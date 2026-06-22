@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/cli-claude-code",
+  "version": "0.1.0",
+  "kind": "cli-provider",
+  "displayName": {
+    "zh": "Claude Code",
+    "en": "Claude Code CLI"
+  },
+  "description": {
+    "zh": "Anthropic claude-code CLI 适配 · spawn `claude --mode stream` 子进程,把 ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/claude-code/,本 plugin 声明 metadata + Bus 入口。",
+    "en": "Anthropic claude-code CLI adapter. Spawns `claude --mode stream` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/claude-code/; this plugin declares metadata + Bus entry."
+  },
+  "provides": {
+    "cliProvider": {
+      "id": "@forgeax-plugin/cli-claude-code",
+      "displayName": "Claude Code",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ],
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "toolCalls": true,
+        "subAgents": true,
+        "sessions": true
+      },
+      "runner": {
+        "cmd": "claude",
+        "args": [
+          "--mode",
+          "stream"
+        ]
+      }
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-vfx-artist-3d",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "3D 特效设计师",
+    "en": "3D VFX Artist"
+  },
+  "description": {
+    "zh": "专精 wb-skill 工作台 · 3D 技能特效 / 命中粒子 / buff 光环 / 招式拖尾。把 Iori 的技能 spec + 2D 动画设计师的动作锚点(vfx_anchor)接起来,产出 3D vfx-config 与粒子帧序。不画角色立绘 / 不做动作动画。",
+    "en": "Specializes in the wb-skill workbench — 3D skill VFX, hit particles, buff auras, attack trails. Bridges Iori's skill spec and the 2D Animator's vfx_anchor frames to produce 3D vfx-config plus particle frame sequences. Doesn't draw characters or animate motion."
+  },
+  "provides": {
+    "agent": {
+      "id": "vfx-artist-3d",
+      "role": "vfx-artist-3d",
+      "card": {
+        "name": {
+          "zh": "3D 特效设计师",
+          "en": "3D VFX Artist"
+        },
+        "color": "#A8E6CF",
+        "avatar": "✨"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/.forgeax/games/*/skills/**",
+        "<active_game>.dir/**/skills/**/*.json",
+        "<active_game>.dir/**/skills/**/skill.manifest.json",
+        "<active_game>.dir/**/vfx/**",
+        "<active_game>.dir/**/skill-spec.md",
+        "<active_game>.dir/**/vfx-pipeline.md"
+      ],
+      "agentTags": ["skill", "vfx", "particle", "buff", "hit-feedback", "trail"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

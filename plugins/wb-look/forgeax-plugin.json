@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-look",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "色彩 / Look",
+    "en": "Color & Look-dev"
+  },
+  "description": {
+    "zh": "色彩 / Look-dev 工作台 · colorgrade.toml + theme.json + postprocess stack · 后续接 2D_style_transfer + H-3d-LookMaster — palette + LUT + 后处理。",
+    "en": "Color & look-dev workbench. colorgrade.toml + theme.json + postprocess stack. Will host 2D_style_transfer + H-3d-LookMaster — palette + LUT + postprocess."
+  },
+  "provides": {
+    "workbench": {
+      "id": "look",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "🎨",
+      "position": 120,
+      "panelSize": "md",
+      "matchProduces": [
+        "**/colorgrade.toml",
+        "**/theme.json",
+        "**/postprocess/*.json"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

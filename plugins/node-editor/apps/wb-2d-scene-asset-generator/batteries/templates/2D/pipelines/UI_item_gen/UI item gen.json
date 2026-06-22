@@ -1,0 +1,372 @@
+{
+  "id": "group_1781681284454_m76rc",
+  "name": "UI item gen",
+  "nameEn": "UI item gen",
+  "nodes": [
+    {
+      "id": "node-1781677872043",
+      "opId": "number_const",
+      "name": "node-1781677872043",
+      "position": {
+        "x": -1643.1974782710254,
+        "y": 302.50606587389757
+      },
+      "params": {
+        "value": 13
+      }
+    },
+    {
+      "id": "node-1781677922519",
+      "opId": "image_remove_bg",
+      "name": "node-1781677922519",
+      "position": {
+        "x": -1407.0063169978705,
+        "y": 2.119381073994248
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781680871056",
+      "opId": "prompt_template",
+      "name": "node-1781680871056",
+      "position": {
+        "x": -1929.4765261610764,
+        "y": -60.40466795671887
+      },
+      "params": {
+        "template": "## 物品信息\n- **名称**: [name]\n- **类别**: [label]\n- **等级**: [level]\n- **描述**: [tooltip]\n- **背景设定**: [background]\n- **视觉设计**: [visual]\n\n## ⚠️ 核心特征约束（所有图标必须严格遵守）\n\n### CRITICAL REQUIREMENTS（绝对不可改变）\n```\n1. **居中布局**：物品主体必须严格居中显示在64×64画布中\n2. **背景颜色**：纯白色背景 (#FFFFFF)，无任何纹理、渐变或图案\n3. **边缘描边**：物品轮廓使用纯黑色 (#000000) 描边，宽度1-2像素\n4. **像素风格**：像素艺术风格，每个像素块宽度为3px（即64px画布中约21-22个像素块）\n5. **像素对齐**：所有元素必须严格对齐到3px像素网格，确保像素颗粒度一致\n6. **无阴影**：绝对不使用任何阴影效果（无投影、无内阴影、无渐变阴影）\n7. **平铺光照**：使用平铺光照，无光照渐变效果\n8. **有限色彩**：使用6-12种颜色的有限调色板，保持像素艺术经典风格\n```\n\n### 尺寸与格式\n- **尺寸**：64像素 × 64像素（正方形）\n- **用途**：游戏背包系统中的物品图标\n- **视角**：正面视角，物品清晰可见\n\n### 视觉风格要求\n- **像素艺术风格**：采用像素风格绘制，每个像素块的实际宽度为3px\n- **表意清晰**：图标需要清晰表达物品的特征和用途，即使在小尺寸下也能快速识别\n- **风格统一**：所有图标必须保持相同的视觉风格和像素颗粒度，确保在背包界面中风格一致\n\n### 设计参考（根据物品类别调整内容，但保持核心特征不变）\n- **材料类物品**：简洁明了，突出材质特征，居中显示\n- **植物类物品**：展现植物的形态和生长特征，居中显示\n- **种子类物品**：小巧精致，体现种子的形态，居中显示\n- **药水类物品**：瓶装容器，体现液体的透明感和颜色，居中显示\n- **装备类物品**：展现装备的结构和功能特征，居中显示\n- **道具类物品**：突出道具的独特性和用途，居中显示\n\n### 技术规范（必须严格遵守）\n- **像素网格对齐**：所有元素必须对齐到3px的像素网格，确保像素颗粒度完全一致\n- **轮廓线**：使用1-2像素宽的纯黑色 (#000000) 轮廓线，确保所有图标边缘风格统一\n- **背景要求**：背景必须完全为纯白色 (#FFFFFF)，没有任何其他颜色、图案或渐变效果\n- **色彩限制**：使用6-12种颜色的有限调色板，保持像素艺术的经典风格\n- **细节处理**：在64px尺寸下，重点突出物品的核心特征，避免过度细节\n- **居中要求**：物品主体必须居中显示，左右和上下对称\n\n### 输出要求\n生成一个清晰、简洁、符合像素艺术风格的64px×64px物品图标，能够准确传达物品的类别、等级和特征。\n\n**核心特征必须保持一致**：\n- 居中布局 ✓\n- 纯白色背景 (#FFFFFF) ✓\n- 黑色轮廓线 (#000000) ✓\n- 3px像素颗粒度 ✓\n- 无阴影效果 ✓\n- 有限色彩调色板 ✓",
+        "_promptName": "背包物品图标（64px 像素）",
+        "_promptVars": [
+          "name",
+          "label",
+          "level",
+          "tooltip",
+          "background",
+          "visual"
+        ]
+      }
+    },
+    {
+      "id": "node-1781680876446",
+      "opId": "image_gen",
+      "name": "node-1781680876446",
+      "position": {
+        "x": -1693.99257572009,
+        "y": -58.04982845230916
+      },
+      "params": {
+        "_gen_image": "{\"alias\":\"ai-3-------critical-requirements-1-64-64-2-ffffff-3-node-1781680876446-mqhqwcwq.jpg\",\"blobId\":\"1e223775940e942205d49f4d98986121339aa40a1ebd23e638dbc824b02c4a2c\"}",
+        "_gen_error": ""
+      }
+    },
+    {
+      "id": "node-1781680892451",
+      "opId": "text_panel",
+      "name": "node-1781680892451",
+      "position": {
+        "x": -2196.347412346864,
+        "y": -124.70419163626548
+      },
+      "params": {
+        "text": "定海神针",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781680912565-nm5uw",
+      "opId": "text_panel",
+      "name": "node-1781680912565-nm5uw",
+      "position": {
+        "x": -2199.5022487872047,
+        "y": -52.143362978504
+      },
+      "params": {
+        "text": "武器",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781680919239-zosv8",
+      "opId": "text_panel",
+      "name": "node-1781680919239-zosv8",
+      "position": {
+        "x": -2201.3949471146243,
+        "y": 10.95299976273293
+      },
+      "params": {
+        "text": "3",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781680933113-6t92w",
+      "opId": "text_panel",
+      "name": "node-1781680933113-6t92w",
+      "position": {
+        "x": -2172.3705432317283,
+        "y": 77.83510575748039
+      },
+      "params": {
+        "text": "一根可审查缩短的经典金箍棒",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781680947050-0uufa",
+      "opId": "text_panel",
+      "name": "node-1781680947050-0uufa",
+      "position": {
+        "x": -2178.6801409948885,
+        "y": 151.65788867569108
+      },
+      "params": {
+        "text": "泼猴的爱不释手的武器",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781680968938-cs39x",
+      "opId": "text_panel",
+      "name": "node-1781680968938-cs39x",
+      "position": {
+        "x": -2033.5583911571525,
+        "y": 207.18268788797963
+      },
+      "params": {
+        "text": "金色长棍，两端红色，非常华丽",
+        "_nodeWidth": 120,
+        "_nodeHeight": 60
+      }
+    },
+    {
+      "id": "node-1781681034407",
+      "opId": "image_pixel_fix",
+      "name": "node-1781681034407",
+      "position": {
+        "x": -1132.1745178711237,
+        "y": 8.289867434308974
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781681076482",
+      "opId": "image_output",
+      "name": "node-1781681076482",
+      "position": {
+        "x": -883.0740603566275,
+        "y": 8.809764638276192
+      },
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-node-1781677872043-value-node-1781677922519-lab_tolerance",
+      "source": {
+        "nodeId": "node-1781677872043",
+        "port": "value"
+      },
+      "target": {
+        "nodeId": "node-1781677922519",
+        "port": "lab_tolerance"
+      }
+    },
+    {
+      "id": "e-node-1781680871056-prompt-node-1781680876446-prompt",
+      "source": {
+        "nodeId": "node-1781680871056",
+        "port": "prompt"
+      },
+      "target": {
+        "nodeId": "node-1781680876446",
+        "port": "prompt"
+      }
+    },
+    {
+      "id": "e-node-1781680876446-image-node-1781677922519-image",
+      "source": {
+        "nodeId": "node-1781680876446",
+        "port": "image"
+      },
+      "target": {
+        "nodeId": "node-1781677922519",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e-node-1781680892451-output-node-1781680871056-name",
+      "source": {
+        "nodeId": "node-1781680892451",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "name"
+      }
+    },
+    {
+      "id": "e-node-1781680912565-nm5uw-output-node-1781680871056-label",
+      "source": {
+        "nodeId": "node-1781680912565-nm5uw",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "label"
+      }
+    },
+    {
+      "id": "e-node-1781680919239-zosv8-output-node-1781680871056-level",
+      "source": {
+        "nodeId": "node-1781680919239-zosv8",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "level"
+      }
+    },
+    {
+      "id": "e-node-1781680933113-6t92w-output-node-1781680871056-tooltip",
+      "source": {
+        "nodeId": "node-1781680933113-6t92w",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "tooltip"
+      }
+    },
+    {
+      "id": "e-node-1781680947050-0uufa-output-node-1781680871056-background",
+      "source": {
+        "nodeId": "node-1781680947050-0uufa",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "background"
+      }
+    },
+    {
+      "id": "e-node-1781680968938-cs39x-output-node-1781680871056-visual",
+      "source": {
+        "nodeId": "node-1781680968938-cs39x",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781680871056",
+        "port": "visual"
+      }
+    },
+    {
+      "id": "e-node-1781677922519-image-node-1781681034407-image",
+      "source": {
+        "nodeId": "node-1781677922519",
+        "port": "image"
+      },
+      "target": {
+        "nodeId": "node-1781681034407",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e-node-1781680892451-output-node-1781681076482-name",
+      "source": {
+        "nodeId": "node-1781680892451",
+        "port": "output"
+      },
+      "target": {
+        "nodeId": "node-1781681076482",
+        "port": "name"
+      }
+    },
+    {
+      "id": "e-node-1781681034407-image-node-1781681076482-image",
+      "source": {
+        "nodeId": "node-1781681034407",
+        "port": "image"
+      },
+      "target": {
+        "nodeId": "node-1781681076482",
+        "port": "image"
+      }
+    }
+  ],
+  "position": {
+    "x": -1805.8979299175228,
+    "y": 39.50430917338029
+  },
+  "exposedInputs": [
+    {
+      "portName": "in_0",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781677922519",
+      "sourcePortName": "bg_grow_tolerance"
+    },
+    {
+      "portName": "in_1",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781677922519",
+      "sourcePortName": "sample_points"
+    },
+    {
+      "portName": "in_2",
+      "portType": "boolean",
+      "access": "item",
+      "sourceNodeId": "node-1781677922519",
+      "sourcePortName": "crop"
+    },
+    {
+      "portName": "in_3",
+      "portType": "image",
+      "access": "tree",
+      "sourceNodeId": "node-1781680876446",
+      "sourcePortName": "image"
+    },
+    {
+      "portName": "in_4",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781681034407",
+      "sourcePortName": "k_colors"
+    },
+    {
+      "portName": "in_5",
+      "portType": "boolean",
+      "access": "item",
+      "sourceNodeId": "node-1781681034407",
+      "sourcePortName": "square_grid"
+    },
+    {
+      "portName": "in_6",
+      "portType": "string",
+      "access": "list",
+      "sourceNodeId": "node-1781681076482",
+      "sourcePortName": "tags"
+    }
+  ],
+  "exposedOutputs": [
+    {
+      "portName": "out_0",
+      "portType": "string",
+      "access": "item",
+      "sourceNodeId": "node-1781681076482",
+      "sourcePortName": "alias"
+    },
+    {
+      "portName": "out_1",
+      "portType": "boolean",
+      "access": "item",
+      "sourceNodeId": "node-1781681076482",
+      "sourcePortName": "ok"
+    }
+  ]
+}

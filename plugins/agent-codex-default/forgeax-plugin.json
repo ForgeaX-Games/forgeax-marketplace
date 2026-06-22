@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-codex-default",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "Codex 默认助手",
+    "en": "Codex Default"
+  },
+  "description": {
+    "zh": "OpenAI codex CLI 的开箱即用 persona · 通用编程助手,偏好 openai-responses 或 azure 通道。新用户切到 codex CLI 时直接能跑。",
+    "en": "Out-of-the-box persona for the OpenAI Codex CLI provider. Generic coding assistant; new users get this when switching to the codex CLI."
+  },
+  "provides": {
+    "agent": {
+      "id": "codex-default",
+      "role": "coder",
+      "card": {
+        "name": { "zh": "Codex", "en": "Codex" },
+        "color": "#10A37F",
+        "avatar": "🟢"
+      },
+      "personaFile": "./persona/zh.md",
+      "preferredCliProvider": "@forgeax-plugin/cli-codex",
+      "defaultLang": "zh",
+      "multiInstance": true
+    }
+  }
+}

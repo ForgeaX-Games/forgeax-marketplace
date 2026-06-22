@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:vibe-author args",
+  "description": "LLM authors a fresh source.json from a natural-language brief. Overwrite of existing source requires user-side confirm (manifest.requireConfirm).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gameSlug", "slug", "instruction"],
+  "properties": {
+    "gameSlug": { "type": "string" },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "instruction": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "model": { "type": "string", "description": "Optional override of provider:model id." },
+    "overwriteIfExists": { "type": "boolean", "default": false }
+  }
+}

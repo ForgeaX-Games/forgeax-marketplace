@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["charId", "action", "sheet"],
+  "additionalProperties": false,
+  "properties": {
+    "charId": { "type": "string" },
+    "action": { "type": "string" },
+    "sheet": {
+      "type": "object",
+      "required": ["path", "url"],
+      "properties": {
+        "path": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    },
+    "atlas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dir": { "type": "string" },
+          "framesPerDir": { "type": "integer" },
+          "frameSize": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

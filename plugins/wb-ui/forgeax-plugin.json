@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-ui",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "UI 工坊",
+    "en": "UI Workshop"
+  },
+  "description": {
+    "zh": "Workbench UI 工坊：按游戏类型、界面流程、视觉风格生成 UI 蓝图、组件素材与可交互原型。",
+    "en": "Workbench UI workshop for generating UI blueprints, component assets, and interactive prototypes by genre, screen flow, and visual style."
+  },
+  "icon": "LayoutTemplate",
+  "keywords": [
+    "ui",
+    "hud",
+    "workshop",
+    "prototype",
+    "interface",
+    "game-ui"
+  ],
+  "provides": {
+    "workbench": {
+      "id": "ui",
+      "lens": "by-category",
+      "icon": "LayoutTemplate",
+      "position": 130,
+      "panelSize": "lg",
+      "panes": {
+        "left": {
+          "defaultWidth": 360,
+          "minWidth": 300,
+          "collapsible": true,
+          "scrollable": true
+        },
+        "center": {
+          "scrollable": false
+        }
+      },
+      "matchProduces": [
+        "**/ui/**",
+        "**/ui/spec.json",
+        "**/ui-design/**"
+      ]
+    },
+    "skills": [
+      {
+        "id": "wb-ui:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/ui-workshop"
+      }
+    ],
+    "tools": [
+      {
+        "id": "ui-design:generate-assets",
+        "args": "./schemas/generate-assets.args.json",
+        "returns": "./schemas/generate-assets.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为 UI 工坊生成按钮、标题、面板、图标、背景、NPC 等素材。"
+        }
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./server/api-plugin.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "embeddedAlso": true
+    }
+  },
+  "experimental": true
+}

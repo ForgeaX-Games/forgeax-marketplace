@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-anim",
+  "version": "0.1.31",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "动画",
+    "en": "Animation"
+  },
+  "description": {
+    "zh": "动画工作台 · 像素角色四方向动画 · 载具动画 · 怪物精灵 · Spine 骨骼 · 视频生成 · iframe 嵌入 + 中间视口预览。",
+    "en": "Animation workbench — pixel character 4-dir sprite, vehicle anim, monster sprites, Spine binding, video generation. iframe-embedded with center viewport preview."
+  },
+  "provides": {
+    "workbench": {
+      "id": "anim",
+      "lens": "by-category",
+      "icon": "🎬",
+      "position": 160,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "minWidth": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "matchProduces": [
+        "**/.forgeax/games/*/characters/*/anims/**",
+        "**/anim/**",
+        "**/*.spine.json",
+        "**/*.sheet.png"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-animator-2d"
+    },
+    "tools": [
+      {
+        "id": "anim:generate-pixel",
+        "args": "./schemas/generate-pixel.args.json",
+        "returns": "./schemas/generate-pixel.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "Q版像素四方向 sprite · pixel-char 管线" }
+      },
+      {
+        "id": "anim:generate-sprite-sheet",
+        "args": "./schemas/generate-sprite-sheet.args.json",
+        "returns": "./schemas/generate-sprite-sheet.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "行动小人 sprite sheet · 用立绘做 reference 保持一致性" }
+      },
+      {
+        "id": "anim:generate-vehicle",
+        "args": "./schemas/generate-vehicle.args.json",
+        "returns": "./schemas/generate-vehicle.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "载具动画 · 多类型 · 多视角参考 → 动画帧" }
+      },
+      {
+        "id": "anim:generate-monster",
+        "args": "./schemas/generate-monster.args.json",
+        "returns": "./schemas/generate-monster.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "怪物精灵 · 8 方向 × 5 动画 · 隐藏管线，由角色设计内部触发" }
+      },
+      {
+        "id": "anim:generate-spine",
+        "args": "./schemas/generate-spine.args.json",
+        "returns": "./schemas/generate-spine.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "Spine 拆件绑骨 · 拆 → 绑 → 动作工坊 → skel/json 导出" }
+      },
+      {
+        "id": "anim:generate-video",
+        "args": "./schemas/generate-video.args.json",
+        "returns": "./schemas/generate-video.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "视频角色 · 序列帧 / 场景展示" }
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx",
+    "backend": "./server/api-plugin.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15174,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true
+    }
+  },
+  "requestedEnv": [
+    "KLING_ACCESS_KEY",
+    "KLING_SECRET_KEY"
+  ],
+  "experimental": true
+}

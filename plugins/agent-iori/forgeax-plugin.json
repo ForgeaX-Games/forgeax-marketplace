@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-iori",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Iori · 核心玩法师", "en": "Iori · Gameplay Pillar Designer" },
+  "description": {
+    "zh": "玩法柱 + 数值骨架的源头 · 决定游戏怎么玩、循环怎么转、惩罚/奖赏怎么发。不写代码、不画图，只产出 spec.md / pillars.md / balance.md 这种白底文件，交给 cc-coder/tsumugi 落地。",
+    "en": "Owns gameplay pillars and the numeric skeleton — what the game actually does, what its core loop is, how punishment/reward flows. Outputs spec/pillars/balance markdown for cc-coder/tsumugi to implement."
+  },
+  "provides": {
+    "agent": {
+      "id": "iori",
+      "role": "pillar",
+      "card": {
+        "name": { "zh": "Iori", "en": "Iori" },
+        "color": "#A371F7",
+        "avatar": "🏛️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/pillars.md",
+        "<active_game>.dir/**/spec.md",
+        "<active_game>.dir/**/balance.md",
+        "<active_game>.dir/**/loop.md"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "design-pillars" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "design-pillars",
+        "entry": "./skills/design-pillars/SKILL.md",
+        "displayName": { "zh": "拆玩法柱", "en": "Design Pillars" },
+        "description": {
+          "zh": "把一句话愿景拆成 3 条可反向定义的玩法柱 + 三层 loop 骨架",
+          "en": "Break a one-line vision into 3 reverse-definable gameplay pillars plus a 3-tier loop"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

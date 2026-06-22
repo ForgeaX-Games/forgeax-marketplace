@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/bgm-backend.args",
+  "title": "bgm:backend args (SPA raw library passthrough; read-only)",
+  "type": "object",
+  "properties": {
+    "endpoint": { "type": "string", "description": "Upstream RPC method: FindAssetMeta | HybridSearch | Search" },
+    "payload": { "type": "object", "description": "RPC payload (query + pagination). asset_type, if present, must be 3 or 7." }
+  },
+  "required": ["endpoint"]
+}

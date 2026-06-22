@@ -1,0 +1,63 @@
+# ═══════════════════════════════════════
+# Dependencies
+# ═══════════════════════════════════════
+node_modules/
+
+# ═══════════════════════════════════════
+# Build output
+# ═══════════════════════════════════════
+dist/
+
+# ═══════════════════════════════════════
+# Secrets & credentials — 绝对不入库
+# ═══════════════════════════════════════
+.env
+.env.local
+.env.*.local
+server/keys.local.json
+config/
+*.credentials.json
+
+# ═══════════════════════════════════════
+# IDE / Editor
+# ═══════════════════════════════════════
+# Share .cursor/rules/ (Cursor AI project context) — do NOT ignore it
+.cursor/mcp.json
+.cursor/settings.json
+.cursor/chat/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ═══════════════════════════════════════
+# Runtime / generated data
+# ═══════════════════════════════════════
+workspace/
+server.log
+.server.pid
+
+# ═══════════════════════════════════════
+# Monster Pipeline runtime data
+# ═══════════════════════════════════════
+server/monster-pipeline/output/
+server/monster-pipeline/temp/
+server/monster-pipeline/history.json
+server/monster-pipeline/__pycache__/
+server/monster-pipeline/pipeline/__pycache__/
+server/monster-pipeline/static/
+
+# ═══════════════════════════════════════
+# OS files
+# ═══════════════════════════════════════
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ═══════════════════════════════════════
+# Temp / debug
+# ═══════════════════════════════════════
+*.log
+*.tmp
+_temp_*/
+mcp-servers/

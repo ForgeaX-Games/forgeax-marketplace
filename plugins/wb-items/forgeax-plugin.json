@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-items",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "道具 / 图标",
+    "en": "Items & Icons"
+  },
+  "description": {
+    "zh": "道具 / 图标工作台 · items.json + 像素 icon 编辑 · 后续接 2D_sidescroller + 2D_tileable + 2D_ai_pixel 生图链路。",
+    "en": "Items & icons workbench. items.json + pixel-icon editing. Will host 2D_sidescroller, 2D_tileable and 2D_ai_pixel pipelines."
+  },
+  "provides": {
+    "workbench": {
+      "id": "items",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "🎒",
+      "position": 150,
+      "panelSize": "md",
+      "matchProduces": [
+        "**/items.json",
+        "**/assets/icons/**"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-plugin-author",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "插件作者",
+    "en": "Plugin Author"
+  },
+  "description": {
+    "zh": "v2-vision 09 §2.1/4 · 非专业作者的 in-app 编辑器入口。Phase D6 (4/4) placeholder · 真实 React panel 在后续 sprint 落地(file-tree 左,Monaco 右,保存自动 reload)。当前手写路径走 SettingsPanel · Fork & 录制 + meta:author-plugin skill。",
+    "en": "Non-expert authoring workbench (09 §2.1/4). D6 (4/4) placeholder; the real panel (file tree + Monaco editor, save → auto-reload) lands in a follow-up sprint. Today the working flows are SettingsPanel · Fork + meta:author-plugin skill."
+  },
+  "provides": {
+    "workbench": {
+      "id": "plugin-author",
+      "hidden": true,
+      "lens": "by-author",
+      "icon": "📝",
+      "position": 200,
+      "panelSize": "lg",
+      "matchProduces": [
+        ".forgeax/plugins/**"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

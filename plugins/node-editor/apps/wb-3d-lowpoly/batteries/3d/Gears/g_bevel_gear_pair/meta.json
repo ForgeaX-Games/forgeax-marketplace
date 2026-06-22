@@ -1,0 +1,29 @@
+{
+  "id": "g_bevel_gear_pair",
+  "label": "锥齿轮对",
+  "name-en": "GBevelGearPair",
+  "description": "在 Geometry DSL 末尾追加 bevel_gear_pair(...) 一行（cq_gears BevelGearPair；大小锥齿按轴夹角一体烘）。当 prompt 提到 锥齿轮对 / 伞齿轮副 / 差速器锥齿 / bevel gear pair / gear and pinion 时使用。",
+  "description-en": "Append `bevel_gear_pair(...)` — gear + pinion baked together at the axis angle. Use when the prompt mentions a bevel gear pair / gear-and-pinion / differential bevel.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "gear", "bevel", "pair", "cad"],
+  "tag_labels": ["几何", "齿轮", "锥齿", "齿轮对", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "module", "type": "number", "label": "模数 m", "default": 0.002, "description": "大端模数（米）", "description-en": "Module at the large end (meters)." },
+    { "name": "gear_teeth", "type": "number", "label": "大齿数", "default": 30, "description": "大锥齿齿数（整数，>= 3）", "description-en": "Gear tooth count (integer, >= 3)." },
+    { "name": "pinion_teeth", "type": "number", "label": "小齿数", "default": 15, "description": "小锥齿齿数（整数，>= 3）", "description-en": "Pinion tooth count (integer, >= 3)." },
+    { "name": "face_width", "type": "number", "label": "齿宽", "default": 0.008, "description": "沿锥面的齿宽（米）", "description-en": "Face width along the cone (meters)." },
+    { "name": "axis_angle", "type": "number", "label": "轴夹角 (°)", "default": 0, "description": "0 = 用默认 90°", "description-en": "0 = use default 90°." },
+    { "name": "pressure_angle", "type": "number", "label": "压力角 (°)", "default": 0, "description": "0 = 用默认 20°", "description-en": "0 = use default 20°." },
+    { "name": "clearance", "type": "number", "label": "顶隙", "default": 0, "description": "齿顶径向间隙", "description-en": "Tip radial clearance." },
+    { "name": "backlash", "type": "number", "label": "侧隙", "default": 0, "description": "齿面侧隙", "description-en": "Tooth-flank backlash." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 bevp{n}", "description-en": "Custom id; empty = auto bevp{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 bevel_gear_pair 行后的 Geometry", "description-en": "Geometry after appending the bevel gear pair." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

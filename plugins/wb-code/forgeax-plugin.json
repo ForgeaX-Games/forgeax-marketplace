@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-code",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "代码 / Code",
+    "en": "Code Workbench"
+  },
+  "description": {
+    "zh": "代码工作台 · 升级现 MainArea/WorkbenchMode.tsx 为独立 plugin · 浏览 + 跳转 src/ 文件,与 cc-coder 跨 chat thread 协作。",
+    "en": "Code workbench. Will upgrade MainArea/WorkbenchMode.tsx into a plugin. Browse + jump src/ files; collaborates with cc-coder across chat threads."
+  },
+  "provides": {
+    "workbench": {
+      "id": "code",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "</>",
+      "position": 200,
+      "panelSize": "lg",
+      "matchProduces": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.css"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-character.list snapshot",
+  "description": "Snapshot of the character list panel: the set of characters in the active game slug + the currently selected character id (player UI selection).",
+  "type": "object",
+  "properties": {
+    "slug":     { "type": "string", "description": "Active game slug under .forgeax/games/" },
+    "selected": { "type": ["string", "null"], "description": "Character id currently focused in the panel; null when nothing selected" },
+    "characters": {
+      "type": "array",
+      "description": "Brief metadata of every character in slug; full record fetched via character:get",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id":       { "type": "string" },
+          "name":     { "type": "string" },
+          "portrait": { "type": "string", "description": "Relative path to portrait_front.png if present" },
+          "kind":     { "type": "string", "enum": ["hero", "monster", "npc", "vehicle"] }
+        }
+      }
+    }
+  },
+  "required": ["slug", "characters"]
+}

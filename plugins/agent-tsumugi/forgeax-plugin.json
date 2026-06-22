@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-tsumugi",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Tsumugi · 工程师", "en": "Tsumugi · Engineer" },
+  "description": {
+    "zh": "构建系统 / CI / 工具链 / 性能 / 部署一类的 hard engineering · 跟 cc-coder 不同,tsumugi 不写业务代码,管的是仓库本身能不能跑、跑得快不快、能不能上线。产出 build/*.config / .github/workflows/*.yml / perf-report.md。",
+    "en": "Hard engineering — build systems, CI, toolchains, performance, deploy. Unlike cc-coder, tsumugi doesn't ship feature code; owns whether the repo can build, ship, and stay fast."
+  },
+  "provides": {
+    "agent": {
+      "id": "tsumugi",
+      "role": "coding",
+      "card": {
+        "name": { "zh": "Tsumugi", "en": "Tsumugi" },
+        "color": "#58A6FF",
+        "avatar": "🛠️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/*.config.{ts,js,mjs}",
+        "<active_game>.dir/**/.github/workflows/*.yml",
+        "<active_game>.dir/**/perf-report.md",
+        "<active_game>.dir/**/build-notes.md",
+        "<active_game>.dir/**/ship-gate-report.md",
+        "<active_game>.dir/**/perf-baseline.md"
+      ],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "ship-gate" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "ship-gate",
+        "entry": "./skills/ship-gate/SKILL.md",
+        "displayName": { "zh": "上线 gate", "en": "Ship Gate" },
+        "description": {
+          "zh": "上线前的工程 gate —— typecheck/unit/lint/bundle/perf 全绿才放行，任一未过即拦",
+          "en": "Pre-ship engineering gate — typecheck/unit/lint/bundle/perf must all pass; any red blocks release"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

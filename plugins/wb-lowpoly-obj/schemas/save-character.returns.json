@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:save-character returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "absPath"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "absPath": { "type": "string" },
+    "bytesWritten": { "type": "integer", "minimum": 0 }
+  }
+}

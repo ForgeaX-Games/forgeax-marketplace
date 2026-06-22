@@ -1,0 +1,34 @@
+:root {
+  --color-text-primary: #ffffff;
+  --color-text-secondary: rgba(255,255,255,.60);
+  --color-text-tertiary: rgba(255,255,255,.30);
+  --color-text-disabled: rgba(255,255,255,.20);
+  --color-text-on-bright-primary: #000000;
+  --color-icon-primary: var(--color-text-primary);
+  --color-icon-secondary: var(--color-text-secondary);
+  --color-background-canvas: #0d0d0d;
+  --color-background-base: #191919;
+  --color-background-elevated: #242424;
+  --color-background-floating: #333333;
+  --color-border-subtle: #333333;
+  --color-border-default: #404040;
+  --color-border-strong: #737373;
+  --color-divider-subtle: rgba(255,255,255,.05);
+  --color-divider-default: rgba(255,255,255,.10);
+  --color-divider-strong: rgba(255,255,255,.15);
+  --color-brand-primary: #d4ff48;
+  --primary: var(--color-brand-primary);
+  --primary-bg: rgba(212,255,72,.10);
+  --color-interaction-hover: rgba(255,255,255,.05);
+  --color-interaction-selected-brand: rgba(212,255,72,.10);
+  --color-status-success: #1b9d4b;
+  --color-status-warning: #ba8e06;
+  --color-status-error: #be3636;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --motion-duration-instant: 80ms;
+  --motion-duration-fast: 110ms;
+  --motion-duration-base: 150ms;
+  --motion-duration-smooth: 190ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-press-scale: .996;
+}

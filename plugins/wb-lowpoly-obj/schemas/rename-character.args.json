@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:rename-character args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gameSlug", "fromSlug", "toSlug"],
+  "properties": {
+    "gameSlug": { "type": "string" },
+    "fromSlug": { "type": "string" },
+    "toSlug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "kebab-case; same regex as on-disk directory name."
+    }
+  }
+}

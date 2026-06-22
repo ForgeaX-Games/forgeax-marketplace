@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/cli-cursor-agent",
+  "version": "0.1.0",
+  "kind": "cli-provider",
+  "displayName": {
+    "zh": "Cursor Agent",
+    "en": "Cursor Agent CLI"
+  },
+  "description": {
+    "zh": "Cursor IDE 的 cursor-agent CLI 适配 · spawn `cursor-agent -p --output-format stream-json --stream-partial-output -f` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/cursor-agent/,本 plugin 声明 metadata + Bus 入口。",
+    "en": "Cursor IDE cursor-agent CLI adapter (-p stream-json print mode). Spawns the subprocess and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/cursor-agent/; this plugin declares metadata + Bus entry."
+  },
+  "provides": {
+    "cliProvider": {
+      "id": "@forgeax-plugin/cli-cursor-agent",
+      "displayName": "Cursor Agent",
+      "models": [
+        "auto",
+        "claude-sonnet-4-6",
+        "gpt-5"
+      ],
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "toolCalls": true,
+        "subAgents": true,
+        "sessions": true
+      },
+      "runner": {
+        "cmd": "cursor-agent",
+        "args": [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--stream-partial-output",
+          "-f"
+        ]
+      }
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

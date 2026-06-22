@@ -1,0 +1,133 @@
+{
+  "id": "g_clevis_bracket",
+  "label": "U 形支架",
+  "name-en": "GClevisBracket",
+  "description": "在 Geometry DSL 末尾追加 clevis_bracket(...) 一行（articraft 语义零件，编译期烘成 mesh）。当 prompt 提到 U 形支架 / 双耳支架 / 叉耳 / 铰接座 / clevis / bracket 时使用。",
+  "description-en": "Append a `clevis_bracket(...)` line to the Geometry DSL (semantic part; sidecar bakes to mesh). Use when the prompt mentions a clevis / U-bracket / double-eared mounting bracket / pinned bracket.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": [
+    "geometry",
+    "part",
+    "bracket",
+    "cad"
+  ],
+  "tag_labels": [
+    "几何",
+    "语义零件",
+    "支架",
+    "CAD"
+  ],
+  "principal": "geometry",
+  "inputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "required": false,
+      "label": "几何",
+      "description": "上游 Geometry；缺省视为空",
+      "description-en": "Upstream Geometry."
+    },
+    {
+      "name": "w",
+      "type": "number",
+      "label": "外形宽 w",
+      "default": 0.06,
+      "description": "整体 X 尺寸",
+      "description-en": "Overall X."
+    },
+    {
+      "name": "d",
+      "type": "number",
+      "label": "外形深 d",
+      "default": 0.04,
+      "description": "整体 Y 尺寸",
+      "description-en": "Overall Y."
+    },
+    {
+      "name": "h",
+      "type": "number",
+      "label": "外形高 h",
+      "default": 0.05,
+      "description": "整体 Z 尺寸",
+      "description-en": "Overall Z."
+    },
+    {
+      "name": "gap_width",
+      "type": "number",
+      "label": "颊间距",
+      "default": 0.02,
+      "description": "两颊间净间距",
+      "description-en": "Clear gap between cheeks."
+    },
+    {
+      "name": "bore_diameter",
+      "type": "number",
+      "label": "孔径",
+      "default": 0.008,
+      "description": "横向通孔直径",
+      "description-en": "Cross bore diameter."
+    },
+    {
+      "name": "bore_center_z",
+      "type": "number",
+      "label": "孔心高",
+      "default": 0.035,
+      "description": "孔心距底面高度",
+      "description-en": "Bore-center height above base."
+    },
+    {
+      "name": "base_thickness",
+      "type": "number",
+      "label": "底厚",
+      "default": 0.01,
+      "description": "底座厚度",
+      "description-en": "Base plate thickness."
+    },
+    {
+      "name": "corner_radius",
+      "type": "number",
+      "label": "外圆角",
+      "default": 0,
+      "description": "0 = 不倒角",
+      "description-en": "0 = no fillet."
+    },
+    {
+      "name": "center",
+      "type": "bool",
+      "required": false,
+      "label": "居中",
+      "default": true,
+      "description": "false = 角点对齐原点",
+      "description-en": "false = corner at origin."
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "required": false,
+      "label": "id",
+      "default": "",
+      "description": "自定义 id；空表示自动生成 cle{n}",
+      "description-en": "Custom id; empty = auto cle{n}."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "label": "几何",
+      "description": "追加 clevis_bracket 行后的 Geometry",
+      "description-en": "Geometry after appending the line."
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "label": "id",
+      "description": "本行 shape 的 id（供下游 part 引用）",
+      "description-en": "Id of the new shape."
+    }
+  ],
+  "projectTypes": [
+    "asset3d"
+  ]
+}

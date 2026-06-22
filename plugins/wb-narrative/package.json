@@ -1,0 +1,30 @@
+{
+  "name": "narrative-studio",
+  "version": "0.1.0",
+  "description": "AI-driven narrative content generation pipeline for game development",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && cd viz && npm install --prefer-offline && npm run build",
+    "build:backend": "tsc",
+    "build:skills": "tsx scripts/build-skills.ts",
+    "dev": "tsx --env-file=.env src/cli.ts",
+    "start": "tsx --env-file=.env src/api/server.ts",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "express": "^5.1.0",
+    "mammoth": "^1.12.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

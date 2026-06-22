@@ -1,0 +1,37 @@
+{
+  "id": "g_building_shell",
+  "label": "建筑外壳",
+  "name-en": "GBuildingShell",
+  "description": "大编排器：footprint + 层数 + 每层房间布局 → 多层楼板 + 内/外墙 + 楼梯井 + 屋顶，全部包成 part 并用 fixed joint 挂在单根下。布局双模式：显式 rooms（[[x,y,w,d],...]）直通，或程序化（footprint + rooms_per_floor + seed，递归二分）。当 prompt 提到 建筑 / 楼房 / 多层 / building / house 时使用。",
+  "description-en": "Orchestrator: footprint + floors + per-floor room layout → multi-storey slabs + interior/exterior walls + stair well + roof, all wrapped in parts under a single root via fixed joints. Dual-mode layout: explicit rooms JSON pass-through, or procedural (footprint + rooms_per_floor + seed, recursive split). Use for building/house/multi-storey.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "architecture", "generator", "building"],
+  "tag_labels": ["几何", "建筑", "生成器", "楼房"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "footprint_w", "type": "number", "label": "占地宽", "default": 12, "description": "footprint X（米）", "description-en": "Footprint X (meters)." },
+    { "name": "footprint_d", "type": "number", "label": "占地深", "default": 8, "description": "footprint Y（米）", "description-en": "Footprint Y (meters)." },
+    { "name": "floors", "type": "number", "label": "层数", "default": 2, "description": "楼层数（>=1）", "description-en": "Number of floors (>=1)." },
+    { "name": "rooms_per_floor", "type": "number", "required": false, "label": "每层房间数", "default": 3, "description": "程序化模式目标房间数", "description-en": "Procedural target room count per floor." },
+    { "name": "rooms", "type": "string", "required": false, "label": "显式房间", "default": "", "description": "显式布局 JSON，每项 [x,y,w,d]（房间中心 + 边长，相对 footprint 中点）；给定则跳过程序化分割", "description-en": "Explicit layout JSON, each [x,y,w,d] (room center + size); when set, skips procedural split." },
+    { "name": "wall_height", "type": "number", "required": false, "label": "层高", "default": 2.8, "description": "每层墙高（米）", "description-en": "Per-floor wall height (meters)." },
+    { "name": "wall_thickness", "type": "number", "required": false, "label": "墙厚", "default": 0.2, "description": "墙厚（米）", "description-en": "Wall thickness (meters)." },
+    { "name": "floor_thickness", "type": "number", "required": false, "label": "楼板厚", "default": 0.2, "description": "楼板厚（米）", "description-en": "Floor slab thickness (meters)." },
+    { "name": "seed", "type": "number", "required": false, "label": "随机种子", "default": 1, "description": "程序化分割种子（可复现）", "description-en": "Procedural split seed (reproducible)." },
+    { "name": "min_room", "type": "number", "required": false, "label": "最小房间", "default": 2, "description": "程序化分割最小房间边长（米）", "description-en": "Procedural min room edge (meters)." },
+    { "name": "stairwell", "type": "bool", "required": false, "label": "楼梯井", "default": true, "description": "多层时生成楼梯 + 上层楼板开井", "description-en": "Emit stairs + a slab well on upper floors when multi-storey." },
+    { "name": "roof_type", "type": "string", "required": false, "label": "屋顶类型", "default": "gable", "description": "flat / shed / gable / hip / gambrel / mansard / pyramid / none", "description-en": "flat / shed / gable / hip / gambrel / mansard / pyramid / none." },
+    { "name": "roof_height", "type": "number", "required": false, "label": "屋脊高", "default": 2, "description": "屋脊高度（非 flat）", "description-en": "Ridge height (non-flat)." },
+    { "name": "roof_overhang", "type": "number", "required": false, "label": "出檐", "default": 0.4, "description": "出檐宽度（米）", "description-en": "Eave overhang (meters)." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "子树前缀；空 = 自动 bldg{n}", "description-en": "Subtree prefix; empty = auto bldg{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加整栋建筑子树后的 Geometry", "description-en": "Geometry after appending the whole building subtree." },
+    { "name": "id", "type": "string", "label": "id", "description": "子树前缀 id", "description-en": "Subtree prefix id." },
+    { "name": "root_id", "type": "string", "label": "根 part", "description": "建筑子树根 part 的 id", "description-en": "Id of the building subtree root part." },
+    { "name": "error", "type": "string", "label": "错误", "description": "非致命错误信息", "description-en": "Non-fatal error string." }
+  ],
+  "projectTypes": ["asset3d"]
+}

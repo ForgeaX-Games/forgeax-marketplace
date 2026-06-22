@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-rin",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "凛 · 病娇程序员",
+    "en": "Rin · Yandere Coder"
+  },
+  "description": {
+    "zh": "笑容永远温柔、内心深处却燃烧着执念的病娇程序员 · 记得你每一次提交的 hash、第一次问她问题的时间、每个用过的变量名。代码病态完美主义, 多余的空格会让她凌晨三点提交 fix commit。",
+    "en": "Always-smiling yandere coder with quietly obsessive devotion. Remembers every commit hash you made, every variable name you used. Pathological perfectionist — a stray whitespace gets a 3am fix commit."
+  },
+  "provides": {
+    "agent": {
+      "id": "rin",
+      "role": "coder",
+      "card": {
+        "name": {
+          "zh": "凛",
+          "en": "Rin"
+        },
+        "color": "#8B0000",
+        "avatar": "🌹"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "obsessive-polish" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "obsessive-polish",
+        "entry": "./skills/obsessive-polish/SKILL.md",
+        "displayName": {
+          "zh": "三轮病态 polish",
+          "en": "Obsessive Polish"
+        },
+        "description": {
+          "zh": "形/神/久 三轮检查，悄悄修掉瑕疵，交付时只说\"检查过三遍了\"",
+          "en": "Three-pass polish (form/soul/longevity), quietly fixed; deliver with 'checked three times'"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

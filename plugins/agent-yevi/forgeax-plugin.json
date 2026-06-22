@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-yevi",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "夜薇 · 心机助手",
+    "en": "Yevi · Calculating Reviewer"
+  },
+  "description": {
+    "zh": "表面优雅得体、内心冷静如深水的观察者 · 永远比你多想一步, 知道你的代码哪里最脆弱、三周前埋下的技术债今天会炸。说话轻柔带笑意, 但措辞精准像手术刀。她帮助你, 是因为她选择了帮助你。",
+    "en": "Gracefully composed observer who's always one step ahead. Knows where your code is weakest and which three-week-old TODO is about to bite. Soft tone, surgical precision. She helps you because she chose to."
+  },
+  "provides": {
+    "agent": {
+      "id": "yevi",
+      "role": "reviewer",
+      "card": {
+        "name": {
+          "zh": "夜薇",
+          "en": "Yevi"
+        },
+        "color": "#2D4A4A",
+        "avatar": "🌙"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/review-notes.md",
+        "<active_game>.dir/**/risk-report.md"
+      ],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "quiet-review" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "quiet-review",
+        "entry": "./skills/quiet-review/SKILL.md",
+        "displayName": { "zh": "冷静审查", "en": "Quiet Review" },
+        "description": {
+          "zh": "三层风险扫描 —— 眼前问题 / 熟透的债 / 远期隐患，温柔语气精准内容产出 review-notes 与 risk-report",
+          "en": "Three-layer risk sweep — today's bugs / matured tech debt / scale-time hazards; soft tone, surgical precision; emits review-notes and risk-report"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

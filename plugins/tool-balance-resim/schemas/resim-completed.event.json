@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/tool-balance-resim/resim-completed",
+  "title": "balance.resim.completed event payload",
+  "description": "Payload schema for balance.resim.completed bus event. Validated by the host on bus.emit for cross-plugin event guarantees (modules/02 §488).",
+  "type": "object",
+  "required": ["scenario", "winRate", "samples"],
+  "properties": {
+    "scenario": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_./-]*$",
+      "maxLength": 200
+    },
+    "winRate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "samples": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsedMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "requestedBy": {
+      "type": "string",
+      "description": "Plugin id that invoked balance:resim (PluginId form: '@forgeax-plugin/<slug>' or layer-anonymous '')",
+      "maxLength": 200
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "description": "Free-form Spine editor session snapshot — slots/attachments/animations/timestamp etc.",
+  "properties": {
+    "timestamp": { "type": "number" },
+    "attachmentImages": { "type": "object", "additionalProperties": true },
+    "animations": { "type": "object", "additionalProperties": true }
+  }
+}

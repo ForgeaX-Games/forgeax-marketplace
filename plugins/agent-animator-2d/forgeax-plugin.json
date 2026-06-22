@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-animator-2d",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "2D 动画设计师",
+    "en": "2D Animator"
+  },
+  "description": {
+    "zh": "专精 wb-anim 工作台 · 2D 像素四方向动画 / Spine 骨骼绑定 / 载具动画 / 怪物精灵 / 视频角色。把 2D 角色设计师交付的 portrait + manifest 翻译成会动的 sprite-sheet / spine.json / 视频序列帧。不画概念立绘(交给 2D 角色设计师)、不写技能(交给 3D 特效设计师)。",
+    "en": "Specializes in the wb-anim workbench — 2D pixel four-direction animation, Spine rigging, vehicle animation, monster sprites, video character clips. Translates the 2D Character Designer's portrait + manifest into animated sprite sheets, spine.json, and video frames. Doesn't draw static portraits or design skills."
+  },
+  "provides": {
+    "agent": {
+      "id": "animator-2d",
+      "role": "animator-2d",
+      "card": {
+        "name": {
+          "zh": "2D 动画设计师",
+          "en": "2D Animator"
+        },
+        "color": "#7BD3F7",
+        "avatar": "🎞️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/.forgeax/games/*/characters/*/anims/**",
+        "<active_game>.dir/**/anims/**",
+        "<active_game>.dir/**/*.spine.json",
+        "<active_game>.dir/**/*.atlas",
+        "<active_game>.dir/**/*.sheet.png",
+        "<active_game>.dir/**/anim-spec.md",
+        "<active_game>.dir/**/sprite-pipeline.md"
+      ],
+      "agentTags": ["anim", "animation", "pixel", "spine", "sprite-sheet", "vehicle.anim", "monster.anim", "video"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

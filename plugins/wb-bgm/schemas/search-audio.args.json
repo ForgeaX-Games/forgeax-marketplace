@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/search-audio.args",
+  "title": "search-audio args",
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "单个英文单词(tag,小写),必填,如 battle / click / jump" },
+    "kind": { "type": "string", "enum": ["bgm", "sfx"], "description": "音频类型(必填):bgm=背景音乐, sfx=音效" },
+    "limit": { "type": "number", "description": "返回条数,缺省 20,1..200" }
+  },
+  "required": ["query", "kind"]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "g_hyperbolic_gear",
+  "label": "双曲齿轮",
+  "name-en": "GHyperbolicGear",
+  "description": "在 Geometry DSL 末尾追加 hyperbolic_gear(...) 一行（cq_gears HyperbolicGear；按总扭转角生成双曲面齿）。当 prompt 提到 双曲齿轮 / 准双曲齿轮 / hyperbolic gear / hypoid 时使用。",
+  "description-en": "Append `hyperbolic_gear(...)` — cq_gears HyperbolicGear (hyperboloid teeth from a total twist angle). Use when the prompt mentions a hyperbolic / hypoid gear.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "gear", "hyperbolic", "cad"],
+  "tag_labels": ["几何", "齿轮", "双曲齿", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "module", "type": "number", "label": "模数 m", "default": 0.002, "description": "模数（米），节圆直径 = module×teeth", "description-en": "Module (meters); pitch diameter = module × teeth." },
+    { "name": "teeth_number", "type": "number", "label": "齿数 z", "default": 20, "description": "齿数（整数，>= 3）", "description-en": "Tooth count (integer, >= 3)." },
+    { "name": "width", "type": "number", "label": "齿宽", "default": 0.01, "description": "齿宽 / 厚度（米）", "description-en": "Face width / thickness (meters)." },
+    { "name": "twist_angle", "type": "number", "label": "总扭转角 (°)", "default": 30, "description": "从底面到顶面的总扭转角（度）", "description-en": "Total twist from bottom to top face (degrees)." },
+    { "name": "pressure_angle", "type": "number", "label": "压力角 (°)", "default": 0, "description": "0 = 用默认 20°", "description-en": "0 = use default 20°." },
+    { "name": "clearance", "type": "number", "label": "顶隙", "default": 0, "description": "齿顶径向间隙", "description-en": "Tip radial clearance." },
+    { "name": "backlash", "type": "number", "label": "侧隙", "default": 0, "description": "齿面侧隙", "description-en": "Tooth-flank backlash." },
+    { "name": "bore_d", "type": "number", "label": "中心孔径", "default": 0, "description": "中心轴孔直径；0 = 无孔", "description-en": "Center bore diameter; 0 = no bore." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 hyp{n}", "description-en": "Custom id; empty = auto hyp{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 hyperbolic_gear 行后的 Geometry", "description-en": "Geometry after appending the hyperbolic gear." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

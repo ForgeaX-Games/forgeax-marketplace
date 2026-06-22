@@ -1,0 +1,13 @@
+node_modules/
+dist/
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.env
+.env.local
+.env.*.local
+server.log
+.server.pid
+*.log
+*.tmp
+.DS_Store

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:publish-to-workspace-game returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "destAbsPath"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "destAbsPath": { "type": "string" },
+    "bytes": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-balance",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "平衡 / 数值",
+    "en": "Balance & Sim"
+  },
+  "description": {
+    "zh": "平衡 / 数值工作台 · 调 balance:resim (tool-balance-resim) 跑 N 次重模拟 · dashboard 显示 winRate + 95% CI · 跟玩家手调数值闭环。",
+    "en": "Balance & sim workbench. Drives balance:resim (tool-balance-resim) for N-trial replays; dashboards winRate + 95% CI; loops with manual stat tweaks."
+  },
+  "provides": {
+    "workbench": {
+      "id": "balance",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "📐",
+      "position": 190,
+      "panelSize": "md",
+      "matchProduces": [
+        "**/balance/**",
+        "**/sim/**"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

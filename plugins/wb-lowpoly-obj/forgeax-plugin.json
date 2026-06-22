@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-lowpoly-obj",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": { "zh": "方块人编辑器", "en": "LowPoly Humanoid Editor" },
+  "description": {
+    "zh": "可动方块人 3D 角色编辑器 · vibe + 手编（Blender 风 gizmo） · 内置游乐场 · 烘焙 .glb 引擎中立",
+    "en": "Lowpoly humanoid 3D character editor — vibe (LLM) + manual edit (Blender-style gizmo) + playground; bakes to engine-neutral .glb."
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "🧱",
+  "keywords": ["character", "3d", "lowpoly", "humanoid", "rig", "animation", "glb", "vibe", "blender"],
+
+  "provides": {
+    "workbench": {
+      "id": "wb-lowpoly-obj",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "🧱",
+      "position": 110,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "width": 240, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": true }
+      },
+      "matchProduces": [
+        "**/.forgeax/games/*/lowpoly-characters/**"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-cc-coder"
+    },
+    "tools": [
+      {
+        "id": "lowpoly:list-characters",
+        "args": "./schemas/list-characters.args.json",
+        "returns": "./schemas/list-characters.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "列出当前游戏下所有 lowpoly 角色（slug + meta）" }
+      },
+      {
+        "id": "lowpoly:get-character",
+        "args": "./schemas/get-character.args.json",
+        "returns": "./schemas/get-character.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "读单个角色的 source.json（zod 校验）" }
+      },
+      {
+        "id": "lowpoly:save-character",
+        "args": "./schemas/save-character.args.json",
+        "returns": "./schemas/save-character.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "整体保存角色 source.json（覆盖；zod 严格校验）" }
+      },
+      {
+        "id": "lowpoly:rename-character",
+        "args": "./schemas/rename-character.args.json",
+        "returns": "./schemas/rename-character.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "改 slug；同步重命名目录" }
+      },
+      {
+        "id": "lowpoly:vibe-author",
+        "args": "./schemas/vibe-author.args.json",
+        "returns": "./schemas/vibe-author.returns.json",
+        "exposedToAI": true,
+        "requireConfirm": "always",
+        "description": { "zh": "LLM 全新生成 source.json（覆盖现有需 confirm）" }
+      },
+      {
+        "id": "lowpoly:vibe-edit",
+        "args": "./schemas/vibe-edit.args.json",
+        "returns": "./schemas/vibe-edit.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "LLM 增量改：current source + instruction → patch ops" }
+      },
+      {
+        "id": "lowpoly:bake-glb",
+        "args": "./schemas/bake-glb.args.json",
+        "returns": "./schemas/bake-glb.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "烘焙到 .glb（@gltf-transform 构造，引擎中立；content-addressed sha 文件名）" }
+      },
+      {
+        "id": "lowpoly:bake-obj",
+        "args": "./schemas/bake-obj.args.json",
+        "returns": "./schemas/bake-obj.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "兜底静态导出 .obj + .mtl（无骨骼无动画，仅 T-pose）" }
+      },
+      {
+        "id": "lowpoly:publish-to-workspace-game",
+        "args": "./schemas/publish-to-workspace-game.args.json",
+        "returns": "./schemas/publish-to-workspace-game.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "拷 latest.glb 到游戏工程 assets/ 目录" }
+      },
+      {
+        "id": "lowpoly:playground-snapshot",
+        "args": "./schemas/playground-snapshot.args.json",
+        "returns": "./schemas/playground-snapshot.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "抓游乐场截图，用作角色缩略图 preview.png" }
+      }
+    ]
+  },
+
+  "entry": {
+    "backend": "./server/handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15174,
+      "readyProbe": "/",
+      "dev": { "watch": true, "hmr": true },
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/lowpoly-characters/**",
+    "fs:write:.forgeax/games/{slug}/lowpoly-characters/**",
+    "model:text:reasoning",
+    "emit:lowpoly.*"
+  ],
+
+  "requestedEnv": [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "FORGEAX_LLM_PROXY_URL",
+    "LITELLM_PROXY_BASE_URL",
+    "LITELLM_PROXY_KEY"
+  ],
+
+  "hot": false,
+  "experimental": true,
+  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+}

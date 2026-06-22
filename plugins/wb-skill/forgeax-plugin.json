@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-skill",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "技能 / VFX",
+    "en": "Skills & VFX"
+  },
+  "description": {
+    "zh": "技能 / VFX 工作台 · 列出 skills/* 与 vfx/* 产出 · 后续接 Monster_Skill_Package 技能树编辑 + vfx2 预览,玩家手点 / AI dispatch 共改一份 skill spec。",
+    "en": "Skill & VFX workbench. Lists skills/* and vfx/* outputs. Will host the skill-tree editor + VFX preview; player DOM and AI dispatch share one spec."
+  },
+  "provides": {
+    "workbench": {
+      "id": "skill",
+      "lens": "by-category",
+      "icon": "⚡",
+      "position": 140,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "minWidth": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "matchProduces": [
+        "**/skills/**",
+        "**/vfx/**"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-vfx-artist-3d"
+    },
+    "tools": [
+      {
+        "id": "skill:generate-vfx",
+        "args": "./schemas/generate-vfx.args.json",
+        "returns": "./schemas/generate-vfx.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "技能特效 · 粒子/着色器/挂点 vfx-config 生成" }
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx",
+    "backend": "./server/api-plugin.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15175,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true
+    }
+  },
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "LITELLM_PROXY_KEY",
+    "LITELLM_PROXY_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "AZURE_GPT_IMAGE_KEY",
+    "AZURE_GPT_IMAGE_ENDPOINT",
+    "AZURE_GPT_IMAGE_DEPLOYMENT",
+    "AZURE_GPT_IMAGE_API_VERSION"
+  ],
+  "experimental": true
+}

@@ -1,0 +1,57 @@
+{
+  "id": "poi_scatter",
+  "label": "随机POI分布",
+  "description": "在网格指定区域值上随机散布兴趣点（POI），支持单网格、多值网格、网格列表三种输入格式，输出格式与输入保持一致。",
+  "description-en": "Randomly scatters Points of Interest onto cells matching specified target values; supports single grid, multi-value grid, and grid-list inputs, preserving the input format in output.",
+  "icon": "深色网格上散落若干彩色小圆点标记，每种颜色对应一类POI，圆点周围留有最小间距，扁平插画风格，简洁小图标，主色2种。",
+  "version": "1.0.0",
+  "tags": ["poi", "scatter", "placement", "landmark", "grid", "pcg"],
+  "tag_labels": ["兴趣点", "散布", "放置", "地标", "网格", "PCG"],
+  "inputs": [
+    {
+      "name": "grid",
+      "type": "array",
+      "label": "输入网格",
+      "description": "输入网格列表 (number[][][])，也支持单网格 (number[][]) 自动包装",
+      "description-en": "Input list of 2D grids (number[][][]); single grid is auto-wrapped."
+    },
+    {
+      "name": "poiRules",
+      "type": "array",
+      "label": "POI规则列表",
+      "description": "POI规则数组，简化格式 [{名称: \"targetValue:count:minDistance\"}, ...]，如 [{\"洞穴\": \"7:4:12\"}, {\"营火\": \"4:8:6\"}]；也兼容旧格式 [{decoration, targetValue, count, minDistance}]",
+      "description-en": "Array of POI rules; simplified [{name: \"targetValue:count:minDistance\"}, ...] e.g. [{\"cave\": \"7:4:12\"}]; legacy {decoration, targetValue, count, minDistance} also accepted."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "default": 0,
+      "description": "随机种子，0表示使用当前时间自动随机",
+      "description-en": "Random seed; 0 uses current timestamp."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGridList",
+      "type": "array",
+      "label": "输出网格列表",
+      "description": "单值网格的平铺列表：每种POI一张，仅含该id与0；与 outputNameList 一一对应",
+      "description-en": "Flat list of single-value grids: one per POI type (only that id or 0); aligned 1:1 with outputNameList."
+    },
+    {
+      "name": "outputNameList",
+      "type": "array",
+      "label": "名称清单",
+      "description": "与 outputGridList 一一对应的拍平名称清单，格式为 [{id, name, type}]，type 固定为 asset",
+      "description-en": "Flat name list aligned 1:1 with outputGridList: [{id, name, type}], type is always \"asset\"."
+    },
+    {
+      "name": "placedCount",
+      "type": "number",
+      "label": "成功放置数量",
+      "description": "所有规则中成功放置的POI点总数",
+      "description-en": "Total number of POI points successfully placed across all rules."
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "id": "region_zone_generator",
+  "label": "区域分区生成器",
+  "description": "在基准掩码网格上，根据区域列表（名称、面积、九宫格方位）生成若干不重叠的不规则区域，支持多种边界后处理风格",
+  "description-en": "Generate non-overlapping irregular zones on a base mask grid from a region list (name, area ratio, 1-9 grid position), with multiple boundary post-processing styles.",
+  "icon": "俯视分区地图，多个不规则彩色多边形紧密拼接填满矩形区域，每块有不同深浅色，扁平插画风格，简洁小图标，主色2种。",
+  "version": "1.0.0",
+  "tags": ["zone", "partition", "region", "layout", "voronoi", "procedural", "pcg"],
+  "tag_labels": ["分区", "地块", "区域", "布局", "Voronoi", "程序生成", "PCG"],
+  "inputs": [
+    {
+      "name": "baseGrid",
+      "type": "array",
+      "label": "基准网格",
+      "description": "基准掩码网格或网格列表，非零像素为可用区域，零像素为不可用区域",
+      "description-en": "Base mask grid or list of grids; non-zero cells are usable area, zero cells are unavailable."
+    },
+    {
+      "name": "regions",
+      "type": "array",
+      "label": "区域列表",
+      "description": "区域描述数组，支持直接连入 JSON 字符串。每项格式为 [名称, 面积占比, 九宫格方位]。面积占比=0~1浮点数（表示占可用区域总面积的比例）；多个区域加和超过1时自动等比缩放；加和小于1时剩余区域不分配。方位=1-9（1=左上,2=上中,3=右上,4=左中,5=中央,6=右中,7=左下,8=下中,9=右下）",
+      "description-en": "Region descriptor array or JSON string. Each item: [name, areaRatio (0~1 float), position (1-9)]. Ratios summing >1 are scaled down proportionally; ratios summing <1 leave the remainder unassigned."
+    },
+    {
+      "name": "boundaryStyle",
+      "type": "string",
+      "label": "边界风格",
+      "description": "边界后处理风格：organic=有机自然形状（CA平滑），smooth=更强的圆滑处理，rectilinear=矩形化（rect区域拟合），voronoi=保持原始Voronoi边界",
+      "description-en": "Boundary post-processing style: organic, smooth, rectilinear, or voronoi.",
+      "default": "rectilinear",
+      "options": ["organic", "smooth", "rectilinear", "voronoi"]
+    },
+    {
+      "name": "relaxIterations",
+      "type": "number",
+      "label": "松弛迭代次数",
+      "description": "Lloyd松弛迭代次数，值越大区域分布越均匀，但计算量也越大，推荐3-8",
+      "description-en": "Lloyd relaxation iterations. More iterations = more uniform distribution. Recommended: 3-8.",
+      "default": 5
+    },
+    {
+      "name": "smoothIterations",
+      "type": "number",
+      "label": "平滑迭代次数",
+      "description": "边界平滑的CA迭代次数，仅在 organic/smooth 风格下生效，推荐3-10",
+      "description-en": "CA smoothing iterations for organic/smooth styles. Recommended: 3-10.",
+      "default": 5
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "随机种子，0表示使用当前时间（每次结果不同）",
+      "description-en": "Random seed; 0 uses current timestamp for a different result each run.",
+      "default": 0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGridList",
+      "type": "array",
+      "label": "分区网格列表",
+      "description": "单值网格列表，每个区域对应一张网格，只含该区域 ID 和 0，顺序与区域列表一致",
+      "description-en": "List of single-value grids, one per zone, each containing only that zone's ID or 0."
+    },
+    {
+      "name": "nameList",
+      "type": "array",
+      "label": "名称清单",
+      "description": "区域名称清单，格式为 [{id: number, name: string, type: string}]，type 固定为 'tile'",
+      "description-en": "Zone name list as [{id, name, type}], where type is always 'tile'."
+    }
+  ]
+}

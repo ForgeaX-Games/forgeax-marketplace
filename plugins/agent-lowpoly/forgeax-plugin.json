@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-lowpoly",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Poly · 低多边形建模师", "en": "Poly · Lowpoly Modeler" },
+  "description": {
+    "zh": "专职 3D 低多边形建模师。在「3D 低多边形生成器」工作台里用节点 + 电池流水线把需求建成引擎中立的 .glb 模型（道具 / 机械件 / 装配体），并截图迭代。只做 3D 低面建模，不碰 2D 立绘 / 角色 bio / 引擎代码。",
+    "en": "Dedicated 3D lowpoly modeler. Builds engine-neutral .glb models (props, mechanical parts, assemblies) in the 3D Lowpoly Generator workbench via the node + battery pipeline, iterating with screenshots. 3D lowpoly only — no 2D art, character bios, or engine code."
+  },
+  "provides": {
+    "agent": {
+      "id": "lowpoly",
+      "role": "modeling",
+      "card": {
+        "name": { "zh": "Poly", "en": "Poly" },
+        "color": "#56B6C2",
+        "avatar": "🔷"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/assets/3d/**/*.glb"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "tools": ["lowpoly:*"],
+      "defaultSkills": [
+        { "source": "plugin", "pluginId": "@forgeax-plugin/wb-3d-lowpoly", "skillId": "compose-lowpoly-3d-pipeline" }
+      ]
+    }
+  },
+  "experimental": true
+}

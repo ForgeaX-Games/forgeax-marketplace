@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:playground-snapshot returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "absPath"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "absPath": { "type": "string" },
+    "bytes": { "type": "integer", "minimum": 0 }
+  }
+}

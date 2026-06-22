@@ -1,0 +1,24 @@
+{
+  "name": "@forgeax-plugin/wb-lowpoly-obj",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ForgeaX workbench plugin: lowpoly humanoid 3D character editor (vibe + manual + playground)",
+  "scripts": {
+    "dev": "vite --host --port 15174",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.0.0",
+    "three": "^0.170.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-forgeax-default",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "ForgeaX 默认助手",
+    "en": "ForgeaX Default"
+  },
+  "description": {
+    "zh": "forgeax-native 自带 driver 的开箱即用 persona · 不依赖任何外部 CLI 二进制,直接走 KeyVault 里登记的模型。新装环境用这个就能聊。",
+    "en": "Out-of-the-box persona for the forgeax-native in-process driver. Requires no external CLI binary — talks straight to whatever model the KeyVault knows about. Default for fresh installs."
+  },
+  "provides": {
+    "agent": {
+      "id": "forgeax-default",
+      "role": "planner",
+      "card": {
+        "name": { "zh": "ForgeaX", "en": "ForgeaX" },
+        "color": "#1F6FEB",
+        "avatar": "🔷"
+      },
+      "personaFile": "./persona/zh.md",
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "g_barrel_hinge",
+  "label": "桶式铰链",
+  "name-en": "GBarrelHinge",
+  "description": "在 Geometry DSL 末尾追加 barrel_hinge(...) 一行。两叶交错指节式合页。当 prompt 提到 铰链 / 合页 / 转轴接头 / hinge / butt hinge 时使用（短小两叶式）；动起来时用 g_joint_revolute。",
+  "description-en": "Append `barrel_hinge(...)` — two-leaf interleaved knuckle hinge. Use when the prompt mentions a hinge / butt hinge / pivot joint (compact two-leaf); animate with g_joint_revolute.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "part", "hinge", "cad"],
+  "tag_labels": ["几何", "语义零件", "铰链", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "length", "type": "number", "label": "总长", "default": 0.06, "description": "铰链沿销轴方向的总长", "description-en": "Total length along the pin axis." },
+    { "name": "leaf_width_a", "type": "number", "label": "叶 A 宽", "default": 0.025, "description": "叶片 A 宽度", "description-en": "Width of leaf A." },
+    { "name": "leaf_width_b", "type": "number", "label": "叶 B 宽", "default": 0, "description": "0 = 与 A 相同", "description-en": "Width of leaf B; 0 = same as A." },
+    { "name": "leaf_thickness", "type": "number", "label": "叶厚", "default": 0.0025, "description": "叶片厚度", "description-en": "Leaf thickness." },
+    { "name": "pin_diameter", "type": "number", "label": "销径", "default": 0.005, "description": "销轴直径", "description-en": "Pin diameter." },
+    { "name": "knuckle_outer_diameter", "type": "number", "label": "指节外径", "default": 0, "description": "0 = 默认", "description-en": "Knuckle outer diameter; 0 = default." },
+    { "name": "knuckle_count", "type": "number", "label": "指节数 (奇)", "default": 0, "description": "0 = 默认；建议奇数", "description-en": "Knuckle count; 0 = default (odd preferred)." },
+    { "name": "clearance", "type": "number", "label": "间隙", "default": 0, "description": "指节间间隙", "description-en": "Clearance between knuckles." },
+    { "name": "open_angle_deg", "type": "number", "label": "展开角 (°)", "default": 0, "description": "0 = 平展 180°", "description-en": "Open angle; 0 = flat 180°." },
+    { "name": "center", "type": "bool", "required": false, "label": "居中", "default": true, "description": "true = 关于原点居中", "description-en": "true = center about the origin." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 hinge{n}", "description-en": "Custom id; empty = auto hinge{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 barrel_hinge 行后的 Geometry", "description-en": "Geometry after appending the hinge." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+output/
+output_*.json
+.env
+viz/node_modules/
+viz/dist/
+sync.sh
+bun.lock

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/tool-balance-resim/resim.args",
+  "title": "balance:resim args",
+  "description": "Input schema for balance:resim. The host validates with ajv on bus.call (modules/02 §530).",
+  "type": "object",
+  "required": ["scenario", "N"],
+  "properties": {
+    "scenario": {
+      "type": "string",
+      "description": "Battle scenario id (path-like, e.g. 'pve/wave-3' or 'pvp/duel')",
+      "pattern": "^[a-z][a-z0-9_./-]*$",
+      "maxLength": 200
+    },
+    "N": {
+      "type": "integer",
+      "description": "Number of resim trials",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "seed": {
+      "type": "integer",
+      "description": "Optional RNG seed for reproducibility",
+      "minimum": 0
+    },
+    "teamA": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 32
+    },
+    "teamB": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 32
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,64 @@
+{
+  "id": "g_validate",
+  "label": "几何校验",
+  "name-en": "GValidate",
+  "description": "跑一遍 Geometry 的 SSA/ref/类型校验，再加几条 URDF 语义检查（part 至少 1 个、joint parent/child 必须是 part、joint type 合法、不能成环）。错误以多行字符串输出。",
+  "description-en": "Run SSA/ref/type validation and a few URDF semantic checks (≥ 1 part, joint parents/children must be parts, joint type valid, no cycles). Errors are returned as a multi-line string.",
+  "version": "1.0.0",
+  "autoIterate": false,
+  "tags": [
+    "geometry",
+    "validate",
+    "urdf",
+    "lint"
+  ],
+  "tag_labels": [
+    "几何",
+    "校验",
+    "URDF",
+    "lint"
+  ],
+  "inputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "required": true,
+      "label": "几何",
+      "description": "要校验的 Geometry",
+      "description-en": "Geometry to validate."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "label": "几何",
+      "description": "原 Geometry 透传，方便继续接下游",
+      "description-en": "Pass-through Geometry."
+    },
+    {
+      "name": "valid",
+      "type": "bool",
+      "label": "通过",
+      "description": "true = 无错",
+      "description-en": "true = no errors."
+    },
+    {
+      "name": "errors",
+      "type": "string",
+      "label": "错误",
+      "description": "多行错误信息",
+      "description-en": "Multi-line error report."
+    },
+    {
+      "name": "count",
+      "type": "number",
+      "label": "错误条数",
+      "description": "错误数量",
+      "description-en": "Error count."
+    }
+  ],
+  "projectTypes": [
+    "asset3d"
+  ]
+}

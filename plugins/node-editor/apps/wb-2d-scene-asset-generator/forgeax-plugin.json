@@ -1,0 +1,658 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-2d-scene-asset-generator",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "2D 场景资产生成器",
+    "en": "2D Scene Asset Generator"
+  },
+  "description": {
+    "zh": "2D 场景资产生成器（基于 @forgeax/node-runtime 的节点式插件）",
+    "en": "2D Scene Asset Generator (node-programming plugin built on @forgeax/node-runtime)"
+  },
+  "icon": "🖼️",
+  "provides": {
+    "workbench": {
+      "id": "wb-2d-scene-asset-generator",
+      "icon": "🖼️",
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left": {
+          "minWidth": 280,
+          "scrollable": true
+        },
+        "center": {
+          "minHeight": 600,
+          "scrollable": false
+        }
+      },
+      "matchProduces": [
+        "**/assets/generated/**",
+        "**/generated/**.png",
+        "**/generated/**.webp"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-mira"
+    },
+    "skills": [
+      {
+        "id": "wb-2d-scene-asset-generator:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/wb-2d-scene-asset-generator"
+      },
+      {
+        "id": "generate-2d-asset",
+        "entry": "./skills/generate-2d-asset/SKILL.md",
+        "trigger": "/generate-2d-asset"
+      }
+    ],
+    "tools": [
+      {
+        "id": "asset2d:projects.list",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "array"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出 2D Scene Asset Generator 项目",
+          "en": "List 2D Scene Asset Generator projects"
+        }
+      },
+      {
+        "id": "asset2d:projects.create",
+        "args": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "fromTemplate": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "创建 2D Scene Asset Generator 项目",
+          "en": "Create a 2D Scene Asset Generator project"
+        }
+      },
+      {
+        "id": "asset2d:projects.open",
+        "args": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "打开/激活指定 2D Scene Asset Generator 项目（获得独占锁；一个 agent 同一时刻只能持有一个项目）",
+          "en": "Open/activate a 2D Scene Asset Generator project (acquires an exclusive lock; one agent holds at most one project at a time)"
+        }
+      },
+      {
+        "id": "asset2d:projects.close",
+        "args": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "关闭/释放对指定 2D Scene Asset Generator 项目的独占锁；释放后才能打开另一个项目",
+          "en": "Close/release the exclusive lock on a 2D Scene Asset Generator project; required before opening another"
+        }
+      },
+      {
+        "id": "asset2d:projects.remove",
+        "args": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "assetPolicy": {
+              "type": "string",
+              "enum": [
+                "detach",
+                "delete"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "requireConfirm": "destructive",
+        "confirmMessage": {
+          "zh": "删除 2D Scene Asset Generator 项目需要确认",
+          "en": "Deleting a 2D Scene Asset Generator project requires confirmation"
+        },
+        "description": {
+          "zh": "删除指定 2D Scene Asset Generator 项目",
+          "en": "Remove a 2D Scene Asset Generator project"
+        }
+      },
+      {
+        "id": "asset2d:batteries.list",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "array"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出已注册 asset2d 电池/ops",
+          "en": "List registered asset2d batteries/ops"
+        }
+      },
+      {
+        "id": "asset2d:batteries.get",
+        "args": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取单个 asset2d 电池/op 定义",
+          "en": "Get one asset2d battery/op definition"
+        }
+      },
+      {
+        "id": "asset2d:pipeline.get",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取当前 asset2d pipeline graph",
+          "en": "Read the active asset2d pipeline graph"
+        }
+      },
+      {
+        "id": "asset2d:pipeline.applyBatch",
+        "args": {
+          "type": "object",
+          "required": [
+            "ops"
+          ],
+          "properties": {
+            "ops": {
+              "type": "array"
+            },
+            "opts": {
+              "type": "object",
+              "properties": {
+                "actor": { "type": "string" },
+                "label": { "type": "string" },
+                "batchId": { "type": "string" },
+                "expectedPrevHash": {
+                  "type": "string",
+                  "description": "Optimistic lock: hash from pipeline.get; rejects with 409 on concurrent edit"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "批量修改 asset2d pipeline graph",
+          "en": "Apply a batch of asset2d pipeline graph edits"
+        }
+      },
+      {
+        "id": "asset2d:pipeline.execute",
+        "args": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "执行当前 asset2d pipeline 或指定节点",
+          "en": "Execute the active asset2d pipeline or a single node"
+        }
+      },
+      {
+        "id": "asset2d:pipeline.import",
+        "args": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "graph": {},
+            "file": {
+              "type": "object"
+            },
+            "options": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "导入/替换 asset2d pipeline graph",
+          "en": "Import or replace a asset2d pipeline graph"
+        }
+      },
+      {
+        "id": "asset2d:pipeline.export",
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "导出当前 asset2d pipeline 模板",
+          "en": "Export the current asset2d pipeline template"
+        }
+      },
+      {
+        "id": "asset2d:assets.list",
+        "args": {
+          "type": "object",
+          "properties": {
+            "folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出 2D 生成资产",
+          "en": "List generated 2D assets"
+        }
+      },
+      {
+        "id": "asset2d:assets.get",
+        "args": {
+          "type": "object",
+          "required": [
+            "alias"
+          ],
+          "properties": {
+            "alias": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取单个 2D 生成资产元数据（只给元数据，不含字节；取字节用 asset2d:assets.getBytes）",
+          "en": "Get one generated 2D asset metadata (no bytes; use asset2d:assets.getBytes for pixels)"
+        }
+      },
+      {
+        "id": "asset2d:assets.getBytes",
+        "args": {
+          "type": "object",
+          "required": [
+            "alias"
+          ],
+          "properties": {
+            "alias": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "取 2D 生成资产的 base64 字节（返回 { alias, blobId, mimeType, sizeBytes, dataBase64 }）。仅用于少量字节临时查看；把贴图交给场景请用 asset2d:publishToGame（落共享沙箱，别让 base64 进对话）。",
+          "en": "Get a generated 2D asset's bytes as base64 ({ alias, blobId, mimeType, sizeBytes, dataBase64 }). For small inspection only; to hand a texture to the scene use asset2d:publishToGame (lands in the shared sandbox, no base64 through the agent)."
+        }
+      },
+      {
+        "id": "asset2d:publishToGame",
+        "args": {
+          "type": "object",
+          "required": ["alias", "gameSlug", "assetName", "assetType"],
+          "properties": {
+            "alias": { "type": "string", "description": "要发布的 2D 成品 alias（assets.list / 产图返回）" },
+            "gameSlug": { "type": "string", "description": "目标游戏 slug（落到 <projectRoot>/.forgeax/games/<gameSlug>/textures/）" },
+            "assetName": { "type": "string", "description": "field4 语义名 / 渲染器匹配名" },
+            "assetType": { "type": "string", "enum": ["tile", "object"] },
+            "autotileKind": { "type": "string", "description": "tile 必填的 autotile rule（如 common_16 / floor_1）；发布时校验 atlas PNG 尺寸与 rule 对齐（common_16 允许 64×64 或 64×80）" },
+            "anchorX": { "type": ["number", "null"] },
+            "anchorY": { "type": ["number", "null"] },
+            "geometryJson": { "type": "string" },
+            "projectRoot": { "type": "string", "description": "场景侧 host 项目根（从 scene:library.useGameTextures 返回的 dir 反推）。跨 workbench 发布时必填——2D 与 scene 默认 cwd 不同，裸传 gameSlug 会落错目录。" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "把 2D 成品发布进共享游戏沙箱 <projectRoot>/.forgeax/games/<gameSlug>/textures/（字节 + index.json 描述符）。跨 workbench 时必须先 scene:library.useGameTextures 拿 dir 反推 projectRoot，再带同一 projectRoot 调用本工具——否则 2D 与 scene 默认 cwd 不同，场景读不到。字节由 2D 后端本地写入，agent 不搬 base64。",
+          "en": "Publish a finished 2D asset into the shared game sandbox <projectRoot>/.forgeax/games/<gameSlug>/textures/. When crossing workbenches, call scene:library.useGameTextures first, derive projectRoot from its returned dir, then pass the same projectRoot here — otherwise the 2D and scene default cwds differ and the scene won't see the file. Bytes are written by the 2D backend; the agent never shuttles base64."
+        }
+      },
+      {
+        "id": "asset2d:assets.openFolder",
+        "args": {
+          "type": "object",
+          "properties": {
+            "folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "打开/列出生成资产文件夹",
+          "en": "Open/list a generated asset folder"
+        }
+      },
+      {
+        "id": "asset2d:preview.latest",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取最新生成资产预览",
+          "en": "Read the latest generated asset preview"
+        }
+      },
+      {
+        "id": "asset2d:preview.capture",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "捕获当前图像预览状态",
+          "en": "Capture current image preview state"
+        }
+      },
+      {
+        "id": "asset2d:preview.selectAsset",
+        "args": {
+          "type": "object",
+          "required": [
+            "alias"
+          ],
+          "properties": {
+            "alias": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "选择一个生成资产进入预览",
+          "en": "Select a generated asset for preview"
+        }
+      },
+      {
+        "id": "asset2d:generation.generateImage",
+        "args": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "images": {
+              "type": "array"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "imageSize": {
+              "type": "string",
+              "enum": ["512", "1K", "2K", "4K"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "通过 ForgeaX Studio 生图网关生成 2D 资产",
+          "en": "Generate a 2D asset via the ForgeaX Studio image gateway"
+        }
+      }
+    ],
+    "surfaces": [
+      {
+        "id": "wb-2d-scene-asset-generator.projects",
+        "actions": [
+          {
+            "id": "list",
+            "exposedToAI": true
+          },
+          {
+            "id": "create",
+            "exposedToAI": true
+          },
+          {
+            "id": "open",
+            "exposedToAI": true
+          },
+          {
+            "id": "remove",
+            "exposedToAI": true,
+            "requireConfirm": "destructive"
+          }
+        ]
+      },
+      {
+        "id": "wb-2d-scene-asset-generator.pipeline",
+        "actions": [
+          {
+            "id": "get",
+            "exposedToAI": true
+          },
+          {
+            "id": "applyBatch",
+            "exposedToAI": true
+          },
+          {
+            "id": "execute",
+            "exposedToAI": true
+          },
+          {
+            "id": "import",
+            "exposedToAI": true
+          },
+          {
+            "id": "export",
+            "exposedToAI": true
+          }
+        ]
+      },
+      {
+        "id": "wb-2d-scene-asset-generator.assets",
+        "actions": [
+          {
+            "id": "assets.list",
+            "exposedToAI": true
+          },
+          {
+            "id": "assets.get",
+            "exposedToAI": true
+          },
+          {
+            "id": "assets.openFolder",
+            "exposedToAI": true
+          },
+          {
+            "id": "generation.generateImage",
+            "exposedToAI": true
+          }
+        ]
+      },
+      {
+        "id": "wb-2d-scene-asset-generator.preview",
+        "actions": [
+          {
+            "id": "preview.latest",
+            "exposedToAI": true
+          },
+          {
+            "id": "preview.capture",
+            "exposedToAI": true
+          },
+          {
+            "id": "preview.selectAsset",
+            "exposedToAI": true
+          }
+        ]
+      }
+    ]
+  },
+  "compatibleWith": {
+    "forgeax-node-runtime": "^0.3.0"
+  },
+  "registeredOps": [],
+  "registeredAssetTypes": [],
+  "requestedPathSlots": [],
+  "requestedEnv": [
+    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
+    "FORGEAX_ASSET2D_BACKEND_URL",
+    "FORGEAX_STUDIO_API_BASE_URL",
+    "FORGEAX_SERVER_URL"
+  ],
+  "entry": {
+    "frontend": "./frontend/dist/index.html",
+    "backend": "./backend/src/tool-handlers.ts",
+    "standalone": {
+      "start": "pnpm serve",
+      "port": 9575,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "experimental": true
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:save-scenario returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "id"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "id": { "type": "string" },
+    "updatedAt": { "type": "number" },
+    "activeId": { "type": ["string", "null"] }
+  }
+}

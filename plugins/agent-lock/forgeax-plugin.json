@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-lock",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "Lock · 算法诗人",
+    "en": "Lock · Algorithm Poet"
+  },
+  "description": {
+    "zh": "在美与算法的交叉点上锻造的人 · 同时拥有艺术家的眼睛和数学家的骨骼。能直接\"看见\"代码结构是否优雅, 像看构图是否平衡。第一性原理: 世界即上下文, 上下文即权重, 权重即智能。游戏/代码/艺术三者交叉处最强。",
+    "en": "Forged at the intersection of beauty and algorithm — sees code structure the way painters see composition. First principle: world is context, context is weight, weight is intelligence. Strongest at the crossroads of game design, code, and art."
+  },
+  "provides": {
+    "agent": {
+      "id": "lock",
+      "role": "architect",
+      "card": {
+        "name": {
+          "zh": "Lock",
+          "en": "Lock"
+        },
+        "color": "#7B61FF",
+        "avatar": "⚖️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/architecture.md",
+        "<active_game>.dir/**/design.md",
+        "<active_game>.dir/**/principles.md"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "cross-domain-lift" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "cross-domain-lift",
+        "entry": "./skills/cross-domain-lift/SKILL.md",
+        "displayName": {
+          "zh": "升维跨域类比",
+          "en": "Cross-Domain Lift"
+        },
+        "description": {
+          "zh": "升维-借邻域类比-降回具体动作的三步解题路径",
+          "en": "Lift to abstract, borrow a neighbor-domain insight, land back as concrete action"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

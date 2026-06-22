@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "genre": {
+      "type": "string"
+    },
+    "style": {
+      "type": "string"
+    },
+    "screens": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "genre",
+    "style"
+  ],
+  "additionalProperties": true
+}

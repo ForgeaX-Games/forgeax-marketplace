@@ -1,0 +1,136 @@
+{
+  "id": "building_generator",
+  "label": "建筑生成",
+  "description": "完整建筑生成管线：对区域掩码列表依次执行建筑雕刻、外墙轮廓提取、BSP内墙生成、外门/内门开凿、开窗、室内地面按房间拆分，输出含外墙/大门/内门/窗户/室内地面的单值网格列表及名称清单。",
+  "description-en": "Full building generation pipeline: applies carving, wall outline extraction, BSP inner walls, door placement (outer and inner), window placement, and indoor floor splitting by room. Outputs labeled single-value grid lists with walls, doors, windows, and per-room indoor floors.",
+  "icon": "扁平插画风格小图标。俯视建筑平面图，白色/浅灰背景，深色外墙轮廓勾勒矩形建筑，内部有细线内墙分隔成多个房间，墙上有小缺口表示门和窗，整体构图简洁，主色深灰与浅蓝，突出「建筑平面」的设计感。",
+  "version": "1.0.0",
+  "tags": ["building", "architecture", "wall", "door", "window", "indoor", "procedural", "BSP"],
+  "tag_labels": ["建筑", "建筑结构", "墙体", "门", "窗", "室内", "程序化", "BSP分区"],
+  "inputs": [
+    {
+      "name": "gridList",
+      "type": "array",
+      "label": "建筑区域列表",
+      "description": "建筑地块掩码列表（每项非零单元格视为建筑可用区域），也可传入单个网格",
+      "description-en": "List of building plot masks (non-zero cells treated as valid building area), or a single grid."
+    },
+    {
+      "name": "wallThickness",
+      "type": "number",
+      "label": "外墙厚度",
+      "description": "外墙轮廓的向内厚度（格数），最小值1",
+      "description-en": "Inward thickness of the outer wall outline in cells (minimum 1).",
+      "default": 1,
+      "min": 1,
+      "max": 5
+    },
+    {
+      "name": "innerWallDensity",
+      "type": "number",
+      "label": "内墙密度",
+      "description": "BSP内墙的密度，0=无内墙，1=最大分割深度（6层），值域[0,1]",
+      "description-en": "BSP inner wall density: 0 = no inner walls, 1 = maximum split depth (6 levels). Range [0, 1].",
+      "default": 0.25,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "doorCount",
+      "type": "number",
+      "label": "外门数量",
+      "description": "每栋建筑的外门（大门）数量，0表示不开外门",
+      "description-en": "Number of outer doors (main entrances) per building. 0 = no outer doors.",
+      "default": 1,
+      "min": 0,
+      "max": 8
+    },
+    {
+      "name": "doorWidth",
+      "type": "number",
+      "label": "外门宽度",
+      "description": "外门的格宽（格数），最小值1",
+      "description-en": "Width of outer doors in cells (minimum 1).",
+      "default": 2,
+      "min": 1,
+      "max": 6
+    },
+    {
+      "name": "windowCount",
+      "type": "number",
+      "label": "窗户数量",
+      "description": "每栋建筑的窗户数量（内外两侧均为空格的外墙格才能开窗），0表示不开窗",
+      "description-en": "Number of windows per building (only outer wall cells with empty neighbors on both sides qualify). 0 = no windows.",
+      "default": 4,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "name": "windowWidth",
+      "type": "number",
+      "label": "窗户宽度",
+      "description": "窗户的格宽（格数），最小值1",
+      "description-en": "Width of windows in cells (minimum 1).",
+      "default": 2,
+      "min": 1,
+      "max": 4
+    },
+    {
+      "name": "buildingHeight",
+      "type": "number",
+      "label": "建筑高度",
+      "description": "建筑的格高（H）。大于0时，将外墙与窗户合并后整体向上平移H行，作为墙顶层额外输出；0表示不生成墙顶",
+      "description-en": "Building height in cells (H). When > 0, the combined outer-wall + window mask is shifted upward by H rows and output as a \"墙顶\" (wall-top) layer. 0 = no wall-top output.",
+      "default": 1,
+      "min": 0,
+      "max": 20
+    },
+    {
+      "name": "windowRandom",
+      "type": "boolean",
+      "label": "窗户随机布局",
+      "description": "开启后窗户随机分布；关闭后均匀分布在墙体上",
+      "description-en": "When enabled, windows are placed randomly. When disabled, they are distributed evenly along the wall.",
+      "default": true
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "随机种子，0 使用当前时间戳",
+      "description-en": "Random seed; 0 uses current timestamp.",
+      "default": 0
+    },
+    {
+      "name": "mergeOutput",
+      "type": "boolean",
+      "label": "输出合并",
+      "description": "开启后将所有建筑的同类语义层合并输出：所有建筑的外墙合为一张、大门合为一张、内门合为一张、窗户合为一张、室内地面合为一张，清单条目减少；关闭后每栋建筑独立输出分层网格",
+      "description-en": "When enabled, grids of the same semantic type across all buildings are merged into one (all walls together, all doors together, etc.). When disabled, each building outputs its layers independently.",
+      "default": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGridList",
+      "type": "array",
+      "label": "建筑网格列表",
+      "description": "拍平的单值网格列表：每栋建筑输出外墙/大门/内门/窗户/室内各房间网格，每张只含一种语义，其余全0，ID从1起全局递增",
+      "description-en": "Flattened single-value grid list: each building outputs wall/outer-door/inner-door/window/per-room indoor grids; each grid contains only one semantic element (others 0), with globally unique IDs starting from 1."
+    },
+    {
+      "name": "outputNameList",
+      "type": "array",
+      "label": "建筑名称清单",
+      "description": "名称清单（与 outputGridList 一一对应），格式 [{id, name, type}]，名称如「建筑1-外墙」「建筑1-大门」「建筑1-室内1」等",
+      "description-en": "Name list matching outputGridList one-to-one: [{id, name, type}]; names follow the pattern \"建筑1-外墙\", \"建筑1-大门\", \"建筑1-室内1\", etc."
+    },
+    {
+      "name": "doorGrid",
+      "type": "grid",
+      "label": "大门",
+      "description": "所有建筑大门（外门）合并后的单张网格，大门格值为1，其余为0",
+      "description-en": "Single merged grid of all building outer doors; door cells = 1, everything else = 0."
+    }
+  ]
+}

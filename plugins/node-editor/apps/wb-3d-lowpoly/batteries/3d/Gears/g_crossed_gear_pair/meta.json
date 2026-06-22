@@ -1,0 +1,31 @@
+{
+  "id": "g_crossed_gear_pair",
+  "label": "交错斜齿轮对",
+  "name-en": "GCrossedGearPair",
+  "description": "在 Geometry DSL 末尾追加 crossed_gear_pair(...) 一行（两个斜齿轮按 shaft_angle 交错轴啮合，一体烘）。当 prompt 提到 交错齿轮副 / 螺旋齿轮副 / 交叉轴齿轮 / crossed gear pair / screw gear pair 时使用。",
+  "description-en": "Append `crossed_gear_pair(...)` — two helical gears meshing on crossed axes (shaft_angle), baked together. Use when the prompt mentions a crossed / screw gear pair on crossed axes.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "gear", "crossed", "pair", "cad"],
+  "tag_labels": ["几何", "齿轮", "交错", "齿轮对", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "module", "type": "number", "label": "模数 m", "default": 0.002, "description": "模数（米）", "description-en": "Module (meters)." },
+    { "name": "gear1_teeth_number", "type": "number", "label": "齿轮 1 齿数", "default": 20, "description": "齿轮 1 齿数（整数，>= 3）", "description-en": "Gear 1 tooth count (integer, >= 3)." },
+    { "name": "gear2_teeth_number", "type": "number", "label": "齿轮 2 齿数", "default": 24, "description": "齿轮 2 齿数（整数，>= 3）", "description-en": "Gear 2 tooth count (integer, >= 3)." },
+    { "name": "gear1_width", "type": "number", "label": "齿轮 1 齿宽", "default": 0.01, "description": "齿轮 1 齿宽（米）", "description-en": "Gear 1 face width (meters)." },
+    { "name": "gear2_width", "type": "number", "label": "齿轮 2 齿宽", "default": 0.01, "description": "齿轮 2 齿宽（米）", "description-en": "Gear 2 face width (meters)." },
+    { "name": "shaft_angle", "type": "number", "label": "轴夹角 (°)", "default": 0, "description": "两轴夹角；0 = 用默认 90°", "description-en": "Crossed-shaft angle; 0 = use default 90°." },
+    { "name": "gear1_helix_angle", "type": "number", "label": "齿轮 1 螺旋角 (°)", "default": 0, "description": "齿轮 1 螺旋角；0 = 默认 shaft_angle/2（齿轮 2 取互补角）", "description-en": "Gear 1 helix angle; 0 = default shaft_angle/2 (gear 2 takes the complement)." },
+    { "name": "pressure_angle", "type": "number", "label": "压力角 (°)", "default": 0, "description": "0 = 用默认 20°", "description-en": "0 = use default 20°." },
+    { "name": "clearance", "type": "number", "label": "顶隙", "default": 0, "description": "齿顶径向间隙", "description-en": "Tip radial clearance." },
+    { "name": "backlash", "type": "number", "label": "侧隙", "default": 0, "description": "齿面侧隙", "description-en": "Tooth-flank backlash." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 xpr{n}", "description-en": "Custom id; empty = auto xpr{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 crossed_gear_pair 行后的 Geometry", "description-en": "Geometry after appending the crossed gear pair." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

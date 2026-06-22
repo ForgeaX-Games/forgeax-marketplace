@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:publish-to-workspace-game args",
+  "description": "Copies the latest baked .glb into the game project's assets/ directory. UI-only (exposedToAI: false).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gameSlug", "slug", "destSubpath"],
+  "properties": {
+    "gameSlug": { "type": "string" },
+    "slug": { "type": "string" },
+    "destSubpath": {
+      "type": "string",
+      "description": "Path inside game project, e.g. 'assets/characters/'. Trailing slash optional."
+    }
+  }
+}

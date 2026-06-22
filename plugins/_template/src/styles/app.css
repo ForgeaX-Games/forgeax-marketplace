@@ -1,0 +1,12 @@
+/* Tailwind entry. tokens.css (vendored @forgeax/design) is imported separately
+   in main.tsx so the --fx-* variables exist before utilities resolve. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Token-driven base surface (preflight is off, so set these explicitly). */
+html,
+body {
+  background: var(--fx-bg, #0d0d0d);
+  color: var(--fx-fg, #fff);
+}

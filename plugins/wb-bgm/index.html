@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BGM / 音效资产</title>
+</head>
+
+<body>
+  <!-- ===== 顶部 Header ===== -->
+  <header class="header">
+    <div class="header-logo">
+      <span class="logo-icon">🔊</span>
+      <span class="logo-text">BGM / 音效资产</span>
+    </div>
+
+    <div class="header-spacer"></div>
+
+    <!-- 搜索框 -->
+    <div class="search-box" id="searchBox">
+      <select id="searchType" class="search-mode-select" title="资产类型">
+        <option value="3">BGM</option>
+        <option value="7">音效</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="按标签搜索..." />
+      <button id="searchBtn">搜索</button>
+    </div>
+
+    <!-- 刷新按钮 -->
+    <button class="icon-btn" id="refreshBtn" title="检查并更新缓存">
+      <span id="refreshIcon">↻</span>
+    </button>
+  </header>
+
+  <!-- ===== 类型 Tab 栏 ===== -->
+  <nav class="tabs-bar" id="tabsBar">
+    <button class="tab-btn active" data-type="">
+      <span>📂 全部（文件管理器）</span>
+    </button>
+    <button class="tab-btn" data-type="3"><span>🎵 BGM</span></button>
+    <button class="tab-btn" data-type="7"><span>🔊 音效</span></button>
+  </nav>
+
+  <!-- ===== 主内容区 ===== -->
+  <div class="main-content">
+
+    <!-- 左侧面板：文件树 / 资产列表 -->
+    <aside class="left-panel" id="leftPanel">
+      <div class="panel-header" id="panelHeader">
+        <span id="panelTitle">文件管理器</span>
+        <span class="panel-count" id="panelCount"></span>
+      </div>
+
+      <!-- 文件管理器树 -->
+      <div id="fileTreeView">
+        <div class="tree-loading" id="treeLoading">
+          <div class="spinner"></div>
+          <span id="treeLoadingText">正在从服务端加载资产数据...</span>
+        </div>
+        <div id="treeContainer" class="hidden"></div>
+        <div id="treeEmpty" class="empty-hint hidden">
+          <p>暂无数据</p>
+          <p class="hint-sub">请确认在内网环境下运行</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧面板：查看器 -->
+    <main class="right-panel" id="rightPanel">
+
+      <!-- 主视图版本切换 -->
+      <div class="asset-version-tabs hidden" id="assetVersionTabs"></div>
+
+      <!-- 占位提示 -->
+      <div class="viewer-placeholder" id="viewerPlaceholder">
+        <div class="placeholder-icon">🔊</div>
+        <p>点击左侧资产试听 BGM / 音效</p>
+        <p class="hint-sub">试听后可点「配入游戏」写入当前游戏的 audio/manifest.json</p>
+      </div>
+
+      <!-- 筛选视图 -->
+      <div class="filter-view hidden" id="filterView">
+        <div class="filter-view-content">
+          <div id="assetGrid" class="asset-grid-large"></div>
+          <div id="filterLoading" class="filter-loading hidden">
+            <div class="spinner"></div><span>加载中...</span>
+          </div>
+          <div id="filterEmpty" class="empty-hint hidden"><p>该类型暂无资产</p></div>
+          <div id="filterError" class="error-hint hidden">
+            <p id="filterErrorMsg"></p>
+            <button id="filterRetry">重试</button>
+          </div>
+        </div>
+        <div id="pagination" class="pagination hidden"></div>
+      </div>
+
+      <!-- 搜索结果视图 -->
+      <div class="search-results hidden" id="searchResults">
+        <div class="viewer-toolbar">
+          <span class="viewer-name" id="searchResultTitle">搜索结果</span>
+          <button class="close-btn" id="closeSearchBtn" title="关闭搜索">✕</button>
+        </div>
+        <div class="search-results-content" id="searchResultsContent">
+          <div class="search-loading hidden" id="searchLoading">
+            <div class="spinner"></div>
+            <span>搜索中...</span>
+          </div>
+          <div class="search-results-grid" id="searchResultsGrid"></div>
+          <div class="search-empty hidden" id="searchEmpty">
+            <p>未找到匹配的资产</p>
+          </div>
+          <div class="pagination" id="searchPagination"></div>
+        </div>
+      </div>
+
+      <!-- 音频播放器 -->
+      <div class="viewer-media hidden" id="viewerAudio">
+        <div class="viewer-toolbar">
+          <span class="viewer-name" id="audioName"></span>
+          <button class="toolbar-btn" id="attachAudioBtn" title="把该音频配入游戏" style="margin-left:auto">🎮 配入游戏</button>
+        </div>
+        <div class="media-wrap">
+          <div class="media-icon">🎵</div>
+          <audio id="audioPlayer" controls preload="metadata"></audio>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast hidden" id="toast"></div>
+
+  <!-- 资产详情弹窗 -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal-container" id="modalContainer">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">资产详情</h3>
+        <button class="modal-close-btn" id="modalCloseBtn">✕</button>
+      </div>
+      
+      <div class="modal-version-tabs hidden" id="modalVersionTabs"></div>
+      
+      <div class="modal-content" id="modalContent">
+        <div class="modal-info-section" id="modalInfoSection">
+          <div class="info-row">
+            <span class="info-label">名称</span>
+            <span class="info-value" id="infoName">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">资产 ID</span>
+            <span class="info-value" id="infoId">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">类型</span>
+            <span class="info-value" id="infoType">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">状态</span>
+            <span class="info-value" id="infoState">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">描述</span>
+            <span class="info-value" id="infoDescription">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">路径</span>
+            <span class="info-value info-path" id="infoPath">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">版本</span>
+            <span class="info-value" id="infoVersion">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">创建时间</span>
+            <span class="info-value" id="infoCreateTime">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">修改时间</span>
+            <span class="info-value" id="infoUpdateTime">-</span>
+          </div>
+          <div class="info-row" id="infoAiMetaRow">
+            <span class="info-label">AI Meta</span>
+            <span class="info-value" id="infoAiMeta" style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg-3); padding: 6px; border-radius: 4px; border: 1px solid var(--border);">-</span>
+          </div>
+          <div class="info-row" id="infoExtraRow">
+            <span class="info-label">Extra</span>
+            <span class="info-value" id="infoExtra" style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg-3); padding: 6px; border-radius: 4px; border: 1px solid var(--border);">-</span>
+          </div>
+          <div class="info-row" id="infoTagsRow">
+            <span class="info-label">标签</span>
+            <span class="info-tags" id="infoTags"></span>
+          </div>
+          <div class="info-row" style="margin-top: 24px;">
+            <button id="modalAttachBtn" class="download-btn hidden" style="margin-bottom: 12px;">🎮 配入游戏</button>
+          </div>
+        </div>
+
+        <div class="modal-preview-section" id="modalPreviewSection">
+          <div class="modal-viewer-media hidden" id="modalViewerAudio">
+            <div class="media-wrap">
+              <div class="media-icon">🎵</div>
+              <audio id="modalAudioPlayer" controls preload="metadata"></audio>
+            </div>
+          </div>
+          <div class="modal-preview-placeholder hidden" id="modalPreviewPlaceholder">
+            <div class="placeholder-icon">📄</div>
+            <p id="modalPlaceholderText">暂不支持预览该类型</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

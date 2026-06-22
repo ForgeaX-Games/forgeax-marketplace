@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-character",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": { "zh": "角色编辑器", "en": "Character Editor" },
+  "description": {
+    "zh": "角色概念设计 · 立绘 / 三视图 / 角色画像，产出物 (manifest + portrait/turnaround) 下游接入动画工作台。",
+    "en": "Character concept design — portrait / turnaround. Outputs (manifest + portrait/turnaround) feed downstream into the Animation workbench."
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "⚒️",
+  "keywords": ["character", "portrait", "turnaround", "concept-design", "image-gen"],
+
+  "provides": {
+    "workbench": {
+      "id": "wb-character",
+      "lens": "by-category",
+      "icon": "⚒️",
+      "position": 100,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "width": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "matchProduces": [
+        "**/.forgeax/games/*/characters/**"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-character-designer-2d"
+    },
+    "skills": [
+      {
+        "id": "wb-character:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/character"
+      }
+    ],
+    "tools": [
+      {
+        "id": "character:generate-portrait",
+        "args": "./schemas/generate-portrait.args.json",
+        "returns": "./schemas/generate-portrait.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "立绘 · 主用 Seedream 备 Gemini nano-banana / Azure GPT-Image; 可选三视图" }
+      },
+      {
+        "id": "character:generate-turnaround",
+        "args": "./schemas/generate-turnaround.args.json",
+        "returns": "./schemas/generate-turnaround.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "三视图 · 正面 / 侧面 / 背面 (内部 _turnaround 管线)" }
+      },
+      {
+        "id": "character:list",
+        "args": "./schemas/list-characters.args.json",
+        "returns": "./schemas/list-characters.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "列出指定 game slug 下的角色资产清单" }
+      },
+      {
+        "id": "character:get",
+        "args": "./schemas/get-character.args.json",
+        "returns": "./schemas/get-character.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "读取单角色完整 manifest + asset url" }
+      },
+      {
+        "id": "character:rename",
+        "args": "./schemas/rename-character.args.json",
+        "returns": "./schemas/rename-character.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "重命名角色 (修改 manifest.name)" }
+      },
+      {
+        "id": "character:save-render-config",
+        "args": "./schemas/save-render-config.args.json",
+        "returns": "./schemas/save-render-config.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "保存角色渲染参数 (位置/缩放/色键) 为项目级配置 (P4 funnel)" }
+      },
+      {
+        "id": "character:save-spine-session",
+        "args": "./schemas/save-spine-session.args.json",
+        "returns": "./schemas/save-spine-session.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "保存 Spine 拆件绑骨编辑会话快照到磁盘 (P4 funnel)" }
+      },
+      {
+        "id": "character:publish-character",
+        "args": "./schemas/publish-character.args.json",
+        "returns": "./schemas/publish-character.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "发布像素角色 atlas+manifest 到 docker compose 共享卷 (P4 funnel)" }
+      },
+      {
+        "id": "character:publish-to-workspace-game",
+        "args": "./schemas/publish-to-workspace-game.args.json",
+        "returns": "./schemas/publish-to-workspace-game.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "发布角色到指定 workspace 游戏目录 (P4 funnel)" }
+      },
+      {
+        "id": "character:merge-skills-to-workspace-game",
+        "args": "./schemas/merge-skills-to-workspace-game.args.json",
+        "returns": "./schemas/merge-skills-to-workspace-game.returns.json",
+        "exposedToAI": false,
+        "description": { "zh": "把 VFX 管线产出的技能合并入 workspace 游戏 character.manifest.json (P4 funnel)" }
+      }
+    ],
+    "events": [
+      { "name": "character.portrait.generated" },
+      { "name": "character.sprite.generated" },
+      { "name": "character.pixel.generated" },
+      { "name": "character.spine.generated" },
+      { "name": "character.vfx.generated" },
+      { "name": "character.monster.generated" },
+      { "name": "character.video.generated" },
+      { "name": "character.turnaround.generated" },
+      { "name": "character.vehicle.generated" },
+      { "name": "character.renamed" },
+      { "name": "character.quota-exceeded" }
+    ],
+    "surfaces": [
+      {
+        "id": "wb-character.list",
+        "schema": "./schemas/surface-list.schema.json",
+        "actions": [
+          { "id": "list",   "exposedToAI": true,  "permission": "fs:read:.forgeax/games/{slug}/characters/**" },
+          { "id": "get",    "exposedToAI": true,  "permission": "fs:read:.forgeax/games/{slug}/characters/**" },
+          { "id": "rename", "exposedToAI": true,  "permission": "fs:write:.forgeax/games/{slug}/characters/**", "requireConfirm": "destructive" },
+          { "id": "select", "exposedToAI": false }
+        ]
+      },
+      {
+        "id": "wb-character.create",
+        "schema": "./schemas/surface-create.schema.json",
+        "actions": [
+          { "id": "generate-portrait",   "exposedToAI": true, "permission": "model:image:concept-art" },
+          { "id": "generate-turnaround", "exposedToAI": true, "permission": "model:image:concept-art" }
+        ]
+      }
+    ]
+  },
+
+  "consumes": {
+    "models": [
+      { "channel": "image", "role": "concept-art" },
+      { "channel": "image", "role": "sprite-frame" },
+      { "channel": "image", "role": "pixel-art" },
+      { "channel": "video", "role": "character-clip" },
+      { "channel": "text", "role": "reasoning" }
+    ]
+  },
+
+  "entry": {
+    "backend": "./server/tool-handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15173,
+      "readyProbe": "/",
+      "dev": { "watch": true, "hmr": true },
+      "embeddedAlso": true
+    }
+  },
+
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/characters/**",
+    "fs:write:.forgeax/games/{slug}/characters/**",
+    "fs:read:.forgeax/games/{slug}/playground/**",
+    "fs:write:.forgeax/games/{slug}/playground/**",
+    "model:image:concept-art",
+    "model:image:sprite-frame",
+    "model:image:pixel-art",
+    "model:video:character-clip",
+    "model:text:reasoning",
+    "net:ark.cn-beijing.volces.com",
+    "net:generativelanguage.googleapis.com",
+    "emit:character.*"
+  ],
+
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "GOOGLE_GEN_AI_KEY",
+    "CLAUDE_API_KEY",
+    "CLAUDE_API_BASE",
+    "FORGEAX_LLM_PROXY_URL",
+    "AZURE_GPT_IMAGE_API_KEY",
+    "AZURE_GPT_IMAGE_KEY",
+    "AZURE_GPT_IMAGE_ENDPOINT",
+    "AZURE_GPT_IMAGE_DEPLOYMENT",
+    "ARK_IMAGE_KEY",
+    "SEEDREAM_API_KEY",
+    "LITELLM_PROXY_BASE_URL",
+    "LITELLM_PROXY_KEY",
+    "LITELLM_PROXY_IMAGE_MODEL"
+  ],
+
+  "hot": false,
+  "experimental": true,
+  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+}

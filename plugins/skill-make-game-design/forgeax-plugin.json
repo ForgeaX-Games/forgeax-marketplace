@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/skill-make-game-design",
+  "version": "0.1.0",
+  "kind": "skill",
+  "displayName": {
+    "zh": "做游戏设计",
+    "en": "Make Game Design"
+  },
+  "description": {
+    "zh": "纯 skill plugin (modules/02 §359-§384) · 暴露 /make-game-design slash 命令,引导 cc-coder 系列 agent 在 30 分钟内从一句话愿景产出可玩 demo 的最小设计文档 (玩法 / 数值 / 角色 / 章节)。",
+    "en": "Pure-skill plugin. Exposes /make-game-design slash command that walks cc-coder-style agents through producing a minimal playable design doc (gameplay / numbers / characters / chapters) from a one-line vision in ~30 minutes."
+  },
+  "provides": {
+    "skills": [
+      {
+        "id": "make-game-design",
+        "entry": "./skills/make-game-design/SKILL.md",
+        "trigger": "/make-game-design"
+      }
+    ]
+  },
+  "experimental": true
+}

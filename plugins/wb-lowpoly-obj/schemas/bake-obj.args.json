@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:bake-obj args",
+  "description": "Static T-pose .obj + .mtl fallback. No skeleton, no animation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gameSlug", "slug"],
+  "properties": {
+    "gameSlug": { "type": "string" },
+    "slug": { "type": "string" }
+  }
+}

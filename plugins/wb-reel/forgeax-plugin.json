@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-reel",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": { "zh": "影游工坊", "en": "Reel Studio" },
+  "description": {
+    "zh": "互动影游 (FMV) 编辑器与运行时 · Opus/Gemini 提示词锻造 + GPT-Image 占位图 + Seedance 视频 + QTE + 剧情分支",
+    "en": "Interactive FMV editor & player — prompt forging (Opus/Gemini), GPT-Image keyframes, Seedance video, QTE engine, branch tree"
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "🎬",
+  "keywords": [
+    "reel",
+    "fmv",
+    "interactive-movie",
+    "qte",
+    "branch",
+    "scenario",
+    "video",
+    "seedance"
+  ],
+  "provides": {
+    "workbench": {
+      "id": "reel",
+      "lens": "by-category",
+      "icon": "🎬",
+      "position": 160,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "minWidth": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "matchProduces": [
+        "**/*.scenario.json",
+        "**/scenarios/**",
+        "**/reels/**",
+        ".reel-assets/**",
+        ".reel-scenarios/**"
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-reia"
+    },
+    "skills": [
+      {
+        "id": "wb-reel:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/reel"
+      }
+    ],
+    "tools": [
+      {
+        "id": "reel:list-scenarios",
+        "args": "./schemas/list-scenarios.args.json",
+        "returns": "./schemas/list-scenarios.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出本机已存的所有剧本 (Scenario) 元数据",
+          "en": "List metadata of all scenarios persisted on this machine"
+        }
+      },
+      {
+        "id": "reel:get-scenario",
+        "args": "./schemas/get-scenario.args.json",
+        "returns": "./schemas/get-scenario.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取指定剧本的完整 JSON",
+          "en": "Read full JSON of a scenario by id"
+        }
+      },
+      {
+        "id": "reel:save-scenario",
+        "args": "./schemas/save-scenario.args.json",
+        "returns": "./schemas/save-scenario.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "新建/覆盖一份剧本",
+          "en": "Create or overwrite a scenario"
+        }
+      },
+      {
+        "id": "reel:list-assets",
+        "args": "./schemas/list-assets.args.json",
+        "returns": "./schemas/list-assets.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出当前 .reel-assets/ 媒体库（图/视频）",
+          "en": "List asset records in .reel-assets/ (images & videos)"
+        }
+      },
+      {
+        "id": "reel:generate-video",
+        "args": "./schemas/generate-video.args.json",
+        "returns": "./schemas/generate-video.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为一个或多个场景生成视频（必须带 sceneId）。shot-aware：已分镜场(scene.shots≥2)逐镜出片送生成队列(后台并发、不挡剪辑)、各镜写 shot.videoMediaRef、Player 按 shot 切镜；未分镜则回落整场一条绑 scene.media。投递到工坊队列由工作台走浏览器内管线、刷新可接盘。工作台必须打开。提交后立即返回，进度在 forge 对话；完成后可用 reel:get-scenario 查 shot.videoMediaRef / scene.media 确认。",
+          "en": "Generate video(s) for one or more scenes (sceneId required). Shot-aware: storyboarded scenes (scene.shots>=2) produce one clip per shot via the generation queue (concurrent background, never blocks editing), writing each shot.videoMediaRef (Player cuts between shots); un-storyboarded scenes fall back to a single whole-scene clip bound to scene.media. Enqueued to the workbench (must be open); survives reloads. Returns immediately; progress in the forge chat; confirm via reel:get-scenario."
+        }
+      },
+      {
+        "id": "reel:get-video-task",
+        "args": "./schemas/get-video-task.args.json",
+        "returns": "./schemas/get-video-task.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "查询指定 Seedance 任务状态",
+          "en": "Get status of a Seedance video task"
+        }
+      },
+      {
+        "id": "reel:import-from-narrative",
+        "args": "./schemas/import-from-narrative.args.json",
+        "returns": "./schemas/import-from-narrative.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "从叙事管线 (wb-narrative) 产出转入影游 Scenario，支持按里程碑增量导入（M2 三幕大纲/M3 剧情树/M4 剧本），同 runId 多次导入合并为同一本",
+          "en": "Import a narrative pipeline run into a Reel Scenario; supports milestone-incremental import (M2 outline / M3 branch tree / M4 screenplay), merging repeated imports of the same runId into one scenario"
+        }
+      },
+      {
+        "id": "reel:forge-script",
+        "args": "./schemas/forge-script.args.json",
+        "returns": "./schemas/forge-script.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "提交剧本/想法给影游工坊的内置锻造管线处理（工坊会自动走 梗概→人物→大纲→剧情树 流程）",
+          "en": "Submit script or idea to the workbench's built-in forge pipeline (auto-processes through synopsis → characters → outline → story tree)"
+        }
+      },
+      {
+        "id": "reel:generate-storyboard",
+        "args": "./schemas/generate-storyboard.args.json",
+        "returns": "./schemas/generate-storyboard.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "把节点拆成多个镜头(分镜)并写回 scene.shots[]、在时间轴铺成可预览站位。逐节点分镜化生产的第一步——出关键帧/视频前必须先拆分镜。scope='scene'(默认,需 sceneId)拆单节点；scope='all' 整本铺底(跨场一致性)。投递到工坊队列,工作台必须打开。完成后用 reel:get-scenario 查 scene.shots 镜头数确认",
+          "en": "Split a node into multiple shots (storyboard) → write scene.shots[] and lay them out as previewable placeholders on the timeline. The FIRST step of per-node production — required before generating keyframes/videos. scope='scene' (default, needs sceneId) splits one node; scope='all' storyboards the whole episode (cross-scene consistency). Enqueued to the workbench (must be open). Confirm via reel:get-scenario (scene.shots count)"
+        }
+      },
+      {
+        "id": "reel:produce-node",
+        "args": "./schemas/produce-node.args.json",
+        "returns": "./schemas/produce-node.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "一键产出一个或多个节点：拆分镜→逐镜关键帧→逐镜出片,按序跑完整条生产线。按用户原话选节点:『只生成第一个』→scope=firstN count=1;『前三个』→scope=firstN count=3;『全部』→scope=all;也可 sceneId 单个或 sceneIds 列表。多节点沿主线顺序推进保证跨节点一致性。幂等(已完成阶段/镜自动跳过)、可 stages 指定阶段、force 强制重跑。视频逐镜后台并发出片不挡剪辑,对话给节点级树状进度。逐节点产出的总指挥入口；想精细控制可单独调 generate-storyboard/keyframes/video。工作台必须打开",
+          "en": "One-click production for one OR MORE nodes: storyboard → per-shot keyframes → per-shot video, in order. Pick nodes from the user's words: '只生成第一个/first node' -> scope=firstN count=1; '前三个/first three' -> scope=firstN count=3; '全部/all' -> scope=all; or sceneId (one) / sceneIds (list). Multiple nodes run sequentially along the mainline for cross-node consistency. Idempotent (skips done stages/shots), with optional stages subset and force re-run. Videos render per-shot in a concurrent background queue (never blocks editing); the forge chat shows a node-level tree progress. The orchestrator entry for per-node production; for fine control call generate-storyboard/keyframes/video individually. Workbench must be open"
+        }
+      },
+      {
+        "id": "reel:generate-keyframes",
+        "args": "./schemas/generate-keyframes.args.json",
+        "returns": "./schemas/generate-keyframes.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为某个节点逐镜各出一张关键帧(写 shot.keyframeMediaRef,keyShot 同步 scene.media),时间轴每个分镜站位显示缩略图。需先 reel:generate-storyboard 拆镜。区别于 generate-visuals(只生成人/景/物锚点)。投递到工坊队列,工作台必须打开。幂等(已有关键帧的镜默认跳过,force=true 重生)。完成后用 reel:get-scenario 查 shot.keyframeMediaRef 确认",
+          "en": "Generate one keyframe per shot of a scene (writes shot.keyframeMediaRef; key shot syncs scene.media); each timeline shot placeholder then shows a thumbnail. Requires storyboarding first (reel:generate-storyboard). Distinct from generate-visuals (anchors only). Enqueued to the workbench (must be open). Idempotent (skip already-generated shots unless force=true). Confirm via reel:get-scenario (shot.keyframeMediaRef)"
+        }
+      },
+      {
+        "id": "reel:generate-visuals",
+        "args": "./schemas/generate-visuals.args.json",
+        "returns": "./schemas/generate-visuals.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为当前剧本提取视觉锚点(场景/道具)并生成参考图：角色定妆照 + 场景基准图(多角度) + 关键道具图。非破坏性（不新建/替换剧本、不碰分镜关键帧）。剧本就绪后调用",
+          "en": "Extract visual anchors (locations/props) for the active scenario and generate reference images: character turnaround sheets + location base images (multi-angle) + key prop images. Non-destructive (never recreates the scenario, never touches shot keyframes). Call after the script is ready"
+        }
+      },
+      {
+        "id": "reel:generate-auditions",
+        "args": "./schemas/generate-auditions.args.json",
+        "returns": "./schemas/generate-auditions.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为角色生成「试镜视频 + 音色」：以每个角色的定妆照为参考，用 Seedance 生成 ~10s/3:4 单人胸像试镜视频(角色本人念白)，并把整段音轨抽成 MP3 绑为该角色音色。后续该角色镜头视频会自动用这段音色作 reference_audio,保证全剧嗓音一致。前置:角色需先有定妆照(reel:generate-visuals)。scope='all'(默认,全部有定妆照的角色,缺失才生成);scope='characters'+characterIds 指定角色;force 覆盖重生。投递工坊队列,工作台必须打开,进度见 forge 对话",
+          "en": "Generate an audition video + voice sample per character: using each character's turnaround sheet as reference, Seedance creates a ~10s/3:4 head-and-shoulders audition video (the character speaking a line), and the full audio track is extracted to an MP3 bound as that character's voice sample. Later, that character's shot videos automatically use this sample as reference_audio for a consistent voice across the film. Prerequisite: characters must already have turnaround sheets (reel:generate-visuals). scope='all' (default; every character with a turnaround, missing-only) or scope='characters' + characterIds; force re-generates existing ones. Enqueued to the workbench (must be open); progress shows in the forge chat"
+        }
+      }
+    ],
+    "surfaces": [
+      {
+        "id": "wb-reel.scenario",
+        "schema": "./schemas/surface-scenario.schema.json",
+        "actions": [
+          { "id": "load-scenario", "exposedToAI": true },
+          { "id": "save-scenario", "exposedToAI": true },
+          { "id": "switch-tab",    "exposedToAI": true }
+        ]
+      }
+    ]
+  },
+  "consumes": {
+    "models": [
+      { "channel": "text",  "role": "reasoning" },
+      { "channel": "image", "role": "still" },
+      { "channel": "video", "role": "kinetic" }
+    ]
+  },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend":  "./server/tool-handlers.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15175,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "permissions": [
+    "fs:read:.reel-assets/**",
+    "fs:write:.reel-assets/**",
+    "fs:read:.reel-scenarios/**",
+    "fs:write:.reel-scenarios/**",
+    "fs:read:.forgeax/games/{slug}/reel/**",
+    "fs:write:.forgeax/games/{slug}/reel/**",
+    "model:text:reasoning",
+    "model:image:still",
+    "model:video:kinetic",
+    "net:openspeech.bytedance.com",
+    "net:api.minimaxi.com",
+    "net:ark.cn-beijing.volces.com",
+    "emit:reel.*"
+  ],
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "CLAUDE_API_KEY",
+    "GPT_IMAGE_API_KEY",
+    "ARK_API_KEY",
+    "VIDEO_ENDPOINT_ID",
+    "DOUBAO_TTS_KEY",
+    "MINIMAX_MUSIC_KEY",
+    "FORGEAX_SERVER_URL",
+    "FORGEAX_SERVER_PORT",
+    "FACE_MASK_SERVICE_URL",
+    "PORT_REEL_STUDIO",
+    "KS_LLM_KEY_PATH"
+  ],
+  "experimental": true
+}

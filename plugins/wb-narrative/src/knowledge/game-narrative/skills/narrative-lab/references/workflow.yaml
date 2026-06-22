@@ -1,0 +1,136 @@
+# narrative-lab 工作流定义
+# 用途: 展示 AI 叙事实验室的闭环流程，供 Agent 理解执行顺序和数据流
+
+name: narrative-lab-pipeline
+version: "1.0"
+description: AI 叙事实验室 - 从互联网采风到总策划案的自动化工作流
+
+# 工作流状态（全局上下文）
+state:
+  material_pool: []
+  creative_drafts: []
+  evaluated_concepts: []
+
+# 工作流步骤定义
+steps:
+  - id: scrape_and_parse
+    name: 采风与解析
+    module: TrendScraper
+    description: 识别和分析输入素材中的热点元素
+    input:
+      - name: raw_data
+        type: string
+        description: 原始素材内容（互联网梗、新闻、趋势话题等）
+    output:
+      - name: parsed_material
+        type: object
+        schema:
+          summary: string      # 内容摘要
+          tags: array          # 标签列表 ["#互联网梗", "#社会事件"]
+          uniqueness_score: number  # 独特性评分 (1-10)
+    side_effect: 将结果追加到 state.material_pool
+
+  - id: brainstorm_reconstruct
+    name: 创意重构拼接
+    module: CreativeRecombinator
+    description: 将素材与经典叙事原型进行跨领域拼接
+    depends_on: [scrape_and_parse]
+    input:
+      - name: materials
+        type: array
+        source: state.material_pool
+    output:
+      - name: concept
+        type: object
+        schema:
+          name: string         # 创意名称
+          logic: string        # 拼接逻辑说明
+          hook: string         # 核心 Hook / 卖点
+    side_effect: 将结果追加到 state.creative_drafts
+
+  - id: evaluate
+    name: 双重评估
+    module: DualGateEvaluator
+    description: 从创意性、可落地性、场景匹配三维度评估
+    depends_on: [brainstorm_reconstruct]
+    input:
+      - name: concept
+        type: object
+        source: steps.brainstorm_reconstruct.output.concept
+    output:
+      - name: evaluation
+        type: object
+        schema:
+          creativity: number      # 创意分 (1-10)
+          feasibility: number     # 可落地性 (1-10)
+          scenes: array           # 适用场景 ["独立游戏", "互动影游"]
+          status: string          # "Approved" | "NeedsRevision" | "Rejected"
+    side_effect: 将 {concept, evaluation} 追加到 state.evaluated_concepts
+    branching:
+      - condition: status == "NeedsRevision"
+        goto: brainstorm_reconstruct
+      - condition: status == "Rejected"
+        action: terminate_with_feedback
+
+  - id: generate_gdd
+    name: 总策划案生成
+    module: GDDGenerator
+    description: 将通过评估的创意转化为专业游戏策划案
+    depends_on: [evaluate]
+    condition: evaluate.output.status == "Approved"
+    input:
+      - name: evaluated_concept
+        type: object
+        source: state.evaluated_concepts[0]
+    output:
+      - name: gdd
+        type: document
+        format: markdown
+        sections:
+          - 核心创意
+          - 评估摘要
+          - 适用场景
+          - 世界观大纲
+          - 核心玩法循环
+          - 商业化潜力
+
+# 流程图 (Mermaid 语法，可直接渲染)
+flowchart: |
+  graph TD
+    A[scrape_and_parse<br/>采风与解析] --> B[brainstorm_reconstruct<br/>创意重构拼接]
+    B --> C{evaluate<br/>双重评估}
+    C -->|Approved| D[generate_gdd<br/>总策划案生成]
+    C -->|NeedsRevision| B
+    C -->|Rejected| E[终止并反馈]
+    D --> F[输出 GDD]
+
+# 示例执行
+example:
+  input:
+    raw_data: "最近流行的'赛博打工人'梗与某传记中的隐居生活..."
+  trace:
+    - step: scrape_and_parse
+      output:
+        summary: "最近流行的'赛博打工人'梗与某传记中的隐居生活..."
+        tags: ["#互联网梗", "#社会事件"]
+        uniqueness_score: 7
+    - step: brainstorm_reconstruct
+      output:
+        name: "拼接创意-X"
+        logic: "将[素材A]的社会讽刺与[素材B]的科幻设定拼接"
+        hook: "如果你的记忆可以像'梗'一样被全网转发？"
+    - step: evaluate
+      output:
+        creativity: 9
+        feasibility: 6
+        scenes: ["独立游戏", "互动影游"]
+        status: "Approved"
+    - step: generate_gdd
+      output: |
+        # 游戏叙事总策划案: 拼接创意-X
+        ## 1. 核心创意
+        如果你的记忆可以像'梗'一样被全网转发？
+        ## 2. 评估摘要
+        创意分: 9, 可落地性: 6
+        ## 3. 适用场景
+        独立游戏, 互动影游

@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/_template",
+  "version": "0.0.1",
+  "kind": "workbench",
+  "displayName": { "zh": "插件模板", "en": "Plugin Template" },
+  "description": {
+    "zh": "三栏 split-surface 插件最小骨架。新建 plugin 时 cp 一份改名即可。",
+    "en": "Minimum split-surface plugin scaffold. Copy & rename to start a new plugin."
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "🧩",
+  "hidden": true,
+  "keywords": ["template", "scaffold", "split-surface"],
+
+  "provides": {
+    "workbench": {
+      "id": "wb-template",
+      "hidden": true,
+      "lens": "by-category",
+      "icon": "🧩",
+      "position": 999,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "width": 320, "scrollable": true  },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "bus": { "surfaceId": "template" },
+      "matchProduces": []
+    },
+    "skills": [
+      {
+        "id": "wb-template:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/template"
+      }
+    ],
+    "tools": [
+      {
+        "id": "template:echo",
+        "args": "./schemas/echo.args.json",
+        "returns": "./schemas/echo.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "回显参数 + 写一行到 surface snapshot" }
+      }
+    ]
+  },
+
+  "entry": {
+    "backend":  "./server/router.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 7820,
+      "readyProbe": "/",
+      "dev": { "watch": true, "hmr": true },
+      "embeddedAlso": true
+    }
+  }
+}

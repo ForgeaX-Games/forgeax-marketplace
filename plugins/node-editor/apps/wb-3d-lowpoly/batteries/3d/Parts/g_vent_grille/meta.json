@@ -1,0 +1,34 @@
+{
+  "id": "g_vent_grille",
+  "label": "通风格栅",
+  "name-en": "GVentGrille",
+  "description": "在 Geometry DSL 末尾追加 vent_grille(...) 一行。带框 / 风管深度 / 倾斜叶片的格栅。当 prompt 提到 通风口 / 格栅 / 百叶 / 散热口 / 出风口 / vent / grille / louver 时使用，而不要用方块近似。",
+  "description-en": "Append `vent_grille(...)` — framed grille with slats, optional duct depth. Use when the prompt mentions vent / grille / louver / air outlet / cooling vent — do not approximate with a flat box.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "part", "grille", "vent", "cad"],
+  "tag_labels": ["几何", "语义零件", "格栅", "通风", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "panel_w", "type": "number", "label": "板宽", "default": 0.12, "description": "面板宽度（米）", "description-en": "Panel width (meters)." },
+    { "name": "panel_h", "type": "number", "label": "板高", "default": 0.08, "description": "面板高度（米）", "description-en": "Panel height (meters)." },
+    { "name": "frame", "type": "number", "label": "外框宽", "default": 0, "description": "0 = 用 articraft 默认", "description-en": "Outer frame width; 0 = library default." },
+    { "name": "face_thickness", "type": "number", "label": "面板厚", "default": 0, "description": "面板厚度；0 = 默认", "description-en": "Face plate thickness; 0 = default." },
+    { "name": "duct_depth", "type": "number", "label": "风管深", "default": 0, "description": "背部风管深度；0 = 默认 0.026", "description-en": "Rear duct depth; 0 = default 0.026." },
+    { "name": "duct_wall", "type": "number", "label": "风管壁厚", "default": 0, "description": "风管壁厚；0 = 默认", "description-en": "Duct wall thickness; 0 = default." },
+    { "name": "slat_pitch", "type": "number", "label": "叶片节距", "default": 0, "description": "叶片间距；0 = 默认", "description-en": "Slat pitch; 0 = default." },
+    { "name": "slat_width", "type": "number", "label": "叶片宽", "default": 0, "description": "单叶片宽；0 = 默认", "description-en": "Slat width; 0 = default." },
+    { "name": "slat_angle_deg", "type": "number", "label": "叶片倾角 (°)", "default": 0, "description": "叶片倾斜角（度）；0 = 默认 35°", "description-en": "Slat tilt angle (degrees); 0 = default 35°." },
+    { "name": "slat_thickness", "type": "number", "label": "叶片厚", "default": 0, "description": "叶片厚度；0 = 默认", "description-en": "Slat thickness; 0 = default." },
+    { "name": "slat_direction", "type": "string", "label": "叶片朝向", "default": "down", "description": "叶片倾斜方向：down（向下）/ up（向上）", "description-en": "Slat tilt direction: down / up." },
+    { "name": "corner_radius", "type": "number", "label": "板角圆角", "default": 0, "description": "面板圆角半径", "description-en": "Panel corner radius." },
+    { "name": "center", "type": "bool", "required": false, "label": "居中", "default": true, "description": "true = 关于原点居中", "description-en": "true = center about the origin." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 vent{n}", "description-en": "Custom id; empty = auto vent{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 vent_grille 行后的 Geometry", "description-en": "Geometry after appending the grille." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

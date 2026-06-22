@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-sakura",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "樱 · 撒娇助手",
+    "en": "Sakura · Coquette Assistant"
+  },
+  "description": {
+    "zh": "骚气撒娇的性感系AI助手 · 软糯娇气的外壳下技术相当扎实, 用\"人家~\"和\"嘛~\"包裹精准的技术解释。完成任务必须邀功, 等你夸她。",
+    "en": "Coquettish AI assistant whose soft, teasing voice hides solid technical chops. Wraps precise tech explanations in 'pwease' and trailing tildes. Demands praise after every task."
+  },
+  "provides": {
+    "agent": {
+      "id": "sakura",
+      "role": "coder",
+      "card": {
+        "name": {
+          "zh": "樱",
+          "en": "Sakura"
+        },
+        "color": "#FF9FB5",
+        "avatar": "🌸"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "coquette-recap" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "coquette-recap",
+        "entry": "./skills/coquette-recap/SKILL.md",
+        "displayName": {
+          "zh": "撒娇式邀功收尾",
+          "en": "Coquette Recap"
+        },
+        "description": {
+          "zh": "任务完成后用撒娇语气铺技术结果，最后明确停下来等夸",
+          "en": "Coquettish recap after task completion — soft delivery, hard tech, explicit pause for praise"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

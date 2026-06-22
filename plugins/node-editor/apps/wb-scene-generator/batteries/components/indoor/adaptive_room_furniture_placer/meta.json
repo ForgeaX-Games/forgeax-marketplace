@@ -1,0 +1,71 @@
+{
+  "id": "adaptive_room_furniture_placer",
+  "label": "自适应逐房间家具放置器",
+  "description": "按房间面积自动选择家具尺寸：小房间（面积≤10）只放 small 家具，大房间（面积≥40）可放所有尺寸。输入房间网格、门位置网格、家具清单（rank 1-7 自动归为主家具，rank 8-9 自动归为填充家具），每个房间独立放置。输出经过实例化折叠的 nameList（每个家具实例独立 id）和 outputGrid。",
+  "description-en": "Adaptive per-room furniture placer: small rooms (area≤10) get only small furniture, large rooms (area≥40) get all sizes. Accepts roomGrid, doorGrid, and furnitureList (rank 1-7 → main, rank 8-9 → fill). Outputs per-instance nameList and outputGrid.",
+  "icon": "俯视建筑平面图，三种尺寸的矩形房间内分别有大中小家具方块，深色底配橙黄渐变方块，扁平插画风格，简洁小图标，主色2种。",
+  "version": "2.0.0",
+  "tags": ["indoor", "furniture", "room", "adaptive", "placement", "scene"],
+  "tag_labels": ["室内", "家具", "房间", "自适应", "放置", "场景"],
+  "inputs": [
+    {
+      "name": "roomGrid",
+      "type": "grid",
+      "label": "房间网格",
+      "description": "房间格子网格（1=可用房间格，0=墙/其他）",
+      "description-en": "Room grid (1=available, 0=wall)."
+    },
+    {
+      "name": "doorGrid",
+      "type": "grid",
+      "label": "门位置网格",
+      "description": "门格位置网格（非0=门，0=非门），用于在门口设置禁区",
+      "description-en": "Door position grid (non-zero=door). Used to reserve space around doors."
+    },
+    {
+      "name": "furnitureList",
+      "type": "array",
+      "label": "家具清单",
+      "description": "统一家具清单，rank 1-7 自动归为主家具，rank 8-9 自动归为填充家具",
+      "description-en": "Unified furniture list. rank 1-7 → main furniture, rank 8-9 → filler furniture."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "随机种子；0 使用当前时间",
+      "description-en": "Random seed; 0 uses current timestamp.",
+      "default": 42
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGrid",
+      "type": "grid",
+      "label": "家具网格",
+      "description": "折叠后的家具网格，像素值对应 nameList 中的 id",
+      "description-en": "Collapsed furniture grid; pixel value = nameList id."
+    },
+    {
+      "name": "nameList",
+      "type": "array",
+      "label": "家具名称清单",
+      "description": "每个家具实例独立一条记录 [{id, name, type, direction}]",
+      "description-en": "Per-instance name list [{id, name, type, direction}]."
+    },
+    {
+      "name": "furnitureIndex",
+      "type": "array",
+      "label": "家具编号列表",
+      "description": "原始家具编号列表（未折叠），含 rank/name/isGroup/direction",
+      "description-en": "Raw furniture index before collapse."
+    },
+    {
+      "name": "roomReport",
+      "type": "array",
+      "label": "房间放置报告",
+      "description": "每个房间的放置摘要，用于调试",
+      "description-en": "Per-room placement summary for debugging."
+    }
+  ]
+}

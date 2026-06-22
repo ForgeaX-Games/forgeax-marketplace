@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Hyperbolic gear battery">
+  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
+  <path d="M7 6h10c-2 2-2 4-2 6s0 4 2 6H7c2-2 2-4 2-6s0-4-2-6Z" fill="#b7ff5a" fill-opacity=".16" stroke="#e7f5ee" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M9 6.4 8 8.5M11 6.2 10 8.3M13 6.2 14 8.3M15 6.4 16 8.5M8 15.5 9 17.6M10 15.7 11 17.8M13 15.7 14 17.8M15 15.5 16 17.6" fill="none" stroke="#e7f5ee" stroke-width="1.2" stroke-linecap="round"/>
+</svg>

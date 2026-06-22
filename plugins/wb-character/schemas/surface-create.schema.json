@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-character.create snapshot",
+  "description": "Snapshot of the character create / generate panel: which generation pipeline is currently armed in the UI, the in-progress prompt, and the last generated asset URI.",
+  "type": "object",
+  "properties": {
+    "slug":         { "type": "string" },
+    "armedPipeline": {
+      "type": ["string", "null"],
+      "enum": ["generate-portrait", "generate-sprite-sheet", "generate-pixel", "generate-spine", "generate-vfx", "generate-monster", "generate-video", "generate-turnaround", "generate-vehicle", null],
+      "description": "Which character:generate-* the player has open in the form; null when no form is active"
+    },
+    "draft": {
+      "type": "object",
+      "description": "Free-form draft state of the form (prompt text, style chips, knobs); shape varies per pipeline",
+      "additionalProperties": true
+    },
+    "lastResult": {
+      "type": ["object", "null"],
+      "properties": {
+        "pipeline": { "type": "string" },
+        "uri":      { "type": "string" },
+        "ts":       { "type": "number" }
+      }
+    }
+  },
+  "required": ["slug"]
+}

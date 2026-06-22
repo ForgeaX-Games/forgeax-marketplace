@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-narrative",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": { "zh": "叙事工坊", "en": "Narrative Studio" },
+  "description": {
+    "zh": "AI 驱动的游戏叙事生成管线 · Tier/Mode 双层路由 + Planner 动态选步 · 117 品类 · 9 种管线模板",
+    "en": "AI-driven narrative pipeline with tier/mode routing + dynamic planner, 117 genres, 9 pipeline templates"
+  },
+  "icon": "📖",
+  "provides": {
+    "workbench": {
+      "id": "narrative",
+      "lens": "by-category",
+      "icon": "📖",
+      "position": 140,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "minWidth": 320, "defaultWidth": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
+      },
+      "matchProduces": ["**/*_narrative.md", "**/dialog/**", "**/*_branch_tree.json"]
+    },
+    "skills": [
+      {
+        "id": "wb-narrative:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/narrative"
+      }
+    ],
+    "tools": [
+      {
+        "id": "narrative:start-pipeline",
+        "args": "./schemas/start-pipeline.args.json",
+        "returns": "./schemas/start-pipeline.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "启动叙事管线 · 支持 117 品类 × 9 模板 · 自动 Tier/Mode 路由" }
+      },
+      {
+        "id": "narrative:get-run-status",
+        "args": "./schemas/get-run-status.args.json",
+        "returns": "./schemas/get-run-status.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "查询管线运行状态 · 步骤进度 · 结果获取" }
+      },
+      {
+        "id": "narrative:list-runs",
+        "args": "./schemas/list-runs.args.json",
+        "returns": "./schemas/list-runs.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "列出历史运行记录 · 支持断点续跑与分叉重生成" }
+      },
+      {
+        "id": "narrative:export-result",
+        "args": "./schemas/export-result.args.json",
+        "returns": "./schemas/export-result.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "导出叙事结果到项目目录" }
+      },
+      {
+        "id": "narrative:cancel-run",
+        "args": "./schemas/cancel-run.args.json",
+        "returns": "./schemas/cancel-run.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "取消正在运行的管线" }
+      },
+      {
+        "id": "narrative:regenerate-step",
+        "args": "./schemas/regenerate-step.args.json",
+        "returns": "./schemas/regenerate-step.returns.json",
+        "exposedToAI": true,
+        "description": { "zh": "重生成指定步骤 · 支持用户指令注入与节点级过滤" }
+      },
+      {
+        "id": "narrative:list-genres",
+        "exposedToAI": true,
+        "description": { "zh": "列出全部游戏品类(按大类分组,含 code/名称/tier/叙事比重/模板),选 genreCode 前先查" },
+        "args": { "type": "object", "properties": {} }
+      },
+      {
+        "id": "narrative:list-modes",
+        "exposedToAI": true,
+        "description": { "zh": "列出各 tier 可用的运行模式/模板及步骤数" },
+        "args": { "type": "object", "properties": {} }
+      },
+      {
+        "id": "narrative:list-files",
+        "exposedToAI": true,
+        "description": { "zh": "列出某次运行(runId 或输出目录名)的全部产出文件" },
+        "args": {
+          "type": "object",
+          "properties": { "runId": { "type": "string", "description": "运行 id 或输出目录名" } },
+          "required": ["runId"]
+        }
+      },
+      {
+        "id": "narrative:read-file",
+        "exposedToAI": true,
+        "description": { "zh": "读取某次运行下指定相对路径的产出文件内容(json/文本,自动截断防爆上下文)" },
+        "args": {
+          "type": "object",
+          "properties": {
+            "runId": { "type": "string", "description": "运行 id 或输出目录名" },
+            "filePath": { "type": "string", "description": "相对该运行目录的文件路径,如 narrative.md / characters/hero.md" }
+          },
+          "required": ["runId", "filePath"]
+        }
+      },
+      {
+        "id": "narrative:get-story-tree",
+        "exposedToAI": true,
+        "description": { "zh": "读取某次运行的叙事树结构(分层节点),用于把握整体故事骨架" },
+        "args": {
+          "type": "object",
+          "properties": { "dir": { "type": "string", "description": "运行输出目录名(checkpoint 所在)" } },
+          "required": ["dir"]
+        }
+      },
+      {
+        "id": "narrative:get-pipeline-nodes",
+        "exposedToAI": true,
+        "description": { "zh": "读取正在运行的管线各步骤节点及状态(仅对内存中活动 run 有效)" },
+        "args": {
+          "type": "object",
+          "properties": { "runId": { "type": "string", "description": "活动运行 id" } },
+          "required": ["runId"]
+        }
+      },
+      {
+        "id": "narrative:load-history",
+        "exposedToAI": true,
+        "description": { "zh": "加载某条历史运行记录的详情(拿到 tier/mode/result 及目录名,供后续续跑/编辑)" },
+        "args": {
+          "type": "object",
+          "properties": { "key": { "type": "string", "description": "历史记录 key(来自 list-runs)" } },
+          "required": ["key"]
+        }
+      },
+      {
+        "id": "narrative:resume-pipeline",
+        "exposedToAI": true,
+        "requireConfirm": "always",
+        "description": { "zh": "从 checkpoint 断点续跑某次未完成的运行(写入同一目录)" },
+        "args": {
+          "type": "object",
+          "properties": {
+            "dir": { "type": "string", "description": "运行输出目录名(含 checkpoint)" },
+            "model": { "type": "string", "description": "可选,覆盖默认 LLM 模型" }
+          },
+          "required": ["dir"]
+        }
+      },
+      {
+        "id": "narrative:get-stale-steps",
+        "exposedToAI": true,
+        "description": { "zh": "给定起始步骤,返回会因其变更而过期、需重生成的下游步骤与字段" },
+        "args": {
+          "type": "object",
+          "properties": {
+            "sourceDir": { "type": "string", "description": "运行输出目录名" },
+            "fromStepId": { "type": "string", "description": "起始步骤 id" }
+          },
+          "required": ["sourceDir", "fromStepId"]
+        }
+      },
+      {
+        "id": "narrative:analyze-impact",
+        "exposedToAI": true,
+        "description": { "zh": "重生成前预判:对若干节点的拟改动做差异+影响分析,返回受影响范围" },
+        "args": {
+          "type": "object",
+          "properties": {
+            "sourceDir": { "type": "string", "description": "运行输出目录名" },
+            "modifications": {
+              "type": "array",
+              "description": "拟改动列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "stepId": { "type": "string" },
+                  "nodeId": { "type": "string" },
+                  "editedContent": { "description": "改后的内容(任意结构)" },
+                  "userInput": { "type": "string", "description": "自然语言改动说明" }
+                },
+                "required": ["stepId"]
+              }
+            }
+          },
+          "required": ["sourceDir", "modifications"]
+        }
+      },
+      {
+        "id": "narrative:get-review",
+        "exposedToAI": true,
+        "description": { "zh": "读取某次运行的评审状态(各步骤 approved/rejected/反馈)" },
+        "args": {
+          "type": "object",
+          "properties": { "dir": { "type": "string", "description": "运行输出目录名" } },
+          "required": ["dir"]
+        }
+      },
+      {
+        "id": "narrative:set-review",
+        "exposedToAI": true,
+        "description": { "zh": "标记某步骤的评审结论(approved/rejected/pending)并附反馈" },
+        "args": {
+          "type": "object",
+          "properties": {
+            "dir": { "type": "string", "description": "运行输出目录名" },
+            "stepId": { "type": "string", "description": "步骤 id" },
+            "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "description": "评审结论" },
+            "feedback": { "type": "string", "description": "可选,评审反馈" },
+            "regenerateRunId": { "type": "string", "description": "可选,关联的重生成 run id" }
+          },
+          "required": ["dir", "stepId", "status"]
+        }
+      }
+    ],
+    "surfaces": [
+      {
+        "id": "wb-narrative.control",
+        "schema": "./schemas/surface-control.schema.json",
+        "actions": [
+          { "id": "start",        "exposedToAI": true },
+          { "id": "cancel",       "exposedToAI": true },
+          { "id": "load-history", "exposedToAI": true }
+        ]
+      },
+      {
+        "id": "wb-narrative.pipeline",
+        "schema": "./schemas/surface-pipeline.schema.json",
+        "actions": [
+          { "id": "regenerate", "exposedToAI": true, "requireConfirm": "always" },
+          { "id": "export",     "exposedToAI": true },
+          { "id": "focus-step", "exposedToAI": false }
+        ]
+      }
+    ]
+  },
+  "consumes": {
+    "models": [
+      { "channel": "text", "role": "reasoning" }
+    ]
+  },
+  "entry": {
+    "frontend": "./viz/dist/index.html",
+    "backend": "./server/tool-handlers.ts",
+    "standalone": {
+      "start": "npm run start",
+      "port": 8900,
+      "readyProbe": "/api/health",
+      "embeddedAlso": true
+    }
+  },
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/narrative/**",
+    "fs:write:.forgeax/games/{slug}/narrative/**",
+    "model:text:reasoning",
+    "net:generativelanguage.googleapis.com",
+    "emit:narrative.*"
+  ],
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "LLM_PROXY_URL",
+    "LITELLM_PROXY_KEY",
+    "NARRATIVE_MODEL",
+    "SMALL_MODEL",
+    "NARRATIVE_PORT",
+    "NARRATIVE_AUTO_DEBUG",
+    "NARRATIVE_AGENT_DEBUG",
+    "NARRATIVE_DISABLE_EVAL"
+  ],
+  "experimental": true
+}

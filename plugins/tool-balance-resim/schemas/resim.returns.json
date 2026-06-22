@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/tool-balance-resim/resim.returns",
+  "title": "balance:resim returns",
+  "description": "Output schema for balance:resim. Validated by the host on tool return (modules/02 §530).",
+  "type": "object",
+  "required": ["winRate", "samples"],
+  "properties": {
+    "winRate": {
+      "type": "number",
+      "description": "Win-rate (teamA / total samples), range [0, 1]",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "samples": {
+      "type": "integer",
+      "description": "Number of completed trials (may be ≤ requested N if aborted)",
+      "minimum": 0
+    },
+    "elapsedMs": {
+      "type": "number",
+      "description": "Wall-clock duration of the resim batch",
+      "minimum": 0
+    },
+    "ci95": {
+      "type": "array",
+      "description": "95% confidence interval [lo, hi] of winRate",
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "byScenarioStep": {
+      "type": "array",
+      "description": "Optional per-step breakdown for diagnostics",
+      "items": {
+        "type": "object",
+        "required": ["step", "winRate"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 0 },
+          "winRate": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

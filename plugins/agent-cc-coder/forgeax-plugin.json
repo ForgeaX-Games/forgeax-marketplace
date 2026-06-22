@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-cc-coder",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "cc-coder",
+    "en": "cc-coder"
+  },
+  "description": {
+    "zh": "通用编码 agent · 接 iori 玩法骨架 / suzu 体验流程 / kotone 剧情大纲,产出可运行的 TS/React/Go/Python 代码。偏好 claude-code CLI,支持多 instance 并行写不同子包。",
+    "en": "Generic coding agent. Takes iori's gameplay pillars, suzu's UX flows, kotone's narrative outlines and turns them into runnable TS/React/Go/Python. Prefers claude-code CLI; multi-instance for parallel package work."
+  },
+  "provides": {
+    "agent": {
+      "id": "cc-coder",
+      "role": "coder",
+      "card": {
+        "name": {
+          "zh": "cc-coder",
+          "en": "cc-coder"
+        },
+        "color": "#1F6FEB",
+        "avatar": "🧑‍💻"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": true,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "implement-feature" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "implement-feature",
+        "entry": "./skills/implement-feature/SKILL.md",
+        "displayName": { "zh": "落地 spec", "en": "Implement Feature" },
+        "description": {
+          "zh": "把一份带验收条件的 spec/任务卡落成可运行代码 + ≥5 case 单测",
+          "en": "Turn an actionable spec into runnable code with ≥5 unit tests"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

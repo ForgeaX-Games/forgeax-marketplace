@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/model-anthropic-text",
+  "version": "0.1.0",
+  "kind": "model-binding",
+  "displayName": {
+    "zh": "Anthropic Text",
+    "en": "Anthropic Text"
+  },
+  "description": {
+    "zh": "text channel 的 Anthropic 厂商绑定 · 默认 reasoning→opus / draft→sonnet / summarize→haiku · 实际 HTTP 调用在 server/src/bus/channels/text.ts,本 plugin 只声明能力清单与 role→model 映射。",
+    "en": "Anthropic vendor binding on the text channel. Defaults: reasoning→opus, draft→sonnet, summarize→haiku. Actual HTTP lives in server/src/bus/channels/text.ts; this plugin only declares capability list + role→model mapping."
+  },
+  "provides": {
+    "modelBinding": {
+      "channel": "text",
+      "vendor": "anthropic",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ],
+      "roles": [
+        "reasoning",
+        "draft",
+        "summarize"
+      ]
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

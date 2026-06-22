@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-agent-persona",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": { "zh": "Agent Persona 编辑器", "en": "Agent Persona Editor" },
+  "description": {
+    "zh": "编辑各 agent 的 persona/zh.md · 列表选 agent + 文本区编辑 + 保存后热重载",
+    "en": "Edit each agent's persona/zh.md — list-pick + textarea + save with hot-reload."
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "📝",
+  "keywords": ["agent", "persona", "editor", "prompt"],
+
+  "provides": {
+    "workbench": {
+      "id": "wb-agent-persona",
+      "icon": "📝",
+      "position": 200,
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left":   { "width": 240, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": true }
+      }
+    }
+  },
+
+  "entry": {
+    "frontend": "./index.html",
+    "standalone": {
+      "start": "true",
+      "port": 0,
+      "readyProbe": "/",
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+
+  "permissions": [
+    "fs:read:packages/marketplace/plugins/agent-*/persona/**",
+    "fs:write:packages/marketplace/plugins/agent-*/persona/**"
+  ],
+
+  "hot": false,
+  "experimental": true,
+  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Rack gear battery">
+  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
+  <path d="M4.5 13V11H6V13H7.5V11H9V13H10.5V11H12V13H13.5V11H15V13H16.5V11H18V13H19.5" fill="none" stroke="#e7f5ee" stroke-width="1.5" stroke-linejoin="round"/>
+  <rect x="4.5" y="13" width="15" height="4" fill="#b7ff5a" fill-opacity=".18" stroke="#e7f5ee" stroke-width="1.5"/>
+</svg>

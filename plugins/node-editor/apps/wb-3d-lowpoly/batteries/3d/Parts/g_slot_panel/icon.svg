@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Slot panel part battery">
+  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
+  <rect x="5" y="6.5" width="14" height="11" rx="1.6" fill="#b7ff5a" fill-opacity=".14" stroke="#e7f5ee" stroke-width="1.6"/>
+  <rect x="8" y="10.5" width="8" height="3" rx="1.5" fill="#10211d" stroke="#e7f5ee" stroke-width="1.5"/>
+</svg>

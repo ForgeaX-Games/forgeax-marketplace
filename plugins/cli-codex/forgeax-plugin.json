@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/cli-codex",
+  "version": "0.1.0",
+  "kind": "cli-provider",
+  "displayName": {
+    "zh": "OpenAI Codex",
+    "en": "OpenAI Codex CLI"
+  },
+  "description": {
+    "zh": "OpenAI codex (@openai/codex) CLI 适配 · spawn `codex exec --json` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/codex/,本 plugin 声明 metadata + Bus 入口。",
+    "en": "OpenAI codex (@openai/codex) CLI adapter. Spawns `codex exec --json` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/codex/; this plugin declares metadata + Bus entry."
+  },
+  "provides": {
+    "cliProvider": {
+      "id": "@forgeax-plugin/cli-codex",
+      "displayName": "OpenAI Codex",
+      "models": [
+        "gpt-5",
+        "gpt-5-codex"
+      ],
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "toolCalls": true,
+        "subAgents": true,
+        "sessions": true
+      },
+      "runner": {
+        "cmd": "codex",
+        "args": [
+          "exec",
+          "--json"
+        ]
+      }
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

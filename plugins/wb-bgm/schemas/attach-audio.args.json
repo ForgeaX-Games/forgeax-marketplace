@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/attach-audio.args",
+  "title": "attach-audio args",
+  "type": "object",
+  "properties": {
+    "assetId": { "type": "string", "description": "资产 id(来自 search-audio)" },
+    "kind": { "type": "string", "enum": ["bgm", "sfx"], "description": "bgm 或 sfx" },
+    "resUrl": { "type": "string", "description": "COS 下载地址(来自 search-audio,勿编造)" },
+    "name": { "type": "string", "description": "曲目名;sfx 建议用稳定短名(如 hit/score)" },
+    "version": { "type": "string", "description": "版本号(来自 search-audio)" },
+    "slug": { "type": "string", "description": "目标游戏 slug(必填):必须显式传入,不自动探测" },
+    "filename": { "type": "string", "description": "落盘文件名;缺省从 name/url 推导" }
+  },
+  "required": ["assetId", "kind", "resUrl", "slug"]
+}

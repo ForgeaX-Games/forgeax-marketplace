@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:get-scenario returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["scenario"],
+  "properties": {
+    "scenario": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "scenes": { "type": "array" }
+      }
+    }
+  }
+}

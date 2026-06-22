@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["anchors"],
+      "description": "What to generate. 'anchors' (default) = extract anchors (locations/props) if missing, then generate character turnaround sheets + location base images (multi-angle) + key prop reference images for the active scenario. Does NOT touch shot keyframes."
+    },
+    "scenarioId": {
+      "type": "string",
+      "description": "Optional target scenario id. If omitted (recommended), runs on the currently active scenario in the workbench."
+    },
+    "force": {
+      "type": "boolean",
+      "description": "If true, regenerate reference images even for entities that already have one. Default false (idempotent: skips entities that already have a reference image)."
+    }
+  },
+  "required": []
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/list-audio.args",
+  "title": "list-audio args",
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string", "description": "目标游戏 slug(必填):必须显式传入,不自动探测" }
+  },
+  "required": ["slug"]
+}

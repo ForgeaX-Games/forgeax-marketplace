@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-cursor-default",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "Cursor Agent 默认助手",
+    "en": "Cursor Agent Default"
+  },
+  "description": {
+    "zh": "Cursor IDE cursor-agent CLI 的开箱即用 persona · 通用编程助手,偏好 auto/Sonnet/GPT-5 通道。",
+    "en": "Out-of-the-box persona for the cursor-agent CLI provider. Generic coding assistant routed via Cursor's auto/Sonnet/GPT-5 backends."
+  },
+  "provides": {
+    "agent": {
+      "id": "cursor-default",
+      "role": "coder",
+      "card": {
+        "name": { "zh": "Cursor", "en": "Cursor" },
+        "color": "#7C3AED",
+        "avatar": "🟣"
+      },
+      "personaFile": "./persona/zh.md",
+      "preferredCliProvider": "@forgeax-plugin/cli-cursor-agent",
+      "defaultLang": "zh",
+      "multiInstance": true
+    }
+  }
+}

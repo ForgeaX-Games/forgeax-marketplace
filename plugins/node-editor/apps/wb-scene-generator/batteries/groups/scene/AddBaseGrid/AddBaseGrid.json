@@ -1,0 +1,449 @@
+{
+  "id": "group_1781266146700_dm7xl",
+  "name": "AddBaseGrid",
+  "nameEn": "AddBaseGrid",
+  "nodes": [
+    {
+      "id": "node-1781265639404-im7p2",
+      "opId": "grid2node",
+      "name": "node-1781264263532-cpe9z",
+      "position": {
+        "x": -2694.6752387086726,
+        "y": 1057.466760570171
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781265639404-nophx",
+      "opId": "rect_grid",
+      "name": "node-1781264265306-g2y15",
+      "position": {
+        "x": -2939.2642237408404,
+        "y": 1198.7363696103555
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781265639404-r5fm6",
+      "opId": "add_child",
+      "name": "node-1781264296514",
+      "position": {
+        "x": -2166.96124706743,
+        "y": 979.3289427573332
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781265639404-uehkz",
+      "opId": "scene_focus_path",
+      "name": "node-1781264349540",
+      "position": {
+        "x": -1814.4659480879072,
+        "y": 1024.361411410226
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781265639404-0l8p4",
+      "opId": "scene_passthrough",
+      "name": "node-1781264369646",
+      "position": {
+        "x": -1814.4659480879072,
+        "y": 936.0315353317278
+      },
+      "params": {}
+    },
+    {
+      "id": "node-1781265639404-kjhhu",
+      "opId": "type_string",
+      "name": "node-1781264453635",
+      "position": {
+        "x": -1814.4659480879072,
+        "y": 1133.7956520410949
+      },
+      "params": {}
+    },
+    {
+      "id": "group_1781266066498_4ri3o",
+      "opId": "__group__",
+      "name": "TileAssetName",
+      "position": {
+        "x": -2440.4690658417753,
+        "y": 1113.6111177317075
+      },
+      "params": {
+        "groupId": "group_1781266066498_4ri3o"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1781265639404-dbdj4",
+      "source": {
+        "nodeId": "node-1781265639404-nophx",
+        "port": "grid"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-im7p2",
+        "port": "grid"
+      }
+    },
+    {
+      "id": "edge-1781265639404-9jg2c",
+      "source": {
+        "nodeId": "node-1781265639404-r5fm6",
+        "port": "childPaths"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-uehkz",
+        "port": "path"
+      }
+    },
+    {
+      "id": "edge-1781265639404-s9m7a",
+      "source": {
+        "nodeId": "node-1781265639404-r5fm6",
+        "port": "scene"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-uehkz",
+        "port": "scene"
+      }
+    },
+    {
+      "id": "edge-1781265639404-fktly",
+      "source": {
+        "nodeId": "node-1781265639404-r5fm6",
+        "port": "scene"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-0l8p4",
+        "port": "scene"
+      }
+    },
+    {
+      "id": "edge-1781265639404-7426s",
+      "source": {
+        "nodeId": "node-1781265639404-r5fm6",
+        "port": "childPaths"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-kjhhu",
+        "port": "value"
+      }
+    },
+    {
+      "id": "e-node-1781265639404-im7p2-scene-group_1781266066498_4ri3o-in_0",
+      "source": {
+        "nodeId": "node-1781265639404-im7p2",
+        "port": "scene"
+      },
+      "target": {
+        "nodeId": "group_1781266066498_4ri3o",
+        "port": "in_0"
+      }
+    },
+    {
+      "id": "e-group_1781266066498_4ri3o-out_0-node-1781265639404-r5fm6-nodes",
+      "source": {
+        "nodeId": "group_1781266066498_4ri3o",
+        "port": "out_0"
+      },
+      "target": {
+        "nodeId": "node-1781265639404-r5fm6",
+        "port": "nodes"
+      }
+    }
+  ],
+  "position": {
+    "x": -2240.6810885174914,
+    "y": 1063.333112778945
+  },
+  "exposedInputs": [
+    {
+      "portName": "in_1",
+      "portType": "string",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-im7p2",
+      "sourcePortName": "name",
+      "customLabelEn": "BaseName",
+      "order": 1
+    },
+    {
+      "portName": "in_5",
+      "portType": "string",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-im7p2",
+      "sourcePortName": "schema",
+      "hidden": true,
+      "order": 2
+    },
+    {
+      "portName": "in_6",
+      "portType": "string",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-im7p2",
+      "sourcePortName": "token",
+      "hidden": true,
+      "order": 3
+    },
+    {
+      "portName": "in_7",
+      "portType": "number",
+      "access": "list",
+      "sourceNodeId": "node-1781265639404-im7p2",
+      "sourcePortName": "zRange",
+      "hidden": true,
+      "order": 4
+    },
+    {
+      "portName": "in_2",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-nophx",
+      "sourcePortName": "width",
+      "order": 5,
+      "customLabelEn": "Width"
+    },
+    {
+      "portName": "in_3",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-nophx",
+      "sourcePortName": "height",
+      "order": 6,
+      "customLabelEn": "Height"
+    },
+    {
+      "portName": "in_8",
+      "portType": "number",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-nophx",
+      "sourcePortName": "fillValue",
+      "hidden": true,
+      "order": 7
+    },
+    {
+      "portName": "in_0",
+      "portType": "scene",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-r5fm6",
+      "sourcePortName": "scene",
+      "customLabelEn": "RootScene",
+      "order": 0
+    },
+    {
+      "portName": "in_4",
+      "portType": "string",
+      "access": "tree",
+      "sourceNodeId": "group_1781266066498_4ri3o",
+      "sourcePortName": "in_1",
+      "order": 8,
+      "customLabelEn": "BaseAsset"
+    }
+  ],
+  "exposedOutputs": [
+    {
+      "portName": "out_1",
+      "portType": "scene",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-uehkz",
+      "sourcePortName": "scene",
+      "order": 1,
+      "customLabelEn": "BaseNode"
+    },
+    {
+      "portName": "out_2",
+      "portType": "scene",
+      "access": "tree",
+      "sourceNodeId": "node-1781265639404-0l8p4",
+      "sourcePortName": "scene",
+      "order": 0,
+      "customLabelEn": "RootScene"
+    },
+    {
+      "portName": "out_3",
+      "portType": "string",
+      "access": "tree",
+      "sourceNodeId": "node-1781265639404-kjhhu",
+      "sourcePortName": "value",
+      "customLabelEn": "BaseNodePath",
+      "order": 2
+    },
+    {
+      "portName": "out_0",
+      "portType": "scene",
+      "access": "item",
+      "sourceNodeId": "node-1781265639404-im7p2",
+      "sourcePortName": "scene",
+      "order": 3
+    }
+  ],
+  "_nestedGroups": [
+    {
+      "id": "group_1781266066498_4ri3o",
+      "name": "TileAssetName",
+      "nameEn": "TileAssetName",
+      "nodes": [
+        {
+          "id": "node-1781266066498-i2bso",
+          "opId": "text_panel",
+          "name": "node-1781094591109",
+          "position": {
+            "x": 1823.2161694202596,
+            "y": 320.5333437440952
+          },
+          "params": {
+            "text": "asset_name",
+            "_nodeWidth": 180,
+            "_nodeHeight": 67
+          }
+        },
+        {
+          "id": "node-1781266066498-dv0mm",
+          "opId": "text_panel",
+          "name": "node-1781094625955-ysok9",
+          "position": {
+            "x": 2101.219750353309,
+            "y": 317.34099784790226
+          },
+          "params": {
+            "text": "asset_type",
+            "_nodeWidth": 181,
+            "_nodeHeight": 60
+          }
+        },
+        {
+          "id": "node-1781266066498-pjcqp",
+          "opId": "text_panel",
+          "name": "node-1781094635614-mu6fs",
+          "position": {
+            "x": 2101.219750353309,
+            "y": 486.1257362686896
+          },
+          "params": {
+            "text": "tile",
+            "_nodeWidth": 181,
+            "_nodeHeight": 60
+          }
+        },
+        {
+          "id": "node-1781266066498-tl038",
+          "opId": "scene_set_attribute",
+          "name": "node-1781097305549",
+          "position": {
+            "x": 2003.1308341299732,
+            "y": 159.02072612717268
+          },
+          "params": {}
+        },
+        {
+          "id": "node-1781266066498-y5n6m",
+          "opId": "scene_set_attribute",
+          "name": "node-1781097326596-22xx1",
+          "position": {
+            "x": 2273.5984614822623,
+            "y": 167.27027591857814
+          },
+          "params": {}
+        },
+        {
+          "id": "node-1781266066498-6j5ex",
+          "opId": "type_string",
+          "name": "字符串",
+          "position": {
+            "x": 1795.2161694202596,
+            "y": 219.59964172770196
+          },
+          "params": {}
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-1781266066498-8fn3u",
+          "source": {
+            "nodeId": "node-1781266066498-i2bso",
+            "port": "output"
+          },
+          "target": {
+            "nodeId": "node-1781266066498-tl038",
+            "port": "key"
+          }
+        },
+        {
+          "id": "edge-1781266066498-aovgt",
+          "source": {
+            "nodeId": "node-1781266066498-tl038",
+            "port": "scene"
+          },
+          "target": {
+            "nodeId": "node-1781266066498-y5n6m",
+            "port": "scene"
+          }
+        },
+        {
+          "id": "edge-1781266066498-8gvl2",
+          "source": {
+            "nodeId": "node-1781266066498-dv0mm",
+            "port": "output"
+          },
+          "target": {
+            "nodeId": "node-1781266066498-y5n6m",
+            "port": "key"
+          }
+        },
+        {
+          "id": "edge-1781266066498-bue1k",
+          "source": {
+            "nodeId": "node-1781266066498-pjcqp",
+            "port": "output"
+          },
+          "target": {
+            "nodeId": "node-1781266066498-y5n6m",
+            "port": "value"
+          }
+        },
+        {
+          "id": "edge-1781266066498-igzbq",
+          "source": {
+            "nodeId": "node-1781266066498-6j5ex",
+            "port": "value"
+          },
+          "target": {
+            "nodeId": "node-1781266066498-tl038",
+            "port": "value"
+          }
+        }
+      ],
+      "position": {
+        "x": -2440.4690658417753,
+        "y": 1113.6111177317075
+      },
+      "exposedInputs": [
+        {
+          "portName": "in_0",
+          "portType": "scene",
+          "access": "item",
+          "sourceNodeId": "node-1781266066498-tl038",
+          "sourcePortName": "scene"
+        },
+        {
+          "portName": "in_1",
+          "portType": "string",
+          "access": "tree",
+          "sourceNodeId": "node-1781266066498-6j5ex",
+          "sourcePortName": "value"
+        }
+      ],
+      "exposedOutputs": [
+        {
+          "portName": "out_0",
+          "portType": "scene",
+          "access": "item",
+          "sourceNodeId": "node-1781266066498-y5n6m",
+          "sourcePortName": "scene"
+        }
+      ]
+    }
+  ]
+}

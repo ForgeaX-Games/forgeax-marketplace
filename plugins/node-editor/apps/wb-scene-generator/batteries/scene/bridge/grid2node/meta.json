@@ -1,0 +1,87 @@
+{
+  "id": "grid2node",
+  "label": "网格→场景节点",
+  "name-en": "Grid2Node",
+  "description": "由 2D grid 构造一个携带体素的独立场景节点，输出单节点 scene（focus 指向新节点）。grid[y][x] 非零 → (x,y,z) 体素，z 取自 zRange 列表（每个非零格对应 zRange 中所有 z 层）。多个 grid2node 输出可通过 add_child 挂到同一父节点下。",
+  "description-en": "Construct a single scene node from a 2D grid. Non-zero cells in grid[y][x] become voxels at (x,y,z) for each z in zRange (one voxel per layer per cell). Compose outputs under a parent via add_child.",
+  "version": "1.0.0",
+  "tags": [
+    "scene",
+    "bridge",
+    "grid",
+    "node",
+    "source"
+  ],
+  "tag_labels": [
+    "场景",
+    "桥接",
+    "网格",
+    "节点",
+    "源"
+  ],
+  "inputs": [
+    {
+      "name": "name",
+      "type": "string",
+      "access": "item",
+      "required": true,
+      "label": "节点名",
+      "description": "新节点名（不含 /）",
+      "description-en": "Name of the node (no '/')."
+    },
+    {
+      "name": "grid",
+      "type": "grid",
+      "access": "item",
+      "required": true,
+      "label": "grid",
+      "description": "输入二维 grid（grid[y][x]）；非零值写入对应 (x,y,zBase) 体素",
+      "description-en": "Input 2D grid (grid[y][x]); non-zero cells become voxels at (x,y,zBase)."
+    },
+    {
+      "name": "schema",
+      "type": "string",
+      "access": "item",
+      "label": "schema",
+      "description": "节点几何 schema 标签",
+      "description-en": "Schema tag for the node geometry.",
+      "default": "voxel-mass"
+    },
+    {
+      "name": "token",
+      "type": "string",
+      "access": "item",
+      "label": "token",
+      "description": "每个体素的语义标签",
+      "description-en": "Semantic token for each voxel.",
+      "default": "cell"
+    },
+    {
+      "name": "zRange",
+      "type": "number",
+      "access": "list",
+      "label": "z 层",
+      "description": "体素 z 坐标列表；每个非零格在列表中每一层各生成一个体素。默认 [0] 表示单层平铺。",
+      "description-en": "List of z values; each non-zero cell emits one voxel per z in this list. Default [0] = single flat layer.",
+      "default": [0]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "scene",
+      "type": "scene",
+      "access": "item",
+      "label": "scene",
+      "description": "单节点 scene，focus 指向新节点；可直接喂下游 add_child / set_transform / node_explode",
+      "description-en": "One-node scene with focus on the new node; feed into add_child / set_transform / node_explode."
+    },
+    {
+      "name": "voxelCount",
+      "type": "number",
+      "access": "item",
+      "label": "体素数",
+      "description": "写入的体素数量",
+      "description-en": "Number of voxels written."
+    }
+  ]
+}

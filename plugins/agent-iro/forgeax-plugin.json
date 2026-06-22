@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-iro",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Iro · 美术师", "en": "Iro · Art Director" },
+  "description": {
+    "zh": "视觉一切 — 角色立绘 / 像素 sprite / lowpoly OBJ / VFX / icon / UI 配色。接 Iori 的玩法 + Kotone 的角色 bio + Suzu 的 hud-spec,落成实际的 png / glb / svg 素材。",
+    "en": "Owns everything visual — character portraits, pixel sprites, lowpoly OBJ, VFX, icons, UI palette. Takes Iori's gameplay + Kotone's bios + Suzu's hud-spec and produces actual png / glb / svg assets."
+  },
+  "provides": {
+    "agent": {
+      "id": "iro",
+      "role": "art",
+      "card": {
+        "name": { "zh": "Iro", "en": "Iro" },
+        "color": "#3FB950",
+        "avatar": "🎨"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/*.png",
+        "<active_game>.dir/**/*.svg",
+        "<active_game>.dir/**/*.glb",
+        "<active_game>.dir/**/*.obj",
+        "<active_game>.dir/**/art-style.md",
+        "<active_game>.dir/**/palette.json"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": true,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "establish-art-style" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "establish-art-style",
+        "entry": "./skills/establish-art-style/SKILL.md",
+        "displayName": { "zh": "立美术规范", "en": "Establish Art Style" },
+        "description": {
+          "zh": "在画第一张 hero 之前先产出 art-style.md + token 化的 palette.json",
+          "en": "Lock down art-style.md and tokenized palette.json before any hero asset"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

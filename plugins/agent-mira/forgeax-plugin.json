@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-mira",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Mira · 织绘师", "en": "Mira · Asset Weaver" },
+  "description": {
+    "zh": "专职 2D 场景资产生成师。在「2D 场景资产生成器」工作台里用节点 + 电池流水线 + 生图网关产出 2D 场景资产（道具 / 贴图 / UI 件 / 房屋装饰），截图迭代，并把成果命名、归档进项目资产库。只做 2D 资产生成与整理，不碰 3D 建模 / 角色 bio / 引擎代码。",
+    "en": "Dedicated 2D scene asset weaver. Produces 2D scene assets (props, textures, UI pieces, house decorations) in the 2D Scene Asset Generator workbench via the node + battery pipeline and image gateway, iterating with screenshots and curating results into the project asset library. 2D asset generation only — no 3D modeling, character bios, or engine code."
+  },
+  "provides": {
+    "agent": {
+      "id": "mira",
+      "role": "art-asset",
+      "card": {
+        "name": { "zh": "Mira", "en": "Mira" },
+        "color": "#FB923C",
+        "avatar": "🎨"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/assets/generated/**",
+        "<active_game>.dir/**/generated/**.png",
+        "<active_game>.dir/**/generated/**.webp"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": true,
+      "tools": ["asset2d:*"],
+      "defaultSkills": [
+        { "source": "plugin", "pluginId": "@forgeax-plugin/wb-2d-scene-asset-generator", "skillId": "generate-2d-asset" }
+      ]
+    }
+  },
+  "experimental": true
+}

@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>Agent Manager</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg-0: #0d1117; --bg-1: #161b22; --bg-2: #21262d;
+    --text-primary: #e6edf3; --text-secondary: #8b949e; --text-tertiary: #6e7681;
+    --border: #30363d;
+    /* Aligned with main visual: brand lime (#D4FF48, matches
+     * --color-brand-primary in packages/interface/src/styles/tokens.css)
+     * as the active/primary accent so this iframe matches the host shell. */
+    --accent: #D4FF48; --accent-warn: #d29922; --accent-ok: #3fb950;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0);
+               color: var(--text-primary);
+               font: 13px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif; }
+  body[data-pane="left"]   .pane-center { display: none; }
+  body[data-pane="center"] .pane-left   { display: none; }
+
+  /* ── Left pane ── */
+  .pane-left { height: 100%; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  .pane-left h2 { font-size: 11px; text-transform: uppercase; color: var(--text-tertiary);
+                  letter-spacing: 0.06em; padding: 10px 12px 6px; margin: 0; }
+  .agent-list { flex: 1; overflow-y: auto; padding: 4px 6px 12px; }
+  .agent-item {
+    width: 100%; text-align: left; padding: 8px 10px; margin: 2px 0;
+    background: transparent; border: 1px solid transparent; border-radius: 5px;
+    color: var(--text-secondary); cursor: pointer; font-size: 12px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .agent-item:hover { background: var(--bg-2); color: var(--text-primary); }
+  .agent-item.active { background: var(--bg-2); color: var(--text-primary); border-color: var(--accent); }
+  .agent-item .avatar {
+    font-size: 18px; line-height: 1; flex-shrink: 0;
+    /* 状态机头像 (见 ADR-0019). 默认是 emoji 字, 有 avatarRules 的 agent 会
+     * 把这个槽变成 video. 圆角 + cover 跟主仓 React 端 .agent-avatar-video
+     * 的视觉对齐. */
+    width: 28px; height: 28px; border-radius: 50%; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-2);
+  }
+  .agent-item .avatar video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    /* 立绘头顶留白多, center top 让脸贴顶部 (跟 React 端 agent-avatar-video.css 一致). */
+    object-position: center top;
+    pointer-events: none;
+    transform: translateZ(0);
+  }
+  /* suzu 美术资源头顶留白比其它 agent 多, 单独缩放 + 上移 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="suzu"] .avatar video {
+    transform: scale(1.10) translate3d(0, -12%, 0);
+    transform-origin: center top;
+  }
+  /* arin / kotone / tsumugi 脸部相对偏小, 各自单独缩放 + 微抬 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="arin"] .avatar video {
+    transform: scale(1.10) translate3d(0, -4%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="kotone"] .avatar video {
+    transform: scale(1.18) translate3d(0, -3%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="tsumugi"] .avatar video {
+    transform: scale(1.06) translate3d(0, -2%, 0);
+    transform-origin: center top;
+  }
+  /* lock / cc-coder 立绘也偏小, 同步放大 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="lock"] .avatar video {
+    transform: scale(1.12) translate3d(0, -10%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="cc-coder"] .avatar video {
+    transform: scale(1.12) translate3d(0, -5%, 0);
+    transform-origin: center top;
+  }
+  /* iori 立绘头部偏高, 微微下移. 纯 translate 用不上 transform-origin (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="iori"] .avatar video {
+    transform: translate3d(0, 5%, 0);
+  }
+  .agent-item .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .agent-item .name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-item .role { font-size: 10.5px; color: var(--text-tertiary); }
+
+  /* ── Catalog group fold (ADR-0019 §9, 2026-06-22) ─────────────────────
+   * Mirrors the AgentsMainArea grouping logic from the React side. See
+   * GROUP_REGISTRY below for the registry. This iframe lives in its own
+   * bundle so the registry data is duplicated here intentionally (kept in
+   * sync with packages/interface/src/data/agent-groups.ts by convention).
+   *
+   * Visual treatment is a VERTICAL tree: a lead (iro / reia / mochi)
+   * renders at its natural position, and its subs / sibling skins render
+   * underneath indented with a dashed left-border so the parent ↔ child
+   * relationship reads at a glance. */
+  .agent-item.is-sub {
+    margin-left: 16px;
+    padding-left: 10px;
+    border-left: 1px dashed var(--border-strong, var(--border));
+    border-radius: 0 5px 5px 0;
+  }
+  .agent-item.is-sub .name { font-size: 11.5px; }
+  .agent-item.is-sub .role { font-size: 10px; }
+  .agent-item.is-sub .avatar { width: 22px; height: 22px; font-size: 14px; }
+
+  /* ── Center pane ── */
+  .pane-center { height: 100%; display: flex; flex-direction: column; padding: 10px 14px; gap: 8px; }
+  .header { display: flex; align-items: baseline; gap: 12px; }
+  .header h1 { font-size: 14px; margin: 0; }
+  .header .role-pill {
+    font-size: 10.5px; color: var(--text-secondary); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 3px; text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .header .path { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, monospace; margin-left: auto; }
+
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 4px 0 6px; }
+  .tab {
+    background: transparent; border: none; color: var(--text-secondary);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { background: #2d333b; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
+  .status.ok { color: var(--accent-ok); }
+  .status.warn { color: var(--accent-warn); }
+
+  textarea.editor {
+    flex: 1; min-height: 280px;
+    background: var(--bg-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 12px; resize: none;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+    tab-size: 2;
+  }
+  textarea.editor:focus { outline: none; border-color: var(--accent); }
+  .empty { padding: 30px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
+  /* ── Memory tab layout ── */
+  .mem-pane { display: flex; gap: 10px; flex: 1; min-height: 0; }
+  .mem-files { width: 200px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 4px;
+               background: var(--bg-1); display: flex; flex-direction: column; overflow: hidden; }
+  .mem-files-header { padding: 6px 10px; font-size: 10.5px; text-transform: uppercase;
+                      color: var(--text-tertiary); letter-spacing: 0.06em;
+                      border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: center; }
+  .mem-files-list { flex: 1; overflow-y: auto; padding: 4px; }
+  .mem-file {
+    width: 100%; text-align: left; background: transparent; border: 1px solid transparent;
+    color: var(--text-secondary); font-size: 12px; padding: 5px 8px; cursor: pointer;
+    border-radius: 3px;
+  }
+  .mem-file:hover { background: var(--bg-2); color: var(--text-primary); }
+  .mem-file.active { background: var(--bg-2); color: var(--text-primary); border-color: var(--accent); }
+  .mem-edit { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .new-input {
+    background: var(--bg-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 3px 6px; font-size: 11.5px; flex: 1;
+    font-family: ui-monospace, monospace;
+  }
+  .new-input:focus { outline: none; border-color: var(--accent); }
+
+  /* ── Skills / Workbench list ── */
+  .info-card {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px 12px; margin-bottom: 8px;
+  }
+  .info-card-title { font-size: 11px; color: var(--text-tertiary);
+                     text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .info-card-body { font-size: 12.5px; line-height: 1.6; }
+  .info-row { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+  .info-row .k { color: var(--text-tertiary); flex-shrink: 0; min-width: 110px; font-size: 11.5px; }
+  .info-row .v { color: var(--text-primary); font-family: ui-monospace, monospace; font-size: 12px; }
+  .pill {
+    display: inline-block; padding: 1px 7px; margin: 2px 4px 2px 0;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 11px; color: var(--text-secondary);
+  }
+  .wb-row {
+    display: flex; gap: 10px; padding: 8px 10px; align-items: center;
+    border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 6px; background: var(--bg-1);
+  }
+  .wb-row .icon { font-size: 18px; flex-shrink: 0; }
+  .wb-row .body { flex: 1; min-width: 0; }
+  .wb-row .body .name { font-size: 12.5px; font-weight: 600; }
+  .wb-row .body .desc { font-size: 11px; color: var(--text-tertiary); margin-top: 2px;
+                        overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+                        -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+</style>
+</head>
+<body>
+
+<div class="pane-left">
+  <h2>AGENTS</h2>
+  <div class="agent-list" id="agent-list"></div>
+</div>
+
+<div class="pane-center">
+  <div class="header">
+    <h1 id="title">未选 agent</h1>
+    <span class="role-pill" id="role-pill" style="display:none"></span>
+    <span class="path" id="header-path"></span>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="persona">Persona</button>
+    <button class="tab" data-tab="memory">长期记忆</button>
+    <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="workbench">Workbench</button>
+  </div>
+
+  <!-- Persona tab -->
+  <div class="tab-body" id="tab-persona">
+    <div class="toolbar">
+      <button class="btn primary" id="persona-save" disabled>保存 persona</button>
+      <button class="btn" id="persona-reload" disabled>放弃改动</button>
+      <span class="status" id="persona-status"></span>
+    </div>
+    <textarea class="editor" id="persona-editor" spellcheck="false" disabled
+              placeholder="左栏选一个 agent 加载 persona..."></textarea>
+  </div>
+
+  <!-- Memory tab -->
+  <div class="tab-body" id="tab-memory" style="display:none">
+    <div class="mem-pane">
+      <div class="mem-files">
+        <div class="mem-files-header">
+          <span>FILES</span>
+          <input class="new-input" id="mem-new-name" placeholder="new-note.md" />
+          <button class="btn" id="mem-new-btn" title="新建记忆文件">+</button>
+        </div>
+        <div class="mem-files-list" id="mem-files-list"></div>
+      </div>
+      <div class="mem-edit">
+        <div class="toolbar">
+          <button class="btn primary" id="mem-save" disabled>保存</button>
+          <button class="btn" id="mem-reload" disabled>放弃改动</button>
+          <span class="path" id="mem-path"></span>
+          <span class="status" id="mem-status"></span>
+        </div>
+        <textarea class="editor" id="mem-editor" spellcheck="false" disabled
+                  placeholder="左侧选一个记忆文件，或新建一个 .md..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skills tab -->
+  <div class="tab-body" id="tab-skills" style="display:none">
+    <div id="skills-content"></div>
+  </div>
+
+  <!-- Workbench tab -->
+  <div class="tab-body" id="tab-workbench" style="display:none">
+    <div id="workbench-content"></div>
+  </div>
+</div>
+
+<script type="module">
+const params = new URLSearchParams(location.search);
+const pane = params.get('pane') || 'center';
+document.body.dataset.pane = pane;
+
+const channel = new BroadcastChannel('wb-agent-persona');
+
+// State
+let agents = [];           // BusPluginInfo[] of kind=agent
+let workbenches = [];      // BusPluginInfo[] of kind=workbench (for cross-ref)
+let avatarRulesById = {};  // short agent id (e.g. "iori") → AgentAvatarRules. ADR-0019.
+let selected = null;       // pluginId
+let selectedAgent = null;  // BusPluginInfo (full slim) of the active agent
+let activeTab = 'persona';
+
+// Persona state
+let personaOriginal = '';
+let personaDirty = false;
+
+// Memory state
+let memFiles = [];
+let memSelected = null;    // filename within memoryDir
+let memOriginal = '';
+let memDirty = false;
+
+// ─── helpers ──────────────────────────────────────────────────────────
+function shortId(pluginId) { return pluginId.replace(/^@[^/]+\//, ''); }
+function pluginDir(pluginId) {
+  return `packages/marketplace/plugins/${shortId(pluginId)}`;
+}
+function personaPath(agent) {
+  const f = agent?.agent?.personaFile?.replace(/^\.\//, '') ?? 'persona/zh.md';
+  return `${pluginDir(agent.id)}/${f}`;
+}
+function memoryDir(agent) {
+  const m = agent?.agent?.memoryDir;
+  if (!m) return null;
+  return `${pluginDir(agent.id)}/${m.replace(/^\.\//, '').replace(/\/$/, '')}`;
+}
+function pickLang(text) {
+  if (!text) return '';
+  if (typeof text === 'string') return text;
+  return text.zh ?? text.en ?? '';
+}
+
+function setStatus(elId, text, kind) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+// ─── left pane ────────────────────────────────────────────────────────
+//
+// GROUP_REGISTRY — catalog-side fold for the agent list. Mirrors
+// packages/interface/src/data/agent-groups.ts (the canonical TS source).
+// Iframe is a separate bundle so we can't import that file; keep the two
+// in sync by convention.
+//
+// Two relationships are folded (both rendered the same way here — lead +
+// indented sub list):
+//   1. skin family → representative (e.g. mochi) treated as the visual
+//      "lead", other personas (rin / sakura / ...) as indented siblings.
+//      Note: this iframe deliberately treats skin like subagent-family
+//      because here every persona is a separately-editable file — the
+//      "replaceable skin" vs "delegated sub" distinction only matters for
+//      the chat-side surface (AgentsMainArea), NOT for the persona editor.
+//   2. subagent-family → lead (e.g. iro, reia) in place + indented subs.
+//
+// Provider-default coders (cc-coder / claude-code-default / etc.) stay
+// flat — they differ by *driver*, not persona/family.
+//
+// Click semantics here: EVERY agent / sub / skin member is a real persona
+// file the user must be able to open and edit, so all clicks call
+// selectAgent() regardless of role. The "subs aren't directly addressable"
+// rule only applies to chat routing (handled in packages/interface/.../
+// open-agent-detail.ts via switchChat=false from sub-card click).
+const GROUP_REGISTRY = [
+  {
+    id: 'coder-skins',
+    kind: 'skin',
+    representativeShortId: 'mochi',
+    memberShortIds: ['mochi', 'rin', 'sakura', 'kaede', 'kumo'],
+    // Provider-default coders folded into the same tree under mochi. They
+    // get the same `is-sub` indented treatment as skin members in this
+    // iframe — the persona editor doesn't visually distinguish driver vs
+    // tone (both are independently editable persona files). The catalog
+    // surface in AgentsMainArea DOES distinguish them via a separate
+    // mini-card column.
+    providerDefaultShortIds: ['cc-coder', 'claude-code-default', 'codex-default', 'cursor-default'],
+  },
+  {
+    id: 'art-family',
+    kind: 'subagent-family',
+    leadShortId: 'iro',
+    memberShortIds: ['mira', 'animator-2d', 'character-designer-2d', 'vfx-artist-3d', 'lowpoly'],
+  },
+  {
+    id: 'reel-family',
+    kind: 'subagent-family',
+    leadShortId: 'reia',
+    memberShortIds: ['reel-storyboard', 'reel-video', 'reel-visual'],
+  },
+];
+
+function shortAgentId(a) { return a.agent?.id ?? ''; }
+
+// Return the (leadShortId, subShortIds) view of a group regardless of kind.
+// Skin: representative = lead; rest of skin members + provider-default
+// coders all become subs (they're all independently editable persona
+// files). Subagent-family: native leadShortId, native memberShortIds.
+function leadAndSubsOf(g) {
+  if (g.kind === 'subagent-family') {
+    return { leadShortId: g.leadShortId, subShortIds: g.memberShortIds };
+  }
+  // skin
+  return {
+    leadShortId: g.representativeShortId,
+    subShortIds: [
+      ...g.memberShortIds.filter((id) => id !== g.representativeShortId),
+      ...(g.providerDefaultShortIds ?? []),
+    ],
+  };
+}
+
+// Lookup a short agent id's tree role in the registry. Returns the same
+// shape regardless of group kind so the renderer can stay generic.
+function treeForAgent(shortId) {
+  for (const g of GROUP_REGISTRY) {
+    const { leadShortId, subShortIds } = leadAndSubsOf(g);
+    if (leadShortId === shortId) return { group: g, role: 'lead', leadShortId, subShortIds };
+    if (subShortIds.includes(shortId)) return { group: g, role: 'sub', leadShortId, subShortIds };
+  }
+  return null;
+}
+
+async function loadAgents() {
+  try {
+    // ADR-0019: 第三个 fetch 拿 avatarRules. server `/api/workbench/agents` 已经把
+    // AVATAR.md 解析好挂在 agent.avatarRules 上, 我们只需要按 short id 索引一下.
+    const [aRes, wRes, wbAgRes] = await Promise.all([
+      fetch('/api/bus/plugins?kind=agent'),
+      fetch('/api/bus/plugins?kind=workbench'),
+      fetch('/api/workbench/agents?lang=zh'),
+    ]);
+    if (!aRes.ok) { setStatus('persona-status', `agent 列表加载失败: ${aRes.status}`, 'warn'); return; }
+    agents = (await aRes.json()).items;
+    workbenches = wRes.ok ? (await wRes.json()).items : [];
+    if (wbAgRes.ok) {
+      const wbAg = await wbAgRes.json();
+      avatarRulesById = {};
+      for (const a of wbAg.agents ?? []) {
+        if (a.id && a.avatarRules) avatarRulesById[a.id] = a.avatarRules;
+      }
+    }
+    renderList();
+  } catch (e) {
+    setStatus('persona-status', `加载异常: ${e.message}`, 'warn');
+  }
+}
+
+// Build one agent row. `extraClass` ('' | 'is-sub') drives indent for
+// subagent-family members.
+function createAgentItem(a, extraClass) {
+  const btn = document.createElement('button');
+  btn.className = 'agent-item' + (a.id === selected ? ' active' : '') + (extraClass ? ' ' + extraClass : '');
+  btn.dataset.id = a.id;
+  // ADR-0019: per-agent CSS hook (e.g. suzu 立绘要再上移). short id 来自 manifest.
+  const sid = shortAgentId(a);
+  if (sid) btn.dataset.agentId = sid;
+
+  const av = document.createElement('div'); av.className = 'avatar';
+  const rules = avatarRulesById[sid];
+  const defaultState = rules ? rules.states[rules.default] : null;
+  if (defaultState?.url) {
+    // ADR-0019: 用 default state (期待) 循环, idle 模式 — 不订阅 chat 事件,
+    // 跟主仓 AgentAvatarVideo mode='idle' 行为对齐.
+    const v = document.createElement('video');
+    v.src = defaultState.url;
+    v.autoplay = true;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    av.appendChild(v);
+  } else {
+    av.textContent = a.agent?.card?.avatar ?? '🤖';
+  }
+
+  const meta = document.createElement('div'); meta.className = 'meta';
+  const name = document.createElement('div'); name.className = 'name';
+  name.textContent = pickLang(a.displayName);
+  const role = document.createElement('div'); role.className = 'role';
+  role.textContent = a.agent?.role ?? '';
+  meta.append(name, role);
+  btn.append(av, meta);
+  btn.addEventListener('click', () => {
+    channel.postMessage({ type: 'select-agent', pluginId: a.id });
+    selectAgent(a.id);
+  });
+  return btn;
+}
+
+function renderList() {
+  const root = document.getElementById('agent-list');
+  root.innerHTML = '';
+
+  // Pre-index by short agent id so we can render subs on demand without
+  // O(n) lookups inside the loop.
+  const bySid = new Map();
+  for (const a of agents) {
+    const sid = shortAgentId(a);
+    if (sid) bySid.set(sid, a);
+  }
+
+  const consumedIds = new Set();
+
+  for (const a of agents) {
+    if (consumedIds.has(a.id)) continue;
+    const sid = shortAgentId(a);
+    const link = sid ? treeForAgent(sid) : null;
+
+    // Sub: defer until its lead is rendered. Same code path for skin
+    // members (rin/sakura/...) and subagent-family members (mira/...).
+    if (link && link.role === 'sub') {
+      const lead = bySid.get(link.leadShortId);
+      if (lead && !consumedIds.has(lead.id)) continue;
+      // Lead missing (e.g. uninstalled) → render flat at the bottom pass.
+      root.appendChild(createAgentItem(a, ''));
+      consumedIds.add(a.id);
+      continue;
+    }
+
+    // Lead: render in place, then all subs indented.
+    if (link && link.role === 'lead') {
+      root.appendChild(createAgentItem(a, ''));
+      consumedIds.add(a.id);
+      for (const subSid of link.subShortIds) {
+        const sub = bySid.get(subSid);
+        if (!sub || consumedIds.has(sub.id)) continue;
+        root.appendChild(createAgentItem(sub, 'is-sub'));
+        consumedIds.add(sub.id);
+      }
+      continue;
+    }
+
+    // Flat / ungrouped agent.
+    root.appendChild(createAgentItem(a, ''));
+    consumedIds.add(a.id);
+  }
+
+  // Defensive pass: any agent we deferred but never got to render (lead
+  // was missing entirely). Should be rare.
+  for (const a of agents) {
+    if (consumedIds.has(a.id)) continue;
+    root.appendChild(createAgentItem(a, ''));
+    consumedIds.add(a.id);
+  }
+}
+
+// ─── tab switching ────────────────────────────────────────────────────
+function setTab(name) {
+  activeTab = name;
+  for (const el of document.querySelectorAll('.tab')) {
+    el.classList.toggle('active', el.dataset.tab === name);
+  }
+  for (const t of ['persona', 'memory', 'skills', 'workbench']) {
+    document.getElementById(`tab-${t}`).style.display = t === name ? 'flex' : 'none';
+  }
+  // Lazy-load tab content when first switching
+  if (name === 'memory' && selectedAgent) loadMemoryFiles();
+  if (name === 'skills' && selectedAgent) renderSkills();
+  if (name === 'workbench' && selectedAgent) renderWorkbench();
+}
+for (const el of document.querySelectorAll('.tab')) {
+  el.addEventListener('click', () => setTab(el.dataset.tab));
+}
+
+// ─── center pane: agent selected ──────────────────────────────────────
+async function selectAgent(pluginId) {
+  if (personaDirty && !confirm('Persona 编辑未保存，丢弃改动?')) return;
+  if (memDirty && !confirm('记忆文件未保存，丢弃改动?')) return;
+  try { localStorage.setItem('wb-agent-persona:selected-agent-id', pluginId); } catch { /* private mode */ }
+  selected = pluginId;
+  selectedAgent = agents.find((a) => a.id === pluginId) ?? null;
+
+  for (const el of document.querySelectorAll('.agent-item')) {
+    el.classList.toggle('active', el.dataset.id === pluginId);
+  }
+
+  // Header
+  document.getElementById('title').textContent = selectedAgent ? pickLang(selectedAgent.displayName) : shortId(pluginId);
+  const rolePill = document.getElementById('role-pill');
+  if (selectedAgent?.agent?.role) {
+    rolePill.textContent = selectedAgent.agent.role;
+    rolePill.style.display = 'inline-block';
+    rolePill.style.borderColor = selectedAgent.agent.card?.color ?? 'var(--border)';
+    rolePill.style.color = selectedAgent.agent.card?.color ?? 'var(--text-secondary)';
+  } else {
+    rolePill.style.display = 'none';
+  }
+  document.getElementById('header-path').textContent = pluginDir(pluginId);
+
+  // Reset memory state
+  memFiles = []; memSelected = null; memOriginal = ''; memDirty = false;
+  document.getElementById('mem-files-list').innerHTML = '';
+  document.getElementById('mem-editor').value = '';
+  document.getElementById('mem-editor').disabled = true;
+  document.getElementById('mem-path').textContent = '';
+  document.getElementById('mem-save').disabled = true;
+  document.getElementById('mem-reload').disabled = true;
+  setStatus('mem-status', '');
+
+  // Always reload persona — that's the default tab
+  await loadPersona();
+  // If user is currently on a non-persona tab, refresh it too
+  if (activeTab === 'memory') loadMemoryFiles();
+  if (activeTab === 'skills') renderSkills();
+  if (activeTab === 'workbench') renderWorkbench();
+}
+
+// ─── Persona tab ──────────────────────────────────────────────────────
+async function loadPersona() {
+  if (!selectedAgent) return;
+  const path = personaPath(selectedAgent);
+  setStatus('persona-status', '加载中…');
+  try {
+    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    if (!r.ok) {
+      setStatus('persona-status', `加载失败: ${r.status}`, 'warn');
+      setPersonaContent('', false);
+      return;
+    }
+    const body = await r.json();
+    setPersonaContent(body.content ?? '', true);
+    setStatus('persona-status', `已加载 (${(body.content ?? '').length} 字符)`, 'ok');
+  } catch (e) {
+    setStatus('persona-status', `加载异常: ${e.message}`, 'warn');
+    setPersonaContent('', false);
+  }
+}
+
+function setPersonaContent(text, enableSave) {
+  const ed = document.getElementById('persona-editor');
+  ed.value = text;
+  ed.disabled = false;
+  personaOriginal = text;
+  personaDirty = false;
+  document.getElementById('persona-save').disabled = !enableSave;
+  document.getElementById('persona-reload').disabled = true;
+}
+
+async function savePersona() {
+  if (!selectedAgent) return;
+  const ed = document.getElementById('persona-editor');
+  const path = personaPath(selectedAgent);
+  setStatus('persona-status', '保存中…');
+  try {
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content: ed.value }),
+    });
+    if (!r.ok) {
+      const err = await r.text().catch(() => '');
+      setStatus('persona-status', `保存失败: ${r.status} ${err}`, 'warn');
+      return;
+    }
+    personaOriginal = ed.value;
+    personaDirty = false;
+    document.getElementById('persona-reload').disabled = true;
+    setStatus('persona-status', '已保存 · 重载插件中…');
+    await fetch('/api/plugins/reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    setStatus('persona-status', '已保存 · 插件已重载', 'ok');
+  } catch (e) {
+    setStatus('persona-status', `保存异常: ${e.message}`, 'warn');
+  }
+}
+
+document.getElementById('persona-save').addEventListener('click', savePersona);
+document.getElementById('persona-reload').addEventListener('click', loadPersona);
+document.getElementById('persona-editor').addEventListener('input', () => {
+  const ed = document.getElementById('persona-editor');
+  personaDirty = ed.value !== personaOriginal;
+  document.getElementById('persona-reload').disabled = !personaDirty;
+});
+
+// ─── Memory tab ───────────────────────────────────────────────────────
+async function loadMemoryFiles() {
+  if (!selectedAgent) return;
+  const memDir = memoryDir(selectedAgent);
+  const list = document.getElementById('mem-files-list');
+  if (!memDir) {
+    list.innerHTML = '<div class="empty">该 agent manifest 没有声明 memoryDir</div>';
+    return;
+  }
+  setStatus('mem-status', '扫描记忆目录…');
+  try {
+    const r = await fetch(`/api/files/tree?root=${encodeURIComponent(memDir)}`);
+    if (!r.ok) {
+      list.innerHTML = `<div class="empty">memoryDir 不存在或不可读: ${r.status}</div>`;
+      setStatus('mem-status', '');
+      return;
+    }
+    const body = await r.json();
+    const tree = body.tree;
+    memFiles = (tree?.children ?? [])
+      .filter((c) => c.type === 'file' && c.name.endsWith('.md'))
+      .map((c) => c.name);
+    renderMemFiles();
+    setStatus('mem-status', `${memFiles.length} 个记忆文件`, '');
+  } catch (e) {
+    setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
+  }
+}
+
+function renderMemFiles() {
+  const list = document.getElementById('mem-files-list');
+  list.innerHTML = '';
+  if (memFiles.length === 0) {
+    list.innerHTML = '<div class="empty">暂无记忆文件 · 在右上输入文件名 + 号新建</div>';
+    return;
+  }
+  for (const name of memFiles) {
+    const btn = document.createElement('button');
+    btn.className = 'mem-file' + (name === memSelected ? ' active' : '');
+    btn.textContent = name;
+    btn.dataset.name = name;
+    btn.addEventListener('click', () => loadMemoryFile(name));
+    list.appendChild(btn);
+  }
+}
+
+async function loadMemoryFile(name) {
+  if (memDirty && !confirm('记忆文件未保存，丢弃改动?')) return;
+  if (!selectedAgent) return;
+  const memDir = memoryDir(selectedAgent);
+  if (!memDir) return;
+  memSelected = name;
+  renderMemFiles();
+  const path = `${memDir}/${name}`;
+  document.getElementById('mem-path').textContent = path;
+  setStatus('mem-status', '加载中…');
+  try {
+    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    if (!r.ok) { setStatus('mem-status', `加载失败: ${r.status}`, 'warn'); return; }
+    const body = await r.json();
+    const ed = document.getElementById('mem-editor');
+    ed.value = body.content ?? '';
+    ed.disabled = false;
+    memOriginal = ed.value;
+    memDirty = false;
+    document.getElementById('mem-save').disabled = false;
+    document.getElementById('mem-reload').disabled = true;
+    setStatus('mem-status', `已加载 (${ed.value.length} 字符)`, 'ok');
+  } catch (e) {
+    setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
+  }
+}
+
+async function saveMemory() {
+  if (!selectedAgent || !memSelected) return;
+  const memDir = memoryDir(selectedAgent);
+  if (!memDir) return;
+  const path = `${memDir}/${memSelected}`;
+  const ed = document.getElementById('mem-editor');
+  setStatus('mem-status', '保存中…');
+  try {
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content: ed.value }),
+    });
+    if (!r.ok) {
+      const err = await r.text().catch(() => '');
+      setStatus('mem-status', `保存失败: ${r.status} ${err}`, 'warn');
+      return;
+    }
+    memOriginal = ed.value;
+    memDirty = false;
+    document.getElementById('mem-reload').disabled = true;
+    setStatus('mem-status', '已保存', 'ok');
+  } catch (e) {
+    setStatus('mem-status', `保存异常: ${e.message}`, 'warn');
+  }
+}
+
+async function newMemoryFile() {
+  if (!selectedAgent) return;
+  const memDir = memoryDir(selectedAgent);
+  if (!memDir) { setStatus('mem-status', '该 agent 没有 memoryDir', 'warn'); return; }
+  const input = document.getElementById('mem-new-name');
+  let name = (input.value || '').trim();
+  if (!name) { setStatus('mem-status', '请输入文件名', 'warn'); return; }
+  if (!name.endsWith('.md')) name += '.md';
+  if (memFiles.includes(name)) { setStatus('mem-status', `${name} 已存在`, 'warn'); return; }
+  // Create empty file via POST
+  const path = `${memDir}/${name}`;
+  setStatus('mem-status', '新建中…');
+  try {
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content: `# ${name.replace(/\.md$/, '')}\n\n` }),
+    });
+    if (!r.ok) {
+      setStatus('mem-status', `新建失败: ${r.status}`, 'warn');
+      return;
+    }
+    input.value = '';
+    memFiles = [...memFiles, name].sort();
+    renderMemFiles();
+    await loadMemoryFile(name);
+    setStatus('mem-status', `已新建 ${name}`, 'ok');
+  } catch (e) {
+    setStatus('mem-status', `新建异常: ${e.message}`, 'warn');
+  }
+}
+
+document.getElementById('mem-save').addEventListener('click', saveMemory);
+document.getElementById('mem-reload').addEventListener('click', () => memSelected && loadMemoryFile(memSelected));
+document.getElementById('mem-new-btn').addEventListener('click', newMemoryFile);
+document.getElementById('mem-new-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); newMemoryFile(); }
+});
+document.getElementById('mem-editor').addEventListener('input', () => {
+  const ed = document.getElementById('mem-editor');
+  memDirty = ed.value !== memOriginal;
+  document.getElementById('mem-reload').disabled = !memDirty;
+});
+
+// ─── Skills tab ───────────────────────────────────────────────────────
+function renderSkills() {
+  const root = document.getElementById('skills-content');
+  if (!selectedAgent) { root.innerHTML = '<div class="empty">未选 agent</div>'; return; }
+
+  const a = selectedAgent.agent ?? {};
+  const defaultSkills = Array.isArray(a.defaultSkills) ? a.defaultSkills : [];
+  const ownSkills = Array.isArray(selectedAgent.skills) ? selectedAgent.skills : [];
+  const ownTools = Array.isArray(selectedAgent.tools) ? selectedAgent.tools : [];
+  const produces = Array.isArray(a.produces) ? a.produces : [];
+
+  let html = `
+    <div class="info-card">
+      <div class="info-card-title">Identity</div>
+      <div class="info-card-body">
+        <div class="info-row"><div class="k">id</div><div class="v">${a.id ?? '?'}</div></div>
+        <div class="info-row"><div class="k">role</div><div class="v">${a.role ?? '?'}</div></div>
+        <div class="info-row"><div class="k">multiInstance</div><div class="v">${a.multiInstance ? 'yes' : 'no'}</div></div>
+        <div class="info-row"><div class="k">defaultLang</div><div class="v">${a.defaultLang ?? '-'}</div></div>
+        <div class="info-row"><div class="k">preferredCli</div><div class="v">${a.preferredCliProvider ?? '-'}</div></div>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Default skills (manifest provides.agent.defaultSkills)</div>
+      <div class="info-card-body">
+        ${defaultSkills.length === 0
+          ? '<span class="empty" style="padding:0;font-size:12px">未声明 default skill</span>'
+          : defaultSkills.map((s) => `<span class="pill">${escapeHtml(typeof s === 'string' ? s : JSON.stringify(s))}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Plugin's own skills (provides.skills)</div>
+      <div class="info-card-body">
+        ${ownSkills.length === 0
+          ? '<span class="empty" style="padding:0;font-size:12px">无自带 skill</span>'
+          : ownSkills.map((s) => `<span class="pill">${escapeHtml(s.id)}${s.trigger ? ` <code style="opacity:0.6">${escapeHtml(s.trigger)}</code>` : ''}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Plugin's own tools (provides.tools)</div>
+      <div class="info-card-body">
+        ${ownTools.length === 0
+          ? '<span class="empty" style="padding:0;font-size:12px">无自带 tool</span>'
+          : ownTools.map((t) => `<span class="pill">${escapeHtml(t.id)}${t.exposedToAI ? ' <span style="color:var(--accent-ok)">·exposed</span>' : ''}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Produces (file glob — tells Forge orchestrator which files this agent owns)</div>
+      <div class="info-card-body">
+        ${produces.length === 0
+          ? '<span class="empty" style="padding:0;font-size:12px">未声明 produces</span>'
+          : produces.map((p) => `<span class="pill"><code>${escapeHtml(p)}</code></span>`).join('')}
+      </div>
+    </div>
+  `;
+  root.innerHTML = html;
+}
+
+// ─── Workbench tab ────────────────────────────────────────────────────
+function renderWorkbench() {
+  const root = document.getElementById('workbench-content');
+  if (!selectedAgent) { root.innerHTML = '<div class="empty">未选 agent</div>'; return; }
+  const matches = workbenches.filter((w) => w.workbench?.preferredAgent === selectedAgent.id);
+  if (matches.length === 0) {
+    root.innerHTML = `
+      <div class="info-card">
+        <div class="info-card-title">配套 workbench 插件</div>
+        <div class="info-card-body" style="color:var(--text-tertiary)">
+          没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。
+          要让某个 workbench 自动选中这个 agent，给它的 forgeax-plugin.json
+          的 <code>provides.workbench</code> 加一行：
+          <pre style="background:var(--bg-2);padding:8px;border-radius:3px;margin:6px 0 0;overflow:auto">
+"preferredAgent": "${selectedAgent.id}"</pre>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  let html = `<div class="info-card-title">配套 workbench 插件 (${matches.length})</div>`;
+  for (const w of matches) {
+    const desc = pickLang(w.description) || '';
+    html += `
+      <div class="wb-row">
+        <div class="icon">${w.workbench?.icon ?? w.icon ?? '🧩'}</div>
+        <div class="body">
+          <div class="name">${escapeHtml(pickLang(w.displayName))}</div>
+          <div class="desc">${escapeHtml(desc)}</div>
+        </div>
+        <code style="font-size:11px;color:var(--text-tertiary)">${escapeHtml(w.id)}</code>
+      </div>
+    `;
+  }
+  root.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}
+
+// ─── boot ─────────────────────────────────────────────────────────────
+const SELECTED_LS_KEY = 'wb-agent-persona:selected-agent-id';
+
+// Resolve a host-supplied id (either short `iori` from /api/workbench/agents,
+// or full `@forgeax-plugin/agent-iori` plugin id) to a real agent in our list.
+function resolveAgentId(input) {
+  if (!input) return null;
+  const direct = agents.find((a) => a.id === input);
+  if (direct) return direct.id;
+  const byShort = agents.find((a) => a.agent?.id === input);
+  if (byShort) return byShort.id;
+  // Tolerate `agent-iori` short forms too
+  const byTail = agents.find((a) => a.id.endsWith(`/${input}`));
+  return byTail ? byTail.id : null;
+}
+
+channel.addEventListener('message', (e) => {
+  const msg = e.data;
+  if (msg?.type !== 'select-agent') return;
+  const requested = msg.pluginId ?? msg.id ?? msg.agentId;
+  const resolved = resolveAgentId(requested);
+  if (resolved && resolved !== selected) selectAgent(resolved);
+});
+
+loadAgents().then(() => {
+  if (pane !== 'center' || agents.length === 0) return;
+  let initial = null;
+  try {
+    initial = resolveAgentId(localStorage.getItem(SELECTED_LS_KEY));
+  } catch { /* private mode */ }
+  selectAgent(initial ?? agents[0].id);
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["gameId", "characterId", "manifest", "files"],
+  "additionalProperties": false,
+  "properties": {
+    "gameId": { "type": "string", "minLength": 1 },
+    "characterId": { "type": "string", "minLength": 1 },
+    "manifest": { "type": "object", "additionalProperties": true },
+    "files": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

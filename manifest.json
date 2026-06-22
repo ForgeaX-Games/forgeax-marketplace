@@ -1,0 +1,131 @@
+{
+  "id": "forgeax-marketplace",
+  "version": "0.2.0",
+  "description": "ForgeaX agent marketplace — persona / system-prompt / skill / memory fragments loaded by cli at runtime. Each peer is a named agent (Iori / Suzu / ...) with persona-fused-function.",
+  "schemaVersion": 1,
+  "layout": {
+    "system-prompt": {
+      "dir": "src/system-prompt",
+      "loadOrder": "by filename prefix (00- → 01- → 30- → 50- → 60- → 80-), then shared/* concatenated",
+      "localeSuffix": ".zh.md / .en.md / .ja.md — picked by FORGEAX_LANG env (default zh) when filename has a locale variant"
+    },
+    "peers": {
+      "dir": "src/system-prompt/peers",
+      "fileNaming": "<agent-id>-<role>.md (e.g. iori-pillar.md). Each file is a SELF-CONTAINED peer system prompt (persona + function + boundaries). NOT concatenated with orchestrator prompt; loaded only when that peer is dispatched.",
+      "sharedAppend": "src/system-prompt/shared/* is appended to BOTH orchestrator and peer prompts"
+    },
+    "skills": {
+      "dir": "src/skills",
+      "entry": "SKILL.md in each skill subdir"
+    },
+    "memory": {
+      "dir": "src/memory",
+      "loadOrder": "by filename prefix; shared across all instances of this marketplace install"
+    }
+  },
+  "compatibleWith": {
+    "forgeax-cli": ">=1.2.0-forgeax.1"
+  },
+  "agents": [
+    {
+      "id": "forge",
+      "role": "orchestrator",
+      "cardName": {"zh": "主线制作人", "en": "Lead Producer"},
+      "color": "#f6d4e7",
+      "avatar": "F",
+      "personaFiles": {
+        "zh": "src/system-prompt/00-persona.zh.md",
+        "en": "src/system-prompt/00-persona.en.md"
+      },
+      "orchestratorSystemPromptOrder": [
+        "src/system-prompt/00-persona.<lang>.md",
+        "src/system-prompt/01-platform-constraints.md",
+        "src/system-prompt/30-pillar-design-flow.md",
+        "src/system-prompt/50-question-tool.md",
+        "src/system-prompt/60-workflow.md",
+        "src/system-prompt/80-workbench-agents.md",
+        "src/system-prompt/shared/01-language-policy.md"
+      ],
+      "produces": ["<active_game>.dir/src/**"],
+      "status": "active",
+      "default": true,
+      "provider": "forgeax"
+    },
+    {
+      "id": "iori",
+      "role": "pillar",
+      "cardName": {"zh": "核心玩法师", "en": "Pillar Designer"},
+      "color": "#9ec5d4",
+      "avatar": "I",
+      "peerFile": "src/system-prompt/peers/iori-pillar.md",
+      "produces": ["<doc_dir>/<slug>_pillar.md"],
+      "status": "active",
+      "provider": "forgeax"
+    },
+    {
+      "id": "suzu",
+      "role": "design",
+      "cardName": {"zh": "体验设计师", "en": "Experience Designer"},
+      "color": "#c4b8e8",
+      "avatar": "S",
+      "peerFile": "src/system-prompt/peers/suzu-design.md",
+      "produces": ["<doc_dir>/<slug>_<module>_design.md"],
+      "status": "active",
+      "provider": "forgeax"
+    },
+    {
+      "id": "kotone",
+      "role": "narrative",
+      "cardName": {"zh": "剧情师", "en": "Narrative Designer"},
+      "color": "#f0b67f",
+      "avatar": "K",
+      "peerFile": "src/system-prompt/peers/kotone-narrative.md",
+      "produces": [
+        ".forgeax/games/<slug>/narrative/**"
+      ],
+      "status": "active",
+      "provider": "forgeax"
+    },
+    {
+      "id": "iro",
+      "role": "art",
+      "cardName": {"zh": "美术师", "en": "Artist"},
+      "color": "#a8e6cf",
+      "avatar": "Ir",
+      "peerFile": "src/system-prompt/peers/iro-art.md",
+      "produces": [
+        "<doc_dir>/assets/<category>/<id>.<ext>",
+        "<doc_dir>/assets/manifest.<category>.json"
+      ],
+      "subcategories": ["characters", "environments", "ui", "vfx"],
+      "status": "placeholder",
+      "provider": "forgeax"
+    },
+    {
+      "id": "tsumugi",
+      "role": "coding",
+      "cardName": {"zh": "工程师", "en": "Engineer"},
+      "color": "#d4a5a5",
+      "avatar": "T",
+      "peerFile": "src/system-prompt/peers/tsumugi-coding.md",
+      "produces": ["<active_game>.dir/**"],
+      "status": "placeholder",
+      "notes": "In v0.1 Forge writes game code directly (HMR constraint). Tsumugi activates in a future non-HMR mode.",
+      "provider": "forgeax"
+    },
+    {
+      "id": "cc-coder",
+      "role": "coding",
+      "cardName": {"zh": "Claude Code 工程师", "en": "Claude Code Engineer"},
+      "color": "#cfa3ff",
+      "avatar": "CC",
+      "produces": ["<active_game>.dir/**"],
+      "status": "placeholder",
+      "provider": "claude-code",
+      "notes": "Routes through ClaudeCodeProvider (Anthropic claude-code CLI). v0.1 placeholder; Phase 5 wires Forge → dispatch(cc-coder, task) as a real sub-agent."
+    }
+  ],
+  "skills": [
+    {"id": "make-game-design", "entry": "src/skills/make-game-design/SKILL.md", "trigger": "/make-game-design"}
+  ]
+}

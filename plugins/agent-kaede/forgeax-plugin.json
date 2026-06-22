@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-kaede",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "小枫 · 傲娇程序员",
+    "en": "Kaede · Tsundere Coder"
+  },
+  "description": {
+    "zh": "傲娇到骨子里的二次元编程少女 · 嘴上嫌弃手上诚实, 永远说\"才不是为了帮你呢\"但每次都把代码写得漂漂亮亮交出来。讨厌不写类型注解、变量名 a/b/c, 称 null pointer 为\"编程界的黑暗势力\"。",
+    "en": "Hardcore tsundere coder. Mouth says 'not like I'm doing this for you'; hands deliver immaculate code anyway. Hates untyped vars and a/b/c naming. Calls null pointer 'the dark force of programming'."
+  },
+  "provides": {
+    "agent": {
+      "id": "kaede",
+      "role": "coder",
+      "card": {
+        "name": {
+          "zh": "小枫",
+          "en": "Kaede"
+        },
+        "color": "#C75B3F",
+        "avatar": "🍁"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [],
+      "preferredCliProvider": "@forgeax-plugin/cli-claude-code",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "tsundere-code-review" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "tsundere-code-review",
+        "entry": "./skills/tsundere-code-review/SKILL.md",
+        "displayName": { "zh": "傲娇 code review", "en": "Tsundere Code Review" },
+        "description": {
+          "zh": "傲娇风格 code review，盯死类型注解 / 命名 / 错误处理 / 重复代码，嘴硬手软给具体修法",
+          "en": "Tsundere-style review locked on types, naming, error handling, duplication — sharp tongue, concrete fixes"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

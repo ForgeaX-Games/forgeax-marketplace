@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/skill-author-plugin",
+  "version": "0.1.0",
+  "kind": "skill",
+  "displayName": {
+    "zh": "插件作者向导",
+    "en": "Plugin Author Guide"
+  },
+  "description": {
+    "zh": "首条「四条 authoring path」之一 · /author-plugin 触发,把作者从空白引导到第一个可加载的 forgeax-plugin.json + 一个最小 hello tool。非工程师玩家用得动。",
+    "en": "First of the four authoring paths: typing /author-plugin walks the user through scaffolding a working forgeax-plugin.json plus a minimal hello tool — no TypeScript expertise required."
+  },
+  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "icon": "📝",
+  "keywords": ["meta", "authoring", "plugin", "skill", "scaffold"],
+  "provides": {
+    "skills": [
+      {
+        "id": "meta:author-plugin",
+        "entry": "./SKILL.md",
+        "trigger": "/author-plugin",
+        "displayName": {
+          "zh": "插件作者向导",
+          "en": "Plugin Author Guide"
+        },
+        "description": {
+          "zh": "10 分钟从零做出 hello-plugin。包含 manifest 模板 + tool entry.backend 模板 + 验证步骤。",
+          "en": "Bootstrap a hello-plugin in 10 minutes — manifest template, entry.backend skeleton, and verification steps included."
+        }
+      }
+    ]
+  },
+  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+}

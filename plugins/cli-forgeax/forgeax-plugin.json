@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/cli-forgeax",
+  "version": "0.1.0",
+  "kind": "cli-provider",
+  "displayName": {
+    "zh": "ForgeaX CLI",
+    "en": "ForgeaX CLI"
+  },
+  "description": {
+    "zh": "in-repo packages/cli 的 forgeax 命令适配 · spawn `forgeax chat --stream` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/forgeax/,本 plugin 声明 metadata + Bus 入口。",
+    "en": "In-repo packages/cli 'forgeax' command adapter. Spawns `forgeax chat --stream` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/forgeax/; this plugin declares metadata + Bus entry."
+  },
+  "provides": {
+    "cliProvider": {
+      "id": "@forgeax-plugin/cli-forgeax",
+      "displayName": "ForgeaX CLI",
+      "models": [
+        "forgeax-default"
+      ],
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "toolCalls": true,
+        "subAgents": true,
+        "sessions": true
+      },
+      "runner": {
+        "cmd": "forgeax",
+        "args": [
+          "chat",
+          "--stream"
+        ]
+      }
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

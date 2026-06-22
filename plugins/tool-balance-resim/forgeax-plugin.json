@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/tool-balance-resim",
+  "version": "0.1.0",
+  "kind": "tool",
+  "displayName": {
+    "zh": "战斗重模拟",
+    "en": "Balance Resim"
+  },
+  "description": {
+    "zh": "纯 tool plugin (modules/02 §201-§214) · 暴露 balance:resim — 对指定 scenario 跑 N 次 PvP/PvE 重模拟、返回 winRate + 95% CI,跑 in-process worker。给 /make-game-design 与 wb-balance 共用。",
+    "en": "Pure-tool plugin. Exposes balance:resim — N PvP/PvE resims for a scenario returning winRate + 95% CI. Runs in-process worker. Shared by /make-game-design and wb-balance."
+  },
+  "provides": {
+    "tools": [
+      {
+        "id": "balance:resim",
+        "args": "./schemas/resim.args.json",
+        "returns": "./schemas/resim.returns.json",
+        "exposedToAI": true
+      }
+    ],
+    "events": [
+      {
+        "name": "balance.resim.completed",
+        "payload": "./schemas/resim-completed.event.json"
+      }
+    ]
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

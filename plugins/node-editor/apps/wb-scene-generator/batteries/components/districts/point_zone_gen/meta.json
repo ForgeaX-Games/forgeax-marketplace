@@ -1,0 +1,51 @@
+{
+  "id": "point_zone_gen",
+  "label": "点生区域",
+  "description": "从给定点位按目标面积生长出有机区域，每个区域输出独立单值网格；高度字段透传到名称清单的 height 上，由渲染器自动作立面化处理。",
+  "description-en": "Grows organic zones from given seed points with target area each; outputs one single-value grid per zone, with the height field passed through to the name list (height) for renderer cliff/elevation processing.",
+  "icon": "扁平插画风格小图标。深色网格底面散落几块不规则有机斑块，每块从中心点向外放射性生长，浅色斑块配深色网格底，主色2种。",
+  "version": "1.0.0",
+  "tags": ["zone", "district", "point", "grow", "organic", "procedural", "pcg"],
+  "tag_labels": ["区域", "分区", "点位", "生长", "有机", "程序生成", "PCG"],
+  "inputs": [
+    {
+      "name": "grids",
+      "type": "array",
+      "label": "输入网格列表",
+      "description": "输入网格或网格列表，仅用于确定输出网格的尺寸（行/列数）以及推断起始 ID（取所有输入网格的最大值 + 1 作为第一个区域 ID）",
+      "description-en": "Input grid or list of grids; used only to determine the output grid size and starting mask ID (max of all inputs + 1)."
+    },
+    {
+      "name": "regions",
+      "type": "string",
+      "label": "区域定义",
+      "description": "区域描述 JSON 字符串或数组，每项为 [x, y, area, height]：x/y 是种子点（列/行），area 是目标面积（格数），height 是立面高度（透传到名称清单 height 字段，由渲染器自动处理）",
+      "description-en": "Region descriptors as JSON string or array. Each item: [x, y, area, height]. x/y = seed point (col/row), area = target cell count, height = elevation passed through to nameList.height for renderer auto-processing.",
+      "default": "[]"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "随机种子，0 使用当前时间。每个区域基于此种子加质数偏移以保证形态各异",
+      "description-en": "Random seed; 0 uses current timestamp. Each zone derives its own seed offset.",
+      "default": 0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGridList",
+      "type": "array",
+      "label": "区域网格列表",
+      "description": "单值网格列表，每个区域对应一张网格，只含该区域 ID 和 0，顺序与输入区域列表一致",
+      "description-en": "List of single-value grids, one per zone, each containing only that zone's ID or 0, aligned with the input region list."
+    },
+    {
+      "name": "outputNameList",
+      "type": "array",
+      "label": "名称清单",
+      "description": "名称清单，格式 [{id, name: '区域 N', type: 'tile', height}]，与输出网格列表顺序一致",
+      "description-en": "Name list as [{id, name: '区域 N', type: 'tile', height}], aligned with the output grid list."
+    }
+  ]
+}

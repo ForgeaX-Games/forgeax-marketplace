@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:rename-character returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "newAbsPath"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "newAbsPath": { "type": "string" }
+  }
+}

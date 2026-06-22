@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-reia",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Reia · 影游导演", "en": "Reia · Reel Director" },
+  "description": {
+    "zh": "互动影游 (FMV) 导演 — 做「影游 / 互动影片 / 真人短剧 / 可点按悬念片 / 限时点按恋爱选择片」(《完蛋!我被美女包围了》类) 的不二人选。拼提示词、调视频、定 QTE 节拍、织剧情分支与多结局。专门驱动 wb-reel「影游工坊」插件，把作者一句 idea 变成可点按、可试玩的悬念片。用户说「我想要一个影游 / 互动影片 / FMV / 选择驱动的悬念片」时就派给她。(长篇分支剧本 / 94 品类剧情管线归 kotone,不归她。)",
+    "en": "Interactive FMV director — the go-to agent for 影游 / interactive films / clickable suspense reels / timed-choice dating shorts (think 'Love Is All Around'-style FMV). Forges prompts, plans video shots, paces QTEs and weaves branching narratives with multiple endings. Drives the wb-reel workbench end-to-end, turning one idea into a clickable, playable suspense film. Route here whenever the user wants an interactive film / FMV / choice-driven reel. (Long branching scripts / the 94-category narrative pipeline belong to kotone, not Reia.)"
+  },
+  "provides": {
+    "agent": {
+      "id": "reia",
+      "role": "reel-director",
+      "card": {
+        "name": { "zh": "Reia", "en": "Reia" },
+        "color": "#D4A5A5",
+        "avatar": "🎬"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/*.scenario.json",
+        "<active_game>.dir/**/scenes/**",
+        "<active_game>.dir/**/reel-shotlist.md",
+        "<active_game>.dir/**/qte-pacing.md",
+        ".reel-scenarios/**",
+        ".reel-assets/**"
+      ],
+      "agentTags": ["reel", "fmv", "interactive-film", "影游", "互动影游", "qte", "branch", "scenario", "suspense"],
+      "tools": [
+        "reel:*",
+        "narrative:start-pipeline",
+        "narrative:resume-pipeline",
+        "narrative:get-run-status",
+        "narrative:get-story-tree",
+        "narrative:list-runs",
+        "narrative:read-file",
+        "narrative:list-files",
+        "narrative:save-step-edit",
+        "narrative:analyze-impact",
+        "narrative:regenerate-step"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

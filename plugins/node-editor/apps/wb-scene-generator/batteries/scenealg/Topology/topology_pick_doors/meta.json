@@ -1,0 +1,77 @@
+{
+  "id": "alg_topology_pick_doors",
+  "label": "拓扑开门",
+  "name-en": "TopologyPickDoors",
+  "description": "在输入拓扑（墙状 0/1 grid）上挑出 count 个宽度为 width 的门洞段。先在每段连续墙体（≥6 格）的中心找候选，要求候选至少有一侧紧邻空格；若候选不足则 fallback 到无段长限制的逐格枚举。输出只包含被挑中的门洞格。",
+  "description-en": "Picks `count` doorway segments of `width` cells from an input topology (wall-like 0/1 grid). First seeks segment-center candidates within continuous wall runs (>=6 cells), requiring an empty neighbor on the perpendicular side; falls back to per-cell enumeration if needed. Output contains only the chosen door cells.",
+  "icon": "深色背景上一条水平细线中间出现一段亮色短缺口表示门洞，扁平插画风格，简洁小图标，主色2种。",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": [
+    "topology",
+    "door",
+    "opening",
+    "subsample"
+  ],
+  "tag_labels": [
+    "拓扑",
+    "门",
+    "开洞",
+    "子采样"
+  ],
+  "inputs": [
+    {
+      "name": "topology",
+      "type": "grid",
+      "required": true,
+      "label": "输入拓扑",
+      "description": "要在其上开门的 0/1 拓扑 grid（通常是墙体）。",
+      "description-en": "0/1 topology grid (typically a wall) where doors will be picked."
+    },
+    {
+      "name": "count",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "precision": 0,
+      "label": "门数量",
+      "description": "目标开门数量；若候选不足，实际数量可能小于此值。",
+      "description-en": "Target number of doors; the actual count may be smaller if candidates are insufficient."
+    },
+    {
+      "name": "width",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 6,
+      "precision": 0,
+      "label": "门宽度",
+      "description": "门洞宽度（格数）。",
+      "description-en": "Doorway width in cells."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "default": 0,
+      "label": "随机种子",
+      "description": "随机种子，0 使用当前时间。",
+      "description-en": "Random seed; 0 uses current timestamp."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "topology",
+      "type": "grid",
+      "label": "门拓扑",
+      "description": "挑出的门洞位置 0/1 grid，与输入拓扑同形状。",
+      "description-en": "0/1 topology of chosen door cells, same shape as input."
+    },
+    {
+      "name": "placed",
+      "type": "number",
+      "label": "实际数量",
+      "description": "成功放置的门数（可能小于 count）。",
+      "description-en": "Number of doors actually placed (may be less than count)."
+    }
+  ]
+}
