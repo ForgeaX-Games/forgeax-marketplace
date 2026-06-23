@@ -86,7 +86,7 @@ describe('skills · 文档卫生', () => {
 
 describe('skills · scenario-architect / batch-prompt-trio (P0 强约束)', () => {
   /**
-   * 这两个 skill 经过 Claude Code 风格重写，必须包含若干"硬指令前缀"
+   * 这两个 skill 经过 the reference agent CLI 风格重写，必须包含若干"硬指令前缀"
    * 与"自检块"——这是 Claude/GPT 对约束注意力权重的关键。
    * 这组测试不验语义，只验"风格 marker 仍在"，防止后续 PR 误删。
    */
@@ -128,7 +128,7 @@ describe('skills · scenario-architect / batch-prompt-trio (P0 强约束)', () =
 
 describe('skills · P1 重写 (outline / prose-beats / storyboard / kinetic) 风格 marker', () => {
   /**
-   * P1 批次：把第二轮 Claude Code 风格重写过的几个 skill 也锁住风格 marker,
+   * P1 批次：把第二轮 the reference agent CLI 风格重写过的几个 skill 也锁住风格 marker,
    * 防止后续 PR 误删 IMPORTANT/CRITICAL 前缀或自检块。
    *
    * 不检语义,只检 marker 在场。
@@ -181,7 +181,7 @@ describe('skills · P1 重写 (outline / prose-beats / storyboard / kinetic) 风
 
 describe('skills · P2 重写 (cinema-image / cinema-video / dialogue / image-seed / index-scanner) 风格 marker', () => {
   /**
-   * P2 批次：第三轮 Claude Code 风格重写过的 5 个 skill,
+   * P2 批次：第三轮 the reference agent CLI 风格重写过的 5 个 skill,
    * 同样锁住 IMPORTANT/CRITICAL + NEVER/ALWAYS + 自检块 + <bad-example> 四件套.
    */
 
@@ -217,7 +217,7 @@ describe('skills · P2 重写 (cinema-image / cinema-video / dialogue / image-se
 describe('skills · P3 Forge 模块化新批 (style-curator / logline / synopsis / forge-chat-aligner) 风格 marker', () => {
   /**
    * P3 批次：PR5 Forge 模块化锻造管道引入的 4 个新 skill,
-   * 都按 Claude Code 风格写成. 锁住 IMPORTANT/CRITICAL + NEVER/ALWAYS + 自检块 + <bad-example> 四件套,
+   * 都按 the reference agent CLI 风格写成. 锁住 IMPORTANT/CRITICAL + NEVER/ALWAYS + 自检块 + <bad-example> 四件套,
    * 防止后续重构误删风格 marker.
    */
 
