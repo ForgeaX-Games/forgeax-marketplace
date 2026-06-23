@@ -9,7 +9,7 @@ import { DEFAULT_EPISODE_ID } from './schemaMigrate'
  *   - 只有一个占位 scene（rootSceneId 指向它），让 StagePane / StoryTree
  *     都能正常渲染（如果 scenes 为空，rootSceneId 会指向未定义场景，会崩）
  *   - id 基于时间戳生成，避免和 demo / 历史条目撞 id
- *   - schemaVersion = 6（最新），避免首次加载就走迁移
+ *   - schemaVersion = 7（最新），避免首次加载就走迁移
  *
  * 为什么不复用 getDemoScenario().scenes + 清空？
  *   demo 是"想把第一印象做得漂亮"的样例；新故事是"一张白纸"。语义不同，
@@ -46,8 +46,9 @@ export function makeBlankScenario(opts: MakeBlankOpts = {}): Scenario {
     title: opts.title ?? DEFAULT_TITLE,
     rootSceneId,
     defaultCharMs: 32,
-    schemaVersion: 6,
+    schemaVersion: 8,
     variables: {},
+    items: {},
     characters: {},
     locations: {},
     episodes: [defaultEpisode],

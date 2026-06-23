@@ -381,7 +381,11 @@ export default defineConfig(({ mode, command }) => {
     },
     server: {
       host: true,
-      port: 15175,
+      // run.sh allocates a (possibly shifted) frontend port and passes it as
+      // VITE_DEV_PORT — honoring it lets the stack coexist with a parallel
+      // forgeax-studio that already holds the 15175 default. Falls back to
+      // 15175 for a bare `npm run dev`. (Mirrors the node-editor apps.)
+      port: process.env.VITE_DEV_PORT ? Number(process.env.VITE_DEV_PORT) : 15175,
       strictPort: true,
       allowedHosts: true,
       hmr: {

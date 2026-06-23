@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "charId": { "type": "string" },
+    "name": { "type": "string" },
+    "role": { "type": "string" },
+    "manifestPath": { "type": "string" },
+    "portraitUrl": { "type": ["string", "null"] }
+  }
+}

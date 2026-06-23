@@ -137,6 +137,19 @@ export function collectScenarioRefs(scenario: Scenario): RefCell[] {
     }
   }
 
+  // ─── Inventory items ─────────────────────────────────────────────
+  if (scenario.items) {
+    for (const [iid, it] of Object.entries(scenario.items)) {
+      if (refLooksPackable(it.iconMediaId)) {
+        cells.push({
+          get: () => it.iconMediaId!,
+          set: (v) => { it.iconMediaId = v },
+          label: `item/${iid}/icon`,
+        })
+      }
+    }
+  }
+
   // ─── UIStyle ─────────────────────────────────────────────────────
   if (scenario.uiStyle && refLooksPackable(scenario.uiStyle.refImageId)) {
     const ui = scenario.uiStyle
@@ -196,6 +209,18 @@ export function collectScenarioRefs(scenario: Scenario): RefCell[] {
           get: () => clip.ref,
           set: (v) => { clip.ref = v },
           label: `scene/${sid}/audio/${clip.id}`,
+        })
+      }
+    }
+
+    // scene.stickerClips[] —— 自定义图片贴纸的 mediaId（内置图标/花字不引用素材）
+    if (Array.isArray(sc.stickerClips)) {
+      for (const stk of sc.stickerClips) {
+        if (stk.kind !== 'image' || !refLooksPackable(stk.mediaId)) continue
+        cells.push({
+          get: () => stk.mediaId!,
+          set: (v) => { stk.mediaId = v },
+          label: `scene/${sid}/sticker/${stk.id}`,
         })
       }
     }

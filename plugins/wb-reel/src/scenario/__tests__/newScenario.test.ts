@@ -52,7 +52,7 @@ describe('makeBlankScenario', () => {
 
   it('是最新 schema 版本（避免首次加载就触发迁移）', () => {
     const s = makeBlankScenario()
-    expect(s.schemaVersion).toBe(6)
+    expect(s.schemaVersion).toBe(8)
   })
 
   it('传 title 覆盖默认值', () => {

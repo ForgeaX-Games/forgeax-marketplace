@@ -10,6 +10,7 @@ import { injectStyleOnce } from '../styles/injectStyle'
 import {
   describeCondition,
   isBranchAvailable,
+  type ItemState,
   type VarState,
 } from './conditionEval'
 
@@ -32,9 +33,11 @@ interface Props {
   vars?: VarState
   /** 已访问场景 id —— 用于 visited 条件 */
   visitedSceneIds?: string[]
+  /** 运行时背包持有量 —— 用于 hasItem 条件 */
+  ownedItems?: ItemState
 }
 
-export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds }: Props) {
+export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds, ownedItems }: Props) {
   const scenario = useScenarioStore((s) => s.scenario)
   const [picked, setPicked] = useState<string | null>(null)
 
@@ -46,8 +49,12 @@ export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds }: Props) {
   //   - 条件不满足 + gateMode='lock' → 显示但置灰锁定（悬停看所需条件）
   //   - 条件不满足 + gateMode='hide'（默认）→ 直接不渲染
   const ctx = useMemo(
-    () => ({ vars: vars ?? {}, visitedSceneIds: new Set(visitedSceneIds ?? []) }),
-    [vars, visitedSceneIds],
+    () => ({
+      vars: vars ?? {},
+      visitedSceneIds: new Set(visitedSceneIds ?? []),
+      ownedItems: ownedItems ?? {},
+    }),
+    [vars, visitedSceneIds, ownedItems],
   )
   const choices = useMemo(() => {
     return scene.branches

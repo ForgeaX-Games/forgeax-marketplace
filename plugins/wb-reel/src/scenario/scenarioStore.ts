@@ -18,11 +18,19 @@ import type {
   Scenario,
   Scene,
   ScenePrompts,
+  SearchSegmentClip,
   Shot,
   StudioMode,
+  TextOverlayClip,
   UIStyle,
   VisualStyle,
   VideoConfig,
+  FilterClip,
+  AdjustClip,
+  EffectClip,
+  StickerClip,
+  TransitionSpec,
+  ClipAnimSpec,
 } from './types'
 import { getDemoScenario } from './demoScenario'
 import { makeBlankScenario } from './blankScenario'
@@ -228,6 +236,40 @@ export interface ScenarioStore {
     patch: Partial<Omit<MinigameClip, 'id'>>,
   ) => void
 
+  // ─── v7 · 文字叠加 clip（scene.textOverlays） ───────────────────
+  addTextOverlay: (sceneId: string, clip: TextOverlayClip) => void
+  removeTextOverlay: (sceneId: string, clipId: string) => void
+  updateTextOverlay: (
+    sceneId: string,
+    clipId: string,
+    patch: Partial<Omit<TextOverlayClip, 'id'>>,
+  ) => void
+
+  // ─── v7 · 搜索段 clip（scene.searchSegments） ───────────────────
+  addSearchSegment: (sceneId: string, clip: SearchSegmentClip) => void
+  removeSearchSegment: (sceneId: string, clipId: string) => void
+  updateSearchSegment: (
+    sceneId: string,
+    clipId: string,
+    patch: Partial<Omit<SearchSegmentClip, 'id'>>,
+  ) => void
+
+  // ─── v8 · 剪映式后期效果（filter/adjust/effect/sticker + transition/clipAnim） ─
+  addFilterClip: (sceneId: string, clip: FilterClip) => void
+  removeFilterClip: (sceneId: string, clipId: string) => void
+  updateFilterClip: (sceneId: string, clipId: string, patch: Partial<Omit<FilterClip, 'id'>>) => void
+  addAdjustClip: (sceneId: string, clip: AdjustClip) => void
+  removeAdjustClip: (sceneId: string, clipId: string) => void
+  updateAdjustClip: (sceneId: string, clipId: string, patch: Partial<Omit<AdjustClip, 'id'>>) => void
+  addEffectClip: (sceneId: string, clip: EffectClip) => void
+  removeEffectClip: (sceneId: string, clipId: string) => void
+  updateEffectClip: (sceneId: string, clipId: string, patch: Partial<Omit<EffectClip, 'id'>>) => void
+  addStickerClip: (sceneId: string, clip: StickerClip) => void
+  removeStickerClip: (sceneId: string, clipId: string) => void
+  updateStickerClip: (sceneId: string, clipId: string, patch: Partial<Omit<StickerClip, 'id'>>) => void
+  setTransition: (sceneId: string, spec: TransitionSpec | undefined) => void
+  setClipAnim: (sceneId: string, spec: ClipAnimSpec | undefined) => void
+
   /**
    * 一键清空时间轴上的可见 clip —— 不动 scene 基础信息（title / media /
    * background / characterIds / locationId / durationMs / pos），
@@ -394,6 +436,10 @@ export interface ScenarioStore {
   /** 数值/变量（v6） · 与 Scenario.variables 对应（好感度 / flag / 积分） */
   upsertVariable: (v: GameVariable) => void
   removeVariable: (id: string) => void
+  /** 背包系统(v7)：写入/更新一个物品定义。 */
+  upsertItem: (item: import('./types').InventoryItem) => void
+  /** 背包系统(v7)：删除一个物品定义。 */
+  removeItem: (id: string) => void
 
   setUIStyle: (patch: Partial<UIStyle>) => void
   /**
@@ -406,6 +452,11 @@ export interface ScenarioStore {
    * 运镜 / 剪辑节奏 / 色彩基调。传 undefined 清除（回到默认 persona）。
    */
   setDirectorStyle: (style: DirectorStyleId | undefined) => void
+  /**
+   * 模块开关 —— v7 新增。把某模块标记为启用/关闭(写入 scenario.modules)。
+   * 关闭后生产/运行时会跳过该模块(见 scenario/moduleFlags.ts)。
+   */
+  setModuleEnabled: (moduleId: import('./types').ModuleId, enabled: boolean) => void
   /** 3D 相机调度：写入/更新一个 blockout（按 id 进 scenario.blockouts 注册表）。 */
   upsertBlockout: (blockout: Blockout) => void
   /** 3D 相机调度：删除一个 blockout，并清除指向它的所有 scene.blockoutRef。 */
@@ -1187,6 +1238,116 @@ export const useScenarioStore = create<ScenarioStore>()(
       })),
     ),
 
+  addTextOverlay: (sceneId, clip) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        textOverlays: [...(scene.textOverlays ?? []), clip],
+      })),
+    ),
+
+  removeTextOverlay: (sceneId, clipId) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        textOverlays: (scene.textOverlays ?? []).filter((c) => c.id !== clipId),
+      })),
+    ),
+
+  updateTextOverlay: (sceneId, clipId, patch) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        textOverlays: (scene.textOverlays ?? []).map((c) =>
+          c.id === clipId ? { ...c, ...patch } : c,
+        ),
+      })),
+    ),
+
+  addSearchSegment: (sceneId, clip) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        searchSegments: [...(scene.searchSegments ?? []), clip],
+      })),
+    ),
+
+  removeSearchSegment: (sceneId, clipId) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        searchSegments: (scene.searchSegments ?? []).filter((c) => c.id !== clipId),
+      })),
+    ),
+
+  updateSearchSegment: (sceneId, clipId, patch) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        searchSegments: (scene.searchSegments ?? []).map((c) =>
+          c.id === clipId ? { ...c, ...patch } : c,
+        ),
+      })),
+    ),
+
+  // ─── v8 · 后期效果 clip CRUD ──────────────────────────────────────
+  addFilterClip: (sceneId, clip) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, filterClips: [...(scene.filterClips ?? []), clip],
+    }))),
+  removeFilterClip: (sceneId, clipId) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, filterClips: (scene.filterClips ?? []).filter((c) => c.id !== clipId),
+    }))),
+  updateFilterClip: (sceneId, clipId, patch) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, filterClips: (scene.filterClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
+    }))),
+
+  addAdjustClip: (sceneId, clip) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, adjustClips: [...(scene.adjustClips ?? []), clip],
+    }))),
+  removeAdjustClip: (sceneId, clipId) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, adjustClips: (scene.adjustClips ?? []).filter((c) => c.id !== clipId),
+    }))),
+  updateAdjustClip: (sceneId, clipId, patch) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, adjustClips: (scene.adjustClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
+    }))),
+
+  addEffectClip: (sceneId, clip) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, effectClips: [...(scene.effectClips ?? []), clip],
+    }))),
+  removeEffectClip: (sceneId, clipId) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, effectClips: (scene.effectClips ?? []).filter((c) => c.id !== clipId),
+    }))),
+  updateEffectClip: (sceneId, clipId, patch) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, effectClips: (scene.effectClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
+    }))),
+
+  addStickerClip: (sceneId, clip) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, stickerClips: [...(scene.stickerClips ?? []), clip],
+    }))),
+  removeStickerClip: (sceneId, clipId) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, stickerClips: (scene.stickerClips ?? []).filter((c) => c.id !== clipId),
+    }))),
+  updateStickerClip: (sceneId, clipId, patch) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({
+      ...scene, stickerClips: (scene.stickerClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
+    }))),
+
+  setTransition: (sceneId, spec) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({ ...scene, transition: spec }))),
+  setClipAnim: (sceneId, spec) =>
+    set((s) => mutateScene(s, sceneId, (scene) => ({ ...scene, clipAnim: spec }))),
+
   clearSceneTimeline: (sceneId) =>
     set((s) => {
       const scene = s.scenario.scenes[sceneId]
@@ -1747,6 +1908,21 @@ export const useScenarioStore = create<ScenarioStore>()(
       return { scenario: { ...s.scenario, variables: next } }
     }),
 
+  upsertItem: (item) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        items: { ...(s.scenario.items ?? {}), [item.id]: item },
+      },
+    })),
+
+  removeItem: (id) =>
+    set((s) => {
+      const next = { ...(s.scenario.items ?? {}) }
+      delete next[id]
+      return { scenario: { ...s.scenario, items: next } }
+    }),
+
   setPropRefImage: (id, refImageId) =>
     set((s) => {
       const p = s.scenario.props?.[id]
@@ -1783,6 +1959,14 @@ export const useScenarioStore = create<ScenarioStore>()(
       scenario: {
         ...s.scenario,
         directorStyle: style,
+      },
+    })),
+
+  setModuleEnabled: (moduleId, enabled) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        modules: { ...(s.scenario.modules ?? {}), [moduleId]: enabled },
       },
     })),
 

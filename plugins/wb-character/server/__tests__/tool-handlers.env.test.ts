@@ -5,8 +5,8 @@
  * `requestedEnv`; bypassing it would defeat the sandbox / Bus permission
  * layer (see 15-IMPLEMENTATION-COVERAGE.md gap #2).
  *
- * Strategy: spy on `@server-lib/character-forge` so we can observe the ctx
- * the dispatch layer forwards. We only need to confirm two things:
+ * Strategy: spy on the plugin-local `./character-forge` SSOT so we can observe
+ * the ctx the dispatch layer forwards. We only need to confirm two things:
  *
  *   1. `ctx.env` reaches the forge handler verbatim (no merge with
  *      process.env, no overrides).
@@ -21,7 +21,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const listSpy = vi.fn()
 const getSpy = vi.fn()
 
-vi.mock('../../../../../server/src/lib/character-forge/index', () => ({
+vi.mock('../character-forge', () => ({
   listCharacters: (ctx: unknown, slug: string) => {
     listSpy(ctx, slug)
     return { slug, items: [] }

@@ -60,6 +60,13 @@ export type ToolbarSelection =
   | { kind: 'cue'; id: string }
   | { kind: 'branch'; id: string }
   | { kind: 'minigame'; id: string }
+  | { kind: 'textOverlay'; id: string }
+  | { kind: 'searchSegment'; id: string }
+  | { kind: 'filter'; id: string }
+  | { kind: 'adjust'; id: string }
+  | { kind: 'effect'; id: string }
+  | { kind: 'sticker'; id: string }
+  | { kind: 'transition'; id: string }
   // v3.9.8：video 是"每场景唯一"的视频裁剪条（scene.media.kind='VIDEO'），
   //   没有独立 id，统一用 'scene:<sceneId>' 之类的自描述字符串方便调试。
   | { kind: 'video'; id: string }
@@ -324,6 +331,20 @@ function selLabel(kind: ToolbarSelection['kind']): string {
       return 'BRANCH'
     case 'minigame':
       return 'MINIGAME'
+    case 'textOverlay':
+      return 'TEXT'
+    case 'searchSegment':
+      return 'SEARCH'
+    case 'filter':
+      return 'FILTER'
+    case 'adjust':
+      return 'ADJUST'
+    case 'effect':
+      return 'EFFECT'
+    case 'sticker':
+      return 'STICKER'
+    case 'transition':
+      return 'TRANS'
     case 'video':
       return 'VIDEO'
   }

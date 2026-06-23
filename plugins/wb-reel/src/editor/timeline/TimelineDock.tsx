@@ -21,18 +21,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AudioRole,
-  Branch,
-  BranchKind,
-  ConditionClause,
   DialogueLine,
-  GameVariable,
-  GameVariableKind,
   QTECueShape,
   Scenario,
-  VarEffect,
+  Scene,
+  SearchSegmentClip,
+  TextOverlayClip,
 } from '../../scenario/types'
+import { FONT_PRESETS } from './fontPresets'
+import { buildSearchLoopVideoPrompt } from '../../forge/modules/searchLoopVideo'
 import { useMediaStore, type MediaEntry } from '../../media/mediaStore'
 import { useScenarioStore } from '../../scenario/scenarioStore'
+import { isModuleEnabled } from '../../scenario/moduleFlags'
 import { useShellStore } from '../../shell/shellStore'
 import { MINIGAMES } from '../../minigames/registry'
 import { filterEnabledMinigames } from '../../minigames/filterEnabledMinigames'
@@ -45,13 +45,23 @@ import {
   type DockDropPayload,
 } from './dndTypes'
 import { useDialogueSelection } from './dialogueSelection'
+import { useClipSelection } from './clipSelection'
 
 interface Props {
   scenario: Scenario
   currentSceneId: string
 }
 
-type Tab = 'assets' | 'dialogue' | 'cue' | 'branch' | 'audio' | 'image' | 'video' | 'minigame' | 'vars'
+type Tab =
+  | 'assets'
+  | 'dialogue'
+  | 'text'
+  | 'cue'
+  | 'audio'
+  | 'minigame'
+  | 'search'
+  | 'image'
+  | 'video'
 
 const EMPTY_IDS: string[] = []
 
@@ -72,6 +82,21 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
       setTab('dialogue')
     }
   }, [selectedDialogueId])
+  // 文字叠加 / 搜索段：选中时自动切到对应 tab（与 dialogue 同理）
+  const selectedTextId = useClipSelection((s) => s.textOverlayId)
+  const selectedSearchId = useClipSelection((s) => s.searchSegmentId)
+  const prevSelTextRef = useRef<string | null>(null)
+  const prevSelSearchRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevSelTextRef.current
+    prevSelTextRef.current = selectedTextId
+    if (selectedTextId && selectedTextId !== prev) setTab('text')
+  }, [selectedTextId])
+  useEffect(() => {
+    const prev = prevSelSearchRef.current
+    prevSelSearchRef.current = selectedSearchId
+    if (selectedSearchId && selectedSearchId !== prev) setTab('search')
+  }, [selectedSearchId])
   // 2026-04-30：去掉 Dock 里的"图像 / 视频"两个 tab —— 功能与右侧
   // "资产生成 · 素材库"（SceneAssetGallery）完全重叠，作者反馈多余。
   // 保留 MediaDock 组件定义以便必要时恢复；这里只是把入口摘掉。
@@ -80,24 +105,20 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
       <div className="ks-dock-tabs" role="tablist">
         <DockTab cur={tab} me="assets" onSel={setTab} icon="🎬" label="素材库" />
         <DockTab cur={tab} me="dialogue" onSel={setTab} icon="💬" label="字幕" />
+        <DockTab cur={tab} me="text" onSel={setTab} icon="🆎" label="文字" />
         <DockTab cur={tab} me="cue" onSel={setTab} icon="⚡" label="QTE" />
-        <DockTab cur={tab} me="branch" onSel={setTab} icon="⎇" label="分支" />
         <DockTab cur={tab} me="audio" onSel={setTab} icon="♪" label="音频" />
         <DockTab cur={tab} me="minigame" onSel={setTab} icon="🎮" label="小游戏" />
-        <DockTab cur={tab} me="vars" onSel={setTab} icon="#" label="数值" />
+        <DockTab cur={tab} me="search" onSel={setTab} icon="🔍" label="搜索" />
       </div>
       <div className="ks-dock-body">
         {tab === 'assets' && <AssetsDock sceneId={currentSceneId} />}
         {tab === 'dialogue' && <DialogueDock />}
+        {tab === 'text' && <TextOverlayDock />}
         {tab === 'cue' && <CueDock />}
-        {tab === 'branch' && (
-          <BranchDock scenario={scenario} currentSceneId={currentSceneId} />
-        )}
         {tab === 'audio' && <AudioDock currentSceneId={currentSceneId} />}
         {tab === 'minigame' && <MinigameDock />}
-        {tab === 'vars' && (
-          <VarsDock scenario={scenario} currentSceneId={currentSceneId} />
-        )}
+        {tab === 'search' && <SearchSegmentDock scenario={scenario} currentSceneId={currentSceneId} />}
       </div>
       <div className="ks-dock-hint ks-mono">
         · 填好信息 · 按住拖到左侧时间轴 ·
@@ -551,552 +572,254 @@ function SegBtn<T extends string>({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 分支
+// 文字叠加（剪映 / PR 式贴字）—— v7
 // ─────────────────────────────────────────────────────────────────────
-function BranchDock({
-  scenario,
-  currentSceneId,
-}: {
-  scenario: Scenario
-  currentSceneId: string
-}) {
-  const options = useMemo(() => {
-    return Object.values(scenario.scenes)
-      .filter((s) => s.id !== currentSceneId)
-      .map((s) => ({ id: s.id, title: s.title ?? s.id }))
-  }, [scenario.scenes, currentSceneId])
-
-  const [targetId, setTargetId] = useState<string>(options[0]?.id ?? '')
-  const [label, setLabel] = useState('')
-  const [branchKind, setBranchKind] = useState<BranchKind>('choice')
-
-  const canDrag = !!targetId
-  const payload: DockDropPayload = {
-    kind: 'branch',
-    targetSceneId: targetId,
-    label: label.trim() || undefined,
-    branchKind,
-  }
+function TextOverlayDock() {
+  const scene = useScenarioStore((s) => s.scenario.scenes[s.selectedSceneId])
+  const selectedId = useClipSelection((s) => s.textOverlayId)
+  const selected = scene?.textOverlays?.find((t) => t.id === selectedId)
 
   return (
-    <div className="ks-dock-card">
-      <label className="ks-dock-field">
-        <span>连线类型</span>
-        <select
-          value={branchKind}
-          onChange={(e) => setBranchKind(e.target.value as BranchKind)}
-        >
-          <option value="choice">玩家选择</option>
-          <option value="auto">自动续播</option>
-          <option value="qte_pass">QTE 通过</option>
-          <option value="qte_fail">QTE 失败</option>
-        </select>
-      </label>
-      <label className="ks-dock-field">
-        <span>目标场景</span>
-        <select
-          value={targetId}
-          onChange={(e) => setTargetId(e.target.value)}
-          disabled={options.length === 0}
-        >
-          {options.length === 0 ? (
-            <option value="">—— 当前剧本还没有其它 scene ——</option>
-          ) : (
-            options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.title}
-              </option>
-            ))
-          )}
-        </select>
-      </label>
-      <label className="ks-dock-field">
-        <span>按钮文字</span>
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder={branchKind === 'choice' ? '如：追上去' : '可选'}
-        />
-      </label>
-      <DragChip
-        enabled={canDrag}
-        payload={payload}
-        label={
-          canDrag
-            ? `↗ ${label || targetId.slice(0, 10)}`
-            : '先添加至少两个场景'
-        }
-      />
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 数值 / 变量系统（v6）
-// ─────────────────────────────────────────────────────────────────────
-//
-// 一个 tab 把整套「数值/条件」作者工作流收在一起：
-//   1. 变量定义（全局）：好感度 / flag / 积分，name + kind + 初始值
-//   2. 本节点进入时的数值变化（Scene.onEnterEffects）：经过此节点就累积
-//   3. 本节点各分支的「解锁条件」「选择效果」「条件不满足表现」
-//
-function VarsDock({
-  scenario,
-  currentSceneId,
-}: {
-  scenario: Scenario
-  currentSceneId: string
-}) {
-  const upsertVariable = useScenarioStore((s) => s.upsertVariable)
-  const removeVariable = useScenarioStore((s) => s.removeVariable)
-  const updateScene = useScenarioStore((s) => s.updateScene)
-  const updateBranch = useScenarioStore((s) => s.updateBranch)
-
-  const variables = useMemo(
-    () => Object.values(scenario.variables ?? {}),
-    [scenario.variables],
-  )
-  const scene = scenario.scenes[currentSceneId]
-  const branches = scene?.branches ?? []
-
-  function addVariable(): void {
-    const n = variables.length + 1
-    const id = `var_${Date.now().toString(36)}`
-    upsertVariable({ id, name: `数值${n}`, kind: 'number', initial: 0 })
-  }
-
-  return (
-    <div className="ks-dock-card">
-      {/* ── 1. 变量定义 ───────────────────────────────── */}
-      <div className="ks-dock-tab-label ks-mono">变量定义（全局）</div>
-      {variables.length === 0 ? (
-        <div className="ks-dock-empty ks-mono">
-          还没有变量 · 例如「好感度」「是否救过她」
-        </div>
-      ) : (
-        variables.map((v) => (
-          <VarDefRow
-            key={v.id}
-            variable={v}
-            onChange={(patch) => upsertVariable({ ...v, ...patch })}
-            onRemove={() => removeVariable(v.id)}
+    <div className="ks-dock-card ks-text-dock">
+      <div className="ks-dialogue-templates">
+        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加文字</div>
+        <div className="ks-dialogue-template-row">
+          <DragChip
+            enabled
+            label="标题文字"
+            payload={{ kind: 'textOverlay', text: '标题文字', defaultDurationMs: 3000 }}
           />
-        ))
-      )}
-      <button type="button" className="ks-dock-addbtn" onClick={addVariable}>
-        ＋ 新增变量
-      </button>
-
-      {scene && (
-        <>
-          <div className="ks-dialogue-detail-divider" />
-          {/* ── 2. 本节点进入效果 ───────────────────────── */}
-          <div className="ks-dock-tab-label ks-mono">
-            进入本节点时（经过即累积）
+          <DragChip
+            enabled
+            label="花字"
+            payload={{ kind: 'textOverlay', text: '双击编辑', defaultDurationMs: 2000 }}
+          />
+        </div>
+      </div>
+      <div className="ks-dialogue-detail-divider" />
+      <div className="ks-dialogue-detail">
+        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
+        {!selected ? (
+          <div className="ks-dialogue-empty ks-mono">
+            在时间轴 TXT 轨上点击一段文字来编辑；或先把上面的文字拖入时间轴
           </div>
-          <EffectListEditor
-            variables={variables}
-            effects={scene.onEnterEffects ?? []}
-            onChange={(effects) =>
-              updateScene(currentSceneId, {
-                onEnterEffects: effects.length ? effects : undefined,
-              })
-            }
-          />
-
-          <div className="ks-dialogue-detail-divider" />
-          {/* ── 3. 本节点分支条件 / 效果 ─────────────────── */}
-          <div className="ks-dock-tab-label ks-mono">本节点分支 · 条件 / 效果</div>
-          {branches.length === 0 ? (
-            <div className="ks-dock-empty ks-mono">本节点还没有分支</div>
-          ) : (
-            branches.map((b) => (
-              <BranchGateEditor
-                key={b.id}
-                branch={b}
-                scenario={scenario}
-                variables={variables}
-                onPatch={(patch) => updateBranch(currentSceneId, b.id, patch)}
-              />
-            ))
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function VarDefRow({
-  variable,
-  onChange,
-  onRemove,
-}: {
-  variable: GameVariable
-  onChange: (patch: Partial<GameVariable>) => void
-  onRemove: () => void
-}) {
-  return (
-    <div className="ks-var-row">
-      <input
-        className="ks-var-name"
-        value={variable.name}
-        onChange={(e) => onChange({ name: e.target.value })}
-        placeholder="变量名"
-      />
-      <select
-        className="ks-var-kind"
-        value={variable.kind}
-        onChange={(e) => {
-          const kind = e.target.value as GameVariableKind
-          onChange({ kind, initial: kind === 'flag' ? 0 : variable.initial })
-        }}
-      >
-        <option value="number">数值</option>
-        <option value="flag">旗标</option>
-      </select>
-      {variable.kind === 'flag' ? (
-        <select
-          className="ks-var-init"
-          value={variable.initial ? '1' : '0'}
-          onChange={(e) => onChange({ initial: e.target.value === '1' ? 1 : 0 })}
-        >
-          <option value="0">初始否</option>
-          <option value="1">初始是</option>
-        </select>
-      ) : (
-        <input
-          className="ks-var-init"
-          type="number"
-          value={variable.initial}
-          onChange={(e) => onChange({ initial: Number(e.target.value) || 0 })}
-          title="初始值"
-        />
-      )}
-      <button
-        type="button"
-        className="ks-var-del"
-        onClick={onRemove}
-        title="删除变量"
-      >
-        ✕
-      </button>
-    </div>
-  )
-}
-
-/** 一组数值副作用编辑器（用于 scene.onEnterEffects 和 branch.effects） */
-function EffectListEditor({
-  variables,
-  effects,
-  onChange,
-}: {
-  variables: GameVariable[]
-  effects: VarEffect[]
-  onChange: (effects: VarEffect[]) => void
-}) {
-  const firstVarId = variables[0]?.id ?? ''
-  if (variables.length === 0) {
-    return (
-      <div className="ks-dock-empty ks-mono">先在上方定义变量，才能设置效果</div>
-    )
-  }
-  return (
-    <>
-      {effects.map((eff, i) => (
-        <div className="ks-var-row" key={i}>
-          <select
-            className="ks-var-name"
-            value={eff.varId}
-            onChange={(e) =>
-              onChange(
-                effects.map((x, j) =>
-                  j === i ? { ...x, varId: e.target.value } : x,
-                ),
-              )
-            }
-          >
-            {variables.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="ks-var-kind"
-            value={eff.op}
-            onChange={(e) =>
-              onChange(
-                effects.map((x, j) =>
-                  j === i ? { ...x, op: e.target.value as 'add' | 'set' } : x,
-                ),
-              )
-            }
-          >
-            <option value="add">增加</option>
-            <option value="set">设为</option>
-          </select>
-          <input
-            className="ks-var-init"
-            type="number"
-            value={eff.value}
-            onChange={(e) =>
-              onChange(
-                effects.map((x, j) =>
-                  j === i ? { ...x, value: Number(e.target.value) || 0 } : x,
-                ),
-              )
-            }
-          />
-          <button
-            type="button"
-            className="ks-var-del"
-            onClick={() => onChange(effects.filter((_, j) => j !== i))}
-            title="删除效果"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        className="ks-dock-addbtn"
-        onClick={() =>
-          onChange([...effects, { varId: firstVarId, op: 'add', value: 1 }])
-        }
-      >
-        ＋ 新增效果
-      </button>
-    </>
-  )
-}
-
-/** 单条分支的「解锁条件 + 不满足表现 + 选择效果」编辑器 */
-function BranchGateEditor({
-  branch,
-  scenario,
-  variables,
-  onPatch,
-}: {
-  branch: Branch
-  scenario: Scenario
-  variables: GameVariable[]
-  onPatch: (patch: Partial<Branch>) => void
-}) {
-  const clauses = branch.condition?.all ?? []
-  const sceneOptions = useMemo(
-    () => Object.values(scenario.scenes).map((s) => ({ id: s.id, title: s.title ?? s.id })),
-    [scenario.scenes],
-  )
-
-  function setClauses(next: ConditionClause[]): void {
-    onPatch({ condition: next.length ? { all: next } : undefined })
-  }
-
-  return (
-    <div className="ks-gate">
-      <div className="ks-gate-head ks-mono">
-        {branch.kind === 'choice' ? '选项' : branch.kind} ·{' '}
-        {branch.label || branch.targetSceneId}
-      </div>
-
-      {/* 分支类型 + 文字（可随时改） */}
-      <div className="ks-gate-typerow">
-        <select
-          className="ks-var-kind"
-          value={branch.kind}
-          onChange={(e) => onPatch({ kind: e.target.value as BranchKind })}
-          title="分支连线类型"
-        >
-          <option value="choice">玩家选择</option>
-          <option value="auto">自动续播</option>
-          <option value="qte_pass">QTE 通过</option>
-          <option value="qte_fail">QTE 失败</option>
-        </select>
-        <input
-          className="ks-gate-labelinput"
-          value={branch.label ?? ''}
-          onChange={(e) => onPatch({ label: e.target.value || undefined })}
-          placeholder={branch.kind === 'choice' ? '按钮文字' : '标签(可选)'}
-        />
-      </div>
-
-      {/* 解锁条件 */}
-      {clauses.map((c, i) => (
-        <ConditionRow
-          key={i}
-          clause={c}
-          variables={variables}
-          sceneOptions={sceneOptions}
-          onChange={(nc) => setClauses(clauses.map((x, j) => (j === i ? nc : x)))}
-          onRemove={() => setClauses(clauses.filter((_, j) => j !== i))}
-        />
-      ))}
-      <div className="ks-gate-actions">
-        <button
-          type="button"
-          className="ks-dock-addbtn ks-gate-addcond"
-          onClick={() =>
-            setClauses([
-              ...clauses,
-              variables[0]
-                ? { type: 'var', varId: variables[0].id, op: 'gte', value: 1 }
-                : { type: 'visited', sceneId: sceneOptions[0]?.id ?? '' },
-            ])
-          }
-        >
-          ＋ 解锁条件
-        </button>
-        {clauses.length > 0 && (
-          <label className="ks-gate-mode">
-            不满足时
-            <select
-              value={branch.gateMode ?? 'hide'}
-              onChange={(e) =>
-                onPatch({ gateMode: e.target.value as 'hide' | 'lock' })
-              }
-            >
-              <option value="hide">隐藏</option>
-              <option value="lock">锁定显示</option>
-            </select>
-          </label>
+        ) : (
+          <TextOverlayEditor key={selected.id} clip={selected} />
         )}
       </div>
-
-      {/* 选择效果 */}
-      <div className="ks-gate-sub ks-mono">选中后</div>
-      <EffectListEditor
-        variables={variables}
-        effects={branch.effects ?? []}
-        onChange={(effects) =>
-          onPatch({ effects: effects.length ? effects : undefined })
-        }
-      />
     </div>
   )
 }
 
-function ConditionRow({
-  clause,
-  variables,
-  sceneOptions,
-  onChange,
-  onRemove,
-}: {
-  clause: ConditionClause
-  variables: GameVariable[]
-  sceneOptions: { id: string; title: string }[]
-  onChange: (c: ConditionClause) => void
-  onRemove: () => void
-}) {
-  const firstVarId = variables[0]?.id ?? ''
+const WEIGHT_OPTIONS: { v: number; label: string }[] = [
+  { v: 300, label: '细' },
+  { v: 400, label: '常规' },
+  { v: 600, label: '中粗' },
+  { v: 700, label: '粗' },
+  { v: 900, label: '特粗' },
+]
+
+function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
+  const sceneId = useScenarioStore((s) => s.selectedSceneId)
+  const update = useScenarioStore((s) => s.updateTextOverlay)
+  const patch = useCallback(
+    (p: Partial<Omit<TextOverlayClip, 'id'>>) => update(sceneId, clip.id, p),
+    [update, sceneId, clip.id],
+  )
+
+  // 文字内容：本地缓冲，blur 才提交（避免 IME 逐字符刷 zundo 历史）
+  const [draftText, setDraftText] = useState(clip.text)
+  useEffect(() => {
+    setDraftText((cur) => (cur === clip.text ? cur : clip.text))
+  }, [clip.text])
+  const draftRef = useRef(draftText)
+  draftRef.current = draftText
+  const flushText = useCallback(() => {
+    if (draftRef.current !== clip.text) patch({ text: draftRef.current })
+  }, [patch, clip.text])
+  useEffect(() => () => flushText(), [flushText])
+
   return (
-    <div className="ks-var-row">
-      <select
-        className="ks-var-kind"
-        value={clause.type}
-        onChange={(e) => {
-          const type = e.target.value as ConditionClause['type']
-          if (type === 'var')
-            onChange({ type: 'var', varId: firstVarId, op: 'gte', value: 1 })
-          else if (type === 'flag')
-            onChange({ type: 'flag', varId: firstVarId, equals: true })
-          else onChange({ type: 'visited', sceneId: sceneOptions[0]?.id ?? '' })
-        }}
-      >
-        <option value="var">数值</option>
-        <option value="flag">旗标</option>
-        <option value="visited">经历过</option>
-      </select>
+    <div className="ks-text-edit">
+      <label className="ks-dock-field">
+        <span>文字内容</span>
+        <textarea
+          rows={2}
+          value={draftText}
+          onChange={(e) => setDraftText(e.target.value)}
+          onBlur={flushText}
+          placeholder="输入要显示的文字"
+        />
+      </label>
 
-      {clause.type === 'var' && (
-        <>
-          <select
-            className="ks-var-name"
-            value={clause.varId}
-            onChange={(e) => onChange({ ...clause, varId: e.target.value })}
-          >
-            {variables.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="ks-var-op"
-            value={clause.op}
-            onChange={(e) =>
-              onChange({ ...clause, op: e.target.value as typeof clause.op })
-            }
-          >
-            <option value="gte">≥</option>
-            <option value="gt">&gt;</option>
-            <option value="lte">≤</option>
-            <option value="lt">&lt;</option>
-            <option value="eq">=</option>
-            <option value="neq">≠</option>
-          </select>
-          <input
-            className="ks-var-init"
-            type="number"
-            value={clause.value}
-            onChange={(e) =>
-              onChange({ ...clause, value: Number(e.target.value) || 0 })
-            }
-          />
-        </>
-      )}
-
-      {clause.type === 'flag' && (
-        <>
-          <select
-            className="ks-var-name"
-            value={clause.varId}
-            onChange={(e) => onChange({ ...clause, varId: e.target.value })}
-          >
-            {variables.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="ks-var-init"
-            value={clause.equals ? '1' : '0'}
-            onChange={(e) =>
-              onChange({ ...clause, equals: e.target.value === '1' })
-            }
-          >
-            <option value="1">为是</option>
-            <option value="0">为否</option>
-          </select>
-        </>
-      )}
-
-      {clause.type === 'visited' && (
+      <label className="ks-dock-field">
+        <span>字体</span>
         <select
-          className="ks-var-name ks-gate-scenesel"
-          value={clause.sceneId}
-          onChange={(e) => onChange({ ...clause, sceneId: e.target.value })}
+          value={clip.fontFamily ?? 'sans'}
+          onChange={(e) => patch({ fontFamily: e.target.value })}
         >
-          {sceneOptions.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.title}
+          {FONT_PRESETS.map((f) => (
+            <option key={f.key} value={f.key}>
+              {f.label}
             </option>
           ))}
         </select>
-      )}
+      </label>
 
-      <button
-        type="button"
-        className="ks-var-del"
-        onClick={onRemove}
-        title="删除条件"
-      >
-        ✕
-      </button>
+      <label className="ks-dock-field">
+        <span>字重</span>
+        <div className="ks-dock-seg">
+          {WEIGHT_OPTIONS.map((w) => (
+            <SegBtn
+              key={w.v}
+              cur={String(clip.fontWeight ?? 700)}
+              me={String(w.v)}
+              onSel={() => patch({ fontWeight: w.v })}
+              label={w.label}
+            />
+          ))}
+        </div>
+      </label>
+
+      <div className="ks-text-row2">
+        <label className="ks-dock-field">
+          <span>字号 {Math.round(clip.fontSizePct ?? 7)}%</span>
+          <input
+            type="range"
+            min={2}
+            max={24}
+            step={0.5}
+            value={clip.fontSizePct ?? 7}
+            onChange={(e) => patch({ fontSizePct: Number(e.target.value) })}
+          />
+        </label>
+        <div className="ks-text-style-toggles">
+          <button
+            type="button"
+            className={`ks-text-tg ${clip.italic ? 'is-on' : ''}`}
+            style={{ fontStyle: 'italic' }}
+            onClick={() => patch({ italic: !clip.italic })}
+            title="斜体"
+          >
+            I
+          </button>
+          <button
+            type="button"
+            className={`ks-text-tg ${clip.underline ? 'is-on' : ''}`}
+            style={{ textDecoration: 'underline' }}
+            onClick={() => patch({ underline: !clip.underline })}
+            title="下划线"
+          >
+            U
+          </button>
+        </div>
+      </div>
+
+      <label className="ks-dock-field">
+        <span>对齐</span>
+        <div className="ks-dock-seg">
+          <SegBtn cur={clip.align ?? 'center'} me="left" onSel={(v) => patch({ align: v })} label="左" />
+          <SegBtn cur={clip.align ?? 'center'} me="center" onSel={(v) => patch({ align: v })} label="中" />
+          <SegBtn cur={clip.align ?? 'center'} me="right" onSel={(v) => patch({ align: v })} label="右" />
+        </div>
+      </label>
+
+      <div className="ks-text-row2">
+        <label className="ks-dock-field">
+          <span>颜色</span>
+          <input
+            type="color"
+            value={clip.color ?? '#ffffff'}
+            onChange={(e) => patch({ color: e.target.value })}
+          />
+        </label>
+        <label className="ks-dock-field">
+          <span>描边</span>
+          <input
+            type="color"
+            value={clip.strokeColor ?? '#000000'}
+            onChange={(e) => patch({ strokeColor: e.target.value })}
+          />
+        </label>
+        <label className="ks-dock-field">
+          <span>描边宽 {clip.strokeWidth ?? 3}</span>
+          <input
+            type="range"
+            min={0}
+            max={12}
+            step={1}
+            value={clip.strokeWidth ?? 3}
+            onChange={(e) => patch({ strokeWidth: Number(e.target.value) })}
+          />
+        </label>
+      </div>
+
+      <label className="ks-dock-field">
+        <span>底色条</span>
+        <div className="ks-text-bg-row">
+          <button
+            type="button"
+            className={`ks-text-tg ${clip.bgColor ? '' : 'is-on'}`}
+            onClick={() => patch({ bgColor: undefined })}
+            title="无底色"
+          >
+            无
+          </button>
+          <input
+            type="color"
+            value={clip.bgColor ?? '#000000'}
+            onChange={(e) => patch({ bgColor: e.target.value })}
+          />
+        </div>
+      </label>
+
+      <div className="ks-text-row2">
+        <label className="ks-dock-field">
+          <span>旋转 {Math.round(clip.rotation ?? 0)}°</span>
+          <input
+            type="range"
+            min={-180}
+            max={180}
+            step={1}
+            value={clip.rotation ?? 0}
+            onChange={(e) => patch({ rotation: Number(e.target.value) })}
+          />
+        </label>
+        <label className="ks-dock-field">
+          <span>缩放 {(clip.scale ?? 1).toFixed(2)}×</span>
+          <input
+            type="range"
+            min={0.3}
+            max={3}
+            step={0.05}
+            value={clip.scale ?? 1}
+            onChange={(e) => patch({ scale: Number(e.target.value) })}
+          />
+        </label>
+        <label className="ks-dock-field">
+          <span>不透明 {Math.round((clip.opacity ?? 1) * 100)}%</span>
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={clip.opacity ?? 1}
+            onChange={(e) => patch({ opacity: Number(e.target.value) })}
+          />
+        </label>
+      </div>
+
+      <div className="ks-text-hint ks-mono">
+        位置：在上方播放预览画面里直接拖拽这段文字摆放；时间：拖时间轴 TXT 轨左右把手。
+      </div>
     </div>
   )
 }
+
+// 「分支」与「数值」不再占用时间轴右侧 Dock：
+//   · 分支（连线）在剧情树画布上直接拉线编辑；
+//   · 数值/变量在「模块 · 数值系统」节点图里编辑。
+// 这里只保留与「某个节点的某段时间」强相关的轨道化编辑（字幕/文字/QTE/音频/小游戏/搜索）。
 
 // ─────────────────────────────────────────────────────────────────────
 // 音频
@@ -1220,9 +943,11 @@ function probeAudioDuration(file: File): Promise<number> {
 // 拖落到 Timeline 时由 onTrackDrop 分派，调用 addMinigameClip 建一条 clip。
 function MinigameDock() {
   const enabledIds = useScenarioStore((s) => s.scenario.enabledMinigameIds)
+  // 小游戏模块关闭 → 不提供任何可拖小游戏(等同空池)。
+  const minigameOn = useScenarioStore((s) => isModuleEnabled(s.scenario, 'minigame'))
   const available = useMemo(
-    () => filterEnabledMinigames(MINIGAMES, enabledIds),
-    [enabledIds],
+    () => (minigameOn ? filterEnabledMinigames(MINIGAMES, enabledIds) : []),
+    [enabledIds, minigameOn],
   )
   const [selectedId, setSelectedId] = useState<string>(available[0]?.id ?? '')
   const [label, setLabel] = useState('')
@@ -1583,6 +1308,173 @@ function UploadProgress({
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// 搜索段（道具搜索玩法）—— v7
+// ─────────────────────────────────────────────────────────────────────
+function SearchSegmentDock({
+  scenario,
+  currentSceneId,
+}: {
+  scenario: Scenario
+  currentSceneId: string
+}) {
+  const scene = scenario.scenes[currentSceneId]
+  const selectedId = useClipSelection((s) => s.searchSegmentId)
+  const selected = scene?.searchSegments?.find((sg) => sg.id === selectedId)
+  const inventoryOn = isModuleEnabled(scenario, 'inventory')
+
+  return (
+    <div className="ks-dock-card ks-search-dock">
+      {!inventoryOn && (
+        <div className="ks-dock-empty ks-mono">
+          搜索段依赖「背包系统」模块。请先在左侧「模块」里开启背包系统并定义可拾取物品。
+        </div>
+      )}
+      <div className="ks-dialogue-templates">
+        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加搜索段</div>
+        <div className="ks-dialogue-template-row">
+          <DragChip
+            enabled
+            label="搜索段"
+            payload={{ kind: 'searchSegment', defaultDurationMs: 4000 }}
+          />
+        </div>
+        <div className="ks-text-hint ks-mono">
+          到达该段时视频在该区间静态循环，弹出放大镜，玩家搜寻拾取物品后继续播放。
+        </div>
+      </div>
+      <div className="ks-dialogue-detail-divider" />
+      <div className="ks-dialogue-detail">
+        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
+        {!selected || !scene ? (
+          <div className="ks-dialogue-empty ks-mono">在时间轴 SRCH 轨上点击一段来编辑</div>
+        ) : (
+          <SearchSegmentEditor key={selected.id} clip={selected} scene={scene} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SearchSegmentEditor({
+  clip,
+  scene,
+}: {
+  clip: SearchSegmentClip
+  scene: Scene
+}) {
+  const sceneId = scene.id
+  const update = useScenarioStore((s) => s.updateSearchSegment)
+  const items = useScenarioStore((s) => s.scenario.items)
+  const patch = useCallback(
+    (p: Partial<Omit<SearchSegmentClip, 'id'>>) => update(sceneId, clip.id, p),
+    [update, sceneId, clip.id],
+  )
+  const loot = scene.searchLoot ?? []
+  const selectedHotspots = clip.hotspotIds ?? []
+  const [copied, setCopied] = useState(false)
+
+  const loopPrompt = useMemo(() => buildSearchLoopVideoPrompt(scene, clip), [scene, clip])
+
+  function toggleHotspot(id: string): void {
+    const next = selectedHotspots.includes(id)
+      ? selectedHotspots.filter((x) => x !== id)
+      : [...selectedHotspots, id]
+    patch({ hotspotIds: next.length ? next : undefined })
+  }
+
+  async function copyPrompt(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(loopPrompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* 剪贴板不可用时忽略 */
+    }
+  }
+
+  return (
+    <div className="ks-text-edit">
+      <label className="ks-dock-field">
+        <span>段落提示（给玩家）</span>
+        <input
+          type="text"
+          value={clip.label ?? ''}
+          onChange={(e) => patch({ label: e.target.value || undefined })}
+          placeholder="如：仔细搜查这个房间"
+        />
+      </label>
+
+      <label className="ks-dock-field">
+        <span>完成条件</span>
+        <div className="ks-dock-seg">
+          <SegBtn
+            cur={clip.completeWhen ?? 'all'}
+            me="all"
+            onSel={(v) => patch({ completeWhen: v })}
+            label="全部拾完"
+          />
+          <SegBtn
+            cur={clip.completeWhen ?? 'all'}
+            me="any"
+            onSel={(v) => patch({ completeWhen: v })}
+            label="任意一个"
+          />
+        </div>
+      </label>
+
+      <label className="ks-search-skip">
+        <input
+          type="checkbox"
+          checked={clip.allowSkip ?? false}
+          onChange={(e) => patch({ allowSkip: e.target.checked })}
+        />
+        <span>允许玩家跳过本段（不强制搜完）</span>
+      </label>
+
+      <div className="ks-dock-field">
+        <span>本段参与的搜寻热点</span>
+        {loot.length === 0 ? (
+          <div className="ks-dock-empty ks-mono">
+            本场景还没放搜寻热点。去「背包系统」编辑器在画面上放置可拾取热点。
+          </div>
+        ) : (
+          <ul className="ks-search-hslist">
+            {loot.map((h) => {
+              const on = selectedHotspots.length === 0 || selectedHotspots.includes(h.id)
+              const itemName = items?.[h.itemId]?.name ?? h.itemId
+              return (
+                <li key={h.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedHotspots.includes(h.id)}
+                      onChange={() => toggleHotspot(h.id)}
+                    />
+                    <span className={on ? '' : 'is-off'}>{itemName}</span>
+                  </label>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        <div className="ks-text-hint ks-mono">不勾选 = 本段使用本场景全部热点。</div>
+      </div>
+
+      <div className="ks-dock-field">
+        <span>静态循环视频提示词（自动生成）</span>
+        <textarea className="ks-search-prompt" rows={5} value={loopPrompt} readOnly />
+        <button type="button" className="ks-search-copybtn" onClick={() => void copyPrompt()}>
+          {copied ? '已复制 ✓' : '复制提示词 · 去素材库生成可循环视频'}
+        </button>
+        <div className="ks-text-hint ks-mono">
+          首尾相同、机位静止、无干扰内容。生成后在「素材库」把它设为本段的循环画面。
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // 拖拽 chip
 // ─────────────────────────────────────────────────────────────────────
 function DragChip({
@@ -1632,8 +1524,8 @@ const dockCss = `
 }
 .ks-dock-tabs {
   display: grid;
-  /* 7 个 tab（素材库 / 字幕 / QTE / 分支 / 音频 / 小游戏 / 数值）图标化平铺。
-   * 只显示图标, 文字转 title 悬停提示, 因此列再多也放得下。 */
+  /* 7 个 tab（素材库 / 字幕 / 文字 / QTE / 音频 / 小游戏 / 搜索）图标化平铺。
+   * 分支、数值已在剧情树连线 / 数值模块编辑器里编辑, 不再占用本面板。 */
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
   padding: 4px;
@@ -2229,5 +2121,66 @@ const dockCss = `
   color: var(--ks-text-faint);
   margin-top: 2px;
 }
+
+/* ── 文字叠加 / 搜索段 编辑器 ───────────────────────── */
+.ks-text-edit { display: flex; flex-direction: column; gap: 10px; }
+.ks-text-row2 { display: flex; gap: 8px; align-items: flex-end; }
+.ks-text-row2 > .ks-dock-field { flex: 1 1 0; min-width: 0; }
+.ks-text-style-toggles { display: flex; gap: 4px; padding-bottom: 1px; }
+.ks-text-tg {
+  width: 28px; height: 28px;
+  border: 1px solid var(--ks-border);
+  background: var(--ks-panel-solid);
+  color: var(--ks-text);
+  border-radius: var(--ks-radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--ks-font-cn);
+}
+.ks-text-tg.is-on {
+  color: var(--ks-amber);
+  border-color: var(--ks-amber-soft);
+  background: rgba(232, 162, 58, 0.14);
+}
+.ks-text-bg-row { display: flex; gap: 6px; align-items: center; }
+.ks-text-bg-row input[type="color"] { flex: 1; height: 28px; padding: 0; }
+.ks-dock-field input[type="color"] {
+  width: 100%; height: 28px; padding: 0;
+  background: var(--ks-panel-solid);
+  border: 1px solid var(--ks-border);
+  border-radius: var(--ks-radius-sm);
+  cursor: pointer;
+}
+.ks-dock-field input[type="range"] { width: 100%; accent-color: var(--ks-amber); }
+.ks-text-hint {
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--ks-text-faint);
+}
+.ks-search-skip {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--ks-text-dim); cursor: pointer;
+}
+.ks-search-hslist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ks-search-hslist label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ks-text); cursor: pointer; }
+.ks-search-hslist .is-off { color: var(--ks-text-faint); }
+.ks-search-prompt {
+  font-size: 11px !important;
+  line-height: 1.5;
+  resize: vertical;
+}
+.ks-search-copybtn {
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: var(--ks-radius-sm);
+  border: 1px solid var(--ks-amber-soft);
+  background: rgba(232, 162, 58, 0.1);
+  color: var(--ks-amber);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--ks-font-cn);
+}
+.ks-search-copybtn:hover { background: rgba(232, 162, 58, 0.18); }
 `
 injectStyleOnce('timeline-dock', dockCss)

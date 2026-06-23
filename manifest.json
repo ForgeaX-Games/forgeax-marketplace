@@ -116,7 +116,7 @@
     {
       "id": "cc-coder",
       "role": "coding",
-      "cardName": {"zh": "Claude Code 工程师", "en": "Claude Code Engineer"},
+      "cardName": {"zh": "the reference agent CLI 工程师", "en": "the reference agent CLI Engineer"},
       "color": "#cfa3ff",
       "avatar": "CC",
       "produces": ["<active_game>.dir/**"],

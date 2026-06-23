@@ -22,6 +22,7 @@ import { distillCharacters, distillLocations, distillProps } from './forgeDistil
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'
 import { useForgeChatStore } from './forgeChatStore'
+import { useGenerationQueue } from './generationQueueStore'
 import { broadcastScenarioAdopt } from '../shell/crossPaneSync'
 import type { Character, Location, Prop, Scenario, Scene } from '../scenario/types'
 
@@ -185,81 +186,124 @@ export async function triggerVisualFromQueue(item: VisualQueueItem): Promise<voi
       return
     }
 
-    chat.setPending(scenarioId, {
-      reason: 'forging',
-      startedAt: Date.now(),
-      stages: [
-        {
-          label: '生成视觉锚点',
-          detail: `${charCount} 角色 · ${locCount} 场所 · ${propCount} 道具`,
-          at: Date.now(),
+    // 视觉锚点统一进生成队列：每个角色/场所/道具一条 image job —— 队列里能看进度/
+    // 失败原因，右键卡片可回看「发给图像模型的提示词」(GenRequestDialog)；不再静默吞错。
+    // 每条 job 用单实体 scenario 复用 characterRefPass 的同一套提示词/打码逻辑。
+    const q = useGenerationQueue.getState()
+    const group = `visual-${Date.now().toString(36)}`
+    const base = useScenarioStore.getState().scenario
+
+    const chars = Object.values(passScenario.characters ?? {}) as Character[]
+    const locs = Object.values(passScenario.locations ?? {}) as Location[]
+    const propsList = Object.values(passScenario.props ?? {}) as Prop[]
+
+    for (const c of chars) {
+      q.enqueue({
+        kind: 'image',
+        label: `角色定妆照 · ${c.name ?? c.id}`,
+        cardKey: `visual:char:${c.id}`,
+        group,
+        run: async ({ setRequest }) => {
+          let primary: string | undefined
+          await characterRefPass({
+            scenario: { ...base, characters: { [c.id]: c }, locations: {}, props: {} },
+            client: imgClient,
+            throwOnFailure: true,
+            onRequest: setRequest,
+            onCharacterRef: (characterId, result) => {
+              const mediaId = useMediaStore.getState().ingestDataUrl(result.dataUrl, {
+                name: `turnaround-${characterId}.png`,
+                promptKind: 'character-ref',
+                tags: ['turnaround'],
+                humanReadableName: `角色定妆照 · ${characterId}`,
+              })
+              useScenarioStore.getState().setCharacterTurnaroundRef(characterId, mediaId)
+              primary = mediaId
+            },
+          })
+          broadcastScenarioAdopt(useScenarioStore.getState().scenario)
+          return primary
         },
-      ],
-      streamTail: '',
-      streamBytes: 0,
-      abortable: false,
-    })
+      })
+    }
 
-    const mediaStore = useMediaStore.getState()
-    const scenarioStore = useScenarioStore.getState()
-    await characterRefPass({
-      scenario: passScenario,
-      client: imgClient,
-      onCharacterRef: (characterId, result) => {
-        const mediaId = mediaStore.ingestDataUrl(result.dataUrl, {
-          name: `turnaround-${characterId}.png`,
-          promptKind: 'character-ref',
-          tags: ['turnaround'],
-          humanReadableName: `角色定妆照 · ${characterId}`,
-        })
-        scenarioStore.setCharacterTurnaroundRef(characterId, mediaId)
-      },
-      onLocationRef: (locationId, result) => {
-        const mediaId = mediaStore.ingestDataUrl(result.dataUrl, {
-          name: `loc-ref-${locationId}.png`,
-          promptKind: 'location-ref',
-          humanReadableName: `场景基准 · ${locationId}`,
-        })
-        scenarioStore.setLocationRefImage(locationId, mediaId)
-      },
-      onLocationAngleRef: (locationId, angle, result) => {
-        const mediaId = mediaStore.ingestDataUrl(result.dataUrl, {
-          name: `loc-${locationId}-${angle.id}.png`,
-          promptKind: 'location-ref',
-          humanReadableName: `场景角度 · ${locationId} · ${angle.label}`,
-        })
-        scenarioStore.addLocationAngleRef(locationId, {
-          id: angle.id,
-          label: angle.label,
-          anglePrompt: angle.anglePrompt,
-          mediaId,
-        })
-      },
-      onPropRef: (propId, result) => {
-        const mediaId = mediaStore.ingestDataUrl(result.dataUrl, {
-          name: `prop-ref-${propId}.png`,
-          promptKind: 'prop-ref',
-          humanReadableName: `道具参考 · ${propId}`,
-        })
-        scenarioStore.setPropRefImage(propId, mediaId)
-      },
-      onProgress: (ev) => {
-        const kindLabel =
-          ev.kind === 'character' ? '角色' : ev.kind === 'location' ? '场所' : '道具'
-        useForgeChatStore.getState().appendPendingStage(scenarioId, {
-          label: `锚点出图 ${ev.done}/${ev.total}`,
-          detail: `${kindLabel} · ${ev.name}`,
-        })
-      },
-    })
+    for (const l of locs) {
+      q.enqueue({
+        kind: 'image',
+        label: `场景基准图 · ${l.name ?? l.id}`,
+        cardKey: `visual:loc:${l.id}`,
+        group,
+        run: async ({ setRequest }) => {
+          let primary: string | undefined
+          await characterRefPass({
+            scenario: { ...base, characters: {}, locations: { [l.id]: l }, props: {} },
+            client: imgClient,
+            throwOnFailure: true,
+            onRequest: setRequest,
+            onLocationRef: (locationId, result) => {
+              const mediaId = useMediaStore.getState().ingestDataUrl(result.dataUrl, {
+                name: `loc-ref-${locationId}.png`,
+                promptKind: 'location-ref',
+                humanReadableName: `场景基准 · ${locationId}`,
+              })
+              useScenarioStore.getState().setLocationRefImage(locationId, mediaId)
+              primary = primary ?? mediaId
+            },
+            onLocationAngleRef: (locationId, angle, result) => {
+              const mediaId = useMediaStore.getState().ingestDataUrl(result.dataUrl, {
+                name: `loc-${locationId}-${angle.id}.png`,
+                promptKind: 'location-ref',
+                humanReadableName: `场景角度 · ${locationId} · ${angle.label}`,
+              })
+              useScenarioStore.getState().addLocationAngleRef(locationId, {
+                id: angle.id,
+                label: angle.label,
+                anglePrompt: angle.anglePrompt,
+                mediaId,
+              })
+            },
+          })
+          broadcastScenarioAdopt(useScenarioStore.getState().scenario)
+          return primary
+        },
+      })
+    }
 
-    if (_aborted) return
+    for (const p of propsList) {
+      q.enqueue({
+        kind: 'image',
+        label: `道具参考图 · ${p.name ?? p.id}`,
+        cardKey: `visual:prop:${p.id}`,
+        group,
+        run: async ({ setRequest }) => {
+          let primary: string | undefined
+          await characterRefPass({
+            scenario: { ...base, characters: {}, locations: {}, props: { [p.id]: p } },
+            client: imgClient,
+            throwOnFailure: true,
+            onRequest: setRequest,
+            onPropRef: (propId, result) => {
+              const mediaId = useMediaStore.getState().ingestDataUrl(result.dataUrl, {
+                name: `prop-ref-${propId}.png`,
+                promptKind: 'prop-ref',
+                humanReadableName: `道具参考 · ${propId}`,
+              })
+              useScenarioStore.getState().setPropRefImage(propId, mediaId)
+              primary = mediaId
+            },
+          })
+          broadcastScenarioAdopt(useScenarioStore.getState().scenario)
+          return primary
+        },
+      })
+    }
 
     chat.appendMessage(scenarioId, {
       role: 'assistant',
-      text: `视觉锚点生成完成 · ${charCount} 角色定妆照 · ${locCount} 场景基准图 · ${propCount} 道具图`,
+      text:
+        `已把视觉锚点入队 · ${charCount} 角色定妆照 · ${locCount} 场景基准图 · ${propCount} 道具图` +
+        `（见上方「生成队列」，可看每条进度/失败原因，失败的卡片可右键/在队列里「查看生成参数」回看发给模型的提示词）。`,
     })
-    broadcastScenarioAdopt(useScenarioStore.getState().scenario)
   } catch (e) {
     const msg = (e as Error).message ?? String(e)
     chat.appendMessage(scenarioId, { role: 'system', text: `[视觉生成失败] ${msg}` })
