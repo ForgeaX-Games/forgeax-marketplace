@@ -43,11 +43,24 @@
  *   ToolRegistry goes through THIS module.
  */
 import { resolve } from 'node:path';
-// 业务 SSOT 现内聚在本插件内(server/character-forge/),不再 reach 进编排层。
-// 图像生成能力由宿主经 ctx.imageGen 注入(中立 @forgeax/types ImageGen 缝)。
-import * as forge from './character-forge';
+// Resolved relative to this file: marketplace/plugins/wb-character/server/ →
+// packages/server/src/lib/character-forge/. We can't use the
+// `@server-lib/character-forge` tsconfig alias here because Bun walks up from
+// THIS file and lands on the plugin's tsconfig, which does not declare that
+// path. Relative import is the contract-friendly fix.
+import * as forge from '../../../../server/src/lib/character-forge/index';
 import type { ToolCall } from '../../../../types/src/index';
-import type { ImageGen } from '../../../../types/src/image-gen';
+import { dispatchToSurface } from '../../../../server/src/api/bus';
+
+const WB_CHARACTER_SURFACE_ID = 'wb-character.host';
+
+function notifyWorkbenchHost(action: string, payload: Record<string, unknown>): void {
+  try {
+    dispatchToSurface(WB_CHARACTER_SURFACE_ID, action, payload);
+  } catch {
+    // iframe 未挂载时静默丢弃；用户切回工作台会自行 refresh
+  }
+}
 
 interface ToolCtx {
   caller: ToolCall['caller'];
@@ -58,11 +71,6 @@ interface ToolCtx {
   /** Plugin install dir, supplied by ToolRegistry. Falls back to cwd only
    *  for unit tests that bypass the registry. */
   cwd?: string;
-  /** 用户数据根(`<projectRoot>/.forgeax/games/...`),由 ToolRegistry 注入。
-   *  角色资产写盘用此,而非 cwd(=插件安装目录)。 */
-  projectRoot?: string;
-  /** Host-injected image generator (ToolRegistry 提供);生图类 handler 必需。 */
-  imageGen?: ImageGen;
 }
 
 /** Build a `HandlerCtx` from the per-call ToolCtx the registry provides.
@@ -70,10 +78,8 @@ interface ToolCtx {
  *  so handlers downstream see exactly the keys the plugin declared. */
 function makeForgeCtx(ctx: ToolCtx): forge.HandlerCtx {
   return {
-    // 用户数据根优先(写 .forgeax/games/...);缺省退化到 cwd 仅供绕过 registry 的单测。
-    projectRoot: resolve(ctx.projectRoot ?? ctx.cwd ?? process.cwd()),
+    projectRoot: resolve(ctx.cwd ?? process.cwd()),
     env: ctx.env ?? {},
-    imageGen: ctx.imageGen,
   };
 }
 
@@ -118,29 +124,33 @@ interface RenameArgs { slug: string; charId: string; name: string }
 
 export const tools = {
   'character:generate-portrait': async (args: PortraitArgs, _ctx: ToolCtx) => {
-    return await forge.generatePortrait(makeForgeCtx(_ctx), args as forge.GeneratePortraitArgs);
+    const result = await forge.generatePortrait(makeForgeCtx(_ctx), args as forge.GeneratePortraitArgs);
+    notifyWorkbenchHost('reload', { charId: result.charId, slug: args.slug, kind: 'portrait' });
+    return result;
   },
 
   'character:generate-sprite-sheet': async (args: SpriteSheetArgs, _ctx: ToolCtx) => {
-    return await forge.generateSpriteSheet(makeForgeCtx(_ctx), args as forge.GenerateSpriteSheetArgs);
+    const result = await forge.generateSpriteSheet(makeForgeCtx(_ctx), args as forge.GenerateSpriteSheetArgs);
+    notifyWorkbenchHost('reload', { charId: result.charId, slug: args.slug, kind: 'sprite-sheet' });
+    return result;
   },
 
   'character:list': async (args: ListArgs, _ctx: ToolCtx) => {
-    return await forge.listCharacters(makeForgeCtx(_ctx), args.slug);
+    const result = await forge.listCharacters(makeForgeCtx(_ctx), args.slug);
+    notifyWorkbenchHost('reload', { slug: args.slug, kind: 'list' });
+    return result;
   },
 
   'character:get': async (args: GetArgs, _ctx: ToolCtx) => {
-    return await forge.getCharacter(makeForgeCtx(_ctx), args.slug, args.charId);
+    const result = await forge.getCharacter(makeForgeCtx(_ctx), args.slug, args.charId);
+    notifyWorkbenchHost('reload', { slug: args.slug, charId: args.charId, kind: 'get' });
+    return result;
   },
 
   'character:rename': async (args: RenameArgs, _ctx: ToolCtx) => {
-    return await forge.renameCharacter(makeForgeCtx(_ctx), args.slug, args.charId, args.name);
-  },
-
-  // 客户端管线产图 + /upload-asset 落盘后,登记/合并角色 manifest(不在服务端生图)。
-  // iframe(src/shared/GlobalState.ts)经 /api/wb/character/upsert-manifest 路由代理到此。
-  'character:upsert-manifest': async (args: forge.UpsertManifestArgs, _ctx: ToolCtx) => {
-    return await forge.upsertManifest(makeForgeCtx(_ctx), args);
+    const result = await forge.renameCharacter(makeForgeCtx(_ctx), args.slug, args.charId, args.name);
+    notifyWorkbenchHost('reload', { slug: args.slug, charId: args.charId, kind: 'rename' });
+    return result;
   },
 
   'character:generate-pixel':      notImplemented('character:generate-pixel'),
@@ -157,7 +167,6 @@ export const tools = {
   // to that path when the host bridge is unavailable. These stubs will be
   // replaced once the host can resolve plugin-local working dirs; for now
   // they preserve the contract so call sites stay auditable via ToolRegistry.
-  'character:save-scene-defaults':           notImplemented('character:save-scene-defaults'),
   'character:save-render-config':            notImplemented('character:save-render-config'),
   'character:save-spine-session':            notImplemented('character:save-spine-session'),
   'character:publish-character':             notImplemented('character:publish-character'),

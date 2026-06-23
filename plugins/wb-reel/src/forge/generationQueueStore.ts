@@ -407,18 +407,13 @@ export function cardJobOf(cardKey: string): GenJob | undefined {
 }
 
 /**
- * 取某一镜（sceneId + shotId）最近一次的生成 job —— 用于时间轴上双击/右键某段视频/
- * 关键帧时回看「这一镜是怎么生成的」（提示词 / 上传的参考素材 / 参数 / 报错）。非 React 读。
- *
- * kind 可选：同一镜可能同时有「关键帧(image)」与「逐镜视频(video)」两条 job，
- *   时间轴图像轨右键传 'image'、视频轨右键传 'video'，各自命中正确的那条；
- *   不传则返回该镜最近一条（不分类型）。
+ * 取某一镜（sceneId + shotId）最近一次的生成 job —— 用于时间轴上双击/右键某段视频时
+ * 回看「这段视频是怎么生成的」（提示词 / 上传的参考素材 / 参数 / 报错）。非 React 读。
  */
-export function jobForShot(sceneId: string, shotId: string, kind?: GenJobKind): GenJob | undefined {
+export function jobForShot(sceneId: string, shotId: string): GenJob | undefined {
   let latest: GenJob | undefined
   for (const j of Object.values(useGenerationQueue.getState().jobs)) {
     if (j.sceneId !== sceneId || j.shotId !== shotId) continue
-    if (kind && j.kind !== kind) continue
     if (!latest || j.createdAt > latest.createdAt) latest = j
   }
   return latest

@@ -14,27 +14,19 @@
 import type {
   Branch,
   ConditionClause,
-  EntryGate,
   GameVariable,
-  ItemEffect,
   Scenario,
-  Scene,
   VarEffect,
 } from '../scenario/types'
 
 /** 运行时数值状态：varId -> 数字（flag 用 0/1） */
 export type VarState = Record<string, number>
 
-/** 运行时背包状态：itemId -> 拥有数量 */
-export type ItemState = Record<string, number>
-
 /** 条件求值上下文 */
 export interface EvalContext {
   vars: VarState
   /** 已访问过的 sceneId（用于 visited 条件） */
   visitedSceneIds: ReadonlySet<string>
-  /** 背包持有量（用于 hasItem 条件）；缺省视为空背包。 */
-  ownedItems?: Readonly<ItemState>
 }
 
 function clampVar(def: GameVariable | undefined, n: number): number {
@@ -86,32 +78,9 @@ export function evaluateClause(
     }
     case 'visited':
       return ctx.visitedSceneIds.has(clause.sceneId)
-    case 'hasItem': {
-      const need = clause.count ?? 1
-      const have = ctx.ownedItems?.[clause.itemId] ?? 0
-      return have >= need
-    }
     default:
       return true
   }
-}
-
-/**
- * 应用一组物品副作用，返回**新**背包状态（不修改入参）。
- * give 累加，take 扣减并夹到 ≥0；count 缺省 = 1。
- */
-export function applyItemEffects(
-  effects: ItemEffect[] | undefined,
-  owned: ItemState,
-): ItemState {
-  if (!effects || effects.length === 0) return owned
-  const next: ItemState = { ...owned }
-  for (const eff of effects) {
-    const n = eff.count ?? 1
-    const cur = next[eff.itemId] ?? 0
-    next[eff.itemId] = eff.op === 'give' ? cur + n : Math.max(0, cur - n)
-  }
-  return next
 }
 
 /**
@@ -122,51 +91,6 @@ export function isBranchAvailable(branch: Branch, ctx: EvalContext): boolean {
   const clauses = branch.condition?.all
   if (!clauses || clauses.length === 0) return true
   return clauses.every((c) => evaluateClause(c, ctx))
-}
-
-/** 求一组条件是否全部满足（AND）；空 / undefined = 满足。 */
-export function evaluateCondition(
-  condition: { all: ConditionClause[] } | undefined,
-  ctx: EvalContext,
-): boolean {
-  const clauses = condition?.all
-  if (!clauses || clauses.length === 0) return true
-  return clauses.every((c) => evaluateClause(c, ctx))
-}
-
-/** 进入场景门槛求值结果。 */
-export interface GateResult {
-  /** 是否允许进入。 */
-  allowed: boolean
-  /** 不允许 + redirect 时的改道目标（调用方据此换场）。 */
-  redirectSceneId?: string
-  /** 不允许时给玩家看的提示文案。 */
-  hint?: string
-}
-
-/**
- * 求场景进入门槛。
- *
- * 无 entryGate / 条件满足 → allowed=true。
- * 条件不满足：
- *   - onFail='redirect' 且 redirectSceneId 有效 → allowed=false + 改道目标。
- *   - 否则（block 或没填改道目标） → allowed=false（阻断）。
- */
-export function evaluateGate(
-  gate: EntryGate | undefined,
-  ctx: EvalContext,
-): GateResult {
-  if (!gate) return { allowed: true }
-  if (evaluateCondition(gate.condition, ctx)) return { allowed: true }
-  if (gate.onFail === 'redirect' && gate.redirectSceneId) {
-    return { allowed: false, redirectSceneId: gate.redirectSceneId, hint: gate.hint }
-  }
-  return { allowed: false, hint: gate.hint }
-}
-
-/** 便捷重载：直接传 scene。 */
-export function evaluateSceneGate(scene: Scene | undefined, ctx: EvalContext): GateResult {
-  return evaluateGate(scene?.entryGate, ctx)
 }
 
 /**
@@ -219,20 +143,9 @@ export function describeClause(
       const title = scenario.scenes[clause.sceneId]?.title ?? clause.sceneId
       return `经历过「${title}」`
     }
-    case 'hasItem': {
-      const name = scenario.items?.[clause.itemId]?.name ?? clause.itemId
-      const n = clause.count ?? 1
-      return n > 1 ? `拥有「${name}」×${n}` : `拥有「${name}」`
-    }
     default:
       return ''
   }
-}
-
-export function describeItemEffect(eff: ItemEffect, scenario: Scenario): string {
-  const name = scenario.items?.[eff.itemId]?.name ?? eff.itemId
-  const n = eff.count ?? 1
-  return eff.op === 'give' ? `获得 ${name}${n > 1 ? `×${n}` : ''}` : `消耗 ${name}${n > 1 ? `×${n}` : ''}`
 }
 
 /** 把整条分支条件渲染成一句话；无条件返回空串 */

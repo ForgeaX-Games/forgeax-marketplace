@@ -14,8 +14,6 @@ import { VisualStyleSelector } from './VisualStyleSelector'
 import { DirectorStyleSelector } from './DirectorStyleSelector'
 import { UIStyleSelector } from './UIStyleSelector'
 import { MinigamePoolSelector } from './MinigamePoolSelector'
-import { NumericModule } from './modules/NumericModule'
-import { InventoryModule } from './modules/InventoryModule'
 
 /**
  * RefGrid 每张卡片的显示项 —— 继承 PreviewTarget，再叠加两个 UI 专用字段：
@@ -430,24 +428,6 @@ function RefsPanel() {
     return (
       <div className="ks-forge-step ks-forge-step-full">
         <MinigamePoolSelector />
-      </div>
-    )
-  }
-
-  // 「数值系统」模块：全局变量 + 节点门槛/分支条件（节点图编辑器后续阶段挂载）。
-  if (imageSection === 'numeric') {
-    return (
-      <div className="ks-forge-step ks-forge-step-full">
-        <NumericModule />
-      </div>
-    )
-  }
-
-  // 「背包系统」模块：搜寻拾取道具 + 物品效果（编辑器后续阶段挂载）。
-  if (imageSection === 'inventory') {
-    return (
-      <div className="ks-forge-step ks-forge-step-full">
-        <InventoryModule />
       </div>
     )
   }

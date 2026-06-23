@@ -1,7 +1,0 @@
-{
-  "type": "object",
-  "properties": {
-    "slug": { "type": "string" },
-    "charId": { "type": "string" }
-  }
-}

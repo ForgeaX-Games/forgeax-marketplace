@@ -158,50 +158,11 @@ export function migrateV4ToV5(scenario: Scenario): Scenario {
  * 迁移只显式建一个空 variables 字典并 bump 版本号，保证「有没有数值系统」可判定。
  */
 export function migrateV5ToV6(scenario: Scenario): Scenario {
-  if (scenario.schemaVersion >= 6) return scenario
+  if (scenario.schemaVersion === 6) return scenario
   return {
     ...scenario,
     schemaVersion: 6,
     variables: scenario.variables ?? {},
-  }
-}
-
-/**
- * v6 → v7：模块化 + 背包系统。
- *
- * 增量：
- *   1. Scenario.modules?: Partial<Record<ModuleId, boolean>> —— 模块开关
- *      · 旧剧本视为「全开」（isModuleEnabled 默认 true），这里不强写，
- *        让向后兼容由 moduleFlags 兜底；只为显式 bump 版本号。
- *   2. Scenario.items?: Record<string, InventoryItem> —— 背包物品注册表
- *   3. Scene.entryGate / onEnterItemEffects / searchLoot、Branch.itemEffects、
- *      ConditionClause 'hasItem' —— 均为可选，运行时已 `?? []`/`?? {}` 兜底。
- *
- * 与 v5→v6 同理：旧数据不写这些字段也能照常播放，迁移仅显式建空 items 字典
- * 并 bump 版本号，保证「有没有背包系统」可判定。
- */
-export function migrateV6ToV7(scenario: Scenario): Scenario {
-  if (scenario.schemaVersion >= 7) return scenario
-  return {
-    ...scenario,
-    schemaVersion: 7,
-    items: scenario.items ?? {},
-  }
-}
-
-/**
- * v7 → v8：剪映式后期效果（滤镜/调节/特效/贴纸/转场/首尾动画）。
- *
- * 增量全部为 Scene 上的可选字段（filterClips / adjustClips / effectClips /
- * stickerClips / transition / clipAnim），缺省即「无效果」，渲染层已用 `?? []`
- * 兜底。旧数据不写这些字段也能照常播放，迁移仅显式 bump 版本号即可，
- * 无需任何字段转换。
- */
-export function migrateV7ToV8(scenario: Scenario): Scenario {
-  if (scenario.schemaVersion >= 8) return scenario
-  return {
-    ...scenario,
-    schemaVersion: 8,
   }
 }
 
@@ -261,8 +222,6 @@ export function migrateScenarioToLatest(scenario: Scenario): Scenario {
   if (s.schemaVersion === 3) s = migrateV3ToV4(s)
   if (s.schemaVersion === 4) s = migrateV4ToV5(s)
   if (s.schemaVersion === 5) s = migrateV5ToV6(s)
-  if (s.schemaVersion === 6) s = migrateV6ToV7(s)
-  if (s.schemaVersion === 7) s = migrateV7ToV8(s)
   // 末尾无条件兜底：跨过 v4 守卫导致 episodes 缺失的历史剧本也能拿回剧集。
   s = ensureEpisodes(s)
   return s

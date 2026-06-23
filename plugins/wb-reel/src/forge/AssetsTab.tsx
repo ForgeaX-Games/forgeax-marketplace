@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useShellStore } from '../shell/shellStore'
 import { SceneAssetGallery } from '../editor/SceneAssetGallery'
@@ -46,23 +46,6 @@ export function AssetsTab() {
   // 右侧「正式素材」托盘: 图片 / 视频 / 分镜 并列 tab 切换(一次显示一种, 可滚动)。
   // 分镜页签 = 智能体生成的关键帧按镜头管理(不再塞进视频卡)。
   const [trayKind, setTrayKind] = useState<'image' | 'video' | 'shot'>('image')
-
-  /**
-   * 时间轴 clip 右键「在素材库查看」跳来时（assetFocus.tick 变化）：
-   *   - 把托盘切到对应页签（分镜 / 视频 / 图片），
-   *   - 把 shotId 透传给 SceneShotGallery 高亮滚动到那一镜。
-   * 只在 tick 变化时响应，避免抢走用户手动切 tab 的操作。
-   */
-  const assetFocus = useShellStore((s) => s.assetFocus)
-  const focusTick = assetFocus?.tick ?? 0
-  useEffect(() => {
-    if (assetFocus && assetFocus.sceneId === selectedSceneId) {
-      setTrayKind(assetFocus.trayKind)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusTick])
-  const focusShotId =
-    assetFocus && assetFocus.sceneId === selectedSceneId ? assetFocus.shotId : null
 
   return (
     <div className="ks-assets-tab">
@@ -129,11 +112,7 @@ export function AssetsTab() {
                   ) : trayKind === 'video' ? (
                     <SceneAssetGallery sceneId={selectedSceneId} kind="video" ids={sceneVideos} />
                   ) : (
-                    <SceneShotGallery
-                      sceneId={selectedSceneId}
-                      focusShotId={focusShotId}
-                      focusTick={focusTick}
-                    />
+                    <SceneShotGallery sceneId={selectedSceneId} />
                   )}
                 </div>
               </aside>

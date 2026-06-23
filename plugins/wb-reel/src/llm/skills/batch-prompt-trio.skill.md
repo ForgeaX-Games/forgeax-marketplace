@@ -95,14 +95,6 @@ CRITICAL rules per shot:
 - **相邻两镜必须共享至少一个视觉锚点** (人物 / 道具 / 环境 / 光源), 在 `transitionHint` 里 **明写承接元素**
 - 每 shot 必填 `audioHint` (具体到物理: 呼吸 / 脚步 / 水滴 / 金属碰撞), `subtext` / `performance` (无台词给空字符串)
 
-### 景别 & 运镜的跨镜变化 (必须 · 作者强调)
-
-「少而长」**不等于**「每镜同款」. 即使一场戏只有 3–5 镜, 这几镜之间也**必须有景别与运镜的对比和切换** —— 否则视频看起来就是一组雷同机位的静态幻灯片 (作者明确反馈过这个问题). 这一条与上面的景别规则配套, 专门管 `cameraHint` 的跨镜变化:
-
-- **运镜随戏走, 不抄同一句**: NEVER 把同一个 `cameraHint` 复制到每一镜. 平铺直叙的拍用稳健的静态 / 微动 (锁定、极缓 push、轻摇); 情绪 / 动作 / 转折的**峰值**才动用 persona 的**签名大运镜** (Dolly Zoom / 快速 Pull Back / 大幅升降 / 手持冲撞). 签名是**点睛**, **不设固定次数配额**, 按这一拍的戏来定、克制而有目的 —— 既不必每镜都来一遍, 也不要为了"显得有变化"硬塞运镜.
-- **静↔动、远↔近成节奏**: 刻意让相邻镜在「机位是否运动」「景别远近」上形成对比, 让观众看完有整体呼吸感, 而不是一堆同质机位.
-- **最终解释权在 persona**: system prompt 顶部的「镜头调度通则 / DIRECTING_PRINCIPLE」对"该不该动、用哪种签名"有最终解释权; 本节只是把它对齐到 `framing` / `cameraHint` 两个字段的硬要求上. persona 与本节冲突时听 persona.
-
 ### keyframeStrategy 决策
 
 CRITICAL: Choose `'single'` vs `'ab'` based on **physical motion**, not aesthetic preference.
@@ -161,15 +153,6 @@ For each scene, produce one video prompt that follows the **official `seedance2-
 - 若输入有 UI / 参考图锚点 → 逐镜复述一次。
 
 > **分解原则（核心）**：一个 scene 的整段 prose 用**多个镜头**来演绎；越细的描写越要落到**各镜头**里，而不是堆成一句空话。一次出片（≈5–15s）只演绎其中一段镜头，**没演完的内容靠 `storyboard.shots[*].continuityGroupId` + 尾帧续接进入后续镜头 / 下一次出片的提示词**——所以同一连续动作的相邻镜共用一个 `continuityGroupId`（见 §2），切到新动作就换 group。
-
-### 构图继承与放大 (CRITICAL —— 作者反馈最痛的点)
-
-你在 §1 image 与 §2 storyboard 里已经为每一镜设计好了 `framing`（景别）/ `cameraHint`（机位运镜）/ 画面意图。**那是一份你自己刚定好的构图契约, 不是参考建议。** 作者反馈过：**分镜的构图本来是好的, 一到视频段就被写普通了** —— 各种视角、镜头语言、构图、运镜全被弱化成小学初学者水平。本段视频提示词的每个 `镜头N` 必须：
-
-- **忠实继承**：本 scene 每个 `镜头N` 的景别 / 视点 / 运镜方向, 必须与 §2 里同序号 shot 的 `framing` + `cameraHint` 一致, 不许私自抹平成"中景角色站中间说话"。
-- **就地放大**：在继承的基础上往电影级**加细节**（前景遮挡、纵深层次、光比、运动矢量、主体在画面的占位与朝向），而不是简化。
-- **降级即失败**：若某个 `镜头N` 把分镜精心设计的视角 / 景别 / 运镜抹平成平庸正打镜头 → 视为失败, 重写该镜。
-- **谁是权威**：真正出片时下游会对**每一镜**单独跑 `cinema-video-prompt`（带 persona 的逐镜工程化）作为最终提示词；本段 `video` 是 scene 级草稿/概览, 但仍**不得**与上面的构图契约相矛盾, 以免给下游错误的基线。
 
 <example name="video-good">
 镜头1：锁定中近景，雨幕在画面上层斜切而过，<主体1>（深灰风衣男子）呼吸带起鬓角碎发，背景霓虹光斑虚化为竖条；只有雨声和心跳的低频底噪。
@@ -272,23 +255,6 @@ scene-B (相邻): 角色穿黑大衣 (输入 beat 没写换装)
 </reasoning>
 </bad-example>
 
-<bad-example name="camera-uniform">
-6 镜 cameraHint 全是 "缓慢推进 Push In · 35mm"
-
-<reasoning>
-违反 §2 "运镜的跨镜变化". 把同一个运镜抄到每一镜 = 一组雷同机位的幻灯片. 应当: 多数镜静态/微动, 只在情绪或动作峰值动用 persona 的签名大运镜, 并让相邻镜在静↔动 / 远↔近上形成对比. 运镜按这一拍的戏来定, 不设固定配额.
-</reasoning>
-</bad-example>
-
-<bad-example name="flattened-composition">
-storyboard shot: framing="ots 过肩", cameraHint="低角度 + 前景栏杆遮挡"
-video 同序号镜头: "镜头2：中景, <主体1> 站在画面中央开口说话"
-
-<reasoning>
-违反 §3 "构图继承与放大". 分镜辛苦设计的过肩视点 + 低角度 + 前景遮挡, 到视频段被抹平成平庸正打中景. 必须忠实继承景别/视点/运镜, 再就地往电影级加细节 (前景遮挡、纵深、光比、主体占位朝向), 而不是简化.
-</reasoning>
-</bad-example>
-
 <bad-example name="markdown-fence">
 ` ```json ` { "actId": ... } ` ``` `
 
@@ -308,10 +274,8 @@ Silently verify before emitting (do not write the checklist out):
 - [ ] `scenes.length === 输入 scene 数`, sceneId 全部一一对应.
 - [ ] 每个 scene 的 `image` 长度在 150–300 字, 末尾有画幅关键词.
 - [ ] 每个 scene 的 `storyboard.shots[*]` 满足: durationSec 是 1–60 整数秒、按节奏长短混用 (别一刀切) / 总和 ≈ sceneDurationSec ± 5s / 至少 3 种景别 / 没有连续三镜同景别.
-- [ ] `cameraHint` **没有被抄成每镜同款**: 运镜随戏走 (平铺用静态/微动、峰值才上签名大运镜、不设次数配额), 相邻镜在静↔动 / 远↔近上有对比.
 - [ ] 每个 shot 都填了 `continuityGroupId` (同一连续动作/长镜共用一个 id, 切动作就换 id) 和 `sourceTextSpan` (script 模式摘原文, idea 模式可空).
 - [ ] 每个 scene 的 `video` 用 `镜头1/镜头2…`（无绝对秒数）+ 一镜一运镜 + `<主体N>` 指代（无裸 asset-id）+ 至少 1 句声音线 + 末尾兜底包（画质/稳定/无字幕/水印；多人挂双胞胎兜底）；**不写"打码/马赛克"**（写实人脸由管线 faceMaskTool 半脸打码，与提示词无关）.
-- [ ] `video` 每个 `镜头N` **忠实继承并放大**同序号 shot 的 `framing` + `cameraHint` + 画面意图, 没有把构图抹平成"角色站中间说话".
 - [ ] 跨 scene 角色服饰 / 道具 / 光源方向一致 (除非 beat 明写改变).
 - [ ] LOCKED ANCHORS 全部遵守.
 - [ ] 没有人名 / 品牌 / IP.

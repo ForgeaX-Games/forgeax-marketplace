@@ -349,19 +349,6 @@ function setStatus(elId, text, kind) {
 // open-agent-detail.ts via switchChat=false from sub-card click).
 const GROUP_REGISTRY = [
   {
-    // Producer family — mirrors agent-groups.ts. NOTE: the canonical TS
-    // registry leads this group with `forge` (主线制作人), but `forge` is a
-    // runtime orchestrator alias that has NO persona plugin, so it never
-    // appears in this iframe's `/api/bus/plugins?kind=agent` source. Here the
-    // group degrades to lead=`arin` (the editable 制作人 persona) with
-    // forgeax-default folded under it — same lead+indented-subs treatment as
-    // the art family.
-    id: 'producer-family',
-    kind: 'subagent-family',
-    leadShortId: 'arin',
-    memberShortIds: ['forgeax-default'],
-  },
-  {
     id: 'coder-skins',
     kind: 'skin',
     representativeShortId: 'mochi',

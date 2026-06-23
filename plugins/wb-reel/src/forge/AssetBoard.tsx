@@ -341,7 +341,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
         label: `图像 · ${spec.title}${n > 1 ? ` (${i + 1}/${n})` : ''}`,
         sceneId,
         group,
-        run: async ({ setRequest }) =>
+        run: async () =>
           generateCardImage({
             sceneId,
             kind: spec.kind,
@@ -350,7 +350,6 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
             prompt,
             client,
             referenceImages,
-            onRequest: setRequest,
           }),
       })
     }

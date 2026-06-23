@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   migrateV1ToV2,
   migrateV2ToV3,
-  migrateV6ToV7,
-  migrateV7ToV8,
   migrateScenarioToLatest,
   ensureSceneHasShots,
 } from '../schemaMigrate'
@@ -74,14 +72,9 @@ describe('migrateV1ToV2', () => {
 })
 
 describe('migrateScenarioToLatest', () => {
-  it('v1 → v8（链式迁移到最新版本）', () => {
+  it('v1 → v6（链式迁移到最新版本）', () => {
     const out = migrateScenarioToLatest(mkV1())
-    expect(out.schemaVersion).toBe(8)
-  })
-  it('v1 迁到最新后有空 items 容器', () => {
-    const out = migrateScenarioToLatest(mkV1())
-    expect(out.items).toBeDefined()
-    expect(out.items).toEqual({})
+    expect(out.schemaVersion).toBe(6)
   })
   it('最新版幂等', () => {
     const v1 = mkV1()
@@ -190,48 +183,6 @@ describe('migrateV2ToV3', () => {
     expect(out.scenes.s1!.shots?.length).toBe(2)
     expect(out.scenes.s1!.shots?.[0]?.id).toBe('custom')
     expect(out.scenes.s1!.keyShotId).toBe('custom')
-  })
-})
-
-describe('migrateV6ToV7', () => {
-  function mkV6(): Scenario {
-    return { ...mkV1(), schemaVersion: 6, variables: {} }
-  }
-
-  it('版本号升到 7 并补齐空 items', () => {
-    const out = migrateV6ToV7(mkV6())
-    expect(out.schemaVersion).toBe(7)
-    expect(out.items).toEqual({})
-  })
-
-  it('已有 items 时保留', () => {
-    const v6: Scenario = {
-      ...mkV6(),
-      items: { it1: { id: 'it1', name: '钥匙' } },
-    }
-    const out = migrateV6ToV7(v6)
-    expect(out.items?.it1?.name).toBe('钥匙')
-  })
-
-  it('已经是 v7 时幂等返回（引用相等）', () => {
-    const v7: Scenario = { ...mkV6(), schemaVersion: 7, items: {} }
-    expect(migrateV6ToV7(v7)).toBe(v7)
-  })
-})
-
-describe('migrateV7ToV8', () => {
-  function mkV7(): Scenario {
-    return { ...mkV1(), schemaVersion: 7, items: {} }
-  }
-
-  it('版本号升到 8（后期效果字段可选，无需转换）', () => {
-    const out = migrateV7ToV8(mkV7())
-    expect(out.schemaVersion).toBe(8)
-  })
-
-  it('已经是 v8 时幂等返回（引用相等）', () => {
-    const v8: Scenario = { ...mkV7(), schemaVersion: 8 }
-    expect(migrateV7ToV8(v8)).toBe(v8)
   })
 })
 

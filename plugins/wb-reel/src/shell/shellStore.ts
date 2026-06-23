@@ -58,33 +58,11 @@ export type ForgeView = 'script' | 'image' | 'tree' | 'assets'
  *
  * 切换不影响 scenarioStore，仅 UI 选择。持久化与 forgeView 同档。
  */
-export type ImageSection =
-  | 'style'
-  | 'director'
-  | 'refs'
-  | 'ui'
-  | 'minigame'
-  | 'numeric'
-  | 'inventory'
+export type ImageSection = 'style' | 'director' | 'refs' | 'ui' | 'minigame'
 
 export interface FocusIntent {
   sceneId: string
   /** 单调递增；即使 sceneId 不变，tick 变了就重新聚焦 */
-  tick: number
-}
-
-/**
- * 素材库聚焦意图 —— 从时间轴 clip 右键「在素材库查看」跳转时填入。
- *
- *   - sceneId  : 目标节点（AssetsTab 跟随 selectedSceneId，由调用方一并 selectScene）
- *   - trayKind : 落到「正式素材」哪个页签（image / video / shot）
- *   - shotId   : 若是分镜/逐镜视频，定位到具体那一镜的卡片并高亮滚动
- *   - tick     : 单调递增，保证同一目标连点也会重新触发聚焦
- */
-export interface AssetFocus {
-  sceneId: string
-  trayKind: 'image' | 'video' | 'shot'
-  shotId: string | null
   tick: number
 }
 
@@ -115,10 +93,6 @@ export interface ShellState {
    */
   selectedShotId: string | null
   focusIntent: FocusIntent | null
-  /**
-   * 素材库聚焦意图（见 AssetFocus）。会话态，不持久化 —— 刷新后不该自动跳进素材库。
-   */
-  assetFocus: AssetFocus | null
   forgeProgress: { done: number; total: number } | null
   /**
    * v4 · StoryTree 视图当前选中的剧集 id（分剧集化）。
@@ -178,16 +152,6 @@ export interface ShellState {
   /** 显式关闭详情浮层（ESC / × 按钮） */
   closeSceneDetail: () => void
   clearFocusIntent: () => void
-  /**
-   * 跳转「素材库」并聚焦某节点/某镜的卡片（时间轴 clip 右键「在素材库查看」用）。
-   * 切到 forge.assets 视图，写 assetFocus（tick++）；节点选择由调用方一并 selectScene。
-   */
-  openAssetFocus: (payload: {
-    sceneId: string
-    trayKind: 'image' | 'video' | 'shot'
-    shotId?: string | null
-  }) => void
-  clearAssetFocus: () => void
   setForgeProgress: (progress: ShellState['forgeProgress']) => void
   /** 切换活跃剧集；null 表示兜底/未初始化（UI 层会同步落到第一集） */
   setActiveEpisodeId: (episodeId: string | null) => void
@@ -232,7 +196,6 @@ export const useShellStore = create<ShellState>()(
       promptFloaterOpen: false,
       selectedShotId: null,
       focusIntent: null,
-      assetFocus: null,
       forgeProgress: null,
       activeEpisodeId: null,
       chatVisible: true,
@@ -257,15 +220,7 @@ export const useShellStore = create<ShellState>()(
       setImageSection: (section) => {
         // 白名单须与 ImageSection 联合类型保持一致 —— 漏列会让对应分区点击被强制
         // 回退到 'refs'（曾导致「导演风格 / 小游戏」点击无效）。
-        const valid: readonly ImageSection[] = [
-          'style',
-          'director',
-          'refs',
-          'ui',
-          'minigame',
-          'numeric',
-          'inventory',
-        ]
+        const valid: readonly ImageSection[] = ['style', 'director', 'refs', 'ui', 'minigame']
         set({ imageSection: valid.includes(section) ? section : 'refs' })
       },
       toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
@@ -310,20 +265,6 @@ export const useShellStore = create<ShellState>()(
           selectedShotId: null,
         }),
       clearFocusIntent: () => set({ focusIntent: null }),
-      openAssetFocus: ({ sceneId, trayKind, shotId }) => {
-        const prev = get().assetFocus
-        set({
-          activeTab: 'forge',
-          forgeView: 'assets',
-          assetFocus: {
-            sceneId,
-            trayKind,
-            shotId: shotId ?? null,
-            tick: (prev?.tick ?? 0) + 1,
-          },
-        })
-      },
-      clearAssetFocus: () => set({ assetFocus: null }),
       setForgeProgress: (progress) => set({ forgeProgress: progress }),
       setActiveEpisodeId: (episodeId) => set({ activeEpisodeId: episodeId }),
       setChatVisible: (visible) => set({ chatVisible: visible }),
@@ -401,17 +342,9 @@ export const useShellStore = create<ShellState>()(
           }
           if (
             typeof p.imageSection === 'string' &&
-            (
-              [
-                'style',
-                'director',
-                'refs',
-                'ui',
-                'minigame',
-                'numeric',
-                'inventory',
-              ] as readonly string[]
-            ).includes(p.imageSection)
+            (['style', 'director', 'refs', 'ui', 'minigame'] as readonly string[]).includes(
+              p.imageSection,
+            )
           ) {
             merged.imageSection = p.imageSection as ImageSection
           }

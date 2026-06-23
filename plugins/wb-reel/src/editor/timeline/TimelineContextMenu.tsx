@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { formatTimeCode } from './timelineFormat'
-import type { Branch, DialogueLine, QTECue, Shot } from '../../scenario/types'
+import type { Branch, DialogueLine, QTECue } from '../../scenario/types'
 
 /**
  * 时间轴右键菜单
@@ -27,10 +27,6 @@ export type ContextTarget =
   | { kind: 'dialogue'; ms: number; line: DialogueLine }
   | { kind: 'cue'; ms: number; cue: QTECue }
   | { kind: 'branch'; ms: number; branch: Branch }
-  /** 图像轨分镜 clip / VIDEO 轨逐镜视频 clip —— 共用同一套「查看生成参数 / 在素材库查看」菜单 */
-  | { kind: 'shot'; ms: number; shot: Shot; hasVideo: boolean }
-  /** 场景级单条视频（scene.media.kind==='VIDEO'） */
-  | { kind: 'video'; ms: number }
 
 export interface TimelineContextMenuProps {
   /** 鼠标点击位置（viewport 坐标，clientX / clientY） */
@@ -46,14 +42,6 @@ export interface TimelineContextMenuProps {
   onRemoveCue: (id: string) => void
   onRemoveBranch: (id: string) => void
   onCopyTimecode: (ms: number) => void
-  /** 分镜 clip → 弹「查看生成参数」(GenRequestDialog) */
-  onInspectShot?: (shot: Shot) => void
-  /** 分镜 clip → 跳转素材库并聚焦该镜卡片（提示词 / 关键帧 / 视频） */
-  onOpenShotInAssets?: (shot: Shot) => void
-  /** 场景级视频 → 弹「查看生成参数」 */
-  onInspectSceneVideo?: () => void
-  /** 场景级视频 → 跳转素材库视频页签 */
-  onOpenSceneVideoInAssets?: () => void
 }
 
 export function TimelineContextMenu({
@@ -69,10 +57,6 @@ export function TimelineContextMenu({
   onRemoveCue,
   onRemoveBranch,
   onCopyTimecode,
-  onInspectShot,
-  onOpenShotInAssets,
-  onInspectSceneVideo,
-  onOpenSceneVideoInAssets,
 }: TimelineContextMenuProps): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -115,9 +99,6 @@ export function TimelineContextMenu({
       style={{ left: x, top: y }}
       role="menu"
       onContextMenu={(e) => e.preventDefault()}
-      // 菜单内的指针交互不外漏到时间轴轨道（避免点菜单时误触发 scrub / 选中）
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="ks-tl-ctxmenu-header ks-mono">
         @{formatTimeCode(target.ms)}
@@ -249,71 +230,6 @@ export function TimelineContextMenu({
           >
             <span className="ks-tl-ctxmenu-glyph">⎘</span>
             <span>拷贝出现时间码</span>
-          </button>
-        </>
-      )}
-
-      {target.kind === 'shot' && (
-        <>
-          <div className="ks-tl-ctxmenu-info ks-cn">
-            镜{target.shot.order + 1}
-            {target.shot.prompt ? ` · ${truncate(target.shot.prompt, 16)}` : ''}
-          </div>
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onInspectShot?.(target.shot))}
-          >
-            <span className="ks-tl-ctxmenu-glyph">◎</span>
-            <span>查看生成参数（提示词 / 参考素材）</span>
-          </button>
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onOpenShotInAssets?.(target.shot))}
-          >
-            <span className="ks-tl-ctxmenu-glyph">▦</span>
-            <span>在素材库查看此镜卡片</span>
-          </button>
-          <div className="ks-tl-ctxmenu-sep" />
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onCopyTimecode(target.ms))}
-          >
-            <span className="ks-tl-ctxmenu-glyph">⎘</span>
-            <span>拷贝时间码</span>
-          </button>
-        </>
-      )}
-
-      {target.kind === 'video' && (
-        <>
-          <div className="ks-tl-ctxmenu-info ks-cn">场景视频</div>
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onInspectSceneVideo?.())}
-          >
-            <span className="ks-tl-ctxmenu-glyph">◎</span>
-            <span>查看生成参数（提示词 / 参考素材）</span>
-          </button>
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onOpenSceneVideoInAssets?.())}
-          >
-            <span className="ks-tl-ctxmenu-glyph">▦</span>
-            <span>在素材库查看视频卡片</span>
-          </button>
-          <div className="ks-tl-ctxmenu-sep" />
-          <button
-            type="button"
-            className="ks-tl-ctxmenu-item"
-            onClick={close(() => onCopyTimecode(target.ms))}
-          >
-            <span className="ks-tl-ctxmenu-glyph">⎘</span>
-            <span>拷贝时间码</span>
           </button>
         </>
       )}

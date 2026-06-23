@@ -4,11 +4,7 @@ import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
-import type { QTECue, QTEHitWindow, Shot, StickerClip, TextOverlayClip } from '../scenario/types'
-import { useClipSelection } from './timeline/clipSelection'
-import { pickActiveOverlays, overlayStyle } from '../player/TextOverlayLayer'
-import { composeStageFx } from '../fx/fxPresets'
-import { FxOverlayLayer, FadeLayer, StickerContent, stickerStyle } from '../player/SceneFxLayers'
+import type { QTECue, QTEHitWindow, Shot } from '../scenario/types'
 import { CUE_RING_TARGET_SCALE, cuePhase, cueProgress, cueRingScale } from '../qte/QTEEngine'
 import { Timeline } from './Timeline'
 import { injectStyleOnce } from '../styles/injectStyle'
@@ -141,11 +137,6 @@ export function StagePane({
    * pointerup 时 Timeline 会 dispatch 真正的 update，并把 preview 清空。
    */
   const [localPreview, setLocalPreview] = useState<TimelinePreview | null>(null)
-  // 预览观看偏好（纯本地视图态，不写进剧本）：
-  //   · viewFit：默认 'contain' —— 画面**完整展示不裁切**；'cover' = 填充铺满（会裁切）。
-  //   · viewZoom：1~3 倍，>1 时放大并被画布裁切（用户自己「放大」才裁）。
-  const [viewFit, setViewFit] = useState<'contain' | 'cover'>('contain')
-  const [viewZoom, setViewZoom] = useState(1)
   const preview = extPreview !== undefined ? extPreview : localPreview
   const setPreview: (p: TimelinePreview | null) => void =
     extPreview !== undefined ? () => { /* 受控 */ } : setLocalPreview
@@ -186,13 +177,6 @@ export function StagePane({
   const imgClient = useMemo<ImageClient>(() => createImageProvider(), [])
   const canvasRef = useRef<HTMLDivElement>(null)
   const updateQTECue = useScenarioStore((s) => s.updateQTECue)
-  const updateTextOverlay = useScenarioStore((s) => s.updateTextOverlay)
-  const selectedTextId = useClipSelection((s) => s.textOverlayId)
-  const setSelectedText = useClipSelection((s) => s.setTextOverlay)
-  const updateStickerClip = useScenarioStore((s) => s.updateStickerClip)
-  const fxSelection = useClipSelection((s) => s.fxSelection)
-  const setFxSelection = useClipSelection((s) => s.setFxSelection)
-  const selectedStickerId = fxSelection?.kind === 'sticker' ? fxSelection.id : null
 
   // 走全局磁盘持久化的 sceneImageCache —— 切场景再回来不丢、刷新不丢
   const cacheRecord = useSceneImageCache((s) => s.records[sceneId])
@@ -493,18 +477,6 @@ export function StagePane({
         ? startedDialogue.reduce(latestStart)
         : undefined
 
-  // 剪映式后期效果：媒体 filter/transform + 叠层（暗角/颗粒/特效/遮罩/贴纸）。
-  // 通过 CSS 变量灌到 .ks-stage-canvas，让所有画面元素（单视频 / 多镜 ShotSequenceVideo /
-  // 单图）统一吃到 filter/transform —— 否则多镜节点（生成视频最常见）滤镜/调节没效果。
-  const stageFx = composeStageFx(scene, hoverMs, scene.durationMs)
-  const canvasFxStyle = {
-    ['--ks-fx-filter' as string]: stageFx.mediaFilter || 'none',
-    // 留空串而非 'none'：好和「观看缩放」transform 拼接（none 不能与 scale() 并列）。
-    ['--ks-fx-transform' as string]: stageFx.mediaTransform || '',
-    ['--ks-view-fit' as string]: viewFit,
-    ['--ks-view-zoom' as string]: String(viewZoom),
-  } as React.CSSProperties
-
   return (
     <div
       ref={stageRef}
@@ -532,11 +504,7 @@ export function StagePane({
         </div>
       )}
 
-      <div
-        className={`ks-stage-canvas ${stageFx.wrapperClass}`}
-        ref={canvasRef}
-        style={canvasFxStyle}
-      >
+      <div className="ks-stage-canvas" ref={canvasRef}>
         <span className="ks-corner ks-corner-tl" />
         <span className="ks-corner ks-corner-tr" />
         <span className="ks-corner ks-corner-bl" />
@@ -734,28 +702,6 @@ export function StagePane({
           )
         })}
 
-        {/* 剪映式后期效果叠层：暗角/颗粒/特效 + 贴纸（可拖拽）+ 渐显渐隐遮罩 */}
-        <FxOverlayLayer frame={stageFx} />
-        <StageStickerLayer
-          stickers={scene.stickerClips}
-          hoverMs={hoverMs}
-          canvasRef={canvasRef}
-          selectedId={selectedStickerId}
-          onSelect={(id) => setFxSelection({ kind: 'sticker', id })}
-          onMove={(id, patch) => updateStickerClip(scene.id, id, patch)}
-        />
-        <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
-
-        {/* 文字叠加预览（剪映/PR 式贴字）—— 跟随 hoverMs 出现；选中的可在画面上直接拖拽定位。 */}
-        <StageTextOverlayLayer
-          overlays={scene.textOverlays}
-          hoverMs={hoverMs}
-          canvasRef={canvasRef}
-          selectedId={selectedTextId}
-          onSelect={setSelectedText}
-          onMove={(id, patch) => updateTextOverlay(scene.id, id, patch)}
-        />
-
         {/* 字幕预览（hover 当前时刻有台词时显示）
             v3.9.11：受 Timeline DIA 开关联动，关闭时不渲染，画面保持干净。 */}
         {showDialogue && activeDialogue && (
@@ -780,15 +726,6 @@ export function StagePane({
          * 画面角落保持只剩 P 浮层一个开关，没有其他悬浮按钮。
          * 历史版本如需查看，走 PromptTabs/Inspector，从数据层恢复而非画面叠浮层。
          */}
-
-        {/* 悬浮观看控件（半透明）：适应/填充 + 缩放。默认 contain 完整展示，
-            放大才裁切。纯本地视图态，不写进剧本，不影响成片。 */}
-        <StageViewControls
-          fit={viewFit}
-          zoom={viewZoom}
-          onToggleFit={() => setViewFit((f) => (f === 'contain' ? 'cover' : 'contain'))}
-          onZoom={(z) => setViewZoom(Math.min(3, Math.max(1, Number(z.toFixed(2)))))}
-        />
       </div>
 
       {rightSlot}
@@ -801,56 +738,6 @@ export function StagePane({
           onPreviewChange={setPreview}
         />
       )}
-    </div>
-  )
-}
-
-/**
- * StageViewControls —— 画面右上角的半透明「观看控件」。
- *
- * 只调「怎么看」，不改剧本数据：
- *   · 适应(contain) / 填充(cover) 切换 —— 默认 contain 完整展示不裁切；
- *   · 缩放 − / 百分比 / ＋ —— 1~3 倍，>1 时画面被画布裁切（用户主动放大才裁）。
- * 默认低调（半透明），hover 整个画布时更明显。
- */
-function StageViewControls({
-  fit,
-  zoom,
-  onToggleFit,
-  onZoom,
-}: {
-  fit: 'contain' | 'cover'
-  zoom: number
-  onToggleFit: () => void
-  onZoom: (z: number) => void
-}) {
-  const pct = Math.round(zoom * 100)
-  return (
-    <div
-      className="ks-view-controls"
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        type="button"
-        className={`ks-view-btn ks-view-fit ${fit === 'cover' ? 'is-on' : ''}`}
-        onClick={onToggleFit}
-        title={fit === 'contain' ? '当前「适应」：完整展示。点击切「填充」铺满裁切' : '当前「填充」：铺满裁切。点击切「适应」完整展示'}
-      >
-        {fit === 'contain' ? '适应' : '填充'}
-      </button>
-      <div className="ks-view-zoom">
-        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom - 0.25)} disabled={zoom <= 1} title="缩小" aria-label="缩小">−</button>
-        <button
-          type="button"
-          className="ks-view-btn ks-view-pct"
-          onClick={() => onZoom(1)}
-          title="点击复位到 100%"
-        >
-          {pct}%
-        </button>
-        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom + 0.25)} disabled={zoom >= 3} title="放大" aria-label="放大">＋</button>
-      </div>
     </div>
   )
 }
@@ -1020,160 +907,6 @@ function ShotSequenceVideo({
  *   - 整层 pointer-events: none（不接受点击，避免抢拖拽手势）
  *   - 触发徽章淡化（不是要让作者按键，只是告知玩家会看到啥）
  */
-/**
- * StageTextOverlayLayer —— 编辑器舞台上的「文字叠加」预览 + 画面内拖拽定位。
- *
- * 渲染 hoverMs 当前可见的所有 overlay；选中的那条加虚线选框并可直接拖动，
- * 写回 x/y（[0,1] 归一化坐标）。拖拽用纯 DOM pointer（与 EditorCueMarker 同思路），
- * pointerup 一次性 commit，避免 60Hz 写 store + undo 噪声。
- */
-function StageTextOverlayLayer({
-  overlays,
-  hoverMs,
-  canvasRef,
-  selectedId,
-  onSelect,
-  onMove,
-}: {
-  overlays: TextOverlayClip[] | undefined
-  hoverMs: number
-  canvasRef: React.RefObject<HTMLDivElement | null>
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onMove: (id: string, patch: { x: number; y: number }) => void
-}) {
-  const active = useMemo(() => pickActiveOverlays(overlays, hoverMs), [overlays, hoverMs])
-  if (active.length === 0) return null
-
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, clip: TextOverlayClip): void {
-    onSelect(clip.id)
-    if (e.button !== 0 && e.pointerType === 'mouse') return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    e.stopPropagation()
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    const startCX = clip.x ?? 0.5
-    const startCY = clip.y ?? 0.5
-    const el = e.currentTarget
-    let pending: { x: number; y: number } | null = null
-    const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
-    const compute = (ev: PointerEvent): { x: number; y: number } => {
-      const r = canvas.getBoundingClientRect()
-      const dx = (ev.clientX - startX) / Math.max(1, r.width)
-      const dy = (ev.clientY - startY) / Math.max(1, r.height)
-      return { x: clamp01(startCX + dx), y: clamp01(startCY + dy) }
-    }
-    const onMoveEv = (ev: PointerEvent): void => {
-      const next = compute(ev)
-      el.style.left = `${next.x * 100}%`
-      el.style.top = `${next.y * 100}%`
-      pending = next
-    }
-    const onUp = (ev: PointerEvent): void => {
-      document.removeEventListener('pointermove', onMoveEv)
-      document.removeEventListener('pointerup', onUp)
-      const next = pending ?? compute(ev)
-      if (next.x !== startCX || next.y !== startCY) onMove(clip.id, next)
-    }
-    document.addEventListener('pointermove', onMoveEv)
-    document.addEventListener('pointerup', onUp)
-  }
-
-  return (
-    <div className="ks-stage-txtovl" style={{ position: 'absolute', inset: 0, zIndex: 18, containerType: 'size' }}>
-      {active.map((clip) => (
-        <div
-          key={clip.id}
-          className={`ks-stage-txtovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
-          style={{ ...overlayStyle(clip), position: 'absolute', cursor: 'move' }}
-          onPointerDown={(e) => onPointerDown(e, clip)}
-        >
-          {clip.text}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * StageStickerLayer —— 画面内贴纸（剪映式）：跟随 hoverMs 出现，选中后可直接拖拽改位置。
- * 拖拽模型与 StageTextOverlayLayer 一致（pointer 二维 + pointerup 时一次性 commit）。
- */
-function StageStickerLayer({
-  stickers,
-  hoverMs,
-  canvasRef,
-  selectedId,
-  onSelect,
-  onMove,
-}: {
-  stickers: StickerClip[] | undefined
-  hoverMs: number
-  canvasRef: React.RefObject<HTMLDivElement | null>
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onMove: (id: string, patch: { x: number; y: number }) => void
-}) {
-  const active = useMemo(
-    () => (stickers ?? []).filter((c) => hoverMs >= c.startMs && hoverMs <= c.endMs),
-    [stickers, hoverMs],
-  )
-  if (active.length === 0) return null
-
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, clip: StickerClip): void {
-    onSelect(clip.id)
-    if (e.button !== 0 && e.pointerType === 'mouse') return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    e.stopPropagation()
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    const startCX = clip.x ?? 0.5
-    const startCY = clip.y ?? 0.5
-    const el = e.currentTarget
-    let pending: { x: number; y: number } | null = null
-    const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
-    const compute = (ev: PointerEvent): { x: number; y: number } => {
-      const r = canvas.getBoundingClientRect()
-      const dx = (ev.clientX - startX) / Math.max(1, r.width)
-      const dy = (ev.clientY - startY) / Math.max(1, r.height)
-      return { x: clamp01(startCX + dx), y: clamp01(startCY + dy) }
-    }
-    const onMoveEv = (ev: PointerEvent): void => {
-      const next = compute(ev)
-      el.style.left = `${next.x * 100}%`
-      el.style.top = `${next.y * 100}%`
-      pending = next
-    }
-    const onUp = (ev: PointerEvent): void => {
-      document.removeEventListener('pointermove', onMoveEv)
-      document.removeEventListener('pointerup', onUp)
-      const next = pending ?? compute(ev)
-      if (next.x !== startCX || next.y !== startCY) onMove(clip.id, next)
-    }
-    document.addEventListener('pointermove', onMoveEv)
-    document.addEventListener('pointerup', onUp)
-  }
-
-  return (
-    <div className="ks-stage-stkovl" style={{ position: 'absolute', inset: 0, zIndex: 19, containerType: 'size' }}>
-      {active.map((clip) => (
-        <div
-          key={clip.id}
-          className={`ks-stage-stkovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
-          style={{ ...stickerStyle(clip), cursor: 'move' }}
-          onPointerDown={(e) => onPointerDown(e, clip)}
-        >
-          <StickerContent clip={clip} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function EditorCueMarker({
   cue,
   hoverMs,
@@ -1441,25 +1174,7 @@ const stageCss = `
 .ks-stage-video, .ks-stage-img {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
-  /* 默认 contain —— 画面完整展示不裁切；用户在悬浮控件切「填充」才用 cover。 */
-  object-fit: var(--ks-view-fit, contain);
-  transform-origin: center center;
-  /* 后期效果：滤镜/调节 → filter；观看缩放 scale + 转场/首尾 transform 叠加。
-     由 .ks-stage-canvas 上的 --ks-* 变量驱动，覆盖单视频/多镜/单图所有画面元素。 */
-  filter: var(--ks-fx-filter, none);
-  transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, );
-}
-/* 镜头抖动特效：整块画布做高频小位移（叠在 transform 之上用 animation） */
-.ks-stage-canvas.ks-fx-shake > .ks-stage-video,
-.ks-stage-canvas.ks-fx-shake > .ks-stage-img {
-  animation: ks-fx-shake-kf 220ms infinite;
-}
-@keyframes ks-fx-shake-kf {
-  0% { transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, ) translate(0, 0); }
-  25% { transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, ) translate(-1.2%, 0.8%); }
-  50% { transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, ) translate(1%, -1%); }
-  75% { transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, ) translate(-0.8%, -1.2%); }
-  100% { transform: scale(var(--ks-view-zoom, 1)) var(--ks-fx-transform, ) translate(0, 0); }
+  object-fit: cover;
 }
 /*
  * VideoPlayToggle —— 舞台画面左下角的圆形播放按钮。
@@ -1467,45 +1182,6 @@ const stageCss = `
  *   - 悬停整体亮一度；按下缩 92%；playing 态颜色加冷色调（琥珀主题里用冷色表示"运行中"）
  *   - 半透明 + backdrop-filter 让任何背景底下都能看清图标
  */
-/* 右上角悬浮观看控件（半透明） */
-.ks-view-controls {
-  position: absolute;
-  top: 6px; right: 6px;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1.5px;
-  border-radius: 6px;
-  background: rgba(12, 14, 20, 0.42);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  opacity: 0.4;
-  transition: opacity 140ms var(--ks-ease, ease);
-}
-.ks-stage-canvas:hover .ks-view-controls,
-.ks-view-controls:hover { opacity: 1; }
-.ks-view-zoom { display: inline-flex; align-items: center; gap: 1px; }
-.ks-view-btn {
-  all: unset;
-  cursor: pointer;
-  box-sizing: border-box;
-  min-width: 15px; height: 15px;
-  padding: 0 3px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 4px;
-  font-size: 8px; line-height: 1;
-  color: var(--ks-text-soft, #d8d8d8);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  transition: all 120ms var(--ks-ease, ease);
-}
-.ks-view-btn:hover { color: #fff; border-color: rgba(255,255,255,0.32); background: rgba(255,255,255,0.12); }
-.ks-view-btn:disabled { opacity: 0.35; cursor: default; }
-.ks-view-fit.is-on { color: var(--ks-amber, #f0b661); border-color: var(--ks-amber, #f0b661); }
-.ks-view-pct { min-width: 24px; font-variant-numeric: tabular-nums; }
-
 .ks-stage-play-toggle {
   position: absolute;
   left: 14px;
@@ -1709,28 +1385,5 @@ const stageCss = `
 
 .ks-img-stamp,
 .ks-img-stamp-btn { display: none !important; }
-
-/* 舞台文字叠加预览 + 选框 */
-.ks-stage-txtovl-item {
-  white-space: pre-wrap;
-  max-width: 90%;
-  line-height: 1.2;
-  word-break: break-word;
-  user-select: none;
-}
-.ks-stage-txtovl-item.is-sel {
-  outline: 1px dashed rgba(232,162,58,0.9);
-  outline-offset: 4px;
-}
-.ks-stage-stkovl-item {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-}
-.ks-stage-stkovl-item.is-sel {
-  outline: 1px dashed rgba(232,162,58,0.9);
-  outline-offset: 4px;
-}
 `
 injectStyleOnce('stage-pane', stageCss)

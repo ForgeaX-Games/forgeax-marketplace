@@ -5,15 +5,7 @@ import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
-import type {
-  Branch,
-  MinigameClip,
-  Scene,
-  SearchHotspot,
-  SearchSegmentClip,
-  Shot,
-  QTECue,
-} from '../scenario/types'
+import type { Branch, MinigameClip, Scene, Shot, QTECue } from '../scenario/types'
 import { DialogueBox } from './DialogueBox'
 import { QTEOverlay } from './QTEOverlay'
 import { ChoiceLayer } from './ChoiceLayer'
@@ -21,20 +13,11 @@ import { PlayerMenu } from './PlayerMenu'
 import { PlaybackControls } from './PlaybackControls'
 import { SettlementOverlay } from './SettlementOverlay'
 import { MinigameOverlay } from './MinigameOverlay'
-import { SearchLayer, InventoryHUD } from './SearchLayer'
-import { TextOverlayLayer } from './TextOverlayLayer'
-import { FxOverlayLayer, FadeLayer, StickerLayer } from './SceneFxLayers'
-import { composeStageFx } from '../fx/fxPresets'
-import { isModuleEnabled } from '../scenario/moduleFlags'
 import { nextMinigameToTrigger, pendingMinigamesAtEnd } from './minigameHit'
-import { nextSearchToTrigger, segmentHotspots, isSegmentComplete } from './searchSegmentHit'
 import {
   applyEffects,
-  applyItemEffects,
-  evaluateGate,
   initVarState,
   isBranchAvailable,
-  type ItemState,
   type VarState,
 } from './conditionEval'
 import type { MinigameEvent } from './minigameMessage'
@@ -137,19 +120,9 @@ export function Player() {
   const [vars, setVars] = useState<VarState>(() => initVarState(scenario))
   const varsRef = useRef(vars)
   varsRef.current = vars
-  // 背包系统运行时状态：itemId -> 拥有数量。搜索拾取 / 分支与进入效果增减。
-  const [ownedItems, setOwnedItems] = useState<ItemState>({})
-  const ownedItemsRef = useRef(ownedItems)
-  ownedItemsRef.current = ownedItems
   const visitedRef = useRef(visited)
   visitedRef.current = visited
   const appliedEnterRef = useRef<Set<string>>(new Set())
-  // 搜索热点「已拾取」去重：`${sceneId}:${hotspotId}` 一轮只能拾取一次。
-  const [lootedKeys, setLootedKeys] = useState<Set<string>>(new Set())
-  const lootedRef = useRef<Set<string>>(lootedKeys)
-  lootedRef.current = lootedKeys
-  // 搜索模式开关（放大镜光标 + 热点可点）。换场时自动退出。
-  const [searching, setSearching] = useState(false)
 
   const [elapsed, setElapsed] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -164,17 +137,9 @@ export function Player() {
     windowProgress: 0,
   })
   const [settlement, setSettlement] = useState<{ failedCue: QTECue } | null>(null)
-  /**
-   * 进入门槛被阻断时的瞬时提示（数值/物品不足、且门槛 onFail='block' 又没配改道）。
-   * 几秒后自动消失，纯反馈，不改导航。
-   */
-  const [gateNotice, setGateNotice] = useState<string | null>(null)
   // 小游戏触发状态：当前正在玩哪一条 clip / 已玩过哪些（不再重触）
   const [activeMinigame, setActiveMinigame] = useState<MinigameClip | null>(null)
   const triggeredMinigamesRef = useRef<Set<string>>(new Set())
-  // 搜索段触发状态：当前正卡在哪一段 / 已完成过哪些（不再重触）
-  const [activeSearch, setActiveSearch] = useState<SearchSegmentClip | null>(null)
-  const completedSearchRef = useRef<Set<string>>(new Set())
   /*
    * 字幕（DialogueBox）可见性 —— 与时间轴的 "DIA 轨" 开关同步。
    *
@@ -217,18 +182,6 @@ export function Player() {
     })
   }
 
-  // 门槛阻断提示 2.6s 后自动消失。
-  useEffect(() => {
-    if (!gateNotice) return
-    const t = window.setTimeout(() => setGateNotice(null), 2600)
-    return () => window.clearTimeout(t)
-  }, [gateNotice])
-
-  // 换场自动退出搜索模式（搜查是「当前现场」的动作）。
-  useEffect(() => {
-    setSearching(false)
-  }, [sceneId])
-
   /*
    * 剧本在播放器底下被「换掉」时,把播放状态复位到新剧本的根节点。
    *
@@ -248,9 +201,6 @@ export function Player() {
     setSceneId(scenario.rootSceneId)
     setVisited([scenario.rootSceneId])
     setVars(initVarState(scenario))
-    setOwnedItems({})
-    setLootedKeys(new Set())
-    setSearching(false)
     appliedEnterRef.current = new Set()
     setElapsed(0)
     setVerdicts([])
@@ -259,8 +209,6 @@ export function Player() {
     setSettlement(null)
     setActiveMinigame(null)
     triggeredMinigamesRef.current = new Set()
-    setActiveSearch(null)
-    completedSearchRef.current = new Set()
     setResetTick((t) => t + 1)
   }, [scenario])
 
@@ -372,8 +320,6 @@ export function Player() {
     setSlowMo({ active: false, rate: 1, activeCueId: null, windowProgress: 0 })
     setActiveMinigame(null)
     triggeredMinigamesRef.current = new Set()
-    setActiveSearch(null)
-    completedSearchRef.current = new Set()
     // 进新场景时把 video 的速率/currentTime 复位
     if (videoRef.current) {
       try {
@@ -386,18 +332,14 @@ export function Player() {
     setVisited((prev) => (prev.includes(sceneId) ? prev : [...prev, sceneId]))
     // 数值系统：进入节点的数值副作用（如「经过这一节点 +好感」）。
     // 用 appliedEnterRef 去重，保证每个 sceneId 一轮游玩只累加一次。
-    const hasEnterVar = scene.onEnterEffects && scene.onEnterEffects.length > 0
-    const hasEnterItem = scene.onEnterItemEffects && scene.onEnterItemEffects.length > 0
-    if ((hasEnterVar || hasEnterItem) && !appliedEnterRef.current.has(sceneId)) {
+    if (
+      scene.onEnterEffects &&
+      scene.onEnterEffects.length > 0 &&
+      !appliedEnterRef.current.has(sceneId)
+    ) {
       appliedEnterRef.current.add(sceneId)
-      if (hasEnterVar) {
-        const effects = scene.onEnterEffects!
-        setVars((v) => applyEffects(effects, v, scenario))
-      }
-      if (hasEnterItem) {
-        const itemEffects = scene.onEnterItemEffects!
-        setOwnedItems((o) => applyItemEffects(itemEffects, o))
-      }
+      const effects = scene.onEnterEffects
+      setVars((v) => applyEffects(effects, v, scenario))
     }
   }, [sceneId, scene, resetTick, scenario])
 
@@ -491,7 +433,6 @@ export function Player() {
     if (!scene) return
     if (paused) return
     if (activeMinigame) return
-    if (activeSearch) return
     const duration = scene.durationMs
     const effectiveEnd = computeEffectiveEndMs(scene)
     const isVideo = scene.media.kind === 'VIDEO'
@@ -604,28 +545,6 @@ export function Player() {
         }
       }
 
-      // 6.5) 搜索段触发检测：到达某未完成搜索段 startMs → 定格循环 + 进搜查态
-      {
-        const sg = nextSearchToTrigger({
-          clips: scene!.searchSegments ?? [],
-          elapsedMs: e,
-          completedIds: completedSearchRef.current,
-        })
-        if (sg) {
-          if (isVideo && videoRef.current) {
-            try {
-              // 跳到循环段起点定格，等待玩家搜寻
-              videoRef.current.currentTime = (sg.loopStartMs ?? sg.startMs) / 1000
-              videoRef.current.pause()
-            } catch { /* 还没 ready */ }
-          }
-          rafRef.current = null
-          setActiveSearch(sg)
-          setSearching(true)
-          return
-        }
-      }
-
       if (!reachedEnd) {
         rafRef.current = requestAnimationFrame(step)
       } else {
@@ -654,58 +573,7 @@ export function Player() {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId, paused, resetTick, activeMinigame, activeSearch])
-
-  /** 搜索段结束 → 标记完成、视频跳到段末继续播放、退出搜查态。 */
-  function resumeFromSearch(sg: SearchSegmentClip): void {
-    completedSearchRef.current.add(sg.id)
-    setSearching(false)
-    setActiveSearch(null)
-    elapsedRef.current = Math.max(elapsedRef.current, sg.endMs)
-    const v = videoRef.current
-    if (scene?.media.kind === 'VIDEO' && v) {
-      try {
-        v.currentTime = sg.endMs / 1000
-        void v.play().catch(() => {})
-      } catch {
-        /* 还没 ready */
-      }
-    }
-  }
-
-  // 搜索段进行中：把视频在 [loopStart, loopEnd] 之间循环（首尾相同的静态可循环段）
-  useEffect(() => {
-    if (!activeSearch) return
-    if (scene?.media.kind !== 'VIDEO') return
-    const v = videoRef.current
-    if (!v) return
-    const loopStart = (activeSearch.loopStartMs ?? activeSearch.startMs) / 1000
-    const loopEnd = (activeSearch.loopEndMs ?? activeSearch.endMs) / 1000
-    let raf = 0
-    const tick = (): void => {
-      if (v.paused) void v.play().catch(() => {})
-      if (v.currentTime >= loopEnd || v.currentTime < loopStart - 0.05) {
-        try {
-          v.currentTime = loopStart
-        } catch {
-          /* ignore */
-        }
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [activeSearch, scene])
-
-  // 搜索段完成检测：本段热点按完成条件搜完 → 自动续播
-  useEffect(() => {
-    if (!activeSearch || !scene) return
-    const hs = segmentHotspots(activeSearch, scene.searchLoot ?? [])
-    if (isSegmentComplete(activeSearch, scene.id, hs, lootedKeys)) {
-      resumeFromSearch(activeSearch)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSearch, lootedKeys, scene])
+  }, [sceneId, paused, resetTick, activeMinigame])
 
   function handleSceneEnd(): void {
     if (!scene) return
@@ -716,7 +584,6 @@ export function Player() {
     const evalCtx = {
       vars: varsRef.current,
       visitedSceneIds: new Set(visitedRef.current),
-      ownedItems: ownedItemsRef.current,
     }
     const hasVisibleChoice = scene.branches.some(
       (b) =>
@@ -737,7 +604,7 @@ export function Player() {
 
     const auto = scene.branches.find((b) => b.kind === 'auto')
     if (auto) {
-      navigateTo(auto.targetSceneId)
+      setSceneId(auto.targetSceneId)
       return
     }
 
@@ -747,7 +614,7 @@ export function Player() {
         run.passed ? b.kind === 'qte_pass' : b.kind === 'qte_fail',
       )
       if (targetBranch) {
-        navigateTo(targetBranch.targetSceneId)
+        setSceneId(targetBranch.targetSceneId)
         return
       }
     }
@@ -768,12 +635,12 @@ export function Player() {
     // 优先级：cue.failSceneId > scene.branches.qte_fail > 通用结算屏
     const explicit = cue.slowMo?.failSceneId
     if (explicit && scenario.scenes[explicit]) {
-      navigateTo(explicit)
+      setSceneId(explicit)
       return
     }
     const failBranch = scene.branches.find((b) => b.kind === 'qte_fail')
     if (failBranch && scenario.scenes[failBranch.targetSceneId]) {
-      navigateTo(failBranch.targetSceneId)
+      setSceneId(failBranch.targetSceneId)
       return
     }
     setSettlement({ failedCue: cue })
@@ -795,7 +662,7 @@ export function Player() {
     setActiveMinigame(null)
     const pass = scene.branches.find((b) => b.kind === 'qte_pass')
     if (pass && scenario.scenes[pass.targetSceneId]) {
-      navigateTo(pass.targetSceneId)
+      setSceneId(pass.targetSceneId)
       return
     }
     // 没有 pass 分支 → 当作"场景完成"走正常的 end 流程
@@ -812,7 +679,7 @@ export function Player() {
     const fail = scene.branches.find((b) => b.kind === 'qte_fail')
     if (fail && scenario.scenes[fail.targetSceneId]) {
       setActiveMinigame(null)
-      navigateTo(fail.targetSceneId)
+      setSceneId(fail.targetSceneId)
       return
     }
     // 没配 fail 分支：保留 overlay（玩家可以继续重试或点"放弃"）
@@ -826,96 +693,21 @@ export function Player() {
     setActiveMinigame(null)
     const fail = scene.branches.find((b) => b.kind === 'qte_fail')
     if (fail && scenario.scenes[fail.targetSceneId]) {
-      navigateTo(fail.targetSceneId)
+      setSceneId(fail.targetSceneId)
       return
     }
     // 无 fail 分支：当作"场景完成"走 end 流程，不重启视频
     handleSceneEnd()
   }
 
-  /**
-   * 解析进入门槛 —— 从 targetId 出发，按 entryGate 链式求值：
-   *   - 条件满足 / 无门槛 → 返回该 scene。
-   *   - 不满足 + redirect → 跳到改道目标继续解析（防环 + 限深）。
-   *   - 不满足 + block（或改道目标缺失/成环）→ 返回 null（阻断进入）。
-   *
-   * varsOverride 用于「刚选完分支、效果还没异步落进 varsRef」的场景：
-   * 用同步算好的 nextVars 求门槛，避免迟一拍误判。
-   */
-  function resolveGateTarget(
-    targetId: string,
-    varsOverride?: VarState,
-    ownedOverride?: ItemState,
-  ): { sceneId: string } | { blocked: true; hint?: string } {
-    const ctx = {
-      vars: varsOverride ?? varsRef.current,
-      visitedSceneIds: new Set(visitedRef.current),
-      ownedItems: ownedOverride ?? ownedItemsRef.current,
-    }
-    let cur = targetId
-    const seen = new Set<string>()
-    for (let i = 0; i < 50; i++) {
-      const sc = scenario.scenes[cur]
-      // scene 缺失交给上层「无可播放场景」兜底，这里直接放行。
-      if (!sc || !sc.entryGate) return { sceneId: cur }
-      const res = evaluateGate(sc.entryGate, ctx)
-      if (res.allowed) return { sceneId: cur }
-      if (res.redirectSceneId && !seen.has(res.redirectSceneId)) {
-        seen.add(cur)
-        cur = res.redirectSceneId
-        continue
-      }
-      return { blocked: true, hint: res.hint }
-    }
-    return { sceneId: cur }
-  }
-
-  /**
-   * 门槛感知的换场 —— 所有「剧情推进型」跳转都走这里（分支/auto/QTE/小游戏/失败改道）。
-   * 被阻断时停在当前场景并弹出瞬时提示，不让玩家凭空消失。
-   * 作者调试用的 PlayerMenu「跳到场景」与 restart 不走门槛（保留自由跳转）。
-   */
-  function navigateTo(
-    targetId: string,
-    varsOverride?: VarState,
-    ownedOverride?: ItemState,
-  ): void {
-    const r = resolveGateTarget(targetId, varsOverride, ownedOverride)
-    if ('blocked' in r) {
-      setGateNotice(r.hint ?? '条件不足，暂时无法进入这一节点')
-      return
-    }
-    setSceneId(r.sceneId)
-  }
-
   function takeBranch(branch: Branch): void {
     setChoiceOpen(false)
-    // 数值系统：选中分支的副作用（如「安慰她 → 好感+10」）先落地再跳转。
-    // 同步算出 nextVars 既写回 state，又喂给门槛求值，避免「刚 +的好感」这一拍读不到。
-    let nextVars = varsRef.current
+    // 数值系统：选中分支的副作用（如「安慰她 → 好感+10」）先落地再跳转
     if (branch.effects && branch.effects.length > 0) {
-      nextVars = applyEffects(branch.effects, varsRef.current, scenario)
-      setVars(nextVars)
+      const effects = branch.effects
+      setVars((v) => applyEffects(effects, v, scenario))
     }
-    // 背包系统：选中分支的物品增减（如「用钥匙开门 → 消耗钥匙」）同步落地再喂门槛。
-    let nextOwned = ownedItemsRef.current
-    if (branch.itemEffects && branch.itemEffects.length > 0) {
-      nextOwned = applyItemEffects(branch.itemEffects, ownedItemsRef.current)
-      setOwnedItems(nextOwned)
-    }
-    navigateTo(branch.targetSceneId, nextVars, nextOwned)
-  }
-
-  /** 搜索拾取：把热点对应物品入袋、标记已拾取，并弹出获得提示。 */
-  function handlePickup(hotspot: SearchHotspot): void {
-    const key = `${sceneId}:${hotspot.id}`
-    if (lootedRef.current.has(key)) return
-    setLootedKeys((s) => new Set(s).add(key))
-    setOwnedItems((o) =>
-      applyItemEffects([{ itemId: hotspot.itemId, op: 'give', count: 1 }], o),
-    )
-    const itemName = scenario.items?.[hotspot.itemId]?.name ?? '物品'
-    setGateNotice(`获得「${itemName}」`)
+    setSceneId(branch.targetSceneId)
   }
 
   function replayScene(): void {
@@ -927,12 +719,6 @@ export function Player() {
     // 数值系统：从头玩 → 数值复位到初始、清空「进入效果已应用」记录，
     // 这样 root 的 onEnterEffects 会在重进时重新累加一次。
     setVars(initVarState(scenario))
-    // 背包系统：从头玩 → 清空已拾取物品与搜索去重记录。
-    setOwnedItems({})
-    setLootedKeys(new Set())
-    setSearching(false)
-    setActiveSearch(null)
-    completedSearchRef.current = new Set()
     appliedEnterRef.current = new Set()
     if (sceneId === scenario.rootSceneId) {
       setResetTick((t) => t + 1)
@@ -1017,16 +803,6 @@ export function Player() {
     return <div className="ks-player-empty">无可播放场景</div>
   }
 
-  // 背包系统：仅当模块开启时叠加搜查/HUD。当前场景还有未拾取热点才显示放大镜。
-  const inventoryEnabled = isModuleEnabled(scenario, 'inventory')
-  const hasUnlootedHere = (scene.searchLoot ?? []).some(
-    (h) => !lootedKeys.has(`${scene.id}:${h.id}`),
-  )
-  // 搜索段进行中：把搜寻热点限定为本段参与的热点。
-  const searchHotspotFilter = activeSearch
-    ? new Set(segmentHotspots(activeSearch, scene.searchLoot ?? []).map((h) => h.id))
-    : undefined
-
   return (
     <div className="ks-player">
       <SceneCanvas
@@ -1048,8 +824,6 @@ export function Player() {
 
       {showSubtitles && <DialogueBox scene={scene} elapsed={elapsed} />}
 
-      <TextOverlayLayer scene={scene} elapsed={elapsed} />
-
       {scene.qte && (
         <QTEOverlay
           spec={scene.qte}
@@ -1068,60 +842,12 @@ export function Player() {
 
       {slowMo.active && <SlowMoHUD state={slowMo} />}
 
-      {gateNotice && (
-        <div className="ks-gate-notice" role="status" aria-live="polite">
-          <span className="ks-gate-notice-ico" aria-hidden>
-            {gateNotice.startsWith('获得') ? '🎒' : '⛔'}
-          </span>
-          {gateNotice}
-        </div>
-      )}
-
-      {inventoryEnabled && (
-        <>
-          <SearchLayer
-            scene={scene}
-            items={scenario.items ?? {}}
-            lootedKeys={lootedKeys}
-            active={(searching || !!activeSearch) && !choiceOpen && !activeMinigame && !endingScreen}
-            hotspotFilter={searchHotspotFilter}
-            onPickup={handlePickup}
-          />
-          <InventoryHUD
-            items={scenario.items ?? {}}
-            owned={ownedItems}
-            canSearch={hasUnlootedHere && !activeSearch}
-            searching={searching}
-            onToggleSearch={() => setSearching((v) => !v)}
-          />
-        </>
-      )}
-
-      {activeSearch && (
-        <div className="ks-search-banner" role="status" aria-live="polite">
-          <span className="ks-search-banner-ico" aria-hidden>🔍</span>
-          <span className="ks-search-banner-txt">
-            {activeSearch.label || '仔细搜寻画面中的可疑之处'}
-          </span>
-          {activeSearch.allowSkip && (
-            <button
-              type="button"
-              className="ks-search-banner-skip"
-              onClick={() => resumeFromSearch(activeSearch)}
-            >
-              跳过 ›
-            </button>
-          )}
-        </div>
-      )}
-
       {choiceOpen && (
         <ChoiceLayer
           scene={scene}
           onPick={takeBranch}
           vars={vars}
           visitedSceneIds={visited}
-          ownedItems={ownedItems}
         />
       )}
 
@@ -1380,17 +1106,9 @@ function SceneCanvas({
   const isSkeleton = streamingStatus === 'skeleton'
   const isPromptsReady = streamingStatus === 'prompts-ready'
 
-  // 剪映式后期效果：媒体 filter/transform（CSS 变量注入）+ 抖动 wrapper class。
-  const stageFx = composeStageFx(scene, currentMs, scene.durationMs)
-  const canvasStyle = {
-    '--ks-fx-filter': stageFx.mediaFilter || 'none',
-    '--ks-fx-transform': stageFx.mediaTransform || 'none',
-  } as React.CSSProperties
-
   return (
     <div
-      className={`ks-player-canvas ${stageFx.wrapperClass}`}
-      style={canvasStyle}
+      className="ks-player-canvas"
       // 防止浏览器把 <video>/<img>/<div bg-image> 当可拖资源拖走干扰 QTE
       // draggable=false 对 div 已经足够，子节点 <img>/<video> 单独再关一次
       onDragStart={(e) => e.preventDefault()}
@@ -1444,10 +1162,6 @@ function SceneCanvas({
           PROMPTS · 等素材
         </div>
       )}
-      {/* 剪映式后期效果叠层：暗角/颗粒/特效 → 贴纸 → 渐显渐隐遮罩（默认黑底） */}
-      <FxOverlayLayer frame={stageFx} />
-      <StickerLayer scene={scene} ms={currentMs} />
-      <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
       <div className="ks-player-vignette" />
     </div>
   )
@@ -1705,9 +1419,6 @@ const playerCss = `
   -webkit-user-drag: none;
   user-drag: none;
   pointer-events: none;
-  /* 剪映式后期效果：滤镜/调节合成的 filter + 转场/首尾动画 transform（CSS 变量由 SceneCanvas 注入） */
-  filter: var(--ks-fx-filter, none);
-  transform: var(--ks-fx-transform, none);
 }
 /*
  * Unmute 按钮：autoplay 策略把视频降级为 muted 时浮出，点一下恢复声音。
@@ -1967,72 +1678,6 @@ const playerCss = `
 }
 @keyframes ks-video-stall-spin {
   to { transform: rotate(360deg); }
-}
-
-/* 进入门槛阻断提示 —— 顶部居中的瞬时 toast（数值/物品不足时） */
-.ks-gate-notice {
-  position: absolute;
-  top: 64px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 80%;
-  padding: 10px 18px;
-  border-radius: 999px;
-  background: rgba(18, 16, 14, 0.82);
-  border: 1px solid rgba(255, 200, 128, 0.4);
-  color: rgba(255, 226, 188, 0.96);
-  font-size: 13px;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  animation: ks-gate-notice-pop 220ms ease-out both;
-}
-.ks-gate-notice-ico { font-size: 14px; }
-@keyframes ks-gate-notice-pop {
-  from { opacity: 0; transform: translate(-50%, -6px); }
-  to   { opacity: 1; transform: translate(-50%, 0); }
-}
-
-/* 搜索段提示横幅 */
-.ks-search-banner {
-  position: absolute;
-  top: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 45;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 86%;
-  padding: 9px 14px 9px 16px;
-  border-radius: 999px;
-  background: rgba(14, 14, 20, 0.8);
-  border: 1px solid rgba(255, 210, 120, 0.42);
-  color: #ffe9bd;
-  font-size: 13px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  animation: ks-gate-notice-pop 240ms ease-out both;
-}
-.ks-search-banner-ico { font-size: 15px; animation: ks-search-pulse 1.6s ease-in-out infinite; }
-.ks-search-banner-skip {
-  margin-left: 4px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 210, 120, 0.5);
-  background: transparent;
-  color: #ffe9bd;
-  font-size: 12px;
-  cursor: pointer;
-}
-.ks-search-banner-skip:hover { background: rgba(255, 210, 120, 0.16); }
-@keyframes ks-search-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.85; }
-  50% { transform: scale(1.18); opacity: 1; }
 }
 
 /* ─── 长文本分段管线 · 三态装饰（id: p3-player） ───────────────────── */
