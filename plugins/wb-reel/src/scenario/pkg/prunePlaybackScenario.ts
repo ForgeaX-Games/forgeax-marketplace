@@ -87,6 +87,9 @@ export function prunePlaybackScenario(
     ...(scenario.videoConfig ? { videoConfig: scenario.videoConfig } : {}),
     // 数值系统：变量定义是运行时分支条件求值所必需的，必须随播放包保留
     ...(scenario.variables ? { variables: scenario.variables } : {}),
+    // 背包系统：物品注册表（含图标 mediaId）+ 模块开关都是运行时所必需的
+    ...(scenario.items ? { items: scenario.items } : {}),
+    ...(scenario.modules ? { modules: scenario.modules } : {}),
   }
 
   return { scenario: next, includedScenes, droppedScenes }
@@ -155,5 +158,20 @@ function scrubScene(scene: Scene, opts: PrunePlaybackOptions): Scene {
   if (scene.isEnding) next.isEnding = scene.isEnding
   // 数值系统：进入节点的数值副作用是运行时播放流的一部分
   if (scene.onEnterEffects) next.onEnterEffects = scene.onEnterEffects.slice()
+  // 数值系统：进入门槛（改道/阻断）是运行时导航的一部分
+  if (scene.entryGate) next.entryGate = scene.entryGate
+  // 背包系统：进入节点的物品副作用 + 现场搜索热点都参与运行时
+  if (scene.onEnterItemEffects) next.onEnterItemEffects = scene.onEnterItemEffects.slice()
+  if (scene.searchLoot) next.searchLoot = scene.searchLoot.slice()
+  // 文字叠加（剪映式贴字）+ 搜索段（定格循环找物）都参与运行时叠层/玩法
+  if (scene.textOverlays) next.textOverlays = scene.textOverlays.slice()
+  if (scene.searchSegments) next.searchSegments = scene.searchSegments.slice()
+  // 剪映式后期效果（滤镜/调节/特效/贴纸/转场/首尾动画）—— 全是运行时实时渲染所需
+  if (scene.filterClips) next.filterClips = scene.filterClips.slice()
+  if (scene.adjustClips) next.adjustClips = scene.adjustClips.slice()
+  if (scene.effectClips) next.effectClips = scene.effectClips.slice()
+  if (scene.stickerClips) next.stickerClips = scene.stickerClips.slice()
+  if (scene.transition) next.transition = scene.transition
+  if (scene.clipAnim) next.clipAnim = scene.clipAnim
   return next
 }

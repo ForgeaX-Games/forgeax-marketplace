@@ -23,6 +23,7 @@
 
 import type { Scenario, Scene, QTECue, QTESpec } from '../scenario/types'
 import type { TextClient, ImageClient, ImageResult } from './types'
+import type { GenRequestSnapshot } from '../forge/generationQueueStore'
 import {
   forgeScenarioFromIdea,
   forgeScenarioFromScript,
@@ -174,6 +175,18 @@ export interface CharacterRefPassOpts {
   /** v3.7 · 关键道具参考图生成完成回调 */
   onPropRef?: (propId: string, result: ImageResult) => void
   onProgress?: (ev: CharacterRefPassProgress) => void
+  /**
+   * 请求快照回调 —— 发图前回调一次（每个实体的主提示词），把「发给图像模型的东西」
+   * 交给调用方记录进队列 job.request（用于素材库/队列右键回看与失败诊断）。
+   * 批量调用方可不传；按实体逐条入队时（visualQueueTrigger）传入。
+   */
+  onRequest?: (req: GenRequestSnapshot) => void
+  /**
+   * 出错即抛 —— 默认 false（批量调用方容错：单张失败只记录、不阻断其它）。
+   * 按实体逐条入队时设 true：让队列 job 能感知失败、把错误显示在卡片上（而不是
+   * 静默吞掉、看起来"成功"却没出图）。
+   */
+  throwOnFailure?: boolean
   /** 并发度，默认 IMAGE_BATCH_CONCURRENCY（统一定义在 llm/concurrency.ts） */
   concurrency?: number
 }
@@ -216,14 +229,35 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
 
   let done = 0
 
-  await runWithConcurrency(
+  // 请求快照只发一次（按实体逐条入队时，一个 pass 即一个实体；批量调用方不传 onRequest）。
+  let snapped = false
+  const snap = (kind: string, prompt: string, size: string): void => {
+    if (snapped || !opts.onRequest) return
+    snapped = true
+    opts.onRequest({
+      endpoint: `${client.getModel?.() ?? client.getProviderName?.() ?? '图像'} · ${kind}`,
+      prompt,
+      params: {
+        size,
+        provider: client.getProviderName?.() ?? '(未知)',
+        model: client.getModel?.() ?? '(默认)',
+        kind,
+      },
+      refs: [],
+      at: Date.now(),
+    })
+  }
+
+  const rChars = await runWithConcurrency(
     characters,
     async (c) => {
+      const prompt = composeVisualPrompt(
+        buildCharacterTurnaroundPrompt(c, { visualStyle }),
+        visualStyle,
+      )
+      snap('角色定妆照(三视图)', prompt, '1536x1024')
       const turnaround = await client.generate({
-        prompt: composeVisualPrompt(
-          buildCharacterTurnaroundPrompt(c, { visualStyle }),
-          visualStyle,
-        ),
+        prompt,
         size: '1536x1024',
       })
       opts.onCharacterRef?.(c.id, turnaround)
@@ -233,9 +267,11 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
     { concurrency },
   )
 
-  await runWithConcurrency(
+  const rAngles = await runWithConcurrency(
     angleTasks,
     async (task) => {
+      if (task.id.endsWith('-angle1'))
+        snap('场景基准图', composeVisualPrompt(task.fullPrompt, visualStyle), '1536x1024')
       const out = await client.generate({
         prompt: composeVisualPrompt(task.fullPrompt, visualStyle),
         size: '1536x1024',
@@ -259,11 +295,13 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
     { concurrency },
   )
 
-  await runWithConcurrency(
+  const rProps = await runWithConcurrency(
     props,
     async (p) => {
+      const prompt = composeVisualPrompt(buildPropRefPrompt(p), visualStyle)
+      snap('关键道具参考图', prompt, '1024x1024')
       const out = await client.generate({
-        prompt: composeVisualPrompt(buildPropRefPrompt(p), visualStyle),
+        prompt,
         size: '1024x1024',
       })
       opts.onPropRef?.(p.id, out)
@@ -272,4 +310,11 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
     },
     { concurrency },
   )
+
+  // 逐条入队时（throwOnFailure）把吞掉的错误抛出来，让队列 job 显示失败原因。
+  if (opts.throwOnFailure) {
+    const firstErr =
+      rChars.failed[0]?.error ?? rAngles.failed[0]?.error ?? rProps.failed[0]?.error
+    if (firstErr) throw firstErr
+  }
 }

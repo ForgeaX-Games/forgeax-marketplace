@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { StagePane } from '../editor/StagePane'
 import { TimelineDock } from '../editor/timeline/TimelineDock'
 import { Timeline } from '../editor/Timeline'
+import { EffectsRail } from '../editor/fx/EffectsRail'
 import type { TimelinePreview } from '../editor/timeline/timelinePreview'
 import { loadDialoguePref } from '../editor/timeline/dialoguePref'
 import { useScenarioStore } from '../scenario/scenarioStore'
@@ -72,6 +73,8 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
    * 初值先读一次 localStorage，避免首帧 StagePane 闪一下字幕又消失。
    */
   const [showDialogue, setShowDialogue] = useState<boolean>(() => loadDialoguePref())
+  /** 右侧「后期效果」检视栏是否收起（默认展开）。 */
+  const [fxRailCollapsed, setFxRailCollapsed] = useState(false)
 
   // v3.9：切换 scene 时把时间线回到 0（场景起点）；跟"光标跟随"默认关掉
   // 一起用，满足"刷新/切场景时时间线不跟随、稳在起点"的作者需求。
@@ -202,16 +205,24 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
           </div>
         </header>
         <div className="ks-scene-detail-body">
-          {/* 画面为王: Stage 直接吃满上方全部高度 + 整幅宽度, 不被 dock 从右侧抢宽 */}
-          <StagePane
-            sceneId={sceneId}
-            hideHeader
-            hideTimeline
-            hoverMs={hoverMs}
-            setHoverMs={setHoverMs}
-            preview={preview}
-            showDialogue={showDialogue}
-          />
+          {/* 上行: 画面预览 + 右侧「后期效果」检视栏(可收起)，画面仍吃满剩余宽高 */}
+          <div className="ks-scene-detail-stagerow">
+            <StagePane
+              sceneId={sceneId}
+              hideHeader
+              hideTimeline
+              hoverMs={hoverMs}
+              setHoverMs={setHoverMs}
+              preview={preview}
+              showDialogue={showDialogue}
+            />
+            <EffectsRail
+              sceneId={sceneId}
+              hoverMs={hoverMs}
+              collapsed={fxRailCollapsed}
+              onToggleCollapsed={() => setFxRailCollapsed((v) => !v)}
+            />
+          </div>
           {/*
            * 底部定高 band 横分: 左 = 素材库成品条 + 时间轴, 右 = dock(字幕/QTE/分支/
            *   音频/小游戏)。dock 高度与时间轴 band 平齐, 画面拿回整幅宽高。
@@ -351,7 +362,7 @@ const css = `
   padding: 10px;
   gap: 10px;
 }
-.ks-scene-detail.is-inline .ks-scene-detail-body > .ks-stage,
+.ks-scene-detail.is-inline .ks-scene-detail-stagerow > .ks-stage,
 .ks-scene-detail.is-inline .ks-scene-detail-cell-assets,
 .ks-scene-detail.is-inline .ks-scene-detail-cell-timeline {
   border-color: var(--ks-border-soft);
@@ -364,7 +375,7 @@ const css = `
   box-shadow: var(--ks-shadow-inset-hi);
 }
 /* 画面主体留更纯净的呈现：去掉外框，只保留圆角裁切，让"画面是主角" */
-.ks-scene-detail.is-inline .ks-scene-detail-body > .ks-stage {
+.ks-scene-detail.is-inline .ks-scene-detail-stagerow > .ks-stage {
   background: var(--ks-canvas-deep, #000);
   border-color: transparent;
 }
@@ -490,8 +501,18 @@ const css = `
   padding: 10px;
   overflow: hidden;
 }
-/* 画面主体 —— 直接是 body 子项, 吃满全部剩余高度 + 整幅宽度 */
-.ks-scene-detail-body > .ks-stage {
+/* 上行: 画面 + 效果栏 横排, 吃满 body 剩余高度 */
+.ks-scene-detail-stagerow {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  overflow: hidden;
+}
+/* 画面主体 —— stagerow 内左侧, 吃满剩余宽高 */
+.ks-scene-detail-stagerow > .ks-stage {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;

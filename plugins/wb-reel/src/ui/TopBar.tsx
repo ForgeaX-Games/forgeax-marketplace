@@ -33,7 +33,7 @@ import { injectStyleOnce } from '../styles/injectStyle'
  */
 const VIEW_DEFS: { id: ForgeView; label: string; hint: string }[] = [
   { id: 'script', label: '剧本', hint: '剧本编辑 · 对话/分支/QTE' },
-  { id: 'image', label: '视觉', hint: '风格 / 导演 / 参考图 / 界面 / 小游戏 · 视觉基准' },
+  { id: 'image', label: '模块', hint: '美术 / 导演 / 参考图 / 界面 / 小游戏 / 数值 / 背包 · 可独立开关' },
   { id: 'tree', label: '剧情树', hint: '可视化剧情树 · 节点详情' },
 ]
 

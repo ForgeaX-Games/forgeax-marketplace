@@ -33,10 +33,38 @@ export async function generateCardImage(opts: {
   prompt: string
   client: ImageClient
   referenceImages?: ImageReference[]
+  /**
+   * 请求快照回调 —— 发图前调用一次，把「发给图像模型的东西」(最终提示词 + 参数 +
+   * 上传的参考图) 交给调用方记录到队列 job.request，成功失败都可在素材库/队列回看。
+   */
+  onRequest?: (req: GenRequestSnapshot) => void
 }): Promise<string> {
   const style = useScenarioStore.getState().scenario.visualStyle
   const finalPrompt = composeVisualPrompt(opts.prompt, style)
   const refs = opts.referenceImages?.length ? opts.referenceImages : undefined
+
+  // ── 请求快照：先记下「发了什么」，再发请求；失败也能回看 ───────────────────
+  if (opts.onRequest) {
+    const reqRefs: GenRequestRef[] = (refs ?? []).map((r) => ({
+      role: 'reference_image',
+      url: r.dataUrl,
+      label: r.label ?? '参考图',
+    }))
+    opts.onRequest({
+      endpoint: `${opts.client.getModel?.() ?? opts.client.getProviderName?.() ?? '图像'} · ${refs ? '图生图(参考锚点)' : '文生图'}`,
+      prompt: finalPrompt,
+      params: {
+        size: '1024x1024',
+        provider: opts.client.getProviderName?.() ?? '(未知)',
+        model: opts.client.getModel?.() ?? '(默认)',
+        mode: refs ? '图生图' : '文生图',
+        refs: refs?.length ?? 0,
+      },
+      refs: reqRefs,
+      at: Date.now(),
+    })
+  }
+
   const out = await opts.client.generate({
     prompt: finalPrompt,
     size: '1024x1024',

@@ -58,6 +58,185 @@ export interface DialogueLine {
   charMs?: number
 }
 
+/**
+ * 富文本「文字叠加」—— v7（剪映 / Premiere 式贴字）。
+ *
+ * 与 DialogueLine 的区别：DialogueLine 是固定底栏电影字幕（绑 TTS / 叙事），
+ * TextOverlayClip 是作者在画面任意位置自由摆放的装饰文字（标题卡、角标、台词花字），
+ * 支持自由定位 / 缩放 / 旋转 / 字体 / 字号 / 粗细 / 颜色 / 描边 / 底色。
+ *
+ * 坐标 x/y 为归一化（0~1，相对画面），字号 fontSizePct 为画面高度百分比（用 cqh 渲染），
+ * 这样在编辑器画布与播放器舞台上表现一致、与分辨率无关。
+ */
+export interface TextOverlayClip {
+  id: string
+  text: string
+  /** 出现时刻（相对 scene 起点，ms）。 */
+  startMs: number
+  /** 消失时刻（ms）；不填 → 持续到场景结束。 */
+  endMs?: number
+  /** 归一化锚点坐标（0~1，画面中心为 0.5,0.5）。 */
+  x: number
+  y: number
+  /** 字号：画面高度百分比（如 6 = 画面高度的 6%）。默认 6。 */
+  fontSizePct?: number
+  /** 自由缩放倍数（角柄拖拽，叠加在 fontSizePct 之上）。默认 1。 */
+  scale?: number
+  /** 旋转角度（deg）。默认 0。 */
+  rotation?: number
+  /** 字体族（FONT_PRESETS 的 key 或任意 css font-family）。 */
+  fontFamily?: string
+  /** 字重 100~900。默认 700。 */
+  fontWeight?: number
+  /** 斜体。 */
+  italic?: boolean
+  /** 下划线。 */
+  underline?: boolean
+  /** 文字颜色。默认 #ffffff。 */
+  color?: string
+  /** 描边颜色。 */
+  strokeColor?: string
+  /** 描边宽度（px @ 1080p 基准）。 */
+  strokeWidth?: number
+  /** 文字底色条（半透明矩形）；不填 → 无底色。 */
+  bgColor?: string
+  /** 对齐。默认 center。 */
+  align?: 'left' | 'center' | 'right'
+  /** 投影。默认 true。 */
+  shadow?: boolean
+  /** 透明度 0~1。默认 1。 */
+  opacity?: number
+}
+
+// ============================================================================
+// 剪映式后期效果 —— v8（滤镜 / 调节 / 特效 / 贴纸 / 转场 / 首尾动画）
+// ============================================================================
+//
+// 全部为「作者元数据 + 预览/播放期实时渲染」：不重新编码 mp4。
+//   · 滤镜 + 调节 → 合成 CSS filter 串作用到 <video>/<img>
+//   · 特效 / 贴纸 → 画面叠层（暗角、颗粒、光效、抖动；花字/图标）
+//   · 转场 / 首尾动画 → 节点级，按 elapsed 在画面边界跑入/出动画
+//
+// 时间轴语义沿用其它 clip：startMs/endMs 为相对 scene 起点的 ms 区间。
+
+/**
+ * 画面色彩参数（滤镜预设与「调节」手动项共用）。
+ * 全部为「相对默认值的偏移/倍率」，0 表示不改变，便于按强度线性缩放与叠加。
+ */
+export interface AdjustParams {
+  /** 亮度，-1~1（0=原样，映射到 css brightness 0~2）。 */
+  brightness?: number
+  /** 对比度，-1~1。 */
+  contrast?: number
+  /** 饱和度，-1~1。 */
+  saturation?: number
+  /** 色温，-1(冷)~1(暖)；用 sepia + hue 近似。 */
+  temperature?: number
+  /** 色相旋转，-180~180（deg）。 */
+  hue?: number
+  /** 模糊，0~1（映射到 0~12px）。 */
+  blur?: number
+  /** 暗角强度，0~1（叠层径向渐变）。 */
+  vignette?: number
+  /** 颗粒/噪点强度，0~1（叠层噪声纹理）。 */
+  grain?: number
+  /** 怀旧/褐色，0~1（css sepia）。 */
+  sepia?: number
+}
+
+/** 滤镜 clip：引用一个内置/自定义滤镜预设，按 intensity 缩放其 AdjustParams。 */
+export interface FilterClip {
+  id: string
+  startMs: number
+  endMs: number
+  /** 预设 id（FX_FILTERS 或自定义库）。 */
+  presetId: string
+  /** 强度 0~1，默认 1。 */
+  intensity?: number
+}
+
+/** 调节 clip：作者手动调的色彩参数（不挂预设）。 */
+export interface AdjustClip {
+  id: string
+  startMs: number
+  endMs: number
+  params: AdjustParams
+}
+
+/** 特效 clip：叠层型动效（光效/抖动/马赛克/故障/暗角脉冲...）。 */
+export interface EffectClip {
+  id: string
+  startMs: number
+  endMs: number
+  /** 预设 id（FX_EFFECTS）。 */
+  presetId: string
+  /** 强度 0~1，默认 1。 */
+  intensity?: number
+}
+
+/**
+ * 贴纸 clip：画面上自由摆放的装饰元素。
+ *   - kind='numeric'：数值花字（如「好感度 +1」），text 必填，走描边花字样式
+ *   - kind='builtin' ：内置矢量图标（箭头/定位/问号/强调线...），presetId 指定
+ *   - kind='emoji'   ：emoji 字符，text 存 emoji
+ *   - kind='image'   ：素材库自定义图片，mediaId 指向 mediaStore
+ */
+export interface StickerClip {
+  id: string
+  startMs: number
+  endMs: number
+  kind: 'numeric' | 'builtin' | 'emoji' | 'image'
+  /** numeric/emoji 的文本内容。 */
+  text?: string
+  /** builtin 图标预设 id（FX_STICKERS）。 */
+  presetId?: string
+  /** image 类型引用的 mediaStore id。 */
+  mediaId?: string
+  /** 归一化锚点（0~1，中心 0.5,0.5）。 */
+  x: number
+  y: number
+  /** 基准尺寸：画面高度百分比。默认 12。 */
+  sizePct?: number
+  /** 自由缩放倍数。默认 1。 */
+  scale?: number
+  /** 旋转角度（deg）。默认 0。 */
+  rotation?: number
+  /** 主色（numeric/builtin 可用）。 */
+  color?: string
+  /** 透明度 0~1。默认 1。 */
+  opacity?: number
+  /** 入场动画预设 id（FX_CLIP_ANIM 子集，pop/fade/slide）。 */
+  enter?: string
+  /** 出场动画预设 id。 */
+  exit?: string
+}
+
+/** 转场（节点级入场）：在 scene 开头一段时间内跑转场动画。 */
+export interface TransitionSpec {
+  /** 预设 id（FX_TRANSITIONS：flashBlack/flashWhite/dissolve/pushIn/slideLeft/zoomBlur...）。 */
+  presetId: string
+  /** 转场时长（ms）。默认按预设。 */
+  durationMs: number
+}
+
+
+/** 单端动画（首或尾）。 */
+export interface ClipAnimEnd {
+  /** 预设 id（FX_CLIP_ANIM：fade/zoomIn/zoomOut/slideIn/slideOut...）。 */
+  preset: string
+  /** 动画时长（ms）。 */
+  durationMs: number
+}
+
+/**
+ * 首尾动画（节点级）：本节点画面的入场/出场动画。
+ * 默认（in/out 都不填时由渲染层兜底）以黑底渐显/渐隐处理。
+ */
+export interface ClipAnimSpec {
+  in?: ClipAnimEnd
+  out?: ClipAnimEnd
+}
+
 // ============================================================================
 // QTE 节奏点（Quick Time Event）
 // ============================================================================
@@ -183,6 +362,42 @@ export interface MinigameClip {
   label?: string
 }
 
+/**
+ * 搜索段 clip —— v7 新增（道具搜索玩法，类似 QTE/小游戏的"段落型"互动）。
+ *
+ * 到达 startMs 时：视频在 [loopStartMs, loopEndMs] 之间静态循环（作者应生成
+ * 一段"首尾相同、无干扰内容"的可循环视频），出现放大镜等搜寻图标，玩家在
+ * hotspotIds 指定的热点处点击拾取物品。完成 / 跳过后从 endMs 继续正常播放。
+ */
+export interface SearchSegmentClip {
+  id: string
+  /** 段开始时刻（ms，相对 scene 起点）—— 触发搜查 + 视频循环。 */
+  startMs: number
+  /** 段结束时刻（ms）—— 时间轴块宽度 / 超时上限；搜完后从此处继续。 */
+  endMs: number
+  /**
+   * 视频循环区间（ms，相对 scene/video 起点）。
+   * 不填则默认 = [startMs, endMs]；通常指向作者生成的"静态可循环段"。
+   */
+  loopStartMs?: number
+  loopEndMs?: number
+  /**
+   * 本段参与搜索的热点 id 列表，引用 scene.searchLoot[].id。
+   * 缺省 / 空 = 用本场景全部 searchLoot 热点。
+   */
+  hotspotIds?: string[]
+  /**
+   * 完成条件：'all' 拾完本段全部热点，'any' 拾到任意一个即可。默认 'all'。
+   */
+  completeWhen?: 'all' | 'any'
+  /**
+   * 是否允许玩家跳过本段（不强制搜完）。默认 false（必须搜完才继续）。
+   */
+  allowSkip?: boolean
+  /** 作者备注 / 玩家提示文案（如「仔细搜查房间」）。 */
+  label?: string
+}
+
 // ============================================================================
 // 分支
 // ============================================================================
@@ -217,6 +432,10 @@ export interface Branch {
    * 选中该分支时触发的数值变化 —— v6 新增（如「安慰她 → 好感+10」）。
    */
   effects?: VarEffect[]
+  /**
+   * 选中该分支时触发的物品增减 —— v7 新增（如「交出钥匙 → 消耗钥匙」）。
+   */
+  itemEffects?: ItemEffect[]
 }
 
 // ============================================================================
@@ -250,6 +469,8 @@ export type ConditionClause =
     }
   | { type: 'flag'; varId: string; equals: boolean }
   | { type: 'visited'; sceneId: string }
+  /** 背包系统(v7)：拥有某物品 ≥ count(默认 1)。 */
+  | { type: 'hasItem'; itemId: string; count?: number }
 
 export interface BranchCondition {
   /** 全部满足（AND）才解锁；空数组 = 无条件 */
@@ -261,6 +482,88 @@ export interface VarEffect {
   varId: string
   op: 'add' | 'set'
   value: number
+}
+
+/**
+ * 物品副作用 —— v7 背包系统。选中分支 / 进入场景时增减某物品。
+ *   - give：获得 count 件（默认 1）
+ *   - take：消耗 count 件（默认 1，不足则尽量扣到 0）
+ */
+export interface ItemEffect {
+  itemId: string
+  op: 'give' | 'take'
+  count?: number
+}
+
+/**
+ * 背包物品定义 —— v7 背包系统。
+ *
+ * 物品的「美术」走透明抠图图标(iconMediaId 指向 mediaStore 里抠好底的 PNG)，
+ * 可关联一个参考道具(propId → Scenario.props)以复用其外观/参考图做图标生成。
+ */
+export interface InventoryItem {
+  id: string
+  /** 显示名（如「生锈钥匙」） */
+  name: string
+  /** 抠图后的透明图标 mediaId（mediaStore）。 */
+  iconMediaId?: string
+  /** 关联的参考道具 id（Scenario.props），用于图标生成时复用外观。 */
+  propId?: string
+  /** 作者备注 / 给玩家看的物品描述。 */
+  desc?: string
+  /** 生成图标用的提示词（独立于 prop.prompt，可单独微调）。 */
+  iconPrompt?: string
+  /**
+   * 从素材库拉入的参考图 mediaId 列表 —— 生成图标时作为图生图外观锚点，
+   * 与 propId 互补（propId 复用参考道具，这里直接挑任意已有素材）。
+   */
+  iconRefMediaIds?: string[]
+  /** 是否可堆叠（默认 false，单件语义）。 */
+  stackable?: boolean
+}
+
+/**
+ * 场景内可搜寻的战利品热点 —— v7 背包系统。
+ *
+ * 玩家在场景画面上「搜寻」时，悬停命中热点高亮、点击拾取对应物品。
+ * 坐标用相对画面的归一化值（0~1），适配任意分辨率/裁剪。
+ */
+export interface SearchHotspot {
+  id: string
+  /** 拾取后获得的物品 id（Scenario.items）。 */
+  itemId: string
+  /** 归一化坐标（相对场景画面，0~1）。 */
+  x: number
+  y: number
+  /** 命中半径（归一化，默认 0.07）。 */
+  r?: number
+  /** 拾取数量（默认 1）。 */
+  count?: number
+  /** 悬停/拾取提示文案（可选）。 */
+  label?: string
+}
+
+/**
+ * 场景进入门槛 —— v7 新增（数值/背包系统）。
+ *
+ * 玩家试图进入本场景时先求 condition：
+ *   - 满足 → 正常进入。
+ *   - 不满足 + onFail='redirect' → 自动改道到 redirectSceneId（门槛节点的典型用法：
+ *     线索/好感不够时被引导去别处，而不是看到一个走不通的死节点）。
+ *   - 不满足 + onFail='block' → 阻断（编辑器/试玩里提示 hint；运行时一般配合「隐藏」
+ *     使这个节点在数值达标前不出现）。
+ *
+ * 缺省 / 字段不存在 = 无门槛（旧数据默认任何时候都能进）。
+ */
+export interface EntryGate {
+  /** 进入条件（全部满足 AND）。 */
+  condition: BranchCondition
+  /** 不满足时如何处理。 */
+  onFail: 'redirect' | 'block'
+  /** onFail='redirect' 时改道到的场景 id。 */
+  redirectSceneId?: string
+  /** 给玩家/作者看的提示文案（如「线索不足，先去现场调查」）。 */
+  hint?: string
 }
 
 // ============================================================================
@@ -993,6 +1296,22 @@ export interface Shot {
    * 写入时机：forgeKineticVideo 成功后回写。
    */
   videoMediaRef?: string
+  /**
+   * 本镜「首尾动画」—— v8 后期效果（剪映式 clip 入/出动画）。
+   *
+   * 与 scene.clipAnim 的区别：多镜节点里每段视频各自独立的入/出动画，
+   * 互不影响（选中镜 1 设的渐隐只作用于镜 1 的尾部）。单视频节点（无 shots）
+   * 仍用 scene.clipAnim 兜底。
+   */
+  clipAnim?: ClipAnimSpec
+  /**
+   * 进入本镜的「转场」—— v8 剪映式两段视频衔接转场。
+   *
+   * 语义：作用在「上一镜 → 本镜」的衔接点（本镜 startMs 处），闪黑/闪白等在
+   * 衔接点达到峰值。仅对 order≥1（有前一镜）的镜头有意义。直接渲染在 VIDEO 轨
+   * 两段视频之间，而非独立轨道。
+   */
+  transitionIn?: TransitionSpec
 }
 
 export interface Scene {
@@ -1009,6 +1328,21 @@ export interface Scene {
    * 例如「经过这一节点就 +好感」。每次进入都会触发（Player 用 visited 去重避免重复累加）。
    */
   onEnterEffects?: VarEffect[]
+  /**
+   * 进入本场景时触发的物品增减 —— v7 新增（背包系统）。
+   * 例如「进入仓库 → 自动获得手电筒」。Player 用 visited 去重避免重复发放。
+   */
+  onEnterItemEffects?: ItemEffect[]
+  /**
+   * 可搜寻战利品热点 —— v7 新增（背包系统）。
+   * 玩家在场景画面上搜寻、悬停高亮、点击拾取对应物品。缺省 = 不可搜寻。
+   */
+  searchLoot?: SearchHotspot[]
+  /**
+   * 进入门槛 —— v7 新增（数值/背包系统）。
+   * 数值/物品不达标时改道或阻断进入本场景（见 EntryGate）。缺省 = 无门槛。
+   */
+  entryGate?: EntryGate
   /** 编辑器拖拽用：自由位置（用于分支树画布） */
   pos?: { x: number; y: number }
   /**
@@ -1071,6 +1405,39 @@ export interface Scene {
    * 缺省 / 空数组 = 这场戏没有小游戏。
    */
   minigames?: MinigameClip[]
+  /**
+   * 富文本文字叠加 clip —— v7 新增（剪映/PR 式贴字）。
+   *
+   * 时间轴上作为一条独立轨渲染（TXT 轨）；Player / 编辑器舞台在画面任意位置
+   * 自由摆放、缩放、旋转。与 dialogue（固定底栏字幕）并行、互不影响。
+   * 缺省 / 空数组 = 这场戏没有叠加文字。
+   */
+  textOverlays?: TextOverlayClip[]
+  /**
+   * 搜索段 clip —— v7 新增（道具搜索玩法）。
+   *
+   * 时间轴上作为一条独立轨渲染（SEARCH 轨）；Player 到达 startMs 时把视频
+   * 在该段内静态循环（首尾相同的可循环视频），弹出放大镜搜寻图标，等待玩家
+   * 在 hotspotIds 指定的热点处拾取物品。搜完 / 跳过后继续播放。
+   * 缺省 / 空数组 = 这场戏没有搜索段。
+   */
+  searchSegments?: SearchSegmentClip[]
+  /**
+   * 剪映式后期效果 —— v8 新增。全部为「作者元数据 + 实时渲染」，不重编码 mp4。
+   * 缺省 / 空 = 这场戏没有该类效果。
+   */
+  /** 滤镜 clip（预设 + 强度，时间区间）。 */
+  filterClips?: FilterClip[]
+  /** 调节 clip（手动色彩参数，时间区间）。 */
+  adjustClips?: AdjustClip[]
+  /** 特效 clip（叠层动效，时间区间）。 */
+  effectClips?: EffectClip[]
+  /** 贴纸 clip（画面装饰元素，时间区间）。 */
+  stickerClips?: StickerClip[]
+  /** 入场转场（节点级，整段开头）。 */
+  transition?: TransitionSpec
+  /** 首尾动画（节点级，默认黑底渐显渐隐）。 */
+  clipAnim?: ClipAnimSpec
   /**
    * 场景级图像素材库 —— v3.2 新增（资产生成面板）。
    *
@@ -1305,6 +1672,22 @@ export interface OutlineNode {
   order: number
 }
 
+/**
+ * 影游工坊「模块」中枢里可独立开关的模块 id —— v7 新增。
+ *
+ * 与 shellStore.ImageSection 的取值刻意保持一致(同一批模块的两种视角:
+ *   ImageSection = 边栏路由 / 内容区渲染哪个面板;
+ *   ModuleId     = scenario.modules 里该模块是否启用)。
+ */
+export type ModuleId =
+  | 'style'
+  | 'director'
+  | 'refs'
+  | 'ui'
+  | 'minigame'
+  | 'numeric'
+  | 'inventory'
+
 export interface Scenario {
   id: string
   title: string
@@ -1324,7 +1707,16 @@ export interface Scenario {
    * v6 = 加入 variables{} + Branch.condition/effects/gateMode + Scene.onEnterEffects（数值系统）。
    * 读入时按版本链式升级（migrateScenarioToLatest 负责）。
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+
+  /**
+   * 模块开关 —— v7 新增。
+   *
+   * 影游工坊「模块」中枢里各模块的独立启用状态(美术/导演/参考图/界面/小游戏/数值/背包)。
+   * 缺省 / 字段不存在 = 沿用旧行为(视为启用),保证旧数据零回归;只有作者显式关掉时
+   * 才会在生产/运行时跳过该模块。读写统一走 `scenario/moduleFlags.ts`。
+   */
+  modules?: Partial<Record<ModuleId, boolean>>
 
   /**
    * 数值 / 变量注册表 —— v6 新增。
@@ -1333,6 +1725,11 @@ export interface Scenario {
    * 缺失 / 空对象 = 没有数值系统（旧数据默认）。
    */
   variables?: Record<string, GameVariable>
+  /**
+   * 背包物品注册表 —— v7 新增（背包系统）。
+   * 缺失 / 空对象 = 没有背包系统（旧数据默认）。
+   */
+  items?: Record<string, InventoryItem>
   /** 角色库（一致性锚点；refImageId 指向 mediaStore 里的固化参考图） */
   characters?: Record<string, Character>
   /** 场所库 —— v2 新增；scene.locationId 引用这里 */

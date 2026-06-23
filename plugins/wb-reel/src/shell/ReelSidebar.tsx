@@ -3,6 +3,8 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import { useForgeStudioStore, STUDIO_TABS, type StudioTab } from '../forge/studio/forgeStudioStore'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { SceneMiniMap } from '../storytree/SceneMiniMap'
+import type { ModuleId } from '../scenario/types'
+import { isModuleEnabled } from '../scenario/moduleFlags'
 
 /**
  * ReelSidebar —— wb-reel 嵌入 forgeax-studio 的 split-pane 模式下, 渲染在
@@ -35,7 +37,7 @@ const TAB_DEFS: Array<{ id: ShellTab; label: string; hint: string }> = [
 
 const VIEW_DEFS: Array<{ id: ForgeView; label: string; hint: string }> = [
   { id: 'script', label: '剧本',   hint: '小说家工作板 · 5 段切换' },
-  { id: 'image',  label: '视觉',   hint: '风格 / 导演 / 参考图 / 界面 / 小游戏 · 视觉基准' },
+  { id: 'image',  label: '模块',   hint: '美术 / 导演 / 参考图 / 界面 / 小游戏 / 数值 / 背包 · 可独立开关' },
   { id: 'tree',   label: '剧情树', hint: '可视化剧情树 · 节点详情编辑' },
   // 「素材库」不再是独立 pill —— 从剧情树节点详情「时间轴上方」的醒目按钮进入,
   //   它跟随当前选中节点 (与剧情树共用同一套节点选择, 不再各自一份)。
@@ -45,12 +47,20 @@ const VIEW_DEFS: Array<{ id: ForgeView; label: string; hint: string }> = [
  * 「图像」视图下的一级分区（与「剧本」视图下「段子」三级同样式）。
  * 2026-06：把原本堆在内容区的 风格 / 参考图 / UI 三块切换提到边栏。
  */
-const IMAGE_SECTION_DEFS: Array<{ id: ImageSection; label: string; hint: string }> = [
-  { id: 'style', label: '美术风格', hint: '视觉风格基调 · VISUAL STYLE' },
-  { id: 'director', label: '导演风格', hint: '导演流派 · 运镜/剪辑/色彩基调' },
-  { id: 'refs',  label: '参考图库', hint: '角色 / 场所 / 道具 参考图流水线' },
-  { id: 'ui',    label: '界面风格', hint: '游戏化 UI 风格 · 按钮/字幕条/HUD' },
-  { id: 'minigame', label: '小游戏库', hint: '预选小游戏池 · 剧情树剪辑时可用' },
+const IMAGE_SECTION_DEFS: Array<{
+  id: ImageSection
+  /** 对应 scenario.modules 的开关键(与 ImageSection 取值一致) */
+  module: ModuleId
+  label: string
+  hint: string
+}> = [
+  { id: 'style', module: 'style', label: '美术风格', hint: '视觉风格基调 · VISUAL STYLE' },
+  { id: 'director', module: 'director', label: '导演风格', hint: '导演流派 · 运镜/剪辑/色彩基调' },
+  { id: 'refs', module: 'refs', label: '参考图库', hint: '角色 / 场所 / 道具 参考图流水线' },
+  { id: 'ui', module: 'ui', label: '界面风格', hint: '游戏化 UI 风格 · 按钮/字幕条/HUD' },
+  { id: 'minigame', module: 'minigame', label: '小游戏库', hint: '预选小游戏池 · 剧情树剪辑时可用' },
+  { id: 'numeric', module: 'numeric', label: '数值系统', hint: '好感度/积分/flag · 节点门槛与结局分流' },
+  { id: 'inventory', module: 'inventory', label: '背包系统', hint: '搜寻拾取道具 · 解锁节点/触发结局' },
 ]
 
 export function ReelSidebar() {
@@ -61,6 +71,10 @@ export function ReelSidebar() {
   const imageSection = useShellStore((s) => s.imageSection)
   const setImageSection = useShellStore((s) => s.setImageSection)
   const setImportOpen = useShellStore((s) => s.setImportOpen)
+  const modules = useScenarioStore((s) => s.scenario.modules)
+  const variables = useScenarioStore((s) => s.scenario.variables)
+  const items = useScenarioStore((s) => s.scenario.items)
+  const setModuleEnabled = useScenarioStore((s) => s.setModuleEnabled)
   const studioTab = useForgeStudioStore((s) => s.tab)
   const setStudioTab = useForgeStudioStore((s) => s.setTab)
   const title = useScenarioStore((s) => s.scenario.title)
@@ -71,6 +85,8 @@ export function ReelSidebar() {
   const directorStyle = useScenarioStore((s) => s.scenario.directorStyle)
   const uiPrompt = useScenarioStore((s) => s.scenario.uiStyle?.prompt ?? '')
   const minigameCount = useScenarioStore((s) => s.scenario.enabledMinigameIds?.length ?? 0)
+  const variableCount = useScenarioStore((s) => Object.keys(s.scenario.variables ?? {}).length)
+  const itemCount = useScenarioStore((s) => Object.keys(s.scenario.items ?? {}).length)
   const characters = useScenarioStore((s) => s.scenario.characters)
   const locations = useScenarioStore((s) => s.scenario.locations)
   const propsMap = useScenarioStore((s) => s.scenario.props)
@@ -80,12 +96,15 @@ export function ReelSidebar() {
     ) ||
     Object.values(locations ?? {}).some((l) => !!l.refImageId) ||
     Object.values(propsMap ?? {}).some((p) => !!p.refImageId)
-  const sectionEnabled: Record<ImageSection, boolean> = {
+  // 「已配置」= 该模块当前有可用内容(纯展示用，区别于「已开关」)。
+  const sectionConfigured: Record<ImageSection, boolean> = {
     style: !!visualStyle,
     director: !!directorStyle,
     refs: hasRefs,
     ui: !!uiPrompt.trim(),
     minigame: minigameCount > 0,
+    numeric: variableCount > 0,
+    inventory: itemCount > 0,
   }
 
   return (
@@ -151,10 +170,11 @@ export function ReelSidebar() {
       )}
 
       {forgeView === 'image' && (
-        <Section label="视觉分区">
+        <Section label="模块">
           <RowGroup>
             {IMAGE_SECTION_DEFS.map((s) => {
-              const on = sectionEnabled[s.id]
+              const enabled = isModuleEnabled({ modules, variables, items }, s.module)
+              const configured = sectionConfigured[s.id]
               return (
                 <RowButton
                   key={s.id}
@@ -162,14 +182,34 @@ export function ReelSidebar() {
                   onClick={() => setImageSection(s.id)}
                   hint={s.hint}
                   indented
+                  dimmed={!enabled}
                   trailing={
                     <span
-                      className={`rs-row-status${on ? ' is-on' : ''}`}
-                      title={on ? '已启用 · 该模块当前会被应用' : '未启用 · 进入并配置后才会应用'}
-                      aria-label={on ? '已启用' : '未启用'}
+                      className={`rs-row-toggle${enabled ? ' is-on' : ''}`}
+                      role="switch"
+                      tabIndex={0}
+                      aria-checked={enabled}
+                      title={
+                        enabled
+                          ? `已开启 · 该模块会参与制作${configured ? '（已配置）' : '（待配置）'}`
+                          : '已关闭 · 制作/运行时跳过该模块'
+                      }
+                      aria-label={enabled ? `关闭${s.label}` : `开启${s.label}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setModuleEnabled(s.module, !enabled)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setModuleEnabled(s.module, !enabled)
+                        }
+                      }}
                     >
-                      <span className="rs-row-status-dot" aria-hidden />
-                      <span className="rs-row-status-text">{on ? '已启用' : '未启用'}</span>
+                      <span className="rs-row-toggle-track" aria-hidden>
+                        <span className="rs-row-toggle-knob" />
+                      </span>
                     </span>
                   }
                 >
@@ -198,7 +238,7 @@ export function ReelSidebar() {
           <span className="rs-foot-text">
             {forgeView === 'script'
               ? `编辑中 · ${STUDIO_TABS.find((t) => t.id === studioTab)?.label ?? ''}`
-              : `视觉 · ${IMAGE_SECTION_DEFS.find((t) => t.id === imageSection)?.label ?? ''}`}
+              : `模块 · ${IMAGE_SECTION_DEFS.find((t) => t.id === imageSection)?.label ?? ''}`}
           </span>
         </footer>
       )}
@@ -256,6 +296,7 @@ function RowButton({
   hint,
   indented,
   trailing,
+  dimmed,
   children,
 }: {
   active: boolean
@@ -263,13 +304,17 @@ function RowButton({
   hint?: string
   indented?: boolean
   trailing?: React.ReactNode
+  /** 模块关闭时把整行轻微弱化(纯展示，仍可点进去配置)。 */
+  dimmed?: boolean
   children: React.ReactNode
 }) {
   return (
     <button
       type="button"
       role="listitem"
-      className={`rs-row${active ? ' is-active' : ''}${indented ? ' is-indented' : ''}`}
+      className={`rs-row${active ? ' is-active' : ''}${indented ? ' is-indented' : ''}${
+        dimmed ? ' is-dimmed' : ''
+      }`}
       aria-pressed={active}
       title={hint}
       onClick={onClick}
@@ -520,6 +565,54 @@ const css = `
   background: var(--color-brand-primary);
   opacity: 1;
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-brand-primary) 70%, transparent);
+}
+
+/* 模块开关 —— 可点的 iOS 风格小拨杆 (作者: 各模块要能独立开启/关闭)。
+   放在行右侧, 点它只切开关 (stopPropagation), 点行其余区域仍切到该模块面板。 */
+.rs-row-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 2px;
+  margin-left: 4px;
+  border-radius: 999px;
+  outline: none;
+}
+.rs-row-toggle:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand-primary) 55%, transparent);
+}
+.rs-row-toggle-track {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
+  transition: background var(--motion-duration-instant) var(--motion-ease-standard);
+}
+.rs-row-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  transition: transform var(--motion-duration-instant) var(--motion-ease-standard),
+              background var(--motion-duration-instant) var(--motion-ease-standard);
+}
+.rs-row-toggle.is-on .rs-row-toggle-track {
+  background: color-mix(in srgb, var(--color-brand-primary) 70%, transparent);
+}
+.rs-row-toggle.is-on .rs-row-toggle-knob {
+  transform: translateX(11px);
+  background: #0c0f08;
+}
+
+/* 模块关闭 → 整行轻微弱化, 一眼看出哪些模块没启用 (仍可点进去配置)。 */
+.rs-row.is-dimmed .rs-row-label {
+  opacity: 0.5;
 }
 
 /* 底部状态栏 */

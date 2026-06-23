@@ -69,6 +69,46 @@ export type DockDropPayload =
       /** 时间轴块宽度默认值（ms），拖入时用（从 registry 取 defaultDurationMs） */
       defaultDurationMs: number
     }
+  | {
+      kind: 'textOverlay'
+      /** 初始文字内容 */
+      text: string
+      /** 默认 duration（ms）；落点 startMs = hoverMs */
+      defaultDurationMs?: number
+    }
+  | {
+      kind: 'searchSegment'
+      label?: string
+      /** 默认 duration（ms）；落点 startMs = hoverMs */
+      defaultDurationMs?: number
+    }
+  | {
+      kind: 'filter'
+      /** FX_FILTERS / 自定义预设 id */
+      presetId: string
+      /** 自定义预设时直接带参数（presetId 以 'myfx_' 开头） */
+      params?: import('../../scenario/types').AdjustParams
+      defaultDurationMs?: number
+    }
+  | {
+      kind: 'adjust'
+      params?: import('../../scenario/types').AdjustParams
+      defaultDurationMs?: number
+    }
+  | {
+      kind: 'effect'
+      /** FX_EFFECTS id */
+      presetId: string
+      defaultDurationMs?: number
+    }
+  | {
+      kind: 'sticker'
+      stickerKind: 'numeric' | 'builtin' | 'emoji' | 'image'
+      text?: string
+      presetId?: string
+      mediaId?: string
+      defaultDurationMs?: number
+    }
 
 export function serializeDockPayload(p: DockDropPayload): string {
   return JSON.stringify(p)

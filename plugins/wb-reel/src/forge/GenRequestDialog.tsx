@@ -11,6 +11,7 @@
  * 刷新接盘的失败项里被裁掉的 data: 缩略图会显示占位提示，但 prompt/参数/角色仍在。
  */
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../styles/injectStyle'
 import type { GenJob, GenRequestRef } from './generationQueueStore'
 
@@ -69,7 +70,7 @@ export function GenRequestDialog({
   const [copied, setCopied] = useState<'prompt' | 'error' | null>(null)
   const req = job.request
 
-  return (
+  return createPortal(
     <div className="ks-grd-backdrop" onClick={onClose}>
       <div className="ks-grd-panel" onClick={(e) => e.stopPropagation()}>
         <header className="ks-grd-head">
@@ -161,7 +162,8 @@ export function GenRequestDialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
