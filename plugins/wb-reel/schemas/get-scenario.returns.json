@@ -12,7 +12,10 @@
       "properties": {
         "id": { "type": "string" },
         "title": { "type": ["string", "null"] },
-        "scenes": { "type": "array" }
+        "scenes": { "type": "array" },
+        "synopsis": { "type": ["string", "null"], "description": "Script synopsis. Preserve on round-trip saves." },
+        "outline": { "type": "array", "description": "Outline tree (act->beat->moment). Edit via reel:update-outline; preserve on save-scenario." },
+        "characterRelations": { "type": "array", "description": "Character-relations graph. Edit via reel:update-relations; preserve on save-scenario (do NOT drop it, or characters become unrelated)." }
       }
     }
   }

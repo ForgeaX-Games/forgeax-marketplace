@@ -246,9 +246,10 @@ export const MODEL_CAPABILITIES: Record<VideoModelId, ModelCapability> = {
 
 /**
  * 默认模型 —— 没配置时回退。
- * 当前项目默认 Seedance（工程里 llm_key 也主配 Seedance）。
+ * 当前项目默认 Seedance 2.0（settingsStore 默认模型 doubao-seedance-2-0-260128，
+ * 即梦 Seedance 2.0），能力回退也对齐 2.0（单段 15s、1080p、return_last_frame）。
  */
-export const DEFAULT_MODEL: VideoModelId = 'seedance-doubao'
+export const DEFAULT_MODEL: VideoModelId = 'seedance-2-0'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers · 可单测

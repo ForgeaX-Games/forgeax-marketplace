@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
+import { useShellStore } from '../shell/shellStore'
 import { useMediaStore } from '../media/mediaStore'
 import { createImageProvider } from '../llm'
 import { injectStyleOnce } from '../styles/injectStyle'
@@ -17,7 +18,11 @@ import {
 import { generateCardAudio, generateCardImage, generateCardVideo } from './assetCardGen'
 import type { SeedanceMode } from '../llm/seedanceContent'
 import type { SeedanceResolutionTier, SeedanceRatio } from '../llm/seedanceResolution'
-import { useGenerationQueue } from './generationQueueStore'
+import {
+  useGenerationQueue,
+  archiveRequestForMedia,
+  type GenRequestSnapshot,
+} from './generationQueueStore'
 import { orchestrateVideos } from './orchestrateVideos'
 import { GenerationQueuePanel } from './GenerationQueuePanel'
 import { BlockoutEditor } from './blockout/BlockoutEditor'
@@ -124,13 +129,19 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
       const next = { ...prev }
       for (const c of cards) {
         if (!next[c.id]) {
-          next[c.id] = defaultState(c)
+          const base = defaultState(c)
+          // 镜头卡：首帧预填该镜关键帧，让卡里直接看到这一镜的画面起点。
+          if (c.shotId) {
+            const sh = scene?.shots?.find((s) => s.id === c.shotId)
+            if (sh?.keyframeMediaRef) base.startFrameMediaId = sh.keyframeMediaRef
+          }
+          next[c.id] = base
           changed = true
         }
       }
       return changed ? next : prev
     })
-  }, [cards])
+  }, [cards, scene])
 
   // 折叠态：自动播种卡默认折叠（减少占位，点头展开）；用户手动加的卡默认展开（待配置）。
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -157,6 +168,27 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
   function toggleCollapsed(id: string): void {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }))
   }
+
+  // 从时间轴右键 / 生成队列「在素材库查看」跳来时（assetFocus.tick 变化）：
+  //   把对应镜头卡展开并滚动聚焦到中区 —— 这样新生成的逐镜视频能在素材库中区
+  //   以「完整信息卡」的形式被定位到，而不是只落在右侧托盘。
+  const assetFocus = useShellStore((s) => s.assetFocus)
+  const focusTick = assetFocus?.tick ?? 0
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!assetFocus || assetFocus.sceneId !== sceneId || !assetFocus.shotId) return
+    const cardId = `shot:${assetFocus.shotId}`
+    setCollapsed((prev) => (prev[cardId] === false ? prev : { ...prev, [cardId]: false }))
+    // 等展开后再滚动定位（下一帧 DOM 已更新）。
+    const t = window.setTimeout(() => {
+      const el = gridRef.current?.querySelector<HTMLElement>(
+        `[data-asset-card="${cardId}"]`,
+      )
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTick])
 
   function patch(id: string, p: Partial<CardState>): void {
     setStateById((prev) => {
@@ -186,14 +218,26 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
       const tag = cardTag(spec, st.variantId)
       const startFrameUrl = st.startFrameMediaId ? mediaLookup(st.startFrameMediaId) : undefined
       const endFrameUrl = st.endFrameMediaId ? mediaLookup(st.endFrameMediaId) : undefined
-      const anchorRefUrls = buildAnchorRefs(scenario, st.anchors, mediaLookup).map(
-        (r) => r.dataUrl,
-      )
+      // 锚点参考图：带身份标签（角色/场景/道具 + 名字），让卡片/队列里能看清用了哪些锚点。
+      const anchorRefs = buildAnchorRefs(scenario, st.anchors, mediaLookup)
+      const anchorRefUrls = anchorRefs.map((r) => r.dataUrl)
+      const anchorRefLabels = anchorRefs.map((r) => r.label ?? '参考图')
       // 全能参考图：用户自由拖入/选入的额外参考图，与锚点参考并列喂给视频模型。
-      const omniRefUrls = (st.refImageMediaIds ?? [])
-        .map((id) => mediaLookup(id))
-        .filter((u): u is string => !!u)
+      const omniRefEntries = (st.refImageMediaIds ?? [])
+        .map((id) => ({ id, url: mediaLookup(id) }))
+        .filter((e): e is { id: string; url: string } => !!e.url)
+      const omniRefUrls = omniRefEntries.map((e) => e.url)
       const referenceImageUrls = [...anchorRefUrls, ...omniRefUrls]
+      const referenceImageLabels = [
+        ...anchorRefLabels,
+        ...omniRefEntries.map(() => '参考图'),
+      ]
+      // mediaId 与 referenceImageUrls 同序（锚点的 dataUrl 无对应稳定 mediaId，留空；
+      // 全能参考图本就是 mediaId 拖入的，可填，刷新后据它重解析缩略图）。
+      const referenceImageMediaIds: (string | undefined)[] = [
+        ...anchorRefs.map(() => undefined),
+        ...omniRefEntries.map((e) => e.id),
+      ]
       const referenceVideoUrl = st.refVideoMediaId ? mediaLookup(st.refVideoMediaId) : undefined
       let referenceAudioUrl = st.refAudioMediaId ? mediaLookup(st.refAudioMediaId) : undefined
       // 音色参考：未显式指定参考音频时，取第一个带「音色样本」的角色锚点的 voiceSample
@@ -219,6 +263,12 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
       const finalRefs = blockoutStillUrl
         ? [...referenceImageUrls, blockoutStillUrl]
         : referenceImageUrls
+      const finalRefLabels = blockoutStillUrl
+        ? [...referenceImageLabels, '3D 机位静帧']
+        : referenceImageLabels
+      const finalRefMediaIds = blockoutStillUrl
+        ? [...referenceImageMediaIds, st.blockoutStillMediaId]
+        : referenceImageMediaIds
       const finalMode: SeedanceMode = blockoutStillUrl ? 'reference' : (st.videoMode ?? 'reference')
       const basePrompt =
         blockoutStillUrl && st.blockoutPromptAddon
@@ -227,8 +277,11 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
       const finalPrompt = voiceNote ? `${basePrompt}\n\n${voiceNote}` : basePrompt
       setBusy((b) => ({ ...b, [spec.id]: true }))
       setStages((s) => ({ ...s, [spec.id]: '提交任务…' }))
+      // 手点视频卡不走生成队列（直接 await）；这里自行捕获请求快照，拿到产物 mediaId
+      // 后归档，让这条视频也能在卡片「ⓘ 生成信息」里回看用了哪些角色/场景/道具锚点。
+      let videoReq: GenRequestSnapshot | undefined
       try {
-        await generateCardVideo({
+        const newMediaId = await generateCardVideo({
           sceneId,
           tag,
           title: spec.title,
@@ -237,14 +290,31 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
           resolution: st.resolution,
           ratio: st.ratio,
           startFrameUrl,
+          startFrameMediaId: st.startFrameMediaId,
           endFrameUrl,
+          endFrameMediaId: st.endFrameMediaId,
           referenceImageUrls: finalRefs,
+          referenceImageLabels: finalRefLabels,
+          referenceImageMediaIds: finalRefMediaIds,
           referenceVideoUrl,
           referenceAudioUrl,
           generateAudio: st.genAudio,
           durationSec: st.durationSec,
           onStage: (stage) => setStages((s) => ({ ...s, [spec.id]: stage })),
+          onRequest: (req) => {
+            videoReq = req
+          },
         })
+        if (newMediaId && videoReq) {
+          archiveRequestForMedia({
+            kind: 'video',
+            label: spec.title,
+            sceneId,
+            shotId: spec.shotId,
+            resultMediaId: newMediaId,
+            request: videoReq,
+          })
+        }
       } catch (err) {
         setErrs((e) => ({ ...e, [spec.id]: (err as Error).message || '生成失败' }))
       } finally {
@@ -583,7 +653,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
 
       <GenerationQueuePanel />
 
-      <div className="ks-board-grid">
+      <div className="ks-board-grid" ref={gridRef}>
         <div className="ks-board-cols">
         {cards.map((spec) => {
           const st = stateById[spec.id] ?? defaultState(spec)
@@ -958,6 +1028,14 @@ const css = `
 }
 .ks-card-tovideo { background: #ff6ba6; color: #1a0a12; }
 .ks-card-adopt:disabled { background: rgba(255,255,255,0.35); color: rgba(0,0,0,0.5); cursor: default; }
+/* 候选「ⓘ 生成信息」按钮：低调描边 pill，点开看这条用了哪些角色/场景/道具锚点参考 */
+.ks-card-info {
+  all: unset; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; padding: 1px 6px; border-radius: 999px;
+  color: #fff; background: rgba(0,0,0,0.55);
+}
+.ks-card-info:hover { background: rgba(0,0,0,0.82); color: var(--ks-amber, #d4ff48); }
 
 /* 候选悬浮角标：左上放大、右上删除（点开看大图 / 删除历史） */
 .ks-card-zoom, .ks-card-del {

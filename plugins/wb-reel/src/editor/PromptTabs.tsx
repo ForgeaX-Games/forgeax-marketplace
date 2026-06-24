@@ -323,7 +323,8 @@ function ShotHistoryStrip({
       <div className="ks-pt-history-strip">
         {history.map((r) => {
           const mediaId = r.meta.mediaId as string
-          const url = `/__reel__/assets/${r.id}`
+          // 经 urlOf：带 ?game=<slug>，命中本 game 的 reel/assets（缺它会落全局桶 404）。
+          const url = useAssetStore.getState().urlOf(r.id)
           const isCurrent = currentMediaId === mediaId
           return (
             <button

@@ -192,6 +192,174 @@ interface GetVideoTaskArgs {
   taskId: string;
 }
 
+// ── Script meta (outline / character relations) collaboration helpers ────────
+//
+// 让智能体能**增量**协作维护「剧本大纲」(scenario.outline) 与「人物关系」
+// (scenario.characterRelations),而不是只能整本锻造/覆盖。落盘走与 save-scenario
+// 同一通道(PUT {db});前端 scenarioPersistBoot 的轮询按 updatedAt 把改动 reload
+// 进工作台,左侧「大纲 / 人物关系」面板随之刷新。
+
+interface GetScriptMetaArgs {
+  scenarioId?: string;
+}
+interface OutlineNodeInput {
+  id?: string;
+  parentId?: string;
+  title: string;
+  summary?: string;
+  order?: number;
+}
+interface OutlineNodeOut {
+  id: string;
+  parentId?: string;
+  title: string;
+  summary?: string;
+  order: number;
+}
+interface UpdateOutlineArgs {
+  scenarioId?: string;
+  /** 整体替换大纲树(慎用:会丢掉未列出的节点)。优先用 upsert/removeIds 增量改。 */
+  replace?: OutlineNodeInput[];
+  /** 增量新增/更新节点(按 id upsert;无 id 则新建)。 */
+  upsert?: OutlineNodeInput[];
+  /** 按 id 删除节点(连同其后代一并删,避免 parentId 悬挂)。 */
+  removeIds?: string[];
+  /** 顺带更新一句话剧本简介(scenario.synopsis)。 */
+  synopsis?: string;
+}
+interface RelationInput {
+  /** 边 id;省略则新建。同 id = 更新该边。 */
+  id?: string;
+  /** 关系起点:角色 id、角色名或别名都可(自动解析成 id)。 */
+  from: string;
+  /** 关系终点:角色 id、角色名或别名都可。 */
+  to: string;
+  /** 关系描述,如「父亲」「前任」「暗中跟踪」。 */
+  label: string;
+  note?: string;
+  itemHint?: string;
+}
+interface RelationOut {
+  id: string;
+  fromCharId: string;
+  toCharId: string;
+  label: string;
+  note?: string;
+  itemHint?: string;
+}
+interface UpdateRelationsArgs {
+  scenarioId?: string;
+  /** 整体替换关系图(慎用)。优先用 upsert/removeIds 增量改,绝不动作者手改的其它边。 */
+  replace?: RelationInput[];
+  /** 增量新增/更新关系边(同 id 更新;无 id 时按 from/to/label 去重)。 */
+  upsert?: RelationInput[];
+  /** 按 id 删除关系边。 */
+  removeIds?: string[];
+}
+
+function outlineNodeId(): string {
+  return `ol-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+function relationId(): string {
+  return `rel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeOutlineNode(raw: OutlineNodeInput, fallbackOrder: number): OutlineNodeOut {
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  if (!title) {
+    throw Object.assign(new Error("outline node requires a non-empty title (大纲节点需要标题)"), {
+      code: "invalid_argument",
+    });
+  }
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : outlineNodeId(),
+    parentId: typeof raw.parentId === "string" && raw.parentId ? raw.parentId : undefined,
+    title,
+    summary: typeof raw.summary === "string" ? raw.summary : undefined,
+    order: typeof raw.order === "number" ? raw.order : fallbackOrder,
+  };
+}
+
+/** 同级内按 order(其次按数组序)重排为 0..n,消除重复/空洞,保证 OutlinePanel 渲染稳定。 */
+function renumberOutline(nodes: OutlineNodeOut[]): OutlineNodeOut[] {
+  const byParent = new Map<string, OutlineNodeOut[]>();
+  for (const n of nodes) {
+    const key = n.parentId ?? "__root__";
+    const list = byParent.get(key) ?? [];
+    list.push(n);
+    byParent.set(key, list);
+  }
+  for (const list of byParent.values()) {
+    list.sort((a, b) => a.order - b.order).forEach((n, i) => {
+      n.order = i;
+    });
+  }
+  return nodes;
+}
+
+/** 把「角色 id / 名字 / 别名」统一解析成 character.id。找不到返回 null。 */
+function buildCharResolver(
+  chars: Record<string, { name?: string; aliases?: string[] }>,
+): (ref: string) => string | null {
+  const ids = new Set(Object.keys(chars));
+  const byName = new Map<string, string>();
+  for (const [id, c] of Object.entries(chars)) {
+    if (c?.name) byName.set(c.name.trim().toLowerCase(), id);
+    for (const a of c?.aliases ?? []) {
+      if (a) byName.set(a.trim().toLowerCase(), id);
+    }
+  }
+  return (ref: string): string | null => {
+    const r = (ref ?? "").trim();
+    if (!r) return null;
+    if (ids.has(r)) return r;
+    return byName.get(r.toLowerCase()) ?? null;
+  };
+}
+
+/**
+ * 读 → 改 → 写:在持久化库里就地修改一本 scenario(默认 active,或指定 scenarioId)。
+ * mutate 收到 scenario 的浅拷贝;返回后 bump updatedAt 并整库 PUT 回去,activeId 不变。
+ */
+async function mutateScenario(
+  ctx: ToolCtx,
+  scenarioId: string | undefined,
+  mutate: (scenario: Record<string, unknown> & { id: string }) => void,
+): Promise<{ id: string; updatedAt: number; activeId: string | null }> {
+  const base = getReelDevBase(ctx);
+  const q = gameQ(ctx);
+  const db = await fetchScenarioDb(base, q);
+  const items = [...db.items];
+  const wantId = scenarioId ?? db.activeId ?? undefined;
+  const idx = wantId ? items.findIndex((it) => it.id === wantId) : -1;
+  if (idx < 0) {
+    throw Object.assign(
+      new Error(
+        scenarioId
+          ? `scenario not found: ${scenarioId}`
+          : "no active scenario to edit — pass scenarioId, or open/forge a scenario first",
+      ),
+      { code: "not_found", httpStatus: 404 },
+    );
+  }
+  const item = items[idx]!;
+  const scenario = { ...item.scenario } as Record<string, unknown> & { id: string };
+  mutate(scenario);
+  const updatedAt = Date.now();
+  items[idx] = {
+    ...item,
+    scenario,
+    title: (scenario as { title?: string }).title ?? item.title,
+    updatedAt,
+  };
+  const nextDb: PersistedDb = { version: 1, activeId: db.activeId ?? null, items };
+  await apiFetch(`${base}/__reel__/scenarios/${q}`, {
+    method: "PUT",
+    body: JSON.stringify({ db: nextDb }),
+  });
+  return { id: scenario.id, updatedAt, activeId: nextDb.activeId };
+}
+
 export const tools: Record<string, (args: any, ctx: ToolCtx) => Promise<unknown>> = {
   /** List scenarios persisted in the .reel-scenarios/scenarios.json index. */
   "reel:list-scenarios": async (args: ListScenariosArgs, ctx: ToolCtx) => {
@@ -254,6 +422,20 @@ export const tools: Record<string, (args: any, ctx: ToolCtx) => Promise<unknown>
     const updatedAt = Date.now();
     const idx = items.findIndex((it) => it.id === args.scenario.id);
     const existing = idx >= 0 ? items[idx] : null;
+    // 加固止血:整本覆盖时,若调用方**没带**(undefined) 大纲/人物关系/简介,保留旧值,
+    // 避免智能体 round-trip(get → 改 → save)时把这几块剧本元信息整块抹掉——作者反馈
+    // 「剧本大纲/人物关系丢了、人物都变独立」的最可能路径。注意:显式传 [] / "" 视为
+    // 作者主动清空,尊重之、不回填(想增量改大纲/关系请优先用 reel:update-outline /
+    // reel:update-relations,它们不会动其它字段)。
+    if (existing?.scenario) {
+      const incoming = args.scenario as Record<string, unknown>;
+      const prev = existing.scenario as Record<string, unknown>;
+      for (const k of ["outline", "characterRelations", "synopsis"] as const) {
+        if (incoming[k] === undefined && prev[k] !== undefined) {
+          incoming[k] = prev[k];
+        }
+      }
+    }
     // PersistedItem wraps the scenario; the frontend reads `item.scenario`.
     // Flattening the scenario into the item (the old shape) made the UI see
     // `item.scenario === undefined` and never render it.
@@ -286,6 +468,184 @@ export const tools: Record<string, (args: any, ctx: ToolCtx) => Promise<unknown>
       updatedAt,
       activeId: nextDb.activeId,
     };
+  },
+
+  // ── Script-meta collaboration: read/edit outline + character relations ──────
+  //
+  // 修复作者反馈「剧本大纲/人物关系丢了、人物都变独立、没工具让智能体协作」。
+  // get 给智能体看清现状(含角色名↔id 映射,便于按名建关系);update-* 增量改且不
+  // 抹掉其它内容。前端轮询会把改动 reload 进工作台对应面板。
+
+  "reel:get-script-meta": async (args: GetScriptMetaArgs, ctx: ToolCtx) => {
+    const base = getReelDevBase(ctx);
+    const db = await fetchScenarioDb(base, gameQ(ctx));
+    const wantId = args.scenarioId ?? db.activeId ?? undefined;
+    const item = wantId ? db.items.find((it) => it.id === wantId) : undefined;
+    if (!item) {
+      throw Object.assign(
+        new Error(args.scenarioId ? `scenario not found: ${args.scenarioId}` : "no active scenario"),
+        { code: "not_found", httpStatus: 404 },
+      );
+    }
+    const s = item.scenario as Record<string, unknown>;
+    const charsRaw = (s.characters ?? {}) as Record<string, { name?: string; aliases?: string[] }>;
+    const characters = Object.entries(charsRaw).map(([id, c]) => ({
+      id,
+      name: c?.name ?? id,
+      aliases: Array.isArray(c?.aliases) ? c.aliases : [],
+    }));
+    const outline = Array.isArray(s.outline) ? (s.outline as unknown[]) : [];
+    const characterRelations = Array.isArray(s.characterRelations)
+      ? (s.characterRelations as unknown[])
+      : [];
+    return {
+      scenarioId: item.id,
+      title: (s.title as string | undefined) ?? item.title ?? null,
+      synopsis: (s.synopsis as string | undefined) ?? null,
+      characters,
+      outline,
+      characterRelations,
+      counts: {
+        characters: characters.length,
+        outlineNodes: outline.length,
+        relations: characterRelations.length,
+      },
+    };
+  },
+
+  "reel:update-outline": async (args: UpdateOutlineArgs, ctx: ToolCtx) => {
+    const hasOp =
+      Array.isArray(args.replace) ||
+      Array.isArray(args.upsert) ||
+      Array.isArray(args.removeIds) ||
+      typeof args.synopsis === "string";
+    if (!hasOp) {
+      throw Object.assign(
+        new Error("update-outline needs at least one of: replace / upsert / removeIds / synopsis"),
+        { code: "invalid_argument" },
+      );
+    }
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      if (typeof args.synopsis === "string") scenario.synopsis = args.synopsis;
+
+      let nodes: OutlineNodeOut[] = Array.isArray(scenario.outline)
+        ? (scenario.outline as OutlineNodeOut[]).map((n) => ({ ...n }))
+        : [];
+
+      if (Array.isArray(args.replace)) {
+        nodes = args.replace.map((n, i) => normalizeOutlineNode(n, i));
+      }
+      if (Array.isArray(args.upsert)) {
+        for (const raw of args.upsert) {
+          const node = normalizeOutlineNode(raw, nodes.length);
+          const at = nodes.findIndex((n) => n.id === node.id);
+          if (at >= 0) nodes[at] = { ...nodes[at]!, ...node };
+          else nodes.push(node);
+        }
+      }
+      if (Array.isArray(args.removeIds) && args.removeIds.length > 0) {
+        // 连同后代一起删,避免 parentId 悬挂(大纲靠 parentId 形成树)。
+        const dead = new Set(args.removeIds);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const n of nodes) {
+            if (n.parentId && dead.has(n.parentId) && !dead.has(n.id)) {
+              dead.add(n.id);
+              grew = true;
+            }
+          }
+        }
+        nodes = nodes.filter((n) => !dead.has(n.id));
+      }
+      scenario.outline = renumberOutline(nodes);
+    });
+    return { ok: true, ...result };
+  },
+
+  "reel:update-relations": async (args: UpdateRelationsArgs, ctx: ToolCtx) => {
+    const hasOp =
+      Array.isArray(args.replace) || Array.isArray(args.upsert) || Array.isArray(args.removeIds);
+    if (!hasOp) {
+      throw Object.assign(
+        new Error("update-relations needs at least one of: replace / upsert / removeIds"),
+        { code: "invalid_argument" },
+      );
+    }
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const charsRaw = (scenario.characters ?? {}) as Record<
+        string,
+        { name?: string; aliases?: string[] }
+      >;
+      const resolve = buildCharResolver(charsRaw);
+      const knownNames = Object.entries(charsRaw)
+        .map(([id, c]) => c?.name ?? id)
+        .join(", ");
+
+      const toEdge = (raw: RelationInput): RelationOut => {
+        const from = resolve(String(raw.from ?? ""));
+        const to = resolve(String(raw.to ?? ""));
+        if (!from || !to) {
+          const bad = !from ? raw.from : raw.to;
+          throw Object.assign(
+            new Error(
+              `未找到角色「${String(bad)}」。可用角色:${knownNames || "(本剧暂无角色)"}。` +
+                `请先用 reel:get-script-meta 取角色名/ id,或先建好该角色再连关系。`,
+            ),
+            { code: "invalid_argument" },
+          );
+        }
+        const label = typeof raw.label === "string" ? raw.label.trim() : "";
+        if (!label) {
+          throw Object.assign(
+            new Error("relation requires a non-empty label (关系描述,如「父亲」「前任」)"),
+            { code: "invalid_argument" },
+          );
+        }
+        return {
+          id: typeof raw.id === "string" && raw.id ? raw.id : relationId(),
+          fromCharId: from,
+          toCharId: to,
+          label,
+          note: typeof raw.note === "string" ? raw.note : undefined,
+          itemHint: typeof raw.itemHint === "string" ? raw.itemHint : undefined,
+        };
+      };
+
+      let edges: RelationOut[] = Array.isArray(scenario.characterRelations)
+        ? (scenario.characterRelations as RelationOut[]).map((e) => ({ ...e }))
+        : [];
+
+      if (Array.isArray(args.replace)) {
+        edges = args.replace.map(toEdge);
+      }
+      if (Array.isArray(args.upsert)) {
+        for (const raw of args.upsert) {
+          const edge = toEdge(raw);
+          // 同 id 更新;无 id 时按(from,to,label)去重,避免重复边。
+          const at = raw.id
+            ? edges.findIndex((e) => e.id === edge.id)
+            : edges.findIndex(
+                (e) =>
+                  e.fromCharId === edge.fromCharId &&
+                  e.toCharId === edge.toCharId &&
+                  e.label === edge.label,
+              );
+          if (at >= 0) {
+            const cur = edges[at]!;
+            edges[at] = { ...cur, ...edge, id: cur.id };
+          } else {
+            edges.push(edge);
+          }
+        }
+      }
+      if (Array.isArray(args.removeIds) && args.removeIds.length > 0) {
+        const dead = new Set(args.removeIds);
+        edges = edges.filter((e) => !dead.has(e.id));
+      }
+      scenario.characterRelations = edges;
+    });
+    return { ok: true, ...result };
   },
 
   "reel:list-assets": async (args: ListAssetsArgs, ctx: ToolCtx) => {
@@ -1059,6 +1419,7 @@ interface GenerateStoryboardArgs {
   scope?: "scene" | "all";
   sceneId?: string;
   scenarioId?: string;
+  force?: boolean;
 }
 
 tools["reel:generate-storyboard"] = async (
@@ -1074,6 +1435,7 @@ tools["reel:generate-storyboard"] = async (
       { code: "invalid_argument" },
     );
   }
+  const force = args.force === true;
   const base = getReelDevBase(ctx);
   await apiFetch(`${base}/__reel__/storyboard-queue${gameQ(ctx)}`, {
     method: "POST",
@@ -1081,16 +1443,21 @@ tools["reel:generate-storyboard"] = async (
       scope,
       sceneId: args.sceneId,
       scenarioId: args.scenarioId,
+      force,
     }),
   });
   return {
     ok: true,
     scope,
     sceneId: args.sceneId,
+    force,
     message:
       (scope === "all"
         ? "已把「整本拆分镜」投递到影游工坊队列。"
         : `已把节点 ${args.sceneId} 的「拆分镜」投递到影游工坊队列。`) +
+      (force
+        ? "（force=重拆并清理旧分镜：会用新分镜替换时间轴上的旧镜头，旧视频/关键帧归档进素材库不删除；工作台会先让用户确认。）"
+        : "") +
       "工作台会用导演分镜引擎把节点拆成多镜、写回 scene.shots[] 并在时间轴铺成可预览站位。" +
       "进度见 forge 对话；该流程在浏览器管线里跑，工作台必须保持打开。" +
       "完成后可用 reel:get-scenario 查 scene.shots 的镜头数确认，再逐镜 reel:generate-keyframes。",

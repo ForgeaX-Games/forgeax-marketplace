@@ -84,13 +84,61 @@ export function resolveProduceTargets(
  * 产出单个节点（分镜→关键帧→视频），返回一行树状进度文案。
  * 不发 header；调用方在批量时统一发头尾，单节点时也复用这行做收尾。
  */
+/**
+ * 强制重生前的确认 —— 用户明确要求「清理之前先确认一下」。
+ *
+ * 语义：force 重生会用新内容**替换当前节点时间轴上的旧分镜/旧视频/旧关键帧**（消除
+ * 重复），但底层媒体**不删除**——旧视频/关键帧会留在素材库（按 shot 归到历史版本），
+ * 随时可以「拿回来」重新采用。这里只是把「将要脱离时间轴的旧内容」摆给用户确认。
+ *
+ * 返回 true=继续重生；false=用户取消。无 window（测试/SSR）时默认放行（不阻断管线）。
+ */
+function confirmForceRegen(
+  sceneId: string,
+  stages: ProduceStage[],
+): boolean {
+  const cur = useScenarioStore.getState().scenario.scenes?.[sceneId]
+  const shotN = cur?.shots?.length ?? 0
+  const kfN = cur?.shots?.filter((s) => s.keyframeMediaRef).length ?? 0
+  const vidN = cur?.shots?.filter((s) => s.videoMediaRef).length ?? 0
+  // 没有任何旧内容 → 无需确认，直接生成。
+  if (shotN === 0 && kfN === 0 && vidN === 0) return true
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+
+  const willReplace: string[] = []
+  if (stages.includes('storyboard') && shotN > 0) willReplace.push(`分镜 ${shotN} 镜`)
+  if (stages.includes('keyframes') && kfN > 0) willReplace.push(`关键帧 ${kfN} 张`)
+  if (stages.includes('video') && vidN > 0) willReplace.push(`视频 ${vidN} 段`)
+  if (willReplace.length === 0) return true
+
+  return window.confirm(
+    `重新生成节点「${sceneId}」前确认：\n\n` +
+      `将用新内容替换当前时间轴上的：${willReplace.join('、')}。\n\n` +
+      `旧的视频 / 关键帧不会被删除 —— 会归档进素材库（按镜头归到历史版本），\n` +
+      `随时可以从素材库「拿回来」重新采用替换。\n\n` +
+      `确认开始重新生成？`,
+  )
+}
+
 async function produceOneNode(
   scenarioId: string,
   sceneId: string,
   stages: ProduceStage[],
   force: boolean,
-): Promise<string> {
+): Promise<string | null> {
   const chat = useForgeChatStore.getState()
+
+  // ── 强制重生：先弹确认（清理前先问），用户取消则整节点跳过 ─────────────────
+  if (force) {
+    const ok = confirmForceRegen(sceneId, stages)
+    if (!ok) {
+      chat.appendMessage(scenarioId, {
+        role: 'assistant',
+        text: `[${sceneId}] 已取消重新生成 —— 旧分镜 / 视频 / 关键帧原样保留。`,
+      })
+      return null
+    }
+  }
 
   // ── 阶段 1：分镜 ─────────────────────────────────────────────────────────
   if (stages.includes('storyboard')) {
@@ -186,7 +234,7 @@ export async function triggerProduceNodeFromQueue(item: ProduceNodeQueueItem): P
   const summaries: string[] = []
   for (const sceneId of targets) {
     const line = await produceOneNode(scenarioId, sceneId, stages, force)
-    summaries.push(line)
+    if (line != null) summaries.push(line)
   }
 
   if (targets.length > 1) {

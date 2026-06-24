@@ -186,7 +186,8 @@ function startGenerate(
   const finalPrompt = composeVisualPrompt(prompt, style)
   const promise = (async (): Promise<string | null> => {
     try {
-      const out = await client.generate({ prompt: finalPrompt, size: '1024x1024' })
+      // 场景兜底背景图走横版 1536x1024（gpt-image-2 原生最宽，对齐 16:9 视频）。
+      const out = await client.generate({ prompt: finalPrompt, size: '1536x1024' })
       const latencyMs = Math.round(performance.now() - t0)
 
       // 1) 立刻显示（base64 dataUrl）

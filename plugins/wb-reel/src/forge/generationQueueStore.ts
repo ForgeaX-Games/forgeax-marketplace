@@ -35,6 +35,12 @@ export interface GenRequestRef {
   /** 素材 URL（mediaStore/asset URL 或 data URL）。持久化时会丢弃超长/ data: URL。 */
   url: string
   label?: string
+  /**
+   * 该参考素材的 mediaId（若已知）。持久化时 url 里的 data: / 超长 URL 会被裁掉，
+   * 但 mediaId 很短、始终保留 —— 查看时可据它从 mediaStore **重新解析**出可显示的
+   * 缩略图，从而「刷新/跨 iframe 后仍能看到用了哪张参考图（角色/场景/道具锚点）」。
+   */
+  mediaId?: string
 }
 
 /**
@@ -351,18 +357,20 @@ function startJob(id: string): void {
         return
       }
       const resultMediaId = typeof mediaId === 'string' ? mediaId : undefined
-      store.setState((s) => ({
-        jobs: {
-          ...s.jobs,
-          [id]: {
-            ...cur,
-            status: 'done',
-            resultMediaId,
-            stage: undefined,
-            finishedAt: Date.now(),
-          },
-        },
-      }))
+      const doneJob: GenJob = {
+        ...cur,
+        status: 'done',
+        resultMediaId,
+        stage: undefined,
+        finishedAt: Date.now(),
+      }
+      store.setState((s) => ({ jobs: { ...s.jobs, [id]: doneJob } }))
+      // 把「发了什么」归档，供刷新/跨 iframe 后仍能在素材库/时间轴看参数（不进活动队列）。
+      try {
+        archiveDoneRequest(doneJob)
+      } catch {
+        /* 归档失败不影响主流程 */
+      }
       try {
         job.onDone?.(resultMediaId)
       } catch (e) {
@@ -424,14 +432,173 @@ export function jobForShot(sceneId: string, shotId: string, kind?: GenJobKind): 
   return latest
 }
 
-/** 取产出了某个 mediaId 的生成 job（按结果素材反查），用于场景级单条视频的回看。非 React 读。 */
+/**
+ * 取产出了某个 mediaId 的生成 job（按结果素材反查），用于场景级单条视频/关键帧的回看。
+ *   优先内存活动队列里**带请求快照**的最近一条（含完整 url，可显示缩略图）；
+ *   内存找不到（已清理 / 跨 iframe / 刷新）时回退到 localStorage 请求归档。非 React 读。
+ */
 export function jobForMedia(mediaId: string): GenJob | undefined {
+  if (!mediaId) return undefined
   let latest: GenJob | undefined
   for (const j of Object.values(useGenerationQueue.getState().jobs)) {
     if (j.resultMediaId !== mediaId) continue
     if (!latest || j.createdAt > latest.createdAt) latest = j
   }
-  return latest
+  // 内存命中但无请求快照时，仍尝试归档兜底（归档里可能有更完整的 prompt/参考）。
+  if (latest?.request) return latest
+  return archivedJobForMedia(mediaId) ?? latest
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 已完成生成的「请求快照」归档 —— 让「看参数」跨刷新/跨 iframe 存活。
+//
+// 背景（作者反馈）：新出的逐镜视频在素材库/时间轴上点「查看生成记录」常报「没找到」，
+//   因为活动队列是纯内存、done 不持久化、且 split-pane 跨 iframe 不共享内存。
+//   这里把每个**成功完成**的 job 的请求快照（prompt+参数+参考）按 sceneId:shotId 和
+//   resultMediaId 双键归档到 localStorage（裁掉超长/ data: URL），刷新/跨页后仍可回看，
+//   不进活动队列面板（避免老 done 反复刷屏）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ArchivedRequest {
+  kind: GenJobKind
+  label: string
+  sceneId?: string
+  shotId?: string
+  resultMediaId?: string
+  request: GenRequestSnapshot
+  at: number
+}
+
+const REQ_ARCHIVE_CAP = 240
+
+function reqArchiveKey(): string {
+  return `reel-studio:gen-req-archive:v1${gameKeySuffix()}`
+}
+
+function loadReqArchive(): ArchivedRequest[] {
+  if (isPersistDisabled()) return []
+  try {
+    const raw = window.localStorage.getItem(reqArchiveKey())
+    if (!raw) return []
+    const arr = JSON.parse(raw) as unknown
+    return Array.isArray(arr) ? (arr as ArchivedRequest[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveReqArchive(list: ArchivedRequest[]): void {
+  if (isPersistDisabled()) return
+  try {
+    // 只留最近 CAP 条，避免 localStorage 无限增长。
+    const trimmed = list.slice(-REQ_ARCHIVE_CAP)
+    window.localStorage.setItem(reqArchiveKey(), JSON.stringify(trimmed))
+  } catch {
+    /* 配额满/不可用 —— best-effort */
+  }
+}
+
+/** 成功完成且带请求快照的 job → 归档（裁掉超长 URL）。同键去重保留最新。 */
+function archiveDoneRequest(job: GenJob): void {
+  if (!job.request) return
+  const trimmed = trimRequestForPersist(job.request)
+  if (!trimmed) return
+  const entry: ArchivedRequest = {
+    kind: job.kind,
+    label: job.label,
+    sceneId: job.sceneId,
+    shotId: job.shotId,
+    resultMediaId: job.resultMediaId,
+    request: trimmed,
+    at: Date.now(),
+  }
+  const list = loadReqArchive().filter((a) => {
+    // 同一镜同类型 / 同 mediaId 的旧归档去掉，保留这条最新。
+    if (entry.resultMediaId && a.resultMediaId === entry.resultMediaId) return false
+    if (
+      entry.sceneId &&
+      entry.shotId &&
+      a.sceneId === entry.sceneId &&
+      a.shotId === entry.shotId &&
+      a.kind === entry.kind
+    )
+      return false
+    return true
+  })
+  list.push(entry)
+  saveReqArchive(list)
+}
+
+/**
+ * 直接归档一条「请求快照 ↔ 产物 mediaId」—— 供**不走生成队列**的路径（如素材库手点
+ * 视频卡）调用，使其生成信息（prompt/参数/角色·场景·道具锚点参考）同样能在卡片
+ * 「ⓘ 生成信息」里按 mediaId 回看。语义与 archiveDoneRequest 一致（同键去重保留最新）。
+ */
+export function archiveRequestForMedia(input: {
+  kind: GenJobKind
+  label: string
+  sceneId?: string
+  shotId?: string
+  resultMediaId: string
+  request: GenRequestSnapshot
+}): void {
+  archiveDoneRequest({
+    id: `adhoc-${Date.now().toString(36)}`,
+    kind: input.kind,
+    label: input.label,
+    sceneId: input.sceneId,
+    shotId: input.shotId,
+    status: 'done',
+    request: input.request,
+    resultMediaId: input.resultMediaId,
+    attempts: 1,
+    createdAt: Date.now(),
+    finishedAt: Date.now(),
+    run: async () => undefined,
+  })
+}
+
+/** 把归档记录还原成一个「已完成」的最小 GenJob，供 GenRequestDialog 直接渲染。 */
+function archivedToJob(a: ArchivedRequest): GenJob {
+  return {
+    id: `arch-${a.at.toString(36)}`,
+    kind: a.kind,
+    label: a.label,
+    sceneId: a.sceneId,
+    shotId: a.shotId,
+    status: 'done',
+    request: a.request,
+    resultMediaId: a.resultMediaId,
+    attempts: 1,
+    createdAt: a.at,
+    finishedAt: a.at,
+    run: async () => undefined,
+  }
+}
+
+/** 从归档里找某一镜最近一次的请求快照（活动队列里找不到时的兜底）。 */
+export function archivedJobForShot(
+  sceneId: string,
+  shotId: string,
+  kind?: GenJobKind,
+): GenJob | undefined {
+  let latest: ArchivedRequest | undefined
+  for (const a of loadReqArchive()) {
+    if (a.sceneId !== sceneId || a.shotId !== shotId) continue
+    if (kind && a.kind !== kind) continue
+    if (!latest || a.at > latest.at) latest = a
+  }
+  return latest ? archivedToJob(latest) : undefined
+}
+
+/** 从归档里按产物 mediaId 找请求快照。 */
+export function archivedJobForMedia(mediaId: string): GenJob | undefined {
+  let latest: ArchivedRequest | undefined
+  for (const a of loadReqArchive()) {
+    if (a.resultMediaId !== mediaId) continue
+    if (!latest || a.at > latest.at) latest = a
+  }
+  return latest ? archivedToJob(latest) : undefined
 }
 
 /**
@@ -508,6 +675,8 @@ function trimRequestForPersist(req: GenRequestSnapshot | undefined): GenRequestS
     refs: req.refs.map((r) => ({
       role: r.role,
       label: r.label,
+      // mediaId 很短、始终保留：刷新后即便 url 被裁掉，也能据 mediaId 重解析缩略图。
+      mediaId: r.mediaId,
       url: r.url.startsWith('data:') || r.url.length > 2048 ? '' : r.url,
     })),
   }

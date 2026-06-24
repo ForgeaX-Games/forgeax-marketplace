@@ -95,14 +95,11 @@ function load(): ReelSettings {
     if (!savedVid.apiBase || !String(savedVid.apiBase).trim()) {
       merged.apiBase = DEFAULT.videoConfig.apiBase
     }
-    // 模型默认/迁移：空 → 用默认；历史写死的 1.0（doubao-seedance-1-0-pro-250528）
-    //   自动升级到 2.0 默认（R2V）。否则老 localStorage 会一直把 1.0 盖回来，
-    //   作者明明已改用 seedance 2.0，快照里却仍显示 1.0。
-    if (
-      !savedVid.model ||
-      !String(savedVid.model).trim() ||
-      String(savedVid.model).trim() === 'doubao-seedance-1-0-pro-250528'
-    ) {
+    // 模型默认/迁移：空 → 用默认；任何遗留的 Seedance 1.x（如
+    //   doubao-seedance-1-0-pro-250528）自动升级到 2.0 默认（R2V）。否则老
+    //   localStorage 会一直把 1.0 盖回来，作者明明已改用 seedance 2.0，快照里却仍显示 1.0。
+    const savedModel = String(savedVid.model ?? '').trim()
+    if (!savedModel || /^doubao-seedance-1[-.]/.test(savedModel)) {
       merged.model = DEFAULT.videoConfig.model
     }
     const savedConc: Partial<GenConcurrency> = parsed.genConcurrency ?? {}

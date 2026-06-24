@@ -25,6 +25,8 @@ import {
   type AnchorRef,
   type CardSpec,
 } from './assetCards'
+import { jobForMedia, type GenJob } from './generationQueueStore'
+import { GenRequestDialog } from './GenRequestDialog'
 
 const EMPTY: string[] = []
 
@@ -163,6 +165,25 @@ export function AssetCard(props: {
   const [audioDur, setAudioDur] = useState<Record<string, number>>({})
   /** 灯箱（点开候选放大看细节）当前索引；null = 关闭 */
   const [lightIdx, setLightIdx] = useState<number | null>(null)
+  /** 「ⓘ 生成信息」当前查看的产物 mediaId；null = 关闭。就地弹 GenRequestDialog。 */
+  const [infoMediaId, setInfoMediaId] = useState<string | null>(null)
+
+  // 据 mediaId 反查「生成这条素材的那次请求」（内存活动队列 → localStorage 归档兜底）。
+  // 查不到也给一个最小 job，让弹窗显示「未记录请求快照」而非无反馈。
+  const infoJob: GenJob | null = useMemo(() => {
+    if (!infoMediaId) return null
+    return (
+      jobForMedia(infoMediaId) ?? {
+        id: `noreq-${infoMediaId}`,
+        kind: isVideo ? 'video' : isAudio ? 'audio' : 'image',
+        label: spec.title,
+        status: 'done',
+        attempts: 1,
+        createdAt: Date.now(),
+        run: async () => undefined,
+      }
+    )
+  }, [infoMediaId, isVideo, isAudio, spec.title])
 
   const tag = cardTag(spec, variantId)
 
@@ -402,6 +423,7 @@ export function AssetCard(props: {
 
   return (
     <div
+      data-asset-card={spec.id}
       className={`ks-card ks-card-${accent} ${busy ? 'is-busy' : ''} ${collapsed ? 'is-collapsed' : ''}`}
     >
       <header
@@ -605,6 +627,19 @@ export function AssetCard(props: {
                   🗑
                 </button>
                 <div className="ks-card-cand-ops">
+                  {mediaId ? (
+                    <button
+                      type="button"
+                      className="ks-card-info"
+                      title="查看这条的生成信息：提示词 / 参数 / 用到的角色·场景·道具锚点参考图"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setInfoMediaId(mediaId)
+                      }}
+                    >
+                      ⓘ
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="ks-card-adopt"
@@ -778,6 +813,16 @@ export function AssetCard(props: {
                     : '已设主参考'
                   : '文生（留空）'}
               </span>
+              {startFrameMediaId ? (
+                <button
+                  type="button"
+                  className="ks-card-frow-clear"
+                  title="查看该关键帧/主参考图的生成信息：用了哪些角色/场景锚点参考图"
+                  onClick={() => setInfoMediaId(startFrameMediaId)}
+                >
+                  ⓘ
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="ks-card-frow-clear"
@@ -1305,6 +1350,12 @@ export function AssetCard(props: {
           onDelete={(it) => doDelete({ id: it.id, mediaId: it.mediaId })}
           onSaveEdited={!isVideo && !isAudio ? handleSaveEdited : undefined}
         />
+      ) : null}
+
+      {/* 生成信息：就地查看「这条候选/这张关键帧」发给模型的提示词 / 参数 /
+          用到的角色·场景·道具锚点参考图（按 mediaId 反查请求快照）。 */}
+      {infoMediaId && infoJob ? (
+        <GenRequestDialog job={infoJob} onClose={() => setInfoMediaId(null)} />
       ) : null}
         </>
       )}

@@ -149,6 +149,11 @@ const css = `
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
+  /* 作为内层模块面板（数值图 / 背包三栏）的容器查询上下文：面板按这块实际
+     可用宽度自适应，而不是按浏览器视口——嵌在 studio center iframe / 分屏里
+     时视口宽度并不代表面板宽度。 */
+  container-type: inline-size;
+  container-name: ksmod;
 }
 .ks-mod-body.is-disabled > *:not(.ks-mod-veil) {
   opacity: 0.4;

@@ -126,14 +126,25 @@ describe('normalizeStoryboardShots', () => {
     prompts: { scene: '兜底场景描述' },
   })
 
-  it('id 重签为 `<sceneId>-shNN`，order 按顺序', () => {
+  it('id 重签为 `<sceneId>-shNN-<token>`（每次拆镜唯一），order 按顺序', () => {
     const raw = [
       { framing: 'wide', prompt: 'a' },
       { framing: 'medium', prompt: 'b' },
       { framing: 'close', prompt: 'c' },
     ]
     const shots = normalizeStoryboardShots(raw, sceneA, [])
-    expect(shots.map((s) => s.id)).toEqual(['s1-sh01', 's1-sh02', 's1-sh03'])
+    // 形如 s1-sh01-<token>：稳定前缀 + 每次拆镜唯一的 token（防「重拆复用旧 id」）。
+    expect(shots.map((s) => s.id)).toEqual([
+      expect.stringMatching(/^s1-sh01-[a-z0-9]+$/),
+      expect.stringMatching(/^s1-sh02-[a-z0-9]+$/),
+      expect.stringMatching(/^s1-sh03-[a-z0-9]+$/),
+    ])
+    // 同一次拆镜内各镜共享同一 token（id 仍互不相同，靠镜号区分）。
+    const tokens = shots.map((s) => s.id.split('-').pop())
+    expect(new Set(tokens).size).toBe(1)
+    // 两次拆镜的 token 不同 —— 新镜得到全新 id，旧编排视频不再误挂新卡。
+    const again = normalizeStoryboardShots(raw, sceneA, [])
+    expect(again[0]!.id).not.toBe(shots[0]!.id)
     expect(shots.map((s) => s.order)).toEqual([0, 1, 2])
   })
 

@@ -697,8 +697,9 @@ const css = `
 }
 
 .ks-ng-inspector {
-  flex: 0 0 360px;
+  flex: 0 1 360px;
   width: 360px;
+  min-width: 280px;
   min-height: 0;
   border-left: 1px solid var(--color-border-default);
   background: var(--color-background-base);
@@ -807,6 +808,27 @@ const css = `
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md, 8px);
   font-family: inherit;
+}
+
+/* ── 缩放适配（容器查询，锚定 ModuleShell .ks-mod-body 的实际宽度）──────────
+   宽：节点画布 flex | inspector 360
+   中：压缩 inspector
+   窄：上下堆叠——画布在上(可平移缩放)，inspector 在下并自带滚动，
+       任何宽度都不会把 inspector 挤出可视区 */
+@container ksmod (max-width: 920px) {
+  .ks-ng-inspector { flex-basis: 312px; width: 312px; min-width: 260px; }
+}
+@container ksmod (max-width: 680px) {
+  .ks-ng-body { flex-direction: column; }
+  .ks-ng-canvas { flex: 1 1 0; min-width: 0; min-height: 220px; }
+  .ks-ng-inspector {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-height: 46%;
+    border-left: none;
+    border-top: 1px solid var(--color-border-default);
+  }
 }
 `
 injectStyleOnce('numeric-graph', css)

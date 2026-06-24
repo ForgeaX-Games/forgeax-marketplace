@@ -95,7 +95,8 @@ export function useShotVersionGroups(sceneId: string): Group[] {
         filename: r.filename,
         mimeType: r.mimeType,
         bytes: r.bytes,
-        url: `/__reel__/assets/${r.id}`,
+        // 经 urlOf：带 ?game=<slug>，命中本 game 的 reel/assets（缺它会落全局桶 404）。
+        url: useAssetStore.getState().urlOf(r.id),
       })
       real.set(r.meta.shotId, arr)
     }

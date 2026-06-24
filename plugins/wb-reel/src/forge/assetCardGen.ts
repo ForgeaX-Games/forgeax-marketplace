@@ -103,6 +103,17 @@ export async function generateCardVideo(opts: {
   startFrameUrl?: string
   endFrameUrl?: string
   referenceImageUrls?: string[]
+  /**
+   * 与 referenceImageUrls 同序的「身份标签」（如「角色 · 林深」「场景 · 客厅」「道具 · 钥匙」）。
+   * 仅用于请求快照展示，让作者在卡片/队列里看清「这次用了哪些角色/场景/道具锚点」。
+   */
+  referenceImageLabels?: string[]
+  /** 与 referenceImageUrls 同序的 mediaId（已知时传，可含 undefined 占位）：刷新后据此重解析缩略图。 */
+  referenceImageMediaIds?: (string | undefined)[]
+  /** 首帧 mediaId（已知时传，用于快照刷新后重解析缩略图）。 */
+  startFrameMediaId?: string
+  /** 尾帧 mediaId（已知时传）。 */
+  endFrameMediaId?: string
   /** 运镜/动作参考视频 URL（Seedance reference_video role） */
   referenceVideoUrl?: string
   /** BGM/氛围参考音频 URL（Seedance reference_audio role） */
@@ -151,11 +162,27 @@ export async function generateCardVideo(opts: {
   if (opts.onRequest) {
     const refs: GenRequestRef[] = []
     if (req.startFrameImageUrl)
-      refs.push({ role: 'first_frame', url: req.startFrameImageUrl, label: '首帧' })
+      refs.push({
+        role: 'first_frame',
+        url: req.startFrameImageUrl,
+        label: '首帧',
+        mediaId: opts.startFrameMediaId,
+      })
     if (req.endFrameImageUrl)
-      refs.push({ role: 'last_frame', url: req.endFrameImageUrl, label: '尾帧' })
-    for (const u of req.referenceImageUrls ?? [])
-      refs.push({ role: 'reference_image', url: u, label: '参考图' })
+      refs.push({
+        role: 'last_frame',
+        url: req.endFrameImageUrl,
+        label: '尾帧',
+        mediaId: opts.endFrameMediaId,
+      })
+    ;(req.referenceImageUrls ?? []).forEach((u, i) =>
+      refs.push({
+        role: 'reference_image',
+        url: u,
+        label: opts.referenceImageLabels?.[i] ?? '参考图',
+        mediaId: opts.referenceImageMediaIds?.[i],
+      }),
+    )
     if (req.referenceVideoUrl)
       refs.push({ role: 'reference_video', url: req.referenceVideoUrl, label: '运镜参考视频' })
     if (req.referenceAudioUrl)

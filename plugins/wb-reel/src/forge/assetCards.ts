@@ -11,6 +11,16 @@ import type { ImageReference } from '../llm/types'
  * 本文件是**纯函数**（只 import 类型），可单测、不碰浏览器 API。
  */
 
+/** 景别中文标签（镜头卡标题用，与 SceneShotGallery 一致）。 */
+const SHOT_FRAMING_LABEL: Record<string, string> = {
+  wide: '远景',
+  medium: '中景',
+  close: '近景',
+  insert: '插入',
+  ots: '过肩',
+  pov: '主观',
+}
+
 export type CardKind = 'scene' | 'character' | 'prop' | 'free' | 'video' | 'audio'
 
 /** 卡片产物类型：图像 / 视频 / 音频(配音·音色) */
@@ -59,6 +69,17 @@ export interface CardSpec {
    *   - true = 通用视频卡：全干净，不绑场景锚点，由用户自行上传/选择参考图。
    */
   generic?: boolean
+  /**
+   * 逐镜「镜头卡」专用：绑定的 shot id。设了它的卡 = 某一镜的视频卡，
+   * 候选直接复用编排出片的 tag（reel:orch:sceneId:shotId），无需再生成即自动挂上
+   * 该镜已出的视频；从时间轴/生成队列跳「在素材库查看」时滚动聚焦到这张卡。
+   */
+  shotId?: string
+  /**
+   * 显式候选归组 tag（覆盖 cardTag 默认推导）。镜头卡用它对齐编排出片 tag，
+   * 让「逐镜出片」的视频自动成为该镜卡的候选。
+   */
+  tag?: string
 }
 
 /**
@@ -66,9 +87,11 @@ export interface CardSpec {
  * 全部生成历史聚到一起。变体不同 → tag 不同 → 候选分开。
  */
 export function cardTag(
-  spec: { kind: CardKind; anchorId?: string; id: string },
+  spec: { kind: CardKind; anchorId?: string; id: string; tag?: string },
   variantId?: string,
 ): string {
+  // 镜头卡等显式指定 tag 的卡：直接用它（对齐编排出片 reel:orch:* tag）。
+  if (spec.tag) return spec.tag
   const v = variantId ?? 'main'
   switch (spec.kind) {
     case 'scene':
@@ -225,6 +248,24 @@ export function computeNodeCards(scene: Scene, scenario: Scenario): CardSpec[] {
       defaultVariantId: pickShotVariant(scene, 'prop', pid),
     })
   }
+
+  // 逐镜「镜头卡」：每个 shot 一张视频卡，候选 tag 对齐编排出片
+  //   （reel:orch:sceneId:shotId）—— 这样「逐镜出片」生成的视频会自动成为该镜卡的
+  //   候选，作者在素材库中区就能看到这一镜的完整信息卡（视频 + prompt + 参考），
+  //   而不用从右侧托盘的小缩略里找。prompt 预填该镜画面意图，首帧预填该镜关键帧。
+  const sortedShots = (scene.shots ?? []).slice().sort((a, b) => a.order - b.order)
+  sortedShots.forEach((sh, i) => {
+    const framing = SHOT_FRAMING_LABEL[sh.framing] ?? sh.framing
+    cards.push({
+      id: `shot:${sh.id}`,
+      kind: 'video',
+      mediaKind: 'video',
+      shotId: sh.id,
+      tag: `reel:orch:${scene.id}:${sh.id}`,
+      title: `镜${i + 1} · ${framing}`,
+      basePrompt: (sh.prompt || resolveScenePrompt(scene)).trim(),
+    })
+  })
 
   // 音色卡：每个出场说话人一张（预填其首句台词 + 已锚定音色）。
   for (const sp of collectSceneSpeakers(scene, scenario)) {

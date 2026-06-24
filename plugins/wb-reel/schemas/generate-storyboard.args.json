@@ -18,6 +18,10 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{1,64}$",
       "description": "Optional target scenario id. Defaults to the workbench's active scenario."
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Re-split and CLEAN the node first. Set force=true whenever the user asks to '重新生成 / 重做 / 重拆 / 重新分镜 / redo / regenerate' a node that already has shots — this replaces the existing shots/dialogue timing on the timeline with a fresh decomposition (old videos/keyframes are NOT deleted; they are archived to the asset library and stay retrievable). The workbench will ask the user to confirm before replacing existing content. Omit/false for a first-time storyboard or to keep author-polished shots."
     }
   }
 }

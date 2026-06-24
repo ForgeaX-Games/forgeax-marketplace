@@ -85,7 +85,8 @@ For each scene, split into shots according to the **target duration formula**:
 
 CRITICAL rules per shot:
 
-- 每 shot `durationSec` 是 **1–60 的整数秒**, **由 persona 节奏决定**: 一镜到底/史诗长镜 → 长段 (15–40s); 快切/动能派 → 短段 (1–4s); 文戏中速 → 5–10s. **别一刀切全 10**, 同 scene 内要有长短对比.
+- 每 shot `durationSec` 是 **4–15 的整数秒**（每镜 = 一段 ≤15s 的视频片段，引擎硬上限 15s；低于 4s 会被模型拒）, **由 persona 节奏决定**: 史诗长镜 → 接近 15s; 快切/动能派 → 短段 (4–6s); 文戏中速 → 8–12s. **别一刀切全 10**, 同 scene 内要有长短对比.
+- **台词时长守恒（关键）**: `durationSec` **必须 ≥ 本镜 `dialogueText` 自然朗读所需时间**（中文约 4 字/秒 + 句间停顿）。台词长就把这一镜给满或接近 15s，**绝不可为了凑节奏把长台词压进 10s 让角色读不完**。**一句连续台词朗读超过 15s** → 必须拆到下一镜，用相同 `continuityGroupId` 承接续读，而不是塞进一个读不完的镜。
 - 全部 shot `durationSec` 之和 **必须 ≈ sceneDurationSec ± 5s**
 - 必填字段: `framing` (wide/medium/close/insert/ots/pov), `cameraHint` (专业术语), `bokehState` (sharp/blurred/dynamic), `keyframeStrategy` (single/ab), `prompt` (150–300 字)
 - `keyframeStrategy='ab'` 时 **必填** `startFramePrompt` + `endFramePrompt` (各 120–220 字)
@@ -307,7 +308,9 @@ Silently verify before emitting (do not write the checklist out):
 - [ ] 顶层只有 `actId` 和 `scenes` 两个键.
 - [ ] `scenes.length === 输入 scene 数`, sceneId 全部一一对应.
 - [ ] 每个 scene 的 `image` 长度在 150–300 字, 末尾有画幅关键词.
-- [ ] 每个 scene 的 `storyboard.shots[*]` 满足: durationSec 是 1–60 整数秒、按节奏长短混用 (别一刀切) / 总和 ≈ sceneDurationSec ± 5s / 至少 3 种景别 / 没有连续三镜同景别.
+- [ ] 每个 scene 的 `storyboard.shots[*]` 满足: durationSec 是 4–15 整数秒、按节奏长短混用 (别一刀切) / 总和 ≈ sceneDurationSec ± 5s / 至少 3 种景别 / 没有连续三镜同景别.
+- [ ] **台词时长守恒**: 每镜 `durationSec` ≥ 该镜 `dialogueText` 朗读所需时间 (中文约 4 字/秒); 长台词镜给到接近 15s, 读不完的连续台词拆到下一镜 (同 continuityGroupId 承接), 绝不压缩到读不完.
+- [ ] **台词全覆盖、不重复**: 输入 `dialogue[]` 的每一句都被分配进某个 shot 的 `dialogueText` (按说话人逐字保留, 不遗漏); 没有两镜重复同一段台词, 没有把同一段戏拆成两条几乎一样的镜.
 - [ ] `cameraHint` **没有被抄成每镜同款**: 运镜随戏走 (平铺用静态/微动、峰值才上签名大运镜、不设次数配额), 相邻镜在静↔动 / 远↔近上有对比.
 - [ ] 每个 shot 都填了 `continuityGroupId` (同一连续动作/长镜共用一个 id, 切动作就换 id) 和 `sourceTextSpan` (script 模式摘原文, idea 模式可空).
 - [ ] 每个 scene 的 `video` 用 `镜头1/镜头2…`（无绝对秒数）+ 一镜一运镜 + `<主体N>` 指代（无裸 asset-id）+ 至少 1 句声音线 + 末尾兜底包（画质/稳定/无字幕/水印；多人挂双胞胎兜底）；**不写"打码/马赛克"**（写实人脸由管线 faceMaskTool 半脸打码，与提示词无关）.

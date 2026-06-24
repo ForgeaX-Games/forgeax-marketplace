@@ -22,6 +22,7 @@
 import { createTextProvider } from '../llm'
 import { runActBatchUpgradeOnScenario } from '../llm/runActBatchUpgrade'
 import { assignShotTimecodes } from '../llm/assignShotTimecodes'
+import { realignSceneDialogue } from '../scenario/realignDialogue'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useForgeChatStore } from './forgeChatStore'
 import type { Scenario } from '../scenario/types'
@@ -33,7 +34,28 @@ export interface StoryboardQueueItem {
   sceneId?: string
   /** 可选：目标剧本 id；缺省/匹配当前 active 时直接处理。 */
   scenarioId?: string
+  /**
+   * 重拆并清理旧分镜（用户说「重新生成/重做/重拆」时为 true）。已有分镜的节点会先弹
+   * 确认再用新分镜替换时间轴上的旧镜头；旧视频/关键帧不删除（归档进素材库，可拿回）。
+   */
+  force?: boolean
   createdAt: number
+}
+
+/**
+ * force 重拆前的确认 —— 与 produceNode.confirmForceRegen 同语义：替换时间轴旧分镜
+ * （旧视频/关键帧不删，归档进素材库可拿回）。无 window（测试/SSR）默认放行。
+ * 返回 false=用户取消。
+ */
+function confirmStoryboardRegen(sceneId: string, shotN: number): boolean {
+  if (shotN === 0) return true
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+  return window.confirm(
+    `重新拆分镜节点「${sceneId}」前确认：\n\n` +
+      `将用新分镜替换当前时间轴上的旧 ${shotN} 镜。\n` +
+      `旧的视频 / 关键帧不会删除 —— 会归档进素材库（按镜头归到历史版本），随时可拿回采用。\n\n` +
+      `确认开始重新拆分镜？`,
+  )
 }
 
 let _aborted = false
@@ -78,6 +100,17 @@ export async function triggerStoryboardFromQueue(item: StoryboardQueueItem): Pro
         text: `[分镜] 跳过：当前剧本里没有节点 ${sceneId}。`,
       })
       return
+    }
+    // force 重拆：已有分镜时先确认（清理前先问）；用户取消则整条跳过。
+    if (item.force) {
+      const ok = confirmStoryboardRegen(sceneId, scene.shots?.length ?? 0)
+      if (!ok) {
+        chat.appendMessage(scenarioId, {
+          role: 'assistant',
+          text: `[分镜] 已取消重拆节点 ${sceneId} —— 旧分镜原样保留。`,
+        })
+        return
+      }
     }
     targetScenario = {
       ...fullScenario,
@@ -131,8 +164,13 @@ export async function triggerStoryboardFromQueue(item: StoryboardQueueItem): Pro
       if (!upgraded) continue
       const shots = assignShotTimecodes(upgraded.shots ?? [], upgraded.durationMs)
       totalShots += shots.length
+      // 台词时间随分镜重排：把 scene.dialogue 的 startMs/endMs 对齐到各镜窗口
+      // （按 shot.dialogueText 回匹配 + 字数占比铺时间，未认领句线性插值补位、不丢句）。
+      // 解决「台词全挤在场景开头、与画面/视频/播放头错位、预览字幕乱」的根因。
+      const dialogue = realignSceneDialogue({ ...upgraded, shots })
       store.updateScene(sceneId, {
         shots,
+        dialogue,
         prompts: upgraded.prompts,
         media: upgraded.media,
       })

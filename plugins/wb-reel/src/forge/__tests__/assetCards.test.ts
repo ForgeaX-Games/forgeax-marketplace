@@ -104,8 +104,17 @@ describe('computeNodeCards', () => {
     })
 
     const cards = computeNodeCards(scene, scenario)
-    // 出场角色 c1 同时播种一张「配音」音色卡（音色锚点能力）
-    expect(cards.map((c) => c.kind)).toEqual(['scene', 'character', 'prop', 'audio'])
+    // 出场角色 c1 同时播种一张「配音」音色卡（音色锚点能力）；
+    // 每个 shot 播种一张「镜头卡」(video)，候选 tag 对齐编排出片。
+    expect(cards.map((c) => c.kind)).toEqual(['scene', 'character', 'prop', 'video', 'audio'])
+
+    // 镜头卡：绑定 shot、tag 对齐 reel:orch:<sceneId>:<shotId>、标题含镜号+景别
+    const shotCard = cards.find((c) => c.kind === 'video')!
+    expect(shotCard.id).toBe('shot:sh1')
+    expect(shotCard.shotId).toBe('sh1')
+    expect(shotCard.tag).toBe('reel:orch:s1:sh1')
+    expect(shotCard.title).toBe('镜1 · 中景')
+    expect(cardTag(shotCard)).toBe('reel:orch:s1:sh1')
 
     const audioCard = cards.find((c) => c.kind === 'audio')!
     expect(audioCard.speakerId).toBe('c1')

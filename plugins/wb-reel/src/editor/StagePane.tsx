@@ -7,6 +7,7 @@ import type { ImageClient } from '../llm/types'
 import type { QTECue, QTEHitWindow, Shot, StickerClip, TextOverlayClip } from '../scenario/types'
 import { useClipSelection } from './timeline/clipSelection'
 import { pickActiveOverlays, overlayStyle } from '../player/TextOverlayLayer'
+import { pickActiveLine } from '../player/subtitleSelect'
 import { composeStageFx } from '../fx/fxPresets'
 import { FxOverlayLayer, FadeLayer, StickerContent, stickerStyle } from '../player/SceneFxLayers'
 import { CUE_RING_TARGET_SCALE, cuePhase, cueProgress, cueRingScale } from '../qte/QTEEngine'
@@ -26,6 +27,12 @@ import {
   previewedDialogue as projectDialogue,
   type TimelinePreview,
 } from './timeline/timelinePreview'
+
+/**
+ * 缺省 endMs 的台词在预览里的兜底显示时长（ms）。与 Timeline DIA 轨画 clip 宽度
+ * （`endMs ?? min(total, startMs + 2000)`）保持一致，保证预览字幕与时间轴 clip 同进同退。
+ */
+const DIALOGUE_PREVIEW_FALLBACK_MS = 2000
 
 /**
  * 中栏 · STAGE PANE —— 编辑器主舞台
@@ -472,26 +479,22 @@ export function StagePane({
 
   // 拖动期间用 previewed 副本来命中「当前活跃台词」，让画面字幕跟手。
   //
-  // 选词规则（跟随 playhead 的"当前帧"语义）：
-  //   1) 优先：hoverMs 落在 [startMs, endMs] 区间内的台词；多条重叠时取「最晚开始」
-  //      的那条（最贴近当前帧的说话）。
-  //   2) 间隙回退：没有区间命中时，取「已开始且开始时间最大」的那条（最近一句台词
-  //      余韵），而不是数组里的第一条 —— 否则 scrub 到后面时字幕会卡在开头那句。
-  const projectedDialogue = scene.dialogue.map((d) => projectDialogue(d, preview))
-  const latestStart = (
-    a: (typeof projectedDialogue)[number],
-    b: (typeof projectedDialogue)[number],
-  ) => (b.startMs > a.startMs ? b : a)
-  const inRangeDialogue = projectedDialogue.filter(
-    (d) => hoverMs >= d.startMs && (d.endMs == null ? true : hoverMs <= d.endMs),
-  )
-  const startedDialogue = projectedDialogue.filter((d) => d.startMs <= hoverMs)
-  const activeDialogue =
-    inRangeDialogue.length > 0
-      ? inRangeDialogue.reduce(latestStart)
-      : startedDialogue.length > 0
-        ? startedDialogue.reduce(latestStart)
-        : undefined
+  // 选词规则（与运行时 Player 的 pickActiveLine 完全一致 + 与时间轴 DIA 轨同源）：
+  //   - 缺省 endMs 统一兜底为 startMs + DIALOGUE_PREVIEW_FALLBACK_MS（封顶到场景末），
+  //     和 Timeline DIA 轨画 clip 宽度的算法一致 —— 这样「时间轴上 clip 已结束」时
+  //     画面字幕同步消失，不再常驻末句。
+  //   - 只显示 hoverMs 落在 [startMs, endMs] 内、startMs 最晚的一句；间隙 / 播完后
+  //     pickActiveLine 返回 null → 字幕自动清空（去掉旧的「已开始就一直显示」回退）。
+  const projectedDialogue = scene.dialogue.map((d) => {
+    const p = projectDialogue(d, preview)
+    return {
+      ...p,
+      endMs:
+        p.endMs ??
+        Math.min(scene.durationMs, p.startMs + DIALOGUE_PREVIEW_FALLBACK_MS),
+    }
+  })
+  const activeDialogue = pickActiveLine(projectedDialogue, hoverMs) ?? undefined
 
   // 剪映式后期效果：媒体 filter/transform + 叠层（暗角/颗粒/特效/遮罩/贴纸）。
   // 通过 CSS 变量灌到 .ks-stage-canvas，让所有画面元素（单视频 / 多镜 ShotSequenceVideo /

@@ -75,8 +75,38 @@
         "returns": "./schemas/save-scenario.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "新建/覆盖一份剧本",
-          "en": "Create or overwrite a scenario"
+          "zh": "新建/覆盖一份剧本(整本)。注意:这是整本覆盖——要增量改大纲/人物关系请优先用 reel:update-outline / reel:update-relations,别走这条把它们抹掉。本工具已加固:调用方未带的 outline/characterRelations/synopsis 会自动保留旧值。",
+          "en": "Create or overwrite a scenario (whole-document). NOTE: this is a full overwrite — to edit the outline/relations incrementally use reel:update-outline / reel:update-relations instead. Hardened: outline/characterRelations/synopsis you omit are auto-preserved from the existing scenario."
+        }
+      },
+      {
+        "id": "reel:get-script-meta",
+        "args": "./schemas/get-script-meta.args.json",
+        "returns": "./schemas/get-script-meta.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "一次读回剧本的叙事元信息:简介 + 大纲树(scenario.outline) + 人物关系图(scenario.characterRelations) + 角色名↔id 映射。改大纲/关系前先调它拿到现有节点/边 id 和角色名。只读,不需工作台打开。",
+          "en": "Read a scenario's narrative meta in one shot: synopsis + outline tree + character-relations graph + a character name<->id map. Call before update-outline / update-relations to learn existing ids and reference characters by name. Read-only."
+        }
+      },
+      {
+        "id": "reel:update-outline",
+        "args": "./schemas/update-outline.args.json",
+        "returns": "./schemas/update-outline.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增量编辑剧本大纲树(scenario.outline,显示在左侧大纲面板)。优先用 upsert/removeIds 增量改(replace 会丢未列出的节点)。可顺带改 synopsis。前端轮询会把改动 reload 进工作台(要看到需打开工作台,数据无论如何都已持久化)。先用 reel:get-script-meta 取节点 id。",
+          "en": "Incrementally edit the outline tree (scenario.outline, shown in the Outline panel). Prefer upsert/removeIds over replace. Can also set synopsis. The workbench reloads the change within seconds (open it to SEE it; data persists regardless). Call reel:get-script-meta first for node ids."
+        }
+      },
+      {
+        "id": "reel:update-relations",
+        "args": "./schemas/update-relations.args.json",
+        "returns": "./schemas/update-relations.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增量编辑人物关系图(scenario.characterRelations,显示在左侧人物关系面板)。有向边(from→to,label),双向关系=两条边以表达非对称。端点可用角色 id/名字/别名,自动解析成 id。优先 upsert/removeIds,绝不动你没碰的边。出关键帧/分镜后想补全角色关系也用它。先用 reel:get-script-meta 看角色名↔id。",
+          "en": "Incrementally edit the character-relations graph (scenario.characterRelations, shown in the Relations panel). Directed edges (from->to, label); a bidirectional relationship = two edges (asymmetry-aware). Endpoints accept id/name/alias, auto-resolved to ids. Prefer upsert/removeIds; never wipes untouched edges. Use it to backfill relations after characters/storyboarding too. Call reel:get-script-meta for the name<->id map."
         }
       },
       {

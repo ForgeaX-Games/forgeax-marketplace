@@ -1035,6 +1035,11 @@ const css = `
  */
 .ks-forge-wizard.is-chat-detached {
   grid-template-columns: minmax(0, 1fr);
+  /* 嵌入态(studio 分屏 / chat 外托)没有 chat 子元素 —— 必须显式给单行满高。
+     否则窄屏 @media 把 wizard 设成 auto+1fr 双行时，唯一的 main 会落进
+     第一行(auto)塌成内容高(只剩模块标题栏)，数值/背包面板被压成 0 高而消失。
+     此处更高优先级(0,2,0)在窄屏 media 内也压过 .ks-forge-wizard(0,1,0)。 */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .ks-forge-wizard-main {

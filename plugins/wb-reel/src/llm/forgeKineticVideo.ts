@@ -19,7 +19,7 @@
  *   - 不调 ImageClient / VideoClient，只调 TextClient
  */
 
-import type { Scene, Shot, Character, DirectorStyleId, VisualStyle } from '../scenario/types'
+import type { Scene, Shot, Character, DialogueLine, DirectorStyleId, VisualStyle } from '../scenario/types'
 import { SKILLS } from './skills'
 import type { TextClient } from './types'
 import { streamOrFallback } from './types'
@@ -368,7 +368,7 @@ export function buildCinemaVideoUserPrompt(args: ForgeCinematicVideoArgs): strin
   if (shot.cameraHint?.trim()) lines.push(`【运镜提示 cameraHint】${shot.cameraHint.trim()}`)
 
   // 台词 —— 保留换行；明确逐字念 + 点名角色
-  const dialogue = shot.dialogueText?.trim() || fallbackSceneDialogue(scene)
+  const dialogue = buildShotDialogue(shot, scene)
   if (dialogue) {
     lines.push(
       `【本镜台词（必须逐字保留，由点名的角色开口说出，不可漏念/改写/错配到别人）】\n${dialogue}`,
@@ -403,6 +403,38 @@ function fallbackSceneDialogue(scene: Scene): string {
     .filter((d) => d && d.text?.trim() && d.role !== 'system')
     .map((d) => `${d.speaker || (d.role === 'narration' ? '旁白' : '角色')}：${d.text.trim()}`)
     .join('\n')
+}
+
+/** 一行台词的「说话人：内容」展示。 */
+function dialogueDisplayLine(d: DialogueLine): string {
+  return `${d.speaker || (d.role === 'narration' ? '旁白' : '角色')}：${d.text.trim()}`
+}
+
+/**
+ * 本镜出片提示词用的台词 —— 在 shot.dialogueText 基础上，**补齐落在本镜时间窗内、
+ * 却没被分配进 dialogueText 的 scene.dialogue 句**。
+ *
+ * 背景：拆分镜时 LLM 偶尔漏把某句台词写进任何镜的 dialogueText，导致这句台词在
+ * 所有出片 prompt 里都看不到（用户反馈「漏台词」）。realign 后每句都有相对 scene
+ * 的时间，这里按 shot 的 [startMs,endMs] 把漏掉的句补回对应镜，保证全覆盖、不漏读。
+ */
+function buildShotDialogue(shot: Shot, scene: Scene): string {
+  const base = shot.dialogueText?.trim() || ''
+  // 整镜无台词文本 → 退回 scene 级兜底（保持旧行为）。
+  if (!base) return fallbackSceneDialogue(scene)
+  if (shot.startMs == null || shot.endMs == null) return base
+  const start = shot.startMs
+  const end = shot.endMs
+  const baseNorm = base.replace(/\s+/g, '')
+  const extra = (scene.dialogue ?? [])
+    .filter((d) => d && d.text?.trim() && d.role !== 'system')
+    .filter((d) => {
+      const mid = d.endMs != null ? (d.startMs + d.endMs) / 2 : d.startMs
+      return mid >= start && mid < end
+    })
+    .filter((d) => !baseNorm.includes(d.text.trim().replace(/\s+/g, '')))
+    .map(dialogueDisplayLine)
+  return extra.length > 0 ? `${base}\n${extra.join('\n')}` : base
 }
 
 /**

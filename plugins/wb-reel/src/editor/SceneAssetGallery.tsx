@@ -499,9 +499,13 @@ const css = `
 .ks-asset-name {
   flex: 1;
   min-width: 0;
+  /* 两行 clamp + tooltip —— 文件名不再单行截成「半截」(作者反馈右侧文字都是一半)。 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  line-height: 1.4;
 }
 .ks-asset-order {
   color: var(--ks-text-faint);

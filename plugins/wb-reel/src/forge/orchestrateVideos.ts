@@ -145,6 +145,39 @@ async function resolveSeedanceShotPrompt(
  * 把一条参考图来源 trace 翻译成给视频模型看的自然语言说明（含实体名）。
  * 用于 R2V 的「参考素材说明」清单 —— 让模型知道每张图是角色/场景/道具，怎么用。
  */
+/**
+ * 参考素材的「短身份标签」—— 用于请求快照里每张参考图的徽标（角色/场景/道具 + 名字）。
+ * 与 describeRefEntry 的长句说明不同，这个只给一眼能认的简短标签，让作者在素材库卡片 /
+ * 生成队列里清楚「这次出片到底用了哪些角色/场景/道具锚点」。
+ */
+function shortRefLabel(
+  scenario: Scenario,
+  source: string,
+  entityId: string | undefined,
+): string {
+  switch (source) {
+    case 'character-turnaround': {
+      const c = entityId ? scenario.characters?.[entityId] : undefined
+      return `角色 · ${c?.name ?? entityId ?? '角色'}`
+    }
+    case 'location-ref':
+    case 'location-angle': {
+      const l = entityId
+        ? (scenario.locations?.[entityId] as { name?: string } | undefined)
+        : undefined
+      return `场景 · ${l?.name ?? entityId ?? '场景'}`
+    }
+    case 'prop-ref': {
+      const p = entityId
+        ? (scenario.props?.[entityId] as { name?: string } | undefined)
+        : undefined
+      return `道具 · ${p?.name ?? entityId ?? '道具'}`
+    }
+    default:
+      return '参考图'
+  }
+}
+
 function describeRefEntry(
   scenario: Scenario,
   source: string,
@@ -307,14 +340,20 @@ function buildShotVideoInput(
 
   let startFrameUrl: string | undefined
   let referenceImageUrls: string[]
+  // 与 referenceImageUrls 同序的身份标签（角色/场景/道具 + 名字），仅用于请求快照展示。
+  let referenceImageLabels: string[]
   if (mode === 'frames') {
     // 首尾帧续接：仍用关键帧 A→B（导演显式指定的承接关系）
     startFrameUrl = startFrameId ? mediaUrl(startFrameId) : undefined
     referenceImageUrls = []
+    referenceImageLabels = []
   } else {
     // 多模态参考(R2V)：只发 角色定妆照 + 场景 + 道具，**不发写实关键帧、不发首帧**
     startFrameUrl = undefined
     referenceImageUrls = designRefs
+    referenceImageLabels = designTrace.map((t) =>
+      shortRefLabel(scenario, t.source, t.entityId),
+    )
   }
 
   // 音色参考：取本镜（缺省继承 scene 全员）首个带「音色样本」的角色，把它的 voiceSample
@@ -385,8 +424,11 @@ function buildShotVideoInput(
         prompt: finalPrompt,
         mode,
         startFrameUrl,
+        startFrameMediaId: startFrameId,
         endFrameUrl,
+        endFrameMediaId: endFrameId,
         referenceImageUrls,
+        referenceImageLabels,
         referenceAudioUrl,
         durationSec,
         onStage,

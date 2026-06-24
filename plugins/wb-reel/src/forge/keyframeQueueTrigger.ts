@@ -50,6 +50,33 @@ export function abortKeyframeQueue(): void {
  * 单镜关键帧生成的共享上下文 —— 队列批量循环与单镜手动重生共用同一条纯函数链，
  * 保证「打码 / 参考图 / 视觉风格」行为完全一致，不发生漂移。
  */
+/**
+ * 解析某一镜关键帧实际会用到的「主参考图」的 mediaId + 身份标签（与
+ * pickPrimaryRefForShot 同一优先级：场景 location → 镜内/场景首个角色定妆照）。
+ * 让关键帧的请求快照能显示「用了哪张参考图（场景X / 角色Y）」并在刷新后据 mediaId
+ * 重解析缩略图 —— 修复作者反馈「关键帧看不到参考图」。
+ */
+function resolveKeyframePrimaryRef(
+  scene: Scene,
+  shot: Shot,
+  scenario: Scenario,
+): { mediaId: string; label: string } | undefined {
+  if (scene.locationId) {
+    const loc = scenario.locations?.[scene.locationId]
+    if (loc?.refImageId) return { mediaId: loc.refImageId, label: `场景 · ${loc.name ?? scene.locationId}` }
+  }
+  const charIds =
+    shot.characterIds && shot.characterIds.length > 0
+      ? shot.characterIds
+      : scene.characterIds ?? []
+  for (const cid of charIds) {
+    const char = scenario.characters?.[cid]
+    const id = char?.turnaroundRefImageId ?? char?.refImageId
+    if (id) return { mediaId: id, label: `角色 · ${char?.name ?? cid}` }
+  }
+  return undefined
+}
+
 interface ShotKeyframeContext {
   scenario: Scenario
   scene: Scene
@@ -118,18 +145,28 @@ async function generateShotKeyframe(
 
   // 请求快照：先记下「发了什么」，再发请求；失败也能回看。
   if (hooks?.onRequest) {
+    // 主参考图的身份（场景X / 角色Y）+ mediaId —— 让「看不到参考图」变成看得到、
+    // 且刷新后据 mediaId 仍能解析出缩略图。
+    const primaryRefInfo = resolveKeyframePrimaryRef(scene, shot, scenario)
     hooks.onRequest({
       endpoint: `${imgClient.getModel?.() ?? imgClient.getProviderName?.() ?? '图像'} · 分镜关键帧`,
       prompt: finalPrompt,
       params: {
-        size: '1024x1024',
+        size: '1536x1024',
         provider: imgClient.getProviderName?.() ?? '(未知)',
         model: imgClient.getModel?.() ?? '(默认)',
         framing: shot.framing ?? '(未标注)',
         hasReference: Boolean(primaryRef),
       },
       refs: primaryRef
-        ? [{ role: 'reference_image', url: primaryRef, label: '该镜主参考(角色/场景锚点)' }]
+        ? [
+            {
+              role: 'reference_image',
+              url: primaryRef,
+              label: primaryRefInfo ? `该镜主参考 · ${primaryRefInfo.label}` : '该镜主参考(角色/场景锚点)',
+              mediaId: primaryRefInfo?.mediaId,
+            },
+          ]
         : [],
       at: Date.now(),
     })
@@ -137,7 +174,9 @@ async function generateShotKeyframe(
 
   const out = await imgClient.generate({
     prompt: finalPrompt,
-    size: '1024x1024',
+    // 分镜关键帧走横版：gpt-image-2 原生最宽是 1536x1024（3:2，无真 16:9），
+    // 与场景/人物参考链一致，便于作为 Seedance 16:9 视频首帧参考。
+    size: '1536x1024',
     referenceImageDataUrl: primaryRef,
   })
   const mediaId = useMediaStore.getState().ingestDataUrl(out.dataUrl, {

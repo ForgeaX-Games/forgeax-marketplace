@@ -98,12 +98,12 @@ export function SceneShotGallery({
           <div className="ks-shotgal-shot-head">
             <span className="ks-shotgal-shot-no">镜{r.idx}</span>
             <span className="ks-shotgal-shot-framing">{r.framing}</span>
-            {r.prompt ? (
-              <span className="ks-shotgal-shot-prompt" title={r.prompt}>
-                {r.prompt}
-              </span>
-            ) : null}
           </div>
+          {r.prompt ? (
+            <div className="ks-shotgal-shot-prompt" title={r.prompt}>
+              {r.prompt}
+            </div>
+          ) : null}
           <div className="ks-shotgal-frames">
             {r.frames.map((f, fi) => {
               const url = f.mediaId ? entries[f.mediaId]?.url : undefined
@@ -179,8 +179,10 @@ const css = `
   border: 1px solid var(--ks-border-soft);
 }
 .ks-shotgal-shot-prompt {
-  flex: 1; min-width: 0; font-size: 9.5px; color: var(--ks-text-faint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; font-size: 9.5px; line-height: 1.5; color: var(--ks-text-faint);
+  /* 两行 clamp + tooltip 看全文 —— 不再单行截断成「半句」(作者反馈右侧文字都是一半)。 */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
 }
 .ks-shotgal-frames { display: flex; flex-wrap: wrap; gap: 6px; }
 .ks-shotgal-frame {

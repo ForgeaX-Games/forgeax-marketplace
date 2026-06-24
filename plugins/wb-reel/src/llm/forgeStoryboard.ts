@@ -285,7 +285,7 @@ export function buildStoryboardUserPrompt(args: ForgeStoryboardArgs): string {
   )
   lines.push('')
   lines.push(
-    '请严格按 skill 中"输出契约"返回 JSON，只含 shots 数组；每个 durationSec 是 4–15 的整数秒（承载戏肉的镜优先 10–15s）；A/B 双帧模式下 startFramePrompt / endFramePrompt 必填并保证物理守恒；不要任何元话语。',
+    '请严格按 skill 中"输出契约"返回 JSON，只含 shots 数组；每个 durationSec 是 4–15 的整数秒（承载戏肉的镜优先 10–15s）；**durationSec 必须 ≥ 本镜 dialogueText 自然朗读所需时间（中文约 4 字/秒）—— 台词长就给满或接近 15s，绝不可压到角色读不完；一句连续台词朗读超过 15s 时，拆到下一镜并用 continuityGroupId 承接**；A/B 双帧模式下 startFramePrompt / endFramePrompt 必填并保证物理守恒；不要任何元话语。',
   )
 
   return lines.join('\n\n')
@@ -312,19 +312,43 @@ export function normalizeStoryboardShots(
     scene.title ||
     ''
 
-  return raw.map((item, i) => {
+  // 每次「拆镜」生成一个唯一 token 拼进 shot id（如 s1-sh01-k3f9a）。
+  //   根因修复（作者反馈「一个卡片上面有多段视频」）：旧实现用纯索引 id
+  //   `<sceneId>-shNN`，「重新拆镜」后新镜会**复用**和上一版完全相同的 id；
+  //   而逐镜出片的视频按 `reel:orch:<sceneId>:<shotId>` 打 tag、镜头卡也按同
+  //   tag 聚合候选 —— 于是上一版镜头的旧视频会原样挂到新镜卡上，造成「我没在
+  //   这张卡上迭代，却出现了好几段视频」。给每次拆镜一个 token，新镜得到全新
+  //   id，旧视频自然不再匹配新卡（仍留在素材库可手动找回），实现「一卡一内容、
+  //   只有在本卡继续生成才追加候选」。
+  const genToken = Math.random().toString(36).slice(2, 7)
+  const shotId = (i: number): string =>
+    `${scene.id}-sh${String(i + 1).padStart(2, '0')}-${genToken}`
+
+  const mapped: Shot[] = raw.map((item, i) => {
     if (!item || typeof item !== 'object') {
       warnings.push(`shot[${i}] 非对象，已占位`)
     }
     const r = (item as Record<string, unknown>) ?? {}
-    const id = `${scene.id}-sh${String(i + 1).padStart(2, '0')}`
+    const id = shotId(i)
     const framing = normalizeFraming(stringOr(r.framing))
     const prompt = stringOr(r.prompt)?.trim() || fallbackPrompt
     const cameraHint = trimOrUndef(stringOr(r.cameraHint))
     const transitionHint = trimOrUndef(stringOr(r.transitionHint))
-    const durationSec = clampDurationSec(numOr(r.durationSec))
-    const bokehState = normalizeBokeh(stringOr(r.bokehState))
     const dialogueText = trimOrUndef(stringOr(r.dialogueText))
+    // 台词感知的镜时长：LLM 给的秒数若短于「这句台词自然朗读所需的时间」，角色会
+    // 读得飞快还读不完。取两者较大者再 clamp 到 [4,15]；单镜台词需 >15s 则告警，
+    // 提示拆到下一镜（靠 continuityGroupId 承接），而不是硬塞进一个读不完的镜。
+    const readSec = dialogueReadingSec(dialogueText)
+    const llmDurSec = numOr(r.durationSec)
+    const durationSec = clampDurationSec(
+      Math.max(llmDurSec ?? 0, readSec ?? 0) || undefined,
+    )
+    if (readSec != null && readSec > 15) {
+      warnings.push(
+        `shot[${i}] 台词朗读约需 ${readSec}s，超单镜上限 15s —— 建议把这段台词拆到下一镜（continuityGroupId 承接），否则会读不完。`,
+      )
+    }
+    const bokehState = normalizeBokeh(stringOr(r.bokehState))
     const subtext = trimOrUndef(stringOr(r.subtext))
     const performance = trimOrUndef(stringOr(r.performance))
     const audioHint = trimOrUndef(stringOr(r.audioHint))
@@ -383,6 +407,32 @@ export function normalizeStoryboardShots(
     }
     return shot
   })
+
+  // 折叠「相邻、念同一句台词 + 同 prompt」的重复镜：LLM 偶发把同一段戏拆出两条几乎
+  // 一样的分镜（用户反馈「前后拆解重复台词」）。**保守起见只在 dialogueText 非空且
+  // 完全相同时**才折叠（重复念白是最可靠的「重复镜」信号）——避免把仅 prompt 凑巧
+  // 相同、但其实是不同节奏的镜误删。只折叠相邻项；折叠后重排 order + 重签 id 保持连续。
+  const norm = (s?: string): string => (s ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const deduped: Shot[] = []
+  for (const s of mapped) {
+    const prev = deduped[deduped.length - 1]
+    const dt = norm(s.dialogueText)
+    if (
+      prev &&
+      dt !== '' &&
+      norm(prev.dialogueText) === dt &&
+      norm(prev.prompt) === norm(s.prompt)
+    ) {
+      warnings.push(`${s.id} 与上一镜念同一句台词且 prompt 相同，已折叠去重`)
+      continue
+    }
+    deduped.push(s)
+  }
+  return deduped.map((s, i) => ({
+    ...s,
+    order: i,
+    id: shotId(i),
+  }))
 }
 
 /**
@@ -485,6 +535,36 @@ function clampDurationSec(n?: number): number | undefined {
   //   (InvalidParameter ... in t2v)，高于 15s 也不支持。同时 4s 起也避免时间轴
   //   站位条太短(作者反馈"都太短了")。LLM 给的过短/过长值一律吸附到区间内。
   return Math.max(4, Math.min(15, Math.round(n)))
+}
+
+/** 中文朗读速度估计（与 realignDialogue 一致）：每字约 240ms。 */
+const READ_MS_PER_CHAR = 240
+/** 每行台词之间的小停顿（呼吸/换气）。 */
+const READ_LINE_GAP_MS = 120
+/** 镜头收尾余量（最后一句读完到切镜的缓冲）。 */
+const READ_TAIL_PAD_MS = 600
+
+/**
+ * 估算一段 `dialogueText` 自然朗读所需的秒数（向上取整）。
+ *   - 逐行计字（剥掉「角色名：」前缀，只算真正要念的内容）。
+ *   - 每行字数 × READ_MS_PER_CHAR + 行间停顿 + 收尾余量。
+ * 用于给镜头时长兜底：长台词不能被压到读不完。无台词返回 undefined。
+ */
+function dialogueReadingSec(dialogueText?: string): number | undefined {
+  if (!dialogueText) return undefined
+  const lines = dialogueText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return undefined
+  let ms = 0
+  for (const line of lines) {
+    // 去掉「角色名：」/「角色名:」前缀，只数实际念白字数
+    const spoken = line.replace(/^[^：:]{1,12}[：:]\s*/, '')
+    ms += spoken.length * READ_MS_PER_CHAR + READ_LINE_GAP_MS
+  }
+  ms += READ_TAIL_PAD_MS
+  return Math.ceil(ms / 1000)
 }
 
 function stringOr(v: unknown): string | undefined {

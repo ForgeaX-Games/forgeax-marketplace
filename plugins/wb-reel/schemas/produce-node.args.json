@@ -44,7 +44,7 @@
     },
     "force": {
       "type": "boolean",
-      "description": "Force re-run every selected stage (re-storyboard, regenerate keyframes, re-produce videos). Default false (idempotent skip)."
+      "description": "Force re-run every selected stage (re-storyboard, regenerate keyframes, re-produce videos), CLEANING old content first. Map the user's words directly: whenever they say '重新生成 / 重做 / 重拆 / 重拍 / 重出 / redo / regenerate / do it again' for a node that already has content, set force=true — otherwise the pipeline idempotently SKIPS already-done stages and the old content lingers (causing duplicates). force replaces the old shots/videos on the timeline with fresh ones; old videos/keyframes are NOT deleted — they are archived to the asset library and stay retrievable. The workbench asks the user to confirm before replacing existing content. Default false (idempotent skip; first-time production or keep author-polished work)."
     }
   }
 }

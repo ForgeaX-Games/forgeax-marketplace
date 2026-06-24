@@ -47,7 +47,7 @@
 |------|------------|------|--------|
 | 提示词锻造 / 台词草稿 | Azure Anthropic · `claude-opus-4-6` | `key/llm_key.json → azure-claude` | **vite define · build-time** |
 | 占位画面生成 | Azure OpenAI · `gpt-image-2` | 同上 → `azure-openai-image` | **vite define · build-time** |
-| 视频生成（即梦 seedance 2.0 / sora 兼容） | 火山引擎 ARK · `doubao-seedance-1-0-pro-250528` | UI 输入 / `localStorage` | **运行时 · 本机持久化** |
+| 视频生成（即梦 seedance 2.0 / sora 兼容） | 火山引擎 ARK · `doubao-seedance-2-0-260128` | UI 输入 / `localStorage` | **运行时 · 本机持久化** |
 
 任一缺失则自动退化为本地 Mock（占位画面是 Canvas 渲染的渐变 + prompt 文字）。
 

@@ -17,7 +17,7 @@
     },
     "force": {
       "type": "boolean",
-      "description": "Regenerate keyframes even for shots that already have one. Default false (skip already-generated shots)."
+      "description": "Regenerate keyframes even for shots that already have one. Set force=true whenever the user asks to '重新生成 / 重做 / redo / regenerate' keyframes — otherwise already-generated shots are skipped. Old keyframes are not deleted (archived to the asset library, retrievable). Default false (skip already-generated shots)."
     }
   }
 }

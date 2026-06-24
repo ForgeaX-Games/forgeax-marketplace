@@ -484,8 +484,9 @@ const css = `
   min-height: 0;
 }
 .ks-inv-list {
-  flex: 0 0 180px;
+  flex: 0 1 180px;
   width: 180px;
+  min-width: 132px;
   border-right: 1px solid var(--color-border-default);
   display: flex;
   flex-direction: column;
@@ -543,7 +544,7 @@ const css = `
   font-size: 14px;
 }
 .ks-inv-detail {
-  flex: 1 1 0;
+  flex: 1 1 260px;
   min-width: 0;
   border-right: 1px solid var(--color-border-default);
   overflow: hidden;
@@ -658,8 +659,9 @@ const css = `
   text-align: center;
 }
 .ks-inv-loot {
-  flex: 0 0 360px;
+  flex: 0 1 360px;
   width: 360px;
+  min-width: 260px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -714,6 +716,48 @@ const css = `
   border: 1px solid var(--color-border-default);
   background: transparent; color: var(--color-text-secondary);
   cursor: pointer; font-size: 10.5px; font-family: inherit;
+}
+
+/* ── 缩放适配（容器查询，锚定 ModuleShell .ks-mod-body 的实际宽度）──────────
+   宽：列表 180 | 详情 flex | 热点 360
+   中：压缩两侧固定列，给详情让出空间
+   窄：三栏纵向堆叠 + 整体纵向滚动，任何宽度都不丢内容 */
+@container ksmod (max-width: 920px) {
+  .ks-inv-list { flex-basis: 152px; width: 152px; }
+  .ks-inv-loot { flex-basis: 296px; width: 296px; min-width: 232px; }
+}
+@container ksmod (max-width: 660px) {
+  .ks-inv-root {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .ks-inv-list {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-default);
+  }
+  .ks-inv-detail {
+    flex: 0 0 auto;
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-default);
+    overflow: visible;
+  }
+  /* 堆叠后由 .ks-inv-root 统一纵向滚动，内层不再各自抢滚动条 */
+  .ks-inv-detail-scroll { overflow: visible; }
+  .ks-inv-loot {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+  .ks-inv-loot-inner { overflow: visible; }
+  /* 窄屏热点画布别撑太高，给下方列表留出可视空间 */
+  .ks-inv-loot-canvas { max-width: 520px; }
 }
 `
 injectStyleOnce('inventory-editor', css)

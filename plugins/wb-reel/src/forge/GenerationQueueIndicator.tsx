@@ -63,9 +63,17 @@ export function GenerationQueueIndicator() {
     if (job.sceneId) {
       useScenarioStore.getState().selectScene(job.sceneId)
       shell.setStageScene(job.sceneId)
+      if (job.shotId) shell.setSelectedShotId(job.shotId)
+      // 统一走 openAssetFocus：切到素材库 + 写聚焦意图(tick++)，让 AssetBoard 把该镜
+      // 「完整信息卡」展开并滚动到中区（与时间轴右键「在素材库查看」同一条路径）。
+      shell.openAssetFocus({
+        sceneId: job.sceneId,
+        trayKind: job.shotId ? 'shot' : 'video',
+        shotId: job.shotId ?? null,
+      })
+    } else {
+      shell.setForgeView('assets')
     }
-    shell.setForgeView('assets')
-    if (job.shotId) shell.setSelectedShotId(job.shotId)
     setOpen(false)
   }
 
@@ -224,7 +232,19 @@ export function GenerationQueueIndicator() {
                             {STATUS_LABEL[job.status]}
                           </span>
                         )}
-                        {job.request || job.error ? (
+                        {/* 已完成且有节点：「查看」直接跳到素材库该卡片（在卡上看完整
+                            信息 + 用 ⓘ 看参考锚点），不再停在队列二级弹窗。失败/排队/无
+                            产物时仍弹请求详情，方便就地排查报错。 */}
+                        {job.status === 'done' && job.sceneId ? (
+                          <button
+                            type="button"
+                            className="ks-qi-x is-info"
+                            onClick={() => jumpToAsset(job)}
+                            title="在素材库打开这张卡片（看完整信息 / 用 ⓘ 看用到的角色·场景·道具锚点）"
+                          >
+                            🔍
+                          </button>
+                        ) : job.request || job.error ? (
                           <button
                             type="button"
                             className="ks-qi-x is-info"

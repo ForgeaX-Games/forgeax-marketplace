@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../styles/injectStyle'
+import { useMediaStore } from '../media/mediaStore'
 import type { GenJob, GenRequestRef } from './generationQueueStore'
 
 const ROLE_LABEL: Record<GenRequestRef['role'], string> = {
@@ -33,25 +34,30 @@ async function copyText(text: string, onOk: () => void): Promise<void> {
 }
 
 function RefThumb({ r }: { r: GenRequestRef }): JSX.Element {
+  // 优先用 url；缺失（刷新后被裁）时据 mediaId 从 mediaStore 重新解析出可显示的缩略图。
+  const fromMedia = useMediaStore((s) => (r.mediaId ? s.entries[r.mediaId]?.url : undefined))
+  const url = r.url || fromMedia
   const badge = <span className="ks-grd-ref-role ks-mono">{ROLE_LABEL[r.role]}</span>
-  if (!r.url) {
+  if (!url) {
     return (
       <div className="ks-grd-ref is-empty">
         {badge}
-        <div className="ks-grd-ref-empty ks-cn">刷新后缩略图不可用</div>
+        <div className="ks-grd-ref-empty ks-cn">
+          {r.label ? r.label : '刷新后缩略图不可用'}
+        </div>
       </div>
     )
   }
   let media: JSX.Element
   if (r.role === 'reference_audio') {
-    media = <audio className="ks-grd-ref-audio" controls src={r.url} />
+    media = <audio className="ks-grd-ref-audio" controls src={url} />
   } else if (r.role === 'reference_video') {
-    media = <video className="ks-grd-ref-media" controls muted playsInline src={r.url} />
+    media = <video className="ks-grd-ref-media" controls muted playsInline src={url} />
   } else {
-    media = <img className="ks-grd-ref-media" src={r.url} alt={r.label ?? r.role} />
+    media = <img className="ks-grd-ref-media" src={url} alt={r.label ?? r.role} />
   }
   return (
-    <a className="ks-grd-ref" href={r.url} target="_blank" rel="noreferrer" title="点开看原图/原素材">
+    <a className="ks-grd-ref" href={url} target="_blank" rel="noreferrer" title="点开看原图/原素材">
       {badge}
       {media}
       {r.label ? <div className="ks-grd-ref-label ks-cn">{r.label}</div> : null}

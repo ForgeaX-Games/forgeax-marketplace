@@ -72,7 +72,13 @@ import { loadDialoguePref, saveDialoguePref } from './timeline/dialoguePref'
 import { computeVideoTrim } from './timeline/computeVideoTrim'
 import { nudgeVideoOffset } from './timeline/nudgeVideoOffset'
 import { GenRequestDialog } from '../forge/GenRequestDialog'
-import { jobForShot, jobForMedia, type GenJob } from '../forge/generationQueueStore'
+import {
+  jobForShot,
+  jobForMedia,
+  archivedJobForShot,
+  archivedJobForMedia,
+  type GenJob,
+} from '../forge/generationQueueStore'
 import { useToastStore } from '../ui/toastStore'
 
 /**
@@ -491,25 +497,35 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
       byKind ??
       jobForShot(scene.id, shot.id) ??
       (shot.videoMediaRef ? jobForMedia(shot.videoMediaRef) : undefined) ??
-      (shot.keyframeMediaRef ? jobForMedia(shot.keyframeMediaRef) : undefined)
-    if (job) setInspectJob(job)
-    else
-      useToastStore
-        .getState()
-        .fire(
-          prefer === 'image'
-            ? '没找到这一镜关键帧的生成记录（可能已清理队列或为外部导入）'
-            : '没找到这段视频的生成记录（可能已清理队列或为外部导入）',
-          { kind: 'info' },
-        )
+      (shot.keyframeMediaRef ? jobForMedia(shot.keyframeMediaRef) : undefined) ??
+      // 活动队列里没有（已清理 / 跨 iframe / 刷新过）→ 退回持久化的请求归档，仍能看参数。
+      archivedJobForShot(scene.id, shot.id, prefer) ??
+      archivedJobForShot(scene.id, shot.id) ??
+      (shot.videoMediaRef ? archivedJobForMedia(shot.videoMediaRef) : undefined) ??
+      (shot.keyframeMediaRef ? archivedJobForMedia(shot.keyframeMediaRef) : undefined)
+    if (job) {
+      setInspectJob(job)
+      return
+    }
+    // 内存里的生成 job 已被清理 / 跨 iframe 不可见 / 外部导入 —— 不再死路一条弹「没找到」，
+    // 而是把作者带到素材库中区这一镜的「完整信息卡」（视频 + prompt + 关键帧 + 参考）。
+    openShotInAssets(shot)
+    useToastStore
+      .getState()
+      .fire('未找到实时生成记录，已为你在素材库定位这一镜的完整卡片', { kind: 'info' })
   }
   function inspectMediaRequest(mediaId: string | undefined): void {
-    const job = mediaId ? jobForMedia(mediaId) : undefined
-    if (job) setInspectJob(job)
-    else
-      useToastStore
-        .getState()
-        .fire('没找到这段视频的生成记录（可能已清理队列或为外部导入）', { kind: 'info' })
+    const job =
+      (mediaId ? jobForMedia(mediaId) : undefined) ??
+      (mediaId ? archivedJobForMedia(mediaId) : undefined)
+    if (job) {
+      setInspectJob(job)
+      return
+    }
+    openSceneVideoInAssets()
+    useToastStore
+      .getState()
+      .fire('未找到实时生成记录，已为你在素材库定位这段视频', { kind: 'info' })
   }
 
   /**

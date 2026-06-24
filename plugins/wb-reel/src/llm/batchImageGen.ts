@@ -237,7 +237,8 @@ export async function batchGenerateScenes(args: {
           : undefined
       const out = await args.client.generate({
         prompt: composeVisualPrompt(fullPrompt, args.visualStyle),
-        size: '1024x1024',
+        // 批量分镜关键帧走横版 1536x1024（gpt-image-2 原生最宽，对齐 16:9 视频）。
+        size: '1536x1024',
         ...(referenceImages && referenceImages.length > 0
           ? { referenceImages }
           : {}),

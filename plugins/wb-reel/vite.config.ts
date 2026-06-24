@@ -215,7 +215,7 @@ function loadKeys(): BuildKeys {
           'https://ark.cn-beijing.volces.com/api/v3',
         model:
           seedance.models?.split(',')[0]?.trim() ||
-          'doubao-seedance-1-0-pro-250528',
+          'doubao-seedance-2-0-260128',
       }
     }
 
@@ -359,7 +359,7 @@ export default defineConfig(({ mode, command }) => {
         keys.seedance?.apiBase ?? 'https://ark.cn-beijing.volces.com/api/v3',
       ),
       __RS_VIDEO_MODEL__: JSON.stringify(
-        keys.seedance?.model ?? 'doubao-seedance-1-0-pro-250528',
+        keys.seedance?.model ?? 'doubao-seedance-2-0-260128',
       ),
 
       // TTS （角色音色锚点）—— 同 llm_key.json 同源注入
@@ -1771,11 +1771,13 @@ function reelScenariosPlugin(): Plugin {
             scope?: string
             sceneId?: string
             scenarioId?: string
+            force?: boolean
           } | null
           const item = {
             scope: body?.scope === 'all' ? 'all' : 'scene',
             sceneId: typeof body?.sceneId === 'string' ? body.sceneId : undefined,
             scenarioId: typeof body?.scenarioId === 'string' ? body.scenarioId : undefined,
+            force: body?.force === true,
             createdAt: Date.now(),
           }
           writeFileSync(queuePath, JSON.stringify(item, null, 2))
