@@ -2,14 +2,17 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Resolve src/ without pulling in @types/node (avoids node: imports here).
-const SRC_DIR = new URL('./src/', import.meta.url).pathname;
+// No trailing slash: @rollup/plugin-alias matches a string key only when the
+// importee is exactly the key or is followed by `/`. A `@/` key never matches
+// `@/lib/...` (the char after `@/` is `l`, not `/`), so build resolution fails.
+const SRC_DIR = new URL('./src', import.meta.url).pathname;
 
 export default defineConfig({
   base: './',
   plugins: [react()],
   resolve: {
     alias: {
-      '@/': SRC_DIR,
+      '@': SRC_DIR,
     },
   },
   server: {
