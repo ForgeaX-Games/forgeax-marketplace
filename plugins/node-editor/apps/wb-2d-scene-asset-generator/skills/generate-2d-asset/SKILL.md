@@ -57,11 +57,11 @@ trigger: /generate-2d-asset
 
 | 目录 | 模板 |
 |---|---|
-| `(pixel)asset_gen/` | asset_generation |
-| `(pixel)conceptual_scene_design/` | conceptual_scene_design |
-| `(pixel)dechouse_gen/` | dechouse_gen |
-| `(pixel)tile_gen/` | tile_gen |
-| `(pixel)UI_item_gen/` | ui_item_gen |
+| `pixel_asset_gen/` | asset_generation |
+| `pixel_conceptual_scene_design/` | conceptual_scene_design |
+| `pixel_dechouse_gen/` | dechouse_gen |
+| `pixel_tile_gen/` | tile_gen |
+| `pixel_UI_item_gen/` | ui_item_gen |
 
 它们在编辑器左侧「**Templates**」栏可见。**你（AI）用 `asset2d:templates.list` 列出库里这些模板、用
 `asset2d:groups.instantiateTemplate` 自己把目标模板放上画布**（一步落地一个组合电池节点，返回运行时

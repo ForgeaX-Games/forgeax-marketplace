@@ -24,7 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const appRoot = resolve(here, '..', '..')
 const CONCEPTUAL = resolve(
   appRoot,
-  'batteries/templates/pipelines/(pixel)conceptual_scene_design/conceptual_scene_design.json',
+  'batteries/templates/pipelines/pixel_conceptual_scene_design/conceptual_scene_design.json',
 )
 
 const GROUP_OP_ID = '__group__'
