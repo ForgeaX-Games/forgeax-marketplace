@@ -36,7 +36,6 @@ export async function registerQueryRoutes(app: FastifyInstance): Promise<void> {
       logOutputFetch(id, portId, performance.now() - t0, 0, {
         sharded: true,
         dataChunks: meta.dataChunks,
-        skipped: true,
       })
       reply.code(413)
       reply.header('content-type', 'application/json; charset=utf-8')

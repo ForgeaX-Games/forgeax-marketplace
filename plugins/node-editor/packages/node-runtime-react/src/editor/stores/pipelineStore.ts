@@ -171,13 +171,6 @@ function edgeTopologySignature(pipeline: Pipeline | null | undefined): string {
 // request so the backend is never hammered with redundant read-only re-runs.
 const _groupProbeInFlight = new Map<string, Promise<void>>()
 
-// Live-sync de-dup: the id of the last committed batch we already re-pulled for.
-// A single committed batch must drive at most one snapshot re-pull, even if its
-// `graph:applied` is delivered more than once (e.g. a WS reconnect replay, or
-// two announce paths racing). Empty batchId (project activate / import server
-// broadcasts that carry none) is never de-duped — it always refetches.
-let _lastSyncedBatchId: string | null = null
-
 // Self-echo reload suppression for local param edits (slider drag, inspector
 // edits). A local `incrementalExecute` already wrote the new param into
 // `currentPipeline` BEFORE persisting, so the `graph:applied` self-echo for that
@@ -1875,8 +1868,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   subscribeLiveSync: () => {
     const { ws, api } = getEditorTransport()
     ws.connect()
-    // Fresh sync session: forget any batchId/hash de-duped under a prior subscription.
-    _lastSyncedBatchId = null
+    // Fresh sync session: forget any hash de-duped under a prior subscription.
     _lastSyncedHash = null
     _mountRefreshInFlight = null
 
@@ -1930,7 +1922,6 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       // metadata / group position) — canvas already holds the desired state;
       // skip loadPipeline + fan-out; outputs on disk are unchanged.
       if (meta && meta.invalidatedNodeCount === 0) {
-        if (batchId) _lastSyncedBatchId = batchId
         try {
           _lastSyncedHash = await api.getPipelineHash()
         } catch {
@@ -1938,8 +1929,6 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         }
         return
       }
-
-      if (batchId) _lastSyncedBatchId = batchId
 
       const preSnapshot = get().currentPipeline
       await reloadAndRecordHash()
