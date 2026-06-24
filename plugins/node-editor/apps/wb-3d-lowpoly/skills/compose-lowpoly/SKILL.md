@@ -8,12 +8,16 @@ description: >-
   with g_bake_part → reference the staged g_mesh meshes and assemble one rooted
   URDF tree); PART B — static low-poly BUILDINGS (walls, floors, stairs, doors,
   windows, roofs, facades, railings, columns via the Architecture family and
-  g_building_shell); PART C — scene assembly (place already-baked meshes into a
-  single URDF tree with g_mesh + transforms / arrays + g_joint_fixed, QC, then
-  export the whole scene to .glb). Use when the user asks to create, modify,
-  preview, screenshot, export, or iterate a low-poly 3D model, mechanical part,
-  building, or a composed scene. First clarify the request, then route to the
-  right PART and follow its execution file.
+  g_building_shell); SCENE orchestration (terminal stage = PART C) — for a
+  scene / city / multi-object + building composition: list the scene inventory,
+  loop each unique item through PART A/B + bake, then place the baked meshes into
+  one URDF tree by setting each g_part's origin/rpy (no g_joint — g_to_urdf
+  auto-stitches the jointless roots into one tree), QC, and export the whole
+  scene to .glb. Use when the user asks to create, modify, preview, screenshot,
+  export, or iterate a low-poly 3D model, mechanical part, building, or a composed
+  scene. First triage the intent (single object/assembly → A; building → B;
+  scene → SCENE orchestration), then route to the right PART and follow its
+  execution file.
 trigger: /compose-lowpoly
 ---
 
@@ -48,21 +52,49 @@ trigger: /compose-lowpoly
 
 ---
 
-## 一、选哪套流程（路由表）
+## 一、意图分诊（先走这棵决策树）
+
+拿到需求**先分诊**：用户要的是**一个物件**、**一栋建筑**，还是**一个由多物体/建筑组成的空间**？
+照下面从上到下判，命中即停：
+
+1. **场景 / 城市 / 多物体 + 建筑的空间组合**（「一条街」「一个村子」「一座小城」「房子 + 树 +
+   栅栏 + 路灯摆成一个院子」「一片柱列 + 道具阵」）→ **SCENE 编排**。这是一个**包裹 A+B 再 C**
+   的内部循环：先列**详细**场景清单 → **对每个 unique item 打开并完整跟做它对应的 execution 文件**
+   （`part-a-asset.md` 或 `part-b-building.md` 的整套建模 + `g_bake_part`）→ 最后走 PART C 按位姿
+   组装成整棵 URDF 树并导出整场。**每个 unique item 都在同一个场景项目里 bake**（blob 库 workspace
+   级，同项目 bake 出的 `<sha>.obj` 才能稳定被组装引用）。入口见
+   [PART C · 场景编排与组装](executions/part-c-scene-assembly.md)。
+2. **房屋 / 建筑 / 房间 / 多层壳体 / 建筑构件**（墙、楼板、楼梯、门窗、屋顶、栏杆、柱）→
+   **PART B · 建筑**（Architecture 家族）。
+3. **单个物件 / 机械件 / 装配体**（枪、宝箱、齿轮组、机械臂…）→ **PART A · 资产 / 机械**。
+
+### 装配 vs 场景的边界（最容易误判，先消歧）
+
+- **PART A（装配体）= 一个作为整体运作 / 联动的物件**，哪怕它有很多零件、带可动关节（机械臂、
+  齿轮组、带盖宝箱）。判据：拆出来的件是**同一个东西的零件**，合起来才是「那一个物件」。
+- **SCENE（场景）= 多个各自独立的物体 / 建筑共处同一个环境**。判据：每个 item 自己就是一个完整
+  的东西（一栋楼、一棵树、一个路灯），它们只是**摆在一起**、没有作为一个机构联动。
+- 一句话区分：**「这是一个会动/联动的整体」→ A；「这是好几样东西摆在一块」→ SCENE。**
+
+## 二、选哪套流程（路由表）
 
 | 你要做的 | 走哪个 PART | 打开 |
 |---|---|---|
 | 单个物件 / 机械件 / 装配体（枪、宝箱、齿轮组、机械臂…）——**逐件建模 + 烘焙 → 引用 mesh 组装** | **PART A · 资产 / 机械** | [executions/part-a-asset.md](executions/part-a-asset.md) |
 | 房屋 / 建筑 / 房间 / 多层壳体 / 建筑构件（墙、楼板、楼梯、门窗、屋顶、栏杆、柱）——**用 Architecture 家族** | **PART B · 建筑** | [executions/part-b-building.md](executions/part-b-building.md) |
-| 把**前面已 bake 的多个 mesh** 摆进同一棵 URDF 树组成一个**场景**，再导出整场 `.glb` | **PART C · 场景组装** | [executions/part-c-scene-assembly.md](executions/part-c-scene-assembly.md) |
+| **场景 / 城市 / 多物体 + 建筑的空间组合**——先列详细清单、逐件**打开并完整跟做** A/B execution 文件 + bake（同一场景项目内），再按位姿组装成整场 `.glb` | **SCENE 编排（终段 = PART C）** | [executions/part-c-scene-assembly.md](executions/part-c-scene-assembly.md) |
 
-## 二、各 PART 要点提要（先看摘要，再进 execution 文件）
+> **SCENE 编排不是独立的第四套流程**，而是**包裹 A/B 逐件建模 + PART C 终段组装**的编排循环。
+> 场景里的每个 unique item 仍先经 A 或 B 建模并 bake；PART C 是这套编排的**最终组装阶段**——把
+> 这些已 bake 的 mesh 按算好的位姿摆进同一棵 URDF 树并导出整场。
+
+## 三、各 PART 要点提要（先看摘要，再进 execution 文件）
 
 ### PART A · 资产 / 机械 → [executions/part-a-asset.md](executions/part-a-asset.md)
 - **强制两阶段，绝不一个 mega-batch 成图**：阶段0 写**精细拆件清单**（硬门禁，每件一行：
   名称+功能 / 真实形态 / op 路由 / 带轴尺寸 / 细节特征及位置 / 局部原点基准 / 装配关节 /
   材质 / 用 primitive 的逐件理由）。
-- **阶段1 逐件建模 + 烘焙**：每件从空几何起搭**独立子图**（CSG / Parts / Gears），末端
+- **阶段1 逐件建模 + 烘焙**：每件从空几何起搭**独立子图**（CSG / Parts，齿轮也在 Parts 里），末端
   `g_bake_part` 烘成 `<sha>.obj`，记下 filename。一件一个小 batch + execute。
 - **阶段2 引用 mesh 组装**：`g_mesh(filename=<sha>.obj)` → `g_part` → `g_material` 配色 →
   `g_joint_*` 连成单一根树 → `g_geometry_qc` + `g_validate` + `g_to_urdf` + `urdf_preview` →
@@ -77,18 +109,30 @@ trigger: /compose-lowpoly
 - 整栋优先 **`g_building_shell`**（单房间就 `floors=1, rooms_per_floor=1, roof_type=none`），
   别手工连几十面墙；末端同样 `g_geometry_qc` → `g_to_urdf` → `urdf_preview`。
 
-### PART C · 场景组装 → [executions/part-c-scene-assembly.md](executions/part-c-scene-assembly.md)
-- 定位：把 PART A/B 阶段已 bake 的 mesh 当**道具库**，摆进同一棵 URDF 树组成场景，导出整场 `.glb`。
-  **不建新几何、不加电池**——纯组装。
-- **阶段0 布局清单**：每个实例一行——引用哪个 `<sha>.obj` / 位置(x,y,z) / 旋转 / 缩放 /
-  挂到哪个父 / 配色。
-- **阶段2 搭场景图**：建场景根 → 每实例 `g_mesh` →（按需 `g_translate`/`g_rotate`/`g_scale`
-  或 `g_array_linear`/`g_array_radial` 成排成网格）→ `g_part` → `g_joint_fixed`（origin 写
-  布局坐标）→ 重复 → QC → `g_to_urdf` → `urdf_preview` → `lowpoly:export-glb`。
-- **两条限制**：①OBJ 不带材质，每实例颜色要在阶段2 用 `g_material` 重新指定；②跨项目引用
-  `<sha>.obj` 的前提见 part-c（不确定时退化为「同项目内组装本项目已 bake 的件」）。
+### SCENE 编排（终段 = PART C） → [executions/part-c-scene-assembly.md](executions/part-c-scene-assembly.md)
+- 定位：**SCENE 编排的最终组装阶段**。前置是先口播场景清单、逐件走 A/B 建模 + bake；PART C 把这些
+  已 bake 的 mesh 当**道具库**，按算好的位姿摆进同一棵 URDF 树，导出整场 `.glb`。组装阶段本身
+  **不建新几何**。
+- **阶段-2/-1/0 编排上游**：先写场景 brief（主题、尺度、布局范式）→ **详细**场景清单（每 item 走 A
+  还是 B、2~3 句真实形态、目标尺寸、数量、**哪些实例化复用**、落位）→ 分发循环：**对每个 unique item
+  打开并完整跟做它对应的 execution 文件**（`part-a-asset.md` / `part-b-building.md` 的整套两阶段建模
+  + `g_bake_part`，不是凭记忆堆电池），记 `<sha>.obj` + bbox。
+- **同项目 bake（硬规则）**：所有 unique item 都**在同一个场景项目里 bake**——blob 库是 workspace 级、
+  内容寻址，同项目 bake 出的 `<sha>.obj` 才能稳定被组装阶段 `g_mesh` 引用。别把不同物体分散到不同
+  项目里 bake（跨项目引用的前提与退化条件见 part-c）。
+- **组装配方（默认）**：每实例 `g_mesh(<sha>.obj, bbox)` → `g_part(origin=位姿, rpy, material)`，
+  **不写 `g_joint_fixed`**——`g_to_urdf` 的 auto-stitch 会把无 joint 的根 part 自动缝成单一根树。
+  位姿挂在 `g_part` 自己的 origin / rpy 上（直接渲染成 `<visual><origin>`）。
+- **重烘陷阱**：别用 `g_translate`/`g_array_*` 给引用 mesh 摆位（它们会把每个实例重新烘成新 OBJ、
+  毁掉实例化）；大量同款复用 = **同一 `<sha>.obj` + 多个不同 origin 的 `g_part`**。
+- **QC 注意**：场景模式下 `g_geometry_qc` 的 `islands` 信号可忽略（无 joint 的 part 会被报成孤岛，
+  但 auto-stitch 已缝好）；**`aabb_overlap` 穿模仍是硬信号**——`g_mesh` 必须填 `bbox_min/max` 才生效。
+- **多色物体两条路**：①**`g_bake_object`**——把物体各 part 用真形状建在一个图里 + 各配 `g_material`，
+  整组烘成**一个带色 `<sha>.glb`**，场景里当一个 mesh 摆、引用它的 `g_part` 不再上 material（配色固定、
+  整体复用首选；只适合静态物体）。②`g_bake_part` 按颜色分件成多个 `<sha>.obj` + 组装阶段各上一次
+  `g_material`（同款换色 / 配色多变）。**单个 `<sha>.obj` 不带材质 = 单色**；跨项目引用前提见 part-c。
 
-## 三、共享参考（通用规则 / 防呆，随时查）
+## 四、共享参考（通用规则 / 防呆，随时查）
 
 | 内容 | 文件 |
 |---|---|

@@ -57,6 +57,24 @@ class ScreenshotService {
     return true;
   }
 
+  // Renderer-side error callback: the renderer couldn't produce a frame (no
+  // canvas, empty scene, encode failure). Settle the pending capture as a
+  // rejection NOW so the awaiting /capture returns immediately instead of
+  // hanging until the timeout fires (the "renderer online but capture 504s"
+  // symptom). Reports the id as unknown if it already timed out / is invalid.
+  rejectCapture(captureId: string, reason: string): boolean {
+    const pending = this.pending.get(captureId);
+    if (!pending) {
+      console.warn(`[Screenshot] No pending capture to reject for id: ${captureId}`);
+      return false;
+    }
+    clearTimeout(pending.timer);
+    this.pending.delete(captureId);
+    console.warn(`[Screenshot] Capture rejected: ${captureId} (${reason})`);
+    pending.reject(new Error(reason));
+    return true;
+  }
+
   // Non-blocking read of the most recent successful frame.
   getLatest(): ScreenshotRecord | null {
     return this.latest;

@@ -13,10 +13,15 @@ import { registerSceneExportRoutes } from './scene-export/routes.js'
 import { registerProjectRoutes } from './routes/projects.js'
 import { registerGroupTemplateRoutes } from './routes/groupTemplates.js'
 import { registerAssetRoutes } from './routes/assets.js'
+import { registerCanvasPerfDebugRoutes } from './routes/canvasPerfDebug.js'
 import { getRuntime, stopBatteryWatch } from './runtime.js'
+import { isCanvasPerfDebugEnabled, logPerfDebugStartup } from './lib/canvasPerfDebug.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
+  // Perf debug hooks must register before route handlers so every request is timed.
+  await registerCanvasPerfDebugRoutes(app)
+  logPerfDebugStartup()
   // Release the dev battery watcher on shutdown so `app.close()` lets the
   // process exit (an open chokidar watch keeps the event loop alive).
   app.addHook('onClose', async () => stopBatteryWatch())
@@ -45,4 +50,9 @@ if (isMain) {
   const port = Number(process.env.PORT ?? 9557)
   await app.listen({ port, host: '0.0.0.0' })
   console.log(`[wb-scene-generator backend] listening on :${port}`)
+  if (isCanvasPerfDebugEnabled()) {
+    console.log(
+      `[wb-scene-generator backend] FORGEAX_CANVAS_PERF_DEBUG=${process.env.FORGEAX_CANVAS_PERF_DEBUG} — canvas perf logs on stdout`,
+    )
+  }
 }

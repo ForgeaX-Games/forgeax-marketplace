@@ -47,11 +47,6 @@
         "id": "compose-sino-scene",
         "entry": "./skills/compose-sino-scene/SKILL.md",
         "trigger": "/compose-sino-scene"
-      },
-      {
-        "id": "texture-pipeline",
-        "entry": "./skills/texture-pipeline/SKILL.md",
-        "trigger": "/texture-pipeline"
       }
     ],
     "tools": [

@@ -11,7 +11,7 @@ import { useViewerStore } from '../../store/viewerStore'
 import { useViewerI18n } from '../../i18n/strings'
 import './Titlebar.css'
 
-type ExportFormat = 'obj' | 'glb' | 'urdf'
+type ExportFormat = 'obj' | 'glb' | 'glb-static' | 'urdf'
 
 interface TitlebarProps {
   onResetView: () => void
@@ -106,6 +106,14 @@ function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExpor
               >
                 <span className="viewer-dropdown-item-title">{t.titlebar.exportGlb}</span>
                 <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbSub}</span>
+              </button>
+              <button
+                className="viewer-dropdown-item"
+                disabled={!canExportScene}
+                onClick={() => handleExportFormat('glb-static')}
+              >
+                <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbStatic}</span>
+                <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbStaticSub}</span>
               </button>
               <button
                 className="viewer-dropdown-item"

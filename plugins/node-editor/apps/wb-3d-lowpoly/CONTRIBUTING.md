@@ -41,7 +41,8 @@ All domain ops in this plugin are **file-based batteries** — there is no
 programmatic registration in `main.ts`. The `backend/src/ops/index.ts` is an
 intentional empty stub.
 
-1. Create the directory `batteries/3d/<Category>/<id>/` with three files:
+1. Create the directory `batteries/<Stage>/<Family>/<id>/` (pick the pipeline
+   stage `Generate`/`Modify`/`Assemble`/`Output`) with three files:
    - `meta.json` — unique `id`, `label`, `inputs`/`outputs`, `params`, UI fields.
      Use `"type":"geometry"` for geometry I/O ports.
    - `index.ts` — export one lowercase-named entry function. Import kernel

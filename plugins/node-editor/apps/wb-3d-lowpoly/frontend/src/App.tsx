@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { HttpApiClient } from './api/HttpApiClient.js'
 import { WorkbenchHost } from './workbench/WorkbenchHost.js'
 import { WorkbenchLeftPane } from './workbench/WorkbenchLeftPane.js'
@@ -11,6 +11,8 @@ import { UrdfViewerSurface } from './surfaces/UrdfViewerSurface.js'
 //   • center    → the workbench host: kernel Editor + embedded panes
 export function App({ pane }: { pane?: string }): JSX.Element {
   const client = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
+  // Dispose the client (and its WebSocket) when the app tears down / HMR remounts.
+  useEffect(() => () => { client.dispose() }, [client])
 
   if (pane === 'urdf') return <UrdfViewerSurface client={client} />
   if (pane === 'left') return <WorkbenchLeftPane client={client} />

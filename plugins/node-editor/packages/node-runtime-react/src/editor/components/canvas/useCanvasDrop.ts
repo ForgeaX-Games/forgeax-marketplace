@@ -8,7 +8,7 @@ import { useCallback } from 'react'
 import type { Node, ReactFlowInstance } from 'reactflow'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { createEmptyPipeline } from '../../stores/pipelineStore.helpers.js'
-import type { Battery } from '../../types.js'
+import type { Battery, PipelineNode } from '../../types.js'
 import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth } from './canvasConstants.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import { RELAY_BATTERY_ID, RELAY_NODE_HEIGHT, RELAY_NODE_WIDTH } from './RelayNode.js'
@@ -35,6 +35,13 @@ interface UseCanvasDropParams {
    * about the domain payload (it lives in an app-side channel, e.g. localStorage).
    */
   onExternalDrop?: ExternalDropHandler
+  /**
+   * Route a newly placed node into the active group's internal view instead of
+   * the root graph. Supplied (via a ref bridge) by the group-view hook; when the
+   * canvas is inside a group view, `placeBattery` calls this in lieu of the
+   * store's root-level `addNode`, so the new battery is saved into the group.
+   */
+  onInnerNodeAdd?: (node: PipelineNode) => void
 }
 
 export type ExternalDropHandler = (
@@ -49,7 +56,7 @@ export type PlaceBatteryFn = (
   options?: { presetText?: string; presetParams?: Record<string, unknown> },
 ) => string | null
 
-export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterGroup, onExternalDrop }: UseCanvasDropParams) {
+export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterGroup, onExternalDrop, onInnerNodeAdd }: UseCanvasDropParams) {
   const addNode = usePipelineStore((s) => s.addNode)
   const addGroup = usePipelineStore((s) => s.addGroup)
   const addAnnotation = usePipelineStore((s) => s.addAnnotation)
@@ -75,6 +82,19 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
     (battery, position, options) => {
       const presetText = options?.presetText
       const presetExtraParams = options?.presetParams ?? {}
+      // Inside a group's internal view the new node is routed to the group (via
+      // the store's addNode → group-view sink). Skip the root-graph history record
+      // and execute here: the node isn't in the root kernel graph, so a root
+      // execute would no-op/error and an undo snapshot would desync from the
+      // group's live refs. The exit flush re-executes the edited inner subgraph.
+      const inGroupView = usePipelineStore.getState().groupViewStack.length > 0
+      // Inside a group view the node belongs to the group's inner graph, so route
+      // it to the group-view sink (live refs, flushed on exit) instead of the root
+      // store; otherwise insert at root as usual.
+      const insertNode = (node: PipelineNode) => {
+        if (inGroupView && onInnerNodeAdd) onInnerNodeAdd(node)
+        else addNode(node)
+      }
 
       if (battery.type === 'group') {
         // Templates are a locked, restyled class of group battery (big tag
@@ -113,14 +133,16 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
             // Record BEFORE the lazy pipeline is created (currentPipeline may
             // still be null on the very first drop into a fresh project); an
             // empty pipeline is the correct pre-state for undoing the first node.
-            const { currentPipeline } = usePipelineStore.getState()
-            useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
-              nodeIds: [remapped.root.id],
-              label: `添加模板节点：${battery.name}`,
-              labelEn: `Add template: ${formatIdAsLabel(battery.id)}`,
-            })
+            if (!inGroupView) {
+              const { currentPipeline } = usePipelineStore.getState()
+              useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
+                nodeIds: [remapped.root.id],
+                label: `添加模板节点：${battery.name}`,
+                labelEn: `Add template: ${formatIdAsLabel(battery.id)}`,
+              })
+            }
 
-            addNode({
+            insertNode({
               id: remapped.root.id,
               batteryId: '__group__',
               name: remapped.root.name,
@@ -139,6 +161,10 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
                 ...(droppedIsTemplate ? { isTemplate: true } : {}),
               }),
             })
+            // In a group view the dropped group is an inner member (routed to the
+            // group-view sink); the root persist+execute below would target a node
+            // absent from the root graph. The exit flush handles persistence/run.
+            if (inGroupView) return
             setTimeout(() => {
               // Persist FIRST (this commits the createGroup op that materialises
               // the group shadow node in the kernel), THEN execute. Chaining the
@@ -182,15 +208,17 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
         }
         setNodes((nds) => [...nds, newNode])
 
-        const { currentPipeline } = usePipelineStore.getState()
-        useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
-          nodeIds: [nodeId],
-          label: `添加提示词：${battery.name}`,
-          labelEn: `Add prompt: ${battery.name}`,
-        })
+        if (!inGroupView) {
+          const { currentPipeline } = usePipelineStore.getState()
+          useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
+            nodeIds: [nodeId],
+            label: `添加提示词：${battery.name}`,
+            labelEn: `Add prompt: ${battery.name}`,
+          })
+        }
 
-        addNode({ id: nodeId, batteryId: PROMPT_OP_ID, name: battery.name, position, params })
-        incrementalExecute(nodeId, false)
+        insertNode({ id: nodeId, batteryId: PROMPT_OP_ID, name: battery.name, position, params })
+        if (!inGroupView) incrementalExecute(nodeId, false)
         return nodeId
       }
 
@@ -207,14 +235,16 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
 
         setNodes((nds) => [...nds, newNode])
 
-        const { currentPipeline } = usePipelineStore.getState()
-        useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
-          nodeIds: [nodeId],
-          label: '添加 Relay',
-          labelEn: 'Add Relay',
-        })
+        if (!inGroupView) {
+          const { currentPipeline } = usePipelineStore.getState()
+          useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
+            nodeIds: [nodeId],
+            label: '添加 Relay',
+            labelEn: 'Add Relay',
+          })
+        }
 
-        addNode({
+        insertNode({
           id: nodeId,
           batteryId: RELAY_BATTERY_ID,
           name: 'Relay',
@@ -288,14 +318,16 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
 
       setNodes((nds) => [...nds, newNode])
 
-      const { currentPipeline } = usePipelineStore.getState()
-      useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
-        nodeIds: [nodeId],
-        label: `添加节点：${battery.name}`,
-        labelEn: `Add node: ${formatIdAsLabel(battery.id)}`,
-      })
+      if (!inGroupView) {
+        const { currentPipeline } = usePipelineStore.getState()
+        useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
+          nodeIds: [nodeId],
+          label: `添加节点：${battery.name}`,
+          labelEn: `Add node: ${formatIdAsLabel(battery.id)}`,
+        })
+      }
 
-      addNode({
+      insertNode({
         id: nodeId,
         batteryId: battery.id,
         name: battery.name,
@@ -304,13 +336,13 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       })
 
       // AI batteries must be run manually; everything else triggers a partial
-      // recompute on insert.
-      if (battery.type !== 'ai') {
+      // recompute on insert. In a group view the exit flush handles re-execution.
+      if (battery.type !== 'ai' && !inGroupView) {
         incrementalExecute(nodeId, false)
       }
       return nodeId
     },
-    [setNodes, addNode, addGroup, addAnnotation, incrementalExecute, onUngroup, onEnterGroup],
+    [setNodes, addNode, addGroup, addAnnotation, incrementalExecute, onUngroup, onEnterGroup, onInnerNodeAdd],
   )
 
   const onDrop = useCallback(

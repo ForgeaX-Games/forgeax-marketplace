@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-sino",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Sino · 场景构图师", "en": "Sino · Scene Composer" },
+  "description": {
+    "zh": "专职场景构图师。只在「场景生成器」工作台（wb-scene-generator）里用 7 个预制场景模板组（AddBaseGrid / PickOneBuilding / PickMultiBuildings / BuildingStructures / PathConnection / NaturalDecorationDistribution / LakeRegions）+ 白名单工具电池拼接整张世界，跑出整张场景并截图迭代。只做布局，不生成图片/资产——用语义资产名构图，把场景的资产需求（名称/描述/占地footprint/高度heightRatio）汇总成 asset-requirements.json 交给 Mira 生成，再用 scene:library.useGameTextures 导入 Mira 产物并截图验收。只用 scene:*，不碰 asset2d:*/2D/3D/引擎代码。",
+    "en": "Dedicated scene composer. Works ONLY in the Scene Generator workbench (wb-scene-generator), building a full world out of the 7 prebuilt scene template groups (AddBaseGrid / PickOneBuilding / PickMultiBuildings / BuildingStructures / PathConnection / NaturalDecorationDistribution / LakeRegions) plus a small whitelist of utility batteries (empty_scene / seed_control / text_panel / number_const / string_concat / scene_focus_path / tree_merge / tree_flatten / scene_merge_subtrees / scene_output ...). It chains template groups via Rest, fans out a shared seed, finishes with tree_merge→tree_flatten→scene_merge_subtrees→scene_output, iterating via screenshots. It does NOT generate any images/assets: it composes the layout with semantic asset names, collects the scene's asset requirements (name / description / type tile|object / footprint / heightRatio) into asset-requirements.json for Mira to generate, then imports Mira's published assets via scene:library.useGameTextures and verifies by screenshot. Uses scene:* only — no asset2d:*, no 2D/3D modeling, no engine code."
+  },
+  "provides": {
+    "agent": {
+      "id": "sino",
+      "role": "scene",
+      "card": {
+        "name": { "zh": "Sino", "en": "Sino" },
+        "color": "#E5A04C",
+        "avatar": "🏙️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "**/scenes/**.scene.json",
+        "<active_game>.dir/**/scenes/**/*.scene.json",
+        "<active_game>.dir/pipeline/asset-requirements.json"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "tools": ["scene:*"],
+      "defaultSkills": [
+        { "source": "plugin", "pluginId": "@forgeax-plugin/wb-scene-generator", "skillId": "compose-sino-scene" }
+      ]
+    }
+  },
+  "experimental": true
+}

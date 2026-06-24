@@ -11,6 +11,7 @@
  */
 
 import {
+  makePoint2D,
   makePoint3D,
   parseScenePort,
   readNode,
@@ -26,6 +27,7 @@ const EMPTY = {
   height: 0,
   voxels: [],
   tokens: [],
+  '2dPoints': [],
   childPaths: [],
 };
 
@@ -40,6 +42,16 @@ export function nodeExplode(input: Record<string, unknown>): Record<string, unkn
   const voxels = cells.map(c => makePoint3D(c.x, c.y, c.z));
   const tokens = cells.map(c => c.token);
 
+  // 2D 投影：丢弃 z，按 (x,y) 去重得到节点体素的平面足迹点集。
+  const seen2D = new Set<string>();
+  const points2D = [];
+  for (const c of cells) {
+    const key = `${c.x},${c.y}`;
+    if (seen2D.has(key)) continue;
+    seen2D.add(key);
+    points2D.push(makePoint2D(c.x, c.y));
+  }
+
   const prefix = sin.focus === '/' ? '' : sin.focus;
   const childPaths = node.children.map(c => `${prefix}/${c.name}`);
 
@@ -53,6 +65,7 @@ export function nodeExplode(input: Record<string, unknown>): Record<string, unkn
     height: node.bounds?.height ?? 0,
     voxels,
     tokens,
+    '2dPoints': points2D,
     childPaths,
   };
 }

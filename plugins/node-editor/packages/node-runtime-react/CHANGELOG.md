@@ -5,6 +5,16 @@ Changelog · semver. Dates are calendar dates in the project timezone.
 
 ## Unreleased
 
+### Added — Develop ⇄ Templates toggle in the battery rail
+
+- The battery bar's big-label rail now hosts a **Develop/Templates mode toggle**
+  in its bottom collection group, placed between the collapse button and the
+  favorites star (`BatteryBar.tsx` `.bb-rail-group--collection`). It calls the
+  same `setBatteryFilterMode` store action as the Toolbar toggle, so the two stay
+  in sync; the rail button lights up with the accent color while in Templates
+  mode (`BatteryBar.css` `.bb-rail-button--mode`). *Why:* let users switch modes
+  without leaving the battery rail.
+
 ### Fixed — Live-sync canvas reconciler (AI/CLI graph mutations no longer go stale)
 
 - **The editor canvas now self-heals when a `graph:applied` WS frame is

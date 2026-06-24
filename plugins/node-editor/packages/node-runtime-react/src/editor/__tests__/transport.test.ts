@@ -262,6 +262,34 @@ describe('EditorApiAdapter', () => {
     expect(group?.name).toBe('My Group')
     expect(group?.nodes.map((n) => n.id).sort()).toEqual(['n1', 'n2'])
   })
+
+  it('loadGroup with scope reads the on-disk library file before a stale in-graph copy', async () => {
+    const client = createMockApiClient()
+    client.__state.groups.set('lib-id', {
+      id: 'lib-id',
+      name: 'PathConnection (1)',
+      nodes: [],
+      edges: [],
+      exposedInputs: [],
+      exposedOutputs: [],
+      position: { x: 0, y: 0 },
+    })
+    client.loadGroupTemplate = vi.fn(async () => ({
+      id: 'lib-id',
+      name: 'PathConnection',
+      nodes: [],
+      edges: [],
+      exposedInputs: [],
+      exposedOutputs: [],
+      position: { x: 0, y: 0 },
+    }))
+    const { api } = createEditorTransport(client)
+
+    const group = await api.loadGroup('lib-id', { scope: 'groups' })
+
+    expect(group?.name).toBe('PathConnection')
+    expect(client.loadGroupTemplate).toHaveBeenCalledWith('lib-id', { scope: 'groups' })
+  })
 })
 
 describe('WsAdapter', () => {
@@ -389,12 +417,13 @@ describe('diffPipelineToOps', () => {
         type: 'createGroup',
         groupId: 'g1',
         name: 'Group Node',
+        nameEn: undefined,
         position: { x: 50, y: 0 },
         memberNodeIds: ['n1', 'n2'],
         // Authoritative contract: the stable portName + its inner mapping. The
         // kernel honours the name verbatim instead of re-deriving from node ids.
         exposedPorts: {
-          outputs: [{ portName: 'out__n2__out', sourceNodeId: 'n2', sourcePortName: 'out' }],
+          outputs: [{ portName: 'out__n2__out', portType: 'any', sourceNodeId: 'n2', sourcePortName: 'out' }],
         },
       },
     ])

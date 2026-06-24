@@ -226,7 +226,7 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
     expect(drawImageOps.map(op => op.image.alias)).toEqual(['Grass', 'Tree'])
   })
 
-  it('draws one sprite for grouped object instance cells and keeps legacy cells rendering', () => {
+  it('draws one sprite for grouped object instance cells on the same layer', () => {
     const groupedCells = [
       {
         x: 0,
@@ -284,6 +284,24 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
     expect(drawImageOps.filter(op => op.image.alias === 'LegacyRock')).toHaveLength(1)
   })
 
+  it('draws one sprite for voxel-mass object layer without instanceId', () => {
+    const footprint = [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+      { x: 1, y: 1, z: 0 },
+      { x: 0, y: 0, z: 1 },
+      { x: 1, y: 0, z: 1 },
+    ]
+
+    buildVoxelMaster(
+      [objectInputWithCells('四合院', footprint, 0)],
+      { drawMode: 'asset', aliases: [objectAlias('四合院')] },
+    )
+
+    expect(drawImageOps.filter(op => op.image.alias === '四合院')).toHaveLength(1)
+  })
+
   it('sorts grouped object instances by their occupied column depth', () => {
     buildVoxelMaster(
       [
@@ -327,7 +345,14 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
 
   it('expands the master bounds to retain tall object sprites above the terrain', () => {
     const master = buildVoxelMaster(
-      [objectInput('TallTree', 0, 0, 0, 0)],
+      [
+        objectInputWithCells('TallTree', [
+          { x: 0, y: 0, z: 0 },
+          { x: 1, y: 0, z: 0 },
+          { x: 0, y: 1, z: 0 },
+          { x: 1, y: 1, z: 0 },
+        ], 0),
+      ],
       { drawMode: 'asset', aliases: [objectAlias('TallTree')] },
     )
 

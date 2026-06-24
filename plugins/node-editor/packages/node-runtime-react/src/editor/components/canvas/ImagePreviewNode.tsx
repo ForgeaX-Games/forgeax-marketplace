@@ -3,12 +3,13 @@
 // the downstream output. Layout: left input port | center preview (auto-fit) |
 // right output port; matches the ImageReaderNode style. Ported from the legacy
 // editor (components/canvas/ImagePreviewNode.tsx).
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'
 import { TooltipPortal, useNodeTooltip, type BatteryTooltipState } from './nodeTooltip.js'
+import { getRealNodeIdFromContext } from './groupBoundaryIds.js'
 import type { Battery } from '../../types.js'
 import { imageRefToSrc } from '../../utils/imageRef.js'
 import { isDataTreeEntries } from '../../utils/datatreeShape.js'
@@ -34,24 +35,24 @@ function firstImageRef(value: unknown): string {
 function ImagePreviewNode({ id, data, selected, dragging }: NodeProps<ImagePreviewNodeData>) {
   const { battery } = data
 
-  const edges       = usePipelineStore(s => s.currentPipeline?.edges ?? [])
-  const nodeOutputs = usePipelineStore(s => s.nodeOutputs)
-  const langMode    = useUIStore(s => s.langMode)
-  const en          = langMode === 'en'
+  const upstreamImage = usePipelineStore(
+    useCallback((s) => {
+      const lookupId = getRealNodeIdFromContext(id)
+      const edge = (s.currentPipeline?.edges ?? []).find(
+        (e) => e.target.nodeId === lookupId && e.target.port === 'image',
+      )
+      if (!edge) return ''
+      const upstream = s.nodeOutputs[edge.source.nodeId]?.[edge.source.port]
+      return firstImageRef(upstream)
+    }, [id]),
+  )
+
+  const langMode = useUIStore((s) => s.langMode)
+  const en = langMode === 'en'
 
   const { tooltip, showDelayed, hide, trackMouse } = useNodeTooltip(1000, 500, dragging)
 
   const imageColor = getPortTypeColor('image')
-
-  // Resolve the upstream image: prefer the linked source; empty string if unwired.
-  // The `image` port carries an encoded ImageRef (JSON); imageRefToSrc turns it
-  // into a content-addressed blob URL, which is immutable and browser-cacheable.
-  const upstreamImage = useMemo<string>(() => {
-    const edge = edges.find(e => e.target.nodeId === id && e.target.port === 'image')
-    if (!edge) return ''
-    const upstream = nodeOutputs[edge.source.nodeId]?.[edge.source.port]
-    return firstImageRef(upstream)
-  }, [edges, nodeOutputs, id])
 
   const previewSrc = imageRefToSrc(upstreamImage)
   const hasImage = previewSrc.length > 0

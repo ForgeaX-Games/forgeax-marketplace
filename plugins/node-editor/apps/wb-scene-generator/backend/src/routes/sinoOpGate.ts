@@ -44,6 +44,10 @@ export const SINO_TOP_LEVEL_OPID_ALLOWLIST: ReadonlySet<string> = new Set([
   'number_const',
   'seed_control',
   'string_concat',
+  // manual point source — feeds PointSampleBuilding.in_0 (point2d) for the
+  // "manually place a decorative building at coord (x,y)" workflow. See
+  // TEMPLATES_INDEX「手动放置装饰性建筑」and PointSampleBuilding/README.
+  'manual_points',
   // scene composition utilities
   'scene_focus_path',
   // scene query / analysis batteries — let sino precisely target a sub-region
@@ -63,8 +67,6 @@ export const SINO_TOP_LEVEL_OPID_ALLOWLIST: ReadonlySet<string> = new Set([
   'grid2node',
   'voxel_slice',
   'node_explode',
-  'building_footprint_mask',
-  'grid_to_json',
   'scene_passthrough',
 ])
 

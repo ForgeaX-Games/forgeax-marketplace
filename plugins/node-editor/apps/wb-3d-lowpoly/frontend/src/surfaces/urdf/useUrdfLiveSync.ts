@@ -39,6 +39,17 @@ function pickSourceNode(nodes: readonly GraphNode[]): GraphNode | null {
 export function useUrdfLiveSync(client: ApiClient): void {
   useEffect(() => {
     let cancelled = false
+    // Track the last source we pushed so we can skip redundant setSource calls
+    // (which rebuild the viewer scene + drop selection/camera) when neither the
+    // source node nor its URDF changed across a refresh.
+    let lastNodeId: string | null = null
+    let lastUrdf: string | null = null
+
+    const clearViewer = (): void => {
+      if (useViewerStore.getState().source) useViewerStore.getState().setSource('', { baseUrl: '' })
+      lastNodeId = null
+      lastUrdf = null
+    }
 
     async function refresh(): Promise<void> {
       const nodes = await client.listNodes()
@@ -46,19 +57,28 @@ export function useUrdfLiveSync(client: ApiClient): void {
       const node = pickSourceNode(nodes)
       if (!node) {
         // STALE eviction: no source node left → empty the viewer.
-        if (useViewerStore.getState().source) useViewerStore.getState().setSource('', { baseUrl: '' })
+        clearViewer()
         return
       }
       const value = await client.getNodeOutput(node.id, URDF_PORT)
       if (cancelled) return
       const urdf = flattenWire<string>(value)[0]
-      if (typeof urdf === 'string' && urdf.includes('<robot')) {
-        // Baked composite Parts/Gears emit <mesh filename="<sha>.obj"/>; the
-        // viewer's geometry loader fetches `baseUrl + '/' + filename`, so point
-        // it at the content-addressed blob route. URDF-native primitives
-        // (box/cylinder/sphere) carry no filename and ignore baseUrl.
-        useViewerStore.getState().setSource(urdf, { baseUrl: '/api/v1/library/blob' })
+      if (typeof urdf !== 'string' || !urdf.includes('<robot')) {
+        // Source node still present but this output is empty/invalid (chain
+        // disconnected, upstream errored, not executed yet) → clear too, so the
+        // viewport never lingers on a stale model from a previous good run.
+        clearViewer()
+        return
       }
+      // Unchanged node + identical URDF → nothing to do; avoid a needless rebuild.
+      if (node.id === lastNodeId && urdf === lastUrdf) return
+      lastNodeId = node.id
+      lastUrdf = urdf
+      // Baked composite Parts/Gears emit <mesh filename="<sha>.obj"/>; the
+      // viewer's geometry loader fetches `baseUrl + '/' + filename`, so point
+      // it at the content-addressed blob route. URDF-native primitives
+      // (box/cylinder/sphere) carry no filename and ignore baseUrl.
+      useViewerStore.getState().setSource(urdf, { baseUrl: '/api/v1/library/blob' })
     }
 
     // Coalesce bursts (a delete fires graph:applied; downstream re-exec fires

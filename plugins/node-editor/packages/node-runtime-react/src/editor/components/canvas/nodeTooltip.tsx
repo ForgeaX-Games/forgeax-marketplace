@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, cre
 import ReactDOM from 'react-dom'
 import { usePipelineStore } from '../../stores/index.js'
 import { isDataTreeEntries } from '../../utils/datatreeShape.js'
+import { getRealNodeIdFromContext } from './groupBoundaryIds.js'
 
 export interface TooltipState {
   x: number
@@ -121,8 +122,12 @@ function formatDomainValueList(
 export function resolveInputPortValue(nodeId: string, portName: string): unknown {
   const state = usePipelineStore.getState()
   const edges = state.currentPipeline?.edges ?? []
+  // External context nodes render under a synthetic prefixed id in the inner
+  // view, but the real wiring (and cached value) lives on their original id in
+  // the container graph — trace by the real id so their ports resolve too.
+  const lookupId = getRealNodeIdFromContext(nodeId)
   const connectedEdge = edges.find(
-    (e) => e.target.nodeId === nodeId && e.target.port === portName,
+    (e) => e.target.nodeId === lookupId && e.target.port === portName,
   )
   if (connectedEdge) {
     const upstreamVal = state.nodeOutputs[connectedEdge.source.nodeId]?.[connectedEdge.source.port]
@@ -138,7 +143,7 @@ export function resolveInputPortValue(nodeId: string, portName: string): unknown
     }
   }
 
-  const node = state.currentPipeline?.nodes.find((n) => n.id === nodeId)
+  const node = state.currentPipeline?.nodes.find((n) => n.id === lookupId)
   if (!node) return undefined
   if (node.params[portName] !== undefined) return node.params[portName]
 

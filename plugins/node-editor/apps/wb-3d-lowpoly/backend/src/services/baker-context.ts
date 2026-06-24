@@ -28,9 +28,26 @@ export interface BakeResultShape {
   blobSha256?: string
 }
 
+export interface ColoredAssemblyPartInput {
+  shapeId: string
+  rgba: [number, number, number, number]
+  origin?: [number, number, number]
+  rpy?: [number, number, number]
+}
+
+export interface BakeResultShapeWithBbox extends BakeResultShape {
+  bboxMin?: [number, number, number]
+  bboxMax?: [number, number, number]
+}
+
 export interface BakerHandle {
   bake(opName: string, args: Record<string, unknown>): Promise<BakeResultShape>
   bakeGeometryShape(rootId: string, geometry: Geometry): Promise<BakeResultShape>
+  /** 把多个带色 part 烘成单个多材质 GLB（g_bake_object 用）。 */
+  bakeColoredAssembly(
+    parts: readonly ColoredAssemblyPartInput[],
+    geometry: Geometry,
+  ): Promise<BakeResultShapeWithBbox>
   listBakeableOps(): readonly string[]
 }
 
@@ -75,6 +92,10 @@ export function createBakerServices(libRoot: string): BakerServices {
     async bakeGeometryShape(rootId, geometry) {
       const { bakeGeometryShape } = await import('./baker/baker.service.js')
       return bakeGeometryShape(rootId, geometry, library)
+    },
+    async bakeColoredAssembly(parts, geometry) {
+      const { bakeColoredAssembly } = await import('./baker/baker.service.js')
+      return bakeColoredAssembly(parts, geometry, library)
     },
     listBakeableOps() {
       return listBakeableOps()

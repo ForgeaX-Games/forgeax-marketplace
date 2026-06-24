@@ -18,6 +18,17 @@ function formatLocation(folder: string | undefined | null): string {
   return value || 'All Images'
 }
 
+// The record's `createdAt` is an ISO timestamp; show it as a readable local
+// date-time. Falls back to the raw value (or '-') if it isn't parseable.
+function formatCreatedAt(createdAt: string | undefined | null): string {
+  if (!createdAt) return '-'
+  const ms = Date.parse(createdAt)
+  if (Number.isNaN(ms)) return createdAt
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 export function ImagePreviewSurface(): JSX.Element {
   const [selected, setSelected] = useState<GeneratedAssetRecord | null>(null)
   const [error, setError] = useState('')
@@ -134,8 +145,9 @@ export function ImagePreviewSurface(): JSX.Element {
                   <div><dt>Size</dt><dd>{dimensions ? `${dimensions.width} × ${dimensions.height} px` : '-'}</dd></div>
                   <div><dt>Blob</dt><dd>{selected.blobId.slice(0, 12)}</dd></div>
                 </div>
-                <div className="asset2d-preview__meta-row asset2d-preview__meta-row--full">
+                <div className="asset2d-preview__meta-row">
                   <div><dt>Location</dt><dd title={formatLocation(selected.folder)}>{formatLocation(selected.folder)}</dd></div>
+                  <div><dt>Created</dt><dd>{formatCreatedAt(selected.createdAt)}</dd></div>
                 </div>
               </dl>
             </>

@@ -12,11 +12,11 @@ import { bakeShape, initBakerService } from '../src/services/baker/baker.service
 import { listBakeableOps } from '../src/services/baker/ops/index.js';
 import type { BakerLibraryHandle } from '../src/services/baker/types.js';
 import { gClevisBracket } from
-  '../../batteries/3d/Parts/g_clevis_bracket/index.js';
+  '../../batteries/Generate/Parts/g_clevis_bracket/index.js';
 import { gPart } from
-  '../../batteries/3d/Assembly/g_part/index.js';
+  '../../batteries/Assemble/Assembly/g_part/index.js';
 import { gToUrdf } from
-  '../../batteries/3d/Utils/g_to_urdf/index.js';
+  '../../batteries/Output/Export/g_to_urdf/index.js';
 import type { Geometry } from '../../vendor/dist/shared/types/index.js';
 
 // Fake library + ctx：让 g_to_urdf 看到真正的 baker，但不依赖 SQLite。

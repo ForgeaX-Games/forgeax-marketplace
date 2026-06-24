@@ -232,7 +232,8 @@ function parseNormalizedPoint(raw: unknown, widthPx: number, heightPx: number): 
   const [uRaw, vRaw] = raw
   const u = numberFrom(uRaw)
   const v = numberFrom(vRaw)
-  return u !== undefined && v !== undefined ? { x: u * widthPx, y: v * heightPx } : null
+  // geometry_json v is bottom-left origin (0=bottom); image pixels are top-left.
+  return u !== undefined && v !== undefined ? { x: u * widthPx, y: (1 - v) * heightPx } : null
 }
 
 export interface AssetPage {

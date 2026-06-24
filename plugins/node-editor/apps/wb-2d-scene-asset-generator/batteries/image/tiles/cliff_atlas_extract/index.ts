@@ -1483,6 +1483,14 @@ export async function cliffAtlasExtract(
   input: Record<string, unknown>,
   ctx?: { services?: Record<string, unknown> },
 ): Promise<Record<string, unknown>> {
+  // 总开关：关闭时跳过加工，所有端口返回空（不产生任何输出值）。
+  const enable = typeof input.enable === 'boolean'
+    ? input.enable
+    : typeof input.enable === 'string'
+      ? input.enable === 'true'
+      : true;
+  if (!enable) return {};
+
   const sourceAlias   = typeof input.image    === 'string' ? input.image.trim()    : '';
   const templateAlias = typeof input.template === 'string' ? input.template.trim() : '';
   if (!sourceAlias)   return failOutput('image (source) alias is required');

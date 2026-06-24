@@ -17,14 +17,37 @@
 
 import { createHash } from 'crypto';
 import type { Arg } from './shared-types.js';
+import { DEFAULT_TESSELLATION } from './types.js';
 
 // Bake implementation changes must invalidate previously materialized OBJ blobs.
 // The key is op+args, so without a version salt a fixed baker bug could still
 // load an old mesh from the library under the same <sha>.obj alias.
-const BAKE_CACHE_VERSION = 'baker-v2-gear-worm-twist';
+// v3 lowers low-poly segment defaults (profile_circle/torus/dome/fan/sweep) — bump
+// so previously over-tessellated blobs are re-baked.
+const BAKE_CACHE_VERSION = 'baker-v3-lowpoly-defaults';
+
+/**
+ * 镶嵌指纹：把全局 tessellation 容差折进 cache key。调整 DEFAULT_TESSELLATION（deflection
+ * 等）后所有 sha 改变 → 磁盘上的陈旧网格自动失效，无需手动 bump version。
+ */
+function tessellationFingerprint(): string {
+  const t = DEFAULT_TESSELLATION;
+  return [
+    t.linearDeflection,
+    t.angularDeflection,
+    t.relativeDeflection,
+    t.minLinearDeflection,
+    t.maxLinearDeflection,
+  ].join(':');
+}
 
 export function canonicalizeBakeKey(opName: string, args: Record<string, Arg>): string {
-  return JSON.stringify({ version: BAKE_CACHE_VERSION, op: opName, args: canonicalize(args) });
+  return JSON.stringify({
+    version: BAKE_CACHE_VERSION,
+    tess: tessellationFingerprint(),
+    op: opName,
+    args: canonicalize(args),
+  });
 }
 
 export function bakeSha256(opName: string, args: Record<string, Arg>): string {

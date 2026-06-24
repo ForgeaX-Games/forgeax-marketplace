@@ -17,12 +17,8 @@
 import type { OpBuilder, BakeableShape } from '../types.js';
 import { BakerError } from '../errors.js';
 import { csgFuse } from '../csg_helpers.js';
-import { optionalBool, optionalNumber, requireNumber } from '../arg_readers.js';
-import type { Arg } from '../shared-types.js';
-
-function safeDelete(obj: { delete?: () => void } | null | undefined): void {
-  try { obj?.delete?.(); } catch { /* noop */ }
-}
+import { safeDelete, maybeShiftToZ0, centeredBox } from '../op_helpers.js';
+import { optionalNumber, requireNumber } from '../arg_readers.js';
 
 /** 把一组 Solid 依次 fuse 成一个。列表至少 1 个。 */
 function fuseAll(shapes: BakeableShape[]): BakeableShape {
@@ -31,17 +27,6 @@ function fuseAll(shapes: BakeableShape[]): BakeableShape {
     acc = csgFuse(acc, shapes[i]);
   }
   return acc;
-}
-
-/** center=false 时整体 +Z 平移 length/2，使底面贴 z=0。 */
-function maybeShiftToZ0(shape: BakeableShape, length: number, args: Record<string, Arg>): BakeableShape {
-  const center = optionalBool(args, 'center', true);
-  return center ? shape : shape.translateZ(length / 2);
-}
-
-/** 居中盒：makeBaseBox 的 z∈[0, h] 改造成 z∈[-h/2, h/2]。 */
-function centeredBox(ctx: Parameters<OpBuilder>[0], w: number, d: number, h: number): BakeableShape {
-  return ctx.replicad.makeBaseBox(w, d, h).translateZ(-h / 2);
 }
 
 // ── 共用构造：参考 BarrelHingeGeometry —————————————————————

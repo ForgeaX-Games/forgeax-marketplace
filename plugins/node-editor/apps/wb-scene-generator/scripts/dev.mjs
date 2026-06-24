@@ -37,10 +37,23 @@ const opts = { cwd: root, stdio: 'inherit', shell }
 // the same effect, so the condition is scoped to the backend process only.
 const backendEnv = {
   ...process.env,
-  NODE_OPTIONS: `${process.env.NODE_OPTIONS ? process.env.NODE_OPTIONS + ' ' : ''}--conditions=source`,
+  NODE_OPTIONS: [
+    process.env.NODE_OPTIONS,
+    '--conditions=source',
+    '--max-old-space-size=8192',
+  ]
+    .filter(Boolean)
+    .join(' '),
+}
+const frontendEnv = {
+  ...process.env,
+  // Opt-in: FORGEAX_CANVAS_PERF_DEBUG=1 + VITE_CANVAS_PERF_DEBUG=true for perf diagnosis.
+  ...(process.env.VITE_CANVAS_PERF_DEBUG !== undefined
+    ? { VITE_CANVAS_PERF_DEBUG: process.env.VITE_CANVAS_PERF_DEBUG }
+    : {}),
 }
 const backend = spawn('pnpm', ['-C', 'backend', 'dev'], { ...opts, env: backendEnv })
-const frontend = spawn('pnpm', ['-C', 'frontend', 'dev'], opts)
+const frontend = spawn('pnpm', ['-C', 'frontend', 'dev'], { ...opts, env: frontendEnv })
 
 let shuttingDown = false
 function shutdown(signal) {

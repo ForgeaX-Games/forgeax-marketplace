@@ -8,7 +8,7 @@
 // mismatches are surfaced as an 'invariant' StorageError.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import type { GraphFileV1 } from './types.js'
@@ -34,6 +34,16 @@ export function computeGraphHash(graph: Omit<GraphFileV1, 'hash'> & { hash?: str
 export class GraphStore {
   constructor(private readonly path: string) {}
 
+  // Parsed-graph cache keyed by the file's (mtime, size) signature. graph.json
+  // is the read-hot SSOT: every query (getPipeline / getNode / listNodes /
+  // listGroups / per-inner-node group probes) calls load(). Without a cache each
+  // call re-reads the file, re-parses it, AND re-canonicalises + re-hashes the
+  // ENTIRE graph (every group's node/edge definitions) just to re-verify the
+  // tamper hash — O(graph) work + a full deep-clone of transient garbage on
+  // every read. We cache the validated result and reuse it while the file's
+  // mtime+size signature is unchanged, so repeated reads cost a single stat().
+  private cache: { sig: string; graph: GraphFileV1 } | null = null
+
   exists(): boolean {
     return existsSync(this.path)
   }
@@ -44,7 +54,21 @@ export class GraphStore {
    * to recover (e.g. record a `kernel:migration` history entry) or refuse.
    */
   load(): GraphFileV1 | null {
-    if (!existsSync(this.path)) return null
+    if (!existsSync(this.path)) {
+      this.cache = null
+      return null
+    }
+    // Cheap freshness probe: reuse the validated parse while the on-disk
+    // mtime+size is unchanged. A save() (atomic rename) or external edit shifts
+    // the signature and forces a re-read + re-validate below.
+    let sig: string | null = null
+    try {
+      const st = statSync(this.path)
+      sig = `${st.mtimeMs}:${st.size}`
+      if (this.cache && this.cache.sig === sig) return this.cache.graph
+    } catch {
+      sig = null
+    }
     let parsed: GraphFileV1
     try {
       parsed = JSON.parse(readFileSync(this.path, 'utf-8')) as GraphFileV1
@@ -60,6 +84,7 @@ export class GraphStore {
         `graph.json hash mismatch — file may have been edited externally (stored=${parsed.hash}, recomputed=${recomputed})`,
       )
     }
+    if (sig !== null) this.cache = { sig, graph: parsed }
     return parsed
   }
 
@@ -96,6 +121,10 @@ export class GraphStore {
       'utf-8',
     )
     renameSync(tmp, this.path)
+    // Drop the parse cache so the next load() re-stats the freshly written file
+    // and rebuilds its (mtime, size) signature — guards against a same-tick
+    // signature collision on our own writes.
+    this.cache = null
     return finalGraph
   }
 }

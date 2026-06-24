@@ -8,7 +8,7 @@
 //   4. Provide the breadcrumb navigation data.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Node, Edge, ReactFlowInstance } from 'reactflow'
-import { usePipelineStore } from '../../stores/index.js'
+import { usePipelineStore, setGroupInnerSink } from '../../stores/index.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 import { DEFAULT_BATTERY_WIDTH, DEFAULT_GROUP_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth } from './canvasConstants.js'
 import type { Battery, NodeGroup, PipelineEdge, PipelineNode } from '../../types.js'
@@ -38,6 +38,10 @@ export interface UseCanvasGroupViewReturn {
   breadcrumbs: BreadcrumbItem[]
   /** Called on inner node position change (innerLayout tracking). */
   syncInnerNodePosition: (nodeId: string, position: { x: number; y: number }) => void
+  /** Called when a new inner node is added to the current group view. */
+  syncInnerNodeAdd: (node: PipelineNode) => void
+  /** Called when an inner node's param changes; returns whether the id was handled. */
+  syncInnerNodeParam: (nodeId: string, key: string, value: unknown) => boolean
   /** Called when inner nodes are deleted from the current group view. */
   syncInnerNodesDelete: (nodes: Node[]) => void
   /** Called when an inner edge is added. */
@@ -54,12 +58,18 @@ export interface UseCanvasGroupViewReturn {
   rebuildInnerView: () => void
 }
 
-// Group-internal boundary node id prefixes.
-export const BOUNDARY_INPUT_PREFIX = '__boundary_input__'
-export const BOUNDARY_OUTPUT_PREFIX = '__boundary_output__'
+// Group-internal boundary node id prefixes. The id scheme itself lives in the
+// dependency-free `groupBoundaryIds` module (shared with the pipeline store);
+// imported for internal use + re-exported to preserve this hook's public surface.
+import {
+  BOUNDARY_INPUT_PREFIX,
+  BOUNDARY_OUTPUT_PREFIX,
+  CONTEXT_INPUT_PREFIX,
+  CONTEXT_OUTPUT_PREFIX,
+  makeGroupContextNodeId,
+} from './groupBoundaryIds.js'
+export { BOUNDARY_INPUT_PREFIX, BOUNDARY_OUTPUT_PREFIX, makeGroupContextNodeId }
 export const BOUNDARY_EDGE_PREFIX = '__boundary_edge__'
-const CONTEXT_INPUT_PREFIX = '__group_context_in__'
-const CONTEXT_OUTPUT_PREFIX = '__group_context_out__'
 const CONTEXT_GAP_X = 64
 const CONTEXT_MIN_GAP_Y = 28
 const CONTEXT_LABEL_OVERHANG_Y = 26
@@ -102,10 +112,6 @@ export function getGroupContextOutputTargetNodeId(nodeId: string): string {
   return nodeId.slice(CONTEXT_OUTPUT_PREFIX.length)
 }
 
-export function makeGroupContextNodeId(direction: 'in' | 'out', nodeId: string, edgeId?: string): string {
-  const prefix = direction === 'in' ? CONTEXT_INPUT_PREFIX : CONTEXT_OUTPUT_PREFIX
-  return `${prefix}${nodeId}${edgeId ? `__${edgeId}` : ''}`
-}
 
 export function isBoundaryInputNodeId(nodeId: string | null | undefined): nodeId is string {
   return typeof nodeId === 'string' && nodeId.startsWith(BOUNDARY_INPUT_PREFIX)
@@ -682,21 +688,24 @@ export function useCanvasGroupView({
     const { currentPipeline } = usePipelineStore.getState()
     const group = (currentPipeline?.groups ?? []).find((g) => g.id === currentGroupId)
     const dirty = flushInnerEdits()
+    // The execution engine only runs TOP-LEVEL graph nodes. An inner node id is
+    // not in graphFile.nodes, so executing it fails with "target node not found"
+    // and the edited inner subgraph never recomputes (the "stuck at add_child"
+    // symptom). Re-run the top-level group ANCESTOR instead — its shadow node id
+    // equals groupViewStack[0] and IS a top-level node, so running it (fullExec=
+    // false → it + downstream) re-executes the whole group subtree top-down,
+    // including the just-edited inner nodes. This mirrors how every other inner
+    // edit (updateGroupInnerNodeParam, bind/unbindGroupExposedPort) re-runs the
+    // group node by its id rather than an inner node.
+    const topLevelGroupNodeId = groupViewStack[0] ?? currentGroupId
     exitGroupViewStore()
-    if (dirty && group) {
-      const firstNodeId = innerNodesRef.current[0]?.id ?? group.nodes[0]?.id
+    if (dirty && group && topLevelGroupNodeId) {
       setTimeout(() => {
         void usePipelineStore.getState().persistSession()
-          .then(() => {
-            // Incremental (fullExec=false): only the edited inner subgraph + its
-            // downstream need recomputing; boundary upstream hydrates from cache.
-            // A full-graph execute would needlessly run unrelated branches and let
-            // any unrelated error abort the whole pipeline (empty "no result").
-            if (firstNodeId) return usePipelineStore.getState().incrementalExecute(firstNodeId, false, { persist: false })
-          })
+          .then(() => usePipelineStore.getState().incrementalExecute(topLevelGroupNodeId, false, { persist: false }))
       }, 80)
     }
-  }, [currentGroupId, exitGroupViewStore, flushInnerEdits])
+  }, [currentGroupId, groupViewStack, exitGroupViewStore, flushInnerEdits])
 
   // Breadcrumb cross-level jump: flush the current inner dirty state, then trim the
   // stack to the given depth. depth=0 → root; depth=N → keep stack[0..N-1].
@@ -821,6 +830,43 @@ export function useCanvasGroupView({
     isDirtyRef.current = true
   }, [currentGroupId, removeEdge, setEdges, setNodes, updateGroup])
 
+  // A battery dropped / inserted while inside a group view belongs to the group,
+  // not the root graph. Push it into the live inner refs (the canvas node was
+  // already added by the drop hook's setNodes) and mark dirty so the exit flush
+  // saves it into the group (turning the outer instance `unsaved*`).
+  const syncInnerNodeAdd = useCallback((node: PipelineNode) => {
+    innerNodesRef.current = [...innerNodesRef.current.filter((n) => n.id !== node.id), node]
+    innerLayoutRef.current[node.id] = node.position
+    isDirtyRef.current = true
+  }, [])
+
+  // An inner node's param edit (text panel content, slider/toggle value, resize…)
+  // updates the live ref + the on-canvas node data, and marks dirty. Returns false
+  // for ids that are not inner nodes of the current group so the store can fall
+  // back to its normal root-graph path.
+  const syncInnerNodeParam = useCallback((nodeId: string, key: string, value: unknown): boolean => {
+    if (!innerNodesRef.current.some((n) => n.id === nodeId)) return false
+    innerNodesRef.current = innerNodesRef.current.map((n) =>
+      n.id === nodeId ? { ...n, params: { ...n.params, [key]: value } } : n,
+    )
+    setNodes((nds) => nds.map((node) =>
+      node.id === nodeId
+        ? { ...node, data: { ...node.data, params: { ...(node.data?.params ?? {}), [key]: value } } }
+        : node,
+    ))
+    isDirtyRef.current = true
+    return true
+  }, [setNodes])
+
+  // Register the inner param-edit sink while a group view is active so the store's
+  // generic updateNodeParam routes an inner node's param edit here instead of the
+  // root graph. (Node ADD is routed at the drop hook, not via the store.)
+  useEffect(() => {
+    if (!currentGroupId) return
+    setGroupInnerSink(syncInnerNodeParam)
+    return () => setGroupInnerSink(null)
+  }, [currentGroupId, syncInnerNodeParam])
+
   const syncInnerEdgeAdd = useCallback((edge: PipelineEdge) => {
     innerEdgesRef.current = innerEdgesRef.current.filter((e) => e.id !== edge.id)
     innerEdgesRef.current.push(edge)
@@ -853,6 +899,8 @@ export function useCanvasGroupView({
     currentGroup,
     breadcrumbs,
     syncInnerNodePosition,
+    syncInnerNodeAdd,
+    syncInnerNodeParam,
     syncInnerNodesDelete,
     syncInnerEdgeAdd,
     syncInnerEdgeRemove,

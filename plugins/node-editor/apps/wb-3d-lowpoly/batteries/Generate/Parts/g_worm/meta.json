@@ -1,0 +1,29 @@
+{
+  "id": "g_worm",
+  "label": "蜗杆",
+  "name-en": "GWorm",
+  "description": "在 Geometry DSL 末尾追加 worm(...) 一行（cq_gears Worm；螺旋蜗杆，沿 X 轴）。当 prompt 提到 蜗杆 / 蜗轮蜗杆 / 螺杆 / worm / worm screw 时使用，常与 g_gear（蜗轮）组合。",
+  "description-en": "Append `worm(...)` — cq_gears Worm (helical worm screw along X). Use when the prompt mentions a worm / worm screw / worm drive; often paired with a worm wheel (g_gear).",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "gear", "worm", "cad"],
+  "tag_labels": ["几何", "齿轮", "蜗杆", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "module", "type": "number", "label": "模数 m", "default": 0.002, "description": "模数（米）", "description-en": "Module (meters)." },
+    { "name": "lead_angle", "type": "number", "label": "导程角 (°)", "default": 5, "description": "导程角，[1, 89) 度", "description-en": "Lead angle, in [1, 89) degrees." },
+    { "name": "n_threads", "type": "number", "label": "螺纹头数", "default": 1, "description": "螺纹头数（整数，>= 1）", "description-en": "Number of thread starts (integer, >= 1)." },
+    { "name": "length", "type": "number", "label": "长度", "default": 0.03, "description": "蜗杆长度（米），沿 X 轴", "description-en": "Worm length (meters) along X." },
+    { "name": "pressure_angle", "type": "number", "label": "压力角 (°)", "default": 0, "description": "0 = 用默认 20°", "description-en": "0 = use default 20°." },
+    { "name": "clearance", "type": "number", "label": "顶隙", "default": 0, "description": "齿顶径向间隙", "description-en": "Tip radial clearance." },
+    { "name": "backlash", "type": "number", "label": "侧隙", "default": 0, "description": "齿面侧隙", "description-en": "Tooth-flank backlash." },
+    { "name": "bore_d", "type": "number", "label": "中心孔径", "default": 0, "description": "中心轴孔直径（沿 X）；0 = 无孔", "description-en": "Center bore diameter (along X); 0 = no bore." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 worm{n}", "description-en": "Custom id; empty = auto worm{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 worm 行后的 Geometry", "description-en": "Geometry after appending the worm." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

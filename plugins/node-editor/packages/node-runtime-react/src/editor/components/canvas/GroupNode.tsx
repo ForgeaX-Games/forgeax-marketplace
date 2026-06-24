@@ -104,7 +104,7 @@ const GroupNode = memo(function GroupNode({ id, data, selected, dragging, domain
   const en = langMode === 'en'
 
   const renameGroup                = usePipelineStore((s) => s.renameGroup)
-  const nodeOutputs                = usePipelineStore((s) => s.nodeOutputs)
+  const groupNodeOutputs           = usePipelineStore(useCallback((s) => s.nodeOutputs[groupId], [groupId]))
   const setNodePreview             = usePipelineStore((s) => s.setNodePreview)
   const updateGroupInnerNodeParam  = usePipelineStore((s) => s.updateGroupInnerNodeParam)
   const updateGroupPort            = usePipelineStore((s) => s.updateGroupPort)
@@ -770,7 +770,7 @@ const GroupNode = memo(function GroupNode({ id, data, selected, dragging, domain
                   id={port.portName}
                   style={{ background: color, border: `2px solid ${color}` }}
                   onMouseEnter={(e) => {
-                    const val = nodeOutputs[groupId]?.[port.portName]
+                    const val = groupNodeOutputs?.[port.portName]
                     const text = formatPortValue(val)
                     const extra = Array.isArray(val) || (val !== null && typeof val === 'object')
                       ? formatPortValueExtra(val) : undefined

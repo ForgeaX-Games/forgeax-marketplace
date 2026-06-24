@@ -49,6 +49,24 @@ export function getPipeline(runtime: Runtime): PipelineSnapshot | null {
   }
 }
 
+/** Lightweight hash read for live-sync reconciler polls (no full snapshot). */
+export function getPipelineHash(runtime: Runtime): string | null {
+  const g = runtime.graph.load()
+  return g?.hash ?? null
+}
+
+export interface NodeOutputMeta {
+  executedHash: string
+  valid: boolean
+  sharded: boolean
+  dataChunks?: number
+}
+
+/** Metadata-only output read — avoids reassembling sharded payloads. */
+export function getNodeOutputMeta(runtime: Runtime, nodeId: string, portId: string): NodeOutputMeta | null {
+  return runtime.outputs.readMeta(nodeId, portId)
+}
+
 export function getNode(runtime: Runtime, nodeId: string): GraphNode | null {
   const g = runtime.graph.load()
   return g?.nodes[nodeId] ?? null
@@ -184,24 +202,21 @@ export function listOps(runtime: Runtime): ReadonlyArray<OpSummary> {
 export type GroupInnerOutputs = Record<string, Record<string, unknown>>
 
 /**
- * READ-ONLY "probe" execution of a group's INNER sub-graph so the editor's
- * internal view can show real data + types on the inner nodes' wires instead of
- * empty "any / no result".
+ * READ-ONLY probe of a group's INNER nodes so the editor's internal view can
+ * show real data + types on the inner wires/ports instead of empty
+ * "any / no result".
  *
- * Why this exists: a group executes as a BLACK BOX — executeGroupSubgraph runs
- * every inner node but only RETURNS the group's boundary outputs; the inner
- * intermediate values are discarded and never reach runtime.outputs, so the
- * internal view has nothing to draw. This query re-runs the sub-graph purely to
- * capture those intermediates (via the onInnerResult sink). It does NOT persist
- * anything, emit events, or affect the group's external output.
+ * It does NOT re-run anything. The real pipeline execution now persists every
+ * inner node's output into the SAME output cache top-level nodes use (see
+ * execute-node.ts `onInnerResult` — inner node ids are globally unique across
+ * all nesting levels), so this query simply READS those persisted last-run
+ * values back per inner node + port. A port that has never produced a value
+ * stays absent (faithfully empty). This faithfully reflects actual data flow and
+ * carries no re-trigger risk for manualTrigger inner nodes (image_gen etc.).
  *
- * External inputs are hydrated from the persisted output cache of the upstream
- * nodes feeding the group's shadow node (top-level shadow id === groupId, or a
- * nested __group__ inner node whose params.groupId === groupId), mapped onto the
- * group's exposedInputs.portName — exactly how the real execution feeds it.
- *
- * Returns null when the group / graph is absent. Nested groups recurse, and the
- * nested __group__ inner node's bag holds its sub-group's boundary outputs.
+ * Returns null when the group / graph is absent. Nested groups are handled the
+ * same way: each nested level's inner nodes are persisted under their own ids
+ * and read when the user enters THAT level (probed on its own id).
  */
 // Locate the shadow node that instantiates a group + the container whose edges
 // feed its external inputs. Top level: a node with id === groupId living in
@@ -268,19 +283,17 @@ export async function probeGroupInner(
   const group = graph?.groups?.[groupId]
   if (!graph || !group) return null
 
-  const externalInputs = buildGroupExternalInputs(runtime, graph, group)
-  const ctx = groupSubgraphCtx(runtime)
-
-  // Capture ONLY this group's direct inner nodes (groupId === group.id). Deeper
-  // recursion fires onInnerResult too, but its ids belong to a child sub-graph
-  // and are surfaced when the user enters THAT level (probed on its own id).
+  // Read each direct inner node's persisted last-run outputs from the cache the
+  // real execution wrote (every produced port id under outputs/<innerId>/).
   const inner: GroupInnerOutputs = {}
-  await executeGroupSubgraph(group, externalInputs, runtime.registry, ctx, {
-    getNestedGroup: (gid) => graph.groups?.[gid],
-    onInnerResult: ({ groupId: gid, innerNodeId, outputs }) => {
-      if (gid === group.id) inner[innerNodeId] = outputs
-    },
-  })
+  for (const node of group.nodes) {
+    const bag: Record<string, unknown> = {}
+    for (const port of runtime.outputs.listPorts(node.id)) {
+      const data = runtime.outputs.read(node.id, port)?.data
+      if (data !== undefined) bag[port] = data
+    }
+    if (Object.keys(bag).length > 0) inner[node.id] = bag
+  }
   return inner
 }
 

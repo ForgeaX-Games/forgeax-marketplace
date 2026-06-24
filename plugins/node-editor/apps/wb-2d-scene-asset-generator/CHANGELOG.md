@@ -19,6 +19,87 @@ calendar dates in the project timezone.
 ## Unreleased
 
 ### Changed
+- **`generate-2d-asset` skill 的"触发生图"步骤重写，根治 agent 把 `pipeline.execute` 当触发器用而全流程翻车的问题。** 实测复盘（Mira 真实运行 + 直连后端复刻）确认：模板链「实例化→喂参数→生图→后处理」整条**后端完全可跑通**（已端到端产出 32×64 绿萝：`out_4` 贴图 PNG、`out_5` 碰撞 mask、`out_7` 几何 `{object_height,collision_mask,pivot}`），唯一卡点是 **skill 没讲清"触发生图只能用 `generation.generateImage({nodeId})`"**——agent 误用 `pipeline.execute` 去触发组内 `image_gen`（manualTrigger 按设计被跳过 / 组内节点顶层寻址不到 `target node not found`），便误判"没有触发工具"并放弃模板。
+  `skills/generate-2d-asset/SKILL.md`：明确「触发生图 = `generation.generateImage({nodeId=runButtons[].nodeId})` = 点 Run」，新增「⛔ 三条死路」表逐条列出 Mira 走过的错误触发路径及其"按设计如此、非 bug"的原因；铁律 2 强化为"生图唯一入口"，并澄清 asset_generation 不接参考图 = 合法文生图（此前"几毫秒空转"是误用 execute、非缺参考图）。
+  **并补上正确节奏：生图前后各跑一遍管线**——第 3 步 `execute({})` 预热（把喂进的常量算进上游缓存，否则 `generateImage` 按缓存解析会拿到空参数）→ 第 4 步逐个 `generateImage` → 第 5 步 `execute({})` 跑后处理；`pipeline.execute({})` 该跑但永不出图。
+  *为什么：* 经验证后端触发机制（`generation.generateImage` 跨组解析内部 `image_gen`）正确且可用，问题纯在 skill 表述；故只改文档、不动后端。
+
+### Changed
+- **`generate-2d-asset` skill 重写为「操作模板电池」**（不再手搭单个电池）。`skills/generate-2d-asset/`：
+  `SKILL.md` 改为五模板路由表 + 通用操作流程（`groups.list/get` 发现模板组 → 连常量电池喂暴露 `in_N` → 对 `runButtons` 里每个内部 image_gen 调 `generation.generateImage` → `pipeline.execute` → 读暴露 `out_N`）+ 铁律；
+  每个模板一个子文档 `templates/{asset_generation,conceptual_scene_design,dechouse_gen,tile_gen,ui_item_gen}.md`（列各自暴露端口的**稳定 `in_N`/`out_N` 端口名 + 含义 + 喂什么** + Run 数量）。
+  端口名稳定（随模板固化），agent **照子文档连线、无需逐实例查对外端口**；只有 `groupId` 与 `runButtons.nodeId` 是运行时值，从 `groups.list` 取。SKILL.md 另加「模板在哪儿」（仓库 `batteries/templates/pipelines/` + 编辑器 Templates 栏）与「多 image_gen 必须串行」。
+  删除旧的手搭文档 `battery-catalog.md`/`pipeline-schema.md`/`tile-pipeline.md`/`notes/common-base.md`/`executions/part-a|b|c.md`。
+  *为什么：* 五套流程已固化为画布上的组合电池（模板），agent 应只操作模板而非逐电池连线；配合本次新增的 `groups.list/get`。
+
+### Added
+- **新增 MCP 工具 `asset2d:templates.list` / `asset2d:templates.get` / `asset2d:groups.instantiateTemplate`，让 agent 能自己把模板组放上画布（不必等人拖入）。**
+  此前 `groups.list/get` 只看见画布上**已实例化**的组——空画布时 agent 拿不到任何模板，skill 只能「提示用户拖入」，agent 无法自主操作模板。现补齐两条能力：
+  ①**库发现**：`templates.list`（转发 `GET /api/v1/group-templates?scope=templates`）列出随插件发布的 5 套模板 + 用户模板的 `id/name/category`；`templates.get` 读单个模板完整定义（`exposedInputs/Outputs` 即 `in_N/out_N` 端口契约）。均剥离内联预览图（`stripInlineImages`）。
+  ②**一步实例化**：`groups.instantiateTemplate` 转发新路由 `POST /api/v1/group-templates/:id/instantiate`——读模板 JSON → `buildTemplateOps` 重映射内部 node/edge/group id（同模板可重复实例化不冲突、对外 `in_N/out_N` 端口名稳定）→ 盖 `__groupIsTemplate` provenance → 一条原子 `applyBatch` 落地为一个 `__group__` 顶层组节点，返回运行时 `groupId` + 端口清单供接线。
+  新增 `backend/src/lib/templateOps.ts`（`buildTemplateOps`/`splitTemplate`，与 `wb-scene-generator` 同名 lib 及 CLI `node-create-template` 保持等价）；路由加在 `backend/src/routes/groupTemplates.ts`（复用 `findGroupFile`/`readGroup`/`categoryFor`/`templateRoots`，经 `ensureMutationAccess` 走同一把 per-agent 项目锁）；三工具声明于 `forgeax-plugin.json`。
+  配套把 `skills/generate-2d-asset/SKILL.md` 的操作流程从「等用户拖入模板」改为「`templates.list` 发现 → `groups.instantiateTemplate` 自实例化 → `groups.get` 取 runButtons → 喂入参 → 触发 → execute → 读产出」，并更新 id 来源铁律（`groupId` 取自 instantiate 返回、`runButtons.nodeId` 取自 `groups.get`，禁止手拼展开模板）。
+  *为什么：* 把 `wb-scene-generator` 早有的 `templates.*` + `instantiateTemplate` 通路移植到 2D app，补齐 agent 自主操作模板的最后一环。验证：`backend/tests/templateInstantiate.test.ts`（4 项，含把内置 `conceptual_scene_design` 模板实例化进 app runtime、断言 `__group__` 影子节点 + 稳定 `in_N/out_N` 端口 + 同模板二次实例化不撞 id）；既有 `tool-handlers`/`group-templates` 测试不受影响。
+- **新增 MCP 工具 `asset2d:groups.list` / `asset2d:groups.get`，让 agent 能像人一样驱动画布上的组合电池（模板组）。**
+  `backend/src/tool-handlers.ts` 两个工具转发已存在的只读路由 `GET /api/v1/groups`、`/api/v1/groups/:id`：
+  `groups.list` 返回每个组合电池的 `id/name/exposedInputs/exposedOutputs` 及 `runButtons`；`groups.get` 返回单个组的完整（去内联图/`_gen_*` 大字段）定义 + `runButtons`。
+  `runButtons` 复刻前端 `GroupNode.tsx` 外侧映射 Run 按钮——**组内每个 `manualTrigger` 电池（image_gen/text_gen）各出一个可单独触发的入口**（`{nodeId, opId, kind:image|text}`），
+  agent 据此对内部节点 id 调 `generation.generateImage` 即与人点外侧 Run 走完全相同的后端路径（`ai/routes.ts` 的 `findNodeWithGroup` 跨组解析）。
+  *为什么：* 此前 `pipeline.get` 只返回顶层 nodes/edges，组合电池内部的 `image_gen` 节点 id 既不可见又在实例化时被重映射，agent 无法定位并触发模板组的内部生图。
+  `forgeax-plugin.json` 声明这两个工具。验证：`backend/tests/tool-handlers.test.ts` 新增用例（建 text_panel→image_gen 组合电池，断言 `groups.list/get` 暴露端口齐全且 image_gen 出一个 `kind:image` 的 runButton），3 项全过。
+- **`image_atlas_compose` / `cliff_atlas_extract` 新增 `enable` 开关输入端口（bool，默认 true）。** 端口为 false 时跳过加工、所有输出端口返回空（execute 顶部 `if (!enable) return {}`，先于必填校验/IO，故关闭时即使未连源图也不报错）；默认开，行为与原先一致。`batteries/image/tiles/image_atlas_compose/{meta.json,index.ts}`、`batteries/image/tiles/cliff_atlas_extract/{meta.json,index.ts}`。*为什么：* 便于在流水线中按条件门控这两步重计算。
+- **新增 helper 电池 `tile_type`（Tile 种类下拉框）。** `batteries/helper/tile_type/`：输入端口 `tile`（带 `options` 下拉：floor / cliff / forest / flower_bed / tilemap / slope，默认 floor）原样输出到字符串端口 `value`（`index.ts:tileType`，非法值兜底 floor）。*为什么：* 供下游按统一的 tile 种类字符串选择/路由资产生成分支。
+- **右侧 Preview 资产信息新增「生成时间」行（`Created`）。** `frontend/src/surfaces/ImagePreviewSurface.tsx`
+  新增 `formatCreatedAt()`，把记录里的 `createdAt`（ISO 时间戳）格式化为本地 `YYYY-MM-DD HH:mm:ss`
+  与 `Location` 同处一行（左 Location、右 Created）显示（不可解析时回退原值，缺失显示 `-`）。*为什么：* 之前 Preview 只展示
+  Alias/Prompt/Source/Size/Blob/Location，无法看出资产何时生成。
+
+### Fixed
+- **Asset Store 现在能实时显示新生成的图片（含 `All` 列），无需手动切换标签刷新。**
+  `frontend/src/surfaces/GeneratedAssetStoreSurface.tsx` 新增一个 2s 轮询：复用 Preview 的廉价信号
+  `latestPreviewAsset()`（`GET /api/v1/preview/latest`，单条记录），当最新 alias 变化即代表有新资产生成，
+  随即 `setReloadKey(k+1)` 重新拉取 folders+assets；并以 `interactingRef`（重命名/右键菜单/文件夹菜单/
+  新建弹窗/确认弹窗/导入/拖拽中）守护，交互进行中不强制刷新以免抢走焦点。
+  *为什么：* 此前列表只在切换 `folder` 或本地变更（导入/删除等）时 re-fetch，AI 图像节点产出的新图不会进入网格，
+  用户必须点一下标签才显示；Preview 因为本就在轮询故能实时更新。改为同样轮询，二者行为一致。
+
+### Changed
+- **房子路由改默认走 `dechouse_gen`（不再当 PART A 小 sprite）。** `generate-2d-asset/SKILL.md` 路由表把「房子/小屋/建筑」单列一行→ PART C（`dechouse_gen` 一键模板）置顶，PART A 限定为「小物件（植被/道具/图标/小件）」；改写 line 36 路由说明与 `notes/common-base.md` PART C 段，去掉「专属/非默认/仅当用户明确要 billboard」框定。*为什么：* 用户实测 Sino 做村庄时房子全走了 PART A、完全没调 `dechouse_gen`；根因是路由文档把正确路径 gate 成「非默认」。配套场景侧改动见 `wb-scene-generator` CHANGELOG。
+
+### Added
+- **2D 侧补齐 `instantiateTemplate` 能力（与场景侧对等）：`asset2d:pipeline.instantiateTemplate` + `asset2d:templates.list` / `asset2d:templates.get`。**
+  此前 2D agent 工具层**没有**实例化模板组的入口（只有 `pipeline.applyBatch`），导致文档只能让 AI「手搭等价链」来生成建筑——
+  与「生成场景用模板组一键实例化」的产品做法不一致、且过时易错。本次把 `wb-scene-generator` 的同名能力**逐份移植**到 2D：
+  ① 新增 `backend/src/lib/templateOps.ts`（`buildTemplateOps`/`splitTemplate`，与场景侧 / CLI `node-create-template` 字节级等价的 backend twin）；
+  ② `backend/src/routes/groupTemplates.ts` 新增 `POST /api/v1/group-templates/:id/instantiate`（仅扫 `templates/`，经内核 `applyBatch` 一次性把模板组落成
+  **单个锁定组节点**并回填 `__groupIsTemplate` provenance，受 `ensureMutationAccess` 项目锁保护）；
+  ③ `backend/src/tool-handlers.ts` 新增 3 个 op handler（`templates.list`/`templates.get` 走 `?scope=templates` 并 `stripInlineImages` 防 base64 污染上下文；
+  `pipeline.instantiateTemplate` 转发 `/instantiate`）；④ `forgeax-plugin.json` 声明这 3 个 `exposedToAI` 工具及 schema。
+  *为什么：* 用户指出「生成建筑只需一个 `dechouse_gen` 模板电池，手搭一系列节点连接是过时错误做法」——2D 必须像场景侧一样支持一键实例化模板组。
+  验证：`backend/tests/group-templates.test.ts` 新增「实例化内置 `dechouse_gen` 得到单组节点 + 对外 `in_0`/`out_3`/`out_4` 端口」「不存在的模板 404」两例；
+  `tsc --noEmit` 对新增 3 份文件干净（既存 `src/ai/*` 的 `findNodeWithGroup` 报错为环境内核未重建，与本改动无关）。
+
+### Changed
+- **装饰性房屋占地尺寸写明「铁律」：推荐 ≥`10×10` 格（常规 10×10～16×16），`4×4` 太小不成形、别过大。**
+  此前 PART C / `house_template` 文档示例多用 `[[0,2,0],[1,1,1]]`、`[[1,1,1],[1,1,1],[1,1,1]]` 这类 2×3 / 3×3，
+  容易让 AI 误以为掩码就该这么小——实际太小的格数渲出来门/窗/屋脊挤成一团、整栋贴图细节稀碎。
+  在 `executions/part-c-shaped-house.md`「形状从哪来」+ `dechouse_gen.in_0` 端口行、`batteries/grayscale/house/house_template/README.md`
+  spec 行都补上尺寸铁律，并注明小数组**只是 0/1/2 语义示意、非推荐尺寸**。*为什么：* 用户明确「装饰性房屋至少 10×10，4×4 是瞎扯淡」。
+- **PART C / generate-2d-asset 技能文档全面改为「一键 `instantiateTemplate({templateId:\"dechouse_gen\"})`」，更正上一条「2D 工具层暂无 instantiateTemplate / 用 applyBatch 复刻等价链」的说法。**
+  随上面新增的 2D `instantiateTemplate` 能力，把 `skills/generate-2d-asset/SKILL.md`（PART C 摘要新增「生成建筑=一键模板，别手搭」lead-in）、
+  `executions/part-c-shaped-house.md`（「C-阶段零」改写「怎么用」为一键实例化 + 三步收尾；C-阶段一/二加 banner 标注为「内部原理/极端兜底」）
+  统一为：常规生成建筑一律 `asset2d:pipeline.instantiateTemplate`，逐节点手搭仅在魔改模板内部时参考。*为什么：* 文档曾因当时缺 op 而教 AI 手搭链，
+  现能力补齐，必须改回与场景侧一致的一键实例化（append-only 更正，不改写上一条历史）。
+
+- **PART C 技能文档新增「C-阶段零 · 一键模板 `dechouse_gen`」端口契约节，作为 Scene 建筑 → 2D 贴图的对接真相源。**
+  核对了新加的成组电池模板 `batteries/templates/2D/dechouse_gen`（id `group_1781717536593_kh58a`，内部 = `house_template`
+  + `house_footprint` + `grid_json_to_size` + `image_gen` + remove_bg/pixel_fix/despeckle/cut_by_mask + `image_output` 一整条）
+  的输入/输出端口，并在 `skills/generate-2d-asset/executions/part-c-shaped-house.md` 写明：`in_0`(json_mask) 内部同时喂
+  `house_template.spec`/`house_footprint.spec`/`grid_json_to_size.json`——**正是 Scene 侧 `building_footprint_mask → grid_to_json`
+  输出的同一份 0/1/2 占地 JSON**；`in_1`=height、`in_15`=roofType → `out_3`=建筑贴图、`out_4`=碰撞掩码。*为什么：* Scene 侧
+  「手动放楼（PointSampleBuilding）→ 取占地 json → 建筑贴图 + collision mask 导出」要有一份明确的端口契约，sino 才能照着对接；
+  并提示 2D 工具层暂无 `instantiateTemplate`，AI 用 `asset2d:pipeline.applyBatch` 复刻等价链（或 UI 拖模板）。
+
 - **`image_atlas_compose.template` 改为可选，留空时自动加载内置标准模版。** 根因：`template`
   此前 `required:true`，做标准 tile（`common_16`）也必须建一个模版 `image_source` 并填内置模版
   `preset:tiles/tile模板.png` 的 `{alias,blobId}`——但 `preset:` 是 alias 前缀、对应的虚拟文件夹叫
@@ -343,6 +424,26 @@ calendar dates in the project timezone.
   `part-c-shaped-house.md`, `pipeline-schema.md`, `common-base.md`, `forgeax-plugin.json`.
 
 ### Added
+- **Workbench CN 场景资产 skill 迁移为可编排电池与模板。** 新增 Four-Way 场景资产电池
+  `fourway_route_classifier` / `fourway_prompt_builder` / `fourway_metadata_pack` /
+  `seamless_edge_check`（落点 `batteries/image/fourway/*`），把 top-down/isometric
+  资产按 `material_seamless` / `decal_sprite` / `modular_tileset` / `prop_sprite`
+  分流，生成提示词、连续性报告和 runtime metadata；新增横版场景电池
+  `sidescroller_prompt_builder` / `sidescroller_crop_letterbox` /
+  `sidescroller_resize_tile` / `sidescroller_edge_blend` /
+  `sidescroller_stitch_tiles` / `sidescroller_quality_check` /
+  `sidescroller_metadata_pack`（落点 `batteries/image/sidescroller/*`），把
+  2D side-scroller skill 的 16:9 背景、640×360 tile、1920×360 拼接、质量检查和
+  metadata 约定沉淀为普通可复跑电池。新增模板
+  `FourWayMaterialSeamless` / `SideScrollerBackgroundLayer`
+  （`batteries/templates/*`），并补 `asset2d:templates.list/get` 与
+  `asset2d:pipeline.instantiateTemplate`（`forgeax-plugin.json`、
+  `backend/src/tool-handlers.ts`、`routes/groupTemplates.ts`、
+  `lib/templateOps.ts`），让 AI 可先实例化高频模板再触发 `image_gen` 和下游
+  `pipeline.execute`。同步更新 `generate-2d-asset` PART D/PART E 执行文档、
+  `battery-catalog.md`、`ARCHITECTURE.md` 和 `docs/architecture/backend.md`。
+  *为什么：* 两个共享 skill 原本只是文档规则，AI 每次都要临时解释并手搓节点；拆成
+  路由 / prompt / 后处理 / 检查 / metadata 电池后，生成链路可复用、可验证、可由模板稳定落图。
 - **Asset Store 新增「文件夹」视图（Folder），与 Grid / List 并列于标题栏视图下拉菜单。**
   选中文件夹视图时左侧文件夹菜单栏隐藏（该预览形式本身即是文件夹导航），主区域改为
   Windows 资源管理器风格的文件夹卡片网格——每张卡片是带页签的文件夹外观，盖内 peek

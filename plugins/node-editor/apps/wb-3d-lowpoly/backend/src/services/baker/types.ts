@@ -51,18 +51,27 @@ export interface TessellationOptions {
 }
 
 /**
- * 默认相对容差：
- *   - relativeDeflection=0.004（包围盒对角线的 0.4%）
- *   - 下限 0.0001（0.1mm，等于旧的绝对默认值）→ 小零件 / 小特征精度不退化
- *   - 上限 0.001（1mm）→ 大齿轮最多到 1mm 弦距，三角面骤减、meshing 提速数倍
- * 净效果：小件维持旧精度，大件大幅提速，且任何形状都不会比旧的 0.1mm 更细。
+ * 默认相对容差（**low-poly 取向**）：
+ *   - angularDeflection=0.35（≈20°）—— 曲面分面的主控杠杆。它直接决定球 / 圆柱 /
+ *     圆锥这类回转面**每圈分几段**：值越大、段数越少。0.35 给出约 18~20 段的
+ *     圆，比旧的 0.6（≈34°，约 10 段）更圆润、棱角不再扎眼，但仍保持 low-poly。
+ *   - relativeDeflection=0.015（包围盒对角线的 1.5%）+ 上限 0.01（1cm）：弦距是
+ *     另一个会逼出细分的约束（OCCT 取角度/弦距里更细的那个）。放粗到 1.5% / 1cm 后，
+ *     弦距通常不再是瓶颈，回转面段数由上面的 angular 杠杆主控。
+ *   - 下限 minLinearDeflection=0.0001（0.1mm）保持不变：**独立的小零件包围盒小，
+ *     弦距按比例自然回到 0.1mm 级**，所以螺孔 / 小倒角等真实小特征精度不退化；
+ *     放粗只作用在"大回转面"上 = 正是我们要的 low-poly。
+ *
+ * 取舍：relativeDeflection 用整体包围盒，所以**大零件上的小曲面特征**（如 1m 大件
+ * 上的 1cm 圆角）会被 1cm 上限粗化。这是 low-poly 工作台刻意的取向（要"少面、带棱"）；
+ * 真要某件更精细，回该件 PART A/B 把它单独建小一点 / 单独 bake 即可。
  */
 export const DEFAULT_TESSELLATION: TessellationOptions = {
   linearDeflection: 0.0001,
-  angularDeflection: 0.5,
-  relativeDeflection: 0.004,
+  angularDeflection: 0.35,
+  relativeDeflection: 0.015,
   minLinearDeflection: 0.0001,
-  maxLinearDeflection: 0.001,
+  maxLinearDeflection: 0.01,
 };
 
 /** 注入到每个 op builder 的上下文。后续要加日志 / 性能计时 / 容差覆写 都加在这里。 */

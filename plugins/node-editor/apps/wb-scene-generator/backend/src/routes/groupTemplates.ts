@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import type { NodeGroup, Op } from '@forgeax/node-runtime'
 import { applyBatch } from '@forgeax/node-runtime'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { basename, dirname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
 import { getRuntime } from '../runtime.js'
@@ -62,15 +62,40 @@ interface GroupTemplateBattery {
   iconPng?: string
   displayGroup?: string
   sourcePath?: string
+  /** True for preset templates shipped in the plugin (read-only); false for user templates under `.forgeax`. */
+  builtin?: boolean
 }
 
-/** Read icon.png beside the template json and encode it as a data URL. */
+// Templates 模式预览图：template 文件夹内若含图片（任意 png/jpg/jpeg/webp/gif），
+// 优先 icon.png，否则取首张（按名排序，确定性），编码为 data URL 当前端 thumb。
+// 与 wb-2d-scene-asset-generator 的 readPreviewImage 行为保持一致。
+const PREVIEW_EXT_MIME: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+}
+
+/** Read the first supported preview image beside the template json (prefer icon.png). */
 async function readIconPng(file: string): Promise<string | undefined> {
-  const pngPath = resolve(dirname(file), 'icon.png')
-  if (!existsSync(pngPath)) return undefined
+  const dir = dirname(file)
+  let entries: import('node:fs').Dirent[]
   try {
-    const buf = await readFile(pngPath)
-    return `data:image/png;base64,${buf.toString('base64')}`
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return undefined
+  }
+  const images = entries
+    .filter((e) => e.isFile() && PREVIEW_EXT_MIME[extname(e.name).toLowerCase()] !== undefined)
+    .map((e) => e.name)
+    .sort((a, b) => (a === 'icon.png' ? -1 : b === 'icon.png' ? 1 : a.localeCompare(b)))
+  const picked = images[0]
+  if (!picked) return undefined
+  try {
+    const buf = await readFile(resolve(dir, picked))
+    const mime = PREVIEW_EXT_MIME[extname(picked).toLowerCase()]
+    return `data:${mime};base64,${buf.toString('base64')}`
   } catch {
     return undefined
   }
@@ -128,9 +153,50 @@ async function findGroupFile(groupId: string, scope: 'groups' | 'templates'): Pr
   return null
 }
 
+/**
+ * Locate a develop group battery folder by its on-disk folder name when the json
+ * is already gone (README-only orphans after a partial delete).
+ */
+async function findGroupBatteryFolder(batteryFolderName: string): Promise<string | null> {
+  for (const root of groupRoots) {
+    let categories: import('node:fs').Dirent[]
+    try {
+      categories = await readdir(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const cat of categories) {
+      if (!cat.isDirectory()) continue
+      const dir = resolve(root, cat.name, batteryFolderName)
+      if (!existsSync(dir)) continue
+      try {
+        const info = await stat(dir)
+        if (info.isDirectory()) return dir
+      } catch {
+        continue
+      }
+    }
+  }
+  return null
+}
+
+/** Remove a group battery folder (<cat>/<name>/) and prune an empty category dir. */
+async function removeGroupBatteryDirectory(dir: string, owningRoot: string): Promise<void> {
+  const resolvedDir = resolve(dir)
+  if (resolvedDir === resolve(owningRoot)) return
+  await rm(resolvedDir, { recursive: true, force: true })
+  const categoryDir = dirname(resolvedDir)
+  if (resolve(categoryDir) === resolve(owningRoot)) return
+  const remaining = await readdir(categoryDir).catch(() => null)
+  if (remaining !== null && remaining.length === 0) {
+    await rmdir(categoryDir).catch(() => {})
+  }
+}
+
 async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTemplateBattery[]> {
   const items: GroupTemplateBattery[] = []
   const seenPaths = new Set<string>()
+  const userRoot = userTemplateRoot()
   for (const { kind, roots } of kindsForScope(scope)) {
     for (const root of roots) {
       const files: string[] = []
@@ -159,6 +225,9 @@ async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTempl
             : `Group battery: ${group.name ?? group.id}`,
           version: '1.0.0',
           sourcePath,
+          // 用户内容（userTemplateRoot 下）= builtin:false（可右击删除）；
+          // 其余 groups/ 与内置 templates/ = builtin:true（只读，不可删除）。
+          builtin: root !== userRoot,
           ...(iconSvg !== undefined ? { iconSvg } : {}),
           ...(iconPng !== undefined ? { iconPng } : {}),
         })
@@ -166,6 +235,19 @@ async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTempl
     }
   }
   return items.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+}
+
+// 只在用户模板根（workspace `.forgeax`）下按 group id 定位文件，用于删除。
+// 刻意不搜内置 templates/ 与 groups/，从根上保证预设模板永不可删。
+async function findUserTemplateFile(groupId: string): Promise<string | null> {
+  const root = userTemplateRoot()
+  const files: string[] = []
+  await collectJsonFiles(root, files)
+  for (const file of files) {
+    const group = await readGroup(file)
+    if (group?.id === groupId || basename(file, '.json') === groupId) return file
+  }
+  return null
 }
 
 function safeName(value: unknown): string {
@@ -260,6 +342,39 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
     return { filePath, groupId: group.id, categoryName, batteryName }
   })
 
+  // 删除 GROUPS 标签下的成组电池：从本地电池目录（groups/<cat>/<name>/）物理删除。
+  // 只允许删 groupRoots 范围内的文件（templates/ 与项目外路径一律拒绝），删掉 json
+  // 后顺手清理只剩 icon 边车或已空的电池文件夹，保持 GROUPS 目录整洁。
+  app.delete('/api/v1/group-templates/groups/:id', async (req, reply) => {
+    const id = (req.params as { id?: string }).id?.trim()
+    if (!id) return reply.code(400).send({ error: 'missing id' })
+    const file = await findGroupFile(id, 'groups')
+    const orphanDir = file ? null : await findGroupBatteryFolder(id)
+    if (!file && !orphanDir) return reply.code(404).send({ error: 'group battery not found' })
+
+    const batteryDir = file ? dirname(file) : orphanDir!
+    const resolvedDir = resolve(batteryDir)
+
+    // Defense-in-depth: resolved path must stay inside a groupRoot — never let a
+    // crafted id escape into templates/ or outside the battery tree.
+    const owningRoot = groupRoots.find(
+      (root) => resolvedDir === resolve(root) || resolvedDir.startsWith(resolve(root) + sep),
+    )
+    if (!owningRoot) return reply.code(403).send({ error: 'group battery is outside the deletable battery roots' })
+    if (resolve(batteryDir) === resolve(owningRoot)) {
+      return reply.code(403).send({ error: 'refusing to delete a group root directory' })
+    }
+
+    try {
+      await removeGroupBatteryDirectory(batteryDir, owningRoot)
+    } catch (err) {
+      app.log.error({ err, dir: resolvedDir }, 'failed to delete group battery')
+      const message = err instanceof Error ? err.message : String(err)
+      return reply.code(500).send({ error: `Failed to delete group battery: ${message}` })
+    }
+    return { ok: true }
+  })
+
   // 用户「保存到模板」：把成组电池作为用户内容写入 workspace `.forgeax` 区域，
   // 固定大标签 "My templates"，小标签为子目录：
   //   <workspaceRoot>/user-content/templates/My templates/<smallTag>/<name>.json
@@ -292,6 +407,26 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
       return reply.code(500).send({ error: `Failed to save user template: ${message}` })
     }
     return { filePath, groupId: group.id, smallTag, templateName }
+  })
+
+  // 删除用户模板：仅限 userTemplateRoot 下的内容（预设模板只读，不在此可达）。
+  // 删除 json 后顺手清理变空的小标签目录（保持「My templates」整洁，不留空分组）。
+  app.delete('/api/v1/group-templates/user/:id', async (req, reply) => {
+    const id = (req.params as { id?: string }).id?.trim()
+    if (!id) return reply.code(400).send({ error: 'missing id' })
+    const file = await findUserTemplateFile(id)
+    if (!file) return reply.code(404).send({ error: 'user template not found' })
+    try {
+      await rm(file)
+      const dir = dirname(file)
+      const remaining = await readdir(dir).catch(() => [] as string[])
+      if (remaining.length === 0) await rmdir(dir).catch(() => {})
+    } catch (err) {
+      app.log.error({ err, file }, 'failed to delete user template')
+      const message = err instanceof Error ? err.message : String(err)
+      return reply.code(500).send({ error: `Failed to delete user template: ${message}` })
+    }
+    return { ok: true }
   })
 
   // Instantiate a saved group template INTO the active project's graph as one

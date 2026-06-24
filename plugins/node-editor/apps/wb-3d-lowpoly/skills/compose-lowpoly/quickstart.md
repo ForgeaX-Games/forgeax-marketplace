@@ -48,9 +48,28 @@ same path.
 
 ## Iteration Loop
 
-The iteration loop runs in **Phase 2** (assembly). Phase 1 is a bake loop with no
+The iteration loop is a **self-check → self-fix → re-render closed loop the agent
+owns** — diagnose and fix mechanical defects yourself, loop until QC is clean *and*
+all four views match the brief, and only stop to ask the user on subjective /
+trade-off / unclear-requirement calls. Do not hand the diagnosis back to the user.
+
+The loop runs in **Phase 2** (assembly). Phase 1 is a bake loop with no
 per-part screenshot/QC gate — model each part, `g_bake_part` it, move on. Once the
-meshes are staged, assemble and loop. After every meaningful Phase-2 graph change:
+meshes are staged, assemble and loop.
+
+For a **scene** (the SCENE orchestration in
+[part-c-scene-assembly.md](executions/part-c-scene-assembly.md)): a scene is just
+**per-unique-item `g_bake_part` (all in the same scene project) → reference
+assembly** — there is **no scene-level battery to reach for**. Open the scene
+project once, `read` each item's PART A/B execution file and model + bake it there,
+then assemble by giving each `g_part` an `origin` (one `<sha>.obj` reused across N
+instances). Iterate in two tiers: **per item first** (model + bake each unique item
+correctly), **then the whole scene** (assemble by `g_part` origins, then QC +
+four-view the full scene). In scene mode treat `g_geometry_qc`'s `islands` as noise
+(auto-stitch already joins the jointless roots) and keep `aabb_overlap` as the hard
+placement signal.
+
+After every meaningful Phase-2 graph change:
 
 1. Execute the graph.
 2. **Run the QC sensors.** Wire `g_geometry_qc` and `g_validate` into the
@@ -59,7 +78,7 @@ meshes are staged, assemble and loop. After every meaningful Phase-2 graph chang
      `missing_aabb`, `overlaps`, `floating_links` (parts with no joint path to
      root — dropped at runtime), `orphan_profiles` (profiles never
      extruded/lofted/revolved), `primitive_only` (every shape is a bare primitive
-     with no CSG solid / Parts / Gears / baked mesh — fires **even when the boxes
+     with no CSG solid / Parts (incl. gears) / baked mesh — fires **even when the boxes
      are wrapped in g_part + g_joint**, so wrapping a box-stack does not silence
      it; **stop and re-decompose, do not ship a box-stack**),
      and the structured `signals[]` (`{code, severity, message, ids?}`) — loop on

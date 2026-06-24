@@ -4,10 +4,11 @@
  * 输入：
  *   - voxels : Point3D[]（rank=1，整组消费；通常来自 node_explode.voxels）
  *   - grid   : number[][] —— 基准 grid，仅用于决定输出形状（值不参与计算）
- *   - z      : number，默认 0；切片高度
+ *   - z      : number（可选）；切片高度。未提供时自动取所有 voxel 中最大的 z 作为切片高度。
  *
  * 输出：
  *   - slice    : number[][]，形状同 grid；voxel.z === z 且 (x,y) 落在 grid 范围内 → 1，否则 0
+ *   - z        : number，本次实际用于切片的 z（外部传入则回显，未传入则为自动选取的最大 z）
  *   - hitCount : 切片中被置 1 的格子数
  *
  * autoIterate：
@@ -20,6 +21,7 @@ import { isPoint3D } from '../../../../vendor/dist/shared/types/index.js';
 
 interface VoxelSliceResult {
   slice: number[][];
+  z: number;
   hitCount: number;
   error?: string;
 }
@@ -51,31 +53,53 @@ function makeZeroGrid(rows: number, cols: number): number[][] {
 export function voxelSlice(input: Record<string, unknown>): VoxelSliceResult {
   const grid = input.grid;
   if (!Array.isArray(grid)) {
-    return { slice: [], hitCount: 0, error: 'grid is required (number[][])' };
+    return { slice: [], z: 0, hitCount: 0, error: 'grid is required (number[][])' };
   }
   const shape = computeShape(grid);
   if (typeof shape === 'string') {
-    return { slice: [], hitCount: 0, error: shape };
-  }
-
-  const z = Number(input.z ?? 0);
-  if (!Number.isFinite(z)) {
-    return { slice: [], hitCount: 0, error: 'z must be a finite number' };
+    return { slice: [], z: 0, hitCount: 0, error: shape };
   }
 
   const voxels = input.voxels;
   if (!Array.isArray(voxels)) {
-    return { slice: [], hitCount: 0, error: 'voxels is required (Point3D[])' };
+    return { slice: [], z: 0, hitCount: 0, error: 'voxels is required (Point3D[])' };
+  }
+
+  // 先校验所有 voxel，确保后续既能自动选取最大 z，也能安全参与切片。
+  for (let i = 0; i < voxels.length; i++) {
+    if (!isPoint3D(voxels[i])) {
+      return { slice: [], z: 0, hitCount: 0, error: `voxels[${i}] is not a valid Point3D` };
+    }
+  }
+
+  // z 解析：外部提供则按其切片；否则自动取所有 voxel 中最大的 z。
+  const hasExternalZ = input.z !== undefined && input.z !== null && input.z !== '';
+  let z: number;
+  if (hasExternalZ) {
+    z = Number(input.z);
+    if (!Number.isFinite(z)) {
+      return { slice: [], z: 0, hitCount: 0, error: 'z must be a finite number' };
+    }
+  } else {
+    if (voxels.length === 0) {
+      return {
+        slice: [],
+        z: 0,
+        hitCount: 0,
+        error: 'z is not provided and voxels is empty, cannot infer slice height',
+      };
+    }
+    z = -Infinity;
+    for (const v of voxels) {
+      const vz = (v as { z: number }).z;
+      if (vz > z) z = vz;
+    }
   }
 
   const out = makeZeroGrid(shape.rows, shape.cols);
   let hitCount = 0;
 
-  for (let i = 0; i < voxels.length; i++) {
-    const v = voxels[i];
-    if (!isPoint3D(v)) {
-      return { slice: [], hitCount: 0, error: `voxels[${i}] is not a valid Point3D` };
-    }
+  for (const v of voxels as Array<{ x: number; y: number; z: number }>) {
     if (v.z !== z) continue;
     // 体素 (x,y) 通常为整数索引；保险起见用 Math.round 对齐到 grid 索引空间
     const ix = Math.round(v.x);
@@ -87,5 +111,5 @@ export function voxelSlice(input: Record<string, unknown>): VoxelSliceResult {
     }
   }
 
-  return { slice: out, hitCount };
+  return { slice: out, z, hitCount };
 }

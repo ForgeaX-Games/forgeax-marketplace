@@ -178,9 +178,16 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     return reg.getWorkspace()
   })
 
-  app.put('/api/v1/workspace', async (req) => {
+  app.put('/api/v1/workspace', async (req, reply) => {
     const reg = await getProjectRegistry()
     const patch = (req.body ?? {}) as { activeProjectId?: string; recentProjectIds?: string[] }
+    // Switching the active project here must honour the same exclusive open-then-
+    // operate lock as POST /projects/:id/activate — otherwise an AI caller could
+    // clobber another agent's active project by writing the workspace directly.
+    if (patch.activeProjectId) {
+      const lock = reg.acquireProjectLock(patch.activeProjectId, extractCaller(req))
+      if (!lock.ok) return reply.code(409).send({ reason: lock.reason })
+    }
     const ws = reg.setWorkspace(patch)
     if (patch.activeProjectId) await rebindWsSubscriptions()
     return ws

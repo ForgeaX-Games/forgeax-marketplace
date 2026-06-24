@@ -63,8 +63,8 @@ below for the full rules — this list is the spine, that section is the law).
    node: name → real form → family/op route → key dimensions → detail points →
    per-primitive justification. No manifest, no building.
 3. **Phase 1 — model + bake each part (loop, one part per pass).** For each part:
-   build an independent `CSG` / `Parts` / `Gears` / `Architecture` subgraph that
-   makes the real detail, end it with `g_bake_part`, and record the returned
+   build an independent `CSG` / `Parts` (incl. gears) / `Architecture` subgraph
+   that makes the real detail, end it with `g_bake_part`, and record the returned
    `filename` (`<sha>.obj`). One small `applyBatch` + `execute` per part.
 4. **Phase 2 — assemble (one clean rewrite).** Reference each staged mesh with
    `g_mesh(filename=<sha>.obj)` → wrap in `g_part` → color with `g_material` →
@@ -174,8 +174,8 @@ the row before modeling, not during.
 Iterate over the manifest, **one part at a time**. For each part:
 
 1. Build an **independent subgraph from an empty geometry** (do not thread it into
-   any other part's wire). Use `CSG` / `Parts` / `Gears` / `Architecture` to make
-   the real detail — this is where form quality is won or lost.
+   any other part's wire). Use `CSG` / `Parts` (incl. gears) / `Architecture` to
+   make the real detail — this is where form quality is won or lost.
 2. End the subgraph with **`g_bake_part`** (`shape_id` = the terminal shape's id,
    wired from the upstream `id` output or set as a literal). It bakes that shape
    into a staged mesh in `library/blobs/` and returns `filename = <sha>.obj`.
@@ -201,8 +201,9 @@ CSG/Parts op builds this for real?":
 - round / domed / bottle / nozzle / barrel body → `g_revolve` / `g_lathe` /
   `g_loft`, **not** a cylinder.
 - pipe / cable / handle / duct → `g_pipe` / `g_sweep`, **not** stacked cylinders.
-- knob, bezel, wheel, tire, hinge, fan, gear → the matching `Parts` / `Gears`
-  battery (parametric and already correct), **not** an approximation.
+- knob, bezel, wheel, tire, hinge, fan, gear → the matching `Parts` battery
+  (gears via `g_gear` + `tooth_profile`; parametric and already correct), **not**
+  an approximation.
 - rounded edges / chamfers / fillets → build them into the profile
   (`g_profile_rounded_rect`) or via CSG, **not** ignored.
 
@@ -232,9 +233,20 @@ If the assembled object is wrong, only adjust **joints / placement / color** in
 Phase 2 — do **not** reach back into a part's internals. To change a part's
 geometry, re-model and re-bake that single part in Phase 1.
 
-**Material decision (settled):** the stage format is **OBJ (pure geometry)**;
-color is applied in Phase 2 by `g_material` on the link. `g_bake_part` only bakes
-geometry — the baker is unchanged and nothing is embedded in the mesh.
+**Material decision (PART A default):** the per-part stage format is **OBJ (pure
+geometry)**; `g_bake_part` bakes geometry only and color is applied in Phase 2 by
+`g_material` on the link. This keeps geometry deduped and lets you recolor per
+instance.
+
+> **Alternative — one reusable colored asset:** if this object will be **placed into
+> scenes as a fixed-palette unit** (and has no moving joints), you can instead skip
+> the per-part OBJ staging and bake the whole colored object into a **single
+> multi-material `<sha>.glb`** with **`g_bake_object`**: build all parts with their
+> real shapes + `g_material` in one graph, then `g_bake_object`. Scenes reference it
+> once via `g_mesh(filename=<sha>.glb)` with **no link material**. See
+> [PART C · route A](part-c-scene-assembly.md). Trade-off: color is baked in, so the
+> `.glb` is not recolorable per instance and same-shape/different-color does not
+> dedup. Use the OBJ + Phase-2 `g_material` route when you need per-instance recolor.
 
 **Phase-2 efficiency check:** because Phase 2 is all native `g_mesh` references,
 `g_to_urdf` should report `bakeFallbacks = 0`, `report.meshFileCount = 0`, and

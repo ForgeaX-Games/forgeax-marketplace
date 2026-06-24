@@ -33,9 +33,11 @@ import { reachableSubgraphSource, type Arg, type Geometry, type Statement } from
 import { logger } from '../../utils/logger.js';
 import { BakerError } from './errors.js';
 import { getOpBuilder, listBakeableOps } from './ops/index.js';
-import { shapeToObj } from './obj_export.js';
+import { shapeToObj, meshShape } from './obj_export.js';
+import { groupsToGlb, type ColoredMeshGroup } from './glb_export.js';
 import { bakeSha256 } from './canonical.js';
 import { csgCut, csgFuse, csgIntersect } from './csg_helpers.js';
+import { safeDelete, drawingFromPoints, type ClosedDrawing } from './op_helpers.js';
 import { readBool, readNumber, readNumList, readString } from './arg_readers.js';
 import {
   combineMeshes,
@@ -230,6 +232,192 @@ export async function bakeGeometryShape(
   return runSerialized(() => bakeGeometryShapeInner(rootId, geometry, library, sha));
 }
 
+/** 一个带色 part：定位形状的 shapeId + 颜色 + 在物体内的相对位姿。 */
+export interface ColoredAssemblyPart {
+  shapeId: string;
+  rgba: [number, number, number, number];
+  origin?: [number, number, number];
+  rpy?: [number, number, number];
+}
+
+const COLORED_ASSEMBLY_ALGORITHM_VERSION = 'colored-assembly-glb-v1';
+
+/**
+ * 把一组带色 part（每个 = 形状子图 + rgba + 位姿）烘成**单个多材质 GLB**。
+ *
+ * 用途：`g_bake_object` 电池——把"一个由多个上色 part 组成的物体"整体烘成一个
+ * 自带内嵌材质的 `<sha>.glb`，场景里用 `g_mesh(filename=<sha>.glb)` 单实例引用即可
+ * 保留多种颜色（前提：引用它的 part 不要再上 link material 覆盖）。
+ *
+ * 每个 part 的形状用与 OBJ 烘焙相同的 tessellation 三角化（low-poly 容差一致），
+ * 顶点按 part 的 rpy + origin 烘入物体局部坐标，按颜色分 primitive 写进 GLB。
+ */
+export async function bakeColoredAssembly(
+  parts: readonly ColoredAssemblyPart[],
+  geometry: Geometry,
+  library: BakerLibraryHandle,
+): Promise<BakeResult> {
+  const partsSig = parts
+    .map((p) => {
+      const src = reachableSubgraphSource(p.shapeId, geometry);
+      const origin = (p.origin ?? [0, 0, 0]).join(',');
+      const rpy = (p.rpy ?? [0, 0, 0]).join(',');
+      return `${p.shapeId}@[${origin}]r[${rpy}]c[${p.rgba.join(',')}]::${src}`;
+    })
+    .join('\n~~~\n');
+  const sha = bakeSha256('__colored_assembly__', {
+    algorithm: { kind: 'string', value: COLORED_ASSEMBLY_ALGORITHM_VERSION },
+    parts: { kind: 'string', value: partsSig },
+  });
+  const cached = inprocCacheGet(sha);
+  if (cached) {
+    logger.debug(`[Baker] cache hit source=inproc colored-assembly sha=${sha.slice(0, 8)}`);
+    return { ...cached, cacheHit: true };
+  }
+  // 进程重启后 in-proc 缓存清空，但 GLB blob 仍在 library 里 —— 命中磁盘即可省去重烘。
+  const diskCached = tryReadDiskCachedBake(`${sha}.glb`, sha, library, 'colored-assembly', 'glb');
+  if (diskCached) {
+    inprocCacheSet(sha, diskCached);
+    return diskCached;
+  }
+  return runSerialized(() => bakeColoredAssemblyInner(parts, geometry, library, sha));
+}
+
+async function bakeColoredAssemblyInner(
+  parts: readonly ColoredAssemblyPart[],
+  geometry: Geometry,
+  library: BakerLibraryHandle,
+  sha: string,
+): Promise<BakeResult> {
+  const cached = inprocCacheGet(sha);
+  if (cached) return { ...cached, cacheHit: true };
+
+  if (parts.length === 0) throw new BakerError('colored assembly requires at least one part');
+
+  if (cumulativeBakeBytes >= REINIT_THRESHOLD_BYTES) {
+    await reinitOCCT();
+  }
+  await initBakerService();
+  if (!occtState) throw new BakerError('baker not initialized (unreachable)');
+
+  const byId = new Map(geometry.statements.map((s) => [s.id, s]));
+  const opCtx: OpContext = {
+    replicad: occtState.replicad,
+    tessellation: occtState.tessellation,
+  };
+
+  const memo: BakeBuildMemo = { shapes: new Map() };
+  const groups: ColoredMeshGroup[] = [];
+  const totalT0 = Date.now();
+  try {
+    for (const part of parts) {
+      const stmt = byId.get(part.shapeId);
+      if (!stmt) throw new BakerError(`colored assembly: shape "${part.shapeId}" not found in geometry`);
+      const product = buildStatementShape(opCtx, memo, stmt, byId, new Set());
+      let rawVerts: number[];
+      let rawTris: number[];
+      if (isMeshGeometry(product)) {
+        rawVerts = product.vertices.flatMap((v) => [v[0], v[1], v[2]]);
+        rawTris = product.faces.flatMap((f) => [f[0], f[1], f[2]]);
+      } else {
+        const m = meshShape(product, opCtx.tessellation);
+        rawVerts = m.vertices;
+        rawTris = m.triangles;
+        safeDelete(product);
+      }
+      const positions = transformVertices(rawVerts, part.origin ?? [0, 0, 0], part.rpy ?? [0, 0, 0]);
+      groups.push({ positions, indices: rawTris, rgba: part.rgba });
+    }
+  } catch (e) {
+    disposeMemo(memo);
+    if (e instanceof BakerError) throw e;
+    const err = e as Error;
+    throw new BakerError(`colored assembly build failed: ${err?.message ?? String(e)}${err?.stack ? `\n${err.stack}` : ''}`);
+  }
+  disposeMemo(memo);
+
+  const exportT0 = Date.now();
+  const exportResult = groupsToGlb(groups);
+  const exportMs = Date.now() - exportT0;
+
+  if (exportResult.triangleCount === 0) {
+    throw new BakerError('colored assembly produced an empty mesh (no triangles across all parts)');
+  }
+  if (exportResult.triangleCount > MAX_TRIANGLES || exportResult.bytes.byteLength > MAX_OBJ_BYTES) {
+    throw new BakerError(
+      `colored assembly produced an oversized mesh (V=${exportResult.vertexCount} ` +
+      `T=${exportResult.triangleCount} GLB=${exportResult.bytes.byteLength}B).`,
+    );
+  }
+
+  const alias = `${sha}.glb`;
+  const writeT0 = Date.now();
+  const record = await library.importFromBuffer(exportResult.bytes, alias, alias, {
+    zone: MESH_BAKE_ZONE,
+    source: 'pipeline',
+    tags: ['mesh', 'baked', 'colored_assembly', 'glb'],
+  });
+  const writeMs = Date.now() - writeT0;
+
+  const result: BakeResult = {
+    url: `${record.blobId}.glb`,
+    sha256: sha,
+    blobSha256: record.blobId,
+    vertexCount: exportResult.vertexCount,
+    triangleCount: exportResult.triangleCount,
+    byteSize: exportResult.bytes.byteLength,
+    cacheHit: false,
+    ...(exportResult.bboxMin ? { bboxMin: exportResult.bboxMin } : {}),
+    ...(exportResult.bboxMax ? { bboxMax: exportResult.bboxMax } : {}),
+  };
+  inprocCacheSet(sha, result);
+  cumulativeBakeBytes += exportResult.bytes.byteLength;
+  if (exportResult.bytes.byteLength >= SINGLE_LARGE_BAKE_BYTES) {
+    cumulativeBakeBytes += REINIT_THRESHOLD_BYTES;
+  }
+
+  logger.debug(
+    `[Baker] baked colored-assembly parts=${parts.length} sha=${sha.slice(0, 8)} ` +
+    `V=${result.vertexCount} T=${result.triangleCount} GLB=${result.byteSize}B ` +
+    `blob=${record.blobId.slice(0, 8)} export=${exportMs}ms write=${writeMs}ms total=${Date.now() - totalT0}ms`,
+  );
+  return result;
+}
+
+/**
+ * 把 flat 顶点按 URDF 位姿（rpy 后 origin）变换到物体局部坐标。
+ * 旋转顺序遵循 URDF 约定：R = Rz(yaw)·Ry(pitch)·Rx(roll)，作用于列向量。
+ */
+function transformVertices(
+  verts: readonly number[],
+  origin: readonly [number, number, number],
+  rpy: readonly [number, number, number],
+): number[] {
+  const [roll, pitch, yaw] = rpy;
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  // R = Rz(yaw) Ry(pitch) Rx(roll)
+  const r00 = cy * cp;
+  const r01 = cy * sp * sr - sy * cr;
+  const r02 = cy * sp * cr + sy * sr;
+  const r10 = sy * cp;
+  const r11 = sy * sp * sr + cy * cr;
+  const r12 = sy * sp * cr - cy * sr;
+  const r20 = -sp;
+  const r21 = cp * sr;
+  const r22 = cp * cr;
+  const [ox, oy, oz] = origin;
+  const out = new Array<number>(verts.length);
+  for (let i = 0; i < verts.length; i += 3) {
+    const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+    out[i] = r00 * x + r01 * y + r02 * z + ox;
+    out[i + 1] = r10 * x + r11 * y + r12 * z + oy;
+    out[i + 2] = r20 * x + r21 * y + r22 * z + oz;
+  }
+  return out;
+}
+
 async function bakeShapeInner(
   opName: string,
   args: Record<string, Arg>,
@@ -243,7 +431,8 @@ async function bakeShapeInner(
   const alias = `${sha}.obj`;
   const diskCached = tryReadDiskCachedBake(alias, sha, library, `op=${opName}`);
   if (diskCached) {
-    inprocCacheSet(sha, { ...diskCached, cacheHit: false });
+    // 磁盘命中即缓存命中：存入 in-proc 与返回值都用同一个 cacheHit:true，避免标志不一致。
+    inprocCacheSet(sha, diskCached);
     return diskCached;
   }
 
@@ -372,7 +561,7 @@ async function bakeGeometryShapeInner(
   const alias = `${sha}.obj`;
   const diskCached = tryReadDiskCachedBake(alias, sha, library, `geometry root=${rootId}`);
   if (diskCached) {
-    inprocCacheSet(sha, { ...diskCached, cacheHit: false });
+    inprocCacheSet(sha, diskCached);
     return diskCached;
   }
 
@@ -481,6 +670,7 @@ function tryReadDiskCachedBake(
   cacheKey: string,
   library: BakerLibraryHandle,
   label: string,
+  format: 'obj' | 'glb' = 'obj',
 ): BakeResult | null {
   const lookupT0 = Date.now();
   const asset = library.getByAlias?.(alias, MESH_BAKE_ZONE);
@@ -500,9 +690,9 @@ function tryReadDiskCachedBake(
 
   try {
     const bytes = readFileSync(filePath);
-    const stats = countObjStats(bytes);
+    const stats = format === 'glb' ? countGlbStats(bytes) : countObjStats(bytes);
     const result: BakeResult = {
-      url: `${asset.blobId}.obj`,
+      url: `${asset.blobId}.${format}`,
       sha256: cacheKey,
       blobSha256: asset.blobId,
       vertexCount: stats.vertexCount,
@@ -515,13 +705,59 @@ function tryReadDiskCachedBake(
     logger.debug(
       `[Baker] cache hit source=disk ${label} sha=${cacheKey.slice(0, 8)} ` +
       `blob=${asset.blobId.slice(0, 8)} V=${result.vertexCount} T=${result.triangleCount} ` +
-      `OBJ=${result.byteSize}B lookup=${Date.now() - lookupT0}ms`,
+      `${format.toUpperCase()}=${result.byteSize}B lookup=${Date.now() - lookupT0}ms`,
     );
     return result;
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
     logger.warn(`[Baker] failed to read disk cache ${label} alias=${alias}: ${detail}`);
     return null;
+  }
+}
+
+/** GLB 统计：解析 JSON chunk，汇总各 primitive 的顶点 / 三角形数与 POSITION 包围盒。 */
+function countGlbStats(bytes: Buffer): {
+  vertexCount: number;
+  triangleCount: number;
+  bboxMin: [number, number, number] | null;
+  bboxMax: [number, number, number] | null;
+} {
+  const empty = { vertexCount: 0, triangleCount: 0, bboxMin: null, bboxMax: null };
+  try {
+    if (bytes.byteLength < 20 || bytes.readUInt32LE(0) !== 0x46546c67) return empty; // 'glTF'
+    const jsonLen = bytes.readUInt32LE(12);
+    const jsonType = bytes.readUInt32LE(16);
+    if (jsonType !== 0x4e4f534a) return empty; // 'JSON'
+    const json = JSON.parse(bytes.toString('utf8', 20, 20 + jsonLen)) as {
+      accessors?: Array<{ count?: number; min?: number[]; max?: number[] }>;
+      meshes?: Array<{ primitives?: Array<{ attributes?: { POSITION?: number }; indices?: number }> }>;
+    };
+    const accessors = json.accessors ?? [];
+    let vertexCount = 0;
+    let triangleCount = 0;
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    let seen = false;
+    for (const mesh of json.meshes ?? []) {
+      for (const prim of mesh.primitives ?? []) {
+        const posIdx = prim.attributes?.POSITION;
+        const pos = posIdx !== undefined ? accessors[posIdx] : undefined;
+        const posCount = pos?.count ?? 0;
+        vertexCount += posCount;
+        const idxAcc = prim.indices !== undefined ? accessors[prim.indices] : undefined;
+        triangleCount += Math.floor((idxAcc?.count ?? posCount) / 3);
+        if (pos?.min && pos?.max && pos.min.length === 3 && pos.max.length === 3) {
+          seen = true;
+          for (let i = 0; i < 3; i++) {
+            if (pos.min[i] < min[i]) min[i] = pos.min[i];
+            if (pos.max[i] > max[i]) max[i] = pos.max[i];
+          }
+        }
+      }
+    }
+    return { vertexCount, triangleCount, bboxMin: seen ? min : null, bboxMax: seen ? max : null };
+  } catch {
+    return empty;
   }
 }
 
@@ -688,7 +924,6 @@ function ensureReplicadShape(shape: BakeProduct, op: string): ReplicadShape {
   return shape;
 }
 
-type ClosedDrawing = ReturnType<ReturnType<OpContext['replicad']['draw']>['close']>;
 const PROFILE_PREVIEW_THICKNESS = 0.002;
 
 function buildProfilePreviewShape(ctx: OpContext, stmt: Statement): BakeableShape {
@@ -883,7 +1118,7 @@ function readPathPoints(arg: Arg | undefined, op: string): Array<readonly [numbe
 function readSweepOptions(stmt: Statement, defaultCap: boolean) {
   return {
     spline: readString(stmt.args.spline) ?? 'polyline',
-    samplesPerSegment: Math.round(readNumber(stmt.args.samples_per_segment) ?? 12),
+    samplesPerSegment: Math.round(readNumber(stmt.args.samples_per_segment) ?? 8),
     closed: readBool(stmt.args.closed) ?? false,
     alpha: readNumber(stmt.args.alpha) ?? 0.5,
     upHint: asPoint(readNumList(stmt.args.up_hint, 3) ?? [0, 0, 1]),
@@ -1101,7 +1336,8 @@ function profilePoints(profile: Statement): Array<readonly [number, number]> {
     }
     case 'profile_circle': {
       const r = readNumber(profile.args.radius);
-      const segments = Math.round(readNumber(profile.args.segments) ?? 48);
+      // low-poly 默认 16 段（旧默认 48 对低多边形过细）；显式 segments 仍可覆盖。
+      const segments = Math.round(readNumber(profile.args.segments) ?? 16);
       if (r === undefined || r <= 0) throw new BakerError('profile_circle: radius must be positive');
       if (segments < 3 || segments > 256) throw new BakerError('profile_circle: segments must be in [3, 256]');
       const out: Array<readonly [number, number]> = [];
@@ -1162,13 +1398,6 @@ function roundedRectPoints(w: number, d: number, r: number, segments: number): A
   return out;
 }
 
-function drawingFromPoints(ctx: OpContext, points: Array<readonly [number, number]>): ClosedDrawing {
-  if (points.length < 3) throw new BakerError('profile must contain at least 3 points');
-  const pen = ctx.replicad.draw([points[0][0], points[0][1]]);
-  for (let i = 1; i < points.length; i++) pen.lineTo([points[i][0], points[i][1]]);
-  return pen.close();
-}
-
 // ── In-process cache —————————————————————————————————————————————
 
 /**
@@ -1213,9 +1442,3 @@ export function bakerCacheSize(): number {
   return INPROC_CACHE.size;
 }
 
-// ── OCCT 内存管理 ────────────────────────────────────────────────────
-
-/** 安全释放 OCCT WASM 堆上的对象。失败时静默（不中断业务流）。 */
-function safeDelete(obj: unknown): void {
-  try { (obj as { delete?: () => void } | null | undefined)?.delete?.(); } catch { /* OCCT 对象可能已被回收 */ }
-}

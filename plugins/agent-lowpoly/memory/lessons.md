@@ -1,8 +1,13 @@
 # Poly · 累积 lessons
 
+## 2026-06-17 · 工具输出已整理（执行默认摘要 + 增量）
+- **`lowpoly:pipeline.execute` 默认只回 KB 级摘要**（status + 端口形状提示），不再回全量网格/缓冲。判成功看 `status` / `itemCount`。
+- **改了哪个节点就传 `nodeId` 执行那个节点的下游闭包**（增量，上游从 cache 取），别每次裸跑全图。极少数确需全量才 `raw:true`。
+- 任何工具结果超 ~24KB 会自动落盘到 `<cwd>/.cache/tool-results/*.json`，只回 `{path, preview}`；`batteries.list/get` 已剥内联图标，是干净文本。
+
 ## 2026-06-01 · 初始化
 - 记忆系统就位
-- 专职 3D 低多边形建模（wb-3d-lowpoly），工具 `lowpoly:*`，默认 skill `compose-lowpoly-3d-pipeline`
+- 专职 3D 低多边形建模（wb-3d-lowpoly），工具 `lowpoly:*`，默认 skill `compose-lowpoly`（入口+路由：PART A 资产/机械 · PART B 建筑 · PART C 场景组装）
 
 
 ## 2026-06-01 · 可动 lowpoly 装配（坦克）踩坑

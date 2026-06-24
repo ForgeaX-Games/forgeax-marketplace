@@ -33,7 +33,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import type { Connection } from 'reactflow'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
-import type { Battery, BatteryPort } from '../../types.js'
+import type { Battery, BatteryPort, PipelineNode } from '../../types.js'
 import { createCanvasNodeTypes, createCanvasEdgeTypes } from './canvasConstants.js'
 import { ContextMenuPortal, type ContextMenuState } from './BatteryNode.js'
 import { CanvasSearchPopover } from './CanvasSearchPopover.js'
@@ -65,6 +65,8 @@ import { getPortTypeColor } from '../../utils/portTypes.js'
 import { useHistoryStore } from '../../stores/index.js'
 import './Canvas.css'
 import type { DomainPortTypes } from '../../utils/portTypes.js'
+import { ViewportMovingProvider, useViewportMoveHandlers } from './ViewportMovingContext.js'
+import { reportCanvasViewport } from '../../utils/canvasPerfReport.js'
 
 interface CanvasProps {
   domainNodeTypes?: Record<string, NodeTypes[string]>
@@ -72,8 +74,9 @@ interface CanvasProps {
   onExternalDrop?: ExternalDropHandler
 }
 
-function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProps) {
+function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
+  const { onMoveStart, onMoveEnd } = useViewportMoveHandlers()
 
   // Precise selectors: action refs are stable; state fields only re-render on
   // their own change, so 60fps updateNodeParam doesn't re-render the shell.
@@ -135,6 +138,30 @@ function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProp
 
   const { updateGridVars } = useCanvasGrid(reactFlowWrapper)
 
+  const handleViewportMoveStart = useCallback(
+    (_e: unknown, viewport: { x: number; y: number; zoom: number }) => {
+      onMoveStart()
+      reportCanvasViewport('start', viewport)
+    },
+    [onMoveStart],
+  )
+
+  const handleViewportMove = useCallback(
+    (_e: unknown, viewport: { x: number; y: number; zoom: number }) => {
+      updateGridVars(viewport)
+      reportCanvasViewport('move', viewport)
+    },
+    [updateGridVars],
+  )
+
+  const handleViewportMoveEnd = useCallback(
+    (_e: unknown, viewport: { x: number; y: number; zoom: number }) => {
+      onMoveEnd()
+      reportCanvasViewport('end', viewport)
+    },
+    [onMoveEnd],
+  )
+
   // ── Group system (create / ungroup / group-view navigation) ───────────────
   const { groupSelectedNodes, ungroupNode } = useCanvasGroup({ nodes, edges, setNodes, setEdges, domainPortTypes })
 
@@ -148,12 +175,16 @@ function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProp
     handleEnterGroupRef.current(groupId)
   }, [])
 
+  // Bridge a drop placed inside a group view to the group-view sync (produced by
+  // the group-view hook below). Ref-deferred to break the hook ordering cycle.
+  const syncInnerNodeAddRef = useRef<(node: PipelineNode) => void>(() => {})
   const { onDragEnter, onDragOver, onDrop, placeBattery } = useCanvasDrop({
     reactFlowInstance,
     setNodes,
     onUngroup: handleUngroup,
     onEnterGroup: handleEnterGroup,
     onExternalDrop,
+    onInnerNodeAdd: (node) => syncInnerNodeAddRef.current(node),
   })
 
   const groupCallbacks = useMemo(
@@ -167,6 +198,7 @@ function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProp
     isInGroupView,
     breadcrumbs,
     syncInnerNodePosition,
+    syncInnerNodeAdd,
     syncInnerNodesDelete,
     syncInnerEdgeAdd,
     syncInnerEdgeRemove,
@@ -186,6 +218,8 @@ function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProp
   })
   // Wire the deferred enter-group ref to the real implementation.
   handleEnterGroupRef.current = enterGroupView
+  // Wire the deferred inner-node-add ref for drops inside a group view.
+  syncInnerNodeAddRef.current = syncInnerNodeAdd
 
   // Clipboard (Ctrl+C / Ctrl+V) — pasted GroupNodes get the same callbacks.
   useCanvasCopyPaste({ nodes, edges, setNodes, setEdges, onUngroup: handleUngroup, onEnterGroup: handleEnterGroup, domainPortTypes })
@@ -617,7 +651,9 @@ function Canvas({ domainNodeTypes, domainPortTypes, onExternalDrop }: CanvasProp
         onConnectEnd={onConnectEnd}
         connectionLineStyle={{ stroke: connectLineColor, strokeWidth: 2 }}
         onInit={handleFlowInit}
-        onMove={(_e, viewport) => updateGridVars(viewport)}
+        onMoveStart={handleViewportMoveStart}
+        onMove={handleViewportMove}
+        onMoveEnd={handleViewportMoveEnd}
         zoomOnDoubleClick={false}
         onPaneClick={isInGroupView ? undefined : onPaneClick}
         onNodeDrag={onNodeDrag}
@@ -755,6 +791,14 @@ function ZoomSlider({ reactFlowInstance }: { reactFlowInstance: ReactFlowInstanc
       </button>
       <span className="zoom-label">{Math.round(zoom * 100)}%</span>
     </div>
+  )
+}
+
+function Canvas(props: CanvasProps) {
+  return (
+    <ViewportMovingProvider>
+      <CanvasInner {...props} />
+    </ViewportMovingProvider>
   )
 }
 

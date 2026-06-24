@@ -143,10 +143,17 @@ export interface ApiClient {
 
   // Queries ---------------------------------------------------------------
   getPipeline(): Promise<PipelineSnapshot | null>
+  /** Lightweight hash poll for live-sync reconciler (optional on transports). */
+  getPipelineHash?(): Promise<{ hash: string | null }>
   getNode(nodeId: string): Promise<GraphNode | null>
   listNodes(filter?: NodeFilter): Promise<readonly GraphNode[]>
   listEdges(): Promise<readonly GraphEdge[]>
   getNodeOutput(nodeId: string, portId: string): Promise<unknown>
+  /** Metadata-only output read — cheap skip check before full GET (optional). */
+  getNodeOutputMeta?(
+    nodeId: string,
+    portId: string,
+  ): Promise<{ executedHash: string; valid: boolean; sharded: boolean; missing?: boolean }>
   getHistory(opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]>
   listOps(): Promise<readonly OpSpec[]>
 
@@ -226,6 +233,13 @@ export interface ApiClient {
    * read-only and the server rejects the request.
    */
   deleteUserTemplate?(groupId: string): Promise<{ ok: boolean }>
+  /**
+   * Delete a develop GROUPS-tab group battery (groups/<cat>/<name>) from the
+   * app's local battery directory. Mirrors `saveGroupTemplate` (which writes the
+   * same files); transports fronting an app without the delete route omit this,
+   * and the palette hides the per-row delete button accordingly.
+   */
+  deleteGroupTemplate?(groupId: string): Promise<{ ok: boolean }>
   /** List template category folders, including empty folders when the app can scan them. */
   listTemplateCategories?(): Promise<readonly string[]>
   /**

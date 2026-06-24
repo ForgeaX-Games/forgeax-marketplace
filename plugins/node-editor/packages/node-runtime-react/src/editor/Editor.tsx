@@ -123,8 +123,14 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
         useUIStore.getState().setConnectionStatus('connected')
         // Seed the nodeOutputs cache from the backend's retained last-run values
         // so the wire data-probe / port tooltips show data on first load, not
-        // only after a fresh execution.
-        void usePipelineStore.getState().refreshConnectedOutputs()
+        // only after a fresh execution. When the cache is cold (first open / after
+        // a cache wipe) nothing is hydrated, so auto-run the pipeline once so the
+        // canvas — and every group's inner view — is populated without the user
+        // having to nudge an input first.
+        void usePipelineStore
+          .getState()
+          .refreshConnectedOutputs('mount')
+          .then(() => usePipelineStore.getState().autoExecuteOnOpen())
         // Rebuild the operation-history panel from this project's persistent log
         // (history.jsonl), so a refresh keeps the recent ops instead of starting
         // empty. Best-effort: a failure just leaves the panel empty.

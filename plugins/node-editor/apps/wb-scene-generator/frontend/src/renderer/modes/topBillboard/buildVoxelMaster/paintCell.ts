@@ -25,6 +25,8 @@ import type { RuleSprite } from '../../../framework/asset/ruleCache'
 import { colorForLayerIdx, colorForValue, rgbaToCss } from '../../../framework/palette'
 import type { DrawMode } from '../../../types'
 import { TEXTURE_PPU } from '../../../framework/geometry/constants'
+import { computeCollisionFootprint } from '../../../framework/geometry/objectPlacement'
+import type { AssetMatch } from '../../../framework/asset/matchAssetEntry'
 import type { CollectedCell, LayerAssetBinding, ResolvedDrawSink, ResolvedFace } from './types'
 import { pickFaceSprite } from './pickFaceSprite'
 
@@ -77,6 +79,8 @@ export function paintCell(
   assetByLayer?: Map<number, LayerAssetBinding | null> | null,
   coordsByLayerIdx?: Map<number, Set<string>>,
   capture?: ResolveCapture,
+  objectAnchorPoint?: { x: number; y: number },
+  objectFootprintScale?: number,
 ): void {
   const top = billboardTopFaceCanvasXY(cell, bbox, cellSize)
   const front = billboardFrontFaceCanvasXY(cell, bbox, cellSize)
@@ -91,7 +95,10 @@ export function paintCell(
     if (!binding) return
     const img = getOrLoadImage(binding.imgUrl)
     if (!img) return
-    const paintedRects = paintAssetCell(ctx, cell, bbox, top, front, cellSize, binding, coordsByLayerIdx, img, capture)
+    const paintedRects = paintAssetCell(
+      ctx, cell, bbox, top, front, cellSize, binding, coordsByLayerIdx, img, capture, objectAnchorPoint,
+      objectFootprintScale,
+    )
     if (cell.isSelected) paintSelectedAssetHighlight(ctx, paintedRects)
     return
   }
@@ -152,6 +159,8 @@ function paintAssetCell(
   coordsByLayerIdx: Map<number, Set<string>>,
   img: HTMLImageElement,
   capture?: ResolveCapture,
+  objectAnchorPoint?: { x: number; y: number },
+  objectFootprintScale?: number,
 ): PaintedRect[] {
   const paintedRects: PaintedRect[] = []
   if (binding.rule) {
@@ -199,7 +208,9 @@ function paintAssetCell(
   } else {
     // object (no rule): keep the image's real size per PPU and align its library
     // anchor to the cell-footprint centre, drawn ONCE (not stretched to the cell).
-    paintedRects.push(drawAnchoredObject(ctx, img, binding.match.anchor, cell, bbox, cellSize))
+    paintedRects.push(
+      drawAnchoredObject(ctx, img, binding.match.anchor, cell, bbox, cellSize, objectAnchorPoint, objectFootprintScale),
+    )
     emitResolved(capture, cell, 'object', -1, null)
   }
   return paintedRects
@@ -217,8 +228,10 @@ function drawAnchoredObject(
   cell: CollectedCell,
   bbox: VoxelBbox,
   cellPx: number,
+  anchorPoint?: { x: number; y: number },
+  footprintScale = 1,
 ): PaintedRect {
-  const rect = objectSpriteGridRect(cell, img, anchor)
+  const rect = objectSpriteGridRect(cell, img, anchor, anchorPoint, footprintScale)
   const dx = (rect.x - bbox.worldOffsetX) * cellPx
   const dy = (rect.y - bbox.worldOffsetY) * cellPx
   const drawW = rect.w * cellPx
@@ -227,19 +240,75 @@ function drawAnchoredObject(
   return { x: dx, y: dy, w: drawW, h: drawH }
 }
 
+export interface VoxelBottomFootprint {
+  width: number
+  depth: number
+}
+
+export function objectVoxelBottomFootprint(cells: ReadonlyArray<CollectedCell>): VoxelBottomFootprint {
+  const minX = Math.min(...cells.map((c) => c.x))
+  const maxX = Math.max(...cells.map((c) => c.x))
+  const minY = Math.min(...cells.map((c) => c.y))
+  const maxY = Math.max(...cells.map((c) => c.y))
+  return {
+    width: maxX - minX + 1,
+    depth: maxY - minY + 1,
+  }
+}
+
+/** Uniform scale ≤1 so collision footprint fits inside the voxel bottom face (no overflow). */
+export function objectFootprintContainScale(
+  voxel: VoxelBottomFootprint,
+  match: AssetMatch,
+  img: HTMLImageElement,
+): number {
+  const ppu = match.ppu ?? TEXTURE_PPU
+  const natW = img.naturalWidth || img.width || ppu
+  const natH = img.naturalHeight || img.height || ppu
+  const anchorGeo = {
+    widthPx: match.widthPx ?? natW,
+    heightPx: match.heightPx ?? natH,
+    anchorX: match.anchor?.x,
+    anchorY: match.anchor?.y,
+  }
+  const collision = match.geometry?.collisionMask
+    ? computeCollisionFootprint(match.geometry.collisionMask, ppu, anchorGeo)
+    : null
+  const assetW = collision?.width ?? Math.max(1, natW / ppu)
+  const assetD = collision?.height ?? Math.max(1, natW / ppu)
+  if (voxel.width <= 0 || voxel.depth <= 0 || assetW <= 0 || assetD <= 0) return 1
+  return Math.min(1, voxel.width / assetW, voxel.depth / assetD)
+}
+
+export function objectFootprintAnchorPoint(cells: ReadonlyArray<CollectedCell>): { x: number; y: number } {
+  const minX = Math.min(...cells.map((c) => c.x))
+  const maxX = Math.max(...cells.map((c) => c.x))
+  const maxY = Math.max(...cells.map((c) => c.y))
+  const minZ = Math.min(...cells.map((c) => c.z))
+  const centerX = (minX + maxX + 1) / 2
+  // Front row (maxY) on minZ bottom — z=1 is the top face of ground (z=0).
+  return {
+    x: centerX,
+    y: maxY - minZ + 0.5,
+  }
+}
+
 export function objectSpriteGridRect(
   cell: CollectedCell,
   img: HTMLImageElement,
   anchor: { x: number; y: number } | undefined,
+  anchorPoint?: { x: number; y: number },
+  footprintScale = 1,
 ): ObjectSpriteGridRect {
   const natW = img.naturalWidth || img.width || TEXTURE_PPU
   const natH = img.naturalHeight || img.height || TEXTURE_PPU
-  const w = natW / TEXTURE_PPU
-  const h = natH / TEXTURE_PPU
+  const scale = footprintScale > 0 && footprintScale <= 1 ? footprintScale : 1
+  const w = (natW / TEXTURE_PPU) * scale
+  const h = (natH / TEXTURE_PPU) * scale
   const ax = anchor?.x ?? 0.5
   const ay = anchor?.y ?? 0.5
-  const anchorX = cell.x + 0.5
-  const anchorY = objectSpriteAnchorScreenY(cell)
+  const anchorX = anchorPoint?.x ?? cell.x + 0.5
+  const anchorY = anchorPoint?.y ?? objectSpriteAnchorScreenY(cell)
   return {
     x: anchorX - ax * w,
     y: anchorY - (1 - ay) * h,

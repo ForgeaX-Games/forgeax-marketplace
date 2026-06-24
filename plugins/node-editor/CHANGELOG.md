@@ -23,6 +23,62 @@ calendar dates in the project timezone.
 ## Unreleased
 
 ### Added
+- **电池栏大标签 rail 底部新增 Develop ⇄ Templates 切换按钮（在收起与五角星之间）。**
+  `BatteryBar.tsx` `.bb-rail-group--collection` 内、收起按钮之下、收藏星标之上插入一个图标按钮，
+  点击调用与 Toolbar 切换相同的 `setBatteryFilterMode` store 动作（二者状态同步）；
+  处于 templates 模式时按钮点亮强调色（`BatteryBar.css` `.bb-rail-button--mode`）。
+  *为什么：* 让用户无需离开电池 rail 即可切换 develop / templates 模式。
+
+### Changed
+- **Templates 模式预览图改为完整显示（`contain`）+ 黑色填充剩余区域。** `BatteryBar.css`
+  `.battery-row-thumb-img` 由 `object-fit: cover`（裁切）改为 `contain`（整图可见、不裁切），
+  `.battery-row-thumb` 背景由 `rgba(251,191,36,0.06)` 改为 `#000` 填充留白。
+  *为什么：* 模板预览图（如不同宽高比的截图）此前被预览框裁掉边缘，用户需要看到完整模板缩略图。
+- **电池栏大标签拖拽顺序持久化到浏览器（develop / templates 各存各的）。** 此前顺序仅
+  存在 apiAdapter 内存 `orderCache`（刷新即丢），且 develop 与 templates 共用同一
+  `batteryOrder.bigLabels`。现按模式分桶写入 `localStorage`（`batteryBarStorage.ts:readBigLabelOrder/writeBigLabelOrder`，key `battery-bar-big-label-order` = `{ develop, templates }`），
+  `BatteryBar.tsx` 渲染（`bigLabels` useMemo）与拖拽落点（`handleTabDrop`）改用按当前
+  `batteryFilterMode` 读取/回写的本地态；切换模式时重载对应桶。
+  *为什么：* 用户调好的左侧大标签顺序需跨刷新保留，且两种模式标签集不同必须互不污染。
+- **Templates 模式电池栏支持小标签手风琴（与 Develop 模式统一）。** 此前 Templates
+  模式无条件把某大标签下的全部模板平铺、丢弃小标签（`BatteryBar.tsx` 旧分支假设
+  「子目录名＝卡片名」）。现按目录结构区分：`templates/{大标签}/{小标签}/{模板}/file.json`
+  的模板进小标签手风琴（与 Develop 共用新抽出的 `renderSmallSection`，UX 一致）；扁平
+  `templates/{大标签}/{模板}/file.json`（子目录名即卡片名、无独立小标签层）仍直接平铺，
+  避免「每个模板一个同名小标签」的冗余。新增 `batteryGrouping.ts:getTemplateSmallLabel`
+  （仅当大标签与模板文件夹之间确有一层小标签目录时返回该小标签，否则 null）。
+  测试 `batteryGrouping.test.ts`（嵌套返回小标签 / 扁平返回 null / 无 sourcePath 返回 null）。
+  *为什么：* 用户把 scene 模板按 `interests/decoration/LakeRegions` 等结构归类，需要
+  Templates 模式像 Develop 一样按小标签分组。
+- **merge: integrate `origin/main` into `dev`。** 合入 scene 侧 keypoint_graph/keypoint_layout、PointSampleBuilding 手动放楼、voxel_slice 自动 z、共享沙箱热更新、image_atlas_compose 模版端口可选等；2d skill 冲突保留 dev 模板电池版文档。 `BatteryBar.css` 把 `.bb-big-content-title` 的分割线伪元素从 `::after` 改为 `::before`（`flex:1` 撑满），名称从「左侧名称 + 右侧横线」变为「左侧横线 + 右侧名称」。
+
+### Added
+- **`batteries-common` 新增逻辑非电池 `not`（取反）。** 输入 `value`（`type:bool`）取反输出 `result:bool`（true↔false）；非布尔输入按真值判断（空串/"false"/"0"/0 为 false）后取反（`logic/not/index.ts:not`）；支持 DataTree 批处理。
+- **`batteries-common` 新增通用判断电池 `equals`（相等判断）。** 2 个输入端口 `condition`、`rule`（`type:any`，`access:item`），两边转字符串后比较，相等输出 `result:bool=true` 否则 `false`（`logic/equals/index.ts:equals`）；支持 DataTree 按 lacing 逐对批处理。新增 `common/logic/` 分类。
+- **`batteries-common` 新增通用流程电池 `port_router`（端口路由 / Switch）。** 2 个固定输入端口 `rules`（规则串，形如 `[{A:2},{C:3}]`，键→动态端口下标）、`params`（生效键集合串，形如 `(A,C)`）+ 一组 `port_*` 动态输入端口（`port_router/meta.json` 的 `dynamicInputs.prefix="port_"`），按规则书写顺序取第一个命中参数集合的键，将其下标对应的 `port_<n>` 输入原样透传到 `any` 输出端口 `value`；无命中或该端口未连接则不输出（`port_router/index.ts:portRouter`）。所有端口 `access:tree`（无 fanout，函数单次调用、整树透传），`rules/params` 未连线时由 meta 默认值以原始字符串注入、连线时为 DataTree，统一用 `getScalar` 取标量。路由选择逻辑已用独立脚本验证（规则顺序优先、命中/未命中/多键场景）。
+
+### Fixed
+- **组内视图：增加电池、修改组内节点参数（如文本面板内容）会漏到组外、不保存进组合电池、组也不变 `unsaved*`。**
+  - **根因：** 组内编辑采用「ref 暂存 + 退出回写」（`useCanvasGroupView.ts`：`innerNodesRef` 等，退出时 `flushInnerEdits`→`updateGroup` 标脏）。连线增删/删除/移动已接入 `syncInner*`，但**增节点**（`useCanvasDrop.placeBattery` 直接 `store.addNode` 写根 `currentPipeline.nodes`）与**改参数**（节点组件直接 `store.updateNodeParam`，只在根 nodes 里 find/map）两条路径绕过了 ref，落到根图。
+  - **改参数：** 在 `pipelineStore.ts` 新增可注册的 group-view inner param-edit sink（`setGroupInnerSink`）；`useCanvasGroupView` 在组内视图激活时注册 `syncInnerNodeParam`（退出清除），`updateNodeParam` 据此把内部节点参数编辑路由进组的 live ref 并标脏（对非本组 id 返回 false 回落根路径，无需改动各节点组件）。
+  - **增电池：** 经 `Canvas.tsx` 的 ref 桥把 `syncInnerNodeAdd` 传给 `useCanvasDrop`；`placeBattery` 组内时改用 `onInnerNodeAdd` 取代根 `store.addNode`，并跳过根层 history 记录与 `incrementalExecute`（退出 flush 会重算内部子图）。仅路由 `placeBattery`（拖拽/双击搜索），不影响 paste/ctrl-drag 等其它根 `addNode` 调用方。
+  - 退出时 `updateGroup` 如实回写组的 nodes（含新电池与新参数）→ 组合电池正确保存且转 `unsaved*`，不再漏到组外。`pnpm typecheck` 通过；190 项内核单测全过（`transport.test.ts` 1 项失败为既有、与本改动无关）。
+- **复制/Ctrl+拖拽 template/group 节点：① 复制后样式退化为普通 group；② 内部 `image_gen` 仍保留母体缓存。**
+  - **样式：** 复制路径（`useCtrlDragGhost.ts` 单组与包围框两处、`useCanvasCopyPaste.ts` 粘贴）原先把新 shadow 节点的 params 写死成 `{ groupId }` 且不向 `buildGroupNodeData` 传 `isTemplate`，丢掉了 `__groupIsTemplate` 等溯源。现用 `readGroupProvenance(源 params)` 读出溯源（含 `isTemplate`），经 `writeGroupProvenance` 合并进新 params 并传给 `buildGroupNodeData(..., isTemplate)`，复制出的 template 保持 template 样式/锁定 UI。
+  - **缓存：** `remapGroupIds`（`groupViewUtils.ts`）拷贝内部节点 params 时用新增的 `stripGenCacheParams`（`groupStatus.ts`）剥掉 `_gen_image`/`_gen_result`/`_gen_error`，复制体不再带母体上次生成结果（一处改动覆盖 Ctrl+拖拽/粘贴/库实例化全部复制路径；磁盘模板无缓存故为 no-op）。剥除不影响内容哈希（哈希本就 `stripProvenance` 掉 `_gen_*`），保存状态保持一致。
+
+### Changed
+- **电池栏（BatteryBar）：两视图越界滚动连通 + 大标签名称叠在分割线上。**
+  - **越界滚动跨视图（无缝）：** 电池视图滚到底后继续向下滚动、或收藏视图滚到顶后继续向上滚动，累加越界量到阈值即切到相邻视图并定位到对边（`switchOverscrollView` + 滚动恢复 effect 的 `forcedScrollEdgeRef`）。两视图仍各自独立滚动，只是用越界滚动连通。改用**非 passive 的原生 wheel 监听**：跨界时 `preventDefault` 并用 rAF 手动驱动 `scrollTop`（`ensureFlushLoop`/`transitionUntilRef`），绕开浏览器在边界处的 wheel latching，使同一手势越界后无需移动鼠标即可无缝续滚。
+  - **大标签标题：** 每个非空大标签分组在分割线处显示名称（`renderBigSectionTitle`），分割线上下间距略加宽；默认白色（原灰色），带品牌色的大标签沿用其 rail 配色；空分类沿用细线分隔不显示标题（`BatteryBar.css` `.bb-big-content-title`）。
+- **组合电池内部视图改为「运行时如实落账 + 只读回读」，彻底废弃「进组每次重跑子图」的探针做法（含组嵌套）。** 端口现在如实反映数据流转：数据到达端口/电池跑完出结果就显示，没跑就为空，不再用重算的「虚假值」。
+  - **Kernel — 运行时落账内部端口：** `execute-node.ts`（`runWalk` 的 `__group__` 分支）给 `executeGroupSubgraph` 传 `onInnerResult`，把**每一层**内部节点的真实输出写进与顶层节点同一个输出缓存（`runtime.outputs.write`，内部节点 id 全局唯一）。组原先以黑盒执行、内部中间值算完即丢；现真实运行即记录，嵌套各层各自按其 id 落账。`image_gen` 等 `manualTrigger` 内部节点由 `executeGroupSubgraph` 从其缓存 `_gen_*` 水合（`layer1/executor.ts:414`），落账的是其上次缓存结果，**不会被重跑触发**。
+  - **Kernel — 探针改只读回读：** `probeGroupInner`（`layer2/queries.ts`）由「重跑子图」改为直接读 `runtime.outputs` 里落账的真实值（按 `group.nodes` 逐节点 `listPorts`+`read`）；未跑过的端口如实留空。彻底去掉重执行 → 无冷缓存跑空、无 `manualTrigger` 重触发风险。新增 `OutputCache.listPorts(nodeId)`（`layer1/storage/output-cache.ts`）枚举某节点已缓存的端口。
+  - **前端 — 壳/外部上下文端口别名：** 新增 dependency-free 的 `groupBoundaryIds.ts`（边界/上下文 id 方案，供 `useCanvasGroupView` 与 store 共享，避免环依赖）；`pipelineStore.ts` `probeGroupInnerOutputs` 回填内部输出后调用 `hydrateGroupBoundaryAliases`，把已在 store 中的真实值（外部输入在真实上游节点、暴露输出在组 shadow 节点）别名到内部视图的壳（`__boundary_*`）与外部上下文（`__group_context_*`）合成 id 上，使壳端口、外部输入/文本面板端口也如实显示（含嵌套：容器取父组）。
+  - **前端 — 壳端口显示数据 + 下游 external output 回读：** `GroupBoundaryNode.tsx` 给壳（GROUP INPUT/OUTPUT）每个端口加 hover 值 tooltip（读 `nodeOutputs[壳id][portName]`，由上面的别名落值），壳不再是空白。`nodeTooltip.tsx` `resolveInputPortValue` 与 `ImagePreviewNode.tsx` 改用 `getRealNodeIdFromContext` 按**真实节点 id** 追踪容器图连线——外部输出节点（如 ImgPreview）在组内视图渲染为合成上下文 id，原先按合成 id 找不到连线 → 不显示；现按真实 id 解析，组内与组外显示一致。
+  覆盖：`group-nesting.test.ts`「probeGroupInner returns each inner node's real output (incl. nested)」——先整图运行再探针，验证直接内部节点 `k=20` 与嵌套 `g_inner` 暴露输出 `m=10` 均如实回读（174 项内核单测全过）。
+
+### Added
 - **组合电池可把内部「带运行按钮电池」（`image_gen`/`text_gen` 等 `manualTrigger`）的运行按钮映射到外部，点击外部按钮即运行内部电池；人点与 agent 调用走同一套流程。**
   这是「映射」而非独立运行：外部按钮只是按内部节点 id 触发该内部电池的运行。
   - **Kernel — 节点定位/输入解析（group 感知）：** 新增 `findNodeWithGroup`（`layer2/queries.ts`，按全局唯一 id 在顶层或 `groups[*].nodes` 中定位节点并返回 `groupId`）与

@@ -182,6 +182,10 @@ function applyLoadedMeshPresentation(root: THREE.Object3D, options: LoadGeometry
   const side = options.doubleSided ? THREE.DoubleSide : THREE.FrontSide
   const depthBias = options.depthBias
 
+  // 低多边形意图：烘焙出的可视网格用平面/faceted 着色（逐面法线），而不是把法线平滑插值
+  // 成"圆润"外观。collision 是半透明叠加层，维持原状。
+  const flat = kind === 'visual'
+
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return
     if (!child.geometry.attributes.normal) child.geometry.computeVertexNormals()
@@ -189,7 +193,16 @@ function applyLoadedMeshPresentation(root: THREE.Object3D, options: LoadGeometry
     if (materialSpec) {
       child.material = kind === 'collision'
         ? createMaterial(materialSpec, { side, transparent: true, depthBias })
-        : createMaterial(materialSpec, { side, depthBias })
+        : createMaterial(materialSpec, { side, depthBias, flatShading: flat })
+    } else if (flat) {
+      // GLB 自带材质（如彩色装配）：直接打开 flatShading 贴合低多边形。
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      for (const m of mats) {
+        if (m && 'flatShading' in m) {
+          ;(m as THREE.MeshStandardMaterial).flatShading = true
+          m.needsUpdate = true
+        }
+      }
     }
 
     child.castShadow = kind === 'visual'

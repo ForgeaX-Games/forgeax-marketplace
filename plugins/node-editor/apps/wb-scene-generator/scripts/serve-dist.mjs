@@ -40,7 +40,10 @@ if (!existsSync(backendEntry)) {
 
 const backend = spawn(process.execPath, [backendEntry], {
   cwd: root,
-  env: { ...process.env, PORT: String(backendPort) },
+  env: {
+    ...process.env,
+    PORT: String(backendPort),
+  },
   stdio: 'inherit',
 })
 

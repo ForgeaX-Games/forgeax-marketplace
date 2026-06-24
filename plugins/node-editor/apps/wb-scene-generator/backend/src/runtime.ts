@@ -115,6 +115,20 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
         pipelineId: req.pipelineId,
         pluginId: PLUGIN_ID,
         registry: ops,
+        // Surface the execution engine's diagnostics to backend stdout. Without
+        // this the base context's `log` is a no-op, so inner-node errors (e.g. an
+        // `add_child` inside a group reporting "parent path not found") and the
+        // "exposed output empty" warnings vanish — making a group that silently
+        // produces nothing impossible to diagnose. Errors/warnings always print;
+        // verbose debug (per-node trace) is gated behind FORGEAX_EXEC_DEBUG.
+        createExecutionContext: (base) => ({
+          ...base,
+          log: (level, message) => {
+            if (level === 'error') console.error(`[exec] ${message}`)
+            else if (level === 'warn') console.warn(`[exec] ${message}`)
+            else if (process.env.FORGEAX_EXEC_DEBUG) console.log(`[exec:${level}] ${message}`)
+          },
+        }),
         // Each project owns isolated graph/history/outputs; assets stay shared
         // at <workspaceRoot>/assets (the runtime's default assetsDir).
         layout: {

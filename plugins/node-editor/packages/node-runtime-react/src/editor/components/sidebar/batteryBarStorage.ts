@@ -26,6 +26,39 @@ const LS_ACTIVE_BIG_LABEL = 'battery-bar-active-big-label'
 // 入集合即收起）；旧键 battery-bar-open-small-labels 语义不一致已废弃。
 const LS_COLLAPSED_SMALL_MAP = 'battery-bar-collapsed-small-labels'
 const LS_VSCROLL_TOP_MAP = 'battery-bar-vscroll-top'           // { [activeBigLabels|__search__|__all__]: number }
+// 大标签拖拽排序：按模式分桶持久化 { develop: string[], templates: string[] }。
+// develop 与 templates 的大标签集合不同，必须各存各的，互不污染。
+const LS_BIG_LABEL_ORDER = 'battery-bar-big-label-order'
+
+export type BatteryFilterMode = 'develop' | 'templates'
+
+export function readBigLabelOrder(mode: BatteryFilterMode): string[] {
+  try {
+    const raw = localStorage.getItem(LS_BIG_LABEL_ORDER)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return []
+    const arr = (parsed as Record<string, unknown>)[mode]
+    return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function writeBigLabelOrder(mode: BatteryFilterMode, labels: string[]): void {
+  try {
+    const raw = localStorage.getItem(LS_BIG_LABEL_ORDER)
+    let map: Record<string, string[]> = {}
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        map = parsed as Record<string, string[]>
+      }
+    }
+    map[mode] = labels
+    localStorage.setItem(LS_BIG_LABEL_ORDER, JSON.stringify(map))
+  } catch { /* ignore */ }
+}
 
 export function readActiveBigLabels(): string[] {
   try {

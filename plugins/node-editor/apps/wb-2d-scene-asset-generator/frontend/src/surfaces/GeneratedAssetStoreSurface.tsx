@@ -7,6 +7,7 @@ import {
   deleteGeneratedFolder,
   generatedAssetUrl,
   importUserAsset,
+  latestPreviewAsset,
   listGeneratedAssets,
   listGeneratedFolders,
   moveAssetsToFavoriteGroup,
@@ -146,6 +147,45 @@ export function GeneratedAssetStoreSurface(): JSX.Element {
     setSelected(new Set())
     anchorRef.current = null
   }, [folder])
+
+  // Live refresh: the asset list otherwise only re-fetches on a folder switch
+  // or a local mutation, so images produced by AI image nodes don't appear in
+  // the grid (incl. the `All` column) until the user clicks a tab. Mirror the
+  // Preview pane and poll the cheap `/preview/latest` (a single record): when
+  // the newest alias changes a new asset was generated, so bump `reloadKey` to
+  // re-list. We never auto-reload mid-interaction (rename / menus / dialogs /
+  // import / drag) to avoid yanking the grid out from under the user.
+  const liveBaselineAlias = useRef<string | null>(null)
+  const interactingRef = useRef(false)
+  interactingRef.current =
+    renaming !== null ||
+    contextMenu !== null ||
+    folderMenu !== null ||
+    createPrompt !== null ||
+    confirmDialog !== null ||
+    importing ||
+    dragChild !== null
+  useEffect(() => {
+    const detectNewAsset = (): void => {
+      if (interactingRef.current) return
+      void latestPreviewAsset()
+        .then((asset) => {
+          const alias = asset?.alias ?? null
+          // First poll just records the baseline — never reload on mount.
+          if (liveBaselineAlias.current === null) {
+            liveBaselineAlias.current = alias ?? ''
+            return
+          }
+          if ((alias ?? '') !== liveBaselineAlias.current) {
+            liveBaselineAlias.current = alias ?? ''
+            setReloadKey((k) => k + 1)
+          }
+        })
+        .catch(() => {})
+    }
+    const timer = window.setInterval(detectNewAsset, 2000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const resolveTargetFolder = useCallback((): string | null => {
     // Resolve the explicit import-destination selection into a folder name.

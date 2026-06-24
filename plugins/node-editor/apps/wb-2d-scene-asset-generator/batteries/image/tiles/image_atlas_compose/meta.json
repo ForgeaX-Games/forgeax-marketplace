@@ -30,6 +30,15 @@
   ],
   "inputs": [
     {
+      "name": "enable",
+      "type": "bool",
+      "access": "item",
+      "label": "开关",
+      "default": true,
+      "description": "总开关：为 true 时才进行合成加工；为 false 时跳过加工，所有输出端口返回空。默认开。",
+      "description-en": "Master switch: process only when true; when false, skip processing and all output ports return empty. Defaults to on."
+    },
+    {
       "name": "terrain",
       "type": "image",
       "access": "item",

@@ -19,23 +19,17 @@
  * v1 默认 center=true，false 时整体 +z 平移 height/2 以让底面贴 z=0。
  */
 
-import type { Arg } from '../shared-types.js';
 import type { OpBuilder, OpContext, BakeableShape } from '../types.js';
 import { BakerError } from '../errors.js';
 import { csgCut, csgFuse } from '../csg_helpers.js';
+import { centeredBox, maybeShiftToZ0 } from '../op_helpers.js';
 import {
-  optionalBool,
   optionalNumber,
   requireNumber,
   requireNumList,
 } from '../arg_readers.js';
 
 // ── 公共助手 ─────────────────────────────────────────────────────────
-
-/** 居中盒：makeBaseBox 的 z 改造成 z∈[-h/2, h/2]。 */
-function centeredBox(ctx: OpContext, w: number, d: number, h: number): BakeableShape {
-  return ctx.replicad.makeBaseBox(w, d, h).translateZ(-h / 2);
-}
 
 /**
  * 沿 X 轴的圆柱（对应 cadquery `Workplane("YZ").circle(r).extrude(L, both=True)`)：
@@ -54,12 +48,6 @@ function xCylinder(
     [cx - totalLength / 2, cy, cz],
     [1, 0, 0],
   );
-}
-
-/** 处理 center=false 情况：把整个 shape 沿 +Z 平移 h/2，使底面贴 z=0。 */
-function maybeShiftToZ0(shape: BakeableShape, height: number, args: Record<string, Arg>): BakeableShape {
-  const center = optionalBool(args, 'center', true);
-  return center ? shape : shape.translateZ(height / 2);
 }
 
 /** Z 方向竖直边倒圆角；半径 0 时跳过。 */

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { NodeGroup } from '@forgeax/node-runtime'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { basename, dirname, relative, resolve } from 'node:path'
+import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
 
@@ -65,8 +65,17 @@ async function findTemplateFile(groupId: string): Promise<string | null> {
   return null
 }
 
+// Sanitize a user-supplied path segment: strip any directory components and
+// neutralize `..` / leading dots so the value can never climb out of the
+// template root. A defence-in-depth prefix check still runs at the call site.
 function safeName(value: string): string {
-  return value.trim().replace(/[\\/]/g, '-').replace(/\s+/g, ' ') || 'Group'
+  const cleaned = basename(value.trim())
+    .replace(/[\\/]/g, '-')
+    .replace(/\.\.+/g, '.')
+    .replace(/^\.+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || 'Group'
 }
 
 export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise<void> {
@@ -121,10 +130,16 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
 
   app.post<{
     Body: { group: NodeGroup; categoryName: string; batteryName: string }
-  }>('/api/v1/group-templates/save', async (req) => {
+  }>('/api/v1/group-templates/save', async (req, reply) => {
     const categoryName = safeName(req.body.categoryName)
     const batteryName = safeName(req.body.batteryName)
     const dir = resolve(appTemplateRoot, categoryName, batteryName)
+    // Defence-in-depth: even after safeName, confirm the resolved dir stays under
+    // the template root before any mkdir / write (path-traversal guard).
+    const rootPrefix = resolve(appTemplateRoot)
+    if (dir !== rootPrefix && !dir.startsWith(rootPrefix + sep)) {
+      return reply.code(400).send({ reason: 'invalid template path' })
+    }
     await mkdir(dir, { recursive: true })
     const filePath = resolve(dir, `${batteryName}.json`)
     const group = { ...req.body.group, name: batteryName, nameEn: req.body.group.nameEn ?? batteryName }

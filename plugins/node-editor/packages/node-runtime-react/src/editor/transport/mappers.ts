@@ -163,15 +163,28 @@ export function pipelineEdgeToGraphEdge(e: PipelineEdge): GraphEdge {
 }
 
 export function editorGroupToKernelGroup(g: NodeGroup): KernelNodeGroup {
+  const nodes = g.nodes.map(pipelineNodeToGraphNode)
+  // Enforce the per-group invariant before the diff turns these into ops: a
+  // group's edges + exposed-port inner mappings may ONLY reference the group's
+  // own member nodes. Saved group batteries can accrue DANGLING references when
+  // an inner node is removed through a path that does not also prune its wires
+  // (or the file pre-dates such cleanup). The diff would faithfully emit a
+  // `connect` (or member/port mapping) for each phantom endpoint, and the
+  // kernel's applyBatch rejects the WHOLE batch ("connect.target.nodeId X does
+  // not exist"), so the dropped group never persists and its node vanishes on
+  // the next refetch. Prune them here so one corrupt edge can't poison persist.
+  const memberIds = new Set(nodes.map((n) => n.id))
+  const edges = g.edges.filter((e) => memberIds.has(e.source.nodeId) && memberIds.has(e.target.nodeId))
+  const keepPort = (p: ExposedPort): boolean => !p.sourceNodeId || memberIds.has(p.sourceNodeId)
   return {
     id: g.id,
     name: g.name,
     nameEn: g.nameEn,
-    nodes: g.nodes.map(pipelineNodeToGraphNode),
-    edges: g.edges.map(pipelineEdgeToGraphEdge),
+    nodes,
+    edges: edges.map(pipelineEdgeToGraphEdge),
     position: g.position,
-    exposedInputs: g.exposedInputs.map((p) => ({ ...p })),
-    exposedOutputs: g.exposedOutputs.map((p) => ({ ...p })),
+    exposedInputs: g.exposedInputs.filter(keepPort).map((p) => ({ ...p })),
+    exposedOutputs: g.exposedOutputs.filter(keepPort).map((p) => ({ ...p })),
     _nestedGroups: g._nestedGroups?.map(editorGroupToKernelGroup),
   }
 }

@@ -3,9 +3,11 @@ import { applyBatch } from '@forgeax/node-runtime'
 import { getRuntime } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { checkSinoOpAllowlist, isSinoBatch } from './sinoOpGate.js'
+import { logPersistBatch } from '../lib/persistTrace.js'
 
 export async function registerMutationRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/v1/batch', async (req, reply) => {
+    const t0 = performance.now()
     const access = await ensureMutationAccess(req)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
     const rt = await getRuntime()
@@ -44,6 +46,13 @@ export async function registerMutationRoutes(app: FastifyInstance): Promise<void
     if (result.status === 'rejected' && result.reason?.startsWith('concurrent-write:')) {
       return reply.code(409).send(result)
     }
+
+    logPersistBatch(ops as never, result, {
+      actor: opts?.actor,
+      label: opts?.label,
+      batchId: opts?.batchId,
+      durationMs: performance.now() - t0,
+    })
 
     // graph:applied is announced by the kernel's in-process bus (applyBatch ->
     // busFor.emit) and fanned out to every live client by the /ws subscription

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { VoxelBbox } from '../../../framework/geometry/topBillboard'
 import { getRegisteredAssetUrl, setServerImageResolver } from '../../../framework/asset/imageCache'
 import type { CollectedCell, LayerAssetBinding } from './types'
-import { objectSpriteGridRect, paintCell } from './paintCell'
+import { objectFootprintAnchorPoint, objectFootprintContainScale, objectSpriteGridRect, objectVoxelBottomFootprint, paintCell } from './paintCell'
+import type { AssetMatch } from '../../../framework/asset/matchAssetEntry'
 
 type Op =
   | { type: 'drawImage'; args: unknown[] }
@@ -106,6 +107,77 @@ describe('topBillboard paintCell asset selection highlight', () => {
     const drawOps = ops.filter((op) => op.type === 'drawImage')
     expect(drawOps).toHaveLength(1)
     expect(drawOps[0].args.slice(-2)).toEqual([16, 24])
+  })
+
+  it('anchors object footprint at the AABB front-bottom (maxY), not center', () => {
+    const column = Array.from({ length: 6 }, (_, i) => ({
+      ...makeCell(false),
+      x: 10,
+      y: 20,
+      z: i + 1,
+    }))
+    const pt = objectFootprintAnchorPoint(column)
+    expect(pt).toEqual({ x: 10.5, y: 20 - 1 + 0.5 })
+  })
+
+  it('anchors siheyuan 18×18 voxel-mass at front minZ bottom (z=1 = ground top)', () => {
+    const cells = []
+    for (let x = 21; x <= 38; x++) {
+      for (let y = 21; y <= 38; y++) {
+        for (let z = 1; z <= 6; z++) {
+          cells.push({ ...makeCell(false), x, y, z })
+        }
+      }
+    }
+    expect(objectFootprintAnchorPoint(cells)).toEqual({ x: 30, y: 37.5 })
+  })
+
+  it('scales object draw down when collision footprint exceeds voxel bottom face', () => {
+    const img = { width: 288, height: 288, naturalWidth: 288, naturalHeight: 288 } as HTMLImageElement
+    const match: AssetMatch = {
+      primary: 'big',
+      variants: ['big'],
+      ppu: 16,
+      widthPx: 288,
+      heightPx: 288,
+      anchor: { x: 0.5, y: 0.007 },
+      geometry: {
+        collisionMask: {
+          kind: 'rectangle',
+          x: 0,
+          y: 0,
+          width: 288,
+          height: 288,
+        },
+      },
+    }
+    const scale = objectFootprintContainScale({ width: 10, depth: 10 }, match, img)
+    expect(scale).toBeCloseTo(10 / 18, 5)
+    const rect = objectSpriteGridRect(makeCell(false), img, match.anchor, { x: 5.5, y: 10.5 }, scale)
+    expect(rect.w).toBeCloseTo(10, 5)
+    expect(rect.h).toBeCloseTo(10, 5)
+  })
+
+  it('keeps scale 1 when collision fits inside voxel bottom face', () => {
+    const img = { width: 288, height: 288, naturalWidth: 288, naturalHeight: 288 } as HTMLImageElement
+    const match: AssetMatch = {
+      primary: 'siheyuan',
+      variants: ['siheyuan'],
+      ppu: 16,
+      widthPx: 288,
+      heightPx: 288,
+      anchor: { x: 0.5, y: 0.0069444444 },
+      geometry: {
+        collisionMask: {
+          kind: 'rectangle',
+          x: 26,
+          y: 2,
+          width: 236,
+          height: 224,
+        },
+      },
+    }
+    expect(objectFootprintContainScale({ width: 18, depth: 18 }, match, img)).toBe(1)
   })
 
   it('aligns asymmetric object sprite anchors to the selected cell center', () => {

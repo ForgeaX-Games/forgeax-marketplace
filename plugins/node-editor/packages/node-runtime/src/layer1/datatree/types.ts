@@ -28,6 +28,16 @@ export function pathsEqual(a: Path, b: Path): boolean {
   return true;
 }
 
+// Whether `prefix` is a (non-strict) path prefix of `path`: every segment of
+// `prefix` matches the leading segments of `path`. An equal path counts as a
+// prefix. Used by hierarchy-aware lacing to broadcast a parent-level branch
+// (e.g. per-building {b}) across its descendant branches (e.g. per-room {b;r}).
+export function isPrefix(prefix: Path, path: Path): boolean {
+  if (prefix.length > path.length) return false;
+  for (let i = 0; i < prefix.length; i++) if (prefix[i] !== path[i]) return false;
+  return true;
+}
+
 // Enforce the path invariants (non-empty, non-negative finite integers), throwing on the first violation.
 export function validatePath(path: Path): void {
   if (path.length === 0) {

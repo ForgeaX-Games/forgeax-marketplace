@@ -125,7 +125,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       // 4. Load the activated project's graph → pipelineRevision++ → reconcile.
       await usePipelineStore.getState().loadPipeline()
-      void usePipelineStore.getState().refreshConnectedOutputs()
+      void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
 
       // 5. Rebuild the history panel from the INCOMING project's persistent log
       // (history.jsonl). Hydrated rows are display-only; the live undo stack does
@@ -180,7 +180,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           // The server already swapped the active runtime; just load its graph.
           // Do NOT call api.activateProject (would re-broadcast → feedback loop).
           await usePipelineStore.getState().loadPipeline()
-          void usePipelineStore.getState().refreshConnectedOutputs()
+          void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
           // Rebuild the panel from the now-active project's persistent log.
           try {
             useHistoryStore.getState().hydrate(await getEditorTransport().api.getHistory())

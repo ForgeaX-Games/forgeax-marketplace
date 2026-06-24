@@ -333,6 +333,10 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
       }
     },
 
+    async getPipelineHash(): Promise<{ hash: string | null }> {
+      return { hash: state.hash }
+    },
+
     async getNode(nodeId: string): Promise<GraphNode | null> {
       return state.nodes.get(nodeId) ?? null
     },
@@ -349,6 +353,10 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
 
     async getNodeOutput(): Promise<unknown> {
       return undefined
+    },
+
+    async getNodeOutputMeta(): Promise<{ executedHash: string; valid: boolean; sharded: boolean; missing: true }> {
+      return { executedHash: '', valid: false, sharded: false, missing: true }
     },
 
     async getHistory(opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]> {

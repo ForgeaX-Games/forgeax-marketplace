@@ -18,6 +18,163 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Changed
+- **`LakeRegions` 模板：暴露 `LakeSize` 输入以控制单个湖的大小。**
+  `batteries/templates/structures/water/LakeRegions/LakeRegions.json`：删除原本硬喂
+  `alg_region_flood_grow.size` 的 `number_const`(=50) 及其连线，改为把 flood_grow 的 `size`
+  端口暴露为 `in_18`（`customLabelEn: LakeSize`），并将 50 写入该节点 `params.size` 作为默认值。
+  *为什么：* 用户要能从模板外部控制 lake 的 size（每个湖斑块的目标格数）。
+
+### Added
+- **新建 `RegionZoneGenerator` districts 模板（按方位+面积配额分区）。**
+  `batteries/templates/structures/districts/RegionZoneGenerator/`：照 `RiverbankZone` 骨架
+  （`scene→node_explode→rect_grid→voxel_slice→region_zone_generator→grid2node→add_child`，
+  Rest=`占用区−分区`），把 `region_zone_generator` 包成与同目录地块模板一致的 **5 输出**
+  （Main/Rest/District/DistrictPath/RestPath）。输入暴露 scene + DistrictAsset/Seed/Regions/
+  BoundaryStyle/RelaxIterations/SmoothIterations，`Regions` 由内置 `text_panel`（默认
+  `[[1,1],[1,5],[1,9]]`）提供可覆盖默认值。
+  *为什么：* 用户要把 `region_zone_generator` 小电池包成现在的 datatree 模板形态。
+- **新建 `RiverbankGreenZone` 模板（河岸侵蚀 + 边缘绿簇·叠加到同一节点）。**
+  `batteries/templates/structures/districts/RiverbankGreenZone/`：把 `RiverbankZone` 与 `EdgeGreenClusters`
+  合并为一个模板。同一占用区掩码分别喂 `zone_nesting_riverbank`（河岸侵蚀网格 D）与 `edge_green_cluster`
+  （边缘绿簇网格 C），两张网格经 `alg_region_union` **逐格求并为一张**，再 `grid2node` 生成**唯一一个地块节点**
+  （单 voxel-mass）。默认 ErosionStrength=17、Count=16、ClusterSize=267，3 输出（主产物/District/DistrictPath）。
+  *为什么：* 用户要 grid 结果完全合并到同一个节点（单节点单 voxel-mass），而非父子两层或保留差集。
+
+### Fixed
+- **`edge_green_cluster`：`clusterSize` 现在如实生效。** 旧实现各簇共享全局占用图，`count` 较大时
+  种子沿轮廓密集排布、后到种子落在已占用格上直接产出 0 格，存活簇也被邻簇挤死，导致即便 `clusterSize=300`
+  也只生成零星小簇。改为每簇独立生长、只受区域掩码约束（相邻簇允许重叠连片，写出取并集）。脚本实测
+  200×130、count=5：`clusterSize=300`→1571 格、`=30`→158 格，单簇大小随参数线性变化。
+  *为什么：* 用户反馈 `clusterSize` 调大无效。
+
+### Changed
+- **`EdgeTreeClusters` 模板补齐 Rest 输出，对齐 `RiverbankZone` 的 5 输出规范。**
+  `batteries/templates/structures/districts/EdgeTreeClusters/EdgeTreeClusters.json`：原来只有
+  3 输出（Main/Clusters/ClustersPath）、不产 Rest。新增 `alg_region_subtract`(占用区−绿簇)→
+  `grid2node`→`add_child`(rest) + `scene_merge_subtrees` + 第二个 `scene_focus_path`，
+  输出改为 **3 scene + 2 path**：Main/Rest/Clusters + ClustersPath/RestPath（顺序与
+  RiverbankZone 一致）。README 同步更新。
+  *为什么：* 用户要 EdgeGreenClusters 系模板也输出 Rest 区域、与其他地块模板输出规范统一。
+- **`region_zone_generator` 电池改为 DataTree 单网格契约（v2.0.0）。**
+  `batteries/components/districts/region_zone_generator/{index.ts,meta.json}`：入参 `baseGrid`(array,
+  支持网格列表)+输出 `outputGridList`/`nameList` → 改为 `inputGrid`(grid, item) 进、单张多值
+  `outputGrid`(grid, item) 出（分区 k→ID `k+1`，未分配=0），网格列表交由引擎逐张 fanout，
+  与 `zone_nesting`/`edge_green_cluster` 对齐；移除 `nameList` 输出。`regions` 兼容
+  `[area,position]`/`[name,area,position]`/JSON 字符串（名称仅作注释）。
+  *为什么：* 用户要求直接在原电池上改成可被地块模板复用的单网格形态、不再输出 nameList。
+- **三个 districts 模板的资产名暴露端口 `DistrictName`/`ClusterName` → `DistrictAsset`。** 与
+  `structures/water/LakeRegions` 的 `LakeAsset` 命名对齐，明确该端口为资产名称。涉及
+  `ZoneNesting`/`RiverbankZone`/`EdgeGreenClusters` 的 `customLabelEn` 及对应 README。
+
+### Added
+- **新建 `edge_green_cluster` 电池（边缘绿簇）+ `EdgeGreenClusters` 模板。**
+  电池 `batteries/components/Topographic/edge_green_cluster/`：沿 targetValue 区域外轮廓等距+抖动取 `count`
+  个边缘种子，每个种子用「欧氏距离 + FBM 噪声」优先级 BFS 在区域内部长出 ~`clusterSize` 个像素的不规则团块
+  （`irregularity` 控制破碎度，占用图防重叠），输出与输入同形状的绿簇掩码（背景 0，簇=`outputValue`）；
+  输入/输出同为 `grid`/`item`（DataTree）。脚本实测 50×50：簇细胞 100% 落在距边界 ≤4 内，确实粘附边缘。
+  新模板 `batteries/templates/structures/districts/EdgeGreenClusters/`：scene 输入 + 暴露 `Count`/`ClusterSize`/
+  `Irregularity`/`Seed`/`ClusterName`，内部 `node_explode → rect_grid + voxel_slice → edge_green_cluster →
+  grid2node → add_child`，纯装饰叠加（不消耗区域），3 输出（主产物 / Clusters / ClustersPath）。
+  *为什么：* 给已成形地块/水体边缘点缀自然碎绿（灌木/苔藓/藻类）。
+- **`zone_nesting` 改 DataTree 数据格式 + 新建 `ZoneNesting` 模板（templates/structures/districts）。**
+  电池 `batteries/components/Topographic/zone_nesting/`：输入 `inputGrid`、输出 `outputGrid` 改为
+  `type:grid`/`access:item`——每次只处理单张网格，网格列表交由引擎按 DataTree 自动 fanout / 重组；
+  删除手写的 `parseInputGrids` 列表打包与 `outputGridList` / `outputNameList` 数组（命名交给下游模板），
+  `meta.json` 升版 `2.0.0`。新模板 `batteries/templates/structures/districts/ZoneNesting/`（参考
+  `interests/structures/LakeRegions`）：scene 输入 + 自定义参数暴露为输入端口，5 个 scene/string 输出
+  （主产物 / Rest / District / DistrictPath / RestPath），内部 `node_explode → rect_grid + voxel_slice →
+  zone_nesting → grid2node → add_child`，Rest = `alg_region_subtract(占用区 − 地块)`。
+  *为什么：* 让 `zone_nesting` 能像其它 grid 电池一样在 DataTree 流水线里直接复用，并提供可实例化的地块模板。
+- **新建 `zone_nesting_riverbank` 电池（河岸式变深度侵蚀）+ `RiverbankZone` 模板。**
+  电池 `batteries/components/Topographic/zone_nesting_riverbank/`：`erosionStrength` 默认 `54`；用低频 FBM
+  噪声场驱动每段边界的侵蚀深度（`depth = clamp(strength + (fbm-0.5)·2·waviness,0,1) × maxDepth`，先 padded
+  多源 BFS 求内向距离再判 `d ≤ depth`），让内边界**深浅不一、忽宽忽窄**形成自然河岸，而非 `zone_nesting`
+  的等距偏移内缩；新增 `waviness`/`maxDepth`/`featureScale` 参数，输入/输出同为 `grid`/`item`（DataTree）。
+  新模板 `batteries/templates/structures/districts/RiverbankZone/` 与 `ZoneNesting` 同构，改用本电池并暴露
+  `ErosionStrength`/`Waviness`/`MaxDepth`。脚本实测 60×40 全 1 网格：内边界 top-edge 深度 7~40 起伏，明显波动。
+  *为什么：* 用户需要比均匀偏移更夸张、极不均匀的有机河岸地块边界。
+- **成组电池/模板保存方式与 wb-2d 资产插件统一：区分预置（builtin）与用户内容，支持删除用户模板。**
+  此前 scene 侧 `groupTemplates.ts` 虽已能把「保存到模板」写入 workspace `.forgeax`
+  （`save-user` → `user-content/templates/My templates/<smallTag>/`），但列表项不带 `builtin`
+  标记、也没有删除入口，导致电池栏右键菜单无法删除自己保存的用户模板（内核已支持，但 scene
+  的 `HttpApiClient` 缺 `deleteUserTemplate`）。现对齐 wb-2d：(1) `collectCatalogItems` 给每项
+  打 `builtin`（`root !== userTemplateRoot()`：用户内容 = `false` 可删，groups/ 与内置 templates/
+  = `true` 只读）；(2) 新增 `DELETE /api/v1/group-templates/user/:id`（仅在 `.forgeax` 用户根按
+  id 定位删除，删后清理变空小标签目录，预设永不可达）；(3) 前端 `HttpApiClient.deleteUserTemplate`
+  打通内核右键删除链路。落点：`backend/src/routes/groupTemplates.ts`（`builtin` 字段 +
+  `findUserTemplateFile` + DELETE 路由）、`frontend/src/api/HttpApiClient.ts`。测试
+  `tests/groupTemplates.test.ts`（用户模板 `builtin:false`、按 id 删除消失、删缺失/预设 404）。
+  *为什么：* 让 scene 与资产插件「预置只读 / 用户保存到 .forgeax 且可删」的成组电池语义完全一致。
+
+### Fixed
+- **Templates 预览图改读文件夹内任意 `.png`（与 wb-2d 资产插件一致），不再只认 `icon.png`。**
+  此前 `groupTemplates.ts:readIconPng` 只 `resolve(dir, 'icon.png')`，模板里实际图片名为
+  `下载.png` 等时一律「No preview」。现改为扫文件夹、优先 `icon.png` 否则取首张受支持图片
+  （png/jpg/jpeg/webp/gif，按名排序），编码 data URL（`backend/src/routes/groupTemplates.ts:readIconPng`）。
+  测试 `tests/groupTemplates.test.ts`（放 `下载.png` 验证 iconPng 为 data URL）。
+  *为什么：* 用户的 scene 模板预览图未命名为 `icon.png`，导致电池栏 Templates 卡片无预览。
+
+### Changed
+- **模板按小标签归类（配合内核 Templates 小标签手风琴）。** `AddBaseGrid` 由
+  `templates/scene/` 迁到 `templates/general/`；`LakeRegions` 由 `templates/scene/`
+  迁到 `templates/interests/decoration/`（`templates/{大标签}/{小标签}/{模板}/file.json`
+  结构，使 Templates 模式显示「interests › decoration」小标签）。*为什么：* 让 scene
+  模板能像 Develop 一样按小标签分组（内核渲染改动见根 CHANGELOG）。
+
+- **整治 Sino「想太多」：补「放 N 栋手动建筑」照抄食谱 + 把房子路由从「专属/非默认」改回「默认走 `dechouse_gen`」。**
+  起因：用户提供的 Sino 思考轨迹显示，做一个村庄时 Sino (1) 为「怎么串多个 `PointSampleBuilding`」反复空想几十轮，(2) 房子最终走了 PART A 小 sprite、完全没调 `dechouse_gen` 装饰房屋模板。根因两条都在文档：
+  - **多栋手动建筑无可照抄食谱**（`PointSampleBuilding/README.md` 只讲单栋），但 persona 又「禁止自行探索」→ 被迫硬猜。现新增 README「放 N 栋手动建筑」节（链 `out_3`(Rest)→下一栋 `in_1`、**绝不接 `out_2`**(root 0 cells→静默产空+`scene is required`)、POI=各 `out_0` merge、汇总 `tree_merge`[`ABG.out_1`...]→flatten→merge_subtrees），并同步 `compose-sino-scene/SKILL.md`「手动放置装饰性建筑」、`TEMPLATES_INDEX.md`、persona 手动放楼条。
+  - **房子被路由去 PART A**：`compose-sino-scene/SKILL.md`「掩码提取」、`texture-pipeline/SKILL.md` 3.0、`building_footprint_mask/README.md`、persona 与 lessons 此前都把 `dechouse_gen` 框成「专属、非默认、仅当用户明确要 billboard 整栋贴图」。现统一改为「**要给房子/建筑出贴图/资产 → 默认走 PART C `dechouse_gen`**，唯一例外是纯结构化盖楼用内置墙材」。
+  - persona 新增「工作风格：多做少想、边做边想」directive + 「路由」速查表（普通场景/手动放楼/房子贴图/tile/小物件各走哪条），前置在最显眼处，replace「先长篇推演」的元行为。
+  *为什么：* 用户明确「Sino 思考时间太长不合理、要多做少想直截了当；房子生成还在 PART A/B，完全没调装饰房屋模板电池」。过度思考的结构性成因＝文档既禁止探索又不给食谱、且把正确路径 gate 成「非默认」。
+- **`PointSampleBuilding` 写明装饰性建筑尺寸铁律：Width/Height 至少 `10×10`（格），常规 10×10～16×16，`4×4` 太小、别过大（≫20×20）。**
+  `batteries/templates/scene/PointSampleBuilding/README.md`（in_2/in_3 表行 + 新增「尺寸铁律」note + 把示例 Width/Height 由 8/6 改 12/12）、
+  `compose-sino-scene/SKILL.md`「手动放置装饰性建筑」step 2、`TEMPLATES_INDEX.md` 同节、`agent-sino/persona/zh.md` 手动放楼一条同步补上。
+  *为什么：* 用户明确「装饰性房屋推荐至少 10×10，4×4 这种瞎扯淡」；太小的 Width/Height → 建筑区域墙体/门挤一团、后续 `dechouse_gen` 整栋贴图也稀碎。
+- **`compose-sino-scene/SKILL.md` 与 sino persona 的「整栋建筑贴图」更正为：2D 侧一键 `asset2d:pipeline.instantiateTemplate({templateId:"dechouse_gen"})`，不再让 AI 手搭等价链。**
+  上一轮文档因当时 2D 工具层缺 `instantiateTemplate`，写了「用 `asset2d:pipeline.applyBatch` 复刻等价链」；本轮 2D 插件已补齐该 op
+  （见 `wb-2d-scene-asset-generator` CHANGELOG「Added」），故把 `skills/compose-sino-scene/SKILL.md`「手动放置装饰性建筑」step 6/脚注、
+  `agent-sino/persona/zh.md`「整栋建筑贴图」step 4 + 「2D 侧与发布」节统一改为**一键实例化 `dechouse_gen`**（`in_0`=占地 json、`in_1`=height、
+  `in_15`=roofType → `out_3`=贴图、`out_4`=碰撞掩码；`house_template`/`house_footprint`/`grid_json_to_size` 是模板内部节点、别手搭）。
+  *为什么：* 用户明确「生成建筑只需一个模板电池，手搭节点链是过时错误做法」；2D 现已和场景侧对等支持模板组一键实例化，文档与 persona 必须锁步。
+
+### Added
+
+- **新模板组 `PointSampleBuilding`（手动点位建筑）发布到 `templates/scene/`。**
+  把开发版 `batteries/groups/scene/PointSampleBuilding`（仅 Develop 可见、Sino 看不到）原样复制为
+  `batteries/templates/scene/PointSampleBuilding/PointSampleBuilding.json`（templateId
+  `group_1781751905067_4k92s`），使 Sino 可经 `scene:pipeline.instantiateTemplate` 实例化。它支持
+  **在指定坐标手动放一栋装饰性建筑**：IN `in_0`Point(point2d)/`in_1`场景/`in_2`Width/`in_3`Height/`in_4`BuildingAsset，
+  OUT `out_0`Building/`out_1`BuildingPath/`out_2`scene/`out_3`Rest/`out_4`RestPath。配套新增 `README.md`
+  （完整工作流 + 可照抄 ops/CLI）。*为什么：* 与 `ArchitectureRegions`（随机撒 N 栋）互补，满足"就要在这个坐标放一栋这么大的楼"的地标/剧情/装饰诉求。
+- **`manual_points`（手动点位）加入 Sino 顶层 opId 白名单。** `backend/src/routes/sinoOpGate.ts`
+  的 `SINO_TOP_LEVEL_OPID_ALLOWLIST` 增加 `manual_points`（x,y→point2d），并与
+  `skills/compose-sino-scene/SKILL.md`「op 白名单」「手动放置装饰性建筑」一节、`TEMPLATES_INDEX.md`
+  同步（gate↔skill 锁步）。*为什么：* `manualPoint → PointSampleBuilding` 工作流的第一步要在顶层
+  `createNode` 一个点位源；不入白名单则被硬门拒绝，工作流无法跑通。`sinoOpGate.test.ts` 新增对应断言。
+
+### Changed
+
+- **`ArchitectureStructures` 模板新增可见输入 `in_30`（z 高度）。** 用开发版
+  `batteries/groups/scene/ArchitectureStructures`（含新增 z 输入，31 个 exposedInputs）覆盖发布版
+  `batteries/templates/scene/ArchitectureStructures/ArchitectureStructures.json`（原 30 个）；`in_30`
+  接内部 `voxel_slice.z`，控制建筑结构层高/体素切片高度。同步更新该模板 `README.md` 与 `TEMPLATES_INDEX.md`。
+  *为什么：* `PointSampleBuilding.out_0`(Building) → `ArchitectureStructures`（指定 z=1）出细节结构的工作流需要显式喂层高。
+- **`compose-sino-scene/SKILL.md` 打通"手动放楼 → 占地 json → 2D 建筑贴图 + 碰撞掩码"端到端。**
+  在「手动放置装饰性建筑」与「整栋建筑贴图」两节写明：`PointSampleBuilding` 的 Building 经 `BuildingPath` →
+  `scene_focus_path` → `building_footprint_mask`（0/1/2 占地掩码）→ `grid_to_json` 分析成 JSON 保存，这份 JSON **原样**
+  作为 2D 模板 `dechouse_gen.in_0`(json_mask)（内部 = `house_template.spec`/`house_footprint.spec`/`grid_json_to_size.json`），
+  配 `in_1`=height、`in_15`=roofType → `out_3`=建筑贴图、`out_4`=碰撞掩码导出；并补「闭环命名铁律」step 7：渲染按
+  `asset_name` 匹配，`PointSampleBuilding.in_4`(BuildingAsset) 即写 `asset_name` 的口子，故 **BuildingAsset == PART C
+  item_name == publishToGame.assetName**（assetType=object）三处同名，手动放的楼才会渲染成生成的整栋贴图，`topBillboard` 截图核对。
+  *为什么：* 已核对两侧端口契约严丝合缝（见 2D 插件 PART C「C-阶段零 dechouse_gen」），让 sino 学会"生成输入 json → 生成贴图+碰撞 →
+  用回场景"完整闭环（整栋 billboard 铺多格 footprint 属专属路径，首跑需截图验证）。
+- **`TEMPLATES_INDEX.md` / `compose-sino-scene/SKILL.md` 增补"手动放置装饰性建筑"工作流。**
+  说明坐标系（左上角 0,0 / x横 y纵）与 `manualPoint → PointSampleBuilding →（可选）ArchitectureStructures(z=1)`
+  →（BuildingPath 经 `scene_focus_path` + `building_footprint_mask` + `grid_to_json` 取网格形状；
+  BuildingPath `string_concat` 拼 `/outer_door` + `scene_focus_path` + `node_explode` 看 `voxels` 取门坐标）的全链。
+
 ### Fixed
 
 - **共享沙箱资产发布后场景侧不再需要手动刷新页面。** 根因：`scene:library.useGameTextures`

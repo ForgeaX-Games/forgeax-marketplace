@@ -70,6 +70,75 @@ export interface ApplyResult {
   batchId?: string
   reason?: string
   diagnostics?: ApplyDiagnostic[]
+  layoutOnly?: boolean
+  invalidatedNodeCount?: number
+}
+
+/**
+ * DEV consistency check: a persist batch must be SELF-CONTAINED — every node a
+ * `connect` / `createGroup` member / `updateNode` references must either already
+ * live in the kernel snapshot (`current`) OR be created earlier in the same
+ * batch. When that invariant breaks, the kernel's applyBatch rejects the WHOLE
+ * batch ("connect.target.nodeId X does not exist", "member X does not exist"),
+ * the dropped group never persists, and its node vanishes on the next refetch.
+ *
+ * Static data + a fresh diff never produce this; it only arises when the editor
+ * store's `desired` pipeline is transiently inconsistent (e.g. a concurrent
+ * live-sync `loadPipeline()` dropped a just-dropped, not-yet-persisted nested
+ * group while keeping its parent). This logs WHERE each phantom id lives in the
+ * store so the inconsistency can be localised precisely instead of only seeing
+ * the kernel's post-hoc rejection.
+ */
+function reportInconsistentBatch(ops: Op[], current: { nodes?: Record<string, unknown> } | null, desired: Pipeline): void {
+  const exists = new Set<string>(Object.keys(current?.nodes ?? {}))
+  const phantom = new Map<string, string[]>() // id -> op descriptions referencing it before creation
+  const note = (id: string, where: string): void => {
+    if (exists.has(id)) return
+    const list = phantom.get(id) ?? []
+    list.push(where)
+    phantom.set(id, list)
+  }
+  ops.forEach((op, i) => {
+    if (op.type === 'createNode') exists.add(op.nodeId)
+    else if (op.type === 'createGroup') {
+      for (const m of op.memberNodeIds) note(m, `#${i} createGroup ${op.groupId} member`)
+      exists.add(op.groupId)
+    } else if (op.type === 'connect') {
+      note(op.source.nodeId, `#${i} connect.source`)
+      note(op.target.nodeId, `#${i} connect.target`)
+    } else if (op.type === 'updateNode') note(op.nodeId, `#${i} updateNode`)
+  })
+  if (phantom.size === 0) return
+
+  // Locate each phantom id within the editor store's desired pipeline.
+  const topLevel = new Set(desired.nodes.map((n) => n.id))
+  const groupsById = new Map((desired.groups ?? []).map((g) => [g.id, g] as const))
+  const memberOf = new Map<string, string[]>()
+  const edgeOf = new Map<string, string[]>()
+  for (const g of desired.groups ?? []) {
+    for (const n of g.nodes) (memberOf.get(n.id) ?? memberOf.set(n.id, []).get(n.id)!).push(g.id)
+    for (const e of g.edges) {
+      for (const ep of [e.source.nodeId, e.target.nodeId]) (edgeOf.get(ep) ?? edgeOf.set(ep, []).get(ep)!).push(g.id)
+    }
+  }
+  const lines = [...phantom.entries()].map(([id, refs]) => {
+    const groupsAsMember = memberOf.get(id) ?? []
+    const groupsAsEdge = [...new Set(edgeOf.get(id) ?? [])]
+    const memberMissingGroups = groupsAsEdge.filter((gid) => !groupsById.get(gid)?.nodes.some((n) => n.id === id))
+    return [
+      `  • ${id}`,
+      `      referenced by ops: ${refs.join(', ')}`,
+      `      in desired.nodes(top-level): ${topLevel.has(id)}`,
+      `      member of desired.groups: ${groupsAsMember.length ? groupsAsMember.join(', ') : '(none)'}`,
+      `      used by edges of groups: ${groupsAsEdge.length ? groupsAsEdge.join(', ') : '(none)'}`,
+      memberMissingGroups.length ? `      ⚠ used by edges of group(s) [${memberMissingGroups.join(', ')}] but NOT a member of them` : '',
+    ].filter(Boolean).join('\n')
+  })
+  console.warn(
+    `[persist] INCONSISTENT BATCH: ${phantom.size} phantom node ref(s) (would be rejected by the kernel).\n` +
+    `desired.groups=${(desired.groups ?? []).map((g) => `${g.id}(${g.nodes.length}n/${g.edges.length}e)`).join(', ') || '(none)'}\n` +
+    lines.join('\n'),
+  )
 }
 
 function groupTemplateToBattery(template: GroupTemplateBattery): Battery {
@@ -223,8 +292,30 @@ export class EditorApiAdapter {
    * when there is no pipeline yet.
    */
   async getPipelineHash(): Promise<string | null> {
+    try {
+      const r = await (this.client as { getPipelineHash?: () => Promise<{ hash: string | null }> }).getPipelineHash?.()
+      if (r !== undefined) return r.hash
+    } catch {
+      /* fall through to full snapshot */
+    }
     const snap = await this.client.getPipeline()
     return snap?.hash ?? null
+  }
+
+  async getNodeOutputMeta(
+    nodeId: string,
+    portId: string,
+  ): Promise<{ executedHash: string; valid: boolean; sharded: boolean } | null> {
+    const client = this.client as {
+      getNodeOutputMeta?: (
+        nodeId: string,
+        portId: string,
+      ) => Promise<{ executedHash: string; valid: boolean; sharded: boolean; missing?: boolean } | null>
+    }
+    if (!client.getNodeOutputMeta) return null
+    const r = await client.getNodeOutputMeta(nodeId, portId)
+    if (!r || ('missing' in r && r.missing)) return null
+    return r
   }
 
   /**
@@ -247,6 +338,7 @@ export class EditorApiAdapter {
     const currentGroups =
       (desired.groups?.length ?? 0) > 0 || kernelHasGroups ? await this.safeListGroups() : undefined
     const ops = diffPipelineToOps(desired, current, currentGroups)
+    reportInconsistentBatch(ops, current, desired)
     if (ops.length === 0) return { status: 'ok', newHash: current?.hash }
     return this.applyOps(ops, actor, undefined, batchId)
   }
@@ -283,6 +375,8 @@ export class EditorApiAdapter {
       batchId: res.batchId,
       reason: res.reason,
       diagnostics: res.diagnostics ? [...res.diagnostics] : undefined,
+      layoutOnly: res.layoutOnly,
+      invalidatedNodeCount: res.invalidatedNodeCount,
     }
   }
 
@@ -302,6 +396,8 @@ export class EditorApiAdapter {
       batchId: res.batchId,
       reason: res.reason,
       diagnostics: res.diagnostics ? [...res.diagnostics] : undefined,
+      layoutOnly: res.layoutOnly,
+      invalidatedNodeCount: res.invalidatedNodeCount,
     }
   }
 
@@ -427,11 +523,61 @@ export class EditorApiAdapter {
     groupId: string,
     opts?: { scope?: 'groups' | 'templates' },
   ): Promise<NodeGroup | null> {
+    // Palette drops pass `scope` — always read the on-disk library file first.
+    // Otherwise a stale in-graph copy keyed on the same library id (e.g. an old
+    // "PathConnection (1)" instance that was persisted before the file was
+    // renamed) masks the updated batteries/groups entry.
+    if (opts?.scope && this.client.loadGroupTemplate) {
+      const template = await this.client.loadGroupTemplate(groupId, opts)
+      if (template) return this.hydrateNestedGroups(kernelGroupToEditorGroup(template))
+    }
     const live = await this.client.getGroup(groupId)
-    if (live) return kernelGroupToEditorGroup(live)
+    if (live) return this.hydrateNestedGroups(kernelGroupToEditorGroup(live))
     if (!this.client.loadGroupTemplate) return null
     const template = await this.client.loadGroupTemplate(groupId, opts)
-    return template ? kernelGroupToEditorGroup(template) : null
+    return template ? this.hydrateNestedGroups(kernelGroupToEditorGroup(template)) : null
+  }
+
+  /**
+   * Ensure a loaded group carries a COMPLETE `_nestedGroups` bundle.
+   *
+   * The kernel keeps nested groups in a FLAT registry, so `getGroup(root)`
+   * returns the root with its `__group__` member shadows but WITHOUT their child
+   * group definitions (`_nestedGroups` is undefined). Dropping such a root is
+   * fatal: `remapGroupBundle` builds its id-map from `[root, ...deps]`, so with
+   * no deps the nested shadow members fall through to a fresh `node-…` id that
+   * no longer equals their `params.groupId`. That breaks the kernel invariant
+   * "shadow node id === group id"; the persist then emits createGroup members /
+   * connects for ids the kernel never creates ("member/connect.* does not
+   * exist"), the whole batch is rejected, and the dropped group vanishes on the
+   * next refetch.
+   *
+   * File-backed templates already inline `_nestedGroups`; for the live path we
+   * resolve every nested `__group__` member against the flat group list
+   * (transitively) and attach the defs so the bundle is self-contained.
+   */
+  private async hydrateNestedGroups(root: NodeGroup): Promise<NodeGroup> {
+    if (root._nestedGroups && root._nestedGroups.length > 0) return root
+    if (!root.nodes.some((n) => n.batteryId === '__group__')) return root
+    const all = await this.safeListGroups()
+    if (all.length === 0) return root
+    const byId = new Map(all.map((g) => [g.id, kernelGroupToEditorGroup(g)]))
+    const seen = new Set<string>([root.id])
+    const deps: NodeGroup[] = []
+    const visit = (g: NodeGroup): void => {
+      for (const n of g.nodes) {
+        if (n.batteryId !== '__group__') continue
+        const gid = typeof n.params?.groupId === 'string' ? n.params.groupId : ''
+        if (!gid || seen.has(gid)) continue
+        const child = byId.get(gid)
+        if (!child) continue
+        seen.add(gid)
+        deps.push(child)
+        visit(child)
+      }
+    }
+    visit(root)
+    return deps.length > 0 ? { ...root, _nestedGroups: deps } : root
   }
 
   /** List all group sub-graphs. */
@@ -501,6 +647,18 @@ export class EditorApiAdapter {
   async deleteUserTemplate(groupId: string): Promise<boolean> {
     if (!this.client.deleteUserTemplate) return false
     const res = await this.client.deleteUserTemplate(groupId)
+    return res.ok
+  }
+
+  /** Whether the transport can delete develop GROUPS-tab group batteries. */
+  get supportsDeleteGroupBattery(): boolean {
+    return typeof this.client.deleteGroupTemplate === 'function'
+  }
+
+  /** Delete a GROUPS-tab group battery by group id. Returns false when unsupported or rejected. */
+  async deleteGroupBattery(groupId: string): Promise<boolean> {
+    if (!this.client.deleteGroupTemplate) return false
+    const res = await this.client.deleteGroupTemplate(groupId)
     return res.ok
   }
 

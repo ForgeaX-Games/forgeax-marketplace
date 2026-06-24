@@ -73,7 +73,8 @@ export const torus: OpBuilder = (ctx, args) => {
   if (majorR <= 0 || minorR <= 0) throw new BakerError('torus: radii must be positive');
   if (minorR >= majorR) throw new BakerError('torus: minor_radius must be < major_radius');
 
-  const n = 48;
+  // low-poly：环向截面 16 段（旧 48 对低多边形过细）。
+  const n = 16;
   const pts: Array<readonly [number, number]> = [];
   for (let i = 0; i < n; i++) {
     const a = (Math.PI * 2 * i) / n;
@@ -98,7 +99,8 @@ export const dome: OpBuilder = (ctx, args) => {
   const zTop = +h / 2;
   const baseR = Math.sqrt(Math.max(0, r * r - (zBase - sphereCenterZ) ** 2));
 
-  const n = 32;
+  // low-poly：顶盖 16 段（旧 32 对低多边形过细）。
+  const n = 16;
   const pts: Array<readonly [number, number]> = [[0, zBase], [baseR, zBase]];
   for (let i = 1; i <= n; i++) {
     const t = i / n;

@@ -1,10 +1,14 @@
 import type { FastifyInstance } from 'fastify'
-import type { NodeGroup } from '@forgeax/node-runtime'
+import type { NodeGroup, Op } from '@forgeax/node-runtime'
+import { applyBatch } from '@forgeax/node-runtime'
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, dirname, extname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
+import { getRuntime } from '../runtime.js'
+import { ensureMutationAccess } from './projects.js'
+import { buildTemplateOps, splitTemplate } from '../lib/templateOps.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..', '..')
@@ -315,5 +319,106 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
       return reply.code(500).send({ error: `Failed to delete user template: ${message}` })
     }
     return { ok: true }
+  })
+
+  // One-shot instantiation of a template group into the active project's graph
+  // (twin of wb-scene-generator's same route). Reads the template JSON from
+  // `templates/` only (never groups/, which are Develop-only), remaps every
+  // inner node/edge/group id to fresh ones while keeping exposed `portName`s
+  // stable (in_N/out_N), builds a single atomic batch via buildTemplateOps,
+  // and applies it through the kernel applyBatch — so inner member createNodes
+  // are materialised as ONE group node, never hand-wired by the agent. It does
+  // NOT route through POST /api/v1/batch, so nested-group `createNode`s never
+  // hit any top-level op gate. The per-agent project lock is enforced via
+  // ensureMutationAccess (same as /api/v1/batch).
+  app.post<{
+    Params: { id: string }
+    Body: {
+      templateId?: string
+      position?: { x?: number; y?: number }
+      groupId?: string
+      opts?: { actor?: string; label?: string }
+    }
+  }>('/api/v1/group-templates/:id/instantiate', async (req, reply) => {
+    const access = await ensureMutationAccess(req)
+    if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
+
+    const body = (req.body ?? {}) as {
+      templateId?: string
+      position?: { x?: number; y?: number }
+      groupId?: string
+      opts?: { actor?: string; label?: string }
+    }
+    const templateId = body.templateId ?? req.params.id
+    if (typeof templateId !== 'string' || !templateId.trim()) {
+      return reply.code(400).send({ error: 'missing templateId' })
+    }
+
+    const file = await findGroupFile(templateId, 'templates')
+    if (!file) return reply.code(404).send({ error: `template not found: ${templateId}` })
+    const parsed = await readGroup(file)
+    const split = splitTemplate(parsed)
+    if (!split) {
+      return reply.code(422).send({ error: `template '${templateId}' is not a valid NodeGroup` })
+    }
+
+    const position = {
+      x: typeof body.position?.x === 'number' ? body.position.x : 0,
+      y: typeof body.position?.y === 'number' ? body.position.y : 0,
+    }
+    const explicitGroupId =
+      typeof body.groupId === 'string' && body.groupId.trim() ? body.groupId : undefined
+
+    const { ops, rootGroupId, exposedInputs, exposedOutputs } = buildTemplateOps(
+      split.root,
+      split.deps,
+      position,
+      explicitGroupId,
+    )
+
+    // Stamp template provenance on the shadow node so the editor renders the
+    // locked template UI (same fields as drag-out from the Templates palette).
+    // buildTemplateOps/createGroup only sets `{ groupId }`; without this pass
+    // AI-instantiated templates look like ordinary group batteries.
+    const batchOps = [...ops] as Op[]
+    const templateRoot = templateRoots().find((root) => file.startsWith(resolve(root)))
+    if (templateRoot) {
+      const category = categoryFor(templateRoot, file)
+      const batteryName = split.root.name ?? basename(file, '.json')
+      batchOps.push({
+        type: 'updateNode',
+        nodeId: rootGroupId,
+        params: {
+          groupId: rootGroupId,
+          __groupIsTemplate: true,
+          __groupSourceGroupId: split.root.id,
+          __groupSourceCategory: category,
+          __groupSourceBatteryName: batteryName,
+        },
+      } as Op)
+    }
+
+    const rt = await getRuntime()
+    const result = await applyBatch(rt, batchOps as never, {
+      actor: typeof body.opts?.actor === 'string' ? body.opts.actor : 'instantiate-template',
+      label:
+        typeof body.opts?.label === 'string'
+          ? body.opts.label
+          : `instantiate template ${split.root.name ?? templateId}`,
+    })
+
+    if (result.status !== 'ok') {
+      const detail = result.diagnostics?.[0]?.message ?? result.reason ?? 'unknown'
+      return reply.code(422).send({ error: `instantiate rejected: ${detail}`, result })
+    }
+
+    return {
+      ...result,
+      groupId: rootGroupId,
+      name: split.root.name ?? templateId,
+      exposedInputs,
+      exposedOutputs,
+      opCount: ops.length,
+    }
   })
 }

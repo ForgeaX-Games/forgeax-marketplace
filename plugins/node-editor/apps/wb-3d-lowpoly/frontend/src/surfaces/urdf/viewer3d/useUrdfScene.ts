@@ -325,7 +325,15 @@ export function useUrdfScene(
             if (!linkSpec || !visual) return
             const meshLoadT0 = performance.now()
             try {
-              const materialSpec = resolveVisualMaterialSpec(visual)
+              // 自带内嵌材质的 mesh（GLB/GLTF，如 g_bake_object 的多材质产物）在没有
+              // 显式 URDF link material 时，**不要**用默认灰 spec 覆盖——传 undefined 让
+              // loadGeometryObject 保留 GLTFLoader 加载到的内嵌每-part 颜色。
+              // OBJ 无内嵌材质、仍按旧行为上 spec（缺省灰）；显式 link material 一律覆盖。
+              const fn = visual.geometry.filename ?? ''
+              const isEmbeddedMatFormat = /\.(glb|gltf)$/i.test(fn)
+              const materialSpec = (isEmbeddedMatFormat && !visual.material)
+                ? undefined
+                : resolveVisualMaterialSpec(visual)
               const group = await loadGeometryObject(visual.geometry, baseUrl, {
                 kind: 'visual',
                 materialSpec,

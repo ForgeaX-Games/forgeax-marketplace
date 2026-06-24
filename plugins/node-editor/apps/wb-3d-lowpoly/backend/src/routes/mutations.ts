@@ -42,12 +42,21 @@ export async function registerMutationRoutes(app: FastifyInstance): Promise<void
       ops: unknown[]
       opts?: { actor?: string; label?: string; batchId?: string; expectedPrevHash?: string }
     }
-    const result = await applyBatch(rt, ops as never, {
-      actor: opts?.actor ?? 'ui',
-      ...(opts?.label !== undefined ? { label: opts.label } : {}),
-      ...(opts?.batchId !== undefined ? { batchId: opts.batchId } : {}),
-      ...(opts?.expectedPrevHash !== undefined ? { expectedPrevHash: opts.expectedPrevHash } : {}),
-    })
+    // applyBatch returns a structured {status:'rejected'} for known conflicts, but
+    // an unexpected kernel throw (bad op shape, internal invariant) would otherwise
+    // surface as a raw 500. Wrap it so callers always get the same rejected shape.
+    let result: Awaited<ReturnType<typeof applyBatch>>
+    try {
+      result = await applyBatch(rt, ops as never, {
+        actor: opts?.actor ?? 'ui',
+        ...(opts?.label !== undefined ? { label: opts.label } : {}),
+        ...(opts?.batchId !== undefined ? { batchId: opts.batchId } : {}),
+        ...(opts?.expectedPrevHash !== undefined ? { expectedPrevHash: opts.expectedPrevHash } : {}),
+      })
+    } catch (e) {
+      req.log.error({ err: e }, 'applyBatch threw')
+      return reply.code(422).send({ status: 'rejected', reason: `batch-failed: ${(e as Error).message}` })
+    }
 
     if (result.status === 'rejected' && result.reason?.startsWith('concurrent-write:')) {
       return reply.code(409).send(result)

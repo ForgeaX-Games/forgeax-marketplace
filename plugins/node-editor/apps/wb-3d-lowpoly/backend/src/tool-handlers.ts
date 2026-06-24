@@ -75,7 +75,18 @@ async function lowpolyRawFetch(
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
-  const payload = text ? (JSON.parse(text) as unknown) : null
+  // A non-2xx response (or a proxy in front of the backend) may return a non-JSON
+  // body — an HTML error page, plain text, etc. Guard the parse so that surfaces
+  // as a null payload (the raw `text` still feeds the error message below) instead
+  // of throwing and masking the real status.
+  let payload: unknown = null
+  if (text) {
+    try {
+      payload = JSON.parse(text) as unknown
+    } catch {
+      payload = null
+    }
+  }
   return { res, payload, text }
 }
 

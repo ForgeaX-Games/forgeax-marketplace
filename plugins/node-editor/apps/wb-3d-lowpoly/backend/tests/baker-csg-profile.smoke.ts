@@ -8,7 +8,7 @@
 import { bakeGeometryShape, initBakerService } from '../src/services/baker/baker.service.js';
 import { sectionLoftMesh, tubeMeshFromPath, type Vec3 } from '../src/services/baker/curves.js';
 import type { BakerLibraryHandle, MeshGeometry } from '../src/services/baker/types.js';
-import { gToUrdf } from '../../batteries/3d/Utils/g_to_urdf/index.js';
+import { gToUrdf } from '../../batteries/Output/Export/g_to_urdf/index.js';
 import { geometryFromSource, type Geometry } from '../../vendor/dist/shared/types/index.js';
 
 class FakeLibrary implements BakerLibraryHandle {

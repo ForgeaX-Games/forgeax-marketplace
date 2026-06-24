@@ -106,7 +106,15 @@ export function appendCellsToVoxelMaster(
   const state = master.incremental
   // drawMode / asset binding context must match the snapshot for a valid append.
   if (state.drawMode !== opts.drawMode) return fail(`drawMode-mismatch(state=${state.drawMode},opts=${opts.drawMode})`)
-  // Any object-instance cell → bail (irregular sprite, custom sort overrides).
+  // Object layers (non-tile binding): one layer = one sprite; incremental append
+  // cannot recompute grouping/anchor → full rebuild.
+  if (state.assetByLayer) {
+    for (const c of newCells) {
+      const binding = state.assetByLayer.get(c.layerIdx)
+      if (binding && !binding.match.tileType) return fail('object-layer-cell')
+    }
+  }
+  // Legacy painted columns carry instanceId metadata; still bail (irregular sprite).
   for (const c of newCells) {
     if (c.state && typeof c.state.instanceId === 'string' && c.state.instanceId.length > 0) return fail('object-instance-cell')
   }
@@ -280,6 +288,8 @@ export function appendCellsToVoxelMaster(
     ctx.clip()
   }
   const columnCells = state.objectColumnCells
+  const anchorPointsByLayer = state.objectAnchorPointByLayer
+  const footprintScaleByLayer = state.objectFootprintScaleByLayer
   // Gather candidates near the dirty rect + force-repaint objects, then paint in
   // global painter order (sorting only this small set).
   const candidateSet = new Set<CollectedCell>(cellsNearDirty(buckets, dirty, bbox, cellSize))
@@ -299,7 +309,17 @@ export function appendCellsToVoxelMaster(
       const fp = cellFootprint(c, bbox, cellSize)
       if (!rectsOverlap(fp, dirty)) continue
     }
-    paintCell(ctx, c, bbox, cellSize, state.drawMode, state.assetByLayer, state.coordsByLayerIdx)
+    const binding = state.assetByLayer?.get(c.layerIdx)
+    const anchorPoint = binding && !binding.match.tileType && !(columnCells?.has(c))
+      ? anchorPointsByLayer?.get(c.layerIdx)
+      : undefined
+    const footprintScale = binding && !binding.match.tileType && !(columnCells?.has(c))
+      ? footprintScaleByLayer?.get(c.layerIdx)
+      : undefined
+    paintCell(
+      ctx, c, bbox, cellSize, state.drawMode, state.assetByLayer, state.coordsByLayerIdx,
+      undefined, anchorPoint, footprintScale,
+    )
     cellsPainted++
   }
   ctx.restore()

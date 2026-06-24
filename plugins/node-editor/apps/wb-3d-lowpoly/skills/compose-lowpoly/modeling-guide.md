@@ -129,21 +129,34 @@ Confirm exact names/defaults with `lowpoly:batteries.get` before wiring.
 
 ---
 
-## Gears — `g_spur_gear` `g_bevel_gear` `g_ring_gear` `g_rack_gear` `g_worm` `g_planetary_gearset` `g_herringbone_gear` …
+## Gears — `g_gear` `g_ring_gear` `g_rack_gear` `g_planetary_gearset` `g_bevel_gear` `g_worm`
 
-**When to use:** the prompt mentions gears / gearing / transmission. Parametric by
-`module` / `teeth_number` / `width` (note: `teeth_number`, not `teeth`); outputs
-`geometry` + `id`, wrapped by `g_part` like any other shape. Most gears expose
-`bore_d` (center shaft hole), `pressure_angle`, `helix_angle` (≠0 = helical),
-`clearance`, `backlash`. `g_bevel_gear` uses `cone_angle` + `helix_angle` (spiral
-bevel); `g_herringbone_rack_gear` builds a true V-chevron from `helix_angle`;
-`g_planetary_gearset` requires `sun_teeth_number`/`planet_teeth_number` ≥ 3 and
-`n_planets` ≥ 1. Do not approximate a gear with a bare cylinder.
+**When to use:** the prompt mentions gears / gearing / transmission. The 15 old
+gear ops were consolidated into 6 parameterized families under **Parts**:
+
+- **`g_gear`** — the workhorse cylindrical gear; pick the kind with
+  `tooth_profile` = `spur` | `helical` | `herringbone` | `hyperbolic`
+  (`helical`/`hyperbolic` add a twist; `hyperbolic` uses `twist_angle`, the rest
+  share `helix_angle`). Replaces `g_spur_gear`/`g_herringbone_gear`/
+  `g_crossed_helical_gear`/`g_hyperbolic_gear`.
+- **`g_ring_gear`** / **`g_rack_gear`** / **`g_planetary_gearset`** — each takes a
+  `tooth_profile` (`spur`|`herringbone`; rack uses `straight`|`herringbone`).
+- **`g_bevel_gear`** (`cone_angle` + `helix_angle` for spiral bevel) and
+  **`g_worm`** stay standalone.
+
+Parametric by `module` / `teeth_number` / `width` (note: `teeth_number`, not
+`teeth`); outputs `geometry` + `id`, wrapped by `g_part` like any other shape.
+Most gears expose `bore_d` (center shaft hole), `pressure_angle`, `clearance`,
+`backlash`. `g_planetary_gearset` requires `sun_teeth_number`/
+`planet_teeth_number` ≥ 3 and `n_planets` ≥ 1. The old per-profile ids
+(`g_spur_gear`, `g_herringbone_*`, `g_crossed_*`, `g_hyperbolic_*`, `*_pair`)
+were **removed** — always use the 6 ops above; a graph saved with a removed id
+must be re-created with `g_gear`. Do not approximate a gear with a bare cylinder.
 
 ```jsonc
-{ "type": "createNode", "nodeId": "n_gear", "opId": "g_spur_gear",
-  "params": { "teeth_number": 20, "module": 0.002, "width": 0.01,
-              "bore_d": 0.006, "id": "gear1" } }
+{ "type": "createNode", "nodeId": "n_gear", "opId": "g_gear",
+  "params": { "tooth_profile": "spur", "teeth_number": 20, "module": 0.002,
+              "width": 0.01, "bore_d": 0.006, "id": "gear1" } }
 ```
 
 ---
@@ -309,7 +322,7 @@ material. A correct Phase-2 `g_to_urdf` reports `bakeFallbacks = 0` and
 
 ---
 
-## Utils & Preview — QC sensors and the visible path
+## Output (QC / Bake / Export) — QC sensors and the visible path
 
 **When to use:** every model. End the graph with the QC sensors, optional
 auto-collision, then URDF.
@@ -321,7 +334,7 @@ auto-collision, then URDF.
   `islands` / `aabb_missing` / `joint_origin` / `aabb_overlap` / `primitive_only`
   / `floating_link` / `orphan_profile` / `lathe_xy_profile` / `mesh_boolean_misuse`).
   Loop on the `signals` codes. `primitive_only: true` = every shape in the model
-  is a bare primitive with no CSG solid / Parts / Gears / baked mesh; it fires
+  is a bare primitive with no CSG solid / Parts (incl. gears) / baked mesh; it fires
   **even when the boxes are wrapped in `g_part` + `g_joint`** (wrapping a
   box-stack no longer hides it), so on a real object this means go back and model
   the parts for real (CSG/Parts → `g_bake_part` → `g_mesh`).

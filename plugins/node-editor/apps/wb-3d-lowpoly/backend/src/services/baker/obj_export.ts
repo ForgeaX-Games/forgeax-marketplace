@@ -30,20 +30,44 @@ export interface ObjExportResult {
   bboxMax: [number, number, number] | null;
 }
 
+/** 单个 replicad 形状三角化后的裸数组（flat positions + flat indices）。 */
+export interface RawMesh {
+  /** flat [x,y,z,x,y,z,...] */
+  vertices: number[];
+  /** flat [i0,i1,i2,...]，0-based */
+  triangles: number[];
+}
+
+/**
+ * 把一个 replicad 形状按当前 tessellation 三角化成裸数组。
+ *
+ * 与 `shapeToObj` 共用同一套弦距/角度容差（含 low-poly 相对容差逻辑），保证
+ * OBJ 烘焙与多材质 GLB 烘焙的面数表现一致。读完三角面后显式 delete WASM 句柄。
+ */
+export function meshShape(shape: BakeableShape, tess: TessellationOptions): RawMesh {
+  const mesh = shape.mesh({
+    tolerance: effectiveLinearDeflection(shape, tess),
+    angularTolerance: tess.angularDeflection,
+  });
+  try {
+    return {
+      vertices: Array.from(mesh.vertices as ArrayLike<number>),
+      triangles: Array.from(mesh.triangles as ArrayLike<number>),
+    };
+  } finally {
+    try { (mesh as unknown as { delete?: () => void }).delete?.(); } catch { /* 已回收 */ }
+  }
+}
+
 export function shapeToObj(
   shape: BakeableShape | MeshGeometry,
   tess: TessellationOptions,
 ): ObjExportResult {
   if (isMeshGeometry(shape)) return meshToObj(shape);
 
-  const mesh = shape.mesh({
-    tolerance: effectiveLinearDeflection(shape, tess),
-    angularTolerance: tess.angularDeflection,
-  });
+  const { vertices, triangles } = meshShape(shape, tess);
 
-  try {
-    const vertices = mesh.vertices; // flat [x, y, z, x, y, z, ...]
-    const triangles = mesh.triangles; // flat [i0, i1, i2, ...]
+  {
     const vertexCount = vertices.length / 3;
     const triangleCount = triangles.length / 3;
 
@@ -69,11 +93,6 @@ export function shapeToObj(
       triangleCount,
       ...finalizeBbox(bbox),
     };
-  } finally {
-    // 某些 replicad/OCCT 版本下 mesh() 返回的句柄持有 WASM 堆缓冲；读完三角面后
-    // 显式释放（若存在 delete），避免连续 bake 时 OCCT 堆累积碎片。返回的 Buffer
-    // 已是字符串拷贝，delete 后不受影响。无 delete 的纯 JS 对象则为 no-op。
-    try { (mesh as unknown as { delete?: () => void }).delete?.(); } catch { /* 已回收 */ }
   }
 }
 

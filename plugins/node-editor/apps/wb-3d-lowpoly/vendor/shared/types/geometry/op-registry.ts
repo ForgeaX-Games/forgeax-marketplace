@@ -690,9 +690,6 @@ const SPECS: OpSpec[] = [
       { name: 'clearance',      kinds: ['number'] },
       { name: 'backlash',       kinds: ['number'] },
       { name: 'bore_d',         kinds: ['number'] },
-      { name: 'hub_d',          kinds: ['number'] },
-      { name: 'hub_length',     kinds: ['number'] },
-      { name: 'chamfer',        kinds: ['number'] },
     ],
   },
   {
@@ -708,9 +705,6 @@ const SPECS: OpSpec[] = [
       { name: 'clearance',      kinds: ['number'] },
       { name: 'backlash',       kinds: ['number'] },
       { name: 'bore_d',         kinds: ['number'] },
-      { name: 'hub_d',          kinds: ['number'] },
-      { name: 'hub_length',     kinds: ['number'] },
-      { name: 'chamfer',        kinds: ['number'] },
     ],
   },
   {
@@ -726,7 +720,6 @@ const SPECS: OpSpec[] = [
       { name: 'helix_angle',    kinds: ['number'] },
       { name: 'clearance',      kinds: ['number'] },
       { name: 'backlash',       kinds: ['number'] },
-      { name: 'chamfer',        kinds: ['number'] },
     ],
   },
   {
@@ -742,7 +735,6 @@ const SPECS: OpSpec[] = [
       { name: 'helix_angle',    kinds: ['number'] },
       { name: 'clearance',      kinds: ['number'] },
       { name: 'backlash',       kinds: ['number'] },
-      { name: 'chamfer',        kinds: ['number'] },
     ],
   },
   {
@@ -759,8 +751,6 @@ const SPECS: OpSpec[] = [
       { name: 'clearance',      kinds: ['number'] },
       { name: 'backlash',       kinds: ['number'] },
       { name: 'bore_d',         kinds: ['number'] },
-      { name: 'trim_bottom',    kinds: ['bool'] },
-      { name: 'trim_top',       kinds: ['bool'] },
     ],
   },
   {

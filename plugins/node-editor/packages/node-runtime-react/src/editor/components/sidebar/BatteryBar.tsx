@@ -19,7 +19,7 @@ import type { Battery } from '../../types.js'
 import { useNodeTooltip, TooltipPortal } from '../canvas/nodeTooltip.js'
 import type { BatteryTooltipState } from '../canvas/nodeTooltip.js'
 import DevNoteModal from './DevNoteModal.js'
-import { getEditorTransport } from '../../transport/index.js'
+import { getEditorTransport, peekEditorTransport } from '../../transport/index.js'
 import './BatteryBar.css'
 import {
   BATTERY_BAR_WIDTH_DEFAULT,
@@ -34,6 +34,8 @@ import {
   vScrollKey,
   smallGroupKey,
   parseSmallGroupKey,
+  readBigLabelOrder,
+  writeBigLabelOrder,
 } from './batteryBarStorage.js'
 import {
   type CatalogBattery,
@@ -41,10 +43,12 @@ import {
   catalogBatteryKey,
   getBigLabel,
   getTemplateSubfolder,
+  getTemplateSmallLabel,
   getSmallLabel,
   formatBigLabel,
   formatBigLabelRailText,
   formatBigLabelRailRest,
+  compareBigLabel,
   formatSmallLabel,
   applyOrder,
   sortSmallLabels,
@@ -62,12 +66,17 @@ const FAVORITES_SMALL = 'favorites'
 // 条目可拖入画布生成预填文字的 text_panel 节点（行为与电池一致）。
 const PRESETS_BIG = '__presets__'
 
-// 右键「删除」只对用户内容开放：用户保存的提示词（prompt:* 且 builtin !== true）
-// 与用户模板（成组模板电池且 builtin === false）。预设提示词 / 预设模板 builtin=true，
-// 普通 op / 成组电池 builtin=undefined，一律不可删除。
+// 右键「删除」/ 行内删除按钮开放范围：
+//   ─ 用户保存的提示词（prompt:* 且 builtin !== true）
+//   ─ 用户模板（成组模板电池且 builtin === false）
+//   ─ Develop「GROUPS」标签下的成组电池（groups/<cat>，本地电池目录可增删）
+// 预设提示词 / 预设模板 builtin=true 一律不可删；普通 op 不可删。
+// 注意：'group' 删除会物理删除本地电池目录里的文件，且仅在 transport 暴露
+// deleteGroupTemplate 路由时由调用方启用（见 canDeleteGroups 闸门）。
 type DeletableKind =
   | { kind: 'prompt'; promptId: string }
   | { kind: 'template'; groupId: string }
+  | { kind: 'group'; groupId: string }
   | null
 
 function getDeletableKind(battery: Battery): DeletableKind {
@@ -76,6 +85,10 @@ function getDeletableKind(battery: Battery): DeletableKind {
   }
   if (isTemplateBattery(battery)) {
     return battery.builtin === false ? { kind: 'template', groupId: battery.id } : null
+  }
+  // 非模板的成组电池 → Develop「GROUPS」标签项，可删本地电池目录文件。
+  if (battery.type === 'group') {
+    return { kind: 'group', groupId: battery.id }
   }
   return null
 }
@@ -128,6 +141,18 @@ function PresetsRailIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M6 3.6h12a1 1 0 0 1 1 1v16.2l-7-4.3-7 4.3V4.6a1 1 0 0 1 1-1Z" />
+    </svg>
+  )
+}
+
+/** Develop ⇄ Templates 模式切换图标：上下双箭头（swap），随模式高亮由按钮 color 决定。 */
+function ModeToggleRailIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="7 8 4 5 1 8" transform="translate(4 1)" />
+      <path d="M8 6v8a4 4 0 0 0 4 4" />
+      <polyline points="13 16 16 19 19 16" transform="translate(0 -1)" />
+      <path d="M16 18V10a4 4 0 0 0-4-4" />
     </svg>
   )
 }
@@ -232,6 +257,8 @@ interface BatteryRowProps {
   templateMode?: boolean
   onDragStart: (e: React.DragEvent, battery: Battery) => void
   onContextMenu: (e: React.MouseEvent, battery: Battery) => void
+  /** When set, renders an inline (hover) delete button that calls this with the row's battery. */
+  onDelete?: (battery: Battery) => void
 }
 
 const BatteryRow = memo(function BatteryRow({
@@ -245,6 +272,7 @@ const BatteryRow = memo(function BatteryRow({
   templateMode = false,
   onDragStart,
   onContextMenu,
+  onDelete,
 }: BatteryRowProps) {
   const { tooltip, showDelayed, hide, trackMouse } = useNodeTooltip(800)
 
@@ -343,6 +371,20 @@ const BatteryRow = memo(function BatteryRow({
           {showCount && <span className="battery-row-note-count">{devNoteCount}</span>}
         </span>
       )}
+      {onDelete && (
+        <button
+          type="button"
+          className="battery-row-delete"
+          title={langMode === 'en' ? 'Delete this group battery' : '删除此 group 电池'}
+          aria-label={langMode === 'en' ? 'Delete this group battery' : '删除此 group 电池'}
+          draggable={false}
+          onMouseDown={e => e.stopPropagation()}
+          onDragStart={e => { e.preventDefault(); e.stopPropagation() }}
+          onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(battery) }}
+        >
+          <PresetXIcon size={12} />
+        </button>
+      )}
       {tooltip && <TooltipPortal tooltip={tooltip} />}
     </div>
   )
@@ -370,10 +412,12 @@ function BatteryBar() {
   const removeFavoriteBattery = useUIStore((s) => s.removeFavoriteBattery)
   const removePrompt = useUIStore((s) => s.removePrompt)
   const removeUserTemplate = useUIStore((s) => s.removeUserTemplate)
+  const removeGroupBattery = useUIStore((s) => s.removeGroupBattery)
   // 多项目：当前激活项目类型（用于按 projectTypes 过滤）
   const activeProjectType = useUIStore((s) => s.activeProjectType)
-  // Develop / Templates 切换（切换按钮在 Toolbar，此处只读取模式驱动渲染分支）
+  // Develop / Templates 切换：Toolbar 与 rail 底部切换按钮共用同一 store 动作。
   const batteryFilterMode = useUIStore((s) => s.batteryFilterMode)
+  const setBatteryFilterMode = useUIStore((s) => s.setBatteryFilterMode)
   // searchQuery 当前由画布双击搜索浮层（CanvasSearchPopover）驱动，BatteryBar 内部不再有写入入口；
   // 这里仍订阅状态用于显示搜索结果计数 / 切换扁平搜索视图。setter 暂未使用但保留预留接口。
   const [searchQuery, setSearchQuery] = useState('')
@@ -409,6 +453,11 @@ function BatteryBar() {
   // ── 大标签拖拽排序状态 ──────────────────────────────────────────────────
   const [dragBigLabel, setDragBigLabel] = useState<string | null>(null)
   const [dragOverBigLabel, setDragOverBigLabel] = useState<string | null>(null)
+  // 大标签顺序持久化到浏览器（localStorage），develop / templates 各存各的桶。
+  const [bigLabelOrder, setBigLabelOrder] = useState<string[]>(() => readBigLabelOrder(batteryFilterMode))
+  useEffect(() => {
+    setBigLabelOrder(readBigLabelOrder(batteryFilterMode))
+  }, [batteryFilterMode])
   const [isRailExpanded, setIsRailExpanded] = useState(false)
   const [isRailExpansionSuppressed, setIsRailExpansionSuppressed] = useState(false)
   // 电池栏整体收起 / 展开（会话态，不持久化，与宽度一致刷新即恢复默认展开）。
@@ -447,6 +496,19 @@ function BatteryBar() {
   const scrollSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const focusedBigLabelRef = useRef<string | null>(focusedBigLabel)
   const bigLabelsRef = useRef<string[]>([])
+  // ── 越界滚动跨视图：电池视图滚到底再向下 → 切到收藏视图；收藏视图滚到顶再向上 → 回电池视图。
+  //    两视图仍各自独立（互不滚过），只是用「越界滚动」连通。累加越界量到阈值才切，避免误触。
+  //    为「无缝」：跨界后接管 wheel（非 passive，preventDefault + 手动驱动 scrollTop），
+  //    绕开浏览器在边界处的 wheel latching（否则同一手势越界后必须先移动鼠标才能继续滚）。
+  const overscrollAccumRef = useRef(0)
+  // 越界切视图后，强制把新视图定位到指定边（top / bottom），覆盖该视图保存的滚动位置。
+  const forcedScrollEdgeRef = useRef<'top' | 'bottom' | null>(null)
+  // 接管期：在此时间戳之前，wheel 全部由我们手动驱动（每次滚动延长，停顿后归还原生）。
+  const transitionUntilRef = useRef(0)
+  // 刚切视图、强制定位尚未应用前置真：由强制定位 effect 消费后再启动手动驱动循环。
+  const transitionPendingRef = useRef(false)
+  const pendingDeltaRef = useRef(0)
+  const flushRafRef = useRef<number | null>(null)
 
   useEffect(() => {
     focusedBigLabelRef.current = focusedBigLabel
@@ -485,7 +547,26 @@ function BatteryBar() {
     [searchQuery, railView]
   )
 
-  // 切换大标签 / 搜索语境时恢复滚动位置（双 rAF 确保 DOM 已渲染）
+  // 接管期手动驱动循环：把累积的 wheel delta 持续写入 scrollTop，直到停顿超时归还原生滚动。
+  const ensureFlushLoop = useCallback(() => {
+    if (flushRafRef.current != null) return
+    const step = () => {
+      const el = scrollerRef.current
+      if (!el) { flushRafRef.current = null; return }
+      if (pendingDeltaRef.current !== 0) {
+        const max = Math.max(0, el.scrollHeight - el.clientHeight)
+        el.scrollTop = Math.min(max, Math.max(0, el.scrollTop + pendingDeltaRef.current))
+        pendingDeltaRef.current = 0
+      }
+      flushRafRef.current = Date.now() < transitionUntilRef.current
+        ? requestAnimationFrame(step)
+        : null
+    }
+    flushRafRef.current = requestAnimationFrame(step)
+  }, [])
+
+  // 切换大标签 / 搜索语境时恢复滚动位置（双 rAF 确保 DOM 已渲染）。
+  // 越界切视图时 forcedScrollEdgeRef 指定边，优先于保存位置（保证滚动连续感）。
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
@@ -495,10 +576,21 @@ function BatteryBar() {
       const s = scrollerRef.current
       if (!s) return
       const max = Math.max(0, s.scrollHeight - s.clientHeight)
-      s.scrollTop = Math.min(Math.max(0, saved), max)
+      const forced = forcedScrollEdgeRef.current
+      if (forced) {
+        forcedScrollEdgeRef.current = null
+        s.scrollTop = forced === 'bottom' ? max : 0
+      } else {
+        s.scrollTop = Math.min(Math.max(0, saved), max)
+      }
+      // 强制定位（越界切视图）落定后，再启动手动驱动循环，让同一 wheel 手势无缝续滚。
+      if (transitionPendingRef.current) {
+        transitionPendingRef.current = false
+        ensureFlushLoop()
+      }
     }
     requestAnimationFrame(() => requestAnimationFrame(apply))
-  }, [scrollKey])
+  }, [scrollKey, ensureFlushLoop])
 
   const syncFocusedBigLabelFromScroll = useCallback(() => {
     const labels = bigLabelsRef.current
@@ -537,6 +629,7 @@ function BatteryBar() {
 
   useEffect(() => () => {
     if (scrollSaveTimerRef.current != null) clearTimeout(scrollSaveTimerRef.current)
+    if (flushRafRef.current != null) cancelAnimationFrame(flushRafRef.current)
   }, [])
 
   // ── 小标签展开覆盖层定位（点 + 号后从该小标签头下方展开到容器底部） ────
@@ -635,12 +728,12 @@ function BatteryBar() {
       otherTags.push(label)
     })
 
-    return [FAVORITES_BIG, PRESETS_BIG, ...tsTags.sort(), ...otherTags.sort()]
+    return [FAVORITES_BIG, PRESETS_BIG, ...tsTags.sort(compareBigLabel), ...otherTags.sort(compareBigLabel)]
   }, [batteries, categories, activeProjectType, batteryFilterMode, templateCategories])
 
   // 应用持久化排序后的大标签列表（用于渲染），收藏 + 预设始终钉顶
   const bigLabels = useMemo(() => {
-    const ordered = applyOrder(batteryOrder.bigLabels, rawBigLabels)
+    const ordered = applyOrder(bigLabelOrder, rawBigLabels)
     const pinned = [FAVORITES_BIG, PRESETS_BIG].filter(label => ordered.includes(label))
     let result = pinned.length === 0
       ? [...ordered]
@@ -651,7 +744,7 @@ function BatteryBar() {
       result.splice(result.indexOf('groups') + 1, 0, 'prompt')
     }
     return result
-  }, [rawBigLabels, batteryOrder.bigLabels])
+  }, [rawBigLabels, bigLabelOrder])
 
   // ── 双视图拆分：收藏 / 预设 归「收藏视图」，其余电池大标签归「电池视图」。
   //    两个视图各自一个独立滚动容器（互不滚过），rail 底部钉住收藏/预设按钮。
@@ -669,6 +762,70 @@ function BatteryBar() {
   useEffect(() => {
     bigLabelsRef.current = activeViewLabels
   }, [activeViewLabels])
+
+  // ── 越界滚动跨视图：到达边界后继续同向滚动，累加到阈值即切到相邻视图并定位到对边。 ──
+  const switchOverscrollView = useCallback((target: 'batteries' | 'collection', edge: 'top' | 'bottom') => {
+    const targetLabel = target === 'collection'
+      ? collectionLabels[0]
+      : batteryLabels[batteryLabels.length - 1]
+    if (!targetLabel) return
+    setExpandedSmallLabel(null)
+    forcedScrollEdgeRef.current = edge
+    transitionPendingRef.current = true
+    focusedBigLabelRef.current = targetLabel
+    setFocusedBigLabel(targetLabel)
+    writeActiveBigLabels([targetLabel])
+  }, [collectionLabels, batteryLabels])
+
+  // 非 passive 的 wheel 监听：跨界时 preventDefault 并手动驱动滚动，绕开浏览器 wheel latching，
+  // 实现「越界后同一手势无需移动鼠标即可无缝续滚到下一视图」。
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const TRANSITION_MS = 220
+    const OVERSCROLL_THRESHOLD = 120
+
+    const onWheel = (e: WheelEvent) => {
+      if (searchQuery) return
+      const now = Date.now()
+
+      // 接管期：手动消费所有 wheel（preventDefault + 累积 delta 交给 rAF 写 scrollTop）。
+      if (now < transitionUntilRef.current) {
+        e.preventDefault()
+        pendingDeltaRef.current += e.deltaY
+        transitionUntilRef.current = now + TRANSITION_MS
+        if (!transitionPendingRef.current) ensureFlushLoop()
+        return
+      }
+
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      const atBottom = el.scrollTop >= max - 1
+      const atTop = el.scrollTop <= 1
+
+      if (e.deltaY > 0 && railView === 'batteries' && atBottom && collectionLabels.length > 0) {
+        e.preventDefault()
+        overscrollAccumRef.current = Math.max(0, overscrollAccumRef.current) + e.deltaY
+        if (overscrollAccumRef.current >= OVERSCROLL_THRESHOLD) {
+          overscrollAccumRef.current = 0
+          transitionUntilRef.current = now + TRANSITION_MS
+          switchOverscrollView('collection', 'top')
+        }
+      } else if (e.deltaY < 0 && railView === 'collection' && atTop && batteryLabels.length > 0) {
+        e.preventDefault()
+        overscrollAccumRef.current = Math.min(0, overscrollAccumRef.current) + e.deltaY
+        if (overscrollAccumRef.current <= -OVERSCROLL_THRESHOLD) {
+          overscrollAccumRef.current = 0
+          transitionUntilRef.current = now + TRANSITION_MS
+          switchOverscrollView('batteries', 'bottom')
+        }
+      } else {
+        overscrollAccumRef.current = 0
+      }
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [searchQuery, railView, collectionLabels, batteryLabels, switchOverscrollView, ensureFlushLoop, isCollapsed])
 
   const fuzzyMatch = (b: Battery, query: string): boolean => {
     if (!query.trim()) return true
@@ -895,6 +1052,9 @@ function BatteryBar() {
     if (fromIdx === -1 || toIdx === -1) return
     newOrder.splice(fromIdx, 1)
     newOrder.splice(toIdx, 0, sourceLabel)
+    // 持久化到浏览器（按模式分桶），并同步内存 store（小标签排序仍走 store）。
+    writeBigLabelOrder(batteryFilterMode, newOrder)
+    setBigLabelOrder(newOrder)
     saveBatteryOrder({ bigLabels: newOrder, smallLabels: batteryOrder.smallLabels })
     setDragBigLabel(null)
     setDragOverBigLabel(null)
@@ -996,16 +1156,59 @@ function BatteryBar() {
     ? favoriteBatteries.some((f) => f.batteryId === contextMenu.battery.id)
     : false
 
-  // 当前右键目标是否为可删除的用户内容（用户提示词 / 用户模板）。
-  const contextMenuDeletable = contextMenu ? getDeletableKind(contextMenu.battery) : null
+  // 当前 transport 是否支持删除 GROUPS 成组电池（暴露 deleteGroupTemplate 路由）。
+  // 不支持时（如尚未实现该路由的 app）隐藏 group 删除入口，避免点了无反应。
+  //
+  // 关键：左栏在自己的挂载 useEffect 里才 configureEditorTransport，而 React 的
+  // effect 自底向上执行 —— 本组件首帧渲染（含 useMemo）早于父级配置 transport。
+  // 旧实现用抛错的 getEditorTransport() + useMemo([]) 会在首帧 catch 成 false 并
+  // 永久锁死，导致 dev server 干净重启后删除入口整体消失。改用非抛错的
+  // peekEditorTransport()，并在下一 tick（父 effect 配好 transport 之后）复查一次。
+  const [canDeleteGroups, setCanDeleteGroups] = useState<boolean>(
+    () => peekEditorTransport()?.api.supportsDeleteGroupBattery === true,
+  )
+  useEffect(() => {
+    if (canDeleteGroups) return
+    const id = setTimeout(() => {
+      setCanDeleteGroups(peekEditorTransport()?.api.supportsDeleteGroupBattery === true)
+    }, 0)
+    return () => clearTimeout(id)
+  }, [canDeleteGroups])
+
+  // 删除一个 group 成组电池（带确认）：物理删除本地电池目录文件，成功后刷新目录。
+  const deleteGroupName = useCallback((battery: Battery) => (
+    langMode === 'zh' ? battery.name : (battery.nameEn || formatIdAsLabel(battery.id))
+  ), [langMode])
+  const confirmAndRemoveGroup = useCallback((groupId: string, name: string) => {
+    const msg = langMode === 'en'
+      ? `Delete group battery "${name}" from the local battery directory? This removes the files on disk and cannot be undone.`
+      : `从本地电池目录删除 group 电池「${name}」？该操作会删除磁盘上的文件，且不可撤销。`
+    if (typeof window !== 'undefined' && !window.confirm(msg)) return
+    removeGroupBattery(groupId)
+  }, [langMode, removeGroupBattery])
+
+  // 当前右键目标是否为可删除的用户内容（用户提示词 / 用户模板 / GROUPS 成组电池）。
+  const rawContextMenuDeletable = contextMenu ? getDeletableKind(contextMenu.battery) : null
+  // group 删除受 transport 能力闸门约束；其余（prompt/template）不受影响。
+  const contextMenuDeletable = rawContextMenuDeletable?.kind === 'group' && !canDeleteGroups
+    ? null
+    : rawContextMenuDeletable
 
   const handleContextMenuDelete = useCallback(() => {
     if (!contextMenu) return
     const deletable = getDeletableKind(contextMenu.battery)
     if (deletable?.kind === 'prompt') removePrompt(deletable.promptId)
     else if (deletable?.kind === 'template') removeUserTemplate(deletable.groupId)
+    else if (deletable?.kind === 'group' && canDeleteGroups) {
+      confirmAndRemoveGroup(deletable.groupId, deleteGroupName(contextMenu.battery))
+    }
     closeContextMenu()
-  }, [contextMenu, removePrompt, removeUserTemplate, closeContextMenu])
+  }, [contextMenu, removePrompt, removeUserTemplate, canDeleteGroups, confirmAndRemoveGroup, deleteGroupName, closeContextMenu])
+
+  // 行内删除按钮回调（仅 GROUPS 行启用）：稳定引用，供所有行复用，保持 BatteryRow memo 命中。
+  const handleRowDelete = useCallback((battery: Battery) => {
+    confirmAndRemoveGroup(battery.id, deleteGroupName(battery))
+  }, [confirmAndRemoveGroup, deleteGroupName])
 
   // 已收藏电池/模板的 id 集合：行内用来决定是否渲染黄色五角星标记。
   const favoriteIds = useMemo(
@@ -1086,8 +1289,81 @@ function BatteryBar() {
       templateMode={batteryFilterMode === 'templates'}
       onDragStart={handleDragStart}
       onContextMenu={handleRowContextMenu}
+      onDelete={canDeleteGroups && getDeletableKind(battery)?.kind === 'group' ? handleRowDelete : undefined}
     />
   )
+
+  // 大标签名称叠在分组分割线上：默认白色，带品牌色的大标签沿用其 rail 配色（tab-*）。
+  // 收藏视图的「收藏」组自带同名小标签头，省略大标签标题避免重复。
+  const renderBigSectionTitle = (bigLabel: string, index: number) => {
+    if (bigLabel === FAVORITES_BIG) return null
+    return (
+      <div className={`bb-big-content-title tab-${bigLabel}${index === 0 ? ' bb-big-content-title--first' : ''}`}>
+        {formatBigLabel(bigLabel)}
+      </div>
+    )
+  }
+
+  // 渲染单个小标签手风琴分组（Develop 与 Templates 共用，保证两模式小标签 UX 一致）
+  const renderSmallSection = (
+    bigLabel: string,
+    smallLabel: string,
+    items: Battery[],
+    smallLabelsInSection: string[],
+  ) => {
+    const groupKey = smallGroupKey(bigLabel, smallLabel)
+    const isOpen = isSmallOpen(bigLabel, smallLabel)
+    const isExpandedOverlay = expandedSmallLabel === groupKey
+    return (
+      <div
+        key={groupKey}
+        className={[
+          'bb-small-section',
+          isOpen ? 'bb-small-section--open' : '',
+          isExpandedOverlay ? 'bb-small-section--overlay' : '',
+          dragSmallLabel === smallLabel ? 'group-dragging' : '',
+          dragOverSmallLabel === smallLabel && dragSmallLabel !== smallLabel ? 'group-drag-over' : '',
+        ].filter(Boolean).join(' ')}
+        draggable
+        onDragStart={e => handleGroupDragStart(e, smallLabel)}
+        onDragEnd={handleGroupDragEnd}
+        onDragOver={e => handleGroupDragOver(e, smallLabel)}
+        onDragLeave={handleGroupDragLeave}
+        onDrop={e => handleGroupDrop(e, bigLabel, smallLabelsInSection, smallLabel)}
+      >
+        <div
+          className="bb-small-header"
+          ref={el => { smallHeaderRefs.current[groupKey] = el }}
+        >
+          <button
+            className="bb-small-toggle"
+            onClick={() => toggleSmallOpen(bigLabel, smallLabel)}
+          >
+            <span className={`bb-chevron bb-chevron--sm${isOpen ? ' bb-chevron--open' : ''}`} aria-hidden>▶</span>
+            <span className="bb-small-text">
+              {smallLabel === FAVORITES_SMALL
+                ? 'Favorites'
+                : batteryFilterMode === 'templates'
+                  ? formatIdAsLabel(smallLabel)
+                  : formatSmallLabel(smallLabel)}
+            </span>
+            <span className="bb-small-count">{items.length}</span>
+          </button>
+        </div>
+
+        {isOpen && !isExpandedOverlay && (
+          <div className="bb-row-list">
+            {items.length === 0 && (
+              <div className="battery-empty-small">
+                {smallLabel === FAVORITES_SMALL ? 'No favorites' : (langMode === 'en' ? 'No batteries' : '暂无电池')}
+              </div>
+            )}
+            {items.map(b => renderBatteryRow(b, bigLabel === FAVORITES_BIG))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // 渲染单个大标签内容分组（电池视图 / 收藏视图共用；预设走专用面板）
   const renderBigSection = (bigLabel: string, index: number) => {
@@ -1098,6 +1374,7 @@ function BatteryBar() {
           className={`bb-big-content-section${index > 0 ? ' bb-big-content-section--separated' : ''}`}
           ref={el => { bigSectionRefs.current[bigLabel] = el }}
         >
+          {renderBigSectionTitle(bigLabel, index)}
           <PresetsRailPanel batteries={batteries} langMode={langMode} />
         </div>
       )
@@ -1105,24 +1382,46 @@ function BatteryBar() {
     const groupedBySmall = groupBatteriesBySmall(getBatteriesForBig(bigLabel), bigLabel)
     const smallLabelsToRender = getSmallLabelsToRender(bigLabel, groupedBySmall)
 
-    // Templates（非收藏）：子目录名与卡片名称重复，省略小标签手风琴，直接平铺卡片。
+    // Templates（非收藏）：与 Develop 一致地按小标签分组——目录结构为
+    // `templates/{大标签}/{小标签}/{模板}/…` 的模板进小标签手风琴；扁平
+    // `templates/{大标签}/{模板}/…`（子目录名即卡片名，无独立小标签）直接平铺卡片。
     if (batteryFilterMode === 'templates' && bigLabel !== FAVORITES_BIG) {
-      const flatItems = smallLabelsToRender.flatMap(small => groupedBySmall[small] ?? [])
+      const allItems = getBatteriesForBig(bigLabel)
+      const flatItems: Battery[] = []
+      const nestedBySmall: Record<string, Battery[]> = {}
+      for (const b of allItems) {
+        const small = getTemplateSmallLabel(b)
+        if (small === null) flatItems.push(b)
+        else (nestedBySmall[small] ??= []).push(b)
+      }
+      const sortedFlat = sortBatteriesInGroup(flatItems, bigLabel, '')
+      const nestedLabels = applyOrder(
+        batteryOrder.smallLabels[bigLabel] ?? [],
+        sortSmallLabels(Object.keys(nestedBySmall), bigLabel),
+      )
+      for (const k of Object.keys(nestedBySmall)) {
+        nestedBySmall[k] = sortBatteriesInGroup(nestedBySmall[k], bigLabel, k)
+      }
+      const isEmpty = sortedFlat.length === 0 && nestedLabels.length === 0
       return (
         <div
           key={bigLabel}
           className={`bb-big-content-section${index > 0 ? ' bb-big-content-section--separated' : ''}`}
           ref={el => { bigSectionRefs.current[bigLabel] = el }}
         >
-          {flatItems.length === 0 && (
+          {isEmpty && (
             <div className="battery-empty-small">
               {langMode === 'en' ? 'No templates' : '暂无模板'}
             </div>
           )}
-          {flatItems.length > 0 && (
+          {!isEmpty && renderBigSectionTitle(bigLabel, index)}
+          {sortedFlat.length > 0 && (
             <div className="bb-row-list bb-row-list--templates-flat">
-              {flatItems.map(b => renderBatteryRow(b))}
+              {sortedFlat.map(b => renderBatteryRow(b))}
             </div>
+          )}
+          {nestedLabels.map(smallLabel =>
+            renderSmallSection(bigLabel, smallLabel, nestedBySmall[smallLabel] ?? [], nestedLabels),
           )}
         </div>
       )
@@ -1141,61 +1440,10 @@ function BatteryBar() {
               : (langMode === 'en' ? 'No batteries' : '暂无电池')}
           </div>
         )}
-        {smallLabelsToRender.map(smallLabel => {
-          const groupKey = smallGroupKey(bigLabel, smallLabel)
-          const items = groupedBySmall[smallLabel] ?? []
-          const isOpen = isSmallOpen(bigLabel, smallLabel)
-          const isExpandedOverlay = expandedSmallLabel === groupKey
-          return (
-            <div
-              key={groupKey}
-              className={[
-                'bb-small-section',
-                isOpen ? 'bb-small-section--open' : '',
-                isExpandedOverlay ? 'bb-small-section--overlay' : '',
-                dragSmallLabel === smallLabel ? 'group-dragging' : '',
-                dragOverSmallLabel === smallLabel && dragSmallLabel !== smallLabel ? 'group-drag-over' : '',
-              ].filter(Boolean).join(' ')}
-              draggable
-              onDragStart={e => handleGroupDragStart(e, smallLabel)}
-              onDragEnd={handleGroupDragEnd}
-              onDragOver={e => handleGroupDragOver(e, smallLabel)}
-              onDragLeave={handleGroupDragLeave}
-              onDrop={e => handleGroupDrop(e, bigLabel, smallLabelsToRender, smallLabel)}
-            >
-              <div
-                className="bb-small-header"
-                ref={el => { smallHeaderRefs.current[groupKey] = el }}
-              >
-                <button
-                  className="bb-small-toggle"
-                  onClick={() => toggleSmallOpen(bigLabel, smallLabel)}
-                >
-                  <span className={`bb-chevron bb-chevron--sm${isOpen ? ' bb-chevron--open' : ''}`} aria-hidden>▶</span>
-                  <span className="bb-small-text">
-                    {smallLabel === FAVORITES_SMALL
-                      ? 'Favorites'
-                      : batteryFilterMode === 'templates'
-                        ? formatIdAsLabel(smallLabel)
-                        : formatSmallLabel(smallLabel)}
-                  </span>
-                  <span className="bb-small-count">{items.length}</span>
-                </button>
-              </div>
-
-              {isOpen && !isExpandedOverlay && (
-                <div className="bb-row-list">
-                  {items.length === 0 && (
-                    <div className="battery-empty-small">
-                      {smallLabel === FAVORITES_SMALL ? 'No favorites' : (langMode === 'en' ? 'No batteries' : '暂无电池')}
-                    </div>
-                  )}
-                  {items.map(b => renderBatteryRow(b, bigLabel === FAVORITES_BIG))}
-                </div>
-              )}
-            </div>
-          )
-        })}
+        {smallLabelsToRender.length > 0 && renderBigSectionTitle(bigLabel, index)}
+        {smallLabelsToRender.map(smallLabel =>
+          renderSmallSection(bigLabel, smallLabel, groupedBySmall[smallLabel] ?? [], smallLabelsToRender),
+        )}
       </div>
     )
   }
@@ -1245,6 +1493,21 @@ function BatteryBar() {
                 >
                   <span className="bb-rail-icon" aria-hidden>
                     <CollapseRailIcon collapsed={isCollapsed} />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`bb-rail-button bb-rail-button--icon bb-rail-button--mode${batteryFilterMode === 'templates' ? ' is-templates' : ''}`}
+                  aria-label={langMode === 'en'
+                    ? (batteryFilterMode === 'templates' ? 'Switch to Develop' : 'Switch to Templates')
+                    : (batteryFilterMode === 'templates' ? '切换到开发模式' : '切换到模板模式')}
+                  title={langMode === 'en'
+                    ? (batteryFilterMode === 'templates' ? 'Templates · click for Develop' : 'Develop · click for Templates')
+                    : (batteryFilterMode === 'templates' ? '模板模式 · 点击切换开发' : '开发模式 · 点击切换模板')}
+                  onClick={() => setBatteryFilterMode(batteryFilterMode === 'templates' ? 'develop' : 'templates')}
+                >
+                  <span className="bb-rail-icon" aria-hidden>
+                    <ModeToggleRailIcon />
                   </span>
                 </button>
                 {collectionLabels.map(renderRailButton)}
@@ -1407,8 +1670,12 @@ function BatteryBar() {
               onClick={handleContextMenuDelete}
             >
               🗑 {langMode === 'en'
-                ? (contextMenuDeletable.kind === 'prompt' ? 'Delete prompt' : 'Delete template')
-                : (contextMenuDeletable.kind === 'prompt' ? '删除此提示词' : '删除此模板')}
+                ? (contextMenuDeletable.kind === 'prompt'
+                    ? 'Delete prompt'
+                    : contextMenuDeletable.kind === 'group' ? 'Delete group battery' : 'Delete template')
+                : (contextMenuDeletable.kind === 'prompt'
+                    ? '删除此提示词'
+                    : contextMenuDeletable.kind === 'group' ? '删除此 group 电池' : '删除此模板')}
             </div>
           )}
         </div>

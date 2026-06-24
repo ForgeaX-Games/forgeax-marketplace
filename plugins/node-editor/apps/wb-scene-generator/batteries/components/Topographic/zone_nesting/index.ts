@@ -1,6 +1,9 @@
 /**
  * zone_nesting: 区域嵌套
  * 先对目标区域做多层侵蚀得到有机轮廓，再可选地对轮廓做闭合样条平滑并重绘。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  */
 
 import {
@@ -19,12 +22,6 @@ import {
 
 type Grid = number[][];
 type RngFn = () => number;
-
-interface NameEntry {
-  id: number;
-  name: string;
-  type: string;
-}
 
 function createRng(seed: number): RngFn {
   let s = (seed & 0xffffffff) || 1;
@@ -322,16 +319,12 @@ function applySplineToRegion(
   return { ok: true, grid: outputGrid, points: splined };
 }
 
-/** 将输入统一解析为 Grid[]，支持单个网格或网格列表 */
-function parseInputGrids(raw: unknown): Grid[] | null {
+/** 解析单个二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
   if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  // 单个网格：number[][]
   if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as Grid];
-  }
-  // 网格列表：number[][][]
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as Grid[];
+    return raw as Grid;
   }
   return null;
 }
@@ -368,8 +361,8 @@ function processOneGrid(
 }
 
 export function zoneNesting(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.inputGrid);
-  if (!grids) {
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) {
     return { error: "inputGrid is required" };
   }
 
@@ -395,37 +388,23 @@ export function zoneNesting(input: Record<string, unknown>): Record<string, unkn
   // 背景码值固定为 0（不再对外暴露）
   const backgroundId = 0;
 
-  // 从区域名称生成名称清单
-  const zoneName = typeof input.zoneName === "string" && input.zoneName.trim() !== ""
-    ? input.zoneName.trim()
-    : "区域";
-
-  const outputGridList: Grid[] = [];
-
-  for (let i = 0; i < grids.length; i++) {
-    const g = grids[i];
-    if (!g || g.length === 0 || g[0].length === 0) continue;
-
-    // 每个网格使用不同的偏移种子，保证各自独立随机但整体可复现
-    const seedOffset = i * 1000003;
-    const sp = processOneGrid(
-      g,
-      targetValue,
-      erosionStrength,
-      layers,
-      algorithm,
-      baseSeed + seedOffset,
-      splineAlgorithm,
-      splineSmoothness,
-      baseSplineSeed + seedOffset,
-      backgroundId,
-    );
-
-    outputGridList.push(sp.ok ? sp.grid : g);
+  if (grid.length === 0 || grid[0].length === 0) {
+    return { error: "inputGrid is empty" };
   }
 
-  // 根据区域名称生成名称清单，条目只有一条：{id: targetValue, name: zoneName}
-  const outputNameList: NameEntry[] = [{ id: targetValue, name: zoneName, type: "tile" }];
+  const sp = processOneGrid(
+    grid,
+    targetValue,
+    erosionStrength,
+    layers,
+    algorithm,
+    baseSeed,
+    splineAlgorithm,
+    splineSmoothness,
+    baseSplineSeed,
+    backgroundId,
+  );
 
-  return { outputGridList, outputNameList };
+  // 样条阶段失败（区域过小/消失）时回落到侵蚀前的原始网格，保证下游始终拿到一张网格
+  return { outputGrid: sp.ok ? sp.grid : grid };
 }

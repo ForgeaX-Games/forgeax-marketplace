@@ -224,7 +224,7 @@ export async function imageRemoveBg(
   input: Record<string, unknown>,
   ctx?: { services?: Record<string, unknown> },
 ): Promise<Record<string, unknown>> {
-  const labTolerance = typeof input.lab_tolerance === 'number' ? input.lab_tolerance : 9
+  const labTolerance = typeof input.lab_tolerance === 'number' ? input.lab_tolerance : 13
   const bgGrowTolerance = typeof input.bg_grow_tolerance === 'number' ? input.bg_grow_tolerance : 14
   const samplePoints = typeof input.sample_points === 'number' ? Math.round(input.sample_points) : 4
   const crop = input.crop !== false

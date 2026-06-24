@@ -211,6 +211,12 @@ interface UIState {
    * success so the template battery disappears from the Templates palette.
    */
   removeUserTemplate: (groupId: string) => void
+  /**
+   * Delete a develop GROUPS-tab group battery by group id, removing it from the
+   * app's local battery directory. No-op when the transport lacks the delete
+   * route. Refreshes the catalog on success so the group battery disappears.
+   */
+  removeGroupBattery: (groupId: string) => void
   addFavoriteBattery: (battery: Battery) => void
   removeFavoriteBattery: (batteryId: string) => void
   reorderFavoriteBatteries: (fromId: string, toId: string) => void
@@ -387,6 +393,15 @@ export const useUIStore = create<UIState>((set) => ({
     if (!adapter?.supportsDeleteUserTemplate || !groupId.trim()) return
     void adapter
       .deleteUserTemplate(groupId)
+      .then((ok) => { if (ok) return usePipelineStore.getState().loadBatteries() })
+      .catch(() => {})
+  },
+
+  removeGroupBattery: (groupId) => {
+    const adapter = peekEditorTransport()?.api
+    if (!adapter?.supportsDeleteGroupBattery || !groupId.trim()) return
+    void adapter
+      .deleteGroupBattery(groupId)
       .then((ok) => { if (ok) return usePipelineStore.getState().loadBatteries() })
       .catch(() => {})
   },

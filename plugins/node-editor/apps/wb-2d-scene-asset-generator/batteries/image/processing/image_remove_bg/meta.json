@@ -39,7 +39,7 @@
       "access": "item",
       "label": "Lab 容差",
       "description": "背景颜色相似度阈值（Lab ΔE）；越大去除越激进，越小越保守",
-      "default": 9,
+      "default": 13,
       "min": 5,
       "max": 150
     },

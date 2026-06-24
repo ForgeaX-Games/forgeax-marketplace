@@ -67,9 +67,30 @@ export class HttpApiClient implements ApiClient {
   }
 
   private async get<T>(path: string): Promise<T> {
-    const r = await fetch(`${this.base}${path}`, { method: 'GET' })
-    if (!r.ok) throw new Error(`${path} → ${r.status}`)
-    return (await r.json()) as T
+    // GETs are idempotent, so retry TRANSIENT network failures. The common
+    // culprit is the HTTP keep-alive reuse race: the server closes an idle
+    // pooled socket and the browser sends on it before noticing, surfacing as
+    // ERR_CONNECTION_RESET / ERR_EMPTY_RESPONSE / ERR_SOCKET_NOT_CONNECTED
+    // (fetch rejects with a TypeError — distinct from an HTTP !r.ok response).
+    // A short backoff almost always lands on a fresh connection. We deliberately
+    // do NOT retry HTTP status errors (those are real responses) and never retry
+    // POST/PUT/DELETE (non-idempotent).
+    const maxAttempts = 3
+    let lastErr: unknown
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const r = await fetch(`${this.base}${path}`, { method: 'GET' })
+        if (!r.ok) throw new Error(`${path} → ${r.status}`)
+        return (await r.json()) as T
+      } catch (e) {
+        // Only a network-level failure (TypeError from fetch) is retryable; an
+        // HTTP status Error is a genuine response and must propagate as-is.
+        if (this.disposed || !(e instanceof TypeError) || attempt === maxAttempts - 1) throw e
+        lastErr = e
+        await new Promise((res) => setTimeout(res, 120 * (attempt + 1) + Math.random() * 80))
+      }
+    }
+    throw lastErr
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
@@ -108,6 +129,10 @@ export class HttpApiClient implements ApiClient {
     return this.get<PipelineSnapshot | null>('/api/v1/pipeline')
   }
 
+  getPipelineHash(): Promise<{ hash: string | null }> {
+    return this.get<{ hash: string | null }>('/api/v1/pipeline/hash')
+  }
+
   getNode(nodeId: string): Promise<GraphNode | null> {
     return this.get<GraphNode | null>(`/api/v1/nodes/${encodeURIComponent(nodeId)}`)
   }
@@ -125,6 +150,13 @@ export class HttpApiClient implements ApiClient {
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
     )
     return r.value
+  }
+
+  getNodeOutputMeta(
+    nodeId: string,
+    portId: string,
+  ): Promise<{ executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; missing?: boolean }> {
+    return this.get(`/api/v1/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}/meta`)
   }
 
   getHistory(_opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]> {
@@ -243,6 +275,14 @@ export class HttpApiClient implements ApiClient {
     templateName: string
   }): Promise<{ filePath: string; groupId: string; smallTag: string; templateName: string }> {
     return this.post('/api/v1/group-templates/save-user', req)
+  }
+
+  deleteUserTemplate(groupId: string): Promise<{ ok: boolean }> {
+    return this.del<{ ok: boolean }>(`/api/v1/group-templates/user/${encodeURIComponent(groupId)}`)
+  }
+
+  deleteGroupTemplate(groupId: string): Promise<{ ok: boolean }> {
+    return this.del<{ ok: boolean }>(`/api/v1/group-templates/groups/${encodeURIComponent(groupId)}`)
   }
 
   listTemplateCategories(): Promise<readonly string[]> {

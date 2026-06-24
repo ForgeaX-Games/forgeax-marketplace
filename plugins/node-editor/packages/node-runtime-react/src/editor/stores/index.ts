@@ -1,6 +1,6 @@
 // Editor stores barrel.
 
-export { usePipelineStore } from './pipelineStore.js'
+export { usePipelineStore, setGroupInnerSink } from './pipelineStore.js'
 export { useHistoryStore } from './historyStore.js'
 export type { HistoryActionType, HistoryEntry } from './historyStore.js'
 export { useUIStore } from './uiStore.js'

@@ -31,6 +31,8 @@ export interface EditorEventMap {
   'node:output': { nodeId: string; portId: string; outputType: string }
   /** The active project changed elsewhere (another iframe / an agent tool). */
   'project:activated': { projectId: string; pipelineId: string; newHash: string }
+  /** The op catalog changed on the backend (battery hot-reload in dev). */
+  'ops:changed': { opId?: string; kind?: string }
 }
 
 export type EditorEvent = keyof EditorEventMap
@@ -97,6 +99,14 @@ export class WsAdapter {
 
   /** Translate a kernel RuntimeEvent into the editor event bus. */
   private route(e: RuntimeEvent): void {
+    // `ops:changed` is a backend-only catalog event that the HttpApiClient routes
+    // onto the 'graph' channel; it isn't part of the kernel RuntimeEvent union, so
+    // match it loosely before the typed switch.
+    if ((e as { kind?: string }).kind === 'ops:changed') {
+      const opId = (e as { opId?: string }).opId
+      this.emit('ops:changed', opId !== undefined ? { opId } : {})
+      return
+    }
     switch (e.kind) {
       case 'graph:applied':
         this.emit('graph:applied', { batchId: e.batchId, newHash: e.newHash })

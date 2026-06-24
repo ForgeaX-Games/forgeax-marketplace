@@ -45,14 +45,14 @@ import {
 } from '../../vendor/dist/shared/types/index.js';
 
 // 电池
-import { gBox }          from '../../batteries/3d/Primitive/g_box/index.ts';
-import { gCylinder }     from '../../batteries/3d/Primitive/g_cylinder/index.ts';
-import { gSphere }       from '../../batteries/3d/Primitive/g_sphere/index.ts';
-import { gMaterial }     from '../../batteries/3d/Utils/g_material/index.ts';
-import { gPart }         from '../../batteries/3d/Assembly/g_part/index.ts';
-import { gJointFixed }   from '../../batteries/3d/Assembly/g_joint_fixed/index.ts';
-import { gJointRevolute }from '../../batteries/3d/Assembly/g_joint_revolute/index.ts';
-import { gToUrdf }       from '../../batteries/3d/Utils/g_to_urdf/index.ts';
+import { gBox }          from '../../batteries/Generate/Primitive/g_box/index.ts';
+import { gCylinder }     from '../../batteries/Generate/Primitive/g_cylinder/index.ts';
+import { gSphere }       from '../../batteries/Generate/Primitive/g_sphere/index.ts';
+import { gMaterial }     from '../../batteries/Modify/Material/g_material/index.ts';
+import { gPart }         from '../../batteries/Assemble/Assembly/g_part/index.ts';
+import { gJointFixed }   from '../../batteries/Assemble/Assembly/g_joint_fixed/index.ts';
+import { gJointRevolute }from '../../batteries/Assemble/Assembly/g_joint_revolute/index.ts';
+import { gToUrdf }       from '../../batteries/Output/Export/g_to_urdf/index.ts';
 
 // ─────────────────────────────────────────────────────────────────────────
 // 1. parser

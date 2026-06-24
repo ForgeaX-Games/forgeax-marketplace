@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Herringbone ring gear battery">
-  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
-  <circle cx="12" cy="12" r="8" fill="none" stroke="#e7f5ee" stroke-width="1.5"/>
-  <circle cx="12" cy="12" r="5" fill="none" stroke="#e7f5ee" stroke-width="2.6" stroke-dasharray="2 1.8"/>
-  <path d="M9.8 13.2 12 11l2.2 2.2M9.8 10.8 12 8.6l2.2 2.2" fill="none" stroke="#b7ff5a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

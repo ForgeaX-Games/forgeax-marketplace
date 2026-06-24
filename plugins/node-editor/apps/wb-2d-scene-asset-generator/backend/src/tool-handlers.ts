@@ -161,6 +161,52 @@ export function stripBatteryIcon(op: Record<string, unknown>): Record<string, un
   return stripInlineImages(op) as Record<string, unknown>
 }
 
+// A group's outward "Run" buttons (see frontend GroupNode.tsx `manualInnerNodes`):
+// one per INNER manualTrigger battery (image_gen / text_gen). Clicking such a
+// button — or an agent calling `generation.generateImage`/`generation.generateText`
+// with the inner node id — runs that inner node through the SAME AI route
+// (POST /api/v1/ai/image|text { nodeId }); the backend resolves its inputs across
+// the group boundary and surfaces the result on the group's exposed output. A
+// group can pack SEVERAL image_gen nodes, so we return EVERY inner manual node
+// as its own independently-triggerable run entry (never collapsed into one).
+interface GroupRunButton {
+  nodeId: string
+  opId: string
+  /** `image` → call generation.generateImage; `text` → generation.generateText. */
+  kind: 'image' | 'text'
+}
+
+type ManualOpInfo = { kind: 'image' | 'text' }
+
+async function fetchManualTriggerOps(ctx: ToolCtx): Promise<Map<string, ManualOpInfo>> {
+  const ops = (await request(ctx, 'GET', '/api/v1/ops')) as Array<Record<string, unknown>>
+  const map = new Map<string, ManualOpInfo>()
+  if (!Array.isArray(ops)) return map
+  for (const op of ops) {
+    if (op?.manualTrigger !== true || typeof op.id !== 'string') continue
+    const outputs = Array.isArray(op.outputs) ? (op.outputs as Array<Record<string, unknown>>) : []
+    const isImage = outputs.some((o) => o?.name === 'image')
+    map.set(op.id, { kind: isImage ? 'image' : 'text' })
+  }
+  return map
+}
+
+function runButtonsFor(
+  group: Record<string, unknown> | null | undefined,
+  manualOps: Map<string, ManualOpInfo>,
+): GroupRunButton[] {
+  const nodes = Array.isArray(group?.nodes) ? (group!.nodes as Array<Record<string, unknown>>) : []
+  const buttons: GroupRunButton[] = []
+  for (const node of nodes) {
+    const opId = typeof node?.opId === 'string' ? node.opId : undefined
+    const nodeId = typeof node?.id === 'string' ? node.id : undefined
+    if (!opId || !nodeId) continue
+    const meta = manualOps.get(opId)
+    if (meta) buttons.push({ nodeId, opId, kind: meta.kind })
+  }
+  return buttons
+}
+
 function mimeExt(mimeType: unknown): string {
   if (typeof mimeType !== 'string') return 'bin'
   if (mimeType.includes('png')) return 'png'
@@ -198,6 +244,73 @@ export const tools: Record<string, ToolHandler> = {
     const op = ops.find((candidate) => candidate.id === id)
     if (!op) throw new Error(`asset2d battery not found: ${id}`)
     return stripBatteryIcon(op)
+  },
+  // Template-library discovery (the prebuilt template groups shipped under
+  // `batteries/templates/` + saved user templates). `groups.list` only sees
+  // groups ALREADY instantiated on the canvas; these two expose the LIBRARY so
+  // an agent can find a template to instantiate even when the canvas is empty.
+  // Inline preview images (iconPng data URLs / iconSvg) are stripped — the agent
+  // only needs id / name / exposed in_N/out_N ports, never the preview pixels.
+  'asset2d:templates.list': async (_args, ctx) => {
+    const list = await request(ctx, 'GET', '/api/v1/group-templates?scope=templates')
+    return stripInlineImages(list)
+  },
+  'asset2d:templates.get': async (args, ctx) => {
+    const id = stringArg(objectArgs(args), 'id')
+    const group = await request(ctx, 'GET', `/api/v1/group-templates/${encodeURIComponent(id)}?scope=templates`)
+    return stripInlineImages(group)
+  },
+  // One-shot instantiation of a template group into the active project's graph.
+  // Forwards to the dedicated instantiate route (NOT /api/v1/batch): inner
+  // node/edge/group ids are remapped, the template lands as one `__group__`
+  // shadow node, and the response carries the new runtime `groupId` + stable
+  // in_N/out_N ports to wire against. This is how an agent puts a template on
+  // the canvas without a human dragging it in.
+  'asset2d:groups.instantiateTemplate': async (args, ctx) => {
+    const body = objectArgs(args)
+    const id = stringArg(body, 'templateId')
+    return request(ctx, 'POST', `/api/v1/group-templates/${encodeURIComponent(id)}/instantiate`, body)
+  },
+  // Back-compat alias: the scene-skill-battery flows (PART D/E + plugin.json AI
+  // tool declarations) call the instantiate route under this older name. Same
+  // implementation as `groups.instantiateTemplate`.
+  'asset2d:pipeline.instantiateTemplate': async (args, ctx) => {
+    const body = objectArgs(args)
+    const id = stringArg(body, 'templateId')
+    return request(ctx, 'POST', `/api/v1/group-templates/${encodeURIComponent(id)}/instantiate`, body)
+  },
+  // Composite batteries (group templates) placed on the canvas. `pipeline.get`
+  // only returns TOP-LEVEL nodes/edges — a collapsed group's inner sub-graph
+  // lives in `graph.groups[*]` and is invisible there. These two tools expose
+  // it so an agent can drive a placed template EXACTLY like a human: read the
+  // group's exposed in_N/out_N ports + the inner manualTrigger Run targets, wire
+  // / fill the inputs, then trigger each inner image_gen via
+  // `generation.generateImage({ nodeId })`. Inline images / `_gen_*` payloads are
+  // stripped (agents need ports + ids, never pixels).
+  'asset2d:groups.list': async (_args, ctx) => {
+    const [groups, manualOps] = await Promise.all([
+      request(ctx, 'GET', '/api/v1/groups') as Promise<Array<Record<string, unknown>>>,
+      fetchManualTriggerOps(ctx),
+    ])
+    if (!Array.isArray(groups)) return groups
+    return groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      nameEn: group.nameEn,
+      exposedInputs: stripInlineImages(group.exposedInputs ?? []),
+      exposedOutputs: stripInlineImages(group.exposedOutputs ?? []),
+      runButtons: runButtonsFor(group, manualOps),
+    }))
+  },
+  'asset2d:groups.get': async (args, ctx) => {
+    const id = stringArg(objectArgs(args), 'id')
+    const [group, manualOps] = await Promise.all([
+      request(ctx, 'GET', `/api/v1/groups/${encodeURIComponent(id)}`) as Promise<Record<string, unknown> | null>,
+      fetchManualTriggerOps(ctx),
+    ])
+    if (!group || typeof group !== 'object') throw new Error(`asset2d group not found: ${id}`)
+    const cleaned = stripInlineImages(group) as Record<string, unknown>
+    return { ...cleaned, runButtons: runButtonsFor(group, manualOps) }
   },
   'asset2d:pipeline.get': async (_args, ctx) => request(ctx, 'GET', '/api/v1/pipeline'),
   'asset2d:pipeline.applyBatch': async (args, ctx) => request(ctx, 'POST', '/api/v1/batch', objectArgs(args)),

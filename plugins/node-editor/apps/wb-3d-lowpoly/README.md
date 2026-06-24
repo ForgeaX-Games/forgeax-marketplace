@@ -53,18 +53,27 @@ frontend/                        # Vite + React UI
     surfaces/urdf/               # URDF/3D viewer (three.js, live-sync, screenshot, GLB)
     api/HttpApiClient.ts         # ApiClient over REST + WS (with backoff reconnect)
     theme.ts                     # plugin colour / icon overrides
-batteries/                       # 93 geometry domain ops
-  3d/
+batteries/                       # 85 geometry domain ops
+  Generate/                      # 创建几何
+    Primitive/    (8 ops)
+    Profile/      (5 ops)
+    Parts/        (20 ops)       # 含 6 个齿轮族：g_gear + bevel/ring/rack/planetary/worm
     Architecture/ (10 ops)
-    Assembly/   (9 ops)
-    CSG/        (11 ops)
-    Gears/      (15 ops)
-    Parts/      (14 ops)
-    Preview/    (2 ops)
-    Primitive/  (8 ops)
-    Profile/    (5 ops)
-    Transform/  (6 ops)
-    Utils/      (13 ops)
+  Modify/                        # 修改 / 变换
+    CSG/          (11 ops)
+    Transform/    (6 ops)
+    Material/     (2 ops)
+    Placement/    (3 ops)
+  Assemble/                      # 装配 / 关节 / 碰撞
+    Assembly/     (9 ops)
+    Collision/    (4 ops)
+  Output/                        # 烘焙 / 校验 / 导出
+    Bake/         (2 ops)
+    QC/           (2 ops)
+    Export/       (3 ops)
+# 注：以上为快照；运行期权威清单是 `lowpoly:batteries.list` 工具（SSOT）。
+# 文件夹名即调色板大类（无数字前缀）；rail 顺序由 batteryGrouping.ts 的显式
+# 阶段顺序 Generate→Modify→Assemble→Output 决定。
 vendor/                          # vendored geometry DSL types → vendor/dist (gitignored)
 schemas/                         # .gitkeep stubs (schema files land here as batteries mature)
 scripts/
@@ -77,11 +86,16 @@ SKILL.md                         # AI-readable op + workflow guide
 
 ## Status
 
-Fully implemented. 93 domain batteries (Architecture, Assembly, CSG, Gears,
-Parts, Preview, Primitive, Profile, Transform, Utils) + 32 shared batteries from
-`@forgeax/batteries-common`. OCCT/replicad WASM baker, content-addressed OBJ
-blob library, three.js URDF viewer with live-sync, per-agent project lock,
-agent screenshot and GLB export tools, headless renderer daemon.
+Fully implemented. 85 active domain batteries organised by pipeline stage
+(Generate / Modify / Assemble / Output) + 32 shared batteries from
+`@forgeax/batteries-common`. The 15 legacy gear ops were consolidated into 6
+parameterized Parts families (`g_gear` with a `tooth_profile` enum, plus
+`g_ring_gear` / `g_rack_gear` / `g_planetary_gearset` / `g_bevel_gear` /
+`g_worm`); the old per-profile battery ids were removed (graphs saved with them
+must be re-created with `g_gear`), though the baker still understands every
+underlying gear DSL op. OCCT/replicad WASM baker (flat/faceted low-poly tessellation), content-
+addressed OBJ/GLB blob library, three.js URDF viewer with live-sync, per-agent
+project lock, agent screenshot and GLB export tools, headless renderer daemon.
 
 ## Architecture
 

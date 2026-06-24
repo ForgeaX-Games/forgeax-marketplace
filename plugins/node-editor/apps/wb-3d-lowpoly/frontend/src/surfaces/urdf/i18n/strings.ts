@@ -22,6 +22,8 @@ export interface ViewerI18nStrings {
     exportObjSub: string
     exportGlb: string
     exportGlbSub: string
+    exportGlbStatic: string
+    exportGlbStaticSub: string
     exportUrdf: string
     exportUrdfSub: string
     pasteOverlayTitle: string
@@ -90,8 +92,10 @@ const ZH: ViewerI18nStrings = {
     exportHeader: '导出格式',
     exportObj: 'OBJ',
     exportObjSub: '保存当前视图中的物体为 Wavefront OBJ',
-    exportGlb: 'GLB',
+    exportGlb: 'GLB（带动画）',
     exportGlbSub: '保存当前物体为 GLB，含关节预览动画（与自动动画一致）',
+    exportGlbStatic: 'GLB（静态）',
+    exportGlbStaticSub: '保存当前物体为 GLB，仅几何 + 材质，不含任何动画轨道',
     exportUrdf: 'URDF',
     exportUrdfSub: '保存当前 URDF XML 源文件',
     pasteOverlayTitle: '粘贴 URDF XML',
@@ -160,8 +164,10 @@ const EN: ViewerI18nStrings = {
     exportHeader: 'Export format',
     exportObj: 'OBJ',
     exportObjSub: 'Save the visible object as Wavefront OBJ',
-    exportGlb: 'GLB',
+    exportGlb: 'GLB (animated)',
     exportGlbSub: 'Save as GLB with joint preview animation (same as auto-animate)',
+    exportGlbStatic: 'GLB (static)',
+    exportGlbStaticSub: 'Save as GLB with geometry + materials only, no animation tracks',
     exportUrdf: 'URDF',
     exportUrdfSub: 'Save the current URDF XML source',
     pasteOverlayTitle: 'Paste URDF XML',

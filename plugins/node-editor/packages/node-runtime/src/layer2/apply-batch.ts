@@ -233,6 +233,10 @@ export interface ApplyBatchResult {
   diagnostics?: ReadonlyArray<Diagnostic>
   // History batchId on ok.
   batchId?: string
+  /** True when the batch only repositions / updates presentation metadata. */
+  layoutOnly?: boolean
+  /** Nodes whose output cache was invalidated by this batch (topology change). */
+  invalidatedNodeCount?: number
 }
 
 // A batch that only repositions things or updates presentation metadata (viewport / frames /
@@ -240,7 +244,7 @@ export interface ApplyBatchResult {
 // recorded in history, but must NOT emit a `graph:applied` data-change event — otherwise every
 // live client re-pulls the snapshot and rebuilds previews on each node drag. Mirrors the legacy
 // model where moving a node was a plain position save, never a re-exec/re-pull trigger.
-function isLayoutOnlyBatch(ops: readonly Op[]): boolean {
+export function batchIsLayoutOnly(ops: readonly Op[]): boolean {
   if (ops.length === 0) return false
   return ops.every((op) => {
     switch (op.type) {
@@ -266,6 +270,43 @@ function isLayoutOnlyBatch(ops: readonly Op[]): boolean {
         return false
     }
   })
+}
+
+/** Compact op summary for perf / persist tracing logs. */
+export function summarizeBatchOps(ops: readonly Op[]): string {
+  return ops
+    .map((op) => {
+      switch (op.type) {
+        case 'updateNode': {
+          const parts: string[] = []
+          if (op.position !== undefined) parts.push('pos')
+          if (op.params !== undefined) parts.push('params')
+          if (op.name !== undefined) parts.push('name')
+          return `updateNode:${op.nodeId}{${parts.join('+') || '?'}}`
+        }
+        case 'setMetadata':
+          return `setMetadata:${op.key}`
+        case 'connect':
+          return `connect:${op.edgeId}`
+        case 'disconnect':
+          return `disconnect:${op.edgeId}`
+        case 'createNode':
+          return `createNode:${op.nodeId}`
+        case 'deleteNode':
+          return `deleteNode:${op.nodeId}`
+        case 'createGroup':
+          return `createGroup:${op.groupId}`
+        case 'updateGroup':
+          return `updateGroup:${op.groupId}`
+        case 'deleteGroup':
+          return `deleteGroup:${op.groupId}`
+        case 'ungroup':
+          return `ungroup:${op.groupId}`
+        default:
+          return (op as { type: string }).type
+      }
+    })
+    .join(',')
 }
 
 // Bootstrap an empty graph file — used by the first applyBatch on a fresh project.
@@ -1057,6 +1098,7 @@ export async function applyBatch(
   // back), which is why "删除输入边后输出没变". Seeds come from the PRE-batch graph
   // (disconnect targets are already gone from `next`); the BFS walks `next.edges`.
   const seeds = collectInvalidationSeeds(current, ops)
+  let invalidatedNodeCount = 0
   if (seeds.size > 0) {
     const nextEdges: GraphEdge[] = Object.values(next.edges)
     const allNodeIds = Object.keys(next.nodes)
@@ -1067,13 +1109,16 @@ export async function applyBatch(
         toInvalidate.add(id)
       }
     }
+    invalidatedNodeCount = toInvalidate.size
     for (const id of toInvalidate) runtime.outputs.invalidate(id)
   }
+
+  const layoutOnly = batchIsLayoutOnly(ops)
 
   // Announce the mutation so consumers on the 'graph' channel learn about it —
   // except for layout-only batches (reposition / viewport / frames), which are
   // not data changes and must not drive a re-pull / preview rebuild.
-  if (!isLayoutOnlyBatch(ops)) {
+  if (!layoutOnly) {
     busFor(runtime).emit({
       kind: 'graph:applied',
       pipelineId: runtime.config.pipelineId,
@@ -1082,5 +1127,11 @@ export async function applyBatch(
     })
   }
 
-  return { status: 'ok', newHash: written.hash, batchId }
+  return {
+    status: 'ok',
+    newHash: written.hash,
+    batchId,
+    layoutOnly,
+    invalidatedNodeCount,
+  }
 }

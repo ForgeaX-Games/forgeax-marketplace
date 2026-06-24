@@ -115,6 +115,10 @@ export interface IncrementalBakeState {
    *  rect when a painted tile overlaps an object, so the object is correctly
    *  cleared + repainted (a plain 1-cell footprint would leave stale pixels). */
   objectBoundsByCell?: ReadonlyMap<CollectedCell, { minX: number; minY: number; maxX: number; maxY: number }>
+  /** Footprint-center anchor for grouped object layers (geometry anchor lands here). */
+  objectAnchorPointByLayer?: ReadonlyMap<number, { x: number; y: number }>
+  /** Per-layer uniform scale so asset collision fits voxel bottom face. */
+  objectFootprintScaleByLayer?: ReadonlyMap<number, number>
   /** Spatial bucket index: coarse master-grid screen tile → cells whose footprint
    *  touches it. Lets the incremental append visit only the O(k) cells near the
    *  dirty rect instead of scanning all N cells every paint. Buckets are keyed in

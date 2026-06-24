@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-director",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Director · 场景总监", "en": "Director · Scene Director" },
+  "description": {
+    "zh": "场景资产流水线调度者。统筹 Sino（场景布局）与 Mira（2D 资产生成）：先让 Sino 出布局并汇总 asset-requirements.json，转交 Mira 生成并发布到共享游戏沙箱，再让 Sino 用 useGameTextures 导入并截图验收。自己不构图、不生图，只编排与传参。",
+    "en": "Orchestrator for the scene-asset pipeline. Coordinates Sino (scene layout) and Mira (2D asset generation): first has Sino produce the layout and collect asset-requirements.json, hands it to Mira to generate and publish into the shared game sandbox, then has Sino import via useGameTextures and verify by screenshot. Does not compose scenes or generate assets itself — it only orchestrates and passes the contract/gameSlug between agents."
+  },
+  "provides": {
+    "agent": {
+      "id": "director",
+      "role": "orchestrator",
+      "card": {
+        "name": { "zh": "Director", "en": "Director" },
+        "color": "#7C9CF6",
+        "avatar": "🎬"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

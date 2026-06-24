@@ -6,6 +6,7 @@ import { usePipelineStore } from '../../stores/index.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth } from './canvasConstants.js'
 import { RELAY_BATTERY_ID, RELAY_INPUT_PORT, RELAY_NODE_HEIGHT, RELAY_NODE_WIDTH, RELAY_OUTPUT_PORT } from './RelayNode.js'
+import { stripGenCacheParams } from './groupStatus.js'
 import type { Battery, NodeGroup, PipelineNode, PipelineEdge, ExposedPort } from '../../types.js'
 
 /**
@@ -168,13 +169,30 @@ export function remapGroupIds(
     if (n.batteryId === '__group__' && groupIdMap) {
       const old = typeof n.params?.groupId === 'string' ? n.params.groupId : ''
       const mappedGroupId = groupIdMap[old]
-      newId = mappedGroupId ?? genId('node')
-      if (mappedGroupId) params = { ...n.params, groupId: mappedGroupId }
+      if (mappedGroupId) {
+        newId = mappedGroupId
+        params = { ...n.params, groupId: mappedGroupId }
+      } else if (old) {
+        // The child group is NOT in the remap (the bundle arrived without its
+        // `_nestedGroups` def). Keep the ORIGINAL group id so the shadow still
+        // resolves to a real group rather than minting an unrelated `node-…` id:
+        // a `node-` id would match no group def, so the persist would emit a
+        // createGroup member / connects the kernel never creates and reject the
+        // whole batch ("member/connect.* does not exist"), making the dropped
+        // group vanish. `loadGroup` now hydrates `_nestedGroups` so this branch
+        // is a safety net rather than the normal path.
+        newId = old
+        params = { ...n.params, groupId: old }
+      } else {
+        newId = genId('node')
+      }
     } else {
       newId = genId('node')
     }
     nodeIdMap[n.id] = newId
-    return { ...n, id: newId, params }
+    // A duplicate starts with NO cached generation result: strip the volatile
+    // `_gen_*` Run cache so a copied image_gen doesn't carry the source's image.
+    return { ...n, id: newId, params: stripGenCacheParams(params) }
   })
 
   const newEdges: PipelineEdge[] = group.edges.map(e => ({

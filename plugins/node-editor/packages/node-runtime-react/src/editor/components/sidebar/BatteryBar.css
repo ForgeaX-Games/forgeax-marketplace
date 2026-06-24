@@ -63,6 +63,19 @@
   color: var(--color-text-primary);
 }
 
+/* Develop ⇄ Templates 切换按钮（rail 底部、收起之下、五角星之上）：
+   默认次级文字色；处于 templates 模式时点亮强调色，给出当前模式的视觉反馈。 */
+.bb-rail-button--mode {
+  color: var(--color-text-secondary);
+}
+.bb-rail-button--mode:hover {
+  background-color: rgba(var(--color-accent-rgb), 0.10);
+  color: var(--color-text-primary);
+}
+.bb-rail-button--mode.is-templates {
+  color: var(--color-accent);
+}
+
 /* 拖宽时禁用全局选择，避免 mousemove 文本被选中 */
 body.bb-resizing {
   cursor: col-resize !important;
@@ -583,20 +596,52 @@ body.bb-resizing {
 .bb-big-header.tab-prompt.active::before { background: #0891b2; }
 .bb-big-header.tab-prompt.active .bb-chevron { color: #67e8f9; }
 
-/* ── 大标签内容分组（右侧全量目录，组间用横线分隔） ─────────────────────── */
+/* ── 大标签内容分组（右侧全量目录，分组标题叠在分割线上） ─────────────────── */
 .bb-big-content-section {
   display: flex;
   flex-direction: column;
   padding: 2px 0 6px;
 }
 
+/* 非空分组的分割线由 .bb-big-content-title 自带（左侧横线 + 右侧名称）承载，故不再画 border。 */
 .bb-big-content-section--separated {
-  border-top: 1px solid rgba(255, 255, 255, 0.32);
-  margin-top: 6px;
-  padding-top: 6px;
+  margin-top: 2px;
 }
 
-/* 空的大分类行与左侧 rail 的 26px 按钮 + 3px gap 垂直步进对齐。 */
+/* 大标签名称叠在分割线右侧：默认白色，品牌色大标签沿用 rail 配色；上下间距略宽。 */
+.bb-big-content-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 7px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.bb-big-content-title::before {
+  content: '';
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.bb-big-content-title--first {
+  margin-top: 4px;
+}
+
+.bb-big-content-title.tab-json { color: #FCA823; }
+.bb-big-content-title.tab-common { color: #c084fc; }
+.bb-big-content-title.tab-ai { color: #FC8181; }
+.bb-big-content-title.tab-special { color: #60a5fa; }
+.bb-big-content-title.tab-groups { color: #34d399; }
+.bb-big-content-title.tab-prompt { color: #22d3ee; }
+
+/* 空的大分类行与左侧 rail 的 26px 按钮 + 3px gap 垂直步进对齐（无标题，用细线分隔）。 */
 .bb-big-content-section:has(> .battery-empty-small:only-child) {
   min-height: 29px;
   padding: 0;
@@ -605,6 +650,7 @@ body.bb-resizing {
 }
 
 .bb-big-content-section--separated:has(> .battery-empty-small:only-child) {
+  border-top: 1px solid rgba(255, 255, 255, 0.32);
   margin-top: 0;
   padding-top: 0;
 }
@@ -848,6 +894,32 @@ body.bb-resizing {
   line-height: 1;
 }
 
+/* GROUPS 行内删除按钮：默认透明，hover 行时浮现；推到行末。 */
+.battery-row-delete {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary, #9ca3af);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+.battery-row:hover .battery-row-delete {
+  opacity: 1;
+}
+.battery-row-delete:hover {
+  color: #f87171;
+  background-color: rgba(248, 113, 113, 0.14);
+}
+
 .battery-row-note-count {
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
@@ -1011,6 +1083,10 @@ body.bb-resizing .bb-resize-handle {
   color: #fbbf24;
 }
 
+.battery-bar.mode-templates .bb-big-content-title {
+  color: rgba(251, 191, 36, 0.9);
+}
+
 .battery-bar.mode-templates .bb-small-toggle {
   color: rgba(251, 191, 36, 0.85);
 }
@@ -1054,7 +1130,7 @@ body.bb-resizing .bb-resize-handle {
   justify-content: center;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: rgba(251, 191, 36, 0.06);
+  background: #000;
   border: 1.5px solid rgba(251, 191, 36, 0.45);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
   transform-origin: center;
@@ -1071,7 +1147,7 @@ body.bb-resizing .bb-resize-handle {
 .battery-row-thumb-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   /* 像素素材放大时关闭浏览器插值平滑，保持锐利像素 */
   image-rendering: pixelated;

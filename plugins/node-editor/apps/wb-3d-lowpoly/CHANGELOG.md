@@ -10,8 +10,143 @@
 
 ## Unreleased
 
+### Added
+
+- **Gears consolidated 15 → 6 parametric Parts batteries (`g_gear` + friends).**
+  Why: 15 near-duplicate gear batteries diverged on tooth math and tessellation and
+  buried the common 90% case. The 6 survivors live under `batteries/Generate/Parts/`
+  and select tooth shape via a `tooth_profile` enum (`spur`/`helical`/`herringbone`/
+  `hyperbolic`) instead of one battery per profile. Dead per-profile params were
+  pruned from `op-registry.ts`. The baker keeps every underlying gear DSL builder,
+  so the new batteries still emit the original DSL ops. See `SKILL.md` /
+  `skills/compose-lowpoly/*` for the routing (`g_gear` with `tooth_profile`, gears
+  are now a Parts detail).
+
+### Removed
+
+- **Deprecated per-profile gear battery IDs and the `Legacy/Gears` palette group.**
+  Why: keeping `g_spur_gear` / `g_herringbone_*` / `g_crossed_*` / `g_hyperbolic_*`
+  / `*_pair` around as folded shells just cluttered the palette with a standalone
+  Legacy stage. They are gone; all gears go through the 6 consolidated `Generate/
+  Parts` ops. Trade-off: a graph saved with a removed gear ID no longer resolves in
+  the editor (the node becomes unknown) and must be re-created with `g_gear`. The
+  baker still understands the underlying gear DSL ops, so re-emitted DSL bakes fine.
+- **Battery taxonomy reorganised to `batteries/<Stage>/<Family>/`.** Why: the flat
+  `batteries/3d/<family>` tree gave no sense of pipeline order. Families now sit
+  under pipeline stages `Generate` / `Modify` / `Assemble` / `Output` (+ `Legacy`
+  for deprecated shells). Folder names are **plain** (no numeric prefixes like
+  `1_Generate`); `BatteryBar` sorts stages explicitly via `compareBigLabel` /
+  `PIPELINE_STAGE_ORDER` rather than relying on folder-name ordering. `lowpoly:batteries.list`
+  remains the single source of truth — op IDs are independent of folder paths.
+- **`g_bake_object` — bake a multi-color object into ONE multi-material GLB.**
+  Answers "do I really have to split every colored object into separate parts at
+  assembly time?" — no. Build the object as multiple colored parts (PART A phase 2,
+  each `g_part` + `g_material`), then bake the whole set with `g_bake_object` into a
+  single content-addressed `<sha>.glb` whose per-part colors are embedded as glTF
+  materials. Reference it once in the scene via `g_mesh(filename=<sha>.glb)` — with
+  **no link material on the wrapping `g_part`** — to keep all the colors. New
+  pieces:
+  - `backend/src/services/baker/glb_export.ts` — hand-rolled glTF-2.0 GLB writer
+    (no new dependency): one mesh, one primitive per color group, deduped
+    `pbrMetallicRoughness.baseColorFactor` materials, POSITION+indices only (normals
+    recomputed on the viewer, matching the OBJ path), 4-byte-aligned JSON+BIN chunks.
+  - `backend/src/services/baker/baker.service.ts` — `bakeColoredAssembly(parts,
+    geometry)` tessellates each part with the **same low-poly tessellation** as the
+    OBJ path (refactored a shared `meshShape()` out of `obj_export.ts`), bakes each
+    part's `rpy`+`origin` (URDF `Rz·Ry·Rx`) into vertices, groups by color, and
+    writes the GLB into the content-addressed blob library as `<sha>.glb`.
+  - `backend/src/services/baker-context.ts` — exposes `baker.bakeColoredAssembly`
+    on the battery `ctx.services.baker` handle.
+  - `batteries/3d/Utils/g_bake_object/` (new battery) — collects every `part()` in
+    the input geometry, resolves each part's `shape` ref + `material` ref→rgba (gray
+    fallback) + `origin`/`rpy`, calls the baker, and returns `filename`(`<sha>.glb`)
+    + `bbox_min`/`bbox_max`/`size`. Usage constraints (guarded with clear errors):
+    parts must reference **real shapes** (primitive / CSG / Parts / composite), **not**
+    pre-baked `g_mesh`/`<sha>.obj` refs — `g_bake_object` is "skip OBJ staging, bake the
+    whole colored object at once", distinct from the `g_bake_part` + per-instance
+    `g_material` route; it bakes part poses into a single static mesh, so moving joints
+    are not preserved (static props only); and the wrapping scene `g_part` must carry
+    no link material or the embedded colors get overwritten.
+- **Viewer keeps GLB-embedded materials when there is no explicit URDF material.**
+  `frontend/src/surfaces/urdf/viewer3d/useUrdfScene.ts`: for `.glb`/`.gltf` meshes
+  whose URDF `<visual>` declares no `<material>`, the loader no longer forces the
+  default-gray `materialSpec` (which `applyLoadedMeshPresentation` would use to
+  overwrite every loaded mesh's material) — it passes `undefined` so the per-part
+  colors baked by `g_bake_object` survive. OBJ meshes and any visual with an explicit
+  link material keep the previous override behavior.
+
+### Changed
+
+- **URDF `<collision>` defaults to a coarse AABB box proxy.** Why: copying the full
+  visual mesh into `<collision>` for every composite/baked part made physics both
+  slower and less stable. `g_to_urdf` now wraps composite/baked-mesh collisions in an
+  AABB box (provenance `collision_proxy_box`) by default; native `box`/`cylinder`/
+  `sphere` stay as-is, and an explicit `g_collision_*` still wins. New `collision_proxy`
+  input (default `true`) restores the legacy `visual = collision` behaviour when set
+  `false`. `batteries/Output/Export/g_to_urdf/{index.ts,meta.json}`.
+- **Tessellation parameters folded into bake cache keys; colored assemblies get disk
+  caching.** Why: changing tessellation used to silently reuse stale geometry, and
+  multi-color GLB bakes recomputed every time. Cache keys now carry a
+  `tessellationFingerprint`, and `bakeColoredAssembly` writes a content-addressed
+  `<sha>.glb` to the on-disk blob library.
+- **Shared baker geometry helpers extracted to `op_helpers.ts`.** Why: `safeDelete` /
+  `maybeShiftToZ0` / `centeredBox` / `boxFloor` / `drawingFromPoints` were copy-pasted
+  across `ops/*.ts`, `csg_helpers.ts`, `gears/*` and `baker.service.ts` and had begun
+  to drift. They now live in one module; per-family variants with genuinely different
+  behaviour (e.g. gears' `maybeShiftToZ0`) stay local on purpose.
+- **Baker tessellation tuned for low-poly (sphere/cylinder/cone get fewer
+  facets).** `backend/src/services/baker/types.ts` `DEFAULT_TESSELLATION`:
+  `angularDeflection` 0.5 → 0.6 (the primary curved-surface facet lever),
+  `relativeDeflection` 0.004 → 0.015, `maxLinearDeflection` 1mm → 1cm. Previously
+  the 0.4%/1mm linear-chord clamp forced curved revolved surfaces into dozens of
+  segments regardless of the angular budget, so baked spheres/cylinders/cones came
+  out high-poly. Now round surfaces hold a stable ~12–14 segments (low-poly but not
+  blocky) independent of size. `minLinearDeflection` stays 0.1mm so small standalone
+  parts (their bbox diagonal is small) keep fine detail — the coarsening only bites
+  large curved surfaces, which is the intended low-poly look. *Trade-off:* small
+  curved features riding on a very large part can be coarsened by the 1cm clamp;
+  rebuild/scale that feature on its own part if it needs more resolution.
+- **Scene/asset color guidance: color is per baked part, multi-color objects must
+  be baked per color region (docs + persona).** `g_bake_part` bakes pure-geometry
+  OBJ (no `usemtl`/`vt`) and URDF carries one `<material>` per link, so baking a
+  whole multi-color object into a single mesh yields a single-color block — the
+  reported "every scene object is one color" symptom. Clarified the real workflow in
+  `skills/compose-lowpoly/executions/part-c-scene-assembly.md` (expanded the
+  "OBJ 无材质" section + the stage-0 dispatch loop: split an item by color region,
+  `g_bake_part` each region to its own `<sha>.obj`, then assemble each as its own
+  `g_part` + `g_material`; instancing still reuses the whole part-set) and the
+  companion `agent-lowpoly/persona/zh.md` SCENE recipe. "Color before bake" does not
+  survive — bake always strips materials.
+- **`forgeax-native` skills slot now inlines prompt-skill manuals (incl. linked
+  `executions/*.md`), so the agent can actually see part-a/b/c.** Companion change in
+  `packages/server/builtin/kits/persona/slots/skills.ts` (no wb-3d-lowpoly source).
+  The slot used to inject only a one-line skill index; under `forgeax-native` the
+  `SKILL.md` body and its relative-linked sub-manuals were never delivered (the
+  claude-code `composeSystemPrompt` inline path doesn't run, SkillRunner only reads
+  the entry file on slash-trigger, and the agent has no generic file-read tool). The
+  slot now reads each prompt skill's `SKILL.md`, BFS-follows relative `.md` links
+  within the skill dir (capped at 256KB, frontmatter-stripped, path-escape guarded),
+  and inlines them under a "Skill Manuals" section. So `compose-lowpoly`'s
+  `part-a/b/c` + guides reach Poly directly instead of relying on the persona as the
+  only delivered text.
+
 ### Fixed
 
+- **CSG / Assembly / Architecture correctness pass.** Reconciled `meta.json`
+  defaults with code defaults, fixed staircase rendering and `facade_panel` Z
+  alignment, emitted proper errors for missing/invalid joints, validated `mimic`
+  joint sources, and plugged the `recenterXYToFloor` OCCT memory leak. Documented
+  the mesh-vs-solid boundary and `building_shell` limitations directly in the
+  relevant `meta.json` files. `backend/src/services/baker/ops/architecture.ts` and
+  the CSG/assembly ops.
+- **Frontend/backend reliability pass.** Screenshot captures now fail fast via a
+  `rejectCapture` path instead of timing out silently; URDF live-sync clears stale
+  models and skips redundant viewer rebuilds; the selection-highlight race is gated
+  by a monotonic generation counter; JSON parsing and batch-API throws are guarded
+  into structured responses; `group-templates/save` is hardened against path
+  traversal; the workspace `PUT` honours the exclusive project lock; `HttpApiClient`
+  is disposed on unmount; and `ops:changed` is wired end-to-end so the palette
+  hot-reloads.
 - **AI tool handlers transparently recover project lock after backend restart.**
   `tool-handlers.ts` re-opens active project on `mutation-denied-not-open` and retries once.
 - **Mutation routes forward `expectedPrevHash` and surface lock `code` on HTTP 403.**
@@ -104,6 +239,75 @@
 
 ### Changed
 
+- **SCENE guidance made enforce the per-item bake → reference-assembly loop, and
+  lifted into the persona (docs/persona only, no battery/baker/viewer change).**
+  *Why:* the `agent-lowpoly` persona runs under `forgeax-native`, whose `skills`
+  slot injects only the skill **index**, not the `SKILL.md` / `executions/*.md`
+  bodies. So the per-item bake discipline scattered across those files was
+  effectively invisible to Poly — it fell back to the trimmed persona and piled the
+  whole scene into one batch. The existing batteries already support per-item
+  `g_bake_part` → reference assembly, so this is pure guidance, no new battery.
+  - `agent-lowpoly/persona/zh.md` — expanded the SCENE bullet into a mandatory
+    four-step loop (口播 a **detailed** item manifest → per **unique** item `read`
+    its A/B execution file + model fully + `g_bake_part` → **all baked in the same
+    scene project** → reference-only assembly via `g_part` origins, no re-bake), and
+    added a standing reminder that the `compose-lowpoly` bodies do **not** auto-load
+    under `forgeax-native`, so `read` the matching execution file before each
+    modeling round.
+  - `skills/compose-lowpoly/SKILL.md` — the SCENE intent-triage item, routing-table
+    row, and PART-C summary now require **opening and fully following** each item's
+    A/B execution file (full modeling round + `g_bake_part`) before reference
+    assembly, and state the **same-project bake** rule.
+  - `skills/compose-lowpoly/executions/part-c-scene-assembly.md` — upgraded the
+    阶段-1 scene inventory from a one-line list to a **detailed per-item description**
+    (real form in 2–3 sentences + target size, with a "thin row = failed manifest"
+    gate); made **same-project bake a hard default** in 阶段0 and demoted the
+    cross-project blob discussion to an **advanced footnote** (default = bake every
+    unique item in the scene project).
+  - `skills/compose-lowpoly/battery-catalog.md` + `quickstart.md` — note that a
+    scene = per-item `g_bake_part` (same project) → reference assembly, with **no
+    new scene-level battery needed**.
+
+- **`compose-lowpoly` skill recast for three-tier modeling + SCENE orchestration
+  (docs only, no battery/baker/viewer change).** The skill used to route to three
+  flat PARTs (A asset / B building / C "pure assembly"), with no guidance on
+  *scene* requests and a PART C that hand-wired every instance with
+  `g_joint_fixed`. Reworked the docs so a scene / city / multi-object request is a
+  first-class flow:
+  - `skills/compose-lowpoly/SKILL.md` — added an **intent-triage** decision tree
+    (single object/assembly → A; building → B; scene/city → SCENE orchestration)
+    and an **assembly-vs-scene boundary** disambiguation ("one interlocking whole"
+    → A; "several independent things staged together" → SCENE); recast the routing
+    table + PART summaries so SCENE orchestration *wraps* per-item A/B modeling and
+    ends in PART C; refreshed the frontmatter description to match.
+  - `skills/compose-lowpoly/executions/part-c-scene-assembly.md` — expanded from
+    "pure assembly" into **scene orchestration & assembly**: prepended a scene
+    **brief** (theme / scale / footprint / layout paradigm), an item-level **scene
+    inventory** (per item: A or B, count, which instances reuse one `<sha>.obj`),
+    and a single-agent **dispatch loop** (model + bake each *unique* item). Changed
+    the default assembly recipe from per-instance
+    `g_mesh→g_part→g_material→g_joint_fixed` to **`g_mesh→g_part(origin=pose, rpy,
+    material)` with no `g_joint_fixed`**, relying on `g_to_urdf` auto-stitch to
+    join the jointless roots into one tree. Added a **re-bake trap** warning (using
+    `g_translate`/`g_array_*` to place a referenced mesh re-bakes a fresh OBJ per
+    instance and kills instancing — mass reuse = one `<sha>.obj` + many `g_part`
+    origins) and a **scene-mode QC note** (`g_geometry_qc` `islands` is noise after
+    auto-stitch; `aabb_overlap` stays the hard placement signal, so `g_mesh` must
+    still carry `bbox_min/max`). Added a **Deferred** note for future scene-level
+    batteries (`g_scene_root` / `g_place` / `g_scatter`) that would retire the
+    `g_part` boilerplate (needs backend work, not done here).
+  - `skills/compose-lowpoly/battery-catalog.md` — added a top SCENE-orchestration
+    routing row (decompose → A/B per item → assemble by `g_part` origins) noting
+    `g_array_*` re-bakes referenced meshes.
+  - `skills/compose-lowpoly/quickstart.md` — tightened the Iteration Loop into an
+    agent-owned **self-check → self-fix → re-render** closed loop (fix mechanical
+    defects yourself, only ask the user on subjective calls) and added the
+    two-tier scene iteration note (per item first, then whole-scene QC/four-view).
+  - Companion `agent-lowpoly` persona/manifest (no CHANGELOG in that plugin):
+    `persona/zh.md` + `AGENT.md` rewritten to the three-tier spine with intent
+    triage and the self-check/self-fix loop (replacing the "screenshot critique,
+    hand it back to the user" anti-pattern); `forgeax-plugin.json` description
+    widened from props/mechanical to also cover buildings and scenes/cities.
 - **`primitive_only` QC signal now fires for box-stacks wrapped in parts/joints.**
   The original gate required `no part` **and** `no joint`, so the moment a model
   wrapped its boxes in `g_part` + `g_joint_*` — i.e. the exact lazy

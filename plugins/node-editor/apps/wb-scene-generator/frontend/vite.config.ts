@@ -27,8 +27,15 @@ const cert = process.env.VITE_DEV_HTTPS_CERT
 const key = process.env.VITE_DEV_HTTPS_KEY
 const https = cert && key ? { cert: readFileSync(cert), key: readFileSync(key) } : undefined
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  // Dev: opt-in viewport perf markers (see node-runtime-react/canvasPerfReport.ts).
+  define:
+    mode === 'development' && process.env.VITE_CANVAS_PERF_DEBUG !== undefined
+      ? {
+          'import.meta.env.VITE_CANVAS_PERF_DEBUG': JSON.stringify(process.env.VITE_CANVAS_PERF_DEBUG),
+        }
+      : undefined,
   resolve: {
     alias: kernelAlias,
     // Single React/reactflow/zustand instance across app + kernel source — when
@@ -47,4 +54,4 @@ export default defineConfig({
     },
   },
   build: { outDir: 'dist', sourcemap: true },
-})
+}))

@@ -37,6 +37,9 @@ function readBool(key: string, fallback: boolean): boolean {
 // channel. Mirrors the scene generator's WorkbenchHost (renderer pane).
 export function WorkbenchHost(): JSX.Element {
   const client = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
+  // Release the client's WebSocket + listeners on unmount so a host teardown
+  // (or HMR remount) doesn't leak a live socket + reconnect loop.
+  useEffect(() => () => { client.dispose() }, [client])
 
   const [urdfInline, setUrdfInline] = useState(() => readBool(LS_URDF, true))
   const [workbenchHeight, setWorkbenchHeight] = useState<number | null>(null)

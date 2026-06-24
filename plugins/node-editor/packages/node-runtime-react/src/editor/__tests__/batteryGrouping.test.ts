@@ -3,6 +3,7 @@ import {
   formatSmallLabel,
   getBigLabel,
   getSmallLabel,
+  getTemplateSmallLabel,
   isTemplateBattery,
   sortSmallLabels,
 } from '../components/sidebar/batteryGrouping.js'
@@ -56,6 +57,26 @@ describe('BatteryBar grouping labels', () => {
 
   it('formats preview as Annotation for common annotation batteries', () => {
     expect(formatSmallLabel('preview')).toBe('Annotation')
+  })
+
+  // Templates 模式小标签：仅当目录结构为 templates/<big>/<small>/<template>/file
+  // 时识别出真实小标签；扁平 templates/<big>/<template>/file 视为无小标签（平铺）。
+  describe('getTemplateSmallLabel', () => {
+    const tpl = (sourcePath?: string): Battery =>
+      ({ ...make({ type: 'group' }), sourcePath } as unknown as Battery)
+    it('returns the nested small folder for templates/<big>/<small>/<template>/file', () => {
+      expect(getTemplateSmallLabel(tpl('batteries/templates/interests/decoration/LakeRegions/LakeRegions.json')))
+        .toBe('decoration')
+    })
+    it('returns null for a flat templates/<big>/<template>/file (no real small label)', () => {
+      expect(getTemplateSmallLabel(tpl('batteries/templates/scene/ArchitectureStructures/ArchitectureStructures.json')))
+        .toBeNull()
+      expect(getTemplateSmallLabel(tpl('batteries/templates/general/AddBaseGrid/AddBaseGrid.json')))
+        .toBeNull()
+    })
+    it('returns null when there is no sourcePath', () => {
+      expect(getTemplateSmallLabel(tpl(undefined))).toBeNull()
+    })
   })
 
   // Template-vs-group bucketing keys off the BIG label, not an exact displayGroup

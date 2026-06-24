@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import type { RuntimeChannel } from '@forgeax/node-runtime'
+import type { RuntimeChannel, RuntimeEvent } from '@forgeax/node-runtime'
 import { getRuntime } from '../runtime.js'
+import { isCanvasPerfVerbose, logWsRuntimeEvent } from '../lib/canvasPerfDebug.js'
 
 interface Socketish {
   send: (data: string) => void
@@ -46,6 +47,24 @@ async function bind(entry: ClientEntry): Promise<void> {
   if (!entry.channels) return
   const rt = await getRuntime()
   entry.unsub = rt.subscriptions.subscribe(rt.config.pipelineId, entry.channels, (event) => {
+    if (isCanvasPerfVerbose()) {
+      const e = event as RuntimeEvent
+      const kind = typeof e === 'object' && e !== null && 'kind' in e ? String((e as { kind: unknown }).kind) : 'unknown'
+      let extra = ''
+      if (kind === 'node:output' && typeof e === 'object' && e !== null) {
+        const { nodeId, portId } = e as { nodeId?: string; portId?: string }
+        if (nodeId && portId) extra = `node=${nodeId} port=${portId}`
+      }
+      if (kind === 'exec:completed' || kind === 'exec:started' || kind === 'node:output' || kind === 'graph:applied') {
+        if (kind === 'graph:applied' && typeof e === 'object' && e !== null) {
+          const { batchId, newHash } = e as { batchId?: string; newHash?: string }
+          const parts = [extra, batchId ? `batchId=${batchId}` : '', newHash ? `newHash=${newHash.slice(0, 12)}…` : ''].filter(Boolean)
+          logWsRuntimeEvent('runtime', kind, parts.join(' ') || undefined)
+        } else {
+          logWsRuntimeEvent('runtime', kind, extra || undefined)
+        }
+      }
+    }
     try {
       entry.socket.send(JSON.stringify({ event: 'runtime', payload: event }))
     } catch {

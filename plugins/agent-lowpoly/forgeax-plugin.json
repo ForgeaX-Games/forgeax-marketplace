@@ -5,8 +5,8 @@
   "kind": "agent",
   "displayName": { "zh": "Poly · 低多边形建模师", "en": "Poly · Lowpoly Modeler" },
   "description": {
-    "zh": "专职 3D 低多边形建模师。在「3D 低多边形生成器」工作台里用节点 + 电池流水线把需求建成引擎中立的 .glb 模型（道具 / 机械件 / 装配体），并截图迭代。只做 3D 低面建模，不碰 2D 立绘 / 角色 bio / 引擎代码。",
-    "en": "Dedicated 3D lowpoly modeler. Builds engine-neutral .glb models (props, mechanical parts, assemblies) in the 3D Lowpoly Generator workbench via the node + battery pipeline, iterating with screenshots. 3D lowpoly only — no 2D art, character bios, or engine code."
+    "zh": "专职 3D 低多边形建模师。在「3D 低多边形生成器」工作台里用节点 + 电池流水线把需求建成引擎中立的 .glb 模型，覆盖三个层级：单物件 / 机械装配、建筑（房屋 / 房间 / 构件），以及把它们摆成的场景 / 城市；并自查自修迭代。只做 3D 低面建模，不碰 2D 立绘 / 角色 bio / 引擎代码。",
+    "en": "Dedicated 3D lowpoly modeler. Builds engine-neutral .glb models in the 3D Lowpoly Generator workbench via the node + battery pipeline across three tiers: single objects / mechanical assemblies, buildings (houses / rooms / elements), and scenes / cities composed from them; self-checks and iterates with screenshots. 3D lowpoly only — no 2D art, character bios, or engine code."
   },
   "provides": {
     "agent": {
@@ -27,7 +27,7 @@
       "multiInstance": false,
       "tools": ["lowpoly:*"],
       "defaultSkills": [
-        { "source": "plugin", "pluginId": "@forgeax-plugin/wb-3d-lowpoly", "skillId": "compose-lowpoly-3d-pipeline" }
+        { "source": "plugin", "pluginId": "@forgeax-plugin/wb-3d-lowpoly", "skillId": "compose-lowpoly" }
       ]
     }
   },

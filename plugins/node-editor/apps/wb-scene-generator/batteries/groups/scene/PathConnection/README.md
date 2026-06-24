@@ -1,6 +1,6 @@
 # PathConnection（道路连接）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781236103740_crshq`，也可用 basename `PathConnection`。
+> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781857907971_zblc6`，也可用 basename `PathConnection`。
 > 内部 27 个节点、1 个嵌套子组。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明

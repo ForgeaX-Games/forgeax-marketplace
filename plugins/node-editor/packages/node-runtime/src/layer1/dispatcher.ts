@@ -23,7 +23,7 @@
 // last-call-wins and the executor picks them out (e.g. _loopBatch). dynamicOutputs ops
 // are the exception: no fanout, every input fed as the raw tree, execute called once.
 
-import { DataTree, type DataTreeEntry, type Path, comparePaths, pathToString, pathsEqual } from './datatree/index.js'
+import { DataTree, type DataTreeEntry, type Path, comparePaths, pathToString, pathsEqual, isPrefix } from './datatree/index.js'
 import type { OpAccess, OpLacingMode, OpSpec } from './types/op-spec.js'
 
 type OpFn = (input: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>
@@ -190,12 +190,71 @@ function alignBranches(
     })
   }
 
-  const target = lacing === 'shortest' ? Math.min(...counts) : Math.max(...counts)
+  if (lacing === 'shortest') {
+    const target = Math.min(...counts)
+    return Array.from({ length: target }, (_, i) => {
+      const indices = new Map<string, number>()
+      for (const p of ports) indices.set(p, Math.min(i, branchPaths.get(p)!.length - 1))
+      return indices
+    })
+  }
+
+  // longest (default): hierarchy-aware. The driving axis ("spine") is the port
+  // with the most branches (ties broken by the deepest paths). A port with FEWER
+  // branches than the spine is treated as a broadcasting parent: for each spine
+  // branch it selects the branch whose path is the longest prefix of the spine
+  // path, so a per-building {b} value broadcasts across its descendant per-room
+  // {b;r} spine branches. A port with the SAME branch count as the spine is a
+  // peer list and zips POSITIONALLY (element i ↔ spine i) — never prefix-matched.
+  //
+  // The equal-count positional rule is essential: prefix matching would collapse
+  // equal-length siblings onto one element. E.g. spine rooms {0;0},{0;1},{0;2}
+  // (three siblings under one parent) laced with a flat list [0],[1],[2] — only
+  // [0] is a prefix of every {0;k}, so prefix matching would feed element 0 to
+  // all three (duplicates). Positional zip correctly pairs k↔k. Prefix broadcast
+  // is reserved for the genuine fewer-than-spine parent case (e.g. grid2node's
+  // 3-building zRange broadcasting onto 12 rooms).
+  const target = Math.max(...counts)
+  let spine = ports[0]
+  let spineCount = -1
+  let spineDepth = -1
+  for (const p of ports) {
+    const paths = branchPaths.get(p)!
+    const cnt = paths.length
+    const depth = paths.reduce((m, pa) => Math.max(m, pa.length), 0)
+    if (cnt > spineCount || (cnt === spineCount && depth > spineDepth)) {
+      spineCount = cnt
+      spineDepth = depth
+      spine = p
+    }
+  }
+  const spinePaths = branchPaths.get(spine)!
+
   return Array.from({ length: target }, (_, i) => {
+    const sp = spinePaths[Math.min(i, spinePaths.length - 1)]
     const indices = new Map<string, number>()
     for (const p of ports) {
-      const cnt = branchPaths.get(p)!.length
-      indices.set(p, Math.min(i, cnt - 1))
+      if (p === spine) {
+        indices.set(p, Math.min(i, spineCount - 1))
+        continue
+      }
+      const paths = branchPaths.get(p)!
+      // Equal-cardinality peer list: positional zip (preserves element-wise
+      // pairing). Only a strictly-shorter port is a broadcasting parent.
+      if (paths.length >= spineCount) {
+        indices.set(p, Math.min(i, paths.length - 1))
+        continue
+      }
+      let bestIdx = -1
+      let bestLen = -1
+      for (let k = 0; k < paths.length; k++) {
+        const pp = paths[k]
+        if (pp.length > bestLen && isPrefix(pp, sp)) {
+          bestLen = pp.length
+          bestIdx = k
+        }
+      }
+      indices.set(p, bestIdx >= 0 ? bestIdx : Math.min(i, paths.length - 1))
     }
     return indices
   })
@@ -359,24 +418,44 @@ function collectorToTree(collector: OutputCollector): DataTree<unknown> {
   return DataTree.fromEntries(entries)
 }
 
-// Pick the principal output path for a tuple: the deepest input branch wins because it
-// carries the most precise hierarchical address, with ties broken by the declared
-// principal port and then iteration order.
+// Pick the principal output path for a tuple. The output must follow the FANOUT AXIS —
+// the port whose branch varies per tuple — so each call lands on its own output branch.
+// That axis is the port with the most branches (mirroring alignBranches' spine choice),
+// so branch count is the PRIMARY criterion. Depth is only a tiebreak between ports of
+// equal count (prefer the more precise/deeper address), then the declared principal,
+// then iteration order.
+//
+// Count must beat depth, not the other way around: a single-branch input can sit at a
+// DEEPER path than the multi-branch fanout port (e.g. a `region` grafted to [0,0,0]
+// laced with a flattened `point` list at [0,k]). Depth-first would pick the deep but
+// CONSTANT region path for every tuple and collapse all results onto it (last-call-wins);
+// count-first correctly follows `point`'s distinct [0,k] branches.
 function computePrincipalPath(
   principalName: string | undefined,
   branchIndices: Map<string, number>,
   branchPaths: Map<string, readonly Path[]>,
 ): Path {
   let bestPath: Path | undefined
+  let bestCount = -1
   let bestDepth = -1
+  let bestIsPrincipal = false
 
   for (const [port, paths] of branchPaths) {
     const idx = branchIndices.get(port)
     if (idx === undefined) continue
     const path = paths[idx]
+    const count = paths.length
     const depth = path.length
-    if (depth > bestDepth || (depth === bestDepth && port === principalName)) {
+    const isPrincipal = port === principalName
+    const better =
+      count > bestCount ||
+      (count === bestCount &&
+        (depth > bestDepth ||
+          (depth === bestDepth && isPrincipal && !bestIsPrincipal)))
+    if (better) {
+      bestCount = count
       bestDepth = depth
+      bestIsPrincipal = isPrincipal
       bestPath = path
     }
   }

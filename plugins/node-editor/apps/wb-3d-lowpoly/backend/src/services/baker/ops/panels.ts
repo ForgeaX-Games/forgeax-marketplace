@@ -14,9 +14,10 @@
  *   - sleeve.style="full"  → 后部带壁厚 duct_wall、深度 duct_depth 的盒套
  */
 
-import type { OpBuilder, BakeableShape, OpContext } from '../types.js';
+import type { OpBuilder, BakeableShape } from '../types.js';
 import { BakerError } from '../errors.js';
 import { csgCut, csgFuse } from '../csg_helpers.js';
+import { centeredBox, maybeShiftToZ0 } from '../op_helpers.js';
 import {
   optionalBool, optionalNumber, optionalString,
   readNumList, requireNumber, requireNumList,
@@ -24,15 +25,6 @@ import {
 import type { Arg } from '../shared-types.js';
 
 // ── 公共助手 ─────────────────────────────────────────────────────────
-
-function centeredBox(ctx: OpContext, w: number, d: number, h: number): BakeableShape {
-  return ctx.replicad.makeBaseBox(w, d, h).translateZ(-h / 2);
-}
-
-function maybeShiftToZ0(shape: BakeableShape, h: number, args: Record<string, Arg>): BakeableShape {
-  const center = optionalBool(args, 'center', true);
-  return center ? shape : shape.translateZ(h / 2);
-}
 
 function filletVerticalEdges(shape: BakeableShape, r: number): BakeableShape {
   if (r <= 0) return shape;

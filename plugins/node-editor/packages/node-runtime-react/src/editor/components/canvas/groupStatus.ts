@@ -42,6 +42,20 @@ const GROUP_SAVED_HASH = '__groupSavedContentHash'
 const GROUP_IS_TEMPLATE = '__groupIsTemplate'
 const GROUP_SOURCE_ID = '__groupSourceGroupId'
 
+/**
+ * Strip the volatile manual-trigger Run-result keys (`_gen_image` /
+ * `_gen_result` / `_gen_error`) from an inner node's params. A DUPLICATE (copy /
+ * Ctrl+drag / library instantiate) must start with NO cached generation result —
+ * otherwise the copy would display the source's last-run image (the parent
+ * 母体 cache) and hydrate it on execute instead of being empty until re-run.
+ */
+export function stripGenCacheParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!params) return {}
+  const { _gen_image: _a, _gen_result: _b, _gen_error: _c, ...rest } = params
+  void _a; void _b; void _c
+  return rest
+}
+
 /** Read provenance fields out of a node's params (all optional / tolerant). */
 export function readGroupProvenance(params: Record<string, unknown> | undefined): GroupProvenance {
   if (!params) return {}

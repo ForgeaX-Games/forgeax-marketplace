@@ -11,6 +11,7 @@ import { getPortTypeColor, normalizeType, resolveCanonicalTypeMeta, type DomainP
 import type { ExposedPort } from '../../types.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getGroupPortDisplayLabel, getVisibleGroupPorts, sortGroupPorts } from './groupViewUtils.js'
+import { TooltipPortal, useNodeTooltip, useNodeValueFormatters } from './nodeTooltip.js'
 import './GroupBoundaryNode.css'
 
 /** Floating port-type picker: lists the core + domain types, mounted to body. */
@@ -150,6 +151,29 @@ const GroupBoundaryNode = memo(function GroupBoundaryNode({
     })
   }, [isInput, currentGroup, fallbackPorts])
 
+  // Port value tooltip. The inner view's run-time aliasing writes each shell
+  // port's live value into nodeOutputs under this shell node's id (external input
+  // on the input shell, the group's exposed output on the output shell), so the
+  // shell can faithfully show the data flowing through each exposed port.
+  const { tooltip, showImmediate, hide } = useNodeTooltip(1000, 400)
+  const { formatPortValue, formatPortValueExtra } = useNodeValueFormatters()
+  const showPortValueTooltip = useCallback((e: React.MouseEvent, port: ExposedPort) => {
+    const val = usePipelineStore.getState().nodeOutputs[id]?.[port.portName]
+    const canonical = normalizeType(port.portType)
+    const label = isInput ? 'input:' : 'output:'
+    const valueLine = val !== undefined
+      ? { label, text: formatPortValue(val), extra: formatPortValueExtra(val) }
+      : { label, text: en ? 'no value' : '暂无数据', muted: true as const }
+    showImmediate({
+      x: e.clientX + 16,
+      y: e.clientY - 8,
+      title: getGroupPortDisplayLabel(port, en),
+      subtitle: canonical.charAt(0).toUpperCase() + canonical.slice(1),
+      subtitleColor: getPortTypeColor(port.portType, domainPortTypes),
+      valueLine,
+    })
+  }, [id, isInput, en, showImmediate, formatPortValue, formatPortValueExtra, domainPortTypes])
+
   const [editingPort, setEditingPort] = useState<string | null>(null)
   const [labelDraft, setLabelDraft] = useState('')
   const [typeMenu, setTypeMenu] = useState<{ portName: string; portType: string; x: number; y: number } | null>(null)
@@ -260,6 +284,8 @@ const GroupBoundaryNode = memo(function GroupBoundaryNode({
               key={port.portName}
               className={`group-boundary-node__port nodrag`}
               onMouseDown={(e) => e.stopPropagation()}
+              onMouseEnter={(e) => showPortValueTooltip(e, port)}
+              onMouseLeave={hide}
               onContextMenu={editable ? (e) => openTypeMenu(e, port) : undefined}
               onDragOver={editable ? (e) => {
                 if (draggingRef.current) { dragOverRef.current = port.portName; e.preventDefault() }
@@ -357,6 +383,8 @@ const GroupBoundaryNode = memo(function GroupBoundaryNode({
           onClose={() => setTypeMenu(null)}
         />
       )}
+
+      {tooltip && <TooltipPortal tooltip={tooltip} />}
     </div>
   )
 })

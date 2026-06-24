@@ -93,7 +93,59 @@ async function runWalk(
 ): Promise<ExecutionResult> {
   const startedAt = Date.now()
   const pipelineId = runtime.config.pipelineId
+  // In-memory output cache that feeds DOWNSTREAM inputs during this run. It is
+  // NOT the result payload — entries are evicted the moment every in-closure
+  // consumer has run (see `releaseProduced`), so peak memory is bounded to the
+  // live working set instead of the sum of every node's output. The durable
+  // copy lives in the on-disk output cache (`runtime.outputs`), which is also
+  // what boundary/cold reads fall back to.
   const produced = new Map<string, Record<string, unknown>>()
+  // The result payload echoed back to the caller for instant preview apply.
+  // Only SMALL port values are inlined here; large (sharded) outputs are
+  // omitted so the response never rebuilds a multi-hundred-MB JSON string —
+  // the client re-fetches those lazily from the output cache.
+  const resultOutputs: Record<string, Record<string, unknown>> = {}
+
+  // Reference counts for `produced` eviction: how many distinct in-closure
+  // consumer nodes still need to read each producer's cached output. Boundary
+  // (out-of-closure) consumers are excluded — they read from disk, not memory.
+  const inClosure = new Set(closure.sorted)
+  const producersByConsumer = new Map<string, Set<string>>()
+  const consumersRemaining = new Map<string, number>()
+  {
+    const counted = new Set<string>()
+    for (const e of closure.edges) {
+      const p = e.source.nodeId
+      const c = e.target.nodeId
+      if (!inClosure.has(p) || !inClosure.has(c)) continue
+      let set = producersByConsumer.get(c)
+      if (!set) {
+        set = new Set<string>()
+        producersByConsumer.set(c, set)
+      }
+      set.add(p)
+      const key = `${p}\u0000${c}`
+      if (!counted.has(key)) {
+        counted.add(key)
+        consumersRemaining.set(p, (consumersRemaining.get(p) ?? 0) + 1)
+      }
+    }
+  }
+  // Called after a node finishes: drop any upstream producer whose last
+  // consumer just ran, and drop the node itself if it is a closure sink. The
+  // freed values become eligible for GC immediately rather than at run end.
+  const releaseProduced = (consumerId: string): void => {
+    const producers = producersByConsumer.get(consumerId)
+    if (producers) {
+      for (const p of producers) {
+        const n = (consumersRemaining.get(p) ?? 0) - 1
+        consumersRemaining.set(p, n)
+        if (n <= 0) produced.delete(p)
+      }
+    }
+    if ((consumersRemaining.get(consumerId) ?? 0) <= 0) produced.delete(consumerId)
+  }
+
   const baseCtx: ExecutionContext = { pipelineId, log: () => {}, signal }
   // Generic seam: a host may enrich the context (e.g. inject `services`) via RuntimeConfig.createExecutionContext. Default = base context unchanged.
   const ctx: ExecutionContext = runtime.config.createExecutionContext
@@ -111,7 +163,7 @@ async function runWalk(
   ): ExecutionResult => ({
     executionId,
     status,
-    outputs: Object.fromEntries(produced),
+    outputs: resultOutputs,
     ...(error ? { error } : {}),
     durationMs: Date.now() - startedAt,
   })
@@ -141,7 +193,11 @@ async function runWalk(
           if (entry?.data !== undefined) cached[out.name] = entry.data
         }
         produced.set(nodeId, cached)
+        // Cached manualTrigger outputs are tiny refs (e.g. image ids), safe to
+        // echo back for fast preview apply.
+        resultOutputs[nodeId] = { ...cached }
         bus.emit({ kind: 'exec:node:skipped', pipelineId, executionId, nodeId, reason: 'manualTrigger' })
+        releaseProduced(nodeId)
         continue
       }
 
@@ -199,6 +255,28 @@ async function runWalk(
         // visiting-set cycle detection.
         outputs = await executeGroupSubgraph(group, inputs, runtime.registry, ctx, {
           getNestedGroup: (gid) => graphFile.groups?.[gid],
+          // Persist EVERY inner node's real output (at every nesting level —
+          // onInnerResult fires per inner node of this group and recurses into
+          // child groups) into the same output cache top-level nodes use. Inner
+          // node ids are globally unique, so the editor's internal view can read
+          // back the actual last-run values per inner port — no separate re-run.
+          // A group otherwise discards these intermediates (black box). Cold /
+          // never-run ports simply stay absent (faithfully empty). image_gen &
+          // other manualTrigger inner nodes are hydrated by executeGroupSubgraph
+          // from their cached `_gen_*`, so what we persist is their last cached
+          // result, never a re-trigger.
+          onInnerResult: ({ innerNodeId, opId, outputs: innerOutputs }) => {
+            for (const [portId, value] of Object.entries(innerOutputs)) {
+              if (value === undefined) continue
+              runtime.outputs.write(innerNodeId, portId, {
+                valid: true,
+                executedAt: new Date().toISOString(),
+                executedHash,
+                type: portTypeOf(runtime.registry, opId, portId),
+                data: value,
+              })
+            }
+          },
         })
       } else {
         const inference = resolveConnectionInference(runtime.registry, node, allNodesById, closure.edges)
@@ -212,18 +290,26 @@ async function runWalk(
       }
 
       produced.set(nodeId, outputs)
+      const resultPorts: Record<string, unknown> = {}
       for (const [portId, value] of Object.entries(outputs)) {
         if (value === undefined) continue
         const outputType = groupOutputTypeByPort?.get(portId) ?? portTypeOf(runtime.registry, node.opId, portId)
-        runtime.outputs.write(nodeId, portId, {
+        const large = runtime.outputs.write(nodeId, portId, {
           valid: true,
           executedAt: new Date().toISOString(),
           executedHash,
           type: outputType,
           data: value,
         })
+        // Inline only small values in the response; large (sharded) outputs are
+        // omitted so the HTTP body never rebuilds a giant string — the client
+        // re-fetches them from the output cache (the trailing exec:completed
+        // fan-out already does this).
+        if (!large) resultPorts[portId] = value
         bus.emit({ kind: 'exec:node:output', pipelineId, nodeId, portId, outputType })
       }
+      resultOutputs[nodeId] = resultPorts
+      releaseProduced(nodeId)
     }
 
     bus.emit({ kind: 'exec:completed', pipelineId, executionId })

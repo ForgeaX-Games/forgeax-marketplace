@@ -31,7 +31,7 @@
 //
 // Non-DataTreeEntry array payloads (rare) fall back to per-element sharding.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { OutputCacheV1 } from './types.js'
@@ -42,6 +42,15 @@ import type { OutputCacheV1 } from './types.js'
 // each *chunk* (one item) staying far below the limit, which it does because a
 // single scene-tree item is sub-MB in practice.
 const INLINE_DATA_MAX_BYTES = 32 * 1024 * 1024
+
+// The cache is machine-read JSON (never hand-edited), so it is written COMPACT
+// (no pretty-print indentation). A `voxel-mass` payload is a flat list of
+// occupied cells `{x,y,z,token}`; pretty-printing exploded each cell across ~6
+// deeply-indented lines — measured at 141 bytes/cell vs 34 bytes compact, a
+// ~4.1× blow-up on outputs with millions of cells. Compact also roughly
+// quarters the transient string built by JSON.stringify, easing the memory
+// spike that was tipping the (already memory-saturated) backend into OOM.
+const stringifyEntry = (entry: OutputCacheV1): string => JSON.stringify(entry)
 
 /** One sharded unit: a single item tagged with its branch path so read can regroup entries. */
 interface DataChunk {
@@ -68,6 +77,13 @@ function isDataTreeEntry(v: unknown): v is { path: number[]; items: unknown[] } 
   )
 }
 
+export interface OutputCacheMeta {
+  executedHash: string
+  valid: boolean
+  sharded: boolean
+  dataChunks?: number
+}
+
 export class OutputCache {
   constructor(private readonly root: string) {}
 
@@ -84,6 +100,42 @@ export class OutputCache {
   /** Absolute path to the directory holding sharded `data` chunks (large array payloads). */
   private dataChunkDir(nodeId: string, portId: string): string {
     return join(this.root, nodeId, `${portId}.data`)
+  }
+
+  /**
+   * List every port id that has a cached `.json` entry for a node. Used to read
+   * back whatever a node actually produced without knowing its (possibly dynamic)
+   * output port set in advance. Returns [] when the node has no cache directory.
+   */
+  listPorts(nodeId: string): string[] {
+    const dir = join(this.root, nodeId)
+    if (!existsSync(dir)) return []
+    try {
+      return readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => f.slice(0, -'.json'.length))
+    } catch {
+      return []
+    }
+  }
+
+  /** Read metadata only — no shard reassembly (cheap for refresh skip checks). */
+  readMeta(nodeId: string, portId: string): OutputCacheMeta | null {
+    const p = this.jsonPath(nodeId, portId)
+    if (!existsSync(p)) return null
+    try {
+      const parsed = JSON.parse(readFileSync(p, 'utf-8')) as OutputCacheV1
+      if (parsed.schemaVersion !== 1) return null
+      const sharded = typeof parsed.dataChunks === 'number' && parsed.dataChunks >= 0
+      return {
+        executedHash: parsed.executedHash,
+        valid: parsed.valid,
+        sharded,
+        ...(sharded ? { dataChunks: parsed.dataChunks } : {}),
+      }
+    } catch {
+      return null
+    }
   }
 
   /** Read one cached entry. Returns null when missing or invalid JSON. */
@@ -137,8 +189,18 @@ export class OutputCache {
     return out
   }
 
-  /** Write a cached entry. Inline JSON when small, sibling .bin when binary, sharded chunks when huge. */
-  write(nodeId: string, portId: string, entry: Omit<OutputCacheV1, 'schemaVersion'>, binPayload?: Buffer): void {
+  /**
+   * Write a cached entry. Inline JSON when small, sibling .bin when binary,
+   * sharded chunks when huge.
+   *
+   * Returns `true` when the payload was "large" — sharded or binary — and
+   * `false` when it inlined as a small value. Callers (the executor) use this
+   * to decide whether to also echo the value back in an HTTP response: a large
+   * value must NOT be serialized into the execute response (it would rebuild
+   * the same multi-hundred-MB string this sharding exists to avoid), so the
+   * client re-fetches it lazily from the cache instead.
+   */
+  write(nodeId: string, portId: string, entry: Omit<OutputCacheV1, 'schemaVersion'>, binPayload?: Buffer): boolean {
     const dir = join(this.root, nodeId)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
@@ -153,8 +215,8 @@ export class OutputCache {
       finalEntry.binFile = `${portId}.bin`
       delete (finalEntry as { data?: unknown }).data
       writeFileSync(this.binPath(nodeId, portId), binPayload)
-      writeFileSync(this.jsonPath(nodeId, portId), JSON.stringify(finalEntry, null, 2), 'utf-8')
-      return
+      writeFileSync(this.jsonPath(nodeId, portId), stringifyEntry(finalEntry), 'utf-8')
+      return true
     }
 
     // Shard only array payloads (the wire shape is DataTreeEntry[]). A non-array
@@ -167,11 +229,12 @@ export class OutputCache {
       finalEntry.dataChunks = chunkCount
       // The metadata file carries no inline `data`, so this stringify is tiny
       // and can never hit the single-string limit.
-      writeFileSync(this.jsonPath(nodeId, portId), JSON.stringify(finalEntry, null, 2), 'utf-8')
-      return
+      writeFileSync(this.jsonPath(nodeId, portId), stringifyEntry(finalEntry), 'utf-8')
+      return true
     }
 
-    writeFileSync(this.jsonPath(nodeId, portId), JSON.stringify(finalEntry, null, 2), 'utf-8')
+    writeFileSync(this.jsonPath(nodeId, portId), stringifyEntry(finalEntry), 'utf-8')
+    return false
   }
 
   /**

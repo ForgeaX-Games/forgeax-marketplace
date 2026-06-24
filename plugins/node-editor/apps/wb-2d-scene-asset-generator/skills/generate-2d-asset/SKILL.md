@@ -1,79 +1,177 @@
 ---
 name: generate-2d-asset
 description: >-
-  Generate 2D scene assets in the ForgeaX 2D Scene Asset Generator (wb-2d-scene-asset-generator)
-  by composing pipelines of batteries over the Studio ToolRegistry (asset2d:*). Covers three
-  distinct flows: PART A — single object asset DEFAULT DUAL OUTPUT (sprite + collision_mask via
-  second ImageGen + CutByMask; prompt → ImageGen → RemoveBG → PixelFix → PixelScale → output,
-  plus maskPrompt → ImageGen(512, ref=sprite) → CutByMask → same PixelScale → name_mask);
-  PART B — tileset core flow; PART C — whole-building decorative texture only. First clarify
-  the request, then build the graph and run each ImageGen node exactly once (PART A = two ImageGens).
+  Generate 2D scene assets in the ForgeaX 2D Scene Asset Generator
+  (wb-2d-scene-asset-generator) by OPERATING PREBUILT TEMPLATE BATTERIES
+  (composite/group batteries) over the Studio ToolRegistry (asset2d:*). Each
+  flow is ONE template group with stable exposed in_N/out_N ports and an
+  external Run button per inner image_gen. The agent does NOT hand-wire
+  individual batteries anymore: it discovers a template in the library via
+  asset2d:templates.list, places it on the canvas itself via
+  asset2d:groups.instantiateTemplate (returns the runtime groupId + ports — no
+  human drag needed), reads the inner image_gen Run targets via
+  asset2d:groups.get, feeds the exposed inputs, triggers each inner image_gen
+  via asset2d:generation.generateImage, then asset2d:pipeline.execute and reads
+  the exposed outputs. Five templates: asset_generation (物体贴图+碰撞),
+  conceptual_scene_design (场景实景图), dechouse_gen (装饰房屋), tile_gen (地形瓦片),
+  ui_item_gen (背包/UI 图标). First clarify the request, then operate the template.
 trigger: /generate-2d-asset
 ---
 
-# 生成 2D 资产（节点图管线）· 入口与路由
+# 生成 2D 资产（模板电池）· 入口与路由
 
-> **PART A 默认双产出**：每个 object 贴图任务**必须**同时产出 `{name}` + `{name}_mask`，除非用户明确不要。见 [part-a-single-asset.md 顶部铁律](executions/part-a-single-asset.md)。
+在「2D 场景资产生成器」（wb-2d-scene-asset-generator）里，**每套流程 = 一个模板电池
+（组合/成组电池 group）**，它对外暴露稳定的 `in_N`/`out_N` 端口，并为内部每个 `image_gen`
+映射出一个外侧 **Run 按钮**。你（AI）**不再手搭单个电池**——而是：**从库里实例化模板组 → 喂暴露入参 →
+逐个触发内部 image_gen → 执行 → 读暴露产出**。这与人在画布上「拖入模板 + 连端口 + 点 Run」**走完全相同的
+后端路径**，只是人走前端、你走 `asset2d:*` API——**画布是空的你自己用 `groups.instantiateTemplate`
+把模板放上去，不必等人拖入**。
 
-在「2D 场景资产生成器」（wb-2d-scene-asset-generator）里，通过**摆放电池 + 连线 + 运行**
-产出 2D 资产。所有操作走 Studio ToolRegistry 工具（`asset2d:*`），不要手改
-`state/graph.json`，不要点 UI 模拟人工。
-
-> **本文件只负责路由 + 每个部分的要点提要。** 拿到需求先**判断走哪套流程**，再打开对应的
-> execution 文件按步骤执行；动手前与执行中遇到的通用规则查「注意事项」。**无论哪个 PART，
-> 都先问清需求，再搭管线并运行。**
+> **本文件 = 路由 + 通用操作流程 + 铁律。** 拿到需求先**判断走哪个模板**，再打开对应子文档看该模板的
+> 端口与要点；通用操作步骤与防呆看本文件。**无论哪个模板，都先问清需求，再操作。**
 
 ---
 
-## 一、选哪套流程（路由表）
+## 一、选哪个模板（路由表）
 
-| 你要做的 | 走哪个 PART | 打开 |
+| 你要做的 | 模板 | 子文档 |
 |---|---|---|
-| 单个物件 / 贴图 / 图标 / UI 件（文生图或图生图，可选抠图/缩放） | **PART A · 单个资产生成** | [executions/part-a-single-asset.md](executions/part-a-single-asset.md) |
-| **可无缝平铺的地形瓦片 / Wang-Autotile atlas**（先生大块纹理图，再提取→无缝化→合成 atlas→重命名） | **PART B · Tile 生成核心流程** | [executions/part-b-tileset.md](executions/part-b-tileset.md) |
-| **指定形状/轮廓的整栋装饰房屋贴图**（单张 object；房顶/footprint 掩码 → HouseTemplate 灰度底图 → ImageGen） | **PART C · 指定形状的房屋生成** | [executions/part-c-shaped-house.md](executions/part-c-shaped-house.md) |
+| 单个物件 / 贴图（文生图或图生图，默认同出**物体贴图 + 底部碰撞 mask + 放置几何**） | **asset_generation** | [templates/asset_generation.md](templates/asset_generation.md) |
+| 一张**完整游戏场景实景图**（给后续美术对齐像素颗粒度/配色/光照的基准图） | **conceptual_scene_design** | [templates/conceptual_scene_design.md](templates/conceptual_scene_design.md) |
+| **指定形状/掩码的整栋装饰房屋贴图**（房顶掩码 → 灰度底图 → 图生图，同出底面碰撞） | **dechouse_gen** | [templates/dechouse_gen.md](templates/dechouse_gen.md) |
+| **可无缝平铺的地形瓦片 / Autotile atlas**（大块纹理 → 提取 → 合成 atlas） | **tile_gen** | [templates/tile_gen.md](templates/tile_gen.md) |
+| **背包物品 / UI 图标**（按 name/label/level/… + 参考图生成纯底像素图标） | **ui_item_gen** | [templates/ui_item_gen.md](templates/ui_item_gen.md) |
 
-> PART C = **整栋建筑一张贴图**，与场景模板组「结构化盖楼（内置墙材）」是两条线。只有用户明确要 billboard 级整栋贴图时才路由到 PART C；否则 object → A，tile → B，场景建筑 → compose + 内置素材。
-## 二、各 PART 要点提要（先看摘要，再进 execution 文件）
+> **端口名（`in_N`/`out_N`）是稳定的**（随模板固化、实例化不变），各端口含义已在对应子文档列明——
+> **照子文档掌握「端口含义 + 喂什么」即可，无需逐实例去读对外端口列表**。
+> 只有 **`groupId`（连线目标，从 `groups.instantiateTemplate` 的返回值取）与 `runButtons` 里内部
+> image_gen 的 `nodeId`（触发用，从 `asset2d:groups.get` 取）是运行时值**，**不要硬编、也不要抄模板
+> JSON 里的旧 id**。
 
-### PART A · 单个资产生成 → [executions/part-a-single-asset.md](executions/part-a-single-asset.md)
-- **阶段一问清**：生成什么 / 文生图还是图生图 / 长宽比·像素风还是写实·抠图 / 是否批量（**只问比例不问像素尺寸**）。
-- **默认双产出**：**物体贴图 + 底部碰撞 mask**（`xxx` 与 `xxx_mask`），同抠图轮廓、同最终像素尺寸；用户明确不要 mask 时才省略旁路。
-- **阶段二搭图**：主链 `text_panel`→`image_gen`→`image_remove_bg`→（像素风）`image_pixel_fix`→`image_pixel_scale`→`image_output`；
-  旁路 `maskPrompt`→`image_gen`（参考=物体图、`imageSize=512`）→`image_cut_by_mask`（mask←主链 RemoveBG.mask）→**`image_remove_wireframe`**→`image_pixel_scale`（**共用缩放参数**）→`image_output`（`name=xxx_mask`）。
-  **放置几何**：`image_object_geometry` → 审查 → 重试 genMask（≤4 次）→ **仍不理想则人工近似 geometry** → `publishToGame`。
-  **像素风走 PixelFix→PixelScale，不再用 `image_resize`。**
-- **核心动作**：**两个** `image_gen` 各 `generateImage` 一次（**先物体、后 mask**），**再** `pipeline.execute` 跑下游。
+---
 
-### PART B · Tile 生成核心流程 → [executions/part-b-tileset.md](executions/part-b-tileset.md)
-- **三步走**：①生图（大面积目标纹理，不抠图）→ ②`image_terrain_extract` →（可选 `make_seamless_moisan`）
-  → `image_atlas_compose`（**只需接 terrain**）→ ③重命名入库。
-- **关键约束**：AtlasCompose 的 `template` 端口**默认内置**——标准 tile（`common_16` / 64×80）**不接 template 端口**即可，
-  **别去 `assets.list` 找模版 alias、别建模版 image_source**；只有换其它 rule/mask 时才接自定义 4×N 模版。
-  MakeSeamless 是**可选增强**（compose 内部已自平铺）。
-- op 速查 / 最小可跑图见 [tile-pipeline.md](tile-pipeline.md)。
+## 二、模板在哪儿
 
-### PART C · 指定形状的房屋生成 → [executions/part-c-shaped-house.md](executions/part-c-shaped-house.md)
-- **默认产出像素图**。**四步走**：①`house_template`（**普通电池，靠 execute**；装饰房先定**平/坡屋顶**落到 `roofType`）把房顶掩码 JSON 渲成灰度形状模版 ＋
-  `house_footprint`（**同一份掩码＋同一 height**，默认一并输出建筑底面黑白图）＋ `grid_json_to_size`（**同一份掩码**）算出目标像素宽高 →
-  ②写**强约束提示词**（**两条硬约束：严格遵守灰度图形状 + 纯色背景**）→
-  ③图生图（**默认单灰度图直连 `image_gen.image`**；仅当用户要把某张参考图风格严格迁移到灰度图上，才加该锚图、双图 **merge 成一路**）→
-  ④`image_pixel_fix → image_pixel_scale`，把 `grid_json_to_size.width/height` 接进 PixelScale 的 `width/height`、**`lock_aspect=false`** 锁死目标尺寸；`house_footprint.image` 旁路 `image_preview → image_output` 入库。
-- **"形状没跟"头号根因**：①提示词太软（要 `完全一致/EXACTLY/不得增删延伸、白=空`，且点名房顶∶墙面∶门比例照灰度图）；
-  ②双图分支没 merge —— 后端只读 `image_gen.image` 一条进边，两张各连一条边只生效第一张。
+五个模板电池随插件发布，存放在本仓：
+`apps/wb-2d-scene-asset-generator/batteries/templates/pipelines/`
 
-## 三、注意事项（通用规则 / 防呆，随时查）
-
-| 内容 | 文件 |
+| 目录 | 模板 |
 |---|---|
-| 公共底座 + 三 PART 防呆清单（applyBatch、触发语义、入库命名、各 PART 专属防呆） | [notes/common-base.md](notes/common-base.md) |
-| applyBatch / op 写法 + 图结构 + 最小可跑图 | [pipeline-schema.md](pipeline-schema.md) |
-| 电池速查（op id / 端口 / 参数；含 tile 链、house 链） | [battery-catalog.md](battery-catalog.md) |
-| Tile 链 op 速查 / 数据流 / 最小可跑图 | [tile-pipeline.md](tile-pipeline.md) |
+| `(pixel)asset_gen/` | asset_generation |
+| `(pixel)conceptual_scene_design/` | conceptual_scene_design |
+| `(pixel)dechouse_gen/` | dechouse_gen |
+| `(pixel)tile_gen/` | tile_gen |
+| `(pixel)UI_item_gen/` | ui_item_gen |
 
-**最常踩的三条铁律**（详见 [notes/common-base.md](notes/common-base.md)）：
+它们在编辑器左侧「**Templates**」栏可见。**你（AI）用 `asset2d:templates.list` 列出库里这些模板、用
+`asset2d:groups.instantiateTemplate` 自己把目标模板放上画布**（一步落地一个组合电池节点，返回运行时
+`groupId` 与稳定 `in_N`/`out_N` 端口），无需等人拖入。`templateId` 用 `templates.list` 返回的
+`id` 或文件 basename。**AI 不凭空造模板**——只实例化库里已有的这五套。
 
-1. **op id / 端口名只从 `batteries.list` / `batteries.get` 取**，别凭记忆编。
-2. **先生图、后跑下游**：每个 `image_gen` 必须先 `generateImage`（缓存有值），再 `pipeline.execute`；
-   `image_gen` 是 `manualTrigger` 数据边界，execute 不会替你触发它，**每节点只点一次**。
-3. **每次 `applyBatch` 后立刻 `pipeline.get`** 确认 `nodes` 真变了（防"ok 却空"陷阱）。
+---
+
+## 三、通用操作流程（所有模板共用）
+
+### 0. 开/选项目
+`asset2d:projects.list` / `asset2d:projects.open`（没有就 `projects.create`）。
+
+### 1. 把模板放上画布，拿 groupId 与 run 目标
+
+先看画布上是否已有目标模板（用户可能已拖入）：
+```json
+{ "toolId": "asset2d:groups.list", "args": {}, "caller": { "kind": "ai" } }
+```
+**没有就自己实例化**（这一步替代「等人拖入」）：先 `asset2d:templates.list` 找到目标模板的 `templateId`，再
+```json
+{ "toolId": "asset2d:groups.instantiateTemplate",
+  "args": { "templateId": "<id 或 basename>", "position": { "x": 0, "y": 0 } },
+  "caller": { "kind": "ai" } }
+```
+返回里拿 **`groupId`（连线目标）** 与稳定的 `exposedInputs`/`exposedOutputs`（应与子文档一致）。
+然后用 `asset2d:groups.get({ id: <groupId> })` 取 **`runButtons`**（组内每个 image_gen 一个
+`{ nodeId, opId, kind:"image"|"text" }`，即触发目标的真实 nodeId）。
+> 端口名照子文档（稳定）；只有 `groupId`（从 instantiate 返回取）、`runButtons.nodeId`（从 `groups.get` 取）是实例运行时值。
+> 一次只实例化/操作**一个**模板组；同一模板可重复实例化，每次返回全新 `groupId`，连线一律用最新返回的那个。
+
+### 2. 喂入参（照子文档的 `in_N` 连线）
+打开该模板的子文档，照表把常量电池连到 **`<groupId>.in_N`**（走 `asset2d:pipeline.applyBatch`）：
+
+| 端口类型 | 用什么电池 | 手填字段 | connect 的 source.port |
+|---|---|---|---|
+| `string` | `text_panel` | `params.text` | **`output`** |
+| `number` | `number_const` | `params.value` | **`value`** |
+| `boolean` | `toggle` | `params.value` | **`value`** |
+| `image`（参考图） | `image_source` | `params.image`/`alias` | **`image`** |
+
+```jsonc
+// 例：把场景名喂给 conceptual_scene_design 的 scene_name（子文档标明 = in_5）
+{"type":"createNode","nodeId":"p_name","opId":"text_panel","position":{"x":-2800,"y":0},"params":{"text":"林间空地"}}
+{"type":"connect","edgeId":"e_name","source":{"nodeId":"p_name","port":"output"},"target":{"nodeId":"<groupId>","port":"in_5"}}
+```
+
+- **下拉端口**（子文档标「下拉」，如 tile_gen 的 `tile`、dechouse_gen 的 `roofType`）：是 `string` 端口，连一个 `text_panel`（`params.text` 填某个合法选项值）即可。
+- **参考图端口是可选的**：不接 = **文生图**（合法，image_gen 不会因此被跳过；之前"整组 execute 几毫秒空转"是用错了 execute、不是缺参考图）。要图生图时参考图 `image_source` 通常由用户从 generated asset 面板拖入画布生成；没有就用 `asset2d:assets.list` 找已有 alias 再建。
+- **每次 `applyBatch` 后立刻 `asset2d:pipeline.get` 复核** `nodes`/`edges` 真变了（防"ok 却空"）。
+- 仅当 `connect` 报某 `in_N` 不存在时，才用 `asset2d:groups.get` 核对当前端口名。
+
+### 3. 先跑一遍管线（**生图前必做**：预热上游缓存）
+**喂完参数、触发生图之前，必须先 `execute({})` 跑一遍整图**：
+```json
+{ "toolId": "asset2d:pipeline.execute", "args": {}, "caller": { "kind": "ai" } }
+```
+- 这一遍把第 2 步喂进的常量（item_name/width/height…）真正算出来、写进上游输出缓存。`generation.generateImage` 是按**缓存里的已算上游**解析 image_gen 的 `prompt`/`image`/`imageSize` 的；**不先跑这遍，缓存是空的 → 生图会拿到空参数/空参考图**。
+- 这遍里 `image_gen` 作为 manualTrigger 被跳过、**不出图**（正常，出图是下一步的事）。
+
+### 4. 触发生图 —— 唯一入口是 `generation.generateImage({ nodeId })`
+
+> **这一步就是"点 Run 按钮"那个动作。** 组内 `image_gen` 是 `manualTrigger` 节点，它**只能**被
+> `asset2d:generation.generateImage` 按 `nodeId` 发动——这条工具 = 等价于人在前端点该节点的外侧 Run。
+> **`pipeline.execute` 永远不会、也无法触发生图（见下方死路表）。** 别去找什么 `runNode`/`triggerRunButton`，
+> 没有别的触发 op，就是这一条。
+
+对第 1 步 `groups.get` 拿到的 `runButtons` 里**每个** image_gen 各调**一次**：
+```json
+{ "toolId": "asset2d:generation.generateImage", "args": { "nodeId": "<runButton.nodeId>" }, "caller": { "kind": "ai" } }
+```
+- 传**组内 image_gen 的真实 nodeId**（来自 `runButtons[].nodeId`）。后端会按组内连线**跨组边界**解析该节点的
+  `prompt`/`image`/`imageSize`（即第 2 步喂进 `in_N` 的常量），生成后回写到该组的暴露输出缓存——与人点外侧 Run **完全等价**。返回 `{ data: { image, asset } }` 即成功。
+- **多个 image_gen 必须串行、严格一个一个来**：**等上一张真正返回成功再触发下一个**。绝不并发/连点——下游 gen 常以上游 gen 的产出作参考图，上一张没生完就点下一张会拿到空输入而失败。
+- 顺序：先跑不依赖其它 gen 的那颗，再跑以它为参考的那颗（如 `asset_generation` **先贴图、后碰撞**，详见子文档）。
+- 不接参考图就是**文生图**（合法，不会报错）；要图生图再显式带 `images`。
+
+> #### ⛔ 三条死路（别走 —— 这些都**不能**触发生图）
+> | 你可能想这么干 | 实际结果 | 为什么 |
+> |---|---|---|
+> | `pipeline.execute({})` 整图 / `execute({ nodeId: 组 groupId })` | 几毫秒 completed、`out` 的 alias 为空、`ok=false` | `image_gen` 是 manualTrigger 数据边界，**execute 按设计跳过它、不生图**（这不是 bug） |
+> | `pipeline.execute({ nodeId: 组内 image_gen })` | `target node not found` | 组把内部节点收编了，顶层 execute **寻址不到组内节点**（按设计） |
+> | 自己在顶层另建一个裸 `image_gen` 去 execute | 同样 `{}` 空转 | 还是 manualTrigger 短路；且这是**手搭电池、违反铁律 6** |
+>
+> 以上"空转/找不到"**都不是缺工具，而是用错了工具**——生图永远走 `generation.generateImage({ nodeId })`。
+> （注意区分：`execute({})` **该跑**——第 3 步预热、第 5 步后处理都要它；只是它**永不出图**，别指望用它代替 `generateImage`。）
+
+### 5. 再跑一遍管线（生图**全部完成之后**跑后处理，且**不带组内 nodeId**）
+**确认第 4 步每个 image_gen 都已 `generateImage` 成功之后**，**再 `execute({})` 跑第二遍**：
+```json
+{ "toolId": "asset2d:pipeline.execute", "args": {}, "caller": { "kind": "ai" } }
+```
+- **`args` 留空 `{}`（整图）**，把折叠组当黑盒驱动：内部后处理（抠图/像素修复/缩放/合成/入库等）跑完，结果汇到暴露 `out_N`。
+- **绝不要给 `execute` 传组内节点的 nodeId**（会 `target node not found`）。execute 的职责只有"跑后处理"，不负责生图。
+- `image_gen` 是数据边界，execute **不会替你重新生图**；没先做第 4 步就跑这遍 = `out` 全空。
+
+> **整体节奏（务必照此顺序）：** 喂参数 → **`execute({})` 预热** → 逐个 `generateImage({nodeId})` 生图 → **`execute({})` 跑后处理** → 读 `out_N`。**生图前后各跑一遍管线**，缺了前一遍生图拿空参数、缺了后一遍后处理不汇出。
+
+### 6. 读产出 / 入库 / 发布
+- 从 execute 摘要或该组 `out_N`（`image`/`collision`/`geometry_json`/`error`）读结果。
+- 内部 `image_output` 已按 `item_name`/`name` 入库；`asset2d:assets.list` / `asset2d:preview.latest` / `asset2d:preview.selectAsset` 查看与核对。
+- 需要进游戏沙箱：`asset2d:publishToGame`（object 传 `geometryJson`+`anchorX/Y`；tile 传 `autotileKind`）。
+
+---
+
+## 四、铁律（防呆，随时查）
+
+1. **端口名 `in_N`/`out_N` 稳定、照子文档用**；**`groupId` 从 `groups.instantiateTemplate` 返回（或已在画布上则从 `groups.list`）取、`runButtons.nodeId` 从 `groups.get` 取**——都是运行时值，**绝不硬编、不抄模板 JSON 旧 id**。同模板重复实例化每次返回新 `groupId`，连线只用最新那个。
+2. **生图唯一入口 = `generation.generateImage({ nodeId })`**（= 点 Run）；**`pipeline.execute` 既不能、也不会触发生图**（manualTrigger 边界被跳过；组内节点顶层寻址不到 → `target node not found`）。**生图前后各跑一遍管线**，顺序固定：**`execute({})` 预热 → 对每个 image_gen 各 `generateImage` 一次（成功）→ `execute({})` 跑后处理**。不先预热则生图拿空参数；用 execute 硬触发或找 `runNode` 都没用。
+3. **每个 image_gen 只点一次，且多个 gen 必须串行**：`generateImage` 写入输出缓存且是数据边界，`execute` 不会重触发；重复点 = 重复生成、重复耗额度。**有多个 gen 时一定要等上一张生成成功后再点下一张**——不可并发/连点，否则下游 gen 拿不到上游参考图会失败。
+4. **每次 `applyBatch` 后立刻 `pipeline.get`** 确认图真变了（"ok 却空"陷阱）。并发防覆盖：`pipeline.get` 的 `hash` 写入 `opts.expectedPrevHash` 再提交。
+5. **只喂未 `hidden` 的暴露端口**；参考图来自用户拖入的 `image_source`，AI 不凭空造图。
+6. **优先用 `groups.instantiateTemplate` 落模板**（自动重映射内部 id、稳定端口），**不要**用 `pipeline.applyBatch` 手拼 createNode+connect+createGroup 去展开模板、也不要抄模板 JSON 里的旧 id。**库里查不到目标模板（`templates.list` 没有）才如实上报能力缺口**，不要自己编 op id 或手搭电池绕过模板。

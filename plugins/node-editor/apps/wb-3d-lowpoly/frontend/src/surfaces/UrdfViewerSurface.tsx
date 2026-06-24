@@ -12,7 +12,7 @@ import ViewerCanvas from './urdf/components/ViewerCanvas'
 import SidePanel from './urdf/components/SidePanel'
 import { useViewerStore } from './urdf/store/viewerStore'
 import { useUrdfLiveSync } from './urdf/useUrdfLiveSync'
-import { exportAnimatedGlbBlob } from './urdf/viewer3d/export-glb'
+import { exportAnimatedGlbBlob, exportStaticGlbBlob } from './urdf/viewer3d/export-glb'
 import { captureFrameToBlob } from './urdf/viewer3d/capture-frame'
 import { applyLinkHighlight } from './urdf/viewer3d/selection-highlight'
 import { cloneObject3DForExport, disposeObject3D } from './urdf/viewer3d/three-dispose'
@@ -24,7 +24,7 @@ import './urdf/UrdfViewerSurface.css'
 
 const EDITOR_SELECTION_MESSAGE = 'workbench:editor-selection'
 
-type ExportFormat = 'obj' | 'glb' | 'urdf'
+type ExportFormat = 'obj' | 'glb' | 'glb-static' | 'urdf'
 
 export interface UrdfViewerSurfaceProps {
   /** Live-sync transport. Wired in a later task; unused for now. */
@@ -147,8 +147,13 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
   // highlight. A `g_part` node's `id` param becomes a `<link name>`; an orphan
   // shape becomes `<id>_link`. We try both. Depends on `spec` so a freshly
   // loaded model re-applies the current selection to its new meshes.
+  // Monotonic generation guard: each effect run claims the next number, and the
+  // async resolution only applies if it is still the latest. This prevents a
+  // slow node-fetch from an earlier selection (or earlier `spec`) clobbering the
+  // highlight of a newer one when several runs overlap.
+  const highlightGenRef = useRef(0)
   useEffect(() => {
-    let cancelled = false
+    const gen = ++highlightGenRef.current
     const root = getExportObject()
     if (selectedNodeIds.length === 0) {
       applyLinkHighlight(root, new Set())
@@ -172,11 +177,10 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
           }
         }),
       )
-      if (cancelled) return
+      if (highlightGenRef.current !== gen) return
       applyLinkHighlight(getExportObject(), names)
       invalidate()
     })()
-    return () => { cancelled = true }
   }, [selectedNodeIds, client, spec, getExportObject, invalidate])
 
   // Reusable capture seam: grab the live renderer canvas and turn the current
@@ -234,13 +238,16 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
           return
         }
 
-        if (!spec) throw new Error('No URDF spec available for GLB export')
+        // 静态版只导出几何 + 材质（不需要 spec）；动画版烘关节预览轨迹（需要 spec）。
+        // 文件名带 `-static` 后缀避免覆盖动画版。
+        const animated = format === 'glb'
+        if (animated && !spec) throw new Error('No URDF spec available for GLB export')
         await saveGeneratedBlob(
-          `${baseName}.glb`,
-          'Binary glTF',
+          `${baseName}${animated ? '' : '-static'}.glb`,
+          animated ? 'Binary glTF (animated)' : 'Binary glTF (static)',
           'model/gltf-binary',
           'glb',
-          () => exportAnimatedGlbBlob(exportRoot, spec),
+          () => (animated ? exportAnimatedGlbBlob(exportRoot, spec!) : exportStaticGlbBlob(exportRoot)),
         )
       } finally {
         // 导出克隆是 root.clone(true) 的临时副本（geometry/material 在 GLB/OBJ

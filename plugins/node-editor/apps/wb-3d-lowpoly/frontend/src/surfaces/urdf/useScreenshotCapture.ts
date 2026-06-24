@@ -37,15 +37,31 @@ export function useScreenshotCapture(accessors: ScreenshotCaptureAccessors): voi
       }
       if (msg.event !== 'screenshot:request' || !msg.payload?.captureId) return
       const captureId = msg.payload.captureId
+      // Report a renderer-side failure to /store so the awaiting /capture rejects
+      // immediately instead of silently timing out (504) after the full window.
+      const reportError = (reason: string): void => {
+        void fetch('/api/v1/agent/screenshot/store', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ captureId, error: reason }),
+        })
+      }
       const { renderFrame, getFrameCanvas, captureContactSheet } = accessorsRef.current
       // Prefer the orthographic 4-view contact sheet; fall back to a single live
       // frame if the sheet can't be composed (e.g. scene empty / pre-mount).
       renderFrame()
       const canvas = captureContactSheet() ?? getFrameCanvas()
-      if (!canvas) return
+      if (!canvas) {
+        reportError('no canvas available (scene empty or viewer not mounted)')
+        return
+      }
       canvas.toBlob((blob) => {
-        if (!blob) return
+        if (!blob) {
+          reportError('canvas.toBlob returned null')
+          return
+        }
         const reader = new FileReader()
+        reader.onerror = () => reportError('failed to encode screenshot blob')
         reader.onloadend = () => {
           void fetch('/api/v1/agent/screenshot/store', {
             method: 'POST',

@@ -16,39 +16,29 @@
 import type { OpBuilder, BakeableShape, OpContext } from '../types.js';
 import { BakerError } from '../errors.js';
 import { csgCut, csgFuse } from '../csg_helpers.js';
+import {
+  boxFloor,
+  centeredBox as boxCentered,
+  drawingFromPoints,
+  type ClosedDrawing,
+} from '../op_helpers.js';
 import { optionalNumber, optionalString, requireNumber, requireNumList } from '../arg_readers.js';
 import type { Arg } from '../shared-types.js';
 
 // ── 公共助手 ─────────────────────────────────────────────────────────
-
-/** makeBaseBox：X/Y 居中、Z∈[0, h]（底面落在 Z=0）。 */
-function boxFloor(ctx: OpContext, w: number, d: number, h: number): BakeableShape {
-  return ctx.replicad.makeBaseBox(w, d, h) as BakeableShape;
-}
-
-/** 全轴居中盒：X/Y 居中、Z∈[-h/2, h/2]。 */
-function boxCentered(ctx: OpContext, w: number, d: number, h: number): BakeableShape {
-  return ctx.replicad.makeBaseBox(w, d, h).translateZ(-h / 2) as BakeableShape;
-}
-
-type ClosedDrawing = ReturnType<ReturnType<OpContext['replicad']['draw']>['close']>;
-
-function drawingFromPoints(ctx: OpContext, pts: Array<readonly [number, number]>): ClosedDrawing {
-  if (pts.length < 3) throw new BakerError('architecture: profile needs >=3 points');
-  const pen = ctx.replicad.draw([pts[0][0], pts[0][1]]);
-  for (let i = 1; i < pts.length; i++) pen.lineTo([pts[i][0], pts[i][1]]);
-  return pen.close();
-}
 
 type SolidSketch = { extrude: (h: number) => BakeableShape };
 type LoftSketch = { loftWith: (s: unknown[], cfg?: { ruled?: boolean }) => BakeableShape };
 
 /** 把 shape 在 X/Y 居中、并把 Z 最小值落到 0（屋脊棱柱的拉伸方向因平面法向而异，统一兜底）。 */
 function recenterXYToFloor(shape: BakeableShape): BakeableShape {
-  const [min, max] = shape.boundingBox.bounds;
+  // OCCT bbox 是手动管理内存的 WASM 对象 —— 读完即释放，避免泄漏。
+  const bbox = shape.boundingBox;
+  const [min, max] = bbox.bounds;
   const cx = (min[0] + max[0]) / 2;
   const cy = (min[1] + max[1]) / 2;
   const minZ = min[2];
+  (bbox as { delete?: () => void }).delete?.();
   if (Math.abs(cx) < 1e-9 && Math.abs(cy) < 1e-9 && Math.abs(minZ) < 1e-9) return shape;
   return shape.translate(-cx, -cy, -minZ) as BakeableShape;
 }
@@ -193,15 +183,20 @@ export const stairs: OpBuilder = (ctx, args) => {
     return shape;
   }
 
-  let shape: BakeableShape | null = null;
+  // 直梯：把锯齿截面（每级一个踢面+踏面）在 XZ 平面画成闭合多段线，沿 Y 拉伸成单一 shape。
+  // 旧实现逐级累积叠高盒体（高度 = riser×(i+1)）再 csgFuse，OCCT 布尔会把它退化成实心斜块；
+  // 改用拉伸的台阶截面后是干净的低面数台阶，且无布尔运算。
+  const totalRun = run * stepCount;
+  const profile: Array<readonly [number, number]> = [[0, 0]];
   for (let i = 0; i < stepCount; i++) {
-    const stepH = riser * (i + 1);
-    // 第 i 级：X∈[i*run, (i+1)*run]，Y 居中，Z∈[0, stepH]
-    const step = boxFloor(ctx, run, width, stepH).translate(i * run + run / 2, 0, 0) as BakeableShape;
-    shape = shape === null ? step : csgFuse(shape, step);
+    const z = riser * (i + 1);
+    profile.push([i * run, z]);        // 踢面：竖直上升
+    profile.push([(i + 1) * run, z]);  // 踏面：水平外伸
   }
-  if (shape === null) throw new BakerError('stairs: produced no steps');
-  return shape;
+  profile.push([totalRun, 0]);          // 沿背面竖直回到底面，闭合
+  // X∈[0, totalRun]、Y 居中、Z∈[0, totalRise]（与旧直梯的原点约定一致）。
+  const sketch = drawingFromPoints(ctx, profile).sketchOnPlane('XZ', -width / 2) as unknown as SolidSketch;
+  return sketch.extrude(width);
 };
 
 // ── roof ────────────────────────────────────────────────────────────
@@ -211,7 +206,8 @@ export const stairs: OpBuilder = (ctx, args) => {
 export const roof: OpBuilder = (ctx, args) => {
   const [w, d] = requireNumList(args, 'footprint', 2, 'roof');
   const type = optionalString(args, 'type', 'gable');
-  const overhang = optionalNumber(args, 'overhang', 0);
+  // 默认出檐对齐 g_facade/g_roof 电池默认值（0.3），避免 DSL 省略 overhang 时与电池行为不一致。
+  const overhang = optionalNumber(args, 'overhang', 0.3);
   if (w <= 0 || d <= 0) throw new BakerError('roof: footprint must be positive');
   if (overhang < 0) throw new BakerError('roof: overhang must be >= 0');
 
@@ -303,19 +299,20 @@ export const facadePanel: OpBuilder = (ctx, args) => {
     throw new BakerError('facade_panel: panel_size and thickness must be positive');
   }
 
-  let shape = boxCentered(ctx, w, h, thickness);
+  // 贴地约定（与墙/楼板一致）：底面落在 Z=0，Z∈[0, thickness]。
+  let shape = boxFloor(ctx, w, h, thickness);
 
   if (grooveCount > 0) {
     if (grooveDepth <= 0 || grooveDepth >= thickness) {
       throw new BakerError('facade_panel: groove_depth must be in (0, thickness)');
     }
     if (grooveWidth <= 0) throw new BakerError('facade_panel: groove_width must be positive');
-    // 在 h 方向均匀排 grooveCount 条横槽，切在 +Z 面
+    // 在 h 方向均匀排 grooveCount 条横槽，切在 +Z 面（顶面 Z=thickness）
     const span = h - grooveWidth;
     for (let i = 1; i <= grooveCount; i++) {
       const y = -span / 2 + (span * i) / (grooveCount + 1);
       const groove = boxCentered(ctx, w + 0.002, grooveWidth, grooveDepth * 2)
-        .translate(0, y, thickness / 2) as BakeableShape;
+        .translate(0, y, thickness) as BakeableShape;
       shape = csgCut(shape, groove);
     }
   }

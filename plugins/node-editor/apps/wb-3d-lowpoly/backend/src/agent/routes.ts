@@ -60,14 +60,36 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
     broadcastToClients({ event: 'screenshot:request', payload: { captureId } })
     try {
       return persistForAgent(await promise)
-    } catch {
-      return reply.code(504).send({ error: 'capture timeout (no renderer connected?)' })
+    } catch (e) {
+      // A renderer-reported failure (empty scene / encode error) rejects fast with
+      // its own reason; only a genuine no-reply hits the timeout message.
+      const reason = (e as Error).message
+      const msg = reason && reason !== 'timeout'
+        ? `capture failed: ${reason}`
+        : 'capture timeout (no renderer connected?)'
+      return reply.code(504).send({ error: msg })
     }
   })
 
   app.post('/api/v1/agent/screenshot/store', { bodyLimit: 20 * 1024 * 1024 }, async (req) => {
-    const b = req.body as { captureId: string; dataUrl: string; width: number; height: number }
-    const ok = svc.resolveCapture(b.captureId, { ...b, capturedAt: new Date().toISOString() })
+    const b = req.body as { captureId: string; dataUrl?: string; width?: number; height?: number; error?: string }
+    // The renderer POSTs an `error` when it can't produce a frame, so the awaiting
+    // /capture fails fast instead of waiting for the timeout.
+    if (b.error) {
+      const ok = svc.rejectCapture(b.captureId, b.error)
+      return { ok: false, rejected: ok }
+    }
+    if (typeof b.dataUrl !== 'string') {
+      svc.rejectCapture(b.captureId, 'missing dataUrl')
+      return { ok: false }
+    }
+    const ok = svc.resolveCapture(b.captureId, {
+      captureId: b.captureId,
+      dataUrl: b.dataUrl,
+      width: b.width ?? 0,
+      height: b.height ?? 0,
+      capturedAt: new Date().toISOString(),
+    })
     return { ok }
   })
 

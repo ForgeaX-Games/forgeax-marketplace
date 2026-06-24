@@ -31,7 +31,7 @@ import type { DrawMode } from '../../../types'
 import { collectCells, cullOccluded, painterSort, type PainterSortOverride } from './collect'
 import { buildLayerAssetBindings } from './bindings'
 import { buildCellBuckets } from './incrementalBake'
-import { objectSpriteAnchorDepthY, objectSpriteGridRect, paintCell } from './paintCell'
+import { objectSpriteAnchorDepthY, objectSpriteGridRect, objectFootprintAnchorPoint, objectFootprintContainScale, objectVoxelBottomFootprint, paintCell } from './paintCell'
 import type {
   VoxelLayerInput, BuildVoxelMasterOpts, VoxelMaster, LayerAssetBinding, CollectedCell,
   IncrementalBakeState,
@@ -66,7 +66,18 @@ export function buildVoxelMaster(
   const cellSize = pickMasterCellSize(assetByLayer)
   const objectGroups = collectObjectInstanceGroups(visible, assetByLayer)
   const objectColumnCells = new Set<CollectedCell>()
+  const objectAnchorPointByLayer = new Map<number, { x: number; y: number }>()
+  const objectFootprintScaleByLayer = new Map<number, number>()
   for (const group of objectGroups) {
+    objectAnchorPointByLayer.set(group.anchor.layerIdx, objectFootprintAnchorPoint(group.cells))
+    const binding = assetByLayer?.get(group.anchor.layerIdx)
+    const img = binding ? getOrLoadImage(binding.imgUrl) : null
+    if (binding && img) {
+      objectFootprintScaleByLayer.set(
+        group.anchor.layerIdx,
+        objectFootprintContainScale(objectVoxelBottomFootprint(group.cells), binding.match, img),
+      )
+    }
     for (const cell of group.cells) {
       if (cell !== group.anchor) objectColumnCells.add(cell)
     }
@@ -104,7 +115,17 @@ export function buildVoxelMaster(
     : undefined
   for (const c of visible) {
     if (objectColumnCells.has(c)) continue
-    paintCell(ctx, c, bbox, cellSize, opts.drawMode, assetByLayer, collected.coordsByLayerIdx, capture)
+    const binding = assetByLayer?.get(c.layerIdx)
+    const objectAnchor = binding && !binding.match.tileType
+      ? objectAnchorPointByLayer.get(c.layerIdx)
+      : undefined
+    const objectScale = binding && !binding.match.tileType
+      ? objectFootprintScaleByLayer.get(c.layerIdx)
+      : undefined
+    paintCell(
+      ctx, c, bbox, cellSize, opts.drawMode, assetByLayer, collected.coordsByLayerIdx, capture,
+      objectAnchor, objectScale,
+    )
   }
 
   // Attach an incremental snapshot so subsequent additive paints can dirty-region
@@ -124,6 +145,8 @@ export function buildVoxelMaster(
     coordsByLayerIdx: collected.coordsByLayerIdx,
     objectColumnCells: objectColumnCells.size > 0 ? objectColumnCells : undefined,
     objectBoundsByCell: objectVisuals.boundsByCell.size > 0 ? objectVisuals.boundsByCell : undefined,
+    objectAnchorPointByLayer: objectAnchorPointByLayer.size > 0 ? objectAnchorPointByLayer : undefined,
+    objectFootprintScaleByLayer: objectFootprintScaleByLayer.size > 0 ? objectFootprintScaleByLayer : undefined,
     cellBuckets: buildCellBuckets(visible),
   }
   return { canvas, bbox, incremental }
@@ -142,22 +165,21 @@ function collectObjectInstanceGroups(
   assetByLayer: Map<number, LayerAssetBinding | null> | null,
 ): ObjectInstanceGroup[] {
   if (!assetByLayer) return []
-  const grouped = new Map<string, CollectedCell[]>()
+  // One renderer layer = one object instance (scene voxel-mass or painted column).
+  const byLayer = new Map<number, CollectedCell[]>()
   for (const cell of visible) {
     const binding = assetByLayer.get(cell.layerIdx)
     if (!binding || binding.match.tileType) continue
-    const instanceId = objectInstanceId(cell.state)
-    if (!instanceId) continue
-    const key = `${cell.layerIdx}:${instanceId}`
-    const cells = grouped.get(key)
-    if (cells) cells.push(cell)
-    else grouped.set(key, [cell])
+    const bucket = byLayer.get(cell.layerIdx)
+    if (bucket) bucket.push(cell)
+    else byLayer.set(cell.layerIdx, [cell])
   }
   const out: ObjectInstanceGroup[] = []
-  for (const [key, cells] of grouped) {
+  for (const [layerIdx, cells] of byLayer) {
+    if (cells.length === 0) continue
     const anchor = chooseObjectAnchor(cells)
     out.push({
-      instanceId: key,
+      instanceId: `layer:${layerIdx}`,
       anchor,
       cells,
       footprintDepthY: Math.max(...cells.map((c) => c.y)),
@@ -167,20 +189,25 @@ function collectObjectInstanceGroups(
   return out
 }
 
-function objectInstanceId(state: Record<string, unknown> | undefined): string | null {
-  return typeof state?.instanceId === 'string' && state.instanceId.length > 0 ? state.instanceId : null
-}
-
 function chooseObjectAnchor(cells: CollectedCell[]): CollectedCell {
   const explicit = cells.find((cell) => cell.state?.role === 'anchor')
   if (explicit) return explicit
-  return cells.slice().sort((a, b) => {
-    const adz = typeof a.state?.columnDz === 'number' ? a.state.columnDz : a.z
-    const bdz = typeof b.state?.columnDz === 'number' ? b.state.columnDz : b.z
-    if (adz !== bdz) return adz - bdz
-    const ady = typeof a.state?.footprintDy === 'number' ? a.state.footprintDy : a.y
-    const bdy = typeof b.state?.footprintDy === 'number' ? b.state.footprintDy : b.y
-    if (ady !== bdy) return bdy - ady
+  return chooseLayerFootprintAnchor(cells)
+}
+
+/** Bottom-face front row of the layer footprint (camera-facing foot contact cell). */
+function chooseLayerFootprintAnchor(cells: CollectedCell[]): CollectedCell {
+  const minZ = Math.min(...cells.map((c) => c.z))
+  const bottom = cells.filter((c) => c.z === minZ)
+  const maxY = Math.max(...bottom.map((c) => c.y))
+  const front = bottom.filter((c) => c.y === maxY)
+  const minX = Math.min(...front.map((c) => c.x))
+  const maxX = Math.max(...front.map((c) => c.x))
+  const targetX = (minX + maxX + 1) / 2
+  return front.slice().sort((a, b) => {
+    const da = Math.abs(a.x + 0.5 - targetX)
+    const db = Math.abs(b.x + 0.5 - targetX)
+    if (da !== db) return da - db
     return a.x - b.x
   })[0]!
 }
@@ -228,7 +255,9 @@ function collectObjectVisuals(
     }
     const img = getOrLoadImage(binding.imgUrl)
     if (!img) continue
-    const rect = objectSpriteGridRect(group.anchor, img, binding.match.anchor)
+    const anchorPoint = objectFootprintAnchorPoint(group.cells)
+    const scale = objectFootprintContainScale(objectVoxelBottomFootprint(group.cells), binding.match, img)
+    const rect = objectSpriteGridRect(group.anchor, img, binding.match.anchor, anchorPoint, scale)
     const b: VoxelVisualBoundsLite = {
       minX: rect.x,
       minY: rect.y,
@@ -240,23 +269,6 @@ function collectObjectVisuals(
     boundsByCell.set(group.anchor, b)
   }
 
-  for (const cell of visible) {
-    if (groupedCells.has(cell)) continue
-    const binding = assetByLayer.get(cell.layerIdx)
-    if (!binding || binding.match.tileType) continue
-    const img = getOrLoadImage(binding.imgUrl)
-    if (!img) continue
-    const rect = objectSpriteGridRect(cell, img, binding.match.anchor)
-    const b: VoxelVisualBoundsLite = {
-      minX: rect.x,
-      minY: rect.y,
-      maxX: rect.x + rect.w,
-      maxY: rect.y + rect.h,
-    }
-    bounds.push(b)
-    boundsByCell.set(cell, b)
-    sortOverrides.set(cell, { y: objectSpriteAnchorDepthY(cell) })
-  }
   return { bounds, sortOverrides, boundsByCell }
 }
 

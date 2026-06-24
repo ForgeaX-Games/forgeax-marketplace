@@ -6,11 +6,11 @@
 
 | 场景 | 是否用本电池 |
 |------|----------------|
-| 用户要 **一整张整栋建筑的装饰贴图**（Scene footprint → 2D `house_template` PART C） | ✅ |
-| 日常 **结构化场景构图**（`ArchitectureRegions` + `ArchitectureStructures` + 内置墙材） | ❌ |
-| 一般 **object** / **tile** 贴图（树、道具、地块） | ❌ → PART A / PART B |
+| 要为 **一栋房子/建筑生成贴图/资产**（含手动放的装饰建筑；Scene footprint → 2D PART C `dechouse_gen`） | ✅ **房子默认走这条** |
+| **纯结构化盖楼**用引擎内置墙材渲染、不要单独房子贴图 | ❌ |
+| 小物件 **object** / **tile** 贴图（树、道具、地块） | ❌ → PART A / PART B |
 
-本电池是 **「整栋建筑贴图」专属** 的 Scene 侧第一步，不是通用构图积木。
+本电池是 **房子贴图链** 的 Scene 侧第一步：要给房子出贴图就从这里取占地掩码。
 
 ## 输入
 

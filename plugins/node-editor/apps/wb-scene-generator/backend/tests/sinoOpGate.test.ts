@@ -93,6 +93,15 @@ describe('checkSinoOpAllowlist', () => {
     expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('seed_control')).toBe(true)
     expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('tree_merge')).toBe(true)
     expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('scene_output')).toBe(true)
+    // manual point source for the manualPoint → PointSampleBuilding workflow
+    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('manual_points')).toBe(true)
     expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('alg_random_rect_zone_gen')).toBe(false)
+  })
+
+  it('allows a top-level manual_points createNode (manualPoint placement workflow)', () => {
+    const ops = [
+      { type: 'createNode', nodeId: 'pt', opId: 'manual_points', position: { x: 0, y: 0 }, params: {} },
+    ]
+    expect(checkSinoOpAllowlist(ops)).toBeNull()
   })
 })

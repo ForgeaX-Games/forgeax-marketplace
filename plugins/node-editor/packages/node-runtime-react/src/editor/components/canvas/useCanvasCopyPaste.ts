@@ -7,6 +7,7 @@ import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import type { CanvasFrame, NodeGroup, PipelineEdge } from '../../types.js'
 import { buildGroupNodeData } from './GroupNode.js'
 import { remapGroupIds, resolveEdgeColorFromStore } from './groupViewUtils.js'
+import { readGroupProvenance, writeGroupProvenance } from './groupStatus.js'
 import { RELAY_BATTERY_ID } from './RelayNode.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import type { DomainPortTypes } from '../../utils/portTypes.js'
@@ -172,14 +173,17 @@ export function useCanvasCopyPaste({ nodes, edges, setNodes, setEdges, onUngroup
           if (entry.node.type === 'group' && entry.nodeGroup) {
             const newGroup = remapGroupIds(entry.nodeGroup, newPosition)
             const noop = (_gid: string) => {}
-            const groupRfData = buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop)
+            // Carry the copied shadow's provenance (incl. __groupIsTemplate) so a
+            // pasted template keeps its template styling/locked UI.
+            const srcProvenance = readGroupProvenance(entry.pipelineParams)
+            const groupRfData = buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop, srcProvenance.isTemplate === true)
             const newNode: Node = { ...entry.node, id: newGroup.id, position: newPosition, selected: true, data: groupRfData }
             newNodes.push(newNode)
             groupPasteIds.push(newGroup.id)
             idMap.set(entry.node.id, newGroup.id)
 
             addGroup(newGroup)
-            addNode({ id: newGroup.id, batteryId: '__group__', name: newGroup.name, position: newPosition, params: { groupId: newGroup.id } })
+            addNode({ id: newGroup.id, batteryId: '__group__', name: newGroup.name, position: newPosition, params: writeGroupProvenance({ groupId: newGroup.id }, srcProvenance) })
             continue
           }
 

@@ -7,10 +7,7 @@
  */
 
 import type { ReplicadShape } from './types.js';
-
-function safeDelete(obj: { delete?: () => void } | null | undefined): void {
-  try { obj?.delete?.(); } catch { /* OCCT 对象可能已被回收 */ }
-}
+import { safeDelete } from './op_helpers.js';
 
 export function csgCut(body: ReplicadShape, tool: ReplicadShape): ReplicadShape {
   const result = body.cut(tool);

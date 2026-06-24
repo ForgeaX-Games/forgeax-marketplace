@@ -17,15 +17,8 @@
 import type { OpBuilder, BakeableShape, OpContext } from '../types.js';
 import { BakerError } from '../errors.js';
 import { csgCut, csgFuse } from '../csg_helpers.js';
+import { maybeShiftToZ0 } from '../op_helpers.js';
 import { optionalBool, optionalNumber, optionalString, requireNumber, requireNumList } from '../arg_readers.js';
-import type { Arg } from '../shared-types.js';
-
-// ── 公共助手 ─────────────────────────────────────────────────────────
-
-function maybeShiftToZ0(shape: BakeableShape, height: number, args: Record<string, Arg>): BakeableShape {
-  const center = optionalBool(args, 'center', true);
-  return center ? shape : shape.translateZ(height / 2);
-}
 
 // ── knob 几何 ─────────────────────────────────────────────────────
 

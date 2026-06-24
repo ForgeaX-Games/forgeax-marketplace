@@ -26,9 +26,9 @@ import {
   type SpurGearSpec,
 } from './gear_math.js';
 
-export function safeDelete(obj: { delete?: () => void } | null | undefined): void {
-  try { obj?.delete?.(); } catch { /* noop */ }
-}
+// safeDelete 收敛到共享 op_helpers；这里 re-export 以保持 gears 内部 import 路径不变。
+import { safeDelete } from '../op_helpers.js';
+export { safeDelete };
 
 export function maybeShiftToZ0(shape: BakeableShape, h: number, args: Record<string, Arg>): BakeableShape {
   const center = optionalBool(args, 'center', true);

@@ -20,6 +20,20 @@ import type { NameListEntry, VoxelLayer } from '../types'
 
 type PortSpec = { name: string; type: string }
 
+/** Sharded outputs (tree_merge etc.) are too large to inline-fetch; skip them. */
+async function isShardedOutput(
+  client: HttpApiClient,
+  nodeId: string,
+  port: string,
+): Promise<boolean> {
+  try {
+    const meta = await client.getNodeOutputMeta(nodeId, port)
+    return meta?.sharded === true
+  } catch {
+    return false
+  }
+}
+
 /** A dense 2D grid (`number[][]`): non-empty array whose first row is a number array. */
 function isGrid2D(value: unknown): value is number[][] {
   if (!Array.isArray(value) || value.length === 0) return false
@@ -223,6 +237,7 @@ export function useNodePreviews(client: HttpApiClient): void {
           continue
         }
         for (const port of gridPorts) {
+          if (await isShardedOutput(client, node.id, port.name)) continue
           const raw = await client.getNodeOutput(node.id, port.name)
           if (cancelled) return
           // Declared grid ports: one flattened item == one dense grid. Wider

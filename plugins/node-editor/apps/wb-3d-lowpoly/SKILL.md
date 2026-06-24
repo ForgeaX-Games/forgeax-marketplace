@@ -30,24 +30,25 @@ through Studio ToolRegistry (`/api/tools/call`) tools declared in
 
 `lowpoly:batteries.list` is authoritative (dynamic; includes plugin domain ops
 plus shared node-runtime ops). The plugin ships these geometry families under
-`batteries/3d/` — prefer the richer families over stacking primitives:
+`batteries/<Stage>/<Family>/` — organised by pipeline stage (**Generate →
+Modify → Assemble → Output**). Prefer the richer families over stacking
+primitives:
 
+### Generate
 - **Primitive** — `g_box` `g_cylinder` `g_sphere` `g_cone` `g_capsule` `g_torus`
   `g_dome` `g_mesh`. Use only when the form genuinely is that primitive. `g_mesh`
   takes optional `bbox_min`/`bbox_max` (wired from `g_bake_part`) so a referenced
   mesh resolves an AABB for QC overlap checks.
 - **Profile** — `g_profile_rect` `g_profile_rounded_rect` `g_profile_circle`
   `g_profile_polygon` `g_profile_regular_polygon`. 2D sections for CSG.
-- **CSG** — `g_difference` `g_union` `g_intersection` `g_extrude`
-  `g_extrude_with_holes` `g_loft` `g_revolve` `g_sweep` `g_lathe` `g_pipe`
-  `g_section_loft`. Hollow shells, cuts, recesses, lofted/swept/revolved solids.
-- **Parts** — `g_knob` `g_bezel` `g_wheel` `g_tire` `g_vent_grille`
-  `g_perforated_panel` `g_slot_panel` `g_barrel_hinge` `g_piano_hinge`
-  `g_clevis_bracket` `g_pivot_fork` `g_trunnion_yoke` `g_fan_rotor`
-  `g_blower_wheel`. Semantic mechanical parts.
-- **Gears** — `g_spur_gear` `g_bevel_gear`/`_pair` `g_ring_gear` `g_rack_gear`
-  `g_worm` `g_planetary_gearset` `g_herringbone_*` `g_hyperbolic_*`
-  `g_crossed_*`.
+- **Parts** — semantic mechanical parts **and gears**:
+  `g_knob` `g_bezel` `g_wheel` `g_tire` `g_vent_grille` `g_perforated_panel`
+  `g_slot_panel` `g_barrel_hinge` `g_piano_hinge` `g_clevis_bracket`
+  `g_pivot_fork` `g_trunnion_yoke` `g_fan_rotor` `g_blower_wheel`, plus the 6
+  gear families: **`g_gear`** (one op covering spur / helical / herringbone /
+  hyperbolic via a `tooth_profile` enum), `g_ring_gear`, `g_rack_gear`,
+  `g_planetary_gearset` (each with a `tooth_profile` enum: spur|herringbone,
+  rack adds straight), `g_bevel_gear`, and `g_worm`.
 - **Architecture** — `g_wall` `g_floor_slab` `g_stairs` `g_roof`
   `g_facade_panel` `g_window` `g_door` `g_railing` `g_column` + generator
   `g_building_shell`.
@@ -56,18 +57,40 @@ plus shared node-runtime ops). The plugin ships these geometry families under
   that emit shape→part→fixed-joint subtrees. See **PART B** of the
   `skills/compose-lowpoly/` skill
   (`skills/compose-lowpoly/executions/part-b-building.md`).
+
+### Modify
+- **CSG** — `g_difference` `g_union` `g_intersection` `g_extrude`
+  `g_extrude_with_holes` `g_loft` `g_revolve` `g_sweep` `g_lathe` `g_pipe`
+  `g_section_loft`. Hollow shells, cuts, recesses, lofted/swept/revolved solids.
+  (`g_pipe`/`g_sweep`/`g_section_loft` emit a **mesh**, not a solid — they can't
+  feed a boolean.)
 - **Transform** — `g_translate` `g_rotate` `g_scale` `g_mirror` `g_array_linear`
   `g_array_radial`.
+- **Material** — `g_material` `g_named_color`.
+- **Placement** — `g_align_centers` `g_place_on_face` `g_place_on_surface`.
+
+### Assemble
 - **Assembly** — `g_part` + `g_joint_fixed` `g_joint_revolute`
   `g_joint_prismatic` `g_joint_continuous` `g_joint_planar` `g_joint_floating`
   `g_joint_mimic` `g_joint_on_surface`. Links + joints into one rooted URDF tree.
-- **Utils** — `g_material` `g_named_color` `g_align_centers` `g_place_on_face`
-  `g_place_on_surface` `g_bake_part` `g_collision_box` `g_collision_clustered`
-  `g_auto_collision` `g_inertial_from_geometry` `g_validate` `g_geometry_qc`
-  `g_to_urdf`. `g_bake_part` also returns `bbox_min`/`bbox_max`/`size` (baked mesh
-  local AABB + dimensions in meters) for placement and feeding `g_mesh`. The
-  terminal `g_to_urdf` (URDF emitter + OCCT baker) lives here, not under Preview.
-- **Preview** — `urdf_preview` `g_preview`.
+- **Collision** — `g_collision_box` `g_collision_clustered` `g_auto_collision`
+  `g_inertial_from_geometry`.
+
+### Output
+- **Bake** — `g_bake_part` `g_bake_object`. `g_bake_part` also returns
+  `bbox_min`/`bbox_max`/`size` (baked mesh local AABB + dimensions in meters) for
+  placement and feeding `g_mesh`.
+- **QC** — `g_validate` `g_geometry_qc`.
+- **Export** — `g_to_urdf` (the terminal URDF emitter + OCCT baker; collision
+  defaults to a coarse AABB box proxy for composite/baked meshes), `g_preview`,
+  `urdf_preview`.
+
+> **Gears were consolidated 15 → 6** and the old per-profile battery ids
+> (`g_spur_gear`, `g_herringbone_*`, `g_crossed_*`, `g_hyperbolic_*`, the
+> `*_pair` ops) were **removed** — there is no Legacy palette group. Use `g_gear`
+> + `tooth_profile` (or the parameterized ring/rack/planetary ops) for all gears.
+> The baker still understands every underlying gear DSL op, but graphs saved with
+> a removed battery id must be re-created with `g_gear`.
 
 The end-user modeling guidance lives in the single `skills/compose-lowpoly/`
 skill — an entry/router (`SKILL.md`) over three flows: **PART A · asset /
@@ -78,8 +101,8 @@ brief — `executions/part-b-building.md`); and **PART C · scene assembly** (pl
 already-baked meshes into one URDF tree and export the whole scene to .glb —
 `executions/part-c-scene-assembly.md`). Shared references (modeling-guide,
 battery-catalog, pipeline-schema, quickstart) sit at the skill root. Keep this
-catalogue in sync with the families under `batteries/3d/` when ops are added or
-removed.
+catalogue in sync with the families under `batteries/<Stage>/<Family>/` when ops
+are added or removed — `lowpoly:batteries.list` remains the authoritative SSOT.
 
 ## Domain surfaces
 

@@ -18,6 +18,7 @@ import type { Edge, Node, ReactFlowInstance } from 'reactflow'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { buildGroupNodeData } from './GroupNode.js'
 import { remapGroupIds, resolveEdgeColorFromStore } from './groupViewUtils.js'
+import { readGroupProvenance, writeGroupProvenance } from './groupStatus.js'
 import { RELAY_BATTERY_ID } from './RelayNode.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import type { CanvasFrame, PipelineEdge } from '../../types.js'
@@ -219,6 +220,7 @@ export function useCtrlDragGhost({
             if (!sourceGroup) continue
             const newGroup = remapGroupIds(sourceGroup, newPosition)
             const noop = (_gid: string) => {}
+            const memberProvenance = readGroupProvenance(currentPipeline?.nodes.find((n) => n.id === memberNode.id)?.params)
             idMap.set(memberNode.id, newGroup.id)
             groupCopyIds.push(newGroup.id)
             addGroup(newGroup)
@@ -227,14 +229,14 @@ export function useCtrlDragGhost({
               batteryId: '__group__',
               name: newGroup.name,
               position: newPosition,
-              params: { groupId: newGroup.id },
+              params: writeGroupProvenance({ groupId: newGroup.id }, memberProvenance),
             })
             newNodes.push({
               ...memberNode,
               id: newGroup.id,
               position: newPosition,
               selected: true,
-              data: buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop),
+              data: buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop, memberProvenance.isTemplate === true),
             })
             continue
           }
@@ -344,7 +346,11 @@ export function useCtrlDragGhost({
 
         const newGroup = remapGroupIds(sourceGroup, flowPos)
         const noop = (_gid: string) => {}
-        const groupRfData = buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop)
+        // Carry the source shadow's provenance (incl. __groupIsTemplate) so the
+        // duplicate keeps its template styling/locked UI instead of degrading to
+        // a plain group.
+        const srcProvenance = readGroupProvenance(currentPipeline?.nodes.find((n) => n.id === nodeId)?.params)
+        const groupRfData = buildGroupNodeData(newGroup, onUngroup ?? noop, onEnterGroup ?? noop, srcProvenance.isTemplate === true)
         const newNode: Node = { ...sourceNode, id: newGroup.id, position: flowPos, selected: true, data: groupRfData }
 
         const { currentPipeline: pipelineBeforeCopy } = usePipelineStore.getState()
@@ -357,7 +363,7 @@ export function useCtrlDragGhost({
         }
 
         addGroup(newGroup)
-        addNode({ id: newGroup.id, batteryId: '__group__', name: newGroup.name, position: flowPos, params: { groupId: newGroup.id } })
+        addNode({ id: newGroup.id, batteryId: '__group__', name: newGroup.name, position: flowPos, params: writeGroupProvenance({ groupId: newGroup.id }, srcProvenance) })
         setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode])
 
         setTimeout(() => {

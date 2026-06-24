@@ -8,29 +8,31 @@
 2. **五种样条**：贝塞尔(Chaikin)、自然三次样条、移动平均、高斯、折线扰动；默认高斯。
 3. **独立随机种子**：侵蚀用 `seed`，折线扰动用 `splineSeed`，便于分别复现。
 
+## 数据格式（DataTree）
+
+输入 `inputGrid` 与输出 `outputGrid` 均为 `grid` / `access:item`：本算子每次只处理**单张**网格，网格列表由引擎按 DataTree 自动逐张 fanout 并重组为同形状的输出 DataTree。不再有手写的「单网格或网格列表」打包，也不再产出 `outputNameList`（命名交由下游模板处理）。
+
 ## 输入参数
 
-| 参数名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| inputGrid | grid | — | 输入网格 |
-| targetValue | number | 1 | 目标区域掩码值 |
-| erosionStrength | number | 20 | 大于 1 时按 0~100 百分点；≤1 时为旧版 0~1 强度 |
-| layers | number | 12 | 侵蚀层数 |
-| algorithm | string | cellular | 侵蚀算法：cellular / noise / random_walk |
-| seed | number | 0 | 侵蚀随机种子，0=时间戳 |
-| splineAlgorithm | string | gaussian | bezier / cubic_spline / moving_avg / gaussian / polyline_perturb |
-| splineSmoothness | number | 5 | 样条强度 1~20（与边缘样条化一致） |
-| splineSeed | number | 0 | polyline_perturb 用，0=每次随机 |
-| backgroundId | number | 0 | 样条重绘时背景格值 |
+| 参数名 | 类型 | access | 默认值 | 说明 |
+|--------|------|--------|--------|------|
+| inputGrid | grid | item | — | 输入网格（单张） |
+| targetValue | number | item | 1 | 目标区域掩码值 |
+| erosionStrength | number | item | 20 | 大于 1 时按 0~100 百分点；≤1 时为旧版 0~1 强度 |
+| layers | number | item | 12 | 侵蚀层数 |
+| algorithm | string | item | cellular | 侵蚀算法：cellular / noise / random_walk |
+| seed | number | item | 0 | 侵蚀随机种子，0=时间戳 |
+| splineAlgorithm | string | item | gaussian | bezier / cubic_spline / moving_avg / gaussian / polyline_perturb |
+| splineSmoothness | number | item | 5 | 样条强度 1~20（与边缘样条化一致） |
+| splineSeed | number | item | 0 | polyline_perturb 用，0=每次随机 |
 
 ## 输出参数
 
-| 参数名 | 类型 | 说明 |
-|--------|------|------|
-| outputGrid | grid | 结果网格 |
-| outputPoints | array | 样条后的闭合轮廓点 |
+| 参数名 | 类型 | access | 说明 |
+|--------|------|--------|------|
+| outputGrid | grid | item | 侵蚀并样条平滑后的结果网格（单张） |
 
 ## 注意事项
 
 1. 样条阶段仅追踪**最外层**连通区域边界，行为与「边缘样条化」一致。
-2. 若侵蚀后目标区域过小或消失，样条阶段可能报错「找不到有效区域边界」。
+2. 若侵蚀后目标区域过小或消失，样条阶段回落到侵蚀前的原始网格（保证下游始终拿到一张网格）。

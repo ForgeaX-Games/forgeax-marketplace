@@ -75,7 +75,7 @@ function zAxisAnnulusMesh(
   rInner: number,
   height: number,
   baseZ = -height * 0.5,
-  segments = 48,
+  segments = 16,
 ): MeshGeometry {
   const vertices: Vec3[] = [];
   const faces: Array<readonly [number, number, number]> = [];

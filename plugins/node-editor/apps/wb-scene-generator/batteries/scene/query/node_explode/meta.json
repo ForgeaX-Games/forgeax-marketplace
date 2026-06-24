@@ -98,6 +98,14 @@
       "description-en": "List of (x,y,z) positions of this node's voxels."
     },
     {
+      "name": "2dPoints",
+      "type": "point2d",
+      "access": "list",
+      "label": "2D 投影点",
+      "description": "该节点全部体素的 2D 投影 (x,y) 点列表；丢弃 z 后按 (x,y) 去重，即平面足迹点集。",
+      "description-en": "List of 2D-projected (x,y) points of this node's voxels; z is dropped and points are de-duplicated by (x,y) — the planar footprint."
+    },
+    {
       "name": "tokens",
       "type": "string",
       "access": "list",

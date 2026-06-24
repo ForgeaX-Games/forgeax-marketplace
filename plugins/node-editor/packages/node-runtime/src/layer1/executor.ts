@@ -20,6 +20,46 @@ const RELAY_INPUT_PORT = 'input'
 const RELAY_OUTPUT_PORT = 'output'
 const GROUP_OP_ID = '__group__'
 
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+// Compact, bounded shape descriptor for a wire value (DataTreeEntry[] = [{path,
+// items}]). Surfaces the signals that explain WHY a scene op (e.g. add_child)
+// errors or produces nothing — without ever dumping the full (possibly huge)
+// payload. For scene items it lifts `focus`, the field add_child validates.
+function describeWireItem(item: unknown): string {
+  if (item !== null && typeof item === 'object') {
+    const o = item as Record<string, unknown>
+    if (typeof o.focus === 'string') return `focus="${o.focus}"`
+    return `keys=${Object.keys(o).slice(0, 4).join('|') || '∅'}`
+  }
+  if (typeof item === 'string') return `"${item.slice(0, 32)}"`
+  return String(item)
+}
+
+function describeWireValue(val: unknown): string {
+  if (val === undefined) return 'undefined'
+  if (val === null) return 'null'
+  if (Array.isArray(val)) {
+    let items = 0
+    let sample = ''
+    for (const e of val) {
+      if (e !== null && typeof e === 'object' && Array.isArray((e as { items?: unknown }).items)) {
+        const its = (e as { items: unknown[] }).items
+        items += its.length
+        if (!sample && its.length > 0) sample = describeWireItem(its[0])
+      }
+    }
+    return `entries[${val.length}] items[${items}]${sample ? ` first{${sample}}` : ''}`
+  }
+  if (typeof val === 'object') return 'object'
+  if (typeof val === 'string') return `"${val.slice(0, 32)}"`
+  return String(val)
+}
+
+function summarizeWireInputs(inputs: Record<string, unknown>): string {
+  const parts = Object.entries(inputs).map(([port, val]) => `${port}=${describeWireValue(val)}`)
+  return parts.length > 0 ? parts.join(', ') : '<none>'
+}
+
 // Per-node execution result returned from the executor.
 export interface NodeExecutionResult {
   nodeId: string
@@ -431,7 +471,21 @@ export async function executeGroupSubgraph(
 
     const result = await executeNode(registry, innerNode, innerInputValues, ctx)
     if (result.error) {
-      ctx.log('error', `[Group ${group.id}] Inner node error [${innerNodeId}]: ${result.error}`)
+      // Include the resolved inputs the node received: an inner scene op that
+      // "stops" the chain (add_child et al.) almost always fails because an
+      // upstream port arrived empty/malformed — the input shape pinpoints which.
+      ctx.log(
+        'error',
+        `[Group ${group.id}] Inner node error [${innerNodeId}] op=${innerNode.opId}: ${result.error} | inputs: ${summarizeWireInputs(innerInputValues)}`,
+      )
+    } else {
+      // Per-node trace (gated by FORGEAX_EXEC_DEBUG at the log sink): shows the
+      // full inner data flow so a chain that quietly produces empty downstream
+      // can be traced to the exact node where a port went empty.
+      ctx.log(
+        'debug',
+        `[Group ${group.id}] inner ${innerNodeId} op=${innerNode.opId} inputs: ${summarizeWireInputs(innerInputValues)} → out[${Object.keys(result.outputs).join(',') || '∅'}]`,
+      )
     }
     innerOutputCache[innerNodeId] = result.outputs
     onInnerResult?.({ groupId: group.id, innerNodeId, opId: innerNode.opId, outputs: result.outputs })

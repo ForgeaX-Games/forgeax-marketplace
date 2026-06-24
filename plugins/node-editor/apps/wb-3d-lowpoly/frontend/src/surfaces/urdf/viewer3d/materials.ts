@@ -132,6 +132,8 @@ export function createMaterial(spec: MaterialSpec, options?: {
   transparent?: boolean
   side?: THREE.Side
   depthBias?: number
+  /** 平面/faceted 着色（low-poly 烘焙网格逐面法线，而非平滑插值）。 */
+  flatShading?: boolean
 }): THREE.MeshPhysicalMaterial {
   const transparent = options?.transparent ?? (spec.opacity < 0.999 || spec.transmission > 0.01)
   const side = options?.side ?? THREE.FrontSide
@@ -152,6 +154,7 @@ export function createMaterial(spec: MaterialSpec, options?: {
     depthWrite: !transparent,
     forceSinglePass: transparent,
     wireframe: options?.wireframe ?? false,
+    flatShading: options?.flatShading ?? false,
     side,
     polygonOffset: depthBias !== 0,
     polygonOffsetFactor: 0,

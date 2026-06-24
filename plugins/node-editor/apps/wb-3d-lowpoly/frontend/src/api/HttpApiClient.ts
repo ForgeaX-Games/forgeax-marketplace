@@ -259,6 +259,15 @@ export class HttpApiClient implements ApiClient {
     sock.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data as string) as { event: string; payload: RuntimeEvent }
+        // Battery hot-reload: the backend broadcasts a top-level `ops:changed`
+        // frame (not wrapped as a `runtime` event). Surface it on the 'graph'
+        // channel as a synthetic runtime event so the editor can reload the
+        // palette — otherwise a dev meta/index edit never reaches the catalog.
+        if (msg.event === 'ops:changed') {
+          const opsEvent = { ...(msg.payload ?? {}), kind: 'ops:changed' } as unknown as RuntimeEvent
+          this.listeners.get('graph')?.forEach((l) => l(opsEvent))
+          return
+        }
         if (msg.event !== 'runtime') return
         const kind = (msg.payload as { kind?: string }).kind ?? ''
         const channel: RuntimeChannel = kind.startsWith('exec')

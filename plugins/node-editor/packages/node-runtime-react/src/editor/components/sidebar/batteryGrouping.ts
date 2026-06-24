@@ -37,6 +37,25 @@ export function getTemplateSubfolder(battery: Battery): string {
   return battery.id
 }
 
+/**
+ * 模板电池的「真实小标签」——仅当目录结构为 `templates/{大标签}/{小标签}/{模板}/file.json`
+ * （大标签与模板文件夹之间还夹了一层小标签目录）时返回该小标签；扁平的
+ * `templates/{大标签}/{模板}/file.json`（子目录名即模板名，无独立小标签）返回 null。
+ * 用于让 Templates 模式与 Develop 模式一致地以小标签手风琴分组，同时不把扁平模板
+ * 拆成「每个模板一个同名小标签」的冗余分组。
+ */
+export function getTemplateSmallLabel(battery: Battery): string | null {
+  const sourcePath = (battery as CatalogBattery).sourcePath
+  if (!sourcePath) return null
+  const parts = sourcePath.replace(/\\/g, '/').split('/')
+  const idx = parts.indexOf('templates')
+  if (idx < 0) return null
+  // 模板 json 的所在目录 = parts[length-2]；小标签候选 = parts[idx+2]。
+  // 仅当二者不是同一层（即大标签与模板文件夹之间确有一层小标签）才算有真实小标签。
+  if (parts.length - 2 > idx + 2) return parts[idx + 2]
+  return null
+}
+
 export function getSmallLabel(battery: Battery): string {
   // Batteries group by their on-disk layout "bigTag/smallTag" (category), or by
   // an explicit displayGroup override (templates). The accordion sub-group is the
@@ -63,6 +82,22 @@ export function formatBigLabel(label: string): string {
   if (label === 'ai') return 'AI'
   if (label === 'groups') return 'GROUPS'
   return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+// 已知的流水线阶段大标签顺序（wb-3d-lowpoly）。这些标签按此人工顺序排在最前，
+// 其余大标签 A→Z；其它插件不含这些标签，故不受影响。
+const PIPELINE_STAGE_ORDER = ['Generate', 'Modify', 'Assemble', 'Output']
+
+/** 大标签比较器：已知流水线阶段按 PIPELINE_STAGE_ORDER，其余按 localeCompare。 */
+export function compareBigLabel(a: string, b: string): number {
+  const ia = PIPELINE_STAGE_ORDER.indexOf(a)
+  const ib = PIPELINE_STAGE_ORDER.indexOf(b)
+  if (ia >= 0 || ib >= 0) {
+    if (ia < 0) return 1
+    if (ib < 0) return -1
+    return ia - ib
+  }
+  return a.localeCompare(b)
 }
 
 export function formatBigLabelRailText(label: string): string {

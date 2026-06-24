@@ -339,6 +339,9 @@ export async function imageAtlasCompose(
   input: Record<string, unknown>,
   ctx?: { services?: Record<string, unknown> },
 ): Promise<Record<string, unknown>> {
+  // 总开关：关闭时跳过加工，所有端口返回空（不产生任何输出值）。
+  if (!asBool(input.enable, true)) return {}
+
   const alphaThreshold = asInt(input.alpha_threshold, 127, 0, 255)
   const applyTone = asBool(input.apply_tone, true)
   const refCell = asInt(input.ref_cell, 6, 0, 63)
