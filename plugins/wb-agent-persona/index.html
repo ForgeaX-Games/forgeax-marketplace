@@ -378,13 +378,24 @@ const GROUP_REGISTRY = [
     id: 'art-family',
     kind: 'subagent-family',
     leadShortId: 'iro',
-    memberShortIds: ['mira', 'animator-2d', 'character-designer-2d', 'vfx-artist-3d', 'lowpoly'],
+    memberShortIds: ['animator-2d', 'character-designer-2d', 'vfx-artist-3d', 'lowpoly'],
   },
   {
     id: 'reel-family',
     kind: 'subagent-family',
     leadShortId: 'reia',
     memberShortIds: ['reel-storyboard', 'reel-video', 'reel-visual'],
+  },
+  {
+    // Scene-asset pipeline family — mirrors agent-groups.ts. `director`
+    // (场景总监) leads, delegating to `sino` (场景构图) + `mira` (2D 资产).
+    // Unlike producer-family, `director` is a real agent plugin so it shows
+    // up in /api/bus/plugins?kind=agent — no lead degradation needed.
+    // `mira` moved here out of art-family.
+    id: 'scene-pipeline-family',
+    kind: 'subagent-family',
+    leadShortId: 'director',
+    memberShortIds: ['sino', 'mira'],
   },
 ];
 
