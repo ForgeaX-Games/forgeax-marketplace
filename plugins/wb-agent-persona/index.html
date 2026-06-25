@@ -6,9 +6,12 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg-0: #0d1117; --bg-1: #161b22; --bg-2: #21262d;
+    /* 对齐宿主壳的中性黑阶（packages/interface/src/styles/tokens.css）：
+     * canvas #0D0D0D（最深，与左右两栏一致）/ base #191919 / elevated #242424。
+     * 之前用的是 GitHub 风格带蓝的深色（#0d1117…），跟两侧纯黑面板对不上。 */
+    --bg-0: #0d0d0d; --bg-1: #191919; --bg-2: #242424;
     --text-primary: #e6edf3; --text-secondary: #8b949e; --text-tertiary: #6e7681;
-    --border: #30363d;
+    --border: #333333;
     /* Aligned with main visual: brand lime (#D4FF48, matches
      * --color-brand-primary in packages/interface/src/styles/tokens.css)
      * as the active/primary accent so this iframe matches the host shell. */
