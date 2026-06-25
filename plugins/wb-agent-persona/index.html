@@ -158,15 +158,54 @@
   .mem-files-header { padding: 6px 10px; font-size: 10.5px; text-transform: uppercase;
                       color: var(--text-tertiary); letter-spacing: 0.06em;
                       border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: center; }
-  .mem-files-list { flex: 1; overflow-y: auto; padding: 4px; }
+  .mem-files-list { flex: 1; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+  /* 列表项统一范式：纯文字标签，两栏完全同样式（长宽 / 字体 / hover / active 一致）。 */
   .mem-file {
     width: 100%; text-align: left; background: transparent; border: 1px solid transparent;
-    color: var(--text-secondary); font-size: 12px; padding: 5px 8px; cursor: pointer;
-    border-radius: 3px;
+    color: var(--text-secondary); font-size: 12.5px; font-weight: 500;
+    font-family: inherit; line-height: 1.4;
+    padding: 6px 9px; cursor: pointer; border-radius: 4px;
+    display: block; box-sizing: border-box;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .mem-file:hover { background: var(--bg-2); color: var(--text-primary); }
   .mem-file.active { background: var(--bg-2); color: var(--text-primary); border-color: var(--accent); }
+  /* 用户画像(全局) 与 本 agent 记忆 之间的轻量分隔，独立元素，不影响任一列表项的尺寸/hover。 */
+  .mem-sep { height: 1px; background: var(--border); margin: 5px 6px; flex-shrink: 0; }
   .mem-edit { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+  /* ── 用户画像槽位视图 ── */
+  .slots { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+  .slots-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; padding: 2px 2px 0; }
+  .slots-list { display: flex; flex-direction: column; gap: 8px; }
+  .slot {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 10px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .slot:focus-within { border-color: var(--accent); }
+  .slot-head { display: flex; align-items: center; gap: 8px; }
+  .slot-key {
+    flex: 1; min-width: 0; background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+    font-size: 12px; font-weight: 600; font-family: inherit;
+  }
+  .slot-key:focus { outline: none; border-color: var(--accent); }
+  .slot-del {
+    flex-shrink: 0; background: transparent; border: 1px solid var(--border);
+    color: var(--text-tertiary); border-radius: 4px; padding: 3px 8px;
+    font-size: 11px; cursor: pointer;
+  }
+  .slot-del:hover { border-color: var(--accent-warn); color: var(--accent-warn); }
+  .slot-val {
+    width: 100%; background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;
+    font-size: 12.5px; line-height: 1.5; font-family: inherit; resize: vertical;
+    min-height: 38px; box-sizing: border-box;
+  }
+  .slot-val:focus { outline: none; border-color: var(--accent); }
+  .slot-add { align-self: flex-start; }
+  .btn.ghost { background: transparent; color: var(--text-secondary); }
+  .slots-empty { padding: 18px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
   .new-input {
     background: var(--bg-1); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: 3px;
@@ -251,9 +290,16 @@
         <div class="toolbar">
           <button class="btn primary" id="mem-save" disabled>保存</button>
           <button class="btn" id="mem-reload" disabled>放弃改动</button>
-          <span class="path" id="mem-path"></span>
+          <button class="btn ghost" id="mem-raw-toggle" style="display:none">源码模式</button>
           <span class="status" id="mem-status"></span>
         </div>
+        <!-- 用户画像：结构化槽位视图（默认）。每条画像 = 一个可查看 / 修改的槽位。 -->
+        <div class="slots" id="mem-slots" style="display:none">
+          <div class="slots-hint">关于「你」的长期事实，会作为每个 agent 的开场上下文注入。可直接修改、删除或新增。</div>
+          <div class="slots-list" id="slots-list"></div>
+          <button class="btn slot-add" id="slot-add">＋ 添加一条画像</button>
+        </div>
+        <!-- 普通记忆文件：自由文本编辑器。 -->
         <textarea class="editor" id="mem-editor" spellcheck="false" disabled
                   placeholder="左侧选一个记忆文件，或新建一个 .md..."></textarea>
       </div>
@@ -292,9 +338,58 @@ let personaDirty = false;
 
 // Memory state
 let memFiles = [];
-let memSelected = null;    // filename within memoryDir
-let memOriginal = '';
+let memSelected = null;    // filename within memoryDir, or USER_PROFILE.id
+let memOriginal = '';      // 规范化后的 USER.md 原文(用于 dirty 比较)
 let memDirty = false;
+let memMode = 'text';      // 'slots'(用户画像结构化视图) | 'text'(自由文本)
+
+// 全局用户画像(USER.md)—— 与具体 agent 无关,固定置顶,所有 agent 详情页共享。
+// 由对话自动沉淀(auto-extract),也可在此手动编辑。读写走通用文件 API
+// (safe-path 已白名单 .forgeax/user)。
+const USER_PROFILE = { id: '__user_profile__', label: '用户画像', path: '.forgeax/user/USER.md' };
+
+// USER.md 行格式 = `- **<name>** — <body> <!-- k:<slug> -->`(与后端 user-profile.ts 同源)。
+const PROFILE_HEADER =
+  '# 用户画像\n\n> 由对话自动捕捉 + 可手动编辑。每条按 `key` 去重 upsert(末尾 `<!-- k:... -->` 是去重标记,勿删)。\n';
+const PROFILE_LINE_RE = /^- \*\*(.+?)\*\* — ([\s\S]*?)\s*<!-- k:([^\s]+) -->\s*$/;
+
+/** 与后端 slug() 同源:小写、空白转 -、去非字母数字、截断 48。 */
+function profileSlug(s) {
+  return (
+    (s || '')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\p{L}\p{N}-]+/gu, '')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'fact'
+  );
+}
+
+/** USER.md 文本 → 槽位数组 [{name, body, k}]。 */
+function parseProfile(text) {
+  const out = [];
+  for (const line of (text || '').split('\n')) {
+    const m = line.match(PROFILE_LINE_RE);
+    if (m) out.push({ name: m[1].trim(), body: m[2].trim(), k: m[3] });
+  }
+  return out;
+}
+
+/** 槽位数组 → 规范化 USER.md 文本(按 key 去重 + 排序,与后端 upsert 输出一致)。 */
+function serializeProfile(slots) {
+  const map = new Map();
+  for (const s of slots) {
+    const name = (s.name || '').trim();
+    const body = (s.body || '').replace(/\s*\n+\s*/g, ' ').trim();
+    if (!body) continue;
+    const k = name ? profileSlug(name) : profileSlug(body);
+    map.set(k, { name: name || k, body });
+  }
+  const lines = [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `- **${v.name}** — ${v.body} <!-- k:${k} -->`);
+  return `${PROFILE_HEADER}\n${lines.join('\n')}\n`;
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────
 function shortId(pluginId) { return pluginId.replace(/^@[^/]+\//, ''); }
@@ -598,11 +693,14 @@ async function selectAgent(pluginId) {
   document.getElementById('header-path').textContent = pluginDir(pluginId);
 
   // Reset memory state
-  memFiles = []; memSelected = null; memOriginal = ''; memDirty = false;
+  memFiles = []; memSelected = null; memOriginal = ''; memDirty = false; memMode = 'text';
   document.getElementById('mem-files-list').innerHTML = '';
+  document.getElementById('slots-list').innerHTML = '';
   document.getElementById('mem-editor').value = '';
   document.getElementById('mem-editor').disabled = true;
-  document.getElementById('mem-path').textContent = '';
+  document.getElementById('mem-slots').style.display = 'none';
+  document.getElementById('mem-editor').style.display = '';
+  document.getElementById('mem-raw-toggle').style.display = 'none';
   document.getElementById('mem-save').disabled = true;
   document.getElementById('mem-reload').disabled = true;
   setStatus('mem-status', '');
@@ -685,17 +783,20 @@ document.getElementById('persona-editor').addEventListener('input', () => {
 async function loadMemoryFiles() {
   if (!selectedAgent) return;
   const memDir = memoryDir(selectedAgent);
-  const list = document.getElementById('mem-files-list');
   if (!memDir) {
-    list.innerHTML = '<div class="empty">该 agent manifest 没有声明 memoryDir</div>';
+    // 没有 per-plugin memoryDir 也要能编辑全局用户画像 → 仍渲染置顶项。
+    memFiles = [];
+    renderMemFiles();
+    setStatus('mem-status', '该 agent 未声明 memoryDir（仍可编辑全局用户画像）', '');
     return;
   }
   setStatus('mem-status', '扫描记忆目录…');
   try {
     const r = await fetch(`/api/files/tree?root=${encodeURIComponent(memDir)}`);
     if (!r.ok) {
-      list.innerHTML = `<div class="empty">memoryDir 不存在或不可读: ${r.status}</div>`;
-      setStatus('mem-status', '');
+      memFiles = [];
+      renderMemFiles();
+      setStatus('mem-status', `memoryDir 不存在或不可读: ${r.status}`, '');
       return;
     }
     const body = await r.json();
@@ -706,76 +807,221 @@ async function loadMemoryFiles() {
     renderMemFiles();
     setStatus('mem-status', `${memFiles.length} 个记忆文件`, '');
   } catch (e) {
+    renderMemFiles();
     setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
   }
+}
+
+/** 统一的列表项：纯文字标签，所有项同一范式（长宽/字体/hover 一致）。 */
+function makeMemFileItem(label, name, opts = {}) {
+  const btn = document.createElement('button');
+  btn.className = 'mem-file' + (name === memSelected ? ' active' : '');
+  btn.dataset.name = name;
+  btn.textContent = label;
+  if (opts.title) btn.title = opts.title;
+  btn.addEventListener('click', () => loadMemoryFile(name));
+  return btn;
+}
+
+/** 当前 agent 的短名(取 displayName 在 ·/・ 前的一段),用于"XX 的日记"。 */
+function agentShortName() {
+  if (!selectedAgent) return '该 agent';
+  const full = pickLang(selectedAgent.displayName) || shortId(selectedAgent.id);
+  return full.split(/[·・]/)[0].trim() || full;
+}
+
+/** 记忆文件名 → 友好标签:lessons → "XX 的日记";其余去掉 .md 后缀。 */
+function memFileLabel(name) {
+  const stem = name.replace(/\.md$/i, '');
+  if (stem.toLowerCase() === 'lessons') return `${agentShortName()} 的日记`;
+  return stem;
 }
 
 function renderMemFiles() {
   const list = document.getElementById('mem-files-list');
   list.innerHTML = '';
+  // 全局用户画像固定置顶（与当前 agent 无关），与文件项完全同样式。
+  list.appendChild(
+    makeMemFileItem(USER_PROFILE.label, USER_PROFILE.id, { title: '全局用户画像 · 由对话自动沉淀,可手动编辑' }),
+  );
+  // 轻量分隔(独立元素,不改变任一列表项的尺寸/hover)。
+  const sep = document.createElement('div');
+  sep.className = 'mem-sep';
+  list.appendChild(sep);
+
   if (memFiles.length === 0) {
-    list.innerHTML = '<div class="empty">暂无记忆文件 · 在右上输入文件名 + 号新建</div>';
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '该 agent 暂无独立记忆文件 · 右上输入文件名 + 号新建';
+    list.appendChild(empty);
     return;
   }
   for (const name of memFiles) {
-    const btn = document.createElement('button');
-    btn.className = 'mem-file' + (name === memSelected ? ' active' : '');
-    btn.textContent = name;
-    btn.dataset.name = name;
-    btn.addEventListener('click', () => loadMemoryFile(name));
-    list.appendChild(btn);
+    list.appendChild(makeMemFileItem(memFileLabel(name), name, { title: name }));
   }
 }
 
 async function loadMemoryFile(name) {
-  if (memDirty && !confirm('记忆文件未保存，丢弃改动?')) return;
+  if (memDirty && !confirm('未保存，丢弃改动?')) return;
   if (!selectedAgent) return;
-  const memDir = memoryDir(selectedAgent);
-  if (!memDir) return;
+  const isProfile = name === USER_PROFILE.id;
+  let path;
+  if (isProfile) {
+    path = USER_PROFILE.path;
+  } else {
+    const memDir = memoryDir(selectedAgent);
+    if (!memDir) return;
+    path = `${memDir}/${name}`;
+  }
   memSelected = name;
   renderMemFiles();
-  const path = `${memDir}/${name}`;
-  document.getElementById('mem-path').textContent = path;
   setStatus('mem-status', '加载中…');
   try {
-    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    // 用户画像可能尚未创建 → optional=1，缺文件返回 200 {exists:false}。
+    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}${isProfile ? '&optional=1' : ''}`);
     if (!r.ok) { setStatus('mem-status', `加载失败: ${r.status}`, 'warn'); return; }
     const body = await r.json();
-    const ed = document.getElementById('mem-editor');
-    ed.value = body.content ?? '';
-    ed.disabled = false;
-    memOriginal = ed.value;
-    memDirty = false;
+    const content = body.content ?? '';
     document.getElementById('mem-save').disabled = false;
     document.getElementById('mem-reload').disabled = true;
-    setStatus('mem-status', `已加载 (${ed.value.length} 字符)`, 'ok');
+    memDirty = false;
+
+    if (isProfile) {
+      // 用户画像 → 槽位视图(规范化原文用于 dirty 比较)。
+      const slots = parseProfile(content);
+      memOriginal = serializeProfile(slots);
+      setMemMode('slots');
+      renderSlots(slots);
+      if (body.exists === false) setStatus('mem-status', '尚未创建 · 可直接添加画像后保存', 'ok');
+      else setStatus('mem-status', `${slots.length} 条画像`, 'ok');
+    } else {
+      // 普通记忆文件 → 文本编辑器。
+      const ed = document.getElementById('mem-editor');
+      ed.value = content;
+      ed.disabled = false;
+      memOriginal = content;
+      setMemMode('text');
+      setStatus('mem-status', `已加载 (${content.length} 字符)`, 'ok');
+    }
   } catch (e) {
     setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
   }
 }
 
+/** 切换槽位视图 / 文本视图(并控制源码切换按钮是否可见 —— 仅用户画像可切)。 */
+function setMemMode(mode) {
+  memMode = mode;
+  const slots = document.getElementById('mem-slots');
+  const ed = document.getElementById('mem-editor');
+  const toggle = document.getElementById('mem-raw-toggle');
+  const isProfile = memSelected === USER_PROFILE.id;
+  slots.style.display = mode === 'slots' ? 'flex' : 'none';
+  ed.style.display = mode === 'slots' ? 'none' : '';
+  toggle.style.display = isProfile ? 'inline-block' : 'none';
+  toggle.textContent = mode === 'slots' ? '源码模式' : '槽位模式';
+}
+
+/** 当前编辑内容:用户画像槽位模式从 DOM 序列化;其余(画像源码模式 / 普通文件)取 textarea 原文。 */
+function currentMemContent() {
+  if (memSelected === USER_PROFILE.id && memMode === 'slots') {
+    return serializeProfile(readSlotsFromDom());
+  }
+  return document.getElementById('mem-editor').value;
+}
+
+/** 重新评估 dirty 并刷新「放弃改动」可用态。 */
+function recomputeMemDirty() {
+  memDirty = currentMemContent() !== memOriginal;
+  document.getElementById('mem-reload').disabled = !memDirty;
+}
+
+/** 从 DOM 收集槽位。 */
+function readSlotsFromDom() {
+  return [...document.querySelectorAll('#slots-list .slot')].map((el) => ({
+    name: el.querySelector('.slot-key').value,
+    body: el.querySelector('.slot-val').value,
+    k: el.dataset.k || '',
+  }));
+}
+
+/** 渲染槽位列表。 */
+function renderSlots(slots) {
+  const list = document.getElementById('slots-list');
+  list.innerHTML = '';
+  if (!slots.length) {
+    const empty = document.createElement('div');
+    empty.className = 'slots-empty';
+    empty.textContent = '还没有任何用户画像 · 点下方「添加一条画像」开始';
+    list.appendChild(empty);
+    return;
+  }
+  for (const s of slots) list.appendChild(makeSlot(s));
+}
+
+/** 造一个槽位卡片(key 标题 + value 正文 + 删除)。 */
+function makeSlot(s = { name: '', body: '', k: '' }) {
+  const el = document.createElement('div');
+  el.className = 'slot';
+  if (s.k) el.dataset.k = s.k;
+
+  const head = document.createElement('div');
+  head.className = 'slot-head';
+  const key = document.createElement('input');
+  key.className = 'slot-key';
+  key.value = s.name || '';
+  key.placeholder = '画像名（如 时区 / 语言偏好）';
+  const del = document.createElement('button');
+  del.className = 'slot-del';
+  del.textContent = '删除';
+  del.addEventListener('click', () => { el.remove(); recomputeMemDirty(); });
+  head.append(key, del);
+
+  const val = document.createElement('textarea');
+  val.className = 'slot-val';
+  val.value = s.body || '';
+  val.placeholder = '事实正文（如 Asia/Shanghai (UTC+8)）';
+  val.rows = 1;
+
+  el.append(head, val);
+  el.addEventListener('input', recomputeMemDirty);
+  return el;
+}
+
 async function saveMemory() {
   if (!selectedAgent || !memSelected) return;
-  const memDir = memoryDir(selectedAgent);
-  if (!memDir) return;
-  const path = `${memDir}/${memSelected}`;
-  const ed = document.getElementById('mem-editor');
+  let path;
+  if (memSelected === USER_PROFILE.id) {
+    path = USER_PROFILE.path;
+  } else {
+    const memDir = memoryDir(selectedAgent);
+    if (!memDir) return;
+    path = `${memDir}/${memSelected}`;
+  }
+  const content = currentMemContent();
   setStatus('mem-status', '保存中…');
   try {
     const r = await fetch('/api/files', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, content: ed.value }),
+      body: JSON.stringify({ path, content }),
     });
     if (!r.ok) {
       const err = await r.text().catch(() => '');
       setStatus('mem-status', `保存失败: ${r.status} ${err}`, 'warn');
       return;
     }
-    memOriginal = ed.value;
+    memOriginal = content;
     memDirty = false;
     document.getElementById('mem-reload').disabled = true;
-    setStatus('mem-status', '已保存', 'ok');
+    // 用户画像保存后用规范化结果回填(去重/排序生效，槽位即时反映)。
+    if (memSelected === USER_PROFILE.id) {
+      const slots = parseProfile(content);
+      if (memMode === 'slots') renderSlots(slots);
+      else document.getElementById('mem-editor').value = content;
+      setStatus('mem-status', `已保存 · ${slots.length} 条画像`, 'ok');
+    } else {
+      setStatus('mem-status', '已保存', 'ok');
+    }
   } catch (e) {
     setStatus('mem-status', `保存异常: ${e.message}`, 'warn');
   }
@@ -819,10 +1065,31 @@ document.getElementById('mem-new-btn').addEventListener('click', newMemoryFile);
 document.getElementById('mem-new-name').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); newMemoryFile(); }
 });
-document.getElementById('mem-editor').addEventListener('input', () => {
-  const ed = document.getElementById('mem-editor');
-  memDirty = ed.value !== memOriginal;
-  document.getElementById('mem-reload').disabled = !memDirty;
+document.getElementById('mem-editor').addEventListener('input', recomputeMemDirty);
+
+// 新增一条画像槽位。
+document.getElementById('slot-add').addEventListener('click', () => {
+  const list = document.getElementById('slots-list');
+  const empty = list.querySelector('.slots-empty');
+  if (empty) empty.remove();
+  const el = makeSlot();
+  list.appendChild(el);
+  el.querySelector('.slot-key').focus();
+  recomputeMemDirty();
+});
+
+// 用户画像:槽位 ↔ 源码 双向切换(内容随切换同步,不丢改动)。
+document.getElementById('mem-raw-toggle').addEventListener('click', () => {
+  if (memSelected !== USER_PROFILE.id) return;
+  if (memMode === 'slots') {
+    document.getElementById('mem-editor').value = serializeProfile(readSlotsFromDom());
+    document.getElementById('mem-editor').disabled = false;
+    setMemMode('text');
+  } else {
+    renderSlots(parseProfile(document.getElementById('mem-editor').value));
+    setMemMode('slots');
+  }
+  recomputeMemDirty();
 });
 
 // ─── Skills tab ───────────────────────────────────────────────────────
