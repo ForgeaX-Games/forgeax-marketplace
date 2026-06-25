@@ -14,6 +14,8 @@
       "role": "art",
       "card": {
         "name": { "zh": "Iro", "en": "Iro" },
+        "cnTitle": "美术师",
+        "enTitle": "Art Director",
         "color": "#3FB950",
         "avatar": "🎨"
       },

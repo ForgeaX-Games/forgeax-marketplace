@@ -206,6 +206,29 @@
   .slot-add { align-self: flex-start; }
   .btn.ghost { background: transparent; color: var(--text-secondary); }
   .slots-empty { padding: 18px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
+  /* ── 记忆日记视图（带人设口吻的只读呈现，可切到源码模式编辑） ── */
+  .diary { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+  .diary-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; padding: 2px 2px 0; }
+  .diary-list { display: flex; flex-direction: column; gap: 10px; }
+  .diary-entry {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 11px 13px 11px 15px; position: relative;
+  }
+  .diary-entry::before {
+    content: ''; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
+    background: var(--accent); border-radius: 2px; opacity: 0.55;
+  }
+  .diary-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 6px; flex-wrap: wrap; }
+  .diary-date {
+    font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, monospace;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1px 8px; flex-shrink: 0;
+  }
+  .diary-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .diary-body { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+  .diary-empty { padding: 18px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
   .new-input {
     background: var(--bg-1); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: 3px;
@@ -299,7 +322,12 @@
           <div class="slots-list" id="slots-list"></div>
           <button class="btn slot-add" id="slot-add">＋ 添加一条画像</button>
         </div>
-        <!-- 普通记忆文件：自由文本编辑器。 -->
+        <!-- 普通记忆文件：默认「日记视图」（带人设口吻的只读卡片）。 -->
+        <div class="diary" id="mem-diary" style="display:none">
+          <div class="diary-hint">这是 <span id="diary-owner">该 agent</span> 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。</div>
+          <div class="diary-list" id="diary-list"></div>
+        </div>
+        <!-- 源码模式 / 普通文本编辑器。 -->
         <textarea class="editor" id="mem-editor" spellcheck="false" disabled
                   placeholder="左侧选一个记忆文件，或新建一个 .md..."></textarea>
       </div>
@@ -409,6 +437,13 @@ function pickLang(text) {
   if (!text) return '';
   if (typeof text === 'string') return text;
   return text.zh ?? text.en ?? '';
+}
+
+// 统一命名：title=「中文职能·英文名」，sub=灰字英文职能。server 已算好挂 a.naming，
+// 老 server / 缺字段时退回 displayName。
+function agentNaming(a) {
+  if (a && a.naming && a.naming.title) return a.naming;
+  return { title: pickLang(a && a.displayName), sub: '' };
 }
 
 function setStatus(elId, text, kind) {
@@ -579,10 +614,11 @@ function createAgentItem(a, extraClass) {
   }
 
   const meta = document.createElement('div'); meta.className = 'meta';
+  const nm = agentNaming(a);
   const name = document.createElement('div'); name.className = 'name';
-  name.textContent = pickLang(a.displayName);
+  name.textContent = nm.title;
   const role = document.createElement('div'); role.className = 'role';
-  role.textContent = a.agent?.role ?? '';
+  role.textContent = nm.sub || (a.agent?.role ?? '');
   meta.append(name, role);
   btn.append(av, meta);
   btn.addEventListener('click', () => {
@@ -680,7 +716,7 @@ async function selectAgent(pluginId) {
   }
 
   // Header
-  document.getElementById('title').textContent = selectedAgent ? pickLang(selectedAgent.displayName) : shortId(pluginId);
+  document.getElementById('title').textContent = selectedAgent ? agentNaming(selectedAgent).title : shortId(pluginId);
   const rolePill = document.getElementById('role-pill');
   if (selectedAgent?.agent?.role) {
     rolePill.textContent = selectedAgent.agent.role;
@@ -699,6 +735,8 @@ async function selectAgent(pluginId) {
   document.getElementById('mem-editor').value = '';
   document.getElementById('mem-editor').disabled = true;
   document.getElementById('mem-slots').style.display = 'none';
+  document.getElementById('mem-diary').style.display = 'none';
+  document.getElementById('diary-list').innerHTML = '';
   document.getElementById('mem-editor').style.display = '';
   document.getElementById('mem-raw-toggle').style.display = 'none';
   document.getElementById('mem-save').disabled = true;
@@ -788,6 +826,7 @@ async function loadMemoryFiles() {
     memFiles = [];
     renderMemFiles();
     setStatus('mem-status', '该 agent 未声明 memoryDir（仍可编辑全局用户画像）', '');
+    autoSelectMemory();
     return;
   }
   setStatus('mem-status', '扫描记忆目录…');
@@ -797,6 +836,7 @@ async function loadMemoryFiles() {
       memFiles = [];
       renderMemFiles();
       setStatus('mem-status', `memoryDir 不存在或不可读: ${r.status}`, '');
+      autoSelectMemory();
       return;
     }
     const body = await r.json();
@@ -806,10 +846,20 @@ async function loadMemoryFiles() {
       .map((c) => c.name);
     renderMemFiles();
     setStatus('mem-status', `${memFiles.length} 个记忆文件`, '');
+    autoSelectMemory();
   } catch (e) {
     renderMemFiles();
     setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
   }
+}
+
+/** 打开记忆 tab 时自动选中一条记录，让内容 + 源码切换按钮立刻可见：
+ *  优先选「XX 的日记」(lessons)，否则第一份记忆文件，再否则全局用户画像。 */
+function autoSelectMemory() {
+  if (memSelected) return;
+  const diary = memFiles.find((n) => n.replace(/\.md$/i, '').toLowerCase() === 'lessons');
+  const target = diary || memFiles[0] || USER_PROFILE.id;
+  loadMemoryFile(target);
 }
 
 /** 统一的列表项：纯文字标签，所有项同一范式（长宽/字体/hover 一致）。 */
@@ -823,11 +873,13 @@ function makeMemFileItem(label, name, opts = {}) {
   return btn;
 }
 
-/** 当前 agent 的短名(取 displayName 在 ·/・ 前的一段),用于"XX 的日记"。 */
+/** 当前 agent 的短名(英文名/人名),用于"XX 的日记"。命名是「中文职能·英文名」,
+ *  取 · 之后那段;无人名则退回整段标题。 */
 function agentShortName() {
   if (!selectedAgent) return '该 agent';
-  const full = pickLang(selectedAgent.displayName) || shortId(selectedAgent.id);
-  return full.split(/[·・]/)[0].trim() || full;
+  const title = agentNaming(selectedAgent).title || shortId(selectedAgent.id);
+  const parts = title.split(/[·・]/);
+  return (parts.length > 1 ? parts[parts.length - 1] : parts[0]).trim() || title;
 }
 
 /** 记忆文件名 → 友好标签:lessons → "XX 的日记";其余去掉 .md 后缀。 */
@@ -895,12 +947,14 @@ async function loadMemoryFile(name) {
       if (body.exists === false) setStatus('mem-status', '尚未创建 · 可直接添加画像后保存', 'ok');
       else setStatus('mem-status', `${slots.length} 条画像`, 'ok');
     } else {
-      // 普通记忆文件 → 文本编辑器。
+      // 普通记忆文件 → 默认日记视图（textarea 始终持有源码，供源码模式编辑）。
       const ed = document.getElementById('mem-editor');
       ed.value = content;
       ed.disabled = false;
       memOriginal = content;
-      setMemMode('text');
+      document.getElementById('diary-owner').textContent = agentShortName();
+      renderDiary(content);
+      setMemMode('diary');
       setStatus('mem-status', `已加载 (${content.length} 字符)`, 'ok');
     }
   } catch (e) {
@@ -908,17 +962,20 @@ async function loadMemoryFile(name) {
   }
 }
 
-/** 切换槽位视图 / 文本视图(并控制源码切换按钮是否可见 —— 仅用户画像可切)。 */
+/** 切换结构化视图(slots 画像 / diary 日记) ↔ 源码(text)。任意选中文件都可切。 */
 function setMemMode(mode) {
   memMode = mode;
   const slots = document.getElementById('mem-slots');
+  const diary = document.getElementById('mem-diary');
   const ed = document.getElementById('mem-editor');
   const toggle = document.getElementById('mem-raw-toggle');
   const isProfile = memSelected === USER_PROFILE.id;
   slots.style.display = mode === 'slots' ? 'flex' : 'none';
-  ed.style.display = mode === 'slots' ? 'none' : '';
-  toggle.style.display = isProfile ? 'inline-block' : 'none';
-  toggle.textContent = mode === 'slots' ? '源码模式' : '槽位模式';
+  diary.style.display = mode === 'diary' ? 'flex' : 'none';
+  ed.style.display = mode === 'text' ? '' : 'none';
+  toggle.style.display = memSelected ? 'inline-block' : 'none';
+  if (isProfile) toggle.textContent = mode === 'slots' ? '源码模式' : '槽位模式';
+  else toggle.textContent = mode === 'diary' ? '源码模式' : '日记模式';
 }
 
 /** 当前编辑内容:用户画像槽位模式从 DOM 序列化;其余(画像源码模式 / 普通文件)取 textarea 原文。 */
@@ -987,6 +1044,66 @@ function makeSlot(s = { name: '', body: '', k: '' }) {
   return el;
 }
 
+/** 记忆 markdown → 日记条目。`## 日期 · 标题` 起一条；`# ...` 作整本标题；标题里
+ *  的 ` · ` 拆成 [日期, 标题]（没有就整段当标题）。容忍任意 .md，不强制格式。 */
+function parseDiary(text) {
+  const entries = [];
+  let title = '';
+  let cur = null;
+  const push = () => { if (cur) { cur.body = cur.body.replace(/\s+$/, ''); entries.push(cur); cur = null; } };
+  for (const line of (text || '').split('\n')) {
+    const h2 = line.match(/^#{2,}\s+(.*)$/);
+    const h1 = line.match(/^#\s+(.*)$/);
+    if (h2) {
+      push();
+      const head = h2[1].trim();
+      const seg = head.split(/\s+[·・]\s+/);
+      cur = seg.length > 1
+        ? { date: seg[0].trim(), title: seg.slice(1).join(' · ').trim(), body: '' }
+        : { date: '', title: head, body: '' };
+    } else if (h1) {
+      push();
+      title = h1[1].trim();
+    } else if (cur) {
+      cur.body += (cur.body ? '\n' : '') + line;
+    } else if (line.trim()) {
+      cur = { date: '', title: '', body: line };
+    }
+  }
+  push();
+  return { title, entries };
+}
+
+/** 渲染日记卡片到 #diary-list（只读）。 */
+function renderDiary(text) {
+  const root = document.getElementById('diary-list');
+  root.innerHTML = '';
+  const { entries } = parseDiary(text);
+  if (!entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'diary-empty';
+    empty.textContent = '这本日记还是空的 · 切到「源码模式」写下第一条';
+    root.appendChild(empty);
+    return;
+  }
+  for (const e of entries) {
+    const card = document.createElement('div');
+    card.className = 'diary-entry';
+    if (e.date || e.title) {
+      const head = document.createElement('div');
+      head.className = 'diary-head';
+      if (e.date) { const d = document.createElement('span'); d.className = 'diary-date'; d.textContent = e.date; head.appendChild(d); }
+      if (e.title) { const t = document.createElement('span'); t.className = 'diary-title'; t.textContent = e.title; head.appendChild(t); }
+      card.appendChild(head);
+    }
+    const body = document.createElement('div');
+    body.className = 'diary-body';
+    body.textContent = e.body.trim();
+    card.appendChild(body);
+    root.appendChild(card);
+  }
+}
+
 async function saveMemory() {
   if (!selectedAgent || !memSelected) return;
   let path;
@@ -1020,6 +1137,8 @@ async function saveMemory() {
       else document.getElementById('mem-editor').value = content;
       setStatus('mem-status', `已保存 · ${slots.length} 条画像`, 'ok');
     } else {
+      // 普通记忆:保存后若在日记视图,用新内容重渲染卡片。
+      if (memMode === 'diary') renderDiary(content);
       setStatus('mem-status', '已保存', 'ok');
     }
   } catch (e) {
@@ -1078,16 +1197,27 @@ document.getElementById('slot-add').addEventListener('click', () => {
   recomputeMemDirty();
 });
 
-// 用户画像:槽位 ↔ 源码 双向切换(内容随切换同步,不丢改动)。
+// 结构化 ↔ 源码 双向切换(内容随切换同步,不丢改动)。
+// 用户画像:槽位 ↔ 源码;普通记忆:日记 ↔ 源码。
 document.getElementById('mem-raw-toggle').addEventListener('click', () => {
-  if (memSelected !== USER_PROFILE.id) return;
-  if (memMode === 'slots') {
-    document.getElementById('mem-editor').value = serializeProfile(readSlotsFromDom());
-    document.getElementById('mem-editor').disabled = false;
-    setMemMode('text');
+  if (!memSelected) return;
+  const ed = document.getElementById('mem-editor');
+  if (memSelected === USER_PROFILE.id) {
+    if (memMode === 'slots') {
+      ed.value = serializeProfile(readSlotsFromDom());
+      ed.disabled = false;
+      setMemMode('text');
+    } else {
+      renderSlots(parseProfile(ed.value));
+      setMemMode('slots');
+    }
   } else {
-    renderSlots(parseProfile(document.getElementById('mem-editor').value));
-    setMemMode('slots');
+    if (memMode === 'diary') {
+      setMemMode('text'); // textarea 已持有源码
+    } else {
+      renderDiary(ed.value);
+      setMemMode('diary');
+    }
   }
   recomputeMemDirty();
 });

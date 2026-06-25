@@ -14,6 +14,8 @@
       "role": "orchestrator",
       "card": {
         "name": { "zh": "Director", "en": "Director" },
+        "cnTitle": "场景总监",
+        "enTitle": "Scene Director",
         "color": "#7C9CF6",
         "avatar": "🎬"
       },

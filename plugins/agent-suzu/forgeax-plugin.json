@@ -14,6 +14,8 @@
       "role": "design",
       "card": {
         "name": { "zh": "Suzu", "en": "Suzu" },
+        "cnTitle": "体验设计师",
+        "enTitle": "UX Flow Designer",
         "color": "#DB61A2",
         "avatar": "📐"
       },

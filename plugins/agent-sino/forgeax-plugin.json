@@ -14,6 +14,8 @@
       "role": "scene",
       "card": {
         "name": { "zh": "Sino", "en": "Sino" },
+        "cnTitle": "场景构图师",
+        "enTitle": "Scene Composer",
         "color": "#E5A04C",
         "avatar": "🏙️"
       },

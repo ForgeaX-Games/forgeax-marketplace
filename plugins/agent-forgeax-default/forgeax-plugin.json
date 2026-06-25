@@ -17,6 +17,8 @@
       "role": "planner",
       "card": {
         "name": { "zh": "ForgeaX", "en": "ForgeaX" },
+        "cnTitle": "默认助手",
+        "enTitle": "Default Assistant",
         "color": "#1F6FEB",
         "avatar": "🔷"
       },

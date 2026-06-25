@@ -14,6 +14,8 @@
       "role": "modeling",
       "card": {
         "name": { "zh": "Poly", "en": "Poly" },
+        "cnTitle": "低多边形建模师",
+        "enTitle": "Lowpoly Modeler",
         "color": "#56B6C2",
         "avatar": "🔷"
       },

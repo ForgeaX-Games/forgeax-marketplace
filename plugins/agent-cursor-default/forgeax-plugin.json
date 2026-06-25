@@ -17,6 +17,8 @@
       "role": "coder",
       "card": {
         "name": { "zh": "Cursor", "en": "Cursor" },
+        "cnTitle": "默认助手",
+        "enTitle": "Default Assistant",
         "color": "#7C3AED",
         "avatar": "🟣"
       },

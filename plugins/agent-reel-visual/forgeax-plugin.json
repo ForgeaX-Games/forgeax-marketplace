@@ -13,7 +13,9 @@
       "id": "reel-visual",
       "role": "reel-visual",
       "card": {
-        "name": { "zh": "视觉/关键帧", "en": "Visual & Keyframe" },
+        "name": { "zh": "Aya", "en": "Aya" },
+        "cnTitle": "视觉关键帧师",
+        "enTitle": "Visual & Keyframe Artist",
         "color": "#a8e6cf",
         "avatar": "🖼️"
       },

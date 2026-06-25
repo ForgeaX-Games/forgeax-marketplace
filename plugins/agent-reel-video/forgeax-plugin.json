@@ -13,7 +13,9 @@
       "id": "reel-video",
       "role": "reel-video",
       "card": {
-        "name": { "zh": "出片", "en": "Video Output" },
+        "name": { "zh": "Mai", "en": "Mai" },
+        "cnTitle": "出片师",
+        "enTitle": "Video Output Artist",
         "color": "#7dd3fc",
         "avatar": "🎥"
       },

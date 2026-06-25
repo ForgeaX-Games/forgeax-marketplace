@@ -17,6 +17,8 @@
       "role": "coder",
       "card": {
         "name": { "zh": "Claude", "en": "Claude" },
+        "cnTitle": "默认助手",
+        "enTitle": "Default Assistant",
         "color": "#D97757",
         "avatar": "🟧"
       },

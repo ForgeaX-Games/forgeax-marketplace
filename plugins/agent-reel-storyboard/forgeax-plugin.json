@@ -13,7 +13,9 @@
       "id": "reel-storyboard",
       "role": "reel-storyboard",
       "card": {
-        "name": { "zh": "分镜导演", "en": "Storyboard Director" },
+        "name": { "zh": "Koma", "en": "Koma" },
+        "cnTitle": "分镜师",
+        "enTitle": "Storyboard Director",
         "color": "#b8c4e8",
         "avatar": "🎞️"
       },

@@ -14,6 +14,8 @@
       "role": "pillar",
       "card": {
         "name": { "zh": "Iori", "en": "Iori" },
+        "cnTitle": "核心玩法师",
+        "enTitle": "Gameplay Pillar Designer",
         "color": "#A371F7",
         "avatar": "🏛️"
       },

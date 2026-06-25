@@ -14,6 +14,8 @@
       "role": "coding",
       "card": {
         "name": { "zh": "Tsumugi", "en": "Tsumugi" },
+        "cnTitle": "工程师",
+        "enTitle": "Engineer",
         "color": "#58A6FF",
         "avatar": "🛠️"
       },

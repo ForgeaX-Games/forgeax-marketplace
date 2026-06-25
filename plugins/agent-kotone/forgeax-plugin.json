@@ -14,6 +14,8 @@
       "role": "narrative",
       "card": {
         "name": { "zh": "Kotone", "en": "Kotone" },
+        "cnTitle": "剧情师",
+        "enTitle": "Narrative Writer",
         "color": "#FFA657",
         "avatar": "💬"
       },

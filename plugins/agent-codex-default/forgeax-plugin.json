@@ -17,6 +17,8 @@
       "role": "coder",
       "card": {
         "name": { "zh": "Codex", "en": "Codex" },
+        "cnTitle": "默认助手",
+        "enTitle": "Default Assistant",
         "color": "#10A37F",
         "avatar": "🟢"
       },
