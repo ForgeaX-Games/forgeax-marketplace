@@ -231,8 +231,8 @@ const CSS_TEXT = `
   font-weight: 700;
   border: none;
   border-radius: 50%;
-  background: rgba(0,0,0,0.6);
-  color: #fff;
+  background: color-mix(in srgb, var(--prim-color-neutral-1000) 60%, transparent);
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -256,11 +256,11 @@ img[data-hideable-installed="1"]:hover + .ce-img-close,
 }
 .ce-img-close:focus-visible {
   opacity: 1;
-  outline: 2px solid rgba(120,180,255,0.8);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .ce-img-close:hover {
-  background: rgba(220,50,50,0.85);
+  background: color-mix(in srgb, var(--danger) 85%, transparent);
   transform: scale(1.08);
 }
 
@@ -273,9 +273,9 @@ img[data-hideable-installed="1"]:hover + .ce-img-close,
   justify-content: center;
   padding: 14px 22px;
   border-radius: 6px;
-  border: 1px dashed var(--border, #444);
-  background: var(--surface-2, rgba(255,255,255,0.03));
-  color: var(--text-secondary, #999);
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   min-height: 60px;
@@ -284,11 +284,11 @@ img[data-hideable-installed="1"]:hover + .ce-img-close,
   transition: background .15s ease, color .15s ease;
 }
 .ce-hideable-placeholder:hover {
-  background: var(--surface-3, rgba(255,255,255,0.06));
-  color: var(--text-primary, #eee);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
 }
 .ce-hideable-placeholder:focus-visible {
-  outline: 2px solid rgba(120,180,255,0.8);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 `
