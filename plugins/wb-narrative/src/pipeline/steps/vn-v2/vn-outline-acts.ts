@@ -20,8 +20,8 @@ import type {
 } from "../../../types/index.js";
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
-import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import { FIVE_ELEMENT_NOTE, getStreamEmit } from "./_shared.js";
 
 interface CombinedOutput {
@@ -30,20 +30,53 @@ interface CombinedOutput {
   key_items: VnKeyItems;
 }
 
-const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
+// ── 开放幕数支持（§4.6 VN 适配）──────────────────────────────────────
+const CN_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+
+/** 第 n 幕的汉字编号（1-based）。 */
+export function actNumeral(n: number): string {
+  return CN_NUMERALS[n - 1] ?? String(n);
+}
+
+/** 解析目标幕数：ctx.vn_target_act_count 优先（clamp 2..10），缺省 3 幕（向后兼容）。 */
+export function resolveActCount(ctx: NarrativeContext): number {
+  const n = ctx.vn_target_act_count;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 2) return Math.min(10, Math.round(n));
+  return 3;
+}
+
+/** 期望的幕编号序列（一..N）。 */
+function expectedActIds(count: number): string[] {
+  return Array.from({ length: count }, (_, i) => actNumeral(i + 1));
+}
+
+/** 按幕数生成"幕职能"指引：首幕建置、末幕解决、中间幕对抗/发展。 */
+function buildActSpec(count: number): string {
+  if (count <= 1) return `- 一（单幕）：完整起承转合，约 400 字。`;
+  const lines: string[] = [];
+  lines.push(`- ${actNumeral(1)}（建置）：约 150 字。介绍主角处境、关键关系、世界规则、推动主角离开常态的引爆事件`);
+  for (let i = 2; i < count; i++) {
+    lines.push(`- ${actNumeral(i)}（对抗/发展）：约 300 字。主角的连续尝试与挫折，反派/阻力逐步显影，至少 1 个低谷或反转`);
+  }
+  lines.push(`- ${actNumeral(count)}（解决）：约 150 字。最终对峙与代价；为后续"剧情树改造"留出可分支的高潮空间`);
+  return lines.join("\n");
+}
+
+export const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
   stepId: "vn_outline_acts",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    ip_dna: IP_DNA_SLOT_BLOCK,
     role: `你是互动影游主笔。基于 logline，扩写出严格三幕剧本骨架、全员人物小传与贯穿剧情的关键道具。`,
 
-    task: `## 三幕结构（严格，不允许新增或删减幕）
-- 一（建置）：约 150 字。介绍主角处境、关键关系、世界规则、推动主角离开常态的引爆事件
-- 二（对抗）：约 300 字。主角的连续尝试与挫折，反派/阻力的逐步显影，至少 1 个低谷
-- 三（解决）：约 150 字。最终对峙与代价；为后续"剧情树改造"留出可分支的高潮空间
+    task: (ctx: NarrativeContext): string => {
+      const count = resolveActCount(ctx);
+      return `## 幕结构（严格 ${count} 幕，不允许新增或删减幕；幕编号用汉字 ${expectedActIds(count).join("/")}）
+${buildActSpec(count)}
 
-## 双轮驱动（必须在三幕中显化）
+## 双轮驱动（必须在各幕中显化）
 - 外驱（external_motivation）：来自世界事件、他人压力、时间窗口的外部紧迫
 - 内驱（internal_motivation）：主角的性格缺陷、未愈伤口、价值观挣扎
 - 两者须在第二幕交叉、第三幕收束
@@ -61,27 +94,37 @@ const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
 道具是叙事的"硬抓手"——它制造目标、转折与象征。每件必须包含：
 - name（道具名）/ category（信物 / 武器 / 线索 / 契约物 / 媒介 / 遗物…）
 - description（外形、来历、质感，可被镜头看见）
-- narrative_function（在剧情中的具体作用：推动 / 转折 / 揭示真相 / 制造制约 / 完成代价）——必须能与三幕中的具体事件挂钩
+- narrative_function（在剧情中的具体作用：推动 / 转折 / 揭示真相 / 制造制约 / 完成代价）——必须能与具体幕的事件挂钩
 - bound_character（关联人物，需与人物小传中的 name 呼应；若为无主线索可留空）
-- act_appearance（出现/起关键作用的幕，用 ["一","二","三"] 子集）
+- act_appearance（出现/起关键作用的幕，用 [${expectedActIds(count).map((a) => `"${a}"`).join(",")}] 子集）
 - symbolism（象征意涵：道具如何外化主角的内驱或中心主题）
-要求：至少 1 件道具贯穿第二、三幕并在第三幕的对峙/代价中扮演关键角色。
+要求：至少 1 件道具贯穿后半程并在末幕（${actNumeral(count)}）的对峙/代价中扮演关键角色。
 
 ${FIVE_ELEMENT_NOTE}
 
 ## 编号约定（本步骤产出）
-- act_id：使用汉字 "一" / "二" / "三"
-- act_name：建置 / 对抗 / 解决（或保留同义中文，不允许英文）`,
+- act_id：使用汉字数字序列 ${expectedActIds(count).join(" / ")}（共 ${count} 幕，顺序连续）
+- act_name：建置 / 对抗 / 发展 / 解决（或保留同义中文，不允许英文）`;
+    },
 
-    output_format: `## 输出格式（严格 JSON，单一根对象包含三个子结构）
+    output_format: (ctx: NarrativeContext): string => {
+      const count = resolveActCount(ctx);
+      const ids = expectedActIds(count);
+      const actLines = ids
+        .map((id, i) => {
+          const name = i === 0 ? "建置" : i === count - 1 ? "解决" : "对抗";
+          const hint = i === 0 ? "约 150 字的五要素融合段落" : i === count - 1 ? "约 150 字" : "约 300 字";
+          return `      { "act_id": "${id}", "act_name": "${name}", "content": "${hint}" }`;
+        })
+        .join(",\n");
+      const sample = ids.length >= 2 ? [ids[ids.length - 2], ids[ids.length - 1]] : [ids[0]];
+      return `## 输出格式（严格 JSON，单一根对象包含三个子结构；acts 恰好 ${count} 幕）
 {
   "outline_acts": {
     "title": "故事标题（沿用 logline.title 或微调）",
     "central_theme": "作品中心主题（一句话，如：复仇是否能换回失去的）",
     "acts": [
-      { "act_id": "一", "act_name": "建置", "content": "约 150 字的五要素融合段落" },
-      { "act_id": "二", "act_name": "对抗", "content": "约 300 字" },
-      { "act_id": "三", "act_name": "解决", "content": "约 150 字" }
+${actLines}
     ]
   },
   "character_bios": {
@@ -99,14 +142,15 @@ ${FIVE_ELEMENT_NOTE}
       {
         "name": "...", "category": "信物",
         "description": "外形 / 来历 / 质感",
-        "narrative_function": "在第二幕推动主角揭开真相，在第三幕成为换取代价的筹码",
+        "narrative_function": "在中段推动主角揭开真相，在末幕成为换取代价的筹码",
         "bound_character": "主角名（与 character_bios 呼应）",
-        "act_appearance": ["二", "三"],
+        "act_appearance": [${sample.map((a) => `"${a}"`).join(", ")}],
         "symbolism": "..."
       }
     ]
   }
-}`,
+}`;
+    },
 
     context_inputs: (ctx: NarrativeContext): string => {
       const logline = ctx.vn_logline;
@@ -118,21 +162,25 @@ ${FIVE_ELEMENT_NOTE}
 - 内容：${logline.content}
 
 ## 用户原始需求（参考）
-${ctx.user_input}`;
+${ctx.user_input}
+${buildIpSourceReference(ctx)}`;
     },
 
-    task_instruction: `## 任务
-基于上述 logline 扩写：(1) 严格三幕剧本骨架；(2) 全员人物小传；(3) 贯穿剧情的关键道具。三者在同一份 JSON 中分别落到 outline_acts / character_bios / key_items 三个键。关键道具须与三幕事件、人物驱动真正咬合，不得是可有可无的摆设。`,
+    task_instruction: (ctx: NarrativeContext): string => {
+      const count = resolveActCount(ctx);
+      return `## 任务
+基于上述 logline 扩写：(1) 严格 ${count} 幕剧本骨架；(2) 全员人物小传；(3) 贯穿剧情的关键道具。三者在同一份 JSON 中分别落到 outline_acts / character_bios / key_items 三个键。关键道具须与各幕事件、人物驱动真正咬合，不得是可有可无的摆设。`;
+    },
   },
 };
 
-function validateOutput(parsed: CombinedOutput): void {
+function validateOutput(parsed: CombinedOutput, expectedCount = 3): void {
   const oa = parsed.outline_acts;
   if (!oa?.title?.trim()) throw new Error("缺少 outline_acts.title");
-  if (!Array.isArray(oa.acts) || oa.acts.length !== 3) {
-    throw new Error("acts 必须恰好 3 项（一/二/三）");
+  if (!Array.isArray(oa.acts) || oa.acts.length !== expectedCount) {
+    throw new Error(`acts 必须恰好 ${expectedCount} 项（${expectedActIds(expectedCount).join("/")}）`);
   }
-  const expected = ["一", "二", "三"] as const;
+  const expected = expectedActIds(expectedCount);
   oa.acts.forEach((act, idx) => {
     if (act.act_id !== expected[idx]) {
       throw new Error(`acts[${idx}].act_id 必须为 "${expected[idx]}"`);
@@ -166,12 +214,13 @@ function validateOutput(parsed: CombinedOutput): void {
 
 export async function vnOutlineActs(ctx: NarrativeContext, llm: LLMClient): Promise<void> {
   const streamEmit = getStreamEmit(ctx);
+  const actCount = resolveActCount(ctx);
 
   const raw = await llm.callWithRetry(
     composeSystemPrompt(VN_OUTLINE_ACTS_COMPOSER, ctx),
     appendUserInstructions(composeUserPrompt(VN_OUTLINE_ACTS_COMPOSER, ctx), ctx),
     { temperature: 0.7, responseFormat: "json" },
-    (r) => validateOutput(extractJSON<CombinedOutput>(r)),
+    (r) => validateOutput(extractJSON<CombinedOutput>(r), actCount),
     streamEmit,
   );
 

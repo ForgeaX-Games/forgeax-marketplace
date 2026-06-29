@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-audio args",
+  "description": "Add / update / remove an audio clip (BGM / SFX / voice-over) on a scene timeline. op='add' needs role+ref+startMs+durationMs (ref = a mediaStore audio id, e.g. from reel:list-assets; returns new id). op='update' patches by id — including volume (0..1) and fade in/out (剪映式音量包络). op='remove' deletes by id. Times are ms relative to scene start. Call reel:get-scene-timeline / reel:list-assets first.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId", "op"],
+  "properties": {
+    "scenarioId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string", "enum": ["add", "update", "remove"], "description": "add | update | remove" },
+    "id": { "type": "string", "description": "Audio clip id. Required for update/remove." },
+    "role": { "type": "string", "enum": ["bgm", "sfx", "vo"], "description": "Audio role. Required for add." },
+    "ref": { "type": "string", "description": "mediaStore id of the sound file. Required for add." },
+    "startMs": { "type": "number", "minimum": 0, "description": "Clip start on timeline (ms). Required for add." },
+    "durationMs": { "type": "number", "minimum": 1, "description": "Clip length on timeline (ms). Required for add." },
+    "offsetMs": { "type": "number", "minimum": 0, "description": "In-point inside the source audio (ms)." },
+    "volume": { "type": "number", "minimum": 0, "maximum": 1, "description": "Volume 0..1 (default 1)." },
+    "fadeInMs": { "type": "number", "minimum": 0, "description": "Fade-in length (ms), ramps 0 -> volume." },
+    "fadeOutMs": { "type": "number", "minimum": 0, "description": "Fade-out length (ms), ramps volume -> 0 at the tail." },
+    "label": { "type": "string", "description": "Author label (e.g. 主题曲)." }
+  }
+}

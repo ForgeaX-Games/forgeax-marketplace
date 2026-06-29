@@ -1,11 +1,15 @@
 /**
- * prompt-composer.ts (C6 - Phase P1)
+ * prompt-composer.ts —— ✅ 当前**唯一生产提示词引擎**（P1.2/P1.3 真值订正）。
  * ─────────────────────────────────────────────────────────────────
  * 把"过程性 step + 硬编码 prompt"重构为"声明式 PromptComposer + 薄 Executor"。
+ * run() 与 runWithBlueprint 的 legacy 回退均通过本文件的 composeSystemPrompt 生成提示词。
  *
- * @deprecated 新增步骤请使用 blueprint/prompt-resolver.ts + agent-templates/*.md
- * 外置模板系统。本文件保留用于尚未迁移到 .md 模板的旧步骤。
- * 迁移路径: PromptComposer.blocks → .md 模板文件 + AgentDef 注册
+ * ⚠️ 历史修订：早期注释曾标 @deprecated 并建议"改用 blueprint/prompt-resolver.ts +
+ *    prompts/agents/*.md"——此为**名实不符**：PromptResolver 是 useNewRunner 实验引擎，
+ *    生产从不执行（见其文件头 + pipeline.ts:1179）。**新增/修改 step 提示词请改本文件的
+ *    PromptComposer.blocks**（含逻辑的块用 (ctx)=>string 函数；静态文案直接写字符串），
+ *    IP DNA 段统一用 IP_DNA_SLOT_BLOCK（段序派生自 skeleton.PROMPT_SLOT_ORDER）。
+ *    prompts/agents/*.md 仅属实验引擎 PromptResolver，与本文件内联块**互不同步**，勿混用。
  *
  * 设计要点：
  *   1. 每个 step 用一份纯数据 PromptComposer 描述 prompt 结构
@@ -22,6 +26,31 @@
 import type { NarrativeContext } from "../types/index.js";
 import { getStepSkill } from "../knowledge/game-narrative/skill-loader.js";
 import type { StepSkillBlock } from "../knowledge/game-narrative/skill-types.js";
+import { getInjectedFragment } from "../ip-dna/injection/operator-injection.js";
+import { hasIpDnaPlaceholders, renderPlaceholders } from "./prompt/syntax.js";
+import { buildSlotMap, buildDataHelpers } from "./prompt/providers.js";
+import { PROMPT_SLOT_ORDER, type PromptSlot } from "./prompt/skeleton.js";
+
+/**
+ * §7.2b 统一提示词骨架的 IP DNA 一等插槽块（客观真相→三视角算子→关系→账本，段序固定）。
+ *
+ * 用法：消费算子的 step 把本块加入 PromptComposer.blocks 并在 systemBlockOrder 中
+ * 置于「身份」之后、「品类风格/约束」之前，即可让 IP DNA 注入从"末尾 append"
+ * 升级为骨架内结构化插槽（位置正确、与 step 角色设定融合）。
+ *
+ * 非 IP DNA 驱动的常规生成：各插槽 provider 返空 → 占位渲染为空 → 整块塌缩消失，
+ * 行为与未声明本块时完全一致（零副作用）。
+ *
+ * 段序唯一事实源：直接从 skeleton.ts 的 PROMPT_SLOT_ORDER 派生（过滤出 IP DNA 四段），
+ * 各 step 不再各自决定 IP DNA 段内顺序——改骨架即改全局，杜绝漂移。
+ */
+const IP_DNA_SLOTS: readonly PromptSlot[] = ["objective_truth", "operators", "relations", "ledger"];
+
+export const IP_DNA_SLOT_BLOCK = PROMPT_SLOT_ORDER.filter((slot) =>
+  IP_DNA_SLOTS.includes(slot),
+)
+  .map((slot) => `{{slot:${slot}}}`)
+  .join("\n\n");
 
 /**
  * 一个 step 的 prompt 蓝图。
@@ -105,6 +134,20 @@ export function composeSystemPrompt(
 
   if (skillBlock?.systemPromptAddition && allowed.length > 0) {
     sp += `\n\n## 🎭 品类专属指引（${genreCode}）\n${skillBlock.systemPromptAddition}`;
+  }
+
+  // IP DNA 注入双轨（与 PromptResolver.renderSystemPrompt 一致）：
+  //   - 模板声明了结构化插槽（{{slot:operators}} 等）→ provider 按骨架插槽精确填充
+  //     （§7.2b：客观真相→三视角算子→关系→账本，位置与 step 角色融合）；
+  //   - 未声明 → 退回"末尾 append"兼容旧行为。
+  if (hasIpDnaPlaceholders(sp)) {
+    const slots = buildSlotMap(ctx, composer.stepId);
+    sp = renderPlaceholders(sp, { ctx, slots, data: buildDataHelpers(ctx) })
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  } else {
+    const injected = getInjectedFragment(ctx, composer.stepId);
+    if (injected) sp += `\n\n${injected}`;
   }
 
   return sp;

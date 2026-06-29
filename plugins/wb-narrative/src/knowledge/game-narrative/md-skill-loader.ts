@@ -4,7 +4,10 @@
  * 把 skills/ 目录下的 .md 文件作为 NarrativeSkill 的 fallback 数据源。
  *
  * 现状（"被忽略的金矿"）：
- *   - 174 个 .md 文件分布在 narrative-USC / narrative-lab / narrative-studio 等子目录
+ *   - 生产读取两处源库：全局 step 提示词来自 narrative-USC/skills/{prompts,lab_prompts,
+ *     production_prompts}/*.md（GLOBAL_FILES）；题材风格 specialist 来自
+ *     narrative-studio/assets/prompts/specialists/specialist_*.md（SPECIALISTS）。
+ *     （P2.2 已收敛：删除 narrative-USC 下与 studio 重复的 specialists/；归档删除未加载的 narrative-lab。）
  *   - skill-loader 之前只读 .ts 索引，所有 md 都是空架子
  *   - 80+ long-tail 品类没有 ts skill，导致 buildSkillSystemPrompt 注入率为 0
  *

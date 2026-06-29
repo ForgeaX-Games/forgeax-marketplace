@@ -2,7 +2,7 @@ import type { NarrativeContext, LoreFragment, ItemLore } from "../../types/index
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
 export const LORE_GENERATION_COMPOSER: PromptComposer = {
@@ -20,6 +20,7 @@ export const LORE_GENERATION_COMPOSER: PromptComposer = {
 ## 物品叙事要求
 - 每件物品需要: 名称、类型、稀有度、Lore文本（2-3句背景故事）、风味文本（1句意境文本）
 - 稀有度: common, uncommon, rare, epic, legendary`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `## 输出格式（严格JSON）
@@ -46,7 +47,7 @@ export const LORE_GENERATION_COMPOSER: PromptComposer = {
   ]
 }`,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

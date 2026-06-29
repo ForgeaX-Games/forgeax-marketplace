@@ -54,6 +54,22 @@ describe("Phase 4 骨干：全品类 narrativeSteps 覆盖", () => {
     expect(bad).toEqual([]);
   });
 
+  it("tpl-vn-v2（adv-interactive）preset 链含 vn_state_ledger 且与 templates.ts 规范链对齐", () => {
+    const out = planPipeline({
+      genre_code: "adv-interactive",
+      tier: "tier1",
+      needs: { W: 3, C: 3, S: 3, D: 3, Q: 3, E: 3, I: 3 },
+      narrative_type: "branching",
+      pipelineTemplate: "tpl-vn-v2",
+    });
+    const flat = out.stepGroups.flatMap((g) => (Array.isArray(g) ? g : [g]));
+    // G-01.5 世界状态账本必须存在（修复前 preset 漏此步）
+    expect(flat).toContain("vn_state_ledger");
+    // 必须排在分支节拍之后、剧本之前，与 templates.ts 规范链严格一致
+    expect(flat.indexOf("vn_state_ledger")).toBeGreaterThan(flat.indexOf("vn_branched_beats"));
+    expect(flat.indexOf("vn_state_ledger")).toBeLessThan(flat.indexOf("vn_screenplay"));
+  });
+
   it("史诗品类（rpg-crpg）拼出完整 RPG 七单品链", () => {
     const out = planPipeline({
       genre_code: "rpg-crpg",

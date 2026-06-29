@@ -996,9 +996,9 @@ export type AudioRole = 'bgm' | 'sfx' | 'vo'
  *   - `offsetMs` / `clipDurationMs` 是在媒体素材上的"入点/出点"，
  *     剪切（split）就是把一条 clip 切成两条共享 ref、offset 相接的 clip
  *
- * 简化约束（MVP）：
- *   - 不做 fade in/out（可留扩展字段）
+ * 约束：
  *   - volume 0..1，不做 per-channel
+ *   - fadeInMs / fadeOutMs：剪映式淡入/淡出包络(ms),成片/导出按之调音量;时间轴上画三角提示
  */
 export interface AudioClip {
   id: string
@@ -1013,6 +1013,10 @@ export interface AudioClip {
   offsetMs?: number
   /** 0..1，默认 1 */
   volume?: number
+  /** 淡入时长(ms,默认 0)——剪映式音量包络,从 0 升到 volume */
+  fadeInMs?: number
+  /** 淡出时长(ms,默认 0)——剪映式音量包络,末尾从 volume 降到 0 */
+  fadeOutMs?: number
   /** 作者给的标签（如"主题曲"、"脚步声"），UI 展示用 */
   label?: string
 }
@@ -1297,6 +1301,23 @@ export interface Shot {
    */
   videoMediaRef?: string
   /**
+   * 本镜视频的「真实时长」(ms) —— 视频元素 loadedmetadata 后探测回写。
+   *
+   * 用途：把「视频时长」与「图像/镜窗时长(startMs..endMs)」解耦。镜窗是作者在时间轴上
+   * 自由拖拽的布局参考(图片只是占位参考)，可以拉得比视频长；但视频本身有固定时长，
+   * VIDEO 轨上的视频条应按这个真实时长绘制、播放到此即定格，绝不随图片镜窗无限拉伸。
+   *
+   * 未写入(旧数据 / 还没探测到)时退化为按镜窗时长绘制(兼容旧行为)。
+   */
+  videoNaturalDurationMs?: number
+  /**
+   * 本镜播放倍速(剪映式变速)——默认 1。
+   *   · 0.5..2:视频 playbackRate 据此加速/减速;
+   *   · 0:定格(freeze frame),画面停在当前帧。
+   * 成片/试玩按此设 <video>.playbackRate;时间轴上画速度徽标。
+   */
+  speed?: number
+  /**
    * 本镜「首尾动画」—— v8 后期效果（剪映式 clip 入/出动画）。
    *
    * 与 scene.clipAnim 的区别：多镜节点里每段视频各自独立的入/出动画，
@@ -1312,6 +1333,18 @@ export interface Shot {
    * 两段视频之间，而非独立轨道。
    */
   transitionIn?: TransitionSpec
+}
+
+/**
+ * 时间轴标记点（剪映式打点）—— 编辑期参考锚点，挂在 scene.markers。
+ * 不进成片 / 试玩输出；用于标尺打点、命名与吸附。
+ */
+export interface TimelineMarker {
+  id: string
+  /** 标记点时间（ms），相对当前场景时间轴起点。 */
+  ms: number
+  /** 可选命名。 */
+  label?: string
 }
 
 export interface Scene {
@@ -1438,6 +1471,12 @@ export interface Scene {
   transition?: TransitionSpec
   /** 首尾动画（节点级，默认黑底渐显渐隐）。 */
   clipAnim?: ClipAnimSpec
+  /**
+   * 时间轴标记点（剪映式打点）—— v9 新增。编辑期参考锚点：标尺上打点/命名，
+   * 拖拽 clip / 移动播放头可吸附到这些点。**不进成片 / 试玩输出**，纯作者元数据。
+   * 缺省 / 空 = 没有标记点。供智能体经 reel:add-marker / reel:remove-marker 寻址。
+   */
+  markers?: TimelineMarker[]
   /**
    * 场景级图像素材库 —— v3.2 新增（资产生成面板）。
    *

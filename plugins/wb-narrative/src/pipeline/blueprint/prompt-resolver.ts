@@ -1,6 +1,12 @@
 /**
  * blueprint/prompt-resolver.ts
  *
+ * ⚠️ 生产状态（P1.2 真值标注）：本解析器是 Blueprint/AgentRunner **实验路径**的提示词引擎，
+ *    仅当某 AgentDef 显式设置 `useNewRunner=true` 时才会被 runner 调用——目前**全仓无一处置 true**
+ *    （见 pipeline.ts:1179），故本文件在默认/当前生产路径上**不被执行**。
+ *    唯一生产提示词引擎是 prompt-composer.ts 的 `composeSystemPrompt`（run() 与 runWithBlueprint
+ *    的 legacy 回退均走它）。改提示词请改 PromptComposer / prompts/agents/*.md，勿改本文件。
+ *
  * 提示词模板解析器。从 .md 模板文件读取 → 按分区解析 → 填充 skill 槽位 →
  * 渲染 ctx 变量 → 输出最终 system / user prompt。
  *
@@ -40,12 +46,18 @@ import {
   composeUserPrompt as legacyComposeUser,
 } from "../prompt-composer.js";
 import { findGenreByCode } from "../../knowledge/genre-taxonomy.js";
+import { getInjectedFragment } from "../../ip-dna/injection/operator-injection.js";
+import {
+  renderPlaceholders,
+  hasIpDnaPlaceholders,
+  buildSlotMap,
+  buildDataHelpers,
+} from "../prompt/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const SKILL_PLACEHOLDER = /\{\{SKILL\.([\w_]+)\}\}/g;
-const CTX_PLACEHOLDER = /\{\{ctx\.([\w_.]+)\}\}/g;
 
 // ════════════════════════════════════════════════════════
 // 模板缓存
@@ -63,27 +75,37 @@ function resolveDirWithFallback(candidate: string, srcFallback: string): string 
   return fs.existsSync(candidate) ? candidate : srcFallback;
 }
 
-// tsx 模式: __dirname = src/pipeline/blueprint/ → ../agent-templates = src/pipeline/agent-templates/
+// 统一提示词树根：src/prompts/（agents 骨架 / genres 品类覆盖）。
+// tsx 模式: __dirname = src/pipeline/blueprint/ → ../../prompts/agents
 // 编译模式: __dirname = dist/pipeline/blueprint/ → 回退到 src/ 路径
 const TEMPLATES_DIR = resolveDirWithFallback(
-  path.resolve(__dirname, "../agent-templates"),
-  path.resolve(__dirname, "../../../src/pipeline/agent-templates"),
+  path.resolve(__dirname, "../../prompts/agents"),
+  path.resolve(__dirname, "../../../src/prompts/agents"),
 );
 
-// 品类专属 prompts 根目录：knowledge/game-narrative/skills/<tier>/<genre>/prompts/<step>.md
-const SKILLS_DIR = resolveDirWithFallback(
+// 新品类覆盖目录：prompts/genres/<tier>/<genre>/<step>.md
+const GENRES_DIR = resolveDirWithFallback(
+  path.resolve(__dirname, "../../prompts/genres"),
+  path.resolve(__dirname, "../../../src/prompts/genres"),
+);
+
+// 旧品类专属 prompts（colocated 于 skill 包）：skills/<tier>/<genre>/prompts/<step>.md（回退兼容）
+const LEGACY_SKILLS_DIR = resolveDirWithFallback(
   path.resolve(__dirname, "../../knowledge/game-narrative/skills"),
   path.resolve(__dirname, "../../../src/knowledge/game-narrative/skills"),
 );
 
 /**
- * 定位品类专属 prompt 文件：skills/<tier>/<genre>/prompts/<step>.md。
- * 返回绝对路径（可能不存在），由调用方用 fs.existsSync 判断。
+ * 定位品类专属 prompt 文件：优先新树 prompts/genres/<tier>/<genre>/<step>.md，
+ * 回退旧位置 skills/<tier>/<genre>/prompts/<step>.md。返回存在的绝对路径，否则 null。
  */
 function genrePromptPath(genreCode: string, stepId: string): string | null {
   const entry = findGenreByCode(genreCode);
   if (!entry) return null;
-  return path.join(SKILLS_DIR, entry.tier, genreCode, "prompts", `${stepId}.md`);
+  const newPath = path.join(GENRES_DIR, entry.tier, genreCode, `${stepId}.md`);
+  if (fs.existsSync(newPath)) return newPath;
+  const legacyPath = path.join(LEGACY_SKILLS_DIR, entry.tier, genreCode, "prompts", `${stepId}.md`);
+  return legacyPath;
 }
 
 // ════════════════════════════════════════════════════════
@@ -180,25 +202,11 @@ function fillSkillSlots(
 }
 
 // ════════════════════════════════════════════════════════
-// Ctx 变量渲染
+// Ctx 变量渲染（统一委托 prompt/syntax，支持 {{ctx.*}} + {{data:*}}）
 // ════════════════════════════════════════════════════════
 
-function resolveCtxPath(ctx: NarrativeContext, fieldPath: string): string {
-  const parts = fieldPath.split(".");
-  let current: unknown = ctx;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") return "";
-    current = (current as Record<string, unknown>)[part];
-  }
-  if (current == null) return "";
-  if (typeof current === "string") return current;
-  return JSON.stringify(current, null, 2);
-}
-
 function fillCtxPlaceholders(text: string, ctx: NarrativeContext): string {
-  return text.replace(CTX_PLACEHOLDER, (_, fieldPath: string) => {
-    return resolveCtxPath(ctx, fieldPath);
-  });
+  return renderPlaceholders(text, { ctx, data: buildDataHelpers(ctx) });
 }
 
 // ════════════════════════════════════════════════════════
@@ -257,11 +265,30 @@ export class PromptResolver {
   }
 
   /**
-   * 运行时渲染 system prompt 中的 {{ctx.*}} 占位符（如果有）。
-   * 大多数 system prompt 不含 ctx 引用，但部分动态 step 需要。
+   * 运行时渲染 system prompt（§7.2b）。
+   *
+   * IP DNA 注入采用两种形态：
+   *   - 模板已声明结构化占位（{{IP_DNA.*}} / {{slot:operators}} 等）→ 由 provider 按骨架插槽
+   *     精确填充（位置正确、与 step 角色设定融合）；
+   *   - 模板未声明占位 → 退回"末尾 append"兼容（保持旧行为）。
+   * 同时统一填充 {{ctx.*}} / {{data:*}}。
+   *
+   * @param stepId 提供时启用 IP DNA 注入。
    */
-  static renderSystemPrompt(template: string, ctx: NarrativeContext): string {
-    return fillCtxPlaceholders(template, ctx);
+  static renderSystemPrompt(template: string, ctx: NarrativeContext, stepId?: string): string {
+    if (!stepId) return fillCtxPlaceholders(template, ctx);
+
+    if (hasIpDnaPlaceholders(template)) {
+      const slots = buildSlotMap(ctx, stepId);
+      // 空插槽渲染为空串后塌缩多余空行（结构化骨架内未命中的插槽不留痕迹）。
+      return renderPlaceholders(template, { ctx, slots, data: buildDataHelpers(ctx) })
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+
+    const base = fillCtxPlaceholders(template, ctx);
+    const injected = getInjectedFragment(ctx, stepId);
+    return injected ? `${base}\n\n${injected}` : base;
   }
 
   /** 清除模板缓存（用于热重载/测试） */

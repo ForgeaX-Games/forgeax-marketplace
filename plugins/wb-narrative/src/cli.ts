@@ -1,6 +1,7 @@
 import { NarrativePipeline } from "./pipeline/pipeline.js";
 import { getModesForTier, TIER_DEFAULT_MODE } from "./pipeline/modes.js";
 import type { TierId, ModeId } from "./types/index.js";
+import { runIpDnaCli } from "./ip-dna/cli-runner.js";
 // Phase C6: env reads are funnelled through plugin-env so the literal
 // `process.env.*_API_KEY` substring stays out of plugin source files. See
 // utils/plugin-env.ts header for the full rationale (standalone-process
@@ -11,6 +12,13 @@ const LLM_PROXY_URL = getLlmProxyUrl();
 const LLM_PROXY_KEY = getLlmProxyKey();
 const API_KEY = getGeminiApiKey();
 const args = process.argv.slice(2);
+
+// IP DNA 端到端子命令：tsx src/cli.ts --ip <文件...> [选项]
+// 进入"输入理解 → IP DNA → 改编 → (可选)生成"链路（蓝图 §5）。
+if (args.includes("--ip") || args.some((a) => a.startsWith("--ip="))) {
+  await runIpDnaCli(args, { apiKey: API_KEY || undefined, proxyUrl: LLM_PROXY_URL || undefined });
+  process.exit(0);
+}
 
 // 解析 --tier=xxx 和 --mode=xxx 参数
 let tier: TierId | undefined;

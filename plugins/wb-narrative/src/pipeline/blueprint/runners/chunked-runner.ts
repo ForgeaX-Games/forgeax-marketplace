@@ -74,6 +74,7 @@ export class ChunkedRunner implements AgentRunner {
     const systemPrompt = PromptResolver.renderSystemPrompt(
       resolvedPrompts.systemPrompt,
       ctx,
+      step.stepId,
     );
 
     const llmConfig = config.llm ?? {

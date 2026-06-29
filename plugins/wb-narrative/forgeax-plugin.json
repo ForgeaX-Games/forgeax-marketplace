@@ -216,6 +216,92 @@
           },
           "required": ["dir", "stepId", "status"]
         }
+      },
+      {
+        "id": "narrative:ip-dna-start",
+        "exposedToAI": true,
+        "requireConfirm": "always",
+        "description": { "zh": "IP DNA 端到端入口(蓝图§5):上传/指定全模态 IP 文件 → 理解 → 改编 → (可选)全品类游戏叙事生成。可能较久,默认仅产出 IP DNA+改编指令+生成输入" },
+        "args": "./schemas/ip-dna-start.args.json",
+        "returns": "./schemas/ip-dna-start.returns.json"
+      },
+      {
+        "id": "narrative:get-ip-dna",
+        "exposedToAI": true,
+        "description": { "zh": "只读:按 runId 读取 IP DNA 层级树摘要(节点/层级/标题),用于审阅与可视化" },
+        "args": "./schemas/get-ip-dna.args.json",
+        "returns": "./schemas/get-ip-dna.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-analyze-impact",
+        "exposedToAI": true,
+        "description": { "zh": "IP DNA 改写影响面分析(蓝图§10/§15):给定改动字段,沿 data-atlas 推导受影响下游与输入层级节点" },
+        "args": "./schemas/ip-dna-analyze-impact.args.json",
+        "returns": "./schemas/ip-dna-analyze-impact.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-ingest",
+        "exposedToAI": true,
+        "description": { "zh": "IP 半自动阶段门①(§5.1):摄入+标准化+建树(含干扰项过滤),停在确认裁剪范围前。返回层级树骨架+体量/拆解建议+默认裁剪/单元/维度" },
+        "args": "./schemas/ip-dna-ingest.args.json",
+        "returns": "./schemas/ip-dna-ingest.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-get-hierarchy",
+        "exposedToAI": true,
+        "description": { "zh": "只读:摄入后的层级树 + 默认裁剪/单元/维度 + 体量,供确认裁剪范围引导(半自动/agent 共用)" },
+        "args": "./schemas/ip-dna-get-hierarchy.args.json",
+        "returns": "./schemas/ip-dna-get-hierarchy.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-decompose",
+        "exposedToAI": true,
+        "description": { "zh": "IP 半自动(§5 步骤6-10):体量超线时按标记/单元闭环拆解→再标准化→重写骨架层级树" },
+        "args": "./schemas/ip-dna-decompose.args.json",
+        "returns": "./schemas/ip-dna-decompose.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-confirm-scope",
+        "exposedToAI": true,
+        "description": { "zh": "确认裁剪范围(§4.4 第①步):回填嵌套层级选择;缺省=全量。确认门终点" },
+        "args": "./schemas/ip-dna-confirm-scope.args.json",
+        "returns": "./schemas/ip-dna-confirm-scope.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-confirm-units",
+        "exposedToAI": true,
+        "description": { "zh": "确认游戏单元 + 改编维度(§4.4 第②③步):回填 game_unit_plan/adaptation_dimensions/mode" },
+        "args": "./schemas/ip-dna-confirm-units.args.json",
+        "returns": "./schemas/ip-dna-confirm-units.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-extract",
+        "exposedToAI": true,
+        "description": { "zh": "生成 scoped IP DNA(§5 步骤4):仅提取不跑下游生成,消费已确认裁剪范围/单元/维度" },
+        "args": "./schemas/ip-dna-extract.args.json",
+        "returns": "./schemas/ip-dna-extract.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-generate",
+        "exposedToAI": true,
+        "requireConfirm": "always",
+        "description": { "zh": "开始生成(§5 步骤4→5):提取(=生成 scoped IP DNA)+下游叙事生成自动串跑。改编范围确认后触发,中途不暂停" },
+        "args": "./schemas/ip-dna-generate.args.json",
+        "returns": "./schemas/ip-dna-generate.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-get-job",
+        "exposedToAI": true,
+        "description": { "zh": "轮询异步任务(ingest/extract/generate)的状态/进度/结果" },
+        "args": "./schemas/ip-dna-get-job.args.json",
+        "returns": "./schemas/ip-dna-get-job.returns.json"
+      },
+      {
+        "id": "narrative:ip-dna-cancel",
+        "exposedToAI": true,
+        "description": { "zh": "取消生产(§5.1):取消正在运行的 IP DNA 异步任务(与前端「取消生成」按钮能力对等)" },
+        "args": "./schemas/ip-dna-cancel.args.json",
+        "returns": "./schemas/ip-dna-cancel.returns.json"
       }
     ],
     "surfaces": [
@@ -270,7 +356,15 @@
     "NARRATIVE_PORT",
     "NARRATIVE_AUTO_DEBUG",
     "NARRATIVE_AGENT_DEBUG",
-    "NARRATIVE_DISABLE_EVAL"
+    "NARRATIVE_DISABLE_EVAL",
+    "NARRATIVE_EMBED_URL",
+    "NARRATIVE_EMBED_MODEL",
+    "NARRATIVE_EMBED_DIM",
+    "NARRATIVE_EMBED_MODEL_DIR",
+    "NARRATIVE_EMBED_ONNX",
+    "FFMPEG_PATH",
+    "ASR_ENDPOINT",
+    "PDFTOPPM_PATH"
   ],
   "experimental": true
 }

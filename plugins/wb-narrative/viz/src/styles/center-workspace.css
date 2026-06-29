@@ -60,9 +60,11 @@ body[data-pane="center"] .editor-center-workspace {
   color: var(--color-text-primary);
 }
 
+/* 副标题：与左侧三个步骤副标题 .wb-step-note 字体统一（11px / secondary / 加粗） */
 .cw-pipeline-note {
   flex-basis: 100%;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1.45;
   color: var(--color-text-secondary);
 }

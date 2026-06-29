@@ -45,34 +45,6 @@
         "description": { "zh": "立绘 · 主用 Seedream 备 Gemini nano-banana / Azure GPT-Image; 可选三视图" }
       },
       {
-        "id": "character:generate-sprite-sheet",
-        "args": "./schemas/generate-sprite-sheet.args.json",
-        "returns": "./schemas/generate-sprite-sheet.returns.json",
-        "exposedToAI": true,
-        "description": { "zh": "行动小人 sprite sheet · 走 sprite-frame 通道生成多方向帧" }
-      },
-      {
-        "id": "character:generate-pixel",
-        "args": "./schemas/generate-pixel.args.json",
-        "returns": "./schemas/generate-pixel.returns.json",
-        "exposedToAI": true,
-        "description": { "zh": "像素角色管线 (未实现 · 返回 not_implemented)" }
-      },
-      {
-        "id": "character:generate-monster",
-        "args": "./schemas/generate-monster.args.json",
-        "returns": "./schemas/generate-monster.returns.json",
-        "exposedToAI": true,
-        "description": { "zh": "怪物角色管线 (未实现 · 返回 not_implemented)" }
-      },
-      {
-        "id": "character:generate-vehicle",
-        "args": "./schemas/generate-vehicle.args.json",
-        "returns": "./schemas/generate-vehicle.returns.json",
-        "exposedToAI": true,
-        "description": { "zh": "载具管线 (未实现 · 返回 not_implemented)" }
-      },
-      {
         "id": "character:generate-turnaround",
         "args": "./schemas/generate-turnaround.args.json",
         "returns": "./schemas/generate-turnaround.returns.json",
@@ -134,20 +106,6 @@
         "returns": "./schemas/merge-skills-to-workspace-game.returns.json",
         "exposedToAI": false,
         "description": { "zh": "把 VFX 管线产出的技能合并入 workspace 游戏 character.manifest.json (P4 funnel)" }
-      },
-      {
-        "id": "character:save-scene-defaults",
-        "args": "./schemas/save-scene-defaults.args.json",
-        "returns": "./schemas/save-scene-defaults.returns.json",
-        "exposedToAI": false,
-        "description": { "zh": "保存场景默认参数 (未实现 · 返回 not_implemented)" }
-      },
-      {
-        "id": "character:upsert-manifest",
-        "args": "./schemas/upsert-manifest.args.json",
-        "returns": "./schemas/upsert-manifest.returns.json",
-        "exposedToAI": false,
-        "description": { "zh": "登记/合并角色 manifest (客户端管线落盘后调用;iframe 经 /upsert-manifest 路由代理)" }
       }
     ],
     "events": [
@@ -232,6 +190,8 @@
     "AZURE_GPT_IMAGE_KEY",
     "AZURE_GPT_IMAGE_ENDPOINT",
     "AZURE_GPT_IMAGE_DEPLOYMENT",
+    "AZURE_GPT_IMAGE_API_VERSION",
+    "AZURE_GPT_IMAGE_EDIT_API_VERSION",
     "ARK_IMAGE_KEY",
     "SEEDREAM_API_KEY",
     "LITELLM_PROXY_BASE_URL",

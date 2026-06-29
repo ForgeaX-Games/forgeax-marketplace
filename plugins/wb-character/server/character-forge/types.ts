@@ -3,6 +3,18 @@ export type SpriteAction = 'walk' | 'idle' | 'attack';
 export type SpriteDirection = 'down' | 'left' | 'right' | 'up';
 
 /**
+ * Turnaround view angles. Superset of PortraitView: 3D-model generation wants
+ * the four orthographic angles (front/back/left/right) on a clean white canvas
+ * in a neutral A-pose, which feed wb-gen3d's views-to-3d named view slots
+ * (front_image_url / back_image_url / left_image_url / right_image_url).
+ * 'side' / 'three-quarter' stay for the legacy stylized concept turnaround.
+ */
+export type TurnaroundView = PortraitView | 'left' | 'right' | 'three-quarter';
+
+/** The four orthographic views wb-gen3d's views-to-3d maps to its view slots. */
+export const TURNAROUND_3D_VIEWS = ['front', 'back', 'left', 'right'] as const;
+
+/**
  * 角色定位。下游动画工作台(wb-anim)据此分流:hero/npc/monster 走角色动画
  * 管线(pixel-char / spine / video),vehicle 走载具设计动画管线
  * (vehicle-design)。来源是 wb-character 前端的 profile.characterRole。
@@ -114,7 +126,10 @@ export interface MonsterArtifact extends PipelineArtifactBase {
 }
 
 export interface TurnaroundArtifact extends PipelineArtifactBase {
-  views: Partial<Record<PortraitView | 'three-quarter', string>>;
+  views: Partial<Record<TurnaroundView, string>>;
+  /** Set when these views were generated for 3D-model input (orthographic,
+   *  A-pose, white canvas) rather than the stylized concept turnaround. */
+  forThreeD?: boolean;
 }
 
 export interface VehicleArtifact extends PipelineArtifactBase {
@@ -186,6 +201,39 @@ export interface GeneratePortraitResult {
   costEstimate?: { usd: number; vendor: string };
 }
 
+/**
+ * Generate a 3D-model-ready character turnaround: orthographic front/back/left/
+ * right views in a neutral A-pose on a pure-white canvas, conditioned on the
+ * character's existing design so the four views stay the same character. The
+ * output feeds wb-gen3d's views-to-3d (front/back/left/right image slots).
+ */
+export interface GenerateTurnaroundArgs {
+  slug: string;
+  /** Existing character to attach the turnaround to. Created if absent. */
+  charId?: string;
+  /** Character design reference (base64, no data: prefix). When omitted the
+   *  handler loads the character's saved front portrait as the reference. */
+  refImageBase64?: string;
+  /** Free-text appearance hint; the reference image carries the real identity. */
+  prompt?: string;
+  style?: StylePreset;
+  /** Which views to render. Defaults to the four orthographic 3D views. */
+  views?: TurnaroundView[];
+  name?: string;
+  model?: 'seedream' | 'nano-banana' | 'azure-gpt-image';
+  size?: '1k' | '2k' | '4k';
+}
+
+export interface GenerateTurnaroundResult {
+  charId: string;
+  slug: string;
+  /** Per-view saved asset: relative path + browser-fetchable studio URL. */
+  views: Partial<Record<TurnaroundView, { path: string; url: string }>>;
+  manifestPath: string;
+  model: string;
+  costEstimate?: { usd: number; vendor: string };
+}
+
 export interface GenerateSpriteSheetArgs {
   slug: string;
   charId: string;
@@ -203,12 +251,6 @@ export interface GenerateSpriteSheetResult {
   atlas: Array<{ dir: SpriteDirection; framesPerDir: number; frameSize: number }>;
 }
 
-// Host-provided image generation capability (中立缝)。由 ToolRegistry 注入,
-// 业务插件只消费接口,不反向 import 编排层的 vendor 实现。
-// server/ 不在插件 tsconfig 的 include 内,故走相对路径(类型在运行时擦除)。
-import type { ImageGen } from '../../../../../types/src/image-gen';
-export type { ImageGen };
-
 export interface RouterCtx {
   /** forgeax project root, absolute */
   projectRoot: string;
@@ -216,6 +258,4 @@ export interface RouterCtx {
   emit?: (name: string, args: Record<string, unknown>) => void;
   /** env reader; tests can inject overrides without polluting process.env */
   env: Record<string, string | undefined>;
-  /** 宿主注入的图像生成能力(ToolRegistry 提供);生图类 handler 必需。 */
-  imageGen?: ImageGen;
 }

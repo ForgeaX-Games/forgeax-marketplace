@@ -47,6 +47,7 @@
         "src/system-prompt/shared/01-language-policy.md"
       ],
       "produces": ["<active_game>.dir/src/**"],
+      "tools": ["gen3d:*", "character:*"],
       "status": "active",
       "default": true,
       "provider": "forgeax"

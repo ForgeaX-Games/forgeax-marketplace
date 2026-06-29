@@ -28,7 +28,7 @@ import type {
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import { getStreamEmit, runBySegments } from "./_shared.js";
 import { computeWorldSnapshot } from "./vn-state-ledger.js";
 
@@ -37,12 +37,13 @@ const SEGMENT_CONCURRENCY = 4;
 /** 单次 LLM 调用的 beat 上限；超过则把段切成多个子批串行生成（防上下文超限） */
 const MAX_BEATS_PER_CALL = 8;
 
-const VN_STORYBOARD_COMPOSER: PromptComposer = {
+export const VN_STORYBOARD_COMPOSER: PromptComposer = {
   stepId: "vn_storyboard",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
   userBlockOrder: [],
   blocks: {
+    ip_dna: IP_DNA_SLOT_BLOCK,
     role: `你是互动影游分镜师。基于剧本 beat，为每一 beat 编写电影级分镜序列。`,
 
     task: `## 景别（严格使用中文）

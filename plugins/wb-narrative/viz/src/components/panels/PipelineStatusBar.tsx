@@ -13,6 +13,22 @@ type StepStatus = "pending" | "running" | "completed" | "failed";
 
 const STEP_LABEL_MAP = new Map(PIPELINE_STEPS.map((s) => [s.id, s.label]));
 
+/**
+ * 动态 C 序号（§5.1 / 蓝图 §3.5 动态分步）：中间管线里出现的 IP 预处理节点（id 以 `ip_` 开头）
+ * 按其在当前管线序列中的实际出现顺序赋号 C0..Cn——而非写死 C0–C4。
+ * 这样拆解(ip_decompose)/改编规划(ip_adapt_plan) 等可选分支被纳入时，后续序号自动顺延。
+ * 仅中间管线加 C 前缀（左侧步骤用纯数字，按产品决策）。
+ */
+function withDynamicIpPrefix<T extends { id: string; label: string }>(steps: T[]): T[] {
+  let c = 0;
+  return steps.map((s) => {
+    if (!s.id.startsWith("ip_")) return s;
+    const label = `C${c} ${s.label.replace(/^C\d+(?:\.\d+)?\s*/, "")}`;
+    c += 1;
+    return { ...s, label };
+  });
+}
+
 function ChipGlyph({ display }: { display: StepDisplayState }) {
   const size = 10;
   const stroke = 2;
@@ -75,11 +91,13 @@ export function PipelineStatusBar() {
         .map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
       return [...ordered, ...extra];
     };
-    if (effectivePipelineOrder.length > 0) return buildFromOrder(effectivePipelineOrder);
-    if (previewOrder && previewOrder.length > 0) return buildFromOrder(previewOrder);
-    if (liveSteps.length > 0)
-      return liveSteps.map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
-    return [];
+    let built: Array<{ id: string; label: string; status: StepStatus }>;
+    if (effectivePipelineOrder.length > 0) built = buildFromOrder(effectivePipelineOrder);
+    else if (previewOrder && previewOrder.length > 0) built = buildFromOrder(previewOrder);
+    else if (liveSteps.length > 0)
+      built = liveSteps.map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
+    else built = [];
+    return withDynamicIpPrefix(built);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectivePipelineOrder, previewOrder, liveMap, liveSteps]);
 

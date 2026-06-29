@@ -107,6 +107,36 @@ export const FX_CLIP_ANIM: ClipAnimPreset[] = [
   { id: 'slideOut', label: '滑出', end: 'out' },
 ]
 
+/**
+ * 贴纸（花字）自身的入/出场动画预设。
+ *
+ * 与 FX_CLIP_ANIM（节点级画面首尾动画）不同：这套作用在**单个贴纸元素**上，
+ * 通过 transform/opacity 在贴纸的 [startMs, startMs+IN] / [endMs-OUT, endMs] 区间
+ * 内做弹入/淡入/滑动等微动效（见 stickerAnimAt）。preset id 存进 StickerClip.enter/exit。
+ */
+export interface StickerAnimPreset {
+  id: string
+  label: string
+}
+export const FX_STICKER_ANIM_IN: StickerAnimPreset[] = [
+  { id: 'pop', label: '弹入' },
+  { id: 'fade', label: '淡入' },
+  { id: 'zoomIn', label: '放大入' },
+  { id: 'slideUp', label: '上滑入' },
+  { id: 'slideDown', label: '下滑入' },
+]
+export const FX_STICKER_ANIM_OUT: StickerAnimPreset[] = [
+  { id: 'fade', label: '淡出' },
+  { id: 'pop', label: '弹出' },
+  { id: 'zoomOut', label: '缩小出' },
+  { id: 'slideUp', label: '上滑出' },
+  { id: 'slideDown', label: '下滑出' },
+]
+
+/** 贴纸入/出场动画默认时长（ms）—— 固定值，UI 不暴露，保持极简。 */
+export const STICKER_ANIM_IN_MS = 450
+export const STICKER_ANIM_OUT_MS = 380
+
 // ─────────────────────────────────────────────────────────────────────
 // 查表辅助
 // ─────────────────────────────────────────────────────────────────────
@@ -259,6 +289,78 @@ export function activeStickers(scene: Scene, ms: number): StickerClip[] {
   return (scene.stickerClips ?? []).filter((s) => inRange(ms, s.startMs, s.endMs))
 }
 
+/** 贴纸入/出场动画的当前帧偏移量（叠加到 stickerStyle 的基准 transform/opacity 上）。 */
+export interface StickerAnimDelta {
+  /** 透明度乘子 0~1。 */
+  opacity: number
+  /** 缩放乘子（在 c.scale 之上再乘）。 */
+  scaleMul: number
+  /** 额外平移（画面高度百分比，正=下移）。 */
+  translateYPct: number
+  /** 额外平移（画面宽度百分比，正=右移）。 */
+  translateXPct: number
+}
+
+function easeOutBack(t: number): number {
+  const c1 = 1.70158
+  const c3 = c1 + 1
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
+}
+
+/**
+ * 计算贴纸在 ms 时刻的入/出场动画偏移。
+ *
+ * 入场：贴纸 startMs 起的前 STICKER_ANIM_IN_MS 内，按 preset 做弹入/淡入/滑入。
+ * 出场：endMs 前 STICKER_ANIM_OUT_MS 内，按 preset 做淡出/缩小/滑出。
+ * 两段都不命中时返回"完全显示"（opacity 1、无缩放、无位移）。
+ * ms 省略（编辑器静态取用）时也返回完全显示，便于拖拽编辑时贴纸稳定可见。
+ */
+export function stickerAnimAt(c: StickerClip, ms?: number): StickerAnimDelta {
+  const rest: StickerAnimDelta = { opacity: 1, scaleMul: 1, translateYPct: 0, translateXPct: 0 }
+  if (ms == null) return rest
+
+  // 入场
+  if (c.enter) {
+    const t = clamp((ms - c.startMs) / STICKER_ANIM_IN_MS, 0, 1)
+    if (t < 1) {
+      switch (c.enter) {
+        case 'fade':
+          return { ...rest, opacity: t }
+        case 'pop':
+          return { ...rest, opacity: clamp(t * 2, 0, 1), scaleMul: 0.3 + 0.7 * easeOutBack(t) }
+        case 'zoomIn':
+          return { ...rest, opacity: t, scaleMul: 0.6 + 0.4 * t }
+        case 'slideUp':
+          return { ...rest, opacity: t, translateYPct: (1 - t) * 12 }
+        case 'slideDown':
+          return { ...rest, opacity: t, translateYPct: -(1 - t) * 12 }
+      }
+    }
+  }
+
+  // 出场（p = 出场进度 0→1）
+  if (c.exit) {
+    const tFromEnd = clamp((c.endMs - ms) / STICKER_ANIM_OUT_MS, 0, 1)
+    const p = 1 - tFromEnd
+    if (p > 0) {
+      switch (c.exit) {
+        case 'fade':
+          return { ...rest, opacity: 1 - p }
+        case 'pop':
+          return { ...rest, opacity: 1 - p, scaleMul: 1 - 0.7 * p }
+        case 'zoomOut':
+          return { ...rest, opacity: 1 - p, scaleMul: 1 - 0.4 * p }
+        case 'slideUp':
+          return { ...rest, opacity: 1 - p, translateYPct: -p * 12 }
+        case 'slideDown':
+          return { ...rest, opacity: 1 - p, translateYPct: p * 12 }
+      }
+    }
+  }
+
+  return rest
+}
+
 /** 转场进度：在 scene 开头 [0, durationMs] 内返回 0~1，否则 null。 */
 export function transitionProgress(
   scene: Scene,
@@ -334,12 +436,10 @@ function activeShotAt(
       return { startMs: s.startMs as number, endMs: s.endMs as number, clipAnim: s.clipAnim }
     }
   }
-  // 落在镜间空隙：就近取第一/最后镜，避免首尾动画在缝隙里闪
-  const first = shots[0]!
-  const last = shots[shots.length - 1]!
-  return ms < (first.startMs as number)
-    ? { startMs: first.startMs as number, endMs: first.endMs as number, clipAnim: first.clipAnim }
-    : { startMs: last.startMs as number, endMs: last.endMs as number, clipAnim: last.clipAnim }
+  // 落在镜间空隙 / 首镜前 / 末镜后:返回 null —— 空隙=留白(黑场),不在缝隙里硬挂某镜的
+  // 首尾动画(过去就近取首/末镜,会让"剪出来的空档"被首尾动画的渐显渐隐糊上,违背
+  // 作者的剪辑意图)。播放层在 null 时直接渲染黑场,与 Player/StagePane 的取镜逻辑一致。
+  return null
 }
 
 // ─────────────────────────────────────────────────────────────────────

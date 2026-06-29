@@ -4,6 +4,7 @@ import { extractJSON } from "../llm-client.js";
 import { getEntropy, getDeviationCeiling, getNodeBudget } from "../layer-threshold-config.js";
 import { appendUserInstructions } from "./design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
+import { isIpDnaSeeded } from "../../ip-dna/generation-seed.js";
 
 const PREFERENCE_ANALYSIS_COMPOSER: PromptComposer = {
   stepId: "preference_analysis",
@@ -75,7 +76,8 @@ ${ctx.user_preference_summary ?? "（无）"}`,
 {
   "全局控制参数": {
     "complexity": 2,
-    "deviation": 0.0
+    "deviation": 0.0,
+    "story_title": "为本作品起一个统一的中文标题（简洁有辨识度，≤20字；若用户已给出书名/项目名则沿用）"
   },
   "世界观维度": {
     "WV_01": { "slot_name": "时空背景", "user_preference": "...", "description": "...", "entropy_config": { "base_entropy": 0.5, "entropy_type": "balanced", "complexity_factor": 1.0, "branch_probability": 0.3, "detail_density": 0.5 }, "deviation_config": { "base_deviation": 0.0, "deviation_type": "structural", "deviation_direction": "neutral", "deviation_intensity": 0.5, "anti_cliche_rules": [] } },
@@ -103,10 +105,35 @@ ${ctx.user_preference_summary ?? "（无）"}`,
   },
 };
 
+/**
+ * 派生全局故事标题（§6.5）：优先用 LLM 给出的 story_title，否则从用户输入截取首句关键短语，
+ * 最终兜底"未命名故事"。截断到 20 字以内，去除标点噪声，保证全局唯一可用于时间戳命名/一级标题。
+ */
+function deriveStoryTitle(llmTitle: unknown, userInput?: string): string {
+  const fromLlm = typeof llmTitle === "string" ? llmTitle.trim().replace(/^[《"'\s]+|[》"'\s]+$/g, "") : "";
+  if (fromLlm) return fromLlm.slice(0, 20);
+  const firstLine = (userInput ?? "")
+    .split(/[\n。！？.!?]/)[0]
+    ?.trim()
+    .replace(/^[《"'\s]+|[》"'\s]+$/g, "");
+  if (firstLine) return firstLine.slice(0, 20);
+  return "未命名故事";
+}
+
 export async function userPreferenceAnalysis(
   ctx: NarrativeContext,
   llm: LLMClient,
 ): Promise<void> {
+  // IP DNA 改编（Phase2c §4.6）：编排器可能已据游戏单元目标节点数预注入 target_structure
+  // 与 complexity（pipelinePlan.complexity，决定层级节点预算 layer_controls）。
+  // 二者均视为改编计划的权威值，分析步骤不得覆盖（短路防覆盖）。判定显式化为 isIpDnaSeeded（T4）。
+  const seeded = isIpDnaSeeded(ctx);
+  const preInjectedTargetStructure = seeded
+    ? ctx.global_control_params?.target_structure ?? null
+    : null;
+  const preInjectedComplexity =
+    seeded && typeof ctx.complexity === "number" ? ctx.complexity : null;
+
   const sp = composeSystemPrompt(PREFERENCE_ANALYSIS_COMPOSER, ctx);
   const up = composeUserPrompt(PREFERENCE_ANALYSIS_COMPOSER, ctx);
 
@@ -129,7 +156,15 @@ export async function userPreferenceAnalysis(
   const gcp = analysis["全局控制参数"] as unknown as Record<string, unknown> | undefined;
   const layerParams = analysis["层级调控参数"];
 
-  const complexity = Math.round(Math.max(1, Math.min(5, Number(gcp?.complexity) || 2)));
+  // 全局标题（§6.5）：无策划阶段在用户偏好分析生成。有 D0/IP DNA 预设标题则继承，不覆盖。
+  if (!ctx.story_title?.trim()) {
+    ctx.story_title = deriveStoryTitle(gcp?.story_title, ctx.user_input);
+  }
+
+  // seeded 时以改编计划预注入的 complexity 为权威（与 target_structure 一致），否则用 LLM 读数。
+  const complexity = Math.round(
+    Math.max(1, Math.min(5, preInjectedComplexity ?? (Number(gcp?.complexity) || 2))),
+  );
   const entropy = getEntropy(complexity);
   const ceiling = getDeviationCeiling(entropy);
 
@@ -161,7 +196,7 @@ export async function userPreferenceAnalysis(
   ctx.global_control_params = {
     complexity,
     deviation,
-    target_structure: (gcp?.target_structure as TargetStructure) ?? null,
+    target_structure: preInjectedTargetStructure ?? (gcp?.target_structure as TargetStructure) ?? null,
     layer_controls: {
       layer_0: clampLayerToBudget(layerParams?.["layer0_control"] as unknown as Record<string, unknown> | undefined, { layer_name: "layer_0", entropy_inheritance: 1.0 }, budget.l0_min, budget.l0_max),
       layer_1: clampLayerToBudget(layerParams?.["layer1_control"] as unknown as Record<string, unknown> | undefined, { layer_name: "layer_1", entropy_inheritance: 0.85 }, budget.l1_per_min, budget.l1_per_max),

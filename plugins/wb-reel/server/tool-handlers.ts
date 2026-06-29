@@ -360,6 +360,47 @@ async function mutateScenario(
   return { id: scenario.id, updatedAt, activeId: nextDb.activeId };
 }
 
+// ── 时间轴编辑工具的共用助手 ───────────────────────────────────────────────
+//
+// scenario.scenes 是以 sceneId 为 key 的字典；各类 clip(dialogue / qte.cues /
+// audio / textOverlays / shots / markers)是 scene 下的数组/对象。下面 reel:edit-*
+// / reel:update-shot 全部走 mutateScenario(定位 scene → 改对应数组/字段 → 落盘)。
+
+type AnyScene = Record<string, any> & { id?: string };
+
+/** 在 scenario.scenes 字典里定位一场;找不到抛 not_found。 */
+function locateScene(
+  scenario: Record<string, unknown> & { id: string },
+  sceneId: string,
+): AnyScene {
+  const scenes = scenario.scenes as Record<string, AnyScene> | undefined;
+  const scene = scenes?.[sceneId];
+  if (!scene || typeof scene !== "object") {
+    throw Object.assign(new Error(`scene not found: ${sceneId}`), {
+      code: "not_found",
+      httpStatus: 404,
+    });
+  }
+  return scene;
+}
+
+function genId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function invalid(message: string): never {
+  throw Object.assign(new Error(message), { code: "invalid_argument" });
+}
+
+function notFound(message: string): never {
+  throw Object.assign(new Error(message), { code: "not_found", httpStatus: 404 });
+}
+
+/** 把任意值收成 >=0 的整数 ms;非数字时用 fallback(默认 0)。 */
+function toMs(v: unknown, fallback = 0): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : fallback;
+}
+
 export const tools: Record<string, (args: any, ctx: ToolCtx) => Promise<unknown>> = {
   /** List scenarios persisted in the .reel-scenarios/scenarios.json index. */
   "reel:list-scenarios": async (args: ListScenariosArgs, ctx: ToolCtx) => {
@@ -754,6 +795,322 @@ export const tools: Record<string, (args: any, ctx: ToolCtx) => Promise<unknown>
       durationSec: null,
     };
   },
+
+  // ── 时间轴编辑工具箱 ─────────────────────────────────────────────────────
+
+  "reel:get-scene-timeline": async (args: any, ctx: ToolCtx) => {
+    const base = getReelDevBase(ctx);
+    const db = await fetchScenarioDb(base, gameQ(ctx));
+    const wantId = args.scenarioId ?? db.activeId ?? undefined;
+    const item = wantId ? db.items.find((it) => it.id === wantId) : undefined;
+    if (!item) {
+      notFound(
+        args.scenarioId
+          ? `scenario not found: ${args.scenarioId}`
+          : "no active scenario — pass scenarioId or open/forge one first",
+      );
+    }
+    const scene = locateScene(
+      item!.scenario as Record<string, unknown> & { id: string },
+      args.sceneId,
+    );
+    const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+    const shots = arr(scene.shots)
+      .map((s: any) => ({
+        id: s.id,
+        order: s.order,
+        startMs: s.startMs,
+        endMs: s.endMs,
+        speed: s.speed,
+        framing: s.framing,
+        transitionIn: s.transitionIn ?? null,
+        clipAnim: s.clipAnim ?? null,
+      }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    return {
+      scenarioId: item!.id,
+      sceneId: args.sceneId,
+      durationMs: typeof scene.durationMs === "number" ? scene.durationMs : undefined,
+      shots,
+      dialogue: arr(scene.dialogue).map((d: any) => ({
+        id: d.id, role: d.role, speaker: d.speaker, text: d.text, startMs: d.startMs, endMs: d.endMs,
+      })),
+      qteCues: arr(scene.qte?.cues).map((c: any) => ({
+        id: c.id, shape: c.shape, appearAt: c.appearAt, targetAt: c.targetAt, label: c.label,
+      })),
+      audio: arr(scene.audio).map((a: any) => ({
+        id: a.id, role: a.role, ref: a.ref, startMs: a.startMs, durationMs: a.durationMs,
+        volume: a.volume, fadeInMs: a.fadeInMs, fadeOutMs: a.fadeOutMs,
+      })),
+      textOverlays: arr(scene.textOverlays).map((t: any) => ({
+        id: t.id, text: t.text, startMs: t.startMs, endMs: t.endMs, x: t.x, y: t.y,
+      })),
+      markers: arr(scene.markers).map((m: any) => ({ id: m.id, ms: m.ms, label: m.label })),
+    };
+  },
+
+  "reel:update-shot": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    if (!args.shotId) invalid("shotId required");
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      const shots = Array.isArray(scene.shots) ? scene.shots : [];
+      const i = shots.findIndex((s: any) => s?.id === args.shotId);
+      if (i < 0) notFound(`shot not found: ${args.shotId}`);
+      const shot = { ...shots[i] };
+      if (args.speed !== undefined) {
+        if (typeof args.speed !== "number" || args.speed < 0 || args.speed > 4) {
+          invalid("speed must be a number in [0, 4] (0=freeze, 1=normal)");
+        }
+        shot.speed = args.speed;
+      }
+      if (args.startMs !== undefined) shot.startMs = toMs(args.startMs);
+      if (args.endMs !== undefined) shot.endMs = toMs(args.endMs);
+      if (
+        shot.startMs !== undefined &&
+        shot.endMs !== undefined &&
+        shot.endMs <= shot.startMs
+      ) {
+        invalid("endMs must be greater than startMs");
+      }
+      if (args.transitionIn !== undefined) {
+        shot.transitionIn = args.transitionIn === null ? undefined : args.transitionIn;
+      }
+      if (args.clipAnim !== undefined) {
+        shot.clipAnim = args.clipAnim === null ? undefined : args.clipAnim;
+      }
+      shots[i] = shot;
+      scene.shots = shots;
+    });
+    return { ok: true, scenarioId: result.id, sceneId: args.sceneId, shotId: args.shotId, updatedAt: result.updatedAt };
+  },
+
+  "reel:edit-dialogue": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    const op = args.op as "add" | "update" | "remove";
+    if (!["add", "update", "remove"].includes(op)) invalid("op must be add | update | remove");
+    const newId = op === "add" ? genId("dia") : undefined;
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      let list: any[] = Array.isArray(scene.dialogue) ? [...scene.dialogue] : [];
+      if (op === "add") {
+        if (typeof args.text !== "string" || !args.text.trim()) invalid("text required for add");
+        if (typeof args.startMs !== "number") invalid("startMs required for add");
+        list.push({
+          id: newId,
+          role: args.role ?? "character",
+          text: args.text,
+          startMs: toMs(args.startMs),
+          ...(args.speaker ? { speaker: args.speaker } : {}),
+          ...(args.endMs !== undefined ? { endMs: toMs(args.endMs) } : {}),
+        });
+      } else {
+        if (!args.id) invalid("id required for update/remove");
+        const i = list.findIndex((d) => d?.id === args.id);
+        if (i < 0) notFound(`dialogue not found: ${args.id}`);
+        if (op === "remove") {
+          list.splice(i, 1);
+        } else {
+          const next = { ...list[i] };
+          if (args.role !== undefined) next.role = args.role;
+          if (args.speaker !== undefined) next.speaker = args.speaker;
+          if (args.text !== undefined) next.text = args.text;
+          if (args.startMs !== undefined) next.startMs = toMs(args.startMs);
+          if (args.endMs !== undefined) next.endMs = toMs(args.endMs);
+          list[i] = next;
+        }
+      }
+      scene.dialogue = list.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+    });
+    return { ok: true, op, scenarioId: result.id, sceneId: args.sceneId, id: newId ?? args.id, updatedAt: result.updatedAt };
+  },
+
+  "reel:edit-qte": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    const op = args.op as "add" | "update" | "remove";
+    if (!["add", "update", "remove"].includes(op)) invalid("op must be add | update | remove");
+    const newId = op === "add" ? genId("cue") : undefined;
+    let cueCount = 0;
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      // 没有 qte 块时按需创建一套合理默认(窗口/分值)。
+      if (!scene.qte || typeof scene.qte !== "object") {
+        if (op !== "add") notFound("scene has no qte block");
+        scene.qte = {
+          cues: [],
+          window: { perfect: 80, great: 160, good: 280 },
+          score: { perfect: 100, great: 60, good: 30, miss: -10 },
+        };
+      }
+      let cues: any[] = Array.isArray(scene.qte.cues) ? [...scene.qte.cues] : [];
+      if (op === "add") {
+        if (!["tap", "hold", "sweep"].includes(args.shape)) invalid("shape required (tap|hold|sweep) for add");
+        if (typeof args.appearAt !== "number") invalid("appearAt required for add");
+        if (typeof args.targetAt !== "number") invalid("targetAt required for add");
+        if (args.shape === "sweep" && !args.sweepDir) invalid("sweepDir required when shape=sweep");
+        cues.push({
+          id: newId,
+          shape: args.shape,
+          x: typeof args.x === "number" ? args.x : 0.5,
+          y: typeof args.y === "number" ? args.y : 0.5,
+          appearAt: toMs(args.appearAt),
+          targetAt: toMs(args.targetAt),
+          ...(args.durationMs !== undefined ? { durationMs: toMs(args.durationMs) } : {}),
+          ...(args.sweepDir ? { sweepDir: args.sweepDir } : {}),
+          ...(args.label ? { label: args.label } : {}),
+        });
+      } else {
+        if (!args.id) invalid("id required for update/remove");
+        const i = cues.findIndex((c) => c?.id === args.id);
+        if (i < 0) notFound(`qte cue not found: ${args.id}`);
+        if (op === "remove") {
+          cues.splice(i, 1);
+        } else {
+          const next = { ...cues[i] };
+          for (const k of ["shape", "x", "y", "sweepDir", "label"] as const) {
+            if (args[k] !== undefined) next[k] = args[k];
+          }
+          if (args.appearAt !== undefined) next.appearAt = toMs(args.appearAt);
+          if (args.targetAt !== undefined) next.targetAt = toMs(args.targetAt);
+          if (args.durationMs !== undefined) next.durationMs = toMs(args.durationMs);
+          cues[i] = next;
+        }
+      }
+      cues.sort((a, b) => (a.appearAt ?? 0) - (b.appearAt ?? 0));
+      scene.qte.cues = cues;
+      cueCount = cues.length;
+    });
+    return { ok: true, op, scenarioId: result.id, sceneId: args.sceneId, id: newId ?? args.id, cueCount, updatedAt: result.updatedAt };
+  },
+
+  "reel:edit-text-overlay": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    const op = args.op as "add" | "update" | "remove";
+    if (!["add", "update", "remove"].includes(op)) invalid("op must be add | update | remove");
+    const newId = op === "add" ? genId("txt") : undefined;
+    const STYLE = ["fontSizePct", "rotation", "fontWeight", "color", "strokeColor", "align"] as const;
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      let list: any[] = Array.isArray(scene.textOverlays) ? [...scene.textOverlays] : [];
+      if (op === "add") {
+        if (typeof args.text !== "string" || !args.text.trim()) invalid("text required for add");
+        if (typeof args.startMs !== "number") invalid("startMs required for add");
+        list.push({
+          id: newId,
+          text: args.text,
+          startMs: toMs(args.startMs),
+          x: typeof args.x === "number" ? args.x : 0.5,
+          y: typeof args.y === "number" ? args.y : 0.5,
+          ...(args.endMs !== undefined ? { endMs: toMs(args.endMs) } : {}),
+          ...Object.fromEntries(STYLE.filter((k) => args[k] !== undefined).map((k) => [k, args[k]])),
+        });
+      } else {
+        if (!args.id) invalid("id required for update/remove");
+        const i = list.findIndex((t) => t?.id === args.id);
+        if (i < 0) notFound(`text overlay not found: ${args.id}`);
+        if (op === "remove") {
+          list.splice(i, 1);
+        } else {
+          const next = { ...list[i] };
+          if (args.text !== undefined) next.text = args.text;
+          if (args.startMs !== undefined) next.startMs = toMs(args.startMs);
+          if (args.endMs !== undefined) next.endMs = toMs(args.endMs);
+          if (args.x !== undefined) next.x = args.x;
+          if (args.y !== undefined) next.y = args.y;
+          for (const k of STYLE) if (args[k] !== undefined) next[k] = args[k];
+          list[i] = next;
+        }
+      }
+      scene.textOverlays = list.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+    });
+    return { ok: true, op, scenarioId: result.id, sceneId: args.sceneId, id: newId ?? args.id, updatedAt: result.updatedAt };
+  },
+
+  "reel:edit-audio": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    const op = args.op as "add" | "update" | "remove";
+    if (!["add", "update", "remove"].includes(op)) invalid("op must be add | update | remove");
+    const newId = op === "add" ? genId("aud") : undefined;
+    const NUM = ["offsetMs", "volume", "fadeInMs", "fadeOutMs"] as const;
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      let list: any[] = Array.isArray(scene.audio) ? [...scene.audio] : [];
+      if (op === "add") {
+        if (!["bgm", "sfx", "vo"].includes(args.role)) invalid("role required (bgm|sfx|vo) for add");
+        if (typeof args.ref !== "string" || !args.ref) invalid("ref (mediaStore audio id) required for add");
+        if (typeof args.startMs !== "number") invalid("startMs required for add");
+        if (typeof args.durationMs !== "number" || args.durationMs <= 0) invalid("durationMs required (>0) for add");
+        list.push({
+          id: newId,
+          role: args.role,
+          ref: args.ref,
+          startMs: toMs(args.startMs),
+          durationMs: toMs(args.durationMs),
+          ...(args.offsetMs !== undefined ? { offsetMs: toMs(args.offsetMs) } : {}),
+          ...(args.volume !== undefined ? { volume: args.volume } : {}),
+          ...(args.fadeInMs !== undefined ? { fadeInMs: toMs(args.fadeInMs) } : {}),
+          ...(args.fadeOutMs !== undefined ? { fadeOutMs: toMs(args.fadeOutMs) } : {}),
+          ...(args.label ? { label: args.label } : {}),
+        });
+      } else {
+        if (!args.id) invalid("id required for update/remove");
+        const i = list.findIndex((a) => a?.id === args.id);
+        if (i < 0) notFound(`audio clip not found: ${args.id}`);
+        if (op === "remove") {
+          list.splice(i, 1);
+        } else {
+          const next = { ...list[i] };
+          if (args.role !== undefined) next.role = args.role;
+          if (args.ref !== undefined) next.ref = args.ref;
+          if (args.startMs !== undefined) next.startMs = toMs(args.startMs);
+          if (args.durationMs !== undefined) next.durationMs = toMs(args.durationMs);
+          if (args.label !== undefined) next.label = args.label;
+          for (const k of NUM) {
+            if (args[k] !== undefined) next[k] = k === "volume" ? args[k] : toMs(args[k]);
+          }
+          list[i] = next;
+        }
+      }
+      scene.audio = list.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+    });
+    return { ok: true, op, scenarioId: result.id, sceneId: args.sceneId, id: newId ?? args.id, updatedAt: result.updatedAt };
+  },
+
+  "reel:edit-marker": async (args: any, ctx: ToolCtx) => {
+    if (!args.sceneId) invalid("sceneId required");
+    const op = args.op as "add" | "rename" | "remove";
+    if (!["add", "rename", "remove"].includes(op)) invalid("op must be add | rename | remove");
+    let outId: string | undefined = op === "add" ? undefined : args.id;
+    let markerCount = 0;
+    const result = await mutateScenario(ctx, args.scenarioId, (scenario) => {
+      const scene = locateScene(scenario, args.sceneId);
+      let list: any[] = Array.isArray(scene.markers) ? [...scene.markers] : [];
+      if (op === "add") {
+        if (typeof args.ms !== "number") invalid("ms required for add");
+        const ms = toMs(args.ms);
+        const dup = list.find((m) => Math.abs((m.ms ?? -1) - ms) <= 1);
+        if (dup) {
+          outId = dup.id;
+        } else {
+          outId = genId("mk");
+          list.push({ id: outId, ms, ...(args.label ? { label: args.label } : {}) });
+        }
+      } else {
+        if (!args.id) invalid("id required for rename/remove");
+        const i = list.findIndex((m) => m?.id === args.id);
+        if (i < 0) notFound(`marker not found: ${args.id}`);
+        if (op === "remove") {
+          list.splice(i, 1);
+        } else {
+          if (typeof args.label !== "string") invalid("label required for rename");
+          list[i] = { ...list[i], label: args.label };
+        }
+      }
+      scene.markers = list.sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0));
+      markerCount = list.length;
+    });
+    return { ok: true, op, scenarioId: result.id, sceneId: args.sceneId, id: outId, markerCount, updatedAt: result.updatedAt };
+  },
 };
 
 // ── Import from Narrative Pipeline ──────────────────────────────────────────
@@ -879,6 +1236,36 @@ function characterBiosToScenario(raw: NarrativeCharacterBios | null): Record<
     if (c.internal_motivation) lines.push(`【内驱】${c.internal_motivation}`);
     if (c.arc) lines.push(`【弧光】${c.arc}`);
     out[id] = { id, name, prompt: lines.join("\n") };
+  });
+  return out;
+}
+
+/**
+ * vn_key_items → scenario.props（道具锚点）。
+ *
+ * 背景：叙事管线把"信物 / 武器 / 关键文件"等关键道具放在 vn_key_items 里，但
+ * import-from-narrative 以前只把它塞进 meta.keyItems + 派生关系，从不落进
+ * scenario.props —— 于是导入的剧本"道具也没有"，generate-visuals 也无道具可出图。
+ * 这里把每个 key item 映射成一个 Prop：name + 由 description/narrative_function/
+ * category 折叠出的外观/识别提示词，供后续道具基准图生成使用。
+ */
+function keyItemsToProps(raw: NarrativeKeyItems | null): Record<
+  string,
+  { id: string; name: string; prompt: string }
+> {
+  const out: Record<string, { id: string; name: string; prompt: string }> = {};
+  const list = raw?.items ?? [];
+  list.forEach((it, i) => {
+    const name = (it.name ?? "").trim();
+    if (!name) return;
+    let id = `prop-${slugify(name) || `n${i}`}`;
+    while (out[id]) id = `${id}-${i}`;
+    const lines: string[] = [];
+    if (it.category) lines.push(`【类别】${it.category}`);
+    if (it.description) lines.push(`【外观】${it.description}`);
+    if (it.narrative_function) lines.push(`【叙事作用】${it.narrative_function}`);
+    if (it.bound_character) lines.push(`【关联角色】${it.bound_character}`);
+    out[id] = { id, name, prompt: lines.join("\n") || name };
   });
   return out;
 }
@@ -1274,6 +1661,18 @@ tools["reel:import-from-narrative"] = async (args: ImportFromNarrativeArgs, ctx:
       warnings.push("vn_character_bios not found; characters panel will be empty");
     }
 
+    // Key items → props（道具锚点）。Merge 而非覆盖，re-import 不抹掉作者编辑/参考图。
+    if (items) {
+      const props = keyItemsToProps(items as NarrativeKeyItems);
+      const propCount = Object.keys(props).length;
+      if (propCount > 0) {
+        scenario.props = {
+          ...((scenario.props as Record<string, unknown>) ?? {}),
+          ...props,
+        };
+      }
+    }
+
     // Synopsis: prefer logline, fall back to outline's central_theme/title.
     const loglineText =
       (logline as { logline?: string; synopsis?: string } | null)?.logline ??
@@ -1336,6 +1735,22 @@ tools["reel:import-from-narrative"] = async (args: ImportFromNarrativeArgs, ctx:
     scenario.meta = meta;
     if (!storyboardRaw) {
       warnings.push("vn_storyboard not found; media prompts derived from screenplay descriptions only");
+    }
+
+    // 道具锚点：M4-only 导入（跳过 M2）时 scenario.props 仍为空 —— 这里补抓一次
+    // vn_key_items 映射进 props（merge，不抹作者编辑/参考图）。M2 已导过则 props
+    // 已随 existing 带入，重复 merge 同 id 也安全。
+    if (Object.keys((scenario.props as Record<string, unknown>) ?? {}).length === 0) {
+      const keyItems = await fetchNarrativeStep(narrativeBase, runKey, "vn_key_items", files);
+      if (keyItems) {
+        const props = keyItemsToProps(keyItems as NarrativeKeyItems);
+        if (Object.keys(props).length > 0) {
+          scenario.props = {
+            ...((scenario.props as Record<string, unknown>) ?? {}),
+            ...props,
+          };
+        }
+      }
     }
   }
 

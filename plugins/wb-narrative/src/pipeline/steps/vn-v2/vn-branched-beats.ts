@@ -22,8 +22,8 @@ import type {
 } from "../../../types/index.js";
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
-import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import {
   FIVE_ELEMENT_NOTE,
   NUMBERING_NOTE,
@@ -34,12 +34,13 @@ import {
 } from "./_shared.js";
 import { runGraphQA, type GraphAdapter, type QaGraph } from "../../../utils/graph-qa.js";
 
-const VN_BRANCHED_BEATS_COMPOSER: PromptComposer = {
+export const VN_BRANCHED_BEATS_COMPOSER: PromptComposer = {
   stepId: "vn_branched_beats",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
   userBlockOrder: [],
   blocks: {
+    ip_dna: IP_DNA_SLOT_BLOCK,
     role: `你是互动影游剧情树架构师。传入的线性 beats 是一条「黄金线（理想线）」——角色对世界每一次考验都做出"理想作答"时走过的那唯一一条路，它只是整棵树里 N 条路径中的 1 条、是脊不是全部故事。你的产出是整部影游的"分支骨架"——**薄结构、不写满正文**（详细剧本由下游 G-02 打磨）。你要**以黄金线为脊、一次性**长出一棵**全局自洽**的剧情树：大量戏剧张力存在于黄金线**之外**（答错/答偏的下坠、挣扎、中段结局），分支轨迹是树的**主体**，黄金线反而是少数。`,
 
     task: (ctx) => `## 设计哲学（务必内化）
@@ -317,6 +318,7 @@ ${JSON.stringify(allScenes, null, 2)}
 
 ## 参考：用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 🎯 节点预算（软目标·复杂度档位「${budget.label}」——黄金线是少数派脊，分支轨迹+结局才是主体）
 - 当前黄金线拍数：**${linearCount}**（上面这些 beat 必须原样保留，不删不改 beat_id）

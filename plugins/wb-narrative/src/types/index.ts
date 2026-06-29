@@ -74,6 +74,21 @@ export interface NarrativeContext {
   player_name?: string;
   global_control_params?: GlobalControlParams;
 
+  // ── IP DNA（输入理解产物，A 套数据，§4.1）──
+  // narrativeIpDna 与上述生成字段（B 套数据）并列；A 经双向映射喂入 B。
+  // 类型见 ./narrative-ip-dna.ts（NarrativeIpDna = 叙事层级树 × 三件套）。
+  narrativeIpDna?: import("./narrative-ip-dna.js").NarrativeIpDna;
+  /** 改编指令（§4.4）：改编范围 + 游戏单元规划 + 改编维度。 */
+  adaptation_directive?: import("./narrative-ip-dna.js").AdaptationDirective;
+  /** 用户资产参考清单（§6.2）。 */
+  user_asset_manifest?: import("./narrative-ip-dna.js").UserAssetManifest;
+  /** 全局故事/项目标题（§6.5），策划 D0 或叙事首阶段生成，全局传递。 */
+  story_title?: string;
+  /** 完整故事时间戳（§6.0），贯穿 input→output 的同一主键。 */
+  story_timestamp?: import("./narrative-ip-dna.js").StoryTimestamp;
+  /** KAG 关系网络注入简报（§8）：角色关系/场景子图压缩文本，供生成节点保持一致性。 */
+  relation_network?: string;
+
   // 策划管线数据 (D0-D4)
   demand_analysis?: import("./game-design.js").DemandAnalysis;
   core_concept?: import("./game-design.js").CoreConcept;
@@ -85,7 +100,9 @@ export interface NarrativeContext {
 
   // 影游叙事 v2 管线产出（tpl-vn-v2，9 步专属）
   vn_logline?: VnLogline;                       // E1-01
-  vn_outline_acts?: VnOutlineActs;              // E1-02 (三幕)
+  /** VN 目标幕数（§4.6 开放幕数）：由复杂度/目标节点数派生（resolveVnActCount）；缺省 3 幕。 */
+  vn_target_act_count?: number;
+  vn_outline_acts?: VnOutlineActs;              // E1-02 (开放幕数，默认三幕)
   vn_character_bios?: VnCharacterBios;          // E1-02 (人物小传)
   vn_key_items?: VnKeyItems;                    // E1-02 (关键道具)
   vn_scenes?: VnScenes;                         // E1-03
@@ -120,7 +137,11 @@ export interface VnOutlineActs {
 }
 
 export interface VnAct {
-  act_id: "一" | "二" | "三";
+  /**
+   * 幕编号。历史上用汉字 一/二/三（固定三幕）；现已开放幕数（§4.6 VN 适配），
+   * 类型放宽为 string，仍以汉字数字序列（一/二/…/十）表达，保持序号语义与向后兼容。
+   */
+  act_id: string;
   act_name: string;      // 建置/对抗/解决（或自定义）
   content: string;       // 五要素融合段落（150/300/150 字建议）
 }
@@ -163,7 +184,7 @@ export interface VnScenes {
 
 export interface VnScene {
   scene_id: string;                          // "1", "2", "3"…（纯数字字符串）
-  act_id: "一" | "二" | "三";
+  act_id: string;                            // 幕编号（开放幕数，汉字数字序列）
   location_name: string;
   time_of_day: "日" | "夜";
   indoor_outdoor: "内" | "外";

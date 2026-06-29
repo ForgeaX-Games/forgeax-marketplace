@@ -79,12 +79,15 @@ import { STEP_REGISTRY, getStepOutputFields as registryGetOutputFields } from ".
 import { planPipeline } from "./planner/index.js";
 import type { PlannerInput } from "./planner/index.js";
 
+// IP DNA 统一注入适配器（算子/关系/账本 → 消费 step 提示词，§7.2b/§8/§10）
+// 注入逻辑下沉到 ip-dna/injection 服务，pipeline 仅薄委托（T5）。
+import { prepareInjection } from "../ip-dna/injection/operator-injection.js";
+
 // Blueprint + Agent Framework (Phase 4 integration)
 import type { PipelineBlueprint, StepBlueprint } from "./blueprint/types.js";
 import { assembleBlueprint } from "./blueprint/assembler.js";
 import { hasAgentDef } from "./blueprint/agent-def-registry.js";
 import { getRunnerForStructure } from "./blueprint/runners/index.js";
-import { PromptResolver } from "./blueprint/prompt-resolver.js";
 // Side-effect: register AgentDefs + validators
 import "./blueprint/agent-def-registrations.js";
 
@@ -568,6 +571,9 @@ export class NarrativePipeline {
         });
       };
       (ctx as Record<string, unknown>)._streamEmit = streamEmit;
+
+      // IP DNA 算子/关系/账本注入（仅 IP DNA 驱动的改编生成 + 消费算子的 step；否则零开销）。
+      await prepareInjection(ctx, step.id, this.llm);
 
       try {
         await step.fn(ctx, this.llm);
@@ -1167,6 +1173,10 @@ export class NarrativePipeline {
         stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
         status: "running", message: `正在执行：${step.agentDef.name}...`,
       });
+
+      // 与 run() 主循环一致：消费算子的 step 在执行前注入 IP DNA（算子/关系/账本）。
+      // 缺此调用会导致 Blueprint 路径静默丢失算子注入（名实不符），故必须对齐。
+      await prepareInjection(ctx, step.stepId, this.llm);
 
       try {
         if (hasAgentDef(step.stepId) && step.agentDef.useNewRunner) {

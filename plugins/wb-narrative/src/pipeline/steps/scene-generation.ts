@@ -14,7 +14,7 @@ import { extractJSON } from "../llm-client.js";
 import { runParallel, type ParallelTask } from "../parallel-runner.js";
 import { chunkArray } from "../topo-sort.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import { getNodeFilter } from "../node-merge.js";
 import {
   aggregateScenes,
@@ -128,10 +128,11 @@ export const SCENE_SKELETON_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
     base: PHASE1_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -140,10 +141,11 @@ const SCENE_SKELETON_INCREMENTAL_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
     base: PHASE1_INCREMENTAL_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -271,10 +273,11 @@ export const SCENE_EXPAND_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
     base: PHASE2_UNIT_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

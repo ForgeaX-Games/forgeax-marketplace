@@ -3,6 +3,7 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import { useShellStore } from '../shell/shellStore'
 import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
+import { useSceneAudio } from '../media/useSceneAudio'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
 import type {
@@ -24,6 +25,7 @@ import { MinigameOverlay } from './MinigameOverlay'
 import { SearchLayer, InventoryHUD } from './SearchLayer'
 import { TextOverlayLayer } from './TextOverlayLayer'
 import { FxOverlayLayer, FadeLayer, StickerLayer } from './SceneFxLayers'
+import { useTrackPrefsStore } from '../editor/timeline/trackPrefsStore'
 import { composeStageFx } from '../fx/fxPresets'
 import { isModuleEnabled } from '../scenario/moduleFlags'
 import { nextMinigameToTrigger, pendingMinigamesAtEnd } from './minigameHit'
@@ -194,6 +196,8 @@ export function Player() {
    * 周期性 re-read 一次（200ms 轮询，代价极低）。
    */
   const [showSubtitles, setShowSubtitles] = useState<boolean>(() => loadDialoguePref())
+  // 轨头眼睛(trackPrefs)同步 —— 编辑器内试玩时,隐藏的文字轨在画面里也不叠。
+  const txtTrackVisible = useTrackPrefsStore((s) => s.prefs.txt.visible)
   useEffect(() => {
     function syncFromStorage(): void {
       setShowSubtitles(loadDialoguePref())
@@ -285,6 +289,22 @@ export function Player() {
 
   // setPaused 暂未对外暴露；保留 setter 让 React 不警告（未来可接菜单暂停）
   void setPaused
+
+  // 音频预览：画面推进时（无 minigame/search/choice/结算等暂停态）按场景音频出声。
+  // 播放头用 elapsedRef（高频、不进依赖），避免触发重渲。
+  const audioPlaying =
+    !!scene &&
+    !paused &&
+    !activeMinigame &&
+    !activeSearch &&
+    !choiceOpen &&
+    !endingScreen
+  useSceneAudio({
+    scene,
+    sceneId,
+    playing: audioPlaying,
+    getPlayheadMs: () => elapsedRef.current,
+  })
 
   /**
    * 跳进 / 跳退 —— delta 正值前进、负值后退（ms）。
@@ -1048,7 +1068,7 @@ export function Player() {
 
       {showSubtitles && <DialogueBox scene={scene} elapsed={elapsed} />}
 
-      <TextOverlayLayer scene={scene} elapsed={elapsed} />
+      {txtTrackVisible && <TextOverlayLayer scene={scene} elapsed={elapsed} />}
 
       {scene.qte && (
         <QTEOverlay
@@ -1255,14 +1275,21 @@ function isMultiShotScene(scene: Scene): boolean {
   return shots.some((s) => s.videoMediaRef || s.keyframeMediaRef)
 }
 
-/** 按当前播放时间选落点 shot：命中 [startMs,endMs) 的镜；越界夹到首/末镜。 */
+/**
+ * 按当前播放时间选落点 shot：命中 [startMs,endMs) 的镜；落在镜间空隙 / 首镜前 /
+ * 末镜后返回 undefined —— 调用方据此渲染黑场（留白）。
+ *
+ * 历史（2026-06 作者反馈「中间剪空了还在正常播」）：过去空隙就近夹到首/末镜，
+ * 导致作者剪出的空档、把镜头挪到后面留出的留白，全被相邻镜头顶上，看起来像「没生效」。
+ * 现在严格按时间码取镜，空隙=黑场，所见即所得。
+ */
 function resolveActiveShot(scene: Scene, currentMs: number): Shot | undefined {
   const shots = timedShots(scene)
   if (shots.length === 0) return undefined
   for (const s of shots) {
     if (currentMs >= (s.startMs as number) && currentMs < (s.endMs as number)) return s
   }
-  return currentMs < (shots[0]!.startMs as number) ? shots[0] : shots[shots.length - 1]
+  return undefined
 }
 
 function MultiShotLayer({
@@ -1278,13 +1305,10 @@ function MultiShotLayer({
 }) {
   const entries = useMediaStore((s) => s.entries)
   const shots = timedShots(scene)
-  const active = resolveActiveShot(scene, currentMs) ?? shots[0]
+  const active = resolveActiveShot(scene, currentMs)
+  // 落在镜间空隙 / 首镜前 / 末镜后:渲染纯黑场 —— 尊重作者在时间轴上剪出的留白。
   if (!active) {
-    return (
-      <div className={placeholderBgClass('idle')}>
-        <div className="ks-player-bg-strip" />
-      </div>
-    )
+    return <div className="ks-player-gap" aria-hidden />
   }
   const isLast = active.id === shots[shots.length - 1]?.id
   const videoUrl = active.videoMediaRef ? entries[active.videoMediaRef]?.url : undefined
@@ -1321,7 +1345,7 @@ function MultiShotLayer({
   )
 }
 
-function SceneCanvas({
+export function SceneCanvas({
   scene,
   videoRef,
   currentMs = 0,
@@ -1338,6 +1362,9 @@ function SceneCanvas({
       ? s.entries[scene.media.ref]
       : undefined,
   )
+  // 轨头眼睛(trackPrefs):隐藏的特效/贴纸轨在试玩画面里也不叠。
+  const fxTrackVisible = useTrackPrefsStore((s) => s.prefs.fx.visible)
+  const stkTrackVisible = useTrackPrefsStore((s) => s.prefs.stk.visible)
   const multiShot = isMultiShotScene(scene)
   const imgClient = useMemo<ImageClient>(() => createImageProvider(), [])
   const cacheRecord = useSceneImageCache((s) => s.records[scene.id])
@@ -1444,9 +1471,10 @@ function SceneCanvas({
           PROMPTS · 等素材
         </div>
       )}
-      {/* 剪映式后期效果叠层：暗角/颗粒/特效 → 贴纸 → 渐显渐隐遮罩（默认黑底） */}
-      <FxOverlayLayer frame={stageFx} />
-      <StickerLayer scene={scene} ms={currentMs} />
+      {/* 剪映式后期效果叠层：暗角/颗粒/特效 → 贴纸 → 渐显渐隐遮罩（默认黑底）
+          特效/贴纸轨被轨头眼睛隐藏时不叠(与时间轴/预览一致)。 */}
+      {fxTrackVisible && <FxOverlayLayer frame={stageFx} />}
+      {stkTrackVisible && <StickerLayer scene={scene} ms={currentMs} />}
       <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
       <div className="ks-player-vignette" />
     </div>
@@ -1785,6 +1813,11 @@ const playerCss = `
   pointer-events: none;
   background:
     radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.8) 100%);
+}
+/* 镜间空隙(留白)：纯黑场，对标剪映时间轴上「没有片段」的那一段播放时显黑。 */
+.ks-player-gap {
+  position: absolute; inset: 0;
+  background: #000;
 }
 
 /* 子弹时间 HUD —— 边缘高光 + 单条文字 + 倒计时进度 */

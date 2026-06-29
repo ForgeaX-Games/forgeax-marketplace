@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-marker args",
+  "description": "Add / rename / remove a timeline marker (剪映式打点, editor reference anchor; never enters the final cut). op='add' needs ms (optional label; returns the marker id; adding within 1ms of an existing marker returns that one). op='rename' sets label by id. op='remove' deletes by id. ms is relative to scene start. Call reel:get-scene-timeline for ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId", "op"],
+  "properties": {
+    "scenarioId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string", "enum": ["add", "rename", "remove"], "description": "add | rename | remove" },
+    "id": { "type": "string", "description": "Marker id. Required for rename/remove." },
+    "ms": { "type": "number", "minimum": 0, "description": "Marker time (ms). Required for add." },
+    "label": { "type": "string", "description": "Marker name. Used by add (optional) / rename (required)." }
+  }
+}

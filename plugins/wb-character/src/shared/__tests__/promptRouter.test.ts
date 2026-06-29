@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pickPromptForImageModel,
   apiModelIdForImageModel,
+  turnaroundVendorForImageModel,
   type PromptBundle,
 } from '../promptRouter'
 
@@ -56,5 +57,15 @@ describe('apiModelIdForImageModel', () => {
 
   it('gpt-image-2 分支的返回值绝不能以 "gemini" 开头—— 否则会被后端 forceGemini 误判', () => {
     expect(apiModelIdForImageModel('gpt-image-2').startsWith('gemini')).toBe(false)
+  })
+})
+
+describe('turnaroundVendorForImageModel', () => {
+  it('gpt-image-2 → azure-gpt-image (edits path)', () => {
+    expect(turnaroundVendorForImageModel('gpt-image-2')).toBe('azure-gpt-image')
+  })
+
+  it('gemini → nano-banana', () => {
+    expect(turnaroundVendorForImageModel('gemini')).toBe('nano-banana')
   })
 })

@@ -97,6 +97,27 @@ NARRATIVE_PORT=8900                 # 可选，API 端口
 NARRATIVE_AGENT_DEBUG=1             # 可选，打印 universal-agent plan/eval 详情
 ```
 
+#### IP DNA / RAG 向量检索（蓝图 §7.1）
+
+IP DNA 改编生成的算子检索默认走 `knowledge_base/`（`embeddings.npy` + `methods_3_converted.jsonl` + `retrieval_config.json`）。
+查询向量化器按优先级解析：**HTTP 端点 > 本地 e5(transformers.js) > ONNX**；都未配置时静默降级为 `scope+tag`
+关键词检索（corpus 仍可用，不抛错）。CLI 与后端 API（`/api/narrative/ip-dna/start`）经同一 helper
+（`resolveIpDnaRuntimeAdapters`）注入，行为一致。
+
+```bash
+# 三选一启用 vector 通道（不配则自动 scope+tag 降级）：
+NARRATIVE_EMBED_URL=http://...:9100/embed   # 首选 — 本地嵌入 HTTP 端点
+NARRATIVE_EMBED_MODEL=intfloat/multilingual-e5-small  # 可选 — HTTP 端点用模型名
+NARRATIVE_EMBED_DIM=384                      # 可选 — 向量维度校验
+NARRATIVE_EMBED_MODEL_DIR=/path/to/e5        # 本地 e5 模型目录（覆盖 retrieval_config.model_path_local）
+NARRATIVE_EMBED_ONNX=/path/to/model.onnx     # ONNX 备选（onnxruntime-node）
+FFMPEG_PATH=ffmpeg                           # 可选 — 视频抽帧/压缩 ffmpeg 路径（默认取 PATH）
+ASR_ENDPOINT=http://127.0.0.1:9000/asr       # 可选 — 本地 ASR HTTP 端点（视频音轨转写；缺省则不转写）
+PDFTOPPM_PATH=pdftoppm                        # 可选 — PDF 拆页 poppler pdftoppm 路径（默认取 PATH）
+```
+
+> 本地 e5 模型目录缺省取 `knowledge_base/retrieval_config.json` 的 `model_path_local`，开箱即用。
+
 ---
 
 ## 项目架构

@@ -80,6 +80,23 @@ export type AgentStructure =
 // 二、Agent 定义（纯数据配置，无函数引用）
 // ════════════════════════════════════════════════════════
 
+/**
+ * IP DNA 算子消费声明（§7 / §7.2b）。
+ * 形状与 ip-dna/injection/slot-registry 的 StepSlotSpec 一致：
+ * 当 AgentDef 声明本字段时，它即为该 step 算子消费的"单一事实源"，
+ * 覆盖 OPERATOR_SLOT_REGISTRY 的默认值（registry 退化为默认提供器）。
+ */
+export interface ConsumesIpDnaSpec {
+  /** 需要的三视角算子槽位名（顺序即注入顺序）。 */
+  slots: string[];
+  /** 是否注入 KAG 关系网络子图（§8）。 */
+  kag?: boolean;
+  /** 是否注入长记忆账本一致性约束（§10）。 */
+  ledger?: boolean;
+  /** 检索 query 侧重提示。 */
+  queryHint?: string;
+}
+
 export interface AgentIOContract {
   /** 必需的 ctx 字段（step 执行前断言存在） */
   requiredInputs: string[];
@@ -89,6 +106,11 @@ export interface AgentIOContract {
   outputField: string;
   /** 派生字段（如 validation_result、player_name） */
   derivedFields?: string[];
+  /**
+   * IP DNA 算子消费声明（§7.2b）。声明后该 step 在 IP DNA 驱动时装备三视角算子
+   * /KAG/账本，由统一注入服务读取本声明（消除与 slot-registry 的双重事实源）。
+   */
+  consumesIpDna?: ConsumesIpDnaSpec;
 }
 
 export interface AgentPromptConfig {

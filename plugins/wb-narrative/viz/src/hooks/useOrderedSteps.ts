@@ -19,12 +19,15 @@ export function useOrderedSteps(): StepState[] {
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const activeSteps = useNarrativeStore((s) => s.activeSteps);
   const pipelineOrder = useNarrativeStore((s) => s.pipelineOrder);
   const activeConfigOrder = useNarrativeStore((s) => s.activeConfig?.pipelineOrder);
 
-  const isViewingRunning = activeEntryKey === runningEntryKey && !!runningRunId;
+  // IP 半自动预览（ipPreviewRunId）与正式 SSE run（runningRunId）共用"运行中视图"：
+  // 都读 runningProgress + pipelineOrder，使 IP 各步与生成管线在文本/节点模式同源同序。
+  const isViewingRunning = activeEntryKey === runningEntryKey && (!!runningRunId || !!ipPreviewRunId);
   const rawSteps = isViewingRunning ? runningProgress : activeSteps;
   const order = isViewingRunning ? pipelineOrder : activeConfigOrder ?? [];
 

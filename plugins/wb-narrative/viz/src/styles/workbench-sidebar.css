@@ -149,10 +149,6 @@
   text-align: left;
 }
 
-.wb-step-toggle:hover .wb-step-title {
-  color: var(--color-text-primary, var(--dt-text));
-}
-
 .wb-step-toggle:focus-visible {
   outline: 1px solid rgba(212, 255, 72, 0.55);
   outline-offset: 4px;
@@ -186,15 +182,22 @@
   color: #0b120b;
 }
 
+/* L1 步骤级（一级标题）：加粗、固定颜色、不变色 */
 .wb-step-title {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary, var(--dt-text-sec));
+  font-weight: 700;
+  color: var(--color-text-primary, var(--dt-text));
   letter-spacing: 0.02em;
 }
 
-.wb-step-section.expanded .wb-step-title {
-  color: var(--color-text-primary, var(--dt-text));
+/* 英文眉题（数字 + 英文标题 + 中文标题，对齐中间标题区 cw-eyebrow 格式） */
+.wb-step-eyebrow {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary, var(--dt-text-dim));
 }
 
 .wb-step-caret {
@@ -214,9 +217,21 @@
   color: rgba(242, 244, 247, 0.46);
 }
 
+/* 副标题（标题下的描述行，对齐中间标题区 cw-pipeline-note） */
+.wb-step-note {
+  color: var(--color-text-secondary, var(--dt-text-sec));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  padding-left: 26px;
+  word-break: break-word;
+}
+
+/* 动态状态行：不加粗，与中间管线状态区 .cw-pipeline-empty 字体统一 */
 .wb-step-summary {
   color: var(--color-text-tertiary, rgba(242, 244, 247, 0.48));
   font-size: 11px;
+  font-weight: 400;
   line-height: 1.45;
   padding-left: 26px;
   word-break: break-word;
@@ -253,7 +268,7 @@
   background: transparent;
   color: var(--color-text-secondary, var(--dt-text-sec));
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
@@ -281,6 +296,7 @@
 
 .wb-helper {
   font-size: 10px;
+  font-weight: 700;
   line-height: 1.45;
   color: var(--color-text-tertiary, var(--dt-text-dim));
 }
@@ -396,12 +412,13 @@
   min-width: 0;
 }
 
+/* L3 子选项级/标签标题（三级标题）：同步骤级字体/字号/颜色，加粗、不变色 */
 .wb-field-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--color-text-tertiary, var(--dt-text-dim));
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary, var(--dt-text));
+  text-transform: none;
 }
 
 .wb-field-control {
@@ -437,8 +454,8 @@
   border-radius: 0;
   background: transparent;
   color: rgba(242, 244, 247, 0.9);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 400;
   font-family: inherit;
   cursor: pointer;
   text-align: left;
@@ -459,16 +476,18 @@
   cursor: not-allowed;
 }
 
+/* L4 标签级：选中实际标签 → 主题黄绿色；未限定（不限）→ 白色 */
 .wb-dropdown-value {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #d4ff48;
 }
 
 .wb-dropdown-value.is-placeholder {
-  color: rgba(212, 255, 72, 0.42);
+  color: #ffffff;
 }
 
 .wb-dropdown-chevron {
@@ -546,15 +565,23 @@
   cursor: not-allowed;
 }
 
+/* L4 标签级（下拉项）：同步骤级字体/字号/颜色，不加粗，选中变色 */
 .wb-dropdown-option-label {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1.3;
+  color: var(--color-text-primary, var(--dt-text));
 }
 
+.wb-dropdown-option.active .wb-dropdown-option-label {
+  color: #d4ff48;
+}
+
+/* L5 其他注释性文字：加粗、不变色 */
 .wb-dropdown-option-desc {
   color: rgba(242, 244, 247, 0.42);
   font-size: 10px;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -564,6 +591,7 @@
 
 .wb-field-hint {
   font-size: 10px;
+  font-weight: 700;
   line-height: 1.45;
   color: var(--color-text-tertiary, var(--dt-text-dim));
 }

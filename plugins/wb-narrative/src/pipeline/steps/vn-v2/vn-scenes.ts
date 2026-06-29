@@ -13,7 +13,7 @@ import type { NarrativeContext, VnScenes, VnScene } from "../../../types/index.j
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import {
   FIVE_ELEMENT_NOTE,
   NUMBERING_NOTE,
@@ -22,12 +22,13 @@ import {
   getVnBudget,
 } from "./_shared.js";
 
-const VN_SCENES_COMPOSER: PromptComposer = {
+export const VN_SCENES_COMPOSER: PromptComposer = {
   stepId: "vn_scenes",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    ip_dna: IP_DNA_SLOT_BLOCK,
     role: `你是互动影游剧作总监。基于三幕骨架，把每一幕分解为若干"场"。`,
 
     task: (ctx: NarrativeContext) => `## 任务

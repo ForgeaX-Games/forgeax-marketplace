@@ -1,5 +1,6 @@
 import { useScenarioStore } from './scenarioStore'
 import { getDemoScenario, BUNDLED_DEMO_ID } from './demoScenario'
+import { makeBlankScenario } from './blankScenario'
 import type { Scenario } from './types'
 import {
   loadDb,
@@ -271,9 +272,17 @@ export interface BootScenarioPersistOptions {
       saveDb(_db)
     }
   } else if (!storeInDb) {
-    // per-game 作用域：不要把 store 初值（内置 demo 空壳）写进库 —— 新建 game 必须
-    // 保持空白；等用户写/导入/agent 生成第一本剧本时再入库。全局库行为不变。
-    if (!(isPerGameScope() && currentStore.id === BUNDLED_DEMO_ID)) {
+    // per-game 作用域 + store 初值还停在共享内置 demo（demo-001）：新建 game 必须
+    // 是一张白纸。这里用一份**全新的、id 唯一的空白剧本**替换共享 demo —— 否则
+    // 用户在新 game 里生成的图/视频会被打上 meta.scenarioId='demo-001'，落进该 game
+    // 的 assets 目录造成"被 demo 素材污染"（正是 1234 工程 745 张 demo-001 资产的根因）。
+    // 全局库（无 slug）行为保持不变：仍沿用历史 demo 体验。
+    if (isPerGameScope() && currentStore.id === BUNDLED_DEMO_ID) {
+      const blank = makeBlankScenario()
+      systemLoadScenario(blank)
+      _db = upsertScenario(_db, blank)
+      saveDb(_db)
+    } else {
       _db = upsertScenario(_db, currentStore)
       saveDb(_db)
     }

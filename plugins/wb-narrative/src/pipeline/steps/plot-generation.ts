@@ -13,8 +13,8 @@ import type { NarrativeContext, DetailedOutlineNode, PlotNode } from "../../type
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { validateTripleConstraints } from "../../utils/constraint-validator.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../prompt-composer.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import { getNodeFilter } from "../node-merge.js";
 import { structureValidationL3 } from "./structure-validation.js";
 import {
@@ -63,10 +63,11 @@ export const PLOT_GENERATION_COMPOSER: PromptComposer = {
   stepId: "plot_generation",
   blocks: {
     base: SYSTEM_PROMPT,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -175,6 +176,7 @@ function buildPromptForNode(
 
   let prompt = `## 用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 剧情简介
 ${JSON.stringify(ctx.plot_synopsis ?? {}, null, 2)}

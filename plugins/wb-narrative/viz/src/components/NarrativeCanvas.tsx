@@ -127,10 +127,12 @@ function NarrativeCanvasInner() {
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const activeResult = useNarrativeStore((s) => s.activeResult);
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
 
-  const isViewingRunning = activeEntryKey === runningEntryKey && !!runningRunId;
+  // IP 半自动预览（ipPreviewRunId）与正式 SSE run 共用"运行中"画布渲染（同源 useOrderedSteps）。
+  const isViewingRunning = activeEntryKey === runningEntryKey && (!!runningRunId || !!ipPreviewRunId);
   // 加载对象 + 顺序由 useOrderedSteps 统一计算（与文本阅读模式同源同序）。
   const steps = useOrderedSteps();
   const result = activeResult;

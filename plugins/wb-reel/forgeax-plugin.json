@@ -80,6 +80,76 @@
         }
       },
       {
+        "id": "reel:get-scene-timeline",
+        "args": "./schemas/get-scene-timeline.args.json",
+        "returns": "./schemas/get-scene-timeline.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取单个场景(节点)的可编辑时间轴：分镜 shots、台词 dialogue、QTE 节奏点、音频 audio、花字 textOverlays、标记点 markers —— 每项都带 id 与时间(ms)。调用任何 reel:update-shot / reel:edit-* 前先用它拿到真实 id 与现有时间。只读,不需工作台打开。",
+          "en": "Read one scene's editable timeline in compact form: shots, dialogue, QTE cues, audio clips, text overlays (花字) and markers — each with id and timing (ms). Call this BEFORE any reel:update-shot / reel:edit-* tool to learn real ids and current times. Read-only; workbench need not be open."
+        }
+      },
+      {
+        "id": "reel:update-shot",
+        "args": "./schemas/update-shot.args.json",
+        "returns": "./schemas/update-shot.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增量修改单个分镜的时间轴属性：变速/定格(speed,1=正常/0=定格/0.5~2=慢快放)、起止 startMs/endMs、入场转场 transitionIn、首尾动画 clipAnim。只改你给的字段。先用 reel:get-scene-timeline 拿 shotId。数据立即落盘,工作台数秒内 reload。",
+          "en": "Incrementally patch one shot's timeline properties: speed (变速/定格; 1=normal/0=freeze/0.5~2=slow-fast), in/out timing, entrance transition (转场), clip in/out animation (首尾动画). Only provided fields change. Get shotId via reel:get-scene-timeline. Persists immediately; workbench reloads within seconds."
+        }
+      },
+      {
+        "id": "reel:edit-dialogue",
+        "args": "./schemas/edit-dialogue.args.json",
+        "returns": "./schemas/edit-dialogue.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增/改/删 一条字幕台词(底栏电影字幕,DIA 轨)。op=add 建(text+startMs 必填,返回新 id);op=update 按 id 改;op=remove 按 id 删。先用 reel:get-scene-timeline 拿 id。时间为相对场景起点 ms。",
+          "en": "Add/update/remove a subtitle dialogue line (DIA track). op=add (text+startMs required, returns new id); op=update by id; op=remove by id. Get ids via reel:get-scene-timeline. Times in ms from scene start."
+        }
+      },
+      {
+        "id": "reel:edit-qte",
+        "args": "./schemas/edit-qte.args.json",
+        "returns": "./schemas/edit-qte.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增/改/删 一个 QTE 节奏点(限时点按)。op=add 建(shape+appearAt+targetAt 必填,返回新 id;场景没有 qte 块时自动以默认窗口/分值创建);op=update 按 id 改;op=remove 按 id 删。hold 需 durationMs,sweep 需 sweepDir。",
+          "en": "Add/update/remove a QTE cue. op=add (shape+appearAt+targetAt required, returns new id; creates the qte block with default windows/scores if absent); op=update by id; op=remove by id. hold needs durationMs, sweep needs sweepDir."
+        }
+      },
+      {
+        "id": "reel:edit-text-overlay",
+        "args": "./schemas/edit-text-overlay.args.json",
+        "returns": "./schemas/edit-text-overlay.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增/改/删 一个花字/文字叠加(自由摆放装饰文字,TEXT 轨,区别于底栏字幕)。op=add 建(text+startMs 必填,x/y 默认画面中心,返回新 id);op=update 按 id 改;op=remove 按 id 删。x/y 归一化 0~1(0.5,0.5=中心),fontSizePct=画面高度百分比。",
+          "en": "Add/update/remove a free text overlay (花字, TEXT track; distinct from bottom subtitles). op=add (text+startMs required, x/y default to center, returns new id); op=update by id; op=remove by id. x/y normalized 0..1 (0.5,0.5=center); fontSizePct = % of frame height."
+        }
+      },
+      {
+        "id": "reel:edit-audio",
+        "args": "./schemas/edit-audio.args.json",
+        "returns": "./schemas/edit-audio.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增/改/删 一段音频 clip(BGM/音效/配音)。op=add 建(role+ref+startMs+durationMs 必填,ref=mediaStore 音频 id,可由 reel:list-assets 查,返回新 id);op=update 按 id 改(含 volume 0~1、淡入 fadeInMs、淡出 fadeOutMs);op=remove 按 id 删。",
+          "en": "Add/update/remove an audio clip (BGM/SFX/voice-over). op=add (role+ref+startMs+durationMs required; ref = mediaStore audio id from reel:list-assets; returns new id); op=update by id (incl. volume 0..1, fadeInMs, fadeOutMs); op=remove by id."
+        }
+      },
+      {
+        "id": "reel:edit-marker",
+        "args": "./schemas/edit-marker.args.json",
+        "returns": "./schemas/edit-marker.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "增/命名/删 一个时间轴标记点(剪映式打点,编辑期参考锚点,不进成片)。op=add(ms 必填,label 可选,返回 id;距已有点 1ms 内返回该点);op=rename 按 id 改名;op=remove 按 id 删。ms 相对场景起点。",
+          "en": "Add/rename/remove a timeline marker (editor reference anchor; never enters the final cut). op=add (ms required, optional label, returns id; within 1ms of an existing marker returns that one); op=rename by id; op=remove by id. ms relative to scene start."
+        }
+      },
+      {
         "id": "reel:get-script-meta",
         "args": "./schemas/get-script-meta.args.json",
         "returns": "./schemas/get-script-meta.returns.json",

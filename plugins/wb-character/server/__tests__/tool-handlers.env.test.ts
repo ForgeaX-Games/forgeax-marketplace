@@ -5,8 +5,8 @@
  * `requestedEnv`; bypassing it would defeat the sandbox / Bus permission
  * layer (see 15-IMPLEMENTATION-COVERAGE.md gap #2).
  *
- * Strategy: spy on the plugin-local `./character-forge` SSOT so we can observe
- * the ctx the dispatch layer forwards. We only need to confirm two things:
+ * Strategy: spy on `@server-lib/character-forge` so we can observe the ctx
+ * the dispatch layer forwards. We only need to confirm two things:
  *
  *   1. `ctx.env` reaches the forge handler verbatim (no merge with
  *      process.env, no overrides).
@@ -21,7 +21,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const listSpy = vi.fn()
 const getSpy = vi.fn()
 
-vi.mock('../character-forge', () => ({
+vi.mock('../character-forge/index', () => ({
   listCharacters: (ctx: unknown, slug: string) => {
     listSpy(ctx, slug)
     return { slug, items: [] }
@@ -33,6 +33,7 @@ vi.mock('../character-forge', () => ({
   // Other exports aren't reached by these tests; stub as throw to catch drift.
   generatePortrait: () => { throw new Error('not exercised') },
   generateSpriteSheet: () => { throw new Error('not exercised') },
+  generateTurnaround: () => { throw new Error('not exercised') },
   renameCharacter: () => { throw new Error('not exercised') },
 }))
 
@@ -53,13 +54,28 @@ describe('wb-character tool-handlers — gap #2 sandbox env routing', () => {
         toolId: 'character:list',
         env: fakeEnv,
         cwd: '/plugin/install/dir',
+        projectRoot: '/studio/instance/root',
       },
     )
     expect(listSpy).toHaveBeenCalledTimes(1)
     const ctx = listSpy.mock.calls[0][0] as { env: Record<string, string | undefined>; projectRoot: string }
     expect(ctx.env).toBe(fakeEnv)
     expect(ctx.env.GEMINI_API_KEY).toBe('forwarded-from-registry')
-    expect(ctx.projectRoot).toBe('/plugin/install/dir')
+    expect(ctx.projectRoot).toBe('/studio/instance/root')
+  })
+
+  it('derives projectRoot from FORGEAX_PROJECT_ROOT when projectRoot is omitted', async () => {
+    await tools['character:get'](
+      { slug: 'demo', charId: 'c1' },
+      {
+        caller: { kind: 'ai', threadId: 't1' } as any,
+        toolId: 'character:get',
+        env: { GEMINI_API_KEY: 'only-this-key', FORGEAX_PROJECT_ROOT: '/from-env/root' },
+        cwd: '/plugin/install/dir',
+      },
+    )
+    const ctx = getSpy.mock.calls[0][0] as { env: Record<string, string | undefined>; projectRoot: string }
+    expect(ctx.projectRoot).toBe('/from-env/root')
   })
 
   it('does not leak process.env keys that were not in ctx.env', async () => {
@@ -72,6 +88,7 @@ describe('wb-character tool-handlers — gap #2 sandbox env routing', () => {
           toolId: 'character:get',
           env: { GEMINI_API_KEY: 'only-this-key' },
           cwd: '/plugin/install/dir',
+          projectRoot: '/studio/instance/root',
         },
       )
       const ctx = getSpy.mock.calls[0][0] as { env: Record<string, string | undefined> }
@@ -83,16 +100,12 @@ describe('wb-character tool-handlers — gap #2 sandbox env routing', () => {
     }
   })
 
-  it('falls back to {} env and process.cwd when no ctx is supplied (test-only path)', async () => {
-    await tools['character:list'](
-      { slug: 'demo' },
-      // simulate a caller that built its own ctx without env/cwd — registry
-      // always passes both, so this branch only triggers in unit tests
-      { caller: { kind: 'user', threadId: 't1' } as any, toolId: 'character:list' },
-    )
-    const ctx = listSpy.mock.calls[0][0] as { env: Record<string, string | undefined>; projectRoot: string }
-    expect(ctx.env).toEqual({})
-    expect(typeof ctx.projectRoot).toBe('string')
-    expect(ctx.projectRoot.length).toBeGreaterThan(0)
+  it('throws misconfigured when projectRoot and FORGEAX_PROJECT_ROOT are missing', async () => {
+    await expect(
+      tools['character:list'](
+        { slug: 'demo' },
+        { caller: { kind: 'user', threadId: 't1' } as any, toolId: 'character:list', env: {} },
+      ),
+    ).rejects.toMatchObject({ code: 'misconfigured' })
   })
 })

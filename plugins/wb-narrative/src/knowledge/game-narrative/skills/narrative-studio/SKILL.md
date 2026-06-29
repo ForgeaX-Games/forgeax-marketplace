@@ -34,7 +34,6 @@ permissions: [none]
 
 ## Non-goals
 
-- 创意脑暴/早期概念探索（使用 `narrative-lab`）
 - 单个任务/关卡的专项设计（使用 `mission-designer`）
 - 跨媒介 IP 转译（使用 `media-adapter`）
 - 叙事-玩法一致性审计（使用 `ludo-auditor`）

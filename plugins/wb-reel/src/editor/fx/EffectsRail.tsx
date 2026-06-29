@@ -8,6 +8,8 @@ import {
   FX_CLIP_ANIM,
   FX_EFFECTS,
   FX_FILTERS,
+  FX_STICKER_ANIM_IN,
+  FX_STICKER_ANIM_OUT,
   FX_STICKERS,
   FX_TRANSITIONS,
   getTransitionPreset,
@@ -46,7 +48,7 @@ function shotAtMs(scene: Scene | undefined, ms: number): Shot | undefined {
  * 的参数编辑器（强度 / 位置 / 旋转 / 时长……，调节给全套色彩滑块）。
  */
 
-type RailTab = 'transition' | 'effect' | 'sticker' | 'filter' | 'adjust' | 'clipAnim' | 'mine'
+type RailTab = 'transition' | 'effect' | 'sticker' | 'filter' | 'adjust' | 'clipAnim' | 'speed' | 'mine'
 
 const TABS: { id: RailTab; label: string }[] = [
   { id: 'transition', label: '转场' },
@@ -55,6 +57,7 @@ const TABS: { id: RailTab; label: string }[] = [
   { id: 'filter', label: '滤镜' },
   { id: 'adjust', label: '调节' },
   { id: 'clipAnim', label: '首尾动画' },
+  { id: 'speed', label: '变速' },
   { id: 'mine', label: '我的' },
 ]
 
@@ -129,6 +132,7 @@ export function EffectsRail({ sceneId, hoverMs, collapsed, onToggleCollapsed }: 
         {tab === 'filter' && <FilterTab sceneId={sceneId} hoverMs={hoverMs} total={total} />}
         {tab === 'adjust' && <AdjustTab sceneId={sceneId} hoverMs={hoverMs} total={total} />}
         {tab === 'clipAnim' && <ClipAnimTab sceneId={sceneId} hoverMs={hoverMs} />}
+        {tab === 'speed' && <SpeedTab sceneId={sceneId} hoverMs={hoverMs} />}
         {tab === 'mine' && <MineTab sceneId={sceneId} hoverMs={hoverMs} total={total} />}
       </div>
 
@@ -481,6 +485,63 @@ function ClipAnimTab({ sceneId, hoverMs }: { sceneId: string; hoverMs: number })
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// 变速 / 定格（剪映式 · 落在 shot.speed）
+// ─────────────────────────────────────────────────────────────────────
+
+const SPEED_OPTS: { v: number; label: string }[] = [
+  { v: 0, label: '定格' },
+  { v: 0.5, label: '0.5×' },
+  { v: 0.75, label: '0.75×' },
+  { v: 1, label: '1×' },
+  { v: 1.5, label: '1.5×' },
+  { v: 2, label: '2×' },
+]
+
+function SpeedTab({ sceneId, hoverMs }: { sceneId: string; hoverMs: number }) {
+  const scene = useScenarioStore((s) => s.scenario.scenes[sceneId])
+  const updateShot = useScenarioStore((s) => s.updateShot)
+  const selectedShotId = useShellStore((s) => s.selectedShotId)
+
+  const shots = timedShotsOf(scene)
+  // 作用于「选中的镜」，无选中则取游标处的镜；都没有则回退首镜。
+  const targetShot =
+    shots.find((s) => s.id === selectedShotId) ?? shotAtMs(scene, hoverMs) ?? shots[0]
+
+  if (!targetShot) {
+    return (
+      <div className="ks-fx-tabpane">
+        <p className="ks-fx-hint">
+          变速作用于「镜头视频段」。本节点暂无分镜镜头，先在时间轴拆出镜头再来调速。
+        </p>
+      </div>
+    )
+  }
+
+  const cur = targetShot.speed ?? 1
+  const shotIdx = shots.findIndex((s) => s.id === targetShot.id) + 1
+
+  return (
+    <div className="ks-fx-tabpane">
+      <p className="ks-fx-hint">
+        作用于【镜 {shotIdx}】这一段（在时间轴点选其他镜可切换）。
+        <b>定格</b>＝画面停在当前帧（播放时暂停推进）；0.5×–2× 改视频播放倍速。
+      </p>
+      <div className="ks-fx-grid ks-fx-grid-3">
+        {SPEED_OPTS.map((o) => (
+          <PresetCard
+            key={o.v}
+            glyph={o.v === 0 ? '❙❙' : o.v < 1 ? '🐢' : o.v > 1 ? '🐇' : '▶'}
+            label={o.label}
+            active={Math.abs(cur - o.v) < 0.01}
+            onApply={() => updateShot(sceneId, targetShot.id, { speed: o.v })}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // 我的 / 收藏
 // ─────────────────────────────────────────────────────────────────────
 
@@ -736,7 +797,33 @@ function FxInspector({ sceneId }: { sceneId: string }) {
           <input type="color" value={c.color ?? '#ffd24a'} onChange={(e) => upd({ color: e.target.value })} />
         </label>
       )}
-      <p className="ks-fx-hint">提示：在画面预览里直接拖动贴纸可改位置。</p>
+      <label className="ks-fx-row ks-fx-row-text">
+        <span>入场</span>
+        <select
+          className="ks-fx-select"
+          value={c.enter ?? ''}
+          onChange={(e) => upd({ enter: e.target.value || undefined })}
+        >
+          <option value="">无</option>
+          {FX_STICKER_ANIM_IN.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="ks-fx-row ks-fx-row-text">
+        <span>出场</span>
+        <select
+          className="ks-fx-select"
+          value={c.exit ?? ''}
+          onChange={(e) => upd({ exit: e.target.value || undefined })}
+        >
+          <option value="">无</option>
+          {FX_STICKER_ANIM_OUT.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+      </label>
+      <p className="ks-fx-hint">提示：在画面预览里直接拖动贴纸可改位置；入/出场动画在播放经过贴纸首尾时显现。</p>
     </div>
   )
 }
@@ -856,6 +943,7 @@ const css = `
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+.ks-fx-grid-3 { grid-template-columns: repeat(3, 1fr); }
 .ks-fx-card {
   position: relative;
   cursor: pointer;
@@ -964,6 +1052,17 @@ const css = `
   padding: 3px 6px;
   font-size: 11px;
 }
+.ks-fx-select {
+  flex: 1; min-width: 0;
+  background: var(--ks-panel-elev);
+  border: 1px solid var(--ks-border-soft);
+  border-radius: var(--ks-radius-sm);
+  color: var(--ks-text);
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ks-fx-select:focus-visible { border-color: var(--ks-amber); outline: none; }
 .ks-fx-clear {
   all: unset;
   cursor: pointer;

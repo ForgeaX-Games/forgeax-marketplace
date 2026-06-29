@@ -103,6 +103,267 @@ export async function startRun(
   return res.json();
 }
 
+/**
+ * IP DNA 多模态摄入载荷（对齐后端 POST /api/narrative/ip-dna/start 的 files[]）。
+ * - 文本：content（utf8 字符串）
+ * - .docx：content_base64 + encoding="base64-docx"（后端 mammoth 解析）
+ * - 二进制（图片/视频/音频/PDF/压缩包）：content_base64（不带 encoding，后端按 file_type 处理）
+ */
+export interface IpDnaFilePayload {
+  file_name?: string;
+  content?: string;
+  content_base64?: string;
+  encoding?: "utf8" | "base64-docx";
+  file_type?: string;
+  role?: string;
+}
+
+export interface IpDnaStartOptions {
+  title?: string;
+  tier?: TierId;
+  generationMode?: ModeId;
+  complexity?: number;
+  /** 路由组（planning/narrative）：决定下游走策划全量还是叙事单品（§5.1 ROUTING 透传）。 */
+  routeGroup?: string;
+  /** 品类编码：scoped 生成喂 vn/rpg 管线的路由依据（§5.1/§L genreCode 透传）。 */
+  genreCode?: string;
+  /** 默认 true：跑完提取后继续跑生成管线（重需求端到端）。 */
+  runGeneration?: boolean;
+}
+
+export interface IpDnaJobStartResponse {
+  jobId: string;
+  story_timestamp: string;
+  status: string;
+}
+
+export interface IpDnaJobStatus {
+  jobId: string;
+  story_timestamp?: string;
+  status: "pending" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled" | "degraded";
+  current_stage?: string;
+  progress?: number;
+  message?: string;
+  error?: string;
+  result?: {
+    story_timestamp?: string;
+    run_id?: string;
+    title?: string;
+    media_type?: string;
+    node_count?: number;
+    /** ingest 阶段结果：层级树 + 默认裁剪/单元/维度 + 干扰过滤。 */
+    hierarchy?: unknown[];
+    volume?: unknown;
+    decomposition?: unknown;
+    noise_filtered?: string[];
+    default_scope?: unknown;
+    default_game_unit_plan?: unknown;
+    default_dimensions?: unknown;
+    awaiting?: string;
+    /** D3 提取质量闸门（§14.2/§L）：层级连通 / 三件套齐全 / 核心要素 / 五大类算子覆盖。 */
+    extraction_quality?: {
+      passed: boolean;
+      checks: Array<{ name: string; passed: boolean; detail?: string }>;
+      warnings: string[];
+    };
+    game_units?: Array<{ index: number; generated?: boolean; output_dir?: string }>;
+  };
+}
+
+/**
+ * 重需求摄入（蓝图 §5）：上传多模态/压缩包/多文件 → IP DNA → 改编 → 生成。
+ * 异步模式：立即返回 jobId，前端轮询 fetchIpDnaJob。
+ */
+export async function startIpDnaRun(
+  files: IpDnaFilePayload[],
+  opts: IpDnaStartOptions = {},
+): Promise<IpDnaJobStartResponse> {
+  const res = await fetch(`${API_BASE}/api/narrative/ip-dna/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      files,
+      title: opts.title,
+      tier: opts.tier,
+      generation_mode: opts.generationMode,
+      complexity: opts.complexity,
+      route_group: opts.routeGroup,
+      genre_code: opts.genreCode,
+      run_generation: opts.runGeneration !== false,
+      async: true,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `IP DNA start failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 轮询 IP DNA 异步任务进度（§11）。 */
+export async function fetchIpDnaJob(jobId: string): Promise<IpDnaJobStatus> {
+  const res = await fetch(`${API_BASE}/api/narrative/ip-dna/job/${jobId}`);
+  if (!res.ok) throw new Error(`Failed to fetch IP DNA job: ${res.status}`);
+  return res.json();
+}
+
+/** 取消 IP DNA 异步任务（§5.1 取消生产；与主管线 cancelRun 对齐统一 job 状态）。 */
+export async function ipDnaCancel(jobId: string): Promise<{ jobId: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/narrative/ip-dna/job/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to cancel IP DNA job: ${res.status}`);
+  return res.json();
+}
+
+// ─────────────────────────────────────────────────────────────────
+// IP 半自动阶段门 API 客户端（§5.1）：ingest → hierarchy →(decompose)→ confirm → extract/generate。
+// 与平台 agent 工具 narrative:ip-dna-* 走同一组后端端点，行为等价（双通道）。
+// ─────────────────────────────────────────────────────────────────
+
+/** 层级节点摘要（前端展示/裁剪范围下拉用）。 */
+export interface IpHierarchyNode {
+  id: string;
+  levelType: "complete" | "part" | "chapter" | "unit";
+  index: number;
+  title: string;
+  parent: string | null;
+  children?: string[];
+  childRange?: string;
+}
+
+/** ingest / hierarchy 共用的层级树 + 默认裁剪/单元/维度摘要。 */
+export interface IpHierarchyResult {
+  story_timestamp: string;
+  run_id: string;
+  title: string;
+  media_type: string;
+  node_count: number;
+  hierarchy: IpHierarchyNode[];
+  volume?: { charCount: number; isShort: boolean; needsDecompose: boolean; suggestedChunks: number; thresholdBasis: string };
+  decomposition?: { iterations: number; splitUnits: number; residualOversize: boolean };
+  noise_filtered?: string[];
+  default_scope?: { full: boolean; selections?: unknown[] };
+  default_game_unit_plan?: { mode: "single" | "series"; units: unknown[]; userSpecified?: boolean };
+  default_dimensions?: unknown;
+  confirmation?: Record<string, unknown>;
+  awaiting?: string;
+  jobId?: string;
+  status?: string;
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((b as { error?: string }).error ?? `请求失败: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 阶段门①：摄入 + 标准化（async=true 返回 jobId，轮询 fetchIpDnaJob 取层级树摘要）。 */
+export async function ipDnaIngest(
+  files: IpDnaFilePayload[],
+  opts: { title?: string; decompose?: boolean; model?: string; async?: boolean; storyTimestamp?: string } = {},
+): Promise<IpHierarchyResult> {
+  return postJson<IpHierarchyResult>(`${API_BASE}/api/narrative/ip-dna/ingest`, {
+    files,
+    title: opts.title,
+    decompose: opts.decompose,
+    model: opts.model,
+    async: opts.async,
+    story_timestamp: opts.storyTimestamp,
+  });
+}
+
+/** 只读层级树 + 默认裁剪/单元/维度 + 体量（供确认裁剪范围引导）。 */
+export async function fetchIpHierarchy(runId: string): Promise<IpHierarchyResult> {
+  const res = await fetch(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/hierarchy`);
+  if (!res.ok) throw new Error(`Failed to fetch hierarchy: ${res.status}`);
+  return res.json();
+}
+
+/** 只读：按 runId 读取已落盘 IP DNA 层级树摘要（§6/§10，历史回放还原输入模块用）。 */
+export interface IpDnaHierarchySummary {
+  story_id: string;
+  title: string;
+  media_type: string;
+  node_count: number;
+  hierarchy: IpHierarchyNode[];
+}
+export async function fetchIpDnaHierarchy(runId: string): Promise<IpDnaHierarchySummary | null> {
+  const res = await fetch(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to fetch IP DNA hierarchy: ${res.status}`);
+  return res.json();
+}
+
+/** 拆解（§5 步骤6-10）：超线时按标记/单元闭环拆解→再标准化→重写骨架层级树。 */
+export async function ipDnaDecompose(runId: string): Promise<{ run_id: string; decomposed: boolean; chunk_count: number; closure: unknown; node_count: number; hierarchy: IpHierarchyNode[] }> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/decompose`, {});
+}
+
+/** ① 确认裁剪范围（§4.4 第①步）。 */
+export async function ipDnaConfirmScope(
+  runId: string,
+  body: { scopeSelections?: unknown[]; scopeFull?: boolean; adaptationNotes?: string } = {},
+): Promise<{ run_id: string; confirmation: Record<string, unknown>; awaiting: string }> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/confirm-scope`, {
+    scope_selections: body.scopeSelections,
+    scope_full: body.scopeFull,
+    adaptation_notes: body.adaptationNotes,
+  });
+}
+
+/** ② 确认游戏单元 + 改编维度（§4.4 第②③步）。 */
+export async function ipDnaConfirmUnits(
+  runId: string,
+  body: { gameUnitPlan?: unknown; adaptationDimensions?: unknown; mode?: "single" | "series"; targetUnits?: number } = {},
+): Promise<{ run_id: string; confirmation: Record<string, unknown>; awaiting: string }> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/confirm-units`, {
+    game_unit_plan: body.gameUnitPlan,
+    adaptation_dimensions: body.adaptationDimensions,
+    mode: body.mode,
+    target_units: body.targetUnits,
+  });
+}
+
+/** ③ 生成 scoped IP DNA（仅提取，run_generation=false）。async=true 走 job。 */
+export async function ipDnaExtract(
+  runId: string,
+  opts: { pipelineFamily?: "rpg" | "vn"; tier?: TierId; generationMode?: ModeId; complexity?: number; maxGameUnits?: number; equipOperators?: boolean; model?: string; async?: boolean } = {},
+): Promise<IpDnaJobStartResponse | IpDnaJobStatus["result"]> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/extract`, {
+    pipeline_family: opts.pipelineFamily,
+    tier: opts.tier,
+    generation_mode: opts.generationMode,
+    complexity: opts.complexity,
+    max_game_units: opts.maxGameUnits,
+    equip_operators: opts.equipOperators,
+    model: opts.model,
+    async: opts.async,
+  });
+}
+
+/** 开始生成（§5 步骤4→5）：提取 + 下游生成自动串跑。async=true 走 job。 */
+export async function ipDnaGenerate(
+  runId: string,
+  opts: { pipelineFamily?: "rpg" | "vn"; tier?: TierId; generationMode?: ModeId; complexity?: number; maxGameUnits?: number; equipOperators?: boolean; model?: string; async?: boolean } = {},
+): Promise<IpDnaJobStartResponse | IpDnaJobStatus["result"]> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/generate`, {
+    pipeline_family: opts.pipelineFamily,
+    tier: opts.tier,
+    generation_mode: opts.generationMode,
+    complexity: opts.complexity,
+    max_game_units: opts.maxGameUnits,
+    equip_operators: opts.equipOperators,
+    model: opts.model,
+    async: opts.async,
+  });
+}
+
 /** Fetch final result */
 export async function fetchResult(runId: string): Promise<RunResultResponse> {
   const res = await fetch(`${API_BASE}/api/narrative/result/${runId}`);

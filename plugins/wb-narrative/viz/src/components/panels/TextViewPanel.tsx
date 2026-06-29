@@ -101,6 +101,7 @@ export function TextViewPanel() {
   // 加载对象 + 顺序由 useOrderedSteps 统一计算（与可视化节点模式同源同序）。
   const steps = useOrderedSteps();
   const result = activeResult;
+  // IP 半自动预览也设置了 runningEntryKey（见 startIpPreviewRun），故沿用同一判定即可。
   const isRunningState = isViewingRunning && !!runningEntryKey;
   const totalSteps = steps.length;
   const completedSteps = steps.filter((s) => s.status === "completed").length;

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-audio returns",
+  "description": "Result of an audio clip add/update/remove.",
+  "type": "object",
+  "properties": {
+    "scenarioId": { "type": "string" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string" },
+    "id": { "type": "string", "description": "Affected audio clip id (the new id for add)." },
+    "updatedAt": { "type": "number" },
+    "ok": { "type": "boolean" }
+  }
+}

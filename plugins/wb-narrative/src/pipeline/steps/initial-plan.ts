@@ -198,6 +198,10 @@ export async function initialPlan(
   };
   ctx.core_settings = coreSettings;
 
+  // ── 全局故事标题（§6.5）：D0 生成的 world_name 即全局唯一 story_title；
+  // 若上游（如 IP DNA A→B 种子）已预置 story_title 则尊重之，保证一级标题与算子 source-name 全局统一。──
+  if (!ctx.story_title?.trim()) ctx.story_title = parsed.world_name;
+
   // ── 写入 plot_synopsis ──
   const synopsis: PlotSynopsis = {
     synopsis_strategy: parsed.synopsis_strategy ?? "",

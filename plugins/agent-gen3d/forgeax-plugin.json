@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-gen3d",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Gen3D · 3D 角色生成师", "en": "Gen3D · 3D Character Artist" },
+  "description": {
+    "zh": "专职 3D 角色生成师。在「3D 角色生成」工坊（wb-gen3d）里用文生 / 图生 / 多视图生成带贴图角色，按需绑骨、套动作、评分、命名，产出 per-game 的 .glb 资产。只做 3D 角色资产生产，不写引擎代码、不画 2D 立绘。",
+    "en": "Dedicated 3D character artist. Generates textured characters (text / image / multi-view) in the Gen3D workbench (wb-gen3d), then rigs / animates / scores / names them into per-game .glb assets. 3D character assets only — no engine code, no 2D art."
+  },
+  "provides": {
+    "agent": {
+      "id": "gen3d",
+      "role": "modeling",
+      "card": {
+        "name": { "zh": "Gen3D", "en": "Gen3D" },
+        "color": "#E0A458",
+        "avatar": "🗿"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "**/.forgeax/games/*/assets/3d/**"
+      ],
+      "agentTags": ["gen3d", "3d", "角色", "character", "绑骨", "rig", "动作", "animation", "建模", "modeling"],
+      "tools": ["gen3d:*"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

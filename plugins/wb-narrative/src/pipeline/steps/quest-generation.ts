@@ -10,7 +10,7 @@ import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { chunkArray } from "../topo-sort.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 import { getNodeFilter } from "../node-merge.js";
 import { runGraphQA, type GraphAdapter, type QaGraph } from "../../utils/graph-qa.js";
@@ -43,12 +43,13 @@ export const QUEST_GENERATION_COMPOSER: PromptComposer = {
 - 触发条件必须基于剧情上下文（不能凭空）
 - 奖励道具应尽量来自道具清单
 - 前后任务链必须符合剧情时间线`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `输出JSON对象：
 {"quests": [{ ... }]}`,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

@@ -114,8 +114,9 @@ function validate(parsed: VnSegmentConfirmed): void {
   if (!parsed.selected_range?.start || !parsed.selected_range?.end) {
     throw new Error("selected_range.start/end 不能为空");
   }
-  if (!Array.isArray(parsed.acts) || parsed.acts.length !== 3) {
-    throw new Error("acts 必须恰好 3 项（重新分幕 一/二/三）");
+  // 开放幕数（§4.6）：重新分幕至少 2 幕，不再硬性要求恰好三幕。
+  if (!Array.isArray(parsed.acts) || parsed.acts.length < 2) {
+    throw new Error("acts 至少 2 项（重新分幕，开放幕数）");
   }
   if (!Array.isArray(parsed.scenes) || parsed.scenes.length === 0) {
     throw new Error("scenes 不能为空");

@@ -206,8 +206,14 @@ function makeHost(): ForgeaxHost {
     },
     tool: {
       async call(toolId, args, timeoutMs) {
+        // caller.kind MUST be one of the @forgeax/types ToolCallSchema enum
+        // ('user'|'ai'|'skill'|'workbench'|'cli') — 'plugin' is NOT valid there
+        // and makes the host RpcChannel drop the whole tool.call envelope on
+        // schema validation, so no tool.result ever comes back (the call hangs
+        // until timeout). The host overrides this to {kind:'workbench',agentId}
+        // anyway; we mirror that so the envelope passes validation.
         const resp = await request<{ kind: 'tool.result'; result: ToolResult }>(
-          { kind: 'tool.call', call: { toolId, args, caller: { kind: 'plugin', pluginId: PLUGIN_ID } } },
+          { kind: 'tool.call', call: { toolId, args, caller: { kind: 'workbench', agentId: PLUGIN_ID } } },
           'tool.result',
           timeoutMs,
         );

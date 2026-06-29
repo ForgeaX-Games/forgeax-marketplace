@@ -391,6 +391,17 @@ export interface PipelineStepDef {
 }
 
 export const STEP_CTX_FIELD: Record<string, string> = {
+  // IP 输入处理前驱（ctx 无对应字段，由阶段门进度独立驱动，仅占位以纳入预览顺序）
+  ip_input: "ip_input",
+  ip_standardize: "ip_standardize",
+  ip_volume: "ip_volume",
+  ip_decompose: "ip_decompose",
+  // 改编规划（范围裁剪 + 游戏单元，§5.1 合并步骤）
+  ip_adapt_plan: "ip_adapt_plan",
+  // 向后兼容：旧存档的分离节点 id，仍可映射（前端预览顺序已合并为 ip_adapt_plan）
+  ip_scope: "ip_scope",
+  ip_game_unit: "ip_game_unit",
+  ip_dna_extract: "ip_dna_extract",
   preference_summary: "user_preference_summary",
   preference_analysis: "user_preference_analysis",
   initial_plan: "initial_plan",
@@ -441,6 +452,15 @@ export const STEP_CTX_FIELD: Record<string, string> = {
 };
 
 export const PIPELINE_STEPS: PipelineStepDef[] = [
+  // ── IP 输入处理前驱（§5 半自动；生成管线前置，节点化展示输入+IP处理）──
+  // C 序号在中间管线运行时按实际路径动态赋号（见 PipelineStatusBar withDynamicIpPrefix），
+  // 故此处只存基础标签，不写死 Cn（拆解/游戏单元规划等可选分支会改变序号）。
+  { id: "ip_input", label: "IP 作品输入", type: "pipeline" },
+  { id: "ip_standardize", label: "标准化", type: "pipeline" },
+  { id: "ip_volume", label: "体量判断", type: "pipeline" },
+  { id: "ip_decompose", label: "拆解 · 再标准化", type: "pipeline" },
+  { id: "ip_adapt_plan", label: "改编规划", type: "pipeline" },
+  { id: "ip_dna_extract", label: "生成 scoped IP DNA", type: "pipeline" },
   { id: "tier_router", label: "品类识别", type: "pipeline" },
   { id: "pipeline_config", label: "管线配置", type: "pipeline" },
   // 策划步骤 (D0-D4)

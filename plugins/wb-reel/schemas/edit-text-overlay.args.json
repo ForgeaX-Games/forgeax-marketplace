@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-text-overlay args",
+  "description": "Add / update / remove a free text overlay (花字 / 标题卡 / 角标, TEXT 轨). Distinct from dialogue: overlays are freely positioned/scaled/styled. op='add' needs text+startMs (x,y default to screen center; returns new id). op='update' patches by id. op='remove' deletes by id. Coordinates x/y are normalized 0..1 (0.5,0.5 = center); fontSizePct is % of frame height. Call reel:get-scene-timeline first for ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId", "op"],
+  "properties": {
+    "scenarioId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string", "enum": ["add", "update", "remove"], "description": "add | update | remove" },
+    "id": { "type": "string", "description": "Overlay id. Required for update/remove." },
+    "text": { "type": "string", "description": "Overlay text. Required for add." },
+    "startMs": { "type": "number", "minimum": 0, "description": "Appearance time (ms). Required for add." },
+    "endMs": { "type": "number", "minimum": 0, "description": "Disappear time (ms). Omit = until scene end." },
+    "x": { "type": "number", "minimum": 0, "maximum": 1, "description": "Normalized X (default 0.5)." },
+    "y": { "type": "number", "minimum": 0, "maximum": 1, "description": "Normalized Y (default 0.5)." },
+    "fontSizePct": { "type": "number", "minimum": 1, "maximum": 40, "description": "Font size as % of frame height (default 6)." },
+    "rotation": { "type": "number", "minimum": -180, "maximum": 180, "description": "Rotation in degrees." },
+    "fontWeight": { "type": "number", "minimum": 100, "maximum": 900 },
+    "color": { "type": "string", "description": "Text color (#hex)." },
+    "strokeColor": { "type": "string", "description": "Outline color (#hex)." },
+    "align": { "type": "string", "enum": ["left", "center", "right"] }
+  }
+}

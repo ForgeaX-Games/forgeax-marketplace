@@ -27,7 +27,13 @@ import {
   runStageSynopsis,
   runStageOutline,
 } from './runStages'
-import { distillOutline, distillRelations } from './forgeDistillSkills'
+import {
+  distillOutline,
+  distillRelations,
+  distillCharacters,
+  distillLocations,
+  distillProps,
+} from './forgeDistillSkills'
 import { broadcastScenarioAdopt } from '../shell/crossPaneSync'
 
 export interface ForgeQueueItem {
@@ -138,11 +144,48 @@ export async function triggerForgeFromQueue(item: ForgeQueueItem): Promise<void>
       }`,
     })
 
-    // ── Stage 5.5: Distill outline + relations from the forged scenario ────
+    // ── Stage 5.5a: 锚点回填（角色 / 场所 / 道具）—— 仅在缺失时跑 ───────────
+    // 根因修复：全量扩写（forgeScenarioFromIdea / forgeScriptSegmented）有时只产
+    // 场景+对白，characters/locations/props 稀疏甚至为空 —— 表现为"智能体不会自己
+    // 拆角色、场景、道具也没有"。这里复用 generate-visuals 的同款蒸馏器，从对白
+    // 发言人 + 画面线索反向提取主要角色/场所/关键道具并入库，让后续关系蒸馏与参考图
+    // 都有锚点可用。镜像 visualQueueTrigger 的守卫：只在该类目为空时补，不覆盖已有。
+    if (_aborted) return
+    {
+      const cur = useScenarioStore.getState().scenario
+      const hasChar = Object.keys(cur.characters ?? {}).length > 0
+      const hasLoc = Object.keys(cur.locations ?? {}).length > 0
+      const hasProp = Object.keys(cur.props ?? {}).length > 0
+      if (!hasChar || !hasLoc || !hasProp) {
+        useForgeChatStore.getState().appendPendingStage(cur.id, {
+          label: '回填锚点',
+          detail: '从剧本蒸馏角色 / 场景 / 关键道具',
+        })
+        const [chars, locs, props] = await Promise.all([
+          hasChar ? Promise.resolve([]) : distillCharacters(llm, cur),
+          hasLoc ? Promise.resolve([]) : distillLocations(llm, cur),
+          hasProp ? Promise.resolve([]) : distillProps(llm, cur),
+        ])
+        if (_aborted) return
+        const ss = useScenarioStore.getState()
+        for (const c of chars) ss.upsertCharacter(c)
+        for (const l of locs) ss.upsertLocation(l)
+        for (const p of props) ss.upsertProp(p)
+        if (chars.length > 0 || locs.length > 0 || props.length > 0) {
+          chat.appendMessage(scenarioId, {
+            role: 'assistant',
+            text: `锚点回填完成 · 新增 ${chars.length} 角色 · ${locs.length} 场景 · ${props.length} 关键道具`,
+          })
+        }
+      }
+    }
+
+    // ── Stage 5.5b: Distill outline + relations from the forged scenario ────
+    // 关系蒸馏需 ≥2 角色，故必须在锚点回填之后跑（否则纯场景剧本永远抽不出关系）。
     if (_aborted) return
     const adoptedScenario = useScenarioStore.getState().scenario
     useForgeChatStore.getState().appendPendingStage(
-      useScenarioStore.getState().scenario.id,
+      adoptedScenario.id,
       { label: '提取大纲与人物关系', detail: '从剧本中蒸馏结构信息' },
     )
     const [outline, relations] = await Promise.all([
@@ -157,17 +200,21 @@ export async function triggerForgeFromQueue(item: ForgeQueueItem): Promise<void>
     }
 
     // ── Stage 6: Character/location reference images (if available) ───────
+    // 计数与出图都读**回填后**的 store 剧本，而非原始 res.scenario —— 否则
+    // 回填出来的角色/场景/道具拿不到定妆照。
     if (_aborted) return
     const imgClient = createImageProvider()
     const isMock = imgClient.getProviderName() === 'Mock'
-    const locCount = Object.keys(res.scenario.locations ?? {}).length
-    const propCount = Object.keys(res.scenario.props ?? {}).length
+    const refScenario = useScenarioStore.getState().scenario
+    const refCharCount = Object.keys(refScenario.characters ?? {}).length
+    const locCount = Object.keys(refScenario.locations ?? {}).length
+    const propCount = Object.keys(refScenario.props ?? {}).length
 
-    if (!isMock && (charCount > 0 || locCount > 0 || propCount > 0)) {
+    if (!isMock && (refCharCount > 0 || locCount > 0 || propCount > 0)) {
       useForgeChatStore.getState().setPending(scenarioId, {
         reason: 'forging',
         startedAt: Date.now(),
-        stages: [{ label: '生成参考图', detail: `${charCount} 角色 · ${locCount} 场所 · ${propCount} 道具`, at: Date.now() }],
+        stages: [{ label: '生成参考图', detail: `${refCharCount} 角色 · ${locCount} 场所 · ${propCount} 道具`, at: Date.now() }],
         streamTail: '',
         streamBytes: 0,
         abortable: false,
@@ -176,7 +223,7 @@ export async function triggerForgeFromQueue(item: ForgeQueueItem): Promise<void>
       const mediaStore = useMediaStore.getState()
       const scenarioStore = useScenarioStore.getState()
       await characterRefPass({
-        scenario: res.scenario,
+        scenario: refScenario,
         client: imgClient,
         onCharacterRef: (characterId, result) => {
           const mediaId = mediaStore.ingestDataUrl(result.dataUrl, {
@@ -228,7 +275,7 @@ export async function triggerForgeFromQueue(item: ForgeQueueItem): Promise<void>
 
       chat.appendMessage(scenarioId, {
         role: 'assistant',
-        text: `参考图生成完成 · ${charCount} 角色 · ${locCount} 场所 · ${propCount} 道具`,
+        text: `参考图生成完成 · ${refCharCount} 角色 · ${locCount} 场所 · ${propCount} 道具`,
       })
     }
 

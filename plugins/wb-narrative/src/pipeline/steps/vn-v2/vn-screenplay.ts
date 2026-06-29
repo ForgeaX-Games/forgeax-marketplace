@@ -26,7 +26,7 @@ import type {
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import { getStreamEmit, ORIGINALITY_NOTE, runBySegments } from "./_shared.js";
 import { computeWorldSnapshot, renderWorldSnapshot } from "./vn-state-ledger.js";
 
@@ -35,13 +35,15 @@ const SEGMENT_CONCURRENCY = 4;
 /** 单次 LLM 调用的 beat 上限；超过则把段切成多个子批串行生成（防上下文超限） */
 const MAX_BEATS_PER_CALL = 10;
 
-const VN_SCREENPLAY_COMPOSER: PromptComposer = {
+export const VN_SCREENPLAY_COMPOSER: PromptComposer = {
   stepId: "vn_screenplay",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "ip_dna", "task", "output_format"],
   userBlockOrder: [],
   blocks: {
     role: `你是互动影游剧本主笔。把"剧情树情节点"逐一改写为可拍摄、可演奏的剧本片段。`,
+
+    ip_dna: IP_DNA_SLOT_BLOCK,
 
     task: `## 任务
 - 为 vn_branched_beats.beats 中的每一个 beat 编写剧本片段

@@ -7,6 +7,9 @@ import type { TimelinePreview } from '../editor/timeline/timelinePreview'
 import { loadDialoguePref } from '../editor/timeline/dialoguePref'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { injectStyleOnce } from '../styles/injectStyle'
+import { TimelineTour } from '../editor/onboarding/TimelineTour'
+import { HelpPanel } from '../editor/onboarding/HelpPanel'
+import { useOnboardingStore } from '../editor/onboarding/onboardingStore'
 
 /**
  * SceneDetailDrawer —— 在 StoryTree Tab 内弹出的场景详情编辑面板。
@@ -87,6 +90,12 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
   useEffect(() => {
     selectScene(sceneId)
   }, [sceneId, selectScene])
+
+  // 首次进入场景编辑器自动起新手引导（看过/跳过后不再自动弹；工具栏「?」可重看）。
+  const maybeAutoStartTour = useOnboardingStore((s) => s.maybeAutoStart)
+  useEffect(() => {
+    maybeAutoStartTour()
+  }, [maybeAutoStartTour])
 
   /**
    * 统一关闭入口 —— 先标记 closing 播退出动画，动画结束再通知父组件 unmount。
@@ -252,6 +261,10 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
             </div>
           </div>
         </div>
+        {/* 新手引导（首次自动起）+ 帮助速查（工具栏「?」打开）—— 挂在 aside 内，
+            position:absolute 覆盖整个编辑器区域。 */}
+        <TimelineTour />
+        <HelpPanel />
       </aside>
     </div>
   )

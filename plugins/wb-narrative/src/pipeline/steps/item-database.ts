@@ -2,7 +2,7 @@ import type { NarrativeContext, GameItem } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
 const MIN_ITEMS = 8;
@@ -17,12 +17,13 @@ export const ITEM_DATABASE_COMPOSER: PromptComposer = {
 - 字段包含：name, category, rarity(common/uncommon/rare/epic/legendary), description, effect, initial_owner(null或角色名), initial_scene(初始出现场景名), related_character(关联角色名或null), value({"buy":数字,"sell":数字}), max_stack(堆叠上限), read_content(可选,仅readable物品)
 - description 必须包含：外观描述 + 作用说明
 - 位置信息必须基于世界观/故事/角色信息`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `输出格式（严格 JSON）：
 {"item_database": [ {...}, ... ]}`,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

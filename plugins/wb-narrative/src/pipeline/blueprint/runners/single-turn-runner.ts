@@ -40,6 +40,7 @@ export class SingleTurnRunner implements AgentRunner {
     const systemPrompt = PromptResolver.renderSystemPrompt(
       resolvedPrompts.systemPrompt,
       ctx,
+      step.stepId,
     );
     const userPrompt = PromptResolver.renderUserPrompt(
       resolvedPrompts.userPromptTemplate,

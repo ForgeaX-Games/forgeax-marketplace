@@ -120,6 +120,22 @@ export async function saveSpriteSheet(
   return { path: abs, rel };
 }
 
+export async function saveTurnaroundView(
+  ctx: RouterCtx,
+  slug: string,
+  charId: string,
+  view: string,
+  pngBytes: Uint8Array,
+): Promise<{ path: string; rel: string }> {
+  const dir = charDir(ctx, slug, charId);
+  const ext = sniffImageExt(pngBytes);
+  const rel = `turnaround/${view}.${ext}`;
+  const abs = resolve(dir, rel);
+  await ensureAssetPath(abs);
+  await writeFile(abs, pngBytes);
+  return { path: abs, rel };
+}
+
 export async function listCharacters(ctx: RouterCtx, slug: string): Promise<CharacterListItem[]> {
   const dir = gameCharsDir(ctx, slug);
   if (!existsSync(dir)) return [];

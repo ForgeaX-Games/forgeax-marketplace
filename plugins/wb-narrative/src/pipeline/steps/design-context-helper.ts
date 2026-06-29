@@ -75,6 +75,26 @@ export function appendUserInstructions(prompt: string, ctx: NarrativeContext): s
   return `${prompt}\n\n## 🚨 用户修改意见（本次重新生成的核心指导，必须优先遵守）\n${instructions}`;
 }
 
+/**
+ * IP 原文参考块（§B2）：当存在 IP 改编范围内的原文切片（ctx.uploaded_script.content，
+ * 由 IP DNA 编排在 buildGenerationInput 时注入）时，给结构规划/情节点生成步骤一个显式、
+ * 高优先级的"忠实改编基准"指令。原文正文已由管线 M1.6 拼接到 user_input 末尾，
+ * 此处不重复倾倒全文（避免 token 膨胀），仅显式声明其权威性与改编约束。
+ * 无上传原文时返回空串（忠实/纯生成行为不变）。
+ */
+export function buildIpSourceReference(ctx: NarrativeContext): string {
+  const u = ctx.uploaded_script;
+  if (!u?.content?.trim()) return "";
+  const meta = u.description ?? `${u.format ?? "prose"} 格式（约 ${u.char_count ?? u.content.length} 字）`;
+  return [
+    "\n## 📖 IP 原文参考（忠实改编基准，最高优先级）",
+    `本作品改编自既有 IP，原文素材（${meta}）已附在「用户需求」末尾，请将其作为本步创作的权威依据：`,
+    "- 严格沿用原作的人名、地名、势力、场景命名与关键台词，不臆造与原作冲突的核心设定；",
+    "- 情节顺序、因果关系与人物动机以原文为准，仅在游戏化结构（节点/分支/单元）层面做必要重组；",
+    "- 若原文体量大于本层级所需，按本层级职责提炼，不遗漏原文中的关键转折与高光段落。",
+  ].join("\n");
+}
+
 import { getStepSkill, renderStepSkillForSystemPrompt } from "../../knowledge/game-narrative/skill-loader.js";
 
 /**

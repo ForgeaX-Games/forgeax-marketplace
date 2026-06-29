@@ -84,7 +84,8 @@ export const PIPELINE_TEMPLATES: Record<PipelineTemplateId, PipelineTemplate> = 
 
   "tpl-vn-v2": {
     id: "tpl-vn-v2",
-    label: "互动影游 v2（专属管线）",
+    // 展示层去 v2 后缀（命名统一，§Phase5）；底层 id 保持 tpl-vn-v2 以兼容历史 checkpoint/模板注册。
+    label: "互动影游（专属管线）",
     description:
       "影游叙事 9 步专属管线：E1（Logline → 三幕 → 场 → 情节点）→ G（剧情树改造 → 剧本创作 → 分镜设计）。" +
       "上传剧本时自动切换到 E2 入口（剧本预处理 → 文本段确认 → 跳过 E1 中下层），E1 与 E2 互斥。" +

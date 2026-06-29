@@ -4,6 +4,7 @@ import { useShellStore } from './shell/shellStore'
 import { TopBar } from './ui/TopBar'
 import { ReelSidebar } from './shell/ReelSidebar'
 import { Player } from './player/Player'
+import { RenderStage } from './render/RenderStage'
 import { ForgeTab } from './forge/ForgeTab'
 import { InspectorDrawer } from './shell/InspectorDrawer'
 import { ToastHost } from './ui/ToastHost'
@@ -94,6 +95,21 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
   const [playerOnly] = useState(() => {
     try {
       return new URLSearchParams(window.location.search).get('surface') === 'player'
+    } catch {
+      return false
+    }
+  })
+
+  /*
+   * 2026-06 节点→MP4 导出 · render-only 表面.
+   *
+   * `?surface=render` → 仅挂 <RenderStage />（固定 1080p 离屏画布，逐帧 seek，
+   * 跳过所有交互层），给 headless 录制器逐帧截图。数据加载复用 player-only 的
+   * slim boot（按 ?scn 把剧本与媒体从磁盘灌进来），不挂任何编辑器 chrome。
+   */
+  const [renderOnly] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('surface') === 'render'
     } catch {
       return false
     }
@@ -197,7 +213,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
     // player-only 预览态跳过：这是只读试玩 iframe，不应和编辑器 iframe 抢着
     // 接盘/续跑视频生成任务（否则同一任务会被两个客户端重复 poll）。
     let resumeTimer: number | undefined
-    if (!playerOnly) {
+    if (!playerOnly && !renderOnly) {
       resumeTimer = window.setTimeout(() => {
         resumeRunningVideoTasks({
           onLog: (m) => console.log(m),
@@ -229,7 +245,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
       window.clearInterval(timer)
       if (resumeTimer) window.clearTimeout(resumeTimer)
     }
-  }, [playerOnly])
+  }, [playerOnly, renderOnly])
 
   /**
    * 刷新 / 首次加载 / 导入剧本时 —— 把磁盘里已存在的场景图批量灌回内存。
@@ -518,7 +534,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
      *     · sceneImageCache 自动重置订阅、cross-pane 同步
      *   bootScenarioPersist 仍会装持久化订阅，但只读试玩不改 scenario → 不触发写盘。
      */
-    if (playerOnly) {
+    if (playerOnly || renderOnly) {
       /*
        * 独立站点试玩（Route B）——`?src=pack`：不连 dev server / 不读磁盘镜像，
        * 直接从同目录 `pack-index.json` 找到 reel-game 资产、取回整棵 Scenario，
@@ -635,7 +651,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
       disposeRouteSync()
       disposeCacheReset()
     }
-  }, [persistence, playerOnly])
+  }, [persistence, playerOnly, renderOnly])
 
   // activeTab → mode 单向同步（activeTab 是唯一真相源，mode 仅作镜像兼容）
   //
@@ -669,6 +685,10 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
    * 只渲染沉浸式 Player + Toast，零编辑器 chrome，避免界面嵌套。
    * 复用 .ks-app-root.is-playing 的全屏黑底样式。
    */
+  if (renderOnly) {
+    return <RenderStage />
+  }
+
   if (playerOnly) {
     return (
       <div className="ks-app-root is-playing" data-surface="player">

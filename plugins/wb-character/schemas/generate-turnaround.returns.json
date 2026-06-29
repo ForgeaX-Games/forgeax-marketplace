@@ -1,11 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["charId", "slug", "manifest"],
-  "additionalProperties": true,
+  "required": ["charId", "slug", "views", "manifestPath", "model"],
+  "additionalProperties": false,
   "properties": {
     "charId": { "type": "string" },
     "slug": { "type": "string" },
-    "manifest": { "type": "object", "description": "Updated CharacterManifest (schemaVersion: 2)" }
+    "views": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      }
+    },
+    "manifestPath": { "type": "string" },
+    "model": { "type": "string" },
+    "costEstimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "usd": { "type": "number" },
+        "vendor": { "type": "string" }
+      }
+    }
   }
 }

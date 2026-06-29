@@ -21,8 +21,8 @@ import type {
 } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import {
   buildCharacterDigest,
   buildItemDigest,
@@ -73,10 +73,11 @@ export const DETAIL_PLAN_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
     base: STEP1_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -85,10 +86,11 @@ export const DETAIL_FILL_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
     base: "你是叙事结构设计师。",
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -112,6 +114,7 @@ function buildStep1Prompt(ctx: NarrativeContext): string {
 
   return `## 用户需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 核心设计原则
 - **命运必然论**：L0框架层预设所有命运分支和结局，细纲层在大纲框架内继续细化，不创造新结局
@@ -306,6 +309,7 @@ async function step1_5_batchFill(
 
 ## 用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 世界观
 ${JSON.stringify(ctx.worldview_structure ?? {}, null, 2)}
@@ -400,10 +404,11 @@ export const DETAIL_GAP_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
     base: STEP2_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -426,6 +431,7 @@ function buildStep2Prompt(ctx: NarrativeContext, skeleton: SkeletonNode[], fillM
 
   return `## 用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## L1大纲
 ${outlinesDigest}

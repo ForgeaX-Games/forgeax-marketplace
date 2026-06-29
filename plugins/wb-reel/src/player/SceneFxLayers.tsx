@@ -5,6 +5,7 @@ import type { Scene, StickerClip } from '../scenario/types'
 import {
   activeStickers,
   getStickerPreset,
+  stickerAnimAt,
   type StageFxFrame,
 } from '../fx/fxPresets'
 
@@ -73,14 +74,23 @@ export function FadeLayer({ color, opacity }: { color: string; opacity: number }
 }
 
 // ── 贴纸样式 ──────────────────────────────────────────────────────────
-export function stickerStyle(c: StickerClip): CSSProperties {
+/**
+ * 贴纸定位 + 入/出场动画样式。
+ *
+ * ms 省略时返回"完全显示"基准样式（编辑器拖拽 / 静态取用），传入 ms 时叠加
+ * stickerAnimAt 算出的入/出场偏移（弹入/淡入/滑动…）。平移用 cqw/cqh —— 贴纸层
+ * 容器 container-type:size，与 fontSize 的 cqh 同一基准。
+ */
+export function stickerStyle(c: StickerClip, ms?: number): CSSProperties {
+  const anim = stickerAnimAt(c, ms)
+  const scale = (c.scale ?? 1) * anim.scaleMul
   return {
     position: 'absolute',
     left: `${(c.x ?? 0.5) * 100}%`,
     top: `${(c.y ?? 0.5) * 100}%`,
-    transform: `translate(-50%, -50%) rotate(${c.rotation ?? 0}deg) scale(${c.scale ?? 1})`,
+    transform: `translate(calc(-50% + ${anim.translateXPct}cqw), calc(-50% + ${anim.translateYPct}cqh)) rotate(${c.rotation ?? 0}deg) scale(${scale})`,
     fontSize: `${c.sizePct ?? 12}cqh`,
-    opacity: c.opacity ?? 1,
+    opacity: (c.opacity ?? 1) * anim.opacity,
     color: c.color ?? '#ffd24a',
     lineHeight: 1,
     whiteSpace: 'nowrap',
@@ -111,7 +121,7 @@ export function StickerLayer({ scene, ms }: { scene: Scene; ms: number }) {
   return (
     <div className="ks-fxsticker-layer" aria-hidden>
       {stickers.map((c) => (
-        <div key={c.id} className="ks-fxsticker" style={stickerStyle(c)}>
+        <div key={c.id} className="ks-fxsticker" style={stickerStyle(c, ms)}>
           <StickerContent clip={c} />
         </div>
       ))}

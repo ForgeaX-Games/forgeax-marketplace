@@ -45,6 +45,14 @@ function applyPaneAttribute() {
 async function main() {
   applyPaneAttribute()
 
+  // Studio 现在经 iframe URL `?slug=` 注入 per-game slug —— 旧的 STUDIO_INIT
+  // 消息已退役(全仓无发送方)、host-sdk handshake 的 ctx 也不带 slug。每个
+  // pane(left 表单 / center 预览)是独立 iframe,各自从自己的 URL 读,否则
+  // center pane 的写盘类动作(生成动画 / 生成 3D 四视图 / 写 manifest)会因
+  // slug 为空被拦。STUDIO_CTX 监听保留,供 host 后续推送 slug 变更。
+  const slugParam = new URLSearchParams(location.search).get('slug')
+  if (slugParam) globalState.setSlug(slugParam)
+
   const bridge = new PlatformBridge()
   bridge.onMessage((msg: unknown) => {
     const m = msg as { type?: string; ctx?: { slug?: string | null } }

@@ -31,6 +31,7 @@ import type {
   StickerClip,
   TransitionSpec,
   ClipAnimSpec,
+  TimelineMarker,
 } from './types'
 import { getDemoScenario } from './demoScenario'
 import { makeBlankScenario } from './blankScenario'
@@ -269,6 +270,11 @@ export interface ScenarioStore {
   updateStickerClip: (sceneId: string, clipId: string, patch: Partial<Omit<StickerClip, 'id'>>) => void
   setTransition: (sceneId: string, spec: TransitionSpec | undefined) => void
   setClipAnim: (sceneId: string, spec: ClipAnimSpec | undefined) => void
+
+  /** 时间轴标记点（剪映式打点，编辑期锚点，不进输出）。返回新点 id（同位置 ±1ms 不重复加）。 */
+  addMarker: (sceneId: string, ms: number, label?: string) => string
+  removeMarker: (sceneId: string, markerId: string) => void
+  renameMarker: (sceneId: string, markerId: string, label: string) => void
 
   /**
    * 一键清空时间轴上的可见 clip —— 不动 scene 基础信息（title / media /
@@ -1347,6 +1353,38 @@ export const useScenarioStore = create<ScenarioStore>()(
     set((s) => mutateScene(s, sceneId, (scene) => ({ ...scene, transition: spec }))),
   setClipAnim: (sceneId, spec) =>
     set((s) => mutateScene(s, sceneId, (scene) => ({ ...scene, clipAnim: spec }))),
+
+  addMarker: (sceneId, ms, label) => {
+    const rounded = Math.max(0, Math.round(ms))
+    const existing = get().scenario.scenes[sceneId]?.markers ?? []
+    const dup = existing.find((m) => Math.abs(m.ms - rounded) <= 1)
+    if (dup) return dup.id
+    const id = `mk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const marker: TimelineMarker = { id, ms: rounded, ...(label ? { label } : {}) }
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        markers: [...(scene.markers ?? []), marker].sort((a, b) => a.ms - b.ms),
+      })),
+    )
+    return id
+  },
+  removeMarker: (sceneId, markerId) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        markers: (scene.markers ?? []).filter((m) => m.id !== markerId),
+      })),
+    ),
+  renameMarker: (sceneId, markerId, label) =>
+    set((s) =>
+      mutateScene(s, sceneId, (scene) => ({
+        ...scene,
+        markers: (scene.markers ?? []).map((m) =>
+          m.id === markerId ? { ...m, label } : m,
+        ),
+      })),
+    ),
 
   clearSceneTimeline: (sceneId) =>
     set((s) => {

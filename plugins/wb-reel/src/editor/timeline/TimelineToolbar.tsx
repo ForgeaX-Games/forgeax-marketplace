@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { useScenarioStore } from '../../scenario/scenarioStore'
+import { useOnboardingStore } from '../onboarding/onboardingStore'
 import { TimelineRestoreMenu } from './TimelineRestoreMenu'
+import { formatTimeCode } from './timelineFormat'
 
 /**
  * TimelineToolbar —— 位于时间轴左上的常驻工具条（剪映 style）。
@@ -24,6 +26,16 @@ export interface TimelineToolbarProps {
   onCompactShots: () => void
   onCompactAudio: () => void
   onDelete: () => void
+  /** 复制 / 粘贴 / 再制（剪映式，落点在播放头）。粘贴是否可用由剪贴板是否有内容决定。 */
+  onCopy: () => void
+  onPaste: () => void
+  onDuplicate: () => void
+  canPaste: boolean
+  /** 播放头跳转(剪映标配:回到起点 / 跳到末尾) */
+  onSeekToStart: () => void
+  onSeekToEnd: () => void
+  /** 当前节点总时长(ms)——播放头读数显示 mm:ss.SSS / 总时长 */
+  totalMs: number
   /** 一键清空当前场景时间轴（字幕 / QTE / 镜头 / 音频 / 场景素材库；剧情分支保留） */
   onClearAll: () => void
   /** 微调选中 clip 位置：dir=-1 左移 / +1 右移；stepMs 已计入 Shift/Alt 修饰 */
@@ -33,13 +45,6 @@ export interface TimelineToolbarProps {
   /** 光标跟随模式 —— true 时时间线跟随鼠标，false 时锁定不动 */
   followCursor: boolean
   onToggleFollow: () => void
-  /**
-   * 台词 / 字幕轨可见性 —— 作者默认关掉（见 dialoguePref）。
-   * 关闭时 DIA 轨在时间轴里被藏起来，同时画面预览也不叠字幕。
-   * 这里工具条只负责切开关，具体轨道渲染和画面预览由父组件/兄弟消费同一个 flag。
-   */
-  showDialogue: boolean
-  onToggleDialogue: () => void
   /** 时间轴缩放倍率（1× = 整段铺满，放大出现横向滚动） */
   zoom: number
   onZoomChange: (zoom: number) => void
@@ -126,6 +131,25 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
     }
   }
 
+  const setHelpOpen = useOnboardingStore((s) => s.setHelpOpen)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDocDown = (e: PointerEvent): void => {
+      if (!moreRef.current?.contains(e.target as Node)) setMoreOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMoreOpen(false)
+    }
+    document.addEventListener('pointerdown', onDocDown, true)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('pointerdown', onDocDown, true)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [moreOpen])
+
   return (
     <div className="ks-tltb">
       <div className="ks-tltb-left">
@@ -155,6 +179,7 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         {/* 误删恢复 · 回收站 —— 读持久化的删除快照，刷新也能找回（区别于内存里的撤销栈） */}
         <TimelineRestoreMenu />
         <span className="ks-tltb-sep" aria-hidden />
+        {/* 高频常驻：剪切 / 删除 */}
         <TbButton
           icon="✂"
           label="剪切"
@@ -169,36 +194,6 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           disabled={!canSplit}
         />
         <TbButton
-          icon="⇤"
-          label="镜头左对齐"
-          hint="镜头左对齐 · 把所有 SHOT 段按顺序紧挨"
-          onClick={props.onCompactShots}
-        />
-        <TbButton
-          icon="♪"
-          label="音频左对齐"
-          hint="音频左对齐 · 各 audio role 内部紧挨"
-          onClick={props.onCompactAudio}
-          variant="ghost"
-        />
-        <span className="ks-tltb-sep" aria-hidden />
-        <TbButton
-          icon="◀"
-          label="左移"
-          hint="左移选中 clip · 默认 100ms · Shift=10ms · Alt=500ms"
-          onClick={nudge(-1)}
-          disabled={!canNudge}
-          variant="ghost"
-        />
-        <TbButton
-          icon="▶"
-          label="右移"
-          hint="右移选中 clip · 默认 100ms · Shift=10ms · Alt=500ms"
-          onClick={nudge(1)}
-          disabled={!canNudge}
-          variant="ghost"
-        />
-        <TbButton
           icon="🗑"
           label="删除"
           hint={canDelete ? '删除选中 clip（Delete / Backspace）' : '先选中 clip'}
@@ -207,16 +202,62 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           variant="danger"
         />
         <span className="ks-tltb-sep" aria-hidden />
-        <TbButton
-          icon="⌫"
-          label="清空"
-          hint="一键清空当前场景时间轴：字幕 / QTE / 镜头 / 音频 / 场景素材库（图像 & 视频）。剧情分支保留不动 · 会弹确认"
-          onClick={props.onClearAll}
-          variant="danger"
-        />
+        {/* 更多 —— 低频操作收进弹层，根治工具栏拥挤/裁切 */}
+        <div className="ks-tltb-more-wrap" ref={moreRef}>
+          <button
+            type="button"
+            className={`ks-tltb-btn ks-tltb-more-btn ${moreOpen ? 'is-open' : ''}`}
+            onClick={() => setMoreOpen((v) => !v)}
+            title="更多编辑操作（复制/粘贴/再制 · 左对齐 · 微调 · 清空）"
+            aria-label="更多"
+            aria-expanded={moreOpen}
+          >
+            <span className="ks-tltb-btn-icon" aria-hidden>⋯</span>
+            <span className="ks-tltb-btn-label">更多</span>
+          </button>
+          {moreOpen && (
+            <div className="ks-tltb-more" role="menu">
+              <div className="ks-tltb-more-group">剪贴板</div>
+              <TbMenuItem icon="⧉" label="复制" hint="⌘/Ctrl+C" disabled={!canDelete} onClick={() => { props.onCopy(); setMoreOpen(false) }} />
+              <TbMenuItem icon="⎘" label="粘贴到播放头" hint="⌘/Ctrl+V" disabled={!props.canPaste} onClick={() => { props.onPaste(); setMoreOpen(false) }} />
+              <TbMenuItem icon="⊞" label="再制" hint="⌘/Ctrl+D" disabled={!canDelete} onClick={() => { props.onDuplicate(); setMoreOpen(false) }} />
+              <div className="ks-tltb-more-group">对齐</div>
+              <TbMenuItem icon="⇤" label="镜头左对齐" hint="所有 SHOT 段按顺序紧挨" onClick={() => { props.onCompactShots(); setMoreOpen(false) }} />
+              <TbMenuItem icon="♪" label="音频左对齐" hint="各 audio role 内部紧挨" onClick={() => { props.onCompactAudio(); setMoreOpen(false) }} />
+              <div className="ks-tltb-more-group">微调（Shift=10ms · Alt=500ms）</div>
+              <TbMenuItem icon="◀" label="左移选中" hint="默认 100ms" disabled={!canNudge} onClick={(e) => { nudge(-1)(e); }} keepOpen />
+              <TbMenuItem icon="▶" label="右移选中" hint="默认 100ms" disabled={!canNudge} onClick={(e) => { nudge(1)(e); }} keepOpen />
+              <div className="ks-tltb-more-group">危险</div>
+              <TbMenuItem icon="⌫" label="清空时间轴" hint="字幕/QTE/镜头/音频/素材库 · 分支保留 · 会确认" variant="danger" onClick={() => { props.onClearAll(); setMoreOpen(false) }} />
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="ks-tltb-right">
+        {/* 播放头读数 + 跳转（剪映标配）：当前时间码 / 总时长，回到起点 / 跳到末尾 */}
+        <button
+          type="button"
+          className="ks-tltb-jump"
+          onClick={props.onSeekToStart}
+          title="回到起点（播放头跳到 0）"
+          aria-label="回到起点"
+        >
+          ⏮
+        </button>
+        <span className="ks-tltb-timecode ks-mono" title="播放头位置 / 节点总时长">
+          {formatTimeCode(hoverMs)} / {formatTimeCode(props.totalMs)}
+        </span>
+        <button
+          type="button"
+          className="ks-tltb-jump"
+          onClick={props.onSeekToEnd}
+          title="跳到末尾（播放头跳到结尾）"
+          aria-label="跳到末尾"
+        >
+          ⏭
+        </button>
+        <span className="ks-tltb-sep" aria-hidden />
         {/* 总长（秒）—— 直接键入加长当前节点时间轴；player 仍按素材实际长度播放 */}
         <label
           className="ks-tltb-num"
@@ -261,20 +302,6 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         <span className="ks-tltb-sep" aria-hidden />
         <button
           type="button"
-          className={`ks-tltb-snap ${props.showDialogue ? 'is-on' : ''}`}
-          onClick={props.onToggleDialogue}
-          title={
-            props.showDialogue
-              ? '台词 / 字幕轨已显示 · 画面预览也会叠字幕 · 点击字幕条 → 在右侧字幕面板修改文字 · 点击隐藏（刷新不丢）'
-              : '台词 / 字幕轨已隐藏 · 画面预览也不叠字幕 · 点击显示后选中字幕可在右侧面板编辑'
-          }
-          aria-pressed={props.showDialogue}
-        >
-          <span className="ks-tltb-snap-dot" aria-hidden />
-          <span className="ks-mono">DIA</span>
-        </button>
-        <button
-          type="button"
           className={`ks-tltb-snap ${props.followCursor ? 'is-on' : ''}`}
           onClick={props.onToggleFollow}
           title={
@@ -300,6 +327,16 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         >
           <span className="ks-tltb-snap-dot" aria-hidden />
           <span className="ks-mono">SNAP</span>
+        </button>
+        <span className="ks-tltb-sep" aria-hidden />
+        <button
+          type="button"
+          className="ks-tltb-help"
+          onClick={() => setHelpOpen(true)}
+          title="帮助 · 快捷键与功能速查（新手引导）"
+          aria-label="帮助"
+        >
+          ?
         </button>
         {/*
          * v3.9.11：右侧拿掉了两个"只读装饰"元素 —— 时间码徽章（.ks-tltb-tc）
@@ -384,7 +421,37 @@ function TbButton({
   )
 }
 
-
+/** 「更多」弹层里的菜单项：图标 + 文字 + 副提示。keepOpen 用于微调（可连点）。 */
+function TbMenuItem({
+  icon,
+  label,
+  hint,
+  onClick,
+  disabled,
+  variant,
+}: {
+  icon: string
+  label: string
+  hint?: string
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
+  disabled?: boolean
+  variant?: 'danger'
+  keepOpen?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`ks-tltb-more-item ${variant ? `is-${variant}` : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="ks-tltb-more-item-icon" aria-hidden>{icon}</span>
+      <span className="ks-tltb-more-item-label">{label}</span>
+      {hint && <span className="ks-tltb-more-item-hint">{hint}</span>}
+    </button>
+  )
+}
 
 const css = `
 .ks-tltb {
@@ -399,15 +466,17 @@ const css = `
   box-shadow: var(--ks-shadow-inset-hi);
   min-width: 0;
   flex-wrap: nowrap;
-  overflow: hidden;
+  /* overflow 不再 hidden：左侧低频操作已折叠进「更多」弹层，按钮量大幅减少，
+     无需裁切；且弹层(下拉/帮助)需要溢出工具栏显示。 */
+  overflow: visible;
 }
 .ks-tltb-left {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
+  flex: 0 1 auto;
+  overflow: visible;
 }
 .ks-tltb-sep {
   display: inline-block;
@@ -466,6 +535,67 @@ const css = `
   display: none;
 }
 
+/* 「更多」弹层 —— 低频操作折叠于此, 根治工具栏裁切 */
+.ks-tltb-more-wrap { position: relative; flex-shrink: 0; display: inline-flex; }
+.ks-tltb-more-btn.is-open {
+  background: var(--ks-panel-elev);
+  color: var(--ks-text);
+  border-color: var(--ks-border-strong);
+}
+.ks-tltb-more {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 196px;
+  padding: 4px;
+  border-radius: var(--ks-radius-md);
+  background: var(--ks-panel-elev);
+  border: 1px solid var(--ks-border);
+  box-shadow: var(--ks-shadow-pop, 0 8px 24px rgba(0,0,0,0.4));
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ks-tltb-more-group {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ks-text-faint);
+  padding: 6px 8px 2px;
+}
+.ks-tltb-more-item {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--ks-radius-sm);
+  color: var(--ks-text-soft);
+  font-size: 12px;
+}
+.ks-tltb-more-item:hover:not(:disabled) { background: var(--ks-panel-solid); color: var(--ks-text); }
+.ks-tltb-more-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.ks-tltb-more-item.is-danger:hover:not(:disabled) { color: var(--ks-rose); }
+.ks-tltb-more-item-icon { width: 16px; text-align: center; font-size: 13px; flex-shrink: 0; }
+.ks-tltb-more-item-label { flex: 1 1 auto; white-space: nowrap; }
+.ks-tltb-more-item-hint { font-size: 9.5px; color: var(--ks-text-faint); white-space: nowrap; }
+
+/* 「?」帮助按钮 */
+.ks-tltb-help {
+  all: unset;
+  cursor: pointer;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-size: 12px; font-weight: 700;
+  color: var(--ks-text-dim);
+  border: 1px solid var(--ks-border-soft);
+  flex-shrink: 0;
+}
+.ks-tltb-help:hover { color: var(--ks-amber); border-color: var(--ks-amber); }
+
 .ks-tltb-right {
   display: flex;
   align-items: center;
@@ -500,6 +630,19 @@ const css = `
 }
 
 /* ── 总长（秒）数字输入 ─────────────────────────────────────── */
+.ks-tltb-jump {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 18px; padding: 0;
+  border: 1px solid var(--ks-border-soft); border-radius: var(--ks-radius-sm);
+  background: var(--ks-surface-warm); color: var(--ks-text-dim);
+  cursor: pointer; font-size: 11px;
+}
+.ks-tltb-jump:hover { color: var(--ks-text); border-color: var(--ks-amber); }
+.ks-tltb-timecode {
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ks-text-dim); white-space: nowrap;
+  padding: 0 2px; min-width: 118px; text-align: center;
+}
 .ks-tltb-num {
   display: inline-flex;
   align-items: center;

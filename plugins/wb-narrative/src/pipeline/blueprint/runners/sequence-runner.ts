@@ -87,10 +87,10 @@ export class SequenceRunner implements AgentRunner {
         { templateId: stage.templateId, skillSlots: step.agentDef.prompts.skillSlots },
         null,
       );
-      systemPrompt = PromptResolver.renderSystemPrompt(stagePrompts.systemPrompt, ctx);
+      systemPrompt = PromptResolver.renderSystemPrompt(stagePrompts.systemPrompt, ctx, step.stepId);
       userPromptTemplate = stagePrompts.userPromptTemplate;
     } else {
-      systemPrompt = PromptResolver.renderSystemPrompt(resolvedPrompts.systemPrompt, ctx);
+      systemPrompt = PromptResolver.renderSystemPrompt(resolvedPrompts.systemPrompt, ctx, step.stepId);
       userPromptTemplate = resolvedPrompts.userPromptTemplate;
     }
 

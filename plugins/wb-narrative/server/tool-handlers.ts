@@ -134,6 +134,103 @@ interface SetReviewArgs {
   regenerateRunId?: string;
 }
 
+/** 嵌套裁剪选择（§4.4 第①步对话产物）。 */
+interface ScopeSelectionArg {
+  nodeId: string;
+  childRange?: [number, number];
+  children?: ScopeSelectionArg[];
+}
+
+interface IpDnaStartArgs {
+  files: Array<{
+    fileName: string;
+    content?: string;
+    contentBase64?: string;
+    encoding?: "utf8" | "base64-docx";
+    fileType?: string;
+    role?: string;
+  }>;
+  title?: string;
+  mode?: "single" | "series";
+  /** §4.4 第①步：裁剪范围（嵌套选择）；缺省=全量。 */
+  scopeSelections?: ScopeSelectionArg[];
+  /** §4.4 第②步：用户精确选填的游戏单元规划；缺省=默认切分。 */
+  gameUnitPlan?: unknown;
+  /** §4.4 第③步：改编维度（叙事层级数 + 模板字段）；缺省=全维度模板。 */
+  adaptationDimensions?: unknown;
+  /** §5.1 自定义补充：作者改编意图自由文本；缺省=忠实转化。 */
+  adaptationNotes?: string;
+  targetUnits?: number;
+  complexity?: number;
+  runGeneration?: boolean;
+  maxGameUnits?: number;
+  pipelineFamily?: "rpg" | "vn";
+  tier?: string;
+  generationMode?: string;
+  /** ROUTING 透传（§5.1/§L）：路由组 + 品类编码，决定下游 vn/rpg 生成管线。 */
+  routeGroup?: "planning" | "narrative";
+  genreCode?: string;
+  model?: string;
+}
+
+interface IpDnaAnalyzeImpactArgs {
+  runId: string;
+  changedKeys: string[];
+}
+
+/** 阶段门 ① 摄入 + 标准化（停在确认裁剪范围前）。 */
+interface IpDnaIngestArgs {
+  files: Array<{
+    fileName: string;
+    content?: string;
+    contentBase64?: string;
+    encoding?: "utf8" | "base64-docx";
+    fileType?: string;
+    role?: string;
+  }>;
+  title?: string;
+  decompose?: boolean;
+  model?: string;
+  /** 异步：true 立即返回 jobId，轮询 ip-dna-get-job 取层级树摘要。 */
+  async?: boolean;
+  storyTimestamp?: string;
+}
+
+/** 阶段门 ③ 确认裁剪范围（§4.4 第①步）。 */
+interface IpDnaConfirmScopeArgs {
+  runId: string;
+  scopeSelections?: ScopeSelectionArg[];
+  scopeFull?: boolean;
+  /** §5.1 自定义补充：作者改编意图自由文本；缺省=忠实转化。 */
+  adaptationNotes?: string;
+}
+
+/** 阶段门 确认游戏单元 + 改编维度（§4.4 第②③步）。 */
+interface IpDnaConfirmUnitsArgs {
+  runId: string;
+  gameUnitPlan?: unknown;
+  adaptationDimensions?: unknown;
+  mode?: "single" | "series";
+  targetUnits?: number;
+}
+
+/** 阶段门 提取/生成（extract=仅 IP DNA；generate=提取+下游生成自动串跑）。 */
+interface IpDnaExtractGenerateArgs {
+  runId: string;
+  pipelineFamily?: "rpg" | "vn";
+  tier?: string;
+  generationMode?: string;
+  complexity?: number;
+  maxGameUnits?: number;
+  equipOperators?: boolean;
+  model?: string;
+  async?: boolean;
+}
+
+interface JobIdArg {
+  jobId: string;
+}
+
 /** read-file may return text/plain; cap payload so AI callers don't blow context. */
 const READ_FILE_MAX_CHARS = 24000;
 
@@ -334,6 +431,159 @@ export const tools = {
         feedback: args.feedback,
         regenerateRunId: args.regenerateRunId,
       }),
+    });
+  },
+
+  // ── F. IP DNA 叙事操作系统（蓝图 §5/§10/§15）─────────────────────────────
+
+  "narrative:ip-dna-start": async (args: IpDnaStartArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        files: (args.files ?? []).map((f) => ({
+          file_name: f.fileName,
+          content: f.content,
+          content_base64: f.contentBase64,
+          encoding: f.encoding,
+          file_type: f.fileType,
+          role: f.role,
+        })),
+        title: args.title,
+        mode: args.mode,
+        scope_selections: args.scopeSelections,
+        game_unit_plan: args.gameUnitPlan,
+        adaptation_dimensions: args.adaptationDimensions,
+        adaptation_notes: args.adaptationNotes,
+        target_units: args.targetUnits,
+        complexity: args.complexity,
+        run_generation: args.runGeneration,
+        max_game_units: args.maxGameUnits,
+        pipeline_family: args.pipelineFamily,
+        tier: args.tier,
+        generation_mode: args.generationMode,
+        route_group: args.routeGroup,
+        genre_code: args.genreCode,
+        model: args.model,
+      }),
+    });
+  },
+
+  "narrative:get-ip-dna": async (args: RunIdArg, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}`);
+  },
+
+  // ── F.2 IP 半自动阶段门（§5.1）：ingest → hierarchy → (decompose) → confirm → extract/generate ──
+
+  "narrative:ip-dna-ingest": async (args: IpDnaIngestArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/ingest`, {
+      method: "POST",
+      body: JSON.stringify({
+        files: (args.files ?? []).map((f) => ({
+          file_name: f.fileName,
+          content: f.content,
+          content_base64: f.contentBase64,
+          encoding: f.encoding,
+          file_type: f.fileType,
+          role: f.role,
+        })),
+        title: args.title,
+        decompose: args.decompose,
+        model: args.model,
+        async: args.async,
+        story_timestamp: args.storyTimestamp,
+      }),
+    });
+  },
+
+  "narrative:ip-dna-get-hierarchy": async (args: RunIdArg, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/hierarchy`);
+  },
+
+  "narrative:ip-dna-decompose": async (args: RunIdArg, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/decompose`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  "narrative:ip-dna-confirm-scope": async (args: IpDnaConfirmScopeArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/confirm-scope`, {
+      method: "POST",
+      body: JSON.stringify({ scope_selections: args.scopeSelections, scope_full: args.scopeFull, adaptation_notes: args.adaptationNotes }),
+    });
+  },
+
+  "narrative:ip-dna-confirm-units": async (args: IpDnaConfirmUnitsArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/confirm-units`, {
+      method: "POST",
+      body: JSON.stringify({
+        game_unit_plan: args.gameUnitPlan,
+        adaptation_dimensions: args.adaptationDimensions,
+        mode: args.mode,
+        target_units: args.targetUnits,
+      }),
+    });
+  },
+
+  "narrative:ip-dna-extract": async (args: IpDnaExtractGenerateArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/extract`, {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline_family: args.pipelineFamily,
+        tier: args.tier,
+        generation_mode: args.generationMode,
+        complexity: args.complexity,
+        max_game_units: args.maxGameUnits,
+        equip_operators: args.equipOperators,
+        model: args.model,
+        async: args.async,
+      }),
+    });
+  },
+
+  "narrative:ip-dna-generate": async (args: IpDnaExtractGenerateArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/${encodeURIComponent(args.runId)}/generate`, {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline_family: args.pipelineFamily,
+        tier: args.tier,
+        generation_mode: args.generationMode,
+        complexity: args.complexity,
+        max_game_units: args.maxGameUnits,
+        equip_operators: args.equipOperators,
+        model: args.model,
+        async: args.async,
+      }),
+    });
+  },
+
+  "narrative:ip-dna-get-job": async (args: JobIdArg, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/job/${encodeURIComponent(args.jobId)}`);
+  },
+
+  // 取消生产（§5.1）：与前端 UI「取消生成」按钮能力对等（agent 也能取消 IP DNA 异步任务）。
+  "narrative:ip-dna-cancel": async (args: JobIdArg, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/job/${encodeURIComponent(args.jobId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  "narrative:ip-dna-analyze-impact": async (args: IpDnaAnalyzeImpactArgs, ctx: ToolCtx) => {
+    const base = getApiBase(ctx);
+    return await apiFetch(`${base}/ip-dna/analyze-impact`, {
+      method: "POST",
+      body: JSON.stringify({ runId: args.runId, changedKeys: args.changedKeys }),
     });
   },
 };

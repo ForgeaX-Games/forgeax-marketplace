@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
+import { useSceneAudio } from '../media/useSceneAudio'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
 import type { QTECue, QTEHitWindow, Shot, StickerClip, TextOverlayClip } from '../scenario/types'
 import { useClipSelection } from './timeline/clipSelection'
+import { useTrackPrefsStore } from './timeline/trackPrefsStore'
 import { pickActiveOverlays, overlayStyle } from '../player/TextOverlayLayer'
 import { pickActiveLine } from '../player/subtitleSelect'
 import { composeStageFx } from '../fx/fxPresets'
@@ -109,6 +111,11 @@ export function StagePane({
   const scene = scenario.scenes[sceneId]
   const togglePromptFloater = useShellStore((s) => s.togglePromptFloater)
 
+  // 轨头眼睛(trackPrefs)同步 —— 隐藏的视觉轨在画面预览里也不叠(剪映式)。
+  const fxTrackVisible = useTrackPrefsStore((s) => s.prefs.fx.visible)
+  const stkTrackVisible = useTrackPrefsStore((s) => s.prefs.stk.visible)
+  const txtTrackVisible = useTrackPrefsStore((s) => s.prefs.txt.visible)
+
   const media = scene?.media
   const mediaEntry = useMediaStore((s) =>
     media?.kind === 'VIDEO' && media.ref ? s.entries[media.ref] : undefined,
@@ -156,6 +163,15 @@ export function StagePane({
   const preview = extPreview !== undefined ? extPreview : localPreview
   const setPreview: (p: TimelinePreview | null) => void =
     extPreview !== undefined ? () => { /* 受控 */ } : setLocalPreview
+
+  // 编辑器预览音频：时间轴游标推进或视频播放时，按场景音频出声，
+  // 播放头取 hoverMs（hook 内部每帧刷新 getter，闭包不会过期）。
+  useSceneAudio({
+    scene,
+    sceneId,
+    playing: isTimelinePlaying || isVideoPlaying,
+    getPlayheadMs: () => hoverMs,
+  })
 
   // 双击 StoryGraph 节点 → 滚舞台进入视野 + 短暂闪一下边框。
   // 新路径：订阅 shellStore.focusIntent（tick 递增触发）。
@@ -286,6 +302,22 @@ export function StagePane({
     () => (isMultiShotVideo ? resolveActiveShotByMs(timedShots, hoverMs) : undefined),
     [isMultiShotVideo, timedShots, hoverMs],
   )
+
+  // 镜头变速(剪映式):把当前镜的 speed 应用到 <video>.playbackRate;speed=0 → 定格(暂停)。
+  const activeSpeed = (playbackShot ?? activeShot)?.speed
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (activeSpeed == null || activeSpeed === 1) {
+      v.playbackRate = 1
+      return
+    }
+    if (activeSpeed === 0) {
+      try { v.pause() } catch { /* noop */ }
+      return
+    }
+    v.playbackRate = Math.max(0.25, Math.min(4, activeSpeed))
+  }, [activeSpeed])
 
   // 是否存在可播放的视频（shot 级 / scene 级）。无视频时播放走时间轴游标推进。
   const hasVideo = !!shotVideoUrl || (scene?.media.kind === 'VIDEO' && !!mediaEntry)
@@ -557,13 +589,18 @@ export function StagePane({
          */}
         {isMultiShotVideo ? (
           <>
-            <ShotSequenceVideo
-              shot={playbackShot ?? timedShots[0]!}
-              scene={scene}
-              hoverMs={hoverMs}
-              isPlaying={isTimelinePlaying}
-              videoRef={videoRef}
-            />
+            {playbackShot ? (
+              <ShotSequenceVideo
+                shot={playbackShot}
+                scene={scene}
+                hoverMs={hoverMs}
+                isPlaying={isTimelinePlaying}
+                videoRef={videoRef}
+              />
+            ) : (
+              // 播放头落在镜间空隙：黑场留白，尊重时间轴上剪出的空档（与 Player 一致）。
+              <div className="ks-stage-gap" aria-hidden />
+            )}
             <VideoPlayToggle isPlaying={isTimelinePlaying} onToggle={togglePlay} />
           </>
         ) : (shotVideoUrl || (scene.media.kind === 'VIDEO' && mediaEntry)) ? (
@@ -737,27 +774,33 @@ export function StagePane({
           )
         })}
 
-        {/* 剪映式后期效果叠层：暗角/颗粒/特效 + 贴纸（可拖拽）+ 渐显渐隐遮罩 */}
-        <FxOverlayLayer frame={stageFx} />
-        <StageStickerLayer
-          stickers={scene.stickerClips}
-          hoverMs={hoverMs}
-          canvasRef={canvasRef}
-          selectedId={selectedStickerId}
-          onSelect={(id) => setFxSelection({ kind: 'sticker', id })}
-          onMove={(id, patch) => updateStickerClip(scene.id, id, patch)}
-        />
+        {/* 剪映式后期效果叠层：暗角/颗粒/特效 + 贴纸（可拖拽）+ 渐显渐隐遮罩
+            特效/贴纸轨被轨头眼睛隐藏时,预览里也不叠(与时间轴一致)。 */}
+        {fxTrackVisible && <FxOverlayLayer frame={stageFx} />}
+        {stkTrackVisible && (
+          <StageStickerLayer
+            stickers={scene.stickerClips}
+            hoverMs={hoverMs}
+            canvasRef={canvasRef}
+            selectedId={selectedStickerId}
+            onSelect={(id) => setFxSelection({ kind: 'sticker', id })}
+            onMove={(id, patch) => updateStickerClip(scene.id, id, patch)}
+          />
+        )}
         <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
 
-        {/* 文字叠加预览（剪映/PR 式贴字）—— 跟随 hoverMs 出现；选中的可在画面上直接拖拽定位。 */}
-        <StageTextOverlayLayer
-          overlays={scene.textOverlays}
-          hoverMs={hoverMs}
-          canvasRef={canvasRef}
-          selectedId={selectedTextId}
-          onSelect={setSelectedText}
-          onMove={(id, patch) => updateTextOverlay(scene.id, id, patch)}
-        />
+        {/* 文字叠加预览（剪映/PR 式贴字）—— 跟随 hoverMs 出现；选中的可在画面上直接拖拽定位。
+            文字轨被轨头眼睛隐藏时,预览里也不叠。 */}
+        {txtTrackVisible && (
+          <StageTextOverlayLayer
+            overlays={scene.textOverlays}
+            hoverMs={hoverMs}
+            canvasRef={canvasRef}
+            selectedId={selectedTextId}
+            onSelect={setSelectedText}
+            onMove={(id, patch) => updateTextOverlay(scene.id, id, patch)}
+          />
+        )}
 
         {/* 字幕预览（hover 当前时刻有台词时显示）
             v3.9.11：受 Timeline DIA 开关联动，关闭时不渲染，画面保持干净。 */}
@@ -888,14 +931,15 @@ function VideoPlayToggle({
 
 /**
  * 按播放头(ms)在带时间码的 shots 里选「当前镜」。
- * 命中 [startMs,endMs) 的镜；越界则夹到首/末镜。与 Player.resolveActiveShot 同义。
+ * 命中 [startMs,endMs) 的镜；落在镜间空隙 / 首镜前 / 末镜后返回 undefined（调用方渲染黑场）。
+ * 与 Player.resolveActiveShot 同义——空隙=留白，尊重作者剪辑，不再就近夹到首/末镜。
  */
 function resolveActiveShotByMs(shots: Shot[], currentMs: number): Shot | undefined {
   if (shots.length === 0) return undefined
   for (const s of shots) {
     if (currentMs >= (s.startMs as number) && currentMs < (s.endMs as number)) return s
   }
-  return currentMs < (shots[0]!.startMs as number) ? shots[0] : shots[shots.length - 1]
+  return undefined
 }
 
 /**
@@ -1167,7 +1211,9 @@ function StageStickerLayer({
         <div
           key={clip.id}
           className={`ks-stage-stkovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
-          style={{ ...stickerStyle(clip), cursor: 'move' }}
+          // 选中(正在编辑/拖拽)的贴纸恒定完全显示(传 undefined 关闭动画),避免被入/出场
+          // 动画淡掉影响编辑;其余贴纸按 hoverMs 预览各自的入/出场动效。
+          style={{ ...stickerStyle(clip, clip.id === selectedId ? undefined : hoverMs), cursor: 'move' }}
           onPointerDown={(e) => onPointerDown(e, clip)}
         >
           <StickerContent clip={clip} />
@@ -1441,6 +1487,11 @@ const stageCss = `
 .ks-corner-bl { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }
 .ks-corner-br { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
 
+/* 镜间空隙(留白)：纯黑场，对标剪映时间轴上「没有片段」那一段。 */
+.ks-stage-gap {
+  position: absolute; inset: 0;
+  background: #000;
+}
 .ks-stage-video, .ks-stage-img {
   position: absolute; inset: 0;
   width: 100%; height: 100%;

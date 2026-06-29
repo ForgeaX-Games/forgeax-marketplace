@@ -15,7 +15,7 @@ import { processScriptNode } from "./script-generation.js";
 import { processSceneUnit } from "./scene-generation.js";
 import { extractJSON } from "../llm-client.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 import {
   aggregateScenes,
@@ -113,11 +113,12 @@ export const SCRIPT_SCENE_SKELETON_COMPOSER: PromptComposer = {
   blocks: {
     role: SSG_ROLE,
     task_spec: SSG_TASK_SPEC,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: SSG_OUTPUT_SCHEMA,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

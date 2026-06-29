@@ -39,6 +39,13 @@ Scenario
 | `reel:get-video-task`  | 查询 Seedance 任务状态            | `taskId`(必填) |
 | `reel:generate-visuals`| 提取视觉锚点(场景/道具)并出图：角色定妆照+场景基准图(多角度)+关键道具图（非破坏性，不碰分镜） | `scope?`('anchors'), `scenarioId?`, `force?` |
 | `reel:generate-auditions`| 给角色生成「试镜视频+音色」：定妆照→Seedance ~10s/3:4 试镜视频→抽整段音轨为 MP3 绑为角色音色 | `scope?`('all'/'characters'), `characterIds?`, `scenarioId?`, `force?` |
+| `reel:get-scene-timeline` | 读单场紧凑时间轴（shots/dialogue/qte/audio/textOverlays/markers，各带 id+时间）。**任何编辑前必调** | `sceneId`(必填), `scenarioId?` |
+| `reel:update-shot`     | 改单镜：变速/定格 `speed`(0=定格/1=正常)、起止 `startMs/endMs`、入场转场 `transitionIn`、首尾动画 `clipAnim` | `sceneId`, `shotId`(必填) |
+| `reel:edit-dialogue`   | 增/改/删 底栏字幕台词 | `sceneId`, `op`(add/update/remove) |
+| `reel:edit-text-overlay`| 增/改/删 花字/文字叠加（自由摆放） | `sceneId`, `op`(add/update/remove) |
+| `reel:edit-qte`        | 增/改/删 QTE 节奏点 | `sceneId`, `op`(add/update/remove) |
+| `reel:edit-audio`      | 增/改/删 音频 clip（BGM/SFX/VO，含音量+淡入淡出） | `sceneId`, `op`(add/update/remove) |
+| `reel:edit-marker`     | 增/命名/删 时间轴标记点（不进成片） | `sceneId`, `op`(add/rename/remove) |
 
 ### `reel:generate-visuals` —— 剧本→视觉锚点
 
@@ -59,6 +66,37 @@ Scenario
 参数：`scope='all'`（默认，给全部有定妆照的角色；缺失才生成）；`scope='characters'` + `characterIds:[...]` 只做指定角色；`force:true` 覆盖重生已有试镜视频。无定妆照的角色会被跳过并在对话里提示。该管线跑在浏览器（Seedance 凭据 + 抽音轨用 AudioContext），调用时工坊需保持打开。
 
 **何时调**：用户说「生成试镜视频 / 角色试镜 / 角色音色 / 给角色配音色 / 定妆照视频」，或在视觉锚点（定妆照）出齐后想为角色补音色时。建议顺序：`forge-script` → `generate-visuals`（出定妆照）→ **`generate-auditions`**（出试镜视频+音色）→ `generate-storyboard` → `generate-keyframes` → `generate-video`（角色镜头会自动带上音色）。
+
+## 时间轴编辑工具箱（成片后精修）
+
+成片（分镜/关键帧/视频齐了）之后，用这组 **scene 级增量编辑**工具精修时间轴。也是 `reel-editor`
+（剪辑师子智能体）的专属武器。**铁律：改任何 clip 前先 `reel:get-scene-timeline { sceneId }` 拿真实 id 与现有时间**；
+时间一律 ms（相对场景起点），坐标一律归一化 0~1（中心 0.5,0.5）。
+
+- **`reel:update-shot`** —— 改一镜的节奏与衔接：
+  - `speed`：`0`=定格（画面停帧）、`1`=正常、`0.5~2` 慢/快放（范围 0~4）。
+  - `startMs/endMs`：镜头在时间轴上的起止。
+  - `transitionIn: { presetId, durationMs }`：入场转场；传 `null` 清除。
+  - `clipAnim: { in:{preset,durationMs}, out:{...} }`：首尾动画；传 `null` 清除。
+- **`reel:edit-dialogue`**（底栏电影字幕）/ **`reel:edit-text-overlay`**（花字，画面任意位置自由摆放）——
+  `op=add`（`text+startMs` 必填，返回新 id）/ `op=update`（按 `id` 改）/ `op=remove`（按 `id` 删）。
+  花字额外有 `x/y`(默认中心)、`fontSizePct`、`rotation`、`color`、`strokeColor`、`align`。
+- **`reel:edit-qte`** —— QTE 节奏点。`op=add` 需 `shape(tap/hold/sweep)+appearAt+targetAt`；
+  hold 需 `durationMs`、sweep 需 `sweepDir`；场景无 qte 块时自动以默认窗口/分值创建。
+- **`reel:edit-audio`** —— 音频 clip。`op=add` 需 `role(bgm/sfx/vo)+ref+startMs+durationMs`
+  （`ref`=素材库音频 id，先 `reel:list-assets` 查）；可设 `volume`(0~1)、`fadeInMs`、`fadeOutMs`、`offsetMs`、`label`。
+- **`reel:edit-marker`** —— 时间轴标记点（编辑期锚点，**不进成片**）。`op=add` 需 `ms`（`label` 可选）/
+  `op=rename` 需 `id+label` / `op=remove` 需 `id`。
+
+> 这组工具都是**增量**：只动点名那一项，`update` 只改你传的字段。`add` 返回新 id；`update/remove/rename`
+> 必须带来自 `reel:get-scene-timeline` 的真实 `id`。改完用 `reel:get-scene-timeline` 自查。
+
+```
+reel:get-scene-timeline({ sceneId: "scene-07" })
+  → { shots:[{id,startMs,endMs,speed,...}], dialogue:[...], qteCues:[...], audio:[...], textOverlays:[...], markers:[...] }
+reel:update-shot({ sceneId:"scene-07", shotId:"shot-3", speed:0.5, transitionIn:{ presetId:"flash-white", durationMs:400 } })
+reel:edit-text-overlay({ sceneId:"scene-07", op:"add", text:"三年后", startMs:0, endMs:1500, x:0.5, y:0.18, fontSizePct:9 })
+```
 
 ## 「重新生成」= 传 `force=true`（清理旧内容）
 

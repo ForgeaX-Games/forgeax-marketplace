@@ -2,14 +2,15 @@ import type { NarrativeContext, CharacterSheet, CharacterPersonalLife } from "..
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 
-const CHARACTER_ENRICHMENT_COMPOSER: PromptComposer = {
+export const CHARACTER_ENRICHMENT_COMPOSER: PromptComposer = {
   stepId: "character_enrichment",
   skillSlots: ["style_guide", "examples", "constraints", "character_archetype"],
   systemBlockOrder: [
     "role",
     "task_requirements",
+    "ip_dna",
     "character_archetype",
     "style_guide",
     "examples",
@@ -58,6 +59,7 @@ const CHARACTER_ENRICHMENT_COMPOSER: PromptComposer = {
   * 中文版示例："25岁亚洲女性，乌黑长直发，墨色瞳孔冷峻，鹅蛋脸薄唇，挺拔身形，黑色高领立绒西装+银扣腰带，左耳一枚银色长链耳坠，背手而立，气质冷艳带不易察觉的疲惫，电影感写实立绘"
   * 英文版示例："25-year-old Asian woman, jet-black long straight hair, ink-black piercing eyes, oval face with thin lips, slender posture, black high-collar velvet suit with silver belt buckle, single silver long-chain earring on left ear, hands behind back, cold elegant aura with subtle weariness, cinematic realistic portrait"
   * 不要写"美丽"、"帅气"等空洞修饰，用具体的视觉细节代替`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     character_archetype: "{{SKILL.character_archetype}}",
     style_guide: "{{SKILL.style_guide}}",
     examples: "{{SKILL.examples}}",

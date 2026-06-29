@@ -42,3 +42,9 @@ export function pickPromptForImageModel<T>(bundle: PromptBundle<T>, model: Image
 export function apiModelIdForImageModel(model: ImageModel): string {
   return model === 'gpt-image-2' ? 'gpt-image-2' : 'gemini-3-pro-image-preview'
 }
+
+/** Host tool vendor for 3D turnaround. gpt-image-2 → Azure /images/edits (the
+ *  only reference-capable vendor wired here); gemini → nano-banana. */
+export function turnaroundVendorForImageModel(model: ImageModel): 'azure-gpt-image' | 'nano-banana' {
+  return model === 'gpt-image-2' ? 'azure-gpt-image' : 'nano-banana'
+}

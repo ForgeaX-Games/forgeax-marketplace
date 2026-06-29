@@ -2,7 +2,7 @@ import type { NarrativeContext, WorldviewStructure, InitialOutline } from "../..
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 
 function outlineToText(outline: InitialOutline | undefined): string {
   if (!outline) return "（无）";
@@ -18,12 +18,13 @@ function outlineToText(outline: InitialOutline | undefined): string {
   ].filter(Boolean).join("\n\n");
 }
 
-const WORLDVIEW_COMPOSER: PromptComposer = {
+export const WORLDVIEW_COMPOSER: PromptComposer = {
   stepId: "worldview",
   skillSlots: ["style_guide", "examples", "constraints", "worldview_archetype"],
   systemBlockOrder: [
     "role",
     "task",
+    "ip_dna",
     "worldview_archetype",
     "style_guide",
     "examples",
@@ -50,6 +51,7 @@ const WORLDVIEW_COMPOSER: PromptComposer = {
 - WV_10 核心冲突：矛盾根源、冲突表现
 - WV_11 主要人物：核心角色、人物定位
 - WV_12 叙事入口：故事切入点、读者体验目标`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     worldview_archetype: "{{SKILL.worldview_archetype}}",
     style_guide: "{{SKILL.style_guide}}",
     examples: "{{SKILL.examples}}",

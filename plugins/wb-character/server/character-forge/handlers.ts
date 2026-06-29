@@ -1,23 +1,27 @@
 /**
- * character-forge —— plain-function handler SSOT(业务内聚在 wb-character 插件内)。
+ * character-forge —— plain-function handler SSOT.
  *
- * 唯一消费者:同插件的 `server/tool-handlers.ts`(ToolRegistry `entry.backend`)。
- * AI(host_tool_bridge)与 iframe(/api/wb/character/* 薄代理)都经 ToolRegistry
- * 调到这里 —— 同一份业务实现 + 同一组 character-forge.* 事件名。
+ * Two parallel consumers share this module:
+ *   1. packages/server/src/api/wb-character.ts —— Hono router thin-wraps each endpoint
+ *   2. packages/server/builtin/{commands,kits}/character-forge/*.ts
+ *      —— agent / CLI / cron 直接调 handler 拿 JSON,不走 HTTP
  *
- * HandlerCtx 字段 = RouterCtx 字段(projectRoot / env / emit? / imageGen)。图像
- * 生成能力由宿主经 ctx.imageGen 注入(中立 @forgeax/types ImageGen 缝),业务不
- * 反向依赖编排层 vendor 实现。
+ * 两路径共享同一份业务实现 + 同一个 character-forge.* 事件名 —— ledger / ws 看到的
+ * 事件形状统一,与 caller 无关。
  *
- * 历史:本模块 2026-05 曾被抬到 host-level(server→cli),2026-06 解耦时迁回插件
- * (它最初就来自 marketplace/plugins/wb-character-forge/src/)。
+ * HandlerCtx 字段 = RouterCtx 字段（projectRoot / env / emit?）.
+ *
+ * 历史:文件曾位于 packages/marketplace/plugins/wb-character-forge/src/handlers.ts,
+ * 2026-05-21 Phase 6 plugin shell 删除时搬来 host-level shared lib。
  */
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { ImageDispatcher } from './clients/dispatcher';
 import { buildPortraitPrompt, getStylePreset, STYLE_IDS } from './prompts/portrait';
 import { buildSpriteSheetPrompt } from './prompts/sprite';
+import { buildTurnaroundPrompt } from './prompts/turnaround';
 import { assertCharId, assertSlug, deriveCharId, deriveName, ForgeError } from './lib/ids';
 import {
   assetUrl,
@@ -29,9 +33,10 @@ import {
   savePortraitFile,
   saveManifest,
   saveSpriteSheet,
+  saveTurnaroundView,
 } from './lib/storage';
+import { TURNAROUND_3D_VIEWS } from './types';
 import type {
-  ImageGen,
   CharacterListItem,
   CharacterManifest,
   CharacterManifestV2,
@@ -40,10 +45,13 @@ import type {
   GeneratePortraitResult,
   GenerateSpriteSheetArgs,
   GenerateSpriteSheetResult,
+  GenerateTurnaroundArgs,
+  GenerateTurnaroundResult,
   PortraitView,
   RouterCtx,
   SpriteDirection,
   StylePreset,
+  TurnaroundView,
   UpsertManifestArgs,
   UpsertManifestResult,
 } from './types';
@@ -53,9 +61,11 @@ export type HandlerCtx = RouterCtx;
 
 const VALID_VIEWS: PortraitView[] = ['front', 'side', 'back'];
 const VALID_DIRS: SpriteDirection[] = ['down', 'left', 'right', 'up'];
+const VALID_TURNAROUND_VIEWS: TurnaroundView[] = ['front', 'back', 'left', 'right', 'side', 'three-quarter'];
 
 const PORTRAIT_TIMEOUT_MS = 90_000;
 const SPRITE_TIMEOUT_MS = 120_000;
+const TURNAROUND_TIMEOUT_MS = 120_000;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -84,19 +94,23 @@ export function upgradeManifestToLatest(m: CharacterManifest): CharacterManifest
   return { ...m, schemaVersion: 2, pipelines: {} };
 }
 
-// 图像生成能力由宿主(ToolRegistry)经 ctx.imageGen 注入。生图类 handler 必需;
-// 缺失即报错(不再自建 dispatcher —— 业务插件不依赖编排层 vendor 实现)。
-function imageGenFor(ctx: HandlerCtx): ImageGen {
-  if (!ctx.imageGen) {
-    throw new ForgeError('image-gen-unavailable', 'host did not inject an image generator', 500);
+// Per-ctx dispatcher cache —— 同一 ctx.env 复用同一个 ImageDispatcher（包含
+// vendor SDK 实例 + key 状态）,避免每次 handler call 重新构造。projectRoot
+// 用作弱键足够 —— forgeax-server 只跑一个 projectRoot,plugin host 注入一个 env。
+const dispatcherCache = new WeakMap<HandlerCtx, ImageDispatcher>();
+function dispatcherFor(ctx: HandlerCtx): ImageDispatcher {
+  let d = dispatcherCache.get(ctx);
+  if (!d) {
+    d = new ImageDispatcher(ctx.env);
+    dispatcherCache.set(ctx, d);
   }
-  return ctx.imageGen;
+  return d;
 }
 
 export interface StatusResult {
   plugin: string;
   version: string;
-  vendors: ReturnType<ImageGen['isReady']>;
+  vendors: ReturnType<ImageDispatcher['isReady']>;
   styles: typeof STYLE_IDS;
   now: string;
 }
@@ -105,7 +119,7 @@ export function getStatus(ctx: HandlerCtx): StatusResult {
   return {
     plugin: '@forgeax-plugin/wb-character',
     version: '0.1.0',
-    vendors: imageGenFor(ctx).isReady(),
+    vendors: dispatcherFor(ctx).isReady(),
     styles: STYLE_IDS,
     now: new Date().toISOString(),
   };
@@ -198,7 +212,7 @@ export async function generatePortrait(
   ctx: HandlerCtx,
   body: GeneratePortraitArgs,
 ): Promise<GeneratePortraitResult> {
-  const imageGen = imageGenFor(ctx);
+  const dispatcher = dispatcherFor(ctx);
   const slug = assertSlug(body.slug);
   const prompt = (body.prompt ?? '').trim();
   if (!prompt) throw new ForgeError('empty-prompt', 'prompt is required');
@@ -241,7 +255,7 @@ export async function generatePortrait(
       view,
       consistencyHint,
     });
-    const dispatchPromise = imageGen.generate('concept-art', {
+    const dispatchPromise = dispatcher.generate('concept-art', {
       prompt: promptText,
       size: body.size ?? '2k',
       refImageBase64: body.refImageBase64,
@@ -272,11 +286,131 @@ export async function generatePortrait(
   };
 }
 
+/**
+ * Generate a 3D-model-ready turnaround: orthographic views in a neutral A-pose
+ * on a pure-white canvas, conditioned on the character's reference image so the
+ * views stay the same character. Output feeds wb-gen3d's views-to-3d.
+ *
+ * Reference resolution: prefer body.refImageBase64; otherwise fall back to the
+ * character's saved front portrait on disk. At least one is required so the
+ * vendor has an identity to hold across angles.
+ */
+export async function generateTurnaround(
+  ctx: HandlerCtx,
+  body: GenerateTurnaroundArgs,
+): Promise<GenerateTurnaroundResult> {
+  const dispatcher = dispatcherFor(ctx);
+  const slug = assertSlug(body.slug);
+  const prompt = (body.prompt ?? '').trim();
+  const views = body.views?.length
+    ? body.views.filter((v): v is TurnaroundView => VALID_TURNAROUND_VIEWS.includes(v))
+    : [...TURNAROUND_3D_VIEWS];
+  if (views.length === 0) throw new ForgeError('invalid-views', 'at least one view required');
+
+  if (!body.charId && !prompt) {
+    throw new ForgeError('missing-character', 'charId or prompt is required');
+  }
+  const charId = body.charId ? assertCharId(body.charId) : deriveCharId(prompt);
+  const style = (body.style ?? 'anime-hd-flat') as StylePreset;
+  const nowIso = new Date().toISOString();
+
+  let manifest: CharacterManifest;
+  const existingPath = manifestPathOf(ctx, slug, charId);
+  const manifestExists = existsSync(existingPath);
+  if (manifestExists) {
+    manifest = upgradeManifestToLatest(await loadManifest(ctx, slug, charId));
+  } else {
+    manifest = {
+      schemaVersion: 2,
+      charId,
+      name: body.name?.trim() || deriveName(prompt || charId),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      prompt: { user: prompt, style, refImage: null },
+      portrait: {},
+      sprites: {},
+      variants: [],
+      pipelines: {},
+    };
+  }
+
+  // Reference image: explicit override wins, else the saved front portrait.
+  let refBase64 = body.refImageBase64?.replace(/^data:[^,]*,/, '');
+  if (!refBase64) {
+    const frontRel = manifest.portrait?.front;
+    if (frontRel) {
+      const frontAbs = resolve(charDir(ctx, slug, charId), frontRel);
+      if (await fileExists(frontAbs)) {
+        refBase64 = Buffer.from(await readFile(frontAbs)).toString('base64');
+      }
+    }
+  }
+  if (!refBase64) {
+    throw new ForgeError(
+      'missing-reference',
+      'refImageBase64 or an existing front portrait is required to keep the character consistent',
+      400,
+    );
+  }
+
+  const userDescription = prompt || manifest.prompt.user;
+  const out: GenerateTurnaroundResult['views'] = {};
+  let lastModel = '';
+  const refAware = Boolean(refBase64);
+  // With a reference portrait the only reference-capable vendor wired with
+  // working credentials is azure-gpt-image (/images/edits). Pin it (unless the
+  // caller explicitly picked a vendor) and forward the matching model id.
+  const preferredVendor = body.model ?? (refAware ? 'azure-gpt-image' : undefined);
+  const modelOverride = refAware
+    ? (body.model === 'nano-banana' ? 'gemini-2.5-flash-image' : 'gpt-image-2')
+    : undefined;
+  for (const view of views) {
+    const promptText = buildTurnaroundPrompt({ userDescription, view });
+    const r2 = await withTimeout(
+      dispatcher.generate('concept-art', {
+        prompt: promptText,
+        size: body.size ?? '2k',
+        refImageBase64: refBase64,
+        modelOverride,
+      }, preferredVendor),
+      TURNAROUND_TIMEOUT_MS,
+      `turnaround:${view}`,
+    );
+    const { rel } = await saveTurnaroundView(ctx, slug, charId, view, r2.pngBytes);
+    out[view] = { path: rel, url: assetUrl(slug, charId, rel) };
+    lastModel = `${r2.vendor}/${r2.modelId}`;
+  }
+
+  const m2 = upgradeManifestToLatest(manifest);
+  const forThreeD = views.every((v) => (TURNAROUND_3D_VIEWS as readonly string[]).includes(v));
+  m2.pipelines.turnaround = {
+    generatedAt: nowIso,
+    model: lastModel,
+    views: Object.fromEntries(Object.entries(out).map(([v, f]) => [v, f!.path])),
+    forThreeD,
+    costEstimate: { usd: 0.04 * views.length, vendor: lastModel.split('/')[0] || 'unknown' },
+  };
+  const manifestAbs = await saveManifest(ctx, slug, m2);
+
+  ctx.emit?.('character-forge.turnaround.generated', {
+    slug, charId, views, model: lastModel, forThreeD,
+  });
+
+  return {
+    charId,
+    slug,
+    views: out,
+    manifestPath: friendly(manifestAbs, ctx.projectRoot),
+    model: lastModel,
+    costEstimate: { usd: 0.04 * views.length, vendor: lastModel.split('/')[0] || 'unknown' },
+  };
+}
+
 export async function generateSpriteSheet(
   ctx: HandlerCtx,
   body: GenerateSpriteSheetArgs,
 ): Promise<GenerateSpriteSheetResult> {
-  const imageGen = imageGenFor(ctx);
+  const dispatcher = dispatcherFor(ctx);
   const slug = assertSlug(body.slug);
   const charId = assertCharId(body.charId);
   const action = body.action ?? 'walk';
@@ -307,7 +441,7 @@ export async function generateSpriteSheet(
   });
 
   const r2 = await withTimeout(
-    imageGen.generate('sprite-frame', {
+    dispatcher.generate('sprite-frame', {
       prompt: promptText,
       size: '2k',
       refImageBase64: refBase64,

@@ -45,6 +45,13 @@ const narrativeCardDef: AgentDef = {
   io: {
     requiredInputs: ["user_input"],
     outputField: "narrative_card",
+    // 声明式算子消费（T1）：本 step 即为单一事实源，覆盖 OPERATOR_SLOT_REGISTRY 默认值。
+    consumesIpDna: {
+      slots: ["风格算子", "情感算子"],
+      kag: false,
+      ledger: true,
+      queryHint: "叙事卡片表达",
+    },
   },
   dependencies: [],
   validators: ["narrative_card_validator"],

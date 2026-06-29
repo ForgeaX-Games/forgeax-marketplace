@@ -14,8 +14,14 @@ import {
   useNarrativeStream,
   analyzeImpact,
   regenerateStep,
+  startIpDnaRun,
+  fetchIpDnaJob,
+  ipDnaCancel,
+  fetchIpDnaHierarchy,
 } from "../../hooks/useNarrativeStream";
-import type { HistoryEntry, GenreCategoryGroup } from "../../hooks/useNarrativeStream";
+import type { IpDnaHierarchySummary } from "../../hooks/useNarrativeStream";
+import type { HistoryEntry, GenreCategoryGroup, IpDnaFilePayload, IpDnaJobStatus } from "../../hooks/useNarrativeStream";
+import { IpStageFlow, type IpUploadDisplay } from "./IpStageFlow";
 import { tryRestoreFromStorage } from "../../store/narrativeStore";
 import type { TierId, ModeId, NarrativeContext } from "../../types";
 import { PIPELINE_STEPS, STEP_CTX_FIELD } from "../../types";
@@ -34,6 +40,68 @@ const INPUT_TAB_DEFS: { id: InputTab; label: string; Icon: typeof PenLine }[] = 
   { id: "tags", label: "标签选择", Icon: Tags },
   { id: "file", label: "文件上传", Icon: FileUp },
 ];
+
+// 蓝图 §3.4/§6.1：多模态 + 压缩包 + 多文件上传。按扩展名分流读取方式。
+const TEXT_EXTS = ["txt", "md", "markdown"];
+const DOCX_EXTS = ["doc", "docx"];
+const BINARY_EXTS = [
+  "pdf",
+  "png", "jpg", "jpeg", "webp", "gif",
+  "mp4", "mov", "webm", "mkv",
+  "mp3", "wav", "m4a",
+  "zip", "tar", "gz", "tgz",
+];
+const ALL_UPLOAD_EXTS = [...TEXT_EXTS, ...DOCX_EXTS, ...BINARY_EXTS];
+const UPLOAD_ACCEPT = ALL_UPLOAD_EXTS.map((e) => `.${e}`).join(",");
+
+type UploadKind = "text" | "docx" | "binary";
+
+interface UploadedItem {
+  name: string;
+  size: number;
+  mime?: string;
+  fileType: string;
+  kind: UploadKind;
+  content?: string;
+  contentBase64?: string;
+  encoding: "utf8" | "base64-docx" | "base64";
+}
+
+/** ArrayBuffer → base64（分块 btoa，避免大文件栈溢出）。 */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(binary);
+}
+
+function uploadKindOf(ext: string): UploadKind | null {
+  if (TEXT_EXTS.includes(ext)) return "text";
+  if (DOCX_EXTS.includes(ext)) return "docx";
+  if (BINARY_EXTS.includes(ext)) return "binary";
+  return null;
+}
+
+/** 读取单个文件为中性 UploadedItem（文本 utf8 / docx base64-docx / 二进制 base64）。 */
+async function readUploadedItem(file: File): Promise<UploadedItem | null> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const kind = uploadKindOf(ext);
+  if (!kind) return null;
+  const base = { name: file.name, size: file.size, mime: file.type, fileType: file.type || ext };
+  if (kind === "text") {
+    let text = "";
+    try { text = await file.text(); } catch { text = ""; }
+    return { ...base, kind, content: text, encoding: "utf8" };
+  }
+  const b64 = arrayBufferToBase64(await file.arrayBuffer());
+  if (kind === "docx") {
+    return { ...base, kind, contentBase64: b64, encoding: "base64-docx" };
+  }
+  return { ...base, kind, contentBase64: b64, encoding: "base64" };
+}
 
 const ROUTE_GROUP_DEFS: { id: RouteGroup; label: string; Icon: typeof ClipboardList }[] = [
   { id: "planning", label: "策划全量", Icon: ClipboardList },
@@ -57,6 +125,48 @@ const ROUTE_GROUP_DEFS: { id: RouteGroup; label: string; Icon: typeof ClipboardL
 //   [全量]   = [场景]（Lore 在叙事 agent 内部按 needs.L 处理，UI/运营文案已从叙事模块移除）
 //   [自动]   = narrative_auto，由 buildAutoSteps 按 needs/品类动态决定
 const PREF_STEPS = ["preference_summary", "preference_analysis"];
+
+/**
+ * IP DNA 半自动前驱节点链（输入 + IP 处理），拼在生成管线 previewStepOrder 头部（WS-F）。
+ * 改编规划(ip_adapt_plan) 合并了范围裁剪 + 游戏单元；拆解(ip_decompose) 为可选分支，仅在体量超线时按需插入（§3.5 动态分步）。
+ * 中间管线的 C 序号由 PipelineStatusBar 按实际出现顺序动态赋号，故此链可随路径增减而序号自洽。
+ */
+const IP_PREDECESSOR_STEPS = ["ip_input", "ip_standardize", "ip_volume", "ip_adapt_plan", "ip_dna_extract"];
+
+/**
+ * 历史回放还原输入模块（§6 LIST 双模块）：由已落盘 IP DNA 层级树摘要重建各 IP 前驱步的可读正文，
+ * 使点选 LIST 条目时中间预览能精确展示「之前经历的所有步骤」（嵌套到最小叙事单元）。
+ * ip_input 上传原件不可由层级树反推，仅以顶层单元概述占位；其余步直接由树/计数派生。
+ */
+function buildIpReplayContent(summary: IpDnaHierarchySummary): Record<string, string> {
+  const nodes = summary.hierarchy;
+  const byParent = new Map<string | null, typeof nodes>();
+  for (const n of nodes) {
+    const k = n.parent ?? null;
+    const arr = byParent.get(k);
+    if (arr) arr.push(n);
+    else byParent.set(k, [n]);
+  }
+  const ids = new Set(nodes.map((n) => n.id));
+  const roots = nodes.filter((n) => !n.parent || !ids.has(n.parent));
+  const lines: string[] = ["# 标准化 · 层级化文件系统\n"];
+  const walk = (group: typeof nodes, depth: number): void => {
+    for (const n of [...group].sort((a, b) => a.index - b.index)) {
+      lines.push(`${"  ".repeat(depth)}- ${n.title}${n.childRange ? `（第 ${n.childRange}）` : ""}`);
+      walk(byParent.get(n.id) ?? [], depth + 1);
+    }
+  };
+  walk(roots, 0);
+  const tree = lines.join("\n");
+  const topTitles = [...roots].sort((a, b) => a.index - b.index).map((n) => `### ${n.title}`).join("\n\n");
+  return {
+    ip_input: `# IP 作品输入\n\n${topTitles || summary.title}`,
+    ip_standardize: tree,
+    ip_volume: `# 体量判断\n\n- 层级节点：${summary.node_count}`,
+    ip_adapt_plan: "# 改编规划\n\n- 改编范围 + 游戏单元（历史记录）",
+    ip_dna_extract: `# 生成 scoped IP DNA\n\n- 作品：${summary.title}\n- 层级节点：${summary.node_count}`,
+  };
+}
 const OUTLINE_BASE  = [...PREF_STEPS, "initial_plan"];                                       // [大纲]
 const WV_BASE       = [...OUTLINE_BASE, "worldview"];                                        // [世界观]
 // 兼容旧引用：策划入口的 TIER_MODE_STEPS / DESIGN_MODE_STEPS 中 PLAN_BASE = 偏好 + initial_plan + worldview
@@ -328,22 +438,33 @@ export function TierModeSelector() {
   const [tagCustomTexts, setTagCustomTexts] = useState<Record<string, string>>({});
   const [openTagDropdownKey, setOpenTagDropdownKey] = useState<string | null>(null);
 
-  // M1: 上传剧本与"用户输入框"独立 state，提交时一起传给 backend，互不污染。
-  // - uploadedFile.content: utf8 文本内容（.txt 文件直接读出来；.docx 在前端不做解析，传 contentBase64）
-  // - uploadedFile.contentBase64: 二进制 base64（.docx 走这里，由 backend mammoth 解析）
-  // - uploadedFile.encoding: "utf8" | "base64-docx"
-  // - uploadedPreview: 仅 UI 显示用（500 字预览）
-  const [uploadedFile, setUploadedFile] = useState<{
-    name: string;
-    size: number;
-    mime?: string;
-    content?: string;
-    contentBase64?: string;
-    encoding: "utf8" | "base64-docx";
+  // 上传文件与"用户输入框"独立 state，提交时一起传给 backend，互不污染。
+  // 蓝图 §3.4：支持单/多文件 + 混合模态 + 压缩包。
+  //   - 纯单文本/docx（轻需求）→ 走老 uploaded_script 通道（流式预览）。
+  //   - 含二进制/压缩包/多文件（重需求）→ 走 /ip-dna/start（IP DNA 异步管线）。
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedItem[]>([]);
+  // IP DNA 异步任务（重需求路径）：本地轮询进度，不污染流式 run store。
+  const [ipDnaJob, setIpDnaJob] = useState<{
+    jobId: string;
+    status: IpDnaJobStatus["status"];
+    stage?: string;
+    progress?: number;
+    message?: string;
+    error?: string;
+    result?: IpDnaJobStatus["result"];
   } | null>(null);
-  const [uploadedPreview, setUploadedPreview] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const actionLockRef = useRef(false);
+
+  // 轻需求剧本 = 唯一一个纯文本/docx 文件（走老 uploaded_script 流式通道）。
+  // 重需求 = 含二进制/压缩包，或多文件（走 IP DNA 异步管线）。
+  const scriptFile = useMemo(
+    () => (uploadedFiles.length === 1 && uploadedFiles[0].kind !== "binary" ? uploadedFiles[0] : null),
+    [uploadedFiles],
+  );
+  const isHeavyUpload = uploadedFiles.length > 0 && !scriptFile;
+  const ipDnaRunning =
+    !!ipDnaJob && ipDnaJob.status !== "completed" && ipDnaJob.status !== "failed" && ipDnaJob.status !== "cancelled";
 
   const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -596,7 +717,7 @@ export function TierModeSelector() {
       const baseSteps = PIPELINE_TEMPLATE_STEPS[tplId];
       // tpl-vn-v2 E2 旁路镜像 backend：上传剧本时把 vn_outline_acts/vn_scenes/vn_beats 三步
       // 替换为 vn_script_normalize + vn_segment_confirm（E1/E2 互斥）。
-      if (tplId === "tpl-vn-v2" && (uploadedFile?.content || uploadedFile?.contentBase64)) {
+      if (tplId === "tpl-vn-v2" && (scriptFile?.content || scriptFile?.contentBase64)) {
         const REPLACED = new Set(["vn_outline_acts", "vn_scenes", "vn_beats"]);
         const expanded: string[] = [];
         let injected = false;
@@ -615,14 +736,22 @@ export function TierModeSelector() {
       return [...DESIGN_STEPS, ...baseSteps];
     }
     return TIER_MODE_STEPS[tierKey];
-  }, [routeGroup, selectedNarrativeRoute, selectedTierId, activePipelineTemplate, uploadedFile]);
+  }, [routeGroup, selectedNarrativeRoute, selectedTierId, activePipelineTemplate, scriptFile]);
 
   const previewIsAuto = routeGroup === "planning" && selectedTierId === "auto";
 
+  // IP DNA 重需求上传时，把"输入 + IP 处理"作为生成管线前驱节点链拼到 previewStepOrder 头部，
+  // 使中间预览先呈现 ip_input→标准化→体量→裁剪→生成 scoped IP DNA 五个前驱节点（WS-F）。
+  const previewStepOrderWithIp = useMemo<string[] | null>(() => {
+    if (!isHeavyUpload) return previewStepOrder;
+    const base = previewStepOrder ?? [];
+    return [...IP_PREDECESSOR_STEPS, ...base.filter((s) => !IP_PREDECESSOR_STEPS.includes(s))];
+  }, [isHeavyUpload, previewStepOrder]);
+
   // 把预演链路推进 store（右栏 PIPELINE STATUS 跨 iframe 读取的唯一来源）。
   useEffect(() => {
-    setPreviewOrder(previewStepOrder, previewIsAuto);
-  }, [previewStepOrder, previewIsAuto, setPreviewOrder]);
+    setPreviewOrder(previewStepOrderWithIp, previewIsAuto);
+  }, [previewStepOrderWithIp, previewIsAuto, setPreviewOrder]);
 
   // ---- Handlers ----
 
@@ -631,9 +760,9 @@ export function TierModeSelector() {
       activeEntryKey, activeEntryStatus, hasDrafts, primaryAction,
       stack: new Error().stack?.split("\n").slice(1, 5).join(" < "),
     });
-    // M1: 用户口头需求或上传剧本（utf8 或 base64-docx），至少一个非空就允许提交
-    const hasUploadedScript = !!(uploadedFile?.content?.trim() || uploadedFile?.contentBase64);
-    if ((!userInput.trim() && !hasUploadedScript) || actionLockRef.current) return;
+    // 用户口头需求或上传文件，至少一个非空就允许提交
+    const hasAnyUpload = uploadedFiles.length > 0;
+    if ((!userInput.trim() && !hasAnyUpload) || actionLockRef.current) return;
     // Phase 5.3 (V15): 前端拦截并发，避免重复请求后端再吃 409。
     // 后端通过 [...runs.values()].find(r=>r.status==="running") 强制单实例，前端给个提示更友好。
     const runningCheck = useNarrativeStore.getState();
@@ -641,6 +770,43 @@ export function TierModeSelector() {
       setError(`已有运行中的管线（${runningCheck.runningEntryKey ?? runningCheck.runningRunId}），请先取消或等待完成`);
       return;
     }
+    if (ipDnaRunning) {
+      setError(`已有运行中的 IP DNA 任务（${ipDnaJob?.jobId}），请等待完成`);
+      return;
+    }
+
+    // 重需求路径（多模态/压缩包/多文件）：走 IP DNA 异步管线（蓝图 §5）。
+    if (isHeavyUpload) {
+      actionLockRef.current = true;
+      setStarting(true);
+      setError(null);
+      try {
+        const files: IpDnaFilePayload[] = uploadedFiles.map((f) => ({
+          file_name: f.name,
+          content: f.kind === "text" ? f.content : undefined,
+          content_base64: f.kind !== "text" ? f.contentBase64 : undefined,
+          encoding: f.kind === "docx" ? "base64-docx" : f.kind === "text" ? "utf8" : undefined,
+          file_type: f.fileType,
+        }));
+        const resp = await startIpDnaRun(files, {
+          title: uploadedFiles[0]?.name?.replace(/\.[^.]+$/, ""),
+          tier: tier ?? undefined,
+          generationMode: mode ?? undefined,
+          complexity: showComplexity ? complexity : undefined,
+          routeGroup,
+          genreCode: (!!selectedGenreCode && routeGroup === "planning") ? selectedGenreCode : undefined,
+          runGeneration: true,
+        });
+        setIpDnaJob({ jobId: resp.jobId, status: (resp.status as IpDnaJobStatus["status"]) ?? "running" });
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        actionLockRef.current = false;
+        setStarting(false);
+      }
+      return;
+    }
+
     actionLockRef.current = true;
     setStarting(true);
     setError(null);
@@ -652,8 +818,8 @@ export function TierModeSelector() {
       // M1: 上传剧本独立通道传给 backend；user_input 留给"用户在输入框写的口头需求"。
       // 若用户只上传了剧本没在输入框写需求，user_input 给一个简短占位（避免 backend 校验失败）。
       const trimmedInput = userInput.trim();
-      const fallbackInput = uploadedFile?.name
-        ? `（用户上传了剧本：${uploadedFile.name}，请基于上传剧本展开生成）`
+      const fallbackInput = scriptFile?.name
+        ? `（用户上传了剧本：${scriptFile.name}，请基于上传剧本展开生成）`
         : "";
       const effectiveUserInput = trimmedInput || fallbackInput;
       const res = await startRun(effectiveUserInput, {
@@ -663,14 +829,14 @@ export function TierModeSelector() {
         complexity: showComplexity ? complexity : undefined,
         routeGroup,
         genreCode: hasGenre ? selectedGenreCode! : undefined,
-        uploadedScript: uploadedFile
+        uploadedScript: scriptFile
           ? {
-              content: uploadedFile.content,
-              content_base64: uploadedFile.contentBase64,
-              encoding: uploadedFile.encoding,
-              file_name: uploadedFile.name,
-              size: uploadedFile.size,
-              mime: uploadedFile.mime,
+              content: scriptFile.content,
+              content_base64: scriptFile.contentBase64,
+              encoding: scriptFile.encoding as "utf8" | "base64-docx",
+              file_name: scriptFile.name,
+              size: scriptFile.size,
+              mime: scriptFile.mime,
             }
           : undefined,
       });
@@ -683,10 +849,51 @@ export function TierModeSelector() {
       actionLockRef.current = false;
       setStarting(false);
     }
-  }, [userInput, uploadedFile, tier, mode, autoDetect, complexity, showComplexity, routeGroup, selectedGenreCode, storeStartNewRun]);
+  }, [userInput, uploadedFiles, scriptFile, isHeavyUpload, ipDnaRunning, ipDnaJob, tier, mode, autoDetect, complexity, showComplexity, routeGroup, selectedGenreCode, storeStartNewRun]);
+
+  /**
+   * 半自动每步产物推给中间预览（WS-F 实时同步）：复用 pushProgress 把 IP 处理步骤
+   * （ip_input/ip_standardize/ip_volume/ip_scope/ip_dna_extract）作为生成管线前驱节点
+   * 增量加入 runningProgress，使中间节点图随每步确认实时更新。
+   */
+  const pushIpStageProgress = useCallback(
+    (stepId: string, status: "running" | "completed", message?: string, data?: unknown) => {
+      const store = useNarrativeStore.getState();
+      // 首次推送时建立 IP 预览运行轨：让中间画布/文本与正式生成同源（读 runningProgress + pipelineOrder），
+      // 否则 IP 步因无 run 上下文而排不进预览（孤立浮节点 / 文本空）。独立旁路不触发 SSE、不撞并发守卫。
+      if (!store.ipPreviewRunId && !store.runningRunId) {
+        // 仅 seed IP 前驱链：下游生成管线走 job 轮询无 SSE，若一并 seed 会留下永不点亮的 pending 节点。
+        store.startIpPreviewRun(`ip-preview-${Date.now()}`, `ip-preview:${Date.now()}`, [...IP_PREDECESSOR_STEPS]);
+      }
+      useNarrativeStore.getState().pushProgress({
+        stage: stepId,
+        stepId,
+        step: 0,
+        totalSteps: 0,
+        status: status === "completed" ? "completed" : "running",
+        message,
+        // 该步可读正文（文本直接展示 / 多模态以 @文件名 表示），中间文本视图据此渲染。
+        data,
+      });
+      // 末步（生成 scoped IP DNA）完成即收束预览轨：固化顺序、退出"运行中"态。
+      if (stepId === "ip_dna_extract" && status === "completed") {
+        useNarrativeStore.getState().finishIpPreview("completed");
+      }
+    },
+    [],
+  );
 
   const handleCancel = useCallback(async () => {
     const store = useNarrativeStore.getState();
+    // 收束 IP 预览轨（任意阶段取消）：把"运行中"步骤标为中断、退出运行态，否则预览残留 running。
+    if (store.ipPreviewRunId) store.finishIpPreview("interrupted");
+    // 统一 job 状态（§5.1 取消生产）：IP DNA 异步任务也由"取消生成"接管。
+    if (ipDnaRunning && ipDnaJob?.jobId) {
+      try { await ipDnaCancel(ipDnaJob.jobId); } catch { /* 后端无端点时静默，仅清前端态 */ }
+      setIpDnaJob((prev) => (prev ? { ...prev, status: "failed" } : prev));
+      setTimeout(() => fetchHistory().then(setHistoryList).catch(() => {}), 500);
+      return;
+    }
     if (store.runningRunId) {
       cancelRun(store.runningRunId);
       store.cancelRun();
@@ -704,7 +911,7 @@ export function TierModeSelector() {
       setHistoryList(history);
     }
     setTimeout(() => fetchHistory().then(setHistoryList).catch(() => {}), 500);
-  }, []);
+  }, [ipDnaRunning, ipDnaJob]);
 
   const handleReset = useCallback(() => {
     const store = useNarrativeStore.getState();
@@ -956,8 +1163,10 @@ export function TierModeSelector() {
   }, [isRunning, runningEntryKey, runningRunId, tier, mode, runningProgress, userInput, routeGroup, complexity, showComplexity, historyList]);
 
   const inputStepSummary = useMemo(() => {
-    if (inputTab === "file" && uploadedFile) {
-      return `已上传 ${uploadedFile.name}`;
+    if (inputTab === "file" && uploadedFiles.length > 0) {
+      return uploadedFiles.length === 1
+        ? `已上传 ${uploadedFiles[0].name}`
+        : `已上传 ${uploadedFiles.length} 个文件`;
     }
     if (inputTab === "tags") {
       const picked = TAG_DIMENSIONS.map((dim) => {
@@ -969,7 +1178,7 @@ export function TierModeSelector() {
     const trimmed = userInput.trim();
     if (!trimmed) return "未填写需求";
     return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;
-  }, [inputTab, uploadedFile, tagSelections, tagCustomTexts, userInput]);
+  }, [inputTab, uploadedFiles, tagSelections, tagCustomTexts, userInput]);
 
   const routingStepSummary = useMemo(() => {
     const routeLabel = routeGroup === "planning" ? "策划全量" : "叙事单品";
@@ -1070,6 +1279,24 @@ export function TierModeSelector() {
             : resolveExpectedSteps(entryTier, entryMode);
 
       const rawSteps = buildStepsFromCtx(ctx, authoritativeOrder);
+
+      // §6 LIST 双模块：若权威序含 IP 前驱段（IP 作品入口的历史条目），拉取已落盘层级树摘要，
+      // 回填各 IP 步的可读正文并标记完成，使中间预览还原输入模块（嵌套到最小叙事单元），
+      // 同时保证 IP 步不被下方 completed 过滤甩掉 → 顶栏与中间预览同源（SSOT）。
+      if (authoritativeOrder.some((id) => id.startsWith("ip_"))) {
+        try {
+          const summary = await fetchIpDnaHierarchy(entry.key);
+          if (summary) {
+            const ipContent = buildIpReplayContent(summary);
+            for (const s of rawSteps) {
+              if (s.id.startsWith("ip_")) {
+                s.status = "completed";
+                if (ipContent[s.id] != null) s.data = ipContent[s.id];
+              }
+            }
+          }
+        } catch { /* 无 IP 层级树（非 IP 条目或未落盘）：保持原状，零回归 */ }
+      }
 
       // pipeline_config 是「管线启动」元 step，没有 ctx field；如果它出现在权威序里
       // 视为隐式 completed（一旦 announce 帧发出就完成），避免显灰。
@@ -1194,54 +1421,31 @@ export function TierModeSelector() {
     setUserInput(parts.join("；"));
   }, [inputTab, tagSelections, tagCustomTexts, setUserInput]);
 
-  // ── File handlers ──
-  // 上传剧本：M1 解耦后**不再**污染 userInput（输入框留给用户自己写口头需求）。
-  // - .txt：file.text() 直接读 utf8 文本，存到 content
-  // - .docx：file.arrayBuffer() → base64，存到 contentBase64，由 backend mammoth 解析
-  // - .doc 老格式 mammoth 不直接支持，按字节传送给 backend 兜底（多半解析为乱码，建议用户改用 .docx 或 .txt）
-  // 预览只显示前 500 字（UI 显示用），不影响发送给 backend 的内容。
-  const handleFileUpload = useCallback(async (file: File) => {
-    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!["txt", "doc", "docx"].includes(ext)) return;
-
-    if (ext === "docx" || ext === "doc") {
-      try {
-        const buf = await file.arrayBuffer();
-        // ArrayBuffer → base64（用浏览器 btoa；分块避免栈溢出）
-        const bytes = new Uint8Array(buf);
-        let binary = "";
-        const CHUNK = 0x8000;
-        for (let i = 0; i < bytes.length; i += CHUNK) {
-          binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
-        }
-        const b64 = btoa(binary);
-        setUploadedFile({
-          name: file.name,
-          size: file.size,
-          mime: file.type,
-          contentBase64: b64,
-          encoding: "base64-docx",
-        });
-        setUploadedPreview(`📄 ${file.name}（二进制 ${ext.toUpperCase()}，${(file.size / 1024).toFixed(1)} KB）已上传，将在提交时由服务端解析。`);
-        onConfigChange();
-      } catch (e) {
-        setUploadedPreview(`❌ 读取 .${ext} 失败：${(e as Error).message}`);
-      }
-      return;
+  // ── File handlers（多文件 + 多模态 + 压缩包，蓝图 §3.4）──
+  // 读取与 userInput 解耦：输入框留给用户写口头需求。逐文件按扩展名分流：
+  //   - 文本(txt/md)：utf8 content；docx：base64-docx（后端 mammoth）；
+  //   - 二进制(图片/视频/音频/pdf/压缩包)：base64 + file_type（后端 IP DNA 摄入）。
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    const items: UploadedItem[] = [];
+    const rejected: string[] = [];
+    for (const f of list) {
+      const item = await readUploadedItem(f);
+      if (item) items.push(item);
+      else rejected.push(f.name);
     }
-
-    // .txt：直接 utf8
-    let text = "";
-    try { text = await file.text(); } catch { text = ""; }
-    setUploadedFile({
-      name: file.name,
-      size: file.size,
-      mime: file.type,
-      content: text,
-      encoding: "utf8",
-    });
-    const preview = text.slice(0, 500) + (text.length > 500 ? "\n...(预览已截断 500 字，全文已上传，提交时随请求发送)" : "");
-    setUploadedPreview(preview);
+    if (items.length > 0) {
+      // 同名去重：后上传覆盖先前同名条目。
+      setUploadedFiles((prev) => {
+        const byName = new Map(prev.map((p) => [p.name, p] as const));
+        for (const it of items) byName.set(it.name, it);
+        return Array.from(byName.values());
+      });
+    }
+    if (rejected.length > 0) {
+      setError(`不支持的格式已忽略：${rejected.join("、")}`);
+    }
     onConfigChange();
   }, [onConfigChange]);
 
@@ -1249,19 +1453,42 @@ export function TierModeSelector() {
     e.preventDefault();
     e.currentTarget.classList.remove("dragover");
     const files = e.dataTransfer?.files;
-    if (files?.length) handleFileUpload(files[0]);
-  }, [handleFileUpload]);
+    if (files?.length) void addFiles(files);
+  }, [addFiles]);
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.length) handleFileUpload(e.target.files[0]);
-  }, [handleFileUpload]);
-
-  const removeFile = useCallback(() => {
-    setUploadedFile(null);
-    setUploadedPreview("");
+    if (e.target.files?.length) void addFiles(e.target.files);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [addFiles]);
+
+  const removeFile = useCallback((name: string) => {
+    setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
     onConfigChange();
   }, [onConfigChange]);
+
+  // IP DNA 异步任务轮询：每 1.5s 拉一次进度，完成/失败即停；完成后刷新历史列表
+  // 让生成的游戏单元可被加载预览。
+  useEffect(() => {
+    if (!ipDnaJob?.jobId || ipDnaJob.status === "completed" || ipDnaJob.status === "failed" || ipDnaJob.status === "cancelled") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const st = await fetchIpDnaJob(ipDnaJob.jobId);
+        if (cancelled) return;
+        setIpDnaJob((prev) =>
+          prev && prev.jobId === st.jobId
+            ? { ...prev, status: st.status, stage: st.current_stage, progress: st.progress, message: st.message, error: st.error, result: st.result }
+            : prev,
+        );
+        if (st.status === "completed" || st.status === "failed" || st.status === "cancelled") {
+          fetchHistory().then(setHistoryList).catch(() => {});
+        }
+      } catch { /* 轮询失败下次再试 */ }
+    };
+    const id = setInterval(tick, 1500);
+    void tick();
+    return () => { cancelled = true; clearInterval(id); };
+  }, [ipDnaJob?.jobId, ipDnaJob?.status]);
 
   return (
     <div className="tier-mode-selector">
@@ -1270,6 +1497,8 @@ export function TierModeSelector() {
           <WorkbenchStepSection
             step={1}
             title="输入需求"
+            titleEn="INPUT"
+            note="三种模式，开启自由创作之路"
             summary={inputStepSummary}
             expanded={expandedSteps.has("input")}
             active={expandedSteps.has("input")}
@@ -1293,11 +1522,12 @@ export function TierModeSelector() {
 
             {inputTab === "text" && (
               <div className="input-wrap">
+                <p className="wb-helper">输入你的故事需求</p>
                 <textarea
                   className="input-textarea"
                   value={userInput}
                   onChange={(e) => { setUserInput(e.target.value); onConfigChange(); }}
-                  placeholder={"输入你的故事需求...\n\n例：赛博朋克世界，黑客揭露政府阴谋，充满背叛与救赎。"}
+                  placeholder={"例：赛博朋克世界，黑客揭露政府阴谋，充满背叛与救赎。"}
                   rows={4}
                 />
               </div>
@@ -1340,6 +1570,7 @@ export function TierModeSelector() {
 
             {inputTab === "file" && (
               <div className="file-upload-wrap">
+                <p className="wb-helper">上传 IP 作品 · 支持多模态 / 压缩包 / 多文件</p>
                 <div
                   className="file-drop-zone"
                   onClick={() => fileInputRef.current?.click()}
@@ -1348,27 +1579,89 @@ export function TierModeSelector() {
                   onDrop={onFileDrop}
                 >
                   <div className="fdz-icon"><Upload size={20} strokeWidth={1.75} aria-hidden /></div>
-                  <div className="fdz-text">点击或拖拽上传文件</div>
-                  <div className="fdz-hint">支持 .txt / .doc / .docx</div>
+                  <div className="fdz-text">点击或拖拽上传文件（可多选）</div>
+                  <div className="fdz-hint">文本 txt/md/doc/docx · 图片 jpg/png/webp/gif · 视频 mp4/mov/webm/mkv · 音频 mp3/wav · pdf · 压缩包 zip/tar/gz</div>
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".txt,.doc,.docx"
+                  accept={UPLOAD_ACCEPT}
+                  multiple
                   style={{ display: "none" }}
                   onChange={onFileChange}
                 />
-                {uploadedFile && (
-                  <div className="file-info visible">
-                    <span className="fi-name">{uploadedFile.name}</span>
-                    <span className="fi-size">{(uploadedFile.size / 1024).toFixed(1)} KB</span>
-                    <button type="button" className="fi-remove" onClick={removeFile} aria-label="移除文件">
-                      <X size={14} strokeWidth={2} />
-                    </button>
+                {uploadedFiles.length > 0 && (
+                  <div className="file-list visible">
+                    {uploadedFiles.map((f) => (
+                      <div className="file-info visible" key={f.name}>
+                        <span className="fi-name">{f.name}</span>
+                        <span className="fi-size">{(f.size / 1024).toFixed(1)} KB</span>
+                        <button type="button" className="fi-remove" onClick={() => removeFile(f.name)} aria-label={`移除 ${f.name}`}>
+                          <X size={14} strokeWidth={2} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
-                {uploadedPreview && (
-                  <div className="file-preview visible">{uploadedPreview}</div>
+                {isHeavyUpload && (
+                  <>
+                    <p className="wb-helper">含多模态/压缩包/多文件 → IP DNA 半自动摄入：分步确认裁剪范围后，配置 ROUTING 即可开始生成。</p>
+                    <IpStageFlow
+                      files={uploadedFiles.map((f) => ({
+                        file_name: f.name,
+                        content: f.kind === "text" ? f.content : undefined,
+                        content_base64: f.kind !== "text" ? f.contentBase64 : undefined,
+                        encoding: f.kind === "docx" ? "base64-docx" : f.kind === "text" ? "utf8" : undefined,
+                        file_type: f.fileType,
+                      }))}
+                      displayItems={uploadedFiles.map<IpUploadDisplay>((f) => ({ name: f.name, kind: f.kind, fileType: f.fileType }))}
+                      title={uploadedFiles[0]?.name?.replace(/\.[^.]+$/, "")}
+                      tier={tier ?? undefined}
+                      mode={mode ?? undefined}
+                      complexity={showComplexity ? complexity : undefined}
+                      routingReady={selectedTierId !== "auto" || !!selectedGenreCode || selectedNarrativeRoute !== "narrative_auto"}
+                      onStageProgress={pushIpStageProgress}
+                      onGenerateStarted={(jobId) => setIpDnaJob({ jobId, status: "running" })}
+                    />
+                  </>
+                )}
+                {ipDnaJob && (
+                  <div className={`ip-dna-job ip-dna-job--${ipDnaJob.status}`}>
+                    <div className="ip-dna-job__head">
+                      <span className="ip-dna-job__stage">
+                        IP DNA · {ipDnaJob.status === "completed" ? "完成" : ipDnaJob.status === "failed" ? "失败" : (ipDnaJob.stage ?? "处理中")}
+                      </span>
+                      {typeof ipDnaJob.progress === "number" && ipDnaJob.status !== "completed" && ipDnaJob.status !== "failed" && (
+                        <span className="ip-dna-job__pct">{ipDnaJob.progress}%</span>
+                      )}
+                    </div>
+                    {ipDnaJob.message && <div className="ip-dna-job__msg">{ipDnaJob.message}</div>}
+                    {ipDnaJob.error && <div className="ip-dna-job__msg ip-dna-job__msg--err">{ipDnaJob.error}</div>}
+                    {ipDnaJob.status === "completed" && ipDnaJob.result && (
+                      <div className="ip-dna-job__msg">
+                        层级节点 {ipDnaJob.result.node_count ?? 0} · 游戏单元 {ipDnaJob.result.game_units?.length ?? 0}（已生成 {ipDnaJob.result.game_units?.filter((g) => g.generated).length ?? 0}）
+                      </div>
+                    )}
+                    {ipDnaJob.status === "completed" && ipDnaJob.result?.extraction_quality && (
+                      <div className="ip-dna-job__quality">
+                        <span className={`ip-dna-job__quality-head${ipDnaJob.result.extraction_quality.passed ? " ok" : " warn"}`}>
+                          提取质量{ipDnaJob.result.extraction_quality.passed ? " · 通过" : " · 有告警"}
+                        </span>
+                        <div className="ip-dna-job__quality-checks">
+                          {ipDnaJob.result.extraction_quality.checks.map((c) => (
+                            <span key={c.name} className={`ip-dna-job__check${c.passed ? " ok" : " warn"}`} title={c.detail}>
+                              {c.passed ? "✓" : "!"} {c.name}{c.detail ? ` · ${c.detail}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                        {ipDnaJob.result.extraction_quality.warnings.length > 0 && (
+                          <div className="ip-dna-job__msg ip-dna-job__msg--err">
+                            {ipDnaJob.result.extraction_quality.warnings.join("；")}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -1377,6 +1670,8 @@ export function TierModeSelector() {
           <WorkbenchStepSection
             step={2}
             title="叙事路由"
+            titleEn="ROUTING"
+            note="两个入口，百种叙事，任您挑选"
             summary={routingStepSummary}
             expanded={expandedSteps.has("routing")}
             active={expandedSteps.has("routing")}
@@ -1543,6 +1838,8 @@ export function TierModeSelector() {
           <WorkbenchStepSection
             step={3}
             title="项目清单"
+            titleEn="LIST"
+            note="创作成果，在此落盘"
             summary={projectStepSummary}
             expanded={expandedSteps.has("project")}
             active={expandedSteps.has("project")}
@@ -1620,9 +1917,9 @@ export function TierModeSelector() {
         <div className="tool-action-row__main">
           <button
             type="button"
-            className={`btn-cancel btn-cancel--compact${(isRunning || isViewingRunning) ? " btn-cancel--active" : ""}`}
+            className={`btn-cancel btn-cancel--compact${(isRunning || isViewingRunning || ipDnaRunning) ? " btn-cancel--active" : ""}`}
             onClick={handleCancel}
-            disabled={!isRunning && !isViewingRunning}
+            disabled={!isRunning && !isViewingRunning && !ipDnaRunning}
           >
             取消生成
           </button>
@@ -1649,7 +1946,7 @@ export function TierModeSelector() {
               type="button"
               className="btn-generate btn-generate--compact"
               onClick={handleStart}
-              disabled={primaryAction === "none" || starting || isRunning || (!userInput.trim() && !uploadedFile?.content?.trim() && !uploadedFile?.contentBase64)}
+              disabled={primaryAction === "none" || starting || isRunning || ipDnaRunning || (!userInput.trim() && uploadedFiles.length === 0)}
             >
               {starting ? "启动中..." : isViewingRunning ? "生成中..." : isRunning ? "等待运行结束" : "开始生成"}
             </button>

@@ -1,13 +1,19 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AdjustClip,
   AudioClip,
   Branch,
   DialogueLine,
+  EffectClip,
+  FilterClip,
+  MinigameClip,
   QTECue,
   Scene,
   SearchSegmentClip,
   Shot,
+  StickerClip,
   TextOverlayClip,
+  TimelineMarker,
 } from '../scenario/types'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { rafThrottle } from '../lib/rafThrottle'
@@ -68,7 +74,15 @@ import { clampToScene, moveTo } from './timeline/editOps'
 import { planVideoDrop } from './timeline/videoDropPlan'
 import { probeVideoDurationMs } from './timeline/probeVideoDuration'
 import { loadSnapPref, saveSnapPref } from './timeline/snapPref'
-import { loadDialoguePref, saveDialoguePref } from './timeline/dialoguePref'
+import { withTrack, type TrackKey } from './timeline/trackVisibility'
+import { useTrackPrefsStore } from './timeline/trackPrefsStore'
+import { takeLegacyMarkers } from './timeline/markersStore'
+import {
+  TrackGutter,
+  TRACK_CLASS_META,
+  type GutterRow,
+} from './timeline/TrackGutter'
+import { TrackManager } from './timeline/TrackManager'
 import { computeVideoTrim } from './timeline/computeVideoTrim'
 import { nudgeVideoOffset } from './timeline/nudgeVideoOffset'
 import { GenRequestDialog } from '../forge/GenRequestDialog'
@@ -81,19 +95,11 @@ import {
 } from '../forge/generationQueueStore'
 import { useToastStore } from '../ui/toastStore'
 
-/**
- * 轨道可见性开关 —— v3.9。
- * 用户诉求「只保留 视频/图像/音频/台词/QTE 五行」，这里把历史上的 TRIG / GAME /
- * BRANCH 三行统一关闭。保留代码是为了：
- *   1. 数据层 scene.qte.slowMo / scene.minigames / scene.branches 都还在用；
- *   2. 将来接回"跨 scene 分支编辑"视图时，直接把 flag 打开即可。
- * 不要把它变成运行时可切换的 store 字段 —— 现阶段它就是个编辑期死开关。
+/*
+ * 轨道显隐已迁移到运行期偏好(trackVisibility.ts)+ 左侧轨头眼睛 +「轨道」管理面板。
+ * TRIG / GAME / BRANCH 三轨仍默认隐藏(DEFAULT_VISIBLE),但现在可在面板里随时打开。
+ * 数据层 scene.qte.slowMo / scene.minigames / scene.branches 一直都在用。
  */
-const VISIBLE_TRACKS = {
-  trig: false,
-  game: false,
-  branch: false,
-} as const
 
 interface Props {
   scene: Scene
@@ -228,6 +234,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
   setHoverMsRef.current = setHoverMs
 
   const lastCommitRef = useRef(-1)
+  // 标记点供 track() RAF 闭包做"播放头吸附标记"——同 shots 一样靠 ref 注入最新值。
+  const markersRef = useRef<TimelineMarker[]>([])
 
   // track RAF 回调里要"实时读最新 shots / 调度 setSelectedShotId"。
   // track 本身是 useMemo + rafThrottle，只创建一次，因此必须通过 ref 注入当前值，
@@ -327,6 +335,56 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
    * （让抽屉内其他地方如 PromptTabs 的 Shot tab 跟随），反之亦然。
    */
   const [toolbarSel, setToolbarSel] = useState<ToolbarSelection | null>(null)
+  /**
+   * 多选集合(剪映式 Shift+点选)——与 toolbarSel(锚点)并存。
+   * 非空时:删除 / 微调按整批执行;点空白处清空。box 框选体量大、与空白处拖拽刷
+   * 头冲突,暂不做(后续单开)。
+   */
+  const [multiSel, setMultiSel] = useState<ToolbarSelection[]>([])
+  const inMultiSel = (kind: ToolbarSelection['kind'], id: string): boolean =>
+    multiSel.some((s) => s.kind === kind && s.id === id)
+  // shot / audio 走子组件渲染，用 Set 传 id 以便高亮多选项。
+  const multiShotIds = useMemo(
+    () => new Set(multiSel.filter((s) => s.kind === 'shot').map((s) => s.id)),
+    [multiSel],
+  )
+  const multiAudioIds = useMemo(
+    () => new Set(multiSel.filter((s) => s.kind === 'audio').map((s) => s.id)),
+    [multiSel],
+  )
+  // ── 标尺标记点(剪映式打点)── 已纳入 scenario(scene.markers)，可被 agent 寻址 ──
+  const addMarker = useScenarioStore((s) => s.addMarker)
+  const renameMarker = useScenarioStore((s) => s.renameMarker)
+  const removeMarker = useScenarioStore((s) => s.removeMarker)
+  const markers = useMemo(
+    () => (scene.markers ?? []).slice().sort((a, b) => a.ms - b.ms),
+    [scene.markers],
+  )
+  markersRef.current = markers
+  // 旧版标记点在 localStorage——首次见到本场景且其 scene.markers 为空时迁移进 scenario。
+  useEffect(() => {
+    if ((scene.markers?.length ?? 0) > 0) return
+    const legacy = takeLegacyMarkers(scene.id)
+    if (legacy.length === 0) return
+    for (const m of legacy) addMarker(scene.id, m.ms, m.label)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene.id])
+  /** Shift+点击 clip → 切换其多选态;返回 true 表示已被多选拦截(调用方应 return,不进入拖拽)。 */
+  const tryMultiSelect = (
+    e: React.PointerEvent,
+    sel: ToolbarSelection,
+  ): boolean => {
+    if (!e.shiftKey) return false
+    e.stopPropagation()
+    setToolbarSel(sel)
+    setMultiSel((prev) => {
+      const hit = prev.some((s) => s.kind === sel.kind && s.id === sel.id)
+      return hit
+        ? prev.filter((s) => !(s.kind === sel.kind && s.id === sel.id))
+        : [...prev, sel]
+    })
+    return true
+  }
   /**
    * 当前打开「生成请求详情」弹窗的 job —— 双击/右键时间轴上的视频片段时填入，
    * 复用 GenRequestDialog 展示提示词 / 上传的参考素材 / 参数 / 报错。
@@ -587,24 +645,161 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
   }
 
   /**
-   * DIA（台词 / 字幕）轨可见性 —— 作者 2026-05-07 需求：
-   *   默认藏掉，让编辑时时间轴更安静；画面预览也同步不叠字幕。
-   * 值从 localStorage 读（默认 false），切换立即落盘并通过回调告知父组件，
-   * 父组件再把这个 flag 灌到 StagePane 控制画面上的字幕 band。
+   * 逐轨状态(显隐 / 静音 / 锁定)—— 剪映式轨头能力的单一事实源(见 trackVisibility.ts)。
+   * 每条轨左侧轨头的眼睛/静音/锁定都改这里;StagePane 预览与 Player 试玩输出也读它。
+   * DIA 的 visible 继续与旧 dialoguePref 双向同步,所以画面字幕逻辑无缝沿用。
    */
-  const [showDialogue, setShowDialogue] = useState<boolean>(() => loadDialoguePref())
+  const trackPrefs = useTrackPrefsStore((s) => s.prefs)
+  const patchTrack = useTrackPrefsStore((s) => s.patch)
+  const replaceTrackPrefs = useTrackPrefsStore((s) => s.replace)
+  const showDialogue = trackPrefs.dia.visible
   const onShowDialogueChangeRef = useRef(onShowDialogueChange)
   onShowDialogueChangeRef.current = onShowDialogueChange
   useEffect(() => {
     onShowDialogueChangeRef.current?.(showDialogue)
   }, [showDialogue])
-  function toggleDialogue(): void {
-    setShowDialogue((v) => {
-      const next = !v
-      saveDialoguePref(next)
-      return next
-    })
+  function hideTrack(key: TrackKey): void {
+    patchTrack(key, { visible: false })
   }
+  function toggleTrackMute(key: TrackKey): void {
+    patchTrack(key, { muted: !trackPrefs[key].muted })
+  }
+  function toggleTrackLock(key: TrackKey): void {
+    patchTrack(key, { locked: !trackPrefs[key].locked })
+  }
+
+  /** 恒显轨:勾选可见即铺轨,不看是否有内容(字幕/QTE 是一等内容,空也铺)。 */
+  const ALWAYS_ON_TRACKS = useMemo(
+    () => new Set<TrackKey>(['video', 'image', 'dia', 'qte', 'audio']),
+    [],
+  )
+  /** 各轨当前是否有内容 —— 决定可选轨是否自动出现 / 面板里是否标「空」。 */
+  function trackHasContent(key: TrackKey): boolean {
+    switch (key) {
+      case 'fx':
+        return (
+          (scene.filterClips?.length ?? 0) +
+            (scene.adjustClips?.length ?? 0) +
+            (scene.effectClips?.length ?? 0) >
+          0
+        )
+      case 'stk':
+        return (scene.stickerClips?.length ?? 0) > 0
+      case 'dia':
+        return scene.dialogue.length > 0
+      case 'txt':
+        return (scene.textOverlays?.length ?? 0) > 0
+      case 'srch':
+        return (scene.searchSegments?.length ?? 0) > 0
+      case 'trig':
+        return (
+          (scene.qte?.cues.filter((c) => c.slowMo && c.slowMo.rate < 1)
+            .length ?? 0) > 0
+        )
+      case 'game':
+        return (scene.minigames?.length ?? 0) > 0
+      case 'br':
+        return scene.branches.some((b) => b.kind === 'choice')
+      case 'qte':
+        return (scene.qte?.cues.length ?? 0) > 0
+      default:
+        return true
+    }
+  }
+  /** 某轨是否应铺出 lane(综合可见 + 恒显/有内容/强制空轨)。 */
+  function isTrackShown(key: TrackKey): boolean {
+    const st = trackPrefs[key]
+    if (!st.visible) return false
+    return ALWAYS_ON_TRACKS.has(key) || trackHasContent(key) || st.showEmpty
+  }
+  /** 某轨是否锁定(锁定轨内 clip 不可选/拖/删)。 */
+  function isTrackLocked(key: TrackKey): boolean {
+    return trackPrefs[key].locked
+  }
+  function setTrackShown(key: TrackKey, shown: boolean): void {
+    if (shown) {
+      const needEmpty = !ALWAYS_ON_TRACKS.has(key) && !trackHasContent(key)
+      patchTrack(key, needEmpty ? { visible: true, showEmpty: true } : { visible: true })
+    } else {
+      patchTrack(key, { visible: false })
+    }
+  }
+  function showAllTracks(): void {
+    let next = trackPrefs
+    for (const k of Object.keys(trackPrefs) as TrackKey[]) {
+      const needEmpty = !ALWAYS_ON_TRACKS.has(k) && !trackHasContent(k)
+      next = withTrack(next, k, needEmpty ? { visible: true, showEmpty: true } : { visible: true })
+    }
+    replaceTrackPrefs(next)
+  }
+
+  // 轨头列(左栏)布局:量测真实 lane 的 offsetTop/offsetHeight,做像素级镜像。
+  const [gutterRows, setGutterRows] = useState<GutterRow[]>([])
+  const [gutterScrollTop, setGutterScrollTop] = useState(0)
+  const [trackManagerOpen, setTrackManagerOpen] = useState(false)
+
+  // 轨头列布局镜像:量测 .ks-timeline-tracks 的直接子节点(标尺 + 各 lane)的
+  // offsetTop/offsetHeight,生成左栏行布局。无论 lane 高度怎么变(DIA 多行、IMAGE 空/满)
+  // 都能像素级对齐。ResizeObserver + render 触发双保险。
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let raf = 0
+    const recompute = (): void => {
+      const next: GutterRow[] = []
+      for (const child of Array.from(el.children) as HTMLElement[]) {
+        if (child.classList.contains('ks-timeline-rule')) {
+          next.push({ kind: 'rule', top: child.offsetTop, height: child.offsetHeight })
+          continue
+        }
+        for (const cls in TRACK_CLASS_META) {
+          if (child.classList.contains(cls)) {
+            const meta = TRACK_CLASS_META[cls]
+            if (meta) {
+              next.push({
+                kind: 'track',
+                key: meta.key,
+                label: meta.label,
+                top: child.offsetTop,
+                height: child.offsetHeight,
+              })
+            }
+            break
+          }
+        }
+      }
+      setGutterRows((prev) => {
+        if (
+          prev.length === next.length &&
+          prev.every((p, i) => {
+            const n = next[i]
+            return (
+              !!n &&
+              p.kind === n.kind &&
+              p.key === n.key &&
+              p.top === n.top &&
+              p.height === n.height
+            )
+          })
+        ) {
+          return prev
+        }
+        return next
+      })
+    }
+    const schedule = (): void => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(recompute)
+    }
+    schedule()
+    const ro = new ResizeObserver(schedule)
+    ro.observe(el)
+    for (const child of Array.from(el.children)) ro.observe(child as Element)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [scene, trackPrefs, zoom, viewportW, dialogueLanes])
 
   /**
    * 光标跟随模式 —— 2026-04-30 作者需求（v3.9 默认改为 off）。
@@ -642,7 +837,18 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           1,
           Math.max(0, (clientX - rect.left) / rect.width),
         )
-        const next = Math.round(ratio * totalRef.current)
+        let next = Math.round(ratio * totalRef.current)
+        // 播放头吸附标记点(剪映式):落在 ±8px 内则吸到该标记。
+        const msPerPx = totalRef.current / Math.max(1, rect.width)
+        const snapTolMs = msPerPx * 8
+        let bestDist = snapTolMs
+        for (const mk of markersRef.current) {
+          const d = Math.abs(mk.ms - next)
+          if (d <= bestDist) {
+            bestDist = d
+            next = mk.ms
+          }
+        }
         if (next === lastCommitRef.current) return
         lastCommitRef.current = next
         setHoverMsRef.current(next)
@@ -733,6 +939,12 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
    * 严格只在"编辑器的可输入控件没聚焦时"响应，避免文本域里按退格就把台词删了。
    */
   const tbDeleteRef = useRef<() => void>(() => {})
+  const clipboardRef = useRef<{ kind: string; data: Record<string, unknown> } | null>(null)
+  const [canPaste, setCanPaste] = useState(false)
+  const copySelectionRef = useRef<() => void>(() => {})
+  const pasteAtPlayheadRef = useRef<() => void>(() => {})
+  const duplicateSelectionRef = useRef<() => void>(() => {})
+  const addMarkerRef = useRef<() => void>(() => {})
   const tbNudgeRef = useRef<(dir: -1 | 1, step: number) => void>(() => {})
   useEffect(() => {
     function isTypingTarget(t: EventTarget | null): boolean {
@@ -744,6 +956,31 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     }
     function onKey(e: KeyboardEvent): void {
       if (isTypingTarget(e.target)) return
+      const mod = e.metaKey || e.ctrlKey
+      // 复制 / 粘贴 / 再制(剪映式)。粘贴可在无选中时进行(只要剪贴板有内容)。
+      if (mod && (e.key === 'c' || e.key === 'C')) {
+        if (!toolbarSel) return
+        e.preventDefault()
+        copySelectionRef.current()
+        return
+      }
+      if (mod && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault()
+        pasteAtPlayheadRef.current()
+        return
+      }
+      if (mod && (e.key === 'd' || e.key === 'D')) {
+        if (!toolbarSel) return
+        e.preventDefault()
+        duplicateSelectionRef.current()
+        return
+      }
+      // M：在播放头打标记点(剪映式 marker),无需选中。
+      if (!mod && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault()
+        addMarkerRef.current()
+        return
+      }
       if (!toolbarSel) {
         // 没有选中时不接管，避免吞掉页面级快捷键
         return
@@ -757,6 +994,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         case 'Escape':
           e.preventDefault()
           setToolbarSel(null)
+          setMultiSel([])
           break
         case 'ArrowLeft':
         case 'ArrowRight': {
@@ -783,6 +1021,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     line: DialogueLine,
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked('dia')) return
+    if (tryMultiSelect(e, { kind: 'dialogue', id: line.id })) return
     e.stopPropagation()
     selectDialogue(line.id)
     drag.beginDrag<{ snapshot: DialogueLine }>(e, {
@@ -824,6 +1064,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     cue: QTECue,
     handle: 'whole' | 'leadIn',
   ): void {
+    if (isTrackLocked(handle === 'leadIn' ? 'trig' : 'qte')) return
+    if (tryMultiSelect(e, { kind: 'cue', id: cue.id })) return
     e.stopPropagation()
     selectCue(cue.id)
     drag.beginDrag<{ snapshot: QTECue }>(e, {
@@ -873,6 +1115,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     clip: TextOverlayClip,
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked('txt')) return
+    if (tryMultiSelect(e, { kind: 'textOverlay', id: clip.id })) return
     e.stopPropagation()
     setToolbarSel({ kind: 'textOverlay', id: clip.id })
     const snap = { startMs: clip.startMs, endMs: clip.endMs ?? Math.min(total, clip.startMs + 2500) }
@@ -893,6 +1137,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     clip: SearchSegmentClip,
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked('srch')) return
+    if (tryMultiSelect(e, { kind: 'searchSegment', id: clip.id })) return
     e.stopPropagation()
     setToolbarSel({ kind: 'searchSegment', id: clip.id })
     const snap = { startMs: clip.startMs, endMs: clip.endMs }
@@ -915,6 +1161,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     clip: { id: string; startMs: number; endMs: number },
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked(kind === 'sticker' ? 'stk' : 'fx')) return
+    if (tryMultiSelect(e, { kind, id: clip.id })) return
     e.stopPropagation()
     setToolbarSel({ kind, id: clip.id })
     const snap = { startMs: clip.startMs, endMs: clip.endMs }
@@ -1002,6 +1250,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
 
   // ── Branch pin 拖拽 ─────────────────────────────────────────────────
   function onBranchPointerDown(e: React.PointerEvent, branch: Branch): void {
+    if (isTrackLocked('br')) return
+    if (tryMultiSelect(e, { kind: 'branch', id: branch.id })) return
     e.stopPropagation()
     selectBranch(branch.id)
     drag.beginDrag<{ snapshot: Branch }>(e, {
@@ -1046,6 +1296,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     shot: Shot,
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked('image')) return
+    if (tryMultiSelect(e, { kind: 'shot', id: shot.id })) return
     e.stopPropagation()
     selectShotFromTimeline(shot.id)
     const span0 = shotSpan(shot)
@@ -1094,6 +1346,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     e: React.PointerEvent,
     handle: 'left' | 'right',
   ): void {
+    if (isTrackLocked('video')) return
     e.stopPropagation()
     const offset0 = Math.max(0, scene.videoOffsetMs ?? 0)
     const clip0 =
@@ -1141,6 +1394,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     clip: AudioClip,
     handle: 'whole' | 'left' | 'right',
   ): void {
+    if (isTrackLocked('audio')) return
+    if (tryMultiSelect(e, { kind: 'audio', id: clip.id })) return
     e.stopPropagation()
     selectAudio(clip.id)
     const span0 = { startMs: clip.startMs, endMs: clip.startMs + clip.durationMs }
@@ -1180,49 +1435,49 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
       splitAudioClip(scene.id, toolbarSel.id, hoverMs)
     }
   }
-  function tbDelete(): void {
-    if (!toolbarSel) return
-    switch (toolbarSel.kind) {
+  /** 删除单个选择项（不复位 toolbarSel；供批量与单条共用）。 */
+  function removeSelection(sel: ToolbarSelection): void {
+    switch (sel.kind) {
       case 'shot':
-        removeShot(scene.id, toolbarSel.id)
+        removeShot(scene.id, sel.id)
         setSelectedShotId(null)
         break
       case 'audio':
-        removeAudioClip(scene.id, toolbarSel.id)
+        removeAudioClip(scene.id, sel.id)
         break
       case 'dialogue':
-        removeDialogue(scene.id, toolbarSel.id)
+        removeDialogue(scene.id, sel.id)
         break
       case 'cue':
-        removeQTECue(scene.id, toolbarSel.id)
+        removeQTECue(scene.id, sel.id)
         break
       case 'branch':
-        removeBranch(scene.id, toolbarSel.id)
+        removeBranch(scene.id, sel.id)
         break
       case 'minigame':
-        removeMinigameClip(scene.id, toolbarSel.id)
+        removeMinigameClip(scene.id, sel.id)
         break
       case 'textOverlay':
-        removeTextOverlay(scene.id, toolbarSel.id)
+        removeTextOverlay(scene.id, sel.id)
         break
       case 'searchSegment':
-        removeSearchSegment(scene.id, toolbarSel.id)
+        removeSearchSegment(scene.id, sel.id)
         break
       case 'filter':
-        removeFilterClip(scene.id, toolbarSel.id)
+        removeFilterClip(scene.id, sel.id)
         break
       case 'adjust':
-        removeAdjustClip(scene.id, toolbarSel.id)
+        removeAdjustClip(scene.id, sel.id)
         break
       case 'effect':
-        removeEffectClip(scene.id, toolbarSel.id)
+        removeEffectClip(scene.id, sel.id)
         break
       case 'sticker':
-        removeStickerClip(scene.id, toolbarSel.id)
+        removeStickerClip(scene.id, sel.id)
         break
       case 'transition':
         // 转场存在镜上（shot.transitionIn）；删除 = 清掉该镜的入场转场。
-        updateShot(scene.id, toolbarSel.id, { transitionIn: undefined })
+        updateShot(scene.id, sel.id, { transitionIn: undefined })
         break
       case 'video':
         // v3.9.8：把 scene.media 归到 PLACEHOLDER + 清 video trim 字段。
@@ -1236,6 +1491,17 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         })
         break
     }
+  }
+  function tbDelete(): void {
+    // 多选优先：整批删除。
+    if (multiSel.length > 0) {
+      for (const sel of multiSel) removeSelection(sel)
+      setMultiSel([])
+      setToolbarSel(null)
+      return
+    }
+    if (!toolbarSel) return
+    removeSelection(toolbarSel)
     setToolbarSel(null)
   }
 
@@ -1270,8 +1536,18 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
    * 每类维护独立的时域边界，防止 clip 被推到 scene 外。
    */
   function tbNudge(dir: -1 | 1, step: number): void {
-    if (!toolbarSel) return
     const delta = dir * step
+    // 多选优先：整批微调（同向同步移动）。
+    if (multiSel.length > 0) {
+      for (const s of multiSel) nudgeOne(s, delta)
+      return
+    }
+    if (!toolbarSel) return
+    nudgeOne(toolbarSel, delta)
+  }
+  /** 微调单个选择项 delta(ms)。供 tbNudge 单条 / 批量共用（body 用 toolbarSel 别名保持不变）。 */
+  function nudgeOne(selArg: ToolbarSelection, delta: number): void {
+    const toolbarSel = selArg
     switch (toolbarSel.kind) {
       case 'shot': {
         const sh = scene.shots?.find((x) => x.id === toolbarSel.id)
@@ -1387,9 +1663,174 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     }
   }
 
+  // ── 复制 / 粘贴 / 再制（剪映式）──────────────────────────────────────
+  // 剪贴板放 ref（纯传值，不需要触发重渲）。粘贴/再制的落点统一在播放头(hoverMs)。
+  type ClipKind =
+    | 'dialogue'
+    | 'audio'
+    | 'sticker'
+    | 'textOverlay'
+    | 'searchSegment'
+    | 'filter'
+    | 'adjust'
+    | 'effect'
+    | 'cue'
+    | 'minigame'
+  interface ClipboardItem {
+    kind: ClipKind
+    data: Record<string, unknown>
+  }
+
+  function cloneId(prefix: string): string {
+    return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  }
+  const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+  /** 读当前选中的 clip，深拷贝成剪贴板项（不支持的选择返回 null）。 */
+  function readSelectionClip(sel: ToolbarSelection | null): ClipboardItem | null {
+    if (!sel) return null
+    const find = <T extends { id: string }>(arr: T[] | undefined): T | undefined =>
+      arr?.find((x) => x.id === sel.id)
+    let data: { id: string } | undefined
+    switch (sel.kind) {
+      case 'dialogue': data = find(scene.dialogue); break
+      case 'audio': data = find(scene.audio); break
+      case 'sticker': data = find(scene.stickerClips); break
+      case 'textOverlay': data = find(scene.textOverlays); break
+      case 'searchSegment': data = find(scene.searchSegments); break
+      case 'filter': data = find(scene.filterClips); break
+      case 'adjust': data = find(scene.adjustClips); break
+      case 'effect': data = find(scene.effectClips); break
+      case 'cue': data = find(scene.qte?.cues); break
+      case 'minigame': data = find(scene.minigames); break
+      default: return null
+    }
+    if (!data) return null
+    return {
+      kind: sel.kind as ClipKind,
+      data: JSON.parse(JSON.stringify(data)) as Record<string, unknown>,
+    }
+  }
+
+  /** 把剪贴板项克隆一份、落点在 ms（播放头）、写库并选中。 */
+  function cloneAndInsert(item: ClipboardItem, ms: number): void {
+    const src = item.data
+    const at = clampN(ms, 0, Math.max(0, total - 100))
+    const spanOf = (s: number, e: number) => Math.max(100, e - s)
+    switch (item.kind) {
+      case 'dialogue': {
+        const d = src as unknown as DialogueLine
+        const id = cloneId('d')
+        const span = d.endMs != null ? d.endMs - d.startMs : null
+        const startMs = at
+        const next: DialogueLine =
+          span != null
+            ? { ...d, id, startMs, endMs: clampN(startMs + span, startMs + 100, total) }
+            : { ...d, id, startMs }
+        addDialogue(scene.id, next)
+        setToolbarSel({ kind: 'dialogue', id })
+        break
+      }
+      case 'audio': {
+        const a = src as unknown as AudioClip
+        const id = cloneId('a')
+        const startMs = clampN(at, 0, Math.max(0, total - a.durationMs))
+        addAudioClip(scene.id, { ...a, id, startMs })
+        setToolbarSel({ kind: 'audio', id })
+        break
+      }
+      case 'sticker': {
+        const c = src as unknown as StickerClip
+        const id = cloneId('stk')
+        const span = spanOf(c.startMs, c.endMs)
+        addStickerClip(scene.id, { ...c, id, startMs: at, endMs: clampN(at + span, at + 100, total) })
+        setToolbarSel({ kind: 'sticker', id })
+        break
+      }
+      case 'textOverlay': {
+        const c = src as unknown as TextOverlayClip
+        const id = cloneId('tx')
+        const end = c.endMs ?? c.startMs + 2500
+        const span = spanOf(c.startMs, end)
+        addTextOverlay(scene.id, { ...c, id, startMs: at, endMs: clampN(at + span, at + 100, total) })
+        setToolbarSel({ kind: 'textOverlay', id })
+        break
+      }
+      case 'searchSegment': {
+        const c = src as unknown as SearchSegmentClip
+        const id = cloneId('ss')
+        const span = spanOf(c.startMs, c.endMs)
+        const endMs = clampN(at + span, at + 100, total)
+        addSearchSegment(scene.id, { ...c, id, startMs: at, endMs, loopStartMs: at, loopEndMs: endMs })
+        setToolbarSel({ kind: 'searchSegment', id })
+        break
+      }
+      case 'filter': {
+        const c = src as unknown as FilterClip
+        const id = cloneId('flt')
+        const span = spanOf(c.startMs, c.endMs)
+        addFilterClip(scene.id, { ...c, id, startMs: at, endMs: clampN(at + span, at + 100, total) })
+        setToolbarSel({ kind: 'filter', id })
+        break
+      }
+      case 'adjust': {
+        const c = src as unknown as AdjustClip
+        const id = cloneId('adj')
+        const span = spanOf(c.startMs, c.endMs)
+        addAdjustClip(scene.id, { ...c, id, startMs: at, endMs: clampN(at + span, at + 100, total) })
+        setToolbarSel({ kind: 'adjust', id })
+        break
+      }
+      case 'effect': {
+        const c = src as unknown as EffectClip
+        const id = cloneId('efx')
+        const span = spanOf(c.startMs, c.endMs)
+        addEffectClip(scene.id, { ...c, id, startMs: at, endMs: clampN(at + span, at + 100, total) })
+        setToolbarSel({ kind: 'effect', id })
+        break
+      }
+      case 'cue': {
+        const c = src as unknown as QTECue
+        const id = cloneId('q')
+        const gap = c.targetAt - c.appearAt
+        const targetAt = clampN(at, gap, total)
+        addQTECue(scene.id, { ...c, id, targetAt, appearAt: targetAt - gap })
+        setToolbarSel({ kind: 'cue', id })
+        break
+      }
+      case 'minigame': {
+        const c = src as unknown as MinigameClip
+        const id = cloneId('mg')
+        const startMs = clampN(at, 0, Math.max(0, total - c.durationMs))
+        addMinigameClip(scene.id, { ...c, id, startMs })
+        setToolbarSel({ kind: 'minigame', id })
+        break
+      }
+    }
+  }
+
+  function copySelection(): void {
+    const item = readSelectionClip(toolbarSel)
+    if (item) {
+      clipboardRef.current = item
+      setCanPaste(true)
+    }
+  }
+  function pasteAtPlayhead(): void {
+    if (clipboardRef.current) cloneAndInsert(clipboardRef.current as ClipboardItem, hoverMs)
+  }
+  function duplicateSelection(): void {
+    const item = readSelectionClip(toolbarSel)
+    if (item) cloneAndInsert(item, hoverMs)
+  }
+
   // 把最新的 tbDelete/tbNudge 同步到 ref，键盘 handler 里读 ref 即可拿到最新闭包。
   tbDeleteRef.current = tbDelete
   tbNudgeRef.current = tbNudge
+  copySelectionRef.current = copySelection
+  pasteAtPlayheadRef.current = pasteAtPlayhead
+  duplicateSelectionRef.current = duplicateSelection
+  addMarkerRef.current = () => addMarker(scene.id, hoverMs)
 
   // ── 拖入外部素材（TimelineDock）────────────────────────────────────
   function onTrackDrop(e: React.DragEvent): void {
@@ -1639,14 +2080,19 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         onCompactShots={() => compactShotsLeft(scene.id)}
         onCompactAudio={() => compactAudioLeft(scene.id)}
         onDelete={tbDelete}
+        onCopy={copySelection}
+        onPaste={pasteAtPlayhead}
+        onDuplicate={duplicateSelection}
+        canPaste={canPaste}
+        onSeekToStart={() => setHoverMs(0)}
+        onSeekToEnd={() => setHoverMs(total)}
+        totalMs={total}
         onClearAll={tbClearAll}
         onNudge={tbNudge}
         snapEnabled={snapEnabled}
         onToggleSnap={toggleSnap}
         followCursor={followCursor}
         onToggleFollow={toggleFollow}
-        showDialogue={showDialogue}
-        onToggleDialogue={toggleDialogue}
         zoom={zoom}
         onZoomChange={(z) => setZoom(clampZoom(z))}
         onZoomFit={() => setZoom(1)}
@@ -1657,7 +2103,74 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           })
         }
       />
-      <div className="ks-timeline-scroll" ref={scrollRef}>
+      {(() => {
+        if (toolbarSel?.kind !== 'audio') return null
+        const ac = scene.audio?.find((a) => a.id === toolbarSel.id)
+        if (!ac) return null
+        const vol = Math.round((ac.volume ?? 1) * 100)
+        return (
+          <div className="ks-audio-inspector" onPointerDown={(e) => e.stopPropagation()}>
+            <span className="ks-audio-insp-title ks-mono">
+              ♪ {ac.label ?? ac.role.toUpperCase()}
+            </span>
+            <label className="ks-audio-insp-field">
+              <span>音量 {vol}%</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={vol}
+                onChange={(e) =>
+                  updateAudioClip(scene.id, ac.id, { volume: Number(e.target.value) / 100 })
+                }
+              />
+            </label>
+            <label className="ks-audio-insp-field">
+              <span>淡入 ms</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={ac.fadeInMs ?? 0}
+                onChange={(e) =>
+                  updateAudioClip(scene.id, ac.id, {
+                    fadeInMs: Math.max(0, Math.round(Number(e.target.value) || 0)),
+                  })
+                }
+              />
+            </label>
+            <label className="ks-audio-insp-field">
+              <span>淡出 ms</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={ac.fadeOutMs ?? 0}
+                onChange={(e) =>
+                  updateAudioClip(scene.id, ac.id, {
+                    fadeOutMs: Math.max(0, Math.round(Number(e.target.value) || 0)),
+                  })
+                }
+              />
+            </label>
+          </div>
+        )
+      })()}
+      <div className="ks-timeline-body">
+      <TrackGutter
+        rows={gutterRows}
+        prefs={trackPrefs}
+        scrollTop={gutterScrollTop}
+        onHide={hideTrack}
+        onToggleMute={toggleTrackMute}
+        onToggleLock={toggleTrackLock}
+        onOpenManager={() => setTrackManagerOpen(true)}
+      />
+      <div
+        className="ks-timeline-scroll"
+        ref={scrollRef}
+        onScroll={(e) => setGutterScrollTop(e.currentTarget.scrollTop)}
+      >
       <div
         ref={ref}
         className={`ks-timeline-tracks ${preview || shotPreview || audioPreview ? 'is-dragging' : ''}`}
@@ -1687,6 +2200,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           )
           if (!hitClip) {
             setToolbarSel(null)
+            setMultiSel([])
             // 空白处按下 → 进入拖拽 scrub，playhead 实时跟手（画面 / 字幕同步刷新）。
             beginScrub(e)
           }
@@ -1695,8 +2209,19 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         onDragOver={onTrackDragOver}
         onDrop={onTrackDrop}
       >
-        {/* 刻度 —— 缩放后按像素密度自适应（剪映式），位置仍是相对画布宽度的百分比 */}
-        <div className="ks-timeline-rule">
+        {/* 刻度 —— 缩放后按像素密度自适应（剪映式），位置仍是相对画布宽度的百分比。
+            双击空白处在该位置打标记点。 */}
+        <div
+          className="ks-timeline-rule"
+          onDoubleClick={(e) => {
+            const el = ref.current
+            if (!el) return
+            const rect = el.getBoundingClientRect()
+            const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+            addMarker(scene.id, Math.round(ratio * total))
+          }}
+          title="双击打标记点 · 拖动播放头会吸附标记 · 标记点单击跳转 / 右键改名删除"
+        >
           {ruleTicks.map((t, i) => (
             <span
               key={i}
@@ -1706,6 +2231,31 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               {t.label}
             </span>
           ))}
+          {markers.map((mk) => (
+            <span
+              key={mk.id}
+              className="ks-rule-marker"
+              style={{ left: `${Math.min(100, (mk.ms / total) * 100)}%` }}
+              title={`${mk.label ?? '标记'} · ${formatTimeCode(mk.ms)} · 单击跳转 · 右键改名/删除`}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                setHoverMs(mk.ms)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                const name = window.prompt(
+                  '标记点名称（留空=删除该标记）',
+                  mk.label ?? '',
+                )
+                if (name === null) return
+                if (name.trim() === '') removeMarker(scene.id, mk.id)
+                else renameMarker(scene.id, mk.id, name.trim())
+              }}
+            >
+              <span className="ks-rule-marker-flag">{mk.label ?? ''}</span>
+            </span>
+          ))}
         </div>
 
         {/* ── 后期效果轨（画面 / 贴纸）—— 摆在 VIDEO 轨「上方」，对标剪映
@@ -1713,15 +2263,13 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
            转场不在这里：它直接画在 VIDEO 轨两段视频的衔接处（剪映式）。 ── */}
 
         {/* FX 轨 —— 画面后期（滤镜 / 调节 / 特效），按 kind 着色 */}
-        {((scene.filterClips?.length ?? 0) +
-          (scene.adjustClips?.length ?? 0) +
-          (scene.effectClips?.length ?? 0)) > 0 && (
-          <div className="ks-track ks-track-fx">
+        {isTrackShown('fx') && (
+          <div className={`ks-track ks-track-fx${isTrackLocked('fx') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">特效</span>
             {(scene.filterClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'filter' && toolbarSel.id === c.id
+              const isSelected = (toolbarSel?.kind === 'filter' && toolbarSel.id === c.id) || inMultiSel('filter', c.id)
               const label = getFilterPreset(c.presetId)?.label ?? '滤镜'
               return (
                 <div
@@ -1740,7 +2288,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             {(scene.adjustClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'adjust' && toolbarSel.id === c.id
+              const isSelected = (toolbarSel?.kind === 'adjust' && toolbarSel.id === c.id) || inMultiSel('adjust', c.id)
               return (
                 <div
                   key={c.id}
@@ -1758,7 +2306,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             {(scene.effectClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'effect' && toolbarSel.id === c.id
+              const isSelected = (toolbarSel?.kind === 'effect' && toolbarSel.id === c.id) || inMultiSel('effect', c.id)
               const label = getEffectPreset(c.presetId)?.label ?? '特效'
               return (
                 <div
@@ -1778,13 +2326,13 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         )}
 
         {/* STK 轨 —— 贴纸（数值花字 / 图标 / emoji / 图片） */}
-        {(scene.stickerClips?.length ?? 0) > 0 && (
-          <div className="ks-track ks-track-sticker">
+        {isTrackShown('stk') && (
+          <div className={`ks-track ks-track-sticker${isTrackLocked('stk') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">贴纸</span>
             {(scene.stickerClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'sticker' && toolbarSel.id === c.id
+              const isSelected = (toolbarSel?.kind === 'sticker' && toolbarSel.id === c.id) || inMultiSel('sticker', c.id)
               const glyph =
                 c.kind === 'emoji'
                   ? c.text
@@ -1815,6 +2363,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
            · scene.media.kind=VIDEO → 左右 handle 拉 → 改 scene.videoOffsetMs / videoClipDurationMs
            · scene.media.kind=IMAGE 或空 → 显示空占位（"未生成视频"），等着后续点"生成视频"覆盖图像
            视觉上始终在 IMAGE 轨上方，对标剪映的"视频层 > 图像层"。 */}
+        {isTrackShown('video') && (
         <VideoTrimTrack
           scene={scene}
           totalMs={total}
@@ -1837,26 +2386,37 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             }
             setToolbarSel({ kind: 'transition', id: shot.id })
           }}
+          onProbeShotVideoDuration={(shotId, ms) => {
+            const sh = scene.shots?.find((s) => s.id === shotId)
+            if (!sh) return
+            // 容差 40ms：避免浏览器 duration 抖动反复写库导致渲染抖动。
+            if (sh.videoNaturalDurationMs != null && Math.abs(sh.videoNaturalDurationMs - ms) < 40) return
+            updateShot(scene.id, shotId, { videoNaturalDurationMs: ms })
+          }}
         />
+        )}
 
         {/* IMAGE 轨 —— v3 镜头带：每段是一个 shot clip，显示关键帧缩略 + framing 标签
            （shot.keyframeMediaRef 是图像，作为占位；视频在上方 VIDEO 轨覆盖） */}
+        {isTrackShown('image') && (
         <ShotTrack
           scene={scene}
           totalMs={total}
           preview={shotPreview}
           selectedShotId={toolbarSel?.kind === 'shot' ? toolbarSel.id : null}
+          multiSelectedIds={multiShotIds}
           onSelect={selectShotFromTimeline}
           onPointerDown={onShotPointerDown}
           onInspect={(shot) => inspectShotRequest(shot, 'image')}
           onContextMenuShot={onShotContextMenu}
           spanOf={shotSpan}
         />
+        )}
 
         {/* 字幕带 —— v3 只画 dialogue，不含 scene.background
            2026-06-19：默认显示（dialoguePref 默认值改为 true）；时间重叠的台词分行
            堆叠（assignDialogueLanes），不再糊成一团；空文本台词显示占位并可一键清理。 */}
-        {showDialogue && (() => {
+        {isTrackShown('dia') && (() => {
           const LANE_H = 16
           const LANE_GAP = 2
           const PAD = 4
@@ -1867,7 +2427,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             (d) => (d.text ?? '').trim() === '',
           ).length
           return (
-        <div className="ks-track ks-track-dialogue" style={{ height: trackH }}>
+        <div className={`ks-track ks-track-dialogue${isTrackLocked('dia') ? ' is-locked' : ''}`} style={{ height: trackH }}>
           <span className="ks-track-label ks-mono">DIA</span>
           {emptyCount > 0 && (
             <button
@@ -1886,7 +2446,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               ((d.endMs ?? Math.min(total, d.startMs + 2000)) / total) * 100
             const isPreviewing = preview?.kind === 'dialogue' && preview.id === d.id
             const isSelected =
-              toolbarSel?.kind === 'dialogue' && toolbarSel.id === d.id
+              (toolbarSel?.kind === 'dialogue' && toolbarSel.id === d.id) ||
+              inMultiSel('dialogue', d.id)
             const isEmpty = (rawD.text ?? '').trim() === ''
             const lane = laneOf[rawD.id] ?? 0
             return (
@@ -1931,13 +2492,15 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         })()}
 
         {/* QTE 带 */}
-        <div className="ks-track ks-track-qte">
+        {isTrackShown('qte') && (
+        <div className={`ks-track ks-track-qte${isTrackLocked('qte') ? ' is-locked' : ''}`}>
           <span className="ks-track-label ks-mono">QTE</span>
           {scene.qte?.cues.map((rawC) => {
             const c = previewedCue(rawC)
             const isPreviewing = preview?.kind === 'cue' && preview.id === c.id
             const isSelected =
-              toolbarSel?.kind === 'cue' && toolbarSel.id === c.id
+              (toolbarSel?.kind === 'cue' && toolbarSel.id === c.id) ||
+              inMultiSel('cue', c.id)
             return (
               <div
                 key={c.id}
@@ -1967,16 +2530,17 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             )
           })}
         </div>
+        )}
 
         {/* TXT 轨 —— 富文本文字叠加（剪映/PR 式贴字） */}
-        {(scene.textOverlays?.length ?? 0) > 0 && (
-          <div className="ks-track ks-track-text">
+        {isTrackShown('txt') && (
+          <div className={`ks-track ks-track-text${isTrackLocked('txt') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">TXT</span>
             {(scene.textOverlays ?? []).map((t) => {
               const endMs = t.endMs ?? Math.min(total, t.startMs + 2500)
               const start = (t.startMs / total) * 100
               const end = (endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'textOverlay' && toolbarSel.id === t.id
+              const isSelected = (toolbarSel?.kind === 'textOverlay' && toolbarSel.id === t.id) || inMultiSel('textOverlay', t.id)
               return (
                 <div
                   key={t.id}
@@ -2003,13 +2567,13 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         )}
 
         {/* SEARCH 轨 —— 道具搜索段（视频定格循环 + 放大镜搜寻） */}
-        {(scene.searchSegments?.length ?? 0) > 0 && (
-          <div className="ks-track ks-track-search">
+        {isTrackShown('srch') && (
+          <div className={`ks-track ks-track-search${isTrackLocked('srch') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">SRCH</span>
             {(scene.searchSegments ?? []).map((sg) => {
               const start = (sg.startMs / total) * 100
               const end = (sg.endMs / total) * 100
-              const isSelected = toolbarSel?.kind === 'searchSegment' && toolbarSel.id === sg.id
+              const isSelected = (toolbarSel?.kind === 'searchSegment' && toolbarSel.id === sg.id) || inMultiSel('searchSegment', sg.id)
               return (
                 <div
                   key={sg.id}
@@ -2035,9 +2599,9 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           </div>
         )}
 
-        {/* 触发轨 · 子弹时间区间（v3.9：按五轨极简需求默认隐藏） */}
-        {VISIBLE_TRACKS.trig && (
-          <div className="ks-track ks-track-trig">
+        {/* 触发轨 · 子弹时间区间（默认隐藏,可在「轨道」面板打开） */}
+        {isTrackShown('trig') && (
+          <div className={`ks-track ks-track-trig${isTrackLocked('trig') ? ' is-locked' : ''}`}>
           <span className="ks-track-label ks-mono">TRIG</span>
           {scene.qte?.cues
             .map(previewedCue)
@@ -2080,19 +2644,22 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         )}
 
         {/* AUDIO 轨 —— BGM / SFX / VO 三色。每条 clip 可拖、可剪切、可左对齐 */}
+        {isTrackShown('audio') && (
         <AudioTrack
           scene={scene}
           totalMs={total}
           preview={audioPreview}
           selectedClipId={toolbarSel?.kind === 'audio' ? toolbarSel.id : null}
+          multiSelectedIds={multiAudioIds}
           onSelect={selectAudio}
           onPointerDown={onAudioPointerDown}
         />
+        )}
 
         {/* MINIGAME 轨 —— 每个 clip 表示一次"到点暂停、弹出 iframe 小游戏"
-           v3.9：按五轨极简需求默认隐藏（数据层仍在，flag 打开即恢复编辑） */}
-        {VISIBLE_TRACKS.game && (
-          <div className="ks-track ks-track-minigame">
+           默认隐藏（数据层仍在，「轨道」面板打开即恢复编辑） */}
+        {isTrackShown('game') && (
+          <div className={`ks-track ks-track-minigame${isTrackLocked('game') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">GAME</span>
             {(scene.minigames ?? []).map((mg) => {
               const left = (mg.startMs / total) * 100
@@ -2123,9 +2690,9 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           </div>
         )}
 
-        {/* 分支带（v3.9：按五轨极简需求默认隐藏） */}
-        {VISIBLE_TRACKS.branch && (
-          <div className="ks-track ks-track-branch">
+        {/* 分支带（默认隐藏,可在「轨道」面板打开） */}
+        {isTrackShown('br') && (
+          <div className={`ks-track ks-track-branch${isTrackLocked('br') ? ' is-locked' : ''}`}>
             <span className="ks-track-label ks-mono">BR</span>
             {scene.branches
               .filter((b) => b.kind === 'choice')
@@ -2133,7 +2700,8 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
                 const b = previewedBranch(rawB)
                 const isPreviewing = preview?.kind === 'branch' && preview.id === b.id
                 const isSelected =
-                  toolbarSel?.kind === 'branch' && toolbarSel.id === b.id
+                  (toolbarSel?.kind === 'branch' && toolbarSel.id === b.id) ||
+                  inMultiSel('branch', b.id)
                 return (
                   <div
                     key={b.id}
@@ -2212,6 +2780,18 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         )}
       </div>
       </div>
+      </div>
+
+      {trackManagerOpen && (
+        <TrackManager
+          prefs={trackPrefs}
+          isShown={isTrackShown}
+          hasContent={trackHasContent}
+          onSetShown={setTrackShown}
+          onShowAll={showAllTracks}
+          onClose={() => setTrackManagerOpen(false)}
+        />
+      )}
 
       {/* 视频片段「生成请求详情」弹窗 —— 双击/右键 VIDEO 轨视频片段时打开 */}
       {inspectJob && (
@@ -2427,6 +3007,7 @@ function VideoTrimTrack({
   onContextMenuSceneVideo,
   selectedTransitionShotId,
   onTransitionClick,
+  onProbeShotVideoDuration,
 }: {
   scene: Scene
   totalMs: number
@@ -2435,6 +3016,8 @@ function VideoTrimTrack({
   onSelect: () => void
   onPointerDown: (e: React.PointerEvent, handle: 'left' | 'right') => void
   shotSpanOf: (shot: Shot) => { startMs: number; endMs: number }
+  /** 视频 loadedmetadata 后回写本镜视频真实时长(ms)，用于视频条与图像镜窗解耦。 */
+  onProbeShotVideoDuration: (shotId: string, ms: number) => void
   selectedShotId: string | null
   onSelectShot: (shotId: string) => void
   onInspectShot: (shot: Shot) => void
@@ -2474,8 +3057,14 @@ function VideoTrimTrack({
           <span className="ks-track-label ks-mono">VIDEO</span>
           {shotVideos.map((shot, i) => {
             const span = shotSpanOf(shot)
+            // 视频条与「图像镜窗」解耦：从镜起点画，长度 = 视频真实时长(探测到的
+            // videoNaturalDurationMs)，而不是被拉伸的镜窗长度。作者把图片拉多长都不影响
+            // 视频条——它只画到视频本身最长处，超出部分是图片占位参考(下方 IMAGE 轨)。
+            const naturalMs = shot.videoNaturalDurationMs
+            const videoLenMs = naturalMs && naturalMs > 0 ? naturalMs : span.endMs - span.startMs
+            const segEndMs = Math.min(totalMs, span.startMs + videoLenMs)
             const leftPct = (span.startMs / totalMs) * 100
-            const widthPct = Math.max(1.5, ((span.endMs - span.startMs) / totalMs) * 100)
+            const widthPct = Math.max(1.5, ((segEndMs - span.startMs) / totalMs) * 100)
             const url = entries[shot.videoMediaRef!]!.url
             const sel = shot.id === selectedShotId
             // 剪映式转场徽标：画在「上一段视频 → 本段」的衔接处（本段左边缘），
@@ -2506,6 +3095,12 @@ function VideoTrimTrack({
                     playsInline
                     preload="metadata"
                     aria-hidden
+                    onLoadedMetadata={(e) => {
+                      const d = e.currentTarget.duration
+                      if (Number.isFinite(d) && d > 0) {
+                        onProbeShotVideoDuration(shot.id, Math.round(d * 1000))
+                      }
+                    }}
                   />
                   <span className="ks-shot-video-tag">
                     {String(shot.order + 1).padStart(2, '0')}
@@ -2634,6 +3229,7 @@ function ShotTrack({
   totalMs,
   preview,
   selectedShotId,
+  multiSelectedIds,
   onSelect,
   onPointerDown,
   onInspect,
@@ -2644,6 +3240,7 @@ function ShotTrack({
   totalMs: number
   preview: { id: string; startMs: number; endMs: number } | null
   selectedShotId: string | null
+  multiSelectedIds?: Set<string>
   onSelect: (shotId: string) => void
   onPointerDown: (
     e: React.PointerEvent,
@@ -2681,7 +3278,7 @@ function ShotTrack({
         const leftPct = (span.startMs / totalMs) * 100
         const widthPct = Math.max(1.5, ((span.endMs - span.startMs) / totalMs) * 100)
         const isKey = shot.id === keyShotId
-        const isSelected = shot.id === selectedShotId
+        const isSelected = shot.id === selectedShotId || !!multiSelectedIds?.has(shot.id)
         return (
           <ShotClip
             key={shot.id}
@@ -2779,6 +3376,11 @@ function ShotClip({
           )}
         </span>
       )}
+      {shot.speed != null && shot.speed !== 1 && (
+        <span className="ks-shot-speed-badge ks-mono">
+          {shot.speed === 0 ? '定格' : `${shot.speed}×`}
+        </span>
+      )}
       <span className="ks-shot-clip-tag ks-mono">
         {isKey && <span className="ks-shot-clip-star" aria-label="代表帧">★</span>}
         {String(shot.order + 1).padStart(2, '0')} · {framingTag}
@@ -2819,6 +3421,7 @@ function AudioTrack({
   totalMs,
   preview,
   selectedClipId,
+  multiSelectedIds,
   onSelect,
   onPointerDown,
 }: {
@@ -2826,6 +3429,7 @@ function AudioTrack({
   totalMs: number
   preview: { id: string; startMs: number; durationMs: number } | null
   selectedClipId: string | null
+  multiSelectedIds?: Set<string>
   onSelect: (clipId: string) => void
   onPointerDown: (
     e: React.PointerEvent,
@@ -2849,17 +3453,20 @@ function AudioTrack({
         const dur = isPreviewing ? preview!.durationMs : clip.durationMs
         const leftPct = (start / totalMs) * 100
         const widthPct = Math.max(1, (dur / totalMs) * 100)
-        const isSelected = clip.id === selectedClipId
+        const isSelected = clip.id === selectedClipId || !!multiSelectedIds?.has(clip.id)
+        const vol = clip.volume ?? 1
+        const fadeInPct = Math.min(60, ((clip.fadeInMs ?? 0) / Math.max(1, dur)) * 100)
+        const fadeOutPct = Math.min(60, ((clip.fadeOutMs ?? 0) / Math.max(1, dur)) * 100)
         return (
           <div
             key={clip.id}
             className={`ks-clip ks-audio-clip role-${clip.role} ${
               isSelected ? 'is-selected' : ''
             } ${isPreviewing ? 'is-dragging' : ''}`}
-            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            style={{ left: `${leftPct}%`, width: `${widthPct}%`, ['--ks-aud-vol' as string]: String(vol) }}
             onClick={() => onSelect(clip.id)}
             onPointerDown={(e) => onPointerDown(e, clip, 'whole')}
-            title={`${clip.role.toUpperCase()} · ${clip.label ?? clip.ref}`}
+            title={`${clip.role.toUpperCase()} · ${clip.label ?? clip.ref} · 音量 ${Math.round(vol * 100)}%${(clip.fadeInMs ?? 0) > 0 ? ` · 淡入 ${clip.fadeInMs}ms` : ''}${(clip.fadeOutMs ?? 0) > 0 ? ` · 淡出 ${clip.fadeOutMs}ms` : ''}`}
           >
             <span
               className="ks-clip-handle ks-clip-handle-l"
@@ -2869,6 +3476,12 @@ function AudioTrack({
               }}
             />
             <span className="ks-audio-clip-wave" aria-hidden />
+            {fadeInPct > 0 && (
+              <span className="ks-audio-fade ks-audio-fade-in" style={{ width: `${fadeInPct}%` }} aria-hidden />
+            )}
+            {fadeOutPct > 0 && (
+              <span className="ks-audio-fade ks-audio-fade-out" style={{ width: `${fadeOutPct}%` }} aria-hidden />
+            )}
             <span className="ks-audio-clip-label ks-mono">
               {clip.label ?? clip.role.toUpperCase()}
             </span>
@@ -2898,6 +3511,60 @@ const tlCss = `
   letter-spacing: 0.24em;
   color: var(--ks-text-dim);
 }
+/* 时间轴主体 —— 剪映式两栏:左固定轨头 .ks-track-gutter + 右滚动画布。
+   外框(边框/圆角/内阴影)挪到这里,左右两栏同框、纵向滚动共享同一个滚动条。 */
+.ks-timeline-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--ks-border);
+  border-radius: var(--ks-radius-md);
+  background: var(--ks-panel-elev);
+  box-shadow: var(--ks-shadow-inset-hi);
+  overflow: hidden;
+}
+/* 左侧轨头列 —— 横向固定不动;纵向由 JS 把 .ks-timeline-scroll 的 scrollTop 同步进来。 */
+.ks-track-gutter {
+  position: relative;
+  flex: 0 0 80px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--ks-surface-warm);
+  border-right: 1px solid var(--ks-border);
+  z-index: 6;
+}
+.ks-gutter-inner { position: absolute; inset: 0; will-change: transform; }
+.ks-gutter-cell {
+  position: absolute; left: 0; right: 0;
+  box-sizing: border-box;
+  display: flex; align-items: center;
+  border-bottom: 1px solid var(--ks-border);
+}
+.ks-gutter-rule {
+  justify-content: flex-end;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--ks-border-soft);
+}
+.ks-gutter-row { justify-content: space-between; gap: 3px; padding: 0 5px; }
+.ks-gutter-row.is-locked { opacity: 0.62; }
+.ks-gutter-name {
+  font-size: 9.5px; letter-spacing: 0.1em;
+  color: var(--ks-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ks-gutter-ctrls { display: inline-flex; gap: 1px; flex: 0 0 auto; }
+.ks-gutter-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: 0; background: transparent;
+  color: var(--ks-text-faint); cursor: pointer;
+  border-radius: 3px; line-height: 1;
+}
+.ks-gutter-btn:hover { color: var(--ks-text); background: var(--ks-panel-elev); }
+.ks-gutter-btn.is-active { color: var(--ks-amber); }
+.ks-gutter-manage { font-size: 13px; width: 18px; height: 16px; }
+
 /* 横向滚动视口 —— 包住 .ks-timeline-tracks；缩放 > 1× 时画布变宽，这里出现滚动条 */
 .ks-timeline-scroll {
   position: relative;
@@ -2907,21 +3574,122 @@ const tlCss = `
   overflow-x: auto;
   /* 轨道变多（叠加转场/画面/贴纸轨）时纵向可滚，避免底部 VIDEO/IMAGE/AUDIO 被裁切 */
   overflow-y: auto;
-  border-radius: var(--ks-radius-md);
   scrollbar-width: thin;
 }
 .ks-timeline-tracks {
   position: relative;
   box-sizing: border-box;
   min-height: 220px;
-  border: 1px solid var(--ks-border);
-  border-radius: var(--ks-radius-md);
-  background: var(--ks-panel-elev);
-  box-shadow: var(--ks-shadow-inset-hi);
   cursor: ew-resize;
   overflow: hidden;
   user-select: none;
   touch-action: none;
+}
+/* 轨名改由左侧轨头(.ks-track-gutter)承担;lane 内的旧标签一律隐藏,避免盖住片段。 */
+.ks-track-label { display: none !important; }
+
+/* 音频 clip:波形高度随音量;两端淡入淡出三角(剪映式包络可视化)。 */
+.ks-audio-clip-wave {
+  transform-origin: bottom;
+  transform: scaleY(var(--ks-aud-vol, 1));
+}
+.ks-audio-fade {
+  position: absolute; top: 0; bottom: 0; pointer-events: none;
+  z-index: 2;
+}
+.ks-audio-fade-in {
+  left: 0;
+  background: linear-gradient(to right, rgba(0,0,0,0.5), transparent);
+  clip-path: polygon(0 100%, 100% 0, 100% 100%);
+}
+.ks-audio-fade-out {
+  right: 0;
+  background: linear-gradient(to left, rgba(0,0,0,0.5), transparent);
+  clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+
+/* 音频片段检查器 —— 选中某条音频 clip 时出现:音量 / 淡入 / 淡出。 */
+.ks-audio-inspector {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 5px 9px; margin-bottom: 2px;
+  background: var(--ks-surface-warm);
+  border: 1px solid var(--ks-border-soft);
+  border-radius: var(--ks-radius-sm);
+  font-size: 10px; color: var(--ks-text-dim);
+}
+.ks-audio-insp-title { color: var(--ks-mint, var(--ks-text)); letter-spacing: 0.08em; }
+.ks-audio-insp-field { display: inline-flex; align-items: center; gap: 5px; }
+.ks-audio-insp-field input[type='range'] { width: 96px; }
+.ks-audio-insp-field input[type='number'] {
+  width: 58px; background: var(--ks-panel-elev); color: var(--ks-text);
+  border: 1px solid var(--ks-border-soft); border-radius: 3px; padding: 1px 4px;
+}
+/* 镜头条上的变速徽标 */
+.ks-shot-speed-badge {
+  position: absolute; top: 2px; right: 3px; z-index: 3;
+  font-size: 8.5px; line-height: 1; padding: 1px 3px;
+  background: rgba(0,0,0,0.55); color: var(--ks-amber);
+  border-radius: 3px; pointer-events: none;
+}
+
+/* 锁定轨:lane 内片段不可交互(点击穿透到容器=只滚动播放头),并加斜纹提示。 */
+.ks-track.is-locked > .ks-clip,
+.ks-track.is-locked > .ks-cue-pin,
+.ks-track.is-locked > .ks-branch-pin,
+.ks-track.is-locked > .ks-trig-band,
+.ks-track.is-locked > .ks-minigame-block { pointer-events: none; }
+.ks-track.is-locked::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+    rgba(255,255,255,0.045) 0 6px, transparent 6px 12px);
+}
+
+/* ── 轨道管理浮层 ──────────────────────────────────────────── */
+.ks-trackmgr-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.42);
+}
+.ks-trackmgr {
+  width: 260px; max-height: 70vh; overflow: auto;
+  background: var(--ks-panel-elev);
+  border: 1px solid var(--ks-border);
+  border-radius: var(--ks-radius-md);
+  box-shadow: var(--ks-shadow-pop, 0 12px 40px rgba(0,0,0,0.5));
+  padding: 8px;
+}
+.ks-trackmgr-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.ks-trackmgr-title { font-size: 12px; letter-spacing: 0.18em; color: var(--ks-text); }
+.ks-trackmgr-allbtn {
+  font-size: 10px; cursor: pointer;
+  background: var(--ks-surface-warm); color: var(--ks-text-dim);
+  border: 1px solid var(--ks-border-soft); border-radius: var(--ks-radius-sm);
+  padding: 2px 7px;
+}
+.ks-trackmgr-allbtn:hover { color: var(--ks-text); border-color: var(--ks-amber); }
+.ks-trackmgr-list { display: flex; flex-direction: column; gap: 1px; }
+.ks-trackmgr-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 5px; border-radius: var(--ks-radius-sm);
+  font-size: 11px; color: var(--ks-text); cursor: pointer;
+}
+.ks-trackmgr-item:hover { background: var(--ks-surface-warm); }
+.ks-trackmgr-item input { cursor: pointer; }
+.ks-trackmgr-name { flex: 0 0 auto; min-width: 30px; }
+.ks-trackmgr-hint {
+  flex: 1 1 auto; font-size: 9.5px; color: var(--ks-text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ks-trackmgr-empty {
+  flex: 0 0 auto; font-size: 9px; color: var(--ks-text-faint);
+  border: 1px solid var(--ks-border-soft); border-radius: 3px; padding: 0 4px;
+}
+.ks-trackmgr-foot {
+  margin: 8px 2px 2px; font-size: 9.5px; line-height: 1.5;
+  color: var(--ks-text-faint);
 }
 .ks-timeline-tracks.is-dragging { cursor: grabbing; }
 .ks-timeline-rule {
@@ -2937,6 +3705,42 @@ const tlCss = `
   letter-spacing: 0.14em;
   color: var(--ks-text-faint);
   transform: translateX(-50%);
+}
+/* 标记点(剪映式 marker):标尺上的小旗,向下贯穿轨区作吸附参考 */
+.ks-rule-marker {
+  position: absolute;
+  top: 0;
+  bottom: -2px;
+  width: 0;
+  border-left: 1px solid var(--ks-amber, #f0a500);
+  transform: translateX(-0.5px);
+  cursor: pointer;
+  z-index: 6;
+}
+.ks-rule-marker::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ks-amber, #f0a500);
+}
+.ks-rule-marker:hover::before { filter: brightness(1.25); }
+.ks-rule-marker-flag {
+  position: absolute;
+  top: -1px;
+  left: 5px;
+  font-size: 8px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--ks-amber, #f0a500);
+  pointer-events: none;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ks-track {
   position: relative;
@@ -3462,9 +4266,16 @@ const tlCss = `
 
 /* ── TXT 轨（文字叠加）─────────────────────────────── */
 .ks-track-text { background: rgba(196, 166, 255, 0.05); }
-.ks-clip-text {
+/*
+ * 命名冲突修复：内层文字标签 span 也叫 ks-clip-text(见上方 pointer-events:none 规则),
+ * 而 TXT 叠层 clip 的容器 div 是 ks-clip + ks-clip-text。两者同名时,容器会继承到标签
+ * 规则的 pointer-events:none -> 字体 clip 点不中(无法选中/拖动/拉伸)。这里用更高特异度的
+ * 双类选择器只命中容器,并显式恢复 pointer-events:auto。
+ */
+.ks-clip.ks-clip-text {
   position: absolute;
   top: 4px; bottom: 4px;
+  min-width: 30px;
   border-radius: 6px;
   background: linear-gradient(180deg, rgba(196,166,255,0.30), rgba(196,166,255,0.16));
   border: 1px solid rgba(196,166,255,0.5);
@@ -3472,8 +4283,9 @@ const tlCss = `
   display: flex; align-items: center;
   overflow: hidden;
   cursor: grab;
+  pointer-events: auto;
 }
-.ks-clip-text.is-selected {
+.ks-clip.ks-clip-text.is-selected {
   border-color: #c4a6ff;
   box-shadow: 0 0 0 2px rgba(196,166,255,0.4);
 }
@@ -3501,6 +4313,9 @@ const tlCss = `
 .ks-clip-fx {
   position: absolute;
   top: 4px; bottom: 4px;
+  /* 像素级最小宽度:短花字/特效/文字 clip 在缩放下不会缩成几像素难以选中、拖动、拉伸。
+     与 width:% 并存时 min-width 生效,保证任何时长/缩放下都有足够命中区。 */
+  min-width: 30px;
   border-radius: 6px;
   display: flex; align-items: center;
   overflow: hidden;
@@ -3562,6 +4377,7 @@ const tlCss = `
 .ks-clip-sticker {
   position: absolute;
   top: 4px; bottom: 4px;
+  min-width: 30px;
   border-radius: 6px;
   background: linear-gradient(180deg, rgba(255,140,190,0.30), rgba(255,140,190,0.15));
   border: 1px solid rgba(255,140,190,0.5);

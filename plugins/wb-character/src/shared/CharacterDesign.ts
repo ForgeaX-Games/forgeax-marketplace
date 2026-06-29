@@ -2,7 +2,7 @@ import { globalState, type CombatType, type Gender, type ArtStyle, type Characte
 import { BODY_TYPE_PRESETS, getBodyType, describeProfession, type BodyType } from './BodyTypes'
 import { listNpcOccupations, describeNpcOccupation } from './NpcOccupations'
 import { applyHideableTo } from './HideableImage'
-import { apiModelIdForImageModel } from './promptRouter'
+import { apiModelIdForImageModel, turnaroundVendorForImageModel } from './promptRouter'
 import { adaptPromptForImageModel } from './promptAdapter'
 import {
   buildConceptStyleDirectives,
@@ -30,6 +30,11 @@ import {
   getVehicleEra,
   isCustomVehicleSubtype,
 } from './VehicleClassification'
+import {
+  generateTurnaroundFor3D,
+  loadTurnaround3DHandoffViews,
+  type TurnaroundViewAsset,
+} from '../lib/api-client'
 
 /**
  * 决定是否要把「职业 NPC / 路人」的角色设计流程自动跳到像素动画管线。
@@ -43,6 +48,22 @@ import {
  *   2. 角色必须是 `npc`——主角英雄保留原有流程（设定图 → 修改局部细节 → 选择管线）。
  *   3. 当前图与上次已跳转的图不同——避免用户切回 CharacterDesign tab 时被反复弹走。
  */
+/** Map handler turnaround `{path,url}` objects to wb-gen3d handoff URL strings. */
+export function buildGen3DHandoffViews(
+  views: Partial<Record<'front' | 'back' | 'left' | 'right', TurnaroundViewAsset | undefined>>,
+): { front: string; back?: string; left?: string; right?: string } | null {
+  const front = views.front?.url?.trim()
+  if (!front) return null
+  const out: { front: string; back?: string; left?: string; right?: string } = { front }
+  const back = views.back?.url?.trim()
+  const left = views.left?.url?.trim()
+  const right = views.right?.url?.trim()
+  if (back) out.back = back
+  if (left) out.left = left
+  if (right) out.right = right
+  return out
+}
+
 export function shouldAutoRouteNpcToPixel(
   role: CharacterRole | undefined | null,
   lastRoutedImage: string | null,
@@ -807,6 +828,13 @@ export class CharacterDesign {
   private conceptDetailOpen = false
   private conceptDetailPart: string | null = null
   private conceptDetailVersion = 0
+
+  /** 3D-ready orthographic view URLs for wb-gen3d handoff (hero/monster final phase). */
+  private turnaround3DViews: { front: string; back?: string; left?: string; right?: string } | null = null
+  private turnaround3DCharId: string | null = null
+  private turnaroundHydrateGen = 0
+  private finalPreviewHydrateGen = 0
+  private generatingTurnaround3D = false
 
   /**
    * 路人 NPC 一次性自动跳转到像素管线的记忆位。
@@ -1693,6 +1721,49 @@ export class CharacterDesign {
     this.wireConceptEvents()
   }
 
+  /** Best preview src: disk URL beats memory; concept thumb is last resort. */
+  private resolveFinalPreviewSrc(): string | null {
+    const st = globalState.get()
+    if (st.characterImageUrl) return st.characterImageUrl
+    if (st.characterImage) return st.characterImage
+    return this.conceptImages[0] || null
+  }
+
+  private mountFinalPreviewImage(src: string): void {
+    const preview = this.centerEl?.querySelector('[data-cd="preview"]') as HTMLElement | null
+    const actions = this.centerEl?.querySelector('[data-cd="actions"]') as HTMLElement | null
+    if (!preview) return
+    const imgEl = document.createElement('img')
+    imgEl.className = 'cd-preview-img'
+    imgEl.onload = () => { if (actions) actions.style.display = 'flex' }
+    imgEl.src = src
+    preview.innerHTML = ''
+    preview.appendChild(imgEl)
+    applyHideableTo(preview, 'img.cd-preview-img', { idFrom: () => 'character-design:final' })
+    if (actions) actions.style.display = 'flex'
+  }
+
+  /** Pull full-res portrait from disk when memory only has a thumb / concept fallback. */
+  private hydrateFinalPreviewIfNeeded(initialSrc: string | null): void {
+    const gen = ++this.finalPreviewHydrateGen
+    void (async () => {
+      const needsHydrate = !initialSrc
+        || (!globalState.get().characterImage && !!globalState.get().characterImageUrl)
+        || (initialSrc === this.conceptImages[0] && !!globalState.get().characterImageUrl)
+      if (!needsHydrate && initialSrc?.startsWith('/api/')) return
+      if (!needsHydrate && initialSrc?.startsWith('data:') && !globalState.get().characterImageUrl) return
+      const ok = await globalState.hydrateCharacterImage()
+      if (gen !== this.finalPreviewHydrateGen || this.phase !== 'final') return
+      const upgraded = this.resolveFinalPreviewSrc()
+      if (upgraded && upgraded !== initialSrc) {
+        this.mountFinalPreviewImage(upgraded)
+      } else if (!initialSrc && ok && upgraded) {
+        this.mountFinalPreviewImage(upgraded)
+        this.clearConceptsLoadFallback()
+      }
+    })()
+  }
+
   private renderFinalCenter(): void {
     if (!this.centerEl) return
     // NPC / 怪物 / 载具都不走「修改局部细节」部件编辑面板——都是 gameplay 实例，
@@ -1717,6 +1788,11 @@ export class CharacterDesign {
     // 不再让用户选 3 选 1（大部分用户会点错）。按钮直接叫"生成动画"。载具走
     // wb-anim/vehicle-design 切多视角，文案也叫「生成动画」。
     const confirmText = isVehicle ? '🎬 切多视角 / 生成动画' : '🎬 生成动画'
+    const showGen3D = !isNpc && !isVehicle
+    const gen3dButtonsHtml = showGen3D
+      ? `<button class="cd-btn" data-action="gen-turnaround-3d"${this.generatingTurnaround3D ? ' disabled' : ''}>${this.generatingTurnaround3D ? '⏳ 生成四视图中...' : '🧊 生成 3D 四视图'}</button>
+            <button class="cd-btn cd-btn-primary" data-action="go-gen3d"${this.turnaround3DViews ? '' : ' disabled'}>🚀 送去 3D 生成</button>`
+      : ''
     this.centerEl.innerHTML = `
       <div class="cd-center-stack">
         ${this.roleTabBarHTML()}
@@ -1728,10 +1804,12 @@ export class CharacterDesign {
               <div>加载中...</div>
             </div>
           </div>
+          ${this.turnaroundGridHtml()}
           <div class="cd-preview-actions" data-cd="actions" style="display:none">
             <button class="cd-btn" data-action="back-concepts">← 返回概念图</button>
             <button class="cd-btn" data-action="regen-final">重新生成设定图</button>
             ${detailBtnHtml}
+            ${gen3dButtonsHtml}
             <button class="cd-btn cd-btn-accent cd-btn-xl" data-action="go-pixel">${confirmText}</button>
           </div>
         </div>
@@ -1739,32 +1817,56 @@ export class CharacterDesign {
     `
     this.wireFinalEvents()
 
-    // 成品图优先用 globalState.characterImage(跨 iframe 经 localStorage 同步)。
-    // 但大图可能撑爆 localStorage quota 导致 save() 静默失败 → 同 iframe 内也读空,
-    // 内容区永远停在"加载中..."。这里用内存里的概念图(载具/NPC 单图直达场景下
-    // conceptImages[0] 就是那张设定图)兜底,保证至少本 iframe 能立刻看到图。
-    const img = globalState.get().characterImage || this.conceptImages[0] || null
+    // 优先 characterImageUrl(磁盘全分辨率); memory / conceptImages[0] 作即时兜底,
+    // hydrateFinalPreviewIfNeeded 再从磁盘拉高清替换缩略图。
+    const img = this.resolveFinalPreviewSrc()
     if (img) {
-      const preview = this.centerEl.querySelector('[data-cd="preview"]') as HTMLElement
-      const actions = this.centerEl.querySelector('[data-cd="actions"]') as HTMLElement
-      if (preview) {
-        const imgEl = document.createElement('img')
-        imgEl.className = 'cd-preview-img'
-        imgEl.onload = () => { if (actions) actions.style.display = 'flex' }
-        imgEl.src = img
-        preview.innerHTML = ''
-        preview.appendChild(imgEl)
-        applyHideableTo(preview, 'img.cd-preview-img', { idFrom: () => 'character-design:final' })
-      }
-      if (actions) actions.style.display = 'flex'
+      this.mountFinalPreviewImage(img)
       this.clearConceptsLoadFallback()
-    } else if (!this.isGenerationActive()) {
+      this.hydrateFinalPreviewIfNeeded(img)
+    } else {
+      this.hydrateFinalPreviewIfNeeded(null)
+    }
+    if (!img && !this.isGenerationActive()) {
       // final phase 但拿不到任何图(localStorage 同步丢失 / 切到没生成过的角色 /
       // 状态残留)——别永久卡在"加载中...",退回 form 让用户重新开始。
       this.scheduleFinalNoImageFallback()
     }
 
     this.maybeAutoRouteNpcToPixel(img)
+    void this.hydrateTurnaround3DFromDisk()
+  }
+
+  /** Restore 2×2 turnaround grid from manifest / on-disk files (no re-generation). */
+  private async hydrateTurnaround3DFromDisk(): Promise<void> {
+    const role = globalState.profile?.characterRole
+    if (role === 'npc' || role === 'vehicle') return
+    if (this.generatingTurnaround3D) return
+
+    const slug = globalState.getSlug()
+    if (!slug) return
+    let charId = globalState.profile?.charId?.trim() ?? ''
+    if (!charId) charId = globalState.ensureCharId()
+    if (!charId) return
+
+    if (this.turnaround3DViews && this.turnaround3DCharId === charId) return
+
+    const gen = ++this.turnaroundHydrateGen
+    try {
+      const views = await loadTurnaround3DHandoffViews(slug, charId)
+      if (gen !== this.turnaroundHydrateGen || this.generatingTurnaround3D) return
+      if (!views) {
+        if (this.turnaround3DCharId !== charId) {
+          this.turnaround3DViews = null
+          this.turnaround3DCharId = charId
+          this.syncTurnaround3DUI()
+        }
+        return
+      }
+      this.turnaround3DViews = views
+      this.turnaround3DCharId = charId
+      this.syncTurnaround3DUI()
+    } catch { /* best-effort */ }
   }
 
   private _finalNoImageFallbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -2004,6 +2106,163 @@ export class CharacterDesign {
     this.centerEl?.querySelector('[data-action="go-pixel"]')?.addEventListener('click', () => {
       void this.navigateToAnim()
     })
+
+    this.centerEl?.querySelector('[data-action="gen-turnaround-3d"]')?.addEventListener('click', () => {
+      void this.generateTurnaround3D()
+    })
+
+    this.centerEl?.querySelector('[data-action="go-gen3d"]')?.addEventListener('click', () => {
+      void this.navigateToGen3D()
+    })
+  }
+
+  private turnaroundGridHtml(): string {
+    if (!this.turnaround3DViews) return ''
+    const labels: Record<'front' | 'back' | 'left' | 'right', string> = {
+      front: '正面',
+      back: '背面',
+      left: '左侧',
+      right: '右侧',
+    }
+    const order = ['front', 'back', 'left', 'right'] as const
+    const cells = order.map((key) => {
+      const url = this.turnaround3DViews![key]
+      if (!url) {
+        return `<div class="cd-turnaround-cell cd-turnaround-empty"><span>${labels[key]}</span></div>`
+      }
+      return `<div class="cd-turnaround-cell"><img src="${esc(url)}" alt="${labels[key]}"/><span>${labels[key]}</span></div>`
+    }).join('')
+    return `<div class="cd-turnaround-grid" data-cd="turnaround-grid">${cells}</div>`
+  }
+
+  private syncTurnaround3DUI(): void {
+    if (!this.centerEl) return
+    const wrap = this.centerEl.querySelector('.cd-preview-wrap')
+    const existing = wrap?.querySelector('[data-cd="turnaround-grid"]')
+    existing?.remove()
+    const html = this.turnaroundGridHtml()
+    if (html && wrap) {
+      const actions = wrap.querySelector('[data-cd="actions"]')
+      const tpl = document.createElement('template')
+      tpl.innerHTML = html.trim()
+      wrap.insertBefore(tpl.content.firstElementChild!, actions)
+    }
+    const genBtn = this.centerEl.querySelector('[data-action="gen-turnaround-3d"]') as HTMLButtonElement | null
+    if (genBtn) {
+      genBtn.disabled = this.generatingTurnaround3D
+      genBtn.textContent = this.generatingTurnaround3D ? '⏳ 生成四视图中...' : '🧊 生成 3D 四视图'
+    }
+    const goBtn = this.centerEl.querySelector('[data-action="go-gen3d"]') as HTMLButtonElement | null
+    if (goBtn) goBtn.disabled = !this.turnaround3DViews
+  }
+
+  /** Final-phase reference image — same fallbacks as renderFinalCenter preview. */
+  private async resolveFinalReferenceDataUrl(): Promise<string | null> {
+    const fromState = globalState.get().characterImage
+    if (fromState) return fromState
+
+    const fromConcept = this.conceptImages[0]
+    if (fromConcept) return fromConcept
+
+    const preview = this.centerEl?.querySelector('img.cd-preview-img') as HTMLImageElement | null
+    const src = preview?.currentSrc || preview?.src
+    if (src) {
+      if (src.startsWith('data:')) return src
+      if (await globalState.loadPortraitFromUrl(src)) {
+        return globalState.get().characterImage
+      }
+    }
+
+    if (await globalState.hydrateCharacterImage(true)) {
+      return globalState.get().characterImage
+    }
+    return null
+  }
+
+  private static dataUrlToBase64(dataUrl: string): string {
+    const comma = dataUrl.indexOf(',')
+    return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
+  }
+
+  private async generateTurnaround3D(): Promise<void> {
+    const slug = globalState.getSlug()
+    if (!slug) {
+      this.toast('请先在 Studio 顶部选择一个游戏项目，再生成 3D 四视图')
+      return
+    }
+    if (this.generatingTurnaround3D) return
+    this.generatingTurnaround3D = true
+    this.syncTurnaround3DUI()
+
+    const refDataUrl = await this.resolveFinalReferenceDataUrl()
+    if (!refDataUrl) {
+      this.generatingTurnaround3D = false
+      this.syncTurnaround3DUI()
+      this.toast('找不到角色设定图，请重新生成设定图后再试')
+      return
+    }
+
+    let charId = globalState.profile?.charId ?? ''
+    try {
+      charId = globalState.ensureCharId()
+      await globalState.uploadAsset('portrait/current.png', refDataUrl)
+      const r = await globalState.writeManifest('portrait/current.png')
+      if (r) charId = r.charId
+    } catch { /* best-effort — refImageBase64 below is the hard guarantee */ }
+    if (!charId) charId = globalState.ensureCharId()
+
+    const profile = globalState.profile
+    const promptParts = [profile?.extraDesc?.trim(), profile?.name?.trim()].filter(Boolean) as string[]
+    const prompt = promptParts.length ? promptParts.join('\n') : undefined
+
+    try {
+      const result = await generateTurnaroundFor3D({
+        slug,
+        charId,
+        prompt,
+        refImageBase64: CharacterDesign.dataUrlToBase64(refDataUrl),
+        model: turnaroundVendorForImageModel(globalState.getImageModel()),
+      })
+      const handoff = buildGen3DHandoffViews(result.views)
+      if (!handoff) {
+        this.toast('四视图生成失败：缺少正面视图')
+        return
+      }
+      this.turnaround3DViews = handoff
+      this.turnaround3DCharId = charId
+      this.syncTurnaround3DUI()
+      this.toast('✅ 3D 四视图已生成，可送去 3D 工坊')
+    } catch (e: any) {
+      this.toast('四视图生成失败: ' + (e?.message || '未知错误'))
+    } finally {
+      this.generatingTurnaround3D = false
+      this.syncTurnaround3DUI()
+    }
+  }
+
+  /** Hand off orthographic view URLs to wb-gen3d (views mode prefill only — no auto 3D gen). */
+  private async navigateToGen3D(): Promise<void> {
+    const slug = globalState.getSlug()
+    if (!slug) {
+      this.toast('请先在 Studio 顶部选择一个游戏项目')
+      return
+    }
+    if (!this.turnaround3DViews?.front) {
+      this.toast('请先生成 3D 四视图')
+      return
+    }
+    const name = globalState.profile?.name?.trim() || undefined
+    try {
+      window.parent?.postMessage({
+        type: 'FORGEAX_NAVIGATE',
+        targetPluginId: '@forgeax-plugin/wb-gen3d',
+        payload: {
+          views: this.turnaround3DViews,
+          name,
+          slug,
+        },
+      }, '*')
+    } catch { /* not embedded — no-op */ }
   }
 
   /**
@@ -3764,10 +4023,13 @@ ${styleSuffix}
 
       imagePrompt = `IMPORTANT: The provided reference image is the character concept. The output character design sheet MUST depict the EXACT same character — identical face, hair, outfit, weapon, color scheme. Do NOT change the character design. \n` + imagePrompt
 
+      const imageModel = globalState.getImageModel()
       const imgResult = await apiPost('/__ce-api__/generate-image', {
         prompt: imagePrompt,
         inputImageBase64: base64,
-        model: apiModelIdForImageModel(globalState.getImageModel()),
+        aspectRatio: '3:4',
+        ...(imageModel !== 'gpt-image-2' ? { imageSize: '2k' as const } : {}),
+        model: apiModelIdForImageModel(imageModel),
       })
 
       if (imgResult.success && imgResult.imageBase64) {
@@ -4239,13 +4501,7 @@ ${styleSuffix}
   }
 
   private showPreview(dataUrl: string): void {
-    const preview = this.q('[data-cd="preview"]') as HTMLElement
-    if (preview) {
-      preview.innerHTML = `<img src="${dataUrl}" class="cd-preview-img">`
-      applyHideableTo(preview, 'img.cd-preview-img', { idFrom: () => 'character-design:final' })
-    }
-    const actions = this.q('[data-cd="actions"]') as HTMLElement
-    if (actions) actions.style.display = 'flex'
+    this.mountFinalPreviewImage(dataUrl)
   }
 
   private showEmptyPreview(): void {
@@ -4655,11 +4911,19 @@ const DESIGN_CSS = `
   margin-bottom: 12px; text-align: center; letter-spacing: 0.3px;
 }
 .cd-preview {
-  flex: 1; display: flex; align-items: center; justify-content: center;
+  flex: 1 1 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid var(--border);
-  overflow: hidden; min-height: 200px;
+  overflow: hidden; min-height: clamp(240px, 42vh, 680px);
+  position: relative;
 }
-.cd-preview-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cd-preview-img {
+  width: 100%; height: 100%;
+  object-fit: contain; object-position: center;
+}
+/* 有 3D 四视图时：设定图占主画面，四视图缩为下方参考条 */
+.cd-preview-wrap:has(.cd-turnaround-grid) .cd-preview {
+  min-height: clamp(300px, 52vh, 680px);
+}
 .cd-preview-empty { text-align: center; color: var(--text-secondary); font-size: 13px; padding: 30px; }
 .cd-preview-empty-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.3; }
 .cd-preview-tip { font-size: 11px; opacity: 0.5; margin-top: 8px; }
@@ -5039,4 +5303,29 @@ const DESIGN_CSS = `
   font-family: inherit;
 }
 .cd-cdetail-hint:hover { border-color: var(--accent); color: var(--accent); }
+
+.cd-turnaround-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  margin: 10px 0 0; padding: 10px;
+  width: 100%; max-width: 100%;
+  flex-shrink: 0;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: rgba(0,0,0,0.25);
+  box-sizing: border-box;
+}
+.cd-turnaround-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.cd-turnaround-cell img {
+  width: 100%; height: auto;
+  max-height: 200px; min-height: 140px;
+  object-fit: contain; background: #fff;
+}
+.cd-turnaround-cell span {
+  font-size: 11px; color: var(--text-secondary); padding: 0 0 6px;
+}
+.cd-turnaround-empty { min-height: 140px; justify-content: center; opacity: 0.4; }
 `

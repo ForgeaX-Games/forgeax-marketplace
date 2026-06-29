@@ -8,6 +8,12 @@ export interface LLMCallOptions {
   responseFormat?: "text" | "json";
 }
 
+/** 多模态图像分块（Gemini inlineData）。data 为 base64 字符串或 Buffer。 */
+export interface ImagePart {
+  mimeType: string;
+  data: string | Buffer;
+}
+
 export interface LLMClientConfig {
   apiKey?: string;
   proxyUrl?: string;
@@ -137,6 +143,72 @@ export class LLMClient {
         },
       });
 
+    const text = response.text;
+    if (!text) throw new Error("LLM returned empty response");
+    return text;
+  }
+
+  /**
+   * 多模态调用（图像 + 文本 → 文本）。用于 Phase1 图片/视频帧理解（§3.4 多模态提取）。
+   * 把图像作为 inlineData parts 与文本一起喂给模型，返回模型文本输出。
+   * 走与 call 相同的 SDK / proxy 双通道；无多模态支持时由上层降级。
+   */
+  async callWithImages(
+    systemPrompt: string,
+    userPrompt: string,
+    images: ImagePart[],
+    options: LLMCallOptions = {},
+  ): Promise<string> {
+    const toBase64 = (d: string | Buffer): string =>
+      typeof d === "string" ? d : d.toString("base64");
+    const parts: Array<Record<string, unknown>> = [
+      ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: toBase64(img.data) } })),
+      { text: userPrompt },
+    ];
+    const model = options.model ?? this.defaultModel;
+
+    const config: Record<string, unknown> = {};
+    if (options.temperature !== undefined) config.temperature = options.temperature;
+    config.maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
+    if (options.responseFormat === "json") config.responseMimeType = "application/json";
+
+    if (this.proxyUrl) {
+      const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+      const body = {
+        contents: [{ role: "user", parts }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: config,
+      };
+      const url = `${this.proxyUrl}/v1/gemini/generateContent/${model}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+      try {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!resp.ok) {
+          const detail = await resp.text().catch(() => "");
+          throw new Error(`Proxy returned ${resp.status}: ${detail}`);
+        }
+        const data = (await resp.json()) as {
+          candidates?: { content?: { parts?: { text?: string }[] } }[];
+        };
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("LLM returned empty response");
+        return text;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    const response: GenerateContentResponse = await this.client!.models.generateContent({
+      model,
+      contents: [{ role: "user", parts: parts as never }],
+      config: { systemInstruction: systemPrompt, ...config },
+    });
     const text = response.text;
     if (!text) throw new Error("LLM returned empty response");
     return text;

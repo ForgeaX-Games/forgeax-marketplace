@@ -22,8 +22,8 @@ import type {
 } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, type PromptComposer } from "../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import {
   buildCharacterDigest,
   buildItemDigest,
@@ -92,10 +92,11 @@ export const OUTLINE_PLAN_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
     base: STEP1_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -104,10 +105,11 @@ export const OUTLINE_FILL_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
     base: "你是叙事结构设计师。",
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -131,6 +133,7 @@ function buildStep1Prompt(ctx: NarrativeContext): string {
 
   return `## 用户需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 偏好总结
 ${ctx.user_preference_summary ?? "（无）"}
@@ -323,6 +326,7 @@ async function step1_5b_batchFill(
 
 ## 用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## 偏好总结
 ${ctx.user_preference_summary ?? "（无）"}
@@ -423,10 +427,11 @@ export const OUTLINE_GAP_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
     base: STEP2_SYSTEM,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -451,6 +456,7 @@ function buildStep2Prompt(ctx: NarrativeContext, skeleton: SkeletonNode[], fillM
 
   return `## 用户原始需求
 ${ctx.user_input}
+${buildIpSourceReference(ctx)}
 
 ## L0故事框架
 ${frameworkStr}

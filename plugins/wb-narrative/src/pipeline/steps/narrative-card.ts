@@ -3,7 +3,7 @@ import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { matchPreset, WRITING_CORE, OUTPUT_TEMPLATE, type Tier4Preset } from "../../knowledge/game-narrative/tier4-presets.js";
 import { appendUserInstructions, buildDesignContextSnippet } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
 function buildPresetContext(preset: Tier4Preset): string {
@@ -43,6 +43,7 @@ ${WRITING_CORE.formula}
 
 ## 写作原则
 ${WRITING_CORE.principles.map((p) => `- ${p}`).join("\n")}`,
+    ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `## 输出格式（严格JSON）
@@ -64,7 +65,7 @@ ${WRITING_CORE.principles.map((p) => `- ${p}`).join("\n")}`,
   }
 }`,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

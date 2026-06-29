@@ -14,16 +14,17 @@
 import type { NarrativeContext, VnBeats } from "../../../types/index.js";
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
-import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import { FIVE_ELEMENT_NOTE, NUMBERING_NOTE, getStreamEmit, getVnBudget } from "./_shared.js";
 
-const VN_BEATS_COMPOSER: PromptComposer = {
+export const VN_BEATS_COMPOSER: PromptComposer = {
   stepId: "vn_beats",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    ip_dna: IP_DNA_SLOT_BLOCK,
     role: `你是互动影游剧作师。基于已切分的"场"，为每场细化出若干"情节点"。你产出的这条线性序列是整部影游的「黄金线（理想线）」——角色对世界每一次考验都做出"最理想作答"时走过的那一条路。它是下游 G-01 长出整棵剧情树的**脊**，本身要干净、紧凑、因果连贯。`,
 
     task: (ctx: NarrativeContext) => `## 任务
@@ -80,7 +81,8 @@ ${acts}
 ${chars}
 
 ## 参考：用户原始需求
-${ctx.user_input}`;
+${ctx.user_input}
+${buildIpSourceReference(ctx)}`;
     },
 
     task_instruction: `## 任务
