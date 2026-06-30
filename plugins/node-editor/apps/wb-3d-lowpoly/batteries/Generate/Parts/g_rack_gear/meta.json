@@ -1,0 +1,31 @@
+{
+  "id": "g_rack_gear",
+  "label": "齿条",
+  "name-en": "GRackGear",
+  "description": "在 Geometry DSL 末尾追加 rack_gear(...) 一行（cq_gears RackGear；直齿条）。当 prompt 提到 齿条 / 齿排 / 直线齿条 / rack / linear gear 时使用，常与 g_gear 组合成齿轮齿条。",
+  "description-en": "Append `rack_gear(...)` — cq_gears RackGear (straight rack). Use when the prompt mentions a rack / linear gear; often paired with g_gear for a rack-and-pinion.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "gear", "rack", "cad"],
+  "tag_labels": ["几何", "齿轮", "齿条", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "tooth_profile", "type": "string", "label": "齿形", "default": "straight", "description": "straight(直齿条) / herringbone(人字齿条)", "description-en": "straight / herringbone rack." },
+    { "name": "module", "type": "number", "label": "模数 m", "default": 0.002, "description": "模数（米），齿距 = π×module", "description-en": "Module (meters); pitch = π × module." },
+    { "name": "length", "type": "number", "label": "长度", "default": 0.1, "description": "齿条长度（米）", "description-en": "Rack length (meters)." },
+    { "name": "width", "type": "number", "label": "宽度", "default": 0.01, "description": "齿条厚度（米）", "description-en": "Rack thickness (meters)." },
+    { "name": "height", "type": "number", "label": "齿根下背高", "default": 0.01, "description": "齿根以下背板高度（米）", "description-en": "Backing height below the tooth root (meters)." },
+    { "name": "pressure_angle", "type": "number", "label": "压力角 (°)", "default": 0, "description": "0 = 用默认 20°", "description-en": "0 = use default 20°." },
+    { "name": "helix_angle", "type": "number", "required": false, "label": "螺旋角 (°)", "default": 0, "description": "仅 herringbone 齿形用", "description-en": "Herringbone profile only." },
+    { "name": "clearance", "type": "number", "label": "顶隙", "default": 0, "description": "齿顶径向间隙", "description-en": "Tip radial clearance." },
+    { "name": "backlash", "type": "number", "label": "侧隙", "default": 0, "description": "齿面侧隙", "description-en": "Tooth-flank backlash." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 rack{n}", "description-en": "Custom id; empty = auto rack{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 rack_gear 行后的 Geometry", "description-en": "Geometry after appending the rack gear." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." },
+    { "name": "error", "type": "string", "label": "错误", "description": "非致命错误信息", "description-en": "Non-fatal error string." }
+  ],
+  "projectTypes": ["asset3d"]
+}

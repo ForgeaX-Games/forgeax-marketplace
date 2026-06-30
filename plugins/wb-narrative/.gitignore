@@ -1,0 +1,17 @@
+node_modules/
+dist/
+output/
+output_*.json
+.env
+viz/node_modules/
+viz/dist/
+sync.sh
+bun.lock
+
+# 大数据/运行产物：不进 git
+# knowledge_base 含 embeddings/语料(单文件>100MB 超 GitHub 上限)，分发策略(git-lfs/release)另议
+knowledge_base/
+input/
+.ipdna-jobs/
+_tmp_*.ts
+_tmp_*.mjs

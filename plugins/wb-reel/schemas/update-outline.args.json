@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:update-outline args",
+  "description": "Incrementally edit the script outline tree (scenario.outline) of the active (or specified) scenario, shown in the workbench's Outline panel. Prefer upsert/removeIds (incremental) over replace (which drops nodes you don't list). The workbench picks up the change within a few seconds (must be open to SEE it; the data is persisted regardless). Provide at least one of upsert / replace / removeIds / synopsis. Call reel:get-script-meta first to learn existing node ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Optional target scenario id. Defaults to the active scenario."
+    },
+    "upsert": {
+      "type": "array",
+      "description": "Add or update nodes. Match by id (omit id to create a new node). order is reflowed per parent automatically.",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Existing node id to update; omit to create." },
+          "parentId": { "type": "string", "description": "Parent node id; omit for a top-level (act) node." },
+          "title": { "type": "string", "description": "Node title, e.g. '\u7b2c\u4e8c\u5e55\uff1a\u96e8\u591c\u6289\u62e9'." },
+          "summary": { "type": "string", "description": "One/few-line synopsis of this beat." },
+          "order": { "type": "number", "description": "Sibling sort hint; auto-reflowed if omitted." }
+        }
+      }
+    },
+    "removeIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Node ids to delete. Descendants are removed too, to avoid dangling parentId."
+    },
+    "replace": {
+      "type": "array",
+      "description": "Replace the WHOLE outline with these nodes (drops anything not listed). Use sparingly.",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "parentId": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "order": { "type": "number" }
+        }
+      }
+    },
+    "synopsis": {
+      "type": "string",
+      "description": "Optional: also set the scenario's one-line synopsis (scenario.synopsis)."
+    }
+  }
+}

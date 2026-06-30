@@ -1,0 +1,13 @@
+# Keep host-installed node_modules out of the image; deps are installed by
+# `pnpm install` during the dependency layer inside the container.
+node_modules
+dist
+.vite
+.DS_Store
+*.log
+# Flask runtime artifacts (huge; rebuilt at runtime inside the container)
+server/monster-pipeline/output
+server/monster-pipeline/temp
+server/monster-pipeline/static
+server/monster-pipeline/__pycache__
+server/monster-pipeline/pipeline/__pycache__

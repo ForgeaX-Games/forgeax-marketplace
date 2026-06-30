@@ -1,0 +1,34 @@
+{
+  "id": "g_knob",
+  "label": "旋钮",
+  "name-en": "GKnob",
+  "description": "在 Geometry DSL 末尾追加 knob(...) 一行（控制旋钮 / 钮帽）。当 prompt 提到 旋钮 / 钮 / 旋钮帽 / 调节钮 / knob / dial / cap 时使用，而不要用裸圆柱近似。",
+  "description-en": "Append `knob(...)` — control knob / cap. Use when the prompt mentions knob / dial / control knob / cap — do not approximate it with a bare cylinder.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "part", "knob", "control", "cad"],
+  "tag_labels": ["几何", "语义零件", "旋钮", "控件", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "diameter", "type": "number", "label": "直径", "default": 0.025, "description": "旋钮主体直径（米）", "description-en": "Knob body diameter (meters)." },
+    { "name": "height", "type": "number", "label": "高度", "default": 0.018, "description": "旋钮高度（米）", "description-en": "Knob height (meters)." },
+    { "name": "body_style", "type": "string", "label": "形态", "default": "cylindrical", "description": "cylindrical/tapered/domed/mushroom/skirted/hourglass/faceted/lobed", "description-en": "Body silhouette: cylindrical/tapered/domed/mushroom/skirted/hourglass/faceted/lobed." },
+    { "name": "top_diameter", "type": "number", "label": "顶部直径", "default": 0, "description": "0 = 与 diameter 相同", "description-en": "Top diameter; 0 = same as diameter." },
+    { "name": "base_diameter", "type": "number", "label": "底部直径", "default": 0, "description": "底部直径；0 = 与 diameter 相同", "description-en": "Base diameter; 0 = same as diameter." },
+    { "name": "crown_radius", "type": "number", "label": "顶部圆角", "default": 0, "description": "顶面圆角半径", "description-en": "Top crown fillet radius." },
+    { "name": "edge_radius", "type": "number", "label": "边缘圆角", "default": 0, "description": "侧边圆角半径", "description-en": "Side edge fillet radius." },
+    { "name": "side_draft_deg", "type": "number", "label": "侧壁拔模角 (°)", "default": 0, "description": "侧壁拔模角（度）", "description-en": "Side draft angle (degrees)." },
+    { "name": "skirt_diameter", "type": "number", "required": false, "label": "裙边直径", "default": 0, "description": "底部裙边圆台直径（米）；需大于主体直径，0 = 无裙边", "description-en": "Base skirt diameter (meters); must exceed the body diameter, 0 = none." },
+    { "name": "skirt_height", "type": "number", "required": false, "label": "裙边高", "default": 0, "description": "裙边高度（米）；与 skirt_diameter 同时 >0 才生效", "description-en": "Skirt height (meters); effective only with skirt_diameter > 0." },
+    { "name": "indicator", "type": "bool", "required": false, "label": "指示槽", "default": false, "description": "true = 顶面切一道朝 +X 的指示槽", "description-en": "true = cut a +X-pointing indicator groove on the top face." },
+    { "name": "bore_d", "type": "number", "required": false, "label": "中心孔径", "default": 0, "description": "中心轴孔直径（米）；0 = 无孔。需小于主体直径", "description-en": "Center bore diameter (meters); 0 = none. Must be smaller than the body diameter." },
+    { "name": "center", "type": "bool", "required": false, "label": "居中", "default": true, "description": "true = 关于原点居中", "description-en": "true = center about the origin." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 knob{n}", "description-en": "Custom id; empty = auto knob{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 knob 行后的 Geometry", "description-en": "Geometry after appending the knob." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

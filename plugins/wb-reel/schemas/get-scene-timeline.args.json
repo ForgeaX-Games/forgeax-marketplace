@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:get-scene-timeline args",
+  "description": "Read one scene's editable timeline in a compact form: shots, dialogue lines, QTE cues, audio clips, text overlays (花字) and markers — each with its id and timing (ms). Call this BEFORE any reel:update-shot / reel:edit-* tool so you know the real ids and current times. Read-only; the workbench need not be open.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId"],
+  "properties": {
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Optional target scenario id. Defaults to the active scenario."
+    },
+    "sceneId": {
+      "type": "string",
+      "description": "Scene (node) id to read. Use reel:get-scenario to discover scene ids."
+    }
+  }
+}

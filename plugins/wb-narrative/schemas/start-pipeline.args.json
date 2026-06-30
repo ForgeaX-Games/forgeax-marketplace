@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["userInput"],
+  "additionalProperties": false,
+  "properties": {
+    "userInput": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000,
+      "description": "Story requirements in any language (free text). May include genre hints, theme, setting, character concepts, or an entire brief."
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["tier1", "tier2", "tier3", "tier4"],
+      "description": "Narrative intensity tier. Omit to let the pipeline auto-detect via LLM."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "full", "novel", "script", "quest", "scene",
+        "initial_outline", "worldview", "character", "item_lore",
+        "story_framework", "story_outline", "detailed_outline",
+        "fragmented", "emergent",
+        "narrative_auto", "narrative_card",
+        "tier2_enhanced", "tier3_basic",
+        "design_auto", "design_full_narrative", "design_fragmented",
+        "design_emergent", "design_only",
+        "vn_full", "design_vn_full"
+      ],
+      "description": "Pipeline mode (step sequence). Omit to use tier default (design_auto)."
+    },
+    "genreCode": {
+      "type": "string",
+      "description": "Explicit genre code from the 94-entry taxonomy (e.g. 'rpg-jrpg'). Skips LLM genre detection when provided."
+    },
+    "complexity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Narrative complexity level (1=minimal, 5=maximum depth)."
+    },
+    "routeGroup": {
+      "type": "string",
+      "enum": ["planning", "narrative"],
+      "description": "Route group: 'planning' for game design pipeline, 'narrative' for story-only."
+    },
+    "routingMode": {
+      "type": "string",
+      "enum": ["auto", "semi", "manual"],
+      "description": "Routing strategy. 'auto' = full LLM detection, 'semi' = tier given / mode auto, 'manual' = both given."
+    },
+    "model": {
+      "type": "string",
+      "description": "Override LLM model for this run (e.g. 'gemini-2.5-pro'). Uses NARRATIVE_MODEL env default when omitted."
+    }
+  }
+}

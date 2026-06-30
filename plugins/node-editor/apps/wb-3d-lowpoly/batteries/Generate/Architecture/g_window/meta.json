@@ -1,0 +1,31 @@
+{
+  "id": "g_window",
+  "label": "窗",
+  "name-en": "GWindow",
+  "description": "追加 window(...)：窗框 + type=cross 十字 / grid 格栅 / louver 百叶 + 可选玻璃。当 prompt 提到 窗 / 窗户 / 窗框 / 格栅窗 / 百叶窗 / window / louver 时使用。",
+  "description-en": "Append `window(...)` — frame with type=cross/grid/louver + optional glass. Use for window, grid window, louver.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "architecture", "window", "opening", "cad"],
+  "tag_labels": ["几何", "建筑", "窗", "开口", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "width", "type": "number", "label": "窗宽", "default": 1.2, "description": "窗宽（X，米）", "description-en": "Window width along X." },
+    { "name": "height", "type": "number", "label": "窗高", "default": 1.4, "description": "窗高（Z，米）", "description-en": "Window height along Z." },
+    { "name": "depth", "type": "number", "label": "进深", "default": 0.2, "description": "进深（Y，对齐墙厚）", "description-en": "Depth along Y (matches wall thickness)." },
+    { "name": "frame", "type": "number", "required": false, "label": "边框宽", "default": 0.06, "description": "窗框宽度", "description-en": "Frame width." },
+    { "name": "mullion", "type": "number", "required": false, "label": "中梃宽", "default": 0.04, "description": "中梃宽度；0=无", "description-en": "Mullion width; 0 = none." },
+    { "name": "glass", "type": "number", "required": false, "label": "玻璃厚", "default": 0, "description": "玻璃厚度；>0 嵌入玻璃片", "description-en": "Glass thickness; >0 embeds a pane." },
+    { "name": "type", "type": "string", "required": false, "label": "类型", "default": "cross", "description": "cross 十字 / grid 格栅 / louver 百叶", "description-en": "cross / grid / louver." },
+    { "name": "rows", "type": "number", "required": false, "label": "行数/百叶片数", "default": 3, "description": "grid 行数 / louver 百叶片数", "description-en": "grid rows / louver slat count." },
+    { "name": "cols", "type": "number", "required": false, "label": "列数", "default": 3, "description": "grid 列数", "description-en": "grid columns." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 win{n}", "description-en": "Custom id; empty = auto win{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 window 行后的 Geometry", "description-en": "Geometry after appending the window." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id", "description-en": "Id of the new shape." },
+    { "name": "error", "type": "string", "label": "错误", "description": "非致命错误信息", "description-en": "Non-fatal error string." }
+  ],
+  "projectTypes": ["asset3d"]
+}

@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>wb-lowpoly-obj</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #1a1c20; color: #d4d6da; min-height: 100vh; }
+      /* Split-surface convention: host renders two sibling iframes
+         (?pane=left | ?pane=center). CSS below hides the inactive sections
+         so each iframe shows only its slice. */
+      body[data-pane="left"]   .pane-center { display: none; }
+      body[data-pane="center"] .pane-left   { display: none; }
+
+      .pane-left   { padding: 16px; height: 100vh; overflow-y: auto; background: #16181c; }
+      .pane-center { padding: 16px; height: 100vh; overflow-y: auto; background: #1a1c20; display: flex; flex-direction: column; gap: 16px; }
+
+      h2 { margin: 0 0 12px; font-size: 13px; color: #d4a070; text-transform: uppercase; letter-spacing: 0.05em; }
+      .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+      .field label { font-size: 12px; color: #8a8d93; }
+      .field input { background: #2a2d33; color: #d4d6da; border: 1px solid #3a3d43; border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: inherit; }
+      .field input:focus { outline: none; border-color: #d4a070; }
+      button { background: #d4a070; color: #1a1c20; border: none; border-radius: 4px; padding: 8px 16px; font-weight: 600; cursor: pointer; font-size: 13px; }
+      button:hover { background: #e0b080; }
+      button:disabled { background: #4a4d53; color: #8a8d93; cursor: not-allowed; }
+
+      .viewer { width: 100%; aspect-ratio: 4 / 3; background: linear-gradient(180deg, #1f242a 0%, #14171b 100%); border: 1px solid #2a2d33; border-radius: 8px; position: relative; overflow: hidden; }
+      .viewer canvas { display: block; width: 100% !important; height: 100% !important; }
+      .viewer .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6a6d73; font-size: 13px; text-align: center; padding: 24px; }
+      .viewer .label { position: absolute; left: 10px; bottom: 10px; font-size: 11px; color: #8a8d93; background: rgba(0,0,0,0.45); padding: 3px 8px; border-radius: 4px; }
+      .status { font-size: 12px; padding: 8px 12px; border-radius: 4px; }
+      .status.ok   { background: #1f3a2a; color: #7fcfa0; }
+      .status.err  { background: #3a1f1f; color: #cf7f7f; }
+      .status.idle { background: #2a2d33; color: #8a8d93; }
+      .char-list { display: flex; flex-direction: column; gap: 4px; }
+      .char-item { padding: 6px 8px; background: #2a2d33; border-radius: 4px; font-size: 12px; cursor: pointer; }
+      .char-item:hover { background: #3a3d43; }
+      .char-item.selected { background: #3a3d43; outline: 1px solid #d4a070; }
+      code { background: #2a2d33; padding: 1px 5px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 11px; }
+      .meta { font-size: 11px; color: #6a6d73; margin-top: 16px; line-height: 1.5; }
+      .form-card { background: #16181c; border: 1px solid #2a2d33; border-radius: 8px; padding: 16px; }
+      .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    </style>
+  </head>
+  <body>
+    <aside class="pane-left">
+      <h2>Characters</h2>
+      <div id="char-list" class="char-list"><div class="char-item" style="cursor:default;color:#6a6d73">Loading…</div></div>
+      <div class="meta">
+        Click a character to preview. List under <code>.forgeax/games/&lt;game&gt;/lowpoly-characters/</code>.
+      </div>
+    </aside>
+
+    <main class="pane-center">
+      <div class="viewer" id="viewer">
+        <div class="empty" id="viewer-empty">No character selected. Create one below or pick from the left list.</div>
+        <div class="label" id="viewer-label" style="display:none"></div>
+      </div>
+      <div id="status" class="status idle">Ready. Fill the form below and click <b>Create default humanoid</b>.</div>
+      <div class="form-card">
+        <h2>New Character</h2>
+        <div class="form-row">
+          <div class="field">
+            <label for="gameSlug">Game slug</label>
+            <input id="gameSlug" type="text" value="mini-gta" />
+          </div>
+          <div class="field">
+            <label for="charSlug">Character slug</label>
+            <input id="charSlug" type="text" value="hero-blocky" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="charName">Display name</label>
+            <input id="charName" type="text" value="Hero Blocky" />
+          </div>
+          <div class="field">
+            <label for="bodyColor">Body color</label>
+            <input id="bodyColor" type="color" value="#5a8fc7" />
+          </div>
+        </div>
+        <button id="create-btn">Create default humanoid</button>
+        <div class="meta">
+          Writes <code>source.json</code> using LowPolySource v1 schema (humanoid-standard-v1, 16 default parts, T-pose).
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import * as THREE from 'https://esm.sh/three@0.160.0';
+      import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+      const params = new URLSearchParams(location.search);
+      const pane = params.get('pane') || 'center';
+      document.body.dataset.pane = pane;
+
+      const bc = new BroadcastChannel('wb-lowpoly-obj');
+      const $ = (id) => document.getElementById(id);
+
+      // humanoid-standard-v1 — bone reference positions in T-pose (world).
+      // Parts attach to a bone and offset from it. v0.1.0: hardcoded; later
+      // this comes from a shared @forgeax/lowpoly schema package.
+      const BONES = {
+        hips:        [ 0.00, 0.95, 0],
+        chest:       [ 0.00, 1.20, 0],
+        neck:        [ 0.00, 1.45, 0],
+        head:        [ 0.00, 1.55, 0],
+        leftArm:     [-0.20, 1.40, 0],
+        leftForeArm: [-0.20, 1.12, 0],
+        leftHand:    [-0.20, 0.85, 0],
+        rightArm:    [ 0.20, 1.40, 0],
+        rightForeArm:[ 0.20, 1.12, 0],
+        rightHand:   [ 0.20, 0.85, 0],
+        leftUpLeg:   [-0.08, 0.90, 0],
+        leftLeg:     [-0.08, 0.50, 0],
+        leftFoot:    [-0.08, 0.10, 0],
+        rightUpLeg:  [ 0.08, 0.90, 0],
+        rightLeg:    [ 0.08, 0.50, 0],
+        rightFoot:   [ 0.08, 0.10, 0],
+      };
+
+      // ---------------- 3D viewer ----------------
+      let scene, camera, renderer, controls, charGroup;
+
+      function initViewer() {
+        if (pane !== 'center') return;
+        const host = $('viewer');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x14171b);
+        const w = host.clientWidth, h = host.clientHeight;
+        camera = new THREE.PerspectiveCamera(40, w / h, 0.05, 50);
+        camera.position.set(1.6, 1.4, 2.2);
+        camera.lookAt(0, 1.0, 0);
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(w, h, false);
+        host.appendChild(renderer.domElement);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.0, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x202428, 0.85));
+        const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+        sun.position.set(2, 4, 3);
+        scene.add(sun);
+
+        const grid = new THREE.GridHelper(4, 16, 0x3a3d43, 0x2a2d33);
+        grid.position.y = 0;
+        scene.add(grid);
+
+        charGroup = new THREE.Group();
+        scene.add(charGroup);
+
+        const onResize = () => {
+          const w2 = host.clientWidth, h2 = host.clientHeight;
+          if (w2 === 0 || h2 === 0) return;
+          camera.aspect = w2 / h2;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w2, h2, false);
+        };
+        new ResizeObserver(onResize).observe(host);
+
+        const loop = () => {
+          requestAnimationFrame(loop);
+          controls.update();
+          renderer.render(scene, camera);
+        };
+        loop();
+      }
+
+      function clearChar() {
+        if (!charGroup) return;
+        while (charGroup.children.length) {
+          const m = charGroup.children.pop();
+          m.geometry?.dispose?.();
+          m.material?.dispose?.();
+        }
+      }
+
+      function makeGeometry(geo) {
+        switch (geo.kind) {
+          case 'sphere':
+            return new THREE.SphereGeometry(geo.radius ?? 0.1, geo.widthSeg ?? 8, geo.heightSeg ?? 6);
+          case 'cylinder':
+            return new THREE.CylinderGeometry(geo.radiusTop ?? 0.05, geo.radiusBottom ?? 0.05, geo.height ?? 0.2, geo.segments ?? 8);
+          case 'box':
+          default: {
+            const s = geo.size ?? [0.1, 0.1, 0.1];
+            return new THREE.BoxGeometry(s[0], s[1], s[2]);
+          }
+        }
+      }
+
+      function renderSource(src) {
+        if (!charGroup) return;
+        clearChar();
+        const yMinTarget = 0; // sit feet on ground
+        let yMin = Infinity;
+        const meshes = [];
+        for (const part of src.parts ?? []) {
+          const bone = BONES[part.attachTo] ?? [0, 1, 0];
+          const off = part.offset ?? [0, 0, 0];
+          const rot = part.rotation ?? [0, 0, 0];
+          const scl = part.scale ?? [1, 1, 1];
+          const mat = new THREE.MeshStandardMaterial({
+            color: part.color ?? '#888888',
+            roughness: part.material?.roughness ?? 0.85,
+            metalness: part.material?.metalness ?? 0.05,
+            flatShading: part.material?.flatShading ?? true,
+          });
+          const m = new THREE.Mesh(makeGeometry(part.geo ?? { kind: 'box' }), mat);
+          m.position.set(bone[0] + off[0], bone[1] + off[1], bone[2] + off[2]);
+          m.rotation.set(rot[0], rot[1], rot[2]);
+          m.scale.set(scl[0], scl[1], scl[2]);
+          charGroup.add(m);
+          meshes.push(m);
+        }
+        // Ground feet: shift so the lowest mesh bottom sits on y=0.
+        for (const m of meshes) {
+          const box = new THREE.Box3().setFromObject(m);
+          if (box.min.y < yMin) yMin = box.min.y;
+        }
+        if (Number.isFinite(yMin) && yMin !== yMinTarget) {
+          charGroup.position.y -= yMin;
+        } else {
+          charGroup.position.y = 0;
+        }
+      }
+
+      function showViewerLabel(text) {
+        const label = $('viewer-label');
+        if (!label) return;
+        label.textContent = text;
+        label.style.display = 'block';
+        $('viewer-empty').style.display = 'none';
+      }
+
+      function clearViewer() {
+        clearChar();
+        if (charGroup) charGroup.position.y = 0;
+        const label = $('viewer-label');
+        if (label) label.style.display = 'none';
+        $('viewer-empty').style.display = 'flex';
+      }
+
+      // ---------------- character I/O ----------------
+      let currentSlug = null;
+
+      async function loadCharacter(gameSlug, slug) {
+        const path = `.forgeax/games/${gameSlug}/lowpoly-characters/${slug}/source.json`;
+        try {
+          const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const body = await res.json();
+          const src = JSON.parse(body.content);
+          renderSource(src);
+          showViewerLabel(`${src.meta?.name ?? slug} · ${src.parts?.length ?? 0} parts`);
+          currentSlug = slug;
+          highlightSelection(slug);
+        } catch (e) {
+          setStatus('err', `Load failed: ${e.message}`);
+        }
+      }
+
+      function highlightSelection(slug) {
+        document.querySelectorAll('.char-item').forEach((el) => {
+          el.classList.toggle('selected', el.dataset.slug === slug);
+        });
+      }
+
+      function setStatus(kind, html) {
+        const el = $('status');
+        if (!el) return;
+        el.className = 'status ' + kind;
+        el.innerHTML = html;
+      }
+
+      function buildDefaultSource(slug, name, bodyColor) {
+        const skin = '#e0b89a';
+        const dark = '#3a3d43';
+        const part = (id, geo, attachTo, offset, color, rotation) => ({
+          id, geo, attachTo,
+          offset: offset ?? [0, 0, 0],
+          rotation: rotation ?? [0, 0, 0],
+          scale: [1, 1, 1],
+          color,
+          material: { roughness: 0.82, metalness: 0.04, flatShading: true },
+        });
+        return {
+          schemaVersion: 1,
+          meta: { name, createdAt: new Date().toISOString(), scale: 1 },
+          skeleton: 'humanoid-standard-v1',
+          parts: [
+            part('head', { kind: 'sphere', radius: 0.13, widthSeg: 8, heightSeg: 6 }, 'head', [0, 0.13, 0], skin),
+            part('neck', { kind: 'cylinder', radiusTop: 0.05, radiusBottom: 0.05, height: 0.1, segments: 8 }, 'neck', [0, 0.05, 0], skin),
+            part('torso', { kind: 'box', size: [0.32, 0.5, 0.18] }, 'chest', [0, 0.18, 0], bodyColor),
+            part('hips-mesh', { kind: 'box', size: [0.28, 0.16, 0.18] }, 'hips', [0, 0, 0], bodyColor),
+            part('leftArm', { kind: 'cylinder', radiusTop: 0.05, radiusBottom: 0.05, height: 0.28, segments: 8 }, 'leftArm', [0, -0.14, 0], bodyColor),
+            part('leftForeArm', { kind: 'cylinder', radiusTop: 0.045, radiusBottom: 0.045, height: 0.26, segments: 8 }, 'leftForeArm', [0, -0.13, 0], skin),
+            part('leftHand', { kind: 'box', size: [0.06, 0.1, 0.04] }, 'leftHand', [0, -0.05, 0], skin),
+            part('rightArm', { kind: 'cylinder', radiusTop: 0.05, radiusBottom: 0.05, height: 0.28, segments: 8 }, 'rightArm', [0, -0.14, 0], bodyColor),
+            part('rightForeArm', { kind: 'cylinder', radiusTop: 0.045, radiusBottom: 0.045, height: 0.26, segments: 8 }, 'rightForeArm', [0, -0.13, 0], skin),
+            part('rightHand', { kind: 'box', size: [0.06, 0.1, 0.04] }, 'rightHand', [0, -0.05, 0], skin),
+            part('leftUpLeg', { kind: 'cylinder', radiusTop: 0.07, radiusBottom: 0.06, height: 0.4, segments: 8 }, 'leftUpLeg', [0, -0.2, 0], dark),
+            part('leftLeg', { kind: 'cylinder', radiusTop: 0.06, radiusBottom: 0.05, height: 0.38, segments: 8 }, 'leftLeg', [0, -0.19, 0], dark),
+            part('leftFoot', { kind: 'box', size: [0.09, 0.05, 0.18] }, 'leftFoot', [0, -0.025, 0.04], dark),
+            part('rightUpLeg', { kind: 'cylinder', radiusTop: 0.07, radiusBottom: 0.06, height: 0.4, segments: 8 }, 'rightUpLeg', [0, -0.2, 0], dark),
+            part('rightLeg', { kind: 'cylinder', radiusTop: 0.06, radiusBottom: 0.05, height: 0.38, segments: 8 }, 'rightLeg', [0, -0.19, 0], dark),
+            part('rightFoot', { kind: 'box', size: [0.09, 0.05, 0.18] }, 'rightFoot', [0, -0.025, 0.04], dark),
+          ],
+          clips: [],
+        };
+      }
+
+      async function writeSource(gameSlug, slug, source) {
+        const path = `.forgeax/games/${gameSlug}/lowpoly-characters/${slug}/source.json`;
+        const res = await fetch(`/api/files`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, content: JSON.stringify(source, null, 2) + '\n' }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'unknown' }));
+          throw new Error(err.error ?? `HTTP ${res.status}`);
+        }
+        return await res.json();
+      }
+
+      function getActiveGameSlug() {
+        const el = $('gameSlug');
+        return el ? (el.value.trim() || 'mini-gta') : 'mini-gta';
+      }
+
+      async function refreshList() {
+        const list = $('char-list');
+        if (!list) return;
+        const gameSlug = getActiveGameSlug();
+        const rootPath = `.forgeax/games/${gameSlug}/lowpoly-characters`;
+        try {
+          const res = await fetch(`/api/files/tree?root=${encodeURIComponent(rootPath)}&depth=2`);
+          if (!res.ok) {
+            list.innerHTML = '<div class="char-item" style="cursor:default;color:#6a6d73">No characters yet</div>';
+            return;
+          }
+          const body = await res.json();
+          const tree = body.tree ?? body;
+          const dirs = (tree.children ?? []).filter((c) => c.type === 'dir' || c.kind === 'dir');
+          if (dirs.length === 0) {
+            list.innerHTML = '<div class="char-item" style="cursor:default;color:#6a6d73">No characters yet</div>';
+            return;
+          }
+          list.innerHTML = dirs.map((d) => `<div class="char-item" data-slug="${d.name}">🧱 ${d.name}</div>`).join('');
+          list.querySelectorAll('.char-item').forEach((el) => {
+            el.addEventListener('click', () => {
+              const slug = el.dataset.slug;
+              if (!slug) return;
+              if (pane === 'center') {
+                loadCharacter(getActiveGameSlug(), slug);
+              } else {
+                bc.postMessage({ type: 'select-character', gameSlug: getActiveGameSlug(), slug });
+                highlightSelection(slug);
+              }
+            });
+          });
+          if (currentSlug) highlightSelection(currentSlug);
+        } catch (e) {
+          list.innerHTML = `<div class="char-item" style="cursor:default;color:#cf7f7f">load error: ${e.message}</div>`;
+        }
+      }
+
+      const createBtn = $('create-btn');
+      if (createBtn) {
+        createBtn.addEventListener('click', async () => {
+          const gameSlug = $('gameSlug').value.trim();
+          const slug = $('charSlug').value.trim();
+          const name = $('charName').value.trim();
+          const bodyColor = $('bodyColor').value;
+          if (!gameSlug || !slug || !name) {
+            setStatus('err', 'All fields required.');
+            return;
+          }
+          if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
+            setStatus('err', 'Character slug must be kebab-case (a-z, 0-9, -).');
+            return;
+          }
+          setStatus('idle', 'Writing source.json…');
+          createBtn.disabled = true;
+          try {
+            const source = buildDefaultSource(slug, name, bodyColor);
+            const res = await writeSource(gameSlug, slug, source);
+            setStatus('ok', `✓ Created <code>${res.path}</code> (${res.bytes} bytes)`);
+            renderSource(source);
+            showViewerLabel(`${name} · ${source.parts.length} parts`);
+            currentSlug = slug;
+            bc.postMessage({ type: 'character-created', gameSlug, slug });
+            await refreshList();
+          } catch (e) {
+            setStatus('err', `Failed: ${e.message}`);
+          } finally {
+            createBtn.disabled = false;
+          }
+        });
+      }
+
+      const gameInput = $('gameSlug');
+      if (gameInput) gameInput.addEventListener('change', () => { clearViewer(); currentSlug = null; refreshList(); });
+
+      bc.addEventListener('message', (ev) => {
+        if (ev.data?.type === 'character-created') {
+          refreshList();
+          if (pane === 'center') loadCharacter(ev.data.gameSlug, ev.data.slug);
+        } else if (ev.data?.type === 'select-character' && pane === 'center') {
+          loadCharacter(ev.data.gameSlug, ev.data.slug);
+        }
+      });
+
+      initViewer();
+      refreshList().then(async () => {
+        // Auto-select first character on load so the viewer isn't empty.
+        if (pane !== 'center') return;
+        const first = document.querySelector('.char-item[data-slug]');
+        if (first) await loadCharacter(getActiveGameSlug(), first.dataset.slug);
+      });
+    </script>
+  </body>
+</html>

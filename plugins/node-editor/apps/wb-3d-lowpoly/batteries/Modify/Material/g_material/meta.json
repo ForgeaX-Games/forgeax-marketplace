@@ -1,0 +1,91 @@
+{
+  "id": "g_material",
+  "label": "材质",
+  "name-en": "GMaterial",
+  "description": "在 Geometry DSL 末尾追加 material(rgba=[r,g,b,a]) 一行。",
+  "description-en": "Append a `material(rgba=[r,g,b,a])` line.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": [
+    "geometry",
+    "material",
+    "color",
+    "cad"
+  ],
+  "tag_labels": [
+    "几何",
+    "材质",
+    "颜色",
+    "CAD"
+  ],
+  "inputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "required": false,
+      "label": "几何",
+      "description": "上游 Geometry",
+      "description-en": "Upstream Geometry."
+    },
+    {
+      "name": "r",
+      "type": "number",
+      "label": "红 r",
+      "default": 0.7,
+      "description": "红 0-1",
+      "description-en": "Red 0-1."
+    },
+    {
+      "name": "g",
+      "type": "number",
+      "label": "绿 g",
+      "default": 0.7,
+      "description": "绿 0-1",
+      "description-en": "Green 0-1."
+    },
+    {
+      "name": "b",
+      "type": "number",
+      "label": "蓝 b",
+      "default": 0.7,
+      "description": "蓝 0-1",
+      "description-en": "Blue 0-1."
+    },
+    {
+      "name": "a",
+      "type": "number",
+      "label": "不透明 a",
+      "default": 1,
+      "description": "不透明度 0-1",
+      "description-en": "Alpha 0-1."
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "required": false,
+      "label": "id",
+      "default": "",
+      "description": "自定义 id；空 = 自动 mat{n}",
+      "description-en": "Custom id; empty = auto mat{n}."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "label": "几何",
+      "description": "追加后 Geometry",
+      "description-en": "Geometry after appending."
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "label": "id",
+      "description": "本行 material 的 id",
+      "description-en": "Id of the material line."
+    }
+  ],
+  "projectTypes": [
+    "asset3d"
+  ]
+}

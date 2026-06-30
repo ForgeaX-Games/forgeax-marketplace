@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:generate-keyframes returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "sceneId"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "sceneId": { "type": "string" },
+    "message": { "type": "string" }
+  }
+}

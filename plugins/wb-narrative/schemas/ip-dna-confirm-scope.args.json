@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["runId"],
+  "additionalProperties": false,
+  "description": "确认裁剪范围(§4.4 第①步):嵌套层级选择;缺省=全量。",
+  "properties": {
+    "runId": { "type": "string", "description": "运行 id(=时间戳_故事名)" },
+    "scopeSelections": {
+      "type": "array",
+      "description": "裁剪范围(嵌套层级选择)。缺省=全量改编",
+      "items": {
+        "type": "object",
+        "required": ["nodeId"],
+        "properties": {
+          "nodeId": { "type": "string", "description": "选中的层级节点 id" },
+          "childRange": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "限定子层区间[start,end]" },
+          "children": { "type": "array", "description": "更深层嵌套选择(同结构递归)" }
+        }
+      }
+    },
+    "scopeFull": { "type": "boolean", "description": "是否全量(无 selections 时默认 true)" },
+    "adaptationNotes": { "type": "string", "description": "作者自定义改编补充(§5.1 自由文本):描述所选范围想怎么改;下游据此判断改哪些维度并定点替换。缺省=忠实把原 IP 转化为目标品类叙事" }
+  }
+}

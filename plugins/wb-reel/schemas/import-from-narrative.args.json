@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:import-from-narrative args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId"],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "description": "Narrative pipeline run ID (from narrative:list-runs or narrative:start-pipeline). For milestone-incremental import, the run only needs to have reached the corresponding milestone step."
+    },
+    "title": {
+      "type": "string",
+      "description": "Optional display title for the imported scenario. Defaults to the narrative run's title or a generated slug. Imports of the same runId merge into one scenario."
+    },
+    "setActive": {
+      "type": "boolean",
+      "default": false,
+      "description": "Mark the imported scenario as the active (playable) interactive film. Defaults to false: staged outline/character drafts are NOT playable and activating them would hijack the Play workspace of every game. Only pass true once the scenario is genuinely playable (e.g. after the screenplay milestone)."
+    },
+    "milestone": {
+      "type": "string",
+      "enum": ["outline_acts", "branched_beats", "screenplay"],
+      "description": "Milestone-incremental import (staged collaboration): 'outline_acts' (M2) imports the three-act outline, character bios and key items into the top-level scenario fields the studio panels read (scenario.outline / scenario.characters / scenario.characterRelations, with a relation graph derived from bios.role + key_items.bound_character) plus raw payloads under scenario.meta; 'branched_beats' (M3) imports the branch tree as scene skeletons; 'screenplay' (M4) imports full scenes (dialogue/QTE/media). Omit to auto-detect the furthest available milestone (legacy one-shot end import). runId may be the logical run id or the run's directory key; both resolve correctly."
+    }
+  }
+}

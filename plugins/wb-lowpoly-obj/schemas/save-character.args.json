@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:save-character args",
+  "description": "Whole-document save. Server zod-validates against LowPolySource before writing. Refuses non-conforming input (fail fast).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gameSlug", "slug", "source"],
+  "properties": {
+    "gameSlug": { "type": "string" },
+    "slug": { "type": "string" },
+    "source": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "LowPolySource v1 document; see schemas/lowpoly-source.zod.ts."
+    }
+  }
+}

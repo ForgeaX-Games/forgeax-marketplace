@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:update-shot returns",
+  "description": "Result of patching a shot.",
+  "type": "object",
+  "properties": {
+    "scenarioId": { "type": "string" },
+    "sceneId": { "type": "string" },
+    "shotId": { "type": "string" },
+    "updatedAt": { "type": "number" },
+    "ok": { "type": "boolean" }
+  }
+}

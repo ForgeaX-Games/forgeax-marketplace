@@ -1,0 +1,28 @@
+{
+  "id": "g_tire",
+  "label": "轮胎",
+  "name-en": "GTire",
+  "description": "在 Geometry DSL 末尾追加 tire(...) 一行（圆环胎，沿 local X 轴旋转）。当 prompt 提到 轮胎 / 外胎 / 胎面 / tire 时使用，常与 g_wheel 组合。",
+  "description-en": "Append `tire(...)` — torus-like tire, rotates about local X. Use when the prompt mentions tire / tyre / tread; often combined with g_wheel.",
+  "version": "1.0.0",
+  "autoIterate": true,
+  "tags": ["geometry", "part", "tire", "cad"],
+  "tag_labels": ["几何", "语义零件", "轮胎", "CAD"],
+  "principal": "geometry",
+  "inputs": [
+    { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
+    { "name": "outer_radius", "type": "number", "label": "外径 R", "default": 0.06, "description": "胎外半径（米）", "description-en": "Tire outer radius (meters)." },
+    { "name": "width", "type": "number", "label": "宽 (沿 X)", "default": 0.03, "description": "胎宽，沿 local X（米）", "description-en": "Tire width along local X (meters)." },
+    { "name": "inner_radius", "type": "number", "label": "内径 r (轮辋)", "default": 0, "description": "轮辋内半径；0 = 默认环 (~0.58×outer_radius)。", "description-en": "Inner (rim) radius; 0 = default ring (~0.58×outer_radius)." },
+    { "name": "tread_depth", "type": "number", "required": false, "label": "胎面花纹深", "default": 0, "description": "周向花纹槽深度（米）；需小于 (外径-内径)。与 tread_count 同时 >0 才生效", "description-en": "Circumferential tread groove depth (meters); must be < (outer-inner). Effective only with tread_count > 0." },
+    { "name": "tread_count", "type": "number", "required": false, "label": "胎面花纹道数", "default": 0, "description": "沿胎宽分布的周向花纹槽数（上限 6）", "description-en": "Number of circumferential tread grooves across the width (capped at 6)." },
+    { "name": "sidewall_depth", "type": "number", "required": false, "label": "胎侧凹槽深", "default": 0, "description": "两侧面浅环形凹槽深度（米）；需小于半胎宽", "description-en": "Side-face annular recess depth on both walls (meters); must be < half width." },
+    { "name": "center", "type": "bool", "required": false, "label": "居中", "default": true, "description": "true = 关于原点居中", "description-en": "true = center about the origin." },
+    { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 tire{n}", "description-en": "Custom id; empty = auto tire{n}." }
+  ],
+  "outputs": [
+    { "name": "geometry", "type": "geometry", "label": "几何", "description": "追加 tire 行后的 Geometry", "description-en": "Geometry after appending the tire." },
+    { "name": "id", "type": "string", "label": "id", "description": "本行 shape 的 id（供下游 g_part 的 shape_id 引用）", "description-en": "Id of the new shape (feed into a downstream g_part's shape_id)." }
+  ],
+  "projectTypes": ["asset3d"]
+}

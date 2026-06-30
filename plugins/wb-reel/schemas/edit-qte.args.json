@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-qte args",
+  "description": "Add / update / remove a QTE cue (限时点按节奏点) on a scene. op='add' creates a cue (shape+appearAt+targetAt required; returns new id; if the scene has no qte block yet it is created with sensible default windows/scores). op='update' patches a cue by id. op='remove' deletes a cue by id. Times are ms relative to scene start. Call reel:get-scene-timeline first for ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId", "op"],
+  "properties": {
+    "scenarioId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string", "enum": ["add", "update", "remove"], "description": "add | update | remove" },
+    "id": { "type": "string", "description": "Cue id. Required for update/remove." },
+    "shape": { "type": "string", "enum": ["tap", "hold", "sweep"], "description": "Cue type. Required for add. hold/sweep need durationMs/sweepDir." },
+    "x": { "type": "number", "minimum": 0, "maximum": 1, "description": "Normalized screen X (0..1). Default 0.5." },
+    "y": { "type": "number", "minimum": 0, "maximum": 1, "description": "Normalized screen Y (0..1). Default 0.5." },
+    "appearAt": { "type": "number", "minimum": 0, "description": "When the prompt appears (ms). Required for add." },
+    "targetAt": { "type": "number", "minimum": 0, "description": "Ideal hit time (ms). Required for add; must be >= appearAt." },
+    "durationMs": { "type": "number", "minimum": 0, "description": "Hold duration (shape=hold) / sweep window." },
+    "sweepDir": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Required when shape=sweep." },
+    "label": { "type": "string", "description": "Optional UI label." }
+  }
+}

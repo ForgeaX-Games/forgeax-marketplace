@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:get-script-meta returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["scenarioId", "characters", "outline", "characterRelations"],
+  "properties": {
+    "scenarioId": { "type": "string" },
+    "title": { "type": ["string", "null"] },
+    "synopsis": { "type": ["string", "null"], "description": "One/few-line script synopsis (scenario.synopsis)." },
+    "characters": {
+      "type": "array",
+      "description": "Character name<->id map for resolving relation endpoints by name.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "outline": {
+      "type": "array",
+      "description": "Flat outline nodes forming a tree via parentId (act -> beat -> moment).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "parentId": { "type": ["string", "null"] },
+          "title": { "type": "string" },
+          "summary": { "type": ["string", "null"] },
+          "order": { "type": "number" }
+        }
+      }
+    },
+    "characterRelations": {
+      "type": "array",
+      "description": "Directed relation edges (fromCharId -> toCharId, label).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "fromCharId": { "type": "string" },
+          "toCharId": { "type": "string" },
+          "label": { "type": "string" },
+          "note": { "type": ["string", "null"] },
+          "itemHint": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "characters": { "type": "integer" },
+        "outlineNodes": { "type": "integer" },
+        "relations": { "type": "integer" }
+      }
+    }
+  }
+}

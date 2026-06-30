@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:bake-glb returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "sha", "absPath", "bytes"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "sha": { "type": "string", "description": "sha256 of the .glb (filename: <sha>.glb)." },
+    "absPath": { "type": "string" },
+    "bytes": { "type": "integer", "minimum": 0 },
+    "latestSymlink": { "type": "string", "description": "Absolute path to latest.glb pointer." }
+  }
+}

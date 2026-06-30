@@ -1,0 +1,63 @@
+{
+  "id": "outdoor_texture",
+  "label": "室外纹理",
+  "description": "根据掩码网格列表（或单网格），使用 Whittaker 生物群系模型（温度+湿度双轴）与多层分形噪声，生成室外地面纹理分布（草地/泥土/碎石/沙地/湿草/落叶/苔藓/雪地），同类型跨网格 OR 合并，输出单值网格列表。",
+  "description-en": "Generate outdoor ground texture (grass/dirt/gravel/sand/wet grass/fallen leaves/moss/snow) from a mask grid list (or single grid) using Whittaker biome model + multi-octave FBM; same texture ids are OR-merged across inputs; outputs a single-value grid list.",
+  "icon": "俯视网格中分布绿色草地斑块与棕色泥土区域，边缘散有灰色碎石，扁平插画风格，简洁小图标，主色2种。",
+  "version": "2.0.0",
+  "tags": ["texture", "outdoor", "ground", "biome", "procedural", "whittaker", "noise"],
+  "tag_labels": ["纹理", "室外", "地面", "生态", "程序化", "惠特克", "噪声"],
+  "inputs": [
+    {
+      "name": "gridList",
+      "type": "array",
+      "label": "掩码网格",
+      "description": "输入掩码网格或网格列表（自动识别），非零单元格视为有效地面区域；多个网格同类型纹理 OR 合并为一张",
+      "description-en": "Input mask grid or list of grids (auto-detected). Non-zero cells are valid ground; same texture ids are OR-merged across grids."
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "label": "温度",
+      "description": "全局温度偏置(0-1)：0=极寒(雪地/苔藓/碎石为主)，0.5=温和(草地为主)，1=酷热(沙地为主)",
+      "description-en": "Global temperature bias (0-1): 0=freezing (snow/moss/gravel dominant), 0.5=temperate (grass dominant), 1=scorching (sand dominant).",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "moisture",
+      "type": "number",
+      "label": "湿度",
+      "description": "全局湿度偏置(0-1)：0=极干(沙地/碎石为主)，0.5=适中(草地为主)，1=极湿(湿草/苔藓为主)",
+      "description-en": "Global moisture bias (0-1): 0=arid (sand/gravel dominant), 0.5=moderate (grass dominant), 1=saturated (wet grass/moss dominant).",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "随机种子，0 使用当前时间戳",
+      "description-en": "Random seed; 0 uses current timestamp.",
+      "default": 0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputGridList",
+      "type": "array",
+      "label": "单值网格列表",
+      "description": "单值网格列表（最多 8 张）：每种纹理类型一张，仅含 0 与该类型 id（1=草地，2=泥土，3=碎石，4=沙地，5=湿草，6=落叶，7=苔藓，8=雪地），按 id 1→8 有序，与 nameList 一一对应",
+      "description-en": "Single-value grid list (up to 8): one grid per texture type, cells are 0 or that id; ordered id 1→8; pairs 1:1 with nameList."
+    },
+    {
+      "name": "nameList",
+      "type": "array",
+      "label": "名称清单",
+      "description": "与 outputGridList 逐项对应；name 来自随机选定的一套「同材质 tile 变体」8 连名（草地/泥地/碎石等 8 套主题之一），同次运行内风格一致",
+      "description-en": "Aligned with outputGridList; names come from one randomly chosen 8-name theme (same material family per run), consistent styling within the run."
+    }
+  ]
+}

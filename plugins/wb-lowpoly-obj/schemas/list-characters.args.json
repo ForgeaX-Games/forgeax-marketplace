@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:list-characters args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "gameSlug": {
+      "type": "string",
+      "description": "Workspace game slug. Roots search at .forgeax/games/<gameSlug>/lowpoly-characters/."
+    }
+  },
+  "required": ["gameSlug"]
+}

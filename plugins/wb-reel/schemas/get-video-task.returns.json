@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:get-video-task returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["taskId", "status"],
+  "properties": {
+    "taskId": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "generating",
+        "downloading",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "videoUrl": { "type": ["string", "null"] },
+    "error":    { "type": ["string", "null"] },
+    "createdAt":   { "type": ["number", "null"] },
+    "completedAt": { "type": ["number", "null"] },
+    "durationSec": { "type": ["number", "null"] }
+  }
+}

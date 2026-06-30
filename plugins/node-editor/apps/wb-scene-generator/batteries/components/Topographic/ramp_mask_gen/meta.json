@@ -1,0 +1,61 @@
+{
+  "id": "ramp_mask_gen",
+  "label": "坡道掩码生成",
+  "description": "读取网格列表中每个区域的底边，生成2×2坡道掩码块：上两格在区域内，下两格在区域外，坡道格子保留原区域值。支持指定坡道横向位置（0~1），并输出坡道名称清单。",
+  "description-en": "Reads each region in a grid list and generates a 2x2 ramp mask at the bottom edge. Supports specifying ramp horizontal position (0~1) and outputs a name list with tile-type entries.",
+  "icon": "一个方形区域底边中央向下延伸出两格坡道，形成T形出口结构，扁平插画风格，主色2种。",
+  "version": "1.3.0",
+  "tags": ["ramp", "mask", "entrance", "exit", "region", "2.5d"],
+  "tag_labels": ["坡道", "掩码", "入口", "出口", "区域", "2.5D"],
+  "inputs": [
+    {
+      "name": "input",
+      "type": "array",
+      "label": "网格列表",
+      "description": "网格列表（每项为一个二维网格）；每个非零值视为独立区域，支持不规则形状",
+      "description-en": "A list of 2D grids. Each distinct non-zero value is treated as a separate region."
+    },
+    {
+      "name": "rampPosition",
+      "type": "number",
+      "label": "坡道位置",
+      "description": "坡道在区域底边的横向位置，取值 0~1（0=最左，1=最右）。不填（-1）或超出范围时使用随机位置",
+      "description-en": "Horizontal position of the ramp along the region's bottom edge, 0~1 (0=leftmost, 1=rightmost). Use -1 or leave empty for random.",
+      "default": -1,
+      "min": -1,
+      "max": 1
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "随机种子",
+      "description": "坡道位置随机种子，0表示使用当前时间（仅在坡道位置为随机时生效）",
+      "description-en": "Random seed for ramp placement. 0 uses current timestamp. Only used when rampPosition is random.",
+      "default": 0
+    },
+    {
+      "name": "merge",
+      "type": "boolean",
+      "label": "输出合并",
+      "description": "开启后，将所有网格的坡道合并为一张网格输出，名称清单也合并为单条坡道条目；关闭时保持列表格式逐一输出",
+      "description-en": "When enabled, merges all ramp masks into a single grid and collapses the name list to a single 'ramp' entry. When disabled, outputs a list per input grid.",
+      "default": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "array",
+      "label": "坡道掩码",
+      "description": "合并模式：包含一张合并网格的列表（所有坡道叠加）；非合并模式：网格列表，每项对应一个输入网格的坡道",
+      "description-en": "Merge mode: single-element list containing the merged grid. Non-merge mode: list of ramp mask grids, one per input."
+    },
+    {
+      "name": "outputNameList",
+      "type": "array",
+      "label": "坡道名称清单",
+      "description": "合并模式：单条 {id:1, name:'坡道', type:'tile'}；非合并模式：每个输入网格对应一条条目",
+      "description-en": "Merge mode: single entry {id:1, name:'ramp', type:'tile'}. Non-merge mode: one entry per input grid."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:edit-marker returns",
+  "description": "Result of a marker add/rename/remove.",
+  "type": "object",
+  "properties": {
+    "scenarioId": { "type": "string" },
+    "sceneId": { "type": "string" },
+    "op": { "type": "string" },
+    "id": { "type": "string", "description": "Affected marker id (the new id for add)." },
+    "markerCount": { "type": "number" },
+    "updatedAt": { "type": "number" },
+    "ok": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,416 @@
+/**
+ * Center preview shell — aligned with forgeax-preview / wb-gen3d EditorCenterWorkspace.
+ * Scope: center iframe only (body[data-pane="center"]).
+ */
+
+.editor-center-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-background-canvas);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+}
+
+/* 与左栏一致的 pane header，center iframe 专属 */
+.cw-preview-header {
+  flex-shrink: 0;
+  background: var(--color-background-elevated);
+}
+
+/* 隐藏旧版 center 顶栏（mode-bar / action-bar），防止 dist 缓存或 full 模式残留 */
+.editor-center-workspace .mode-bar,
+.editor-center-workspace .action-bar {
+  display: none !important;
+}
+
+body[data-pane="center"] .editor-center-workspace {
+  height: 100%;
+}
+
+/* ── Pipeline status strip ─────────────────────────────────────────────── */
+.cw-pipeline-wrap {
+  flex-shrink: 0;
+  background: var(--color-background-base);
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.cw-pipeline-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 10px 14px 6px;
+}
+
+.cw-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.cw-pipeline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* 副标题：与左侧三个步骤副标题 .wb-step-note 字体统一（11px / secondary / 加粗） */
+.cw-pipeline-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.cw-pipeline-empty {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  padding: 4px 14px 10px;
+}
+
+.cw-pipeline-track {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px 14px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 24%, transparent) transparent;
+}
+
+.cw-pipeline-track::-webkit-scrollbar { height: 4px; }
+.cw-pipeline-track::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 999px;
+}
+
+/* ── Toolbar: segmented view + actions ─────────────────────────────────── */
+.cw-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-bottom: 1px solid var(--color-divider-subtle);
+  background: var(--color-background-base);
+}
+
+.cw-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  min-height: 0;
+}
+
+.cw-toolbar-row + .cw-toolbar-row {
+  border-top: 1px solid var(--color-divider-subtle);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.fx-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fx-segmented-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    transform var(--motion-duration-base) var(--motion-ease-out),
+    border-color var(--motion-duration-base) var(--motion-ease-out),
+    background var(--motion-duration-base) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.fx-segmented-btn:hover:not(.is-selected) {
+  background: var(--color-interaction-hover);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.fx-segmented-btn.is-selected {
+  border-color: var(--primary);
+  background: var(--color-interaction-selected-brand, color-mix(in srgb, var(--primary) 12%, transparent));
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.fx-segmented-btn:active { transform: scale(0.98); }
+
+.cw-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cw-action-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform var(--motion-duration-base) var(--motion-ease-out),
+    border-color var(--motion-duration-base) var(--motion-ease-out),
+    background var(--motion-duration-base) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.fx-btn:hover:not(:disabled) {
+  background: var(--color-interaction-hover);
+  border-color: var(--color-border-strong);
+}
+
+.fx-btn:active:not(:disabled) { transform: scale(0.98); }
+
+.fx-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.fx-btn--danger {
+  color: var(--color-accent-error-default);
+}
+
+.fx-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent-error-default) 40%, transparent);
+  background: color-mix(in srgb, var(--color-accent-error-default) 8%, transparent);
+}
+
+.fx-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  color: var(--color-icon-secondary);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-base) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.fx-icon-btn:hover {
+  color: var(--primary);
+  border-color: var(--color-border-strong);
+}
+
+/* ── Workspace body ────────────────────────────────────────────────────── */
+.editor-center-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.editor-center-scroll {
+  height: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 24%, transparent) transparent;
+}
+
+.editor-center-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.editor-center-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 999px;
+}
+
+/* Pipeline chips — center scope overrides */
+.editor-center-workspace .pipeline-chip {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  background: var(--color-background-elevated);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  transition:
+    border-color var(--motion-duration-base) var(--motion-ease-out),
+    background var(--motion-duration-base) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.editor-center-workspace .pipeline-chip:hover {
+  background: var(--color-interaction-hover);
+  color: var(--color-text-primary);
+}
+
+.editor-center-workspace .pipeline-chip.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+}
+
+.editor-center-workspace .pipeline-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border-default);
+  background: var(--color-background-floating);
+}
+
+.editor-center-workspace .pipeline-chip.status-completed .pipeline-chip-icon,
+.editor-center-workspace .pipeline-chip.status-draft_ready .pipeline-chip-icon {
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  color: var(--primary);
+}
+
+.editor-center-workspace .pipeline-chip.status-running .pipeline-chip-icon {
+  border-color: color-mix(in srgb, var(--color-accent-orange-default) 50%, transparent);
+  color: var(--color-accent-orange-default);
+}
+
+.editor-center-workspace .pipeline-chip.status-failed .pipeline-chip-icon {
+  border-color: color-mix(in srgb, var(--color-accent-error-default) 45%, transparent);
+  color: var(--color-accent-error-default);
+}
+
+.editor-center-workspace .pipeline-chip-arrow {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.editor-center-workspace .pipeline-bar-auto {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-background-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  padding: 2px 6px;
+}
+
+/* Step detail drawer — no glow shadow */
+.editor-center-workspace .step-detail-panel {
+  background: var(--color-background-base);
+  border-top: 1px solid var(--color-divider-subtle);
+  box-shadow: none;
+  animation: cw-panel-in var(--motion-duration-panel) var(--motion-ease-out);
+}
+
+@keyframes cw-panel-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.editor-center-workspace .step-detail-panel-header {
+  background: var(--color-background-elevated);
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.editor-center-workspace .step-detail-panel-title {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.editor-center-workspace .step-detail-close {
+  font-family: var(--font-sans);
+}
+
+/* Cross-step link bar */
+.editor-center-workspace .cross-step-link-bar {
+  background: var(--color-background-elevated);
+  border: 1px solid var(--color-border-default);
+  border-left: 2px solid var(--primary);
+  border-radius: var(--prim-radius-6);
+  font-family: var(--font-sans);
+}
+
+.editor-center-workspace .cross-step-link-chip {
+  font-family: var(--font-sans);
+  border-color: var(--color-border-default);
+  color: var(--color-text-primary);
+}
+
+.editor-center-workspace .cross-step-link-chip:hover {
+  background: var(--color-interaction-hover);
+  border-color: var(--primary);
+}
+
+.editor-center-workspace .cross-step-link-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-icon-secondary);
+}
+
+.editor-center-workspace .cross-step-link-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--primary);
+}
+
+/* Text view empty */
+.editor-center-workspace .empty-text {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.editor-center-workspace .text-view {
+  padding: 12px 16px;
+}
+
+.cw-spin {
+  animation: cw-spin 1s linear infinite;
+}
+
+@keyframes cw-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Legacy full-mode: map old class when not in center-only iframe */
+.app-right-panel.editor-center-workspace {
+  background: var(--color-background-canvas);
+}

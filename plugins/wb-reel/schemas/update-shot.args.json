@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:update-shot args",
+  "description": "Patch one storyboard shot's timeline properties: playback speed (变速/定格), in/out timing, entrance transition (转场) and clip in/out animation (首尾动画). Only the fields you provide are changed. Call reel:get-scene-timeline first for the shotId. The workbench reloads within seconds (data persists regardless).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sceneId", "shotId"],
+  "properties": {
+    "scenarioId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Optional; defaults to active scenario." },
+    "sceneId": { "type": "string", "description": "Scene id owning the shot." },
+    "shotId": { "type": "string", "description": "Target shot id (from reel:get-scene-timeline)." },
+    "speed": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "Playback speed. 1=normal, 0=freeze frame (画面定格), 0.5..2 typical slow/fast. Affects <video>.playbackRate."
+    },
+    "startMs": { "type": "number", "minimum": 0, "description": "Shot start on the scene timeline (ms)." },
+    "endMs": { "type": "number", "minimum": 0, "description": "Shot end on the scene timeline (ms). Must be > startMs." },
+    "transitionIn": {
+      "description": "Entrance transition into this shot (剪映式两段视频衔接). Pass null to clear.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "presetId": { "type": "string", "description": "Transition preset id (e.g. fade, flash-white)." },
+        "durationMs": { "type": "number", "minimum": 100, "maximum": 3000, "description": "Transition length (ms), default ~500." }
+      }
+    },
+    "clipAnim": {
+      "description": "In/out animation for this shot (首尾动画, 默认黑底渐显渐隐). Pass null to clear.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "in": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "preset": { "type": "string" },
+            "durationMs": { "type": "number", "minimum": 100, "maximum": 2500 }
+          }
+        },
+        "out": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "preset": { "type": "string" },
+            "durationMs": { "type": "number", "minimum": 100, "maximum": 2500 }
+          }
+        }
+      }
+    }
+  }
+}

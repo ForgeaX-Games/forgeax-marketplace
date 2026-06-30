@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["slug", "charId"],
+  "additionalProperties": false,
+  "properties": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$" },
+    "charId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]{1,40}$" },
+    "action": { "type": "string", "enum": ["walk", "idle", "attack"], "default": "walk" },
+    "directions": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["down", "left", "right", "up"] },
+      "uniqueItems": true,
+      "minItems": 1,
+      "default": ["down", "left", "right", "up"]
+    },
+    "framesPerDir": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4 },
+    "frameSize": { "type": "integer", "enum": [64, 96, 128], "default": 96 },
+    "model": { "type": "string", "enum": ["nano-banana", "azure-gpt-image"], "default": "nano-banana" }
+  }
+}

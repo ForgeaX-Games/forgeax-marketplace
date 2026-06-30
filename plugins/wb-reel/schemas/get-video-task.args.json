@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:get-video-task args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId"],
+  "properties": {
+    "taskId": { "type": "string", "minLength": 1 }
+  }
+}

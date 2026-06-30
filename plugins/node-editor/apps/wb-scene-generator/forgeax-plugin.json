@@ -1,0 +1,507 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-scene-generator",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "场景生成器",
+    "en": "Scene Generator"
+  },
+  "description": {
+    "zh": "场景生成器（基于 @forgeax/node-runtime 的节点式插件）",
+    "en": "Scene Generator (node-programming plugin built on @forgeax/node-runtime)"
+  },
+  "icon": "🌍",
+  "provides": {
+    "workbench": {
+      "id": "wb-scene-generator",
+      "icon": "🌍",
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left": {
+          "minWidth": 280,
+          "scrollable": true
+        },
+        "center": {
+          "minHeight": 600,
+          "scrollable": false
+        }
+      },
+      "matchProduces": [
+        "**/scenes/**.scene.json"
+      ]
+    },
+    "skills": [
+      {
+        "id": "wb-scene-generator:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/wb-scene-generator"
+      },
+      {
+        "id": "compose-scene-pipeline",
+        "entry": "./skills/compose-scene-pipeline/SKILL.md",
+        "trigger": "/compose-scene-pipeline"
+      },
+      {
+        "id": "compose-sino-scene",
+        "entry": "./skills/compose-sino-scene/SKILL.md",
+        "trigger": "/compose-sino-scene"
+      }
+    ],
+    "tools": [
+      {
+        "id": "scene:projects.list",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": { "type": "array" },
+        "exposedToAI": true,
+        "description": { "zh": "列出 Scene Generator 项目", "en": "List Scene Generator projects" }
+      },
+      {
+        "id": "scene:projects.create",
+        "args": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "type": { "type": "string" },
+            "description": { "type": "string" },
+            "fromTemplate": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "创建 Scene Generator 项目", "en": "Create a Scene Generator project" }
+      },
+      {
+        "id": "scene:projects.open",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "打开/激活指定 Scene Generator 项目（获得独占锁；一个 agent 同一时刻只能持有一个项目）", "en": "Open/activate a Scene Generator project (acquires an exclusive lock; one agent holds at most one project at a time)" }
+      },
+      {
+        "id": "scene:projects.close",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "关闭/释放对指定 Scene Generator 项目的独占锁；释放后才能打开另一个项目", "en": "Close/release the exclusive lock on a Scene Generator project; required before opening another" }
+      },
+      {
+        "id": "scene:projects.remove",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string" },
+            "assetPolicy": { "type": "string", "enum": ["detach", "delete"] }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "requireConfirm": "destructive",
+        "confirmMessage": { "zh": "删除 Scene Generator 项目需要确认", "en": "Deleting a Scene Generator project requires confirmation" },
+        "description": { "zh": "删除指定 Scene Generator 项目", "en": "Remove a Scene Generator project" }
+      },
+      {
+        "id": "scene:batteries.list",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": { "type": "array" },
+        "exposedToAI": true,
+        "description": { "zh": "列出已注册 scene 电池/ops", "en": "List registered scene batteries/ops" }
+      },
+      {
+        "id": "scene:batteries.get",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "读取单个 scene 电池/op 定义", "en": "Get one scene battery/op definition" }
+      },
+      {
+        "id": "scene:templates.list",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": { "type": "array" },
+        "exposedToAI": true,
+        "description": { "zh": "列出可实例化的模板组（6 个预制场景模板组 + 已保存的成组电池），含 id / name / category。用它发现模板组——batteries.get 查不到模板组（那查的是静态 op）。", "en": "List instantiable group templates (the 6 prebuilt scene template groups + saved group batteries) with id / name / category. Use this to discover template groups — batteries.get cannot find them (it lists static ops only)." }
+      },
+      {
+        "id": "scene:templates.get",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": ["object", "null"],
+          "description": "完整 NodeGroup 定义（nodes/edges/exposedInputs/exposedOutputs/_nestedGroups）；exposedInputs/exposedOutputs 的 portName 即对外 in_N/out_N 端口 / Full NodeGroup definition; exposedInputs/exposedOutputs portName are the outward in_N/out_N ports"
+        },
+        "exposedToAI": true,
+        "description": { "zh": "读取一个模板组的完整定义（含 exposedInputs/exposedOutputs，即 in_N/out_N 对外端口及类型）。实例化前用它核对端口契约。", "en": "Get one group template's full definition (incl. exposedInputs/exposedOutputs — the outward in_N/out_N ports and their types). Use before instantiating to verify the port contract." }
+      },
+      {
+        "id": "scene:pipeline.instantiateTemplate",
+        "args": {
+          "type": "object",
+          "required": ["templateId"],
+          "properties": {
+            "templateId": { "type": "string", "description": "模板组 id 或文件 basename（如 LakeRegions） / template group id or file basename (e.g. LakeRegions)" },
+            "position": {
+              "type": "object",
+              "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+              "additionalProperties": false,
+              "description": "顶层组影子节点的画布坐标 / canvas position of the top-level group shadow node"
+            },
+            "groupId": { "type": "string", "description": "可选：给顶层组一个稳定句柄（= 顶层影子节点 id）；省略则自动生成且不冲突 / optional stable handle for the top-level group (= its shadow node id); omitted → auto-generated, collision-free" },
+            "opts": {
+              "type": "object",
+              "properties": {
+                "actor": { "type": "string" },
+                "label": { "type": "string" }
+              },
+              "description": "actor 透传到历史记录（如 ai:sino）；label 为历史面板可读标签 / actor forwarded to history (e.g. ai:sino); label is a human-readable history row"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string" },
+            "newHash": { "type": "string" },
+            "groupId": { "type": "string", "description": "新建顶层组的影子节点 id（接线时作为 nodeId 用）/ shadow node id of the new top-level group (use as nodeId when wiring)" },
+            "name": { "type": "string" },
+            "exposedInputs": { "type": "array", "description": "对外输入端口清单 [{portName:in_N, portType}] / outward input ports" },
+            "exposedOutputs": { "type": "array", "description": "对外输出端口清单 [{portName:out_N, portType}] / outward output ports" },
+            "opCount": { "type": "number" }
+          }
+        },
+        "exposedToAI": true,
+        "description": { "zh": "一步把模板组实例化进当前活动项目的图：自动重映射内部 node/edge/group id（同一模板可重复实例化不冲突），落地为一个 __group__ 顶层组节点（含嵌套子组），并返回新组的 groupId 与稳定 in_N/out_N 端口清单供接线。优先用它替代手工 createNode+connect+createGroup 展开。", "en": "Instantiate a template group into the active project's graph in one call: inner node/edge/group ids are remapped (same template can be instantiated repeatedly without collision), materialised as one __group__ top-level node (incl. nested sub-groups), returning the new groupId and stable in_N/out_N exposed ports for wiring. Prefer this over manual createNode+connect+createGroup expansion." }
+      },
+      {
+        "id": "scene:pipeline.get",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": { "type": ["object", "null"] },
+        "exposedToAI": true,
+        "description": { "zh": "读取当前 scene pipeline graph", "en": "Read the active scene pipeline graph" }
+      },
+      {
+        "id": "scene:pipeline.applyBatch",
+        "args": {
+          "type": "object",
+          "required": ["ops"],
+          "properties": {
+            "ops": { "type": "array" },
+            "opts": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "批量修改 scene pipeline graph", "en": "Apply a batch of scene pipeline graph edits" }
+      },
+      {
+        "id": "scene:pipeline.execute",
+        "args": {
+          "type": "object",
+          "properties": {
+            "nodeId": { "type": "string" },
+            "raw": {
+              "type": "boolean",
+              "description": "默认 false：只返回轻量摘要（status + 各节点端口的 children 名/cell 数等），可放心整图 execute 看摘要验证每组是否产出。仅在极少数需要原始全量 voxel cells 时传 true（体积巨大，会撑爆上下文）。"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "执行当前 scene pipeline 或指定节点；默认返回轻量摘要（status + 各端口 children 名/cell 数），raw:true 才返回全量", "en": "Execute the active scene pipeline or a single node; returns a lightweight summary by default (status + per-port child names / cell counts), pass raw:true for the full result" }
+      },
+      {
+        "id": "scene:pipeline.import",
+        "args": {
+          "type": "object",
+          "properties": {
+            "format": { "type": "string" },
+            "graph": {},
+            "file": { "type": "object" },
+            "options": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "导入/替换 scene pipeline graph", "en": "Import or replace a scene pipeline graph" }
+      },
+      {
+        "id": "scene:pipeline.export",
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "导出当前 scene pipeline 模板", "en": "Export the current scene pipeline template" }
+      },
+      {
+        "id": "scene:assets.list",
+        "args": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "suffix": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "列出 scene 项目文件系统素材（<workspaceRoot>/assets，非私有库；查发布进库的私有资产用 scene:library.list）", "en": "List scene project filesystem assets (<workspaceRoot>/assets — NOT the private library; use scene:library.list to see published private assets)" }
+      },
+      {
+        "id": "scene:library.list",
+        "args": {
+          "type": "object",
+          "properties": {
+            "zone": { "type": "string", "description": "default 'raw' (publish-bridge landing zone)" },
+            "search": { "type": "string" },
+            "page": { "type": "number" },
+            "pageSize": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "列出资产库（内置 ∪ 当前项目私有，分页，私有优先）。默认 zone=raw。这是 agent 唯一能看到/核对 publishExternal 发布结果的途径（scene:assets.list 查的是文件系统素材、看不到私有库）。", "en": "List the asset library (base ∪ active-project private, paginated, private first). Defaults to zone=raw. This is the ONLY way an agent can see/verify what scene:library.publishExternal landed (scene:assets.list lists filesystem assets, not the private library)." }
+      },
+      {
+        "id": "scene:library.useGameTextures",
+        "args": {
+          "type": "object",
+          "required": ["gameSlug"],
+          "properties": {
+            "gameSlug": { "type": "string", "description": "目标游戏 slug（绑定 <projectRoot>/.forgeax/games/<gameSlug>/textures/ 作为资产源）" },
+            "projectRoot": { "type": "string", "description": "场景侧 host 项目根（默认=本工具 cwd）。返回 dir 供反推后传给 asset2d:publishToGame 的 projectRoot。" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "把共享游戏沙箱 <projectRoot>/.forgeax/games/<gameSlug>/textures/ 绑定为资产源。跨 workbench 发布时**先调本工具**（返回 dir），从 dir 反推 projectRoot 再传给 asset2d:publishToGame——两 workbench 默认 cwd 不同，顺序反了会落错目录、library.list 搜不到。绑定后广播 library:changed。",
+          "en": "Bind the shared game sandbox <projectRoot>/.forgeax/games/<gameSlug>/textures/ as an asset source. When publishing across workbenches, call this FIRST (returns dir), derive projectRoot from dir, then pass the same projectRoot to asset2d:publishToGame — the two workbench default cwds differ; reversing the order lands bytes where the scene can't read them. Broadcasts library:changed on bind."
+        }
+      },
+      {
+        "id": "scene:library.publishExternal",
+        "args": {
+          "type": "object",
+          "required": ["assetName", "assetType"],
+          "properties": {
+            "assetName": { "type": "string", "description": "field4 语义名 / item-name the renderer matches on" },
+            "assetType": { "type": "string", "enum": ["tile", "object"] },
+            "from2dAlias": { "type": "string", "description": "★推荐：2D 生成资产的 alias（asset2d:assets.list/getBytes 返回的那个）。发布桥会 server-to-server 取字节，agent 不必、也不要传 base64。" },
+            "from2dBlobId": { "type": "string", "description": "可选：2D 资产 blobId（同时作 sourceBlobId 幂等键）；from2dAlias 优先。" },
+            "dataBase64": { "type": "string", "description": "（回退用）base64 PNG 字节。优先用 from2dAlias 让发布桥自取——base64 经上下文会被自动压缩丢弃、引发发布死循环。" },
+            "autotileKind": { "type": "string", "description": "autotile rule alias, required for tile (e.g. common_16)" },
+            "sourceBlobId": { "type": "string", "description": "provenance / idempotency key（给了 from2dBlobId 会自动填）" },
+            "anchorX": { "type": ["number", "null"] },
+            "anchorY": { "type": ["number", "null"] },
+            "geometryJson": { "type": "string" },
+            "extraFields": { "type": "object", "additionalProperties": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "【已退役为兼容回退，新任务请用 asset2d:publishToGame + scene:library.useGameTextures 走共享沙箱】贴图发布桥：把 2D 生成的 PNG 发布进当前场景项目私有 raw 库（合成 renderer alias、tile 绑定 autotile 规则、记录 provenance、幂等）。如仍用：只传 from2dAlias（+tile 的 autotileKind）让桥 server-to-server 自取字节；别把 base64 塞进上下文（会被压缩丢失→死循环）。", "en": "[LEGACY fallback — new work should use asset2d:publishToGame + scene:library.useGameTextures (shared sandbox)] Texture publish bridge: publish a 2D-generated PNG into the active scene project's private raw library. If still used: pass from2dAlias (+autotileKind for tiles) so the bridge fetches bytes server-to-server; NEVER push base64 through the agent context (it gets compacted away → publish loops)." }
+      },
+      {
+        "id": "scene:screenshot.capture",
+        "args": {
+          "type": "object",
+          "properties": { "timeout": { "type": "number" } },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "captureId": { "type": "string" },
+            "width": { "type": "number" },
+            "height": { "type": "number" },
+            "capturedAt": { "type": "string" },
+            "path": { "type": "string", "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image" },
+            "relPath": { "type": "string" }
+          }
+        },
+        "exposedToAI": true,
+        "description": { "zh": "请求渲染器截图：把 PNG 存到磁盘并返回其绝对路径（不内联 base64，避免撑爆上下文）。要查看图像，用 read_file 打开返回的 path。", "en": "Request a renderer screenshot: saves the PNG to disk and returns its absolute path (no inline base64 — avoids blowing up the context window). To view the image, open the returned path with read_file." }
+      },
+      {
+        "id": "scene:screenshot.latest",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": {
+          "type": "object",
+          "properties": {
+            "captureId": { "type": "string" },
+            "width": { "type": "number" },
+            "height": { "type": "number" },
+            "capturedAt": { "type": "string" },
+            "path": { "type": "string", "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image" },
+            "relPath": { "type": "string" }
+          }
+        },
+        "exposedToAI": true,
+        "description": { "zh": "读取最近一次 scene 预览截图：把 PNG 存到磁盘并返回其绝对路径（不内联 base64）。要查看图像，用 read_file 打开返回的 path。", "en": "Read the latest scene preview screenshot: saves the PNG to disk and returns its absolute path (no inline base64). To view the image, open the returned path with read_file." }
+      },
+      {
+        "id": "scene:screenshot.store",
+        "args": {
+          "type": "object",
+          "required": ["captureId", "dataUrl", "width", "height"],
+          "properties": {
+            "captureId": { "type": "string" },
+            "dataUrl": { "type": "string" },
+            "width": { "type": "number" },
+            "height": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": false,
+        "description": { "zh": "渲染器回写截图数据（内部）", "en": "Renderer callback to store screenshot data" }
+      },
+      {
+        "id": "scene:renderer.info",
+        "args": { "type": "object", "additionalProperties": false },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "读取 scene 渲染器控制能力", "en": "Read scene renderer control capabilities" }
+      },
+      {
+        "id": "scene:renderer.setViewMode",
+        "args": {
+          "type": "object",
+          "required": ["mode"],
+          "properties": { "mode": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "设置 scene 预览视角", "en": "Set the scene preview view mode" }
+      },
+      {
+        "id": "scene:renderer.selectLayer",
+        "args": {
+          "type": "object",
+          "properties": {
+            "layerKey": { "type": "string" },
+            "nodeId": { "type": "string" },
+            "nodePath": { "type": "string" },
+            "portName": { "type": "string" },
+            "subLayerValue": { "type": ["number", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "选择 scene 预览层", "en": "Select a scene preview layer" }
+      },
+      {
+        "id": "scene:renderer.openAllSubLayers",
+        "args": {
+          "type": "object",
+          "properties": { "nodeId": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "展开 scene 预览子层", "en": "Open scene preview sub-layers" }
+      }
+    ],
+    "surfaces": [
+      {
+        "id": "wb-scene-generator.projects",
+        "actions": [
+          { "id": "list", "exposedToAI": true },
+          { "id": "create", "exposedToAI": true },
+          { "id": "open", "exposedToAI": true },
+          { "id": "remove", "exposedToAI": true, "requireConfirm": "destructive" }
+        ]
+      },
+      {
+        "id": "wb-scene-generator.pipeline",
+        "actions": [
+          { "id": "get", "exposedToAI": true },
+          { "id": "applyBatch", "exposedToAI": true },
+          { "id": "execute", "exposedToAI": true },
+          { "id": "import", "exposedToAI": true },
+          { "id": "export", "exposedToAI": true },
+          { "id": "instantiateTemplate", "exposedToAI": true }
+        ]
+      },
+      {
+        "id": "wb-scene-generator.preview",
+        "actions": [
+          { "id": "renderer.info", "exposedToAI": true },
+          { "id": "renderer.setViewMode", "exposedToAI": true },
+          { "id": "renderer.selectLayer", "exposedToAI": true },
+          { "id": "renderer.openAllSubLayers", "exposedToAI": true },
+          { "id": "screenshot.capture", "exposedToAI": true },
+          { "id": "screenshot.latest", "exposedToAI": true },
+          { "id": "assets.list", "exposedToAI": true }
+        ]
+      },
+      {
+        "id": "wb-scene-generator.library",
+        "actions": [
+          { "id": "library.publishExternal", "exposedToAI": true }
+        ]
+      }
+    ]
+  },
+  "compatibleWith": {
+    "forgeax-node-runtime": "^0.3.0"
+  },
+  "registeredOps": [],
+  "registeredAssetTypes": [],
+  "requestedPathSlots": [],
+  "requestedEnv": [
+    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
+    "FORGEAX_SCENE_BACKEND_URL",
+    "FORGEAX_SCENE_SCREENSHOT_NO_VISION",
+    "FORGEAX_ASSET2D_BACKEND_URL"
+  ],
+  "entry": {
+    "frontend": "./frontend/dist/index.html",
+    "backend": "./backend/src/tool-handlers.ts",
+    "standalone": {
+      "start": "pnpm serve",
+      "port": 9555,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "experimental": true
+}

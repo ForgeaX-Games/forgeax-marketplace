@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lowpoly:vibe-edit returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "ops"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "ops": {
+      "type": "array",
+      "description": "Applied SourceOp[]; see schemas/lowpoly-source.zod.ts (SourceOp).",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Resulting source.json (omitted when dryRun)."
+    },
+    "vibeId": { "type": "string" }
+  }
+}
