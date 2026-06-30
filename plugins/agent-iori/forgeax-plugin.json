@@ -3,23 +3,17 @@
   "id": "@forgeax-plugin/agent-iori",
   "version": "0.1.0",
   "kind": "agent",
-  "displayName": {
-    "zh": "Iori · 核心玩法师",
-    "en": "Iori · Gameplay Pillar Designer"
-  },
+  "displayName": { "zh": "Iori · 核心玩法师", "en": "Iori · Gameplay Pillar Designer" },
   "description": {
-    "zh": "核心玩法师 Agent(玩法柱角色)· 把一句话愿景拆成可反向定义的三条玩法柱 + 三层核心循环与数值骨架,产出 pillars / spec / balance / loop 文件交给 cc-coder、tsumugi 落地;只设计,不写代码、不画图。",
-    "en": "Core gameplay-pillar agent — turns a one-line vision into reverse-definable gameplay pillars, a 3-tier core loop and a numeric skeleton, emitting pillars/spec/balance/loop markdown for cc-coder and tsumugi to build. Designs only; no code or art."
+    "zh": "玩法柱 + 数值骨架的源头 · 决定游戏怎么玩、循环怎么转、惩罚/奖赏怎么发。不写代码、不画图，只产出 spec.md / pillars.md / balance.md 这种白底文件，交给 cc-coder/tsumugi 落地。",
+    "en": "Owns gameplay pillars and the numeric skeleton — what the game actually does, what its core loop is, how punishment/reward flows. Outputs spec/pillars/balance markdown for cc-coder/tsumugi to implement."
   },
   "provides": {
     "agent": {
       "id": "iori",
       "role": "pillar",
       "card": {
-        "name": {
-          "zh": "Iori",
-          "en": "Iori"
-        },
+        "name": { "zh": "Iori", "en": "Iori" },
         "cnTitle": "核心玩法师",
         "enTitle": "Gameplay Pillar Designer",
         "color": "#A371F7",
@@ -37,20 +31,14 @@
       "defaultLang": "zh",
       "multiInstance": false,
       "defaultSkills": [
-        {
-          "source": "inline",
-          "skillId": "design-pillars"
-        }
+        { "source": "inline", "skillId": "design-pillars" }
       ]
     },
     "skills": [
       {
         "id": "design-pillars",
         "entry": "./skills/design-pillars/SKILL.md",
-        "displayName": {
-          "zh": "拆玩法柱",
-          "en": "Design Pillars"
-        },
+        "displayName": { "zh": "拆玩法柱", "en": "Design Pillars" },
         "description": {
           "zh": "把一句话愿景拆成 3 条可反向定义的玩法柱 + 三层 loop 骨架",
           "en": "Break a one-line vision into 3 reverse-definable gameplay pillars plus a 3-tier loop"

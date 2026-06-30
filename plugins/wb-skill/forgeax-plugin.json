@@ -8,8 +8,8 @@
     "en": "Skills & VFX"
   },
   "description": {
-    "zh": "技能 / VFX 工作台 · 浏览游戏的 skills/* 与 vfx/* 产出,内置 VFX 引擎实时预览特效,并用 skill:generate-vfx 生成特效;玩家手点与 AI dispatch 共改同一份 skill spec。",
-    "en": "Skill & VFX workbench — browse a game's skills/* and vfx/* outputs, preview effects live in a built-in VFX engine, and generate them via skill:generate-vfx; player clicks and AI dispatch edit one shared skill spec."
+    "zh": "技能 / VFX 工作台 · 列出 skills/* 与 vfx/* 产出 · 后续接 Monster_Skill_Package 技能树编辑 + vfx2 预览,玩家手点 / AI dispatch 共改一份 skill spec。",
+    "en": "Skill & VFX workbench. Lists skills/* and vfx/* outputs. Will host the skill-tree editor + VFX preview; player DOM and AI dispatch share one spec."
   },
   "provides": {
     "workbench": {
@@ -20,14 +20,8 @@
       "panelSize": "lg",
       "surface": "split",
       "panes": {
-        "left": {
-          "minWidth": 320,
-          "scrollable": true
-        },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
-        }
+        "left":   { "minWidth": 320, "scrollable": true },
+        "center": { "minHeight": 600, "scrollable": false }
       },
       "matchProduces": [
         "**/skills/**",
@@ -41,9 +35,7 @@
         "args": "./schemas/generate-vfx.args.json",
         "returns": "./schemas/generate-vfx.returns.json",
         "exposedToAI": true,
-        "description": {
-          "zh": "技能特效 · 粒子/着色器/挂点 vfx-config 生成"
-        }
+        "description": { "zh": "技能特效 · 粒子/着色器/挂点 vfx-config 生成" }
       }
     ]
   },

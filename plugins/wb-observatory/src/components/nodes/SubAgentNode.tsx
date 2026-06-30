@@ -1,5 +1,4 @@
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { TraceBadge } from './TraceBadge';
 
 type AgentStatus = 'spawning' | 'running' | 'completed' | 'failed';
 
@@ -20,7 +19,7 @@ const STATUS_STYLE: Record<AgentStatus, { color: string; label: string; animate:
   failed:    { color: 'var(--ob-error)', label: 'failed', animate: false },
 };
 
-export function SubAgentNode({ id, data }: NodeProps<SubAgentData>) {
+export function SubAgentNode({ data }: NodeProps<SubAgentData>) {
   const ss = STATUS_STYLE[data.status] ?? STATUS_STYLE.completed;
 
   return (
@@ -39,7 +38,6 @@ export function SubAgentNode({ id, data }: NodeProps<SubAgentData>) {
         />
         <span className="ob-node__label">{data.agentId}</span>
         {data.agentType && <span className="ob-node__badge">{data.agentType}</span>}
-        <TraceBadge nodeId={id} />
       </div>
       <div className="ob-node__content">
         {data.task && <div style={{ marginBottom: 3 }}>"{data.task.slice(0, 50)}"</div>}

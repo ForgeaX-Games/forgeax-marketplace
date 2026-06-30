@@ -6,8 +6,6 @@ import { useObservatoryData } from '../hooks/useObservatoryData';
 import { useSessionNodes } from '../hooks/useSessionNodes';
 import { useGraphLayout } from '../hooks/useGraphLayout';
 import { useEventStream } from '../hooks/useEventStream';
-import { useTelemetryStream } from '../hooks/useTelemetryStream';
-import { joinTelemetryToNodes } from '../lib/join-telemetry';
 import { SystemModuleNode } from './nodes/SystemModuleNode';
 import { TurnNode } from './nodes/TurnNode';
 import { ToolCallNode } from './nodes/ToolCallNode';
@@ -60,7 +58,6 @@ export function ObservatoryCanvas() {
   const {
     sessionPath, sessionMode, liveNodes, liveEdges,
     openSidebarLoading, setSidebarSystemData, setSidebarTurnNode, closeSidebar,
-    spansById, logsBySpanId, setNodeTraces,
   } = useObservatoryStore();
 
   const isLive = sessionMode === 'live';
@@ -93,17 +90,6 @@ export function ObservatoryCanvas() {
     setDisplayNodes(sourceNodes);
     setDisplayEdges(sourceEdges);
   }, [sourceNodes, sourceEdges]);
-
-  // Telemetry overlay (todo 038) — subscribe the same session and join spans/logs
-  // onto the existing nodes. Pure additive: when telemetry is empty/off the join
-  // simply marks traceable nodes 'no-trace' and the trajectory is untouched.
-  const telemetrySid = sessionPath ?? (isLive ? 'current' : null);
-  useTelemetryStream(showPlaceholder ? null : telemetrySid, !showPlaceholder);
-  const nodeTraces = useMemo(
-    () => joinTelemetryToNodes(sourceNodes, spansById, logsBySpanId),
-    [sourceNodes, spansById, logsBySpanId],
-  );
-  useEffect(() => { setNodeTraces(nodeTraces); }, [nodeTraces, setNodeTraces]);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setDisplayNodes(nds => applyNodeChanges(changes, nds));

@@ -8,8 +8,8 @@
     "en": "Code Workbench"
   },
   "description": {
-    "zh": "代码工作台(规划中)· 目标:在 Studio 内浏览 + 跳转游戏 src/ 文件,与 cc-coder 跨对话线程协作改代码。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
-    "en": "Code workbench (planned) — will browse and jump through a game's src/ files inside Studio and collaborate with cc-coder across chat threads. Currently a marketplace placeholder; the panel lands in a later sprint."
+    "zh": "代码工作台 · 升级现 MainArea/WorkbenchMode.tsx 为独立 plugin · 浏览 + 跳转 src/ 文件,与 cc-coder 跨 chat thread 协作。",
+    "en": "Code workbench. Will upgrade MainArea/WorkbenchMode.tsx into a plugin. Browse + jump src/ files; collaborates with cc-coder across chat threads."
   },
   "provides": {
     "workbench": {

@@ -8,8 +8,8 @@
     "en": "Balance Resim"
   },
   "description": {
-    "zh": "战斗重模拟工具 · 暴露 balance:resim:对指定 scenario 跑 N 次 PvP/PvE 重模拟,返回胜率 + 95% 置信区间(in-process worker)。供 /make-game-design 与平衡工作台数值调优共用。",
-    "en": "Balance Resim tool — exposes balance:resim: runs N PvP/PvE resimulations of a scenario and returns win-rate + 95% CI (in-process worker). Shared by /make-game-design and the Balance workbench for stat tuning."
+    "zh": "纯 tool plugin (modules/02 §201-§214) · 暴露 balance:resim — 对指定 scenario 跑 N 次 PvP/PvE 重模拟、返回 winRate + 95% CI,跑 in-process worker。给 /make-game-design 与 wb-balance 共用。",
+    "en": "Pure-tool plugin. Exposes balance:resim — N PvP/PvE resims for a scenario returning winRate + 95% CI. Runs in-process worker. Shared by /make-game-design and wb-balance."
   },
   "provides": {
     "tools": [

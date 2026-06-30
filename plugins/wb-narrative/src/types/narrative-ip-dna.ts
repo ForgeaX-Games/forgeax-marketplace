@@ -416,15 +416,10 @@ export interface NarrativeIpDna {
  * 递归 children 表达更深层的嵌套选择。整体即蓝图所述 `[[...],...],[...]...` 的结构化形态。
  */
 export interface AdaptationScopeSelection {
-  /** 选中的层级节点 id（leafRange 形态可省略,直接给最小单元闭区间）。 */
-  nodeId?: string;
+  /** 选中的层级节点 id。 */
+  nodeId: string;
   /** 限定该节点下的子层区间（如 [1, 5] 表示第 1-5 章）；缺省=全选其子树。 */
   childRange?: [number, number];
-  /**
-   * 最小单元（叶子）闭区间 [start, end]（文档序），用于"每部=一个区间"的区间裁剪。
-   * 与 nodeId/childRange 互斥使用：给 leafRange 时直接取文档序中该闭区间内的全部叶子。
-   */
-  leafRange?: { start: string; end: string };
   /** 更深层嵌套选择。 */
   children?: AdaptationScopeSelection[];
 }

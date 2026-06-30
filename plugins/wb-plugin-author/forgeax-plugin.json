@@ -8,8 +8,8 @@
     "en": "Plugin Author"
   },
   "description": {
-    "zh": "插件作者工作台 · 在 Studio 内编辑 .forgeax/plugins/<slug>/ 下的本地插件:左侧文件树 + 右侧文本编辑器,保存即写回并后台热重载注册表;配合 fork / record-as-skill 创建插件。",
-    "en": "Plugin Author workbench — an in-app editor for local plugins under .forgeax/plugins/<slug>/: a left file tree + right text editor; saving writes back and hot-reloads the plugin registry in the background. Pairs with fork / record-as-skill to create a plugin."
+    "zh": "v2-vision 09 §2.1/4 · 非专业作者的 in-app 编辑器入口。Phase D6 (4/4) placeholder · 真实 React panel 在后续 sprint 落地(file-tree 左,Monaco 右,保存自动 reload)。当前手写路径走 SettingsPanel · Fork & 录制 + meta:author-plugin skill。",
+    "en": "Non-expert authoring workbench (09 §2.1/4). D6 (4/4) placeholder; the real panel (file tree + Monaco editor, save → auto-reload) lands in a follow-up sprint. Today the working flows are SettingsPanel · Fork + meta:author-plugin skill."
   },
   "provides": {
     "workbench": {

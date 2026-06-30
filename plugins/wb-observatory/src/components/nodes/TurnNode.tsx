@@ -1,5 +1,4 @@
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { TraceBadge } from './TraceBadge';
 
 type TurnStatus = 'thinking' | 'tool_calling' | 'completed';
 
@@ -23,7 +22,7 @@ const STATUS_INDICATOR: Record<TurnStatus, { color: string; label: string; anima
   completed:    { color: '#D4FF48', label: 'done', animate: false },
 };
 
-export function TurnNode({ id, data }: NodeProps<TurnData>) {
+export function TurnNode({ data }: NodeProps<TurnData>) {
   const status = data.status ?? 'completed';
   const si = STATUS_INDICATOR[status];
   const isActive = status !== 'completed';
@@ -45,7 +44,6 @@ export function TurnNode({ id, data }: NodeProps<TurnData>) {
         />
         <span className="ob-node__label">Turn {data.index}</span>
         <span className="ob-node__badge" style={{ color: si.color }}>{si.label}</span>
-        <TraceBadge nodeId={id} />
       </div>
       <div className="ob-node__content">
         <div style={{ marginBottom: 3 }}>▸ {data.userSummary}</div>

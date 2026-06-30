@@ -468,35 +468,12 @@ function finalizeStructure(dna: NarrativeIpDna): NarrativeIpDna {
 export interface VolumeAssessment {
   charCount: number;
   isShort: boolean;
-  /**
-   * 整部体量超"单游戏单元水准线"（单元数 + 体量双维）。语义＝"这部够大、应切成多个游戏单元(系列)"，
-   * 是游戏单元规划的默认依据，**不代表存在无法处理的超大文件**（勿据此弹"拆解"问题）。
-   */
+  /** 超阈值需拆解（按格式切分为可独立处理的块）。 */
   needsDecompose: boolean;
   /** 建议拆解块数（按阈值整除向上取整）。 */
   suggestedChunks: number;
   /** 命中的水准线说明（可读，含命中维度）。 */
   thresholdBasis: string;
-  /**
-   * 真·超大最小单元（叶子）数量：单个叶子正文 > MAX_UNIT_CHARS，提取/生成会失真，需"再标准化/拆解"。
-   * 这才是"发现超大文件，是否进一步拆解"问题的唯一触发依据（=0 时该问题不出现）。
-   */
-  oversizedUnitCount: number;
-}
-
-/**
- * 统计层级树中"真·超大最小单元"数量 —— 判断对象是【最小叙事单元(叶子=节/话/集/情节点)】本身，
- * 不是整部作品、也不是单张图/单个物理文件（§3.1/§5.0）：单个叶子的 sourceRange 跨度 > maxUnitChars。
- *
- * 媒体量纲：文字按字数（此处实现）；漫画按"话内页数"、视频按时长 —— 蓝图标注较难/留接口，
- * 标准化阶段图片/视频叶子无 sourceRange、恒计 0（不弹"再标准化"，符合 §5.0）。
- * 与 needsDecompose（整部体量、系列化判断）正交——已切成众多小章节的长篇此值为 0（70 话小说不误报）。
- */
-export function countOversizedUnits(dna: NarrativeIpDna, maxUnitChars = MAX_UNIT_CHARS): number {
-  return collectLeafIds(dna).filter((id) => {
-    const r = dna.nodes[id]?.sourceRange;
-    return !!r && r.end - r.start > maxUnitChars;
-  }).length;
 }
 
 /** 单次处理体量上限（字符）；无媒体维度信息时的字数兜底水准线（§7.1）。 */
@@ -564,7 +541,6 @@ export function assessVolume(text: string, input: VolumeAssessmentInput = {}): V
     needsDecompose,
     suggestedChunks: needsDecompose ? Math.max(2, Math.ceil(charCount / DECOMPOSE_THRESHOLD)) : 1,
     thresholdBasis,
-    oversizedUnitCount: 0, // 无层级树信息时占位；编排器据 dna 用 countOversizedUnits 回填真值
   };
 }
 

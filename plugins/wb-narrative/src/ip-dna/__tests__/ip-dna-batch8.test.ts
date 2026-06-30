@@ -23,7 +23,7 @@ import type { LLMClient } from "../../pipeline/llm-client.js";
 import type { TemplateSummary } from "../../types/narrative-ip-dna.js";
 import { archiveAndBuildManifest, type IncomingFile } from "../phase0-foundation.js";
 import { transcribeMediaFiles, detectMediaUnit, buildMultimodalMarkdown } from "../phase1-multimodal.js";
-import { loadManifest, mediaOriginalDir } from "../filesystem.js";
+import { loadManifest } from "../filesystem.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -187,24 +187,21 @@ describe("batch8 · 逐层递归聚合（§3.3）", () => {
   });
 });
 
-describe("batch8 · 媒体优先分家落盘 + 会话级幂等追加（§6.1）", () => {
-  it("文件按模态分家落各媒体 *_original（媒体优先布局）", () => {
+describe("batch8 · 模态分目录 + 会话级幂等追加（§2）", () => {
+  it("文件按模态归入 _original/<book|picture|video> 子目录", () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ipdna-modal-"));
-    const ts = "2026-06-26_010101";
-    const title = "混合作品";
     const files: IncomingFile[] = [
       { fileName: "小说.txt", data: "正文。".repeat(20), fileType: "text/plain" },
       { fileName: "封面.png", data: Buffer.from([1, 2, 3]), fileType: "image/png" },
       { fileName: "预告.mp4", data: Buffer.from([4, 5, 6]), fileType: "video/mp4" },
     ];
-    const r = archiveAndBuildManifest({ files, title, story_timestamp: ts, cwd });
+    const r = archiveAndBuildManifest({ files, title: "混合作品", story_timestamp: "2026-06-26_010101", cwd });
     expect(r.manifest.media_type).toBe("mixed");
-    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "book", { cwd }), "小说.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "picture", { cwd }), "封面.png"))).toBe(true);
-    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "video", { cwd }), "预告.mp4"))).toBe(true);
+    expect(fs.existsSync(path.join(r.originalDir, "book", "小说.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(r.originalDir, "picture", "封面.png"))).toBe(true);
+    expect(fs.existsSync(path.join(r.originalDir, "video", "预告.mp4"))).toBe(true);
     const paths = r.manifest.source_files.map((s) => s.path.replace(/\\/g, "/"));
-    expect(paths).toContain(`book/story_book/story_book_original/${ts}_${title}/小说.txt`);
-    expect(paths).toContain(`picture/story_picture/picture_original/${ts}_${title}/封面.png`);
+    expect(paths).toContain("_original/book/小说.txt");
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 

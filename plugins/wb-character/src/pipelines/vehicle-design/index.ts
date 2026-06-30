@@ -202,10 +202,6 @@ class VehicleDesignUI {
     saveCfg(this.cfg)
   }
 
-  // NOTE: vehicle-design UI uses an intentional Catppuccin-themed inline palette
-  // (#1e1e2e/#cdd6f4/#89b4fa/...), distinct from the main neutral+lime editor tokens.
-  // Accepted as a themed exception (owner decision 2026-06-29) — do NOT recolor to
-  // the main palette without an owner call. See .ui-loop/issues.json A-R1.
   private toast(msg: string): void {
     const t = document.createElement('div')
     t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1e2e;color:#cdd6f4;padding:8px 16px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 2px 12px #0008'

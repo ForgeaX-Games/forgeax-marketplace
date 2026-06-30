@@ -1,5 +1,4 @@
 import { Handle, Position, type NodeProps } from 'reactflow';
-import { TraceBadge } from './TraceBadge';
 
 type ToolStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -17,7 +16,7 @@ const STATUS_STYLE: Record<ToolStatus, { color: string; border: string; animate:
   error:     { color: 'var(--ob-error)', border: 'var(--ob-error)', animate: false },
 };
 
-export function ToolCallNode({ id, data }: NodeProps<ToolCallData>) {
+export function ToolCallNode({ data }: NodeProps<ToolCallData>) {
   const status = data.status ?? 'completed';
   const ss = STATUS_STYLE[status];
 
@@ -44,7 +43,6 @@ export function ToolCallNode({ id, data }: NodeProps<ToolCallData>) {
         {status === 'running' && <span className="ob-node__badge" style={{ color: '#A78BFA' }}>running</span>}
         {status === 'error' && <span className="ob-node__badge" style={{ color: 'var(--ob-error)' }}>error</span>}
         {data.hasReminder && <span className="ob-node__badge" style={{ color: 'var(--ob-reminder)' }}>⚡</span>}
-        <TraceBadge nodeId={id} />
       </div>
       <div className="ob-node__content" style={{ maxHeight: 40, overflow: 'hidden' }}>
         {data.inputSummary}

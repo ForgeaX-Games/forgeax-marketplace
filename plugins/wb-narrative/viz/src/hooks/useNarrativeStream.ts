@@ -238,7 +238,7 @@ export interface IpHierarchyResult {
   media_type: string;
   node_count: number;
   hierarchy: IpHierarchyNode[];
-  volume?: { charCount: number; isShort: boolean; needsDecompose: boolean; suggestedChunks: number; thresholdBasis: string; oversizedUnitCount?: number };
+  volume?: { charCount: number; isShort: boolean; needsDecompose: boolean; suggestedChunks: number; thresholdBasis: string };
   decomposition?: { iterations: number; splitUnits: number; residualOversize: boolean };
   noise_filtered?: string[];
   default_scope?: { full: boolean; selections?: unknown[] };

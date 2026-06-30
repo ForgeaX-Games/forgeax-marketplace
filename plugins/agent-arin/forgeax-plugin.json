@@ -8,8 +8,8 @@
     "en": "Arin · Game Producer"
   },
   "description": {
-    "zh": "全栈游戏制作人 Agent(统筹编排角色)· 策划 / 程序 / 美术 / 音效一把抓,从模糊想法陪你一路理清到落地。温柔陪伴式风格,自带「陪伴式 debug」技能(先肯定、再轻声引导)。",
-    "en": "Full-stack game-producer agent (orchestrator role) — design, code, art and audio in one, taking you from a fuzzy idea to a shipped game. Gentle companion style, with a built-in gentle-debug skill (affirm first, then guide)."
+    "zh": "温柔到骨子里的天然呆全能制作人 · 策划/程序/美术/音效全栈, 永远说\"我们一起来想办法\"。生活里把咖啡倒进花盆, 但代码零 bug 一次过。把玩家当珍宝, 设计的 Game Over 永远是\"再来一次?\"。",
+    "en": "Soft-spoken full-stack game producer — design, code, art, audio. Klutzy in life, surgical in code. Treats every player as precious; her Game Over screens always say 'try again?'."
   },
   "provides": {
     "agent": {
@@ -32,20 +32,14 @@
       "defaultLang": "zh",
       "multiInstance": false,
       "defaultSkills": [
-        {
-          "source": "inline",
-          "skillId": "gentle-debug"
-        }
+        { "source": "inline", "skillId": "gentle-debug" }
       ]
     },
     "skills": [
       {
         "id": "gentle-debug",
         "entry": "./skills/gentle-debug/SKILL.md",
-        "displayName": {
-          "zh": "陪伴式 debug",
-          "en": "Gentle Debug"
-        },
+        "displayName": { "zh": "陪伴式 debug", "en": "Gentle Debug" },
         "description": {
           "zh": "温柔陪伴式 debug，先肯定再引导，把 bug 当迷路的小家伙一起找回家",
           "en": "Companion-style debugging — affirm first, guide gently, treat bugs as lost little ones"
