@@ -8,13 +8,24 @@
     "en": "Observatory"
   },
   "description": {
-    "zh": "实时/离线查看 agent 与子 agent 的 turn / tool / sub-agent 轨迹与 system-prompt 模块切片，辅助上下文 / skill / 护栏 / cache 管理。",
-    "en": "Live + static visualization of agent and sub-agent turns, tool calls, and system-prompt module slices. Aids context / skill / guardrail / cache management."
+    "zh": "Observatory · 轨迹观察台(工作台)· 用 reactflow 把一次 agent 会话画成 session→turn→tool / 子 agent 的图,实时(SSE)+ 离线回放;并把拼好的 system-prompt 切成带 token 估算的模块切片,辅助上下文 / skill / 护栏 / cache 管理。",
+    "en": "Observatory workbench — renders an agent session as a reactflow graph (session to turn to tool / sub-agent) with a live SSE tail + offline replay, and slices the composed system prompt into inspectable modules with token estimates; aids context / skill / guardrail / cache management."
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "🔭",
-  "keywords": ["observatory", "agent", "sub-agent", "trace", "sse", "reactflow", "context", "system-prompt"],
-
+  "keywords": [
+    "observatory",
+    "agent",
+    "sub-agent",
+    "trace",
+    "sse",
+    "reactflow",
+    "context",
+    "system-prompt"
+  ],
   "provides": {
     "workbench": {
       "id": "wb-observatory",
@@ -24,7 +35,6 @@
       "surface": "single"
     }
   },
-
   "entry": {
     "frontend": "./dist/index.html",
     "standalone": {
@@ -35,11 +45,11 @@
       "devOnly": false
     }
   },
-
   "permissions": [
     "fs:read:~/.forgeax/sessions/**"
   ],
-
   "experimental": true,
-  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  }
 }

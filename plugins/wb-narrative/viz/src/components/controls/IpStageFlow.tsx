@@ -27,7 +27,6 @@ import {
   type IpDnaJobStatus,
 } from "../../hooks/useNarrativeStream";
 import type { TierId, ModeId } from "../../types";
-
 /** 顶层上传单体的展示信息（类型抽象符号）。 */
 export interface IpUploadDisplay {
   name: string;
@@ -36,12 +35,14 @@ export interface IpUploadDisplay {
 }
 
 /**
- * 改编规划一行（§5.1）：一行 = 一部 = 一个游戏单元。
- * levelPath[k] = 第 k+1 层选中的节点 id；"" / 不存在表示该层及以下"全部"（不再下钻）。
+ * 改编规划一行（§5.1）：一行 = 一部 = 一个游戏单元 = 一个区间 [起点 ~ 终点]。
+ * startPath/endPath[k] = 第 k+1 层选中的节点 id；"" / 不存在表示该层及以下"全部"（不再下钻）。
+ * 起点取其解析子树的"首叶"，终点取解析子树的"末叶"（文档序），构成游戏单元的最小单元闭区间。
  */
 interface PlanRow {
   id: string;
-  levelPath: string[];
+  startPath: string[];
+  endPath: string[];
 }
 
 interface IpStageFlowProps {
@@ -62,7 +63,7 @@ interface IpStageFlowProps {
   onGenerateStarted?: (jobId: string, runId: string) => void;
 }
 
-type Stage = "idle" | "ingesting" | "standardized" | "scope_confirmed" | "generating" | "done" | "error";
+type Stage = "idle" | "confirmed" | "ingesting" | "standardized" | "scope_confirmed" | "generating" | "done" | "error";
 
 /** 文件类型抽象符号。 */
 function typeSymbol(item: IpUploadDisplay): string {
@@ -163,14 +164,20 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const [hierarchy, setHierarchy] = useState<IpHierarchyResult | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   /**
-   * 改编规划行（§5.1）：一行 = 一个游戏单元（部）。levelPath[k] = 第 k+1 层选中的节点 id；
-   * "" 表示该层及以下"全选"（不再下钻）。默认 1 行（第一部 = 整部作品 → 单品）。
+   * 改编规划行（§5.1）：一行 = 一个游戏单元（部）= 一个区间 [起点 ~ 终点]。默认 1 行（整部作品 → 单品）。
    * 行数即游戏单元数：1 行=单品 single；≥2 行=系列 series（部=游戏单元）。
    */
-  const [rows, setRows] = useState<PlanRow[]>([{ id: "r1", levelPath: [] }]);
+  const [rows, setRows] = useState<PlanRow[]>([{ id: "r1", startPath: [], endPath: [] }]);
   const rowSeq = useRef(2);
   /** 自定义补充（§5.1 自由文本）：作者改编意图，空＝忠实转化。 */
   const [adaptationNotes, setAdaptationNotes] = useState<string>("");
+  /**
+   * 体量门控（点 4 逐步）：pending=等用户在卡 2 抉择/确认；crop=进入改编范围裁剪；
+   * redecompose=正在再标准化（拆解中）。卡 3 仅在 != pending 时揭示。
+   */
+  const [volumeDecision, setVolumeDecision] = useState<"pending" | "crop" | "redecompose">("pending");
+  /** 是否已执行过"再标准化"（影响改编范围卡的动态序号：是→再标准化卡占 2、改编占 3）。 */
+  const [didRestandardize, setDidRestandardize] = useState(false);
   const [progress, setProgress] = useState<{ pct: number; message?: string } | null>(null);
   /** 自动模式 runId（hierarchy 未建时由 /start 的 story_timestamp 回填，修 bug#1）。 */
   const [autoRunId, setAutoRunId] = useState<string>("");
@@ -288,12 +295,20 @@ export function IpStageFlow(props: IpStageFlowProps) {
     }
   }, [busy, files, displayItems, title, tier, mode, complexity, runId, pollJob, props]);
 
-  // ── 执行：① 摄入 + 标准化（半自动，停在标准化等确认）──
+  // ── 卡0：确认 IP 作品（仅揭示卡1 标准化，不触发后端）──
+  const handleConfirmWorks = useCallback(() => {
+    if (busy || files.length === 0) return;
+    setStage("confirmed");
+  }, [busy, files]);
+
+  // ── 卡1：执行 摄入 + 标准化（半自动，停在标准化等确认）──
   const handleIngest = useCallback(async () => {
     if (busy || files.length === 0) return;
     setBusy(true);
     setError(null);
     setStage("ingesting");
+    setVolumeDecision("pending"); // 逐步门控：标准化完成后停在体量抉择，等用户点击再揭示改编范围
+    setDidRestandardize(false);
     props.onStageProgress?.("ip_input", "completed", `${files.length} 个上传单体`, buildInputContent(files, displayItems));
     props.onStageProgress?.("ip_standardize", "running", "标准化 + 干扰项过滤");
     try {
@@ -328,6 +343,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const handleDecompose = useCallback(async () => {
     if (busy || !runId) return;
     setBusy(true);
+    setVolumeDecision("redecompose"); // 再标准化中
     try {
       props.onStageProgress?.("ip_decompose", "running", "拆解 · 再标准化");
       const res = await ipDnaDecompose(runId);
@@ -351,8 +367,12 @@ export function IpStageFlow(props: IpStageFlowProps) {
         );
       }
       props.onStageProgress?.("ip_decompose", "completed", `拆解为 ${res.chunk_count} 块`);
+      // 按设计：再标准化执行后直接进入改编范围（再标准化卡占序号 2、改编范围占 3），不再循环追问。
+      setDidRestandardize(true);
+      setVolumeDecision("crop");
     } catch (e) {
       setError((e as Error).message);
+      setVolumeDecision("pending");
     } finally {
       setBusy(false);
     }
@@ -404,23 +424,93 @@ export function IpStageFlow(props: IpStageFlowProps) {
     [childrenById],
   );
 
-  /** 一行的"解析节点" = levelPath 最后一个非空选项；全空 = 整部作品（root）。 */
-  const resolvedNodeId = useCallback((row: PlanRow): string | null => {
-    for (let k = row.levelPath.length - 1; k >= 0; k--) {
-      if (row.levelPath[k]) return row.levelPath[k];
-    }
+  /** id → 节点 速查。 */
+  const byId = useMemo(() => {
+    const m = new Map<string, IpHierarchyNode>();
+    for (const n of hierarchy?.hierarchy ?? []) m.set(n.id, n);
+    return m;
+  }, [hierarchy]);
+
+  /** 全部最小单元（叶）id，文档序——供区间顺延与 leafRange 解析。 */
+  const allLeaves = useMemo<string[]>(() => (rootId ? collectLeaves(rootId) : []), [rootId, collectLeaves]);
+
+  /** 路径解析：最后一个非空层级的节点 id；全空=null（整部 root）。 */
+  const resolvePath = useCallback((path: string[]): string | null => {
+    for (let k = path.length - 1; k >= 0; k--) if (path[k]) return path[k];
     return null;
   }, []);
 
-  /** rows → scope_selections（各行解析子树）+ full（仅 1 行且整部时全量，§D2）。 */
-  const rowsToScope = useCallback((): { selections: { nodeId: string }[]; full: boolean } => {
-    const resolved = rows.map((r) => resolvedNodeId(r));
-    if (rows.length === 1 && resolved[0] === null) return { selections: [], full: true };
-    const selections = resolved.filter((id): id is string => !!id).map((nodeId) => ({ nodeId }));
-    return selections.length === 0 ? { selections: [], full: true } : { selections, full: false };
-  }, [rows, resolvedNodeId]);
+  /** 路径展示标签（解析节点标题，全空=整部作品）。 */
+  const resolveLabel = useCallback(
+    (path: string[]): string => {
+      const id = resolvePath(path);
+      return id ? byId.get(id)?.title ?? id : "整部作品";
+    },
+    [resolvePath, byId],
+  );
 
-  /** rows → 显式 game_unit_plan（行→GameUnit 1:1，§D3，修 bug#2）。 */
+  /** 解析路径子树的首叶 / 末叶（文档序）。 */
+  const pathStartLeaf = useCallback(
+    (path: string[]): string | null => {
+      const id = resolvePath(path) ?? rootId;
+      const leaves = id ? collectLeaves(id) : [];
+      return leaves[0] ?? null;
+    },
+    [resolvePath, rootId, collectLeaves],
+  );
+  const pathEndLeaf = useCallback(
+    (path: string[]): string | null => {
+      const id = resolvePath(path) ?? rootId;
+      const leaves = id ? collectLeaves(id) : [];
+      return leaves[leaves.length - 1] ?? null;
+    },
+    [resolvePath, rootId, collectLeaves],
+  );
+
+  /** 某叶子/节点的层级路径（[顶层…自身]，不含 complete root），用于把"顺延叶子"回填为选择器路径。 */
+  const ancestorPath = useCallback(
+    (nodeId: string): string[] => {
+      const path: string[] = [];
+      let cur: string | null = nodeId;
+      while (cur) {
+        const node = byId.get(cur);
+        if (!node || node.levelType === "complete" || node.parent == null) break;
+        path.unshift(cur);
+        cur = node.parent;
+      }
+      return path;
+    },
+    [byId],
+  );
+
+  /** 一行 → 区间 [首叶, 末叶]（叶子 id，文档序）。 */
+  const rowRange = useCallback(
+    (row: PlanRow): { start: string; end: string } | null => {
+      const start = pathStartLeaf(row.startPath);
+      const end = pathEndLeaf(row.endPath);
+      if (!start || !end) return null;
+      // 若起点在终点之后（用户误选），按文档序自动取小→大。
+      const si = allLeaves.indexOf(start);
+      const ei = allLeaves.indexOf(end);
+      if (si >= 0 && ei >= 0 && si > ei) return { start: end, end: start };
+      return { start, end };
+    },
+    [pathStartLeaf, pathEndLeaf, allLeaves],
+  );
+
+  /** rows → scope（每部一个 leafRange 闭区间）+ full（仅 1 行且整部时全量）。 */
+  const rowsToScope = useCallback((): { selections: { leafRange: { start: string; end: string } }[]; full: boolean } => {
+    const wholeWork =
+      rows.length === 1 && resolvePath(rows[0].startPath) === null && resolvePath(rows[0].endPath) === null;
+    if (wholeWork) return { selections: [], full: true };
+    const selections = rows
+      .map((r) => rowRange(r))
+      .filter((rg): rg is { start: string; end: string } => !!rg)
+      .map((leafRange) => ({ leafRange }));
+    return selections.length === 0 ? { selections: [], full: true } : { selections, full: false };
+  }, [rows, resolvePath, rowRange]);
+
+  /** rows → 显式 game_unit_plan（行→GameUnit 1:1，区间=叶子闭区间）。 */
   const rowsToGameUnitPlan = useCallback((): {
     mode: "single" | "series";
     units: Array<{ index: number; partId?: string; unitRange: { start: string; end: string }; boundary: "hard" }>;
@@ -428,64 +518,59 @@ export function IpStageFlow(props: IpStageFlowProps) {
   } => {
     const units = rows
       .map((r, i) => {
-        const nodeId = resolvedNodeId(r) ?? rootId;
-        const leaves = nodeId ? collectLeaves(nodeId) : [];
-        if (leaves.length === 0) return null;
+        const rg = rowRange(r);
+        if (!rg) return null;
         return {
           index: i + 1,
-          partId: r.levelPath[0] || nodeId || undefined,
-          unitRange: { start: leaves[0], end: leaves[leaves.length - 1] },
+          partId: r.startPath[0] || undefined,
+          unitRange: rg,
           boundary: "hard" as const,
         };
       })
       .filter((u): u is NonNullable<typeof u> => !!u);
     return { mode: rows.length >= 2 ? "series" : "single", units, userSpecified: true };
-  }, [rows, resolvedNodeId, rootId, collectLeaves]);
+  }, [rows, rowRange]);
 
-  /** 改编规划预览正文（裁剪行 + 单元 + 补充摘要），推给中间预览 ip_adapt_plan。 */
+  /** 改编规划预览正文（区间行 + 单元 + 补充摘要），推给中间预览 ip_adapt_plan。 */
   const buildPlanContent = useCallback(
     (full: boolean, plan: { mode: string; units: unknown[] }): string => {
-      const labelOf = (id: string | null): string =>
-        id ? hierarchy?.hierarchy.find((n) => n.id === id)?.title ?? id : "整部作品";
       const lines = [
         "# 改编规划\n",
         `- 模式：${plan.mode === "series" ? "系列（多游戏单元）" : "单品（单游戏单元）"}`,
         `- 游戏单元数：${plan.units.length}`,
         "",
-        "## 改编范围（行=部=游戏单元）",
+        "## 改编范围（每部=一个游戏单元=一个区间）",
       ];
       rows.forEach((r, i) => {
-        lines.push(`- 第 ${i + 1} 部：${labelOf(resolvedNodeId(r))}${full && rows.length === 1 ? "（全量）" : ""}`);
+        const whole = full && rows.length === 1;
+        lines.push(`- 第 ${i + 1} 部：${resolveLabel(r.startPath)} ~ ${resolveLabel(r.endPath)}${whole ? "（全量）" : ""}`);
       });
       lines.push("", "## 自定义补充（作者改编意图）");
       lines.push(adaptationNotes.trim() || "（未填写 → 忠实把原 IP 转化为目标品类叙事）");
       return lines.join("\n");
     },
-    [rows, hierarchy, resolvedNodeId, adaptationNotes],
+    [rows, resolveLabel, adaptationNotes],
   );
 
   // ── 改编规划行编辑 ──
-  const updateRowLevel = useCallback((rowId: string, lvl: number, value: string) => {
+  const updateRow = useCallback((rowId: string, which: "start" | "end", path: string[]) => {
     setRows((prev) =>
-      prev.map((r) => {
-        if (r.id !== rowId) return r;
-        // 改某层即截断更深层（父变则子选择失效）；空值＝该层全选。
-        const next = r.levelPath.slice(0, lvl);
-        if (value) next[lvl] = value;
-        return { ...r, levelPath: next };
-      }),
+      prev.map((r) => (r.id === rowId ? { ...r, [which === "start" ? "startPath" : "endPath"]: path } : r)),
     );
   }, []);
 
   const addRow = useCallback(() => {
     setRows((prev) => {
       const id = `r${rowSeq.current++}`;
-      // 新增部默认占用下一个未被选中的顶层节点（便于系列分部，避免重复整部）。
-      const used = new Set(prev.map((r) => r.levelPath[0]).filter(Boolean));
-      const nextTop = topNodes.find((n) => !used.has(n.id));
-      return [...prev, { id, levelPath: nextTop ? [nextTop.id] : [] }];
+      // 自动顺延：新部默认起点 = 上一部终点叶子的"下一个叶子"（连续不重叠）；终点默认到结尾（留空）。
+      const last = prev[prev.length - 1];
+      const prevEnd = pathEndLeaf(last.endPath);
+      const idx = prevEnd ? allLeaves.indexOf(prevEnd) : -1;
+      const nextLeaf = idx >= 0 && idx + 1 < allLeaves.length ? allLeaves[idx + 1] : null;
+      const startPath = nextLeaf ? ancestorPath(nextLeaf) : [];
+      return [...prev, { id, startPath, endPath: [] }];
     });
-  }, [topNodes]);
+  }, [pathEndLeaf, allLeaves, ancestorPath]);
 
   const removeRow = useCallback((rowId: string) => {
     setRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== rowId)));
@@ -577,6 +662,64 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const scopeReady = stage === "scope_confirmed" || stage === "generating" || stage === "done";
   const generateEnabled = scopeReady && routingReady && stage !== "generating" && stage !== "done";
 
+  // ── 逐步门控派生量（点 2/点 1）──
+  const hierReady = !!hierarchy && stage !== "ingesting" && stage !== "idle" && stage !== "confirmed";
+  /** 真·超大叶子数（仅此触发"再标准化"问题；整部体量大≠超大文件）。 */
+  const oversizedUnits = hierarchy?.volume?.oversizedUnitCount ?? 0;
+  /** 【问题】块：仅当确实发现超大叶子且尚未抉择时出现（无超大文件则根本不出现）。 */
+  const showQuestion = hierReady && oversizedUnits > 0 && volumeDecision === "pending";
+  /** 改编范围卡：已抉择 crop，或本就无超大文件（无需问题，直接进入）。 */
+  const showRange = hierReady && (volumeDecision === "crop" || (oversizedUnits === 0 && volumeDecision === "pending"));
+  /** 改编范围卡动态序号：经历"再标准化"则改编占 3（再标准化占 2），否则占 2。 */
+  const rangeCardNo = didRestandardize ? 3 : 2;
+
+  /** 渲染层级树（标准化卡 / 再标准化卡复用）：每个顶层节点一棵只读可展开树。 */
+  const renderHierTree = () => (
+    <div className="ip-stage-tree">
+      {topNodes.map((node) => (
+        <div key={node.id} className="ip-tree-group">
+          <button className="ip-tree-toggle" onClick={() => toggleExpand(node.id)}>
+            <span className="ip-tree-caret">{expanded.has(node.id) ? "▾" : "▸"}</span>
+            <span className="ip-tree-label">{node.title}</span>
+            {node.childRange && <span className="ip-tree-range">第 {node.childRange}</span>}
+          </button>
+          {expanded.has(node.id) && (
+            <div className="ip-tree-children">
+              {childrenById(node.id).map((c) => (
+                <div key={c.id} className="ip-tree-child">· {c.title}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  /** 渲染区间一侧（起点/终点）：按作品层级深度逐层内联级联下拉（有几层就几个下拉，深层依赖上层）。 */
+  const renderRangeSide = (rowId: string, which: "start" | "end", path: string[]) =>
+    Array.from({ length: maxDepth }).map((_, lvl) => {
+      const options = lvl === 0 ? topNodes : path[lvl - 1] ? childrenById(path[lvl - 1]) : [];
+      const disabled = scopeReady || (lvl > 0 && !path[lvl - 1]) || options.length === 0;
+      return (
+        <select
+          key={lvl}
+          className="ip-scope-select"
+          value={path[lvl] ?? ""}
+          disabled={disabled}
+          onChange={(e) => {
+            const next = path.slice(0, lvl);
+            if (e.target.value) next[lvl] = e.target.value;
+            updateRow(rowId, which, next);
+          }}
+        >
+          <option value="">{lvl === 0 ? "全部" : "全部"}</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>{o.title}</option>
+          ))}
+        </select>
+      );
+    });
+
   return (
     <div className="ip-stage-flow">
       {/* 0 IP 作品 */}
@@ -603,97 +746,98 @@ export function IpStageFlow(props: IpStageFlowProps) {
             >
               自动
             </button>
-            <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy || files.length === 0} onClick={handleIngest}>
-              执行
+            <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy || files.length === 0} onClick={handleConfirmWorks}>
+              确认
             </button>
           </div>
         )}
+        {stage !== "idle" && <p className="wb-helper ip-stage-ok">✓ 已确认 {displayItems.length} 个 IP 作品</p>}
       </div>
 
       {stage === "ingesting" && (
         <div className="ip-stage-progress">标准化处理中… {progress?.pct ?? 0}% {progress?.message ?? ""}</div>
       )}
 
-      {/* 1 标准化（可展开嵌套目录） + 2 体量 + 3 裁剪范围 */}
-      {hierarchy && stage !== "ingesting" && (
+      {/* 1 标准化：卡0 确认后揭示；执行才真正标准化。执行前列上传件名，执行后每件一棵只读可展开树。 */}
+      {stage !== "idle" && stage !== "ingesting" && (
+        <div className="ip-stage-card">
+          <div className="ip-stage-card__head">
+            <span className="ip-stage-card__no">1</span>
+            <span className="ip-stage-card__title">标准化 · 层级化文件系统</span>
+          </div>
+          {hierReady ? (
+            <>
+              {renderHierTree()}
+              {hierarchy?.noise_filtered && hierarchy.noise_filtered.length > 0 && (
+                <p className="wb-helper ip-stage-noise">已过滤 {hierarchy.noise_filtered.length} 个干扰项：{hierarchy.noise_filtered.slice(0, 4).join("、")}{hierarchy.noise_filtered.length > 4 ? "…" : ""}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="ip-stage-tree">
+                {displayItems.map((it, i) => (
+                  <div key={i} className="ip-tree-group ip-tree-group--pending">
+                    <span className="ip-tree-caret">▸</span>
+                    <span className="ip-tree-label">{it.name}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="ip-stage-card__foot">
+                <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleIngest}>
+                  执行
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 【问题】无序号：仅当确实发现超大叶子时出现（整部体量大≠超大文件 → 70 章小说不弹）。 */}
+      {showQuestion && (
+        <div className="ip-stage-question">
+          <p className="ip-stage-question__text">【问题】发现有超大文件（{oversizedUnits} 个超大单元），是否需要进一步拆解（再标准化）？</p>
+          <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={() => setVolumeDecision("crop")}>
+            否，直接确认改编范围
+          </button>
+          <button className="btn-generate btn-generate--compact ip-stage-btn ip-stage-btn--ghost" disabled={busy} onClick={handleDecompose}>
+            是，进一步标准化
+          </button>
+        </div>
+      )}
+      {volumeDecision === "redecompose" && (
+        <div className="ip-stage-progress">再标准化（拆解）中… {progress?.pct ?? 0}%</div>
+      )}
+
+      {/* 2 再标准化（仅当走了"是"路径）：展示再标准化后的层级树。 */}
+      {hierReady && didRestandardize && (
+        <div className="ip-stage-card">
+          <div className="ip-stage-card__head">
+            <span className="ip-stage-card__no">2</span>
+            <span className="ip-stage-card__title">再标准化</span>
+          </div>
+          {renderHierTree()}
+        </div>
+      )}
+
+      {/* 改编范围裁剪（动态序号 2/3）：每部=一个游戏单元=一个区间 [起点~终点]，起止各按层级展开内联级联下拉。 */}
+      {showRange && (
         <>
           <div className="ip-stage-card">
             <div className="ip-stage-card__head">
-              <span className="ip-stage-card__no">1</span>
-              <span className="ip-stage-card__title">标准化 · 层级化文件系统</span>
-            </div>
-            <div className="ip-stage-tree">
-              {topNodes.map((node) => (
-                <div key={node.id} className="ip-tree-group">
-                  <button className="ip-tree-toggle" onClick={() => toggleExpand(node.id)}>
-                    <span className="ip-tree-caret">{expanded.has(node.id) ? "▾" : "▸"}</span>
-                    <span className="ip-tree-label">{node.title}</span>
-                    {node.childRange && <span className="ip-tree-range">第 {node.childRange}</span>}
-                  </button>
-                  {expanded.has(node.id) && (
-                    <div className="ip-tree-children">
-                      {childrenById(node.id).map((c) => (
-                        <div key={c.id} className="ip-tree-child">· {c.title}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {hierarchy.noise_filtered && hierarchy.noise_filtered.length > 0 && (
-              <p className="wb-helper ip-stage-noise">已过滤 {hierarchy.noise_filtered.length} 个干扰项：{hierarchy.noise_filtered.slice(0, 4).join("、")}{hierarchy.noise_filtered.length > 4 ? "…" : ""}</p>
-            )}
-          </div>
-
-          <div className="ip-stage-card">
-            <div className="ip-stage-card__head">
-              <span className="ip-stage-card__no">2</span>
-              <span className="ip-stage-card__title">体量判断</span>
-            </div>
-            <p className="wb-helper">{hierarchy.volume?.thresholdBasis ?? "—"}</p>
-            {hierarchy.volume?.needsDecompose && (
-              <>
-                <p className="wb-helper ip-stage-warn">超出体量水准线，建议拆解</p>
-                <div className="ip-stage-card__foot">
-                  <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleDecompose}>执行拆解</button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* 3 改编规划（§5.1 合并：范围裁剪 + 游戏单元 + 自定义补充，一卡一确认） */}
-          <div className="ip-stage-card">
-            <div className="ip-stage-card__head">
-              <span className="ip-stage-card__no">3</span>
-              <span className="ip-stage-card__title">改编规划</span>
+              <span className="ip-stage-card__no">{rangeCardNo}</span>
+              <span className="ip-stage-card__title">改编范围裁剪</span>
             </div>
             <p className="wb-helper">
-              每行 = 一部 = 一个游戏单元；逐层下钻选裁剪范围，留「全部」即整部。1 行=单品，≥2 行=系列。
+              每部 = 一个游戏单元 = 一个区间 [起点 ~ 终点]；逐层下拉选择，留「全部」即该层整体。1 部=单品，＋新增一部=系列。
             </p>
             <div className="ip-plan-rows">
               {rows.map((row, ri) => (
                 <div key={row.id} className="ip-plan-row">
                   <span className="ip-plan-row__no">第 {ri + 1} 部</span>
-                  <div className="ip-plan-row__levels">
-                    {Array.from({ length: maxDepth }).map((_, lvl) => {
-                      const options =
-                        lvl === 0 ? topNodes : row.levelPath[lvl - 1] ? childrenById(row.levelPath[lvl - 1]) : [];
-                      const disabled = scopeReady || (lvl > 0 && !row.levelPath[lvl - 1]) || options.length === 0;
-                      return (
-                        <select
-                          key={lvl}
-                          className="ip-scope-select"
-                          value={row.levelPath[lvl] ?? ""}
-                          disabled={disabled}
-                          onChange={(e) => updateRowLevel(row.id, lvl, e.target.value)}
-                        >
-                          <option value="">{lvl === 0 ? "全部（整部）" : "全部"}</option>
-                          {options.map((o) => (
-                            <option key={o.id} value={o.id}>{o.title}</option>
-                          ))}
-                        </select>
-                      );
-                    })}
+                  <div className="ip-plan-row__range">
+                    <div className="ip-plan-row__side">{renderRangeSide(row.id, "start", row.startPath)}</div>
+                    <span className="ip-plan-row__tilde">~</span>
+                    <div className="ip-plan-row__side">{renderRangeSide(row.id, "end", row.endPath)}</div>
                   </div>
                   {!scopeReady && rows.length > 1 && (
                     <button type="button" className="ip-plan-row__del" onClick={() => removeRow(row.id)} aria-label="删除此部">
@@ -722,7 +866,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
             {!scopeReady ? (
               <div className="ip-stage-card__foot">
                 <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleConfirmPlan}>
-                  确认改编规划
+                  确认
                 </button>
               </div>
             ) : (
@@ -737,16 +881,17 @@ export function IpStageFlow(props: IpStageFlowProps) {
             )}
           </div>
 
-          {/* C4/C5 开始生成 */}
-          <div className="ip-stage-generate">
-            {!scopeReady && <p className="wb-helper">先确认改编规划</p>}
-            {scopeReady && !routingReady && <p className="wb-helper">在下方 ROUTING 选择叙事路由后即可生成</p>}
-            <div className="ip-stage-card__foot">
-              <button className="btn-generate btn-generate--compact ip-stage-gen-btn" disabled={!generateEnabled || busy} onClick={handleGenerate}>
-                {stage === "done" ? "✓ 已生成" : stage === "generating" ? `生成中… ${progress?.pct ?? 0}%` : "开始生成（IP DNA → 下游）"}
-              </button>
+          {/* 开始生成（仅范围确认后才进入此步） */}
+          {scopeReady && (
+            <div className="ip-stage-generate">
+              {!routingReady && <p className="wb-helper">在下方 ROUTING 选择叙事路由后即可生成</p>}
+              <div className="ip-stage-card__foot">
+                <button className="btn-generate btn-generate--compact ip-stage-gen-btn" disabled={!generateEnabled || busy} onClick={handleGenerate}>
+                  {stage === "done" ? "✓ 已生成" : stage === "generating" ? `生成中… ${progress?.pct ?? 0}%` : "开始生成（IP DNA → 下游）"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 

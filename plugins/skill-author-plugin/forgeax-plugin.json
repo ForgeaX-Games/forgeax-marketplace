@@ -8,12 +8,21 @@
     "en": "Plugin Author Guide"
   },
   "description": {
-    "zh": "首条「四条 authoring path」之一 · /author-plugin 触发,把作者从空白引导到第一个可加载的 forgeax-plugin.json + 一个最小 hello tool。非工程师玩家用得动。",
-    "en": "First of the four authoring paths: typing /author-plugin walks the user through scaffolding a working forgeax-plugin.json plus a minimal hello tool — no TypeScript expertise required."
+    "zh": "插件作者向导(技能)· 输入 /author-plugin 触发,手把手带非工程师在约 10 分钟内做出第一个可被 server 加载的插件:有效的 forgeax-plugin.json + 一个最小 hello tool + reload 验证。",
+    "en": "Plugin Author Guide skill — type /author-plugin and it walks a non-engineer through building their first server-loadable plugin in ~10 minutes: a valid forgeax-plugin.json + a minimal hello tool + a reload-and-verify step."
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "📝",
-  "keywords": ["meta", "authoring", "plugin", "skill", "scaffold"],
+  "keywords": [
+    "meta",
+    "authoring",
+    "plugin",
+    "skill",
+    "scaffold"
+  ],
   "provides": {
     "skills": [
       {
@@ -31,5 +40,7 @@
       }
     ]
   },
-  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  }
 }

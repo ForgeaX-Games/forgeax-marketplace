@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect } from 'react';
 import type { Node, Edge } from 'reactflow';
 import { useObservatoryStore } from '../store/observatoryStore';
 
@@ -14,6 +14,14 @@ interface AgentEventEnvelope {
 
 type NodeMap = Map<string, Node>;
 type EdgeMap = Map<string, Edge>;
+
+/** Coerce a tool output to a display string. Tool results can be strings OR
+ *  objects (e.g. {error:'…'}); callers do `.slice()` on this, so a non-string
+ *  must be stringified rather than passed through (else `.slice` throws and the
+ *  node never leaves "running"). */
+function safeStringify(v: unknown): string {
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
 
 function applyEvent(
   envelope: AgentEventEnvelope,
@@ -191,7 +199,14 @@ function applyEvent(
     const toolId = `tool-${event.toolUseId}`;
     const node = nodes.get(toolId);
     if (node) {
-      const output = (event.output ?? event.result ?? '') as string;
+      // output may be a STRING or an OBJECT (e.g. {error:'Unknown tool: …'}).
+      // Coercing is essential: a previous `output.slice(...)` assumed a string,
+      // so an object result threw — the node.data assignment never completed and
+      // the node stayed "running" forever (the throw was swallowed by onmessage's
+      // try/catch). Stringify non-strings so the node always reaches a terminal
+      // state. (todo 043 root cause.)
+      const raw = event.output ?? event.result ?? '';
+      const output = typeof raw === 'string' ? raw : safeStringify(raw);
       node.data = {
         ...node.data,
         status: event.isError ? 'error' : 'completed',
@@ -345,7 +360,8 @@ function applyEvent(
       const toolId = `${saId}-tool-${inner.toolUseId}`;
       const toolNode = nodes.get(toolId);
       if (toolNode) {
-        const output = (inner.output ?? inner.result ?? '') as string;
+        const rawOut = inner.output ?? inner.result ?? '';
+        const output = typeof rawOut === 'string' ? rawOut : safeStringify(rawOut);
         toolNode.data = {
           ...toolNode.data,
           status: inner.isError ? 'error' : 'completed',
@@ -428,45 +444,43 @@ function applyEvent(
 }
 
 export function useEventStream(sessionId: string | null, live: boolean) {
-  const nodesRef = useRef<NodeMap>(new Map());
-  const edgesRef = useRef<EdgeMap>(new Map());
-  const turnCounterRef = useRef({ current: 0 });
-  const pendingUserTextRef = useRef({ current: '' });
   const setLiveGraph = useObservatoryStore(s => s.setLiveGraph);
-
-  const flush = useCallback(() => {
-    setLiveGraph(
-      Array.from(nodesRef.current.values()),
-      Array.from(edgesRef.current.values()),
-    );
-  }, [setLiveGraph]);
 
   useEffect(() => {
     if (!live || !sessionId) return;
 
-    nodesRef.current.clear();
-    edgesRef.current.clear();
-    turnCounterRef.current = { current: 0 };
-    pendingUserTextRef.current = { current: '' };
+    // State is LOCAL to this connection (todo 043 fix). Previously the node/edge
+    // maps lived in useRefs shared across effect runs; when sessionId flipped
+    // (null→'current'→real sid) the effect re-ran and a second EventSource shared
+    // the same map as the first — interleaved/teardown races left the terminal
+    // tool node stuck "running" despite its tool_result being applied. Per-run
+    // local maps make each connection fully isolated; the latest connection's
+    // flushes own the store, and a torn-down connection can't corrupt it.
+    const nodes: NodeMap = new Map();
+    const edges: EdgeMap = new Map();
+    const turnCounter = { current: 0 };
+    const pendingUserText = { current: '' };
+    const flush = () => setLiveGraph(Array.from(nodes.values()), Array.from(edges.values()));
     flush();
 
     // SSE connection — server replays full history on connect, then streams live events
     const url = `/api/observatory/events${sessionId !== 'current' ? `?session=${encodeURIComponent(sessionId)}` : ''}`;
     const es = new EventSource(url);
-    let pendingFlush = false;
+
+    // Trailing-edge debounced flush: always flushes the latest map a few ms after
+    // the last applied event, so the final state (e.g. the last tool's completion)
+    // always reaches the store.
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFlush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(() => { flushTimer = null; flush(); }, 50);
+    };
 
     es.onmessage = (msg) => {
       try {
         const envelope: AgentEventEnvelope = JSON.parse(msg.data);
         if (!envelope.event) return;
-        const changed = applyEvent(envelope, nodesRef.current, edgesRef.current, turnCounterRef.current, pendingUserTextRef.current);
-        if (changed && !pendingFlush) {
-          pendingFlush = true;
-          requestAnimationFrame(() => {
-            pendingFlush = false;
-            flush();
-          });
-        }
+        if (applyEvent(envelope, nodes, edges, turnCounter, pendingUserText)) scheduleFlush();
       } catch { /* ignore parse errors */ }
     };
 
@@ -474,6 +488,6 @@ export function useEventStream(sessionId: string | null, live: boolean) {
       // EventSource auto-reconnects
     };
 
-    return () => { es.close(); };
-  }, [sessionId, live, flush]);
+    return () => { es.close(); if (flushTimer) clearTimeout(flushTimer); };
+  }, [sessionId, live, setLiveGraph]);
 }

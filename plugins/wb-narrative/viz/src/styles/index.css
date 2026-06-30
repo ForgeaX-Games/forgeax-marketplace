@@ -1475,6 +1475,33 @@ body[data-pane="center"] .app-header { display: none; }
   cursor: pointer;
 }
 .ip-plan-add:hover { background: rgba(212, 255, 72, 0.12); }
+
+/* 区间行：起点一排级联下拉 ~ 终点一排级联下拉（每部=一个游戏单元=一个区间）。
+   单行不换行；窄面板放不下时整行横向滚动（避免折行把区间撑乱）。 */
+.ip-plan-row { align-items: center; }
+.ip-plan-row__range {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 auto; min-width: 0;
+  flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+}
+.ip-plan-row__side { display: flex; gap: 3px; flex-wrap: nowrap; align-items: center; }
+.ip-plan-row__side .ip-scope-select { flex: 0 0 auto; min-width: 56px; max-width: 110px; }
+.ip-plan-row__tilde { color: var(--dt-text-sec, #b8b8b8); flex: 0 0 auto; font-weight: 600; }
+
+/* 标准化执行前的待处理上传件行（仅名字，未展开）。 */
+.ip-tree-group--pending { display: flex; align-items: center; gap: 6px; opacity: 0.7; }
+
+/* 【问题】块：无序号，仅发现超大文件时出现（左=问题文案，下=否/是两按钮）。 */
+.ip-stage-question {
+  display: grid; gap: 8px; margin: 4px 0;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(242, 170, 76, 0.06);
+  border: 1px solid rgba(242, 170, 76, 0.28);
+}
+.ip-stage-question__text { margin: 0; font-size: 12px; color: var(--dt-text, #e8e8e8); }
+.ip-stage-question .ip-stage-btn { justify-self: start; }
+.ip-stage-btn--ghost { background: transparent; border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.22)); }
+
 .ip-plan-notes { display: grid; gap: 4px; margin-top: 10px; }
 .ip-plan-notes__input {
   font-size: 11px;
@@ -1493,8 +1520,14 @@ body[data-pane="center"] .app-header { display: none; }
   font-size: 11px;
   padding: 3px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  /* 展开的原生下拉列表会继承 select 的 background/color；用主题深底+亮字，
+     避免半透明叠在系统白色弹层上变成"白底白字"看不见。 */
+  background: var(--dt-bg-elevated, #1c1c1e);
   border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.12));
+  color: var(--dt-text, #e8e8e8);
+}
+.ip-scope-select option {
+  background: var(--dt-bg-elevated, #1c1c1e);
   color: var(--dt-text, #e8e8e8);
 }
 /* 嵌套裁剪折叠树（§4 嵌套裁剪契约）。 */

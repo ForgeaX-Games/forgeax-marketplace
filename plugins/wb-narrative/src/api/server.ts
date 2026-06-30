@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Express } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { NarrativePipeline } from "../pipeline/pipeline.js";
@@ -15,7 +15,7 @@ import { LLMClient } from "../pipeline/llm-client.js";
 import { buildKnowledgePromptSection, buildNodeTreeSummary, preClassifyChange, PIPELINE_KNOWLEDGE } from "../pipeline/pipeline-knowledge.js";
 import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript } from "../types/index.js";
 import { detectScriptFormat, describeScriptFormat } from "../utils/script-format-detector.js";
-import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceByRun, resolveIpDnaRuntimeAdapters, loadHierarchyIndexByRun, analyzeRewriteImpact, createJob, updateJob, getJob, listJobs, cancelJob, formatTimestamp as formatIpDnaTimestamp, buildAdaptationDirective, planDecomposition, applyDecompositionClosure, assessVolume, collectLeafIds, saveHierarchyIndexOnly, saveAdaptationConfirmation, loadAdaptationConfirmation, type IncomingFile, type IpDnaProgress, type ExtractSource } from "../ip-dna/index.js";
+import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceByRun, resolveIpDnaRuntimeAdapters, loadHierarchyIndexByRun, loadManifestByRun, listInputRunKeys, analyzeRewriteImpact, createJob, updateJob, getJob, listJobs, cancelJob, formatTimestamp as formatIpDnaTimestamp, buildAdaptationDirective, planDecomposition, applyDecompositionClosure, assessVolume, collectLeafIds, saveHierarchyIndexOnly, saveAdaptationConfirmation, loadAdaptationConfirmation, type IncomingFile, type IpDnaProgress, type ExtractSource } from "../ip-dna/index.js";
 // Phase C6: env reads are funnelled through plugin-env so the literal
 // `process.env.*_API_KEY` substring stays out of plugin source files. See
 // utils/plugin-env.ts header for the full rationale (this Express server is
@@ -527,7 +527,7 @@ function loadCheckpoint(dir: string): CheckpointData | null {
   }
 }
 
-const app = express();
+const app: Express = express();
 // 上传剧本可能远大于 100kb（默认）：放宽到 5mb，覆盖中长篇剧本
 app.use(express.json({ limit: "5mb" }));
 app.use((_req, res, next) => {
@@ -2484,14 +2484,10 @@ interface HistoryItem {
   kind?: string;
 }
 
-const INPUT_DIR = path.resolve(process.cwd(), "input");
-
-/** IP DNA 输入侧资产清单（input/<runId>/user_asset_manifest.json），用于无 output 清单时回填历史。 */
-function loadIpDnaInputManifest(dir: string): { story_id?: string; title?: string; media_type?: string; processing_status?: string; created_at?: string } | undefined {
+/** IP DNA 输入侧资产清单（媒体优先：主媒体 extraction_output；legacy 兜底），用于无 output 清单时回填历史。 */
+function loadIpDnaInputManifest(key: string): { story_id?: string; title?: string; media_type?: string; processing_status?: string; created_at?: string } | undefined {
   try {
-    const p = path.join(INPUT_DIR, dir, "user_asset_manifest.json");
-    if (!fs.existsSync(p)) return undefined;
-    return JSON.parse(fs.readFileSync(p, "utf-8"));
+    return loadManifestByRun(key);
   } catch {
     return undefined;
   }
@@ -2710,19 +2706,18 @@ app.get("/api/narrative/history", (_req, res) => {
     // 摄入后即中断的运行只在 input/<key> 留痕（user_asset_manifest.json / _hierarchy.json）。
     // 扫 INPUT_DIR，把无 output 对应项的 IP 运行也列入 LIST（中断仍可见、可回放）。
     try {
-      const inputDirs = fs.readdirSync(INPUT_DIR, { withFileTypes: true });
-      for (const entry of inputDirs) {
-        if (!entry.isDirectory() || IGNORED_DIRS.has(entry.name)) continue;
-        if (outputKeys.has(entry.name)) continue; // output 侧已覆盖
-        const desc = loadIpInputDescriptor(entry.name);
-        if (!desc) continue; // 非运行目录（book/picture/video/package/user_input 等模态根目录）
+      // 媒体优先布局：运行键在 input/<媒体>/story_<媒体>/*_<阶段>/<run> 下，需跨家族枚举（+legacy 兜底）。
+      for (const key of listInputRunKeys()) {
+        if (outputKeys.has(key)) continue; // output 侧已覆盖
+        const desc = loadIpInputDescriptor(key);
+        if (!desc) continue;
         const activeIpJob = [...listJobs()].some(
           (j) =>
             (j.status === "running" || j.status === "awaiting_confirmation") &&
             j.story_timestamp &&
-            entry.name.startsWith(j.story_timestamp),
+            key.startsWith(j.story_timestamp),
         );
-        items.push(buildIpDnaHistoryItem(entry.name, desc, activeIpJob, dirHasEdits(entry.name)));
+        items.push(buildIpDnaHistoryItem(key, desc, activeIpJob, dirHasEdits(key)));
       }
     } catch { /* input 目录不存在则跳过 */ }
 

@@ -3,12 +3,18 @@
   "id": "@forgeax-plugin/wb-reel",
   "version": "0.1.0",
   "kind": "workbench",
-  "displayName": { "zh": "影游工坊", "en": "Reel Studio" },
-  "description": {
-    "zh": "互动影游 (FMV) 编辑器与运行时 · Opus/Gemini 提示词锻造 + GPT-Image 占位图 + Seedance 视频 + QTE + 剧情分支",
-    "en": "Interactive FMV editor & player — prompt forging (Opus/Gemini), GPT-Image keyframes, Seedance video, QTE engine, branch tree"
+  "displayName": {
+    "zh": "影游工坊",
+    "en": "Reel Studio"
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "description": {
+    "zh": "互动影游(FMV)工坊 · 作者把提示词 / 视频 / 镜头 / 台词 / QTE / 剧情分支拼成可玩互动影片:Opus·Gemini 锻造提示词、GPT-Image 占位关键帧、Seedance 生成视频;编辑期产出可序列化 Scenario JSON,运行期确定性回放(限时点按 + 选项分支)。",
+    "en": "Interactive FMV (reel) studio — authors assemble prompts / video / shots / dialogue / QTE / branch trees into a playable interactive movie: Opus and Gemini prompt forging, GPT-Image keyframes, Seedance video. The editor emits a serializable Scenario JSON; the runtime is deterministic playback (timed taps + choice branches)."
+  },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "🎬",
   "keywords": [
     "reel",
@@ -29,8 +35,14 @@
       "panelSize": "lg",
       "surface": "split",
       "panes": {
-        "left":   { "minWidth": 320, "scrollable": true },
-        "center": { "minHeight": 600, "scrollable": false }
+        "left": {
+          "minWidth": 320,
+          "scrollable": true
+        },
+        "center": {
+          "minHeight": 600,
+          "scrollable": false
+        }
       },
       "matchProduces": [
         "**/*.scenario.json",
@@ -285,23 +297,41 @@
         "id": "wb-reel.scenario",
         "schema": "./schemas/surface-scenario.schema.json",
         "actions": [
-          { "id": "load-scenario", "exposedToAI": true },
-          { "id": "save-scenario", "exposedToAI": true },
-          { "id": "switch-tab",    "exposedToAI": true }
+          {
+            "id": "load-scenario",
+            "exposedToAI": true
+          },
+          {
+            "id": "save-scenario",
+            "exposedToAI": true
+          },
+          {
+            "id": "switch-tab",
+            "exposedToAI": true
+          }
         ]
       }
     ]
   },
   "consumes": {
     "models": [
-      { "channel": "text",  "role": "reasoning" },
-      { "channel": "image", "role": "still" },
-      { "channel": "video", "role": "kinetic" }
+      {
+        "channel": "text",
+        "role": "reasoning"
+      },
+      {
+        "channel": "image",
+        "role": "still"
+      },
+      {
+        "channel": "video",
+        "role": "kinetic"
+      }
     ]
   },
   "entry": {
     "frontend": "./dist/index.html",
-    "backend":  "./server/tool-handlers.ts",
+    "backend": "./server/tool-handlers.ts",
     "standalone": {
       "start": "npm run dev",
       "port": 15175,

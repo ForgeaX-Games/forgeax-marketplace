@@ -58,6 +58,25 @@ function ext(fileName: string): string {
   return path.extname(fileName).toLowerCase();
 }
 
+/**
+ * 解码压缩包内成员文件名(中文兼容)。
+ * Windows/GBK 打包的 zip/tar 常以 CP936(GBK) 字节存名且不置 UTF-8 标志,
+ * 直接 toString("utf-8") 会得到 `�`。策略:EFS/UTF-8 标志位 → UTF-8;
+ * 否则先 UTF-8 严格解码,失败再按 gb18030(GBK 超集)兜底。
+ */
+export function decodeArchiveName(bytes: Buffer, utf8Flag: boolean): string {
+  if (utf8Flag) return bytes.toString("utf-8");
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    try {
+      return new TextDecoder("gb18030").decode(bytes);
+    } catch {
+      return bytes.toString("utf-8");
+    }
+  }
+}
+
 /** 是否为本模块可识别的压缩包。 */
 export function isArchive(fileName: string): boolean {
   const e = ext(fileName);
@@ -82,7 +101,9 @@ export function untar(buf: Buffer): Array<{ name: string; data: Buffer }> {
     const header = buf.subarray(offset, offset + BLOCK);
     // 全零块 = 结束。
     if (header.every((b) => b === 0)) break;
-    const name = header.subarray(0, 100).toString("utf-8").replace(/\0.*$/, "").trim();
+    const nameRaw = header.subarray(0, 100);
+    const nameZero = nameRaw.indexOf(0);
+    const name = decodeArchiveName(nameZero >= 0 ? nameRaw.subarray(0, nameZero) : nameRaw, false).trim();
     const sizeOctal = header.subarray(124, 136).toString("utf-8").replace(/\0.*$/, "").trim();
     const size = parseInt(sizeOctal, 8) || 0;
     const typeflag = String.fromCharCode(header[156]);
@@ -125,13 +146,14 @@ export function unzip(buf: Buffer): Array<{ name: string; data: Buffer }> {
   const out: Array<{ name: string; data: Buffer }> = [];
   for (let n = 0; n < cdCount; n++) {
     if (ptr + 46 > buf.length || buf.readUInt32LE(ptr) !== CDFH_SIG) break;
+    const flag = buf.readUInt16LE(ptr + 8); // 通用位标志;bit11(0x800)=文件名按 UTF-8(EFS)
     const method = buf.readUInt16LE(ptr + 10);
     const compSize = buf.readUInt32LE(ptr + 20);
     const nameLen = buf.readUInt16LE(ptr + 28);
     const extraLen = buf.readUInt16LE(ptr + 30);
     const commentLen = buf.readUInt16LE(ptr + 32);
     const localOffset = buf.readUInt32LE(ptr + 42);
-    const name = buf.subarray(ptr + 46, ptr + 46 + nameLen).toString("utf-8");
+    const name = decodeArchiveName(buf.subarray(ptr + 46, ptr + 46 + nameLen), (flag & 0x800) !== 0);
     ptr += 46 + nameLen + extraLen + commentLen;
 
     if (name.endsWith("/")) continue; // 目录项
@@ -166,9 +188,30 @@ export function createDefaultArchiveExtractor(): ArchiveExtractor {
   };
 }
 
+/** 压缩包内应忽略的垃圾/元数据项（Mac/Windows 系统文件、目录项、AppleDouble 资源叉）。 */
+export function isJunkArchiveEntry(name: string): boolean {
+  if (!name || name.endsWith("/") || name.endsWith("\\")) return true; // 目录项
+  if (name.includes("__MACOSX")) return true;
+  const base = (name.split(/[/\\]/).pop() ?? name).trim();
+  if (base === ".DS_Store" || base === "Thumbs.db" || base === "desktop.ini") return true;
+  if (base.startsWith("._")) return true; // AppleDouble 资源叉
+  return false;
+}
+
+/**
+ * 过滤垃圾项 + 自然序排序（数字感知）：保证「第2话」在「第10话」前，
+ * 层级序号 / sourceRange 顺序确定、可复跑（§5.0 解压标准化算法）。
+ */
+export function finalizeArchiveMembers(members: IncomingFile[]): IncomingFile[] {
+  return members
+    .filter((m) => !isJunkArchiveEntry(m.fileName))
+    .sort((a, b) => a.fileName.localeCompare(b.fileName, "zh-Hans-CN", { numeric: true, sensitivity: "base" }));
+}
+
 /**
  * 展开单个压缩包为成员文件（gz/tar/tgz 原生；zip 等走 extractor 接缝）。
  * 无法识别或 extractor 缺失时返回原文件（透传，不抛错）。
+ * 多成员结果统一过滤垃圾项 + 自然序排序；保留成员相对子路径供建树识别 部/卷/章。
  */
 export async function expandArchive(
   file: IncomingFile,
@@ -179,10 +222,10 @@ export async function expandArchive(
   const buf = asBuffer(file.data);
   try {
     if (e === ".tar") {
-      return untar(buf).map((m) => ({ fileName: m.name, data: m.data, fileType: fileTypeFromName(m.name) }));
+      return finalizeArchiveMembers(untar(buf).map((m) => ({ fileName: m.name, data: m.data, fileType: fileTypeFromName(m.name) })));
     }
     if (e === ".tgz" || lower.endsWith(".tar.gz")) {
-      return untar(zlib.gunzipSync(buf)).map((m) => ({ fileName: m.name, data: m.data, fileType: fileTypeFromName(m.name) }));
+      return finalizeArchiveMembers(untar(zlib.gunzipSync(buf)).map((m) => ({ fileName: m.name, data: m.data, fileType: fileTypeFromName(m.name) })));
     }
     if (e === ".gz") {
       const inner = zlib.gunzipSync(buf);
@@ -190,7 +233,7 @@ export async function expandArchive(
       return [{ fileName: innerName, data: inner, fileType: fileTypeFromName(innerName) }];
     }
     if (e === ".zip" && extractor) {
-      return await extractor(file);
+      return finalizeArchiveMembers(await extractor(file));
     }
   } catch {
     // 解压失败 → 透传原文件，避免中断。
@@ -198,7 +241,7 @@ export async function expandArchive(
   }
   if (extractor) {
     try {
-      return await extractor(file);
+      return finalizeArchiveMembers(await extractor(file));
     } catch {
       return [file];
     }
@@ -239,12 +282,11 @@ export async function compressMediaToDir(
   title: string,
   opts: { compressor?: MediaCompressor; cwd?: string } = {},
 ): Promise<IncomingFile[]> {
-  const dir = compressDir(timestamp, title, { cwd: opts.cwd });
   const out: IncomingFile[] = [];
   for (const f of files) {
-    const isMedia = /^(image|video)\//.test(f.fileType) ||
-      [".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mkv"].includes(ext(f.fileName));
-    if (!isMedia) {
+    const isImage = /^image\//.test(f.fileType) || [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext(f.fileName));
+    const isVideo = /^video\//.test(f.fileType) || [".mp4", ".mov", ".webm", ".mkv"].includes(ext(f.fileName));
+    if (!isImage && !isVideo) {
       out.push(f);
       continue;
     }
@@ -256,9 +298,13 @@ export async function compressMediaToDir(
         compressed = f;
       }
     }
+    // 媒体优先：图片落 picture_compress、视频落 video_compress（§6.1）；保留成员相对子路径。
+    const dir = compressDir(timestamp, title, isVideo ? "video" : "picture", { cwd: opts.cwd });
+    const segments = compressed.fileName.split(/[/\\]+/).filter((s) => s && s !== "." && s !== "..");
+    const abs = path.join(dir, ...(segments.length ? segments : [compressed.fileName]));
     try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, compressed.fileName), asBuffer(compressed.data));
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, asBuffer(compressed.data));
     } catch {
       /* 落盘失败不阻断 */
     }

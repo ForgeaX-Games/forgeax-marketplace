@@ -3,17 +3,23 @@
   "id": "@forgeax-plugin/agent-kotone",
   "version": "0.1.0",
   "kind": "agent",
-  "displayName": { "zh": "Kotone · 剧情师", "en": "Kotone · Narrative Writer" },
+  "displayName": {
+    "zh": "Kotone · 剧情师",
+    "en": "Kotone · Narrative Writer"
+  },
   "description": {
-    "zh": "世界观 / 角色 bio / 关键剧情节点 / 对白文本。负责把 Iori 的玩法节奏配上「为什么主角要做这件事」的情感线。产出 narrative.md / characters/*.md / dialogue/*.json。",
-    "en": "World, character bios, plot beats, line-level dialogue. Pairs Iori's gameplay tempo with emotional motivation. Outputs narrative + characters + dialogue files."
+    "zh": "剧情师 Agent(叙事角色)· 把 Iori 的玩法节奏配上「主角为什么要做这件事」的情感线——世界观、角色 bio、关键剧情节点、line-level 对白(含 i18n key),产出 narrative / world / characters / dialogue 文件。自带「写角色 bio」技能。",
+    "en": "Narrative-writer agent — pairs Iori's gameplay tempo with emotional motivation: world, character bios, plot beats and line-level dialogue (with i18n keys), emitting narrative / world / characters / dialogue files. Built-in write-character-bio skill."
   },
   "provides": {
     "agent": {
       "id": "kotone",
       "role": "narrative",
       "card": {
-        "name": { "zh": "Kotone", "en": "Kotone" },
+        "name": {
+          "zh": "Kotone",
+          "en": "Kotone"
+        },
         "cnTitle": "剧情师",
         "enTitle": "Narrative Writer",
         "color": "#FFA657",
@@ -30,16 +36,24 @@
       "preferredCliProvider": "forgeax-native",
       "defaultLang": "zh",
       "multiInstance": false,
-      "tools": ["narrative:*"],
+      "tools": [
+        "narrative:*"
+      ],
       "defaultSkills": [
-        { "source": "inline", "skillId": "write-character-bio" }
+        {
+          "source": "inline",
+          "skillId": "write-character-bio"
+        }
       ]
     },
     "skills": [
       {
         "id": "write-character-bio",
         "entry": "./skills/write-character-bio/SKILL.md",
-        "displayName": { "zh": "写角色 bio", "en": "Write Character Bio" },
+        "displayName": {
+          "zh": "写角色 bio",
+          "en": "Write Character Bio"
+        },
         "description": {
           "zh": "给 NPC 写可推动机 + 区分度足够的 talk style + 三句标志性台词",
           "en": "Build NPC bio with derivable motive, distinctive talk style, and 3 signature lines"

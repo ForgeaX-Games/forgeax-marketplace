@@ -8,8 +8,8 @@
     "en": "Cursor Agent CLI"
   },
   "description": {
-    "zh": "Cursor IDE 的 cursor-agent CLI 适配 · spawn `cursor-agent -p --output-format stream-json --stream-partial-output -f` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/cursor-agent/,本 plugin 声明 metadata + Bus 入口。",
-    "en": "Cursor IDE cursor-agent CLI adapter (-p stream-json print mode). Spawns the subprocess and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/cursor-agent/; this plugin declares metadata + Bus entry."
+    "zh": "Cursor Agent CLI 后端 · 把 Cursor IDE 的 cursor-agent(`cursor-agent -p --output-format stream-json`)接成 Studio 推理后端,支持流式 / 思考 / 工具调用 / 子 agent / 会话;模型 auto / sonnet-4.6 / gpt-5。",
+    "en": "Cursor Agent CLI backend — wires Cursor IDE's cursor-agent (`cursor-agent -p --output-format stream-json`) in as a Studio reasoning backend with streaming, thinking, tool calls, sub-agents and sessions; models auto / sonnet-4.6 / gpt-5."
   },
   "provides": {
     "cliProvider": {

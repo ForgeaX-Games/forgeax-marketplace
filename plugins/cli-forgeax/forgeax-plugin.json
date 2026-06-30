@@ -8,8 +8,8 @@
     "en": "ForgeaX CLI"
   },
   "description": {
-    "zh": "in-repo packages/cli 的 forgeax 命令适配 · spawn `forgeax chat --stream` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/forgeax/,本 plugin 声明 metadata + Bus 入口。",
-    "en": "In-repo packages/cli 'forgeax' command adapter. Spawns `forgeax chat --stream` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/forgeax/; this plugin declares metadata + Bus entry."
+    "zh": "ForgeaX CLI 后端 · 把仓库内置的 forgeax 命令(`forgeax chat --stream`,packages/cli)接成 Studio 推理后端,支持流式 / 思考 / 工具调用 / 子 agent / 会话;无需外部 CLI 的原生后端。",
+    "en": "ForgeaX CLI backend — wires the in-repo forgeax command (`forgeax chat --stream`, packages/cli) in as a Studio reasoning backend with streaming, thinking, tool calls, sub-agents and sessions; the native backend, no external CLI needed."
   },
   "provides": {
     "cliProvider": {

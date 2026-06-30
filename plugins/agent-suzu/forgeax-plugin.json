@@ -3,17 +3,23 @@
   "id": "@forgeax-plugin/agent-suzu",
   "version": "0.1.0",
   "kind": "agent",
-  "displayName": { "zh": "Suzu · 体验设计师", "en": "Suzu · UX Flow Designer" },
+  "displayName": {
+    "zh": "Suzu · 体验设计师",
+    "en": "Suzu · UX Flow Designer"
+  },
   "description": {
-    "zh": "玩家从打开游戏到关掉那一刻每一个节拍 · 把 Iori 的玩法柱翻译成「玩家先按啥再按啥、UI 上看见什么、到第几秒才解锁第二个机制」。产出 ux-flow.md / hud-spec.md / onboarding.md。",
-    "en": "Owns the moment-to-moment player experience — translates Iori's pillars into 'press X then Y, see this on HUD, unlock mechanic 2 at second 30'. Outputs ux-flow / hud-spec / onboarding markdown."
+    "zh": "体验设计师 Agent(设计角色)· 把 Iori 的玩法柱翻译成玩家可感知的体验节拍——先看到什么、先做什么、第几秒解锁,产出 ux-flow / hud-spec / onboarding / wireframe 规格。自带「30 秒节拍表」技能,再反推 HUD。",
+    "en": "UX-flow designer agent — translates Iori's gameplay pillars into the player's moment-to-moment experience (what they see, do and unlock first), emitting ux-flow / hud-spec / onboarding / wireframe specs. Built-in 30s beat-sheet skill that reverse-derives the HUD."
   },
   "provides": {
     "agent": {
       "id": "suzu",
       "role": "design",
       "card": {
-        "name": { "zh": "Suzu", "en": "Suzu" },
+        "name": {
+          "zh": "Suzu",
+          "en": "Suzu"
+        },
         "cnTitle": "体验设计师",
         "enTitle": "UX Flow Designer",
         "color": "#DB61A2",
@@ -31,7 +37,10 @@
       "defaultLang": "zh",
       "multiInstance": false,
       "defaultSkills": [
-        { "source": "inline", "skillId": "beat-sheet-flow" }
+        {
+          "source": "inline",
+          "skillId": "beat-sheet-flow"
+        }
       ]
     },
     "skills": [

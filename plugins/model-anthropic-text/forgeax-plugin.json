@@ -8,8 +8,8 @@
     "en": "Anthropic Text"
   },
   "description": {
-    "zh": "text channel 的 Anthropic 厂商绑定 · 默认 reasoning→opus / draft→sonnet / summarize→haiku · 实际 HTTP 调用在 server/src/bus/channels/text.ts,本 plugin 只声明能力清单与 role→model 映射。",
-    "en": "Anthropic vendor binding on the text channel. Defaults: reasoning→opus, draft→sonnet, summarize→haiku. Actual HTTP lives in server/src/bus/channels/text.ts; this plugin only declares capability list + role→model mapping."
+    "zh": "Anthropic 文本模型绑定 · 在 text 通道把推理 / 起草 / 摘要三档分别映射到 opus-4.7 / sonnet-4.6 / haiku-4.5,让 Studio 各档任务用合适的 Claude 模型(HTTP 由 server 统一调度)。",
+    "en": "Anthropic text model binding — on the text channel, maps the reasoning / draft / summarize tiers to opus-4.7 / sonnet-4.6 / haiku-4.5 so each Studio task uses the right Claude model (HTTP routed by the server)."
   },
   "provides": {
     "modelBinding": {

@@ -92,8 +92,20 @@ async function readUploadedItem(file: File): Promise<UploadedItem | null> {
   if (!kind) return null;
   const base = { name: file.name, size: file.size, mime: file.type, fileType: file.type || ext };
   if (kind === "text") {
+    // file.text() 默认按 UTF-8 解码,GBK/CP936 的中文 txt 会整篇变 `�`。
+    // 改为读字节后先 UTF-8 严格解码,失败再回退 gb18030(GBK 超集),并去 BOM。
     let text = "";
-    try { text = await file.text(); } catch { text = ""; }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        text = new TextDecoder("gb18030").decode(bytes);
+      }
+      if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    } catch {
+      text = "";
+    }
     return { ...base, kind, content: text, encoding: "utf8" };
   }
   const b64 = arrayBufferToBase64(await file.arrayBuffer());

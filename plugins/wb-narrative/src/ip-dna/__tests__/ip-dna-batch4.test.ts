@@ -10,7 +10,7 @@ import {
   buildLightHierarchy,
   DECOMPOSE_THRESHOLD,
 } from "../phase1-understanding.js";
-import { saveManifest, loadManifest, runName } from "../filesystem.js";
+import { saveManifest, loadManifest, extractionOutputDir } from "../filesystem.js";
 import type { UserAssetManifest } from "../../types/narrative-ip-dna.js";
 
 /**
@@ -122,10 +122,12 @@ describe("batch4: manifest 落盘与状态更新", () => {
     expect(loaded?.preliminary_structure?.guessed_levels).toEqual(["chapter", "unit"]);
   });
 
-  it("落盘到 input run 目录约定路径", () => {
+  it("落盘到主媒体 extraction_output 约定路径（媒体优先 §6.1）", () => {
     const m = makeManifest();
     saveManifest(m, { cwd: TMP });
-    const expected = path.join(TMP, "input", runName("20260101_0900", "落盘清单"), "user_asset_manifest.json");
+    const expected = path.join(extractionOutputDir(m.story_id, m.title, m.media_type, { cwd: TMP }), "user_asset_manifest.json");
     expect(fs.existsSync(expected)).toBe(true);
+    // 媒体优先：book 落 book/story_book/story_book_extraction_output。
+    expect(expected.replace(/\\/g, "/")).toContain("book/story_book/story_book_extraction_output");
   });
 });

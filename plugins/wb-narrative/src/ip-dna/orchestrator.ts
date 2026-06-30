@@ -29,12 +29,13 @@ import type {
   GameMode,
   GameUnitPlan,
   IpSide,
+  IpMediaType,
   StoryTimestamp,
   UserAssetManifest,
 } from "../types/narrative-ip-dna.js";
 import { archiveAndBuildManifest, type IncomingFile, inferMediaType, modalityOf } from "./phase0-foundation.js";
 import { transcribeMediaFiles, type VideoFrameSampler, type VideoTranscriber } from "./phase1-multimodal.js";
-import { expandArchives, expandPdfs, compressMediaToDir, type ArchiveExtractor, type MediaCompressor, type PdfPageSplitter } from "./phase0-compress.js";
+import { expandArchives, expandPdfs, compressMediaToDir, isArchive, type ArchiveExtractor, type MediaCompressor, type PdfPageSplitter } from "./phase0-compress.js";
 import {
   buildLightHierarchy,
   buildHierarchyFromSegments,
@@ -43,6 +44,7 @@ import {
   sliceUnitTexts,
   sliceSubtreeText,
   assessVolume,
+  countOversizedUnits,
   planDecomposition,
   applyDecompositionClosure,
   guessLevelsFromHierarchy,
@@ -63,7 +65,7 @@ import {
   assessExtractionQuality,
 } from "./phase2-extract.js";
 import type { QualityCheck } from "./job.js";
-import { saveIpDna, outputRunDir, processingDir, saveOperatorSolution, extractionOutputDir, saveNodeProcessingMarkdown, saveManifest, loadManifest, loadFullIpDna, saveHierarchyIndexOnly, loadStandardizedText, loadHierarchyIndex, loadHierarchyIndexByRun, saveAdaptationDirective, saveIpDnaRunManifest } from "./filesystem.js";
+import { saveIpDna, outputRunDir, processingDir, saveOperatorSolution, extractionOutputDir, saveNodeProcessingMarkdown, saveManifest, loadManifest, loadFullIpDna, saveHierarchyIndexOnly, loadStandardizedText, loadHierarchyIndex, loadHierarchyIndexByRun, saveAdaptationDirective, saveIpDnaRunManifest, packageDir } from "./filesystem.js";
 import { buildCorpusRetriever, equipAndConsume } from "./phase3-rag.js";
 import { resolveVnActCount, mapGameUnitToPipeline, representativeGenreForFamily, type PipelineFamily, type GameUnitPipelinePlan } from "./phase2c-gen-adapt.js";
 import { buildKagFromTemplate, renderRelationInjection } from "./phase3b-kag.js";
@@ -248,7 +250,8 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
 
   // ── Phase 0：压缩包解压 → PDF 拆页 → 归档 + 资产清单 ──
   emit({ phase: "phase0", message: "解压压缩包并归档原始资产", ratio: 0 });
-  const unarchived = await expandArchives(options.files ?? [], options.archiveExtractor);
+  const rawFiles = options.files ?? [];
+  const unarchived = await expandArchives(rawFiles, options.archiveExtractor);
   const expandedFiles = await expandPdfs(unarchived, options.pdfPageSplitter);
   const phase0 = archiveAndBuildManifest({
     files: expandedFiles,
@@ -258,6 +261,20 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
     cwd: options.cwd,
   });
   const { story_timestamp, title, manifest } = phase0;
+
+  // 压缩包本体原样存「专门目录」input/package/<run>/（可追溯/复跑；成员已在上面分家落各媒体 *_original）。
+  for (const f of rawFiles) {
+    if (!isArchive(f.fileName)) continue;
+    try {
+      const dir = packageDir(story_timestamp, title, { cwd: options.cwd });
+      fs.mkdirSync(dir, { recursive: true });
+      const safe = f.fileName.replace(/[/\\?%*:|"<>]/g, "_");
+      fs.writeFileSync(path.join(dir, safe), typeof f.data === "string" ? Buffer.from(f.data, "utf-8") : f.data);
+    } catch {
+      /* 压缩包本体落盘失败不阻断主链 */
+    }
+  }
+  const ingestMedia = inferMediaType(expandedFiles);
   try { saveManifest(manifest, { cwd: options.cwd }); } catch { /* 落盘失败不阻断主链 */ }
   // 历史可见性（§5.1）：标题已定即在 output 写 running 运行清单，使本次运行进入 history 列表；
   // 中途被进程重启打断时残留 running → 由 cleanupStaleRunningManifests 翻为 interrupted（仍可见）。
@@ -294,17 +311,20 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
     mmText = mm.combinedText;
   }
   const fullText = [textPart, mmText].filter((s) => s.trim().length > 0).join("\n\n");
-  persistProcessingText(story_timestamp, title, fullText, options.cwd);
+  persistProcessingText(story_timestamp, title, ingestMedia, fullText, options.cwd);
 
   // ── 断点续传：resume 且存在持久化 IP DNA → 加载完整（含三件套），跳过重建。──
   const resumedDna = options.resume ? loadFullIpDna(story_timestamp, title, { cwd: options.cwd }) : undefined;
-  const media_type = resumedDna?.media_type ?? inferMediaType(expandedFiles);
+  const media_type = resumedDna?.media_type ?? ingestMedia;
 
   if (resumedDna) {
     emit({ phase: "phase1", message: "断点续传：加载已持久化 IP DNA（跳过重建/提取）", ratio: 0.5 });
     manifest.processing_status = "extracted";
     try { saveManifest(manifest, { cwd: options.cwd }); } catch { /* 落盘失败不阻断主链 */ }
-    const volume = assessVolume(fullText, { mediaType: media_type, unitCount: collectLeafIds(resumedDna).length });
+    const volume = {
+      ...assessVolume(fullText, { mediaType: media_type, unitCount: collectLeafIds(resumedDna).length }),
+      oversizedUnitCount: countOversizedUnits(resumedDna),
+    };
     return {
       story_timestamp, title, manifest, fullText, media_type, dna: resumedDna, volume,
       decomposition: { iterations: 0, splitUnits: 0, residualOversize: false },
@@ -337,7 +357,10 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
 
   // 多维体量水准线。
   const unitCount = collectLeafIds(dna).length;
-  const volume = assessVolume(fullText, { mediaType: media_type, unitCount });
+  const volume = {
+    ...assessVolume(fullText, { mediaType: media_type, unitCount }),
+    oversizedUnitCount: countOversizedUnits(dna),
+  };
   emit({
     phase: "phase1",
     message: `体量评估：${volume.thresholdBasis}${volume.needsDecompose ? `（超线，建议拆 ${volume.suggestedChunks} 块）` : ""}`,
@@ -369,7 +392,7 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
   for (const [nodeId, text] of ingestUnitTexts) {
     if (!text.trim()) continue;
     try {
-      saveNodeProcessingMarkdown(story_timestamp, title, nodeId, dna.nodes[nodeId]?.title ?? nodeId, text, { cwd: options.cwd });
+      saveNodeProcessingMarkdown(story_timestamp, title, media_type, nodeId, dna.nodes[nodeId]?.title ?? nodeId, text, { cwd: options.cwd });
     } catch {
       /* 落盘失败不阻断主链 */
     }
@@ -547,7 +570,7 @@ export async function runExtractAndGenerate(
       relationBrief = renderRelationInjection(graph) || undefined;
       if (graph.edgeCount > 0) {
         graph.saveJsonl(
-          path.join(extractionOutputDir(story_timestamp, title, { cwd: options.cwd }), `_kag_game_unit_${unit.index}`),
+          path.join(extractionOutputDir(story_timestamp, title, media_type, { cwd: options.cwd }), `_kag_game_unit_${unit.index}`),
         );
       }
     }
@@ -743,20 +766,32 @@ function defaultGenerationRunner(options: IpDnaOrchestratorOptions): GenerationR
 // ─────────────────────────────────────────────────────────────────
 
 function safeToText(buf: Buffer): string {
-  // 仅对可解码为 utf-8 的文本生效；二进制（图像/视频）返回空串（留多模态接口）。
-  try {
-    const text = buf.toString("utf-8");
-    // 粗判：若包含大量不可打印字符则视为二进制。
+  // 仅对可解码为文本的内容生效；二进制（图像/视频）返回空串（留多模态接口）。
+  const looksBinary = (text: string): boolean => {
     const ctrl = (text.match(/[\u0000-\u0008\u000e-\u001f]/g) ?? []).length;
-    return ctrl > text.length * 0.01 ? "" : text;
+    return ctrl > text.length * 0.01;
+  };
+  try {
+    const utf8 = buf.toString("utf-8");
+    // UTF-8 出现大量替换字符 → 多半是 GBK 正文被误读,回退 gb18030（GBK 超集）。
+    const replacements = (utf8.match(/\uFFFD/g) ?? []).length;
+    if (replacements > 0 && replacements > utf8.length * 0.002) {
+      try {
+        const gbk = new TextDecoder("gb18030").decode(buf);
+        if (!looksBinary(gbk)) return gbk;
+      } catch {
+        /* gb18030 解码失败 → 沿用 utf-8 结果 */
+      }
+    }
+    return looksBinary(utf8) ? "" : utf8;
   } catch {
     return "";
   }
 }
 
-function persistProcessingText(timestamp: StoryTimestamp, title: string, text: string, cwd?: string): void {
+function persistProcessingText(timestamp: StoryTimestamp, title: string, media: IpMediaType, text: string, cwd?: string): void {
   if (!text.trim()) return;
-  const dir = processingDir(timestamp, title, { cwd });
+  const dir = processingDir(timestamp, title, media, { cwd });
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "standardized.txt"), text, "utf-8");
 }
