@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Pivot fork part battery">
-  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
-  <path d="M7 5v6.5M17 5v6.5M7 11.5a5 5 0 0 0 10 0" fill="none" stroke="#e7f5ee" stroke-width="1.7" stroke-linecap="round"/>
-  <path d="M12 14.5V19" fill="none" stroke="#e7f5ee" stroke-width="1.7" stroke-linecap="round"/>
-  <circle cx="12" cy="13" r="1.5" fill="#b7ff5a"/>
-</svg>

@@ -1,9 +1,0 @@
-{
-  "type": "object",
-  "properties": {
-    "ok": { "type": "boolean" },
-    "mode": { "type": "string", "enum": ["idea", "script"] },
-    "message": { "type": "string" }
-  },
-  "required": ["ok", "mode", "message"]
-}

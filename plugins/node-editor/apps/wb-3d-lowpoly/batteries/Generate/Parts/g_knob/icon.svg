@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Knob part battery">
-  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
-  <circle cx="12" cy="12" r="6.6" fill="#b7ff5a" fill-opacity=".14" stroke="#e7f5ee" stroke-width="1.6"/>
-  <path d="M12 5.6V8M12 16v2.4M5.6 12H8M16 12h2.4M7.5 7.5l1.6 1.6M14.9 14.9l1.6 1.6M16.5 7.5l-1.6 1.6M9.1 14.9l-1.6 1.6" fill="none" stroke="#e7f5ee" stroke-width="1.2" stroke-linecap="round"/>
-  <path d="M12 12V7.8" fill="none" stroke="#b7ff5a" stroke-width="1.7" stroke-linecap="round"/>
-</svg>

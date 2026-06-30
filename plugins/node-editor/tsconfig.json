@@ -1,9 +1,0 @@
-{
-  "files": [],
-  "references": [
-    { "path": "./packages/node-runtime" },
-    { "path": "./packages/node-runtime-react" },
-    { "path": "./packages/node-runtime-cli" },
-    { "path": "./packages/i18n" }
-  ]
-}
