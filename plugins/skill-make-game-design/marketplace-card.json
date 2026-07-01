@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "做游戏设计技能。在对话里输入 /make-game-design 触发,引导 cc-coder 系列 agent 在大约 30 分钟内,把「我想做个 XX 游戏」的一句话愿景拆成一份可直接交给程序落代码的最小设计文档,涵盖玩法、数值、角色与章节。产出落到 design/<slug>.md,后续工作台直接读它作为 ground truth。",
+    "en": "The make-game-design skill. Type /make-game-design and it guides cc-coder-style agents, in about thirty minutes, to turn a one-line 'I want to make X' vision into a minimal, build-ready design doc covering gameplay, numbers, characters and chapters. The output lands in design/<slug>.md, which downstream workbenches read as ground truth."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "/make-game-design 触发\n一句话愿景 → 可落码的最小设计文档\n用到 balance:resim + code 读写,默认 agent cc-coder",
+        "en": "Triggered by /make-game-design\nOne-line vision → build-ready design doc\nUses balance:resim + code read/write; default agent cc-coder"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "design/<slug>.md(玩法 / 数值 / 角色 / 章节)",
+        "en": "design/<slug>.md (gameplay / numbers / characters / chapters)"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:做游戏设计技能",
+        "en": "First release: make-game-design skill"
+      }
+    }
+  ]
+}

@@ -56,6 +56,7 @@ export function PipelineStatusBar() {
   const activeConfig = useNarrativeStore((s) => s.activeConfig);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const pipelineOrder = useNarrativeStore((s) => s.pipelineOrder);
   const previewOrder = useNarrativeStore((s) => s.previewOrder);
@@ -63,8 +64,14 @@ export function PipelineStatusBar() {
   const editDrafts = useNarrativeStore((s) => s.editDrafts);
 
   const isRunning = !!runningRunId;
+  // IP 半自动预览（ipPreviewRunId）与正式 SSE run 共用"运行中视图"——与 useOrderedSteps 对齐（§D3）。
+  const isIpPreview = !!ipPreviewRunId;
+  const hasIpProgress = runningProgress.some((s) => s.id.startsWith("ip_"));
   const isViewingRunning =
-    (activeEntryKey === runningEntryKey && isRunning) || activeEntryStatus === "running";
+    (activeEntryKey != null &&
+      activeEntryKey === runningEntryKey &&
+      (isRunning || isIpPreview || runningProgress.length > 0)) ||
+    activeEntryStatus === "running";
 
   const liveSteps = activeEntryKey && activeEntryKey === runningEntryKey ? runningProgress : activeSteps;
 
@@ -79,6 +86,7 @@ export function PipelineStatusBar() {
     STEP_LABEL_MAP.get(id) ?? live?.label ?? id;
 
   const displaySteps = useMemo(() => {
+    // 整条铺开（含未达 pending）：正式 run / 历史视图——可预见下游待跑步骤。
     const buildFromOrder = (order: string[]) => {
       const used = new Set<string>();
       const ordered = order.map((id) => {
@@ -91,15 +99,32 @@ export function PipelineStatusBar() {
         .map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
       return [...ordered, ...extra];
     };
+    // 逐步生长（仅已 push 的步骤，与预览同源）：IP 半自动预处理随每步确认增量出现（§D1）。
+    const buildGrown = (order: string[]) => {
+      const used = new Set<string>();
+      const ordered: Array<{ id: string; label: string; status: StepStatus }> = [];
+      for (const id of order) {
+        const live = liveMap.get(id);
+        if (!live) continue; // 未 push → 不渲染（不铺 pending）
+        used.add(id);
+        ordered.push({ id, label: labelOf(id, live), status: live.status as StepStatus });
+      }
+      const extra = liveSteps
+        .filter((s) => !used.has(s.id))
+        .map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
+      return [...ordered, ...extra];
+    };
     let built: Array<{ id: string; label: string; status: StepStatus }>;
-    if (effectivePipelineOrder.length > 0) built = buildFromOrder(effectivePipelineOrder);
+    const useGrown = isIpPreview || (hasIpProgress && isViewingRunning);
+    if (useGrown) built = buildGrown(effectivePipelineOrder.length > 0 ? effectivePipelineOrder : liveSteps.map((s) => s.id));
+    else if (effectivePipelineOrder.length > 0) built = buildFromOrder(effectivePipelineOrder);
     else if (previewOrder && previewOrder.length > 0) built = buildFromOrder(previewOrder);
     else if (liveSteps.length > 0)
       built = liveSteps.map((s) => ({ id: s.id, label: labelOf(s.id, s), status: s.status as StepStatus }));
     else built = [];
     return withDynamicIpPrefix(built);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectivePipelineOrder, previewOrder, liveMap, liveSteps]);
+  }, [isIpPreview, hasIpProgress, isViewingRunning, effectivePipelineOrder, previewOrder, liveMap, liveSteps]);
 
   const done = displaySteps.filter((s) => s.status === "completed").length;
   const total = displaySteps.length;

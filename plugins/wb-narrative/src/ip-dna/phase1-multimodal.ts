@@ -16,6 +16,7 @@ import type { LLMClient, ImagePart } from "../pipeline/llm-client.js";
 import type { IncomingFile } from "./phase0-foundation.js";
 import { modalityOf } from "./phase0-foundation.js";
 import { loadIpDnaPrompt } from "./prompt-loader.js";
+import { extractEpisodeNumber, extractComicUnitNumber } from "./unit-identity.js";
 
 const IMAGE_DESCRIBE_SYSTEM = loadIpDnaPrompt(
   "image-describe",
@@ -176,10 +177,14 @@ export async function transcribeMediaFiles(
         : await describeVideoToText(file, opts);
     const { levelHint, title } = detectMediaUnit(file.fileName);
     seqByModality[modality] += 1;
+    // 序号（§3.1）：优先用文件名里写明的真实话/集/页号，无则回退按输入顺序的位置计数。
+    const realNum = modality === "video"
+      ? extractEpisodeNumber(file.fileName)
+      : extractComicUnitNumber(file.fileName);
     segments.push({
       fileName: file.fileName,
       modality,
-      seq: seqByModality[modality],
+      seq: realNum ?? seqByModality[modality],
       unitTitle: title,
       levelHint,
       text: text.trim(),

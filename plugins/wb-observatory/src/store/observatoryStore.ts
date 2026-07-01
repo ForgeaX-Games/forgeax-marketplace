@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { Node, Edge } from 'reactflow';
+import type { SpanData, LogRecord } from '../lib/telemetry-types';
+import type { NodeTrace } from '../lib/join-telemetry';
 
 export type SessionMode = 'static' | 'live';
 
@@ -62,6 +64,15 @@ interface ObservatoryState {
   liveEdges: Edge[];
   setLiveGraph: (nodes: Node[], edges: Edge[]) => void;
 
+  // Telemetry overlay (todo 038) — span/log streams keyed for client-side join.
+  // Additive: never gates the trajectory plane; empty when OTEL is off.
+  spansById: Map<string, SpanData>;
+  logsBySpanId: Map<string, LogRecord[]>;
+  setTelemetry: (spans: Map<string, SpanData>, logs: Map<string, LogRecord[]>) => void;
+  // Derived join (nodeId → trace), recomputed by the canvas from spans + nodes.
+  nodeTraces: Map<string, NodeTrace>;
+  setNodeTraces: (m: Map<string, NodeTrace>) => void;
+
   // Sidebar
   sidebarOpen: boolean;
   sidebarLoading: boolean;
@@ -99,12 +110,24 @@ export const useObservatoryStore = create<ObservatoryState>((set) => ({
   searchQuery: '',
   setSearchQuery: (searchQuery) => set({ searchQuery }),
 
-  sessionPath: null,
+  // Initialise from ?session= SYNCHRONOUSLY (before first render) so the very
+  // first useEventStream connects to the real sid instead of 'current' then
+  // reconnecting — that null→'current'→real flip opened two SSE connections and
+  // raced the trajectory state (todo 043). The workbench path still arrives via
+  // postMessage→setSessionPath; that transition is handled by per-connection
+  // isolation in useEventStream.
+  sessionPath: (() => { try { return new URLSearchParams(window.location.search).get('session'); } catch { return null; } })(),
   setSessionPath: (sessionPath) => set({ sessionPath }),
 
   liveNodes: [],
   liveEdges: [],
   setLiveGraph: (liveNodes, liveEdges) => set({ liveNodes, liveEdges }),
+
+  spansById: new Map(),
+  logsBySpanId: new Map(),
+  setTelemetry: (spansById, logsBySpanId) => set({ spansById, logsBySpanId }),
+  nodeTraces: new Map(),
+  setNodeTraces: (nodeTraces) => set({ nodeTraces }),
 
   sidebarOpen: false,
   sidebarLoading: false,

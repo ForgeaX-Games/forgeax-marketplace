@@ -8,13 +8,22 @@
     "en": "BGM & SFX"
   },
   "description": {
-    "zh": "BGM / 音效素材库（Local 环境）· 试听 + 配入游戏 · 下载到 .forgeax/games/<slug>/audio/ 并写入 audio/manifest.json。",
-    "en": "BGM & SFX asset library (Local depot). Preview + attach: downloads into .forgeax/games/<slug>/audio/ and upserts audio/manifest.json."
+    "zh": "BGM / 音效工作台 · 搜索 + 试听音频素材库,一键配入游戏:下载到 .forgeax/games/<slug>/audio/ 并写入 audio/manifest.json,供引擎按 manifest 播放。",
+    "en": "BGM & SFX workbench — search and preview an audio asset library, then attach to a game in one click: downloads into .forgeax/games/<slug>/audio/ and upserts audio/manifest.json for the engine to play."
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "🔊",
-  "keywords": ["audio", "bgm", "music", "sfx", "sound", "asset-library"],
-
+  "keywords": [
+    "audio",
+    "bgm",
+    "music",
+    "sfx",
+    "sound",
+    "asset-library"
+  ],
   "provides": {
     "workbench": {
       "id": "bgm",
@@ -33,29 +42,40 @@
         "id": "search-audio",
         "args": "./schemas/search-audio.args.json",
         "exposedToAI": true,
-        "description": { "zh": "在 Local 库搜索 BGM(kind=bgm)/音效(kind=sfx),按 tag 匹配。返回 { assetId, name, kind, version, resUrl } 列表,供 attach-audio 使用。", "en": "Search the Local depot for BGM (kind=bgm) / SFX (kind=sfx) by tag. Returns { assetId, name, kind, version, resUrl } for attach-audio." }
+        "description": {
+          "zh": "在 Local 库搜索 BGM(kind=bgm)/音效(kind=sfx),按 tag 匹配。返回 { assetId, name, kind, version, resUrl } 列表,供 attach-audio 使用。",
+          "en": "Search the Local depot for BGM (kind=bgm) / SFX (kind=sfx) by tag. Returns { assetId, name, kind, version, resUrl } for attach-audio."
+        }
       },
       {
         "id": "attach-audio",
         "args": "./schemas/attach-audio.args.json",
         "exposedToAI": true,
-        "description": { "zh": "把一条 BGM/音效下载到 .forgeax/games/<slug>/audio/ 并 upsert 到 audio/manifest.json(按 assetId 幂等)。assetId/resUrl/name/version 取自 search-audio,勿编造。slug 必填。", "en": "Download a BGM/SFX into .forgeax/games/<slug>/audio/ and upsert audio/manifest.json (idempotent by assetId). Fields from search-audio; slug required." }
+        "description": {
+          "zh": "把一条 BGM/音效下载到 .forgeax/games/<slug>/audio/ 并 upsert 到 audio/manifest.json(按 assetId 幂等)。assetId/resUrl/name/version 取自 search-audio,勿编造。slug 必填。",
+          "en": "Download a BGM/SFX into .forgeax/games/<slug>/audio/ and upsert audio/manifest.json (idempotent by assetId). Fields from search-audio; slug required."
+        }
       },
       {
         "id": "list-audio",
         "args": "./schemas/list-audio.args.json",
         "exposedToAI": true,
-        "description": { "zh": "读取 .forgeax/games/<slug>/audio/manifest.json,返回已配入的 BGM/音效清单。slug 必填。配 audio 前先调它,避免重复附加。", "en": "Read .forgeax/games/<slug>/audio/manifest.json — the attached BGM/SFX list. slug required. Call before attaching to avoid duplicates." }
+        "description": {
+          "zh": "读取 .forgeax/games/<slug>/audio/manifest.json,返回已配入的 BGM/音效清单。slug 必填。配 audio 前先调它,避免重复附加。",
+          "en": "Read .forgeax/games/<slug>/audio/manifest.json — the attached BGM/SFX list. slug required. Call before attaching to avoid duplicates."
+        }
       },
       {
         "id": "bgm:backend",
         "args": "./schemas/bgm-backend.args.json",
         "exposedToAI": false,
-        "description": { "zh": "(SPA 专用)Local 音频库原始只读透传:FindAssetMeta/HybridSearch/Search。仅人用面板调用。", "en": "(SPA only) raw read-only passthrough to the Local audio library (FindAssetMeta/HybridSearch/Search)." }
+        "description": {
+          "zh": "(SPA 专用)Local 音频库原始只读透传:FindAssetMeta/HybridSearch/Search。仅人用面板调用。",
+          "en": "(SPA only) raw read-only passthrough to the Local audio library (FindAssetMeta/HybridSearch/Search)."
+        }
       }
     ]
   },
-
   "entry": {
     "frontend": "./dist/index.html",
     "backend": "./server/tool-handlers.ts",
@@ -63,23 +83,25 @@
       "start": "npm run dev",
       "port": 5173,
       "readyProbe": "/",
-      "dev": { "watch": true, "hmr": true },
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
       "embeddedAlso": true,
       "devOnly": false
     }
   },
-
   "permissions": [
     "emit:bgm.*"
   ],
-
   "requestedEnv": [
     "WB_BGM_BACKEND_BASE",
     "WB_BGM_SANDBOX_KEY",
     "WB_BGM_DEPOT",
     "FORGEAX_PROJECT_ROOT"
   ],
-
   "experimental": true,
-  "compatibleWith": { "forgeax-bus": "^1.0.0" }
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  }
 }

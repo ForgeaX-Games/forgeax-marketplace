@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "影游工坊工作台,作者向的互动影游(FMV)编辑器与运行时。作者把提示词、视频、镜头、台词、QTE 与剧情分支拼成可玩的互动影片:用 Opus / Gemini 锻造画面提示词、GPT-Image 出占位关键帧、Seedance 生成视频。编辑期数据 100% 可序列化为 Scenario JSON,运行期是确定性回放,由限时点按(QTE)与选项分支驱动,产出可分发的剧本 + 试玩运行时。",
+    "en": "The Reel Studio workbench — an author-facing interactive FMV editor and player. Authors assemble prompts, video, shots, dialogue, QTE and branch trees into a playable interactive movie: Opus / Gemini forge画面 prompts, GPT-Image makes placeholder keyframes, Seedance generates video. Editor-time data is 100% serializable to a Scenario JSON; runtime is deterministic playback driven by timed taps (QTE) and choice branches, producing a distributable scenario + playable runtime."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "拼什么",
+        "en": "What you assemble"
+      },
+      "body": {
+        "zh": "提示词 / 视频 / 镜头 / 台词 / QTE / 剧情分支",
+        "en": "prompts / video / shots / dialogue / QTE / branch tree"
+      }
+    },
+    {
+      "title": {
+        "zh": "编辑期 vs 运行期",
+        "en": "Editor vs runtime"
+      },
+      "body": {
+        "zh": "编辑期 → 可序列化 Scenario JSON\n运行期 → 确定性回放(限时点按 + 选项分支)",
+        "en": "Editor → serializable Scenario JSON\nRuntime → deterministic playback (timed taps + choices)"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「reel」面板或对话 /reel",
+        "en": "Enable in Admin → open 'reel' or type /reel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-29",
+      "notes": {
+        "zh": "首版:互动影游编辑器 + 运行时",
+        "en": "First release: interactive FMV editor + runtime"
+      }
+    }
+  ]
+}

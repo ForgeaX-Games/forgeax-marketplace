@@ -8,8 +8,8 @@
     "en": "Color & Look-dev"
   },
   "description": {
-    "zh": "色彩 / Look-dev 工作台 · colorgrade.toml + theme.json + postprocess stack · 后续接 2D_style_transfer + H-3d-LookMaster — palette + LUT + 后处理。",
-    "en": "Color & look-dev workbench. colorgrade.toml + theme.json + postprocess stack. Will host 2D_style_transfer + H-3d-LookMaster — palette + LUT + postprocess."
+    "zh": "色彩 / Look-dev 工作台(规划中)· 目标:管理 colorgrade.toml + theme.json + 后处理栈(palette / LUT / 后处理)统一全局色调。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
+    "en": "Color & look-dev workbench (planned) — will manage colorgrade.toml + theme.json + a postprocess stack (palette / LUT / postprocess) for global color grading. Currently a marketplace placeholder; the panel lands in a later sprint."
   },
   "provides": {
     "workbench": {

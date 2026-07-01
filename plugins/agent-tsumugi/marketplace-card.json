@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "Tsumugi 是工程师 Agent,担任工程角色,专管「仓库本身能不能跑、跑得快不快、能不能上线」——构建链、CI、工具链、性能调优、上线 gate。它和 cc-coder 不同:不写业务代码,只对工程负责。改 build config 前先记录基线(bundle size / build time / FPS),每个改动都答得出「回滚会怎样」,产出 *.config / workflows / perf-report,自带「上线 gate」技能(typecheck/单测/lint/bundle/perf 全绿才放行)。",
+    "en": "Tsumugi is the engineer (the engineering role), owning whether the repo can build, run fast and ship — build chain, CI, toolchains, perf tuning and the ship gate. Unlike cc-coder it writes no feature code, only engineering. It records a baseline (bundle size / build time / FPS) before touching build config and can always answer 'what if we roll this back', emitting configs / workflows / perf-reports, with a ship-gate skill (typecheck/unit/lint/bundle/perf must all pass)."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "工程角色:构建链 / CI / 工具链 / 性能 / 上线\n不写业务代码(那是 cc-coder)\n改 config 先记基线,性能改动配 before/after 数字",
+        "en": "Engineering role: build chain / CI / toolchain / perf / shipping\nNo feature code (that's cc-coder)\nBaseline before config changes; perf diffs carry before/after numbers"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "*.config / .github/workflows/*.yml / perf-report.md / ship-gate-report.md\n自带「上线 gate」技能",
+        "en": "*.config / workflows / perf-report / ship-gate-report\nship-gate skill"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "改构建/CI、调性能、上线前把关时 @tsumugi。",
+        "en": "@tsumugi for build/CI changes, perf tuning and pre-ship gating."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:工程师人设 + 上线 gate 技能",
+        "en": "First release: engineer persona + ship-gate skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

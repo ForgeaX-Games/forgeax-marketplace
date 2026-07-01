@@ -8,8 +8,8 @@
     "en": "the reference agent CLI CLI"
   },
   "description": {
-    "zh": "Anthropic claude-code CLI 适配 · spawn `claude --mode stream` 子进程,把 ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/claude-code/,本 plugin 声明 metadata + Bus 入口。",
-    "en": "Anthropic claude-code CLI adapter. Spawns `claude --mode stream` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/claude-code/; this plugin declares metadata + Bus entry."
+    "zh": "the reference agent CLI CLI 后端 · 把 Anthropic 的 claude-code(`claude --mode stream`)接成 Studio 的推理后端,支持流式 / 思考 / 工具调用 / 子 agent / 会话;模型 opus-4.7 / sonnet-4.6 / haiku-4.5。",
+    "en": "the reference agent CLI CLI backend — wires Anthropic's claude-code (`claude --mode stream`) in as a Studio reasoning backend with streaming, thinking, tool calls, sub-agents and sessions; models opus-4.7 / sonnet-4.6 / haiku-4.5."
   },
   "provides": {
     "cliProvider": {

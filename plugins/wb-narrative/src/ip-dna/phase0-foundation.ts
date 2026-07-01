@@ -2,7 +2,7 @@
  * Phase 0 · 输入地基（仅后端）—— 蓝图 §6.1 / §6.2。
  *
  * 职责：
- *   ① 接收多模态 / 压缩包 / 不限量上传的文件描述，按完整故事时间戳归档到 input/.../_original/；
+ *   ① 接收多模态 / 压缩包 / 不限量上传的文件描述，按模态分家归档到各媒体 *_original（媒体优先 §6.1，保留相对子路径）；
  *   ② 生成结构化《用户资产参考清单》(UserAssetManifest)，作为后续 Phase 处理的驱动数据。
  *
  * HTTP 层的 multipart 解析 / 解压由 api/server.ts 负责（已存在 mammoth 等）；
@@ -17,7 +17,7 @@ import type {
   IpSide,
   StoryTimestamp,
 } from "../types/narrative-ip-dna.js";
-import { originalDir, modalOriginalDir, safeName, loadManifest, saveManifest, type InputModality } from "./filesystem.js";
+import { mediaOriginalDir, familyOfModality, safeName, loadManifest, saveManifest, type InputModality } from "./filesystem.js";
 import { formatTimestamp } from "./io-flow.js";
 
 /** 入站文件描述（来自 HTTP 层解析后的中性表示）。 */
@@ -76,38 +76,49 @@ export interface Phase0Result {
 /**
  * 归档文件并生成资产清单（§2/§6.1/§6.2）。纯确定性：相同输入产出相同结构。
  *
- * 模态分目录（§2）：每个文件按 modalityOf 归入 _original/<book|picture|video>/。
+ * 媒体优先分家（§6.1）：每个文件按 modalityOf→媒体家族落到各自 *_original/<run>/，保留相对子路径。
  * 会话级幂等追加（§2）：当 story_timestamp 指向已有运行（已落盘 manifest）时，本次文件**追加**到
  * 同一运行——按 path 去重合并 source_files、并集模态、按全集重算 media_type，created_at 保持首次值。
  * 这支撑"一次会话只确认一次时间戳、后续文件复用同一 ts 幂等 append"的产品语义。
  */
+/** 把成员名拆为安全的相对路径段（保留压缩包内子目录结构，供建树识别 部/卷/章）。 */
+export function sanitizeRelSegments(fileName: string): string[] {
+  return String(fileName)
+    .split(/[/\\]+/)
+    .map((s) => s.trim())
+    .filter((s) => s && s !== "." && s !== "..")
+    .map((s) => safeName(s));
+}
+
 export function archiveAndBuildManifest(input: Phase0Input): Phase0Result {
   const timestamp = input.story_timestamp ?? formatTimestamp(new Date().toISOString());
   const title = (input.title ?? deriveTitleFromFiles(input.files)).trim() || "untitled";
   const side: IpSide = input.side ?? "story";
+  const cwd = input.cwd ?? process.cwd();
+  const inputRoot = path.join(cwd, "input");
 
-  const baseDir = originalDir(timestamp, title, { cwd: input.cwd });
-  fs.mkdirSync(baseDir, { recursive: true });
-
-  // 本批：按模态分目录落盘。
+  // 本批：按模态分家落到各媒体 *_original，并**保留相对子路径**（§6.1 媒体优先）。
+  const baseDirs = new Set<string>();
   const batchSources: UserAssetManifest["source_files"] = [];
   for (const f of input.files) {
     const modality = modalityOf(f.fileType, f.fileName) as InputModality;
-    const modalDir = modalOriginalDir(timestamp, title, modality, { cwd: input.cwd });
-    fs.mkdirSync(modalDir, { recursive: true });
-    const safe = safeName(f.fileName);
-    fs.writeFileSync(path.join(modalDir, safe), typeof f.data === "string" ? f.data : f.data);
+    const family = familyOfModality(modality);
+    const mediaDir = mediaOriginalDir(timestamp, title, family, { cwd });
+    baseDirs.add(mediaDir);
+    const segments = sanitizeRelSegments(f.fileName);
+    const safeRel = segments.length > 0 ? segments : [safeName(f.fileName) || "untitled"];
+    const absFile = path.join(mediaDir, ...safeRel);
+    fs.mkdirSync(path.dirname(absFile), { recursive: true });
+    fs.writeFileSync(absFile, typeof f.data === "string" ? f.data : f.data);
     const size = typeof f.data === "string" ? Buffer.byteLength(f.data, "utf-8") : f.data.length;
-    batchSources.push({
-      path: path.join("_original", { text: "book", image: "picture", video: "video" }[modality], safe),
-      file_type: f.fileType,
-      size,
-      role: f.role,
-    });
+    // manifest path = 相对 input 根的媒体优先路径（posix 风格，跨平台稳定）。
+    const relPath = path.relative(inputRoot, absFile).split(path.sep).join("/");
+    batchSources.push({ path: relPath, file_type: f.fileType, size, role: f.role });
   }
+  const baseDir = [...baseDirs][0] ?? mediaOriginalDir(timestamp, title, "book", { cwd });
 
   // 会话级幂等追加：与已有 manifest 合并（按 path 去重）。
-  const prev = input.story_timestamp ? loadManifest(timestamp, title, { cwd: input.cwd }) : undefined;
+  const prev = input.story_timestamp ? loadManifest(timestamp, title, { cwd }) : undefined;
   const byPath = new Map<string, UserAssetManifest["source_files"][number]>();
   for (const s of prev?.source_files ?? []) byPath.set(s.path, s);
   for (const s of batchSources) byPath.set(s.path, s);
@@ -121,8 +132,9 @@ export function archiveAndBuildManifest(input: Phase0Input): Phase0Result {
   const media_type = mediaTypeFromModalities(modalitySet);
 
   const isMultipart = source_files.length > 1;
+  // 文字体量：path 命中 book 家族段（book/story_book/book_original/...）。
   const totalText = source_files
-    .filter((s) => s.path.includes(`${path.sep}book${path.sep}`) || s.path.includes("/book/"))
+    .filter((s) => /(^|\/)book\//.test(s.path))
     .reduce((acc, s) => acc + (s.size ?? 0), 0);
 
   const manifest: UserAssetManifest = {

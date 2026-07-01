@@ -3,17 +3,23 @@
   "id": "@forgeax-plugin/agent-iro",
   "version": "0.1.0",
   "kind": "agent",
-  "displayName": { "zh": "Iro · 美术师", "en": "Iro · Art Director" },
+  "displayName": {
+    "zh": "Iro · 美术师",
+    "en": "Iro · Art Director"
+  },
   "description": {
-    "zh": "视觉一切 — 角色立绘 / 像素 sprite / lowpoly OBJ / VFX / icon / UI 配色。接 Iori 的玩法 + Kotone 的角色 bio + Suzu 的 hud-spec,落成实际的 png / glb / svg 素材。",
-    "en": "Owns everything visual — character portraits, pixel sprites, lowpoly OBJ, VFX, icons, UI palette. Takes Iori's gameplay + Kotone's bios + Suzu's hud-spec and produces actual png / glb / svg assets."
+    "zh": "美术师 Agent(美术角色,可多实例)· 接 Iori 玩法 + Kotone 角色 bio + Suzu 的 hud-spec,先定 art-style.md + token 化 palette,再产出立绘 / 像素 sprite / lowpoly OBJ / VFX / icon 等 png·svg·glb 素材。自带「立美术规范」技能。",
+    "en": "Art-director agent (multi-instance) — takes Iori's gameplay, Kotone's bios and Suzu's hud-spec, locks an art-style.md + tokenized palette first, then produces portraits / pixel sprites / lowpoly OBJ / VFX / icons as png·svg·glb assets. Built-in establish-art-style skill."
   },
   "provides": {
     "agent": {
       "id": "iro",
       "role": "art",
       "card": {
-        "name": { "zh": "Iro", "en": "Iro" },
+        "name": {
+          "zh": "Iro",
+          "en": "Iro"
+        },
         "cnTitle": "美术师",
         "enTitle": "Art Director",
         "color": "#3FB950",
@@ -33,14 +39,20 @@
       "defaultLang": "zh",
       "multiInstance": true,
       "defaultSkills": [
-        { "source": "inline", "skillId": "establish-art-style" }
+        {
+          "source": "inline",
+          "skillId": "establish-art-style"
+        }
       ]
     },
     "skills": [
       {
         "id": "establish-art-style",
         "entry": "./skills/establish-art-style/SKILL.md",
-        "displayName": { "zh": "立美术规范", "en": "Establish Art Style" },
+        "displayName": {
+          "zh": "立美术规范",
+          "en": "Establish Art Style"
+        },
         "description": {
           "zh": "在画第一张 hero 之前先产出 art-style.md + token 化的 palette.json",
           "en": "Lock down art-style.md and tokenized palette.json before any hero asset"

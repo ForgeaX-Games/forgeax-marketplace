@@ -224,10 +224,22 @@ export interface IpHierarchyNode {
   id: string;
   levelType: "complete" | "part" | "chapter" | "unit";
   index: number;
+  /** 原始标题/文件名（溯源源串）。 */
   title: string;
+  /** 对外展示规范名：`序号_《原始标题》`（root=`《题目》`），展示一律优先用它。 */
+  displayName?: string;
+  /** 根→自身的完整嵌套层级链（内部运行/定位用）。 */
+  lineage?: Array<{ id: string; levelType: string; index: number; displayName: string }>;
   parent: string | null;
   children?: string[];
   childRange?: string;
+}
+
+/** 层级摘要：levels[0]=complete（根/完整作品），其后为 root 以下真实层级（按深度排序）。决定改编范围下拉列数与每列标题。 */
+export interface IpLevelSummary {
+  levelType: "complete" | "part" | "chapter" | "unit" | string;
+  label: string;
+  count: number;
 }
 
 /** ingest / hierarchy 共用的层级树 + 默认裁剪/单元/维度摘要。 */
@@ -237,8 +249,14 @@ export interface IpHierarchyResult {
   title: string;
   media_type: string;
   node_count: number;
+  /** 层级结构类型（single_file/single_layer/two_layer/three_layer，§3.2）。 */
+  structure_type?: string;
+  /** 逐层聚合次数 = root 以下层数。 */
+  aggregation_times?: number;
+  /** 层级摘要（levels[0]=complete 根 + 其后真实层级）；前端范围列数 = 根列(1) + 真实层级数。 */
+  levels?: IpLevelSummary[];
   hierarchy: IpHierarchyNode[];
-  volume?: { charCount: number; isShort: boolean; needsDecompose: boolean; suggestedChunks: number; thresholdBasis: string };
+  volume?: { charCount: number; isShort: boolean; needsDecompose: boolean; suggestedChunks: number; thresholdBasis: string; oversizedUnitCount?: number };
   decomposition?: { iterations: number; splitUnits: number; residualOversize: boolean };
   noise_filtered?: string[];
   default_scope?: { full: boolean; selections?: unknown[] };
@@ -376,6 +394,42 @@ export async function fetchStatus(runId: string) {
   const res = await fetch(`${API_BASE}/api/narrative/status/${runId}`);
   if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
   return res.json();
+}
+
+/** 某 run 的「环节文件分组」（input 各阶段 + output），后端按真实落盘目录返回。 */
+export interface RunFileGroup {
+  group: string;
+  label: string;
+  files: string[];
+}
+
+/** 列出某 run 跨 input/output 两侧的全部文件（按环节分组）。失败/空则返回 []。 */
+export async function fetchRunFiles(runId: string): Promise<RunFileGroup[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/narrative/files/${encodeURIComponent(runId)}`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { groups?: RunFileGroup[] };
+    return data.groups ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 读取某 run 下单个文件内容（路径形如 `<group>/<相对路径>`）。
+ * json 文件返回美化字符串，其余按纯文本；失败返回 null。
+ */
+export async function fetchRunFileContent(runId: string, groupedPath: string): Promise<string | null> {
+  try {
+    const encoded = groupedPath.split("/").map(encodeURIComponent).join("/");
+    const res = await fetch(`${API_BASE}/api/narrative/file/${encodeURIComponent(runId)}/${encoded}`);
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("json")) return JSON.stringify(await res.json(), null, 2);
+    return await res.text();
+  } catch {
+    return null;
+  }
 }
 
 export interface HistoryEntry {

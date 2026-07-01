@@ -20,6 +20,7 @@
           "zh": "2D 角色设计师",
           "en": "2D Character Designer"
         },
+        "cnTitle": "2D 角色设计师",
         "enTitle": "2D Character Designer",
         "color": "#E8B4D6",
         "avatar": "🎴"
@@ -37,10 +38,25 @@
         "<active_game>.dir/**/character-design.md"
       ],
       "agentTags": ["character", "character.design", "concept-art", "portrait", "turnaround", "monster", "npc", "vehicle"],
+      "tools": ["character:*"],
       "preferredCliProvider": "forgeax-native",
       "defaultLang": "zh",
-      "multiInstance": false
-    }
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "design-2d-character" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "design-2d-character",
+        "entry": "./skills/design-2d-character/SKILL.md",
+        "displayName": { "zh": "设计一个 2D 角色", "en": "Design a 2D Character" },
+        "description": {
+          "zh": "从一行 idea + 玩法柱 + 角色 bio 出发，先定位 hero/npc/monster/vehicle，再产出 portrait + turnaround + character.manifest.json + profile.md 三件套",
+          "en": "From a one-line idea + pillars + bio: fix the hero/npc/monster/vehicle role, then produce portrait + turnaround + character.manifest.json + profile.md"
+        }
+      }
+    ]
   },
   "experimental": true
 }

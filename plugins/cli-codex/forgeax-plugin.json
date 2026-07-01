@@ -8,8 +8,8 @@
     "en": "OpenAI Codex CLI"
   },
   "description": {
-    "zh": "OpenAI codex (@openai/codex) CLI 适配 · spawn `codex exec --json` 子进程,ChatEvent 流桥接到 Bus。实际 runner 在 server/src/cli-providers/codex/,本 plugin 声明 metadata + Bus 入口。",
-    "en": "OpenAI codex (@openai/codex) CLI adapter. Spawns `codex exec --json` and bridges ChatEvent streams onto the Bus. Real runner lives in server/src/cli-providers/codex/; this plugin declares metadata + Bus entry."
+    "zh": "OpenAI Codex CLI 后端 · 把 @openai/codex(`codex exec --json`)接成 Studio 的推理后端,支持流式 / 思考 / 工具调用 / 子 agent / 会话;模型 gpt-5 / gpt-5-codex。",
+    "en": "OpenAI Codex CLI backend — wires @openai/codex (`codex exec --json`) in as a Studio reasoning backend with streaming, thinking, tool calls, sub-agents and sessions; models gpt-5 / gpt-5-codex."
   },
   "provides": {
     "cliProvider": {

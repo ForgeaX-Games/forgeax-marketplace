@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-ai-asset",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "AI-Asset · 小物件生成师", "en": "AI-Asset · Prop Artist" },
+  "description": {
+    "zh": "专职 AI 小物件生成师。在「AI 小物件低模生成」工坊（wb-ai-asset）里用 Meshy 文生 / 图生 / 多视图把道具、装备、场景小物件生成低面 .glb，按需补 PBR 贴图、降面到目标面数，产出 per-game 的 props 资产。只做小物件 / 道具，不做角色（交给 Gen3D）、不写引擎代码、不画 2D。",
+    "en": "Dedicated AI prop artist for small lowpoly assets. In the AI prop workbench (wb-ai-asset), uses Meshy text / image / multi-view to generate props, equipment and small set-pieces as lowpoly .glb, with optional PBR texturing and remeshing to a target polycount, persisted as per-game props assets. Props only — characters go to Gen3D, no engine code, no 2D art."
+  },
+  "provides": {
+    "agent": {
+      "id": "ai-asset",
+      "role": "modeling",
+      "card": {
+        "name": { "zh": "AI-Asset", "en": "AI-Asset" },
+        "cnTitle": "小物件生成师",
+        "enTitle": "Prop Artist",
+        "color": "#C08552",
+        "avatar": "📦"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "**/.forgeax/games/*/assets/3d/props/**"
+      ],
+      "agentTags": ["ai-asset", "props", "道具", "prop", "装备", "item", "小物件", "低模", "lowpoly", "meshy", "asset"],
+      "tools": ["aiasset:*"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "generate-lowpoly-prop" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "generate-lowpoly-prop",
+        "entry": "./skills/generate-lowpoly-prop/SKILL.md",
+        "displayName": { "zh": "造一件低模小物件", "en": "Generate a Lowpoly Prop" },
+        "description": {
+          "zh": "从一句需求 / 一张参考图生成一件低面、带 PBR、游戏可用的 .glb 小物件，含降面与质量自检",
+          "en": "Turn a prompt or reference image into one lowpoly, PBR-textured, game-ready .glb prop, with remeshing and a quality self-check"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

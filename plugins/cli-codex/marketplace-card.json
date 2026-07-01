@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "把 OpenAI 的 codex CLI(@openai/codex)接成 ForgeaX Studio 的推理后端。runner spawn `codex exec --json` 子进程,把 ChatEvent 流桥接到消息总线;支持流式、思考、工具调用、子 agent 与会话。在面板管理认证并选用后,所有 agent 的推理走 codex 后端,适合想用 GPT-5 系列模型驱动开发循环的场景。",
+    "en": "Wires OpenAI's codex CLI (@openai/codex) in as a ForgeaX Studio reasoning backend. The runner spawns `codex exec --json` and bridges ChatEvent streams onto the bus, with streaming, thinking, tool calls, sub-agents and sessions. Once authenticated and selected in Admin, agents reason through codex — handy for driving the dev loop with the GPT-5 family."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "适配方式",
+        "en": "How it adapts"
+      },
+      "body": {
+        "zh": "Runner:codex exec --json\nChatEvent 流桥接到 Bus",
+        "en": "Runner: codex exec --json\nBridges ChatEvent streams to the Bus"
+      }
+    },
+    {
+      "title": {
+        "zh": "能力与模型",
+        "en": "Capabilities & models"
+      },
+      "body": {
+        "zh": "流式 / 思考 / 工具调用 / 子 agent / 会话\n模型:gpt-5 / gpt-5-codex",
+        "en": "streaming / thinking / tool calls / sub-agents / sessions\nModels: gpt-5 / gpt-5-codex"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理 → CLI 后端 → 选择并认证",
+        "en": "Admin → CLI backends → pick & authenticate"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-16",
+      "notes": {
+        "zh": "首版:codex 后端适配",
+        "en": "First release: codex backend adapter"
+      }
+    }
+  ]
+}

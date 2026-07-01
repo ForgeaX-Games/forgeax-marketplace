@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "Agent Persona 编辑器,在 Studio 内直接调每个 agent 的人设。左侧列表选 agent,右侧文本区编辑它的 persona/zh.md,保存后热重载即时生效——不用重启就能改 agent 的语气、职责与行为边界。适合微调 Arin/Iori/Suzu 等内置 agent,或给自定义 agent 打磨人设。",
+    "en": "The Agent Persona Editor — tune each agent's persona right inside Studio. Pick an agent from the left list, edit its persona/zh.md in the right textarea, and save with hot-reload so changes apply instantly — adjust an agent's tone, duties and behavioral bounds without a restart. Great for fine-tuning the built-in agents (Arin/Iori/Suzu…) or polishing a custom one."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "列表选 agent → 文本区编辑 persona/zh.md\n保存即热重载,无需重启",
+        "en": "Pick an agent → edit persona/zh.md in a textarea\nSave with hot-reload, no restart"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 左侧打开「wb-agent-persona」面板",
+        "en": "Enable in Admin → open the 'wb-agent-persona' panel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:persona 编辑 + 热重载",
+        "en": "First release: persona editing + hot-reload"
+      }
+    }
+  ]
+}

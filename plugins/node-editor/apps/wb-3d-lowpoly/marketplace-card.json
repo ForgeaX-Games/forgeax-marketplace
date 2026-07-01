@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "3D 低多边形生成器工作台,基于 @forgeax/node-runtime 的节点图编程应用。你用节点管线参数化地生成 low-poly 几何,经 OCCT / replicad 在后端烘焙网格,前端用 three.js / URDF 实时预览,最终导出 .glb。它把「建模」变成可复用、可批处理的节点图,AI 可经 pipeline 工具(applyBatch / execute / import / export)批量编排,也支持项目管理、内置零件库(batteries)与截图。",
+    "en": "The 3D Lowpoly Generator workbench — a node-graph programming app built on @forgeax/node-runtime. You build parametric low-poly geometry through a node pipeline, bake meshes with OCCT / replicad on the backend, preview live in three.js / URDF on the front end, and export .glb. It turns 'modeling' into a reusable, batchable node graph; AI can orchestrate via pipeline tools (applyBatch / execute / import / export), with project management, a built-in parts library (batteries) and screenshots."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "怎么生成",
+        "en": "How it generates"
+      },
+      "body": {
+        "zh": "节点管线参数化 → OCCT / replicad 烘焙 → 导出 .glb\nthree.js / URDF 实时预览",
+        "en": "Node pipeline → OCCT / replicad bake → export .glb\nthree.js / URDF live preview"
+      }
+    },
+    {
+      "title": {
+        "zh": "AI 编排",
+        "en": "AI orchestration"
+      },
+      "body": {
+        "zh": "pipeline 工具:applyBatch / execute / import / export\n项目管理 + 零件库(batteries)+ 截图",
+        "en": "pipeline tools: applyBatch / execute / import / export\nprojects + batteries library + screenshots"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开面板或对话 /wb-3d-lowpoly",
+        "en": "Enable in Admin → open the panel or /wb-3d-lowpoly"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-02",
+      "notes": {
+        "zh": "首版:节点式 3D 低多边形生成器",
+        "en": "First release: node-based 3D lowpoly generator"
+      }
+    }
+  ]
+}

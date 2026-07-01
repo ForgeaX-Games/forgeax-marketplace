@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Express } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { NarrativePipeline } from "../pipeline/pipeline.js";
@@ -15,7 +15,7 @@ import { LLMClient } from "../pipeline/llm-client.js";
 import { buildKnowledgePromptSection, buildNodeTreeSummary, preClassifyChange, PIPELINE_KNOWLEDGE } from "../pipeline/pipeline-knowledge.js";
 import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript } from "../types/index.js";
 import { detectScriptFormat, describeScriptFormat } from "../utils/script-format-detector.js";
-import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceByRun, resolveIpDnaRuntimeAdapters, loadHierarchyIndexByRun, analyzeRewriteImpact, createJob, updateJob, getJob, listJobs, cancelJob, formatTimestamp as formatIpDnaTimestamp, buildAdaptationDirective, planDecomposition, applyDecompositionClosure, assessVolume, collectLeafIds, saveHierarchyIndexOnly, saveAdaptationConfirmation, loadAdaptationConfirmation, type IncomingFile, type IpDnaProgress, type ExtractSource } from "../ip-dna/index.js";
+import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceByRun, resolveIpDnaRuntimeAdapters, loadHierarchyIndexByRun, loadManifestByRun, listInputRunKeys, runArtifactRoots, RUN_ARTIFACT_GROUP_LABELS, analyzeRewriteImpact, createJob, updateJob, getJob, listJobs, cancelJob, formatTimestamp as formatIpDnaTimestamp, buildAdaptationDirective, planDecomposition, applyDecompositionClosure, assessVolume, collectLeafIds, saveHierarchyIndexOnly, saveAdaptationConfirmation, loadAdaptationConfirmation, guessLevelsFromHierarchy, type IncomingFile, type IpDnaProgress, type ExtractSource, type NarrativeIpDna } from "../ip-dna/index.js";
 // Phase C6: env reads are funnelled through plugin-env so the literal
 // `process.env.*_API_KEY` substring stays out of plugin source files. See
 // utils/plugin-env.ts header for the full rationale (this Express server is
@@ -527,7 +527,7 @@ function loadCheckpoint(dir: string): CheckpointData | null {
   }
 }
 
-const app = express();
+const app: Express = express();
 // 上传剧本可能远大于 100kb（默认）：放宽到 5mb，覆盖中长篇剧本
 app.use(express.json({ limit: "5mb" }));
 app.use((_req, res, next) => {
@@ -2484,14 +2484,10 @@ interface HistoryItem {
   kind?: string;
 }
 
-const INPUT_DIR = path.resolve(process.cwd(), "input");
-
-/** IP DNA 输入侧资产清单（input/<runId>/user_asset_manifest.json），用于无 output 清单时回填历史。 */
-function loadIpDnaInputManifest(dir: string): { story_id?: string; title?: string; media_type?: string; processing_status?: string; created_at?: string } | undefined {
+/** IP DNA 输入侧资产清单（媒体优先：主媒体 extraction_output；legacy 兜底），用于无 output 清单时回填历史。 */
+function loadIpDnaInputManifest(key: string): { story_id?: string; title?: string; media_type?: string; processing_status?: string; created_at?: string } | undefined {
   try {
-    const p = path.join(INPUT_DIR, dir, "user_asset_manifest.json");
-    if (!fs.existsSync(p)) return undefined;
-    return JSON.parse(fs.readFileSync(p, "utf-8"));
+    return loadManifestByRun(key);
   } catch {
     return undefined;
   }
@@ -2710,19 +2706,18 @@ app.get("/api/narrative/history", (_req, res) => {
     // 摄入后即中断的运行只在 input/<key> 留痕（user_asset_manifest.json / _hierarchy.json）。
     // 扫 INPUT_DIR，把无 output 对应项的 IP 运行也列入 LIST（中断仍可见、可回放）。
     try {
-      const inputDirs = fs.readdirSync(INPUT_DIR, { withFileTypes: true });
-      for (const entry of inputDirs) {
-        if (!entry.isDirectory() || IGNORED_DIRS.has(entry.name)) continue;
-        if (outputKeys.has(entry.name)) continue; // output 侧已覆盖
-        const desc = loadIpInputDescriptor(entry.name);
-        if (!desc) continue; // 非运行目录（book/picture/video/package/user_input 等模态根目录）
+      // 媒体优先布局：运行键在 input/<媒体>/story_<媒体>/*_<阶段>/<run> 下，需跨家族枚举（+legacy 兜底）。
+      for (const key of listInputRunKeys()) {
+        if (outputKeys.has(key)) continue; // output 侧已覆盖
+        const desc = loadIpInputDescriptor(key);
+        if (!desc) continue;
         const activeIpJob = [...listJobs()].some(
           (j) =>
             (j.status === "running" || j.status === "awaiting_confirmation") &&
             j.story_timestamp &&
-            entry.name.startsWith(j.story_timestamp),
+            key.startsWith(j.story_timestamp),
         );
-        items.push(buildIpDnaHistoryItem(entry.name, desc, activeIpJob, dirHasEdits(entry.name)));
+        items.push(buildIpDnaHistoryItem(key, desc, activeIpJob, dirHasEdits(key)));
       }
     } catch { /* input 目录不存在则跳过 */ }
 
@@ -3044,40 +3039,53 @@ function listRunFiles(runDir: string, prefix = ""): string[] {
   return files;
 }
 
+/** 解析某 run 的磁盘运行键：运行中实例用其 output 目录名，否则即 runId 参数本身。 */
+function resolveRunKey(runId: string): string {
+  const state = runs.get(runId);
+  return state ? path.basename(getRunDir(state)) : runId;
+}
+
+/**
+ * 列出某 run 跨「input 各环节 + output」两侧的全部文件（§5.1 每环节文件可见）。
+ * 返回值：
+ *   - `files`: `<group>/<相对路径>` 扁平清单（group ∈ original/processing/extraction_output/package/output）。
+ *   - `groups`: 按环节分组（含中文 label + 文件相对路径），供「按环节浏览」直接渲染。
+ * 兼容旧行为：纯 output run（无 input 痕迹）也照样以 `output/<rel>` 形式给出。
+ */
 app.get("/api/narrative/files/:runId", (req, res) => {
-  const state = runs.get(req.params.runId);
-  if (!state) {
-    const dirPath = path.join(OUTPUT_DIR, req.params.runId);
-    if (fs.existsSync(dirPath)) {
-      res.json({ files: listRunFiles(dirPath) });
-      return;
-    }
+  const key = resolveRunKey(req.params.runId);
+  const roots = runArtifactRoots(key);
+  if (roots.length === 0) {
     res.status(404).json({ error: "Run not found" });
     return;
   }
-  const runDir = getRunDir(state);
-  res.json({ files: listRunFiles(runDir) });
+  const files: string[] = [];
+  const groups = roots.map((r) => {
+    const rel = listRunFiles(r.dir);
+    files.push(...rel.map((f) => `${r.group}/${f}`));
+    return { group: r.group, label: RUN_ARTIFACT_GROUP_LABELS[r.group] ?? r.group, files: rel };
+  });
+  res.json({ files, groups });
 });
 
 app.get("/api/narrative/file/:runId/{*filePath}", (req, res) => {
-  const runId = req.params.runId;
+  const key = resolveRunKey(req.params.runId);
   const rawPath = (req.params as unknown as Record<string, unknown>).filePath;
-  const filePath = Array.isArray(rawPath) ? rawPath.join("/") : String(rawPath ?? "");
+  const relRaw = Array.isArray(rawPath) ? rawPath.join("/") : String(rawPath ?? "");
 
-  let runDir: string;
-  const state = runs.get(runId);
-  if (state) {
-    runDir = getRunDir(state);
-  } else {
-    runDir = path.join(OUTPUT_DIR, runId);
-  }
+  const roots = runArtifactRoots(key);
+  // 首段为环节分组键 → 映射到对应根目录；否则回退 output（兼容历史的 output 相对路径）。
+  const firstSeg = relRaw.split("/")[0];
+  const matched = roots.find((r) => r.group === firstSeg);
+  const baseDir = matched ? matched.dir : path.join(OUTPUT_DIR, key);
+  const relPath = matched ? relRaw.slice(firstSeg.length + 1) : relRaw;
 
-  const fullPath = path.join(runDir, filePath);
-  if (!fullPath.startsWith(runDir)) {
+  const fullPath = path.resolve(baseDir, relPath);
+  if (fullPath !== baseDir && !fullPath.startsWith(baseDir + path.sep)) {
     res.status(403).json({ error: "Path traversal denied" });
     return;
   }
-  if (!fs.existsSync(fullPath)) {
+  if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
     res.status(404).json({ error: "File not found" });
     return;
   }
@@ -3424,6 +3432,27 @@ function ipDnaLlm(model?: string): LLMClient | undefined {
     : undefined;
 }
 
+/** 各媒体在"最小叙事单元"层的叫法（§3.1b：层级对齐、叫法按媒体取词）。 */
+function unitWord(media: NarrativeIpDna["media_type"]): string {
+  return media === "picture" ? "话" : media === "video" ? "集" : "节";
+}
+
+/**
+ * 由层级树构建"真实层级"摘要（root 以下，按深度排序 part→chapter→unit）——
+ * 前端据此决定改编范围下拉**列数**与每列标题（不再用物理树深度硬猜，§3.1「层级才是抽象」）。
+ */
+function buildLevelsSummary(dna: NarrativeIpDna): Array<{ levelType: string; label: string; count: number }> {
+  const labelOf = (lt: string): string =>
+    lt === "complete" ? "完整作品" : lt === "part" ? "部/卷" : lt === "chapter" ? "章" : lt === "unit" ? unitWord(dna.media_type) : lt;
+  // 含根（§"根+真实层级"）：levels[0]=complete 供前端范围裁剪首列（只读"完整作品"），其后为真实层级。
+  const levels = ["complete", ...guessLevelsFromHierarchy(dna)];
+  return levels.map((lt) => ({
+    levelType: lt,
+    label: labelOf(lt),
+    count: Object.values(dna.nodes).filter((n) => n.levelType === lt).length,
+  }));
+}
+
 /** 把 IngestResult 摘要成给 UI/agent 的可读结构（层级树 + 体量 + 默认裁剪/单元 + 干扰过滤）。 */
 function summarizeIngest(ingest: Awaited<ReturnType<typeof runIngest>>) {
   return {
@@ -3432,8 +3461,11 @@ function summarizeIngest(ingest: Awaited<ReturnType<typeof runIngest>>) {
     title: ingest.title,
     media_type: ingest.media_type,
     node_count: Object.keys(ingest.dna.nodes).length,
+    structure_type: ingest.dna.structureType,
+    aggregation_times: ingest.dna.aggregationTimes,
+    levels: buildLevelsSummary(ingest.dna),
     hierarchy: Object.values(ingest.dna.nodes).map((n) => ({
-      id: n.id, levelType: n.levelType, index: n.index, title: n.title, parent: n.parent, children: n.children, childRange: n.childRange,
+      id: n.id, levelType: n.levelType, index: n.index, title: n.title, displayName: n.displayName, lineage: n.lineage, parent: n.parent, children: n.children, childRange: n.childRange,
     })),
     volume: ingest.volume,
     decomposition: ingest.decomposition,
@@ -3525,8 +3557,11 @@ app.get("/api/narrative/ip-dna/:runId/hierarchy", (req, res) => {
     title: source.title,
     media_type: source.media_type,
     node_count: Object.keys(source.dna.nodes).length,
+    structure_type: source.dna.structureType,
+    aggregation_times: source.dna.aggregationTimes,
+    levels: buildLevelsSummary(source.dna),
     hierarchy: Object.values(source.dna.nodes).map((n) => ({
-      id: n.id, levelType: n.levelType, index: n.index, title: n.title, parent: n.parent, children: n.children, childRange: n.childRange,
+      id: n.id, levelType: n.levelType, index: n.index, title: n.title, displayName: n.displayName, lineage: n.lineage, parent: n.parent, children: n.children, childRange: n.childRange,
     })),
     volume,
     default_scope: directive.adaptation_scope,
@@ -3553,8 +3588,11 @@ app.post("/api/narrative/ip-dna/:runId/decompose", (req, res) => {
     chunk_count: plan.chunks.length,
     closure,
     node_count: Object.keys(source.dna.nodes).length,
+    structure_type: source.dna.structureType,
+    aggregation_times: source.dna.aggregationTimes,
+    levels: buildLevelsSummary(source.dna),
     hierarchy: Object.values(source.dna.nodes).map((n) => ({
-      id: n.id, levelType: n.levelType, index: n.index, title: n.title, parent: n.parent, children: n.children, childRange: n.childRange,
+      id: n.id, levelType: n.levelType, index: n.index, title: n.title, displayName: n.displayName, lineage: n.lineage, parent: n.parent, children: n.children, childRange: n.childRange,
     })),
   });
 });

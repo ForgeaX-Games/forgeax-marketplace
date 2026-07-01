@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "角色编辑器工作台,基于 Three.js 的多管线角色生成器。它把角色从概念到能动起来分成多条管线:像素角色四方向序列帧、Spine 骨骼拆件绑骨与动画、视频角色三视图→序列帧、技能 VFX 与打击感(挂点 / 受击白闪 / 伤害飘字)、八方向五动画的怪物生成。集成 AI 图像与视频生成,产出 manifest + portrait / turnaround / spritesheet,下游直接接入动画工作台。",
+    "en": "The character editor workbench — a Three.js multi-pipeline character generator. It splits a character from concept to motion across pipelines: 4-direction pixel sprite sheets, Spine rig binding + animation, video turnaround → frames, skill VFX with game-feel (hit flashes, damage numbers), and 8-direction / 5-animation monster generation. With AI image and video generation, it outputs a manifest + portrait / turnaround / spritesheet that feed straight into the Animation workbench."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "多条管线",
+        "en": "Pipelines"
+      },
+      "body": {
+        "zh": "像素角色四方向 · Spine 骨骼 · 视频角色 · 技能 VFX · 八方向怪物",
+        "en": "4-dir pixel · Spine rig · video character · skill VFX · 8-dir monsters"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "manifest + portrait / turnaround / spritesheet\n下游接入动画工作台",
+        "en": "manifest + portrait / turnaround / spritesheet\nfeeds the Animation workbench"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「wb-character」或对话 /character",
+        "en": "Enable in Admin → open 'wb-character' or type /character"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:多管线角色生成器",
+        "en": "First release: multi-pipeline character generator"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-22",
+      "notes": {
+        "zh": "3D turnaround、UI 与渲染修复",
+        "en": "3D turnaround, UI + render fixes"
+      }
+    }
+  ]
+}

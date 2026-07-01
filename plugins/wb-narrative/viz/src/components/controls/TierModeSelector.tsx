@@ -14,7 +14,6 @@ import {
   useNarrativeStream,
   analyzeImpact,
   regenerateStep,
-  startIpDnaRun,
   fetchIpDnaJob,
   ipDnaCancel,
   fetchIpDnaHierarchy,
@@ -92,8 +91,20 @@ async function readUploadedItem(file: File): Promise<UploadedItem | null> {
   if (!kind) return null;
   const base = { name: file.name, size: file.size, mime: file.type, fileType: file.type || ext };
   if (kind === "text") {
+    // file.text() 默认按 UTF-8 解码,GBK/CP936 的中文 txt 会整篇变 `�`。
+    // 改为读字节后先 UTF-8 严格解码,失败再回退 gb18030(GBK 超集),并去 BOM。
     let text = "";
-    try { text = await file.text(); } catch { text = ""; }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        text = new TextDecoder("gb18030").decode(bytes);
+      }
+      if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    } catch {
+      text = "";
+    }
     return { ...base, kind, content: text, encoding: "utf8" };
   }
   const b64 = arrayBufferToBase64(await file.arrayBuffer());
@@ -470,6 +481,8 @@ export function TierModeSelector() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<StepSectionId>>(new Set(["input"]));
+  /** 用户是否在 ROUTING 区显式配置过叙事路由（重需求 IP 流程：改编确认后必须先配路由再生成）。 */
+  const [routingConfigured, setRoutingConfigured] = useState(false);
   const [openRouteDropdownId, setOpenRouteDropdownId] = useState<string | null>(null);
 
   const routeDropdownProps = useCallback((dropdownId: string) => ({
@@ -525,6 +538,7 @@ export function TierModeSelector() {
   const activeConfig = useNarrativeStore((s) => s.activeConfig);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const editDrafts = useNarrativeStore((s) => s.editDrafts);
   const tier = useNarrativeStore((s) => s.tier);
@@ -542,6 +556,13 @@ export function TierModeSelector() {
 
   const isRunning = !!runningRunId;
   const hasDrafts = useMemo(() => Object.values(editDrafts).some((d) => d.saved), [editDrafts]);
+  /** 重需求 IP 流程：ROUTING 已显式配置 + 非"全自动占位"态，才允许 IpStageFlow「开始生成」。 */
+  const ipRoutingReady = useMemo(
+    () =>
+      routingConfigured &&
+      (selectedTierId !== "auto" || !!selectedGenreCode || selectedNarrativeRoute !== "narrative_auto"),
+    [routingConfigured, selectedTierId, selectedGenreCode, selectedNarrativeRoute],
+  );
 
   /**
    * 统一的"用户改了 INPUT/ROUTING 配置"hook。
@@ -576,7 +597,10 @@ export function TierModeSelector() {
     return "none";
   }, [activeEntryKey, activeEntryStatus, hasDrafts]);
 
-  const isViewingRunning = (activeEntryKey === runningEntryKey && isRunning) || activeEntryStatus === "running";
+  // 仅正式 SSE / IP DNA 下游 job 算"生成中"；IP 半自动预处理（ipPreviewRunId）不算，避免误禁用 ROUTING。
+  const isGenerating = isRunning || ipDnaRunning;
+  const isIpPreprocessing = !!ipPreviewRunId && !isGenerating;
+  const isViewingRunning = isGenerating;
 
   useNarrativeStream();
 
@@ -740,12 +764,13 @@ export function TierModeSelector() {
 
   const previewIsAuto = routeGroup === "planning" && selectedTierId === "auto";
 
-  // IP DNA 重需求上传时，把"输入 + IP 处理"作为生成管线前驱节点链拼到 previewStepOrder 头部，
-  // 使中间预览先呈现 ip_input→标准化→体量→裁剪→生成 scoped IP DNA 五个前驱节点（WS-F）。
+  // IP DNA 重需求上传时（输入阶段）：中间管线只呈现"输入 + IP 处理"前驱环节链
+  // （ip_input→标准化→体量→裁剪→生成 scoped IP DNA），不提前铺生产全管线（避免一上来就 0/23）。
+  // 生产环节在"开始生成"后由实时运行轨揭示——这与"第一步只显示输入环节、确认参数后再揭示生产工作流"的
+  // 设计一致；且生产走 job 轮询无 SSE，提前 seed 只会留下永不点亮的 pending 死节点。
   const previewStepOrderWithIp = useMemo<string[] | null>(() => {
     if (!isHeavyUpload) return previewStepOrder;
-    const base = previewStepOrder ?? [];
-    return [...IP_PREDECESSOR_STEPS, ...base.filter((s) => !IP_PREDECESSOR_STEPS.includes(s))];
+    return [...IP_PREDECESSOR_STEPS];
   }, [isHeavyUpload, previewStepOrder]);
 
   // 把预演链路推进 store（右栏 PIPELINE STATUS 跨 iframe 读取的唯一来源）。
@@ -775,35 +800,9 @@ export function TierModeSelector() {
       return;
     }
 
-    // 重需求路径（多模态/压缩包/多文件）：走 IP DNA 异步管线（蓝图 §5）。
+    // 重需求路径（多模态/压缩包/多文件）：走 IP DNA 半自动分步卡片，禁止底部按钮一键全自动（会跳过 ROUTING）。
     if (isHeavyUpload) {
-      actionLockRef.current = true;
-      setStarting(true);
-      setError(null);
-      try {
-        const files: IpDnaFilePayload[] = uploadedFiles.map((f) => ({
-          file_name: f.name,
-          content: f.kind === "text" ? f.content : undefined,
-          content_base64: f.kind !== "text" ? f.contentBase64 : undefined,
-          encoding: f.kind === "docx" ? "base64-docx" : f.kind === "text" ? "utf8" : undefined,
-          file_type: f.fileType,
-        }));
-        const resp = await startIpDnaRun(files, {
-          title: uploadedFiles[0]?.name?.replace(/\.[^.]+$/, ""),
-          tier: tier ?? undefined,
-          generationMode: mode ?? undefined,
-          complexity: showComplexity ? complexity : undefined,
-          routeGroup,
-          genreCode: (!!selectedGenreCode && routeGroup === "planning") ? selectedGenreCode : undefined,
-          runGeneration: true,
-        });
-        setIpDnaJob({ jobId: resp.jobId, status: (resp.status as IpDnaJobStatus["status"]) ?? "running" });
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        actionLockRef.current = false;
-        setStarting(false);
-      }
+      setError("重需求 IP 作品请走上方分步卡片：确认改编范围 → 在 ROUTING 选择叙事路由 → 点击「开始生成（IP DNA → 下游）」");
       return;
     }
 
@@ -862,8 +861,10 @@ export function TierModeSelector() {
       // 首次推送时建立 IP 预览运行轨：让中间画布/文本与正式生成同源（读 runningProgress + pipelineOrder），
       // 否则 IP 步因无 run 上下文而排不进预览（孤立浮节点 / 文本空）。独立旁路不触发 SSE、不撞并发守卫。
       if (!store.ipPreviewRunId && !store.runningRunId) {
-        // 仅 seed IP 前驱链：下游生成管线走 job 轮询无 SSE，若一并 seed 会留下永不点亮的 pending 节点。
-        store.startIpPreviewRun(`ip-preview-${Date.now()}`, `ip-preview:${Date.now()}`, [...IP_PREDECESSOR_STEPS]);
+        const diskKey = store.ipRunKey;
+        const suffix = diskKey ?? String(Date.now());
+        const entryKey = diskKey ? `ip-preview:${diskKey}` : `ip-preview:${suffix}`;
+        store.startIpPreviewRun(`ip-preview-${suffix}`, entryKey, [...IP_PREDECESSOR_STEPS]);
       }
       useNarrativeStore.getState().pushProgress({
         stage: stepId,
@@ -875,10 +876,8 @@ export function TierModeSelector() {
         // 该步可读正文（文本直接展示 / 多模态以 @文件名 表示），中间文本视图据此渲染。
         data,
       });
-      // 末步（生成 scoped IP DNA）完成即收束预览轨：固化顺序、退出"运行中"态。
-      if (stepId === "ip_dna_extract" && status === "completed") {
-        useNarrativeStore.getState().finishIpPreview("completed");
-      }
+      // 不在 ip_dna_extract 完成时收束预览轨——节点需保留至用户配置 ROUTING 并手动触发生成；
+      // 收束由 cancel / 新 run 挂载 / 显式 reset 负责。
     },
     [],
   );
@@ -1428,6 +1427,7 @@ export function TierModeSelector() {
   const addFiles = useCallback(async (files: FileList | File[]) => {
     const list = Array.from(files);
     if (list.length === 0) return;
+    setRoutingConfigured(false);
     const items: UploadedItem[] = [];
     const rejected: string[] = [];
     for (const f of list) {
@@ -1463,6 +1463,7 @@ export function TierModeSelector() {
 
   const removeFile = useCallback((name: string) => {
     setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+    setRoutingConfigured(false);
     onConfigChange();
   }, [onConfigChange]);
 
@@ -1619,7 +1620,7 @@ export function TierModeSelector() {
                       tier={tier ?? undefined}
                       mode={mode ?? undefined}
                       complexity={showComplexity ? complexity : undefined}
-                      routingReady={selectedTierId !== "auto" || !!selectedGenreCode || selectedNarrativeRoute !== "narrative_auto"}
+                      routingReady={ipRoutingReady}
                       onStageProgress={pushIpStageProgress}
                       onGenerateStarted={(jobId) => setIpDnaJob({ jobId, status: "running" })}
                     />
@@ -1685,7 +1686,7 @@ export function TierModeSelector() {
                   role="tab"
                   aria-selected={routeGroup === id}
                   className={`wb-segmented-btn ${routeGroup === id ? "active" : ""}`}
-                  onClick={() => { setRouteGroup(id); onConfigChange(); }}
+                  onClick={() => { setRouteGroup(id); setRoutingConfigured(true); onConfigChange(); }}
                 >
                   <Icon className="wb-segmented-icon" size={13} strokeWidth={2} aria-hidden />
                   <span>{label}</span>
@@ -1708,6 +1709,7 @@ export function TierModeSelector() {
                 value={selectedTierId}
                 onChange={(val) => {
                   setSelectedTierId(val as TierId | "auto");
+                  setRoutingConfigured(true);
                   onConfigChange();
                 }}
                 options={TIER_ITEMS.map((t) => ({
@@ -1738,10 +1740,12 @@ export function TierModeSelector() {
                   onChange={(val) => {
                     if (!val) {
                       setSelectedGenreCode(null);
+                      setRoutingConfigured(true);
                       onConfigChange();
                       return;
                     }
                     setSelectedGenreCode(val);
+                    setRoutingConfigured(true);
                     const found = genreCategories
                       .flatMap((c) => c.genres)
                       .find((g) => g.code === val);
@@ -1786,6 +1790,7 @@ export function TierModeSelector() {
                 value={selectedNarrativeRoute}
                 onChange={(val) => {
                   setSelectedNarrativeRoute(val as ModeId);
+                  setRoutingConfigured(true);
                   onConfigChange();
                 }}
                 options={NARRATIVE_ROUTES.map((opt) => {
@@ -1917,9 +1922,9 @@ export function TierModeSelector() {
         <div className="tool-action-row__main">
           <button
             type="button"
-            className={`btn-cancel btn-cancel--compact${(isRunning || isViewingRunning || ipDnaRunning) ? " btn-cancel--active" : ""}`}
+            className={`btn-cancel btn-cancel--compact${(isGenerating || isIpPreprocessing) ? " btn-cancel--active" : ""}`}
             onClick={handleCancel}
-            disabled={!isRunning && !isViewingRunning && !ipDnaRunning}
+            disabled={!isGenerating && !isIpPreprocessing}
           >
             取消生成
           </button>
@@ -1946,9 +1951,10 @@ export function TierModeSelector() {
               type="button"
               className="btn-generate btn-generate--compact"
               onClick={handleStart}
-              disabled={primaryAction === "none" || starting || isRunning || ipDnaRunning || (!userInput.trim() && uploadedFiles.length === 0)}
+              disabled={primaryAction === "none" || starting || isGenerating || isHeavyUpload || (!userInput.trim() && uploadedFiles.length === 0)}
+              title={isHeavyUpload ? "重需求 IP 请使用上方分步卡片的「开始生成（IP DNA → 下游）」" : undefined}
             >
-              {starting ? "启动中..." : isViewingRunning ? "生成中..." : isRunning ? "等待运行结束" : "开始生成"}
+              {starting ? "启动中..." : isGenerating ? "生成中..." : "开始生成"}
             </button>
           )}
         </div>

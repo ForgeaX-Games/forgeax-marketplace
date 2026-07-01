@@ -1,23 +1,27 @@
 /**
- * 文件系统布局（Filesystem Layout）—— 蓝图 §6「落盘与文件系统」/ §14.2 D4-D5 的可执行实现。
+ * 文件系统布局（Filesystem Layout）—— 蓝图 §6.1「媒体优先 input 目录」/ §14.2 D4-D5 的可执行实现。
  *
- * 两大根目录（与现有 api/server.ts 的 output 约定对齐）：
+ * 输入侧 = 媒体优先（book_default）：媒体类型在最顶层、阶段其次、<run> 在叶子。
  *
- *   input/<时间戳>_<故事名>/         （输入侧三段式）
- *     ├─ _original/                   原始上传（多模态/压缩包，Phase0 归档）
- *     ├─ _processing/                 标准化中间产物（含 _compress 解压临时区，Phase1）
- *     │    └─ _compress/
- *     └─ _extraction_output/          IP DNA 提取产物（三件套，Phase2）
- *          └─ <node_id>/{template,operators,metadata}.json   ← 每层每文件夹必有三件套
+ *   input/package/<run>/<archive>                            压缩包本体专门目录（原样保留）
+ *   input/book/story_book/book_original/<run>/...            文字原始件（含解压成员，保留相对路径）
+ *   input/book/story_book/book_processing/<run>/...          标准化（standardized.txt + <最小叙事单元>/content.md）
+ *   input/book/story_book/book_extraction_output/<run>/      统一：_hierarchy.json + <node>/三件套 + 指令/确认/清单
+ *   input/picture/story_picture/picture_{original,compress,processing,extraction_output}/<run>/
+ *   input/video/story_video/video_{original,compress,processing,extraction_output}/<run>/
  *
- *   output/<时间戳>_<故事名>/        （输出侧，生成产物）
- *     ├─ <序号>_<名>.<ext>            生成步骤产物（沿用 server.ts 既有格式）
- *     ├─ 算子方案/                     算子方案 JSON（§6.4，文件名不带时间戳）
- *     │    └─ <节点>_operator_solution.json
- *     └─ _checkpoint.json             断点续传
+ * 主媒体（primaryFamilyOf）：统一层级树/三件套/指令/清单/standardized.txt 落主媒体家族
+ * （book/mixed→book、picture/comic→picture、video→video）；原始件按各自模态分家。
+ * 读取侧无 media_type 时按 book→picture→video + legacy 兜底解析（resolveStageDir）。
  *
- * input 与 output 同名（<时间戳>_<故事名>）即可关联同一完整故事（§6.0）。
+ *   output/<run>/                    （输出侧，生成产物；本次不迁移，保持原约定）
+ *     ├─ <序号>_<名>.<ext> / game_unit_N.json
+ *     ├─ 算子方案/<节点>_operator_solution.json
+ *     └─ manifest.json / _long_memory_ledger.json
+ *
+ * <run> = <时间戳>_<故事名>，input 与 output 同名即关联同一完整故事（§6.0）。
  * 层级树支持按层分文件懒加载（§14.2 D4）：层级树本身是索引，三件套按节点目录存放。
+ * legacy（run 优先 input/<run>/{_original,_processing,_extraction_output}）仅读取兜底，不再写入。
  */
 
 import * as fs from "node:fs";
@@ -31,6 +35,7 @@ import type {
   OperatorSolution,
   StoryTimestamp,
   UserAssetManifest,
+  IpMediaType,
 } from "../types/narrative-ip-dna.js";
 import { NARRATIVE_IP_DNA_SCHEMA_VERSION, migrateIpDnaSchema } from "../types/narrative-ip-dna.js";
 
@@ -68,93 +73,196 @@ function resolveCwd(roots?: LayoutRoots): string {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 输入侧三段式路径
+// 媒体优先布局（§6.1）：input/<媒体>/story_<媒体>/<媒体>_<阶段>/<run>/
 // ─────────────────────────────────────────────────────────────────
 
-export function inputRunDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(resolveCwd(roots), "input", runName(timestamp, title));
-}
+/** 媒体家族键（落盘三大家族）。 */
+export type MediaFamilyKey = "book" | "picture" | "video";
 
-export function originalDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(inputRunDir(timestamp, title, roots), "_original");
-}
-
-/** 输入模态（§2 模态分目录）；映射自 modalityOf 的 text/image/video。 */
+/** 输入模态（§2）；映射自 modalityOf 的 text/image/video。 */
 export type InputModality = "text" | "image" | "video";
 
-/** 模态 → _original 子目录名（对齐产品蓝图命名：text→book、image→picture、video→video）。 */
-export const MODAL_SUBDIR: Record<InputModality, string> = {
-  text: "book",
-  image: "picture",
-  video: "video",
+/** 模态 → 媒体家族（text→book、image→picture、video→video）。 */
+export function familyOfModality(m: InputModality): MediaFamilyKey {
+  return m === "image" ? "picture" : m === "video" ? "video" : "book";
+}
+
+/**
+ * IpMediaType → 主媒体家族：统一层级树/三件套/指令/清单/standardized.txt 的落点（book_default）。
+ * mixed/book→book（文字优先）、picture/comic→picture、video→video。
+ */
+export function primaryFamilyOf(media: IpMediaType): MediaFamilyKey {
+  switch (media) {
+    case "picture":
+    case "comic":
+      return "picture";
+    case "video":
+      return "video";
+    default:
+      return "book"; // book / mixed
+  }
+}
+
+/**
+ * 各媒体家族的目录布局（§6.1）：家族路径段 + 阶段目录前缀。
+ * 阶段目录前缀统一用家族键（book/picture/video），不再带 story_ 冗余前缀，落点形如：
+ *   input/book/story_book/book_{original,processing,extraction_output}/<run>/
+ *   input/picture/story_picture/picture_{...}/<run>/
+ *   input/video/story_video/video_{...}/<run>/
+ */
+const FAMILY_LAYOUT: Record<MediaFamilyKey, { family: readonly string[]; prefix: string }> = {
+  book: { family: ["book", "story_book"], prefix: "book" },
+  picture: { family: ["picture", "story_picture"], prefix: "picture" },
+  video: { family: ["video", "story_video"], prefix: "video" },
 };
 
-/** 模态分目录：input/<run>/_original/<book|picture|video>/（§2）。 */
-export function modalOriginalDir(
+const ALL_FAMILIES: readonly MediaFamilyKey[] = ["book", "picture", "video"];
+
+type LayoutStage = "original" | "compress" | "processing" | "extraction_output";
+
+/** 媒体优先某家族某阶段的运行目录：input/<媒体>/story_<媒体>/<前缀>_<阶段>/<run>/。 */
+function familyStageDir(cwd: string, family: MediaFamilyKey, stage: LayoutStage, run: string): string {
+  const { family: fam, prefix } = FAMILY_LAYOUT[family];
+  return path.join(cwd, "input", ...fam, `${prefix}_${stage}`, run);
+}
+
+/** legacy（run 优先）阶段目录：input/<run>/{_original|_processing|_extraction_output|_processing/_compress}。 */
+function legacyStageDir(cwd: string, stage: LayoutStage, run: string): string {
+  switch (stage) {
+    case "original":
+      return path.join(cwd, "input", run, "_original");
+    case "processing":
+      return path.join(cwd, "input", run, "_processing");
+    case "compress":
+      return path.join(cwd, "input", run, "_processing", "_compress");
+    case "extraction_output":
+      return path.join(cwd, "input", run, "_extraction_output");
+  }
+}
+
+/**
+ * 读取侧家族解析：在 book→picture→video 各家族 + legacy 中，找首个「含 marker 文件」的某阶段运行目录。
+ * 写入侧无 media 时（如 adaptation 落盘）亦可借此定位既有 extraction 目录；找不到由调用方兜底默认 book。
+ */
+function resolveStageDir(
+  cwd: string,
+  run: string,
+  stage: LayoutStage,
+  marker?: string,
+): string | undefined {
+  const hit = (d: string): boolean => (marker ? fs.existsSync(path.join(d, marker)) : fs.existsSync(d));
+  for (const fam of ALL_FAMILIES) {
+    const d = familyStageDir(cwd, fam, stage, run);
+    if (hit(d)) return d;
+  }
+  const legacy = legacyStageDir(cwd, stage, run);
+  if (hit(legacy)) return legacy;
+  return undefined;
+}
+
+/** 写入侧定位既有 extraction 目录（按 _hierarchy.json 标记），找不到则默认 book 主媒体（创建）。 */
+function resolveExtractionDirForWrite(cwd: string, run: string): string {
+  return (
+    resolveStageDir(cwd, run, "extraction_output", HIERARCHY_INDEX_FILE) ??
+    familyStageDir(cwd, "book", "extraction_output", run)
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 输入侧路径（媒体优先）
+// ─────────────────────────────────────────────────────────────────
+
+/** 压缩包本体专门目录：input/package/<run>/（原样保留，标准化时再解压分家）。 */
+export function packageDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
+  return path.join(resolveCwd(roots), "input", "package", runName(timestamp, title));
+}
+
+/** 某媒体家族的原始件目录：input/<媒体>/story_<媒体>/<前缀>_original/<run>/。 */
+export function mediaOriginalDir(
   timestamp: StoryTimestamp,
   title: string,
-  modality: InputModality,
+  family: MediaFamilyKey,
   roots?: LayoutRoots,
 ): string {
-  return path.join(originalDir(timestamp, title, roots), MODAL_SUBDIR[modality]);
+  return familyStageDir(resolveCwd(roots), family, "original", runName(timestamp, title));
 }
 
-/** 压缩包暂存目录：input/<run>/_package/（§2，解压后成员归入各模态 _original）。 */
-export function packageDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(inputRunDir(timestamp, title, roots), "_package");
+/** 某媒体家族的压缩目录（图片/视频）：<前缀>_compress/<run>/。 */
+export function compressDir(
+  timestamp: StoryTimestamp,
+  title: string,
+  family: MediaFamilyKey,
+  roots?: LayoutRoots,
+): string {
+  return familyStageDir(resolveCwd(roots), family, "compress", runName(timestamp, title));
 }
 
-export function processingDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(inputRunDir(timestamp, title, roots), "_processing");
+/** 主媒体标准化目录：<主媒体前缀>_processing/<run>/（standardized.txt + <node>/content.md）。 */
+export function processingDir(
+  timestamp: StoryTimestamp,
+  title: string,
+  media: IpMediaType,
+  roots?: LayoutRoots,
+): string {
+  return familyStageDir(resolveCwd(roots), primaryFamilyOf(media), "processing", runName(timestamp, title));
 }
 
-export function compressDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(processingDir(timestamp, title, roots), "_compress");
-}
-
-/** 某节点的标准化处理目录：_processing/<节点>/（每节点一目录，存 content.md）。 */
+/**
+ * 某最小叙事单元的标准化处理目录：<processing>/<规范名>/（每单元一目录，存 content.md）。
+ * 文件夹名直接用对外规范名（nodeTitle = displayName「序号_《标题》」），不再加 nodeId 前缀；
+ * 规范名已含序号天然唯一，仅在为空时回退 nodeId 兜底，避免空目录名。
+ */
 export function nodeProcessingDir(
   timestamp: StoryTimestamp,
   title: string,
+  media: IpMediaType,
   nodeId: string,
   nodeTitle: string,
   roots?: LayoutRoots,
 ): string {
-  const folder = `${safeName(nodeId)}_${safeName(nodeTitle).slice(0, 40)}`;
-  return path.join(processingDir(timestamp, title, roots), folder);
+  const folder = safeName(nodeTitle).slice(0, 80) || safeName(nodeId);
+  return path.join(processingDir(timestamp, title, media, roots), folder);
 }
 
 /**
- * 落盘单个节点的标准化正文为嵌套 markdown（_processing/<节点>/content.md，§6.1）。
+ * 落盘单个节点的标准化正文为嵌套 markdown（<processing>/<节点>/content.md，§6.1）。
  * 标准化产物按层级树结构镜像存放，便于审阅与断点续处理。
  */
 export function saveNodeProcessingMarkdown(
   timestamp: StoryTimestamp,
   title: string,
+  media: IpMediaType,
   nodeId: string,
   nodeTitle: string,
   content: string,
   roots?: LayoutRoots,
 ): string {
-  const dir = nodeProcessingDir(timestamp, title, nodeId, nodeTitle, roots);
+  const dir = nodeProcessingDir(timestamp, title, media, nodeId, nodeTitle, roots);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "content.md");
   fs.writeFileSync(file, `# ${nodeTitle}\n\n${content}\n`, "utf-8");
   return file;
 }
 
-export function extractionOutputDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
-  return path.join(inputRunDir(timestamp, title, roots), "_extraction_output");
+/** 主媒体提取产物目录：<主媒体前缀>_extraction_output/<run>/（统一层级树/三件套/指令/清单）。 */
+export function extractionOutputDir(
+  timestamp: StoryTimestamp,
+  title: string,
+  media: IpMediaType,
+  roots?: LayoutRoots,
+): string {
+  return familyStageDir(resolveCwd(roots), primaryFamilyOf(media), "extraction_output", runName(timestamp, title));
 }
 
-/** 某层级节点的三件套目录。 */
+/** 某层级节点的三件套目录（写入侧，按 media 定位主媒体 extraction）。 */
 export function nodeTriadDir(
   timestamp: StoryTimestamp,
   title: string,
+  media: IpMediaType,
   nodeId: string,
   roots?: LayoutRoots,
 ): string {
-  return path.join(extractionOutputDir(timestamp, title, roots), safeName(nodeId));
+  return path.join(extractionOutputDir(timestamp, title, media, roots), safeName(nodeId));
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -163,6 +271,39 @@ export function nodeTriadDir(
 
 export function outputRunDir(timestamp: StoryTimestamp, title: string, roots?: LayoutRoots): string {
   return path.join(resolveCwd(roots), "output", runName(timestamp, title));
+}
+
+/** 文件浏览分组（环节）键 → 中文标签，供「按环节看文件」UI 用。 */
+export const RUN_ARTIFACT_GROUP_LABELS: Record<string, string> = {
+  original: "原始件",
+  processing: "标准化",
+  extraction_output: "抽取产物",
+  package: "压缩包",
+  output: "生成产物",
+};
+
+/**
+ * 某 run 的全部产物根目录（按环节分组）：输出（生产产物）+ 输入各阶段
+ * （original/processing/extraction_output 跨家族 + legacy 兜底）+ package 压缩包本体。
+ * 只返回真实存在的目录；run 即磁盘运行键（`<时间戳>_<标题>` 或生产侧时间戳）。
+ * 用于让中间预览「按环节读取并展示 input/ 与 output/ 两侧文件」。
+ */
+export function runArtifactRoots(run: string, roots?: LayoutRoots): Array<{ group: string; dir: string }> {
+  const cwd = resolveCwd(roots);
+  const result: Array<{ group: string; dir: string }> = [];
+  const pushIf = (group: string, dir: string): void => {
+    if (fs.existsSync(dir) && !result.some((r) => r.dir === dir)) result.push({ group, dir });
+  };
+  // 输入各阶段（跨家族枚举 + legacy 兜底）。
+  for (const stage of ["original", "processing", "extraction_output"] as LayoutStage[]) {
+    for (const fam of ALL_FAMILIES) pushIf(stage, familyStageDir(cwd, fam, stage, run));
+    pushIf(stage, legacyStageDir(cwd, stage, run));
+  }
+  // 压缩包本体。
+  pushIf("package", path.join(cwd, "input", "package", run));
+  // 输出（生产产物）。
+  pushIf("output", path.join(cwd, "output", run));
+  return result;
 }
 
 /** IP DNA 运行清单文件名（output/<runId>/manifest.json，与既有 narrative 运行清单同名同构）。 */
@@ -227,8 +368,8 @@ function readJson<T>(filepath: string): T | undefined {
  * 这样上层只需读 `_hierarchy.json` 即可遍历结构，三件套按需懒加载（§14.2 D4）。
  */
 export function saveIpDna(dna: NarrativeIpDna, roots?: LayoutRoots): void {
-  const { story_id, title } = dna;
-  const extractDir = extractionOutputDir(story_id, title, roots);
+  const { story_id, title, media_type } = dna;
+  const extractDir = extractionOutputDir(story_id, title, media_type, roots);
   fs.mkdirSync(extractDir, { recursive: true });
 
   // 索引：节点结构（剥离三件套正文，仅留是否存在的标记由文件系统体现）。
@@ -245,7 +386,7 @@ export function saveIpDna(dna: NarrativeIpDna, roots?: LayoutRoots): void {
 
   // 三件套：每节点一个目录。
   for (const node of Object.values(dna.nodes)) {
-    const dir = nodeTriadDir(story_id, title, node.id, roots);
+    const dir = nodeTriadDir(story_id, title, media_type, node.id, roots);
     if (node.template !== undefined) writeJson(path.join(dir, TRIAD_FILES.template), node.template);
     if (node.operators !== undefined) writeJson(path.join(dir, TRIAD_FILES.operators), node.operators);
     if (node.metadata !== undefined) writeJson(path.join(dir, TRIAD_FILES.metadata), node.metadata);
@@ -267,8 +408,8 @@ export const ADAPTATION_CONFIRMATION_FILE = "_adaptation_confirmation.json";
  * 不写三件套目录（便宜，覆盖整部）。后续 runExtract 会用 saveIpDna 覆盖为完整版。
  */
 export function saveHierarchyIndexOnly(dna: NarrativeIpDna, roots?: LayoutRoots): void {
-  const { story_id, title } = dna;
-  const extractDir = extractionOutputDir(story_id, title, roots);
+  const { story_id, title, media_type } = dna;
+  const extractDir = extractionOutputDir(story_id, title, media_type, roots);
   fs.mkdirSync(extractDir, { recursive: true });
   const index: NarrativeIpDna = {
     ...dna,
@@ -282,13 +423,15 @@ export function saveHierarchyIndexOnly(dna: NarrativeIpDna, roots?: LayoutRoots)
   writeJson(path.join(extractDir, HIERARCHY_INDEX_FILE), index);
 }
 
-/** 读取标准化全文（_processing/standardized.txt），阶段门续跑时重建提取所需正文。 */
+/** 读取标准化全文（<processing>/standardized.txt），阶段门续跑时重建提取所需正文。媒体家族 + legacy 兜底。 */
 export function loadStandardizedText(
   timestamp: StoryTimestamp,
   title: string,
   roots?: LayoutRoots,
 ): string | undefined {
-  const file = path.join(processingDir(timestamp, title, roots), STANDARDIZED_TEXT_FILE);
+  const dir = resolveStageDir(resolveCwd(roots), runName(timestamp, title), "processing", STANDARDIZED_TEXT_FILE);
+  if (!dir) return undefined;
+  const file = path.join(dir, STANDARDIZED_TEXT_FILE);
   if (!fs.existsSync(file)) return undefined;
   return fs.readFileSync(file, "utf-8");
 }
@@ -299,18 +442,19 @@ export function saveAdaptationDirective(
   title: string,
   roots?: LayoutRoots,
 ): void {
-  const dir = extractionOutputDir(directive.story_id, title, roots);
+  const dir = resolveExtractionDirForWrite(resolveCwd(roots), runName(directive.story_id, title));
   fs.mkdirSync(dir, { recursive: true });
   writeJson(path.join(dir, ADAPTATION_DIRECTIVE_FILE), directive);
 }
 
-/** 只读改编指令（§4.4），无则 undefined。 */
+/** 只读改编指令（§4.4），无则 undefined。媒体家族 + legacy 兜底。 */
 export function loadAdaptationDirective<T = unknown>(
   timestamp: StoryTimestamp,
   title: string,
   roots?: LayoutRoots,
 ): T | undefined {
-  return readJson<T>(path.join(extractionOutputDir(timestamp, title, roots), ADAPTATION_DIRECTIVE_FILE));
+  const dir = resolveStageDir(resolveCwd(roots), runName(timestamp, title), "extraction_output", ADAPTATION_DIRECTIVE_FILE);
+  return dir ? readJson<T>(path.join(dir, ADAPTATION_DIRECTIVE_FILE)) : undefined;
 }
 
 /**
@@ -323,7 +467,7 @@ export function saveAdaptationConfirmation(
   patch: Record<string, unknown>,
   roots?: LayoutRoots,
 ): Record<string, unknown> {
-  const dir = extractionOutputDir(timestamp, title, roots);
+  const dir = resolveExtractionDirForWrite(resolveCwd(roots), runName(timestamp, title));
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, ADAPTATION_CONFIRMATION_FILE);
   const prev = readJson<Record<string, unknown>>(file) ?? {};
@@ -332,66 +476,115 @@ export function saveAdaptationConfirmation(
   return merged;
 }
 
-/** 只读改编确认态（阶段门）。 */
+/** 只读改编确认态（阶段门）。媒体家族 + legacy 兜底。 */
 export function loadAdaptationConfirmation(
   timestamp: StoryTimestamp,
   title: string,
   roots?: LayoutRoots,
 ): Record<string, unknown> | undefined {
-  return readJson<Record<string, unknown>>(
-    path.join(extractionOutputDir(timestamp, title, roots), ADAPTATION_CONFIRMATION_FILE),
-  );
+  const dir = resolveStageDir(resolveCwd(roots), runName(timestamp, title), "extraction_output", ADAPTATION_CONFIRMATION_FILE);
+  return dir ? readJson<Record<string, unknown>>(path.join(dir, ADAPTATION_CONFIRMATION_FILE)) : undefined;
 }
 
 /**
- * 落盘《用户资产参考清单》(§6.2) 到 input 运行目录根（user_asset_manifest.json）。
+ * 落盘《用户资产参考清单》(§6.2) 到主媒体 extraction_output 运行目录（user_asset_manifest.json）。
  * 随阶段更新 processing_status / guessed_levels 后复调即可覆盖（幂等）。
  */
 export function saveManifest(manifest: UserAssetManifest, roots?: LayoutRoots): void {
-  const dir = inputRunDir(manifest.story_id, manifest.title, roots);
+  const dir = extractionOutputDir(manifest.story_id, manifest.title, manifest.media_type, roots);
   fs.mkdirSync(dir, { recursive: true });
   writeJson(path.join(dir, USER_ASSET_MANIFEST_FILE), manifest);
 }
 
-/** 只读《用户资产参考清单》(§6.2)。 */
+/** 只读《用户资产参考清单》(§6.2)，按 runId 定位。媒体家族 + legacy 兜底。 */
+export function loadManifestByRun(runId: string, roots?: LayoutRoots): UserAssetManifest | undefined {
+  const cwd = resolveCwd(roots);
+  const run = safeName(runId);
+  const dir = resolveStageDir(cwd, run, "extraction_output", USER_ASSET_MANIFEST_FILE)
+    // legacy manifest 旧版落在 input/<run>/ 根，不在 _extraction_output 下，单独兜底。
+    ?? (fs.existsSync(path.join(cwd, "input", run, USER_ASSET_MANIFEST_FILE))
+      ? path.join(cwd, "input", run)
+      : undefined);
+  return dir ? readJson<UserAssetManifest>(path.join(dir, USER_ASSET_MANIFEST_FILE)) : undefined;
+}
+
+/** 只读《用户资产参考清单》(§6.2)。媒体家族 + legacy 兜底。 */
 export function loadManifest(
   timestamp: StoryTimestamp,
   title: string,
   roots?: LayoutRoots,
 ): UserAssetManifest | undefined {
-  return readJson<UserAssetManifest>(
-    path.join(inputRunDir(timestamp, title, roots), USER_ASSET_MANIFEST_FILE),
-  );
+  return loadManifestByRun(runName(timestamp, title), roots);
 }
 
-/** 只读层级树索引（按 runId=<时间戳>_<故事名> 直接定位，前端审阅用）。 */
+/** 媒体优先布局下的「输入根」目录名（非运行键）：扫描历史时需跳过这些容器目录。 */
+export const INPUT_CONTAINER_DIRS: ReadonlySet<string> = new Set([
+  "book", "picture", "video", "package", "text", "user_input",
+]);
+
+/**
+ * 列举所有「IP 运行键」（=<时间戳>_<故事名>）：遍历三大媒体家族的 original/processing/extraction_output
+ * 子目录 + legacy（input/<run>/_extraction_output 或根 manifest）收集去重。供 history 列出中断运行（§5.1）。
+ */
+export function listInputRunKeys(roots?: LayoutRoots): string[] {
+  const cwd = resolveCwd(roots);
+  const keys = new Set<string>();
+  const addDirsIn = (p: string): void => {
+    try {
+      for (const e of fs.readdirSync(p, { withFileTypes: true })) if (e.isDirectory()) keys.add(e.name);
+    } catch {
+      /* 目录不存在则跳过 */
+    }
+  };
+  for (const fam of ALL_FAMILIES) {
+    const { family, prefix } = FAMILY_LAYOUT[fam];
+    const famRoot = path.join(cwd, "input", ...family);
+    for (const stage of ["original", "processing", "extraction_output"] as const) {
+      addDirsIn(path.join(famRoot, `${prefix}_${stage}`));
+    }
+  }
+  // legacy（run 优先）：input/<run> 且含 _extraction_output / 根 manifest。
+  try {
+    for (const e of fs.readdirSync(path.join(cwd, "input"), { withFileTypes: true })) {
+      if (!e.isDirectory() || INPUT_CONTAINER_DIRS.has(e.name)) continue;
+      const runRoot = path.join(cwd, "input", e.name);
+      if (fs.existsSync(path.join(runRoot, "_extraction_output")) || fs.existsSync(path.join(runRoot, USER_ASSET_MANIFEST_FILE))) {
+        keys.add(e.name);
+      }
+    }
+  } catch {
+    /* input 不存在则跳过 */
+  }
+  return [...keys];
+}
+
+/** 只读层级树索引（按 runId=<时间戳>_<故事名> 直接定位，前端审阅用）。媒体家族 + legacy 兜底。 */
 export function loadHierarchyIndexByRun(runId: string, roots?: LayoutRoots): NarrativeIpDna | undefined {
-  const raw = readJson<NarrativeIpDna>(
-    path.join(resolveCwd(roots), "input", safeName(runId), "_extraction_output", HIERARCHY_INDEX_FILE),
-  );
+  const dir = resolveStageDir(resolveCwd(roots), safeName(runId), "extraction_output", HIERARCHY_INDEX_FILE);
+  if (!dir) return undefined;
+  const raw = readJson<NarrativeIpDna>(path.join(dir, HIERARCHY_INDEX_FILE));
   return raw ? migrateIpDnaSchema(raw) : undefined;
 }
 
-/** 只读层级树索引（懒加载入口，不加载三件套正文）。加载即按需做 schema 迁移（§14.2 D5）。 */
+/** 只读层级树索引（懒加载入口，不加载三件套正文）。媒体家族 + legacy 兜底；加载即按需 schema 迁移（§14.2 D5）。 */
 export function loadHierarchyIndex(
   timestamp: StoryTimestamp,
   title: string,
   roots?: LayoutRoots,
 ): NarrativeIpDna | undefined {
-  const raw = readJson<NarrativeIpDna>(
-    path.join(extractionOutputDir(timestamp, title, roots), HIERARCHY_INDEX_FILE),
-  );
-  return raw ? migrateIpDnaSchema(raw) : undefined;
+  return loadHierarchyIndexByRun(runName(timestamp, title), roots);
 }
 
-/** 按需加载单个节点的三件套（懒加载）。 */
+/** 按需加载单个节点的三件套（懒加载）。媒体家族 + legacy 兜底定位 extraction 目录。 */
 export function loadNodeTriad(
   timestamp: StoryTimestamp,
   title: string,
   nodeId: string,
   roots?: LayoutRoots,
 ): { template?: NarrativeTemplate; operators?: NarrativeOperator[]; metadata?: NodeMetadata } {
-  const dir = nodeTriadDir(timestamp, title, nodeId, roots);
+  const extractDir = resolveStageDir(resolveCwd(roots), runName(timestamp, title), "extraction_output", HIERARCHY_INDEX_FILE);
+  if (!extractDir) return {};
+  const dir = path.join(extractDir, safeName(nodeId));
   return {
     template: readJson<NarrativeTemplate>(path.join(dir, TRIAD_FILES.template)),
     operators: readJson<NarrativeOperator[]>(path.join(dir, TRIAD_FILES.operators)),

@@ -27,7 +27,11 @@ export function useOrderedSteps(): StepState[] {
 
   // IP 半自动预览（ipPreviewRunId）与正式 SSE run（runningRunId）共用"运行中视图"：
   // 都读 runningProgress + pipelineOrder，使 IP 各步与生成管线在文本/节点模式同源同序。
-  const isViewingRunning = activeEntryKey === runningEntryKey && (!!runningRunId || !!ipPreviewRunId);
+  // ipPreviewRunId 收束后仍保留 runningEntryKey + runningProgress 副本，继续走运行中视图保节点不丢。
+  const isViewingRunning =
+    activeEntryKey != null &&
+    activeEntryKey === runningEntryKey &&
+    (!!runningRunId || !!ipPreviewRunId || runningProgress.length > 0);
   const rawSteps = isViewingRunning ? runningProgress : activeSteps;
   const order = isViewingRunning ? pipelineOrder : activeConfigOrder ?? [];
 

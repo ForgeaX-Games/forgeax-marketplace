@@ -27,6 +27,8 @@ export function App() {
   const viewMode = useNarrativeStore((s) => s.viewMode);
   const setViewMode = useNarrativeStore((s) => s.setViewMode);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
+  const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const activeSteps = useNarrativeStore((s) => s.activeSteps);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
@@ -37,8 +39,13 @@ export function App() {
   const prevStepsRef = useRef<string>("");
 
   const isRunning = !!runningRunId;
-  const isViewingRunning = activeEntryKey === runningEntryKey;
-  const displayStatus = isViewingRunning && isRunning ? "running" : activeEntryStatus;
+  const isIpPreview = !!ipPreviewRunId;
+  const isViewingRunning =
+    activeEntryKey != null &&
+    activeEntryKey === runningEntryKey &&
+    (isRunning || isIpPreview || runningProgress.length > 0);
+  // 仅正式 SSE run 算 GENERATING；IP 半自动预处理用 idle（startIpPreviewRun 已设 activeEntryStatus=idle）。
+  const displayStatus = isRunning ? "running" : activeEntryStatus;
 
   // 自动挂载 agent（Kotone）在后台起的 run：让中间预览直播 + 左栏选择器回填，无需 host 转发。
   useAutoAttach();

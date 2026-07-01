@@ -71,8 +71,23 @@ export function cropByScope(dna: NarrativeIpDna, scope: AdaptationScope): Hierar
   const all = flattenMinimalUnits(dna);
   if (scope.full || !scope.selections || scope.selections.length === 0) return all;
 
+  const orderIndex = new Map<string, number>();
+  all.forEach((u, i) => orderIndex.set(u.id, i));
+
   const selectedIds = new Set<string>();
   const collectFromSelection = (sel: AdaptationScopeSelection): void => {
+    // 区间形态（每部=一个最小单元闭区间）：取文档序中 [start, end] 内全部叶子。
+    if (sel.leafRange) {
+      const lo = orderIndex.get(sel.leafRange.start);
+      const hi = orderIndex.get(sel.leafRange.end);
+      if (lo != null && hi != null) {
+        const [a, b] = lo <= hi ? [lo, hi] : [hi, lo];
+        for (let i = a; i <= b; i++) selectedIds.add(all[i].id);
+      }
+      if (sel.children) for (const child of sel.children) collectFromSelection(child);
+      return;
+    }
+    if (!sel.nodeId) return;
     const node = dna.nodes[sel.nodeId];
     if (!node) return;
     // 该选择节点子树下的全部叶子

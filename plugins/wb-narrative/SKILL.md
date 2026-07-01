@@ -14,16 +14,39 @@ trigger: /narrative
 
 默认行为：所有 Tier 走 `design_auto`（先跑策划 D0-D4，再根据需求矩阵动态追加叙事步骤）。
 
-## 6 个 Tool
+## 工具集（共 30 个，按用途分组）
+
+### 核心叙事管线（最常用）
 
 | tool id | 用途 | 关键 args |
 |---|---|---|
 | `narrative:start-pipeline` | 启动叙事管线 | `userInput`(必填), `tier?`, `mode?`, `genreCode?`, `complexity?` |
+| `narrative:resume-pipeline` | 断点续传 | `entryKey` |
 | `narrative:get-run-status` | 查询运行状态与结果 | `runId`, `includeResult?` |
 | `narrative:list-runs` | 列出历史运行记录 | 无必填 |
-| `narrative:export-result` | 导出结果到项目目录 | `runId`, `slug?`, `targetDir?` |
 | `narrative:cancel-run` | 取消正在运行的管线 | `runId` |
 | `narrative:regenerate-step` | 重生成指定步骤 | `sourceDir`, `fromStepId`, `userInstructions?` |
+| `narrative:export-result` | 导出结果到项目目录 | `runId`, `slug?`, `targetDir?` |
+| `narrative:load-history` | 加载某次运行完整结果 | `key` |
+
+### IP DNA 改编生成（从已有 IP 作品生成，见 README 同名章节）
+
+| tool id | 用途 | 关键 args |
+|---|---|---|
+| `narrative:ip-dna-start` | **全自动**改编：上传→标准化→提取→生成一路直跑 | `files`(必填), `mode?`, `genreCode?`, `generationMode?` |
+| `narrative:ip-dna-ingest` | **半自动**：仅摄入 + 标准化建树 | `files`(必填), `async?`, `decompose?` |
+| `narrative:ip-dna-get-hierarchy` | 取层级树 + 体量 + 默认改编范围 | `runId` |
+| `narrative:ip-dna-decompose` | 超体量再标准化 | `runId` |
+| `narrative:ip-dna-confirm-scope` | 确认改编范围 | `runId`, `scopeFull?` / `scopeSelections?` |
+| `narrative:ip-dna-confirm-units` | 确认游戏单元划分 | `runId`, `gameUnitPlan` |
+| `narrative:ip-dna-extract` | 生成 scoped IP DNA（三件套） | `runId` |
+| `narrative:ip-dna-generate` | 用 scoped IP DNA 驱动下游生成 | `runId` |
+| `narrative:ip-dna-get-job` / `ip-dna-cancel` | 异步任务状态查询 / 取消 | `jobId` |
+| `narrative:ip-dna-analyze-impact` | IP DNA 编辑影响面分析 | `runId` |
+
+### 查询 / 文件 / 编辑辅助
+
+`narrative:list-modes`、`list-genres`、`get-pipeline-nodes`、`get-story-tree`、`get-ip-dna`、`list-files`、`read-file`、`analyze-impact`、`get-stale-steps`、`get-review`、`set-review`。
 
 ## 意图→路由决策表
 

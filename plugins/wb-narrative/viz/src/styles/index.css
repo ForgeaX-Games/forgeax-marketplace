@@ -1396,6 +1396,94 @@ body[data-pane="center"] .app-header { display: none; }
 }
 .ip-stage-progress { font-size: 11px; color: var(--dt-text-sec); padding: 4px 2px; }
 .ip-stage-tree { display: grid; gap: 2px; }
+/* 标准化「层级化文件系统」下拉栏：可点下拉头 + 受限高度滚动体（跟范围区间裁剪一个形式）。 */
+.ip-hier-dd {
+  border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  background: var(--dt-bg-elevated, #1c1c1e);
+  overflow: hidden;
+}
+.ip-hier-dd__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--dt-text, #e8e8e8);
+  font-size: 11px;
+  text-align: left;
+}
+.ip-hier-dd__head:hover { background: rgba(255, 255, 255, 0.04); }
+.ip-hier-dd__caret { flex: 0 0 auto; width: 10px; color: var(--dt-text-sec, #b8b8b8); }
+.ip-hier-dd__summary { flex: 1 1 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-hier-dd__hint { flex: 0 0 auto; font-size: 10px; color: var(--dt-text-sec, #b8b8b8); }
+.ip-hier-dd__body {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-top: 1px solid var(--dt-border, rgba(255, 255, 255, 0.1));
+}
+
+/* 环节文件浏览器（文本阅读 / 节点视图复用）：按环节列真实落盘文件，点开内联读取，内容区限高滚动。 */
+.stage-files {
+  margin-top: 8px;
+  border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.stage-files--loading { padding: 6px 8px; font-size: 11px; color: var(--dt-text-sec, #b8b8b8); }
+.stage-files__head {
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dt-text-sec, #b8b8b8);
+  border-bottom: 1px solid var(--dt-border, rgba(255, 255, 255, 0.08));
+}
+.stage-files__scroll { max-height: 280px; overflow-y: auto; padding: 4px 6px; }
+.stage-files__group { margin-bottom: 4px; }
+.stage-files__group-label {
+  font-size: 10px;
+  color: var(--dt-text-sec, #9a9a9a);
+  padding: 3px 2px;
+  letter-spacing: 0.02em;
+}
+.stage-files__item { display: block; }
+.stage-files__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--dt-text, #e8e8e8);
+  font-size: 11px;
+  text-align: left;
+}
+.stage-files__file:hover { background: rgba(255, 255, 255, 0.05); }
+.stage-files__file.is-open { background: rgba(212, 255, 72, 0.1); }
+.stage-files__caret { flex: 0 0 auto; width: 10px; color: var(--dt-text-sec, #b8b8b8); }
+.stage-files__name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dt-font-mono, monospace); }
+.stage-files__content {
+  max-height: 320px;
+  overflow: auto;
+  margin: 2px 4px 6px 18px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--dt-bg-elevated, #16161a);
+  border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.1));
+  color: var(--dt-text, #dcdcdc);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .ip-tree-toggle {
   display: flex;
   align-items: center;
@@ -1466,6 +1554,7 @@ body[data-pane="center"] .app-header { display: none; }
 .ip-plan-row__del:hover { border-color: #f26a6a; color: #f26a6a; }
 .ip-plan-add {
   margin-top: 8px;
+  width: 100%;
   font-size: 11px;
   padding: 5px 10px;
   border-radius: 6px;
@@ -1475,6 +1564,38 @@ body[data-pane="center"] .app-header { display: none; }
   cursor: pointer;
 }
 .ip-plan-add:hover { background: rgba(212, 255, 72, 0.12); }
+/* +号下方注释（格式同其他 wb-helper 注释）：解释新增一部=游戏单元+1=系列。 */
+.ip-plan-add__hint { margin-top: 4px; }
+
+/* 每部=一个游戏单元=两行（点3）：第一行标题「第 N 部」（× 固定最右），第二行范围区间全宽。
+   范围区间行宽=面板全宽，所有下拉按数量平均分摊（flex:1 1 0），随侧边栏拉伸自适应。 */
+.ip-plan-rows { display: grid; gap: 10px; }
+.ip-plan-unit { display: grid; gap: 4px; }
+.ip-plan-unit__head { display: flex; align-items: center; justify-content: space-between; }
+.ip-plan-row__range {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; min-width: 0;
+}
+.ip-plan-row__side { display: flex; gap: 4px; align-items: center; flex: 1 1 0; min-width: 0; }
+/* flex:1 1 0 + min-width:0 → 每个下拉等宽平均分布，随面板宽度自适应收缩。 */
+.ip-plan-row__side .ip-scope-select { flex: 1 1 0; min-width: 0; }
+.ip-plan-row__tilde { color: var(--dt-text-sec, #b8b8b8); flex: 0 0 auto; font-weight: 600; }
+.ip-plan-row__del { flex: 0 0 auto; }
+
+/* 标准化执行前的待处理上传件行（仅名字，未展开）。 */
+.ip-tree-group--pending { display: flex; align-items: center; gap: 6px; opacity: 0.7; }
+
+/* 【问题】块：无序号，仅发现超大文件时出现（左=问题文案，下=否/是两按钮）。 */
+.ip-stage-question {
+  display: grid; gap: 8px; margin: 4px 0;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(242, 170, 76, 0.06);
+  border: 1px solid rgba(242, 170, 76, 0.28);
+}
+.ip-stage-question__text { margin: 0; font-size: 12px; color: var(--dt-text, #e8e8e8); }
+.ip-stage-question .ip-stage-btn { justify-self: start; }
+.ip-stage-btn--ghost { background: transparent; border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.22)); }
+
 .ip-plan-notes { display: grid; gap: 4px; margin-top: 10px; }
 .ip-plan-notes__input {
   font-size: 11px;
@@ -1493,8 +1614,14 @@ body[data-pane="center"] .app-header { display: none; }
   font-size: 11px;
   padding: 3px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  /* 展开的原生下拉列表会继承 select 的 background/color；用主题深底+亮字，
+     避免半透明叠在系统白色弹层上变成"白底白字"看不见。 */
+  background: var(--dt-bg-elevated, #1c1c1e);
   border: 1px solid var(--dt-border, rgba(255, 255, 255, 0.12));
+  color: var(--dt-text, #e8e8e8);
+}
+.ip-scope-select option {
+  background: var(--dt-bg-elevated, #1c1c1e);
   color: var(--dt-text, #e8e8e8);
 }
 /* 嵌套裁剪折叠树（§4 嵌套裁剪契约）。 */

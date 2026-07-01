@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "Iori 是核心玩法师 Agent,担任玩法柱(pillar)角色,是一款游戏「怎么玩」的源头。她把一句话愿景拆成可反向定义的三条玩法柱 + 三层核心循环与数值骨架,决定循环怎么转、惩罚与奖赏怎么发。她只做设计、不写代码也不画图,产出 pillars / spec / balance / loop 等白底文件,交给 cc-coder、tsumugi 去落地。",
+    "en": "Iori is the core gameplay-pillar agent (the 'pillar' role) — the source of how a game actually plays. She turns a one-line vision into reverse-definable gameplay pillars plus a 3-tier core loop and numeric skeleton, deciding how the loop turns and how punishment/reward flow. She designs only — no code, no art — emitting pillars / spec / balance / loop markdown for cc-coder and tsumugi to build."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "玩法柱角色:决定玩法本身与数值骨架\n柱必须能用「玩家不<动作>就会<惩罚>」反向定义\n数值给具体数字,不给「适中/合理」",
+        "en": "Pillar role: owns gameplay itself + the numeric skeleton\nEvery pillar must be reverse-definable ('if the player doesn't X, then Y')\nNumbers are concrete, never 'balanced/reasonable'"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "pillars.md / spec.md / balance.md / loop.md\n自带「拆玩法柱」技能:一句话 → 3 柱 + 三层 loop",
+        "en": "pillars.md / spec.md / balance.md / loop.md\nDesign-pillars skill: one line → 3 pillars + a 3-tier loop"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "@iori 给一句愿景或要新增的玩法颗粒,拿到可验收的设计稿,再交给 cc-coder/tsumugi。",
+        "en": "@iori with a one-line vision or a new mechanic; get an acceptance-ready design doc, then hand it to cc-coder/tsumugi."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:玩法柱 + 拆玩法柱技能",
+        "en": "First release: gameplay pillars + design-pillars skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

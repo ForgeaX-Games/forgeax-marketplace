@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "战斗重模拟工具。暴露 balance:resim 一个工具:对指定 scenario 跑 N 次 PvP/PvE 重模拟,在 in-process worker 里算出胜率(winRate)与 95% 置信区间并返回。它是数值平衡的客观度量来源,被 /make-game-design 技能与平衡工作台共用,让「这套数值公不公平」从拍脑袋变成可统计的数字。",
+    "en": "The combat-resimulation tool. It exposes a single tool, balance:resim: run N PvP/PvE resimulations of a given scenario in an in-process worker and return the win-rate with a 95% confidence interval. It's the objective measure behind numeric balance, shared by the make-game-design skill and the Balance workbench, turning 'is this fair' from a guess into a statistic."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "暴露 balance:resim 工具\nN 次 PvP/PvE 重模拟 → winRate + 95% CI\n跑 in-process worker",
+        "en": "Exposes the balance:resim tool\nN PvP/PvE resims → winRate + 95% CI\nRuns an in-process worker"
+      }
+    },
+    {
+      "title": {
+        "zh": "谁在用",
+        "en": "Used by"
+      },
+      "body": {
+        "zh": "/make-game-design 技能 + 平衡工作台数值调优",
+        "en": "The make-game-design skill + the Balance workbench"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:balance:resim 工具",
+        "en": "First release: balance:resim tool"
+      }
+    }
+  ]
+}

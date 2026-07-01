@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "动画工作台,把角色与物件「动起来」的一站式生成台。内置六条生成管线:像素角色四方向行走、序列帧 spritesheet、载具动画、怪物精灵、Spine 骨骼绑定,以及经 Kling 的 AI 视频生成。它以 iframe 嵌入 Studio,中间视口实时预览生成结果,产出可直接被引擎消费的动画资产,常接在角色编辑器之后做动作。",
+    "en": "The animation workbench — a one-stop台 for making characters and objects move. It ships six generators: 4-direction pixel walk cycles, sprite-sheets, vehicle animation, monster sprites, Spine rig binding, and AI video via Kling. Embedded in Studio as an iframe with a live center-viewport preview, it outputs engine-ready animation assets and typically follows the character editor."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "六条管线",
+        "en": "Six pipelines"
+      },
+      "body": {
+        "zh": "像素四方向 / spritesheet / 载具 / 怪物 / Spine / AI 视频(Kling)",
+        "en": "Pixel 4-dir / sprite-sheet / vehicle / monster / Spine / AI video (Kling)"
+      }
+    },
+    {
+      "title": {
+        "zh": "形态",
+        "en": "Shape"
+      },
+      "body": {
+        "zh": "iframe 嵌入 Studio,中间视口实时预览\n6 个 AI 工具(anim:generate-*)",
+        "en": "Embedded as an iframe with live center preview\n6 AI tools (anim:generate-*)"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 左侧打开「anim」面板开始创作",
+        "en": "Enable in Admin → open the 'anim' panel on the left"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:多管线动画生成",
+        "en": "First release: multi-pipeline animation"
+      }
+    },
+    {
+      "version": "0.1.31",
+      "date": "2026-06-16",
+      "notes": {
+        "zh": "管线打磨与视频生成完善",
+        "en": "Pipeline polish + video generation"
+      }
+    }
+  ]
+}

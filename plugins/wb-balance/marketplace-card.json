@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "平衡 / 数值工作台(规划中)。目标是给数值调优做一个可视化闭环:调用 balance:resim 工具对场景跑 N 次重模拟,在 dashboard 上显示胜率与 95% 置信区间,玩家据此手调数值、再跑一轮,直到平衡。当前为 marketplace 占位:工具(tool-balance-resim)已可用,工作台面板实现安排在后续 sprint。",
+    "en": "Balance & sim workbench (planned). The goal is a visual loop for numeric tuning: call the balance:resim tool to run N resimulations of a scenario, show win-rate and a 95% CI on a dashboard, then let the player tweak stats and re-run until balanced. Currently a marketplace placeholder: the tool (tool-balance-resim) already works; the workbench panel is scheduled for a later sprint."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "目标",
+        "en": "Goal"
+      },
+      "body": {
+        "zh": "调 balance:resim 跑 N 次重模拟\ndashboard 显示胜率 + 95% CI,闭环手调",
+        "en": "Drive balance:resim for N resims\nDashboard win-rate + 95% CI; manual-tune loop"
+      }
+    },
+    {
+      "title": {
+        "zh": "现状",
+        "en": "Status"
+      },
+      "body": {
+        "zh": "工具已可用;工作台面板待后续 sprint",
+        "en": "The tool works; the panel lands in a later sprint"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:占位入口",
+        "en": "First release: placeholder entry"
+      }
+    }
+  ]
+}

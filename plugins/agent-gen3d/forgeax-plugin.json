@@ -14,20 +14,37 @@
       "role": "modeling",
       "card": {
         "name": { "zh": "Gen3D", "en": "Gen3D" },
+        "cnTitle": "3D 角色生成师",
+        "enTitle": "3D Character Artist",
         "color": "#E0A458",
         "avatar": "🗿"
       },
       "personaFile": "./persona/zh.md",
       "memoryDir": "./memory/",
       "produces": [
-        "**/.forgeax/games/*/assets/3d/**"
+        "**/.forgeax/games/*/assets/3d/characters/**",
+        "**/.forgeax/games/*/assets/3d/meshes/**"
       ],
       "agentTags": ["gen3d", "3d", "角色", "character", "绑骨", "rig", "动作", "animation", "建模", "modeling"],
       "tools": ["gen3d:*"],
       "preferredCliProvider": "forgeax-native",
       "defaultLang": "zh",
-      "multiInstance": false
-    }
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "generate-3d-character" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "generate-3d-character",
+        "entry": "./skills/generate-3d-character/SKILL.md",
+        "displayName": { "zh": "生成一个 3D 角色", "en": "Generate a 3D Character" },
+        "description": {
+          "zh": "从一句需求 / 一张参考图生成一个带贴图、游戏可用的 3D 角色资产；默认静态，按需绑骨套动作，含质量评分与命名交付",
+          "en": "Turn a prompt or reference image into a textured, game-ready 3D character asset — static by default, rig / animate on demand, with quality scoring and named delivery"
+        }
+      }
+    ]
   },
   "experimental": true
 }

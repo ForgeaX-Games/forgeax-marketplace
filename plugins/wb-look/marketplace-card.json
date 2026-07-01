@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "色彩 / Look-dev 工作台(规划中)。目标是统一管理一款游戏的全局色调:colorgrade.toml 调色、theme.json 主题、后处理栈(palette + LUT + 后处理),让画面风格可集中调、可复用,并接 2D 风格迁移与 3D LookMaster。当前为 marketplace 占位:清单与入口就位,真实面板安排在后续 sprint 落地。",
+    "en": "Color & look-dev workbench (planned). The goal is to manage a game's global color centrally: colorgrade.toml grading, a theme.json, and a postprocess stack (palette + LUT + postprocess), making the look tunable and reusable, with 2D style-transfer and 3D LookMaster to follow. Currently a marketplace placeholder: manifest and entry are in place, with the real panel scheduled for a later sprint."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "目标",
+        "en": "Goal"
+      },
+      "body": {
+        "zh": "colorgrade.toml + theme.json + 后处理栈\npalette / LUT / 后处理统一全局色调",
+        "en": "colorgrade.toml + theme.json + postprocess stack\npalette / LUT / postprocess for global grading"
+      }
+    },
+    {
+      "title": {
+        "zh": "现状",
+        "en": "Status"
+      },
+      "body": {
+        "zh": "marketplace 占位,面板实现待后续 sprint",
+        "en": "Marketplace placeholder; panel lands in a later sprint"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:占位入口",
+        "en": "First release: placeholder entry"
+      }
+    }
+  ]
+}

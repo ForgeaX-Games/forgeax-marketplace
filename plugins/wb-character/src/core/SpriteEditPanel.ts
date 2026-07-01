@@ -361,7 +361,11 @@ export class SpriteEditPanel {
         box-shadow: 0 4px 12px rgba(255,107,53,0.4);
       }
 
-      /* Panel — game HUD style floating panel */
+      /* Panel — game HUD style floating panel.
+         NOTE: HP-editor uses an intentional golden fantasy theme
+         (rgba(255,215,100,*) gold + #ff6b35 orange + #e8e4d8 parchment + Cinzel),
+         distinct from the main neutral+lime editor tokens. Accepted as a themed
+         exception (owner decision 2026-06-29). See .ui-loop/issues.json A-R2. */
       .ce-hud-sprite-panel {
         position: absolute;
         bottom: 42px;
@@ -420,8 +424,9 @@ export class SpriteEditPanel {
         flex: 1; height: 3px;
         -webkit-appearance: none; appearance: none;
         background: rgba(255,215,100,0.15);
-        border-radius: 2px; outline: none;
+        border-radius: 2px; outline: 2px solid transparent; outline-offset: 1px;
       }
+      .ce-hp-row input[type="range"]:focus-visible { outline-color: var(--accent); }
       .ce-hp-row input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
         width: 10px; height: 10px;

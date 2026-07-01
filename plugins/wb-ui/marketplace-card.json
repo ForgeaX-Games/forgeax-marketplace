@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "UI 工坊工作台,按游戏类型、界面流程与视觉风格生成 UI。它校验 UI 模块/布局组合,经 Gemini 生图产出 UI 组件素材,预览 HUD、菜单、商店、对话、结算等游戏界面,并导出可交互的原型预览。视觉对齐 ForgeaX 主设计系统的 token 与 motion,嵌入 Studio 时由宿主 token 驱动最终风格,保证生成的界面与产品一致。",
+    "en": "The UI Workshop workbench — generate UI by game genre, screen flow and visual style. It validates UI module/layout combinations, generates component assets via Gemini image, previews HUD / menu / shop / dialog / result screens, and exports an interactive prototype preview. Visuals align to ForgeaX's main design-system tokens and motion; embedded in Studio the host tokens drive the final look so generated UI matches the product."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "按类型 / 流程 / 风格生成 UI 蓝图与组件素材(Gemini)\n预览 HUD / 菜单 / 商店 / 对话 / 结算",
+        "en": "Generate UI blueprints + component assets by genre/flow/style (Gemini)\nPreview HUD / menu / shop / dialog / result"
+      }
+    },
+    {
+      "title": {
+        "zh": "一致性",
+        "en": "Consistency"
+      },
+      "body": {
+        "zh": "对齐 ForgeaX 设计系统 token 与 motion",
+        "en": "Aligned to ForgeaX design-system tokens + motion"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「ui」面板或对话 /ui-workshop",
+        "en": "Enable in Admin → open 'ui' or type /ui-workshop"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:UI 工坊",
+        "en": "First release: UI workshop"
+      }
+    }
+  ]
+}

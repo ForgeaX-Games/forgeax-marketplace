@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "把仓库内置的 forgeax 命令(packages/cli)接成 ForgeaX Studio 的原生推理后端。runner spawn `forgeax chat --stream` 子进程,把 ChatEvent 流桥接到消息总线;支持流式、思考、工具调用、子 agent 与会话。它是「无需外部 CLI」的内置后端,新机器开箱即用,首次启动的默认引导也走它。",
+    "en": "Wires the in-repo forgeax command (packages/cli) in as ForgeaX Studio's native reasoning backend. The runner spawns `forgeax chat --stream` and bridges ChatEvent streams onto the bus, with streaming, thinking, tool calls, sub-agents and sessions. It is the built-in backend that needs no external CLI — works out of the box on a fresh machine and backs first-run onboarding."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "适配方式",
+        "en": "How it adapts"
+      },
+      "body": {
+        "zh": "Runner:forgeax chat --stream\nChatEvent 流桥接到 Bus",
+        "en": "Runner: forgeax chat --stream\nBridges ChatEvent streams to the Bus"
+      }
+    },
+    {
+      "title": {
+        "zh": "能力",
+        "en": "Capabilities"
+      },
+      "body": {
+        "zh": "流式 / 思考 / 工具调用 / 子 agent / 会话\n内置原生后端,无需外部 CLI",
+        "en": "streaming / thinking / tool calls / sub-agents / sessions\nNative built-in backend, no external CLI"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "开箱可用;面板管理可切换其他后端",
+        "en": "Works out of the box; switch backends in Admin"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-21",
+      "notes": {
+        "zh": "首版:内置 forgeax 后端适配",
+        "en": "First release: native forgeax backend adapter"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "BGM / 音效工作台,一个本地的音频素材库 + 配入游戏的工具。你搜索、试听音频素材库里的 BGM 与音效,选中后一键配入当前游戏:文件下载到 .forgeax/games/<slug>/audio/ 并写入(upsert)audio/manifest.json,引擎据 manifest 播放。它把「找一段合适的音乐/音效并接进游戏」这件事收进一个面板,搜、听、配一气呵成。",
+    "en": "The BGM & SFX workbench — a local audio asset library plus an attach-to-game tool. You search and preview BGM and SFX from the library, then attach a pick to the current game in one click: the file downloads into .forgeax/games/<slug>/audio/ and is upserted into audio/manifest.json, which the engine plays from. It folds 'find the right music/SFX and wire it into the game' into one panel — search, listen, attach in one go."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "搜索 + 试听音频素材库\n一键配入游戏 → audio/ + audio/manifest.json",
+        "en": "Search + preview the audio library\nOne-click attach → audio/ + audio/manifest.json"
+      }
+    },
+    {
+      "title": {
+        "zh": "工具",
+        "en": "Tools"
+      },
+      "body": {
+        "zh": "search-audio / attach-audio / list-audio",
+        "en": "search-audio / attach-audio / list-audio"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「bgm」面板",
+        "en": "Enable in Admin → open the 'bgm' panel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:BGM / 音效素材库",
+        "en": "First release: BGM & SFX library"
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "插件作者向导技能。在对话里输入 /author-plugin 触发,手把手带不会 TypeScript 的玩家在大约 10 分钟内做出第一个能被 forgeax-server 加载的插件:一个过 schema 的 forgeax-plugin.json、一个最小可运行的 hello tool,以及一份把插件热加载进去的 reload + 验证脚本。每一步都明确说明改哪个文件、改成什么、怎么知道改对了。",
+    "en": "The plugin-author guide skill. Type /author-plugin in chat and it walks a non-TypeScript user, in about ten minutes, to their first server-loadable plugin: a schema-valid forgeax-plugin.json, a minimal runnable hello tool, and a reload-and-verify step that hot-loads it. Every step states which file to edit, what to write, and how to know it worked."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "/author-plugin 触发的引导式技能\n10 分钟产出可加载插件 + hello tool\n面向非工程师玩家",
+        "en": "Skill triggered by /author-plugin\n~10 min to a loadable plugin + hello tool\nFor non-engineer users"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "有效 forgeax-plugin.json + 最小 hello tool + reload 验证",
+        "en": "A valid forgeax-plugin.json + minimal hello tool + reload/verify"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-23",
+      "notes": {
+        "zh": "首版:四条 authoring path 之一",
+        "en": "First release: one of the four authoring paths"
+      }
+    }
+  ]
+}

@@ -8,8 +8,8 @@
     "en": "cc-coder"
   },
   "description": {
-    "zh": "通用编码 agent · 接 iori 玩法骨架 / suzu 体验流程 / kotone 剧情大纲,产出可运行的 TS/React/Go/Python 代码。偏好 claude-code CLI,支持多 instance 并行写不同子包。",
-    "en": "Generic coding agent. Takes iori's gameplay pillars, suzu's UX flows, kotone's narrative outlines and turns them into runnable TS/React/Go/Python. Prefers claude-code CLI; multi-instance for parallel package work."
+    "zh": "通用编码 Agent(编码角色,可多实例)· 接 Iori 玩法骨架 / Suzu 体验流程 / Kotone 剧情大纲,把带验收条件的 spec 一颗粒一颗粒落成可运行的 TS / React / Go / Python 代码 + ≥5 case 单测。默认走 claude-code CLI 后端。",
+    "en": "Generic coding agent (coder role, multi-instance) — turns actionable specs from Iori/Suzu/Kotone into runnable TS / React / Go / Python, one small granule at a time with >=5 unit tests each. Defaults to the claude-code CLI backend."
   },
   "provides": {
     "agent": {
@@ -32,14 +32,20 @@
       "defaultLang": "zh",
       "multiInstance": true,
       "defaultSkills": [
-        { "source": "inline", "skillId": "implement-feature" }
+        {
+          "source": "inline",
+          "skillId": "implement-feature"
+        }
       ]
     },
     "skills": [
       {
         "id": "implement-feature",
         "entry": "./skills/implement-feature/SKILL.md",
-        "displayName": { "zh": "落地 spec", "en": "Implement Feature" },
+        "displayName": {
+          "zh": "落地 spec",
+          "en": "Implement Feature"
+        },
         "description": {
           "zh": "把一份带验收条件的 spec/任务卡落成可运行代码 + ≥5 case 单测",
           "en": "Turn an actionable spec into runnable code with ≥5 unit tests"

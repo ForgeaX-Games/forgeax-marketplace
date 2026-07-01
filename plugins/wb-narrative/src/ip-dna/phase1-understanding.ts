@@ -22,6 +22,7 @@ import type {
 import { createEmptyIpDna } from "./filesystem.js";
 import { SHORT_TEXT_THRESHOLD } from "./phase0-foundation.js";
 import { loadIpDnaPrompt } from "./prompt-loader.js";
+import { extractUnitNumber } from "./unit-identity.js";
 
 /** 单条结构标记的识别结果。 */
 export interface HierarchyMarker {
@@ -149,10 +150,12 @@ export function buildLightHierarchy(input: BuildHierarchyInput): NarrativeIpDna 
     const seq = (counters.get(parentId) ?? 0) + 1;
     counters.set(parentId, seq);
     const id = `${m.levelType[0]}${Object.keys(dna.nodes).length}`;
+    // 序号（§3.1）：优先用标记里写明的真实叙事序号（第八章→8），无则回退位置计数。
+    const realNum = extractUnitNumber(m.title, input.media_type);
     const node: HierarchyNode = {
       id,
       levelType: m.levelType,
-      index: seq,
+      index: realNum ?? seq,
       title: m.title,
       parent: parentId,
       children: [],
@@ -243,6 +246,9 @@ function baseName(p: string): string {
  * 仅在此类输入下启用多文件建树（其余多文件场景沿用 concat 扫标记，零回归）。
  */
 export function segmentsHaveStructure(segments: FileSegment[]): boolean {
+  // 多文件 = 天然以"文件"为最小叙事单元边界（看结构不看名字，§3.1）：每个文件就是一个节。
+  if (segments.length >= 2) return true;
+  // 单文件：仅当路径含目录或文件名命中层级词时按文件边界建树；否则交由 buildLightHierarchy 扫内部标记。
   return segments.some((s) => {
     const norm = s.path.replace(/\\/g, "/");
     if (norm.includes("/")) return true;
@@ -250,11 +256,35 @@ export function segmentsHaveStructure(segments: FileSegment[]): boolean {
   });
 }
 
+/** 目录名是否像真正的"部/卷/册/季"层（而非压缩包打包文件夹）。 */
+const PART_DIR_RE = /第[0-9零一二三四五六七八九十百千]+[卷部册季]|^[上中下][卷部册]|^(?:卷|部|册|季)[0-9零一二三四五六七八九十]/;
+
 /**
- * 多文件 / 卷目录建树（§3.2 核心）——保留**文件与目录边界**，而非把所有文件拼成一坨再扫标记：
- *   - 目录层 → part 节点（逐级嵌套，复用同名目录节点）；
- *   - 文件 → chapter（文件内有 节/话 等标记）或 unit（叶子）；文件名命中卷/章/节模式时按命中层级；
- *   - 文件内标记 → unit 子节点（一层），实现 部/卷-章-节 真多层树。
+ * 计算所有文件共有的最外层目录前缀段数 —— 压缩包打包容器（含自我嵌套，如
+ * `蛊真人_测试/蛊真人_测试/`）。逐层比对，所有文件同名才算共有 → 整体剥离，不计入叙事层级。
+ */
+function commonDirPrefixDepth(allDirSegs: string[][]): number {
+  if (allDirSegs.length === 0) return 0;
+  let depth = 0;
+  for (;;) {
+    const head = allDirSegs[0][depth];
+    if (head === undefined) break;
+    if (!allDirSegs.every((d) => d[depth] === head)) break;
+    depth++;
+  }
+  return depth;
+}
+
+/**
+ * 多文件 / 卷目录建树（§3.2 核心，"看结构不看名字" §3.1）——保留文件边界，但只把**真正的多卷结构**
+ * 升级为 部/卷 层，其余打包/单链目录一律折叠；每个文件默认就是一个最小叙事单元(节)，
+ * 仅"一文多节的大文件"（≥2 内层标记且体量 > MAX_UNIT_CHARS）才作为 chapter 容器内拆为 unit。
+ *
+ * 规则：
+ *   ① 剥离所有文件共有的最外层包裹目录（压缩包容器，含自嵌套），不计入叙事层级；
+ *   ② 余下目录：仅当目录名像 卷/部/册/季，或同一父级下存在 ≥2 个并列子目录（真多卷）时升级为 part；
+ *      否则折叠（不建节点，文件直接挂到当前父级）；
+ *   ③ 文件 → 默认 unit(节)；含 ≥2 内层标记且体量 > MAX_UNIT_CHARS 时才升 chapter 并内拆 unit。
  * sourceRange 用 segment.offset + 文件内局部偏移回填，可直接在 concat 全文上切片。
  */
 export function buildHierarchyFromSegments(
@@ -267,7 +297,6 @@ export function buildHierarchyFromSegments(
     media_type: input.media_type,
   });
   const root = dna.nodes[dna.rootId];
-  const partByKey = new Map<string, string>(); // 累积目录路径 → part 节点 id
   const counters = new Map<string, number>(); // parentId → 子序号
   let seq = 0;
   const nextId = (prefix: string): string => `${prefix}${++seq}`;
@@ -277,13 +306,52 @@ export function buildHierarchyFromSegments(
     return n;
   };
 
-  for (const seg of segments) {
-    // ① 目录层 → 逐级 part。
-    let parentId = root.id;
+  // ① 剥离共有最外层打包目录（含自嵌套）。
+  const rawDirSegs = segments.map((s) => dirParts(s.path));
+  const strip = commonDirPrefixDepth(rawDirSegs);
+  const dirSegsList = rawDirSegs.map((d) => d.slice(strip));
+
+  // ①b 真实叙事序号提取（§3.1：第八章→8，而非上传位置）+ 同目录同号去重（保留末次，剔除复制的重复同号单元）。
+  //     移植 chapter_parsing._parse_chapters 的 chapter_dict 去重语义；号未识别者永不去重（回退位置计数）。
+  const unitNums = segments.map((s) => extractUnitNumber(baseName(s.path), input.media_type));
+  const lastByDirNum = new Map<string, number>();
+  segments.forEach((_, i) => {
+    const n = unitNums[i];
+    if (n !== undefined) lastByDirNum.set(`${dirSegsList[i].join("/")}#${n}`, i);
+  });
+  const keepFile = (i: number): boolean => {
+    const n = unitNums[i];
+    if (n === undefined) return true; // 无可识别序号 → 保留（走位置计数）
+    return lastByDirNum.get(`${dirSegsList[i].join("/")}#${n}`) === i; // 同目录同号仅留末次
+  };
+
+  // ② 预统计每个父级下并列子目录数，判定某层是否"真多卷" → 升级 part。
+  const childDirs = new Map<string, Set<string>>();
+  for (const segs of dirSegsList) {
     let acc = "";
-    for (const part of dirParts(seg.path)) {
+    for (const part of segs) {
+      const parent = acc;
+      if (!childDirs.has(parent)) childDirs.set(parent, new Set());
+      childDirs.get(parent)!.add(part);
       acc = acc ? `${acc}/${part}` : part;
-      let pid = partByKey.get(acc);
+    }
+  }
+  const keepAsPart = (parentAcc: string, name: string): boolean =>
+    PART_DIR_RE.test(name) || (childDirs.get(parentAcc)?.size ?? 0) >= 2;
+
+  const partByKey = new Map<string, string>(); // 累积目录路径 → part 节点 id
+
+  for (let si = 0; si < segments.length; si++) {
+    if (!keepFile(si)) continue; // 同目录同号重复单元：仅保留末次出现。
+    const seg = segments[si];
+    let parentId = root.id;
+    let accFull = "";
+    // 目录层 → 仅真多卷升级 part，其余折叠。
+    for (const part of dirSegsList[si]) {
+      const parentAcc = accFull;
+      accFull = accFull ? `${accFull}/${part}` : part;
+      if (!keepAsPart(parentAcc, part)) continue;
+      let pid = partByKey.get(accFull);
       if (!pid) {
         pid = nextId("p");
         dna.nodes[pid] = {
@@ -295,22 +363,24 @@ export function buildHierarchyFromSegments(
           children: [],
         };
         dna.nodes[parentId].children.push(pid);
-        partByKey.set(acc, pid);
+        partByKey.set(accFull, pid);
       }
       parentId = pid;
     }
 
-    // ② 文件节点：文件内标记决定是 chapter（有内层）还是 unit（叶子）。
-    const base = baseName(seg.path) || `文件${seq + 1}`;
+    // ③ 文件节点：默认 unit(节)，看结构不看名字（文件名只决定标题）；
+    //    仅"一文多节大文件"（≥2 内层标记且超单元水准线）才作 chapter 容器并内拆 unit。
+    const base = baseName(seg.path) || `文件${si + 1}`;
     const innerMarkers = detectHierarchyMarkers(seg.text);
-    const namedLevel = levelFromName(base);
-    const hasInner = innerMarkers.length > 0;
-    const fileLevel: HierarchyLevelType = namedLevel ?? (hasInner ? "chapter" : "unit");
+    const isContainer = innerMarkers.length >= 2 && seg.text.length > MAX_UNIT_CHARS;
+    const fileLevel: HierarchyLevelType = isContainer ? "chapter" : "unit";
     const fileId = nextId(fileLevel[0]);
+    // 序号（§3.1）：优先用文件名里写明的真实叙事序号（第八章→8），无则回退同父位置计数。
+    const realNum = unitNums[si];
     dna.nodes[fileId] = {
       id: fileId,
       levelType: fileLevel,
-      index: childSeq(parentId),
+      index: realNum ?? childSeq(parentId),
       title: base,
       parent: parentId,
       children: [],
@@ -318,8 +388,7 @@ export function buildHierarchyFromSegments(
     };
     dna.nodes[parentId].children.push(fileId);
 
-    // ③ 文件内标记 → unit 子节点（一层），偏移按 segment.offset 平移。
-    if (hasInner) {
+    if (isContainer) {
       for (let i = 0; i < innerMarkers.length; i++) {
         const m = innerMarkers[i];
         const start = seg.offset + m.offset;
@@ -454,10 +523,38 @@ export function computeAggregationTimes(dna: NarrativeIpDna): number {
   return Math.max(1, treeMaxDepth(dna));
 }
 
-/** 落定结构元信息（在每个建树出口调用）：写入 structureType + aggregationTimes。 */
+/**
+ * 锚定最小叙事单元的"对外展示名 + 完整嵌套链"（§3.1）——在每个建树出口单点计算，零遗漏。
+ * - displayName：非根 = `序号_《原始标题》`（如 `1_《第一章》`）；root = `《题目》`。
+ * - lineage：根→自身的完整嵌套层级链（内部运行/定位用）。
+ */
+function annotateDisplayAndLineage(dna: NarrativeIpDna): void {
+  // ① 先算所有节点的 displayName（lineage 需要引用各祖先的 displayName）。
+  for (const node of Object.values(dna.nodes)) {
+    node.displayName =
+      node.id === dna.rootId ? `《${node.title}》` : `${node.index}_《${node.title}》`;
+  }
+  // ② 沿 parent 链回填 root→自身的完整链。
+  for (const node of Object.values(dna.nodes)) {
+    const chain: NonNullable<HierarchyNode["lineage"]> = [];
+    let cur: string | null = node.id;
+    const guard = new Set<string>();
+    while (cur && !guard.has(cur)) {
+      guard.add(cur);
+      const anc: HierarchyNode | undefined = dna.nodes[cur];
+      if (!anc) break;
+      chain.unshift({ id: anc.id, levelType: anc.levelType, index: anc.index, displayName: anc.displayName ?? anc.title });
+      cur = anc.parent;
+    }
+    node.lineage = chain;
+  }
+}
+
+/** 落定结构元信息（在每个建树出口调用）：写入 structureType + aggregationTimes + 展示名/链。 */
 function finalizeStructure(dna: NarrativeIpDna): NarrativeIpDna {
   dna.structureType = classifyStructureType(dna);
   dna.aggregationTimes = computeAggregationTimes(dna);
+  annotateDisplayAndLineage(dna);
   return dna;
 }
 
@@ -468,12 +565,35 @@ function finalizeStructure(dna: NarrativeIpDna): NarrativeIpDna {
 export interface VolumeAssessment {
   charCount: number;
   isShort: boolean;
-  /** 超阈值需拆解（按格式切分为可独立处理的块）。 */
+  /**
+   * 整部体量超"单游戏单元水准线"（单元数 + 体量双维）。语义＝"这部够大、应切成多个游戏单元(系列)"，
+   * 是游戏单元规划的默认依据，**不代表存在无法处理的超大文件**（勿据此弹"拆解"问题）。
+   */
   needsDecompose: boolean;
   /** 建议拆解块数（按阈值整除向上取整）。 */
   suggestedChunks: number;
   /** 命中的水准线说明（可读，含命中维度）。 */
   thresholdBasis: string;
+  /**
+   * 真·超大最小单元（叶子）数量：单个叶子正文 > MAX_UNIT_CHARS，提取/生成会失真，需"再标准化/拆解"。
+   * 这才是"发现超大文件，是否进一步拆解"问题的唯一触发依据（=0 时该问题不出现）。
+   */
+  oversizedUnitCount: number;
+}
+
+/**
+ * 统计层级树中"真·超大最小单元"数量 —— 判断对象是【最小叙事单元(叶子=节/话/集/情节点)】本身，
+ * 不是整部作品、也不是单张图/单个物理文件（§3.1/§5.0）：单个叶子的 sourceRange 跨度 > maxUnitChars。
+ *
+ * 媒体量纲：文字按字数（此处实现）；漫画按"话内页数"、视频按时长 —— 蓝图标注较难/留接口，
+ * 标准化阶段图片/视频叶子无 sourceRange、恒计 0（不弹"再标准化"，符合 §5.0）。
+ * 与 needsDecompose（整部体量、系列化判断）正交——已切成众多小章节的长篇此值为 0（70 话小说不误报）。
+ */
+export function countOversizedUnits(dna: NarrativeIpDna, maxUnitChars = MAX_UNIT_CHARS): number {
+  return collectLeafIds(dna).filter((id) => {
+    const r = dna.nodes[id]?.sourceRange;
+    return !!r && r.end - r.start > maxUnitChars;
+  }).length;
 }
 
 /** 单次处理体量上限（字符）；无媒体维度信息时的字数兜底水准线（§7.1）。 */
@@ -541,6 +661,7 @@ export function assessVolume(text: string, input: VolumeAssessmentInput = {}): V
     needsDecompose,
     suggestedChunks: needsDecompose ? Math.max(2, Math.ceil(charCount / DECOMPOSE_THRESHOLD)) : 1,
     thresholdBasis,
+    oversizedUnitCount: 0, // 无层级树信息时占位；编排器据 dna 用 countOversizedUnits 回填真值
   };
 }
 

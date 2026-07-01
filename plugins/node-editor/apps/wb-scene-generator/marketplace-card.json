@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "场景生成器工作台,基于 @forgeax/node-runtime 的节点图编程应用。你用节点管线加模板生成完整游戏场景,可复用游戏已有的纹理库,在多层渲染器里预览(支持分层、视图模式、子图层展开),并能截图与对外发布。它把搭场景变成可复用、可批处理的节点图,AI 可经 pipeline 工具批量编排,适合快速产出风格一致的场景。",
+    "en": "The Scene Generator workbench — a node-graph programming app on @forgeax/node-runtime. You build whole game scenes through a node pipeline plus templates, reuse the game's existing texture library, preview in a layered renderer (layers, view modes, sub-layer expansion), and capture screenshots or publish externally. It turns scene-building into a reusable, batchable node graph; AI can orchestrate via pipeline tools, ideal for quickly producing style-consistent scenes."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "怎么生成",
+        "en": "How it generates"
+      },
+      "body": {
+        "zh": "节点管线 + 模板生成场景\n复用游戏纹理库",
+        "en": "Node pipeline + templates → scenes\nreuse the game's texture library"
+      }
+    },
+    {
+      "title": {
+        "zh": "预览与发布",
+        "en": "Preview & publish"
+      },
+      "body": {
+        "zh": "多层渲染器(分层 / 视图模式 / 子图层)· 截图 · 对外发布",
+        "en": "layered renderer (layers / view modes / sub-layers) · screenshots · publish"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开面板或对话 /compose-scene-pipeline",
+        "en": "Enable in Admin → open the panel or /compose-scene-pipeline"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-02",
+      "notes": {
+        "zh": "首版:节点式场景生成器",
+        "en": "First release: node-based scene generator"
+      }
+    }
+  ]
+}

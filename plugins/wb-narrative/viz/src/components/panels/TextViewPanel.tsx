@@ -26,6 +26,7 @@ import { sendToHost } from "../../lib/bridge";
 import { resolveStepDisplay, getStepIcon } from "../../utils/stepDisplay";
 import type { EntryStatus } from "../../utils/stepDisplay";
 import { findStepsContainingNodeId } from "../../utils/cross-step-node";
+import { StageFileBrowser, fileGroupsForStep } from "../shared/StageFileBrowser";
 
 const STEP_TAGS: Record<string, string[]> = {
   pipeline_config:      ["Tier", "Mode", "步骤数"],
@@ -97,7 +98,16 @@ export function TextViewPanel() {
   const setEditDraft = useNarrativeStore((s) => s.setEditDraft);
   const clearEditDraft = useNarrativeStore((s) => s.clearEditDraft);
 
-  const isViewingRunning = activeEntryKey === runningEntryKey;
+  const ipRunKey = useNarrativeStore((s) => s.ipRunKey);
+  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
+  const runningRunId = useNarrativeStore((s) => s.runningRunId);
+  const runningProgress = useNarrativeStore((s) => s.runningProgress);
+  const isViewingRunning =
+    activeEntryKey != null &&
+    activeEntryKey === runningEntryKey &&
+    (!!runningRunId || !!ipPreviewRunId || runningProgress.length > 0);
+  // 环节文件浏览的运行键：半自动预览期用 ipRunKey（真实落盘键），历史回看用 activeEntryKey（=目录名）。
+  const fileRunKey = (isViewingRunning ? ipRunKey : activeEntryKey) ?? activeEntryKey;
   // 加载对象 + 顺序由 useOrderedSteps 统一计算（与可视化节点模式同源同序）。
   const steps = useOrderedSteps();
   const result = activeResult;
@@ -248,6 +258,8 @@ export function TextViewPanel() {
               expanded={isExpanded}
               data={data}
               result={result}
+              fileRunKey={fileRunKey}
+              fileGroups={fileGroupsForStep(s.id)}
               isRunning={s.status === "running" && isRunningState}
               isLocked={isLocked}
               isAnimating={isAnimating}
@@ -279,7 +291,7 @@ export function TextViewPanel() {
 }
 
 function StepCard({
-  stepId, label, stepStatus, message, tags, expanded, data, result, isRunning, isLocked, isAnimating,
+  stepId, label, stepStatus, message, tags, expanded, data, result, fileRunKey, fileGroups, isRunning, isLocked, isAnimating,
   canEdit, draft, displayState,
   onToggle, onStartEdit, onSaveDraft, onCancelEdit, onDraftChange,
 }: {
@@ -291,6 +303,8 @@ function StepCard({
   expanded: boolean;
   data: unknown;
   result: NarrativeContext | null;
+  fileRunKey?: string | null;
+  fileGroups?: string[];
   isRunning: boolean;
   isLocked?: boolean;
   isAnimating?: boolean;
@@ -390,6 +404,9 @@ function StepCard({
               isAnimating={isAnimating}
               message={message}
             />
+          )}
+          {fileGroups && fileGroups.length > 0 && (
+            <StageFileBrowser runKey={fileRunKey ?? null} groups={fileGroups} />
           )}
         </div>
       )}

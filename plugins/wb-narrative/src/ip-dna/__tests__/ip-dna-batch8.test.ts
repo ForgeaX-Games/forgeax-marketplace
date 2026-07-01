@@ -11,6 +11,8 @@ import {
   detectHierarchyMarkers,
   collectLeafIds,
   sliceUnitTexts,
+  guessLevelsFromHierarchy,
+  MAX_UNIT_CHARS,
 } from "../phase1-understanding.js";
 import {
   analyzeHierarchy,
@@ -23,7 +25,7 @@ import type { LLMClient } from "../../pipeline/llm-client.js";
 import type { TemplateSummary } from "../../types/narrative-ip-dna.js";
 import { archiveAndBuildManifest, type IncomingFile } from "../phase0-foundation.js";
 import { transcribeMediaFiles, detectMediaUnit, buildMultimodalMarkdown } from "../phase1-multimodal.js";
-import { loadManifest } from "../filesystem.js";
+import { loadManifest, mediaOriginalDir } from "../filesystem.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -105,16 +107,22 @@ describe("batch8 · 多文件/卷目录建树（§3.2）", () => {
     expect(allText).toContain("第三章的正文内容");
   });
 
-  it("无目录无编号的多文件不触发多文件建树（零回归守卫）", () => {
+  it("多文件 = 天然以文件为最小叙事单元边界（看结构不看名字）", () => {
     const items = [
       { path: "a.txt", text: "甲文本。".repeat(10) },
       { path: "b.txt", text: "乙文本。".repeat(10) },
     ];
     const { segments } = segmentsFromTexts(items);
-    expect(segmentsHaveStructure(segments)).toBe(false);
+    // 多文件即结构：每个文件就是一个节。
+    expect(segmentsHaveStructure(segments)).toBe(true);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "双文件", media_type: "book" }, segments);
+    const units = Object.values(dna.nodes).filter((n) => n.levelType === "unit");
+    expect(units.length).toBe(2);
+    expect(dna.structureType).toBe("single_layer");
   });
 
-  it("命名为第N章的扁平文件 → 触发多文件建树并按命名取层级", () => {
+  it("命名为第N章的扁平单文件 → 抽象层级是节(unit)，不被文件名误升为章", () => {
+    // §3.1「叫法是实例，层级才是抽象」：文件名写"第N章"只是叫法，结构上每个扁平文件就是一个最小叙事单元(节)。
     const items = [
       { path: "第一章.txt", text: "一。".repeat(10) },
       { path: "第二章.txt", text: "二。".repeat(10) },
@@ -123,7 +131,122 @@ describe("batch8 · 多文件/卷目录建树（§3.2）", () => {
     expect(segmentsHaveStructure(segments)).toBe(true);
     const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "扁平章", media_type: "book" }, segments);
     const chapters = Object.values(dna.nodes).filter((n) => n.levelType === "chapter");
-    expect(chapters.length).toBe(2);
+    const units = Object.values(dna.nodes).filter((n) => n.levelType === "unit");
+    expect(chapters.length).toBe(0);
+    expect(units.length).toBe(2);
+    // root 以下只有"节"一层。
+    expect(dna.structureType).toBe("single_layer");
+  });
+});
+
+describe("batch8 · 标准化纠正（看结构不看名字，§3.1b 硬规则）", () => {
+  it("扁平单 txt 压缩包（蛊真人式）→ single_layer：完整→节，折叠打包目录", () => {
+    // 模拟：压缩包容器目录 蛊真人_测试/ 下一堆扁平 txt，文件名写"第N章"实为"节"，每个约 1700 字。
+    const items = Array.from({ length: 8 }, (_, i) => ({
+      path: `蛊真人_测试/第${i + 1}章_遭遇魔道蛊师.txt`,
+      text: `第${i + 1}节：遭遇魔道蛊师\n` + "方源行走在山道上，警觉地观察四周。".repeat(60),
+    }));
+    const { segments } = segmentsFromTexts(items);
+    expect(segmentsHaveStructure(segments)).toBe(true);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "蛊真人", media_type: "book" }, segments);
+    // 打包目录被折叠 → 无 part 层；每个文件 = 一个节(unit)。
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "part").length).toBe(0);
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "chapter").length).toBe(0);
+    expect(collectLeafIds(dna).length).toBe(8);
+    expect(dna.structureType).toBe("single_layer");
+    // 真实层级数 = 1（仅"节"），驱动前端每侧 1 个下拉。
+    expect(guessLevelsFromHierarchy(dna)).toEqual(["unit"]);
+  });
+
+  it("自我嵌套打包目录（蛊真人_测试/蛊真人_测试/）整体剥离", () => {
+    const items = [
+      { path: "蛊真人_测试/蛊真人_测试/第一章.txt", text: "甲。".repeat(40) },
+      { path: "蛊真人_测试/蛊真人_测试/第二章.txt", text: "乙。".repeat(40) },
+    ];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "蛊真人", media_type: "book" }, segments);
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "part").length).toBe(0);
+    expect(collectLeafIds(dna).length).toBe(2);
+    expect(dna.structureType).toBe("single_layer");
+  });
+
+  it("多卷并列目录 → 多层（部→节），保留卷层", () => {
+    const items = [
+      { path: "第一卷/第01节.txt", text: "卷一节一。".repeat(20) },
+      { path: "第一卷/第02节.txt", text: "卷一节二。".repeat(20) },
+      { path: "第二卷/第03节.txt", text: "卷二节三。".repeat(20) },
+    ];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "分卷", media_type: "book" }, segments);
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "part").length).toBe(2);
+    expect(dna.structureType === "two_layer" || dna.structureType === "three_layer").toBe(true);
+    expect(guessLevelsFromHierarchy(dna)).toContain("part");
+  });
+
+  it("一文多节大文件（≥2 内层标记且超 MAX_UNIT_CHARS）→ 章 + 节内拆", () => {
+    // 单文件含 3 个内层"第N节"标记，且整体远超单元水准线 → 当作章容器，内拆为节。
+    const big = [
+      "第一节 开端\n" + "正文甲。".repeat(MAX_UNIT_CHARS / 3),
+      "第二节 发展\n" + "正文乙。".repeat(MAX_UNIT_CHARS / 3),
+      "第三节 高潮\n" + "正文丙。".repeat(MAX_UNIT_CHARS / 3),
+    ].join("\n");
+    const items = [{ path: "巨型单章.txt", text: big }];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "巨型", media_type: "book" }, segments);
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "chapter").length).toBe(1);
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "unit").length).toBe(3);
+  });
+
+  it("小体量单文件即便含内层标记也不内拆（仍为单节）", () => {
+    const small = "第一节 甲\n小正文。\n第二节 乙\n小正文。";
+    const items = [{ path: "小文件.txt", text: small }];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "小", media_type: "book" }, segments);
+    // 单文件 + 体量未超线 → 整文件一个节，不升章不内拆。
+    expect(Object.values(dna.nodes).filter((n) => n.levelType === "chapter").length).toBe(0);
+    expect(collectLeafIds(dna).length).toBe(1);
+  });
+});
+
+describe("batch8 · 展示规范名 + 完整嵌套链（§3.1 锚定最小叙事单元）", () => {
+  it("displayName：根=《题目》、非根=序号_《原始标题》；title 保留原始名", () => {
+    const items = [
+      { path: "第一章_遭遇.txt", text: "甲。".repeat(40) },
+      { path: "第二章_脱险.txt", text: "乙。".repeat(40) },
+    ];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "蛊真人", media_type: "book" }, segments);
+    expect(dna.nodes[dna.rootId].displayName).toBe("《蛊真人》");
+    const leaves = collectLeafIds(dna).map((id) => dna.nodes[id]);
+    // title 仍是原始文件名（溯源），displayName 为 序号_《原始标题》。
+    expect(leaves[0].title).toBe("第一章_遭遇");
+    expect(leaves[0].displayName).toBe("1_《第一章_遭遇》");
+    expect(leaves[1].displayName).toBe("2_《第二章_脱险》");
+  });
+
+  it("lineage：根→自身完整嵌套链（多卷场景含部层）", () => {
+    const items = [
+      { path: "第一卷/第01节.txt", text: "卷一节一。".repeat(20) },
+      { path: "第二卷/第02节.txt", text: "卷二节二。".repeat(20) },
+    ];
+    const { segments } = segmentsFromTexts(items);
+    const dna = buildHierarchyFromSegments({ story_timestamp: TS, title: "分卷作", media_type: "book" }, segments);
+    const firstLeaf = dna.nodes[collectLeafIds(dna)[0]];
+    const chain = firstLeaf.lineage ?? [];
+    // 链首为根，链尾为自身；中间含其所属"部/卷"。
+    expect(chain[0]?.id).toBe(dna.rootId);
+    expect(chain[chain.length - 1]?.id).toBe(firstLeaf.id);
+    expect(chain.some((c) => c.levelType === "part")).toBe(true);
+    expect(chain.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("buildLightHierarchy 也产出 displayName/lineage（扫标记路径）", () => {
+    const text = ["# 第一章 起", "起。".repeat(10), "# 第二章 承", "承。".repeat(10)].join("\n");
+    const dna = buildLightHierarchy({ story_timestamp: TS, title: "多章", media_type: "book", text });
+    for (const n of Object.values(dna.nodes)) {
+      expect(typeof n.displayName).toBe("string");
+      expect((n.lineage ?? []).length).toBeGreaterThanOrEqual(1);
+    }
   });
 });
 
@@ -187,21 +310,24 @@ describe("batch8 · 逐层递归聚合（§3.3）", () => {
   });
 });
 
-describe("batch8 · 模态分目录 + 会话级幂等追加（§2）", () => {
-  it("文件按模态归入 _original/<book|picture|video> 子目录", () => {
+describe("batch8 · 媒体优先分家落盘 + 会话级幂等追加（§6.1）", () => {
+  it("文件按模态分家落各媒体 *_original（媒体优先布局）", () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ipdna-modal-"));
+    const ts = "2026-06-26_010101";
+    const title = "混合作品";
     const files: IncomingFile[] = [
       { fileName: "小说.txt", data: "正文。".repeat(20), fileType: "text/plain" },
       { fileName: "封面.png", data: Buffer.from([1, 2, 3]), fileType: "image/png" },
       { fileName: "预告.mp4", data: Buffer.from([4, 5, 6]), fileType: "video/mp4" },
     ];
-    const r = archiveAndBuildManifest({ files, title: "混合作品", story_timestamp: "2026-06-26_010101", cwd });
+    const r = archiveAndBuildManifest({ files, title, story_timestamp: ts, cwd });
     expect(r.manifest.media_type).toBe("mixed");
-    expect(fs.existsSync(path.join(r.originalDir, "book", "小说.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(r.originalDir, "picture", "封面.png"))).toBe(true);
-    expect(fs.existsSync(path.join(r.originalDir, "video", "预告.mp4"))).toBe(true);
+    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "book", { cwd }), "小说.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "picture", { cwd }), "封面.png"))).toBe(true);
+    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "video", { cwd }), "预告.mp4"))).toBe(true);
     const paths = r.manifest.source_files.map((s) => s.path.replace(/\\/g, "/"));
-    expect(paths).toContain("_original/book/小说.txt");
+    expect(paths).toContain(`book/story_book/book_original/${ts}_${title}/小说.txt`);
+    expect(paths).toContain(`picture/story_picture/picture_original/${ts}_${title}/封面.png`);
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 

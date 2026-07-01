@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "方块人 3D 角色编辑器,做可动的参数化低多边形人形。源数据是 LowPolySource JSON(关节绑骨 + 部件几何 + 动画 clip)且作为唯一 SSOT;支持 vibe 自然语言生成/修改角色,以及 Blender 风 gizmo 手编(选件 + G/R/S 轴锁 + 镜像 + 捕捉),内置第三人称 Playground 用 WASD 验证骨骼动画。three.js 实时预览,烘焙为引擎中立的 .glb(含骨骼动画)/ .obj,骨架命名兼容 Mixamo。",
+    "en": "A lowpoly humanoid 3D character editor for animatable parametric block humanoids. The source is a LowPolySource JSON (joints + part geometry + animation clips) as the single source of truth; it supports vibe natural-language authoring/editing and Blender-style gizmo manual editing (part select + G/R/S axis lock + mirror + snapping), with a third-person playground to test rig animation via WASD. three.js live preview, baking to engine-neutral .glb (with skeleton+anim) / .obj, with Mixamo-compatible bone naming."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "两种编辑",
+        "en": "Two ways to edit"
+      },
+      "body": {
+        "zh": "vibe 自然语言 + Blender 风 gizmo 手编\n第三人称 Playground 验证动画",
+        "en": "vibe natural-language + Blender-style gizmo\nthird-person playground to test animation"
+      }
+    },
+    {
+      "title": {
+        "zh": "数据与烘焙",
+        "en": "Data & bake"
+      },
+      "body": {
+        "zh": "JSON 为唯一 SSOT → 烘焙 .glb / .obj\nthree.js 预览;Mixamo 命名兼容",
+        "en": "JSON SSOT → bake .glb / .obj\nthree.js preview; Mixamo-compatible naming"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「wb-lowpoly-obj」面板",
+        "en": "Enable in Admin → open the 'wb-lowpoly-obj' panel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-23",
+      "notes": {
+        "zh": "首版:参数化方块人编辑器",
+        "en": "First release: parametric block-humanoid editor"
+      }
+    }
+  ]
+}

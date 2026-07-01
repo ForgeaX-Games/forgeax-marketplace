@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "Kotone 是剧情师 Agent,担任叙事(narrative)角色。她把 Iori 的玩法节奏配上「主角为什么要做这件事」的情感线,负责世界观、角色 bio、关键剧情节点与 line-level 对白(含 i18n key)。每个剧情节点都挂在具体玩法触发上(打到第三只 boss 才解锁这段独白),拒绝靠血统/天赋开后门的廉价 backstory,产出 narrative / world / characters / dialogue 文件。",
+    "en": "Kotone is the narrative writer (the 'narrative' role). She pairs Iori's gameplay tempo with emotional motivation — why the protagonist does what they do — owning the world, character bios, key plot beats and line-level dialogue (with i18n keys). Every beat hangs on a concrete gameplay trigger (a monologue unlocks only after the third boss), and she refuses cheap bloodline/talent backstory, emitting narrative / world / characters / dialogue files."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "叙事角色:世界观 / 角色 bio / 剧情节点 / 对白\n动机要可视可推,不靠血统开后门\n剧情节点必须挂在玩法触发上",
+        "en": "Narrative role: world / bios / plot beats / dialogue\nMotives must be visible and derivable, no bloodline shortcuts\nEvery beat hangs on a gameplay trigger"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "narrative.md / world.md / characters/*.md / dialogue/*.json\n自带「写角色 bio」技能:动机 + 谈吐 + 三句标志台词",
+        "en": "narrative / world / characters / dialogue files\nWrite-character-bio skill: motive + talk style + 3 signature lines"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "有了玩法柱 + UX 流程后 @kotone,决定哪个 phase 触发什么剧情、给 NPC 写 bio 与对白。",
+        "en": "With pillars + UX flow, @kotone to decide which phase triggers which story, and write NPC bios + dialogue."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:剧情师人设 + 写角色 bio 技能",
+        "en": "First release: narrative persona + write-character-bio skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

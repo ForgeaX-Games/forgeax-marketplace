@@ -109,7 +109,105 @@ function buildTurnSummary(node: Node, allNodes: Node[], allEdges: Edge[]): TurnS
   };
 }
 
+// Turn view = three tabs: the existing Context accordion + a Trace tab (the
+// joined kernel.turn span) + a Logs tab (that turn's bound log stream). Trace
+// data comes from the client-side join (todo 038 P3); empty/degraded states
+// render an honest notice rather than hiding the tab.
 function TurnContextView() {
+  const nodeId = useObservatoryStore(s => s.sidebarTurnNodeId);
+  const trace = useObservatoryStore(s => (nodeId ? s.nodeTraces.get(nodeId) : undefined));
+  const [tab, setTab] = useState<'context' | 'trace' | 'logs'>('context');
+  const logCount = trace?.logs.length ?? 0;
+
+  return (
+    <>
+      <div className="ob-tabbar">
+        <button className={`ob-tab ${tab === 'context' ? 'ob-tab--active' : ''}`} onClick={() => setTab('context')}>Context</button>
+        <button className={`ob-tab ${tab === 'trace' ? 'ob-tab--active' : ''}`} onClick={() => setTab('trace')}>Trace</button>
+        <button className={`ob-tab ${tab === 'logs' ? 'ob-tab--active' : ''}`} onClick={() => setTab('logs')}>Logs{logCount > 0 ? ` (${logCount})` : ''}</button>
+      </div>
+      {tab === 'context' && <TurnContextBody />}
+      {tab === 'trace' && <TraceTab trace={trace} />}
+      {tab === 'logs' && <LogsTab logs={trace?.logs ?? []} />}
+    </>
+  );
+}
+
+// ─── Trace tab — the joined kernel.turn span ────────────────────────────────
+
+function TraceTab({ trace }: { trace?: { span?: import('../lib/telemetry-types').SpanData; degrade?: string } }) {
+  if (!trace || (!trace.span && trace.degrade === 'no-trace')) {
+    return <div className="ob-trace-empty">No trace span linked to this node (OTEL off, rented kernel, or pre-telemetry session).</div>;
+  }
+  if (trace.degrade === 'ordinal-misaligned') {
+    return <div className="ob-trace-empty">Trace alignment degraded for this turn bucket (empty-turn ordinal drift) — span not attached to avoid mis-linking.</div>;
+  }
+  const span = trace.span!;
+  const dur = span.endTs !== undefined ? `${((span.endTs - span.startTs) / 1000).toFixed(3)}s` : 'in progress';
+  const attrs = span.attrs ?? {};
+  const rows: Array<[string, string]> = [
+    ['name', span.name],
+    ['duration', dur],
+    ['start', new Date(span.startTs).toISOString()],
+    ...(span.endTs !== undefined ? [['end', new Date(span.endTs).toISOString()] as [string, string]] : []),
+    ['status', span.status ? `${span.status.code}${span.status.message ? ` — ${span.status.message}` : ''}` : '—'],
+    ['traceId', span.traceId],
+    ['spanId', span.spanId],
+  ];
+  const attrRows = Object.entries(attrs).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)] as [string, string]);
+
+  return (
+    <div className="ob-trace-tab">
+      <table className="ob-trace-table"><tbody>
+        {rows.map(([k, v]) => (
+          <tr key={k}><td className="ob-trace-table__k">{k}</td><td className="ob-trace-table__v">{v}</td></tr>
+        ))}
+      </tbody></table>
+      {attrRows.length > 0 && (
+        <>
+          <div className="ob-trace-tab__sub">attrs</div>
+          <table className="ob-trace-table"><tbody>
+            {attrRows.map(([k, v]) => (
+              <tr key={k}><td className="ob-trace-table__k">{k}</td><td className="ob-trace-table__v">{v}</td></tr>
+            ))}
+          </tbody></table>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Logs tab — the turn-bound log stream, filterable by level ──────────────
+
+function LogsTab({ logs }: { logs: import('../lib/telemetry-types').LogRecord[] }) {
+  const [level, setLevel] = useState<'all' | 'debug' | 'info' | 'warn' | 'error'>('all');
+  if (logs.length === 0) {
+    return <div className="ob-trace-empty">No logs bound to this turn's span.</div>;
+  }
+  const shown = level === 'all' ? logs : logs.filter(l => l.level === level);
+  return (
+    <div className="ob-logs-tab">
+      <div className="ob-logs-filter">
+        {(['all', 'debug', 'info', 'warn', 'error'] as const).map(lv => (
+          <button key={lv} className={`ob-logs-filter__btn ${level === lv ? 'ob-logs-filter__btn--active' : ''}`} onClick={() => setLevel(lv)}>{lv}</button>
+        ))}
+      </div>
+      <div className="ob-logs-list">
+        {shown.map((l, i) => (
+          <div key={i} className={`ob-log-line ob-log-line--${l.level}`}>
+            <span className="ob-log-line__lv">{l.level}</span>
+            <span className="ob-log-line__msg">{l.msg}</span>
+            {l.fields && Object.keys(l.fields).length > 0 && (
+              <span className="ob-log-line__fields">{JSON.stringify(l.fields)}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TurnContextBody() {
   const nodeId = useObservatoryStore(s => s.sidebarTurnNodeId);
   const systemTokens = useObservatoryStore(s => s.sidebarSystemTokens);
   const live = useLiveTurnData(nodeId);

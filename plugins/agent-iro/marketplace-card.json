@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "Iro 是美术师 Agent,担任美术(art)角色,可多实例并行出图。她接住 Iori 的玩法、Kotone 的角色 bio、Suzu 的 hud-spec,先定 art-style.md + token 化 palette,再产出立绘、像素 sprite、lowpoly OBJ、VFX、icon 等实际 png / svg / glb 素材。配色给 token(hero-low-hp、boss-cooldown)而非散落 hex,保证全局视觉一致——玩家截图发出去同事一眼认出是同一款游戏。",
+    "en": "Iro is the art director (the 'art' role), and can run multiple instances in parallel. Taking Iori's gameplay, Kotone's bios and Suzu's hud-spec, it first locks an art-style.md + tokenized palette, then produces actual png / svg / glb assets — portraits, pixel sprites, lowpoly OBJ, VFX, icons. Colors are tokens (hero-low-hp, boss-cooldown) rather than scattered hex, keeping global visual consistency so any screenshot is instantly recognizable as the same game."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "美术角色,可多实例并行\n先 art-style.md + palette.json,再画单个素材\n配色给 token,不给散落 hex",
+        "en": "Art role, multi-instance\nLock art-style.md + palette.json before any single asset\nColors as tokens, not scattered hex"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "png / svg / glb / obj + art-style.md + palette.json\n立绘 / 像素 sprite / lowpoly OBJ / VFX / icon\n自带「立美术规范」技能",
+        "en": "png / svg / glb / obj + art-style.md + palette.json\nportraits / pixel sprites / lowpoly OBJ / VFX / icons\nestablish-art-style skill"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "@iro 先定风格再批量出素材;视觉一致性优先于单点 UX。",
+        "en": "@iro to lock the style then batch assets; visual consistency wins over one-off UX."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:美术人设 + 立美术规范技能",
+        "en": "First release: art persona + establish-art-style skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

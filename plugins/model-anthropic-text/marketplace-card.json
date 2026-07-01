@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "Anthropic 文本模型绑定。在 text 通道上声明 Anthropic 厂商的能力清单与「档位 → 模型」映射:reasoning 走 opus、draft 走 sonnet、summarize 走 haiku,让 Studio 里不同档位的任务自动用合适的 Claude 模型。本插件只声明映射,实际 HTTP 调用由 server 的 text 通道统一调度。",
+    "en": "The Anthropic text model binding. On the text channel it declares the Anthropic vendor's capability list and a tier→model mapping: reasoning→opus, draft→sonnet, summarize→haiku, so each tier of task in Studio automatically uses the right Claude model. The plugin only declares the mapping; the actual HTTP is routed by the server's text channel."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "text 通道的 Anthropic 厂商绑定\n档位映射:reasoning→opus / draft→sonnet / summarize→haiku",
+        "en": "Anthropic vendor binding on the text channel\nTiers: reasoning→opus / draft→sonnet / summarize→haiku"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理 → 模型绑定 → text 通道;HTTP 由 server 调度",
+        "en": "Admin → model bindings → text channel; HTTP routed by the server"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:Anthropic 文本绑定",
+        "en": "First release: Anthropic text binding"
+      }
+    }
+  ]
+}

@@ -8,8 +8,8 @@
     "en": "Items & Icons"
   },
   "description": {
-    "zh": "道具 / 图标工作台 · items.json + 像素 icon 编辑 · 后续接 2D_sidescroller + 2D_tileable + 2D_ai_pixel 生图链路。",
-    "en": "Items & icons workbench. items.json + pixel-icon editing. Will host 2D_sidescroller, 2D_tileable and 2D_ai_pixel pipelines."
+    "zh": "道具 / 图标工作台(规划中)· 目标:编辑游戏的 items.json + 像素 icon,接 2D 像素生图管线。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
+    "en": "Items & icons workbench (planned) — will edit a game's items.json + pixel icons and host 2D pixel-asset pipelines. Currently a marketplace placeholder; the panel implementation lands in a later sprint."
   },
   "provides": {
     "workbench": {

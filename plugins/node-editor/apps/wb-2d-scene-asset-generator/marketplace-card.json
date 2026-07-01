@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "2D 场景资产生成器工作台,基于 @forgeax/node-runtime + node-runtime-react 的节点图编程应用。你用节点管线加模板批量生成 2D 场景资产,经 AI 生图节点出图,实时预览生成结果,管理版本化的资产库,并能从模板实例化分组、一键发布到游戏。它把零散的「生成一张图」整合成可复用、可批处理、可追溯的 2D 资产流水线。",
+    "en": "The 2D Scene Asset Generator workbench — a node-graph programming app on @forgeax/node-runtime + node-runtime-react. You batch-generate 2D scene assets through a node pipeline plus templates, produce images via AI generation nodes, preview live, manage a versioned asset library, instantiate groups from templates and publish to a game in one click. It turns ad-hoc 'generate an image' into a reusable, batchable, traceable 2D asset pipeline."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "怎么生成",
+        "en": "How it generates"
+      },
+      "body": {
+        "zh": "节点管线 + 模板批量生成 2D 资产\nAI 生图节点 + 实时预览",
+        "en": "Node pipeline + templates batch 2D assets\nAI image nodes + live preview"
+      }
+    },
+    {
+      "title": {
+        "zh": "资产管理",
+        "en": "Asset management"
+      },
+      "body": {
+        "zh": "版本化资产库 · 模板实例化分组 · 一键发布到游戏",
+        "en": "versioned library · template groups · one-click publish to game"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开面板或对话 /generate-2d-asset",
+        "en": "Enable in Admin → open the panel or /generate-2d-asset"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-08",
+      "notes": {
+        "zh": "首版:节点式 2D 场景资产生成器",
+        "en": "First release: node-based 2D scene asset generator"
+      }
+    }
+  ]
+}

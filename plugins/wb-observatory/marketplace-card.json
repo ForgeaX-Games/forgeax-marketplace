@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "Observatory 轨迹观察台工作台,把一次 agent 运行变得可见。它用 reactflow 把会话画成 session-root → 每一回合 turn → tool / 子 agent 的节点图,支持实时(SSE)跟随与离线回放;同时把拼好的 system prompt 切成可检视的模块切片并给出 token 估算,辅助上下文、skill、护栏与 cache 管理。它是被动消费宿主 observatory 端点的只读观测工具。",
+    "en": "The Observatory workbench makes a single agent run visible. Using reactflow it renders a session as a graph of session-root → each turn → tool / sub-agent nodes, with a live SSE tail and offline replay; it also slices the composed system prompt into inspectable modules with token estimates, aiding context / skill / guardrail / cache management. It is a read-only observer that passively consumes the host observatory endpoints."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能看什么",
+        "en": "What it shows"
+      },
+      "body": {
+        "zh": "reactflow 图:session → turn → tool / 子 agent\nsystem-prompt 模块切片 + token 估算",
+        "en": "reactflow graph: session → turn → tool / sub-agent\nsystem-prompt module slices + token estimates"
+      }
+    },
+    {
+      "title": {
+        "zh": "实时与回放",
+        "en": "Live & replay"
+      },
+      "body": {
+        "zh": "SSE 实时跟随 + 离线回放(只读)",
+        "en": "Live SSE tail + offline replay (read-only)"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 打开「wb-observatory」面板",
+        "en": "Enable in Admin → open the 'wb-observatory' panel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-25",
+      "notes": {
+        "zh": "首版:轨迹观察台",
+        "en": "First release: trace observatory"
+      }
+    }
+  ]
+}

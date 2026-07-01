@@ -8,8 +8,8 @@
     "en": "UI Workshop"
   },
   "description": {
-    "zh": "Workbench UI 工坊：按游戏类型、界面流程、视觉风格生成 UI 蓝图、组件素材与可交互原型。",
-    "en": "Workbench UI workshop for generating UI blueprints, component assets, and interactive prototypes by genre, screen flow, and visual style."
+    "zh": "UI 工坊(工作台)· 按游戏类型 / 界面流程 / 视觉风格生成 UI 蓝图与组件素材(经 Gemini 生图),预览 HUD / 菜单 / 商店 / 对话 / 结算等界面并导出可交互原型;视觉对齐 ForgeaX 设计系统 token。",
+    "en": "UI Workshop workbench — generate UI blueprints and component assets by game genre / screen flow / visual style (via Gemini image gen), preview HUD / menu / shop / dialog / result screens and export an interactive prototype; visuals aligned to the ForgeaX design-system tokens."
   },
   "icon": "LayoutTemplate",
   "keywords": [

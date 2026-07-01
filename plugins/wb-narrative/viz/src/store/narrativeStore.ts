@@ -89,6 +89,12 @@ interface NarrativeState {
    * "运行中"，读取 runningProgress + pipelineOrder，使 IP 各步带 data 实时投影到文本/节点模式。
    */
   ipPreviewRunId: string | null;
+  /**
+   * IP 运行磁盘键（`<时间戳>_<标题>` = ingest 返回的 run_id）。与 ipPreviewRunId（合成预览轨 id）
+   * 不同：它是真实落盘运行键，供「按环节浏览文件」按 key 读取 input/ 与 output/ 两侧文件。
+   * 历史回看时改用 activeEntryKey（=目录名=同一 key），故仅需在半自动预览期间持有此值。
+   */
+  ipRunKey: string | null;
 
   // ---- Local drafts (bound to activeEntry) ----
   editDrafts: Record<string, EditDraft>;
@@ -131,6 +137,8 @@ interface NarrativeState {
    * 并携带可读正文 data，文本/节点模式据此同源渲染。
    */
   startIpPreviewRun: (runId: string, entryKey: string, order: string[]) => void;
+  /** 设定 IP 运行磁盘键（ingest 返回 run_id 时回填），供文件浏览按 key 读取两侧文件。 */
+  setIpRunKey: (key: string | null) => void;
   /** IP 预览结束（完成/失败）：清旁路，固化 pipelineOrder 到 activeConfig 以保持非运行态有序。 */
   finishIpPreview: (status?: "completed" | "interrupted") => void;
   pushProgress: (p: PipelineProgress) => void;
@@ -326,9 +334,6 @@ function rebuildStepsFromResult(result: NarrativeContext, existingSteps: StepSta
   return merged;
 }
 
-/** 步骤 id → 展示标签（IP 预览轨 seed pending 节点时用）。 */
-const STEP_LABEL_BY_ID = new Map(PIPELINE_STEPS.map((s) => [s.id, s.label]));
-
 function buildStepState(p: PipelineProgress): StepState {
   return {
     id: p.stepId ?? p.stage,
@@ -453,6 +458,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   pipelineOrder: [],
   runMode: null,
   ipPreviewRunId: null,
+  ipRunKey: null,
 
   // ---- Drafts ----
   editDrafts: {},
@@ -560,25 +566,56 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     }),
 
   startIpPreviewRun: (runId, entryKey, order) =>
-    set(() => {
-      // seed 整条 IP 前驱链为 pending：画布立刻呈现完整链路，随各步 push 逐节点点亮（含边）。
-      const seeded: StepState[] = order.map((id) => ({
-        id,
-        label: STEP_LABEL_BY_ID.get(id) ?? id,
-        status: "pending" as StepStatus,
-      }));
+    set((state) => {
+      const nextOrder = order.length > 0 ? order : state.pipelineOrder;
+      // 已在同一 IP 预览轨：只补 order / runId，绝不清空已累积的 runningProgress（避免节点闪没）。
+      if (
+        state.ipPreviewRunId &&
+        state.runningEntryKey === entryKey &&
+        state.runningProgress.length > 0
+      ) {
+        return {
+          ipPreviewRunId: runId || state.ipPreviewRunId,
+          pipelineOrder: nextOrder,
+        };
+      }
+      // 预览轨已收束但 activeSteps 仍持有 IP 前驱步：从 activeSteps 恢复，而非重开空白轨。
+      const archivedIp = state.activeSteps.filter((s) => s.id.startsWith("ip_"));
+      if (!state.ipPreviewRunId && archivedIp.length > 0) {
+        const restoredOrder =
+          nextOrder.length > 0
+            ? nextOrder
+            : (state.activeConfig?.pipelineOrder?.length ? state.activeConfig.pipelineOrder : nextOrder);
+        return {
+          activeEntryKey: entryKey,
+          activeEntryStatus: null,
+          activeResult: null,
+          runningEntryKey: entryKey,
+          runningRunId: null,
+          ipPreviewRunId: runId,
+          runningProgress: archivedIp,
+          pipelineOrder: restoredOrder,
+          runMode: "start",
+          runStartedAt: Date.now(),
+          liveCompletedSteps: archivedIp.filter((s) => s.status === "completed").map((s) => s.id),
+        };
+      }
+      // 点6（逐步揭示）：不再把整条 IP 前驱链一次性 seed 成 pending，否则中间预览（文本/节点两模式）
+      // 会"一下子全冒出来"。这里只把 order 存进 pipelineOrder 作为排序权威，runningProgress 留空，
+      // 由后续 pushProgress 随每步确认增量加入节点——useOrderedSteps 取 order∩runningProgress，
+      // 故节点跟随 IP 前置流程一步一步出现（含边逐段点亮）。
       return {
         activeEntryKey: entryKey,
-        activeEntryStatus: "running",
-        activeSteps: seeded,
+        activeEntryStatus: null,
+        activeSteps: [],
         activeResult: null,
         activeConfig: null,
         runningEntryKey: entryKey,
         // runningRunId 故意保持 null：IP 走 job 轮询，不开 SSE，也不撞并发守卫。
         runningRunId: null,
         ipPreviewRunId: runId,
-        runningProgress: seeded,
-        pipelineOrder: order,
+        runningProgress: [],
+        pipelineOrder: nextOrder,
         runMode: "start",
         editDrafts: {},
         focusedStepId: null,
@@ -594,6 +631,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       };
     }),
 
+  setIpRunKey: (key) => set(() => ({ ipRunKey: key })),
+
   finishIpPreview: (status = "completed") =>
     set((state) => {
       if (!state.ipPreviewRunId) return {};
@@ -603,11 +642,14 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
           ? { ...s, status: "failed" as StepStatus }
           : s,
       );
+      const entryKey = state.activeEntryKey ?? state.runningEntryKey;
+      // 保留 activeEntryKey/runningEntryKey 对齐，使中间预览继续读到 finalized 步骤（节点不闪没）。
+      // IP 预处理完成 ≠ 下游叙事生成完成：用 idle 而非 completed，避免误显示 DONE/GENERATING。
       return {
         ipPreviewRunId: null,
-        runningEntryKey: null,
+        runningEntryKey: entryKey,
         runMode: null,
-        activeEntryStatus: status === "interrupted" ? "interrupted" : "completed",
+        activeEntryStatus: status === "interrupted" ? "interrupted" : null,
         activeSteps: finalized,
         runningProgress: finalized,
         activeConfig: { ...(state.activeConfig ?? {}), pipelineOrder: state.pipelineOrder },
@@ -839,20 +881,28 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     })),
 
   clearActiveEntry: () =>
-    set({
-      activeEntryKey: null,
-      activeEntryStatus: null,
-      activeSteps: [],
-      activeResult: null,
-      activeConfig: null,
-      editDrafts: {},
-      focusedStepId: null,
-      focusedChildNodeId: null,
-      expandedStepId: null,
-      collapsedGraphIds: [],
-      streamingChunks: {},
-      streamPlayedSteps: [],
-      animatingStepId: null,
+    set((state) => {
+      // §D3 保护 IP 预览轨：半自动预处理进行中（ipPreviewRunId 存在）时，不清 viewing 上下文，
+      // 否则用户改 INPUT/ROUTING 触发的 clearActiveEntry 会把正在逐步生长的中间预览瞬间清空。
+      if (state.ipPreviewRunId) return {};
+      // 预处理已固化到 activeSteps / ipRunKey 时同样保护，避免 ROUTING 配置变更把节点清掉。
+      if (state.ipRunKey) return {};
+      if (state.activeSteps.some((s) => s.id.startsWith("ip_"))) return {};
+      return {
+        activeEntryKey: null,
+        activeEntryStatus: null,
+        activeSteps: [],
+        activeResult: null,
+        activeConfig: null,
+        editDrafts: {},
+        focusedStepId: null,
+        focusedChildNodeId: null,
+        expandedStepId: null,
+        collapsedGraphIds: [],
+        streamingChunks: {},
+        streamPlayedSteps: [],
+        animatingStepId: null,
+      };
     }),
 
   // ---- Actions: drafts ----
@@ -1094,6 +1144,7 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "runningEntryKey",
   "runningRunId",
   "ipPreviewRunId",
+  "ipRunKey",
   "runningProgress",
   "pipelineOrder",
   "previewOrder",

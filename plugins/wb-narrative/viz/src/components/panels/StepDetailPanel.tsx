@@ -2,17 +2,26 @@ import { useMemo } from "react";
 import { X } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import type { NarrativeContext, SceneNode } from "../../types";
+import { StageFileBrowser, fileGroupsForStep } from "../shared/StageFileBrowser";
 
 export function StepDetailPanel() {
   const focusedStepId = useNarrativeStore((s) => s.focusedStepId);
   const result = useNarrativeStore((s) => s.activeResult);
   const steps = useNarrativeStore((s) => s.activeSteps);
+  const runningProgress = useNarrativeStore((s) => s.runningProgress);
+  const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
+  const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
+  const ipRunKey = useNarrativeStore((s) => s.ipRunKey);
   const setFocus = useNarrativeStore((s) => s.setFocus);
 
   if (!focusedStepId) return null;
 
-  const stepState = steps.find((s) => s.id === focusedStepId);
+  // 半自动预览期 step 在 runningProgress，历史/完成态在 activeSteps —— 两处都查，保证节点详情有数据。
+  const stepState = steps.find((s) => s.id === focusedStepId) ?? runningProgress.find((s) => s.id === focusedStepId);
   const stepData = stepState?.data;
+  const isViewingRunning = activeEntryKey === runningEntryKey;
+  const fileRunKey = (isViewingRunning ? ipRunKey : activeEntryKey) ?? activeEntryKey;
+  const fileGroups = fileGroupsForStep(focusedStepId);
 
   return (
     <div className="step-detail-panel">
@@ -31,6 +40,9 @@ export function StepDetailPanel() {
       </div>
       <div className="step-detail-panel-body">
         <StepDetailContent stepId={focusedStepId} data={stepData} result={result} status={stepState?.status} />
+        {fileGroups && fileGroups.length > 0 && (
+          <StageFileBrowser runKey={fileRunKey} groups={fileGroups} />
+        )}
       </div>
     </div>
   );

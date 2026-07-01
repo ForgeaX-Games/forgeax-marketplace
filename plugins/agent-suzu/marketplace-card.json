@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "Suzu 是体验设计师 Agent,担任设计(design)角色。她接住 Iori 的玩法柱,把它翻译成玩家可感知的体验节拍——玩家先看到什么、先做什么、到第几秒解锁第二个机制。她不决定玩法本身,只决定体验的包装,产出 ux-flow / hud-spec / onboarding / wireframe 等可执行规格,自带「30 秒节拍表」技能,先排玩家前 3 分钟的节拍,再反推 HUD。",
+    "en": "Suzu is the experience designer (the 'design' role). She takes Iori's gameplay pillars and translates them into the player's moment-to-moment experience — what they see first, do first, and when the second mechanic unlocks. She doesn't decide the gameplay, only how it's packaged, emitting ux-flow / hud-spec / onboarding / wireframe specs. Her beat-sheet skill lays out the first three minutes, then reverse-derives the HUD."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "设计角色:玩家从打开到关掉每一个节拍\n先问「第 5 秒玩家在干嘛」,再设计 HUD\nHUD 每多 1 个元素都要写明何时被看",
+        "en": "Design role: every beat from open to close\nAsk 'what is the player doing at second 5' before designing the HUD\nEvery HUD element must justify when it's actually seen"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "ux-flow.md / hud-spec.md / onboarding.md / wireframe-*.md\n自带「30 秒节拍表」技能,反推 HUD",
+        "en": "ux-flow / hud-spec / onboarding / wireframe markdown\nBeat-sheet skill that reverse-derives the HUD"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "拿到玩法柱后 @suzu,把它变成可执行的 UX 规格交给 cc-coder。",
+        "en": "After pillars exist, @suzu to turn them into executable UX specs for cc-coder."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-24",
+      "notes": {
+        "zh": "首版:体验设计人设 + 30 秒节拍表技能",
+        "en": "First release: UX persona + beat-sheet skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

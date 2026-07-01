@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "zh": "插件作者工作台,在 Studio 内编辑本地插件的可视化编辑器。它读写 .forgeax/plugins/<slug>/ 下的 L2 插件:左侧是文件树,右侧是文本编辑器,保存即写回并在后台热重载插件注册表,改完立刻生效。配合 fork 与 record-as-skill 创建新插件,让非工程师也能在应用内做、改、上自己的插件。",
+    "en": "The Plugin Author workbench — an in-app visual editor for local plugins. It reads and writes L2 plugins under .forgeax/plugins/<slug>/: a file tree on the left, a text editor on the right; saving writes back and hot-reloads the plugin registry in the background so changes apply at once. Paired with fork and record-as-skill to create new plugins, it lets non-engineers author, edit and ship plugins in-app."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "编辑 .forgeax/plugins/<slug>/ 下本地插件\n左文件树 + 右文本编辑器\n保存即写回 + 后台热重载注册表",
+        "en": "Edit local plugins under .forgeax/plugins/<slug>/\nLeft file tree + right text editor\nSave writes back + hot-reloads the registry"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "配合 fork / record-as-skill 创建插件,再在此编辑",
+        "en": "Create with fork / record-as-skill, then edit here"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-23",
+      "notes": {
+        "zh": "首版:占位入口",
+        "en": "First release: placeholder entry"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-26",
+      "notes": {
+        "zh": "落地真实文件树 + 编辑器面板",
+        "en": "Real file-tree + editor panel landed"
+      }
+    }
+  ]
+}

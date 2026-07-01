@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "面板管理工作台,是 Studio 的设置中枢。它有四个区:工作台启用与排序、多模态模型绑定、cli-provider 认证健康、marketplace 插件计数,四块都与设置面板(SettingsPanel)的 sections registry 保持同源——在这里开关/排序工作台、绑定各通道的模型、检查 CLI 后端认证状态、查看已装插件数量。",
+    "en": "The Admin workbench — Studio's settings hub. It has four sections: workbench enable/order, multi-modal model bindings, cli-provider auth health, and marketplace plugin counts, all kept in sync with the SettingsPanel sections registry — toggle/reorder workbenches, bind models per channel, check CLI-backend auth status, and see how many plugins are installed."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "四个区",
+        "en": "Four sections"
+      },
+      "body": {
+        "zh": "工作台启用 / 排序\n多模态模型绑定\ncli-provider 认证健康\nmarketplace 插件计数",
+        "en": "Workbench enable/order\nMulti-modal model bindings\ncli-provider auth health\nMarketplace plugin counts"
+      }
+    },
+    {
+      "title": {
+        "zh": "同源",
+        "en": "In sync"
+      },
+      "body": {
+        "zh": "与 Studio 设置面板(SettingsPanel)的 sections 同源",
+        "en": "Kept in sync with Studio's SettingsPanel sections"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:面板管理四区",
+        "en": "First release: four admin sections"
+      }
+    }
+  ]
+}

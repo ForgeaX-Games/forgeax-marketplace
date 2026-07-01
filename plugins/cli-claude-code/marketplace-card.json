@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "把 Anthropic 的 claude-code CLI 接成 ForgeaX Studio 的推理后端。插件声明能力清单与 Bus 入口,实际 runner spawn `claude --mode stream` 子进程,把 ChatEvent 流桥接到内部消息总线;支持流式输出、思考过程、工具调用、子 agent 与会话续接。在面板管理里认证并选用后,所有 agent 的推理请求都走它。",
+    "en": "Wires Anthropic's claude-code CLI in as a ForgeaX Studio reasoning backend. The plugin declares the capability list + Bus entry; the runner spawns `claude --mode stream` and bridges ChatEvent streams onto the internal bus, with streaming, thinking, tool calls, sub-agents and session resume. Once authenticated and selected in Admin, every agent's reasoning routes through it."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "适配方式",
+        "en": "How it adapts"
+      },
+      "body": {
+        "zh": "Runner:claude --mode stream\nChatEvent 流桥接到 Bus\n本插件只声明 metadata + 入口",
+        "en": "Runner: claude --mode stream\nBridges ChatEvent streams to the Bus\nPlugin declares metadata + entry only"
+      }
+    },
+    {
+      "title": {
+        "zh": "能力与模型",
+        "en": "Capabilities & models"
+      },
+      "body": {
+        "zh": "流式 / 思考 / 工具调用 / 子 agent / 会话\n模型:opus-4.7 / sonnet-4.6 / haiku-4.5",
+        "en": "streaming / thinking / tool calls / sub-agents / sessions\nModels: opus-4.7 / sonnet-4.6 / haiku-4.5"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理 → CLI 后端 → 选择并认证 → 全局生效",
+        "en": "Admin → CLI backends → pick & authenticate → applies globally"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:claude-code 后端适配",
+        "en": "First release: claude-code backend adapter"
+      }
+    }
+  ]
+}

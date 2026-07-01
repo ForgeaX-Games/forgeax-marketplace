@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "zh": "cc-coder 是通用编码 Agent,担任编码(coder)角色,可多实例并行写不同子包。它接住 Iori 的玩法骨架、Suzu 的体验流程、Kotone 的剧情大纲,把带验收条件的 spec 一颗粒一颗粒落成可运行的 TypeScript / React / Go / Python 代码,每次只动一颗(≤200 行 diff)并配 ≥5 个单测,拒绝 --no-verify / --force / 跳 hook。默认走 claude-code CLI 后端。",
+    "en": "cc-coder is the generic coding agent (the 'coder' role), running multiple instances in parallel across packages. It takes Iori's gameplay skeleton, Suzu's UX flows and Kotone's narrative outlines and turns acceptance-bearing specs into runnable TypeScript / React / Go / Python — one small granule at a time (≤200-line diff) with ≥5 unit tests each, refusing --no-verify / --force / skipping hooks. Defaults to the claude-code CLI backend."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "角色定位",
+        "en": "Role"
+      },
+      "body": {
+        "zh": "编码角色,可多实例;默认 claude-code 后端\n一次一颗粒(≤200 行),不批量重构\n单测至少 5 case 一起出",
+        "en": "Coder role, multi-instance; defaults to claude-code backend\nOne granule at a time (≤200 lines), no mass refactors\nAt least 5 unit tests shipped together"
+      }
+    },
+    {
+      "title": {
+        "zh": "产出物",
+        "en": "Outputs"
+      },
+      "body": {
+        "zh": "可运行的 TS / React / Go / Python 代码 + 单测\n自带「落地 spec」技能",
+        "en": "Runnable TS / React / Go / Python + tests\nimplement-feature skill"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "把带验收条件的 spec/任务卡交给 @cc-coder;不接没有验收条件的任务。",
+        "en": "Give @cc-coder a spec/task with acceptance criteria; it won't take work without them."
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:通用编码人设 + 落地 spec 技能",
+        "en": "First release: coding persona + implement-feature skill"
+      }
+    },
+    {
+      "version": null,
+      "date": "2026-06-25",
+      "notes": {
+        "zh": "补全人设与长期记忆",
+        "en": "Persona + long-term memory added"
+      }
+    }
+  ]
+}

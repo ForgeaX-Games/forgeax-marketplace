@@ -8,8 +8,8 @@
     "en": "Balance & Sim"
   },
   "description": {
-    "zh": "平衡 / 数值工作台 · 调 balance:resim (tool-balance-resim) 跑 N 次重模拟 · dashboard 显示 winRate + 95% CI · 跟玩家手调数值闭环。",
-    "en": "Balance & sim workbench. Drives balance:resim (tool-balance-resim) for N-trial replays; dashboards winRate + 95% CI; loops with manual stat tweaks."
+    "zh": "平衡 / 数值工作台(规划中)· 目标:调用 balance:resim 跑 N 次重模拟,dashboard 显示胜率 + 95% 置信区间,与玩家手调数值形成闭环。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
+    "en": "Balance & sim workbench (planned) — will drive balance:resim for N-trial replays, dashboard win-rate + 95% CI, and loop with manual stat tweaks. Currently a marketplace placeholder; the panel lands in a later sprint."
   },
   "provides": {
     "workbench": {

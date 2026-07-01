@@ -362,3 +362,62 @@ body {
   stroke-width: var(--ob-edge-width);
   filter: drop-shadow(0 0 4px rgba(212, 255, 72, 0.2));
 }
+
+/* ── Trace/Log overlay (todo 038) ─────────────────────────────────────────── */
+
+/* Node corner badge — trace status at a glance */
+.ob-trace-badge {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 4px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.ob-trace-badge--ok { color: #4B9EFF; background: rgba(75, 158, 255, 0.14); }
+.ob-trace-badge--none { color: var(--ob-node-text-dim); background: rgba(255, 255, 255, 0.05); }
+.ob-trace-badge--warn { color: #FBBF24; background: rgba(251, 191, 36, 0.14); }
+
+/* Sidebar tab bar */
+.ob-tabbar { display: flex; gap: 2px; margin: 6px 0 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.ob-tab {
+  background: none; border: none; color: var(--ob-node-text-dim);
+  font-size: 11px; padding: 6px 10px; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.ob-tab:hover { color: #fff; }
+.ob-tab--active { color: var(--ob-system); border-bottom-color: var(--ob-system); }
+
+/* Trace tab */
+.ob-trace-empty { padding: 16px 4px; font-size: 11px; color: var(--ob-node-text-dim); line-height: 1.6; }
+.ob-trace-tab__sub { font-size: 10px; color: var(--ob-node-text-dim); margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.ob-trace-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ob-trace-table td { padding: 3px 6px; vertical-align: top; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.ob-trace-table__k { color: var(--ob-node-text-dim); width: 90px; white-space: nowrap; }
+.ob-trace-table__v { color: #e6e6e6; word-break: break-all; font-family: var(--ob-mono, monospace); }
+
+/* Logs tab */
+.ob-logs-filter { display: flex; gap: 4px; margin-bottom: 8px; }
+.ob-logs-filter__btn {
+  background: rgba(255, 255, 255, 0.05); border: none; color: var(--ob-node-text-dim);
+  font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer;
+}
+.ob-logs-filter__btn--active { background: rgba(212, 255, 72, 0.18); color: var(--ob-system); }
+.ob-logs-list { display: flex; flex-direction: column; gap: 2px; }
+/* Grid (not flex): level in an auto column, msg in a 1fr column that can shrink
+ * (min-width:0) and wrap normally, fields on a full-width second row. A prior
+ * flex layout with `flex:0 0 100%` fields crushed msg to ~0 width, so a no-space
+ * string like "kernel.turnStart" wrapped one char per line (vertical). */
+.ob-log-line {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; row-gap: 2px;
+  align-items: baseline; font-size: 11px;
+  font-family: var(--ob-mono, monospace); padding: 2px 4px; border-radius: 3px;
+}
+.ob-log-line__lv { text-transform: uppercase; font-size: 9px; opacity: 0.75; white-space: nowrap; }
+.ob-log-line__msg { min-width: 0; overflow-wrap: anywhere; color: #e6e6e6; }
+.ob-log-line__fields { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; color: var(--ob-node-text-dim); font-size: 10px; }
+.ob-log-line--debug { color: var(--ob-node-text-dim); }
+.ob-log-line--info .ob-log-line__lv { color: #4B9EFF; }
+.ob-log-line--warn { background: rgba(251, 191, 36, 0.08); }
+.ob-log-line--warn .ob-log-line__lv { color: #FBBF24; }
+.ob-log-line--error { background: rgba(255, 80, 80, 0.10); }
+.ob-log-line--error .ob-log-line__lv { color: var(--ob-error); }

@@ -8,8 +8,8 @@
     "en": "Yevi · Calculating Reviewer"
   },
   "description": {
-    "zh": "表面优雅得体、内心冷静如深水的观察者 · 永远比你多想一步, 知道你的代码哪里最脆弱、三周前埋下的技术债今天会炸。说话轻柔带笑意, 但措辞精准像手术刀。她帮助你, 是因为她选择了帮助你。",
-    "en": "Gracefully composed observer who's always one step ahead. Knows where your code is weakest and which three-week-old TODO is about to bite. Soft tone, surgical precision. She helps you because she chose to."
+    "zh": "代码 / 方案审查 Agent(审查角色)· 三层风险扫描——眼前 bug、熟透的技术债、远期扩容隐患;语气轻柔、内容精准如手术刀,产出 review-notes / risk-report。只做上线前把关,不写代码、不跑 CI。",
+    "en": "Code- and design-review agent (reviewer role) — a three-layer risk sweep (today's bugs, matured tech debt, scale-time hazards), soft in tone but surgical in content, emitting review-notes and risk-report. Reviews only; no coding or CI."
   },
   "provides": {
     "agent": {
@@ -35,14 +35,20 @@
       "defaultLang": "zh",
       "multiInstance": false,
       "defaultSkills": [
-        { "source": "inline", "skillId": "quiet-review" }
+        {
+          "source": "inline",
+          "skillId": "quiet-review"
+        }
       ]
     },
     "skills": [
       {
         "id": "quiet-review",
         "entry": "./skills/quiet-review/SKILL.md",
-        "displayName": { "zh": "冷静审查", "en": "Quiet Review" },
+        "displayName": {
+          "zh": "冷静审查",
+          "en": "Quiet Review"
+        },
         "description": {
           "zh": "三层风险扫描 —— 眼前问题 / 熟透的债 / 远期隐患，温柔语气精准内容产出 review-notes 与 risk-report",
           "en": "Three-layer risk sweep — today's bugs / matured tech debt / scale-time hazards; soft tone, surgical precision; emits review-notes and risk-report"

@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "zh": "道具 / 图标工作台(规划中)。目标是在 Studio 内编辑一款游戏的 items.json 与像素 icon,并接上 2D 侧滚 / 可平铺 / AI 像素的生图链路,做到道具数据与图标素材一处管理、所见即所得。当前为 marketplace 占位:插件清单与入口已就位,真正的 React 面板实现安排在后续 sprint,届时替换占位 shim。",
+    "en": "Items & icons workbench (planned). The goal is to edit a game's items.json and pixel icons inside Studio and wire up 2D side-scroller / tileable / AI-pixel generation pipelines, managing item data and icon assets in one place, WYSIWYG. It is currently a marketplace placeholder: the manifest and entry are in place, with the real React panel scheduled for a later sprint to replace the shim."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "目标",
+        "en": "Goal"
+      },
+      "body": {
+        "zh": "编辑 items.json + 像素 icon\n接 2D 像素生图链路",
+        "en": "Edit items.json + pixel icons\nHook up 2D pixel-gen pipelines"
+      }
+    },
+    {
+      "title": {
+        "zh": "现状",
+        "en": "Status"
+      },
+      "body": {
+        "zh": "marketplace 占位,面板实现待后续 sprint",
+        "en": "Marketplace placeholder; panel lands in a later sprint"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:占位入口",
+        "en": "First release: placeholder entry"
+      }
+    }
+  ]
+}

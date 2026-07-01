@@ -1,0 +1,48 @@
+{
+  "summary": {
+    "zh": "技能 / VFX 工作台,管理一款游戏的技能与特效产出。它浏览游戏里的 skills/* 与 vfx/* 文件,内置一套 VFX 引擎实时预览特效效果,并用 skill:generate-vfx 生成新特效。玩家在面板里手点调整,与 AI dispatch 共改同一份 skill spec,做到技能树与打击感特效一处编辑、所见即所得。",
+    "en": "The skill & VFX workbench, managing a game's skills and effects. It browses the game's skills/* and vfx/* files, previews effects live in a built-in VFX engine, and generates new ones via skill:generate-vfx. Players tweak by hand in the panel while AI dispatch edits the same shared skill spec, so the skill tree and game-feel effects are edited in one place, WYSIWYG."
+  },
+  "sections": [
+    {
+      "title": {
+        "zh": "能做什么",
+        "en": "What it does"
+      },
+      "body": {
+        "zh": "浏览 skills/* 与 vfx/* 产出\n内置 VFX 引擎实时预览\nskill:generate-vfx 生成特效",
+        "en": "Browse skills/* and vfx/* outputs\nLive preview in a built-in VFX engine\nGenerate effects via skill:generate-vfx"
+      }
+    },
+    {
+      "title": {
+        "zh": "协作",
+        "en": "Collaboration"
+      },
+      "body": {
+        "zh": "玩家手点与 AI dispatch 共改一份 skill spec",
+        "en": "Player clicks and AI dispatch edit one shared skill spec"
+      }
+    },
+    {
+      "title": {
+        "zh": "怎么用",
+        "en": "How to use"
+      },
+      "body": {
+        "zh": "面板管理启用 → 左侧打开「skill」面板",
+        "en": "Enable in Admin → open the 'skill' panel"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-05-15",
+      "notes": {
+        "zh": "首版:技能 / VFX 工作台",
+        "en": "First release: skill & VFX workbench"
+      }
+    }
+  ]
+}

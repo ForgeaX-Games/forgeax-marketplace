@@ -2,12 +2,18 @@
 
 AI 驱动的游戏叙事内容生成管线。支持 **双层路由**（Tier + Mode）+ **Planner 动态选步**，自动适配不同游戏品类的叙事需求深度，覆盖 117 个品类、9 种管线模板、29 种执行模式、6 种叙事原型。
 
+**两条输入路径，同一套生成内核**：
+
+1. **从需求生成**（主路径）——用户一句话需求 → Tier/Mode 路由 + Planner 组装 → D0-D4 策划 + 叙事管线，从零创作。本文档大部分篇幅描述这条路径。
+2. **IP DNA 改编生成**（输入侧）——上传已有 IP 作品（小说 / 漫画 / 视频）→ 标准化建树 + scoped 提取"叙事 DNA" + 改编规划裁剪 → 复用同一套生成管线产出可玩叙事。见 [IP DNA 改编生成](#ip-dna-改编生成)。
+
 ## 目录
 
 - [快速开始](#快速开始)
 - [项目架构](#项目架构)
 - [管线模板与模式](#管线模板与模式)
 - [管线步骤详解](#管线步骤详解)
+- [IP DNA 改编生成](#ip-dna-改编生成)
 - [设计思想（tpl-rpg）](#设计思想tpl-rpg)
 - [可视化特性](#可视化特性)
 - [API 参考](#api-参考)
@@ -434,6 +440,46 @@ interface GenreEntry {
 
 ---
 
+## IP DNA 改编生成
+
+**定位**：与"从需求生成"平行的第二条输入路径。用户上传已有 IP 作品（小说 / 漫画 / 视频 / 压缩包 / 混合模态），系统把它标准化为层级化的"最小叙事单元树"，逐层提取结构化的**叙事 DNA**（角色 / 场景 / 事件 + 叙事方法"三件套"），经改编范围裁剪后，**复用同一套生成管线**（`pipeline.run`）产出可玩游戏叙事。全程以同一 `story_timestamp` 为主键，`input/` 与 `output/` 同名关联，落盘可续跑。
+
+实现位于 `src/ip-dna/`，编排入口 `orchestrator.ts:runIpDnaPipeline`；LLM 均以"接缝(seam)"注入——无 API key 时走确定性兜底，离线 dry-run 也能跑通整链（不抛错）。
+
+### 相位总览
+
+| 相位 | 实现 | 职责 |
+|------|------|------|
+| **Phase 0 · 输入地基** | `phase0-foundation.ts` / `phase0-compress.ts` | 多模态分家归档到各媒体 `*_original`、生成《用户资产参考清单》；压缩包/PDF 展开、媒体压缩（720p / 抽帧）|
+| **Phase 1 · 标准化** | `phase1-understanding.ts` / `phase1-multimodal.ts` / `noise-filter.ts` / `unit-identity.ts` | 建**轻量层级树**（部/卷→章→最小单元）、多模态转写为叙事文本、干扰项过滤、体量水准线评估。详见下方 |
+| **Phase 2 · scoped 提取** | `phase2-extract.ts` | 按最小叙事单元切片，自底向上逐层聚合出"三件套"（角色/场景/事件 + 方法）模板 |
+| **Phase 2b/2c · 改编规划** | `phase2b-adapt.ts` / `phase2c-gen-adapt.ts` | 改编范围裁剪（全量/局部）、游戏单元划分（超体量成系列）、A→B 映射到目标生成管线 |
+| **Phase 3 · 算子装备** | `phase3-rag.ts` / `phase3-vector.ts` / `phase3b-kag.ts` | 从 `knowledge_base/` 检索叙事方法算子（vector / scope+tag / KAG），装备到生成输入 |
+| **Phase 4/5 · 精修** | `phase4-rewrite.ts` / `phase5-polish.ts` | 忠实改写与产物润色 |
+
+### Phase 1 标准化（含最近修复项）
+
+标准化是 Phase 1 的一小步骤集合，把"杂乱上传"收敛为可提取的规范层级树：
+
+- **层级建树**：多文件/卷目录按结构建多层树（打包目录自动剥离），单文件散文扫标记或整篇成一单元；"看结构不看名字"——文件名叫法只决定标题，层级抽象由结构决定。
+- **多模态转写**：图片/视频统一转写为带边界的层级化叙事文本，汇入同一条文本主链。
+- **真实叙事序号 + 去重**（`unit-identity.ts`）：从标题/文件名提取真实序号（`第八章_一场戏` → `8_《第八章_一场戏》`，支持中文简繁体/S01E03/第N话/页码），同序号重复单元保留末次去重。
+- **干扰项过滤**（`noise-filter.ts`）：剔除引言/序/作者感言/求月票/公告等非正文，保留后记/番外等特殊章节。
+- **体量水准线**：按媒体维度（小说字数/漫画页数/视频时长）评估是否需拆解/系列化。
+
+### 半自动阶段门（前端交互）
+
+前端 `IpStageFlow` 逐步驱动，每步落盘、可中断续跑：
+
+```
+上传 → ingest（标准化+建树）→ [体量抉择] → (decompose 再标准化) →
+confirm-scope/units（改编范围+游戏单元）→ extract（scoped IP DNA）→ generate（下游生成）
+```
+
+自动模式（`/ip-dna/start`）则一路走默认（全量改编 + 按体量定档），无逐步确认。IP DNA 相关 REST 端点见 [API 参考](#api-参考)。
+
+---
+
 ## 设计思想（tpl-rpg）
 
 > **适用范围**：本节描述 **tpl-rpg 标准管线** L0-L5 流程的核心设计原则。其它 Pipeline Template 有各自的工作模式，不全部适用。
@@ -650,6 +696,26 @@ deviation (-1 ~ +1, 由 LLM 输出, clamp 到 [-deviation_bound, +deviation_boun
 | POST | `/api/narrative/resume` | **resume**：断点续传 |
 | POST | `/api/narrative/regenerate` | **fork**：基于 modifications 仅重跑受影响 step |
 | POST | `/api/narrative/cancel/:id` | 取消正在运行的 pipeline |
+
+</details>
+
+<details>
+<summary>IP DNA 改编生成</summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/narrative/ip-dna/start` | **全自动**：上传 → 标准化 → 提取 → 生成一路直跑（支持 `async` 返回 jobId）|
+| POST | `/api/narrative/ip-dna/ingest` | **半自动**：仅摄入 + 标准化建树，停在层级确认（`async` 返回 jobId）|
+| GET | `/api/narrative/ip-dna/:runId/hierarchy` | 取某次运行的层级树 + 体量 + 默认改编范围 |
+| POST | `/api/narrative/ip-dna/:runId/decompose` | 超体量再标准化（按标记边界拆块）|
+| POST | `/api/narrative/ip-dna/:runId/confirm-scope` | 确认改编范围（全量/裁剪）|
+| POST | `/api/narrative/ip-dna/:runId/confirm-units` | 确认游戏单元划分 |
+| POST | `/api/narrative/ip-dna/:runId/extract` | 生成 scoped IP DNA（三件套）|
+| POST | `/api/narrative/ip-dna/:runId/generate` | 用 scoped IP DNA 驱动下游生成 |
+| GET | `/api/narrative/ip-dna/job/:jobId` | 查询异步 IP DNA 任务状态/进度 |
+| POST | `/api/narrative/ip-dna/job/:jobId/cancel` | 取消异步 IP DNA 任务 |
+| GET | `/api/narrative/ip-dna/:runId` | 取某次 IP DNA 运行的汇总信息 |
+| POST | `/api/narrative/ip-dna/analyze-impact` | IP DNA 编辑影响面分析 |
 
 </details>
 
@@ -962,7 +1028,7 @@ src/                                          # 后端 — 叙事生成管线
 │   └── game-design.ts                        # D0-D4 策划数据类型 + NarrativeRequirements
 │
 ├── knowledge/
-│   ├── genre-taxonomy.ts                     # 97 品类知识库 + GENRE_TEMPLATE_OVERRIDES
+│   ├── genre-taxonomy.ts                     # 117 品类知识库 + GENRE_TEMPLATE_OVERRIDES
 │   ├── genre-narrative-type.ts               # 品类 → 叙事类型映射
 │   └── game-narrative/                       # Skill 体系（按 tier × genre 组织）
 │       ├── skill-loader.ts                   # 入口：loadSkill / getStepSkill + getArchetypeForGenre（6 原型映射）
@@ -1060,6 +1126,20 @@ src/                                          # 后端 — 叙事生成管线
 │   └── agents/
 │       └── universal-narrative.ts            # 通用叙事 agent 实例
 │
+├── ip-dna/                                   # ★ IP DNA 改编生成子系统（第二条输入路径）
+│   ├── orchestrator.ts                       # ★ 端到端编排：Phase0→1→2→2b/2c→3→生成
+│   ├── job.ts                                # 异步任务队列（createJob/updateJob）
+│   ├── phase0-foundation.ts / phase0-compress.ts  # 归档+清单 / 解压+媒体压缩
+│   ├── phase1-understanding.ts               # ★ 标准化建层级树 + 体量评估 + 拆解闭环
+│   ├── phase1-multimodal.ts                  # 图片/视频转写为层级化叙事文本
+│   ├── unit-identity.ts                      # ★ 真实叙事序号提取（中文数字/章·集·话·页）+ 同号去重
+│   ├── noise-filter.ts                       # 干扰项过滤（非正文/作者互动，保留特殊章节）
+│   ├── phase2-extract.ts                     # scoped 提取：逐层聚合三件套
+│   ├── phase2b-adapt.ts / phase2c-gen-adapt.ts    # 改编范围裁剪 / 游戏单元 A→B 映射
+│   ├── phase3-rag.ts / phase3-vector.ts / phase3b-kag.ts  # 叙事方法算子检索装备
+│   ├── phase4-rewrite.ts / phase5-polish.ts  # 忠实改写 / 产物润色
+│   └── filesystem.ts                         # input/output 媒体优先布局 + 落盘/续跑
+│
 ├── utils/
 │   ├── connection-repair.ts                  # 剧情树连接推断/修复/验证
 │   └── constraint-validator.ts               # 三重约束验证器 + 角色连续性
@@ -1069,7 +1149,7 @@ src/                                          # 后端 — 叙事生成管线
 │   ├── workbench-types.ts
 │   └── index.ts
 │
-├── api/server.ts                             # ★ HTTP API + SSE（24 端点）
+├── api/server.ts                             # ★ HTTP API + SSE（叙事生成 + 12 个 IP DNA 端点）
 ├── cli.ts                                    # CLI 入口
 └── index.ts                                  # 库入口
 

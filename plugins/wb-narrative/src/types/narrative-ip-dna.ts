@@ -346,8 +346,18 @@ export interface HierarchyNode {
   levelType: HierarchyLevelType;
   /** 序号（同层内顺序）。 */
   index: number;
-  /** 标题（"叫法是实例"——按媒体取词，结构对齐）。 */
+  /** 标题（"叫法是实例"——按媒体取词，结构对齐）；保留为原始标题/文件名，作溯源源串。 */
   title: string;
+  /**
+   * 对外展示规范名（§3.1 锚定最小叙事单元）：`序号_《原始标题》`（如 `1_《第一章》`）；
+   * root（complete）= `《题目》`（无序号）。展示/落盘命名一律以此为准，title 仅作溯源。
+   */
+  displayName?: string;
+  /**
+   * 根→自身的完整嵌套层级链（内部运行/定位用）：按文档序自顶向下，含 root 与自身。
+   * 每项为轻量祖先描述，便于下游精确引用"本单元处于 部X>章Y>节Z"的位置。
+   */
+  lineage?: Array<{ id: string; levelType: HierarchyLevelType; index: number; displayName: string }>;
   /** 父节点 id（root 为 null）。 */
   parent: string | null;
   /** 子节点 id 列表。 */
@@ -416,10 +426,15 @@ export interface NarrativeIpDna {
  * 递归 children 表达更深层的嵌套选择。整体即蓝图所述 `[[...],...],[...]...` 的结构化形态。
  */
 export interface AdaptationScopeSelection {
-  /** 选中的层级节点 id。 */
-  nodeId: string;
+  /** 选中的层级节点 id（leafRange 形态可省略,直接给最小单元闭区间）。 */
+  nodeId?: string;
   /** 限定该节点下的子层区间（如 [1, 5] 表示第 1-5 章）；缺省=全选其子树。 */
   childRange?: [number, number];
+  /**
+   * 最小单元（叶子）闭区间 [start, end]（文档序），用于"每部=一个区间"的区间裁剪。
+   * 与 nodeId/childRange 互斥使用：给 leafRange 时直接取文档序中该闭区间内的全部叶子。
+   */
+  leafRange?: { start: string; end: string };
   /** 更深层嵌套选择。 */
   children?: AdaptationScopeSelection[];
 }
