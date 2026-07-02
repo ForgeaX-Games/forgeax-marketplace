@@ -15,15 +15,16 @@
  *
  * ## 值域
  *
- * 只有两个合法值：
+ * 有三个合法值：
  * - `'gemini'`     → 后端路由到 Gemini 3 Pro Image（nanobanana-pro）
  * - `'gpt-image-2'` → 后端路由到 Azure OpenAI gpt-image-2 deployment
+ * - `'litellm'`    → 后端路由到 LiteLLM 代理的图像模型（真实 model 由 LITELLM_PROXY_IMAGE_MODEL env 决定；底层通常是 gpt-image-2）
  *
  * 历史存档里的旧值（例如 `'nanobanana-pro'`、`'gpt-4o'`、空串）都回落
  * 到默认 `'gemini'`，避免把非法值送进 prompt 选择器。
  */
 
-export type ImageModel = 'gemini' | 'gpt-image-2'
+export type ImageModel = 'gemini' | 'gpt-image-2' | 'litellm'
 
 export const IMAGE_MODEL_STORAGE_KEY = 'character-editor:image-model'
 
@@ -36,6 +37,6 @@ export const DEFAULT_IMAGE_MODEL: ImageModel = 'gemini'
  * 单独抽成纯函数的原因：单测不用 mock localStorage。
  */
 export function parseImageModelFromStorage(raw: string | null | undefined): ImageModel {
-  if (raw === 'gemini' || raw === 'gpt-image-2') return raw
+  if (raw === 'gemini' || raw === 'gpt-image-2' || raw === 'litellm') return raw
   return DEFAULT_IMAGE_MODEL
 }

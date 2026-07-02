@@ -26,7 +26,12 @@ const vendors = new Map<string, ImageVendor>();
 const roleChains = new Map<NonNullable<ImageGenRequest['role']>, string[]>();
 
 /** Which vendor owns a given model id. Lets the gateway forward modelOverride
- *  only to the matching vendor and let fallbacks use their own defaults. */
+ *  only to the matching vendor and let fallbacks use their own defaults.
+ *
+ *  `'litellm-image'` is a *semantic* id only — it pins the gateway to the
+ *  litellm-images vendor, but the real proxy model is decided by the vendor's
+ *  `LITELLM_PROXY_IMAGE_MODEL` env (see vendors/litellm-images.ts), so the
+ *  vendor intentionally ignores this modelOverride instead of forwarding it. */
 const MODEL_VENDOR_OWNER: Record<string, string> = {
   'gpt-image-2': 'azure-gpt-image',
   'gpt-image-1': 'azure-gpt-image',
@@ -35,6 +40,7 @@ const MODEL_VENDOR_OWNER: Record<string, string> = {
   'gemini-3.1-flash-image-preview': 'nano-banana',
   'doubao-seedream-5-0-260128': 'seedream',
   'doubao-seedream-4-0-250828': 'seedream',
+  'litellm-image': 'litellm-images',
 };
 
 /** modelOverride is vendor-specific (e.g. 'gpt-image-2' belongs to azure). Only

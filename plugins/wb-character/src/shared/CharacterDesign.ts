@@ -1321,6 +1321,7 @@ export class CharacterDesign {
     const professionLabel = this.professionLabel(p)
     const styleLabel = this.artStyleLabel(p)
     const methodSummary = conceptGenButtonLabel(p.characterRole).replace(/^[^\s]+\s*/, '')
+    const imageModel = globalState.getImageModel()
 
     this.leftEl.innerHTML = `
       <div class="cd-panel">
@@ -1445,6 +1446,15 @@ export class CharacterDesign {
                   placeholder="描述你想要的画风，例如：赛璐璐厚涂混合、90年代复古漫画风..."
                   value="${esc(p.artStyleCustom)}"
                   style="display:${p.artStyle === 'custom' ? '' : 'none'}" />
+              </div>
+
+              <div class="cd-field">
+                <label class="cd-label">生图模型 <span class="cd-optional">(切 LiteLLM 走代理图像模型)</span></label>
+                <div class="cd-btn-group" data-group="image-model">
+                  <button class="cd-chip ${imageModel === 'gemini' ? 'active' : ''}" data-val="gemini">Gemini</button>
+                  <button class="cd-chip ${imageModel === 'gpt-image-2' ? 'active' : ''}" data-val="gpt-image-2">GPT-Image-2</button>
+                  <button class="cd-chip ${imageModel === 'litellm' ? 'active' : ''}" data-val="litellm">LiteLLM</button>
+                </div>
               </div>
 
               <div class="cd-field">
@@ -2404,7 +2414,7 @@ export class CharacterDesign {
       this.resetToForm()
     })
     this.wireGroup('image-model', val => {
-      const model: ImageModel = val === 'gpt-image-2' ? 'gpt-image-2' : 'gemini'
+      const model: ImageModel = val === 'litellm' ? 'litellm' : val === 'gpt-image-2' ? 'gpt-image-2' : 'gemini'
       globalState.setImageModel(model)
       // 模型切换不 resetToForm——允许用户在看概念图 / 设定图中途只切换
       // 下一步生成要用的模型，已生成的结果保留。globalState.notify() 里会

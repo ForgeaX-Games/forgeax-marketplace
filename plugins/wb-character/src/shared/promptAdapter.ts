@@ -18,6 +18,7 @@
  *
  * - `model === 'gemini'`     → 原样返回
  * - `model === 'gpt-image-2'` → 去权重 + 压缩连续逗号 + 修空白
+ * - `model === 'litellm'`    → 同 gpt-image-2（LiteLLM 代理底层通常是 gpt-image-2，走同一清洗分支）
  */
 
 import type { ImageModel } from './ImageModel'

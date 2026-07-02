@@ -43,7 +43,11 @@ export function createLitellmImagesVendor(opts: LitellmImagesOpts = {}): ImageVe
       return !!(baseUrl && apiKey && defaultModel);
     },
     async generate(req) {
-      const model = req.modelOverride ?? defaultModel;
+      // litellm 的真实 model id 由 LITELLM_PROXY_IMAGE_MODEL env 决定,不由调用方
+      // 覆盖。前端选 litellm 时经 MODEL_VENDOR_OWNER 路由过来的 modelOverride 是
+      // 语义 id `'litellm-image'`(见 image-gateway/index.ts),不是 proxy 认识的
+      // model,转发上去会 404,所以这里始终用 env 配置的 defaultModel。
+      const model = defaultModel;
       if (!model) throw new Error('litellm-images: no model configured (set LITELLM_PROXY_IMAGE_MODEL)');
       if (!baseUrl) throw new Error('litellm-images: LITELLM_PROXY_BASE_URL not set');
       if (!apiKey) throw new Error('litellm-images: LITELLM_PROXY_KEY not set');

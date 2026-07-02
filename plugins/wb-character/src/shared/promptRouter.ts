@@ -22,9 +22,13 @@ import type { ImageModel } from './ImageModel'
 export interface PromptBundle<T> {
   gemini: T
   'gpt-image-2': T
+  /** LiteLLM 代理底层通常是 gpt-image-2,prompt 风格同 gpt-image-2;
+   *  未单独配置时 pickPromptForImageModel 回落到 'gpt-image-2'。 */
+  litellm?: T
 }
 
 export function pickPromptForImageModel<T>(bundle: PromptBundle<T>, model: ImageModel): T {
+  if (model === 'litellm') return bundle.litellm ?? bundle['gpt-image-2']
   return bundle[model]
 }
 
@@ -40,11 +44,16 @@ export function pickPromptForImageModel<T>(bundle: PromptBundle<T>, model: Image
  * - `'gpt-image-2'` → `'gpt-image-2'`（不以 gemini 开头，走 Azure 分支）
  */
 export function apiModelIdForImageModel(model: ImageModel): string {
-  return model === 'gpt-image-2' ? 'gpt-image-2' : 'gemini-3-pro-image-preview'
+  if (model === 'gpt-image-2') return 'gpt-image-2'
+  if (model === 'litellm') return 'litellm-image'
+  return 'gemini-3-pro-image-preview'
 }
 
 /** Host tool vendor for 3D turnaround. gpt-image-2 → Azure /images/edits (the
  *  only reference-capable vendor wired here); gemini → nano-banana. */
 export function turnaroundVendorForImageModel(model: ImageModel): 'azure-gpt-image' | 'nano-banana' {
-  return model === 'gpt-image-2' ? 'azure-gpt-image' : 'nano-banana'
+  // litellm-images vendor 只走 /images/generations,不支持参考图 edits,无法
+  // 在四视图间保持角色一致 → turnaround 退回 azure-gpt-image(参考图可用)。
+  if (model === 'gpt-image-2' || model === 'litellm') return 'azure-gpt-image'
+  return 'nano-banana'
 }

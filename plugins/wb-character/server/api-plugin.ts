@@ -34,6 +34,8 @@ import {
   type AzureImageCredentials,
 } from './env-credentials'
 import { selectGeminiTextModel } from './select-gemini-text-model'
+import { ImageDispatcher } from './character-forge/clients/dispatcher'
+import { vendorForModel } from './image-gateway'
 
 // ── Monster pipeline Flask proxy config ─────────────────────────────
 const MONSTER_HOST = process.env.MONSTER_BACKEND_HOST || '127.0.0.1'
@@ -274,6 +276,51 @@ function mcpCall(host: string, port: number, tool: string, args: Record<string, 
 }
 
 // ── Gemini Image Generation (via LLM proxy) ─────────────────────────
+
+// ── Unified image gateway path (Stage D) ─────────────────────────────
+// 通用 /generate-image 现在优先走 image-gateway(role chain 含 litellm-images
+// 末位 fallback),gateway 全失败时再回落到下面的 Gemini/Azure 直连老分支,
+// 保住 LLM_PROXY_URL 代理 Gemini 等既有能力不丢。验证稳定后老三函数可删。
+function bodySizeToGatewaySize(body: any): '1k' | '2k' | '4k' {
+  if (body.imageSize === '1024x1024' || body.aspectRatio === '1:1') return '1k'
+  return '2k'
+}
+
+async function generateImageViaGateway(body: any): Promise<{
+  success: boolean
+  imageBase64?: string
+  mimeType?: string
+  vendor?: string
+  modelId?: string
+  triedVendors?: string[]
+  error?: string
+}> {
+  try {
+    const dispatcher = new ImageDispatcher(process.env as Record<string, string | undefined>)
+    const ref = body.inputImageBase64
+      ?? (Array.isArray(body.inputImages) && body.inputImages[0]?.base64 ? body.inputImages[0].base64 : null)
+    const preferred = vendorForModel((body.model || '').trim())
+    const r = await dispatcher.generate('concept-art', {
+      prompt: body.prompt,
+      size: bodySizeToGatewaySize(body),
+      refImageBase64: ref,
+    }, preferred)
+    return {
+      success: true,
+      imageBase64: Buffer.from(r.pngBytes).toString('base64'),
+      mimeType: r.mime,
+      vendor: r.vendor,
+      modelId: r.modelId,
+      triedVendors: r.triedVendors,
+    }
+  } catch (e: any) {
+    return {
+      success: false,
+      error: e?.message ?? 'gateway failed',
+      triedVendors: e?.triedVendors,
+    }
+  }
+}
 
 async function geminiGenerateImage(body: any): Promise<any> {
   const { prompt, aspectRatio, inputImageBase64, inputImages, model, imageSize } = body
@@ -2143,6 +2190,23 @@ export function apiProxyPlugin(): Plugin {
 
           switch (urlPath) {
             case '/__ce-api__/generate-image': {
+              // 优先走统一 image-gateway(含 litellm-images 末位 fallback);
+              // gateway 全失败再回落 Gemini/Azure 直连老分支,保住 LLM_PROXY_URL
+              // 代理 Gemini 等既有能力。验证稳定后老分支可删(见 generateImageViaGateway)。
+              const gw = await generateImageViaGateway(body)
+              if (gw.success) {
+                result = {
+                  success: true,
+                  imageBase64: gw.imageBase64,
+                  mimeType: gw.mimeType,
+                  vendor: gw.vendor,
+                  modelId: gw.modelId,
+                  triedVendors: gw.triedVendors,
+                }
+                break
+              }
+              console.warn(`[generate-image] gateway failed (${(gw.triedVendors ?? []).join(',') || gw.error}), falling back to legacy direct path`)
+
               const requestedModel = (body.model || '').trim()
               const hasInputImages = body.inputImageBase64 || body.inputImages
               const forceGemini = requestedModel.startsWith('gemini')
@@ -2164,6 +2228,7 @@ export function apiProxyPlugin(): Plugin {
                   result = await geminiGenerateImage(body)
                 }
               }
+              if (!result.success) result.triedVendors = gw.triedVendors
               break
             }
             case '/__ce-api__/gemini-text':
