@@ -4,12 +4,17 @@ import { buildReelGameAsset } from '../buildReelGameAsset'
 const scenario = {
   id: 's1',
   title: 'demo',
+  rootSceneId: '1.1',
+  schemaVersion: 8,
+  defaultCharMs: 30,
   scenes: {
     '1.1': {
       id: '1.1',
+      title: '镜头一',
       media: { kind: 'VIDEO', ref: 'm-aaa' },
       durationMs: 6000,
       dialogue: [],
+      branches: [],
     },
   },
 } as never
@@ -23,7 +28,7 @@ describe('buildReelGameAsset', () => {
     const entry = res.packJson.assets[0]!
     expect(entry.kind).toBe('reel-game')
     expect(entry.guid).toBe('0190a0b1-0000-7000-8000-000000000001')
-    const rewritten = (entry.payload.scenario as never as Record<string, never>)['scenes']!['1.1']!
+    const rewritten = (entry.payload.scenario as unknown as { scenes: Record<string, { media: { ref: string } }> })['scenes']!['1.1']!
       .media.ref as string
     expect(rewritten).toMatch(/^\.\/reel-media\/[0-9a-f]{16}\.mp4$/)
     expect(res.mediaFiles).toHaveLength(1)
@@ -35,9 +40,12 @@ describe('buildReelGameAsset', () => {
     const twoRefs = {
       id: 's2',
       title: 'dup',
+      rootSceneId: '1.1',
+      schemaVersion: 8,
+      defaultCharMs: 30,
       scenes: {
-        '1.1': { id: '1.1', media: { kind: 'IMAGE', ref: 'm-a' }, dialogue: [] },
-        '1.2': { id: '1.2', media: { kind: 'IMAGE', ref: 'm-b' }, dialogue: [] },
+        '1.1': { id: '1.1', title: 'a', durationMs: 1000, media: { kind: 'IMAGE', ref: 'm-a' }, dialogue: [], branches: [] },
+        '1.2': { id: '1.2', title: 'b', durationMs: 1000, media: { kind: 'IMAGE', ref: 'm-b' }, dialogue: [], branches: [] },
       },
     } as never
     const res = await buildReelGameAsset(twoRefs, {
@@ -52,7 +60,7 @@ describe('buildReelGameAsset', () => {
       guid: '0190a0b1-0000-7000-8000-000000000002',
       resolveBlob: async () => ({ kind: 'missing', reason: 'gone' }),
     })
-    const sc = res.packJson.assets[0]!.payload.scenario as never as Record<string, never>
+    const sc = res.packJson.assets[0]!.payload.scenario as unknown as { scenes: Record<string, { media: { ref: string } }> }
     expect(sc['scenes']!['1.1']!.media.ref).toBe('m-aaa')
     expect(res.missing).toHaveLength(1)
   })
@@ -62,7 +70,7 @@ describe('buildReelGameAsset', () => {
       guid: '0190a0b1-0000-7000-8000-000000000004',
       resolveBlob: async () => ({ kind: 'external', url: 'https://cdn/x.mp4' }),
     })
-    const sc = res.packJson.assets[0]!.payload.scenario as never as Record<string, never>
+    const sc = res.packJson.assets[0]!.payload.scenario as unknown as { scenes: Record<string, { media: { ref: string } }> }
     expect(sc['scenes']!['1.1']!.media.ref).toBe('m-aaa')
     expect(res.external).toHaveLength(1)
   })

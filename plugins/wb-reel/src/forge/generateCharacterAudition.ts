@@ -125,7 +125,7 @@ export async function generateCharacterAudition(
   })
 
   opts?.onStage?.('生成试镜视频')
-  const auditionVideoMediaId = await generateCardVideo({
+  const { mediaId: auditionVideoMediaId } = await generateCardVideo({
     sceneId: `audition-${character.id}`,
     tag: `audition:${character.id}`,
     title: `试镜视频 · ${character.name}`,
@@ -138,6 +138,8 @@ export async function generateCharacterAudition(
     referenceImageUrls: [refUrl],
     generateAudio: true,
     visualStyle: scenario.visualStyle,
+    scenarioVideoConfig: scenario.videoConfig,
+    scenarioId: scenario.id,
     onStage: opts?.onStage,
     onRequest: opts?.onRequest,
   })
@@ -155,6 +157,7 @@ export async function generateCharacterAudition(
         humanReadableName: `音色参考 · ${character.name}`,
         promptKind: 'character-voice',
         tags: ['voice-sample'],
+        scenarioId: scenario.id,
       })
     } catch (e) {
       warnings.push(

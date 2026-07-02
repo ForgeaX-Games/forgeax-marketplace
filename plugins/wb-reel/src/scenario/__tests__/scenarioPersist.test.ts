@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   deserialize,
   emptyDb,
+  isUntouchedBlankItem,
   mergeDbs,
   pickActive,
   pickRecent,
   removeFromDb,
+  sanitizeBlankPollution,
   serialize,
   setActive,
   upsertScenario,
 } from '../scenarioPersist'
+import type { PersistedDb, PersistedItem } from '../scenarioPersist'
 import type { Scenario } from '../types'
 
 /**
@@ -249,6 +252,75 @@ describe('scenarioPersist', () => {
     it('空 db 合并 → 仍返回空', () => {
       const merged = mergeDbs(emptyDb(), emptyDb())
       expect(merged).toEqual(emptyDb())
+    })
+  })
+
+  describe('sanitizeBlankPollution', () => {
+    // 空白「新的故事」污染：title 默认、id=scn-*、单占位场景、score 0。
+    const blank = (id: string, now: number): PersistedItem => ({
+      id,
+      title: '新的故事',
+      scenario: makeScenario({ id, title: '新的故事' }),
+      createdAt: now,
+      updatedAt: now,
+    })
+    const real = (id: string, now: number, title = '真剧本'): PersistedItem => ({
+      id,
+      title,
+      scenario: makeScenario({ id, title }),
+      createdAt: now,
+      updatedAt: now,
+    })
+    const db = (items: PersistedItem[], activeId: string | null): PersistedDb => ({
+      version: 1,
+      activeId,
+      items,
+    })
+
+    it('isUntouchedBlankItem：默认标题空壳判为空白，改过名/有内容不判', () => {
+      expect(isUntouchedBlankItem(blank('scn-1', 1))).toBe(true)
+      expect(isUntouchedBlankItem(real('scn-2', 1, '我的太空剧'))).toBe(false)
+      // id 不是 scn-* 的（如 narr-/demo-）即使标题巧合也不误删
+      expect(
+        isUntouchedBlankItem({ ...blank('scn-x', 1), id: 'narr-x' }),
+      ).toBe(false)
+    })
+
+    it('有真剧本 + 多本空白 → 空白全清除，真剧本保留', () => {
+      const items = [blank('scn-b1', 10), real('r1', 20), blank('scn-b2', 30), real('r2', 40)]
+      const out = sanitizeBlankPollution(db(items, 'r2'))
+      expect(out.items.map((it) => it.id).sort()).toEqual(['r1', 'r2'])
+      expect(out.activeId).toBe('r2')
+    })
+
+    it('activeId 被污染抢占到空白（多本空白=污染特征）→ 清空白并归位到最近真剧本', () => {
+      // 1234 工程的真实形态：activeId 落在一批空白里的某一本，且不止一本空白。
+      const items = [real('r1', 20), real('r2', 40), blank('scn-poison', 99), blank('scn-b2', 50)]
+      const out = sanitizeBlankPollution(db(items, 'scn-poison'))
+      expect(out.items.find((it) => it.id === 'scn-poison')).toBeUndefined()
+      expect(out.items.find((it) => it.id === 'scn-b2')).toBeUndefined()
+      expect(out.items.map((it) => it.id).sort()).toEqual(['r1', 'r2'])
+      expect(out.activeId).toBe('r2') // updatedAt 最大的真剧本
+    })
+
+    it('全空白（无真剧本）→ 原样不动，尊重"新建 game 一张白纸"', () => {
+      const items = [blank('scn-b1', 10), blank('scn-b2', 20)]
+      const input = db(items, 'scn-b1')
+      const out = sanitizeBlankPollution(input)
+      expect(out).toBe(input)
+    })
+
+    it('唯一空白且正是 active（刚点新建还没写）→ 保留它与 active', () => {
+      const items = [real('r1', 20), blank('scn-fresh', 99)]
+      const out = sanitizeBlankPollution(db(items, 'scn-fresh'))
+      expect(out.items.map((it) => it.id).sort()).toEqual(['r1', 'scn-fresh'])
+      expect(out.activeId).toBe('scn-fresh')
+    })
+
+    it('无空白 → 原样返回', () => {
+      const items = [real('r1', 20), real('r2', 40)]
+      const input = db(items, 'r1')
+      expect(sanitizeBlankPollution(input)).toBe(input)
     })
   })
 })

@@ -281,7 +281,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
       // 后归档，让这条视频也能在卡片「ⓘ 生成信息」里回看用了哪些角色/场景/道具锚点。
       let videoReq: GenRequestSnapshot | undefined
       try {
-        const newMediaId = await generateCardVideo({
+        const { mediaId: newMediaId } = await generateCardVideo({
           sceneId,
           tag,
           title: spec.title,
@@ -300,6 +300,8 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
           referenceAudioUrl,
           generateAudio: st.genAudio,
           durationSec: st.durationSec,
+          scenarioVideoConfig: scenario.videoConfig,
+          scenarioId: scenario.id,
           onStage: (stage) => setStages((s) => ({ ...s, [spec.id]: stage })),
           onRequest: (req) => {
             videoReq = req
@@ -346,6 +348,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
             text,
             voiceType,
             speedRatio: st.speedRatio,
+            scenarioId: scenario.id,
           })
         }
       } catch (err) {
@@ -381,6 +384,8 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
           prompt,
           client,
           referenceImages,
+          visualStyle: scenario.visualStyle,
+          scenarioId: scenario.id,
         })
       }
     } catch (err) {
@@ -412,16 +417,20 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
         sceneId,
         group,
         run: async ({ setRequest }) =>
-          generateCardImage({
-            sceneId,
-            kind: spec.kind,
-            tag,
-            title: spec.title,
-            prompt,
-            client,
-            referenceImages,
-            onRequest: setRequest,
-          }),
+          (
+            await generateCardImage({
+              sceneId,
+              kind: spec.kind,
+              tag,
+              title: spec.title,
+              prompt,
+              client,
+              referenceImages,
+              visualStyle: scenario.visualStyle,
+              scenarioId: scenario.id,
+              onRequest: setRequest,
+            })
+          ).mediaId,
       })
     }
     return n

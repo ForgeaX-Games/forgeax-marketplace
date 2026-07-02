@@ -536,7 +536,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
      */
     if (playerOnly || renderOnly) {
       /*
-       * 独立站点试玩（Route B）——`?src=pack`：不连 dev server / 不读磁盘镜像，
+       * 独立站点试玩 `?src=pack`：不连 dev server / 不读磁盘镜像，
        * 直接从同目录 `pack-index.json` 找到 reel-game 资产、取回整棵 Scenario，
        * 把媒体引用（已是 `./reel-media/<hash>.<ext>` 的 bundle 相对 URL）自指喂进
        * mediaStore（播放器走 entries[ref].url），再灌进 scenario store 即可播放。

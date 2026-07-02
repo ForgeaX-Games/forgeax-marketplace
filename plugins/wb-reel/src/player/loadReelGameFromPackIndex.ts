@@ -5,13 +5,17 @@
  * 这个读取器只做最朴素的三步：
  *   1) fetch pack-index.json（资产目录）
  *   2) 找到 kind==='reel-game' 的条目，按其 relativeUrl fetch 对应 .pack.json
- *   3) 用共享的 extractScenario 从 payload 取回整棵 Scenario
+ *   3) 用 extractValidatedScenario 从 payload 取回并 schema 校验整棵 Scenario
+ *      （charter Fail-Fast：payload 不合契约就在这里炸，而不是带病进播放器）
  *
- * 与引擎 runtime 的 reelGameLoader 是「同一磁盘格式的两个消费端」：loader 走
- * loadByGuid（studio/inspector/未来 3D 内嵌），本读取器走纯 fetch（独立站点）。
+ * 与预览态共享同一棵 Scenario（都灌进 scenarioStore、由同一个 Player 渲染）：预览走
+ * bootScenarioPersist（读 workbench/reel），本读取器走纯 fetch（独立站点 ?src=pack）。
+ *〔暂缓〕将来影游若内嵌进引擎场景，再补一个 loadByGuid loader 作为「同一磁盘格式的
+ * 第三个消费端」，磁盘格式不变。
  */
 
-import { extractScenario } from '../scenario/pkg/reelGamePayload'
+import { type ReelScenarioLike } from '../scenario/pkg/reelGamePayload'
+import { extractValidatedScenario } from '../scenario/schema/validateScenario'
 
 export interface LoadDeps {
   fetchJson: (url: string) => Promise<unknown>
@@ -37,7 +41,7 @@ function rebase(packIndexUrl: string, relativeUrl: string): string {
 export async function loadReelGameFromPackIndex(
   packIndexUrl: string,
   deps: LoadDeps = defaultDeps,
-): Promise<Record<string, unknown>> {
+): Promise<ReelScenarioLike> {
   const index = (await deps.fetchJson(packIndexUrl)) as PackIndexEntry[]
   const entry = Array.isArray(index) ? index.find((e) => e.kind === 'reel-game') : undefined
   if (!entry) throw new Error('no reel-game asset in pack-index')
@@ -46,7 +50,5 @@ export async function loadReelGameFromPackIndex(
     assets: Array<{ guid: string; payload: unknown }>
   }
   const asset = pack.assets.find((a) => a.guid === entry.guid) ?? pack.assets[0]
-  const scenario = extractScenario(asset?.payload)
-  if (!scenario) throw new Error('reel-game payload malformed')
-  return scenario
+  return extractValidatedScenario(asset?.payload)
 }

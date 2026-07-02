@@ -12,6 +12,13 @@ import {
   createReadStream,
 } from 'fs'
 import type { IncomingMessage, ServerResponse } from 'http'
+import {
+  workbenchMediaDir,
+  workbenchReelDir,
+  isValidGameSlug,
+  WORKBENCH_MEDIA_KINDS,
+  type WorkbenchMediaKind,
+} from './src/storage/gameLayout'
 
 /**
  * Reel-Studio 构建注入 —— 从 `key/llm_key.json` 读取：
@@ -519,9 +526,12 @@ interface AssetMeta {
   tags?: string[]
 }
 
+/** 媒体素材类型 —— 决定落到 workbench 的哪个分桶（image/video/audio）。 */
+type MediaKind = 'image' | 'video' | 'audio'
+
 interface AssetRecord {
   id: string
-  kind: 'image' | 'video'
+  kind: MediaKind
   filename: string
   mimeType: string
   bytes: number
@@ -604,10 +614,19 @@ function extFromMime(mime: string): string {
   return 'bin'
 }
 
-function nextId(kind: 'image' | 'video'): string {
+function nextId(kind: MediaKind): string {
   const t = Date.now().toString(36)
   const r = Math.random().toString(36).slice(2, 8)
-  return `${kind === 'image' ? 'img' : 'vid'}-${t}-${r}`
+  const prefix = kind === 'video' ? 'vid' : kind === 'audio' ? 'aud' : 'img'
+  return `${prefix}-${t}-${r}`
+}
+
+/** 从 mime + 可选显式提示推断媒体分桶；缺省按 image 处理（与历史一致）。 */
+function mediaKindOf(mime: string, hint?: string | null): MediaKind {
+  if (hint === 'image' || hint === 'video' || hint === 'audio') return hint
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  return 'image'
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -680,7 +699,7 @@ function sendBinary(
 }
 
 interface CreateBody {
-  kind?: 'image' | 'video'
+  kind?: MediaKind
   dataUrl?: string
   base64?: string
   mimeType?: string
@@ -709,8 +728,7 @@ async function handleCreate(
   if (!b64) return { status: 400, body: { error: 'missing base64/dataUrl' } }
   if (!mime) return { status: 400, body: { error: 'missing mimeType' } }
 
-  const kind: 'image' | 'video' =
-    body.kind ?? (mime.startsWith('video/') ? 'video' : 'image')
+  const kind: MediaKind = mediaKindOf(mime, body.kind)
   const id = nextId(kind)
   const ext = extFromMime(mime)
   const filename = `blobs/${id}.${ext}`
@@ -765,12 +783,7 @@ async function handleCreateBinary(
   if (!mime) return { status: 400, body: { error: 'missing content-type' } }
 
   const kindHeader = (req.headers['x-reel-kind'] as string | undefined) ?? ''
-  const kind: 'image' | 'video' =
-    kindHeader === 'image' || kindHeader === 'video'
-      ? kindHeader
-      : mime.startsWith('video/')
-        ? 'video'
-        : 'image'
+  const kind: MediaKind = mediaKindOf(mime, kindHeader)
 
   let meta: AssetMeta = {}
   const metaHeader = req.headers['x-reel-meta'] as string | undefined
@@ -827,16 +840,16 @@ async function handleCreateBinary(
 }
 
 function handleList(
-  storage: AssetStorage,
+  storages: AssetStorage[],
   query: URLSearchParams,
 ): { status: number; body: unknown } {
-  const manifest = readManifest(storage)
   const sceneId = query.get('sceneId') ?? undefined
   const scenarioId = query.get('scenarioId') ?? undefined
   const kind = query.get('kind') ?? undefined
   const promptKind = query.get('promptKind') ?? undefined
 
-  let list = manifest.assets
+  // per-kind 分桶后，列表需跨桶合并（image/video/audio 各一份 manifest）。
+  let list = storages.flatMap((s) => readManifest(s).assets)
   if (sceneId) list = list.filter((a) => a.meta.sceneId === sceneId)
   if (scenarioId) list = list.filter((a) => a.meta.scenarioId === scenarioId)
   if (kind) list = list.filter((a) => a.kind === kind)
@@ -1069,41 +1082,52 @@ async function handlePatch(
   })
 }
 
-function statsOf(storage: AssetStorage): { count: number; bytes: number } {
-  const m = readManifest(storage)
-  let bytes = 0
-  for (const a of m.assets) {
-    const fp = resolve(storage.rootDir, a.filename)
-    try {
-      const st = statSync(fp)
-      bytes += st.size
-    } catch {
-      bytes += a.bytes
-    }
+/** 本插件管理的媒体分桶（per-kind）。3D/贴图/角色等由其它插件写入，不走本路由。 */
+const MEDIA_BUCKETS: MediaKind[] = ['image', 'video', 'audio']
+
+/** 推断 JSON create body 的媒体分桶（先看显式 kind，再看 dataUrl/mimeType）。 */
+function createBodyKind(body: CreateBody): MediaKind {
+  if (body.kind) return body.kind
+  let mime = body.mimeType ?? ''
+  if (body.dataUrl) {
+    const parsed = parseDataUrl(body.dataUrl)
+    if (parsed) mime = parsed.mime
   }
-  return { count: m.assets.length, bytes }
+  return mediaKindOf(mime, body.kind)
 }
 
 function reelAssetsPlugin(): Plugin {
-  /** 全局库（无 ?game= 时用）—— 仍落在 wb-reel 包内 config.root/.reel-assets，老素材零搬迁。 */
-  let globalStorage: AssetStorage
-  /** 工程根（含 .forgeax/games），per-game 媒体落到该根下；找不到时回退 config.root。 */
+  /** 工程根（含 .forgeax/games）；找不到时回退 config.root。 */
   let projectRoot = ''
-  const gameStorages = new Map<string, AssetStorage>()
+  /** 无 slug 时的宿主全局 workbench 根（dev 裸跑兜底，不再回退旧 .reel-assets）。 */
+  let noSlugRoot = ''
+  /** 缓存键 `${slug|'~global'}::${kind}` → AssetStorage。 */
+  const buckets = new Map<string, AssetStorage>()
 
   /**
-   * 按 game slug 解析媒体存储：
-   *   - 合法 slug → `<projectRoot>/.forgeax/games/<slug>/reel/assets`（game 自包含）。
-   *   - 无 slug → 全局库（历史行为）。
-   * 每个 slug 一份缓存的 AssetStorage（含 ensureStorage 建目录）。
+   * per-(slug,kind) 解析媒体桶（硬切换，无旧路径回退）：
+   *   - 合法 slug → `<projectRoot>/.forgeax/games/<slug>/workbench/<kind>`
+   *   - 无 slug   → `<noSlugRoot>/.reel-workbench/<kind>`（裸 dev 兜底）
    */
-  function resolveStorageForSlug(slug: string | null): AssetStorage {
-    if (!slug) return globalStorage
-    const cached = gameStorages.get(slug)
+  function resolveBucket(slug: string | null, kind: MediaKind): AssetStorage {
+    const key = `${slug && isValidGameSlug(slug) ? slug : '~global'}::${kind}`
+    const cached = buckets.get(key)
     if (cached) return cached
-    const st = ensureStorage(resolveAssetsDir(projectRoot, slug))
-    gameStorages.set(slug, st)
+    const dir = isValidGameSlug(slug)
+      ? workbenchMediaDir(projectRoot, slug, kind)
+      : resolve(noSlugRoot, '.reel-workbench', kind)
+    const st = ensureStorage(dir)
+    buckets.set(key, st)
     return st
+  }
+
+  /** 跨桶按 id 定位记录所在的桶（id 操作 URL 不带 kind，需逐桶找）。 */
+  function findBucketById(slug: string | null, id: string): AssetStorage | null {
+    for (const kind of MEDIA_BUCKETS) {
+      const st = resolveBucket(slug, kind)
+      if (readManifest(st).assets.some((a) => a.id === id)) return st
+    }
+    return null
   }
 
   function attachWriteAndRead(server: ViteDevServer): void {
@@ -1112,16 +1136,18 @@ function reelAssetsPlugin(): Plugin {
         const url = new URL(req.url ?? '/', 'http://localhost')
         const path = url.pathname.replace(/\/+$/, '') || '/'
         const method = (req.method ?? 'GET').toUpperCase()
-        // per-game 媒体：?game=<slug> 指定时落到该 game 隔离目录，否则全局库。
-        const storage = resolveStorageForSlug(gameSlugFromUrl(url))
+        const slug = gameSlugFromUrl(url)
 
         if (path === '/' || path === '') {
           if (method === 'GET') {
-            const { status, body } = handleList(storage, url.searchParams)
+            // 跨 image/video/audio 桶合并列表。
+            const storages = MEDIA_BUCKETS.map((k) => resolveBucket(slug, k))
+            const { status, body } = handleList(storages, url.searchParams)
             return sendJson(res, status, body)
           }
           if (method === 'POST') {
             const body = (await readJsonBody(req)) as CreateBody
+            const storage = resolveBucket(slug, createBodyKind(body))
             const { status, body: out } = await handleCreate(storage, body)
             return sendJson(res, status, out)
           }
@@ -1133,6 +1159,9 @@ function reelAssetsPlugin(): Plugin {
             return sendJson(res, 405, { error: 'method not allowed' })
           }
           const buf = await readBinaryBody(req)
+          const mime = (req.headers['content-type'] as string | undefined) ?? ''
+          const kindHeader = (req.headers['x-reel-kind'] as string | undefined) ?? null
+          const storage = resolveBucket(slug, mediaKindOf(mime, kindHeader))
           const { status, body } = await handleCreateBinary(storage, req, buf)
           return sendJson(res, status, body)
         }
@@ -1140,6 +1169,8 @@ function reelAssetsPlugin(): Plugin {
         const idMatch = /^\/([^/]+)$/.exec(path)
         if (idMatch) {
           const id = decodeURIComponent(idMatch[1] ?? '')
+          const storage = findBucketById(slug, id)
+          if (!storage) return sendJson(res, 404, { error: `asset ${id} not found` })
           if (method === 'GET') return handleGetBlob(storage, id, req, res)
           if (method === 'DELETE') {
             const { status, body } = await handleDelete(storage, id)
@@ -1173,14 +1204,13 @@ function reelAssetsPlugin(): Plugin {
     name: 'reel-assets',
     apply: 'serve',
     configResolved(config) {
-      // per-game 媒体落到工程根的 .forgeax/games/<slug>/reel/assets；全局库仍在
-      // 包内 .reel-assets（resolveAssetsDir(config.root, null)），老素材零搬迁。
+      // per-game 原始媒体落到 .forgeax/games/<slug>/workbench/<kind>；
+      // 裸 dev（无 ?game=）落到 config.root/.reel-workbench/<kind>。硬切换：不再
+      // 回退包内旧 .reel-assets，旧 game 数据由 phase1-migrate 一次性搬迁。
       projectRoot = findProjectRootWithForgeax(config.root) ?? config.root
-      globalStorage = ensureStorage(resolveAssetsDir(config.root, null))
-      const stat = statsOf(globalStorage)
-      const mb = (stat.bytes / 1024 / 1024).toFixed(1)
+      noSlugRoot = config.root
       console.info(
-        `[reel-assets] ${stat.count} record(s) · ${mb} MiB · ${globalStorage.rootDir} · per-game→ ${resolve(projectRoot, '.forgeax', 'games')}`,
+        `[reel-assets] per-game→ ${resolve(projectRoot, '.forgeax', 'games', '<slug>', 'workbench', '<kind>')} · no-slug→ ${resolve(noSlugRoot, '.reel-workbench', '<kind>')}`,
       )
     },
     configureServer(server) {
@@ -1348,24 +1378,81 @@ function findProjectRootWithForgeax(start: string): string | null {
 }
 
 /**
- * 按 game slug 解析 reel 媒体资产根目录（与剧本库 resolveStorage 同源策略）：
- *   - 合法 slug：`<base>/.forgeax/games/<slug>/reel/assets`，让 game 目录自包含，
- *     server 端导出器可直接读取该 game 的全部媒体（P0：互动影游作为引擎资产）。
- *   - 无 slug / 非法 slug：回退到包内全局 `<base>/.reel-assets`（与历史行为一致，
- *     老素材零搬迁）。
- * 纯函数 —— base 由调用方决定：per-game 传工程根（含 .forgeax），全局传 config.root。
+ * 按 game slug + 媒体类型解析 workbench 原始媒体桶目录（per-kind 硬切换）：
+ *   - 合法 slug：`<base>/.forgeax/games/<slug>/workbench/<kind>`（game 自包含，
+ *     导出器/迁移器直接读该 game 的原始素材）。
+ *   - 无 slug / 非法 slug：`<base>/.reel-workbench/<kind>`（裸 dev 兜底，不再回退旧
+ *     `.reel-assets`；旧数据交由 phase1-migrate 搬迁）。
+ * 纯函数 —— base 由调用方决定：per-game 传工程根（含 .forgeax），裸 dev 传 config.root。
+ * 路径真源在 src/storage/gameLayout.ts；此处包装兼顾「无 slug 兜底」分支。
  */
-export function resolveAssetsDir(base: string, slug: string | null): string {
-  if (slug && GAME_SLUG_RE.test(slug)) {
-    return resolve(base, '.forgeax', 'games', slug, 'reel', 'assets')
-  }
-  return resolve(base, '.reel-assets')
+export function resolveWorkbenchMediaDir(
+  base: string,
+  slug: string | null,
+  kind: WorkbenchMediaKind,
+): string {
+  if (isValidGameSlug(slug)) return workbenchMediaDir(base, slug, kind)
+  return resolve(base, '.reel-workbench', kind)
 }
 
 /** 从请求 URL 的 `?game=` 取合法 slug（禁路径穿越）；与 reelScenariosPlugin 对齐。 */
 function gameSlugFromUrl(url: URL): string | null {
   const raw = (url.searchParams.get('game') ?? '').trim()
   return raw && GAME_SLUG_RE.test(raw) ? raw : null
+}
+
+// ─── 空白剧本污染清除（服务端权威）────────────────────────────────────────────
+// 与前端 scenarioPersist.ts::sanitizeBlankPollution 同款判据，服务端 PUT 合并后
+// 落盘前再跑一遍 —— 因为 PUT 会“保留磁盘已有条目”，纯靠前端剪枝无法删掉磁盘上的
+// 空白污染。这里是磁盘唯一的权威写入口，收敛点放在这里最稳。
+type RawItem = { id: string; updatedAt: number; title?: unknown; scenario?: unknown; [k: string]: unknown }
+
+function scoreSubstantiveRaw(sc: Record<string, unknown>): number {
+  let score = 0
+  const scenes = (sc.scenes ?? {}) as Record<string, Record<string, unknown>>
+  for (const scene of Object.values(scenes)) {
+    const media = (scene.media ?? {}) as { ref?: string }
+    if (typeof media.ref === 'string' && media.ref) score += 3
+    const shots = (scene.shots ?? []) as Array<{ keyframeMediaRef?: string }>
+    for (const sh of shots) if (sh.keyframeMediaRef) score += 2
+    const prompts = (scene.prompts ?? {}) as { scene?: string; video?: string }
+    if (prompts.scene?.trim()) score += 1
+    if (prompts.video?.trim()) score += 1
+    score += ((scene.dialogue ?? []) as unknown[]).length
+    score += ((scene.branches ?? []) as unknown[]).length
+  }
+  score += Object.keys((sc.characters ?? {}) as object).length
+  score += Object.keys((sc.locations ?? {}) as object).length
+  return score
+}
+
+function isServerBlankItem(it: RawItem): boolean {
+  if (!it || it.title !== '新的故事') return false
+  if (typeof it.id !== 'string' || !it.id.startsWith('scn-')) return false
+  const sc = it.scenario
+  if (!sc || typeof sc !== 'object') return false
+  const s = sc as Record<string, unknown>
+  if (Object.keys((s.scenes ?? {}) as object).length > 1) return false
+  if (Array.isArray(s.outline) && s.outline.length > 0) return false
+  if (Array.isArray(s.characterRelations) && s.characterRelations.length > 0) return false
+  return scoreSubstantiveRaw(s) === 0
+}
+
+function pruneBlankPollution(
+  items: RawItem[],
+  activeId: string | null,
+): { items: RawItem[]; activeId: string | null } {
+  const real = items.filter((it) => !isServerBlankItem(it))
+  const blanks = items.filter((it) => isServerBlankItem(it))
+  if (real.length === 0 || blanks.length === 0) return { items, activeId }
+  const activeIsBlank = blanks.some((b) => b.id === activeId)
+  const keep = activeIsBlank && blanks.length === 1 ? [blanks[0] as RawItem] : []
+  const kept = [...real, ...keep].sort((a, b) => b.updatedAt - a.updatedAt)
+  let nextActive = activeId
+  if (!nextActive || !kept.find((it) => it.id === nextActive)) {
+    nextActive = real.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a)).id
+  }
+  return { items: kept, activeId: nextActive }
 }
 
 function reelScenariosPlugin(): Plugin {
@@ -1377,18 +1464,19 @@ function reelScenariosPlugin(): Plugin {
   const gameStorages = new Map<string, ScenarioStorage>()
 
   /**
-   * 按 game slug 解析剧本库存储位置：
-   *   - 合法 slug：`<projectRoot>/.forgeax/games/<slug>/reel/`（与插件清单声明的
-   *     `fs:*:.forgeax/games/{slug}/reel/**` 路径一致）；找不到工程根时退回包内
+   * 按 game slug 解析剧本库 / 队列存储位置（硬切换到 workbench/reel）：
+   *   - 合法 slug：`<projectRoot>/.forgeax/games/<slug>/workbench/reel/`（影游处理 +
+   *     玩法数据 + 各类 *-queue.json 全落这里）；找不到工程根时退回包内
    *     `.reel-scenarios/games/<slug>/`。每个 game 一套独立 db + activeId。
-   *   - 无 slug / 非法：返回全局库（与历史行为完全一致，老剧本零改动）。
+   *   - 无 slug / 非法：返回全局库（裸 dev 兜底）。
+   * 注：不再回退旧 `reel/` 目录；旧剧本由 phase1-migrate 搬迁到 workbench/reel/。
    */
   function resolveStorage(slug: string | null): ScenarioStorage {
-    if (!slug || !GAME_SLUG_RE.test(slug)) return storage
+    if (!isValidGameSlug(slug)) return storage
     const cached = gameStorages.get(slug)
     if (cached) return cached
     const dir = projectRoot
-      ? resolve(projectRoot, '.forgeax', 'games', slug, 'reel')
+      ? workbenchReelDir(projectRoot, slug)
       : resolve(baseRoot, 'games', slug)
     const st = ensureScenarioStorage(dir)
     gameStorages.set(slug, st)
@@ -1495,11 +1583,17 @@ function reelScenariosPlugin(): Plugin {
             const mergedItems = [...byId.values()].sort(
               (a, b) => b.updatedAt - a.updatedAt,
             )
+            // 服务端权威剪枝：清掉「空白新故事」污染 + 归位被抢占的 activeId。
+            // 磁盘只从这一个入口写，收敛在这里最稳（前端剪枝无法删磁盘保留的旧条目）。
+            const pruned = pruneBlankPollution(
+              mergedItems,
+              incoming.activeId ?? existing?.activeId ?? null,
+            )
             const mergedDb = {
               version: 1,
               // activeId：尊重客户端的选择（他的会话在编辑哪个剧本，不该被别的客户端打扰）
-              activeId: incoming.activeId ?? existing?.activeId ?? null,
-              items: mergedItems,
+              activeId: pruned.activeId,
+              items: pruned.items,
             }
 
             writeScenarioDbFile(storage, mergedDb)
@@ -1508,7 +1602,7 @@ function reelScenariosPlugin(): Plugin {
               // 把合并后的结果送回 —— 前端能据此知道"哪些别人改了"并刷 UI
               merged: true,
               db: mergedDb,
-              itemCount: mergedItems.length,
+              itemCount: pruned.items.length,
             })
           }
           return sendJson(res, 405, { error: 'method not allowed' })

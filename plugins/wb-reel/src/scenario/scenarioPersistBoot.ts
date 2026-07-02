@@ -8,6 +8,7 @@ import {
   pickActive,
   removeFromDb,
   saveDb,
+  sanitizeBlankPollution,
   setActive,
   upsertScenario,
   type PersistedDb,
@@ -35,8 +36,13 @@ import { gameQuery, getGameSlug, gameKeySuffix } from '../shell/gameScope'
  * 直接以（已清理的）磁盘为准、丢弃本地缓存，且每个作用域只执行一次。
  *
  * 仅在"成功读到磁盘"后才执行，故不会因磁盘瞬时不可用而清空本地。
+ *
+ * epoch 5（2026-07-01）：wb-reel 子模块被 `bun fx setup` 递归重置回基线、
+ * 又被基线代码以旧存储布局跑过一轮，往每个 game 的 localStorage 里灌进了大量
+ * 空白「新的故事」并把 activeId 抢占到空壳。提升纪元号 → 下次 hydrate 直接以
+ * （已清理的）磁盘为准、丢弃被污染的本地缓存，恢复真实 activeId。
  */
-const DISK_RECONCILE_EPOCH = 4
+const DISK_RECONCILE_EPOCH = 5
 
 function reconcileEpochKey(): string {
   return `reel-studio:reconcile-epoch${gameKeySuffix()}`
@@ -243,6 +249,14 @@ export interface BootScenarioPersistOptions {
     saveDb(_db)
   }
 
+  // 自愈：清除「空白新故事」污染 + 归位被抢占的 activeId（见 sanitizeBlankPollution）。
+  // 必须在 pickActive 之前，确保 active 落在真剧本上。
+  const deblanked = sanitizeBlankPollution(_db)
+  if (deblanked !== _db) {
+    _db = deblanked
+    saveDb(_db)
+  }
+
   const preferredItem = _preferredId
     ? _db.items.find((it) => it.id === _preferredId)
     : null
@@ -356,31 +370,31 @@ async function hydrateFromDisk(): Promise<void> {
     // 一次性磁盘对账：丢弃可能被污染的本地缓存，完全以（已清理的）磁盘为准。
     // 只在成功读到磁盘后执行，且每个作用域只执行一次（纪元号守门）。
     if (needsDiskReconcile()) {
-      _db = diskDb
+      _db = sanitizeBlankPollution(diskDb)
       saveDb(_db)
       markDiskReconciled()
-      const active = pickActive(diskDb)
+      const active = pickActive(_db)
       const storeScenario = useScenarioStore.getState().scenario
       const wantsId =
-        _preferredId && diskDb.items.some((it) => it.id === _preferredId)
+        _preferredId && _db.items.some((it) => it.id === _preferredId)
           ? _preferredId
           : active?.id
       const targetItem = wantsId
-        ? diskDb.items.find((it) => it.id === wantsId) ?? null
+        ? _db.items.find((it) => it.id === wantsId) ?? null
         : null
       if (targetItem && targetItem.id !== storeScenario.id) {
         systemLoadScenario(targetItem.scenario)
       }
       // eslint-disable-next-line no-console
       console.info(
-        `[reel-scenarios] 磁盘对账(epoch ${DISK_RECONCILE_EPOCH})：以磁盘为准重建本地库，共 ${diskDb.items.length} 条。`,
+        `[reel-scenarios] 磁盘对账(epoch ${DISK_RECONCILE_EPOCH})：以磁盘为准重建本地库，共 ${_db.items.length} 条。`,
       )
       _hydrateReady = true
       return
     }
 
     const before = _db
-    const merged = mergeDbs(diskDb, before)
+    const merged = sanitizeBlankPollution(mergeDbs(diskDb, before))
 
     const noChange =
       merged.items.length === before.items.length &&

@@ -417,7 +417,7 @@ function buildShotVideoInput(
       // 出片前把镜头提示词工程化为 Seedance 2.0 视频提示词（一镜一运镜、路径 A）。
       const engineered = await resolveSeedanceShotPrompt(sceneId, shot, prompt, onStage)
       const finalPrompt = referenceLegend ? `${engineered}\n\n${referenceLegend}` : engineered
-      return generateCardVideo({
+      const { mediaId } = await generateCardVideo({
         sceneId,
         tag,
         title: label,
@@ -431,13 +431,20 @@ function buildShotVideoInput(
         referenceImageLabels,
         referenceAudioUrl,
         durationSec,
+        scenarioVideoConfig: scenario.videoConfig,
+        scenarioId: scenario.id,
         onStage,
         onRequest: setRequest,
       })
+      return mediaId
     },
     onDone: (mediaId) => {
       if (!mediaId || !o.autoAdopt) return
       const store = useScenarioStore.getState()
+      // 防跨游戏污染：派任务时锚定的目标 game，与「回写此刻」的活动 game 不一致就不写
+      //（作者中途切了工程 —— 素材已按 scenario.id 记对了归属，但写回只能落到活动剧本，
+      // 宁可漏写、也不把 A 的成片塞进 B 的时间轴）。
+      if (store.scenario.id !== scenario.id) return
       store.addSceneVideo(sceneId, mediaId)
       store.updateShot(sceneId, shotId, { videoMediaRef: mediaId })
     },

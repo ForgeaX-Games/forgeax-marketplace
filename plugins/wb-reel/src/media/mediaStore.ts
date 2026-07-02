@@ -96,6 +96,12 @@ interface MediaStore {
        * 素材库「生成卡片」用它给候选归组（cardTag）；其它调用方可不传。
        */
       tags?: string[]
+      /**
+       * 资产归属的 game/scenario id —— 由编排器/生成层显式传入（charter 解耦：
+       * mediaStore 不再隐式读 scenarioStore 决定归属，避免「发给 A 游戏的素材被记成
+       * 当前活动 B 游戏」）。省略时回落到当前活动 scenario（手动上传等旧路径兼容）。
+       */
+      scenarioId?: string
     },
   ) => string
   remove: (id: string) => void
@@ -289,6 +295,7 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
       parentAssetId: opts?.parentAssetId,
       promptKind: opts?.promptKind,
       tags: opts?.tags,
+      scenarioId: opts?.scenarioId,
     }).then(
       (ok) => markPersisted(id, ok),
       () => markPersisted(id, null),
@@ -403,23 +410,33 @@ export function primeMediaEntry(entry: MediaEntry): void {
   })
 }
 
+/**
+ * 资产归属的 scenarioId：显式入参优先（编排器/生成层「发给哪个 game」的权威来源），
+ * 省略时才回落到当前活动 scenario（手动上传 / retry 等旧路径兼容）。
+ *
+ * 让 mediaStore 与 scenarioStore 解耦：有显式入参时**不再**动态 import scenarioStore，
+ * 从根上杜绝「发给 A 游戏的素材被记成当前活动 B 游戏」的错归属。
+ * 回落分支仍用动态 import 打破循环依赖（scenario → media → scenario）。
+ */
+async function resolveOwnerScenarioId(explicit?: string): Promise<string> {
+  if (explicit) return explicit
+  const { useScenarioStore } = await import('../scenario/scenarioStore')
+  return useScenarioStore.getState().scenario.id
+}
+
 async function persistFileToAsset(
   mediaId: string,
   file: File,
   opts?: {
     onProgress?: (loaded: number, total: number) => void
     signal?: AbortSignal
+    scenarioId?: string
   },
 ): Promise<string | null> {
   try {
     const { useAssetStore } = await import('./assetStore')
-    // 取当前剧本 id —— 让资产绑定到"这是哪个剧本上传的图/视频"，
-    // 便于：
-    //   a) 未来删除剧本时级联清理（见 scenarioPersistBoot.removeScenarioFromHistory）
-    //   b) 资产面板按剧本过滤（后续能做"本剧本已上传的素材"视图）
-    // 动态 import 打破循环依赖（scenario → media → scenario）
-    const { useScenarioStore } = await import('../scenario/scenarioStore')
-    const scenarioId = useScenarioStore.getState().scenario.id
+    // 资产绑定到"这是哪个剧本上传的图/视频"：便于删剧本时级联清理、按剧本过滤素材。
+    const scenarioId = await resolveOwnerScenarioId(opts?.scenarioId)
     const kind = file.type.startsWith('video/') ? 'video' : 'image'
     const asset = await useAssetStore.getState().saveBlob({
       kind,
@@ -453,8 +470,7 @@ async function persistBlobToAsset(
 ): Promise<string | null> {
   try {
     const { useAssetStore } = await import('./assetStore')
-    const { useScenarioStore } = await import('../scenario/scenarioStore')
-    const scenarioId = useScenarioStore.getState().scenario.id
+    const scenarioId = await resolveOwnerScenarioId()
     const kind = entry.mimeType.startsWith('video/') ? 'video' : 'image'
     const asset = await useAssetStore.getState().saveBlob({
       kind,
@@ -485,12 +501,12 @@ async function persistDataUrlToAsset(
     parentAssetId?: string
     promptKind?: string
     tags?: string[]
+    scenarioId?: string
   },
 ): Promise<string | null> {
   try {
     const { useAssetStore } = await import('./assetStore')
-    const { useScenarioStore } = await import('../scenario/scenarioStore')
-    const scenarioId = useScenarioStore.getState().scenario.id
+    const scenarioId = await resolveOwnerScenarioId(extraMeta?.scenarioId)
     const kind = entry.mimeType.startsWith('video/') ? 'video' : 'image'
     const asset = await useAssetStore.getState().saveDataUrl({
       kind,

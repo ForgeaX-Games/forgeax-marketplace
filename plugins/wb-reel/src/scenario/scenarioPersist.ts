@@ -225,6 +225,60 @@ export function mergeDbs(
   return { version: 1, activeId, items }
 }
 
+/**
+ * 判定一条 item 是否为「未动过的空白新故事」——即 `makeBlankScenario()` 的产物
+ * 从未被编辑：默认标题「新的故事」、id 形如 `scn-*`、只有一个占位场景、
+ * 无大纲 / 人物关系、scoreSubstantive === 0。
+ *
+ * 判据同时看**标题 + 内容**，故绝不会误伤：
+ *   - 改过名的剧本（标题非「新的故事」）
+ *   - 有任何实质内容的剧本（score > 0）
+ *   - 导入的空剧本（标题形如「Imported: …」）
+ */
+export function isUntouchedBlankItem(it: PersistedItem): boolean {
+  if (it.title !== '新的故事') return false
+  if (!it.id.startsWith('scn-')) return false
+  const sc = it.scenario
+  if (Object.keys(sc.scenes ?? {}).length > 1) return false
+  if ((sc.outline?.length ?? 0) > 0) return false
+  if (((sc as { characterRelations?: unknown[] }).characterRelations?.length ?? 0) > 0) return false
+  return scoreSubstantive(sc) === 0
+}
+
+/**
+ * 清除「空白新故事」污染 —— 自愈函数，boot / hydrate / 服务端 PUT 都调用。
+ *
+ * 背景（2026-07 复发根因）：wb-reel 子模块被 `bun fx setup` 递归重置回旧代码后，
+ * 旧代码以错误存储布局空跑数轮，往每个 game 灌进大量默认标题「新的故事」的空白
+ * 剧本，并把 activeId 抢占到其中一本 → 工坊显示空。而 mergeDbs（union）与
+ * 服务端 PUT（保留磁盘已有条目）都只增不删，靠手动清盘会被反复 merge 回来。
+ *
+ * 策略（保守、可自愈、绝不误删真内容）：
+ *   - 若库里没有任何真剧本（全空白）→ 原样返回（新建 game 保持一张白纸）。
+ *   - 若存在真剧本 → 空白「新的故事」判定为污染，一律剔除；
+ *     唯一例外：当前 activeId 恰好指向**唯一**一本空白（用户刚点「新建」还没写）→
+ *     保留它、也保留 active，尊重"我正要开新故事"。
+ *   - 若 activeId 落在被剔除的空白上 → 归位到最近编辑（updatedAt 最大）的真剧本。
+ */
+export function sanitizeBlankPollution(db: PersistedDb): PersistedDb {
+  const real = db.items.filter((it) => !isUntouchedBlankItem(it))
+  const blanks = db.items.filter((it) => isUntouchedBlankItem(it))
+  if (real.length === 0) return db
+  if (blanks.length === 0) return db
+
+  const activeIsBlank = blanks.some((b) => b.id === db.activeId)
+  const keep =
+    activeIsBlank && blanks.length === 1 ? [blanks[0] as PersistedItem] : []
+  const items = [...real, ...keep].sort((a, b) => b.updatedAt - a.updatedAt)
+
+  let activeId = db.activeId
+  if (!activeId || !items.find((it) => it.id === activeId)) {
+    const mostRecentReal = real.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a))
+    activeId = mostRecentReal.id
+  }
+  return { version: 1, activeId, items }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 序列化 / 反序列化（单测重点：损坏数据要降级为 emptyDb，不能让首屏崩）
 // ─────────────────────────────────────────────────────────────────────────────

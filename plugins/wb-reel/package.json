@@ -15,6 +15,10 @@
       "types": "./server/tool-handlers.ts",
       "import": "./server/tool-handlers.ts"
     },
+    "./generation": {
+      "types": "./src/forge/generation.ts",
+      "import": "./src/forge/generation.ts"
+    },
     "./forgeax-plugin.json": "./forgeax-plugin.json"
   },
   "keywords": [
@@ -38,6 +42,7 @@
     "@breezystack/lamejs": "^1.2.7",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
+    "ajv": "^8.20.0",
     "mammoth": "^1.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

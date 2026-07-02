@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://forgeax.dev/schemas/reel-scenario.schema.json",
+  "title": "ReelScenario",
+  "description": "影游(wb-reel) Scenario 的结构骨架契约。守 charter「Schema-as-Contract」红线:把进出 ReelLevel.pack.json payload 的剧本从 Record<string,unknown> 收窄为可机读、可 fail-fast 的契约。策略=骨架严格(runtime 寻路真正依赖的字段)+长尾宽松(additionalProperties:true,避免与 1700 行 TS 类型逐字段漂移)。完整字段语义见 src/scenario/types.ts 的 Scenario/Scene。",
+  "type": "object",
+  "required": ["id", "title", "rootSceneId", "scenes", "schemaVersion", "defaultCharMs"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "rootSceneId": { "type": "string", "minLength": 1 },
+    "defaultCharMs": { "type": "number" },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "description": "Scenario 编辑器版本(types.ts:1749 的 1..8);读入时 migrateScenarioToLatest 链式升级。超出范围说明 payload 不是本 runtime 认识的影游剧本。"
+    },
+    "scenes": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "sceneId → Scene 映射;至少 1 个(rootSceneId 必须能寻址到)。",
+      "additionalProperties": { "$ref": "#/definitions/scene" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "scene": {
+      "type": "object",
+      "description": "Scene 骨架(types.ts:1350)。仅约束 runtime 寻路/播放必需字段,其余(qte/audio/shots/textOverlays/effects 等长尾)宽松放行。",
+      "required": ["id", "title", "durationMs", "branches"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "media": { "type": "object" },
+        "dialogue": { "type": "array" },
+        "branches": {
+          "type": "array",
+          "description": "分支出边(可空数组=叶子节点)。是剧情树寻路的核心,故必填。"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

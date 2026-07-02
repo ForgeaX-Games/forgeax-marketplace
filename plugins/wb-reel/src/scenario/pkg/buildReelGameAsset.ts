@@ -1,7 +1,7 @@
 /**
  * 纯构建器：一棵 Scenario + 一个媒体解析器 → reel-game.pack.json + 媒体文件清单。
  *
- * 这是「互动影游作为引擎资产（Route B）」的「蒸馏 / importer 等价物」：它把作者在
+ * 这是影游成品资产的「蒸馏 / importer 等价物」（host 自写，无独立 importer）：它把作者在
  * wb-reel 里做好的 per-game 状态，转成可分发的引擎资产形态：
  *   - 一份 `internal-text-package` 的 pack.json，单条 `kind:'reel-game'` 资产，
  *     payload 是整棵 Scenario（媒体引用已改写成 `./reel-media/<hash>.<ext>`）。
@@ -13,7 +13,12 @@
 
 import type { Scenario } from '../types'
 import { collectScenarioRefs } from './collectScenarioRefs'
-import { makeReelGamePayload, type ReelGamePayload } from './reelGamePayload'
+import {
+  makeReelGamePayload,
+  type ReelGamePayload,
+  type ReelScenarioLike,
+} from './reelGamePayload'
+import { assertReelScenario } from '../schema/validateScenario'
 import { createHash } from 'node:crypto'
 
 export type ResolvedBlob =
@@ -77,6 +82,9 @@ export async function buildReelGameAsset(
     }
   }
 
+  // charter Fail-Fast：落盘前按 schema 骨架校验，绝不打包不合契约的剧本。
+  assertReelScenario(clone)
+
   const packJson: ReelGamePackFile = {
     schemaVersion: '1.0.0',
     kind: 'internal-text-package',
@@ -85,7 +93,7 @@ export async function buildReelGameAsset(
         guid: opts.guid,
         kind: 'reel-game',
         name: clone.title || clone.id,
-        payload: makeReelGamePayload(clone as unknown as Record<string, unknown>),
+        payload: makeReelGamePayload(clone as unknown as ReelScenarioLike),
         refs: [],
       },
     ],

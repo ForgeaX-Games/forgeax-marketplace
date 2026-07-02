@@ -48,7 +48,7 @@
         "**/*.scenario.json",
         "**/scenarios/**",
         "**/reels/**",
-        ".reel-assets/**",
+        ".reel-workbench/**",
         ".reel-scenarios/**"
       ],
       "preferredAgent": "@forgeax-plugin/agent-reia"
@@ -340,12 +340,16 @@
     }
   },
   "permissions": [
-    "fs:read:.reel-assets/**",
-    "fs:write:.reel-assets/**",
     "fs:read:.reel-scenarios/**",
     "fs:write:.reel-scenarios/**",
-    "fs:read:.forgeax/games/{slug}/reel/**",
-    "fs:write:.forgeax/games/{slug}/reel/**",
+    "fs:read:.reel-workbench/**",
+    "fs:write:.reel-workbench/**",
+    "fs:read:.forgeax/games/{slug}/assets/**",
+    "fs:write:.forgeax/games/{slug}/assets/**",
+    "fs:read:.forgeax/games/{slug}/workbench/**",
+    "fs:write:.forgeax/games/{slug}/workbench/**",
+    "fs:read:.forgeax/reel/**",
+    "fs:write:.forgeax/reel/**",
     "model:text:reasoning",
     "model:image:still",
     "model:video:kinetic",
