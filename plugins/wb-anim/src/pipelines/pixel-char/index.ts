@@ -3,12 +3,13 @@ import { meta } from './meta'
 import { globalState } from '../../shared/GlobalState'
 import type { ImageModel } from '../../shared/ImageModel'
 import { forgeaxHost } from '../../platform/HostSdkBridge'
+import { t, tf, onLocaleChange } from '../../i18n'
 import { apiModelIdForImageModel } from '../../shared/promptRouter'
 import { adaptPromptForImageModel } from '../../shared/promptAdapter'
 import { CHIBI_ACTIONS, DIR_LABELS, getAction, type ChibiAction, type Direction } from './actions'
 import { generateTurnaroundPrompt, generateSheetPrompt, generateTemplatePrompt, generatePoseTransferPrompt, generateSingleDirectionPrompt, type StyleContext, type TurnaroundModel } from './prompt-engine'
-import { ART_STYLES, DEFAULT_ART_STYLE_ID, getArtStyleOrDefault } from './art-styles'
-import { GAMEPLAY_MODES, DEFAULT_GAMEPLAY_MODE, applyGameplayMode, filterActionsForMode, getGameplayMode, type GameplayMode } from './gameplay-modes'
+import { ART_STYLES, DEFAULT_ART_STYLE_ID, getArtStyleOrDefault, artStyleLabel, artStyleDescription } from './art-styles'
+import { GAMEPLAY_MODES, DEFAULT_GAMEPLAY_MODE, applyGameplayMode, filterActionsForMode, getGameplayMode, gameplayModeLabel, gameplayModeDescription, type GameplayMode } from './gameplay-modes'
 import { CHARACTER_TYPES, DEFAULT_CHARACTER_TYPE, applyCharacterType, getCharacterType, type CharacterType } from './character-types'
 import {
   composeChibiTemplate, splitSheetByDirection,
@@ -416,6 +417,7 @@ class PixelPipelineUI {
   private restoreReady = false
   /** Guards the one-shot "partial generation recovered" toast (see restoreSession). */
   private _partialChecked = false
+  private unsubLocale: (() => void) | null = null
 
   // Module 16 split-pane sync — see CharacterDesign for full rationale. The
   // pixel pipeline lives in two same-origin iframes; user-facing generation
@@ -535,6 +537,11 @@ class PixelPipelineUI {
   mount(left: HTMLElement, panels: PipelinePanels): void {
     this.leftEl = left
     this.panels = panels
+    this.unsubLocale?.()
+    this.unsubLocale = onLocaleChange(() => {
+      this.renderLeft()
+      this.renderCenter()
+    })
 
     // 软提示：未完成角色设计时仍渲染完整左侧编辑 UI，只在顶部插一条警告条
     // 提醒用户去 wb-character 完成角色设计——便于调试动画工作台本身。
@@ -548,12 +555,14 @@ class PixelPipelineUI {
   private injectNoCharacterBanner(left: HTMLElement): void {
     const banner = document.createElement('div')
     banner.style.cssText = 'padding:10px 12px;margin-bottom:8px;background:color-mix(in srgb, var(--color-status-warning) 14%, transparent);border:1px solid color-mix(in srgb, var(--color-status-warning) 40%, transparent);border-radius:6px;color:var(--color-text-secondary);font-size:12px;line-height:1.5;'
-    banner.innerHTML = `<strong style="color:var(--color-status-warning);">提示：还未完成角色设计</strong><br>
-      去 <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">wb-character</code> 生成角色后再来跑像素流水线；当前可预览/调试 UI 但生成会缺基础图。`
+    banner.innerHTML = `<strong style="color:var(--color-status-warning);">${t('px.banner.title')}</strong><br>
+      ${t('px.banner.body')}`
     left.insertBefore(banner, left.firstChild)
   }
 
   unmount(): void {
+    this.unsubLocale?.()
+    this.unsubLocale = null
     this.stopAllGifs()
     saveConfig(this.cfg)
     this.leftEl = null
@@ -606,7 +615,7 @@ class PixelPipelineUI {
     this.broadcastState()
 
     if (this.leftEl && this.panels) this.refresh()
-    if (!opts.silent) this.toast('工作区已清空')
+    if (!opts.silent) this.toast(t('px.toast.cleared'))
   }
 
   /* ── StyleContext helpers (gameplay mode + art style) ───────────── */
@@ -664,13 +673,13 @@ class PixelPipelineUI {
     this.leftEl.innerHTML = `
       <div class="px-panel">
         <div class="px-header">
-          <span class="px-header-title">角色动画工作台</span>
-          <span class="px-header-pill">角色动画</span>
+          <span class="px-header-title">${t('px.title')}</span>
+          <span class="px-header-pill">${t('px.pill')}</span>
         </div>
 
         <div class="px-tab-bar">
-          <button class="px-tab-btn${this.leftTab === 'edit' ? ' active' : ''}" data-px-tab="edit">编辑</button>
-          <button class="px-tab-btn${this.leftTab === 'lib' ? ' active' : ''}" data-px-tab="lib">动作库${libCount ? ` (${libCount})` : ''}</button>
+          <button class="px-tab-btn${this.leftTab === 'edit' ? ' active' : ''}" data-px-tab="edit">${t('px.tab.edit')}</button>
+          <button class="px-tab-btn${this.leftTab === 'lib' ? ' active' : ''}" data-px-tab="lib">${t('px.tab.lib')}${libCount ? ` (${libCount})` : ''}</button>
         </div>
 
         <div class="px-tab-body" data-px="tab-body"></div>
@@ -698,21 +707,21 @@ class PixelPipelineUI {
   private renderLeftEditTab(body: HTMLElement): void {
     body.innerHTML = `
       <div class="px-section">
-        <div class="px-label">工作流程</div>
+        <div class="px-label">${t('px.workflow')}</div>
         <div class="px-steps" data-px="steps"></div>
       </div>
 
       <div class="px-progress" data-px="gen-progress" style="display:none">
         <div class="px-progress-bar"><div class="px-progress-fill"></div></div>
-        <div class="px-progress-text" data-px="gen-text">处理中...</div>
+        <div class="px-progress-text" data-px="gen-text">${t('px.processing')}</div>
       </div>
 
       ${this.renderBatchHistorySection()}
     `
 
     const steps: { id: Step; label: string; icon: string }[] = [
-      { id: 1, label: '四方向参考', icon: 'directions' },
-      { id: 2, label: '动作生成与处理', icon: 'sword' },
+      { id: 1, label: t('px.step.ref'), icon: 'directions' },
+      { id: 2, label: t('px.step.actions'), icon: 'sword' },
     ]
 
     const stepsEl = body.querySelector('[data-px="steps"]') as HTMLElement
@@ -725,7 +734,7 @@ class PixelPipelineUI {
         <div class="px-step-head">
           <span class="px-step-icon">${pxIcon(isDone ? 'check' : step.icon, 'px-icon px-step-svg')}</span>
           <span class="px-step-label">${step.label}</span>
-          ${isDone ? '<span class="px-step-done">已完成</span>' : ''}
+          ${isDone ? `<span class="px-step-done">${t('px.step.done')}</span>` : ''}
         </div>
         ${isActive ? `<div class="px-step-detail">${this.renderStepDetail(step.id)}</div>` : ''}
       `
@@ -752,8 +761,8 @@ class PixelPipelineUI {
       body.innerHTML = `
         <div class="px-lib-empty">
           <div class="px-lib-empty-icon">${pxIcon('box', 'px-icon px-empty-svg')}</div>
-          <div class="px-lib-empty-text">动作库为空</div>
-          <div class="px-lib-empty-hint">在「编辑」标签页生成动作后，保存到动作库即可在此查看</div>
+          <div class="px-lib-empty-text">${t('px.lib.empty')}</div>
+          <div class="px-lib-empty-hint">${t('px.lib.emptyHint')}</div>
         </div>`
       return
     }
@@ -780,35 +789,35 @@ class PixelPipelineUI {
               : '<div class="px-lib-card-thumb-empty">?</div>'}
           </div>
           <div class="px-lib-card-name">${label}${hasSkill ? ' <span style="color:var(--color-accent-orange-default)">⚔</span>' : ''}</div>
-          <div class="px-lib-card-scale" title="缩放（双击重置）">
-            <button class="px-scale-btn" data-lib-scale-down="${entry.id}" title="缩小 5%">−</button>
+          <div class="px-lib-card-scale" title="${t('px.scale.label')}">
+            <button class="px-scale-btn" data-lib-scale-down="${entry.id}" title="${t('px.scale.down')}">−</button>
             <span class="px-scale-pct" data-lib-scale-reset="${entry.id}">${pct}%</span>
-            <button class="px-scale-btn" data-lib-scale-up="${entry.id}" title="放大 5%">+</button>
+            <button class="px-scale-btn" data-lib-scale-up="${entry.id}" title="${t('px.scale.up')}">+</button>
           </div>
           <div class="px-lib-card-ops">
-            <button class="px-btn tiny" data-lib-card-apply="${entry.id}" title="应用到工作区">↻</button>
-            <button class="px-btn tiny" data-lib-card-del="${actionId}" title="删除">×</button>
+            <button class="px-btn tiny" data-lib-card-apply="${entry.id}" title="${t('px.apply')}">↻</button>
+            <button class="px-btn tiny" data-lib-card-del="${actionId}" title="${t('px.delete')}">×</button>
           </div>
         </div>`
     }
 
     body.innerHTML = `
       <div class="px-lib-toolbar">
-        <button class="px-btn-pill" data-px="auto-align-scales" title="以待机动作的角色身高为基准，自动统一所有动作的缩放"><span class="px-btn-pill-icon">${pxIcon('target', 'px-icon')}</span> 自动统一大小</button>
-        <button class="px-btn-pill" data-px="reset-scales" title="清除所有动作的缩放调整">重置缩放</button>
+        <button class="px-btn-pill" data-px="auto-align-scales" title="${t('px.autoAlign.title')}"><span class="px-btn-pill-icon">${pxIcon('target', 'px-icon')}</span> ${t('px.autoAlign')}</button>
+        <button class="px-btn-pill" data-px="reset-scales" title="${t('px.resetScales.title')}">${t('px.resetScales')}</button>
       </div>
       <div class="px-lib-grid">${cards}</div>
       <div class="px-lib-footer">
         <div class="px-lib-footer-row px-lib-footer-primary">
-          <button class="px-btn-pill primary xl" data-px="publish-as-player" title="一键写入到 data/workspace/games/&lt;gameId&gt;/public/assets/art/characters/player/，刷新游戏即可作为主角"><span class="px-btn-pill-icon">${pxIcon('user', 'px-icon')}</span> 导入到游戏作为主角</button>
-          <button class="px-btn-pill accent xl" data-px="publish-as-npc" title="批量把当前动作库发布到游戏里的 NPC 槽位。默认只填充'空'槽位，已有的不会被顶替。"><span class="px-btn-pill-icon">${pxIcon('users', 'px-icon')}</span> 批量发布到 NPC</button>
+          <button class="px-btn-pill primary xl" data-px="publish-as-player"><span class="px-btn-pill-icon">${pxIcon('user', 'px-icon')}</span> ${t('px.publishPlayer')}</button>
+          <button class="px-btn-pill accent xl" data-px="publish-as-npc"><span class="px-btn-pill-icon">${pxIcon('users', 'px-icon')}</span> ${t('px.publishNpc')}</button>
         </div>
         <div class="px-lib-footer-row px-lib-footer-secondary">
-          <button class="px-btn-pill ghost" data-px="apply-all-lib" title="把动作库里的所有动作应用到当前工作区"><span class="px-btn-pill-icon">↻</span> 全部应用</button>
-          <button class="px-btn-pill ghost" data-px="inject-scene" title="把动作库发布到当前场景（Kino Studio 预览用）"><span class="px-btn-pill-icon">${pxIcon('film', 'px-icon')}</span> 放入场景</button>
-          <button class="px-btn-pill ghost" data-px="export-game" title="把动作库打包成 ZIP 导出"><span class="px-btn-pill-icon">${pxIcon('upload', 'px-icon')}</span> 导出</button>
-          <button class="px-btn-pill ghost" data-px="publish-game" title="发布到 phaser-2d 模板工程（共享卷）"><span class="px-btn-pill-icon">${pxIcon('play', 'px-icon')}</span> 发布到 phaser-2d</button>
-          <button class="px-btn-pill ghost danger" data-px="clear-lib" title="清空动作库、批次历史与内存中的参考图/帧，恢复到刚打开像素管线时的初始状态。换角色前建议先清一次。"><span class="px-btn-pill-icon">${pxIcon('trash', 'px-icon')}</span> 清空工作区</button>
+          <button class="px-btn-pill ghost" data-px="apply-all-lib"><span class="px-btn-pill-icon">↻</span> ${t('px.applyAll')}</button>
+          <button class="px-btn-pill ghost" data-px="inject-scene"><span class="px-btn-pill-icon">${pxIcon('film', 'px-icon')}</span> ${t('px.injectScene')}</button>
+          <button class="px-btn-pill ghost" data-px="export-game"><span class="px-btn-pill-icon">${pxIcon('upload', 'px-icon')}</span> ${t('px.export')}</button>
+          <button class="px-btn-pill ghost" data-px="publish-game"><span class="px-btn-pill-icon">${pxIcon('play', 'px-icon')}</span> ${t('px.publishPhaser')}</button>
+          <button class="px-btn-pill ghost danger" data-px="clear-lib"><span class="px-btn-pill-icon">${pxIcon('trash', 'px-icon')}</span> ${t('px.clearWorkspace')}</button>
         </div>
       </div>`
 
@@ -842,7 +851,7 @@ class PixelPipelineUI {
         e.stopPropagation()
         const entryId = btn.dataset.libCardApply!
         const entry = this.actionLib.find(e => e.id === entryId)
-        if (!entry) { this.toast('找不到该动作'); return }
+        if (!entry) { this.toast(t('px.toast.notFound')); return }
         this.replaceActionFromSource(entry.actionId, entry.directions, entry.sheetDataUrl)
         this.btnFlash(btn, 'done')
       })
@@ -901,7 +910,7 @@ class PixelPipelineUI {
         await updatePixelActionScale(entry.id, 1)
       }
       this.renderLeft()
-      this.toast(`已重置 ${this.actionLib.length} 个动作的缩放`)
+      this.toast(tf('px.toast.scalesReset', { n: this.actionLib.length }))
     })
 
     root.querySelector('[data-px="apply-all-lib"]')?.addEventListener('click', () => {
@@ -913,7 +922,7 @@ class PixelPipelineUI {
         if (entry.sheetDataUrl) this.img.actionSheets[entry.actionId] = entry.sheetDataUrl
       }
       this.autoSave()
-      this.toast(`${seen.size} 个动作已应用到工作区`)
+      this.toast(tf('px.toast.applied', { n: seen.size }))
       this.btnFlash(root.querySelector('[data-px="apply-all-lib"]') as HTMLElement, 'done')
     })
 
@@ -929,10 +938,10 @@ class PixelPipelineUI {
     root.querySelector('[data-px="publish-game"]')?.addEventListener('click', async () => {
       const btn = root.querySelector('[data-px="publish-game"]') as HTMLElement
       this.btnFlash(btn, 'busy')
-      const promptedId = prompt('角色 ID (留空自动生成):', '') || undefined
+      const promptedId = prompt(t('px.prompt.charId'), '') || undefined
       const safeId = promptedId && /^[a-zA-Z0-9][a-zA-Z0-9_\-]*$/.test(promptedId) ? promptedId : undefined
       if (promptedId && !safeId) {
-        this.toast('ID 格式不合法，已自动生成')
+        this.toast(t('px.toast.badId'))
       }
       await this.publishToGame(safeId)
       this.btnFlash(btn, 'done')
@@ -958,13 +967,7 @@ class PixelPipelineUI {
       // 二次确认——按下去要抹掉的东西不少（动作库 + 批次 + 参考图/帧 + 会话），
       // 比旧版「清空」只清 action-lib 后果更大，没提示容易误点。
       const ok = window.confirm(
-        `确定要清空当前像素角色工作区吗？\n\n` +
-        `将清除：\n` +
-        `  • 动作库中的 ${libCount} 个动作\n` +
-        `  • 全部生成批次历史\n` +
-        `  • 当前的四方向参考图与拆分帧\n\n` +
-        `个人偏好（FPS / 对齐模式 / 勾选的动作）会保留。\n` +
-        `此操作不可撤销。`,
+        `${t('px.confirm.clear.title')}\n\n${tf('px.confirm.clear.body', { libCount })}`,
       )
       if (!ok) return
       this.btnFlash(btn, 'busy')
@@ -992,9 +995,11 @@ class PixelPipelineUI {
     const typePreset = getCharacterType(this.cfg.characterType)
     const isMonster = !typePreset.humanoidGuards
 
-    const entityWord = isMonster ? (typePreset.id === 'creature-small' ? '小型怪物' : '怪物/BOSS') : '角色'
-    const layoutWord = isPlatformer ? '侧面' : '2×2 四方向'
-    const stepDesc = `基于参考图，生成 ${layoutWord} ${entityWord} 参考图（支持拖拽上传）`
+    const entityWord = isMonster
+      ? (typePreset.id === 'creature-small' ? t('px.entity.smallMonster') : t('px.entity.monsterBoss'))
+      : t('px.entity.character')
+    const layoutWord = isPlatformer ? t('px.layout.side') : t('px.layout.fourDir')
+    const stepDesc = tf('px.step1.desc', { layout: layoutWord, entity: entityWord })
 
     let html = `<div class="px-step-desc">${stepDesc}</div>`
 
@@ -1002,18 +1007,18 @@ class PixelPipelineUI {
       html += `
         <div class="px-source-preview">
           <img src="${globalState.get().characterImage}" class="px-source-thumb" />
-          <span class="px-source-label">当前设定图</span>
+          <span class="px-source-label">${t('px.currentDesign')}</span>
           <label class="px-link-btn" style="margin-left:auto;">
-            ${pxIcon('refresh', 'px-icon')} 替换
+            ${pxIcon('refresh', 'px-icon')} ${t('px.replace')}
             <input type="file" data-px="upload-character-sheet" accept="image/*" style="display:none" />
           </label>
         </div>`
     } else {
       html += `
         <div class="px-hint-box">
-          提示：还没有角色设定图。去「角色设计」标签页生成，或者
+          ${t('px.noDesign.hint')}
           <label class="px-link-btn" style="display:inline-block;margin-left:4px;">
-            ${pxIcon('upload', 'px-icon')} 直接上传作为设定图
+            ${pxIcon('upload', 'px-icon')} ${t('px.uploadDesign')}
             <input type="file" data-px="upload-character-sheet" accept="image/*" style="display:none" />
           </label>
         </div>`
@@ -1025,25 +1030,25 @@ class PixelPipelineUI {
     // render 时从 profile 推导并 save，用于 applyCharacterType/prompt-engine。
 
     // Gameplay mode selector (RPG / Platformer)
-    html += `<div class="px-label" style="margin-top:10px">玩法模式</div>`
+    html += `<div class="px-label" style="margin-top:10px">${t('px.gameplay')}</div>`
     html += `<div class="px-ta-mode-row">`
     for (const m of GAMEPLAY_MODES) {
       const active = m.id === this.cfg.gameplayMode ? ' active' : ''
-      const title = this.esc(m.description)
-      html += `<button class="px-ta-mode-btn${active}" data-gameplay-mode="${m.id}" title="${title}">${pxIcon(m.id === 'platformer' ? 'jump' : 'map', 'px-icon px-mode-svg')}<span>${m.label}</span></button>`
+      const title = this.esc(gameplayModeDescription(m))
+      html += `<button class="px-ta-mode-btn${active}" data-gameplay-mode="${m.id}" title="${title}">${pxIcon(m.id === 'platformer' ? 'jump' : 'map', 'px-icon px-mode-svg')}<span>${this.esc(gameplayModeLabel(m))}</span></button>`
     }
     html += `</div>`
-    html += `<div class="px-mode-hint">${this.esc(mode.description)}</div>`
+    html += `<div class="px-mode-hint">${this.esc(gameplayModeDescription(mode))}</div>`
 
     // Art-style picker grid
-    html += `<div class="px-label" style="margin-top:10px">画风预设</div>`
+    html += `<div class="px-label" style="margin-top:10px">${t('px.stylePreset')}</div>`
     html += `<div class="px-style-grid">`
     for (const s of ART_STYLES) {
       const active = s.id === this.cfg.artStyleId ? ' active' : ''
-      const title = this.esc(s.description)
+      const title = this.esc(artStyleDescription(s))
       html += `<button class="px-style-chip${active}" data-art-style="${s.id}" title="${title}">
         <span class="px-style-chip-icon">${pixelArtStyleIcon(s.id)}</span>
-        <span class="px-style-chip-label">${this.esc(s.label)}</span>
+        <span class="px-style-chip-label">${this.esc(artStyleLabel(s))}</span>
       </button>`
     }
     html += `</div>`
@@ -1052,21 +1057,21 @@ class PixelPipelineUI {
     html += `<div class="px-mode-hint">${this.esc(currentStyle.description)}</div>`
 
     html += `
-      <div class="px-label" style="margin-top:10px">画风补充（可选） <span style="font-size:10px;color:var(--text-secondary)">将叠加在预设之上</span></div>
-      <textarea class="px-textarea" data-px="style-prompt" placeholder="如：偏冷色调、带淡淡辉光、参考《极乐迪斯科》"
+      <div class="px-label" style="margin-top:10px">${t('px.styleExtra')} <span style="font-size:10px;color:var(--text-secondary)">${t('px.styleExtra.hint')}</span></div>
+      <textarea class="px-textarea" data-px="style-prompt" placeholder="${t('px.styleExtra.placeholder')}"
         rows="2">${this.esc(this.cfg.pixelStyle)}</textarea>
 
       <button class="px-btn primary" data-px="gen-turnaround" style="margin-top:10px"
         ${!hasDesign ? 'disabled' : ''}>
         ${isPlatformer
-          ? (isMonster ? `用参考图生成侧面${entityWord}图` : '用设定图生成侧面参考')
-          : (isMonster ? `用参考图生成四方向${entityWord}图` : '用设定图生成四方向参考')}
+          ? (isMonster ? tf('px.genTurnaround.sideMonster', { entity: entityWord }) : t('px.genTurnaround.sideChar'))
+          : (isMonster ? tf('px.genTurnaround.fourMonster', { entity: entityWord }) : t('px.genTurnaround.fourChar'))}
       </button>
 
       <div class="px-upload-row" style="margin-top:8px">
-        <span style="font-size:10px;color:var(--text-secondary)">已有参考图？</span>
+        <span style="font-size:10px;color:var(--text-secondary)">${t('px.hasRef')}</span>
         <label class="px-link-btn">
-          直接作为参考上传
+          ${t('px.uploadRef')}
           <input type="file" data-px="upload-turnaround" accept="image/*" style="display:none" />
         </label>
       </div>`
@@ -1081,20 +1086,20 @@ class PixelPipelineUI {
     const hasRef = !!this.img.turnaroundImage
     const hasSplit = Object.keys(this.img.splitFrames).length > 0
 
-    let h = `<div class="px-step-desc">一键完成：生成 → 去背景 → 拆帧预览</div>`
+    let h = `<div class="px-step-desc">${t('px.step2.desc')}</div>`
 
     if (!hasRef) {
-      h += `<div class="px-hint-box">提示：请先完成 Step 1（四方向参考图）</div>`
+      h += `<div class="px-hint-box">${t('px.hint.needStep1')}</div>`
       return h
     }
 
-    h += `<div class="px-label">生成模式（无预制模板的动作适用）</div>`
+    h += `<div class="px-label">${t('px.genMode')}</div>`
     h += `<div class="px-ta-mode-row">`
-    h += `<button class="px-ta-mode-btn${c.genMode === 'direct' ? ' active' : ''}" data-gen-mode="direct">提示词直出</button>`
-    h += `<button class="px-ta-mode-btn${c.genMode === 'template' ? ' active' : ''}" data-gen-mode="template">模板填充</button>`
+    h += `<button class="px-ta-mode-btn${c.genMode === 'direct' ? ' active' : ''}" data-gen-mode="direct">${t('px.genMode.direct')}</button>`
+    h += `<button class="px-ta-mode-btn${c.genMode === 'template' ? ' active' : ''}" data-gen-mode="template">${t('px.genMode.template')}</button>`
     h += `</div>`
 
-    h += `<div class="px-label">帧对齐方式</div>`
+    h += `<div class="px-label">${t('px.alignMode')}</div>`
     h += `<select class="px-select" data-px="align-mode">`
     for (const m of ALIGN_MODES) {
       const sel = c.alignMode === m.id ? ' selected' : ''
@@ -1103,18 +1108,18 @@ class PixelPipelineUI {
     h += `</select>`
 
     if (hasSplit) {
-      h += `<button class="px-btn" data-px="realign" style="margin-top:4px;font-size:10px">应用新对齐方式</button>`
+      h += `<button class="px-btn" data-px="realign" style="margin-top:4px;font-size:10px">${t('px.realign')}</button>`
     }
 
     const frameSizeOptions = [
-      { value: 0, label: '自动（取最大帧）' },
+      { value: 0, label: t('px.frameSize.auto') },
       { value: 32, label: '32×32' },
       { value: 48, label: '48×48' },
       { value: 64, label: '64×64' },
       { value: 96, label: '96×96' },
       { value: 128, label: '128×128' },
     ]
-    h += `<div class="px-label" style="margin-top:6px">帧输出尺寸</div>`
+    h += `<div class="px-label" style="margin-top:6px">${t('px.frameSize')}</div>`
     h += `<select class="px-select" data-px="frame-size">`
     for (const opt of frameSizeOptions) {
       const sel = c.targetFrameSize === opt.value ? ' selected' : ''
@@ -1129,25 +1134,25 @@ class PixelPipelineUI {
     const isNpc = globalState.profile?.characterRole === 'npc'
     const npcHint = isNpc
       ? `<div style="margin-top:8px;padding:6px 8px;border-radius:4px;background:var(--color-interaction-selected-brand);border:1px solid rgba(212,255,72,.25);font-size:11px;color:var(--text-secondary);line-height:1.4">
-        💡 <b>职业 NPC / 路人</b>：建议只勾选「待机 / 走路」这类日常动画，路人没有武器与大招，生成战斗动画容易产出不合身份的姿态。
+        ${t('px.npc.hint')}
       </div>`
       : ''
     h += npcHint
     h += `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
-      <div class="px-label" style="margin:0">选择动作</div>
-      <button class="px-btn tiny" data-px="toggle-all-actions" style="font-size:10px;width:auto;padding:2px 8px">${allSelected ? '取消全选' : '全选'}</button>
+      <div class="px-label" style="margin:0">${t('px.selectActions')}</div>
+      <button class="px-btn tiny" data-px="toggle-all-actions" style="font-size:10px;width:auto;padding:2px 8px">${allSelected ? t('px.deselectAll') : t('px.selectAll')}</button>
     </div>`
     for (const action of availableActions) {
       const checked = c.selectedActions.includes(action.id) ? 'checked' : ''
       const eff = this.effectiveAction(action)
       const dirCount = eff.directions.length
-      const dirWord = dirCount === 1 ? '侧面' : `${dirCount}方向`
+      const dirWord = dirCount === 1 ? t('px.dir.side') : tf('px.dir.multi', { count: dirCount })
       const badge = action.templateAsset
-        ? '<span style="font-size:9px;color:var(--accent);margin-left:4px">📋预制模板</span>'
+        ? `<span style="font-size:9px;color:var(--accent);margin-left:4px">${t('px.template.badge')}</span>`
         : ''
       h += `<label class="px-checkbox-label">
         <input type="checkbox" data-action-id="${action.id}" ${checked} />
-        ${action.label} <span style="font-size:10px;color:var(--text-secondary)">(${dirWord}×${eff.framesPerDir}帧)</span>${badge}
+        ${action.label} <span style="font-size:10px;color:var(--text-secondary)">(${tf('px.action.dirFrames', { dirs: dirWord, frames: eff.framesPerDir })})</span>${badge}
       </label>`
     }
 
@@ -1160,11 +1165,11 @@ class PixelPipelineUI {
 
     h += `<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">`
     h += `<button class="px-btn primary" data-px="gen-actions-force" style="flex:1">
-      ${pxIcon('film', 'px-icon px-btn-svg')}生成选中动作
+      ${pxIcon('film', 'px-icon px-btn-svg')}${t('px.genSelected')}
     </button>`
     if (hasAnyResult && !allHaveResult) {
       h += `<button class="px-btn" data-px="gen-actions-continue" style="flex:1">
-        ▶ 继续生成未完成项
+        ${t('px.continueIncomplete')}
       </button>`
     }
     h += `</div>`
@@ -1175,19 +1180,19 @@ class PixelPipelineUI {
         const action = getAction(actionId)
         const dirs = Object.keys(dirMap).length
         const frames = Object.values(dirMap).reduce((n, arr) => n + arr.length, 0)
-        items.push(`${action?.label || actionId}: ${dirs}方向 ${frames}帧`)
+        items.push(tf('px.actionSummary', { label: action?.label || actionId, dirs, frames }))
       }
       h += `<div class="px-hint-box" style="margin-top:8px;color:var(--color-status-success);background:color-mix(in srgb, var(--color-status-success) 12%, transparent);border-color:color-mix(in srgb, var(--color-status-success) 25%, transparent)">${items.join('<br/>')}</div>`
 
-      h += `<div class="px-label" style="margin-top:8px">GIF 播放速度</div>`
+      h += `<div class="px-label" style="margin-top:8px">${t('px.gifSpeed')}</div>`
       h += `<div style="display:flex;align-items:center;gap:8px;">
         <input type="range" min="4" max="24" value="${c.fps}" data-px="fps-slider" style="flex:1" />
         <span data-px="fps-val" style="font-size:11px;min-width:40px">${c.fps} fps</span>
       </div>`
 
       h += `<div class="px-step2-actions">
-        <button class="px-btn-pill accent" data-px="save-to-lib"><span class="px-btn-pill-icon">${pxIcon('box', 'px-icon')}</span> 保存到动作库</button>
-        <button class="px-btn-pill" data-px="export-all"><span class="px-btn-pill-icon">${pxIcon('upload', 'px-icon')}</span> 导出全部 (ZIP)</button>
+        <button class="px-btn-pill accent" data-px="save-to-lib"><span class="px-btn-pill-icon">${pxIcon('box', 'px-icon')}</span> ${t('px.saveToLib')}</button>
+        <button class="px-btn-pill" data-px="export-all"><span class="px-btn-pill-icon">${pxIcon('upload', 'px-icon')}</span> ${t('px.exportAll')}</button>
       </div>`
     }
 
@@ -1223,25 +1228,25 @@ class PixelPipelineUI {
     const typePreset = getCharacterType(this.cfg.characterType)
     const isMonster = !typePreset.humanoidGuards
     const isSmall = typePreset.id === 'creature-small'
-    const creatureWord = isSmall ? '小怪' : '怪物'
+    const creatureWord = isSmall ? t('px.creature.small') : t('px.creature.large')
     const isPlatformer = this.cfg.gameplayMode === 'platformer'
 
-    const leftLabel = isMonster ? '参考原图（可拖拽）' : '角色设计图（可拖拽）'
+    const leftLabel = isMonster ? t('px.center.left.ref') : t('px.center.left.design')
     const rightLabel = isPlatformer
-      ? (isMonster ? `侧面${creatureWord}参考` : '侧面角色参考')
-      : (isMonster ? `2×2 ${creatureWord}四方向` : '2×2 四方向图')
+      ? (isMonster ? tf('px.center.right.sideMonster', { creature: creatureWord }) : t('px.center.right.sideChar'))
+      : (isMonster ? tf('px.center.right.fourMonster', { creature: creatureWord }) : t('px.center.right.fourChar'))
 
     const regenBtn = turnaround
-      ? `<button class="px-btn secondary" data-px="regen-turnaround" style="margin-top:8px">不满意？重新生成</button>`
+      ? `<button class="px-btn secondary" data-px="regen-turnaround" style="margin-top:8px">${t('px.regenTurnaround')}</button>`
       : ''
     const nextBtn = turnaround
-      ? `<button class="px-btn primary" data-px="goto-step2" style="margin-top:8px">进入动作生成与处理 →</button>`
+      ? `<button class="px-btn primary" data-px="goto-step2" style="margin-top:8px">${t('px.gotoStep2')}</button>`
       : ''
 
     const leftEmpty = `<div class="px-grid-empty px-droppable-hint">
       <div class="px-empty-icon">${pxIcon('image', 'px-icon px-empty-svg')}</div>
-      <div class="px-empty-title">拖拽角色图到这里</div>
-      <div class="px-empty-sub">或点击选择文件</div>
+      <div class="px-empty-title">${t('px.drop.title')}</div>
+      <div class="px-empty-sub">${t('px.drop.sub')}</div>
     </div>`
 
     // Right cell is a state machine: empty → generating → done.
@@ -1254,22 +1259,22 @@ class PixelPipelineUI {
       rightCellContent = `<div class="px-grid-empty px-cell-loading">
         <div class="px-cell-skeleton"></div>
         <div class="px-cell-spinner"></div>
-        <div class="px-cell-loading-text">${this.esc(this.progressText || '正在生成...')}</div>
-        <div class="px-cell-loading-hint">AI 正在工作 · 完成后这里会出现新图</div>
+        <div class="px-cell-loading-text">${this.esc(this.progressText || t('px.loading.default'))}</div>
+        <div class="px-cell-loading-hint">${t('px.loading.aiHint')}</div>
       </div>`
     } else {
       rightCellContent = `<div class="px-grid-empty px-droppable-hint">
         <div class="px-empty-icon">${pxIcon('sparkles', 'px-icon px-empty-svg')}</div>
-        <div class="px-empty-title">等 AI 给你生成${isPlatformer ? '侧面' : '4 方向'}参考图</div>
-        <div class="px-empty-sub">点击左侧『生成${isPlatformer ? '侧面' : '四方向'}参考图』开始</div>
-        <div class="px-empty-hint">或直接拖拽成品参考图到这里</div>
+        <div class="px-empty-title">${isPlatformer ? t('px.waitAi.side') : t('px.waitAi.fourDir')}</div>
+        <div class="px-empty-sub">${isPlatformer ? t('px.waitAi.clickSide') : t('px.waitAi.clickFourDir')}</div>
+        <div class="px-empty-hint">${t('px.dropHint')}</div>
       </div>`
     }
 
     this.panels!.center.innerHTML = `
       <div class="px-center">
         ${this.renderStageStrip()}
-        <div class="px-center-title">四方向参考图</div>
+        <div class="px-center-title">${t('px.center.refTitle')}</div>
         <div class="px-grid px-grid-ref">
           <div class="px-grid-cell px-droppable" data-drop-target="source" tabindex="0">
             <div class="px-grid-label">${leftLabel}</div>
@@ -1390,22 +1395,22 @@ class PixelPipelineUI {
     const stages: { id: string; label: string; state: StageState }[] = [
       {
         id: 'source',
-        label: '角色',
+        label: t('px.stage.source'),
         state: hasSource ? 'done' : 'active',
       },
       {
         id: 'turnaround',
-        label: '四视图',
+        label: t('px.stage.turnaround'),
         state: hasTurnaround ? 'done' : (hasSource && activeStep === 1 ? (generating ? 'active' : 'active') : 'pending'),
       },
       {
         id: 'sheets',
-        label: '动作 Sheet',
+        label: t('px.stage.sheets'),
         state: hasSheets ? 'done' : (hasTurnaround && activeStep === 2 ? (generating ? 'active' : 'active') : 'pending'),
       },
       {
         id: 'split',
-        label: '拆帧 + 去背',
+        label: t('px.stage.split'),
         state: hasFrames ? 'done' : (hasSheets ? (generating ? 'active' : 'active') : 'pending'),
       },
     ]
@@ -1434,15 +1439,15 @@ class PixelPipelineUI {
       this.panels!.center.innerHTML = `
         <div class="px-center">
           ${this.renderStageStrip()}
-          <div class="px-center-title">动作帧预览</div>
+          <div class="px-center-title">${t('px.center.actionPreview')}</div>
           ${this.progressActive ? `<div class="px-step2-loading">
             <div class="px-cell-spinner"></div>
-            <div class="px-cell-loading-text">${this.esc(this.progressText || '正在生成...')}</div>
-            <div class="px-cell-loading-hint">完成的动作会自动出现在下方</div>
+            <div class="px-cell-loading-text">${this.esc(this.progressText || t('px.loading.default'))}</div>
+            <div class="px-cell-loading-hint">${t('px.center.loadingHint')}</div>
           </div>` : `<div class="px-grid-empty px-droppable-hint" style="margin-top:32px">
             <div class="px-empty-icon">${pxIcon('film', 'px-icon px-empty-svg')}</div>
-            <div class="px-empty-title">勾选动作 → 点击『一键生成』</div>
-            <div class="px-empty-sub">每个动作走 4 阶段：生成 → 扩图 → 去背景 → 拆帧</div>
+            <div class="px-empty-title">${t('px.center.emptyTitle')}</div>
+            <div class="px-empty-sub">${t('px.center.emptySub')}</div>
           </div>`}
         </div>`
       return
@@ -1461,7 +1466,7 @@ class PixelPipelineUI {
     this.panels!.center.innerHTML = `
       <div class="px-center">
         ${this.renderStageStrip()}
-        <div class="px-center-title">动作帧预览</div>
+        <div class="px-center-title">${t('px.center.actionPreview')}</div>
         <div class="px-action-results" data-px="action-results"></div>
       </div>`
     this.renderProgressOverlay()
@@ -1494,30 +1499,34 @@ class PixelPipelineUI {
     if (dirFrames) {
       const dirCount = Object.keys(dirFrames).length
       const frameCount = Object.values(dirFrames).reduce((n, arr) => n + arr.length, 0)
-      html += `<span class="px-action-card-meta">${action?.framesPerDir || '?'}帧 × ${dirCount}方向 = ${frameCount}帧</span>`
+      html += `<span class="px-action-card-meta">${tf('px.action.frameMeta', {
+        frames: action?.framesPerDir || '?',
+        dirs: dirCount,
+        total: frameCount,
+      })}</span>`
     } else {
-      html += `<span class="px-action-card-meta">⏳ 处理中...</span>`
+      html += `<span class="px-action-card-meta">${t('px.action.processing')}</span>`
     }
     html += `</div>`
 
     if (rawSheetUrl || cleanSheetUrl || storedPrompt) {
-      html += `<details class="px-sheet-toggle"><summary>▶ 原始 Sheet 与 Prompt（点击展开，可编辑后重生成）</summary>`
+      html += `<details class="px-sheet-toggle"><summary>${t('px.sheet.toggle')}</summary>`
       html += `<div class="px-sheet-prompt-row">`
       html += `<div class="px-sheet-col">`
       if (rawSheetUrl) {
-        html += `<div class="px-sheet-label">AI 原始输出</div><img class="px-sheet-img" src="${rawSheetUrl}" alt="raw sheet">`
+        html += `<div class="px-sheet-label">${t('px.sheet.rawOutput')}</div><img class="px-sheet-img" src="${rawSheetUrl}" alt="raw sheet">`
       }
       if (cleanSheetUrl && cleanSheetUrl !== rawSheetUrl) {
-        html += `<div class="px-sheet-label">去背景后</div><img class="px-sheet-img" src="${cleanSheetUrl}" alt="clean sheet">`
+        html += `<div class="px-sheet-label">${t('px.sheet.afterBg')}</div><img class="px-sheet-img" src="${cleanSheetUrl}" alt="clean sheet">`
       }
       html += `</div>`
       if (storedPrompt !== undefined) {
         html += `<div class="px-prompt-col">`
-        html += `<div class="px-sheet-label">提示词（可修改后重生成）</div>`
+        html += `<div class="px-sheet-label">${t('px.sheet.promptLabel')}</div>`
         html += `<textarea class="px-prompt-textarea" data-px-prompt-text="${actionId}" spellcheck="false">${this.esc(storedPrompt)}</textarea>`
         html += `<div class="px-prompt-actions">`
-        html += `<button class="px-btn small" data-px-regen-prompt="${actionId}">${pxIcon('refresh', 'px-icon')} 用当前提示词重生成</button>`
-        html += `<button class="px-btn small" data-px-reset-prompt="${actionId}" title="恢复默认模板生成的提示词">↺ 恢复默认</button>`
+        html += `<button class="px-btn small" data-px-regen-prompt="${actionId}">${pxIcon('refresh', 'px-icon')} ${t('px.sheet.regenPrompt')}</button>`
+        html += `<button class="px-btn small" data-px-reset-prompt="${actionId}" title="${t('px.sheet.resetPromptTitle')}">${t('px.sheet.resetPrompt')}</button>`
         html += `</div></div>`
       }
       html += `</div></details>`
@@ -1538,8 +1547,8 @@ class PixelPipelineUI {
       }
 
       html += `<div class="px-action-card-footer">`
-      html += `<button class="px-btn small" data-regen-action="${actionId}">${pxIcon('refresh', 'px-icon')} 重新生成此动作</button>`
-      html += `<button class="px-btn small" data-autocenter-action="${actionId}">⊙ 全部居中</button>`
+      html += `<button class="px-btn small" data-regen-action="${actionId}">${pxIcon('refresh', 'px-icon')} ${t('px.action.regen')}</button>`
+      html += `<button class="px-btn small" data-autocenter-action="${actionId}">${t('px.action.autocenterAll')}</button>`
       html += `</div>`
     }
 
@@ -1573,15 +1582,15 @@ class PixelPipelineUI {
       </div>`
     }
     return `<div class="px-frame-cell" data-frame="${key}">
-      <div class="px-frame-drag-zone" data-drag-frame="${key}" title="拖拽移动角色位置">
+      <div class="px-frame-drag-zone" data-drag-frame="${key}" title="${t('px.frame.dragTitle')}">
         <img src="${url}" class="px-frame-img checkerboard" draggable="false" />
       </div>
       <span class="px-frame-idx">#${idx + 1}</span>
       <div class="px-frame-ops">
-        <button class="px-btn tiny" data-frame-replace="${key}" title="上传替换">↻</button>
-        <button class="px-btn tiny" data-frame-copy="${key}" title="从其他帧复制">📋</button>
-        <button class="px-btn tiny" data-frame-flip="${key}" title="左右翻转">↔</button>
-        <button class="px-btn tiny" data-frame-autocenter="${key}" title="自动居中">⊙</button>
+        <button class="px-btn tiny" data-frame-replace="${key}" title="${t('px.frame.replaceTitle')}">↻</button>
+        <button class="px-btn tiny" data-frame-copy="${key}" title="${t('px.frame.copyTitle')}">📋</button>
+        <button class="px-btn tiny" data-frame-flip="${key}" title="${t('px.frame.flipTitle')}">↔</button>
+        <button class="px-btn tiny" data-frame-autocenter="${key}" title="${t('px.frame.autocenterTitle')}">⊙</button>
       </div>
     </div>`
   }
@@ -1788,7 +1797,7 @@ class PixelPipelineUI {
         const pool = this.availableActions()
         const allNow = pool.every(a => this.cfg.selectedActions.includes(a.id))
         const toggleBtn = this.leftEl?.querySelector('[data-px="toggle-all-actions"]')
-        if (toggleBtn) toggleBtn.textContent = allNow ? '取消全选' : '全选'
+        if (toggleBtn) toggleBtn.textContent = allNow ? t('px.deselectAll') : t('px.selectAll')
       })
     })
 
@@ -1801,7 +1810,7 @@ class PixelPipelineUI {
         cb.checked = this.cfg.selectedActions.includes(cb.dataset.actionId!)
       })
       const toggleBtn = this.leftEl?.querySelector('[data-px="toggle-all-actions"]')
-      if (toggleBtn) toggleBtn.textContent = allSelected ? '全选' : '取消全选'
+      if (toggleBtn) toggleBtn.textContent = allSelected ? t('px.selectAll') : t('px.deselectAll')
     })
 
     this.leftEl.querySelector('[data-px="gen-actions-continue"]')?.addEventListener('click', () => this.execGenPipeline(false))
@@ -2750,11 +2759,11 @@ class PixelPipelineUI {
     dialog.className = 'px-copy-dialog'
     dialog.innerHTML = `
       <div class="px-copy-dialog-inner">
-        <div class="px-copy-dialog-title">选择来源帧</div>
+        <div class="px-copy-dialog-title">${t('px.copy.title')}</div>
         <div class="px-copy-dialog-list">
           ${allFrames.map((f, i) => `<button class="px-btn small" data-copy-src="${i}">${f.label}</button>`).join('')}
         </div>
-        <button class="px-btn small" data-copy-cancel>取消</button>
+        <button class="px-btn small" data-copy-cancel>${t('px.copy.cancel')}</button>
       </div>`
 
     dialog.querySelector('[data-copy-cancel]')?.addEventListener('click', () => dialog.remove())
@@ -3143,32 +3152,32 @@ class PixelPipelineUI {
     const editor = document.createElement('div')
     editor.className = 'px-skill-editor'
     editor.innerHTML = `
-      <div class="px-skill-section-title">基础属性</div>
-      <div class="px-skill-row"><label>名称</label><input data-sf="name" value="${skill.name}" /></div>
-      <div class="px-skill-row"><label>伤害</label><input data-sf="damage" type="number" value="${skill.damage}" min="0" /></div>
-      <div class="px-skill-row"><label>范围</label><input data-sf="range" type="number" value="${skill.range}" min="0" /></div>
-      <div class="px-skill-row"><label>冷却</label><input data-sf="cooldown" type="number" value="${skill.cooldown}" min="0" step="100" /><span style="font-size:10px;color:#999">ms</span></div>
+      <div class="px-skill-section-title">${t('px.skill.basic')}</div>
+      <div class="px-skill-row"><label>${t('px.skill.name')}</label><input data-sf="name" value="${skill.name}" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.damage')}</label><input data-sf="damage" type="number" value="${skill.damage}" min="0" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.range')}</label><input data-sf="range" type="number" value="${skill.range}" min="0" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.cooldown')}</label><input data-sf="cooldown" type="number" value="${skill.cooldown}" min="0" step="100" /><span style="font-size:10px;color:#999">ms</span></div>
 
-      <div class="px-skill-section-title">触发帧 (点击选择)</div>
+      <div class="px-skill-section-title">${t('px.skill.triggerFrames')}</div>
       <div class="px-skill-frames-strip">
         ${frames.map((url, i) => `<img src="${url}" class="px-skill-frame-thumb ${i === skill.triggerFrame ? 'trigger' : ''}" data-fidx="${i}" />`).join('')}
       </div>
 
-      <div class="px-skill-section-title">特效绑定</div>
+      <div class="px-skill-section-title">${t('px.skill.vfxBinding')}</div>
       <div class="px-skill-row">
-        <label>类型</label>
+        <label>${t('px.skill.vfxType')}</label>
         <select data-sf="vfx-type">
           ${(['slash', 'impact', 'aura', 'projectile'] as VfxType[]).map(t => `<option value="${t}" ${vfx.type === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
       </div>
-      <div class="px-skill-row"><label>起始帧</label><input data-sf="vfx-start" type="number" value="${vfx.startFrame}" min="0" max="${frames.length - 1}" /></div>
-      <div class="px-skill-row"><label>持续帧</label><input data-sf="vfx-dur" type="number" value="${vfx.duration}" min="1" /></div>
-      <div class="px-skill-row"><label>颜色</label><input data-sf="vfx-color" type="color" value="${vfx.color}" /></div>
-      <div class="px-skill-row"><label>缩放</label><input data-sf="vfx-scale" type="number" value="${vfx.scale}" min="0.1" max="5" step="0.1" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.vfxStart')}</label><input data-sf="vfx-start" type="number" value="${vfx.startFrame}" min="0" max="${frames.length - 1}" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.vfxDur')}</label><input data-sf="vfx-dur" type="number" value="${vfx.duration}" min="1" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.vfxColor')}</label><input data-sf="vfx-color" type="color" value="${vfx.color}" /></div>
+      <div class="px-skill-row"><label>${t('px.skill.vfxScale')}</label><input data-sf="vfx-scale" type="number" value="${vfx.scale}" min="0.1" max="5" step="0.1" /></div>
 
       <div class="px-skill-row" style="margin-top:6px">
-        <button class="px-btn small" data-sf="save">保存</button>
-        <button class="px-btn small" data-sf="clear" style="color:var(--color-status-error)">清除技能</button>
+        <button class="px-btn small" data-sf="save">${t('px.skill.save')}</button>
+        <button class="px-btn small" data-sf="clear" style="color:var(--color-status-error)">${t('px.skill.clear')}</button>
       </div>
     `
 
@@ -3946,8 +3955,8 @@ class PixelPipelineUI {
       <div class="px-ws-divider"></div>
       <div class="px-ws-header" data-px="toggle-batches">
         <span class="px-ws-icon">📋</span>
-        <span class="px-ws-title">生成历史</span>
-        <span class="px-ws-badge">${count} 条</span>
+        <span class="px-ws-title">${t('px.batchHistory')}</span>
+        <span class="px-ws-badge">${t('px.batchCount', { count: String(count) })}</span>
         <span class="px-ws-arrow">${this.batchHistoryExpanded ? '▲' : '▼'}</span>
       </div>`
 

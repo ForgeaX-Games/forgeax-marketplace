@@ -4,6 +4,7 @@ import { useScenarioStore } from '../../scenario/scenarioStore'
 import { useShellStore } from '../../shell/shellStore'
 import { useClipSelection } from '../timeline/clipSelection'
 import { useFxPresetStore } from '../../fx/fxPresetStore'
+import { useT } from '../../i18n'
 import {
   FX_CLIP_ANIM,
   FX_EFFECTS,
@@ -50,16 +51,16 @@ function shotAtMs(scene: Scene | undefined, ms: number): Shot | undefined {
 
 type RailTab = 'transition' | 'effect' | 'sticker' | 'filter' | 'adjust' | 'clipAnim' | 'speed' | 'mine'
 
-const TABS: { id: RailTab; label: string }[] = [
-  { id: 'transition', label: '转场' },
-  { id: 'effect', label: '特效' },
-  { id: 'sticker', label: '贴纸' },
-  { id: 'filter', label: '滤镜' },
-  { id: 'adjust', label: '调节' },
-  { id: 'clipAnim', label: '首尾动画' },
-  { id: 'speed', label: '变速' },
-  { id: 'mine', label: '我的' },
-]
+const TAB_KEYS: Record<RailTab, string> = {
+  transition: 'fx.tab.transition',
+  effect: 'fx.tab.effect',
+  sticker: 'fx.tab.sticker',
+  filter: 'fx.tab.filter',
+  adjust: 'fx.tab.adjust',
+  clipAnim: 'fx.tab.clipAnim',
+  speed: 'fx.tab.speed',
+  mine: 'fx.tab.mine',
+}
 
 const FX_DUR = 3000
 
@@ -71,6 +72,7 @@ export interface EffectsRailProps {
 }
 
 export function EffectsRail({ sceneId, hoverMs, collapsed, onToggleCollapsed }: EffectsRailProps) {
+  const t = useT()
   const [tab, setTab] = useState<RailTab>('transition')
   const scene = useScenarioStore((s) => s.scenario.scenes[sceneId])
   const fxSel = useClipSelection((s) => s.fxSelection)
@@ -82,10 +84,10 @@ export function EffectsRail({ sceneId, hoverMs, collapsed, onToggleCollapsed }: 
           type="button"
           className="ks-fxrail-expand"
           onClick={onToggleCollapsed}
-          title="展开后期效果栏"
+          title={t('fx.expand')}
         >
           <span className="ks-fxrail-expand-ico" aria-hidden>✦</span>
-          <span className="ks-fxrail-expand-txt">效果</span>
+          <span className="ks-fxrail-expand-txt">{t('fx.effects')}</span>
         </button>
       </div>
     )
@@ -98,29 +100,29 @@ export function EffectsRail({ sceneId, hoverMs, collapsed, onToggleCollapsed }: 
   return (
     <div className="ks-fxrail">
       <div className="ks-fxrail-head">
-        <span className="ks-fxrail-title ks-mono">后期效果</span>
+        <span className="ks-fxrail-title ks-mono">{t('fx.title')}</span>
         <button
           type="button"
           className="ks-fxrail-collapse"
           onClick={onToggleCollapsed}
-          title="收起效果栏"
-          aria-label="收起"
+          title={t('fx.collapse')}
+          aria-label={t('fx.collapse')}
         >
           ›
         </button>
       </div>
 
       <div className="ks-fxrail-tabs" role="tablist">
-        {TABS.map((t) => (
+        {(Object.keys(TAB_KEYS) as RailTab[]).map((id) => (
           <button
-            key={t.id}
+            key={id}
             type="button"
             role="tab"
-            aria-selected={tab === t.id}
-            className={`ks-fxrail-tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => setTab(t.id)}
+            aria-selected={tab === id}
+            className={`ks-fxrail-tab ${tab === id ? 'is-active' : ''}`}
+            onClick={() => setTab(id)}
           >
-            {t.label}
+            {t(TAB_KEYS[id])}
           </button>
         ))}
       </div>

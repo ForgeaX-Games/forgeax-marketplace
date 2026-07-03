@@ -22,6 +22,24 @@
                font: 13px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif; }
   body[data-pane="left"]   .pane-center { display: none; }
   body[data-pane="center"] .pane-left   { display: none; }
+  /* Marketplace preview capture — show agent list + detail panes together */
+  body[data-pane="marketplace"] {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+  }
+  body[data-pane="marketplace"] .pane-left,
+  body[data-pane="marketplace"] .pane-center {
+    display: flex !important;
+  }
+  body[data-pane="marketplace"] .pane-left {
+    width: min(280px, 26vw);
+    flex-shrink: 0;
+  }
+  body[data-pane="marketplace"] .pane-center {
+    flex: 1;
+    min-width: 0;
+  }
 
   /* ── Left pane ── */
   .pane-left { height: 100%; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
@@ -268,6 +286,17 @@
                         overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
                         -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 </style>
+<script>
+(function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get('locale') === 'en' || q.get('marketplace') === '1') {
+      localStorage.setItem('forgeax.locale', 'en');
+      document.documentElement.lang = 'en';
+    }
+  } catch (_) { /* ignore */ }
+})();
+</script>
 </head>
 <body>
 
@@ -278,14 +307,14 @@
 
 <div class="pane-center">
   <div class="header">
-    <h1 id="title">未选 agent</h1>
+    <h1 id="title">No agent selected</h1>
     <span class="role-pill" id="role-pill" style="display:none"></span>
     <span class="path" id="header-path"></span>
   </div>
 
   <div class="tabs" id="tabs">
     <button class="tab active" data-tab="persona">Persona</button>
-    <button class="tab" data-tab="memory">长期记忆</button>
+    <button class="tab" data-tab="memory">Long-term memory</button>
     <button class="tab" data-tab="skills">Skills</button>
     <button class="tab" data-tab="workbench">Workbench</button>
   </div>
@@ -293,12 +322,12 @@
   <!-- Persona tab -->
   <div class="tab-body" id="tab-persona">
     <div class="toolbar">
-      <button class="btn primary" id="persona-save" disabled>保存 persona</button>
-      <button class="btn" id="persona-reload" disabled>放弃改动</button>
+      <button class="btn primary" id="persona-save" disabled>Save persona</button>
+      <button class="btn" id="persona-reload" disabled>Discard changes</button>
       <span class="status" id="persona-status"></span>
     </div>
     <textarea class="editor" id="persona-editor" spellcheck="false" disabled
-              placeholder="左栏选一个 agent 加载 persona..."></textarea>
+              placeholder="Select an agent in the left pane to load persona…"></textarea>
   </div>
 
   <!-- Memory tab -->
@@ -350,8 +379,152 @@
 
 <script type="module">
 const params = new URLSearchParams(location.search);
-const pane = params.get('pane') || 'center';
+const pane = params.get('marketplace') === '1' ? 'marketplace' : (params.get('pane') || 'center');
 document.body.dataset.pane = pane;
+
+function getLocale() {
+  try {
+    const url = new URLSearchParams(location.search).get('locale');
+    if (url === 'en' || url === 'zh') return url;
+    const v = localStorage.getItem('forgeax.locale');
+    return v === 'zh' ? 'zh' : 'en';
+  } catch { return 'en'; }
+}
+let locale = getLocale();
+
+function onLocaleChanged(next) {
+  if (next !== 'en' && next !== 'zh') return;
+  if (next === locale) return;
+  locale = next;
+  applyChrome();
+  renderList();
+}
+
+const UI = {
+  en: {
+    noAgent: 'No agent selected',
+    tabMemory: 'Long-term memory',
+    savePersona: 'Save persona',
+    discard: 'Discard changes',
+    save: 'Save',
+    rawMode: 'Source mode',
+    memNewPlaceholder: 'new-note.md',
+    memNewTitle: 'New memory file',
+    personaPlaceholder: 'Select an agent in the left pane to load persona…',
+    memPlaceholder: 'Select a memory file on the left, or create a new .md…',
+    slotsHint: 'Long-term facts about you — injected as opening context for every agent. Edit, delete, or add freely.',
+    slotAdd: '＋ Add profile fact',
+    diaryHintBefore: 'Long-term memory from working with you, shown as a diary. Read-only — switch to ',
+    diaryHintAfter: ' above to edit.',
+    diaryOwner: 'this agent',
+    userProfile: 'User profile',
+    userProfileTitle: 'Global user profile · auto-captured from chat, editable',
+    profileHeader: '# User profile\n\n> Auto-captured from chat + manual edits. Lines dedupe by `key` (trailing `<!-- k:... -->` is the dedupe marker — do not remove).\n',
+    agentListFailed: 'Failed to load agent list: {status}',
+    loadError: 'Load error: {msg}',
+    personaUnsaved: 'Persona edits unsaved. Discard changes?',
+    memUnsaved: 'Memory file unsaved. Discard changes?',
+    unsavedDiscard: 'Unsaved changes. Discard?',
+    saving: 'Saving…',
+    saveFailed: 'Save failed: {status} {err}',
+    savedReloading: 'Saved · reloading plugin…',
+    savedReloaded: 'Saved · plugin reloaded',
+    saveException: 'Save error: {msg}',
+    noMemoryDir: 'This agent has no memoryDir (global user profile still editable)',
+    noProfileYet: 'Not created yet · add facts and save',
+    noProfileSlots: 'No profile facts yet · click below to add one',
+    savedProfileCount: 'Saved · {n} profile facts',
+    saved: 'Saved',
+    emptyNoAgent: 'No agent selected',
+  },
+  zh: {
+    noAgent: '未选 agent',
+    tabMemory: '长期记忆',
+    savePersona: '保存 persona',
+    discard: '放弃改动',
+    save: '保存',
+    rawMode: '源码模式',
+    memNewPlaceholder: 'new-note.md',
+    memNewTitle: '新建记忆文件',
+    personaPlaceholder: '左栏选一个 agent 加载 persona...',
+    memPlaceholder: '左侧选一个记忆文件，或新建一个 .md...',
+    slotsHint: '关于「你」的长期事实，会作为每个 agent 的开场上下文注入。可直接修改、删除或新增。',
+    slotAdd: '＋ 添加一条画像',
+    diaryHintBefore: '这是 ',
+    diaryHintAfter: ' 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
+    diaryOwner: '该 agent',
+    userProfile: '用户画像',
+    userProfileTitle: '全局用户画像 · 由对话自动沉淀,可手动编辑',
+    profileHeader: '# 用户画像\n\n> 由对话自动捕捉 + 可手动编辑。每条按 `key` 去重 upsert(末尾 `<!-- k:... -->` 是去重标记,勿删)。\n',
+    agentListFailed: 'agent 列表加载失败: {status}',
+    loadError: '加载异常: {msg}',
+    personaUnsaved: 'Persona 编辑未保存，丢弃改动?',
+    memUnsaved: '记忆文件未保存，丢弃改动?',
+    unsavedDiscard: '未保存，丢弃改动?',
+    saving: '保存中…',
+    saveFailed: '保存失败: {status} {err}',
+    savedReloading: '已保存 · 重载插件中…',
+    savedReloaded: '已保存 · 插件已重载',
+    saveException: '保存异常: {msg}',
+    noMemoryDir: '该 agent 未声明 memoryDir（仍可编辑全局用户画像）',
+    noProfileYet: '尚未创建 · 可直接添加画像后保存',
+    noProfileSlots: '还没有任何用户画像 · 点下方「添加一条画像」开始',
+    savedProfileCount: '已保存 · {n} 条画像',
+    saved: '已保存',
+    emptyNoAgent: '未选 agent',
+  },
+};
+function t(key, vars) {
+  let s = UI[locale][key] ?? UI.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+  return s;
+}
+function userProfile() {
+  return { id: '__user_profile__', label: t('userProfile'), path: '.forgeax/user/USER.md' };
+}
+function profileHeader() { return t('profileHeader'); }
+
+function applyChrome() {
+  const title = document.getElementById('title');
+  if (title && !selectedAgent) title.textContent = t('noAgent');
+  const memTab = document.querySelector('.tab[data-tab="memory"]');
+  if (memTab) memTab.textContent = t('tabMemory');
+  const personaSave = document.getElementById('persona-save');
+  if (personaSave) personaSave.textContent = t('savePersona');
+  const personaReload = document.getElementById('persona-reload');
+  if (personaReload) personaReload.textContent = t('discard');
+  const memSave = document.getElementById('mem-save');
+  if (memSave) memSave.textContent = t('save');
+  const memReload = document.getElementById('mem-reload');
+  if (memReload) memReload.textContent = t('discard');
+  const memRaw = document.getElementById('mem-raw-toggle');
+  if (memRaw) memRaw.textContent = t('rawMode');
+  const personaEditor = document.getElementById('persona-editor');
+  if (personaEditor) personaEditor.placeholder = t('personaPlaceholder');
+  const memEditor = document.getElementById('mem-editor');
+  if (memEditor) memEditor.placeholder = t('memPlaceholder');
+  const memNew = document.getElementById('mem-new-name');
+  if (memNew) memNew.placeholder = t('memNewPlaceholder');
+  const memNewBtn = document.getElementById('mem-new-btn');
+  if (memNewBtn) memNewBtn.title = t('memNewTitle');
+  const slotsHint = document.querySelector('.slots-hint');
+  if (slotsHint) slotsHint.textContent = t('slotsHint');
+  const slotAdd = document.getElementById('slot-add');
+  if (slotAdd) slotAdd.textContent = t('slotAdd');
+  const diaryOwner = document.getElementById('diary-owner');
+  if (diaryOwner) diaryOwner.textContent = t('diaryOwner');
+}
+window.addEventListener('storage', (e) => {
+  if (e.key === 'forgeax.locale' && (e.newValue === 'en' || e.newValue === 'zh')) {
+    onLocaleChanged(e.newValue);
+  }
+});
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.type !== 'forgeax:locale-changed') return;
+  onLocaleChanged(d.locale);
+});
+applyChrome();
 
 const channel = new BroadcastChannel('wb-agent-persona');
 
@@ -369,19 +542,12 @@ let personaDirty = false;
 
 // Memory state
 let memFiles = [];
-let memSelected = null;    // filename within memoryDir, or USER_PROFILE.id
+let memSelected = null;    // filename within memoryDir, or userProfile().id
 let memOriginal = '';      // 规范化后的 USER.md 原文(用于 dirty 比较)
 let memDirty = false;
 let memMode = 'text';      // 'slots'(用户画像结构化视图) | 'text'(自由文本)
 
 // 全局用户画像(USER.md)—— 与具体 agent 无关,固定置顶,所有 agent 详情页共享。
-// 由对话自动沉淀(auto-extract),也可在此手动编辑。读写走通用文件 API
-// (safe-path 已白名单 .forgeax/user)。
-const USER_PROFILE = { id: '__user_profile__', label: '用户画像', path: '.forgeax/user/USER.md' };
-
-// USER.md 行格式 = `- **<name>** — <body> <!-- k:<slug> -->`(与后端 user-profile.ts 同源)。
-const PROFILE_HEADER =
-  '# 用户画像\n\n> 由对话自动捕捉 + 可手动编辑。每条按 `key` 去重 upsert(末尾 `<!-- k:... -->` 是去重标记,勿删)。\n';
 const PROFILE_LINE_RE = /^- \*\*(.+?)\*\* — ([\s\S]*?)\s*<!-- k:([^\s]+) -->\s*$/;
 
 /** 与后端 slug() 同源:小写、空白转 -、去非字母数字、截断 48。 */
@@ -419,7 +585,7 @@ function serializeProfile(slots) {
   const lines = [...map.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([k, v]) => `- **${v.name}** — ${v.body} <!-- k:${k} -->`);
-  return `${PROFILE_HEADER}\n${lines.join('\n')}\n`;
+  return `${profileHeader()}\n${lines.join('\n')}\n`;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
@@ -439,7 +605,7 @@ function memoryDir(agent) {
 function pickLang(text) {
   if (!text) return '';
   if (typeof text === 'string') return text;
-  return text.zh ?? text.en ?? '';
+  return locale === 'en' ? (text.en ?? text.zh ?? '') : (text.zh ?? text.en ?? '');
 }
 
 // 统一命名：title=「中文职能·英文名」，sub=灰字英文职能。server 已算好挂 a.naming，
@@ -570,9 +736,9 @@ async function loadAgents() {
     const [aRes, wRes, wbAgRes] = await Promise.all([
       fetch('/api/bus/plugins?kind=agent'),
       fetch('/api/bus/plugins?kind=workbench'),
-      fetch('/api/workbench/agents?lang=zh'),
+      fetch(`/api/workbench/agents?lang=${locale}`),
     ]);
-    if (!aRes.ok) { setStatus('persona-status', `agent 列表加载失败: ${aRes.status}`, 'warn'); return; }
+    if (!aRes.ok) { setStatus('persona-status', t('agentListFailed', { status: aRes.status }), 'warn'); return; }
     agents = (await aRes.json()).items;
     workbenches = wRes.ok ? (await wRes.json()).items : [];
     if (wbAgRes.ok) {
@@ -708,8 +874,8 @@ for (const el of document.querySelectorAll('.tab')) {
 
 // ─── center pane: agent selected ──────────────────────────────────────
 async function selectAgent(pluginId) {
-  if (personaDirty && !confirm('Persona 编辑未保存，丢弃改动?')) return;
-  if (memDirty && !confirm('记忆文件未保存，丢弃改动?')) return;
+  if (personaDirty && !confirm(t('personaUnsaved'))) return;
+  if (memDirty && !confirm(t('memUnsaved'))) return;
   try { localStorage.setItem('wb-agent-persona:selected-agent-id', pluginId); } catch { /* private mode */ }
   selected = pluginId;
   selectedAgent = agents.find((a) => a.id === pluginId) ?? null;
@@ -861,7 +1027,7 @@ async function loadMemoryFiles() {
 function autoSelectMemory() {
   if (memSelected) return;
   const diary = memFiles.find((n) => n.replace(/\.md$/i, '').toLowerCase() === 'lessons');
-  const target = diary || memFiles[0] || USER_PROFILE.id;
+  const target = diary || memFiles[0] || userProfile().id;
   loadMemoryFile(target);
 }
 
@@ -897,7 +1063,7 @@ function renderMemFiles() {
   list.innerHTML = '';
   // 全局用户画像固定置顶（与当前 agent 无关），与文件项完全同样式。
   list.appendChild(
-    makeMemFileItem(USER_PROFILE.label, USER_PROFILE.id, { title: '全局用户画像 · 由对话自动沉淀,可手动编辑' }),
+    makeMemFileItem(userProfile().label, userProfile().id, { title: t('userProfileTitle') }),
   );
   // 轻量分隔(独立元素,不改变任一列表项的尺寸/hover)。
   const sep = document.createElement('div');
@@ -917,12 +1083,12 @@ function renderMemFiles() {
 }
 
 async function loadMemoryFile(name) {
-  if (memDirty && !confirm('未保存，丢弃改动?')) return;
+  if (memDirty && !confirm(t('unsavedDiscard'))) return;
   if (!selectedAgent) return;
-  const isProfile = name === USER_PROFILE.id;
+  const isProfile = name === userProfile().id;
   let path;
   if (isProfile) {
-    path = USER_PROFILE.path;
+    path = userProfile().path;
   } else {
     const memDir = memoryDir(selectedAgent);
     if (!memDir) return;
@@ -972,7 +1138,7 @@ function setMemMode(mode) {
   const diary = document.getElementById('mem-diary');
   const ed = document.getElementById('mem-editor');
   const toggle = document.getElementById('mem-raw-toggle');
-  const isProfile = memSelected === USER_PROFILE.id;
+  const isProfile = memSelected === userProfile().id;
   slots.style.display = mode === 'slots' ? 'flex' : 'none';
   diary.style.display = mode === 'diary' ? 'flex' : 'none';
   ed.style.display = mode === 'text' ? '' : 'none';
@@ -983,7 +1149,7 @@ function setMemMode(mode) {
 
 /** 当前编辑内容:用户画像槽位模式从 DOM 序列化;其余(画像源码模式 / 普通文件)取 textarea 原文。 */
 function currentMemContent() {
-  if (memSelected === USER_PROFILE.id && memMode === 'slots') {
+  if (memSelected === userProfile().id && memMode === 'slots') {
     return serializeProfile(readSlotsFromDom());
   }
   return document.getElementById('mem-editor').value;
@@ -1110,8 +1276,8 @@ function renderDiary(text) {
 async function saveMemory() {
   if (!selectedAgent || !memSelected) return;
   let path;
-  if (memSelected === USER_PROFILE.id) {
-    path = USER_PROFILE.path;
+  if (memSelected === userProfile().id) {
+    path = userProfile().path;
   } else {
     const memDir = memoryDir(selectedAgent);
     if (!memDir) return;
@@ -1134,7 +1300,7 @@ async function saveMemory() {
     memDirty = false;
     document.getElementById('mem-reload').disabled = true;
     // 用户画像保存后用规范化结果回填(去重/排序生效，槽位即时反映)。
-    if (memSelected === USER_PROFILE.id) {
+    if (memSelected === userProfile().id) {
       const slots = parseProfile(content);
       if (memMode === 'slots') renderSlots(slots);
       else document.getElementById('mem-editor').value = content;
@@ -1205,7 +1371,7 @@ document.getElementById('slot-add').addEventListener('click', () => {
 document.getElementById('mem-raw-toggle').addEventListener('click', () => {
   if (!memSelected) return;
   const ed = document.getElementById('mem-editor');
-  if (memSelected === USER_PROFILE.id) {
+  if (memSelected === userProfile().id) {
     if (memMode === 'slots') {
       ed.value = serializeProfile(readSlotsFromDom());
       ed.disabled = false;
@@ -1228,7 +1394,7 @@ document.getElementById('mem-raw-toggle').addEventListener('click', () => {
 // ─── Skills tab ───────────────────────────────────────────────────────
 function renderSkills() {
   const root = document.getElementById('skills-content');
-  if (!selectedAgent) { root.innerHTML = '<div class="empty">未选 agent</div>'; return; }
+  if (!selectedAgent) { root.innerHTML = `<div class="empty">${t('emptyNoAgent')}</div>`; return; }
 
   const a = selectedAgent.agent ?? {};
   const defaultSkills = Array.isArray(a.defaultSkills) ? a.defaultSkills : [];
@@ -1290,7 +1456,7 @@ function renderSkills() {
 // ─── Workbench tab ────────────────────────────────────────────────────
 function renderWorkbench() {
   const root = document.getElementById('workbench-content');
-  if (!selectedAgent) { root.innerHTML = '<div class="empty">未选 agent</div>'; return; }
+  if (!selectedAgent) { root.innerHTML = `<div class="empty">${t('emptyNoAgent')}</div>`; return; }
   const matches = workbenches.filter((w) => w.workbench?.preferredAgent === selectedAgent.id);
   if (matches.length === 0) {
     root.innerHTML = `

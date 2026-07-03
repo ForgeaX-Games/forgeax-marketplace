@@ -3,9 +3,12 @@ import {
   iconLabelsFromModuleSpecs,
   resolveIconSlotCount,
 } from './icon-semantics'
+import { localizedModuleLabel, localizedScreenLabel, localizedStyleLabel, localizedStyleReason, localizedAssetKindLabel, localizedComponentStepLabel } from './model-i18n'
 
 export const STORAGE_KEY = 'character-editor:ui-design-state'
 export const RUNTIME_STORAGE_KEY = 'character-editor:ui-design-runtime'
+/** 上一轮五步流程已跑完；下次打开 UI 工坊应自动从第 1 步重来。 */
+export const CYCLE_COMPLETE_KEY = 'character-editor:ui-design-cycle-complete'
 
 export interface UiDesignRuntimeSnapshot {
   version: 1
@@ -90,7 +93,15 @@ export type FontFlavorId = 'modern' | 'fantasy' | 'arcade' | 'clean'
 export type UISurfaceId = 'glass' | 'metal' | 'painted' | 'minimal'
 export type DensityId = 'airy' | 'balanced' | 'dense'
 export type ModuleLayerId = 'permanent-hud' | 'context-hud' | 'active-menu' | 'depth-settings'
-export type AssetKindId = 'buttonNormal' | 'buttonPrimary' | 'titleDeco' | 'panelTexture' | 'icons' | 'background'
+export type AssetKindId =
+  | 'buttonNormal'
+  | 'buttonPrimary'
+  | 'buttonNormalLong'
+  | 'buttonPrimaryLong'
+  | 'titleDeco'
+  | 'panelTexture'
+  | 'icons'
+  | 'background'
 export type WorkflowStepId =
   | 'genre'
   | 'layout'
@@ -257,6 +268,8 @@ export interface ComponentVerificationStep {
 export interface StyleAssetPreview {
   buttonPrimary?: string
   buttonNormal?: string
+  buttonPrimaryLong?: string
+  buttonNormalLong?: string
   titleDeco?: string
   panelTexture?: string
   icon?: string
@@ -276,13 +289,20 @@ export interface StyleAssetHistoryItem {
   preview?: StyleAssetPreview
 }
 
+
 export const ASSET_KIND_LABELS: Record<AssetKindId, string> = {
   buttonNormal: '次按钮',
   buttonPrimary: '主按钮',
+  buttonNormalLong: '长选项次按钮',
+  buttonPrimaryLong: '长选项主按钮',
   titleDeco: '标题条',
   panelTexture: '面板纹理',
   icons: '图标组',
   background: '背景',
+}
+
+export function assetKindLabel(kind: AssetKindId): string {
+  return localizedAssetKindLabel(kind, ASSET_KIND_LABELS[kind])
 }
 
 export const COMPONENT_VERIFICATION_STEPS: ComponentVerificationStep[] = [
@@ -719,12 +739,16 @@ export {
   resolveIconSlotCount,
 } from './icon-semantics'
 
+function specsNeedDialogStrip(specs: ModuleAssetSpec[]): boolean {
+  return specs.some(spec => spec.id === 'dialog-box' || spec.id === 'modal-dialog')
+}
+
 const DEFAULT_COMPONENT_LIBRARY_STEPS: ComponentLibraryStep[] = [
-  { kind: 'buttonPrimary', label: '主按钮' },
-  { kind: 'buttonNormal', label: '次按钮' },
-  { kind: 'titleDeco', label: '标题条' },
-  { kind: 'panelTexture', label: '面板纹理' },
-  { kind: 'icons', label: '图标组' },
+  { kind: 'buttonPrimary', label: localizedAssetKindLabel('buttonPrimary', '主按钮') },
+  { kind: 'buttonNormal', label: localizedAssetKindLabel('buttonNormal', '次按钮') },
+  { kind: 'titleDeco', label: localizedAssetKindLabel('titleDeco', '标题条') },
+  { kind: 'panelTexture', label: localizedAssetKindLabel('panelTexture', '面板纹理') },
+  { kind: 'icons', label: localizedAssetKindLabel('icons', '图标组') },
 ]
 
 function specsNeedButtons(specs: ModuleAssetSpec[]): boolean {
@@ -751,28 +775,32 @@ export function buildComponentLibrarySteps(
   const steps: ComponentLibraryStep[] = []
   const buttonModules = specs
     .filter(spec => spec.assetRoles.includes('button-base') || spec.assetRoles.includes('tab'))
-    .map(spec => spec.label)
+    .map(spec => localizedModuleLabel(spec.id, spec.label))
     .slice(0, 3)
   const panelModules = specs
     .filter(spec => spec.assetRoles.some(role => role === 'panel' || role === 'card' || role === 'modal-panel' || role === 'list-row' || role === 'bar'))
-    .map(spec => spec.label)
+    .map(spec => localizedModuleLabel(spec.id, spec.label))
     .slice(0, 4)
   const iconLabels = iconLabelsFromModuleSpecs(specs)
 
   if (specsNeedButtons(specs)) {
-    const hint = buttonModules.length > 0 ? `（${buttonModules.join('、')}）` : ''
-    steps.push({ kind: 'buttonPrimary', label: `主按钮${hint}` })
-    steps.push({ kind: 'buttonNormal', label: `次按钮${hint}` })
+    const hint = buttonModules.slice(0, 3)
+    steps.push({ kind: 'buttonPrimary', label: localizedComponentStepLabel('buttonPrimary', hint) })
+    steps.push({ kind: 'buttonNormal', label: localizedComponentStepLabel('buttonNormal', hint) })
+  }
+  if (specsNeedDialogStrip(specs)) {
+    steps.push({ kind: 'buttonPrimaryLong', label: localizedComponentStepLabel('buttonPrimaryLong', []) })
+    steps.push({ kind: 'buttonNormalLong', label: localizedComponentStepLabel('buttonNormalLong', []) })
   }
   if (specsNeedPanels(specs)) {
-    const hint = panelModules.length > 0 ? `（${panelModules.slice(0, 2).join('、')}）` : ''
-    steps.push({ kind: 'titleDeco', label: `标题条${hint}` })
-    steps.push({ kind: 'panelTexture', label: `面板纹理${hint}` })
+    const hint = panelModules.slice(0, 2)
+    steps.push({ kind: 'titleDeco', label: localizedComponentStepLabel('titleDeco', hint) })
+    steps.push({ kind: 'panelTexture', label: localizedComponentStepLabel('panelTexture', hint) })
   }
   if (specsNeedIcons(specs)) {
     const count = resolveIconSlotCount(specs)
-    const hint = iconLabels.length > 0 ? `（${iconLabels.slice(0, 3).join('、')}）` : ''
-    steps.push({ kind: 'icons', label: `功能图标 ${count} 个${hint}` })
+    const hint = iconLabels.slice(0, 3)
+    steps.push({ kind: 'icons', label: localizedComponentStepLabel('icons', hint, count) })
   }
 
   return steps.length > 0 ? steps : [...DEFAULT_COMPONENT_LIBRARY_STEPS]
@@ -783,7 +811,7 @@ export function resolveStyleBoardSectionsForLayout(
   selectedFeatures: string[],
 ): StyleBoardSection[] {
   const selected = confirmedLayoutFeatureIds(genre, selectedFeatures)
-  const labelFor = (id: string): string => FEATURE_MAP.get(id)?.label ?? id
+  const labelFor = (id: string): string => localizedModuleLabel(id, FEATURE_MAP.get(id)?.label ?? id)
   return getStyleBoardSections(genre).filter(section => {
     if (section.id === 'buttons' || section.id === 'panels' || section.id === 'icons') return false
     return SECTION_FEATURE_HINTS[section.id].some(id => selected.has(id))
@@ -1277,9 +1305,10 @@ function uniqueIds(ids: string[]): string[] {
 
 function makePriorityModule(id: string, priority: ModulePriority): PriorityModule {
   const module = FEATURE_MAP.get(id)
+  const zh = module?.label ?? id
   return {
     id,
-    label: module?.label ?? id,
+    label: localizedModuleLabel(id, zh),
     priority,
     isRequired: priority === 'required',
     defaultOn: priority !== 'optional',
@@ -1308,7 +1337,11 @@ export function recommendedFeatures(state: UIDesignState): string[] {
 
 /** PDF Step 1 — ordered screen flow for a given genre */
 export function getScreenFlow(genre: GenrePresetId): ScreenFlow {
-  return SCREEN_FLOWS[genre] ?? SCREEN_FLOWS['open-world']
+  const flow = SCREEN_FLOWS[genre] ?? SCREEN_FLOWS['open-world']
+  return flow.map(node => ({
+    ...node,
+    label: localizedScreenLabel(genre, node.kind, node.label),
+  }))
 }
 
 /** PDF Step 2 — module priority set（Skill 屏幕矩阵 + 通用 start/pause/results/end 回退） */
@@ -1346,7 +1379,14 @@ export function mergeScreenBaselineIntoSelection(
 
 /** PDF Step 3 — 2-3 recommended styles for a given genre */
 export function recommendedStyles(genre: GenrePresetId): StyleRecommendation[] {
-  return STYLE_RECOMMENDATIONS[genre] ?? []
+  return (STYLE_RECOMMENDATIONS[genre] ?? []).map(rec => {
+    const style = localizedStyleLabel(rec.id, rec.label, STYLE_PRESETS.find(s => s.id === rec.id)?.tone ?? '')
+    return {
+      ...rec,
+      label: style.label,
+      reason: localizedStyleReason(genre, rec.id, rec.reason),
+    }
+  })
 }
 
 const STYLE_BOARD_BASE: StyleBoardSection[] = [
@@ -1939,6 +1979,8 @@ export function hydrateState(raw: unknown): UIDesignState {
         assets: isRecord(item.assets) ? {
           buttonPrimary: typeof item.assets.buttonPrimary === 'string' ? item.assets.buttonPrimary : undefined,
           buttonNormal: typeof item.assets.buttonNormal === 'string' ? item.assets.buttonNormal : undefined,
+          buttonPrimaryLong: typeof item.assets.buttonPrimaryLong === 'string' ? item.assets.buttonPrimaryLong : undefined,
+          buttonNormalLong: typeof item.assets.buttonNormalLong === 'string' ? item.assets.buttonNormalLong : undefined,
           titleDeco: typeof item.assets.titleDeco === 'string' ? item.assets.titleDeco : undefined,
           panelTexture: typeof item.assets.panelTexture === 'string' ? item.assets.panelTexture : undefined,
           icon: typeof item.assets.icon === 'string' ? item.assets.icon : undefined,
@@ -1949,6 +1991,8 @@ export function hydrateState(raw: unknown): UIDesignState {
         preview: isRecord(item.preview) ? {
           buttonPrimary: typeof item.preview.buttonPrimary === 'string' ? item.preview.buttonPrimary : undefined,
           buttonNormal: typeof item.preview.buttonNormal === 'string' ? item.preview.buttonNormal : undefined,
+          buttonPrimaryLong: typeof item.preview.buttonPrimaryLong === 'string' ? item.preview.buttonPrimaryLong : undefined,
+          buttonNormalLong: typeof item.preview.buttonNormalLong === 'string' ? item.preview.buttonNormalLong : undefined,
           titleDeco: typeof item.preview.titleDeco === 'string' ? item.preview.titleDeco : undefined,
           panelTexture: typeof item.preview.panelTexture === 'string' ? item.preview.panelTexture : undefined,
           icon: typeof item.preview.icon === 'string' ? item.preview.icon : undefined,
@@ -1962,7 +2006,7 @@ export function hydrateState(raw: unknown): UIDesignState {
   if (Array.isArray(raw.lockedAssetKinds)) {
     next.lockedAssetKinds = raw.lockedAssetKinds
       .filter((item): item is AssetKindId => typeof item === 'string'
-        && ['buttonNormal', 'buttonPrimary', 'titleDeco', 'panelTexture', 'icons', 'background'].includes(item))
+        && ['buttonNormal', 'buttonPrimary', 'buttonNormalLong', 'buttonPrimaryLong', 'titleDeco', 'panelTexture', 'icons', 'background'].includes(item))
   }
   if (next.selectedFeatures.length === 0) {
     next.selectedFeatures = recommendedFeatures(next)
@@ -2208,6 +2252,8 @@ export function loadRuntimeSnapshot(): UiDesignRuntimeSnapshot | null {
           : [],
         buttonNormal: typeof parsed.liveAssets?.buttonNormal === 'string' ? parsed.liveAssets.buttonNormal : undefined,
         buttonPrimary: typeof parsed.liveAssets?.buttonPrimary === 'string' ? parsed.liveAssets.buttonPrimary : undefined,
+        buttonNormalLong: typeof parsed.liveAssets?.buttonNormalLong === 'string' ? parsed.liveAssets.buttonNormalLong : undefined,
+        buttonPrimaryLong: typeof parsed.liveAssets?.buttonPrimaryLong === 'string' ? parsed.liveAssets.buttonPrimaryLong : undefined,
         titleDeco: typeof parsed.liveAssets?.titleDeco === 'string' ? parsed.liveAssets.titleDeco : undefined,
         panelTexture: typeof parsed.liveAssets?.panelTexture === 'string' ? parsed.liveAssets.panelTexture : undefined,
       },
@@ -2231,4 +2277,41 @@ export function clearRuntimeSnapshot(): void {
 export function wipePersistedSession(): void {
   clearRuntimeSnapshot()
   saveState(createDefaultState())
+}
+
+export function markWorkflowCycleComplete(): void {
+  try {
+    localStorage.setItem(CYCLE_COMPLETE_KEY, String(Date.now()))
+  } catch {
+    // Ignore persistence failures in sandbox/dev.
+  }
+}
+
+export function hasPendingWorkflowCycleComplete(): boolean {
+  try {
+    return localStorage.getItem(CYCLE_COMPLETE_KEY) != null
+  } catch {
+    return false
+  }
+}
+
+export function clearWorkflowCycleComplete(): void {
+  try {
+    localStorage.removeItem(CYCLE_COMPLETE_KEY)
+  } catch {
+    // Ignore persistence failures in sandbox/dev.
+  }
+}
+
+/** 上一轮已生成可交互原型（旧会话无 cycle 标记时的兜底判定）。 */
+export function isCompletedWorkflowSession(
+  state: UIDesignState,
+  runtime: UiDesignRuntimeSnapshot | null,
+): boolean {
+  return Boolean(
+    runtime?.prototypeHTML
+    && state.layoutApproved
+    && state.styleBoardApproved
+    && state.workflowStep === 'prototype',
+  )
 }

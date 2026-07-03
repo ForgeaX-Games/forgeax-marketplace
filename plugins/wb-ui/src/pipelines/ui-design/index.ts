@@ -25,10 +25,14 @@ import {
   saveState,
   saveRuntimeSnapshot,
   loadRuntimeSnapshot,
+  markWorkflowCycleComplete,
+  hasPendingWorkflowCycleComplete,
+  clearWorkflowCycleComplete,
+  isCompletedWorkflowSession,
   clearRuntimeSnapshot,
   wipePersistedSession,
   type UiDesignRuntimeSnapshot,
-  ASSET_KIND_LABELS,
+  assetKindLabel,
   type AssetKindId,
   type ComponentLibraryStep,
   type GenrePresetId,
@@ -42,6 +46,7 @@ import {
   type UIDesignState,
   type WorkflowStepId,
 } from './model'
+import { localizedGenreField, localizedModuleLabel, localizedStyleLabel } from './model-i18n'
 import { getLayoutSpec } from './layout-engine'
 import {
   renderLayoutPreviewFromSpec,
@@ -51,8 +56,18 @@ import {
   GENRE_PROTO_WIRE_SCRIPT,
   WORKBENCH_LAYOUT_SCENE_CSS,
 } from './layout-templates'
-import { buildPrototypeChromeCss } from './prototype-assets'
+import {
+  buildPreviewButtonChromeCss,
+  inlineButtonChromeStyle,
+  inlineButtonChromeStylePrimary,
+  inlineButtonChromeStyleLong,
+  inlineButtonChromeStylePrimaryLong,
+  inlineLongStripMatViewStyle,
+} from './button-chrome-css'
+import { buildPreviewPanelFrameCss, inlinePanelFrameStyle } from './panel-chrome-css'
+import { buildPrototypeChromeCss, buildProtoGenreShellGateClasses } from './prototype-assets'
 import { createUiGenerationNonce } from './ui-design-generation-nonce'
+import { initLocaleSync, onLocaleChange, t, workflowSteps } from '../../i18n'
 
 const CSS_ID = 'ui-design-pipeline-css'
 
@@ -65,6 +80,8 @@ interface GeneratedAssets {
   icons: string[]
   buttonNormal?: string
   buttonPrimary?: string
+  buttonNormalLong?: string
+  buttonPrimaryLong?: string
   titleDeco?: string
 }
 
@@ -72,6 +89,8 @@ interface GeneratedAssets {
 const PARALLEL_CHROME_ASSET_KINDS = new Set<AssetKindId>([
   'buttonPrimary',
   'buttonNormal',
+  'buttonPrimaryLong',
+  'buttonNormalLong',
   'titleDeco',
   'panelTexture',
 ])
@@ -80,7 +99,7 @@ const CHROME_GENERATION_CONCURRENCY = 3
 /** 功能图标按槽位并行生成 */
 const ICON_GENERATION_CONCURRENCY = 3
 /** 组件素材单请求超时：避免某一路挂死后进度永远卡住 */
-const COMPONENT_ASSET_REQUEST_TIMEOUT_MS = 45_000
+const COMPONENT_ASSET_REQUEST_TIMEOUT_MS = 90_000
 /** 布局/原型场景背景单请求超时 */
 const PREVIEW_BG_REQUEST_TIMEOUT_MS = 30_000
 /** 原型生成前并行预拉背景：单屏最多等待这么久，超时则用 CSS 占位先出原型 */
@@ -149,13 +168,7 @@ const SCREEN_TO_PREVIEW: Partial<Record<ScreenKind, PreviewModeId>> = {
   shop: 'shop',
 }
 
-const WORKFLOW_STEPS: Array<{ id: WorkflowStepId; label: string }> = [
-  { id: 'genre', label: '游戏类型' },
-  { id: 'layout', label: '布局验证' },
-  { id: 'style', label: '风格与组件生成' },
-  { id: 'component-preview', label: '素材微调' },
-  { id: 'prototype', label: '生成可交互原型' },
-]
+const WORKFLOW_STEPS = workflowSteps
 
 function esc(value: string): string {
   return value
@@ -171,7 +184,7 @@ function cls(...names: (string | false | undefined)[]): string {
 }
 
 class UIDesignPipelineUI {
-  // 工作流状态持久化到 localStorage；切换工作台后通过 restorePersistedSession 恢复。
+  // 工作流持久化到 localStorage；切换工作台可恢复，完整跑完一轮后自动开新轮。
   private state: UIDesignState = loadState()
   private left: HTMLElement | null = null
   private panels: PipelinePanels | null = null
@@ -190,6 +203,8 @@ class UIDesignPipelineUI {
     icons: string[]
     buttonNormal?: string
     buttonPrimary?: string
+    buttonNormalLong?: string
+    buttonPrimaryLong?: string
     titleDeco?: string
   } = { icons: [] }
   /** liveAssets 是否已在拉取中 */
@@ -224,6 +239,7 @@ class UIDesignPipelineUI {
   } | null = null
   /** 进入后续步骤被拦截时给用户的明确提示 */
   private workflowGateNotice: string | null = null
+  private unsubLocale: (() => void) | null = null
   /** 下一次 render 后需要滚动聚焦的字段，用于“微调素材”入口 */
   private pendingFocusField: 'styleBoardPrompt' | 'assetPromptNotes' | null = null
   /** 第2步模块点选反馈：用于让“新增/移除”有明确可视回执 */
@@ -246,6 +262,44 @@ class UIDesignPipelineUI {
   private documentActionBindingAbort: AbortController | null = null
   /** 本轮组件库生成步骤（由第二步选中模块推导） */
   private activeComponentLibrarySteps: ComponentLibraryStep[] = []
+  /** 预览 DOM 用 blob: URL，避免多个 data URL 堆在同一 style 上超出浏览器限制 */
+  private chromeDisplayUrlCache = new Map<string, string>()
+
+  private displayUrlForAsset(cacheKey: string, dataUrl: string | undefined): string | undefined {
+    if (!dataUrl) return undefined
+    const prev = this.chromeDisplayUrlCache.get(cacheKey)
+    if (prev) URL.revokeObjectURL(prev)
+    if (dataUrl.startsWith('blob:')) {
+      this.chromeDisplayUrlCache.set(cacheKey, dataUrl)
+      return dataUrl
+    }
+    try {
+      const comma = dataUrl.indexOf(',')
+      if (comma < 0) return dataUrl
+      const header = dataUrl.slice(0, comma)
+      const b64 = dataUrl.slice(comma + 1)
+      const mime = header.match(/^data:([^;,]+)/)?.[1] ?? 'image/png'
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }))
+      this.chromeDisplayUrlCache.set(cacheKey, blobUrl)
+      return blobUrl
+    } catch {
+      return dataUrl
+    }
+  }
+
+  private revokeChromeDisplayUrls(): void {
+    for (const url of this.chromeDisplayUrlCache.values()) {
+      URL.revokeObjectURL(url)
+    }
+    this.chromeDisplayUrlCache.clear()
+  }
+
+  private escCssUrl(url: string): string {
+    return url.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  }
 
   private getComponentLibrarySteps(): ComponentLibraryStep[] {
     if (this.activeComponentLibrarySteps.length > 0) return this.activeComponentLibrarySteps
@@ -348,10 +402,13 @@ class UIDesignPipelineUI {
 
   mount(container: HTMLElement, panels: PipelinePanels): void {
     injectCSS()
+    initLocaleSync()
+    this.unsubLocale?.()
+    this.unsubLocale = onLocaleChange(() => this.render())
     this.left = container
     this.panels = panels
     this.setupStateSync()
-    this.acceptPersistedSessionOnThisLoad = !this.shouldStartFreshSession()
+    this.acceptPersistedSessionOnThisLoad = this.shouldRestorePersistedSession()
     if (this.acceptPersistedSessionOnThisLoad) {
       this.restorePersistedSession()
       this.stateChannel?.postMessage({
@@ -374,8 +431,11 @@ class UIDesignPipelineUI {
   }
 
   unmount(): void {
+    this.unsubLocale?.()
+    this.unsubLocale = null
     this.flushRuntimeSnapshot()
     this.stopLoadingProgressPulse()
+    this.revokeChromeDisplayUrls()
     this.actionBindingAbort?.abort()
     this.actionBindingAbort = null
     this.documentActionBindingAbort?.abort()
@@ -403,13 +463,27 @@ class UIDesignPipelineUI {
   }
 
   private beginFreshSession(): void {
+    this.clearWorkflowRuntime()
+  }
+
+  /** 第五步原型生成成功后：左侧从第 1 步重来，中央继续展示刚生成的原型。 */
+  private beginNewWorkflowCycleAfterPrototypeSuccess(): void {
+    markWorkflowCycleComplete()
+    this.clearWorkflowRuntime({ keepPrototype: true })
+    this.flushRuntimeSnapshot()
+    this.broadcastState()
+  }
+
+  private clearWorkflowRuntime(options: { keepPrototype?: boolean } = {}): void {
+    const keepPrototype = options.keepPrototype ?? false
+    const keptPrototype = keepPrototype ? this.prototypeHTML : null
     this.stopLoadingProgressPulse()
     wipePersistedSession()
     this.state = loadState()
     this.bgCacheKey = `${this.state.genrePreset}::${this.state.style}`
     this.activeScreen = 'start'
     this.genreSelectionConfirmed = false
-    this.prototypeHTML = null
+    this.prototypeHTML = keptPrototype
     this.previewBg = {}
     this.bgLoading.clear()
     this.liveAssets = { icons: [] }
@@ -524,6 +598,8 @@ class UIDesignPipelineUI {
         icons: [...this.liveAssets.icons],
         buttonNormal: this.liveAssets.buttonNormal,
         buttonPrimary: this.liveAssets.buttonPrimary,
+        buttonNormalLong: this.liveAssets.buttonNormalLong,
+        buttonPrimaryLong: this.liveAssets.buttonPrimaryLong,
         titleDeco: this.liveAssets.titleDeco,
         panelTexture: this.liveAssets.panelTexture,
       },
@@ -559,10 +635,13 @@ class UIDesignPipelineUI {
       this.prototypeHTML = runtime.prototypeHTML
       this.previewBg = { ...runtime.previewBg }
       if (runtime.liveAssets.icons.length > 0 || runtime.liveAssets.buttonNormal || runtime.liveAssets.buttonPrimary
+        || runtime.liveAssets.buttonNormalLong || runtime.liveAssets.buttonPrimaryLong
         || runtime.liveAssets.titleDeco || runtime.liveAssets.panelTexture) {
         this.liveAssets.icons = this.ensureIconSlots(Math.max(runtime.liveAssets.icons.length, this.getIconSlotCount()))
         if (runtime.liveAssets.buttonNormal) this.liveAssets.buttonNormal = runtime.liveAssets.buttonNormal
         if (runtime.liveAssets.buttonPrimary) this.liveAssets.buttonPrimary = runtime.liveAssets.buttonPrimary
+        if (runtime.liveAssets.buttonNormalLong) this.liveAssets.buttonNormalLong = runtime.liveAssets.buttonNormalLong
+        if (runtime.liveAssets.buttonPrimaryLong) this.liveAssets.buttonPrimaryLong = runtime.liveAssets.buttonPrimaryLong
         if (runtime.liveAssets.titleDeco) this.liveAssets.titleDeco = runtime.liveAssets.titleDeco
         if (runtime.liveAssets.panelTexture) this.liveAssets.panelTexture = runtime.liveAssets.panelTexture
         runtime.liveAssets.icons.forEach((src, index) => {
@@ -577,6 +656,18 @@ class UIDesignPipelineUI {
       this.genreSelectionConfirmed = true
     }
     this.syncActiveScreen()
+  }
+
+  private shouldRestorePersistedSession(): boolean {
+    if (this.shouldStartFreshSession()) return false
+    if (hasPendingWorkflowCycleComplete()) {
+      clearWorkflowCycleComplete()
+      return false
+    }
+    const persisted = loadState()
+    const runtime = loadRuntimeSnapshot()
+    if (isCompletedWorkflowSession(persisted, runtime)) return false
+    return true
   }
 
   private shouldStartFreshSession(): boolean {
@@ -627,7 +718,15 @@ class UIDesignPipelineUI {
       this.previewBg = {}
       this.bgLoading.clear()
       this.bgCacheKey = newKey
-      this.liveAssets = { icons: [], buttonNormal: undefined, buttonPrimary: undefined, titleDeco: undefined, panelTexture: undefined }
+      this.liveAssets = {
+        icons: [],
+        buttonNormal: undefined,
+        buttonPrimary: undefined,
+        buttonNormalLong: undefined,
+        buttonPrimaryLong: undefined,
+        titleDeco: undefined,
+        panelTexture: undefined,
+      }
       this.liveAssetsLoading = false
       this.componentPreviewError = null
       this.componentLibraryAutoRequestKey = ''
@@ -773,13 +872,13 @@ class UIDesignPipelineUI {
       this.genreSelectionConfirmed = true
     }
     if (step !== 'genre' && !this.hasStartedLayoutWorkflow()) {
-      this.workflowGateNotice = '请先在第 1 步选择游戏类型，然后再配置页面布局。'
+      this.workflowGateNotice = t('gate.selectGenre')
       this.collapsedWorkflowSections.delete('genre')
       this.setState({ ...this.state, workflowStep: 'genre' })
       return
     }
     if (!this.canEnterComponentWorkflow(step)) {
-      this.workflowGateNotice = '请先完成第 1 步游戏类型，并在第 2 步点击「确认布局」后，再进入风格选择与组件生成。'
+      this.workflowGateNotice = t('gate.confirmLayoutForStyle')
       this.collapsedWorkflowSections.delete('layout')
       this.setState({ ...this.state, workflowStep: 'layout' })
       return
@@ -830,8 +929,8 @@ class UIDesignPipelineUI {
   }
 
   private nextStep(): void {
-    const idx = WORKFLOW_STEPS.findIndex(step => step.id === this.state.workflowStep)
-    const next = WORKFLOW_STEPS[idx + 1]
+    const idx = WORKFLOW_STEPS().findIndex(step => step.id === this.state.workflowStep)
+    const next = WORKFLOW_STEPS()[idx + 1]
     if (next) this.goToStep(next.id)
   }
 
@@ -870,8 +969,8 @@ class UIDesignPipelineUI {
     if (!this.allLayoutScreensReviewed()) {
       const flow = getScreenFlow(this.state.genrePreset)
       const pending = flow.filter(screen => !this.layoutReviewedScreens.has(this.layoutScreenKey(screen.kind)))
-      const label = pending[0]?.label ?? '未确认页面'
-      this.workflowGateNotice = `还有 ${pending.length} 个页面未确认，请先完成「${label}」并点击「确认本页」。`
+      const label = pending[0]?.label ?? t('layout.unconfirmedPage')
+      this.workflowGateNotice = t('gate.pendingPages', { count: String(pending.length), label })
       this.collapsedWorkflowSections.delete('layout')
       this.render()
       return
@@ -1026,7 +1125,7 @@ class UIDesignPipelineUI {
     event.preventDefault()
     event.stopImmediatePropagation()
     if (btn.hasAttribute('disabled') || btn.dataset.uidDisabled === 'true') {
-      this.workflowGateNotice = '请先完成前两步：选择游戏类型，并在第 2 步确认布局后才能生成组件素材。'
+      this.workflowGateNotice = t('gate.needTwoSteps')
       this.setState({ ...this.state, workflowStep: 'layout' })
       return true
     }
@@ -1042,7 +1141,7 @@ class UIDesignPipelineUI {
       return
     }
     if (!this.state.layoutApproved) {
-      this.workflowGateNotice = '请先完成前两步：选择游戏类型，并在第 2 步确认布局后才能生成组件素材。'
+      this.workflowGateNotice = t('gate.needTwoSteps')
       this.setState({ ...this.state, workflowStep: 'layout' })
       return
     }
@@ -1098,12 +1197,17 @@ class UIDesignPipelineUI {
     })
   }
 
-  private applyHistoryAssetKinds(packId: string, kinds: Array<'buttonPrimary' | 'buttonNormal' | 'titleDeco' | 'panelTexture' | 'icons'>): void {
+  private applyHistoryAssetKinds(
+    packId: string,
+    kinds: Array<'buttonPrimary' | 'buttonNormal' | 'buttonPrimaryLong' | 'buttonNormalLong' | 'titleDeco' | 'panelTexture' | 'icons'>,
+  ): void {
     const pack = this.state.assetHistory.find(item => item.id === packId)
     const assets = pack?.assets ?? pack?.preview
     if (!assets) return
     if (kinds.includes('buttonPrimary') && assets.buttonPrimary) this.liveAssets.buttonPrimary = assets.buttonPrimary
     if (kinds.includes('buttonNormal') && assets.buttonNormal) this.liveAssets.buttonNormal = assets.buttonNormal
+    if (kinds.includes('buttonPrimaryLong') && assets.buttonPrimaryLong) this.liveAssets.buttonPrimaryLong = assets.buttonPrimaryLong
+    if (kinds.includes('buttonNormalLong') && assets.buttonNormalLong) this.liveAssets.buttonNormalLong = assets.buttonNormalLong
     if (kinds.includes('titleDeco') && assets.titleDeco) this.liveAssets.titleDeco = assets.titleDeco
     if (kinds.includes('panelTexture') && assets.panelTexture) this.liveAssets.panelTexture = assets.panelTexture
     if (kinds.includes('icons')) {
@@ -1167,6 +1271,8 @@ class UIDesignPipelineUI {
     if (!assets) return
     if (assets.buttonPrimary) this.liveAssets.buttonPrimary = assets.buttonPrimary
     if (assets.buttonNormal) this.liveAssets.buttonNormal = assets.buttonNormal
+    if (assets.buttonPrimaryLong) this.liveAssets.buttonPrimaryLong = assets.buttonPrimaryLong
+    if (assets.buttonNormalLong) this.liveAssets.buttonNormalLong = assets.buttonNormalLong
     if (assets.titleDeco) this.liveAssets.titleDeco = assets.titleDeco
     if (assets.panelTexture) this.liveAssets.panelTexture = assets.panelTexture
     const icons = assets.icons?.length ? assets.icons : (assets.icon ? [assets.icon] : [])
@@ -1194,6 +1300,14 @@ class UIDesignPipelineUI {
       this.liveAssets.buttonNormal = assets.buttonNormal
       changed = true
     }
+    if (assets.buttonPrimaryLong && !this.liveAssets.buttonPrimaryLong) {
+      this.liveAssets.buttonPrimaryLong = assets.buttonPrimaryLong
+      changed = true
+    }
+    if (assets.buttonNormalLong && !this.liveAssets.buttonNormalLong) {
+      this.liveAssets.buttonNormalLong = assets.buttonNormalLong
+      changed = true
+    }
     if (assets.titleDeco && !this.liveAssets.titleDeco) {
       this.liveAssets.titleDeco = assets.titleDeco
       changed = true
@@ -1215,10 +1329,13 @@ class UIDesignPipelineUI {
 
   /** 开始分步生成前清空 chrome，避免第 1 步完成后 hasFull 误判并提前结束进度 UI */
   private clearComponentLibraryLiveAssets(): void {
+    this.revokeChromeDisplayUrls()
     this.liveAssets = {
       icons: [],
       buttonNormal: undefined,
       buttonPrimary: undefined,
+      buttonNormalLong: undefined,
+      buttonPrimaryLong: undefined,
       titleDeco: undefined,
       panelTexture: undefined,
     }
@@ -1228,6 +1345,8 @@ class UIDesignPipelineUI {
     if (!assets) return
     if (assets.buttonNormal) this.liveAssets.buttonNormal = assets.buttonNormal
     if (assets.buttonPrimary) this.liveAssets.buttonPrimary = assets.buttonPrimary
+    if (assets.buttonNormalLong) this.liveAssets.buttonNormalLong = assets.buttonNormalLong
+    if (assets.buttonPrimaryLong) this.liveAssets.buttonPrimaryLong = assets.buttonPrimaryLong
     if (assets.titleDeco) this.liveAssets.titleDeco = assets.titleDeco
     if (assets.panelTexture) this.liveAssets.panelTexture = assets.panelTexture
     if (Array.isArray(assets.icons)) {
@@ -1266,6 +1385,22 @@ class UIDesignPipelineUI {
     }
     if (token === 'buttonNormal' && this.liveAssets.buttonNormal) {
       return { title: '次按钮', src: this.liveAssets.buttonNormal }
+    }
+    if (token === 'buttonPrimaryLong') {
+      if (this.liveAssets.buttonPrimaryLong) {
+        return { title: '长选项主按钮', src: this.liveAssets.buttonPrimaryLong }
+      }
+      if (this.liveAssets.buttonPrimary) {
+        return { title: '长选项主按钮（暂用菜单底图）', src: this.liveAssets.buttonPrimary }
+      }
+    }
+    if (token === 'buttonNormalLong') {
+      if (this.liveAssets.buttonNormalLong) {
+        return { title: '长选项次按钮', src: this.liveAssets.buttonNormalLong }
+      }
+      if (this.liveAssets.buttonNormal) {
+        return { title: '长选项次按钮（暂用菜单底图）', src: this.liveAssets.buttonNormal }
+      }
     }
     if (token === 'panelTexture' && this.liveAssets.panelTexture) {
       return { title: '面板底纹', src: this.liveAssets.panelTexture }
@@ -1317,6 +1452,20 @@ class UIDesignPipelineUI {
     if (stepKinds.has('buttonNormal') && this.liveAssets.buttonNormal) {
       items.push({ token: 'buttonNormal', title: '次按钮', src: this.liveAssets.buttonNormal })
     }
+    if (stepKinds.has('buttonPrimaryLong') && (this.liveAssets.buttonPrimaryLong || this.liveAssets.buttonPrimary)) {
+      items.push({
+        token: 'buttonPrimaryLong',
+        title: this.liveAssets.buttonPrimaryLong ? '长选项主按钮' : '长选项主按钮（暂用菜单底图）',
+        src: this.liveAssets.buttonPrimaryLong ?? this.liveAssets.buttonPrimary!,
+      })
+    }
+    if (stepKinds.has('buttonNormalLong') && (this.liveAssets.buttonNormalLong || this.liveAssets.buttonNormal)) {
+      items.push({
+        token: 'buttonNormalLong',
+        title: this.liveAssets.buttonNormalLong ? '长选项次按钮' : '长选项次按钮（暂用菜单底图）',
+        src: this.liveAssets.buttonNormalLong ?? this.liveAssets.buttonNormal!,
+      })
+    }
     if (stepKinds.has('panelTexture') && this.liveAssets.panelTexture) {
       items.push({ token: 'panelTexture', title: '面板底纹', src: this.liveAssets.panelTexture })
     }
@@ -1349,7 +1498,12 @@ class UIDesignPipelineUI {
   private openComponentAssetLightbox(kind: 'asset' | 'section', token: string): void {
     if (kind === 'asset') {
       const asset = this.resolveComponentAssetView(token)
-      if (!asset) return
+      if (!asset) {
+        this.workflowGateNotice = t('gate.assetNotReady')
+        this.render()
+        return
+      }
+      this.workflowGateNotice = null
       this.componentAssetLightbox = { kind: 'asset', token, ...asset }
     } else {
       const section = this.resolveDynamicSectionView(token as StyleBoardSection['id'])
@@ -1476,6 +1630,8 @@ class UIDesignPipelineUI {
       }
       if (unlockedKinds.includes('buttonNormal')) this.liveAssets.buttonNormal = json.assets.buttonNormal
       if (unlockedKinds.includes('buttonPrimary')) this.liveAssets.buttonPrimary = json.assets.buttonPrimary
+      if (unlockedKinds.includes('buttonNormalLong')) this.liveAssets.buttonNormalLong = json.assets.buttonNormalLong
+      if (unlockedKinds.includes('buttonPrimaryLong')) this.liveAssets.buttonPrimaryLong = json.assets.buttonPrimaryLong
       if (unlockedKinds.includes('titleDeco')) this.liveAssets.titleDeco = json.assets.titleDeco
       if (unlockedKinds.includes('panelTexture')) this.liveAssets.panelTexture = json.assets.panelTexture
       if (unlockedKinds.includes('icons') && Array.isArray(json.assets.icons)) {
@@ -1504,6 +1660,8 @@ class UIDesignPipelineUI {
     return !!(
       this.liveAssets.buttonNormal
       || this.liveAssets.buttonPrimary
+      || this.liveAssets.buttonNormalLong
+      || this.liveAssets.buttonPrimaryLong
       || this.liveAssets.titleDeco
       || this.liveAssets.panelTexture
       || this.liveAssets.icons.filter(Boolean).length > 0
@@ -1515,6 +1673,8 @@ class UIDesignPipelineUI {
     const stepKinds = new Set(this.getComponentLibrarySteps().map(step => step.kind))
     if (stepKinds.has('buttonPrimary') && !this.liveAssets.buttonPrimary) missing.push('buttonPrimary')
     if (stepKinds.has('buttonNormal') && !this.liveAssets.buttonNormal) missing.push('buttonNormal')
+    if (stepKinds.has('buttonPrimaryLong') && !this.liveAssets.buttonPrimaryLong) missing.push('buttonPrimaryLong')
+    if (stepKinds.has('buttonNormalLong') && !this.liveAssets.buttonNormalLong) missing.push('buttonNormalLong')
     if (stepKinds.has('titleDeco') && !this.liveAssets.titleDeco) missing.push('titleDeco')
     return missing
   }
@@ -1539,6 +1699,8 @@ class UIDesignPipelineUI {
   private isAssetKindComplete(kind: AssetKindId): boolean {
     if (kind === 'buttonPrimary') return !!this.liveAssets.buttonPrimary
     if (kind === 'buttonNormal') return !!this.liveAssets.buttonNormal
+    if (kind === 'buttonPrimaryLong') return !!this.liveAssets.buttonPrimaryLong
+    if (kind === 'buttonNormalLong') return !!this.liveAssets.buttonNormalLong
     if (kind === 'titleDeco') return !!this.liveAssets.titleDeco
     if (kind === 'panelTexture') return !!this.liveAssets.panelTexture
     if (kind === 'icons') return this.liveAssets.icons.filter(Boolean).length >= this.getIconSlotCount()
@@ -1728,7 +1890,7 @@ class UIDesignPipelineUI {
           payload.iconModuleId = slot?.moduleId
         }
         const resp = await this.fetchComponentAssetWithTimeout(payload)
-        const json = await this.parseGenerateAssetsResponse(resp, ASSET_KIND_LABELS[kind] ?? kind)
+        const json = await this.parseGenerateAssetsResponse(resp, assetKindLabel(kind))
         if (cacheKey !== this.componentVisualRequestKey()) return false
         if (json.assets) {
           this.mergeGeneratedAssets(json.assets)
@@ -2031,12 +2193,8 @@ class UIDesignPipelineUI {
       this.componentPreviewError = e instanceof Error ? e.message : String(e)
     } finally {
       this.stopLoadingProgressPulse()
-      if (this.hasFullComponentLibrary()) {
-        this.componentPreviewLoading = false
-        this.componentPreviewProgress = null
-      } else if (this.componentPreviewError) {
-        this.componentPreviewLoading = false
-      }
+      this.componentPreviewLoading = false
+      this.componentPreviewProgress = null
       this.loadComponentLibraryRunning = false
       this.skipLiveAssetHydration = false
       this.render()
@@ -2051,27 +2209,73 @@ class UIDesignPipelineUI {
     const root = this.panels.center
     const styleTargets = [
       root,
-      ...Array.from(root.querySelectorAll<HTMLElement>('.uid-preview-shell, .uid-preview-stage')),
+      ...Array.from(root.querySelectorAll<HTMLElement>('.uid-preview-shell, .uid-preview-stage, .gl-proto-genre-shell')),
     ]
 
-    // ── CSS 变量注入（让所有后代元素用 var() 引用）──────────────
+    const btnNormalUrl = this.displayUrlForAsset('buttonNormal', this.liveAssets.buttonNormal)
+    const btnPrimaryUrl = this.displayUrlForAsset('buttonPrimary', this.liveAssets.buttonPrimary)
+    const btnNormalLongSrc = this.liveAssets.buttonNormalLong ?? this.liveAssets.buttonNormal
+    const btnPrimaryLongSrc = this.liveAssets.buttonPrimaryLong ?? this.liveAssets.buttonPrimary
+    const btnNormalLongUrl = btnNormalLongSrc
+      ? this.displayUrlForAsset('buttonNormalLong', btnNormalLongSrc)
+      : undefined
+    const btnPrimaryLongUrl = btnPrimaryLongSrc
+      ? this.displayUrlForAsset('buttonPrimaryLong', btnPrimaryLongSrc)
+      : undefined
+    const titleDecoUrl = this.displayUrlForAsset('titleDeco', this.liveAssets.titleDeco)
+    const panelTextureUrl = this.displayUrlForAsset('panelTexture', this.liveAssets.panelTexture)
+
+    // ── CSS 变量注入（blob: URL 避免多个 data URL 超出 inline style 长度上限）──
     styleTargets.forEach(target => {
-      if (this.liveAssets.buttonNormal)  target.style.setProperty('--uid-btn-normal',   `url("${this.liveAssets.buttonNormal}")`)
-      if (this.liveAssets.buttonPrimary) target.style.setProperty('--uid-btn-primary',  `url("${this.liveAssets.buttonPrimary}")`)
-      if (this.liveAssets.titleDeco)     target.style.setProperty('--uid-title-deco',   `url("${this.liveAssets.titleDeco}")`)
-      if (this.liveAssets.panelTexture)  target.style.setProperty('--uid-panel-texture',`url("${this.liveAssets.panelTexture}")`)
+      const hasDialogStripChrome = !!(btnNormalLongUrl || btnPrimaryLongUrl)
+      target.classList.toggle('uid-chrome-btn-normal', !!btnNormalUrl)
+      target.classList.toggle('uid-chrome-btn-primary', !!btnPrimaryUrl)
+      target.classList.toggle('uid-chrome-tabs-section', !!btnNormalUrl)
+      target.classList.toggle('uid-chrome-btn-normal-long', !!btnNormalLongUrl)
+      target.classList.toggle('uid-chrome-btn-primary-long', !!btnPrimaryLongUrl)
+      target.classList.toggle('uid-chrome-dialog-strip', hasDialogStripChrome)
+      target.classList.toggle('uid-chrome-panel-frame', !!panelTextureUrl)
+      if (btnNormalUrl) target.style.setProperty('--uid-btn-normal', `url("${this.escCssUrl(btnNormalUrl)}")`)
+      if (btnPrimaryUrl) target.style.setProperty('--uid-btn-primary', `url("${this.escCssUrl(btnPrimaryUrl)}")`)
+      if (btnNormalLongUrl) target.style.setProperty('--uid-btn-normal-long', `url("${this.escCssUrl(btnNormalLongUrl)}")`)
+      if (btnPrimaryLongUrl) target.style.setProperty('--uid-btn-primary-long', `url("${this.escCssUrl(btnPrimaryLongUrl)}")`)
+      if (titleDecoUrl) target.style.setProperty('--uid-title-deco', `url("${this.escCssUrl(titleDecoUrl)}")`)
+      if (panelTextureUrl) target.style.setProperty('--uid-panel-texture', `url("${this.escCssUrl(panelTextureUrl)}")`)
+    })
+
+    // ── 组件库物料区：对单个预览元素直接挂样式，不依赖同一节点上的多路 CSS 变量 ──
+    const applyAssetViewStyle = (token: string, cssText: string): void => {
+      root.querySelectorAll<HTMLElement>(`[data-uid-asset-view="${token}"]`).forEach(el => {
+        el.style.cssText = `${cssText};color:transparent!important;text-shadow:none!important;font-size:0!important;line-height:0!important`
+      })
+    }
+    if (btnNormalUrl) applyAssetViewStyle('buttonNormal', inlineButtonChromeStyle(this.escCssUrl(btnNormalUrl)))
+    if (btnPrimaryUrl) applyAssetViewStyle('buttonPrimary', inlineButtonChromeStylePrimary(this.escCssUrl(btnPrimaryUrl)))
+    if (btnNormalLongUrl) applyAssetViewStyle('buttonNormalLong', inlineLongStripMatViewStyle(this.escCssUrl(btnNormalLongUrl)))
+    if (btnPrimaryLongUrl) applyAssetViewStyle('buttonPrimaryLong', inlineLongStripMatViewStyle(this.escCssUrl(btnPrimaryLongUrl)))
+    if (titleDecoUrl) {
+      const titleCss = `background-image:url("${this.escCssUrl(titleDecoUrl)}");background-size:contain;background-repeat:no-repeat;background-position:center`
+      applyAssetViewStyle('titleDeco', titleCss)
+    }
+    if (panelTextureUrl) {
+      applyAssetViewStyle('panelTexture', inlinePanelFrameStyle(this.escCssUrl(panelTextureUrl)))
+    }
+
+    root.querySelectorAll<HTMLElement>('.uid-clib-dialog-strip-preview').forEach(el => {
+      el.classList.toggle('uid-chrome-dialog-strip', !!(btnNormalLongUrl || btnPrimaryLongUrl))
     })
 
     // ── icon → 直接替换元素 backgroundImage ─────────────────────
     this.liveAssets.icons.forEach((src, i) => {
+      const iconUrl = this.displayUrlForAsset(`icon-${i}`, src)
       root.querySelectorAll<HTMLElement>(`.uid-live-icon-${i}`).forEach(el => {
-        if (!src) {
+        if (!iconUrl) {
           el.style.backgroundImage = ''
           el.classList.remove('uid-clib-icon-ready')
           el.classList.add('uid-clib-icon-missing')
           return
         }
-        el.style.backgroundImage = `url("${src}")`
+        el.style.backgroundImage = `url("${this.escCssUrl(iconUrl)}")`
         el.style.backgroundSize = 'contain'
         el.style.backgroundRepeat = 'no-repeat'
         el.style.backgroundPosition = 'center'
@@ -2137,6 +2341,8 @@ class UIDesignPipelineUI {
           let changed = false
           if (!this.liveAssets.buttonNormal  && json.assets.buttonNormal)  { this.liveAssets.buttonNormal  = json.assets.buttonNormal;  changed = true }
           if (!this.liveAssets.buttonPrimary && json.assets.buttonPrimary) { this.liveAssets.buttonPrimary = json.assets.buttonPrimary; changed = true }
+          if (!this.liveAssets.buttonNormalLong  && json.assets.buttonNormalLong)  { this.liveAssets.buttonNormalLong  = json.assets.buttonNormalLong;  changed = true }
+          if (!this.liveAssets.buttonPrimaryLong && json.assets.buttonPrimaryLong) { this.liveAssets.buttonPrimaryLong = json.assets.buttonPrimaryLong; changed = true }
           if (!this.liveAssets.titleDeco     && json.assets.titleDeco)     { this.liveAssets.titleDeco     = json.assets.titleDeco;     changed = true }
           if (!this.liveAssets.panelTexture  && json.assets.panelTexture)  { this.liveAssets.panelTexture  = json.assets.panelTexture;  changed = true }
           if (Array.isArray(json.assets.icons)) {
@@ -2162,6 +2368,8 @@ class UIDesignPipelineUI {
       icons: [...this.liveAssets.icons],
         buttonNormal: this.liveAssets.buttonNormal,
         buttonPrimary: this.liveAssets.buttonPrimary,
+        buttonNormalLong: this.liveAssets.buttonNormalLong,
+        buttonPrimaryLong: this.liveAssets.buttonPrimaryLong,
         titleDeco: this.liveAssets.titleDeco,
       }
   }
@@ -2236,27 +2444,31 @@ class UIDesignPipelineUI {
       const confirmedAssets = this.collectPrototypeAssets()
       this.prototypeHTML = buildPrototypeHTML(this.state, confirmedAssets)
       this.prototypeGenerateError = null
+      this.beginNewWorkflowCycleAfterPrototypeSuccess()
     } catch (err: unknown) {
       this.prototypeGenerateError = err instanceof Error ? err.message : String(err)
       this.prototypeHTML = null
     } finally {
       this.prototypeGenerating = false
       this.prototypeGenerateHint = null
-      this.broadcastState()
+      if (!this.prototypeHTML) {
+        this.broadcastState()
+      }
       this.render()
     }
   }
 
   private renderPrototypeGeneratingCenter(): string {
-    const genreLabel = GENRE_PRESETS.find(g => g.id === this.state.genrePreset)?.label ?? ''
-    const hint = this.prototypeGenerateHint ?? '正在组合已确认的布局和组件素材，请稍候…'
+    const genre = GENRE_PRESETS.find(g => g.id === this.state.genrePreset)
+    const genreLabel = genre ? localizedGenreField(genre.id, 'label', genre.label) : ''
+    const hint = this.prototypeGenerateHint ?? t('loading.protoAssetsSubDefault')
     return `
       <div class="uid-loading-shell uid-proto-loading">
         <div class="uid-loading-inner">
           <div class="uid-loading-spinner"></div>
-          <div class="uid-loading-title">正在生成「${esc(genreLabel)}」可交互原型</div>
+          <div class="uid-loading-title">${esc(t('loading.protoTitle', { genre: genreLabel }))}</div>
           <div class="uid-loading-sub">${esc(hint)}</div>
-          <div class="uid-loading-hint">生成需要 30 秒～2 分钟（多屏背景图较慢）。右侧预览会在完成后自动切换，请勿重复点击。</div>
+          <div class="uid-loading-hint">${esc(t('loading.protoHint'))}</div>
         </div>
       </div>
     `
@@ -2267,9 +2479,9 @@ class UIDesignPipelineUI {
       <div class="uid-loading-shell">
         <div class="uid-loading-inner">
           <div class="uid-loading-spinner"></div>
-          <div class="uid-loading-title">正在生成「${esc(genreLabel)}」原型素材</div>
-          <div class="uid-loading-sub">${total > 0 ? `正在准备 ${total} 张素材，请稍候…` : '正在组合已确认的布局和组件素材，请稍候…'}</div>
-          <div class="uid-loading-hint">原型会优先使用你在前面确认过的组件素材。</div>
+          <div class="uid-loading-title">${esc(t('loading.protoAssetsTitle', { genre: genreLabel }))}</div>
+          <div class="uid-loading-sub">${total > 0 ? esc(t('loading.protoAssetsSub', { total })) : esc(t('loading.protoAssetsSubDefault'))}</div>
+          <div class="uid-loading-hint">${esc(t('loading.protoAssetsHint'))}</div>
         </div>
       </div>
     `
@@ -2279,9 +2491,9 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-loading-shell">
         <div class="uid-loading-inner">
-          <div class="uid-loading-title" style="color:#ff8080">生成失败</div>
+          <div class="uid-loading-title" style="color:#ff8080">${esc(t('loading.failed'))}</div>
           <div class="uid-loading-sub">${esc(msg)}</div>
-          <button class="uid-proto-back" data-uid-action="back" style="margin-top:16px">← 返回编辑</button>
+          <button class="uid-proto-back" data-uid-action="back" style="margin-top:16px">${esc(t('proto.backEdit'))}</button>
         </div>
       </div>
     `
@@ -2289,8 +2501,10 @@ class UIDesignPipelineUI {
 
   /** 第四步中央：整屏「生成预览中」+ 5 步百分比进度 */
   private renderComponentLibraryLoadingCenter(): string {
-    const g = GENRE_PRESETS.find(x => x.id === this.state.genrePreset)?.label ?? ''
-    const s = STYLE_PRESETS.find(x => x.id === this.state.style)?.label ?? ''
+    const genre = GENRE_PRESETS.find(x => x.id === this.state.genrePreset)
+    const style = STYLE_PRESETS.find(x => x.id === this.state.style)
+    const g = genre ? localizedGenreField(genre.id, 'label', genre.label) : ''
+    const s = style ? localizedStyleLabel(style.id, style.label, style.tone).label : ''
     const progress = this.componentPreviewProgress
     const steps = this.getComponentLibrarySteps()
     const total = progress?.total ?? steps.length
@@ -2310,16 +2524,16 @@ class UIDesignPipelineUI {
       <div class="uid-loading-shell uid-clib-loading">
         <div class="uid-loading-inner uid-loading-inner-progress">
           <div class="uid-loading-head">
-            <div class="uid-loading-title">生成预览中</div>
+            <div class="uid-loading-title">${esc(t('loading.preview'))}</div>
             <div class="uid-loading-percent">${this.formatProgressPercentLabel(progress?.percent ?? 0)}</div>
           </div>
           <div class="uid-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
             <div class="uid-progress-fill${pulsing}" style="width:${percent}%"></div>
           </div>
-          <div class="uid-loading-sub">第 ${unitDone}/${totalUnits} 项 · 正在生成：${esc(currentLabel)}</div>
-          <div class="uid-loading-sub uid-loading-sub-muted">正在按「${esc(g)} / ${esc(s)}」与第二步已选模块拉取组件素材</div>
-          <ul class="uid-loading-steps" aria-label="生成步骤">${stepRows}</ul>
-          <div class="uid-loading-hint">${totalUnits} 项全部完成前不会展示组件库，失败后可重试。</div>
+          <div class="uid-loading-sub">${esc(t('loading.previewSub', { done: unitDone, total: totalUnits, label: currentLabel }))}</div>
+          <div class="uid-loading-sub uid-loading-sub-muted">${esc(t('loading.fetchingSub', { genre: g, style: s }))}</div>
+          <ul class="uid-loading-steps" aria-label="${esc(t('loading.previewSteps'))}">${stepRows}</ul>
+          <div class="uid-loading-hint">${esc(t('loading.previewHint', { total: totalUnits }))}</div>
         </div>
       </div>
     `
@@ -2329,9 +2543,9 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-loading-shell">
         <div class="uid-loading-inner">
-          <div class="uid-loading-title" style="color:#ff8a80">组件库生成失败</div>
+          <div class="uid-loading-title" style="color:#ff8a80">${esc(t('loading.libraryFailed'))}</div>
           <div class="uid-loading-sub">${esc(msg)}</div>
-          <button class="uid-proto-back" data-uid-action="retry-component-library" style="margin-top:16px">重试</button>
+          <button class="uid-proto-back" data-uid-action="retry-component-library" style="margin-top:16px">${esc(t('loading.retry'))}</button>
         </div>
       </div>
     `
@@ -2341,8 +2555,8 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-loading-shell">
         <div class="uid-loading-inner">
-          <div class="uid-loading-title">等待生成 UI 组件素材</div>
-          <div class="uid-loading-sub">请在左侧第 3 步点击「生成 UI 组件素材」。进入步骤、展开微调面板或切换流程不会自动开始生成。</div>
+          <div class="uid-loading-title">${esc(t('loading.waitLibrary'))}</div>
+          <div class="uid-loading-sub">${esc(t('loading.waitLibrarySub'))}</div>
         </div>
       </div>
     `
@@ -2366,7 +2580,8 @@ class UIDesignPipelineUI {
       }
       // 如果 liveAssets 已有，立即注入（render 后 DOM 刷新了需要重新注入）
       const hasLive = this.liveAssets.panelTexture || this.liveAssets.buttonNormal
-        || this.liveAssets.buttonPrimary || this.liveAssets.titleDeco
+        || this.liveAssets.buttonPrimary || this.liveAssets.buttonNormalLong
+        || this.liveAssets.buttonPrimaryLong || this.liveAssets.titleDeco
         || this.liveAssets.icons.some(Boolean)
       if (hasLive) requestAnimationFrame(() => this.injectLiveAssets())
     }
@@ -2417,10 +2632,10 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-layout-flow-panel">
         <div class="uid-layout-flow-head">
-          <span>页面流程确认</span>
+          <span>${esc(t('layout.flowTitle'))}</span>
           <b>${activeIndex + 1}/${flow.length}</b>
         </div>
-        <div class="uid-helper-copy">请从第 1 页开始逐页配置模块，每页点击「确认本页」；全部页面确认后才可「确认布局」。</div>
+        <div class="uid-helper-copy">${esc(t('layout.helper'))}</div>
         <div class="uid-layout-screen-list">
           ${flow.map((screen, index) => {
             const modules = getScreenModules(this.state.genrePreset, screen.kind)
@@ -2432,9 +2647,9 @@ class UIDesignPipelineUI {
                 <span class="uid-layout-screen-index">${index + 1}</span>
                 <span class="uid-layout-screen-main">
                   <b>${esc(screen.label)}</b>
-                  <small>${modules.required.length} 必选 · ${modules.recommended.length} 推荐 · ${modules.optional.length} 可选</small>
+                  <small>${modules.required.length} ${t('layout.required')} · ${modules.recommended.length} ${t('layout.recommended')} · ${modules.optional.length} ${t('layout.optional')}</small>
                 </span>
-                <span class="uid-layout-screen-state">${isActive ? '正在配置' : isReviewed ? '已确认' : '待查看'}</span>
+                <span class="uid-layout-screen-state">${isActive ? t('layout.configuring') : isReviewed ? t('layout.reviewed') : t('layout.pending')}</span>
               </button>
             `
           }).join('')}
@@ -2454,14 +2669,14 @@ class UIDesignPipelineUI {
       && (this.componentPreviewLoading || this.loadComponentLibraryRunning || Boolean(this.componentPreviewProgress) || this.state.workflowStep === 'component-preview')
     const prototypeLocked = !prototypeReady && !this.prototypeGenerating
     const prototypeStatus = this.prototypeGenerating
-      ? '生成中'
-      : prototypeReady ? '可生成' : prototypePreparing ? '原型准备中' : '未就绪'
-    const componentStatus = prototypeReady ? '已确认' : prototypePreparing ? '同步中' : this.hasFullComponentLibrary() ? '已生成，待同步' : '未确认'
+      ? t('proto.generating')
+      : prototypeReady ? t('proto.ready') : prototypePreparing ? t('proto.preparing') : t('proto.notReady')
+    const componentStatus = prototypeReady ? t('component.confirmed') : prototypePreparing ? t('component.syncing') : this.hasFullComponentLibrary() ? t('component.generatedPending') : t('component.unconfirmed')
     const prototypeGateNotice = !this.state.layoutApproved
-      ? '请先在第 2 步确认页面布局。'
+      ? t('gate.needLayout')
       : prototypePreparing
-        ? '组件素材已生成，正在同步到原型预览。请稍候，准备完成后按钮会自动点亮。'
-        : '请先在第 3 步生成组件素材；素材准备完成后即可生成可交互原型。'
+        ? t('gate.protoPreparing')
+        : t('gate.protoNeedComponents')
     const currentSet = getScreenModules(this.state.genrePreset, this.activeScreen)
     const currentIds = new Set([
       ...currentSet.required.map(m => m.id),
@@ -2470,10 +2685,14 @@ class UIDesignPipelineUI {
     ])
     const activeLabels = this.state.selectedFeatures
       .filter(id => currentIds.has(id))
-      .map(id => FEATURE_MODULES.find(m => m.id === id)?.label ?? id)
+      .map(id => localizedModuleLabel(id, FEATURE_MODULES.find(m => m.id === id)?.label ?? id))
       .slice(0, 8)
     const currentGenre = GENRE_PRESETS.find(genre => genre.id === this.state.genrePreset)
+    const genreLabel = currentGenre ? localizedGenreField(currentGenre.id, 'label', currentGenre.label) : ''
+    const genreTagline = currentGenre ? localizedGenreField(currentGenre.id, 'tagline', currentGenre.tagline) : ''
+    const genreSummary = currentGenre ? localizedGenreField(currentGenre.id, 'summary', currentGenre.summary) : ''
     const currentStyle = STYLE_PRESETS.find(style => style.id === this.state.style)
+    const styleDisplay = currentStyle ? localizedStyleLabel(currentStyle.id, currentStyle.label, currentStyle.tone) : null
     const currentScreen = flow.find(screen => screen.kind === this.activeScreen)
     const layoutScreensReviewed = this.allLayoutScreensReviewed()
     const currentScreenReviewed = this.layoutReviewedScreens.has(this.layoutScreenKey(this.activeScreen))
@@ -2481,35 +2700,35 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-shell">
         <div class="uid-header">
-          <span class="uid-title">玩家界面工作台</span>
-          <button type="button" class="uid-header-clear" data-uid-action="clear-session" title="清除布局确认、历史素材与生成缓存">清除会话</button>
-          <span class="uid-header-pill">UI 工坊</span>
+          <span class="uid-title">${esc(t('chrome.workbenchTitle'))}</span>
+          <button type="button" class="uid-header-clear" data-uid-action="clear-session" title="${esc(t('chrome.clearSessionTitle'))}">${esc(t('chrome.clearSession'))}</button>
+          <span class="uid-header-pill">${esc(t('chrome.workshopPill'))}</span>
         </div>
         <section class="${this.workflowSectionClass('genre')}" data-uid-section="genre">
-          ${this.renderWorkflowSectionHeader('genre', 1, '游戏类型', currentGenre ? `${currentGenre.label} · ${currentGenre.tagline}` : '未选择游戏类型')}
+          ${this.renderWorkflowSectionHeader('genre', 1, t('step.genre'), currentGenre ? `${genreLabel} · ${genreTagline}` : t('step.genre'))}
           <div class="uid-section-body">
             <details class="uid-dropdown-details">
               <summary>
-                <span>${esc(currentGenre?.label ?? '选择游戏类型')}</span>
+                <span>${esc(currentGenre ? genreLabel : t('genre.selectPlaceholder'))}</span>
                 <span class="uid-dropdown-details-arrow">⌄</span>
               </summary>
               <div class="uid-dropdown-menu-like">
                 ${GENRE_PRESETS.map(genre => `
                   <button class="${cls('uid-dropdown-option-like', this.state.genrePreset === genre.id && 'active')}"
-                          data-uid-genre="${genre.id}" title="${esc(genre.summary)}">
-                    <span>${esc(genre.label)}</span>
-                    <small>${esc(genre.tagline)}</small>
+                          data-uid-genre="${genre.id}" title="${esc(localizedGenreField(genre.id, 'summary', genre.summary))}">
+                    <span>${esc(localizedGenreField(genre.id, 'label', genre.label))}</span>
+                    <small>${esc(localizedGenreField(genre.id, 'tagline', genre.tagline))}</small>
                   </button>
                 `).join('')}
               </div>
             </details>
-            ${currentGenre ? `<div class="uid-option-detail">${esc(currentGenre.summary)}</div>` : ''}
-            <div class="uid-helper-copy">先定游戏类型，下面的页面流、模块优先级和整套风格组件都会跟着重算。</div>
+            ${currentGenre ? `<div class="uid-option-detail">${esc(genreSummary)}</div>` : ''}
+            <div class="uid-helper-copy">${esc(t('genre.helper'))}</div>
           </div>
         </section>
 
         <section class="${this.workflowSectionClass('layout')}" data-uid-section="layout">
-          ${this.renderWorkflowSectionHeader('layout', 2, '页面布局', `${currentScreen?.label ?? this.activeScreen} · ${this.state.layoutApproved ? '已确认' : '待确认'}`)}
+          ${this.renderWorkflowSectionHeader('layout', 2, t('step.layout'), `${currentScreen?.label ?? this.activeScreen} · ${this.state.layoutApproved ? t('layout.reviewed') : t('layout.pending')}`)}
           <div class="uid-section-body">
             ${this.workflowGateNotice ? `<div class="uid-gate-notice">${esc(this.workflowGateNotice)}</div>` : ''}
             ${this.renderLayoutScreenChecklist(flow)}
@@ -2518,30 +2737,30 @@ class UIDesignPipelineUI {
                 <div class="uid-screen-modules">${this.renderScreenModules()}</div>
               </div>
               <div class="uid-layout-modules-enabled">
-                <div class="uid-module-live-heading">本屏已启用模块：</div>
+                <div class="uid-module-live-heading">${esc(t('layout.modulesEnabled'))}</div>
                 <div class="uid-module-live-panel">
                   <div class="uid-module-live-chips">
                     ${activeLabels.length > 0
                       ? activeLabels.map(label => `<span class="uid-module-live-chip">${esc(label)}</span>`).join('')
-                      : '<span class="uid-module-live-empty">暂无（点选左侧推荐/可选模块）</span>'}
+                      : `<span class="uid-module-live-empty">${esc(t('layout.modulesEmpty'))}</span>`}
                   </div>
                 </div>
               </div>
             </div>
             <div class="uid-layout-actions">
-              <button class="uid-scene-regen uid-layout-reset" data-uid-action="reset-features">重置</button>
+              <button class="uid-scene-regen uid-layout-reset" data-uid-action="reset-features">${esc(t('layout.reset'))}</button>
               <button class="uid-next-btn uid-layout-screen-confirm" data-uid-action="confirm-layout-screen"
-                      ${this.state.layoutApproved || currentScreenReviewed ? 'disabled' : ''}>${currentScreenReviewed ? '本页已确认' : '确认本页'}</button>
+                      ${this.state.layoutApproved || currentScreenReviewed ? 'disabled' : ''}>${currentScreenReviewed ? t('layout.pageConfirmed') : t('layout.confirmPage')}</button>
               <button class="uid-next-btn uid-layout-confirm" data-uid-action="confirm-layout"
-                      ${this.state.layoutApproved || !layoutScreensReviewed ? 'disabled' : ''}>${this.state.layoutApproved ? '布局已确认' : '确认布局'}</button>
+                      ${this.state.layoutApproved || !layoutScreensReviewed ? 'disabled' : ''}>${this.state.layoutApproved ? t('layout.layoutConfirmed') : t('layout.confirmLayout')}</button>
             </div>
           </div>
         </section>
 
         <section class="${cls(this.workflowSectionClass('style'), styleLocked && 'uid-section-disabled')}" data-uid-section="style">
-          ${this.renderWorkflowSectionHeader('style', 3, '风格选择', `${currentStyle?.label ?? this.state.style}${styles.length > 0 ? ' · AI推荐' : ''}`)}
+          ${this.renderWorkflowSectionHeader('style', 3, t('style.stepTitle'), `${styleDisplay?.label ?? this.state.style}${styles.length > 0 ? ` · ${t('style.aiRecommended')}` : ''}`)}
           <div class="uid-section-body">
-            ${styleLocked ? '<div class="uid-gate-notice">请先完成前两步：选择游戏类型，并在第 2 步确认布局后才能选择风格和生成组件。</div>' : ''}
+            ${styleLocked ? `<div class="uid-gate-notice">${esc(t('gate.styleLocked'))}</div>` : ''}
             ${styles.length > 0 ? `
               <div class="uid-recommend-strip">
                 ${styles.map(s => `
@@ -2554,68 +2773,70 @@ class UIDesignPipelineUI {
               </div>
             ` : ''}
             <details class="uid-details">
-              <summary>全部风格（${STYLE_PRESETS.length}种）</summary>
+              <summary>${esc(t('style.allStyles', { n: STYLE_PRESETS.length }))}</summary>
               <div class="uid-grid uid-grid-2 uid-mt8">
-                ${STYLE_PRESETS.map(style => `
+                ${STYLE_PRESETS.map(style => {
+                  const sl = localizedStyleLabel(style.id, style.label, style.tone)
+                  return `
                   <button class="${cls('uid-chip uid-chip-sm', this.state.style === style.id && 'active')}"
                           data-uid-style="${style.id}" ${styleLocked ? 'disabled' : ''}>
-                    <span>${esc(style.label)}</span>
-                    <small>${esc(style.tone)}</small>
+                    <span>${esc(sl.label)}</span>
+                    <small>${esc(sl.tone)}</small>
                   </button>
-                `).join('')}
+                `}).join('')}
               </div>
             </details>
-            <div class="uid-section-subtitle">风格元素提示词（可选）</div>
-            <div class="uid-helper-copy">这里只描述视觉元素，例如材质、边框、发光、纹理、图标气质。它会影响本步组件素材生图，但不会改变第 2 步确认过的布局框架。</div>
+            <div class="uid-section-subtitle">${esc(t('style.promptSubtitle'))}</div>
+            <div class="uid-helper-copy">${esc(t('style.promptHelper'))}</div>
             <div class="uid-scene-suggestions">
               ${[
-                STYLE_PRESETS.find(style => style.id === this.state.style)?.tone ?? '',
-                '按钮更厚重，边框更清晰',
-                '标题条更有装饰性，图标统一亮度',
-                '面板减少噪点，保留材质纹理',
-                '整体更高对比，适合最终游戏 UI',
+                styleDisplay?.tone ?? '',
+                t('style.suggest.heavyButtons'),
+                t('style.suggest.titleDeco'),
+                t('style.suggest.lessNoise'),
+                t('style.suggest.highContrast'),
               ].filter(Boolean).map(s => `
                 <button class="uid-scene-tag" data-uid-style-note="${esc(s)}" ${styleLocked ? 'disabled' : ''}>${esc(s)}</button>
               `).join('')}
             </div>
             <textarea class="uid-scene-input" rows="3" data-uid-field="assetPromptNotes"
-              placeholder="例如：金属描边、低饱和蓝色发光、按钮更厚重、icon 统一为写实雕刻感；只改视觉样式，不改模块位置和大框架。" ${styleLocked ? 'disabled' : ''}>${esc(this.state.assetPromptNotes)}</textarea>
+              placeholder="${esc(t('style.promptPlaceholder'))}" ${styleLocked ? 'disabled' : ''}>${esc(this.state.assetPromptNotes)}</textarea>
             <div class="uid-inline uid-inline-wrap uid-action-row">
               <button class="${cls('uid-next-btn', styleLocked && 'uid-action-disabled')}" data-uid-action="generate-component-preview"
-                      ${styleLocked ? 'aria-disabled="true" data-uid-disabled="true"' : ''}>${this.hasFullComponentLibrary() ? '重新生成' : '生成 UI 组件素材'}</button>
+                      ${styleLocked ? 'aria-disabled="true" data-uid-disabled="true"' : ''}>${this.hasFullComponentLibrary() ? esc(t('style.regenerate')) : esc(t('style.generate'))}</button>
             </div>
           </div>
         </section>
 
         <section class="${this.workflowSectionClass('component-preview')}" data-uid-section="component-preview">
-          ${this.renderWorkflowSectionHeader('component-preview', 4, '素材微调', this.hasFullComponentLibrary() ? '已有组件素材' : '可选步骤')}
+          ${this.renderWorkflowSectionHeader('component-preview', 4, t('tuning.stepTitle'), this.hasFullComponentLibrary() ? t('tuning.hasAssets') : t('tuning.optionalStep'))}
           <div class="uid-section-body">
-            <div class="uid-helper-copy">这里仅在需要调整素材时使用；修改提示词后重生组件，中央会保留同一套组件预览。</div>
-            <div class="uid-section-subtitle">风格提示词</div>
+            <div class="uid-helper-copy">${esc(t('tuning.helper'))}</div>
+            <div class="uid-section-subtitle">${esc(t('tuning.stylePrompt'))}</div>
             <textarea class="uid-scene-input uid-long-input" rows="4" data-uid-field="styleBoardPrompt">${esc(this.state.styleBoardPrompt)}</textarea>
-            <div class="uid-section-subtitle">组件样式追加微调</div>
-            <div class="uid-helper-copy">这里会沿用第 3 步填写的风格元素提示词；继续修改会触发下一次组件重生的视觉调整，不改变布局结构。</div>
-            <textarea class="uid-scene-input" rows="3" data-uid-field="assetPromptNotes" placeholder="例如：按钮更厚重、标题装饰更克制、icon 更写实并统一亮度、通知卡减少描边……">${esc(this.state.assetPromptNotes)}</textarea>
+            <div class="uid-section-subtitle">${esc(t('tuning.componentTuning'))}</div>
+            <div class="uid-helper-copy">${esc(t('tuning.componentHelper'))}</div>
+            <textarea class="uid-scene-input" rows="3" data-uid-field="assetPromptNotes" placeholder="${esc(t('tuning.componentPlaceholder'))}">${esc(this.state.assetPromptNotes)}</textarea>
             <div class="uid-inline uid-inline-wrap uid-action-row">
-              <button class="uid-scene-regen" data-uid-action="regen-style-board">按微调提示词重新生成</button>
-              <button class="uid-next-btn" data-uid-action="open-asset-history">历史记录</button>
+              <button class="uid-scene-regen" data-uid-action="regen-style-board">${esc(t('tuning.regenByPrompt'))}</button>
+              <button class="uid-next-btn" data-uid-action="open-asset-history">${esc(t('tuning.history'))}</button>
             </div>
           </div>
         </section>
 
         <section class="${this.workflowSectionClass('prototype')}" data-uid-section="prototype">
-          ${this.renderWorkflowSectionHeader('prototype', 5, '生成可交互原型', prototypeStatus)}
+          ${this.renderWorkflowSectionHeader('prototype', 5, t('step.prototype'), prototypeStatus)}
           <div class="uid-section-body">
             ${prototypeLocked ? `<div class="uid-gate-notice">${esc(prototypeGateNotice)}</div>` : ''}
             <div class="uid-summary-card">
-              <div><b>布局确认：</b>${this.state.layoutApproved ? '已确认' : '未确认'}</div>
-              <div><b>组件素材：</b>${componentStatus}</div>
-              <div><b>当前风格：</b>${esc(STYLE_PRESETS.find(item => item.id === this.state.style)?.label ?? this.state.style)}</div>
+              <div><b>${esc(t('proto.summaryLayout'))}</b>${this.state.layoutApproved ? esc(t('proto.confirmed')) : esc(t('proto.unconfirmed'))}</div>
+              <div><b>${esc(t('proto.summaryAssets'))}</b>${componentStatus}</div>
+              <div><b>${esc(t('proto.summaryStyle'))}</b>${esc(styleDisplay?.label ?? this.state.style)}</div>
             </div>
             <div class="uid-generate-bar">
               <button class="uid-generate-btn${this.prototypeGenerating ? ' is-generating' : ''}" data-uid-action="generate" ${prototypeLocked || this.prototypeGenerating ? 'disabled' : ''}>
                 <span class="uid-generate-icon">${this.prototypeGenerating ? '⏳' : '▶'}</span>
-                ${this.prototypeGenerating ? '正在生成可交互原型…' : '生成可交互原型'}
+                ${this.prototypeGenerating ? esc(t('proto.generatingBtn')) : esc(t('proto.generateBtn'))}
               </button>
             </div>
           </div>
@@ -2631,7 +2852,7 @@ class UIDesignPipelineUI {
       this.activeScreen,
     )
     if (required.length + recommended.length + optional.length === 0) {
-      return '<div class="uid-empty">该屏幕暂无模块规则。</div>'
+      return `<div class="uid-empty">${esc(t('layout.noModules'))}</div>`
     }
 
     const row = (label: string, modules: typeof required, variant: string) => {
@@ -2653,9 +2874,9 @@ class UIDesignPipelineUI {
 
     return `
       <div class="uid-module-table">
-        ${row('必选', required, 'required')}
-        ${row('推荐', recommended, 'recommended')}
-        ${row('可选', optional, 'optional')}
+        ${row(t('layout.required'), required, 'required')}
+        ${row(t('layout.recommended'), recommended, 'recommended')}
+        ${row(t('layout.optional'), optional, 'optional')}
       </div>
     `
   }
@@ -2666,9 +2887,9 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-proto-shell">
         <div class="uid-proto-bar">
-          <button class="uid-proto-back" data-uid-action="back">← 返回编辑</button>
-          <span class="uid-proto-title">可交互原型 · ${esc(GENRE_PRESETS.find(g => g.id === this.state.genrePreset)?.label ?? '')}</span>
-          <a class="uid-proto-open" href="${url}" target="_blank" rel="noopener">↗ 新标签页打开</a>
+          <button class="uid-proto-back" data-uid-action="back">${esc(t('proto.backEdit'))}</button>
+          <span class="uid-proto-title">${esc(t('proto.title'))} · ${esc(localizedGenreField(this.state.genrePreset, 'label', GENRE_PRESETS.find(g => g.id === this.state.genrePreset)?.label ?? ''))}</span>
+          <a class="uid-proto-open" href="${url}" target="_blank" rel="noopener">${esc(t('proto.openTab'))}</a>
         </div>
         <iframe class="uid-proto-frame" src="${url}" frameborder="0" allowfullscreen></iframe>
       </div>
@@ -2736,9 +2957,9 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-setup-empty">
         <div class="uid-setup-empty-inner">
-          <div class="uid-setup-empty-kicker">UI WORKSHOP</div>
-          <div class="uid-setup-empty-title">先在左侧选择游戏类型</div>
-          <div class="uid-setup-empty-copy">右侧预览会在进入「页面布局」后生成，并随左侧屏幕流程、必选/推荐/可选模块实时变化。</div>
+          <div class="uid-setup-empty-kicker">${esc(t('setup.kicker'))}</div>
+          <div class="uid-setup-empty-title">${esc(t('setup.title'))}</div>
+          <div class="uid-setup-empty-copy">${esc(t('setup.copy'))}</div>
         </div>
       </div>
     `
@@ -2754,8 +2975,8 @@ class UIDesignPipelineUI {
     zone: string
   } {
     const m = FEATURE_MODULES.find(x => x.id === id)
-    if (m) return { id: m.id, label: m.label, layer: m.layer, zone: m.zone }
-    return { id, label: id, layer: 'permanent-hud', zone: '未注册' }
+    if (m) return { id: m.id, label: localizedModuleLabel(m.id, m.label), layer: m.layer, zone: m.zone }
+    return { id, label: id, layer: 'permanent-hud', zone: t('meta.unregistered') }
   }
 
   /** 第二步布局验证：只展示玩家侧 UI 预览，左侧模块点选只控制预览内模块显隐 */
@@ -2764,9 +2985,9 @@ class UIDesignPipelineUI {
     const bgSrc = this.previewBg[this.activeScreen] ?? ''
     const isLoading = this.bgLoading.has(this.activeScreen)
     const bgHint = isLoading
-      ? `<div class="uid-preview-bg-hint"><span class="uid-preview-bg-spinner"></span>生成背景中…</div>`
+      ? `<div class="uid-preview-bg-hint"><span class="uid-preview-bg-spinner"></span>${esc(t('layout.previewBgLoading'))}</div>`
       : !bgSrc
-        ? `<div class="uid-preview-bg-hint uid-preview-bg-hint-idle">选风格后自动生成场景背景</div>`
+        ? `<div class="uid-preview-bg-hint uid-preview-bg-hint-idle">${esc(t('layout.previewBgIdle'))}</div>`
         : ''
     const sceneBody = renderLayoutSceneBody({
       bgSrc: bgSrc || undefined,
@@ -2776,14 +2997,14 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-preview-shell uid-style-${this.state.style}">
         <div class="uid-preview-topbar">
-          <span class="uid-preview-genre">${esc(blueprint.genre.label)}</span>
+          <span class="uid-preview-genre">${esc(localizedGenreField(blueprint.genre.id, 'label', blueprint.genre.label))}</span>
           <div class="uid-preview-flow-tabs">
             ${flow.map(s => `
               <button class="${cls('uid-preview-tab', s.kind === this.activeScreen && 'active')}"
                       data-uid-screen="${s.kind}">${esc(s.label)}</button>
             `).join('')}
           </div>
-          <span class="uid-preview-mode">布局预览</span>
+          <span class="uid-preview-mode">${esc(t('layout.preview'))}</span>
         </div>
         <div class="uid-preview-stage uid-mode-${this.state.previewMode}">
           <div class="uid-preview-scene">${sceneBody}</div>
@@ -2831,6 +3052,8 @@ class UIDesignPipelineUI {
     const missTitle = !this.liveAssets.titleDeco
     const missPrimaryBtn = !this.liveAssets.buttonPrimary
     const missNormalBtn = !this.liveAssets.buttonNormal
+    const missPrimaryLongBtn = !this.liveAssets.buttonPrimaryLong
+    const missNormalLongBtn = !this.liveAssets.buttonNormalLong
     const missingCore = this.missingCoreAssetKinds()
     const missingKey = this.coreBackfillAttemptKey(missingCore)
     const backfillAttempts = this.componentCoreBackfillAttempts[missingKey] ?? 0
@@ -2871,6 +3094,7 @@ class UIDesignPipelineUI {
           <span class="uid-clib-pure-meta">${esc(blueprint.genre.label)} · ${esc(styleLabel)}</span>
           <span class="uid-clib-pure-badge">组件物料</span>
         </div>
+        ${this.workflowGateNotice ? `<div class="uid-gate-notice uid-clib-gate-notice">${esc(this.workflowGateNotice)}</div>` : ''}
         <div class="uid-preview-stage uid-style-board-stage uid-clib-mat-only">
           <div class="uid-clib-pure-wrap">
             ${stepKinds.has('titleDeco') ? `
@@ -2891,9 +3115,19 @@ class UIDesignPipelineUI {
               ${backfillFailed ? `<button class="uid-clib-retry-btn" data-uid-action="retry-missing-core">重新生成缺失组件</button>` : ''}
             </div>
             ` : ''}
+            ${stepKinds.has('buttonPrimaryLong') || stepKinds.has('buttonNormalLong') ? `
+            <div class="uid-clib-pure-sec uid-clib-long-strip-sec">
+              <div class="uid-clib-pure-label">对话长选项</div>
+              <p class="uid-clib-strip-zoom-note">点按下方彩色长条底图可放大查看 PNG 原图（非上方小字）</p>
+              <div class="uid-clib-dialog-strip-preview uid-clib-long-strip-mat-preview">
+                ${stepKinds.has('buttonPrimaryLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missPrimaryLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="长选项主按钮底图，点击放大" data-uid-asset-view="buttonPrimaryLong">${missPrimaryLongBtn ? `长选项主${missingHint}` : ''}</div>` : ''}
+                ${stepKinds.has('buttonNormalLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missNormalLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="长选项次按钮底图，点击放大" data-uid-asset-view="buttonNormalLong">${missNormalLongBtn ? `长选项次${missingHint}` : ''}</div>` : ''}
+              </div>
+            </div>
+            ` : ''}
             ${stepKinds.has('panelTexture') ? `
             <div class="uid-clib-pure-sec">
-              <div class="uid-clib-pure-label">面板底纹</div>
+              <div class="uid-clib-pure-label">面板底纹 <span class="uid-clib-zoom-hint">点击放大</span></div>
               ${moduleChipRow(panelModules)}
               <div class="uid-clib-panel-preview uid-clib-viewable" role="img" aria-label="面板框体纹理" data-uid-asset-view="panelTexture" tabindex="0"></div>
             </div>
@@ -2988,23 +3222,23 @@ class UIDesignPipelineUI {
         <div class="uid-clib-extra-preview uid-clib-tabs-preview uid-clib-genre-preview ${kitClass}" data-genre-kit="${esc(kit.genre)}">
           <div class="uid-clib-tab-line uid-clib-tab-line-primary">
             ${kit.tabs.primary.map((label, idx) => `
-              <button class="upv-bag-tab ${idx === kit.tabs.activeIndex ? 'active' : ''}">${esc(label)}</button>
+              <button class="upv-bag-tab uid-clib-tabs-section-item ${idx === kit.tabs.activeIndex ? 'active' : ''}">${esc(label)}</button>
             `).join('')}
           </div>
           <div class="uid-clib-tab-line uid-clib-filter-line">
             ${kit.tabs.filters.map((label, idx) => `
-              <button class="upv-bag-tab ${idx === 0 ? 'active' : ''}">${esc(label)}</button>
+              <button class="upv-bag-tab uid-clib-tabs-section-item ${idx === 0 ? 'active' : ''}">${esc(label)}</button>
             `).join('')}
           </div>
           <div class="uid-clib-segment">
-            ${kit.tabs.segment.map((label, idx) => `<span class="${idx === 1 ? 'active' : ''}">${esc(label)}</span>`).join('')}
+            ${kit.tabs.segment.map((label, idx) => `<span class="uid-clib-tabs-section-item ${idx === 1 ? 'active' : ''}">${esc(label)}</span>`).join('')}
           </div>
-          <div class="uid-clib-pager">
-            <button aria-label="上一页">‹</button>
-            <button class="active">1</button>
-            <button>2</button>
-            <button>3</button>
-            <button aria-label="下一页">›</button>
+          <div class="uid-clib-pager uid-chrome-pager">
+            <button class="uid-clib-tabs-section-item" aria-label="上一页">‹</button>
+            <button class="uid-clib-tabs-section-item active">1</button>
+            <button class="uid-clib-tabs-section-item">2</button>
+            <button class="uid-clib-tabs-section-item">3</button>
+            <button class="uid-clib-tabs-section-item" aria-label="下一页">›</button>
             <em>${esc(kit.tabs.pagerLabel)}</em>
           </div>
         </div>
@@ -3323,22 +3557,32 @@ class UIDesignPipelineUI {
       }
     })
 
-    queryShared<HTMLElement>('[data-uid-asset-view]').forEach(el => {
-      const open = () => {
-        const token = el.dataset.uidAssetView ?? ''
-        if (!token) return
-        this.openComponentAssetLightbox('asset', token)
-      }
-      el.onclick = (event) => {
-        event.stopPropagation()
-        open()
-      }
-      el.onkeydown = (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return
-        event.preventDefault()
-        event.stopPropagation()
-        open()
-      }
+    const openAssetViewFromTarget = (target: EventTarget | null): void => {
+      if (!(target instanceof Element)) return
+      const el = target.closest<HTMLElement>('[data-uid-asset-view]')
+      if (!el || el.closest('.uid-asset-lightbox')) return
+      const token = el.dataset.uidAssetView ?? ''
+      if (!token) return
+      this.openComponentAssetLightbox('asset', token)
+    }
+    const onAssetViewClick = (event: MouseEvent): void => {
+      if (!(event.target instanceof Element)) return
+      if (!event.target.closest('[data-uid-asset-view]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      openAssetViewFromTarget(event.target)
+    }
+    const onAssetViewKeydown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      if (!(event.target instanceof Element)) return
+      if (!event.target.closest('[data-uid-asset-view]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      openAssetViewFromTarget(event.target)
+    }
+    sharedRoots.forEach(node => {
+      node.addEventListener('click', onAssetViewClick, { signal: this.actionBindingAbort?.signal })
+      node.addEventListener('keydown', onAssetViewKeydown, { signal: this.actionBindingAbort?.signal })
     })
 
     queryShared<HTMLElement>('[data-uid-section-view]').forEach(el => {
@@ -3612,17 +3856,13 @@ function buildPrototypeHTML(state: UIDesignState, assets: GeneratedAssets): stri
   const btnN = assets.buttonNormal
   const titleD = assets.titleDeco
   const pTex = assets.panelTexture
-  const styleBtnPri = btnP
-    ? `background-image:url('${btnP}');background-size:100% 100%;background-color:transparent !important;border-color:transparent !important;color:#fff!important;text-shadow:0 2px 6px rgba(0,0,0,.85);`
-    : ''
-  const styleBtnNorm = btnN
-    ? `background-image:url('${btnN}');background-size:100% 100%;background-color:transparent !important;border-color:transparent !important;color:#fff!important;text-shadow:0 2px 5px rgba(0,0,0,.78);`
-    : ''
+  const styleBtnPri = btnP ? `${inlineButtonChromeStylePrimary(btnP.replace(/'/g, "\\'"))};` : ''
+  const styleBtnNorm = btnN ? `${inlineButtonChromeStyle(btnN.replace(/'/g, "\\'"))};` : ''
   const styleTitleStrip = titleD
     ? `min-height:58px;background-image:url('${titleD}');background-size:100% 100%;background-repeat:no-repeat;background-position:center;display:flex;align-items:center;justify-content:center;padding:6px 24px;box-sizing:border-box;`
     : ''
   const styleSceneBtn = btnP
-    ? `background-image:url('${btnP}');background-size:100% 100%;background-color:transparent !important;border:1px solid rgba(255,255,255,.25) !important;color:#fff;`
+    ? `${inlineButtonChromeStylePrimary(btnP.replace(/'/g, "\\'"))};`
     : ''
   const skillSlot = (key: string, i: number) => {
     const ic = assets.icons[i]
@@ -3635,16 +3875,24 @@ function buildPrototypeHTML(state: UIDesignState, assets: GeneratedAssets): stri
     ? `.proto-skin-panel{position:relative;background-color:color-mix(in srgb,var(--panel) 78%,var(--bg))!important;background-image:url('${pTex}')!important;background-size:100% 100%!important;background-repeat:no-repeat!important;background-position:center!important;background-blend-mode:soft-light;border-color:transparent!important;overflow:hidden}.proto-skin-panel::after{content:'';position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(0,0,0,.18));pointer-events:none}.proto-skin-panel > *{position:relative;z-index:1}.dialog-bubble.proto-skin-panel,.panel-screen.proto-skin-panel,.shop-shelf.proto-skin-panel,.shop-bag.proto-skin-panel{background-image:none!important;background-color:color-mix(in srgb,var(--panel) 88%,var(--bg))!important;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border))!important;box-shadow:0 22px 72px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.08)!important}.dialog-bubble.proto-skin-panel::before,.panel-screen.proto-skin-panel::before,.shop-shelf.proto-skin-panel::before,.shop-bag.proto-skin-panel::before{content:'';position:absolute;inset:10px;z-index:0;background-image:url('${pTex}');background-size:100% 100%;background-repeat:no-repeat;background-position:center;opacity:.16;mix-blend-mode:screen;pointer-events:none}.dialog-bubble.proto-skin-panel::after,.panel-screen.proto-skin-panel::after,.shop-shelf.proto-skin-panel::after,.shop-bag.proto-skin-panel::after{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(0,0,0,.24)),radial-gradient(circle at 20% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 48%)}`
     : ''
   const protoAssetCss = [
-    btnN ? `.nav-btn,.panel-nav-item{background-image:url('${btnN}');background-size:100% 100%;background-color:transparent!important;border-color:transparent!important;color:#fff!important;text-shadow:0 1px 4px rgba(0,0,0,.75)}` : '',
-    btnP ? `.nav-btn:hover,.panel-nav-item.active{background-image:url('${btnP}');background-size:100% 100%;background-color:transparent!important;border-color:transparent!important;color:#fff!important}` : '',
+    btnN ? `.nav-btn,.panel-nav-item{${inlineButtonChromeStyle(btnN.replace(/'/g, "\\'"))}}` : '',
+    btnP ? `.nav-btn:hover,.panel-nav-item.active{${inlineButtonChromeStylePrimary(btnP.replace(/'/g, "\\'"))}}` : '',
     titleD ? `.shop-title,.weapon-title,.level-title,.pause-title,.panel-title{min-height:38px;padding:8px 22px;background-image:url('${titleD}');background-size:100% 100%;background-repeat:no-repeat;background-position:center;display:inline-flex;align-items:center;justify-content:center;color:#fff!important;text-shadow:0 2px 8px rgba(0,0,0,.82)}` : '',
   ].join('')
   const protoGenreChromeCss = buildPrototypeChromeCss({
     buttonPrimary: btnP,
     buttonNormal: btnN,
+    buttonPrimaryLong: assets.buttonPrimaryLong,
+    buttonNormalLong: assets.buttonNormalLong,
     titleDeco: titleD,
     panelTexture: pTex,
     icons: assets.icons,
+  })
+  const protoShellGateClasses = buildProtoGenreShellGateClasses({
+    buttonPrimary: btnP,
+    buttonNormal: btnN,
+    buttonPrimaryLong: assets.buttonPrimaryLong,
+    buttonNormalLong: assets.buttonNormalLong,
   })
   const panelClass = (base: string) => `${base}${pTex ? ' proto-skin-panel' : ''}`
   const svgDataUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
@@ -3699,13 +3947,13 @@ function buildPrototypeHTML(state: UIDesignState, assets: GeneratedAssets): stri
         renderModuleFeedback: () => '',
       })
       if (layoutInner) {
-        body = renderLayoutSceneBody({ bgSrc, markup: layoutInner, shellDataAttrs })
+        body = renderLayoutSceneBody({ bgSrc, markup: layoutInner, shellDataAttrs, shellExtraClasses: protoShellGateClasses })
       }
     }
 
     if (!body) {
       const previewMarkup = renderScreenPreviewMarkup(state, blueprint, screen.kind, { esc: (v) => v })
-      body = renderLayoutSceneBody({ bgSrc, markup: previewMarkup, shellDataAttrs })
+      body = renderLayoutSceneBody({ bgSrc, markup: previewMarkup, shellDataAttrs, shellExtraClasses: protoShellGateClasses })
     }
 
     return `
@@ -4735,6 +4983,41 @@ function injectCSS(): void {
     .uid-clib-pure-wrap { max-width: 520px; margin: 0 auto; padding: 20px 18px 28px; display: grid; gap: 20px; box-sizing: border-box; }
     .uid-clib-pure-sec { display: grid; gap: 8px; }
     .uid-clib-pure-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: rgba(242,244,247,.38); }
+    .uid-clib-zoom-hint {
+      margin-left: 8px;
+      font-size: 9px;
+      letter-spacing: .06em;
+      text-transform: none;
+      color: rgba(212,255,72,.55);
+      font-weight: 600;
+    }
+    .uid-clib-strip-zoom-note {
+      margin: 0;
+      font-size: 10px;
+      line-height: 1.45;
+      color: rgba(212,255,72,.48);
+      letter-spacing: .02em;
+    }
+    .uid-clib-long-strip-mat-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+    .uid-clib-long-strip-view {
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 4px;
+      background-color: rgba(0,0,0,.12);
+    }
+    .uid-clib-long-strip-view.uid-clib-missing {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 8px 12px;
+    }
     .uid-clib-viewable {
       cursor: zoom-in;
       transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
@@ -5182,7 +5465,7 @@ function injectCSS(): void {
       border-right: 1px solid rgba(255,255,255,.08);
     }
     .uid-clib-segment span:last-child { border-right: 0; }
-    .uid-clib-segment span.active { color: #0f1a26; background: var(--uid-accent, #ffb24a); font-weight: 700; }
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-segment span.active { color: #0f1a26; background: var(--uid-accent, #ffb24a); font-weight: 700; }
     .uid-clib-pager {
       display: flex;
       align-items: center;
@@ -5191,7 +5474,8 @@ function injectCSS(): void {
     }
     .uid-clib-pager button {
       min-width: 28px;
-      height: 28px;
+      min-height: 28px;
+      height: auto;
       border-radius: 6px;
       border: 1px solid rgba(255,255,255,.14);
       background: rgba(255,255,255,.05);
@@ -5203,7 +5487,8 @@ function injectCSS(): void {
       align-items: center;
       justify-content: center;
     }
-    .uid-clib-pager button.active {
+    /* flat 分页态：tabs-section 注入 chrome 后由统一 uid-clib-tabs-section-item 接管 */
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-pager button.active {
       border-color: var(--uid-accent, #ffb24a);
       color: var(--uid-accent, #ffb24a);
       background: color-mix(in srgb, var(--uid-accent, #ffb24a) 12%, transparent);
@@ -5388,22 +5673,51 @@ function injectCSS(): void {
       --uid-kit-surface: rgba(255,255,255,.045);
       --uid-kit-text: rgba(242,244,247,.86);
     }
-    .uid-clib-genre-preview .upv-bag-tab,
-    .uid-clib-genre-preview .uid-clib-segment,
-    .uid-clib-genre-preview .uid-clib-pager button,
-    .uid-clib-genre-preview .uid-clib-list-row,
-    .uid-clib-genre-preview .uid-clib-notice,
-    .uid-clib-genre-preview .uid-clib-bar {
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .upv-bag-tab,
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .uid-clib-segment span,
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .uid-clib-pager button,
+    .uid-preview-stage:not(.uid-chrome-btn-normal) .uid-clib-genre-preview .uid-clib-list-row,
+    .uid-preview-stage:not(.uid-chrome-btn-normal) .uid-clib-genre-preview .uid-clib-notice,
+    .uid-preview-stage:not(.uid-chrome-btn-normal) .uid-clib-genre-preview .uid-clib-bar {
       border-color: var(--uid-kit-border);
       background: var(--uid-kit-surface);
       border-radius: var(--uid-kit-radius);
     }
-    .uid-clib-genre-preview .upv-bag-tab.active,
-    .uid-clib-genre-preview .uid-clib-pager button.active,
-    .uid-clib-genre-preview .uid-clib-segment span.active {
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .upv-bag-tab.active,
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .uid-clib-pager button.active,
+    .uid-preview-stage:not(.uid-chrome-tabs-section) .uid-clib-genre-preview .uid-clib-segment span.active {
       border-color: color-mix(in srgb, var(--uid-kit-accent) 65%, transparent);
       color: var(--uid-kit-accent);
       background: color-mix(in srgb, var(--uid-kit-accent) 18%, transparent);
+    }
+    .uid-clib-dialog-strip-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: min(640px, 100%);
+    }
+    .uid-clib-dialog-strip-preview.uid-chrome-dialog-strip .upv-dialog-opt,
+    .uid-preview-stage.uid-chrome-dialog-strip .uid-clib-dialog-strip-preview .upv-dialog-opt {
+      width: 100%;
+      max-width: 100%;
+    }
+    .uid-preview-stage:not(.uid-chrome-dialog-strip) .uid-clib-dialog-strip-preview .upv-dialog-opt,
+    .uid-preview-stage:not(.uid-chrome-dialog-strip) .uid-clib-genre-preview .upv-dialog-opt {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 18px;
+      border-radius: var(--uid-kit-radius);
+      border: 1px solid var(--uid-kit-border);
+      background: var(--uid-kit-surface);
+      color: var(--uid-kit-text);
+      text-align: left;
+    }
+    .uid-preview-stage:not(.uid-chrome-dialog-strip) .uid-clib-dialog-strip-preview .upv-dialog-opt.primary,
+    .uid-preview-stage:not(.uid-chrome-dialog-strip) .uid-clib-genre-preview .upv-dialog-opt.primary {
+      border-color: color-mix(in srgb, var(--uid-kit-accent) 55%, transparent);
+      color: #fff;
+      background: color-mix(in srgb, var(--uid-kit-accent) 22%, rgba(0,0,0,.35));
     }
     .uid-clib-genre-preview .uid-clib-bar-label {
       display: flex;
@@ -5922,75 +6236,9 @@ function injectCSS(): void {
     .upv-results--arpg .gl-arpg-results-btn { min-height: 54px !important; font-size: 16px !important; }
     .upv-results--arpg .gl-arpg-results-btn.primary { min-height: 58px !important; min-width: 200px !important; }
 
-    /* ── 按钮图片注入（CSS 变量有值时覆盖背景色）── */
-    /* 普通按钮 */
-    .uid-preview-stage .upv-start-item:not(.primary),
-    .uid-preview-stage .upv-pause-item:not(.primary),
-    .uid-preview-stage .upv-results-btn:not(.primary),
-    .uid-preview-stage .upv-bag-tab,
-    .uid-preview-stage .uid-clib-segment span,
-    .uid-preview-stage .uid-clib-pager button,
-    .uid-preview-stage .uid-clib-notify-preview .uid-clib-notice.prompt button,
-    .uid-preview-stage .upv-shop-tabs button,
-    .uid-preview-stage .upv-map-filter button,
-    .uid-preview-stage .upv-dialog-opt {
-      background-image: var(--uid-btn-normal, none);
-      background-size: 100% 100%;
-      background-color: transparent;
-      border-color: transparent;
-      color: #fff;
-      text-shadow: 0 1px 3px rgba(0,0,0,.7);
-    }
-    .uid-preview-stage .gl-fps-topnav button,
-    .uid-preview-stage .gl-fps-loadout-tabs button,
-    .uid-preview-stage .gl-surv-topnav button,
-    .uid-preview-stage .gl-arpg-tabs button {
-      background-image: var(--uid-btn-normal, none);
-      background-size: 100% 100%;
-      background-color: transparent;
-      border-color: transparent;
-      color: #fff;
-      text-shadow: 0 1px 3px rgba(0,0,0,.7);
-    }
-    /* 主按钮 */
-    .uid-preview-stage .upv-start-item.primary,
-    .uid-preview-stage .gl-fps-match-btn,
-    .uid-preview-stage .gl-fps-loadout-confirm,
-    .uid-preview-stage .upv-pause-item.primary,
-    .uid-preview-stage .upv-results-btn.primary,
-    .uid-preview-stage .uid-clib-genre-preview .upv-bag-tab.active,
-    .uid-preview-stage .uid-clib-genre-preview .uid-clib-segment span.active,
-    .uid-preview-stage .uid-clib-genre-preview .uid-clib-pager button.active,
-    .uid-preview-stage .upv-shop-buy {
-      background-image: var(--uid-btn-primary, none);
-      background-size: 100% 100%;
-      background-color: transparent;
-      border-color: transparent;
-      color: #fff;
-      font-weight: 700;
-      text-shadow: 0 1px 4px rgba(0,0,0,.8);
-    }
-    /* 标签与分段：注入按钮底图时放大底版、缩小文字，避免字撑满底纹 */
-    .uid-preview-stage .uid-clib-tabs-preview .upv-bag-tab {
-      min-width: 84px;
-      min-height: 40px;
-      padding: 7px 22px;
-      font-size: 8px;
-      line-height: 1.1;
-      letter-spacing: 0.04em;
-    }
-    .uid-preview-stage .uid-clib-segment span {
-      min-width: 60px;
-      min-height: 36px;
-      padding: 7px 20px;
-      font-size: 8px;
-      letter-spacing: 0.04em;
-    }
-    .uid-preview-stage .uid-clib-pager button {
-      min-width: 32px;
-      height: 32px;
-      font-size: 8px;
-    }
+    /* ── 按钮底图：border-image 九宫格，避免长条 pause/menu 按钮横向拉伸 ── */
+    ${buildPreviewButtonChromeCss()}
+    ${buildPreviewPanelFrameCss()}
     .uid-preview-stage .uid-clib-pager em {
       font-size: 9px;
     }
@@ -6220,7 +6468,7 @@ const pipeline: IPipeline = {
   createUI(container: HTMLElement, panels?: PipelinePanels) {
     if (!ui) ui = new UIDesignPipelineUI()
     if (!panels) {
-      container.innerHTML = '<div style="padding:12px;color:var(--text-secondary)">UI设计管线缺少面板上下文。</div>'
+      container.innerHTML = `<div style="padding:12px;color:var(--text-secondary)">${t('error.missingPanels')}</div>`
       return
     }
     ui.mount(container, panels)

@@ -32,17 +32,20 @@ import { makeBlankScene } from '../editor/storygraph/sceneFactory'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { detectOrphans, defaultPlan } from '../scenario/reconnectOrphans'
 import { EpisodeRail } from './EpisodeRail'
+import { useT } from '../i18n'
 import type { BranchKind, Episode, Scene } from '../scenario/types'
 
 const EMPTY_EPISODES: Episode[] = []
 
 /** 四种下游类型的极简图例（与大图 BranchEdge 配色严格一致）。 */
-const KIND_LEGEND: { kind: BranchKind; label: string }[] = [
-  { kind: 'choice', label: '选择' },
-  { kind: 'qte_pass', label: 'QTE 通过' },
-  { kind: 'qte_fail', label: 'QTE 失败' },
-  { kind: 'auto', label: '自动' },
-]
+function kindLegend(t: (key: string) => string): { kind: BranchKind; label: string }[] {
+  return [
+    { kind: 'choice', label: t('tree.legend.choice') },
+    { kind: 'qte_pass', label: t('tree.legend.qtePass') },
+    { kind: 'qte_fail', label: t('tree.legend.qteFail') },
+    { kind: 'auto', label: t('tree.legend.auto') },
+  ]
+}
 
 /** 新建后继节点时可选的连线类型（含一句说明）。 */
 const BRANCH_KIND_OPTIONS: { kind: BranchKind; label: string; hint: string }[] = [
@@ -110,6 +113,7 @@ export function SceneMiniMap() {
 }
 
 function SceneMiniMapInner() {
+  const t = useT()
   const scenario = useScenarioStore((s) => s.scenario)
   const selectedSceneId = useScenarioStore((s) => s.selectedSceneId)
   const addScene = useScenarioStore((s) => s.addScene)
@@ -491,7 +495,7 @@ function SceneMiniMapInner() {
       <EpisodeRail />
 
       <div className="ks-mini-legend" aria-label="分支类型图例">
-        {KIND_LEGEND.map(({ kind, label }) => {
+        {kindLegend(t).map(({ kind, label }) => {
           const s = BRANCH_EDGE_STYLES[kind]
           return (
             <span key={kind} className="ks-mini-legend-item" title={label}>
@@ -563,17 +567,17 @@ function SceneMiniMapInner() {
       <div className="ks-mini-foot">
         <button type="button" className="ks-mini-add" onClick={onAddScene}>
           <span aria-hidden>＋</span>
-          {targetScene ? '在此后新建' : '新建节点'}
+          {targetScene ? t('tree.addAfter') : t('tree.addNode')}
         </button>
-        <div className="ks-mini-ops" role="group" aria-label="节点操作">
+        <div className="ks-mini-ops" role="group" aria-label="Node actions">
           <button
             type="button"
             className="ks-mini-op"
             onClick={onDuplicateScene}
             disabled={!targetScene}
-            title={targetScene ? `复制「${targetScene.title}」` : '先选中一个节点'}
+            title={targetScene ? `Duplicate “${targetScene.title}”` : 'Select a node first'}
           >
-            <span aria-hidden>⧉</span> 复制
+            <span aria-hidden>⧉</span> {t('tree.duplicate')}
           </button>
           <button
             type="button"
@@ -582,13 +586,13 @@ function SceneMiniMapInner() {
             disabled={!targetScene}
             title={
               !targetScene
-                ? '先选中一个节点'
+                ? 'Select a node first'
                 : targetScene.isEnding
-                  ? '取消结局标记'
-                  : '标记为结局节点'
+                  ? 'Clear ending flag'
+                  : 'Mark as ending node'
             }
           >
-            <span aria-hidden>★</span> 结局
+            <span aria-hidden>★</span> {t('tree.ending')}
           </button>
           <button
             type="button"
@@ -603,7 +607,7 @@ function SceneMiniMapInner() {
                   : `删除「${targetScene.title}」`
             }
           >
-            <span aria-hidden>🗑</span> 删除
+            <span aria-hidden>🗑</span> {t('tree.delete')}
           </button>
         </div>
       </div>

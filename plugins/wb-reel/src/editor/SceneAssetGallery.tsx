@@ -8,6 +8,7 @@ import {
   parseDockPayload,
   type DockDropPayload,
 } from './timeline/dndTypes'
+import { tf, useT } from '../i18n'
 
 /**
  * SceneAssetGallery —— 场景级图像 / 视频资产小画廊。
@@ -46,6 +47,7 @@ export function SceneAssetGallery({
    */
   compact?: boolean
 }) {
+  const t = useT()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ingest = useMediaStore((s) => s.ingest)
   const entries = useMediaStore((s) => s.entries)
@@ -193,7 +195,7 @@ export function SceneAssetGallery({
                 : '＋ 上传视频（可拖入）'}
           </button>
           <span className="ks-mono ks-asset-count">
-            {ids.length} 项 · 可拖入时间轴
+            {tf('assets.count', { count: ids.length })}
           </span>
         </div>
       )}
@@ -205,10 +207,10 @@ export function SceneAssetGallery({
               <>
                 <span className="ks-asset-empty-icon" aria-hidden>＋</span>
                 <span className="ks-asset-empty-main">
-                  点击空白处 / 拖文件到这里上传
+                  {t('assets.emptyUpload')}
                 </span>
                 <span className="ks-asset-empty-sub">
-                  也可在「打开素材库」里生成后自动入库
+                  {t('assets.emptySub')}
                 </span>
               </>
             ) : (

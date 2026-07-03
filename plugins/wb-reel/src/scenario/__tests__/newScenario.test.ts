@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { makeBlankScenario } from '../blankScenario'
+import { setLocale } from '../../i18n'
 import { useScenarioStore } from '../scenarioStore'
 import { getDemoScenario } from '../demoScenario'
 import { useSceneImageCache } from '../../media/sceneImageCache'
@@ -24,6 +25,8 @@ import {
  */
 
 describe('makeBlankScenario', () => {
+  beforeEach(() => setLocale('zh'))
+
   it('返回的剧本 id 每次都不一样（基于时间戳）', () => {
     const a = makeBlankScenario()
     const b = makeBlankScenario({ now: Date.now() + 1 })
@@ -63,6 +66,7 @@ describe('makeBlankScenario', () => {
 
 describe('scenarioStore · newScenario action', () => {
   beforeEach(() => {
+    setLocale('zh')
     __resetSceneCacheResetForTest()
     useScenarioStore.setState({
       scenario: getDemoScenario(),

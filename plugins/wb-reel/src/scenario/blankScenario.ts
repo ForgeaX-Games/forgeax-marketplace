@@ -1,5 +1,6 @@
 import type { Episode, Scenario } from './types'
 import { DEFAULT_EPISODE_ID } from './schemaMigrate'
+import { getLocale, t } from '../i18n'
 
 /**
  * 空白剧本工厂 —— 作者点顶栏 ➕「新的故事」时用。
@@ -25,6 +26,18 @@ export interface MakeBlankOpts {
 
 const DEFAULT_TITLE = '新的故事'
 
+function defaultTitle(): string {
+  return getLocale() === 'en' ? t('blank.title') : DEFAULT_TITLE
+}
+
+function defaultEpisodeTitle(): string {
+  return t('blank.episode')
+}
+
+function defaultSceneTitle(): string {
+  return t('blank.scene')
+}
+
 export function makeBlankScenario(opts: MakeBlankOpts = {}): Scenario {
   const now = opts.now ?? Date.now()
   // 后缀防止同一毫秒连点两次"新建剧本"撞 id 把前一个空白挤掉。
@@ -35,7 +48,7 @@ export function makeBlankScenario(opts: MakeBlankOpts = {}): Scenario {
 
   const defaultEpisode: Episode = {
     id: DEFAULT_EPISODE_ID,
-    title: '第一集',
+    title: defaultEpisodeTitle(),
     rootSceneId,
     order: 0,
     createdAt: now,
@@ -43,7 +56,7 @@ export function makeBlankScenario(opts: MakeBlankOpts = {}): Scenario {
 
   return {
     id,
-    title: opts.title ?? DEFAULT_TITLE,
+    title: opts.title ?? defaultTitle(),
     rootSceneId,
     defaultCharMs: 32,
     schemaVersion: 8,
@@ -57,7 +70,7 @@ export function makeBlankScenario(opts: MakeBlankOpts = {}): Scenario {
     scenes: {
       [rootSceneId]: {
         id: rootSceneId,
-        title: '01 · 开始',
+        title: defaultSceneTitle(),
         media: {
           kind: 'IMAGE_PROMPT',
           prompt: '',

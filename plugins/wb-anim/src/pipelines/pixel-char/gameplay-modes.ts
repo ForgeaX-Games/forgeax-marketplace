@@ -12,6 +12,8 @@
  *                silhouette readability and gravity-based motion.
  */
 
+import { getLocale } from '../../i18n'
+
 import type { ChibiAction, Direction } from './actions'
 
 export type GameplayMode = 'rpg' | 'platformer'
@@ -65,6 +67,29 @@ export const GAMEPLAY_MODES: GameplayModePreset[] = [
     turnaroundLayout: 'single-side',
   },
 ]
+
+const GAMEPLAY_DISPLAY_EN: Record<GameplayMode, { label: string; shortLabel: string; description: string }> = {
+  rpg: {
+    label: 'RPG / Top-down',
+    shortLabel: 'RPG',
+    description: 'Classic 4-direction RPG — actions generate front / back / left / right facings',
+  },
+  platformer: {
+    label: 'Platformer',
+    shortLabel: 'Side',
+    description: '2D side-scroller — only right-facing animations (mirrored at runtime)',
+  },
+}
+
+export function gameplayModeLabel(mode: GameplayModePreset): string {
+  if (getLocale() !== 'en') return mode.label
+  return GAMEPLAY_DISPLAY_EN[mode.id]?.label ?? mode.label
+}
+
+export function gameplayModeDescription(mode: GameplayModePreset): string {
+  if (getLocale() !== 'en') return mode.description
+  return GAMEPLAY_DISPLAY_EN[mode.id]?.description ?? mode.description
+}
 
 export function getGameplayMode(id: string | undefined | null): GameplayModePreset {
   return (

@@ -94,6 +94,7 @@ import {
   type GenJob,
 } from '../forge/generationQueueStore'
 import { useToastStore } from '../ui/toastStore'
+import { t } from '../i18n'
 
 /*
  * 轨道显隐已迁移到运行期偏好(trackVisibility.ts)+ 左侧轨头眼睛 +「轨道」管理面板。
@@ -3133,7 +3134,7 @@ function VideoTrimTrack({
       <div className="ks-track ks-track-video is-empty">
         <span className="ks-track-label ks-mono">VIDEO</span>
         <span className="ks-track-empty-hint ks-mono">
-          · 尚未生成视频 · 生成后将铺到本轨（与下方图像对齐）·
+          {t('timeline.videoEmpty')}
         </span>
       </div>
     )
@@ -3262,7 +3263,7 @@ function ShotTrack({
       <div className="ks-track ks-track-shot is-empty">
         <span className="ks-track-label ks-mono">IMAGE</span>
         <span className="ks-track-empty-hint ks-mono">
-          · 尚未分镜 · 在 Forge 拆剧本时自动生成 ·
+          {t('timeline.shotsEmpty')}
         </span>
       </div>
     )

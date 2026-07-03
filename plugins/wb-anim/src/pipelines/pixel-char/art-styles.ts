@@ -18,6 +18,8 @@
  * game name, which Gemini tends to ignore.
  */
 
+import { getLocale } from '../../i18n'
+
 export interface ArtStylePreset {
   id: string
   label: string
@@ -203,6 +205,67 @@ export const ART_STYLES: ArtStylePreset[] = [
       'No clean vector outlines, no pixel grid, no 3D rendering, no airbrush gradients, no photoreal details.',
   },
 ]
+
+const ART_STYLE_DISPLAY_EN: Record<string, { label: string; description: string }> = {
+  'match-reference': {
+    label: 'Match reference',
+    description: 'No preset — keep the reference line art, shading, palette, and proportions',
+  },
+  'pixel-16bit': {
+    label: '16-bit pixel',
+    description: 'Classic SNES-era pixels, chibi 4–5 heads, solid outlines',
+  },
+  'pixel-32bit': {
+    label: '32-bit detailed pixel',
+    description: 'PS1 / modern pixel look with limited dithering and gradient light',
+  },
+  origami: {
+    label: 'Origami craft',
+    description: 'Geometric folds, paper texture, hard shadows — Paper Mario style',
+  },
+  'hd-2d': {
+    label: 'HD-2D pseudo-3D',
+    description: 'Octopath style — pixel character with HD lighting and depth',
+  },
+  'hand-drawn-cartoon': {
+    label: 'Hand-drawn cartoon',
+    description: 'Bold ink outlines + cel flats — Cuphead / 1930s animation feel',
+  },
+  'cel-anime': {
+    label: 'Cel anime',
+    description: 'Clean Japanese anime line art with cel shading',
+  },
+  'vector-flat': {
+    label: 'Vector flat',
+    description: 'Minimal vector blocks, geometric silhouettes, no texture',
+  },
+  'paper-cut': {
+    label: 'Paper-cut silhouette',
+    description: 'Layered paper cutouts with hard cast shadows — Limbo / Inside vibe',
+  },
+  watercolor: {
+    label: 'Watercolor storybook',
+    description: 'Soft watercolor washes with light sketch — picture book / Gris style',
+  },
+  voxel: {
+    label: 'Voxel blocks',
+    description: 'Crossy Road–style voxel assembly',
+  },
+  crayon: {
+    label: 'Crayon childlike',
+    description: 'Waxy crayon lines and scribbled fills — kids’ book illustration',
+  },
+}
+
+export function artStyleLabel(preset: ArtStylePreset): string {
+  if (getLocale() !== 'en') return preset.label
+  return ART_STYLE_DISPLAY_EN[preset.id]?.label ?? preset.label
+}
+
+export function artStyleDescription(preset: ArtStylePreset): string {
+  if (getLocale() !== 'en') return preset.description
+  return ART_STYLE_DISPLAY_EN[preset.id]?.description ?? preset.description
+}
 
 export function getArtStyle(id: string | undefined | null): ArtStylePreset | undefined {
   if (!id) return undefined

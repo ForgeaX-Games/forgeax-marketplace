@@ -46,6 +46,7 @@ import {
 } from './dndTypes'
 import { useDialogueSelection } from './dialogueSelection'
 import { useClipSelection } from './clipSelection'
+import { useT } from '../../i18n'
 
 interface Props {
   scenario: Scenario
@@ -167,6 +168,7 @@ function DockTab({
 // （→ forgeView='assets' 为本节点智能生成/管理素材）+ 本节点成品图廊
 // （SceneAssetGallery，可上传 / 拖文件入库 / 拖进时间轴）。素材库跟随当前节点。
 function AssetsDock({ sceneId }: { sceneId: string }) {
+  const t = useT()
   const selectScene = useScenarioStore((s) => s.selectScene)
   const setForgeView = useShellStore((s) => s.setForgeView)
   const sceneImages = useScenarioStore(
@@ -181,10 +183,10 @@ function AssetsDock({ sceneId }: { sceneId: string }) {
           selectScene(sceneId)
           setForgeView('assets')
         }}
-        title="打开素材库 · 为本节点智能生成/管理图像与视频素材"
+        title={t('assets.openLibraryTitle')}
       >
         <span aria-hidden>🎨</span>
-        打开素材库
+        {t('assets.openLibrary')}
         <span aria-hidden>→</span>
       </button>
       <SceneAssetGallery sceneId={sceneId} kind="image" ids={sceneImages} compact />

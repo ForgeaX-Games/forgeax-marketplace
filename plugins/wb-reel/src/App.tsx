@@ -21,6 +21,7 @@ import { hydrateMediaFromIdb } from './media/hydrateMediaFromIdb'
 import { getAllMedia } from './media/mediaIdb'
 import { primeMediaEntry, useMediaStore } from './media/mediaStore'
 import { bootScenarioPersist, flushScenarioPersist } from './scenario/scenarioPersistBoot'
+import { makeBlankScenario } from './scenario/blankScenario'
 import { loadReelGameFromPackIndex } from './player/loadReelGameFromPackIndex'
 import { collectScenarioRefs } from './scenario/pkg/collectScenarioRefs'
 import { bootUpstreamCharacter } from './scenario/upstreamCharacter'
@@ -110,6 +111,14 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
   const [renderOnly] = useState(() => {
     try {
       return new URLSearchParams(window.location.search).get('surface') === 'render'
+    } catch {
+      return false
+    }
+  })
+
+  const [marketplaceCapture] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('marketplace') === '1'
     } catch {
       return false
     }
@@ -525,7 +534,20 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
   }, [])
 
   useEffect(() => {
+    if (!marketplaceCapture) return
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith('reel-studio')) localStorage.removeItem(k)
+      }
+    } catch { /* best-effort */ }
+    useScenarioStore.getState().loadScenario(makeBlankScenario({ now: 42 }))
+    useShellStore.getState().setActiveTab('forge')
+    useShellStore.getState().setForgeView('tree')
+  }, [marketplaceCapture])
+
+  useEffect(() => {
     if (persistence === 'memory') return
+    if (marketplaceCapture) return
     /*
      * player-only 预览态 slim boot（2026-06）——
      *   只按 ?scn 把剧本从磁盘加载进来，跳过编辑器专属副作用：

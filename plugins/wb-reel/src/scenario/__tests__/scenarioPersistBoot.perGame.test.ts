@@ -7,6 +7,7 @@ import { loadDb } from '../scenarioPersist'
 import { useScenarioStore } from '../scenarioStore'
 import { getDemoScenario, BUNDLED_DEMO_ID } from '../demoScenario'
 import { __resetGameScopeForTest } from '../../shell/gameScope'
+import { setLocale } from '../../i18n'
 
 /**
  * 防污染回归 —— 对应用户反馈：
@@ -62,6 +63,7 @@ describe('scenarioPersistBoot · per-game 新建工程防污染', () => {
   })
 
   it('per-game 作用域 + 空库：store 从 demo-001 切到全新空白剧本（不留在 demo）', () => {
+    setLocale('zh')
     window.history.replaceState({}, '', '/?slug=testgame')
     __resetGameScopeForTest()
     storage = installMemoryLocalStorage()

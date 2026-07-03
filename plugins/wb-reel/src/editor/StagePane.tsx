@@ -17,6 +17,7 @@ import { Timeline } from './Timeline'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { FOCUS_STAGE_EVENT } from './storygraph/sceneNodeHandlers'
 import { useShellStore } from '../shell/shellStore'
+import { useT } from '../i18n'
 import { regenerateShotKeyframe } from '../forge/keyframeQueueTrigger'
 import {
   decideSeekFromHoverWithTrim,
@@ -103,6 +104,7 @@ export function StagePane({
   rightSlot,
   showDialogue = true,
 }: StagePaneProps = {}) {
+  const t = useT()
   const scenario = useScenarioStore((s) => s.scenario)
   const storeSceneId = useScenarioStore((s) => s.selectedSceneId)
   // 受控优先：drawer 直接指定要渲染的节点，避免与时间轴各读各的源造成错位。
@@ -722,10 +724,10 @@ export function StagePane({
             )}
             <div className="ks-ph-headline">
               {isPending
-                ? '生成中…'
+                ? t('stage.generating')
                 : isError
                   ? 'GENERATION FAILED'
-                  : 'NO IMAGE · 点击下方按钮生成'}
+                  : t('stage.noImage')}
             </div>
             <div className="ks-ph-prompt ks-cn">
               {activeShot?.prompt ??
@@ -740,12 +742,12 @@ export function StagePane({
               disabled={isPending || (!activeShot && !scene.media.prompt)}
             >
               {isPending
-                ? '↻ 渲染中'
+                ? t('stage.rendering')
                 : isError
-                  ? '↻ 重试生成'
+                  ? '↻ Retry'
                   : activeShot
-                    ? `↻ 生成镜 ${(activeShot.order ?? 0) + 1} 关键帧`
-                    : `↻ 用 ${imgClient.getModel()} 生成`}
+                    ? `↻ Generate keyframe ${(activeShot.order ?? 0) + 1}`
+                    : `↻ Generate with ${imgClient.getModel()}`}
             </button>
           </div>
         )}
