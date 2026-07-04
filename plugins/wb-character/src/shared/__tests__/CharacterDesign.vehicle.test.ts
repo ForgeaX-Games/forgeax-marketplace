@@ -16,7 +16,7 @@
  *   - 概念 prompt：必须是「单台载具 solo vehicle / 中性背景 / 无人无驾驶
  *     员」，不能出现 `reference sheet` / `turnaround` 等多视图禁词。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll } from 'vitest'
 import {
   buildVehicleConceptPrompt,
   conceptGenButtonLabel,
@@ -25,6 +25,7 @@ import {
   shouldAutoRouteNpcToPixel,
   shouldSkipFinalSheetForNpc,
 } from '../CharacterDesign'
+import { setLocale } from '../../i18n'
 
 describe('conceptVariantCount() — vehicle', () => {
   it('载具产 1 张概念图（下游 vehicle-design 自己切多视角）', () => {
@@ -39,6 +40,8 @@ describe('conceptVariantCount() — vehicle', () => {
 })
 
 describe('conceptGenButtonLabel() — vehicle', () => {
+  beforeAll(() => setLocale('zh'))
+
   it('载具按钮显示「生成载具设计图」', () => {
     expect(conceptGenButtonLabel('vehicle')).toBe('🎨 生成载具设计图')
   })

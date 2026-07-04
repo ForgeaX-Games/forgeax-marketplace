@@ -1,5 +1,6 @@
 import type { SceneManifest } from '../core/types'
 import type { SceneManager } from '../core/SceneManager'
+import { t } from '../i18n'
 
 export class SceneSelector {
   private select: HTMLSelectElement | null = null
@@ -26,7 +27,7 @@ export class SceneSelector {
     })
 
     const label = document.createElement('span')
-    label.textContent = '场景'
+    label.textContent = t('scene.label')
     label.style.color = 'var(--text-secondary)'
 
     this.container.appendChild(label)

@@ -14,7 +14,7 @@
  *   - 概念 prompt：必须是「单个怪物 solo creature 居中全身中性绿背景」，
  *     不能出现 `reference sheet` / `turnaround` 等会触发多视图的禁词。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll } from 'vitest'
 import {
   buildMonsterConceptPrompt,
   conceptGenButtonLabel,
@@ -23,6 +23,7 @@ import {
   shouldAutoRouteNpcToPixel,
   shouldSkipFinalSheetForNpc,
 } from '../CharacterDesign'
+import { setLocale } from '../../i18n'
 
 describe('conceptVariantCount() — monster', () => {
   it('returns 4 for monster — BOSS/精英值得挑图', () => {
@@ -31,6 +32,8 @@ describe('conceptVariantCount() — monster', () => {
 })
 
 describe('conceptGenButtonLabel() — monster', () => {
+  beforeAll(() => setLocale('zh'))
+
   it('returns monster-specific label', () => {
     expect(conceptGenButtonLabel('monster')).toBe('🎨 生成 4 张怪物概念图')
   })

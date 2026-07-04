@@ -35,6 +35,7 @@ import {
   loadTurnaround3DHandoffViews,
   type TurnaroundViewAsset,
 } from '../lib/api-client'
+import { t } from '../i18n'
 
 /**
  * 决定是否要把「职业 NPC / 路人」的角色设计流程自动跳到像素动画管线。
@@ -94,10 +95,10 @@ export function conceptVariantCount(role: CharacterRole | undefined | null): num
 }
 
 export function conceptGenButtonLabel(role: CharacterRole | undefined | null): string {
-  if (role === 'npc') return '生成 NPC 参考稿'
-  if (role === 'monster') return '生成 4 张怪物概念图'
-  if (role === 'vehicle') return '生成载具设计图'
-  return '生成 4 张概念图'
+  if (role === 'npc') return t('conceptGen.npc')
+  if (role === 'monster') return t('conceptGen.monster')
+  if (role === 'vehicle') return t('conceptGen.vehicle')
+  return t('conceptGen.hero')
 }
 
 function cdRoleIcon(role: CharacterRole | 'hero'): string {
@@ -430,10 +431,10 @@ interface HistoryEntry {
 
 function roleHistoryLabel(role: CharacterRole | undefined | null): string {
   switch (role) {
-    case 'npc': return 'NPC'
-    case 'monster': return '怪物'
-    case 'vehicle': return '载具'
-    default: return '主角'
+    case 'npc': return t('roleHistory.npc')
+    case 'monster': return t('roleHistory.monster')
+    case 'vehicle': return t('roleHistory.vehicle')
+    default: return t('roleHistory.hero')
   }
 }
 
@@ -634,44 +635,44 @@ function renderMonsterFields(p: CharacterProfileRenderView): string {
 
   return `
           <div class="cd-field" data-cd-role="monster-only" ${style}>
-            <label class="cd-label">怪物分类 ${crumb}</label>
+            <label class="cd-label">${t('field.monsterCategory')} ${crumb}</label>
             <select class="cd-select" data-cd="monster-cat-select">
-              <option value="">选择怪物分类</option>
+              <option value="">${t('monsterCategory.placeholder')}</option>
               ${Object.keys(MONSTER_TREE).map(k => `<option value="${esc(k)}" ${cat === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
             </select>
           </div>
 
           <div class="cd-field" data-cd-role="monster-only" style="display:${visible && cat ? '' : 'none'}">
-            <label class="cd-label">次分类 <span class="cd-optional">(决定基础形态)</span></label>
+            <label class="cd-label">${t('field.monsterSub')} <span class="cd-optional">${t('field.monsterSub.hint')}</span></label>
             <select class="cd-select" data-cd="monster-sub-select">
-              <option value="">选择次分类</option>
+              <option value="">${t('monsterSub.placeholder')}</option>
               ${subOptions.map(s => `<option value="${esc(s)}" ${sub === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
             </select>
           </div>
 
           <div class="cd-field" data-cd-role="monster-only" style="display:${visible && cat && sub ? '' : 'none'}">
-            <label class="cd-label">种族 <span class="cd-optional">(最细识别词;可自定义)</span></label>
+            <label class="cd-label">${t('field.monsterRace')} <span class="cd-optional">${t('field.monsterRace.hint')}</span></label>
             <select class="cd-select" data-cd="monster-race-select">
-              <option value="">选择种族</option>
+              <option value="">${t('monsterRace.placeholder')}</option>
               ${raceOptions.map(r => `<option value="${esc(r)}" ${p.monsterRace === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
             </select>
             <input class="cd-input cd-input-sm" data-cd="monster-race-custom" type="text"
-              placeholder="或自定义种族名..." value="${raceOptions.includes(p.monsterRace ?? '') ? '' : esc(p.monsterRace ?? '')}" />
+              placeholder="${t('monsterRace.custom.placeholder')}" value="${raceOptions.includes(p.monsterRace ?? '') ? '' : esc(p.monsterRace ?? '')}" />
           </div>
 
           <div class="cd-field-row" data-cd-role="monster-only" style="display:${visible && cat ? '' : 'none'}">
             <div class="cd-field cd-field-half">
-              <label class="cd-label">体型</label>
+              <label class="cd-label">${t('field.monsterBody')}</label>
               <select class="cd-select" data-cd="monster-body-select">
-                ${MONSTER_BODY_PRESETS.map(b => `<option value="${esc(b.id)}" ${(p.monsterBodyType ?? 'default') === b.id ? 'selected' : ''}>${esc(b.label)}</option>`).join('')}
+                ${MONSTER_BODY_PRESETS.map(b => `<option value="${esc(b.id)}" ${(p.monsterBodyType ?? 'default') === b.id ? 'selected' : ''}>${esc(t('bodytype.' + b.id + '.label'))}</option>`).join('')}
               </select>
             </div>
             <div class="cd-field cd-field-half">
-              <label class="cd-label">威胁等级</label>
+              <label class="cd-label">${t('field.monsterThreat')}</label>
               <select class="cd-select" data-cd="monster-threat-select">
-                <option value="normal" ${threat === 'normal' ? 'selected' : ''}>普通</option>
-                <option value="elite" ${threat === 'elite' ? 'selected' : ''}>精英</option>
-                <option value="boss" ${threat === 'boss' ? 'selected' : ''}>BOSS</option>
+                <option value="normal" ${threat === 'normal' ? 'selected' : ''}>${t('threat.normal')}</option>
+                <option value="elite" ${threat === 'elite' ? 'selected' : ''}>${t('threat.elite')}</option>
+                <option value="boss" ${threat === 'boss' ? 'selected' : ''}>${t('threat.boss')}</option>
               </select>
             </div>
           </div>
@@ -708,43 +709,43 @@ function renderVehicleFields(p: VehicleProfileRenderView): string {
   // breadcrumb 仅在已选大类时出现,避免空 label
   const crumb = cat
     ? (sub
-        ? `<span class="cd-crumb">${esc(cat.label)} <span class="cd-crumb-sep">›</span> ${esc(sub.label)}</span>`
-        : `<span class="cd-crumb">${esc(cat.label)}</span>`)
+        ? `<span class="cd-crumb">${esc(t('vehiclecat.' + cat.id + '.label'))} <span class="cd-crumb-sep">›</span> ${esc(t('vehiclesub.' + cat.id + '.' + sub.id + '.label'))}</span>`
+        : `<span class="cd-crumb">${esc(t('vehiclecat.' + cat.id + '.label'))}</span>`)
     : ''
 
   return `
           <div class="cd-field" data-cd-role="vehicle-only" ${style}>
-            <label class="cd-label">载具大类 ${crumb}</label>
+            <label class="cd-label">${t('field.vehicleCategory')} ${crumb}</label>
             <select class="cd-select" data-cd="vehicle-cat-select">
-              <option value="">选择载具大类</option>
-              ${VEHICLE_CATEGORIES.map(c => `<option value="${esc(c.id)}" ${catId === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+              <option value="">${t('vehicleCategory.placeholder')}</option>
+              ${VEHICLE_CATEGORIES.map(c => `<option value="${esc(c.id)}" ${catId === c.id ? 'selected' : ''}>${esc(t('vehiclecat.' + c.id + '.label'))}</option>`).join('')}
             </select>
           </div>
 
           <div class="cd-field" data-cd-role="vehicle-only" style="display:${visible && cat ? '' : 'none'}">
-            <label class="cd-label">载具子类型 <span class="cd-optional">(决定生成时的载具主体描述)</span></label>
+            <label class="cd-label">${t('field.vehicleSubtype')} <span class="cd-optional">${t('field.vehicleSubtype.hint')}</span></label>
             <select class="cd-select" data-cd="vehicle-subtype-select">
-              <option value="">选择载具子类型</option>
-              ${cat ? cat.subtypes.map(s => `<option value="${esc(s.id)}" ${p.vehicleSubtype === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('') : ''}
+              <option value="">${t('vehicleSubtype.placeholder')}</option>
+              ${cat ? cat.subtypes.map(s => `<option value="${esc(s.id)}" ${p.vehicleSubtype === s.id ? 'selected' : ''}>${esc(t('vehiclesub.' + cat.id + '.' + s.id + '.label'))}</option>`).join('') : ''}
             </select>
             <textarea class="cd-textarea" data-cd="vehicle-subtype-custom" rows="2"
-              placeholder="自定义载具描述,例如:六足蜘蛛形机甲,前端搭载激光炮塔..."
+              placeholder="${t('field.vehicleSubtype.custom.placeholder')}"
               style="display:${showCustomTextarea ? '' : 'none'};margin-top:6px">${esc(p.vehicleSubtypeCustom ?? '')}</textarea>
           </div>
 
           <div class="cd-field-row" data-cd-role="vehicle-only" style="display:${visible && cat ? '' : 'none'}">
             <div class="cd-field cd-field-half">
-              <label class="cd-label">美术风格 <span class="cd-optional">(可选)</span></label>
+              <label class="cd-label">${t('field.vehicleStyle')} <span class="cd-optional">${t('field.vehicleStyle.hint')}</span></label>
               <select class="cd-select" data-cd="vehicle-style-select">
-                <option value="" ${!styleId ? 'selected' : ''}>默认</option>
-                ${VEHICLE_STYLES.map(s => `<option value="${esc(s.id)}" ${styleId === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}
+                <option value="" ${!styleId ? 'selected' : ''}>${t('field.vehicleStyle.default')}</option>
+                ${VEHICLE_STYLES.map(s => `<option value="${esc(s.id)}" ${styleId === s.id ? 'selected' : ''}>${esc(t('vehiclestyle.' + s.id + '.label'))}</option>`).join('')}
               </select>
             </div>
             <div class="cd-field cd-field-half">
-              <label class="cd-label">时代背景 <span class="cd-optional">(可选)</span></label>
+              <label class="cd-label">${t('field.vehicleEra')} <span class="cd-optional">${t('field.vehicleEra.hint')}</span></label>
               <select class="cd-select" data-cd="vehicle-era-select">
-                <option value="" ${!eraId ? 'selected' : ''}>默认</option>
-                ${VEHICLE_ERAS.map(e => `<option value="${esc(e.id)}" ${eraId === e.id ? 'selected' : ''}>${esc(e.label)}</option>`).join('')}
+                <option value="" ${!eraId ? 'selected' : ''}>${t('field.vehicleEra.default')}</option>
+                ${VEHICLE_ERAS.map(e => `<option value="${esc(e.id)}" ${eraId === e.id ? 'selected' : ''}>${esc(t('vehicleera.' + e.id + '.label'))}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -953,7 +954,7 @@ export class CharacterDesign {
 
       if (data.generating) {
         this.progressId = data.progressId ?? 'progress'
-        this.progressText = data.progressText ?? '生成中...'
+        this.progressText = data.progressText ?? t('progress.generating')
       } else if (!this.generating) {
         this.progressId = null
         this.progressText = null
@@ -1024,7 +1025,7 @@ export class CharacterDesign {
           sessionStorage.setItem(CharacterDesign.GEN_STARTED_AT_KEY, String(Date.now()))
         }
         sessionStorage.setItem(CharacterDesign.GEN_PROGRESS_ID_KEY, this.progressId || 'progress')
-        sessionStorage.setItem(CharacterDesign.GEN_PROGRESS_TEXT_KEY, this.progressText || '生成中...')
+        sessionStorage.setItem(CharacterDesign.GEN_PROGRESS_TEXT_KEY, this.progressText || t('progress.generating'))
       } else {
         this.clearGenerationSnapshot()
       }
@@ -1044,10 +1045,10 @@ export class CharacterDesign {
     try {
       return {
         progressId: sessionStorage.getItem(CharacterDesign.GEN_PROGRESS_ID_KEY) || 'progress',
-        progressText: sessionStorage.getItem(CharacterDesign.GEN_PROGRESS_TEXT_KEY) || '生成中...',
+        progressText: sessionStorage.getItem(CharacterDesign.GEN_PROGRESS_TEXT_KEY) || t('progress.generating'),
       }
     } catch {
-      return { progressId: 'progress', progressText: '生成中...' }
+      return { progressId: 'progress', progressText: t('progress.generating') }
     }
   }
 
@@ -1188,17 +1189,17 @@ export class CharacterDesign {
     const isHero = !r || r === 'hero'
     return `
       <div class="cd-role-tabbar">
-        <button class="cd-role-tab ${isHero ? 'active' : ''}" data-cd-role-tab="hero" title="主角英雄走完整战斗管线">
-          <span class="cd-role-icon">${cdRoleIcon('hero')}</span><span class="cd-role-label">主角</span>
+        <button class="cd-role-tab ${isHero ? 'active' : ''}" data-cd-role-tab="hero" title="${t('roleTab.hero.title')}">
+          <span class="cd-role-icon">${cdRoleIcon('hero')}</span><span class="cd-role-label">${t('roleTab.hero')}</span>
         </button>
-        <button class="cd-role-tab ${r === 'npc' ? 'active' : ''}" data-cd-role-tab="npc" title="职业 NPC 是普通路人,直达像素管线">
-          <span class="cd-role-icon">${cdRoleIcon('npc')}</span><span class="cd-role-label">NPC</span>
+        <button class="cd-role-tab ${r === 'npc' ? 'active' : ''}" data-cd-role-tab="npc" title="${t('roleTab.npc.title')}">
+          <span class="cd-role-icon">${cdRoleIcon('npc')}</span><span class="cd-role-label">${t('roleTab.npc')}</span>
         </button>
-        <button class="cd-role-tab ${r === 'monster' ? 'active' : ''}" data-cd-role-tab="monster" title="敌方生物 / BOSS">
-          <span class="cd-role-icon">${cdRoleIcon('monster')}</span><span class="cd-role-label">怪物</span>
+        <button class="cd-role-tab ${r === 'monster' ? 'active' : ''}" data-cd-role-tab="monster" title="${t('roleTab.monster.title')}">
+          <span class="cd-role-icon">${cdRoleIcon('monster')}</span><span class="cd-role-label">${t('roleTab.monster')}</span>
         </button>
-        <button class="cd-role-tab ${r === 'vehicle' ? 'active' : ''}" data-cd-role-tab="vehicle" title="可驾驶 / 可骑乘的产线产物">
-          <span class="cd-role-icon">${cdRoleIcon('vehicle')}</span><span class="cd-role-label">载具</span>
+        <button class="cd-role-tab ${r === 'vehicle' ? 'active' : ''}" data-cd-role-tab="vehicle" title="${t('roleTab.vehicle.title')}">
+          <span class="cd-role-icon">${cdRoleIcon('vehicle')}</span><span class="cd-role-label">${t('roleTab.vehicle')}</span>
         </button>
       </div>
     `
@@ -1274,39 +1275,42 @@ export class CharacterDesign {
   // ── Left Panel ───────────────────────────────────────────────
 
   private characterRoleLabel(role: CharacterRole | undefined | null): string {
-    if (role === 'npc') return '职业 NPC'
-    if (role === 'monster') return '怪物敌人'
-    if (role === 'vehicle') return '载具'
-    return '主角英雄'
+    if (role === 'npc') return t('role.npc')
+    if (role === 'monster') return t('role.monster')
+    if (role === 'vehicle') return t('role.vehicle')
+    return t('role.hero')
   }
 
   private worldLabel(worldSetting: string | undefined): string {
     const world = WORLD_OPTIONS.find(w => w.id === worldSetting)
-    return world?.label ?? (worldSetting?.trim() || '未选择世界观')
+    if (world) return t('world.' + world.id + '.label')
+    return worldSetting?.trim() || t('world.unselected')
   }
 
   private artStyleLabel(profile: CharacterProfile): string {
-    if (profile.artStyle === 'custom') return profile.artStyleCustom?.trim() || '自定义画风'
+    if (profile.artStyle === 'custom') return profile.artStyleCustom?.trim() || t('artStyle.custom.default')
     const style = ART_STYLE_OPTIONS.find(s => s.id === profile.artStyle)
-    return style?.label ?? '默认写实'
+    return style ? t('artstyle.' + style.id + '.label') : t('artStyle.default.fallback')
   }
 
   private professionLabel(profile: CharacterProfile): string {
-    if (profile.characterRole === 'npc') return profile.npcOccupation?.trim() || '未选择 NPC 职业'
+    if (profile.characterRole === 'npc') return profile.npcOccupation?.trim() || t('profession.npc.unselected')
     if (profile.characterRole === 'monster') {
       return [profile.monsterCategory, profile.monsterSubCategory, profile.monsterRace]
         .filter(Boolean)
-        .join(' / ') || '未选择怪物分类'
+        .join(' / ') || t('profession.monster.unselected')
     }
     if (profile.characterRole === 'vehicle') {
       const category = VEHICLE_CATEGORIES.find(c => c.id === profile.vehicleCategory)
       const subtype = category?.subtypes.find(s => s.id === profile.vehicleSubtype)
-      return [category?.label, subtype?.label ?? profile.vehicleSubtypeCustom]
+      const catLabel = category ? t('vehiclecat.' + category.id + '.label') : undefined
+      const subLabel = subtype ? t('vehiclesub.' + category!.id + '.' + subtype.id + '.label') : profile.vehicleSubtypeCustom
+      return [catLabel, subLabel]
         .filter(Boolean)
-        .join(' / ') || '未选择载具类型'
+        .join(' / ') || t('profession.vehicle.unselected')
     }
-    const combat = profile.combatType === 'ranged' ? '远程' : '近战'
-    return `${profile.charClass?.trim() || '未选择职业'} · ${combat}`
+    const combat = profile.combatType === 'ranged' ? t('status.ranged') : t('status.melee')
+    return `${profile.charClass?.trim() || t('profession.hero.unselected')} · ${combat}`
   }
 
   private buildLeft(): void {
@@ -1316,7 +1320,7 @@ export class CharacterDesign {
     const roleLabel = this.characterRoleLabel(p.characterRole)
     const identitySummary = p.name?.trim()
       ? `${p.name.trim()} · ${roleLabel}`
-      : `未命名 · ${roleLabel}`
+      : `${t('identity.unnamed')} · ${roleLabel}`
     const worldLabel = this.worldLabel(p.worldSetting)
     const professionLabel = this.professionLabel(p)
     const styleLabel = this.artStyleLabel(p)
@@ -1326,35 +1330,35 @@ export class CharacterDesign {
     this.leftEl.innerHTML = `
       <div class="cd-panel">
         <div class="cd-header">
-          <span class="cd-header-title">角色概念设计</span>
+          <span class="cd-header-title">${t('header.title')}</span>
           <span class="cd-header-pill">${esc(roleLabel)}</span>
         </div>
 
         <div class="cd-form">
           <details class="cd-workflow-card" open>
             <summary class="cd-workflow-head">
-              <span class="cd-workflow-title"><span class="cd-step">1</span>基础设定</span>
+              <span class="cd-workflow-title"><span class="cd-step">1</span>${t('step.basic')}</span>
               <span class="cd-workflow-caret">⌄</span>
             </summary>
             <div class="cd-workflow-summary">${esc(identitySummary)}</div>
             <div class="cd-workflow-body">
               <div class="cd-field">
-                <label class="cd-label">角色名称</label>
-                <input class="cd-input" data-cd="name" type="text" placeholder="输入角色名称,如:焰影·洛" value="${esc(p.name)}" />
+                <label class="cd-label">${t('field.name')}</label>
+                <input class="cd-input" data-cd="name" type="text" placeholder="${t('field.name.placeholder')}" value="${esc(p.name)}" />
               </div>
 
               <div class="cd-field-row" data-cd-role="character-only" style="display:${p.characterRole === 'vehicle' ? 'none' : ''}">
                 <div class="cd-field cd-field-half">
-                  <label class="cd-label">性别</label>
+                  <label class="cd-label">${t('field.gender')}</label>
                   <div class="cd-btn-group" data-group="gender">
-                    <button class="cd-chip ${p.gender === 'male' ? 'active' : ''}" data-val="male">♂ 男</button>
-                    <button class="cd-chip ${p.gender === 'female' ? 'active' : ''}" data-val="female">♀ 女</button>
+                    <button class="cd-chip ${p.gender === 'male' ? 'active' : ''}" data-val="male">${t('gender.male')}</button>
+                    <button class="cd-chip ${p.gender === 'female' ? 'active' : ''}" data-val="female">${t('gender.female')}</button>
                   </div>
                 </div>
                 <div class="cd-field cd-field-half">
-                  <label class="cd-label">年龄段</label>
+                  <label class="cd-label">${t('field.age')}</label>
                   <select class="cd-select" data-cd="age">
-                    <option value="">选择年龄</option>
+                    <option value="">${t('age.placeholder')}</option>
                     ${AGE_OPTIONS.map(a => `<option value="${a}" ${p.age === a ? 'selected' : ''}>${a}</option>`).join('')}
                   </select>
                 </div>
@@ -1364,61 +1368,61 @@ export class CharacterDesign {
 
           <details class="cd-workflow-card">
             <summary class="cd-workflow-head">
-              <span class="cd-workflow-title"><span class="cd-step">2</span>形态与世界</span>
+              <span class="cd-workflow-title"><span class="cd-step">2</span>${t('step.formworld')}</span>
               <span class="cd-workflow-caret">⌄</span>
             </summary>
             <div class="cd-workflow-summary">${esc(worldLabel)} · ${esc(styleLabel)}</div>
             <div class="cd-workflow-body">
               <div class="cd-field" data-cd-role="hero-only" style="display:${p.characterRole === 'hero' || !p.characterRole ? '' : 'none'}">
-                <label class="cd-label">形态 / 物种 <span class="cd-optional">(决定整套画风走向)</span></label>
+                <label class="cd-label">${t('field.bodytype')} <span class="cd-optional">${t('field.bodytype.optional')}</span></label>
                 <div class="cd-world-grid" data-group="bodytype">
-                  ${BODY_TYPE_PRESETS.map(b => `<button class="cd-world-chip ${p.bodyType === b.id ? 'active' : ''}" data-val="${esc(b.id)}" title="${esc(b.hint)}\n参考:${esc(b.references)}">${esc(b.label)}</button>`).join('')}
+                  ${BODY_TYPE_PRESETS.map(b => `<button class="cd-world-chip ${p.bodyType === b.id ? 'active' : ''}" data-val="${esc(b.id)}" title="${esc(t('bodytype.' + b.id + '.hint'))}\n${t('bodytype.references')}:${esc(b.references)}">${esc(t('bodytype.' + b.id + '.label'))}</button>`).join('')}
                 </div>
               </div>
 
               <div class="cd-field">
-                <label class="cd-label">世界观 / 风格</label>
+                <label class="cd-label">${t('field.world')}</label>
                 <div class="cd-world-grid" data-group="world">
-                  ${WORLD_OPTIONS.map(w => `<button class="cd-world-chip ${p.worldSetting === w.id ? 'active' : ''}" data-val="${esc(w.id)}" title="${esc(w.desc)}">${esc(w.label)}</button>`).join('')}
+                  ${WORLD_OPTIONS.map(w => `<button class="cd-world-chip ${p.worldSetting === w.id ? 'active' : ''}" data-val="${esc(w.id)}" title="${esc(t('world.' + w.id + '.desc'))}">${esc(t('world.' + w.id + '.label'))}</button>`).join('')}
                 </div>
                 <input class="cd-input cd-input-sm" data-cd="world-custom" type="text"
-                  placeholder="或自定义世界观..." value="${WORLD_OPTIONS.some(w => w.id === p.worldSetting) ? '' : esc(p.worldSetting)}" />
+                  placeholder="${t('field.world.placeholder')}" value="${WORLD_OPTIONS.some(w => w.id === p.worldSetting) ? '' : esc(p.worldSetting)}" />
               </div>
             </div>
           </details>
 
           <details class="cd-workflow-card">
             <summary class="cd-workflow-head">
-              <span class="cd-workflow-title"><span class="cd-step">3</span>职业与规则</span>
+              <span class="cd-workflow-title"><span class="cd-step">3</span>${t('step.profession')}</span>
               <span class="cd-workflow-caret">⌄</span>
             </summary>
             <div class="cd-workflow-summary">${esc(professionLabel)}</div>
             <div class="cd-workflow-body">
               <div class="cd-field" data-cd-role="hero-only" style="display:${p.characterRole === 'hero' || !p.characterRole ? '' : 'none'}">
-                <label class="cd-label">职业 / 角色定位</label>
+                <label class="cd-label">${t('field.class')}</label>
                 <select class="cd-select" data-cd="class-select">
-                  <option value="">选择职业</option>
+                  <option value="">${t('field.class.placeholder')}</option>
                   ${CLASS_OPTIONS.map(c => `<option value="${esc(c)}" ${p.charClass === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
                 </select>
                 <input class="cd-input cd-input-sm" data-cd="class-custom" type="text"
-                  placeholder="或自定义职业..." value="${CLASS_OPTIONS.includes(p.charClass) ? '' : esc(p.charClass)}" />
+                  placeholder="${t('field.class.custom.placeholder')}" value="${CLASS_OPTIONS.includes(p.charClass) ? '' : esc(p.charClass)}" />
               </div>
 
               <div class="cd-field" data-cd-role="npc-only" style="display:${p.characterRole === 'npc' ? '' : 'none'}">
-                <label class="cd-label">NPC 职业 <span class="cd-optional">(随「世界观」自动切换候选词表)</span></label>
+                <label class="cd-label">${t('field.npcOccupation')} <span class="cd-optional">${t('field.npcOccupation.hint')}</span></label>
                 <select class="cd-select" data-cd="npc-occupation-select">
-                  <option value="">选择 NPC 职业</option>
+                  <option value="">${t('field.npcOccupation.placeholder')}</option>
                   ${listNpcOccupations(p.worldSetting).map(o => `<option value="${esc(o.zh)}" ${p.npcOccupation === o.zh ? 'selected' : ''}>${esc(o.zh)}</option>`).join('')}
                 </select>
                 <input class="cd-input cd-input-sm" data-cd="npc-occupation-custom" type="text"
-                  placeholder="或自定义 NPC 职业..." value="${listNpcOccupations(p.worldSetting).some(o => o.zh === p.npcOccupation) ? '' : esc(p.npcOccupation)}" />
+                  placeholder="${t('field.npcOccupation.custom.placeholder')}" value="${listNpcOccupations(p.worldSetting).some(o => o.zh === p.npcOccupation) ? '' : esc(p.npcOccupation)}" />
               </div>
 
               <div class="cd-field" data-cd-role="hero-only" style="display:${p.characterRole === 'hero' || !p.characterRole ? '' : 'none'}">
-                <label class="cd-label">战斗类型</label>
+                <label class="cd-label">${t('field.combat')}</label>
                 <div class="cd-btn-group" data-group="combat">
-                  <button class="cd-chip ${p.combatType === 'melee' ? 'active' : ''}" data-val="melee">近战</button>
-                  <button class="cd-chip ${p.combatType === 'ranged' ? 'active' : ''}" data-val="ranged">远程</button>
+                  <button class="cd-chip ${p.combatType === 'melee' ? 'active' : ''}" data-val="melee">${t('combat.melee')}</button>
+                  <button class="cd-chip ${p.combatType === 'ranged' ? 'active' : ''}" data-val="ranged">${t('combat.ranged')}</button>
                 </div>
               </div>
 
@@ -1430,26 +1434,26 @@ export class CharacterDesign {
 
           <details class="cd-workflow-card">
             <summary class="cd-workflow-head">
-              <span class="cd-workflow-title"><span class="cd-step">4</span>画风与生成</span>
+              <span class="cd-workflow-title"><span class="cd-step">4</span>${t('step.stylegen')}</span>
               <span class="cd-workflow-caret">⌄</span>
             </summary>
             <div class="cd-workflow-summary">${esc(styleLabel)} · ${esc(methodSummary)}</div>
             <div class="cd-workflow-body">
               <div class="cd-field">
-                <label class="cd-label">画风风格 <span class="cd-optional">(可选 · 默认韩式写实)</span></label>
+                <label class="cd-label">${t('field.artStyle')} <span class="cd-optional">${t('field.artStyle.hint')}</span></label>
                 <div class="cd-world-grid" data-group="artstyle">
-                  <button class="cd-world-chip ${!p.artStyle ? 'active' : ''}" data-val="" title="韩式写实 DNF 风格">默认写实</button>
-                  ${ART_STYLE_OPTIONS.map(s => `<button class="cd-world-chip ${p.artStyle === s.id ? 'active' : ''}" data-val="${esc(s.id)}" title="${esc(s.hint)}">${esc(s.label)}</button>`).join('')}
-                  <button class="cd-world-chip ${p.artStyle === 'custom' ? 'active' : ''}" data-val="custom" title="自定义画风">自定义</button>
+                  <button class="cd-world-chip ${!p.artStyle ? 'active' : ''}" data-val="" title="${t('artStyle.default.hint')}">${t('artStyle.default')}</button>
+                  ${ART_STYLE_OPTIONS.map(s => `<button class="cd-world-chip ${p.artStyle === s.id ? 'active' : ''}" data-val="${esc(s.id)}" title="${esc(t('artstyle.' + s.id + '.hint'))}">${esc(t('artstyle.' + s.id + '.label'))}</button>`).join('')}
+                  <button class="cd-world-chip ${p.artStyle === 'custom' ? 'active' : ''}" data-val="custom" title="${t('artStyle.custom.hint')}">${t('artStyle.custom')}</button>
                 </div>
                 <input class="cd-input cd-input-sm" data-cd="artstyle-custom" type="text"
-                  placeholder="描述你想要的画风，例如：赛璐璐厚涂混合、90年代复古漫画风..."
+                  placeholder="${t('artStyle.custom.placeholder')}"
                   value="${esc(p.artStyleCustom)}"
                   style="display:${p.artStyle === 'custom' ? '' : 'none'}" />
               </div>
 
               <div class="cd-field">
-                <label class="cd-label">生图模型 <span class="cd-optional">(切 LiteLLM 走代理图像模型)</span></label>
+                <label class="cd-label">${t('field.imageModel')} <span class="cd-optional">${t('field.imageModel.hint')}</span></label>
                 <div class="cd-btn-group" data-group="image-model">
                   <button class="cd-chip ${imageModel === 'gemini' ? 'active' : ''}" data-val="gemini">Gemini</button>
                   <button class="cd-chip ${imageModel === 'gpt-image-2' ? 'active' : ''}" data-val="gpt-image-2">GPT-Image-2</button>
@@ -1458,18 +1462,18 @@ export class CharacterDesign {
               </div>
 
               <div class="cd-field">
-                <label class="cd-label">补充描述 <span class="cd-optional">(可选)</span></label>
+                <label class="cd-label">${t('field.extra')} <span class="cd-optional">${t('field.extra.hint')}</span></label>
                 <textarea class="cd-textarea" data-cd="extra" rows="3"
-                  placeholder="补充外貌、性格、武器、配色等细节...&#10;例如：银白色长发，佩戴黑色面具，双持弯刀，暗红色披风">${esc(p.extraDesc)}</textarea>
+                  placeholder="${t('field.extra.placeholder')}">${esc(p.extraDesc)}</textarea>
               </div>
 
               <div class="cd-section">
-                <div class="cd-label">生成方式</div>
+                <div class="cd-label">${t('genMethod')}</div>
                 <div class="cd-method-row">
-                  <button class="cd-method active" data-method="text">AI 生成</button>
-                  <button class="cd-method" data-method="upload">图生图</button>
-                  <button class="cd-method" data-method="complete">补全设定</button>
-                  <button class="cd-method" data-method="direct">上传</button>
+                  <button class="cd-method active" data-method="text">${t('genMethod.text')}</button>
+                  <button class="cd-method" data-method="upload">${t('genMethod.upload')}</button>
+                  <button class="cd-method" data-method="complete">${t('genMethod.complete')}</button>
+                  <button class="cd-method" data-method="direct">${t('genMethod.direct')}</button>
                 </div>
               </div>
 
@@ -1480,46 +1484,46 @@ export class CharacterDesign {
                   </button>
                 </div>
                 <button class="cd-btn cd-btn-back" data-action="go-back" style="display:none;margin-top:6px">
-                  ← 返回上一步
+                  ${t('action.goBack')}
                 </button>
                 <div class="cd-progress" data-cd="progress" style="display:none">
                   <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-                  <div class="cd-progress-text">生成中...</div>
+                  <div class="cd-progress-text">${t('progress.generating')}</div>
                 </div>
               </div>
 
               <div class="cd-method-body" data-body="upload" style="display:none">
                 <div class="cd-drop" data-drop="ref">
-                  <div>拖拽参考图或点击上传</div>
-                  <div class="cd-drop-sub">AI 将参考图转换为 DNF 风格角色设定图</div>
+                  <div>${t('drop.ref.title')}</div>
+                  <div class="cd-drop-sub">${t('drop.ref.sub')}</div>
                 </div>
                 <button class="cd-btn cd-btn-primary cd-btn-gen" data-action="gen-img2img" disabled>
-                  AI 风格转换
+                  ${t('action.img2img')}
                 </button>
                 <div class="cd-progress" data-cd="progress-img" style="display:none">
                   <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-                  <div class="cd-progress-text">风格转换中...</div>
+                  <div class="cd-progress-text">${t('progress.styleTransferring')}</div>
                 </div>
               </div>
 
               <div class="cd-method-body" data-body="complete" style="display:none">
                 <div class="cd-drop" data-drop="complete">
-                  <div>拖拽任意参考图或点击上传</div>
-                  <div class="cd-drop-sub">头像 / 草图 / 局部立绘 / 任意尺寸 —  AI 会把这张图当作设计本身，<br/>只参考上面的「角色名称」做标签，其余（职业 / 世界观 / 画风 / 形态 等）全部从图里推断</div>
+                  <div>${t('drop.complete.title')}</div>
+                  <div class="cd-drop-sub">${t('drop.complete.sub')}</div>
                 </div>
                 <button class="cd-btn cd-btn-primary cd-btn-gen" data-action="gen-complete" disabled>
-                  补全为完整设定图
+                  ${t('action.complete')}
                 </button>
                 <div class="cd-progress" data-cd="progress-complete" style="display:none">
                   <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-                  <div class="cd-progress-text">补全中...</div>
+                  <div class="cd-progress-text">${t('progress.completing')}</div>
                 </div>
               </div>
 
               <div class="cd-method-body" data-body="direct" style="display:none">
                 <div class="cd-drop" data-drop="direct">
-                  <div>拖拽角色立绘到此处</div>
-                  <div class="cd-drop-sub">直接使用此图进入后续管线</div>
+                  <div>${t('drop.direct.title')}</div>
+                  <div class="cd-drop-sub">${t('drop.direct.sub')}</div>
                 </div>
               </div>
             </div>
@@ -1528,8 +1532,8 @@ export class CharacterDesign {
 
         <div class="cd-history-section">
           <div class="cd-history-header">
-            <span class="cd-history-title">📂 ${roleHistoryLabel(p.characterRole)}历史</span>
-            <button class="cd-history-clear" data-action="clear-history">清空</button>
+            <span class="cd-history-title">${t('history.title', { role: roleHistoryLabel(p.characterRole) })}</span>
+            <button class="cd-history-clear" data-action="clear-history">${t('history.clear')}</button>
           </div>
           <div class="cd-history-list" data-cd="history"></div>
         </div>
@@ -1568,22 +1572,22 @@ export class CharacterDesign {
     if (!this.centerEl) return
     const role = globalState.profile?.characterRole
     const hint = role === 'npc'
-      ? '填写左侧角色信息，点击「生成 NPC 参考稿」'
+      ? t('form.hint.npc')
       : role === 'vehicle'
-        ? '填写左侧载具信息，点击「生成载具设计图」'
+        ? t('form.hint.vehicle')
         : role === 'monster'
-          ? '填写左侧怪物信息，点击「生成 4 张怪物概念图」'
-          : '填写左侧角色信息，点击「生成 4 张概念图」'
+          ? t('form.hint.monster')
+          : t('form.hint.hero')
     const tip = role === 'npc'
-      ? 'Claude 参考稿方案 · Gemini 单图 · 直达像素管线'
+      ? t('form.tip.npc')
       : role === 'vehicle'
-        ? 'Claude 载具设计方案 · Gemini 单图 · 下游接 wb-anim/vehicle-design 切多视角'
-        : 'Claude 设计方案 · Gemini 绘图'
+        ? t('form.tip.vehicle')
+        : t('form.tip.hero')
     this.centerEl.innerHTML = `
       <div class="cd-center-stack">
         ${this.roleTabBarHTML()}
         <div class="cd-preview-wrap">
-          <div class="cd-preview-title">角色预览</div>
+          <div class="cd-preview-title">${t('preview.title')}</div>
           <div class="cd-preview" data-cd="preview">
             <div class="cd-preview-empty">
               <div class="cd-preview-empty-icon">🖼️</div>
@@ -1630,11 +1634,11 @@ export class CharacterDesign {
         <div class="cd-center-stack">
           ${this.roleTabBarHTML()}
           <div class="cd-preview-wrap">
-            <div class="cd-preview-title">正在加载概念图...</div>
+            <div class="cd-preview-title">${t('concepts.loading.title')}</div>
             <div class="cd-preview" data-cd="preview">
               <div class="cd-preview-empty">
                 <div class="cd-preview-empty-icon">⏳</div>
-                <div>正在从缓存加载概念图，请稍候...</div>
+                <div>${t('concepts.loading.sub')}</div>
               </div>
             </div>
           </div>
@@ -1666,23 +1670,23 @@ export class CharacterDesign {
         </div>`
     }
 
-    let actionText = '请点击选择'
+    let actionText = t('concepts.selectHint')
     let actionBtns = ''
     if (selCount === 1) {
       const editPartsBtn = skipLocalEdit
         ? ''
-        : '<button class="cd-btn" data-action="concept-edit-parts">✏️ 修改局部</button>'
+        : `<button class="cd-btn" data-action="concept-edit-parts">${t('concepts.editParts')}</button>`
       // 怪物分支：挑完直接落 characterImage，跳过「生成完整设定图」——Gemini/Claude
       // 的 final sheet 对怪物意义不大（没有装备槽、没有正反侧背分解），只会拖慢流程。
       const confirmAction = isMonster ? 'concept-to-pixel' : 'gen-final'
-      const confirmLabel = isMonster ? '确认 — 进入像素管线 →' : '生成完整设定图 →'
+      const confirmLabel = isMonster ? t('concepts.confirmMonster') : t('concepts.confirmFinal')
       actionBtns = `
         ${editPartsBtn}
         <button class="cd-btn cd-btn-primary" data-action="${confirmAction}">${confirmLabel}</button>`
-      actionText = isNpc ? 'NPC 参考稿（已自动选中）' : isMonster ? '怪物概念图（已选 1 张）' : `已选中 1 张`
+      actionText = isNpc ? t('concepts.selected.one.npc') : isMonster ? t('concepts.selected.one.monster') : t('concepts.selected.one')
     } else if (selCount >= 2) {
-      actionBtns = `<button class="cd-btn cd-btn-accent" data-action="fuse-selected">融合并生成 →</button>`
-      actionText = `已选中 ${selCount} 张`
+      actionBtns = `<button class="cd-btn cd-btn-accent" data-action="fuse-selected">${t('concepts.fuse')}</button>`
+      actionText = t('concepts.selected.n', { count: selCount })
     }
 
     let conceptDetailHtml = ''
@@ -1694,10 +1698,10 @@ export class CharacterDesign {
       <div class="cd-center-stack">
         ${this.roleTabBarHTML()}
         <div class="cd-preview-wrap">
-          <div class="cd-preview-title">选择概念图 <span class="cd-sel-count">${actionText}</span></div>
+          <div class="cd-preview-title">${t('concepts.title')} <span class="cd-sel-count">${actionText}</span></div>
         <div class="cd-concepts-grid">${gridHtml}</div>
         <div class="cd-concepts-actions">
-          <button class="cd-btn" data-action="regen-concepts">不满意，重新生成</button>
+          <button class="cd-btn" data-action="regen-concepts">${t('concepts.regen')}</button>
           ${actionBtns}
         </div>
         ${selCount >= 2 ? (() => {
@@ -1713,17 +1717,17 @@ export class CharacterDesign {
           return `
         <div class="cd-fusion-panel">
           <div class="cd-fusion-ref">
-            <div class="cd-fusion-ref-title">选中的图（用字母指代）</div>
+            <div class="cd-fusion-ref-title">${t('concepts.fusion.refTitle')}</div>
             <div class="cd-fusion-thumbs">${thumbsHtml}</div>
           </div>
           <textarea class="cd-textarea cd-fusion-input" rows="2"
-            placeholder="描述融合方式（可选）&#10;例如：要图A的场景氛围 + 图B的角色设计">${esc(this.fusionDesc)}</textarea>
+            placeholder="${t('concepts.fusion.placeholder')}">${esc(this.fusionDesc)}</textarea>
         </div>`
         })() : ''}
         ${conceptDetailHtml}
         <div class="cd-progress" data-cd="progress" style="display:none">
           <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-          <div class="cd-progress-text">生成中...</div>
+          <div class="cd-progress-text">${t('progress.generating')}</div>
         </div>
         </div>
       </div>
@@ -1786,22 +1790,22 @@ export class CharacterDesign {
     const skipDetail = isNpc || isMonster || isVehicle
     const detailBtnHtml = skipDetail
       ? ''
-      : '<button class="cd-btn cd-btn-primary" data-action="enter-detail">✏️ 修改局部细节</button>'
+      : `<button class="cd-btn cd-btn-primary" data-action="enter-detail">${t('final.editDetail')}</button>`
     const titleText = isNpc
-      ? '角色设定图（NPC / 路人）'
+      ? t('final.title.npc')
       : isMonster
-        ? '怪物设定图'
+        ? t('final.title.monster')
         : isVehicle
-          ? '载具设计图'
-          : '角色设定图'
+          ? t('final.title.vehicle')
+          : t('final.title.hero')
     // 只剩像素管线一条主路——video / spine 都下沉到"更多模块"下拉里，主流程
     // 不再让用户选 3 选 1（大部分用户会点错）。按钮直接叫"生成动画"。载具走
     // wb-anim/vehicle-design 切多视角，文案也叫「生成动画」。
-    const confirmText = isVehicle ? '🎬 切多视角 / 生成动画' : '🎬 生成动画'
+    const confirmText = isVehicle ? t('final.goPixel.vehicle') : t('final.goPixel')
     const showGen3D = !isNpc && !isVehicle
     const gen3dButtonsHtml = showGen3D
-      ? `<button class="cd-btn" data-action="gen-turnaround-3d"${this.generatingTurnaround3D ? ' disabled' : ''}>${this.generatingTurnaround3D ? '⏳ 生成四视图中...' : '🧊 生成 3D 四视图'}</button>
-            <button class="cd-btn cd-btn-primary" data-action="go-gen3d"${this.turnaround3DViews ? '' : ' disabled'}>🚀 送去 3D 生成</button>`
+      ? `<button class="cd-btn" data-action="gen-turnaround-3d"${this.generatingTurnaround3D ? ' disabled' : ''}>${this.generatingTurnaround3D ? t('final.genTurnaround.busy') : t('final.genTurnaround')}</button>
+            <button class="cd-btn cd-btn-primary" data-action="go-gen3d"${this.turnaround3DViews ? '' : ' disabled'}>${t('final.goGen3d')}</button>`
       : ''
     this.centerEl.innerHTML = `
       <div class="cd-center-stack">
@@ -1811,13 +1815,13 @@ export class CharacterDesign {
           <div class="cd-preview" data-cd="preview">
             <div class="cd-preview-empty">
               <div class="cd-preview-empty-icon">🖼️</div>
-              <div>加载中...</div>
+              <div>${t('final.loading')}</div>
             </div>
           </div>
           ${this.turnaroundGridHtml()}
           <div class="cd-preview-actions" data-cd="actions" style="display:none">
-            <button class="cd-btn" data-action="back-concepts">← 返回概念图</button>
-            <button class="cd-btn" data-action="regen-final">重新生成设定图</button>
+            <button class="cd-btn" data-action="back-concepts">${t('final.backConcepts')}</button>
+            <button class="cd-btn" data-action="regen-final">${t('final.regen')}</button>
             ${detailBtnHtml}
             ${gen3dButtonsHtml}
             <button class="cd-btn cd-btn-accent cd-btn-xl" data-action="go-pixel">${confirmText}</button>
@@ -1975,7 +1979,9 @@ export class CharacterDesign {
     let partsHtml = '<div class="cd-cdetail-parts">'
     for (const part of DETAIL_PARTS) {
       const active = this.conceptDetailPart === part.code
-      partsHtml += `<button class="cd-cdetail-part-btn ${active ? 'active' : ''}" data-cdetail-part="${part.code}" title="${part.name} · ${part.position}">${part.icon}</button>`
+      const partName = t('detailpart.' + part.code + '.name')
+      const partPos = t('detailpart.' + part.code + '.position')
+      partsHtml += `<button class="cd-cdetail-part-btn ${active ? 'active' : ''}" data-cdetail-part="${part.code}" title="${partName} · ${partPos}">${part.icon}</button>`
     }
     partsHtml += '</div>'
 
@@ -1983,26 +1989,30 @@ export class CharacterDesign {
     if (this.conceptDetailPart) {
       const part = DETAIL_PARTS.find(p => p.code === this.conceptDetailPart)
       if (part) {
-        let placeholder = '描述这个部件你想要的样子...'
-        if (part.code === 'weapon') placeholder = '描述想在手中生成的武器道具...'
-        if (part.code === 'outfit') placeholder = '描述想要替换的服装...'
-        if (part.code === 'pose') placeholder = '描述想要的动作姿态...'
+        let placeholder = t('cdetail.placeholder.default')
+        if (part.code === 'weapon') placeholder = t('cdetail.placeholder.weapon')
+        if (part.code === 'outfit') placeholder = t('cdetail.placeholder.outfit')
+        if (part.code === 'pose') placeholder = t('cdetail.placeholder.pose')
+
+        const partName = t('detailpart.' + part.code + '.name')
+        const partPos = t('detailpart.' + part.code + '.position')
+        const hintsHtml = part.hints.map((_h, i) => `<span class="cd-cdetail-hint">${t('detailpart.' + part.code + '.hint.' + i)}</span>`).join('')
 
         editorHtml = `
           <div class="cd-cdetail-editor">
             <div class="cd-cdetail-editor-head">
               <span>${part.icon}</span>
-              <span style="font-weight:600;">${part.name}</span>
-              <span style="font-size:10px;color:var(--text-secondary);">${part.position}</span>
+              <span style="font-weight:600;">${partName}</span>
+              <span style="font-size:10px;color:var(--text-secondary);">${partPos}</span>
             </div>
             <textarea class="cd-textarea" data-cdetail-desc rows="2" placeholder="${placeholder}"></textarea>
             <div class="cd-cdetail-hints">
-              ${part.hints.map(h => `<span class="cd-cdetail-hint">${h}</span>`).join('')}
+              ${hintsHtml}
             </div>
-            <button class="cd-btn cd-btn-primary" data-action="apply-cdetail" disabled style="margin-top:6px;">⚡ 应用修改到概念图</button>
+            <button class="cd-btn cd-btn-primary" data-action="apply-cdetail" disabled style="margin-top:6px;">${t('cdetail.apply')}</button>
             <div class="cd-progress" data-cd="cdetail-progress" style="display:none">
               <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-              <div class="cd-progress-text">修改中...</div>
+              <div class="cd-progress-text">${t('cdetail.progress')}</div>
             </div>
           </div>`
       }
@@ -2011,8 +2021,8 @@ export class CharacterDesign {
     return `
       <div class="cd-cdetail-panel">
         <div class="cd-cdetail-header">
-          <span style="font-size:12px;font-weight:600;">✏️ 局部修改</span>
-          <span style="font-size:10px;color:var(--text-secondary);">选择部件 → 描述 → 应用</span>
+          <span style="font-size:12px;font-weight:600;">${t('cdetail.header')}</span>
+          <span style="font-size:10px;color:var(--text-secondary);">${t('cdetail.header.sub')}</span>
         </div>
         ${partsHtml}
         ${editorHtml}
@@ -2041,7 +2051,8 @@ export class CharacterDesign {
       tag.addEventListener('click', () => {
         if (!textarea) return
         const hint = tag.textContent ?? ''
-        textarea.value = textarea.value ? textarea.value + '、' + hint : hint
+        const sep = t('text.enumerationSep')
+        textarea.value = textarea.value ? textarea.value + sep + hint : hint
         textarea.dispatchEvent(new Event('input'))
       })
     })
@@ -2060,8 +2071,9 @@ export class CharacterDesign {
     const part = DETAIL_PARTS.find(p => p.code === code)
     if (!part || this.generating) return
 
+    const partName = t('detailpart.' + part.code + '.name')
     this.generating = true
-    this.showProgress('cdetail-progress', true, `正在修改「${part.name}」...`)
+    this.showProgress('cdetail-progress', true, t('progress.editingPart', { name: partName }))
     const applyBtn = this.centerEl?.querySelector('[data-action="apply-cdetail"]') as HTMLButtonElement
     if (applyBtn) applyBtn.disabled = true
 
@@ -2084,12 +2096,12 @@ export class CharacterDesign {
         saveConceptsToIDB(this.conceptImages).catch(() => {})
         void globalState.uploadConceptBatch(this.conceptImages)
         this.conceptDetailVersion++
-        this.toast(`「${part.name}」修改成功！`)
+        this.toast(t('toast.partEditSuccess', { name: partName }))
       } else {
-        this.toast('修改失败: ' + (result.error || result.text || '未知错误'))
+        this.toast(t('toast.editFailed', { error: result.error || result.text || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('cdetail-progress', false)
@@ -2129,10 +2141,10 @@ export class CharacterDesign {
   private turnaroundGridHtml(): string {
     if (!this.turnaround3DViews) return ''
     const labels: Record<'front' | 'back' | 'left' | 'right', string> = {
-      front: '正面',
-      back: '背面',
-      left: '左侧',
-      right: '右侧',
+      front: t('turnaround.front'),
+      back: t('turnaround.back'),
+      left: t('turnaround.left'),
+      right: t('turnaround.right'),
     }
     const order = ['front', 'back', 'left', 'right'] as const
     const cells = order.map((key) => {
@@ -2160,7 +2172,7 @@ export class CharacterDesign {
     const genBtn = this.centerEl.querySelector('[data-action="gen-turnaround-3d"]') as HTMLButtonElement | null
     if (genBtn) {
       genBtn.disabled = this.generatingTurnaround3D
-      genBtn.textContent = this.generatingTurnaround3D ? '⏳ 生成四视图中...' : '🧊 生成 3D 四视图'
+      genBtn.textContent = this.generatingTurnaround3D ? t('final.genTurnaround.busy') : t('final.genTurnaround')
     }
     const goBtn = this.centerEl.querySelector('[data-action="go-gen3d"]') as HTMLButtonElement | null
     if (goBtn) goBtn.disabled = !this.turnaround3DViews
@@ -2197,7 +2209,7 @@ export class CharacterDesign {
   private async generateTurnaround3D(): Promise<void> {
     const slug = globalState.getSlug()
     if (!slug) {
-      this.toast('请先在 Studio 顶部选择一个游戏项目，再生成 3D 四视图')
+      this.toast(t('toast.needGameFor3D'))
       return
     }
     if (this.generatingTurnaround3D) return
@@ -2208,7 +2220,7 @@ export class CharacterDesign {
     if (!refDataUrl) {
       this.generatingTurnaround3D = false
       this.syncTurnaround3DUI()
-      this.toast('找不到角色设定图，请重新生成设定图后再试')
+      this.toast(t('toast.noPortraitFor3D'))
       return
     }
 
@@ -2235,15 +2247,15 @@ export class CharacterDesign {
       })
       const handoff = buildGen3DHandoffViews(result.views)
       if (!handoff) {
-        this.toast('四视图生成失败：缺少正面视图')
+        this.toast(t('toast.turnaroundMissingFront'))
         return
       }
       this.turnaround3DViews = handoff
       this.turnaround3DCharId = charId
       this.syncTurnaround3DUI()
-      this.toast('✅ 3D 四视图已生成，可送去 3D 工坊')
+      this.toast(t('toast.turnaroundDone'))
     } catch (e: any) {
-      this.toast('四视图生成失败: ' + (e?.message || '未知错误'))
+      this.toast(t('toast.turnaroundFailed', { error: e?.message || t('toast.unknownError') }))
     } finally {
       this.generatingTurnaround3D = false
       this.syncTurnaround3DUI()
@@ -2254,11 +2266,11 @@ export class CharacterDesign {
   private async navigateToGen3D(): Promise<void> {
     const slug = globalState.getSlug()
     if (!slug) {
-      this.toast('请先在 Studio 顶部选择一个游戏项目')
+      this.toast(t('toast.needGame'))
       return
     }
     if (!this.turnaround3DViews?.front) {
-      this.toast('请先生成 3D 四视图')
+      this.toast(t('toast.needTurnaround'))
       return
     }
     const name = globalState.profile?.name?.trim() || undefined
@@ -2291,7 +2303,7 @@ export class CharacterDesign {
     const role = globalState.profile?.characterRole ?? 'hero'
     const slug = globalState.getSlug()
     if (!slug) {
-      this.toast('请先在 Studio 顶部选择一个游戏项目，再生成动画')
+      this.toast(t('toast.needGameForAnim'))
       return
     }
     let charId = ''
@@ -2307,7 +2319,7 @@ export class CharacterDesign {
       if (!portraitUrl) portraitUrl = globalState.get().characterImageUrl ?? undefined
     } catch { /* best-effort */ }
     if (!portraitUrl && !globalState.get().characterImage) {
-      this.toast('角色图未能保存到磁盘，请重新生成设定图后重试')
+      this.toast(t('toast.portraitSaveFailed'))
       return
     }
     // 「走文件连通」:把 active-character 指针落盘到工程目录
@@ -2345,7 +2357,7 @@ export class CharacterDesign {
         if (this.phase === 'form') {
           genBtn.textContent = conceptGenButtonLabel(role)
         } else {
-          genBtn.textContent = role === 'npc' ? '🔄 重新生成参考稿' : '🔄 重新生成概念图'
+          genBtn.textContent = role === 'npc' ? t('conceptGen.regenerate.npc') : t('conceptGen.regenerate.default')
         }
       }
     }
@@ -2724,14 +2736,14 @@ export class CharacterDesign {
     this.q('[data-action="clear-history"]')?.addEventListener('click', () => {
       const currentRole: CharacterRole = globalState.profile?.characterRole ?? 'hero'
       const roleLabel = roleHistoryLabel(currentRole)
-      if (!confirm(`确定清空「${roleLabel}」的历史概设？`)) return
+      if (!confirm(t('toast.historyClearConfirm', { role: roleLabel }))) return
       const all = loadHistory()
       const toRemove = all.filter(e => (e.role ?? 'hero') === currentRole)
       const keep = all.filter(e => (e.role ?? 'hero') !== currentRole)
       toRemove.forEach(e => { idbRemove(e.id).catch(() => {}) })
       saveHistory(keep)
       this.renderHistory()
-      this.toast(`「${roleLabel}」历史已清空`)
+      this.toast(t('toast.historyCleared', { role: roleLabel }))
     })
   }
 
@@ -2770,7 +2782,7 @@ export class CharacterDesign {
     const history = loadHistory().filter(e => (e.role ?? 'hero') === currentRole)
 
     if (!history.length) {
-      container.innerHTML = '<div class="cd-history-empty">暂无历史记录，生成角色后会自动保存</div>'
+      container.innerHTML = `<div class="cd-history-empty">${t('history.empty')}</div>`
       return
     }
 
@@ -2792,8 +2804,8 @@ export class CharacterDesign {
           <div class="cd-history-meta">${esc(entry.charClass)}${entry.charClass ? ' · ' : ''}${timeStr}</div>
         </div>
         <div class="cd-history-actions">
-          <button class="cd-history-btn cd-history-use" title="使用此角色">▶</button>
-          <button class="cd-history-btn cd-history-del" title="删除">×</button>
+          <button class="cd-history-btn cd-history-use" title="${t('history.useTitle')}">▶</button>
+          <button class="cd-history-btn cd-history-del" title="${t('history.deleteTitle')}">×</button>
         </div>
       `
 
@@ -2829,7 +2841,7 @@ export class CharacterDesign {
       this.refreshCenter()
       this.refreshLeftActions()
       this.updateStatus()
-      this.toast(`已加载「${entry.name}」`)
+      this.toast(t('toast.historyLoaded', { name: entry.name }))
     }
 
     idbLoad(entry.id).then(fullImg => {
@@ -2890,13 +2902,13 @@ export class CharacterDesign {
             this.refreshLeftActions()
             this.addToHistory(dataUrl)
             this.updateStatus()
-            this.toast('已上传，可进入后续管线')
+            this.toast(t('toast.uploaded'))
           })
       } else if (mode === 'complete') {
         this.completeRefImage = dataUrl
         const zone = this.q('[data-drop="complete"]') as HTMLElement
         if (zone) {
-          zone.innerHTML = `<img src="${dataUrl}" style="max-width:100%;max-height:120px;object-fit:contain;border-radius:4px;"><div class="cd-drop-sub" style="margin-top:4px;">点击重新上传</div>`
+          zone.innerHTML = `<img src="${dataUrl}" style="max-width:100%;max-height:120px;object-fit:contain;border-radius:4px;"><div class="cd-drop-sub" style="margin-top:4px;">${t('drop.clickReupload')}</div>`
           zone.addEventListener('click', () => this.pickFile('complete'), { once: true })
         }
         const btn = this.q('[data-action="gen-complete"]') as HTMLButtonElement
@@ -2905,7 +2917,7 @@ export class CharacterDesign {
         this.refImageData = dataUrl
         const zone = this.q('[data-drop="ref"]') as HTMLElement
         if (zone) {
-          zone.innerHTML = `<img src="${dataUrl}" style="max-width:100%;max-height:100px;object-fit:contain;border-radius:4px;"><div class="cd-drop-sub" style="margin-top:4px;">点击重新上传</div>`
+          zone.innerHTML = `<img src="${dataUrl}" style="max-width:100%;max-height:100px;object-fit:contain;border-radius:4px;"><div class="cd-drop-sub" style="margin-top:4px;">${t('drop.clickReupload')}</div>`
           zone.addEventListener('click', () => this.pickFile('ref'), { once: true })
         }
         const btn = this.q('[data-action="gen-img2img"]') as HTMLButtonElement
@@ -3525,7 +3537,7 @@ ${styleSuffix}
   private async generateCharacter(): Promise<void> {
     const p = globalState.profile
     if (!p.name && !p.charClass && !p.extraDesc) {
-      this.toast('请至少填写角色名称或职业')
+      this.toast(t('toast.needNameOrClass'))
       return
     }
     if (this.generating) return
@@ -3533,7 +3545,7 @@ ${styleSuffix}
 
     const aspect = '3:4'
 
-    this.showProgress('progress', true, '1/2 Claude 正在设计角色方案...')
+    this.showProgress('progress', true, t('progress.claudeDesigning'))
     this.setGenBtnState(true)
 
     try {
@@ -3558,11 +3570,11 @@ ${styleSuffix}
           imagePrompt = fullText
         }
       } else {
-        this.toast('Claude 设计失败: ' + (chatResult.error || '未知错误'))
+        this.toast(t('toast.claudeDesignFailed', { error: chatResult.error || t('toast.unknownError') }))
         return
       }
 
-      this.showProgress('progress', true, '2/2 正在绘制角色设计图...')
+      this.showProgress('progress', true, t('progress.drawingSheet'))
 
       const imgResult = await apiPost('/__ce-api__/generate-image', {
         prompt: imagePrompt,
@@ -3577,12 +3589,12 @@ ${styleSuffix}
         this.showPreview(dataUrl)
         this.addToHistory(dataUrl)
         this.updateStatus()
-        this.toast('✅ 角色设定图生成成功')
+        this.toast(t('toast.sheetGenSuccess'))
       } else {
-        this.toast('绘图失败: ' + (imgResult.error || imgResult.text || '未知错误'))
+        this.toast(t('toast.drawFailed', { error: imgResult.error || imgResult.text || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress', false)
@@ -3602,11 +3614,11 @@ ${styleSuffix}
    *   - 直接一次性把英文 layout prompt + 图交给 image-gen 模型
    */
   private async generateSheetFromUpload(): Promise<void> {
-    if (!this.completeRefImage) { this.toast('请先上传参考图'); return }
+    if (!this.completeRefImage) { this.toast(t('toast.needRefImage')); return }
     if (this.generating) return
     this.generating = true
 
-    this.showProgress('progress-complete', true, '1/1 Gemini 正在补全为完整设定图...')
+    this.showProgress('progress-complete', true, t('progress.geminiCompleting'))
     this.setGenBtnState(true)
 
     try {
@@ -3686,12 +3698,12 @@ ${styleSuffix}
         this.refreshLeftActions()
         this.addToHistory(dataUrl)
         this.updateStatus()
-        this.toast('✅ 已基于参考图补全为完整设定')
+        this.toast(t('toast.completeSuccess'))
       } else {
-        this.toast('补全失败: ' + (imgResult.error || imgResult.text || '未知错误'))
+        this.toast(t('toast.completeFailed', { error: imgResult.error || imgResult.text || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress-complete', false)
@@ -3700,11 +3712,11 @@ ${styleSuffix}
   }
 
   private async generateFromImage(): Promise<void> {
-    if (!this.refImageData) { this.toast('请先上传参考图'); return }
+    if (!this.refImageData) { this.toast(t('toast.needRefImage')); return }
     if (this.generating) return
     this.generating = true
 
-    this.showProgress('progress-img', true, '正在风格转换...')
+    this.showProgress('progress-img', true, t('progress.styleTransferringShort'))
     this.setGenBtnState(true)
 
     try {
@@ -3744,12 +3756,12 @@ ${styleSuffix}
         this.showPreview(dataUrl)
         this.addToHistory(dataUrl)
         this.updateStatus()
-        this.toast('✅ 风格转换成功')
+        this.toast(t('toast.styleTransferSuccess'))
       } else {
-        this.toast('转换失败: ' + (result.error || '未知错误'))
+        this.toast(t('toast.styleTransferFailed', { error: result.error || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress-img', false)
@@ -3762,19 +3774,19 @@ ${styleSuffix}
   private async generateConcepts(): Promise<void> {
     const p = globalState.profile
     if (!p.name && !p.charClass && !p.extraDesc && p.characterRole !== 'monster' && p.characterRole !== 'vehicle') {
-      this.toast('请至少填写角色名称或职业')
+      this.toast(t('toast.needNameOrClass'))
       return
     }
     if (p.characterRole === 'monster' && !p.monsterCategory) {
-      this.toast('请先选择怪物主分类')
+      this.toast(t('toast.needMonsterCategory'))
       return
     }
     if (p.characterRole === 'vehicle' && !p.vehicleCategory) {
-      this.toast('请先选择载具大类')
+      this.toast(t('toast.needVehicleCategory'))
       return
     }
     if (p.characterRole === 'vehicle' && !p.vehicleSubtype) {
-      this.toast('请先选择载具子类型')
+      this.toast(t('toast.needVehicleSubtype'))
       return
     }
     if (this.generating) return
@@ -3783,14 +3795,15 @@ ${styleSuffix}
     const isMonster = p.characterRole === 'monster'
     const isVehicle = p.characterRole === 'vehicle'
     const variantCount = conceptVariantCount(p.characterRole)
-    const designTargetLabel = isNpc
-      ? '路人参考稿'
+    const designTargetKey = isNpc
+      ? 'designTarget.npc'
       : isMonster
-        ? '4 种怪物变体'
+        ? 'designTarget.monster'
         : isVehicle
-          ? '载具设计图'
-          : '4 种角色变体'
-    this.showProgress('progress', true, `1/2 Claude 正在设计 ${designTargetLabel}...`)
+          ? 'designTarget.vehicle'
+          : 'designTarget.hero'
+    const designTargetLabel = t(designTargetKey)
+    this.showProgress('progress', true, t('progress.claudeDesigningVariants', { target: designTargetLabel }))
     this.setGenBtnState(true)
 
     try {
@@ -3803,7 +3816,7 @@ ${styleSuffix}
       })
 
       if (!chatResult.success || !chatResult.text) {
-        this.toast('Claude 设计失败: ' + (chatResult.error || '未知错误'))
+        this.toast(t('toast.claudeDesignFailed', { error: chatResult.error || t('toast.unknownError') }))
         return
       }
 
@@ -3833,10 +3846,12 @@ ${styleSuffix}
       }
 
       const prompts = variants.slice(0, variantCount)
-      this.showProgress('progress', true, `2/2 正在绘制 ${prompts.length} 张概念图...`)
+      this.showProgress('progress', true, t('progress.drawingConcepts', { count: prompts.length }))
 
       this.conceptImages = []
-      this.showProgress('progress', true, `2/2 正在${prompts.length === 1 ? '' : '并行'}绘制 ${prompts.length} 张概念图...`)
+      this.showProgress('progress', true, prompts.length === 1
+        ? t('progress.drawingConcepts', { count: prompts.length })
+        : t('progress.drawingConceptsParallel', { count: prompts.length }))
       const results = await Promise.allSettled(
         prompts.map((prompt: string) =>
           apiPost('/__ce-api__/generate-image', {
@@ -3853,7 +3868,7 @@ ${styleSuffix}
       }
 
       if (this.conceptImages.length === 0) {
-        this.toast('所有概念图生成失败，请重试')
+        this.toast(t('toast.allConceptsFailed'))
         return
       }
 
@@ -3876,17 +3891,17 @@ ${styleSuffix}
         this.refreshLeftActions()
         this.updateStatus()
         this.toast(p.characterRole === 'vehicle'
-          ? '载具设计图已生成，可在右侧预览，下游接 wb-anim/vehicle-design 多视角切帧'
-          : 'NPC 参考稿已生成，进入像素动画管线')
+          ? t('toast.vehicleConceptDone')
+          : t('toast.npcConceptDone'))
         return
       }
 
       this.phase = 'concepts'
       this.refreshCenter()
       this.refreshLeftActions()
-      this.toast(`生成了 ${this.conceptImages.length} 张概念图，请挑选`)
+      this.toast(t('toast.conceptsDone', { count: this.conceptImages.length }))
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress', false)
@@ -3896,12 +3911,12 @@ ${styleSuffix}
 
   private async fuseConcepts(): Promise<void> {
     if (this.selectedConcepts.size < 2) {
-      this.toast('请至少选中 2 张图进行融合')
+      this.toast(t('toast.needTwoForFusion'))
       return
     }
     if (this.generating) return
     this.generating = true
-    this.showProgress('progress', true, '1/2 分析选中概念图...')
+    this.showProgress('progress', true, t('progress.analyzingConcepts'))
     this.setGenBtnState(true)
 
     try {
@@ -3934,7 +3949,7 @@ ${styleSuffix}
       const fusionPrompt = adaptPromptForImageModel(fusionPromptRaw, globalState.getImageModel())
 
       if (resizedImages.length <= 2) {
-        this.showProgress('progress', true, '2/2 Gemini 融合生成中...')
+        this.showProgress('progress', true, t('progress.fusionGen'))
         const inputImages = resizedImages.map(img => ({
           base64: img.replace(/^data:[^;]+;base64,/, ''),
         }))
@@ -3953,12 +3968,12 @@ ${styleSuffix}
           this.selectedConcepts.clear()
           this.fusionDesc = ''
           this.refreshCenter()
-          this.toast('融合成功，新概念图已添加到末尾')
+          this.toast(t('toast.fusionSuccess'))
           return
         }
       }
 
-      this.showProgress('progress', true, '2/2 使用主图参考融合...')
+      this.showProgress('progress', true, t('progress.fusionFallback'))
       const fallbackResult = await apiPost('/__ce-api__/generate-image', {
         prompt: fusionPrompt,
         inputImageBase64: primaryBase64,
@@ -3974,12 +3989,12 @@ ${styleSuffix}
         this.selectedConcepts.clear()
         this.fusionDesc = ''
         this.refreshCenter()
-        this.toast('融合成功，新概念图已添加到末尾')
+        this.toast(t('toast.fusionSuccess'))
       } else {
-        this.toast('融合失败: ' + (fallbackResult.error || '未知错误'))
+        this.toast(t('toast.fusionFailed', { error: fallbackResult.error || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('融合失败: ' + e.message)
+      this.toast(t('toast.fusionFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress', false)
@@ -3990,13 +4005,13 @@ ${styleSuffix}
   private async generateFinalSheet(): Promise<void> {
     const sel = [...this.selectedConcepts]
     if (sel.length !== 1) {
-      this.toast('请选中 1 张概念图作为参考')
+      this.toast(t('toast.needOneForFinal'))
       return
     }
     if (this.generating) return
     this.generating = true
 
-    this.showProgress('progress', true, '1/2 正在压缩参考图...')
+    this.showProgress('progress', true, t('progress.compressingRef'))
     this.setGenBtnState(true)
 
     try {
@@ -4006,7 +4021,7 @@ ${styleSuffix}
       const base64 = resized.replace(/^data:[^;]+;base64,/, '')
       console.log(`[FinalSheet] compressed ref image: ${Math.round(base64.length / 1024)}KB`)
 
-      this.showProgress('progress', true, '1/2 Claude 正在设计设定图方案...')
+      this.showProgress('progress', true, t('progress.claudeDesigningSheet'))
 
       const systemPrompt = this.buildSystemPrompt()
       const brief = this.buildCharacterBrief()
@@ -4025,11 +4040,11 @@ ${styleSuffix}
         const analysisText = sepIdx >= 0 ? fullText.substring(0, sepIdx).trim() : ''
         if (analysisText) this.showDesignAnalysis(analysisText)
       } else {
-        this.toast('Claude 设计失败: ' + (chatResult.error || '未知错误'))
+        this.toast(t('toast.claudeDesignFailed', { error: chatResult.error || t('toast.unknownError') }))
         return
       }
 
-      this.showProgress('progress', true, '2/2 正在基于概念图生成完整设定图...')
+      this.showProgress('progress', true, t('progress.genFullSheet'))
 
       imagePrompt = `IMPORTANT: The provided reference image is the character concept. The output character design sheet MUST depict the EXACT same character — identical face, hair, outfit, weapon, color scheme. Do NOT change the character design. \n` + imagePrompt
 
@@ -4053,12 +4068,12 @@ ${styleSuffix}
         this.refreshLeftActions()
         this.addToHistory(dataUrl)
         this.updateStatus()
-        this.toast('角色设定图生成成功')
+        this.toast(t('toast.sheetGenSuccessNoEmoji'))
       } else {
-        this.toast('绘图失败: ' + (imgResult.error || imgResult.text || '未知错误'))
+        this.toast(t('toast.drawFailed', { error: imgResult.error || imgResult.text || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('progress', false)
@@ -4074,7 +4089,7 @@ ${styleSuffix}
   private acceptConceptAsFinal(): void {
     const sel = [...this.selectedConcepts]
     if (sel.length !== 1) {
-      this.toast('请选中 1 张概念图')
+      this.toast(t('toast.needOneConcept'))
       return
     }
     const conceptData = this.conceptImages[sel[0]]
@@ -4087,7 +4102,7 @@ ${styleSuffix}
     this.refreshLeftActions()
     this.updateStatus()
     const role = globalState.profile?.characterRole
-    this.toast(role === 'monster' ? '怪物设定图已确认，进入像素动画管线' : '已确认，进入像素动画管线')
+    this.toast(role === 'monster' ? t('toast.monsterSheetConfirmed') : t('toast.sheetConfirmed'))
   }
 
   private goBackPhase(): void {
@@ -4136,7 +4151,7 @@ ${styleSuffix}
     let html = `
       <div class="cd-header">
         <span class="cd-header-icon">✏️</span>
-        <span class="cd-header-title">局部修改</span>
+        <span class="cd-header-title">${t('detail.header')}</span>
       </div>
       <div class="cd-detail-parts-list">`
 
@@ -4144,21 +4159,23 @@ ${styleSuffix}
       const active = this.detailCurrentPart === part.code
       const generated = !!this.detailParts[part.code]
       const cls = ['cd-detail-part-row', active ? 'active' : '', generated ? 'generated' : ''].filter(Boolean).join(' ')
+      const partName = t('detailpart.' + part.code + '.name')
+      const partPos = t('detailpart.' + part.code + '.position')
       html += `<div class="${cls}" data-detail-part="${part.code}">
         <span class="cd-detail-part-icon">${part.icon}</span>
         <div class="cd-detail-part-info">
-          <div class="cd-detail-part-name">${part.name}</div>
-          <div class="cd-detail-part-pos">${part.position}</div>
+          <div class="cd-detail-part-name">${partName}</div>
+          <div class="cd-detail-part-pos">${partPos}</div>
         </div>
         <div class="cd-detail-part-dot"></div>
       </div>`
     }
 
     html += `</div>
-      <div class="cd-detail-parts-count">已修改: ${Object.keys(this.detailParts).length} / ${DETAIL_PARTS.length}</div>
+      <div class="cd-detail-parts-count">${t('detail.count', { done: Object.keys(this.detailParts).length, total: DETAIL_PARTS.length })}</div>
       <div class="cd-detail-actions">
-        <button class="cd-btn" data-action="detail-back-final">← 返回设定图</button>
-        <button class="cd-btn cd-btn-accent" data-action="detail-done">✅ 修改完成 → 生成动画</button>
+        <button class="cd-btn" data-action="detail-back-final">${t('detail.backFinal')}</button>
+        <button class="cd-btn cd-btn-accent" data-action="detail-done">${t('detail.done')}</button>
       </div>`
 
     detailPanel.innerHTML = html
@@ -4211,7 +4228,7 @@ ${styleSuffix}
     let html = `<div class="cd-center-stack">${this.roleTabBarHTML()}<div class="cd-preview-wrap cd-detail-wrap">`
 
     html += `<div class="cd-detail-preview-area">
-      <div class="cd-preview-title">角色立绘 <span class="cd-detail-ver">v${this.detailVersion}</span></div>
+      <div class="cd-preview-title">${t('detail.previewTitle')} <span class="cd-detail-ver">v${this.detailVersion}</span></div>
       <div class="cd-preview" data-cd="preview">
         <img src="${charImg}" class="cd-preview-img">
       </div>`
@@ -4236,8 +4253,8 @@ ${styleSuffix}
     } else {
       html += `<div class="cd-detail-empty-hint">
         <div style="font-size:36px;opacity:0.3;margin-bottom:8px;">👈</div>
-        <div style="font-size:13px;font-weight:500;">从左侧选择要修改的部件</div>
-        <div style="font-size:11px;color:var(--text-secondary);">基于当前立绘，通过图生图修改指定部件</div>
+        <div style="font-size:13px;font-weight:500;">${t('detail.emptyHint.title')}</div>
+        <div style="font-size:11px;color:var(--text-secondary);">${t('detail.emptyHint.sub')}</div>
       </div>`
     }
 
@@ -4258,40 +4275,42 @@ ${styleSuffix}
 
     const existing = this.detailParts[code]
     const desc = existing?.description ?? ''
+    const partName = t('detailpart.' + part.code + '.name')
+    const partPos = t('detailpart.' + part.code + '.position')
 
-    let placeholder = '描述这个部件你想要的样子...'
-    if (code === 'weapon') placeholder = '描述想在手中生成的武器道具...'
-    if (code === 'outfit') placeholder = '描述想要替换的服装...'
-    if (code === 'pose') placeholder = '描述想要的动作姿态...'
+    let placeholder = t('cdetail.placeholder.default')
+    if (code === 'weapon') placeholder = t('cdetail.placeholder.weapon')
+    if (code === 'outfit') placeholder = t('cdetail.placeholder.outfit')
+    if (code === 'pose') placeholder = t('cdetail.placeholder.pose')
 
     let html = `<div class="cd-detail-editor">
       <div class="cd-detail-editor-header">
         <span style="font-size:20px;">${part.icon}</span>
-        <span style="font-size:14px;font-weight:600;">${part.name}</span>
-        <span style="font-size:11px;color:var(--text-secondary);">${part.position}</span>
+        <span style="font-size:14px;font-weight:600;">${partName}</span>
+        <span style="font-size:11px;color:var(--text-secondary);">${partPos}</span>
       </div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">描述你想要的造型</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">${t('detail.editor.descLabel')}</div>
       <textarea class="cd-textarea" data-detail-desc rows="3" placeholder="${placeholder}">${esc(desc)}</textarea>
       <div class="cd-detail-hints">`
 
-    for (const h of part.hints) {
-      html += `<span class="cd-detail-hint-tag">${h}</span>`
+    for (let i = 0; i < part.hints.length; i++) {
+      html += `<span class="cd-detail-hint-tag">${t('detailpart.' + part.code + '.hint.' + i)}</span>`
     }
 
     html += `</div>
       <div class="cd-detail-prompt-preview">
         <div class="cd-detail-prompt-header">
-          📋 图生图提示词预览
-          <button class="cd-btn" style="padding:2px 8px;font-size:10px;width:auto;" data-action="copy-detail-prompt">复制</button>
+          ${t('detail.editor.promptHeader')}
+          <button class="cd-btn" style="padding:2px 8px;font-size:10px;width:auto;" data-action="copy-detail-prompt">${t('detail.editor.copy')}</button>
         </div>
-        <div class="cd-detail-prompt-text" data-detail-prompt-text style="color:var(--text-secondary);">${desc ? esc(buildDetailPrompt(code, desc)) : '输入描述后实时预览提示词...'}</div>
+        <div class="cd-detail-prompt-text" data-detail-prompt-text style="color:var(--text-secondary);">${desc ? esc(buildDetailPrompt(code, desc)) : t('detail.editor.promptEmpty')}</div>
       </div>
       <div style="margin-top:8px;">
-        <button class="cd-btn cd-btn-primary" data-action="apply-detail-mod" ${desc ? '' : 'disabled'}>⚡ 应用修改</button>
+        <button class="cd-btn cd-btn-primary" data-action="apply-detail-mod" ${desc ? '' : 'disabled'}>${t('detail.editor.apply')}</button>
       </div>
       <div class="cd-progress" data-cd="detail-progress" style="display:none">
         <div class="cd-progress-bar"><div class="cd-progress-fill"></div></div>
-        <div class="cd-progress-text">修改中...</div>
+        <div class="cd-progress-text">${t('cdetail.progress')}</div>
       </div>
     </div>`
 
@@ -4317,7 +4336,7 @@ ${styleSuffix}
       if (promptPreview && this.detailCurrentPart) {
         promptPreview.textContent = desc
           ? buildDetailPrompt(this.detailCurrentPart, desc)
-          : '输入描述后实时预览提示词...'
+          : t('detail.editor.promptEmpty')
       }
       if (applyBtn) applyBtn.disabled = !desc
     })
@@ -4326,7 +4345,8 @@ ${styleSuffix}
       tag.addEventListener('click', () => {
         if (!textarea) return
         const hint = tag.textContent ?? ''
-        textarea.value = textarea.value ? textarea.value + '、' + hint : hint
+        const sep = t('text.enumerationSep')
+        textarea.value = textarea.value ? textarea.value + sep + hint : hint
         textarea.dispatchEvent(new Event('input'))
       })
     })
@@ -4340,8 +4360,8 @@ ${styleSuffix}
     this.centerEl.querySelector('[data-action="copy-detail-prompt"]')?.addEventListener('click', () => {
       const text = promptPreview?.textContent ?? ''
       navigator.clipboard.writeText(text).then(
-        () => this.toast('已复制到剪贴板'),
-        () => this.toast('复制失败'),
+        () => this.toast(t('toast.copied')),
+        () => this.toast(t('toast.copyFailed')),
       )
     })
   }
@@ -4356,7 +4376,8 @@ ${styleSuffix}
     if (this.generating) return
     this.generating = true
 
-    this.showProgress('detail-progress', true, `正在修改「${part.name}」...`)
+    const partName = t('detailpart.' + part.code + '.name')
+    this.showProgress('detail-progress', true, t('progress.editingPart', { name: partName }))
     const applyBtn = this.centerEl?.querySelector('[data-action="apply-detail-mod"]') as HTMLButtonElement
     if (applyBtn) applyBtn.disabled = true
 
@@ -4383,7 +4404,7 @@ ${styleSuffix}
           dataUrl,
           partCode: code,
           partIcon: part.icon,
-          partName: part.name,
+          partName,
           description: desc,
         }
         this.detailHistory.push(entry)
@@ -4397,12 +4418,12 @@ ${styleSuffix}
 
         globalState.setCharacterImage(dataUrl)
         this.addToHistory(dataUrl)
-        this.toast(`「${part.name}」修改成功！v${this.detailVersion}`)
+        this.toast(t('toast.partEditSuccessV', { name: partName, version: this.detailVersion }))
       } else {
-        this.toast('修改失败: ' + (result.error || result.text || '未知错误'))
+        this.toast(t('toast.editFailed', { error: result.error || result.text || t('toast.unknownError') }))
       }
     } catch (e: any) {
-      this.toast('请求失败: ' + e.message)
+      this.toast(t('toast.requestFailed', { error: e.message }))
     } finally {
       this.generating = false
       this.showProgress('detail-progress', false)
@@ -4418,7 +4439,7 @@ ${styleSuffix}
     globalState.setCharacterImage(entry.dataUrl)
     this.detailVersion = entry.version
     this.refreshCenter()
-    this.toast(`已回退到 v${entry.version}（${entry.partName}）`)
+    this.toast(t('toast.reverted', { version: entry.version, name: entry.partName }))
   }
 
   // ── UI Helpers ────────────────────────────────────────────────
@@ -4438,9 +4459,9 @@ ${styleSuffix}
 
     preview.innerHTML = `
       <div class="cd-analysis">
-        <div class="cd-analysis-title">🎯 设计策略</div>
+        <div class="cd-analysis-title">${t('analysis.title')}</div>
         ${html}
-        <div class="cd-analysis-hint">Gemini 正在根据此方案绘制...</div>
+        <div class="cd-analysis-hint">${t('analysis.hint')}</div>
       </div>
     `
   }
@@ -4466,14 +4487,14 @@ ${styleSuffix}
       <div class="cd-preview-empty cd-generating-overlay">
         <div class="cd-preview-empty-icon">⏳</div>
         <div>${esc(text)}</div>
-        <div class="cd-preview-tip">生成进行中，切换模块后已恢复进度显示</div>
+        <div class="cd-preview-tip">${t('preview.overlay.hint')}</div>
       </div>`
   }
 
   private showProgress(id: string, show: boolean, text?: string): void {
     if (show) {
       this.progressId = id
-      this.progressText = text ?? this.progressText ?? '生成中...'
+      this.progressText = text ?? this.progressText ?? t('progress.generating')
       this.patchCenterGeneratingOverlay(this.progressText)
     } else {
       this.progressId = null
@@ -4498,7 +4519,7 @@ ${styleSuffix}
         if (!btn.dataset.origText) btn.dataset.origText = btn.textContent || ''
         btn.disabled = true
         if (action === 'gen-final' || action === 'regen-final' || action === 'fuse-selected') {
-          btn.textContent = '⏳ 正在生成...'
+          btn.textContent = t('progress.genBtnBusy')
         }
       } else {
         btn.disabled = false
@@ -4520,8 +4541,8 @@ ${styleSuffix}
       preview.innerHTML = `
         <div class="cd-preview-empty">
           <div class="cd-preview-empty-icon">🖼️</div>
-          <div>填写左侧角色信息，点击「一键生成」</div>
-          <div class="cd-preview-tip">Claude 设计 · Gemini 绘图</div>
+          <div>${t('preview.empty.default')}</div>
+          <div class="cd-preview-tip">${t('preview.tip.default')}</div>
         </div>
       `
     }
@@ -4550,32 +4571,32 @@ ${styleSuffix}
     if (p.characterRole === 'vehicle') {
       const cat = getVehicleCategory(p.vehicleCategory)
       const sub = getVehicleSubtype(p.vehicleCategory, p.vehicleSubtype)
-      parts.push('🚗 载具')
-      if (cat) parts.push(cat.label)
-      if (sub) parts.push(isCustomVehicleSubtype(sub) ? (p.vehicleSubtypeCustom?.trim() || '自定义') : sub.label)
+      parts.push(t('status.vehicle'))
+      if (cat) parts.push(t('vehiclecat.' + cat.id + '.label'))
+      if (sub) parts.push(isCustomVehicleSubtype(sub) ? (p.vehicleSubtypeCustom?.trim() || t('status.custom')) : t('vehiclesub.' + (cat?.id ?? '') + '.' + sub.id + '.label'))
     } else {
       parts.push(p.gender === 'female' ? '♀' : '♂')
       if (p.characterRole === 'npc') {
-        parts.push('🚶 NPC')
+        parts.push(t('status.npc'))
         if (p.npcOccupation) parts.push(p.npcOccupation)
       } else if (p.characterRole === 'monster') {
-        parts.push('👾 怪物')
+        parts.push(t('status.monster'))
         if (p.monsterCategory) parts.push(p.monsterCategory)
         if (p.monsterRace) parts.push(p.monsterRace)
       } else {
         if (p.charClass) parts.push(p.charClass)
-        parts.push(p.combatType === 'ranged' ? '远程' : '近战')
+        parts.push(p.combatType === 'ranged' ? t('status.ranged') : t('status.melee'))
       }
     }
     if (p.worldSetting) {
       const w = WORLD_OPTIONS.find(o => o.id === p.worldSetting)
-      parts.push(w ? w.label : p.worldSetting)
+      parts.push(w ? t('world.' + w.id + '.label') : p.worldSetting)
     }
     if (p.artStyle) {
       const s = ART_STYLE_OPTIONS.find(o => o.id === p.artStyle)
-      parts.push(s ? s.label : p.artStyle === 'custom' ? p.artStyleCustom : p.artStyle)
+      parts.push(s ? t('artstyle.' + s.id + '.label') : p.artStyle === 'custom' ? p.artStyleCustom : p.artStyle)
     }
-    if (globalState.hasCharacter) parts.push('✅ 已生成')
+    if (globalState.hasCharacter) parts.push(t('status.generated'))
     el.textContent = parts.join(' · ')
   }
 

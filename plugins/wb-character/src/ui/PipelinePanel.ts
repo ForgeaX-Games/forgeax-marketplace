@@ -5,6 +5,7 @@ import type { CameraStore } from '../core/CameraStore'
 import type { PreviewControls } from './PreviewControls'
 import type { CharacterDesign as CharacterDesignType } from '../shared/CharacterDesign'
 import { globalState } from '../shared/GlobalState'
+import { t } from '../i18n'
 
 export interface ExtraPanels {
   center: HTMLElement
@@ -120,7 +121,7 @@ export class PipelinePanel {
 
     const trigger = document.createElement('button')
     trigger.className = 'pipeline-tab drawer-trigger'
-    trigger.innerHTML = '<span class="tab-icon">⋯</span>更多模块 <span class="drawer-chevron">▾</span>'
+    trigger.innerHTML = `<span class="tab-icon">⋯</span>${t('pipeline.drawer.more')} <span class="drawer-chevron">▾</span>`
     wrap.appendChild(trigger)
 
     const panel = document.createElement('div')
@@ -151,7 +152,7 @@ export class PipelinePanel {
     }
 
     if (variantGroup.length) {
-      panel.appendChild(groupHead('生产变体'))
+      panel.appendChild(groupHead(t('pipeline.drawer.variantGroup')))
       for (const m of variantGroup) {
         panel.appendChild(item(m.icon, m.name, m.description, () => { void this.activate(m) }))
         this.tabEls.set(m.id, trigger)
@@ -159,7 +160,7 @@ export class PipelinePanel {
     }
 
     if (auxGroup.length) {
-      panel.appendChild(groupHead('辅助工具'))
+      panel.appendChild(groupHead(t('pipeline.drawer.auxGroup')))
       for (const m of auxGroup) {
         panel.appendChild(item(m.icon, m.name, m.description, () => { void this.activate(m) }))
         this.tabEls.set(m.id, trigger)
@@ -186,8 +187,8 @@ export class PipelinePanel {
 
     this.extra.center.classList.add('active')
     this.leftPanel.innerHTML =
-      '<div class="pipeline-loading"><div class="pipeline-loading-spinner"></div>' +
-      '<div class="pipeline-loading-text">🎨 角色设计 加载中…</div></div>'
+      `<div class="pipeline-loading"><div class="pipeline-loading-spinner"></div>` +
+      `<div class="pipeline-loading-text">${t('pipeline.loading.design')}</div></div>`
 
     void this.ensureCharDesign().then(cd => {
       // 用户可能在 await 期间切到别的 tab —— 不再是 design 模式就不挂载
@@ -197,7 +198,7 @@ export class PipelinePanel {
     }).catch(err => {
       if (!this.activeDesign) return
       console.warn('[PipelinePanel] CharacterDesign load failed:', err)
-      this.leftPanel.innerHTML = '<div class="pipeline-loading pipeline-loading-error">⚠️ 角色设计模块加载失败</div>'
+      this.leftPanel.innerHTML = `<div class="pipeline-loading pipeline-loading-error">${t('pipeline.loading.error')}</div>`
     })
   }
 
@@ -263,7 +264,7 @@ export class PipelinePanel {
     this.leftPanel.innerHTML = `
       <div class="pipeline-loading">
         <div class="pipeline-loading-spinner"></div>
-        <div class="pipeline-loading-text">${meta.icon} ${meta.name} 加载中…</div>
+        <div class="pipeline-loading-text">${t('pipeline.loading.hint', { icon: meta.icon, name: meta.name })}</div>
       </div>
     `
   }
@@ -275,8 +276,8 @@ export class PipelinePanel {
   private showLoadError(meta: PipelineMeta): void {
     this.leftPanel.innerHTML = `
       <div class="pipeline-loading pipeline-loading-error">
-        ⚠️ 加载失败:${meta.id}
-        <div style="margin-top:8px;font-size:12px;opacity:0.7">查看控制台获取详情</div>
+        ${t('pipeline.loadError', { id: meta.id })}
+        <div style="margin-top:8px;font-size:12px;opacity:0.7">${t('pipeline.loadError.hint')}</div>
       </div>
     `
   }

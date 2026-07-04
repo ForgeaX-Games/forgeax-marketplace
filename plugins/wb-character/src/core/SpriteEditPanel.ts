@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { IEngine } from './types'
+import { t } from '../i18n'
 
 export interface SpriteDisplayParams {
   posX: number
@@ -125,7 +126,7 @@ export class SpriteEditPanel {
     const triggerBtn = document.createElement('div')
     triggerBtn.className = 'ce-hud-sprite-btn'
     triggerBtn.innerHTML = '🎮'
-    triggerBtn.title = '角色渲染控制'
+    triggerBtn.title = t('sprite.trigger.title')
     triggerBtn.addEventListener('click', (e) => {
       e.stopPropagation()
       this.togglePanel()
@@ -147,16 +148,16 @@ export class SpriteEditPanel {
     const p = this.params
 
     const sliders: { label: string; key: keyof SpriteDisplayParams; min: number; max: number; step: number }[] = [
-      { label: '水平 X', key: 'posX', min: -20, max: 20, step: 0.1 },
-      { label: '高度 Y', key: 'posY', min: -10, max: 20, step: 0.1 },
-      { label: '深度 Z', key: 'posZ', min: -20, max: 20, step: 0.1 },
-      { label: '缩放', key: 'scale', min: 0.1, max: 10, step: 0.1 },
-      { label: '不透明度', key: 'opacity', min: 0, max: 1, step: 0.01 },
+      { label: t('sprite.slider.posX'), key: 'posX', min: -20, max: 20, step: 0.1 },
+      { label: t('sprite.slider.posY'), key: 'posY', min: -10, max: 20, step: 0.1 },
+      { label: t('sprite.slider.posZ'), key: 'posZ', min: -20, max: 20, step: 0.1 },
+      { label: t('sprite.slider.scale'), key: 'scale', min: 0.1, max: 10, step: 0.1 },
+      { label: t('sprite.slider.opacity'), key: 'opacity', min: 0, max: 1, step: 0.01 },
     ]
 
     this.panel.innerHTML = `
       <div class="ce-hp-header">
-        <span>🎮 角色渲染</span>
+        <span>${t('sprite.panel.header')}</span>
         <button class="ce-hp-close" data-action="close">×</button>
       </div>
       ${hasMesh ? `
@@ -171,12 +172,12 @@ export class SpriteEditPanel {
             </div>`
           }).join('')}
           <div class="ce-hp-btns">
-            <button data-action="reset">↩️ 重置</button>
-            <button data-action="focus" class="accent">🎯 聚焦</button>
+            <button data-action="reset">${t('sprite.reset')}</button>
+            <button data-action="focus" class="accent">${t('sprite.focus')}</button>
           </div>
         </div>
       ` : `
-        <div class="ce-hp-empty">尚未放入角色</div>
+        <div class="ce-hp-empty">${t('sprite.empty')}</div>
       `}
     `
     this.bindPanelEvents()

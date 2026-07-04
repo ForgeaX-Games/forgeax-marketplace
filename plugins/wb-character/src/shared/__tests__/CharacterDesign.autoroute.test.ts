@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll } from 'vitest'
 import {
   conceptGenButtonLabel,
   conceptVariantCount,
@@ -7,6 +7,7 @@ import {
   shouldAutoRouteNpcToPixel,
   shouldSkipFinalSheetForNpc,
 } from '../CharacterDesign'
+import { setLocale } from '../../i18n'
 
 describe('shouldAutoRouteNpcToPixel()', () => {
   it('returns false when there is no current image (no 设定图 = 没有“生成完”这个事件)', () => {
@@ -56,6 +57,8 @@ describe('conceptVariantCount()', () => {
 })
 
 describe('conceptGenButtonLabel()', () => {
+  beforeAll(() => setLocale('zh'))
+
   it('returns NPC-specific label for npc — 不显示「4 张」避免误导', () => {
     expect(conceptGenButtonLabel('npc')).toBe('🎨 生成 NPC 参考稿')
   })
