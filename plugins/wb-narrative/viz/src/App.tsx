@@ -1,12 +1,13 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { AlignLeft, Network, Download, ArrowLeftRight, Trash2 } from "lucide-react";
+import { useT } from "./i18n";
 import { NarrativeCanvas } from "./components/NarrativeCanvas";
 import { TextViewPanel } from "./components/panels/TextViewPanel";
 import { StepDetailPanel } from "./components/panels/StepDetailPanel";
 import { RegeneratePanel } from "./components/panels/RegeneratePanel";
 import { TierModeSelector } from "./components/controls/TierModeSelector";
 import { PipelineStatusBar } from "./components/panels/PipelineStatusBar";
-import { useNarrativeStore } from "./store/narrativeStore";
+import { useNarrativeStore, useNarrativePhase } from "./store/narrativeStore";
 import type { TierId, ModeId } from "./types";
 import { useAutoAttach } from "./hooks/useAutoAttach";
 import { notifyReady, sendToHost, onHostMessage } from "./lib/bridge";
@@ -23,6 +24,7 @@ function getPaneMode(): PaneMode {
 }
 
 export function App() {
+  const t = useT();
   const pane = useMemo(getPaneMode, []);
   const viewMode = useNarrativeStore((s) => s.viewMode);
   const setViewMode = useNarrativeStore((s) => s.setViewMode);
@@ -44,8 +46,11 @@ export function App() {
     activeEntryKey != null &&
     activeEntryKey === runningEntryKey &&
     (isRunning || isIpPreview || runningProgress.length > 0);
-  // 仅正式 SSE run 算 GENERATING；IP 半自动预处理用 idle（startIpPreviewRun 已设 activeEntryStatus=idle）。
-  const displayStatus = isRunning ? "running" : activeEntryStatus;
+  // §状态机重构：header/状态灯由单一 phase 派生。generating（SSE run 或 IP DNA 下游 job）→ running；
+  // done → completed；其余（含 IP 半自动预处理 input/routed）→ activeEntryStatus（预处理期恒为 STANDBY，
+  // 不再因 useAutoAttach 误设 runningRunId 而闪成 GENERATING）。
+  const phase = useNarrativePhase();
+  const displayStatus = phase === "generating" ? "running" : phase === "done" ? "completed" : activeEntryStatus;
 
   // 自动挂载 agent（Kotone）在后台起的 run：让中间预览直播 + 左栏选择器回填，无需 host 转发。
   useAutoAttach();
@@ -143,8 +148,8 @@ export function App() {
       {pane === "full" && (
         <header className="app-header">
           <div className="header-left">
-            <span className="header-title">叙事工作室</span>
-            <span className="header-sub">NARRATIVE STUDIO</span>
+            <span className="header-title">{t("app.title")}</span>
+            <span className="header-sub">{t("app.subtitle")}</span>
           </div>
           <div className="header-right">
             <span className={`header-status ${displayStatus === "running" ? "running" : ""}`}>
@@ -156,9 +161,9 @@ export function App() {
 
       <main className="app-main">
         {showSidebar && (
-          <aside className="app-sidebar tool-left-panel" aria-label="叙事配置">
+          <aside className="app-sidebar tool-left-panel" aria-label={t("app.sidebarAria")}>
             <header className="workbench-pane-header">
-              <span className="workbench-pane-title">叙事工作室</span>
+              <span className="workbench-pane-title">{t("app.title")}</span>
               <span className={`workbench-pane-pill ${displayStatus === "running" ? "running" : ""}`}>
                 {statusLabel}
               </span>
@@ -180,7 +185,7 @@ export function App() {
             <PipelineStatusBar />
             <div className="cw-toolbar">
               <div className="cw-toolbar-row">
-                <div className="fx-segmented" role="tablist" aria-label="预览模式">
+                <div className="fx-segmented" role="tablist" aria-label={t("app.previewModeAria")}>
                   <button
                     type="button"
                     role="tab"
@@ -189,7 +194,7 @@ export function App() {
                     onClick={() => setViewMode("text")}
                   >
                     <AlignLeft size={14} aria-hidden />
-                    文本阅读
+                    {t("app.view.text")}
                   </button>
                   <button
                     type="button"
@@ -199,7 +204,7 @@ export function App() {
                     onClick={() => setViewMode("graph")}
                   >
                     <Network size={14} aria-hidden />
-                    节点视图
+                    {t("app.view.graph")}
                   </button>
                 </div>
               </div>
@@ -207,14 +212,14 @@ export function App() {
               {hasEntry && (
                 <div className="cw-toolbar-row">
                   <span className="cw-hint">
-                    {displayStatus === "completed" ? "已完成" : displayStatus === "running" ? "生成中" : displayStatus === "interrupted" ? "已中断" : ""}
+                    {displayStatus === "completed" ? t("app.status.completed") : displayStatus === "running" ? t("app.status.running") : displayStatus === "interrupted" ? t("app.status.interruptedShort") : ""}
                     {displayStatus ? " · " : ""}
-                    {new Date().toLocaleDateString()} · {activeSteps.filter((s) => s.status === "completed").length} 个步骤
+                    {new Date().toLocaleDateString()} · {t("app.stepsCount", { n: activeSteps.filter((s) => s.status === "completed").length })}
                   </span>
                   <div className="cw-action-btns">
                     <button type="button" className="fx-btn" onClick={handleExport}>
                       <Download size={13} aria-hidden />
-                      导出
+                      {t("app.export")}
                     </button>
                     <button
                       type="button"
@@ -222,17 +227,17 @@ export function App() {
                       onClick={() => setViewMode(viewMode === "text" ? "graph" : "text")}
                     >
                       <ArrowLeftRight size={13} aria-hidden />
-                      切换
+                      {t("app.switchView")}
                     </button>
                     <button
                       type="button"
                       className="fx-btn fx-btn--danger"
                       onClick={() => {
-                        if (confirm("清除当前生成结果？")) useNarrativeStore.getState().reset();
+                        if (confirm(t("app.clearConfirm"))) useNarrativeStore.getState().reset();
                       }}
                     >
                       <Trash2 size={13} aria-hidden />
-                      清除
+                      {t("app.clear")}
                     </button>
                   </div>
                 </div>

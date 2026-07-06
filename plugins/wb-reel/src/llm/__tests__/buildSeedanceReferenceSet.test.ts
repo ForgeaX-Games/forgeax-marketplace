@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   buildSeedanceReferenceSet,
   type BuildSeedanceRefArgs,
-} from '../buildSeedanceReferenceSet'
-import { getCapability } from '../modelCapabilities'
+} from '../refsets/buildSeedanceReferenceSet'
+import { getCapability } from '../config/modelCapabilities'
 
 const cap = getCapability('seedance-doubao') // maxRefImages = 9
 

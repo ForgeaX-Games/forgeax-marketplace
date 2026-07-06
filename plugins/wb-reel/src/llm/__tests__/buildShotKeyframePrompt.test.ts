@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildShotKeyframePrompt } from '../forgeImagePipeline'
+import { buildShotKeyframePrompt } from '../forge/forgeImagePipeline'
 import type { Character, Location, Scene, Shot } from '../../scenario/types'
 
 /**

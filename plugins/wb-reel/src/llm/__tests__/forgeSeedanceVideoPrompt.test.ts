@@ -7,9 +7,9 @@ import {
   composeGuardrails,
   composeSeedanceDraft,
   type ForgeSeedancePromptArgs,
-} from '../forgeSeedanceVideoPrompt'
-import type { SeedanceReferenceSet } from '../buildSeedanceReferenceSet'
-import { PERSONAS } from '../directorPersonas'
+} from '../forge/forgeSeedanceVideoPrompt'
+import type { SeedanceReferenceSet } from '../refsets/buildSeedanceReferenceSet'
+import { PERSONAS } from '../config/directorPersonas'
 import type { Shot } from '../../scenario/types'
 
 /**

@@ -10,23 +10,39 @@
  */
 
 import type { TrackKey, TrackPrefs } from './trackVisibility'
+import { useT } from '../../i18n'
 
 export const TRACK_GUTTER_W = 80
 
-/** lane 根节点 className → {轨 key, 中文名}。父组件量测时用它把 DOM 行映射成轨头。 */
-export const TRACK_CLASS_META: Record<string, { key: TrackKey; label: string }> = {
-  'ks-track-fx': { key: 'fx', label: '特效' },
-  'ks-track-sticker': { key: 'stk', label: '贴纸' },
-  'ks-track-video': { key: 'video', label: '视频' },
-  'ks-track-shot': { key: 'image', label: '画面' },
-  'ks-track-dialogue': { key: 'dia', label: '字幕' },
-  'ks-track-qte': { key: 'qte', label: 'QTE' },
-  'ks-track-text': { key: 'txt', label: '文字' },
-  'ks-track-search': { key: 'srch', label: '搜索' },
-  'ks-track-trig': { key: 'trig', label: '触发' },
-  'ks-track-audio': { key: 'audio', label: '音频' },
-  'ks-track-minigame': { key: 'game', label: '小游戏' },
-  'ks-track-branch': { key: 'br', label: '分支' },
+/** lane 根节点 className → 轨 key。父组件量测时用它把 DOM 行映射成轨头。 */
+export const TRACK_CLASS_META: Record<string, { key: TrackKey }> = {
+  'ks-track-fx': { key: 'fx' },
+  'ks-track-sticker': { key: 'stk' },
+  'ks-track-video': { key: 'video' },
+  'ks-track-shot': { key: 'image' },
+  'ks-track-dialogue': { key: 'dia' },
+  'ks-track-qte': { key: 'qte' },
+  'ks-track-text': { key: 'txt' },
+  'ks-track-search': { key: 'srch' },
+  'ks-track-trig': { key: 'trig' },
+  'ks-track-audio': { key: 'audio' },
+  'ks-track-minigame': { key: 'game' },
+  'ks-track-branch': { key: 'br' },
+}
+
+export const TRACK_LABEL_KEY: Record<TrackKey, string> = {
+  fx: 'track.fx',
+  stk: 'track.sticker',
+  video: 'track.video',
+  image: 'track.image',
+  dia: 'track.dia',
+  qte: 'track.qte',
+  txt: 'track.txt',
+  srch: 'track.search',
+  trig: 'track.trig',
+  audio: 'track.audio',
+  game: 'track.game',
+  br: 'track.branch',
 }
 
 export interface GutterRow {
@@ -103,6 +119,7 @@ export function TrackGutter({
   onToggleLock,
   onOpenManager,
 }: TrackGutterProps) {
+  const t = useT()
   return (
     <div className="ks-track-gutter">
       <div
@@ -120,8 +137,8 @@ export function TrackGutter({
                 <button
                   type="button"
                   className="ks-gutter-btn ks-gutter-manage"
-                  title="轨道管理 · 显示/隐藏各轨"
-                  aria-label="轨道管理"
+                  title={t('track.manage')}
+                  aria-label={t('track.manageAria')}
                   onClick={onOpenManager}
                 >
                   ≡
@@ -131,22 +148,23 @@ export function TrackGutter({
           }
           const key = r.key as TrackKey
           const st = prefs[key]
+          const label = t(TRACK_LABEL_KEY[key])
           return (
             <div
               key={key}
               className={`ks-gutter-cell ks-gutter-row${st.locked ? ' is-locked' : ''}`}
               style={{ top: r.top, height: r.height }}
             >
-              <span className="ks-gutter-name" title={r.label}>
-                {r.label}
+              <span className="ks-gutter-name" title={label}>
+                {label}
               </span>
               <span className="ks-gutter-ctrls">
                 {key === 'audio' && (
                   <button
                     type="button"
                     className={`ks-gutter-btn${st.muted ? ' is-active' : ''}`}
-                    title={st.muted ? '取消静音' : '静音此轨'}
-                    aria-label="静音"
+                    title={st.muted ? t('track.unmute') : t('track.mute')}
+                    aria-label={t('track.muteAria')}
                     onClick={() => onToggleMute(key)}
                   >
                     <MuteIcon muted={st.muted} />
@@ -155,8 +173,8 @@ export function TrackGutter({
                 <button
                   type="button"
                   className={`ks-gutter-btn${st.locked ? ' is-active' : ''}`}
-                  title={st.locked ? '解锁此轨' : '锁定此轨 · 禁止编辑'}
-                  aria-label="锁定"
+                  title={st.locked ? t('track.unlock') : t('track.lock')}
+                  aria-label={t('track.lockAria')}
                   onClick={() => onToggleLock(key)}
                 >
                   <LockIcon locked={st.locked} />
@@ -164,8 +182,8 @@ export function TrackGutter({
                 <button
                   type="button"
                   className="ks-gutter-btn"
-                  title="隐藏此轨 · 在「轨道」面板可恢复"
-                  aria-label="隐藏"
+                  title={t('track.hide')}
+                  aria-label={t('track.hideAria')}
                   onClick={() => onHide(key)}
                 >
                   <EyeIcon />

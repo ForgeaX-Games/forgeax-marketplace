@@ -29,6 +29,7 @@ import { getOrCreateAdapter } from '../../vfx/mount/SharedAdapter'
 import type { MountAdapter } from '../../vfx/mount/MountAdapter'
 import { TargetAcquisitionSystem } from '../../vfx/targeting/TargetAcquisitionSystem'
 import { DamageNumber } from '../../vfx/effects/hit/DamageNumber'
+import { t, tf, onLocaleChange } from '../../i18n'
 
 const CSS_ID = 'vfx-pipeline-css'
 const VFX_STATE_KEY = 'vfx-editor-state'
@@ -72,81 +73,52 @@ const GROUP_THEMES: Record<string, { bg: string; text: string; border: string; c
   'advance': { bg: 'rgba(255,200,60,.10)',  text: '#eebb33', border: 'rgba(255,200,60,.30)',  cardBg: 'rgba(255,200,60,.03)',  dot: '#eebb33' },
 }
 const DEFAULT_THEME = { bg: 'var(--bg-hover)', text: 'var(--accent)', border: 'var(--border)', cardBg: 'transparent', dot: 'var(--accent)' }
-const GROUP_LABELS: Record<string, string> = {
-  attack: '攻击特效',
-  status: '状态 / 回复',
-  vanish: '位移 / 消失',
-  ice: '冰霜控制',
-  advance: '高级爆发',
+
+function groupLabel(id: string): string {
+  const key = `vfx.group.${id}`
+  const hit = t(key)
+  return hit === key ? id : hit
 }
-const SLOT_LABELS: Record<SkillSlot['id'], string> = {
-  normal: '普通攻击',
-  skill1: '技能 1',
-  skill2: '技能 2',
-  skill3: '技能 3',
-  skill4: '技能 4',
-  ultimate: '终极技',
+
+function slotLabel(id: SkillSlot['id']): string {
+  return t(`vfx.slot.${id}`)
 }
-const EFFECT_LABELS: Record<string, string> = {
-  attack: '基础连击',
-  dashtrail: '冲刺拖尾',
-  starblade: '星刃斩击',
-  weaponslash: '武器斩击',
-  poison: '毒雾 / 中毒',
-  shield: '召唤护盾',
-  heal: '治疗光环',
-  'dissolve-out': '溶解消失',
-  'dissolve-in': '溶解出现',
-  teleport: '传送',
-  'teleport-in': '传送出现',
-  ice: '冰锥连击',
-  groundfrost: '地面冰霜',
-  screenfrost: '屏幕冰霜',
-  bigfireball: '巨型火球',
-  meteor: '陨石打击',
-  magiccannon: '魔法炮',
-  lightning: '闪电攻击',
-  arcaneblast: '奥术爆破',
-  hitexplosion: '命中爆炸',
-  hurt: '受击反馈',
-  shockwave: '冲击波',
-  vinestrike: '藤蔓突刺',
+
+function effectLabel(id: string, fallback: string): string {
+  const key = `vfx.effect.${id}`
+  const hit = t(key)
+  return hit === key ? fallback : hit
 }
-const PARAM_LABELS: Record<string, string> = {
-  Element: '元素',
-  Glow: '辉光',
-  Mix: '混合',
-  Radius: '半径',
-  Speed: '速度',
-  Parts: '粒子',
-  Charge: '蓄力',
-  Width: '宽度',
-  Height: '高度',
-  Drop: '落差',
-  Pool: '毒池',
-  Scale: '缩放',
-  Grid: '网格',
-  Flow: '流动',
-  Bright: '亮度',
-  Hue: '色相',
-  Dur: '时长',
-  Freeze: '冻结',
-  Screen: '屏幕',
-  Explode: '爆炸',
-  Warn: '预警',
-  Impact: '冲击',
-  Shock: '冲击波',
-  Smoke: '烟雾',
-  Shake: '震屏',
-  Flash: '闪光',
-  Burn: '燃烧',
-  Ring: '圆环',
-  Length: '长度',
-  Vortex: '旋涡',
-  Streaks: '拖痕',
-  MaxLen: '最大长度',
-  Intense: '强度',
-  Cracks: '裂纹',
+
+function paramLabel(label: string): string {
+  const key = `vfx.param.${label}`
+  const hit = t(key)
+  return hit === key ? label : hit
+}
+
+function combatLabel(type?: string): string {
+  return type === 'ranged' ? t('vfx.banner.ranged') : t('vfx.banner.melee')
+}
+
+function elementOptions(): { v: string; l: string }[] {
+  return [
+    { v: '', l: t('vfx.element.default') },
+    { v: 'fire', l: t('vfx.element.fire') },
+    { v: 'ice', l: t('vfx.element.ice') },
+    { v: 'magic', l: t('vfx.element.magic') },
+    { v: 'plant', l: t('vfx.element.plant') },
+    { v: 'light', l: t('vfx.element.light') },
+  ]
+}
+
+function confBadgeLabel(conf: string): string {
+  const map: Record<string, string> = {
+    high: t('vfx.banner.confHigh'),
+    medium: t('vfx.banner.confMedium'),
+    low: t('vfx.banner.confLow'),
+    static: '-',
+  }
+  return map[conf] ?? conf
 }
 
 /**
@@ -243,6 +215,7 @@ class VFXPipelineUI {
     attackDir?:  [number, number]
   } | null = null
   private tmplGenerating = false
+  private localeUnsub: (() => void) | null = null
 
   // Module 16 split-pane: left iframe carries the controls, center iframe owns the
   // visible THREE canvas. Each iframe spins up its own VFXManager so a `def.fire(v)`
@@ -255,7 +228,15 @@ class VFXPipelineUI {
   private _applyingIntent = false
 
   // D-8: no reactive GlobalState subscription -- unsub stays null (R1 known risk).
-  constructor() { injectCSS(); this.st = createDefault(); this.unsub = null; this.setupVfxIntentBus() }
+  constructor() {
+    injectCSS()
+    this.st = createDefault()
+    this.unsub = null
+    this.setupVfxIntentBus()
+    this.localeUnsub = onLocaleChange(() => {
+      if (this.left) this.render()
+    })
+  }
 
   private setupVfxIntentBus(): void {
     if (this._bcVfx) return
@@ -395,7 +376,7 @@ class VFXPipelineUI {
       this.vfxGroup.parent?.remove(this.vfxGroup)
       this.vfxGroup = null
     }
-    this.unsub?.(); this.vfx?.dispose(); this.vfx = null; this.save()
+    this.unsub?.(); this.localeUnsub?.(); this.localeUnsub = null; this.vfx?.dispose(); this.vfx = null; this.save()
   }
 
   private refresh(): void { if (this.left && this.panels && this.ctx) this.mount(this.left, this.panels, this.ctx) }
@@ -549,11 +530,11 @@ class VFXPipelineUI {
     // Character status banner
     root.appendChild(this.renderCharacterBanner())
     const configuredCount = this.st.skills.filter(s => s.effectId).length
-    const slotBody = this.workflowBody(root, '1', '技能槽配置', `${configuredCount}/${this.st.skills.length} 个技能已绑定`, true)
-    const effectBody = this.workflowBody(root, '2', '特效选择', '按类型选择模板并绑定到默认技能槽')
-    const debugBody = this.workflowBody(root, '3', '参数调试', '高级手感、命中、轨迹和挂点调试')
+    const slotBody = this.workflowBody(root, '1', t('vfx.workflow.slots.title'), tf('vfx.workflow.slots.summary', { configured: configuredCount, total: this.st.skills.length }), true)
+    const effectBody = this.workflowBody(root, '2', t('vfx.workflow.effects.title'), t('vfx.workflow.effects.summary'))
+    const debugBody = this.workflowBody(root, '3', t('vfx.workflow.debug.title'), t('vfx.workflow.debug.summary'))
     debugBody.classList.add('vp-debug-body')
-    const aiBody = this.workflowBody(root, '4', 'AI 生成与技能包', '自然语言生成、保存和复用技能包')
+    const aiBody = this.workflowBody(root, '4', t('vfx.workflow.ai.title'), t('vfx.workflow.ai.summary'))
 
     // Top quick-action bar (two rows):
     //   Row 1 (primary, enlarged): Auto-match -> Import to game -- highest frequency for new users.
@@ -562,31 +543,26 @@ class VFXPipelineUI {
     // NOTE: "Auto-match" reads profile from localStorage (single slot storage --
     // designing a new character in wb-character overwrites it, so the 6 slots will
     // be rewritten to the new character's template on next click).
-    bar.appendChild(this.btn('自动匹配技能', 'accent xl', () => {
+    bar.appendChild(this.btn(t('vfx.btn.autoMatch'), 'accent xl', () => {
       this.st.skills = autoMatchSkills(readCharacterProfile()); this.save(); this.render()
     }))
-    // Import to game: downgrade st.skills into manifest.skills[] and merge.
-    // Prerequisite: character must have been published via pixel-char pipeline first
-    // (skills need to bind to actionIds).
-    bar.appendChild(this.btn('导入到游戏', 'primary xl', () => void this.onClickPublishVfxToGame()))
+    bar.appendChild(this.btn(t('vfx.btn.importToGame'), 'primary xl', () => void this.onClickPublishVfxToGame()))
     slotBody.appendChild(bar)
 
     const bar2 = mk('div', 'vp-btn-row vp-btn-row-secondary')
     // Default assign: fill all 6 slots by each effect's defaultSlot field.
     // Does not depend on profile, so switching characters does not change it.
-    bar2.appendChild(this.btn('默认绑定', '', () => {
+    bar2.appendChild(this.btn(t('vfx.btn.defaultBind'), '', () => {
       for (const sk of this.st.skills) {
         const def = EFFECTS.find(d => d.defaultSlot === sk.id)
         if (def) { sk.effectId = def.id; sk.effectLabel = def.label; sk.isAIGenerated = false }
       }
-      this.save(); this.render(); toast('已按默认方案绑定 6 个技能')
+      this.save(); this.render(); toast(t('vfx.toast.defaultBound'))
     }))
-    // Sync from game: reverse-map the currently published character.manifest.json.skills[]
-    // back into editor SkillSlots so the user can see "what is actually in game right now".
-    bar2.appendChild(this.btn('从游戏同步', '', () => void this.onClickPullFromGame()))
-    bar2.appendChild(this.btn('全部预览', '', () => this.playAll()))
+    bar2.appendChild(this.btn(t('vfx.btn.syncFromGame'), '', () => void this.onClickPullFromGame()))
+    bar2.appendChild(this.btn(t('vfx.btn.previewAll'), '', () => this.playAll()))
     if (this.activeEffect || this.toggleOn.size > 0) {
-      bar2.appendChild(this.btn('全部停止', '', () => {
+      bar2.appendChild(this.btn(t('vfx.btn.stopAll'), '', () => {
         this.stopLoop(); this.activeEffect = null; this.toggleOn.clear(); this.render()
       }))
     }
@@ -611,7 +587,7 @@ class VFXPipelineUI {
 
           const grpHdr = mk('div', 'vp-gh')
           grpHdr.style.cssText = `background:${curTheme.bg};border-left:3px solid ${curTheme.dot};`
-          grpHdr.innerHTML = `<span class="vp-gh-dot" style="background:${curTheme.dot}"></span><span class="vp-gh-label" style="color:${curTheme.text}">${GROUP_LABELS[def.group] ?? def.group}</span><span class="vp-gh-count" style="color:${curTheme.text}">${EFFECTS.filter(e => e.group === def.group).length}</span><span class="vp-shv" style="color:${curTheme.text}">${isGroupOpen ? '▾' : '▸'}</span>`
+          grpHdr.innerHTML = `<span class="vp-gh-dot" style="background:${curTheme.dot}"></span><span class="vp-gh-label" style="color:${curTheme.text}">${groupLabel(def.group)}</span><span class="vp-gh-count" style="color:${curTheme.text}">${EFFECTS.filter(e => e.group === def.group).length}</span><span class="vp-shv" style="color:${curTheme.text}">${isGroupOpen ? '▾' : '▸'}</span>`
           grpHdr.addEventListener('click', () => {
             this.collapsed.has(def.group) ? this.collapsed.delete(def.group) : this.collapsed.add(def.group)
             this.render()
@@ -638,16 +614,16 @@ class VFXPipelineUI {
         const head = mk('div', 'vp-ecard-head')
         if (isAct) head.style.background = curTheme.bg
         const iconEl = mk('span', 'vp-ei'); iconEl.textContent = def.icon
-        const nameEl = mk('span', 'vp-en'); nameEl.textContent = EFFECT_LABELS[def.id] ?? def.label
+        const nameEl = mk('span', 'vp-en'); nameEl.textContent = effectLabel(def.id, def.label)
         head.appendChild(iconEl)
         head.appendChild(nameEl)
 
         if (!def.toggleable && isAct) {
-          const lp = mk('span', 'vp-looping'); lp.textContent = '循环'; head.appendChild(lp)
+          const lp = mk('span', 'vp-looping'); lp.textContent = t('vfx.btn.loop'); head.appendChild(lp)
         }
         if (def.toggleable) {
           const bd = mk('span', 'vp-badge')
-          bd.textContent = isTog ? '已开启' : '已关闭'
+          bd.textContent = isTog ? t('vfx.btn.on') : t('vfx.btn.off')
           if (isTog) bd.style.cssText = 'background:rgba(100,255,100,.15);color:#55cc88;'
           else bd.style.cssText = `background:${curTheme.bg};color:${curTheme.text};`
           head.appendChild(bd)
@@ -657,7 +633,7 @@ class VFXPipelineUI {
         playBtn.className = `vp-btn${isAct || isTog ? ' accent' : ''}`
         playBtn.style.cssText = 'padding:2px 8px;font-size:10px;flex-shrink:0;min-width:40px;'
         if (isAct || isTog) playBtn.style.cssText += `background:${curTheme.dot};border-color:${curTheme.dot};`
-        playBtn.textContent = def.toggleable ? (isTog ? '关闭' : '开启') : (isAct ? '重播' : '预览')
+        playBtn.textContent = def.toggleable ? (isTog ? t('vfx.btn.close') : t('vfx.btn.open')) : (isAct ? t('vfx.btn.replay') : t('vfx.btn.preview'))
         playBtn.addEventListener('click', e => { e.stopPropagation(); this.selectEffect(def) })
         head.appendChild(playBtn)
 
@@ -671,17 +647,17 @@ class VFXPipelineUI {
         const assBtn = document.createElement('button')
         assBtn.className = 'vp-btn'
         assBtn.style.cssText = 'padding:2px 6px;font-size:9px;flex-shrink:0;opacity:.8;'
-        assBtn.textContent = activeMatches ? '绑定★' : '绑定'
-        assBtn.title = `绑定到「${SLOT_LABELS[targetSlotId] ?? targetLabel}」`
+        assBtn.textContent = activeMatches ? t('vfx.btn.bindStar') : t('vfx.btn.bind')
+        assBtn.title = tf('vfx.bind.title', { slot: slotLabel(targetSlotId) })
         assBtn.addEventListener('click', e => {
           e.stopPropagation()
-          if (!targetSkill) { toast(`未找到技能槽 ${targetSlotId}`); return }
+          if (!targetSkill) { toast(tf('vfx.toast.slotNotFound', { id: targetSlotId })); return }
           targetSkill.effectId = def.id
           targetSkill.effectLabel = def.label
           targetSkill.isAIGenerated = false
           // Also switch activeSlot to the target so the right panel focuses the assigned skill.
           this.st.activeSlot = this.st.skills.findIndex(s => s.id === targetSlotId)
-          this.save(); toast(`${EFFECT_LABELS[def.id] ?? def.label} -> ${SLOT_LABELS[targetSlotId] ?? targetLabel}`)
+          this.save(); toast(`${effectLabel(def.id, def.label)} -> ${slotLabel(targetSlotId)}`)
           this.render()
         })
         head.appendChild(assBtn)
@@ -703,24 +679,24 @@ class VFXPipelineUI {
     }
 
     // Skill slots section (expanded by default)
-    slotBody.appendChild(this.sectionHeader('技能槽', 'slots'))
+    slotBody.appendChild(this.sectionHeader(t('vfx.section.slots'), 'slots'))
     if (!this.collapsed.has('slots')) {
       const profile = readCharacterProfile()
       const info = mk('div', 'vp-info')
-      info.textContent = `${profile.name || '未命名角色'} · ${profile.charClass || '未设定职业'} · ${profile.worldSetting || '默认世界观'} · ${profile.combatType === 'ranged' ? '远程' : '近战'}`
+      info.textContent = `${profile.name || t('vfx.banner.unnamedCharacter')} · ${profile.charClass || t('vfx.banner.noClass')} · ${profile.worldSetting || t('vfx.banner.defaultWorld')} · ${combatLabel(profile.combatType)}`
       slotBody.appendChild(info)
       for (let i = 0; i < this.st.skills.length; i++) {
         const sk = this.st.skills[i], meta = SLOT_META[i], isSel = this.st.activeSlot === i
         const tmpl = EFFECT_TEMPLATES.find(t => t.id === sk.effectId)
-        const displayName = sk.name === meta.label ? (SLOT_LABELS[meta.id] ?? sk.name) : sk.name
+        const displayName = sk.name === meta.label ? slotLabel(meta.id) : sk.name
         const card = mk('div', `vp-card${isSel ? ' sel' : ''}`)
         card.innerHTML = `
           <div class="vp-card-head">
             <span class="vp-card-icon">${meta.icon}</span>
             <input class="vp-card-name" value="${displayName}" data-i="${i}" />
-            <span class="vp-card-effect">${tmpl ? `${tmpl.icon} ${EFFECT_LABELS[tmpl.id] ?? tmpl.label}` : '未绑定'}</span>
-            <button class="vp-card-play" ${sk.effectId ? '' : 'disabled'} title="预览">▶</button>
-            <button class="vp-card-clear" ${sk.effectId ? '' : 'disabled'} title="清空">✕</button>
+            <span class="vp-card-effect">${tmpl ? `${tmpl.icon} ${effectLabel(tmpl.id, tmpl.label)}` : t('vfx.card.unbound')}</span>
+            <button class="vp-card-play" ${sk.effectId ? '' : 'disabled'} title="${t('vfx.card.previewTitle')}">▶</button>
+            <button class="vp-card-clear" ${sk.effectId ? '' : 'disabled'} title="${t('vfx.card.clearTitle')}">✕</button>
           </div>
         `
         const nameInp = card.querySelector('.vp-card-name') as HTMLInputElement
@@ -736,15 +712,15 @@ class VFXPipelineUI {
     }
 
     // Skill packs section (collapsed by default)
-    aiBody.appendChild(this.sectionHeader('技能包', 'packs'))
+    aiBody.appendChild(this.sectionHeader(t('vfx.section.packs'), 'packs'))
     if (!this.collapsed.has('packs')) {
       const sec = mk('div', 'vp-sec')
-      sec.appendChild(this.btn('保存为技能包', 'accent', () => this.savePack()))
+      sec.appendChild(this.btn(t('vfx.btn.savePack'), 'accent', () => this.savePack()))
       for (const pk of this.st.packs) {
         const r = mk('div', `vp-pkrow${pk.id === this.st.activePack ? ' act' : ''}`)
-        r.innerHTML = `<div class="vp-pkinfo"><b>${pk.name}</b><span>${pk.profession} · ${pk.skills.filter(s => s.effectId).length} 个技能</span></div>`
-        const loadB = mk('button', 'vp-pkbtn'); loadB.textContent = '载入'
-        loadB.addEventListener('click', () => { this.st.skills = JSON.parse(JSON.stringify(pk.skills)); this.st.activePack = pk.id; this.save(); this.render(); toast(`已载入 ${pk.name}`) })
+        r.innerHTML = `<div class="vp-pkinfo"><b>${pk.name}</b><span>${pk.profession} · ${tf('vfx.pack.skillCount', { count: pk.skills.filter(s => s.effectId).length })}</span></div>`
+        const loadB = mk('button', 'vp-pkbtn'); loadB.textContent = t('vfx.btn.load')
+        loadB.addEventListener('click', () => { this.st.skills = JSON.parse(JSON.stringify(pk.skills)); this.st.activePack = pk.id; this.save(); this.render(); toast(tf('vfx.toast.packLoaded', { name: pk.name })) })
         const delB = mk('button', 'vp-pkbtn del'); delB.textContent = '✕'
         delB.addEventListener('click', () => { this.st.packs = this.st.packs.filter(x => x.id !== pk.id); this.save(); this.render() })
         r.appendChild(loadB); r.appendChild(delB); sec.appendChild(r)
@@ -753,15 +729,15 @@ class VFXPipelineUI {
     }
 
     // AI assistant section (collapsed by default)
-    aiBody.appendChild(this.sectionHeader('AI 助手 (Gemini 3.0 Pro)', 'chat'))
+    aiBody.appendChild(this.sectionHeader(t('vfx.section.chat'), 'chat'))
     if (!this.collapsed.has('chat')) {
       const sec = mk('div', 'vp-sec vp-chat')
       const log = mk('div', 'vp-chatlog'); log.id = 'vp-chatlog'
       for (const m of this.chatHistory) { const b = mk('div', `vp-msg ${m.role}`); b.textContent = m.text; log.appendChild(b) }
       sec.appendChild(log)
       const irow = mk('div', 'vp-chatrow')
-      const ta = document.createElement('textarea'); ta.className = 'vp-chatin'; ta.placeholder = '描述你想要的特效...'; ta.rows = 2
-      const send = mk('button', 'vp-btn accent'); send.textContent = '发送'
+      const ta = document.createElement('textarea'); ta.className = 'vp-chatin'; ta.placeholder = t('vfx.ai.chatPlaceholder'); ta.rows = 2
+      const send = mk('button', 'vp-btn accent'); send.textContent = t('vfx.btn.send')
       send.addEventListener('click', () => this.chat(ta))
       ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.chat(ta) } })
       irow.appendChild(ta); irow.appendChild(send); sec.appendChild(irow)
@@ -830,7 +806,7 @@ class VFXPipelineUI {
     const a = (l: string, mn: number, mx: number, s: number, v: number, cb: (n: number) => void) => w.appendChild(sld(l, mn, mx, s, v, cb))
     switch (eid) {
       case 'attack':
-        w.appendChild(sel('Element', [{ v: '', l: '默认' }, { v: 'fire', l: '火焰' }, { v: 'ice', l: '冰霜' }, { v: 'magic', l: '魔法' }, { v: 'plant', l: '植物' }, { v: 'light', l: '光明' }], p.slash.elementOverride, v => { p.slash.elementOverride = v as ElementKey | '' }))
+        w.appendChild(sel('Element', elementOptions(), p.slash.elementOverride, v => { p.slash.elementOverride = v as ElementKey | '' }))
         a('Glow',    0.2, 4,   0.1,  p.slash.glowScale,   v => { p.slash.glowScale   = v })
         a('Mix',     0,   1,   0.05, p.slash.colorMix,    v => { p.slash.colorMix    = v })
         a('Radius',  0.4, 2.5, 0.05, p.slash.radiusScale, v => { p.slash.radiusScale = v })
@@ -907,8 +883,8 @@ class VFXPipelineUI {
   private renderSidebarHeader(): HTMLElement {
     const header = mk('div', 'vp-header')
     header.innerHTML = `
-      <span class="vp-title">技能特效工作台</span>
-      <span class="vp-header-pill">技能特效</span>
+      <span class="vp-title">${t('vfx.shell.title')}</span>
+      <span class="vp-header-pill">${t('vfx.shell.pill')}</span>
     `
     return header
   }
@@ -926,7 +902,7 @@ class VFXPipelineUI {
     // CharPosTracker live state
     const tracked = hasTrackedSprite()
     const pos     = getCharWorldPos(0.5)
-    const posStr  = pos ? `(${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})` : '未跟踪'
+    const posStr  = pos ? `(${pos.x.toFixed(2)}, ${pos.z.toFixed(2)})` : t('vfx.banner.untracked')
     const trackerColor = tracked ? '#55cc88' : '#ff6655'
 
     const srcColor: Record<string, string> = {
@@ -935,46 +911,39 @@ class VFXPipelineUI {
       geometric: '#55bbff',
       static:    '#aaaaaa',
     }
-    const confBadge: Record<string, string> = {
-      high:    '● 高',
-      medium:  '◐ 中',
-      low:     '○ 低',
-      static:  '-',
-    }
 
     const banner = mk('div', 'vp-char-banner')
     banner.innerHTML = `
       <div class="vp-cb-row">
-        <span class="vp-cb-name">${hasChar ? (profile.name || '未命名') : '未检测到角色'}</span>
-        <span class="vp-cb-class">${profile.charClass || '未设定职业'}</span>
-        <span class="vp-cb-world">${profile.worldSetting || '默认世界观'}</span>
-        <span class="vp-cb-type">${profile.combatType === 'ranged' ? '远程' : '近战'}</span>
+        <span class="vp-cb-name">${hasChar ? (profile.name || t('vfx.banner.unnamed')) : t('vfx.banner.noCharacter')}</span>
+        <span class="vp-cb-class">${profile.charClass || t('vfx.banner.noClass')}</span>
+        <span class="vp-cb-world">${profile.worldSetting || t('vfx.banner.defaultWorld')}</span>
+        <span class="vp-cb-type">${combatLabel(profile.combatType)}</span>
       </div>
       <div class="vp-cb-row vp-cb-mount">
-        <span style="color:${srcColor[src] ?? '#aaa'}">挂点源: ${src.toUpperCase()}</span>
-        <span style="opacity:.7">置信度: ${confBadge[conf] ?? conf}</span>
-        <span style="opacity:.7">比例: ${ratio}</span>
-        <span style="opacity:.7">高度: ${height}u</span>
+        <span style="color:${srcColor[src] ?? '#aaa'}">${t('vfx.banner.mountSource')} ${src.toUpperCase()}</span>
+        <span style="opacity:.7">${t('vfx.banner.confidence')} ${confBadgeLabel(conf)}</span>
+        <span style="opacity:.7">${t('vfx.banner.ratio')} ${ratio}</span>
+        <span style="opacity:.7">${t('vfx.banner.height')} ${height}u</span>
       </div>
       <div class="vp-cb-row" id="vp-pos-tracker" style="font-family:monospace;font-size:9px;gap:6px">
-        <span style="color:${trackerColor}">● 位置跟踪: ${tracked ? '开启' : '关闭'}</span>
+        <span style="color:${trackerColor}">● ${t('vfx.banner.tracking')} ${tracked ? t('vfx.banner.trackingOn') : t('vfx.banner.trackingOff')}</span>
         <span style="opacity:.8">XZ: ${posStr}</span>
-        ${!tracked ? `<span style="color:#ffaa33">请先把角色放入场景</span>` : ''}
+        ${!tracked ? `<span style="color:#ffaa33">${t('vfx.banner.placeCharacter')}</span>` : ''}
       </div>
     `
 
-    // Update position display every 500ms
     const updatePos = (): void => {
       const el = this.left?.querySelector('#vp-pos-tracker')
       if (!el) return
-      const t = hasTrackedSprite()
+      const trackedNow = hasTrackedSprite()
       const p = getCharWorldPos(0.5)
-      const s = p ? `(${p.x.toFixed(2)}, ${p.z.toFixed(2)})` : '未跟踪'
-      const c = t ? '#55cc88' : '#ff6655'
+      const s = p ? `(${p.x.toFixed(2)}, ${p.z.toFixed(2)})` : t('vfx.banner.untracked')
+      const c = trackedNow ? '#55cc88' : '#ff6655'
       el.innerHTML = `
-        <span style="color:${c}">● 位置跟踪: ${t ? '开启' : '关闭'}</span>
+        <span style="color:${c}">● ${t('vfx.banner.tracking')} ${trackedNow ? t('vfx.banner.trackingOn') : t('vfx.banner.trackingOff')}</span>
         <span style="opacity:.8">XZ: ${s}</span>
-        ${!t ? `<span style="color:#ffaa33">请先把角色放入场景</span>` : ''}
+        ${!trackedNow ? `<span style="color:#ffaa33">${t('vfx.banner.placeCharacter')}</span>` : ''}
       `
     }
     if (this._posUpdateTimer) clearInterval(this._posUpdateTimer)
@@ -991,7 +960,7 @@ class VFXPipelineUI {
     // Collapsible header
     const isOpen = !this.collapsed.has('ai-tmpl')
     const hdr = mk('div', 'vp-sh')
-    hdr.innerHTML = `<span>AI 模板特效生成器</span><span class="vp-shv">${isOpen ? '▾' : '▸'}</span>`
+    hdr.innerHTML = `<span>${t('vfx.ai.templateGen')}</span><span class="vp-shv">${isOpen ? '▾' : '▸'}</span>`
     hdr.addEventListener('click', e => {
       e.stopPropagation()
       this.collapsed.has('ai-tmpl') ? this.collapsed.delete('ai-tmpl') : this.collapsed.add('ai-tmpl')
@@ -1006,7 +975,7 @@ class VFXPipelineUI {
     const ta = document.createElement('textarea')
     ta.className = 'vp-chatin'
     ta.rows = 2
-    ta.placeholder = '描述技能特效，例如：地狱火爆破、巨大范围爆炸'
+    ta.placeholder = t('vfx.ai.placeholder')
     ta.style.cssText = 'width:100%;box-sizing:border-box;resize:none;'
     body.appendChild(ta)
 
@@ -1015,28 +984,28 @@ class VFXPipelineUI {
 
     const genBtn = document.createElement('button')
     genBtn.className = 'vp-btn accent'
-    genBtn.textContent = this.tmplGenerating ? '生成中...' : 'AI 生成'
+    genBtn.textContent = this.tmplGenerating ? t('vfx.btn.generating') : t('vfx.btn.aiGenerate')
     genBtn.disabled = this.tmplGenerating
     genBtn.addEventListener('click', async () => {
       const desc = ta.value.trim()
-      if (!desc) { toast('请先描述想要的特效'); return }
+      if (!desc) { toast(t('vfx.toast.describeFirst')); return }
       this.tmplGenerating = true; this.render()
       const res = await generateFromDescription(desc)
       console.log('[VFX Compose] AI result:', JSON.stringify(res, null, 2))
       this.tmplGenerating = false
       if (!res.success) {
-        toast(`${res.error || '生成失败'}`); this.render(); return
+        toast(`${res.error || t('vfx.toast.generateFailed')}`); this.render(); return
       }
       if (res.mode === 'compose') {
-        if (!res.components) { toast('组合结果缺少组件'); this.render(); return }
+        if (!res.components) { toast(t('vfx.toast.composeMissingComponents')); this.render(); return }
         this.lastTmplResult = {
           mode: 'compose',
-          label: res.label ?? '组合特效',
+          label: res.label ?? t('vfx.ai.composedEffect'),
           components: res.components as Record<string, ComponentInstanceConfig>,
           attackDir: res.attackDir,
         }
       } else {
-        if (!res.template || !res.params) { toast('响应格式无效'); this.render(); return }
+        if (!res.template || !res.params) { toast(t('vfx.toast.invalidResponse')); this.render(); return }
         this.lastTmplResult = {
           mode: 'template',
           template: res.template,
@@ -1046,14 +1015,14 @@ class VFXPipelineUI {
       }
       this.spawnLastTemplate()
       this.render()
-      toast(`已生成: ${this.lastTmplResult.label}`)
+      toast(tf('vfx.toast.generated', { label: this.lastTmplResult.label }))
     })
     btnRow.appendChild(genBtn)
 
     if (this.lastTmplResult) {
       const replayBtn = document.createElement('button')
       replayBtn.className = 'vp-btn'
-      replayBtn.textContent = '重播'
+      replayBtn.textContent = t('vfx.btn.replay')
       replayBtn.addEventListener('click', () => this.spawnLastTemplate())
       btnRow.appendChild(replayBtn)
     }
@@ -1067,13 +1036,13 @@ class VFXPipelineUI {
       const card = mk('div', 'vp-tmpl-card')
       // compose mode: show component list; template mode: show params
       const modeTag = isCompose
-        ? `<span style="font-size:9px;color:#a78bfa;margin-left:auto">组合</span>`
+        ? `<span style="font-size:9px;color:#a78bfa;margin-left:auto">${t('vfx.ai.compose')}</span>`
         : `<span style="font-size:9px;color:var(--accent);margin-left:auto">${r.template}</span>`
       const paramLine = (!isCompose && r.params)
         ? `<div style="font-size:9px;color:var(--text-secondary);line-height:1.5">
-            缩放 <b style="color:var(--accent)">${r.params.scale}</b> ·
-            时长 <b style="color:var(--accent)">${r.params.duration}</b> ·
-            强度 <b style="color:var(--accent)">${r.params.intensity}</b>
+            ${t('vfx.ai.scale')} <b style="color:var(--accent)">${r.params.scale}</b> ·
+            ${t('vfx.ai.duration')} <b style="color:var(--accent)">${r.params.duration}</b> ·
+            ${t('vfx.ai.intensity')} <b style="color:var(--accent)">${r.params.intensity}</b>
             <span style="display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-left:4px;background:rgb(${r.params.primaryColor.map(v=>Math.round(v*255)).join(',')})"></span>
             <span style="display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-left:2px;background:rgb(${r.params.secondaryColor.map(v=>Math.round(v*255)).join(',')})"></span>
            </div>`
@@ -1092,7 +1061,7 @@ class VFXPipelineUI {
       if (!isCompose) {
         const assignBtn = document.createElement('button')
         assignBtn.className = 'vp-pkbtn'
-        assignBtn.textContent = `绑定到「${this.st.skills[this.st.activeSlot]?.name ?? '技能'}」`
+        assignBtn.textContent = tf('vfx.bind.assignTo', { name: this.st.skills[this.st.activeSlot]?.name ?? t('vfx.fallback.skill') })
         assignBtn.style.cssText = 'margin-top:6px;width:100%;'
         assignBtn.addEventListener('click', () => {
           const sk = this.st.skills[this.st.activeSlot]
@@ -1100,7 +1069,7 @@ class VFXPipelineUI {
           sk.effectId = `tmpl:${r.template}`
           sk.tmplParams = r.params
           this.save(); this.render()
-          toast(`已绑定「${r.label}」->「${sk.name}」`)
+          toast(tf('vfx.toast.bound', { effect: r.label, skill: sk.name }))
         })
         card.appendChild(assignBtn)
       }
@@ -1117,10 +1086,10 @@ class VFXPipelineUI {
         _replayTimer = window.setTimeout(() => this.spawnLastTemplate(), 280)
       }
 
-      const addP = (label: string, min: number, max: number, step: number, key: keyof TemplateParams) => {
+      const addP = (labelKey: string, min: number, max: number, step: number, key: keyof TemplateParams) => {
         if (!r.params) return
         const cur = (r.params as unknown as Record<string, number>)[key as string] ?? min
-        tuneWrap.appendChild(sld(label, min, max, step, cur, v => {
+        tuneWrap.appendChild(sldDisplay(t(labelKey), min, max, step, cur, v => {
           if (this.lastTmplResult?.params) {
             ;(this.lastTmplResult.params as unknown as Record<string, number>)[key as string] = v
           }
@@ -1129,11 +1098,11 @@ class VFXPipelineUI {
       }
 
       if (!isCompose) {
-        addP('缩放', 0.3, 3.0, 0.1, 'scale')
-        addP('时长', 0.5, 2.5, 0.1, 'duration')
-        addP('强度', 0.3, 2.0, 0.1, 'intensity')
-        if (r.params?.crackCount    !== undefined) addP('裂纹', 4,  14, 1, 'crackCount')
-        if (r.params?.particleCount !== undefined) addP('粒子', 8,  48, 2, 'particleCount')
+        addP('vfx.ai.scale', 0.3, 3.0, 0.1, 'scale')
+        addP('vfx.ai.duration', 0.5, 2.5, 0.1, 'duration')
+        addP('vfx.ai.intensity', 0.3, 2.0, 0.1, 'intensity')
+        if (r.params?.crackCount    !== undefined) addP('vfx.param.Cracks', 4,  14, 1, 'crackCount')
+        if (r.params?.particleCount !== undefined) addP('vfx.param.Parts', 8,  48, 2, 'particleCount')
         body.appendChild(tuneWrap)
       }
     }
@@ -1151,7 +1120,7 @@ class VFXPipelineUI {
 
     const hdr = mk('div', 'vp-sh')
     hdr.style.cssText = 'font-size:11px;font-weight:700;cursor:pointer;'
-    hdr.innerHTML = `<span>打击手感</span><span class="vp-shv" style="font-size:10px">${isOpen ? '▾' : '▸'}</span>`
+    hdr.innerHTML = `<span>${t('vfx.gameFeel.title')}</span><span class="vp-shv" style="font-size:10px">${isOpen ? '▾' : '▸'}</span>`
     hdr.addEventListener('click', e => {
       e.stopPropagation()
       this.collapsed.has(KEY) ? this.collapsed.delete(KEY) : this.collapsed.add(KEY)
@@ -1166,15 +1135,14 @@ class VFXPipelineUI {
     // Multiplier reference info for users
     const gameFeelTip = mk('div', '')
     gameFeelTip.style.cssText = 'font-size:9px;color:var(--text-secondary);padding:2px 4px 6px;line-height:1.4;'
-    gameFeelTip.textContent = '普通斩击 x0.3 · 连击 x0.35-0.55 · 重击/陨石/炮击/闪电/爆破 x1.0 · 受击 x0.75'
+    gameFeelTip.textContent = t('vfx.gameFeel.multiplierTip')
     body.appendChild(gameFeelTip)
 
     const cfg = this.gameFeelCfg
 
     const mkSld = (label: string, min: number, max: number, step: number, key: keyof GameFeelConfig) => {
-      body.appendChild(sld(label, min, max, step, cfg[key], (v) => {
+      body.appendChild(sldDisplay(label, min, max, step, cfg[key], (v) => {
         cfg[key] = v
-        // Sync to GameFeelSystem in real-time (no re-render needed)
         if (this.gameFeel) this.gameFeel.config = cfg
       }))
     }
@@ -1182,14 +1150,14 @@ class VFXPipelineUI {
     // Usage tip
     const tip = mk('div', '')
     tip.style.cssText = 'font-size:9px;color:var(--text-secondary);padding:2px 4px 6px;line-height:1.6;'
-    tip.textContent = '触发任意特效后生效。全部设为 0 可关闭打击手感。'
+    tip.textContent = t('vfx.gameFeel.usageTip')
     body.appendChild(tip)
 
-    mkSld('闪光', 0,    1.0,  0.05, 'flashIntensity')
-    mkSld('闪光时长', 0.05, 0.4, 0.01, 'flashDuration')
-    mkSld('震屏', 0,    0.30, 0.01, 'shakeAmplitude')
-    mkSld('震屏时长', 0.05, 0.5, 0.01, 'shakeDuration')
-    mkSld('辉光', 0,    0.50, 0.02, 'bloomBoost')
+    mkSld(t('vfx.gameFeel.flash'), 0,    1.0,  0.05, 'flashIntensity')
+    mkSld(t('vfx.gameFeel.flashDuration'), 0.05, 0.4, 0.01, 'flashDuration')
+    mkSld(t('vfx.gameFeel.shake'), 0,    0.30, 0.01, 'shakeAmplitude')
+    mkSld(t('vfx.gameFeel.shakeDuration'), 0.05, 0.5, 0.01, 'shakeDuration')
+    mkSld(t('vfx.gameFeel.bloom'), 0,    0.50, 0.02, 'bloomBoost')
 
     // Quick preset buttons
     const presets = mk('div', '')
@@ -1207,10 +1175,10 @@ class VFXPipelineUI {
       presets.appendChild(b)
     }
 
-    applyPreset('关闭', { shakeAmplitude:0,    shakeDuration:0.18, bloomBoost:0,    flashIntensity:0,    flashDuration:0.16 })
-    applyPreset('轻量', { shakeAmplitude:0.03, shakeDuration:0.15, bloomBoost:0.06, flashIntensity:0.20, flashDuration:0.14 })
-    applyPreset('标准', { ...DEFAULT_GAMEFEEL })
-    applyPreset('重击', { shakeAmplitude:0.14, shakeDuration:0.28, bloomBoost:0.22, flashIntensity:0.55, flashDuration:0.20 })
+    applyPreset(t('vfx.gameFeel.presetOff'), { shakeAmplitude:0,    shakeDuration:0.18, bloomBoost:0,    flashIntensity:0,    flashDuration:0.16 })
+    applyPreset(t('vfx.gameFeel.presetLight'), { shakeAmplitude:0.03, shakeDuration:0.15, bloomBoost:0.06, flashIntensity:0.20, flashDuration:0.14 })
+    applyPreset(t('vfx.gameFeel.presetStandard'), { ...DEFAULT_GAMEFEEL })
+    applyPreset(t('vfx.gameFeel.presetHeavy'), { shakeAmplitude:0.14, shakeDuration:0.28, bloomBoost:0.22, flashIntensity:0.55, flashDuration:0.20 })
 
     body.appendChild(presets)
     sec.appendChild(body)
@@ -1303,23 +1271,24 @@ class VFXPipelineUI {
 
   private savePack(): void {
     const pr = readCharacterProfile()
-    const name = prompt('技能包名称:', `${pr.charClass || '未知职业'}技能包`)
+    const defaultName = tf('vfx.prompt.packDefaultName', { class: pr.charClass || t('vfx.prompt.unknownClass') })
+    const name = prompt(t('vfx.prompt.packName'), defaultName)
     if (!name) return
-    this.st.packs.push({ id: `pk_${Date.now()}`, name, profession: pr.charClass || '未知职业', skills: JSON.parse(JSON.stringify(this.st.skills)), timestamp: Date.now() })
-    this.save(); this.render(); toast(`已保存「${name}」`)
+    this.st.packs.push({ id: `pk_${Date.now()}`, name, profession: pr.charClass || t('vfx.prompt.unknownClass'), skills: JSON.parse(JSON.stringify(this.st.skills)), timestamp: Date.now() })
+    this.save(); this.render(); toast(tf('vfx.toast.packSaved', { name }))
   }
 
   private async chat(ta: HTMLTextAreaElement): Promise<void> {
-    const t = ta.value.trim(); if (!t) return; ta.value = ''
-    this.chatHistory.push({ role: 'user', text: t }); this.updateChatLog()
+    const text = ta.value.trim(); if (!text) return; ta.value = ''
+    this.chatHistory.push({ role: 'user', text }); this.updateChatLog()
     try {
       const pr = readCharacterProfile()
       const r = await apiPost('/__ce-api__/gemini-text', {
-        prompt: `You are a Three.js VFX expert. Character: ${pr.charClass || 'Unknown'} (${pr.worldSetting || 'fantasy'}, ${pr.combatType === 'ranged' ? 'ranged' : 'melee'}).\nUser: ${t}`,
+        prompt: `You are a Three.js VFX expert. Character: ${pr.charClass || 'Unknown'} (${pr.worldSetting || 'fantasy'}, ${pr.combatType === 'ranged' ? 'ranged' : 'melee'}).\nUser: ${text}`,
         model: 'gemini-3-pro-image-preview',
       })
-      this.chatHistory.push({ role: 'ai', text: r.success && r.text ? r.text : (r.error || '没有响应') })
-    } catch (e: any) { this.chatHistory.push({ role: 'ai', text: '错误: ' + e.message }) }
+      this.chatHistory.push({ role: 'ai', text: r.success && r.text ? r.text : (r.error || t('vfx.toast.noResponse')) })
+    } catch (e: any) { this.chatHistory.push({ role: 'ai', text: t('vfx.toast.errorPrefix') + e.message }) }
     this.updateChatLog()
   }
 
@@ -1359,8 +1328,8 @@ class VFXPipelineUI {
   private async onClickPullFromGame(): Promise<void> {
     let games: WorkspaceGame[] = []
     try { games = await listWorkspaceGames() }
-    catch (e: any) { toast(`获取工作区游戏失败: ${e.message}`); return }
-    if (games.length === 0) { toast('工作区里没有游戏项目'); return }
+    catch (e: any) { toast(tf('vfx.toast.listGamesFailed', { error: e.message })); return }
+    if (games.length === 0) { toast(t('vfx.toast.noGames')); return }
 
     const LS_GAME_KEY = 'pixelchar.lastWorkspaceGameId'
     const LS_SLOT_KEY = 'pixelchar.lastWorkspaceSlot'
@@ -1371,21 +1340,21 @@ class VFXPipelineUI {
     } else {
       const opts = games.map((g, i) => `${i + 1}) ${g.gameId}`).join('\n')
       const defaultIdx = Math.max(1, games.findIndex(g => g.gameId === remembered) + 1)
-      const input = prompt(`从哪个游戏同步技能？\n\n${opts}`, String(defaultIdx))
+      const input = prompt(tf('vfx.prompt.syncFromGame', { opts }), String(defaultIdx))
       if (!input) return
       const asNum = parseInt(input, 10)
       if (!isNaN(asNum) && asNum >= 1 && asNum <= games.length) gameId = games[asNum - 1].gameId
-      else { const m = games.find(g => g.gameId === input.trim()); if (!m) { toast('无效的游戏 ID'); return } gameId = m.gameId }
+      else { const m = games.find(g => g.gameId === input.trim()); if (!m) { toast(t('vfx.toast.invalidGameId')); return } gameId = m.gameId }
     }
     const slot = (localStorage.getItem(LS_SLOT_KEY) || 'player').trim()
 
     const resp = await fetch(`/__ce-api__/workspace-game-manifest?gameId=${encodeURIComponent(gameId)}&characterId=${encodeURIComponent(slot)}`)
     const data = await resp.json()
-    if (!data?.success) { toast(`游戏 ${gameId} 中找不到角色槽「${slot}」(${data?.error ?? '未知错误'})`); return }
+    if (!data?.success) { toast(tf('vfx.toast.slotNotInGame', { gameId, slot, error: data?.error ?? t('vfx.toast.unknownReason') })); return }
 
     const manifest = data.manifest as CharacterManifest
     const derived = manifestSkillsToSkillSlots(manifest.skills ?? [])
-    if (derived.length === 0) { toast('游戏中的角色 skills[] 为空'); return }
+    if (derived.length === 0) { toast(t('vfx.toast.emptyGameSkills')); return }
 
     // Overwrite editor effectIds; keep user-given names intact
     for (const d of derived) {
@@ -1398,20 +1367,20 @@ class VFXPipelineUI {
     localStorage.setItem(LS_GAME_KEY, gameId)
     this.save(); this.render()
     const summary = derived.map(d => `${d.slotId}=${d.effectLabel}`).join(' · ')
-    toast(`已从 ${gameId}/${slot} 同步 ${derived.length} 个技能: ${summary}`)
+    toast(tf('vfx.toast.syncedFromGame', { gameId, slot, count: derived.length, summary }))
   }
 
   private async onClickPublishVfxToGame(): Promise<void> {
     const filled = this.st.skills.filter(s => s.effectId)
     if (filled.length === 0) {
-      toast('还没有配置技能，请先给技能槽绑定特效')
+      toast(t('vfx.toast.noSkillsConfigured'))
       return
     }
 
     let games: WorkspaceGame[] = []
     try { games = await listWorkspaceGames() }
-    catch (e: any) { toast(`获取工作区游戏失败: ${e.message}`); return }
-    if (games.length === 0) { toast('工作区里没有游戏项目'); return }
+    catch (e: any) { toast(tf('vfx.toast.listGamesFailed', { error: e.message })); return }
+    if (games.length === 0) { toast(t('vfx.toast.noGames')); return }
 
     // Shares localStorage keys with pixel-char pipeline so selection persists
     const LS_GAME_KEY = 'pixelchar.lastWorkspaceGameId'
@@ -1424,24 +1393,24 @@ class VFXPipelineUI {
     } else {
       const opts = games.map((g, i) => `${i + 1}) ${g.gameId}${g.hasPlayerSlot ? '  (has player)' : ''}`).join('\n')
       const defaultIdx = Math.max(1, games.findIndex(g => g.gameId === remembered) + 1)
-      const input = prompt(`把技能导入到哪个游戏？请输入序号或 UUID:\n\n${opts}`, String(defaultIdx))
+      const input = prompt(tf('vfx.prompt.importToGame', { opts }), String(defaultIdx))
       if (!input) return
       const asNum = parseInt(input, 10)
       if (!isNaN(asNum) && asNum >= 1 && asNum <= games.length) {
         gameId = games[asNum - 1].gameId
       } else {
         const match = games.find(g => g.gameId === input.trim())
-        if (!match) { toast('无效的游戏 ID'); return }
+        if (!match) { toast(t('vfx.toast.invalidGameId')); return }
         gameId = match.gameId
       }
     }
 
     const defaultSlot = localStorage.getItem(LS_SLOT_KEY) || 'player'
-    const slot = prompt('把技能合并到哪个角色槽？通常是 "player"', defaultSlot)
+    const slot = prompt(t('vfx.prompt.mergeSlot'), defaultSlot)
     if (!slot) return
     const trimmed = slot.trim()
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_\-]*$/.test(trimmed)) {
-      toast('无效的角色槽 ID，只能使用 a-zA-Z0-9_-')
+      toast(t('vfx.toast.invalidSlotId'))
       return
     }
 
@@ -1455,14 +1424,14 @@ class VFXPipelineUI {
     } catch { /* fall through */ }
 
     if (!manifest) {
-      toast(`${gameId} 中的角色槽「${trimmed}」尚未发布，请先到像素角色流程导入主角`)
+      toast(tf('vfx.toast.slotNotPublished', { gameId, slot: trimmed }))
       return
     }
 
     const { skills, skipped } = vfxSkillsToExported(this.st.skills, manifest)
     if (skills.length === 0) {
       const first = skipped[0]
-      toast(`没有可导出的技能（跳过 ${skipped.length} 个: ${first?.reason ?? '未知原因'}）`)
+      toast(tf('vfx.toast.noExportableSkills', { count: skipped.length, reason: first?.reason ?? t('vfx.toast.unknownReason') }))
       return
     }
 
@@ -1470,10 +1439,10 @@ class VFXPipelineUI {
       const result = await mergeSkillsToWorkspaceGame({ gameId, characterId: trimmed, skills })
       localStorage.setItem(LS_GAME_KEY, gameId)
       localStorage.setItem(LS_SLOT_KEY, trimmed)
-      const tail = result.skillsSkipped > 0 ? ` | 跳过 ${result.skillsSkipped}` : ''
-      toast(`已合并 ${result.skillsApplied} 个技能到 ${gameId}/${trimmed}${tail}`)
+      const tail = result.skillsSkipped > 0 ? tf('vfx.toast.mergeSkipped', { count: result.skillsSkipped }) : ''
+      toast(tf('vfx.toast.mergedToGame', { count: result.skillsApplied, gameId, slot: trimmed, tail }))
     } catch (e: any) {
-      toast(`导入失败: ${e.message}`)
+      toast(tf('vfx.toast.importFailed', { error: e.message }))
     }
   }
 }
@@ -1485,7 +1454,7 @@ const vfxPipeline: IPipeline = {
   meta,
   async init(c) { pCtx = c; if (!ui) { ui = new VFXPipelineUI(); await ui.restore() } },
   dispose() { ui?.dispose(); ui = null; pCtx = null },
-  createUI(c, p) { if (ui && pCtx && p) ui.mount(c, p, pCtx); else c.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">需要面板容器</div>' },
+  createUI(c, p) { if (ui && pCtx && p) ui.mount(c, p, pCtx); else c.innerHTML = `<div style="padding:16px;color:var(--text-secondary)">${t('vfx.shell.needPanels')}</div>` },
   destroyUI() { ui?.unmount() },
   getDefaultParams() { return {} },
 }
@@ -1497,7 +1466,16 @@ function mk(t: string, c: string): HTMLElement { const e = document.createElemen
 
 function sld(label: string, min: number, max: number, step: number, val: number, cb: (n: number) => void): HTMLElement {
   const r = mk('div', 'vp-sld')
-  r.innerHTML = `<span class="vp-sl">${PARAM_LABELS[label] ?? label}</span>`
+  r.innerHTML = `<span class="vp-sl">${paramLabel(label)}</span>`
+  const i = document.createElement('input'); i.type = 'range'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(val); i.className = 'vp-sr'
+  const v = mk('span', 'vp-sv'); v.textContent = String(val)
+  i.addEventListener('input', () => { v.textContent = i.value; cb(parseFloat(i.value)) })
+  r.appendChild(i); r.appendChild(v); return r
+}
+
+function sldDisplay(display: string, min: number, max: number, step: number, val: number, cb: (n: number) => void): HTMLElement {
+  const r = mk('div', 'vp-sld')
+  r.innerHTML = `<span class="vp-sl">${display}</span>`
   const i = document.createElement('input'); i.type = 'range'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(val); i.className = 'vp-sr'
   const v = mk('span', 'vp-sv'); v.textContent = String(val)
   i.addEventListener('input', () => { v.textContent = i.value; cb(parseFloat(i.value)) })
@@ -1505,7 +1483,7 @@ function sld(label: string, min: number, max: number, step: number, val: number,
 }
 
 function sel(label: string, opts: { v: string; l: string }[], cur: string, cb: (s: string) => void): HTMLElement {
-  const r = mk('div', 'vp-sld'); r.innerHTML = `<span class="vp-sl">${PARAM_LABELS[label] ?? label}</span>`
+  const r = mk('div', 'vp-sld'); r.innerHTML = `<span class="vp-sl">${paramLabel(label)}</span>`
   const s = document.createElement('select'); s.className = 'vp-sel'
   for (const o of opts) { const op = document.createElement('option'); op.value = o.v; op.textContent = o.l; if (o.v === cur) op.selected = true; s.appendChild(op) }
   s.addEventListener('change', () => cb(s.value)); r.appendChild(s); return r

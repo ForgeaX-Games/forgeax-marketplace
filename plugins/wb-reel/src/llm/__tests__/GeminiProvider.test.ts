@@ -22,7 +22,7 @@ import {
   buildGeminiBody,
   extractGeminiText,
   splitSseEvents,
-} from '../GeminiProvider'
+} from '../providers/GeminiProvider'
 
 interface MockCall {
   url: string

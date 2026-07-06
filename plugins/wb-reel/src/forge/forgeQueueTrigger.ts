@@ -14,9 +14,9 @@ import { createTextProvider } from '../llm'
 import {
   forgeScenarioFromIdea,
   type ForgeProgress,
-} from '../llm/promptForge'
-import { forgeScenarioFromScriptSegmented } from '../llm/forgeScriptSegmented'
-import { characterRefPass } from '../llm/forgePasses'
+} from '../llm/forge/promptForge'
+import { forgeScenarioFromScriptSegmented } from '../llm/forge/forgeScriptSegmented'
+import { characterRefPass } from '../llm/forge/forgePasses'
 import { createImageProvider } from '../llm'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'

@@ -5,7 +5,7 @@ import {
   VIDEO_SIZE_CHOICES,
   DEFAULT_VIDEO_SIZE,
   type VideoSize,
-} from '../seedanceResolution'
+} from '../refsets/seedanceResolution'
 
 /**
  * 测试契约（2026-05 样例对齐后）：

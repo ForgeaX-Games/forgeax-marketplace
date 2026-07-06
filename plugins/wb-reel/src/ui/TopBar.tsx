@@ -16,6 +16,7 @@ import {
 import type { PersistedItem } from '../scenario/scenarioPersist'
 import { useShellStore, type ForgeView } from '../shell/shellStore'
 import { injectStyleOnce } from '../styles/injectStyle'
+import { tf, useT } from '../i18n'
 
 /**
  * TopBar —— 黑曜石玻璃顶栏：左侧 Logo & 剧本名，中间二 Tab 切换，右侧动作组。
@@ -31,13 +32,14 @@ import { injectStyleOnce } from '../styles/injectStyle'
  *   - 否则 → mode = 'editor'
  * 旧调用点（PlayerMenu.setMode('editor'), etc.）通过 App 层的 effect 反向同步。
  */
-const VIEW_DEFS: { id: ForgeView; label: string; hint: string }[] = [
-  { id: 'script', label: '剧本', hint: '剧本编辑 · 对话/分支/QTE' },
-  { id: 'image', label: '模块', hint: '美术 / 导演 / 参考图 / 界面 / 小游戏 / 数值 / 背包 · 可独立开关' },
-  { id: 'tree', label: '剧情树', hint: '可视化剧情树 · 节点详情' },
+const VIEW_DEFS: { id: ForgeView; labelKey: string; hintKey: string }[] = [
+  { id: 'script', labelKey: 'tab.script', hintKey: 'topbar.tab.scriptHint' },
+  { id: 'image', labelKey: 'tab.image', hintKey: 'topbar.tab.imageHint' },
+  { id: 'tree', labelKey: 'tab.tree', hintKey: 'topbar.tab.treeHint' },
 ]
 
 export function TopBar() {
+  const t = useT()
   const forgeView = useShellStore((s) => s.forgeView)
   const setForgeView = useShellStore((s) => s.setForgeView)
   const setActiveTab = useShellStore((s) => s.setActiveTab)
@@ -68,7 +70,7 @@ export function TopBar() {
       )
     if (hasContent) {
       const ok = window.confirm(
-        `开始新的故事？\n\n当前「${scn.title}」会保存到历史，可在右上「历史 ▾」中找回。`,
+        tf('topbar.newStoryConfirm', { title: scn.title }),
       )
       if (!ok) return
     }
@@ -114,13 +116,7 @@ export function TopBar() {
    * 如果 reset 后仍异常，作者可以手动 F5 + 这个按钮再点一次（按钮逻辑是幂等的）.
    */
   function handleResetUiState(): void {
-    const ok = window.confirm(
-      'UI 卡住了？这一键会:\n' +
-        '  · 关掉所有抽屉/浮层\n' +
-        '  · 把视图拉回 FORGE › 剧情树\n' +
-        '  · 清掉 UI 偏好缓存（不影响剧本/历史/资产）\n\n' +
-        '继续？',
-    )
+    const ok = window.confirm(t('topbar.resetUiConfirm'))
     if (!ok) return
     try {
       window.localStorage.removeItem('reel-studio:shell:v1')
@@ -186,8 +182,8 @@ export function TopBar() {
               type="button"
               className="ks-doc-new-btn"
               onClick={handleNewStory}
-              title="新的故事 · 当前会保存进历史"
-              aria-label="新的故事"
+              title={t('topbar.newStoryTitle')}
+              aria-label={t('topbar.newStory')}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true" width="14" height="14">
                 <path
@@ -205,29 +201,29 @@ export function TopBar() {
         </div>
       </div>
 
-      <nav className="ks-mode-switch" aria-label="视图切换">
+      <nav className="ks-mode-switch" aria-label={t('topbar.viewSwitch')}>
         {VIEW_DEFS.map((v) => (
           <button
             key={v.id}
             type="button"
             className={`ks-mode-tab ${forgeView === v.id ? 'is-active' : ''}`}
             onClick={() => setForgeView(v.id)}
-            title={v.hint}
+            title={t(v.hintKey)}
           >
             <span className="ks-tab-dot" />
-            {v.label}
+            {t(v.labelKey)}
           </button>
         ))}
       </nav>
 
       <div className="ks-topbar-right">
-        <div className="ks-history-group" role="group" aria-label="编辑历史">
+        <div className="ks-history-group" role="group" aria-label={t('topbar.editHistory')}>
           <button
             type="button"
             className="ks-action ks-history-btn"
             onClick={doUndo}
             disabled={pastCount === 0}
-            title={`撤销 (⌘Z) · 还可撤 ${pastCount} 步`}
+            title={tf('topbar.undoTitle', { count: pastCount })}
           >
             <span className="ks-history-arrow">↶</span>
             <span className="ks-history-count ks-mono">{pastCount}</span>
@@ -237,7 +233,7 @@ export function TopBar() {
             className="ks-action ks-history-btn"
             onClick={doRedo}
             disabled={futureCount === 0}
-            title={`重做 (⌘⇧Z) · 还可重做 ${futureCount} 步`}
+            title={tf('topbar.redoTitle', { count: futureCount })}
           >
             <span className="ks-history-arrow">↷</span>
             <span className="ks-history-count ks-mono">{futureCount}</span>
@@ -248,14 +244,11 @@ export function TopBar() {
           type="button"
           className="ks-action ks-reset-ui-btn"
           onClick={handleResetUiState}
-          title={
-            'UI 救火 · 卡住/抽屉收不起/Tab 点不动时点这里\n' +
-            '只清 UI 偏好（视图、抽屉开关），不动剧本/历史/资产/撤销栈'
-          }
-          aria-label="重置 UI 状态"
+          title={t('topbar.resetUiTitle')}
+          aria-label={t('topbar.resetUiLabel')}
         >
           <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>⟲</span>
-          <span style={{ marginLeft: 4 }}>救火</span>
+          <span style={{ marginLeft: 4 }}>{t('topbar.resetUiBtn')}</span>
         </button>
       </div>
 
@@ -275,6 +268,7 @@ export function TopBar() {
  * 真实需求：作者刷新浏览器后，剧情树和图都没了 → 这是补救入口。
  */
 function ScenarioHistoryDropdown() {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<PersistedItem[]>([])
   const [anchorRect, setAnchorRect] = useState<{
@@ -348,7 +342,7 @@ function ScenarioHistoryDropdown() {
     }
     const ok = loadScenarioFromHistory(id)
     if (!ok) {
-      alert('加载历史失败：条目可能已损坏')
+      alert(t('topbar.loadFailed'))
     }
     setOpen(false)
   }
@@ -356,10 +350,10 @@ function ScenarioHistoryDropdown() {
   function handleDelete(e: React.MouseEvent, id: string, title: string): void {
     e.stopPropagation()
     if (id === currentId) {
-      alert('当前正在编辑这份剧本，请先切到别的版本再删')
+      alert(t('topbar.deleteActive'))
       return
     }
-    if (!window.confirm(`从历史里移除「${title}」？\n（不影响当前编辑，但找不回了）`)) {
+    if (!window.confirm(tf('topbar.removeConfirm', { title }))) {
       return
     }
     removeScenarioFromHistory(id)
@@ -370,7 +364,7 @@ function ScenarioHistoryDropdown() {
     const json = exportHistoryJson()
     const ok = triggerDownload(defaultExportFilename(), json)
     if (!ok) {
-      alert('当前环境不支持下载文件，请手动复制 localStorage')
+      alert(t('topbar.downloadUnsupported'))
     }
   }
 
@@ -381,7 +375,7 @@ function ScenarioHistoryDropdown() {
     e.stopPropagation()
     if (exportingPkgId) return
     setExportingPkgId(item.id)
-    setExportProgress('扫描引用…')
+    setExportProgress(t('topbar.scanRefs'))
     try {
       const { exportScenarioPackage } = await import(
         '../scenario/pkg/exportScenarioPackage'
@@ -394,11 +388,11 @@ function ScenarioHistoryDropdown() {
         includeSubtitles: loadDialoguePref(),
         onProgress: (p) => {
           if (p.phase === 'collect') {
-            setExportProgress(`扫描到 ${p.total} 个引用…`)
+            setExportProgress(tf('topbar.scanRefsFound', { total: p.total }))
           } else if (p.phase === 'resolve') {
-            setExportProgress(`抓取资产 ${p.resolved} / ${p.total}`)
+            setExportProgress(tf('topbar.fetchAssets', { resolved: p.resolved, total: p.total }))
           } else if (p.phase === 'pack') {
-            setExportProgress('压缩打包…')
+            setExportProgress(t('topbar.packingZip'))
           }
         },
       })
@@ -407,30 +401,34 @@ function ScenarioHistoryDropdown() {
       )
       const ok = triggerBlobDownload(result.filename, result.blob)
       if (!ok) {
-        alert('当前环境不支持下载文件')
+        alert(t('topbar.downloadUnsupported'))
         return
       }
       const sizeMb = (result.blob.size / 1048576).toFixed(1)
       const s = result.manifest.stats
-      let msg = `已导出 ${result.filename}（所见即所得）\n${sizeMb} MiB · ${s.packedBlobs} 份资产`
+      let msg = tf('topbar.exportDone', {
+        filename: result.filename,
+        sizeMb,
+        packedBlobs: s.packedBlobs,
+      })
       if (result.manifest.includedScenes) {
-        msg += ` · ${result.manifest.includedScenes.length} 个场景`
+        msg += tf('topbar.exportScenes', { count: result.manifest.includedScenes.length })
         const dropped = result.manifest.droppedScenes?.length ?? 0
-        if (dropped > 0) msg += `（跳过 ${dropped} 个孤岛）`
+        if (dropped > 0) msg += tf('topbar.exportDropped', { count: dropped })
       }
       if (s.externalKept > 0) {
-        msg += ` · ${s.externalKept} 个外链（需联网加载）`
+        msg += tf('topbar.exportExternal', { count: s.externalKept })
       }
       if (s.missingCells > 0) {
-        msg += `\n⚠ ${s.missingCells} 个引用的原始素材已丢失`
+        msg += tf('topbar.exportMissing', { count: s.missingCells })
       }
       if (s.failedCells > 0) {
-        msg += `\n⚠ ${s.failedCells} 个引用抓取失败`
+        msg += tf('topbar.exportFailedCells', { count: s.failedCells })
       }
       alert(msg)
     } catch (err) {
       console.error('[reelpkg export] failed:', err)
-      alert(`导出失败：${(err as Error).message}`)
+      alert(tf('topbar.exportFailed', { message: (err as Error).message }))
     } finally {
       setExportingPkgId(null)
       setExportProgress('')
@@ -450,15 +448,18 @@ function ScenarioHistoryDropdown() {
       const raw = typeof reader.result === 'string' ? reader.result : ''
       const res = importHistoryFromJson(raw)
       if (!res.ok) {
-        alert(`导入失败：${res.error ?? '未知错误'}`)
+        alert(tf('topbar.importFailed', { error: res.error ?? t('topbar.unknownError') }))
         return
       }
       refresh()
       alert(
-        `导入成功：新增 ${res.addedCount ?? 0} 条，当前历史共 ${res.totalCount ?? 0} 条。`,
+        tf('topbar.importSuccess', {
+          added: res.addedCount ?? 0,
+          total: res.totalCount ?? 0,
+        }),
       )
     }
-    reader.onerror = () => alert('读取文件失败')
+    reader.onerror = () => alert(t('topbar.readFileFailed'))
     reader.readAsText(file)
   }
 
@@ -469,9 +470,9 @@ function ScenarioHistoryDropdown() {
         type="button"
         className="ks-action ks-hist-btn-top"
         onClick={() => setOpen((o) => !o)}
-        title="刷新不丢 · 点击查看以前锻造过的剧本"
+        title={t('topbar.historyTitle')}
       >
-        历史 ▾
+        {t('topbar.history')}
       </button>
       {open && anchorRect && typeof document !== 'undefined'
         ? createPortal(
@@ -486,12 +487,12 @@ function ScenarioHistoryDropdown() {
             >
               {items.length === 0 ? (
                 <div className="ks-hist-empty">
-                  <div>还没有历史记录</div>
+                  <div>{t('topbar.historyEmpty')}</div>
                   <div
                     className="ks-faint"
                     style={{ marginTop: 4, fontSize: 10 }}
                   >
-                    锻造剧本后约 1.5s 会自动写入；刷新页面也不丢
+                    {t('topbar.historyEmptyHint')}
                   </div>
                 </div>
               ) : (
@@ -513,14 +514,14 @@ function ScenarioHistoryDropdown() {
                           </div>
                           {active && (
                             <span className="ks-hist-active-badge ks-mono">
-                              当前
+                              {t('topbar.current')}
                             </span>
                           )}
                         </div>
                         <div className="ks-hist-item-meta ks-mono">
                           <span>{sceneCount} scenes</span>
                           <span style={{ marginLeft: 10 }}>
-                            {formatRelativeTime(it.updatedAt)}
+                            {formatRelativeTime(it.updatedAt, t)}
                           </span>
                           <button
                             type="button"
@@ -529,10 +530,10 @@ function ScenarioHistoryDropdown() {
                             disabled={exportingPkgId !== null}
                             title={
                               exportingPkgId === it.id
-                                ? exportProgress || '打包中…'
-                                : '导出完整剧本包（.reelpkg，含所有图像/视频/音频）'
+                                ? exportProgress || t('topbar.packing')
+                                : t('topbar.exportPkgTitle')
                             }
-                            aria-label="导出完整包"
+                            aria-label={t('topbar.exportPkgAria')}
                           >
                             {exportingPkgId === it.id ? '⏳' : '📦'}
                           </button>
@@ -540,8 +541,8 @@ function ScenarioHistoryDropdown() {
                             type="button"
                             className="ks-hist-delete"
                             onClick={(e) => handleDelete(e, it.id, it.title)}
-                            title="从历史移除"
-                            aria-label="删除"
+                            title={t('topbar.removeFromHistory')}
+                            aria-label={t('topbar.delete')}
                           >
                             ✕
                           </button>
@@ -556,17 +557,17 @@ function ScenarioHistoryDropdown() {
                   type="button"
                   className="ks-hist-foot-btn"
                   onClick={handleExport}
-                  title="把整份历史导出为 JSON 文件"
+                  title={t('topbar.exportJsonTitle')}
                 >
-                  ⬇ 导出 JSON
+                  {t('topbar.exportJson')}
                 </button>
                 <button
                   type="button"
                   className="ks-hist-foot-btn"
                   onClick={handleImportClick}
-                  title="从 JSON 文件合并历史（同 id 按更新时间新者胜）"
+                  title={t('topbar.importJsonTitle')}
                 >
-                  ⬆ 导入 JSON
+                  {t('topbar.importJson')}
                 </button>
                 <input
                   ref={fileInputRef}
@@ -585,13 +586,13 @@ function ScenarioHistoryDropdown() {
   )
 }
 
-function formatRelativeTime(t: number): string {
-  const diff = Date.now() - t
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`
-  const d = new Date(t)
+function formatRelativeTime(ts: number, tr: (key: string) => string): string {
+  const diff = Date.now() - ts
+  if (diff < 60_000) return tr('topbar.time.justNow')
+  if (diff < 3_600_000) return tf('topbar.time.minutesAgo', { n: Math.floor(diff / 60_000) })
+  if (diff < 86_400_000) return tf('topbar.time.hoursAgo', { n: Math.floor(diff / 3_600_000) })
+  if (diff < 7 * 86_400_000) return tf('topbar.time.daysAgo', { n: Math.floor(diff / 86_400_000) })
+  const d = new Date(ts)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 

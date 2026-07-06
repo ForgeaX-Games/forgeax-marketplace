@@ -42,7 +42,8 @@
         "**/ui/**",
         "**/ui/spec.json",
         "**/ui-design/**"
-      ]
+      ],
+      "preferredAgent": "@forgeax-plugin/agent-ui-designer"
     },
     "skills": [
       {

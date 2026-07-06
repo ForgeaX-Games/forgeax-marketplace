@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useShellStore } from '../shell/shellStore'
 import { injectStyleOnce } from '../styles/injectStyle'
-import { appendEpisodePass } from '../llm/appendEpisodePass'
-import { createTextProvider } from '../llm/ClaudeAzureProvider'
+import { appendEpisodePass } from '../llm/forge/appendEpisodePass'
+import { createTextProvider } from '../llm/providers/ClaudeAzureProvider'
 import { makeBlankScene } from '../editor/storygraph/sceneFactory'
 import { DEFAULT_EPISODE_ID } from '../scenario/schemaMigrate'
 import { GenerationQueueIndicator } from '../forge/GenerationQueueIndicator'
 import type { Episode } from '../scenario/types'
+import { useT, tf } from '../i18n'
 
 const EMPTY_EPISODES: Episode[] = []
 
@@ -39,6 +40,7 @@ export interface EpisodeRailProps {
 }
 
 export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
+  const t = useT()
   const episodes = useScenarioStore((s) => s.scenario.episodes ?? EMPTY_EPISODES)
   const updateEpisode = useScenarioStore((s) => s.updateEpisode)
   const addEpisode = useScenarioStore((s) => s.addEpisode)
@@ -94,7 +96,7 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
   async function runAppend() {
     const trimmedHint = hint.trim()
     if (!trimmedHint) {
-      setErrorMsg('先写一句这一集大致要发生什么，AI 才好接着拆。')
+      setErrorMsg(t('episode.hintRequired'))
       setPhase('error')
       return
     }
@@ -119,8 +121,8 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
 
   function createBlankEpisode() {
     const id = `ep-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`
-    const epTitle = title.trim() || `第${sorted.length + 1}集`
-    const starter = makeBlankScene({ title: `${epTitle} · 开场` })
+    const epTitle = title.trim() || tf('episode.defaultTitle', { n: sorted.length + 1 })
+    const starter = makeBlankScene({ title: `${epTitle} · ${t('episode.opening')}` })
     starter.episodeId = id
     addScene(starter)
     addEpisode({ id, title: epTitle, rootSceneId: starter.id })
@@ -139,16 +141,17 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
   const running = phase === 'running'
 
   return (
-    <div className="ks-eprail" aria-label="剧集">
-      <div className="ks-eprail-tabs" role="tablist" aria-label="剧集切换">
+    <div className="ks-eprail" aria-label={t('episode.aria')}>
+      <div className="ks-eprail-tabs" role="tablist" aria-label={t('episode.tabsAria')}>
         {sorted.length === 0 && (
           <button
             type="button"
             className="ks-eprail-establish"
             onClick={establishFirstEpisode}
-            title="本剧本还没分集 —— 把现有场景收纳为第一集，找回剧集"
+            title={t('episode.establishTitle')}
           >
-            ▸ 建立第一集{sceneCount > 0 ? `（收纳 ${sceneCount} 个场景）` : ''}
+            ▸ {t('episode.establish')}
+            {sceneCount > 0 ? tf('episode.establishScenes', { count: sceneCount }) : ''}
           </button>
         )}
         {sorted.map((ep) => (
@@ -179,7 +182,7 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
                   setRenamingId(ep.id)
                   setRenameValue(ep.title)
                 }}
-                title={`${ep.title}${ep.synopsis ? ` · ${ep.synopsis}` : ''}\n双击重命名`}
+                title={`${ep.title}${ep.synopsis ? ` · ${ep.synopsis}` : ''}\n${t('episode.renameHint')}`}
               >
                 {ep.title}
               </button>
@@ -198,9 +201,9 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
           // 队列指示器(margin-left:auto)被隐藏时, 由「新一集」接管右推, 否则它会贴着 tab。
           style={!showQueue ? { marginLeft: 'auto' } : undefined}
           onClick={() => (composing ? resetComposer() : setComposing(true))}
-          title="新开一集（角色 / 世界观沿用，AI 续写新剧情树）"
+          title={t('episode.newTitle')}
         >
-          {composing ? '收起' : '＋ 新一集'}
+          {composing ? t('episode.collapse') : t('episode.new')}
         </button>
       </div>
 
@@ -211,7 +214,7 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
             value={title}
             disabled={running}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder={`第${sorted.length + 1}集标题（留空让 AI 命名）`}
+            placeholder={tf('episode.titlePlaceholder', { n: sorted.length + 1 })}
           />
           <textarea
             className="ks-eprail-hint-input"
@@ -219,7 +222,7 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
             disabled={running}
             onChange={(e) => setHint(e.target.value)}
             rows={3}
-            placeholder="这一集大致要发生什么？例：主角追查线索，却发现幕后黑手竟是旧友……（现有角色 / 场所 / 美术风格会自动沿用）"
+            placeholder={t('episode.hintPlaceholder')}
           />
 
           {phase === 'error' && errorMsg && (
@@ -235,22 +238,20 @@ export function EpisodeRail({ showQueue = true }: EpisodeRailProps = {}) {
               onClick={runAppend}
               disabled={running}
             >
-              {running ? '⏳ AI 拆解中…' : '✨ AI 续写本集剧情树'}
+              {running ? t('episode.aiRunning') : t('episode.aiContinue')}
             </button>
             <button
               type="button"
               className="ks-eprail-blank"
               onClick={createBlankEpisode}
               disabled={running}
-              title="只建一个空开场节点，自己手动拆"
+              title={t('episode.blankTitle')}
             >
-              建空集
+              {t('episode.blankEpisode')}
             </button>
           </div>
 
-          <div className="ks-eprail-note">
-            AI 会沿用现有角色 / 场所 / 道具与前情，自动拆出新一集的分镜节点与分支。
-          </div>
+          <div className="ks-eprail-note">{t('episode.note')}</div>
         </div>
       )}
     </div>

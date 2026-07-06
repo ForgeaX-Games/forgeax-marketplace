@@ -9,10 +9,10 @@ import {
   quoteOverlapRatio,
   type ScriptIndex,
   type ChunkBeatsResult,
-} from '../proseToBeatsChunked'
+} from '../forge/proseToBeatsChunked'
 import { SKILLS } from '../skills'
 import { planChunks } from '../../io/chunkPlanner'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 import type { Chunk } from '../../io/chunkPlanner'
 
 /**

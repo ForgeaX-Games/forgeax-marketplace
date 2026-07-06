@@ -6,7 +6,7 @@
  * 并在本层做体积上限 + MIME 大类校验。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { uploadRefMedia, MAX_VIDEO_BYTES, MAX_AUDIO_BYTES } from '../uploadRefMedia'
+import { uploadRefMedia, MAX_VIDEO_BYTES, MAX_AUDIO_BYTES } from '../refsets/uploadRefMedia'
 
 describe('uploadRefMedia', () => {
   beforeEach(() => {

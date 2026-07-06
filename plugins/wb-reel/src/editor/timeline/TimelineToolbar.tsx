@@ -5,6 +5,7 @@ import { useScenarioStore } from '../../scenario/scenarioStore'
 import { useOnboardingStore } from '../onboarding/onboardingStore'
 import { TimelineRestoreMenu } from './TimelineRestoreMenu'
 import { formatTimeCode } from './timelineFormat'
+import { tf, useT } from '../../i18n'
 
 /**
  * TimelineToolbar —— 位于时间轴左上的常驻工具条（剪映 style）。
@@ -77,6 +78,7 @@ export type ToolbarSelection =
   | { kind: 'video'; id: string }
 
 export function TimelineToolbar(props: TimelineToolbarProps) {
+  const t = useT()
   const { selection, hoverMs } = props
   // 剪切仅对"可在 hoverMs 处切成两段"的 clip 成立：shot / audio
   const canSplit = !!selection && (selection.kind === 'shot' || selection.kind === 'audio')
@@ -155,22 +157,22 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
       <div className="ks-tltb-left">
         <TbButton
           icon="↶"
-          label="撤销"
+          label={t('timeline.toolbar.undo')}
           hint={
             pastCount > 0
-              ? `撤销上一步（还可撤 ${pastCount} 步）· ⌘/Ctrl+Z · 误删可在此找回`
-              : '没有可撤销的操作（撤销记录在内存里，刷新会清空）'
+              ? tf('timeline.toolbar.undoHint', { count: pastCount })
+              : t('timeline.toolbar.undoEmpty')
           }
           onClick={doUndo}
           disabled={pastCount === 0}
         />
         <TbButton
           icon="↷"
-          label="重做"
+          label={t('timeline.toolbar.redo')}
           hint={
             futureCount > 0
-              ? `重做（还可重做 ${futureCount} 步）· ⌘/Ctrl+Shift+Z`
-              : '没有可重做的操作'
+              ? tf('timeline.toolbar.redoHint', { count: futureCount })
+              : t('timeline.toolbar.redoEmpty')
           }
           onClick={doRedo}
           disabled={futureCount === 0}
@@ -182,21 +184,21 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         {/* 高频常驻：剪切 / 删除 */}
         <TbButton
           icon="✂"
-          label="剪切"
+          label={t('timeline.toolbar.split')}
           hint={
             canSplit
-              ? `在 ${(hoverMs / 1000).toFixed(2)}s 处切开当前选中`
+              ? tf('timeline.toolbar.splitHint', { sec: (hoverMs / 1000).toFixed(2) })
               : selection
-                ? `${selLabel(selection.kind)} 无法被剪切（只支持 SHOT / AUDIO）`
-                : '先选中一段 SHOT 或 AUDIO'
+                ? tf('timeline.toolbar.splitUnsupported', { kind: selLabel(selection.kind) })
+                : t('timeline.toolbar.splitSelect')
           }
           onClick={props.onSplit}
           disabled={!canSplit}
         />
         <TbButton
           icon="🗑"
-          label="删除"
-          hint={canDelete ? '删除选中 clip（Delete / Backspace）' : '先选中 clip'}
+          label={t('timeline.toolbar.delete')}
+          hint={canDelete ? t('timeline.toolbar.deleteHint') : t('timeline.toolbar.deleteSelect')}
           onClick={props.onDelete}
           disabled={!canDelete}
           variant="danger"
@@ -208,27 +210,27 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
             type="button"
             className={`ks-tltb-btn ks-tltb-more-btn ${moreOpen ? 'is-open' : ''}`}
             onClick={() => setMoreOpen((v) => !v)}
-            title="更多编辑操作（复制/粘贴/再制 · 左对齐 · 微调 · 清空）"
-            aria-label="更多"
+            title={t('timeline.toolbar.moreTitle')}
+            aria-label={t('timeline.toolbar.more')}
             aria-expanded={moreOpen}
           >
             <span className="ks-tltb-btn-icon" aria-hidden>⋯</span>
-            <span className="ks-tltb-btn-label">更多</span>
+            <span className="ks-tltb-btn-label">{t('timeline.toolbar.more')}</span>
           </button>
           {moreOpen && (
             <div className="ks-tltb-more" role="menu">
-              <div className="ks-tltb-more-group">剪贴板</div>
-              <TbMenuItem icon="⧉" label="复制" hint="⌘/Ctrl+C" disabled={!canDelete} onClick={() => { props.onCopy(); setMoreOpen(false) }} />
-              <TbMenuItem icon="⎘" label="粘贴到播放头" hint="⌘/Ctrl+V" disabled={!props.canPaste} onClick={() => { props.onPaste(); setMoreOpen(false) }} />
-              <TbMenuItem icon="⊞" label="再制" hint="⌘/Ctrl+D" disabled={!canDelete} onClick={() => { props.onDuplicate(); setMoreOpen(false) }} />
-              <div className="ks-tltb-more-group">对齐</div>
-              <TbMenuItem icon="⇤" label="镜头左对齐" hint="所有 SHOT 段按顺序紧挨" onClick={() => { props.onCompactShots(); setMoreOpen(false) }} />
-              <TbMenuItem icon="♪" label="音频左对齐" hint="各 audio role 内部紧挨" onClick={() => { props.onCompactAudio(); setMoreOpen(false) }} />
-              <div className="ks-tltb-more-group">微调（Shift=10ms · Alt=500ms）</div>
-              <TbMenuItem icon="◀" label="左移选中" hint="默认 100ms" disabled={!canNudge} onClick={(e) => { nudge(-1)(e); }} keepOpen />
-              <TbMenuItem icon="▶" label="右移选中" hint="默认 100ms" disabled={!canNudge} onClick={(e) => { nudge(1)(e); }} keepOpen />
-              <div className="ks-tltb-more-group">危险</div>
-              <TbMenuItem icon="⌫" label="清空时间轴" hint="字幕/QTE/镜头/音频/素材库 · 分支保留 · 会确认" variant="danger" onClick={() => { props.onClearAll(); setMoreOpen(false) }} />
+              <div className="ks-tltb-more-group">{t('timeline.toolbar.group.clipboard')}</div>
+              <TbMenuItem icon="⧉" label={t('timeline.toolbar.copy')} hint="⌘/Ctrl+C" disabled={!canDelete} onClick={() => { props.onCopy(); setMoreOpen(false) }} />
+              <TbMenuItem icon="⎘" label={t('timeline.toolbar.paste')} hint="⌘/Ctrl+V" disabled={!props.canPaste} onClick={() => { props.onPaste(); setMoreOpen(false) }} />
+              <TbMenuItem icon="⊞" label={t('timeline.toolbar.duplicate')} hint="⌘/Ctrl+D" disabled={!canDelete} onClick={() => { props.onDuplicate(); setMoreOpen(false) }} />
+              <div className="ks-tltb-more-group">{t('timeline.toolbar.group.align')}</div>
+              <TbMenuItem icon="⇤" label={t('timeline.toolbar.compactShots')} hint={t('timeline.toolbar.compactShotsHint')} onClick={() => { props.onCompactShots(); setMoreOpen(false) }} />
+              <TbMenuItem icon="♪" label={t('timeline.toolbar.compactAudio')} hint={t('timeline.toolbar.compactAudioHint')} onClick={() => { props.onCompactAudio(); setMoreOpen(false) }} />
+              <div className="ks-tltb-more-group">{t('timeline.toolbar.group.nudge')}</div>
+              <TbMenuItem icon="◀" label={t('timeline.toolbar.nudgeLeft')} hint={t('timeline.toolbar.nudgeHint')} disabled={!canNudge} onClick={(e) => { nudge(-1)(e); }} keepOpen />
+              <TbMenuItem icon="▶" label={t('timeline.toolbar.nudgeRight')} hint={t('timeline.toolbar.nudgeHint')} disabled={!canNudge} onClick={(e) => { nudge(1)(e); }} keepOpen />
+              <div className="ks-tltb-more-group">{t('timeline.toolbar.group.danger')}</div>
+              <TbMenuItem icon="⌫" label={t('timeline.toolbar.clearAll')} hint={t('timeline.toolbar.clearAllHint')} variant="danger" onClick={() => { props.onClearAll(); setMoreOpen(false) }} />
             </div>
           )}
         </div>
@@ -240,20 +242,20 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           type="button"
           className="ks-tltb-jump"
           onClick={props.onSeekToStart}
-          title="回到起点（播放头跳到 0）"
-          aria-label="回到起点"
+          title={t('timeline.toolbar.seekStart')}
+          aria-label={t('timeline.toolbar.seekStartAria')}
         >
           ⏮
         </button>
-        <span className="ks-tltb-timecode ks-mono" title="播放头位置 / 节点总时长">
+        <span className="ks-tltb-timecode ks-mono" title={t('timeline.toolbar.timecodeTitle')}>
           {formatTimeCode(hoverMs)} / {formatTimeCode(props.totalMs)}
         </span>
         <button
           type="button"
           className="ks-tltb-jump"
           onClick={props.onSeekToEnd}
-          title="跳到末尾（播放头跳到结尾）"
-          aria-label="跳到末尾"
+          title={t('timeline.toolbar.seekEnd')}
+          aria-label={t('timeline.toolbar.seekEndAria')}
         >
           ⏭
         </button>
@@ -261,9 +263,9 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         {/* 总长（秒）—— 直接键入加长当前节点时间轴；player 仍按素材实际长度播放 */}
         <label
           className="ks-tltb-num"
-          title="节点总时长（秒）· 起步 50s · 可任意加长 · 时间轴不被自动生成的素材秒数限制 · player 播完素材即跳下一节点"
+          title={t('timeline.toolbar.durationTitle')}
         >
-          <span className="ks-mono">总长</span>
+          <span className="ks-mono">{t('timeline.toolbar.durationLabel')}</span>
           <input
             type="number"
             min={1}
@@ -279,13 +281,13 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
         {/* 缩放滑块（剪映式）· Ctrl/⌘ + 滚轮也可缩放 */}
         <div
           className="ks-tltb-zoom"
-          title="时间轴缩放 · 拖滑块或 Ctrl/⌘ + 滚轮 · 点 1× 回到适配宽度"
+          title={t('timeline.toolbar.zoomTitle')}
         >
           <button
             type="button"
             className="ks-tltb-zoom-fit"
             onClick={props.onZoomFit}
-            title="适配宽度（1×）"
+            title={t('timeline.toolbar.zoomFit')}
           >
             <span className="ks-mono">{props.zoom.toFixed(1)}×</span>
           </button>
@@ -296,7 +298,7 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
             step={0.1}
             value={Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, props.zoom))}
             onChange={(e) => props.onZoomChange(Number(e.target.value))}
-            aria-label="时间轴缩放"
+            aria-label={t('timeline.toolbar.zoomAria')}
           />
         </div>
         <span className="ks-tltb-sep" aria-hidden />
@@ -304,11 +306,7 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           type="button"
           className={`ks-tltb-snap ${props.followCursor ? 'is-on' : ''}`}
           onClick={props.onToggleFollow}
-          title={
-            props.followCursor
-              ? '光标跟随 · 鼠标移到哪，时间线就到哪；拖入素材落点 = 当前时间线。点击关闭'
-              : '光标已锁定 · 鼠标移动不改时间线；只有点击时间轴才会跳；拖入素材落点 = 锁定位置。点击开启'
-          }
+          title={props.followCursor ? t('timeline.toolbar.followOn') : t('timeline.toolbar.followOff')}
           aria-pressed={props.followCursor}
         >
           <span className="ks-tltb-snap-dot" aria-hidden />
@@ -318,11 +316,7 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           type="button"
           className={`ks-tltb-snap ${props.snapEnabled ? 'is-on' : ''}`}
           onClick={props.onToggleSnap}
-          title={
-            props.snapEnabled
-              ? '吸附已开启 · 默认 100ms / Shift=10ms / Alt=500ms · 点击关闭（刷新不丢）'
-              : '吸附已关闭 · 拖拽走 1ms 自由位移 · 点击开启'
-          }
+          title={props.snapEnabled ? t('timeline.toolbar.snapOn') : t('timeline.toolbar.snapOff')}
           aria-pressed={props.snapEnabled}
         >
           <span className="ks-tltb-snap-dot" aria-hidden />
@@ -333,8 +327,8 @@ export function TimelineToolbar(props: TimelineToolbarProps) {
           type="button"
           className="ks-tltb-help"
           onClick={() => setHelpOpen(true)}
-          title="帮助 · 快捷键与功能速查（新手引导）"
-          aria-label="帮助"
+          title={t('timeline.toolbar.help')}
+          aria-label={t('timeline.toolbar.helpAria')}
         >
           ?
         </button>

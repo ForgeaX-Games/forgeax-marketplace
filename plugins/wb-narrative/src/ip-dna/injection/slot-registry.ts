@@ -53,8 +53,7 @@ export const OPERATOR_SLOT_REGISTRY: Readonly<Record<string, StepSlotSpec>> = {
 
   // ── VN / 互动影游管线 ──
   vn_outline_acts: { slots: ["结构算子", "风格算子"], kag: true, ledger: true, queryHint: "幕结构与戏剧节拍" },
-  vn_scenes: { slots: ["结构算子", "情节算子"], kag: true, ledger: true, queryHint: "场搭建" },
-  vn_beats: { slots: ["情节算子", "情感算子"], kag: true, ledger: true, queryHint: "情节点节奏" },
+  vn_beats: { slots: ["结构算子", "情节算子", "情感算子"], kag: true, ledger: true, queryHint: "情节点节奏与三维 staging" },
   vn_branched_beats: { slots: ["情节算子", "结构算子"], kag: true, ledger: true, queryHint: "剧情树分支改造" },
   vn_screenplay: { slots: ["对白算子", "情感算子", "风格算子"], kag: true, ledger: true, queryHint: "影游剧本台词" },
   vn_storyboard: { slots: ["对白算子", "风格算子"], kag: true, ledger: true, queryHint: "分镜画面语言" },

@@ -3,22 +3,27 @@
  * ─────────────────────────────────────────────────────────────────
  * 与 MyFile/提示词/影游叙事生成提示词/07_剧情树改造.md 对齐。
  *
- * 输入：ctx.vn_outline_acts + ctx.vn_scenes + ctx.vn_beats
+ * 输入：ctx.vn_outline_acts + ctx.vn_beats（拓扑序黄金线，每 beat 带三维 staging）
  * 输出：ctx.vn_branched_beats = {
- *   acts, scenes（含支线新增）, beats（含 prev/next）, endings, branch_summary
+ *   acts, scenes（确定性导出）, beats（含 prev/next，最终 `场.序` id）, endings, branch_summary
  * }
+ *
+ * 场/情节点解耦（§4.6c）：本步产出**纯情节点 DAG**、beat_id 用**拓扑序稳定 id**（b1/b7…）；
+ * 全部分支/结局定稿并过质量门后，末尾跑**确定性场号导出**——按 DFS 序 + 三维相邻变化编场号，
+ * 重写全部 id 与边引用为 `场.序`、并派生 ctx.vn_branched_beats.scenes（供下游 G-02/G-03 与前端）。
  *
  * 核心约束：
  *   - 决策点密度建议：每 3-5 个情节点出现 1 个 pivot（决策 QTE 或选项），全剧不少于 3 个 pivot
  *   - 决策点密度仅计 pivot_kind ∈ {choice, branch_qte}；演出型 QTE 已全局停用（剧情完全靠决策推进）
  *   - 选项数：每个 pivot 2-4 选项，UI 标签 A/B/C/D
  *   - 结局：H/B/O 三大类，至少 3 个，至少覆盖 2 类
- *   - 支线场判定：选项导向的下一情节点的三维状态与当前场全同 ⟹ 场内分支；任一维变 ⟹ 跨场分支，自动追加新场号（is_main_line=false，branch_origin_beat 填该 pivot beat_id）
+ *   - 每 beat 携带三维 staging（location_name/time_of_day/indoor_outdoor）——场号由系统确定性导出，LLM 不编场号
  */
 import type {
   NarrativeContext,
   VnBranchedBeats,
   VnBranchedBeat,
+  VnScene,
 } from "../../../types/index.js";
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
@@ -26,9 +31,9 @@ import { appendUserInstructions, buildIpSourceReference } from "../design-contex
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import {
   FIVE_ELEMENT_NOTE,
-  NUMBERING_NOTE,
   ORIGINALITY_NOTE,
-  SCENE_STATE_NOTE,
+  STAGING_NOTE,
+  TOPO_BEAT_ID_NOTE,
   getStreamEmit,
   getVnBudget,
 } from "./_shared.js";
@@ -167,26 +172,21 @@ pivot beat 的 content 按三段写：① **现状**（把当下处境 / 困境�
 - 普通推进 beat 的 next_nodes 仅 1 项，kind="linear"
 - 汇流点 beat 的 prev_nodes 多于 1 项
 
-## 三维场状态与支线场号
-${SCENE_STATE_NOTE}
+## 情节点编号与三维 staging（务必内化：故事结构只由情节点 DAG 承载，"场"是拍摄分组、由系统导出）
+${TOPO_BEAT_ID_NOTE}
 
-支线场新增规则（场号沿"链路推进顺序"全局递增，绝不复用）：
-- ⚠ 比较基准是「该分支链路上**前一个 beat 所在场**」——不是 pivot 所在场，也不是"全篇任一同名场"
-- 分支后续 beat 与**前一个 beat** 三维全同（仍停在同一场、中途没离开）⟹ 沿用该场 scene_id（场内延展）
-- 任一维度变化 ⟹ 新增场号（取全局最大场号 +1，is_main_line=false，branch_origin_beat=pivot 的 beat_id）
-- ⚠ "场一→场二→回到场一"：第三段虽与场一同地点，但它是"离开后回归"，**必须取新场号（全局最大 +1），绝不复用场一的场号**——否则两段都编进"场 1"→ "1.x" 撞号、剧情树残缺。同名地点的资产复用由 location_name 承担，与场号无关
-
-${NUMBERING_NOTE}
+${STAGING_NOTE}
+- ⚠ 你**只标每个 beat 的三维状态**，绝不编场号；两段同地点但"离开后回归"照实标同名 location_name 即可，系统会自动切成不同场（同名地点的资产复用由 location_name 承担）。
 
 ## 剧情树拓扑硬约束（合法性铁律——违反任意一条即整次输出作废，输出 JSON 前逐条自检）
-1) **beat_id 唯一且纯数字**：每个 beat_id 形如「场号.场内序号」（如 "5.2"），**全篇有且仅出现一次**。
-   · ❌ 严禁把选项字母 / QTE 结果拼进 beat_id —— 不得出现 "5.2_A"、"5.2_B"、"7.1_S"、"3.1a" 这类。
+1) **beat_id 唯一且为拓扑序 id**：每个 beat_id 形如 "b" + 数字（如 "b7"），**全篇有且仅出现一次**。
+   · ❌ 严禁把选项字母 / QTE 结果 / 场号拼进 beat_id —— 不得出现 "b7_A"、"5.2"、"7.1_S"、"b3a" 这类。
      分支信息只走 next_nodes[].label（A/B/C/D）与 next_nodes[].condition，**绝不进 beat_id**。
    · ❌ 严禁同一个 beat_id 出现两份（哪怕 content 完全相同）。
-2) **原地改造，禁止复制**：输入 vn_beats 的每个线性 beat 在输出里必须保留**同一个 beat_id**，
+2) **原地改造，禁止复制**：输入 vn_beats 的每个线性 beat 在输出里必须保留**同一个 beat_id 与 content**，
    只允许改它的 next_nodes（在其上原地插入 pivot）。**绝不允许把一个原 beat 复制成两份**
-   （一份保留线性、一份再加分支）——这正是"开头冒出两个 5.1、多出一个无后继的死胡同 5.2"的根因。
-   新增 beat 仅限"选项后果 beat"与"局部结局型推进 beat"，其 beat_id 取该场内更大的序号或新场号，且全篇唯一。
+   （一份保留线性、一份再加分支）——这是"开头冒出两个重复 beat、多出一个无后继死胡同"的根因。
+   新增 beat 仅限"选项后果 beat"与"局部结局型推进 beat"，其 beat_id 取新的 "b<更大数字>"，且全篇唯一。
 3) **无死胡同**：除指向结局外，每个非结局 beat 必须有 ≥1 条 next_nodes。
    · 通向结局：直接把 next_nodes.to 填 ending_id（如 "END_B1"），**不要造一个 next_nodes 为空的"半截 beat"**。
 4) **真分叉 + 选项对等（假分支审查）**：
@@ -194,11 +194,10 @@ ${NUMBERING_NOTE}
      每个选项必须先各自走一个**专属后果 beat**（演绎"选了之后立刻发生什么"），之后才允许 merge_back 汇流。
    · 同一 pivot 各选项的后果链长度应**大致对等**（相差 ≤1 个 beat）；不要一条线 2 个中段、另一条线 0 个中段直奔汇合 / 结局。
    · 汇流点（prev_nodes ≥2）正文写"殊途同归"，严禁"如果之前选了 A…若选了 B…"这类条件式叙述。
-5) **叙事前向，不留死胡同（⚠ 场号 ≠ 叙事序，别被数值骗了）**：判断"前向"看的是**剧情推进/拓扑**，不是 beat_id 的数值大小。
-   · 支线场号取"全局最大 +1"，所以支线 beat 的场号往往**大于**它要汇回的主线 beat。**支线汇回主线、或汇流到某后续 beat，即使目标场号更小，也是正常的叙事前向边——照实连即可，用 kind="linear"（普通续接）或不标特殊 kind 均可，绝不能因为"目标场号更小"就不连而留空 next。**
+5) **叙事前向由拓扑判定（不成环即合法）**：判断"前向"看的是**剧情推进/拓扑**——只要不与已有链路成环，就是合法前向边。
+   · 挣扎回归链、拒绝/失误分支末端本该汇回主线时，**照实连即可，用 kind="linear"**（普通续接），绝不能因怕"被当回跳"而把 next 留空 → 死胡同。
    · kind="merge_back" 只留给**真正的剧情闪回 / 回环**（A→…→B 且从 B 能沿 next 走回 A、形成环）。普通的支线汇回不是环，**不要**标 merge_back。
    · 合法性由后端按"**是否成环**"判定：不成环的边一律保留；只有真正成环且未标 merge_back 的乱连边才会被清除。所以你放心连汇回边。
-   · ❌ 最常见错误：挣扎回归链末端、拒绝/失误分支末端，本该汇回主线，却因"目标场号更小、怕被当回跳"而把 next 留空 → 死胡同。这是禁止的。
 6) **无孤儿 + 全可达**：除唯一开场 beat 外，每个 beat 必须有 ≥1 来路（被某 beat 的 next 指向）；
    从开场 beat 沿 next 必须可达每一个 beat 与每一个结局。**输出前在脑中跑一遍 BFS**：从开场出发，
    把能走到的 id 标记一遍——若有 beat / 结局没被标记到，就是漏接了来路，必须补上指向它的边
@@ -208,14 +207,14 @@ ${ORIGINALITY_NOTE}
 
 ${FIVE_ELEMENT_NOTE}`,
 
-    output_format: `## 输出格式（严格 JSON · 一次性输出整棵树）
+    output_format: `## 输出格式（严格 JSON · 一次性输出整棵树 · beat_id 用拓扑序 b<n>，不产 scenes / scene_id）
 {
   "acts": [ ... 三幕（沿用 E1-02） ],
-  "scenes": [ ... 含主线场 + 支线新增场 ],
   "beats": [
     {
-      "beat_id": "1.1", "scene_id": "1", "content": "...",
-      "prev_nodes": [], "next_nodes": [ { "to": "1.2", "kind": "linear" } ],
+      "beat_id": "b1", "act_id": "一", "content": "...",
+      "location_name": "青云宗·外门杂役房", "time_of_day": "日", "indoor_outdoor": "内",
+      "prev_nodes": [], "next_nodes": [ { "to": "b2", "kind": "linear" } ],
       "is_main_line": true, "is_ending": false,
       "spacetime": { "time": "天元历1042年·秋·卯时", "location": "青云宗·外门杂役房" },
       "state_deltas": [
@@ -223,12 +222,13 @@ ${FIVE_ELEMENT_NOTE}`,
       ]
     },
     {
-      "beat_id": "2.3", "scene_id": "2",
+      "beat_id": "b8", "act_id": "一",
       "content": "① 现状：…… ② 抛问题：你会留下还是离开？",
-      "prev_nodes": ["2.2"],
+      "location_name": "青云宗·演武场", "time_of_day": "日", "indoor_outdoor": "外",
+      "prev_nodes": ["b7"],
       "next_nodes": [
-        { "to": "2.4",  "kind": "choice", "label": "A", "condition": "选择和解（考验共情面）" },
-        { "to": "5.1",  "kind": "choice", "label": "B", "condition": "选择对抗（考验意志面）" }
+        { "to": "b9",  "kind": "choice", "label": "A", "condition": "选择和解（考验共情面）" },
+        { "to": "b20", "kind": "choice", "label": "B", "condition": "选择对抗（考验意志面）" }
       ],
       "is_main_line": true, "is_ending": false,
       "pivot_kind": "choice", "branch_type": "converge",
@@ -236,9 +236,11 @@ ${FIVE_ELEMENT_NOTE}`,
       "state_deltas": []
     },
     {
-      "beat_id": "3.3", "scene_id": "3", "content": "服下灵果后浑身剧痛，骨骼重塑，白发变黑，皱纹消退...",
-      "prev_nodes": ["3.2"],
-      "next_nodes": [ { "to": "3.4", "kind": "linear" } ],
+      "beat_id": "b12", "act_id": "二",
+      "content": "服下灵果后浑身剧痛，骨骼重塑，白发变黑，皱纹消退...",
+      "location_name": "青云宗·灵药谷", "time_of_day": "日", "indoor_outdoor": "外",
+      "prev_nodes": ["b11"],
+      "next_nodes": [ { "to": "b13", "kind": "linear" } ],
       "is_main_line": true, "is_ending": false,
       "spacetime": { "time": "天元历1042年·秋·辰时", "location": "青云宗·灵药谷" },
       "state_deltas": [
@@ -249,10 +251,11 @@ ${FIVE_ELEMENT_NOTE}`,
       ]
     },
     {
-      "beat_id": "3.4", "scene_id": "3", "content": "...",
-      "prev_nodes": ["3.3"],
+      "beat_id": "b13", "act_id": "二", "content": "...",
+      "location_name": "青云宗·灵药谷", "time_of_day": "夜", "indoor_outdoor": "外",
+      "prev_nodes": ["b12"],
       "next_nodes": [
-        { "to": "3.5",     "kind": "branch_qte", "label": "通过", "condition": "QTE 成功" },
+        { "to": "b14",     "kind": "branch_qte", "label": "通过", "condition": "QTE 成功" },
         { "to": "END_B1",  "kind": "branch_qte", "label": "失败", "condition": "QTE 失败（已充分预警）" }
       ],
       "is_main_line": true, "is_ending": false,
@@ -262,7 +265,7 @@ ${FIVE_ELEMENT_NOTE}`,
     }
   ],
   "endings": [
-    { "ending_id": "END_B1", "label": "B", "scope": "local", "title": "……", "content": "...", "trigger": "在 3.4 的 QTE 失败" },
+    { "ending_id": "END_B1", "label": "B", "scope": "local", "title": "……", "content": "...", "trigger": "在灵药谷 QTE 失败" },
     { "ending_id": "END_H1", "label": "H", "scope": "global", "title": "黎明之约", "content": "...", "trigger": "在终极抉择中选择 A" }
   ],
   "branch_summary": {
@@ -279,9 +282,9 @@ ${FIVE_ELEMENT_NOTE}`,
 /**
  * 构造**整棵树**的 user prompt——一次性喂入全部 acts / scenes / 线性 beats。
  *
- * 之所以单次整树（而非按幕分块）：G-01 的职责是决定**跨场跨幕的全局分支拓扑**，
- * 必须有单一编号权威，才能根治"两幕各造场 5 → 双 5.1 撞号"、`__CROSS_ACT__` 拼接、
- * "非末幕禁结局"等分块副作用。Gemini 2.5 Flash 1M 上下文，整树输入 ~17-29K token、
+ * 之所以单次整树（而非按幕分块）：G-01 的职责是决定**跨幕的全局分支拓扑**，
+ * 必须有单一编号权威（这里是全篇唯一的拓扑序 id），才能根治分块导致的撞号、`__CROSS_ACT__` 拼接、
+ * "非末幕禁结局"等副作用。Gemini 2.5 Flash 1M 上下文，整树输入 ~17-29K token、
  * 输出 ~24-50K token，余量充足（详见对话评估）。
  */
 function buildFullUserPrompt(ctx: NarrativeContext): string {
@@ -290,7 +293,6 @@ function buildFullUserPrompt(ctx: NarrativeContext): string {
     : "（无）";
   const acts = ctx.vn_outline_acts?.acts ?? [];
   const allBeats = ctx.vn_beats!.beats;
-  const allScenes = ctx.vn_scenes!.scenes;
 
   // 节点预算：线性拍是"底座"，分支后果拍 + 结局拍是在其上"新增"的；headroom = 还能新增多少。
   const budget = getVnBudget(ctx);
@@ -310,11 +312,8 @@ ${JSON.stringify(ctx.vn_key_items ?? { items: [] }, null, 2)}
 ${JSON.stringify(acts, null, 2)}
 
 ## 必需：黄金线（理想线·主输入——角色"全答对"的那唯一一条单路；它是脊不是全部故事，是少数派骨架）
-（其 beat_id 与 content 必须原样保留，只在其上原地插 pivot；分支轨迹才是树的主体，须明显多于这些黄金 beat）
+（其 beat_id〔拓扑序 b<n>〕与 content 必须原样保留，只在其上原地插 pivot；每个 beat 已带三维 staging，新增 beat 同样必须带三维 staging；分支轨迹才是树的主体，须明显多于这些黄金 beat）
 ${JSON.stringify(allBeats, null, 2)}
-
-## 必需：全部场列表（三维状态校验 + 支线新增场号增量基准）
-${JSON.stringify(allScenes, null, 2)}
 
 ## 参考：用户原始需求
 ${ctx.user_input}
@@ -436,42 +435,25 @@ function validateNodeShapes(parsed: VnBranchedBeats): void {
 }
 
 /**
- * 字母后缀归一化：把 LLM 漏出的 "5.2_A"/"9.2_A"/"7.1_S"/"3.1a" 等带字母后缀的 beat_id
- * 重映射成**同场下一个空位**的纯数字 id，并同步改写所有 prev_nodes / next_nodes 引用。
- * endings（END_*）不受影响。单次整树生成下无跨幕撞号，此函数只需处理字母后缀这一类，
- * 逻辑确定、可单测。对全清洁产出为恒等变换（no-op）。
+ * 拓扑序 id 归一化：把 LLM 漏出的非 "b<数字>" 形态 beat_id（如 "b7_A"/"5.2"/"7.1_S"/"b3a"）
+ * 重映射成一个全新的 "b<全局最大+1>"，并同步改写所有 prev_nodes / next_nodes / branch_origin 引用。
+ * endings（END_*）不受影响。**场号不在此阶段存在**——由拓扑定稿后的确定性场号导出统一分配。
+ * 逻辑确定、可单测；对全清洁产出为恒等变换（no-op）。
  */
-function normalizeBeatIds(beats: VnBranchedBeat[], endingIds: Set<string>): void {
-  const isClean = (id: string): boolean => /^\d+\.\d+$/.test(id);
-  const sceneOf = (id: string): number => {
-    const m = /^(\d+)\./.exec(id);
-    return m ? Number(m[1]) : 0;
-  };
-  const seqOf = (id: string): number => {
-    const m = /^\d+\.(\d+)/.exec(id);
-    return m ? Number(m[1]) : 0;
-  };
-
-  // 先扫描各场已用的最大场内序号（仅从清洁 id 统计）
-  const sceneMaxSeq = new Map<number, number>();
+function normalizeTopoIds(beats: VnBranchedBeat[], endingIds: Set<string>): void {
+  const isClean = (id: string): boolean => /^b\d+$/.test(id);
+  let maxN = 0;
   for (const b of beats) {
-    if (isClean(b.beat_id)) {
-      const s = sceneOf(b.beat_id);
-      sceneMaxSeq.set(s, Math.max(sceneMaxSeq.get(s) ?? 0, seqOf(b.beat_id)));
-    }
+    const m = /^b(\d+)$/.exec(b.beat_id);
+    if (m) maxN = Math.max(maxN, Number(m[1]));
   }
 
-  // 为脏 id 分配同场下一个空位序号
   const idMap = new Map<string, string>();
   for (const b of beats) {
     if (isClean(b.beat_id)) continue;
-    const s = sceneOf(b.beat_id);
-    const nextSeq = (sceneMaxSeq.get(s) ?? 0) + 1;
-    sceneMaxSeq.set(s, nextSeq);
-    const newId = `${s}.${nextSeq}`;
+    const newId = `b${++maxN}`;
     idMap.set(b.beat_id, newId);
     b.beat_id = newId;
-    b.scene_id = String(s);
   }
   if (idMap.size === 0) return; // no-op：本就全清洁
 
@@ -483,6 +465,128 @@ function normalizeBeatIds(beats: VnBranchedBeat[], endingIds: Set<string>): void
     }
     if (b.branch_origin_beat) b.branch_origin_beat = remap(b.branch_origin_beat);
   }
+}
+
+/**
+ * 确定性场号导出（§4.6c / 影游生成方案 §7.3）——剧情树拓扑定稿后运行。
+ *
+ * 「场」是拍摄分组、非故事结构层：按 **DFS 序**遍历纯情节点 DAG，相邻（DFS 父子）三维状态
+ * （location_name/time_of_day/indoor_outdoor）全同 ⟹ 沿用父场号；任一维变化（含离开后回到
+ * 同名地点）⟹ 全局最大场号 +1。据此把拓扑序 id 重写为最终 `场.序`、改写所有边引用，
+ * 并派生 result.scenes（scene_id/act_id/三维/is_main_line/branch_origin_beat/location_id）。
+ *
+ * 纯确定性、可单测；下游 G-02/G-03 与前端只见导出后的 `场.序` 与派生 scenes。
+ */
+export function exportScenesAndRenumber(result: VnBranchedBeats): void {
+  const beats = result.beats;
+  if (beats.length === 0) { result.scenes = []; return; }
+  const beatById = new Map(beats.map((b) => [b.beat_id, b] as const));
+
+  // 1) 选根：入度为 0 的 beat（拓扑序最小者优先；兜底取全局最小序）
+  const indeg = new Map<string, number>();
+  for (const b of beats) indeg.set(b.beat_id, 0);
+  for (const b of beats) for (const e of b.next_nodes ?? []) {
+    if (indeg.has(e.to)) indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1);
+  }
+  const byOrder = (a: string, b: string) => beatOrderOf(a) - beatOrderOf(b);
+  const roots = beats.filter((b) => (indeg.get(b.beat_id) ?? 0) === 0).map((b) => b.beat_id).sort(byOrder);
+  const startId = roots[0] ?? [...beatById.keys()].sort(byOrder)[0];
+
+  // 2) DFS 前序 + 记录 DFS 父（邻居按拓扑序定序，保证确定性）
+  const parent = new Map<string, string | null>();
+  const dfsOrder: string[] = [];
+  const visited = new Set<string>();
+  const visit = (id: string, par: string | null): void => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    parent.set(id, par);
+    dfsOrder.push(id);
+    const nb = beatById.get(id);
+    const nexts = (nb?.next_nodes ?? []).map((e) => e.to).filter((t) => beatById.has(t)).sort(byOrder);
+    for (const t of nexts) visit(t, id);
+  };
+  visit(startId, null);
+  for (const b of [...beats].sort((x, y) => byOrder(x.beat_id, y.beat_id))) {
+    if (!visited.has(b.beat_id)) visit(b.beat_id, null);
+  }
+
+  // 3) 按 DFS 序编场号：DFS 父子三维全同 ⟹ 同场；否则新场（全局最大 +1）
+  const threeDim = (b?: VnBranchedBeat) => `${b?.location_name ?? ""}|${b?.time_of_day ?? ""}|${b?.indoor_outdoor ?? ""}`;
+  const sceneOfBeat = new Map<string, number>();
+  let maxScene = 0;
+  for (const id of dfsOrder) {
+    const b = beatById.get(id)!;
+    const par = parent.get(id) ?? null;
+    const parBeat = par ? beatById.get(par) : undefined;
+    // 缺三维时从 DFS 父继承（保持同场，避免误切）
+    if (!b.location_name && parBeat?.location_name) {
+      b.location_name = parBeat.location_name;
+      b.time_of_day = parBeat.time_of_day;
+      b.indoor_outdoor = parBeat.indoor_outdoor;
+    }
+    if (parBeat && threeDim(b) === threeDim(parBeat)) {
+      sceneOfBeat.set(id, sceneOfBeat.get(par!)!);
+    } else {
+      sceneOfBeat.set(id, ++maxScene);
+    }
+  }
+
+  // 4) 场内序号（按 DFS 序 1..k），构造 拓扑id → 场.序 映射
+  const sceneSeq = new Map<number, number>();
+  const idMap = new Map<string, string>();
+  for (const id of dfsOrder) {
+    const scene = sceneOfBeat.get(id)!;
+    const seq = (sceneSeq.get(scene) ?? 0) + 1;
+    sceneSeq.set(scene, seq);
+    idMap.set(id, `${scene}.${seq}`);
+  }
+
+  // 5) location_name → 稳定 location_id（首见顺序）
+  const locId = new Map<string, string>();
+  for (const id of dfsOrder) {
+    const ln = beatById.get(id)!.location_name ?? "未标注地点";
+    if (!locId.has(ln)) locId.set(ln, `loc-${locId.size + 1}`);
+  }
+
+  // 6) 重写 beat 自身 id + 所有边引用（endings 不在 idMap → 保持不变）
+  const remap = (id: string): string => idMap.get(id) ?? id;
+  for (const b of beats) {
+    const origId = b.beat_id;
+    b.scene_id = String(sceneOfBeat.get(origId) ?? "");
+    b.location_id = locId.get(b.location_name ?? "未标注地点");
+    b.prev_nodes = (b.prev_nodes ?? []).map(remap);
+    for (const e of b.next_nodes ?? []) e.to = remap(e.to);
+    if (b.branch_origin_beat) b.branch_origin_beat = remap(b.branch_origin_beat);
+    b.beat_id = remap(origId);
+  }
+
+  // 7) 派生 scenes（beatById/dfsOrder/sceneOfBeat 仍以**原始拓扑 id** 索引，未受第 6 步影响）
+  const scenes: VnScene[] = [];
+  for (let s = 1; s <= maxScene; s++) {
+    const memberIds = dfsOrder.filter((id) => sceneOfBeat.get(id) === s);
+    if (memberIds.length === 0) continue;
+    const first = beatById.get(memberIds[0])!;
+    const act = memberIds.map((id) => beatById.get(id)!.act_id).find((a) => a && a.trim())
+      ?? scenes[scenes.length - 1]?.act_id ?? "一";
+    const isMain = memberIds.some((id) => beatById.get(id)!.is_main_line);
+    const branchOrigin = memberIds.map((id) => beatById.get(id)!.branch_origin_beat).find(Boolean);
+    scenes.push({
+      scene_id: String(s),
+      act_id: act,
+      location_name: first.location_name ?? "未标注地点",
+      time_of_day: (first.time_of_day ?? "日") as "日" | "夜",
+      indoor_outdoor: (first.indoor_outdoor ?? "内") as "内" | "外",
+      content: memberIds.map((id) => beatById.get(id)!.content).filter(Boolean).slice(0, 3).join(" / ").slice(0, 200),
+      is_main_line: isMain,
+      location_id: locId.get(first.location_name ?? "未标注地点"),
+      ...(branchOrigin ? { branch_origin_beat: branchOrigin } : {}),
+    });
+  }
+  result.scenes = scenes;
+
+  // 导出后契约：所有 beat_id 必须为最终 `场.序`（拓扑序临时 id 已全部重写）。
+  const bad = result.beats.find((b) => !/^\d+\.\d+$/.test(b.beat_id));
+  if (bad) throw new Error(`场号导出后仍存在非「场.序」beat_id：${bad.beat_id}`);
 }
 
 /**
@@ -506,10 +610,8 @@ function normalizeBeatIds(beats: VnBranchedBeat[], endingIds: Set<string>): void
 function reconcileBeatEdges(beats: VnBranchedBeat[]): void {
   type Edge = VnBranchedBeat["next_nodes"][number];
   const beatIds = new Set(beats.map((b) => b.beat_id));
-  const orderOf = (id: string): number => {
-    const m = /^(\d+)\.(\d+)/.exec(id);
-    return m ? Number(m[1]) * 10000 + Number(m[2]) : Number.MAX_SAFE_INTEGER;
-  };
+  // 拓扑序/场.序统一排序基准（成环判定本身是拓扑 DFS，此处仅用于选起点/邻居定序）。
+  const orderOf = beatOrderOf;
 
   // 候选边（去自环），保留原始 meta（kind/label/condition）
   const origEdge = new Map<string, Map<string, Edge>>();
@@ -646,8 +748,15 @@ function dedupeBeats(beats: VnBranchedBeat[]): VnBranchedBeat[] {
   return survivors;
 }
 
-/** 叙事序：beat_id 的「场.序」数值；非 beat（ending）视为末端。 */
+/**
+ * 叙事/拓扑序：
+ *   - 树阶段拓扑序 id "b<n>" → n（黄金线按叙事顺序 b1..bN，分支新增更大编号）
+ *   - 导出后 "场.序" → 场*10000+序
+ * 非 beat（ending）视为末端。两种形态不会在同一时刻混用（导出前全 b<n>、导出后全场.序）。
+ */
 function beatOrderOf(id: string): number {
+  const t = /^b(\d+)$/.exec(id);
+  if (t) return Number(t[1]);
   const m = /^(\d+)\.(\d+)/.exec(id);
   return m ? Number(m[1]) * 10000 + Number(m[2]) : Number.MAX_SAFE_INTEGER;
 }
@@ -940,15 +1049,15 @@ async function qaVnBranchedBeats(
 }
 
 /**
- * G-01 剧情树改造（单次整树生成）。
+ * G-01 剧情树改造（单次整树生成，纯情节点 DAG）。
  *
- * 一次 LLM 调用产出整棵树 → 字母后缀归一化 → 结局标修复 → 撞号合并 → 全局验证 →
- * 边一致性修复 → 结构质量门。单一编号权威，根治"按幕分块"带来的跨幕撞号（双 5.1）、
- * `__CROSS_ACT__` 拼接、"非末幕禁结局"（解锁中段局部结局）等副作用。
+ * 一次 LLM 调用产出整棵树（拓扑序 id + 三维 staging）→ 拓扑 id 归一化 → 结局标修复 →
+ * 撞号合并 → 全局验证 → 边一致性修复 → 结构质量门 → **确定性场号导出**（DFS 序编 `场.序` + 派生 scenes）。
+ * 单一编号权威 + 场/情节点解耦（§4.6c）：故事结构只由情节点 DAG 承载，场号是拓扑定稿后的确定性分组。
  */
 export async function vnBranchedBeats(ctx: NarrativeContext, llm: LLMClient): Promise<void> {
-  if (!ctx.vn_outline_acts || !ctx.vn_scenes || !ctx.vn_beats) {
-    throw new Error("vn_branched_beats 需要 vn_outline_acts / vn_scenes / vn_beats 全部已生成");
+  if (!ctx.vn_outline_acts || !ctx.vn_beats) {
+    throw new Error("vn_branched_beats 需要 vn_outline_acts / vn_beats 全部已生成");
   }
   const streamEmit = getStreamEmit(ctx);
   const acts = ctx.vn_outline_acts.acts;
@@ -977,8 +1086,8 @@ export async function vnBranchedBeats(ctx: NarrativeContext, llm: LLMClient): Pr
   const endings = parsed.endings ?? [];
   const endingIds = new Set(endings.map((e) => e.ending_id));
 
-  // Phase 1: 字母后缀归一化（5.2_A → 同场纯数字，prev/next 引用同步改写）。
-  normalizeBeatIds(beats, endingIds);
+  // Phase 1: 拓扑序 id 归一化（b7_A / 5.2 等脏 id → 全新 b<max+1>，prev/next 引用同步改写）。
+  normalizeTopoIds(beats, endingIds);
 
   // Phase 2: 结局标修复——is_ending=true 但缺 ending_label 时兜底借用 label，否则降级为非结局。
   const endingById = new Map(endings.map((e) => [e.ending_id, e] as const));
@@ -1006,7 +1115,8 @@ export async function vnBranchedBeats(ctx: NarrativeContext, llm: LLMClient): Pr
 
   const result: VnBranchedBeats = {
     acts: parsed.acts && parsed.acts.length > 0 ? parsed.acts : acts,
-    scenes: parsed.scenes && parsed.scenes.length > 0 ? parsed.scenes : ctx.vn_scenes.scenes,
+    // 场号改后处理导出：LLM 不产 scenes；由 Phase 7 exportScenesAndRenumber 派生。
+    scenes: [],
     beats: cleanBeats,
     endings,
     branch_summary: {
@@ -1026,6 +1136,10 @@ export async function vnBranchedBeats(ctx: NarrativeContext, llm: LLMClient): Pr
 
   // Phase 6: 结构质量门（算法校验→修复→LLM critic 兜底）+ prev↔next 双向同步。
   await qaVnBranchedBeats(ctx, llm, result);
+
+  // Phase 7: 确定性场号导出（§4.6c）——拓扑定稿后按 DFS 序 + 三维相邻变化编场号，
+  // 把拓扑序 id 重写为最终 `场.序`、改写全部边引用，并派生 result.scenes（供下游/前端）。
+  exportScenesAndRenumber(result);
 
   ctx.vn_branched_beats = result;
 }

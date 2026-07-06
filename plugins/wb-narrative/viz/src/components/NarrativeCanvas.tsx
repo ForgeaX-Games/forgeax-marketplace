@@ -22,9 +22,10 @@ import { NarrativeCardNode } from "./nodes/NarrativeCardNode";
 import { DetroitEdge } from "./edges/DetroitEdge";
 import { useDetroitLayout } from "../hooks/useDetroitLayout";
 import { useAnimatedProgress } from "../hooks/useAnimatedProgress";
+import { useT } from "../i18n";
 
 class CanvasErrorBoundary extends React.Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; t: (key: string) => string },
   { error: Error | null; info: React.ErrorInfo | null }
 > {
   state = { error: null as Error | null, info: null as React.ErrorInfo | null };
@@ -37,6 +38,7 @@ class CanvasErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.error) {
+      const t = this.props.t;
       const stack = this.state.error.stack ?? "";
       const compStack = this.state.info?.componentStack ?? "";
       return (
@@ -47,13 +49,13 @@ class CanvasErrorBoundary extends React.Component<
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, padding: 24,
           flexDirection: "column", gap: 10, overflow: "auto",
         }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>节点渲染异常 (CanvasErrorBoundary)</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{t("canvas.errorTitle")}</div>
           <div style={{ color: "rgba(255,180,180,0.95)", fontSize: 12, fontWeight: 600 }}>
             {this.state.error.name}: {this.state.error.message}
           </div>
           {stack && (
             <details open style={{ width: "100%" }}>
-              <summary style={{ color: "rgba(180,255,200,0.7)", cursor: "pointer", fontSize: 11 }}>JS Stack</summary>
+              <summary style={{ color: "rgba(180,255,200,0.7)", cursor: "pointer", fontSize: 11 }}>{t("canvas.jsStack")}</summary>
               <pre style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", whiteSpace: "pre-wrap",
                 background: "rgba(0,0,0,0.4)", padding: 8, borderRadius: 4, margin: "6px 0", maxHeight: 240, overflow: "auto" }}>
                 {stack}
@@ -62,7 +64,7 @@ class CanvasErrorBoundary extends React.Component<
           )}
           {compStack && (
             <details open style={{ width: "100%" }}>
-              <summary style={{ color: "rgba(180,255,200,0.7)", cursor: "pointer", fontSize: 11 }}>Component Stack</summary>
+              <summary style={{ color: "rgba(180,255,200,0.7)", cursor: "pointer", fontSize: 11 }}>{t("canvas.componentStack")}</summary>
               <pre style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", whiteSpace: "pre-wrap",
                 background: "rgba(0,0,0,0.4)", padding: 8, borderRadius: 4, margin: "6px 0", maxHeight: 240, overflow: "auto" }}>
                 {compStack}
@@ -76,7 +78,7 @@ class CanvasErrorBoundary extends React.Component<
                 color: "rgba(77,255,160,0.85)", borderRadius: 2, fontSize: 11 }}
               onClick={() => this.setState({ error: null, info: null })}
             >
-              重试
+              {t("canvas.retry")}
             </button>
             <button
               style={{ padding: "4px 16px", cursor: "pointer",
@@ -87,7 +89,7 @@ class CanvasErrorBoundary extends React.Component<
                 navigator.clipboard?.writeText(text).catch(() => {});
               }}
             >
-              复制完整堆栈
+              {t("canvas.copyStack")}
             </button>
           </div>
         </div>
@@ -124,6 +126,7 @@ function resolveStepId(nodeId: string, steps: { id: string }[]): string | null {
 }
 
 function NarrativeCanvasInner() {
+  const t = useT();
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
@@ -375,7 +378,7 @@ function NarrativeCanvasInner() {
         flexDirection: "column", gap: 6,
       }}>
         <span style={{ fontSize: 24, opacity: 0.3 }}>◈</span>
-        <span>运行管线后查看节点图</span>
+        <span>{t("canvas.empty")}</span>
       </div>
     );
   }
@@ -429,8 +432,9 @@ function NarrativeCanvasInner() {
 }
 
 export function NarrativeCanvas() {
+  const t = useT();
   return (
-    <CanvasErrorBoundary>
+    <CanvasErrorBoundary t={t}>
       <ReactFlowProvider>
         <NarrativeCanvasInner />
       </ReactFlowProvider>
@@ -447,6 +451,7 @@ interface LayoutErrPayload {
 }
 
 function LayoutErrorBanner() {
+  const t = useT();
   const [err, setErr] = useState<LayoutErrPayload | null>(() => {
     const w = window as unknown as { __narrativeLayoutError__?: LayoutErrPayload };
     return w.__narrativeLayoutError__ ?? null;
@@ -473,7 +478,7 @@ function LayoutErrorBanner() {
       maxHeight: "60%", overflow: "auto",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 14, fontWeight: 700 }}>⚠ Layout 计算崩溃 (useDetroitLayout)</span>
+        <span style={{ fontSize: 14, fontWeight: 700 }}>⚠ {t("canvas.layoutError")}</span>
         <button
           style={{
             marginLeft: "auto", padding: "2px 10px", cursor: "pointer",
@@ -482,7 +487,7 @@ function LayoutErrorBanner() {
           }}
           onClick={() => navigator.clipboard?.writeText(dump).catch(() => {})}
         >
-          复制完整堆栈
+          {t("canvas.copyStack")}
         </button>
         <button
           style={{
@@ -496,13 +501,13 @@ function LayoutErrorBanner() {
             setErr(null);
           }}
         >
-          关闭
+          {t("canvas.close")}
         </button>
       </div>
       <div style={{ color: "rgba(255,180,180,0.95)", fontWeight: 600, marginBottom: 4 }}>{err.message}</div>
       {err.stack && (
         <details open>
-          <summary style={{ color: "rgba(180,220,255,0.7)", cursor: "pointer", fontSize: 11 }}>JS Stack</summary>
+          <summary style={{ color: "rgba(180,220,255,0.7)", cursor: "pointer", fontSize: 11 }}>{t("canvas.jsStack")}</summary>
           <pre style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", whiteSpace: "pre-wrap",
             background: "rgba(0,0,0,0.4)", padding: 6, borderRadius: 4, margin: "4px 0", maxHeight: 180, overflow: "auto" }}>
             {err.stack}
@@ -510,7 +515,7 @@ function LayoutErrorBanner() {
         </details>
       )}
       <details>
-        <summary style={{ color: "rgba(180,220,255,0.7)", cursor: "pointer", fontSize: 11 }}>Steps & Result keys</summary>
+        <summary style={{ color: "rgba(180,220,255,0.7)", cursor: "pointer", fontSize: 11 }}>{t("canvas.stepsResult")}</summary>
         <pre style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", whiteSpace: "pre-wrap",
           background: "rgba(0,0,0,0.4)", padding: 6, borderRadius: 4, margin: "4px 0", maxHeight: 180, overflow: "auto" }}>
           {JSON.stringify({ steps: err.steps, resultKeys: err.resultKeys }, null, 2)}

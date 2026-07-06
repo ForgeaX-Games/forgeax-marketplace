@@ -6,8 +6,8 @@ import {
   parseOutlineJSON,
   assembleScriptFromActs,
   type Outline,
-} from '../scenarioFlow'
-import type { TextClient, TextRequest } from '../types'
+} from '../forge/scenarioFlow'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * scenarioFlow 单测 —— 分三层：

@@ -4,8 +4,8 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { useMediaStore } from '../media/mediaStore'
 import { useShellStore } from '../shell/shellStore'
-import { runForgeImagePipeline } from '../llm/forgeImagePipeline'
-import { createImageProvider, getModerationContext } from '../llm/GptImageProvider'
+import { runForgeImagePipeline } from '../llm/forge/forgeImagePipeline'
+import { createImageProvider, getModerationContext } from '../llm/providers/GptImageProvider'
 import { AssetPreviewDialog, type PreviewTarget } from './AssetPreviewDialog'
 import { enqueueAuditions, auditionCardKey } from './enqueueAudition'
 import { useCardJob, useGenerationQueue, type GenJob } from './generationQueueStore'
@@ -16,6 +16,7 @@ import { UIStyleSelector } from './UIStyleSelector'
 import { MinigamePoolSelector } from './MinigamePoolSelector'
 import { NumericModule } from './modules/NumericModule'
 import { InventoryModule } from './modules/InventoryModule'
+import { tf, useT } from '../i18n'
 
 /**
  * RefGrid 每张卡片的显示项 —— 继承 PreviewTarget，再叠加两个 UI 专用字段：
@@ -94,6 +95,7 @@ export function ForgeWizard({ chatDetached = false }: ForgeWizardProps = {}) {
 }
 
 function RefsPanel() {
+  const t = useT()
   const scenario = useScenarioStore((s) => s.scenario)
   const setCharacterTurnaroundRef = useScenarioStore((s) => s.setCharacterTurnaroundRef)
   const setLocationRefImage = useScenarioStore((s) => s.setLocationRefImage)
@@ -181,7 +183,7 @@ function RefsPanel() {
 
     // onlyMissing=true 但现在啥都不缺 —— 直接提示一下；不发请求
     if (onlyMissing && missingTotal === 0) {
-      setError('当前所有参考图都已经生成好了。如果想重刷，请点右侧「全部重生」。')
+      setError(t('forge.wizard.allRefsDone'))
       return
     }
 
@@ -305,7 +307,7 @@ function RefsPanel() {
     const existing = allTotal - missingTotal
     if (existing > 0) {
       const ok = window.confirm(
-        `将重新生成全部 ${allTotal} 张参考图，其中 ${existing} 张已经存在的会被覆盖。确定继续？`,
+        tf('forge.wizard.regenerateConfirm', { total: allTotal, existing }),
       )
       if (!ok) return
     }
@@ -336,8 +338,8 @@ function RefsPanel() {
     if (runList.length === 0) {
       setAuditionError(
         withRef.length === 0
-          ? '请先生成角色定妆照，再生成试镜视频。'
-          : '所有有定妆照的角色都已生成试镜视频；如需重做请用「全部重生」。',
+          ? t('forge.wizard.needTurnaround')
+          : t('forge.wizard.allAuditionsDone'),
       )
       return
     }
@@ -370,7 +372,7 @@ function RefsPanel() {
       const ok = await retryPersist(mid)
       if (!ok) {
         alert(
-          '重试失败：这张图的原始数据在本地也已丢失（可能清过浏览器数据）。请点卡片选择"重新生成"。',
+          t('forge.wizard.retryLost'),
         )
       }
     } finally {
@@ -457,13 +459,15 @@ function RefsPanel() {
     <div className="ks-forge-step">
       <div className="ks-forge-grid-head">
         <div>
-          <div className="ks-forge-step-title ks-mono">参考图流水线</div>
+          <div className="ks-forge-step-title ks-mono">{t('forge.wizard.pipelineTitle')}</div>
           <div className="ks-forge-refs-summary ks-cn">
-            并发生成 · <strong>角色 ×{characters.length}</strong> ·{' '}
-            <strong>场所 ×{locations.length}</strong> ·{' '}
-            <strong>关键道具 ×{props.length}</strong>
+            {tf('forge.wizard.pipelineSummary', {
+              chars: characters.length,
+              locs: locations.length,
+              props: props.length,
+            })}
             <span className="ks-forge-refs-hint">
-              （分镜关键帧请到「剧情树」面板按场景生成）
+              {t('forge.wizard.pipelineHint')}
             </span>
           </div>
         </div>
@@ -481,15 +485,17 @@ function RefsPanel() {
             disabled={running || !canRun}
             title={
               missingTotal === 0
-                ? '当前没有缺失的参考图；如需重刷请点右侧「全部重生」'
-                : `只生成尚未有图 / 落盘失败的条目（共 ${missingTotal} 张）`
+                ? t('forge.wizard.genMissingTitle')
+                : tf('forge.wizard.genMissingTitleCount', { count: missingTotal })
             }
           >
             {running
-              ? '生成中…'
+              ? t('forge.wizard.generating')
               : missingTotal === 0 && allTotal > 0
-                ? '已全部生成'
-                : `只生成缺失${missingTotal > 0 ? ` · ${missingTotal} 张` : ''}`}
+                ? t('forge.wizard.allDone')
+                : missingTotal > 0
+                  ? tf('forge.wizard.genMissingCount', { count: missingTotal })
+                  : t('forge.wizard.genMissing')}
           </button>
           {/*
            * 辅助按钮 = "全部重生"。仅当当前存在 >=1 张已生成图、作者确实想推翻重来时用。
@@ -501,9 +507,9 @@ function RefsPanel() {
               className="ks-action is-ghost ks-forge-run-btn-ghost"
               onClick={() => void handleRegenerateAll()}
               disabled={running}
-              title={`重新生成全部 ${allTotal} 张参考图（会覆盖已有的图）`}
+              title={tf('forge.wizard.regenerateAllTitle', { count: allTotal })}
             >
-              ⟲ 全部重生
+              {t('forge.wizard.regenerateAll')}
             </button>
           )}
           {/*
@@ -515,11 +521,11 @@ function RefsPanel() {
             className="ks-action is-ghost ks-forge-run-btn-ghost"
             onClick={() => handleGenerateAuditions({ onlyMissing: true })}
             disabled={running}
-            title="为已有定妆照的角色生成试镜视频（缺失），并提取音色样本"
+            title={t('forge.wizard.auditionMissingTitle')}
           >
             {auditionActiveCount > 0
-              ? `试镜生成中… (${auditionActiveCount})`
-              : '🎬 生成试镜视频（缺失）'}
+              ? tf('forge.wizard.auditionRunning', { count: auditionActiveCount })
+              : t('forge.wizard.auditionMissing')}
           </button>
           {characters.some((c) => c.auditionVideoMediaId) && (
             <button
@@ -527,9 +533,9 @@ function RefsPanel() {
               className="ks-action is-ghost ks-forge-run-btn-ghost"
               onClick={() => handleGenerateAuditions({ onlyMissing: false })}
               disabled={running}
-              title="重新生成全部角色的试镜视频与音色（覆盖已有）"
+              title={t('forge.wizard.auditionRegenerateAllTitle')}
             >
-              ⟲ 试镜全部重生
+              {t('forge.wizard.auditionRegenerateAll')}
             </button>
           )}
         </div>
@@ -548,8 +554,8 @@ function RefsPanel() {
        * 永久显示（即使还没 characters）：空态给占位，别让作者以为模块丢了。
        */}
       <RefGrid
-        title="角色定妆照"
-        emptyHint="剧本锻造后自动填充角色（三视图定妆照）"
+        title={t('forge.wizard.charactersTitle')}
+        emptyHint={t('forge.wizard.charactersEmpty')}
         items={characters.map((c) => {
           const mid = c.turnaroundRefImageId ?? c.refImageId
           const imageUrl = mid ? mediaEntries[mid]?.url : undefined
@@ -587,8 +593,8 @@ function RefsPanel() {
        * 空态走 RefGrid 自己的 empty 占位文案。
        */}
       <RefGrid
-        title="场所基准图"
-        emptyHint="剧本锻造后自动填充场所"
+        title={t('forge.wizard.locationsTitle')}
+        emptyHint={t('forge.wizard.locationsEmpty')}
         items={locations.map((l) => ({
           id: l.id,
           name: l.name,
@@ -613,8 +619,8 @@ function RefsPanel() {
        * 普通场景（无关键道具）空态占位，不隐藏模块，避免作者误以为"丢了"。
        */}
       <RefGrid
-        title="关键道具基准图"
-        emptyHint="剧本锻造后自动提取关键道具（非所有剧本都有）"
+        title={t('forge.wizard.propsTitle')}
+        emptyHint={t('forge.wizard.propsEmpty')}
         items={props.map((p) => ({
           id: p.id,
           name: p.name,
@@ -639,7 +645,7 @@ function RefsPanel() {
 
       {progress && (
         <div className="ks-forge-refs-progress ks-mono">
-          进度 {progress.done} / {progress.total}
+          {tf('forge.wizard.progress', { done: progress.done, total: progress.total })}
           <div className="ks-forge-refs-bar">
             <div
               className="ks-forge-refs-bar-fill"
@@ -653,7 +659,7 @@ function RefsPanel() {
       {error && <div className="ks-forge-refs-error ks-cn">× {error}</div>}
       {failures.length > 0 && (
         <div className="ks-forge-refs-error ks-cn">
-          <div>部分生图失败（其余已完成）：</div>
+          <div>{t('forge.wizard.partialFail')}</div>
           <ul>
             {failures.map((f, i) => (
               <ForgeFailureRow key={i} failure={f} />

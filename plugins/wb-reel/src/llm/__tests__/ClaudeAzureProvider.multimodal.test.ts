@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ClaudeAzureProvider } from '../ClaudeAzureProvider'
+import { ClaudeAzureProvider } from '../providers/ClaudeAzureProvider'
 
 const PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`

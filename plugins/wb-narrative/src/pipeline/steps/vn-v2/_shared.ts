@@ -77,6 +77,18 @@ export function getVnBudget(ctx: NarrativeContext): VnScaleBudget {
   return VN_COMPLEXITY_BUDGET[resolveVnComplexity(ctx)] ?? VN_COMPLEXITY_BUDGET[3]!;
 }
 
+/**
+ * 黄金线（线性拍）预算 —— 场/情节点解耦后 vn-beats 不再经"场"分层，
+ * 直接按幕产情节点。把原 `scenesPerAct × beatsPerScene` 折算为**每幕线性拍数区间**，
+ * 语义与旧预算等价（treeBeats 不变，仍由 G-01 在黄金线上长出分支）。
+ */
+export function getLinearBeatBudget(ctx: NarrativeContext): { perAct: [number, number] } {
+  const b = getVnBudget(ctx);
+  return {
+    perAct: [b.scenesPerAct[0] * b.beatsPerScene[0], b.scenesPerAct[1] * b.beatsPerScene[1]],
+  };
+}
+
 /** v2 管线统一的"原创性"提示（保留原文 vs 二创新增）。 */
 export const ORIGINALITY_NOTE = `
 ## 原创性约束
@@ -105,6 +117,31 @@ export const NUMBERING_NOTE = `
   · ❌ 违例：把选项/QTE 结果塞进 id —— "5.2_A" / "5.2_B" / "7.1_S" / "3.1a" 都非法
   · ✅ 正确：beat_id 永远是 "5.2" 这种纯「场.序」，分支差异走 next_nodes[].label 与 condition
 - 结局标签：H（happy）/ B（bad）/ O（open），全大写
+`.trim();
+
+/**
+ * 场/情节点解耦后的"拓扑序 beat_id"提示（§4.6c）。
+ * 故事结构只由情节点 DAG 承载、情节点用**拓扑序临时 id**（不含场号）；
+ * 最终 `场.序` 由剧情树拓扑定稿后的确定性场号导出统一分配。
+ */
+export const TOPO_BEAT_ID_NOTE = `
+## 情节点编号（拓扑序，非场号）
+- 每个情节点 beat_id = "b" + 递增数字（"b1", "b2", "b3"...），**全篇唯一、纯拓扑序**
+- ⚠ beat_id **不含场号**：场是拍摄分组、由系统在剧情树定稿后按三维状态自动导出，你无需（也不要）编场号
+- 选项 UI 标签仍是 A/B/C/D（仅显示用，严禁拼进 beat_id）
+- 结局标签：H（happy）/ B（bad）/ O（open），全大写
+`.trim();
+
+/**
+ * 场/情节点解耦后的"三维 staging"提示（§4.6c）：每个情节点自带三维状态，
+ * 供系统在剧情树定稿后按"相邻同三维=同场、任一维变=切新场"确定性导出场号。
+ */
+export const STAGING_NOTE = `
+## 三维 staging（每个情节点必填，供系统导出拍摄分组"场"）
+- location_name：地点名称（具体到可拍摄/可渲染的实景）
+- time_of_day："日" 或 "夜"
+- indoor_outdoor："内" 或 "外"
+- 只需**如实标注每个情节点发生的地点/时段/内外**；无需关心"场"如何切分（系统按三维相邻变化自动分组）
 `.trim();
 
 /** v2 管线统一的"三维场状态"提示。 */

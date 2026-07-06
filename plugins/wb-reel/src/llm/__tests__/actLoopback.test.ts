@@ -16,17 +16,17 @@ import {
   buildLockedAnchorsPrompt,
   summarizeForPrecedingContext,
   buildPrecedingContextPrompt,
-} from '../actLoopbackContext'
+} from '../pipeline/actLoopbackContext'
 import {
   resolveLoopbackStrategy,
   runActBatchUpgradeOnScenario,
-} from '../runActBatchUpgrade'
-import { runActBatchPipeline } from '../actBatchPipeline'
-import { forgePromptTrioForAct } from '../forgePromptTrioForAct'
+} from '../pipeline/runActBatchUpgrade'
+import { runActBatchPipeline } from '../pipeline/actBatchPipeline'
+import { forgePromptTrioForAct } from '../forge/forgePromptTrioForAct'
 
 import type { Scenario, Scene } from '../../scenario/types'
-import type { ActScenePromptTrio } from '../forgePromptTrioForAct'
-import type { TextClient } from '../types'
+import type { ActScenePromptTrio } from '../forge/forgePromptTrioForAct'
+import type { TextClient } from '../config/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

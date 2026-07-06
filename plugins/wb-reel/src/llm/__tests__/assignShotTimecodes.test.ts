@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { assignShotTimecodes } from '../assignShotTimecodes'
+import { assignShotTimecodes } from '../refsets/assignShotTimecodes'
 import type { Shot } from '../../scenario/types'
 
 function shot(id: string, order: number, durationSec?: number): Shot {

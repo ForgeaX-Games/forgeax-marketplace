@@ -94,7 +94,7 @@ import {
   type GenJob,
 } from '../forge/generationQueueStore'
 import { useToastStore } from '../ui/toastStore'
-import { t } from '../i18n'
+import { tf, useT } from '../i18n'
 
 /*
  * 轨道显隐已迁移到运行期偏好(trackVisibility.ts)+ 左侧轨头眼睛 +「轨道」管理面板。
@@ -202,6 +202,7 @@ function formatTickLabel(sec: number): string {
 }
 
 export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDialogueChange }: Props) {
+  const tr = useT()
   const ref = useRef<HTMLDivElement>(null)
   // 横向滚动视口（包住 .ks-timeline-tracks）—— 量它的宽度来推算画布像素宽
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -571,7 +572,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     openShotInAssets(shot)
     useToastStore
       .getState()
-      .fire('未找到实时生成记录，已为你在素材库定位这一镜的完整卡片', { kind: 'info' })
+      .fire(tr('timeline.toast.noGenRecordShot'), { kind: 'info' })
   }
   function inspectMediaRequest(mediaId: string | undefined): void {
     const job =
@@ -584,7 +585,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
     openSceneVideoInAssets()
     useToastStore
       .getState()
-      .fire('未找到实时生成记录，已为你在素材库定位这段视频', { kind: 'info' })
+      .fire(tr('timeline.toast.noGenRecordVideo'), { kind: 'info' })
   }
 
   /**
@@ -760,7 +761,6 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               next.push({
                 kind: 'track',
                 key: meta.key,
-                label: meta.label,
                 top: child.offsetTop,
                 height: child.offsetHeight,
               })
@@ -1520,9 +1520,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
    * 完成后清掉选中 + selectedShotId，避免 toolbar 还指向已删 id。
    */
   function tbClearAll(): void {
-    const ok = window.confirm(
-      '确认清空当前场景的时间轴？\n\n会删除：字幕 / QTE / 镜头 / 音频 / 小游戏 / 当前视频。\n保留：场景画面、背景描述、角色 / 场景绑定、剧情分支、素材库（图像 & 视频）。\n\n可通过撤销（⌘/Ctrl + Z）恢复。',
-    )
+    const ok = window.confirm(tr('timeline.clearConfirm'))
     if (!ok) return
     clearSceneTimeline(scene.id)
     setToolbarSel(null)
@@ -2115,7 +2113,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               ♪ {ac.label ?? ac.role.toUpperCase()}
             </span>
             <label className="ks-audio-insp-field">
-              <span>音量 {vol}%</span>
+              <span>{tf('timeline.audio.volume', { vol })}</span>
               <input
                 type="range"
                 min={0}
@@ -2127,7 +2125,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               />
             </label>
             <label className="ks-audio-insp-field">
-              <span>淡入 ms</span>
+              <span>{tr('timeline.audio.fadeIn')}</span>
               <input
                 type="number"
                 min={0}
@@ -2141,7 +2139,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               />
             </label>
             <label className="ks-audio-insp-field">
-              <span>淡出 ms</span>
+              <span>{tr('timeline.audio.fadeOut')}</span>
               <input
                 type="number"
                 min={0}
@@ -2221,7 +2219,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
             addMarker(scene.id, Math.round(ratio * total))
           }}
-          title="双击打标记点 · 拖动播放头会吸附标记 · 标记点单击跳转 / 右键改名删除"
+          title={tr('timeline.track.markerRulerTitle')}
         >
           {ruleTicks.map((t, i) => (
             <span
@@ -2237,7 +2235,10 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               key={mk.id}
               className="ks-rule-marker"
               style={{ left: `${Math.min(100, (mk.ms / total) * 100)}%` }}
-              title={`${mk.label ?? '标记'} · ${formatTimeCode(mk.ms)} · 单击跳转 · 右键改名/删除`}
+              title={tf('timeline.track.markerTitle', {
+                label: mk.label ?? tr('timeline.track.markerDefault'),
+                time: formatTimeCode(mk.ms),
+              })}
               onPointerDown={(e) => {
                 e.stopPropagation()
                 setHoverMs(mk.ms)
@@ -2246,7 +2247,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
                 e.preventDefault()
                 e.stopPropagation()
                 const name = window.prompt(
-                  '标记点名称（留空=删除该标记）',
+                  tr('timeline.track.markerRename'),
                   mk.label ?? '',
                 )
                 if (name === null) return
@@ -2266,12 +2267,12 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         {/* FX 轨 —— 画面后期（滤镜 / 调节 / 特效），按 kind 着色 */}
         {isTrackShown('fx') && (
           <div className={`ks-track ks-track-fx${isTrackLocked('fx') ? ' is-locked' : ''}`}>
-            <span className="ks-track-label ks-mono">特效</span>
+            <span className="ks-track-label ks-mono">{tr('timeline.track.effects')}</span>
             {(scene.filterClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
               const isSelected = (toolbarSel?.kind === 'filter' && toolbarSel.id === c.id) || inMultiSel('filter', c.id)
-              const label = getFilterPreset(c.presetId)?.label ?? '滤镜'
+              const label = getFilterPreset(c.presetId)?.label ?? tr('timeline.track.filter')
               return (
                 <div
                   key={c.id}
@@ -2299,7 +2300,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
                   onPointerDown={(e) => onFxPointerDown(e, 'adjust', c, 'whole')}
                 >
                   <span className="ks-clip-handle ks-clip-handle-l" onPointerDown={(e) => onFxPointerDown(e, 'adjust', c, 'left')} aria-label="拖左 handle 改开始" />
-                  <span className="ks-clip-text">⚙ 调节</span>
+                  <span className="ks-clip-text">{tr('timeline.track.adjustClip')}</span>
                   <span className="ks-clip-handle ks-clip-handle-r" onPointerDown={(e) => onFxPointerDown(e, 'adjust', c, 'right')} aria-label="拖右 handle 改结束" />
                 </div>
               )
@@ -2308,7 +2309,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
               const isSelected = (toolbarSel?.kind === 'effect' && toolbarSel.id === c.id) || inMultiSel('effect', c.id)
-              const label = getEffectPreset(c.presetId)?.label ?? '特效'
+              const label = getEffectPreset(c.presetId)?.label ?? tr('timeline.track.effects')
               return (
                 <div
                   key={c.id}
@@ -2329,7 +2330,7 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
         {/* STK 轨 —— 贴纸（数值花字 / 图标 / emoji / 图片） */}
         {isTrackShown('stk') && (
           <div className={`ks-track ks-track-sticker${isTrackLocked('stk') ? ' is-locked' : ''}`}>
-            <span className="ks-track-label ks-mono">贴纸</span>
+            <span className="ks-track-label ks-mono">{tr('timeline.track.stickers')}</span>
             {(scene.stickerClips ?? []).map((c) => {
               const start = (c.startMs / total) * 100
               const end = (c.endMs / total) * 100
@@ -2434,10 +2435,10 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
             <button
               type="button"
               className="ks-dia-clean-btn"
-              title={`清理 ${emptyCount} 条空台词（无文本的残留 clip）`}
+              title={tf('timeline.track.clearEmptyDialogue', { count: emptyCount })}
               onClick={() => removeEmptyDialogue(scene.id)}
             >
-              清理空台词 ✕{emptyCount}
+              {tf('timeline.track.clearEmptyDialogueBtn', { count: emptyCount })}
             </button>
           )}
           {scene.dialogue.map((rawD) => {
@@ -3030,6 +3031,7 @@ function VideoTrimTrack({
   /** 点击两段视频之间的转场徽标：无转场则加默认闪黑并选中，有则仅选中 */
   onTransitionClick: (shot: Shot) => void
 }) {
+  const tr = useT()
   const entries = useMediaStore((s) => s.entries)
   const entry = scene.media.ref ? entries[scene.media.ref] : undefined
   // v3.9 五轨重构：VIDEO 轨始终显示，但仅在 scene.media.kind='VIDEO' 时
@@ -3070,15 +3072,15 @@ function VideoTrimTrack({
             const sel = shot.id === selectedShotId
             // 剪映式转场徽标：画在「上一段视频 → 本段」的衔接处（本段左边缘），
             // 直接坐落在 VIDEO 轨上，把两段视频「重链接」起来。仅 i≥1 有衔接点。
-            const tr = shot.transitionIn
+            const transIn = shot.transitionIn
             const trSel = shot.id === selectedTransitionShotId
-            const trLabel = tr ? getTransitionPreset(tr.presetId)?.label ?? '转场' : ''
+            const trLabel = transIn ? getTransitionPreset(transIn.presetId)?.label ?? tr('timeline.clip.transition') : ''
             return (
               <Fragment key={shot.id}>
                 <div
                   className={`ks-clip ks-video-clip ks-shot-video-clip ${sel ? 'is-selected' : ''}`}
                   style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                  title={`镜${shot.order + 1} 视频 · 双击 / 右键查看生成参数（提示词 / 参考素材）`}
+                  title={tf('timeline.clip.videoShot', { order: shot.order + 1 })}
                   onPointerDown={(e) => {
                     e.stopPropagation()
                     onSelectShot(shot.id)
@@ -3111,16 +3113,16 @@ function VideoTrimTrack({
                 {i >= 1 && (
                   <button
                     type="button"
-                    className={`ks-trans-badge ${tr ? 'has-trans' : ''} ${trSel ? 'is-selected' : ''}`}
+                    className={`ks-trans-badge ${transIn ? 'has-trans' : ''} ${trSel ? 'is-selected' : ''}`}
                     style={{ left: `${leftPct}%` }}
-                    title={tr ? `转场 · ${trLabel}（点击编辑，Del 删除）` : '点击在两段视频间加转场（闪黑等）'}
+                    title={transIn ? tf('timeline.clip.transitionEdit', { label: trLabel }) : tr('timeline.clip.transitionAdd')}
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation()
                       onTransitionClick(shot)
                     }}
                   >
-                    {tr ? '⇄' : '+'}
+                    {transIn ? '⇄' : '+'}
                   </button>
                 )}
               </Fragment>
@@ -3134,7 +3136,7 @@ function VideoTrimTrack({
       <div className="ks-track ks-track-video is-empty">
         <span className="ks-track-label ks-mono">VIDEO</span>
         <span className="ks-track-empty-hint ks-mono">
-          {t('timeline.videoEmpty')}
+          {tr('timeline.videoEmpty')}
         </span>
       </div>
     )
@@ -3252,6 +3254,7 @@ function ShotTrack({
   onContextMenuShot: (e: React.MouseEvent, shot: Shot) => void
   spanOf: (shot: Shot) => { startMs: number; endMs: number }
 }) {
+  const tr = useT()
   const shots = useMemo(
     () => (scene.shots ?? []).slice().sort((a, b) => a.order - b.order),
     [scene.shots],
@@ -3263,7 +3266,7 @@ function ShotTrack({
       <div className="ks-track ks-track-shot is-empty">
         <span className="ks-track-label ks-mono">IMAGE</span>
         <span className="ks-track-empty-hint ks-mono">
-          {t('timeline.shotsEmpty')}
+          {tr('timeline.shotsEmpty')}
         </span>
       </div>
     )

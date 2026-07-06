@@ -1,8 +1,8 @@
 import { create } from 'zustand'
-import type { ImageClient } from '../llm/types'
+import type { ImageClient } from '../llm/config/types'
 import { useAssetStore } from './assetStore'
 import { useScenarioStore } from '../scenario/scenarioStore'
-import { composeVisualPrompt } from '../llm/visualStylePresets'
+import { composeVisualPrompt } from '../llm/config/visualStylePresets'
 
 /**
  * 场景画面缓存 —— 同一个剧情/会话内，每个 sceneId 只生一次图。

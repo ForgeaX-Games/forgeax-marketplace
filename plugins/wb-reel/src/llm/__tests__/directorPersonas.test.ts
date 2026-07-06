@@ -5,7 +5,7 @@ import {
   resolveDirectorPersona,
   serializePersonaToPrompt,
   listDirectorStyleOptions,
-} from '../directorPersonas'
+} from '../config/directorPersonas'
 
 describe('directorPersonas', () => {
   describe('PERSONAS 字典', () => {

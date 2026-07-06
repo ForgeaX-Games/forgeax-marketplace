@@ -7,7 +7,7 @@ import {
   VIDEO_SIZE_CHOICES,
   DEFAULT_VIDEO_SIZE,
   toDisplayLabel,
-} from '../llm/seedanceResolution'
+} from '../llm/refsets/seedanceResolution'
 import { injectStyleOnce } from '../styles/injectStyle'
 
 /**

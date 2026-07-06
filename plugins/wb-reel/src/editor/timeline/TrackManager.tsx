@@ -10,22 +10,23 @@
  *   · 空的可选轨:visible=true 且 showEmpty=true → 铺一条空 lane 便于拖入
  */
 
+import { useT } from '../../i18n'
 import type { TrackKey, TrackPrefs } from './trackVisibility'
 
-/** 面板里展示的固定轨顺序与中文名(与时间轴渲染顺序一致)。 */
-const TRACK_ROWS: { key: TrackKey; label: string; hint?: string }[] = [
-  { key: 'fx', label: '特效', hint: '滤镜 / 调节 / 特效' },
-  { key: 'stk', label: '贴纸', hint: '花字 / 图标 / emoji' },
-  { key: 'video', label: '视频' },
-  { key: 'image', label: '画面', hint: '关键帧镜头带' },
-  { key: 'dia', label: '字幕', hint: '台词(同时控制画面字幕)' },
-  { key: 'qte', label: 'QTE' },
-  { key: 'txt', label: '文字', hint: '富文本贴字' },
-  { key: 'srch', label: '搜索', hint: '道具搜寻段' },
-  { key: 'trig', label: '触发', hint: '子弹时间区间' },
-  { key: 'audio', label: '音频', hint: 'BGM / 音效 / 配音' },
-  { key: 'game', label: '小游戏' },
-  { key: 'br', label: '分支', hint: '剧情选择' },
+/** 面板里展示的固定轨顺序(与时间轴渲染顺序一致)。 */
+const TRACK_ROWS: { key: TrackKey; labelKey: string; hintKey?: string }[] = [
+  { key: 'fx', labelKey: 'track.fx', hintKey: 'track.fxHint' },
+  { key: 'stk', labelKey: 'track.sticker', hintKey: 'track.stickerHint' },
+  { key: 'video', labelKey: 'track.video' },
+  { key: 'image', labelKey: 'track.image', hintKey: 'track.imageHint' },
+  { key: 'dia', labelKey: 'track.dia', hintKey: 'track.diaHint' },
+  { key: 'qte', labelKey: 'track.qte' },
+  { key: 'txt', labelKey: 'track.txt', hintKey: 'track.txtHint' },
+  { key: 'srch', labelKey: 'track.search', hintKey: 'track.searchHint' },
+  { key: 'trig', labelKey: 'track.trig', hintKey: 'track.trigHint' },
+  { key: 'audio', labelKey: 'track.audio', hintKey: 'track.audioHint' },
+  { key: 'game', labelKey: 'track.game' },
+  { key: 'br', labelKey: 'track.branch', hintKey: 'track.branchHint' },
 ]
 
 export interface TrackManagerProps {
@@ -47,27 +48,28 @@ export function TrackManager({
   onShowAll,
   onClose,
 }: TrackManagerProps) {
+  const t = useT()
   return (
     <div className="ks-trackmgr-backdrop" onPointerDown={onClose}>
       <div
         className="ks-trackmgr"
         role="dialog"
-        aria-label="轨道管理"
+        aria-label={t('track.manageAria')}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="ks-trackmgr-head">
-          <span className="ks-trackmgr-title">轨道</span>
+          <span className="ks-trackmgr-title">{t('track.managerTitle')}</span>
           <button
             type="button"
             className="ks-trackmgr-allbtn"
             onClick={onShowAll}
-            title="显示全部轨道"
+            title={t('track.showAllTitle')}
           >
-            全部显示
+            {t('track.showAll')}
           </button>
         </div>
         <div className="ks-trackmgr-list">
-          {TRACK_ROWS.map(({ key, label, hint }) => {
+          {TRACK_ROWS.map(({ key, labelKey, hintKey }) => {
             const shown = isShown(key)
             const empty = !hasContent(key)
             return (
@@ -77,16 +79,14 @@ export function TrackManager({
                   checked={shown}
                   onChange={() => onSetShown(key, !shown)}
                 />
-                <span className="ks-trackmgr-name">{label}</span>
-                {hint && <span className="ks-trackmgr-hint">{hint}</span>}
-                {empty && <span className="ks-trackmgr-empty">空</span>}
+                <span className="ks-trackmgr-name">{t(labelKey)}</span>
+                {hintKey && <span className="ks-trackmgr-hint">{t(hintKey)}</span>}
+                {empty && <span className="ks-trackmgr-empty">{t('track.empty')}</span>}
               </label>
             )
           })}
         </div>
-        <p className="ks-trackmgr-foot">
-          勾选 = 显示该轨;取消 = 折叠隐藏。视觉轨隐藏后预览与试玩里也不出现。
-        </p>
+        <p className="ks-trackmgr-foot">{t('track.foot')}</p>
       </div>
     </div>
   )

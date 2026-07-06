@@ -20,6 +20,7 @@ import {
 } from "../filesystem.js";
 import { expandArchives, createDefaultArchiveExtractor, finalizeArchiveMembers, isJunkArchiveEntry } from "../phase0-compress.js";
 import { archiveAndBuildManifest, type IncomingFile } from "../phase0-foundation.js";
+import { runIngest } from "../orchestrator.js";
 
 /** 构造一个最小多成员 ZIP（stored 方法 0）。默认置 EFS（UTF-8 名）。 */
 function buildZip(entries: { name: string; content?: string; utf8?: boolean }[]): Buffer {
@@ -140,6 +141,31 @@ describe("媒体优先布局 · runId 家族解析 + legacy 兜底", () => {
     expect(loadHierarchyIndexByRun(run, { cwd })?.story_id).toBe(ts);
     expect(loadManifestByRun(run, { cwd })?.title).toBe(title);
     expect(listInputRunKeys({ cwd })).toContain(run);
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe("§状态机 · IP「确认」即落盘（packageOnly，零 LLM）", () => {
+  it("runIngest(packageOnly) 只归档原料 + 写 manifest，不做标准化/建树（无 _processing / 无 _hierarchy.json）", async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ipdna-pkg-"));
+    const ts = "2026-06-29_170000";
+    const title = "确认落盘作品";
+    const files: IncomingFile[] = [
+      { fileName: "正文.txt", data: "第一章 正文。".repeat(30), fileType: "text/plain" },
+    ];
+    const r = await runIngest({ files, title, story_timestamp: ts, cwd, packageOnly: true, deferMultimodal: true });
+
+    expect(r.story_timestamp).toBe(ts);
+    expect(r.title).toBe(title);
+    // 原料已固化到 input/ 媒体优先目录。
+    expect(fs.existsSync(path.join(mediaOriginalDir(ts, title, "book", { cwd }), "正文.txt"))).toBe(true);
+    // manifest 已写。
+    expect(loadManifestByRun(runName(ts, title), { cwd })?.title).toBe(title);
+    // 标准化被推迟：无 _processing 目录、无 _extraction_output 的 _hierarchy.json。
+    expect(fs.existsSync(processingDir(ts, title, "book", { cwd }))).toBe(false);
+    expect(fs.existsSync(path.join(extractionOutputDir(ts, title, "book", { cwd }), "_hierarchy.json"))).toBe(false);
+    // 未持久化层级树 → listInputRunKeys 不应因 packageOnly 而登记 _hierarchy 索引键。
+    expect(loadHierarchyIndexByRun(runName(ts, title), { cwd })).toBeFalsy();
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 });

@@ -10,15 +10,15 @@ import {
   type DockDropPayload,
 } from '../editor/timeline/dndTypes'
 import type { Scenario, Scene } from '../scenario/types'
-import { TTS_VOICE_PRESETS } from '../llm/TTSProvider'
+import { TTS_VOICE_PRESETS } from '../llm/providers/TTSProvider'
 import { AnchorPicker } from './AnchorPicker'
-import type { SeedanceMode } from '../llm/seedanceContent'
+import type { SeedanceMode } from '../llm/refsets/seedanceContent'
 import {
   SEEDANCE_RESOLUTION_CHOICES,
   SEEDANCE_RATIO_CHOICES,
   type SeedanceResolutionTier,
   type SeedanceRatio,
-} from '../llm/seedanceResolution'
+} from '../llm/refsets/seedanceResolution'
 import {
   cardTag,
   collectSceneSpeakers,

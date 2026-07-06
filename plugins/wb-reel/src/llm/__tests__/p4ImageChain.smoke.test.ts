@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { forgeImageToStorySeed } from '../promptForge'
-import { forgeScriptFromOutline } from '../scenarioFlow'
-import type { TextClient, TextRequest } from '../types'
+import { forgeImageToStorySeed } from '../forge/promptForge'
+import { forgeScriptFromOutline } from '../forge/scenarioFlow'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * P4 链路衔接 smoke：

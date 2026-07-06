@@ -1,4 +1,5 @@
 import { useNarrativeStore } from "../../store/narrativeStore";
+import { useT } from "../../i18n";
 
 /**
  * Legacy regeneration panel — kept as a stub.
@@ -6,6 +7,7 @@ import { useNarrativeStore } from "../../store/narrativeStore";
  * after saving local drafts in StepCard.
  */
 export function RegeneratePanel() {
+  const t = useT();
   const hasDrafts = useNarrativeStore((s) =>
     Object.values(s.editDrafts).some((d) => d.saved),
   );
@@ -16,10 +18,10 @@ export function RegeneratePanel() {
   return (
     <div className="regenerate-panel">
       <div className="regen-header">
-        <span className="regen-title">草稿已保存</span>
+        <span className="regen-title">{t("regen.title")}</span>
       </div>
       <div className="regen-input-area" style={{ padding: "8px 12px", opacity: 0.7, fontSize: 12 }}>
-        请点击底部「重新生成」按钮，基于已保存的草稿 Fork 新分支。
+        {t("regen.hint")}
       </div>
     </div>
   );

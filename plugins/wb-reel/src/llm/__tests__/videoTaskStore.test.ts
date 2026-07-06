@@ -3,7 +3,7 @@ import {
   isTerminal,
   useVideoTaskStore,
   type VideoTaskEntry,
-} from '../videoTaskStore'
+} from '../pipeline/videoTaskStore'
 
 const STORAGE_KEY = 'reel-studio.videoTasks.v1'
 

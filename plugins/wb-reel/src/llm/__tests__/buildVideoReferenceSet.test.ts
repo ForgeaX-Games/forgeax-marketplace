@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildVideoReferenceSet } from '../buildVideoReferenceSet'
+import { buildVideoReferenceSet } from '../refsets/buildVideoReferenceSet'
 import type { Scenario, Scene, Shot } from '../../scenario/types'
 
 function mkScenario(partial: Partial<Scenario> = {}): Scenario {

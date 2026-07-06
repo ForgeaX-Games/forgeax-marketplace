@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSeedanceContent,
   SEEDANCE_MAX_REF_IMAGES,
-} from '../seedanceContent'
+} from '../refsets/seedanceContent'
 
 describe('buildSeedanceContent', () => {
   it('只 prompt（无参考） → 仅一个 text part', () => {

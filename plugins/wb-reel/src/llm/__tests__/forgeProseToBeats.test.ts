@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { forgeProseToBeats, parseProseBeatsJSON } from '../promptForge'
+import { forgeProseToBeats, parseProseBeatsJSON } from '../forge/promptForge'
 import { SKILLS } from '../skills'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * forgeProseToBeats 契约测试

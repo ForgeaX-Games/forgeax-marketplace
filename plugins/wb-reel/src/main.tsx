@@ -1,7 +1,10 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { initLocaleSync, t } from './i18n'
 import './styles/global.css'
+
+initLocaleSync()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element #root not found')
@@ -49,7 +52,7 @@ class TopErrorBoundary extends Component<
   }
 
   private handleClearAll = (): void => {
-    if (!confirm('清除所有剧本缓存并重新加载？（剧本仍保留在磁盘 .reel-scenarios/ 中）')) return
+    if (!confirm(t('error.clearCacheConfirm'))) return
     try {
       localStorage.removeItem('reel-studio:scenarios:v1')
     } catch { /* best-effort */ }
@@ -82,10 +85,10 @@ class TopErrorBoundary extends Component<
         }}
       >
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
-          reel-studio 渲染崩溃
+          {t('error.crashTitle')}
         </div>
         <div style={{ marginBottom: 12, color: '#7a2424' }}>
-          当前剧本数据可能损坏。可尝试下方按钮恢复，或复制 stack 反馈给开发。
+          {t('error.crashHint')}
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           <button
@@ -101,7 +104,7 @@ class TopErrorBoundary extends Component<
               fontWeight: 600,
             }}
           >
-            切换到默认剧本
+            {t('error.switchDefault')}
           </button>
           <button
             type="button"
@@ -115,7 +118,7 @@ class TopErrorBoundary extends Component<
               cursor: 'pointer',
             }}
           >
-            清除本地缓存并重载
+            {t('error.clearCache')}
           </button>
           <button
             type="button"
@@ -129,7 +132,7 @@ class TopErrorBoundary extends Component<
               cursor: 'pointer',
             }}
           >
-            复制错误 stack
+            {t('error.copyStack')}
           </button>
           <button
             type="button"
@@ -143,11 +146,11 @@ class TopErrorBoundary extends Component<
               cursor: 'pointer',
             }}
           >
-            刷新
+            {t('error.refresh')}
           </button>
         </div>
         <details style={{ marginBottom: 8 }}>
-          <summary style={{ cursor: 'pointer', color: '#7a2424' }}>错误详情</summary>
+          <summary style={{ cursor: 'pointer', color: '#7a2424' }}>{t('error.details')}</summary>
           <pre
             style={{
               background: '#fff',

@@ -1,18 +1,18 @@
-export * from './types'
-export { createTextProvider, ClaudeAzureProvider, MockTextProvider } from './ClaudeAzureProvider'
-export { HostGatewayTextProvider, shouldUseHostTextGateway } from './HostGatewayTextProvider'
-export { GeminiProvider } from './GeminiProvider'
-export { createImageProvider, GptImageProvider, MockImageProvider } from './GptImageProvider'
-export { HostGatewayImageProvider, shouldUseHostImageGateway } from './HostGatewayImageProvider'
-export { HostGatewayVideoProvider, shouldUseHostVideoGateway } from './HostGatewayVideoProvider'
-export { HostGatewayTtsProvider, shouldUseHostTtsGateway } from './HostGatewayTTSProvider'
+export * from './config/types'
+export { createTextProvider, ClaudeAzureProvider, MockTextProvider } from './providers/ClaudeAzureProvider'
+export { HostGatewayTextProvider, shouldUseHostTextGateway } from './providers/HostGatewayTextProvider'
+export { GeminiProvider } from './providers/GeminiProvider'
+export { createImageProvider, GptImageProvider, MockImageProvider } from './providers/GptImageProvider'
+export { HostGatewayImageProvider, shouldUseHostImageGateway } from './providers/HostGatewayImageProvider'
+export { HostGatewayVideoProvider, shouldUseHostVideoGateway } from './providers/HostGatewayVideoProvider'
+export { HostGatewayTtsProvider, shouldUseHostTtsGateway } from './providers/HostGatewayTTSProvider'
 export {
   createVideoProvider,
   SeedanceProvider,
   MockVideoProvider,
-} from './VideoProvider'
+} from './providers/VideoProvider'
 export type {
   VideoClient,
   VideoRequest,
   VideoResult,
-} from './VideoProvider'
+} from './providers/VideoProvider'

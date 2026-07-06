@@ -6,7 +6,7 @@ import {
   fitsInSingleClip,
   splitDurationToSegments,
   listCapabilities,
-} from '../modelCapabilities'
+} from '../config/modelCapabilities'
 
 describe('modelCapabilities · 能力表', () => {
   it('DEFAULT_MODEL 在表里', () => {

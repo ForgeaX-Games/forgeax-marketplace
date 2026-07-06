@@ -584,8 +584,7 @@ const EN: Record<string, string> = {
   'main.loading.buildingUI': 'Building interface...',
   'main.loading.ready': 'Ready',
   'main.error.title': 'Startup error',
-
-  // ── Misc text helpers ───────────────────────────────────────────
+  'shell.emptyLeft': 'Select a pipeline tab above',
   'text.enumerationSep': ', ',
 };
 
@@ -1150,6 +1149,7 @@ const ZH: Record<string, string> = {
   'main.loading.buildingUI': '正在构建界面...',
   'main.loading.ready': '准备就绪',
   'main.error.title': '启动错误',
+  'shell.emptyLeft': '选择上方的管线标签开始',
 
   'text.enumerationSep': '、',
 };

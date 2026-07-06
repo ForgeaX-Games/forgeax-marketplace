@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scoreSceneForQte, pickQteCandidates } from '../qteHeuristic'
+import { scoreSceneForQte, pickQteCandidates } from '../util/qteHeuristic'
 import type { Scene } from '../../scenario/types'
 
 function mk(overrides: Partial<Scene>): Scene {

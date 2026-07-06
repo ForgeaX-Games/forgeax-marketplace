@@ -17,7 +17,7 @@
  */
 
 import { createImageProvider, createTextProvider } from '../llm'
-import { characterRefPass } from '../llm/forgePasses'
+import { characterRefPass } from '../llm/forge/forgePasses'
 import { distillCharacters, distillLocations, distillProps } from './forgeDistillSkills'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'

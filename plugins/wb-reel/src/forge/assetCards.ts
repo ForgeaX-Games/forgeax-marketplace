@@ -1,5 +1,5 @@
 import type { Scenario, Scene } from '../scenario/types'
-import type { ImageReference } from '../llm/types'
+import type { ImageReference } from '../llm/config/types'
 
 /**
  * 素材库「生成卡片」模型 —— P1（节点生成卡片画板）。

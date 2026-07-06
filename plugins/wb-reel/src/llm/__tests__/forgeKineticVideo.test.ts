@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildKineticVideoUserPrompt,
   sanitizeKineticVideoPrompt,
-} from '../forgeKineticVideo'
+} from '../forge/forgeKineticVideo'
 import type { Scene, Shot } from '../../scenario/types'
 
 /**

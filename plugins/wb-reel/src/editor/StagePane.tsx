@@ -4,7 +4,7 @@ import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
 import { useSceneAudio } from '../media/useSceneAudio'
 import { createImageProvider } from '../llm'
-import type { ImageClient } from '../llm/types'
+import type { ImageClient } from '../llm/config/types'
 import type { QTECue, QTEHitWindow, Shot, StickerClip, TextOverlayClip } from '../scenario/types'
 import { useClipSelection } from './timeline/clipSelection'
 import { useTrackPrefsStore } from './timeline/trackPrefsStore'
@@ -17,7 +17,7 @@ import { Timeline } from './Timeline'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { FOCUS_STAGE_EVENT } from './storygraph/sceneNodeHandlers'
 import { useShellStore } from '../shell/shellStore'
-import { useT } from '../i18n'
+import { useT, tf } from '../i18n'
 import { regenerateShotKeyframe } from '../forge/keyframeQueueTrigger'
 import {
   decideSeekFromHoverWithTrim,
@@ -506,7 +506,7 @@ export function StagePane({
   if (!scene) {
     return (
       <div className="ks-stage-empty ks-mono">
-        ⚠ 未选中场景
+        {t('stage.noScene')}
       </div>
     )
   }
@@ -698,7 +698,7 @@ export function StagePane({
             alt={scene.title}
             draggable={false}
             onClick={hideHeader ? togglePromptFloater : undefined}
-            title={hideHeader ? '点击切换提示词编辑浮层' : undefined}
+            title={hideHeader ? t('stage.togglePrompt') : undefined}
           />
         ) : (
           <div
@@ -718,7 +718,11 @@ export function StagePane({
             <div className="ks-ph-strip" />
             {activeShot && (
               <div className="ks-ph-shotmeta ks-mono">
-                {scene.title} · 镜 {(activeShot.order ?? 0) + 1}/{sortedShots.length}
+                {tf('stage.shotLabel', {
+                  title: scene.title,
+                  n: (activeShot.order ?? 0) + 1,
+                  total: sortedShots.length,
+                })}
                 {activeShot.framing ? ` · ${activeShot.framing}` : ''}
               </div>
             )}
@@ -732,7 +736,7 @@ export function StagePane({
             <div className="ks-ph-prompt ks-cn">
               {activeShot?.prompt ??
                 scene.media.prompt ??
-                '尚无提示词 — 在左侧 FORGE 锻造或在 Inspector 直接编辑。'}
+                t('stage.noPrompt')}
             </div>
             {isError && <div className="ks-ph-err ks-mono">{errorMessage}</div>}
             <button
@@ -872,6 +876,7 @@ function StageViewControls({
   onToggleFit: () => void
   onZoom: (z: number) => void
 }) {
+  const t = useT()
   const pct = Math.round(zoom * 100)
   return (
     <div
@@ -883,21 +888,21 @@ function StageViewControls({
         type="button"
         className={`ks-view-btn ks-view-fit ${fit === 'cover' ? 'is-on' : ''}`}
         onClick={onToggleFit}
-        title={fit === 'contain' ? '当前「适应」：完整展示。点击切「填充」铺满裁切' : '当前「填充」：铺满裁切。点击切「适应」完整展示'}
+        title={fit === 'contain' ? t('stage.fitContainTitle') : t('stage.fitCoverTitle')}
       >
-        {fit === 'contain' ? '适应' : '填充'}
+        {fit === 'contain' ? t('stage.fitContain') : t('stage.fitCover')}
       </button>
       <div className="ks-view-zoom">
-        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom - 0.25)} disabled={zoom <= 1} title="缩小" aria-label="缩小">−</button>
+        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom - 0.25)} disabled={zoom <= 1} title={t('stage.zoomOut')} aria-label={t('stage.zoomOut')}>−</button>
         <button
           type="button"
           className="ks-view-btn ks-view-pct"
           onClick={() => onZoom(1)}
-          title="点击复位到 100%"
+          title={t('stage.zoomReset')}
         >
           {pct}%
         </button>
-        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom + 0.25)} disabled={zoom >= 3} title="放大" aria-label="放大">＋</button>
+        <button type="button" className="ks-view-btn" onClick={() => onZoom(zoom + 0.25)} disabled={zoom >= 3} title={t('stage.zoomIn')} aria-label={t('stage.zoomIn')}>＋</button>
       </div>
     </div>
   )
@@ -918,13 +923,14 @@ function VideoPlayToggle({
   isPlaying: boolean
   onToggle: () => void
 }) {
+  const t = useT()
   return (
     <button
       type="button"
       className={`ks-stage-play-toggle ${isPlaying ? 'is-playing' : 'is-paused'}`}
       onClick={onToggle}
-      aria-label={isPlaying ? '暂停' : '播放'}
-      title={isPlaying ? '暂停 (space)' : '播放 (space)'}
+      aria-label={isPlaying ? t('stage.pause') : t('stage.play')}
+      title={isPlaying ? t('stage.pauseSpace') : t('stage.playSpace')}
     >
       <span aria-hidden>{isPlaying ? '⏸' : '▶'}</span>
     </button>
@@ -972,6 +978,7 @@ function ShotSequenceVideo({
   const videoUrl = shot.videoMediaRef ? entries[shot.videoMediaRef]?.url : undefined
   const imgUrl = shot.keyframeMediaRef ? entries[shot.keyframeMediaRef]?.url : undefined
   const startMs = (shot.startMs as number) ?? 0
+  const t = useT()
 
   // 镜切换(key 变 → remount)：seek 到本地偏移；播放态则自动播。
   // 只依赖 shot.id / videoUrl —— hoverMs/isPlaying 在挂载瞬间取快照即可。
@@ -1048,7 +1055,9 @@ function ShotSequenceVideo({
   return (
     <div className="ks-stage-placeholder">
       <div className="ks-ph-strip" />
-      <div className="ks-ph-headline">镜 {(shot.order ?? 0) + 1} · 暂无素材</div>
+      <div className="ks-ph-headline">
+        {tf('stage.shotNoMedia', { n: (shot.order ?? 0) + 1 })}
+      </div>
     </div>
   )
 }
@@ -1342,7 +1351,11 @@ function EditorCueMarker({
           '--ks-hold-progress': '0',
         } as React.CSSProperties
       }
-      title={`${cue.shape} · appear ${cue.appearAt}ms · target ${cue.targetAt}ms · 拖动改位置`}
+      title={tf('stage.cueTitle', {
+        shape: cue.shape,
+        appear: cue.appearAt,
+        target: cue.targetAt,
+      })}
       onPointerDown={onCuePointerDown}
     >
       {/* v3.3 · 结构与 QTEOverlay 对齐：

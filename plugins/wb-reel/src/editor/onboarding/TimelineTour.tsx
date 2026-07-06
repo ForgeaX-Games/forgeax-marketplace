@@ -12,85 +12,53 @@
 import { useEffect, useState } from 'react'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { useOnboardingStore } from './onboardingStore'
+import { useT } from '../../i18n'
 
-interface TourStep {
-  title: string
-  body: string
-}
-
-const STEPS: TourStep[] = [
-  {
-    title: '欢迎来到时间轴剪辑台',
-    body: '这里像剪映：多轨时间轴 + 上方工具栏 + 右侧后期面板。下面用 1 分钟带你认全核心操作，看完就能上手。',
-  },
-  {
-    title: '轨道与左栏（轨道头）',
-    body: '左侧固定栏是每条轨的「轨道头」：标签 + 👁 眼睛（显示/隐藏该轨）+ 🔒 锁定（锁后该轨片段不可拖动，只透传播放头）。点「轨道」按钮可统一管理显隐。',
-  },
-  {
-    title: '选中片段 → 编辑',
-    body: '在轨上点一段（镜头/字幕/花字/音频…）即选中，高亮显示。选中后用上方工具栏「剪切 / 删除」，或拖两端裁剪、拖中间移动。按住 Shift 点多段＝多选，可整批删除/微调。',
-  },
-  {
-    title: '右侧后期面板（含变速）',
-    body: '右上「后期效果」面板有转场 / 特效 / 贴纸 / 滤镜 / 调节 / 首尾动画 / 变速 / 我的。选中一个镜头，进「变速」即可设 定格(0) / 0.5× / 1× / 2× 等——变速/定格已从时间轴搬到这里。',
-  },
-  {
-    title: '工具栏「更多 ⋯」',
-    body: '工具栏保持清爽：撤销/重做、剪切、删除常驻；复制/粘贴/再制、镜头/音频左对齐、左右微调、清空时间轴都收进「更多 ⋯」弹层，不再挤成一排被裁切。',
-  },
-  {
-    title: '播放头、标记点与快捷键',
-    body: '工具栏右侧有播放头时间码与回到起点/跳到末尾。双击标尺或按 M 打一个标记点（可命名、可吸附）。常用快捷键：⌘/Ctrl+Z 撤销、Delete 删除、⌘/Ctrl+C/V/D 复制/粘贴/再制、Esc 取消选择。随时点工具栏「?」看速查。',
-  },
-]
+const STEP_COUNT = 6
 
 export function TimelineTour() {
   injectStyleOnce('ks-timeline-tour', css)
   const tourOpen = useOnboardingStore((s) => s.tourOpen)
   const finishTour = useOnboardingStore((s) => s.finishTour)
-  // 用一个受控 step：放在 store 外的局部 state 会在重开时残留，这里用 store 也行，
-  // 但 step 是纯 UI 局部态，用 React 局部 state + key 重置即可。
   return tourOpen ? <TourCard onDone={finishTour} /> : null
 }
 
 function TourCard({ onDone }: { onDone: () => void }) {
-  // 局部 step；组件随 tourOpen 卸载/挂载（见 TimelineTour 三元）天然重置。
+  const t = useT()
   const [step, setStep] = useStepState()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onDone()
-      else if (e.key === 'ArrowRight') setStep((s) => Math.min(STEPS.length - 1, s + 1))
+      else if (e.key === 'ArrowRight') setStep((s) => Math.min(STEP_COUNT - 1, s + 1))
       else if (e.key === 'ArrowLeft') setStep((s) => Math.max(0, s - 1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onDone, setStep])
 
-  const cur = STEPS[step]!
-  const isLast = step === STEPS.length - 1
+  const isLast = step === STEP_COUNT - 1
   return (
     <div className="ks-tour-scrim" onClick={onDone} role="presentation">
-      <div className="ks-tour-card" role="dialog" aria-label="时间轴引导" onClick={(e) => e.stopPropagation()}>
+      <div className="ks-tour-card" role="dialog" aria-label={t('tour.ariaLabel')} onClick={(e) => e.stopPropagation()}>
         <div className="ks-tour-step ks-mono">
-          {step + 1} / {STEPS.length}
+          {step + 1} / {STEP_COUNT}
         </div>
-        <h3 className="ks-tour-title">{cur.title}</h3>
-        <p className="ks-tour-body">{cur.body}</p>
+        <h3 className="ks-tour-title">{t(`tour.step${step}.title`)}</h3>
+        <p className="ks-tour-body">{t(`tour.step${step}.body`)}</p>
         <div className="ks-tour-dots" aria-hidden>
-          {STEPS.map((_, i) => (
+          {Array.from({ length: STEP_COUNT }, (_, i) => (
             <span key={i} className={`ks-tour-dot ${i === step ? 'is-on' : ''}`} />
           ))}
         </div>
         <div className="ks-tour-actions">
           <button type="button" className="ks-tour-skip" onClick={onDone}>
-            跳过，不再显示
+            {t('tour.skip')}
           </button>
           <div className="ks-tour-nav">
             {step > 0 && (
               <button type="button" className="ks-tour-btn" onClick={() => setStep((s) => s - 1)}>
-                上一步
+                {t('tour.prev')}
               </button>
             )}
             <button
@@ -98,7 +66,7 @@ function TourCard({ onDone }: { onDone: () => void }) {
               className="ks-tour-btn is-primary"
               onClick={() => (isLast ? onDone() : setStep((s) => s + 1))}
             >
-              {isLast ? '开始使用' : '下一步'}
+              {isLast ? t('tour.start') : t('tour.next')}
             </button>
           </div>
         </div>
@@ -107,7 +75,6 @@ function TourCard({ onDone }: { onDone: () => void }) {
   )
 }
 
-// 小工具：把 useState 收成稳定的 setter（避免 TourCard 内联多个 useState 噪声）。
 function useStepState(): [number, (fn: (s: number) => number) => void] {
   const [step, setStep] = useState(0)
   const update = (fn: (s: number) => number): void => setStep((s) => fn(s))

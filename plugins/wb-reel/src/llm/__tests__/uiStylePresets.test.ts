@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   UI_STYLE_PRESETS,
   getUIStylePreset,
-} from '../uiStylePresets'
+} from '../config/uiStylePresets'
 
 describe('uiStylePresets', () => {
   it('至少 5 个预设且 id 唯一', () => {

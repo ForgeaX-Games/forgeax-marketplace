@@ -1,10 +1,11 @@
-import { useShellStore, type ShellTab, type ForgeView, type ImageSection } from '../shell/shellStore'
+import { useShellStore, type ForgeView, type ImageSection } from '../shell/shellStore'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useForgeStudioStore, STUDIO_TABS, type StudioTab } from '../forge/studio/forgeStudioStore'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { SceneMiniMap } from '../storytree/SceneMiniMap'
 import type { ModuleId } from '../scenario/types'
 import { isModuleEnabled } from '../scenario/moduleFlags'
+import { tf, useT } from '../i18n'
 
 /**
  * ReelSidebar —— wb-reel 嵌入 forgeax-studio 的 split-pane 模式下, 渲染在
@@ -31,14 +32,10 @@ import { isModuleEnabled } from '../scenario/moduleFlags'
  * 当前阶段先做单 iframe 视觉; 跨 pane 同步留给下一步.
  */
 
-const TAB_DEFS: Array<{ id: ShellTab; label: string; hint: string }> = [
-  { id: 'forge',  label: 'FORGE',  hint: '剧本锻造工作台 · 在中央内容区编辑/查看' },
-]
-
-const VIEW_DEFS: Array<{ id: ForgeView; label: string; hint: string }> = [
-  { id: 'script', label: '剧本',   hint: '小说家工作板 · 5 段切换' },
-  { id: 'image',  label: '模块',   hint: '美术 / 导演 / 参考图 / 界面 / 小游戏 / 数值 / 背包 · 可独立开关' },
-  { id: 'tree',   label: '剧情树', hint: '可视化剧情树 · 节点详情编辑' },
+const VIEW_DEFS: Array<{ id: ForgeView; labelKey: string; hintKey: string }> = [
+  { id: 'script', labelKey: 'tab.script', hintKey: 'view.script.hint' },
+  { id: 'image', labelKey: 'tab.image', hintKey: 'view.image.hint' },
+  { id: 'tree', labelKey: 'tab.tree', hintKey: 'view.tree.hint' },
   // 「素材库」不再是独立 pill —— 从剧情树节点详情「时间轴上方」的醒目按钮进入,
   //   它跟随当前选中节点 (与剧情树共用同一套节点选择, 不再各自一份)。
 ]
@@ -51,21 +48,20 @@ const IMAGE_SECTION_DEFS: Array<{
   id: ImageSection
   /** 对应 scenario.modules 的开关键(与 ImageSection 取值一致) */
   module: ModuleId
-  label: string
-  hint: string
+  labelKey: string
+  hintKey: string
 }> = [
-  { id: 'style', module: 'style', label: '美术风格', hint: '视觉风格基调 · VISUAL STYLE' },
-  { id: 'director', module: 'director', label: '导演风格', hint: '导演流派 · 运镜/剪辑/色彩基调' },
-  { id: 'refs', module: 'refs', label: '参考图库', hint: '角色 / 场所 / 道具 参考图流水线' },
-  { id: 'ui', module: 'ui', label: '界面风格', hint: '游戏化 UI 风格 · 按钮/字幕条/HUD' },
-  { id: 'minigame', module: 'minigame', label: '小游戏库', hint: '预选小游戏池 · 剧情树剪辑时可用' },
-  { id: 'numeric', module: 'numeric', label: '数值系统', hint: '好感度/积分/flag · 节点门槛与结局分流' },
-  { id: 'inventory', module: 'inventory', label: '背包系统', hint: '搜寻拾取道具 · 解锁节点/触发结局' },
+  { id: 'style', module: 'style', labelKey: 'module.style.label', hintKey: 'module.style.hint' },
+  { id: 'director', module: 'director', labelKey: 'module.director.label', hintKey: 'module.director.hint' },
+  { id: 'refs', module: 'refs', labelKey: 'module.refs.label', hintKey: 'module.refs.hint' },
+  { id: 'ui', module: 'ui', labelKey: 'module.ui.label', hintKey: 'module.ui.hint' },
+  { id: 'minigame', module: 'minigame', labelKey: 'module.minigame.label', hintKey: 'module.minigame.hint' },
+  { id: 'numeric', module: 'numeric', labelKey: 'module.numeric.label', hintKey: 'module.numeric.hint' },
+  { id: 'inventory', module: 'inventory', labelKey: 'module.inventory.label', hintKey: 'module.inventory.hint' },
 ]
 
 export function ReelSidebar() {
-  const activeTab = useShellStore((s) => s.activeTab)
-  const setActiveTab = useShellStore((s) => s.setActiveTab)
+  const t = useT()
   const forgeView = useShellStore((s) => s.forgeView)
   const setForgeView = useShellStore((s) => s.setForgeView)
   const imageSection = useShellStore((s) => s.imageSection)
@@ -107,16 +103,18 @@ export function ReelSidebar() {
     inventory: itemCount > 0,
   }
 
+  const studioTabLabel = (id: StudioTab) => t(`studio.tab.${id}.label`)
+
   return (
-    <aside className="rs-sidebar" aria-label="Reel 工作板">
+    <aside className="rs-sidebar" aria-label={t('sidebar.ariaLabel')}>
       <header className="rs-doc">
-        <div className="rs-doc-title">影游工坊</div>
-        <div className="rs-doc-name" title={title || '未命名剧本'}>
-          {title || '未命名剧本'}
+        <div className="rs-doc-title">{t('workshop.title')}</div>
+        <div className="rs-doc-name" title={title || t('doc.unnamed')}>
+          {title || t('doc.unnamed')}
         </div>
         <div className="rs-doc-meta">
           <span className="rs-doc-meta-num">{sceneCount}</span>
-          <span className="rs-doc-meta-label">场景</span>
+          <span className="rs-doc-meta-label">{t('doc.scenes')}</span>
         </div>
       </header>
 
@@ -127,26 +125,26 @@ export function ReelSidebar() {
               key={v.id}
               active={forgeView === v.id}
               onClick={() => setForgeView(v.id)}
-              hint={v.hint}
+              hint={t(v.hintKey)}
             >
-              {v.label}
+              {t(v.labelKey)}
             </PillButton>
           ))}
         </PillGroup>
       </Section>
 
       {forgeView === 'script' && (
-        <Section label="段子">
+        <Section label={t('section.beats')}>
           <RowGroup>
             {STUDIO_TABS.map((s) => (
               <RowButton
                 key={s.id}
                 active={studioTab === s.id}
                 onClick={() => setStudioTab(s.id as StudioTab)}
-                hint={s.hint}
+                hint={t(`studio.tab.${s.id}.hint`)}
                 indented
               >
-                {s.label}
+                {t(`studio.tab.${s.id}.label`)}
               </RowButton>
             ))}
           </RowGroup>
@@ -159,28 +157,29 @@ export function ReelSidebar() {
             type="button"
             className="rs-import-link"
             onClick={() => setImportOpen(true)}
-            title="粘贴或上传你写好的完整剧本，严格按原文解析成剧情树（不经过对话，不改写原文）"
+            title={t('sidebar.importTitle')}
           >
             <span className="rs-import-ico" aria-hidden>
               ↥
             </span>
-            导入完整剧本
+            {t('import.full')}
           </button>
         </Section>
       )}
 
       {forgeView === 'image' && (
-        <Section label="模块">
+        <Section label={t('section.modules')}>
           <RowGroup>
             {IMAGE_SECTION_DEFS.map((s) => {
               const enabled = isModuleEnabled({ modules, variables, items }, s.module)
               const configured = sectionConfigured[s.id]
+              const sectionLabel = t(s.labelKey)
               return (
                 <RowButton
                   key={s.id}
                   active={imageSection === s.id}
                   onClick={() => setImageSection(s.id)}
-                  hint={s.hint}
+                  hint={t(s.hintKey)}
                   indented
                   dimmed={!enabled}
                   trailing={
@@ -191,10 +190,18 @@ export function ReelSidebar() {
                       aria-checked={enabled}
                       title={
                         enabled
-                          ? `已开启 · 该模块会参与制作${configured ? '（已配置）' : '（待配置）'}`
-                          : '已关闭 · 制作/运行时跳过该模块'
+                          ? tf('sidebar.moduleOn', {
+                              suffix: configured
+                                ? t('sidebar.moduleOnConfigured')
+                                : t('sidebar.moduleOnUnconfigured'),
+                            })
+                          : t('sidebar.moduleOff')
                       }
-                      aria-label={enabled ? `关闭${s.label}` : `开启${s.label}`}
+                      aria-label={
+                        enabled
+                          ? tf('sidebar.moduleDisable', { label: sectionLabel })
+                          : tf('sidebar.moduleEnable', { label: sectionLabel })
+                      }
                       onClick={(e) => {
                         e.stopPropagation()
                         setModuleEnabled(s.module, !enabled)
@@ -213,7 +220,7 @@ export function ReelSidebar() {
                     </span>
                   }
                 >
-                  {s.label}
+                  {sectionLabel}
                 </RowButton>
               )
             })}
@@ -237,8 +244,13 @@ export function ReelSidebar() {
           <span className="rs-foot-dot" aria-hidden />
           <span className="rs-foot-text">
             {forgeView === 'script'
-              ? `编辑中 · ${STUDIO_TABS.find((t) => t.id === studioTab)?.label ?? ''}`
-              : `模块 · ${IMAGE_SECTION_DEFS.find((t) => t.id === imageSection)?.label ?? ''}`}
+              ? tf('sidebar.editing', { label: studioTabLabel(studioTab) })
+              : tf('sidebar.moduleStatus', {
+                  label: t(
+                    IMAGE_SECTION_DEFS.find((s) => s.id === imageSection)?.labelKey ??
+                      'section.modules',
+                  ),
+                })}
           </span>
         </footer>
       )}

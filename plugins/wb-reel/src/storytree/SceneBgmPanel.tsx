@@ -25,12 +25,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'
-import { composeSceneBgm, type SceneBgmBrief } from '../llm/sceneBgmComposer'
+import { composeSceneBgm, type SceneBgmBrief } from '../llm/forge/sceneBgmComposer'
 import {
   getMinimaxMusicClient,
   type MusicProgressEvent,
-} from '../llm/MinimaxMusicProvider'
-import { createTextProvider } from '../llm/ClaudeAzureProvider'
+} from '../llm/providers/MinimaxMusicProvider'
+import { createTextProvider } from '../llm/providers/ClaudeAzureProvider'
 import type { SceneBgmAnchor } from '../scenario/types'
 import { injectStyleOnce } from '../styles/injectStyle'
 

@@ -3,7 +3,7 @@ import {
   buildAuditRecord,
   serializeAuditLine,
   defaultAuditFileName,
-} from '../llmAuditLog'
+} from '../util/llmAuditLog'
 
 describe('buildAuditRecord · 纯函数', () => {
   it('填充必填字段', () => {

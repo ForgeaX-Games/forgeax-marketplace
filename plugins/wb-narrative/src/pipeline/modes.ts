@@ -33,7 +33,7 @@ export const STEP_IDS = {
   // 与 MyFile/提示词/影游叙事生成提示词/01-09_*.md 一一对应
   VN_LOGLINE: "vn_logline",                       // E1-01 用户需求预处理（一句话故事梗概）
   VN_OUTLINE_ACTS: "vn_outline_acts",             // E1-02 三幕扩写（三幕 + 人物小传 + 关键道具）
-  VN_SCENES: "vn_scenes",                         // E1-03 场搭建
+  VN_SCENES: "vn_scenes",                         // 派生数据（场号导出，非执行步骤）；符号保留供快照/落盘引用
   VN_BEATS: "vn_beats",                           // E1-04 情节点搭建（线性）
   VN_SCRIPT_NORMALIZE: "vn_script_normalize",     // E2-01 用户剧本预处理
   VN_SEGMENT_CONFIRM: "vn_segment_confirm",       // E2-02 影游化文本段确认
@@ -481,7 +481,6 @@ export const MODE_CONFIGS: ModeConfig[] = [
       S.VN_LOGLINE,
       S.VN_OUTLINE_ACTS,
       S.WORLDVIEW,
-      S.VN_SCENES,
       S.VN_BEATS,
       S.VN_BRANCHED_BEATS,
       S.VN_STATE_LEDGER,
@@ -499,7 +498,6 @@ export const MODE_CONFIGS: ModeConfig[] = [
       S.VN_LOGLINE,
       S.VN_OUTLINE_ACTS,
       S.WORLDVIEW,
-      S.VN_SCENES,
       S.VN_BEATS,
       S.VN_BRANCHED_BEATS,
       S.VN_STATE_LEDGER,
@@ -517,7 +515,6 @@ export const MODE_CONFIGS: ModeConfig[] = [
       S.VN_LOGLINE,
       S.VN_OUTLINE_ACTS,
       S.WORLDVIEW,
-      S.VN_SCENES,
       S.VN_BEATS,
       S.VN_BRANCHED_BEATS,
       S.VN_STATE_LEDGER,
@@ -537,7 +534,6 @@ export const MODE_CONFIGS: ModeConfig[] = [
       S.VN_LOGLINE,
       S.VN_OUTLINE_ACTS,
       S.WORLDVIEW,
-      S.VN_SCENES,
       S.VN_BEATS,
       S.VN_BRANCHED_BEATS,
       S.VN_STATE_LEDGER,

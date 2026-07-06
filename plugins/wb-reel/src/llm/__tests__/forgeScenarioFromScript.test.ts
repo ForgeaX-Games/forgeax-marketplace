@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { forgeScenarioFromScript } from '../promptForge'
+import { forgeScenarioFromScript } from '../forge/promptForge'
 import { SKILLS } from '../skills'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * 简易 mock TextClient —— 记录每一次调用并按预设响应返回。

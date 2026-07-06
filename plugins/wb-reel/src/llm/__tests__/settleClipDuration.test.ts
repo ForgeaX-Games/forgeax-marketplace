@@ -3,8 +3,8 @@ import {
   clipFloorSec,
   settleClipDurationSec,
   planClipSegments,
-} from '../settleClipDuration'
-import { getCapability, type ModelCapability } from '../modelCapabilities'
+} from '../refsets/settleClipDuration'
+import { getCapability, type ModelCapability } from '../config/modelCapabilities'
 
 const seedance2 = getCapability('seedance-2-0')
 const seedance2fast = getCapability('seedance-2-0-fast')

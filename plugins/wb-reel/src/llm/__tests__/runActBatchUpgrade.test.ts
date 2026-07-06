@@ -14,11 +14,11 @@ import {
   orderScenesForUpgrade,
   mergeTrioIntoScene,
   runActBatchUpgradeOnScenario,
-} from '../runActBatchUpgrade'
+} from '../pipeline/runActBatchUpgrade'
 
 import type { Scenario, Scene, Shot } from '../../scenario/types'
-import type { ActScenePromptTrio } from '../forgePromptTrioForAct'
-import type { TextClient, TextRequest } from '../types'
+import type { ActScenePromptTrio } from '../forge/forgePromptTrioForAct'
+import type { TextClient, TextRequest } from '../config/types'
 
 function makeScene(
   id: string,

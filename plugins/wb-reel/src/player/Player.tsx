@@ -5,7 +5,7 @@ import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
 import { useSceneAudio } from '../media/useSceneAudio'
 import { createImageProvider } from '../llm'
-import type { ImageClient } from '../llm/types'
+import type { ImageClient } from '../llm/config/types'
 import type {
   Branch,
   MinigameClip,

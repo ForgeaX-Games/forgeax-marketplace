@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { qteEnhancePass } from '../forgePasses'
+import { qteEnhancePass } from '../forge/forgePasses'
 import type { Scenario, Scene } from '../../scenario/types'
 
 function mkScene(overrides: Partial<Scene>): Scene {

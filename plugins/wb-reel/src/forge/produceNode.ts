@@ -25,7 +25,7 @@ import { triggerKeyframeFromQueue } from './keyframeQueueTrigger'
 import { orchestrateVideos } from './orchestrateVideos'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useForgeChatStore } from './forgeChatStore'
-import { orderScenesForUpgrade } from '../llm/runActBatchUpgrade'
+import { orderScenesForUpgrade } from '../llm/pipeline/runActBatchUpgrade'
 import type { Scenario } from '../scenario/types'
 
 export type ProduceStage = 'storyboard' | 'keyframes' | 'video'

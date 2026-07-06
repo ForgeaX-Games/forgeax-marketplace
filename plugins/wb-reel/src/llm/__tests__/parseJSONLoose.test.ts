@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseJSONLoose } from '../parseJSONLoose'
+import { parseJSONLoose } from '../util/parseJSONLoose'
 
 /**
  * 真实生产中遇到的 LLM 输出脏数据 —— 中文模型尤其容易出：

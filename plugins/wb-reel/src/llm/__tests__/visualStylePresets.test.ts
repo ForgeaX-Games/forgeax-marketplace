@@ -6,7 +6,7 @@ import {
   composeVisualPrompt,
   getAuthoringHint,
   type VisualStyle,
-} from '../visualStylePresets'
+} from '../config/visualStylePresets'
 
 describe('visualStylePresets', () => {
   describe('preset 表完整性', () => {

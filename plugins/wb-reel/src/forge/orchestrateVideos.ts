@@ -18,7 +18,7 @@
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'
 import type { Scenario, Scene, Shot } from '../scenario/types'
-import { buildVideoReferenceSet } from '../llm/buildVideoReferenceSet'
+import { buildVideoReferenceSet } from '../llm/refsets/buildVideoReferenceSet'
 import { generateCardVideo } from './assetCardGen'
 import {
   useGenerationQueue,
@@ -26,7 +26,7 @@ import {
   type GenJobInput,
 } from './generationQueueStore'
 import { createTextProvider } from '../llm'
-import { forgeCinematicVideoPrompt } from '../llm/forgeKineticVideo'
+import { forgeCinematicVideoPrompt } from '../llm/forge/forgeKineticVideo'
 
 /** orch-video recipe 的持久化参数（纯可序列化；resume 按当前剧本重建）。 */
 interface OrchVideoRecipeArgs {

@@ -17,11 +17,12 @@ import {
   fetchIpDnaJob,
   ipDnaCancel,
   fetchIpDnaHierarchy,
+  saveEntry,
 } from "../../hooks/useNarrativeStream";
 import type { IpDnaHierarchySummary } from "../../hooks/useNarrativeStream";
 import type { HistoryEntry, GenreCategoryGroup, IpDnaFilePayload, IpDnaJobStatus } from "../../hooks/useNarrativeStream";
 import { IpStageFlow, type IpUploadDisplay } from "./IpStageFlow";
-import { tryRestoreFromStorage } from "../../store/narrativeStore";
+import { tryRestoreFromStorage, useNarrativePhase } from "../../store/narrativeStore";
 import type { TierId, ModeId, NarrativeContext } from "../../types";
 import { PIPELINE_STEPS, STEP_CTX_FIELD } from "../../types";
 import {
@@ -29,15 +30,16 @@ import {
   type PipelineTemplateId,
 } from "../../pipeline-templates";
 import type { StepState } from "../../store/narrativeStore";
+import { useT, tStepLabel } from "../../i18n";
 
 type InputTab = "text" | "tags" | "file";
 type RouteGroup = "narrative" | "planning";
 type StepSectionId = "input" | "routing" | "project";
 
-const INPUT_TAB_DEFS: { id: InputTab; label: string; Icon: typeof PenLine }[] = [
-  { id: "text", label: "直接输入", Icon: PenLine },
-  { id: "tags", label: "标签选择", Icon: Tags },
-  { id: "file", label: "文件上传", Icon: FileUp },
+const INPUT_TAB_DEFS: { id: InputTab; Icon: typeof PenLine }[] = [
+  { id: "text", Icon: PenLine },
+  { id: "tags", Icon: Tags },
+  { id: "file", Icon: FileUp },
 ];
 
 // 蓝图 §3.4/§6.1：多模态 + 压缩包 + 多文件上传。按扩展名分流读取方式。
@@ -114,9 +116,9 @@ async function readUploadedItem(file: File): Promise<UploadedItem | null> {
   return { ...base, kind, contentBase64: b64, encoding: "base64" };
 }
 
-const ROUTE_GROUP_DEFS: { id: RouteGroup; label: string; Icon: typeof ClipboardList }[] = [
-  { id: "planning", label: "策划全量", Icon: ClipboardList },
-  { id: "narrative", label: "叙事单品", Icon: BookOpen },
+const ROUTE_GROUP_DEFS: { id: RouteGroup; Icon: typeof ClipboardList }[] = [
+  { id: "planning", Icon: ClipboardList },
+  { id: "narrative", Icon: BookOpen },
 ];
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -201,23 +203,22 @@ const OPEN_WORLD_STEPS = [...ITEM_BASE, "region_design", "emergent_event", "ques
 // narrative_auto 的步骤完全由后端 buildAutoSteps 按品类动态决定，前端没有合理的预览
 // 序，应该返回 null（而非 [] —— 后者会让 PipelineStatus 误以为"预览=空管线"，
 // 导致 X/Y 数字消失 + 显示占位文案而非"等待开始生成"）。
-const NARRATIVE_ROUTES: { id: ModeId; label: string; hasComplexity: boolean; steps: string[] | null }[] = [
-  { id: "narrative_auto",   label: "自动",     hasComplexity: true,  steps: null },
-  { id: "initial_outline",  label: "大纲",     hasComplexity: false, steps: OUTLINE_BASE },
-  { id: "worldview",        label: "世界观",   hasComplexity: false, steps: WV_BASE },
-  { id: "character",        label: "角色",     hasComplexity: false, steps: CHAR_BASE },
-  { id: "item_lore",        label: "道具",     hasComplexity: false, steps: ITEM_BASE },
-  { id: "script",           label: "叙事",     hasComplexity: true,  steps: SCRIPT_BASE },
-  { id: "quest",            label: "任务",     hasComplexity: true,  steps: QUEST_BASE },
-  { id: "scene",            label: "场景",     hasComplexity: true,  steps: SCENE_BASE },
-  { id: "vn_script",        label: "影游剧本", hasComplexity: true,  steps: VN_SCRIPT_STEPS },
-  { id: "vn_storyboard_mode", label: "影游分镜", hasComplexity: true,  steps: VN_STORYBOARD_STEPS },
-  // ── 原型族代表性叙事单品（除 RPG 链 / 影游 VN 外的种子选手，按层级补充）──
-  { id: "fragmented",       label: "碎片化叙事", hasComplexity: true,  steps: FRAGMENTED_STEPS },
-  { id: "emergent",         label: "涌现叙事",   hasComplexity: false, steps: EMERGENT_STEPS },
-  { id: "card_narrative",   label: "卡牌叙事",   hasComplexity: false, steps: CARD_NARRATIVE_STEPS },
-  { id: "open_world_narrative", label: "开放世界叙事", hasComplexity: true, steps: OPEN_WORLD_STEPS },
-  { id: "narrative_card",   label: "叙事卡",     hasComplexity: false, steps: NARRATIVE_CARD_STEPS },
+const NARRATIVE_ROUTES: { id: ModeId; hasComplexity: boolean; steps: string[] | null }[] = [
+  { id: "narrative_auto",   hasComplexity: true,  steps: null },
+  { id: "initial_outline",  hasComplexity: false, steps: OUTLINE_BASE },
+  { id: "worldview",        hasComplexity: false, steps: WV_BASE },
+  { id: "character",        hasComplexity: false, steps: CHAR_BASE },
+  { id: "item_lore",        hasComplexity: false, steps: ITEM_BASE },
+  { id: "script",           hasComplexity: true,  steps: SCRIPT_BASE },
+  { id: "quest",            hasComplexity: true,  steps: QUEST_BASE },
+  { id: "scene",            hasComplexity: true,  steps: SCENE_BASE },
+  { id: "vn_script",        hasComplexity: true,  steps: VN_SCRIPT_STEPS },
+  { id: "vn_storyboard_mode", hasComplexity: true,  steps: VN_STORYBOARD_STEPS },
+  { id: "fragmented",       hasComplexity: true,  steps: FRAGMENTED_STEPS },
+  { id: "emergent",         hasComplexity: false, steps: EMERGENT_STEPS },
+  { id: "card_narrative",   hasComplexity: false, steps: CARD_NARRATIVE_STEPS },
+  { id: "open_world_narrative", hasComplexity: true, steps: OPEN_WORLD_STEPS },
+  { id: "narrative_card",   hasComplexity: false, steps: NARRATIVE_CARD_STEPS },
 ];
 
 const NARRATIVE_HINTS: Record<string, string> = {
@@ -331,12 +332,12 @@ function formatNeedsTooltip(needs: Record<string, number> | null, routeId: strin
  *  PLANNING TIER OPTIONS — A1-4: 选择 Tier 后展开二级品类面板
  * ═══════════════════════════════════════════════════════════════════ */
 // 排列顺序：自动 / T4 / T3 / T2 / T1 — 由轻到重，符合用户阅读习惯
-const TIER_ITEMS: { id: TierId | "auto"; label: string }[] = [
-  { id: "auto",  label: "自动" },
-  { id: "tier4", label: "极简叙事" },
-  { id: "tier3", label: "轻叙事" },
-  { id: "tier2", label: "中度叙事" },
-  { id: "tier1", label: "重度叙事" },
+const TIER_ITEMS: { id: TierId | "auto" }[] = [
+  { id: "auto" },
+  { id: "tier4" },
+  { id: "tier3" },
+  { id: "tier2" },
+  { id: "tier1" },
 ];
 
 const TIER_HINTS: Record<string, string> = {
@@ -390,11 +391,11 @@ const TIER_HAS_COMPLEXITY: Record<string, boolean> = {
 };
 
 const COMPLEXITY_LEVELS = [
-  { level: 1, label: "极简", hint: "5-10 节点，L0框架直通，不扩展" },
-  { level: 2, label: "短篇", hint: "15-25 节点，仅L1克制细化" },
-  { level: 3, label: "标准", hint: "35-50 节点，L1/L2克制细化" },
-  { level: 4, label: "丰富", hint: "75-100 节点，L1/L2正常细化" },
-  { level: 5, label: "史诗", hint: "100+ 节点，不限" },
+  { level: 1 },
+  { level: 2 },
+  { level: 3 },
+  { level: 4 },
+  { level: 5 },
 ];
 
 const TIER_DEFAULT_COMPLEXITY: Record<TierId, number> = {
@@ -412,22 +413,23 @@ const TIER_DEFAULT_COMPLEXITY: Record<TierId, number> = {
 // ── Tag system ──
 interface TagDimension {
   key: string;
-  name: string;
+  nameKey: string;
   options: string[];
   allowCustom?: boolean;
 }
 
 const TAG_DIMENSIONS: TagDimension[] = [
-  { key: "theme", name: "故事主题", options: ["成长", "救赎", "复仇", "爱情", "友情", "牺牲", "自由", "权力", "命运", "探索"] },
-  { key: "genre", name: "故事题材", options: ["奇幻", "科幻", "武侠", "悬疑", "恐怖", "历史", "都市", "末日", "仙侠", "军事"] },
-  { key: "tone", name: "风格基调", options: ["热血", "黑暗", "温暖", "幽默", "史诗", "治愈", "压抑", "荒诞", "浪漫", "硬核"] },
-  { key: "conflict", name: "核心冲突", options: ["人vs人", "人vs自然", "人vs社会", "人vs自我", "人vs命运", "人vs科技", "阵营对抗", "生存危机"] },
-  { key: "worldtype", name: "世界观类型", options: ["中世纪", "赛博朋克", "蒸汽朋克", "后启示录", "太空歌剧", "东方仙侠", "克苏鲁", "现代都市", "异世界"] },
-  { key: "custom", name: "自定义补充", options: [], allowCustom: true },
+  { key: "theme", nameKey: "tagDim.theme", options: ["成长", "救赎", "复仇", "爱情", "友情", "牺牲", "自由", "权力", "命运", "探索"] },
+  { key: "genre", nameKey: "tagDim.genre", options: ["奇幻", "科幻", "武侠", "悬疑", "恐怖", "历史", "都市", "末日", "仙侠", "军事"] },
+  { key: "tone", nameKey: "tagDim.tone", options: ["热血", "黑暗", "温暖", "幽默", "史诗", "治愈", "压抑", "荒诞", "浪漫", "硬核"] },
+  { key: "conflict", nameKey: "tagDim.conflict", options: ["人vs人", "人vs自然", "人vs社会", "人vs自我", "人vs命运", "人vs科技", "阵营对抗", "生存危机"] },
+  { key: "worldtype", nameKey: "tagDim.worldtype", options: ["中世纪", "赛博朋克", "蒸汽朋克", "后启示录", "太空歌剧", "东方仙侠", "克苏鲁", "现代都市", "异世界"] },
+  { key: "custom", nameKey: "tagDim.custom", options: [], allowCustom: true },
 ];
 
 // ── Main component ──
 export function TierModeSelector() {
+  const t = useT();
   const [inputTab, setInputTab] = useState<InputTab>("text");
   const [routeGroup, setRouteGroup] = useState<RouteGroup>("planning");
   const [userInput, setUserInput] = useState("");
@@ -438,6 +440,10 @@ export function TierModeSelector() {
 
   const [selectedTierId, setSelectedTierId] = useState<TierId | "auto">("auto");
   const [selectedNarrativeRoute, setSelectedNarrativeRoute] = useState<ModeId>("narrative_auto");
+
+  // §条目持久化：ROUTING「确认保存」脏态。true=有未保存改动（按钮亮）；false=已落盘（按钮灰）。
+  // 建立条目/任一 INPUT|ROUTING 参数变更时置 true；点确认保存 或 开始生成(兜底落盘) 后置 false。
+  const [entryDirty, setEntryDirty] = useState(false);
 
   // A1-4: 选中的二级品类（来自 GET /api/narrative/genres）
   const [selectedGenreCode, setSelectedGenreCode] = useState<string | null>(null);
@@ -481,8 +487,12 @@ export function TierModeSelector() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<StepSectionId>>(new Set(["input"]));
-  /** 用户是否在 ROUTING 区显式配置过叙事路由（重需求 IP 流程：改编确认后必须先配路由再生成）。 */
-  const [routingConfigured, setRoutingConfigured] = useState(false);
+  /**
+   * §状态机重构：ROUTING 是否已显式配置——上提到 store（唯一 SSOT，phase 派生依赖 + 跨 iframe 同步）。
+   * 保留同名读写别名，下方所有 setRoutingConfigured(...) 调用无需改动。
+   */
+  const routingConfigured = useNarrativeStore((s) => s.routingConfigured);
+  const setRoutingConfigured = useNarrativeStore((s) => s.setRoutingConfigured);
   const [openRouteDropdownId, setOpenRouteDropdownId] = useState<string | null>(null);
 
   const routeDropdownProps = useCallback((dropdownId: string) => ({
@@ -538,7 +548,6 @@ export function TierModeSelector() {
   const activeConfig = useNarrativeStore((s) => s.activeConfig);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
-  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const editDrafts = useNarrativeStore((s) => s.editDrafts);
   const tier = useNarrativeStore((s) => s.tier);
@@ -550,9 +559,20 @@ export function TierModeSelector() {
   const storeStartFork = useNarrativeStore((s) => s.startFork);
   const storeStartResume = useNarrativeStore((s) => s.startResume);
   const storeLoadEntry = useNarrativeStore((s) => s.loadEntry);
-  const clearActiveEntry = useNarrativeStore((s) => s.clearActiveEntry);
+  const deselectEntry = useNarrativeStore((s) => s.deselectEntry);
   const reset = useNarrativeStore((s) => s.reset);
   const setPreviewOrder = useNarrativeStore((s) => s.setPreviewOrder);
+  const beginDraftEntry = useNarrativeStore((s) => s.beginDraftEntry);
+  const setIpDnaGenerating = useNarrativeStore((s) => s.setIpDnaGenerating);
+  const setPendingFork = useNarrativeStore((s) => s.setPendingFork);
+  const inputConfirmed = useNarrativeStore((s) => s.inputConfirmed);
+  const pendingFork = useNarrativeStore((s) => s.pendingFork);
+  const pendingForkKind = useNarrativeStore((s) => s.pendingForkKind);
+  const ipRunKey = useNarrativeStore((s) => s.ipRunKey);
+  // §状态机核心：INPUT 分叉待决（改了原料）——重新点亮「确认」，点确认即铸新条目（全量重跑）。
+  const inputForkPending = pendingFork && pendingForkKind === "input";
+  // §状态机重构：顶层单一 phase，驱动底部按钮亮灭（idle/input=灰；routed=开始生成亮；generating=取消亮）。
+  const phase = useNarrativePhase();
 
   const isRunning = !!runningRunId;
   const hasDrafts = useMemo(() => Object.values(editDrafts).some((d) => d.saved), [editDrafts]);
@@ -565,6 +585,23 @@ export function TierModeSelector() {
   );
 
   /**
+   * §条目持久化桥接：IP 摄入产出真实运行键（<条目键>_<标题>）后，立刻把它回写到当前条目的
+   * _entry.json.ipRunKey，无需等用户点「确认保存」。否则输入侧 IP 运行与 output 条目对不上桥接键，
+   * LIST 会把同一请求裂成两条；历史回放也拿不到层级树。只在未生成的当前条目上桥接，且去重避免重复 POST。
+   */
+  const bridgedIpRunKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ipRunKey || !activeEntryKey || activeEntryStatus) return;
+    if (ipRunKey === activeEntryKey) return; // 纯时间戳（自动模式未带标题）暂不桥接，等全键就绪
+    if (!ipRunKey.startsWith(`${activeEntryKey}`)) return; // 仅桥接属于当前条目的运行键
+    if (bridgedIpRunKeyRef.current === ipRunKey) return; // 已桥接过同一值
+    bridgedIpRunKeyRef.current = ipRunKey;
+    void saveEntry(activeEntryKey, { ipRunKey }).then(() =>
+      fetchHistory().then(setHistoryList).catch(() => {}),
+    );
+  }, [ipRunKey, activeEntryKey, activeEntryStatus]);
+
+  /**
    * 统一的"用户改了 INPUT/ROUTING 配置"hook。
    *
    * 状态机契约：配置 = 因 / 管线状态 = 果 / 历史条目 = 书签。
@@ -575,31 +612,74 @@ export function TierModeSelector() {
    * 注意：仅在 onClick / onChange handler 中调用。loadEntry 通过 setter（setUserInput 等）
    * 写入 UI state 不会触发本函数，因此 hydrate 路径无副作用。
    */
-  const onConfigChange = useCallback(() => {
-    if (useNarrativeStore.getState().activeEntryKey) {
-      clearActiveEntry();
+  const onConfigChange = useCallback((kind: "input" | "routing") => {
+    const st = useNarrativeStore.getState();
+    // §状态机核心（不可变条目）：两个提交点——「确认」冻结 INPUT，「开始生成」提交 ROUTING。
+    //
+    // 1) 确认前（无独立条目）：纯内存自由编辑，无副作用。
+    if (!st.inputConfirmed || !st.activeEntryKey) return;
+
+    const produced =
+      st.activeEntryStatus === "running" ||
+      st.activeEntryStatus === "interrupted" ||
+      st.activeEntryStatus === "completed";
+
+    // 2) config 阶段（已确认输入、尚未投产，status=null）：
+    if (!produced) {
+      if (kind === "input") {
+        // INPUT 在「确认」时已冻结 → 改原料 = fork（懒提交）：置 pendingFork(input) 重新点亮「确认」，
+        // 预览仍锚旧条目；重点「确认」时 createEntry 铸新键（原 config 条目作为不可变原料快照保留）。
+        setPendingFork(true, "input");
+      } else {
+        // ROUTING 尚未提交（开始生成才提交）→ 就地脏态，「确认保存」落盘，「开始生成」按当前条目投产。
+        setEntryDirty(true);
+      }
+      return;
     }
-  }, [clearActiveEntry]);
+
+    // 3) 已投产（running/interrupted/completed）：任何改参 = 新需求 → 懒 fork。
+    //    改 INPUT → pendingFork(input)（重点「确认」全量重跑）；改 ROUTING → pendingFork(routing)（点「开始生成」复用预处理）。
+    //    预览仍停旧条目，真正铸新键在提交动作发生（见 handleStart / handleConfirm*）。原条目全量保留。
+    setPendingFork(true, kind);
+  }, [setPendingFork]);
+
+  /** §取消选中：把本地 INPUT/ROUTING 表单清回初始默认（store 侧由 deselectEntry 负责）。 */
+  const resetInputForm = useCallback(() => {
+    setInputTab("text");
+    setRouteGroup("planning");
+    setUserInput("");
+    setComplexity(2);
+    setComplexityTouched(false);
+    setSelectedTierId("auto");
+    setSelectedNarrativeRoute("narrative_auto");
+    setSelectedGenreCode(null);
+    setTagSelections({});
+    setTagCustomTexts({});
+    setUploadedFiles([]);
+    setEntryDirty(false);
+  }, []);
 
   // ---- Action routing ----
   type PrimaryAction = "start" | "resume" | "regen" | "none";
   const primaryAction = useMemo<PrimaryAction>(() => {
-    // 状态机三态：
-    //   - viewing-running（书签 + status=running）→ "none"（不能再操作正在跑的）
-    //   - viewing 任意态 + 有 step draft → "regen"（保留配置，仅重跑改过的 step）
-    //   - viewing-interrupted → "resume"（从断点续跑）
-    //   - fresh-config（无书签）→ "start"（用当前配置开新 entry）
-    //   - viewing-completed（无 draft）→ "none"（纯查看，要改配置或再点取消选中才能重启）
+    // §状态机重构：以 activeEntryStatus 为准（草稿条目 status=null 也算 start，不再因 activeEntryKey 被建立而变 none）。
+    //   - running    → "none"（不能再操作正在跑的）
+    //   - 有 step draft → "regen"（保留配置，仅重跑改过的 step）
+    //   - interrupted → "resume"（从断点续跑）
+    //   - completed   → "none"（纯查看）
+    //   - null（fresh-config 或 草稿条目）→ "start"（用当前配置/草稿开新 run）
     if (activeEntryStatus === "running") return "none";
+    // §状态机核心：有分叉待决（改了 INPUT/ROUTING）→ 一律走 "start"（handleStart 铸新条目 fork），
+    //   压过 resume（中断态改参不再续跑旧条目）/ none（完成态改参不再纯查看）。
+    if (pendingFork) return "start";
     if (hasDrafts) return "regen";
-    if (activeEntryKey && activeEntryStatus === "interrupted") return "resume";
-    if (!activeEntryKey) return "start";
-    return "none";
-  }, [activeEntryKey, activeEntryStatus, hasDrafts]);
+    if (activeEntryStatus === "interrupted") return "resume";
+    if (activeEntryStatus === "completed") return "none";
+    return "start";
+  }, [activeEntryStatus, hasDrafts, pendingFork]);
 
   // 仅正式 SSE / IP DNA 下游 job 算"生成中"；IP 半自动预处理（ipPreviewRunId）不算，避免误禁用 ROUTING。
   const isGenerating = isRunning || ipDnaRunning;
-  const isIpPreprocessing = !!ipPreviewRunId && !isGenerating;
   const isViewingRunning = isGenerating;
 
   useNarrativeStream();
@@ -613,13 +693,13 @@ export function TierModeSelector() {
       .then((cats) => {
         if (!Array.isArray(cats) || cats.length === 0) {
           console.warn("[TierModeSelector] fetchGenres returned empty payload — 后端可能未启动或品类目录为空");
-          setGenresError("品类目录为空（请检查后端 /api/narrative/genres）");
+          setGenresError(t("tms.genres.empty"));
         }
         setGenreCategories(cats ?? []);
       })
       .catch((err) => {
         console.error("[TierModeSelector] fetchGenres failed:", err);
-        setGenresError(`加载品类目录失败：${(err as Error)?.message ?? "未知错误"}`);
+        setGenresError(t("tms.genres.loadFailed", { error: (err as Error)?.message ?? "unknown" }));
         setGenreCategories([]);
       })
       .finally(() => setGenresLoading(false));
@@ -778,6 +858,149 @@ export function TierModeSelector() {
     setPreviewOrder(previewStepOrderWithIp, previewIsAuto);
   }, [previewStepOrderWithIp, previewIsAuto, setPreviewOrder]);
 
+  // ── §条目提前建立 + 统一底部生成入口 ──
+  /** IpStageFlow 上报的"开始生成"就绪态与触发器（重需求 IP：底部按钮据此分流到 IP DNA 生成）。 */
+  const ipGenerateRef = useRef<(() => void) | null>(null);
+  const [ipCanGenerate, setIpCanGenerate] = useState(false);
+  const handleIpGenerateState = useCallback((s: { canGenerate: boolean; generate: () => void }) => {
+    ipGenerateRef.current = s.generate;
+    setIpCanGenerate(s.canGenerate);
+  }, []);
+
+  /** 生成后端兼容的稳定条目键（与 server formatTimestamp 同格式：YYYY-MM-DD_HH-mm-ss-SSS）。 */
+  const mintEntryKey = useCallback(
+    () => new Date().toISOString().replace(/T/, "_").replace(/[:.]/g, "-").replace(/Z$/, ""),
+    [],
+  );
+
+  /**
+   * §条目排他性：切断上一个正在运行的工作流（正式 SSE run + IP DNA 下游 job）。
+   * 供 fork / 新条目提交（确认、开始生成、重新生成）前调用——任一提交动作建立新条目时，
+   * 立即中断旧运行，保证同一时刻只有一条逻辑工作流在跑；选择态随后自动切到新条目。
+   * await 掉 cancel 请求，避免后端单实例校验(409)竞态。
+   */
+  const cutOffActiveRun = useCallback(async () => {
+    const store = useNarrativeStore.getState();
+    let cut = false;
+    if (store.ipPreviewRunId) store.finishIpPreview("interrupted");
+    if (ipDnaRunning && ipDnaJob?.jobId) {
+      try { await ipDnaCancel(ipDnaJob.jobId); } catch { /* 后端无端点时静默 */ }
+      setIpDnaJob((prev) => (prev ? { ...prev, status: "failed" } : prev));
+      cut = true;
+    }
+    if (store.runningRunId) {
+      try { await cancelRun(store.runningRunId); } catch { /* 静默 */ }
+      store.cancelRun();
+      cut = true;
+    }
+    store.setIpDnaGenerating(false);
+    if (cut) setTimeout(() => fetchHistory().then(setHistoryList).catch(() => {}), 500);
+    return cut;
+  }, [ipDnaRunning, ipDnaJob]);
+
+  /**
+   * §条目持久化：首次输入确认即建立"条目"——铸稳定 entryKey、锚定为当前条目，并把 INPUT 参数
+   * 落盘到 output/<key>/_entry.json（POST /entry），使刷新可恢复、LIST 磁盘派生可见、任何阶段点击可还原。
+   * previewText 非空时，向中间预览推一个"输入"节点（直接输入/标签选择即输入本身，单文本+单节点）。
+   * 返回 entryKey，供上游（如 IpStageFlow 的 storyTimestamp）复用锚定。
+   *
+   * §排他性：建立新条目即改配置——若此刻有旧运行在跑，立即切断其工作流（自动跳转），
+   * 新条目成为当前选择（beginDraftEntry 已切 activeEntryKey）。
+   */
+  const createEntry = useCallback(
+    (previewText: string | null, inputType: "text" | "tags" | "works"): string => {
+      const key = mintEntryKey();
+      const store = useNarrativeStore.getState();
+      // §建新条目：先切断上一个正在运行的工作流（排他性），再清预览/运行上下文。
+      if (store.runningRunId || ipDnaRunning) void cutOffActiveRun();
+      store.resetPreviewContext();
+      if (previewText != null) {
+        // 单节点输入预览：用合成预览轨承载（与 IP 前驱步同源，右栏文本/节点视图可点开展示）。
+        store.startIpPreviewRun(`ip-preview-${key}`, key, ["input"]);
+      }
+      store.beginDraftEntry(key, { userInput: previewText ?? userInput, routeGroup });
+      if (previewText != null) {
+        useNarrativeStore.getState().pushProgress({
+          stage: "输入内容",
+          stepId: "input",
+          step: 0,
+          totalSteps: 0,
+          status: "completed",
+          message: "输入已确认",
+          data: previewText,
+        });
+      }
+      // 首次确认即落盘 INPUT 参数（文本/标签的 userInput、标签选择、上传文件名）。
+      void saveEntry(key, {
+        inputType,
+        userInput: previewText ?? userInput,
+        tags:
+          inputType === "tags"
+            ? { selections: { ...tagSelections }, customTexts: { ...tagCustomTexts } }
+            : undefined,
+        uploadedFileNames: inputType === "works" ? uploadedFiles.map((f) => f.name) : undefined,
+        routeGroup,
+      }).then(() => fetchHistory().then(setHistoryList).catch(() => {}));
+      // 刚建立条目：ROUTING 尚未确认保存 → 脏态点亮「确认保存」。
+      setEntryDirty(true);
+      return key;
+    },
+    [mintEntryKey, userInput, routeGroup, tagSelections, tagCustomTexts, uploadedFiles, ipDnaRunning, cutOffActiveRun],
+  );
+
+  /** 直接输入「确定」：铸条目 + 单节点预览（时间戳落在此确定）。 */
+  const handleConfirmText = useCallback(() => {
+    const trimmed = userInput.trim();
+    if (!trimmed) return;
+    createEntry(trimmed, "text");
+  }, [userInput, createEntry]);
+
+  /** 标签选择「确定」：由勾选标签合成需求文本 + 铸条目 + 单节点预览。 */
+  const handleConfirmTags = useCallback(() => {
+    const picked = TAG_DIMENSIONS.map((dim) => {
+      const dimName = t(dim.nameKey);
+      const val = tagSelections[dim.key] ?? tagCustomTexts[dim.key]?.trim();
+      return val ? `${dimName}：${val}` : null;
+    }).filter(Boolean) as string[];
+    const composed = picked.length > 0 ? picked.join("；") : (userInput.trim() || "");
+    if (!composed) return;
+    setUserInput(composed);
+    createEntry(composed, "tags");
+  }, [tagSelections, tagCustomTexts, userInput, createEntry]);
+
+  /** 文件上传 / 0 IP作品「确定」：铸条目锚定（不推预览节点，节点由 IpStageFlow 分步推送）。返回键供 ingest 复用。 */
+  const handleConfirmWorks = useCallback((): string => createEntry(null, "works"), [createEntry]);
+
+  /**
+   * §条目持久化：ROUTING「确认保存」——把当前 INPUT+ROUTING 全量快照 upsert 到 output/<key>/_entry.json，
+   * 落盘成功后清脏（按钮变灰）。IP 作品条目带上 ipRunKey 指针桥接到媒体目录。
+   */
+  const handleSaveEntry = useCallback(async () => {
+    const st = useNarrativeStore.getState();
+    const key = st.activeEntryKey;
+    if (!key || st.activeEntryStatus) return; // 仅未生成的条目可保存配置
+    const hasGenre = !!selectedGenreCode && routeGroup === "planning";
+    await saveEntry(key, {
+      inputType: inputTab === "file" ? "works" : inputTab,
+      userInput,
+      tags:
+        inputTab === "tags"
+          ? { selections: { ...tagSelections }, customTexts: { ...tagCustomTexts } }
+          : undefined,
+      routeGroup,
+      tier: selectedTierId === "auto" ? undefined : selectedTierId,
+      mode: selectedNarrativeRoute,
+      genreCode: hasGenre ? selectedGenreCode! : undefined,
+      complexity: showComplexity ? complexity : undefined,
+      ipRunKey: st.ipRunKey ?? undefined,
+    });
+    setEntryDirty(false);
+    fetchHistory().then(setHistoryList).catch(() => {});
+  }, [
+    userInput, routeGroup, inputTab, tagSelections, tagCustomTexts,
+    selectedTierId, selectedNarrativeRoute, selectedGenreCode, showComplexity, complexity,
+  ]);
+
   // ---- Handlers ----
 
   const handleStart = useCallback(async () => {
@@ -788,21 +1011,22 @@ export function TierModeSelector() {
     // 用户口头需求或上传文件，至少一个非空就允许提交
     const hasAnyUpload = uploadedFiles.length > 0;
     if ((!userInput.trim() && !hasAnyUpload) || actionLockRef.current) return;
-    // Phase 5.3 (V15): 前端拦截并发，避免重复请求后端再吃 409。
-    // 后端通过 [...runs.values()].find(r=>r.status==="running") 强制单实例，前端给个提示更友好。
-    const runningCheck = useNarrativeStore.getState();
-    if (runningCheck.runningRunId) {
-      setError(`已有运行中的管线（${runningCheck.runningEntryKey ?? runningCheck.runningRunId}），请先取消或等待完成`);
-      return;
-    }
-    if (ipDnaRunning) {
-      setError(`已有运行中的 IP DNA 任务（${ipDnaJob?.jobId}），请等待完成`);
-      return;
+    // §条目排他性：开始新一次生成前，切断上一个正在运行的工作流（不再报错拒绝，改为自动接管）。
+    // 后端 [...runs.values()].find(r=>r.status==="running") 强制单实例；cutOffActiveRun 已 await cancel 消除 409 竞态。
+    if (useNarrativeStore.getState().runningRunId || ipDnaRunning) {
+      await cutOffActiveRun();
     }
 
-    // 重需求路径（多模态/压缩包/多文件）：走 IP DNA 半自动分步卡片，禁止底部按钮一键全自动（会跳过 ROUTING）。
+    // §统一底部生成入口：重需求路径（多模态/压缩包/多文件）由底部「开始生成」分流到 IP DNA 下游生成，
+    // 触发器来自 IpStageFlow 上报的 ipGenerateRef（其内部已完成 改编范围/自定义补充 的确认落盘）。
+    // 前置条件：INPUT 已确认（0 IP作品 确定）+ ROUTING 已选定（phase=routed）+ IP 分步就绪（ipCanGenerate）。
     if (isHeavyUpload) {
-      setError("重需求 IP 作品请走上方分步卡片：确认改编范围 → 在 ROUTING 选择叙事路由 → 点击「开始生成（IP DNA → 下游）」");
+      if (!ipCanGenerate || !ipGenerateRef.current) {
+        setError(t("tms.error.ipScopeRequired"));
+        return;
+      }
+      setEntryDirty(false); // 开始生成即视为已保存（IP 生成路径其自身已落盘配置/确认）
+      ipGenerateRef.current();
       return;
     }
 
@@ -821,6 +1045,15 @@ export function TierModeSelector() {
         ? `（用户上传了剧本：${scriptFile.name}，请基于上传剧本展开生成）`
         : "";
       const effectiveUserInput = trimmedInput || fallbackInput;
+      // §条目提前建立：复用条目键（首次确认已建），使生成产物落回同一条目目录。
+      // §状态机核心：有分叉待决（pendingFork）时**不复用键**——铸新键 fork（原条目不可变、全量保留），
+      // 后端 /start 会分配新目录。仅"未投产且无待决"的 config 条目才就地复用键投产。
+      const draftState = useNarrativeStore.getState();
+      const forking = draftState.pendingFork;
+      const reuseKey =
+        !forking && draftState.inputConfirmed && !draftState.activeEntryStatus
+          ? draftState.activeEntryKey ?? undefined
+          : undefined;
       const res = await startRun(effectiveUserInput, {
         tier: tier ?? undefined,
         mode: mode ?? undefined,
@@ -828,6 +1061,7 @@ export function TierModeSelector() {
         complexity: showComplexity ? complexity : undefined,
         routeGroup,
         genreCode: hasGenre ? selectedGenreCode! : undefined,
+        entryKey: reuseKey,
         uploadedScript: scriptFile
           ? {
               content: scriptFile.content,
@@ -840,15 +1074,16 @@ export function TierModeSelector() {
           : undefined,
       });
       const entryKey = (res as any).sourceDir as string | undefined;
-      if (!entryKey) throw new Error("Backend did not return sourceDir");
+      if (!entryKey) throw new Error(t("tms.error.noSourceDir"));
       storeStartNewRun(res.id, entryKey, res.tier ?? undefined, res.mode ?? undefined);
+      setEntryDirty(false); // /start 已把当次配置回写 _entry.json（兜底落盘）→ 清脏
     } catch (e) {
       setError((e as Error).message);
     } finally {
       actionLockRef.current = false;
       setStarting(false);
     }
-  }, [userInput, uploadedFiles, scriptFile, isHeavyUpload, ipDnaRunning, ipDnaJob, tier, mode, autoDetect, complexity, showComplexity, routeGroup, selectedGenreCode, storeStartNewRun]);
+  }, [userInput, uploadedFiles, scriptFile, isHeavyUpload, ipCanGenerate, ipDnaRunning, ipDnaJob, tier, mode, autoDetect, complexity, showComplexity, routeGroup, selectedGenreCode, storeStartNewRun, cutOffActiveRun]);
 
   /**
    * 半自动每步产物推给中间预览（WS-F 实时同步）：复用 pushProgress 把 IP 处理步骤
@@ -863,7 +1098,10 @@ export function TierModeSelector() {
       if (!store.ipPreviewRunId && !store.runningRunId) {
         const diskKey = store.ipRunKey;
         const suffix = diskKey ?? String(Date.now());
-        const entryKey = diskKey ? `ip-preview:${diskKey}` : `ip-preview:${suffix}`;
+        // §条目提前建立：优先复用草稿条目键作为预览轨 entryKey，使 INPUT/预处理/LIST 全部锚定同一条目
+        // （不再另铸 ip-preview:* 合成键造成条目分裂）。无草稿键时回退合成键。
+        const draftKey = store.inputConfirmed && !store.activeEntryStatus ? store.activeEntryKey : null;
+        const entryKey = draftKey ?? (diskKey ? `ip-preview:${diskKey}` : `ip-preview:${suffix}`);
         store.startIpPreviewRun(`ip-preview-${suffix}`, entryKey, [...IP_PREDECESSOR_STEPS]);
       }
       useNarrativeStore.getState().pushProgress({
@@ -926,7 +1164,7 @@ export function TierModeSelector() {
     // Phase 5.3 (V15): 前端拦截并发
     const runningCheck = useNarrativeStore.getState();
     if (runningCheck.runningRunId) {
-      setError(`已有运行中的管线（${runningCheck.runningEntryKey ?? runningCheck.runningRunId}），请先取消或等待完成`);
+      setError(t("tms.error.concurrentRun", { key: runningCheck.runningEntryKey ?? runningCheck.runningRunId ?? "" }));
       return;
     }
     actionLockRef.current = true;
@@ -957,7 +1195,7 @@ export function TierModeSelector() {
     // Phase 5.3 (V15): 前端拦截并发
     const runningCheck = useNarrativeStore.getState();
     if (runningCheck.runningRunId) {
-      setError(`已有运行中的管线（${runningCheck.runningEntryKey ?? runningCheck.runningRunId}），请先取消或等待完成`);
+      setError(t("tms.error.concurrentRun", { key: runningCheck.runningEntryKey ?? runningCheck.runningRunId ?? "" }));
       return;
     }
     actionLockRef.current = true;
@@ -1004,7 +1242,7 @@ export function TierModeSelector() {
         if (idx >= 0 && idx < earliestIdx) earliestIdx = idx;
       }
       if (earliestIdx >= livePipelineOrder.length) {
-        setError("未找到被修改步骤在管线中的位置");
+        setError(t("tms.error.stepNotFound"));
         return;
       }
 
@@ -1067,6 +1305,10 @@ export function TierModeSelector() {
     setStarting(true);
     setError(null);
     try {
+      // §排他性：重新生成也建立新条目（fork），先切断上一个正在运行的工作流，自动切到新条目。
+      if (useNarrativeStore.getState().runningRunId || ipDnaRunning) {
+        await cutOffActiveRun();
+      }
       const res = await regenerateStep(activeEntryKey, pendingForkPlan.fromStepId, {
         skipSteps: pendingForkPlan.skipSteps.length ? pendingForkPlan.skipSteps : undefined,
         nodeFilter: pendingForkPlan.nodeFilter,
@@ -1103,7 +1345,7 @@ export function TierModeSelector() {
       actionLockRef.current = false;
       setStarting(false);
     }
-  }, [pendingForkPlan, activeEntryKey, storeStartFork]);
+  }, [pendingForkPlan, activeEntryKey, storeStartFork, ipDnaRunning, cutOffActiveRun]);
 
   const cancelRegenerate = useCallback(() => {
     setImpactPreview(null);
@@ -1158,57 +1400,86 @@ export function TierModeSelector() {
         h.key === runningEntryKey ? { ...h, status: "running" } : h,
       );
     }
+    // §条目持久化：首次输入确认后即在 LIST 展示该条目（status=config，"待生成"），未生成前也可见、刷新可恢复。
+    // 落盘由 saveEntry 异步完成，这里给一个即时虚拟项占位；真实条目一旦进入 historyList（key 相等或
+    // IP 运行键以条目键为前缀）即去重不再叠加。
+    if (inputConfirmed && activeEntryKey && !activeEntryStatus) {
+      const materialized = historyList.some(
+        (h) => h.key === activeEntryKey || h.key.startsWith(`${activeEntryKey}_`),
+      );
+      if (!materialized) {
+        const draftEntry: HistoryEntry = {
+          key: activeEntryKey,
+          type: "dir",
+          id: null,
+          tier: tier ?? undefined,
+          mode: mode ?? undefined,
+          status: "config",
+          startedAt: new Date().toISOString(),
+          hasCheckpoint: false,
+          lastCompletedStep: null,
+          completedSteps: [],
+          canResume: false,
+          canLoad: false,
+          userInput: userInput || undefined,
+          routeGroup,
+          complexity: showComplexity ? complexity : undefined,
+        };
+        return [draftEntry, ...historyList];
+      }
+    }
     return historyList;
-  }, [isRunning, runningEntryKey, runningRunId, tier, mode, runningProgress, userInput, routeGroup, complexity, showComplexity, historyList]);
+  }, [isRunning, runningEntryKey, runningRunId, tier, mode, runningProgress, userInput, routeGroup, complexity, showComplexity, historyList, inputConfirmed, activeEntryKey, activeEntryStatus]);
 
   const inputStepSummary = useMemo(() => {
     if (inputTab === "file" && uploadedFiles.length > 0) {
       return uploadedFiles.length === 1
-        ? `已上传 ${uploadedFiles[0].name}`
-        : `已上传 ${uploadedFiles.length} 个文件`;
+        ? t("tms.summary.uploadOne", { name: uploadedFiles[0].name })
+        : t("tms.summary.uploadMany", { n: uploadedFiles.length });
     }
     if (inputTab === "tags") {
       const picked = TAG_DIMENSIONS.map((dim) => {
+        const dimName = t(dim.nameKey);
         const val = tagSelections[dim.key] ?? tagCustomTexts[dim.key]?.trim();
-        return val ? `${dim.name}·${val}` : null;
+        return val ? `${dimName}·${val}` : null;
       }).filter(Boolean);
-      return picked.length > 0 ? picked.join("；") : "标签未限定";
+      return picked.length > 0 ? picked.join("；") : t("tms.summary.tagsOpen");
     }
     const trimmed = userInput.trim();
-    if (!trimmed) return "未填写需求";
+    if (!trimmed) return t("tms.summary.noInput");
     return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;
-  }, [inputTab, uploadedFiles, tagSelections, tagCustomTexts, userInput]);
+  }, [inputTab, uploadedFiles, tagSelections, tagCustomTexts, userInput, t]);
 
   const routingStepSummary = useMemo(() => {
-    const routeLabel = routeGroup === "planning" ? "策划全量" : "叙事单品";
+    const routeLabel = routeGroup === "planning" ? t("tms.routeGroup.planning") : t("tms.routeGroup.narrative");
     if (routeGroup === "planning") {
-      const tierLabel = TIER_ITEMS.find((t) => t.id === selectedTierId)?.label ?? "自动";
+      const tierLabel = t(`tier.${selectedTierId}`);
       const genreLabel = selectedGenreCode
         ? genreCategories.flatMap((c) => c.genres).find((g) => g.code === selectedGenreCode)?.name ?? selectedGenreCode
-        : "品类自动识别";
-      const cplx = showComplexity ? ` · 复杂度 ${complexity}` : "";
+        : t("tms.summary.genreAuto");
+      const cplx = showComplexity ? t("tms.summary.complexity", { n: complexity }) : "";
       return `${routeLabel} · ${tierLabel} · ${genreLabel}${cplx}`;
     }
-    const route = NARRATIVE_ROUTES.find((r) => r.id === selectedNarrativeRoute);
-    const cplx = showComplexity ? ` · 复杂度 ${complexity}` : "";
-    return `${routeLabel} · ${route?.label ?? selectedNarrativeRoute}${cplx}`;
-  }, [routeGroup, selectedTierId, selectedGenreCode, genreCategories, showComplexity, complexity, selectedNarrativeRoute]);
+    const routeLabel2 = t(`route.${selectedNarrativeRoute}.label`);
+    const cplx = showComplexity ? t("tms.summary.complexity", { n: complexity }) : "";
+    return `${routeLabel} · ${routeLabel2}${cplx}`;
+  }, [routeGroup, selectedTierId, selectedGenreCode, genreCategories, showComplexity, complexity, selectedNarrativeRoute, t]);
 
   const projectStepSummary = useMemo(() => {
-    if (historyLoading) return "加载历史记录…";
-    if (displayHistory.length === 0) return "暂无项目";
+    if (historyLoading) return t("tms.project.loading");
+    if (displayHistory.length === 0) return t("tms.project.empty");
     const active = displayHistory.find((e) => e.key === activeEntryKey);
     if (active) {
       const status =
-        active.status === "completed" ? "已完成"
-          : active.status === "running" ? "生成中"
-          : active.status === "interrupted" ? "已中断"
-          : active.status === "failed" ? "失败"
-          : "已选中";
-      return `${displayHistory.length} 条记录 · 当前 ${status}`;
+        active.status === "completed" ? t("tms.project.status.completed")
+          : active.status === "running" ? t("tms.project.status.running")
+          : active.status === "interrupted" ? t("tms.project.status.interrupted")
+          : active.status === "failed" ? t("tms.project.status.failed")
+          : t("tms.project.status.selected");
+      return t("tms.project.recordsCurrent", { n: displayHistory.length, status });
     }
-    return `${displayHistory.length} 条历史记录`;
-  }, [historyLoading, displayHistory, activeEntryKey]);
+    return t("tms.project.records", { n: displayHistory.length });
+  }, [historyLoading, displayHistory, activeEntryKey, t]);
 
   const genreSelectGroups = useMemo(() => {
     return visibleGenreCategories.map((cat) => ({
@@ -1223,9 +1494,55 @@ export function TierModeSelector() {
   }, [visibleGenreCategories]);
 
   const complexityHint = useMemo(
-    () => COMPLEXITY_LEVELS.find((c) => c.level === complexity)?.hint ?? "",
-    [complexity],
+    () => t(`complexity.${complexity}.hint`),
+    [complexity, t],
   );
+
+  /**
+   * §条目可选中兜底：任何条目点击都必须能"选中并反映状态"，即使后端 /load 返回 404 或无 result
+   * （典型：IP 作品运行目录 <ts>_title 无 full_result/checkpoint/_entry.json——其配置落在被去重折叠的 <ts> 兄弟目录）。
+   * 这里最小化锚定：置 activeEntryKey + 反映真实 status，并尽力回放可读内容：
+   *  - IP 条目：拉自身 key 的层级树回放 IP 前驱步（ip_input…）；
+   *  - 文本/标签：用 userInput 重建"输入"单节点。
+   * 不再让点击"落空"（原逻辑在 !data.result / 404 时只 setError 不选中）。
+   */
+  const selectEntryBestEffort = useCallback(async (entry: HistoryEntry) => {
+    const store = useNarrativeStore.getState();
+    store.resetPreviewContext();
+    const st =
+      entry.status === "running" ? ("running" as const)
+        : entry.status === "completed" ? ("completed" as const)
+          : (entry.status === "interrupted" || entry.status === "failed") ? ("interrupted" as const)
+            : null;
+    useNarrativeStore.setState({
+      activeEntryKey: entry.key,
+      activeEntryStatus: st,
+      inputConfirmed: true,
+    });
+    if (entry.userInput) setUserInput(entry.userInput);
+    if (entry.routeGroup === "narrative" || entry.routeGroup === "planning") setRouteGroup(entry.routeGroup);
+    if (entry.kind === "ip-dna") {
+      store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, [...IP_PREDECESSOR_STEPS]);
+      try {
+        const summary = await fetchIpDnaHierarchy(entry.key);
+        if (summary) {
+          const ipContent = buildIpReplayContent(summary);
+          for (const stepId of IP_PREDECESSOR_STEPS) {
+            store.pushProgress({
+              stage: stepId, stepId, step: 0, totalSteps: 0,
+              status: "completed", message: "已还原", data: ipContent[stepId] ?? undefined,
+            });
+          }
+        }
+      } catch { /* 无层级树则仅锚定，不回放 */ }
+    } else if (entry.userInput) {
+      store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, ["input"]);
+      store.pushProgress({
+        stage: "输入内容", stepId: "input", step: 0, totalSteps: 0,
+        status: "completed", message: "输入已确认", data: entry.userInput,
+      });
+    }
+  }, []);
 
   const handleLoadHistory = useCallback(async (entry: HistoryEntry) => {
     // Read latest running state from store to avoid stale closures
@@ -1256,8 +1573,56 @@ export function TierModeSelector() {
     setError(null);
     try {
       const data = await loadHistoryResult(entry.key);
+
+      // §条目持久化：未生成的条目（status=config）恢复——还原 INPUT+ROUTING 全部表单态（result 为 null）。
+      if (entry.status === "config" || !!data.entry) {
+        const cfg = data.entry ?? {};
+        beginDraftEntry(entry.key, { userInput: cfg.userInput, routeGroup: cfg.routeGroup });
+        if (cfg.userInput != null) setUserInput(cfg.userInput);
+        if (cfg.routeGroup) setRouteGroup(cfg.routeGroup);
+        if (cfg.tier) setSelectedTierId(cfg.tier);
+        if (cfg.mode) setSelectedNarrativeRoute(cfg.mode);
+        setSelectedGenreCode(cfg.genreCode ?? null);
+        if (cfg.complexity != null) setComplexity(cfg.complexity);
+        if (cfg.tags) {
+          setTagSelections(cfg.tags.selections ?? {});
+          setTagCustomTexts(cfg.tags.customTexts ?? {});
+        }
+        if (cfg.inputType) setInputTab(cfg.inputType === "works" ? "file" : cfg.inputType);
+        setRoutingConfigured(true);
+        setEntryDirty(false); // 刚从磁盘还原 → 与磁盘一致，非脏态
+        const store = useNarrativeStore.getState();
+        // IP 作品条目：经 ipRunKey 取已落盘层级树回放 IP 前驱步；文本/标签则重建"输入"单节点预览。
+        if (cfg.ipRunKey) {
+          store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, [...IP_PREDECESSOR_STEPS]);
+          try {
+            const summary = await fetchIpDnaHierarchy(cfg.ipRunKey);
+            if (summary) {
+              const ipContent = buildIpReplayContent(summary);
+              for (const stepId of IP_PREDECESSOR_STEPS) {
+                store.pushProgress({
+                  stage: stepId, stepId, step: 0, totalSteps: 0,
+                  status: "completed", message: "已还原",
+                  data: ipContent[stepId] ?? undefined,
+                });
+              }
+            }
+          } catch { /* 无层级树则仅锚定，不回放 */ }
+        } else if (cfg.userInput) {
+          store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, ["input"]);
+          store.pushProgress({
+            stage: "输入内容", stepId: "input", step: 0, totalSteps: 0,
+            status: "completed", message: "输入已确认", data: cfg.userInput,
+          });
+        }
+        setLoadingKey(null);
+        return;
+      }
+
       if (!data.result) {
-        setError("该记录无可加载的结果数据（仅加载了元信息）");
+        // 无完整结果（如中断的 IP 预处理条目）：仍选中并尽力回放，不让点击落空。
+        await selectEntryBestEffort(entry);
+        setLoadingKey(null);
         return;
       }
       const ctx = data.result;
@@ -1386,11 +1751,17 @@ export function TierModeSelector() {
       // 注意：strip "manual" 占位（旧版用户手动指定 tier 时 genre_code 写成 "manual"）。
       setSelectedGenreCode(savedGenreCode ?? null);
     } catch (e) {
-      setError((e as Error).message);
+      // 后端 /load 404（IP 运行目录无 full_result/checkpoint/_entry.json）等：仍选中并尽力回放，
+      // 保证"任何有条目的记录点击都能选中并反映状态"。
+      try {
+        await selectEntryBestEffort(entry);
+      } catch {
+        setError((e as Error).message);
+      }
     } finally {
       setLoadingKey(null);
     }
-  }, [storeLoadEntry]);
+  }, [storeLoadEntry, selectEntryBestEffort]);
 
   const setTagValue = useCallback((dimKey: string, val: string) => {
     setTagSelections((prev) => {
@@ -1399,7 +1770,7 @@ export function TierModeSelector() {
       else next[dimKey] = val;
       return next;
     });
-    onConfigChange();
+    onConfigChange("input");
   }, [onConfigChange]);
 
   const setCustomText = useCallback((dimKey: string, val: string) => {
@@ -1414,8 +1785,8 @@ export function TierModeSelector() {
     for (const dim of TAG_DIMENSIONS) {
       const sel = tagSelections[dim.key];
       const custom = tagCustomTexts[dim.key]?.trim();
-      if (sel) parts.push(`${dim.name}：${sel}`);
-      if (custom) parts.push(`${dim.name}补充：${custom}`);
+      if (sel) parts.push(`${t(dim.nameKey)}：${sel}`);
+      if (custom) parts.push(`${t(dim.nameKey)}：${custom}`);
     }
     setUserInput(parts.join("；"));
   }, [inputTab, tagSelections, tagCustomTexts, setUserInput]);
@@ -1444,9 +1815,9 @@ export function TierModeSelector() {
       });
     }
     if (rejected.length > 0) {
-      setError(`不支持的格式已忽略：${rejected.join("、")}`);
+      setError(t("tms.error.unsupportedFormat", { names: rejected.join("、") }));
     }
-    onConfigChange();
+    onConfigChange("input");
   }, [onConfigChange]);
 
   const onFileDrop = useCallback((e: React.DragEvent) => {
@@ -1464,7 +1835,7 @@ export function TierModeSelector() {
   const removeFile = useCallback((name: string) => {
     setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
     setRoutingConfigured(false);
-    onConfigChange();
+    onConfigChange("input");
   }, [onConfigChange]);
 
   // IP DNA 异步任务轮询：每 1.5s 拉一次进度，完成/失败即停；完成后刷新历史列表
@@ -1497,16 +1868,16 @@ export function TierModeSelector() {
         <div className="wb-step-stack">
           <WorkbenchStepSection
             step={1}
-            title="输入需求"
+            title={t("tms.input.title")}
             titleEn="INPUT"
-            note="三种模式，开启自由创作之路"
+            note={t("tms.input.note")}
             summary={inputStepSummary}
             expanded={expandedSteps.has("input")}
             active={expandedSteps.has("input")}
             onToggle={() => toggleStepSection("input")}
           >
-            <div className="wb-segmented" role="tablist" aria-label="输入方式">
-              {INPUT_TAB_DEFS.map(({ id, label, Icon }) => (
+            <div className="wb-segmented" role="tablist" aria-label={t("tms.input.aria")}>
+              {INPUT_TAB_DEFS.map(({ id, Icon }) => (
                 <button
                   key={id}
                   type="button"
@@ -1516,35 +1887,45 @@ export function TierModeSelector() {
                   onClick={() => setInputTab(id)}
                 >
                   <Icon className="wb-segmented-icon" size={13} strokeWidth={2} aria-hidden />
-                  <span>{label}</span>
+                  <span>{t(`tms.inputTab.${id}`)}</span>
                 </button>
               ))}
             </div>
 
             {inputTab === "text" && (
               <div className="input-wrap">
-                <p className="wb-helper">输入你的故事需求</p>
+                <p className="wb-helper">{t("tms.input.helper")}</p>
                 <textarea
                   className="input-textarea"
                   value={userInput}
-                  onChange={(e) => { setUserInput(e.target.value); onConfigChange(); }}
-                  placeholder={"例：赛博朋克世界，黑客揭露政府阴谋，充满背叛与救赎。"}
+                  onChange={(e) => { setUserInput(e.target.value); onConfigChange("input"); }}
+                  placeholder={t("tms.input.placeholder")}
                   rows={4}
                 />
+                <div className="ip-stage-card__foot">
+                  <button
+                    type="button"
+                    className="btn-generate btn-generate--compact ip-stage-btn"
+                    onClick={handleConfirmText}
+                    disabled={!userInput.trim() || (inputConfirmed && !activeEntryStatus && !inputForkPending)}
+                  >
+                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? "✓ 确认" : "确认"}
+                  </button>
+                </div>
               </div>
             )}
 
             {inputTab === "tags" && (
               <div className="wb-route-fields tag-select-wrap">
-                <p className="wb-helper">可勾选标签辅助生成，不选则不限制方向。</p>
+                <p className="wb-helper">{t("tms.tags.helper")}</p>
                 {TAG_DIMENSIONS.map((dim) => {
                   if (dim.allowCustom && dim.options.length === 0) {
                     return (
                       <div key={dim.key} className="wb-field">
-                        <span className="wb-field-label">{dim.name}</span>
+                        <span className="wb-field-label">{t(dim.nameKey)}</span>
                         <input
                           className="wb-tag-custom-input"
-                          placeholder="输入自定义补充..."
+                          placeholder={t("tms.tags.customPlaceholder")}
                           value={tagCustomTexts[dim.key] ?? ""}
                           onChange={(e) => setCustomText(dim.key, e.target.value)}
                         />
@@ -1554,24 +1935,34 @@ export function TierModeSelector() {
                   return (
                     <WorkbenchFieldSelect
                       key={dim.key}
-                      label={dim.name}
+                      label={t(dim.nameKey)}
                       value={tagSelections[dim.key] ?? ""}
                       onChange={(v) => setTagValue(dim.key, v)}
                       options={dim.options.map((o) => ({ value: o, label: o }))}
                       allowEmpty
-                      placeholder="不限"
-                      emptyLabel="不限"
+                      placeholder={t("tms.tags.unlimited")}
+                      emptyLabel={t("tms.tags.unlimited")}
                       open={openTagDropdownKey === dim.key}
                       onOpenChange={(o) => setOpenTagDropdownKey(o ? dim.key : null)}
                     />
                   );
                 })}
+                <div className="ip-stage-card__foot">
+                  <button
+                    type="button"
+                    className="btn-generate btn-generate--compact ip-stage-btn"
+                    onClick={handleConfirmTags}
+                    disabled={inputConfirmed && !activeEntryStatus && !inputForkPending}
+                  >
+                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? "✓ 确认" : "确认"}
+                  </button>
+                </div>
               </div>
             )}
 
             {inputTab === "file" && (
               <div className="file-upload-wrap">
-                <p className="wb-helper">上传 IP 作品 · 支持多模态 / 压缩包 / 多文件</p>
+                <p className="wb-helper">{t("tms.file.helper")}</p>
                 <div
                   className="file-drop-zone"
                   onClick={() => fileInputRef.current?.click()}
@@ -1580,8 +1971,8 @@ export function TierModeSelector() {
                   onDrop={onFileDrop}
                 >
                   <div className="fdz-icon"><Upload size={20} strokeWidth={1.75} aria-hidden /></div>
-                  <div className="fdz-text">点击或拖拽上传文件（可多选）</div>
-                  <div className="fdz-hint">文本 txt/md/doc/docx · 图片 jpg/png/webp/gif · 视频 mp4/mov/webm/mkv · 音频 mp3/wav · pdf · 压缩包 zip/tar/gz</div>
+                  <div className="fdz-text">{t("tms.file.dropText")}</div>
+                  <div className="fdz-hint">{t("tms.file.dropHint")}</div>
                 </div>
                 <input
                   ref={fileInputRef}
@@ -1597,7 +1988,7 @@ export function TierModeSelector() {
                       <div className="file-info visible" key={f.name}>
                         <span className="fi-name">{f.name}</span>
                         <span className="fi-size">{(f.size / 1024).toFixed(1)} KB</span>
-                        <button type="button" className="fi-remove" onClick={() => removeFile(f.name)} aria-label={`移除 ${f.name}`}>
+                        <button type="button" className="fi-remove" onClick={() => removeFile(f.name)} aria-label={t("tms.removeFile", { name: f.name })}>
                           <X size={14} strokeWidth={2} />
                         </button>
                       </div>
@@ -1606,7 +1997,7 @@ export function TierModeSelector() {
                 )}
                 {isHeavyUpload && (
                   <>
-                    <p className="wb-helper">含多模态/压缩包/多文件 → IP DNA 半自动摄入：分步确认裁剪范围后，配置 ROUTING 即可开始生成。</p>
+                    <p className="wb-helper">{t("tms.file.heavyHint")}</p>
                     <IpStageFlow
                       files={uploadedFiles.map((f) => ({
                         file_name: f.name,
@@ -1622,6 +2013,8 @@ export function TierModeSelector() {
                       complexity={showComplexity ? complexity : undefined}
                       routingReady={ipRoutingReady}
                       onStageProgress={pushIpStageProgress}
+                      onConfirmWorks={handleConfirmWorks}
+                      onGenerateStateChange={handleIpGenerateState}
                       onGenerateStarted={(jobId) => setIpDnaJob({ jobId, status: "running" })}
                     />
                   </>
@@ -1630,7 +2023,7 @@ export function TierModeSelector() {
                   <div className={`ip-dna-job ip-dna-job--${ipDnaJob.status}`}>
                     <div className="ip-dna-job__head">
                       <span className="ip-dna-job__stage">
-                        IP DNA · {ipDnaJob.status === "completed" ? "完成" : ipDnaJob.status === "failed" ? "失败" : (ipDnaJob.stage ?? "处理中")}
+                        IP DNA · {ipDnaJob.status === "completed" ? t("ipStage.ipDnaDone") : ipDnaJob.status === "failed" ? t("ipStage.ipDnaFailed") : (ipDnaJob.stage ?? t("ipStage.processing"))}
                       </span>
                       {typeof ipDnaJob.progress === "number" && ipDnaJob.status !== "completed" && ipDnaJob.status !== "failed" && (
                         <span className="ip-dna-job__pct">{ipDnaJob.progress}%</span>
@@ -1640,13 +2033,17 @@ export function TierModeSelector() {
                     {ipDnaJob.error && <div className="ip-dna-job__msg ip-dna-job__msg--err">{ipDnaJob.error}</div>}
                     {ipDnaJob.status === "completed" && ipDnaJob.result && (
                       <div className="ip-dna-job__msg">
-                        层级节点 {ipDnaJob.result.node_count ?? 0} · 游戏单元 {ipDnaJob.result.game_units?.length ?? 0}（已生成 {ipDnaJob.result.game_units?.filter((g) => g.generated).length ?? 0}）
+                        {t("ipStage.hierarchyNodes", {
+                          n: ipDnaJob.result.node_count ?? 0,
+                          units: ipDnaJob.result.game_units?.length ?? 0,
+                          done: ipDnaJob.result.game_units?.filter((g) => g.generated).length ?? 0,
+                        })}
                       </div>
                     )}
                     {ipDnaJob.status === "completed" && ipDnaJob.result?.extraction_quality && (
                       <div className="ip-dna-job__quality">
                         <span className={`ip-dna-job__quality-head${ipDnaJob.result.extraction_quality.passed ? " ok" : " warn"}`}>
-                          提取质量{ipDnaJob.result.extraction_quality.passed ? " · 通过" : " · 有告警"}
+                          {t("ipStage.extractionQuality")}{ipDnaJob.result.extraction_quality.passed ? t("ipStage.extractionPassed") : t("ipStage.extractionWarn")}
                         </span>
                         <div className="ip-dna-job__quality-checks">
                           {ipDnaJob.result.extraction_quality.checks.map((c) => (
@@ -1670,33 +2067,31 @@ export function TierModeSelector() {
 
           <WorkbenchStepSection
             step={2}
-            title="叙事路由"
+            title={t("tms.routing.title")}
             titleEn="ROUTING"
-            note="两个入口，百种叙事，任您挑选"
+            note={t("tms.routing.note")}
             summary={routingStepSummary}
             expanded={expandedSteps.has("routing")}
             active={expandedSteps.has("routing")}
             onToggle={() => toggleStepSection("routing")}
           >
-            <div className="wb-segmented" role="tablist" aria-label="叙事入口">
-              {ROUTE_GROUP_DEFS.map(({ id, label, Icon }) => (
+            <div className="wb-segmented" role="tablist" aria-label={t("tms.routing.aria")}>
+              {ROUTE_GROUP_DEFS.map(({ id, Icon }) => (
                 <button
                   key={id}
                   type="button"
                   role="tab"
                   aria-selected={routeGroup === id}
                   className={`wb-segmented-btn ${routeGroup === id ? "active" : ""}`}
-                  onClick={() => { setRouteGroup(id); setRoutingConfigured(true); onConfigChange(); }}
+                  onClick={() => { setRouteGroup(id); setRoutingConfigured(true); onConfigChange("routing"); }}
                 >
                   <Icon className="wb-segmented-icon" size={13} strokeWidth={2} aria-hidden />
-                  <span>{label}</span>
+                  <span>{t(`tms.routeGroup.${id}`)}</span>
                 </button>
               ))}
             </div>
             <p className="wb-helper">
-              {routeGroup === "planning"
-                ? "从 0 跑完整策划（D0-D4）与叙事全链，适合新游戏立项"
-                : "跳过策划，直接产出大纲、世界观、角色、剧本等单品"}
+              {routeGroup === "planning" ? t("tms.routing.planningHint") : t("tms.routing.narrativeHint")}
             </p>
 
             <div className="tms-route-body">
@@ -1705,43 +2100,43 @@ export function TierModeSelector() {
               <WorkbenchFieldSelect
                 id="route-tier"
                 {...routeDropdownProps("route-tier")}
-                label="叙事层级"
+                label={t("tms.field.tier")}
                 value={selectedTierId}
                 onChange={(val) => {
                   setSelectedTierId(val as TierId | "auto");
                   setRoutingConfigured(true);
-                  onConfigChange();
+                  onConfigChange("routing");
                 }}
-                options={TIER_ITEMS.map((t) => ({
-                  value: t.id,
-                  label: t.label,
-                  title: TIER_HINTS[t.id] ?? "",
+                options={TIER_ITEMS.map((item) => ({
+                  value: item.id,
+                  label: t(`tier.${item.id}`),
+                  title: t(`tierHint.${item.id}`),
                 }))}
-                hint={TIER_NARRATIVE_TRAITS[selectedTierId]}
+                hint={t(`tierTrait.${selectedTierId}`)}
               />
 
               {genresLoading ? (
-                <div className="tms-genre-loading">加载品类目录…</div>
+                <div className="tms-genre-loading">{t("tms.genres.loading")}</div>
               ) : genresError ? (
                 <div className="tms-genre-empty" title={genresError}>{genresError}</div>
               ) : selectedTierId === "auto" ? (
-                <p className="wb-field-hint">自动模式将根据描述从品类库识别层级与品类，无需手动指定</p>
+                <p className="wb-field-hint">{t("tms.genres.autoHint")}</p>
               ) : genreSelectGroups.length === 0 ? (
-                <p className="wb-field-hint">该层级暂无品类，将保持自动识别</p>
+                <p className="wb-field-hint">{t("tms.genres.noTierGenres")}</p>
               ) : (
                 <WorkbenchFieldSelect
                   id="route-genre"
                   {...routeDropdownProps("route-genre")}
                   menuMaxHeight={200}
-                  label="游戏品类"
+                  label={t("tms.field.genre")}
                   value={selectedGenreCode ?? ""}
                   allowEmpty
-                  emptyLabel="自动识别品类"
+                  emptyLabel={t("tms.genres.autoDetect")}
                   onChange={(val) => {
                     if (!val) {
                       setSelectedGenreCode(null);
                       setRoutingConfigured(true);
-                      onConfigChange();
+                      onConfigChange("routing");
                       return;
                     }
                     setSelectedGenreCode(val);
@@ -1752,7 +2147,7 @@ export function TierModeSelector() {
                     if (found && found.tier !== selectedTierId) {
                       setSelectedTierId(found.tier as TierId);
                     }
-                    onConfigChange();
+                    onConfigChange("routing");
                   }}
                   groups={genreSelectGroups}
                 />
@@ -1762,18 +2157,18 @@ export function TierModeSelector() {
                 <WorkbenchFieldSelect
                   id="route-complexity-planning"
                   {...routeDropdownProps("route-complexity-planning")}
-                  label="复杂度"
+                  label={t("tms.field.complexity")}
                   value={String(complexity)}
                   onChange={(val) => {
                     setComplexity(Number(val));
                     setComplexityTouched(true);
-                    onConfigChange();
+                    onConfigChange("routing");
                   }}
                   options={COMPLEXITY_LEVELS.map((c) => ({
                     value: String(c.level),
-                    label: c.label,
-                    title: c.hint,
-                    description: c.hint,
+                    label: t(`complexity.${c.level}.label`),
+                    title: t(`complexity.${c.level}.hint`),
+                    description: t(`complexity.${c.level}.hint`),
                   }))}
                   hint={complexityHint}
                 />
@@ -1786,12 +2181,12 @@ export function TierModeSelector() {
               <WorkbenchFieldSelect
                 id="route-narrative-mode"
                 {...routeDropdownProps("route-narrative-mode")}
-                label="叙事单品"
+                label={t("tms.field.narrativeModule")}
                 value={selectedNarrativeRoute}
                 onChange={(val) => {
                   setSelectedNarrativeRoute(val as ModeId);
                   setRoutingConfigured(true);
-                  onConfigChange();
+                  onConfigChange("routing");
                 }}
                 options={NARRATIVE_ROUTES.map((opt) => {
                   const score = computeRouteScore(opt.id, activeNeeds);
@@ -1799,7 +2194,7 @@ export function TierModeSelector() {
                   const needsSuffix = tag ? ` ${tag}` : "";
                   return {
                     value: opt.id,
-                    label: `${opt.label}${needsSuffix}`,
+                    label: `${t(`route.${opt.id}.label`)}${needsSuffix}`,
                     title: formatNeedsTooltip(activeNeeds, opt.id),
                   };
                 })}
@@ -1808,7 +2203,7 @@ export function TierModeSelector() {
                     {NARRATIVE_HINTS[selectedNarrativeRoute] ?? ""}
                     {activeNeeds && (
                       <span style={{ display: "block", marginTop: 4, opacity: 0.85 }}>
-                        选项后缀 ★ 基于当前品类 needs 矩阵，悬浮可查看详情
+                        {t("tms.needsHint")}
                       </span>
                     )}
                   </>
@@ -1819,18 +2214,18 @@ export function TierModeSelector() {
                 <WorkbenchFieldSelect
                   id="route-complexity-narrative"
                   {...routeDropdownProps("route-complexity-narrative")}
-                  label="复杂度"
+                  label={t("tms.field.complexity")}
                   value={String(complexity)}
                   onChange={(val) => {
                     setComplexity(Number(val));
                     setComplexityTouched(true);
-                    onConfigChange();
+                    onConfigChange("routing");
                   }}
                   options={COMPLEXITY_LEVELS.map((c) => ({
                     value: String(c.level),
-                    label: c.label,
-                    title: c.hint,
-                    description: c.hint,
+                    label: t(`complexity.${c.level}.label`),
+                    title: t(`complexity.${c.level}.hint`),
+                    description: t(`complexity.${c.level}.hint`),
                   }))}
                   hint={complexityHint}
                 />
@@ -1838,13 +2233,30 @@ export function TierModeSelector() {
             </div>
           )}
             </div>
+
+            {/* §条目持久化：ROUTING「确认保存」——把 INPUT+ROUTING 参数落盘到 output/<key>/_entry.json。
+                亮/灰随脏态：有未保存改动亮、已落盘灰；不点也会在「开始生成」时自动落盘（兜底）。
+                仅在"已确认输入、未生成"的条目上出现。 */}
+            {inputConfirmed && activeEntryKey && !activeEntryStatus && (
+              <div className="ip-stage-card__foot">
+                <button
+                  type="button"
+                  className="btn-generate btn-generate--compact ip-stage-btn"
+                  onClick={handleSaveEntry}
+                  disabled={!entryDirty}
+                  title={entryDirty ? "确认并保存当前 INPUT/ROUTING 配置到该条目" : "配置已确认（改动后可再次确认；开始生成也会自动保存）"}
+                >
+                  {entryDirty ? "确认" : "✓ 确认"}
+                </button>
+              </div>
+            )}
           </WorkbenchStepSection>
 
           <WorkbenchStepSection
             step={3}
-            title="项目清单"
+            title={t("tms.project.title")}
             titleEn="LIST"
-            note="创作成果，在此落盘"
+            note={t("tms.project.note")}
             summary={projectStepSummary}
             expanded={expandedSteps.has("project")}
             active={expandedSteps.has("project")}
@@ -1852,9 +2264,9 @@ export function TierModeSelector() {
           >
             <div className="history-panel">
               {historyLoading ? (
-                <div className="history-loading">加载中...</div>
+                <div className="history-loading">{t("tms.history.loading")}</div>
               ) : displayHistory.length === 0 ? (
-                <div className="history-empty">暂无历史记录</div>
+                <div className="history-empty">{t("tms.project.empty")}</div>
               ) : (
                 <div className="history-list">
                   {displayHistory.map((entry) => {
@@ -1870,19 +2282,23 @@ export function TierModeSelector() {
                         onClick={() => {
                           if (busy) return;
                           if (isActive) {
-                            clearActiveEntry();
+                            // §状态机：再点同一激活条目 = 取消选中，强清 store + 表单，回 idle 全新空白。
+                            deselectEntry();
+                            resetInputForm();
                             return;
                           }
+                          // 未生成的条目（status=config）已落盘 _entry.json，点击还原 INPUT/ROUTING；已生成的还原结果。
                           handleLoadHistory(entry);
                         }}
                       >
                         <div className="hi-header">
-                          <span className="hi-time">{isCurrentlyRunning && !entry.startedAt ? "当前" : formatHistoryTime(entry)}</span>
+                          <span className="hi-time">{isCurrentlyRunning && !entry.startedAt ? t("tms.history.current") : formatHistoryTime(entry)}</span>
                           <span className={`hi-badge hi-badge--${entry.status ?? "unknown"}`}>
-                            {entry.status === "completed" ? "完成"
-                              : entry.status === "running" ? "生成中"
-                              : entry.status === "interrupted" ? "中断"
-                              : entry.status === "failed" ? "失败"
+                            {entry.status === "completed" ? t("tms.history.completed")
+                              : entry.status === "running" ? t("tms.history.running")
+                              : entry.status === "interrupted" ? t("tms.history.interrupted")
+                              : entry.status === "failed" ? t("tms.history.failed")
+                              : entry.status === "config" ? t("tms.history.config")
                               : entry.status ?? "?"}
                           </span>
                         </div>
@@ -1892,20 +2308,20 @@ export function TierModeSelector() {
                           </div>
                         )}
                         <div className="hi-meta">
-                          {entry.routeGroup && <span className="hi-tag">{entry.routeGroup === "planning" ? "策划全量" : "叙事单品"}</span>}
+                          {entry.routeGroup && <span className="hi-tag">{entry.routeGroup === "planning" ? t("tms.routeGroup.planning") : t("tms.routeGroup.narrative")}</span>}
                           {entry.tier && <span className="hi-tag">{entry.tier}</span>}
                           {entry.mode && <span className="hi-tag">{entry.mode}</span>}
                           {entry.parentKey && (
                             <span className="hi-tag hi-tag--fork" title={entry.forkReason}>
-                              fork
+                              {t("tms.history.fork")}
                             </span>
                           )}
-                          {entry.fileCount != null && <span className="hi-files">{entry.fileCount} files</span>}
+                          {entry.fileCount != null && <span className="hi-files">{t("tms.history.files", { n: entry.fileCount })}</span>}
                         </div>
                         {entry.hasCheckpoint && entry.lastCompletedStep && (
-                          <div className="hi-cp-info">断点: {STEP_LABEL_MAP.get(entry.lastCompletedStep) ?? entry.lastCompletedStep}</div>
+                          <div className="hi-cp-info">{t("tms.history.checkpoint", { step: tStepLabel(entry.lastCompletedStep, STEP_LABEL_MAP.get(entry.lastCompletedStep) ?? entry.lastCompletedStep) })}</div>
                         )}
-                        {busy && <div className="hi-loading-indicator">加载中...</div>}
+                        {busy && <div className="hi-loading-indicator">{t("tms.history.loading")}</div>}
                       </div>
                     );
                   })}
@@ -1922,11 +2338,11 @@ export function TierModeSelector() {
         <div className="tool-action-row__main">
           <button
             type="button"
-            className={`btn-cancel btn-cancel--compact${(isGenerating || isIpPreprocessing) ? " btn-cancel--active" : ""}`}
+            className={`btn-cancel btn-cancel--compact${phase === "generating" ? " btn-cancel--active" : ""}`}
             onClick={handleCancel}
-            disabled={!isGenerating && !isIpPreprocessing}
+            disabled={phase !== "generating"}
           >
-            取消生成
+            {t("tms.cancel")}
           </button>
           {primaryAction === "regen" ? (
             <button
@@ -1935,7 +2351,7 @@ export function TierModeSelector() {
               onClick={handleRegenerate}
               disabled={starting || isRunning}
             >
-              {starting ? "分析中..." : isViewingRunning ? "重新生成中..." : isRunning ? "等待运行结束" : "重新生成"}
+              {starting ? t("tms.regen.analyzing") : isViewingRunning ? t("tms.regen.running") : isRunning ? t("tms.regen.waitRun") : t("tms.regen")}
             </button>
           ) : primaryAction === "resume" ? (
             <button
@@ -1944,17 +2360,23 @@ export function TierModeSelector() {
               onClick={handleResume}
               disabled={starting || isRunning}
             >
-              {starting ? "恢复中..." : isViewingRunning ? "生成中..." : isRunning ? "等待运行结束" : "断点续传"}
+              {starting ? t("tms.resume.resuming") : isViewingRunning ? t("tms.resume.generating") : isRunning ? t("tms.resume.waitRun") : t("tms.resume")}
             </button>
           ) : (
             <button
               type="button"
               className="btn-generate btn-generate--compact"
               onClick={handleStart}
-              disabled={primaryAction === "none" || starting || isGenerating || isHeavyUpload || (!userInput.trim() && uploadedFiles.length === 0)}
-              title={isHeavyUpload ? "重需求 IP 请使用上方分步卡片的「开始生成（IP DNA → 下游）」" : undefined}
+              disabled={phase !== "routed" || starting || (isHeavyUpload && !ipCanGenerate)}
+              title={
+                phase !== "routed"
+                  ? t("tms.start.notRoutedTitle")
+                  : isHeavyUpload && !ipCanGenerate
+                    ? t("tms.start.ipScopeTitle")
+                    : undefined
+              }
             >
-              {starting ? "启动中..." : isGenerating ? "生成中..." : "开始生成"}
+              {starting ? t("tms.start.starting") : isGenerating ? t("tms.start.generating") : t("tms.start")}
             </button>
           )}
         </div>
@@ -1973,7 +2395,7 @@ export function TierModeSelector() {
               }
             }}
           >
-            后台运行中 — 点击查看
+            {t("tms.runningHint")}
           </button>
         )}
       </div>
@@ -2025,40 +2447,41 @@ function ImpactPreviewModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const fromIdx = pipelineOrder.indexOf(fromStepId);
   const preserved = fromIdx > 0 ? pipelineOrder.slice(0, fromIdx) : [];
   const willRerun = fromIdx >= 0
     ? pipelineOrder.slice(fromIdx).filter((id) => !skipSteps.includes(id))
     : affectedSteps;
 
-  const labelOf = (id: string) => STEP_LABEL_MAP.get(id) ?? id;
+  const labelOf = (id: string) => tStepLabel(id, STEP_LABEL_MAP.get(id) ?? id);
 
   return (
     <div className="impact-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="impact-modal">
         <div className="impact-modal-header">
-          <span className="impact-modal-title">分析影响面</span>
-          {fallback && <span className="impact-modal-fallback">（LLM 失败，已用规则兜底）</span>}
-          <button className="impact-modal-close" onClick={onCancel} aria-label="关闭">×</button>
+          <span className="impact-modal-title">{t("impact.title")}</span>
+          {fallback && <span className="impact-modal-fallback">{t("impact.fallback")}</span>}
+          <button className="impact-modal-close" onClick={onCancel} aria-label={t("impact.close")}>×</button>
         </div>
 
         <div className="impact-modal-body">
           {reasoning && (
             <div className="impact-modal-section">
-              <div className="impact-modal-section-title">分析说明</div>
+              <div className="impact-modal-section-title">{t("impact.section.reasoning")}</div>
               <div className="impact-modal-reasoning">{reasoning}</div>
             </div>
           )}
 
           <div className="impact-modal-section">
-            <div className="impact-modal-section-title">重新生成起点</div>
+            <div className="impact-modal-section-title">{t("impact.section.from")}</div>
             <div className="impact-modal-from-step">▶ {labelOf(fromStepId)}（{fromStepId}）</div>
           </div>
 
           {preserved.length > 0 && (
             <div className="impact-modal-section">
               <div className="impact-modal-section-title impact-modal-preserved-title">
-                ✓ 将保留 ({preserved.length})
+                {t("impact.section.preserve", { n: preserved.length })}
               </div>
               <div className="impact-modal-step-list impact-modal-preserved-list">
                 {preserved.map((id) => (
@@ -2073,7 +2496,7 @@ function ImpactPreviewModal({
           {willRerun.length > 0 && (
             <div className="impact-modal-section">
               <div className="impact-modal-section-title impact-modal-rerun-title">
-                ⟳ 将重新生成 ({willRerun.length})
+                {t("impact.section.rerun", { n: willRerun.length })}
               </div>
               <div className="impact-modal-step-list impact-modal-rerun-list">
                 {willRerun.map((id) => (
@@ -2088,7 +2511,7 @@ function ImpactPreviewModal({
           {skipSteps.length > 0 && (
             <div className="impact-modal-section">
               <div className="impact-modal-section-title impact-modal-skip-title">
-                — 不受影响 (跳过, {skipSteps.length})
+                {t("impact.section.skip", { n: skipSteps.length })}
               </div>
               <div className="impact-modal-step-list impact-modal-skip-list">
                 {skipSteps.map((id) => (
@@ -2103,10 +2526,10 @@ function ImpactPreviewModal({
 
         <div className="impact-modal-footer">
           <button className="impact-modal-btn impact-modal-btn--cancel" onClick={onCancel} disabled={submitting}>
-            取消
+            {t("impact.cancel")}
           </button>
           <button className="impact-modal-btn impact-modal-btn--confirm" onClick={onConfirm} disabled={submitting}>
-            {submitting ? "生成中..." : "确认重新生成"}
+            {submitting ? t("impact.confirmBusy") : t("impact.confirm")}
           </button>
         </div>
       </div>

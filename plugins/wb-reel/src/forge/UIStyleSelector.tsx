@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
-import { UI_STYLE_PRESETS, getUIStylePreset } from '../llm/uiStylePresets'
+import { UI_STYLE_PRESETS, getUIStylePreset } from '../llm/config/uiStylePresets'
 import { PosterCarousel, type PosterItem } from './PosterCarousel'
 import { ensureStylePoster } from '../media/stylePosterCache'
 import { prebuiltUIPoster } from '../media/prebuiltPosters'
-import { createImageProvider } from '../llm/GptImageProvider'
+import { createImageProvider } from '../llm/providers/GptImageProvider'
 import { UIStylePanel } from '../editor/UIStylePanel'
 import { injectStyleOnce } from '../styles/injectStyle'
 

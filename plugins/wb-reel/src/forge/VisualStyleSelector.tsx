@@ -5,11 +5,11 @@ import {
   VISUAL_STYLE_PRESETS,
   DEFAULT_VISUAL_STYLE,
   type VisualStyle,
-} from '../llm/visualStylePresets'
+} from '../llm/config/visualStylePresets'
 import { PosterCarousel, type PosterItem } from './PosterCarousel'
 import { ensureStylePoster } from '../media/stylePosterCache'
 import { prebuiltStylePoster } from '../media/prebuiltPosters'
-import { createImageProvider } from '../llm/GptImageProvider'
+import { createImageProvider } from '../llm/providers/GptImageProvider'
 import { injectStyleOnce } from '../styles/injectStyle'
 
 /**

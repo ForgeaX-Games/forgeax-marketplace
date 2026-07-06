@@ -15,7 +15,7 @@ import {
   runStageStyle,
   runStageSynopsis,
 } from './runStages'
-import type { TextClient } from '../llm/types'
+import type { TextClient } from '../llm/config/types'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { stageRollCss } from './ForgeStageRoll.css'
 

@@ -3,7 +3,7 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import {
   listDirectorStyleOptions,
   DEFAULT_DIRECTOR_STYLE,
-} from '../llm/directorPersonas'
+} from '../llm/config/directorPersonas'
 import type { DirectorStyleId } from '../scenario/types'
 import { PosterCarousel, type PosterItem } from './PosterCarousel'
 import { injectStyleOnce } from '../styles/injectStyle'

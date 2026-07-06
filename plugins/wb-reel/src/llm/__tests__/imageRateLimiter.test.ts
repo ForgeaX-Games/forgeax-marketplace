@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { imageRateLimiter } from '../imageRateLimiter'
+import { imageRateLimiter } from '../util/imageRateLimiter'
 
 /**
  * 这里不能 new 新实例（imageRateLimiter.ts 导出的是单例），

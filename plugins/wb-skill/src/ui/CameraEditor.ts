@@ -1,5 +1,6 @@
 import type { CameraStore } from '../core/CameraStore'
 import type { PreviewControls } from './PreviewControls'
+import { t, onLocaleChange } from '../i18n'
 
 export class CameraEditor {
   private overlay: HTMLElement
@@ -7,6 +8,8 @@ export class CameraEditor {
   private cameraStore: CameraStore
   private visible = false
   private liveUpdateId: number | null = null
+  private manualOpen = false
+  private localeUnsub: (() => void) | null = null
 
   constructor(parent: HTMLElement, previewControls: PreviewControls, cameraStore: CameraStore) {
     this.previewControls = previewControls
@@ -14,10 +17,9 @@ export class CameraEditor {
 
     this.overlay = document.createElement('div')
     this.overlay.className = 'camera-editor-overlay'
-    this.overlay.innerHTML = this.buildHTML()
     parent.appendChild(this.overlay)
 
-    this.bindEvents()
+    this.rebuildOverlay()
 
     window.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyC') {
@@ -25,46 +27,71 @@ export class CameraEditor {
         this.toggle()
       }
     })
+
+    this.localeUnsub = onLocaleChange(() => this.rebuildOverlay())
+  }
+
+  private rebuildOverlay(): void {
+    const wasVisible = this.visible
+    const manualOpen = this.manualOpen
+    if (this.liveUpdateId !== null) {
+      clearInterval(this.liveUpdateId)
+      this.liveUpdateId = null
+    }
+    this.overlay.innerHTML = this.buildHTML()
+    if (manualOpen) {
+      const section = this.overlay.querySelector('[data-manual-section]') as HTMLElement | null
+      const btn = this.overlay.querySelector('[data-action="toggle-manual"]') as HTMLElement | null
+      if (section) section.style.display = ''
+      if (btn) btn.textContent = t('cam.manualToggleOpen')
+    }
+    this.bindEvents()
+    this.overlay.classList.toggle('visible', wasVisible)
+    if (wasVisible) {
+      this.renderPresets()
+      this.updateLiveInfo()
+      this.liveUpdateId = window.setInterval(() => this.updateLiveInfo(), 200)
+    }
   }
 
   private buildHTML(): string {
     return `
-      <h3>相机编辑器</h3>
-      <div class="cam-hint">在场景中自由浏览，找到满意角度后保存视角。</div>
+      <h3>${t('cam.title')}</h3>
+      <div class="cam-hint">${t('cam.hint')}</div>
 
       <div class="cam-live-info">
-        <div class="cam-row"><span class="cam-label">位置</span><span data-live="pos">—</span></div>
-        <div class="cam-row"><span class="cam-label">目标</span><span data-live="tgt">—</span></div>
-        <div class="cam-row"><span class="cam-label">视野角</span><span data-live="fov">—</span></div>
+        <div class="cam-row"><span class="cam-label">${t('cam.pos')}</span><span data-live="pos">—</span></div>
+        <div class="cam-row"><span class="cam-label">${t('cam.tgt')}</span><span data-live="tgt">—</span></div>
+        <div class="cam-row"><span class="cam-label">${t('cam.fov')}</span><span data-live="fov">—</span></div>
       </div>
 
       <div class="cam-save-row">
-        <input data-cam="preset-name" type="text" placeholder="预设名称" value="default" />
-        <button data-action="save-preset">保存视角</button>
+        <input data-cam="preset-name" type="text" placeholder="${t('cam.presetPlaceholder')}" value="default" />
+        <button data-action="save-preset">${t('cam.savePreset')}</button>
       </div>
 
       <div class="cam-actions">
-        <button data-action="copy">复制 JSON</button>
-        <button data-action="reset">恢复默认</button>
+        <button data-action="copy">${t('cam.copyJson')}</button>
+        <button data-action="reset">${t('cam.reset')}</button>
       </div>
 
       <div class="cam-presets-section">
-        <div class="cam-presets-title">已保存的预设</div>
+        <div class="cam-presets-title">${t('cam.savedPresets')}</div>
         <div data-presets></div>
       </div>
 
       <div class="cam-manual-toggle">
-        <button data-action="toggle-manual">手动输入 ▸</button>
+        <button data-action="toggle-manual">${t('cam.manualToggle')}</button>
       </div>
       <div class="cam-manual" data-manual-section style="display:none">
-        <div class="field"><label>位置 X</label><input data-cam="px" type="number" step="0.1" /></div>
-        <div class="field"><label>位置 Y</label><input data-cam="py" type="number" step="0.1" /></div>
-        <div class="field"><label>位置 Z</label><input data-cam="pz" type="number" step="0.1" /></div>
-        <div class="field"><label>目标 X</label><input data-cam="tx" type="number" step="0.1" /></div>
-        <div class="field"><label>目标 Y</label><input data-cam="ty" type="number" step="0.1" /></div>
-        <div class="field"><label>目标 Z</label><input data-cam="tz" type="number" step="0.1" /></div>
-        <div class="field"><label>视野角</label><input data-cam="fov" type="number" step="1" min="10" max="120" /></div>
-        <button data-action="apply" style="width:100%;margin-top:6px;">应用数值</button>
+        <div class="field"><label>${t('cam.posX')}</label><input data-cam="px" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.posY')}</label><input data-cam="py" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.posZ')}</label><input data-cam="pz" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.tgtX')}</label><input data-cam="tx" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.tgtY')}</label><input data-cam="ty" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.tgtZ')}</label><input data-cam="tz" type="number" step="0.1" /></div>
+        <div class="field"><label>${t('cam.fov')}</label><input data-cam="fov" type="number" step="1" min="10" max="120" /></div>
+        <button data-action="apply" style="width:100%;margin-top:6px;">${t('cam.apply')}</button>
       </div>
     `
   }
@@ -76,14 +103,14 @@ export class CameraEditor {
       const preset = this.previewControls.getCurrentPreset(name)
       this.cameraStore.save(preset)
       this.renderPresets()
-      this.flashButton('[data-action="save-preset"]', '已保存!')
+      this.flashButton('[data-action="save-preset"]', t('cam.saved'))
     })
 
     this.overlay.querySelector('[data-action="copy"]')?.addEventListener('click', () => {
       const preset = this.previewControls.getCurrentPreset('export')
       const json = JSON.stringify({ position: preset.position, target: preset.target, fov: preset.fov }, null, 2)
       navigator.clipboard.writeText(json).then(() => {
-        this.flashButton('[data-action="copy"]', '已复制!')
+        this.flashButton('[data-action="copy"]', t('cam.copied'))
       }).catch(() => {})
     })
 
@@ -100,7 +127,8 @@ export class CameraEditor {
       if (!section || !btn) return
       const hidden = section.style.display === 'none'
       section.style.display = hidden ? '' : 'none'
-      btn.textContent = hidden ? '手动输入 ▾' : '手动输入 ▸'
+      this.manualOpen = hidden
+      btn.textContent = hidden ? t('cam.manualToggleOpen') : t('cam.manualToggle')
 
       if (hidden) {
         const preset = this.previewControls.getCurrentPreset('manual')
@@ -158,7 +186,7 @@ export class CameraEditor {
 
     const presets = this.cameraStore.getAll()
     if (presets.length === 0) {
-      container.innerHTML = '<div style="color:var(--text-secondary);font-size:11px;padding:4px 0;">暂无保存的预设</div>'
+      container.innerHTML = `<div style="color:var(--text-secondary);font-size:11px;padding:4px 0;">${t('cam.noPresets')}</div>`
       return
     }
 
@@ -204,6 +232,7 @@ export class CameraEditor {
   }
 
   dispose(): void {
+    this.localeUnsub?.()
     if (this.liveUpdateId !== null) clearInterval(this.liveUpdateId)
     this.overlay.remove()
   }

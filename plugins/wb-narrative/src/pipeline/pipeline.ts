@@ -54,11 +54,10 @@ import { emergentEvent } from "./steps/emergent-event.js";
 import { cardLore } from "./steps/card-lore.js";
 import { eventPool } from "./steps/event-pool.js";
 
-// 影游叙事 v2 专属管线（tpl-vn-v2）9 个独立 step
+// 影游叙事 v2 专属管线（tpl-vn-v2）独立 step（场号改后处理导出，无独立 vn_scenes 步）
 import {
   vnLogline,
   vnOutlineActs,
-  vnScenes,
   vnBeats,
   vnScriptNormalize,
   vnSegmentConfirm,
@@ -216,7 +215,6 @@ const ALL_STEPS = new Map<string, { name: string; fn: PipelineStep }>([
   // 影游叙事 v2 专属管线（tpl-vn-v2）— E1+E2+G 9 步
   [S.VN_LOGLINE,            { name: "E1-01 一句话故事梗概",   fn: vnLogline }],
   [S.VN_OUTLINE_ACTS,       { name: "E1-02 三幕扩写", fn: vnOutlineActs }],
-  [S.VN_SCENES,             { name: "E1-03 场搭建",           fn: vnScenes }],
   [S.VN_BEATS,              { name: "E1-04 情节点搭建",       fn: vnBeats }],
   [S.VN_SCRIPT_NORMALIZE,   { name: "E2-01 用户剧本预处理",   fn: vnScriptNormalize }],
   [S.VN_SEGMENT_CONFIRM,    { name: "E2-02 影游化文本段确认", fn: vnSegmentConfirm }],
@@ -241,12 +239,12 @@ const ALL_STEPS = new Map<string, { name: string; fn: PipelineStep }>([
  * tpl-vn-v2 E2 旁路：用户上传剧本时，**替换**（不是叠加）E1 中下层步骤。
  *
  * 与 MyFile/提示词/影游叙事生成提示词/00_README.md §四 调用顺序对齐：
- *   入口一（用户输入）：vn_logline → vn_outline_acts → vn_scenes → vn_beats → G-01...
+ *   入口一（用户输入）：vn_logline → vn_outline_acts → vn_beats → G-01...（场号由 G-01 末尾导出）
  *   入口二（上传剧本）：vn_logline → vn_script_normalize → vn_segment_confirm → G-01...
  *
- * 也就是 E2 路径下 vn_outline_acts / vn_scenes / vn_beats 三步全部被
- * vn_script_normalize + vn_segment_confirm 替代——后者会同时产出
- * vn_outline_acts / vn_scenes / vn_beats / vn_character_bios，让 G-01~G-03 无差别消费。
+ * 也就是 E2 路径下 vn_outline_acts / vn_beats 步被 vn_script_normalize + vn_segment_confirm
+ * 替代——后者产出 vn_outline_acts / vn_beats / vn_character_bios，让 G-01~G-03 无差别消费；
+ * vn_scenes 已降级为 G-01 拓扑定稿后的派生数据（§4.6c）。
  *
  * 共享同一 mode（vn_full / design_vn_full），路由由 ctx.uploaded_script 是否存在决定。
  */

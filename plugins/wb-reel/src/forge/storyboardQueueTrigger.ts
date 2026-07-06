@@ -20,8 +20,8 @@
  */
 
 import { createTextProvider } from '../llm'
-import { runActBatchUpgradeOnScenario } from '../llm/runActBatchUpgrade'
-import { assignShotTimecodes } from '../llm/assignShotTimecodes'
+import { runActBatchUpgradeOnScenario } from '../llm/pipeline/runActBatchUpgrade'
+import { assignShotTimecodes } from '../llm/refsets/assignShotTimecodes'
 import { realignSceneDialogue } from '../scenario/realignDialogue'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useForgeChatStore } from './forgeChatStore'

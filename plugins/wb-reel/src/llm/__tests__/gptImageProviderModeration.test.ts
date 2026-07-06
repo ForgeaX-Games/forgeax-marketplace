@@ -4,7 +4,7 @@ import {
   extractAuthorPromptSlice,
   getModerationContext,
   isModerationBlocked,
-} from '../GptImageProvider'
+} from '../providers/GptImageProvider'
 
 /**
  * GptImageProvider 内 moderation 相关辅助函数测试。

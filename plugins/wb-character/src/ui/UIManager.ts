@@ -7,6 +7,11 @@ import { SceneSelector } from './SceneSelector'
 import { PipelinePanel } from './PipelinePanel'
 import { PreviewControls } from './PreviewControls'
 import './styles.css'
+import { onLocaleChange, t, tf } from '../i18n'
+
+function applyShellHints(): void {
+  document.documentElement.style.setProperty('--editor-left-empty', `"${t('shell.emptyLeft')}"`)
+}
 
 export class UIManager {
   private topbar!: HTMLElement
@@ -32,6 +37,8 @@ export class UIManager {
   ) {}
 
   init(): void {
+    applyShellHints()
+    onLocaleChange(applyShellHints)
     this.topbar = document.createElement('div')
     this.topbar.className = 'editor-topbar'
     this.uiRoot.appendChild(this.topbar)

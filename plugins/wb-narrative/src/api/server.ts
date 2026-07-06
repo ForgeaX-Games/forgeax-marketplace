@@ -22,9 +22,15 @@ import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceBy
 // a standalone-process bootstrap, scope-excluded from the ctx.env migration;
 // ToolRegistry handlers must use ctx.env per the wb-character precedent).
 import { getGeminiApiKey, getLlmProxyUrl, getLlmProxyKey, getDefaultModel, readPluginEnv } from "../utils/plugin-env.js";
+import { isSafeKey as isSafeEntryKeyFn, loadEntry as loadEntryFromDir, writeEntry as writeEntryToDir, type EntryConfig } from "./entry-store.js";
 
 const OUTPUT_DIR = path.resolve(process.cwd(), "output");
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+// §条目持久化：entry-store 按 OUTPUT_DIR 绑定（逻辑抽到纯模块便于单测）。
+const loadEntryConfig = (key: string): EntryConfig | null => loadEntryFromDir(OUTPUT_DIR, key);
+const writeEntryConfig = (key: string, patch: Partial<EntryConfig>): EntryConfig =>
+  writeEntryToDir(OUTPUT_DIR, key, patch);
 
 const STEP_FILE_MAP: Record<string, { index: string; name: string; ext: string }> = {
   preference_summary:   { index: "00", name: "偏好总结",   ext: "md" },
@@ -869,6 +875,12 @@ app.post("/api/narrative/start", async (req, res) => {
      *  - file_name/size/mime  仅用于存档与 UI；server 端会跑 detectScriptFormat 补 format/char_count
      */
     uploaded_script,
+    /**
+     * §条目提前建立：前端在首次输入确认时铸造的稳定条目键（草稿键）。提供且格式安全时，
+     * 本次运行复用该键作为落盘目录名（sourceDir），使 INPUT 阶段建立的条目与生成产物同锚一处，
+     * 避免另铸时间戳造成"输入条目"与"生成条目"分裂。
+     */
+    entry_key,
   } = req.body as {
     user_input?: string;
     model?: string;
@@ -881,6 +893,7 @@ app.post("/api/narrative/start", async (req, res) => {
     genre_code?: string;
     use_legacy_pipeline?: boolean;
     use_blueprint?: boolean;
+    entry_key?: string;
     uploaded_script?: {
       content?: string;
       content_base64?: string;
@@ -984,6 +997,13 @@ app.post("/api/narrative/start", async (req, res) => {
   const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const resolvedModel = model ?? getDefaultModel();
 
+  // §条目提前建立：复用前端草稿键作为落盘目录（仅接受安全的相对目录名，防路径穿越）。
+  const isSafeEntryKey =
+    typeof entry_key === "string" &&
+    /^[A-Za-z0-9_.-]+$/.test(entry_key) &&
+    !entry_key.includes("..");
+  const reuseOutputDir = isSafeEntryKey ? path.join(OUTPUT_DIR, entry_key!) : undefined;
+
   // A2-2: explicit genre_code makes manual routing implicit (we have genre + tier when both provided)
   const hasExplicitGenre = typeof genre_code === "string" && genre_code.trim().length > 0;
   const state: RunState = {
@@ -1000,8 +1020,26 @@ app.post("/api/narrative/start", async (req, res) => {
     routingMode: resolvedRoutingMode,
     genreCode: hasExplicitGenre ? genre_code!.trim() : undefined,
     model: resolvedModel,
+    outputDir: reuseOutputDir,
   };
   runs.set(id, state);
+
+  // §条目持久化（开始生成自动保存兜底）：把当次最终配置 upsert 回 output/<key>/_entry.json。
+  // 即使用户没点 ROUTING「确认保存」，开始生成也会落盘一份，保证条目参数可还原。
+  if (isSafeEntryKey) {
+    try {
+      writeEntryConfig(entry_key!, {
+        userInput: state.userInput,
+        routeGroup: route_group,
+        tier,
+        mode: resolvedMode,
+        genreCode: state.genreCode,
+        complexity: effectiveComplexity,
+      });
+    } catch (e) {
+      console.error("[Server] writeEntryConfig on start failed:", e);
+    }
+  }
 
   const pipeline = new NarrativePipeline({
     apiKey: API_KEY || undefined,
@@ -1125,7 +1163,8 @@ app.post("/api/narrative/start", async (req, res) => {
       try { saveRunToFile(state); } catch (e) { console.error("Failed to save error:", e); }
     });
 
-  const sourceDir = formatTimestamp(state.startedAt);
+  // §条目提前建立：复用草稿键时 sourceDir = 该键（=outputDir 目录名），否则按启动时间戳。
+  const sourceDir = state.outputDir ? path.basename(state.outputDir) : formatTimestamp(state.startedAt);
   res.json({ id, status: "running", message: "Pipeline started", tier, mode: resolvedMode, sourceDir });
 });
 
@@ -2524,14 +2563,41 @@ function loadIpInputDescriptor(
 }
 
 /** 由 IP 输入侧描述符构造一条 ip-dna 历史条目（output 无运行清单时的兜底）。 */
+/**
+ * 半自动 IP 预处理阶段（摄入 / 标准化 / 停在裁剪确认门）——这些**不是"生成中"**。
+ * 「生成中」只指开始生成之后的下游生成 job（stage ∉ 此集且 status=running）。
+ */
+const IP_PREPROCESS_STAGES = new Set(["pending", "phase0", "phase1", "standardized", "awaiting_confirmation"]);
+
+/**
+ * 归类某 output/input key 关联的活跃 IP job（§状态机：预处理 ≠ 生成中）：
+ *  - "generating"    下游生成进行中（status=running 且 stage 非预处理阶段）→ LIST 显示「生成中」
+ *  - "preprocessing" 半自动预处理中 / 暂停在确认门（awaiting_confirmation，或 running 且 stage 属预处理阶段）→ 显示「待生成」，绝不「生成中」
+ *  - null            无活跃 job
+ */
+function classifyActiveIpJob(key: string): "generating" | "preprocessing" | null {
+  let cls: "generating" | "preprocessing" | null = null;
+  for (const j of listJobs()) {
+    if (!j.story_timestamp || !key.startsWith(j.story_timestamp)) continue;
+    if (j.status === "running" && !IP_PREPROCESS_STAGES.has(j.stage ?? "")) return "generating"; // 生成态优先
+    if (j.status === "awaiting_confirmation" || (j.status === "running" && IP_PREPROCESS_STAGES.has(j.stage ?? ""))) {
+      cls = "preprocessing";
+    }
+  }
+  return cls;
+}
+
 function buildIpDnaHistoryItem(
   key: string,
   desc: NonNullable<ReturnType<typeof loadIpInputDescriptor>>,
-  activeIpJob: boolean,
+  jobClass: "generating" | "preprocessing" | null,
   hasEdits: boolean,
 ): HistoryItem {
   const hasUnits = outputHasGameUnits(key);
-  const status = activeIpJob ? "running" : hasUnits ? "completed" : "interrupted";
+  // 预处理中/暂停在确认门 → 待生成（config），不是「生成中」，也不是「中断」。
+  const status = jobClass === "generating" ? "running"
+    : jobClass === "preprocessing" ? "config"
+    : hasUnits ? "completed" : "interrupted";
   const hasFullResult = fs.existsSync(path.join(OUTPUT_DIR, key, "full_result.json"));
   return {
     key,
@@ -2609,21 +2675,18 @@ function parseDirEntry(dir: string): HistoryItem {
   });
 
   // IP DNA 运行不进 runs Map，其活跃态由进程内 job 注册表反映（重启即清）。
-  // 匹配 runId（=<story_timestamp>_<title>）前缀，避免把"正在跑"的运行误判为 interrupted。
-  const activeIpJob = [...listJobs()].find(
-    (j) =>
-      (j.status === "running" || j.status === "awaiting_confirmation") &&
-      j.story_timestamp &&
-      dir.startsWith(j.story_timestamp),
-  );
+  // §状态机：区分「生成中」（下游生成）与「预处理中/暂停确认门」（待生成），后者不显示生成中。
+  const ipJobClass = classifyActiveIpJob(dir);
 
   try {
     const raw = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     let effectiveStatus: string;
     if (activeRun) {
       effectiveStatus = activeRun.status;
-    } else if (activeIpJob) {
+    } else if (ipJobClass === "generating") {
       effectiveStatus = "running";
+    } else if (ipJobClass === "preprocessing") {
+      effectiveStatus = "config"; // 预处理中/停在确认门 → 待生成，非生成中
     } else if (raw.status === "running") {
       effectiveStatus = "interrupted";
     } else {
@@ -2653,11 +2716,38 @@ function parseDirEntry(dir: string): HistoryItem {
       kind: raw.kind ?? undefined,
     };
   } catch {
+    // §条目持久化：无 output 运行清单但有 _entry.json（未生成的条目）→ 返回 status="config" 项，
+    // canLoad=true 使点击可还原 INPUT/ROUTING。放在 IP 回填之前：文本/标签条目无 IP 输入描述符。
+    const entryCfg = loadEntryConfig(dir);
+    if (entryCfg) {
+      const status = activeRun ? activeRun.status : ipJobClass === "generating" ? "running" : "config";
+      return {
+        key: dir,
+        type: "dir",
+        id: null,
+        tier: entryCfg.tier,
+        mode: entryCfg.mode,
+        status,
+        startedAt: entryCfg.createdAt,
+        fileCount: entryCfg.uploadedFileNames?.length ?? 0,
+        hasCheckpoint: false,
+        hasEdits,
+        lastCompletedStep: null,
+        completedSteps: null,
+        canResume: false,
+        canLoad: true,
+        userInput: entryCfg.userInput,
+        routeGroup: entryCfg.routeGroup as HistoryItem["routeGroup"],
+        complexity: entryCfg.complexity,
+        parentKey: entryCfg.parentKey,
+        kind: entryCfg.ipRunKey ? "ip-dna" : undefined,
+      };
+    }
     // 无 output 运行清单：先尝试用 IP DNA 输入侧资产回填（user_asset_manifest.json 或 _hierarchy.json）。
     // 否则它们会因 catch 落到 "unknown"。状态：进行中 job→running；已落生成产物→completed；否则→interrupted。
     const ipDesc = loadIpInputDescriptor(dir);
     if (ipDesc) {
-      return buildIpDnaHistoryItem(dir, ipDesc, !!activeIpJob, hasEdits);
+      return buildIpDnaHistoryItem(dir, ipDesc, ipJobClass, hasEdits);
     }
     const effectiveStatus = activeRun ? activeRun.status
       : checkpoint ? "interrupted" : "unknown";
@@ -2684,6 +2774,26 @@ function parseDirEntry(dir: string): HistoryItem {
   }
 }
 
+/**
+ * §条目持久化：upsert 条目参数到 output/<key>/_entry.json。
+ * 首次输入确认（建立条目）与 ROUTING「确认保存」都调它；开始生成时 /start 也会回写（兜底）。
+ * 合并语义：同 key 多次 POST 合并、保留 createdAt。
+ */
+app.post("/api/narrative/entry", (req, res) => {
+  const body = (req.body ?? {}) as Partial<EntryConfig>;
+  const key = body.key;
+  if (!isSafeEntryKeyFn(key)) {
+    res.status(400).json({ error: "invalid entry key（需为安全的相对目录名）" });
+    return;
+  }
+  try {
+    const entry = writeEntryConfig(key, body);
+    res.json({ key, status: "config", entry });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
 /** 列出本地保存的历史记录（扫描子目录 + 平铺 JSON 文件） */
 app.get("/api/narrative/history", (_req, res) => {
   try {
@@ -2691,10 +2801,19 @@ app.get("/api/narrative/history", (_req, res) => {
     const items: HistoryItem[] = [];
 
     const outputKeys = new Set<string>();
+    // §条目持久化桥接：收集 output/<key>/_entry.json 里指向 IP 媒体目录的 ipRunKey，
+    // 使输入侧 IP 运行（键=<时间戳>_<标题>）与其 output 条目（键=<时间戳>）去重——只留 output 那条。
+    const linkedIpRunKeys = new Set<string>();
+    // §桥接去重（前缀）：有 _entry.json 的 output 条目键。输入侧 IP 运行键恒为 <条目键>_<标题>，
+    // 故即使 ipRunKey 尚未回写（预处理阶段 / 自动模式存的是纯时间戳），也可按前缀吸附去重。
+    const entryDirKeys: string[] = [];
     for (const entry of all) {
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) continue;
         outputKeys.add(entry.name);
+        const cfg = loadEntryConfig(entry.name);
+        if (cfg) entryDirKeys.push(entry.name);
+        if (cfg?.ipRunKey) linkedIpRunKeys.add(cfg.ipRunKey);
         items.push(parseDirEntry(entry.name));
       } else if (entry.isFile() && entry.name.endsWith(".json")) {
         const item = parseFilenameEntry(entry.name);
@@ -2709,25 +2828,36 @@ app.get("/api/narrative/history", (_req, res) => {
       // 媒体优先布局：运行键在 input/<媒体>/story_<媒体>/*_<阶段>/<run> 下，需跨家族枚举（+legacy 兜底）。
       for (const key of listInputRunKeys()) {
         if (outputKeys.has(key)) continue; // output 侧已覆盖
+        if (linkedIpRunKeys.has(key)) continue; // 已有 output 条目经 ipRunKey 桥接覆盖（去重）
+        // 前缀吸附：输入运行键 = <条目键>_<标题>，被同名 output 条目（含 _entry.json）覆盖即去重，
+        // 不依赖 ipRunKey 何时落盘，修"同一 IP 请求裂成两条"。
+        if (entryDirKeys.some((ek) => key === ek || key.startsWith(`${ek}_`))) continue;
         const desc = loadIpInputDescriptor(key);
         if (!desc) continue;
-        const activeIpJob = [...listJobs()].some(
-          (j) =>
-            (j.status === "running" || j.status === "awaiting_confirmation") &&
-            j.story_timestamp &&
-            key.startsWith(j.story_timestamp),
-        );
-        items.push(buildIpDnaHistoryItem(key, desc, activeIpJob, dirHasEdits(key)));
+        const jobClass = classifyActiveIpJob(key);
+        items.push(buildIpDnaHistoryItem(key, desc, jobClass, dirHasEdits(key)));
       }
     } catch { /* input 目录不存在则跳过 */ }
 
-    items.sort((a, b) => {
+    // §去重（output × output）：IP 生成的产出/运行目录键恒为 <条目键>_<标题>，而「确认」时建的
+    // _entry.json 配置占位目录键为 <条目键>（裸时间戳）。二者是**同一请求**的两个 output 目录，需合并。
+    // 判据用 id 而非 status：占位目录无运行清单 → id=null（即使被活跃 job 蹭成 running 也无 id）；
+    // 真实产出/运行目录带 id。若存在 <条目键>_* 且**带 id** 的产出运行，则丢弃裸占位项，
+    // 使"同一 IP 请求"在 LIST 只呈现一条（修"条目不唯一/分歧"）。
+    // 文本/标签运行的产出目录键即 <条目键>（不追加标题、且自身带 id），不会被裁剪。
+    const dedupedItems = items.filter((it) => {
+      if (it.id) return true; // 有真实运行产出的目录，权威保留
+      const supersededByRun = items.some((o) => !!o.id && o.key.startsWith(`${it.key}_`));
+      return !supersededByRun;
+    });
+
+    dedupedItems.sort((a, b) => {
       const ka = a.startedAt ?? a.key;
       const kb = b.startedAt ?? b.key;
       return kb.localeCompare(ka);
     });
 
-    res.json(items);
+    res.json(dedupedItems);
   } catch {
     res.json([]);
   }
@@ -2894,6 +3024,28 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
       routingMode:
         checkpoint.routingMode ??
         (manifest.routingMode as "auto" | "semi" | "manual" | undefined),
+    });
+    return;
+  }
+
+  // §条目持久化：未生成的条目（只有 output/<key>/_entry.json，无结果/checkpoint）→
+  // 返回 status="config" + entry 供前端还原 INPUT/ROUTING（result 为 null，走前端 config 分支）。
+  const entryCfg = loadEntryConfig(key);
+  if (entryCfg) {
+    res.json({
+      id: key,
+      tier: entryCfg.tier ?? null,
+      mode: entryCfg.mode ?? null,
+      status: "config",
+      result: null,
+      entry: entryCfg,
+      userInput: entryCfg.userInput,
+      routeGroup: entryCfg.routeGroup,
+      complexity: entryCfg.complexity,
+      genre_code: entryCfg.genreCode,
+      // IP 作品条目：带 ipRunKey，前端据此调 fetchIpDnaHierarchy 回放 IP 步。
+      pipelineOrder: entryCfg.ipRunKey ? withIpPredecessorOrder(entryCfg.ipRunKey, undefined) : undefined,
+      routingMode: undefined,
     });
     return;
   }
@@ -3509,6 +3661,9 @@ app.post("/api/narrative/ip-dna/ingest", async (req, res) => {
     mediaCompressor: runtime?.mediaCompressor,
     archiveExtractor: runtime?.archiveExtractor,
     pdfPageSplitter: runtime?.pdfPageSplitter,
+    // §状态机重构 / 成本可控：半自动 UI 的标准化阶段零 LLM——多模态转写推迟到「开始生成」。
+    // 大批量上传时不在标准化就动用 AI 分析（避免不可控成本）；纯文本 IP 本就是纯算法建树。
+    deferMultimodal: true,
     onProgress,
   });
 
@@ -3537,6 +3692,46 @@ app.post("/api/narrative/ip-dna/ingest", async (req, res) => {
     res.json(summarizeIngest(ingest));
   } catch (e) {
     console.error("[Server] ip-dna ingest failed:", e);
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+/**
+ * §状态机 / IP「确认」即落盘（零 LLM）：把用户上传的原料先固化到 input/<媒体>/<故事类型>/<时间戳_标题>/，
+ * 写 user_asset_manifest.json，**不做**标准化/建树/提取（推迟到「开始生成」）。同步返回 { story_timestamp, run_id, title }，
+ * 前端据 run_id 桥接到 output 条目的 _entry.json.ipRunKey。复用传入的 entry_key 作 story_timestamp，使重确认同键覆盖幂等。
+ */
+app.post("/api/narrative/ip-dna/package", async (req, res) => {
+  const body = req.body as {
+    files?: Array<{ file_name?: string; content?: string; content_base64?: string; encoding?: "utf8" | "base64-docx"; file_type?: string; role?: string }>;
+    title?: string;
+    story_timestamp?: string;
+  };
+  if (!body.files?.length) {
+    res.status(400).json({ error: "files is required（至少一个文件，含 content 或 content_base64）" });
+    return;
+  }
+  const incoming = await parseIpDnaIncoming(body.files);
+  const fixedTimestamp = body.story_timestamp ?? formatIpDnaTimestamp(new Date().toISOString());
+  try {
+    const runtime = await resolveIpDnaRuntimeAdapters(process.env);
+    const ingest = await runIngest({
+      files: incoming,
+      title: body.title,
+      story_timestamp: fixedTimestamp,
+      archiveExtractor: runtime?.archiveExtractor,
+      pdfPageSplitter: runtime?.pdfPageSplitter,
+      // 零 LLM：仅打包落盘，标准化/多模态转写/提取整体推迟到「开始生成」。
+      deferMultimodal: true,
+      packageOnly: true,
+    });
+    res.json({
+      story_timestamp: ingest.story_timestamp,
+      run_id: `${ingest.story_timestamp}_${ingest.title}`,
+      title: ingest.title,
+    });
+  } catch (e) {
+    console.error("[Server] ip-dna package failed:", e);
     res.status(500).json({ error: (e as Error).message });
   }
 });

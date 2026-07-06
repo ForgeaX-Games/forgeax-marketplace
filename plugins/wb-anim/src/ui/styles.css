@@ -416,7 +416,7 @@
 }
 
 .editor-left:empty::after {
-  content: '选择上方的管线标签开始';
+  content: 'Select a pipeline tab above to begin';
   display: flex;
   align-items: center;
   justify-content: center;

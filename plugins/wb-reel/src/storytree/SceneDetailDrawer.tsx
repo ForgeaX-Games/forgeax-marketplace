@@ -10,6 +10,7 @@ import { injectStyleOnce } from '../styles/injectStyle'
 import { TimelineTour } from '../editor/onboarding/TimelineTour'
 import { HelpPanel } from '../editor/onboarding/HelpPanel'
 import { useOnboardingStore } from '../editor/onboarding/onboardingStore'
+import { tf, useT } from '../i18n'
 
 /**
  * SceneDetailDrawer —— 在 StoryTree Tab 内弹出的场景详情编辑面板。
@@ -55,6 +56,7 @@ interface Props {
 const SLIDE_DURATION_MS = 200
 
 export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Props) {
+  const t = useT()
   const inline = variant === 'inline'
   const selectScene = useScenarioStore((s) => s.selectScene)
   const scene = useScenarioStore((s) => s.scenario.scenes[sceneId])
@@ -138,16 +140,16 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
         <aside
           className={`ks-scene-detail ${inline ? 'is-inline' : ''} ${closing ? 'is-closing' : ''}`}
           role={inline ? 'region' : 'dialog'}
-          aria-label="场景详情"
+          aria-label={t('drawer.ariaLabel')}
           onClick={(e) => e.stopPropagation()}
         >
           <header className="ks-scene-detail-bar">
-            <span className="ks-mono">场景已被删除</span>
+            <span className="ks-mono">{t('drawer.deleted')}</span>
             <button
               type="button"
               className="ks-scene-detail-close"
               onClick={beginClose}
-              aria-label="关闭"
+              aria-label={t('drawer.close')}
             >
               ✕
             </button>
@@ -166,7 +168,7 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
       <aside
         className={`ks-scene-detail ${inline ? 'is-inline' : ''} ${closing ? 'is-closing' : ''}`}
         role={inline ? 'region' : 'dialog'}
-        aria-label={`场景详情 · ${scene.title}`}
+        aria-label={tf('drawer.ariaLabelTitle', { title: scene.title })}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="ks-scene-detail-bar">
@@ -188,24 +190,24 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
               onClick={() => setSceneIsEnding(scene.id, !scene.isEnding)}
               title={
                 scene.isEnding
-                  ? '取消结局标记 · 玩家在此 FIN 时显示"换条路走"'
-                  : '标为真结局 · 玩家在此 FIN 时显示"回到起点"'
+                  ? t('drawer.unmarkEndingTitle')
+                  : t('drawer.markEndingTitle')
               }
             >
               <span aria-hidden>{scene.isEnding ? '★' : '☆'}</span>
-              <span>标为结局</span>
+              <span>{t('drawer.markEnding')}</span>
             </button>
             {inline ? (
-              <span className="ks-faint">左栏点节点切换</span>
+              <span className="ks-faint">{t('drawer.inlineHint')}</span>
             ) : (
               <>
-                <span className="ks-faint">ESC 关闭</span>
+                <span className="ks-faint">{t('drawer.close')} (ESC)</span>
                 <button
                   type="button"
                   className="ks-scene-detail-close"
                   onClick={beginClose}
-                  aria-label="关闭"
-                  title="关闭 (ESC)"
+                  aria-label={t('drawer.close')}
+                  title={t('drawer.closeEsc')}
                 >
                   ✕
                 </button>

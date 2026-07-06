@@ -11,13 +11,10 @@ import { injectStyleOnce } from '../styles/injectStyle'
 import { useGenerationQueue, type GenJob, type GenJobStatus } from './generationQueueStore'
 import { estimateProgress, useNowTick } from './queueProgress'
 import { GenRequestDialog } from './GenRequestDialog'
+import { tf, useT } from '../i18n'
 
-const STATUS_LABEL: Record<GenJobStatus, string> = {
-  queued: '排队',
-  running: '生成中',
-  done: '完成',
-  failed: '失败',
-  cancelled: '已取消',
+function statusLabel(t: (key: string) => string, status: GenJobStatus): string {
+  return t(`queue.status.${status}`)
 }
 
 const KIND_ICON: Record<GenJob['kind'], string> = {
@@ -27,6 +24,7 @@ const KIND_ICON: Record<GenJob['kind'], string> = {
 }
 
 export function GenerationQueuePanel() {
+  const t = useT()
   const jobs = useGenerationQueue((s) => s.jobs)
   const order = useGenerationQueue((s) => s.order)
   const paused = useGenerationQueue((s) => s.paused)
@@ -74,10 +72,10 @@ export function GenerationQueuePanel() {
       <div className="ks-q-bar">
         <button type="button" className="ks-q-toggle" onClick={() => setOpen((v) => !v)}>
           <span className={`ks-q-dot ${active > 0 ? 'is-live' : ''}`} />
-          生成队列
+          {t('queue.title')}
           <span className="ks-q-counts">
             {running > 0 && <em className="is-run">⟳ {running}</em>}
-            {queued > 0 && <em>· 排队 {queued}</em>}
+            {queued > 0 && <em>· {t('queue.status.queued')} {queued}</em>}
             {done > 0 && <em className="is-done">· ✓ {done}</em>}
             {failed > 0 && <em className="is-fail">· ✕ {failed}</em>}
           </span>
@@ -86,19 +84,19 @@ export function GenerationQueuePanel() {
         <div className="ks-q-ctrls">
           {active > 0 ? (
             paused ? (
-              <button type="button" className="ks-q-btn" onClick={() => resume()}>▶ 继续</button>
+              <button type="button" className="ks-q-btn" onClick={() => resume()}>{t('queue.resume')}</button>
             ) : (
-              <button type="button" className="ks-q-btn" onClick={() => pause()}>⏸ 暂停</button>
+              <button type="button" className="ks-q-btn" onClick={() => pause()}>{t('queue.pause')}</button>
             )
           ) : null}
           {active > 0 ? (
             <button type="button" className="ks-q-btn is-danger" onClick={() => cancelAll()}>
-              取消全部
+              {t('queue.cancelAll')}
             </button>
           ) : null}
           {done + failed > 0 ? (
             <button type="button" className="ks-q-btn" onClick={() => clearFinished()}>
-              清理已完成
+              {t('queue.clearDone')}
             </button>
           ) : null}
         </div>
@@ -121,7 +119,7 @@ export function GenerationQueuePanel() {
                     </span>
                   ) : (
                     <span className={`ks-q-badge is-${job.status}`}>
-                      {STATUS_LABEL[job.status]}
+                      {statusLabel(t, job.status)}
                     </span>
                   )}
                   {job.request || job.error ? (
@@ -129,17 +127,17 @@ export function GenerationQueuePanel() {
                       type="button"
                       className="ks-q-x is-info"
                       onClick={() => setInspectId(job.id)}
-                      title="查看发给模型的请求：提示词 / 上传的参考图 / 参数"
+                      title={t('queue.inspectTitle')}
                     >
                       🔍
                     </button>
                   ) : null}
                   {job.status === 'queued' || job.status === 'running' ? (
-                    <button type="button" className="ks-q-x" onClick={() => cancel(job.id)} title="取消">
+                    <button type="button" className="ks-q-x" onClick={() => cancel(job.id)} title={t('queue.cancel')}>
                       ✕
                     </button>
                   ) : job.status === 'failed' || job.status === 'cancelled' ? (
-                    <button type="button" className="ks-q-x is-retry" onClick={() => retry(job.id)} title="重试">
+                    <button type="button" className="ks-q-x is-retry" onClick={() => retry(job.id)} title={t('queue.retry')}>
                       ↻
                     </button>
                   ) : (
@@ -160,9 +158,9 @@ export function GenerationQueuePanel() {
                       type="button"
                       className="ks-q-copy"
                       onClick={() => void copyError(job.id, job.error ?? '')}
-                      title="复制完整错误"
+                      title={t('queue.copyError')}
                     >
-                      {copiedId === job.id ? '已复制' : '复制'}
+                      {copiedId === job.id ? t('queue.copied') : t('queue.copy')}
                     </button>
                   </div>
                 ) : null}

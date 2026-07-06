@@ -130,6 +130,20 @@ export interface IpDnaOrchestratorOptions {
   queryEmbedder?: QueryEmbedder;
   /** 视频语音转写接缝（ASR）。 */
   transcriber?: VideoTranscriber;
+  /**
+   * 延迟多模态转写（§状态机重构 / 成本可控）：为 true 时，标准化（runIngest）阶段**跳过**
+   * 图片/视频的 LLM 转写，标准化仅做纯算法结构化（不产生 LLM 成本）。多模态转写整体推迟到
+   * 「开始生成」（runExtractAndGenerate）阶段进行——大批量上传时避免标准化阶段的不可控 AI 成本。
+   * 半自动 UI 的 ingest 端点默认置真；全自动一键 /ip-dna/start 保持即时转写（用户已选端到端）。
+   */
+  deferMultimodal?: boolean;
+  /**
+   * 仅打包落盘（§状态机 / IP「确认」即落盘 input/，零 LLM、零标准化）：为 true 时 runIngest 在
+   * 归档原始资产 + 写 user_asset_manifest.json 后**立即短路返回**——不做多模态转写、不做媒体压缩、
+   * 不做标准化文本合并、不建层级树（不写 _hierarchy.json）、不写 running 运行清单。用于用户点「确认」时
+   * 把原料先固化到 input/<媒体>/<故事类型>/<时间戳_标题>/，标准化与提取整体推迟到「开始生成」。
+   */
+  packageOnly?: boolean;
   /** 压缩包解压接缝（zip 等，§6.1）；gz/tar/tgz 已原生支持。 */
   archiveExtractor?: ArchiveExtractor;
   /** PDF 拆页接缝（§6.1）：PDF → 逐页 jpg；缺省则 PDF 原样透传。 */
@@ -276,6 +290,26 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
   }
   const ingestMedia = inferMediaType(expandedFiles);
   try { saveManifest(manifest, { cwd: options.cwd }); } catch { /* 落盘失败不阻断主链 */ }
+
+  // §状态机 / IP「确认」即落盘：packageOnly 到此短路——原料已归档到 input/ 且 manifest 已写，
+  // 不做压缩/标准化/建树/running 清单（全部推迟到「开始生成」）。返回最小合法 IngestResult（in-memory，不落 _hierarchy.json）。
+  if (options.packageOnly) {
+    emit({ phase: "phase0", message: "仅打包落盘（零 LLM）：原料已固化，标准化/提取推迟到生成阶段", ratio: 1 });
+    const media_type = ingestMedia;
+    const dna = buildLightHierarchy({ story_timestamp, title, media_type, text: "" });
+    const volume = {
+      ...assessVolume("", { mediaType: media_type, unitCount: collectLeafIds(dna).length }),
+      oversizedUnitCount: 0,
+    };
+    return {
+      story_timestamp, title, manifest, fullText: "", media_type, dna, volume,
+      decomposition: { iterations: 0, splitUnits: 0, residualOversize: false },
+      noise: { filtered: [], filteredTitles: [] },
+      defaultDirective: buildAdaptationDirective(dna, {}),
+      hydrated: false,
+    };
+  }
+
   // 历史可见性（§5.1）：标题已定即在 output 写 running 运行清单，使本次运行进入 history 列表；
   // 中途被进程重启打断时残留 running → 由 cleanupStaleRunningManifests 翻为 interrupted（仍可见）。
   try {
@@ -302,7 +336,8 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
     .map((f) => ({ path: f.fileName, text: typeof f.data === "string" ? f.data : safeToText(f.data) }));
   const { segments: textSegments, fullText: textPart } = segmentsFromTexts(textItems);
   let mmText = "";
-  if (options.llm || options.frameSampler) {
+  // §状态机重构：deferMultimodal 时跳过多模态转写（标准化零 LLM 成本，转写推迟到生成阶段）。
+  if (!options.deferMultimodal && (options.llm || options.frameSampler)) {
     const mm = await transcribeMediaFiles(expandedFiles, {
       llm: options.llm,
       frameSampler: options.frameSampler,

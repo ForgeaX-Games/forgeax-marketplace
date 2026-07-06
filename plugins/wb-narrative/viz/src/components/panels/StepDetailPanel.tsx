@@ -3,8 +3,10 @@ import { X } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import type { NarrativeContext, SceneNode } from "../../types";
 import { StageFileBrowser, fileGroupsForStep } from "../shared/StageFileBrowser";
+import { useT, tStepLabel, tDisplayState } from "../../i18n";
 
 export function StepDetailPanel() {
+  const t = useT();
   const focusedStepId = useNarrativeStore((s) => s.focusedStepId);
   const result = useNarrativeStore((s) => s.activeResult);
   const steps = useNarrativeStore((s) => s.activeSteps);
@@ -16,25 +18,27 @@ export function StepDetailPanel() {
 
   if (!focusedStepId) return null;
 
-  // 半自动预览期 step 在 runningProgress，历史/完成态在 activeSteps —— 两处都查，保证节点详情有数据。
   const stepState = steps.find((s) => s.id === focusedStepId) ?? runningProgress.find((s) => s.id === focusedStepId);
   const stepData = stepState?.data;
   const isViewingRunning = activeEntryKey === runningEntryKey;
   const fileRunKey = (isViewingRunning ? ipRunKey : activeEntryKey) ?? activeEntryKey;
   const fileGroups = fileGroupsForStep(focusedStepId);
+  const stepLabel = stepState?.label
+    ? tStepLabel(focusedStepId, stepState.label)
+    : tStepLabel(focusedStepId, focusedStepId);
 
   return (
     <div className="step-detail-panel">
       <div className="step-detail-panel-header">
         <span className="step-detail-panel-title">
-          {stepState?.label ?? focusedStepId}
+          {stepLabel}
           {stepState && (
             <span className={`step-detail-status status-${stepState.status}`}>
-              {stepState.status}
+              {tDisplayState(stepState.status)}
             </span>
           )}
         </span>
-        <button type="button" className="step-detail-close fx-icon-btn" onClick={() => setFocus(null)} aria-label="关闭详情">
+        <button type="button" className="step-detail-close fx-icon-btn" onClick={() => setFocus(null)} aria-label={t("stepDetail.close")}>
           <X size={14} aria-hidden />
         </button>
       </div>
@@ -56,12 +60,13 @@ function StepDetailContent({
   result: NarrativeContext | null;
   status?: string;
 }) {
+  const t = useT();
   const resolved = data ?? (result ? getStepData(stepId, result) : null);
 
   if (!resolved) {
     return (
       <div className="step-detail-empty-msg">
-        {status === "running" ? "正在生成中..." : status === "pending" ? "等待执行..." : "暂无数据"}
+        {status === "running" ? t("stepDetail.generating") : status === "pending" ? t("stepDetail.waiting") : t("stepDetail.noData")}
       </div>
     );
   }
@@ -125,6 +130,7 @@ function MdBlock({ text }: { text: string }) {
 }
 
 function SceneMiniTree({ data }: { data: unknown }) {
+  const t = useT();
   const scenes: SceneNode[] = (() => {
     if (!data || typeof data !== "object") return [];
     const d = data as Record<string, unknown>;
@@ -166,13 +172,14 @@ function SceneMiniTree({ data }: { data: unknown }) {
   const worldName = (data as Record<string, unknown>).world_name;
   return (
     <div className="sdp-structured sdp-scene-tree">
-      {worldName ? <div className="sdp-scene-world">{String(worldName)} · {scenes.length} 场景</div> : null}
+      {worldName ? <div className="sdp-scene-world">{String(worldName)} · {t("stepDetail.scenes", { n: scenes.length })}</div> : null}
       {renderBranch("", 0)}
     </div>
   );
 }
 
 function ScriptMiniView({ data }: { data: unknown }) {
+  const t = useT();
   if (!data || typeof data !== "object") {
     return <pre className="step-detail-pre">{JSON.stringify(data, null, 2)}</pre>;
   }
@@ -183,12 +190,16 @@ function ScriptMiniView({ data }: { data: unknown }) {
   }
 
   const TYPE_LABELS: Record<string, string> = {
-    opening: "开端", rising: "发展", climax: "高潮", falling: "下降", resolution: "结局",
+    opening: t("textView.chapterType.opening"),
+    rising: t("textView.chapterType.rising"),
+    climax: t("textView.chapterType.climax"),
+    falling: t("textView.chapterType.falling"),
+    resolution: t("textView.chapterType.resolution"),
   };
 
   return (
     <div className="sdp-structured">
-      {d.title ? <div className="sdp-scene-world">{String(d.title)} · {chapters.length} 章</div> : null}
+      {d.title ? <div className="sdp-scene-world">{String(d.title)} · {t("stepDetail.chapters", { n: chapters.length })}</div> : null}
       {chapters.map((ch, i) => {
         const ct = String(ch.chapter_type ?? "");
         const scenes = Array.isArray(ch.scenes) ? ch.scenes : [];
@@ -196,9 +207,9 @@ function ScriptMiniView({ data }: { data: unknown }) {
         return (
           <div key={i} className="sdp-item">
             <span className="sdp-level">{TYPE_LABELS[ct] ?? ct}</span>
-            <strong>{String(ch.title ?? `第${i + 1}章`)}</strong>
+            <strong>{String(ch.title ?? t("stepDetail.chapterN", { n: i + 1 }))}</strong>
             <span className="sdp-desc">
-              {scenes.length} 场景{conflict ? ` · 张力 ${conflict.tension_level}` : ""}
+              {t("stepDetail.scenes", { n: scenes.length })}{conflict ? ` · ${t("textView.tension")} ${conflict.tension_level}` : ""}
             </span>
           </div>
         );
@@ -208,6 +219,7 @@ function ScriptMiniView({ data }: { data: unknown }) {
 }
 
 function CoreConceptView({ data }: { data: Record<string, unknown> }) {
+  const t = useT();
   const highConcept = data.high_concept as string | undefined;
   const pillars = data.narrative_pillars as string[] | undefined;
   const loops = data.three_loops as Record<string, unknown> | undefined;
@@ -217,18 +229,22 @@ function CoreConceptView({ data }: { data: Record<string, unknown> }) {
       {highConcept && <div className="sdp-scene-world">{highConcept}</div>}
       {pillars?.length ? (
         <div className="sdp-item">
-          <strong>叙事支柱</strong>
+          <strong>{t("stepDetail.narrativePillars")}</strong>
           {pillars.map((p, i) => <div key={i} className="sdp-desc">• {p}</div>)}
         </div>
       ) : null}
       {loops ? (
         <>
-          {["system_loop", "gameplay_loop", "resource_loop"].map((key) => {
+          {(["system_loop", "gameplay_loop", "resource_loop"] as const).map((key) => {
             const loop = loops[key] as Record<string, unknown> | undefined;
             if (!loop) return null;
+            const loopLabel =
+              key === "system_loop" ? t("stepDetail.loop.system")
+              : key === "gameplay_loop" ? t("stepDetail.loop.gameplay")
+              : t("stepDetail.loop.resource");
             return (
               <div key={key} className="sdp-item">
-                <span className="sdp-level">{key === "system_loop" ? "系统" : key === "gameplay_loop" ? "玩法" : "资源"}</span>
+                <span className="sdp-level">{loopLabel}</span>
                 <strong>{String(loop.summary ?? loop.description ?? key)}</strong>
                 {Array.isArray(loop.stages) && (
                   <span className="sdp-desc">{(loop.stages as Array<Record<string, unknown>>).map((s) => s.name).join(" → ")}</span>
@@ -247,13 +263,8 @@ function CoreConceptView({ data }: { data: Record<string, unknown> }) {
 }
 
 function DesignStepView({ stepId, data }: { stepId: string; data: unknown }) {
-  const TITLES: Record<string, string> = {
-    system_architecture: "系统架构",
-    system_detail: "玩法设计",
-    value_framework: "数值框架",
-    design_doc: "策划案整合",
-  };
-  const title = TITLES[stepId] ?? stepId;
+  const t = useT();
+  const title = t(`stepDetail.design.${stepId}`);
   const d = data as Record<string, unknown>;
 
   const summary = d.summary ?? d.description ?? d.high_concept;

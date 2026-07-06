@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchRunFiles, fetchRunFileContent, type RunFileGroup } from "../../hooks/useNarrativeStream";
+import { useT } from "../../i18n";
 
 /**
  * 环节文件浏览器（复用于文本阅读 / 节点视图两个模式）：
@@ -18,6 +19,7 @@ export function StageFileBrowser({
   /** 是否默认展开首个文件内容（文本视图常用 true）。 */
   autoOpenFirst?: boolean;
 }) {
+  const t = useT();
   const [data, setData] = useState<RunFileGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -56,9 +58,9 @@ export function StageFileBrowser({
       setOpenPath(groupedPath);
       setContent(null);
       const c = await fetchRunFileContent(runKey, groupedPath);
-      setContent(c ?? "（无法读取该文件）");
+      setContent(c ?? t("stageFiles.unreadable"));
     },
-    [openPath, runKey],
+    [openPath, runKey, t],
   );
 
   // 自动展开首个文件（文本视图）。
@@ -71,12 +73,12 @@ export function StageFileBrowser({
 
   if (!runKey) return null;
   const total = data.reduce((n, g) => n + g.files.length, 0);
-  if (loading && total === 0) return <div className="stage-files stage-files--loading">环节文件加载中…</div>;
+  if (loading && total === 0) return <div className="stage-files stage-files--loading">{t("stageFiles.loading")}</div>;
   if (total === 0) return null;
 
   return (
     <div className="stage-files">
-      <div className="stage-files__head">环节文件 · {total}</div>
+      <div className="stage-files__head">{t("stageFiles.head", { n: total })}</div>
       <div className="stage-files__scroll">
         {data.map((g) => (
           <div key={g.group} className="stage-files__group">
@@ -95,7 +97,7 @@ export function StageFileBrowser({
                     <span className="stage-files__caret">{isOpen ? "▾" : "▸"}</span>
                     <span className="stage-files__name">{f}</span>
                   </button>
-                  {isOpen && <pre className="stage-files__content">{content ?? "读取中…"}</pre>}
+                  {isOpen && <pre className="stage-files__content">{content ?? t("stageFiles.reading")}</pre>}
                 </div>
               );
             })}

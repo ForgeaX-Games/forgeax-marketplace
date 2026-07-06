@@ -8,10 +8,15 @@ import type { StepState } from "../../store/narrativeStore";
 import { PIPELINE_STEPS } from "../../types";
 import { resolveStepDisplay } from "../../utils/stepDisplay";
 import type { EntryStatus, DraftState, StepDisplayState } from "../../utils/stepDisplay";
+import { useT, tStepLabel } from "../../i18n";
 
 type StepStatus = "pending" | "running" | "completed" | "failed";
 
 const STEP_LABEL_MAP = new Map(PIPELINE_STEPS.map((s) => [s.id, s.label]));
+
+function stepLabelOf(id: string, live: StepState | undefined): string {
+  return tStepLabel(id, STEP_LABEL_MAP.get(id) ?? live?.label ?? id);
+}
 
 /**
  * 动态 C 序号（§5.1 / 蓝图 §3.5 动态分步）：中间管线里出现的 IP 预处理节点（id 以 `ip_` 开头）
@@ -50,6 +55,7 @@ function ChipGlyph({ display }: { display: StepDisplayState }) {
 }
 
 export function PipelineStatusBar() {
+  const t = useT();
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const activeSteps = useNarrativeStore((s) => s.activeSteps);
@@ -83,7 +89,7 @@ export function PipelineStatusBar() {
 
   const liveMap = useMemo(() => new Map(liveSteps.map((s) => [s.id, s])), [liveSteps]);
   const labelOf = (id: string, live: StepState | undefined) =>
-    STEP_LABEL_MAP.get(id) ?? live?.label ?? id;
+    stepLabelOf(id, live);
 
   const displaySteps = useMemo(() => {
     // 整条铺开（含未达 pending）：正式 run / 历史视图——可预见下游待跑步骤。
@@ -115,7 +121,10 @@ export function PipelineStatusBar() {
       return [...ordered, ...extra];
     };
     let built: Array<{ id: string; label: string; status: StepStatus }>;
-    const useGrown = isIpPreview || (hasIpProgress && isViewingRunning);
+    // §状态机重构 / 预览同源：只要出现过真实 ip_* 前驱步（hasIpProgress）就走"逐步生长"分支，
+    // 直接消费已 push 的带 data 步骤——不再回退到静态 previewOrder 渲染"可点击但无 data"的空芯片
+    // （那正是"点 C0-Cn 无内容"的直接原因）。previewOrder 仅在纯预演（无任何真实 progress）时占位。
+    const useGrown = isIpPreview || hasIpProgress;
     if (useGrown) built = buildGrown(effectivePipelineOrder.length > 0 ? effectivePipelineOrder : liveSteps.map((s) => s.id));
     else if (effectivePipelineOrder.length > 0) built = buildFromOrder(effectivePipelineOrder);
     else if (previewOrder && previewOrder.length > 0) built = buildFromOrder(previewOrder);
@@ -133,27 +142,27 @@ export function PipelineStatusBar() {
   return (
     <div className="cw-pipeline-wrap pipeline-bar-wrap">
       <div className="cw-pipeline-header">
-        <span className="cw-eyebrow">Pipeline</span>
+        <span className="cw-eyebrow">{t("pipeline.eyebrow")}</span>
         <span className="cw-pipeline-title">
-          管线状态{total > 0 ? ` (${done}/${total})` : ""}
+          {total > 0 ? t("pipeline.titleProgress", { done, total }) : t("pipeline.title")}
         </span>
-        <span className="cw-pipeline-note">预览界面 — 创世之书就此展开</span>
+        <span className="cw-pipeline-note">{t("pipeline.note")}</span>
       </div>
 
       {total === 0 ? (
         <div className="cw-pipeline-empty pipeline-bar-empty">
-          在左侧选择叙事类型后，这里展示完整管线链路
+          {t("pipeline.empty")}
         </div>
       ) : (
         <div className="cw-pipeline-track pipeline-bar-track">
           {showAutoHint && (
-            <span className="pipeline-bar-auto" title="自动模式预览的是 T1 标准管线，实际步骤由 LLM 按品类判定">
-              自动 · 预览 T1 管线
+            <span className="pipeline-bar-auto" title={t("pipeline.autoHintTitle")}>
+              {t("pipeline.autoHint")}
             </span>
           )}
           {displaySteps.map((s, i) => (
             <div className="pipeline-chip-cell" key={s.id}>
-              <StepChip step={s} entryStatus={activeEntryStatus} draft={editDrafts[s.id]} />
+              <StepChip step={s} entryStatus={activeEntryStatus} draft={editDrafts[s.id]} t={t} />
               {i < displaySteps.length - 1 && <span className="pipeline-chip-arrow" aria-hidden>›</span>}
             </div>
           ))}
@@ -167,10 +176,12 @@ function StepChip({
   step,
   entryStatus,
   draft,
+  t,
 }: {
   step: { id: string; label: string; status: StepStatus };
   entryStatus: EntryStatus;
   draft?: DraftState;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   const focusedId = useNarrativeStore((s) => s.focusedStepId);
   const setFocus = useNarrativeStore((s) => s.setFocus);
@@ -183,7 +194,7 @@ function StepChip({
       type="button"
       className={`pipeline-chip status-${display} ${isActive ? "active" : ""}`}
       onClick={() => setFocus(isActive ? null : step.id)}
-      title={`${step.label} · 点击在下方预览该步产物`}
+      title={t("pipeline.chipTitle", { label: step.label })}
     >
       <span className="pipeline-chip-icon">
         <ChipGlyph display={display} />

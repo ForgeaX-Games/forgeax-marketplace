@@ -839,8 +839,10 @@ async function pollVideoQueue(): Promise<void> {
 }
 
 function systemLoadScenario(next: Scenario): void {
-  _suppressWrite = true
-  useScenarioStore.getState().loadScenario(next)
+  setTimeout(() => {
+    _suppressWrite = true
+    useScenarioStore.getState().loadScenario(next)
+  }, 0)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -191,6 +191,8 @@ export interface VnScene {
   content: string;                            // 五要素融合段落
   is_main_line?: boolean;                     // 默认 true；G-01 改造后支线场为 false
   branch_origin_beat?: string;                // 支线起源情节点 ID（仅支线场用）
+  /** 地点稳定 id（location_name → loc-N，供资产复用）。 */
+  location_id?: string;
 }
 
 /** E1-04 情节点（Beat）线性版 — 尚未分支 */
@@ -199,9 +201,20 @@ export interface VnBeats {
 }
 
 export interface VnBeat {
-  beat_id: string;                            // "1.1", "1.2", "2.1"…
-  scene_id: string;                           // 所属场（首次时间轴上的归属）
+  /**
+   * 拓扑序标识（如 "b1"/"b2"）——故事结构由情节点 DAG 承载、不锚定场号。
+   * 最终 `场.序` beat_id 由剧情树拓扑定稿后的确定性场号导出统一分配（§4.6c）。
+   */
+  beat_id: string;
   content: string;                            // 五要素融合段落
+  /** 所属幕（供场号导出时分组/校验；开放幕数，汉字数字序列）。 */
+  act_id?: string;
+  // 三维 staging（原来自场；现由情节点自身携带，供拓扑定稿后确定性导出场号）
+  location_name?: string;
+  time_of_day?: "日" | "夜";
+  indoor_outdoor?: "内" | "外";
+  /** @deprecated 场号改为派生；旧数据/E2 路径可能仍带，读时兼容、写时不再前置分配。 */
+  scene_id?: string;
 }
 
 /** E2-01 用户剧本预处理（mode + raw + 推断的层级） */
@@ -254,9 +267,22 @@ export interface VnBranchedBeats {
 }
 
 export interface VnBranchedBeat {
-  beat_id: string;                           // "1.1", "2.3"...
+  /**
+   * 剧情树阶段为**拓扑序稳定 id**（如 "b1"/"b7"）；经确定性场号导出后重写为最终 `场.序`（§4.6c）。
+   * 下游（G-02/G-03/前端/落盘）只见导出后的 `场.序` 形态。
+   */
+  beat_id: string;
+  /** 场号——由确定性场号导出按三维状态分组后回填（LLM 阶段不产、留空/占位）。 */
   scene_id: string;
   content: string;
+  /** 所属幕（供场号导出时派生 scene.act_id；LLM 逐 beat 回填，开放幕数汉字序列）。 */
+  act_id?: string;
+  // 三维 staging（场切分唯一依据；LLM 在剧情树阶段逐 beat 产出，供导出编场号）
+  location_name?: string;
+  time_of_day?: "日" | "夜";
+  indoor_outdoor?: "内" | "外";
+  /** 地点稳定 id（location_name → loc-N，场号导出时回填，供资产复用）。 */
+  location_id?: string;
   prev_nodes: string[];                      // 上游 beat_id（root 为空）
   next_nodes: VnNextEdge[];                  // 下游链接（含 label/kind）
   is_main_line: boolean;

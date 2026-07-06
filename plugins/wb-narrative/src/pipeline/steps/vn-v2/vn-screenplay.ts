@@ -14,8 +14,9 @@
  *     * pivot_kind="branch_qte"  ⟹ branch_qte 字段必填
  *   - 演出型 QTE（performance）已全局停用：只保留影响剧情的决策型互动
  *
- * 工程实现（设计 §8.2）：按场分块 LLM 调用，每次只传 1 个场（含其下所有 beats），
- * 支持流式 emit，避免长剧本上下文超限。
+ * 工程实现（设计 §8.2）：按**线性依赖段**分块 LLM 调用（decomposeSegments/runBySegments，
+ * 按 beat 的 prev/next 拓扑切段，**非按场**——场已解耦为拍摄分组，见 §4.6c），
+ * 支持流式 emit，避免长剧本上下文超限。beat_id 为 G-01 导出后的 `场.序`。
  */
 import type {
   NarrativeContext,

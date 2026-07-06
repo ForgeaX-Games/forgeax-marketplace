@@ -20,17 +20,17 @@
  */
 
 import { createVideoProvider } from '../llm'
-import { isVideoTaskProvider } from '../llm/VideoProvider'
-import { useVideoTaskStore } from '../llm/videoTaskStore'
-import { runWithConcurrency } from '../llm/batchImageGen'
-import { DEFAULT_VIDEO_SIZE, type VideoSize } from '../llm/seedanceResolution'
-import { VIDEO_BATCH_CONCURRENCY } from '../llm/concurrency'
+import { isVideoTaskProvider } from '../llm/providers/VideoProvider'
+import { useVideoTaskStore } from '../llm/pipeline/videoTaskStore'
+import { runWithConcurrency } from '../llm/pipeline/batchImageGen'
+import { DEFAULT_VIDEO_SIZE, type VideoSize } from '../llm/refsets/seedanceResolution'
+import { VIDEO_BATCH_CONCURRENCY } from '../llm/util/concurrency'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useSettingsStore } from '../scenario/settingsStore'
 import { useMediaStore } from '../media/mediaStore'
 import { useForgeChatStore } from './forgeChatStore'
 import { orchestrateVideos } from './orchestrateVideos'
-import { buildVideoReferenceSet } from '../llm/buildVideoReferenceSet'
+import { buildVideoReferenceSet } from '../llm/refsets/buildVideoReferenceSet'
 import type { Scene, Shot } from '../scenario/types'
 
 export interface VideoQueueJob {

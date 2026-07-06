@@ -18,7 +18,7 @@
  *      LLM 调用完后直接写回 store —— 简单粗暴但够用。后续 PR 可以把它接进 stage 机。
  */
 
-import type { TextClient } from '../llm/types'
+import type { TextClient } from '../llm/config/types'
 import type {
   Character,
   CharacterRelation,

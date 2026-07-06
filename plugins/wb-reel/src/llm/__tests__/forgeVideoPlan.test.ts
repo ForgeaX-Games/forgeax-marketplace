@@ -6,8 +6,8 @@ import {
   augmentPromptWithContinuityContext,
   decideExtendStrategy,
   composeContinuityDeclaration,
-} from '../forgeVideoPlan'
-import { getCapability } from '../modelCapabilities'
+} from '../forge/forgeVideoPlan'
+import { getCapability } from '../config/modelCapabilities'
 import type { Scene, Shot } from '../../scenario/types'
 
 function makeShot(id: string, order: number, opts: Partial<Shot> = {}): Shot {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { maskSeedanceContentInput } from '../faceMaskTool'
-import type { BuildSeedanceContentInput } from '../seedanceContent'
+import { maskSeedanceContentInput } from '../refsets/faceMaskTool'
+import type { BuildSeedanceContentInput } from '../refsets/seedanceContent'
 
 const DATA_URL = 'data:image/png;base64,AAAA'
 const MASKED = 'data:image/png;base64,MASKED'

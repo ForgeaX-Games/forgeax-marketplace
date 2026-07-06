@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────────
  * 与 MyFile/提示词/影游叙事生成提示词/09_分镜设计.md 对齐。
  *
- * 输入：ctx.vn_screenplay + ctx.vn_branched_beats + ctx.vn_scenes
+ * 输入：ctx.vn_screenplay + ctx.vn_branched_beats（含 G-01 末尾导出的派生 scenes / 场.序 beat_id）
  * 输出：ctx.vn_storyboard = { storyboards: [{ beat_id, shots: [...] }] }
  *
  * 核心规则：

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeBackoffMs, shouldRetryHttp, shouldRetryError } from '../retryPolicy'
+import { computeBackoffMs, shouldRetryHttp, shouldRetryError } from '../util/retryPolicy'
 
 /**
  * 重试策略 = 系统稳定性的契约。

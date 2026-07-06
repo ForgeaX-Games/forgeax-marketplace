@@ -1,6 +1,6 @@
-import type { TextClient } from '../llm/types'
-import { streamOrFallback } from '../llm/types'
-import { parseJSONLoose } from '../llm/parseJSONLoose'
+import type { TextClient } from '../llm/config/types'
+import { streamOrFallback } from '../llm/config/types'
+import { parseJSONLoose } from '../llm/util/parseJSONLoose'
 import { SKILLS } from '../llm/skills'
 import { useForgeChatStore } from './forgeChatStore'
 import type {

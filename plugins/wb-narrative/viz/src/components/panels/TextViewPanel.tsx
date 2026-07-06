@@ -27,36 +27,8 @@ import { resolveStepDisplay, getStepIcon } from "../../utils/stepDisplay";
 import type { EntryStatus } from "../../utils/stepDisplay";
 import { findStepsContainingNodeId } from "../../utils/cross-step-node";
 import { StageFileBrowser, fileGroupsForStep } from "../shared/StageFileBrowser";
-
-const STEP_TAGS: Record<string, string[]> = {
-  pipeline_config:      ["Tier", "Mode", "步骤数"],
-  tier_router:          ["品类", "叙事强度", "叙事类型"],
-  // 策划步骤 (D0-D4)
-  core_concept:         ["核心概念", "三大循环", "叙事支柱"],
-  system_architecture:  ["系统架构", "依赖图", "生成顺序"],
-  system_detail:        ["玩法设计", "系统交互", "关键特性"],
-  value_framework:      ["数值框架", "经济体系", "成长曲线"],
-  design_doc:           ["策划案", "完整性", "叙事需求接口"],
-  // 叙事步骤
-  preference_summary:   ["核心要素", "期望体验", "特殊要求", "简短概述"],
-  preference_analysis:  ["全局控制参数", "世界观维度", "框架层维度", "大纲层维度", "细纲层维度"],
-  initial_outline:      ["大纲草稿"],
-  core_settings:        ["世界设定", "主角", "关键NPC", "核心冲突"],
-  worldview:            ["基础架构层", "交互叙事层", "核心规则"],
-  plot_synopsis:        ["剧情策略", "核心亮点"],
-  story_framework:      ["故事节点", "分支结构", "动态结构"],
-  outline_batch:        ["L1大纲节点"],
-  detailed_outline:     ["L2细纲节点", "故事元素"],
-  character_enrichment: ["角色档案"],
-  item_database:        ["道具清单", "类别", "稀有度"],
-  plot_generation:      ["情节节点", "故事元素", "JRPG元素"],
-  structure_validation_l3: ["L3验证", "修复日志"],
-  script_generation:    ["剧本章节", "冲突张力", "场景描写"],
-  quest_generation:     ["主线任务", "支线任务", "触发条件", "奖励"],
-  scene_generation:     ["场景骨架", "场景展开", "场景合并"],
-  narrative_card:       ["叙事卡片"],
-  lore_generation:      ["Lore碎片"],
-};
+import { useT, tStepLabel, tStepTags, tDisplayState, getLocale } from "../../i18n";
+import { sceneLevelLabel } from "../../i18n/ui";
 
 const STEP_LABEL_MAP = new Map(PIPELINE_STEPS.map((s) => [s.id, s.label]));
 
@@ -87,6 +59,7 @@ function resolveStepData(stepId: string, result: NarrativeContext | null): unkno
 }
 
 export function TextViewPanel() {
+  const t = useT();
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
@@ -187,7 +160,7 @@ export function TextViewPanel() {
   if (!entryStatus && (!result || steps.length === 0)) {
     return (
       <div className="text-view empty-state">
-        <div className="empty-text">[ 输入故事需求 · 点击开始生成 ]</div>
+        <div className="empty-text">{t("textView.empty")}</div>
       </div>
     );
   }
@@ -200,7 +173,7 @@ export function TextViewPanel() {
         <div className="text-progress-bar">
           <ProgressRing progress={progress} size={40} />
           <span className="text-progress-label">
-            {steps.find((s) => s.status === "running")?.label ?? "准备中..."}
+            {steps.find((s) => s.status === "running")?.label ?? t("textView.preparing")}
           </span>
         </div>
       )}
@@ -211,18 +184,18 @@ export function TextViewPanel() {
             <MapPin size={14} />
           </span>
           <span className="cross-step-link-label">
-            节点 <code className="cross-step-link-node">{focusedChildNodeId}</code> 也出现在
+            {t("textView.crossStepPrefix")} <code className="cross-step-link-node">{focusedChildNodeId}</code> {t("textView.crossStepAlso")}
           </span>
           {linkedStepIds.map((sid) => {
             const stepLabel = steps.find((st) => st.id === sid)?.label
-              ?? STEP_LABEL_MAP.get(sid)
-              ?? sid;
+              ? tStepLabel(sid, steps.find((st) => st.id === sid)!.label)
+              : tStepLabel(sid, STEP_LABEL_MAP.get(sid) ?? sid);
             const Icon = CROSS_STEP_ICONS[sid] ?? CornerDownRight;
             return (
               <button
                 key={sid}
                 className="cross-step-link-chip"
-                title={`跳到「${stepLabel}」中的同一节点`}
+                title={t("textView.crossStepJump", { step: stepLabel })}
                 onClick={() => setFocus(sid, focusedChildNodeId)}
               >
                 <span className="cross-step-link-chip-icon" aria-hidden>
@@ -239,7 +212,7 @@ export function TextViewPanel() {
         {steps.filter((s) => !s.id.startsWith("structure_validation")).map((s) => {
           const isExpanded = expandedStepId === s.id;
           const data = s.data ?? resolveStepData(s.id, result);
-          const tags = STEP_TAGS[s.id] ?? [];
+          const tags = tStepTags(s.id);
           const isStory = STORY_STEP_IDS.has(s.id);
           const isLocked = s.status === "running" && isRunningState && !isStory;
           const isAnimating = animatingStepId === s.id;
@@ -251,7 +224,7 @@ export function TextViewPanel() {
             <StepCard
               key={s.id}
               stepId={s.id}
-              label={s.label || STEP_LABEL_MAP.get(s.id) || s.id}
+              label={s.label ? tStepLabel(s.id, s.label) : tStepLabel(s.id, STEP_LABEL_MAP.get(s.id) ?? s.id)}
               stepStatus={s.status}
               message={s.message}
               tags={tags}
@@ -317,6 +290,7 @@ function StepCard({
   onCancelEdit?: () => void;
   onDraftChange?: (content?: string, userInput?: string) => void;
 }) {
+  const t = useT();
   const [showInput, setShowInput] = useState(false);
   const [localEditing, setLocalEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
@@ -332,9 +306,9 @@ function StepCard({
     : "";
 
   const displayBadge =
-    displayState === "editing" ? "编辑中" :
-    displayState === "draft_ready" ? "已修改" :
-    displayState === "incomplete" ? "未完成" :
+    displayState === "editing" ? t("display.editing") :
+    displayState === "draft_ready" ? t("display.draft_ready") :
+    displayState === "incomplete" ? t("display.incomplete") :
     null;
 
   const handleEdit = () => {
@@ -366,7 +340,7 @@ function StepCard({
         {displayBadge ? (
           <span className={`tsc-badge lifecycle-${displayState}`}>{displayBadge}</span>
         ) : (
-          <span className={`tsc-badge status-${displayState}`}>{displayState}</span>
+          <span className={`tsc-badge status-${displayState}`}>{tDisplayState(displayState)}</span>
         )}
         {!isLocked && <span className="tsc-expand-arrow">{expanded ? "▾" : "▸"}</span>}
         {isLocked && <span className="tsc-lock-icon">🔒</span>}
@@ -415,7 +389,7 @@ function StepCard({
         <div className="tsc-user-input-box">
           <textarea
             className="tsc-user-input-textarea"
-            placeholder="输入修改意见或新需求..."
+            placeholder={t("textView.userInputPlaceholder")}
             value={userInputText}
             onChange={(e) => {
               setUserInputText(e.target.value);
@@ -431,32 +405,32 @@ function StepCard({
           <button
             className={`tsc-action-btn edit${isInEditState ? " active" : ""}`}
             onClick={(e) => { e.stopPropagation(); handleEdit(); }}
-            title="直接编辑内容"
+            title={t("textView.editTitle")}
             disabled={!!isInEditState}
           >
-            编辑
+            {t("textView.edit")}
           </button>
           <button
             className={`tsc-action-btn input${showInput ? " active" : ""}`}
             onClick={(e) => { e.stopPropagation(); setShowInput(!showInput); }}
-            title="输入修改意见/指令"
+            title={t("textView.inputTitle")}
           >
-            输入
+            {t("textView.input")}
           </button>
           <button
             className="tsc-action-btn save"
             onClick={(e) => { e.stopPropagation(); handleSave(); }}
-            title="保存编辑和输入"
+            title={t("textView.saveTitle")}
             disabled={!isInEditState && !userInputText.trim()}
           >
-            保存
+            {t("textView.save")}
           </button>
           <button
             className="tsc-action-btn cancel"
             onClick={(e) => { e.stopPropagation(); handleCancel(); }}
-            title="取消修改"
+            title={t("textView.cancelTitle")}
           >
-            取消
+            {t("textView.cancel")}
           </button>
         </div>
       )}
@@ -475,6 +449,7 @@ function StreamingContent({
   isAnimating?: boolean;
   message?: string;
 }) {
+  const t = useT();
   const streamChunk = useNarrativeStore((s) => s.streamingChunks[stepId]);
   const streamPlayed = useNarrativeStore((s) => s.streamPlayedSteps.includes(stepId));
   const finishAnimation = useNarrativeStore((s) => s.finishAnimation);
@@ -516,7 +491,7 @@ function StreamingContent({
 
   return (
     <div className="tsc-empty">
-      {stepStatus === "running" ? "正在生成中..." : stepStatus === "pending" ? "等待执行..." : "暂无数据"}
+      {stepStatus === "running" ? t("textView.generating") : stepStatus === "pending" ? t("textView.waiting") : t("textView.noData")}
     </div>
   );
 }
@@ -620,7 +595,7 @@ function StepRenderer({
         {result.story_framework.dynamic_structure?.branch_groups &&
           result.story_framework.dynamic_structure.branch_groups.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div className="result-section-title">分支结构</div>
+            <BranchStructureTitle />
             <GenericObjectView data={result.story_framework.dynamic_structure.branch_groups} />
           </div>
         )}
@@ -695,12 +670,18 @@ interface InitialPlanData {
   plot_synopsis?: NarrativeContext["plot_synopsis"];
 }
 
+function BranchStructureTitle() {
+  const t = useT();
+  return <div className="result-section-title">{t("textView.branchStructure")}</div>;
+}
+
 function InitialPlanView({
   result, data,
 }: {
   result: NarrativeContext | null;
   data: unknown;
 }) {
+  const t = useT();
   // 优先用 result（顶层 ctx，永远是最新），其次 data（断点续传时 step_done 携带的聚合对象）
   const aggregated = (data && typeof data === "object" ? data as InitialPlanData : null);
   const outline = result?.initial_story_outline ?? aggregated?.initial_story_outline ?? null;
@@ -708,26 +689,26 @@ function InitialPlanView({
   const ps = result?.plot_synopsis ?? aggregated?.plot_synopsis ?? null;
 
   if (!outline && !cs && !ps) {
-    return <div className="tsc-empty">暂无数据</div>;
+    return <div className="tsc-empty">{t("textView.noData")}</div>;
   }
 
   return (
     <div className="initial-plan-view">
       {outline && (
         <section className="ip-section">
-          <h3 className="ip-title">📋 初步大纲</h3>
+          <h3 className="ip-title">📋 {t("textView.initialOutline")}</h3>
           <InitialOutlineSection outline={outline} />
         </section>
       )}
       {cs && (
         <section className="ip-section">
-          <h3 className="ip-title">⚙️ 核心设定</h3>
+          <h3 className="ip-title">⚙️ {t("textView.coreSettings")}</h3>
           <CoreSettingsView cs={cs} />
         </section>
       )}
       {ps && (
         <section className="ip-section">
-          <h3 className="ip-title">📖 剧情简介</h3>
+          <h3 className="ip-title">📖 {t("textView.plotSynopsis")}</h3>
           <PlotSynopsisView ps={ps} />
         </section>
       )}
@@ -740,25 +721,26 @@ function InitialOutlineSection({
 }: {
   outline: NonNullable<NarrativeContext["initial_story_outline"]>;
 }) {
+  const t = useT();
   return (
     <div className="initial-outline-section">
-      <div className="ip-row"><span className="ip-label">主题</span><span>{outline.theme ?? "—"}</span></div>
-      {outline.background && <div className="ip-row"><span className="ip-label">背景</span><span>{outline.background}</span></div>}
-      {outline.character_arc && <div className="ip-row"><span className="ip-label">角色弧光</span><span>{outline.character_arc}</span></div>}
-      {outline.main_conflict && <div className="ip-row"><span className="ip-label">主要冲突</span><span>{outline.main_conflict}</span></div>}
+      <div className="ip-row"><span className="ip-label">{t("field.theme")}</span><span>{outline.theme ?? "—"}</span></div>
+      {outline.background && <div className="ip-row"><span className="ip-label">{t("field.background")}</span><span>{outline.background}</span></div>}
+      {outline.character_arc && <div className="ip-row"><span className="ip-label">{t("field.characterArc")}</span><span>{outline.character_arc}</span></div>}
+      {outline.main_conflict && <div className="ip-row"><span className="ip-label">{t("field.mainConflict")}</span><span>{outline.main_conflict}</span></div>}
       {outline.story_structure && (
         <div className="ip-substruct">
-          <div className="ip-label">故事结构</div>
-          {outline.story_structure.opening && <div>· 开端：{outline.story_structure.opening}</div>}
+          <div className="ip-label">{t("field.storyStructure")}</div>
+          {outline.story_structure.opening && <div>· {t("field.opening")}：{outline.story_structure.opening}</div>}
           {outline.story_structure.development?.length > 0 && (
-            <ul>{outline.story_structure.development.map((d: string, i: number) => <li key={i}>· 发展：{d}</li>)}</ul>
+            <ul>{outline.story_structure.development.map((d: string, i: number) => <li key={i}>· {t("field.development")}：{d}</li>)}</ul>
           )}
-          {outline.story_structure.ending && <div>· 结局：{outline.story_structure.ending}</div>}
+          {outline.story_structure.ending && <div>· {t("field.ending")}：{outline.story_structure.ending}</div>}
         </div>
       )}
       {outline.key_plot_points?.length > 0 && (
         <div className="ip-substruct">
-          <div className="ip-label">关键情节点</div>
+          <div className="ip-label">{t("field.keyPlotPoints")}</div>
           <ul>{outline.key_plot_points.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
         </div>
       )}
@@ -771,21 +753,22 @@ function InitialOutlineSection({
 // ══════════════════════════════════════════════════════════════════════════════
 
 function CoreSettingsView({ cs }: { cs: NonNullable<NarrativeContext["core_settings"]> }) {
+  const t = useT();
   return (
     <div>
-      <KV label="世界名" value={cs.world_name} />
-      <KV label="背景" value={cs.world_setting} />
-      <KV label="主题" value={cs.main_theme} />
-      <KV label="主要冲突" value={cs.main_conflict} />
-      <KV label="类型" value={cs.genre} />
-      <KV label="叙事视角" value={cs.narrative_perspective} />
+      <KV label={t("field.worldName")} value={cs.world_name} />
+      <KV label={t("field.background")} value={cs.world_setting} />
+      <KV label={t("field.theme")} value={cs.main_theme} />
+      <KV label={t("field.mainConflict")} value={cs.main_conflict} />
+      <KV label={t("field.genre")} value={cs.genre} />
+      <KV label={t("field.narrativePerspective")} value={cs.narrative_perspective} />
       {cs.protagonist && (
         <div className="sub-section">
-          <div className="result-section-title">主角</div>
-          <KV label="名字" value={cs.protagonist.name} />
-          <KV label="身份" value={cs.protagonist.identity} />
-          <KV label="性格" value={cs.protagonist.personality} />
-          <KV label="核心冲突" value={cs.protagonist.core_conflict} />
+          <div className="result-section-title">{t("field.protagonist")}</div>
+          <KV label={t("field.name")} value={cs.protagonist.name} />
+          <KV label={t("field.identity")} value={cs.protagonist.identity} />
+          <KV label={t("field.personality")} value={cs.protagonist.personality} />
+          <KV label={t("field.coreConflict")} value={cs.protagonist.core_conflict} />
         </div>
       )}
     </div>
@@ -810,6 +793,7 @@ interface VnKeyItemData {
 }
 
 function VnOutlineActsView({ result, data }: { result: NarrativeContext | null; data: unknown }) {
+  const t = useT();
   const ctx = result as Record<string, unknown> | null;
   // 优先从 result 读三个独立字段；断点恢复时退回 data（聚合对象或仅三幕）。
   const fallback = (data && typeof data === "object" ? (data as Record<string, unknown>) : {}) as Record<string, unknown>;
@@ -824,53 +808,51 @@ function VnOutlineActsView({ result, data }: { result: NarrativeContext | null; 
     <div>
       {/* ── 三幕大纲 ── */}
       <div className="sub-section">
-        <div className="result-section-title">📖 三幕大纲</div>
-        {outline?.title && <KV label="标题" value={outline.title} />}
-        {outline?.central_theme && <KV label="中心主题" value={outline.central_theme} />}
+        <div className="result-section-title">📖 {t("textView.threeActOutline")}</div>
+        {outline?.title && <KV label={t("field.title")} value={outline.title} />}
+        {outline?.central_theme && <KV label={t("field.centralTheme")} value={outline.central_theme} />}
         {(outline?.acts ?? []).map((act, i) => (
           <ProseBlock
             key={i}
-            title={`第${act.act_id ?? i + 1}幕 · ${act.act_name ?? ""}`}
+            title={`${t("field.act", { n: act.act_id ?? i + 1 })} · ${act.act_name ?? ""}`}
             text={act.content ?? ""}
             color="green"
           />
         ))}
       </div>
 
-      {/* ── 人物小传 ── */}
       {characters.length > 0 && (
         <div className="sub-section">
-          <div className="result-section-title">👥 人物小传（{characters.length}）</div>
+          <div className="result-section-title">👥 {t("textView.characterBios", { n: characters.length })}</div>
           {characters.map((c, i) => (
             <div key={i} className="prose-block">
               <div className="prose-block-title prose-title-gold">
-                {c.name ?? `角色${i + 1}`}{c.role ? ` · ${c.role}` : ""}
+                {c.name ?? t("textView.characterDefault", { n: i + 1 })}{c.role ? ` · ${c.role}` : ""}
               </div>
-              {c.identity && <KV label="身份" value={c.identity} />}
-              {c.external_motivation && <KV label="外驱" value={c.external_motivation} />}
-              {c.internal_motivation && <KV label="内驱" value={c.internal_motivation} />}
-              {c.arc && <KV label="弧光" value={c.arc} />}
-              {c.voice && <KV label="语态" value={c.voice} />}
-              {c.visual && <KV label="视觉" value={c.visual} />}
+              {c.identity && <KV label={t("field.identity")} value={c.identity} />}
+              {c.external_motivation && <KV label={t("field.externalDrive")} value={c.external_motivation} />}
+              {c.internal_motivation && <KV label={t("field.internalDrive")} value={c.internal_motivation} />}
+              {c.arc && <KV label={t("field.arc")} value={c.arc} />}
+              {c.voice && <KV label={t("field.voice")} value={c.voice} />}
+              {c.visual && <KV label={t("field.visual")} value={c.visual} />}
             </div>
           ))}
         </div>
       )}
 
-      {/* ── 关键道具 ── */}
       {items.length > 0 && (
         <div className="sub-section">
-          <div className="result-section-title">🗝 关键道具（{items.length}）</div>
+          <div className="result-section-title">🗝 {t("textView.keyItemsSection", { n: items.length })}</div>
           {items.map((it, i) => (
             <div key={i} className="prose-block">
               <div className="prose-block-title prose-title-blue">
-                {it.name ?? `道具${i + 1}`}{it.category ? ` · ${it.category}` : ""}
+                {it.name ?? t("textView.itemDefault", { n: i + 1 })}{it.category ? ` · ${it.category}` : ""}
               </div>
-              {it.description && <KV label="描述" value={it.description} />}
-              {it.narrative_function && <KV label="叙事作用" value={it.narrative_function} />}
-              {it.bound_character && <KV label="关联人物" value={it.bound_character} />}
-              {it.act_appearance?.length ? <KV label="出现幕" value={it.act_appearance.join("、")} /> : null}
-              {it.symbolism && <KV label="象征" value={it.symbolism} />}
+              {it.description && <KV label={t("field.description")} value={it.description} />}
+              {it.narrative_function && <KV label={t("field.narrativeFunction")} value={it.narrative_function} />}
+              {it.bound_character && <KV label={t("field.boundCharacter")} value={it.bound_character} />}
+              {it.act_appearance?.length ? <KV label={t("field.appearanceActs")} value={it.act_appearance.join("、")} /> : null}
+              {it.symbolism && <KV label={t("field.symbolism")} value={it.symbolism} />}
             </div>
           ))}
         </div>
@@ -884,21 +866,22 @@ function VnOutlineActsView({ result, data }: { result: NarrativeContext | null; 
 // ══════════════════════════════════════════════════════════════════════════════
 
 function PreferenceAnalysisView({ data }: { data: Record<string, unknown> }) {
+  const t = useT();
   const gcp = data["全局控制参数"] as Record<string, unknown> | undefined;
-  const sections: Array<{ label: string; key: string }> = [
-    { label: "世界观维度", key: "世界观维度" },
-    { label: "框架层维度 L0", key: "框架层维度_L0" },
-    { label: "大纲层维度 L1", key: "大纲层维度_L1" },
-    { label: "细纲层维度 L2", key: "细纲层维度_L2" },
+  const sections: Array<{ labelKey: string; key: string }> = [
+    { labelKey: "pref.section.worldview", key: "世界观维度" },
+    { labelKey: "pref.section.frameworkL0", key: "框架层维度_L0" },
+    { labelKey: "pref.section.outlineL1", key: "大纲层维度_L1" },
+    { labelKey: "pref.section.detailedL2", key: "细纲层维度_L2" },
   ];
 
   return (
     <div>
       {gcp && (
         <div className="sub-section">
-          <div className="result-section-title">全局控制参数</div>
-          <KV label="复杂度" value={String(gcp.complexity ?? "-")} />
-          <KV label="偏差值" value={gcp.deviation !== undefined ? Number(gcp.deviation).toFixed(2) : String(gcp.deviation_direction ?? "-")} />
+          <div className="result-section-title">{t("pref.section.globalControl")}</div>
+          <KV label={t("textView.complexity")} value={String(gcp.complexity ?? "-")} />
+          <KV label={t("textView.deviation")} value={gcp.deviation !== undefined ? Number(gcp.deviation).toFixed(2) : String(gcp.deviation_direction ?? "-")} />
         </div>
       )}
       {sections.map((sec) => {
@@ -906,7 +889,7 @@ function PreferenceAnalysisView({ data }: { data: Record<string, unknown> }) {
         if (!slots || !Object.keys(slots).length) return null;
         return (
           <div key={sec.key} className="sub-section">
-            <div className="result-section-title">{sec.label}</div>
+            <div className="result-section-title">{t(sec.labelKey)}</div>
             {Object.entries(slots).map(([k, v]) => (
               <div key={k} className="wv-slot-row">
                 <span className="wv-slot-key">{k} {String(v.slot_name ?? "")}</span>
@@ -932,22 +915,23 @@ function PreferenceAnalysisView({ data }: { data: Record<string, unknown> }) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function WorldviewView({ wv }: { wv: NarrativeContext["worldview_structure"] }) {
+  const t = useT();
   if (!wv) return null;
-  const layers: Array<{ key: string; label: string }> = [
-    { key: "基础架构层", label: "基础架构层" },
-    { key: "交互叙事层", label: "交互叙事层" },
+  const layers: Array<{ key: string; labelKey: string }> = [
+    { key: "基础架构层", labelKey: "textView.worldArchitecture" },
+    { key: "交互叙事层", labelKey: "textView.interactiveNarrative" },
   ];
 
   return (
     <div>
-      <KV label="世界名" value={wv.world_name} />
-      {wv.worldview_title && <KV label="标题" value={wv.worldview_title} />}
-      {layers.map(({ key, label }) => {
+      <KV label={t("field.worldName")} value={wv.world_name} />
+      {wv.worldview_title && <KV label={t("field.title")} value={wv.worldview_title} />}
+      {layers.map(({ key, labelKey }) => {
         const slots = (wv as Record<string, unknown>)[key] as Record<string, Record<string, unknown>> | undefined;
         if (!slots || !Object.keys(slots).length) return null;
         return (
           <div key={key} className="sub-section">
-            <div className="result-section-title">{label}</div>
+            <div className="result-section-title">{t(labelKey)}</div>
             {Object.entries(slots).map(([k, v]) => {
               const parts = k.split("_");
               const slotId = parts.slice(0, 2).join("_");
@@ -969,7 +953,7 @@ function WorldviewView({ wv }: { wv: NarrativeContext["worldview_structure"] }) 
       })}
       {Array.isArray((wv as Record<string, unknown>)["核心规则"]) && (
         <div className="sub-section">
-          <div className="result-section-title">核心规则</div>
+          <div className="result-section-title">{t("textView.coreRules")}</div>
           {((wv as Record<string, unknown>)["核心规则"] as Array<{ rule_name: string; rule_content: string }>).map((r, i) => (
             <div key={i} className="wv-slot-row">
               <span className="wv-slot-key">{r.rule_name}</span>
@@ -995,10 +979,11 @@ function FullNodesTable({
   nodeType: "framework" | "outline" | "detailed" | "plot";
   stepId?: string;
 }) {
+  const t = useT();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const edit = useNodeEdit(stepId ?? "");
 
-  if (!nodes || nodes.length === 0) return <p className="section-text">无节点</p>;
+  if (!nodes || nodes.length === 0) return <p className="section-text">{t("textView.noNodes")}</p>;
 
   return (
     <div className="nodes-table node-card-list">
@@ -1025,10 +1010,10 @@ function FullNodesTable({
 
         const funcParts: string[] = [];
         if (funcText) funcParts.push(funcText);
-        if (stage) funcParts.push(`阶段: ${stage}`);
-        if (tension != null) funcParts.push(`张力: ${tension}/10`);
-        if (se?.conflict_type) funcParts.push(`冲突: ${String(se.conflict_type)}`);
-        if (se?.stakes) funcParts.push(`赌注: ${String(se.stakes)}`);
+        if (stage) funcParts.push(t("textView.stagePrefix", { value: stage }));
+        if (tension != null) funcParts.push(t("textView.tensionPrefix", { value: String(tension) }));
+        if (se?.conflict_type) funcParts.push(t("textView.conflictPrefix", { value: String(se.conflict_type) }));
+        if (se?.stakes) funcParts.push(t("textView.stakesPrefix", { value: String(se.stakes) }));
 
         return (
           <div
@@ -1040,10 +1025,10 @@ function FullNodesTable({
               <span className="tsc-expand-arrow">{expanded ? "▾" : "▸"}</span>
               <span className="node-id">{nodeId}{isBranch ? " ⑂" : ""}</span>
               <span className="node-name">{name}</span>
-              {tension != null && <span className="node-badge tension">张力 {String(tension)}/10</span>}
-              {isBranch && <span className="node-badge branch">分支</span>}
+              {tension != null && <span className="node-badge tension">{t("textView.tensionBadge", { value: String(tension) })}</span>}
+              {isBranch && <span className="node-badge branch">{t("textView.branch")}</span>}
               {stage && <span className="node-badge">{stage}</span>}
-              <span className="tsc-badge status-completed">completed</span>
+              <span className="tsc-badge status-completed">{tDisplayState("completed")}</span>
             </div>
             {funcParts.length > 0 && expanded && (
               <div className="nti-func-bar">{funcParts.join(" · ")}</div>
@@ -1058,14 +1043,14 @@ function FullNodesTable({
                     {se && <StoryElementsBlock se={se} />}
                     {bc && (
                       <div className="nti-extra-block blue">
-                        {bc.cause && <div><LabelSpan color="blue">起因约束</LabelSpan> {bc.cause}</div>}
-                        {bc.result && <div><LabelSpan color="blue">结果约束</LabelSpan> {bc.result}</div>}
+                        {bc.cause && <div><LabelSpan color="blue">{t("textView.causeConstraint")}</LabelSpan> {bc.cause}</div>}
+                        {bc.result && <div><LabelSpan color="blue">{t("textView.resultConstraint")}</LabelSpan> {bc.result}</div>}
                       </div>
                     )}
                     {jrpg && <JrpgElementsBlock jrpg={jrpg} />}
                     {charArcs && charArcs.length > 0 && (
                       <div className="nti-extra-block">
-                        <LabelSpan>角色弧</LabelSpan>
+                        <LabelSpan>{t("textView.charArc")}</LabelSpan>
                         {charArcs.map((a, i) => (
                           <div key={i}>{a.character_name ?? a.character ?? ""}: {a.emotional_state ?? ""} → {a.growth ?? a.arc_description ?? ""}</div>
                         ))}
@@ -1073,7 +1058,7 @@ function FullNodesTable({
                     )}
                     {operators && operators.length > 0 && (
                       <div className="nti-extra-block dim">
-                        <LabelSpan>算子</LabelSpan>
+                        <LabelSpan>{t("textView.operators")}</LabelSpan>
                         {operators.map((o, i) => (
                           <div key={i}>{o.name ?? ""}{o.slot_id ? ` (${o.slot_id})` : ""}{o.effect ? ` — ${o.effect}` : ""}</div>
                         ))}
@@ -1115,6 +1100,7 @@ function FullNodesTable({
 }
 
 function BranchSummary({ nodes }: { nodes: StoryNode[] }) {
+  const t = useT();
   const branchNodes = nodes.filter((n) => {
     const r = n as unknown as Record<string, unknown>;
     return !!r.is_branch;
@@ -1131,11 +1117,11 @@ function BranchSummary({ nodes }: { nodes: StoryNode[] }) {
 
   return (
     <div style={{ marginTop: 8 }}>
-      <div className="result-section-title">分支结构 ({branchNodes.length} 分支节点)</div>
+      <div className="result-section-title">{t("textView.branchNodes", { n: branchNodes.length })}</div>
       <div className="nti-extra-block">
         {Array.from(byParent.entries()).map(([parentId, children]) => (
           <div key={parentId}>
-            <span className="node-badge branch">父节点 {parentId}</span>
+            <span className="node-badge branch">{t("textView.parentNode", { id: parentId })}</span>
             {" → "}
             {children.map((c, i) => (
               <span key={c}>
@@ -1151,56 +1137,58 @@ function BranchSummary({ nodes }: { nodes: StoryNode[] }) {
 }
 
 function StoryElementsBlock({ se }: { se: Record<string, unknown> }) {
+  const t = useT();
   const plot = se.plot as Record<string, string> | undefined;
   const parts: JSX.Element[] = [];
 
   if (plot) {
-    if (plot.cause) parts.push(<div key="cause"><LabelSpan>起因</LabelSpan> {plot.cause}</div>);
-    if (plot.process) parts.push(<div key="process"><LabelSpan>经过</LabelSpan> {plot.process}</div>);
-    if (plot.result) parts.push(<div key="result"><LabelSpan>结果</LabelSpan> {plot.result}</div>);
+    if (plot.cause) parts.push(<div key="cause"><LabelSpan>{t("textView.cause")}</LabelSpan> {plot.cause}</div>);
+    if (plot.process) parts.push(<div key="process"><LabelSpan>{t("textView.process")}</LabelSpan> {plot.process}</div>);
+    if (plot.result) parts.push(<div key="result"><LabelSpan>{t("textView.result")}</LabelSpan> {plot.result}</div>);
   }
-  if (se.atmosphere) parts.push(<div key="atm"><LabelSpan color="gold">氛围</LabelSpan> {String(se.atmosphere)}</div>);
-  if (se.dialogue_hint) parts.push(<div key="dlg"><LabelSpan color="gold">对话提示</LabelSpan> {String(se.dialogue_hint)}</div>);
-  if (se.monologue_hint) parts.push(<div key="mono"><LabelSpan color="gold">独白提示</LabelSpan> {String(se.monologue_hint)}</div>);
-  if (se.narration_hint) parts.push(<div key="nar"><LabelSpan color="gold">旁白提示</LabelSpan> {String(se.narration_hint)}</div>);
-  if (se.turning_point) parts.push(<div key="turn"><LabelSpan color="gold">转折点</LabelSpan> {String(se.turning_point)}</div>);
+  if (se.atmosphere) parts.push(<div key="atm"><LabelSpan color="gold">{t("textView.atmosphere")}</LabelSpan> {String(se.atmosphere)}</div>);
+  if (se.dialogue_hint) parts.push(<div key="dlg"><LabelSpan color="gold">{t("textView.dialogueHint")}</LabelSpan> {String(se.dialogue_hint)}</div>);
+  if (se.monologue_hint) parts.push(<div key="mono"><LabelSpan color="gold">{t("textView.monologueHint")}</LabelSpan> {String(se.monologue_hint)}</div>);
+  if (se.narration_hint) parts.push(<div key="nar"><LabelSpan color="gold">{t("textView.narrationHint")}</LabelSpan> {String(se.narration_hint)}</div>);
+  if (se.turning_point) parts.push(<div key="turn"><LabelSpan color="gold">{t("textView.turningPoint")}</LabelSpan> {String(se.turning_point)}</div>);
 
   if (parts.length === 0) return null;
   return <div className="nti-extra-block">{parts}</div>;
 }
 
 function JrpgElementsBlock({ jrpg }: { jrpg: Record<string, unknown> }) {
+  const t = useT();
   const parts: JSX.Element[] = [];
 
   if (jrpg.scene_location)
-    parts.push(<div key="loc"><LabelSpan color="gold">场景</LabelSpan> {String(jrpg.scene_location)}</div>);
+    parts.push(<div key="loc"><LabelSpan color="gold">{t("textView.scene")}</LabelSpan> {String(jrpg.scene_location)}</div>);
   const locs = jrpg.scene_locations as string[] | undefined;
   if (locs?.length)
-    parts.push(<div key="locs"><LabelSpan color="gold">场景列表</LabelSpan> {locs.join("、")}</div>);
+    parts.push(<div key="locs"><LabelSpan color="gold">{t("textView.sceneList")}</LabelSpan> {locs.join("、")}</div>);
   const chars = jrpg.scene_characters as string[] | undefined;
   if (chars?.length)
-    parts.push(<div key="chars"><LabelSpan color="gold">出场角色</LabelSpan> {chars.join("、")}</div>);
+    parts.push(<div key="chars"><LabelSpan color="gold">{t("textView.characters")}</LabelSpan> {chars.join("、")}</div>);
   const keyItems = jrpg.key_items as string[] | undefined;
   if (keyItems?.length)
-    parts.push(<div key="items"><LabelSpan color="gold">关键道具</LabelSpan> {keyItems.join("、")}</div>);
+    parts.push(<div key="items"><LabelSpan color="gold">{t("textView.keyItems")}</LabelSpan> {keyItems.join("、")}</div>);
   const narHints = jrpg.narration_hints as string[] | undefined;
   if (narHints?.length)
-    parts.push(<div key="narh"><LabelSpan color="gold">叙事提示</LabelSpan> {narHints.join("；")}</div>);
+    parts.push(<div key="narh"><LabelSpan color="gold">{t("textView.narrationHints")}</LabelSpan> {narHints.join("；")}</div>);
   if (jrpg.bgm_hint)
-    parts.push(<div key="bgm"><LabelSpan color="gold">BGM</LabelSpan> {String(jrpg.bgm_hint)}</div>);
+    parts.push(<div key="bgm"><LabelSpan color="gold">{t("textView.bgm")}</LabelSpan> {String(jrpg.bgm_hint)}</div>);
   if (jrpg.camera_hint)
-    parts.push(<div key="cam"><LabelSpan color="gold">镜头</LabelSpan> {String(jrpg.camera_hint)}</div>);
+    parts.push(<div key="cam"><LabelSpan color="gold">{t("textView.camera")}</LabelSpan> {String(jrpg.camera_hint)}</div>);
   const trigger = jrpg.trigger as Record<string, string> | undefined;
   if (trigger?.condition || trigger?.event)
-    parts.push(<div key="trig"><LabelSpan color="blue">触发条件</LabelSpan> {trigger?.condition ?? ""} / {trigger?.event ?? ""}</div>);
+    parts.push(<div key="trig"><LabelSpan color="blue">{t("textView.trigger")}</LabelSpan> {trigger?.condition ?? ""} / {trigger?.event ?? ""}</div>);
   const completion = jrpg.completion as Record<string, string> | undefined;
   if (completion?.condition || completion?.event)
-    parts.push(<div key="comp"><LabelSpan color="blue">完成条件</LabelSpan> {completion?.condition ?? ""} / {completion?.event ?? ""}</div>);
+    parts.push(<div key="comp"><LabelSpan color="blue">{t("textView.completion")}</LabelSpan> {completion?.condition ?? ""} / {completion?.event ?? ""}</div>);
   const dialogues = jrpg.dialogue_segments as Array<Record<string, string>> | undefined;
   if (dialogues?.length) {
     parts.push(
       <div key="dlgs" className="nti-dialogue-block">
-        <LabelSpan color="gold">对话</LabelSpan>
+        <LabelSpan color="gold">{t("textView.dialogue")}</LabelSpan>
         {dialogues.map((d, i) => (
           <div key={i} className="nti-dialogue-line">
             <span className="nti-dlg-speaker">{d.speaker ?? ""}</span>
@@ -1221,6 +1209,7 @@ function JrpgElementsBlock({ jrpg }: { jrpg: Record<string, unknown> }) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function FullCharactersView({ characters }: { characters: NarrativeContext["detailed_character_sheets"] }) {
+  const t = useT();
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const edit = useNodeEdit("character_enrichment");
   if (!characters) return null;
@@ -1254,12 +1243,12 @@ function FullCharactersView({ characters }: { characters: NarrativeContext["deta
         const rels = r.relationships as Record<string, unknown[]> | undefined;
         const relationships: string[] = [];
         if (rels?.family_relationships?.length)
-          relationships.push(`家庭: ${(rels.family_relationships as Array<Record<string, string>>).map((rel) => rel.name ?? rel.character ?? "").join("、")}`);
+          relationships.push(`${t("char.relationship.family")}: ${(rels.family_relationships as Array<Record<string, string>>).map((rel) => rel.name ?? rel.character ?? "").join("、")}`);
         if (rels?.social_relationships?.length)
-          relationships.push(`社交: ${(rels.social_relationships as Array<Record<string, string>>).map((rel) => rel.name ?? rel.character ?? "").join("、")}`);
+          relationships.push(`${t("char.relationship.social")}: ${(rels.social_relationships as Array<Record<string, string>>).map((rel) => rel.name ?? rel.character ?? "").join("、")}`);
         const benefitRels = r.benefit_based_relationships as Array<Record<string, string>> | undefined;
         if (benefitRels?.length)
-          relationships.push(`利益: ${benefitRels.map((rel) => `${rel.name ?? ""}(${rel.relationship ?? ""})`).join("、")}`);
+          relationships.push(`${t("char.relationship.benefit")}: ${benefitRels.map((rel) => `${rel.name ?? ""}(${rel.relationship ?? ""})`).join("、")}`);
         const abilities = Array.isArray(r.special_abilities) ? (r.special_abilities as string[]).join("、") : String(r.special_abilities ?? "");
 
         return (
@@ -1275,7 +1264,7 @@ function FullCharactersView({ characters }: { characters: NarrativeContext["deta
             </div>
             {!expanded && (
               <div className="char-card-meta">
-                {[r.race, r.gender, r.age ? `${r.age}岁` : ""].filter(Boolean).map(String).join(" · ")}
+                {[r.race, r.gender, r.age != null && r.age !== "" ? t("textView.ageYears", { n: String(r.age) }) : ""].filter(Boolean).map(String).join(" · ")}
               </div>
             )}
 
@@ -1286,32 +1275,32 @@ function FullCharactersView({ characters }: { characters: NarrativeContext["deta
                 ) : (
                   <>
                     <div className="char-card-meta">
-                      {[r.race, r.gender, r.age ? `${r.age}岁` : ""].filter(Boolean).map(String).join(" · ")}
+                      {[r.race, r.gender, r.age != null && r.age !== "" ? t("textView.ageYears", { n: String(r.age) }) : ""].filter(Boolean).map(String).join(" · ")}
                     </div>
                     {c.role_in_story && <div className="char-card-role">{c.role_in_story}</div>}
-                    {(r.birthplace as string) && <CharRow label="出生" value={String(r.birthplace)} />}
-                    {appearance && <CharRow label="外貌" value={appearance} />}
-                    {locDesc && <CharRow label="出没" value={locDesc} />}
-                    {(r.activity_locations as string[])?.length > 0 && <CharRow label="活动地" value={(r.activity_locations as string[]).join("、")} />}
-                    {(r.story_importance as string) && <CharRow label="重要度" value={String(r.story_importance)} />}
-                    {psych?.core_motivation && <CharRow label="动机" value={psych.core_motivation} />}
-                    {psych?.core_fear && <CharRow label="恐惧" value={psych.core_fear} />}
-                    {(r.decisive_past_event as string) && <CharRow label="决定性过去" value={String(r.decisive_past_event)} />}
-                    {arcSpec && <CharRow label="弧光" value={arcSpec} />}
-                    {archetype?.core_archetype && <CharRow label="原型" value={`${archetype.core_archetype}${archetype.surface_archetype ? " / " + archetype.surface_archetype : ""}`} />}
-                    {(r.archetype_conflict as string) && <CharRow label="原型冲突" value={String(r.archetype_conflict)} />}
-                    {(r.performance_archetype as string) && <CharRow label="表演原型" value={String(r.performance_archetype)} />}
-                    {abilities && <CharRow label="能力" value={abilities} />}
-                    {relationships.length > 0 && <CharRow label="关系" value={relationships.join("；")} />}
-                    {(r.behavior_settings as string) && <CharRow label="行为" value={String(r.behavior_settings)} />}
-                    {sigPhrases?.length && <CharRow label="口头禅" value={sigPhrases.join("；")} />}
-                    {(r.voice_strength as string) && <CharRow label="声线" value={String(r.voice_strength)} />}
-                    {(r.verbal_tics as string) && <CharRow label="语癖" value={String(r.verbal_tics)} />}
-                    {(r.speech_patterns as string) && <CharRow label="话术" value={String(r.speech_patterns)} />}
-                    {(r.dialogue_style as string) && <CharRow label="话风" value={String(r.dialogue_style)} />}
-                    {(r.symbolic_meaning as string) && <CharRow label="象征" value={String(r.symbolic_meaning)} />}
-                    {theme?.central_theme && <CharRow label="主题" value={theme.central_theme} />}
-                    {bgInfo && <CharRow label="背景" value={bgInfo} />}
+                    {(r.birthplace as string) && <CharRow label={t("char.birth")} value={String(r.birthplace)} />}
+                    {appearance && <CharRow label={t("char.appearance")} value={appearance} />}
+                    {locDesc && <CharRow label={t("char.haunt")} value={locDesc} />}
+                    {(r.activity_locations as string[])?.length > 0 && <CharRow label={t("char.activityLocations")} value={(r.activity_locations as string[]).join("、")} />}
+                    {(r.story_importance as string) && <CharRow label={t("char.importance")} value={String(r.story_importance)} />}
+                    {psych?.core_motivation && <CharRow label={t("char.motivation")} value={psych.core_motivation} />}
+                    {psych?.core_fear && <CharRow label={t("char.fear")} value={psych.core_fear} />}
+                    {(r.decisive_past_event as string) && <CharRow label={t("char.decisivePast")} value={String(r.decisive_past_event)} />}
+                    {arcSpec && <CharRow label={t("field.arc")} value={arcSpec} />}
+                    {archetype?.core_archetype && <CharRow label={t("char.archetype")} value={`${archetype.core_archetype}${archetype.surface_archetype ? " / " + archetype.surface_archetype : ""}`} />}
+                    {(r.archetype_conflict as string) && <CharRow label={t("char.archetypeConflict")} value={String(r.archetype_conflict)} />}
+                    {(r.performance_archetype as string) && <CharRow label={t("char.performanceArchetype")} value={String(r.performance_archetype)} />}
+                    {abilities && <CharRow label={t("char.abilities")} value={abilities} />}
+                    {relationships.length > 0 && <CharRow label={t("char.relationships")} value={relationships.join("；")} />}
+                    {(r.behavior_settings as string) && <CharRow label={t("char.behavior")} value={String(r.behavior_settings)} />}
+                    {sigPhrases?.length && <CharRow label={t("char.catchphrase")} value={sigPhrases.join("；")} />}
+                    {(r.voice_strength as string) && <CharRow label={t("char.voiceLine")} value={String(r.voice_strength)} />}
+                    {(r.verbal_tics as string) && <CharRow label={t("char.verbalTic")} value={String(r.verbal_tics)} />}
+                    {(r.speech_patterns as string) && <CharRow label={t("char.speechPattern")} value={String(r.speech_patterns)} />}
+                    {(r.dialogue_style as string) && <CharRow label={t("char.dialogueStyle")} value={String(r.dialogue_style)} />}
+                    {(r.symbolic_meaning as string) && <CharRow label={t("field.symbolism")} value={String(r.symbolic_meaning)} />}
+                    {theme?.central_theme && <CharRow label={t("field.theme")} value={theme.central_theme} />}
+                    {bgInfo && <CharRow label={t("field.background")} value={bgInfo} />}
                     {(() => {
                       const pl = r.personal_life as Record<string, unknown> | undefined;
                       if (!pl) return null;
@@ -1323,19 +1312,19 @@ function FullCharactersView({ characters }: { characters: NarrativeContext["deta
                         : "";
                       return (
                         <>
-                          {likes && <CharRow label="喜好" value={likes} />}
-                          {dislikes && <CharRow label="厌恶" value={dislikes} />}
-                          {habits && <CharRow label="习惯" value={habits} />}
-                          {(pl.speech_pattern as string) && <CharRow label="说话方式" value={String(pl.speech_pattern)} />}
-                          {(pl.personal_item as string) && <CharRow label="私人物件" value={String(pl.personal_item)} />}
-                          {(pl.private_wish as string) && <CharRow label="内心期待" value={String(pl.private_wish)} />}
-                          {(pl.vulnerability as string) && <CharRow label="矛盾面" value={String(pl.vulnerability)} />}
-                          {bonds && <CharRow label="私人牵绊" value={bonds} />}
+                          {likes && <CharRow label={t("char.likes")} value={likes} />}
+                          {dislikes && <CharRow label={t("char.dislikes")} value={dislikes} />}
+                          {habits && <CharRow label={t("char.habits")} value={habits} />}
+                          {(pl.speech_pattern as string) && <CharRow label={t("char.speakingStyle")} value={String(pl.speech_pattern)} />}
+                          {(pl.personal_item as string) && <CharRow label={t("char.personalItem")} value={String(pl.personal_item)} />}
+                          {(pl.private_wish as string) && <CharRow label={t("char.privateWish")} value={String(pl.private_wish)} />}
+                          {(pl.vulnerability as string) && <CharRow label={t("char.vulnerability")} value={String(pl.vulnerability)} />}
+                          {bonds && <CharRow label={t("char.privateBonds")} value={bonds} />}
                         </>
                       );
                     })()}
                     {gmBase && (
-                      <CharRow label="属性" value={`HP:${gmBase.hp ?? "-"} ATK:${gmBase.attack ?? "-"} DEF:${gmBase.defense ?? "-"} MAG:${gmBase.magic ?? "-"} Lv.${gm?.level ?? 1}${gm?.exp != null ? ` EXP:${gm.exp}` : ""}${gm?.money != null ? ` G:${gm.money}` : ""}`} />
+                      <CharRow label={t("char.stats")} value={`HP:${gmBase.hp ?? "-"} ATK:${gmBase.attack ?? "-"} DEF:${gmBase.defense ?? "-"} MAG:${gmBase.magic ?? "-"} Lv.${gm?.level ?? 1}${gm?.exp != null ? ` EXP:${gm.exp}` : ""}${gm?.money != null ? ` G:${gm.money}` : ""}`} />
                     )}
                     {ocean && (
                       <div className="char-ocean">
@@ -1387,25 +1376,28 @@ function CharRow({ label, value }: { label: string; value: string }) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function FullScriptView({ script }: { script: NarrativeContext["jrpg_script"] }) {
+  const t = useT();
   const [expandedCh, setExpandedCh] = useState<string | null>(null);
   const edit = useNodeEdit("script_generation");
   if (!script) return null;
 
-  const TYPE_LABELS: Record<string, string> = {
-    opening: "开端", rising: "发展", climax: "高潮", falling: "下降", resolution: "结局",
+  const chapterTypeLabel = (type: string) => {
+    const key = `textView.chapterType.${type}`;
+    const hit = t(key);
+    return hit === key ? type : hit;
   };
 
   return (
     <div>
-      <KV label="标题" value={script.title} />
-      <p className="section-text">{script.chapters.length} 章节</p>
+      <KV label={t("field.title")} value={script.title} />
+      <p className="section-text">{t("textView.chapters", { n: script.chapters.length })}</p>
       {script.chapters.map((ch) => {
         const nodeId = ch.chapter_id;
         const expanded = expandedCh === nodeId;
         const isNodeEditing = edit.editingNodeId === nodeId;
         const funcParts: string[] = [];
-        if (ch.chapter_type) funcParts.push(TYPE_LABELS[ch.chapter_type] ?? ch.chapter_type);
-        funcParts.push(`张力 ${ch.conflict.tension_level}/10`);
+        if (ch.chapter_type) funcParts.push(chapterTypeLabel(ch.chapter_type));
+        funcParts.push(t("textView.tensionBadge", { value: ch.conflict.tension_level }));
 
         return (
           <div
@@ -1427,15 +1419,15 @@ function FullScriptView({ script }: { script: NarrativeContext["jrpg_script"] })
                 ) : (
                   <>
                     <div className="script-conflict">
-                      <KV label="冲突类型" value={ch.conflict.type} />
-                      <KV label="赌注" value={ch.conflict.stakes} />
-                      <KV label="转折点" value={ch.conflict.turning_point} />
-                      <KV label="来源情节" value={ch.plot_node_id} />
+                      <KV label={t("textView.conflictType")} value={ch.conflict.type} />
+                      <KV label={t("textView.stakesLabel")} value={ch.conflict.stakes} />
+                      <KV label={t("textView.turningPointLabel")} value={ch.conflict.turning_point} />
+                      <KV label={t("textView.sourcePlot")} value={ch.plot_node_id} />
                     </div>
 
                     {ch.character_arcs.length > 0 && (
                       <div className="script-arcs">
-                        <div className="result-section-title">角色弧光</div>
+                        <div className="result-section-title">{t("textView.charArcLight")}</div>
                         {ch.character_arcs.map((arc, i) => (
                           <div key={i} className="wv-slot-row">
                             <span className="wv-slot-key">{arc.character}</span>
@@ -1448,7 +1440,7 @@ function FullScriptView({ script }: { script: NarrativeContext["jrpg_script"] })
                     {ch.scenes.map((sc) => (
                       <div key={sc.scene_id} className="script-scene">
                         <div className="scene-header">
-                          <span className="node-badge">场景</span>
+                          <span className="node-badge">{t("textView.scene")}</span>
                           <span>{sc.location}</span>
                           <span className="node-func">{sc.atmosphere}</span>
                           {sc.bgm && <span className="node-func">🎵 {sc.bgm}</span>}
@@ -1520,7 +1512,10 @@ function FullScriptView({ script }: { script: NarrativeContext["jrpg_script"] })
 // ══════════════════════════════════════════════════════════════════════════════
 
 const LEVEL_ICONS = ["🌐", "⛰️", "🏘️", "🏛️", "🚪", "🔮"];
-const LEVEL_LABELS = ["L0 世界", "L1 区域", "L2 地域", "L3 地标", "L4 房间", "L5 物品"];
+
+function levelLabel(level: number): string {
+  return sceneLevelLabel(level, getLocale());
+}
 
 function sceneLevel(s: SceneNode): number {
   return s.scene_level ?? s.level ?? 0;
@@ -1553,7 +1548,7 @@ function SceneTreeMerged({ scenes }: { scenes: SceneNode[] }) {
             <div key={s.uid || s.name} data-node-id={s.uid} className="scene-tree-node">
               <div className="scene-tree-row">
                 <span className="scene-icon">{LEVEL_ICONS[lvl] ?? "·"}</span>
-                <span className={`node-badge scene-level-${lvl}`}>{LEVEL_LABELS[lvl] ?? `L${lvl}`}</span>
+                <span className={`node-badge scene-level-${lvl}`}>{levelLabel(lvl)}</span>
                 <span className={`scene-name scene-name-l${lvl}`}>{s.name}</span>
                 {s.story_units?.length && (
                   <span className="scene-units">🔗 {s.story_units.join(", ")}</span>
@@ -1580,7 +1575,7 @@ function SceneTreeMerged({ scenes }: { scenes: SceneNode[] }) {
           <div key={r.uid || r.name} className="scene-tree-node root">
             <div className="scene-tree-row">
               <span className="scene-icon">{LEVEL_ICONS[lvl] ?? "·"}</span>
-              <span className={`node-badge scene-level-${lvl}`}>{LEVEL_LABELS[lvl] ?? `L${lvl}`}</span>
+              <span className={`node-badge scene-level-${lvl}`}>{levelLabel(lvl)}</span>
               <span className={`scene-name scene-name-l${lvl}`}>{r.name}</span>
             </div>
             {desc && <p className="section-text scene-desc">{desc}</p>}
@@ -1594,17 +1589,18 @@ function SceneTreeMerged({ scenes }: { scenes: SceneNode[] }) {
 
 type SceneTab = "all" | "skeleton" | "L0" | "L1" | "L2" | "L345";
 
-const SCENE_TAB_LABELS: Record<SceneTab, string> = {
-  all: "全量场景",
-  skeleton: "骨架场景",
-  L0: "L0 框架场景",
-  L1: "L1 大纲场景",
-  L2: "L2 细纲场景",
-  L345: "L3+L4+L5 情节场景",
+const SCENE_TAB_KEYS: Record<SceneTab, string> = {
+  all: "textView.allScenes",
+  skeleton: "textView.skeletonScenes",
+  L0: "textView.l0Framework",
+  L1: "textView.l1Outline",
+  L2: "textView.l2Detailed",
+  L345: "textView.l345Plot",
 };
 
 function SceneList({ scenes }: { scenes: SceneNode[] }) {
-  if (!scenes.length) return <p className="section-text">暂无场景数据</p>;
+  const t = useT();
+  if (!scenes.length) return <p className="section-text">{t("textView.noSceneData")}</p>;
   return (
     <div className="scene-tree-level">
       {scenes.map((s, si) => {
@@ -1614,7 +1610,7 @@ function SceneList({ scenes }: { scenes: SceneNode[] }) {
           <div key={s.uid || s.name || si} data-node-id={s.uid} className="scene-tree-node">
             <div className="scene-tree-row">
               <span className="scene-icon">{LEVEL_ICONS[lvl] ?? "·"}</span>
-              <span className={`node-badge scene-level-${lvl}`}>{LEVEL_LABELS[lvl] ?? `L${lvl}`}</span>
+              <span className={`node-badge scene-level-${lvl}`}>{levelLabel(lvl)}</span>
               <span className={`scene-name scene-name-l${lvl}`}>{s.name}</span>
               {s.story_units?.length && (
                 <span className="scene-units">🔗 {s.story_units.join(", ")}</span>
@@ -1634,8 +1630,9 @@ function ScenePerNodeGroups({ p2, edit, expandedGroup, setExpandedGroup }: {
   expandedGroup: string | null;
   setExpandedGroup: (id: string | null) => void;
 }) {
+  const t = useT();
   const entries = Object.entries(p2);
-  if (entries.length === 0) return <p className="section-text">暂无节点分组数据</p>;
+  if (entries.length === 0) return <p className="section-text">{t("textView.noGroupData")}</p>;
   return (
     <div className="node-card-list">
       {entries.map(([nodeId, groupScenes]) => {
@@ -1650,7 +1647,7 @@ function ScenePerNodeGroups({ p2, edit, expandedGroup, setExpandedGroup }: {
             <div className="node-card-header" onClick={() => setExpandedGroup(expanded ? null : nodeId)}>
               <span className="tsc-expand-arrow">{expanded ? "▾" : "▸"}</span>
               <span className="node-id">{nodeId}</span>
-              <span className="node-name">场景组 ({Array.isArray(groupScenes) ? groupScenes.length : 0} 场景)</span>
+              <span className="node-name">{t("textView.sceneGroup", { n: Array.isArray(groupScenes) ? groupScenes.length : 0 })}</span>
             </div>
             {expanded && (
               <div className="node-expanded-content">
@@ -1665,7 +1662,7 @@ function ScenePerNodeGroups({ p2, edit, expandedGroup, setExpandedGroup }: {
                         <div key={s.uid || s.name || si} className="scene-tree-node" style={{ marginLeft: 8 }}>
                           <div className="scene-tree-row">
                             <span className="scene-icon">{LEVEL_ICONS[lvl] ?? "·"}</span>
-                            <span className={`node-badge scene-level-${lvl}`}>{LEVEL_LABELS[lvl] ?? `L${lvl}`}</span>
+                            <span className={`node-badge scene-level-${lvl}`}>{levelLabel(lvl)}</span>
                             <span className={`scene-name scene-name-l${lvl}`}>{s.name}</span>
                             {s.story_units?.length && (
                               <span className="scene-units">🔗 {s.story_units.join(", ")}</span>
@@ -1706,6 +1703,7 @@ function ScenePerNodeGroups({ p2, edit, expandedGroup, setExpandedGroup }: {
 }
 
 function FullSceneTreeView({ sceneMap }: { sceneMap: NarrativeContext["scene_map"] }) {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<SceneTab>("all");
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const edit = useNodeEdit("scene_generation");
@@ -1750,7 +1748,7 @@ function FullSceneTreeView({ sceneMap }: { sceneMap: NarrativeContext["scene_map
 
   return (
     <div className="scene-tree">
-      <KV label="世界" value={sceneMap.world_name} />
+      <KV label={t("textView.world")} value={sceneMap.world_name} />
 
       <div className="scene-tab-bar">
         {availableTabs.map((tab) => (
@@ -1759,19 +1757,19 @@ function FullSceneTreeView({ sceneMap }: { sceneMap: NarrativeContext["scene_map
             className={`scene-tab${activeTab === tab ? " active" : ""}`}
             onClick={() => setActiveTab(tab)}
           >
-            {SCENE_TAB_LABELS[tab]} ({tabData[tab].length})
+            {t(SCENE_TAB_KEYS[tab])} ({tabData[tab].length})
           </button>
         ))}
       </div>
 
       <div className="scene-stats">
-        <span className="scene-stat-badge">当前 · {activeScenes.length} 节点</span>
+        <span className="scene-stat-badge">{t("textView.currentNodes", { n: activeScenes.length })}</span>
         {(() => {
           const lc = new Map<number, number>();
           for (const s of activeScenes) lc.set(sceneLevel(s), (lc.get(sceneLevel(s)) ?? 0) + 1);
           return Array.from(lc.entries()).sort(([a], [b]) => a - b).map(([level, count]) => (
             <span key={level} className={`scene-stat-badge level-${level}`}>
-              {LEVEL_ICONS[level] ?? ""} {LEVEL_LABELS[level]?.split(" ")[1] ?? `L${level}`} x{count}
+              {LEVEL_ICONS[level] ?? ""} {levelLabel(level).split(" ").slice(1).join(" ") || `L${level}`} x{count}
             </span>
           ));
         })()}
@@ -1797,16 +1795,17 @@ const RARITY_COLORS: Record<string, string> = {
 };
 
 function FullItemDatabaseView({ items }: { items: Record<string, unknown>[] }) {
+  const t = useT();
   const [expanded, setExpanded] = useState<string | null>(null);
   const edit = useNodeEdit("item_database");
 
   return (
     <div className="item-db-list">
       <div className="scene-stats">
-        <span className="scene-stat-badge">道具清单 · {items.length} 件</span>
+        <span className="scene-stat-badge">{t("textView.itemList", { n: items.length })}</span>
       </div>
       {items.map((item, i) => {
-        const nodeId = String(item.name ?? `道具${i + 1}`);
+        const nodeId = String(item.name ?? t("textView.itemDefault", { n: i + 1 }));
         const rarity = String(item.rarity ?? "common");
         const category = String(item.category ?? "");
         const isOpen = expanded === nodeId;
@@ -1845,18 +1844,18 @@ function FullItemDatabaseView({ items }: { items: Record<string, unknown>[] }) {
                   <NodeEditTextarea value={edit.editContent} onChange={edit.setEditContent} rows={10} />
                 ) : (
                   <>
-                    {desc && <CharRow label="描述" value={desc} />}
-                    {effect && <CharRow label="效果" value={effect} />}
-                    {owner && <CharRow label="初始拥有者" value={owner} />}
-                    {scene && <CharRow label="初始场景" value={scene} />}
-                    {relChar && <CharRow label="关联角色" value={relChar} />}
+                    {desc && <CharRow label={t("field.description")} value={desc} />}
+                    {effect && <CharRow label={t("field.effect")} value={effect} />}
+                    {owner && <CharRow label={t("field.initialOwner")} value={owner} />}
+                    {scene && <CharRow label={t("field.initialScene")} value={scene} />}
+                    {relChar && <CharRow label={t("field.relatedCharacter")} value={relChar} />}
                     {val && (
-                      <CharRow label="价值" value={
-                        Object.entries(val).map(([k, v]) => `${k === "buy" ? "买入" : k === "sell" ? "卖出" : k}: ${v}`).join(" / ")
+                      <CharRow label={t("field.value")} value={
+                        Object.entries(val).map(([k, v]) => `${k === "buy" ? t("field.buy") : k === "sell" ? t("field.sell") : k}: ${v}`).join(" / ")
                       } />
                     )}
-                    {maxStack && <CharRow label="最大堆叠" value={maxStack} />}
-                    {readContent && <CharRow label="可读内容" value={readContent} />}
+                    {maxStack && <CharRow label={t("field.maxStack")} value={maxStack} />}
+                    {readContent && <CharRow label={t("field.readContent")} value={readContent} />}
                   </>
                 )}
               </div>
@@ -1889,22 +1888,25 @@ function FullItemDatabaseView({ items }: { items: Record<string, unknown>[] }) {
 // Quest Graph (full view)
 // ══════════════════════════════════════════════════════════════════════════════
 
-const QUEST_TYPE_LABEL: Record<string, string> = {
-  main: "主线", side: "支线", exploration: "探索", collection: "收集", challenge: "挑战",
-};
-
 function FullQuestGraphView({ questGraph }: { questGraph: NarrativeContext["quest_graph"] }) {
+  const t = useT();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const edit = useNodeEdit("quest_generation");
   if (!questGraph) return null;
   const quests = questGraph.quests ?? [];
   const mainChain = questGraph.main_quest_chain ?? [];
 
+  const questTypeLabel = (type: string) => {
+    const key = `textView.questType.${type}`;
+    const hit = t(key);
+    return hit === key ? type : hit;
+  };
+
   return (
     <div className="quest-graph-view">
       <div className="scene-stats">
-        <span className="scene-stat-badge">任务系统 · {quests.length} 个任务</span>
-        <span className="scene-stat-badge">主线链 · {mainChain.length} 步</span>
+        <span className="scene-stat-badge">{t("textView.questSystem", { n: quests.length })}</span>
+        <span className="scene-stat-badge">{t("textView.mainChain", { n: mainChain.length })}</span>
       </div>
       {quests.map((q, i) => {
         const quest = q as Record<string, unknown>;
@@ -1921,7 +1923,7 @@ function FullQuestGraphView({ questGraph }: { questGraph: NarrativeContext["ques
               <span className="node-badge" style={{
                 color: qtype === "main" ? "#fa3" : "#6cf",
               }}>
-                {QUEST_TYPE_LABEL[qtype] ?? qtype}
+                {questTypeLabel(qtype)}
               </span>
               <span className="char-role">{String(quest.story_node_id ?? "")}</span>
             </div>
@@ -1991,17 +1993,18 @@ function ProseBlock({ title, text, color }: { title: string; text: string; color
 
 
 function PlotSynopsisView({ ps }: { ps: PlotSynopsis }) {
+  const t = useT();
   return (
     <div className="synopsis-view">
       {ps.synopsis_strategy && (
         <div className="synopsis-strategy">
-          <span className="synopsis-strategy-label">策略</span>
+          <span className="synopsis-strategy-label">{t("textView.strategy")}</span>
           <span className="synopsis-strategy-text">{ps.synopsis_strategy}</span>
         </div>
       )}
-      <ProseBlock title="剧情" text={ps.synopsis} />
+      <ProseBlock title={t("textView.plot")} text={ps.synopsis} />
       {ps.highlight_analysis && (
-        <ProseBlock title="核心亮点分析" text={ps.highlight_analysis} color="gold" />
+        <ProseBlock title={t("textView.highlightAnalysis")} text={ps.highlight_analysis} color="gold" />
       )}
     </div>
   );

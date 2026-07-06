@@ -10,6 +10,10 @@ import type {
 import { PIPELINE_STEPS } from "../types";
 import { sendToHost } from "../lib/bridge";
 import type { EntryStatus, DraftState } from "../utils/stepDisplay";
+import { computePhase, type NarrativePhase } from "./phase";
+
+export { computePhase };
+export type { NarrativePhase };
 
 export type ViewMode = "text" | "graph";
 
@@ -35,6 +39,14 @@ export interface StepState {
  *  - "fork"           ：预填全量节点（已完成 + 受影响），便于用户一眼看出"哪些保留 / 哪些重跑"
  */
 export type RunMode = "start" | "resume" | "fork" | null;
+
+/**
+ * 分叉待决的改动类型（§状态机核心）：
+ *  - "input"   改了原料（INPUT）——原料在「确认」时冻结，改动须重点「确认」铸新条目并全量重跑。
+ *  - "routing" 改了路由（ROUTING）——路由在「开始生成」时提交，改动点「开始生成」铸新条目、复用预处理/IP DNA。
+ *  - null      无待决分叉。
+ */
+export type ForkKind = "input" | "routing" | null;
 
 /**
  * Phase 2: 当前查看 entry 的"启动管线快照"。
@@ -96,6 +108,25 @@ interface NarrativeState {
    */
   ipRunKey: string | null;
 
+  // ---- 顶层交互状态机信号（§状态机重构，phase 派生依赖） ----
+  /**
+   * 首次输入确认已发生（直接输入/标签选择/IP作品 任一「确定」）→ 条目已建立。
+   * 与 activeEntryKey 一起构成"已进入 INPUT 阶段"的判据；生成完成/reset 后复位。
+   */
+  inputConfirmed: boolean;
+  /** ROUTING 是否已显式选定叙事路由（从 TierModeSelector 上提，使 phase 完全可派生）。 */
+  routingConfigured: boolean;
+  /** IP DNA 下游生成 job 进行中（半自动重需求路径的"生成中"信号，与 runningRunId 并列驱动 phase=generating）。 */
+  ipDnaGenerating: boolean;
+  /**
+   * 分叉待决（§状态机核心，泛化自 point2）：在**已独立条目**（确认后 config / 预处理 / 中断 / 完成）
+   * 上改了 INPUT 或 ROUTING，代表一个新需求。预览仍停在旧条目，此标记只点亮相应提交键；
+   * 真正的新条目在下一个提交动作（INPUT→「确认」/ ROUTING→「开始生成」）时才铸造。原条目全量保留。
+   */
+  pendingFork: boolean;
+  /** 分叉待决的改动类型：input（改原料，「确认」提交，全量重跑）/ routing（改路由，「开始生成」提交，复用预处理）。 */
+  pendingForkKind: ForkKind;
+
   // ---- Local drafts (bound to activeEntry) ----
   editDrafts: Record<string, EditDraft>;
 
@@ -126,6 +157,20 @@ interface NarrativeState {
   // ---- Actions: config ----
   setConfig: (tier: TierId | null, mode: ModeId | null, autoDetect: boolean) => void;
   setAvailableModes: (modes: TierModeInfo[]) => void;
+
+  // ---- Actions: 顶层状态机信号 ----
+  /** ROUTING 选定/取消（TierModeSelector 上提到 store，供 phase 派生与跨 iframe 同步）。 */
+  setRoutingConfigured: (v: boolean) => void;
+  /** IP DNA 下游生成 job 起/止（半自动路径的"生成中"信号）。 */
+  setIpDnaGenerating: (v: boolean) => void;
+  /** 分叉待决置位/复位。传 kind 一并记录改动类型（默认 v=false 时清为 null）。 */
+  setPendingFork: (v: boolean, kind?: ForkKind) => void;
+  /**
+   * 首次输入确认时建立"草稿条目"（§条目提前建立）：把 entryKey 锚定为当前条目，
+   * 后续 INPUT/ROUTING/预处理/生成全部挂在该 key 下。status 保持 null（草稿=未生成）。
+   * inputMeta 写入 activeConfig，供 LIST 虚拟条目展示与 hydrate。
+   */
+  beginDraftEntry: (entryKey: string, inputMeta?: Partial<ActiveConfig>) => void;
 
   // ---- Actions: run lifecycle ----
   startNewRun: (runId: string, entryKey: string, tier?: TierId, mode?: ModeId) => void;
@@ -185,6 +230,13 @@ interface NarrativeState {
    *       pipelineOrder（仅当还有 running 时有意义；否则 PipelineStatus 会忽略它）
    */
   clearActiveEntry: () => void;
+  /**
+   * 显式取消选中当前条目（§状态机：LIST 再点同一条目）。与 clearActiveEntry 不同：
+   * 强制清空，绕过 IP 预览守卫，连预览轨/ipRunKey/运行进度一并清掉，彻底回 idle 全新空白。
+   */
+  deselectEntry: () => void;
+  /** 清上一条目的预览/运行上下文（建新条目前调，避免 pipeline 残留旧节点）。 */
+  resetPreviewContext: () => void;
 
   // ---- Actions: drafts ----
   setEditDraft: (key: string, draft: Partial<EditDraft>) => void;
@@ -460,6 +512,13 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   ipPreviewRunId: null,
   ipRunKey: null,
 
+  // ---- 顶层状态机信号 ----
+  inputConfirmed: false,
+  routingConfigured: false,
+  ipDnaGenerating: false,
+  pendingFork: false,
+  pendingForkKind: null,
+
   // ---- Drafts ----
   editDrafts: {},
 
@@ -489,32 +548,56 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   setConfig: (tier, mode, autoDetect) => set({ tier, mode, autoDetect }),
   setAvailableModes: (modes) => set({ availableModes: modes }),
 
+  // ---- Actions: 顶层状态机信号 ----
+  setRoutingConfigured: (v) => set({ routingConfigured: v }),
+  setPendingFork: (v, kind) => set({ pendingFork: v, pendingForkKind: v ? (kind ?? null) : null }),
+  setIpDnaGenerating: (v) => set({ ipDnaGenerating: v }),
+  beginDraftEntry: (entryKey, inputMeta) =>
+    set((state) => ({
+      activeEntryKey: entryKey,
+      activeEntryStatus: null,
+      inputConfirmed: true,
+      activeConfig: { ...(state.activeConfig ?? {}), ...(inputMeta ?? {}) },
+    })),
+
   // ---- Actions: run lifecycle ----
   startNewRun: (runId, entryKey, tier, mode) =>
-    set({
-      activeEntryKey: entryKey,
-      activeEntryStatus: "running",
-      activeSteps: [],
-      activeResult: null,
-      runningEntryKey: entryKey,
-      runningRunId: runId,
-      ipPreviewRunId: null,
-      runningProgress: [],
-      pipelineOrder: [],
-      runMode: "start",
-      editDrafts: {},
-      tier: tier ?? get().tier,
-      mode: mode ?? get().mode,
-      focusedStepId: null,
-      focusedChildNodeId: null,
-      expandedStepId: null,
-      collapsedGraphIds: [],
-      streamingChunks: {},
-      streamPlayedSteps: [],
-      runStartedAt: Date.now(),
-      liveCompletedSteps: [],
-      animatingStepId: null,
-      animPlayedNodes: [],
+    set((state) => {
+      // §状态机重构 / 管线节点稳定：下游生成开始时**保留已有 ip_* 前驱步**（IP 预处理产物），
+      // 而非整表清空——否则中间预览会出现 5→0→n 的节点跳变（前驱链闪没）。
+      // 仅当继续同一条目（entryKey 对齐）时保留；换条目则清空。
+      const keepIp =
+        (state.activeEntryKey === entryKey || state.runningEntryKey === entryKey) &&
+        state.runningProgress.filter((s) => s.id.startsWith("ip_"));
+      const seededProgress = keepIp && keepIp.length > 0 ? keepIp : [];
+      const seededOrder = seededProgress.map((s) => s.id);
+      return {
+        activeEntryKey: entryKey,
+        activeEntryStatus: "running",
+        activeSteps: seededProgress,
+        activeResult: null,
+        runningEntryKey: entryKey,
+        runningRunId: runId,
+        ipPreviewRunId: null,
+        ipDnaGenerating: false,
+        pendingFork: false,
+        runningProgress: seededProgress,
+        pipelineOrder: seededOrder,
+        runMode: "start",
+        editDrafts: {},
+        tier: tier ?? get().tier,
+        mode: mode ?? get().mode,
+        focusedStepId: null,
+        focusedChildNodeId: null,
+        expandedStepId: null,
+        collapsedGraphIds: [],
+        streamingChunks: {},
+        streamPlayedSteps: [],
+        runStartedAt: Date.now(),
+        liveCompletedSteps: seededProgress.filter((s) => s.status === "completed").map((s) => s.id),
+        animatingStepId: null,
+        animPlayedNodes: [],
+      };
     }),
 
   startFork: (runId, newEntryKey, _sourceEntryKey, tier, mode, preloadSteps) =>
@@ -773,6 +856,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         runningProgress: steps,
         runningRunId: null,
         ipPreviewRunId: null,
+        ipDnaGenerating: false,
         runningEntryKey: null,
         runMode: null,
         activeEntryKey: isViewing ? resolvedKey : state.activeEntryKey,
@@ -793,6 +877,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         runningProgress: finalProgress,
         runningRunId: null,
         ipPreviewRunId: null,
+        ipDnaGenerating: false,
         runningEntryKey: null,
         runMode: null,
         activeSteps: isViewing ? finalProgress : state.activeSteps,
@@ -816,8 +901,12 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         runningRunId: null,
         runningEntryKey: null,
         runMode: null,
+        ipDnaGenerating: false,
         activeEntryStatus: state.activeEntryKey === state.runningEntryKey ? "interrupted" : state.activeEntryStatus,
       });
+    } else {
+      // IP DNA 下游 job 取消（无 SSE runningRunId）：仅清生成信号，phase 回落 routed/input。
+      set({ ipDnaGenerating: false });
     }
   },
 
@@ -862,6 +951,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       tier: opts.tier,
       mode: opts.mode,
       editDrafts: {},
+      // 加载历史条目 → 全新查看态：清完成态分叉待决（改配置才会重新置位）。
+      pendingFork: false,
       focusedStepId: null,
       focusedChildNodeId: null,
       expandedStepId: null,
@@ -895,6 +986,9 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         activeResult: null,
         activeConfig: null,
         editDrafts: {},
+        // 离开条目 → 回落 fresh/idle：清输入确认标记（routingConfigured 保留，UI 选择仍在）。
+        inputConfirmed: false,
+        pendingFork: false,
         focusedStepId: null,
         focusedChildNodeId: null,
         expandedStepId: null,
@@ -903,6 +997,57 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         streamPlayedSteps: [],
         animatingStepId: null,
       };
+    }),
+
+  // §状态机：显式取消选中——强制全清（不受 IP 预览守卫拦截），回 idle 全新空白。
+  // 仅历史条目留在磁盘/LIST，前端不留任何选中/预览/运行残留。
+  deselectEntry: () =>
+    set({
+      activeEntryKey: null,
+      activeEntryStatus: null,
+      activeSteps: [],
+      activeResult: null,
+      activeConfig: null,
+      inputConfirmed: false,
+      pendingFork: false,
+      pendingForkKind: null,
+      ipPreviewRunId: null,
+      ipRunKey: null,
+      ipDnaGenerating: false,
+      runningProgress: [],
+      pipelineOrder: [],
+      runMode: null,
+      editDrafts: {},
+      focusedStepId: null,
+      focusedChildNodeId: null,
+      expandedStepId: null,
+      collapsedGraphIds: [],
+      streamingChunks: {},
+      streamPlayedSteps: [],
+      animatingStepId: null,
+    }),
+
+  // §状态机：建新条目前清上一条目的预览/运行上下文，使 pipeline 干净切到新条目
+  // （不动 activeEntryKey/inputConfirmed——紧接着的 beginDraftEntry 会设新键）。
+  resetPreviewContext: () =>
+    set({
+      ipPreviewRunId: null,
+      ipRunKey: null,
+      ipDnaGenerating: false,
+      runningProgress: [],
+      pipelineOrder: [],
+      activeSteps: [],
+      activeResult: null,
+      runMode: null,
+      pendingFork: false,
+      pendingForkKind: null,
+      focusedStepId: null,
+      focusedChildNodeId: null,
+      expandedStepId: null,
+      collapsedGraphIds: [],
+      streamingChunks: {},
+      streamPlayedSteps: [],
+      animatingStepId: null,
     }),
 
   // ---- Actions: drafts ----
@@ -1037,6 +1182,10 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       runningProgress: [],
       pipelineOrder: [],
       runMode: null,
+      inputConfirmed: false,
+      routingConfigured: false,
+      ipDnaGenerating: false,
+      pendingFork: false,
       editDrafts: {},
       focusedStepId: null,
       focusedChildNodeId: null,
@@ -1058,6 +1207,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       activeConfig: s.activeConfig,
       runningEntryKey: s.runningEntryKey,
       runningRunId: s.runningRunId,
+      inputConfirmed: s.inputConfirmed,
+      routingConfigured: s.routingConfigured,
       tier: s.tier,
       mode: s.mode,
       viewMode: s.viewMode,
@@ -1094,6 +1245,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         activeConfig: data.activeConfig ?? null,
         runningEntryKey: data.runningEntryKey ?? null,
         runningRunId: data.runningRunId ?? null,
+        inputConfirmed: data.inputConfirmed ?? false,
+        routingConfigured: data.routingConfigured ?? false,
         tier: data.tier ?? null,
         mode: data.mode ?? null,
         viewMode: data.viewMode ?? "text",
@@ -1110,6 +1263,14 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     return Object.values(drafts).some((d) => d.saved);
   },
 }));
+
+/**
+ * 顶层 phase 的 React 订阅钩子（§状态机重构）。UI 组件（header/按钮/管线门控）用它取唯一 phase，
+ * 底层依赖变化时自动重算。等价于 useNarrativeStore(computePhase) 但语义更清晰。
+ */
+export function useNarrativePhase(): NarrativePhase {
+  return useNarrativeStore((s) => computePhase(s));
+}
 
 /** Attempt to restore from localStorage on load */
 export function tryRestoreFromStorage(): boolean {
@@ -1145,6 +1306,11 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "runningRunId",
   "ipPreviewRunId",
   "ipRunKey",
+  "inputConfirmed",
+  "routingConfigured",
+  "ipDnaGenerating",
+  "pendingFork",
+  "pendingForkKind",
   "runningProgress",
   "pipelineOrder",
   "previewOrder",

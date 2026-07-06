@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeChunkScenarios } from '../mergeChunkScenarios'
+import { mergeChunkScenarios } from '../forge/mergeChunkScenarios'
 import type { Scenario, Scene, Branch } from '../../scenario/types'
 
 function scene(id: string, opts: Partial<Scene> = {}): Scene {

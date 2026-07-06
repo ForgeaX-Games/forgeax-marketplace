@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { forgeCuratedScript } from '../promptForge'
+import { forgeCuratedScript } from '../forge/promptForge'
 import { SKILLS } from '../skills'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * forgeCuratedScript 契约测试

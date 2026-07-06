@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAssetStore, type AssetRecord } from '../assetStore'
 import { useSceneImageCache } from '../sceneImageCache'
-import type { ImageClient, ImageRequest, ImageResult } from '../../llm/types'
+import type { ImageClient, ImageRequest, ImageResult } from '../../llm/config/types'
 
 /**
  * sceneImageCache 行为契约：

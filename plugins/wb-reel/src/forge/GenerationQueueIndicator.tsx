@@ -17,13 +17,10 @@ import { estimateProgress, useNowTick } from './queueProgress'
 import { useShellStore } from '../shell/shellStore'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { GenRequestDialog } from './GenRequestDialog'
+import { tf, useT } from '../i18n'
 
-const STATUS_LABEL: Record<GenJobStatus, string> = {
-  queued: '排队',
-  running: '生成中',
-  done: '完成',
-  failed: '失败',
-  cancelled: '已取消',
+function statusLabel(t: (key: string) => string, status: GenJobStatus): string {
+  return t(`queue.status.${status}`)
 }
 
 const KIND_ICON: Record<GenJob['kind'], string> = {
@@ -33,6 +30,7 @@ const KIND_ICON: Record<GenJob['kind'], string> = {
 }
 
 export function GenerationQueueIndicator() {
+  const t = useT()
   const jobs = useGenerationQueue((s) => s.jobs)
   const order = useGenerationQueue((s) => s.order)
   const paused = useGenerationQueue((s) => s.paused)
@@ -140,10 +138,10 @@ export function GenerationQueueIndicator() {
         type="button"
         className={`ks-qi-pill${active > 0 ? ' is-live' : ''}${open ? ' is-open' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title="生成进度队列（图片 / 视频 / 音频）"
+        title={t('queue.pillTitle')}
       >
         <span className={`ks-qi-dot${active > 0 ? ' is-live' : ''}`} />
-        <span className="ks-qi-txt">生成</span>
+        <span className="ks-qi-txt">{t('queue.generate')}</span>
         {active > 0 ? (
           <span className="ks-qi-counts">
             {running > 0 && <em className="is-run">⟳{running}</em>}
@@ -169,11 +167,11 @@ export function GenerationQueueIndicator() {
         >
           <div className="ks-qi-head">
             <span className="ks-qi-head-title">
-              生成队列
+              {t('queue.title')}
               {list.length > 0 && (
                 <em className="ks-qi-head-sum">
                   {running > 0 && ` ⟳${running}`}
-                  {queued > 0 && ` 排队${queued}`}
+                  {queued > 0 && tf('queue.queuedInline', { count: queued })}
                   {done > 0 && ` ✓${done}`}
                   {failed > 0 && ` ✕${failed}`}
                 </em>
@@ -183,21 +181,21 @@ export function GenerationQueueIndicator() {
               {active > 0 &&
                 (paused ? (
                   <button type="button" className="ks-qi-btn" onClick={() => resume()}>
-                    ▶ 继续
+                    {t('queue.resume')}
                   </button>
                 ) : (
                   <button type="button" className="ks-qi-btn" onClick={() => pause()}>
-                    ⏸ 暂停
+                    {t('queue.pause')}
                   </button>
                 ))}
               {active > 0 && (
                 <button type="button" className="ks-qi-btn is-danger" onClick={() => cancelAll()}>
-                  取消全部
+                  {t('queue.cancelAll')}
                 </button>
               )}
               {done + failed > 0 && (
                 <button type="button" className="ks-qi-btn" onClick={() => clearFinished()}>
-                  清理
+                  {t('queue.clear')}
                 </button>
               )}
             </div>
@@ -205,8 +203,8 @@ export function GenerationQueueIndicator() {
 
           {list.length === 0 ? (
             <div className="ks-qi-empty">
-              暂无生成任务
-              <span>分镜 / 关键帧 / 视频 / 音频生成时，进度会实时显示在这里。</span>
+              {t('queue.empty')}
+              <span>{t('queue.emptyHint')}</span>
             </div>
           ) : (
             <div className="ks-qi-list">
@@ -229,7 +227,7 @@ export function GenerationQueueIndicator() {
                           </span>
                         ) : (
                           <span className={`ks-qi-badge is-${job.status}`}>
-                            {STATUS_LABEL[job.status]}
+                            {statusLabel(t, job.status)}
                           </span>
                         )}
                         {/* 已完成且有节点：「查看」直接跳到素材库该卡片（在卡上看完整
@@ -240,7 +238,7 @@ export function GenerationQueueIndicator() {
                             type="button"
                             className="ks-qi-x is-info"
                             onClick={() => jumpToAsset(job)}
-                            title="在素材库打开这张卡片（看完整信息 / 用 ⓘ 看用到的角色·场景·道具锚点）"
+                            title={t('queue.viewAssetTitle')}
                           >
                             🔍
                           </button>
@@ -252,7 +250,7 @@ export function GenerationQueueIndicator() {
                               setInspectId(job.id)
                               setOpen(false)
                             }}
-                            title="查看发给模型的请求：提示词 / 上传的参考图 / 参数 / 报错"
+                            title={t('queue.inspectTitle')}
                           >
                             🔍
                           </button>
@@ -262,7 +260,7 @@ export function GenerationQueueIndicator() {
                             type="button"
                             className="ks-qi-x is-info"
                             onClick={() => jumpToAsset(job)}
-                            title="去素材库定位这张卡片（在节点画板里继续编辑/重生）"
+                            title={t('queue.locateTitle')}
                           >
                             ↗
                           </button>
@@ -272,7 +270,7 @@ export function GenerationQueueIndicator() {
                             type="button"
                             className="ks-qi-x"
                             onClick={() => cancel(job.id)}
-                            title="取消"
+                            title={t('queue.cancel')}
                           >
                             ✕
                           </button>
@@ -281,7 +279,7 @@ export function GenerationQueueIndicator() {
                             type="button"
                             className="ks-qi-x is-retry"
                             onClick={() => retry(job.id)}
-                            title="重试"
+                            title={t('queue.retry')}
                           >
                             ↻
                           </button>
@@ -303,9 +301,9 @@ export function GenerationQueueIndicator() {
                             type="button"
                             className="ks-qi-copy"
                             onClick={() => void copyError(job.id, job.error ?? '')}
-                            title="复制完整错误"
+                            title={t('queue.copyError')}
                           >
-                            {copiedId === job.id ? '已复制' : '复制'}
+                            {copiedId === job.id ? t('queue.copied') : t('queue.copy')}
                           </button>
                         </div>
                       ) : null}

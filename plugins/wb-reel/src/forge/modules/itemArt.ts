@@ -1,4 +1,4 @@
-import type { ImageClient, ImageReference } from '../../llm/types'
+import type { ImageClient, ImageReference } from '../../llm/config/types'
 import { useMediaStore } from '../../media/mediaStore'
 import { cutoutToTransparent } from '../../media/cutoutToTransparent'
 import type { InventoryItem } from '../../scenario/types'

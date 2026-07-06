@@ -7,37 +7,34 @@
 
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { useOnboardingStore } from './onboardingStore'
+import { useT } from '../../i18n'
 
-interface Row {
-  keys: string
-  desc: string
-}
+const SHORTCUT_KEYS = [
+  { keysKey: 'help.keys.undo', descKey: 'help.shortcut.undo' },
+  { keysKey: 'help.keys.redo', descKey: 'help.shortcut.redo' },
+  { keysKey: 'help.keys.delete', descKey: 'help.shortcut.delete' },
+  { keysKey: 'help.keys.clipboard', descKey: 'help.shortcut.clipboard' },
+  { keysKey: 'help.keys.shiftClick', descKey: 'help.shortcut.multiselect' },
+  { keysKey: 'help.keys.markerKey', descKey: 'help.shortcut.marker' },
+  { keysKey: 'help.keys.esc', descKey: 'help.shortcut.esc' },
+  { keysKey: 'help.keys.trim', descKey: 'help.shortcut.trim' },
+  { keysKey: 'help.keys.zoom', descKey: 'help.shortcut.zoom' },
+] as const
 
-const SHORTCUTS: Row[] = [
-  { keys: '⌘/Ctrl + Z', desc: '撤销（误删可找回，内存栈最多 50 步）' },
-  { keys: '⌘/Ctrl + Shift + Z · Ctrl+Y', desc: '重做' },
-  { keys: 'Delete · Backspace', desc: '删除选中片段（多选则整批删）' },
-  { keys: '⌘/Ctrl + C / V / D', desc: '复制 / 粘贴到播放头 / 原地再制' },
-  { keys: 'Shift + 点击', desc: '多选片段（可整批删除 / 微调）' },
-  { keys: 'M', desc: '在播放头处打一个标记点' },
-  { keys: 'Esc', desc: '取消当前选择 / 多选' },
-  { keys: '拖两端 / 拖中间', desc: '裁剪片段时长 / 移动片段位置' },
-  { keys: 'Ctrl/⌘ + 滚轮', desc: '时间轴缩放（也可拖工具栏缩放滑块）' },
-]
-
-const FEATURES: Row[] = [
-  { keys: '轨道头 👁', desc: '显示 / 隐藏该轨（不影响数据，仅预览与画面叠层）' },
-  { keys: '轨道头 🔒', desc: '锁定该轨：片段不可拖动，点击只透传播放头' },
-  { keys: '「轨道」按钮', desc: '统一管理所有轨的显隐' },
-  { keys: '右侧后期面板', desc: '转场 / 特效 / 贴纸 / 滤镜 / 调节 / 首尾动画 / 变速 / 我的' },
-  { keys: '变速 / 定格', desc: '选中镜头 → 后期面板「变速」：定格(0)/0.5×/1×/2× 等' },
-  { keys: '工具栏「更多 ⋯」', desc: '复制/粘贴/再制 · 镜头/音频左对齐 · 左右微调 · 清空' },
-  { keys: '标尺双击 / M', desc: '打标记点（可命名、可吸附、不进成片）' },
-  { keys: '音频淡入淡出', desc: '选中音频片段 → 设音量 / 淡入 / 淡出' },
-]
+const FEATURE_KEYS = [
+  { keysKey: 'help.keys.trackEye', descKey: 'help.feature.trackEye' },
+  { keysKey: 'help.keys.trackLock', descKey: 'help.feature.trackLock' },
+  { keysKey: 'help.keys.trackMenu', descKey: 'help.feature.trackMenu' },
+  { keysKey: 'help.keys.fxPanel', descKey: 'help.feature.fxPanel' },
+  { keysKey: 'help.keys.speed', descKey: 'help.feature.speed' },
+  { keysKey: 'help.keys.moreMenu', descKey: 'help.feature.moreMenu' },
+  { keysKey: 'help.keys.marker', descKey: 'help.feature.marker' },
+  { keysKey: 'help.keys.audioFade', descKey: 'help.feature.audioFade' },
+] as const
 
 export function HelpPanel() {
   injectStyleOnce('ks-help-panel', css)
+  const t = useT()
   const helpOpen = useOnboardingStore((s) => s.helpOpen)
   const setHelpOpen = useOnboardingStore((s) => s.setHelpOpen)
   const openTour = useOnboardingStore((s) => s.openTour)
@@ -45,35 +42,35 @@ export function HelpPanel() {
   const close = (): void => setHelpOpen(false)
   return (
     <div className="ks-help-scrim" onClick={close} role="presentation">
-      <aside className="ks-help-panel" role="dialog" aria-label="时间轴帮助" onClick={(e) => e.stopPropagation()}>
+      <aside className="ks-help-panel" role="dialog" aria-label={t('help.ariaLabel')} onClick={(e) => e.stopPropagation()}>
         <header className="ks-help-head">
-          <span className="ks-help-title">时间轴速查</span>
-          <button type="button" className="ks-help-close" onClick={close} aria-label="关闭" title="关闭 (点击空白处也可)">
+          <span className="ks-help-title">{t('help.title')}</span>
+          <button type="button" className="ks-help-close" onClick={close} aria-label={t('drawer.close')} title={t('help.closeTitle')}>
             ✕
           </button>
         </header>
         <div className="ks-help-body">
           <section className="ks-help-sec">
-            <h4 className="ks-help-sec-title">快捷键</h4>
+            <h4 className="ks-help-sec-title">{t('help.shortcuts')}</h4>
             <table className="ks-help-table">
               <tbody>
-                {SHORTCUTS.map((r) => (
-                  <tr key={r.keys}>
-                    <td className="ks-help-keys ks-mono">{r.keys}</td>
-                    <td className="ks-help-desc">{r.desc}</td>
+                {SHORTCUT_KEYS.map((r) => (
+                  <tr key={r.keysKey}>
+                    <td className="ks-help-keys ks-mono">{t(r.keysKey)}</td>
+                    <td className="ks-help-desc">{t(r.descKey)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </section>
           <section className="ks-help-sec">
-            <h4 className="ks-help-sec-title">功能速查</h4>
+            <h4 className="ks-help-sec-title">{t('help.features')}</h4>
             <table className="ks-help-table">
               <tbody>
-                {FEATURES.map((r) => (
-                  <tr key={r.keys}>
-                    <td className="ks-help-keys">{r.keys}</td>
-                    <td className="ks-help-desc">{r.desc}</td>
+                {FEATURE_KEYS.map((r) => (
+                  <tr key={r.keysKey}>
+                    <td className="ks-help-keys">{t(r.keysKey)}</td>
+                    <td className="ks-help-desc">{t(r.descKey)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -89,7 +86,7 @@ export function HelpPanel() {
               openTour()
             }}
           >
-            ↺ 重看新手引导
+            {t('help.replayTour')}
           </button>
         </footer>
       </aside>

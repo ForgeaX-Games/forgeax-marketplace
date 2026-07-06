@@ -5,8 +5,7 @@
  *   E1 主路径（无上传剧本）：
  *     vnLogline           E1-01 用户需求预处理
  *     vnOutlineActs       E1-02 故事梗概扩写（三幕 + 人物小传）
- *     vnScenes            E1-03 场搭建
- *     vnBeats             E1-04 情节点搭建（线性）
+ *     vnBeats             E1-04 情节点搭建（线性黄金线；场号改 G-01 末尾导出，§4.6c）
  *   E2 旁路（有上传剧本时插入）：
  *     vnScriptNormalize   E2-01 用户剧本预处理
  *     vnSegmentConfirm    E2-02 影游化文本段确认
@@ -17,7 +16,6 @@
  */
 export { vnLogline } from "./vn-logline.js";
 export { vnOutlineActs } from "./vn-outline-acts.js";
-export { vnScenes } from "./vn-scenes.js";
 export { vnBeats } from "./vn-beats.js";
 export { vnScriptNormalize } from "./vn-script-normalize.js";
 export { vnSegmentConfirm } from "./vn-segment-confirm.js";

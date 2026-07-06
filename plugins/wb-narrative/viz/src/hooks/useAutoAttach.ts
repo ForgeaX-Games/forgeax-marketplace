@@ -30,11 +30,24 @@ export function useAutoAttach(): void {
         // 已在跟踪某个 run → 交给 SSE，不抢。
         if (st.runningRunId) return;
 
+        // §状态机重构 gate：IP 半自动预处理期间**绝不**误挂载。
+        // 现象根因：ingest job 处于 awaiting_confirmation 时后端把该 run 在 history 标为
+        // status:"running"，本轮询若挂上会调 startNewRun 清空 runningProgress/ipPreviewRunId，
+        // 导致"标准化预览闪一下就没 + 顶栏 C0-Cn 点击无内容 + header 假 GENERATING"。
+        // 存在以下任一 IP 预处理信号时跳过挂载：预览轨/磁盘键/已 push 的 ip_* 前驱步/草稿条目。
+        if (st.ipPreviewRunId || st.ipRunKey) return;
+        if (st.runningProgress.some((s) => s.id.startsWith("ip_"))) return;
+        if (st.inputConfirmed && !st.activeEntryStatus) return; // 草稿条目（未生成）
+
         const history = await fetchHistory();
         if (cancelled) return;
 
+        // 仅挂载真正的下游生成 run：排除 IP DNA 预处理条目（其活跃 job 为 awaiting_confirmation，
+        // 后端仍标 running）。draft/ip-dna kind 或对应 job 未进入下游生成的，一律不挂。
         const running = history.find((e) => e.status === "running" && !!e.id);
         if (!running || !running.id) return;
+        // 二次防线：本地若已锚定同名草稿/预处理条目，交给用户的「开始生成」显式驱动，不自动抢。
+        if (running.key && running.key === st.activeEntryKey && st.inputConfirmed && !st.activeEntryStatus) return;
         if (attemptedRef.current.has(running.id)) return;
 
         // 二次确认：异步间隙里用户/SSE 可能已抢先挂载。

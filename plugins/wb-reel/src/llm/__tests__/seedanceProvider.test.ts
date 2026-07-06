@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { SeedanceProvider } from '../VideoProvider'
+import { SeedanceProvider } from '../providers/VideoProvider'
 
 interface MockCall {
   url: string

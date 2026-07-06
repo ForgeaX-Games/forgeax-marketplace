@@ -8,7 +8,7 @@ import { RenderStage } from './render/RenderStage'
 import { ForgeTab } from './forge/ForgeTab'
 import { InspectorDrawer } from './shell/InspectorDrawer'
 import { ToastHost } from './ui/ToastHost'
-import { resumeRunningVideoTasks } from './llm/videoTaskResume'
+import { resumeRunningVideoTasks } from './llm/pipeline/videoTaskResume'
 import { resumeGenerationQueue } from './forge/generationQueueStore'
 // 副作用导入：注册可恢复任务的 recipe（orch-video / audition），
 // 让 resumeGenerationQueue 在刷新/重开后能按当前剧本重建并续跑。
@@ -34,6 +34,7 @@ import {
   writeSessionRouteFromState,
 } from './shell/sessionRoute'
 import { installCrossPaneSync } from './shell/crossPaneSync'
+import { t, tf } from './i18n'
 
 /**
  * 顶层应用 —— 二 Tab 路由：
@@ -178,19 +179,16 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
    * 反映到 center. 当前两个 iframe store 互相独立, 可以正常工作但用户切 tab
    * 需要在 center 内部的二级 tab 行操作.
    */
-  const [pane, setPane] = useState<'left' | 'center' | null>(null)
-  useEffect(() => {
+  const [pane] = useState<'left' | 'center' | null>(() => {
     try {
       const p = new URLSearchParams(window.location.search).get('pane')
-      if (p === 'left' || p === 'center') setPane(p)
-      // 嵌入到 forgeax-studio 的 split pane 时, 总工程的 ChatPanel + reia
-      // agent 接管对话职能 → wb-reel 自身的 ForgeChatPanel 整列隐藏.
-      // (left pane 没空间放 chat, center pane 让出空间给主区域)
-      if (p === 'left' || p === 'center') setChatVisible(false)
-    } catch {
-      // 静默兜底
-    }
-  }, [setChatVisible])
+      if (p === 'left' || p === 'center') return p
+    } catch { /* */ }
+    return null
+  })
+  useEffect(() => {
+    if (pane === 'left' || pane === 'center') setChatVisible(false)
+  }, [pane, setChatVisible])
 
   /*
    * 2026-05-29 跨 pane 同步桥.
@@ -463,15 +461,15 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
 
       const toast = useToastStore.getState().fire
       if (okCount > 0 && failCount === 0) {
-        toast(`已为你恢复 ${okCount} 个上次未上传完的素材`, { kind: 'success' })
+        toast(tf('app.orphanRecovered', { count: okCount }), { kind: 'success' })
       } else if (okCount > 0 && failCount > 0) {
         toast(
-          `已恢复 ${okCount} 个素材，另有 ${failCount} 个仍未上传（可手动重试）`,
+          tf('app.orphanPartial', { ok: okCount, fail: failCount }),
           { kind: 'warning', ttl: 6000 },
         )
       } else if (failCount > 0) {
         toast(
-          `检测到 ${failCount} 个素材未上传，自动重试失败 —— 请去资产面板手动重传`,
+          tf('app.orphanFailed', { count: failCount }),
           { kind: 'error' },
         )
       }
@@ -654,7 +652,7 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
       //   现在 failed 也拦一次，至少给作者"先点重试再刷"的机会。
       const atRisk = useMediaStore.getState().atRiskIds()
       if (atRisk.length > 0 && e) {
-        const msg = `还有 ${atRisk.length} 个媒体文件未落盘（可能正在保存或保存失败），刷新会丢失。建议先回 Forge 页点击失败图像重试，或稍候再刷新。`
+        const msg = tf('app.mediaAtRisk', { count: atRisk.length })
         e.preventDefault()
         e.returnValue = msg
         return msg

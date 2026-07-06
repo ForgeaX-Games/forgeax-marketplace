@@ -67,7 +67,7 @@ import {
 import { buildPreviewPanelFrameCss, inlinePanelFrameStyle } from './panel-chrome-css'
 import { buildPrototypeChromeCss, buildProtoGenreShellGateClasses } from './prototype-assets'
 import { createUiGenerationNonce } from './ui-design-generation-nonce'
-import { initLocaleSync, onLocaleChange, t, workflowSteps } from '../../i18n'
+import { initLocaleSync, onLocaleChange, t, workflowSteps, getLocale } from '../../i18n'
 
 const CSS_ID = 'ui-design-pipeline-css'
 
@@ -354,7 +354,7 @@ class UIDesignPipelineUI {
     if (this.isAssetKindComplete(step.kind)) return 'done'
     if (!this.loadComponentLibraryRunning) return 'pending'
     if (PARALLEL_CHROME_ASSET_KINDS.has(step.kind)) {
-      const inChromeBatch = Boolean(progress?.currentLabel?.startsWith('并行生成'))
+      const inChromeBatch = Boolean(progress?.currentLabel?.startsWith(t('progress.parallelPrefix')))
       if (inChromeBatch && !this.isAssetKindComplete(step.kind)) return 'active'
     }
     if (progress?.stepIndex === index) return 'active'
@@ -1032,7 +1032,7 @@ class UIDesignPipelineUI {
     const label = [
       GENRE_PRESETS.find(item => item.id === this.state.genrePreset)?.label ?? this.state.genrePreset,
       STYLE_PRESETS.find(item => item.id === this.state.style)?.label ?? this.state.style,
-      this.state.assetPromptNotes.trim() || '默认组件风格',
+      this.state.assetPromptNotes.trim() || t('prompt.defaultStyle'),
     ].join(' · ')
     const preview = await this.buildHistoryPreview()
     const pack = {
@@ -1077,7 +1077,7 @@ class UIDesignPipelineUI {
       label: [
         GENRE_PRESETS.find(item => item.id === this.state.genrePreset)?.label ?? this.state.genrePreset,
         STYLE_PRESETS.find(item => item.id === this.state.style)?.label ?? this.state.style,
-        this.state.assetPromptNotes.trim() || '上一次组件风格',
+        this.state.assetPromptNotes.trim() || t('prompt.lastStyle'),
       ].join(' · '),
       genrePreset: this.state.genrePreset,
       style: this.state.style,
@@ -1361,8 +1361,8 @@ class UIDesignPipelineUI {
     const iconList = (preview?.icons?.length ? preview.icons : preview?.icon ? [preview.icon] : []).slice(0, 4)
     return `
       <div class="uid-history-preview">
-        <div class="uid-history-title" ${preview?.titleDeco ? `style="background-image:url('${esc(preview.titleDeco)}')"` : ''}>标题条</div>
-        <div class="uid-history-panel" ${preview?.panelTexture ? `style="background-image:url('${esc(preview.panelTexture)}')"` : ''}>面板纹理</div>
+        <div class="uid-history-title" ${preview?.titleDeco ? `style="background-image:url('${esc(preview.titleDeco)}')"` : ''}>${t('asset.titleDeco')}</div>
+        <div class="uid-history-panel" ${preview?.panelTexture ? `style="background-image:url('${esc(preview.panelTexture)}')"` : ''}>${t('asset.panelTexture')}</div>
         <div class="uid-history-button-row">
           <span class="uid-history-btn primary" ${preview?.buttonPrimary ? `style="background-image:url('${esc(preview.buttonPrimary)}')"` : ''}></span>
           <span class="uid-history-btn" ${preview?.buttonNormal ? `style="background-image:url('${esc(preview.buttonNormal)}')"` : ''}></span>
@@ -1378,32 +1378,32 @@ class UIDesignPipelineUI {
 
   private resolveComponentAssetView(token: string): { title: string; src: string } | null {
     if (token === 'titleDeco' && this.liveAssets.titleDeco) {
-      return { title: '标题条', src: this.liveAssets.titleDeco }
+      return { title: t('asset.titleDeco'), src: this.liveAssets.titleDeco }
     }
     if (token === 'buttonPrimary' && this.liveAssets.buttonPrimary) {
-      return { title: '主按钮', src: this.liveAssets.buttonPrimary }
+      return { title: t('asset.primaryBtn'), src: this.liveAssets.buttonPrimary }
     }
     if (token === 'buttonNormal' && this.liveAssets.buttonNormal) {
-      return { title: '次按钮', src: this.liveAssets.buttonNormal }
+      return { title: t('asset.normalBtn'), src: this.liveAssets.buttonNormal }
     }
     if (token === 'buttonPrimaryLong') {
       if (this.liveAssets.buttonPrimaryLong) {
-        return { title: '长选项主按钮', src: this.liveAssets.buttonPrimaryLong }
+        return { title: t('asset.primaryLong'), src: this.liveAssets.buttonPrimaryLong }
       }
       if (this.liveAssets.buttonPrimary) {
-        return { title: '长选项主按钮（暂用菜单底图）', src: this.liveAssets.buttonPrimary }
+        return { title: t('asset.primaryLongFallback'), src: this.liveAssets.buttonPrimary }
       }
     }
     if (token === 'buttonNormalLong') {
       if (this.liveAssets.buttonNormalLong) {
-        return { title: '长选项次按钮', src: this.liveAssets.buttonNormalLong }
+        return { title: t('asset.normalLong'), src: this.liveAssets.buttonNormalLong }
       }
       if (this.liveAssets.buttonNormal) {
-        return { title: '长选项次按钮（暂用菜单底图）', src: this.liveAssets.buttonNormal }
+        return { title: t('asset.normalLongFallback'), src: this.liveAssets.buttonNormal }
       }
     }
     if (token === 'panelTexture' && this.liveAssets.panelTexture) {
-      return { title: '面板底纹', src: this.liveAssets.panelTexture }
+      return { title: t('asset.panelTexture'), src: this.liveAssets.panelTexture }
     }
     if (token.startsWith('icon:')) {
       const index = Number(token.slice('icon:'.length))
@@ -1412,7 +1412,7 @@ class UIDesignPipelineUI {
       const slot = Number.isFinite(index) ? slots[index] : undefined
       if (src) {
         return {
-          title: slot ? `${slot.label} — ${slot.functionTitle}` : `功能图标 ${index + 1}`,
+          title: slot ? `${slot.label} — ${slot.functionTitle}` : t('asset.iconN', { n: index + 1 }),
           src,
         }
       }
@@ -1444,30 +1444,30 @@ class UIDesignPipelineUI {
     const stepKinds = new Set(steps.map(step => step.kind))
 
     if (stepKinds.has('titleDeco') && this.liveAssets.titleDeco) {
-      items.push({ token: 'titleDeco', title: '标题条', src: this.liveAssets.titleDeco })
+      items.push({ token: 'titleDeco', title: t('asset.titleDeco'), src: this.liveAssets.titleDeco })
     }
     if (stepKinds.has('buttonPrimary') && this.liveAssets.buttonPrimary) {
-      items.push({ token: 'buttonPrimary', title: '主按钮', src: this.liveAssets.buttonPrimary })
+      items.push({ token: 'buttonPrimary', title: t('asset.primaryBtn'), src: this.liveAssets.buttonPrimary })
     }
     if (stepKinds.has('buttonNormal') && this.liveAssets.buttonNormal) {
-      items.push({ token: 'buttonNormal', title: '次按钮', src: this.liveAssets.buttonNormal })
+      items.push({ token: 'buttonNormal', title: t('asset.normalBtn'), src: this.liveAssets.buttonNormal })
     }
     if (stepKinds.has('buttonPrimaryLong') && (this.liveAssets.buttonPrimaryLong || this.liveAssets.buttonPrimary)) {
       items.push({
         token: 'buttonPrimaryLong',
-        title: this.liveAssets.buttonPrimaryLong ? '长选项主按钮' : '长选项主按钮（暂用菜单底图）',
+        title: this.liveAssets.buttonPrimaryLong ? t('asset.primaryLong') : t('asset.primaryLongFallback'),
         src: this.liveAssets.buttonPrimaryLong ?? this.liveAssets.buttonPrimary!,
       })
     }
     if (stepKinds.has('buttonNormalLong') && (this.liveAssets.buttonNormalLong || this.liveAssets.buttonNormal)) {
       items.push({
         token: 'buttonNormalLong',
-        title: this.liveAssets.buttonNormalLong ? '长选项次按钮' : '长选项次按钮（暂用菜单底图）',
+        title: this.liveAssets.buttonNormalLong ? t('asset.normalLong') : t('asset.normalLongFallback'),
         src: this.liveAssets.buttonNormalLong ?? this.liveAssets.buttonNormal!,
       })
     }
     if (stepKinds.has('panelTexture') && this.liveAssets.panelTexture) {
-      items.push({ token: 'panelTexture', title: '面板底纹', src: this.liveAssets.panelTexture })
+      items.push({ token: 'panelTexture', title: t('asset.panelTexture'), src: this.liveAssets.panelTexture })
     }
     const slots = iconSlotDescriptorsFromModuleSpecs(this.getModuleAssetSpecs())
     for (const slot of slots) {
@@ -1564,25 +1564,25 @@ class UIDesignPipelineUI {
     const counter = showNav && galleryIndex >= 0 ? `${galleryIndex + 1} / ${gallery.length}` : ''
     return `
       <div class="${cls('uid-asset-lightbox', htmlMode && 'uid-asset-lightbox-html')}" role="dialog" aria-modal="true" aria-label="${esc(this.componentAssetLightbox.title)}">
-        <button class="uid-asset-lightbox-backdrop" data-uid-action="close-component-asset-view" aria-label="关闭放大查看"></button>
+        <button class="uid-asset-lightbox-backdrop" data-uid-action="close-component-asset-view" aria-label="${t('lightbox.closeAria')}"></button>
         <div class="uid-asset-lightbox-card">
           <div class="uid-asset-lightbox-head">
             <div class="uid-asset-lightbox-head-main">
               ${showNav ? `
                 <div class="uid-asset-lightbox-nav">
-                  <button type="button" class="uid-asset-lightbox-arrow" data-uid-action="prev-component-asset-view" aria-label="上一项">‹</button>
+                  <button type="button" class="uid-asset-lightbox-arrow" data-uid-action="prev-component-asset-view" aria-label="${t('lightbox.prev')}">‹</button>
                   <span class="uid-asset-lightbox-counter">${esc(counter)}</span>
-                  <button type="button" class="uid-asset-lightbox-arrow" data-uid-action="next-component-asset-view" aria-label="下一项">›</button>
+                  <button type="button" class="uid-asset-lightbox-arrow" data-uid-action="next-component-asset-view" aria-label="${t('lightbox.next')}">›</button>
                 </div>
               ` : ''}
               <span class="uid-asset-lightbox-title">${esc(this.componentAssetLightbox.title)}</span>
             </div>
-            <button class="uid-clib-retry-btn" data-uid-action="close-component-asset-view">关闭</button>
+            <button class="uid-clib-retry-btn" data-uid-action="close-component-asset-view">${t('lightbox.close')}</button>
           </div>
           <div class="${cls('uid-asset-lightbox-canvas', htmlMode && 'uid-preview-stage')}">
             ${showNav ? `
-              <button type="button" class="uid-asset-lightbox-side uid-asset-lightbox-side-prev" data-uid-action="prev-component-asset-view" aria-label="上一项">‹</button>
-              <button type="button" class="uid-asset-lightbox-side uid-asset-lightbox-side-next" data-uid-action="next-component-asset-view" aria-label="下一项">›</button>
+              <button type="button" class="uid-asset-lightbox-side uid-asset-lightbox-side-prev" data-uid-action="prev-component-asset-view" aria-label="${t('lightbox.prev')}">‹</button>
+              <button type="button" class="uid-asset-lightbox-side uid-asset-lightbox-side-next" data-uid-action="next-component-asset-view" aria-label="${t('lightbox.next')}">›</button>
             ` : ''}
             ${this.componentAssetLightbox.src
               ? `<img src="${esc(this.componentAssetLightbox.src)}" alt="${esc(this.componentAssetLightbox.title)}" />`
@@ -1799,7 +1799,7 @@ class UIDesignPipelineUI {
     }
     if (track) track.setAttribute('aria-valuenow', String(pct))
     const unitDone = Math.min(completedUnits + (this.loadComponentLibraryRunning ? 1 : 0), totalUnits)
-    if (sub) sub.textContent = `第 ${unitDone}/${totalUnits} 项 · 正在生成：${currentLabel}`
+    if (sub) sub.textContent = t('progress.item', { done: unitDone, total: totalUnits, label: currentLabel })
     const steps = this.getComponentLibrarySteps()
     root.querySelectorAll<HTMLElement>('.uid-loading-step').forEach((row, index) => {
       const step = steps[index]
@@ -2047,13 +2047,13 @@ class UIDesignPipelineUI {
 
       if (chromeSteps.length > 0) {
         const batchLabel = chromeSteps.map(step => step.label).join('、')
-        this.setComponentPreviewProgress(doneCount, total, `并行生成：${batchLabel}`, {
+        this.setComponentPreviewProgress(doneCount, total, t('progress.parallel', { label: batchLabel }), {
           stepIndex: 0,
           completedUnits,
           totalUnits,
         })
         this.render()
-        this.startLoadingProgressPulse(completedUnits, totalUnits, `并行生成：${batchLabel}`, {
+        this.startLoadingProgressPulse(completedUnits, totalUnits, t('progress.parallel', { label: batchLabel }), {
           stepIndex: 0,
           done: doneCount,
           total,
@@ -2068,7 +2068,7 @@ class UIDesignPipelineUI {
             (doneInBatch, step) => {
               completedUnits = doneInBatch
               const stepIdx = steps.findIndex(item => item.kind === step.kind)
-              this.setComponentPreviewProgress(doneInBatch, total, `并行生成：${step.label}`, {
+              this.setComponentPreviewProgress(doneInBatch, total, t('progress.parallel', { label: step.label }), {
                 stepIndex: stepIdx >= 0 ? stepIdx : Math.min(doneInBatch - 1, total - 1),
                 completedUnits,
                 totalUnits,
@@ -2080,7 +2080,7 @@ class UIDesignPipelineUI {
           if (!ok) throw new Error(`组件素材生成失败：${batchLabel}`)
           doneCount = chromeSteps.length
           completedUnits = chromeSteps.length
-          const nextLabel = remainingSteps[0]?.label ?? '完成'
+          const nextLabel = remainingSteps[0]?.label ?? t('progress.done')
           const nextStepIdx = remainingSteps.length > 0
             ? steps.findIndex(item => item.kind === remainingSteps[0].kind)
             : total - 1
@@ -2140,7 +2140,7 @@ class UIDesignPipelineUI {
           if (cacheKey !== this.componentVisualRequestKey()) return
           if (!ok) throw new Error(`${step.label}生成失败`)
           completedUnits += inFlightUnits
-          const nextLabel = remainingSteps[i + 1]?.label ?? '完成'
+          const nextLabel = remainingSteps[i + 1]?.label ?? t('progress.done')
           const nextDone = stepIndex + 1
           const nextStepIdx = remainingSteps[i + 1]
             ? steps.findIndex(item => item.kind === remainingSteps[i + 1].kind)
@@ -2156,7 +2156,7 @@ class UIDesignPipelineUI {
         }
       }
       if (!this.hasFullComponentLibrary()) throw new Error('组件库生成未完成')
-      this.setComponentPreviewProgress(total, total, '完成', {
+      this.setComponentPreviewProgress(total, total, t('progress.done'), {
         stepIndex: total - 1,
         completedUnits: totalUnits,
         totalUnits,
@@ -2179,7 +2179,7 @@ class UIDesignPipelineUI {
           label: [
             GENRE_PRESETS.find(item => item.id === this.state.genrePreset)?.label ?? this.state.genrePreset,
             STYLE_PRESETS.find(item => item.id === this.state.style)?.label ?? this.state.style,
-            this.state.assetPromptNotes.trim() || '默认组件风格',
+            this.state.assetPromptNotes.trim() || t('prompt.defaultStyle'),
           ].join(' · '),
           genrePreset: this.state.genrePreset,
           style: this.state.style,
@@ -3030,13 +3030,13 @@ class UIDesignPipelineUI {
     if (moduleId === 'dialog-box') return 'anchor-bottom-wide'
     if (moduleId === 'pause-menu' || moduleId === 'settings-panel' || moduleId === 'modal-dialog') return 'anchor-center-wide'
     if (moduleId === 'inventory-grid' || moduleId === 'shop-panel' || moduleId === 'character-panel' || moduleId === 'item-detail' || moduleId === 'crafting-panel' || moduleId === 'reward-summary' || moduleId === 'level-select' || moduleId === 'weapon-select') return 'anchor-right-mid'
-    if (zone.includes('左上')) return 'anchor-left-top'
-    if (zone.includes('右上')) return 'anchor-right-top'
-    if (zone.includes('左下')) return 'anchor-left-bottom'
-    if (zone.includes('右下')) return 'anchor-right-bottom'
-    if (zone.includes('顶部')) return 'anchor-top-center'
-    if (zone.includes('底部')) return 'anchor-bottom-center'
-    if (zone.includes('中心') || zone.includes('中央')) return 'anchor-center'
+    if (zone.includes('左上') || zone.includes('top-left') || zone.includes('Top-left')) return 'anchor-left-top'
+    if (zone.includes('右上') || zone.includes('top-right') || zone.includes('Top-right')) return 'anchor-right-top'
+    if (zone.includes('左下') || zone.includes('bottom-left') || zone.includes('Bottom-left')) return 'anchor-left-bottom'
+    if (zone.includes('右下') || zone.includes('bottom-right') || zone.includes('Bottom-right')) return 'anchor-right-bottom'
+    if (zone.includes('顶部') || zone.toLowerCase().includes('top')) return 'anchor-top-center'
+    if (zone.includes('底部') || zone.toLowerCase().includes('bottom')) return 'anchor-bottom-center'
+    if (zone.includes('中心') || zone.includes('中央') || zone.toLowerCase().includes('center')) return 'anchor-center'
     if (layer === 'depth-settings') return 'anchor-center-wide'
     if (layer === 'active-menu') return 'anchor-right-mid'
     if (layer === 'context-hud') return 'anchor-right-top'
@@ -3062,7 +3062,7 @@ class UIDesignPipelineUI {
       && !this.loadComponentLibraryRunning
       && !this.componentCoreBackfillRunning
       && backfillAttempts >= this.componentCoreBackfillMaxAttempts
-    const missingHint = backfillFailed ? '生成失败，点击重试' : '生成中...'
+    const missingHint = backfillFailed ? t('clib.missingFailed') : t('clib.missingGenerating')
     const steps = this.getComponentLibrarySteps()
     const stepKinds = new Set(steps.map(step => step.kind))
     const specs = this.getModuleAssetSpecs()
@@ -3079,7 +3079,7 @@ class UIDesignPipelineUI {
       ? `<div class="uid-clib-extra-tags uid-clib-linked-modules">${labels.slice(0, 4).map(label => `<span>${esc(label)}</span>`).join('')}</div>`
       : ''
     const dynamicSectionHtml = dynamicSections.map(section => `
-      <div class="uid-clib-extra-card uid-clib-viewable" data-uid-section-view="${section.id}" tabindex="0" role="button" aria-label="放大查看${esc(section.label)}">
+      <div class="uid-clib-extra-card uid-clib-viewable" data-uid-section-view="${section.id}" tabindex="0" role="button" aria-label="${t('clib.zoomSection', { label: section.label })}">
         <div class="uid-clib-extra-head">
           <span>${esc(section.label)}</span>
           <em>${esc(section.description)}</em>
@@ -3092,50 +3092,50 @@ class UIDesignPipelineUI {
       <div class="uid-preview-shell uid-style-${this.state.style}">
         <div class="uid-clib-pure-topbar">
           <span class="uid-clib-pure-meta">${esc(blueprint.genre.label)} · ${esc(styleLabel)}</span>
-          <span class="uid-clib-pure-badge">组件物料</span>
+          <span class="uid-clib-pure-badge">${t('clib.badge')}</span>
         </div>
         ${this.workflowGateNotice ? `<div class="uid-gate-notice uid-clib-gate-notice">${esc(this.workflowGateNotice)}</div>` : ''}
         <div class="uid-preview-stage uid-style-board-stage uid-clib-mat-only">
           <div class="uid-clib-pure-wrap">
             ${stepKinds.has('titleDeco') ? `
             <div class="uid-clib-pure-sec">
-              <div class="uid-clib-pure-label">标题条</div>
+              <div class="uid-clib-pure-label">${t('clib.titleDeco')}</div>
               ${moduleChipRow(panelModules)}
-              <div class="uid-sb-title-deco uid-clib-chrome-silent uid-clib-viewable ${missTitle ? 'uid-clib-missing' : ''}" role="img" aria-label="标题装饰条素材" data-uid-asset-view="titleDeco" tabindex="0">${missTitle ? `标题条${missingHint}` : ''}</div>
+              <div class="uid-sb-title-deco uid-clib-chrome-silent uid-clib-viewable ${missTitle ? 'uid-clib-missing' : ''}" role="img" aria-label="${t('asset.titleDeco')}" data-uid-asset-view="titleDeco" tabindex="0">${missTitle ? `${t('clib.titleDeco')}${missingHint}` : ''}</div>
             </div>
             ` : ''}
             ${stepKinds.has('buttonPrimary') || stepKinds.has('buttonNormal') ? `
             <div class="uid-clib-pure-sec">
-              <div class="uid-clib-pure-label">主 / 次按钮</div>
+              <div class="uid-clib-pure-label">${t('clib.buttons')}</div>
               ${moduleChipRow(buttonModules)}
               <div class="uid-sb-button-row">
-                ${stepKinds.has('buttonPrimary') ? `<button type="button" class="upv-start-item primary uid-clib-chrome-silent uid-clib-viewable ${missPrimaryBtn ? 'uid-clib-missing' : ''}" aria-label="主按钮底图" data-uid-asset-view="buttonPrimary">${missPrimaryBtn ? `主按钮${missingHint}` : ''}</button>` : ''}
-                ${stepKinds.has('buttonNormal') ? `<button type="button" class="upv-start-item uid-clib-chrome-silent uid-clib-viewable ${missNormalBtn ? 'uid-clib-missing' : ''}" aria-label="次按钮底图" data-uid-asset-view="buttonNormal">${missNormalBtn ? `次按钮${missingHint}` : ''}</button>` : ''}
+                ${stepKinds.has('buttonPrimary') ? `<button type="button" class="upv-start-item primary uid-clib-chrome-silent uid-clib-viewable ${missPrimaryBtn ? 'uid-clib-missing' : ''}" aria-label="${t('asset.primaryBtn')}" data-uid-asset-view="buttonPrimary">${missPrimaryBtn ? `${t('asset.primaryBtn')}${missingHint}` : ''}</button>` : ''}
+                ${stepKinds.has('buttonNormal') ? `<button type="button" class="upv-start-item uid-clib-chrome-silent uid-clib-viewable ${missNormalBtn ? 'uid-clib-missing' : ''}" aria-label="${t('asset.normalBtn')}" data-uid-asset-view="buttonNormal">${missNormalBtn ? `${t('asset.normalBtn')}${missingHint}` : ''}</button>` : ''}
               </div>
-              ${backfillFailed ? `<button class="uid-clib-retry-btn" data-uid-action="retry-missing-core">重新生成缺失组件</button>` : ''}
+              ${backfillFailed ? `<button class="uid-clib-retry-btn" data-uid-action="retry-missing-core">${t('clib.retryMissing')}</button>` : ''}
             </div>
             ` : ''}
             ${stepKinds.has('buttonPrimaryLong') || stepKinds.has('buttonNormalLong') ? `
             <div class="uid-clib-pure-sec uid-clib-long-strip-sec">
-              <div class="uid-clib-pure-label">对话长选项</div>
-              <p class="uid-clib-strip-zoom-note">点按下方彩色长条底图可放大查看 PNG 原图（非上方小字）</p>
+              <div class="uid-clib-pure-label">${t('clib.dialogStrip')}</div>
+              <p class="uid-clib-strip-zoom-note">${t('clib.stripZoomNote')}</p>
               <div class="uid-clib-dialog-strip-preview uid-clib-long-strip-mat-preview">
-                ${stepKinds.has('buttonPrimaryLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missPrimaryLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="长选项主按钮底图，点击放大" data-uid-asset-view="buttonPrimaryLong">${missPrimaryLongBtn ? `长选项主${missingHint}` : ''}</div>` : ''}
-                ${stepKinds.has('buttonNormalLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missNormalLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="长选项次按钮底图，点击放大" data-uid-asset-view="buttonNormalLong">${missNormalLongBtn ? `长选项次${missingHint}` : ''}</div>` : ''}
+                ${stepKinds.has('buttonPrimaryLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missPrimaryLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="${t('asset.primaryLong')}" data-uid-asset-view="buttonPrimaryLong">${missPrimaryLongBtn ? `${t('clib.primaryLongShort')}${missingHint}` : ''}</div>` : ''}
+                ${stepKinds.has('buttonNormalLong') ? `<div class="uid-clib-long-strip-view uid-clib-chrome-silent uid-clib-viewable ${missNormalLongBtn ? 'uid-clib-missing' : ''}" role="button" tabindex="0" aria-label="${t('asset.normalLong')}" data-uid-asset-view="buttonNormalLong">${missNormalLongBtn ? `${t('clib.normalLongShort')}${missingHint}` : ''}</div>` : ''}
               </div>
             </div>
             ` : ''}
             ${stepKinds.has('panelTexture') ? `
             <div class="uid-clib-pure-sec">
-              <div class="uid-clib-pure-label">面板底纹 <span class="uid-clib-zoom-hint">点击放大</span></div>
+              <div class="uid-clib-pure-label">${t('clib.panelTexture')} <span class="uid-clib-zoom-hint">${t('clib.zoomHint')}</span></div>
               ${moduleChipRow(panelModules)}
-              <div class="uid-clib-panel-preview uid-clib-viewable" role="img" aria-label="面板框体纹理" data-uid-asset-view="panelTexture" tabindex="0"></div>
+              <div class="uid-clib-panel-preview uid-clib-viewable" role="img" aria-label="${t('asset.panelTexture')}" data-uid-asset-view="panelTexture" tabindex="0"></div>
             </div>
             ` : ''}
             ${stepKinds.has('icons') ? `
             <div class="uid-clib-pure-sec uid-clib-icon-sec">
-              <div class="uid-clib-pure-label">功能图标（${iconCount} 个）</div>
-              <p class="uid-clib-icon-legend">每个图标为独立符号素材；左侧小方框仅作预览底色，右侧为模块名与功能说明，不是游戏内空槽位。</p>
+              <div class="uid-clib-pure-label">${t('clib.icons', { count: iconCount })}</div>
+              <p class="uid-clib-icon-legend">${t('clib.iconLegend')}</p>
               <div class="uid-clib-icon-chip-list">
                 ${iconSlots.map((slot) => `
                   <div class="uid-clib-icon-chip">
@@ -3161,9 +3161,9 @@ class UIDesignPipelineUI {
         </div>
         ${showDecisionActions ? `
           <div class="uid-clib-decision-bar">
-            <button class="uid-next-btn" data-uid-action="confirm-component-assets">确认组件素材</button>
-            <button class="uid-scene-regen" data-uid-action="open-component-preview">微调素材</button>
-            <button class="uid-scene-regen" data-uid-action="reset-component-assets">重新生成素材</button>
+            <button class="uid-next-btn" data-uid-action="confirm-component-assets">${t('clib.confirmAssets')}</button>
+            <button class="uid-scene-regen" data-uid-action="open-component-preview">${t('clib.tuneAssets')}</button>
+            <button class="uid-scene-regen" data-uid-action="reset-component-assets">${t('clib.regenAssets')}</button>
           </div>
         ` : ''}
         ${this.renderComponentAssetLightbox()}
@@ -3176,8 +3176,8 @@ class UIDesignPipelineUI {
     return `
       <div class="uid-preview-shell uid-style-${this.state.style}">
         <div class="uid-clib-pure-topbar">
-          <span class="uid-clib-pure-meta">过往生成记录</span>
-          <button class="uid-clib-retry-btn" data-uid-action="close-asset-history">返回组件预览</button>
+          <span class="uid-clib-pure-meta">${t('history.title')}</span>
+          <button class="uid-clib-retry-btn" data-uid-action="close-asset-history">${t('history.backToPreview')}</button>
         </div>
         <div class="uid-preview-stage uid-history-stage">
           ${history.length > 0 ? `
@@ -3187,19 +3187,19 @@ class UIDesignPipelineUI {
                   ${this.renderHistoryPreviewMarkup(item.preview ?? item.assets)}
                   <div class="uid-history-center-meta">
                     <span>${esc(item.label)}</span>
-                    <small>${new Date(item.confirmedAt).toLocaleString('zh-CN')}</small>
+                    <small>${new Date(item.confirmedAt).toLocaleString(getLocale() === 'zh' ? 'zh-CN' : 'en-US')}</small>
                   </div>
                   <div class="uid-history-center-actions">
-                    <button class="uid-next-btn" data-uid-open-history-preview="${item.id}">打开预览</button>
-                    <button class="uid-history-link danger" data-uid-delete-history="${item.id}">删除</button>
+                    <button class="uid-next-btn" data-uid-open-history-preview="${item.id}">${t('history.openPreview')}</button>
+                    <button class="uid-history-link danger" data-uid-delete-history="${item.id}">${t('history.delete')}</button>
                   </div>
                 </article>
               `).join('')}
             </div>
           ` : `
             <div class="uid-history-empty">
-              <div class="uid-loading-title">暂无历史记录</div>
-              <div class="uid-loading-sub">确认过的组件素材会出现在这里。</div>
+              <div class="uid-loading-title">${t('history.emptyTitle')}</div>
+              <div class="uid-loading-sub">${t('history.emptySub')}</div>
             </div>
           `}
         </div>
@@ -3516,7 +3516,7 @@ class UIDesignPipelineUI {
     root.querySelectorAll<HTMLElement>('[data-uid-style]').forEach(btn => {
       btn.onclick = () => {
         if (btn.hasAttribute('disabled')) {
-          this.workflowGateNotice = '请先完成前两步：选择游戏类型，并在第 2 步确认布局后才能选择风格和生成组件。'
+          this.workflowGateNotice = t('gate.styleLocked')
           this.setState({ ...this.state, workflowStep: 'layout' })
           return
         }
@@ -3606,7 +3606,7 @@ class UIDesignPipelineUI {
     queryShared<HTMLElement>('[data-uid-action]').forEach(btn => {
       btn.onclick = () => {
         if (btn.hasAttribute('disabled')) {
-          this.workflowGateNotice = '请先完成前两步：选择游戏类型，并在第 2 步确认布局后才能继续。'
+          this.workflowGateNotice = t('gate.needTwoSteps')
           this.setState({ ...this.state, workflowStep: 'layout' })
           return
         }
@@ -3678,8 +3678,8 @@ class UIDesignPipelineUI {
           if (this.prototypeGenerating) return
           if (!this.canGeneratePrototype()) {
             this.workflowGateNotice = this.state.layoutApproved
-              ? '组件素材已生成后还需要同步到原型预览。请稍候，按钮会在准备完成后自动点亮。'
-              : '请先确认页面布局后，再生成可交互原型。'
+              ? t('gate.protoPreparing')
+              : t('gate.needLayout')
             this.setState({ ...this.state, workflowStep: this.state.layoutApproved ? 'prototype' : 'layout' })
             return
           }
@@ -6453,9 +6453,9 @@ let ui: UIDesignPipelineUI | null = null
 const pipeline: IPipeline = {
   meta: {
     id: 'ui-design',
-    name: 'UI设计',
+    name: t('meta.pipelineName'),
     icon: '🧩',
-    description: '按游戏类型、阶段与模块组合生成玩家界面蓝图。',
+    description: t('meta.pipelineDesc'),
     version: '2.0.0',
   },
 

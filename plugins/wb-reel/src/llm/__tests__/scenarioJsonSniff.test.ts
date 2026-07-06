@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sniffScenarioJson } from '../scenarioJsonSniff'
+import { sniffScenarioJson } from '../util/scenarioJsonSniff'
 
 /**
  * 真实流入的 JSON 片段往往是残缺的 —— 这套测试覆盖各种"写到一半"的形态。

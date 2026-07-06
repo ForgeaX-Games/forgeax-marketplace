@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCinemaVideoUserPrompt,
   sanitizeCinemaVideoPrompt,
-} from '../forgeKineticVideo'
+} from '../forge/forgeKineticVideo'
 import type { Scene, Shot, Character } from '../../scenario/types'
 
 // ─── 最小可用的 Shot / Scene / Character 构造器（只填本测试用到的字段） ───

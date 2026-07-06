@@ -18,7 +18,7 @@ import { STEP_IDS as S } from "./modes.js";
 export type PipelineTemplateId =
   | "tpl-rpg"             // RPG 标准管线（L0-L5 全量）
   | "tpl-vn"              // [DEPRECATED] 视觉小说/互动影游（分支树+对话脚本）— 仅兼容历史数据
-  | "tpl-vn-v2"           // 互动影游 v2 专属管线（E1+E2+G 9 步，含三维场状态/双向拓扑/H/B/O/双轨 QTE）
+  | "tpl-vn-v2"           // 互动影游 v2 专属管线（E1+E2+G，场号后处理导出/双向拓扑/H/B/O/双轨 QTE）
   | "tpl-open-world"      // 开放世界 RPG（区域+涌现事件）
   | "tpl-card-game"       // 卡牌游戏（卡牌 Lore + 事件池）
   | "tpl-fragmented"      // 碎片化叙事（Souls-like / Metroidvania）
@@ -87,7 +87,7 @@ export const PIPELINE_TEMPLATES: Record<PipelineTemplateId, PipelineTemplate> = 
     // 展示层去 v2 后缀（命名统一，§Phase5）；底层 id 保持 tpl-vn-v2 以兼容历史 checkpoint/模板注册。
     label: "互动影游（专属管线）",
     description:
-      "影游叙事 9 步专属管线：E1（Logline → 三幕 → 场 → 情节点）→ G（剧情树改造 → 剧本创作 → 分镜设计）。" +
+      "影游叙事专属管线：E1（Logline → 三幕 → 情节点黄金线）→ G（剧情树改造〔含场号导出〕 → 剧本创作 → 分镜设计）。" +
       "上传剧本时自动切换到 E2 入口（剧本预处理 → 文本段确认 → 跳过 E1 中下层），E1 与 E2 互斥。" +
       "借用 世界观 一步（已注入 vn-v2 上下文），不再包含 RPG 范式的偏好分析（vn 用 logline+三幕直接驱动）。",
     tiers: ["tier1", "tier2"],

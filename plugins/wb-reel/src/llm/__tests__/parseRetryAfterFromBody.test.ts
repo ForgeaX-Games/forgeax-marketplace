@@ -14,7 +14,7 @@
  *   3) 不相关内容返回 undefined，不会假阳性
  */
 import { describe, it, expect } from 'vitest'
-import { parseRetryAfterFromBody } from '../GptImageProvider'
+import { parseRetryAfterFromBody } from '../providers/GptImageProvider'
 
 describe('parseRetryAfterFromBody', () => {
   it('识别 Azure 的 "retry after 16 seconds."（官方文案）', () => {

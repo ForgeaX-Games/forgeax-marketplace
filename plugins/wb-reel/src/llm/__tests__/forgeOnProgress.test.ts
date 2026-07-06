@@ -3,8 +3,8 @@ import {
   forgeScenarioFromIdea,
   forgeScenarioFromScript,
   type ForgeProgress,
-} from '../promptForge'
-import type { TextClient, TextRequest, StreamEvent } from '../types'
+} from '../forge/promptForge'
+import type { TextClient, TextRequest, StreamEvent } from '../config/types'
 
 /**
  * 覆盖：forgeScenarioFromIdea / forgeScenarioFromScript 的 onProgress 回调，

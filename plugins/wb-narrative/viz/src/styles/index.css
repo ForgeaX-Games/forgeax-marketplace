@@ -1038,6 +1038,7 @@ body[data-pane="center"] .app-header { display: none; }
 .hi-badge--failed    { color: var(--dt-red); background: rgba(242, 106, 106, 0.10); }
 .hi-badge--interrupted { color: var(--dt-yellow); background: rgba(212, 255, 72, 0.10); }
 .hi-badge--unknown   { color: var(--dt-text-dim); background: rgba(255,255,255,0.05); }
+.hi-badge--config    { color: var(--dt-text-dim); background: rgba(255,255,255,0.06); }
 
 .hi-input-preview {
   font-size: 11px;
@@ -1634,13 +1635,12 @@ body[data-pane="center"] .app-header { display: none; }
 .ip-scope-node__row .ip-scope-select { flex: 0 0 auto; }
 .ip-scope-node__children { display: grid; gap: 2px; }
 .ip-tree-caret--leaf { color: var(--dt-text-sec); text-align: center; }
+/* 生成入口区：仅承载状态提示文字（下方统一「开始生成」才是操作入口）。
+   不加边框/底色——这里只是一句注释，不必强调（对齐其它 wb-helper 提示的朴素样式）。 */
 .ip-stage-generate {
   display: grid;
   gap: 4px;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(212, 255, 72, 0.28);
-  background: rgba(212, 255, 72, 0.05);
+  padding: 2px 0;
 }
 .ip-stage-error { font-size: 11px; color: #f26a6a; }
 

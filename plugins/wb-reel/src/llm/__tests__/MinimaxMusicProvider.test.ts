@@ -3,7 +3,7 @@ import {
   createMinimaxMusicClient,
   hexToBytes,
   MINIMAX_MUSIC_PRESETS,
-} from '../MinimaxMusicProvider'
+} from '../providers/MinimaxMusicProvider'
 
 /*
  * MinimaxMusicProvider · 文本/歌词 → 音乐生成

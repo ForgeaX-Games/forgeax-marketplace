@@ -1,4 +1,5 @@
 import React from "react";
+import { useT } from "../../i18n";
 
 interface NodeEditActionsProps {
   nodeId: string;
@@ -21,6 +22,7 @@ export function NodeEditActions({
   onSave,
   onCancel,
 }: NodeEditActionsProps) {
+  const t = useT();
   return (
     <div className="tsc-actions tsc-four-buttons node-actions">
       <button
@@ -28,26 +30,26 @@ export function NodeEditActions({
         onClick={(e) => { e.stopPropagation(); onEdit(); }}
         disabled={isEditing}
       >
-        编辑
+        {t("textView.edit")}
       </button>
       <button
         className={`tsc-action-btn input${showInput ? " active" : ""}`}
         onClick={(e) => { e.stopPropagation(); onInput(); }}
       >
-        输入
+        {t("textView.input")}
       </button>
       <button
         className="tsc-action-btn save"
         onClick={(e) => { e.stopPropagation(); onSave(); }}
         disabled={!canSave}
       >
-        保存
+        {t("textView.save")}
       </button>
       <button
         className="tsc-action-btn cancel"
         onClick={(e) => { e.stopPropagation(); onCancel(); }}
       >
-        取消
+        {t("textView.cancel")}
       </button>
     </div>
   );
@@ -59,11 +61,12 @@ interface NodeUserInputBoxProps {
 }
 
 export function NodeUserInputBox({ value, onChange }: NodeUserInputBoxProps) {
+  const t = useT();
   return (
     <div className="tsc-user-input-box">
       <textarea
         className="tsc-user-input-textarea"
-        placeholder="输入修改意见或新需求..."
+        placeholder={t("textView.userInputPlaceholder")}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={3}

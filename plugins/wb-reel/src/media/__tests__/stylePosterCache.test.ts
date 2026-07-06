@@ -4,7 +4,7 @@ import {
   ensureStylePoster,
   __resetStylePosterCacheForTest,
 } from '../stylePosterCache'
-import type { ImageClient, ImageRequest, ImageResult } from '../../llm/types'
+import type { ImageClient, ImageRequest, ImageResult } from '../../llm/config/types'
 
 /**
  * stylePosterCache 行为契约：

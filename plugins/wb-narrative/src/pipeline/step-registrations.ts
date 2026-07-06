@@ -33,7 +33,6 @@ import { eventPool } from "./steps/event-pool.js";
 import {
   vnLogline,
   vnOutlineActs,
-  vnScenes,
   vnBeats,
   vnScriptNormalize,
   vnSegmentConfirm,
@@ -322,20 +321,12 @@ registerStep({
 });
 
 registerStep({
-  id: "vn_scenes",
-  name: "E1-03 场搭建",
-  fn: vnScenes,
-  extractOutputKey: "vn_scenes",
-  dependsOn: ["vn_outline_acts", "worldview"],
-  outputFields: ["vn_scenes"],
-});
-
-registerStep({
   id: "vn_beats",
   name: "E1-04 情节点搭建",
   fn: vnBeats,
   extractOutputKey: "vn_beats",
-  dependsOn: ["vn_scenes"],
+  // 场/情节点解耦（§4.6c）：黄金线直接由三幕骨架 + 世界观展开，不再前置"场搭建"。
+  dependsOn: ["vn_outline_acts", "worldview"],
   outputFields: ["vn_beats"],
 });
 
@@ -362,7 +353,8 @@ registerStep({
   name: "G-01 剧情树改造",
   fn: vnBranchedBeats,
   extractOutputKey: "vn_branched_beats",
-  dependsOn: ["vn_beats", "vn_scenes", "vn_outline_acts"],
+  // 场/情节点解耦：不再依赖前置 vn_scenes；场号由本步末尾确定性导出并派生 ctx.vn_scenes。
+  dependsOn: ["vn_beats", "vn_outline_acts"],
   outputFields: ["vn_branched_beats"],
   temperature: 0.7,
 });

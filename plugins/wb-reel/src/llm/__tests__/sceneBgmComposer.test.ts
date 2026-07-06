@@ -3,9 +3,9 @@ import {
   composeSceneBgm,
   __test,
   type SceneBgmInput,
-} from '../sceneBgmComposer'
+} from '../forge/sceneBgmComposer'
 import type { Scene, Scenario } from '../../scenario/types'
-import type { TextClient } from '../types'
+import type { TextClient } from '../config/types'
 
 /*
  * sceneBgmComposer · 把 Scene → 影视级 BGM brief

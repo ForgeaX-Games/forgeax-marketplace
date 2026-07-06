@@ -25,7 +25,7 @@ import {
   normalizeActTrioRaw,
   forgePromptTrioForAct,
   type ForgePromptTrioForActArgs,
-} from '../forgePromptTrioForAct'
+} from '../forge/forgePromptTrioForAct'
 
 import {
   estimateSceneOutputTokens,
@@ -34,10 +34,10 @@ import {
   DEFAULT_MAX_SCENES_PER_BATCH,
   HARD_MAX_SCENES_PER_BATCH,
   type ActBatchPipelineArgs,
-} from '../actBatchPipeline'
+} from '../pipeline/actBatchPipeline'
 
 import type { Character, Scene } from '../../scenario/types'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

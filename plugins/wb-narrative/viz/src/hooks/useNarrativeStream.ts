@@ -78,6 +78,8 @@ export async function startRun(
     routingMode?: RoutingMode;
     genreCode?: string;
     uploadedScript?: UploadedScriptPayload;
+    /** §条目提前建立：复用首次输入确认时铸造的草稿键，使生成产物落回同一条目目录。 */
+    entryKey?: string;
   } = {},
 ): Promise<RunStartResponse> {
   const res = await fetch(`${API_BASE}/api/narrative/start`, {
@@ -94,6 +96,7 @@ export async function startRun(
       routing_mode: opts.routingMode,
       genre_code: opts.genreCode,
       uploaded_script: opts.uploadedScript,
+      entry_key: opts.entryKey,
     }),
   });
   if (!res.ok) {
@@ -296,6 +299,22 @@ export async function ipDnaIngest(
   });
 }
 
+/**
+ * §状态机 / IP「确认」即落盘（零 LLM）：把上传原料固化到 input/，写 manifest，不做标准化/建树/提取。
+ * 返回 run_id（=<story_timestamp>_<title>），前端据此桥接到 output 条目的 _entry.json.ipRunKey。
+ * storyTimestamp 传 output 条目键使 input/output 同键关联、重确认覆盖幂等。
+ */
+export async function ipDnaPackage(
+  files: IpDnaFilePayload[],
+  opts: { title?: string; storyTimestamp?: string } = {},
+): Promise<{ story_timestamp: string; run_id: string; title: string }> {
+  return postJson(`${API_BASE}/api/narrative/ip-dna/package`, {
+    files,
+    title: opts.title,
+    story_timestamp: opts.storyTimestamp,
+  });
+}
+
 /** 只读层级树 + 默认裁剪/单元/维度 + 体量（供确认裁剪范围引导）。 */
 export async function fetchIpHierarchy(runId: string): Promise<IpHierarchyResult> {
   const res = await fetch(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/hierarchy`);
@@ -453,6 +472,35 @@ export interface HistoryEntry {
   complexity?: number;
   parentKey?: string;
   forkReason?: string;
+  /** 运行类型标记（"ip-dna" = IP 摄入/改编运行）。 */
+  kind?: string;
+}
+
+/**
+ * §条目持久化：条目配置（与后端 output/<key>/_entry.json 对齐）。
+ * 一次用户需求的全部参数（INPUT + ROUTING）落盘于此，使任何阶段点击都能还原。
+ * IP 作品用 ipRunKey 桥接到 input 媒体目录（<时间戳>_<标题>）。
+ */
+export interface EntryConfig {
+  key?: string;
+  inputType?: "text" | "tags" | "works";
+  userInput?: string;
+  tags?: { selections?: Record<string, string>; customTexts?: Record<string, string> };
+  uploadedFileNames?: string[];
+  routeGroup?: "planning" | "narrative";
+  tier?: TierId;
+  mode?: ModeId;
+  genreCode?: string;
+  complexity?: number;
+  ipRunKey?: string;
+  parentKey?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** §条目持久化：upsert 条目参数（首次输入确认建条目 + ROUTING「确认保存」都调它）。 */
+export async function saveEntry(key: string, patch: Partial<EntryConfig>): Promise<void> {
+  await postJson(`${API_BASE}/api/narrative/entry`, { key, ...patch }).catch(() => {});
 }
 
 /** Cancel a running pipeline */
@@ -467,8 +515,10 @@ export async function fetchHistory(): Promise<HistoryEntry[]> {
   return res.json();
 }
 
-/** Load a historical run's full result */
-export async function loadHistoryResult(key: string): Promise<RunResultResponse> {
+/** Load a historical run's full result（未生成的条目额外带 entry 配置，result 为 null）。 */
+export async function loadHistoryResult(
+  key: string,
+): Promise<RunResultResponse & { entry?: EntryConfig }> {
   const res = await fetch(`${API_BASE}/api/narrative/history/${encodeURIComponent(key)}/load`);
   if (!res.ok) throw new Error(`Failed to load history: ${res.status}`);
   return res.json();

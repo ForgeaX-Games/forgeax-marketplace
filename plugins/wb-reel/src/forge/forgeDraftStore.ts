@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Outline } from '../llm/scenarioFlow'
+import type { Outline } from '../llm/forge/scenarioFlow'
 import type { ScriptShapeReport } from './detectScriptShape'
 
 /**
@@ -59,7 +59,7 @@ export type FlowStage =
 export interface FlowState {
   stage: FlowStage
   /** Stage A 产物，可空 */
-  outline: import('../llm/scenarioFlow').Outline | null
+  outline: import('../llm/forge/scenarioFlow').Outline | null
   /**
    * Stage B 各幕已扩写文本，下标对齐 outline.acts。
    * 进行中的幕留 null，完成的填字符串。

@@ -11,9 +11,9 @@ import {
   pickPrimaryRef,
   pickPrimaryRefForShot,
   runForgeImagePipeline,
-} from '../forgeImagePipeline'
+} from '../forge/forgeImagePipeline'
 import type { Character, Location, Scene, Scenario, Shot } from '../../scenario/types'
-import type { ImageClient, ImageResult } from '../types'
+import type { ImageClient, ImageResult } from '../config/types'
 
 /**
  * Forge 图像流水线测试 —— 三视图 / 场景图 / 关键帧的 prompt 模板和并发调度。

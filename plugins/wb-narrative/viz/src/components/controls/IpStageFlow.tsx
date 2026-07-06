@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ipDnaIngest,
+  ipDnaPackage,
   fetchIpDnaJob,
   fetchIpDnaHierarchy,
   fetchIpHierarchy,
@@ -28,6 +29,7 @@ import {
 } from "../../hooks/useNarrativeStream";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import type { TierId, ModeId } from "../../types";
+import { useT } from "../../i18n";
 /** 顶层上传单体的展示信息（类型抽象符号）。 */
 export interface IpUploadDisplay {
   name: string;
@@ -62,6 +64,16 @@ interface IpStageFlowProps {
   onStageProgress?: (stepId: string, status: "running" | "completed", message?: string, data?: unknown) => void;
   /** 生成开始（jobId）回调，供父组件接管轮询/预览。 */
   onGenerateStarted?: (jobId: string, runId: string) => void;
+  /**
+   * §条目提前建立：卡0「确认 IP 作品」时回调父组件建立草稿条目，返回稳定 entryKey，
+   * 本组件将其作为 ingest 的 story_timestamp 复用，使 IP 运行锚定到同一条目。
+   */
+  onConfirmWorks?: () => string | undefined;
+  /**
+   * §统一底部生成入口：上报"开始生成"就绪态与触发器给父组件——底部统一「开始生成」按钮据此
+   * 对重需求 IP 分流触发（本组件不再持有生成触发按钮）。
+   */
+  onGenerateStateChange?: (s: { canGenerate: boolean; generate: () => void }) => void;
 }
 
 type Stage = "idle" | "confirmed" | "ingesting" | "standardized" | "scope_confirmed" | "generating" | "done" | "error";
@@ -211,6 +223,7 @@ const PHASE_TO_STEP_INDEX: Record<string, number> = {
 };
 
 export function IpStageFlow(props: IpStageFlowProps) {
+  const t = useT();
   const { files, displayItems, title, tier, mode, complexity, routingReady = true } = props;
 
   const [stage, setStage] = useState<Stage>("idle");
@@ -275,7 +288,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
               return;
             }
             if (st.status === "failed" || st.status === "cancelled") {
-              setError(st.status === "cancelled" ? "已取消生产" : (st.error ?? "任务失败"));
+              setError(st.status === "cancelled" ? t("ipStage.cancelled") : (st.error ?? t("ipStage.taskFailed")));
               setStage("error");
               resolve();
               return;
@@ -297,6 +310,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
     setBusy(true);
     setError(null);
     setStage("generating");
+    // 自动模式端到端直跑亦属"生成中"：置信号使 header/取消键与半自动一致。
+    useNarrativeStore.getState().setIpDnaGenerating(true);
     props.onStageProgress?.("ip_input", "completed", `${files.length} 个上传单体`, buildInputContent(files, displayItems));
     props.onStageProgress?.("ip_standardize", "running", "自动模式：全程默认直跑");
     try {
@@ -366,14 +381,27 @@ export function IpStageFlow(props: IpStageFlowProps) {
     } finally {
       setBusy(false);
       setProgress(null);
+      useNarrativeStore.getState().setIpDnaGenerating(false);
     }
   }, [busy, files, displayItems, title, tier, mode, complexity, runId, pollJob, props]);
 
-  // ── 卡0：确认 IP 作品（仅揭示卡1 标准化，不触发后端）──
+  /** §条目提前建立：卡0 确认时父组件铸造的草稿 entryKey，作为 ingest story_timestamp 复用锚定。 */
+  const draftKeyRef = useRef<string | undefined>(undefined);
+
+  // ── 卡0：确认 IP 作品（建立条目 + 即刻零 LLM 落盘 input/ + 揭示卡1 标准化）──
   const handleConfirmWorks = useCallback(() => {
     if (busy || files.length === 0) return;
+    // 首次确认即建立条目（§point3）；返回的稳定键用于 package/ingest 锚定，使输入与后续处理同锚一处。
+    const key = props.onConfirmWorks?.() ?? draftKeyRef.current;
+    draftKeyRef.current = key;
     setStage("confirmed");
-  }, [busy, files]);
+    // §状态机 / IP「确认」即落盘（零 LLM）：把原料固化到 input/<媒体>/<故事类型>/<时间戳_标题>/ 并写 manifest。
+    // 拿到 run_id → 回填 autoRunId → 触发 setIpRunKey → 父组件桥接 effect 回写 _entry.json.ipRunKey（input/output 同键关联）。
+    // 标准化/建树/提取不在此触发，推迟到卡1「执行」及「开始生成」。失败不阻断 UI（保留内存态，可重试确认）。
+    void ipDnaPackage(files, { title, storyTimestamp: key })
+      .then((pkg) => { if (pkg?.run_id) setAutoRunId(pkg.run_id); })
+      .catch(() => { /* 落盘失败静默：不阻断分步 UI，用户可重新确认或直接执行标准化 */ });
+  }, [busy, files, title, props]);
 
   // ── 卡1：执行 摄入 + 标准化（半自动，停在标准化等确认）──
   const handleIngest = useCallback(async () => {
@@ -389,7 +417,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
     props.onStageProgress?.("ip_input", "completed", `${files.length} 个上传单体`, buildInputContent(files, displayItems));
     props.onStageProgress?.("ip_standardize", "running", "标准化 + 干扰项过滤");
     try {
-      const resp = await ipDnaIngest(files, { title, decompose: false, async: true });
+      const resp = await ipDnaIngest(files, { title, decompose: false, async: true, storyTimestamp: draftKeyRef.current });
       const jobId = (resp as unknown as IpDnaJobStartResponse).jobId;
       if (!jobId) {
         // 同步返回（小文件）：直接是 hierarchy 结果。
@@ -507,7 +535,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const realLabels = useMemo<string[]>(() => realLevels.map((l) => l.label), [realLevels]);
   /** 只读根列标题（完整作品）。 */
   const rootLabel = useMemo(
-    () => hierarchy?.levels?.find((l) => l.levelType === "complete")?.label ?? "完整作品",
+    () => hierarchy?.levels?.find((l) => l.levelType === "complete")?.label ?? t("ipStage.wholeWork"),
     [hierarchy],
   );
 
@@ -543,9 +571,9 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const resolveLabel = useCallback(
     (path: string[]): string => {
       const id = resolvePath(path);
-      return id ? disp(byId.get(id)) || id : "整部作品";
+      return id ? disp(byId.get(id)) || id : t("ipStage.wholeWork");
     },
-    [resolvePath, byId],
+    [resolvePath, byId, t],
   );
 
   /** 解析路径子树的首叶 / 末叶（文档序）。 */
@@ -717,6 +745,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
     setBusy(true);
     setError(null);
     setStage("generating");
+    // §状态机重构：置生成信号 → phase=generating（header 显 GENERATING、底部取消键亮）。
+    useNarrativeStore.getState().setIpDnaGenerating(true);
     const extractText = [
       "# 生成 scoped IP DNA\n",
       `- 作品：${hierarchy?.title ?? title ?? runId}`,
@@ -753,6 +783,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
     } finally {
       setBusy(false);
       setProgress(null);
+      // 生成收束（完成/失败）：清生成信号，phase 回落 done/routed。
+      useNarrativeStore.getState().setIpDnaGenerating(false);
     }
   }, [busy, runId, mode, tier, complexity, hierarchy, title, pollJob, props]);
 
@@ -768,6 +800,12 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const generateEnabled = scopeReady && routingReady && stage !== "generating" && stage !== "done";
   /** 范围 UI 是否锁定（已确认范围 或 已最终确认）：锁定后下拉/增删/确认按钮不可再编辑。 */
   const rangeLocked = rangeConfirmed || scopeReady;
+
+  // §统一底部生成入口：把"就绪态 + 触发器"上报给父组件，由底部统一「开始生成」按钮驱动。
+  const onGenerateStateChange = props.onGenerateStateChange;
+  useEffect(() => {
+    onGenerateStateChange?.({ canGenerate: generateEnabled && !busy, generate: handleGenerate });
+  }, [onGenerateStateChange, generateEnabled, busy, handleGenerate]);
 
   /** 改编范围卡「确认」：仅锁定范围/单元 UI，不立即调最终 API；据此揭示自定义补充卡（点3）。 */
   const handleConfirmRange = useCallback(() => {
@@ -817,7 +855,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
           <button className="ip-tree-toggle" onClick={() => toggleExpand(node.id)}>
             <span className="ip-tree-caret">{open ? "▾" : "▸"}</span>
             <span className="ip-tree-label">{disp(node)}</span>
-            {node.childRange && <span className="ip-tree-range">第 {node.childRange}</span>}
+            {node.childRange && <span className="ip-tree-range">{t("ipStage.childRange", { n: node.childRange })}</span>}
           </button>
         ) : (
           <div className="ip-tree-child">· {disp(node)}</div>
@@ -844,8 +882,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
    * 点开后在受限高度（max-height）的滚动容器里展示整棵只读可折叠树，超高用滚轮查看；不再直接铺在卡片里。
    */
   const renderHierDropdown = () => {
-    const leafWord = realLabels.length > 0 ? realLabels[realLabels.length - 1] : "最小叙事单元";
-    const summary = `${rootLabel} · ${allLeaves.length} 个${leafWord}`;
+    const leafWord = realLabels.length > 0 ? realLabels[realLabels.length - 1] : t("ipStage.leafUnitDefault");
+    const summary = t("ipStage.hierSummary", { root: rootLabel, n: allLeaves.length, unit: leafWord });
     return (
       <div className={`ip-hier-dd${hierPanelOpen ? " ip-hier-dd--open" : ""}`}>
         <button
@@ -857,7 +895,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         >
           <span className="ip-hier-dd__caret">{hierPanelOpen ? "▾" : "▸"}</span>
           <span className="ip-hier-dd__summary">{summary}</span>
-          <span className="ip-hier-dd__hint">{hierPanelOpen ? "收起" : "展开查看"}</span>
+          <span className="ip-hier-dd__hint">{hierPanelOpen ? t("ipStage.collapse") : t("ipStage.expand")}</span>
         </button>
         {hierPanelOpen && <div className="ip-hier-dd__body">{renderHierTree()}</div>}
       </div>
@@ -876,7 +914,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
       {Array.from({ length: interactiveDepth }).map((_, lvl) => {
         const options = lvl === 0 ? topNodes : path[lvl - 1] ? childrenById(path[lvl - 1]) : [];
         const disabled = rangeLocked || (lvl > 0 && !path[lvl - 1]) || options.length === 0;
-        const allLabel = realLabels[lvl] ? `全部${realLabels[lvl]}` : "全部";
+        const allLabel = realLabels[lvl] ? `${t("ipStage.all")}${realLabels[lvl]}` : t("ipStage.all");
         return (
           <select
             key={lvl}
@@ -905,7 +943,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
       <div className="ip-stage-card">
         <div className="ip-stage-card__head">
           <span className="ip-stage-card__no">0</span>
-          <span className="ip-stage-card__title">IP 作品</span>
+          <span className="ip-stage-card__title">{t("ipStage.works")}</span>
         </div>
         <div className="ip-stage-items">
           {displayItems.map((it, i) => (
@@ -921,20 +959,20 @@ export function IpStageFlow(props: IpStageFlowProps) {
               className="btn-generate btn-generate--compact ip-stage-btn ip-stage-btn--auto"
               disabled={busy || files.length === 0}
               onClick={handleAuto}
-              title="全程走默认（全量 / 体量自动切分），一路直跑无暂停"
+              title={t("ipStage.autoTitle")}
             >
-              自动
+              {t("ipStage.auto")}
             </button>
             <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy || files.length === 0} onClick={handleConfirmWorks}>
-              确认
+              {t("ipStage.confirm")}
             </button>
           </div>
         )}
-        {stage !== "idle" && <p className="wb-helper ip-stage-ok">✓ 已确认 {displayItems.length} 个 IP 作品</p>}
+        {stage !== "idle" && <p className="wb-helper ip-stage-ok">{t("ipStage.confirmed", { n: displayItems.length })}</p>}
       </div>
 
       {stage === "ingesting" && (
-        <div className="ip-stage-progress">标准化处理中… {progress?.pct ?? 0}% {progress?.message ?? ""}</div>
+        <div className="ip-stage-progress">{t("ipStage.standardizing", { pct: progress?.pct ?? 0, msg: progress?.message ?? "" })}</div>
       )}
 
       {/* 1 标准化：卡0 确认后揭示；执行才真正标准化。执行前列上传件名，执行后每件一棵只读可展开树。 */}
@@ -942,13 +980,16 @@ export function IpStageFlow(props: IpStageFlowProps) {
         <div className="ip-stage-card">
           <div className="ip-stage-card__head">
             <span className="ip-stage-card__no">1</span>
-            <span className="ip-stage-card__title">标准化 · 层级化文件系统</span>
+            <span className="ip-stage-card__title">{t("ipStage.standardize")}</span>
           </div>
           {hierReady ? (
             <>
               {renderHierDropdown()}
               {hierarchy?.noise_filtered && hierarchy.noise_filtered.length > 0 && (
-                <p className="wb-helper ip-stage-noise">已过滤 {hierarchy.noise_filtered.length} 个干扰项：{hierarchy.noise_filtered.slice(0, 4).join("、")}{hierarchy.noise_filtered.length > 4 ? "…" : ""}</p>
+                <p className="wb-helper ip-stage-noise">{t("ipStage.noiseFiltered", {
+                  n: hierarchy.noise_filtered.length,
+                  list: `${hierarchy.noise_filtered.slice(0, 4).join("、")}${hierarchy.noise_filtered.length > 4 ? "…" : ""}`,
+                })}</p>
               )}
             </>
           ) : (
@@ -963,7 +1004,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
               </div>
               <div className="ip-stage-card__foot">
                 <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleIngest}>
-                  执行
+                  {t("ipStage.execute")}
                 </button>
               </div>
             </>
@@ -976,26 +1017,26 @@ export function IpStageFlow(props: IpStageFlowProps) {
       {showQuestion && (
         <div className="ip-stage-question">
           <p className="ip-stage-question__text">
-            【问题】检出 {oversizedUnits} 个超大最小叙事单元（超出体量水准线），建议进一步拆解（再标准化）后再改编；也可直接确认改编范围。
+            {t("ipStage.question", { n: oversizedUnits })}
           </p>
           {volumeDecision === "pending" ? (
             <>
               <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={() => setVolumeDecision("crop")}>
-                否，直接确认改编范围
+                {t("ipStage.questionNo")}
               </button>
               <button className="btn-generate btn-generate--compact ip-stage-btn ip-stage-btn--ghost" disabled={busy} onClick={handleDecompose}>
-                是，进一步标准化（再标准化）
+                {t("ipStage.questionYes")}
               </button>
             </>
           ) : (
             <p className="wb-helper ip-stage-ok">
-              {didRestandardize ? "✓ 已进一步标准化（再标准化）" : "✓ 已选择直接确认改编范围"}
+              {didRestandardize ? t("ipStage.questionDoneRestandardize") : t("ipStage.questionDoneDirect")}
             </p>
           )}
         </div>
       )}
       {volumeDecision === "redecompose" && (
-        <div className="ip-stage-progress">再标准化（拆解）中… {progress?.pct ?? 0}%</div>
+        <div className="ip-stage-progress">{t("ipStage.restandardizing", { pct: progress?.pct ?? 0 })}</div>
       )}
 
       {/* 2 再标准化（仅当走了"是"路径）：展示再标准化后的层级树。 */}
@@ -1003,7 +1044,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         <div className="ip-stage-card">
           <div className="ip-stage-card__head">
             <span className="ip-stage-card__no">2</span>
-            <span className="ip-stage-card__title">再标准化</span>
+            <span className="ip-stage-card__title">{t("ipStage.restandardize")}</span>
           </div>
           {renderHierDropdown()}
         </div>
@@ -1015,19 +1056,17 @@ export function IpStageFlow(props: IpStageFlowProps) {
           <div className="ip-stage-card">
             <div className="ip-stage-card__head">
               <span className="ip-stage-card__no">{rangeCardNo}</span>
-              <span className="ip-stage-card__title">改编范围裁剪</span>
+              <span className="ip-stage-card__title">{t("ipStage.adaptScope")}</span>
             </div>
-            <p className="wb-helper">
-              每部 = 一个游戏单元 = 一个区间 [起点 ~ 终点]；逐层下拉选择，留「全部」即该层整体。1 部=单品，多部=系列。
-            </p>
+            <p className="wb-helper">{t("ipStage.adaptScopeHint")}</p>
             {/* 点3：每部两行——第一行=「第 N 部」标题（× 删除固定标题行最右）；第二行=范围区间全宽展示。 */}
             <div className="ip-plan-rows">
               {rows.map((row, ri) => (
                 <div key={row.id} className="ip-plan-unit">
                   <div className="ip-plan-unit__head">
-                    <span className="ip-plan-row__no">第 {ri + 1} 部</span>
+                    <span className="ip-plan-row__no">{t("ipStage.partN", { n: ri + 1 })}</span>
                     {!rangeLocked && rows.length > 1 && (
-                      <button type="button" className="ip-plan-row__del" onClick={() => removeRow(row.id)} aria-label="删除此部">
+                      <button type="button" className="ip-plan-row__del" onClick={() => removeRow(row.id)} aria-label={t("ipStage.deletePart")}>
                         ×
                       </button>
                     )}
@@ -1044,9 +1083,9 @@ export function IpStageFlow(props: IpStageFlowProps) {
             {!rangeLocked && (
               <>
                 <button type="button" className="ip-plan-add" onClick={addRow}>
-                  ＋ 新增一部
+                  {t("ipStage.addPart")}
                 </button>
-                <p className="wb-helper ip-plan-add__hint">+1：游戏单元 → 游戏系列（每多一部即多一个游戏单元，≥2 部成系列）</p>
+                <p className="wb-helper ip-plan-add__hint">{t("ipStage.addPartHint")}</p>
               </>
             )}
             {/* 范围卡内置「确认」（仅锁定范围/单元 UI，不立即调最终 API）；确认后才揭示自定义补充。 */}
@@ -1054,13 +1093,13 @@ export function IpStageFlow(props: IpStageFlowProps) {
               <div className="ip-stage-card__foot">
                 {!rangeConfirmed ? (
                   <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleConfirmRange}>
-                    确认
+                    {t("ipStage.confirm")}
                   </button>
                 ) : (
                   <>
-                    <p className="wb-helper ip-stage-ok">✓ 改编范围已确认（{rows.length} 部）</p>
+                    <p className="wb-helper ip-stage-ok">{t("ipStage.rangeConfirmed", { n: rows.length })}</p>
                     <button className="btn-generate btn-generate--compact ip-stage-btn ip-stage-btn--auto" disabled={busy} onClick={handleEditRange}>
-                      重新编辑
+                      {t("ipStage.reeditRange")}
                     </button>
                   </>
                 )}
@@ -1074,13 +1113,13 @@ export function IpStageFlow(props: IpStageFlowProps) {
           <div className="ip-stage-card">
             <div className="ip-stage-card__head">
               <span className="ip-stage-card__no">{notesCardNo}</span>
-              <span className="ip-stage-card__title">自定义补充</span>
+              <span className="ip-stage-card__title">{t("ipStage.customNotes")}</span>
             </div>
-            <p className="wb-helper">作者改编意图，可留空＝忠实把原 IP 转化为目标品类叙事。</p>
+            <p className="wb-helper">{t("ipStage.customNotesHint")}</p>
             <textarea
               className="ip-plan-notes__input"
               rows={3}
-              placeholder="例如：背景从古代改为近未来赛博朋克；主角性别反转；保留主线、弱化感情线…（留空则忠实转化为目标品类叙事）"
+              placeholder={t("ipStage.customNotesPlaceholder")}
               value={adaptationNotes}
               disabled={scopeReady}
               onChange={(e) => setAdaptationNotes(e.target.value)}
@@ -1088,15 +1127,15 @@ export function IpStageFlow(props: IpStageFlowProps) {
             {!scopeReady ? (
               <div className="ip-stage-card__foot">
                 <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleConfirmPlan}>
-                  确认
+                  {t("ipStage.confirm")}
                 </button>
               </div>
             ) : (
               <div className="ip-stage-card__foot">
-                <p className="wb-helper ip-stage-ok">✓ 改编规划已确认（{rows.length} 单元） · 请在下方 ROUTING 配置叙事路由</p>
+                <p className="wb-helper ip-stage-ok">{t("ipStage.planConfirmed", { n: rows.length })}</p>
                 {stage !== "generating" && stage !== "done" && (
                   <button className="btn-generate btn-generate--compact ip-stage-btn" disabled={busy} onClick={handleReplan}>
-                    重新规划
+                    {t("ipStage.replan")}
                   </button>
                 )}
               </div>
@@ -1104,15 +1143,18 @@ export function IpStageFlow(props: IpStageFlowProps) {
           </div>
           )}
 
-          {/* 开始生成（仅范围确认后才进入此步） */}
+          {/* §统一底部生成入口：范围确认后此处仅提示状态，实际生成由底部统一「开始生成」按钮触发。 */}
           {scopeReady && (
             <div className="ip-stage-generate">
-              {!routingReady && <p className="wb-helper">在下方 ROUTING 选择叙事路由后即可生成</p>}
-              <div className="ip-stage-card__foot">
-                <button className="btn-generate btn-generate--compact ip-stage-gen-btn" disabled={!generateEnabled || busy} onClick={handleGenerate}>
-                  {stage === "done" ? "✓ 已生成" : stage === "generating" ? `生成中… ${progress?.pct ?? 0}%` : "开始生成（IP DNA → 下游）"}
-                </button>
-              </div>
+              {stage === "done" ? (
+                <p className="wb-helper">{t("ipStage.doneHint")}</p>
+              ) : stage === "generating" ? (
+                <p className="wb-helper">{t("ipStage.generatingHint", { pct: progress?.pct ?? 0 })}</p>
+              ) : !routingReady ? (
+                <p className="wb-helper">{t("ipStage.routingRequired")}</p>
+              ) : (
+                <p className="wb-helper">{t("ipStage.scopeReadyHint")}</p>
+              )}
             </div>
           )}
         </>

@@ -7,7 +7,7 @@ import {
   runStageStyle,
   runStageSynopsis,
 } from '../runStages'
-import type { TextClient, TextRequest } from '../../llm/types'
+import type { TextClient, TextRequest } from '../../llm/config/types'
 
 /**
  * runStages 单测 ——

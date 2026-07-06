@@ -6,27 +6,28 @@ import { useAssetStore } from '../media/assetStore'
 import { useSettingsStore } from '../scenario/settingsStore'
 import { useShellStore } from '../shell/shellStore'
 import { createImageProvider, createTextProvider, createVideoProvider } from '../llm'
-import { DEFAULT_VIDEO_SIZE } from '../llm/seedanceResolution'
-import { isVideoTaskProvider } from '../llm/VideoProvider'
-import { useVideoTaskStore } from '../llm/videoTaskStore'
+import { DEFAULT_VIDEO_SIZE } from '../llm/refsets/seedanceResolution'
+import { isVideoTaskProvider } from '../llm/providers/VideoProvider'
+import { useVideoTaskStore } from '../llm/pipeline/videoTaskStore'
 import {
   uploadRefMedia,
   MAX_VIDEO_BYTES,
   MAX_AUDIO_BYTES,
   type RefMediaKind,
-} from '../llm/uploadRefMedia'
+} from '../llm/refsets/uploadRefMedia'
 import {
   forgeImagePrompt,
   forgeVideoPrompt,
-} from '../llm/promptForge'
-import { forgeShotRefine } from '../llm/forgeShotRefine'
-import { runForgeImagePipeline } from '../llm/forgeImagePipeline'
-import { getAuthoringHint } from '../llm/visualStylePresets'
+} from '../llm/forge/promptForge'
+import { forgeShotRefine } from '../llm/forge/forgeShotRefine'
+import { runForgeImagePipeline } from '../llm/forge/forgeImagePipeline'
+import { getAuthoringHint } from '../llm/config/visualStylePresets'
 import type { Character, Scene, Shot, ShotFraming } from '../scenario/types'
 import { CopyButton } from '../ui/CopyButton'
 import { TextareaWithCopy } from '../ui/TextareaWithCopy'
 import { useFireToast } from '../ui/toastStore'
 import { injectStyleOnce } from '../styles/injectStyle'
+import { tf, useT } from '../i18n'
 // v3.9.4：SCENE / VIDEO 两个 tab 不再内嵌"参考图像/视频素材库"。
 //         跨场景素材库现在作为独立组件 ScenarioAssetLibrary 挂在面板底部
 //         （StagePromptFloater 里），SCENE / VIDEO tab 只负责提示词与生成动作。
@@ -57,6 +58,7 @@ const EMPTY_CHARS_PT: Record<string, Character> = {}
  *   - Shot 级 prompt 会继承 Scene prompt + background 作为上下文（composeShotPrompt）
  */
 export function PromptTabs({ scene }: { scene: Scene }) {
+  const t = useT()
   // v3.9.5（作者反馈"镜头这个模块你怎么又加回来了"）：
   //   顶部 tab bar 彻底回退到两档 SCENE / VIDEO，不再有 SHOT tab。
   //   镜头景别现在作为 SCENE tab 内提示词下方的 chips 小模块（见
@@ -68,8 +70,8 @@ export function PromptTabs({ scene }: { scene: Scene }) {
   return (
     <div className="ks-pt">
       <div className="ks-pt-bar">
-        <PromptTab label="场景生成" sub="SCENE" active={tab === 'scene'} onClick={() => setTab('scene')} />
-        <PromptTab label="视频生成" sub="VIDEO" active={tab === 'video'} onClick={() => setTab('video')} />
+        <PromptTab label={t('prompt.tab.scene')} sub="SCENE" active={tab === 'scene'} onClick={() => setTab('scene')} />
+        <PromptTab label={t('prompt.tab.video')} sub="VIDEO" active={tab === 'video'} onClick={() => setTab('video')} />
       </div>
 
       {tab === 'scene' && <ScenePromptTab scene={scene} />}
@@ -107,6 +109,7 @@ function PromptTab({
 // ─────────────────────────────────────────────────────────
 
 function ScenePromptTab({ scene }: { scene: Scene }) {
+  const t = useT()
   const setScenePrompts = useScenarioStore((s) => s.setScenePrompts)
   const setSceneCharacterIds = useScenarioStore((s) => s.setSceneCharacterIds)
   const characters = useScenarioStore((s) => s.scenario.characters ?? EMPTY_CHARS_PT)
@@ -151,7 +154,7 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
 
   async function forgePrompt(): Promise<void> {
     setForgeStatus({ kind: 'forging' })
-    toast(`锻造中 · 场景「${scene.title}」的画面提示词`)
+    toast(tf('prompt.forgeToast', { title: scene.title }))
     try {
       const refs = pickCharacterRefs(scene.characterIds, characters)
       const intent =
@@ -167,15 +170,15 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
         uiStyle: uiStyle?.prompt,
         style: getAuthoringHint(visualStyle) || undefined,
         framing: framingHint
-          ? `${framingHint.label}（${framingHint.sub}）`
+          ? `${t(framingHint.labelKey)}（${framingHint.sub}）`
           : undefined,
       })
       setScenePrompts(scene.id, { scene: res.prompt })
       setForgeStatus({ kind: 'idle' })
-      toast('✓ 场景提示词已更新', { kind: 'success' })
+      toast(t('prompt.forgeDone'), { kind: 'success' })
     } catch (e) {
       setForgeStatus({ kind: 'error', message: (e as Error).message })
-      toast(`锻造失败 · ${(e as Error).message}`, { kind: 'error' })
+      toast(tf('prompt.forgeFailToast', { message: (e as Error).message }), { kind: 'error' })
     }
   }
 
@@ -189,8 +192,8 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
       <TextareaWithCopy
         rows={5}
         value={value}
-        placeholder="场景画面提示词（锻造后会直接覆盖这里，就是喂给 GPT-Image-2 的最终文本）"
-        copyHint="复制场景画面提示词"
+        placeholder={t('prompt.scene.placeholder')}
+        copyHint={t('prompt.scene.copyHint')}
         onChange={(e) => setScenePrompts(scene.id, { scene: e.target.value })}
       />
 
@@ -208,35 +211,35 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
           className="ks-pt-btn"
           onClick={forgePrompt}
           disabled={forgeStatus.kind === 'forging'}
-          title="用 Opus 4.6 + cinema-image-prompt skill 锻造一段完整的 gpt-image-2 提示词（含角色锚点 / 景别）"
+          title={t('prompt.forgeTitle')}
         >
-          {forgeStatus.kind === 'forging' ? '锻造中…' : '锻造提示词'}
+          {forgeStatus.kind === 'forging' ? t('prompt.forging') : t('prompt.forgeBtn')}
         </button>
         <button
           type="button"
           className="ks-pt-btn is-primary"
           onClick={genImage}
           disabled={!value.trim() || isPending}
-          title={isReady ? '重新生成（旧图自动归档到资产库）' : '用 GPT-Image-2 生成画面'}
+          title={isReady ? t('prompt.regenTitle') : t('prompt.genTitle')}
         >
           {isPending
-            ? '生成中…'
+            ? t('prompt.generating')
             : isReady
-              ? '重新生成'
-              : '生成画面'}
+              ? t('prompt.regenerate')
+              : t('prompt.generate')}
         </button>
         {isError && (
           <span
             className="ks-pt-err-chip ks-mono"
             title={cacheRecord?.status === 'error' ? cacheRecord.message : ''}
           >
-            ✗ 生成失败
+            {t('prompt.genFailed')}
           </span>
         )}
       </div>
       {forgeStatus.kind === 'error' && (
         <div className="ks-pt-state ks-state-error ks-mono">
-          锻造失败 · {forgeStatus.message}
+          {tf('prompt.forgeFailed', { message: forgeStatus.message })}
         </div>
       )}
 
@@ -256,10 +259,10 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
       {scene.shots && scene.shots.length > 0 && (
         <div className="ks-pt-shot-subpanel">
           <div className="ks-pt-shot-subpanel-head">
-            <span className="ks-pt-shot-subpanel-title">当前分镜</span>
+            <span className="ks-pt-shot-subpanel-title">{t('prompt.currentShot')}</span>
             <span className="ks-mono ks-pt-shot-subpanel-sub">SHOT</span>
             <span className="ks-pt-shot-subpanel-hint">
-              拖动时间轴或点选缩略图切换 · 针对单镜锻造/生成/修改
+              {t('prompt.currentShotHint')}
             </span>
           </div>
           <ShotPromptTab scene={scene} compact />
@@ -297,6 +300,7 @@ function ShotHistoryStrip({
   currentMediaId: string | undefined
   onPick: (mediaId: string) => void
 }): JSX.Element | null {
+  const t = useT()
   const records = useAssetStore((s) => s.records)
   const scenarioId = useScenarioStore((s) => s.scenario.id)
   const history = useMemo(() => {
@@ -317,7 +321,7 @@ function ShotHistoryStrip({
   return (
     <div className="ks-pt-history">
       <div className="ks-pt-history-head">
-        <span className="ks-pt-history-title">历史版本</span>
+        <span className="ks-pt-history-title">{t('prompt.history')}</span>
         <span className="ks-mono ks-pt-history-sub">HIST · {history.length}</span>
       </div>
       <div className="ks-pt-history-strip">
@@ -349,7 +353,7 @@ function ShotHistoryStrip({
             >
               <img src={url} alt={r.filename} />
               {isCurrent && (
-                <span className="ks-pt-history-current">◆ 当前</span>
+                <span className="ks-pt-history-current">{t('prompt.historyCurrent')}</span>
               )}
             </button>
           )
@@ -359,13 +363,13 @@ function ShotHistoryStrip({
   )
 }
 
-const FRAMING_OPTS: { id: ShotFraming; label: string; sub: string }[] = [
-  { id: 'wide',   label: '远景', sub: 'WIDE' },
-  { id: 'medium', label: '中景', sub: 'MED'  },
-  { id: 'close',  label: '特写', sub: 'CU'   },
-  { id: 'insert', label: '插入', sub: 'INS'  },
-  { id: 'ots',    label: '过肩', sub: 'OTS'  },
-  { id: 'pov',    label: '主观', sub: 'POV'  },
+const FRAMING_OPTS: { id: ShotFraming; labelKey: string; sub: string }[] = [
+  { id: 'wide', labelKey: 'prompt.framing.wide', sub: 'WIDE' },
+  { id: 'medium', labelKey: 'prompt.framing.medium', sub: 'MED' },
+  { id: 'close', labelKey: 'prompt.framing.close', sub: 'CU' },
+  { id: 'insert', labelKey: 'prompt.framing.insert', sub: 'INS' },
+  { id: 'ots', labelKey: 'prompt.framing.ots', sub: 'OTS' },
+  { id: 'pov', labelKey: 'prompt.framing.pov', sub: 'POV' },
 ]
 
 /**
@@ -394,18 +398,20 @@ function FramingPicker({
   value: ShotFraming | null
   onChange: (next: ShotFraming | null) => void
 }) {
+  const t = useT()
   return (
     <div className="ks-pt-framing">
       <div className="ks-pt-framing-head">
-        <span className="ks-pt-framing-title">镜头景别</span>
+        <span className="ks-pt-framing-title">{t('prompt.framing.title')}</span>
         <span className="ks-mono ks-pt-framing-sub">FRAMING</span>
         <span className="ks-pt-framing-hint">
-          {value ? '下次锻造时用该景别' : '可选 · 默认由 LLM 自行决定'}
+          {value ? t('prompt.framing.selected') : t('prompt.framing.default')}
         </span>
       </div>
       <div className="ks-pt-framing-chips" role="radiogroup">
         {FRAMING_OPTS.map((opt) => {
           const active = value === opt.id
+          const label = t(opt.labelKey)
           return (
             <button
               key={opt.id}
@@ -414,9 +420,9 @@ function FramingPicker({
               aria-checked={active}
               className={`ks-pt-framing-chip ${active ? 'is-active' : ''}`}
               onClick={() => onChange(active ? null : opt.id)}
-              title={`${opt.label} · ${opt.sub}（再点一次取消）`}
+              title={tf('prompt.framing.toggleTitle', { label, sub: opt.sub })}
             >
-              <span className="ks-pt-framing-chip-label">{opt.label}</span>
+              <span className="ks-pt-framing-chip-label">{label}</span>
               <span className="ks-mono ks-pt-framing-chip-sub">{opt.sub}</span>
             </button>
           )
@@ -435,6 +441,7 @@ function FramingPicker({
  *   · 一键生成所有分镜 —— 调 runForgeImagePipeline 两阶段流水线（角色ref + shot关键帧）
  */
 function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boolean }) {
+  const t = useT()
   const selectedShotId = useShellStore((s) => s.selectedShotId)
   const setSelectedShotId = useShellStore((s) => s.setSelectedShotId)
   const updateShot = useScenarioStore((s) => s.updateShot)
@@ -484,21 +491,21 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
   if (!shot) {
     return (
       <div className="ks-pt-body ks-mono ks-faint">
-        ◇ 该场景没有分镜 · 请先运行 Forge 分镜拆解
+        {t('prompt.shot.noShots')}
       </div>
     )
   }
 
   const isKey = shot.id === keyShotId
   const prompt = shot.prompt ?? ''
+  const shotLabel = tf('prompt.shot.label', { n: (shot.order ?? 0) + 1 })
 
   // ── 生成本镜 ─────────────────────────────────────────────────────
   async function regenShot(): Promise<void> {
     if (!shot || !prompt.trim()) return
     setGenStatus({ kind: 'pending' })
     useSceneImageCache.getState().markPending(scene.id, scene.prompts?.scene ?? '')
-    const shotLabel = `Shot ${(shot.order ?? 0) + 1}`
-    toast(`生图中 · ${shotLabel}`)
+    toast(tf('prompt.shot.generating', { label: shotLabel }))
     try {
       const out = await imgClient.generate({ prompt, size: '1024x1024' })
       const mediaId = ingestDataUrl(out.dataUrl, {
@@ -513,12 +520,12 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
         useSceneImageCache.getState().put(scene.id, out.dataUrl, scene.prompts?.scene ?? '')
       }
       setGenStatus({ kind: 'idle' })
-      toast(`✓ ${shotLabel} 图像已生成`, { kind: 'success' })
+      toast(tf('prompt.shot.genDone', { label: shotLabel }), { kind: 'success' })
     } catch (e) {
       const msg = (e as Error).message
       setGenStatus({ kind: 'error', message: msg })
       useSceneImageCache.getState().markError(scene.id, scene.prompts?.scene ?? '', msg)
-      toast(`${shotLabel} 生图失败 · ${msg}`, { kind: 'error' })
+      toast(tf('prompt.shot.genFailed', { label: shotLabel, message: msg }), { kind: 'error' })
     }
   }
 
@@ -526,8 +533,7 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
   async function handleRefine(): Promise<void> {
     if (!shot || !refineIntent.trim()) return
     setRefineStatus({ kind: 'pending' })
-    const shotLabel = `Shot ${(shot.order ?? 0) + 1}`
-    toast(`锻造 + 生图中 · ${shotLabel}`)
+    toast(tf('prompt.shot.refineToast', { label: shotLabel }))
     try {
       const shotIndex = shots.indexOf(shot)
       const prevShot = shotIndex > 0 ? shots[shotIndex - 1] : undefined
@@ -566,10 +572,10 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
       setRefineStatus({ kind: 'idle' })
       setRefineOpen(false)
       setRefineIntent('')
-      toast(`✓ ${shotLabel} 已按新意图重生`, { kind: 'success' })
+      toast(tf('prompt.shot.refineDone', { label: shotLabel }), { kind: 'success' })
     } catch (e) {
       setRefineStatus({ kind: 'error', message: (e as Error).message })
-      toast(`${shotLabel} 修改失败 · ${(e as Error).message}`, { kind: 'error' })
+      toast(tf('prompt.shot.refineFailed', { label: shotLabel, message: (e as Error).message }), { kind: 'error' })
     }
   }
 
@@ -595,18 +601,25 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
       const remaining = totalShots - generatedShots
       const msg =
         remaining === 0
-          ? `剧本里 ${allScenes.length} 个场景 · ${totalShots} 个分镜都已生成过。\n点击"确定"会全部重新生成；"取消"则什么都不做。`
-          : `将为剧本里 ${allScenes.length} 个场景 · ${remaining}/${totalShots} 个未生成的分镜执行两阶段生图。\n（先生成角色/场所参考图，再生成分镜关键帧）\n\n确定开始？`
+          ? tf('prompt.shot.batchConfirmAllDone', {
+              scenes: allScenes.length,
+              shots: totalShots,
+            })
+          : tf('prompt.shot.batchConfirmPartial', {
+              scenes: allScenes.length,
+              remaining,
+              total: totalShots,
+            })
       // eslint-disable-next-line no-alert
       const ok = window.confirm(msg)
       if (!ok) {
-        toast('已取消批量生图')
+        toast(t('prompt.shot.batchCancelled'))
         return
       }
     }
 
     setBatchStatus({ kind: 'pending', done: 0, total: 0 })
-    toast(`批量生图已开始 · ${allScenes.length} 场景 / ${totalShots} 分镜`)
+    toast(tf('prompt.shot.batchStarted', { scenes: allScenes.length, shots: totalShots }))
     try {
       // 计算已有 keyframeMediaRef 的 shot 跳过集合
       const skipSet = new Set<string>()
@@ -665,13 +678,13 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
       failedCount = summary.shots.failed.length + summary.characters.failed.length + summary.locations.failed.length + summary.props.failed.length
       setBatchStatus({ kind: 'done', failed: failedCount })
       if (failedCount > 0) {
-        toast(`批量生图完成 · ${failedCount} 张失败（见面板详情）`, { kind: 'warning' })
+        toast(tf('prompt.shot.batchDoneWarn', { failed: failedCount }), { kind: 'warning' })
       } else {
-        toast('✓ 全部分镜关键帧已生成', { kind: 'success' })
+        toast(t('prompt.shot.batchDoneSuccess'), { kind: 'success' })
       }
     } catch (e) {
       setBatchStatus({ kind: 'error', message: (e as Error).message })
-      toast(`批量生图中断 · ${(e as Error).message}`, { kind: 'error' })
+      toast(tf('prompt.shot.batchFailed', { message: (e as Error).message }), { kind: 'error' })
     }
   }
 
@@ -691,7 +704,11 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
                 type="button"
                 className={`ks-pt-shot-chip ${active ? 'is-active' : ''} ${isKeySh ? 'is-key' : ''}`}
                 onClick={() => setSelectedShotId(sh.id)}
-                title={`第 ${i + 1} 镜 · ${sh.framing}${isKeySh ? ' · 代表帧' : ''}`}
+                title={tf('prompt.shot.chipTitle', {
+                  n: i + 1,
+                  framing: sh.framing,
+                  suffix: isKeySh ? t('prompt.shot.keySuffix') : '',
+                })}
               >
                 {thumbUrl ? (
                   <img src={thumbUrl} className="ks-pt-shot-chip-thumb" alt="" />
@@ -714,19 +731,22 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
           className={`ks-pt-btn ks-pt-btn-batch ${batchStatus.kind === 'pending' ? 'is-pending' : ''}`}
           onClick={handleBatchGenerate}
           disabled={batchStatus.kind === 'pending'}
-          title="两阶段生图：先生成角色参考图，再生成所有分镜关键帧（已有图的镜头自动跳过）"
+          title={t('prompt.shot.batchTitle')}
         >
           {batchStatus.kind === 'pending'
-            ? `生成中 ${batchStatus.done}/${batchStatus.total}`
-            : '⚡ 一键生成所有分镜'}
+            ? tf('prompt.shot.batchProgress', {
+                done: batchStatus.done,
+                total: batchStatus.total,
+              })
+            : t('prompt.shot.batchBtn')}
         </button>
         )}
       </div>
       {batchStatus.kind === 'done' && (
         <div className={`ks-pt-state ${batchStatus.failed > 0 ? 'ks-state-error' : 'ks-state-done'} ks-mono`}>
           {batchStatus.failed > 0
-            ? `完成，${batchStatus.failed} 个任务失败`
-            : '所有分镜生成完成'}
+            ? tf('prompt.shot.batchDonePartial', { failed: batchStatus.failed })
+            : t('prompt.shot.batchDoneAll')}
         </div>
       )}
       {batchStatus.kind === 'error' && (
@@ -735,9 +755,12 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
 
       {/* ── 当前镜字段编辑 ─────────────────────────────────────────── */}
       <FieldHead
-        title={`镜头 · ${shot.id}`}
+        title={tf('prompt.shot.fieldTitle', { id: shot.id })}
         sub={isKey ? 'KEY SHOT' : 'SHOT'}
-        hint={`第 ${shot.order + 1} 镜 · 共 ${shots.length} 镜`}
+        hint={tf('prompt.shot.fieldHint', {
+          n: shot.order + 1,
+          total: shots.length,
+        })}
       >
         <CopyButton value={prompt} />
       </FieldHead>
@@ -755,7 +778,7 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
               title={opt.sub}
             >
               <span className="ks-pt-anchor-dot" />
-              {opt.label}
+              {t(opt.labelKey)}
             </button>
           )
         })}
@@ -768,7 +791,7 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
           <img
             src={url}
             className="ks-pt-shot-keyframe-preview"
-            alt={`镜头 ${shot.id} 关键帧`}
+            alt={tf('prompt.shot.keyframeAlt', { id: shot.id })}
           />
         ) : null
       })()}
@@ -785,34 +808,34 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
         currentMediaId={shot.keyframeMediaRef}
         onPick={(mediaId) => {
           setSceneShotKeyframe(scene.id, shot.id, mediaId)
-          toast('✓ 已回滚到历史版本', { kind: 'success' })
+          toast(t('prompt.shot.rollbackDone'), { kind: 'success' })
         }}
       />
 
       <textarea
         rows={4}
         value={prompt}
-        placeholder="本镜画面，约 50-100 字。与场景/背景描述方向一致"
+        placeholder={t('prompt.shot.promptPlaceholder')}
         onChange={(e) => updateShot(scene.id, shot.id, { prompt: e.target.value })}
       />
 
-      <FieldHead title="机位 / 运动" sub="CAMERA" hint="可选，例如：手持推进、长焦压缩">
+      <FieldHead title={t('prompt.shot.cameraTitle')} sub="CAMERA" hint={t('prompt.shot.cameraHint')}>
         <span />
       </FieldHead>
       <textarea
         rows={2}
         value={shot.cameraHint ?? ''}
-        placeholder="dolly in · 24mm 广角 · 半秒静止后缓推……"
+        placeholder={t('prompt.shot.cameraPlaceholder')}
         onChange={(e) => updateShot(scene.id, shot.id, { cameraHint: e.target.value })}
       />
 
-      <FieldHead title="与下一镜衔接" sub="TRANSITION" hint="可选，切/叠/划/光影桥接">
+      <FieldHead title={t('prompt.shot.transitionTitle')} sub="TRANSITION" hint={t('prompt.shot.transitionHint')}>
         <span />
       </FieldHead>
       <textarea
         rows={2}
         value={shot.transitionHint ?? ''}
-        placeholder="硬切到下一镜中景 · 以雨声做声桥"
+        placeholder={t('prompt.shot.transitionPlaceholder')}
         onChange={(e) => updateShot(scene.id, shot.id, { transitionHint: e.target.value })}
       />
 
@@ -823,25 +846,25 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
           className="ks-pt-btn is-primary"
           onClick={regenShot}
           disabled={!prompt.trim() || genStatus.kind === 'pending'}
-          title="只重生当前分镜，不影响其他镜头"
+          title={t('prompt.shot.regenTitle')}
         >
           {genStatus.kind === 'pending'
-            ? '生成中…'
+            ? t('prompt.shot.regenPending')
             : shot.keyframeMediaRef
-              ? '重新生成本镜'
-              : '生成本镜'}
+              ? t('prompt.shot.regenAgain')
+              : t('prompt.shot.regenBtn')}
         </button>
         <button
           type="button"
           className={`ks-pt-btn ${refineOpen ? 'is-active-subtle' : ''}`}
           onClick={() => { setRefineOpen((v) => !v); setRefineStatus({ kind: 'idle' }) }}
-          title="用 LLM 根据你的意图修改本镜 prompt，并重新生图"
+          title={t('prompt.shot.refineBtnTitle')}
         >
-          {refineOpen ? '收起修改' : '修改本镜'}
+          {refineOpen ? t('prompt.shot.refineCollapse') : t('prompt.shot.refineExpand')}
         </button>
         {isKey && (
           <span className="ks-pt-shot-hint ks-mono">
-            ★ 代表帧 · 生成后同步 Scene / StoryTree
+            {t('prompt.shot.keyHint')}
           </span>
         )}
       </div>
@@ -852,14 +875,14 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
       {/* ── 修改本镜展开区 ───────────────────────────────────────────── */}
       {refineOpen && (
         <div className="ks-pt-refine">
-          <FieldHead title="修改意图" sub="REFINE" hint="告诉 AI 你希望如何改这一镜">
+          <FieldHead title={t('prompt.shot.refineFieldTitle')} sub="REFINE" hint={t('prompt.shot.refineFieldHint')}>
             <span />
           </FieldHead>
           <textarea
             rows={3}
             className="ks-pt-refine-input"
             value={refineIntent}
-            placeholder="例：让她离镜头更近，表情更紧张；去掉背景人群；改成夜景……"
+            placeholder={t('prompt.shot.refinePlaceholder')}
             onChange={(e) => setRefineIntent(e.target.value)}
           />
           <div className="ks-pt-actions">
@@ -869,7 +892,7 @@ function ShotPromptTab({ scene, compact = false }: { scene: Scene; compact?: boo
               onClick={handleRefine}
               disabled={!refineIntent.trim() || refineStatus.kind === 'pending'}
             >
-              {refineStatus.kind === 'pending' ? '修改中…' : '确认修改并重新生图'}
+              {refineStatus.kind === 'pending' ? t('prompt.shot.refinePending') : t('prompt.shot.refineConfirm')}
             </button>
           </div>
           {refineStatus.kind === 'error' && (
@@ -915,6 +938,7 @@ function FrameSlot({
   autoUrl: string | undefined
   scene: Scene
 }): JSX.Element {
+  const t = useT()
   const [pickerOpen, setPickerOpen] = useState(false)
   const entries = useMediaStore((s) => s.entries)
 
@@ -950,10 +974,10 @@ function FrameSlot({
       ) : (
         <span className="ks-pt-frame-slot-empty">
           {overridden
-            ? '已清除\n生成时只用文字'
+            ? t('prompt.frame.cleared')
             : autoUrl
-              ? '参考图加载中…'
-              : '点生成后自动用\n当前分镜关键帧'}
+              ? t('prompt.frame.loading')
+              : t('prompt.frame.autoFill')}
         </span>
       )}
       <div className="ks-pt-frame-slot-actions">
@@ -961,7 +985,7 @@ function FrameSlot({
           <button
             type="button"
             className="ks-pt-frame-slot-btn"
-            title="从媒体库挑选"
+            title={t('prompt.frame.pickFromLibrary')}
             onClick={() => setPickerOpen((v) => !v)}
           >
             ⋯
@@ -971,7 +995,7 @@ function FrameSlot({
           <button
             type="button"
             className="ks-pt-frame-slot-btn"
-            title="清除"
+            title={t('prompt.frame.clear')}
             onClick={onClear}
           >
             ✕
@@ -981,7 +1005,7 @@ function FrameSlot({
           <button
             type="button"
             className="ks-pt-frame-slot-btn"
-            title="恢复默认"
+            title={t('prompt.frame.reset')}
             onClick={onReset}
           >
             ⟳
@@ -1035,6 +1059,7 @@ function RefMediaSlot({
   onClear: () => void
   onError: (message: string) => void
 }): JSX.Element {
+  const t = useT()
   const [uploading, setUploading] = useState(false)
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteValue, setPasteValue] = useState('')
@@ -1043,13 +1068,17 @@ function RefMediaSlot({
       ? 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm'
       : 'audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav,.m4a,.aac'
   const maxBytes = kind === 'video' ? MAX_VIDEO_BYTES : MAX_AUDIO_BYTES
+  const kindLabel = t(kind === 'video' ? 'prompt.ref.kindVideo' : 'prompt.ref.kindAudio')
 
   async function onFileChosen(f: File): Promise<void> {
     // 上传前做一次 size 预检，省一次网络往返
     if (f.size > maxBytes) {
       onError(
-        `${kind} 文件 ${Math.round(f.size / (1024 * 1024))}MB 超过上限 ` +
-          `${Math.round(maxBytes / (1024 * 1024))}MB`,
+        tf('prompt.ref.fileTooLarge', {
+          kind: kindLabel,
+          sizeMb: Math.round(f.size / (1024 * 1024)),
+          maxMb: Math.round(maxBytes / (1024 * 1024)),
+        }),
       )
       return
     }
@@ -1060,7 +1089,7 @@ function RefMediaSlot({
       const r = await uploadRefMedia(f, kind)
       onPicked(r.url, r.originalName)
     } catch (e) {
-      onError(`${kind} 选取失败 · ${(e as Error).message}`)
+      onError(tf('prompt.ref.pickFailed', { kind: kindLabel, message: (e as Error).message }))
     } finally {
       setUploading(false)
     }
@@ -1073,7 +1102,7 @@ function RefMediaSlot({
       return
     }
     if (!/^https?:\/\//i.test(u)) {
-      onError(`${kind} URL 必须以 http(s):// 开头`)
+      onError(tf('prompt.ref.urlInvalid', { kind: kindLabel }))
       return
     }
     // 尝试从 URL 末段抽一个 humanReadable name
@@ -1094,7 +1123,7 @@ function RefMediaSlot({
           <button
             type="button"
             className="ks-pt-refmedia-btn"
-            title="清除"
+            title={t('prompt.ref.clear')}
             onClick={onClear}
           >
             ✕
@@ -1168,8 +1197,11 @@ function RefMediaSlot({
         </div>
       ) : (
         <div className="ks-pt-refmedia-actions">
-          <label className="ks-pt-refmedia-btn" title={`上传本地${kind === 'video' ? '视频' : '音频'}`}>
-            {uploading ? '上传中…' : '上传'}
+          <label
+            className="ks-pt-refmedia-btn"
+            title={kind === 'video' ? t('prompt.ref.uploadLocalVideo') : t('prompt.ref.uploadLocalAudio')}
+          >
+            {uploading ? t('prompt.ref.uploading') : t('prompt.ref.upload')}
             <input
               type="file"
               accept={acceptAttr}
@@ -1188,12 +1220,10 @@ function RefMediaSlot({
             className="ks-pt-refmedia-btn"
             onClick={() => setPasteOpen(true)}
           >
-            粘贴 URL
+            {t('prompt.ref.pasteUrl')}
           </button>
           <span className="ks-faint ks-mono ks-pt-refmedia-hint">
-            {kind === 'video'
-              ? '让 Seedance 复现相同镜头运动'
-              : 'BGM / 环境声参考，生成画面节奏'}
+            {kind === 'video' ? t('prompt.ref.videoHint') : t('prompt.ref.audioHint')}
           </span>
         </div>
       )}
@@ -1218,12 +1248,13 @@ function FrameSlotPicker({
   onPick: (mediaId: string) => void
   onClose: () => void
 }): JSX.Element {
+  const t = useT()
   const entries = useMediaStore((s) => s.entries)
   return (
     <div
       className="ks-pt-frame-picker"
       role="dialog"
-      aria-label="挑选参考图"
+      aria-label={t('prompt.picker.aria')}
       onClick={(e) => {
         // 背景层点击即关；内容由内部 onClick 阻断冒泡
         if (e.target === e.currentTarget) onClose()
@@ -1231,12 +1262,12 @@ function FrameSlotPicker({
     >
       <div className="ks-pt-frame-picker-body" onClick={(e) => e.stopPropagation()}>
         <div className="ks-pt-frame-picker-head">
-          <span className="ks-mono">挑选参考图 · {candidates.length}</span>
+          <span className="ks-mono">{tf('prompt.picker.title', { count: candidates.length })}</span>
           <button
             type="button"
             className="ks-pt-frame-slot-btn"
             onClick={onClose}
-            title="取消"
+            title={t('prompt.picker.cancel')}
           >
             ✕
           </button>
@@ -1271,6 +1302,7 @@ function FrameSlotPicker({
 
 
 function VideoPromptTab({ scene }: { scene: Scene }) {
+  const t = useT()
   const setScenePrompts = useScenarioStore((s) => s.setScenePrompts)
   const setSceneMediaRef = useScenarioStore((s) => s.setSceneMediaRef)
   const characters = useScenarioStore((s) => s.scenario.characters ?? EMPTY_CHARS_PT)
@@ -1396,12 +1428,12 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
     if (!sceneText.trim()) {
       setForgeStatus({
         kind: 'error',
-        message: '请先在「场景生成」tab 写好画面提示词（视频要继承画面）',
+        message: t('prompt.video.needSceneFirst'),
       })
       return
     }
     setForgeStatus({ kind: 'forging' })
-    toast(`锻造中 · 场景「${scene.title}」的视频提示词`)
+    toast(tf('prompt.video.forgeToast', { title: scene.title }))
     try {
       const refs = pickCharacterRefs(scene.characterIds, characters)
       const motion =
@@ -1416,18 +1448,18 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
       })
       setScenePrompts(scene.id, { video: res.prompt })
       setForgeStatus({ kind: 'idle' })
-      toast('✓ 视频提示词已更新', { kind: 'success' })
+      toast(t('prompt.video.forgeDone'), { kind: 'success' })
     } catch (e) {
       setForgeStatus({ kind: 'error', message: (e as Error).message })
-      toast(`锻造失败 · ${(e as Error).message}`, { kind: 'error' })
+      toast(tf('prompt.forgeFailToast', { message: (e as Error).message }), { kind: 'error' })
     }
   }
 
   async function generate(): Promise<void> {
     const prompt = value.trim() || sceneText.trim()
     if (!prompt) return
-    setStatus({ kind: 'pending', stage: '提交任务…', elapsed: 0 })
-    toast(`视频生成已提交 · 场景「${scene.title}」`)
+    setStatus({ kind: 'pending', stage: t('prompt.video.submitStage'), elapsed: 0 })
+    toast(tf('prompt.video.submitToast', { title: scene.title }))
     const tStart = performance.now()
     // v5（P3）· 首尾帧优先用 UI 选择的 startEntryUrl/endEntryUrl。
     //   退路（作者完全没选）：仍保留 sceneImageCache 的 dataUrl 作 start ——
@@ -1469,7 +1501,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
           sceneId: scene.id,
           status: 'generating',
           createdAt: Date.now(),
-          lastMessage: '已提交，排队中',
+          lastMessage: t('prompt.video.queued'),
           providerKind,
         })
         const result = await videoProvider.pollTask(taskId, {
@@ -1509,11 +1541,11 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
           status: 'completed',
           videoUrl: result.videoUrl,
           ingested: true,
-          lastMessage: '完成',
+          lastMessage: t('prompt.video.done'),
         })
         const latency = Math.round(performance.now() - tStart)
         setStatus({ kind: 'done', url: result.videoUrl, latencyMs: latency, taskId })
-        toast(`✓ 视频已生成 · ${Math.round(latency / 1000)}s`, { kind: 'success' })
+        toast(tf('prompt.video.genDone', { sec: Math.round(latency / 1000) }), { kind: 'success' })
         return
       }
 
@@ -1548,12 +1580,12 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         warnings: out.warnings,
       })
       toast(
-        `✓ 视频已生成 · ${Math.round(out.latencyMs / 1000)}s`,
+        tf('prompt.video.genDone', { sec: Math.round(out.latencyMs / 1000) }),
         { kind: 'success' },
       )
     } catch (e) {
       setStatus({ kind: 'error', message: (e as Error).message })
-      toast(`视频生成失败 · ${(e as Error).message}`, { kind: 'error' })
+      toast(tf('prompt.video.genFailed', { message: (e as Error).message }), { kind: 'error' })
     }
   }
 
@@ -1562,12 +1594,8 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
       <TextareaWithCopy
         rows={5}
         value={value}
-        placeholder={
-          '视频运动 / 镜头描述 —— 按「锻造视频提示词」会自动吃最新的场景画面\n' +
-          '示例：[0-2 秒] 中景，男人停在门外，雨水顺手腕滴落。2.39:1 变形宽银幕。\n' +
-          '       [3-5 秒] 镜头缓推到他的指节，门缝透出第二个人的影子。'
-        }
-        copyHint="复制视频提示词"
+        placeholder={t('prompt.video.placeholder')}
+        copyHint={t('prompt.video.copyHint')}
         onChange={(e) => setScenePrompts(scene.id, { video: e.target.value })}
       />
 
@@ -1575,7 +1603,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         Provider · {videoProvider.getProviderName()} ·{' '}
         <span className="ks-faint">{videoProvider.getModel()}</span>
         {videoProvider.getProviderName() === 'Mock' && (
-          <span className="ks-pt-warn"> · 未填 API key（左栏 视频设置）</span>
+          <span className="ks-pt-warn">{t('prompt.video.noApiKey')}</span>
         )}
       </div>
 
@@ -1589,7 +1617,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         * ──────────────────────────────────────────────────────────── */}
       <div className="ks-pt-frames">
         <FrameSlot
-          label="起始帧"
+          label={t('prompt.frame.startLabel')}
           url={startEntryUrl}
           overridden={startOverride !== undefined}
           onClear={() => setStartOverride(null)}
@@ -1604,7 +1632,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         />
         <span className="ks-pt-frames-arrow ks-mono">→</span>
         <FrameSlot
-          label="尾帧"
+          label={t('prompt.frame.endLabel')}
           url={endEntryUrl}
           overridden={endOverride !== undefined}
           onClear={() => setEndOverride(null)}
@@ -1631,7 +1659,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
       <div className="ks-pt-refmedia">
         <RefMediaSlot
           kind="video"
-          label="参考视频（运镜）"
+          label={t('prompt.ref.videoLabel')}
           url={refVideoUrl}
           name={refVideoName}
           onPicked={(url, name) => {
@@ -1646,7 +1674,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         />
         <RefMediaSlot
           kind="audio"
-          label="参考音频（BGM / 氛围）"
+          label={t('prompt.ref.audioLabel')}
           url={refAudioUrl}
           name={refAudioName}
           onPicked={(url, name) => {
@@ -1667,22 +1695,26 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
           className="ks-pt-btn"
           onClick={forgePrompt}
           disabled={forgeStatus.kind === 'forging'}
-          title="用 Opus 4.6 + cinema-video-prompt skill 锻造时间码视频提示词（自动吃最新的场景画面提示词）"
+          title={t('prompt.video.forgeTitle')}
         >
-          {forgeStatus.kind === 'forging' ? '锻造中…' : '锻造视频提示词'}
+          {forgeStatus.kind === 'forging' ? t('prompt.video.forging') : t('prompt.video.forgeBtn')}
         </button>
         <button
           type="button"
           className="ks-pt-btn is-primary"
           onClick={generate}
           disabled={(!value.trim() && !sceneText.trim()) || status.kind === 'pending'}
-          title={`用 ${videoProvider.getProviderName()} 生成视频${status.kind === 'done' ? '（覆盖旧稿）' : ''}`}
+          title={
+            status.kind === 'done'
+              ? tf('prompt.video.genTitleOverwrite', { provider: videoProvider.getProviderName() })
+              : tf('prompt.video.genTitle', { provider: videoProvider.getProviderName() })
+          }
         >
           {status.kind === 'pending'
-            ? '生成中…'
+            ? t('prompt.video.generating')
             : status.kind === 'done'
-              ? '重新生成'
-              : '生成视频'}
+              ? t('prompt.video.regenBtn')
+              : t('prompt.video.genBtn')}
         </button>
       </div>
       {forgeStatus.kind === 'error' && (
@@ -1695,7 +1727,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
         <div className="ks-pt-state ks-state-pending">
           <span className="ks-mono">◆ {status.stage} · {Math.round(status.elapsed / 1000)}s</span>
           <span className="ks-faint ks-mono">
-            seedance 一般需要 60-180 秒；浏览器不要切到后台
+            {t('prompt.video.pendingHint')}
           </span>
         </div>
       )}
@@ -1714,7 +1746,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
           }`}
         >
           <span className="ks-mono">
-            ◆ 任务 {latestTask.taskId.slice(-6)} ·{' '}
+            {tf('prompt.video.taskPrefix', { id: latestTask.taskId.slice(-6) })}
             {latestTask.lastMessage ?? latestTask.status}
             {latestTask.elapsedMs
               ? ` · ${Math.round(latestTask.elapsedMs / 1000)}s`
@@ -1727,7 +1759,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
               target="_blank"
               rel="noreferrer"
             >
-              在新标签页打开 ↗
+              {t('prompt.video.openNewTab')}
             </a>
           )}
           {latestTask.error && (
@@ -1737,7 +1769,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
       )}
       {status.kind === 'done' && (
         <div className="ks-pt-state ks-state-done">
-          <span className="ks-section-title">视频已生成</span>
+          <span className="ks-section-title">{t('prompt.video.generatedTitle')}</span>
           {status.url && (
             <a
               className="ks-pt-link ks-mono"
@@ -1745,7 +1777,7 @@ function VideoPromptTab({ scene }: { scene: Scene }) {
               target="_blank"
               rel="noreferrer"
             >
-              在新标签页打开 ↗
+              {t('prompt.video.openNewTab')}
             </a>
           )}
           {status.warnings?.map((w, i) => (
@@ -1809,18 +1841,19 @@ function CharacterAnchors({
   characters: Record<string, { id: string; name: string }>
   onChange: (ids: string[]) => void
 }) {
+  const t = useT()
   const list = Object.values(characters)
   if (list.length === 0) {
     return (
       <div className="ks-pt-anchors-empty ks-mono ks-faint">
-        ◇ 角色库为空 · 在左栏「角色库」添加角色后，可勾选作为一致性锚点
+        {t('prompt.anchors.empty')}
       </div>
     )
   }
   return (
     <div className="ks-pt-anchors">
       <div className="ks-pt-anchors-label ks-mono">
-        一致性锚点 · CHARACTERS IN SCENE
+        {t('prompt.anchors.label')}
       </div>
       <div className="ks-pt-anchors-row">
         {list.map((c) => {

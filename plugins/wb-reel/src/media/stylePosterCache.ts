@@ -1,4 +1,4 @@
-import type { ImageClient } from '../llm/types'
+import type { ImageClient } from '../llm/config/types'
 
 /**
  * stylePosterCache —— 风格/UI 预设「海报样张」缓存。

@@ -4,6 +4,7 @@ import type { Engine } from '../core/Engine'
 import type { CameraStore } from '../core/CameraStore'
 import type { PreviewControls } from './PreviewControls'
 import { globalState } from '../shared/GlobalState'
+import { t, tf, pipelineLabel, pipelineDescription, onLocaleChange } from '../i18n'
 
 export interface ExtraPanels {
   center: HTMLElement
@@ -30,6 +31,11 @@ export class PipelinePanel {
   private activeId: string | null = null
   private tabEls: Map<string, HTMLElement> = new Map()
   private unsub: (() => void) | null = null
+  private localeUnsub: (() => void) | null = null
+  private mainMetas: PipelineMeta[] = []
+  private drawerMetas: PipelineMeta[] = []
+  private drawerWrap: HTMLElement | null = null
+  private drawerPanel: HTMLElement | null = null
 
   constructor(
     topbar: HTMLElement,
@@ -54,24 +60,23 @@ export class PipelinePanel {
     this.tabsContainer.innerHTML = ''
     this.tabEls.clear()
 
-    // wb-skill 工作台:不显示「角色设计」入口(它属于 wb-character)。
-    // 主 tab(placement='main')—— 当前只有 vfx,但保留 ordering 以便未来扩展。
     const MAIN_TAB_ORDER = ['vfx']
     const mainMetas = this.registry.getByPlacement('main').sort((a, b) => {
       const ai = MAIN_TAB_ORDER.indexOf(a.id)
       const bi = MAIN_TAB_ORDER.indexOf(b.id)
       return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi)
     })
+    this.mainMetas = mainMetas
+    this.drawerMetas = this.registry.getByPlacement('drawer')
     for (const m of mainMetas) {
       const tab = document.createElement('button')
       tab.className = 'pipeline-tab main-tab'
-      tab.innerHTML = `<span class="tab-icon">${m.icon}</span>${m.name}`
+      tab.innerHTML = `<span class="tab-icon">${m.icon}</span>${pipelineLabel(m.id, m.name)}`
       tab.addEventListener('click', () => { void this.activate(m) })
       this.tabsContainer.appendChild(tab)
       this.tabEls.set(m.id, tab)
     }
 
-    // 右侧弹性撑开,让「更多模块」贴右
     const spacer = document.createElement('div')
     spacer.className = 'tab-spacer'
     this.tabsContainer.appendChild(spacer)
@@ -90,33 +95,31 @@ export class PipelinePanel {
       void this.activate(target, { reset: true })
     }) as EventListener)
 
-    // 默认激活第一个 main pipeline(对 wb-skill 即 vfx)。
-    // 旧实现这里调 showDesign(),会把「角色设计」UI 渲到左侧、遮住技能 UI。
+    this.localeUnsub = onLocaleChange(() => this.refreshTabLabels())
+
     const defaultMeta = mainMetas[0]
     if (defaultMeta) {
       void this.activate(defaultMeta)
     }
   }
 
-  /**
-   * 「⋯ 更多模块 ▾」抽屉——右上角一个按钮，点开后列出所有 `placement='drawer'`
-   * 的管线，按 `meta.group` 分到「生产变体」/「辅助工具」两组（缺省 `'variant'`）。
-   */
   private buildMoreDrawer(): void {
-    const drawerPipelines = this.registry.getByPlacement('drawer')
+    const drawerPipelines = this.drawerMetas.length ? this.drawerMetas : this.registry.getByPlacement('drawer')
     if (drawerPipelines.length === 0) return
 
     const wrap = document.createElement('div')
     wrap.className = 'pipeline-drawer-wrap'
+    this.drawerWrap = wrap
 
     const trigger = document.createElement('button')
     trigger.className = 'pipeline-tab drawer-trigger'
-    trigger.innerHTML = '<span class="tab-icon">⋯</span>更多模块 <span class="drawer-chevron">▾</span>'
+    trigger.innerHTML = `<span class="tab-icon">⋯</span>${t('drawer.more')} <span class="drawer-chevron">▾</span>`
     wrap.appendChild(trigger)
 
     const panel = document.createElement('div')
     panel.className = 'pipeline-drawer'
     panel.style.display = 'none'
+    this.drawerPanel = panel
 
     const groupHead = (text: string) => {
       const h = document.createElement('div')
@@ -124,12 +127,13 @@ export class PipelinePanel {
       h.textContent = text
       return h
     }
-    const item = (icon: string, name: string, desc: string, onClick: () => void) => {
+    const item = (meta: PipelineMeta, onClick: () => void) => {
       const it = document.createElement('button')
       it.className = 'pipeline-drawer-item'
-      it.innerHTML = `<span class="pipeline-drawer-icon">${icon}</span>` +
-        `<span class="pipeline-drawer-text"><span class="pipeline-drawer-name">${name}</span>` +
-        `<span class="pipeline-drawer-desc">${desc}</span></span>`
+      it.dataset.pipelineId = meta.id
+      it.innerHTML = `<span class="pipeline-drawer-icon">${meta.icon}</span>` +
+        `<span class="pipeline-drawer-text"><span class="pipeline-drawer-name">${pipelineLabel(meta.id, meta.name)}</span>` +
+        `<span class="pipeline-drawer-desc">${pipelineDescription(meta.id, meta.description)}</span></span>`
       it.addEventListener('click', () => { panel.style.display = 'none'; onClick() })
       return it
     }
@@ -142,17 +146,17 @@ export class PipelinePanel {
     }
 
     if (variantGroup.length) {
-      panel.appendChild(groupHead('生产变体'))
+      panel.appendChild(groupHead(t('drawer.variant')))
       for (const m of variantGroup) {
-        panel.appendChild(item(m.icon, m.name, m.description, () => { void this.activate(m) }))
+        panel.appendChild(item(m, () => { void this.activate(m) }))
         this.tabEls.set(m.id, trigger)
       }
     }
 
     if (auxGroup.length) {
-      panel.appendChild(groupHead('辅助工具'))
+      panel.appendChild(groupHead(t('drawer.aux')))
       for (const m of auxGroup) {
-        panel.appendChild(item(m.icon, m.name, m.description, () => { void this.activate(m) }))
+        panel.appendChild(item(m, () => { void this.activate(m) }))
         this.tabEls.set(m.id, trigger)
       }
     }
@@ -177,17 +181,18 @@ export class PipelinePanel {
     this.showLoadingHint(meta)
 
     let pipeline: IPipeline | undefined
+    let loadErr: unknown
     try {
       pipeline = await this.registry.load(meta.id)
     } catch (err) {
+      loadErr = err
       console.warn('[PipelinePanel] load failed:', meta.id, err)
     }
     if (!pipeline) {
-      this.showLoadError(meta)
+      this.showLoadError(meta, loadErr)
       return
     }
 
-    // 用户在 await 期间可能已经切到别的 tab/设计页 —— 放弃这次 mount。
     if (this.activeId !== meta.id) return
 
     if (opts.reset) {
@@ -197,7 +202,14 @@ export class PipelinePanel {
     }
 
     this.activePipeline = pipeline
-    await pipeline.init(this.context)
+    try {
+      await pipeline.init(this.context)
+    } catch (err) {
+      console.error('[PipelinePanel] init failed:', meta.id, err)
+      this.activePipeline = null
+      this.showLoadError(meta, err)
+      return
+    }
     if (this.activeId !== meta.id) {
       pipeline.dispose()
       this.activePipeline = null
@@ -214,13 +226,12 @@ export class PipelinePanel {
     pipeline.createUI(this.leftPanel, panels)
   }
 
-  /** 懒加载期间在左面板里给一个轻量「加载中」提示,大模块第一次 import
-   *  可能要 0.5–1s,空白会让人以为卡死。 */
   private showLoadingHint(meta: PipelineMeta): void {
+    const name = pipelineLabel(meta.id, meta.name)
     this.leftPanel.innerHTML = `
       <div class="pipeline-loading">
         <div class="pipeline-loading-spinner"></div>
-        <div class="pipeline-loading-text">${meta.icon} ${meta.name} 加载中…</div>
+        <div class="pipeline-loading-text">${meta.icon} ${tf('loading.pipeline', { name })}</div>
       </div>
     `
   }
@@ -229,13 +240,46 @@ export class PipelinePanel {
     this.leftPanel.innerHTML = ''
   }
 
-  private showLoadError(meta: PipelineMeta): void {
+  private showLoadError(meta: PipelineMeta, err?: unknown): void {
+    const detail = err
+      ? (err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+      : ''
+    const stack = err instanceof Error && err.stack ? err.stack : ''
     this.leftPanel.innerHTML = `
       <div class="pipeline-loading pipeline-loading-error">
-        ⚠️ 加载失败:${meta.id}
-        <div style="margin-top:8px;font-size:12px;opacity:0.7">查看控制台获取详情</div>
+        ⚠️ ${t('loading.failed')}:${meta.id}
+        ${detail ? `<div style="margin-top:8px;font-size:12px;color:#ff8888;word-break:break-all;max-width:420px">${escapeHtml(detail)}</div>` : ''}
+        ${stack ? `<details style="margin-top:8px;max-width:440px"><summary style="font-size:11px;opacity:0.7;cursor:pointer">${t('loading.stackDetails')}</summary><pre style="font-size:10px;opacity:0.7;white-space:pre-wrap;word-break:break-all;text-align:left">${escapeHtml(stack)}</pre></details>` : `<div style="margin-top:8px;font-size:12px;opacity:0.7">${t('loading.checkConsole')}</div>`}
       </div>
     `
+  }
+
+  private refreshTabLabels(): void {
+    for (const m of this.mainMetas) {
+      const tab = this.tabEls.get(m.id)
+      if (tab) tab.innerHTML = `<span class="tab-icon">${m.icon}</span>${pipelineLabel(m.id, m.name)}`
+    }
+    if (this.drawerWrap) {
+      const trigger = this.drawerWrap.querySelector('.drawer-trigger') as HTMLElement | null
+      if (trigger) trigger.innerHTML = `<span class="tab-icon">⋯</span>${t('drawer.more')} <span class="drawer-chevron">▾</span>`
+    }
+    if (this.drawerPanel) {
+      const groups = this.drawerPanel.querySelectorAll('.pipeline-drawer-group')
+      let gi = 0
+      const variantGroup = this.drawerMetas.filter(m => m.group !== 'aux')
+      const auxGroup = this.drawerMetas.filter(m => m.group === 'aux')
+      if (variantGroup.length && groups[gi]) { (groups[gi] as HTMLElement).textContent = t('drawer.variant'); gi++ }
+      if (auxGroup.length && groups[gi]) { (groups[gi] as HTMLElement).textContent = t('drawer.aux') }
+      for (const it of this.drawerPanel.querySelectorAll('.pipeline-drawer-item')) {
+        const id = (it as HTMLElement).dataset.pipelineId
+        const meta = id ? this.drawerMetas.find(m => m.id === id) : undefined
+        if (!meta) continue
+        const nameEl = it.querySelector('.pipeline-drawer-name')
+        const descEl = it.querySelector('.pipeline-drawer-desc')
+        if (nameEl) nameEl.textContent = pipelineLabel(meta.id, meta.name)
+        if (descEl) descEl.textContent = pipelineDescription(meta.id, meta.description)
+      }
+    }
   }
 
   private leaveCurrentMode(): void {
@@ -276,8 +320,17 @@ export class PipelinePanel {
 
   dispose(): void {
     this.unsub?.()
+    this.localeUnsub?.()
     this.leaveCurrentMode()
     this.clearPanels()
     this.tabsContainer.remove()
   }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }

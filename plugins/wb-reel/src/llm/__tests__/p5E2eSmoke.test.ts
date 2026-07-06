@@ -26,11 +26,11 @@
 import { describe, it, expect } from 'vitest'
 
 import { planChunks, CHUNK_THRESHOLD_CHARS } from '../../io/chunkPlanner'
-import { forgeProseToBeatsChunked } from '../proseToBeatsChunked'
-import { forgeScenarioFromScript } from '../promptForge'
-import { runActBatchUpgradeOnScenario } from '../runActBatchUpgrade'
+import { forgeProseToBeatsChunked } from '../forge/proseToBeatsChunked'
+import { forgeScenarioFromScript } from '../forge/promptForge'
+import { runActBatchUpgradeOnScenario } from '../pipeline/runActBatchUpgrade'
 
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 工具：stub LLM ——按 systemPrompt 路由返回不同 JSON

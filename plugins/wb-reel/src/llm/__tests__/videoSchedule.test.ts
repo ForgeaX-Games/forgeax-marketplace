@@ -3,8 +3,8 @@ import {
   buildVideoDag,
   layerizeDag,
   criticalPathDurationSec,
-} from '../videoSchedule'
-import type { VideoPlan, VideoSegment } from '../videoPlanTypes'
+} from '../pipeline/videoSchedule'
+import type { VideoPlan, VideoSegment } from '../config/videoPlanTypes'
 
 function makeSeg(
   id: string,

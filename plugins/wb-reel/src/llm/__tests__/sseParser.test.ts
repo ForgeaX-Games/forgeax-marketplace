@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSseParser, feedSse } from '../sseParser'
+import { createSseParser, feedSse } from '../util/sseParser'
 
 /**
  * SSE 解析单测 —— 覆盖 Anthropic Messages API 流式事件的几种真实形态。

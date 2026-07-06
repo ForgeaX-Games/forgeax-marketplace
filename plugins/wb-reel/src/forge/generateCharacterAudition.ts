@@ -15,9 +15,9 @@
 
 import { useMediaStore } from '../media/mediaStore'
 import { useScenarioStore } from '../scenario/scenarioStore'
-import { createTextProvider } from '../llm/ClaudeAzureProvider'
-import { castCharacterVoice } from '../llm/characterVoiceCaster'
-import { buildCharacterAuditionPrompt } from '../llm/characterAudition'
+import { createTextProvider } from '../llm/providers/ClaudeAzureProvider'
+import { castCharacterVoice } from '../llm/forge/characterVoiceCaster'
+import { buildCharacterAuditionPrompt } from '../llm/forge/characterAudition'
 import { extractAudioMp3 } from '../media/extractAudioMp3'
 import { generateCardVideo } from './assetCardGen'
 import type { GenRequestSnapshot } from './generationQueueStore'

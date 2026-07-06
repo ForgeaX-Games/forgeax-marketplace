@@ -17,12 +17,12 @@
  */
 
 import { createImageProvider } from '../llm'
-import type { ImageClient } from '../llm/types'
+import type { ImageClient } from '../llm/config/types'
 import {
   buildShotKeyframePrompt,
   pickPrimaryRefForShot,
-} from '../llm/forgeImagePipeline'
-import { composeVisualPrompt } from '../llm/visualStylePresets'
+} from '../llm/forge/forgeImagePipeline'
+import { composeVisualPrompt } from '../llm/config/visualStylePresets'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'

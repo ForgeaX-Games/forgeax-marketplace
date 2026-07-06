@@ -3,7 +3,7 @@ import {
   buildStoryboardUserPrompt,
   normalizeStoryboardShots,
   clampShotCount,
-} from '../forgeStoryboard'
+} from '../forge/forgeStoryboard'
 import type { Character, Location, Scene } from '../../scenario/types'
 
 /**
@@ -318,7 +318,7 @@ describe('normalizeStoryboardShots', () => {
 
 describe('computeShotQuota / sanitizeSceneDuration', () => {
   it('computeShotQuota 按「少而长」分档返回镜数（最终夹到 [1, 12]）', async () => {
-    const { computeShotQuota } = await import('../forgeStoryboard')
+    const { computeShotQuota } = await import('../forge/forgeStoryboard')
     expect(computeShotQuota(5)).toBe(1) // ≤15 → 1
     expect(computeShotQuota(15)).toBe(1)
     expect(computeShotQuota(20)).toBe(2) // ≤30 → 2
@@ -330,7 +330,7 @@ describe('computeShotQuota / sanitizeSceneDuration', () => {
   })
 
   it('sanitizeSceneDuration 夹到 [5, 300]', async () => {
-    const { sanitizeSceneDuration } = await import('../forgeStoryboard')
+    const { sanitizeSceneDuration } = await import('../forge/forgeStoryboard')
     expect(sanitizeSceneDuration(undefined)).toBe(60)
     expect(sanitizeSceneDuration(0)).toBe(60)
     expect(sanitizeSceneDuration(-10)).toBe(60)

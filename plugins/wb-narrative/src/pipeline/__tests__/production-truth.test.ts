@@ -22,7 +22,6 @@ import { ITEM_DATABASE_COMPOSER } from "../steps/item-database.js";
 
 // ── VN / 互动影游管线消费 step 的 composer ──
 import { VN_OUTLINE_ACTS_COMPOSER } from "../steps/vn-v2/vn-outline-acts.js";
-import { VN_SCENES_COMPOSER } from "../steps/vn-v2/vn-scenes.js";
 import { VN_BEATS_COMPOSER } from "../steps/vn-v2/vn-beats.js";
 import { VN_BRANCHED_BEATS_COMPOSER } from "../steps/vn-v2/vn-branched-beats.js";
 import { VN_SCREENPLAY_COMPOSER } from "../steps/vn-v2/vn-screenplay.js";
@@ -81,7 +80,6 @@ const CONSUMING_COMPOSERS: Array<[string, PromptComposer]> = [
   ["narrative_card", NARRATIVE_CARD_COMPOSER],
   ["item_database", ITEM_DATABASE_COMPOSER],
   ["vn_outline_acts", VN_OUTLINE_ACTS_COMPOSER],
-  ["vn_scenes", VN_SCENES_COMPOSER],
   ["vn_beats", VN_BEATS_COMPOSER],
   ["vn_branched_beats", VN_BRANCHED_BEATS_COMPOSER],
   ["vn_screenplay", VN_SCREENPLAY_COMPOSER],

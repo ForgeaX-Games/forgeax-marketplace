@@ -16,8 +16,8 @@ import {
   type CardSpec,
 } from './assetCards'
 import { generateCardAudio, generateCardImage, generateCardVideo } from './assetCardGen'
-import type { SeedanceMode } from '../llm/seedanceContent'
-import type { SeedanceResolutionTier, SeedanceRatio } from '../llm/seedanceResolution'
+import type { SeedanceMode } from '../llm/refsets/seedanceContent'
+import type { SeedanceResolutionTier, SeedanceRatio } from '../llm/refsets/seedanceResolution'
 import {
   useGenerationQueue,
   archiveRequestForMedia,

@@ -10,6 +10,9 @@ import { UIManager } from './ui/UIManager'
 import type { PipelineContext } from './core/types'
 import { bindHideableEvents, ensureHideableStyles } from './shared/HideableImage'
 import { globalState } from './shared/GlobalState'
+import { initLocaleSync, t } from './i18n'
+
+initLocaleSync()
 
 const T0 = performance.now()
 let TLAST = T0
@@ -57,7 +60,7 @@ async function main() {
       globalState.setSlug(m.ctx.slug)
     }
   })
-  bridge.sendLoading(0, '初始化引擎...')
+  bridge.sendLoading(0, t('main.initEngine'))
 
   if (forgeaxHost.available) {
     forgeaxHost.handshake(2000).then((r) => {
@@ -71,21 +74,21 @@ async function main() {
     })
   }
 
-  setLoadingText('正在创建引擎...')
+  setLoadingText(t('main.creatingEngine'))
   const canvas = document.getElementById('viewport') as HTMLCanvasElement
   if (!canvas) throw new Error('#viewport canvas not found')
 
   const engine = new Engine(canvas)
-  bridge.sendLoading(20, '引擎已创建')
-  setLoadingText('引擎已创建')
+  bridge.sendLoading(20, t('main.engineReady'))
+  setLoadingText(t('main.engineReady'))
 
   const cameraStore = new CameraStore()
   const sceneManager = new SceneManager(engine)
   const characterPreview = new CharacterPreview(engine)
   const eventBus = new EventBus()
 
-  bridge.sendLoading(40, '正在发现管线...')
-  setLoadingText('正在发现管线...')
+  bridge.sendLoading(40, t('main.discoverPipelines'))
+  setLoadingText(t('main.discoverPipelines'))
   const registry = new PipelineRegistry()
 
   // Workbench bridge ── 暴露给主工程的 workbench 编辑器 / 智能体调用。
@@ -106,8 +109,8 @@ async function main() {
     return true
   }
 
-  bridge.sendLoading(60, '正在加载相机预设...')
-  setLoadingText('正在加载相机预设...')
+  bridge.sendLoading(60, t('main.loadCamera'))
+  setLoadingText(t('main.loadCamera'))
   await cameraStore.init()
 
   const context: PipelineContext = {
@@ -121,8 +124,8 @@ async function main() {
   ensureHideableStyles()
   bindHideableEvents()
 
-  bridge.sendLoading(80, '正在构建界面...')
-  setLoadingText('正在构建界面...')
+  bridge.sendLoading(80, t('main.buildUI'))
+  setLoadingText(t('main.buildUI'))
   const uiRoot = document.getElementById('ui-root')!
   const uiManager = new UIManager(uiRoot, engine, sceneManager, cameraStore, registry, context)
   uiManager.init()
@@ -132,7 +135,7 @@ async function main() {
   // 不再阻塞首屏可见时间。
   hideLoading()
   console.log(tick('🎬 loading 屏幕已隐藏'))
-  bridge.sendLoading(100, '准备就绪')
+  bridge.sendLoading(100, t('main.ready'))
   bridge.sendReady()
   engine.start()
 
@@ -274,6 +277,6 @@ main().catch((err) => {
   const overlay = document.getElementById('error-overlay')
   if (overlay) {
     overlay.classList.add('visible')
-    overlay.innerHTML = `<h2>启动错误</h2>${err?.stack || err}`
+    overlay.innerHTML = `<h2>${t('error.startup')}</h2>${err?.stack || err}`
   }
 })

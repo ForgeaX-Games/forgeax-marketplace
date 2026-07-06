@@ -3,7 +3,7 @@ import {
   createTtsClient,
   TTS_VOICE_PRESETS,
   DEFAULT_TTS_SAMPLE_TEXT,
-} from '../TTSProvider'
+} from '../providers/TTSProvider'
 
 /*
  * TTSProvider · TTS HTTP 客户端

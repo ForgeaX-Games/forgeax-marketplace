@@ -7,14 +7,14 @@
 import type { PresetConfig } from "./types.js";
 import type { PipelineTemplateId } from "../templates.js";
 
-// 与 templates.ts / modes.ts 的 tpl-vn-v2 规范链严格对齐（9 步）。
+// 与 templates.ts / modes.ts 的 tpl-vn-v2 规范链严格对齐（8 步）。
+// 场/情节点解耦（§4.6c）：移除前置 vn_scenes 结构步；场号由 vn_branched_beats 末尾确定性导出。
 // vn_state_ledger（G-01.5 世界状态账本）必须在 vn_branched_beats 与 vn_screenplay 之间，
 // 否则 Planner 路径会漏掉账本步，导致剧本/分镜失去世界状态一致性约束。
 const VN_V2_STEPS = [
   "vn_logline",
   "vn_outline_acts",
   "worldview",
-  "vn_scenes",
   "vn_beats",
   "vn_branched_beats",
   "vn_state_ledger",

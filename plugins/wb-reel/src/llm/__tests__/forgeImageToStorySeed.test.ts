@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { forgeImageToStorySeed } from '../promptForge'
+import { forgeImageToStorySeed } from '../forge/promptForge'
 import { SKILLS } from '../skills'
-import type { TextClient, TextRequest } from '../types'
+import type { TextClient, TextRequest } from '../config/types'
 
 /**
  * forgeImageToStorySeed 契约测试

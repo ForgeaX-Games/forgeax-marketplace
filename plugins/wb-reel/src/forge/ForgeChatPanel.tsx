@@ -3,16 +3,16 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import { inferAdoptMode } from '../scenario/forgeIntent'
 import { useMediaStore } from '../media/mediaStore'
 import { createTextProvider, createImageProvider } from '../llm'
-import type { TextClient } from '../llm/types'
+import type { TextClient } from '../llm/config/types'
 import {
   forgeScenarioFromIdea,
   type ForgeProgress,
-} from '../llm/promptForge'
-import { forgeScenarioFromScriptSegmented } from '../llm/forgeScriptSegmented'
+} from '../llm/forge/promptForge'
+import { forgeScenarioFromScriptSegmented } from '../llm/forge/forgeScriptSegmented'
 import { broadcastScenarioAdopt } from '../shell/crossPaneSync'
-import { characterRefPass } from '../llm/forgePasses'
-import { appendEpisodePass } from '../llm/appendEpisodePass'
-import { sniffScenarioJson } from '../llm/scenarioJsonSniff'
+import { characterRefPass } from '../llm/forge/forgePasses'
+import { appendEpisodePass } from '../llm/forge/appendEpisodePass'
+import { sniffScenarioJson } from '../llm/util/scenarioJsonSniff'
 import { injectStyleOnce } from '../styles/injectStyle'
 import {
   useForgeChatStore,
@@ -41,6 +41,7 @@ import {
 import { ForgeStageRoll } from './ForgeStageRoll'
 import { chatPanelCss } from './ForgeChatPanel.css'
 import type { Scenario } from '../scenario/types'
+import { tf, useT } from '../i18n'
 
 /**
  * ForgeChatPanel —— Forge 页右侧的对话面板。
@@ -294,20 +295,21 @@ const IMG_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
  */
 const SLASH_HINTS: Array<{
   cmd: string
-  label: string
-  desc: string
+  labelKey: string
+  descKey: string
   group: 'input' | 'distill'
 }> = [
-  { cmd: 'idea', label: '一句话', desc: '一句话想法 → 锻造完整剧本', group: 'input' },
-  { cmd: 'script', label: '贴剧本', desc: '贴入剧本正文 / 上传 md / txt', group: 'input' },
-  { cmd: 'image', label: '一张图', desc: '上传图片 → 反向凝练故事', group: 'input' },
-  { cmd: 'synopsis', label: '提梗概', desc: '从已有 scenes 反向凝练梗概', group: 'distill' },
-  { cmd: 'outline', label: '提大纲', desc: '从已有 scenes 反向凝练剧情大纲', group: 'distill' },
-  { cmd: 'relations', label: '提关系', desc: '识别人物关系并写入工作板', group: 'distill' },
-  { cmd: 'expand', label: '扩写场景', desc: '按当前梗概+大纲重新展开 scenes', group: 'distill' },
+  { cmd: 'idea', labelKey: 'forge.chat.slash.idea', descKey: 'forge.chat.slash.ideaDesc', group: 'input' },
+  { cmd: 'script', labelKey: 'forge.chat.slash.script', descKey: 'forge.chat.slash.scriptDesc', group: 'input' },
+  { cmd: 'image', labelKey: 'forge.chat.slash.image', descKey: 'forge.chat.slash.imageDesc', group: 'input' },
+  { cmd: 'synopsis', labelKey: 'forge.chat.slash.synopsis', descKey: 'forge.chat.slash.synopsisDesc', group: 'distill' },
+  { cmd: 'outline', labelKey: 'forge.chat.slash.outline', descKey: 'forge.chat.slash.outlineDesc', group: 'distill' },
+  { cmd: 'relations', labelKey: 'forge.chat.slash.relations', descKey: 'forge.chat.slash.relationsDesc', group: 'distill' },
+  { cmd: 'expand', labelKey: 'forge.chat.slash.expand', descKey: 'forge.chat.slash.expandDesc', group: 'distill' },
 ]
 
 export function ForgeChatPanel() {
+  const t = useT()
   const scenarioId = useScenarioStore((s) => s.scenario.id)
 
   const session = useForgeChatStore((s) => s.getSession(scenarioId))
@@ -663,9 +665,12 @@ export function ForgeChatPanel() {
       <div className="ks-forge-chat-stream" ref={scrollRef}>
         {session.messages.length === 0 && (
           <div className="ks-forge-chat-empty ks-cn">
-            在下方输入想法（或拖入剧本 md/txt、参考图），按 ⏎ 发送。
-            <br />
-            对话和附件都会保留，切 tab / 刷新都还在。
+            {t('forge.chat.empty').split('\n').map((line, i, arr) => (
+              <span key={i}>
+                {line}
+                {i < arr.length - 1 && <br />}
+              </span>
+            ))}
           </div>
         )}
         {session.messages.map((m) => (
@@ -716,7 +721,7 @@ export function ForgeChatPanel() {
        * draft 不为空时收起以免遮挡视线.
        */}
       {!session.draft.trim() && (
-        <div className="ks-forge-chat-slash-hints" role="toolbar" aria-label="快捷命令">
+        <div className="ks-forge-chat-slash-hints" role="toolbar" aria-label={t('forge.chat.slashToolbar')}>
           {SLASH_HINTS.map((h) => (
             <button
               key={h.cmd}
@@ -727,10 +732,10 @@ export function ForgeChatPanel() {
                 chat.setDraft(scenarioId, `/${h.cmd} `)
                 inputRef.current?.focus()
               }}
-              title={h.desc}
+              title={t(h.descKey)}
             >
               <span className="ks-forge-chat-slash-cmd ks-mono">/{h.cmd}</span>
-              <span className="ks-forge-chat-slash-label">{h.label}</span>
+              <span className="ks-forge-chat-slash-label">{t(h.labelKey)}</span>
             </button>
           ))}
         </div>
@@ -741,7 +746,7 @@ export function ForgeChatPanel() {
         <textarea
           ref={inputRef}
           className="ks-forge-chat-input ks-cn"
-          placeholder="说点什么，或拖入剧本/参考图…  斜杠输入命令: /idea /script /image /synopsis /outline /relations /expand"
+          placeholder={t('forge.chat.placeholder')}
           rows={2}
           value={session.draft}
           onChange={(e) => chat.setDraft(scenarioId, e.target.value)}
@@ -755,7 +760,7 @@ export function ForgeChatPanel() {
           onClick={() => void handleSend()}
           disabled={busy || (!session.draft.trim() && stagedAtts.length === 0)}
         >
-          {busy ? '…' : '发送 ⏎'}
+          {busy ? '…' : t('forge.chat.send')}
         </button>
       </div>
     </aside>
@@ -763,6 +768,7 @@ export function ForgeChatPanel() {
 }
 
 function PendingBubble({ scenarioId }: { scenarioId: string }) {
+  const t = useT()
   // 订阅 store —— pending 的 stages / streamTail 每次增量都会触发重渲染
   const pending = useForgeChatStore((s) => s.getSession(scenarioId).pending)
   // 每秒 tick 一次让"已 Ns"走秒（store 本身不会为了秒数变化重渲染）
@@ -790,7 +796,7 @@ function PendingBubble({ scenarioId }: { scenarioId: string }) {
       <div className="ks-forge-chat-pending">
         <div className="ks-forge-chat-pending-head ks-mono">
           <span className="ks-forge-chat-pending-spinner" />
-          锻造中
+          {t('forge.chat.forging')}
           <span className="ks-forge-chat-pending-timer">
             {elapsed}s{pending.streamBytes > 0 ? ` · ${pending.streamBytes} chars` : ''}
           </span>
@@ -799,9 +805,9 @@ function PendingBubble({ scenarioId }: { scenarioId: string }) {
               type="button"
               className="ks-forge-chat-pending-abort"
               onClick={() => abortForge(scenarioId)}
-              title="中断当前锻造（已生成的工作流仍会保留在历史里）"
+              title={t('forge.chat.abortTitle')}
             >
-              中断
+              {t('forge.chat.abort')}
             </button>
           )}
         </div>
@@ -839,7 +845,7 @@ function PendingBubble({ scenarioId }: { scenarioId: string }) {
             )}
             {sniff.synopsis && (
               <div className="ks-forge-chat-sniff-row">
-                <span className="ks-forge-chat-sniff-key ks-mono">梗概</span>
+                <span className="ks-forge-chat-sniff-key ks-mono">{t('forge.chat.sniff.synopsis')}</span>
                 <span className="ks-forge-chat-sniff-val is-multi">
                   {sniff.synopsis}
                 </span>
@@ -847,13 +853,13 @@ function PendingBubble({ scenarioId }: { scenarioId: string }) {
             )}
             {sniff.styleNote && (
               <div className="ks-forge-chat-sniff-row">
-                <span className="ks-forge-chat-sniff-key ks-mono">风格</span>
+                <span className="ks-forge-chat-sniff-key ks-mono">{t('forge.chat.sniff.style')}</span>
                 <span className="ks-forge-chat-sniff-val">{sniff.styleNote}</span>
               </div>
             )}
             {sniff.characterNames.length > 0 && (
               <div className="ks-forge-chat-sniff-row">
-                <span className="ks-forge-chat-sniff-key ks-mono">角色</span>
+                <span className="ks-forge-chat-sniff-key ks-mono">{t('forge.chat.sniff.characters')}</span>
                 <span className="ks-forge-chat-sniff-val is-multi">
                   {sniff.characterNames.map((n) => (
                     <span key={n} className="ks-forge-chat-sniff-chip">
@@ -870,11 +876,11 @@ function PendingBubble({ scenarioId }: { scenarioId: string }) {
             )}
             {(sniff.sceneCount > 0 || sniff.currentSceneTitle) && (
               <div className="ks-forge-chat-sniff-row">
-                <span className="ks-forge-chat-sniff-key ks-mono">场景</span>
+                <span className="ks-forge-chat-sniff-key ks-mono">{t('forge.chat.sniff.scenes')}</span>
                 <span className="ks-forge-chat-sniff-val is-multi">
-                  已写 {sniff.sceneCount} 场
+                  {tf('forge.chat.sniff.scenesWritten', { count: sniff.sceneCount })}
                   {sniff.currentSceneTitle &&
-                    ` · 正在写「${sniff.currentSceneTitle}」`}
+                    tf('forge.chat.sniff.writing', { title: sniff.currentSceneTitle })}
                 </span>
               </div>
             )}
@@ -985,6 +991,7 @@ function ArchivedStages({
   elapsedMs?: number
   aborted?: boolean
 }) {
+  const t = useT()
   const [open, setOpen] = useState<boolean>(Boolean(aborted))
   const elapsed = elapsedMs ? `${(elapsedMs / 1000).toFixed(1)}s` : ''
   return (
@@ -993,11 +1000,11 @@ function ArchivedStages({
         type="button"
         className="ks-forge-chat-archive-head ks-mono"
         onClick={() => setOpen((v) => !v)}
-        title={open ? '收起工作流' : '展开本次锻造的工作流'}
+        title={open ? t('forge.chat.archiveCollapse') : t('forge.chat.archiveExpand')}
       >
         <span className="ks-forge-chat-archive-toggle">{open ? '⏷' : '⏵'}</span>
-        {aborted ? '已中断 · ' : ''}
-        {stages.length} 步{elapsed ? ` · ${elapsed}` : ''}
+        {aborted ? t('forge.chat.archiveAborted') : ''}
+        {tf('forge.chat.archiveSteps', { count: stages.length })}{elapsed ? ` · ${elapsed}` : ''}
       </button>
       {open && (
         <ul className="ks-forge-chat-stages ks-cn">
@@ -1044,6 +1051,7 @@ function StagedChip({
   att: Attachment
   onRemove: () => void
 }) {
+  const t = useT()
   return (
     <div className={`ks-forge-chat-chip is-${att.kind}`} title={att.filename}>
       {att.kind === 'image' ? (
@@ -1056,7 +1064,7 @@ function StagedChip({
         type="button"
         className="ks-forge-chat-chip-rm"
         onClick={onRemove}
-        title="移除"
+        title={t('forge.chat.removeAttachment')}
       >
         ✕
       </button>
@@ -1065,6 +1073,7 @@ function StagedChip({
 }
 
 function FileButton({ onPick }: { onPick: (files: FileList) => void }) {
+  const t = useT()
   const ref = useRef<HTMLInputElement>(null)
   const accept = [...TEXT_EXTS, ...IMG_MIMES].join(',')
   return (
@@ -1084,7 +1093,7 @@ function FileButton({ onPick }: { onPick: (files: FileList) => void }) {
         type="button"
         className="ks-forge-chat-attbtn"
         onClick={() => ref.current?.click()}
-        title="上传文本 / 图片"
+        title={t('forge.chat.upload')}
       >
         ⊕
       </button>

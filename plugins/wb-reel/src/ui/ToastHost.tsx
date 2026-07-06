@@ -11,6 +11,7 @@
 import { useEffect, useRef } from 'react'
 import { useToastStore, type ToastItem } from './toastStore'
 import { injectStyleOnce } from '../styles/injectStyle'
+import { useT } from '../i18n'
 
 injectStyleOnce(
   'reel-toast-host',
@@ -114,11 +115,12 @@ function ToastOne({
   item: ToastItem
   onDismiss: () => void
 }): JSX.Element {
+  const t = useT()
   return (
     <div
       className={`ks-toast ks-t-${item.kind}`}
       onClick={onDismiss}
-      title="点击关闭"
+      title={t('toast.clickClose')}
     >
       {item.message}
     </div>

@@ -199,8 +199,7 @@ export function installCrossPaneSync(): () => void {
   })
 
   // 接收远端广播 → apply 本地 (用 isApplying 围栏防止回环)
-  function onMessage(e: MessageEvent<SyncPayload>) {
-    const msg = e.data
+  function applyRemotePatch(msg: SyncPayload): void {
     if (!msg || typeof msg !== 'object') return
     if (msg.senderId === senderId) return // 自己发的, 丢弃
 
@@ -308,6 +307,14 @@ export function installCrossPaneSync(): () => void {
       isApplying = false
     }
   }
+
+  function onMessage(e: MessageEvent<SyncPayload>): void {
+    const msg = e.data
+    // 不能在 BroadcastChannel 回调里同步改 zustand —— 该回调可能落在 React
+    // commit 阶段, 会触发 "Cannot update while rendering" 并整树卸载.
+    // pollDiskForExternalChanges 已用 setTimeout(0) 规避; 跨 pane 同步同理.
+    setTimeout(() => applyRemotePatch(msg), 0)
+  }
   channel.addEventListener('message', onMessage)
 
   // mount 后立即广播一次本地完整状态 —— 让对端 (可能是后到达 iframe) 同步过来.
@@ -315,12 +322,14 @@ export function installCrossPaneSync(): () => void {
   // 这里取舍: 后到的 iframe 通常代表"用户正在看的 pane" (host 加载顺序通常
   // sidebar 先, mainarea 后), 所以让后到的状态赢更符合用户直觉 -> 不需要
   // 选举, 自然行为就是对的.
-  broadcast({
-    activeTab: lastActiveTab,
-    forgeView: lastForgeView,
-    imageSection: lastImageSection,
-    studioTab: lastStudioTab,
-  })
+  setTimeout(() => {
+    broadcast({
+      activeTab: lastActiveTab,
+      forgeView: lastForgeView,
+      imageSection: lastImageSection,
+      studioTab: lastStudioTab,
+    })
+  }, 0)
 
   return () => {
     channel.removeEventListener('message', onMessage)

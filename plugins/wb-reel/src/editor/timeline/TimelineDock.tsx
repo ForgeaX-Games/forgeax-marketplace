@@ -46,7 +46,7 @@ import {
 } from './dndTypes'
 import { useDialogueSelection } from './dialogueSelection'
 import { useClipSelection } from './clipSelection'
-import { useT } from '../../i18n'
+import { useT, tf } from '../../i18n'
 
 interface Props {
   scenario: Scenario
@@ -67,6 +67,7 @@ type Tab =
 const EMPTY_IDS: string[] = []
 
 export function TimelineDock({ scenario, currentSceneId }: Props) {
+  const t = useT()
   // 默认进「素材库」tab —— 作者反馈: 节点详情里最先要看/用的就是本节点成品素材。
   const [tab, setTab] = useState<Tab>('assets')
   const selectedDialogueId = useDialogueSelection((s) => s.selectedId)
@@ -102,15 +103,15 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
   // "资产生成 · 素材库"（SceneAssetGallery）完全重叠，作者反馈多余。
   // 保留 MediaDock 组件定义以便必要时恢复；这里只是把入口摘掉。
   return (
-    <aside className="ks-dock" aria-label="时间轴素材面板">
+    <aside className="ks-dock" aria-label={t('dock.ariaLabel')}>
       <div className="ks-dock-tabs" role="tablist">
-        <DockTab cur={tab} me="assets" onSel={setTab} icon="🎬" label="素材库" />
-        <DockTab cur={tab} me="dialogue" onSel={setTab} icon="💬" label="字幕" />
-        <DockTab cur={tab} me="text" onSel={setTab} icon="🆎" label="文字" />
-        <DockTab cur={tab} me="cue" onSel={setTab} icon="⚡" label="QTE" />
-        <DockTab cur={tab} me="audio" onSel={setTab} icon="♪" label="音频" />
-        <DockTab cur={tab} me="minigame" onSel={setTab} icon="🎮" label="小游戏" />
-        <DockTab cur={tab} me="search" onSel={setTab} icon="🔍" label="搜索" />
+        <DockTab cur={tab} me="assets" onSel={setTab} icon="🎬" label={t('dock.tab.assets')} />
+        <DockTab cur={tab} me="dialogue" onSel={setTab} icon="💬" label={t('dock.tab.dialogue')} />
+        <DockTab cur={tab} me="text" onSel={setTab} icon="🆎" label={t('dock.tab.text')} />
+        <DockTab cur={tab} me="cue" onSel={setTab} icon="⚡" label={t('dock.tab.cue')} />
+        <DockTab cur={tab} me="audio" onSel={setTab} icon="♪" label={t('dock.tab.audio')} />
+        <DockTab cur={tab} me="minigame" onSel={setTab} icon="🎮" label={t('dock.tab.minigame')} />
+        <DockTab cur={tab} me="search" onSel={setTab} icon="🔍" label={t('dock.tab.search')} />
       </div>
       <div className="ks-dock-body">
         {tab === 'assets' && <AssetsDock sceneId={currentSceneId} />}
@@ -122,7 +123,7 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
         {tab === 'search' && <SearchSegmentDock scenario={scenario} currentSceneId={currentSceneId} />}
       </div>
       <div className="ks-dock-hint ks-mono">
-        · 填好信息 · 按住拖到左侧时间轴 ·
+        {t('dock.hint')}
       </div>
     </aside>
   )
@@ -224,6 +225,7 @@ function AssetsDock({ sceneId }: { sceneId: string }) {
 // 拖入→自动选中：Timeline.onTrackDrop 在 addDialogue 后立刻 setToolbarSel，
 // dialogueSelection.selectedId 也跟着同步，作者拖完即可在下面改文字。
 function DialogueDock() {
+  const t = useT()
   const scene = useScenarioStore((s) => s.scenario.scenes[s.selectedSceneId])
   const selectedId = useDialogueSelection((s) => s.selectedId)
 
@@ -233,19 +235,19 @@ function DialogueDock() {
   return (
     <div className="ks-dock-card ks-dialogue-dock">
       <div className="ks-dialogue-templates">
-        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.dialogue.addSection')}</div>
         <div className="ks-dialogue-template-row">
           <DialogueTemplateChip
-            label="旁白"
+            label={t('dock.dialogue.narration')}
             payload={{
               kind: 'dialogue',
               role: 'narration',
-              text: '旁白',
+              text: t('dock.dialogue.narration'),
               defaultDurationMs: 2000,
             }}
           />
           <DialogueTemplateChip
-            label="对白"
+            label={t('dock.dialogue.character')}
             payload={{
               kind: 'dialogue',
               role: 'character',
@@ -259,10 +261,10 @@ function DialogueDock() {
       <div className="ks-dialogue-detail-divider" />
 
       <div className="ks-dialogue-detail">
-        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.dialogue.detailSection')}</div>
         {!selectedDialogue ? (
           <div className="ks-dialogue-empty ks-mono">
-            在时间轴上点击一条字幕来编辑
+            {t('dock.dialogue.clickToEdit')}
           </div>
         ) : (
           // key 让选中条切换时丢弃旧的本地 buffer state，并在 unmount 时
@@ -303,6 +305,7 @@ function DialogueDetailEditor({
 }: {
   line: DialogueLine
 }) {
+  const t = useT()
   const sceneId = useScenarioStore((s) => s.selectedSceneId)
   const updateDialogue = useScenarioStore((s) => s.updateDialogue)
   const charactersMap = useScenarioStore((s) => s.scenario.characters)
@@ -378,25 +381,25 @@ function DialogueDetailEditor({
   return (
     <>
       <label className="ks-dock-field">
-        <span>类型</span>
+        <span>{t('dock.field.type')}</span>
         <div className="ks-dock-seg">
           <SegBtn
             cur={line.role}
             me="narration"
             onSel={(v) => updateDialogue(sceneId, line.id, { role: v })}
-            label="旁白"
+            label={t('dock.dialogue.narration')}
           />
           <SegBtn
             cur={line.role}
             me="character"
             onSel={(v) => updateDialogue(sceneId, line.id, { role: v })}
-            label="对白"
+            label={t('dock.dialogue.character')}
           />
         </div>
       </label>
       {line.role === 'character' && (
         <label className="ks-dock-field">
-          <span>署名</span>
+          <span>{t('dock.field.speaker')}</span>
           <input
             type="text"
             list="ks-dialogue-speaker-list"
@@ -414,8 +417,8 @@ function DialogueDetailEditor({
                 ;(e.target as HTMLInputElement).blur()
               }
             }}
-            placeholder="如：林夕"
-            title="按 Enter 或离开输入框时提交修改 · Esc 撤销"
+            placeholder={t('dock.placeholder.speaker')}
+            title={t('dock.title.speakerCommit')}
           />
           <datalist id="ks-dialogue-speaker-list">
             {speakerSuggestions.map((n) => (
@@ -425,7 +428,7 @@ function DialogueDetailEditor({
         </label>
       )}
       <label className="ks-dock-field ks-field-text">
-        <span>台词</span>
+        <span>{t('dock.field.lines')}</span>
         <textarea
           value={draftText}
           onChange={(e) => setDraftText(e.target.value)}
@@ -443,8 +446,8 @@ function DialogueDetailEditor({
             }
           }}
           rows={3}
-          placeholder="输入这句台词…"
-          title="离开输入框 / Ctrl+Enter 提交修改 · Esc 撤销"
+          placeholder={t('dock.placeholder.lines')}
+          title={t('dock.title.linesCommit')}
         />
       </label>
     </>
@@ -464,6 +467,7 @@ function DialogueTemplateChip({
   label: string
   payload: DockDropPayload
 }) {
+  const t = useT()
   return (
     <div
       className="ks-dock-chip ks-dialogue-template-chip"
@@ -472,7 +476,7 @@ function DialogueTemplateChip({
         e.dataTransfer.setData(DOCK_MIME, serializeDockPayload(payload))
         e.dataTransfer.effectAllowed = 'copy'
       }}
-      title="按住拖到左侧时间轴 · 默认 2 秒，落地后在下方修改文字"
+      title={t('dock.template.dragTitle')}
     >
       <span className="ks-dock-chip-grip" aria-hidden>⋮⋮</span>
       <span className="ks-dock-chip-label">{label}</span>
@@ -484,6 +488,7 @@ function DialogueTemplateChip({
 // QTE
 // ─────────────────────────────────────────────────────────────────────
 function CueDock() {
+  const t = useT()
   const [shape, setShape] = useState<QTECueShape>('tap')
   const [label, setLabel] = useState('')
   const [holdSec, setHoldSec] = useState(0.6)
@@ -500,7 +505,7 @@ function CueDock() {
   return (
     <div className="ks-dock-card">
       <label className="ks-dock-field">
-        <span>QTE 类型</span>
+        <span>{t('dock.cue.type')}</span>
         <div className="ks-dock-seg">
           <SegBtn cur={shape} me="tap" onSel={setShape} label="Tap" />
           <SegBtn cur={shape} me="hold" onSel={setShape} label="Hold" />
@@ -508,11 +513,11 @@ function CueDock() {
         </div>
       </label>
       <label className="ks-dock-field">
-        <span>标签（可选）</span>
+        <span>{t('dock.cue.labelOptional')}</span>
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="如：格挡"
+          placeholder={t('dock.cue.placeholder')}
         />
       </label>
       {shape === 'hold' && (
@@ -530,15 +535,15 @@ function CueDock() {
       )}
       {shape === 'sweep' && (
         <label className="ks-dock-field">
-          <span>Sweep 方向</span>
+          <span>{t('dock.cue.sweepDir')}</span>
           <select
             value={sweepDir}
             onChange={(e) => setSweepDir(e.target.value as typeof sweepDir)}
           >
-            <option value="right">→ 右</option>
-            <option value="left">← 左</option>
-            <option value="up">↑ 上</option>
-            <option value="down">↓ 下</option>
+            <option value="right">{t('dock.dir.right')}</option>
+            <option value="left">{t('dock.dir.left')}</option>
+            <option value="up">{t('dock.dir.up')}</option>
+            <option value="down">{t('dock.dir.down')}</option>
           </select>
         </label>
       )}
@@ -577,33 +582,36 @@ function SegBtn<T extends string>({
 // 文字叠加（剪映 / PR 式贴字）—— v7
 // ─────────────────────────────────────────────────────────────────────
 function TextOverlayDock() {
+  const t = useT()
   const scene = useScenarioStore((s) => s.scenario.scenes[s.selectedSceneId])
   const selectedId = useClipSelection((s) => s.textOverlayId)
   const selected = scene?.textOverlays?.find((t) => t.id === selectedId)
+  const titleText = t('dock.text.titleTemplate')
+  const fancyText = t('dock.text.fancyTemplate')
 
   return (
     <div className="ks-dock-card ks-text-dock">
       <div className="ks-dialogue-templates">
-        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加文字</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.text.addSection')}</div>
         <div className="ks-dialogue-template-row">
           <DragChip
             enabled
-            label="标题文字"
-            payload={{ kind: 'textOverlay', text: '标题文字', defaultDurationMs: 3000 }}
+            label={titleText}
+            payload={{ kind: 'textOverlay', text: titleText, defaultDurationMs: 3000 }}
           />
           <DragChip
             enabled
-            label="花字"
-            payload={{ kind: 'textOverlay', text: '双击编辑', defaultDurationMs: 2000 }}
+            label={fancyText}
+            payload={{ kind: 'textOverlay', text: t('dock.text.doubleEdit'), defaultDurationMs: 2000 }}
           />
         </div>
       </div>
       <div className="ks-dialogue-detail-divider" />
       <div className="ks-dialogue-detail">
-        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.dialogue.detailSection')}</div>
         {!selected ? (
           <div className="ks-dialogue-empty ks-mono">
-            在时间轴 TXT 轨上点击一段文字来编辑；或先把上面的文字拖入时间轴
+            {t('dock.text.clickToEdit')}
           </div>
         ) : (
           <TextOverlayEditor key={selected.id} clip={selected} />
@@ -613,15 +621,16 @@ function TextOverlayDock() {
   )
 }
 
-const WEIGHT_OPTIONS: { v: number; label: string }[] = [
-  { v: 300, label: '细' },
-  { v: 400, label: '常规' },
-  { v: 600, label: '中粗' },
-  { v: 700, label: '粗' },
-  { v: 900, label: '特粗' },
+const WEIGHT_OPTION_KEYS: { v: number; key: string }[] = [
+  { v: 300, key: 'dock.weight.thin' },
+  { v: 400, key: 'dock.weight.regular' },
+  { v: 600, key: 'dock.weight.medium' },
+  { v: 700, key: 'dock.weight.bold' },
+  { v: 900, key: 'dock.weight.black' },
 ]
 
 function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
+  const t = useT()
   const sceneId = useScenarioStore((s) => s.selectedSceneId)
   const update = useScenarioStore((s) => s.updateTextOverlay)
   const patch = useCallback(
@@ -644,18 +653,18 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
   return (
     <div className="ks-text-edit">
       <label className="ks-dock-field">
-        <span>文字内容</span>
+        <span>{t('dock.text.content')}</span>
         <textarea
           rows={2}
           value={draftText}
           onChange={(e) => setDraftText(e.target.value)}
           onBlur={flushText}
-          placeholder="输入要显示的文字"
+          placeholder={t('dock.text.placeholder')}
         />
       </label>
 
       <label className="ks-dock-field">
-        <span>字体</span>
+        <span>{t('dock.text.font')}</span>
         <select
           value={clip.fontFamily ?? 'sans'}
           onChange={(e) => patch({ fontFamily: e.target.value })}
@@ -669,15 +678,15 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
       </label>
 
       <label className="ks-dock-field">
-        <span>字重</span>
+        <span>{t('dock.text.weight')}</span>
         <div className="ks-dock-seg">
-          {WEIGHT_OPTIONS.map((w) => (
+          {WEIGHT_OPTION_KEYS.map((w) => (
             <SegBtn
               key={w.v}
               cur={String(clip.fontWeight ?? 700)}
               me={String(w.v)}
               onSel={() => patch({ fontWeight: w.v })}
-              label={w.label}
+              label={t(w.key)}
             />
           ))}
         </div>
@@ -685,7 +694,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
 
       <div className="ks-text-row2">
         <label className="ks-dock-field">
-          <span>字号 {Math.round(clip.fontSizePct ?? 7)}%</span>
+          <span>{tf('dock.text.fontSize', { pct: Math.round(clip.fontSizePct ?? 7) })}</span>
           <input
             type="range"
             min={2}
@@ -701,7 +710,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
             className={`ks-text-tg ${clip.italic ? 'is-on' : ''}`}
             style={{ fontStyle: 'italic' }}
             onClick={() => patch({ italic: !clip.italic })}
-            title="斜体"
+            title={t('dock.text.italic')}
           >
             I
           </button>
@@ -710,7 +719,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
             className={`ks-text-tg ${clip.underline ? 'is-on' : ''}`}
             style={{ textDecoration: 'underline' }}
             onClick={() => patch({ underline: !clip.underline })}
-            title="下划线"
+            title={t('dock.text.underline')}
           >
             U
           </button>
@@ -718,17 +727,17 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
       </div>
 
       <label className="ks-dock-field">
-        <span>对齐</span>
+        <span>{t('dock.text.align')}</span>
         <div className="ks-dock-seg">
-          <SegBtn cur={clip.align ?? 'center'} me="left" onSel={(v) => patch({ align: v })} label="左" />
-          <SegBtn cur={clip.align ?? 'center'} me="center" onSel={(v) => patch({ align: v })} label="中" />
-          <SegBtn cur={clip.align ?? 'center'} me="right" onSel={(v) => patch({ align: v })} label="右" />
+          <SegBtn cur={clip.align ?? 'center'} me="left" onSel={(v) => patch({ align: v })} label={t('dock.align.left')} />
+          <SegBtn cur={clip.align ?? 'center'} me="center" onSel={(v) => patch({ align: v })} label={t('dock.align.center')} />
+          <SegBtn cur={clip.align ?? 'center'} me="right" onSel={(v) => patch({ align: v })} label={t('dock.align.right')} />
         </div>
       </label>
 
       <div className="ks-text-row2">
         <label className="ks-dock-field">
-          <span>颜色</span>
+          <span>{t('dock.text.color')}</span>
           <input
             type="color"
             value={clip.color ?? '#ffffff'}
@@ -736,7 +745,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
           />
         </label>
         <label className="ks-dock-field">
-          <span>描边</span>
+          <span>{t('dock.text.stroke')}</span>
           <input
             type="color"
             value={clip.strokeColor ?? '#000000'}
@@ -744,7 +753,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
           />
         </label>
         <label className="ks-dock-field">
-          <span>描边宽 {clip.strokeWidth ?? 3}</span>
+          <span>{tf('dock.text.strokeWidth', { w: clip.strokeWidth ?? 3 })}</span>
           <input
             type="range"
             min={0}
@@ -757,15 +766,15 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
       </div>
 
       <label className="ks-dock-field">
-        <span>底色条</span>
+        <span>{t('dock.text.bgBar')}</span>
         <div className="ks-text-bg-row">
           <button
             type="button"
             className={`ks-text-tg ${clip.bgColor ? '' : 'is-on'}`}
             onClick={() => patch({ bgColor: undefined })}
-            title="无底色"
+            title={t('dock.text.noBg')}
           >
-            无
+            {t('dock.text.noBg')}
           </button>
           <input
             type="color"
@@ -777,7 +786,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
 
       <div className="ks-text-row2">
         <label className="ks-dock-field">
-          <span>旋转 {Math.round(clip.rotation ?? 0)}°</span>
+          <span>{tf('dock.text.rotation', { deg: Math.round(clip.rotation ?? 0) })}</span>
           <input
             type="range"
             min={-180}
@@ -788,7 +797,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
           />
         </label>
         <label className="ks-dock-field">
-          <span>缩放 {(clip.scale ?? 1).toFixed(2)}×</span>
+          <span>{tf('dock.text.scale', { scale: (clip.scale ?? 1).toFixed(2) })}</span>
           <input
             type="range"
             min={0.3}
@@ -799,7 +808,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
           />
         </label>
         <label className="ks-dock-field">
-          <span>不透明 {Math.round((clip.opacity ?? 1) * 100)}%</span>
+          <span>{tf('dock.text.opacity', { pct: Math.round((clip.opacity ?? 1) * 100) })}</span>
           <input
             type="range"
             min={0.1}
@@ -812,7 +821,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
       </div>
 
       <div className="ks-text-hint ks-mono">
-        位置：在上方播放预览画面里直接拖拽这段文字摆放；时间：拖时间轴 TXT 轨左右把手。
+        {t('dock.text.positionHint')}
       </div>
     </div>
   )
@@ -827,6 +836,7 @@ function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
 // 音频
 // ─────────────────────────────────────────────────────────────────────
 function AudioDock({ currentSceneId }: { currentSceneId: string }) {
+  const t = useT()
   const [role, setRole] = useState<AudioRole>('bgm')
   const [label, setLabel] = useState('')
   const [mediaId, setMediaId] = useState<string | null>(null)
@@ -862,14 +872,14 @@ function AudioDock({ currentSceneId }: { currentSceneId: string }) {
           与下方「拖一条音频 clip 到时间轴」是两件事: 这里是整场戏的背景音乐。 */}
       {currentSceneId ? (
         <div className="ks-dock-bgm-slot">
-          <div className="ks-dialogue-template-label ks-mono">本场景 BGM</div>
+          <div className="ks-dialogue-template-label ks-mono">{t('dock.audio.sceneBgm')}</div>
           <SceneBgmPanel sceneId={currentSceneId} />
         </div>
       ) : null}
       <div className="ks-dialogue-detail-divider" />
-      <div className="ks-dialogue-template-label ks-mono">拖一条音频到时间轴</div>
+      <div className="ks-dialogue-template-label ks-mono">{t('dock.audio.dragClip')}</div>
       <label className="ks-dock-field">
-        <span>音频类型</span>
+        <span>{t('dock.audio.type')}</span>
         <div className="ks-dock-seg">
           <SegBtn cur={role} me="bgm" onSel={setRole} label="BGM" />
           <SegBtn cur={role} me="sfx" onSel={setRole} label="SFX" />
@@ -877,7 +887,7 @@ function AudioDock({ currentSceneId }: { currentSceneId: string }) {
         </div>
       </label>
       <label className="ks-dock-field">
-        <span>文件</span>
+        <span>{t('dock.audio.file')}</span>
         <input
           type="file"
           accept="audio/*"
@@ -893,11 +903,11 @@ function AudioDock({ currentSceneId }: { currentSceneId: string }) {
         </div>
       )}
       <label className="ks-dock-field">
-        <span>标签</span>
+        <span>{t('dock.audio.label')}</span>
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="如：紧张的鼓点"
+          placeholder={t('dock.audio.placeholder')}
         />
       </label>
       {payload ? (
@@ -906,7 +916,7 @@ function AudioDock({ currentSceneId }: { currentSceneId: string }) {
         <DragChip
           enabled={false}
           payload={null}
-          label={mediaId ? '解析时长中…' : '先选一个音频文件'}
+          label={mediaId ? t('dock.audio.probeDuration') : t('dock.audio.pickFile')}
         />
       )}
     </div>
@@ -944,6 +954,7 @@ function probeAudioDuration(file: File): Promise<number> {
 // 从 minigames/registry.ts 取可用小游戏，作者选一个 → DragChip 变可拖。
 // 拖落到 Timeline 时由 onTrackDrop 分派，调用 addMinigameClip 建一条 clip。
 function MinigameDock() {
+  const t = useT()
   const enabledIds = useScenarioStore((s) => s.scenario.enabledMinigameIds)
   // 小游戏模块关闭 → 不提供任何可拖小游戏(等同空池)。
   const minigameOn = useScenarioStore((s) => isModuleEnabled(s.scenario, 'minigame'))
@@ -974,7 +985,7 @@ function MinigameDock() {
   return (
     <div className="ks-dock-card">
       <label className="ks-dock-field">
-        <span>选择小游戏</span>
+        <span>{t('dock.minigame.pick')}</span>
         <select
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
@@ -994,17 +1005,19 @@ function MinigameDock() {
         </div>
       )}
       <label className="ks-dock-field">
-        <span>标签（可选）</span>
+        <span>{t('dock.minigame.labelOptional')}</span>
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="如：练习关"
+          placeholder={t('dock.minigame.placeholder')}
         />
       </label>
       <DragChip
         enabled={!!selected}
         payload={payload}
-        label={`小游戏 · ${selected ? selected.title : '无可用'}`}
+        label={tf('dock.minigame.chip', {
+          title: selected ? selected.title : t('dock.minigame.none'),
+        })}
       />
     </div>
   )
@@ -1034,6 +1047,7 @@ function MediaDock({
   scenario: Scenario
   currentSceneId: string
 }) {
+  const t = useT()
   const fileRef = useRef<HTMLInputElement>(null)
   const ingestAsync = useMediaStore((s) => s.ingestAsync)
   const entries = useMediaStore((s) => s.entries)
@@ -1094,7 +1108,7 @@ function MediaDock({
       const results = await Promise.allSettled(pending)
       const fails = results.filter((r) => r.status === 'rejected').length
       if (fails > 0) {
-        setLastError(`${fails} 个文件保存失败，刷新后会丢失，请重试`)
+        setLastError(tf('dock.media.failCount', { count: fails }))
       }
     } finally {
       setBusy(false)
@@ -1106,8 +1120,8 @@ function MediaDock({
     <div className="ks-dock-card">
       <div className="ks-dock-field">
         <span>
-          {kind === 'image' ? '上传图片' : '上传视频'}
-          {busy ? <span className="ks-dock-field-busy ks-mono"> · 保存中…</span> : null}
+          {kind === 'image' ? t('dock.media.uploadImage') : t('dock.media.uploadVideo')}
+          {busy ? <span className="ks-dock-field-busy ks-mono">{t('dock.media.saving')}</span> : null}
         </span>
         <input
           ref={fileRef}
@@ -1125,9 +1139,7 @@ function MediaDock({
       ) : null}
       {ids.length === 0 ? (
         <div className="ks-dock-empty ks-mono">
-          {kind === 'image'
-            ? '本场景暂无图像 · 上传或在资产面板里生成'
-            : '本场景暂无视频 · 上传或在资产面板里生成'}
+          {kind === 'image' ? t('dock.media.emptyImage') : t('dock.media.emptyVideo')}
         </div>
       ) : (
         <ul className="ks-dock-media-list">
@@ -1136,7 +1148,7 @@ function MediaDock({
             if (!entry) {
               return (
                 <li key={id} className="ks-dock-media-item is-missing">
-                  <div className="ks-dock-media-miss ks-mono">⚠ 资源丢失</div>
+                  <div className="ks-dock-media-miss ks-mono">{t('dock.media.missing')}</div>
                   <div className="ks-dock-media-label ks-mono" title={id}>
                     {id.slice(0, 10)}…
                   </div>
@@ -1188,13 +1200,16 @@ function MediaDock({
                     serializeDockPayload(freshPayload),
                   )
                 }}
-                title={`${entry.name} · 拖到左侧时间轴${kind === 'image' ? '新建分镜' : '新建视频镜头'}${
-                  persist === 'pending'
-                    ? '\n\n⚠ 正在保存到磁盘，刷新前请勿关页'
-                    : persist === 'failed'
-                      ? '\n\n⚠ 保存失败，刷新会丢。请重新上传'
-                      : ''
-                }`}
+                title={tf('dock.media.dragTitle', {
+                  name: entry.name,
+                  extra:
+                    (kind === 'image' ? t('dock.media.dragNewShot') : t('dock.media.dragNewVideo')) +
+                    (persist === 'pending'
+                      ? t('dock.media.pendingWarn')
+                      : persist === 'failed'
+                        ? t('dock.media.failedWarn')
+                        : ''),
+                })}
               >
                 {kind === 'image' ? (
                   <img
@@ -1234,9 +1249,9 @@ function MediaDock({
                 {persist === 'failed' && (
                   <span
                     className="ks-dock-media-badge is-failed ks-mono"
-                    aria-label="保存失败"
+                    aria-label={t('dock.media.notPersisted')}
                   >
-                    未落盘
+                    {t('dock.media.notPersisted')}
                   </span>
                 )}
                 <div className="ks-dock-media-label" title={entry.name}>
@@ -1266,6 +1281,7 @@ function UploadProgress({
   entry: MediaEntry
   onAbort?: (e: React.MouseEvent) => void
 }): JSX.Element {
+  const t = useT()
   const p = entry.progress
   const total = p?.total || entry.size || 0
   const loaded = p?.loaded ?? 0
@@ -1276,12 +1292,12 @@ function UploadProgress({
     total > 0 && speed > 0 ? Math.ceil((total - loaded) / speed) : 0
   const remainText =
     remainSec > 60
-      ? `约 ${Math.ceil(remainSec / 60)} 分`
+      ? tf('dock.upload.aboutMin', { n: Math.ceil(remainSec / 60) })
       : remainSec > 0
-        ? `约 ${remainSec} 秒`
+        ? tf('dock.upload.aboutSec', { n: remainSec })
         : ''
   return (
-    <div className="ks-dock-upload-overlay" aria-label="上传进度">
+    <div className="ks-dock-upload-overlay" aria-label={t('dock.upload.progress')}>
       <div className="ks-dock-upload-bar">
         <div
           className="ks-dock-upload-bar-fill"
@@ -1298,8 +1314,8 @@ function UploadProgress({
             type="button"
             className="ks-dock-upload-cancel"
             onClick={onAbort}
-            title="取消上传（已传部分会丢弃）"
-            aria-label="取消上传"
+            title={t('dock.upload.cancelTitle')}
+            aria-label={t('dock.upload.cancel')}
           >
             ×
           </button>
@@ -1319,6 +1335,7 @@ function SearchSegmentDock({
   scenario: Scenario
   currentSceneId: string
 }) {
+  const t = useT()
   const scene = scenario.scenes[currentSceneId]
   const selectedId = useClipSelection((s) => s.searchSegmentId)
   const selected = scene?.searchSegments?.find((sg) => sg.id === selectedId)
@@ -1328,27 +1345,27 @@ function SearchSegmentDock({
     <div className="ks-dock-card ks-search-dock">
       {!inventoryOn && (
         <div className="ks-dock-empty ks-mono">
-          搜索段依赖「背包系统」模块。请先在左侧「模块」里开启背包系统并定义可拾取物品。
+          {t('dock.search.needInventory')}
         </div>
       )}
       <div className="ks-dialogue-templates">
-        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加搜索段</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.search.addSection')}</div>
         <div className="ks-dialogue-template-row">
           <DragChip
             enabled
-            label="搜索段"
+            label={t('dock.search.segment')}
             payload={{ kind: 'searchSegment', defaultDurationMs: 4000 }}
           />
         </div>
         <div className="ks-text-hint ks-mono">
-          到达该段时视频在该区间静态循环，弹出放大镜，玩家搜寻拾取物品后继续播放。
+          {t('dock.search.intro')}
         </div>
       </div>
       <div className="ks-dialogue-detail-divider" />
       <div className="ks-dialogue-detail">
-        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
+        <div className="ks-dialogue-template-label ks-mono">{t('dock.dialogue.detailSection')}</div>
         {!selected || !scene ? (
-          <div className="ks-dialogue-empty ks-mono">在时间轴 SRCH 轨上点击一段来编辑</div>
+          <div className="ks-dialogue-empty ks-mono">{t('dock.search.clickToEdit')}</div>
         ) : (
           <SearchSegmentEditor key={selected.id} clip={selected} scene={scene} />
         )}
@@ -1364,6 +1381,7 @@ function SearchSegmentEditor({
   clip: SearchSegmentClip
   scene: Scene
 }) {
+  const t = useT()
   const sceneId = scene.id
   const update = useScenarioStore((s) => s.updateSearchSegment)
   const items = useScenarioStore((s) => s.scenario.items)
@@ -1397,29 +1415,29 @@ function SearchSegmentEditor({
   return (
     <div className="ks-text-edit">
       <label className="ks-dock-field">
-        <span>段落提示（给玩家）</span>
+        <span>{t('dock.search.playerHint')}</span>
         <input
           type="text"
           value={clip.label ?? ''}
           onChange={(e) => patch({ label: e.target.value || undefined })}
-          placeholder="如：仔细搜查这个房间"
+          placeholder={t('dock.search.playerPlaceholder')}
         />
       </label>
 
       <label className="ks-dock-field">
-        <span>完成条件</span>
+        <span>{t('dock.search.completion')}</span>
         <div className="ks-dock-seg">
           <SegBtn
             cur={clip.completeWhen ?? 'all'}
             me="all"
             onSel={(v) => patch({ completeWhen: v })}
-            label="全部拾完"
+            label={t('dock.search.allItems')}
           />
           <SegBtn
             cur={clip.completeWhen ?? 'all'}
             me="any"
             onSel={(v) => patch({ completeWhen: v })}
-            label="任意一个"
+            label={t('dock.search.anyItem')}
           />
         </div>
       </label>
@@ -1430,14 +1448,14 @@ function SearchSegmentEditor({
           checked={clip.allowSkip ?? false}
           onChange={(e) => patch({ allowSkip: e.target.checked })}
         />
-        <span>允许玩家跳过本段（不强制搜完）</span>
+        <span>{t('dock.search.allowSkip')}</span>
       </label>
 
       <div className="ks-dock-field">
-        <span>本段参与的搜寻热点</span>
+        <span>{t('dock.search.hotspots')}</span>
         {loot.length === 0 ? (
           <div className="ks-dock-empty ks-mono">
-            本场景还没放搜寻热点。去「背包系统」编辑器在画面上放置可拾取热点。
+            {t('dock.search.noHotspots')}
           </div>
         ) : (
           <ul className="ks-search-hslist">
@@ -1459,17 +1477,17 @@ function SearchSegmentEditor({
             })}
           </ul>
         )}
-        <div className="ks-text-hint ks-mono">不勾选 = 本段使用本场景全部热点。</div>
+        <div className="ks-text-hint ks-mono">{t('dock.search.allHotspotsHint')}</div>
       </div>
 
       <div className="ks-dock-field">
-        <span>静态循环视频提示词（自动生成）</span>
+        <span>{t('dock.search.loopPrompt')}</span>
         <textarea className="ks-search-prompt" rows={5} value={loopPrompt} readOnly />
         <button type="button" className="ks-search-copybtn" onClick={() => void copyPrompt()}>
-          {copied ? '已复制 ✓' : '复制提示词 · 去素材库生成可循环视频'}
+          {copied ? t('dock.search.copied') : t('dock.search.copyPrompt')}
         </button>
         <div className="ks-text-hint ks-mono">
-          首尾相同、机位静止、无干扰内容。生成后在「素材库」把它设为本段的循环画面。
+          {t('dock.search.loopHint')}
         </div>
       </div>
     </div>
@@ -1488,6 +1506,7 @@ function DragChip({
   payload: DockDropPayload | null
   label: string
 }) {
+  const t = useT()
   function onDragStart(e: React.DragEvent): void {
     if (!enabled || !payload) {
       e.preventDefault()
@@ -1501,7 +1520,7 @@ function DragChip({
       className={`ks-dock-chip ${enabled ? '' : 'is-disabled'}`}
       draggable={enabled}
       onDragStart={onDragStart}
-      title={enabled ? '按住拖到左侧时间轴' : ''}
+      title={enabled ? t('dock.drag.enabled') : ''}
     >
       <span className="ks-dock-chip-grip" aria-hidden>⋮⋮</span>
       <span className="ks-dock-chip-label">{label}</span>

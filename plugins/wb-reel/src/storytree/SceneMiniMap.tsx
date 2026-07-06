@@ -32,7 +32,7 @@ import { makeBlankScene } from '../editor/storygraph/sceneFactory'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { detectOrphans, defaultPlan } from '../scenario/reconnectOrphans'
 import { EpisodeRail } from './EpisodeRail'
-import { useT } from '../i18n'
+import { tf, useT } from '../i18n'
 import type { BranchKind, Episode, Scene } from '../scenario/types'
 
 const EMPTY_EPISODES: Episode[] = []
@@ -48,12 +48,14 @@ function kindLegend(t: (key: string) => string): { kind: BranchKind; label: stri
 }
 
 /** 新建后继节点时可选的连线类型（含一句说明）。 */
-const BRANCH_KIND_OPTIONS: { kind: BranchKind; label: string; hint: string }[] = [
-  { kind: 'auto', label: '自动续播', hint: '看完自动进入下一节点' },
-  { kind: 'choice', label: '玩家选择', hint: '作为一个选项按钮，建议填按钮文字' },
-  { kind: 'qte_pass', label: 'QTE 通过', hint: 'QTE / 小游戏通过后走这条' },
-  { kind: 'qte_fail', label: 'QTE 失败', hint: 'QTE / 小游戏失败后走这条' },
-]
+function branchKindOptions(t: (key: string) => string): { kind: BranchKind; label: string; hint: string }[] {
+  return [
+    { kind: 'auto', label: t('tree.branch.auto.label'), hint: t('tree.branch.auto.hint') },
+    { kind: 'choice', label: t('tree.branch.choice.label'), hint: t('tree.branch.choice.hint') },
+    { kind: 'qte_pass', label: t('tree.branch.qtePass.label'), hint: t('tree.branch.qtePass.hint') },
+    { kind: 'qte_fail', label: t('tree.branch.qteFail.label'), hint: t('tree.branch.qteFail.hint') },
+  ]
+}
 
 /** mini 节点尺寸 —— 比大图(224×196)小一大圈, 适配窄侧栏. */
 const MINI_W = 150
@@ -431,7 +433,7 @@ function SceneMiniMapInner() {
 
   const onDuplicateScene = useCallback(() => {
     if (!targetScene) return
-    const copy = makeBlankScene({ title: `${targetScene.title} 副本` })
+    const copy = makeBlankScene({ title: tf('tree.duplicateCopy', { title: targetScene.title }) })
     copy.media = { ...targetScene.media }
     copy.durationMs = targetScene.durationMs
     copy.dialogue = targetScene.dialogue.map((d) => ({ ...d }))
@@ -450,15 +452,13 @@ function SceneMiniMapInner() {
   const onDeleteScene = useCallback(() => {
     if (!targetSceneId || !targetScene) return
     if (targetSceneId === scenario.rootSceneId) {
-      window.alert('起始节点不能删除。请先把别的节点设为起点，或改接剧情线。')
+      window.alert(t('tree.rootDeleteAlert'))
       return
     }
-    const ok = window.confirm(
-      `删除节点「${targetScene.title}」？\n指向它的连线会自动穿连到它的第一个后继（无后继则断开）。`,
-    )
+    const ok = window.confirm(tf('tree.deleteConfirm', { title: targetScene.title }))
     if (!ok) return
     removeScene(targetSceneId)
-  }, [targetSceneId, targetScene, scenario.rootSceneId, removeScene])
+  }, [targetSceneId, targetScene, scenario.rootSceneId, removeScene, t])
 
   const onToggleEnding = useCallback(() => {
     if (!targetSceneId || !targetScene) return
@@ -475,10 +475,10 @@ function SceneMiniMapInner() {
     const linkCount = plan.entries.filter((e) => e.targetSceneId).length
     const endingCount = plan.entries.length - linkCount
     const parts: string[] = []
-    if (linkCount > 0) parts.push(`为 ${linkCount} 个补「自然下一节点」连线`)
-    if (endingCount > 0) parts.push(`把 ${endingCount} 个末端节点标记为「结局」`)
+    if (linkCount > 0) parts.push(tf('tree.fixConfirmLink', { count: linkCount }))
+    if (endingCount > 0) parts.push(tf('tree.fixConfirmEnding', { count: endingCount }))
     const ok = window.confirm(
-      `检测到 ${orphans.length} 个无下游的节点。\n将${parts.join('，')}。\n（已接好的节点不受影响，可继续手动调整）`,
+      tf('tree.fixConfirm', { total: orphans.length, parts: parts.join(', ') }),
     )
     if (!ok) return
     // 推荐不到目标的 → markEnding 写 isEnding=true; 能接的照常补 auto 边
@@ -486,15 +486,15 @@ function SceneMiniMapInner() {
       e.targetSceneId ? e : { ...e, markEnding: true },
     )
     reconnectOrphans({ entries })
-  }, [orphans, reconnectOrphans])
+  }, [orphans, reconnectOrphans, t])
 
   const isRootTarget = targetSceneId === scenario.rootSceneId
 
   return (
-    <div className="ks-mini" aria-label="剧情树连线图">
+    <div className="ks-mini" aria-label={t('tree.ariaLabel')}>
       <EpisodeRail />
 
-      <div className="ks-mini-legend" aria-label="分支类型图例">
+      <div className="ks-mini-legend" aria-label={t('tree.legend.aria')}>
         {kindLegend(t).map(({ kind, label }) => {
           const s = BRANCH_EDGE_STYLES[kind]
           return (
@@ -517,9 +517,9 @@ function SceneMiniMapInner() {
             <span className="ks-mini-empty-glyph" aria-hidden>
               ✦
             </span>
-            <span className="ks-mini-empty-text">这一集还没有节点</span>
+            <span className="ks-mini-empty-text">{t('tree.emptyEpisode')}</span>
             <button type="button" className="ks-mini-empty-add" onClick={onAddScene}>
-              ＋ 新建第一个节点
+              {t('tree.emptyAdd')}
             </button>
           </div>
         ) : (
@@ -555,11 +555,11 @@ function SceneMiniMapInner() {
             type="button"
             className="ks-mini-fixfab"
             onClick={onFixOrphans}
-            title={`${orphans.length} 个节点未连下游 —— 自动接上后续节点；末端标记为结局`}
+            title={tf('tree.fixOrphansTitle', { count: orphans.length })}
           >
             <span className="ks-mini-fixfab-dot" aria-hidden />
             <span className="ks-mini-fixfab-count">{orphans.length}</span>
-            <span className="ks-mini-fixfab-text">未连下游 · 一键修复</span>
+            <span className="ks-mini-fixfab-text">{t('tree.fixOrphans')}</span>
           </button>
         )}
       </div>
@@ -601,10 +601,10 @@ function SceneMiniMapInner() {
             disabled={!targetScene || isRootTarget}
             title={
               !targetScene
-                ? '先选中一个节点'
+                ? t('tree.selectFirst')
                 : isRootTarget
-                  ? '起始节点不能删除'
-                  : `删除「${targetScene.title}」`
+                  ? t('tree.rootNoDelete')
+                  : tf('tree.deleteConfirmTitle', { title: targetScene.title })
             }
           >
             <span aria-hidden>🗑</span> {t('tree.delete')}
@@ -623,14 +623,16 @@ function SceneMiniMapInner() {
             className="ks-mini-bdlg"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="选择连线类型"
+            aria-label={t('tree.branchDialog.aria')}
           >
             <div className="ks-mini-bdlg-title">
-              在「{targetScene?.title ?? '当前节点'}」之后新建
+              {tf('tree.branchDialog.title', {
+                title: targetScene?.title ?? t('tree.branchDialog.current'),
+              })}
             </div>
-            <div className="ks-mini-bdlg-sub">这条连线是什么类型？</div>
+            <div className="ks-mini-bdlg-sub">{t('tree.branchDialog.sub')}</div>
             <div className="ks-mini-bdlg-kinds">
-              {BRANCH_KIND_OPTIONS.map((o) => {
+              {branchKindOptions(t).map((o) => {
                 const s = BRANCH_EDGE_STYLES[o.kind]
                 const on = newBranchKind === o.kind
                 return (
@@ -663,8 +665,8 @@ function SceneMiniMapInner() {
               }}
               placeholder={
                 newBranchKind === 'choice'
-                  ? '按钮文字，如：追上去'
-                  : '连线标签（可选）'
+                  ? t('tree.branchDialog.choicePh')
+                  : t('tree.branchDialog.labelPh')
               }
             />
             <div className="ks-mini-bdlg-actions">
@@ -673,14 +675,14 @@ function SceneMiniMapInner() {
                 className="ks-mini-bdlg-cancel"
                 onClick={() => setBranchDialogOpen(false)}
               >
-                取消
+                {t('tree.cancel')}
               </button>
               <button
                 type="button"
                 className="ks-mini-bdlg-ok"
                 onClick={onConfirmBranchDialog}
               >
-                创建
+                {t('tree.create')}
               </button>
             </div>
           </div>
@@ -708,6 +710,7 @@ interface MiniNodeData extends Record<string, unknown> {
 }
 
 function MiniSceneNode({ data }: NodeProps<Node<MiniNodeData, 'mini'>>) {
+  const t = useT()
   const d = data
   const cls = [
     'ks-mini-node',
@@ -729,13 +732,19 @@ function MiniSceneNode({ data }: NodeProps<Node<MiniNodeData, 'mini'>>) {
         {d.thumbUrl ? (
           <img src={d.thumbUrl} alt="" loading="lazy" draggable={false} />
         ) : (
-          <span className="ks-mini-thumb-empty">{d.isVideoNoPoster ? '视频' : '无图'}</span>
+          <span className="ks-mini-thumb-empty">
+            {d.isVideoNoPoster ? t('tree.thumb.video') : t('tree.thumb.noImage')}
+          </span>
         )}
-        {d.status === 'pending' && <span className="ks-mini-dot is-pending" title="生成中" />}
-        {d.status === 'error' && <span className="ks-mini-dot is-error" title="生成失败" />}
-        {d.isRoot && <span className="ks-mini-rootbadge">起</span>}
+        {d.status === 'pending' && (
+          <span className="ks-mini-dot is-pending" title={t('tree.status.generating')} />
+        )}
+        {d.status === 'error' && (
+          <span className="ks-mini-dot is-error" title={t('tree.status.failed')} />
+        )}
+        {d.isRoot && <span className="ks-mini-rootbadge">{t('tree.badge.root')}</span>}
         {d.hasQte && (
-          <span className="ks-mini-qtebadge" title="含 QTE / 小游戏判定">
+          <span className="ks-mini-qtebadge" title={t('tree.badge.qte')}>
             QTE
           </span>
         )}
@@ -746,28 +755,30 @@ function MiniSceneNode({ data }: NodeProps<Node<MiniNodeData, 'mini'>>) {
         </div>
         <div className="ks-mini-sub">
           {d.choiceCount > 0 && (
-            <span className="ks-mini-bk" style={{ color: cChoice.stroke }} title={`${d.choiceCount} 个选择分支`}>
+            <span className="ks-mini-bk" style={{ color: cChoice.stroke }} title={tf('tree.badge.choices', { count: d.choiceCount })}>
               {cChoice.glyph}{d.choiceCount}
             </span>
           )}
           {d.qtePassCount > 0 && (
-            <span className="ks-mini-bk" style={{ color: cPass.stroke }} title={`${d.qtePassCount} 条 QTE 通过`}>
+            <span className="ks-mini-bk" style={{ color: cPass.stroke }} title={tf('tree.badge.qtePass', { count: d.qtePassCount })}>
               {cPass.glyph}{d.qtePassCount}
             </span>
           )}
           {d.qteFailCount > 0 && (
-            <span className="ks-mini-bk" style={{ color: cFail.stroke }} title={`${d.qteFailCount} 条 QTE 失败`}>
+            <span className="ks-mini-bk" style={{ color: cFail.stroke }} title={tf('tree.badge.qteFail', { count: d.qteFailCount })}>
               {cFail.glyph}{d.qteFailCount}
             </span>
           )}
           {d.autoCount > 0 && d.choiceCount === 0 && d.qtePassCount === 0 && d.qteFailCount === 0 && (
-            <span className="ks-mini-bk" style={{ color: cAuto.stroke }} title="自然下一节点">
+            <span className="ks-mini-bk" style={{ color: cAuto.stroke }} title={t('tree.badge.autoNext')}>
               {cAuto.glyph}
             </span>
           )}
-          {d.isEnding ? <span className="ks-mini-end">结局</span> : null}
+          {d.isEnding ? <span className="ks-mini-end">{t('tree.ending')}</span> : null}
           {d.isOrphan && !d.isEnding ? (
-            <span className="ks-mini-orphan" title="无下游连线（断头）">⚠ 未连线</span>
+            <span className="ks-mini-orphan" title={t('tree.badge.orphanTitle')}>
+              {t('tree.badge.orphan')}
+            </span>
           ) : null}
         </div>
       </div>
