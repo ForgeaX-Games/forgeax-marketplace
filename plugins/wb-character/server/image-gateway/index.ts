@@ -63,8 +63,8 @@ export function vendorForModel(model: string | undefined | null): string | undef
 }
 
 const DEFAULT_CHAINS: Record<NonNullable<ImageGenRequest['role']>, string[]> = {
-  'concept-art': ['seedream', 'nano-banana', 'azure-gpt-image', 'litellm-images'],
-  'sprite-frame': ['nano-banana', 'azure-gpt-image', 'seedream', 'litellm-images'],
+  'concept-art': ['litellm-images', 'azure-gpt-image', 'nano-banana', 'seedream'],
+  'sprite-frame': ['litellm-images', 'azure-gpt-image', 'nano-banana', 'seedream'],
 };
 
 function defaultChainFor(role: NonNullable<ImageGenRequest['role']>): string[] {

@@ -22,6 +22,14 @@ import {
 } from '../../image-gateway';
 import { createLitellmImagesVendor } from '../../image-gateway/vendors/litellm-images';
 
+function pickLitellmFromEnv(env: Record<string, string | undefined>) {
+  return {
+    baseUrl: env.LITELLM_PROXY_BASE_URL,
+    apiKey: env.LITELLM_PROXY_KEY ?? env.ANTHROPIC_API_KEY,
+    defaultModel: env.LITELLM_PROXY_IMAGE_MODEL ?? env.LITELLM_IMAGE_MODEL,
+  };
+}
+
 export type ChannelRole = 'concept-art' | 'sprite-frame';
 
 export interface DispatchResult extends ImageGenResult {
@@ -52,11 +60,7 @@ export class ImageDispatcher {
       adapt(new SeedreamClient(env), 'seedream'),
       adapt(new GeminiImageClient(env), 'nano-banana'),
       adapt(new AzureGptImageClient(env), 'azure-gpt-image'),
-      createLitellmImagesVendor({
-        baseUrl: env.LITELLM_PROXY_BASE_URL,
-        apiKey: env.LITELLM_PROXY_KEY,
-        defaultModel: env.LITELLM_PROXY_IMAGE_MODEL,
-      }),
+      createLitellmImagesVendor(pickLitellmFromEnv(env)),
     ];
     for (const v of vendors) registerImageVendor(v);
     this.vendorNames = vendors.map((v) => v.name);

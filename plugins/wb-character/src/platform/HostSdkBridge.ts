@@ -165,6 +165,16 @@ function makeHost(): ForgeaxHost {
         return;
       }
 
+      // theme.changed — host locale/theme push (fire-and-forget).
+      if (kind === 'theme.changed') {
+        const loc = env.locale;
+        if (loc === 'en' || loc === 'zh') {
+          // Lazy import avoids circular init if i18n ever imports host bridge.
+          void import('../i18n').then(({ setLocale }) => setLocale(loc));
+        }
+        return;
+      }
+
       // surface.dispatch — invoke local handlers, ack with surface.ack.
       if (kind === 'surface.dispatch') {
         const surfaceId = String(env.surfaceId ?? '');
