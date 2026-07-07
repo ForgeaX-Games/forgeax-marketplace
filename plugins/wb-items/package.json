@@ -1,0 +1,29 @@
+{
+  "name": "@forgeax-plugin/wb-items",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ForgeaX workbench plugin: items.json + 48px icon pipeline with multi-style generation hooks.",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --port 15177",
+    "test": "bun test server",
+    "verify-pipeline": "bun server/verify-pipeline.ts"
+  },
+  "dependencies": {
+    "lucide-react": "^0.460.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "batchId": { "type": "string" },
+    "targetSize": { "type": "number" },
+    "note": { "type": "string" }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "style": { "type": "string" },
+    "slugs": { "type": "array", "items": { "type": "string" } }
+  }
+}
