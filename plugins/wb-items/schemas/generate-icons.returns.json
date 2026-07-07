@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "batchId": { "type": "string" },
+    "generated": { "type": "array" },
+    "failed": { "type": "array" },
+    "imageBackend": { "enum": ["litellm", "plan-only"] }
+  }
+}

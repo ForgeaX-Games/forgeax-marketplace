@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "itemSlug": { "type": "string", "minLength": 1 },
+    "style": { "type": "string" },
+    "targetSize": { "type": "number" },
+    "customPrompt": { "type": "string" },
+    "useStoredReferences": { "type": "boolean" },
+    "referenceImagesB64": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["itemSlug"]
+}

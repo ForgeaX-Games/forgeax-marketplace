@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "batchId": { "type": "string" },
+    "items": { "type": "array" },
+    "referenceImagesB64": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["batchId", "items"]
+}
