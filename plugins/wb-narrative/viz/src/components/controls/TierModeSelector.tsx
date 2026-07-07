@@ -30,7 +30,7 @@ import {
   type PipelineTemplateId,
 } from "../../pipeline-templates";
 import type { StepState } from "../../store/narrativeStore";
-import { useT, tStepLabel } from "../../i18n";
+import { useT, tStepLabel, t as tGlobal } from "../../i18n";
 
 type InputTab = "text" | "tags" | "file";
 type RouteGroup = "narrative" | "planning";
@@ -221,24 +221,6 @@ const NARRATIVE_ROUTES: { id: ModeId; hasComplexity: boolean; steps: string[] | 
   { id: "narrative_card",   hasComplexity: false, steps: NARRATIVE_CARD_STEPS },
 ];
 
-const NARRATIVE_HINTS: Record<string, string> = {
-  narrative_auto:   "按品类需求矩阵 + 模板动态组合（RPG 走 L0-L5；VN/卡牌/涌现/Tier4 走对应模板替代步骤）",
-  initial_outline:  "初步大纲：核心设定 + 剧情简介（preference_summary + preference_analysis + initial_plan）",
-  worldview:        "世界观结构（前置：大纲）",
-  character:        "角色档案（前置：世界观）",
-  item_lore:        "道具清单（含基本道具说明；Lore 由叙事 agent 内嵌产出，不再独立步骤）",
-  script:           "叙事 — RPG: L0-L4 完整（框架+大纲+细纲+情节+剧本，Lore 内嵌）；非 RPG: 通用叙事 agent（规划+执行+质检）",
-  quest:            "任务 — RPG: L5 任务图；非 RPG: 通用任务 agent（碎片化/涌现/支线）",
-  scene:            "场景 — RPG: 场景节点；开放世界: 区域设计；互动影游: 电影分镜；其他: 通用场景 agent",
-  vn_script:        "影游剧本 — 梗概→三幕→世界观→场→情节点→剧情树改造→剧本创作（止于 G-02，不含分镜）",
-  vn_storyboard_mode: "影游分镜 — 在影游剧本基础上追加电影级分镜设计（含 G-03）",
-  fragmented:       "碎片化叙事 — 世界观+角色+道具+场景+碎片(Lore)，代表 类魂 / 步行模拟 / 恐怖探索（T1-T3）",
-  emergent:         "涌现叙事 — 世界观+角色+道具+场景+涌现事件，代表 4X / 模拟经营 / 沙盒殖民（T2-T3）",
-  card_narrative:   "卡牌叙事 — 世界观+卡牌设定+事件池，代表 集换式卡牌 / 桌游 / 部分 Roguelike 卡构（T2-T3）",
-  open_world_narrative: "开放世界叙事 — 世界观+角色+道具+区域设计+涌现事件+[任务∥场景]，代表 开放世界 RPG / 沙盒探索（T1-T2）",
-  narrative_card:   "叙事卡 — 极简一步生成背景设定，代表 超休闲 / 三消 / IO / 弹球（T4）",
-};
-
 /**
  * Phase 3.5 — 复杂度档位全品类解锁。
  *
@@ -286,10 +268,7 @@ const ROUTE_NEEDS_MAP: Record<string, ReadonlyArray<NeedsKey> | null> = {
   narrative_card:  null,
 };
 
-const NEED_LABEL: Record<NeedsKey, string> = {
-  W: "世界观", C: "角色", S: "剧情结构", D: "对话", Q: "支线任务",
-  E: "环境叙事", I: "物品叙事", U: "UI文案", L: "Lore",
-};
+const NEED_KEYS: NeedsKey[] = ["W", "C", "S", "D", "Q", "E", "I", "U", "L"];
 
 function scoreToTag(score: number | null): { tag: string; cls: string } {
   if (score === null) return { tag: "", cls: "" };
@@ -297,6 +276,24 @@ function scoreToTag(score: number | null): { tag: string; cls: string } {
   if (score === 2) return { tag: "★★", cls: "tms-route-needs-2" };
   if (score === 1) return { tag: "★", cls: "tms-route-needs-1" };
   return { tag: "—", cls: "tms-route-needs-0" };
+}
+
+/** 构造完整的 9 维 needs tooltip。 */
+function formatNeedsTooltip(needs: Record<string, number> | null, routeId: string): string {
+  const routeHint = tGlobal(`route.${routeId}.hint`);
+  if (!needs) return routeHint === `route.${routeId}.hint` ? "" : routeHint;
+  const keys = ROUTE_NEEDS_MAP[routeId];
+  const lines: string[] = [];
+  if (keys && keys.length > 0) {
+    const detail = keys.map((k) => `${tGlobal(`need.${k}`)}=${needs[k] ?? 0}`).join(", ");
+    lines.push(tGlobal("needs.tooltip.routeDimensions", { detail }));
+  }
+  const all = NEED_KEYS
+    .map((k) => `${tGlobal(`need.${k}`)}${needs[k] ?? 0}`)
+    .join(" | ");
+  lines.push(tGlobal("needs.tooltip.full", { all }));
+  if (routeHint && routeHint !== `route.${routeId}.hint`) lines.push(routeHint);
+  return lines.join("\n");
 }
 
 /** 计算单个 button 的"代表 needs 分数"（needsKeys 中取最大值）。 */
@@ -309,23 +306,6 @@ function computeRouteScore(routeId: string, needs: Record<string, number> | null
     if (v > max) max = v;
   }
   return max;
-}
-
-/** 构造完整的 9 维 needs tooltip。 */
-function formatNeedsTooltip(needs: Record<string, number> | null, routeId: string): string {
-  if (!needs) return NARRATIVE_HINTS[routeId] ?? "";
-  const keys = ROUTE_NEEDS_MAP[routeId];
-  const lines: string[] = [];
-  if (keys && keys.length > 0) {
-    const detail = keys.map((k) => `${NEED_LABEL[k]}=${needs[k] ?? 0}`).join(", ");
-    lines.push(`本项需求维度: ${detail}`);
-  }
-  const all = (Object.keys(NEED_LABEL) as NeedsKey[])
-    .map((k) => `${NEED_LABEL[k]}${needs[k] ?? 0}`)
-    .join(" | ");
-  lines.push(`完整 needs: ${all}`);
-  if (NARRATIVE_HINTS[routeId]) lines.push(NARRATIVE_HINTS[routeId]);
-  return lines.join("\n");
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -2200,7 +2180,7 @@ export function TierModeSelector() {
                 })}
                 hint={
                   <>
-                    {NARRATIVE_HINTS[selectedNarrativeRoute] ?? ""}
+                    {t(`route.${selectedNarrativeRoute}.hint`)}
                     {activeNeeds && (
                       <span style={{ display: "block", marginTop: 4, opacity: 0.85 }}>
                         {t("tms.needsHint")}

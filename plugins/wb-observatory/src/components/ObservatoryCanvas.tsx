@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, { Background, MiniMap, Controls, applyNodeChanges, type Node, type Edge, type NodeChange } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useObservatoryStore, type ContextBlock } from '../store/observatoryStore';
-import { useObservatoryData } from '../hooks/useObservatoryData';
-import { useSessionNodes } from '../hooks/useSessionNodes';
 import { useGraphLayout } from '../hooks/useGraphLayout';
 import { useEventStream } from '../hooks/useEventStream';
 import { useTelemetryStream } from '../hooks/useTelemetryStream';
@@ -64,26 +62,32 @@ export function ObservatoryCanvas() {
   } = useObservatoryStore();
 
   const isLive = sessionMode === 'live';
-  // sessionPath is the canonical sid; null falls through to 'current' (server
-  // resolves to the most-recently-touched session). Switching the dropdown
-  // mutates sessionPath, so the dependency below tears down + reconnects the
-  // EventSource to the new session — that's the whole "switch session →
-  // switch Observatory" requirement.
-  useEventStream(isLive ? (sessionPath ?? 'current') : null, isLive);
+  // Live AND replay both reconstruct the trajectory from the SAME source: the
+  // /events SSE, which replays the full ledger on connect (then tails). This is
+  // the SSOT — the old replay path fetched /inspect (system-prompt slices, never
+  // a `turns` array) and built nodes from `data.turns`, which was always empty,
+  // so the replay canvas rendered nothing. Reusing the event stream guarantees
+  // replay and live produce identical node shapes.
+  //
+  // Live follows the most-recently-touched session ('current'); replay pins the
+  // chosen sid. Switching the dropdown mutates sessionPath, tearing down +
+  // reconnecting the EventSource to the new session — that's the whole "switch
+  // session → switch Observatory" requirement.
+  const streamSid = isLive ? (sessionPath ?? 'current') : sessionPath;
+  useEventStream(streamSid, !!streamSid);
 
-  const { data, loading, error } = useObservatoryData(isLive ? null : sessionPath);
-  const staticGraph = useSessionNodes(data);
-  const layoutedStatic = useGraphLayout(staticGraph.nodes, staticGraph.edges, 'timeline');
   const layoutedLive = useGraphLayout(liveNodes, liveEdges, 'timeline');
 
-  const showPlaceholder = !isLive && !sessionPath;
+  // Placeholder only when replay has no session picked (live always resolves to
+  // 'current', so streamSid is non-null there).
+  const showPlaceholder = !streamSid;
   const sourceNodes = useMemo(() =>
-    showPlaceholder ? PLACEHOLDER_NODES : (isLive ? layoutedLive.nodes : layoutedStatic.nodes),
-    [showPlaceholder, isLive, layoutedLive.nodes, layoutedStatic.nodes],
+    showPlaceholder ? PLACEHOLDER_NODES : layoutedLive.nodes,
+    [showPlaceholder, layoutedLive.nodes],
   );
   const sourceEdges = useMemo(() =>
-    showPlaceholder ? EMPTY_EDGES : (isLive ? layoutedLive.edges : layoutedStatic.edges),
-    [showPlaceholder, isLive, layoutedLive.edges, layoutedStatic.edges],
+    showPlaceholder ? EMPTY_EDGES : layoutedLive.edges,
+    [showPlaceholder, layoutedLive.edges],
   );
 
   const [displayNodes, setDisplayNodes] = useState<Node[]>(sourceNodes);
@@ -97,7 +101,7 @@ export function ObservatoryCanvas() {
   // Telemetry overlay (todo 038) — subscribe the same session and join spans/logs
   // onto the existing nodes. Pure additive: when telemetry is empty/off the join
   // simply marks traceable nodes 'no-trace' and the trajectory is untouched.
-  const telemetrySid = sessionPath ?? (isLive ? 'current' : null);
+  const telemetrySid = streamSid;
   useTelemetryStream(showPlaceholder ? null : telemetrySid, !showPlaceholder);
   const nodeTraces = useMemo(
     () => joinTelemetryToNodes(sourceNodes, spansById, logsBySpanId),
@@ -178,21 +182,11 @@ export function ObservatoryCanvas() {
 
   return (
     <>
-      {isLive && (
+      {!showPlaceholder && (
         <div style={{ position: 'absolute', top: 48, left: 12, zIndex: 20, fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(16,16,16,0.9)', padding: '4px 10px', borderRadius: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#D4FF48', display: 'inline-block', animation: 'ob-blink 1.5s ease-in-out infinite' }} />
-          <span style={{ color: '#D4FF48' }}>Live</span>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: isLive ? '#D4FF48' : '#4B9EFF', display: 'inline-block', ...(isLive ? { animation: 'ob-blink 1.5s ease-in-out infinite' } : {}) }} />
+          <span style={{ color: isLive ? '#D4FF48' : '#4B9EFF' }}>{isLive ? 'Live' : 'Replay'}</span>
           <span style={{ color: 'var(--ob-node-text-dim)' }}>· {displayNodes.length} nodes</span>
-        </div>
-      )}
-      {!isLive && loading && (
-        <div style={{ position: 'absolute', top: 48, left: 12, zIndex: 20, fontSize: 11, color: 'var(--ob-system)', background: 'rgba(16,16,16,0.9)', padding: '4px 10px', borderRadius: 6 }}>
-          Loading session...
-        </div>
-      )}
-      {!isLive && error && (
-        <div style={{ position: 'absolute', top: 48, left: 12, zIndex: 20, fontSize: 11, color: 'var(--ob-error)', background: 'rgba(16,16,16,0.9)', padding: '4px 10px', borderRadius: 6 }}>
-          Error: {error}
         </div>
       )}
       <ReactFlow

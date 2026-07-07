@@ -100,8 +100,13 @@ interface ObservatoryState {
   toggleSidebarExpand: (id: string) => void;
 }
 
+/** ?session= at load time, read once. A supplied sid means the shell launched
+ *  us to replay that session, so BOTH sessionPath and sessionMode init from it —
+ *  otherwise the first frame shows a 'live' badge over a pinned replay. */
+const initialSid = (() => { try { return new URLSearchParams(window.location.search).get('session'); } catch { return null; } })();
+
 export const useObservatoryStore = create<ObservatoryState>((set) => ({
-  sessionMode: 'live' as SessionMode,
+  sessionMode: (initialSid ? 'static' : 'live') as SessionMode,
   setSessionMode: (sessionMode) => set({ sessionMode }),
 
   selectedTurnIndex: 0,
@@ -116,7 +121,7 @@ export const useObservatoryStore = create<ObservatoryState>((set) => ({
   // raced the trajectory state (todo 043). The workbench path still arrives via
   // postMessage→setSessionPath; that transition is handled by per-connection
   // isolation in useEventStream.
-  sessionPath: (() => { try { return new URLSearchParams(window.location.search).get('session'); } catch { return null; } })(),
+  sessionPath: initialSid,
   setSessionPath: (sessionPath) => set({ sessionPath }),
 
   liveNodes: [],
