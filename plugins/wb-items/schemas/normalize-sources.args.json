@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "sourceDir": { "type": "string", "description": "Directory of source PNG files; defaults to game root" },
+    "targetSize": { "type": "number", "default": 48 },
+    "batchId": { "type": "string" }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string", "description": "Active game slug (auto-injected in Studio UI)" }
+  }
+}

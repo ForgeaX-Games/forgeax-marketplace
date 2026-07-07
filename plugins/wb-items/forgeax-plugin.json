@@ -8,25 +8,174 @@
     "en": "Items & Icons"
   },
   "description": {
-    "zh": "道具 / 图标工作台(规划中)· 目标:编辑游戏的 items.json + 像素 icon,接 2D 像素生图管线。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
-    "en": "Items & icons workbench (planned) — will edit a game's items.json + pixel icons and host 2D pixel-asset pipelines. Currently a marketplace placeholder; the panel implementation lands in a later sprint."
+    "zh": "道具 / 图标工作台 · 管理 items.json 与 48×48 图标素材，批量规范化源图，并按视觉风格生成变体计划（接 Gemini / 像素管线）。",
+    "en": "Items & icons workbench — manage items.json and 48×48 icon assets, batch-normalize source art, and plan multi-style icon generation (Gemini / pixel pipeline hooks)."
   },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
+  "icon": "Backpack",
+  "keywords": [
+    "items",
+    "icons",
+    "inventory",
+    "pixel",
+    "lucide",
+    "items.json"
+  ],
   "provides": {
     "workbench": {
       "id": "items",
-      "hidden": true,
       "lens": "by-category",
-      "icon": "🎒",
+      "icon": "Backpack",
       "position": 150,
-      "panelSize": "md",
+      "panelSize": "lg",
+      "surface": "split",
+      "panes": {
+        "left": {
+          "width": 320,
+          "scrollable": true
+        },
+        "center": {
+          "minHeight": 520,
+          "scrollable": true
+        }
+      },
+      "bus": {
+        "surfaceId": "items"
+      },
       "matchProduces": [
         "**/items.json",
         "**/assets/icons/**"
       ]
-    }
+    },
+    "skills": [
+      {
+        "id": "wb-items:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/items-workshop"
+      }
+    ],
+    "tools": [
+      {
+        "id": "items:list",
+        "args": "./schemas/list-items.args.json",
+        "returns": "./schemas/list-items.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出当前游戏的 items.json 与 assets/icons 图标清单。",
+          "en": "List the active game's items.json entries and assets/icons inventory."
+        }
+      },
+      {
+        "id": "items:save-document",
+        "args": "./schemas/save-document.args.json",
+        "returns": "./schemas/save-document.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "保存 items.json 文档。",
+          "en": "Persist the items.json document for the active game."
+        }
+      },
+      {
+        "id": "items:upsert-item",
+        "args": "./schemas/upsert-item.args.json",
+        "returns": "./schemas/upsert-item.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "新增或更新单个道具条目。",
+          "en": "Insert or update a single item record."
+        }
+      },
+      {
+        "id": "items:delete-item",
+        "args": "./schemas/delete-item.args.json",
+        "returns": "./schemas/delete-item.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "删除单个道具条目，并可选删除对应图标文件。",
+          "en": "Delete a single item record and optionally remove its icon file."
+        }
+      },
+      {
+        "id": "items:normalize-sources",
+        "args": "./schemas/normalize-sources.args.json",
+        "returns": "./schemas/normalize-sources.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "将源目录中的 PNG 批量规范为统一尺寸（默认 48×48），写入 assets/icons 并同步 items.json。",
+          "en": "Batch-normalize PNG sources to a unified size (default 48×48), write assets/icons and sync items.json."
+        }
+      },
+      {
+        "id": "items:generate-style-plan",
+        "args": "./schemas/generate-style-plan.args.json",
+        "returns": "./schemas/generate-style-plan.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为选定道具生成多风格生图计划（prompt + 输出路径），供 MCP 生图管线执行。",
+          "en": "Build a multi-style image-generation plan (prompts + output paths) for selected items."
+        }
+      },
+      {
+        "id": "items:summarize-requirements",
+        "args": "./schemas/summarize-requirements.args.json",
+        "returns": "./schemas/summarize-requirements.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "将玩家自然语言需求解析为道具列表与生图 prompt。",
+          "en": "Parse natural-language item requirements into icon prompts."
+        }
+      },
+      {
+        "id": "items:generate-icons",
+        "args": "./schemas/generate-icons.args.json",
+        "returns": "./schemas/generate-icons.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "按提示词批量生图，写入 workspace batch 目录。",
+          "en": "Batch-generate raw icon images from prompts into the workspace batch folder."
+        }
+      },
+      {
+        "id": "items:run-pipeline",
+        "args": "./schemas/run-pipeline.args.json",
+        "returns": "./schemas/run-pipeline.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "一键执行：需求解析 → 生图计划 → 生图 → 规范化 → 落盘 assets/icons。",
+          "en": "Run full pipeline: requirements → prompts → generate → normalize → assets/icons."
+        }
+      },
+      {
+        "id": "items:list-styles",
+        "returns": "./schemas/list-styles.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出支持的图标视觉风格预设。",
+          "en": "List supported icon visual style presets."
+        }
+      }
+    ]
   },
   "entry": {
-    "frontend": "./src/panel.tsx"
+    "backend": "./server/tool-handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15177,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true,
+      "devOnly": false
+    }
   },
-  "experimental": true
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  }
 }
