@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "document": { "type": "object" }
+  },
+  "required": ["ok", "document"]
+}

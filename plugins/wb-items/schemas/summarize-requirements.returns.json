@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "source": { "enum": ["llm", "heuristic"] },
+    "style": { "type": "string" },
+    "items": { "type": "array" }
+  }
+}

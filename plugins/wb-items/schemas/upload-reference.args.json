@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "base64": { "type": "string", "minLength": 8 },
+    "label": { "type": "string" }
+  },
+  "required": ["base64"]
+}

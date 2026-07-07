@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "depicts": { "type": "string", "minLength": 1 },
+    "style": { "type": "string" },
+    "hint": { "type": "string" }
+  },
+  "required": ["depicts"]
+}
