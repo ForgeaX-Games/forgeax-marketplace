@@ -28,6 +28,7 @@ import type {
   Scene,
   Character,
   VisualStyle,
+  FilmLook,
   DirectorStyleId,
   Location,
 } from '../../scenario/types'
@@ -69,6 +70,8 @@ export interface ActBatchPipelineArgs {
   acts: ActDesc[]
   /** 全局视觉风格 */
   visualStyle?: VisualStyle
+  /** 全局电影美学调色 */
+  filmLook?: FilmLook
   uiStylePrompt?: string
   directorStyle?: DirectorStyleId
   directorCustomPersona?: string
@@ -367,6 +370,7 @@ async function runOneBatch(
     actBeat: args.acts.find((a) => a.actId === batch.actId)?.actBeat,
     characters,
     visualStyle: args.visualStyle,
+    filmLook: args.filmLook,
     uiStylePrompt: args.uiStylePrompt,
     directorStyle: args.directorStyle,
     directorCustomPersona: args.directorCustomPersona,

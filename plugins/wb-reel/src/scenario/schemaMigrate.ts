@@ -40,6 +40,38 @@
 
 import type { Episode, Scenario, Scene, Shot } from './types'
 
+/**
+ * 旧导演流派 id → 新原创 slug 映射（2026-07 版权安全重命名）。
+ *
+ * 历史上导演 id 直接用真名（wong-karwai / hitchcock-suspense …）。为版权安全，
+ * 全部改成原创的风格 slug（mood-neon / foreknowledge-suspense …）。旧存档里
+ * scenario.directorStyle 仍是旧 id，这里在载入时无条件归一，避免 coerce 落回默认丢风格。
+ * 'cyberpunk-neonoir' 与 'custom' 本就无真名，保持不变。幂等（新 id 不在表里，原样返回）。
+ */
+const LEGACY_DIRECTOR_ID_MAP: Record<string, string> = {
+  'villeneuve-epic': 'minimal-epic',
+  'fincher-noir': 'precision-noir',
+  'hitchcock-suspense': 'foreknowledge-suspense',
+  'wong-karwai': 'mood-neon',
+  'shinkai-anime': 'luminous-anime',
+  'miller-kinetic': 'kinetic-clarity',
+  'wan-horror': 'unseen-horror',
+  'nolan-nonlinear': 'nonlinear-scifi',
+  'tarantino-pulp': 'pulp-dialogue',
+}
+
+/**
+ * 防御层：把旧导演 id 归一到新 slug（无视 schemaVersion，旧 id 可能出现在任意版本）。
+ * 幂等：directorStyle 不在旧表里（新 slug / custom / undefined）时原样返回。
+ */
+function normalizeDirectorStyle(scenario: Scenario): Scenario {
+  const cur = scenario.directorStyle as string | undefined
+  if (!cur) return scenario
+  const next = LEGACY_DIRECTOR_ID_MAP[cur]
+  if (!next) return scenario
+  return { ...scenario, directorStyle: next as Scenario['directorStyle'] }
+}
+
 export function migrateV1ToV2(scenario: Scenario): Scenario {
   if (scenario.schemaVersion >= 2) return scenario
   return {
@@ -256,6 +288,7 @@ export function ensureEpisodes(scenario: Scenario): Scenario {
  */
 export function migrateScenarioToLatest(scenario: Scenario): Scenario {
   let s = normalizeScenesShape(scenario)
+  s = normalizeDirectorStyle(s)
   if (s.schemaVersion === 1) s = migrateV1ToV2(s)
   if (s.schemaVersion === 2) s = migrateV2ToV3(s)
   if (s.schemaVersion === 3) s = migrateV3ToV4(s)

@@ -205,6 +205,7 @@ export interface CharacterRefPassOpts {
 export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void> {
   const { scenario, client, concurrency = IMAGE_BATCH_CONCURRENCY } = opts
   const visualStyle = scenario.visualStyle
+  const filmLook = scenario.filmLook
 
   const characters = Object.values(scenario.characters ?? {})
   const locations = Object.values(scenario.locations ?? {})
@@ -254,6 +255,7 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
       const prompt = composeVisualPrompt(
         buildCharacterTurnaroundPrompt(c, { visualStyle }),
         visualStyle,
+        filmLook,
       )
       snap('角色定妆照(三视图)', prompt, '1536x1024')
       const turnaround = await client.generate({
@@ -271,9 +273,9 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
     angleTasks,
     async (task) => {
       if (task.id.endsWith('-angle1'))
-        snap('场景基准图', composeVisualPrompt(task.fullPrompt, visualStyle), '1536x1024')
+        snap('场景基准图', composeVisualPrompt(task.fullPrompt, visualStyle, filmLook), '1536x1024')
       const out = await client.generate({
-        prompt: composeVisualPrompt(task.fullPrompt, visualStyle),
+        prompt: composeVisualPrompt(task.fullPrompt, visualStyle, filmLook),
         size: '1536x1024',
       })
       // 兼容旧回调：第一个角度图同时触发 onLocationRef
@@ -298,7 +300,7 @@ export async function characterRefPass(opts: CharacterRefPassOpts): Promise<void
   const rProps = await runWithConcurrency(
     props,
     async (p) => {
-      const prompt = composeVisualPrompt(buildPropRefPrompt(p), visualStyle)
+      const prompt = composeVisualPrompt(buildPropRefPrompt(p), visualStyle, filmLook)
       snap('关键道具参考图', prompt, '1024x1024')
       const out = await client.generate({
         prompt,

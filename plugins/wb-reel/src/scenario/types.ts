@@ -798,25 +798,46 @@ export type VisualStyle =
   | 'pixelart'
   | 'watercolor'
   | 'ink'
+  | 'render3d2d'
+
+/**
+ * 电影美学调色滤镜（film-looks）—— 与 VisualStyle(渲染媒介) 正交的第二维度。
+ * 决定全片的色板/对比/胶片质感/高光阴影染色，与媒介叠加使用（例：写实 + 蒂尔橙）。
+ * 定义源在 skills/film-looks/<id>/SKILL.md，由 filmLookPresets 解析。可选，不选=不加调色。
+ */
+export type FilmLook =
+  | 'retro-future'
+  | 'baroque-chiaroscuro'
+  | 'teal-orange'
+  | 'bleach-bypass'
+  | 'pastel-symmetry'
+  | 'noir-lowkey'
+  | 'warm-nostalgia'
+  | 'clinical-scifi'
+  | 'morandi-muted'
+  | 'bronze-epic'
 
 /**
  * 导演流派 id —— v3.8 新增。
  *
- * 纯字符串联合；具体的 persona 文本（identity / 剪辑语法 / 镜头语言 / 节奏偏好）
- * 在 llm/directorPersonas.ts 按 id 映射，与 types 层解耦——
- * 保证 types 不把 llm 的 prompt 实现拖进来。
+ * 纯字符串联合；具体的 persona 文本（身份 / 剪辑语法 / 镜头语言 / 节奏 / 下游绑定）
+ * 现在写在 llm/skills/directors/<id>/SKILL.md，由 directorSkillLoader 解析成
+ * DirectorPersona，与 types 层解耦——保证 types 不把 prompt 实现拖进来。
  *
- * 新加流派 = 同时加字符串 + 在 directorPersonas 写 persona + 在 UI
- * 选择器列表里加选项。
+ * 新加流派 = 加字符串 + 建 skills/directors/<id>/SKILL.md + 在 loader 注册表登记
+ * （UI 选择器/海报会自动读取）。
  */
 export type DirectorStyleId =
-  | 'hitchcock-suspense'
-  | 'fincher-noir'
-  | 'villeneuve-epic'
-  | 'wong-karwai'
-  | 'shinkai-anime'
-  | 'miller-kinetic'
+  | 'foreknowledge-suspense'
+  | 'precision-noir'
+  | 'minimal-epic'
+  | 'mood-neon'
+  | 'luminous-anime'
+  | 'kinetic-clarity'
   | 'cyberpunk-neonoir'
+  | 'unseen-horror'
+  | 'nonlinear-scifi'
+  | 'pulp-dialogue'
   | 'custom'
 
 /**
@@ -1796,6 +1817,12 @@ export interface Scenario {
    * 修改后**不追溯旧图**，只影响之后新生成的图像。
    */
   visualStyle?: VisualStyle
+  /**
+   * 全局"电影美学调色"—— 与 visualStyle(渲染媒介) 正交的第二维度，二者叠加。
+   * 决定全片的色板/对比/胶片质感/高光阴影染色（例：visualStyle=写实 + filmLook=蒂尔橙）。
+   * 作者在「风格」模块选择；缺省=不加调色（保持媒介自身色彩）。修改不追溯旧图。
+   */
+  filmLook?: FilmLook
   /** 图像视图预选的小游戏池 id 列表；剧情树剪辑时据此过滤可选小游戏 */
   enabledMinigameIds?: string[]
   /** 视频模型 API 配置（运行时从 settingsStore 读默认，可在剧本里重写） */
@@ -1820,17 +1847,21 @@ export interface Scenario {
   /**
    * 导演 agent 流派 —— v3.8 新增。
    *
-   * 决定 storyboard-director / kinetic-video-prompt 两个 skill 注入哪一套 persona：
-   *   'hitchcock-suspense'  希区柯克 · 悬疑（主观镜/延迟揭示/声音先于画面）
-   *   'fincher-noir'        芬奇 · 黑色惊悚（低饱和/长特写/精确时钟式剪辑）
-   *   'villeneuve-epic'     维伦纽瓦 · 史诗（超广角建立镜/静缓推进/极简剪辑）
-   *   'wong-karwai'         王家卫 · 情绪（手持抽帧/浅景深/霓虹染色/独白叠加）
-   *   'shinkai-anime'       新海诚 · 日漫高光（逆光云层/三秒一景/轻音乐节拍）
-   *   'miller-kinetic'      乔治·米勒 · 动能派（黄金三角/甩镜/子弹时间）
-   *   'cyberpunk-neonoir'   赛博霓虹 · 都市雨夜（拉丝光流/FPV 穿越/手持抖）
-   *   'custom'              作者自填 persona（自由文本，凌驾预设）
+   * 决定 storyboard-director / kinetic-video-prompt 两个 skill 注入哪一套 persona。
+   * 流派 id 为原创命名（版权安全，不含真名）：
+   *   'foreknowledge-suspense' 先知悬疑（主观镜/延迟揭示/声音先于画面）
+   *   'precision-noir'         冷峻黑色（低饱和/长特写/精确时钟式剪辑）
+   *   'minimal-epic'           极简史诗（超广角建立镜/静缓推进/极简剪辑）
+   *   'mood-neon'              情绪浮光（手持抽帧/浅景深/霓虹染色/独白叠加）
+   *   'luminous-anime'         高光日漫（逆光云层/三秒一景/轻音乐节拍）
+   *   'kinetic-clarity'        清晰动能（黄金三角/甩镜/子弹时间但保持可读）
+   *   'cyberpunk-neonoir'      赛博霓虹 · 都市雨夜（拉丝光流/FPV 穿越/手持抖）
+   *   'unseen-horror'          过程恐怖（延迟惊吓/声音诱导/看不见更可怕）
+   *   'nonlinear-scifi'        非线性科幻（交叉剪辑/并行时空/结构叙事）
+   *   'pulp-dialogue'          断章对话（长局对话铺垫/暴力一瞬速决）
+   *   'custom'                 作者自填 persona（自由文本，凌驾预设）
    *
-   * 缺省 = 'villeneuve-epic'（审美稳、电影感强、对新手友好）。
+   * 缺省 = 'minimal-epic'（审美稳、电影感强、对新手友好）。
    */
   directorStyle?: DirectorStyleId
   /**

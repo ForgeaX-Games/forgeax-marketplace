@@ -51,3 +51,8 @@ export function prebuiltUIPoster(uiId: string): string | undefined {
 export function prebuiltDirectorPoster(directorId: string): string | undefined {
   return byBaseName[`director-${directorId}`]
 }
+
+/** 取某电影美学调色的预制海报 URL（竖版 2:3）；没有返回 undefined。 */
+export function prebuiltFilmLookPoster(filmLookId: string): string | undefined {
+  return byBaseName[`filmlook-${filmLookId}`]
+}

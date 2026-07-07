@@ -385,6 +385,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
           client,
           referenceImages,
           visualStyle: scenario.visualStyle,
+          filmLook: scenario.filmLook,
           scenarioId: scenario.id,
         })
       }
@@ -427,6 +428,7 @@ export function AssetBoard({ sceneId }: { sceneId: string }) {
               client,
               referenceImages,
               visualStyle: scenario.visualStyle,
+              filmLook: scenario.filmLook,
               scenarioId: scenario.id,
               onRequest: setRequest,
             })

@@ -24,13 +24,16 @@ import { injectStyleOnce } from '../styles/injectStyle'
  *   色彩基调）的导演 persona 基准（serializePersonaToPrompt 注入 LLM system prompt）。
  */
 const DIRECTOR_SWATCHES: Record<string, [string, string]> = {
-  'hitchcock-suspense': ['#6b2f2f', '#120a0a'],
-  'fincher-noir': ['#22303a', '#06090b'],
-  'villeneuve-epic': ['#caa06a', '#241c14'],
-  'wong-karwai': ['#a8244e', '#1c0f1a'],
-  'shinkai-anime': ['#7cc0ff', '#ffd9a0'],
-  'miller-kinetic': ['#e08a2a', '#3a1a0a'],
+  'foreknowledge-suspense': ['#6b2f2f', '#120a0a'],
+  'precision-noir': ['#22303a', '#06090b'],
+  'minimal-epic': ['#caa06a', '#241c14'],
+  'mood-neon': ['#a8244e', '#1c0f1a'],
+  'luminous-anime': ['#7cc0ff', '#ffd9a0'],
+  'kinetic-clarity': ['#e08a2a', '#3a1a0a'],
   'cyberpunk-neonoir': ['#23e6e0', '#0c0c1a'],
+  'unseen-horror': ['#3a4a44', '#080a09'],
+  'nonlinear-scifi': ['#5a7488', '#0a0f14'],
+  'pulp-dialogue': ['#c8a13a', '#2a1206'],
 }
 
 export function DirectorStyleSelector() {

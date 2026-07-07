@@ -83,6 +83,7 @@ interface ShotKeyframeContext {
   sceneId: string
   location: Location | undefined
   visualStyle: Scenario['visualStyle']
+  filmLook: Scenario['filmLook']
   allShotsLen: number
   keyShotId: string | undefined
   imgClient: ImageClient
@@ -107,6 +108,7 @@ async function generateShotKeyframe(
     sceneId,
     location,
     visualStyle,
+    filmLook,
     allShotsLen,
     keyShotId,
     imgClient,
@@ -141,6 +143,7 @@ async function generateShotKeyframe(
       shotTotal: allShotsLen,
     }),
     visualStyle,
+    filmLook,
   )
 
   // 请求快照：先记下「发了什么」，再发请求；失败也能回看。
@@ -231,6 +234,7 @@ export async function regenerateShotKeyframe(
     sceneId,
     location: scene.locationId ? scenario.locations?.[scene.locationId] : undefined,
     visualStyle: scenario.visualStyle,
+    filmLook: scenario.filmLook,
     allShotsLen: allShots.length,
     keyShotId: scene.keyShotId ?? allShots[0]?.id,
     imgClient,
@@ -323,6 +327,7 @@ export async function triggerKeyframeFromQueue(item: KeyframeQueueItem): Promise
     sceneId: item.sceneId,
     location: scene.locationId ? scenario.locations?.[scene.locationId] : undefined,
     visualStyle: scenario.visualStyle,
+    filmLook: scenario.filmLook,
     allShotsLen: allShots.length,
     keyShotId: scene.keyShotId ?? allShots[0]?.id,
     imgClient,

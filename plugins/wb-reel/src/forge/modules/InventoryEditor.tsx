@@ -121,6 +121,7 @@ function ItemDetail({
   const propList = useMemo(() => Object.values(props ?? {}), [props])
   const synopsis = useScenarioStore((s) => s.scenario.synopsis)
   const visualStyle = useScenarioStore((s) => s.scenario.visualStyle)
+  const filmLook = useScenarioStore((s) => s.scenario.filmLook)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -149,7 +150,7 @@ function ItemDetail({
         propPrompt: prop?.prompt,
         world: {
           worldSynopsis: synopsis,
-          styleHint: getAuthoringHint(visualStyle) || undefined,
+          styleHint: getAuthoringHint(visualStyle, filmLook) || undefined,
         },
         referenceImages: referenceImages.length ? referenceImages : undefined,
       })

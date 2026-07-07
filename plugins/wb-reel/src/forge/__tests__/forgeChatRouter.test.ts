@@ -297,7 +297,7 @@ describe('routeForgeIntent', () => {
   it('await-style —— 输入风格说明 → start-forge.idea（首轮把风格当想法 payload）', () => {
     const r = routeForgeIntent({
       stage: 'await-style',
-      text: '导演 王家卫，编剧 阿城',
+      text: '导演走情绪浮光取向，编剧要碎句留白',
       attachments: [],
     })
     expect(r.kind).toBe('start-forge')

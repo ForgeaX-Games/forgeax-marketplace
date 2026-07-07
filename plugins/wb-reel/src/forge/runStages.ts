@@ -2,6 +2,8 @@ import type { TextClient } from '../llm/config/types'
 import { streamOrFallback } from '../llm/config/types'
 import { parseJSONLoose } from '../llm/util/parseJSONLoose'
 import { SKILLS } from '../llm/skills'
+import { coerceDirectorStyleId } from '../llm/config/directorPersonas'
+import { coerceFilmLookId } from '../llm/config/filmLookPresets'
 import { useForgeChatStore } from './forgeChatStore'
 import type {
   ForgeStage,
@@ -249,6 +251,10 @@ function coerceStyleDraft(raw: string): StageDraftStyle {
   const obj = (parseJSONLoose(stripFences(raw)) ?? {}) as Record<string, unknown>
   return {
     director: stringField(obj.director),
+    // 收敛成合法预设库 id；LLM 乱填或缺失 → undefined，建 scenario 时回退默认
+    directorStyleId: coerceDirectorStyleId(obj.directorStyleId),
+    // 收敛成合法 film-looks 库 id；乱填/缺失 → undefined（不加调色）
+    filmLookId: coerceFilmLookId(obj.filmLookId),
     writer: stringField(obj.writer),
     visualPreset: stringField(obj.visualPreset),
     notes: stringField(obj.notes),

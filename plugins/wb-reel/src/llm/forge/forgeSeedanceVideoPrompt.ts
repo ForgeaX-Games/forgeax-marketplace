@@ -87,6 +87,7 @@ const STYLE_ANCHORS: Record<VisualStyle, StyleAnchor> = {
   pixelart: { tone: '像素艺术质感，规整像素网格、克制抖动', anchor: '像素艺术风格', realistic: false },
   watercolor: { tone: '水彩手绘质感，湿边晕染、留白透气', anchor: '水彩手绘风格', realistic: false },
   ink: { tone: '水墨国风质感，浓淡干湿、飞白与留白', anchor: '水墨国风风格', realistic: false },
+  render3d2d: { tone: '三渲二质感，3D 体积感叠二维赛璐珞描线、平涂上色', anchor: '三渲二(3D转手绘)风格', realistic: false },
 }
 
 function styleAnchorFor(style?: VisualStyle): StyleAnchor {
@@ -112,12 +113,12 @@ const CAMERA_PHRASE: Record<CameraMoveToken, string> = {
 
 /** persona → 默认运镜（cameraHint 缺省时回退）。 */
 const PERSONA_DEFAULT_MOVE: Record<string, CameraMoveToken> = {
-  'villeneuve-epic': '推进',
-  'fincher-noir': '固定',
-  'hitchcock-suspense': '推进',
-  'wong-karwai': '跟移',
-  'shinkai-anime': '摇移',
-  'miller-kinetic': '跟移',
+  'minimal-epic': '推进',
+  'precision-noir': '固定',
+  'foreknowledge-suspense': '推进',
+  'mood-neon': '跟移',
+  'luminous-anime': '摇移',
+  'kinetic-clarity': '跟移',
   'cyberpunk-neonoir': '跟移',
 }
 

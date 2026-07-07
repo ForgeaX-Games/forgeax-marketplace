@@ -60,6 +60,11 @@ export function effectiveVisualStyle(scenario: Scenario): Scenario['visualStyle'
   return isModuleEnabled(scenario, 'style') ? scenario.visualStyle : undefined
 }
 
+/** 电影美学调色 —— 随「风格」模块开关；关掉时按「未设定」处理(不注入调色前缀)。 */
+export function effectiveFilmLook(scenario: Scenario): Scenario['filmLook'] {
+  return isModuleEnabled(scenario, 'style') ? scenario.filmLook : undefined
+}
+
 /** 导演流派 —— 模块关掉时返回 undefined(由调用方退回中性 / 不注入 persona)。 */
 export function effectiveDirectorStyle(scenario: Scenario): Scenario['directorStyle'] {
   return isModuleEnabled(scenario, 'director') ? scenario.directorStyle : undefined

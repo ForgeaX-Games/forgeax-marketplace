@@ -1,5 +1,5 @@
 import type { ImageClient } from '../config/types'
-import type { Scenario, Scene, Shot, VisualStyle } from '../../scenario/types'
+import type { Scenario, Scene, Shot, VisualStyle, FilmLook } from '../../scenario/types'
 import { composeVisualPrompt } from '../config/visualStylePresets'
 import { shotFaceMaskClause } from '../refsets/faceMaskPrompt'
 import { IMAGE_BATCH_CONCURRENCY } from '../util/concurrency'
@@ -192,6 +192,8 @@ export async function batchGenerateScenes(args: {
    * 在这一层 compose（而不是 task 里）可以让调用方少一次遍历。
    */
   visualStyle?: VisualStyle
+  /** 全局电影美学调色 —— 与 visualStyle 叠加注入到每个 task.prompt 之前。 */
+  filmLook?: FilmLook
   /**
    * 完整 scenario —— 必填（Phase A 后）。用于查找 scene / shot / characters /
    * location / props 并组装完整 prompt。
@@ -236,7 +238,7 @@ export async function batchGenerateScenes(args: {
           ? buildRefsForBatchTask(task, scenario, args.mediaLookup)
           : undefined
       const out = await args.client.generate({
-        prompt: composeVisualPrompt(fullPrompt, args.visualStyle),
+        prompt: composeVisualPrompt(fullPrompt, args.visualStyle, args.filmLook),
         // 批量分镜关键帧走横版 1536x1024（gpt-image-2 原生最宽，对齐 16:9 视频）。
         size: '1536x1024',
         ...(referenceImages && referenceImages.length > 0

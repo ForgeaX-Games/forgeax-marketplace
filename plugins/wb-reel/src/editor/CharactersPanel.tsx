@@ -94,11 +94,12 @@ function CharacterRow({
     setGenStatus({ kind: 'pending' })
     try {
       // 角色立绘也吃全局美术风格 —— 否则 anime 剧本会出现一张写实立绘，撕裂世界观
-      const style = useScenarioStore.getState().scenario.visualStyle
+      const scn = useScenarioStore.getState().scenario
       const out = await imgClient.generate({
         prompt: composeVisualPrompt(
           `角色立绘 · 单人居中 · 中性背景 · ${character.prompt}`,
-          style,
+          scn.visualStyle,
+          scn.filmLook,
         ),
         size: '1024x1024',
       })

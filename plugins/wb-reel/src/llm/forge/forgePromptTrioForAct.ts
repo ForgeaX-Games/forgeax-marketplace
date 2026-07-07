@@ -30,8 +30,10 @@ import type {
   Scene,
   Shot,
   VisualStyle,
+  FilmLook,
   DirectorStyleId,
 } from '../../scenario/types'
+import { FILM_LOOK_PRESETS } from '../config/filmLookPresets'
 import { SKILLS } from '../skills'
 import { parseJSONLoose } from '../util/parseJSONLoose'
 import type { TextClient } from '../config/types'
@@ -70,6 +72,7 @@ export interface ForgePromptTrioForActArgs {
   /** 整 Act 共用的关键道具（可选） */
   keyProps?: string[]
   visualStyle?: VisualStyle
+  filmLook?: FilmLook
   uiStylePrompt?: string
   directorStyle?: DirectorStyleId
   directorCustomPersona?: string
@@ -211,6 +214,10 @@ export function buildBatchUserPrompt(
   lines.push(`【导演流派】${personaDisplayName}（身份/剪辑语法/镜头语言见 system prompt）`)
 
   if (args.visualStyle) lines.push(`【全局视觉风格】${args.visualStyle}`)
+  if (args.filmLook) {
+    const fl = FILM_LOOK_PRESETS[args.filmLook]
+    if (fl) lines.push(`【电影美学】${fl.label} · ${fl.tagline}（整片色彩基调，随昼夜/情绪自适应但保持统一）`)
+  }
   if (args.uiStylePrompt?.trim()) lines.push(`【UI 风格】${args.uiStylePrompt.trim()}`)
 
   // Phase 5 一致性回流：作者已确认锚点放最前面（仅次于流派），强调"硬约束"

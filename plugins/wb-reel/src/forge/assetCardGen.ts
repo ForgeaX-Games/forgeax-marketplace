@@ -1,5 +1,5 @@
 import type { ImageClient, ImageReference } from '../llm/config/types'
-import type { VisualStyle, VideoConfig } from '../scenario/types'
+import type { VisualStyle, FilmLook, VideoConfig } from '../scenario/types'
 import { useMediaStore } from '../media/mediaStore'
 import { blobToDataUrl } from '../media/assetStore'
 import { useSettingsStore } from '../scenario/settingsStore'
@@ -68,6 +68,8 @@ export async function generateCardImage(opts: {
    * 生成层不再自己读 scenarioStore（charter Pipeline-Isolation：生成原语保持无状态）。
    */
   visualStyle?: VisualStyle
+  /** 全局电影美学调色前缀 —— 与 visualStyle 叠加注入；由调用方从 scenario.filmLook 传入。 */
+  filmLook?: FilmLook
   /**
    * 资产归属的 game/scenario id —— 由编排器/调用方显式传入，透传给 mediaStore ingest，
    * 决定素材记到哪个 game（charter 解耦：生成层与 mediaStore 都不隐式读 scenarioStore）。
@@ -79,7 +81,7 @@ export async function generateCardImage(opts: {
    */
   onRequest?: (req: GenRequestSnapshot) => void
 }): Promise<AssetGenResult> {
-  const finalPrompt = composeVisualPrompt(opts.prompt, opts.visualStyle)
+  const finalPrompt = composeVisualPrompt(opts.prompt, opts.visualStyle, opts.filmLook)
   const refs = opts.referenceImages?.length ? opts.referenceImages : undefined
 
   // ── 请求快照：先记下「发了什么」，再发请求；onRequest(队列实时) 与返回值(await 方) 各得一份 ─

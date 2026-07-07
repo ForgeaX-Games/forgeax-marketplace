@@ -303,7 +303,7 @@ async function decideContinuityGroups(
     '- 只列"需要连续"的组（即两个及以上 shotId 属同一组）',
     '- 不属于任何连续组的 shot 不用出现',
     '- groupId 要语义化（chase-roof / dialogue-kitchen），不要用随机 hash',
-    '- 根据 persona 的剪辑语法调整（维伦纽瓦慢派系会多合并、米勒快剪派系会少合并）',
+    '- 根据 persona 的剪辑语法调整（极简慢派系会多合并、清晰动能快剪派系会少合并）',
     '- 输出必须是可被 JSON.parse 的纯 JSON，不要 markdown 代码块',
   ].join('\n')
 
