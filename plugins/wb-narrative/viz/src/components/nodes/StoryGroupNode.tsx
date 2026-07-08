@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { StepStatus } from "../../types";
+import { useT } from "../../i18n";
 
 interface PhaseInfo {
   id: string;
@@ -19,6 +20,7 @@ interface StoryGroupData {
 }
 
 function StoryGroupNodeRaw({ data }: NodeProps<StoryGroupData>) {
+  const t = useT();
   const { label, status, childCount, expanded, progress, phases } = data;
 
   const dotColor =
@@ -70,12 +72,12 @@ function StoryGroupNodeRaw({ data }: NodeProps<StoryGroupData>) {
 
       {!expanded && childCount > 0 && (
         <div className="rf-story-summary">
-          {childCount} 节点（点击展开）
+          {t("node.nodesExpand", { n: childCount })}
         </div>
       )}
       {!expanded && childCount === 0 && (
         <div className="rf-story-summary dim">
-          {status === "pending" ? "等待生成..." : status === "running" ? "生成中..." : "无节点数据"}
+          {status === "pending" ? t("node.waiting") : status === "running" ? t("node.generating") : t("node.noData")}
         </div>
       )}
 

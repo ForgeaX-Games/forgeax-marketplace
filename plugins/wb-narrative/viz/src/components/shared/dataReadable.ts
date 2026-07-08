@@ -4,7 +4,9 @@
 // 一旦 .tsx 同时导出 React 组件 + 普通函数，HMR 会强制 invalidate 整个模块，
 // 导致 React 组件树状态错位 → CanvasErrorBoundary 抓到 "节点渲染异常"。
 
-const LABEL_REMAP: Record<string, string> = {
+import { getLocale } from "../../i18n";
+
+const LABEL_REMAP_ZH: Record<string, string> = {
   name: "名称", description: "描述", type: "类型", category: "类别",
   rarity: "稀有度", effect: "效果", source: "来源", location: "位置",
   trigger: "触发", condition: "条件", reward: "奖励", cost: "费用",
@@ -51,8 +53,52 @@ const LABEL_REMAP: Record<string, string> = {
   lighting: "光影", actor_action: "演员动作", sfx: "音效",
 };
 
+const LABEL_REMAP_EN: Record<string, string> = {
+  name: "Name", description: "Description", type: "Type", category: "Category",
+  rarity: "Rarity", effect: "Effect", source: "Source", location: "Location",
+  trigger: "Trigger", condition: "Condition", reward: "Reward", cost: "Cost",
+  level: "Level", hp: "HP", attack: "Attack", defense: "Defense",
+  quest_id: "Quest ID", story_node_id: "Linked node", objectives: "Objectives",
+  prerequisites: "Prerequisites", completion_conditions: "Completion conditions",
+  branch_at: "Branch at", branches: "Branches", merge_at: "Merge at",
+  node_id: "Node", content: "Content", summary: "Summary",
+  main_content: "Main content", narrative_function: "Narrative function",
+  narrative_stage: "Narrative stage", stage_type: "Stage type",
+  story_elements: "Story elements", boundary_constraints: "Boundary constraints",
+  jrpg_elements: "JRPG elements", character_arcs: "Character arcs",
+  prev_node: "Previous node", next_node: "Next node", is_branch: "Branch node",
+  tension_level: "Tension level", conflict_type: "Conflict type", stakes: "Stakes",
+  atmosphere: "Atmosphere", dialogue_hint: "Dialogue hint", turning_point: "Turning point",
+  plot: "Plot", cause: "Cause", process: "Process", result: "Result",
+  qte: "🎯 QTE",
+  shape: "Shape", appear_ms: "Appear (ms)", target_ms: "Target (ms)",
+  duration_ms: "Duration (ms)", window_ms: "Judge window (ms)",
+  fail_penalty: "Fail penalty", success_reward: "Success reward",
+  archetype_analysis: "Archetype analysis", core_archetype: "Core archetype", surface_archetype: "Surface archetype",
+  psychological_drivers: "Psychological drivers", core_motivation: "Core motivation", core_fear: "Core fear",
+  decisive_past_event: "Decisive past event", character_arc_spectrum: "Character arc",
+  background_information: "Background", role_in_story: "Role in story",
+  relationships: "Relationships", family_relationships: "Family relationships", social_relationships: "Social relationships",
+  appearance_description: "Appearance", location_description: "Whereabouts",
+  location_name: "Location name", position_description: "Position",
+  occupation: "Occupation", race: "Race", gender: "Gender", age: "Age",
+  label: "Character type", game_mechanics: "Game stats", base_stats: "Base stats",
+  personal_life: "Persona details", likes: "Likes", dislikes: "Dislikes",
+  habits: "Habits", speech_pattern: "Speech pattern", personal_item: "Personal item",
+  private_wish: "Inner wish", vulnerability: "Vulnerability",
+  independent_bonds: "Personal bonds", relationship: "Relationship", detail: "Detail",
+  visual_prompt: "Visual prompt", scene_prompt: "Scene prompt",
+  ui_style_prompt: "UI style prompt",
+  shots: "Shot sequence", scene: "Scene", lines: "Lines",
+  speaker: "Speaker", text: "Line text", role: "Cast role",
+  scene_role: "Story role", node_kind: "Node kind",
+  framing: "Framing", angle: "Angle", movement: "Camera movement",
+  lighting: "Lighting", actor_action: "Actor action", sfx: "SFX",
+};
+
 export function humanKey(key: string): string {
-  return LABEL_REMAP[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const remap = getLocale() === "zh" ? LABEL_REMAP_ZH : LABEL_REMAP_EN;
+  return remap[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function dataToReadableText(data: unknown, depth = 0): string {

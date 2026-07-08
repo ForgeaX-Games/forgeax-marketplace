@@ -5,12 +5,18 @@
  * 返回 undefined = 无演出源（渲染占位）。
  */
 import { getVideoClip } from '../../../scenario/gameAssetCatalog'
+import { NODIA_NARRATION_VIDEOS } from '../../../scenario/nodiaNarrationMedia'
 
 export function resolveMediaSrc(ref: string | undefined, game?: string): string | undefined {
   if (!ref) return undefined
   if (/^(https?:|blob:|data:|\/)/.test(ref)) return ref
-  // 战斗片段 vd-*：走内置 VIDEO_CLIPS 的直链 url；其余按资产 id 走 reelAssets。
+  // 战斗片段 vd-*：走内置 VIDEO_CLIPS 的直链 url。
   if (ref.startsWith('vd-')) return getVideoClip(ref)?.url
+  // 内置旁白视频 narr-*（及运行时场景规范化的 m- 前缀 id）：走 bundle 直链，不在 reel 清单里。
+  const narrKey = ref.startsWith('m-') ? ref.slice(2) : ref
+  const narrUrl = NODIA_NARRATION_VIDEOS[narrKey]
+  if (narrUrl) return narrUrl
+  // 其余按资产 id 走 reelAssets。
   const q = game ? `?game=${encodeURIComponent(game)}` : ''
   return `/__reel__/assets/${encodeURIComponent(ref)}${q}`
 }

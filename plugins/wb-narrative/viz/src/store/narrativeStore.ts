@@ -11,6 +11,7 @@ import { PIPELINE_STEPS } from "../types";
 import { sendToHost } from "../lib/bridge";
 import type { EntryStatus, DraftState } from "../utils/stepDisplay";
 import { computePhase, type NarrativePhase } from "./phase";
+import { t as tGlobal, tStepLabel } from "../i18n";
 
 export { computePhase };
 export type { NarrativePhase };
@@ -358,7 +359,7 @@ function rebuildStepsFromResult(result: NarrativeContext, existingSteps: StepSta
         id: s.id,
         label: entry?.label ?? s.label,
         status: "completed",
-        message: `${entry?.label ?? s.label} 完成`,
+        message: tGlobal("msg.stepDone", { label: tStepLabel(s.id, entry?.label ?? s.label) }),
         data: dataFromResult,
       });
     } else {
@@ -377,7 +378,7 @@ function rebuildStepsFromResult(result: NarrativeContext, existingSteps: StepSta
       id: entry.id,
       label: entry.label,
       status: "completed",
-      message: `${entry.label} 完成`,
+      message: tGlobal("msg.stepDone", { label: tStepLabel(entry.id, entry.label) }),
       data,
     });
     seen.add(entry.id);
@@ -413,14 +414,14 @@ function splitCompositeStep(
         id: "script_generation",
         label: "L4 剧本生成",
         status: "completed",
-        message: "L4 剧本生成 完成",
+        message: tGlobal("msg.stepDone", { label: tStepLabel("script_generation", "L4 剧本生成") }),
         data: scriptData,
       }),
       {
         id: "scene_generation",
         label: "场景生成",
         status: "completed",
-        message: "场景生成 完成",
+        message: tGlobal("msg.stepDone", { label: tStepLabel("scene_generation", "场景生成") }),
         data: sceneData,
       },
     );
@@ -482,7 +483,7 @@ function mergeValidationIntoParent(
   if (p.status === "running") {
     parent.message = p.message;
   } else if (p.status === "completed") {
-    parent.message = `${parent.label} + 结构验证 完成`;
+    parent.message = tGlobal("msg.validationDone", { label: tStepLabel(parent.id, parent.label) });
   }
   copy[idx] = parent;
   return copy;

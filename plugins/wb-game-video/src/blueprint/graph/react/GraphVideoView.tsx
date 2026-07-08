@@ -17,6 +17,7 @@ import {
   clipIdFromMediaRef,
 } from '../../../scenario/gameAssetCatalog'
 import { listVideoAssetInfos, resolveMediaSrc, type VideoAssetInfo } from './media'
+import { NODIA_NARRATION_VIDEOS } from '../../../scenario/nodiaNarrationMedia'
 import { MaterialTimeline } from '../../../editor/MaterialTimeline'
 import {
   type MaterialItem,
@@ -138,7 +139,19 @@ export function GraphVideoView(): JSX.Element {
 
   const entries = useMemo<VideoEntry[]>(() => {
     const clips: VideoEntry[] = VIDEO_CLIPS.map((c) => ({ id: c.id, label: c.label, url: c.url, group: '战斗', type: c.type, durMs: c.durMs }))
-    const narr: VideoEntry[] = assets.map((v) => ({ id: v.id, label: v.id, url: resolveMediaSrc(v.id, game) ?? '', group: '叙事' }))
+    const seen = new Set<string>()
+    const narr: VideoEntry[] = []
+    // 内置 bundle 旁白视频（narr-*）：随游戏打包、灌进 mediaStore，不在运行时 reel 清单里，直接列出。
+    for (const [id, url] of Object.entries(NODIA_NARRATION_VIDEOS)) {
+      seen.add(id)
+      narr.push({ id, label: id, url, group: '叙事' })
+    }
+    // 运行时 reel 库里的其余视频资产（与 bundle 去重）。
+    for (const v of assets) {
+      if (seen.has(v.id)) continue
+      seen.add(v.id)
+      narr.push({ id: v.id, label: v.id, url: resolveMediaSrc(v.id, game) ?? '', group: '叙事' })
+    }
     return [...clips, ...narr]
   }, [assets, game])
 

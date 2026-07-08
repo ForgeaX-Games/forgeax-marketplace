@@ -162,10 +162,10 @@ function buildIpReplayContent(summary: IpDnaHierarchySummary): Record<string, st
   }
   const ids = new Set(nodes.map((n) => n.id));
   const roots = nodes.filter((n) => !n.parent || !ids.has(n.parent));
-  const lines: string[] = ["# 标准化 · 层级化文件系统\n"];
+  const lines: string[] = [tGlobal("ipc.hier.title")];
   const walk = (group: typeof nodes, depth: number): void => {
     for (const n of [...group].sort((a, b) => a.index - b.index)) {
-      lines.push(`${"  ".repeat(depth)}- ${n.title}${n.childRange ? `（第 ${n.childRange}）` : ""}`);
+      lines.push(`${"  ".repeat(depth)}- ${n.title}${n.childRange ? tGlobal("ipc.hier.range", { r: n.childRange }) : ""}`);
       walk(byParent.get(n.id) ?? [], depth + 1);
     }
   };
@@ -173,11 +173,11 @@ function buildIpReplayContent(summary: IpDnaHierarchySummary): Record<string, st
   const tree = lines.join("\n");
   const topTitles = [...roots].sort((a, b) => a.index - b.index).map((n) => `### ${n.title}`).join("\n\n");
   return {
-    ip_input: `# IP 作品输入\n\n${topTitles || summary.title}`,
+    ip_input: tGlobal("ipc.hist.input", { titles: topTitles || summary.title }),
     ip_standardize: tree,
-    ip_volume: `# 体量判断\n\n- 层级节点：${summary.node_count}`,
-    ip_adapt_plan: "# 改编规划\n\n- 改编范围 + 游戏单元（历史记录）",
-    ip_dna_extract: `# 生成 scoped IP DNA\n\n- 作品：${summary.title}\n- 层级节点：${summary.node_count}`,
+    ip_volume: tGlobal("ipc.hist.volume", { n: summary.node_count }),
+    ip_adapt_plan: tGlobal("ipc.hist.adaptPlan"),
+    ip_dna_extract: tGlobal("ipc.hist.extract", { title: summary.title, n: summary.node_count }),
   };
 }
 const OUTLINE_BASE  = [...PREF_STEPS, "initial_plan"];                                       // [大纲]
@@ -901,12 +901,12 @@ export function TierModeSelector() {
       store.beginDraftEntry(key, { userInput: previewText ?? userInput, routeGroup });
       if (previewText != null) {
         useNarrativeStore.getState().pushProgress({
-          stage: "输入内容",
+          stage: tGlobal("ipc.stage.inputContent"),
           stepId: "input",
           step: 0,
           totalSteps: 0,
           status: "completed",
-          message: "输入已确认",
+          message: tGlobal("ipc.msg.inputConfirmed"),
           data: previewText,
         });
       }
@@ -1022,7 +1022,7 @@ export function TierModeSelector() {
       // 若用户只上传了剧本没在输入框写需求，user_input 给一个简短占位（避免 backend 校验失败）。
       const trimmedInput = userInput.trim();
       const fallbackInput = scriptFile?.name
-        ? `（用户上传了剧本：${scriptFile.name}，请基于上传剧本展开生成）`
+        ? tGlobal("ipc.msg.scriptUploaded", { name: scriptFile.name })
         : "";
       const effectiveUserInput = trimmedInput || fallbackInput;
       // §条目提前建立：复用条目键（首次确认已建），使生成产物落回同一条目目录。
@@ -1247,7 +1247,7 @@ export function TierModeSelector() {
         status: staleSet.has(id) ? ("pending" as const) : ("completed" as const),
       }));
       const preloadSteps: StepState[] = [
-        { id: "pipeline_config", label: STEP_LABEL_LOOKUP.get("pipeline_config") ?? "管线配置", status: "completed" as const },
+        { id: "pipeline_config", label: STEP_LABEL_LOOKUP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const },
         ...baseSteps,
       ];
 
@@ -1304,7 +1304,7 @@ export function TierModeSelector() {
         status: finalStaleSet.has(id) ? ("pending" as const) : ("completed" as const),
       }));
       const finalPreload: StepState[] = [
-        { id: "pipeline_config", label: STEP_LABEL_LOOKUP.get("pipeline_config") ?? "管线配置", status: "completed" as const },
+        { id: "pipeline_config", label: STEP_LABEL_LOOKUP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const },
         ...finalSteps,
       ];
 
@@ -1510,7 +1510,7 @@ export function TierModeSelector() {
           for (const stepId of IP_PREDECESSOR_STEPS) {
             store.pushProgress({
               stage: stepId, stepId, step: 0, totalSteps: 0,
-              status: "completed", message: "已还原", data: ipContent[stepId] ?? undefined,
+              status: "completed", message: tGlobal("ipc.msg.restored"), data: ipContent[stepId] ?? undefined,
             });
           }
         }
@@ -1518,8 +1518,8 @@ export function TierModeSelector() {
     } else if (entry.userInput) {
       store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, ["input"]);
       store.pushProgress({
-        stage: "输入内容", stepId: "input", step: 0, totalSteps: 0,
-        status: "completed", message: "输入已确认", data: entry.userInput,
+        stage: tGlobal("ipc.stage.inputContent"), stepId: "input", step: 0, totalSteps: 0,
+        status: "completed", message: tGlobal("ipc.msg.inputConfirmed"), data: entry.userInput,
       });
     }
   }, []);
@@ -1582,7 +1582,7 @@ export function TierModeSelector() {
               for (const stepId of IP_PREDECESSOR_STEPS) {
                 store.pushProgress({
                   stage: stepId, stepId, step: 0, totalSteps: 0,
-                  status: "completed", message: "已还原",
+                  status: "completed", message: tGlobal("ipc.msg.restored"),
                   data: ipContent[stepId] ?? undefined,
                 });
               }
@@ -1591,8 +1591,8 @@ export function TierModeSelector() {
         } else if (cfg.userInput) {
           store.startIpPreviewRun(`ip-preview-${entry.key}`, entry.key, ["input"]);
           store.pushProgress({
-            stage: "输入内容", stepId: "input", step: 0, totalSteps: 0,
-            status: "completed", message: "输入已确认", data: cfg.userInput,
+            stage: tGlobal("ipc.stage.inputContent"), stepId: "input", step: 0, totalSteps: 0,
+            status: "completed", message: tGlobal("ipc.msg.inputConfirmed"), data: cfg.userInput,
           });
         }
         setLoadingKey(null);

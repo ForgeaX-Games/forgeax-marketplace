@@ -29,7 +29,7 @@ import {
 } from "../../hooks/useNarrativeStream";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import type { TierId, ModeId } from "../../types";
-import { useT } from "../../i18n";
+import { useT, t } from "../../i18n";
 /** 顶层上传单体的展示信息（类型抽象符号）。 */
 export interface IpUploadDisplay {
   name: string;
@@ -103,7 +103,7 @@ function buildInputContent(files: IpDnaFilePayload[], items: IpUploadDisplay[]):
     if (it.kind === "text" && typeof f?.content === "string" && f.content.trim()) {
       const body =
         f.content.length > 4000
-          ? `${f.content.slice(0, 4000)}\n\n…（正文较长已截断，完整内容已交付后端标准化处理）`
+          ? `${f.content.slice(0, 4000)}\n\n${t("ipc.truncated")}`
           : f.content;
       return `### ${sym} ${it.name}\n\n${body}`;
     }
@@ -124,25 +124,25 @@ function buildHierarchyContent(hierarchy: IpHierarchyNode[], noiseFiltered?: str
   }
   const ids = new Set(hierarchy.map((n) => n.id));
   const roots = hierarchy.filter((n) => !n.parent || !ids.has(n.parent));
-  const lines: string[] = ["# 标准化 · 层级化文件系统\n"];
+  const lines: string[] = [t("ipc.hier.title")];
   const leaves: IpHierarchyNode[] = [];
   const walk = (nodes: IpHierarchyNode[], depth: number): void => {
     for (const n of [...nodes].sort((a, b) => a.index - b.index)) {
       const kids = byParent.get(n.id) ?? [];
-      lines.push(`${"  ".repeat(depth)}- ${disp(n)}${n.childRange ? `（第 ${n.childRange}）` : ""}`);
+      lines.push(`${"  ".repeat(depth)}- ${disp(n)}${n.childRange ? t("ipc.hier.range", { r: n.childRange }) : ""}`);
       if (kids.length === 0) leaves.push(n);
       walk(kids, depth + 1);
     }
   };
   walk(roots, 0);
   if (noiseFiltered && noiseFiltered.length > 0) {
-    lines.push(`\n> 已过滤 ${noiseFiltered.length} 个干扰项：${noiseFiltered.join("、")}`);
+    lines.push(t("ipc.hier.filtered", { n: noiseFiltered.length, items: noiseFiltered.join("、") }));
   }
   // 最小叙事单元文件清单（点1：让中间预览能看到"每个环节落了哪些文件"）：
   // 每个最小叙事单元标准化后各落一份 content.md，落点目录名即其规范名 displayName。
   if (leaves.length > 0) {
-    lines.push("", `## 最小叙事单元 · 文件清单（${leaves.length}）`);
-    lines.push("> 落点：`input/book/story_book/book_processing/<run>/<规范名>/content.md`");
+    lines.push("", t("ipc.hier.fileList", { n: leaves.length }));
+    lines.push(t("ipc.hier.dropPath"));
     for (const lf of [...leaves].sort((a, b) => a.index - b.index)) {
       lines.push(`- \`${disp(lf)}/content.md\``);
     }
@@ -162,27 +162,31 @@ function buildExtractResultContent(result: unknown): string {
     game_units?: Array<{ index: number; generated?: boolean; output_dir?: string }>;
     extraction_quality?: { passed: boolean; checks?: Array<{ name: string; passed: boolean; detail?: string }>; warnings?: string[] };
   };
-  const lines: string[] = ["# 生成 scoped IP DNA → 下游叙事\n"];
-  lines.push("## 输入流程产出（scoped IP DNA）");
-  lines.push(`- 层级节点：${r.node_count ?? 0}`);
+  const lines: string[] = [t("ipc.extract.title")];
+  lines.push(t("ipc.extract.inputOutputs"));
+  lines.push(t("ipc.extract.hierNodes", { n: r.node_count ?? 0 }));
   if (r.extraction_quality) {
-    lines.push(`- 提取质量：${r.extraction_quality.passed ? "通过" : "有告警"}`);
+    lines.push(t("ipc.extract.quality", { status: r.extraction_quality.passed ? t("ipc.common.pass") : t("ipc.common.warn") }));
     for (const c of r.extraction_quality.checks ?? []) {
-      lines.push(`  - ${c.passed ? "✓" : "✗"} ${c.name}${c.detail ? `：${c.detail}` : ""}`);
+      lines.push(`  - ${c.passed ? "✓" : "✗"} ${c.name}${c.detail ? `: ${c.detail}` : ""}`);
     }
     if (r.extraction_quality.warnings?.length) {
-      lines.push(`  - 告警：${r.extraction_quality.warnings.join("；")}`);
+      lines.push(t("ipc.extract.warnings", { items: r.extraction_quality.warnings.join("；") }));
     }
   }
   const units = r.game_units ?? [];
-  lines.push("", "## 输出流程产出（游戏单元 = 剧情树）");
+  lines.push("", t("ipc.extract.outputOutputs"));
   if (units.length === 0) {
-    lines.push("- （未生成游戏单元）");
+    lines.push(t("ipc.extract.noUnits"));
   } else {
     for (const u of units) {
-      lines.push(`- 游戏单元 ${u.index}：${u.generated ? "已生成" : "未生成"}${u.output_dir ? ` · 产出 ${u.output_dir}` : ""}`);
+      lines.push(t("ipc.extract.unit", {
+        i: u.index,
+        status: u.generated ? t("ipc.common.generated") : t("ipc.common.notGenerated"),
+        dir: u.output_dir ? t("ipc.extract.outputDir", { dir: u.output_dir }) : "",
+      }));
     }
-    lines.push("", "> 各游戏单元的完整 D0–D4 逐节点叙事内容已落盘到对应 output run，可在历史中打开查看。");
+    lines.push("", t("ipc.extract.footnote"));
   }
   return lines.join("\n");
 }
@@ -190,13 +194,13 @@ function buildExtractResultContent(result: unknown): string {
 /** C2 体量判断正文。 */
 function buildVolumeContent(h: IpHierarchyResult): string {
   const v = h.volume;
-  if (!v) return "# 体量判断\n\n—";
+  if (!v) return t("ipc.volume.empty");
   return [
-    "# 体量判断\n",
-    `- 判定依据：${v.thresholdBasis}`,
-    `- 字符量：${v.charCount}`,
-    `- 是否短篇：${v.isShort ? "是" : "否"}`,
-    `- 是否超线建议拆解：${v.needsDecompose ? `是（建议 ${v.suggestedChunks} 块）` : "否"}`,
+    t("ipc.volume.title"),
+    t("ipc.volume.basis", { basis: v.thresholdBasis }),
+    t("ipc.volume.charCount", { n: v.charCount }),
+    t("ipc.volume.isShort", { v: v.isShort ? t("ipc.common.yes") : t("ipc.common.no") }),
+    t("ipc.volume.needsDecompose", { v: v.needsDecompose ? t("ipc.volume.suggestChunks", { n: v.suggestedChunks }) : t("ipc.common.no") }),
   ].join("\n");
 }
 
@@ -312,8 +316,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
     setStage("generating");
     // 自动模式端到端直跑亦属"生成中"：置信号使 header/取消键与半自动一致。
     useNarrativeStore.getState().setIpDnaGenerating(true);
-    props.onStageProgress?.("ip_input", "completed", `${files.length} 个上传单体`, buildInputContent(files, displayItems));
-    props.onStageProgress?.("ip_standardize", "running", "自动模式：全程默认直跑");
+    props.onStageProgress?.("ip_input", "completed", t("ipc.msg.uploads", { n: files.length }), buildInputContent(files, displayItems));
+    props.onStageProgress?.("ip_standardize", "running", t("ipc.msg.autoStraight"));
     try {
       const resp = await startIpDnaRun(files, {
         title,
@@ -335,9 +339,9 @@ export function IpStageFlow(props: IpStageFlowProps) {
           (result) => {
             for (const s of IP_AUTO_STEPS) props.onStageProgress?.(s, "completed");
             // 自动模式默认全量改编 / 按体量定档：给改编规划/提取节点补可读默认正文，避免"暂无数据"。
-            props.onStageProgress?.("ip_adapt_plan", "completed", "全量 · 按体量定档", "# 改编规划\n\n- 改编范围：全量改编（自动模式未裁剪）\n- 游戏单元：按体量自动定档（>1 单元成系列）\n- 自定义补充：（自动模式未填，忠实转化）");
+            props.onStageProgress?.("ip_adapt_plan", "completed", t("ipc.msg.fullByVolume"), t("ipc.adapt.autoContent"));
             // 输出流程产出接续到中间预览（点2）：展示 scoped IP DNA + 各游戏单元产出概览。
-            props.onStageProgress?.("ip_dna_extract", "completed", "scoped IP DNA + 下游生成完成", buildExtractResultContent(result));
+            props.onStageProgress?.("ip_dna_extract", "completed", t("ipc.msg.dnaDownstreamDone"), buildExtractResultContent(result));
             setStage("done");
           },
           async (st) => {
@@ -362,7 +366,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
                     props.onStageProgress?.(
                       "ip_standardize",
                       "completed",
-                      `${summary.node_count} 个节点`,
+                      t("ipc.msg.nodes", { n: summary.node_count }),
                       buildHierarchyContent(summary.hierarchy),
                     );
                   }
@@ -414,8 +418,8 @@ export function IpStageFlow(props: IpStageFlowProps) {
     setRangeConfirmed(false); // 重新摄入：复位改编范围确认门
     setQuestionEverShown(false); // 重新摄入：清空上一轮"问题"粘性
 
-    props.onStageProgress?.("ip_input", "completed", `${files.length} 个上传单体`, buildInputContent(files, displayItems));
-    props.onStageProgress?.("ip_standardize", "running", "标准化 + 干扰项过滤");
+    props.onStageProgress?.("ip_input", "completed", t("ipc.msg.uploads", { n: files.length }), buildInputContent(files, displayItems));
+    props.onStageProgress?.("ip_standardize", "running", t("ipc.msg.standardizeFilter"));
     try {
       const resp = await ipDnaIngest(files, { title, decompose: false, async: true, storyTimestamp: draftKeyRef.current });
       const jobId = (resp as unknown as IpDnaJobStartResponse).jobId;
@@ -424,7 +428,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         const h = resp as IpHierarchyResult;
         setHierarchy(h);
         setStage("standardized");
-        props.onStageProgress?.("ip_standardize", "completed", `${h.noise_filtered?.length ?? 0} 干扰项已过滤`, buildHierarchyContent(h.hierarchy, h.noise_filtered));
+        props.onStageProgress?.("ip_standardize", "completed", t("ipc.msg.distractorsFiltered", { n: h.noise_filtered?.length ?? 0 }), buildHierarchyContent(h.hierarchy, h.noise_filtered));
         props.onStageProgress?.("ip_volume", "completed", h.volume?.thresholdBasis, buildVolumeContent(h));
         return;
       }
@@ -432,7 +436,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         const h = result as IpHierarchyResult;
         setHierarchy(h);
         setStage("standardized");
-        props.onStageProgress?.("ip_standardize", "completed", `${h.noise_filtered?.length ?? 0} 干扰项已过滤`, buildHierarchyContent(h.hierarchy, h.noise_filtered));
+        props.onStageProgress?.("ip_standardize", "completed", t("ipc.msg.distractorsFiltered", { n: h.noise_filtered?.length ?? 0 }), buildHierarchyContent(h.hierarchy, h.noise_filtered));
         props.onStageProgress?.("ip_volume", "completed", h.volume?.thresholdBasis, buildVolumeContent(h));
       });
     } catch (e) {
@@ -451,14 +455,14 @@ export function IpStageFlow(props: IpStageFlowProps) {
     setRangeConfirmed(false); // 再标准化改变层级 → 复位改编范围确认门
     setVolumeDecision("redecompose"); // 再标准化中
     try {
-      props.onStageProgress?.("ip_decompose", "running", "拆解 · 再标准化");
+      props.onStageProgress?.("ip_decompose", "running", t("ipc.msg.decomposeRestd"));
       const res = await ipDnaDecompose(runId);
       // 修 bug#4：拆解后重算体量——优先重拉权威 hierarchy(含新 volume)，刷新 C1/C2；
       // 失败则按返回回填并清除"建议拆解"标记，避免"建议拆解"残留。
       try {
         const fresh = await fetchIpHierarchy(runId);
         setHierarchy(fresh);
-        props.onStageProgress?.("ip_standardize", "completed", `${fresh.node_count} 个节点`, buildHierarchyContent(fresh.hierarchy, fresh.noise_filtered));
+        props.onStageProgress?.("ip_standardize", "completed", t("ipc.msg.nodes", { n: fresh.node_count }), buildHierarchyContent(fresh.hierarchy, fresh.noise_filtered));
         props.onStageProgress?.("ip_volume", "completed", fresh.volume?.thresholdBasis, buildVolumeContent(fresh));
       } catch {
         setHierarchy((prev) =>
@@ -472,7 +476,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
             : prev,
         );
       }
-      props.onStageProgress?.("ip_decompose", "completed", `拆解为 ${res.chunk_count} 块`);
+      props.onStageProgress?.("ip_decompose", "completed", t("ipc.msg.decomposedInto", { n: res.chunk_count }));
       // 按设计：再标准化执行后直接进入改编范围（再标准化卡占序号 2、改编范围占 3），不再循环追问。
       setDidRestandardize(true);
       setVolumeDecision("crop");
@@ -662,18 +666,23 @@ export function IpStageFlow(props: IpStageFlowProps) {
   const buildPlanContent = useCallback(
     (full: boolean, plan: { mode: string; units: unknown[] }): string => {
       const lines = [
-        "# 改编规划\n",
-        `- 模式：${plan.mode === "series" ? "系列（多游戏单元）" : "单品（单游戏单元）"}`,
-        `- 游戏单元数：${plan.units.length}`,
+        t("ipc.adapt.title"),
+        t("ipc.adapt.mode", { mode: plan.mode === "series" ? t("ipc.adapt.series") : t("ipc.adapt.single") }),
+        t("ipc.adapt.unitCount", { n: plan.units.length }),
         "",
-        "## 改编范围（每部=一个游戏单元=一个区间）",
+        t("ipc.adapt.scopeHeader"),
       ];
       rows.forEach((r, i) => {
         const whole = full && rows.length === 1;
-        lines.push(`- 第 ${i + 1} 部：${resolveLabel(r.startPath)} ~ ${resolveLabel(r.endPath)}${whole ? "（全量）" : ""}`);
+        lines.push(t("ipc.adapt.part", {
+          i: i + 1,
+          start: resolveLabel(r.startPath),
+          end: resolveLabel(r.endPath),
+          whole: whole ? t("ipc.adapt.wholeSuffix") : "",
+        }));
       });
-      lines.push("", "## 自定义补充（作者改编意图）");
-      lines.push(adaptationNotes.trim() || "（未填写 → 忠实把原 IP 转化为目标品类叙事）");
+      lines.push("", t("ipc.adapt.notesHeader"));
+      lines.push(adaptationNotes.trim() || t("ipc.adapt.notesEmpty"));
       return lines.join("\n");
     },
     [rows, resolveLabel, adaptationNotes],
@@ -729,7 +738,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
       props.onStageProgress?.(
         "ip_adapt_plan",
         "completed",
-        `${plan.units.length} 单元 · ${full ? "全量" : `${selections.length} 处裁剪`}`,
+        `${t("ipc.msg.units", { n: plan.units.length })} · ${full ? t("ipc.common.full") : t("ipc.msg.crops", { n: selections.length })}`,
         buildPlanContent(full, plan),
       );
     } catch (e) {
@@ -748,12 +757,12 @@ export function IpStageFlow(props: IpStageFlowProps) {
     // §状态机重构：置生成信号 → phase=generating（header 显 GENERATING、底部取消键亮）。
     useNarrativeStore.getState().setIpDnaGenerating(true);
     const extractText = [
-      "# 生成 scoped IP DNA\n",
-      `- 作品：${hierarchy?.title ?? title ?? runId}`,
-      `- 层级节点：${hierarchy?.node_count ?? 0}`,
-      "- 已按确认的改编规划（裁剪范围 + 游戏单元）提取结构化 IP DNA，进入下游叙事管线生成游戏叙事资产。",
+      t("ipc.extract.startTitle"),
+      t("ipc.extract.work", { title: hierarchy?.title ?? title ?? runId }),
+      t("ipc.extract.hierNodes", { n: hierarchy?.node_count ?? 0 }),
+      t("ipc.extract.startNote"),
     ].join("\n");
-    props.onStageProgress?.("ip_dna_extract", "running", "生成 scoped IP DNA", extractText);
+    props.onStageProgress?.("ip_dna_extract", "running", t("ipc.msg.genDna"), extractText);
     // §图2 品类透传：把 ROUTING 选定的 genreCode 一并发给 generate，
     // 后端据其锁定生成品类并派生 pipeline_family，避免 ROUTING 选的叙事需求接不到下游管线。
     const routedGenre = useNarrativeStore.getState().activeConfig?.genreCode ?? undefined;
@@ -780,7 +789,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         await pollJob(jobId, (result) => {
           setStage("done");
           // 输出流程产出接续到中间预览（点2）：scoped IP DNA + 各游戏单元产出概览。
-          props.onStageProgress?.("ip_dna_extract", "completed", "scoped IP DNA + 下游生成完成", buildExtractResultContent(result));
+          props.onStageProgress?.("ip_dna_extract", "completed", t("ipc.msg.dnaDownstreamDone"), buildExtractResultContent(result));
           // 下游 job 完成：收束 IP 预览轨但保留节点（finishIpPreview 不再清空 runningEntryKey）。
           const st = useNarrativeStore.getState();
           st.finishIpPreview("completed");
@@ -788,7 +797,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         });
       } else {
         setStage("done");
-        props.onStageProgress?.("ip_dna_extract", "completed", "scoped IP DNA 已生成");
+        props.onStageProgress?.("ip_dna_extract", "completed", t("ipc.msg.dnaGenerated"));
       }
     } catch (e) {
       setError((e as Error).message);

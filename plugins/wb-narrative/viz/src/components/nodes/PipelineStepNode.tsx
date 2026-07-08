@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from "reactflow";
 import type { StepStatus } from "../../types";
 import { GenericObjectView } from "../shared/GenericObjectView";
 import { useNarrativeStore } from "../../store/narrativeStore";
+import { useT } from "../../i18n";
 
 interface PipelineStepData {
   label: string;
@@ -107,6 +108,7 @@ function ExpandedOverlay({
 }: {
   label: string; dotColor: string; isStory: boolean; stepData: unknown; status: StepStatus;
 }) {
+  const t = useT();
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const setFocus = useNarrativeStore((s) => s.setFocus);
   const canEdit = (activeEntryStatus === "completed" || activeEntryStatus === "interrupted") && status === "completed";
@@ -135,9 +137,9 @@ function ExpandedOverlay({
               useNarrativeStore.getState().setViewMode("text");
               setTimeout(() => setFocus(label), 50);
             }}
-            title="切换到文本模式编辑"
+            title={t("node.switchToText")}
           >
-            编辑
+            {t("textView.edit")}
           </button>
         </div>
       )}
