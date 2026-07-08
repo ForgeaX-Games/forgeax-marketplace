@@ -31,6 +31,36 @@ import {
 } from "../../pipeline-templates";
 import type { StepState } from "../../store/narrativeStore";
 import { useT, tStepLabel, t as tGlobal } from "../../i18n";
+import { UI_CATALOGS } from "../../i18n/ui";
+
+// Reverse map of tag dimension labels / option values (in any locale) → i18n key,
+// so a frozen record summary like "Story theme：复仇；Story genre：奇幻" can be
+// re-localized for display without touching the backend generation input.
+const TAG_TEXT_TO_KEY: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const loc of ["en", "zh"] as const) {
+    for (const [k, v] of Object.entries(UI_CATALOGS[loc])) {
+      if (k.startsWith("tagDim.") || k.startsWith("tagOpt.")) m.set(v, k);
+    }
+  }
+  return m;
+})();
+
+function localizeTagSummary(text: string, t: (k: string, v?: Record<string, string | number>) => string): string {
+  if (!text || !/[；：]/.test(text)) return text;
+  return text.split("；").map((part) => {
+    const idx = part.indexOf("：");
+    if (idx < 0) {
+      const k = TAG_TEXT_TO_KEY.get(part.trim());
+      return k ? t(k) : part;
+    }
+    const label = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    const lk = TAG_TEXT_TO_KEY.get(label);
+    const vk = TAG_TEXT_TO_KEY.get(val);
+    return `${lk ? t(lk) : label}：${vk ? t(vk) : val}`;
+  }).join("；");
+}
 
 type InputTab = "text" | "tags" | "file";
 type RouteGroup = "narrative" | "planning";
@@ -2295,11 +2325,14 @@ export function TierModeSelector() {
                               : entry.status ?? "?"}
                           </span>
                         </div>
-                        {entry.userInput && (
-                          <div className="hi-input-preview">
-                            {entry.userInput.length > 40 ? entry.userInput.slice(0, 40) + "…" : entry.userInput}
-                          </div>
-                        )}
+                        {entry.userInput && (() => {
+                          const summary = localizeTagSummary(entry.userInput, t);
+                          return (
+                            <div className="hi-input-preview">
+                              {summary.length > 40 ? summary.slice(0, 40) + "…" : summary}
+                            </div>
+                          );
+                        })()}
                         <div className="hi-meta">
                           {entry.routeGroup && <span className="hi-tag">{entry.routeGroup === "planning" ? t("tms.routeGroup.planning") : t("tms.routeGroup.narrative")}</span>}
                           {entry.tier && <span className="hi-tag">{entry.tier}</span>}

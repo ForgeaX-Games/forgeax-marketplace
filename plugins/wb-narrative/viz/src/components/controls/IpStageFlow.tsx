@@ -30,6 +30,7 @@ import {
 import { useNarrativeStore } from "../../store/narrativeStore";
 import type { TierId, ModeId } from "../../types";
 import { useT, t } from "../../i18n";
+import { localizeBackendMessage } from "../../i18n/backendMessage";
 /** 顶层上传单体的展示信息（类型抽象符号）。 */
 export interface IpUploadDisplay {
   name: string;
@@ -284,7 +285,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
         const tick = async () => {
           try {
             const st = await fetchIpDnaJob(jobId);
-            setProgress({ pct: st.progress ?? 0, message: st.message });
+            setProgress({ pct: st.progress ?? 0, message: localizeBackendMessage(st.message, t) });
             onTick?.(st);
             if (st.status === "awaiting_confirmation" || st.status === "completed") {
               onDone(st.result);
@@ -352,7 +353,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
                 props.onStageProgress?.(IP_AUTO_STEPS[i], "completed");
               }
               if (idx < IP_AUTO_STEPS.length) {
-                props.onStageProgress?.(IP_AUTO_STEPS[idx], "running", st.message);
+                props.onStageProgress?.(IP_AUTO_STEPS[idx], "running", localizeBackendMessage(st.message, t));
               }
             }
             // 层级一旦就绪（phase1+ 且拿到 run/story id），拉只读摘要补标准化正文（容错：拉不到则仅状态点亮）。

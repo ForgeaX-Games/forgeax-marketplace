@@ -173,7 +173,10 @@ export function TextViewPanel() {
         <div className="text-progress-bar">
           <ProgressRing progress={progress} size={40} />
           <span className="text-progress-label">
-            {steps.find((s) => s.status === "running")?.label ?? t("textView.preparing")}
+            {(() => {
+              const running = steps.find((s) => s.status === "running");
+              return running ? tStepLabel(running.id, running.label) : t("textView.preparing");
+            })()}
           </span>
         </div>
       )}
@@ -311,6 +314,27 @@ function StepCard({
     displayState === "incomplete" ? t("display.incomplete") :
     null;
 
+  // Backend emits step progress messages in Chinese (interpolating Chinese step
+  // names). Since every message carries a stepId + status, re-derive a localized
+  // message from the (already localized) label + status. Only transform raw
+  // Chinese backend messages; leave already-localized/English text untouched.
+  const locMessage = (() => {
+    if (!message || !/[\u4e00-\u9fff]/.test(message)) return message;
+    const mm = message.match(/(\d+)\s*\/\s*(\d+)/);
+    if (stepStatus === "running") {
+      if (mm) return t("msg.progressCount", { label, n: mm[1], m: mm[2] });
+      if (/重新生成/.test(message)) return t("msg.regeneratingLabel", { label });
+      return t("msg.generatingLabel", { label });
+    }
+    if (stepStatus === "completed") {
+      if (/已恢复/.test(message)) return t("msg.stepRestored", { label });
+      if (/已保留/.test(message)) return t("msg.stepKept", { label });
+      return t("msg.stepDone", { label });
+    }
+    if (stepStatus === "failed") return t("msg.stepFailed", { label });
+    return message;
+  })();
+
   const handleEdit = () => {
     const textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
     setEditContent(typeof draft?.content === "string" ? draft.content : textContent);
@@ -353,8 +377,8 @@ function StepCard({
           ))}
         </div>
       )}
-      {!expanded && message && (stepStatus === "running" || (stepStatus === "completed" && tags.length === 0)) && (
-        <div className="tsc-running-msg">{message}</div>
+      {!expanded && locMessage && (stepStatus === "running" || (stepStatus === "completed" && tags.length === 0)) && (
+        <div className="tsc-running-msg">{locMessage}</div>
       )}
       {expanded && (
         <div className="tsc-body">
@@ -376,7 +400,7 @@ function StepCard({
               result={result}
               isRunning={isRunning}
               isAnimating={isAnimating}
-              message={message}
+              message={locMessage}
             />
           )}
           {fileGroups && fileGroups.length > 0 && (
