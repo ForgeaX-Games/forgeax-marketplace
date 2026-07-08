@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "document": { "type": "object" },
+    "deletedSlug": { "type": "string" }
+  },
+  "required": ["ok", "document", "deletedSlug"]
+}

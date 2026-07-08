@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "itemSlug": { "type": "string" },
+    "deleteIcon": { "type": "boolean" }
+  },
+  "required": ["itemSlug"]
+}
