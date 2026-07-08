@@ -549,7 +549,8 @@ const LLM_PROXY_URL = getLlmProxyUrl();
 const LLM_PROXY_KEY = getLlmProxyKey();
 const API_KEY = getGeminiApiKey();
 
-if (!LLM_PROXY_URL && !API_KEY) {
+if (!LLM_PROXY_URL && !API_KEY && !process.env.VITEST) {
+  // 测试环境（vitest）下允许缺 LLM 配置，使 server 模块可被单测 import（纯函数如 pickIpGenRunOutcome）。
   console.error("❌ LLM_PROXY_URL or GEMINI_API_KEY environment variable is required");
   process.exit(1);
 }
@@ -3829,7 +3830,7 @@ app.post("/api/narrative/ip-dna/:runId/confirm-units", (req, res) => {
 /** 构建 extract/generate 阶段的编排选项（消费已确认态 + 生成控制）。 */
 function buildStageExtractOptions(
   source: ExtractSource,
-  body: { run_generation?: boolean; pipeline_family?: "rpg" | "vn"; tier?: TierId; generation_mode?: ModeId; complexity?: number; model?: string; max_game_units?: number; equip_operators?: boolean; inject_relations?: boolean },
+  body: { run_generation?: boolean; pipeline_family?: "rpg" | "vn"; genre_code?: string; tier?: TierId; generation_mode?: ModeId; complexity?: number; model?: string; max_game_units?: number; equip_operators?: boolean; inject_relations?: boolean },
   onProgress?: (e: IpDnaProgress) => void,
   runtime?: Awaited<ReturnType<typeof resolveIpDnaRuntimeAdapters>>,
 ) {
@@ -3837,6 +3838,14 @@ function buildStageExtractOptions(
   const selections = (c.scope_selections as import("../ip-dna/index.js").AdaptationScopeSelection[] | undefined) ?? [];
   const scope = selections.length ? { full: false, selections } : { full: true };
   const llm = ipDnaLlm(body.model);
+  // ROUTING 透传（§5.1/§L，与一把梭 buildOptions 对齐）：显式 genre_code → 锁定生成品类，
+  // 并据模板派生 pipeline_family，避免 ROUTING 选 vn 仍误跑 rpg 层级链。pipeline_family 显式优先。
+  const explicitGenre =
+    typeof body.genre_code === "string" && body.genre_code.trim().length > 0 ? body.genre_code.trim() : undefined;
+  const familyFromGenre: "rpg" | "vn" | undefined = explicitGenre
+    ? (findGenreByCode(explicitGenre)?.pipelineTemplate?.includes("vn") ? "vn" : "rpg")
+    : undefined;
+  const effectiveFamily = body.pipeline_family ?? familyFromGenre;
   return {
     files: [] as IncomingFile[],
     title: source.title,
@@ -3848,7 +3857,7 @@ function buildStageExtractOptions(
     adaptationNotes: c.adaptation_notes as string | undefined,
     targetUnits: c.target_units as number | undefined,
     targetComplexity: body.complexity,
-    pipelineFamily: body.pipeline_family,
+    pipelineFamily: effectiveFamily,
     llm,
     queryEmbedder: runtime?.queryEmbedder,
     frameSampler: runtime?.frameSampler,
@@ -3862,7 +3871,14 @@ function buildStageExtractOptions(
     maxGameUnits: body.max_game_units,
     tier: body.tier,
     generationMode: body.generation_mode,
-    pipelineConfig: { apiKey: API_KEY || undefined, proxyUrl: LLM_PROXY_URL || undefined, model: body.model ?? getDefaultModel(), complexity: body.complexity },
+    pipelineConfig: {
+      apiKey: API_KEY || undefined,
+      proxyUrl: LLM_PROXY_URL || undefined,
+      model: body.model ?? getDefaultModel(),
+      complexity: body.complexity,
+      // 显式品类锁定生成模板（buildGenerationPipelineConfig 仅在未设时才用 family 代表品类兜底）。
+      ...(explicitGenre ? { genreCode: explicitGenre } : {}),
+    },
     onProgress,
   };
 }
@@ -3883,6 +3899,19 @@ const summarizeExtractGenerate = (result: Awaited<ReturnType<typeof runExtractAn
     generated: !!gu.generated,
   })),
 });
+
+/**
+ * ipgen SSE run 完成收尾产物选取（C1）：取【末个已生成单元】的 generated 作为该 run 的 result
+ * （与用户观看铺开的最后一棵叙事图一致），并取首个有 outputDir 的单元回填 output 目录。
+ * 抽为纯函数便于单测——server 模块顶层会 app.listen，不宜整体拉起做 HTTP 测。
+ */
+export function pickIpGenRunOutcome(
+  gameUnits: Awaited<ReturnType<typeof runExtractAndGenerate>>["gameUnits"],
+): { result?: NarrativeContext; outputDir?: string } {
+  const result = [...gameUnits].reverse().find((g) => g.generated)?.generated;
+  const outputDir = gameUnits.find((g) => g.outputDir)?.outputDir;
+  return { result, outputDir };
+}
 
 /** ③ 生成 scoped IP DNA（§5 步骤 4，run_generation=false）：仅提取，不跑下游生成。 */
 app.post("/api/narrative/ip-dna/:runId/extract", async (req, res) => {
@@ -3905,19 +3934,59 @@ async function runStageExtractGenerate(req: express.Request, res: express.Respon
   const body = { ...(req.body ?? {}), run_generation: runGeneration } as Parameters<typeof buildStageExtractOptions>[1];
   if ((req.body ?? {}).async === true) {
     const job = createJob({ story_timestamp: source.story_timestamp, stage: "phase2b_adapt" });
-    res.status(202).json({ jobId: job.jobId, story_timestamp: source.story_timestamp, status: job.status });
+    // §图2：当本次会跑下游生成（runGeneration）时，为下游叙事管线注册一个正式 SSE run。
+    // 前端拿到 generationRunId 后 startNewRun 挂载 SSE，即可在 ip_* 前驱步之后继续显示
+    // 下游 pipeline_steps_announce 铺开的叙事节点与逐步进度，跑完由 done 帧收尾——
+    // 此前下游 pipeline.run() 在进程内静默跑、无 SSE，UI 永远只见 ip_dna_extract 且卡在「生成中」。
+    const genRunId = runGeneration
+      ? `ipgen_${source.story_timestamp}_${Math.random().toString(36).slice(2, 8)}`
+      : undefined;
+    let genState: RunState | undefined;
+    if (genRunId) {
+      genState = {
+        id: genRunId,
+        status: "running",
+        progress: [],
+        streamBuffer: [],
+        startedAt: new Date().toISOString(),
+        tier: body.tier,
+        mode: body.generation_mode,
+      };
+      runs.set(genRunId, genState);
+    }
+    res.status(202).json({ jobId: job.jobId, story_timestamp: source.story_timestamp, status: job.status, generationRunId: genRunId });
     void (async () => {
       try {
         updateJob(job.jobId, { status: "running", stage: "phase2b_adapt" });
         const runtime = await resolveIpDnaRuntimeAdapters(process.env);
-        const opts = buildStageExtractOptions(source, body, (e) => {
+        const baseOpts = buildStageExtractOptions(source, body, (e) => {
           updateJob(job.jobId, { status: "running", stage: e.phase, progress: Math.round((e.ratio ?? 0) * 100), message: e.message });
         }, runtime);
+        const opts = genState
+          ? {
+              ...baseOpts,
+              onGenerationProgress: (p: PipelineProgress) => {
+                if (p.type === "streaming") genState!.streamBuffer.push(p);
+                else genState!.progress.push(p);
+                capturePipelineSteps(genState!, p);
+              },
+            }
+          : baseOpts;
         const result = await runExtractAndGenerate(opts, source);
         updateJob(job.jobId, { status: "completed", stage: "done", progress: 100, result: summarizeExtractGenerate(result) });
+        if (genState) {
+          // §图2 / 多单元收尾：把末单元生成产物写入 ipgen run 的 result（与用户观看铺开的最后一棵叙事图一致），
+          // 并回填 output 目录。此前只置 status 不写 result，前端 done 时 fetchResult 取不到 result → 误报
+          // "Result unavailable" 卡「生成中」；多单元整体汇总仍由 job.result.game_units 在提取卡展示。
+          const outcome = pickIpGenRunOutcome(result.gameUnits);
+          if (outcome.result) genState.result = outcome.result;
+          if (outcome.outputDir) genState.outputDir = outcome.outputDir;
+          genState.status = "completed";
+        }
       } catch (e) {
         console.error("[Server] ip-dna extract/generate failed:", e);
         updateJob(job.jobId, { status: "failed", error: (e as Error).message });
+        if (genState) { genState.status = "failed"; genState.error = (e as Error).message; }
       }
     })();
     return;
@@ -3995,7 +4064,8 @@ app.post("/api/narrative/ip-dna/analyze-impact", (req, res) => {
   res.json({ runId: runId ?? null, ...impact });
 });
 
-app.listen(PORT, () => {
+// 测试环境（vitest）下不真正监听端口，使 server 模块可被单测 import（如 pickIpGenRunOutcome）。
+if (!process.env.VITEST) app.listen(PORT, () => {
   cleanupStaleRunningManifests();
   console.log(`🚀 Narrative Studio API v0.4.0 running on http://localhost:${PORT}`);
   console.log(`   Health:     GET  /api/health`);

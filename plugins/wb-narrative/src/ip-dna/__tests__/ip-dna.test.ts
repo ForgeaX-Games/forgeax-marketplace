@@ -25,7 +25,7 @@ import {
   normalizeTemplate,
   mapTemplateToContext,
 } from "../phase2-extract.js";
-import { resolveVnActCount, deriveRpgTargetStructure, planPipelineRuns, MIN_PLOT_TREE_NODES } from "../phase2c-gen-adapt.js";
+import { resolveVnActCount, deriveRpgTargetStructure, planPipelineRuns, MIN_PLOT_TREE_NODES, buildSeriesEndingDirective, DEFAULT_MAX_ENDINGS_PER_SERIES_UNIT } from "../phase2c-gen-adapt.js";
 import { KeywordOperatorRetriever, inferPerspective, precheckConflict, fillSlot } from "../phase3-rag.js";
 import { KagGraph } from "../phase3b-kag.js";
 import { analyzeRewriteImpact, projectAllPerspectives } from "../phase4-rewrite.js";
@@ -307,6 +307,24 @@ describe("phase2c 管线适配", () => {
     expect(rpg[0].topLevelMapping).toBe("rpg-L0");
     expect(rpg[0].targetStructure).toBeDefined();
   });
+
+  it("buildSeriesEndingDirective：系列结局收束约束（§4.6b）", () => {
+    // 单品/单部 → 不注入。
+    expect(buildSeriesEndingDirective("single", 1, 1)).toBe("");
+    expect(buildSeriesEndingDirective("series", 1, 1)).toBe("");
+    // 系列非末部：承接结局 + 数量上限 + 禁跨部连边。
+    const mid = buildSeriesEndingDirective("series", 1, 3);
+    expect(mid).toContain("承接结局");
+    expect(mid).toContain(String(DEFAULT_MAX_ENDINGS_PER_SERIES_UNIT));
+    expect(mid).toContain("禁止");
+    // 系列末部：全部就地收束、不留钩子。
+    const last = buildSeriesEndingDirective("series", 3, 3);
+    expect(last).toContain("最后一部");
+    expect(last).toContain("就地收束");
+    expect(last).not.toContain("承接结局");
+    // 自定义上限透传。
+    expect(buildSeriesEndingDirective("series", 2, 3, 4)).toContain("4 个以内");
+  });
 });
 
 describe("phase3 三视角 RAG", () => {
@@ -415,8 +433,14 @@ describe("phase4 改写影响面 + 投影", () => {
 describe("filesystem 落盘往返", () => {
   it("saveIpDna → loadHierarchyIndex + loadNodeTriad 懒加载", () => {
     const dna = createEmptyIpDna({ story_id: "20260101_1200", title: "落盘测试", media_type: "book" });
+    dna.nodes[dna.rootId].displayName = "《落盘测试》";
     dna.nodes["u1"] = {
       id: "u1", levelType: "unit", index: 1, title: "单元1", parent: dna.rootId, children: [],
+      displayName: "1_《单元1》",
+      lineage: [
+        { id: dna.rootId, levelType: "complete", index: 0, displayName: "《落盘测试》" },
+        { id: "u1", levelType: "unit", index: 1, displayName: "1_《单元1》" },
+      ],
       template: normalizeTemplate({ summary: { characters: ["甲"], scene: "城", events: "事" } }),
       operators: [{ uid: "o1", name: "算子", definition: "d", adaptation: { type: "t", element: "e" }, usage_guide: "g", example: "x", knowledge_location: "l", knowledge_domain: "故事内容" }],
       metadata: { processing_status: "extracted", adaptation_status: "未改编" },
@@ -428,8 +452,8 @@ describe("filesystem 落盘往返", () => {
     expect(idx?.nodes["u1"]).toBeDefined();
     // 索引不含三件套正文
     expect(idx?.nodes["u1"].template).toBeUndefined();
-    // 懒加载三件套
-    const triad = loadNodeTriad("20260101_1200", "落盘测试", "u1", { cwd: TMP });
+    // 懒加载三件套（按 lineage 嵌套 displayName 目录写入/读取，路径对称）
+    const triad = loadNodeTriad("20260101_1200", "落盘测试", idx!.nodes["u1"], { cwd: TMP });
     expect(triad.template?.summary.characters).toEqual(["甲"]);
     expect(triad.operators?.[0].uid).toBe("o1");
   });

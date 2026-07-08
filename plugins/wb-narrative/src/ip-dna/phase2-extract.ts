@@ -15,6 +15,7 @@ import { loadIpDnaPrompt } from "./prompt-loader.js";
 import type {
   NarrativeIpDna,
   HierarchyNode,
+  HierarchyLevelType,
   NarrativeTemplate,
   NarrativeOperator,
   TemplateSummary,
@@ -143,6 +144,14 @@ export function aggregateSubtreeTemplates(dna: NarrativeIpDna, rootId: string): 
   if (childTemplates.length === 0) return node.template;
   const aggregated = aggregateTemplates(childTemplates);
   node.template = aggregated;
+  // 确定性降级（无 LLM）：父层算子无法提取，留空数组 + 元数据，保证每层文件夹三件套齐全（§4.2）。
+  if (node.operators === undefined) node.operators = [];
+  node.metadata = node.metadata ?? {
+    processing_status: "extracted",
+    adaptation_status: "未改编",
+    stats: { operator_count: 0 },
+    updated_at: new Date().toISOString(),
+  };
   return aggregated;
 }
 
@@ -231,6 +240,78 @@ export async function synthesizeParentSummary(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// 父层算子提取（§3.2 分层提炼策略）：父层算子的关注维度与底层不同——
+//   中层（章/部/卷/季）：文学风格 / 主题 / 整体情节 / 叙事框架-顺序-节奏-策略 / 情节技巧；
+//   顶层（完整内容）：世界观 / 角色塑造与弧光 / 人物关系 / 情感体验 / 叙事者定位 / 表达方式。
+// 之前聚合层只上卷 template + 精炼 summary，从不提取父层自身算子（父层 operators.json 缺失）。
+// 这里补齐：每个内部/聚合节点按其层级维度 LLM 提取自己的算子，与叶子微观算子并列（非其并集）。
+// ─────────────────────────────────────────────────────────────────
+
+/** 父层算子的分层关注维度（§3.2），unit 层不用（走叶子 extractUnitTemplate）。 */
+const PARENT_OPERATOR_FOCUS: Record<Exclude<HierarchyLevelType, "unit">, string> = {
+  complete:
+    "顶层（完整叙事内容）算子——聚焦宏观全局维度：世界观（空间/政治/经济/文化）、角色塑造与弧光、人物关系、情感体验、叙事者定位、整体表现/表达方式。切勿输出对白/语气/局部情节这类底层微观算子。",
+  part:
+    "中层（部/卷/季）算子——聚焦承上启下维度：文学风格、故事主题、整体情节走向、叙事框架/顺序/节奏/策略、情节技巧。不要输出局部对白/单句腔调这类底层微观算子。",
+  chapter:
+    "中层（章）算子——聚焦承上启下维度：文学风格、故事主题、本章整体情节、叙事框架/顺序/节奏/策略、情节技巧。不要输出局部对白/单句腔调这类底层微观算子。",
+};
+
+const PARENT_OPERATOR_SYSTEM = loadIpDnaPrompt(
+  "parent-operator-extract",
+  `你是叙事算子提取助手。给定一个【父层级】叙事单元（由若干下层单元聚合而成）的摘要与模板，提取**该层级特有维度**的叙事算子。父层算子关注的维度与底层（对白/独白/语气/局部情节腔调）不同，务必按下述层级重点提取：
+{{focus}}
+每个算子遵循 8 字段标准：uid/name/definition/adaptation{type,element}/usage_guide/example/knowledge_location/knowledge_domain。knowledge_domain 取五大核心分类之一：叙事者定位 / 情感体验 / 文学风格 / 故事内容 / 叙事技巧。忠实归纳、不臆造原文没有的手法。仅输出 JSON：{"operators":[ ... ]}。`,
+);
+
+/** 归一算子：补齐缺省 8 字段，缺 uid 时按 name+序号生成，保证下游注入/落盘不 NPE。 */
+export function normalizeOperator(raw: Partial<NarrativeOperator>, fallbackUid: string): NarrativeOperator {
+  return {
+    uid: (raw.uid ?? "").trim() || fallbackUid,
+    name: (raw.name ?? "").trim(),
+    definition: (raw.definition ?? "").trim(),
+    adaptation: { type: (raw.adaptation?.type ?? "").trim(), element: (raw.adaptation?.element ?? "").trim() },
+    usage_guide: (raw.usage_guide ?? "").trim(),
+    example: (raw.example ?? "").trim(),
+    knowledge_location: (raw.knowledge_location ?? "").trim(),
+    knowledge_domain: (raw.knowledge_domain ?? "").trim(),
+  };
+}
+
+/**
+ * 父层级算子提取（§3.2 分层策略）。给定父节点层级 + 聚合 template，提取该层维度专属算子。
+ * 无 LLM / 失败 → 返回 []（诚实留空，不拿子算子冒充；子算子池由 collectOperatorPool 另行组装供注入）。
+ */
+export async function extractParentOperators(
+  llm: LLMClient | undefined,
+  node: Pick<HierarchyNode, "id" | "title" | "levelType">,
+  aggregated: NarrativeTemplate,
+): Promise<NarrativeOperator[]> {
+  if (!llm) return [];
+  const levelType = node.levelType === "unit" ? "chapter" : node.levelType; // 容错：非法层级按中层处理
+  const focus = PARENT_OPERATOR_FOCUS[levelType as Exclude<HierarchyLevelType, "unit">] ?? PARENT_OPERATOR_FOCUS.chapter;
+  const ce = aggregated.core_elements;
+  const context = [
+    `# 父层级标题\n${node.title}`,
+    `# 层级类型\n${levelType}`,
+    `# 聚合摘要\n- 角色：${(aggregated.summary.characters ?? []).join("、")}\n- 场景：${aggregated.summary.scene}\n- 事件脉络：${aggregated.summary.events}`,
+    `# 核心要素\n- 题材：${ce.subject}\n- 主题：${ce.theme}\n- 核心冲突：${ce.core_conflict}\n- 文学风格：${ce.literature_style}\n- 情感体验：${ce.emotion_experience}`,
+    `# 世界观设定\n${aggregated.worldview.setting}`,
+  ].join("\n\n");
+  try {
+    const raw = await llm.callWithRetry(PARENT_OPERATOR_SYSTEM.replace("{{focus}}", focus), context, {
+      responseFormat: "json",
+      temperature: 0.3,
+    });
+    const parsed = parseJSON<{ operators?: Partial<NarrativeOperator>[] }>(raw);
+    const list = Array.isArray(parsed.operators) ? parsed.operators : [];
+    return list.map((op, i) => normalizeOperator(op, `${node.id}_op${i + 1}`));
+  } catch {
+    return []; // LLM 不可用 / 解析失败 → 确定性降级（§3.3，算子只增强质量、不阻断）。
+  }
+}
+
 /**
  * 批压缩 + 迭代归并（§3.3）：子摘要超 batchSize 时分批合并为更少中间摘要，反复直至 ≤batchSize，
  * 再合成最终父摘要。控制 prompt 体量，支撑千章级（macro）聚合。
@@ -286,7 +367,7 @@ export async function aggregateSubtreeTemplatesRecursive(
       if (t) childTemplates.push(t);
     }
     if (childTemplates.length === 0) return node.template;
-    const aggregated = aggregateTemplates(childTemplates); // 确定性结构上卷（worldview/角色/算子/拓扑）
+    const aggregated = aggregateTemplates(childTemplates); // 确定性结构上卷（worldview/角色/拓扑）
     if (options.llm) {
       const childSummaries = childTemplates.map((t) => t.summary);
       aggregated.summary =
@@ -295,6 +376,15 @@ export async function aggregateSubtreeTemplatesRecursive(
           : await synthesizeParentSummary(options.llm, node.title, childSummaries);
     }
     node.template = aggregated;
+    // §3.2 父层算子：按本层维度 LLM 提取自身算子（与叶子微观算子并列，非其并集）。
+    // 无 LLM 时返回 []（诚实留空）；写回 operators + metadata 使每层文件夹三件套齐全。
+    node.operators = await extractParentOperators(options.llm, node, aggregated);
+    node.metadata = {
+      processing_status: "extracted",
+      adaptation_status: node.metadata?.adaptation_status ?? "未改编",
+      stats: { ...(node.metadata?.stats ?? {}), operator_count: node.operators.length },
+      updated_at: new Date().toISOString(),
+    };
     return aggregated;
   };
   return recurse(rootId);

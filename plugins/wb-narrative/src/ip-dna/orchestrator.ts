@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LLMClient } from "../pipeline/llm-client.js";
 import { NarrativePipeline } from "../pipeline/pipeline.js";
-import type { NarrativeContext, PipelineConfig, TierId, ModeId } from "../types/index.js";
+import type { NarrativeContext, PipelineConfig, TierId, ModeId, PipelineProgress } from "../types/index.js";
 import type {
   NarrativeIpDna,
   HierarchyNode,
@@ -67,7 +67,7 @@ import {
 import type { QualityCheck } from "./job.js";
 import { saveIpDna, outputRunDir, processingDir, saveOperatorSolution, extractionOutputDir, saveNodeProcessingMarkdown, saveManifest, loadManifest, loadFullIpDna, saveHierarchyIndexOnly, loadStandardizedText, loadHierarchyIndex, loadHierarchyIndexByRun, saveAdaptationDirective, saveIpDnaRunManifest, packageDir } from "./filesystem.js";
 import { buildCorpusRetriever, equipAndConsume } from "./phase3-rag.js";
-import { resolveVnActCount, mapGameUnitToPipeline, representativeGenreForFamily, type PipelineFamily, type GameUnitPipelinePlan } from "./phase2c-gen-adapt.js";
+import { resolveVnActCount, mapGameUnitToPipeline, representativeGenreForFamily, buildSeriesEndingDirective, type PipelineFamily, type GameUnitPipelinePlan } from "./phase2c-gen-adapt.js";
 import { buildKagFromTemplate, renderRelationInjection } from "./phase3b-kag.js";
 import { buildLedgerFromTemplate, appendLedger, saveLedger, loadLedger, mergeLedger, harvestLedgerFromGenerated, type LongMemoryLedger } from "./phase5-polish.js";
 import { hydrateContextFromSeed, type GenerationSeed } from "./generation-seed.js";
@@ -176,6 +176,12 @@ export interface IpDnaOrchestratorOptions {
   generationMode?: ModeId;
 
   onProgress?: (e: IpDnaProgress) => void;
+  /**
+   * 下游生成管线（NarrativePipeline.run）的逐步进度钩子。提供则 defaultGenerationRunner 把它接到
+   * 生成管线的 onProgress 上，使 IP 改编「开始生成」后下游叙事步骤（announce + 每步 progress）能被
+   * server 桥接为正式 SSE run，前端逐节点显示、跑完收尾（否则下游在进程内静默跑，UI 只见 ip_* 前驱步）。
+   */
+  onGenerationProgress?: (p: PipelineProgress) => void;
 }
 
 export interface GameUnitResult {
@@ -427,7 +433,7 @@ export async function runIngest(options: IpDnaOrchestratorOptions): Promise<Inge
   for (const [nodeId, text] of ingestUnitTexts) {
     if (!text.trim()) continue;
     try {
-      saveNodeProcessingMarkdown(story_timestamp, title, media_type, nodeId, dna.nodes[nodeId]?.displayName ?? dna.nodes[nodeId]?.title ?? nodeId, text, { cwd: options.cwd });
+      saveNodeProcessingMarkdown(story_timestamp, title, media_type, dna.nodes[nodeId] ?? { id: nodeId, title: nodeId }, text, { cwd: options.cwd });
     } catch {
       /* 落盘失败不阻断主链 */
     }
@@ -614,7 +620,13 @@ export async function runExtractAndGenerate(
     const notesBlock = directive.adaptation_notes?.trim()
       ? `## 作者改编补充说明（请据此判断改编哪些维度并定点替换，其余维度忠实于原作）\n${directive.adaptation_notes.trim()}`
       : "";
-    const finalUserInput = [generationInput.userInput, relationBrief, notesBlock]
+    // §4.6b 系列结局收束：系列每部注入"承接/收束结局 + 结局数量上限"约束，防结局爆炸、保跨部承接。
+    const endingBlock = buildSeriesEndingDirective(
+      directive.game_unit_plan.mode,
+      unit.index,
+      directive.game_unit_plan.units.length,
+    );
+    const finalUserInput = [generationInput.userInput, relationBrief, notesBlock, endingBlock]
       .filter((s): s is string => !!s && s.length > 0)
       .join("\n\n");
     generationInput.userInput = finalUserInput;
@@ -689,6 +701,7 @@ export async function runExtractAndGenerate(
   if (runGen) {
     const limit = options.maxGameUnits ?? gameUnits.length;
     const runner = options.generate ?? defaultGenerationRunner(options);
+    const isSeries = directive.game_unit_plan.mode === "series";
     for (let i = 0; i < Math.min(limit, gameUnits.length); i++) {
       const gu = gameUnits[i];
       emit({
@@ -696,6 +709,12 @@ export async function runExtractAndGenerate(
         message: `生成游戏单元 ${gu.index}/${gameUnits.length}`,
         ratio: 0.7 + 0.3 * ((i + 1) / Math.max(1, Math.min(limit, gameUnits.length))),
       });
+      // §4.6b 跨部承接：系列第 2 部起，把已累积账本（含上一部生成产物的世界/角色/结局决策）
+      // 喂给本部生成，让下一部真正续上一部（此前各部只用自身模板账本、互不相通）。
+      if (isSeries && i > 0) {
+        gu.seed = { ...gu.seed, ledger };
+        (gu.seedContext as Record<string, unknown>)._long_memory_ledger = ledger;
+      }
       gu.generated = await runner({
         userInput: gu.generationInput.userInput,
         uploadedScript: gu.generationInput.uploadedScript,
@@ -791,6 +810,9 @@ function defaultGenerationRunner(options: IpDnaOrchestratorOptions): GenerationR
       ...buildGenerationPipelineConfig(options, seed.family),
       // NarrativePipeline 从类型化种子契约显式水合 ctx（T4）。
       resumeCtx: hydrateContextFromSeed(seed),
+      // 下游逐步进度桥接（§图2）：提供 onGenerationProgress 时把生成管线进度透出，
+      // 供 server 注册为 SSE run，让前端在 ip_* 前驱步之后继续显示下游叙事节点。
+      ...(options.onGenerationProgress ? { onProgress: options.onGenerationProgress } : {}),
     });
     return pipeline.run(userInput, uploadedScript ? { uploadedScript } : undefined);
   };

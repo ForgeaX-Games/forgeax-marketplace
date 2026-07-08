@@ -125,7 +125,7 @@ export function App() {
     prevStepsRef.current = snapshot;
   }, [activeSteps]);
 
-  const statusLabel = displayStatus === "running" ? "GENERATING" : displayStatus === "completed" ? "DONE" : displayStatus === "interrupted" ? "INTERRUPTED" : "STANDBY";
+  const statusLabel = displayStatus === "running" ? t("app.status.generating") : displayStatus === "completed" ? t("app.status.done") : displayStatus === "interrupted" ? t("app.status.interrupted") : t("app.status.standby");
 
   const handleExport = useCallback(() => {
     const state = useNarrativeStore.getState();
@@ -177,7 +177,7 @@ export function App() {
         {showCenter && (
           <div className="app-right-panel editor-center-workspace">
             <header className="workbench-pane-header cw-preview-header">
-              <span className="workbench-pane-title">叙事预览</span>
+              <span className="workbench-pane-title">{t("app.previewTitle")}</span>
               <span className={`workbench-pane-pill ${displayStatus === "running" ? "running" : ""}`}>
                 {statusLabel}
               </span>

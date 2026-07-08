@@ -138,6 +138,11 @@ export interface IpDnaJobStartResponse {
   jobId: string;
   story_timestamp: string;
   status: string;
+  /**
+   * §图2：下游生成的 SSE run id（仅 generate 且 run_generation=true 时返回）。
+   * 前端据此 startNewRun 挂载 SSE，在 ip_* 前驱步之后继续显示下游叙事节点与进度。
+   */
+  generationRunId?: string;
 }
 
 export interface IpDnaJobStatus {
@@ -387,10 +392,11 @@ export async function ipDnaExtract(
 /** 开始生成（§5 步骤4→5）：提取 + 下游生成自动串跑。async=true 走 job。 */
 export async function ipDnaGenerate(
   runId: string,
-  opts: { pipelineFamily?: "rpg" | "vn"; tier?: TierId; generationMode?: ModeId; complexity?: number; maxGameUnits?: number; equipOperators?: boolean; model?: string; async?: boolean } = {},
+  opts: { pipelineFamily?: "rpg" | "vn"; genreCode?: string; tier?: TierId; generationMode?: ModeId; complexity?: number; maxGameUnits?: number; equipOperators?: boolean; model?: string; async?: boolean } = {},
 ): Promise<IpDnaJobStartResponse | IpDnaJobStatus["result"]> {
   return postJson(`${API_BASE}/api/narrative/ip-dna/${encodeURIComponent(runId)}/generate`, {
     pipeline_family: opts.pipelineFamily,
+    genre_code: opts.genreCode,
     tier: opts.tier,
     generation_mode: opts.generationMode,
     complexity: opts.complexity,

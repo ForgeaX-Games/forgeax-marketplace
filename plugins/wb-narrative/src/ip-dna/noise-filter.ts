@@ -56,6 +56,74 @@ export function isSpecialChapter(title: string): boolean {
   return SPECIAL_CHAPTER_KEYWORDS.some((kw) => t.startsWith(kw) || t.includes(kw));
 }
 
+// ─────────────────────────────────────────────────────────────────
+// 章节号识别（移植 chapter_filter_utils.py 的白名单闸门核心）：
+// 参考实现对非黑名单文件还要求「能抽出章节号，否则丢弃」，本 TS 之前只迁了黑名单半边。
+// 这里补齐章节号识别，用于「章节结构树」下把抽不出号、又非特殊章节的叶子判为非正文（作者随笔类）。
+// ─────────────────────────────────────────────────────────────────
+
+const CHINESE_DIGIT: Record<string, number> = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+  壹: 1, 贰: 2, 貳: 2, 叁: 3, 參: 3, 肆: 4, 伍: 5, 陆: 6, 陸: 6, 柒: 7, 捌: 8, 玖: 9,
+};
+const CHINESE_UNIT: Record<string, number> = {
+  十: 10, 拾: 10, 百: 100, 佰: 100, 千: 1000, 仟: 1000, 万: 10000, 萬: 10000,
+};
+const CHINESE_NUM_CHARS = "零〇一二两三四五六七八九十百千万壹贰貳叁參肆伍陆陸柒捌玖拾佰仟萬";
+
+/** 中文数字转阿拉伯（支持简繁体 + 位置表示法），移植自参考实现。 */
+export function chineseToArabic(chinese: string): number {
+  if (!chinese) return 0;
+  const hasUnit = [...chinese].some((c) => c in CHINESE_UNIT);
+  if (!hasUnit) {
+    let positional = 0;
+    for (const c of chinese) if (c in CHINESE_DIGIT) positional = positional * 10 + CHINESE_DIGIT[c];
+    return positional;
+  }
+  let result = 0;
+  let temp = 0;
+  let cur = 0;
+  for (const c of chinese) {
+    if (c in CHINESE_DIGIT) {
+      cur = CHINESE_DIGIT[c];
+    } else if (c in CHINESE_UNIT) {
+      const unit = CHINESE_UNIT[c];
+      if (cur === 0) cur = 1;
+      if (unit === 10000) {
+        temp = (temp + cur) * unit;
+        result += temp;
+        temp = 0;
+      } else {
+        temp += cur * unit;
+      }
+      cur = 0;
+    }
+  }
+  return result + temp + cur;
+}
+
+/** 从标题抽章节号（阿拉伯/中文/英文 Chapter），抽不出返回 undefined。 */
+export function extractChapterNumber(title: string): number | undefined {
+  const t = normalizeTitle(title);
+  if (!t) return undefined;
+  const m1 = t.match(/第\s*(\d+)\s*[章回幕节话集]/);
+  if (m1) return Number(m1[1]);
+  const m2 = t.match(new RegExp(`第\\s*([${CHINESE_NUM_CHARS}]+)\\s*[章回幕节话集]`));
+  if (m2) return chineseToArabic(m2[1]) || undefined;
+  const m3 = t.match(/^(\d+)\s*[章回幕节话集][\s_：:]/);
+  if (m3) return Number(m3[1]);
+  const m4 = t.match(new RegExp(`^([${CHINESE_NUM_CHARS}]+)\\s*[章回幕节话集][\\s_：:]`));
+  if (m4) return chineseToArabic(m4[1]) || undefined;
+  const m6 = t.match(/[Cc]hapter\s*(\d+)/);
+  if (m6) return Number(m6[1]);
+  return undefined;
+}
+
+/** 白名单：是否为「有效叙事单元标题」（能抽出章节号 或 特殊章节）。 */
+export function isValidChapterTitle(title: string): boolean {
+  return isSpecialChapter(title) || extractChapterNumber(title) !== undefined;
+}
+
 /** 是否为非正文/干扰节点（应过滤）。特殊章节优先豁免。 */
 export function isNonContentTitle(title: string): boolean {
   const t = normalizeTitle(title);
@@ -97,12 +165,26 @@ export function filterNoiseNodes(dna: NarrativeIpDna): NoiseFilterResult {
     for (const c of node.children ?? []) collectSubtree(c, acc);
   };
 
+  // 白名单闸门预判（移植参考实现）：仅当整棵树「明显是章节结构」（多数叶子能抽出章节号）时，
+  // 才对抽不出号、又非特殊章节的叶子按「非正文（作者随笔/前后言）」处置——避免误伤散文/多模态/单元树。
+  const leaves = Object.values(dna.nodes).filter(
+    (n) => n.id !== dna.rootId && n.levelType !== "complete" && (n.children?.length ?? 0) === 0,
+  );
+  const numberedLeaves = leaves.filter((n) => extractChapterNumber(n.title) !== undefined).length;
+  const chapterStructured = leaves.length >= 3 && numberedLeaves / leaves.length >= 0.6;
+
   // 收集要删除的顶层干扰节点（自身命中即整棵子树删除）。
   const toRemove: HierarchyNode[] = [];
   for (const node of Object.values(dna.nodes)) {
     if (node.id === dna.rootId) continue;
     if (node.levelType === "complete") continue;
-    if (isNonContentTitle(node.title) || isLikelyMediaNoise(node.title)) {
+    const blacklisted = isNonContentTitle(node.title) || isLikelyMediaNoise(node.title);
+    // 白名单闸门：章节结构树里，叶子既非有效章节标题、也非特殊章节 → 视为非正文随笔。
+    const failsWhitelist =
+      chapterStructured &&
+      (node.children?.length ?? 0) === 0 &&
+      !isValidChapterTitle(node.title);
+    if (blacklisted || failsWhitelist) {
       // 仅当父节点不也是待删（避免重复），这里简单标记后统一处理。
       toRemove.push(node);
     }

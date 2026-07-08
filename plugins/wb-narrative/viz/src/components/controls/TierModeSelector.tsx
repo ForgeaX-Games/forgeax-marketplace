@@ -1757,6 +1757,15 @@ export function TierModeSelector() {
     setTagCustomTexts((prev) => ({ ...prev, [dimKey]: val }));
   }, []);
 
+  // 标签 tab「确认」的可用前提：至少选了一个标签维度，或填了任一自定义补充。
+  // 无任何输入时按钮保持禁用（不亮），无法以空内容建立条目。
+  const hasTagInput = useMemo(
+    () =>
+      Object.keys(tagSelections).length > 0 ||
+      Object.values(tagCustomTexts).some((t) => t?.trim()),
+    [tagSelections, tagCustomTexts],
+  );
+
   // 标签 → 输入框自动同步（仅当 inputTab === "tags" 时生效，避免覆盖手动输入）。
   // 用户在标签 tab 任何选择/输入变化都会实时反映到 userInput，去掉了"✓ 确认标签"按钮的中间步骤。
   useEffect(() => {
@@ -1932,7 +1941,7 @@ export function TierModeSelector() {
                     type="button"
                     className="btn-generate btn-generate--compact ip-stage-btn"
                     onClick={handleConfirmTags}
-                    disabled={inputConfirmed && !activeEntryStatus && !inputForkPending}
+                    disabled={!hasTagInput || (inputConfirmed && !activeEntryStatus && !inputForkPending)}
                   >
                     {inputConfirmed && !activeEntryStatus && !inputForkPending ? "✓ 确认" : "确认"}
                   </button>

@@ -11,7 +11,13 @@ import {
   type ExtractSource,
 } from "../orchestrator.js";
 import { runIpDnaPipeline } from "../orchestrator.js";
-import { filterNoiseNodes, isNonContentTitle, isSpecialChapter } from "../noise-filter.js";
+import {
+  filterNoiseNodes,
+  isNonContentTitle,
+  isSpecialChapter,
+  extractChapterNumber,
+  isValidChapterTitle,
+} from "../noise-filter.js";
 import { buildLightHierarchy } from "../phase1-understanding.js";
 import { loadHierarchyIndex } from "../filesystem.js";
 
@@ -53,6 +59,53 @@ describe("WS-B 干扰项过滤", () => {
     expect(titles.some((t) => t.includes("第一章"))).toBe(true);
     expect(titles.some((t) => t.includes("后记"))).toBe(true);
     expect(result.filtered.length).toBeGreaterThan(0);
+  });
+
+  it("章节号识别 + 白名单闸门", () => {
+    expect(extractChapterNumber("第一章 起")).toBe(1);
+    expect(extractChapterNumber("第888章 收魂")).toBe(888);
+    expect(extractChapterNumber("Chapter 5 Title")).toBe(5);
+    expect(extractChapterNumber("闲话江湖")).toBeUndefined();
+    expect(isValidChapterTitle("后记")).toBe(true); // 特殊章节
+    expect(isValidChapterTitle("闲话江湖")).toBe(false); // 抽不出号、非特殊 → 非有效单元
+  });
+
+  it("白名单闸门：章节结构树里剔除不撞黑名单的作者随笔叶子", () => {
+    // 4 个有效章节 + 1 篇既不撞黑名单、又无章节号的随笔（应被白名单闸门剔除）。
+    const text = [
+      "# 第一章 起",
+      "正文一。".repeat(20),
+      "# 第二章 承",
+      "正文二。".repeat(20),
+      "# 第三章 转",
+      "正文三。".repeat(20),
+      "# 第四章 合",
+      "正文四。".repeat(20),
+      "# 闲话江湖",
+      "这是作者的随笔闲聊，不该进提取。",
+    ].join("\n");
+    const dna = buildLightHierarchy({ story_timestamp: "20260101_0001", title: "白名单测试", media_type: "book", text });
+    // 未撞黑名单：确认它是靠白名单闸门而非黑名单被删。
+    expect(isNonContentTitle("闲话江湖")).toBe(false);
+    filterNoiseNodes(dna);
+    const titles = Object.values(dna.nodes).map((n) => n.title);
+    expect(titles.some((t) => t.includes("闲话江湖"))).toBe(false);
+    expect(titles.filter((t) => /第[一二三四]章/.test(t)).length).toBe(4);
+  });
+
+  it("白名单闸门：非章节结构（散文单元树）不误伤", () => {
+    // 整篇散文 → 单 unit 树，叶子无章节号但不该被白名单闸门误删。
+    const dna = buildLightHierarchy({
+      story_timestamp: "20260101_0002",
+      title: "一篇散文",
+      media_type: "book",
+      text: "一段没有任何章节标记的连续散文。".repeat(40),
+    });
+    const beforeLeaves = Object.values(dna.nodes).filter((n) => n.levelType === "unit").length;
+    filterNoiseNodes(dna);
+    const afterLeaves = Object.values(dna.nodes).filter((n) => n.levelType === "unit").length;
+    expect(afterLeaves).toBe(beforeLeaves);
+    expect(beforeLeaves).toBeGreaterThan(0);
   });
 });
 

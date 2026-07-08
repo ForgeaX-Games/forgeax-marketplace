@@ -208,39 +208,37 @@ export function processingDir(
 }
 
 /**
- * 某最小叙事单元的标准化处理目录：<processing>/<规范名>/（每单元一目录，存 content.md）。
- * 文件夹名直接用对外规范名（nodeTitle = displayName「序号_《标题》」），不再加 nodeId 前缀；
- * 规范名已含序号天然唯一，仅在为空时回退 nodeId 兜底，避免空目录名。
+ * 某最小叙事单元的标准化处理目录：<processing>/…/<规范名>/（每单元一目录，存 content.md）。
+ * 与提取(extraction)侧共用同一套「按 lineage 嵌套 + displayName 规范名」骨架（见 nodeRelSegments），
+ * 使标准化与其后各阶段的文件夹结构完全一致、镜像作品层级树，便于审阅与断点续处理（§6.1）。
  */
 export function nodeProcessingDir(
   timestamp: StoryTimestamp,
   title: string,
   media: IpMediaType,
-  nodeId: string,
-  nodeTitle: string,
+  node: Pick<HierarchyNode, "id" | "displayName" | "title" | "lineage">,
   roots?: LayoutRoots,
 ): string {
-  const folder = safeName(nodeTitle).slice(0, 80) || safeName(nodeId);
-  return path.join(processingDir(timestamp, title, media, roots), folder);
+  return path.join(processingDir(timestamp, title, media, roots), ...nodeRelSegments(node));
 }
 
 /**
- * 落盘单个节点的标准化正文为嵌套 markdown（<processing>/<节点>/content.md，§6.1）。
- * 标准化产物按层级树结构镜像存放，便于审阅与断点续处理。
+ * 落盘单个节点的标准化正文为嵌套 markdown（<processing>/…/<节点>/content.md，§6.1）。
+ * 标准化产物按层级树结构镜像存放（与提取三件套同构），便于审阅与断点续处理。
  */
 export function saveNodeProcessingMarkdown(
   timestamp: StoryTimestamp,
   title: string,
   media: IpMediaType,
-  nodeId: string,
-  nodeTitle: string,
+  node: Pick<HierarchyNode, "id" | "displayName" | "title" | "lineage">,
   content: string,
   roots?: LayoutRoots,
 ): string {
-  const dir = nodeProcessingDir(timestamp, title, media, nodeId, nodeTitle, roots);
+  const dir = nodeProcessingDir(timestamp, title, media, node, roots);
   fs.mkdirSync(dir, { recursive: true });
+  const heading = node.displayName ?? node.title ?? node.id;
   const file = path.join(dir, "content.md");
-  fs.writeFileSync(file, `# ${nodeTitle}\n\n${content}\n`, "utf-8");
+  fs.writeFileSync(file, `# ${heading}\n\n${content}\n`, "utf-8");
   return file;
 }
 
@@ -254,15 +252,34 @@ export function extractionOutputDir(
   return familyStageDir(resolveCwd(roots), primaryFamilyOf(media), "extraction_output", runName(timestamp, title));
 }
 
-/** 某层级节点的三件套目录（写入侧，按 media 定位主媒体 extraction）。 */
+/**
+ * 节点在 extraction 目录下的「嵌套相对路径段」：按 lineage(root→自身，含自身) 的规范名
+ * displayName 逐层拼（如 `《题目》/1_《第一卷》/1_《第一章》`），镜像作品的层级/二层结构，
+ * 便于按文件夹浏览。无 lineage（旧数据/骨架）时回退单段 displayName/title，再兜底 nodeId。
+ */
+function nodeRelSegments(
+  node: Pick<HierarchyNode, "id" | "displayName" | "title" | "lineage">,
+): string[] {
+  const seg = (raw: string | undefined, fallback: string): string =>
+    safeName((raw ?? "").trim()).slice(0, 80) || safeName(fallback);
+  if (node.lineage && node.lineage.length > 0) {
+    return node.lineage.map((l) => seg(l.displayName, l.id));
+  }
+  return [seg(node.displayName ?? node.title, node.id)];
+}
+
+/**
+ * 某层级节点的三件套目录（写入侧，按 media 定位主媒体 extraction）。
+ * 目录按 lineage 嵌套 + displayName 规范名命名，与标准化(processing)阶段一致。
+ */
 export function nodeTriadDir(
   timestamp: StoryTimestamp,
   title: string,
   media: IpMediaType,
-  nodeId: string,
+  node: Pick<HierarchyNode, "id" | "displayName" | "title" | "lineage">,
   roots?: LayoutRoots,
 ): string {
-  return path.join(extractionOutputDir(timestamp, title, media, roots), safeName(nodeId));
+  return path.join(extractionOutputDir(timestamp, title, media, roots), ...nodeRelSegments(node));
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -384,9 +401,9 @@ export function saveIpDna(dna: NarrativeIpDna, roots?: LayoutRoots): void {
   };
   writeJson(path.join(extractDir, HIERARCHY_INDEX_FILE), index);
 
-  // 三件套：每节点一个目录。
+  // 三件套：每节点一个目录（按 lineage 嵌套 + displayName 命名）。
   for (const node of Object.values(dna.nodes)) {
-    const dir = nodeTriadDir(story_id, title, media_type, node.id, roots);
+    const dir = nodeTriadDir(story_id, title, media_type, node, roots);
     if (node.template !== undefined) writeJson(path.join(dir, TRIAD_FILES.template), node.template);
     if (node.operators !== undefined) writeJson(path.join(dir, TRIAD_FILES.operators), node.operators);
     if (node.metadata !== undefined) writeJson(path.join(dir, TRIAD_FILES.metadata), node.metadata);
@@ -575,16 +592,25 @@ export function loadHierarchyIndex(
   return loadHierarchyIndexByRun(runName(timestamp, title), roots);
 }
 
-/** 按需加载单个节点的三件套（懒加载）。媒体家族 + legacy 兜底定位 extraction 目录。 */
+/**
+ * 按需加载单个节点的三件套（懒加载）。媒体家族 + legacy 兜底定位 extraction 目录。
+ * 目录优先用新的嵌套 displayName 路径；旧数据（扁平 nodeId 目录）自动回退，保证向后兼容。
+ */
 export function loadNodeTriad(
   timestamp: StoryTimestamp,
   title: string,
-  nodeId: string,
+  node: Pick<HierarchyNode, "id" | "displayName" | "title" | "lineage">,
   roots?: LayoutRoots,
 ): { template?: NarrativeTemplate; operators?: NarrativeOperator[]; metadata?: NodeMetadata } {
   const extractDir = resolveStageDir(resolveCwd(roots), runName(timestamp, title), "extraction_output", HIERARCHY_INDEX_FILE);
   if (!extractDir) return {};
-  const dir = path.join(extractDir, safeName(nodeId));
+  const nestedDir = path.join(extractDir, ...nodeRelSegments(node));
+  const legacyDir = path.join(extractDir, safeName(node.id));
+  const nestedHasTriad =
+    fs.existsSync(path.join(nestedDir, TRIAD_FILES.template)) ||
+    fs.existsSync(path.join(nestedDir, TRIAD_FILES.operators)) ||
+    fs.existsSync(path.join(nestedDir, TRIAD_FILES.metadata));
+  const dir = nestedHasTriad ? nestedDir : legacyDir;
   return {
     template: readJson<NarrativeTemplate>(path.join(dir, TRIAD_FILES.template)),
     operators: readJson<NarrativeOperator[]>(path.join(dir, TRIAD_FILES.operators)),
@@ -605,7 +631,7 @@ export function loadFullIpDna(
   if (!index) return undefined;
   const nodes: NarrativeIpDna["nodes"] = {};
   for (const id of Object.keys(index.nodes)) {
-    const triad = loadNodeTriad(timestamp, title, id, roots);
+    const triad = loadNodeTriad(timestamp, title, index.nodes[id], roots);
     nodes[id] = { ...index.nodes[id], ...triad };
   }
   return { ...index, nodes };
@@ -619,7 +645,7 @@ export function hydrateNode(
 ): HierarchyNode | undefined {
   const node = index.nodes[nodeId];
   if (!node) return undefined;
-  const triad = loadNodeTriad(index.story_id, index.title, nodeId, roots);
+  const triad = loadNodeTriad(index.story_id, index.title, node, roots);
   return { ...node, ...triad };
 }
 
