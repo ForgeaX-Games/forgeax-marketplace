@@ -46,9 +46,10 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 >
 > **动作 opt-in（D-E，默认静态）**：默认只交付**静态**角色。**仅当用户明确说"让角色动起来 / 走 / 跑 / 某个动作"**时，才接 `gen3d:auto-rig` → `gen3d:list-motions` → `gen3d:apply-motion`。rig/motion **按次扣 Meshy credits**，触发前**先告诉用户要花配额并确认**；余额不足时 handler 会以 `provider_insufficient_credits` 拒绝并报价（wb-gen3d T3 护栏）。
 
-> **`reel-storyboard` / `reel-visual` / `reel-video` 是 Reia 的内部专业子智能体**（分镜 / 关键帧 / 出片），
+> **`reel-storyboard` / `reel-visual` / `reel-video` / `reel-editor` 是 Reia 的内部专业子智能体**
+> （分镜 / 关键帧 / 出片 / 时间轴精修剪辑），
 > **只接 Reia 经 `delegate_to_subagent` 的派单，不接用户直接需求**。用户的影游需求一律先派 `reia`，由她
-> 决定是否再把拆分镜 / 出关键帧 / 出片细分给这三个专家。**绝不**把"做个影游"直接路由到这三个子智能体。
+> 决定是否再把拆分镜 / 出关键帧 / 出片 / 时间轴精修细分给这些专家。**绝不**把"做个影游"直接路由到这些子智能体。
   用户说"影游 / 互动影片 / FMV / 恋爱选择片"几乎一定是 `reia`，**不要**误塞进
   pillar→design→code 的做游戏流水线，也不要只丢一句 `/character`/`/narrative` 让用户自己拼。
 

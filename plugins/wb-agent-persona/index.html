@@ -356,7 +356,7 @@
         </div>
         <!-- 普通记忆文件：默认「日记视图」（带人设口吻的只读卡片）。 -->
         <div class="diary" id="mem-diary" style="display:none">
-          <div class="diary-hint">这是 <span id="diary-owner">该 agent</span> 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。</div>
+          <div class="diary-hint"></div>
           <div class="diary-list" id="diary-list"></div>
         </div>
         <!-- 源码模式 / 普通文本编辑器。 -->
@@ -392,12 +392,25 @@ function getLocale() {
 }
 let locale = getLocale();
 
-function onLocaleChanged(next) {
+async function onLocaleChanged(next) {
   if (next !== 'en' && next !== 'zh') return;
   if (next === locale) return;
   locale = next;
   applyChrome();
-  renderList();
+  await loadAgents();
+  if (selectedAgent) {
+    const nm = agentNaming(selectedAgent);
+    document.getElementById('title').textContent = nm.title;
+    if (selectedAgent.agent?.role) {
+      const rolePill = document.getElementById('role-pill');
+      rolePill.textContent = selectedAgent.agent.role;
+    }
+    renderMemFiles();
+    if (memSelected) setMemMode(memMode);
+    if (activeTab === 'skills') renderSkills();
+    if (activeTab === 'workbench') renderWorkbench();
+    if (activeTab === 'persona') await loadPersona();
+  }
 }
 
 const UI = {
@@ -436,6 +449,37 @@ const UI = {
     savedProfileCount: 'Saved · {n} profile facts',
     saved: 'Saved',
     emptyNoAgent: 'No agent selected',
+    loading: 'Loading…',
+    loadFailed: 'Load failed: {status}',
+    personaFallbackZh: 'No English persona — showing Chinese source',
+    loadedChars: 'Loaded ({n} chars)',
+    scanningMemDir: 'Scanning memory folder…',
+    memoryDirUnreadable: 'memoryDir missing or unreadable: {status}',
+    memFileCount: '{n} memory files',
+    noMemFilesEmpty: 'This agent has no memory files yet · enter a filename above and click +',
+    profileFactCount: '{n} profile facts',
+    agentDiary: "{name}'s diary",
+    slotsMode: 'Slots mode',
+    diaryMode: 'Diary mode',
+    slotKeyPlaceholder: 'Fact name (e.g. Timezone / Language)',
+    delete: 'Delete',
+    slotValPlaceholder: 'Fact body (e.g. Asia/Shanghai (UTC+8))',
+    diaryEmpty: 'This diary is empty · switch to Source mode to write the first entry',
+    noMemoryDirWarn: 'This agent has no memoryDir',
+    enterFilename: 'Enter a filename',
+    fileExists: '{name} already exists',
+    creating: 'Creating…',
+    createFailed: 'Create failed: {status}',
+    created: 'Created {name}',
+    createException: 'Create error: {msg}',
+    noDefaultSkill: 'No default skills declared',
+    noOwnSkill: 'No bundled skills',
+    noOwnTool: 'No bundled tools',
+    noProduces: 'No produces declared',
+    wbPluginsTitle: 'Matching workbench plugins',
+    wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-plugin.json under provides.workbench:',
+    wbMatchCount: 'Matching workbench plugins ({n})',
+    diaryHint: 'Long-term memory from {owner}, shown as a diary. Read-only — switch to Source mode above to edit.',
   },
   zh: {
     noAgent: '未选 agent',
@@ -472,6 +516,37 @@ const UI = {
     savedProfileCount: '已保存 · {n} 条画像',
     saved: '已保存',
     emptyNoAgent: '未选 agent',
+    loading: '加载中…',
+    loadFailed: '加载失败: {status}',
+    personaFallbackZh: '暂无英文 persona，显示中文原文',
+    loadedChars: '已加载 ({n} 字符)',
+    scanningMemDir: '扫描记忆目录…',
+    memoryDirUnreadable: 'memoryDir 不存在或不可读: {status}',
+    memFileCount: '{n} 个记忆文件',
+    noMemFilesEmpty: '该 agent 暂无独立记忆文件 · 右上输入文件名 + 号新建',
+    profileFactCount: '{n} 条画像',
+    agentDiary: '{name} 的日记',
+    slotsMode: '槽位模式',
+    diaryMode: '日记模式',
+    slotKeyPlaceholder: '画像名（如 时区 / 语言偏好）',
+    delete: '删除',
+    slotValPlaceholder: '事实正文（如 Asia/Shanghai (UTC+8)）',
+    diaryEmpty: '这本日记还是空的 · 切到「源码模式」写下第一条',
+    noMemoryDirWarn: '该 agent 没有 memoryDir',
+    enterFilename: '请输入文件名',
+    fileExists: '{name} 已存在',
+    creating: '新建中…',
+    createFailed: '新建失败: {status}',
+    created: '已新建 {name}',
+    createException: '新建异常: {msg}',
+    noDefaultSkill: '未声明 default skill',
+    noOwnSkill: '无自带 skill',
+    noOwnTool: '无自带 tool',
+    noProduces: '未声明 produces',
+    wbPluginsTitle: '配套 workbench 插件',
+    wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-plugin.json 的 provides.workbench 加一行：',
+    wbMatchCount: '配套 workbench 插件 ({n})',
+    diaryHint: '这是 {owner} 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
   },
 };
 function t(key, vars) {
@@ -483,6 +558,27 @@ function userProfile() {
   return { id: '__user_profile__', label: t('userProfile'), path: '.forgeax/user/USER.md' };
 }
 function profileHeader() { return t('profileHeader'); }
+
+// State — must be declared before applyChrome() (it reads selectedAgent).
+let agents = [];           // BusPluginInfo[] of kind=agent
+let workbenches = [];      // BusPluginInfo[] of kind=workbench (for cross-ref)
+let avatarRulesById = {};  // short agent id (e.g. "iori") → AgentAvatarRules. ADR-0019.
+let namingById = {};       // short agent id → { title, sub } from /api/workbench/agents?lang=
+let selected = null;       // pluginId
+let selectedAgent = null;  // BusPluginInfo (full slim) of the active agent
+let activeTab = 'persona';
+
+// Persona state
+let personaOriginal = '';
+let personaDirty = false;
+let personaLoadPath = '';
+
+// Memory state
+let memFiles = [];
+let memSelected = null;    // filename within memoryDir, or userProfile().id
+let memOriginal = '';      // 规范化后的 USER.md 原文(用于 dirty 比较)
+let memDirty = false;
+let memMode = 'text';      // 'slots'(用户画像结构化视图) | 'text'(自由文本)
 
 function applyChrome() {
   const title = document.getElementById('title');
@@ -511,8 +607,13 @@ function applyChrome() {
   if (slotsHint) slotsHint.textContent = t('slotsHint');
   const slotAdd = document.getElementById('slot-add');
   if (slotAdd) slotAdd.textContent = t('slotAdd');
-  const diaryOwner = document.getElementById('diary-owner');
-  if (diaryOwner) diaryOwner.textContent = t('diaryOwner');
+  updateDiaryHint();
+}
+function updateDiaryHint(ownerName) {
+  const hint = document.querySelector('.diary-hint');
+  if (!hint) return;
+  const owner = ownerName ?? t('diaryOwner');
+  hint.textContent = t('diaryHint', { owner });
 }
 window.addEventListener('storage', (e) => {
   if (e.key === 'forgeax.locale' && (e.newValue === 'en' || e.newValue === 'zh')) {
@@ -527,25 +628,6 @@ window.addEventListener('message', (e) => {
 applyChrome();
 
 const channel = new BroadcastChannel('wb-agent-persona');
-
-// State
-let agents = [];           // BusPluginInfo[] of kind=agent
-let workbenches = [];      // BusPluginInfo[] of kind=workbench (for cross-ref)
-let avatarRulesById = {};  // short agent id (e.g. "iori") → AgentAvatarRules. ADR-0019.
-let selected = null;       // pluginId
-let selectedAgent = null;  // BusPluginInfo (full slim) of the active agent
-let activeTab = 'persona';
-
-// Persona state
-let personaOriginal = '';
-let personaDirty = false;
-
-// Memory state
-let memFiles = [];
-let memSelected = null;    // filename within memoryDir, or userProfile().id
-let memOriginal = '';      // 规范化后的 USER.md 原文(用于 dirty 比较)
-let memDirty = false;
-let memMode = 'text';      // 'slots'(用户画像结构化视图) | 'text'(自由文本)
 
 // 全局用户画像(USER.md)—— 与具体 agent 无关,固定置顶,所有 agent 详情页共享。
 const PROFILE_LINE_RE = /^- \*\*(.+?)\*\* — ([\s\S]*?)\s*<!-- k:([^\s]+) -->\s*$/;
@@ -593,9 +675,13 @@ function shortId(pluginId) { return pluginId.replace(/^@[^/]+\//, ''); }
 function pluginDir(pluginId) {
   return `packages/marketplace/plugins/${shortId(pluginId)}`;
 }
-function personaPath(agent) {
+function personaDir(agent) {
   const f = agent?.agent?.personaFile?.replace(/^\.\//, '') ?? 'persona/zh.md';
-  return `${pluginDir(agent.id)}/${f}`;
+  const dir = f.replace(/\/[^/]+$/, '');
+  return `${pluginDir(agent.id)}/${dir}`;
+}
+function personaPath(agent, lang = locale) {
+  return `${personaDir(agent)}/${lang}.md`;
 }
 function memoryDir(agent) {
   const m = agent?.agent?.memoryDir;
@@ -608,9 +694,15 @@ function pickLang(text) {
   return locale === 'en' ? (text.en ?? text.zh ?? '') : (text.zh ?? text.en ?? '');
 }
 
-// 统一命名：title=「中文职能·英文名」，sub=灰字英文职能。server 已算好挂 a.naming，
-// 老 server / 缺字段时退回 displayName。
+// 统一命名：zh → server naming（中文职能·英文名）；en → workbench agents API 或 displayName.en。
 function agentNaming(a) {
+  const sid = shortAgentId(a);
+  if (sid && namingById[sid]?.title) return namingById[sid];
+  if (locale === 'en') {
+    if (a?.naming?.title && !/[\u4e00-\u9fff]/.test(a.naming.title)) return a.naming;
+    const enTitle = pickLang(a?.displayName);
+    if (enTitle) return { title: enTitle, sub: a?.naming?.sub ?? a?.agent?.role ?? '' };
+  }
   if (a && a.naming && a.naming.title) return a.naming;
   return { title: pickLang(a && a.displayName), sub: '' };
 }
@@ -744,13 +836,15 @@ async function loadAgents() {
     if (wbAgRes.ok) {
       const wbAg = await wbAgRes.json();
       avatarRulesById = {};
+      namingById = {};
       for (const a of wbAg.agents ?? []) {
         if (a.id && a.avatarRules) avatarRulesById[a.id] = a.avatarRules;
+        if (a.id && a.naming) namingById[a.id] = a.naming;
       }
     }
     renderList();
   } catch (e) {
-    setStatus('persona-status', `加载异常: ${e.message}`, 'warn');
+    setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
   }
 }
 
@@ -923,20 +1017,31 @@ async function selectAgent(pluginId) {
 // ─── Persona tab ──────────────────────────────────────────────────────
 async function loadPersona() {
   if (!selectedAgent) return;
-  const path = personaPath(selectedAgent);
-  setStatus('persona-status', '加载中…');
+  const preferred = personaPath(selectedAgent, locale);
+  const fallback = personaPath(selectedAgent, locale === 'en' ? 'zh' : 'en');
+  setStatus('persona-status', t('loading'));
   try {
-    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    let path = preferred;
+    let r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    let usedFallback = false;
+    if (!r.ok && locale === 'en' && path !== fallback) {
+      r = await fetch(`/api/files?path=${encodeURIComponent(fallback)}`);
+      if (r.ok) { path = fallback; usedFallback = true; }
+    }
     if (!r.ok) {
-      setStatus('persona-status', `加载失败: ${r.status}`, 'warn');
+      setStatus('persona-status', t('loadFailed', { status: r.status }), 'warn');
       setPersonaContent('', false);
       return;
     }
     const body = await r.json();
-    setPersonaContent(body.content ?? '', true);
-    setStatus('persona-status', `已加载 (${(body.content ?? '').length} 字符)`, 'ok');
+    setPersonaContent(body.content ?? '', !usedFallback);
+    const msg = usedFallback
+      ? t('personaFallbackZh')
+      : t('loadedChars', { n: (body.content ?? '').length });
+    setStatus('persona-status', msg, usedFallback ? 'warn' : 'ok');
+    personaLoadPath = path;
   } catch (e) {
-    setStatus('persona-status', `加载异常: ${e.message}`, 'warn');
+    setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
     setPersonaContent('', false);
   }
 }
@@ -954,8 +1059,8 @@ function setPersonaContent(text, enableSave) {
 async function savePersona() {
   if (!selectedAgent) return;
   const ed = document.getElementById('persona-editor');
-  const path = personaPath(selectedAgent);
-  setStatus('persona-status', '保存中…');
+  const path = personaPath(selectedAgent, locale);
+  setStatus('persona-status', t('saving'));
   try {
     const r = await fetch('/api/files', {
       method: 'POST',
@@ -964,17 +1069,17 @@ async function savePersona() {
     });
     if (!r.ok) {
       const err = await r.text().catch(() => '');
-      setStatus('persona-status', `保存失败: ${r.status} ${err}`, 'warn');
+      setStatus('persona-status', t('saveFailed', { status: r.status, err }), 'warn');
       return;
     }
     personaOriginal = ed.value;
     personaDirty = false;
     document.getElementById('persona-reload').disabled = true;
-    setStatus('persona-status', '已保存 · 重载插件中…');
+    setStatus('persona-status', t('savedReloading'));
     await fetch('/api/plugins/reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-    setStatus('persona-status', '已保存 · 插件已重载', 'ok');
+    setStatus('persona-status', t('savedReloaded'), 'ok');
   } catch (e) {
-    setStatus('persona-status', `保存异常: ${e.message}`, 'warn');
+    setStatus('persona-status', t('saveException', { msg: e.message }), 'warn');
   }
 }
 
@@ -994,17 +1099,17 @@ async function loadMemoryFiles() {
     // 没有 per-plugin memoryDir 也要能编辑全局用户画像 → 仍渲染置顶项。
     memFiles = [];
     renderMemFiles();
-    setStatus('mem-status', '该 agent 未声明 memoryDir（仍可编辑全局用户画像）', '');
+    setStatus('mem-status', t('noMemoryDir'), '');
     autoSelectMemory();
     return;
   }
-  setStatus('mem-status', '扫描记忆目录…');
+  setStatus('mem-status', t('scanningMemDir'));
   try {
     const r = await fetch(`/api/files/tree?root=${encodeURIComponent(memDir)}`);
     if (!r.ok) {
       memFiles = [];
       renderMemFiles();
-      setStatus('mem-status', `memoryDir 不存在或不可读: ${r.status}`, '');
+      setStatus('mem-status', t('memoryDirUnreadable', { status: r.status }), '');
       autoSelectMemory();
       return;
     }
@@ -1014,11 +1119,11 @@ async function loadMemoryFiles() {
       .filter((c) => c.type === 'file' && c.name.endsWith('.md'))
       .map((c) => c.name);
     renderMemFiles();
-    setStatus('mem-status', `${memFiles.length} 个记忆文件`, '');
+    setStatus('mem-status', t('memFileCount', { n: memFiles.length }), '');
     autoSelectMemory();
   } catch (e) {
     renderMemFiles();
-    setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
+    setStatus('mem-status', t('loadError', { msg: e.message }), 'warn');
   }
 }
 
@@ -1045,16 +1150,17 @@ function makeMemFileItem(label, name, opts = {}) {
 /** 当前 agent 的短名(英文名/人名),用于"XX 的日记"。命名是「中文职能·英文名」,
  *  取 · 之后那段;无人名则退回整段标题。 */
 function agentShortName() {
-  if (!selectedAgent) return '该 agent';
+  if (!selectedAgent) return t('diaryOwner');
   const title = agentNaming(selectedAgent).title || shortId(selectedAgent.id);
+  if (locale === 'en') return title.split(' · ')[0].trim() || title;
   const parts = title.split(/[·・]/);
   return (parts.length > 1 ? parts[parts.length - 1] : parts[0]).trim() || title;
 }
 
-/** 记忆文件名 → 友好标签:lessons → "XX 的日记";其余去掉 .md 后缀。 */
+/** 记忆文件名 → 友好标签:lessons → "XX's diary";其余去掉 .md 后缀。 */
 function memFileLabel(name) {
   const stem = name.replace(/\.md$/i, '');
-  if (stem.toLowerCase() === 'lessons') return `${agentShortName()} 的日记`;
+  if (stem.toLowerCase() === 'lessons') return t('agentDiary', { name: agentShortName() });
   return stem;
 }
 
@@ -1073,7 +1179,7 @@ function renderMemFiles() {
   if (memFiles.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = '该 agent 暂无独立记忆文件 · 右上输入文件名 + 号新建';
+    empty.textContent = t('noMemFilesEmpty');
     list.appendChild(empty);
     return;
   }
@@ -1096,11 +1202,11 @@ async function loadMemoryFile(name) {
   }
   memSelected = name;
   renderMemFiles();
-  setStatus('mem-status', '加载中…');
+  setStatus('mem-status', t('loading'));
   try {
     // 用户画像可能尚未创建 → optional=1，缺文件返回 200 {exists:false}。
     const r = await fetch(`/api/files?path=${encodeURIComponent(path)}${isProfile ? '&optional=1' : ''}`);
-    if (!r.ok) { setStatus('mem-status', `加载失败: ${r.status}`, 'warn'); return; }
+    if (!r.ok) { setStatus('mem-status', t('loadFailed', { status: r.status }), 'warn'); return; }
     const body = await r.json();
     const content = body.content ?? '';
     document.getElementById('mem-save').disabled = false;
@@ -1108,26 +1214,24 @@ async function loadMemoryFile(name) {
     memDirty = false;
 
     if (isProfile) {
-      // 用户画像 → 槽位视图(规范化原文用于 dirty 比较)。
       const slots = parseProfile(content);
       memOriginal = serializeProfile(slots);
       setMemMode('slots');
       renderSlots(slots);
-      if (body.exists === false) setStatus('mem-status', '尚未创建 · 可直接添加画像后保存', 'ok');
-      else setStatus('mem-status', `${slots.length} 条画像`, 'ok');
+      if (body.exists === false) setStatus('mem-status', t('noProfileYet'), 'ok');
+      else setStatus('mem-status', t('profileFactCount', { n: slots.length }), 'ok');
     } else {
-      // 普通记忆文件 → 默认日记视图（textarea 始终持有源码，供源码模式编辑）。
       const ed = document.getElementById('mem-editor');
       ed.value = content;
       ed.disabled = false;
       memOriginal = content;
-      document.getElementById('diary-owner').textContent = agentShortName();
+      updateDiaryHint(agentShortName());
       renderDiary(content);
       setMemMode('diary');
-      setStatus('mem-status', `已加载 (${content.length} 字符)`, 'ok');
+      setStatus('mem-status', t('loadedChars', { n: content.length }), 'ok');
     }
   } catch (e) {
-    setStatus('mem-status', `加载异常: ${e.message}`, 'warn');
+    setStatus('mem-status', t('loadError', { msg: e.message }), 'warn');
   }
 }
 
@@ -1143,8 +1247,8 @@ function setMemMode(mode) {
   diary.style.display = mode === 'diary' ? 'flex' : 'none';
   ed.style.display = mode === 'text' ? '' : 'none';
   toggle.style.display = memSelected ? 'inline-block' : 'none';
-  if (isProfile) toggle.textContent = mode === 'slots' ? '源码模式' : '槽位模式';
-  else toggle.textContent = mode === 'diary' ? '源码模式' : '日记模式';
+  if (isProfile) toggle.textContent = mode === 'slots' ? t('rawMode') : t('slotsMode');
+  else toggle.textContent = mode === 'diary' ? t('rawMode') : t('diaryMode');
 }
 
 /** 当前编辑内容:用户画像槽位模式从 DOM 序列化;其余(画像源码模式 / 普通文件)取 textarea 原文。 */
@@ -1177,7 +1281,7 @@ function renderSlots(slots) {
   if (!slots.length) {
     const empty = document.createElement('div');
     empty.className = 'slots-empty';
-    empty.textContent = '还没有任何用户画像 · 点下方「添加一条画像」开始';
+    empty.textContent = t('noProfileSlots');
     list.appendChild(empty);
     return;
   }
@@ -1195,17 +1299,17 @@ function makeSlot(s = { name: '', body: '', k: '' }) {
   const key = document.createElement('input');
   key.className = 'slot-key';
   key.value = s.name || '';
-  key.placeholder = '画像名（如 时区 / 语言偏好）';
+  key.placeholder = t('slotKeyPlaceholder');
   const del = document.createElement('button');
   del.className = 'slot-del';
-  del.textContent = '删除';
+  del.textContent = t('delete');
   del.addEventListener('click', () => { el.remove(); recomputeMemDirty(); });
   head.append(key, del);
 
   const val = document.createElement('textarea');
   val.className = 'slot-val';
   val.value = s.body || '';
-  val.placeholder = '事实正文（如 Asia/Shanghai (UTC+8)）';
+  val.placeholder = t('slotValPlaceholder');
   val.rows = 1;
 
   el.append(head, val);
@@ -1251,7 +1355,7 @@ function renderDiary(text) {
   if (!entries.length) {
     const empty = document.createElement('div');
     empty.className = 'diary-empty';
-    empty.textContent = '这本日记还是空的 · 切到「源码模式」写下第一条';
+    empty.textContent = t('diaryEmpty');
     root.appendChild(empty);
     return;
   }
@@ -1284,7 +1388,7 @@ async function saveMemory() {
     path = `${memDir}/${memSelected}`;
   }
   const content = currentMemContent();
-  setStatus('mem-status', '保存中…');
+  setStatus('mem-status', t('saving'));
   try {
     const r = await fetch('/api/files', {
       method: 'POST',
@@ -1293,40 +1397,37 @@ async function saveMemory() {
     });
     if (!r.ok) {
       const err = await r.text().catch(() => '');
-      setStatus('mem-status', `保存失败: ${r.status} ${err}`, 'warn');
+      setStatus('mem-status', t('saveFailed', { status: r.status, err }), 'warn');
       return;
     }
     memOriginal = content;
     memDirty = false;
     document.getElementById('mem-reload').disabled = true;
-    // 用户画像保存后用规范化结果回填(去重/排序生效，槽位即时反映)。
     if (memSelected === userProfile().id) {
       const slots = parseProfile(content);
       if (memMode === 'slots') renderSlots(slots);
       else document.getElementById('mem-editor').value = content;
-      setStatus('mem-status', `已保存 · ${slots.length} 条画像`, 'ok');
+      setStatus('mem-status', t('savedProfileCount', { n: slots.length }), 'ok');
     } else {
-      // 普通记忆:保存后若在日记视图,用新内容重渲染卡片。
       if (memMode === 'diary') renderDiary(content);
-      setStatus('mem-status', '已保存', 'ok');
+      setStatus('mem-status', t('saved'), 'ok');
     }
   } catch (e) {
-    setStatus('mem-status', `保存异常: ${e.message}`, 'warn');
+    setStatus('mem-status', t('saveException', { msg: e.message }), 'warn');
   }
 }
 
 async function newMemoryFile() {
   if (!selectedAgent) return;
   const memDir = memoryDir(selectedAgent);
-  if (!memDir) { setStatus('mem-status', '该 agent 没有 memoryDir', 'warn'); return; }
+  if (!memDir) { setStatus('mem-status', t('noMemoryDirWarn'), 'warn'); return; }
   const input = document.getElementById('mem-new-name');
   let name = (input.value || '').trim();
-  if (!name) { setStatus('mem-status', '请输入文件名', 'warn'); return; }
+  if (!name) { setStatus('mem-status', t('enterFilename'), 'warn'); return; }
   if (!name.endsWith('.md')) name += '.md';
-  if (memFiles.includes(name)) { setStatus('mem-status', `${name} 已存在`, 'warn'); return; }
-  // Create empty file via POST
+  if (memFiles.includes(name)) { setStatus('mem-status', t('fileExists', { name }), 'warn'); return; }
   const path = `${memDir}/${name}`;
-  setStatus('mem-status', '新建中…');
+  setStatus('mem-status', t('creating'));
   try {
     const r = await fetch('/api/files', {
       method: 'POST',
@@ -1334,16 +1435,16 @@ async function newMemoryFile() {
       body: JSON.stringify({ path, content: `# ${name.replace(/\.md$/, '')}\n\n` }),
     });
     if (!r.ok) {
-      setStatus('mem-status', `新建失败: ${r.status}`, 'warn');
+      setStatus('mem-status', t('createFailed', { status: r.status }), 'warn');
       return;
     }
     input.value = '';
     memFiles = [...memFiles, name].sort();
     renderMemFiles();
     await loadMemoryFile(name);
-    setStatus('mem-status', `已新建 ${name}`, 'ok');
+    setStatus('mem-status', t('created', { name }), 'ok');
   } catch (e) {
-    setStatus('mem-status', `新建异常: ${e.message}`, 'warn');
+    setStatus('mem-status', t('createException', { msg: e.message }), 'warn');
   }
 }
 
@@ -1418,7 +1519,7 @@ function renderSkills() {
       <div class="info-card-title">Default skills (manifest provides.agent.defaultSkills)</div>
       <div class="info-card-body">
         ${defaultSkills.length === 0
-          ? '<span class="empty" style="padding:0;font-size:12px">未声明 default skill</span>'
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noDefaultSkill'))}</span>`
           : defaultSkills.map((s) => `<span class="pill">${escapeHtml(typeof s === 'string' ? s : JSON.stringify(s))}</span>`).join('')}
       </div>
     </div>
@@ -1427,7 +1528,7 @@ function renderSkills() {
       <div class="info-card-title">Plugin's own skills (provides.skills)</div>
       <div class="info-card-body">
         ${ownSkills.length === 0
-          ? '<span class="empty" style="padding:0;font-size:12px">无自带 skill</span>'
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnSkill'))}</span>`
           : ownSkills.map((s) => `<span class="pill">${escapeHtml(s.id)}${s.trigger ? ` <code style="opacity:0.6">${escapeHtml(s.trigger)}</code>` : ''}</span>`).join('')}
       </div>
     </div>
@@ -1436,8 +1537,8 @@ function renderSkills() {
       <div class="info-card-title">Plugin's own tools (provides.tools)</div>
       <div class="info-card-body">
         ${ownTools.length === 0
-          ? '<span class="empty" style="padding:0;font-size:12px">无自带 tool</span>'
-          : ownTools.map((t) => `<span class="pill">${escapeHtml(t.id)}${t.exposedToAI ? ' <span style="color:var(--accent-ok)">·exposed</span>' : ''}</span>`).join('')}
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnTool'))}</span>`
+          : ownTools.map((tl) => `<span class="pill">${escapeHtml(tl.id)}${tl.exposedToAI ? ' <span style="color:var(--accent-ok)">·exposed</span>' : ''}</span>`).join('')}
       </div>
     </div>
 
@@ -1445,7 +1546,7 @@ function renderSkills() {
       <div class="info-card-title">Produces (file glob — tells Forge orchestrator which files this agent owns)</div>
       <div class="info-card-body">
         ${produces.length === 0
-          ? '<span class="empty" style="padding:0;font-size:12px">未声明 produces</span>'
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noProduces'))}</span>`
           : produces.map((p) => `<span class="pill"><code>${escapeHtml(p)}</code></span>`).join('')}
       </div>
     </div>
@@ -1461,11 +1562,9 @@ function renderWorkbench() {
   if (matches.length === 0) {
     root.innerHTML = `
       <div class="info-card">
-        <div class="info-card-title">配套 workbench 插件</div>
+        <div class="info-card-title">${escapeHtml(t('wbPluginsTitle'))}</div>
         <div class="info-card-body" style="color:var(--text-tertiary)">
-          没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。
-          要让某个 workbench 自动选中这个 agent，给它的 forgeax-plugin.json
-          的 <code>provides.workbench</code> 加一行：
+          ${escapeHtml(t('wbNoMatch'))}
           <pre style="background:var(--bg-2);padding:8px;border-radius:3px;margin:6px 0 0;overflow:auto">
 "preferredAgent": "${selectedAgent.id}"</pre>
         </div>
@@ -1473,7 +1572,7 @@ function renderWorkbench() {
     `;
     return;
   }
-  let html = `<div class="info-card-title">配套 workbench 插件 (${matches.length})</div>`;
+  let html = `<div class="info-card-title">${escapeHtml(t('wbMatchCount', { n: matches.length }))}</div>`;
   for (const w of matches) {
     const desc = pickLang(w.description) || '';
     html += `
@@ -1503,6 +1602,11 @@ const SELECTED_LS_KEY = 'wb-agent-persona:selected-agent-id';
 // or full `@forgeax-plugin/agent-iori` plugin id) to a real agent in our list.
 function resolveAgentId(input) {
   if (!input) return null;
+  // Legacy orchestrator alias — no persona plugin; degrade to arin (see GROUP_REGISTRY).
+  if (input === 'forge') {
+    const arin = agents.find((a) => a.agent?.id === 'arin');
+    if (arin) return arin.id;
+  }
   const direct = agents.find((a) => a.id === input);
   if (direct) return direct.id;
   const byShort = agents.find((a) => a.agent?.id === input);

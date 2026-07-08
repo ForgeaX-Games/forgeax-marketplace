@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/agent-reel-editor",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "剪辑师 · 影游", "en": "Timeline Editor · Reel" },
+  "description": {
+    "zh": "影游剪辑师（REIA 的专业子智能体，不直接接用户）。专精在已成片的时间轴上做精修：调镜头变速/定格、改入场转场与首尾动画、增删改字幕台词 / 花字 / QTE 节奏点 / 音频(BGM·音效·配音含音量与淡入淡出) / 标记点。全部经细分 reel:edit-* / reel:update-shot 工具走 scene 级增量编辑，落共享 scenario 状态。由 REIA 经 delegate_to_subagent 派单；不拆分镜（→ reel-storyboard）、不出关键帧/视频（→ reel-visual / reel-video）。用户的「我要做影游」整体需求仍归 REIA，不要直接派到这里。",
+    "en": "Reel timeline editor (REIA's specialist sub-agent; not user-facing). Polishes an already-produced timeline at the scene level: shot speed/freeze, entrance transitions and clip in/out animations, and add/update/remove of subtitles, text overlays (花字), QTE cues, audio (BGM/SFX/VO incl. volume & fades) and markers — all via the fine-grained reel:edit-* / reel:update-shot tools, landing in the shared scenario state. Dispatched by REIA via delegate_to_subagent; does NOT storyboard (→ reel-storyboard) or generate keyframes/video (→ reel-visual / reel-video). Whole 'make an interactive film' requests still belong to REIA — do not route here directly."
+  },
+  "provides": {
+    "agent": {
+      "id": "reel-editor",
+      "role": "reel-editor",
+      "card": {
+        "name": { "zh": "剪辑师", "en": "Timeline Editor" },
+        "color": "#e8c4b8",
+        "avatar": "✂️"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        ".reel-scenarios/**"
+      ],
+      "agentTags": ["reel", "editor", "剪辑", "timeline", "时间轴", "影游", "变速", "字幕", "花字", "qte", "audio"],
+      "tools": [
+        "reel:list-scenarios",
+        "reel:get-scenario",
+        "reel:get-scene-timeline",
+        "reel:list-assets",
+        "reel:update-shot",
+        "reel:edit-dialogue",
+        "reel:edit-qte",
+        "reel:edit-text-overlay",
+        "reel:edit-audio",
+        "reel:edit-marker"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}
