@@ -227,7 +227,7 @@ export function QTECard({ scene }: { scene: Scene }) {
               // 过去这里是 { perfect: 80, great: 160, good: 280 }（音游级），
               // 作者新建 QTE 后玩家反映"刚出现就过期"、"按住也失败"，
               // 根因就是这组窗口太窄。统一放宽到 demo 量级。
-              window: { perfect: 400, great: 800, good: 1500 },
+              tolerance: { perfect: 400, great: 800, good: 1500 },
               score: { perfect: 100, great: 60, good: 25, miss: -30 },
               passingScore: 200,
             })
@@ -249,13 +249,13 @@ export function QTECard({ scene }: { scene: Scene }) {
         <Field label="perfect" inline>
           <input
             type="number"
-            value={spec.window.perfect}
+            value={spec.tolerance.perfect}
             min={20}
             step={10}
             onChange={(e) =>
               setQTESpec(scene.id, {
                 ...spec,
-                window: { ...spec.window, perfect: Number(e.target.value) },
+                tolerance: { ...spec.tolerance, perfect: Number(e.target.value) },
               })
             }
           />
@@ -263,13 +263,13 @@ export function QTECard({ scene }: { scene: Scene }) {
         <Field label="great" inline>
           <input
             type="number"
-            value={spec.window.great}
+            value={spec.tolerance.great}
             min={40}
             step={10}
             onChange={(e) =>
               setQTESpec(scene.id, {
                 ...spec,
-                window: { ...spec.window, great: Number(e.target.value) },
+                tolerance: { ...spec.tolerance, great: Number(e.target.value) },
               })
             }
           />
@@ -277,13 +277,13 @@ export function QTECard({ scene }: { scene: Scene }) {
         <Field label="good" inline>
           <input
             type="number"
-            value={spec.window.good}
+            value={spec.tolerance.good}
             min={80}
             step={10}
             onChange={(e) =>
               setQTESpec(scene.id, {
                 ...spec,
-                window: { ...spec.window, good: Number(e.target.value) },
+                tolerance: { ...spec.tolerance, good: Number(e.target.value) },
               })
             }
           />
@@ -568,7 +568,6 @@ export function BranchCard({
             kind: 'choice',
             label: '新选项',
             targetSceneId: sceneIds.find((id) => id !== scene.id) ?? scene.id,
-            showAt: scene.durationMs - 1000,
           })
         }
       >
@@ -626,16 +625,6 @@ function BranchRow({
             ))}
           </select>
         </Field>
-        {branch.kind === 'choice' && (
-          <Field label="showAt" inline>
-            <input
-              type="number"
-              value={branch.showAt ?? 0}
-              step={100}
-              onChange={(e) => onChange({ showAt: Number(e.target.value) || 0 })}
-            />
-          </Field>
-        )}
       </div>
     </div>
   )

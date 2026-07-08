@@ -23,7 +23,7 @@ function makeScenario(overrides: Partial<Scenario> = {}): Scenario {
         dialogue: [],
         branches: [],
         qte: {
-          window: { perfect: 100, great: 200, good: 400 },
+          tolerance: { perfect: 100, great: 200, good: 400 },
           score: { perfect: 100, great: 50, good: 20, miss: -30 },
           cues: [
             {
@@ -44,7 +44,7 @@ function makeScenario(overrides: Partial<Scenario> = {}): Scenario {
 }
 
 function wrap(s: Scenario, updatedAt = 1): PersistedItem {
-  return { id: s.id, scenario: s, updatedAt }
+  return { id: s.id, title: s.title, scenario: s, createdAt: updatedAt, updatedAt }
 }
 
 describe('signScenarioRuntimeSurface', () => {
@@ -56,7 +56,7 @@ describe('signScenarioRuntimeSurface', () => {
   it('QTE window 变化 → 签名变化', () => {
     const a = makeScenario()
     const b = makeScenario()
-    b.scenes.s1!.qte!.window = { perfect: 400, great: 800, good: 1500 }
+    b.scenes.s1!.qte!.tolerance = { perfect: 400, great: 800, good: 1500 }
     expect(signScenarioRuntimeSurface(a)).not.toBe(
       signScenarioRuntimeSurface(b),
     )
@@ -80,10 +80,10 @@ describe('signScenarioRuntimeSurface', () => {
     )
   })
 
-  it('scene clipId 变化（含改为无演出）→ 签名变化', () => {
+  it('scene media.ref 变化（含改为无演出）→ 签名变化', () => {
     const a = makeScenario()
-    a.scenes.s1!.clipId = 'vd-wcc-idle'
-    const b = makeScenario() // 无 clipId = 无演出
+    a.scenes.s1!.media = { kind: 'VIDEO', ref: 'm-builtin-vd-wcc-idle', meta: {} }
+    const b = makeScenario() // 无 VIDEO media = 无演出
     expect(signScenarioRuntimeSurface(a)).not.toBe(
       signScenarioRuntimeSurface(b),
     )
@@ -125,7 +125,7 @@ describe('refreshBuiltinDemoInDb', () => {
 
   it('db 里的 demo-001 比 bundled 老（QTE 更快）→ 用 bundled 覆盖', () => {
     const older = makeScenario()
-    older.scenes.s1!.qte!.window = { perfect: 80, great: 160, good: 280 }
+    older.scenes.s1!.qte!.tolerance = { perfect: 80, great: 160, good: 280 }
     const bundled = makeScenario() // perfect:100 great:200 good:400
     const db: PersistedDb = {
       version: 1,
@@ -135,7 +135,7 @@ describe('refreshBuiltinDemoInDb', () => {
     const next = refreshBuiltinDemoInDb(db, bundled)
     expect(next).not.toBe(db)
     const refreshed = next.items.find((it) => it.id === 'demo-001')
-    expect(refreshed?.scenario.scenes.s1?.qte?.window).toEqual({
+    expect(refreshed?.scenario.scenes.s1?.qte?.tolerance).toEqual({
       perfect: 100,
       great: 200,
       good: 400,
@@ -143,10 +143,10 @@ describe('refreshBuiltinDemoInDb', () => {
     expect(refreshed?.updatedAt).toBeGreaterThan(1)
   })
 
-  it('bundled 去掉 clipId（节点改为无演出）→ 抹掉旧持久化残留的 clipId', () => {
+  it('bundled 去掉演出（节点改为无演出）→ 抹掉旧持久化残留的 media.ref', () => {
     const older = makeScenario()
-    older.scenes.s1!.clipId = 'vd-wcc-idle' // 旧持久化里还挂着演出
-    const bundled = makeScenario() // 新 bundled：该节点无演出（无 clipId）
+    older.scenes.s1!.media = { kind: 'VIDEO', ref: 'm-builtin-vd-wcc-idle', meta: {} } // 旧持久化里还挂着演出
+    const bundled = makeScenario() // 新 bundled：该节点无演出（media 非 VIDEO）
     const db: PersistedDb = {
       version: 1,
       activeId: 'demo-001',
@@ -155,7 +155,7 @@ describe('refreshBuiltinDemoInDb', () => {
     const next = refreshBuiltinDemoInDb(db, bundled)
     expect(next).not.toBe(db)
     const refreshed = next.items.find((it) => it.id === 'demo-001')
-    expect(refreshed?.scenario.scenes.s1?.clipId).toBeUndefined()
+    expect(refreshed?.scenario.scenes.s1?.media?.ref).toBeUndefined()
   })
 
   it('不会动其它 item', () => {

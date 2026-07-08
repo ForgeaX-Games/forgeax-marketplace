@@ -39,7 +39,19 @@
  */
 
 import { coerceHudRules } from './gameplayTypes'
-import type { Effect, Episode, Scenario, Scene, Shot } from './types'
+import { BUILTIN_VIDEO_MEDIA_PREFIX } from './gameAssetCatalog'
+import type {
+  Effect,
+  Episode,
+  MediaRef,
+  OverlayClip,
+  OverlayKind,
+  QTESpec,
+  Scenario,
+  Scene,
+  Shot,
+  TextStyle,
+} from './types'
 
 export function migrateV1ToV2(scenario: Scenario): Scenario {
   if (scenario.schemaVersion >= 2) return scenario
@@ -305,17 +317,19 @@ export function migrateV9ToV10(scenario: Scenario): Scenario {
         itemEffects: undefined,
       } as unknown as typeof branch
     })
-    const cues = scene.performance?.cues.map((cue) => {
-      const rawCue = cue as unknown as Record<string, unknown>
+    const rawPerf = (scene as unknown as Record<string, unknown>).performance as
+      | { cues?: Array<Record<string, unknown>> }
+      | undefined
+    const cues = rawPerf?.cues?.map((rawCue) => {
       return {
-        id: cue.id,
-        atMs: cue.atMs,
-        label: cue.label,
-        layer: cue.layer,
+        id: rawCue.id,
+        atMs: rawCue.atMs,
+        label: rawCue.label,
+        layer: rawCue.layer,
         effects: [
-          ...(migrateEffectList(cue.effects, `${sceneId}-${cue.id}`) ?? []),
-          ...legacyHpEffect(`${sceneId}-${cue.id}-boss-hp`, bossId, rawCue.damageToBoss),
-          ...legacyHpEffect(`${sceneId}-${cue.id}-player-hp`, playerId, rawCue.damageToPlayer),
+          ...(migrateEffectList(rawCue.effects, `${sceneId}-${rawCue.id}`) ?? []),
+          ...legacyHpEffect(`${sceneId}-${rawCue.id}-boss-hp`, bossId, rawCue.damageToBoss),
+          ...legacyHpEffect(`${sceneId}-${rawCue.id}-player-hp`, playerId, rawCue.damageToPlayer),
         ],
       }
     })
@@ -324,10 +338,380 @@ export function migrateV9ToV10(scenario: Scenario): Scenario {
       branches,
       onEnterEffects: onEnterEffects.length > 0 ? onEnterEffects : undefined,
       onEnterItemEffects: undefined,
-      performance: cues && cues.length > 0 ? { cues } : scene.performance,
+      performance: cues && cues.length > 0 ? { cues } : rawScene.performance,
     } as unknown as Scene
   }
   return { ...scenario, schemaVersion: 10, scenes }
+}
+
+const DEFAULT_TOLERANCE = { perfect: 120, great: 280, good: 500 }
+const DEFAULT_QTE_SCORE = { perfect: 100, great: 60, good: 30, miss: 0 }
+
+function cleanTimeWindow(w: {
+  startMs?: unknown
+  endMs?: unknown
+  timeoutMs?: unknown
+}): { startMs?: number; endMs?: number; timeoutMs?: number } | undefined {
+  const out: { startMs?: number; endMs?: number; timeoutMs?: number } = {}
+  if (typeof w.startMs === 'number') out.startMs = w.startMs
+  if (typeof w.endMs === 'number') out.endMs = w.endMs
+  if (typeof w.timeoutMs === 'number') out.timeoutMs = w.timeoutMs
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** 旧 scene.qte + decision(窗口/qteKind) + ext.qteUi → 新 QTESpec（tolerance/window/ui/template）。 */
+function migrateQte(
+  rawQte: Record<string, unknown> | undefined,
+  decision: Record<string, unknown> | undefined,
+  ext: Record<string, unknown> | undefined,
+): QTESpec {
+  const tolerance =
+    (rawQte?.tolerance as QTESpec['tolerance']) ??
+    (rawQte?.window as QTESpec['tolerance']) ??
+    DEFAULT_TOLERANCE
+  const window = cleanTimeWindow({
+    startMs: decision?.windowStartMs ?? decision?.atMs,
+    endMs: decision?.windowEndMs,
+    timeoutMs: rawQte?.timeoutMs ?? decision?.timeoutMs,
+  })
+  const qteUi = ext?.qteUi
+  const template = decision?.qteKind
+  return {
+    cues: (Array.isArray(rawQte?.cues) ? rawQte?.cues : []) as QTESpec['cues'],
+    tolerance,
+    score: (rawQte?.score as QTESpec['score']) ?? DEFAULT_QTE_SCORE,
+    ...(typeof rawQte?.passingScore === 'number' ? { passingScore: rawQte.passingScore } : {}),
+    ...(rawQte?.sequence === true ? { sequence: true } : {}),
+    ...(rawQte?.outcomeLabels ? { outcomeLabels: rawQte.outcomeLabels as QTESpec['outcomeLabels'] } : {}),
+    ...(window ? { window } : {}),
+    ...(typeof qteUi === 'string' ? { ui: qteUi as QTESpec['ui'] } : {}),
+    ...(typeof template === 'string' ? { template: template as QTESpec['template'] } : {}),
+  }
+}
+
+/** 旧 decision(static/timed) + ext.choiceUi → 新 ChoiceSpec。 */
+function migrateChoice(
+  decision: Record<string, unknown>,
+  ext: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const optType = decision.optType
+  const timed = optType === 'timed' || decision.mode === 'timed'
+  const window = cleanTimeWindow({
+    startMs: decision.windowStartMs ?? decision.atMs,
+    endMs: decision.windowEndMs,
+    timeoutMs: decision.timeoutMs,
+  })
+  const choiceUi = ext?.choiceUi
+  return {
+    ...(timed ? { timed: true } : {}),
+    ...(window ? { window } : {}),
+    ...(typeof decision.prompt === 'string' ? { prompt: decision.prompt } : {}),
+    ...(typeof decision.defaultBranchId === 'string'
+      ? { defaultBranchId: decision.defaultBranchId }
+      : {}),
+    ...(typeof decision.fireAt === 'string' ? { fireAt: decision.fireAt } : {}),
+    ...(typeof decision.presentation === 'string' ? { presentation: decision.presentation } : {}),
+    ...(typeof choiceUi === 'string' ? { ui: choiceUi } : {}),
+    ...(typeof decision.layer === 'number' ? { layer: decision.layer } : {}),
+  }
+}
+
+/**
+ * v11：交互形态 presence 化。
+ *   - Scene.kind/decision/calcType → boss/qte/choice/calc 专属字段（至多一个非空，
+ *     优先级 boss > qte > calc > choice）。
+ *   - QTESpec.window(命中窗) → tolerance；decision 窗口 + qte.timeoutMs → qte.window:TimeWindow。
+ *   - ext.qteUi/choiceUi → qte.ui/choice.ui（其余 ext 键保留）。
+ *   - decision.mode==='wait' → scene.mediaPlayMode='loop'。
+ *   - PerformanceCue.effects → settlement:{effects,float}；配对的 numeric sticker
+ *     文本/坐标搬进 settlement.float，该 sticker 从 stickerClips 移除；其余 sticker 去 performanceCueId。
+ *   - 删 Branch.showAt。
+ */
+export function migrateV10ToV11(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 11) return scenario
+  const scenes: Record<string, Scene> = {}
+  for (const [sceneId, scene] of Object.entries(scenario.scenes)) {
+    const raw = scene as unknown as Record<string, unknown>
+    const decision = (raw.decision as Record<string, unknown> | undefined) ?? undefined
+    const ext = (raw.ext as Record<string, unknown> | undefined) ?? undefined
+    const oldKind = raw.kind as string | undefined
+    const rawQte = raw.qte as Record<string, unknown> | undefined
+    const optType =
+      (decision?.optType as string | undefined) ??
+      (decision?.mode === 'timed' || decision?.mode === 'wait' ? 'timed' : decision ? 'static' : undefined)
+
+    const hasCues = Array.isArray(rawQte?.cues) && (rawQte?.cues as unknown[]).length > 0
+
+    const isBoss = raw.boss != null
+    // legacy-alias：旧 decision 枚举里的 'timed_qte' 不是"限时 QTE"这种独立形态
+    // （QTE 天生限时），而是"该 decision 其实是 QTE"的旧说法 → 归到 qte 形态。
+    const isQte = !isBoss && (optType === 'timed_qte' || oldKind === 'qte' || hasCues)
+    const isCalc = !isBoss && !isQte && typeof raw.calcType === 'string'
+    const isChoice = !isBoss && !isQte && !isCalc && (decision != null || oldKind === 'choice')
+
+    // performance cues → settlement，配对 sticker 搬进 float
+    const stickers = Array.isArray(raw.stickerClips)
+      ? (raw.stickerClips as Array<Record<string, unknown>>)
+      : []
+    const usedStickerIds = new Set<string>()
+    const findPaired = (cueId: string): Record<string, unknown> | undefined =>
+      stickers.find((s) => s.performanceCueId === cueId) ??
+      stickers.find((s) => s.id === cueId && s.kind === 'numeric')
+    const perfRaw = raw.performance as { cues?: Array<Record<string, unknown>> } | undefined
+    const cues = perfRaw?.cues?.map((cue) => {
+      const paired = typeof cue.id === 'string' ? findPaired(cue.id) : undefined
+      if (paired && typeof paired.id === 'string') usedStickerIds.add(paired.id)
+      const existingSettlement = cue.settlement as { effects?: Effect[]; float?: unknown } | undefined
+      const effects = (Array.isArray(cue.effects) ? cue.effects : existingSettlement?.effects ?? []) as Effect[]
+      const float = paired
+        ? {
+            ...(typeof paired.text === 'string' ? { text: paired.text } : {}),
+            ...(typeof paired.x === 'number' ? { x: paired.x } : {}),
+            ...(typeof paired.y === 'number' ? { y: paired.y } : {}),
+          }
+        : (existingSettlement?.float as { text?: string; x?: number; y?: number } | undefined)
+      return {
+        id: cue.id as string,
+        atMs: cue.atMs as number,
+        ...(typeof cue.label === 'string' ? { label: cue.label } : {}),
+        ...(typeof cue.layer === 'number' ? { layer: cue.layer } : {}),
+        settlement: { effects, ...(float && Object.keys(float).length > 0 ? { float } : {}) },
+      }
+    })
+    const nextStickers = stickers
+      .filter((s) => !(typeof s.id === 'string' && usedStickerIds.has(s.id)))
+      .map((s) => {
+        const { performanceCueId: _drop, ...rest } = s
+        return rest
+      })
+
+    // branches 去 showAt
+    const branches = (Array.isArray(raw.branches) ? (raw.branches as Array<Record<string, unknown>>) : []).map(
+      (b) => {
+        const { showAt: _drop, ...rest } = b
+        return rest
+      },
+    )
+
+    // ext 去 UI 变体键
+    let nextExt: Record<string, unknown> | undefined
+    if (ext) {
+      const { qteUi: _q, choiceUi: _c, ...restExt } = ext
+      nextExt = Object.keys(restExt).length > 0 ? restExt : undefined
+    }
+
+    const {
+      kind: _k,
+      decision: _d,
+      calcType: _ct,
+      ext: _e,
+      qte: _q2,
+      boss: _b,
+      branches: _br,
+      performance: _p,
+      stickerClips: _s,
+      ...restScene
+    } = raw
+
+    const mediaPlayMode =
+      raw.mediaPlayMode ?? (decision?.mode === 'wait' ? 'loop' : undefined)
+
+    const next: Record<string, unknown> = {
+      ...restScene,
+      branches,
+      ...(mediaPlayMode ? { mediaPlayMode } : {}),
+      ...(nextExt ? { ext: nextExt } : {}),
+      ...(nextStickers.length > 0 ? { stickerClips: nextStickers } : {}),
+      ...(cues && cues.length > 0 ? { performance: { cues } } : {}),
+    }
+    if (isBoss) next.boss = raw.boss
+    if (isQte) next.qte = migrateQte(rawQte, decision, ext)
+    if (isCalc) next.calc = { calcType: raw.calcType }
+    if (isChoice) next.choice = migrateChoice(decision as Record<string, unknown>, ext)
+
+    scenes[sceneId] = next as unknown as Scene
+  }
+  return { ...scenario, schemaVersion: 11, scenes }
+}
+
+/**
+ * v11 → v12：视频演出来源收敛到 `scene.media.ref`（SSOT）。
+ *   - 旧 `scene.clipId`（引用内置 VIDEO_CLIPS）→ `media = { kind:'VIDEO', ref:'m-builtin-<clipId>' }`，
+ *     内置片段以 `m-builtin-<clipId>` 稳定 id 落入 mediaStore（App 启动 seed）。
+ *   - 删除持久化的 `scene.clipId`；蓝图/运行时的 clipId 改由 media.ref 在编译边界派生。
+ *   - 已有真实视频 media（上传产物：kind==='VIDEO' 且 ref 非空）优先保留，不被 clipId 覆盖。
+ */
+export function migrateV11ToV12(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 12) return scenario
+  const scenes: Record<string, Scene> = {}
+  for (const [id, scene] of Object.entries(scenario.scenes)) {
+    const raw = scene as unknown as Record<string, unknown>
+    const clipId = typeof raw.clipId === 'string' && raw.clipId ? raw.clipId : undefined
+    const { clipId: _dropClip, ...rest } = raw
+    const media = scene.media as MediaRef | undefined
+    const mediaIsRealVideo = media?.kind === 'VIDEO' && Boolean(media.ref)
+    const nextMedia: MediaRef | undefined =
+      !mediaIsRealVideo && clipId
+        ? { kind: 'VIDEO', ref: `${BUILTIN_VIDEO_MEDIA_PREFIX}${clipId}` }
+        : media
+    scenes[id] = {
+      ...(rest as unknown as Scene),
+      ...(nextMedia ? { media: nextMedia } : {}),
+    }
+  }
+  return { ...scenario, schemaVersion: 12, scenes }
+}
+
+/** 从旧扁平载体（TextOverlayClip / numeric sticker）抽出嵌套 TextStyle；scale 折进 fontSizePct。 */
+function extractOverlayStyle(raw: Record<string, unknown>, scale: number): TextStyle {
+  const style: Record<string, unknown> = {}
+  for (const k of ['fontFamily', 'color', 'strokeColor', 'align', 'bgColor'] as const) {
+    if (typeof raw[k] === 'string') style[k] = raw[k]
+  }
+  for (const k of ['fontWeight', 'strokeWidth', 'opacity'] as const) {
+    if (typeof raw[k] === 'number') style[k] = raw[k]
+  }
+  for (const k of ['italic', 'underline'] as const) {
+    if (typeof raw[k] === 'boolean') style[k] = raw[k]
+  }
+  if (typeof raw.fontSizePct === 'number') style.fontSizePct = raw.fontSizePct * scale
+  else if (scale !== 1) style.fontSizePct = 7 * scale
+  if (typeof raw.shadow === 'boolean') style.shadow = raw.shadow
+  return style as TextStyle
+}
+
+/**
+ * v12 → v13：统一飘字载体。
+ *   - `textOverlays[]`（花字）→ `overlays[]`（kind='text'、content=text、scale 折进 fontSizePct、
+ *     shadow → style.shadow、扁平样式收进嵌套 style）。
+ *   - `stickerClips[]`（贴纸）→ `overlays[]`：numeric/emoji → kind='text'（content=text、sizePct*scale
+ *     折进 style.fontSizePct、color → style）；builtin → kind='icon'（content=presetId）；
+ *     image → kind='image'（content=mediaId）；sizePct*scale 折进 sizePct。
+ *   - `performance.cues[]` → 按 id 配对已转出的 overlay 挂 `settlement`；未配对 → 不可见
+ *     overlay（content=''、startMs=atMs）仅当纯逻辑触发器。
+ *   - 删除 `textOverlays` / `stickerClips` / `performance` 旧字段。
+ */
+export function migrateV12ToV13(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 13) return scenario
+  const scenes: Record<string, Scene> = {}
+  for (const [id, scene] of Object.entries(scenario.scenes)) {
+    const raw = scene as unknown as Record<string, unknown>
+    const overlays: OverlayClip[] = []
+    const byId = new Map<string, number>()
+
+    // 1) textOverlays → kind:'text'
+    const textOverlays = Array.isArray(raw.textOverlays)
+      ? (raw.textOverlays as Array<Record<string, unknown>>)
+      : []
+    for (const t of textOverlays) {
+      const scale = typeof t.scale === 'number' ? t.scale : 1
+      const style = extractOverlayStyle(t, scale)
+      const ov: OverlayClip = {
+        id: String(t.id),
+        kind: 'text',
+        content: typeof t.text === 'string' ? t.text : '',
+        startMs: typeof t.startMs === 'number' ? t.startMs : 0,
+        x: typeof t.x === 'number' ? t.x : 0.5,
+        y: typeof t.y === 'number' ? t.y : 0.5,
+        ...(typeof t.endMs === 'number' ? { endMs: t.endMs } : {}),
+        ...(typeof t.rotation === 'number' ? { rotation: t.rotation } : {}),
+        ...(typeof t.opacity === 'number' ? { opacity: t.opacity } : {}),
+        ...(typeof t.layer === 'number' ? { layer: t.layer } : {}),
+        ...(Object.keys(style).length > 0 ? { style } : {}),
+      }
+      byId.set(ov.id, overlays.length)
+      overlays.push(ov)
+    }
+
+    // 2) stickerClips → text / icon / image
+    const stickers = Array.isArray(raw.stickerClips)
+      ? (raw.stickerClips as Array<Record<string, unknown>>)
+      : []
+    for (const s of stickers) {
+      const oldKind = String(s.kind)
+      const scale = typeof s.scale === 'number' ? s.scale : 1
+      const baseSize = (typeof s.sizePct === 'number' ? s.sizePct : 12) * scale
+      let kind: OverlayKind
+      let content: string
+      let style: TextStyle | undefined
+      let sizePct: number | undefined
+      if (oldKind === 'builtin') {
+        kind = 'icon'
+        content = typeof s.presetId === 'string' ? s.presetId : ''
+        sizePct = baseSize
+      } else if (oldKind === 'image') {
+        kind = 'image'
+        content = typeof s.mediaId === 'string' ? s.mediaId : ''
+        sizePct = baseSize
+      } else {
+        kind = 'text'
+        content = typeof s.text === 'string' ? s.text : ''
+        const st: Record<string, unknown> = { fontSizePct: baseSize }
+        if (typeof s.color === 'string') st.color = s.color
+        if (oldKind === 'numeric') {
+          st.strokeColor = '#000000'
+          st.strokeWidth = 3
+          st.fontWeight = 900
+        }
+        style = st as TextStyle
+      }
+      const ov: OverlayClip = {
+        id: String(s.id),
+        kind,
+        content,
+        startMs: typeof s.startMs === 'number' ? s.startMs : 0,
+        x: typeof s.x === 'number' ? s.x : 0.5,
+        y: typeof s.y === 'number' ? s.y : 0.5,
+        ...(typeof s.endMs === 'number' ? { endMs: s.endMs } : {}),
+        ...(typeof s.rotation === 'number' ? { rotation: s.rotation } : {}),
+        ...(typeof s.opacity === 'number' ? { opacity: s.opacity } : {}),
+        ...(typeof s.layer === 'number' ? { layer: s.layer } : {}),
+        ...(sizePct !== undefined ? { sizePct } : {}),
+        ...(style && Object.keys(style).length > 0 ? { style } : {}),
+        ...(typeof s.enter === 'string' ? { enter: s.enter } : {}),
+        ...(typeof s.exit === 'string' ? { exit: s.exit } : {}),
+      }
+      byId.set(ov.id, overlays.length)
+      overlays.push(ov)
+    }
+
+    // 3) performance.cues → 配对挂 settlement / 未配对生成不可见触发器
+    const perf = raw.performance as { cues?: Array<Record<string, unknown>> } | undefined
+    const cues = Array.isArray(perf?.cues) ? perf!.cues! : []
+    for (const cue of cues) {
+      const cueId = String(cue.id)
+      const atMs = typeof cue.atMs === 'number' ? cue.atMs : 0
+      const settlement = cue.settlement as OverlayClip['settlement']
+      const idx = byId.get(cueId)
+      const target = idx !== undefined ? overlays[idx] : undefined
+      if (target) {
+        overlays[idx as number] = {
+          ...target,
+          ...(settlement ? { settlement } : {}),
+          ...(target.label === undefined && typeof cue.label === 'string' ? { label: cue.label } : {}),
+        }
+      } else {
+        overlays.push({
+          id: cueId,
+          kind: 'text',
+          content: '',
+          startMs: atMs,
+          x: 0.5,
+          y: 0.5,
+          ...(typeof cue.layer === 'number' ? { layer: cue.layer } : {}),
+          ...(settlement ? { settlement } : {}),
+          ...(typeof cue.label === 'string' ? { label: cue.label } : {}),
+        })
+      }
+    }
+
+    const { textOverlays: _t, stickerClips: _s, performance: _p, ...restScene } = raw
+    scenes[id] = {
+      ...(restScene as unknown as Scene),
+      ...(overlays.length > 0 ? { overlays } : {}),
+    }
+  }
+  return { ...scenario, schemaVersion: 13, scenes }
 }
 
 /**
@@ -470,6 +854,9 @@ export function migrateScenarioToLatest(scenario: Scenario): Scenario {
   if (s.schemaVersion === 7) s = migrateV7ToV8(s)
   if (s.schemaVersion === 8) s = migrateV8ToV9(s)
   if (s.schemaVersion === 9) s = migrateV9ToV10(s)
+  if (s.schemaVersion === 10) s = migrateV10ToV11(s)
+  if (s.schemaVersion === 11) s = migrateV11ToV12(s)
+  if (s.schemaVersion === 12) s = migrateV12ToV13(s)
   s = normalizeUiHud(s)
   s = normalizeSceneQte(s)
   // 末尾无条件兜底：跨过 v4 守卫导致 episodes 缺失的历史剧本也能拿回剧集。

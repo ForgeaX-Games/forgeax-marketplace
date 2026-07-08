@@ -16,7 +16,7 @@ import {
   makeInsertAdjustClip,
   makeInsertEffectClip,
   makeInsertFilterClip,
-  makeInsertStickerClip,
+  makeInsertOverlay,
 } from '../timeline/insertFactories'
 import { DOCK_MIME, serializeDockPayload, type DockDropPayload } from '../timeline/dndTypes'
 import type { AdjustParams, ClipAnimSpec, Scene, Shot } from '../../scenario/types'
@@ -296,16 +296,17 @@ function EffectTab({ sceneId, hoverMs, total }: { sceneId: string; hoverMs: numb
 // ─────────────────────────────────────────────────────────────────────
 
 function StickerTab({ sceneId, hoverMs, total }: { sceneId: string; hoverMs: number; total: number }) {
-  const addStickerClip = useScenarioStore((s) => s.addStickerClip)
+  const addOverlay = useScenarioStore((s) => s.addOverlay)
   return (
     <div className="ks-fx-tabpane">
-      <p className="ks-fx-hint">点击在当前位置加贴纸，再到画面里拖动调位置。</p>
+      <p className="ks-fx-hint">点击在当前位置加飘字，再到画面里拖动调位置。</p>
       <div className="ks-fx-grid">
         {FX_STICKERS.map((p) => {
+          // 数值模板 → 文字飘字（content=模板文字）；其它 → 图标飘字（content=预设 id）。
           const isNumeric = !!p.numericTemplate
           const payload: DockDropPayload = isNumeric
-            ? { kind: 'sticker', stickerKind: 'numeric', text: p.numericTemplate, defaultDurationMs: FX_DUR }
-            : { kind: 'sticker', stickerKind: 'builtin', presetId: p.id, defaultDurationMs: FX_DUR }
+            ? { kind: 'overlay', overlayKind: 'text', content: p.numericTemplate!, defaultDurationMs: FX_DUR }
+            : { kind: 'overlay', overlayKind: 'icon', content: p.id, defaultDurationMs: FX_DUR }
           return (
             <PresetCard
               key={p.id}
@@ -313,14 +314,14 @@ function StickerTab({ sceneId, hoverMs, total }: { sceneId: string; hoverMs: num
               label={p.label}
               payload={payload}
               onApply={() =>
-                addStickerClip(
+                addOverlay(
                   sceneId,
-                  makeInsertStickerClip({
+                  makeInsertOverlay({
                     ms: hoverMs,
                     sceneDurationMs: total,
-                    stickerKind: isNumeric ? 'numeric' : 'builtin',
-                    text: isNumeric ? p.numericTemplate : undefined,
-                    presetId: isNumeric ? undefined : p.id,
+                    kind: isNumeric ? 'text' : 'icon',
+                    content: isNumeric ? p.numericTemplate! : p.id,
+                    defaultDurationMs: FX_DUR,
                   }),
                 )
               }
@@ -581,7 +582,6 @@ function FxInspector({ sceneId }: { sceneId: string }) {
   const updateFilterClip = useScenarioStore((s) => s.updateFilterClip)
   const updateAdjustClip = useScenarioStore((s) => s.updateAdjustClip)
   const updateEffectClip = useScenarioStore((s) => s.updateEffectClip)
-  const updateStickerClip = useScenarioStore((s) => s.updateStickerClip)
   const updateShot = useScenarioStore((s) => s.updateShot)
   const addCustom = useFxPresetStore((s) => s.addCustom)
 
@@ -693,52 +693,8 @@ function FxInspector({ sceneId }: { sceneId: string }) {
     )
   }
 
-  // sticker
-  const c = scene.stickerClips?.find((x) => x.id === fxSel.id)
-  if (!c) return null
-  const upd = (patch: Parameters<typeof updateStickerClip>[2]): void => updateStickerClip(sceneId, c.id, patch)
-  return (
-    <div className="ks-fx-inspector">
-      <div className="ks-fx-inspector-head">贴纸参数</div>
-      {(c.kind === 'numeric' || c.kind === 'emoji') && (
-        <label className="ks-fx-row ks-fx-row-text">
-          <span>文字</span>
-          <input
-            type="text"
-            value={c.text ?? ''}
-            onChange={(e) => upd({ text: e.target.value })}
-          />
-        </label>
-      )}
-      <label className="ks-fx-row">
-        <span>大小</span>
-        <input type="range" min={4} max={40} step={1} value={c.sizePct ?? 12} onChange={(e) => upd({ sizePct: Number(e.target.value) })} />
-        <span className="ks-mono">{c.sizePct ?? 12}</span>
-      </label>
-      <label className="ks-fx-row">
-        <span>缩放</span>
-        <input type="range" min={0.2} max={3} step={0.05} value={c.scale ?? 1} onChange={(e) => upd({ scale: Number(e.target.value) })} />
-        <span className="ks-mono">{(c.scale ?? 1).toFixed(2)}</span>
-      </label>
-      <label className="ks-fx-row">
-        <span>旋转</span>
-        <input type="range" min={-180} max={180} step={1} value={c.rotation ?? 0} onChange={(e) => upd({ rotation: Number(e.target.value) })} />
-        <span className="ks-mono">{c.rotation ?? 0}°</span>
-      </label>
-      <label className="ks-fx-row">
-        <span>透明</span>
-        <input type="range" min={0} max={1} step={0.05} value={c.opacity ?? 1} onChange={(e) => upd({ opacity: Number(e.target.value) })} />
-        <span className="ks-mono">{Math.round((c.opacity ?? 1) * 100)}%</span>
-      </label>
-      {(c.kind === 'numeric' || c.kind === 'builtin') && (
-        <label className="ks-fx-row ks-fx-row-text">
-          <span>颜色</span>
-          <input type="color" value={c.color ?? '#ffd24a'} onChange={(e) => upd({ color: e.target.value })} />
-        </label>
-      )}
-      <p className="ks-fx-hint">提示：在画面预览里直接拖动贴纸可改位置。</p>
-    </div>
-  )
+  // 飘字（overlay）的参数编辑走统一 MaterialInspector（CatalogTabs），此处不再重复。
+  return null
 }
 
 const css = `

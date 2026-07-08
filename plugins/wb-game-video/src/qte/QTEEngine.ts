@@ -211,13 +211,14 @@ export function qtePassed(spec: QTESpec, verdicts: HitVerdict[]): boolean {
  */
 export function qteTimeoutDeadlineMs(spec: QTESpec | undefined): number | null {
   const cues = qteCues(spec)
-  if (!spec || spec.timeoutMs == null || cues.length === 0) return null
-  const good = spec.window?.good ?? 480
+  const timeoutMs = spec?.window?.timeoutMs
+  if (!spec || timeoutMs == null || cues.length === 0) return null
+  const good = spec.tolerance?.good ?? 480
   if (cues.length === 1) {
-    return Math.min(...cues.map((c) => c.appearAt)) + spec.timeoutMs
+    return Math.min(...cues.map((c) => c.appearAt)) + timeoutMs
   }
   const lastLiveEnd = Math.max(...cues.map((c) => c.targetAt + good))
-  return lastLiveEnd + spec.timeoutMs
+  return lastLiveEnd + timeoutMs
 }
 
 /**

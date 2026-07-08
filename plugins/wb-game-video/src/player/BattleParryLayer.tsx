@@ -19,7 +19,7 @@ const PARRY_OPTIONS: Array<{ key: 'A' | 'B'; outcome: QteOutcome }> = [
 ]
 
 export function isBattleParryQte(scene: Scene | undefined): boolean {
-  return scene?.ext?.qteUi === 'battleParry'
+  return scene?.qte?.ui === 'battleParry'
 }
 
 /**

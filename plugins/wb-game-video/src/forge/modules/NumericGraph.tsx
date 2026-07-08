@@ -345,6 +345,9 @@ function SceneNumericInspector({
             onChange={(effects) =>
               updateScene(scene.id, { onEnterEffects: effects.length ? effects : undefined })
             }
+            items={items}
+            entities={Object.values(scenario.entities ?? {}).map((en) => ({ id: en.id, name: en.name }))}
+            statuses={Object.values(scenario.statuses ?? {}).map((st) => ({ id: st.id, name: st.name }))}
           />
         </div>
       </section>

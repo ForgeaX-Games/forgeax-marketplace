@@ -23,10 +23,11 @@ import type {
 } from '../scenario/types'
 import type {
   BossSpec,
-  DecisionSpec,
+  ChoiceSpec,
   Hotspot,
 } from '../scenario/gameplayTypes'
-import { listPerformanceSettlements } from '../scenario/performanceSettlement.js'
+import { clipIdFromMediaRef } from '../scenario/gameAssetCatalog.js'
+import { resolveInteraction } from '../player/choiceTiming.js'
 import {
   GAME_VIDEO_BLUEPRINT_SCHEMA_VERSION,
   type BlueprintBoss,
@@ -178,7 +179,6 @@ function branchEdge(scene: Scene, br: Branch, used: Set<string>): GameVideoBluep
       qteOutcome: br.qteOutcome,
       condition: br.condition,
       effects: br.effects,
-      showAtMs: br.showAt,
       gateMode: br.gateMode,
     },
   }
@@ -232,13 +232,27 @@ function buildNode(scene: Scene, ctx: NodeContext): GameVideoBlueprintNode {
   }
 }
 
+/** 交互形态 → 蓝图内层类别（calc/none 归 story）。 */
+function sceneKindOf(scene: Scene): BlueprintSceneKind {
+  switch (resolveInteraction(scene).type) {
+    case 'boss':
+      return 'battle'
+    case 'qte':
+      return 'qte'
+    case 'choice':
+      return 'choice'
+    default:
+      return 'story'
+  }
+}
+
 function elementTypeFor(scene: Scene, ctx: NodeContext): BlueprintElementType {
   if (ctx.isRoot) return 'start'
   if (scene.subFlowRef) return 'subflow'
   if (ctx.outgoing.length === 0 && !scene.boss) return 'end'
-  if (scene.kind === 'battle') return 'serviceTask'
-  if (scene.kind === 'qte') return 'serviceTask'
-  const hasChoice = scene.kind === 'choice' || (scene.branches ?? []).some((b) => b.kind === 'choice')
+  const it = resolveInteraction(scene).type
+  if (it === 'boss' || it === 'qte') return 'serviceTask'
+  const hasChoice = it === 'choice' || (scene.branches ?? []).some((b) => b.kind === 'choice')
   if (hasChoice) return 'userTask'
   return 'task'
 }
@@ -246,19 +260,19 @@ function elementTypeFor(scene: Scene, ctx: NodeContext): BlueprintElementType {
 function extensionFor(scene: Scene): GameVideoExtensionElements {
   const hotspots = scene.hotspots ? compileHotspots(scene.hotspots) : undefined
   return {
-    clipId: scene.clipId,
+    clipId: clipIdFromMediaRef(scene.media?.ref),
     mediaId: mediaIdOf(scene),
     hud: hudFor(scene),
     stateKey: scene.id,
-    sceneKind: (scene.kind ?? 'story') as BlueprintSceneKind,
+    sceneKind: sceneKindOf(scene),
     mediaPlayMode: (scene.mediaPlayMode ?? 'once') as BlueprintMediaPlayMode,
-    calcType: scene.calcType ?? (scene.kind && scene.kind !== 'story' ? scene.kind : undefined),
+    calcType: scene.calc?.calcType,
     dmgPoints: damagePointsOf(scene),
     options: optionsOf(scene),
     durationMs: scene.durationMs,
-    qte: scene.qte ? compileQte(scene.qte, scene.decision) : undefined,
+    qte: scene.qte ? compileQte(scene.qte) : undefined,
     boss: scene.boss ? compileBoss(scene.boss) : undefined,
-    decision: scene.decision ? compileDecision(scene.decision) : undefined,
+    decision: scene.choice ? compileDecision(scene.choice) : undefined,
     hotspots: hotspots && hotspots.length > 0 ? hotspots : undefined,
     transition: scene.transition ? compileTransition(scene.transition) : undefined,
     onEnter: onEnterOf(scene),
@@ -295,7 +309,7 @@ function mediaIdOf(scene: Scene): string | undefined {
 
 function hudFor(scene: Scene): BlueprintHudMode {
   if (scene.hudPreset) return scene.hudPreset
-  switch (scene.kind) {
+  switch (sceneKindOf(scene)) {
     case 'battle':
       return 'battle'
     case 'qte':
@@ -308,19 +322,18 @@ function hudFor(scene: Scene): BlueprintHudMode {
 }
 
 function damagePointsOf(scene: Scene): BlueprintDamagePoint[] {
-  const views = listPerformanceSettlements(scene)
-  if (views.length === 0) return []
-  const cues = scene.performance?.cues ?? []
-  return views.map((view) => {
-    const cue = cues.find((c) => c.id === view.id)
-    return {
-      t: view.atMs / 1000,
-      x: view.xPct,
-      y: view.yPct,
-      note: view.label,
-      effects: cue?.effects ?? [],
-    }
-  })
+  const settled = (scene.overlays ?? []).filter((o) => o.settlement !== undefined)
+  if (settled.length === 0) return []
+  return settled
+    .slice()
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((ov) => ({
+      t: ov.startMs / 1000,
+      x: Math.round((ov.x ?? 0.5) * 100),
+      y: Math.round((ov.y ?? 0.42) * 100),
+      note: ov.label ?? (ov.content.trim() || '结算'),
+      effects: ov.settlement!.effects,
+    }))
 }
 
 function optionsOf(scene: Scene): BlueprintOption[] | undefined {
@@ -342,13 +355,13 @@ function nodeDocumentation(scene: Scene): string {
 
 // ── 玩法子结构编译 ──────────────────────────────────────────────────────────
 
-function compileQte(qte: QTESpec, decision?: DecisionSpec): BlueprintQte {
+function compileQte(qte: QTESpec): BlueprintQte {
   const cues = qte.cues ?? []
   const sequence = qte.sequence === true
-  const kind = decision?.qteKind ?? inferQteKind(qte)
+  const kind = qte.template ?? inferQteKind(qte)
   return {
     kind,
-    windowMs: qte.window?.good ?? 200,
+    windowMs: qte.tolerance?.good ?? 200,
     cueMs: cues.map((c) => c.appearAt),
     cues: cues.map((c) => ({
       id: c.id,
@@ -359,7 +372,7 @@ function compileQte(qte: QTESpec, decision?: DecisionSpec): BlueprintQte {
       label: c.label,
     })),
     sequence,
-    timeoutMs: qte.timeoutMs,
+    timeoutMs: qte.window?.timeoutMs,
     passingHits: sequence ? cues.length : Math.max(1, Math.ceil(cues.length / 2)),
     outcomeLabels: qte.outcomeLabels,
   }
@@ -390,17 +403,16 @@ function compileBoss(boss: BossSpec): BlueprintBoss {
   }
 }
 
-function compileDecision(decision: DecisionSpec): BlueprintDecision {
-  const optType = decision.optType ?? (decision.mode === 'timed' ? 'timed' : 'static')
+function compileDecision(choice: ChoiceSpec): BlueprintDecision {
   return {
-    optType,
-    atMs: decision.atMs,
-    timeoutMs: decision.timeoutMs,
-    defaultTarget: decision.defaultBranchId,
-    prompt: decision.prompt,
-    fireAt: decision.fireAt,
-    presentation: decision.presentation,
-    layer: decision.layer,
+    optType: choice.timed ? 'timed' : 'static',
+    atMs: choice.window?.startMs,
+    timeoutMs: choice.window?.timeoutMs,
+    defaultBranchId: choice.defaultBranchId,
+    prompt: choice.prompt,
+    fireAt: choice.fireAt,
+    presentation: choice.presentation,
+    layer: choice.layer,
   }
 }
 

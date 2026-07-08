@@ -1,12 +1,5 @@
-import type { CSSProperties } from 'react'
-import { useMediaStore } from '../media/mediaStore'
 import { injectStyleOnce } from '../styles/injectStyle'
-import type { Scene, StickerClip } from '../scenario/types'
-import {
-  activeStickers,
-  getStickerPreset,
-  type StageFxFrame,
-} from '../fx/fxPresets'
+import type { StageFxFrame } from '../fx/fxPresets'
 
 /**
  * SceneFxLayers —— 剪映式后期效果的「实时渲染叠层」，编辑器预览与播放器共用。
@@ -14,8 +7,8 @@ import {
  * 包含：
  *   · FxOverlayLayer —— 暗角 / 颗粒 / 光效 / 故障 / 虚化（叠在媒体之上）
  *   · FadeLayer      —— 闪黑 / 闪白 / 渐显渐隐 的纯色遮罩（默认黑底）
- *   · StickerLayer   —— 贴纸（数值花字 / 图标 / emoji / 图片），静态渲染
  *
+ * 飘字（文字/图标/图片 + 结算）已收敛到 player/OverlayLayer。
  * 媒体元素的 filter / transform 由 composeStageFx 产出，由调用方直接套在
  * <video>/<img> 上（见 StagePane / Player）。
  */
@@ -72,60 +65,12 @@ export function FadeLayer({ color, opacity }: { color: string; opacity: number }
   )
 }
 
-// ── 贴纸样式 ──────────────────────────────────────────────────────────
-export function stickerStyle(c: StickerClip): CSSProperties {
-  return {
-    position: 'absolute',
-    left: `${(c.x ?? 0.5) * 100}%`,
-    top: `${(c.y ?? 0.5) * 100}%`,
-    transform: `translate(-50%, -50%) rotate(${c.rotation ?? 0}deg) scale(${c.scale ?? 1})`,
-    fontSize: `${c.sizePct ?? 12}cqh`,
-    opacity: c.opacity ?? 1,
-    color: c.color ?? '#ffd24a',
-    lineHeight: 1,
-    whiteSpace: 'nowrap',
-  }
-}
-
-/** 单个贴纸的内容（图标/花字/图片）。 */
-export function StickerContent({ clip }: { clip: StickerClip }) {
-  const entries = useMediaStore((s) => s.entries)
-  if (clip.kind === 'image') {
-    const url = clip.mediaId ? entries[clip.mediaId]?.url : undefined
-    if (!url) return null
-    return <img src={url} alt="" draggable={false} style={{ width: '1em', height: 'auto' }} />
-  }
-  if (clip.kind === 'builtin') {
-    return <span>{getStickerPreset(clip.presetId ?? '')?.glyph ?? '★'}</span>
-  }
-  if (clip.kind === 'numeric') {
-    return <span className="ks-fxsticker-numeric">{clip.text ?? ''}</span>
-  }
-  return <span>{clip.text ?? ''}</span>
-}
-
-// ── 贴纸层（静态，播放器用）─────────────────────────────────────────────
-export function StickerLayer({ scene, ms }: { scene: Scene; ms: number }) {
-  const stickers = activeStickers(scene, ms)
-  if (stickers.length === 0) return null
-  return (
-    <div className="ks-fxsticker-layer" aria-hidden>
-      {stickers.map((c) => (
-        <div key={c.id} className="ks-fxsticker" style={stickerStyle(c)}>
-          <StickerContent clip={c} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 const css = `
-.ks-fxovl, .ks-fxfade, .ks-fxsticker-layer {
+.ks-fxovl, .ks-fxfade {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.ks-fxsticker-layer { container-type: size; z-index: 19; }
 .ks-fxfade { z-index: 22; }
 .ks-fxovl { z-index: 17; overflow: hidden; }
 .ks-fxovl > div { position: absolute; inset: 0; }
@@ -178,17 +123,6 @@ const css = `
   40% { transform: translate(3px, -2px); }
   60% { transform: translate(-2px, -3px); }
   80% { transform: translate(2px, 3px); }
-}
-.ks-fxsticker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.ks-fxsticker-numeric {
-  font-weight: 900;
-  -webkit-text-stroke: 0.06em rgba(0,0,0,0.55);
-  text-shadow: 0 2px 6px rgba(0,0,0,0.45);
-  font-family: var(--ks-font-cn, var(--ks-font-ui));
 }
 `
 injectStyleOnce('scene-fx-layers', css)

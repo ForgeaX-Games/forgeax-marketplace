@@ -21,7 +21,7 @@ export function isBattleScene(scene: Scene | null | undefined): boolean {
   return resolveInnerMode(scene) === 'battle'
 }
 
-/** 当前场景是否处于「节奏/限时」交互(QTE 或限时 QTE)。 */
+/** 当前场景是否处于 QTE（节奏/限时）交互。 */
 export function isQteScene(scene: Scene | null | undefined): boolean {
   return resolveInnerMode(scene) === 'qte'
 }

@@ -162,14 +162,13 @@ function scrubScene(scene: Scene, opts: PrunePlaybackOptions): Scene {
   if (scene.entryGate) next.entryGate = scene.entryGate
   // 背包系统：现场搜索热点参与运行时；物品变化已统一进 onEnterEffects。
   if (scene.searchLoot) next.searchLoot = scene.searchLoot.slice()
-  // 文字叠加（剪映式贴字）+ 搜索段（定格循环找物）都参与运行时叠层/玩法
-  if (scene.textOverlays) next.textOverlays = scene.textOverlays.slice()
+  // 统一飘字（文字/图标/图片 + 结算触发器）+ 搜索段（定格循环找物）都参与运行时叠层/玩法
+  if (scene.overlays) next.overlays = scene.overlays.slice()
   if (scene.searchSegments) next.searchSegments = scene.searchSegments.slice()
-  // 剪映式后期效果（滤镜/调节/特效/贴纸/转场/首尾动画）—— 全是运行时实时渲染所需
+  // 剪映式后期效果（滤镜/调节/特效/转场/首尾动画）—— 全是运行时实时渲染所需
   if (scene.filterClips) next.filterClips = scene.filterClips.slice()
   if (scene.adjustClips) next.adjustClips = scene.adjustClips.slice()
   if (scene.effectClips) next.effectClips = scene.effectClips.slice()
-  if (scene.stickerClips) next.stickerClips = scene.stickerClips.slice()
   if (scene.transition) next.transition = scene.transition
   if (scene.clipAnim) next.clipAnim = scene.clipAnim
   return next

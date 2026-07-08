@@ -71,7 +71,7 @@ describe('scoreSceneForQte', () => {
               targetAt: 500,
             },
           ],
-          window: { perfect: 80, great: 180, good: 300 },
+          tolerance: { perfect: 80, great: 180, good: 300 },
           score: { perfect: 100, great: 60, good: 30, miss: -10 },
         },
       }),

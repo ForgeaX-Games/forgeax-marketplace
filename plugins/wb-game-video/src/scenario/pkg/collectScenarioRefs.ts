@@ -213,14 +213,14 @@ export function collectScenarioRefs(scenario: Scenario): RefCell[] {
       }
     }
 
-    // scene.stickerClips[] —— 自定义图片贴纸的 mediaId（内置图标/花字不引用素材）
-    if (Array.isArray(sc.stickerClips)) {
-      for (const stk of sc.stickerClips) {
-        if (stk.kind !== 'image' || !refLooksPackable(stk.mediaId)) continue
+    // scene.overlays[] —— 图片飘字的 content 即 mediaId（text/icon 不引用素材）
+    if (Array.isArray(sc.overlays)) {
+      for (const ov of sc.overlays) {
+        if (ov.kind !== 'image' || !refLooksPackable(ov.content)) continue
         cells.push({
-          get: () => stk.mediaId!,
-          set: (v) => { stk.mediaId = v },
-          label: `scene/${sid}/sticker/${stk.id}`,
+          get: () => ov.content,
+          set: (v) => { ov.content = v },
+          label: `scene/${sid}/overlay/${ov.id}`,
         })
       }
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { forgeScenarioFromIdea } from '../promptForge'
+import { resolveInteraction } from '../../player/choiceTiming'
 import type { TextClient, TextRequest } from '../types'
 
 /**
@@ -136,16 +137,17 @@ describe('玩法优先自动生成 · normalize 透传', () => {
     expect(scenario.modules?.gameplay).toBe(true)
   })
 
-  it('scene.kind / mediaPlayMode / boss(含 round.qte) / performance 存活', async () => {
+  it('scene.kind / mediaPlayMode / boss(含 round.qte) / overlays(结算) 存活', async () => {
     const client = mockClient(GAMEPLAY_REPLY)
     const { scenario } = await forgeScenarioFromIdea(client, { idea: 'boss 游戏' })
     expect(scenario.scenes['s1']?.mediaPlayMode).toBe('loop')
     const battle = scenario.scenes['s2']
-    expect(battle?.kind).toBe('battle')
+    expect(battle && resolveInteraction(battle).type).toBe('boss')
     expect(battle?.boss?.entityId).toBe('boss_1')
     expect(battle?.boss?.rounds).toHaveLength(1)
     expect(battle?.boss?.rounds[0]?.qte?.cues).toHaveLength(1)
-    expect(battle?.performance?.cues[0]?.effects[0]).toMatchObject({
+    const settled = battle?.overlays?.find((o) => o.settlement !== undefined)
+    expect(settled?.settlement?.effects[0]).toMatchObject({
       kind: 'entityStat',
       entityId: 'boss_1',
       stat: 'hp',
@@ -157,8 +159,8 @@ describe('玩法优先自动生成 · normalize 透传', () => {
     const client = mockClient(GAMEPLAY_REPLY)
     const { scenario } = await forgeScenarioFromIdea(client, { idea: 'boss 游戏' })
     const win = scenario.scenes['s3win']
-    expect(win?.decision?.optType).toBe('timed')
-    expect(win?.decision?.timeoutMs).toBe(3000)
+    expect(win?.choice?.timed).toBe(true)
+    expect(win?.choice?.window?.timeoutMs).toBe(3000)
     expect(win?.hotspots?.[0]?.targetSceneId).toBe('s1')
     expect(win?.hotspots?.[0]?.mode).toBe('return')
   })
@@ -187,7 +189,8 @@ describe('纯叙事零回归', () => {
     const { scenario } = await forgeScenarioFromIdea(client, { idea: '一个雨夜重逢的故事' })
     expect(scenario.entities).toBeUndefined()
     expect(scenario.modules?.gameplay).toBeUndefined()
-    expect(scenario.scenes['n1']?.kind).toBeUndefined()
-    expect(scenario.scenes['n1']?.boss).toBeUndefined()
+    const n1 = scenario.scenes['n1']
+    expect(n1 && resolveInteraction(n1).type).toBe('none')
+    expect(n1?.boss).toBeUndefined()
   })
 })

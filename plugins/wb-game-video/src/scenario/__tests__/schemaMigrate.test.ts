@@ -5,6 +5,7 @@ import {
   migrateV6ToV7,
   migrateV7ToV8,
   migrateV8ToV9,
+  migrateV12ToV13,
   migrateScenarioToLatest,
   ensureSceneHasShots,
   normalizeSceneArrays,
@@ -79,9 +80,9 @@ describe('migrateV1ToV2', () => {
 })
 
 describe('migrateScenarioToLatest', () => {
-  it('v1 → v10（链式迁移到最新版本）', () => {
+  it('v1 → v13（链式迁移到最新版本）', () => {
     const out = migrateScenarioToLatest(mkV1())
-    expect(out.schemaVersion).toBe(10)
+    expect(out.schemaVersion).toBe(13)
   })
   it('v1 迁到最新后有空 items 容器', () => {
     const out = migrateScenarioToLatest(mkV1())
@@ -266,11 +267,143 @@ describe('migrateV8ToV9', () => {
     expect(out.ui?.accentColor).toBe('#ff0066')
   })
 
-  it('低版本经链式迁移自动到 v10 且玩法字段缺省不报错', () => {
+  it('低版本经链式迁移自动到 v13 且玩法字段缺省不报错', () => {
     const out = migrateScenarioToLatest(mkV1())
-    expect(out.schemaVersion).toBe(10)
+    expect(out.schemaVersion).toBe(13)
     expect(out.entities).toBeUndefined()
     expect(out.ui).toBeUndefined()
+  })
+})
+
+describe('migrateV12ToV13（统一飘字 OverlayClip）', () => {
+  function mkV12WithScene(sceneExtra: Record<string, unknown>): Scenario {
+    return {
+      ...mkV1(),
+      schemaVersion: 12,
+      scenes: {
+        s1: {
+          id: 's1',
+          title: '开场',
+          media: { kind: 'VIDEO', ref: 'm-1' },
+          durationMs: 4000,
+          dialogue: [],
+          branches: [],
+          ...sceneExtra,
+        } as unknown as Scene,
+      },
+    }
+  }
+
+  it('版本号升到 13', () => {
+    const out = migrateV12ToV13(mkV12WithScene({}))
+    expect(out.schemaVersion).toBe(13)
+  })
+
+  it('已经是 v13 时幂等返回（引用相等）', () => {
+    const v13: Scenario = { ...mkV12WithScene({}), schemaVersion: 13 }
+    expect(migrateV12ToV13(v13)).toBe(v13)
+  })
+
+  it('textOverlays（花字）→ overlays kind=text，扁平样式收进 style，scale 折进 fontSizePct', () => {
+    const out = migrateV12ToV13(
+      mkV12WithScene({
+        textOverlays: [
+          {
+            id: 'tx1',
+            text: '标题',
+            startMs: 500,
+            endMs: 2000,
+            x: 0.3,
+            y: 0.2,
+            scale: 2,
+            rotation: 10,
+            shadow: true,
+            fontSizePct: 6,
+            color: '#ff0000',
+            fontWeight: 700,
+          },
+        ],
+      }),
+    )
+    const ov = out.scenes.s1!.overlays?.[0]
+    expect(ov?.kind).toBe('text')
+    expect(ov?.content).toBe('标题')
+    expect(ov?.x).toBe(0.3)
+    expect(ov?.rotation).toBe(10)
+    expect(ov?.style?.fontSizePct).toBe(12) // 6 * scale(2)
+    expect(ov?.style?.color).toBe('#ff0000')
+    expect(ov?.style?.shadow).toBe(true)
+    // 旧扁平字段不再挂在 clip 顶层
+    expect((ov as unknown as Record<string, unknown>).scale).toBeUndefined()
+    expect((ov as unknown as Record<string, unknown>).fontSizePct).toBeUndefined()
+  })
+
+  it('stickerClips 各 kind 映射：numeric/emoji→text，builtin→icon，image→image', () => {
+    const out = migrateV12ToV13(
+      mkV12WithScene({
+        stickerClips: [
+          { id: 'n1', kind: 'numeric', text: '-100', startMs: 0, endMs: 900, x: 0.5, y: 0.4, sizePct: 10, color: '#f00' },
+          { id: 'e1', kind: 'emoji', text: '🔥', startMs: 0, endMs: 900, x: 0.6, y: 0.5, sizePct: 8 },
+          { id: 'b1', kind: 'builtin', presetId: 'arrow', startMs: 0, endMs: 900, x: 0.2, y: 0.2, sizePct: 12 },
+          { id: 'i1', kind: 'image', mediaId: 'media-9', startMs: 0, endMs: 900, x: 0.8, y: 0.8, sizePct: 20 },
+        ],
+      }),
+    )
+    const byId = Object.fromEntries((out.scenes.s1!.overlays ?? []).map((o) => [o.id, o]))
+    expect(byId.n1?.kind).toBe('text')
+    expect(byId.n1?.content).toBe('-100')
+    expect(byId.n1?.style?.fontSizePct).toBe(10)
+    expect(byId.n1?.style?.color).toBe('#f00')
+    expect(byId.e1?.kind).toBe('text')
+    expect(byId.e1?.content).toBe('🔥')
+    expect(byId.b1?.kind).toBe('icon')
+    expect(byId.b1?.content).toBe('arrow')
+    expect(byId.b1?.sizePct).toBe(12)
+    expect(byId.i1?.kind).toBe('image')
+    expect(byId.i1?.content).toBe('media-9')
+  })
+
+  it('performance.cues 按 id 配对已转出的 overlay 挂 settlement', () => {
+    const out = migrateV12ToV13(
+      mkV12WithScene({
+        stickerClips: [{ id: 'shot1', kind: 'numeric', text: '-50', startMs: 1000, endMs: 1900, x: 0.5, y: 0.4 }],
+        performance: {
+          cues: [{ id: 'shot1', atMs: 1000, label: '命中', settlement: { effects: [{ id: 'e', kind: 'entityStat', entityId: 'b', stat: 'hp', op: 'add', value: -50 }] } }],
+        },
+      }),
+    )
+    const ov = out.scenes.s1!.overlays?.find((o) => o.id === 'shot1')
+    expect(ov?.settlement?.effects?.length).toBe(1)
+    expect(out.scenes.s1!.overlays?.length).toBe(1) // 未额外生成触发器
+  })
+
+  it('未配对 performance.cue → 不可见触发器（content=""，携带 settlement）', () => {
+    const out = migrateV12ToV13(
+      mkV12WithScene({
+        performance: {
+          cues: [{ id: 'logic1', atMs: 2000, label: '纯结算', settlement: { effects: [] } }],
+        },
+      }),
+    )
+    const ov = out.scenes.s1!.overlays?.[0]
+    expect(ov?.content).toBe('')
+    expect(ov?.startMs).toBe(2000)
+    expect(ov?.label).toBe('纯结算')
+    expect(ov?.settlement).toBeDefined()
+  })
+
+  it('删除旧字段 textOverlays / stickerClips / performance', () => {
+    const out = migrateV12ToV13(
+      mkV12WithScene({
+        textOverlays: [{ id: 't', text: 'x', startMs: 0, x: 0.5, y: 0.5 }],
+        stickerClips: [{ id: 's', kind: 'numeric', text: '1', startMs: 0, endMs: 1, x: 0.5, y: 0.5 }],
+        performance: { cues: [] },
+      }),
+    )
+    const raw = out.scenes.s1! as unknown as Record<string, unknown>
+    expect(raw.textOverlays).toBeUndefined()
+    expect(raw.stickerClips).toBeUndefined()
+    expect(raw.performance).toBeUndefined()
   })
 })
 
@@ -379,14 +512,14 @@ describe('coerceHudRules / normalizeUiHud', () => {
       ...mkV1(),
       schemaVersion: 9,
       ui: { hud: { playerHp: 'always' } },
-    } as Scenario
+    } as unknown as Scenario
     const out = normalizeUiHud(scenario)
     expect(out.ui?.hud).toEqual([{ element: 'playerHp', show: 'always' }])
     const migrated = migrateScenarioToLatest({
       ...mkV1(),
       schemaVersion: 9,
       ui: { hud: { score: 'qte' } },
-    } as Scenario)
+    } as unknown as Scenario)
     expect(migrated.ui?.hud).toEqual([{ element: 'score', show: 'qte' }])
   })
 
@@ -400,7 +533,7 @@ describe('coerceHudRules / normalizeUiHud', () => {
           qte: { timeoutMs: 3000, window: { perfect: 80, great: 160, good: 280 }, score: { perfect: 100, great: 60, good: 25, miss: -10 } },
         },
       },
-    } as Scenario
+    } as unknown as Scenario
     const out = normalizeSceneQte(scenario)
     expect(out.scenes.s1.qte?.cues).toEqual([])
   })

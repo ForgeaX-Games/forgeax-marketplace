@@ -425,7 +425,7 @@ function countBadges(node: GameVideoBlueprintNode): number {
   if (ext.qte) n++
   if (ext.options && ext.options.length > 0) n++
   if (ext.dmgPoints && ext.dmgPoints.length > 0) n++
-  if (ext.decision && (ext.decision.optType === 'timed' || ext.decision.optType === 'timed_qte')) n++
+  if (ext.decision && ext.decision.optType === 'timed') n++
   if (ext.entryGate) n++
   if (ext.hotspots && ext.hotspots.length > 0) n++
   if (ext.subFlowRef) n++
@@ -464,7 +464,7 @@ function deriveNodeData(
   if (ext.dmgPoints && ext.dmgPoints.length > 0) {
     badges.push({ glyph: '✦', text: `判定×${ext.dmgPoints.length}`, tone: 'boss' })
   }
-  if (ext.decision && (ext.decision.optType === 'timed' || ext.decision.optType === 'timed_qte')) {
+  if (ext.decision && ext.decision.optType === 'timed') {
     const sec = ext.decision.timeoutMs ? Math.round(ext.decision.timeoutMs / 1000) : null
     badges.push({ glyph: '⏳', text: sec ? `限时${sec}s` : '限时选择', tone: 'timed' })
   }

@@ -36,7 +36,7 @@ import type {
 import type { Effect, EntityStatEffect, Hotspot, QTECue, QTESpec, Scene } from '../scenario/types'
 import { HudLayer } from './hud/HudLayer'
 import { DialogueBox } from './DialogueBox'
-import { TextOverlayLayer } from './TextOverlayLayer'
+import { OverlayLayer } from './OverlayLayer'
 import { ChoiceLayer } from './ChoiceLayer'
 import { BattleSkillLayer, isBattleSkillChoice } from './BattleSkillLayer'
 import { BattleParryLayer, isBattleParryQte } from './BattleParryLayer'
@@ -44,13 +44,11 @@ import { InkKouLayer, isInkKouQte } from './InkKouLayer'
 import { InkYingMoLayer, isInkYingMoChoice } from './InkYingMoLayer'
 import { NarrativeStatsLayer } from './NarrativeStatsLayer'
 import { HotspotLayer } from './hotspots/HotspotLayer'
-import { StickerLayer } from './SceneFxLayers'
 import { initEntities, type EntitiesState } from './entities'
 import { evaluateCondition } from './conditionEval'
 import { injectStyleOnce } from '../styles/injectStyle'
-import { listPerformanceSettlements } from '../scenario/performanceSettlement'
-import { choiceWindowEnd, choiceWindowStart, resolveOptType, resolvePlaybackCapMs, shouldActivateTimedQte, shouldOpenChoiceDuringPlayback } from './choiceTiming'
-import { duePerformanceCues } from './performanceRuntime'
+import { choiceWindowEnd, choiceWindowStart, resolvePlaybackCapMs, shouldActivateTimedQte, shouldOpenChoiceDuringPlayback } from './choiceTiming'
+import { dueOverlaySettlements } from './performanceRuntime'
 import { resolveScenePlaybackDurationMs } from './scenePlaybackDuration'
 import { QTEOverlay } from './QTEOverlay'
 import { qteOverlayAmbientClass } from './qteAmbient'
@@ -106,13 +104,6 @@ interface FloatItem {
   x: number
   y: number
   kind: 'dmg' | 'hurt' | 'note' | 'heal'
-}
-
-interface ContentRect {
-  left: number
-  top: number
-  width: number
-  height: number
 }
 
 interface StableBlueprintVideoProps {
@@ -408,7 +399,6 @@ export function BlueprintPlayer(): JSX.Element {
     qteFailTriggeredRef.current = false
     setQteVerdicts([])
     setSnapshot(EMPTY)
-    setFloats([])
     setLogs([])
     dispatch(runtime.start())
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,26 +457,23 @@ export function BlueprintPlayer(): JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [runtime, snapshot.clip?.nodeId, videoReady, videoSrc, scenario, snapshot.clip?.durationMs])
 
-  // 演出结算：读 live scenario.performance（对齐 Player.tsx），时间栏改动即时生效。
+  // 飘字结算：读 live scene.overlays[].settlement，到 startMs 触发全 effect（引擎侧 applyRuntimeEffects）。
+  // 可见飘字由 OverlayLayer 自身渲染（含 enter 动画），不再 spawn transient DOM float。
   useEffect(() => {
     if (!runtime || !scenario || !snapshot.clip) return
     const nodeId = runtime.state.currentNodeId
     const sc = nodeId ? scenario.scenes[nodeId] : undefined
-    if (!sc?.performance?.cues?.length) return
-    const due = duePerformanceCues(sc.performance, elapsed, perfFiredRef.current)
+    const due = dueOverlaySettlements(sc?.overlays, elapsed, perfFiredRef.current)
     if (due.length === 0) return
-    const settlements = listPerformanceSettlements(sc)
-    for (const cue of due) {
-      perfFiredRef.current.add(cue.id)
-      const view = settlements.find((v) => v.id === cue.id)
+    for (const ov of due) {
+      perfFiredRef.current.add(ov.id)
       const point: BlueprintDamagePoint = {
-        t: cue.atMs / 1000,
-        x: view?.xPct ?? 50,
-        y: view?.yPct ?? 42,
-        note: view?.displayText ?? view?.label ?? cue.label ?? '结算',
-        effects: cue.effects,
+        t: ov.startMs / 1000,
+        x: ov.x * 100,
+        y: ov.y * 100,
+        note: ov.label ?? (ov.content || '结算'),
+        effects: ov.settlement!.effects,
       }
-      spawnFloats(point)
       dispatch(runtime.applyDamagePoint(point))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -526,7 +513,7 @@ export function BlueprintPlayer(): JSX.Element {
     if (bpQte && hasTieredQteOutcomes(bpQte)) {
       dispatch(runtime.submitQteOutcome('fail'))
     } else {
-      const hits = qteVerdicts.filter((v) => v.rank !== 'miss').length
+      const hits = qteVerdicts.filter((v) => v.judgement !== 'MISS').length
       dispatch(runtime.submitQte(hits))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -603,13 +590,16 @@ export function BlueprintPlayer(): JSX.Element {
   /**
    * 进入节点即时结算的实体 HP 效果（onEnter，如冥想回血 +30）弹飘字。
    * 无 clip 时间坐标，按实体（Boss 顶部血条 / 我方右下血条）就近安置。
+   * 与 OverlayLayer 正交：clip 坐标飘字走 overlays[].settlement + OverlayLayer；
+   * 这里只兜 onEnter 无坐标的即时 HP 结算（runtime 发 floatEffects 指令）。
    */
   function spawnOnEnterFloats(effects: Effect[]): void {
     const hp = effects.filter(
       (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp' && Number(e.value) !== 0,
     )
-    if (hp.length === 0) return
-    const isBoss = scenario?.entities?.[hp[0].entityId]?.kind === 'boss'
+    const first = hp[0]
+    if (!first) return
+    const isBoss = scenario?.entities?.[first.entityId]?.kind === 'boss'
     const at = isBoss ? { x: 50, y: 22 } : { x: 80, y: 72 }
     spawnFloats({ t: 0, x: at.x, y: at.y, note: '', effects: hp })
   }
@@ -630,7 +620,7 @@ export function BlueprintPlayer(): JSX.Element {
           const passed = qtePassed(activeQte, next)
           dispatch(runtime.submitQteOutcome(passed ? 'pass' : 'fail'))
         } else {
-          const hits = next.filter((v) => v.rank !== 'miss').length
+          const hits = next.filter((v) => v.judgement !== 'MISS').length
           dispatch(runtime.submitQte(hits))
         }
       }, 400)
@@ -727,7 +717,7 @@ export function BlueprintPlayer(): JSX.Element {
           </div>
         )}
 
-        {/* dmgPoints 飘字层 */}
+        {/* onEnter 无坐标即时结算（如冥想回血）的 transient 飘字层；clip 坐标飘字走 OverlayLayer */}
         <div className="bpx-floats" aria-hidden>
           {floats.map((f) => (
             <span key={f.id} className={`bpx-float bpx-float--${f.kind}`} style={{ left: `${f.x}%`, top: `${f.y}%` }}>
@@ -738,8 +728,7 @@ export function BlueprintPlayer(): JSX.Element {
 
         {/* ── 复用旧 Player 的成熟渲染设施 ── */}
         {scene && <DialogueBox scene={scene} elapsed={elapsed} />}
-        {scene && <TextOverlayLayer scene={scene} elapsed={elapsed} />}
-        {scene && <StickerLayer scene={scene} ms={elapsed} />}
+        {scene && <OverlayLayer scene={scene} elapsed={elapsed} />}
         {scene && hudVisible && (
           <div className="bpx-content-ui" style={contentStyle}>
             <HudLayer scenario={scenario} scene={scene} entities={hudEntities} vars={vars} score={score} />
@@ -827,8 +816,8 @@ export function BlueprintPlayer(): JSX.Element {
               onResolve={(cue, deltaMs, holdMs) => {
                 const v =
                   cue.shape === 'hold'
-                    ? judgeHold(cue, activeQte.window, activeQte.score, deltaMs, holdMs ?? 0)
-                    : judgeTap(cue, activeQte.window, activeQte.score, deltaMs)
+                    ? judgeHold(cue, activeQte.tolerance, activeQte.score, deltaMs, holdMs ?? 0)
+                    : judgeTap(cue, activeQte.tolerance, activeQte.score, deltaMs)
                 handleCueResolve(cue, v)
               }}
             />
@@ -1371,10 +1360,10 @@ function shouldUseBattleParryUi(scene: Scene, spec: QTESpec): boolean {
 function blueprintQteFromScene(scene: Scene, spec: QTESpec): BlueprintQte {
   const cues = spec.cues ?? []
   const sequence = spec.sequence === true
-  const kind = scene.decision?.qteKind ?? 'timing'
+  const kind = spec.template ?? 'timing'
   return {
     kind: kind === 'parry' ? 'parry' : kind === 'mash' ? 'mash' : sequence ? 'sequence' : 'timing',
-    windowMs: spec.window?.good ?? 200,
+    windowMs: spec.tolerance?.good ?? 200,
     cueMs: cues.map((c) => c.appearAt),
     cues: cues.map((c) => ({
       id: c.id,
@@ -1385,7 +1374,7 @@ function blueprintQteFromScene(scene: Scene, spec: QTESpec): BlueprintQte {
       label: c.label,
     })),
     sequence,
-    timeoutMs: spec.timeoutMs ?? scene.decision?.timeoutMs,
+    timeoutMs: spec.window?.timeoutMs ?? scene.choice?.window?.timeoutMs,
     passingHits: sequence ? cues.length : Math.max(1, Math.ceil(cues.length / 2)),
     outcomeLabels: spec.outcomeLabels,
   }
@@ -1520,8 +1509,8 @@ function injectStyles(): void {
     .bpx-sg-lg-ran{background:#3ec98a}
     .bpx-sg-lg-cur{background:#5cffb2;box-shadow:0 0 6px rgba(92,255,178,.9)}
     @keyframes bpx-sg-pulse{0%,100%{filter:drop-shadow(0 0 5px rgba(92,255,178,.55))}50%{filter:drop-shadow(0 0 11px rgba(92,255,178,.95))}}
+    @keyframes bpx-float{0%{opacity:0;transform:translate(-50%,10px) scale(.8)}20%{opacity:1}100%{opacity:0;transform:translate(-50%,-82px) scale(1.12)}}
     .bpx-logs ol{margin:0 0 10px;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12px}
     .bpx-logs pre{white-space:pre-wrap;font-size:11px;color:#bfe4ff;background:rgba(255,255,255,.05);padding:10px;border-radius:10px;margin:0}
-    @keyframes bpx-float{0%{opacity:0;transform:translate(-50%,10px) scale(.8)}20%{opacity:1}100%{opacity:0;transform:translate(-50%,-82px) scale(1.12)}}
   `)
 }

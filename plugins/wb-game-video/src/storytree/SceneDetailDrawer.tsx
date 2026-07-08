@@ -1,10 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { StagePane } from '../editor/StagePane'
 import { TimelineDock } from '../editor/timeline/TimelineDock'
-import { Timeline } from '../editor/Timeline'
+import { MaterialTimeline } from '../editor/MaterialTimeline'
+import { applyMaterialDelete, applyMaterialPatch, collectMaterials, confirmMaterialDelete } from '../forge/CatalogTabs'
 import { EffectsRail } from '../editor/fx/EffectsRail'
-import type { TimelinePreview } from '../editor/timeline/timelinePreview'
-import { loadDialoguePref } from '../editor/timeline/dialoguePref'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { injectStyleOnce } from '../styles/injectStyle'
 
@@ -57,30 +56,29 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
   const scene = useScenarioStore((s) => s.scenario.scenes[sceneId])
   const scenario = useScenarioStore((s) => s.scenario)
   const setSceneIsEnding = useScenarioStore((s) => s.setSceneIsEnding)
+  const updateScene = useScenarioStore((s) => s.updateScene)
   const [closing, setClosing] = useState(false)
 
   /**
-   * Timeline 被提升出 StagePane 后，这两个态由 drawer 持有并同时灌给：
-   *   · StagePane  —— 画面叠层（字幕预览 / QTE 打点）消费
-   *   · Timeline   —— 光标位置 / 拖拽 preview 镜像
+   * hoverMs = 播放头/游标位置，由 drawer 持有并同时灌给：
+   *   · StagePane      —— 画面叠层（字幕预览 / QTE 打点）按此时刻渲染
+   *   · MaterialTimeline —— 平滑播放头位置 + 点击 ruler `onSeek` 回写
    */
   const [hoverMs, setHoverMs] = useState(0)
-  const [preview, setPreview] = useState<TimelinePreview | null>(null)
-  /**
-   * DIA 轨 / 字幕预览联动开关 —— 真实 state 在 Timeline 内部（localStorage
-   * 持久化），这里只做"镜像"给 StagePane 消费：Timeline 通过 onShowDialogueChange
-   * 告诉我们当前值，我们把它灌给上方 StagePane 决定要不要渲染字幕 band。
-   * 初值先读一次 localStorage，避免首帧 StagePane 闪一下字幕又消失。
-   */
-  const [showDialogue, setShowDialogue] = useState<boolean>(() => loadDialoguePref())
+  const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null)
+  /** 递增即让 StagePane 暂停当前播放 —— 手动拖拽时间轴时触发，实现「拖拽自动暂停」。 */
+  const [pauseSignal, setPauseSignal] = useState(0)
   /** 右侧「后期效果」检视栏是否收起（默认展开）。 */
   const [fxRailCollapsed, setFxRailCollapsed] = useState(false)
 
-  // v3.9：切换 scene 时把时间线回到 0（场景起点）；跟"光标跟随"默认关掉
-  // 一起用，满足"刷新/切场景时时间线不跟随、稳在起点"的作者需求。
+  const materials = useMemo(() => (scene ? collectMaterials(scene) : []), [scene])
+  const maxMs = Math.max(1000, scene?.durationMs ?? 0)
+  const isTimedQteNode = Boolean(scene?.qte)
+
+  // 切换 scene 时把播放头回到起点。
   useEffect(() => {
     setHoverMs(0)
-    setPreview(null)
+    setSelectedMaterialKey(null)
   }, [sceneId])
 
   // 同步 scenarioStore.selectedSceneId —— StagePane 才能渲染到本抽屉目标场景
@@ -213,8 +211,7 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
               hideTimeline
               hoverMs={hoverMs}
               setHoverMs={setHoverMs}
-              preview={preview}
-              showDialogue={showDialogue}
+              pauseSignal={pauseSignal}
             />
             <EffectsRail
               sceneId={sceneId}
@@ -237,12 +234,22 @@ export function SceneDetailDrawer({ sceneId, onClose, variant = 'dialog' }: Prop
                * band 左侧现在只放时间轴, 吃满整条 band 高度。
                */}
               <div className="ks-scene-detail-cell ks-scene-detail-cell-timeline">
-                <Timeline
-                  scene={scene}
-                  hoverMs={hoverMs}
-                  setHoverMs={setHoverMs}
-                  onPreviewChange={setPreview}
-                  onShowDialogueChange={setShowDialogue}
+                <MaterialTimeline
+                  materials={materials}
+                  maxMs={maxMs}
+                  playheadMs={hoverMs}
+                  selectedMaterialKey={selectedMaterialKey}
+                  isTimedQteNode={isTimedQteNode}
+                  context="story"
+                  onSeek={setHoverMs}
+                  onScrubStart={() => setPauseSignal((n) => n + 1)}
+                  onSelectMaterial={setSelectedMaterialKey}
+                  onPatchMaterial={(item, patch) => applyMaterialPatch(scene, maxMs, item, patch, updateScene)}
+                  onDeleteMaterial={(item) => {
+                    if (!confirmMaterialDelete(scene, item)) return
+                    applyMaterialDelete(scene, item, updateScene)
+                    if (selectedMaterialKey === item.key) setSelectedMaterialKey(null)
+                  }}
                 />
               </div>
             </div>

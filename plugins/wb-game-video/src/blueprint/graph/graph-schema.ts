@@ -67,6 +67,38 @@ export interface VarSpec {
   max?: number
 }
 
+// ── 文字样式（图原生，镜像 legacy TextStyle；floatText / dialogue 共用底座）──────────
+/**
+ * 文字「长什么样」描述。位置/尺寸不进这里（那是元素自己的 params.x/y/sizePct）；
+ * 样式只管字体/色/描边/字号/对齐/底色/投影。全部可选，缺省由呈现层兜底。
+ */
+export interface GraphTextStyle {
+  fontFamily?: string
+  fontWeight?: number
+  italic?: boolean
+  underline?: boolean
+  color?: string
+  strokeColor?: string
+  strokeWidth?: number
+  /** 字号：画面高度百分比（用 cqh 渲染，与分辨率无关）。 */
+  fontSizePct?: number
+  align?: 'left' | 'center' | 'right'
+  bgColor?: string
+  opacity?: number
+  shadow?: boolean
+}
+
+/** 文字预设样式（预设网格一格）；内置在 text-style.ts，用户自定义存 GameScenario.textStylePresets。 */
+export interface GraphTextStylePreset {
+  id: string
+  name: string
+  style: GraphTextStyle
+  /** 仅字幕预设：勾选后展示说话人前缀（映射到 dialogue.speaker）。 */
+  speakerPrefix?: boolean
+  /** 内置只读；用户自定义可编辑/删除。 */
+  builtin?: boolean
+}
+
 /** 触发时机（相对本节点演出时间线）。 */
 export type TriggerSpec =
   | { when: 'enter' }
@@ -185,6 +217,8 @@ export interface GameScenario {
   rng?: { seed: number }
   /** 图级反应规则（即时判负/判胜等）；每次状态变化后求值。 */
   rules?: ReactiveRule[]
+  /** 用户自定义文字预设（内置在 text-style.ts；这里只存用户新建的，按 subtitle/overlay 分组）。 */
+  textStylePresets?: { subtitle?: GraphTextStylePreset[]; overlay?: GraphTextStylePreset[] }
   graph: GameGraph
 }
 

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   makeInsertDialogue,
   makeInsertCue,
-  makeInsertBranch,
   duplicateDialogue,
 } from '../insertFactories'
 
@@ -66,49 +65,6 @@ describe('makeInsertCue', () => {
   it('多次调用 id 不重复', () => {
     const a = makeInsertCue({ ms: 100, sceneDurationMs: SCENE })
     const b = makeInsertCue({ ms: 100, sceneDurationMs: SCENE })
-    expect(a.id).not.toBe(b.id)
-  })
-})
-
-describe('makeInsertBranch', () => {
-  it('showAt = 光标位置；kind=choice；指向 defaultTargetId', () => {
-    const b = makeInsertBranch({
-      ms: 2200,
-      sceneDurationMs: SCENE,
-      defaultTargetSceneId: 'sceneB',
-    })
-    expect(b.kind).toBe('choice')
-    expect(b.showAt).toBe(2200)
-    expect(b.targetSceneId).toBe('sceneB')
-    expect(b.id).toMatch(/^b-/)
-  })
-
-  it('showAt 夹到 [0, sceneDuration]', () => {
-    const a = makeInsertBranch({
-      ms: -200,
-      sceneDurationMs: SCENE,
-      defaultTargetSceneId: 'x',
-    })
-    expect(a.showAt).toBe(0)
-    const b = makeInsertBranch({
-      ms: SCENE + 999,
-      sceneDurationMs: SCENE,
-      defaultTargetSceneId: 'x',
-    })
-    expect(b.showAt).toBe(SCENE)
-  })
-
-  it('多次调用 id 不重复', () => {
-    const a = makeInsertBranch({
-      ms: 100,
-      sceneDurationMs: SCENE,
-      defaultTargetSceneId: 'x',
-    })
-    const b = makeInsertBranch({
-      ms: 100,
-      sceneDurationMs: SCENE,
-      defaultTargetSceneId: 'x',
-    })
     expect(a.id).not.toBe(b.id)
   })
 })

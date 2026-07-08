@@ -24,7 +24,7 @@ interface Props {
 const SKILL_KEYS = ['X', 'A', 'Y', 'B'] as const
 
 export function isBattleSkillChoice(scene: Scene | undefined): boolean {
-  return scene?.ext?.choiceUi === 'battleSkillBar'
+  return scene?.choice?.ui === 'battleSkillBar'
 }
 
 export function BattleSkillLayer({

@@ -19,10 +19,10 @@ describe('BlueprintPlayer prototype combat visuals', () => {
     expect(s).toContain('if (resetElapsed) setElapsed(0)')
   })
 
-  it('drives subtitle and sticker timing from video currentTime, not a detached wall clock', () => {
+  it('drives subtitle and overlay timing from video currentTime, not a detached wall clock', () => {
     const s = source('BlueprintPlayer.tsx')
     expect(s).toContain('video.currentTime')
-    expect(s).toContain('<StickerLayer')
+    expect(s).toContain('<OverlayLayer')
     expect(s).toContain('<DialogueBox')
   })
 
@@ -77,7 +77,7 @@ describe('BlueprintPlayer prototype combat visuals', () => {
     )
     const skill = source('BattleSkillLayer.tsx')
 
-    expect(demo).toContain("choiceUi: 'battleSkillBar'")
+    expect(demo).toContain("ui: 'battleSkillBar'")
     expect(player).toContain('isBattleSkillChoice(scene)')
     expect(player).toContain('<BattleSkillLayer')
     expect(skill).toContain('pvb-skills')
@@ -98,7 +98,7 @@ describe('BlueprintPlayer prototype combat visuals', () => {
     )
     const parry = source('BattleParryLayer.tsx')
 
-    expect(demo).toContain("qteUi: 'battleParry'")
+    expect(demo).toContain("ui: 'battleParry'")
     expect(player).toContain('isBattleParryQte(scene)')
     expect(player).toContain('<BattleParryLayer')
     expect(player).toContain('shouldActivateTimedQte')

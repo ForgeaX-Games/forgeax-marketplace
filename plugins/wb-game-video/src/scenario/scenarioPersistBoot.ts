@@ -942,11 +942,11 @@ export function signScenarioRuntimeSurface(s: Scenario): string {
   for (const id of sceneIds) {
     const sc = scenes[id]
     if (!sc) continue
-    // clipId / mediaPlayMode 是运行时「演出」表面：改了它们（含从有演出改成无演出）
+    // media.ref / mediaPlayMode 是运行时「演出」表面：改了它们（含从有演出改成无演出）
     // 必须触发内置 demo 刷新，否则旧持久化会盖住 bundled（见「无演出节点」改造）。
-    parts.push(`s:${id}:${sc.durationMs}:${sc.clipId ?? ''}:${sc.mediaPlayMode ?? ''}`)
-    if (sc.qte?.window && sc.qte.cues) {
-      const w = sc.qte.window
+    parts.push(`s:${id}:${sc.durationMs}:${sc.media?.ref ?? ''}:${sc.mediaPlayMode ?? ''}`)
+    if (sc.qte?.tolerance && sc.qte.cues) {
+      const w = sc.qte.tolerance
       parts.push(`w:${w.perfect}/${w.great}/${w.good}`)
       for (const cue of sc.qte.cues) {
         parts.push(
@@ -1003,8 +1003,8 @@ export function refreshBuiltinDemoInDb(
             ...prev,
             durationMs: bundledScene.durationMs,
             qte: bundledScene.qte,
-            // 回填演出表面：bundled 去掉 clipId（无演出）时同步抹掉旧持久化里的 clipId。
-            clipId: bundledScene.clipId,
+            // 回填演出表面：bundled 的 media（演出来源 SSOT）覆盖旧持久化。
+            media: bundledScene.media,
             mediaPlayMode: bundledScene.mediaPlayMode,
           }
         }

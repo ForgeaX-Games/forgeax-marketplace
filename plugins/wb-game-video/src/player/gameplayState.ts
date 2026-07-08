@@ -1,11 +1,11 @@
 import type { Scene } from '../scenario/types'
-import { resolveOptType } from './choiceTiming'
+import { resolveInteraction } from './choiceTiming'
 
 /**
- * 两级状态机 · 内层模式 —— 由 Scene.kind + 字段推导，Player 据此分派交互层。
+ * 两级状态机 · 内层模式 —— 由 resolveInteraction 派生，Player 据此分派交互层。
  *
  * 外层 = 场景图导航(auto / branch)；内层 = 本模式决定挂哪套 UI：
- *   story  → 纯播放 + 台词/热点
+ *   story  → 纯播放 + 台词/热点（含 calc 纯结算节点）
  *   choice → ChoiceLayer
  *   qte    → QTEOverlay
  *   battle → BossBattleOverlay
@@ -13,14 +13,16 @@ import { resolveOptType } from './choiceTiming'
 export type GameplayInnerMode = 'story' | 'battle' | 'qte' | 'choice'
 
 export function resolveInnerMode(scene: Scene | null | undefined): GameplayInnerMode {
-  if (!scene) return 'story'
-  if (scene.kind === 'battle' && scene.boss) return 'battle'
-  if (scene.kind === 'qte') return 'qte'
-  if (resolveOptType(scene.decision) === 'timed_qte') return 'qte'
-  if (scene.qte?.cues?.length) return 'qte'
-  if (scene.kind === 'choice') return 'choice'
-  if (scene.branches.some((b) => b.kind === 'choice') && scene.decision) return 'choice'
-  return 'story'
+  switch (resolveInteraction(scene).type) {
+    case 'boss':
+      return 'battle'
+    case 'qte':
+      return 'qte'
+    case 'choice':
+      return 'choice'
+    default:
+      return 'story'
+  }
 }
 
 /** kind 缺省时按内层模式推断 HUD 方案。 */

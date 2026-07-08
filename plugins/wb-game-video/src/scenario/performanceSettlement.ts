@@ -1,7 +1,6 @@
-import type { PerformanceCue } from './gameplayTypes'
-import type { EntityStatEffect, Scenario, Scene, StickerClip } from './types'
+import type { EntityStatEffect, OverlayClip, Scenario, Scene, Settlement } from './types'
 
-/** 蓝图「计算」组只读展示的结算飘字摘要（SSOT = performance.cues + stickerClips）。 */
+/** 蓝图「计算」组只读展示的结算飘字摘要（SSOT = overlays[].settlement）。 */
 export interface PerformanceSettlementView {
   id: string
   atMs: number
@@ -12,19 +11,24 @@ export interface PerformanceSettlementView {
   yPct: number
 }
 
-export function cueDamageValue(cue: PerformanceCue | undefined): number {
-  const effect = cue?.effects.find((e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp')
+/** settlement 里 hp 变动的绝对值（无则 0）。 */
+export function settlementDamageValue(settlement: Settlement | undefined): number {
+  const effect = settlement?.effects.find(
+    (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp',
+  )
   return Math.abs(Number(effect?.value ?? 0))
 }
 
-export function cueTargetKind(cue: PerformanceCue | undefined, scenario: Scenario): 'boss' | 'player' {
-  const effect = cue?.effects.find((e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp')
+/** settlement 的 hp 变动作用于 player 还是 boss。 */
+export function settlementTargetKind(
+  settlement: Settlement | undefined,
+  scenario: Scenario,
+): 'boss' | 'player' {
+  const effect = settlement?.effects.find(
+    (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp',
+  )
   const entity = effect ? scenario.entities?.[effect.entityId] : undefined
   return entity?.kind === 'player' ? 'player' : 'boss'
-}
-
-function stickerForCue(stickers: StickerClip[], cueId: string): StickerClip | undefined {
-  return stickers.find((s) => s.performanceCueId === cueId) ?? stickers.find((s) => s.id === cueId)
 }
 
 function formatMs(ms: number): string {
@@ -32,40 +36,36 @@ function formatMs(ms: number): string {
   return Number.isInteger(sec) ? `${sec}s` : `${sec.toFixed(1)}s`
 }
 
+/** 带结算的 overlay（有 settlement），按 startMs 升序。 */
+function settledOverlays(scene: Scene): OverlayClip[] {
+  return (scene.overlays ?? [])
+    .filter((o): o is OverlayClip & { settlement: Settlement } => o.settlement !== undefined)
+    .slice()
+    .sort((a, b) => a.startMs - b.startMs)
+}
+
 /** 从 Scene 读取结算点列表（供蓝图只读预览 + blueprint 编译）。 */
 export function listPerformanceSettlements(scene: Scene): PerformanceSettlementView[] {
-  const cues = scene.performance?.cues ?? []
-  const stickers = scene.stickerClips ?? []
-  const usedStickerIds = new Set<string>()
-  const fromCues = cues.map((cue) => {
-    const sticker = stickerForCue(stickers, cue.id)
-    if (sticker) usedStickerIds.add(sticker.id)
-    const damage = cue.effects.some((e) => e.kind === 'entityStat' && e.stat === 'hp')
-      ? cueDamageValue(cue)
+  return settledOverlays(scene).map((ov) => {
+    const settlement = ov.settlement!
+    const float = settlement.float
+    const damage = settlement.effects.some((e) => e.kind === 'entityStat' && e.stat === 'hp')
+      ? settlementDamageValue(settlement)
       : null
-    const displayText = sticker?.text ?? (damage != null && damage > 0 ? `-${damage}` : cue.label ?? '')
+    const displayText =
+      ov.content.trim() ||
+      float?.text ||
+      (damage != null && damage > 0 ? `-${damage}` : ov.label ?? '')
     return {
-      id: cue.id,
-      atMs: cue.atMs,
-      label: cue.label ?? '结算',
+      id: ov.id,
+      atMs: ov.startMs,
+      label: ov.label ?? (ov.content.trim() || '结算'),
       damage,
       displayText,
-      xPct: Math.round((sticker?.x ?? 0.5) * 100),
-      yPct: Math.round((sticker?.y ?? 0.42) * 100),
+      xPct: Math.round((ov.x ?? 0.5) * 100),
+      yPct: Math.round((ov.y ?? 0.42) * 100),
     }
   })
-  const fromTextStickers = stickers
-    .filter((s) => s.kind === 'numeric' && !usedStickerIds.has(s.id))
-    .map((s) => ({
-      id: s.id,
-      atMs: s.startMs,
-      label: '飘字',
-      damage: null as number | null,
-      displayText: s.text ?? '',
-      xPct: Math.round((s.x ?? 0.5) * 100),
-      yPct: Math.round((s.y ?? 0.42) * 100),
-    }))
-  return [...fromCues, ...fromTextStickers].sort((a, b) => a.atMs - b.atMs)
 }
 
 /** 计算节点的判定结果摘要 —— 取非 auto 分支标签（≥2 条时在蓝图展示）。 */

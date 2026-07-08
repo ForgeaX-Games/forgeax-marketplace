@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { injectStyleOnce } from '../styles/injectStyle'
-import { resolveOptType, qteInteractionWindowEnd } from '../player/choiceTiming'
+import { qteInteractionWindowEnd } from '../player/choiceTiming'
+import { MaterialTimeline } from '../editor/MaterialTimeline'
+import {
+  type MaterialItem,
+  type MaterialKind,
+  clamp01,
+  clampLayer,
+  clampMs,
+  materialClass,
+  materialDisplayLabel,
+  materialLabel,
+  normalizeLayer,
+} from '../editor/materialTimelineShared'
 import {
   computeVideoContentRect,
   pointerToVideoNorm,
@@ -14,11 +26,18 @@ import {
   VIDEO_CLIPS,
   UI_SCHEMES,
   GAME_RULES,
+  builtinMediaIdForClip,
+  clipIdFromMediaRef,
   type VideoClip,
   type UiScheme,
   type GameRule,
 } from '../scenario/gameAssetCatalog'
-import type { Branch, DecisionSpec, DialogueLine, EntityStatEffect, Hotspot, PerformanceCue, QTECue, Scenario, Scene, StickerClip } from '../scenario/types'
+import type { Branch, ChoiceSpec, DialogueLine, EntityStatEffect, Hotspot, OverlayClip, QTECue, QTESpec, Scenario, Scene, Settlement, TextStyle, TimeWindow } from '../scenario/types'
+import { makeInsertOverlay } from '../editor/timeline/insertFactories'
+import { BranchGateEditor } from '../editor/numeric/NumericEditors'
+import { resolveTextCss } from '../editor/textStyle'
+import { SUBTITLE_DEFAULT_XY } from '../scenario/textStylePresets'
+import { TextStylePresetPicker } from '../editor/TextStylePresetPicker'
 
 /**
  * 视频 / 界面 / 规则 三个 tab 的内容面板 —— 统一「列表 + 预览」形态：
@@ -29,13 +48,6 @@ import type { Branch, DecisionSpec, DialogueLine, EntityStatEffect, Hotspot, Per
  * 数据全部来自 gameAssetCatalog（内置固定数据），与蓝图节点配置面板的「演出编号 /
  * HUD 方案」下拉同源。样式对齐 `视频交互原型.html` 的左栏栏目 + 预览框。
  */
-
-function fmtDur(ms: number): string {
-  const total = Math.round(ms / 1000)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
-}
 
 /* ── 通用外壳 ─────────────────────────────────────────── */
 
@@ -94,20 +106,6 @@ export function CatalogShell<T extends CatalogItem>({
 
 /* ── 视频 ─────────────────────────────────────────────── */
 
-type MaterialKind = 'subtitle' | 'settlement' | 'qte' | 'qte_window' | 'option'
-
-interface MaterialItem {
-  key: string
-  id: string
-  kind: MaterialKind
-  label: string
-  startMs: number
-  endMs: number
-  layer: number
-  cueId?: string
-  stickerId?: string
-}
-
 interface PreviewOverlay {
   id: string
   materialKey: string
@@ -118,121 +116,23 @@ interface PreviewOverlay {
   r?: number
   layer: number
   movable: boolean
+  /** 字幕 / 飘字预览用的视觉样式（其它类型不填）。 */
+  style?: TextStyle
   target:
-    | { kind: 'sticker'; stickerId: string }
+    | { kind: 'subtitle'; dialogueId: string }
+    | { kind: 'overlay'; overlayId: string }
     | { kind: 'qte'; cueId: string }
     | { kind: 'hotspot'; hotspotId: string }
     | { kind: 'readonly' }
 }
 
-type MaterialTemplate = 'subtitle' | 'settlement' | 'qte' | 'option'
-type SettlementMode = 'damage' | 'text'
-
-const TIMELINE_RULER_H = 24
-const TIMELINE_LAYER_TOP = 34
-const TIMELINE_LAYER_STEP = 34
-const TIMELINE_MAX_LAYER = 4
-
-function clampMs(v: number, min: number, max: number): number {
-  if (!Number.isFinite(v)) return min
-  return Math.max(min, Math.min(max, Math.round(v)))
-}
-
-function clampLayer(v: number): number {
-  if (!Number.isFinite(v)) return 0
-  return Math.max(0, Math.min(TIMELINE_MAX_LAYER, Math.round(v)))
-}
-
-function clamp01(v: number): number {
-  if (!Number.isFinite(v)) return 0
-  return Math.max(0, Math.min(1, v))
-}
-
-function normalizeLayer(v: number | undefined, fallback: number): number {
-  if (v == null) return fallback
-  // Temporary compatibility with earlier 10/20/30 style defaults.
-  if (v >= 10) return clampLayer(Math.round(v / 10) - 1)
-  return clampLayer(v)
-}
-
-function layerFromPointerY(clientY: number, rect: DOMRect): number {
-  const y = clientY - rect.top - TIMELINE_RULER_H
-  return clampLayer(Math.round((y - (TIMELINE_LAYER_TOP - TIMELINE_RULER_H)) / TIMELINE_LAYER_STEP))
-}
-
-function layerTop(layer: number): number {
-  return TIMELINE_LAYER_TOP + clampLayer(layer) * TIMELINE_LAYER_STEP
-}
-
-function materialLabel(kind: MaterialKind): string {
-  switch (kind) {
-    case 'subtitle':
-      return '字幕'
-    case 'settlement':
-      return '结算飘字'
-    case 'qte':
-      return 'QTE 按键点'
-    case 'qte_window':
-      return 'QTE 窗口'
-    case 'option':
-      return '选项'
-  }
-}
-
-function materialDisplayLabel(item: Pick<MaterialItem, 'kind' | 'key'>): string {
-  return materialLabel(item.kind)
-}
-
-function materialClass(kind: MaterialKind): string {
-  switch (kind) {
-    case 'subtitle':
-      return 'is-subtitle'
-    case 'settlement':
-      return 'is-settlement'
-    case 'qte':
-      return 'is-qte'
-    case 'qte_window':
-      return 'is-qte-window'
-    case 'option':
-      return 'is-option'
-  }
-}
+type MaterialTemplate = 'subtitle' | 'overlay' | 'qte' | 'option'
 
 function choiceHotspotId(branchId: string): string {
   return `choice-${branchId}`
 }
 
-function findStickerForCue(scene: Scene, cue: PerformanceCue): StickerClip | undefined {
-  const stickers = scene.stickerClips ?? []
-  return (
-    stickers.find((s) => s.performanceCueId === cue.id && s.kind === 'numeric') ??
-    stickers.find((s) => s.id === cue.id && s.kind === 'numeric') ??
-    stickers.find(
-      (s) =>
-        s.kind === 'numeric' &&
-        Math.abs(s.startMs - cue.atMs) <= 50 &&
-        (s.text === cue.label ||
-          s.text === defaultSettlementText(cue)),
-    )
-  )
-}
-
-function findCueForSticker(scene: Scene, sticker: StickerClip): PerformanceCue | undefined {
-  const cues = scene.performance?.cues ?? []
-  return (
-    (sticker.performanceCueId ? cues.find((cue) => cue.id === sticker.performanceCueId) : undefined) ??
-    cues.find((cue) => cue.id === sticker.id) ??
-    cues.find((cue) => {
-      if (sticker.kind !== 'numeric') return false
-      if (Math.abs(sticker.startMs - cue.atMs) > 50) return false
-      const textValue = numericTextValue(sticker.text)
-      const damageValue = cueDamageValue(cue)
-      return textValue != null && textValue === damageValue
-    })
-  )
-}
-
-function collectMaterials(scene: Scene): MaterialItem[] {
+export function collectMaterials(scene: Scene): MaterialItem[] {
   const out: MaterialItem[] = []
   for (const d of scene.dialogue ?? []) {
     out.push({
@@ -245,35 +145,15 @@ function collectMaterials(scene: Scene): MaterialItem[] {
       layer: normalizeLayer(d.layer, 0),
     })
   }
-  const usedStickerIds = new Set<string>()
-  for (const cue of scene.performance?.cues ?? []) {
-    const pairedSticker = findStickerForCue(scene, cue)
-    if (pairedSticker) usedStickerIds.add(pairedSticker.id)
-    const endMs = pairedSticker?.endMs ?? Math.min(scene.durationMs, cue.atMs + 1200)
+  for (const o of scene.overlays ?? []) {
     out.push({
-      key: `settlement:${cue.id}`,
-      id: cue.id,
-      kind: 'settlement',
-      label: cue.label || pairedSticker?.text || '结算飘字',
-      startMs: cue.atMs,
-      endMs,
-      layer: normalizeLayer(cue.layer ?? pairedSticker?.layer, 1),
-      cueId: cue.id,
-      stickerId: pairedSticker?.id,
-    })
-  }
-  for (const c of scene.stickerClips ?? []) {
-    if (c.kind !== 'numeric') continue
-    if (usedStickerIds.has(c.id)) continue
-    out.push({
-      key: `settlement:${c.id}`,
-      id: c.id,
-      kind: 'settlement',
-      label: c.text || '结算飘字',
-      startMs: c.startMs,
-      endMs: c.endMs,
-      layer: normalizeLayer(c.layer, 1),
-      stickerId: c.id,
+      key: `overlay:${o.id}`,
+      id: o.id,
+      kind: 'overlay',
+      label: o.content.trim() || o.label || (o.settlement ? '结算飘字' : '飘字'),
+      startMs: o.startMs,
+      endMs: o.endMs ?? Math.min(scene.durationMs, o.startMs + 1200),
+      layer: normalizeLayer(o.layer, 1),
     })
   }
   for (const c of scene.qte?.cues ?? []) {
@@ -288,13 +168,13 @@ function collectMaterials(scene: Scene): MaterialItem[] {
     })
   }
   const choiceBranches = scene.branches.filter((b) => b.kind === 'choice')
-  if (scene.decision && resolveOptType(scene.decision) === 'timed_qte') {
-    const startMs = scene.decision.windowStartMs ?? scene.decision.atMs ?? 0
-    const endMs = scene.qte?.cues?.length
+  if (scene.qte) {
+    const startMs = scene.qte.window?.startMs ?? 0
+    const endMs = scene.qte.cues?.length
       ? qteInteractionWindowEnd(scene)
-      : scene.decision.windowEndMs ??
-        (scene.decision.timeoutMs != null
-          ? startMs + scene.decision.timeoutMs
+      : scene.qte.window?.endMs ??
+        (scene.qte.window?.timeoutMs != null
+          ? startMs + scene.qte.window.timeoutMs
           : scene.durationMs)
     out.push({
       key: 'qte-window',
@@ -303,22 +183,194 @@ function collectMaterials(scene: Scene): MaterialItem[] {
       label: '整段限时',
       startMs,
       endMs,
-      layer: normalizeLayer(scene.decision.layer, 3),
+      layer: 3,
     })
-  } else if (scene.decision && choiceBranches.length > 0) {
-    const startMs = scene.decision.windowStartMs ?? scene.decision.atMs ?? 0
-    const endMs = scene.decision.windowEndMs ?? scene.durationMs
+  } else if (scene.choice && choiceBranches.length > 0) {
+    const startMs = scene.choice.window?.startMs ?? 0
+    const endMs = scene.choice.window?.endMs ?? scene.durationMs
     out.push({
       key: 'option:decision',
       id: 'decision',
       kind: 'option',
-      label: scene.decision.prompt || '选项',
+      label: scene.choice.prompt || '选项',
       startMs,
       endMs,
-      layer: normalizeLayer(scene.decision.layer, 3),
+      layer: normalizeLayer(scene.choice.layer, 3),
     })
   }
   return out
+}
+
+/**
+ * 把一次时间轴拖动（起点/终点/层）写回 scene —— 视频 tab 与剧情树抽屉共用的
+ * 唯一写入路径（SSOT）。纯函数：不 close over 组件 state，宿主传入 scene/maxMs/updateScene。
+ */
+export function applyMaterialPatch(
+  scene: Scene,
+  maxMs: number,
+  item: MaterialItem,
+  patch: { startMs?: number; endMs?: number; layer?: number },
+  updateScene: (id: string, patch: Partial<Scene>) => void,
+): void {
+  const start = clampMs(patch.startMs ?? item.startMs, 0, Math.max(0, maxMs - 100))
+  const end = clampMs(patch.endMs ?? item.endMs, start + 100, maxMs)
+  const layer = patch.layer == null ? item.layer : clampLayer(patch.layer)
+  switch (item.kind) {
+    case 'subtitle':
+      updateScene(scene.id, {
+        dialogue: (scene.dialogue ?? []).map((d) =>
+          d.id === item.id ? { ...d, startMs: start, endMs: end, layer } : d,
+        ),
+      })
+      break
+    case 'overlay':
+      updateScene(scene.id, {
+        overlays: (scene.overlays ?? []).map((o) =>
+          o.id === item.id ? { ...o, startMs: start, endMs: end, layer } : o,
+        ),
+      })
+      break
+    case 'qte': {
+      if (!scene.qte) break
+      const nextCues = scene.qte.cues.map((c) =>
+        c.id === item.id ? { ...c, appearAt: start, targetAt: end, layer } : c,
+      )
+      const nextQte: QTESpec = { ...scene.qte, cues: nextCues }
+      // 整段窗口自动盖住最后一个 cue 尾窗。
+      const nextWindow: TimeWindow = {
+        ...(nextQte.window ?? {}),
+        endMs: qteInteractionWindowEnd(scene, nextQte),
+      }
+      updateScene(scene.id, { qte: { ...nextQte, window: nextWindow } })
+      break
+    }
+    case 'qte_window':
+      updateScene(scene.id, {
+        qte: scene.qte
+          ? { ...scene.qte, window: { ...(scene.qte.window ?? {}), startMs: start, endMs: end } }
+          : undefined,
+      })
+      break
+    case 'option':
+      updateScene(scene.id, {
+        choice: scene.choice
+          ? { ...scene.choice, layer, window: { ...(scene.choice.window ?? {}), startMs: start, endMs: end } }
+          : undefined,
+      })
+      break
+  }
+}
+
+/**
+ * 删一段材料是否会破坏式改动蓝图节点连接（需二次确认）：
+ *   - option        —— 删整条选项交互；
+ *   - qte_window    —— 删整段 QTE 交互；
+ *   - qte（最后一个）—— 删掉最后一拍即抹掉整段 QTE，等同删整段交互。
+ * 其余（字幕 / 飘字 / 非末位 QTE 按键点）是独立子项，直接删。
+ */
+function isWholeInteractionDelete(scene: Scene, item: MaterialItem): boolean {
+  if (item.kind === 'option' || item.kind === 'qte_window') return true
+  if (item.kind === 'qte') return (scene.qte?.cues.length ?? 0) <= 1
+  return false
+}
+
+/**
+ * 是否需要在删除前二次确认 —— 会同步改动蓝图节点连接的删除都要确认。
+ */
+export function confirmMaterialDelete(scene: Scene, item: MaterialItem): boolean {
+  if (!isWholeInteractionDelete(scene, item)) return true
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+  const message =
+    item.kind === 'option'
+      ? '删除整条选项交互？\n该节点将改回叙事节点，并自动续连到「第一个选项」原本指向的场景。\n这会同步更改蓝图上的节点连接关系，是否确认？'
+      : '删除整段 QTE 交互？\n该节点将改回叙事节点，并自动续连到「通过 QTE」原本指向的场景。\n这会同步更改蓝图上的节点连接关系，是否确认？'
+  return window.confirm(message)
+}
+
+/**
+ * 拆掉整段 QTE 交互的 scene patch —— 清 scene.qte、剥离 qte_pass/qte_fail 分支，
+ * 并把出边自动续连到「通过 QTE」原本的目标（无 pass 则退「失败」目标）补一条 auto，
+ * 使节点从 QTE 干净回落为叙事，且不在图上留死胡同。
+ */
+function qteTeardownPatch(scene: Scene): Partial<Scene> {
+  const passTarget = scene.branches.find((b) => b.kind === 'qte_pass')?.targetSceneId
+  const failTarget = scene.branches.find((b) => b.kind === 'qte_fail')?.targetSceneId
+  const continueTarget = passTarget ?? failTarget
+  const nextBranches: Branch[] = scene.branches.filter(
+    (b) => b.kind !== 'qte_pass' && b.kind !== 'qte_fail',
+  )
+  if (continueTarget && !nextBranches.some((b) => b.targetSceneId === continueTarget)) {
+    nextBranches.push({
+      id: `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: 'auto',
+      targetSceneId: continueTarget,
+    })
+  }
+  return { qte: undefined, branches: nextBranches }
+}
+
+/**
+ * 从时间轴删除一段材料 —— 视频 tab 与剧情树抽屉共用（SSOT）。
+ * 字幕 / 结算飘字 / 非末位 QTE 按键点：删各自独立子项。
+ * option：删「整条选项交互」—— 清 scene.choice + 全部 choice 分支，节点回落为叙事
+ *   （交互形态由 presence 派生，清空 choice 即改形态），并把出边自动续连到「第一个选项」
+ *   原本的目标（补一条 auto 分支）；原为热区呈现时顺带清掉充当选项的非 detour 热区。
+ * qte_window（或删掉最后一个按键点）：删「整段 QTE 交互」—— 清 scene.qte + qte_pass/qte_fail
+ *   分支，节点回落为叙事并自动续连到「通过 QTE」原目标（qteTeardownPatch）。
+ */
+export function applyMaterialDelete(
+  scene: Scene,
+  item: MaterialItem,
+  updateScene: (id: string, patch: Partial<Scene>) => void,
+): void {
+  switch (item.kind) {
+    case 'subtitle':
+      updateScene(scene.id, {
+        dialogue: (scene.dialogue ?? []).filter((d) => d.id !== item.id),
+      })
+      break
+    case 'overlay':
+      updateScene(scene.id, {
+        overlays: (scene.overlays ?? []).filter((o) => o.id !== item.id),
+      })
+      break
+    case 'qte': {
+      if (!scene.qte) break
+      // 删掉最后一拍 = 删整段 QTE 交互（含图连接续连），走 teardown。
+      if (scene.qte.cues.length <= 1) {
+        updateScene(scene.id, qteTeardownPatch(scene))
+        break
+      }
+      const cues = scene.qte.cues.filter((c) => c.id !== item.id)
+      updateScene(scene.id, { qte: { ...scene.qte, cues } })
+      break
+    }
+    case 'option': {
+      const choiceBranches = scene.branches.filter((b) => b.kind === 'choice')
+      const firstTargetSceneId = choiceBranches[0]?.targetSceneId
+      const nextBranches: Branch[] = scene.branches.filter((b) => b.kind !== 'choice')
+      // 续连：把第一个选项原本的目标接成一条 auto 出边（若尚无边指向它）。
+      if (firstTargetSceneId && !nextBranches.some((b) => b.targetSceneId === firstTargetSceneId)) {
+        nextBranches.push({
+          id: `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          kind: 'auto',
+          targetSceneId: firstTargetSceneId,
+        })
+      }
+      const patch: Partial<Scene> = { choice: undefined, branches: nextBranches }
+      // 热区呈现下，充当选项的是非 detour 热区；删交互时一并清掉，保留 detour 支线热区。
+      if (scene.choice?.presentation === 'hotspot' && (scene.hotspots?.length ?? 0) > 0) {
+        const kept = (scene.hotspots ?? []).filter((h) => h.detour)
+        patch.hotspots = kept.length ? kept : undefined
+      }
+      updateScene(scene.id, patch)
+      break
+    }
+    case 'qte_window':
+      if (!scene.qte) break
+      updateScene(scene.id, qteTeardownPatch(scene))
+      break
+  }
 }
 
 function activePreviewOverlays(scene: Scene, materials: MaterialItem[], ms: number): PreviewOverlay[] {
@@ -331,30 +383,33 @@ function activePreviewOverlays(scene: Scene, materials: MaterialItem[], ms: numb
       materialKey: `subtitle:${d.id}`,
       kind: 'subtitle',
       label: d.speaker ? `${d.speaker}：${d.text}` : d.text,
-      x: 0.5,
-      y: 0.86,
+      x: d.x ?? SUBTITLE_DEFAULT_XY.x,
+      y: d.y ?? SUBTITLE_DEFAULT_XY.y,
       layer: normalizeLayer(d.layer, 0),
-      movable: false,
-      target: { kind: 'readonly' },
-    })
-  }
-  for (const s of scene.stickerClips ?? []) {
-    if (ms < s.startMs || ms > s.endMs) continue
-    const cue = findCueForSticker(scene, s)
-    const material = materials.find((m) => m.kind === 'settlement' && (m.stickerId ?? m.id) === s.id)
-    out.push({
-      id: `sticker:${s.id}`,
-      materialKey: material?.key ?? `settlement:${s.id}`,
-      kind: s.kind === 'numeric' ? 'settlement' : 'subtitle',
-      label: cue ? defaultSettlementText(cue) : s.text ?? s.presetId ?? '贴纸',
-      x: s.x ?? 0.5,
-      y: s.y ?? 0.42,
-      layer: normalizeLayer(s.layer, 1),
       movable: true,
-      target: { kind: 'sticker', stickerId: s.id },
+      style: d.style,
+      target: { kind: 'subtitle', dialogueId: d.id },
     })
   }
-  const goodWindow = scene.qte?.window?.good ?? 480
+  for (const o of scene.overlays ?? []) {
+    const endMs = o.endMs ?? Math.min(scene.durationMs, o.startMs + 1200)
+    if (ms < o.startMs || ms > endMs) continue
+    // 纯逻辑触发器（无可见内容）不在预览上显示。
+    if (o.content.trim().length === 0) continue
+    out.push({
+      id: `overlay:${o.id}`,
+      materialKey: `overlay:${o.id}`,
+      kind: 'overlay',
+      label: o.content,
+      x: o.x ?? 0.5,
+      y: o.y ?? 0.42,
+      layer: normalizeLayer(o.layer, 1),
+      movable: true,
+      style: o.kind === 'text' ? o.style : undefined,
+      target: { kind: 'overlay', overlayId: o.id },
+    })
+  }
+  const goodWindow = scene.qte?.tolerance?.good ?? 480
   for (const q of scene.qte?.cues ?? []) {
     if (ms < q.appearAt || ms > q.targetAt + goodWindow) continue
     out.push({
@@ -369,12 +424,12 @@ function activePreviewOverlays(scene: Scene, materials: MaterialItem[], ms: numb
       target: { kind: 'qte', cueId: q.id },
     })
   }
-  const decision = scene.decision
-  if (decision && resolveOptType(decision) !== 'timed_qte') {
-    const start = decision.windowStartMs ?? decision.atMs ?? 0
-    const end = decision.windowEndMs ?? scene.durationMs
+  const choice = scene.choice
+  if (choice && !scene.qte) {
+    const start = choice.window?.startMs ?? 0
+    const end = choice.window?.endMs ?? scene.durationMs
     if (ms >= start && ms <= end) {
-      if (decision.presentation === 'hotspot') {
+      if (choice.presentation === 'hotspot') {
         for (const h of scene.hotspots ?? []) {
           if (h.detour) continue
           out.push({
@@ -385,7 +440,7 @@ function activePreviewOverlays(scene: Scene, materials: MaterialItem[], ms: numb
             x: h.x,
             y: h.y,
             r: h.r,
-            layer: normalizeLayer(decision.layer, 3),
+            layer: normalizeLayer(choice.layer, 3),
             movable: true,
             target: { kind: 'hotspot', hotspotId: h.id },
           })
@@ -395,10 +450,10 @@ function activePreviewOverlays(scene: Scene, materials: MaterialItem[], ms: numb
           id: 'option:list',
           materialKey: 'option:decision',
           kind: 'option',
-          label: decision.prompt ?? '请选择',
+          label: choice.prompt ?? '请选择',
           x: 0.5,
           y: 0.72,
-          layer: normalizeLayer(decision.layer, 3),
+          layer: normalizeLayer(choice.layer, 3),
           movable: false,
           target: { kind: 'readonly' },
         })
@@ -431,56 +486,56 @@ function upsertChoiceHotspot(scene: Scene, branch: Branch, patch: Partial<Hotspo
   return [...hotspots.filter((h) => h.id !== id), next]
 }
 
-function numericTextValue(text: string | undefined): number | undefined {
-  if (!text) return undefined
-  const match = text.match(/-?\d+(\.\d+)?/)
-  if (!match) return undefined
-  const n = Number(match[0])
-  return Number.isFinite(n) ? Math.abs(n) : undefined
-}
-
-function cueDamageValue(cue: PerformanceCue | undefined): number {
-  const effect = cue?.effects.find((e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp')
-  return Math.abs(Number(effect?.value ?? 100)) || 100
-}
-
-function defaultSettlementText(cue: PerformanceCue | undefined): string {
-  const n = cueDamageValue(cue)
-  return n === 0 ? '0' : `-${n}`
-}
-
 function firstEntityId(scenario: Scenario, kind: 'boss' | 'player'): string {
   return Object.values(scenario.entities ?? {}).find((e) => e.kind === kind)?.id ?? `ent-${kind}`
 }
 
-function cueTargetKind(cue: PerformanceCue | undefined, scenario: Scenario): 'boss' | 'player' {
-  const effect = cue?.effects.find((e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp')
+/** settlement 里 hp 变动的绝对值（无 hp effect 则 0）。 */
+function overlayDamageValue(settlement: Settlement | undefined): number {
+  const effect = settlement?.effects.find(
+    (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp',
+  )
+  return effect ? Math.abs(Number(effect.value) || 0) : 0
+}
+
+/** 从飘字内容里解析伤害数值：取首个数字的绝对值，无数字则 0。 */
+function parseDamageFromContent(content: string): number {
+  const m = content.match(/-?\d+(?:\.\d+)?/)
+  return m ? Math.abs(Number(m[0])) || 0 : 0
+}
+
+/** settlement 的 hp 变动作用于 boss 还是 player。 */
+function overlayTargetKind(settlement: Settlement | undefined, scenario: Scenario): 'boss' | 'player' {
+  const effect = settlement?.effects.find(
+    (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp',
+  )
   const entity = effect ? scenario.entities?.[effect.entityId] : undefined
   return entity?.kind === 'player' ? 'player' : 'boss'
 }
 
-function cueWithHpEffect(
-  cue: PerformanceCue,
+/** 在 settlement 上写入/替换一条 hp 扣血 effect（无 settlement 则新建）。 */
+function settlementWithHpEffect(
+  settlement: Settlement | undefined,
   scenario: Scenario,
   target: 'boss' | 'player',
   amount: number,
-): PerformanceCue {
+): Settlement {
   const entityId = firstEntityId(scenario, target)
-  const effectId = `${cue.id}-${target}-hp`
   const nextEffect: EntityStatEffect = {
-    id: effectId,
+    id: `ov-${target}-hp`,
     kind: 'entityStat',
     entityId,
     stat: 'hp',
     op: 'add',
     value: -Math.abs(amount),
   }
-  const replaced = cue.effects.some((e) => e.kind === 'entityStat' && e.stat === 'hp')
+  const effects = settlement?.effects ?? []
+  const replaced = effects.some((e) => e.kind === 'entityStat' && e.stat === 'hp')
   return {
-    ...cue,
+    ...settlement,
     effects: replaced
-      ? cue.effects.map((e) => (e.kind === 'entityStat' && e.stat === 'hp' ? nextEffect : e))
-      : [nextEffect, ...cue.effects],
+      ? effects.map((e) => (e.kind === 'entityStat' && e.stat === 'hp' ? nextEffect : e))
+      : [nextEffect, ...effects],
   }
 }
 
@@ -488,8 +543,8 @@ function materialDisabledReason(template: MaterialTemplate, scene: Scene | undef
   if (!scene || !hasVideo) return '当前节点未绑定视频素材'
   const hasQteResultBranches = scene.branches.some((b) => b.kind === 'qte_pass' || b.kind === 'qte_fail')
   const hasBoss = !!scene.boss
-  if (template === 'option' && scene.decision && resolveOptType(scene.decision) === 'timed_qte') {
-    return '限时 QTE 节点请编辑「QTE 窗口」轨，不添加选项'
+  if (template === 'option' && scene.qte) {
+    return 'QTE 节点请编辑「QTE 窗口」轨，不添加选项'
   }
   if (template === 'option' && hasQteResultBranches) {
     return 'QTE 节点请使用成功/失败分支，不配置普通选项'
@@ -503,50 +558,45 @@ function materialDisabledReason(template: MaterialTemplate, scene: Scene | undef
 export function VideoCatalogTab() {
   const listBodyRef = useRef<HTMLDivElement | null>(null)
   const [selectedId, setSelectedId] = useState<string>(VIDEO_CLIPS[0]?.id ?? '')
-  const timelineRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [contentRect, setContentRect] = useState<VideoContentRect | null>(null)
   const [sideMode, setSideMode] = useState<'library' | 'inspector' | null>(null)
   const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null)
   const [playheadMs, setPlayheadMs] = useState(0)
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   const [overlayDragId, setOverlayDragId] = useState<string | null>(null)
   const [activeHotspotId, setActiveHotspotId] = useState<string | null>(null)
-  const [drag, setDrag] = useState<{
-    key: string
-    mode: 'move' | 'start' | 'end'
-    pointerX: number
-    startMs: number
-    endMs: number
-    layer: number
-  } | null>(null)
   const scenario = useScenarioStore((s) => s.scenario)
   const selectedSceneId = useScenarioStore((s) => s.selectedSceneId)
   const forgeView = useShellStore((s) => s.forgeView)
   const updateScene = useScenarioStore((s) => s.updateScene)
+  const updateBranch = useScenarioStore((s) => s.updateBranch)
+  const addBranch = useScenarioStore((s) => s.addBranch)
+  const removeBranch = useScenarioStore((s) => s.removeBranch)
   const scene = scenario.scenes[selectedSceneId]
   const selectedClip = VIDEO_CLIPS.find((v) => v.id === selectedId)
-  const boundClip = VIDEO_CLIPS.find((v) => v.id === scene?.clipId)
+  const boundClip = VIDEO_CLIPS.find((v) => v.id === clipIdFromMediaRef(scene?.media?.ref))
   const previewClip = selectedClip ?? boundClip
   const editingBoundClip = Boolean(boundClip && previewClip && boundClip.id === previewClip.id)
   const timelineClip = editingBoundClip ? boundClip : previewClip
   const maxMs = Math.max(1000, videoDurationMs ?? timelineClip?.durMs ?? scene?.durationMs ?? 0)
   const hasEditableVideo = Boolean(scene && editingBoundClip && timelineClip)
-  const isTimedQteNode = scene?.decision ? resolveOptType(scene.decision) === 'timed_qte' : false
+  const isTimedQteNode = Boolean(scene?.qte)
   const materials = useMemo(() => (scene ? collectMaterials(scene) : []), [scene])
   const previewOverlays = useMemo(
     () => (scene && editingBoundClip ? activePreviewOverlays(scene, materials, playheadMs) : []),
     [scene, editingBoundClip, materials, playheadMs],
   )
   const selectedMaterial = materials.find((m) => m.key === selectedMaterialKey) ?? null
-  const settlementDisabled = materialDisabledReason('settlement', scene, hasEditableVideo)
+  const overlayDisabled = materialDisabledReason('overlay', scene, hasEditableVideo)
   const qteDisabled = materialDisabledReason('qte', scene, hasEditableVideo)
   const optionDisabled = materialDisabledReason('option', scene, hasEditableVideo)
 
-  // 切到视频视图 / 换节点时，左栏跟随当前节点绑定的 clipId（避免总从第一条开始）。
+  // 切到视频视图 / 换节点时，左栏跟随当前节点绑定的演出（由 media.ref 派生）。
   useEffect(() => {
-    const clipId = scene?.clipId
+    const clipId = clipIdFromMediaRef(scene?.media?.ref)
     if (!clipId || !VIDEO_CLIPS.some((v) => v.id === clipId)) return
     setSelectedId(clipId)
     requestAnimationFrame(() => {
@@ -554,7 +604,7 @@ export function VideoCatalogTab() {
         ?.querySelector(`[data-clip-id="${clipId}"]`)
         ?.scrollIntoView({ block: 'nearest' })
     })
-  }, [forgeView, selectedSceneId, scene?.clipId])
+  }, [forgeView, selectedSceneId, scene?.media?.ref])
 
   useEffect(() => {
     if (selectedMaterialKey === 'option:qte-window') setSelectedMaterialKey('qte-window')
@@ -583,12 +633,32 @@ export function VideoCatalogTab() {
     update()
     v.addEventListener('loadedmetadata', update)
     window.addEventListener('resize', update)
+    // 关键：检视器侧栏开合会**改变预览框宽度**（非 window resize）→ 仅监听 window 会让
+    // contentRect 停留在旧宽度，叠层按旧 letterbox 定位 → 字幕 X 水平错位。用 ResizeObserver
+    // 直接盯住预览框尺寸，任何布局变化都重算。
+    const ro = new ResizeObserver(update)
+    if (v.parentElement) ro.observe(v.parentElement)
     return () => {
       if (frame) cancelAnimationFrame(frame)
       v.removeEventListener('loadedmetadata', update)
       window.removeEventListener('resize', update)
+      ro.disconnect()
     }
   }, [timelineClip?.id, editingBoundClip])
+
+  // 播放期间用 rAF 每帧直接读 video.currentTime 推进播放头 —— <video> 的 onTimeUpdate
+  // 只 ~4Hz 触发，播放头肉眼「一格一格跳」的根因。暂停/拖动 seek 时回落到事件驱动。
+  useEffect(() => {
+    if (!isVideoPlaying) return
+    let raf = 0
+    const tick = (): void => {
+      const el = videoRef.current
+      if (el) setPlayheadMs(clampMs((el.currentTime || 0) * 1000, 0, maxMs))
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isVideoPlaying, maxMs])
 
   function setPrompt(next: string): void {
     if (!scene) return
@@ -602,75 +672,42 @@ export function VideoCatalogTab() {
 
   function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; layer?: number }): void {
     if (!scene) return
-    const start = clampMs(patch.startMs ?? item.startMs, 0, Math.max(0, maxMs - 100))
-    const end = clampMs(patch.endMs ?? item.endMs, start + 100, maxMs)
-    const layer = patch.layer == null ? item.layer : clampLayer(patch.layer)
-    switch (item.kind) {
-      case 'subtitle':
-        updateScene(scene.id, {
-          dialogue: (scene.dialogue ?? []).map((d) =>
-            d.id === item.id ? { ...d, startMs: start, endMs: end, layer } : d,
-          ),
-        })
-        break
-      case 'settlement': {
-        const cueId = item.cueId ?? item.id
-        const stickerId = item.stickerId ?? item.id
-        const nextCue: PerformanceCue = { id: cueId, atMs: start, label: item.label, layer, effects: [] }
-        updateScene(scene.id, {
-          performance: {
-          cues: (scene.performance?.cues ?? []).some((c) => c.id === cueId)
-            ? (scene.performance?.cues ?? []).map((c) =>
-              c.id === cueId ? { ...c, atMs: start, layer } : c,
-            )
-            : [...(scene.performance?.cues ?? []), nextCue],
-          },
-          stickerClips: (scene.stickerClips ?? []).map((c) =>
-            c.id === stickerId ? { ...c, startMs: start, endMs: end, layer } : c,
-          ),
-        })
-        break
+    applyMaterialPatch(scene, maxMs, item, patch, updateScene)
+  }
+
+  function deleteMaterial(item: MaterialItem): void {
+    if (!scene) return
+    if (!confirmMaterialDelete(scene, item)) return
+    applyMaterialDelete(scene, item, updateScene)
+    if (selectedMaterialKey === item.key) {
+      setSelectedMaterialKey(null)
+      setSideMode(null)
+    }
+  }
+
+  // 手动拖拽播放头：把 <video> seek 到目标时刻并同步播放头。
+  function seekTo(ms: number): void {
+    const target = clampMs(ms, 0, maxMs)
+    const v = videoRef.current
+    if (v) {
+      try {
+        v.currentTime = target / 1000
+      } catch {
+        /* metadata 未就绪时静默：下一次 seek 再试 */
       }
-      case 'qte':
-        updateScene(scene.id, {
-          qte: scene.qte
-            ? {
-                ...scene.qte,
-                cues: scene.qte.cues.map((c) =>
-                  c.id === item.id ? { ...c, appearAt: start, targetAt: end, layer } : c,
-                ),
-              }
-            : undefined,
-          ...(scene.decision?.optType === 'timed_qte' && scene.qte
-            ? {
-                decision: {
-                  ...scene.decision,
-                  windowEndMs: qteInteractionWindowEnd(scene, {
-                    ...scene.qte,
-                    cues: scene.qte.cues.map((c) =>
-                      c.id === item.id ? { ...c, appearAt: start, targetAt: end, layer } : c,
-                    ),
-                  }),
-                },
-              }
-            : {}),
-        })
-        break
-      case 'qte_window':
-        updateScene(scene.id, {
-          decision: scene.decision
-            ? { ...scene.decision, windowStartMs: start, windowEndMs: end, layer }
-            : undefined,
-        })
-        break
-      case 'option':
-        updateScene(scene.id, {
-          decision: scene.decision
-            ? { ...scene.decision, windowStartMs: start, windowEndMs: end, layer }
-            : undefined,
-          branches: scene.branches.map((b) => (b.kind === 'choice' ? { ...b, showAt: start } : b)),
-        })
-        break
+    }
+    setPlayheadMs(target)
+  }
+
+  // 一次拖拽开始 → 若正在播放则自动暂停（作者反馈：拖时间轴时播放应停下）。
+  function pauseForScrub(): void {
+    const v = videoRef.current
+    if (v && !v.paused) {
+      try {
+        v.pause()
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -690,34 +727,16 @@ export function VideoCatalogTab() {
       }
       updateScene(scene.id, { dialogue: [...(scene.dialogue ?? []), line] })
       setSelectedMaterialKey(`subtitle:${id}`)
-    } else if (template === 'settlement') {
-      const id = `settle-${Date.now().toString(36)}`
-      const clip: StickerClip = {
-        id,
-        performanceCueId: id,
-        startMs,
+    } else if (template === 'overlay') {
+      const base = makeInsertOverlay({ ms: startMs, sceneDurationMs: maxMs, kind: 'text', content: '-100' })
+      const clip: OverlayClip = {
+        ...base,
         endMs,
-        kind: 'numeric',
-        text: '-100',
-        x: 0.5,
-        y: 0.42,
-        sizePct: 12,
-        scale: 1,
-        rotation: 0,
-        opacity: 1,
-        enter: 'pop',
         layer: 1,
+        settlement: settlementWithHpEffect(undefined, scenario, 'boss', 100),
       }
-      updateScene(scene.id, {
-        performance: {
-          cues: [
-            ...(scene.performance?.cues ?? []),
-            cueWithHpEffect({ id, atMs: startMs, label: '命中', layer: 1, effects: [] }, scenario, 'boss', 100),
-          ],
-        },
-        stickerClips: [...(scene.stickerClips ?? []), clip],
-      })
-      setSelectedMaterialKey(`settlement:${id}`)
+      updateScene(scene.id, { overlays: [...(scene.overlays ?? []), clip] })
+      setSelectedMaterialKey(`overlay:${clip.id}`)
     } else if (template === 'qte') {
       addQteCue()
     } else {
@@ -729,24 +748,21 @@ export function VideoCatalogTab() {
           kind: 'choice',
           label: '新选项',
           targetSceneId: firstTargetSceneId(scene, scenario.scenes),
-          showAt: startMs,
         }
       const nextBranches = existingChoice
         ? scene.branches
         : [...scene.branches, branch]
-      const nextDecision = {
-        ...(scene.decision ?? {}),
-        optType: scene.decision?.optType ?? 'static',
-        mode: scene.decision?.mode ?? 'pause',
-        presentation: scene.decision?.presentation ?? 'list',
-        windowStartMs: startMs,
-        windowEndMs: endMs,
-        layer: normalizeLayer(scene.decision?.layer, 3),
-        prompt: scene.decision?.prompt ?? '请选择',
-      } as DecisionSpec
+      const nextChoice: ChoiceSpec = {
+        ...(scene.choice ?? {}),
+        presentation: scene.choice?.presentation ?? 'list',
+        window: { ...(scene.choice?.window ?? {}), startMs, endMs },
+        layer: normalizeLayer(scene.choice?.layer, 3),
+        prompt: scene.choice?.prompt ?? '请选择',
+      }
       updateScene(scene.id, {
-        kind: 'choice',
-        decision: nextDecision,
+        choice: nextChoice,
+        qte: undefined,
+        calc: undefined,
         branches: nextBranches,
       })
       setSelectedMaterialKey('option:decision')
@@ -762,42 +778,48 @@ export function VideoCatalogTab() {
           d.id === selectedMaterial.id ? { ...d, ...patch } : d,
         ),
       })
-    } else if (selectedMaterial.kind === 'settlement') {
-      const cueId = selectedMaterial.cueId ?? selectedMaterial.id
-      const cue = (scene.performance?.cues ?? []).find((c) => c.id === cueId)
-      const pairedSticker = cue ? findStickerForCue(scene, cue) : undefined
-      const stickerId = selectedMaterial.stickerId ?? pairedSticker?.id ?? selectedMaterial.id
-      let cuePatch: Partial<PerformanceCue> = {}
-      const stickerPatch: Record<string, unknown> = {}
+    } else if (selectedMaterial.kind === 'overlay') {
+      const overlays = scene.overlays ?? []
+      const cur = overlays.find((o) => o.id === selectedMaterial.id)
+      if (!cur) return
+      let next: OverlayClip = { ...cur }
       for (const [key, value] of Object.entries(patch)) {
-        if (key === 'effectTarget') {
-          if (cue) cuePatch = cueWithHpEffect({ ...cue, ...cuePatch }, scenario, value === 'player' ? 'player' : 'boss', cueDamageValue({ ...cue, ...cuePatch }))
-        } else if (key === 'effectValue') {
-          if (cue) cuePatch = cueWithHpEffect({ ...cue, ...cuePatch }, scenario, cueTargetKind({ ...cue, ...cuePatch }, scenario), Number(value) || 0)
-        } else if (key === 'label' || key === 'layer') {
-          cuePatch = { ...cuePatch, [key]: value }
+        if (key === 'content') {
+          const content = String(value)
+          next = { ...next, content }
+          // 伤害从内容派生（仅 text kind；icon/image 的 content 是 id，不解析）
+          if (next.settlement && next.kind === 'text') {
+            next = {
+              ...next,
+              settlement: settlementWithHpEffect(
+                next.settlement,
+                scenario,
+                overlayTargetKind(next.settlement, scenario),
+                parseDamageFromContent(content),
+              ),
+            }
+          }
+        } else if (key === 'effectTarget') {
+          next = { ...next, settlement: settlementWithHpEffect(next.settlement, scenario, value === 'player' ? 'player' : 'boss', overlayDamageValue(next.settlement)) }
+        } else if (key === 'settlementOn') {
+          next = value
+            ? {
+                ...next,
+                settlement:
+                  next.settlement ??
+                  settlementWithHpEffect(
+                    undefined,
+                    scenario,
+                    'boss',
+                    next.kind === 'text' ? parseDamageFromContent(next.content) : 0,
+                  ),
+              }
+            : { ...next, settlement: undefined }
         } else {
-          stickerPatch[key] = value
+          next = { ...next, [key]: value }
         }
       }
-      if (cuePatch.layer !== undefined) stickerPatch.layer = cuePatch.layer
-      if (Object.prototype.hasOwnProperty.call(patch, 'effectTarget') || Object.prototype.hasOwnProperty.call(patch, 'effectValue')) {
-        if (cue) {
-          const nextCue = { ...cue, ...cuePatch }
-          stickerPatch.performanceCueId = cueId
-          stickerPatch.text = defaultSettlementText(nextCue)
-        }
-      }
-      updateScene(scene.id, {
-        performance: {
-          cues: (scene.performance?.cues ?? []).map((c) =>
-            c.id === cueId ? { ...c, ...cuePatch } : c,
-          ),
-        },
-        stickerClips: (scene.stickerClips ?? []).map((c) =>
-          c.id === stickerId ? { ...c, ...stickerPatch } : c,
-        ),
-      })
+      updateScene(scene.id, { overlays: overlays.map((o) => (o.id === cur.id ? next : o)) })
     } else if (selectedMaterial.kind === 'qte') {
       updateScene(scene.id, {
         qte: scene.qte
@@ -809,92 +831,34 @@ export function VideoCatalogTab() {
             }
           : undefined,
       })
-    } else if (selectedMaterial.kind === 'qte_window' || selectedMaterial.kind === 'option') {
-      const decisionPatch = patch as Partial<NonNullable<Scene['decision']>>
-      const nextDecision = scene.decision ? { ...scene.decision, ...decisionPatch } : undefined
-      const nextQte =
-        selectedMaterial.kind === 'qte_window' &&
-        Object.prototype.hasOwnProperty.call(patch, 'timeoutMs') &&
-        scene.qte
-          ? { ...scene.qte, timeoutMs: patch.timeoutMs as number | undefined }
-          : scene.qte
-      const nextScene = { ...scene, decision: nextDecision, qte: nextQte }
-      const windowEndMs =
-        selectedMaterial.kind === 'qte_window' && nextDecision?.optType === 'timed_qte' && nextQte
-          ? qteInteractionWindowEnd(nextScene)
-          : nextDecision?.windowEndMs
-      updateScene(scene.id, {
-        decision:
-          nextDecision != null
-            ? {
-                ...nextDecision,
-                ...(windowEndMs != null ? { windowEndMs } : {}),
-              }
-            : undefined,
-        ...(nextQte ? { qte: nextQte } : {}),
-      })
+    } else if (selectedMaterial.kind === 'qte_window') {
+      if (!scene.qte) return
+      const nextWindow: TimeWindow = { ...(scene.qte.window ?? {}) }
+      if (Object.prototype.hasOwnProperty.call(patch, 'timeoutMs')) {
+        const timeoutMs = patch.timeoutMs as number | undefined
+        if (timeoutMs == null) delete nextWindow.timeoutMs
+        else nextWindow.timeoutMs = timeoutMs
+      }
+      const nextQte: QTESpec = { ...scene.qte, window: nextWindow }
+      // 整段窗口结束时刻自动盖住尾窗 + 超时。
+      const endMs = qteInteractionWindowEnd({ ...scene, qte: nextQte }, nextQte)
+      updateScene(scene.id, { qte: { ...nextQte, window: { ...nextWindow, endMs } } })
+    } else if (selectedMaterial.kind === 'option') {
+      if (!scene.choice) return
+      let next: ChoiceSpec = { ...scene.choice }
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === 'timeoutMs') {
+          const ms = Number(value)
+          next = {
+            ...next,
+            window: { ...(next.window ?? {}), timeoutMs: value != null && Number.isFinite(ms) && ms > 0 ? ms : undefined },
+          }
+        } else {
+          next = { ...next, [key]: value }
+        }
+      }
+      updateScene(scene.id, { choice: next })
     }
-  }
-
-  function setSettlementMode(item: MaterialItem, mode: SettlementMode): void {
-    if (!scene || item.kind !== 'settlement') return
-    const cueId = item.cueId ?? item.id
-    const stickerId = item.stickerId ?? item.id
-    const cues = scene.performance?.cues ?? []
-    const cue = cues.find((c) => c.id === cueId)
-    const stickers = scene.stickerClips ?? []
-    const sticker = stickers.find((s) => s.id === stickerId)
-    const nextSticker: StickerClip = sticker ?? {
-      id: stickerId,
-      startMs: item.startMs,
-      endMs: item.endMs,
-      kind: 'numeric',
-      text: cue ? defaultSettlementText(cue) : item.label || '飘字',
-      x: 0.5,
-      y: 0.42,
-      sizePct: 12,
-      scale: 1,
-      rotation: 0,
-      opacity: 1,
-      enter: 'pop',
-      layer: item.layer,
-    }
-    const nextStickers = sticker
-      ? stickers
-      : [...stickers, nextSticker]
-
-    if (mode === 'text') {
-      updateScene(scene.id, {
-        performance: { cues: cues.filter((c) => c.id !== cueId) },
-        stickerClips: nextStickers.map((s) =>
-          s.id === stickerId ? { ...s, performanceCueId: undefined } : s,
-        ),
-      })
-      setSelectedMaterialKey(`settlement:${stickerId}`)
-      return
-    }
-
-    const damage = cueDamageValue(cue) || numericTextValue(nextSticker.text) || 100
-    const baseCue: PerformanceCue = cue ?? {
-      id: cueId,
-      atMs: item.startMs,
-      label: '命中',
-      layer: item.layer,
-      effects: [],
-    }
-    const nextCue = cueWithHpEffect(baseCue, scenario, 'boss', damage)
-    const damageSticker = { ...nextSticker, performanceCueId: nextCue.id, text: defaultSettlementText(nextCue) }
-    updateScene(scene.id, {
-      performance: {
-        cues: cue
-          ? cues
-          : [...cues, nextCue],
-      },
-      stickerClips: sticker
-        ? stickers.map((s) => (s.id === stickerId ? damageSticker : s))
-        : [...stickers, damageSticker],
-    })
-    setSelectedMaterialKey(`settlement:${cueId}`)
   }
 
   function patchHotspot(hotspotId: string, patch: Partial<Hotspot>): void {
@@ -925,37 +889,50 @@ export function VideoCatalogTab() {
       layer: base?.layer ?? 2,
     }
     const nextCues = [...cues, cue]
-    const nextQte = scene.qte
+    const baseQte: QTESpec = scene.qte
       ? { ...scene.qte, cues: nextCues }
       : {
           cues: nextCues,
-          window: { perfect: 120, great: 280, good: 480 },
+          tolerance: { perfect: 120, great: 280, good: 480 },
           score: { perfect: 100, great: 60, good: 30, miss: 0 },
         }
-    const nextExt: Record<string, unknown> = { ...(scene.ext ?? {}) }
-    if (nextCues.length > 1 && nextExt.qteUi === 'battleParry') {
-      delete nextExt.qteUi
+    // 多 cue 时「战斗防反」UI 仅支持单 cue，自动回退默认。
+    const nextQte: QTESpec =
+      nextCues.length > 1 && baseQte.ui === 'battleParry'
+        ? { ...baseQte, ui: undefined }
+        : baseQte
+    // 整段窗口结束时刻自动盖住尾窗。
+    const withWindow: QTESpec = {
+      ...nextQte,
+      window: { ...(nextQte.window ?? {}), endMs: qteInteractionWindowEnd({ ...scene, qte: nextQte }, nextQte) },
     }
+    // 首次建 QTE（此前无 qte）= 把节点交互形态收敛为 QTE：清 choice/calc，并剥掉
+    // 残留的 choice 分支——否则场景末尾 maybeEndScene 会先命中 hasVisibleChoice 而误弹选择层。
+    const branchPatch = scene.qte
+      ? {}
+      : { branches: scene.branches.filter((b) => b.kind !== 'choice') }
     updateScene(scene.id, {
-      kind: 'qte',
-      qte: nextQte,
-      ext: Object.keys(nextExt).length > 0 ? nextExt : undefined,
-      ...(scene.decision?.optType === 'timed_qte'
-        ? {
-            decision: {
-              ...scene.decision,
-              windowEndMs: qteInteractionWindowEnd(scene, nextQte),
-            },
-          }
-        : {}),
+      qte: withWindow,
+      choice: undefined,
+      calc: undefined,
+      ...branchPatch,
     })
     setSelectedMaterialKey(`qte:${id}`)
   }
 
   function removeQteCue(cueId: string): void {
     if (!scene?.qte) return
+    // 删最后一拍 = 删整段 QTE 交互（改蓝图连接，需确认）—— 复用时间轴同一删除路径。
+    if (scene.qte.cues.length <= 1) {
+      const windowItem: MaterialItem = { key: 'qte-window', id: 'qte-decision', kind: 'qte_window', label: '整段限时', startMs: 0, endMs: scene.durationMs, layer: 3 }
+      if (!confirmMaterialDelete(scene, windowItem)) return
+      applyMaterialDelete(scene, windowItem, updateScene)
+      setSelectedMaterialKey(null)
+      setSideMode(null)
+      return
+    }
     const cues = scene.qte.cues.filter((cue) => cue.id !== cueId)
-    updateScene(scene.id, { qte: cues.length ? { ...scene.qte, cues } : undefined })
+    updateScene(scene.id, { qte: { ...scene.qte, cues } })
     if (selectedMaterialKey === `qte:${cueId}`) setSelectedMaterialKey(cues[0] ? `qte:${cues[0].id}` : null)
   }
 
@@ -963,11 +940,20 @@ export function VideoCatalogTab() {
     if (!scene || !overlay.movable) return
     const target = overlay.target
     switch (target.kind) {
-      case 'sticker': {
-        const stickerId = target.stickerId
+      case 'subtitle': {
+        const dialogueId = target.dialogueId
         updateScene(scene.id, {
-          stickerClips: (scene.stickerClips ?? []).map((c) =>
-            c.id === stickerId ? { ...c, x, y } : c,
+          dialogue: (scene.dialogue ?? []).map((c) =>
+            c.id === dialogueId ? { ...c, x, y } : c,
+          ),
+        })
+        break
+      }
+      case 'overlay': {
+        const overlayId = target.overlayId
+        updateScene(scene.id, {
+          overlays: (scene.overlays ?? []).map((o) =>
+            o.id === overlayId ? { ...o, x, y } : o,
           ),
         })
         break
@@ -1033,36 +1019,9 @@ export function VideoCatalogTab() {
     setActiveHotspotId(null)
   }
 
-  function onPointerDown(e: React.PointerEvent, item: MaterialItem, mode: 'move' | 'start' | 'end'): void {
-    e.preventDefault()
-    e.stopPropagation()
-    timelineRef.current?.setPointerCapture(e.pointerId)
-    setSelectedMaterialKey(item.key)
+  function handleSelectMaterial(key: string): void {
+    setSelectedMaterialKey(key)
     setSideMode('inspector')
-    setDrag({ key: item.key, mode, pointerX: e.clientX, startMs: item.startMs, endMs: item.endMs, layer: item.layer })
-  }
-
-  function onPointerMove(e: React.PointerEvent): void {
-    if (!drag) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    if (rect.width <= 0) return
-    const item = materials.find((m) => m.key === drag.key)
-    if (!item) return
-    const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
-    const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect) : drag.layer
-    const span = drag.endMs - drag.startMs
-    if (drag.mode === 'move') {
-      const start = clampMs(drag.startMs + deltaMs, 0, Math.max(0, maxMs - span))
-      patchMaterial(item, { startMs: start, endMs: start + span, layer: nextLayer })
-    } else if (drag.mode === 'start') {
-      patchMaterial(item, { startMs: drag.startMs + deltaMs, endMs: drag.endMs })
-    } else {
-      patchMaterial(item, { startMs: drag.startMs, endMs: drag.endMs + deltaMs })
-    }
-  }
-
-  function onPointerUp(): void {
-    setDrag(null)
   }
 
   return (
@@ -1111,7 +1070,7 @@ export function VideoCatalogTab() {
                   if (!scene) return
                   if (previewClip && !editingBoundClip) {
                     updateScene(scene.id, {
-                      clipId: previewClip.id,
+                      media: { kind: 'VIDEO', ref: builtinMediaIdForClip(previewClip.id) },
                       durationMs: previewClip.durMs ?? scene.durationMs,
                     })
                     return
@@ -1146,9 +1105,14 @@ export function VideoCatalogTab() {
                       if (scene && editingBoundClip && scene.durationMs !== ms) updateScene(scene.id, { durationMs: ms })
                     }
                   }}
+                  onPlay={() => setIsVideoPlaying(true)}
+                  onPause={() => setIsVideoPlaying(false)}
                   onTimeUpdate={(e) => setPlayheadMs(clampMs(e.currentTarget.currentTime * 1000, 0, maxMs))}
                   onSeeked={(e) => setPlayheadMs(clampMs(e.currentTarget.currentTime * 1000, 0, maxMs))}
-                  onEnded={() => setPlayheadMs(maxMs)}
+                  onEnded={() => {
+                    setIsVideoPlaying(false)
+                    setPlayheadMs(maxMs)
+                  }}
                 />
                 <div className="gc-content-anchor" style={previewContentStyle}>
                 <div className="gc-preview-overlays">
@@ -1174,7 +1138,12 @@ export function VideoCatalogTab() {
                             style={{ ['--gc-hotspot-r' as string]: `${(o.r ?? 0.08) * 200}%` }}
                           />
                         ) : null}
-                        <span className="gc-preview-label">{o.label}</span>
+                        <span
+                          className="gc-preview-label"
+                          style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveTextCss(o.style) : undefined}
+                        >
+                          {o.label}
+                        </span>
                       </div>
                     )
                   })}
@@ -1192,49 +1161,19 @@ export function VideoCatalogTab() {
               </label>
             </div>
             {editingBoundClip ? (
-              <>
-                <div className="gc-materialbar">
-                  <span className="gc-materialbar-meta">时间轴 · {fmtDur(maxMs)}</span>
-                  {isTimedQteNode ? (
-                    <span className="gc-materialbar-hint">
-                      蓝实线 = QTE 按键点 · 青虚线 = QTE 窗口（整段限时，非选项）
-                    </span>
-                  ) : null}
-                </div>
-                <div
-                  ref={timelineRef}
-                  className="gc-mtimeline"
-                  onPointerMove={onPointerMove}
-                  onPointerUp={onPointerUp}
-                  onLostPointerCapture={onPointerUp}
-                >
-                  <div className="gc-mtimeline-ruler" />
-                  <div
-                    className="gc-playhead"
-                    style={{ left: `${Math.max(0, Math.min(100, (playheadMs / maxMs) * 100))}%` }}
-                    aria-hidden
-                  />
-                  {materials.map((m) => {
-                    const left = (m.startMs / maxMs) * 100
-                    const width = Math.max(2, ((m.endMs - m.startMs) / maxMs) * 100)
-                    const selected = selectedMaterialKey === m.key
-                    return (
-                      <div
-                        key={m.key}
-                        className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}`}
-                        style={{ left: `${left}%`, width: `${width}%`, top: `${layerTop(m.layer)}px` }}
-                        onPointerDown={(e) => onPointerDown(e, m, 'move')}
-                        title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}`}
-                      >
-                        <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
-                        <span>{materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}</span>
-                        <button className="gc-mhandle is-right" onPointerDown={(e) => onPointerDown(e, m, 'end')} aria-label="调整终点" />
-                      </div>
-                    )
-                  })}
-                  {materials.length === 0 && <div className="gc-mempty">打开素材库，把控件加入当前节点时间轴</div>}
-                </div>
-              </>
+              <MaterialTimeline
+                materials={materials}
+                maxMs={maxMs}
+                playheadMs={playheadMs}
+                selectedMaterialKey={selectedMaterialKey}
+                isTimedQteNode={isTimedQteNode}
+                context="video"
+                onSeek={seekTo}
+                onScrubStart={pauseForScrub}
+                onSelectMaterial={handleSelectMaterial}
+                onPatchMaterial={patchMaterial}
+                onDeleteMaterial={deleteMaterial}
+              />
             ) : (
               <div className="gc-readonly-note">
                 这是素材预览。绑定到当前节点后可编辑时间轴控件。
@@ -1260,10 +1199,10 @@ export function VideoCatalogTab() {
                 onClick={() => addMaterial('subtitle')}
               />
               <MaterialCard
-                title="结算飘字"
-                desc="到点结算伤害，并在画面上弹出数字。"
-                disabledReason={settlementDisabled}
-                onClick={() => addMaterial('settlement')}
+                title="飘字"
+                desc="画面上的文字/数值飘字，可选到点结算扣血。"
+                disabledReason={overlayDisabled}
+                onClick={() => addMaterial('overlay')}
               />
               <MaterialCard
                 title="QTE 按键点"
@@ -1305,7 +1244,9 @@ export function VideoCatalogTab() {
               onAddQteCue={addQteCue}
               onRemoveQteCue={removeQteCue}
               onSelectQteCue={(cueId) => setSelectedMaterialKey(`qte:${cueId}`)}
-              onSettlementMode={setSettlementMode}
+              onUpdateBranch={(branchId, patch) => scene && updateBranch(scene.id, branchId, patch)}
+              onAddBranch={(branch) => scene && addBranch(scene.id, branch)}
+              onRemoveBranch={(branchId) => scene && removeBranch(scene.id, branchId)}
             />
           )}
         </aside>
@@ -1392,7 +1333,9 @@ function MaterialInspector({
   onAddQteCue,
   onRemoveQteCue,
   onSelectQteCue,
-  onSettlementMode,
+  onUpdateBranch,
+  onAddBranch,
+  onRemoveBranch,
 }: {
   scenario: Scenario
   scene: Scene | undefined
@@ -1404,7 +1347,9 @@ function MaterialInspector({
   onAddQteCue: (afterCueId?: string) => void
   onRemoveQteCue: (cueId: string) => void
   onSelectQteCue: (cueId: string) => void
-  onSettlementMode: (item: MaterialItem, mode: SettlementMode) => void
+  onUpdateBranch: (branchId: string, patch: Partial<Branch>) => void
+  onAddBranch: (branch: Branch) => void
+  onRemoveBranch: (branchId: string) => void
 }) {
   if (!scene || !item) {
     return (
@@ -1413,28 +1358,25 @@ function MaterialInspector({
       </div>
     )
   }
-  const cue =
-    item.kind === 'settlement'
-      ? (scene.performance?.cues ?? []).find((c) => c.id === (item.cueId ?? item.id))
-      : undefined
-  const sticker =
-    item.kind === 'settlement'
-      ? (scene.stickerClips ?? []).find((c) => c.id === (item.stickerId ?? item.id))
+  const overlay =
+    item.kind === 'overlay'
+      ? (scene.overlays ?? []).find((o) => o.id === item.id)
       : undefined
   const current =
     item.kind === 'subtitle'
       ? scene.dialogue.find((d) => d.id === item.id)
       : item.kind === 'qte'
-      ? scene.qte?.cues.find((c) => c.id === item.id)
-      : item.kind === 'qte_window' || item.kind === 'option'
-        ? scene.decision
-        : undefined
+        ? scene.qte?.cues.find((c) => c.id === item.id)
+        : item.kind === 'qte_window'
+          ? scene.qte
+          : item.kind === 'option'
+            ? scene.choice
+            : undefined
   const branches = scene.branches.filter((b) => b.kind === 'choice')
   const firstBranch = branches[0]
   const firstHotspot = firstBranch
     ? (scene.hotspots ?? []).find((h) => h.id === choiceHotspotId(firstBranch.id) || h.targetSceneId === firstBranch.targetSceneId)
     : undefined
-  const settlementMode: SettlementMode = cue ? 'damage' : 'text'
   return (
     <div className="gc-inspector-card">
       <div className="gc-inspector-title">{materialDisplayLabel(item)}</div>
@@ -1454,93 +1396,120 @@ function MaterialInspector({
             <span>文本</span>
             <input value={current.text} onChange={(e) => onPatch({ text: e.target.value })} />
           </label>
-          <label className="gc-field">
-            <span>类型</span>
-            <select value={current.role} onChange={(e) => onPatch({ role: e.target.value })}>
-              <option value="narration">旁白</option>
-              <option value="character">对白</option>
-              <option value="protagonist">主角</option>
-              <option value="system">系统</option>
-            </select>
+          <div className="gc-field">
+            <span>样式预设</span>
+            <TextStylePresetPicker
+              kind="subtitle"
+              value={current.style}
+              onChange={(style) => onPatch({ style })}
+            />
+          </div>
+          <label className="gc-tsp-check">
+            <input
+              type="checkbox"
+              checked={current.role !== 'narration'}
+              onChange={(e) =>
+                onPatch(e.target.checked ? { role: 'character' } : { role: 'narration', speaker: undefined })
+              }
+            />
+            <span>显示说话人前缀</span>
           </label>
-          {current.role === 'character' && (
+          {current.role !== 'narration' && (
             <label className="gc-field">
-              <span>署名</span>
+              <span>说话人</span>
               <input value={current.speaker ?? ''} onChange={(e) => onPatch({ speaker: e.target.value || undefined })} />
             </label>
           )}
-        </>
-      )}
-      {item.kind === 'settlement' && (
-        <>
-          <label className="gc-field">
-            <span>模式</span>
-            <select
-              value={settlementMode}
-              onChange={(e) => onSettlementMode(item, e.target.value as SettlementMode)}
-            >
-              <option value="damage">伤害结算</option>
-              <option value="text">文本</option>
-            </select>
-          </label>
-          {settlementMode === 'damage' && (
-            <label className="gc-field">
-              <span>计算标签</span>
+          <div className="gc-field-row">
+            <label>
+              <span>X {(current.x ?? SUBTITLE_DEFAULT_XY.x).toFixed(2)}</span>
               <input
-                value={cue?.label ?? ''}
-                onChange={(e) => onPatch({ label: e.target.value || undefined })}
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={current.x ?? SUBTITLE_DEFAULT_XY.x}
+                onChange={(e) => onPatch({ x: Number(e.target.value) })}
               />
             </label>
-          )}
-          {settlementMode === 'damage' && (
+            <label>
+              <span>Y {(current.y ?? SUBTITLE_DEFAULT_XY.y).toFixed(2)}</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={current.y ?? SUBTITLE_DEFAULT_XY.y}
+                onChange={(e) => onPatch({ y: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            className="gc-tsp-toggle"
+            onClick={() => onPatch({ x: undefined, y: undefined })}
+          >
+            归位到默认位置（底部居中）
+          </button>
+        </>
+      )}
+      {item.kind === 'overlay' && overlay && (
+        <>
           <label className="gc-field">
-            <span>结算目标</span>
-            <select
-              value={cueTargetKind(cue, scenario)}
-              onChange={(e) =>
-                onPatch({ effectTarget: e.target.value })
-              }
-            >
-              <option value="boss">Boss</option>
-              <option value="player">玩家</option>
-            </select>
-          </label>
-          )}
-          {settlementMode === 'damage' && (
-          <label className="gc-field">
-            <span>伤害数值</span>
+            <span>内容</span>
             <input
-              type="number"
-              value={cueDamageValue(cue)}
-              onChange={(e) =>
-                onPatch({ effectValue: Number(e.target.value) || 0 })
-              }
+              value={overlay.content}
+              placeholder={overlay.kind === 'text' ? '文字 / 数值' : overlay.kind === 'icon' ? '图标预设 id' : '图片素材 id'}
+              onChange={(e) => onPatch({ content: e.target.value })}
             />
           </label>
+          {overlay.kind === 'text' && (
+            <div className="gc-field">
+              <span>样式预设</span>
+              <TextStylePresetPicker
+                kind="overlay"
+                value={overlay.style}
+                onChange={(style) => onPatch({ style })}
+              />
+            </div>
           )}
-          <label className="gc-field">
-            <span>显示文字</span>
+          <label className="gc-tsp-check">
             <input
-              type={settlementMode === 'damage' ? 'number' : 'text'}
-              value={settlementMode === 'damage' ? cueDamageValue(cue) : sticker?.text ?? ''}
-              title={settlementMode === 'damage' ? '伤害结算模式下只能输入数字，并同步到判定项' : undefined}
-              onChange={(e) => {
-                if (settlementMode === 'damage') {
-                  onPatch({ effectValue: Number(e.target.value) || 0 })
-                } else {
-                  onPatch({ text: e.target.value })
-                }
-              }}
+              type="checkbox"
+              checked={!!overlay.settlement}
+              onChange={(e) => onPatch({ settlementOn: e.target.checked })}
             />
+            <span>启用结算（到点扣血）</span>
           </label>
+          {overlay.settlement && (
+            <>
+              <label className="gc-field">
+                <span>结算目标</span>
+                <select
+                  value={overlayTargetKind(overlay.settlement, scenario)}
+                  onChange={(e) => onPatch({ effectTarget: e.target.value })}
+                >
+                  <option value="boss">Boss</option>
+                  <option value="player">玩家</option>
+                </select>
+              </label>
+              <div className="gc-readonly-note">
+                {overlay.kind === 'text'
+                  ? parseDamageFromContent(overlay.content) > 0
+                    ? `解析伤害：${parseDamageFromContent(overlay.content)}（取自内容）`
+                    : '解析伤害：0（内容无数字）'
+                  : '解析伤害：0（仅文字飘字从内容解析）'}
+              </div>
+            </>
+          )}
           <div className="gc-field-row">
             <label>
               <span>X%</span>
-              <input type="number" value={Math.round((sticker?.x ?? 0.5) * 100)} onChange={(e) => onPatch({ x: Number(e.target.value) / 100 })} />
+              <input type="number" value={Math.round((overlay.x ?? 0.5) * 100)} onChange={(e) => onPatch({ x: Number(e.target.value) / 100 })} />
             </label>
             <label>
               <span>Y%</span>
-              <input type="number" value={Math.round((sticker?.y ?? 0.42) * 100)} onChange={(e) => onPatch({ y: Number(e.target.value) / 100 })} />
+              <input type="number" value={Math.round((overlay.y ?? 0.42) * 100)} onChange={(e) => onPatch({ y: Number(e.target.value) / 100 })} />
             </label>
           </div>
         </>
@@ -1622,23 +1591,19 @@ function MaterialInspector({
           </button>
         </>
       )}
-      {item.kind === 'qte_window' && current && 'optType' in current && (
+      {item.kind === 'qte_window' && current && 'tolerance' in current && (
         <>
           <p className="gc-inspector-hint">
             整段 QTE 何时生效、何时整段超时。试玩<strong>不会</strong>再弹「选项清单」——玩家只经历一次 QTE；
             「QTE 按键点」轨上的圆点才是各次按键时刻。
           </p>
           <label className="gc-field">
-            <span>设计备注（可选）</span>
-            <input value={current.prompt ?? ''} onChange={(e) => onPatch({ prompt: e.target.value || undefined })} />
-          </label>
-          <label className="gc-field">
             <span>整段限时 ms</span>
             <input
               type="number"
               min={500}
               step={500}
-              value={current.timeoutMs ?? scene.qte?.timeoutMs ?? ''}
+              value={current.window?.timeoutMs ?? ''}
               onChange={(e) => {
                 const timeoutMs = e.target.value ? Number(e.target.value) : undefined
                 onPatch({ timeoutMs })
@@ -1647,7 +1612,7 @@ function MaterialInspector({
           </label>
         </>
       )}
-      {item.kind === 'option' && current && 'optType' in current && (
+      {item.kind === 'option' && current && !('tolerance' in current) && !('shape' in current) && !('role' in current) && (
         <>
           <label className="gc-field">
             <span>提示文案</span>
@@ -1694,6 +1659,80 @@ function MaterialInspector({
               />
             </div>
           )}
+          <label className="gc-tsp-check">
+            <input
+              type="checkbox"
+              checked={!!current.timed}
+              onChange={(e) => onPatch({ timed: e.target.checked || undefined })}
+            />
+            <span>限时选择（超时走缺省分支）</span>
+          </label>
+          {current.timed && (
+            <label className="gc-field">
+              <span>倒计时 (ms)</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={current.window?.timeoutMs ?? ''}
+                placeholder="不限时"
+                onChange={(e) => onPatch({ timeoutMs: e.target.value === '' ? undefined : Number(e.target.value) })}
+              />
+            </label>
+          )}
+          <label className="gc-field">
+            <span>选完跳转</span>
+            <select value={current.fireAt ?? 'on_pick'} onChange={(e) => onPatch({ fireAt: e.target.value })}>
+              <option value="on_pick">立即</option>
+              <option value="video_end">等视频结束</option>
+            </select>
+          </label>
+          {current.timed && branches.length > 0 && (
+            <label className="gc-field">
+              <span>缺省分支</span>
+              <select
+                value={current.defaultBranchId ?? ''}
+                onChange={(e) => onPatch({ defaultBranchId: e.target.value || undefined })}
+              >
+                <option value="">第一个可走</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.label || b.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="gc-inspector-subhead">
+            <span>选项分支</span>
+            <span className="gc-inspector-subhint">{branches.length} 条 · 文案 / 目标 / 条件 / 结算</span>
+          </div>
+          {branches.map((b) => (
+            <BranchGateEditor
+              key={b.id}
+              branch={b}
+              scenario={scenario}
+              variables={Object.values(scenario.variables ?? {})}
+              items={Object.values(scenario.items ?? {})}
+              onPatch={(p) => onUpdateBranch(b.id, p)}
+              onRemove={() => onRemoveBranch(b.id)}
+              lockKind
+            />
+          ))}
+          <button
+            type="button"
+            className="gc-add-branch-btn"
+            onClick={() =>
+              onAddBranch({
+                id: `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                kind: 'choice',
+                label: `选项 ${branches.length + 1}`,
+                targetSceneId: firstTargetSceneId(scene, scenario.scenes),
+              })
+            }
+          >
+            ＋ 添加选项
+          </button>
         </>
       )}
     </div>
@@ -2083,9 +2122,10 @@ export const CATALOG_CSS = `
   font-size: 13px;
 }
 .gc-preview-overlay.is-subtitle {
-  left: 50%;
-  right: auto;
-  width: 82%;
+  /* 位置完全由内联 x/y + 基类 translate(-50%,-50%) 决定（可拖拽、默认底部居中）；
+     不再用 left:50% 硬锚，否则会与拖拽写入的 x 冲突。 */
+  max-width: 82%;
+  white-space: normal;
 }
 .gc-preview-overlay.is-subtitle .gc-preview-label {
   font-size: clamp(16px, 1.35vw, 28px);
@@ -2172,23 +2212,71 @@ export const CATALOG_CSS = `
   font-size: 12px;
   text-align: center;
 }
-.gc-mtimeline {
+.gc-inspector-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gc-line-soft);
+}
+.gc-inspector-subhead > span:first-child { color: var(--gc-text); font-size: 12px; font-weight: 600; }
+.gc-inspector-subhint { color: var(--gc-faint); font-size: 11px; }
+.gc-add-branch-btn {
+  width: 100%;
+  border: 1px dashed var(--gc-accent-line);
+  background: rgba(212, 255, 72, 0.06);
+  color: var(--gc-accent);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gc-add-branch-btn:hover { background: rgba(212, 255, 72, 0.12); }
+.gc-zoombar { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.gc-zoombar input[type="range"] { width: 120px; accent-color: var(--gc-accent); cursor: pointer; }
+.gc-zoom-val { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.gc-zoom-fit {
+  border: 1px solid var(--gc-line); background: var(--gc-panel2); color: var(--gc-text);
+  border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+}
+.gc-zoom-fit:hover { border-color: var(--gc-accent-line); }
+.gc-mtimeline-viewport {
   position: relative;
   height: var(--gc-timeline-h);
   min-height: 204px;
   border-radius: 10px;
   border: 1px solid var(--gc-line-soft);
-  background:
-    linear-gradient(90deg, rgba(240,136,64,0.12) 1px, transparent 1px) 0 0 / 10% 100%,
-    rgba(0,0,0,0.22);
-  overflow: hidden;
+  background: rgba(0,0,0,0.22);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.gc-mtimeline-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
   touch-action: none;
 }
 .gc-mtimeline-ruler {
-  position: absolute;
-  left: 0; right: 0; top: 0; height: 22px;
+  position: sticky;
+  left: 0; top: 0; height: 22px;
   border-bottom: 1px solid var(--gc-line-soft);
-  background: rgba(255,255,255,0.025);
+  background: rgba(20,16,12,0.94);
+  z-index: 6;
+}
+.gc-mtick {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  line-height: 22px;
+  padding-left: 4px;
+  font-size: 10px;
+  color: var(--gc-faint);
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--gc-line-soft);
+  pointer-events: none;
+  white-space: nowrap;
 }
 .gc-playhead {
   position: absolute;
@@ -2385,6 +2473,29 @@ export const CATALOG_CSS = `
   color: var(--gc-text);
   border-radius: 7px;
   padding: 7px 8px;
+}
+/* 主题化滑杆（覆盖浏览器默认蓝白 + 去掉上面 input 盒子样式）—— 与页面 accent 对齐 */
+.gc-inspector-card input[type=range],
+.gc-field-row input[type=range],
+.gc-field input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; padding: 0; border: none; border-radius: 999px;
+  background: rgba(255,255,255,.14); outline: none; cursor: pointer;
+}
+.gc-inspector-card input[type=range]::-webkit-slider-thumb,
+.gc-field-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--gc-accent); border: 2px solid rgba(0,0,0,.35);
+}
+.gc-inspector-card input[type=range]::-moz-range-thumb,
+.gc-field-row input[type=range]::-moz-range-thumb {
+  width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(0,0,0,.35);
+  background: var(--gc-accent);
+}
+.gc-inspector-card input[type=range]::-moz-range-track,
+.gc-field-row input[type=range]::-moz-range-track {
+  height: 4px; border-radius: 999px; background: rgba(255,255,255,.14);
 }
 .gc-frame-center { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .gc-play-glyph {

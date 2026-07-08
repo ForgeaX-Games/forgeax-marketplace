@@ -49,8 +49,7 @@ export function makeDemoScenario(): Scenario {
     scene({
       id: 'choose',
       title: '抉择',
-      kind: 'choice',
-      decision: { optType: 'static', prompt: '怎么办？' },
+      choice: { prompt: '怎么办？' },
       branches: [
         branch({ id: 'opt-qte', kind: 'choice', label: '迎击（QTE）', targetSceneId: 'qte' }),
         branch({
@@ -68,13 +67,12 @@ export function makeDemoScenario(): Scenario {
     scene({
       id: 'qte',
       title: '防反 QTE',
-      kind: 'qte',
       qte: {
         cues: [
           { id: 'c1', shape: 'tap', x: 0.4, y: 0.5, appearAt: 800, targetAt: 1000 },
           { id: 'c2', shape: 'tap', x: 0.6, y: 0.5, appearAt: 1600, targetAt: 1800 },
         ],
-        window: { perfect: 80, great: 140, good: 220 },
+        tolerance: { perfect: 80, great: 140, good: 220 },
         score: { perfect: 100, great: 70, good: 40, miss: -10 },
       },
       branches: [
@@ -88,7 +86,6 @@ export function makeDemoScenario(): Scenario {
     scene({
       id: 'boss',
       title: 'Boss 战',
-      kind: 'battle',
       boss: {
         entityId: 'foe',
         playerEntityId: 'hero',

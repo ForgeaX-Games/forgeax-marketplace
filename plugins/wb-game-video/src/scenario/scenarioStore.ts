@@ -24,14 +24,13 @@ import type {
   SearchSegmentClip,
   Shot,
   StudioMode,
-  TextOverlayClip,
+  OverlayClip,
   UIStyle,
   VisualStyle,
   VideoConfig,
   FilterClip,
   AdjustClip,
   EffectClip,
-  StickerClip,
   TransitionSpec,
   ClipAnimSpec,
 } from './types'
@@ -240,13 +239,13 @@ export interface ScenarioStore {
     patch: Partial<Omit<MinigameClip, 'id'>>,
   ) => void
 
-  // ─── v7 · 文字叠加 clip（scene.textOverlays） ───────────────────
-  addTextOverlay: (sceneId: string, clip: TextOverlayClip) => void
-  removeTextOverlay: (sceneId: string, clipId: string) => void
-  updateTextOverlay: (
+  // ─── v13 · 统一飘字 overlay（scene.overlays：文字/图标/图片 + 结算） ─────
+  addOverlay: (sceneId: string, clip: OverlayClip) => void
+  removeOverlay: (sceneId: string, clipId: string) => void
+  updateOverlay: (
     sceneId: string,
     clipId: string,
-    patch: Partial<Omit<TextOverlayClip, 'id'>>,
+    patch: Partial<Omit<OverlayClip, 'id'>>,
   ) => void
 
   // ─── v7 · 搜索段 clip（scene.searchSegments） ───────────────────
@@ -268,9 +267,6 @@ export interface ScenarioStore {
   addEffectClip: (sceneId: string, clip: EffectClip) => void
   removeEffectClip: (sceneId: string, clipId: string) => void
   updateEffectClip: (sceneId: string, clipId: string, patch: Partial<Omit<EffectClip, 'id'>>) => void
-  addStickerClip: (sceneId: string, clip: StickerClip) => void
-  removeStickerClip: (sceneId: string, clipId: string) => void
-  updateStickerClip: (sceneId: string, clipId: string, patch: Partial<Omit<StickerClip, 'id'>>) => void
   setTransition: (sceneId: string, spec: TransitionSpec | undefined) => void
   setClipAnim: (sceneId: string, spec: ClipAnimSpec | undefined) => void
 
@@ -458,6 +454,13 @@ export interface ScenarioStore {
   removeItem: (id: string) => void
 
   setUIStyle: (patch: Partial<UIStyle>) => void
+  /**
+   * 文字预设样式库（字幕 / 花字）：新增或覆盖一个**用户自定义**预设（快照另存）。
+   * builtin 预设写在代码里、不入此库；这里只持久化作者通过「+」新建的。
+   */
+  saveTextStylePreset: (kind: 'subtitle' | 'overlay', preset: import('./types').TextStylePreset) => void
+  /** 删除一个用户自定义文字预设（按 id；builtin 不受影响）。 */
+  removeTextStylePreset: (kind: 'subtitle' | 'overlay', id: string) => void
   /**
    * 全局美术风格 —— 作者在 Forge Tab 一次选择，影响后续所有素材生成。
    * 传 undefined 相当于清除（回到默认 photoreal 语义）。
@@ -869,7 +872,7 @@ export const useScenarioStore = create<ScenarioStore>()(
           ? { ...scene.qte, cues: [...scene.qte.cues, cue] }
           : {
               cues: [cue],
-              window: { perfect: 80, great: 160, good: 280 },
+              tolerance: { perfect: 80, great: 160, good: 280 },
               score: { perfect: 100, great: 60, good: 25, miss: -30 },
             },
       })),
@@ -1253,27 +1256,27 @@ export const useScenarioStore = create<ScenarioStore>()(
       })),
     ),
 
-  addTextOverlay: (sceneId, clip) =>
+  addOverlay: (sceneId, clip) =>
     set((s) =>
       mutateScene(s, sceneId, (scene) => ({
         ...scene,
-        textOverlays: [...(scene.textOverlays ?? []), clip],
+        overlays: [...(scene.overlays ?? []), clip],
       })),
     ),
 
-  removeTextOverlay: (sceneId, clipId) =>
+  removeOverlay: (sceneId, clipId) =>
     set((s) =>
       mutateScene(s, sceneId, (scene) => ({
         ...scene,
-        textOverlays: (scene.textOverlays ?? []).filter((c) => c.id !== clipId),
+        overlays: (scene.overlays ?? []).filter((c) => c.id !== clipId),
       })),
     ),
 
-  updateTextOverlay: (sceneId, clipId, patch) =>
+  updateOverlay: (sceneId, clipId, patch) =>
     set((s) =>
       mutateScene(s, sceneId, (scene) => ({
         ...scene,
-        textOverlays: (scene.textOverlays ?? []).map((c) =>
+        overlays: (scene.overlays ?? []).map((c) =>
           c.id === clipId ? { ...c, ...patch } : c,
         ),
       })),
@@ -1343,19 +1346,6 @@ export const useScenarioStore = create<ScenarioStore>()(
   updateEffectClip: (sceneId, clipId, patch) =>
     set((s) => mutateScene(s, sceneId, (scene) => ({
       ...scene, effectClips: (scene.effectClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
-    }))),
-
-  addStickerClip: (sceneId, clip) =>
-    set((s) => mutateScene(s, sceneId, (scene) => ({
-      ...scene, stickerClips: [...(scene.stickerClips ?? []), clip],
-    }))),
-  removeStickerClip: (sceneId, clipId) =>
-    set((s) => mutateScene(s, sceneId, (scene) => ({
-      ...scene, stickerClips: (scene.stickerClips ?? []).filter((c) => c.id !== clipId),
-    }))),
-  updateStickerClip: (sceneId, clipId, patch) =>
-    set((s) => mutateScene(s, sceneId, (scene) => ({
-      ...scene, stickerClips: (scene.stickerClips ?? []).map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
     }))),
 
   setTransition: (sceneId, spec) =>
@@ -2005,6 +1995,33 @@ export const useScenarioStore = create<ScenarioStore>()(
         uiStyle: { prompt: '', ...(s.scenario.uiStyle ?? {}), ...patch },
       },
     })),
+
+  saveTextStylePreset: (kind, preset) =>
+    set((s) => {
+      const lib = s.scenario.textStylePresets ?? { subtitle: [], overlay: [] }
+      const list = lib[kind] ?? []
+      const next = list.some((p) => p.id === preset.id)
+        ? list.map((p) => (p.id === preset.id ? preset : p))
+        : [...list, preset]
+      return {
+        scenario: {
+          ...s.scenario,
+          textStylePresets: { ...lib, [kind]: next },
+        },
+      }
+    }),
+
+  removeTextStylePreset: (kind, id) =>
+    set((s) => {
+      const lib = s.scenario.textStylePresets
+      if (!lib) return {}
+      return {
+        scenario: {
+          ...s.scenario,
+          textStylePresets: { ...lib, [kind]: (lib[kind] ?? []).filter((p) => p.id !== id) },
+        },
+      }
+    }),
 
   setVisualStyle: (style) =>
     set((s) => ({

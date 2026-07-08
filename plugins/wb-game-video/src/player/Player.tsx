@@ -20,8 +20,8 @@ import { PlaybackControls } from './PlaybackControls'
 import { SettlementOverlay } from './SettlementOverlay'
 import { MinigameOverlay } from './MinigameOverlay'
 import { SearchLayer, InventoryHUD } from './SearchLayer'
-import { TextOverlayLayer } from './TextOverlayLayer'
-import { FxOverlayLayer, FadeLayer, StickerLayer } from './SceneFxLayers'
+import { OverlayLayer } from './OverlayLayer'
+import { FxOverlayLayer, FadeLayer } from './SceneFxLayers'
 import { HudLayer } from './hud/HudLayer'
 import { isGameplay, isBattleScene } from './gameplayGuards'
 import { initEntities, applyDamage, type EntitiesState } from './entities'
@@ -45,14 +45,14 @@ import { DetourOverlay } from './detour/DetourOverlay'
 import {
   isLoopScene,
   resolveFireAt,
-  resolveOptType,
+  resolveInteraction,
   resolvePlaybackCapMs,
   shouldActivateTimedQte,
   shouldOpenChoiceDuringPlayback,
   shouldPauseVideoForChoice,
 } from './choiceTiming'
 import { resolveSceneQte } from '../qte/qteKindPresets'
-import { applyPerformanceCue, duePerformanceCues } from './performanceRuntime'
+import { applyOverlaySettlement, dueOverlaySettlements } from './performanceRuntime'
 import type { HotspotDetour } from '../scenario/types'
 import { CrossfadeLayer } from './CrossfadeLayer'
 import type { MinigameEvent } from './minigameMessage'
@@ -76,7 +76,7 @@ import {
   type SlowMoState,
 } from '../qte/slowMo'
 import { injectStyleOnce } from '../styles/injectStyle'
-import { getVideoClip } from '../scenario/gameAssetCatalog'
+import { clipIdFromMediaRef, getVideoClip } from '../scenario/gameAssetCatalog'
 import { useCinemaHold } from './cinemaGate'
 import { computeEffectiveEndMs } from './sceneEndTime'
 import { qteOverlayAmbientClass } from './qteAmbient'
@@ -302,7 +302,7 @@ export function Player() {
   const sceneStartedAtRef = useRef<number>(performance.now())
   const lastTickWallRef = useRef<number>(performance.now())
   const elapsedRef = useRef<number>(0)
-  /** timed_qte 超出视频物理时长时：片尾定格，逻辑时钟用墙钟续走。 */
+  /** QTE 交互窗超出视频物理时长时：片尾定格，逻辑时钟用墙钟续走。 */
   const videoHoldAnchorRef = useRef<number | null>(null)
   const videoHoldBaseMsRef = useRef<number>(0)
   const rafRef = useRef<number | null>(null)
@@ -576,7 +576,7 @@ export function Player() {
 
       // 1) 解算当前应有的播放速率（基于上一帧 elapsed 已足够，误差一帧不可感）
       const cues = scene!.qte?.cues ?? []
-      const window = scene!.qte?.window ?? { perfect: 80, great: 160, good: 280 }
+      const window = scene!.qte?.tolerance ?? { perfect: 80, great: 160, good: 280 }
       const slow = resolveActiveSlowMo(
         cues,
         window,
@@ -638,19 +638,23 @@ export function Player() {
         }
       }
 
-      // 演出结算轴(M10)：到点扣血 + 飘字。
-      if (scene!.performance?.cues?.length) {
-        const due = duePerformanceCues(scene!.performance, e, perfFiredRef.current)
-        for (const cue of due) {
-          perfFiredRef.current.add(cue.id)
-          const { entities: nextEnt, notice } = applyPerformanceCue(
-            cue,
-            scenario,
-            entitiesRef.current,
-          )
-          entitiesRef.current = nextEnt
-          setEntities(nextEnt)
-          if (notice) setGateNotice(notice)
+      // 飘字结算(v13)：overlay.settlement 到点（startMs）应用全 effect（var/flag/item/hp）。
+      // 可见反馈由 OverlayLayer 自身渲染（含 enter 动画），不再走顶部 gateNotice 横幅。
+      if (scene!.overlays?.length) {
+        const due = dueOverlaySettlements(scene!.overlays, e, perfFiredRef.current)
+        for (const ov of due) {
+          perfFiredRef.current.add(ov.id)
+          const { stores } = applyOverlaySettlement(ov.settlement!, scenario, {
+            vars: varsRef.current,
+            items: ownedItemsRef.current,
+            entities: entitiesRef.current,
+          })
+          varsRef.current = stores.vars
+          setVars(stores.vars)
+          ownedItemsRef.current = stores.items
+          setOwnedItems(stores.items)
+          entitiesRef.current = stores.entities
+          setEntities(stores.entities)
         }
       }
 
@@ -970,7 +974,7 @@ export function Player() {
       let nextVars = varsRef.current
       if (perfect && boss.perfectFlagVarId) {
         nextVars = applyEffects(
-          [{ varId: boss.perfectFlagVarId, op: 'set', value: 1 }],
+          [{ id: `fx-${boss.perfectFlagVarId}`, kind: 'var', varId: boss.perfectFlagVarId, op: 'set', value: 1 }],
           varsRef.current,
           scenario,
         )
@@ -1227,7 +1231,7 @@ export function Player() {
     if (flagIds?.length) {
       setVars((v) =>
         applyEffects(
-          flagIds.map((varId) => ({ varId, op: 'set' as const, value: 1 })),
+          flagIds.map((varId) => ({ id: `fx-${varId}`, kind: 'var' as const, varId, op: 'set' as const, value: 1 })),
           v,
           scenario,
         ),
@@ -1246,7 +1250,7 @@ export function Player() {
     if (lootedRef.current.has(key)) return
     setLootedKeys((s) => new Set(s).add(key))
     setOwnedItems((o) =>
-      applyItemEffects([{ itemId: hotspot.itemId, op: 'give', count: 1 }], o),
+      applyItemEffects([{ id: `fx-${hotspot.itemId}`, kind: 'item', itemId: hotspot.itemId, op: 'give', count: 1 }], o),
     )
     const itemName = scenario.items?.[hotspot.itemId]?.name ?? '物品'
     setGateNotice(`获得「${itemName}」`)
@@ -1387,10 +1391,10 @@ export function Player() {
         onVideoEnded={() => {
           if (choiceOpen || activeMinigame || settlement || endingScreen || activeDetour) return
           if (scene && isLoopScene(scene)) return
-          // timed_qte 交互窗可能超出视频物理时长 —— 由 RAF 逻辑时钟续走，不在此提前结束
+          // QTE 交互窗可能超出视频物理时长 —— 由 RAF 逻辑时钟续走，不在此提前结束
           if (
             scene &&
-            resolveOptType(scene.decision) === 'timed_qte' &&
+            resolveInteraction(scene).type === 'qte' &&
             (scene.qte?.cues?.length ?? 0) > 0 &&
             elapsedRef.current < resolvePlaybackCapMs(scene, computeEffectiveEndMs(scene))
           ) {
@@ -1404,7 +1408,7 @@ export function Player() {
 
       {showSubtitles && <DialogueBox scene={scene} elapsed={elapsed} />}
 
-      <TextOverlayLayer scene={scene} elapsed={elapsed} />
+      <OverlayLayer scene={scene} elapsed={elapsed} />
 
       {activeQte &&
         (activeQte.cues?.length ?? 0) > 0 &&
@@ -1419,8 +1423,8 @@ export function Player() {
           onResolve={(cue, deltaMs, holdMs) => {
             const v =
               cue.shape === 'hold'
-                ? judgeHold(cue, activeQte.window, activeQte.score, deltaMs, holdMs ?? 0)
-                : judgeTap(cue, activeQte.window, activeQte.score, deltaMs)
+                ? judgeHold(cue, activeQte.tolerance, activeQte.score, deltaMs, holdMs ?? 0)
+                : judgeTap(cue, activeQte.tolerance, activeQte.score, deltaMs)
             handleCueResolve(cue, v)
           }}
         />
@@ -1619,12 +1623,12 @@ export function Player() {
 
 function defaultQTESpec(): {
   cues: QTECue[]
-  window: { perfect: number; great: number; good: number }
+  tolerance: { perfect: number; great: number; good: number }
   score: { perfect: number; great: number; good: number; miss: number }
 } {
   return {
     cues: [],
-    window: { perfect: 80, great: 160, good: 280 },
+    tolerance: { perfect: 80, great: 160, good: 280 },
     score: { perfect: 100, great: 60, good: 25, miss: -30 },
   }
 }
@@ -1737,7 +1741,7 @@ function SceneCanvas({
   // 该节点没有真实可播视频（占位演出库尚未绑定素材）时，按所选演出渲染一帧带标签
   // 的占位画面（与「视频」tab 预览一致），让试玩如实反映"这一节点播哪条演出"。
   // 一旦演出库绑定真实素材，playbackSrc 有值即正常播放，占位帧自动让位。
-  const perfClip = getVideoClip(scene.clipId)
+  const perfClip = getVideoClip(clipIdFromMediaRef(scene.media?.ref))
   const showPerfPlaceholder = !!perfClip && !multiShot && !playbackSrc
 
   /*
@@ -1813,9 +1817,9 @@ function SceneCanvas({
           PROMPTS · 等素材
         </div>
       )}
-      {/* 剪映式后期效果叠层：暗角/颗粒/特效 → 贴纸 → 渐显渐隐遮罩（默认黑底） */}
+      {/* 剪映式后期效果叠层：暗角/颗粒/特效 → 渐显渐隐遮罩（默认黑底）。
+          飘字（文字/图标/图片）由 Player 顶层的 OverlayLayer 统一渲染。 */}
       <FxOverlayLayer frame={stageFx} />
-      <StickerLayer scene={scene} ms={currentMs} />
       <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
       <div className="ks-player-vignette" />
     </div>

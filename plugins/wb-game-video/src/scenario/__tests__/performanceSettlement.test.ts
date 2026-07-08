@@ -11,27 +11,20 @@ describe('performanceSettlement', () => {
     expect(rows[0]?.atMs).toBe(600)
   })
 
-  test('lists text-only sticker clips without performance cue', () => {
+  test('lists text-only settlement float without damage', () => {
     const scenario = getBlueprintCombatDemoScenario()
     const base = scenario.scenes.pu!
     const rows = listPerformanceSettlements({
       ...base,
-      performance: { cues: [] },
-      stickerClips: [
+      overlays: [
         {
           id: 'txt-1',
+          kind: 'text',
           startMs: 900,
-          endMs: 2200,
-          kind: 'numeric',
-          text: '完美！',
+          content: '完美！',
           x: 0.5,
           y: 0.3,
-          sizePct: 12,
-          scale: 1,
-          rotation: 0,
-          opacity: 1,
-          enter: 'pop',
-          layer: 1,
+          settlement: { effects: [], float: { text: '完美！', x: 0.5, y: 0.3 } },
         },
       ],
     })

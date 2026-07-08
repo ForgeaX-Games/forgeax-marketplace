@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Branch, DecisionSpec, Scene } from '../scenario/types'
+import type { Branch, ChoiceSpec, Scene } from '../scenario/types'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { isBranchAvailable, type EntityHpView, type ItemState, type VarState } from './conditionEval'
 import { ensureInkRoughFilter } from './inkRoughFilter'
@@ -18,14 +18,15 @@ interface Props {
 const KEY_LABELS = ['A', 'B'] as const
 
 export function isInkYingMoChoice(scene: Scene | undefined): boolean {
-  return scene?.ext?.choiceUi === 'inkYingMo'
+  return scene?.choice?.ui === 'inkYingMo'
 }
 
 export function InkYingMoLayer({ scene, onPick, vars, visitedSceneIds, ownedItems, entities, score }: Props) {
   injectStyleOnce('ink-yingmo-layer', YINGMO_CSS)
   ensureInkRoughFilter()
-  const decision: DecisionSpec | undefined = scene.decision
-  const timed = decision?.optType === 'timed' && (decision.timeoutMs ?? 0) > 0
+  const decision: ChoiceSpec | undefined = scene.choice
+  const timeoutMs = decision?.window?.timeoutMs
+  const timed = decision?.timed === true && (timeoutMs ?? 0) > 0
   const pickedRef = useRef(false)
 
   const ctx = useMemo(
@@ -69,7 +70,7 @@ export function InkYingMoLayer({ scene, onPick, vars, visitedSceneIds, ownedItem
   // 限时倒计时：归零未选 → 落 defaultBranchId(默)，兜底第一个可选（对齐 ChoiceLayer）
   useEffect(() => {
     if (!timed) return
-    const total = decision?.timeoutMs ?? 0
+    const total = timeoutMs ?? 0
     const start = performance.now()
     let raf = 0
     function tick(now: number): void {

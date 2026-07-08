@@ -4,7 +4,7 @@ import { useSceneImageCache } from '../media/sceneImageCache'
 import { useMediaStore } from '../media/mediaStore'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
-import type { Branch, DecisionSpec, Hotspot, Scene } from '../scenario/types'
+import type { Branch, ChoiceSpec, Hotspot, Scene } from '../scenario/types'
 import { useCinemaHold } from './cinemaGate'
 import { injectStyleOnce } from '../styles/injectStyle'
 import {
@@ -73,14 +73,11 @@ export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds, ownedItems, 
   // ChoiceLayer 挂着说明玩家正在"做选择"，阻止电影模式，让 UI 常驻
   useCinemaHold(true)
 
-  // 限时选择(v9)：scene.decision optType/mode='timed' 时启动倒计时，超时自动选默认分支。
-  const decision: DecisionSpec | undefined = scene.decision
-  const timed =
-    (decision?.mode === 'timed' ||
-      decision?.mode === 'wait' ||
-      decision?.optType === 'timed') &&
-    (decision.timeoutMs ?? 0) > 0
-  const [remainMs, setRemainMs] = useState<number>(decision?.timeoutMs ?? 0)
+  // 限时选择：scene.choice.timed 时启动倒计时，超时自动选默认分支。
+  const decision: ChoiceSpec | undefined = scene.choice
+  const timeoutMs = decision?.window?.timeoutMs
+  const timed = decision?.timed === true && (timeoutMs ?? 0) > 0
+  const [remainMs, setRemainMs] = useState<number>(timeoutMs ?? 0)
 
   // 数值系统：按 condition 过滤 / 锁定。
   //   - 条件满足 → 正常可选
@@ -125,7 +122,7 @@ export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds, ownedItems, 
   // 或第一个可走分支，避免玩家不选时卡死。
   useEffect(() => {
     if (!timed || picked) return
-    const total = decision?.timeoutMs ?? 0
+    const total = timeoutMs ?? 0
     const start = performance.now()
     let raf = 0
     function tick(now: number): void {
@@ -157,7 +154,7 @@ export function ChoiceLayer({ scene, onPick, vars, visitedSceneIds, ownedItems, 
           <div className="ks-cl-timer" data-testid="choice-timer">
             <div
               className="ks-cl-timer-fill"
-              style={{ width: `${Math.max(0, Math.min(100, (remainMs / (decision?.timeoutMs || 1)) * 100))}%` }}
+              style={{ width: `${Math.max(0, Math.min(100, (remainMs / (timeoutMs || 1)) * 100))}%` }}
             />
           </div>
         )}

@@ -1,15 +1,13 @@
 import type { OrphanInfo } from '../scenario/reconnectOrphans'
-import type { Effect, QTESpec, Scene, Scenario } from '../scenario/types'
+import type { Effect, OverlayClip, QTESpec, Scene, Scenario } from '../scenario/types'
 import type {
   BossRound,
   BossSpec,
-  DecisionSpec,
+  ChoiceSpec,
   EntityKind,
   EntitySpec,
   Hotspot,
   HotspotDetour,
-  PerformanceCue,
-  PerformanceSpec,
   QteKind,
 } from '../scenario/gameplayTypes'
 import {
@@ -1327,6 +1325,7 @@ interface ParsedScene {
   }[]
   // ── 视频游戏「玩法优先」字段(v9) —— 松散类型，交给 normalizer 结构化 ──
   kind?: string
+  calcType?: string
   mediaPlayMode?: string
   returnsToCaller?: boolean
   boss?: unknown
@@ -1508,15 +1507,13 @@ function normalizeScenario(
             ? undefined
             : Math.max(0, Number(d.endMs) || 0),
       })),
-      qte: normalizeQte(s.qte, sceneId),
       branches: (s.branches ?? []).map((b, i) => ({
         id: b.id ?? `${sceneId}-b${i + 1}`,
         kind: normalizeBranchKind(b.kind),
         label: b.label,
         targetSceneId: b.targetSceneId ?? sceneId,
-        showAt: b.showAt,
       })) as Scenario['scenes'][string]['branches'],
-      // 视频游戏「玩法优先」字段(v9)：仅在 LLM 明确给出时才挂，纯叙事零回归
+      // 交互形态 presence（boss/qte/calc/choice）+ 正交玩法字段：仅在 LLM 明确给出时挂
       ...normalizeSceneGameplay(s, sceneId),
     }
   }
@@ -1575,9 +1572,7 @@ function normalizeScenario(
   const hasEntities = Object.keys(entities).length > 0
   const hasGameplay =
     hasEntities ||
-    Object.values(scenes).some(
-      (s) => (s.kind && s.kind !== 'story') || s.boss || s.hotspots || s.decision,
-    )
+    Object.values(scenes).some((s) => s.boss || s.qte || s.calc || s.choice || s.hotspots)
 
   return {
     id,
@@ -1615,7 +1610,7 @@ function normalizeBranchKind(k?: string): 'choice' | 'qte_pass' | 'qte_fail' | '
 function normalizeQte(raw: unknown, idPrefix: string): QTESpec | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const q = raw as Record<string, unknown>
-  const win = (q.window ?? {}) as Record<string, unknown>
+  const win = (q.tolerance ?? q.window ?? {}) as Record<string, unknown>
   const sc = (q.score ?? {}) as Record<string, unknown>
   const cuesRaw = Array.isArray(q.cues) ? q.cues : []
   const cues: QTESpec['cues'] = []
@@ -1634,9 +1629,11 @@ function normalizeQte(raw: unknown, idPrefix: string): QTESpec | undefined {
     })
   })
   if (cues.length === 0) return undefined
+  const uiRaw = q.ui
+  const templateRaw = q.template ?? q.qteKind
   return {
     cues,
-    window: {
+    tolerance: {
       perfect: Number(win.perfect) || 80,
       great: Number(win.great) || 160,
       good: Number(win.good) || 280,
@@ -1649,7 +1646,11 @@ function normalizeQte(raw: unknown, idPrefix: string): QTESpec | undefined {
     },
     passingScore: typeof q.passingScore === 'number' ? q.passingScore : undefined,
     sequence: q.sequence === true ? true : undefined,
-    timeoutMs: typeof q.timeoutMs === 'number' ? q.timeoutMs : undefined,
+    ...(typeof q.timeoutMs === 'number' ? { window: { timeoutMs: Math.max(0, q.timeoutMs) } } : {}),
+    ...(uiRaw === 'battleParry' || uiRaw === 'inkKou' || uiRaw === 'default'
+      ? { ui: uiRaw }
+      : {}),
+    ...(isQteKind(templateRaw) ? { template: templateRaw } : {}),
   }
 }
 
@@ -1766,19 +1767,31 @@ function normalizeBoss(raw: unknown, sceneId: string): BossSpec | undefined {
   }
 }
 
-function normalizeDecision(raw: unknown): DecisionSpec | undefined {
+/**
+ * 归一化选择交互 → ChoiceSpec。旧 atMs/windowStart/End + timeoutMs 收进 window:TimeWindow。
+ *
+ * legacy-alias：`optType === 'timed_qte'` 是旧 decision 枚举的历史残留（QTE 天生限时，
+ * 无独立"限时 QTE"概念）。presence 重构后交互形态只有 boss/qte/choice/calc —— 这里把它
+ * 当作"该节点其实是 QTE"来处理：返回 undefined，交由 normalizeQte 归成 scene.qte。
+ */
+function normalizeChoice(raw: unknown): ChoiceSpec | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Record<string, unknown>
-  const out: DecisionSpec = {}
-  if (r.optType === 'static' || r.optType === 'timed' || r.optType === 'timed_qte') out.optType = r.optType
-  if (r.mode === 'pause' || r.mode === 'timed' || r.mode === 'wait') out.mode = r.mode
-  if (typeof r.atMs === 'number') out.atMs = Math.max(0, r.atMs)
-  if (typeof r.timeoutMs === 'number') out.timeoutMs = Math.max(0, r.timeoutMs)
+  if (r.optType === 'timed_qte') return undefined // legacy-alias → QTE，非 choice
+  const out: ChoiceSpec = {}
+  if (r.optType === 'timed' || r.mode === 'timed') out.timed = true
+  const window: { startMs?: number; endMs?: number; timeoutMs?: number } = {}
+  const start = r.windowStartMs ?? r.atMs
+  if (typeof start === 'number') window.startMs = Math.max(0, start)
+  if (typeof r.windowEndMs === 'number') window.endMs = Math.max(0, r.windowEndMs)
+  if (typeof r.timeoutMs === 'number') window.timeoutMs = Math.max(0, r.timeoutMs)
+  if (Object.keys(window).length > 0) out.window = window
   if (typeof r.defaultBranchId === 'string' && r.defaultBranchId.trim()) out.defaultBranchId = r.defaultBranchId.trim()
   if (typeof r.prompt === 'string' && r.prompt.trim()) out.prompt = r.prompt.trim()
   if (r.fireAt === 'on_pick' || r.fireAt === 'video_end') out.fireAt = r.fireAt
   if (r.presentation === 'list' || r.presentation === 'hotspot') out.presentation = r.presentation
-  if (isQteKind(r.qteKind)) out.qteKind = r.qteKind
+  if (r.ui === 'battleSkillBar' || r.ui === 'inkYingMo' || r.ui === 'default') out.ui = r.ui
+  if (typeof r.layer === 'number') out.layer = r.layer
   return Object.keys(out).length > 0 ? out : undefined
 }
 
@@ -1822,39 +1835,55 @@ function normalizeHotspots(raw: unknown, sceneId: string): Hotspot[] | undefined
   return out.length > 0 ? out : undefined
 }
 
-function normalizePerformance(raw: unknown, sceneId: string): PerformanceSpec | undefined {
+/**
+ * LLM 仍按 `performance.cues[{atMs,label,effects,float}]` 语义描述判定轴；
+ * 归一到统一飘字 OverlayClip[]：float.text → content（空则为纯逻辑触发器），
+ * atMs → startMs，effects → settlement.effects。
+ */
+function normalizeOverlays(raw: unknown, sceneId: string): OverlayClip[] | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Record<string, unknown>
   const cuesRaw = Array.isArray(r.cues) ? r.cues : []
-  const cues: PerformanceCue[] = []
+  const overlays: OverlayClip[] = []
   cuesRaw.forEach((raw2, i) => {
     if (!raw2 || typeof raw2 !== 'object') return
     const c = raw2 as Record<string, unknown>
-    cues.push({
+    const float = c.float && typeof c.float === 'object' ? (c.float as Record<string, unknown>) : undefined
+    const content = float && typeof float.text === 'string' ? float.text : ''
+    overlays.push({
       id: typeof c.id === 'string' && c.id ? c.id : `${sceneId}-pc${i + 1}`,
-      atMs: Math.max(0, Number(c.atMs) || i * 800),
-      effects: normalizeEffects(c.effects, `${sceneId}-pc${i + 1}`),
+      kind: 'text',
+      startMs: Math.max(0, Number(c.atMs) || i * 800),
+      content,
+      x: float && typeof float.x === 'number' ? float.x : 0.5,
+      y: float && typeof float.y === 'number' ? float.y : 0.42,
+      settlement: { effects: normalizeEffects(c.effects, `${sceneId}-pc${i + 1}`) },
       ...(typeof c.label === 'string' && c.label.trim() ? { label: c.label.trim() } : {}),
     })
   })
-  return cues.length > 0 ? { cues } : undefined
+  return overlays.length > 0 ? overlays : undefined
 }
 
 /** 收拢一个 scene 上所有 v9 玩法字段（仅产出已给出的），供 normalizeScenario 展开。 */
 function normalizeSceneGameplay(s: ParsedScene, sceneId: string): Partial<Scene> {
   const out: Partial<Scene> = {}
-  if (s.kind === 'story' || s.kind === 'battle' || s.kind === 'qte' || s.kind === 'choice') {
-    out.kind = s.kind
-  }
   if (s.mediaPlayMode === 'once' || s.mediaPlayMode === 'loop') out.mediaPlayMode = s.mediaPlayMode
+
+  // 交互形态 presence 化：boss > qte > calc > choice 互斥择一。
   const boss = normalizeBoss(s.boss, sceneId)
+  const qte = normalizeQte(s.qte, sceneId)
+  const calcType = typeof s.calcType === 'string' ? s.calcType : undefined
+  const choice = normalizeChoice(s.decision)
   if (boss) out.boss = boss
-  const decision = normalizeDecision(s.decision)
-  if (decision) out.decision = decision
+  else if (qte) out.qte = qte
+  else if (calcType) out.calc = { calcType } as Scene['calc']
+  else if (choice) out.choice = choice
+
+  // 与交互形态正交的字段
   const hotspots = normalizeHotspots(s.hotspots, sceneId)
   if (hotspots) out.hotspots = hotspots
-  const performance = normalizePerformance(s.performance, sceneId)
-  if (performance) out.performance = performance
+  const overlays = normalizeOverlays(s.performance, sceneId)
+  if (overlays) out.overlays = overlays
   if (s.returnsToCaller === true) out.returnsToCaller = true
   return out
 }

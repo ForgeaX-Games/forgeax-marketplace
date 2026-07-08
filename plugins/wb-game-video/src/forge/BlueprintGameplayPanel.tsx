@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { useScenarioStore } from '../scenario/scenarioStore'
-import { VIDEO_CLIPS, UI_SCHEMES, getVideoClip } from '../scenario/gameAssetCatalog'
+import { VIDEO_CLIPS, UI_SCHEMES, getVideoClip, builtinMediaIdForClip, clipIdFromMediaRef } from '../scenario/gameAssetCatalog'
 import { CALC_TYPE_CATALOG, calcTypeMethod, type CalcTypeId } from '../scenario/calcTypes'
 import {
   branchOutcomeLabels,
@@ -11,8 +11,9 @@ import {
 import { useShellStore } from '../shell/shellStore'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { BranchGateEditor } from '../editor/numeric/NumericEditors'
-import type { BossRound, Branch, DecisionSpec, Effect, EntityStatEffect, GameVariable, Scenario, Scene, VarEffect } from '../scenario/types'
-import type { DecisionOptType, DecisionFireAt, HudPreset, MediaPlayMode, QteKind } from '../scenario/gameplayTypes'
+import { resolveInteraction } from '../player/choiceTiming'
+import type { BossRound, Branch, ChoiceSpec, Effect, EntityStatEffect, GameVariable, QTESpec, Scenario, Scene, VarEffect } from '../scenario/types'
+import type { ChoiceUi, DecisionFireAt, HudPreset, MediaPlayMode, QteKind, QteUi } from '../scenario/gameplayTypes'
 
 /**
  * BlueprintGameplayPanel —— 蓝图视图右侧「玩法字段」可视化编辑面板(v9 M8)。
@@ -34,8 +35,27 @@ import type { DecisionOptType, DecisionFireAt, HudPreset, MediaPlayMode, QteKind
  * 全部经 scenarioStore.updateScene 落同一 Scenario(SSOT)——蓝图、剧情树、运行时
  * 立刻同步。缺省字段不写，保持旧剧本零回归。
  */
-function isTimedDecision(decision: DecisionSpec | undefined): boolean {
-  return decision?.optType === 'timed' || decision?.mode === 'timed' || decision?.mode === 'wait'
+function isTimedChoice(choice: ChoiceSpec | undefined): boolean {
+  return choice?.timed === true
+}
+
+/** 交互类型下拉的四档值 —— 由 presence 派生（不落库）。 */
+type InteractionOpt = 'none' | 'static' | 'timed' | 'qte'
+
+function newQteSpec(): QTESpec {
+  return {
+    cues: [],
+    tolerance: { perfect: 80, great: 160, good: 280 },
+    score: { perfect: 100, great: 60, good: 25, miss: -30 },
+  }
+}
+
+/** 读某组 effects 里 hp entityStat 的伤害绝对值（0 = 无）。 */
+function hpEffectValue(effects: Effect[] | undefined): number {
+  const hp = (effects ?? []).find(
+    (e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp',
+  )
+  return hp ? Math.abs(hp.value) : 0
 }
 
 function firstEntityId(scenario: Scenario, kind: 'boss' | 'player'): string {
@@ -69,8 +89,16 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
   if (!scene) return null
   const activeScene = scene
 
-  const panelKind = scene.boss ? 'battle' : scene.qte?.cues.length ? 'qte' : scene.decision ? 'choice' : 'story'
-  const clip = getVideoClip(scene.clipId)
+  const interaction = resolveInteraction(scene)
+  const panelKind =
+    interaction.type === 'boss'
+      ? 'battle'
+      : interaction.type === 'qte'
+        ? 'qte'
+        : interaction.type === 'choice'
+          ? 'choice'
+          : 'story'
+  const clip = getVideoClip(clipIdFromMediaRef(scene.media?.ref))
   const sceneIds = Object.keys(scenario.scenes)
   const entityEntries = Object.entries(scenario.entities ?? {})
   const bossEntities = entityEntries.filter(([, e]) => e.kind === 'boss')
@@ -80,32 +108,67 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
   const items = Object.values(scenario.items ?? {})
   const choiceBranches = scene.branches.filter((b) => b.kind === 'choice')
   const qteBranches = scene.branches.filter((b) => b.kind === 'qte_pass' || b.kind === 'qte_fail')
-  const isCalcNode = Boolean(scene.calcType)
+  const isCalcNode = Boolean(scene.calc)
+  const isQteNode = interaction.type === 'qte'
   const gateBranches = isCalcNode
     ? scene.branches.filter((b) => b.kind !== 'auto')
-    : scene.decision?.optType === 'timed_qte'
+    : isQteNode
       ? qteBranches
       : choiceBranches
   const qteCues = scene.qte?.cues ?? []
   const battleParryMultiCue =
-    scene.decision?.optType === 'timed_qte' &&
-    scene.ext?.qteUi === 'battleParry' &&
-    qteCues.length > 1
-  const timedDecision = isTimedDecision(scene.decision)
+    isQteNode && scene.qte?.ui === 'battleParry' && qteCues.length > 1
+  const timedChoice = isTimedChoice(scene.choice)
   const sceneTitles = scenario.scenes
 
-  function setDecision(patch: Partial<DecisionSpec> | null): void {
-    if (patch === null) {
+  // 当前交互形态投影成下拉四档值（presence 派生）。
+  const interactionOpt: InteractionOpt =
+    interaction.type === 'qte'
+      ? 'qte'
+      : interaction.type === 'choice'
+        ? scene.choice?.timed
+          ? 'timed'
+          : 'static'
+        : 'none'
+
+  /** 切换交互形态 —— 互斥写入 qte / choice（boss/calc 由各自区块管理）。 */
+  function setInteractionOpt(v: InteractionOpt): void {
+    if (v === 'none') {
       updateScene(selectedSceneId, {
-        decision: undefined,
+        choice: undefined,
+        qte: undefined,
         branches: activeScene.branches.map((branch) =>
           branch.kind === 'choice' ? { ...branch, kind: 'auto' } : branch,
         ),
       })
       return
     }
-    const cur: DecisionSpec = activeScene.decision ?? { mode: 'pause' }
-    updateScene(selectedSceneId, { decision: { ...cur, ...patch } })
+    if (v === 'qte') {
+      updateScene(selectedSceneId, {
+        qte: activeScene.qte ?? newQteSpec(),
+        choice: undefined,
+        calc: undefined,
+      })
+      return
+    }
+    const cur: ChoiceSpec = activeScene.choice ?? { prompt: '请选择' }
+    updateScene(selectedSceneId, {
+      choice: { ...cur, timed: v === 'timed' },
+      qte: undefined,
+      calc: undefined,
+    })
+  }
+
+  /** 局部更新 choice（仅当已是 choice 形态时）。 */
+  function setChoice(patch: Partial<ChoiceSpec>): void {
+    const cur: ChoiceSpec = activeScene.choice ?? {}
+    updateScene(selectedSceneId, { choice: { ...cur, ...patch } })
+  }
+
+  /** 局部更新 qte（仅当已是 qte 形态时）。 */
+  function setQte(patch: Partial<QTESpec>): void {
+    const cur: QTESpec = activeScene.qte ?? newQteSpec()
+    updateScene(selectedSceneId, { qte: { ...cur, ...patch } })
   }
 
   function setRounds(rounds: BossRound[]): void {
@@ -113,18 +176,12 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
     updateScene(selectedSceneId, { boss: { ...activeScene.boss, rounds } })
   }
 
-  function setChoiceUi(choiceUi: 'default' | 'battleSkillBar' | 'inkYingMo'): void {
-    const nextExt: Record<string, unknown> = { ...(activeScene.ext ?? {}) }
-    if (choiceUi === 'default') delete nextExt.choiceUi
-    else nextExt.choiceUi = choiceUi
-    updateScene(selectedSceneId, { ext: Object.keys(nextExt).length > 0 ? nextExt : undefined })
+  function setChoiceUi(choiceUi: ChoiceUi): void {
+    setChoice({ ui: choiceUi === 'default' ? undefined : choiceUi })
   }
 
-  function setQteUi(qteUi: 'default' | 'battleParry' | 'inkKou'): void {
-    const nextExt: Record<string, unknown> = { ...(activeScene.ext ?? {}) }
-    if (qteUi === 'default') delete nextExt.qteUi
-    else nextExt.qteUi = qteUi
-    updateScene(selectedSceneId, { ext: Object.keys(nextExt).length > 0 ? nextExt : undefined })
+  function setQteUi(qteUi: QteUi): void {
+    setQte({ ui: qteUi === 'default' ? undefined : qteUi })
   }
 
   function defaultChoiceTarget(): string {
@@ -134,8 +191,9 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
   function addChoiceBranch(): void {
     const id = `choice-${Date.now().toString(36)}`
     updateScene(selectedSceneId, {
-      decision: activeScene.decision ?? { optType: 'static', mode: 'pause', prompt: '请选择' },
-      kind: activeScene.kind === 'choice' ? activeScene.kind : 'choice',
+      choice: activeScene.choice ?? { prompt: '请选择' },
+      qte: undefined,
+      calc: undefined,
       branches: [
         ...activeScene.branches,
         {
@@ -153,8 +211,7 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
     const hasChoice = branches.some((b) => b.kind === 'choice')
     updateScene(selectedSceneId, {
       branches,
-      decision: hasChoice ? activeScene.decision : undefined,
-      kind: hasChoice && activeScene.kind !== 'choice' ? 'choice' : activeScene.kind,
+      choice: hasChoice ? activeScene.choice : undefined,
     })
   }
 
@@ -186,12 +243,13 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
           <span className="ks-bgp-fk" title="绑定到该节点的视频片段；无则表示纯逻辑或占位节点。">演出编号</span>
           <select
             className="ks-bgp-input"
-            value={scene.clipId ?? ''}
+            value={clipIdFromMediaRef(scene.media?.ref) ?? ''}
             onChange={(e) => {
               const clipId = e.target.value || undefined
               const picked = clipId ? getVideoClip(clipId) : undefined
+              const ref = clipId ? builtinMediaIdForClip(clipId) : undefined
               updateScene(selectedSceneId, {
-                clipId,
+                media: ref ? { kind: 'VIDEO', ref } : { kind: 'PLACEHOLDER' },
                 durationMs: picked?.durMs ?? scene.durationMs,
               })
             }}
@@ -202,9 +260,6 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
                 {c.label}
               </option>
             ))}
-            {scene.clipId && !getVideoClip(scene.clipId) && (
-              <option value={scene.clipId}>{scene.clipId}（自定义）</option>
-            )}
           </select>
         </div>
         <div className="ks-bgp-field">
@@ -271,7 +326,10 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
         clip={clip}
         durationMs={scene.durationMs}
         onCalcType={(calcType) =>
-          updateScene(selectedSceneId, { calcType: calcType || undefined })
+          updateScene(selectedSceneId, {
+            calc: calcType ? { calcType } : undefined,
+            ...(calcType ? { qte: undefined, choice: undefined } : {}),
+          })
         }
         onOpenVideo={() => useShellStore.getState().setForgeView('video')}
       />
@@ -279,10 +337,10 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
       {/* 选项 —— 与「计算类型=无」互斥；选中计算类型后本组自动隐藏 */}
       {!isCalcNode && (
       <section className="ks-bgp-sec">
-        <label className="ks-bgp-lbl" title="配置该节点是否弹出选项、倒计时或限时 QTE；实际去向由 choice / qte 分支连线决定。">
-          {scene.decision?.optType === 'timed_qte' ? 'QTE 交互' : '选项'}
+        <label className="ks-bgp-lbl" title="配置该节点是否弹出选项、倒计时或 QTE；实际去向由 choice / qte 分支连线决定。">
+          {isQteNode ? 'QTE 交互' : '选项'}
         </label>
-        {scene.decision && scene.decision.optType !== 'none' && scene.decision.optType !== 'timed_qte' && (
+        {interaction.type === 'choice' && (
           <p className="ks-bgp-hint">
             窗口时间、提示文案、清单/热区呈现、热区坐标 → 在视频 Tab 时间轴选中「选项」控件编辑。
           </p>
@@ -291,28 +349,17 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
           <span className="ks-bgp-fk">类型</span>
           <select
             className="ks-bgp-input"
-            value={scene.decision?.optType ?? (scene.decision?.mode === 'timed' || scene.decision?.mode === 'wait' ? 'timed' : scene.decision ? 'static' : 'none')}
-            onChange={(e) => {
-              const v = e.target.value
-              if (v === 'none') {
-                setDecision(null)
-                return
-              }
-              const optType = v as DecisionOptType
-              setDecision({
-                optType,
-                mode: optType === 'timed' ? 'wait' : optType === 'static' ? 'pause' : undefined,
-              })
-            }}
+            value={interactionOpt}
+            onChange={(e) => setInteractionOpt(e.target.value as InteractionOpt)}
           >
             <option value="none">无（场景结束出选项）</option>
             <option value="static">不限时选项</option>
             <option value="timed">限时选项</option>
-            <option value="timed_qte">限时 QTE</option>
+            <option value="qte">QTE</option>
           </select>
         </div>
 
-        {scene.decision?.optType === 'timed_qte' ? (
+        {isQteNode ? (
           <>
             <p className="ks-bgp-hint">
               视频 Tab：「QTE 按键点」轨编辑各次按键的时刻/坐标；「QTE 窗口」轨编辑整段生效时段与超时（不是选项清单）。
@@ -321,7 +368,7 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
               <p className="ks-bgp-hint ks-bgp-hint-warn">
                 已配置 {qteCues.length} 个按键点：「战斗防反按键」仅支持单 cue，试玩将自动改用默认 QTE 圆点（与时间轴坐标一致）。
               </p>
-            ) : scene.ext?.qteUi === 'battleParry' && qteCues.length === 1 ? (
+            ) : scene.qte?.ui === 'battleParry' && qteCues.length === 1 ? (
               <p className="ks-bgp-hint">
                 试玩为 A/B 墨章防反 UI，圆点位置与时间轴 cue 坐标无关；要按坐标试玩请改「默认 QTE 按钮」。
               </p>
@@ -330,8 +377,8 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
               <span className="ks-bgp-fk">QTE 类型</span>
               <select
                 className="ks-bgp-input"
-                value={scene.decision.qteKind ?? 'timing'}
-                onChange={(e) => setDecision({ qteKind: e.target.value as QteKind })}
+                value={scene.qte?.template ?? 'timing'}
+                onChange={(e) => setQte({ template: e.target.value as QteKind })}
               >
                 <option value="parry">防反 QTE</option>
                 <option value="timing">精准时点</option>
@@ -344,8 +391,8 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
               <span className="ks-bgp-fk">QTE UI</span>
               <select
                 className="ks-bgp-input"
-                value={(scene.ext?.qteUi as string | undefined) ?? 'default'}
-                onChange={(e) => setQteUi(e.target.value as 'default' | 'battleParry' | 'inkKou')}
+                value={scene.qte?.ui ?? 'default'}
+                onChange={(e) => setQteUi(e.target.value as QteUi)}
               >
                 <option value="default">默认 QTE 按钮</option>
                 <option value="battleParry">战斗防反按键</option>
@@ -360,15 +407,13 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
                 min={500}
                 step={500}
                 placeholder="超时 ms"
-                value={scene.decision.timeoutMs ?? scene.qte?.timeoutMs ?? ''}
+                value={scene.qte?.window?.timeoutMs ?? ''}
                 onChange={(e) => {
                   const timeoutMs = e.target.value ? Number(e.target.value) : undefined
-                  setDecision({ timeoutMs })
-                  if (scene.qte) {
-                    updateScene(selectedSceneId, {
-                      qte: { ...scene.qte, timeoutMs },
-                    })
-                  }
+                  const win = { ...(scene.qte?.window ?? {}) }
+                  if (timeoutMs == null) delete win.timeoutMs
+                  else win.timeoutMs = timeoutMs
+                  setQte({ window: Object.keys(win).length > 0 ? win : undefined })
                 }}
               />
             </div>
@@ -397,21 +442,21 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
               <p className="ks-bgp-hint">尚未配置按键点 —— 绑定视频后在时间轴添加 QTE 控件。</p>
             )}
           </>
-        ) : scene.decision ? (
+        ) : interaction.type === 'choice' ? (
           <>
             <div className="ks-bgp-field">
               <span className="ks-bgp-fk">按钮样式</span>
               <select
                 className="ks-bgp-input"
-                value={(scene.ext?.choiceUi as string | undefined) ?? 'default'}
-                onChange={(e) => setChoiceUi(e.target.value as 'default' | 'battleSkillBar' | 'inkYingMo')}
+                value={scene.choice?.ui ?? 'default'}
+                onChange={(e) => setChoiceUi(e.target.value as ChoiceUi)}
               >
                 <option value="default">默认选择卡片</option>
                 <option value="battleSkillBar">战斗技能栏</option>
                 <option value="inkYingMo">应默 · 国风</option>
               </select>
             </div>
-            {timedDecision && (
+            {timedChoice && (
               <>
                 <div className="ks-bgp-field">
                   <span className="ks-bgp-fk">倒计时</span>
@@ -421,19 +466,23 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
                     min={500}
                     step={500}
                     placeholder="倒计时 ms"
-                    value={scene.decision.timeoutMs ?? ''}
-                    onChange={(e) =>
-                      setDecision({ timeoutMs: e.target.value ? Number(e.target.value) : undefined })
-                    }
+                    value={scene.choice?.window?.timeoutMs ?? ''}
+                    onChange={(e) => {
+                      const timeoutMs = e.target.value ? Number(e.target.value) : undefined
+                      const win = { ...(scene.choice?.window ?? {}) }
+                      if (timeoutMs == null) delete win.timeoutMs
+                      else win.timeoutMs = timeoutMs
+                      setChoice({ window: Object.keys(win).length > 0 ? win : undefined })
+                    }}
                   />
                 </div>
                 <div className="ks-bgp-field">
                   <span className="ks-bgp-fk">超时默认</span>
                   <select
                     className="ks-bgp-input"
-                    value={scene.decision.defaultBranchId ?? ''}
+                    value={scene.choice?.defaultBranchId ?? ''}
                     onChange={(e) =>
-                      setDecision({ defaultBranchId: e.target.value || undefined })
+                      setChoice({ defaultBranchId: e.target.value || undefined })
                     }
                   >
                     <option value="">超时默认走第一项</option>
@@ -442,10 +491,10 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
                         {b.label ?? sceneTitles[b.targetSceneId]?.title ?? b.targetSceneId}
                       </option>
                     ))}
-                    {scene.decision.defaultBranchId &&
-                      !choiceBranches.some((b) => b.id === scene.decision?.defaultBranchId) && (
-                        <option value={scene.decision.defaultBranchId}>
-                          {scene.decision.defaultBranchId}
+                    {scene.choice?.defaultBranchId &&
+                      !choiceBranches.some((b) => b.id === scene.choice?.defaultBranchId) && (
+                        <option value={scene.choice.defaultBranchId}>
+                          {scene.choice.defaultBranchId}
                         </option>
                       )}
                   </select>
@@ -456,8 +505,8 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
               <span className="ks-bgp-fk">跳转时点</span>
               <select
                 className="ks-bgp-input"
-                value={scene.decision.fireAt ?? 'on_pick'}
-                onChange={(e) => setDecision({ fireAt: e.target.value as DecisionFireAt })}
+                value={scene.choice?.fireAt ?? 'on_pick'}
+                onChange={(e) => setChoice({ fireAt: e.target.value as DecisionFireAt })}
               >
                 <option value="on_pick">选完立即跳转</option>
                 <option value="video_end">等视频结束再跳转</option>
@@ -471,7 +520,7 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
       <section className="ks-bgp-sec">
         <div className="ks-bgp-vidhead">
           <label className="ks-bgp-lbl" title="每个选项/出边的条件、跳转与状态变化。">分支</label>
-          {!isCalcNode && scene.decision?.optType !== 'timed_qte' && (
+          {!isCalcNode && !isQteNode && (
             <button type="button" className="ks-bgp-linkbtn" onClick={addChoiceBranch}>
               + 添加选项
             </button>
@@ -481,7 +530,7 @@ export function BlueprintGameplayPanel({ onCollapse }: { onCollapse?: () => void
           <p className="ks-bgp-hint">
             {isCalcNode
               ? '当前计算节点没有可编辑的出向分支。'
-              : scene.decision?.optType === 'timed_qte'
+              : isQteNode
                 ? '当前节点没有 QTE 通过/失败分支（demo 攻击前摇应有 qte_pass ×2 + qte_fail）。'
                 : '当前节点没有 choice 分支。'}
           </p>
@@ -774,11 +823,12 @@ function CalcSection({
 }) {
   const outcomes = branchOutcomeLabels(scene)
   const settlements = listPerformanceSettlements(scene)
-  const method = calcTypeMethod(scene.calcType)
+  const calcType = scene.calc?.calcType
+  const method = calcTypeMethod(calcType)
   const totalMs = clip?.durMs ?? durationMs
   const timelinePct = (atMs: number) =>
     totalMs > 0 ? Math.max(0, Math.min(100, (atMs / totalMs) * 100)) : 0
-  const settlementLabel = scene.calcType ? '结算飘字' : '演出飘字'
+  const settlementLabel = calcType ? '结算飘字' : '演出飘字'
 
   return (
     <section className="ks-bgp-sec">
@@ -789,7 +839,7 @@ function CalcSection({
         <span className="ks-bgp-fk">计算类型</span>
         <select
           className="ks-bgp-input"
-          value={scene.calcType ?? ''}
+          value={calcType ?? ''}
           title={method}
           onChange={(e) => onCalcType((e.target.value || '') as CalcTypeId | '')}
         >
@@ -799,12 +849,12 @@ function CalcSection({
               {entry.id}
             </option>
           ))}
-          {scene.calcType && !CALC_TYPE_CATALOG.some((c) => c.id === scene.calcType) && (
-            <option value={scene.calcType}>{scene.calcType}</option>
+          {calcType && !CALC_TYPE_CATALOG.some((c) => c.id === calcType) && (
+            <option value={calcType}>{calcType}</option>
           )}
         </select>
       </div>
-      {scene.calcType && (
+      {calcType && (
         <div className="ks-bgp-field">
           <span className="ks-bgp-fk">判定结果</span>
           <span className={`ks-bgp-fv${outcomes.length >= 2 ? '' : ' ks-bgp-fv-muted'}`}>
@@ -812,9 +862,9 @@ function CalcSection({
           </span>
         </div>
       )}
-      {(scene.calcType || settlements.length > 0) && (
+      {(calcType || settlements.length > 0) && (
         <>
-          {!scene.calcType && settlements.length > 0 ? (
+          {!calcType && settlements.length > 0 ? (
             <p className="ks-bgp-hint">纯表现飘字，不参与计算分支；时刻与文案在视频 Tab 时间轴编辑。</p>
           ) : null}
           <div className="ks-bgp-field ks-bgp-field--stack">

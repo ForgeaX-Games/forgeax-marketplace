@@ -83,15 +83,16 @@ describe('combatRules', () => {
     expect(rt.state.visited.has('a_my')).toBe(false)
   })
 
-  it('meditate gains (qi + heal) both settle on the fuzhu-heal cue', () => {
+  it('meditate gains (qi + heal) both settle on the fuzhu-heal overlay', () => {
     const scenario = getDemoScenario()
     const fuzhu = scenario.scenes.fuzhu
-    // 气力+2 与回血+30 挂在演出时间轴的「回气回血结算」cue 上，到 atMs 才结算。
-    const cue = fuzhu?.performance?.cues.find((c) => c.id === 'fuzhu-heal')
-    expect(cue?.atMs).toBe(2000)
-    const qi = cue?.effects.find((e) => e.kind === 'var' && e.varId === 'qi')
+    // 气力+2 与回血+30 挂在「回气回血结算」飘字（overlay）的 settlement 上，到 startMs 才结算。
+    const ov = fuzhu?.overlays?.find((o) => o.id === 'fuzhu-heal')
+    expect(ov?.startMs).toBe(2000)
+    const effects = ov?.settlement?.effects ?? []
+    const qi = effects.find((e) => e.kind === 'var' && e.varId === 'qi')
     expect(qi).toMatchObject({ kind: 'var', op: 'add', value: 2 })
-    const heal = cue?.effects.find(
+    const heal = effects.find(
       (e) => e.kind === 'entityStat' && e.entityId === 'ent-player' && e.stat === 'hp',
     )
     expect(heal).toMatchObject({ kind: 'entityStat', op: 'add', value: 30 })
@@ -102,11 +103,11 @@ describe('combatRules', () => {
     expect(branch?.effects ?? []).toHaveLength(0)
   })
 
-  it('applyCombatRules leaves the meditate cue gains intact', () => {
-    // 冥想脱离规则读写：applyCombatRules 后 fuzhu-heal cue 的 qi/heal 不被覆盖或清除。
+  it('applyCombatRules leaves the meditate overlay gains intact', () => {
+    // 冥想脱离规则读写：applyCombatRules 后 fuzhu-heal overlay 的 qi/heal 不被覆盖或清除。
     const scenario = applyCombatRules(getDemoScenario(), { qiMax: 7 })
-    const cue = scenario.scenes.fuzhu?.performance?.cues.find((c) => c.id === 'fuzhu-heal')
-    const gains = cue?.effects ?? []
+    const ov = scenario.scenes.fuzhu?.overlays?.find((o) => o.id === 'fuzhu-heal')
+    const gains = ov?.settlement?.effects ?? []
     expect(gains.find((e) => e.kind === 'var' && e.varId === 'qi')).toMatchObject({ value: 2 })
     expect(gains.find((e) => e.kind === 'entityStat' && e.stat === 'hp')).toMatchObject({ value: 30 })
     expect(scenario.scenes.wait?.branches.find((b) => b.id === 'my-s3')?.effects ?? []).toHaveLength(0)
@@ -129,7 +130,8 @@ describe('combatRules', () => {
     expect(heavy.condition?.all).toEqual([{ type: 'var', varId: 'qi', op: 'gte', value: 3 }])
     expect(heavy.effects).toEqual([{ id: 'qi-add-3', kind: 'var', varId: 'qi', op: 'add', value: -3 }])
     expect(ult.condition?.all).toEqual([{ type: 'var', varId: 'qi', op: 'gte', value: 7 }])
-    expect(scenario.scenes.ult?.performance?.cues[0]?.effects[0]).toMatchObject({
+    const ultSettled = scenario.scenes.ult?.overlays?.find((o) => o.settlement !== undefined)
+    expect(ultSettled?.settlement?.effects[0]).toMatchObject({
       kind: 'entityStat',
       entityId: 'ent-boss',
       stat: 'hp',

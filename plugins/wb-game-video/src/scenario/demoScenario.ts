@@ -1,7 +1,12 @@
-import type { Effect, MediaRef, PerformanceCue, Scenario, Scene } from './types'
+import type { CalcTypeId } from './calcTypes'
+import { builtinMediaIdForClip } from './gameAssetCatalog'
+import type { Effect, MediaRef, OverlayClip, Scenario, Scene } from './types'
 // `game-nodia-fighting` 工程磁盘上的 `game-video/scenarios.json` 的一次性冻结拷贝
 // （整份 { version, activeId, items } DB，原样复制）。
 import nodiaScenariosDb from './nodiaBlueprintDemo.json'
+
+/** demo 作者向的 scene 附加字段 —— calcType 是语义糖，bpScene 转成 calc.presence。 */
+type DemoExtra = Partial<Scene> & { calcType?: CalcTypeId }
 
 /** bundled demo 的固定 id —— 单一真源，供持久化层判定"这是内置 demo，不得抢占 activeId"。 */
 export const BUNDLED_DEMO_ID = 'demo-001'
@@ -39,31 +44,35 @@ function placeholderMedia(): MediaRef {
 }
 
 /**
- * @param clipId 真实片段 id；`null` = 无演出（纯逻辑，不写 clipId）；省略 = 默认 idle。
+ * @param clipId 真实片段 id；`null` = 无演出（纯逻辑，media=PLACEHOLDER）；省略 = 默认 idle。
+ *   演出来源 SSOT 是 `scene.media.ref`（内置片段以 `m-builtin-<clipId>` 落入 mediaStore）。
  */
 function bpScene(
   id: string,
   title: string,
   clipId: string | null | undefined,
   pos: { x: number; y: number },
-  extra?: Partial<Scene>,
+  extra?: DemoExtra,
 ): Scene {
-  const { clipId: _ignoredClip, ...restExtra } = extra ?? {}
+  const { calcType, ...restExtra } = extra ?? {}
   const resolvedClipId =
     clipId === null || clipId === ''
       ? undefined
       : clipId ?? 'vd-wcc-idle'
+  const resolvedMedia: MediaRef = resolvedClipId
+    ? { kind: 'VIDEO', ref: builtinMediaIdForClip(resolvedClipId) ?? `m-builtin-${resolvedClipId}` }
+    : placeholderMedia()
   return {
     id,
     title,
-    media: placeholderMedia(),
+    media: resolvedMedia,
     durationMs: restExtra.durationMs ?? 3200,
     pos,
     dialogue: restExtra.dialogue ?? [],
     branches: restExtra.branches ?? [],
     hudPreset: restExtra.hudPreset ?? 'battle',
     ...restExtra,
-    ...(resolvedClipId ? { clipId: resolvedClipId } : {}),
+    ...(calcType ? { calc: { calcType } } : {}),
   }
 }
 
@@ -83,12 +92,37 @@ function hpEffect(id: string, entityId: string, value: number): Effect {
   return { id, kind: 'entityStat', entityId, stat: 'hp', op: 'add', value }
 }
 
-function bossDamageCue(id: string, atMs: number, value: number, label: string): PerformanceCue {
-  return { id, atMs, label, effects: [hpEffect(`${id}-hp`, 'ent-boss', -value)] }
+/** 结算飘字（伤害数字）—— 可见 numeric 文本 overlay + floatUp 入场 + hp 结算。 */
+function bossDamageCue(id: string, atMs: number, value: number, label: string): OverlayClip {
+  return {
+    id,
+    kind: 'text',
+    content: `-${value}`,
+    startMs: atMs,
+    endMs: atMs + 900,
+    x: 0.5,
+    y: 0.4,
+    enter: 'floatUp',
+    label,
+    style: { color: '#ff5a5a', strokeColor: '#2a0000', strokeWidth: 3, fontWeight: 900, fontSizePct: 9 },
+    settlement: { effects: [hpEffect(`${id}-hp`, 'ent-boss', -value)] },
+  }
 }
 
-function playerDamageCue(id: string, atMs: number, value: number, label: string): PerformanceCue {
-  return { id, atMs, label, effects: [hpEffect(`${id}-hp`, 'ent-player', -value)] }
+function playerDamageCue(id: string, atMs: number, value: number, label: string): OverlayClip {
+  return {
+    id,
+    kind: 'text',
+    content: `-${value}`,
+    startMs: atMs,
+    endMs: atMs + 900,
+    x: 0.5,
+    y: 0.6,
+    enter: 'floatUp',
+    label,
+    style: { color: '#ffd23f', strokeColor: '#2a1a00', strokeWidth: 3, fontWeight: 900, fontSizePct: 9 },
+    settlement: { effects: [hpEffect(`${id}-hp`, 'ent-player', -value)] },
+  }
 }
 
 export function getBlueprintCombatDemoScenario(): Scenario {
@@ -207,9 +241,7 @@ export function getBlueprintCombatDemoScenario(): Scenario {
   add(bpScene('wait', '战斗待机', 'vd-wcc-idle', { x: 60, y: 490 }, {
     mediaPlayMode: 'loop',
     durationMs: 8000,
-    kind: 'choice',
-    decision: { optType: 'static', prompt: '选择技能', windowStartMs: 1000, fireAt: 'on_pick' },
-    ext: { choiceUi: 'battleSkillBar' },
+    choice: { prompt: '选择技能', window: { startMs: 1000 }, fireAt: 'on_pick', ui: 'battleSkillBar' },
     background: '我方回合待机循环（idle）：弹出战斗界面，呈现 4 个技能（轻攻击 / 重攻击 / 冥想 / 灭世），按当前气力 / 冷却可用性灰显不可选项，等待空藏选择（防反不在此选择，改由敌方进攻时的「防反」反应触发）。',
     branches: [
       {
@@ -246,21 +278,19 @@ export function getBlueprintCombatDemoScenario(): Scenario {
     calcType: '轻攻击',
     durationMs: 5000,
     background: '变招判定为普通：欺身前扑挥击，命中迸出爪痕 / 刀痕与受击顿帧（威力1.0·命中100%·不可破防）。',
-    performance: { cues: [bossDamageCue('pu-hit', 1000, 80, '命中结算 威力1.0')] },
+    overlays: [bossDamageCue('pu-hit', 1000, 80, '命中结算 威力1.0')],
     branches: [auto('pu-done', 'my-done', 'Out')],
   }))
   add(bpScene('pu2', '轻攻击·变招', 'vd-wcc-pugong2', { x: 700, y: 220 }, {
     calcType: '轻攻击·变招',
     durationMs: 5000,
     background: '变招判定触发：本次以轻攻击变招（反手补击 / 连段）打出，沿演出分 4 次逐次递增结算（威力 0.25 → 0.3 → 0.35 → 0.4）。',
-    performance: {
-      cues: [
-        bossDamageCue('pu2-1', 600, 20, '第1段 威力0.25'),
-        bossDamageCue('pu2-2', 800, 24, '第2段 威力0.3'),
-        bossDamageCue('pu2-3', 1300, 28, '第3段 威力0.35'),
-        bossDamageCue('pu2-4', 1800, 32, '第4段 威力0.4'),
-      ] as PerformanceCue[],
-    },
+    overlays: [
+      bossDamageCue('pu2-1', 600, 20, '第1段 威力0.25'),
+      bossDamageCue('pu2-2', 800, 24, '第2段 威力0.3'),
+      bossDamageCue('pu2-3', 1300, 28, '第3段 威力0.35'),
+      bossDamageCue('pu2-4', 1800, 32, '第4段 威力0.4'),
+    ],
     branches: [auto('pu2-done', 'my-done', 'Out')],
   }))
   add(bpScene('zjudge', '变招判定', null, { x: 380, y: 490 }, {
@@ -276,47 +306,49 @@ export function getBlueprintCombatDemoScenario(): Scenario {
     calcType: '重攻击',
     durationMs: 6000,
     background: '变招判定为普通：蓄力后一记沉重扑砸 / 重劈，单组大字伤害弹出（威力1.8·命中95%·暴击+5%·破防）。',
-    performance: { cues: [bossDamageCue('zhong-hit', 1700, 144, '命中结算 威力1.8')] },
+    overlays: [bossDamageCue('zhong-hit', 1700, 144, '命中结算 威力1.8')],
     branches: [auto('zhong-done', 'my-done', 'Out')],
   }))
   add(bpScene('z2', '重攻击·变招', 'vd-wcc-zhong2', { x: 700, y: 580 }, {
     calcType: '重攻击·变招',
     durationMs: 6000,
     background: '变招判定触发：本次以重击变招（延迟 / 二段变化）打出，沿演出分 2 次逐次递增结算（威力 1.0 → 1.4）。',
-    performance: {
-      cues: [
-        bossDamageCue('z2-1', 2500, 80, '第1段 威力1.0'),
-        bossDamageCue('z2-2', 3700, 112, '第2段 威力1.4'),
-      ] as PerformanceCue[],
-    },
+    overlays: [
+      bossDamageCue('z2-1', 2500, 80, '第1段 威力1.0'),
+      bossDamageCue('z2-2', 3700, 112, '第2段 威力1.4'),
+    ],
     branches: [auto('z2-done', 'my-done', 'Out')],
   }))
   add(bpScene('fuzhu', '冥想', 'vd-wcc-huiqi', { x: 700, y: 760 }, {
     calcType: '冥想',
     durationMs: 5000,
     background: '空藏冥想调息：回复气力+2、回血 30、解除异常状态（不造成伤害），用后进入 3 回合冷却。',
-    // 冥想的收益（气力+2、回血+30）挂在演出时间轴的「回气回血结算」cue 上，
-    // 到 atMs 才结算（比进场瞬间更贴合演出节奏），飘字/血条走现成 cue 结算路径。
-    performance: {
-      cues: [
-        {
-          id: 'fuzhu-heal',
-          atMs: 2000,
-          label: '回气回血结算',
+    // 冥想收益（气力+2、回血+30）挂在结算飘字上，到 startMs 才结算——
+    // content 为空即「只有结算、无可见飘字」的纯逻辑 cue。
+    overlays: [
+      {
+        id: 'fuzhu-heal',
+        kind: 'text',
+        content: '',
+        startMs: 2000,
+        x: 0.5,
+        y: 0.5,
+        label: '回气回血结算',
+        settlement: {
           effects: [
             varEffect('fuzhu-qi', 'qi', 'add', 2),
             hpEffect('fuzhu-heal-hp', 'ent-player', 30),
           ],
         },
-      ],
-    },
+      },
+    ],
     branches: [auto('fuzhu-done', 'my-done', 'Out')],
   }))
   add(bpScene('ult', '灭世', 'vd-wcc-dazhao', { x: 700, y: 940 }, {
     calcType: '灭世',
     durationMs: 12000,
     background: '气力满（5）方可释放，释放清空气力；招牌绝技长前摇蓄力后全力爆发（威力3.0·命中100%）。',
-    performance: { cues: [bossDamageCue('ult-hit', 7000, 240, '命中结算 威力3.0')] },
+    overlays: [bossDamageCue('ult-hit', 7000, 240, '命中结算 威力3.0')],
     branches: [auto('ult-done', 'my-done', 'Out')],
   }))
   add(bpScene('my-done', '行动完毕', null, { x: 1020, y: 490 }, {
@@ -334,15 +366,14 @@ export function getBlueprintCombatDemoScenario(): Scenario {
   }))
   add(bpScene('tele', '攻击前摇', 'vd-wcc-qianyao', { x: 320, y: 1380 }, {
     calcType: '防反判定',
-    kind: 'qte',
     durationMs: 4000,
-    decision: { optType: 'timed_qte', qteKind: 'parry', timeoutMs: 2600, prompt: '防反 QTE · 按 A/B/C 选择判定' },
-    ext: { qteUi: 'battleParry' },
     background: '小怪压低重心、利爪后扬、双目锁定的起手蓄力，给予空藏可读的预警窗口；窗口内空藏做「防反」QTE 输入，按时机隐藏计算三档判定结果。',
     qte: {
-      window: { perfect: 120, great: 260, good: 480 },
+      tolerance: { perfect: 120, great: 260, good: 480 },
       score: { perfect: 100, great: 70, good: 40, miss: 0 },
-      timeoutMs: 2600,
+      window: { timeoutMs: 2600 },
+      ui: 'battleParry',
+      template: 'parry',
       outcomeLabels: { pass: '受击防反', good: '受击闪避', fail: '受击' },
       cues: [{ id: 'parry', shape: 'tap', x: 0.5, y: 0.55, appearAt: 700, targetAt: 1300, label: '防反' }],
     },
@@ -370,21 +401,21 @@ export function getBlueprintCombatDemoScenario(): Scenario {
     calcType: '防反·大成功',
     durationMs: 4000,
     background: '受击防反：主将精准格挡卸力、周身泛起反震光罩——完全免疫来袭伤害，并顺势反击敌方（威力1.2）。',
-    performance: { cues: [bossDamageCue('block-hit', 1800, 96, '反击结算 威力1.2')] },
+    overlays: [bossDamageCue('block-hit', 1800, 96, '反击结算 威力1.2')],
     branches: [auto('block-done', 'ai-done', 'Out')],
   }))
   add(bpScene('dodgeP', '受击闪避', 'vd-wcc-shanbi', { x: 560, y: 1440 }, {
     calcType: '防反·成功',
     durationMs: 4000,
     background: '受击闪避：主将侧身卸力闪避，完全免疫来袭伤害并顺势反击敌方（威力0.8）；消耗气力1。',
-    performance: { cues: [bossDamageCue('dodge-hit', 2000, 64, '反击结算 威力0.8')] },
+    overlays: [bossDamageCue('dodge-hit', 2000, 64, '反击结算 威力0.8')],
     branches: [auto('dodge-done', 'ai-done', 'Out')],
   }))
   add(bpScene('hurt', '受击', 'vd-wcc-shouji', { x: 560, y: 1600 }, {
     calcType: '防反·失败',
     durationMs: 4000,
     background: '防反失败：主将未能防反、正面中招踉跄硬直破势，承受小怪攻击全额伤害（命中100%·暴击8%），但受击积累气力+1。',
-    performance: { cues: [playerDamageCue('hurt-hit', 10, 120, '受击结算')] },
+    overlays: [playerDamageCue('hurt-hit', 10, 120, '受击结算')],
     branches: [auto('hurt-done', 'ai-done', 'Out')],
   }))
   add(bpScene('ai-done', '行动完毕', null, { x: 820, y: 1440 }, {
@@ -400,7 +431,7 @@ export function getBlueprintCombatDemoScenario(): Scenario {
     originIdea: '从新影游平台交互原型迁移的层级战斗蓝图 demo。',
     rootSceneId: 'enter',
     defaultCharMs: 32,
-    schemaVersion: 10,
+    schemaVersion: 13,
     modules: { gameplay: true, rules: true },
     variables: {
       qi: { id: 'qi', name: '气力', kind: 'number', initial: 0, min: 0, max: 5 },

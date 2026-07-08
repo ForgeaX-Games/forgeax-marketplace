@@ -54,12 +54,11 @@ describe('BlueprintPlayer (render smoke)', () => {
     scenario.rootSceneId = 'choose'
     scenario.scenes.choose = {
       ...scenario.scenes.choose!,
-      clipId: 'vd-wcc-idle',
+      media: { kind: 'VIDEO', ref: 'm-builtin-vd-wcc-idle', meta: {} },
       mediaPlayMode: 'loop',
-      decision: {
-        optType: 'static',
+      choice: {
         prompt: '怎么办？',
-        windowStartMs: 1000,
+        window: { startMs: 1000 },
         fireAt: 'on_pick',
       },
     }

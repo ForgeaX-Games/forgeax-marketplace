@@ -22,9 +22,33 @@ export interface RuntimeCtx {
   elementId?: string
 }
 
+/**
+ * 声明式表单字段 schema —— 让 NodeInspector 的 per-kind 检视器由注册表驱动，
+ * 取代硬编码 switch。标量字段（text/number/select/checkbox/color）直接渲染；
+ * 复杂字段（textStyle/effects/options/qteCues/hotspots）派发到专用受控组件，
+ * 由组件自身处理内部条件分支。
+ */
+export type FormField =
+  | { t: 'text'; key: string; label: string; placeholder?: string; mono?: boolean }
+  | { t: 'number'; key: string; label: string; step?: number; min?: number; max?: number }
+  | { t: 'select'; key: string; label: string; options: { value: string; label: string }[] }
+  | { t: 'checkbox'; key: string; label: string }
+  | { t: 'color'; key: string; label: string; placeholder?: string }
+  | { t: 'textStyle'; key: string; label: string; group: 'subtitle' | 'overlay' }
+  | { t: 'effects'; key: string; label: string }
+  | { t: 'options'; key: string; label: string }
+  | { t: 'qteCues'; key: string; label: string }
+  | { t: 'hotspots'; key: string; label: string }
+
 export interface KindPlugin<P = Record<string, unknown>> {
   kind: string
   role: ElementRole
+  /** 中文标签（编辑器「+ 元素」菜单展示）；缺省用 kind。 */
+  label?: string
+  /** 新建该 kind 元素时的默认 params。 */
+  defaults?(): P
+  /** 声明式检视器表单字段（NodeInspector 据此渲染）；缺省回退 JSON 框。 */
+  form?: FormField[]
   /** 返回问题描述数组，空数组 = 合法。 */
   validate(params: P): string[]
   /** 该 kind 需要的输出 handle（仅 interaction 通常有多出口；view/logic 一般返回 []）。 */

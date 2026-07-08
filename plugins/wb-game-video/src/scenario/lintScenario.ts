@@ -258,7 +258,7 @@ function lintQte(
   qte: QTESpec | undefined,
 ): void {
   if (!qte) return
-  const { perfect, great, good } = qte.window
+  const { perfect, great, good } = qte.tolerance
   if (!(perfect <= great && great <= good)) {
     push(issues, {
       code: 'qte.window_not_monotonic',
@@ -303,7 +303,17 @@ function lintGameplay(
   ids: Set<string>,
   scene: Scene,
 ): void {
-  if (scene.kind === 'battle' && scene.boss) {
+  // 交互形态 presence 互斥：boss/qte/calc/choice 至多一个非空。
+  const present = (['boss', 'qte', 'calc', 'choice'] as const).filter((k) => scene[k] != null)
+  if (present.length > 1) {
+    push(issues, {
+      code: 'interaction.multiple_present',
+      severity: 'error',
+      sceneId: scene.id,
+      message: `场景交互形态字段互斥，最多一个非空（当前同时有 ${present.join(' / ')}）`,
+    })
+  }
+  if (scene.boss) {
     const boss = scene.boss
     if (!scenario.entities?.[boss.entityId]) {
       push(issues, {

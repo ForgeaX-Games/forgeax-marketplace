@@ -17,23 +17,23 @@ export type FxSelection =
   | { kind: 'filter'; id: string }
   | { kind: 'adjust'; id: string }
   | { kind: 'effect'; id: string }
-  | { kind: 'sticker'; id: string }
   | { kind: 'transition'; id: string }
 
 interface ClipSelectionState {
-  textOverlayId: string | null
+  /** 统一飘字 overlay（文字/图标/图片）的选中 id。 */
+  overlayId: string | null
   searchSegmentId: string | null
   fxSelection: FxSelection | null
-  setTextOverlay(id: string | null): void
+  setOverlay(id: string | null): void
   setSearchSegment(id: string | null): void
   setFxSelection(sel: FxSelection | null): void
 }
 
 export const useClipSelection = create<ClipSelectionState>((set) => ({
-  textOverlayId: null,
+  overlayId: null,
   searchSegmentId: null,
   fxSelection: null,
-  setTextOverlay: (id) => set({ textOverlayId: id }),
+  setOverlay: (id) => set({ overlayId: id }),
   setSearchSegment: (id) => set({ searchSegmentId: id }),
   setFxSelection: (sel) => set({ fxSelection: sel }),
 }))

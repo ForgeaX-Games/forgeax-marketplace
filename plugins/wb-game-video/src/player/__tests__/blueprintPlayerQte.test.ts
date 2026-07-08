@@ -58,7 +58,7 @@ describe('BlueprintPlayer QTE timeline alignment', () => {
       },
     })
     expect(spec?.cues).toHaveLength(2)
-    const good = spec?.window?.good ?? 480
+    const good = spec?.tolerance?.good ?? 480
     expect(qteTimeoutDeadlineMs(spec)).toBe(2400 + good + 2600)
   })
 })

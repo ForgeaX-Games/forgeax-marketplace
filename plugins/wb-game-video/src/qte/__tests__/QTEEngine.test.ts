@@ -135,7 +135,7 @@ describe('judgeHold', () => {
 describe('tallyQTE', () => {
   const spec: QTESpec = {
     cues: [],
-    window,
+    tolerance: window,
     score,
     passingScore: 150,
   }
@@ -322,7 +322,7 @@ const seqSpec = (sequence: boolean): QTESpec => ({
     tap({ id: 'b', appearAt: 600, targetAt: 1100 }),
     tap({ id: 'c', appearAt: 1200, targetAt: 1700 }),
   ],
-  window,
+  tolerance: window,
   score,
   sequence,
 })
@@ -374,15 +374,15 @@ describe('qteTimeoutDeadlineMs / qteAllResolved —— 整段超时', () => {
   it('截止线 = 首 cue.appearAt + timeoutMs（单 cue）', () => {
     const spec: QTESpec = {
       cues: [tap({ id: 'solo', appearAt: 0, targetAt: 1000 })],
-      window,
+      tolerance: window,
       score,
-      timeoutMs: 2000,
+      window: { timeoutMs: 2000 },
     }
     expect(qteTimeoutDeadlineMs(spec)).toBe(2000)
   })
 
   it('多 cue 时截止线 = 最后判定窗结束 + timeoutMs', () => {
-    const spec: QTESpec = { ...seqSpec(false), timeoutMs: 2000 }
+    const spec: QTESpec = { ...seqSpec(false), window: { timeoutMs: 2000 } }
     const good = window.good ?? 480
     const lastEnd = Math.max(...spec.cues!.map((c) => c.targetAt + good))
     expect(qteTimeoutDeadlineMs(spec)).toBe(lastEnd + 2000)
@@ -400,7 +400,7 @@ describe('qteTimeoutDeadlineMs / qteAllResolved —— 整段超时', () => {
   })
 
   it('缺 cues 的 QTESpec 壳不崩溃（timeoutMs 存在但 cues 未定义）', () => {
-    const shell = { timeoutMs: 2000 } as QTESpec
+    const shell = { window: { timeoutMs: 2000 } } as QTESpec
     expect(qteTimeoutDeadlineMs(shell)).toBeNull()
     expect(qteAllResolved(shell, [])).toBe(true)
     expect(sequencePassed(shell, [])).toBe(true)

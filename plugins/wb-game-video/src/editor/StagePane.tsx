@@ -4,14 +4,14 @@ import { useMediaStore } from '../media/mediaStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
 import { createImageProvider } from '../llm'
 import type { ImageClient } from '../llm/types'
-import type { QTECue, QTEHitWindow, Shot, StickerClip, TextOverlayClip } from '../scenario/types'
+import type { OverlayClip, QTECue, QTEHitWindow, Shot } from '../scenario/types'
 import { useClipSelection } from './timeline/clipSelection'
-import { pickActiveOverlays, overlayStyle } from '../player/TextOverlayLayer'
 import { pickActiveLine } from '../player/subtitleSelect'
-import { composeStageFx } from '../fx/fxPresets'
-import { FxOverlayLayer, FadeLayer, StickerContent, stickerStyle } from '../player/SceneFxLayers'
+import { hasTextStyle, resolveTextCss } from './textStyle'
+import { SUBTITLE_DEFAULT_XY } from '../scenario/textStylePresets'
+import { composeStageFx, getStickerPreset } from '../fx/fxPresets'
+import { FxOverlayLayer, FadeLayer } from '../player/SceneFxLayers'
 import { CUE_RING_TARGET_SCALE, cuePhase, cueProgress, cueRingScale } from '../qte/QTEEngine'
-import { Timeline } from './Timeline'
 import { injectStyleOnce } from '../styles/injectStyle'
 import { FOCUS_STAGE_EVENT } from './storygraph/sceneNodeHandlers'
 import { useShellStore } from '../shell/shellStore'
@@ -80,6 +80,11 @@ interface StagePaneProps {
    * 父组件（drawer）必须把自己的 setHoverMs 也喂下来，才能闭环。
    */
   setHoverMs?: (ms: number) => void
+  /**
+   * 暂停信号 —— 父组件每递增一次即让画面暂停当前播放（视频 + 时间轴游标推进）。
+   * 用于「手动拖拽时间轴时自动暂停」：拖拽开始时父组件 bump 一下，画面即停。
+   */
+  pauseSignal?: number
   /** 受控 preview —— 同 hoverMs；Timeline 外置后由父组件在两者间桥接。 */
   preview?: TimelinePreview | null
   /** 画面右侧常驻 slot（可选）—— drawer 放 Prompt 面板用。 */
@@ -97,6 +102,7 @@ export function StagePane({
   hideTimeline = false,
   hoverMs: extHoverMs,
   setHoverMs: extSetHoverMs,
+  pauseSignal,
   preview: extPreview,
   rightSlot,
   showDialogue = true,
@@ -193,13 +199,9 @@ export function StagePane({
   const imgClient = useMemo<ImageClient>(() => createImageProvider(), [])
   const canvasRef = useRef<HTMLDivElement>(null)
   const updateQTECue = useScenarioStore((s) => s.updateQTECue)
-  const updateTextOverlay = useScenarioStore((s) => s.updateTextOverlay)
-  const selectedTextId = useClipSelection((s) => s.textOverlayId)
-  const setSelectedText = useClipSelection((s) => s.setTextOverlay)
-  const updateStickerClip = useScenarioStore((s) => s.updateStickerClip)
-  const fxSelection = useClipSelection((s) => s.fxSelection)
-  const setFxSelection = useClipSelection((s) => s.setFxSelection)
-  const selectedStickerId = fxSelection?.kind === 'sticker' ? fxSelection.id : null
+  const updateOverlay = useScenarioStore((s) => s.updateOverlay)
+  const selectedOverlayId = useClipSelection((s) => s.overlayId)
+  const setSelectedOverlay = useClipSelection((s) => s.setOverlay)
 
   // 走全局磁盘持久化的 sceneImageCache —— 切场景再回来不丢、刷新不丢
   const cacheRecord = useSceneImageCache((s) => s.records[sceneId])
@@ -318,6 +320,24 @@ export function StagePane({
   }, [sceneId, scene?.videoOffsetMs])
 
   /*
+   * 暂停信号 —— 父组件（drawer）在手动拖拽时间轴开始时 bump pauseSignal，
+   * 这里把视频与时间轴游标推进都停下，实现「拖拽自动暂停」。之后暂停态下
+   * hoverMs→seek 那条 effect 会正常跟随游标 seek 到对应帧。
+   */
+  useEffect(() => {
+    if (pauseSignal === undefined) return
+    setIsTimelinePlaying(false)
+    const v = videoRef.current
+    if (v && !v.paused) {
+      try {
+        v.pause()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [pauseSignal])
+
+  /*
    * hoverMs → video.seek（仅暂停时）。
    * 作者在时间轴上拖游标时，hoverMs 高频变化，这里把"该不该 seek"交给纯函数。
    * v3.9 走带裁剪变体：videoTargetMs = hoverMs + offset，夹到裁剪段内。
@@ -426,6 +446,52 @@ export function StagePane({
     // hoverMs 仅作起点快照，不入依赖（否则每帧重启循环）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTimelinePlaying, sceneId])
+
+  /*
+   * 单视频节点的游标平滑推进循环。
+   *
+   * 为什么需要它：过去视频节点的游标只靠 <video> 的 `onTimeUpdate` 前进，而浏览器
+   * 只 ~4Hz 触发该事件 → 游标肉眼可见地「一格一格跳」。这里在播放期间起 rAF，每帧
+   * 直接读 `video.currentTime` 写游标，肉眼连续（与图像节点的墙钟循环对称）。
+   *
+   * 关键：这里**不走** decideHoverFromVideoWithTrim —— 它有 60ms 死区（防 seek 回环），
+   * 会把 <60ms 的推进吃掉，游标仍会以 60ms 台阶跳。播放推进本就是单向的，直接把
+   * hoverMs 设成「视频时间 − 裁剪入点」即可；而 hoverMs→seek 那条 effect 自带 60ms
+   * 死区，会把这次同值写回判成"无需 seek"，不会产生回环。
+   *
+   * 多镜连播(isMultiShotVideo)与图像节点(isTimelinePlaying)各自另有墙钟 rAF，不进这里。
+   */
+  useEffect(() => {
+    if (!isVideoPlaying || isTimelinePlaying || isMultiShotVideo || !scene) return
+    const v = videoRef.current
+    if (!v) return
+    const sceneMs = scene.durationMs
+    const trim = { offsetMs: scene.videoOffsetMs, clipDurationMs: scene.videoClipDurationMs }
+    const { startMs } = resolveTrimRange(trim, sceneMs)
+    let raf = 0
+    const tick = (): void => {
+      const el = videoRef.current
+      if (!el) return
+      const videoMs = (el.currentTime || 0) * 1000
+      // 视频文件坐标 → 时间轴坐标，夹到 [0, sceneMs]；每帧直设，无死区。
+      const next = Math.max(0, Math.min(sceneMs, videoMs - startMs))
+      setHoverMs(next)
+      // 到裁剪出点 / 场景末尾就停（onPause 会翻 isVideoPlaying → 本 effect cleanup）。
+      if (isAtTrimEnd({ hoverMs: next, videoMs, isPlaying: true, sceneMs }, trim)) {
+        try {
+          el.pause()
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+    // hoverMs 每帧变动不入依赖（否则每帧重启循环）；tick 内实时读 videoRef。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVideoPlaying, isTimelinePlaying, isMultiShotVideo, sceneId])
 
   /*
    * 快捷键：空格 / k 切换播放。window 级监听，作者不用聚焦按钮；输入框中不响应。
@@ -730,47 +796,54 @@ export function StagePane({
               key={c.id}
               cue={c}
               hoverMs={hoverMs}
-              window={scene.qte!.window}
+              window={scene.qte!.tolerance}
               canvasRef={canvasRef}
               onMoveCue={(patch) => updateQTECue(scene.id, c.id, patch)}
             />
           )
         })}
 
-        {/* 剪映式后期效果叠层：暗角/颗粒/特效 + 贴纸（可拖拽）+ 渐显渐隐遮罩 */}
+        {/* 剪映式后期效果叠层：暗角/颗粒/特效 + 渐显渐隐遮罩 */}
         <FxOverlayLayer frame={stageFx} />
-        <StageStickerLayer
-          stickers={scene.stickerClips}
-          hoverMs={hoverMs}
-          canvasRef={canvasRef}
-          selectedId={selectedStickerId}
-          onSelect={(id) => setFxSelection({ kind: 'sticker', id })}
-          onMove={(id, patch) => updateStickerClip(scene.id, id, patch)}
-        />
         <FadeLayer color={stageFx.fadeColor} opacity={stageFx.fadeOpacity} />
 
-        {/* 文字叠加预览（剪映/PR 式贴字）—— 跟随 hoverMs 出现；选中的可在画面上直接拖拽定位。 */}
-        <StageTextOverlayLayer
-          overlays={scene.textOverlays}
+        {/* 统一飘字预览（文字/图标/图片）—— 跟随 hoverMs 出现；选中的可在画面上直接拖拽定位。 */}
+        <StageOverlayLayer
+          overlays={scene.overlays}
           hoverMs={hoverMs}
           canvasRef={canvasRef}
-          selectedId={selectedTextId}
-          onSelect={setSelectedText}
-          onMove={(id, patch) => updateTextOverlay(scene.id, id, patch)}
+          selectedId={selectedOverlayId}
+          onSelect={setSelectedOverlay}
+          onMove={(id, patch) => updateOverlay(scene.id, id, patch)}
         />
 
         {/* 字幕预览（hover 当前时刻有台词时显示）
             v3.9.11：受 Timeline DIA 开关联动，关闭时不渲染，画面保持干净。 */}
-        {showDialogue && activeDialogue && (
-          <div className="ks-caption-band">
-            {activeDialogue.speaker && (
-              <span className="ks-caption-speaker ks-mono">
-                {activeDialogue.speaker}
-              </span>
-            )}
-            <span className="ks-caption ks-cn">{activeDialogue.text}</span>
-          </div>
-        )}
+        {showDialogue && activeDialogue &&
+          (hasTextStyle(activeDialogue.style) || activeDialogue.x != null || activeDialogue.y != null ? (
+            <div className="ks-caption-free-layer">
+              <div
+                className="ks-caption-free"
+                style={{
+                  left: `${(activeDialogue.x ?? SUBTITLE_DEFAULT_XY.x) * 100}%`,
+                  top: `${(activeDialogue.y ?? SUBTITLE_DEFAULT_XY.y) * 100}%`,
+                  ...resolveTextCss(activeDialogue.style ?? {}),
+                }}
+              >
+                {activeDialogue.speaker && (
+                  <span className="ks-caption-speaker ks-mono">{activeDialogue.speaker}</span>
+                )}
+                <span className="ks-cn">{activeDialogue.text}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="ks-caption-band">
+              {activeDialogue.speaker && (
+                <span className="ks-caption-speaker ks-mono">{activeDialogue.speaker}</span>
+              )}
+              <span className="ks-caption ks-cn">{activeDialogue.text}</span>
+            </div>
+          ))}
 
         {/*
          * 2026-04-29：移除右下 .ks-img-stamp 徽章（"● GPT-IMAGE-2 · 426702ms ↻"）。
@@ -795,15 +868,6 @@ export function StagePane({
       </div>
 
       {rightSlot}
-
-      {!hideTimeline && (
-        <Timeline
-          scene={scene}
-          hoverMs={hoverMs}
-          setHoverMs={setHoverMs}
-          onPreviewChange={setPreview}
-        />
-      )}
     </div>
   )
 }
@@ -1023,14 +1087,46 @@ function ShotSequenceVideo({
  *   - 整层 pointer-events: none（不接受点击，避免抢拖拽手势）
  *   - 触发徽章淡化（不是要让作者按键，只是告知玩家会看到啥）
  */
+/** 单条 overlay 的静态渲染样式 + 内容（编辑器预览用，无入场动画）。 */
+function stageOverlayInner(clip: OverlayClip, entries: Record<string, { url: string }>): {
+  style: React.CSSProperties
+  node: React.ReactNode
+} {
+  const base: React.CSSProperties = {
+    position: 'absolute',
+    left: `${(clip.x ?? 0.5) * 100}%`,
+    top: `${(clip.y ?? 0.5) * 100}%`,
+    transform: `translate(-50%, -50%) rotate(${clip.rotation ?? 0}deg)`,
+    opacity: clip.opacity ?? 1,
+    cursor: 'move',
+  }
+  if (clip.kind === 'icon') {
+    return {
+      style: { ...base, fontSize: `${clip.sizePct ?? 12}cqh`, lineHeight: 1 },
+      node: <span>{getStickerPreset(clip.content)?.glyph ?? '★'}</span>,
+    }
+  }
+  if (clip.kind === 'image') {
+    const url = entries[clip.content]?.url
+    return {
+      style: { ...base, width: `${clip.sizePct ?? 12}cqh` },
+      node: url ? <img src={url} alt="" draggable={false} style={{ width: '100%', height: 'auto', display: 'block' }} /> : null,
+    }
+  }
+  return {
+    style: { ...base, ...resolveTextCss(clip.style ?? {}, { fillDefaults: true }) },
+    node: clip.content,
+  }
+}
+
 /**
- * StageTextOverlayLayer —— 编辑器舞台上的「文字叠加」预览 + 画面内拖拽定位。
+ * StageOverlayLayer —— 编辑器舞台上的统一「飘字」预览 + 画面内拖拽定位。
  *
- * 渲染 hoverMs 当前可见的所有 overlay；选中的那条加虚线选框并可直接拖动，
- * 写回 x/y（[0,1] 归一化坐标）。拖拽用纯 DOM pointer（与 EditorCueMarker 同思路），
- * pointerup 一次性 commit，避免 60Hz 写 store + undo 噪声。
+ * 渲染 hoverMs 当前可见的所有 overlay（文字/图标/图片；空内容的纯结算触发器跳过）；
+ * 选中的那条加虚线选框并可直接拖动，写回 x/y（[0,1] 归一化坐标）。拖拽用纯 DOM pointer
+ * （与 EditorCueMarker 同思路），pointerup 一次性 commit，避免 60Hz 写 store + undo 噪声。
  */
-function StageTextOverlayLayer({
+function StageOverlayLayer({
   overlays,
   hoverMs,
   canvasRef,
@@ -1038,94 +1134,26 @@ function StageTextOverlayLayer({
   onSelect,
   onMove,
 }: {
-  overlays: TextOverlayClip[] | undefined
+  overlays: OverlayClip[] | undefined
   hoverMs: number
   canvasRef: React.RefObject<HTMLDivElement | null>
   selectedId: string | null
   onSelect: (id: string) => void
   onMove: (id: string, patch: { x: number; y: number }) => void
 }) {
-  const active = useMemo(() => pickActiveOverlays(overlays, hoverMs), [overlays, hoverMs])
-  if (active.length === 0) return null
-
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, clip: TextOverlayClip): void {
-    onSelect(clip.id)
-    if (e.button !== 0 && e.pointerType === 'mouse') return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    e.stopPropagation()
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    const startCX = clip.x ?? 0.5
-    const startCY = clip.y ?? 0.5
-    const el = e.currentTarget
-    let pending: { x: number; y: number } | null = null
-    const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
-    const compute = (ev: PointerEvent): { x: number; y: number } => {
-      const r = canvas.getBoundingClientRect()
-      const dx = (ev.clientX - startX) / Math.max(1, r.width)
-      const dy = (ev.clientY - startY) / Math.max(1, r.height)
-      return { x: clamp01(startCX + dx), y: clamp01(startCY + dy) }
-    }
-    const onMoveEv = (ev: PointerEvent): void => {
-      const next = compute(ev)
-      el.style.left = `${next.x * 100}%`
-      el.style.top = `${next.y * 100}%`
-      pending = next
-    }
-    const onUp = (ev: PointerEvent): void => {
-      document.removeEventListener('pointermove', onMoveEv)
-      document.removeEventListener('pointerup', onUp)
-      const next = pending ?? compute(ev)
-      if (next.x !== startCX || next.y !== startCY) onMove(clip.id, next)
-    }
-    document.addEventListener('pointermove', onMoveEv)
-    document.addEventListener('pointerup', onUp)
-  }
-
-  return (
-    <div className="ks-stage-txtovl" style={{ position: 'absolute', inset: 0, zIndex: 18, containerType: 'size' }}>
-      {active.map((clip) => (
-        <div
-          key={clip.id}
-          className={`ks-stage-txtovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
-          style={{ ...overlayStyle(clip), position: 'absolute', cursor: 'move' }}
-          onPointerDown={(e) => onPointerDown(e, clip)}
-        >
-          {clip.text}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * StageStickerLayer —— 画面内贴纸（剪映式）：跟随 hoverMs 出现，选中后可直接拖拽改位置。
- * 拖拽模型与 StageTextOverlayLayer 一致（pointer 二维 + pointerup 时一次性 commit）。
- */
-function StageStickerLayer({
-  stickers,
-  hoverMs,
-  canvasRef,
-  selectedId,
-  onSelect,
-  onMove,
-}: {
-  stickers: StickerClip[] | undefined
-  hoverMs: number
-  canvasRef: React.RefObject<HTMLDivElement | null>
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onMove: (id: string, patch: { x: number; y: number }) => void
-}) {
+  const entries = useMediaStore((s) => s.entries)
   const active = useMemo(
-    () => (stickers ?? []).filter((c) => hoverMs >= c.startMs && hoverMs <= c.endMs),
-    [stickers, hoverMs],
+    () =>
+      (overlays ?? []).filter((o) => {
+        if (o.content.trim().length === 0) return false
+        if (hoverMs < o.startMs) return false
+        return o.endMs === undefined || hoverMs <= o.endMs
+      }),
+    [overlays, hoverMs],
   )
   if (active.length === 0) return null
 
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, clip: StickerClip): void {
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, clip: OverlayClip): void {
     onSelect(clip.id)
     if (e.button !== 0 && e.pointerType === 'mouse') return
     const canvas = canvasRef.current
@@ -1162,17 +1190,20 @@ function StageStickerLayer({
   }
 
   return (
-    <div className="ks-stage-stkovl" style={{ position: 'absolute', inset: 0, zIndex: 19, containerType: 'size' }}>
-      {active.map((clip) => (
-        <div
-          key={clip.id}
-          className={`ks-stage-stkovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
-          style={{ ...stickerStyle(clip), cursor: 'move' }}
-          onPointerDown={(e) => onPointerDown(e, clip)}
-        >
-          <StickerContent clip={clip} />
-        </div>
-      ))}
+    <div className="ks-stage-ovl" style={{ position: 'absolute', inset: 0, zIndex: 19, containerType: 'size' }}>
+      {active.map((clip) => {
+        const { style, node } = stageOverlayInner(clip, entries)
+        return (
+          <div
+            key={clip.id}
+            className={`ks-stage-ovl-item${clip.id === selectedId ? ' is-sel' : ''}`}
+            style={style}
+            onPointerDown={(e) => onPointerDown(e, clip)}
+          >
+            {node}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1709,29 +1740,36 @@ const stageCss = `
   text-align: center;
   max-width: 60ch;
 }
+/* 自由定位 / 带预设样式的字幕（与运行时 DialogueBox 的 .ks-sub-free 对齐） */
+.ks-caption-free-layer {
+  position: absolute; inset: 0; z-index: 3;
+  pointer-events: none; container-type: size; overflow: hidden;
+}
+.ks-caption-free {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  max-width: 84%;
+  text-align: center;
+  color: #f4f7ff;
+  font-size: 17px;
+  line-height: 1.55;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  word-break: break-word;
+}
 
 .ks-img-stamp,
 .ks-img-stamp-btn { display: none !important; }
 
-/* 舞台文字叠加预览 + 选框 */
-.ks-stage-txtovl-item {
+/* 舞台统一飘字预览（文字/图标/图片）+ 选框 */
+.ks-stage-ovl-item {
   white-space: pre-wrap;
   max-width: 90%;
   line-height: 1.2;
   word-break: break-word;
   user-select: none;
 }
-.ks-stage-txtovl-item.is-sel {
-  outline: 1px dashed rgba(232,162,58,0.9);
-  outline-offset: 4px;
-}
-.ks-stage-stkovl-item {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-}
-.ks-stage-stkovl-item.is-sel {
+.ks-stage-ovl-item.is-sel {
   outline: 1px dashed rgba(232,162,58,0.9);
   outline-offset: 4px;
 }

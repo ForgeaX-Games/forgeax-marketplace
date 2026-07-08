@@ -44,7 +44,7 @@ export interface VideoClip {
 const USE_LOCAL_CLIPS = true
 
 /** 远程直链根路径 —— USE_LOCAL_CLIPS=false 或本地缺文件时的回落来源。 */
-const CLIP_BASE = ''
+const CLIP_BASE = 'http://assets.example.com:8001/files/game_resource/zhandou'
 
 // Vite 构建期把 zhandou/*.mp4 静态导入成带 hash 的最终 URL（dev 直接给源路径），运行时零成本。
 const localClipModules = import.meta.glob<string>('../assets/zhandou/*.mp4', {
@@ -172,6 +172,53 @@ export function getVideoClip(id: string | undefined): VideoClip | undefined {
   if (!id) return undefined
   const canonical = LEGACY_CLIP_ALIASES[id] ?? id
   return VIDEO_CLIPS.find((v) => v.id === canonical)
+}
+
+/**
+ * 内置演出视频灌进 mediaStore 时使用的 mediaId 前缀。
+ * 视频绑定收敛到 `scene.media.ref` 后，内置片段以 `m-builtin-<clipId>` 的稳定 id
+ * 作为只读种子进入 mediaStore；上传/生图产物仍是 `m-xxx`。
+ */
+export const BUILTIN_VIDEO_MEDIA_PREFIX = 'm-builtin-'
+
+/** 由内置片段 id 造出稳定 mediaId（`m-builtin-<canonical>`）。传入非内置 id 返回 undefined。 */
+export function builtinMediaIdForClip(clipId: string | undefined): string | undefined {
+  const clip = getVideoClip(clipId)
+  return clip ? `${BUILTIN_VIDEO_MEDIA_PREFIX}${clip.id}` : undefined
+}
+
+/**
+ * 从 `scene.media.ref` 反解出内置演出片段 id（供 blueprint 编译 / 运行时 / 时长派生用）。
+ *   - `m-builtin-<id>`  → 该内置片段 id
+ *   - 裸 clip id / 旧别名（历史 scene.clipId 直接搬进 ref 的兜底）→ 规范化后的 id
+ *   - 上传产物 `m-xxx` / 空 → undefined（非内置，走 mediaStore 解析）
+ */
+export function clipIdFromMediaRef(ref: string | undefined): string | undefined {
+  if (!ref) return undefined
+  const bare = ref.startsWith(BUILTIN_VIDEO_MEDIA_PREFIX)
+    ? ref.slice(BUILTIN_VIDEO_MEDIA_PREFIX.length)
+    : ref
+  return getVideoClip(bare)?.id
+}
+
+/** 一条待灌入 mediaStore 的内置视频种子（字段与 MediaEntry 对齐，不引 mediaStore 避免环依赖）。 */
+export interface BuiltinVideoMediaSeed {
+  id: string
+  name: string
+  mimeType: string
+  url: string
+  size: number
+}
+
+/** 内置演出库 → mediaStore 只读种子列表（url 是构建期直链，恒可播，视作已落盘）。 */
+export function builtinVideoMediaSeeds(): BuiltinVideoMediaSeed[] {
+  return VIDEO_CLIPS.map((c) => ({
+    id: `${BUILTIN_VIDEO_MEDIA_PREFIX}${c.id}`,
+    name: c.label,
+    mimeType: 'video/mp4',
+    url: c.url,
+    size: 0,
+  }))
 }
 
 /** 按 id 取 HUD 方案。 */

@@ -17,13 +17,12 @@ function choice(id: string, targetSceneId: string, label: string): Branch {
   return { id, kind: 'choice', targetSceneId, label }
 }
 
-/** 演出节点：带 clip。 */
+/** 演出节点：带 clip（演出来源收敛到 media.ref = m-builtin-<clipId>）。 */
 function perf(id: string, clipId: string, branches: Branch[], extra?: Partial<Scene>): Scene {
   return {
     id,
     title: id,
-    media: { kind: 'PLACEHOLDER', meta: {} },
-    clipId,
+    media: { kind: 'VIDEO', ref: `m-builtin-${clipId}`, meta: {} },
     durationMs: 3000,
     dialogue: [],
     branches,
@@ -31,13 +30,12 @@ function perf(id: string, clipId: string, branches: Branch[], extra?: Partial<Sc
   }
 }
 
-/** 无演出节点：clip 为空、media 非视频 → nodeHasPerformance=false。 */
+/** 无演出节点：media 非视频 → nodeHasPerformance=false。 */
 function logic(id: string, branches: Branch[], extra?: Partial<Scene>): Scene {
   return {
     id,
     title: id,
     media: { kind: 'PLACEHOLDER', meta: {} },
-    clipId: '',
     durationMs: 300,
     dialogue: [],
     branches,
@@ -96,8 +94,7 @@ describe('BlueprintRuntime — 无演出节点', () => {
       [
         perf('p1', 'clip-1', [auto('p1-next', 'pick')], { mediaPlayMode: 'loop' }),
         logic('pick', [choice('go-a', 'a', 'A'), choice('go-b', 'b', 'B')], {
-          kind: 'choice',
-          decision: { optType: 'static', prompt: '选' },
+          choice: { prompt: '选' },
         }),
         perf('a', 'clip-a', []),
         perf('b', 'clip-b', []),

@@ -6,14 +6,15 @@
  * 保存写 localStorage 版本、不写盘；进入优先级 草稿 > 最新版本 > 磁盘原始 > 内置 demo。
  */
 import { create } from 'zustand'
-import type { GameGraph, GameScenario } from './graph-schema'
+import type { GameGraph, GameScenario, GraphTextStylePreset } from './graph-schema'
+import type { TextStyleGroup } from './text-style'
 import { loadStore, saveScenario, saveDraft, clearDraft, loadVersion, loadDraft, type VersionEntry } from './persist-client'
 import { computeGraphLayout } from './graph-layout'
 import { validateGraph } from './validate'
 
-export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'rules'>
+export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'rules' | 'textStylePresets'>
 
-const pickMeta = (s: GameScenario): ScenarioMetaFields => ({ variables: s.variables, entities: s.entities, ui: s.ui, rng: s.rng, rules: s.rules })
+const pickMeta = (s: GameScenario): ScenarioMetaFields => ({ variables: s.variables, entities: s.entities, ui: s.ui, rng: s.rng, rules: s.rules, textStylePresets: s.textStylePresets })
 const EMPTY_GRAPH: GameGraph = { nodes: [], edges: [] }
 
 /** 位置全 0（未布局）→ dagre 自动排一版。 */
@@ -43,6 +44,10 @@ interface GraphScenarioStore {
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
+  /** 新增/覆盖一个用户自定义文字预设（按 subtitle/overlay 分组持久化）。 */
+  addTextStylePreset: (group: TextStyleGroup, preset: GraphTextStylePreset) => void
+  /** 删除一个用户自定义文字预设。 */
+  removeTextStylePreset: (group: TextStyleGroup, presetId: string) => void
   save: () => number
   pick: (value: string) => void
   reset: () => void
@@ -109,6 +114,22 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
     },
     setMeta: (m) => {
       set((st) => ({ meta: typeof m === 'function' ? (m as (x: ScenarioMetaFields) => ScenarioMetaFields)(st.meta) : m }))
+      scheduleDraft()
+    },
+    addTextStylePreset: (group, preset) => {
+      set((st) => {
+        const presets = st.meta.textStylePresets ?? {}
+        const list = (presets[group] ?? []).filter((p) => p.id !== preset.id)
+        return { meta: { ...st.meta, textStylePresets: { ...presets, [group]: [...list, preset] } } }
+      })
+      scheduleDraft()
+    },
+    removeTextStylePreset: (group, presetId) => {
+      set((st) => {
+        const presets = st.meta.textStylePresets ?? {}
+        const list = (presets[group] ?? []).filter((p) => p.id !== presetId)
+        return { meta: { ...st.meta, textStylePresets: { ...presets, [group]: list } } }
+      })
       scheduleDraft()
     },
 

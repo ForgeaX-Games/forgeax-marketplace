@@ -26,9 +26,7 @@ import type {
   Scenario,
   Scene,
   SearchSegmentClip,
-  TextOverlayClip,
 } from '../../scenario/types'
-import { FONT_PRESETS } from './fontPresets'
 import { buildSearchLoopVideoPrompt } from '../../forge/modules/searchLoopVideo'
 import { useMediaStore, type MediaEntry } from '../../media/mediaStore'
 import { useScenarioStore } from '../../scenario/scenarioStore'
@@ -55,7 +53,6 @@ interface Props {
 type Tab =
   | 'assets'
   | 'dialogue'
-  | 'text'
   | 'cue'
   | 'audio'
   | 'minigame'
@@ -82,16 +79,9 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
       setTab('dialogue')
     }
   }, [selectedDialogueId])
-  // 文字叠加 / 搜索段：选中时自动切到对应 tab（与 dialogue 同理）
-  const selectedTextId = useClipSelection((s) => s.textOverlayId)
+  // 搜索段：选中时自动切到对应 tab（与 dialogue 同理）
   const selectedSearchId = useClipSelection((s) => s.searchSegmentId)
-  const prevSelTextRef = useRef<string | null>(null)
   const prevSelSearchRef = useRef<string | null>(null)
-  useEffect(() => {
-    const prev = prevSelTextRef.current
-    prevSelTextRef.current = selectedTextId
-    if (selectedTextId && selectedTextId !== prev) setTab('text')
-  }, [selectedTextId])
   useEffect(() => {
     const prev = prevSelSearchRef.current
     prevSelSearchRef.current = selectedSearchId
@@ -105,7 +95,6 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
       <div className="ks-dock-tabs" role="tablist">
         <DockTab cur={tab} me="assets" onSel={setTab} icon="🎬" label="素材库" />
         <DockTab cur={tab} me="dialogue" onSel={setTab} icon="💬" label="字幕" />
-        <DockTab cur={tab} me="text" onSel={setTab} icon="🆎" label="文字" />
         <DockTab cur={tab} me="cue" onSel={setTab} icon="⚡" label="QTE" />
         <DockTab cur={tab} me="audio" onSel={setTab} icon="♪" label="音频" />
         <DockTab cur={tab} me="minigame" onSel={setTab} icon="🎮" label="小游戏" />
@@ -114,7 +103,6 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
       <div className="ks-dock-body">
         {tab === 'assets' && <AssetsDock sceneId={currentSceneId} />}
         {tab === 'dialogue' && <DialogueDock />}
-        {tab === 'text' && <TextOverlayDock />}
         {tab === 'cue' && <CueDock />}
         {tab === 'audio' && <AudioDock currentSceneId={currentSceneId} />}
         {tab === 'minigame' && <MinigameDock />}
@@ -571,250 +559,9 @@ function SegBtn<T extends string>({
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 文字叠加（剪映 / PR 式贴字）—— v7
-// ─────────────────────────────────────────────────────────────────────
-function TextOverlayDock() {
-  const scene = useScenarioStore((s) => s.scenario.scenes[s.selectedSceneId])
-  const selectedId = useClipSelection((s) => s.textOverlayId)
-  const selected = scene?.textOverlays?.find((t) => t.id === selectedId)
-
-  return (
-    <div className="ks-dock-card ks-text-dock">
-      <div className="ks-dialogue-templates">
-        <div className="ks-dialogue-template-label ks-mono">拖入时间轴 · 添加文字</div>
-        <div className="ks-dialogue-template-row">
-          <DragChip
-            enabled
-            label="标题文字"
-            payload={{ kind: 'textOverlay', text: '标题文字', defaultDurationMs: 3000 }}
-          />
-          <DragChip
-            enabled
-            label="花字"
-            payload={{ kind: 'textOverlay', text: '双击编辑', defaultDurationMs: 2000 }}
-          />
-        </div>
-      </div>
-      <div className="ks-dialogue-detail-divider" />
-      <div className="ks-dialogue-detail">
-        <div className="ks-dialogue-template-label ks-mono">详情 · 编辑</div>
-        {!selected ? (
-          <div className="ks-dialogue-empty ks-mono">
-            在时间轴 TXT 轨上点击一段文字来编辑；或先把上面的文字拖入时间轴
-          </div>
-        ) : (
-          <TextOverlayEditor key={selected.id} clip={selected} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-const WEIGHT_OPTIONS: { v: number; label: string }[] = [
-  { v: 300, label: '细' },
-  { v: 400, label: '常规' },
-  { v: 600, label: '中粗' },
-  { v: 700, label: '粗' },
-  { v: 900, label: '特粗' },
-]
-
-function TextOverlayEditor({ clip }: { clip: TextOverlayClip }) {
-  const sceneId = useScenarioStore((s) => s.selectedSceneId)
-  const update = useScenarioStore((s) => s.updateTextOverlay)
-  const patch = useCallback(
-    (p: Partial<Omit<TextOverlayClip, 'id'>>) => update(sceneId, clip.id, p),
-    [update, sceneId, clip.id],
-  )
-
-  // 文字内容：本地缓冲，blur 才提交（避免 IME 逐字符刷 zundo 历史）
-  const [draftText, setDraftText] = useState(clip.text)
-  useEffect(() => {
-    setDraftText((cur) => (cur === clip.text ? cur : clip.text))
-  }, [clip.text])
-  const draftRef = useRef(draftText)
-  draftRef.current = draftText
-  const flushText = useCallback(() => {
-    if (draftRef.current !== clip.text) patch({ text: draftRef.current })
-  }, [patch, clip.text])
-  useEffect(() => () => flushText(), [flushText])
-
-  return (
-    <div className="ks-text-edit">
-      <label className="ks-dock-field">
-        <span>文字内容</span>
-        <textarea
-          rows={2}
-          value={draftText}
-          onChange={(e) => setDraftText(e.target.value)}
-          onBlur={flushText}
-          placeholder="输入要显示的文字"
-        />
-      </label>
-
-      <label className="ks-dock-field">
-        <span>字体</span>
-        <select
-          value={clip.fontFamily ?? 'sans'}
-          onChange={(e) => patch({ fontFamily: e.target.value })}
-        >
-          {FONT_PRESETS.map((f) => (
-            <option key={f.key} value={f.key}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="ks-dock-field">
-        <span>字重</span>
-        <div className="ks-dock-seg">
-          {WEIGHT_OPTIONS.map((w) => (
-            <SegBtn
-              key={w.v}
-              cur={String(clip.fontWeight ?? 700)}
-              me={String(w.v)}
-              onSel={() => patch({ fontWeight: w.v })}
-              label={w.label}
-            />
-          ))}
-        </div>
-      </label>
-
-      <div className="ks-text-row2">
-        <label className="ks-dock-field">
-          <span>字号 {Math.round(clip.fontSizePct ?? 7)}%</span>
-          <input
-            type="range"
-            min={2}
-            max={24}
-            step={0.5}
-            value={clip.fontSizePct ?? 7}
-            onChange={(e) => patch({ fontSizePct: Number(e.target.value) })}
-          />
-        </label>
-        <div className="ks-text-style-toggles">
-          <button
-            type="button"
-            className={`ks-text-tg ${clip.italic ? 'is-on' : ''}`}
-            style={{ fontStyle: 'italic' }}
-            onClick={() => patch({ italic: !clip.italic })}
-            title="斜体"
-          >
-            I
-          </button>
-          <button
-            type="button"
-            className={`ks-text-tg ${clip.underline ? 'is-on' : ''}`}
-            style={{ textDecoration: 'underline' }}
-            onClick={() => patch({ underline: !clip.underline })}
-            title="下划线"
-          >
-            U
-          </button>
-        </div>
-      </div>
-
-      <label className="ks-dock-field">
-        <span>对齐</span>
-        <div className="ks-dock-seg">
-          <SegBtn cur={clip.align ?? 'center'} me="left" onSel={(v) => patch({ align: v })} label="左" />
-          <SegBtn cur={clip.align ?? 'center'} me="center" onSel={(v) => patch({ align: v })} label="中" />
-          <SegBtn cur={clip.align ?? 'center'} me="right" onSel={(v) => patch({ align: v })} label="右" />
-        </div>
-      </label>
-
-      <div className="ks-text-row2">
-        <label className="ks-dock-field">
-          <span>颜色</span>
-          <input
-            type="color"
-            value={clip.color ?? '#ffffff'}
-            onChange={(e) => patch({ color: e.target.value })}
-          />
-        </label>
-        <label className="ks-dock-field">
-          <span>描边</span>
-          <input
-            type="color"
-            value={clip.strokeColor ?? '#000000'}
-            onChange={(e) => patch({ strokeColor: e.target.value })}
-          />
-        </label>
-        <label className="ks-dock-field">
-          <span>描边宽 {clip.strokeWidth ?? 3}</span>
-          <input
-            type="range"
-            min={0}
-            max={12}
-            step={1}
-            value={clip.strokeWidth ?? 3}
-            onChange={(e) => patch({ strokeWidth: Number(e.target.value) })}
-          />
-        </label>
-      </div>
-
-      <label className="ks-dock-field">
-        <span>底色条</span>
-        <div className="ks-text-bg-row">
-          <button
-            type="button"
-            className={`ks-text-tg ${clip.bgColor ? '' : 'is-on'}`}
-            onClick={() => patch({ bgColor: undefined })}
-            title="无底色"
-          >
-            无
-          </button>
-          <input
-            type="color"
-            value={clip.bgColor ?? '#000000'}
-            onChange={(e) => patch({ bgColor: e.target.value })}
-          />
-        </div>
-      </label>
-
-      <div className="ks-text-row2">
-        <label className="ks-dock-field">
-          <span>旋转 {Math.round(clip.rotation ?? 0)}°</span>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            step={1}
-            value={clip.rotation ?? 0}
-            onChange={(e) => patch({ rotation: Number(e.target.value) })}
-          />
-        </label>
-        <label className="ks-dock-field">
-          <span>缩放 {(clip.scale ?? 1).toFixed(2)}×</span>
-          <input
-            type="range"
-            min={0.3}
-            max={3}
-            step={0.05}
-            value={clip.scale ?? 1}
-            onChange={(e) => patch({ scale: Number(e.target.value) })}
-          />
-        </label>
-        <label className="ks-dock-field">
-          <span>不透明 {Math.round((clip.opacity ?? 1) * 100)}%</span>
-          <input
-            type="range"
-            min={0.1}
-            max={1}
-            step={0.05}
-            value={clip.opacity ?? 1}
-            onChange={(e) => patch({ opacity: Number(e.target.value) })}
-          />
-        </label>
-      </div>
-
-      <div className="ks-text-hint ks-mono">
-        位置：在上方播放预览画面里直接拖拽这段文字摆放；时间：拖时间轴 TXT 轨左右把手。
-      </div>
-    </div>
-  )
-}
+// 文字飘字（花字）编辑已收敛到统一飘字 OverlayClip：创建走 EffectsRail「飘字」tab，
+// 编辑走视频 tab 的 MaterialInspector（按 kind 显示内容 + 样式预设 + 位置 + 结算开关）。
+// 原 TextOverlayDock / TextOverlayEditor 已退役。
 
 // 「分支」与「数值」不再占用时间轴右侧 Dock：
 //   · 分支（连线）在剧情树画布上直接拉线编辑；

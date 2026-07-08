@@ -4,11 +4,11 @@ import type {
   BranchKind,
   ConditionClause,
   Effect,
+  EffectOp,
   GameVariable,
   GameVariableKind,
   InventoryItem,
   Scenario,
-  VarEffect,
 } from '../../scenario/types'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
@@ -84,50 +84,90 @@ export function VarDefRow({
   )
 }
 
-/** 一组数值副作用编辑器（用于 scene.onEnterEffects 和 branch.effects）。 */
-export function EffectListEditor({
-  variables,
-  effects,
-  onChange,
-}: {
-  variables: GameVariable[]
-  effects: Effect[]
-  onChange: (effects: Effect[]) => void
-}) {
-  const firstVarId = variables[0]?.id ?? ''
-  const varEffects = effects.filter((e): e is VarEffect => e.kind === 'var')
-  const otherEffects = effects.filter((e) => e.kind !== 'var')
-  if (variables.length === 0) {
-    return <div className="ks-ne-empty">先定义变量，才能设置效果</div>
+const EFFECT_KIND_LABELS: Record<Effect['kind'], string> = {
+  var: '数值',
+  flag: '旗标',
+  item: '物品',
+  entityStat: '实体属性',
+  status: '状态',
+}
+
+interface EffectRegistries {
+  numberVars: GameVariable[]
+  flagVars: GameVariable[]
+  items: InventoryItem[]
+  entities: { id: string; name: string }[]
+  statuses: { id: string; name: string }[]
+}
+
+function newEffectId(): string {
+  return `eff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** 按可用注册表决定能新建哪些 effect 类型（无对应词汇表则不提供）。 */
+function effectKindOptions(reg: EffectRegistries): Effect['kind'][] {
+  const out: Effect['kind'][] = []
+  if (reg.numberVars.length) out.push('var')
+  if (reg.items.length) out.push('item')
+  if (reg.entities.length) out.push('entityStat')
+  if (reg.flagVars.length) out.push('flag')
+  if (reg.entities.length && reg.statuses.length) out.push('status')
+  return out
+}
+
+function makeDefaultEffect(kind: Effect['kind'], reg: EffectRegistries): Effect {
+  const id = newEffectId()
+  switch (kind) {
+    case 'var':
+      return { id, kind: 'var', varId: reg.numberVars[0]?.id ?? '', op: 'add', value: 1 }
+    case 'flag':
+      return { id, kind: 'flag', varId: reg.flagVars[0]?.id ?? '', value: true }
+    case 'item':
+      return { id, kind: 'item', itemId: reg.items[0]?.id ?? '', op: 'give', count: 1 }
+    case 'entityStat':
+      return { id, kind: 'entityStat', entityId: reg.entities[0]?.id ?? '', stat: 'hp', op: 'add', value: -10 }
+    case 'status':
+      return { id, kind: 'status', statusId: reg.statuses[0]?.id ?? '', entityId: reg.entities[0]?.id, op: 'add' }
   }
+}
+
+/** 单条 effect 行 —— kind 选择器 + 按 kind 渲染字段。 */
+function EffectRow({
+  eff,
+  kinds,
+  reg,
+  onChange,
+  onRemove,
+}: {
+  eff: Effect
+  kinds: Effect['kind'][]
+  reg: EffectRegistries
+  onChange: (next: Effect) => void
+  onRemove: () => void
+}) {
   return (
-    <>
-      {varEffects.map((eff) => (
-        <div className="ks-ne-row" key={eff.id}>
-          <select
-            className="ks-ne-name"
-            value={eff.varId}
-            onChange={(e) =>
-              onChange([...otherEffects, ...varEffects.map((x) => (x.id === eff.id ? { ...x, varId: e.target.value } : x))])
-            }
-          >
-            {variables.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
+    <div className="ks-ne-row">
+      <select
+        className="ks-ne-kind"
+        value={eff.kind}
+        onChange={(e) => onChange(makeDefaultEffect(e.target.value as Effect['kind'], reg))}
+        title="效果类型"
+      >
+        {kinds.map((k) => (
+          <option key={k} value={k}>
+            {EFFECT_KIND_LABELS[k]}
+          </option>
+        ))}
+      </select>
+
+      {eff.kind === 'var' && (
+        <>
+          <select className="ks-ne-name" value={eff.varId} onChange={(e) => onChange({ ...eff, varId: e.target.value })}>
+            {reg.numberVars.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
             ))}
           </select>
-          <select
-            className="ks-ne-kind"
-            value={eff.op}
-            onChange={(e) =>
-              onChange(
-                [...otherEffects, ...varEffects.map((x) =>
-                  x.id === eff.id ? { ...x, op: e.target.value as 'add' | 'set' } : x,
-                )],
-              )
-            }
-          >
+          <select className="ks-ne-op" value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as EffectOp })}>
             <option value="add">增加</option>
             <option value="set">设为</option>
           </select>
@@ -135,28 +175,157 @@ export function EffectListEditor({
             className="ks-ne-init"
             type="number"
             value={eff.value}
-            onChange={(e) =>
-              onChange(
-                [...otherEffects, ...varEffects.map((x) =>
-                  x.id === eff.id ? { ...x, value: Number(e.target.value) || 0 } : x,
-                )],
-              )
-            }
+            onChange={(e) => onChange({ ...eff, value: Number(e.target.value) || 0 })}
           />
-          <button
-            type="button"
-            className="ks-ne-del"
-            onClick={() => onChange([...otherEffects, ...varEffects.filter((x) => x.id !== eff.id)])}
-            title="删除效果"
+        </>
+      )}
+
+      {eff.kind === 'flag' && (
+        <>
+          <select className="ks-ne-name" value={eff.varId} onChange={(e) => onChange({ ...eff, varId: e.target.value })}>
+            {reg.flagVars.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+          <select
+            className="ks-ne-op"
+            value={eff.value ? '1' : '0'}
+            onChange={(e) => onChange({ ...eff, value: e.target.value === '1' })}
           >
-            ✕
-          </button>
-        </div>
+            <option value="1">设为真</option>
+            <option value="0">设为假</option>
+          </select>
+        </>
+      )}
+
+      {eff.kind === 'item' && (
+        <>
+          <select className="ks-ne-name" value={eff.itemId} onChange={(e) => onChange({ ...eff, itemId: e.target.value })}>
+            {reg.items.map((it) => (
+              <option key={it.id} value={it.id}>{it.name}</option>
+            ))}
+          </select>
+          <select className="ks-ne-op" value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as 'give' | 'take' })}>
+            <option value="give">获得</option>
+            <option value="take">消耗</option>
+          </select>
+          <input
+            className="ks-ne-init"
+            type="number"
+            min={1}
+            value={eff.count}
+            onChange={(e) => onChange({ ...eff, count: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </>
+      )}
+
+      {eff.kind === 'entityStat' && (
+        <>
+          <select className="ks-ne-name" value={eff.entityId} onChange={(e) => onChange({ ...eff, entityId: e.target.value })}>
+            {reg.entities.map((en) => (
+              <option key={en.id} value={en.id}>{en.name}</option>
+            ))}
+          </select>
+          <select className="ks-ne-op" value={eff.stat} onChange={(e) => onChange({ ...eff, stat: e.target.value as 'hp' | 'qi' | 'shield' })}>
+            <option value="hp">HP</option>
+            <option value="qi">气力</option>
+            <option value="shield">护盾</option>
+          </select>
+          <select className="ks-ne-op" value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as EffectOp })}>
+            <option value="add">增减</option>
+            <option value="set">设为</option>
+          </select>
+          <input
+            className="ks-ne-init"
+            type="number"
+            value={eff.value}
+            onChange={(e) => onChange({ ...eff, value: Number(e.target.value) || 0 })}
+          />
+        </>
+      )}
+
+      {eff.kind === 'status' && (
+        <>
+          <select className="ks-ne-name" value={eff.statusId} onChange={(e) => onChange({ ...eff, statusId: e.target.value })}>
+            {reg.statuses.map((st) => (
+              <option key={st.id} value={st.id}>{st.name}</option>
+            ))}
+          </select>
+          <select className="ks-ne-op" value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as 'add' | 'remove' })}>
+            <option value="add">施加</option>
+            <option value="remove">移除</option>
+          </select>
+          <select
+            className="ks-ne-name"
+            value={eff.entityId ?? ''}
+            onChange={(e) => onChange({ ...eff, entityId: e.target.value || undefined })}
+            title="作用目标（缺省 = 默认目标）"
+          >
+            <option value="">默认目标</option>
+            {reg.entities.map((en) => (
+              <option key={en.id} value={en.id}>{en.name}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      <button type="button" className="ks-ne-del" onClick={onRemove} title="删除效果">
+        ✕
+      </button>
+    </div>
+  )
+}
+
+/**
+ * 一组副作用编辑器（用于 scene.onEnterEffects 和 branch.effects）。
+ * 支持 var / flag / item / entityStat / status 五类；可新建的 kind 取决于传入的
+ * 注册表（无变量则不能建 var，无物品则不能建 item……），避免建出空引用的效果。
+ */
+export function EffectListEditor({
+  variables,
+  effects,
+  onChange,
+  items = [],
+  entities = [],
+  statuses = [],
+}: {
+  variables: GameVariable[]
+  effects: Effect[]
+  onChange: (effects: Effect[]) => void
+  /** 背包物品（非空时可建「获得/消耗物品」）。 */
+  items?: InventoryItem[]
+  /** 玩法实体（非空时可建「实体属性」「状态」）。 */
+  entities?: { id: string; name: string }[]
+  /** 状态注册表（配合 entities 非空时可建「状态」）。 */
+  statuses?: { id: string; name: string }[]
+}) {
+  const reg: EffectRegistries = {
+    numberVars: variables.filter((v) => v.kind === 'number'),
+    flagVars: variables.filter((v) => v.kind === 'flag'),
+    items,
+    entities,
+    statuses,
+  }
+  const kinds = effectKindOptions(reg)
+  if (kinds.length === 0) {
+    return <div className="ks-ne-empty">先定义变量 / 物品 / 实体，才能设置效果</div>
+  }
+  return (
+    <>
+      {effects.map((eff) => (
+        <EffectRow
+          key={eff.id}
+          eff={eff}
+          kinds={kinds}
+          reg={reg}
+          onChange={(next) => onChange(effects.map((x) => (x.id === eff.id ? next : x)))}
+          onRemove={() => onChange(effects.filter((x) => x.id !== eff.id))}
+        />
       ))}
       <button
         type="button"
         className="ks-ne-addbtn"
-        onClick={() => onChange([...effects, { id: `var-${Date.now().toString(36)}`, kind: 'var', varId: firstVarId, op: 'add', value: 1 }])}
+        onClick={() => onChange([...effects, makeDefaultEffect(kinds[0]!, reg)])}
       >
         ＋ 新增效果
       </button>
@@ -487,6 +656,7 @@ export function BranchGateEditor({
   items = [],
   onPatch,
   onRemove,
+  lockKind = false,
 }: {
   branch: Branch
   scenario: Scenario
@@ -495,6 +665,8 @@ export function BranchGateEditor({
   items?: InventoryItem[]
   onPatch: (patch: Partial<Branch>) => void
   onRemove?: () => void
+  /** true = 锁定分支触发类型（不渲染 kind 下拉）。用于「选项」检视器：语境已固定为玩家选择。 */
+  lockKind?: boolean
 }) {
   const clauses = branch.condition?.all ?? []
   const sceneOptions = useMemo(
@@ -530,17 +702,19 @@ export function BranchGateEditor({
       </div>
 
       <div className="ks-ne-gate-typerow">
-        <select
-          className="ks-ne-kind"
-          value={branch.kind}
-          onChange={(e) => onPatch({ kind: e.target.value as BranchKind })}
-          title="分支连线类型"
-        >
-          <option value="choice">玩家选择</option>
-          <option value="auto">自动续播</option>
-          <option value="qte_pass">QTE 通过</option>
-          <option value="qte_fail">QTE 失败</option>
-        </select>
+        {!lockKind && (
+          <select
+            className="ks-ne-kind"
+            value={branch.kind}
+            onChange={(e) => onPatch({ kind: e.target.value as BranchKind })}
+            title="分支连线类型"
+          >
+            <option value="choice">玩家选择</option>
+            <option value="auto">自动续播</option>
+            <option value="qte_pass">QTE 通过</option>
+            <option value="qte_fail">QTE 失败</option>
+          </select>
+        )}
         <input
           className="ks-ne-gate-labelinput"
           value={branch.label ?? ''}
@@ -629,6 +803,9 @@ export function BranchGateEditor({
         variables={variables}
         effects={branch.effects ?? []}
         onChange={(effects) => onPatch({ effects: effects.length ? effects : undefined })}
+        items={items}
+        entities={entityOptions}
+        statuses={statusOptions}
       />
     </div>
   )

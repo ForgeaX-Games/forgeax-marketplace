@@ -1,17 +1,14 @@
-import type { DecisionSpec, QTECue, QTESpec, Scene } from '../scenario/types'
+import type { QTECue, QTESpec, Scene } from '../scenario/types'
 import type { QteKind } from '../scenario/gameplayTypes'
-import { resolveOptType } from '../player/choiceTiming'
 
-const DEFAULT_WINDOW = { perfect: 120, great: 280, good: 500 }
+const DEFAULT_TOLERANCE = { perfect: 120, great: 280, good: 500 }
 const DEFAULT_SCORE = { perfect: 100, great: 60, good: 30, miss: 0 }
 
-/** 按原型 qteKind 生成默认 cues（作者未手写 qte 时）。 */
-export function buildQteFromKind(
-  kind: QteKind,
-  scene: Pick<Scene, 'durationMs' | 'decision'>,
-): QTESpec {
-  const start = scene.decision?.windowStartMs ?? scene.decision?.atMs ?? 800
-  const end = scene.decision?.windowEndMs ?? Math.min(scene.durationMs, start + 4000)
+/** 按 qteKind 生成默认 cues（作者未手写 cues 时）。 */
+export function buildQteFromKind(kind: QteKind, scene: Pick<Scene, 'durationMs' | 'qte'>): QTESpec {
+  const w = scene.qte?.window
+  const start = w?.startMs ?? 800
+  const end = w?.endMs ?? Math.min(scene.durationMs, start + 4000)
   const mid = start + (end - start) * 0.45
 
   const baseCue = (id: string, shape: QTECue['shape'], targetAt: number, extra?: Partial<QTECue>): QTECue => ({
@@ -55,40 +52,35 @@ export function buildQteFromKind(
   }
 
   return {
-    window: DEFAULT_WINDOW,
+    tolerance: DEFAULT_TOLERANCE,
     score: DEFAULT_SCORE,
     passingScore: 30,
-    timeoutMs: end - start + 800,
+    window: { timeoutMs: end - start + 800 },
     cues,
+    template: kind,
   }
 }
 
-/** 合并 scene.qte 与 decision.qteKind 预设；timed_qte 无 qte 时自动生成。 */
+/** 解析场景实际使用的 QTESpec —— cues 为空且有 template 时按种子生成。 */
 export function resolveSceneQte(scene: Scene): QTESpec | undefined {
-  const optType = resolveOptType(scene.decision)
-  const kind = scene.decision?.qteKind
-  if (scene.qte?.cues?.length) {
-    if (kind === 'parry' && scene.qte.cues.length === 1) {
+  const qte = scene.qte
+  if (qte?.cues?.length) {
+    if (qte.template === 'parry' && qte.cues.length === 1) {
       return {
-        ...scene.qte,
-        cues: scene.qte.cues.map((c) => ({
+        ...qte,
+        cues: qte.cues.map((c) => ({
           ...c,
           label: c.label ?? '空格 · 防反',
           triggerKey: c.triggerKey ?? ' ',
         })),
       }
     }
-    return scene.qte
+    return qte
   }
-  if (optType === 'timed_qte' && kind) {
-    return buildQteFromKind(kind, scene)
-  }
-  if (scene.kind === 'qte' && kind) {
-    return buildQteFromKind(kind, scene)
-  }
-  return scene.qte
+  if (qte?.template) return buildQteFromKind(qte.template, scene)
+  return qte
 }
 
-export function qteKindFromDecision(d?: DecisionSpec): QteKind | undefined {
-  return d?.qteKind
+export function qteKindFromScene(scene: Scene): QteKind | undefined {
+  return scene.qte?.template
 }

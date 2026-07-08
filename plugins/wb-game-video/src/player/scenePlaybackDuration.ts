@@ -1,4 +1,4 @@
-import { getVideoClip } from '../scenario/gameAssetCatalog'
+import { clipIdFromMediaRef, getVideoClip } from '../scenario/gameAssetCatalog'
 import type { Scene } from '../scenario/types'
 
 /**
@@ -11,7 +11,7 @@ export function resolveScenePlaybackDurationMs(
   opts?: { fallbackMs?: number; videoEl?: HTMLVideoElement | null; loop?: boolean },
 ): number {
   const sceneMs = scene?.durationMs ?? 0
-  const catalogDur = getVideoClip(scene?.clipId)?.durMs ?? 0
+  const catalogDur = getVideoClip(clipIdFromMediaRef(scene?.media?.ref))?.durMs ?? 0
   const videoEl = opts?.videoEl
   const videoDur =
     videoEl && Number.isFinite(videoEl.duration) && videoEl.duration > 0.1

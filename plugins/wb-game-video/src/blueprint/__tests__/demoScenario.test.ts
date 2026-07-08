@@ -169,10 +169,9 @@ describe('real demo blueprint', () => {
     const wait = scenario.scenes.wait
 
     expect(wait?.mediaPlayMode).toBe('loop')
-    expect(wait?.decision).toMatchObject({
-      optType: 'static',
+    expect(wait?.choice).toMatchObject({
       prompt: '选择技能',
-      windowStartMs: 1000,
+      window: { startMs: 1000 },
       fireAt: 'on_pick',
     })
   })

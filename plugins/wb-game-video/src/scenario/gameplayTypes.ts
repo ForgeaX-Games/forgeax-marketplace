@@ -12,22 +12,20 @@
  */
 
 import type { QTESpec, BranchCondition, Effect } from './types'
+import type { CalcTypeId } from './calcTypes'
 
 // ============================================================================
-// 两级状态机 —— 场景类别
+// 交互形态 —— presence 存储 + 派生判别
 // ============================================================================
-
-/**
- * 场景类别 —— 两级状态机的「内层」行为分派。
- *
- *   story  纯叙事 / 过场（缺省，等价旧影游节点）
- *   battle Boss 战（挂 BossSpec，回合制结算）
- *   qte    以 QTE 为主的节点（节奏点 / sequence / 子弹时间）
- *   choice 以选择为主的节点（暂停 / 限时选择）
- *
- * 缺省 undefined = 'story'，保证旧剧本行为不变。
- */
-export type SceneKind = 'story' | 'battle' | 'qte' | 'choice'
+//
+// 一个 Scene 的「交互形态」不落库为显式 tag，而是由「哪个专属字段非空」决定：
+//   scene.boss   → boss（Boss 战）
+//   scene.qte    → qte（QTE 闯关）
+//   scene.calc   → calc（纯结算节点）
+//   scene.choice → choice（暂停 / 限时选择）
+//   四者皆空     → none（纯过场 / 叙事）
+// 约束：四者至多一个非空（lintScenario 校验）。判别集中在
+// player/choiceTiming.resolveInteraction()，投影成下方 Interaction 供 switch。
 
 /** 视频播放方式 —— 对齐原型「演出方式：循环 / 单次」。 */
 export type MediaPlayMode = 'once' | 'loop'
@@ -35,22 +33,73 @@ export type MediaPlayMode = 'once' | 'loop'
 /** HUD 方案 —— 对齐原型四档 + 叙事模式。 */
 export type HudPreset = 'hidden' | 'main' | 'battle' | 'explore' | 'narrative'
 
-/** 选项类型 —— 对齐原型 optType。 */
-export type DecisionOptType = 'static' | 'timed' | 'timed_qte'
-
 /** 选完分支后何时跳转 —— 对齐原型 fireAt。 */
 export type DecisionFireAt = 'on_pick' | 'video_end'
 
 /** 选项 UI 呈现 —— 对齐原型 optPresent。 */
 export type ChoicePresentation = 'list' | 'hotspot'
 
-/** QTE 交互形式 —— 对齐原型 qteKind。 */
+/** QTE 交互形式 —— 对齐原型 qteKind。仅编辑器生成 cues 种子用。 */
 export type QteKind = 'parry' | 'timing' | 'mash' | 'sequence' | 'sweep'
 
-/** QTE UI 变体 —— ext.qteUi 取值。 */
+/** QTE UI 变体 —— QTESpec.ui 取值。 */
 export type QteUi = 'default' | 'battleParry' | 'inkKou'
-/** 选项 UI 变体 —— ext.choiceUi 取值。 */
+/** 选项 UI 变体 —— ChoiceSpec.ui 取值。 */
 export type ChoiceUi = 'default' | 'battleSkillBar' | 'inkYingMo'
+
+/**
+ * 交互生效时窗 —— choice 显示/倒计时窗、qte 交互窗共用。
+ *   startMs 缺省 = 0；endMs 缺省 = scene.durationMs；timeoutMs 缺省 = 不额外限时。
+ */
+export interface TimeWindow {
+  startMs?: number
+  endMs?: number
+  timeoutMs?: number
+}
+
+/**
+ * 选择交互 —— 挂 Scene.choice。分支走 scene.branches(kind='choice')。
+ * 缺省（scene.choice 不存在）= 经典「场景结束后出选项」，不算交互节点。
+ */
+export interface ChoiceSpec {
+  /** true = 限时选择（配 window.timeoutMs 倒计时）；缺省/false = 不限时。 */
+  timed?: boolean
+  /** 显示 / 倒计时窗口。 */
+  window?: TimeWindow
+  /** 玩家提示文案（如「快做决定！」）。 */
+  prompt?: string
+  /** 超时缺省分支 id（不填 → 第一个满足条件的分支）。 */
+  defaultBranchId?: string
+  /** 选完何时跳转：即时 / 等视频结束。 */
+  fireAt?: DecisionFireAt
+  /** 清单式卡片 vs 画面热区（限时锁定 list）。 */
+  presentation?: ChoicePresentation
+  /** UI 变体（原 ext.choiceUi）。 */
+  ui?: ChoiceUi
+  /** 时间轴/画面层级；数值越大越靠上。 */
+  layer?: number
+}
+
+/**
+ * 计算节点 —— 挂 Scene.calc。纯结算（无玩家交互），运行时走 performance/branches，
+ * calcType 只是作者/蓝图的语义标签。
+ */
+export interface CalcSpec {
+  calcType: CalcTypeId
+}
+
+/**
+ * 交互形态的内存投影 —— 由 resolveInteraction(scene) 派生，**不落库**。
+ * 闭合 union：读者 switch(interaction.type) 即穷尽所有形态。
+ */
+export type Interaction =
+  | { type: 'none' }
+  | { type: 'choice'; choice: ChoiceSpec }
+  | { type: 'qte'; qte: QTESpec }
+  | { type: 'boss'; boss: BossSpec }
+  | { type: 'calc'; calc: CalcSpec }
+
+export type InteractionType = Interaction['type']
 
 // ============================================================================
 // 实体 —— HUD 血条 / Boss 战的状态载体
@@ -102,51 +151,6 @@ export interface StatusSpec {
   iconMediaId?: string
   /** 作者备注。 */
   desc?: string
-}
-
-// ============================================================================
-// 限时 / 暂停选择
-// ============================================================================
-
-/**
- * 选择呈现方式 —— 控制 scene.branches(kind='choice') 怎么弹给玩家。
- * 挂 Scene.decision；缺省 = 经典「场景结束后出选项」。
- *
- * 配置套路对齐 `视频交互原型.html` 蓝图右栏「选项」组。
- */
-export interface DecisionSpec {
-  /**
-   * 选项类型（原型 optType）：
-   *   static     = 不限时选项
-   *   timed      = 限时选项（配合 timeoutMs）
-   *   timed_qte  = 限时 QTE（无选项列表，走 qte_pass/fail）
-   */
-  optType?: DecisionOptType
-  /**
-   * 兼容旧字段：pause = 暂停等选；timed = 限时。
-   * optType 缺省时由 mode 推断。
-   */
-  mode?: 'pause' | 'timed' | 'wait'
-  /** 选项开始出现时刻（ms，相对 scene）。loop 节点边播边选。 */
-  atMs?: number
-  /** 选项显示窗口起点（ms）。缺省 = atMs ?? 0。 */
-  windowStartMs?: number
-  /** 选项显示窗口终点（ms）。缺省 = durationMs。 */
-  windowEndMs?: number
-  /** timed 模式倒计时（ms）。 */
-  timeoutMs?: number
-  /** 超时缺省分支 id（不填 → 第一个满足条件的分支）。 */
-  defaultBranchId?: string
-  /** 玩家提示文案（如「快做决定！」）。 */
-  prompt?: string
-  /** 选完何时跳转：即时 / 等视频结束（原型 fireAt）。 */
-  fireAt?: DecisionFireAt
-  /** 清单式卡片 vs 画面热区（原型 optPresent；限时锁定 list）。 */
-  presentation?: ChoicePresentation
-  /** 时间轴/画面层级；数值越大越靠上。 */
-  layer?: number
-  /** 限时 QTE 的交互形式（原型 qteKind）。 */
-  qteKind?: QteKind
 }
 
 // ============================================================================
@@ -234,25 +238,25 @@ export interface Hotspot {
 }
 
 // ============================================================================
-// 演出结算轴（Performance cues）—— seedance attackBeat / 原型结算时间轴
+// 通用结算 —— 所有产生数值变化的地方复用（QTE 判定 / performance cue / boss 回合 / calc）
 // ============================================================================
 
-/** 时间轴上的判定点 —— 到时刻触发一组状态变化，可选绑定飘字表现。 */
-export interface PerformanceCue {
-  id: string
-  /** 触发时刻（ms，相对 scene 起点）。 */
-  atMs: number
-  /** 触发时应用的状态变化。空数组表示纯判定/标记点。 */
-  effects: Effect[]
-  /** 编辑器/日志标签（可选）。 */
-  label?: string
-  /** 时间轴/画面层级；数值越大越靠上。 */
-  layer?: number
+/** 飘字表现 —— 结算的可选视觉；挂了才在画面 (x,y) 浮出 text。 */
+export interface FloatText {
+  text?: string
+  /** 归一化坐标 (0..1)；缺省居中偏上。 */
+  x?: number
+  y?: number
 }
 
-/** 挂 Scene.performance —— FMV 演出内的「attackBeat」扣血轴。 */
-export interface PerformanceSpec {
-  cues: PerformanceCue[]
+/**
+ * 通用结算单元 —— effects = 逻辑（必，空数组表示纯标记点），float = 表现（可选）。
+ * v13 起挂在 OverlayClip.settlement：飘字在其 startMs 触发 effects；float 为可选的
+ * 独立飘字表现（若 overlay 本身已可见则冗余，一般留空）。由 applyOverlaySettlement() 执行。
+ */
+export interface Settlement {
+  effects: Effect[]
+  float?: FloatText
 }
 
 // ============================================================================

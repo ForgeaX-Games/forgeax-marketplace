@@ -1,4 +1,5 @@
-import type { Scene, Scenario, SceneKind } from '../../scenario/types'
+import type { Scene, Scenario } from '../../scenario/types'
+import { resolveInteraction } from '../../player/choiceTiming'
 
 /**
  * 蓝图画布视觉 SSOT —— 对齐 `视频交互原型.html` §UE4 蓝图风格 (.bpg-* / .bp-type-*)。
@@ -45,11 +46,12 @@ export function resolveBpgType(
   if (scene.isEnding) {
     return { typeClass: 'end', accent: BPG_TYPE_ACCENTS.end, kindLabel: '结局' }
   }
-  const kind: SceneKind = scene.kind ?? 'story'
-  switch (kind) {
+  switch (resolveInteraction(scene).type) {
     case 'choice':
       return { typeClass: 'open', accent: BPG_TYPE_ACCENTS.open, kindLabel: '选择' }
-    case 'battle':
+    case 'calc':
+      return { typeClass: 'open', accent: BPG_TYPE_ACCENTS.open, kindLabel: '计算' }
+    case 'boss':
       return { typeClass: 'perf', accent: BPG_TYPE_ACCENTS.perf, kindLabel: 'Boss战' }
     case 'qte':
       return { typeClass: 'perf', accent: BPG_TYPE_ACCENTS.perf, kindLabel: 'QTE' }

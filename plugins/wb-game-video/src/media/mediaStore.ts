@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { putMedia, deleteMedia, getMedia } from './mediaIdb'
 import { gameQuery } from '../shell/gameScope'
+import { builtinVideoMediaSeeds } from '../scenario/gameAssetCatalog'
 
 /**
  * 媒体仓 —— 上传的视频/图像在此登记。
@@ -379,6 +380,31 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
  *   - 新 entry 来自 IDB 兜底（blob URL）→ 仅在 mediaStore 还没这条 id 时填充。
  *     不要让 IDB 路径覆盖 asset 路径写入的"权威 URL"。
  */
+/**
+ * 把内置演出库（gameAssetCatalog.VIDEO_CLIPS）作为只读种子灌进 mediaStore。
+ * 视频绑定收敛到 `scene.media.ref` 后，内置片段以稳定 `m-builtin-<clipId>` 出现在
+ * 素材库画廊里，与上传/生图产物并列；url 是构建期直链，恒可播，视作已落盘 'saved'。
+ * 幂等：已存在同 id 的条目不覆盖（用户不可能改动内置种子）。启动时调用一次即可。
+ */
+export function seedBuiltinVideoMedia(): void {
+  useMediaStore.setState((s) => {
+    const next = { ...s.entries }
+    for (const seed of builtinVideoMediaSeeds()) {
+      if (next[seed.id]) continue
+      next[seed.id] = {
+        id: seed.id,
+        name: seed.name,
+        mimeType: seed.mimeType,
+        size: seed.size,
+        url: seed.url,
+        createdAt: 0,
+        persistState: 'saved',
+      }
+    }
+    return { entries: next }
+  })
+}
+
 export function primeMediaEntry(entry: MediaEntry): void {
   const isAssetUrl = entry.url.startsWith('/__reel__/assets/')
   useMediaStore.setState((s) => {

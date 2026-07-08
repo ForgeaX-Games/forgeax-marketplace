@@ -11,8 +11,8 @@
  *  - qte(interaction)   三档判定：pass/good/fail 出口。
  *  - hotspot(interaction) 热点：每热点一个 hs:<id> 出口。
  */
-import type { GraphEffect } from './graph-schema'
-import type { KindPlugin } from './kind-registry'
+import type { GraphEffect, GraphTextStyle } from './graph-schema'
+import type { FormField, KindPlugin } from './kind-registry'
 import { registerKind } from './kind-registry'
 import { evalExpr } from './expr'
 
@@ -23,21 +23,33 @@ export interface SettleParams {
 export const settleKind: KindPlugin<SettleParams> = {
   kind: 'settle',
   role: 'logic',
+  label: '结算',
+  defaults: () => ({ effects: [] }),
+  form: [{ t: 'effects', key: 'effects', label: '效果' }],
   validate: (p) => (Array.isArray(p.effects) ? [] : ['settle.effects must be an array']),
   outputs: () => [],
   run: (_ctx, p) => ({ effects: p.effects ?? [] }),
 }
 
-// ── presentation: floatText（飘字：伤害数字那种飘起淡出，支持固定文案或动态表达式）──────
+// ── presentation: floatText（花字/飘字：文案飘起淡出，支持固定文案或动态表达式）──────
 export interface FloatTextParams {
   /** 固定文案；含 `{v}` 时用 expr 求值替换（如 "气力 {v}"）。 */
   text?: string
   /** 动态值表达式（如伤害 `-(entity.ent-player.attr.attack*2 - entity.ent-boss.attr.defense)`）。 */
   expr?: string
+  /** 归一化锚点（0~1，画面中心 0.5,0.5）。 */
   x?: number
   y?: number
+  /** 文本样式（预设快照，含 fontSizePct/描边/色/投影）。 */
+  style?: GraphTextStyle
+  /** 兜底文字色（无 style.color 时用；伤害飘字用）。 */
   color?: string
+  /** 飘起淡出总时长 ms。 */
   durationMs?: number
+  /** 入场动画预设 id（pop/fade/slide/floatUp…）。 */
+  enter?: string
+  /** 出场动画预设 id。 */
+  exit?: string
 }
 function signed(v: number): string {
   return v > 0 ? `+${v}` : String(v)
@@ -45,6 +57,17 @@ function signed(v: number): string {
 export const floatTextKind: KindPlugin<FloatTextParams> = {
   kind: 'floatText',
   role: 'presentation',
+  label: '花字/飘字',
+  defaults: () => ({ text: '', x: 0.5, y: 0.45 }),
+  form: [
+    { t: 'text', key: 'text', label: '文案', placeholder: '含 {v} 用 expr 替换' },
+    { t: 'text', key: 'expr', label: '表达式', placeholder: 'entity.ent-boss.attr.hp', mono: true },
+    { t: 'textStyle', key: 'style', label: '样式', group: 'overlay' },
+    { t: 'number', key: 'x', label: 'x', step: 0.05 },
+    { t: 'number', key: 'y', label: 'y', step: 0.05 },
+    { t: 'number', key: 'durationMs', label: '时长ms' },
+    { t: 'color', key: 'color', label: '兜底色', placeholder: '#ffd54a' },
+  ],
   validate: (p) => (p.text || p.expr ? [] : ['floatText 需要 text 或 expr']),
   outputs: () => [],
   // 到触发时机时按当前状态算出要飘的文本，emit 一个已解析的 renderOverlay（Player 只管飘起淡出动画）。
@@ -60,7 +83,7 @@ export const floatTextKind: KindPlugin<FloatTextParams> = {
         nodeId: ctx.nodeId,
         elementId: ctx.elementId ?? 'float',
         kind: 'floatText',
-        params: { text: display, x: p.x, y: p.y, color: p.color, durationMs: p.durationMs, float: true },
+        params: { text: display, x: p.x, y: p.y, color: p.color, style: p.style, durationMs: p.durationMs, enter: p.enter, exit: p.exit, float: true },
       },
     ]
   },
@@ -72,6 +95,12 @@ export interface ChoiceOption {
   label?: string
   effects?: GraphEffect[]
 }
+/** 选项呈现形态：列表 / 画面热区。 */
+export type ChoicePresentation = 'list' | 'hotspot'
+/** 选项 UI 皮肤（对齐 legacy ChoiceUi）。 */
+export type ChoiceUi = 'default' | 'battleSkillBar' | 'inkYingMo'
+/** 何时触发选择：立即结算 / 演出结束。 */
+export type ChoiceFireAt = 'on_pick' | 'video_end'
 export interface ChoiceParams {
   options: ChoiceOption[]
   /** 限时 ms（0/缺省=不限时）。 */
@@ -79,11 +108,28 @@ export interface ChoiceParams {
   /** 超时默认出口 key。 */
   defaultKey?: string
   prompt?: string
+  presentation?: ChoicePresentation
+  ui?: ChoiceUi
+  fireAt?: ChoiceFireAt
+  /** 热区（presentation='hotspot' 时按 key 对应画面区域）。 */
+  hotspots?: HotspotItem[]
 }
-function choiceLike(kind: string): KindPlugin<ChoiceParams> {
+const CHOICE_FORM: FormField[] = [
+  { t: 'text', key: 'prompt', label: '提示' },
+  { t: 'select', key: 'presentation', label: '呈现', options: [{ value: 'list', label: '列表' }, { value: 'hotspot', label: '热区' }] },
+  { t: 'select', key: 'ui', label: '皮肤', options: [{ value: 'default', label: '默认' }, { value: 'battleSkillBar', label: '战斗技能条' }, { value: 'inkYingMo', label: '水墨影魔' }] },
+  { t: 'select', key: 'fireAt', label: '触发', options: [{ value: 'on_pick', label: '选择即结算' }, { value: 'video_end', label: '演出结束' }] },
+  { t: 'number', key: 'timeoutMs', label: '限时ms' },
+  { t: 'text', key: 'defaultKey', label: '超时key' },
+  { t: 'options', key: 'options', label: '选项' },
+]
+function choiceLike(kind: string, label: string): KindPlugin<ChoiceParams> {
   return {
     kind,
     role: 'interaction',
+    label,
+    defaults: () => ({ options: [{ key: 'opt0', label: '选项一' }], presentation: 'list', ui: 'default', fireAt: 'on_pick' }),
+    form: CHOICE_FORM,
     validate: (p) =>
       Array.isArray(p.options) && p.options.length > 0 ? [] : [`${kind}.options must be non-empty`],
     outputs: (p) => (p.options ?? []).map((o) => ({ id: `opt:${o.key}`, label: o.label, kind })),
@@ -95,20 +141,67 @@ function choiceLike(kind: string): KindPlugin<ChoiceParams> {
     },
   }
 }
-export const choiceKind = choiceLike('choice')
-export const skillKind = choiceLike('skill')
+export const choiceKind = choiceLike('choice', '选项')
+export const skillKind = choiceLike('skill', '技能')
 
 // ── interaction: qte ──────────────────────────────────────────────────────────
+/** QTE 单拍的几何/判定形态（对齐 legacy QTECue.shape）。 */
+export type QteCueShape = 'tap' | 'hold' | 'sweep'
+export interface QteCue {
+  id: string
+  shape?: QteCueShape
+  /** 归一化坐标（0~1）。 */
+  x?: number
+  y?: number
+  /** 提示环出现 / 判定命中时刻（相对演出 ms）。 */
+  appearAt?: number
+  targetAt?: number
+  /** hold 时长 / sweep 划动窗口 ms。 */
+  durationMs?: number
+  /** sweep 方向。 */
+  sweepDir?: 'left' | 'right' | 'up' | 'down'
+  label?: string
+  /** 触发键（键盘）。 */
+  triggerKey?: string
+  /** 慢动作系数（<1 减速）。 */
+  slowMo?: number
+  layer?: number
+}
 export interface QteParams {
   qteKind?: 'parry' | 'timing' | 'mash' | 'sequence' | 'sweep'
   windowMs?: number
   passingHits?: number
-  cues?: unknown[]
+  /** 结构化拍点。 */
+  cues?: QteCue[]
+  /** 判定容差 ms。 */
+  tolerance?: number
+  /** 满分。 */
+  score?: number
+  /** 过关分数线。 */
+  passingScore?: number
+  /** sequence 型的按键序列。 */
+  sequence?: string[]
+  /** 整段限时窗口（覆盖 windowMs 的精细控制）。 */
+  window?: { startMs?: number; endMs?: number; timeoutMs?: number }
+  /** UI 皮肤 id。 */
+  ui?: string
   outcomeLabels?: Record<string, string>
 }
 export const qteKind: KindPlugin<QteParams> = {
   kind: 'qte',
   role: 'interaction',
+  label: 'QTE',
+  defaults: () => ({ qteKind: 'parry', cues: [], passingHits: 1 }),
+  form: [
+    { t: 'select', key: 'qteKind', label: 'QTE型', options: [{ value: 'parry', label: '完美防反' }, { value: 'timing', label: '打点' }, { value: 'mash', label: '连打' }, { value: 'sequence', label: '连招' }, { value: 'sweep', label: '划动' }] },
+    { t: 'number', key: 'passingHits', label: '过关次' },
+    { t: 'number', key: 'passingScore', label: '过关分' },
+    { t: 'number', key: 'tolerance', label: '容差ms' },
+    { t: 'number', key: 'score', label: '满分' },
+    { t: 'number', key: 'windowMs', label: '窗口ms' },
+    { t: 'text', key: 'ui', label: '皮肤' },
+    { t: 'qteCues', key: 'cues', label: '拍点' },
+  ],
   validate: () => [],
   outputs: () => [{ id: 'pass', kind: 'qte' }, { id: 'good', kind: 'qte' }, { id: 'fail', kind: 'qte' }],
   resolve: (_ctx, p, input) => {
@@ -128,10 +221,24 @@ export interface DialogueParams {
   speaker?: string
   text: string
   color?: string
+  /** 文本样式（字幕预设快照）。 */
+  style?: GraphTextStyle
+  /** 归一化位置（缺省=底部居中字幕带）。 */
+  x?: number
+  y?: number
 }
 export const dialogueKind: KindPlugin<DialogueParams> = {
   kind: 'dialogue',
   role: 'presentation',
+  label: '字幕/对白',
+  defaults: () => ({ text: '', speaker: '' }),
+  form: [
+    { t: 'text', key: 'speaker', label: '说话人' },
+    { t: 'text', key: 'text', label: '台词' },
+    { t: 'textStyle', key: 'style', label: '样式', group: 'subtitle' },
+    { t: 'number', key: 'x', label: 'x', step: 0.05 },
+    { t: 'number', key: 'y', label: 'y', step: 0.05 },
+  ],
   validate: (p) => (p.text ? [] : ['dialogue 需要 text']),
   outputs: () => [],
   // 无 render()：走引擎泛型 renderOverlay，Player 侧 dialogue 渲染器画底部对话框。
@@ -146,6 +253,13 @@ export interface TransitionParams {
 export const transitionKind: KindPlugin<TransitionParams> = {
   kind: 'transition',
   role: 'presentation',
+  label: '转场',
+  defaults: () => ({ durationMs: 600, style: 'fade' }),
+  form: [
+    { t: 'number', key: 'durationMs', label: '时长ms' },
+    { t: 'select', key: 'style', label: '样式', options: [{ value: 'fade', label: '淡入淡出' }, { value: 'wipe', label: '擦除' }] },
+    { t: 'color', key: 'color', label: '颜色', placeholder: '#000000' },
+  ],
   validate: () => [],
   outputs: () => [],
   // 无 render()：走引擎泛型 renderOverlay，Player 侧 transition 渲染器按 durationMs 做淡入淡出，换节点时随叠层清空。
@@ -165,6 +279,9 @@ export interface HotspotParams {
 export const hotspotKind: KindPlugin<HotspotParams> = {
   kind: 'hotspot',
   role: 'interaction',
+  label: '热点',
+  defaults: () => ({ hotspots: [] }),
+  form: [{ t: 'hotspots', key: 'hotspots', label: '热点' }],
   validate: (p) => (Array.isArray(p.hotspots) ? [] : ['hotspot.hotspots must be an array']),
   outputs: (p) => (p.hotspots ?? []).map((h) => ({ id: `hs:${h.id}`, label: h.label, kind: 'hotspot' })),
   resolve: (_ctx, _p, input) => ({ outcome: `hs:${String(input)}` }),

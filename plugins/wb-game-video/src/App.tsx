@@ -26,7 +26,7 @@ import { hydrateSceneImagesFromDisk } from './media/hydrateSceneImages'
 import { hydrateMediaFromAssets } from './media/hydrateMediaFromAssets'
 import { hydrateMediaFromIdb } from './media/hydrateMediaFromIdb'
 import { getAllMedia } from './media/mediaIdb'
-import { primeMediaEntry, useMediaStore } from './media/mediaStore'
+import { primeMediaEntry, seedBuiltinVideoMedia, useMediaStore } from './media/mediaStore'
 import { bootScenarioPersist, flushScenarioPersist } from './scenario/scenarioPersistBoot'
 import { primeNodiaNarrationMedia } from './scenario/nodiaNarrationMedia'
 import { loadReelGameFromPackIndex } from './player/loadReelGameFromPackIndex'
@@ -345,9 +345,6 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
         scenarioId: currentScenarioId,
       })
       for (const e of Object.values(entries)) primeMediaEntry(e)
-      // nodia 旁白（narr-*）以项目内 bundle 为权威：reel hydrate 会把 m-narr-* 覆盖回
-      // /__reel__/assets 直链，这里在每次 hydrate 后重灌 bundle URL，确保离线可播、不被覆盖。
-      primeNodiaNarrationMedia()
       // IDB 兜底独立跑一次（见下方 mount 时的 getAllMedia），不在这里重复
     }
 
@@ -360,8 +357,6 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
       if (records.length === 0) return
       const idbEntries = hydrateMediaFromIdb(records)
       for (const e of Object.values(idbEntries)) primeMediaEntry(e)
-      // 同上：bundle 优先，IDB 兜底不得覆盖 nodia 旁白的项目内 URL。
-      primeNodiaNarrationMedia()
     })
 
     /*
@@ -525,8 +520,12 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
   }, [])
 
   useEffect(() => {
+    // 内置演出库（VIDEO_CLIPS）→ mediaStore 只读种子（m-builtin-<id>）。
+    // 视频绑定收敛到 scene.media.ref 后，内置片段与上传产物在素材库画廊并列。
+    // 放在 memory-persistence 早退之前：试玩 / 内存态也要能按 ref 解析内置视频。
+    seedBuiltinVideoMedia()
     if (persistence === 'memory') return
-    // nodia 旁白视频（narr-*）：项目内 bundle，覆盖运行时 reel 直链，离线可播。
+    // 内置叙事旁白视频（narr-*）：启动即注册进 mediaStore，供 Scene.media.ref 解析（本地 bundle，离线可播）。
     primeNodiaNarrationMedia()
     /*
      * player-only 预览态 slim boot（2026-06）——

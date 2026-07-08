@@ -1,4 +1,4 @@
-import type { Branch, Effect, EntityStatEffect, Scenario, Scene, VarEffect } from './types'
+import type { Branch, ConditionClause, Effect, EntityStatEffect, OverlayClip, Scenario, Scene, VarEffect } from './types'
 
 export interface CombatRulesDraft {
   playerMaxHp: number
@@ -78,7 +78,11 @@ export function readCombatRules(scenario: Scenario): CombatRulesDraft {
     qiMax: qi?.max ?? 5,
     lightQiGain: varEffectValue(light, 'add', 2),
     heavyQiCost: Math.abs(varEffectValue(heavy, 'add', -2)),
-    ultQiRequired: ult?.condition?.all.find((c) => c.type === 'var' && c.varId === QI_ID)?.value ?? 5,
+    ultQiRequired:
+      ult?.condition?.all.find(
+        (c): c is Extract<ConditionClause, { type: 'var' }> =>
+          c.type === 'var' && c.varId === QI_ID,
+      )?.value ?? 5,
     lightDamage: firstDamageToBoss(scenario.scenes.pu, 80),
     heavyDamage: firstDamageToBoss(scenario.scenes.zhong, 144),
     ultDamage: firstDamageToBoss(scenario.scenes.ult, 240),
@@ -200,8 +204,8 @@ function qiEffects(op: VarEffect['op'], value: number): VarEffect[] {
 }
 
 function firstHpDamage(scene: Scene | undefined, entityId: string, fallback: number): number {
-  const effect = scene?.performance?.cues
-    .flatMap((cue) => cue.effects)
+  const effect = (scene?.overlays ?? [])
+    .flatMap((ov) => ov.settlement?.effects ?? [])
     .find((e): e is EntityStatEffect => e.kind === 'entityStat' && e.stat === 'hp' && e.entityId === entityId && e.value < 0)
   return effect ? Math.abs(effect.value) : fallback
 }
@@ -216,8 +220,11 @@ function updateSceneBranch(scene: Scene | undefined, branchId: string, patch: Pa
 
 function updateFirstCueDamage(scene: Scene | undefined, entityId: string, damage: number): Scene {
   if (!scene) throw new Error('missing scene for cue update')
-  const cues = scene.performance?.cues ?? []
-  const [first, ...rest] = cues.length > 0 ? cues : [{ id: `${scene.id}-rule`, atMs: 1000, effects: [] }]
+  const overlays = scene.overlays ?? []
+  const idx = overlays.findIndex((o) => o.settlement !== undefined)
+  const first: OverlayClip = idx >= 0
+    ? overlays[idx]!
+    : { id: `${scene.id}-rule`, kind: 'text', startMs: 1000, content: '', x: 0.5, y: 0.42, settlement: { effects: [] } }
   const nextEffect: EntityStatEffect = {
     id: `${first.id}-${entityId}-hp`,
     kind: 'entityStat',
@@ -226,13 +233,15 @@ function updateFirstCueDamage(scene: Scene | undefined, entityId: string, damage
     op: 'add',
     value: -Math.abs(damage),
   }
-  const effects: Effect[] = first.effects.some((e) => e.kind === 'entityStat' && e.stat === 'hp' && e.entityId === entityId)
-    ? first.effects.map((e) => (e.kind === 'entityStat' && e.stat === 'hp' && e.entityId === entityId ? nextEffect : e))
-    : [nextEffect, ...first.effects]
-  return {
-    ...scene,
-    performance: {
-      cues: [{ ...first, effects }, ...rest],
-    },
-  }
+  const prevEffects = first.settlement?.effects ?? []
+  const effects: Effect[] = prevEffects.some(
+    (e) => e.kind === 'entityStat' && e.stat === 'hp' && e.entityId === entityId,
+  )
+    ? prevEffects.map((e) =>
+        e.kind === 'entityStat' && e.stat === 'hp' && e.entityId === entityId ? nextEffect : e,
+      )
+    : [nextEffect, ...prevEffects]
+  const nextOverlay: OverlayClip = { ...first, settlement: { ...first.settlement, effects } }
+  const nextOverlays = idx >= 0 ? overlays.map((o, i) => (i === idx ? nextOverlay : o)) : [...overlays, nextOverlay]
+  return { ...scene, overlays: nextOverlays }
 }

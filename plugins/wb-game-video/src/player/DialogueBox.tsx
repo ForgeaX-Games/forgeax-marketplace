@@ -1,5 +1,7 @@
 import type { Scene } from '../scenario/types'
 import { deriveSubtitleView } from './subtitleSelect'
+import { hasTextStyle, resolveTextCss } from '../editor/textStyle'
+import { SUBTITLE_DEFAULT_XY } from '../scenario/textStylePresets'
 import { injectStyleOnce } from '../styles/injectStyle'
 
 interface Props {
@@ -30,18 +32,37 @@ export function DialogueBox({ scene, elapsed }: Props) {
 
   if (!active) return null
 
+  // 双路径：无自定义样式且无自定义位置 → 走历史 CSS 底栏（存量像素级一致，零回归）；
+  // 一旦作者应用了预设样式 / 拖过位置 → 走可定位 + 内联样式的自由层。
+  const styled = hasTextStyle(active.style) || active.x != null || active.y != null
+
+  if (!styled) {
+    return (
+      <div
+        className={`ks-sub ${view.isNarration ? 'is-narration' : 'is-spoken'}`}
+        role="status"
+        aria-live="polite"
+        // key: 不同台词间触发 fade-in 动画重放（同一条切换进/出时也能看到轻微淡入）
+        key={active.id}
+      >
+        <div className="ks-sub-line">
+          {view.speaker && <span className="ks-sub-speaker">{view.speaker}：</span>}
+          <span className="ks-sub-text">{active.text}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const x = active.x ?? SUBTITLE_DEFAULT_XY.x
+  const y = active.y ?? SUBTITLE_DEFAULT_XY.y
   return (
-    <div
-      className={`ks-sub ${view.isNarration ? 'is-narration' : 'is-spoken'}`}
-      role="status"
-      aria-live="polite"
-      // key: 不同台词间触发 fade-in 动画重放（同一条切换进/出时也能看到轻微淡入）
-      key={active.id}
-    >
-      <div className="ks-sub-line">
-        {view.speaker && (
-          <span className="ks-sub-speaker">{view.speaker}：</span>
-        )}
+    <div className="ks-sub-free" role="status" aria-live="polite">
+      <div
+        className={`ks-sub-free-item ${view.isNarration ? 'is-narration' : 'is-spoken'}`}
+        key={active.id}
+        style={{ left: `${x * 100}%`, top: `${y * 100}%`, ...resolveTextCss(active.style ?? {}) }}
+      >
+        {view.speaker && <span className="ks-sub-speaker">{view.speaker}：</span>}
         <span className="ks-sub-text">{active.text}</span>
       </div>
     </div>
@@ -115,6 +136,40 @@ const subtitleCss = `
 @media (max-width: 720px) {
   .ks-sub-line { font-size: 18px; }
   .ks-sub.is-narration .ks-sub-line { font-size: 18px; }
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * 自由定位字幕层 —— 作者应用了预设样式 / 拖过位置的字幕走这里。
+ * 满屏 container（container-type:size）让 fontSizePct 的 cqh 相对整幅画面解析，
+ * 与花字 / 预览一致。未被 style 显式设定的视觉项回落到本层的 CSS 基线。
+ * ──────────────────────────────────────────────────────────────── */
+.ks-sub-free {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  container-type: size;
+  overflow: hidden;
+}
+.ks-sub-free-item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 84%;
+  text-align: center;
+  font-family: var(--ks-font-cn);
+  font-size: clamp(18px, 1.65vw, 40px);
+  line-height: 1.55;
+  color: #ffffff;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+  text-shadow:
+    0 0 1px rgba(0,0,0,0.95),
+    1px 0 0 rgba(0,0,0,0.85),
+    -1px 0 0 rgba(0,0,0,0.85),
+    0 1px 0 rgba(0,0,0,0.85),
+    0 -1px 0 rgba(0,0,0,0.85),
+    0 2px 6px rgba(0,0,0,0.55);
+  animation: ks-sub-in 260ms ease-out;
 }
 `
 injectStyleOnce('subtitle', subtitleCss)

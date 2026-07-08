@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function isInkKouQte(scene: Scene | undefined): boolean {
-  return scene?.ext?.qteUi === 'inkKou'
+  return scene?.qte?.ui === 'inkKou'
 }
 
 export function InkKouLayer({ qte, onResolve, anchorX = 0.58, anchorY = 0.39, glyph = '叩' }: Props) {

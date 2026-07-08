@@ -30,10 +30,10 @@ describe('BlueprintGameplayPanel presentation controls', () => {
     expect(SOURCE).toContain('战斗防反按键')
   })
 
-  it('maps prototype calc group to scene.calcType with readonly settlement preview', () => {
+  it('maps prototype calc group to scene.calc with readonly settlement preview', () => {
     expect(SOURCE).toContain('function CalcSection')
     expect(SOURCE).toContain('计算类型')
-    expect(SOURCE).toContain('scene.calcType')
+    expect(SOURCE).toContain('scene.calc')
     expect(SOURCE).toContain('listPerformanceSettlements')
     expect(SOURCE).toContain('branchOutcomeLabels')
     expect(SOURCE).toContain('演出飘字')
@@ -50,7 +50,7 @@ describe('BlueprintGameplayPanel presentation controls', () => {
   })
 
   it('labels timed_qte section as QTE interaction not choice list', () => {
-    expect(SOURCE).toContain("'timed_qte' ? 'QTE 交互'")
+    expect(SOURCE).toContain("isQteNode ? 'QTE 交互'")
     expect(SOURCE).toContain('QTE 按键点')
   })
 

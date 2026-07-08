@@ -3,14 +3,13 @@ import {
   isLoopScene,
   qteInteractionWindowEnd,
   resolveFireAt,
-  resolveOptType,
   resolvePlaybackCapMs,
   shouldActivateTimedQte,
   shouldOpenChoiceDuringPlayback,
 } from '../choiceTiming'
 import { computeEffectiveEndMs } from '../sceneEndTime'
 import { getBlueprintCombatDemoScenario } from '../../scenario/demoScenario'
-import type { Scene } from '../scenario/types'
+import type { Scene } from '../../scenario/types'
 
 const loopChoiceScene: Scene = {
   id: 'l1',
@@ -19,11 +18,9 @@ const loopChoiceScene: Scene = {
   durationMs: 120000,
   dialogue: [],
   mediaPlayMode: 'loop',
-  decision: {
-    optType: 'timed',
-    mode: 'wait',
-    timeoutMs: 9000,
-    windowStartMs: 400,
+  choice: {
+    timed: true,
+    window: { timeoutMs: 9000, startMs: 400 },
   },
   branches: [
     { id: 'a', kind: 'choice', label: 'A', targetSceneId: 'x' },
@@ -32,11 +29,6 @@ const loopChoiceScene: Scene = {
 }
 
 describe('choiceTiming', () => {
-  it('resolveOptType prefers optType over legacy mode', () => {
-    expect(resolveOptType({ optType: 'timed_qte', mode: 'pause' })).toBe('timed_qte')
-    expect(resolveOptType({ mode: 'wait' })).toBe('timed')
-  })
-
   it('loop scene opens choice during playback window', () => {
     expect(isLoopScene(loopChoiceScene)).toBe(true)
     expect(shouldOpenChoiceDuringPlayback(loopChoiceScene, 500)).toBe(true)

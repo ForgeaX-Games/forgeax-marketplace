@@ -12,7 +12,7 @@
  * 二者以「同一份伤害数」驱动，不产生第二套真相。
  */
 
-import type { BossRound } from '../../scenario/types'
+import type { BossRound, EntityStatEffect } from '../../scenario/types'
 
 export interface BattleState {
   /** 当前回合下标(0-based)。 */
@@ -50,7 +50,10 @@ export function roundDamage(
 ): { toBoss: number; toPlayer: number } {
   const effects = hit ? round.hitEffects : round.missEffects
   const damage = (effects ?? [])
-    .filter((effect) => effect.kind === 'entityStat' && effect.stat === 'hp' && effect.value < 0)
+    .filter(
+      (effect): effect is EntityStatEffect =>
+        effect.kind === 'entityStat' && effect.stat === 'hp' && effect.value < 0,
+    )
     .reduce((sum, effect) => sum + Math.abs(effect.value), 0)
   return hit ? { toBoss: damage, toPlayer: 0 } : { toBoss: 0, toPlayer: damage }
 }

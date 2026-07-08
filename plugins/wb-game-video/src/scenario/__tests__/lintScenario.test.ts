@@ -41,7 +41,7 @@ describe('lintScenario', () => {
 
   it('errors on dangling branch target', () => {
     const scn = minimalScenario()
-    scn.scenes.s1.branches = [{ id: 'b1', kind: 'auto', targetSceneId: 'missing' }]
+    scn.scenes.s1!.branches = [{ id: 'b1', kind: 'auto', targetSceneId: 'missing' }]
     const r = lintScenario(scn)
     expect(r.ok).toBe(false)
     expect(r.issues.some((i) => i.code === 'branch.dangling_target')).toBe(true)
@@ -50,8 +50,7 @@ describe('lintScenario', () => {
   it('errors when boss win scene missing', () => {
     const scn = minimalScenario()
     scn.entities = { boss1: { id: 'boss1', name: 'Boss', kind: 'boss', maxHp: 100 } }
-    scn.scenes.s1.kind = 'battle'
-    scn.scenes.s1.boss = {
+    scn.scenes.s1!.boss = {
       entityId: 'boss1',
       rounds: [{ id: 'r1' }],
       winSceneId: 'nope',
@@ -63,9 +62,9 @@ describe('lintScenario', () => {
 
   it('errors on non-monotonic QTE window', () => {
     const scn = minimalScenario()
-    scn.scenes.s1.qte = {
+    scn.scenes.s1!.qte = {
       cues: [],
-      window: { perfect: 200, great: 100, good: 50 },
+      tolerance: { perfect: 200, great: 100, good: 50 },
       score: { perfect: 100, great: 50, good: 20, miss: -10 },
     }
     const r = lintScenario(scn)

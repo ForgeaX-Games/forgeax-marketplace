@@ -13,9 +13,9 @@
 import type {
   AdjustParams,
   ClipAnimSpec,
+  OverlayClip,
   Scene,
   Shot,
-  StickerClip,
 } from '../scenario/types'
 
 // ─────────────────────────────────────────────────────────────────────
@@ -254,9 +254,16 @@ export function composeSceneFx(scene: Scene, ms: number): SceneFxFrame {
   }
 }
 
-/** 当前激活的贴纸（按 ms 区间过滤）。 */
-export function activeStickers(scene: Scene, ms: number): StickerClip[] {
-  return (scene.stickerClips ?? []).filter((s) => inRange(ms, s.startMs, s.endMs))
+/**
+ * 当前激活的飘字 overlay（按 ms 命中 [startMs, endMs]；endMs 缺省 → 持续到结束）。
+ * 不过滤 content 空的纯逻辑触发器（是否渲染由 OverlayLayer 决定）。
+ */
+export function activeOverlays(scene: Scene, ms: number): OverlayClip[] {
+  return (scene.overlays ?? []).filter((o) => {
+    if (ms < o.startMs) return false
+    if (o.endMs === undefined) return true
+    return ms <= o.endMs
+  })
 }
 
 /** 转场进度：在 scene 开头 [0, durationMs] 内返回 0~1，否则 null。 */

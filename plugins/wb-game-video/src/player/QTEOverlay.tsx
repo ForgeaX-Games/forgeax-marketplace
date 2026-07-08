@@ -143,7 +143,7 @@ export function QTEOverlay({ spec, elapsed, verdicts, onResolve, ambientClass }:
       // hold 类不走超时 MISS：作者反馈"保持到时间就行"，没按也不该弹 miss；
       // 玩家不按则 hold 静默掠过（不进结算，不扣分），视觉上也没有外圈收缩暗示时机。
       if (c.shape === 'hold') continue
-      if (cueIsExpired(c, spec.window, now)) {
+      if (cueIsExpired(c, spec.tolerance, now)) {
         ctxRef.current.onResolve(c, Number.POSITIVE_INFINITY, 0)
       }
     }
@@ -169,7 +169,7 @@ export function QTEOverlay({ spec, elapsed, verdicts, onResolve, ambientClass }:
     let keyDown = false
     function onKeyDown(e: KeyboardEvent): void {
       const ctx = ctxRef.current
-      const cue = pickKeyboardCue(ctx.spec.cues, ctx.verdicts, ctx.spec.window, ctx.now, e.key)
+      const cue = pickKeyboardCue(ctx.spec.cues, ctx.verdicts, ctx.spec.tolerance, ctx.now, e.key)
       if (!cue || !isQTEKeyEvent(e, cue)) return
       // 浏览器在 hold 时会持续触发 keydown（auto-repeat）—— 必须自己去重
       if (e.repeat || keyDown) {
@@ -222,7 +222,7 @@ export function QTEOverlay({ spec, elapsed, verdicts, onResolve, ambientClass }:
     <div className={`ks-qte-layer${ambientClass ? ` ${ambientClass}` : ''}`}>
       {spec.cues.map((cue) => {
         const verdict = verdicts.find((v) => v.cueId === cue.id)
-        if (!shouldRenderCue(cue, spec.window, now, !!verdict, SPLASH_TAIL_MS)) {
+        if (!shouldRenderCue(cue, spec.tolerance, now, !!verdict, SPLASH_TAIL_MS)) {
           return null
         }
         const p = cueProgress(cue, now)

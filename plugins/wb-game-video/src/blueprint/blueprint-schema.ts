@@ -82,7 +82,7 @@ export const BLUEPRINT_HUD_MODES = [
 
 export type BlueprintHudMode = typeof BLUEPRINT_HUD_MODES[number]
 
-/** 两级状态机「内层」行为分派（对齐 gameplayTypes.SceneKind）。 */
+/** 两级状态机「内层」行为分派（对齐 resolveInnerMode 派生的四态）。 */
 export const BLUEPRINT_SCENE_KINDS = ['story', 'battle', 'qte', 'choice'] as const
 export type BlueprintSceneKind = typeof BLUEPRINT_SCENE_KINDS[number]
 
@@ -136,15 +136,15 @@ export interface BlueprintQte {
   outcomeLabels?: Partial<Record<QteOutcome, string>>
 }
 
-/** 限时 / 暂停选择（对齐 gameplayTypes.DecisionSpec 的运行时子集）。 */
+/** 限时 / 暂停选择（对齐 gameplayTypes.ChoiceSpec 的运行时子集）。 */
 export interface BlueprintDecision {
-  optType: 'static' | 'timed' | 'timed_qte'
+  optType: 'static' | 'timed'
   /** 选项出现时刻（ms）。 */
   atMs?: number
   /** 限时倒计时（ms）。 */
   timeoutMs?: number
-  /** 超时缺省目标节点 id。 */
-  defaultTarget?: string
+  /** 超时缺省分支 id（Branch.id，非节点 id）。 */
+  defaultBranchId?: string
   prompt?: string
   /** 选完何时跳转。 */
   fireAt?: 'on_pick' | 'video_end'

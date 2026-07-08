@@ -1,15 +1,16 @@
 import type {
   AdjustClip,
   AdjustParams,
-  Branch,
   DialogueLine,
   EffectClip,
   FilterClip,
   MinigameClip,
+  OverlayClip,
+  OverlayKind,
   QTECue,
   SearchSegmentClip,
-  StickerClip,
-  TextOverlayClip,
+  Settlement,
+  TextStyle,
 } from '../../scenario/types'
 import { clampMs } from './timelineMath'
 
@@ -48,10 +49,6 @@ export interface InsertOpts {
   sceneDurationMs: number
 }
 
-export interface InsertBranchOpts extends InsertOpts {
-  defaultTargetSceneId: string
-}
-
 export function makeInsertDialogue(opts: InsertOpts): DialogueLine {
   const minStart = 0
   // 给 endMs 留至少 100ms 余量，避免 start = duration 时 end 比 start 还小
@@ -85,17 +82,6 @@ export function makeInsertCue(opts: InsertOpts): QTECue {
   }
 }
 
-export function makeInsertBranch(opts: InsertBranchOpts): Branch {
-  const showAt = clampMs(opts.ms, 0, opts.sceneDurationMs)
-  return {
-    id: makeId('b'),
-    kind: 'choice',
-    label: '新选项',
-    targetSceneId: opts.defaultTargetSceneId,
-    showAt,
-  }
-}
-
 export interface InsertMinigameOpts extends InsertOpts {
   minigameId: string
   defaultDurationMs: number
@@ -118,36 +104,59 @@ export function makeInsertMinigame(opts: InsertMinigameOpts): MinigameClip {
   }
 }
 
-const TEXT_OVERLAY_DEFAULT_DURATION = 2500
+const OVERLAY_DEFAULT_DURATION = 2500
 
-export interface InsertTextOverlayOpts extends InsertOpts {
-  text?: string
+/** 统一飘字默认文字样式（含描边/投影，与旧花字默认一致）。 */
+const OVERLAY_TEXT_DEFAULT_STYLE: TextStyle = {
+  fontSizePct: 7,
+  fontWeight: 700,
+  color: '#ffffff',
+  strokeColor: '#000000',
+  strokeWidth: 3,
+  align: 'center',
+  shadow: true,
+}
+
+export interface InsertOverlayOpts extends InsertOpts {
+  kind: OverlayKind
+  /** 内容载荷，按 kind 解读：text→文本；icon→FX_STICKERS id；image→mediaStore id。 */
+  content: string
+  style?: TextStyle
+  sizePct?: number
+  enter?: string
+  settlement?: Settlement
   defaultDurationMs?: number
 }
 
-export function makeInsertTextOverlay(opts: InsertTextOverlayOpts): TextOverlayClip {
+/**
+ * 统一飘字工厂 —— 取代旧的 makeInsertTextOverlay + makeInsertStickerClip。
+ * 工具栏 5 个创建模板（花字/数值/emoji/图标/图片）都调它，只是传不同的
+ * kind / content / style / settlement 默认值。
+ */
+export function makeInsertOverlay(opts: InsertOverlayOpts): OverlayClip {
   const maxStart = Math.max(0, opts.sceneDurationMs - 100)
   const startMs = clampMs(opts.ms, 0, maxStart)
-  const dur = opts.defaultDurationMs ?? TEXT_OVERLAY_DEFAULT_DURATION
+  const dur = opts.defaultDurationMs ?? OVERLAY_DEFAULT_DURATION
   const endMs = clampMs(startMs + dur, startMs + 100, opts.sceneDurationMs)
-  return {
-    id: makeId('tx'),
-    text: opts.text ?? '双击编辑文字',
+  const clip: OverlayClip = {
+    id: makeId('ov'),
+    kind: opts.kind,
     startMs,
     endMs,
+    content: opts.content,
     x: 0.5,
-    y: 0.5,
-    fontSizePct: 7,
-    scale: 1,
+    y: opts.kind === 'text' ? 0.5 : 0.4,
     rotation: 0,
-    fontWeight: 700,
-    color: '#ffffff',
-    strokeColor: '#000000',
-    strokeWidth: 3,
-    align: 'center',
-    shadow: true,
     opacity: 1,
+    enter: opts.enter ?? 'pop',
   }
+  if (opts.kind === 'text') {
+    clip.style = opts.style ?? { ...OVERLAY_TEXT_DEFAULT_STYLE }
+  } else {
+    clip.sizePct = opts.sizePct ?? 12
+  }
+  if (opts.settlement) clip.settlement = opts.settlement
+  return clip
 }
 
 const SEARCH_SEGMENT_DEFAULT_DURATION = 4000
@@ -203,34 +212,6 @@ export function makeInsertEffectClip(
 ): EffectClip {
   const { startMs, endMs } = spanFromMs(opts, opts.defaultDurationMs ?? FX_DEFAULT_DURATION)
   return { id: makeId('efx'), startMs, endMs, presetId: opts.presetId, intensity: 1 }
-}
-
-export function makeInsertStickerClip(
-  opts: InsertOpts & {
-    stickerKind: StickerClip['kind']
-    text?: string
-    presetId?: string
-    mediaId?: string
-    defaultDurationMs?: number
-  },
-): StickerClip {
-  const { startMs, endMs } = spanFromMs(opts, opts.defaultDurationMs ?? FX_DEFAULT_DURATION)
-  return {
-    id: makeId('stk'),
-    startMs,
-    endMs,
-    kind: opts.stickerKind,
-    text: opts.text,
-    presetId: opts.presetId,
-    mediaId: opts.mediaId,
-    x: 0.5,
-    y: 0.4,
-    sizePct: 12,
-    scale: 1,
-    rotation: 0,
-    opacity: 1,
-    enter: 'pop',
-  }
 }
 
 /**

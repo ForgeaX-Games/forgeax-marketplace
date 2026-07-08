@@ -16,24 +16,26 @@
 // 视频游戏「玩法优先」扩展类型(v9) —— 集中在 gameplayTypes.ts，本文件只挂可选字段。
 // type-only import，编译期擦除，无运行时循环。
 import type {
-  SceneKind,
   EntitySpec,
   EntityAttr,
   StatusSpec,
-  DecisionSpec,
+  ChoiceSpec,
+  CalcSpec,
   BossSpec,
   Hotspot,
   UIConfig,
 } from './gameplayTypes'
 
 export type {
-  SceneKind,
   EntityKind,
   EntitySpec,
   EntityAttr,
   StatusSpec,
-  DecisionSpec,
-  DecisionOptType,
+  ChoiceSpec,
+  CalcSpec,
+  TimeWindow,
+  Interaction,
+  InteractionType,
   DecisionFireAt,
   ChoicePresentation,
   MediaPlayMode,
@@ -43,8 +45,8 @@ export type {
   BossSpec,
   Hotspot,
   HotspotDetour,
-  PerformanceCue,
-  PerformanceSpec,
+  Settlement,
+  FloatText,
   HudElement,
   HudRule,
   UIConfig,
@@ -78,6 +80,52 @@ export interface MediaRef {
 
 export type DialogueRole = 'narration' | 'protagonist' | 'character' | 'system'
 
+/**
+ * 文字视觉样式 —— 字幕（DialogueLine.style）与飘字（OverlayClip.style）共享的一层
+ * 「长什么样」描述（SSOT）。位置 / 旋转 / 尺寸不进这里：它们是载体自己的布局属性，
+ * 样式只管字体/色/描边/字号/对齐/底色/投影。全部可选，缺省由渲染层兜底
+ * （字幕走 DialogueBox 的 CSS 基线，飘字走 resolveTextCss 的 fillDefaults）。
+ */
+export interface TextStyle {
+  /** 字体族（FONT_PRESETS 的 key 或任意 css font-family）。 */
+  fontFamily?: string
+  /** 字重 100~900。 */
+  fontWeight?: number
+  italic?: boolean
+  underline?: boolean
+  /** 文字颜色。 */
+  color?: string
+  /** 描边颜色。 */
+  strokeColor?: string
+  /** 描边宽度（px @ 1080p 基准）。 */
+  strokeWidth?: number
+  /** 字号：画面高度百分比（如 6 = 画面高度的 6%），用 cqh 渲染，与分辨率无关。 */
+  fontSizePct?: number
+  /** 对齐。 */
+  align?: 'left' | 'center' | 'right'
+  /** 文字底色条（半透明矩形）；不填 → 无底色。 */
+  bgColor?: string
+  /** 透明度 0~1。 */
+  opacity?: number
+  /** 投影（drop shadow）。缺省 → 花字填充时默认叠投影；显式 false 关闭。 */
+  shadow?: boolean
+}
+
+/**
+ * 文字「预设样式」—— 预设网格里的一格。内置预设在 scenario/textStylePresets.ts；
+ * 用户自定义预设持久化到 Scenario.textStylePresets。应用采用**快照**语义：把 `style`
+ * 拷到目标 clip 上，之后各自独立微调（改预设不追溯已应用的实例）。
+ */
+export interface TextStylePreset {
+  id: string
+  name: string
+  style: TextStyle
+  /** 仅字幕预设：勾选后展示说话人前缀（映射到 DialogueLine 的 speaker）。 */
+  speakerPrefix?: boolean
+  /** 内置预设只读；用户自定义（存 Scenario.textStylePresets）可编辑 / 删除。 */
+  builtin?: boolean
+}
+
 export interface DialogueLine {
   id: string
   role: DialogueRole
@@ -91,62 +139,82 @@ export interface DialogueLine {
    * 不填 → 持续显示直到下一条台词或场景结束。
    */
   endMs?: number
-  /** 打字机速度（每字符 ms），不填用全局默认 */
+  /**
+   * 打字机速度（每字符 ms），不填用全局默认。
+   * @deprecated 逐字打字机效果当前运行时**未消费**（DialogueBox 整段渲染，无 typewriter；
+   *   defaultCharMs 亦仅在 prune/merge 里原样保留）。前端暂不暴露编辑入口，字段保留占位；
+   *   TODO(后续版本)：实现打字机时再启用 charMs / defaultCharMs 这条链。
+   */
   charMs?: number
   /** 时间轴/画面层级；数值越大越靠上。 */
   layer?: number
+  /**
+   * 视觉样式（预设快照）。缺省 → 走内置默认字幕样式（DialogueBox 的 CSS 基线）。
+   * 见 scenario/textStylePresets.ts 与 editor/textStyle.ts。
+   */
+  style?: TextStyle
+  /**
+   * 归一化画面位置（0~1）。缺省 → 走默认「底部居中字幕带」（不落 x/y = 归位态）。
+   * 复用花字的拖拽定位；「归位」= 清空 x/y 回到默认带。
+   */
+  x?: number
+  y?: number
 }
 
 /**
- * 富文本「文字叠加」—— v7（剪映 / Premiere 式贴字）。
- *
- * 与 DialogueLine 的区别：DialogueLine 是固定底栏电影字幕（绑 TTS / 叙事），
- * TextOverlayClip 是作者在画面任意位置自由摆放的装饰文字（标题卡、角标、台词花字），
- * 支持自由定位 / 缩放 / 旋转 / 字体 / 字号 / 粗细 / 颜色 / 描边 / 底色。
- *
- * 坐标 x/y 为归一化（0~1，相对画面），字号 fontSizePct 为画面高度百分比（用 cqh 渲染），
- * 这样在编辑器画布与播放器舞台上表现一致、与分辨率无关。
+ * 统一「飘字」载体的内容形态 —— 对应三条真实渲染路径：
+ *   · text  → content 是字面文本（含数字 / emoji），经 resolveTextCss(style) 排版成 DOM 文本。
+ *   · icon  → content 是内置矢量图标预设 id（FX_STICKERS），画 SVG。
+ *   · image → content 是 mediaStore id，渲 <img>。
+ * 旧的 numeric / emoji 折进 text（数值语义由独立的 settlement 承担、样式由预设承担）；
+ * 旧的 builtin 更名为 icon。
  */
-export interface TextOverlayClip {
+export type OverlayKind = 'text' | 'icon' | 'image'
+
+/**
+ * 「飘字」统一载体 —— 合并 v7 花字（TextOverlayClip）+ v8 贴纸/数值花字（StickerClip）
+ * + 演出结算轴（PerformanceCue）。作者在画面任意位置自由摆放的叠加元素：文字 / 图标 /
+ * 图片，可选带入/出场动画，可选挂结算（在 startMs 触发 effects）。
+ *
+ * 与 DialogueLine 的区别：DialogueLine 是固定底栏电影字幕（绑 TTS / 叙事）；OverlayClip
+ * 是自由摆放的装饰 / 反馈元素。两者共享 TextStyle 底座（DialogueLine.style / OverlayClip.style）。
+ *
+ * 坐标 x/y 归一化（0~1，画面中心 0.5,0.5）；文本字号走 style.fontSizePct（画面高度%），
+ * 非文本尺寸走 sizePct（画面高度%），用 cqh 渲染，与分辨率无关。
+ */
+export interface OverlayClip {
   id: string
-  text: string
+  kind: OverlayKind
   /** 出现时刻（相对 scene 起点，ms）。 */
   startMs: number
   /** 消失时刻（ms）；不填 → 持续到场景结束。 */
   endMs?: number
+  /**
+   * 内容载荷，按 kind 解读：text → 字面文本（含数字/emoji）；icon → FX_STICKERS 预设 id；
+   * image → mediaStore id。空串 + 有 settlement = 纯逻辑触发器（渲染层跳过）。
+   */
+  content: string
   /** 归一化锚点坐标（0~1，画面中心为 0.5,0.5）。 */
   x: number
   y: number
-  /** 字号：画面高度百分比（如 6 = 画面高度的 6%）。默认 6。 */
-  fontSizePct?: number
-  /** 自由缩放倍数（角柄拖拽，叠加在 fontSizePct 之上）。默认 1。 */
-  scale?: number
   /** 旋转角度（deg）。默认 0。 */
   rotation?: number
-  /** 字体族（FONT_PRESETS 的 key 或任意 css font-family）。 */
-  fontFamily?: string
-  /** 字重 100~900。默认 700。 */
-  fontWeight?: number
-  /** 斜体。 */
-  italic?: boolean
-  /** 下划线。 */
-  underline?: boolean
-  /** 文字颜色。默认 #ffffff。 */
-  color?: string
-  /** 描边颜色。 */
-  strokeColor?: string
-  /** 描边宽度（px @ 1080p 基准）。 */
-  strokeWidth?: number
-  /** 文字底色条（半透明矩形）；不填 → 无底色。 */
-  bgColor?: string
-  /** 对齐。默认 center。 */
-  align?: 'left' | 'center' | 'right'
-  /** 投影。默认 true。 */
-  shadow?: boolean
   /** 透明度 0~1。默认 1。 */
   opacity?: number
   /** 时间轴/画面层级；数值越大越靠上。缺省由渲染层按类型兜底。 */
   layer?: number
+  /** 非文本（icon/image）尺寸：画面高度百分比。默认 12。text 尺寸走 style.fontSizePct。 */
+  sizePct?: number
+  /** 文本样式（kind='text'）—— 嵌套 TextStyle，快照语义同字幕（含 shadow）。 */
+  style?: TextStyle
+  /** 入场动画预设 id（FX_CLIP_ANIM 子集：pop/fade/slide/floatUp…）。 */
+  enter?: string
+  /** 出场动画预设 id。 */
+  exit?: string
+  /** 结算（可缺省）：有则在 startMs 触发 effects；见 gameplayTypes.Settlement。 */
+  settlement?: import('./gameplayTypes.js').Settlement
+  /** 编辑器/日志标签（可选，主要给无可见内容的纯结算触发器用）。 */
+  label?: string
 }
 
 // ============================================================================
@@ -217,47 +285,6 @@ export interface EffectClip {
   presetId: string
   /** 强度 0~1，默认 1。 */
   intensity?: number
-  /** 时间轴/画面层级；数值越大越靠上。 */
-  layer?: number
-}
-
-/**
- * 贴纸 clip：画面上自由摆放的装饰元素。
- *   - kind='numeric'：数值花字（如「好感度 +1」），text 必填，走描边花字样式
- *   - kind='builtin' ：内置矢量图标（箭头/定位/问号/强调线...），presetId 指定
- *   - kind='emoji'   ：emoji 字符，text 存 emoji
- *   - kind='image'   ：素材库自定义图片，mediaId 指向 mediaStore
- */
-export interface StickerClip {
-  id: string
-  /** 可选绑定的结算事件；存在时该贴纸只是 PerformanceCue 的视觉表现，不参与结算。 */
-  performanceCueId?: string
-  startMs: number
-  endMs: number
-  kind: 'numeric' | 'builtin' | 'emoji' | 'image'
-  /** numeric/emoji 的文本内容。 */
-  text?: string
-  /** builtin 图标预设 id（FX_STICKERS）。 */
-  presetId?: string
-  /** image 类型引用的 mediaStore id。 */
-  mediaId?: string
-  /** 归一化锚点（0~1，中心 0.5,0.5）。 */
-  x: number
-  y: number
-  /** 基准尺寸：画面高度百分比。默认 12。 */
-  sizePct?: number
-  /** 自由缩放倍数。默认 1。 */
-  scale?: number
-  /** 旋转角度（deg）。默认 0。 */
-  rotation?: number
-  /** 主色（numeric/builtin 可用）。 */
-  color?: string
-  /** 透明度 0~1。默认 1。 */
-  opacity?: number
-  /** 入场动画预设 id（FX_CLIP_ANIM 子集，pop/fade/slide）。 */
-  enter?: string
-  /** 出场动画预设 id。 */
-  exit?: string
   /** 时间轴/画面层级；数值越大越靠上。 */
   layer?: number
 }
@@ -373,8 +400,8 @@ export interface QTEHitWindow {
 
 export interface QTESpec {
   cues: QTECue[]
-  /** 全局命中窗口（ms 容差，向 |delta| 比较） */
-  window: QTEHitWindow
+  /** 命中判定容差（ms，向 |delta| 比较）。原字段名 window，改名避免与交互时窗混淆。 */
+  tolerance: QTEHitWindow
   /** 单点评分配置 */
   score: {
     perfect: number
@@ -394,15 +421,20 @@ export interface QTESpec {
    */
   sequence?: boolean
   /**
-   * 整段超时 —— v9 新增。从首个 cue 出现起的总时限(ms)，超时即按失败结算
-   * (走 qte_fail / slowMo.failSceneId)。缺省 = 不额外限时(仍受各 cue 窗口约束)。
+   * QTE 交互生效时窗（原 decision.windowStart/End + qte.timeoutMs 合并）。
+   *   startMs 缺省 = 0；endMs 缺省 = durationMs；
+   *   timeoutMs = 从首个 cue 出现起的整段时限，超时按失败结算(走 qte_fail)。
    */
-  timeoutMs?: number
+  window?: import('./gameplayTypes.js').TimeWindow
   /**
    * 多档 QTE 展示标签。缺省保持传统 pass/fail；填写 good 时运行时/试玩可呈现
    * 原型里的三档防反（pass=完美、good=成功、fail=失败）。
    */
   outcomeLabels?: Partial<Record<QteOutcome, string>>
+  /** UI 变体（原 ext.qteUi）。缺省 = default。 */
+  ui?: import('./gameplayTypes.js').QteUi
+  /** 玩法种类 —— 仅编辑器在 cues 为空时生成种子用；运行时判定只看 cues。 */
+  template?: import('./gameplayTypes.js').QteKind
 }
 
 // ============================================================================
@@ -487,15 +519,10 @@ export interface Branch {
   /** 跳转目标 sceneId */
   targetSceneId: string
   /**
-   * 三档 QTE 的精确结果键。仅 timed_qte / qte 场景使用；不填时保持旧语义：
+   * 三档 QTE 的精确结果键。仅 qte 场景使用；不填时保持旧语义：
    * qte_pass = pass，qte_fail = fail。
    */
   qteOutcome?: QteOutcome
-  /**
-   * 选项出现的时刻（ms，仅 kind='choice' 有意义）；
-   * 不填 → 场景结束后才显示。
-   */
-  showAt?: number
   /**
    * 解锁条件 —— v6 新增（数值系统）。
    * 不满足时按 gateMode 隐藏或锁定。空 all[] / 缺省 = 无条件（始终可走）。
@@ -1527,13 +1554,12 @@ export interface Scene {
    */
   minigames?: MinigameClip[]
   /**
-   * 富文本文字叠加 clip —— v7 新增（剪映/PR 式贴字）。
-   *
-   * 时间轴上作为一条独立轨渲染（TXT 轨）；Player / 编辑器舞台在画面任意位置
-   * 自由摆放、缩放、旋转。与 dialogue（固定底栏字幕）并行、互不影响。
-   * 缺省 / 空数组 = 这场戏没有叠加文字。
+   * 统一「飘字」叠加元素 —— v13（合并 v7 花字 textOverlays + v8 贴纸 stickerClips
+   * + 演出结算轴 performance.cues）。文字 / 图标 / 图片，可选带入出场动画、可选挂
+   * 结算（settlement 在 startMs 触发 effects）。与 dialogue（固定底栏字幕）并行、互不影响。
+   * 缺省 / 空数组 = 这场戏没有飘字。
    */
-  textOverlays?: TextOverlayClip[]
+  overlays?: OverlayClip[]
   /**
    * 搜索段 clip —— v7 新增（道具搜索玩法）。
    *
@@ -1553,8 +1579,6 @@ export interface Scene {
   adjustClips?: AdjustClip[]
   /** 特效 clip（叠层动效，时间区间）。 */
   effectClips?: EffectClip[]
-  /** 贴纸 clip（画面装饰元素，时间区间）。 */
-  stickerClips?: StickerClip[]
   /** 入场转场（节点级，整段开头）。 */
   transition?: TransitionSpec
   /** 首尾动画（节点级，默认黑底渐显渐隐）。 */
@@ -1659,22 +1683,24 @@ export interface Scene {
    */
   episodeId?: string
 
-  // ── 视频游戏「玩法优先」扩展(v9) —— 全部可选，缺省即纯影游节点 ──
+  // ── 视频游戏「玩法优先」扩展 —— 交互形态由 presence 决定（boss/qte/calc/choice 至多一个非空）──
+  // 判别集中在 player/choiceTiming.resolveInteraction()，四者皆空 = 纯过场(story)。
   /**
-   * 场景类别 —— 两级状态机内层分派。缺省 = 'story'(纯叙事)。
-   * 见 gameplayTypes.SceneKind。
-   */
-  kind?: SceneKind
-  /**
-   * Boss 战配置 —— 仅 kind='battle' 有意义。回合制结算 + 胜负跳转。
+   * Boss 战配置 —— 回合制结算 + 胜负跳转。非空即 boss 交互。
    * 见 gameplayTypes.BossSpec。
    */
   boss?: BossSpec
   /**
-   * 选择呈现方式 —— 暂停 / 限时选择。作用于本场景 branches(kind='choice')。
-   * 缺省 = 经典「场景结束后出选项」。见 gameplayTypes.DecisionSpec。
+   * 选择交互 —— 暂停 / 限时选择。作用于本场景 branches(kind='choice')。
+   * 非空即 choice 交互；缺省 = 经典「场景结束后出选项」（不算交互节点）。
+   * 见 gameplayTypes.ChoiceSpec。
    */
-  decision?: DecisionSpec
+  choice?: ChoiceSpec
+  /**
+   * 计算节点 —— 纯结算，无玩家交互。非空即 calc 交互。
+   * 见 gameplayTypes.CalcSpec。
+   */
+  calc?: CalcSpec
   /**
    * 可点按热点 —— call/return 子流程(点画面进支线，结束返回)。
    * 与 v7 searchLoot(拾物) 区分。见 gameplayTypes.Hotspot。
@@ -1692,12 +1718,10 @@ export interface Scene {
    */
   subFlowRef?: string
   /**
-   * 演出编号 —— 引用「视频」固定资产库（gameAssetCatalog.VIDEO_CLIPS）里的一条
-   * 演出片段 id。蓝图节点配置面板的「演出编号」下拉写它；运行时（试玩）按它取
-   * 演出元数据并播放对应视频。缺省 = 该节点未指定演出（走自带 media / 黑场）。
-   */
-  clipId?: string
-  /**
+   * 演出来源 SSOT = `media.ref`（内置片段以 `m-builtin-<clipId>` 落入 mediaStore）。
+   * 历史 `clipId` 字段已在 schema v12 收敛进 media.ref；蓝图/运行时的 clipId 由
+   * `clipIdFromMediaRef(media.ref)` 在编译边界派生，不再持久化到 Scene 上。
+   *
    * 视频播放方式 —— loop 用于边播边选 / 探索热区。缺省 = once。
    * 见 gameplayTypes.MediaPlayMode。
    */
@@ -1713,21 +1737,13 @@ export interface Scene {
    */
   setFlags?: string[]
   /**
-   * 演出结算轴 —— 时间轴 attackBeat（扣血 / 飘字）。见 gameplayTypes.PerformanceSpec。
-   */
-  performance?: import('./gameplayTypes.js').PerformanceSpec
-  /**
-   * 蓝图「计算」组 —— 预定义计算类型 id（见 calcTypes.CALC_TYPE_CATALOG）。
-   * 有值时蓝图展示「计算」而非「选项」；具体时刻 / 飘字在视频时间轴编辑。
-   */
-  calcType?: import('./calcTypes.js').CalcTypeId
-  /**
    * 通用扩展属性位 —— 让作者 / Nodia 按「规则」往节点上挂任意自定义玩法维度，
    * 而不必把每个维度都沉淀成 typed schema 字段（保持核心 schema 稳定）。
    *
    * 语义约定：
-   *   - typed 一等字段（kind/boss/decision/hotspots/shots…）始终优先；ext 只承载
-   *     尚未一等化的自定义维度（如「界面方案」「阶段标签」「自定义数值」等）。
+   *   - typed 一等字段（boss/qte/choice/calc/hotspots/shots…）始终优先；ext 只承载
+   *     尚未一等化的自定义维度（如「阶段标签」「自定义数值」等）。UI 变体已一等化
+   *     到 qte.ui / choice.ui，不再走 ext。
    *   - 键 = 属性名（作者可读），值 = 标量 / 数组 / 对象（JSON 可序列化）。
    *   - 编辑期元数据：运行时不直接消费 ext；导出 / 迁移 / 复制一律原样保留。
    * 缺省 / 空对象 = 该节点没有自定义扩展属性。
@@ -1910,7 +1926,11 @@ export interface Scenario {
   scenes: Record<string, Scene>
   /** 层级子蓝图注册表；顶层图 = scenes 中不属于任何子图的节点。 */
   blueprintGraphs?: Record<string, ScenarioBlueprintGraph>
-  /** 全局打字机默认速度（ms / 字符） */
+  /**
+   * 全局打字机默认速度（ms / 字符）。
+   * @deprecated 打字机效果当前运行时未消费（见 DialogueLine.charMs）；字段保留占位以免破坏
+   *   存量数据的迁移链。TODO(后续版本)：实现逐字揭示时再启用 charMs / defaultCharMs。
+   */
   defaultCharMs: number
   /**
    * 编辑器版本（升级时做迁移用）。
@@ -1924,9 +1944,16 @@ export interface Scenario {
    * v8 = 加入剪映式后期效果(滤镜/调节/特效/贴纸/转场/首尾动画)。
    * v9 = 加入视频游戏「玩法优先」(Scene.kind/boss/decision/hotspots、Scenario.entities/statuses/ui、
    *      QTESpec.sequence/timeoutMs、ConditionClause hpRatio/score/status、modules.gameplay)。
+   * v10 = Effect 归一（onEnterItemEffects/damageToBoss 等合并进 effects[]）。
+   * v11 = 交互形态 presence 化：Scene.kind/decision/calcType → boss/qte/choice/calc 专属字段；
+   *      QTESpec.window→tolerance + window:TimeWindow + ui/template；ext.qteUi/choiceUi → qte.ui/choice.ui；
+   *      PerformanceCue.effects → settlement:Settlement（飘字收敛）；删 Branch.showAt。
+   * v12 = 视频演出来源收敛到 scene.media.ref（删 scene.clipId）。
+   * v13 = 统一飘字：textOverlays + stickerClips + performance.cues → Scene.overlays[]（OverlayClip，
+   *      kind text/icon/image + content:string + 可选 settlement + enter/exit）；删 PerformanceCue/PerformanceSpec。
    * 读入时按版本链式升级（migrateScenarioToLatest 负责）。
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
 
   /**
    * 模块开关 —— v7 新增。
@@ -1984,6 +2011,12 @@ export interface Scenario {
   episodes?: Episode[]
   /** 全局 UI 视觉风格 —— 喂给生图模型当 prefix；保证按钮/字幕条/QTE icon 风格统一 */
   uiStyle?: UIStyle
+  /**
+   * 用户自定义「文字预设样式」库 —— 字幕 / 花字各一套。内置预设写在代码里
+   * （scenario/textStylePresets.ts）；这里只存作者通过「+」新建的自定义预设（快照另存）。
+   * 缺省 = 仅内置预设。
+   */
+  textStylePresets?: { subtitle: TextStylePreset[]; overlay: TextStylePreset[] }
   /**
    * 全局"美术风格"—— 影响**所有**素材生成（场景图 / 角色立绘 / 参考图 / 批量生图）。
    * 与 uiStyle 的区别：uiStyle 约束 UI 外观（按钮/字幕），visualStyle 约束"画面内容"。

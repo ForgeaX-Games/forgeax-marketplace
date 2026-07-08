@@ -8,7 +8,7 @@
  * payload schema 由 DockDropPayload 联合类型描述；序列化走 JSON.stringify。
  */
 
-import type { AudioRole, BranchKind, DialogueRole, QTECueShape } from '../../scenario/types'
+import type { AudioRole, BranchKind, DialogueRole, OverlayKind, QTECueShape } from '../../scenario/types'
 
 export const DOCK_MIME = 'application/x-reel-timeline-drop'
 
@@ -70,9 +70,11 @@ export type DockDropPayload =
       defaultDurationMs: number
     }
   | {
-      kind: 'textOverlay'
-      /** 初始文字内容 */
-      text: string
+      kind: 'overlay'
+      /** 飘字类型（text/icon/image）。 */
+      overlayKind: OverlayKind
+      /** 内容载荷，按 overlayKind 解读：text→文本；icon→预设 id；image→mediaStore id。 */
+      content: string
       /** 默认 duration（ms）；落点 startMs = hoverMs */
       defaultDurationMs?: number
     }
@@ -99,14 +101,6 @@ export type DockDropPayload =
       kind: 'effect'
       /** FX_EFFECTS id */
       presetId: string
-      defaultDurationMs?: number
-    }
-  | {
-      kind: 'sticker'
-      stickerKind: 'numeric' | 'builtin' | 'emoji' | 'image'
-      text?: string
-      presetId?: string
-      mediaId?: string
       defaultDurationMs?: number
     }
 
