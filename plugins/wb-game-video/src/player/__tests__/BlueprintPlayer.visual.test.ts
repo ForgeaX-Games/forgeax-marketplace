@@ -43,7 +43,7 @@ describe('BlueprintPlayer prototype combat visuals', () => {
   it('does not fall back to a default playback video when a node has no video', () => {
     const player = source('BlueprintPlayer.tsx')
     const demoMedia = readFileSync(
-      resolve(import.meta.dirname, '../../scenario/coldCliffDemoMedia.ts'),
+      resolve(import.meta.dirname, '../../scenario/nodiaNarrationMedia.ts'),
       'utf8',
     )
 

@@ -17,7 +17,7 @@ import { useScenarioStore } from '../scenario/scenarioStore'
 import { useShellStore } from '../shell/shellStore'
 import { useMediaStore } from '../media/mediaStore'
 import { getVideoClip } from '../scenario/gameAssetCatalog'
-import { primeColdCliffDemoMedia } from '../scenario/coldCliffDemoMedia'
+import { primeNodiaNarrationMedia } from '../scenario/nodiaNarrationMedia'
 import { scenarioToBlueprint } from '../blueprint/scenarioToBlueprint'
 import { toFXGraph } from '../blueprint/blueprint-reactflow'
 import type { FXNode } from '../blueprint/react-flow-schema'
@@ -346,7 +346,7 @@ export function BlueprintPlayer(): JSX.Element {
   injectStyles()
 
   useEffect(() => {
-    primeColdCliffDemoMedia()
+    primeNodiaNarrationMedia()
   }, [])
 
   useEffect(() => {

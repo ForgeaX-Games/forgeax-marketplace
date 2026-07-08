@@ -28,7 +28,7 @@ import { hydrateMediaFromIdb } from './media/hydrateMediaFromIdb'
 import { getAllMedia } from './media/mediaIdb'
 import { primeMediaEntry, useMediaStore } from './media/mediaStore'
 import { bootScenarioPersist, flushScenarioPersist } from './scenario/scenarioPersistBoot'
-import { primeColdCliffDemoMedia } from './scenario/coldCliffDemoMedia'
+import { primeNodiaNarrationMedia } from './scenario/nodiaNarrationMedia'
 import { loadReelGameFromPackIndex } from './player/loadReelGameFromPackIndex'
 import { collectScenarioRefs } from './scenario/pkg/collectScenarioRefs'
 import { bootUpstreamCharacter } from './scenario/upstreamCharacter'
@@ -345,6 +345,9 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
         scenarioId: currentScenarioId,
       })
       for (const e of Object.values(entries)) primeMediaEntry(e)
+      // nodia 旁白（narr-*）以项目内 bundle 为权威：reel hydrate 会把 m-narr-* 覆盖回
+      // /__reel__/assets 直链，这里在每次 hydrate 后重灌 bundle URL，确保离线可播、不被覆盖。
+      primeNodiaNarrationMedia()
       // IDB 兜底独立跑一次（见下方 mount 时的 getAllMedia），不在这里重复
     }
 
@@ -357,6 +360,8 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
       if (records.length === 0) return
       const idbEntries = hydrateMediaFromIdb(records)
       for (const e of Object.values(idbEntries)) primeMediaEntry(e)
+      // 同上：bundle 优先，IDB 兜底不得覆盖 nodia 旁白的项目内 URL。
+      primeNodiaNarrationMedia()
     })
 
     /*
@@ -521,8 +526,8 @@ export function App({ hostOptions }: { hostOptions?: AppHostOptions } = {}) {
 
   useEffect(() => {
     if (persistence === 'memory') return
-    // 内置 demo 外链视频：启动即注册，避免 hydrate 后 mediaStore 缺 m-cold-* 条目。
-    primeColdCliffDemoMedia()
+    // nodia 旁白视频（narr-*）：项目内 bundle，覆盖运行时 reel 直链，离线可播。
+    primeNodiaNarrationMedia()
     /*
      * player-only 预览态 slim boot（2026-06）——
      *   只按 ?scn 把剧本从磁盘加载进来，跳过编辑器专属副作用：

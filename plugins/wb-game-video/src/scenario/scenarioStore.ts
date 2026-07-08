@@ -36,7 +36,6 @@ import type {
   ClipAnimSpec,
 } from './types'
 import { getDemoScenario } from './demoScenario'
-import { ensureColdCliffMediaForScenario } from './coldCliffDemoMedia'
 import { makeBlankScenario } from './blankScenario'
 import { migrateScenarioToLatest, ensureEpisodes } from './schemaMigrate'
 import { coerceHudRules } from './gameplayTypes'
@@ -713,7 +712,6 @@ export const useScenarioStore = create<ScenarioStore>()(
       selection: { kind: 'scene', sceneId: rootId },
       streaming: null,
     })
-    ensureColdCliffMediaForScenario(sanitized.scenes)
   },
   applyExternalScenario: (s) => {
     set((state) => {
@@ -732,7 +730,6 @@ export const useScenarioStore = create<ScenarioStore>()(
           : state.selection,
       }
     })
-    ensureColdCliffMediaForScenario(s.scenes)
   },
   adoptForgedScenario: (next, opts) => {
     /*
