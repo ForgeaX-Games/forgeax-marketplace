@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["all", "characters"],
+      "description": "Which characters to make audition videos for. 'all' (default) = every character that already has a turnaround sheet. 'characters' = only the ids listed in characterIds."
+    },
+    "characterIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Required when scope='characters': the character ids to generate audition videos for."
+    },
+    "scenarioId": {
+      "type": "string",
+      "description": "Optional target scenario id. If omitted (recommended), runs on the currently active scenario in the workbench."
+    },
+    "force": {
+      "type": "boolean",
+      "description": "If true, regenerate the audition video + voice sample even for characters that already have one. Default false (idempotent: skips characters that already have an audition video)."
+    }
+  },
+  "required": []
+}

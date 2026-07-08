@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:generate-storyboard args",
+  "description": "Split a scene (or the whole episode) into multiple shots and write scene.shots[] with timeline placeholders. The workbench consumes the queue, runs its director storyboard engine in-browser, and lays the shots out on the timeline for preview. The workbench must be open. This is the FIRST step of per-node production: do it before generating per-shot keyframes/videos.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["scene", "all"],
+      "description": "'scene' (default): split only the node given by sceneId (focused, cheap). 'all': run the batch engine over the whole episode (cross-scene consistency loopback)."
+    },
+    "sceneId": {
+      "type": "string",
+      "description": "Required when scope='scene': the node (key in scenario.scenes) to storyboard."
+    },
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Optional target scenario id. Defaults to the workbench's active scenario."
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Re-split and CLEAN the node first. Set force=true whenever the user asks to '重新生成 / 重做 / 重拆 / 重新分镜 / redo / regenerate' a node that already has shots — this replaces the existing shots/dialogue timing on the timeline with a fresh decomposition (old videos/keyframes are NOT deleted; they are archived to the asset library and stay retrievable). The workbench will ask the user to confirm before replacing existing content. Omit/false for a first-time storyboard or to keep author-polished shots."
+    }
+  }
+}

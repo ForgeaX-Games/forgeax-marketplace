@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gvid:lint-scenario returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "errorCount", "warnCount", "infoCount", "issues"],
+  "properties": {
+    "ok": { "type": "boolean", "description": "errorCount === 0" },
+    "errorCount": { "type": "integer", "minimum": 0 },
+    "warnCount": { "type": "integer", "minimum": 0 },
+    "infoCount": { "type": "integer", "minimum": 0 },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "severity": { "enum": ["error", "warn", "info"] },
+          "message": { "type": "string" },
+          "sceneId": { "type": "string" },
+          "branchId": { "type": "string" }
+        }
+      }
+    }
+  }
+}

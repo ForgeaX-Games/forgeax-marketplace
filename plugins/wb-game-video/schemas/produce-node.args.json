@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:produce-node args",
+  "description": "One-click production for one or more nodes: storyboard → keyframes → video, in order. Idempotent (skips stages/shots already done) and overridable (stages / force). The workbench consumes the queue and runs the whole chain in-browser; it must be open. Videos are produced per-shot in a concurrent background queue that never blocks editing. Select WHICH nodes via exactly one of: sceneId (one node), sceneIds (explicit list), or scope ('all' = whole mainline, 'firstN' = first count nodes). Map the user's words directly: '只生成第一个/the first node' -> scope=firstN count=1; '前三个/first three' -> scope=firstN count=3; '全部/all' -> scope=all. Multiple nodes run sequentially along the mainline for cross-node consistency. For fine control call reel:generate-storyboard / reel:generate-keyframes / reel:generate-video individually.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    { "required": ["sceneId"] },
+    { "required": ["sceneIds"] },
+    { "required": ["scope"] }
+  ],
+  "properties": {
+    "sceneId": {
+      "type": "string",
+      "description": "Single node (key in scenario.scenes) to produce. Use for '生成这个节点/this node'."
+    },
+    "sceneIds": {
+      "type": "array",
+      "description": "Explicit ordered list of nodes to produce. Takes priority over sceneId/scope. Runs in the given order.",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["node", "firstN", "all"],
+      "description": "Range selector. 'all' = every node along the mainline (rootSceneId BFS); 'firstN' = the first `count` mainline nodes; 'node' = use sceneId."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "With scope='firstN', how many leading mainline nodes to produce. Default 1."
+    },
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Optional target scenario id. Defaults to the workbench's active scenario."
+    },
+    "stages": {
+      "type": "array",
+      "description": "Optional subset of stages to run, in any order; defaults to all three. Idempotency still applies per stage.",
+      "items": { "type": "string", "enum": ["storyboard", "keyframes", "video"] },
+      "minItems": 1,
+      "maxItems": 3
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Force re-run every selected stage (re-storyboard, regenerate keyframes, re-produce videos), CLEANING old content first. Map the user's words directly: whenever they say '重新生成 / 重做 / 重拆 / 重拍 / 重出 / redo / regenerate / do it again' for a node that already has content, set force=true — otherwise the pipeline idempotently SKIPS already-done stages and the old content lingers (causing duplicates). force replaces the old shots/videos on the timeline with fresh ones; old videos/keyframes are NOT deleted — they are archived to the asset library and stay retrievable. The workbench asks the user to confirm before replacing existing content. Default false (idempotent skip; first-time production or keep author-polished work)."
+    }
+  }
+}

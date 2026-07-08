@@ -1,0 +1,605 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forgeax.dev/schemas/wb-game-video/logic-node.schema.json",
+  "title": "gvid:logic-node (BPMN 逻辑编排节点)",
+  "description": "视频游戏「场合图 / 蓝图」状态机里的一个逻辑编排节点（BPMN 风格）。与运行时 Scene / Branch 数据模型字段兼容：一个节点 ≡ 一个 Scene，节点的 flows[] ≡ Scene.branches[]（出边挂在源节点上，无独立 edge 表）。BPMN 对照：startEvent=开始事件、sceneTask=活动(场合)、gateway=网关(隐藏判定/分流汇聚)、endEvent=结束事件；sequence flow=flows[]；data object=flags/标记；call activity / 子流程=node.subFlowRef（任意节点都可下钻一张子蓝图）。根 schema 校验单个节点；整图用 $defs/graph 包络。",
+  "$ref": "#/$defs/node",
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "nodeType", "name"],
+      "description": "一个逻辑编排节点。nodeType 是 BPMN 角色判别符；kind 特定字段按 nodeType 经 allOf/if-then 追加约束。未列字段（媒体生产细节等）忽略。",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "节点 id（图内唯一）。对应 Scene.id。"
+        },
+        "nodeType": {
+          "enum": ["startEvent", "sceneTask", "gateway", "endEvent"],
+          "description": "BPMN 角色：startEvent 开始事件（图入口，对应原型 open / P0）；sceneTask 活动节点（场合：loop 视频 + HUD + 选项，对应原型 loop/perf）；gateway 网关（分流/汇聚，含原型「隐藏计算」判定 出手判断/血量判定/胜负判定）；endEvent 结束事件（终局 E1/E2 或子流程出口）。"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "显示名（原型节点标题 nm）。如「L0 中军大帐」。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "一行短标签（原型 s）。如「运筹 · 点将」。"
+        },
+        "description": {
+          "type": "string",
+          "description": "节点说明（原型 ds / Scene.background）。"
+        },
+        "position": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "description": "画布坐标（编辑器布局用，对应 Scene.pos）。",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          }
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "BPMN 连接点。in = 入引脚（被上游 flow 指向）；out = 出引脚（flows[].fromPin 引用其 key）。",
+          "properties": {
+            "in": { "type": "array", "items": { "$ref": "#/$defs/pin" } },
+            "out": { "type": "array", "items": { "$ref": "#/$defs/pin" } }
+          }
+        },
+        "subFlowRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "下钻的子蓝图 id（BPMN call activity / 子流程，对应原型节点的 g 字段）。正交属性：任意 nodeType 都可封装一张嵌套图，双击进入。缺省 = 叶子节点（原型 leaf=true）。"
+        },
+        "flows": {
+          "type": "array",
+          "description": "本节点的出边（BPMN sequence flow，对应 Scene.branches[]）。gateway 的分流条件、sceneTask 的玩家选项、自动续播都用 flows 表达。",
+          "items": { "$ref": "#/$defs/flow" }
+        },
+        "onEnterEffects": {
+          "type": "array",
+          "description": "进入本节点时触发的数值写入（对应 Scene.onEnterEffects / 原型节点 stats）。",
+          "items": { "$ref": "#/$defs/varEffect" }
+        },
+        "onEnterItemEffects": {
+          "type": "array",
+          "description": "进入本节点时的物品增减（对应 Scene.onEnterItemEffects）。",
+          "items": { "$ref": "#/$defs/itemEffect" }
+        },
+        "setFlags": {
+          "type": "array",
+          "description": "进入时置 1 的 flag varId 列表（对应 Scene.setFlags / 原型「标记」写入）。",
+          "items": { "type": "string" }
+        },
+        "hud": {
+          "enum": ["hidden", "main", "battle", "explore"],
+          "description": "HUD 方案（对应 HudPreset / 原型 hud）。缺省由 nodeType/sceneKind 推断。"
+        },
+        "ext": {
+          "type": "object",
+          "description": "扩展属性位（对应 Scene.ext）：承载尚未一等化的自定义玩法维度；运行时不直接消费，导出/迁移原样保留。"
+        },
+
+        "sceneKind": {
+          "enum": ["story", "battle", "qte", "choice"],
+          "description": "仅 nodeType=sceneTask：活动子类（对应 SceneKind）。story 叙事/过场；battle Boss 战（挂 boss）；qte 节奏点为主；choice 选择为主（挂 decision）。"
+        },
+        "media": {
+          "$ref": "#/$defs/mediaRef",
+          "description": "仅 sceneTask：本节点画面来源（对应 Scene.media）。"
+        },
+        "clipId": {
+          "type": "string",
+          "description": "仅 sceneTask：引用固定演出片段库的 id（对应 Scene.clipId / 原型「演出编号」）。"
+        },
+        "playback": {
+          "enum": ["once", "loop"],
+          "description": "仅 sceneTask：视频播放方式（对应 MediaPlayMode）。loop = 边播边选 / 探索热区。缺省 once。"
+        },
+        "durationMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "仅 sceneTask：节点时长（ms，对应 Scene.durationMs）。"
+        },
+        "decision": {
+          "$ref": "#/$defs/decision",
+          "description": "仅 sceneTask（典型 sceneKind=choice）：选择呈现/限时配置（对应 DecisionSpec）。"
+        },
+        "qte": {
+          "$ref": "#/$defs/qteSpec",
+          "description": "仅 sceneTask（典型 sceneKind=qte）：QTE 节奏点配置（对应 QTESpec）。"
+        },
+        "boss": {
+          "$ref": "#/$defs/bossSpec",
+          "description": "仅 sceneTask（sceneKind=battle）：Boss 战回合 + 胜负路由（对应 BossSpec）。"
+        },
+        "hotspots": {
+          "type": "array",
+          "description": "仅 sceneTask：画面可点按热点（call/return 子流程或原地对话，对应 Scene.hotspots）。",
+          "items": { "$ref": "#/$defs/hotspot" }
+        },
+        "performance": {
+          "$ref": "#/$defs/performanceSpec",
+          "description": "仅 sceneTask：演出结算轴（时间轴 attackBeat 扣血/飘字，对应 Scene.performance）。"
+        },
+        "entryGate": {
+          "$ref": "#/$defs/entryGate",
+          "description": "仅 sceneTask：进入门槛（数值/物品不达标时改道或阻断，对应 Scene.entryGate）。"
+        },
+        "returnsToCaller": {
+          "type": "boolean",
+          "description": "仅 sceneTask：true = 本节点是 call/return 子流程的出口，运行时弹回调用它的 hotspot 所在节点（对应 Scene.returnsToCaller）。"
+        },
+
+        "gatewayType": {
+          "enum": ["exclusive", "parallel", "inclusive"],
+          "description": "仅 nodeType=gateway：BPMN 网关语义。exclusive(XOR) 按条件择一走（原型隐藏判定的默认）；parallel(AND) 全部分支并发；inclusive(OR) 满足条件的全部分支。"
+        },
+        "calcLabel": {
+          "type": "string",
+          "description": "仅 gateway：判定的可读名（对应原型 calcType，如「出手判断」「血量判定」「胜负判定」）。纯展示。"
+        },
+        "merge": {
+          "type": "boolean",
+          "description": "仅 gateway：true = 汇聚网关（多入边在此合流）；缺省/false = 分流网关。BPMN 同型网关兼任分流与汇聚，此布尔仅作编辑器提示。"
+        },
+
+        "terminal": {
+          "type": "boolean",
+          "description": "仅 nodeType=endEvent：true = 真终局（游戏结束，无下游，对应原型 E1/E2 leaf 结局）；false = 子流程出口/转场（仍可有 flows，如结局后 [再启战役]→L0）。"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "仅 endEvent：结局标签（如 win/lose/大捷/折戟），供结算 UI 与统计使用。"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "nodeType": { "const": "sceneTask" } }, "required": ["nodeType"] },
+          "then": { "required": ["sceneKind"] }
+        },
+        {
+          "if": { "properties": { "nodeType": { "const": "gateway" } }, "required": ["nodeType"] },
+          "then": { "required": ["gatewayType"] }
+        },
+        {
+          "if": { "properties": { "nodeType": { "const": "endEvent" } }, "required": ["nodeType"] },
+          "then": { "required": ["terminal"] }
+        }
+      ]
+    },
+
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "label"],
+      "description": "节点引脚（BPMN 连接点，对应原型 ins 字符串项 / outs 对象项）。",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "引脚 key（节点内唯一；flows[].fromPin 引用，对应原型 outs[].k）。入引脚常用 'in'，单出口常用 'out'。"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "引脚显示文案（对应原型 outs[].l，如「胜利」「失败」「察看沙盘」）。"
+        },
+        "dot": {
+          "enum": ["ok", "bad", "neutral"],
+          "description": "引脚色点语义（对应原型 outs[].dot）。ok 成功/正向、bad 失败/负向、neutral 中性。纯展示。"
+        }
+      }
+    },
+
+    "flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target"],
+      "description": "出边 / 顺序流（BPMN sequence flow，对应 Branch）。挂在源节点上，target 指向目标节点 id。",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "边 id（编辑/增删 patch 用，对应 Branch.id）。"
+        },
+        "kind": {
+          "enum": ["auto", "choice", "qte_pass", "qte_fail", "timeout"],
+          "description": "触发方式（对应 BranchKind + timeout）。auto 自动续走（exclusive 网关按 condition 择一也用它）；choice 玩家选项；qte_pass/qte_fail QTE 成败；timeout 限时选择超时默认边。"
+        },
+        "label": {
+          "type": "string",
+          "description": "选项文案（kind=choice 必填；对应 Branch.label）。"
+        },
+        "fromPin": {
+          "type": "string",
+          "description": "起始出引脚 key（对应原型 wire.fk / pins.out[].key）。缺省 = 节点默认单出口。"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "目标节点 id（对应 Branch.targetSceneId）。"
+        },
+        "condition": {
+          "$ref": "#/$defs/condition",
+          "description": "走通条件（对应 Branch.condition）。空/缺省 = 无条件。"
+        },
+        "gateMode": {
+          "enum": ["hide", "lock"],
+          "description": "条件不满足时的表现（对应 Branch.gateMode）。hide 隐藏（缺省）；lock 置灰锁定并提示所需条件。"
+        },
+        "default": {
+          "type": "boolean",
+          "description": "true = 本边为网关的默认边（其它条件都不满足时走它，BPMN default flow）。一个网关至多一条 default。"
+        },
+        "showAt": {
+          "type": "number",
+          "minimum": 0,
+          "description": "选项出现时刻（ms，仅 kind=choice 有意义，对应 Branch.showAt）。缺省 = 节点结束后显示。"
+        },
+        "effects": {
+          "type": "array",
+          "description": "选中本边时的数值变化（对应 Branch.effects）。",
+          "items": { "$ref": "#/$defs/varEffect" }
+        },
+        "itemEffects": {
+          "type": "array",
+          "description": "选中本边时的物品增减（对应 Branch.itemEffects）。",
+          "items": { "$ref": "#/$defs/itemEffect" }
+        }
+      }
+    },
+
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all"],
+      "description": "条件（对应 BranchCondition）：all[] 全部满足（AND）才成立；空数组 = 无条件恒真。条件只描述状态，与「玩家点没点」无关。",
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/conditionClause" }
+        }
+      }
+    },
+
+    "conditionClause": {
+      "description": "单条条件子句（对应 ConditionClause 闭合 union）。",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "varId", "op", "value"],
+          "description": "数值变量比较（标记/好感/积分）。",
+          "properties": {
+            "type": { "const": "var" },
+            "varId": { "type": "string" },
+            "op": { "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "varId", "equals"],
+          "description": "布尔旗标比较（标记是否点亮）。",
+          "properties": {
+            "type": { "const": "flag" },
+            "varId": { "type": "string" },
+            "equals": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "sceneId"],
+          "description": "是否到访过某节点。",
+          "properties": {
+            "type": { "const": "visited" },
+            "sceneId": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "itemId"],
+          "description": "拥有某物品 ≥ count（默认 1）。",
+          "properties": {
+            "type": { "const": "hasItem" },
+            "itemId": { "type": "string" },
+            "count": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "entityId", "op", "value"],
+          "description": "实体血量比例(0~1)与阈值比较。",
+          "properties": {
+            "type": { "const": "hpRatio" },
+            "entityId": { "type": "string" },
+            "op": { "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "op", "value"],
+          "description": "累计 QTE 分数与阈值比较。",
+          "properties": {
+            "type": { "const": "score" },
+            "op": { "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "statusId", "present"],
+          "description": "某实体当前是否带某状态效果。",
+          "properties": {
+            "type": { "const": "status" },
+            "statusId": { "type": "string" },
+            "entityId": { "type": "string" },
+            "present": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "left", "attr", "op", "right"],
+          "description": "两实体同一属性运行时比较（left.attr op right.attr），如出手判断比较双方速度。",
+          "properties": {
+            "type": { "const": "attrCompare" },
+            "left": { "type": "string" },
+            "attr": { "enum": ["speed"] },
+            "op": { "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] },
+            "right": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "varEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["varId", "op", "value"],
+      "description": "数值副作用（对应 VarEffect）：改写某变量/标记。",
+      "properties": {
+        "varId": { "type": "string" },
+        "op": { "enum": ["add", "set"] },
+        "value": { "type": "number" },
+        "once": {
+          "type": "boolean",
+          "description": "true = 同一节点重复进入只生效一次（对应原型 stats[].once）。"
+        }
+      }
+    },
+
+    "itemEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemId", "op"],
+      "description": "物品副作用（对应 ItemEffect）。",
+      "properties": {
+        "itemId": { "type": "string" },
+        "op": { "enum": ["give", "take"] },
+        "count": { "type": "integer", "minimum": 1, "description": "默认 1。" }
+      }
+    },
+
+    "mediaRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind"],
+      "description": "媒体引用（对应 MediaRef）。orchestration 只关心 kind/ref/prompt；后期/生产元数据忽略。",
+      "properties": {
+        "kind": { "enum": ["VIDEO", "IMAGE_PROMPT", "IMAGE_STATIC", "PLACEHOLDER"] },
+        "ref": { "type": "string", "description": "本地资源 id 或外链 URL（PLACEHOLDER 时无意义）。" },
+        "prompt": { "type": "string", "description": "IMAGE_PROMPT 模式的生成提示词。" }
+      }
+    },
+
+    "decision": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "选择呈现/限时配置（对应 DecisionSpec / 原型选项组）。",
+      "properties": {
+        "optType": {
+          "enum": ["static", "timed", "timed_qte"],
+          "description": "static 不限时；timed 限时（配 timeoutMs）；timed_qte 限时 QTE（无选项列表，走 qte_pass/fail flow）。"
+        },
+        "atMs": { "type": "number", "minimum": 0, "description": "选项开始出现时刻（ms，loop 节点边播边选）。" },
+        "windowStartMs": { "type": "number", "minimum": 0 },
+        "windowEndMs": { "type": "number", "minimum": 0 },
+        "timeoutMs": { "type": "number", "minimum": 0, "description": "timed 模式倒计时（ms）。" },
+        "defaultBranchId": { "type": "string", "description": "超时默认走的 flow id（缺省 = 第一个满足条件的边，或 kind=timeout 的边）。" },
+        "prompt": { "type": "string", "description": "玩家提示文案。" },
+        "fireAt": { "enum": ["on_pick", "video_end"], "description": "选完即时跳转 / 等视频结束（对应 DecisionFireAt）。" },
+        "presentation": { "enum": ["list", "hotspot"], "description": "清单卡片 / 画面热区（对应 ChoicePresentation；限时锁定 list）。" },
+        "qteKind": { "enum": ["parry", "timing", "mash", "sequence", "sweep"], "description": "timed_qte 的交互形式（对应 QteKind）。" }
+      }
+    },
+
+    "qteSpec": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["cues", "window", "score"],
+      "description": "QTE 节奏点配置（对应 QTESpec）。orchestration 关心 passingScore（影响 qte_pass/fail 路由）与 timeout；cue 时间轴/评分细节归生产层，此处宽松透传。",
+      "properties": {
+        "cues": { "type": "array", "items": { "type": "object" }, "description": "节奏点列表（QTECue[]）。" },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["perfect", "great", "good"],
+          "properties": {
+            "perfect": { "type": "number" },
+            "great": { "type": "number" },
+            "good": { "type": "number" }
+          }
+        },
+        "score": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["perfect", "great", "good", "miss"],
+          "properties": {
+            "perfect": { "type": "number" },
+            "great": { "type": "number" },
+            "good": { "type": "number" },
+            "miss": { "type": "number" }
+          }
+        },
+        "passingScore": { "type": "number", "description": "通过本场 QTE 的最低累计分（驱动 qte_pass vs qte_fail）。" },
+        "sequence": { "type": "boolean", "description": "true = cues 必须按序命中（连段），漏拍即整段失败。" },
+        "timeoutMs": { "type": "number", "minimum": 0, "description": "整段超时（ms），超时按失败结算。" }
+      }
+    },
+
+    "bossSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityId", "rounds"],
+      "description": "Boss 战配置（对应 BossSpec）。胜负通过 winSceneId/loseSceneId 路由（等价两条出边）。",
+      "properties": {
+        "entityId": { "type": "string", "description": "Boss 实体 id（graph.entities）。" },
+        "playerEntityId": { "type": "string", "description": "玩家实体 id（缺省取第一个 kind=player）。" },
+        "rounds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "damageToBoss": { "type": "number" },
+              "damageToPlayer": { "type": "number" },
+              "qte": { "$ref": "#/$defs/qteSpec" }
+            }
+          }
+        },
+        "winSceneId": { "type": "string", "description": "Boss HP 清零跳转（胜利）。" },
+        "loseSceneId": { "type": "string", "description": "玩家 HP 清零跳转（失败）。" },
+        "perfectFlagVarId": { "type": "string", "description": "完美通关写 1 的 flag varId。" }
+      }
+    },
+
+    "hotspot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "x", "y"],
+      "description": "画面可点按热点（对应 Hotspot）：call/return 子流程、原地对话、或单向跳转。",
+      "properties": {
+        "id": { "type": "string" },
+        "x": { "type": "number", "minimum": 0, "maximum": 1, "description": "归一化坐标。" },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "r": { "type": "number", "minimum": 0, "maximum": 1, "description": "命中半径（归一化，默认 0.08）。" },
+        "appearAt": { "type": "number", "minimum": 0 },
+        "endMs": { "type": "number", "minimum": 0 },
+        "targetSceneId": { "type": "string", "description": "点击进入的子流程入口节点 id（与 detour 二选一）。" },
+        "detour": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dialogue"],
+          "description": "原地多行对话（不跳转，播完回原进度）；优先于 targetSceneId。",
+          "properties": {
+            "speaker": { "type": "string" },
+            "dialogue": { "type": "array", "items": { "type": "string" } },
+            "setFlagVarIds": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "once": { "type": "boolean", "description": "true = 本局只触发一次。" },
+        "mode": { "enum": ["return", "goto"], "description": "return（默认）子流程到返回点回本节点；goto 单向跳转不返回。" },
+        "label": { "type": "string" },
+        "condition": { "$ref": "#/$defs/condition" }
+      }
+    },
+
+    "performanceSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cues"],
+      "description": "演出结算轴（对应 PerformanceSpec）：时间轴上的扣血/飘字结算点。",
+      "properties": {
+        "cues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "atMs"],
+            "properties": {
+              "id": { "type": "string" },
+              "atMs": { "type": "number", "minimum": 0 },
+              "damageToBoss": { "type": "number" },
+              "damageToPlayer": { "type": "number" },
+              "bossEntityId": { "type": "string" },
+              "playerEntityId": { "type": "string" },
+              "label": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "entryGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition", "onFail"],
+      "description": "进入门槛（对应 EntryGate）：进入条件不满足时改道或阻断。",
+      "properties": {
+        "condition": { "$ref": "#/$defs/condition" },
+        "onFail": { "enum": ["redirect", "block"] },
+        "redirectSceneId": { "type": "string", "description": "onFail=redirect 时改道到的节点 id。" },
+        "hint": { "type": "string" }
+      }
+    },
+
+    "flagDef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "initial"],
+      "description": "标记 / 变量定义（BPMN data object，对应 GameVariable）。被条件读取、被 effects 写入。",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "description": "显示名（如「士气」「密信」）。" },
+        "kind": { "enum": ["number", "flag"], "description": "number 数值；flag 布尔旗标（0/1）。" },
+        "initial": { "type": "number", "description": "初值（flag 用 0/1）。" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "desc": { "type": "string" }
+      }
+    },
+
+    "graph": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "entryNodeId", "nodes"],
+      "description": "整图包络（BPMN process / 原型一张蓝图）。一个节点可经 subFlowRef 下钻到另一张 graph（层级状态机）。对应 Scenario 的编排子集（entryNodeId≡rootSceneId、nodes≡scenes、flags≡variables）。",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "title": { "type": "string" },
+        "entryNodeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "入口节点 id（应指向一个 nodeType=startEvent 的节点）。"
+        },
+        "nodes": {
+          "type": "object",
+          "description": "节点字典 Record<nodeId, node>（非数组）。",
+          "additionalProperties": { "$ref": "#/$defs/node" }
+        },
+        "flags": {
+          "type": "object",
+          "description": "标记/变量注册表 Record<varId, flagDef>。",
+          "additionalProperties": { "$ref": "#/$defs/flagDef" }
+        }
+      }
+    }
+  }
+}

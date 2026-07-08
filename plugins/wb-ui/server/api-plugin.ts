@@ -1556,6 +1556,27 @@ interface GeneratedAssets {
   titleDeco?: string
 }
 
+/**
+ * 直连 Gemini 生成图片并转为 data URL（本地无 MCP 沙箱时的兜底路径）。
+ * Gemini 的 imageConfig.aspectRatio 仅支持有限比例（如 1:1/4:3/3:4/16:9/9:16/21:9），
+ * 4:1 等不受支持时先按原比例试，失败再不带比例重试，保证总能拿到图。
+ */
+async function geminiTextToImageDataUrl(prompt: string, aspectRatio?: string): Promise<string | null> {
+  const ratioAttempts: (string | undefined)[] = aspectRatio ? [aspectRatio, undefined] : [undefined]
+  for (const ar of ratioAttempts) {
+    try {
+      const r = await geminiGenerateImage({ prompt, aspectRatio: ar })
+      if (r?.success && r.imageBase64) {
+        return `data:${r.mimeType || 'image/png'};base64,${r.imageBase64}`
+      }
+      console.warn('[ui-design/generate-assets] Gemini fallback no image', ar ? `(ar=${ar})` : '', ':', r?.error)
+    } catch (e: any) {
+      console.warn('[ui-design/generate-assets] Gemini fallback error', ar ? `(ar=${ar})` : '', ':', e?.message)
+    }
+  }
+  return null
+}
+
 async function mcpTextToImage(
   host: string,
   port: number,
@@ -1592,11 +1613,12 @@ async function mcpTextToImage(
         }
       }
     }
-    return null
+    console.warn('[ui-design/generate-assets] MCP returned no image, falling back to direct Gemini')
   } catch (e: any) {
-    console.error('[ui-design/generate-assets] MCP error:', e.message)
-    return null
+    // MCP 沙箱不可达（本地开发常见：ECONNREFUSED/ENOTFOUND vag-mcp-sandbox），直连 Gemini 兜底
+    console.warn('[ui-design/generate-assets] MCP unavailable (', e?.message, '), falling back to direct Gemini')
   }
+  return geminiTextToImageDataUrl(prompt, aspectRatio)
 }
 
 async function handleUiDesignGenerateAssets(body: any): Promise<any> {

@@ -1,0 +1,60 @@
+{
+  "name": "@forgeax-plugin/wb-game-video",
+  "version": "0.1.0",
+  "description": "ForgeaX workbench plugin — Video Game (gameplay-on-video) editor & player. 视频游戏（玩法优先）编辑器：Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点 + 视频分支（fork of wb-reel）",
+  "private": true,
+  "type": "module",
+  "main": "src/mount.tsx",
+  "types": "src/mount.tsx",
+  "exports": {
+    ".": {
+      "types": "./src/mount.tsx",
+      "import": "./src/mount.tsx"
+    },
+    "./tool-handlers": {
+      "types": "./server/tool-handlers.ts",
+      "import": "./server/tool-handlers.ts"
+    },
+    "./forgeax-plugin.json": "./forgeax-plugin.json"
+  },
+  "keywords": [
+    "forgeax-plugin",
+    "workbench",
+    "game-video",
+    "video-game",
+    "gameplay",
+    "boss",
+    "qte"
+  ],
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "build:standalone": "RS_NO_KEY=1 tsc -b && RS_NO_KEY=1 vite build && node scripts/bundle-singlefile.mjs",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.10.2",
+    "mammoth": "^1.12.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.184.0",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.184.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "happy-dom": "^20.9.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

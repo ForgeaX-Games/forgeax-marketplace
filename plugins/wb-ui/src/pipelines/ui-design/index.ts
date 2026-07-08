@@ -4620,19 +4620,20 @@ function injectCSS(): void {
     .uid-layout-modules-pick,
     .uid-layout-modules-enabled { min-width: 0; }
     .uid-layout-modules-pick .uid-screen-modules { border-top: none; padding-top: 0; }
-    .uid-section-layout .uid-layout-modules-pick .uid-module-row {
+    .uid-layout-modules-pick .uid-module-row {
       display: grid;
       grid-template-columns: max-content minmax(0, 1fr);
       column-gap: 8px;
       align-items: center;
     }
-    .uid-section-layout .uid-layout-modules-pick .uid-module-label {
+    .uid-layout-modules-pick .uid-module-label {
       width: auto;
       min-width: 0;
       margin: 0;
       padding: 0 0 0 12px;
       text-align: left;
       justify-self: start;
+      white-space: nowrap;
     }
     .uid-layout-modules-enabled {
       min-height: 72px;

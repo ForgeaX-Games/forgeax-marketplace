@@ -406,7 +406,12 @@ async function onLocaleChanged(next) {
       rolePill.textContent = selectedAgent.agent.role;
     }
     renderMemFiles();
-    if (memSelected) setMemMode(memMode);
+    if (memSelected && memSelected !== userProfile().id) {
+      // Re-resolve the memory file for the new locale (picks the matching variant).
+      await loadMemoryFile(memSelected);
+    } else if (memSelected) {
+      setMemMode(memMode);
+    }
     if (activeTab === 'skills') renderSkills();
     if (activeTab === 'workbench') renderWorkbench();
     if (activeTab === 'persona') await loadPersona();
@@ -480,6 +485,7 @@ const UI = {
     wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-plugin.json under provides.workbench:',
     wbMatchCount: 'Matching workbench plugins ({n})',
     diaryHint: 'Long-term memory from {owner}, shown as a diary. Read-only — switch to Source mode above to edit.',
+    memFallback: 'No {lang} memory yet — showing the other language. Saving creates the {lang} copy.',
   },
   zh: {
     noAgent: '未选 agent',
@@ -547,8 +553,47 @@ const UI = {
     wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-plugin.json 的 provides.workbench 加一行：',
     wbMatchCount: '配套 workbench 插件 ({n})',
     diaryHint: '这是 {owner} 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
+    memFallback: '暂无{lang}记忆，显示另一种语言的原文。保存后会生成{lang}副本。',
   },
 };
+
+/** 语言显示名，用于 memFallback 提示。 */
+function langLabel(l) {
+  if (locale === 'zh') return l === 'en' ? '英文' : '中文';
+  return l === 'en' ? 'English' : 'Chinese';
+}
+
+// ─── locale-aware memory file variants ────────────────────────────────
+// Memory files mirror the persona convention: `<base>.en.md` / `<base>.zh.md`
+// (or a legacy language-neutral `<base>.md`). The list shows one row per base;
+// loading picks the current-locale variant, falling back to neutral then the
+// other language. Kept in lockstep with packages/cli/src/agents/memory-locale.ts.
+function memParts(name) {
+  const m = name.match(/^(.*)\.(en|zh)\.md$/i);
+  if (m) return { base: m[1], lang: m[2].toLowerCase() };
+  return { base: name.replace(/\.md$/i, ''), lang: '' };
+}
+function memBases() {
+  const seen = new Set();
+  const out = [];
+  for (const f of memFiles) {
+    const { base } = memParts(f);
+    if (!seen.has(base)) { seen.add(base); out.push(base); }
+  }
+  return out;
+}
+/** Resolve a base + locale to the actual on-disk filename, with fallback.
+ *  Returns { name, fallback } or null when the base has no file yet. */
+function resolveMemName(base, lang = locale) {
+  const other = lang === 'en' ? 'zh' : 'en';
+  const want = `${base}.${lang}.md`;
+  const neutral = `${base}.md`;
+  const otherName = `${base}.${other}.md`;
+  if (memFiles.includes(want)) return { name: want, fallback: false };
+  if (memFiles.includes(neutral)) return { name: neutral, fallback: false };
+  if (memFiles.includes(otherName)) return { name: otherName, fallback: true };
+  return null;
+}
 function t(key, vars) {
   let s = UI[locale][key] ?? UI.en[key] ?? key;
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
@@ -1131,8 +1176,9 @@ async function loadMemoryFiles() {
  *  优先选「XX 的日记」(lessons)，否则第一份记忆文件，再否则全局用户画像。 */
 function autoSelectMemory() {
   if (memSelected) return;
-  const diary = memFiles.find((n) => n.replace(/\.md$/i, '').toLowerCase() === 'lessons');
-  const target = diary || memFiles[0] || userProfile().id;
+  const bases = memBases();
+  const diary = bases.find((b) => b.toLowerCase() === 'lessons');
+  const target = diary || bases[0] || userProfile().id;
   loadMemoryFile(target);
 }
 
@@ -1157,11 +1203,10 @@ function agentShortName() {
   return (parts.length > 1 ? parts[parts.length - 1] : parts[0]).trim() || title;
 }
 
-/** 记忆文件名 → 友好标签:lessons → "XX's diary";其余去掉 .md 后缀。 */
-function memFileLabel(name) {
-  const stem = name.replace(/\.md$/i, '');
-  if (stem.toLowerCase() === 'lessons') return t('agentDiary', { name: agentShortName() });
-  return stem;
+/** 记忆基名 → 友好标签:lessons → "XX's diary";其余原样(已去 .md/语言后缀)。 */
+function memFileLabel(base) {
+  if (base.toLowerCase() === 'lessons') return t('agentDiary', { name: agentShortName() });
+  return base;
 }
 
 function renderMemFiles() {
@@ -1176,31 +1221,36 @@ function renderMemFiles() {
   sep.className = 'mem-sep';
   list.appendChild(sep);
 
-  if (memFiles.length === 0) {
+  const bases = memBases();
+  if (bases.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.textContent = t('noMemFilesEmpty');
     list.appendChild(empty);
     return;
   }
-  for (const name of memFiles) {
-    list.appendChild(makeMemFileItem(memFileLabel(name), name, { title: name }));
+  for (const base of bases) {
+    list.appendChild(makeMemFileItem(memFileLabel(base), base, { title: base }));
   }
 }
 
-async function loadMemoryFile(name) {
+async function loadMemoryFile(base) {
   if (memDirty && !confirm(t('unsavedDiscard'))) return;
   if (!selectedAgent) return;
-  const isProfile = name === userProfile().id;
+  const isProfile = base === userProfile().id;
   let path;
+  let memFallback = false;
   if (isProfile) {
     path = userProfile().path;
   } else {
     const memDir = memoryDir(selectedAgent);
     if (!memDir) return;
-    path = `${memDir}/${name}`;
+    const resolved = resolveMemName(base, locale);
+    // No file yet for this base → target the current-locale name so a save creates it.
+    path = `${memDir}/${resolved ? resolved.name : `${base}.${locale}.md`}`;
+    memFallback = resolved ? resolved.fallback : false;
   }
-  memSelected = name;
+  memSelected = base;
   renderMemFiles();
   setStatus('mem-status', t('loading'));
   try {
@@ -1228,7 +1278,8 @@ async function loadMemoryFile(name) {
       updateDiaryHint(agentShortName());
       renderDiary(content);
       setMemMode('diary');
-      setStatus('mem-status', t('loadedChars', { n: content.length }), 'ok');
+      if (memFallback) setStatus('mem-status', t('memFallback', { lang: langLabel(locale) }), 'warn');
+      else setStatus('mem-status', t('loadedChars', { n: content.length }), 'ok');
     }
   } catch (e) {
     setStatus('mem-status', t('loadError', { msg: e.message }), 'warn');
@@ -1380,12 +1431,15 @@ function renderDiary(text) {
 async function saveMemory() {
   if (!selectedAgent || !memSelected) return;
   let path;
+  let savedName = null;
   if (memSelected === userProfile().id) {
     path = userProfile().path;
   } else {
     const memDir = memoryDir(selectedAgent);
     if (!memDir) return;
-    path = `${memDir}/${memSelected}`;
+    // Always write the current-locale variant, so editing a fallback creates it.
+    savedName = `${memSelected}.${locale}.md`;
+    path = `${memDir}/${savedName}`;
   }
   const content = currentMemContent();
   setStatus('mem-status', t('saving'));
@@ -1409,6 +1463,10 @@ async function saveMemory() {
       else document.getElementById('mem-editor').value = content;
       setStatus('mem-status', t('savedProfileCount', { n: slots.length }), 'ok');
     } else {
+      if (savedName && !memFiles.includes(savedName)) {
+        memFiles = [...memFiles, savedName].sort();
+        renderMemFiles();
+      }
       if (memMode === 'diary') renderDiary(content);
       setStatus('mem-status', t('saved'), 'ok');
     }
@@ -1422,9 +1480,11 @@ async function newMemoryFile() {
   const memDir = memoryDir(selectedAgent);
   if (!memDir) { setStatus('mem-status', t('noMemoryDirWarn'), 'warn'); return; }
   const input = document.getElementById('mem-new-name');
-  let name = (input.value || '').trim();
-  if (!name) { setStatus('mem-status', t('enterFilename'), 'warn'); return; }
-  if (!name.endsWith('.md')) name += '.md';
+  let raw = (input.value || '').trim();
+  if (!raw) { setStatus('mem-status', t('enterFilename'), 'warn'); return; }
+  // Normalize whatever the author typed to a base name (drop .md / language suffix).
+  const base = memParts(raw.endsWith('.md') ? raw : `${raw}.md`).base;
+  const name = `${base}.${locale}.md`;
   if (memFiles.includes(name)) { setStatus('mem-status', t('fileExists', { name }), 'warn'); return; }
   const path = `${memDir}/${name}`;
   setStatus('mem-status', t('creating'));
@@ -1432,7 +1492,7 @@ async function newMemoryFile() {
     const r = await fetch('/api/files', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, content: `# ${name.replace(/\.md$/, '')}\n\n` }),
+      body: JSON.stringify({ path, content: `# ${base}\n\n` }),
     });
     if (!r.ok) {
       setStatus('mem-status', t('createFailed', { status: r.status }), 'warn');
@@ -1441,7 +1501,7 @@ async function newMemoryFile() {
     input.value = '';
     memFiles = [...memFiles, name].sort();
     renderMemFiles();
-    await loadMemoryFile(name);
+    await loadMemoryFile(base);
     setStatus('mem-status', t('created', { name }), 'ok');
   } catch (e) {
     setStatus('mem-status', t('createException', { msg: e.message }), 'warn');

@@ -1,0 +1,101 @@
+/**
+ * 渲染派生层：GameGraph（域 SSOT） → react-flow(FX) 渲染视图。
+ *
+ * spec §2.1.1：SSOT 与渲染视图**分离但同源**。此处只读地把域图投影成 reactflow 能画的形状：
+ *  - inputs = 单一 'in'；outputs = 各 kind 的派生 handle（deriveOutputs）∪ 该节点出边用到的路由 handle。
+ *  - position 来自 node.position（域里存了布局）。
+ *  - data 只放渲染需要的少量字段（标题/角标）；不把整块 node.data 塞进去。
+ * 不回写域图。
+ */
+import type { FXEdge, FXGraph, FXNode, Handle } from '../react-flow-schema'
+import type { GameGraph, GameNode } from './graph-schema'
+import { deriveInputs, deriveOutputs } from './kind-registry'
+
+function nodeOutputHandleIds(graph: GameGraph, node: GameNode): string[] {
+  const ids = new Set<string>(deriveOutputs(node).map((h) => h.id))
+  // 加上该节点出边实际用到的路由 handle（cond:N/else/out 等）——它们由 edge 声明。
+  for (const e of graph.edges) {
+    if (e.source === node.id && e.sourceHandle) ids.add(e.sourceHandle)
+  }
+  return [...ids]
+}
+
+function toHandle(id: string, type: 'source' | 'target'): Handle<{ flowId: string }> {
+  return {
+    id: `${type}:${id}`,
+    type,
+    position: type === 'source' ? 'right' : 'left',
+    label: id,
+    data: { flowId: id },
+  }
+}
+
+/** 当所有节点坐标都在原点（未布局，如 AI 生成/新建）时，按拓扑分层自动布局。 */
+function autoLayout(graph: GameGraph): Record<string, { x: number; y: number }> {
+  const COL_W = 240
+  const ROW_H = 96
+  const targets = new Set(graph.edges.map((e) => e.target))
+  const adj = new Map<string, string[]>()
+  for (const e of graph.edges) (adj.get(e.source) ?? adj.set(e.source, []).get(e.source)!).push(e.target)
+  const depth = new Map<string, number>()
+  const roots = graph.nodes.filter((n) => !targets.has(n.id)).map((n) => n.id)
+  const queue = roots.length > 0 ? [...roots] : graph.nodes.slice(0, 1).map((n) => n.id)
+  for (const r of queue) depth.set(r, 0)
+  while (queue.length) {
+    const id = queue.shift()!
+    const d = depth.get(id) ?? 0
+    for (const nx of adj.get(id) ?? []) {
+      if (depth.has(nx)) continue
+      depth.set(nx, d + 1)
+      queue.push(nx)
+    }
+  }
+  const rowCursor = new Map<number, number>()
+  const out: Record<string, { x: number; y: number }> = {}
+  for (const n of graph.nodes) {
+    const col = depth.get(n.id) ?? 0
+    const row = rowCursor.get(col) ?? 0
+    rowCursor.set(col, row + 1)
+    out[n.id] = { x: col * COL_W, y: row * ROW_H }
+  }
+  return out
+}
+
+export function toFXView(graph: GameGraph): FXGraph {
+  const degenerate = graph.nodes.length > 1 && graph.nodes.every((n) => n.position.x === 0 && n.position.y === 0)
+  const layout = degenerate ? autoLayout(graph) : undefined
+  return {
+    nodes: graph.nodes.map((node): FXNode => ({
+      id: node.id,
+      type: node.data.end ? 'output' : 'default',
+      position: layout?.[node.id] ?? node.position,
+      inputs: deriveInputs().map((h) => toHandle(h.id, 'target')),
+      outputs: nodeOutputHandleIds(graph, node).map((id) => toHandle(id, 'source')),
+      data: {
+        label: node.data.name,
+        subtitle: node.data.clipId ?? node.data.media?.ref ?? '',
+        elementType: 'perf',
+        badge: badgeOf(node),
+        sceneKind: '',
+        hud: node.data.hud?.preset ?? '',
+      },
+    })),
+    edges: graph.edges.map((e): FXEdge => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle ? `source:${e.sourceHandle}` : undefined,
+      targetHandle: 'target:in',
+      label: e.data?.label,
+      data: { edgeId: e.id, conditionExpression: e.data?.condition ? '有条件' : undefined },
+    })),
+  }
+}
+
+function badgeOf(node: GameNode): string {
+  const kinds = new Set(node.data.timeline.map((t) => t.kind))
+  if (kinds.has('qte')) return 'qte'
+  if (kinds.has('skill') || kinds.has('choice')) return 'choice'
+  if (node.data.end) return node.data.end
+  return ''
+}
