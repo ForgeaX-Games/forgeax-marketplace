@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Magical Witch — 2D Platformer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0a0008;
+    overflow: hidden;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  #game-container {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0008;
+  }
+  canvas {
+    display: block;
+    /* 保持 16:9 比例铺满窗口，不变形 */
+    width: 100vw;
+    height: 56.25vw; /* 9/16 = 0.5625 */
+    max-height: 100vh;
+    max-width: 177.78vh; /* 16/9 */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  #controls {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #c878b8;
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-align: center;
+    text-shadow: 0 0 8px #ff6ec7;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+  }
+  #controls.visible { opacity: 0.7; }
+  #controls span { color: #fff; background: #3d0030; border-radius: 4px; padding: 1px 7px; margin: 0 3px; }
+  #fs-btn {
+    position: fixed;
+    top: 10px; right: 14px;
+    background: #3d003088;
+    border: 1px solid #c015a0;
+    color: #ff80d4;
+    font-size: 18px;
+    width: 34px; height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+  }
+  #fs-btn:hover { background: #7d0060aa; }
+  canvas { cursor: default; }
+  canvas.menu-cursor { cursor: pointer; }
+  /* 嵌入版：iframe 里不显示全屏按钮（用父页面控制） */
+  html.embed #fs-btn { display: none; }
+  html.embed #controls { display: none; }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="c"></canvas>
+</div>
+<button id="fs-btn" title="全屏 (F)">⛶</button>
+<div id="controls">
+  <span>← →</span> 移动 &nbsp; <span>↑ / Space</span> 跳跃 &nbsp; <span>Z</span> 攻击 &nbsp; <span>X</span> 闪避 &nbsp; <span>C</span> 施法 &nbsp; <span>V</span> 大招
+</div>
+
+<script>
+// ============================================================
+// Magical Witch Platformer — Pure Canvas 2D, no dependencies
+// Madoka 风格视差背景 + Tim Burton 风格平台
+// 嵌入版（作时间轴 QTE 模块使用时）通过 URL ?embed=1 标记
+// ============================================================
+const IS_EMBED = new URLSearchParams(location.search).get('embed') === '1';
+if (IS_EMBED) document.documentElement.classList.add('embed');
+const CANVAS_W = 1200;
+const CANVAS_H = 675;
+const GRAVITY = 0.55;
+const JUMP_FORCE = -11.0;   // 单跳峰值 ≈ 110px / 二段跳累积 ≈ 195px
+                            // 刚好够到最高平台 (GROUND_Y 521 - y 330 = 191px)
+const MOVE_SPEED = 5;
+const SCROLL_SPEED = 3;
+
+const canvas = document.getElementById('c');
+canvas.width  = CANVAS_W;
+canvas.height = CANVAS_H;
+const ctx = canvas.getContext('2d');
+
+// ---- Asset loader ----
+const imgs = {};
+const ASSETS = {
+  bg_far:  'assets/backgrounds/bg_far.png',
+  bg_mid:  'assets/backgrounds/bg_mid.png',
+  bg_near: 'assets/backgrounds/bg_near.png',
+  // 主菜单封面（已抹除原烤入文字，UI 由代码层叠加）
+  menu_bg: 'assets/backgrounds/menu_bg.jpg',
+  // 角色序列帧（每帧独立 PNG，192×192 RGBA，透明背景）
+  // 命名约定：`char_<action>_<frameIdx 2位零填充>` → assets/character/frames/<action>/right_XX.png
+  // 每动作帧数 / fps / 循环等元信息见下方 CHAR_ANIMS
+  char_idle_00:     'assets/character/frames/idle/right_00.png',
+  char_idle_01:     'assets/character/frames/idle/right_01.png',
+  char_idle_02:     'assets/character/frames/idle/right_02.png',
+  char_walk_00:     'assets/character/frames/walk/right_00.png',
+  char_walk_01:     'assets/character/frames/walk/right_01.png',
+  char_walk_02:     'assets/character/frames/walk/right_02.png',
+  char_run_00:      'assets/character/frames/run/right_00.png',
+  char_run_01:      'assets/character/frames/run/right_01.png',
+  char_run_02:      'assets/character/frames/run/right_02.png',
+  char_jump_00:     'assets/character/frames/jump/right_00.png',
+  char_jump_01:     'assets/character/frames/jump/right_01.png',
+  char_jump_02:     'assets/character/frames/jump/right_02.png',
+  char_jump_03:     'assets/character/frames/jump/right_03.png',
+  char_jump_04:     'assets/character/frames/jump/right_04.png',
+  char_attack_00:   'assets/character/frames/attack/right_00.png',
+  char_attack_01:   'assets/character/frames/attack/right_01.png',
+  char_attack_02:   'assets/character/frames/attack/right_02.png',
+  char_attack_03:   'assets/character/frames/attack/right_03.png',
+  char_hurt_00:     'assets/character/frames/hurt/right_00.png',
+  char_hurt_01:     'assets/character/frames/hurt/right_01.png',
+  char_hurt_02:     'assets/character/frames/hurt/right_02.png',
+  char_cast_00:     'assets/character/frames/cast/right_00.png',
+  char_cast_01:     'assets/character/frames/cast/right_01.png',
+  char_cast_02:     'assets/character/frames/cast/right_02.png',
+  char_cast_03:     'assets/character/frames/cast/right_03.png',
+  char_dodge_00:    'assets/character/frames/dodge/right_00.png',
+  char_dodge_01:    'assets/character/frames/dodge/right_01.png',
+  char_dodge_02:    'assets/character/frames/dodge/right_02.png',
+  char_ultimate_00: 'assets/character/frames/ultimate/right_00.png',
+  char_ultimate_01: 'assets/character/frames/ultimate/right_01.png',
+  char_ultimate_02: 'assets/character/frames/ultimate/right_02.png',
+  char_ultimate_03: 'assets/character/frames/ultimate/right_03.png',
+  char_ultimate_04: 'assets/character/frames/ultimate/right_04.png',
+  char_death_00:    'assets/character/frames/death/right_00.png',
+  char_death_01:    'assets/character/frames/death/right_01.png',
+  char_death_02:    'assets/character/frames/death/right_02.png',
+  // 新增 Madoka 配套平台
+  plat_ground: 'assets/platforms/platform_ground.png',        // 拼布地面
+  plat_ps:  'assets/platforms/platform_patchwork_small.png',  // 拼布小
+  plat_pm:  'assets/platforms/platform_patchwork_medium.png', // 拼布中
+  plat_bl:  'assets/platforms/platform_bone_large.png',       // 骨石大
+  plat_vx:  'assets/platforms/platform_vine_xlarge.png',      // 藤蔓特大
+  // 旧平台保留为备用
+  plat_s:  'assets/platforms/platform_small.png',
+  plat_m:  'assets/platforms/platform_medium.png',
+  plat_l:  'assets/platforms/platform_large.png',
+  plat_xl: 'assets/platforms/platform_xlarge.png',
+  // 新道具
+  prop_crystal:   'assets/props/prop_magic_crystal.png',
+  prop_rune:      'assets/props/prop_rune_stone.png',
+  prop_mlantern:  'assets/props/prop_magic_lantern.png',
+  prop_mushroom2: 'assets/props/prop_witch_mushroom.png',
+  prop_tomb2:     'assets/props/prop_gothic_tombstone.png',
+  prop_cauldron2: 'assets/props/prop_magic_cauldron.png',
+  // 旧道具
+  prop_lantern:   'assets/props/prop_lantern.png',
+  prop_tombstone: 'assets/props/prop_tombstone.png',
+  prop_mushroom:  'assets/props/prop_mushroom.png',
+  prop_coffin:    'assets/props/prop_coffin.png',
+  prop_dead_tree: 'assets/props/prop_dead_tree.png',
+  prop_cauldron:  'assets/props/prop_cauldron.png',
+  // 猫怪敌人精灵图集（横排帧）
+  enemy_cat_idle:   'assets/enemies/enemy_cat_idle.png',   // 4 帧
+  enemy_cat_attack: 'assets/enemies/enemy_cat_attack.png', // 3 帧
+  enemy_cat_hurt:   'assets/enemies/enemy_cat_hurt.png',   // 3 帧
+  enemy_cat_death:  'assets/enemies/enemy_cat_death.png',  // 4 帧
+};
+
+let loaded = 0, total = Object.keys(ASSETS).length;
+let gameReady = false;
+
+// ---- Scene state machine: 'loading' → 'playing' → 'win' | 'lose' ----
+// (menu/transition 已在嵌入版中去除：资源加载完直接进入 playing)
+let scene = 'loading';
+let sceneTime = 0;       // ms spent in current scene
+let transitionAlpha = 0; // 0..1 fade-to-black during menu → play transition（保留变量，嵌入流程不使用）
+
+// ---- Embed / Level bookkeeping ----
+// 作为时间轴上的 QTE 模块使用：短关卡 ~1800px，跑到金色终点 = 通关
+// 外部父页面通过 postMessage 拿到 win/lose/give-up 事件
+const MINIGAME_ID = 'magical-witch-platformer-1';
+const PLAYER_MAX_HP = 3;
+let playerHP = PLAYER_MAX_HP;
+let reachedGoal = false;
+let resultSent = false;
+
+function postToParent(type, extra) {
+  // 胜利/失败/继续 这三类"终局事件"只允许通知父页面一次。
+  // 胜利路径现在是 "到终点 → scene='win' → 玩家看结算 → 点继续 → 发 minigame-continue"
+  // 所以 continue 也要纳入闸门，否则快速连点按钮或同时按键盘+鼠标会重复发。
+  const terminal = type === 'minigame-win' || type === 'minigame-lose' || type === 'minigame-continue';
+  if (resultSent && terminal) return;
+  if (terminal) resultSent = true;
+  try {
+    window.parent && window.parent.postMessage({
+      source: 'reel-minigame',
+      id: MINIGAME_ID,
+      type,
+      ...(extra || {}),
+    }, '*');
+  } catch (_) { /* sandboxed: 放弃 */ }
+}
+
+function damagePlayer() {
+  if (scene !== 'playing') return;
+  if (playerHP <= 0) return;
+  playerHP--;
+  if (playerHP <= 0) {
+    // 切 death 状态；真正 scene='lose' 等 death 动画播完（updatePlayer 里判）
+    setPlayerAnim('death');
+  } else {
+    setPlayerAnim('hurt');
+  }
+}
+
+/**
+ * 设置角色动作状态 —— 高优先级替换低优先级，相同优先级非锁定才可替换。
+ * 锁定中的一次性动作（attack/dodge/…）在 finish 之前不被同级/低级打扰。
+ */
+function setPlayerAnim(state) {
+  const cur = CHAR_ANIMS[player.animState];
+  const nxt = CHAR_ANIMS[state];
+  if (!nxt) return;
+  if (player.animLock && nxt.priority <= cur.priority) return;
+  player.animState = state;
+  player.animFrame = 0;
+  player.animTimer = 0;
+  player.animElapsedMs = 0;
+  player.animLock = !nxt.looping;
+}
+
+Object.entries(ASSETS).forEach(([key, src]) => {
+  const img = new Image();
+  img.onload = () => { loaded++; if (loaded === total) onAssetsLoaded(); };
+  img.onerror = () => { loaded++; if (loaded === total) onAssetsLoaded(); };
+  img.src = src;
+  imgs[key] = img;
+});
+
+// ---- Input ----
+const keys = {};
+window.addEventListener('keydown', e => {
+  // Ctrl/Meta 组合键（刷新、开发工具等）不拦截
+  if (e.ctrlKey || e.metaKey) return;
+  keys[e.code] = true;
+  // 只阻止游戏操作键的默认行为，避免页面滚动
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space',
+       'KeyA','KeyD','KeyW','KeyS','KeyZ','KeyX','KeyC','KeyV',
+       'ShiftLeft','ShiftRight'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ---- Player ----
+// 精灵资产：每帧 192×192 单独 PNG（game-character-sprites 预处理缩放结果）。
+// 画时按 `char_<state>_<frameIdx>` 直接取 img，不再从图集里切片。
+const CHAR_SPRITE_SIZE = 160;   // 精灵显示尺寸（正方形）
+
+/**
+ * 每个动作的元信息 —— 严格对齐 sprite-meta.json。
+ *
+ * looping=true  → 帧数循环播放（idle/walk/run）
+ * looping=false → 播到最后一帧后"锁定"该帧 lockMs 毫秒；期间动作不可打断
+ * feetPct       → 该动作帧内"脚底 Y 百分比"，实测值：不同动作（尤其跳跃、攻击）
+ *                 角色离地高度差异很大，用单一值会导致人物"在地面上漂浮"
+ *
+ * 玩家动作优先级（数字越大越优先）：死亡 > 受击 > 攻击/施法/大招/闪避 > 跳 > 走跑 > 站立
+ */
+const CHAR_ANIMS = {
+  idle:     { frames: 3, fps: 6,  looping: true,  lockMs: 0,    priority: 0, feetPct: 0.828 },
+  walk:     { frames: 3, fps: 8,  looping: true,  lockMs: 0,    priority: 1, feetPct: 0.768 },
+  run:      { frames: 3, fps: 10, looping: true,  lockMs: 0,    priority: 1, feetPct: 0.739 },
+  jump:     { frames: 5, fps: 10, looping: false, lockMs: 0,    priority: 2, feetPct: 0.621 },
+  attack:   { frames: 4, fps: 14, looping: false, lockMs: 0,    priority: 4, feetPct: 0.638 },
+  cast:     { frames: 4, fps: 10, looping: false, lockMs: 0,    priority: 4, feetPct: 0.691 },
+  dodge:    { frames: 3, fps: 16, looping: false, lockMs: 0,    priority: 4, feetPct: 0.634 },
+  ultimate: { frames: 5, fps: 10, looping: false, lockMs: 500,  priority: 5, feetPct: 0.603 },
+  hurt:     { frames: 3, fps: 12, looping: false, lockMs: 0,    priority: 6, feetPct: 0.711 },
+  death:    { frames: 3, fps: 8,  looping: false, lockMs: 9999, priority: 9, feetPct: 0.648 },
+};
+
+// 动作时长（ms）= frames / fps * 1000 —— 供状态机判断"动作是否播完"
+function animTotalMs(state) {
+  const a = CHAR_ANIMS[state];
+  if (!a) return 0;
+  return (a.frames / a.fps) * 1000 + a.lockMs;
+}
+
+const player = {
+  x: 150, y: 469,   // y = GROUND_Y - player.h = 521 - 52
+  w: 36, h: 52,
+  vx: 0, vy: 0,
+  onGround: false,
+  jumpsLeft: 2,
+  facing: 1,        // 1=right, -1=left
+  animFrame: 0,
+  animTimer: 0,
+  animState: 'idle',
+  animElapsedMs: 0, // 当前动作已持续的毫秒（用于 looping=false 的完成判定）
+  animLock: false,  // 当前动作是否锁定（一次性动作完成前为 true）
+  trail: [],
+  jumpPressed: false,
+  invincible: 0,    // 无敌帧计数（>0 = 不受伤害，每帧 -1）
+  // 一次性动作按键的 edge-detect（避免按住连触发）
+  attackPressed: false,
+  dodgePressed: false,
+  castPressed: false,
+  ultimatePressed: false,
+};
+
+// ---- Enemy constants ----
+const ENEMY_W = 70;           // hitbox 宽
+const ENEMY_H = 55;           // hitbox 高
+const ENEMY_DISPLAY_SIZE = 100; // 渲染尺寸（正方形）
+const ENEMY_FEET_PCT  = 0.92;  // 脚底在精灵帧内的 Y 百分比
+const ENEMY_IDLE_FRAMES   = 4; // enemy_cat_idle 帧数（2064×512）
+const ENEMY_ATTACK_FRAMES = 3; // enemy_cat_attack 帧数（1792×592）
+const ENEMY_HURT_FRAMES   = 3; // enemy_cat_hurt 帧数（1792×592）
+const ENEMY_DEATH_FRAMES  = 4; // enemy_cat_death 帧数（1377×768）
+const ENEMY_IDLE_FRAME_W   = Math.round(2064 / ENEMY_IDLE_FRAMES);   // ≈516
+const ENEMY_IDLE_FRAME_H   = 512;
+const ENEMY_ATTACK_FRAME_W = Math.round(1792 / ENEMY_ATTACK_FRAMES); // ≈597
+const ENEMY_ATTACK_FRAME_H = 592;
+const ENEMY_HURT_FRAME_W   = Math.round(1792 / ENEMY_HURT_FRAMES);   // ≈597
+const ENEMY_HURT_FRAME_H   = 592;
+const ENEMY_DEATH_FRAME_W  = Math.round(1377 / ENEMY_DEATH_FRAMES);  // ≈344
+const ENEMY_DEATH_FRAME_H  = 768;
+const ENEMY_SPEED_PATROL = 1.2;
+const ENEMY_SPEED_AGGRO  = 2.8;
+const ENEMY_AGGRO_RANGE  = 360; // 水平追击触发距离
+const ENEMY_PATROL_RANGE = 220; // 巡逻半径
+
+// ---- World state ----
+let worldX = 0;    // camera x offset
+let score = 0;
+let gems = [];     // collectible magic orbs
+let particles = [];
+let enemies = [];
+
+// ---- Platform layout (x relative to world) ----
+// Each platform: {x, y, w, h, img}
+// Ground runs the length of the level
+const GROUND_Y = 521;   // 拼布地面顶部（实测 bg_near 图像中拼布纹理起始位置）
+const LEVEL_LENGTH = 1800;   // 嵌入短关卡：跑到终点即通关
+const GOAL_X = 1680;         // 终点旗杆 x（世界坐标）
+
+function makePlatforms() {
+  const plats = [];
+
+  // ---- 地面：隐形碰撞条，视觉由背景层提供 ----
+  const groundH = 90;
+  const groundW = 400;
+  for (let x = 0; x < LEVEL_LENGTH; x += groundW) {
+    plats.push({ x, y: GROUND_Y, w: groundW, h: groundH, img: null, isGround: true, geo: true });
+  }
+
+  // ---- 浮空平台：短关卡精心设计的 6 块路径 ----
+  // 每块指定贴图 key（`plat_ps` = patchwork_small，拼布面+石底）和视觉放大倍率
+  // `visualScale`。碰撞盒仍是一条薄线（w×h），贴图则按原比例绘制成一整块岛屿
+  // 延伸到下方——见 drawPlatforms。
+  const PLATFORM_TEX = 'plat_ps';
+  const patterns = [
+    { x: 280,  y: 450, w: 140, h: 18, visualScale: 1.6 },
+    { x: 500,  y: 390, w: 140, h: 18, visualScale: 1.6 },
+    { x: 720,  y: 330, w: 140, h: 18, visualScale: 1.5 },
+    { x: 940,  y: 390, w: 140, h: 18, visualScale: 1.6 },
+    { x: 1180, y: 430, w: 160, h: 18, visualScale: 1.55 },
+    { x: 1420, y: 380, w: 180, h: 18, visualScale: 1.55 },
+  ];
+
+  patterns.forEach(p => {
+    plats.push({
+      x: p.x, y: p.y, w: p.w, h: p.h,
+      img: PLATFORM_TEX,
+      visualScale: p.visualScale,
+    });
+  });
+  return plats;
+}
+
+// ---- Props (decorative) ----
+function makeProps() {
+  return [];  // 暂无装饰道具（等待美术资产确认后添加）
+}
+
+// ---- Enemies ----
+function makeEnemies() {
+  const list = [];
+  // 短关卡只放 2 只猫怪，位置经过精心挑选（玩家可以选择跳过或击败）
+  const ENEMY_POSITIONS = [640, 1080];
+  for (const x of ENEMY_POSITIONS) {
+    list.push({
+      x,
+      y: GROUND_Y - ENEMY_H,
+      w: ENEMY_W,
+      h: ENEMY_H,
+      vx: ENEMY_SPEED_PATROL,
+      vy: 0,
+      onGround: false,
+      facing: 1,
+      state: 'patrol',      // patrol | aggro | hurt | death_anim
+      patrolOrigin: x,
+      animFrame: 0,
+      animTimer: 0,
+      hurtTimer: 0,         // > 0 时播放受击动画
+      deathAnimTimer: 0,    // > 0 时播放死亡动画
+      alive: true,
+      prevState: 'patrol',  // hurt 结束后回到的状态
+    });
+  }
+  return list;
+}
+
+// ---- Gems ----
+function makeGems() {
+  const list = [];
+  // 沿路径均匀撒一些，但终点前 100px 留空让"终点旗杆"突出
+  const GEM_XS = [380, 560, 780, 1000, 1250, 1450];
+  for (const x of GEM_XS) {
+    list.push({ x, y: 300 + Math.random() * 120, r: 10, collected: false, phase: Math.random() * Math.PI * 2 });
+  }
+  return list;
+}
+
+let platforms, props, allGems;
+
+// Assets finished loading → build world & start playing immediately.
+function onAssetsLoaded() {
+  platforms = makePlatforms();
+  props = makeProps();
+  allGems = makeGems();
+  enemies = makeEnemies();
+  gameReady = true;
+  // 嵌入版：跳过菜单直接进入游戏，并显示操作提示
+  scene = 'playing';
+  sceneTime = 0;
+  canvas.classList.remove('menu-cursor');
+  const ctrlEl = document.getElementById('controls');
+  if (ctrlEl) ctrlEl.classList.add('visible');
+  // 通知父页：小游戏已准备好
+  postToParent('minigame-ready');
+}
+
+// 重开关卡（失败后"再试一次"调用）
+function resetLevel() {
+  player.x = 150;
+  player.y = 469;
+  player.vx = 0;
+  player.vy = 0;
+  player.invincible = 0;
+  player.jumpsLeft = 2;
+  player.facing = 1;
+  player.animState = 'idle';
+  player.animFrame = 0;
+  player.animTimer = 0;
+  player.animElapsedMs = 0;
+  player.animLock = false;
+  player.attackPressed = false;
+  player.dodgePressed = false;
+  player.castPressed = false;
+  player.ultimatePressed = false;
+  playerHP = PLAYER_MAX_HP;
+  reachedGoal = false;
+  resultSent = false;
+  worldX = 0;
+  score = 0;
+  particles.length = 0;
+  allGems = makeGems();
+  enemies = makeEnemies();
+  scene = 'playing';
+  sceneTime = 0;
+}
+
+// Triggered by the "Start Journey" button（嵌入版不再使用，保留以避免死代码报错）
+function startPlaying() {
+  if (scene !== 'menu') return;
+  scene = 'transition';
+  sceneTime = 0;
+  canvas.classList.remove('menu-cursor');
+}
+
+// ---- Draw background with parallax ----
+function drawBackground() {
+  const bgW = CANVAS_W;
+  const bgH = CANVAS_H;
+
+  // 1. 深色实底兜底（canvas 永远不透明）
+  ctx.fillStyle = '#1a0012';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  // 视差偏移：使用 Math.abs() + 取模，保证结果始终非负
+  function parallaxOffset(speed) {
+    const raw = (worldX * speed) % bgW;
+    return -(raw < 0 ? raw + bgW : raw);
+  }
+
+  // 2. FAR layer — parallax 0.08x（最慢，天空）
+  if (imgs.bg_far.complete && imgs.bg_far.naturalWidth) {
+    const xOff = parallaxOffset(0.08);
+    for (let i = 0; i <= 2; i++) {
+      ctx.drawImage(imgs.bg_far, xOff + i * bgW, 0, bgW, bgH);
+    }
+  }
+
+  // 3. MID layer — parallax 0.25x（森林）
+  if (imgs.bg_mid.complete && imgs.bg_mid.naturalWidth) {
+    const xOff = parallaxOffset(0.25);
+    for (let i = 0; i <= 2; i++) {
+      ctx.drawImage(imgs.bg_mid, xOff + i * bgW, 0, bgH * (imgs.bg_mid.naturalWidth / imgs.bg_mid.naturalHeight), bgH);
+    }
+  }
+
+  // 4. NEAR layer — parallax 0.5x（前景，bg_near 已是 RGBA 透明）
+  if (imgs.bg_near.complete && imgs.bg_near.naturalWidth) {
+    const xOff = parallaxOffset(0.5);
+    for (let i = 0; i <= 2; i++) {
+      ctx.drawImage(imgs.bg_near, xOff + i * bgW, 0, bgW, bgH);
+    }
+  }
+}
+
+// ---- Draw platforms ----
+// 绘制浮空平台时，碰撞盒 (p.x, p.y, p.w, p.h) 保持 18px 的薄线（稳定的手感），
+// 但贴图按图片原始长宽比绘制成一整块更大的"岛屿"，水平居中对齐碰撞盒，
+// 图片顶沿对齐碰撞盒顶沿（`platform_patchwork_small.png` 顶部就是拼布面，
+// 石底自然延伸到下方）。`visualScale` 控制岛屿视觉宽度相对碰撞盒的倍率。
+function drawPlatforms(camX) {
+  platforms.forEach(p => {
+    const sx = p.x - camX;
+    if (sx > CANVAS_W + 200 || sx + p.w < -200) return;
+    if (p.isGround) return;  // 地面碰撞条不绘制，背景层提供视觉
+
+    const img = p.img ? imgs[p.img] : null;
+    const hasImg = img && img.complete && img.naturalWidth;
+
+    if (hasImg) {
+      const aspect = img.naturalWidth / img.naturalHeight;
+      const scale = p.visualScale || 1.4;
+      const dw = p.w * scale;
+      const dh = dw / aspect;
+      const dx = sx - (dw - p.w) / 2;
+      const dy = p.y;  // 图片顶沿 = 碰撞盒顶沿（素材顶部就是可踩的拼布面）
+      ctx.drawImage(img, dx, dy, dw, dh);
+    } else {
+      // 图片还没加载好时的兜底纯色条
+      ctx.fillStyle = p.color || '#3d1060';
+      ctx.fillRect(sx, p.y, p.w, p.h);
+      ctx.fillStyle = 'rgba(255,180,255,0.35)';
+      ctx.fillRect(sx, p.y, p.w, 2);
+    }
+  });
+}
+
+// ---- Draw props ----
+function drawProps(camX) {
+  props.forEach(p => {
+    const sx = p.x - camX;
+    if (sx > CANVAS_W + 100 || sx + p.w < -100) return;
+    const img = imgs[p.img];
+    if (img && img.complete && img.naturalWidth) {
+      ctx.drawImage(img, sx, p.y, p.w, p.h);
+    }
+  });
+}
+
+// ---- Draw player (per-frame PNG sprites) ----
+// 每动作一组 192×192 单帧 PNG，key 格式 `char_<state>_<frame 2位>`；
+// looping 动作按 frames 取模，一次性动作播到最后一帧停住（保持末帧）。
+function drawPlayer(px, py, facing, frame) {
+  const state = player.animState in CHAR_ANIMS ? player.animState : 'idle';
+  const animInfo = CHAR_ANIMS[state];
+  const feetPct = animInfo.feetPct;
+
+  const frameIdx = animInfo.looping
+    ? frame % animInfo.frames
+    : Math.min(frame, animInfo.frames - 1);
+  const frameKey = `char_${state}_${String(frameIdx).padStart(2, '0')}`;
+  const sprite = imgs[frameKey];
+
+  const feetOffsetY = CHAR_SPRITE_SIZE * feetPct;
+  const drawX = px + player.w / 2 - CHAR_SPRITE_SIZE / 2;
+  const drawY = py + player.h - feetOffsetY;
+
+  ctx.save();
+
+  // 向左时水平翻转（以精灵中心为轴）
+  if (facing < 0) {
+    const cx = drawX + CHAR_SPRITE_SIZE / 2;
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-cx, 0);
+  }
+
+  if (sprite && sprite.complete && sprite.naturalWidth) {
+    ctx.drawImage(sprite, drawX, drawY, CHAR_SPRITE_SIZE, CHAR_SPRITE_SIZE);
+  } else {
+    ctx.fillStyle = '#c815a0';
+    ctx.fillRect(drawX, drawY, CHAR_SPRITE_SIZE, CHAR_SPRITE_SIZE * feetPct);
+  }
+
+  ctx.restore();
+}
+
+// ---- Draw enemies ----
+function drawEnemies(camX) {
+  enemies.forEach(e => {
+    if (!e.alive) return;
+    const sx = e.x - camX;
+    if (sx > CANVAS_W + 150 || sx + e.w < -150) return;
+
+    // 选 atlas 和帧参数
+    let atlasKey, frameCount, frameW, frameH;
+    switch (e.state) {
+      case 'hurt':
+        atlasKey = 'enemy_cat_hurt';
+        frameCount = ENEMY_HURT_FRAMES;
+        frameW = ENEMY_HURT_FRAME_W;
+        frameH = ENEMY_HURT_FRAME_H;
+        break;
+      case 'death_anim':
+        atlasKey = 'enemy_cat_death';
+        frameCount = ENEMY_DEATH_FRAMES;
+        frameW = ENEMY_DEATH_FRAME_W;
+        frameH = ENEMY_DEATH_FRAME_H;
+        break;
+      case 'aggro':
+        atlasKey = 'enemy_cat_attack';
+        frameCount = ENEMY_ATTACK_FRAMES;
+        frameW = ENEMY_ATTACK_FRAME_W;
+        frameH = ENEMY_ATTACK_FRAME_H;
+        break;
+      default:
+        atlasKey = 'enemy_cat_idle';
+        frameCount = ENEMY_IDLE_FRAMES;
+        frameW = ENEMY_IDLE_FRAME_W;
+        frameH = ENEMY_IDLE_FRAME_H;
+    }
+
+    const atlas = imgs[atlasKey];
+    const dispH = e.state === 'death_anim' ? ENEMY_DISPLAY_SIZE * 0.8 : ENEMY_DISPLAY_SIZE;
+    const dispW = dispH * (frameW / frameH);
+    const feetOff = dispH * ENEMY_FEET_PCT;
+    const drawX = sx + e.w / 2 - dispW / 2;
+    const drawY = (e.y + e.h) - feetOff;
+
+    ctx.save();
+
+    // 受击时闪烁
+    if (e.state === 'hurt' && Math.floor(e.hurtTimer / 3) % 2 === 0) {
+      ctx.globalAlpha = 0.45;
+    }
+    // 死亡动画最后渐出
+    if (e.state === 'death_anim') {
+      const fade = e.deathAnimTimer / (ENEMY_DEATH_FRAMES * 8);
+      ctx.globalAlpha = Math.max(0.1, fade);
+    }
+
+    // 向左翻转
+    if (e.facing < 0) {
+      const cx = drawX + dispW / 2;
+      ctx.translate(cx, 0); ctx.scale(-1, 1); ctx.translate(-cx, 0);
+    }
+
+    if (atlas && atlas.complete && atlas.naturalWidth) {
+      const fi = Math.min(e.animFrame, frameCount - 1);
+      ctx.drawImage(atlas, fi * frameW, 0, frameW, frameH, drawX, drawY, dispW, dispH);
+    } else {
+      ctx.fillStyle = '#1a0a28';
+      ctx.beginPath();
+      ctx.ellipse(sx + e.w / 2, e.y + e.h / 2, e.w / 2, e.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  });
+}
+
+// ---- Update enemies ----
+function updateEnemies(dt) {
+  const px = player.x, py = player.y, pw = player.w, ph = player.h;
+
+  enemies.forEach(e => {
+    if (!e.alive) return;
+
+    // ── 死亡动画 ──────────────────────────────────────────────────
+    if (e.state === 'death_anim') {
+      e.deathAnimTimer--;
+      const totalTicks = ENEMY_DEATH_FRAMES * 8;
+      const frameDuration = 8;
+      e.animFrame = Math.min(
+        ENEMY_DEATH_FRAMES - 1,
+        Math.floor((totalTicks - e.deathAnimTimer) / frameDuration)
+      );
+      if (e.deathAnimTimer <= 0) {
+        e.alive = false;
+      }
+      return;
+    }
+
+    // ── 受击动画 ──────────────────────────────────────────────────
+    if (e.state === 'hurt') {
+      e.hurtTimer--;
+      const totalTicks = ENEMY_HURT_FRAMES * 6;
+      const frameDuration = 6;
+      e.animFrame = Math.min(
+        ENEMY_HURT_FRAMES - 1,
+        Math.floor((totalTicks - e.hurtTimer) / frameDuration)
+      );
+      if (e.hurtTimer <= 0) {
+        e.state = e.prevState;  // 回到受伤前的状态
+        e.animFrame = 0;
+        e.animTimer = 0;
+      }
+      return;
+    }
+
+    // ── AI 状态 ───────────────────────────────────────────────────
+    const dx = (px + pw / 2) - (e.x + e.w / 2);
+    const dy = (py + ph / 2) - (e.y + e.h / 2);
+    const distH = Math.abs(dx);
+
+    if (e.state === 'patrol') {
+      if (distH < ENEMY_AGGRO_RANGE && Math.abs(dy) < 300) e.state = 'aggro';
+    } else if (e.state === 'aggro') {
+      if (distH > ENEMY_AGGRO_RANGE * 1.5) e.state = 'patrol';
+    }
+
+    // ── 移动 ─────────────────────────────────────────────────────
+    if (e.state === 'patrol') {
+      if (e.x > e.patrolOrigin + ENEMY_PATROL_RANGE) { e.vx = -ENEMY_SPEED_PATROL; e.facing = -1; }
+      if (e.x < e.patrolOrigin - ENEMY_PATROL_RANGE) { e.vx =  ENEMY_SPEED_PATROL; e.facing =  1; }
+    } else {
+      if (dx > 10)       { e.vx =  ENEMY_SPEED_AGGRO; e.facing =  1; }
+      else if (dx < -10) { e.vx = -ENEMY_SPEED_AGGRO; e.facing = -1; }
+      else               { e.vx = 0; }
+    }
+
+    // ── 重力与平台 ────────────────────────────────────────────────
+    e.vy += GRAVITY * 0.9;
+    e.vy = Math.min(e.vy, 18);
+    e.x += e.vx;
+    e.y += e.vy;
+    e.x = Math.max(0, Math.min(e.x, LEVEL_LENGTH - e.w));
+
+    e.onGround = false;
+    platforms.forEach(plat => {
+      if (!plat.isGround) return;
+      if (collide(e.x, e.y, e.w, e.h, plat)) {
+        const overlapTop = (e.y + e.h) - plat.y;
+        if (overlapTop > 0 && overlapTop < e.h * 0.7 && e.vy >= 0) {
+          e.y = plat.y - e.h;
+          e.vy = 0;
+          e.onGround = true;
+        }
+      }
+    });
+
+    if (e.y > CANVAS_H + 200) { e.alive = false; return; }
+
+    // ── 巡逻/追击动画帧 ──────────────────────────────────────────
+    e.animTimer++;
+    const tpf = e.state === 'aggro' ? 5 : 8;
+    const fc  = e.state === 'aggro' ? ENEMY_ATTACK_FRAMES : ENEMY_IDLE_FRAMES;
+    if (e.animTimer >= tpf) { e.animFrame = (e.animFrame + 1) % fc; e.animTimer = 0; }
+
+    // ── 玩家碰撞 ─────────────────────────────────────────────────
+    if (!collide(px, py, pw, ph, e)) return;
+
+    const overlapTop = (py + ph) - e.y;
+    const isStomping = player.vy > 1 && overlapTop > 0 && overlapTop < ph * 0.55;
+
+    if (isStomping) {
+      // 踩踏 → 进入死亡动画
+      e.state = 'death_anim';
+      e.animFrame = 0;
+      e.deathAnimTimer = ENEMY_DEATH_FRAMES * 8;
+      player.vy = -8;   // 踩敌回弹；与 JUMP_FORCE (-11) 同比缩放
+      score += 200;
+      // 爆裂粒子
+      for (let i = 0; i < 10; i++) {
+        const angle = (i / 10) * Math.PI * 2;
+        particles.push({
+          x: e.x + e.w / 2 - worldX,
+          y: e.y + e.h / 2,
+          vx: Math.cos(angle) * 3.5, vy: Math.sin(angle) * 3.5 - 2,
+          r: 4 + Math.random() * 4,
+          color: ['#ff80d4','#d060ff','#c0ffee'][Math.floor(Math.random() * 3)],
+          life: 22, maxLife: 22,
+        });
+      }
+    } else if (!player.invincible) {
+      // 侧撞 → 敌人进入受击状态 + 玩家弹飞
+      e.prevState = e.state;
+      e.state = 'hurt';
+      e.animFrame = 0;
+      e.hurtTimer = ENEMY_HURT_FRAMES * 6;
+
+      player.invincible = 60;
+      const kbDir = px < e.x ? -1 : 1;
+      player.vx = kbDir * 7;
+      player.vy = -8;
+      damagePlayer();
+    }
+  });
+}
+
+// ---- Draw gems ----
+function drawGems(camX, t) {
+  allGems.forEach(g => {
+    if (g.collected) return;
+    const sx = g.x - camX;
+    if (sx < -30 || sx > CANVAS_W + 30) return;
+    const sy = g.y + Math.sin(t * 0.003 + g.phase) * 8;
+
+    ctx.save();
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = '#d060ff';
+    ctx.fillStyle = '#c840ff';
+    ctx.beginPath();
+    // diamond shape
+    ctx.moveTo(sx, sy - g.r * 1.5);
+    ctx.lineTo(sx + g.r, sy);
+    ctx.lineTo(sx, sy + g.r * 1.5);
+    ctx.lineTo(sx - g.r, sy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+// ---- Draw particles ----
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ---- Draw goal flag (关卡终点) ----
+function drawGoal(camX, t) {
+  const sx = GOAL_X - camX;
+  if (sx < -60 || sx > CANVAS_W + 60) return;
+  const baseY = GROUND_Y;
+  const poleH = 180;
+  const poleTopY = baseY - poleH;
+
+  ctx.save();
+
+  // 柱光
+  const glow = ctx.createRadialGradient(sx, baseY - poleH * 0.5, 10, sx, baseY - poleH * 0.5, 140);
+  glow.addColorStop(0, 'rgba(255, 225, 120, 0.55)');
+  glow.addColorStop(1, 'rgba(255, 225, 120, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(sx - 140, poleTopY - 40, 280, poleH + 80);
+
+  // 旗杆
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(sx - 3, poleTopY, 6, poleH);
+
+  // 旗帜（飘动）
+  const flag = Math.sin(t * 0.004) * 6;
+  ctx.fillStyle = '#ffcf4a';
+  ctx.strokeStyle = '#ff8a2a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx + 3, poleTopY + 6);
+  ctx.lineTo(sx + 56 + flag, poleTopY + 22);
+  ctx.lineTo(sx + 3, poleTopY + 40);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 顶部星光
+  ctx.fillStyle = '#fff6c0';
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = '#ffe066';
+  ctx.beginPath();
+  ctx.arc(sx, poleTopY - 2, 5 + Math.sin(t * 0.006) * 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // "GOAL" 字样
+  ctx.shadowBlur = 6;
+  ctx.font = 'bold 14px "Segoe UI"';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText('GOAL', sx, poleTopY - 14);
+  ctx.textAlign = 'left';
+
+  ctx.restore();
+}
+
+// ---- Draw HUD ----
+function drawHUD() {
+  // Score
+  ctx.save();
+  ctx.font = 'bold 22px "Segoe UI"';
+  ctx.fillStyle = '#fff';
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = '#d060ff';
+  ctx.fillText(`✦ ${score}`, 20, 36);
+
+  // Gem count
+  const collected = allGems.filter(g => g.collected).length;
+  ctx.font = '16px "Segoe UI"';
+  ctx.fillStyle = '#d4a0ff';
+  ctx.shadowColor = '#9040cc';
+  ctx.fillText(`◆ ${collected} / ${allGems.length}`, 20, 62);
+
+  // HP hearts (红色 = 还有的命；暗紫 = 已失)
+  for (let i = 0; i < PLAYER_MAX_HP; i++) {
+    ctx.fillStyle = i < playerHP ? '#ff4d6d' : '#3d0020';
+    ctx.shadowBlur = i < playerHP ? 10 : 0;
+    ctx.shadowColor = '#ff4d6d';
+    ctx.font = '24px serif';
+    ctx.fillText('♥', CANVAS_W - 96 + i * 28, 36);
+  }
+
+  // 终点进度
+  ctx.font = '14px "Segoe UI"';
+  ctx.fillStyle = '#ffcf4a';
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = '#ff8a2a';
+  const progress = Math.min(100, Math.floor((player.x / GOAL_X) * 100));
+  ctx.textAlign = 'right';
+  ctx.fillText(`GOAL ${progress}%`, CANVAS_W - 20, 62);
+  ctx.textAlign = 'left';
+
+  ctx.restore();
+}
+
+// ---- Win / Lose overlay ----
+// 按钮热区（用于 click hit test）；只在 overlay 可见时更新
+const overlayBtns = {
+  retry: null,       // 失败：再试一次
+  giveUp: null,      // 失败：放弃（跳失败分支）
+  continue: null,    // 通关：继续剧情
+};
+
+function layoutOverlayButtons(mode) {
+  overlayBtns.retry = null;
+  overlayBtns.giveUp = null;
+  overlayBtns.continue = null;
+  const cy = CANVAS_H / 2 + 80;
+  if (mode === 'lose') {
+    overlayBtns.retry  = { x: CANVAS_W / 2 - 180, y: cy, w: 160, h: 52, label: '再试一次', hotkey: 'R' };
+    overlayBtns.giveUp = { x: CANVAS_W / 2 + 20,  y: cy, w: 200, h: 52, label: '放弃关卡',   hotkey: 'Esc' };
+  } else if (mode === 'win') {
+    overlayBtns.continue = { x: CANVAS_W / 2 - 120, y: cy, w: 240, h: 56, label: '继续剧情 →', hotkey: 'Enter' };
+  }
+}
+
+function drawOverlayBase(alpha, titleColor, title, subtitle) {
+  ctx.save();
+  ctx.fillStyle = `rgba(5, 2, 6, ${0.72 * alpha})`;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  ctx.textAlign = 'center';
+  ctx.shadowBlur = 24;
+  ctx.shadowColor = titleColor;
+  ctx.fillStyle = titleColor;
+  ctx.font = 'bold 72px "Segoe UI"';
+  ctx.globalAlpha = alpha;
+  ctx.fillText(title, CANVAS_W / 2, CANVAS_H / 2 - 20);
+
+  ctx.shadowBlur = 6;
+  ctx.font = '18px "Segoe UI"';
+  ctx.fillStyle = '#d4b0e8';
+  ctx.shadowColor = '#6030a0';
+  ctx.fillText(subtitle, CANVAS_W / 2, CANVAS_H / 2 + 24);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawOverlayButton(btn, hover) {
+  ctx.save();
+  const r = 12;
+  ctx.fillStyle = hover ? 'rgba(255, 205, 90, 0.22)' : 'rgba(255, 255, 255, 0.08)';
+  ctx.strokeStyle = hover ? '#ffcf4a' : '#c878b8';
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = hover ? 16 : 6;
+  ctx.shadowColor = hover ? '#ff8a2a' : '#9040cc';
+  roundRect(ctx, btn.x, btn.y, btn.w, btn.h, r);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px "Segoe UI"';
+  ctx.textAlign = 'center';
+  ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 7);
+
+  ctx.font = '11px "Segoe UI"';
+  ctx.fillStyle = '#c878b8';
+  ctx.fillText(`[${btn.hotkey}]`, btn.x + btn.w / 2, btn.y + btn.h + 16);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+function drawWinOverlay(t) {
+  const alpha = Math.min(1, sceneTime / 450);
+  drawOverlayBase(alpha, '#ffe066', 'VICTORY', `关卡通过 · 得分 ${score}`);
+  layoutOverlayButtons('win');
+  if (overlayBtns.continue) {
+    drawOverlayButton(overlayBtns.continue, hitButton(mouse.x, mouse.y, overlayBtns.continue));
+  }
+}
+
+function drawLoseOverlay(t) {
+  const alpha = Math.min(1, sceneTime / 450);
+  drawOverlayBase(alpha, '#ff6b6b', 'YOU DIED', '没关系，再来一次！');
+  layoutOverlayButtons('lose');
+  if (overlayBtns.retry)  drawOverlayButton(overlayBtns.retry,  hitButton(mouse.x, mouse.y, overlayBtns.retry));
+  if (overlayBtns.giveUp) drawOverlayButton(overlayBtns.giveUp, hitButton(mouse.x, mouse.y, overlayBtns.giveUp));
+}
+
+function hitButton(mx, my, btn) {
+  if (!btn) return false;
+  return mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h;
+}
+
+
+function collide(px, py, pw, ph, plat) {
+  return px < plat.x + plat.w &&
+         px + pw > plat.x &&
+         py < plat.y + plat.h &&
+         py + ph > plat.y;
+}
+
+function updatePlayer(dt) {
+  // Input
+  const left  = keys['ArrowLeft']  || keys['KeyA'];
+  const right = keys['ArrowRight'] || keys['KeyD'];
+  const jump  = keys['ArrowUp'] || keys['Space'] || keys['KeyW'];
+  const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+  const attackBtn   = keys['KeyZ'];
+  const dodgeBtn    = keys['KeyX'];
+  const castBtn     = keys['KeyC'];
+  const ultimateBtn = keys['KeyV'];
+
+  const moveSpeed = sprint ? MOVE_SPEED * 1.6 : MOVE_SPEED;
+  if (left)  { player.vx = -moveSpeed; player.facing = -1; }
+  else if (right) { player.vx = moveSpeed; player.facing = 1; }
+  else player.vx *= 0.8;
+
+  // Jump
+  if (jump && !player.jumpPressed && player.jumpsLeft > 0) {
+    player.vy = JUMP_FORCE * (player.jumpsLeft === 1 ? 0.88 : 1);
+    player.jumpsLeft--;
+    player.jumpPressed = true;
+    // Jump particle burst
+    for (let i = 0; i < 8; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      particles.push({
+        x: player.x + player.w / 2, y: player.y + player.h,
+        vx: Math.cos(angle) * 2.5, vy: Math.sin(angle) * 2.5 - 1,
+        r: 3 + Math.random() * 3,
+        color: ['#d060ff','#ff80d4','#c0ffee'][Math.floor(Math.random()*3)],
+        life: 25, maxLife: 25
+      });
+    }
+  }
+  if (!jump) player.jumpPressed = false;
+
+  // Gravity
+  player.vy += GRAVITY;
+  player.vy = Math.min(player.vy, 20);
+
+  // Move
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // Camera follows player (keep player at ~35% from left)
+  const targetCamX = player.x - CANVAS_W * 0.35;
+  worldX += (targetCamX - worldX) * 0.1;
+  worldX = Math.max(0, Math.min(worldX, LEVEL_LENGTH - CANVAS_W));
+
+  // Clamp player to level
+  player.x = Math.max(0, Math.min(player.x, LEVEL_LENGTH - player.w));
+
+  // Platform collision
+  player.onGround = false;
+  const camX = worldX;
+  platforms.forEach(plat => {
+    // Only check visible platforms
+    if (plat.x - camX > CANVAS_W + 100 || plat.x - camX + plat.w < -100) return;
+
+    const px = player.x, py = player.y, pw = player.w, ph = player.h;
+    if (collide(px, py, pw, ph, plat)) {
+      const overlapLeft  = (px + pw) - plat.x;
+      const overlapRight = (plat.x + plat.w) - px;
+      const overlapTop   = (py + ph) - plat.y;
+      const overlapBot   = (plat.y + plat.h) - py;
+
+      const minO = Math.min(overlapLeft, overlapRight, overlapTop, overlapBot);
+
+      if (minO === overlapTop && player.vy >= 0) {
+        player.y = plat.y - ph;
+        player.vy = 0;
+        player.onGround = true;
+        player.jumpsLeft = 2;
+      } else if (minO === overlapBot && player.vy < 0) {
+        player.y = plat.y + plat.h;
+        player.vy = 1;
+      } else if (minO === overlapLeft) {
+        player.x = plat.x - pw;
+        player.vx = 0;
+      } else if (minO === overlapRight) {
+        player.x = plat.x + plat.w;
+        player.vx = 0;
+      }
+    }
+  });
+
+  // Fall off screen → 扣一次血，复位
+  if (player.y > CANVAS_H + 100) {
+    player.y = 200;
+    player.x = Math.max(50, player.x - 200);
+    player.vy = 0;
+    player.jumpsLeft = 2;
+    damagePlayer();
+  }
+
+  // 到达终点旗杆 → 触发通关；只切 scene='win'，不立刻 post，
+  // 等玩家看完结算面板主动点"继续"（或按 Enter/Space）再通知父页面。
+  // 之前这里会立即 postToParent('minigame-win')，父页面收到后瞬间销毁 overlay，
+  // 玩家完全没机会看到 drawWinOverlay 画出的结算面板。
+  if (!reachedGoal && player.x + player.w >= GOAL_X) {
+    reachedGoal = true;
+    scene = 'win';
+    sceneTime = 0;
+  }
+
+  // Magic trail particles
+  if (Math.abs(player.vx) > 1 || !player.onGround) {
+    if (Math.random() < 0.3) {
+      player.trail.push({
+        x: player.x + player.w / 2 - worldX,
+        y: player.y + player.h * 0.7,
+        life: 12, maxLife: 12,
+        r: 3, color: '#c040ff'
+      });
+    }
+  }
+
+  // Gem collection
+  allGems.forEach(g => {
+    if (g.collected) return;
+    const dx = (player.x + player.w / 2) - g.x;
+    const dy = (player.y + player.h / 2) - g.y;
+    if (Math.sqrt(dx*dx + dy*dy) < player.w * 0.8) {
+      g.collected = true;
+      score += 100;
+      for (let i = 0; i < 12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        particles.push({
+          x: g.x - worldX, y: g.y,
+          vx: Math.cos(angle) * 3, vy: Math.sin(angle) * 3,
+          r: 4, color: '#d060ff', life: 20, maxLife: 20
+        });
+      }
+    }
+  });
+
+  // Particle positions update
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // 无敌帧倒计时
+  if (player.invincible > 0) player.invincible--;
+
+  // ───────────────────────────────────────────────────
+  // 动画状态机
+  //
+  // 规则：
+  //   · death > hurt > attack/cast/ultimate/dodge > jump > run/walk > idle
+  //   · 一次性动作（非 looping）播完前锁定 animLock=true，不被低优先级打断
+  //   · hurt 每次被击新开一次（已在 damagePlayer 里 setPlayerAnim）
+  //   · death 播完 + lockMs 结束 → 切 scene='lose'（让动画看完再结算）
+  //
+  // 推进：每帧 dt≈16.67ms；fps=CHAR_ANIMS[state].fps
+  //   frameInterval = 1000/fps；animElapsedMs += dt；跨界即推进 frame
+  // ───────────────────────────────────────────────────
+  const DT_MS = 1000 / 60;
+  player.animElapsedMs += DT_MS;
+
+  const cur = CHAR_ANIMS[player.animState] || CHAR_ANIMS.idle;
+  const totalMs = animTotalMs(player.animState);
+
+  // 一次性动作是否播完？
+  if (!cur.looping) {
+    if (player.animState === 'death') {
+      // death 锁定期间不再接受任何状态切换；播完 + lock 结束后结算
+      if (player.animElapsedMs >= totalMs) {
+        if (scene === 'playing') {
+          scene = 'lose';
+          sceneTime = 0;
+        }
+      }
+    } else if (player.animElapsedMs >= totalMs) {
+      // 动作播完 → 解锁；下面的基础状态（idle/walk/run/jump）再决定新状态
+      player.animLock = false;
+    }
+  }
+
+  // 一次性动作的触发（edge-detect），优先级 > jump/run
+  // 死亡/受击锁定时不接受新触发
+  if (!player.animLock) {
+    if (attackBtn && !player.attackPressed) {
+      setPlayerAnim('attack');
+    } else if (dodgeBtn && !player.dodgePressed) {
+      setPlayerAnim('dodge');
+    } else if (castBtn && !player.castPressed) {
+      setPlayerAnim('cast');
+    } else if (ultimateBtn && !player.ultimatePressed) {
+      setPlayerAnim('ultimate');
+    }
+  }
+  player.attackPressed   = attackBtn;
+  player.dodgePressed    = dodgeBtn;
+  player.castPressed     = castBtn;
+  player.ultimatePressed = ultimateBtn;
+
+  // 基础动作（只在未锁定时推导）
+  if (!player.animLock) {
+    const absVx = Math.abs(player.vx);
+    const isSprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+    let nextBase;
+    if (!player.onGround) {
+      nextBase = 'jump';
+    } else if (absVx > 0.5) {
+      nextBase = isSprinting ? 'run' : 'walk';
+    } else {
+      nextBase = 'idle';
+    }
+    if (nextBase !== player.animState) {
+      setPlayerAnim(nextBase);
+    }
+  }
+
+  // 帧推进：按当前动作自己的 fps
+  const fps = (CHAR_ANIMS[player.animState] || CHAR_ANIMS.idle).fps;
+  const frameInterval = 1000 / fps;
+  player.animTimer += DT_MS;
+  if (player.animTimer >= frameInterval) {
+    player.animTimer -= frameInterval;
+    const info = CHAR_ANIMS[player.animState] || CHAR_ANIMS.idle;
+    if (info.looping) {
+      player.animFrame = (player.animFrame + 1) % info.frames;
+    } else {
+      // 一次性动作：递增直到末帧，之后 drawPlayer 会 clamp
+      player.animFrame = Math.min(player.animFrame + 1, info.frames - 1);
+    }
+  }
+}
+
+// ============================================================
+// MAIN MENU SCENE — 分层 UI 架构
+//
+//   Layer 0  背景图（已抹除文字）       drawMenuBackground
+//   Layer 1  装饰浮粒 / 雾气              drawMenuAmbient
+//   Layer 2  中央 Spotlight 面罩          drawMenuSpotlight
+//   Layer 3  标题 MIO（笔刷体 + 动效）    drawMenuTitle
+//   Layer 4  菜单项 4 个                  drawMenuItems
+//   Layer 5  Help / 调试浮层              drawHelpOverlay
+//
+// 每层都是独立函数，可以单独调整或替换。
+// 标题与菜单项使用纯代码绘制 + 数据驱动，方便添加 hover / click / tween 动效。
+// ============================================================
+
+// —— 画布交互坐标 ——
+const mouse = { x: -1, y: -1, down: false };
+function canvasPoint(evt) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) / rect.width  * CANVAS_W,
+    y: (evt.clientY - rect.top)  / rect.height * CANVAS_H,
+  };
+}
+
+// —— 标题数据 ——
+const MENU_TITLE = {
+  text: 'MIO',
+  cx: 0.5, cy: 0.20,        // 画布相对位置
+  size: 150,                 // 字号
+  color: '#f5edd8',
+  drawOnSec: 1.4,            // 入场时"画上去"的时长
+  bornAt: -1,                // 入场时间戳
+};
+
+// —— 菜单项数据 —— 每项独立可控（hover/anim/click）
+const MENU_ITEMS = [
+  { id: 'new',      label: 'NEW GAME', enabled: true,  hover: 0, born: 0 },
+  { id: 'continue', label: 'CONTINUE', enabled: true,  hover: 0, born: 0 },
+  { id: 'settings', label: 'SETTINGS', enabled: true,  hover: 0, born: 0 },
+  { id: 'quit',     label: 'QUIT',     enabled: true,  hover: 0, born: 0 },
+];
+const MENU_LAYOUT = {
+  cx: 0.50,           // 列水平中心
+  startY: 0.46,       // 第一项垂直位置（画布相对）
+  rowGap: 60,         // 行距（画布像素）
+  itemW: 320,         // hit-box 宽
+  itemH: 52,          // hit-box 高
+  fontSize: 30,       // 字号
+};
+let showHelpOverlay = false;
+
+// 入场依次浮现
+function startMenuIntro(tSec) {
+  MENU_TITLE.bornAt = tSec;
+  MENU_ITEMS.forEach((it, i) => { it.born = tSec + 0.6 + i * 0.18; });
+}
+
+function menuItemRect(i) {
+  const cx = MENU_LAYOUT.cx * CANVAS_W;
+  const cy = MENU_LAYOUT.startY * CANVAS_H + i * MENU_LAYOUT.rowGap;
+  return {
+    x: cx - MENU_LAYOUT.itemW / 2,
+    y: cy - MENU_LAYOUT.itemH / 2,
+    w: MENU_LAYOUT.itemW,
+    h: MENU_LAYOUT.itemH,
+    cx, cy,
+  };
+}
+
+function menuItemAt(x, y) {
+  for (let i = 0; i < MENU_ITEMS.length; i++) {
+    const r = menuItemRect(i);
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+      return { item: MENU_ITEMS[i], rect: r, index: i };
+    }
+  }
+  return null;
+}
+
+// =====================================================================
+// Layer 0  ——  背景图（已抹除原始烤入文字）
+// =====================================================================
+function drawMenuBackground() {
+  const bg = imgs.menu_bg;
+  if (bg && bg.complete && bg.naturalWidth) {
+    // cover 模式：保留比例铺满 canvas
+    const ar = bg.naturalWidth / bg.naturalHeight;
+    const canvasAr = CANVAS_W / CANVAS_H;
+    let dw, dh, dx, dy;
+    if (ar > canvasAr) {
+      dh = CANVAS_H;
+      dw = dh * ar;
+      dx = (CANVAS_W - dw) / 2;
+      dy = 0;
+    } else {
+      dw = CANVAS_W;
+      dh = dw / ar;
+      dx = 0;
+      dy = (CANVAS_H - dh) / 2;
+    }
+    ctx.drawImage(bg, dx, dy, dw, dh);
+  } else {
+    ctx.fillStyle = '#1a0014';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  }
+}
+
+// =====================================================================
+// Layer 1  ——  环境氛围：飘落微粒 + 边缘暗角
+// =====================================================================
+function drawMenuAmbient(tSec, dt) {
+  // 飘落紫红色尘埃
+  if (Math.random() < 0.22) {
+    particles.push({
+      x: Math.random() * CANVAS_W,
+      y: -5,
+      vx: (Math.random() - 0.5) * 0.25,
+      vy: 0.25 + Math.random() * 0.35,
+      r: 1 + Math.random() * 1.4,
+      color: Math.random() < 0.4 ? '#ff80c0' : '#d060a0',
+      life: 280 + Math.random() * 80, maxLife: 320,
+      menu: true,
+    });
+  }
+  // 顶部 / 底部边缘暗角
+  ctx.save();
+  const vg = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
+  vg.addColorStop(0,   'rgba(0, 0, 0, 0.55)');
+  vg.addColorStop(0.18,'rgba(0, 0, 0, 0.05)');
+  vg.addColorStop(0.82,'rgba(0, 0, 0, 0.05)');
+  vg.addColorStop(1,   'rgba(0, 0, 0, 0.45)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.restore();
+}
+
+// =====================================================================
+// Layer 2  ——  Spotlight：在标题与菜单区域加上柔和打光，引导视线
+// =====================================================================
+function drawMenuSpotlight(tSec) {
+  ctx.save();
+  const cx = CANVAS_W * 0.5;
+  const cy = CANVAS_H * 0.35;
+  const breath = 1 + Math.sin(tSec * 0.9) * 0.04; // 缓慢呼吸
+  const r = CANVAS_W * 0.42 * breath;
+  const g = ctx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r);
+  g.addColorStop(0,   'rgba(255, 240, 220, 0.18)');
+  g.addColorStop(0.4, 'rgba(255, 200, 180, 0.08)');
+  g.addColorStop(1,   'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = g;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.restore();
+
+  // 中央暗色卡片底，让文字易读且自然遮盖原图小瑕疵
+  ctx.save();
+  const cardX = CANVAS_W * 0.32;
+  const cardY = CANVAS_H * 0.10;
+  const cardW = CANVAS_W * 0.36;
+  const cardH = CANVAS_H * 0.78;
+  const cg = ctx.createRadialGradient(
+    cardX + cardW / 2, cardY + cardH / 2, 0,
+    cardX + cardW / 2, cardY + cardH / 2, cardW * 0.7
+  );
+  cg.addColorStop(0,   'rgba(20, 6, 14, 0.45)');
+  cg.addColorStop(0.6, 'rgba(20, 6, 14, 0.25)');
+  cg.addColorStop(1,   'rgba(20, 6, 14, 0)');
+  ctx.fillStyle = cg;
+  ctx.fillRect(cardX - 60, cardY, cardW + 120, cardH);
+  ctx.restore();
+}
+
+// =====================================================================
+// Layer 3  ——  标题 MIO：手写笔刷感 + 入场 draw-on + 持续呼吸/微抖
+// =====================================================================
+function drawMenuTitle(tSec) {
+  if (MENU_TITLE.bornAt < 0) return;
+  const age = tSec - MENU_TITLE.bornAt;
+  const drawOn = Math.min(1, Math.max(0, age / MENU_TITLE.drawOnSec));
+  // 入场缓出曲线
+  const ease = 1 - Math.pow(1 - drawOn, 3);
+
+  const cx = MENU_TITLE.cx * CANVAS_W;
+  const cy = MENU_TITLE.cy * CANVAS_H;
+  // 微小呼吸缩放
+  const breath = 1 + Math.sin(tSec * 1.2) * 0.012;
+  // 入场期间略微下沉再回到原位
+  const introDy = (1 - ease) * -18;
+
+  ctx.save();
+  ctx.translate(cx, cy + introDy);
+  ctx.scale(breath, breath);
+  ctx.globalAlpha = ease;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `900 ${MENU_TITLE.size}px "Georgia", "Times New Roman", serif`;
+
+  // 先画几条偏移阴影模拟笔刷重影
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillText(MENU_TITLE.text, 4, 6);
+
+  // 暖白主体
+  ctx.fillStyle = MENU_TITLE.color;
+  ctx.fillText(MENU_TITLE.text, 0, 0);
+
+  // 高光层
+  ctx.fillStyle = 'rgba(255, 220, 200, 0.25)';
+  ctx.fillText(MENU_TITLE.text, -1.2, -1.5);
+
+  // 描边
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = 'rgba(80, 30, 50, 0.5)';
+  ctx.strokeText(MENU_TITLE.text, 0, 0);
+
+  // 笔刷"擦除"入场效果：用径向遮罩从上往下显形
+  if (ease < 1) {
+    ctx.globalCompositeOperation = 'destination-in';
+    const reveal = ease;
+    const grad = ctx.createLinearGradient(0, -MENU_TITLE.size, 0, MENU_TITLE.size);
+    grad.addColorStop(Math.max(0, reveal - 0.05), 'rgba(0,0,0,1)');
+    grad.addColorStop(Math.min(1, reveal + 0.02), 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-CANVAS_W, -CANVAS_H, CANVAS_W * 2, CANVAS_H * 2);
+  }
+
+  ctx.restore();
+}
+
+// =====================================================================
+// Layer 4  ——  4 项菜单：NEW GAME / CONTINUE / SETTINGS / QUIT
+//   每项独立动效：入场上浮 + hover 高亮 + 选中时左侧装饰符号
+// =====================================================================
+function drawMenuItems(tSec) {
+  const hover = menuItemAt(mouse.x, mouse.y);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${MENU_LAYOUT.fontSize}px "Georgia", "Times New Roman", serif`;
+
+  MENU_ITEMS.forEach((it, i) => {
+    if (it.born <= 0) return;
+    const age = tSec - it.born;
+    if (age < 0) return;
+    const enter = Math.min(1, age / 0.5);
+    const ease = 1 - Math.pow(1 - enter, 3);
+
+    const r = menuItemRect(i);
+
+    // hover 插值
+    const isHover = hover && hover.item === it;
+    const target = isHover ? 1 : 0;
+    it.hover += (target - it.hover) * 0.18;
+
+    const dx = (1 - ease) * -28;            // 入场从左侧滑入
+    const alpha = ease;
+    const scale = 1 + it.hover * 0.06;
+    const offset = it.hover * 6;            // hover 时整行向右偏一点
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(r.cx + dx + offset, r.cy);
+    ctx.scale(scale, scale);
+
+    // hover 时左右两侧出现装饰符号 ❧
+    if (it.hover > 0.04) {
+      ctx.save();
+      ctx.globalAlpha = alpha * it.hover;
+      ctx.font = `${MENU_LAYOUT.fontSize * 0.85}px "Georgia", serif`;
+      ctx.fillStyle = '#ffd29a';
+      const sideX = ctx.measureText(it.label).width / 2 + 32;
+      ctx.fillText('✦', -sideX, 2);
+      ctx.fillText('✦',  sideX, 2);
+      ctx.restore();
+      ctx.font = `bold ${MENU_LAYOUT.fontSize}px "Georgia", serif`;
+    }
+
+    // 阴影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillText(it.label, 3, 4);
+
+    // 主体 — hover 时变成温暖奶白色
+    const base = isHover ? '#fff5d8' : '#f0e2c2';
+    ctx.fillStyle = base;
+    ctx.fillText(it.label, 0, 0);
+
+    // 高光
+    if (it.hover > 0.05) {
+      ctx.globalAlpha = alpha * it.hover * 0.5;
+      ctx.fillStyle = '#ffe7b0';
+      ctx.fillText(it.label, -1, -1);
+    }
+    ctx.restore();
+
+    // 调试可视化 hit-box（默认关闭）
+    // ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    // ctx.strokeRect(r.x, r.y, r.w, r.h);
+  });
+  ctx.restore();
+
+  canvas.style.cursor = hover ? 'pointer' : 'default';
+}
+
+// =====================================================================
+// Layer 5  ——  Help / 设置浮层
+// =====================================================================
+function drawHelpOverlay() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#f6e5c4';
+  ctx.font = 'bold 52px "Georgia", serif';
+  ctx.fillText('HOW  TO  PLAY', CANVAS_W / 2, 150);
+
+  ctx.font = '22px "Segoe UI", sans-serif';
+  ctx.fillStyle = '#e8d3a8';
+  const lines = [
+    '← / → 或 A / D    移动',
+    '↑ / Space / W      跳跃（可二段跳）',
+    'Shift                  奔跑',
+    'Z 攻击  X 闪避  C 施法  V 大招',
+    'F                       全屏',
+    '',
+    '收集紫色魔法水晶 · 避开黑夜的追逐者 · 走向月光尽头',
+  ];
+  lines.forEach((ln, i) => ctx.fillText(ln, CANVAS_W / 2, 210 + i * 38));
+
+  ctx.font = 'italic 16px "Georgia", serif';
+  ctx.fillStyle = 'rgba(230, 200, 170, 0.65)';
+  ctx.fillText('— 点击屏幕任意位置返回 —', CANVAS_W / 2, CANVAS_H - 60);
+  ctx.restore();
+}
+
+// =====================================================================
+// 菜单总装：按层顺序绘制 + 粒子更新
+// =====================================================================
+function drawMenuScene(tSec, dt) {
+  if (MENU_TITLE.bornAt < 0) startMenuIntro(tSec);
+
+  drawMenuBackground();
+  drawMenuAmbient(tSec, dt);
+
+  // 粒子（在 spotlight 之下、文字之下）
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    if (!p.menu) p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife) * 0.75;
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawMenuSpotlight(tSec);
+  drawMenuTitle(tSec);
+  drawMenuItems(tSec);
+
+  if (showHelpOverlay) drawHelpOverlay();
+
+  // footer 提示
+  if (!showHelpOverlay) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.4 + Math.sin(tSec * 2) * 0.16;
+    ctx.fillStyle = '#e8c8a0';
+    ctx.font = 'italic 13px "Georgia", serif';
+    ctx.fillText('use  mouse  ·  click  to  select', CANVAS_W / 2, CANVAS_H - 20);
+    ctx.restore();
+  }
+}
+
+// =====================================================================
+// 交互事件
+// =====================================================================
+canvas.addEventListener('mousemove', e => {
+  const p = canvasPoint(e);
+  mouse.x = p.x; mouse.y = p.y;
+});
+canvas.addEventListener('mouseleave', () => { mouse.x = mouse.y = -1; });
+canvas.addEventListener('click', e => {
+  const p = canvasPoint(e);
+  // 嵌入版：菜单已去除，click 用于点击 win/lose overlay 的按钮
+  if (scene === 'win' && overlayBtns.continue && hitButton(p.x, p.y, overlayBtns.continue)) {
+    // 通关结算 → 玩家主动确认"继续"才通知父页面推进剧情。
+    // minigame-continue 等价于 minigame-win（父页面 MinigameOverlay 同样走 onWin 路径）。
+    postToParent('minigame-continue', { score });
+    return;
+  }
+  if (scene === 'lose') {
+    if (overlayBtns.retry && hitButton(p.x, p.y, overlayBtns.retry)) {
+      resetLevel();
+      return;
+    }
+    if (overlayBtns.giveUp && hitButton(p.x, p.y, overlayBtns.giveUp)) {
+      postToParent('minigame-lose', { score, reason: 'give-up' });
+      return;
+    }
+  }
+});
+
+// ---- Main loop ----
+let lastT = 0;
+function loop(t) {
+  const dt = Math.min((t - lastT) / 16, 3);
+  const frameMs = t - lastT;
+  lastT = t;
+  sceneTime += frameMs;
+  const tSec = t / 1000;
+
+  // --- Loading screen ---
+  if (scene === 'loading') {
+    ctx.fillStyle = '#0a0008';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.fillStyle = '#c878b8';
+    ctx.font = '28px "Segoe UI"';
+    ctx.textAlign = 'center';
+    ctx.fillText('Loading magical assets...', CANVAS_W / 2, CANVAS_H / 2);
+    ctx.fillText(`${loaded} / ${total}`, CANVAS_W / 2, CANVAS_H / 2 + 40);
+    ctx.textAlign = 'left';
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  // --- Menu / Transition 已在嵌入版中去除 ---
+
+  // --- Game scene (原有逻辑) ---
+  ctx.textAlign = 'left';
+
+  // win/lose 时只冻结输入，不冻结渲染，看得到最后一帧
+  const frozen = (scene === 'win' || scene === 'lose');
+
+  if (!frozen) updatePlayer(dt);
+  if (!frozen) updateEnemies(dt);
+
+  const camX = worldX;
+
+  drawBackground();
+  drawProps(camX);
+  drawPlatforms(camX);
+  drawGoal(camX, t);
+  drawGems(camX, t);
+  drawEnemies(camX);
+  drawParticles();
+
+  const showPlayer = !player.invincible || (Math.floor(t / 60) % 2 === 0);
+  if (showPlayer) {
+    drawPlayer(player.x - camX, player.y, player.facing, player.animFrame);
+  }
+
+  // 背景粒子（冻结时也保留，但不增加新粒子）
+  if (!frozen && Math.random() < 0.04) {
+    particles.push({
+      x: CANVAS_W + 10,
+      y: 80 + Math.random() * (CANVAS_H - 200),
+      vx: -(1 + Math.random()),
+      vy: Math.sin(t * 0.001) * 0.5,
+      r: 2 + Math.random() * 2,
+      color: Math.random() < 0.5 ? '#a040ff' : '#40ffe0',
+      life: 120 + Math.random() * 80, maxLife: 200
+    });
+  }
+
+  drawHUD();
+
+  if (sceneTime < 600 && scene === 'playing') {
+    ctx.fillStyle = `rgba(5, 2, 6, ${1 - sceneTime / 600})`;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  }
+
+  if (scene === 'win')  drawWinOverlay(t);
+  if (scene === 'lose') drawLoseOverlay(t);
+
+  requestAnimationFrame(loop);
+}
+
+// Start loading screen immediately
+requestAnimationFrame(loop);
+
+// ---- 键盘快捷键：win/lose overlay 下的动作 ----
+window.addEventListener('keydown', e => {
+  if (scene === 'win') {
+    if (e.code === 'Enter' || e.code === 'Space') {
+      postToParent('minigame-continue', { score });
+      e.preventDefault();
+    }
+  } else if (scene === 'lose') {
+    if (e.code === 'KeyR') {
+      resetLevel();
+      e.preventDefault();
+    } else if (e.code === 'Escape') {
+      postToParent('minigame-lose', { score, reason: 'give-up' });
+      e.preventDefault();
+    }
+  }
+});
+
+// ---- 全屏支持 ----
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (!document.fullscreenElement) {
+    el.requestFullscreen && el.requestFullscreen();
+  } else {
+    document.exitFullscreen && document.exitFullscreen();
+  }
+}
+document.getElementById('fs-btn').addEventListener('click', toggleFullscreen);
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyF') { toggleFullscreen(); e.preventDefault(); }
+});
+// 进入全屏时隐藏按钮提示
+document.addEventListener('fullscreenchange', () => {
+  const btn = document.getElementById('fs-btn');
+  const ctrl = document.getElementById('controls');
+  if (document.fullscreenElement) {
+    btn.textContent = '✕';
+    ctrl.style.opacity = '0.3';
+  } else {
+    btn.textContent = '⛶';
+    ctrl.style.opacity = '0.7';
+  }
+});
+
+</script>
+</body>
+</html>

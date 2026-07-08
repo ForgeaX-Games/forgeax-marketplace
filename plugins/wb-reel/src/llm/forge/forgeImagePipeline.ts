@@ -842,6 +842,7 @@ export async function runForgeImagePipeline(
   const concurrency = opts.concurrency ?? IMAGE_BATCH_CONCURRENCY
   const { scenario, client } = opts
   const visualStyle = scenario.visualStyle
+  const filmLook = scenario.filmLook
 
   const characters = Object.values(scenario.characters ?? {})
   const locations = Object.values(scenario.locations ?? {})
@@ -941,6 +942,7 @@ export async function runForgeImagePipeline(
         prompt: composeVisualPrompt(
           buildCharacterTurnaroundPrompt(c, { visualStyle }),
           visualStyle,
+          filmLook,
         ),
         size: '1536x1024',
       })
@@ -974,7 +976,7 @@ export async function runForgeImagePipeline(
         fullPrompt: buildLocationPrompt(loc),
       }
       const baseOut = await client.generate({
-        prompt: composeVisualPrompt(baseTask.fullPrompt, visualStyle),
+        prompt: composeVisualPrompt(baseTask.fullPrompt, visualStyle, filmLook),
         size: '1536x1024',
       })
       // 把"第一张图"当主图回写 location.refImageId。
@@ -994,7 +996,7 @@ export async function runForgeImagePipeline(
         derived,
         async (a) => {
           const out = await client.generate({
-            prompt: composeVisualPrompt(a.fullPrompt, visualStyle),
+            prompt: composeVisualPrompt(a.fullPrompt, visualStyle, filmLook),
             size: '1536x1024',
             referenceImageDataUrl: baseOut.dataUrl,
           })
@@ -1040,7 +1042,7 @@ export async function runForgeImagePipeline(
     props,
     async (p) => {
       const out = await client.generate({
-        prompt: composeVisualPrompt(buildPropRefPrompt(p), visualStyle),
+        prompt: composeVisualPrompt(buildPropRefPrompt(p), visualStyle, filmLook),
         size: '1024x1024',
       })
       opts.onPropRef?.(p.id, out)
@@ -1097,6 +1099,7 @@ export async function runForgeImagePipeline(
             shotTotal,
           }),
           visualStyle,
+          filmLook,
         ),
         size: '1536x1024',
         referenceImageDataUrl: primaryRef,

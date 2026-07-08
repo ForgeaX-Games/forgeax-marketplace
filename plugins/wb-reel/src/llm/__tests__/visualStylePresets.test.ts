@@ -10,7 +10,7 @@ import {
 
 describe('visualStylePresets', () => {
   describe('preset 表完整性', () => {
-    it('六种风格全部存在 + 字段齐全', () => {
+    it('七种风格全部存在 + 字段齐全', () => {
       const keys: VisualStyle[] = [
         'photoreal',
         'anime',
@@ -18,6 +18,7 @@ describe('visualStylePresets', () => {
         'pixelart',
         'watercolor',
         'ink',
+        'render3d2d',
       ]
       for (const k of keys) {
         const p = VISUAL_STYLE_PRESETS[k]
@@ -30,8 +31,9 @@ describe('visualStylePresets', () => {
         expect(p.authoringHint.length).toBeGreaterThan(0)
       }
     })
-    it('VISUAL_STYLE_LIST 顺序稳定 · 六项', () => {
-      expect(VISUAL_STYLE_LIST).toHaveLength(6)
+    it('VISUAL_STYLE_LIST 顺序稳定 · 七项', () => {
+      expect(VISUAL_STYLE_LIST).toHaveLength(7)
+      expect(VISUAL_STYLE_LIST[0]?.id).toBe('photoreal')
     })
     it('默认风格是 photoreal', () => {
       expect(DEFAULT_VISUAL_STYLE).toBe('photoreal')
@@ -73,10 +75,47 @@ describe('visualStylePresets', () => {
     })
   })
 
+  describe('composeVisualPrompt · 叠加电影美学调色(filmLook)', () => {
+    it('medium + look → [调色锚点] + [媒介前缀] + [raw]（调色在最前）', () => {
+      const out = composeVisualPrompt('一个老人在雪山顶', 'anime', 'teal-orange')
+      const media = VISUAL_STYLE_PRESETS.anime.promptPrefix
+      expect(out.startsWith('Blockbuster teal-and-orange')).toBe(true)
+      expect(out).toContain(media)
+      expect(out.endsWith('一个老人在雪山顶')).toBe(true)
+      // 调色段在媒介段之前
+      expect(out.indexOf('teal-and-orange')).toBeLessThan(out.indexOf(media))
+    })
+    it('只有 look 无 medium → 只注入调色前缀', () => {
+      const out = composeVisualPrompt('X', undefined, 'bleach-bypass')
+      expect(out.startsWith('Bleach-bypass')).toBe(true)
+      expect(out.endsWith('X')).toBe(true)
+    })
+    it('look 为 undefined → 退回仅媒介行为（向后兼容）', () => {
+      expect(composeVisualPrompt('X', 'anime')).toBe(
+        composeVisualPrompt('X', 'anime', undefined),
+      )
+    })
+    it('raw 空 + medium + look → 只返回两段前缀拼接', () => {
+      const out = composeVisualPrompt('', 'watercolor', 'morandi-muted')
+      expect(out).toContain(VISUAL_STYLE_PRESETS.watercolor.promptPrefix)
+      expect(out).toContain('Morandi muted')
+      expect(out.endsWith('\n\n')).toBe(false)
+    })
+  })
+
   describe('getAuthoringHint', () => {
     it('未传 → 空串', () => {
       expect(getAuthoringHint(undefined)).toBe('')
       expect(getAuthoringHint(null)).toBe('')
+    })
+    it('medium + look → 合并两段中文文风', () => {
+      const out = getAuthoringHint('anime', 'teal-orange')
+      expect(out).toContain(VISUAL_STYLE_PRESETS.anime.authoringHint)
+      expect(out).toContain('场景自适应')
+    })
+    it('只有 look → 返回调色文风', () => {
+      const out = getAuthoringHint(undefined, 'morandi-muted')
+      expect(out).toContain('场景自适应')
     })
     it('已知风格 → 返回对应的作者指令', () => {
       expect(getAuthoringHint('anime')).toBe(
@@ -109,6 +148,7 @@ describe('visualStylePresets', () => {
         'pixelart',
         'watercolor',
         'ink',
+        'render3d2d',
       ] as const) {
         const prefix = VISUAL_STYLE_PRESETS[style].promptPrefix
         expect(prefix).not.toMatch(/pixel mosaic/i)

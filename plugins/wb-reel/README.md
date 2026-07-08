@@ -3,6 +3,14 @@
 > 一句话：作者向 FMV 编辑器 —— 把"提示词 / 视频 / 关卡 / QTE / 剧情分支"一站式拼成可玩互动影游。
 > 灵感锚点："完蛋！我被美女包围了" 这种限时点按 + 选择驱动的恋爱悬念片。
 
+> [!IMPORTANT]
+> **本 plugin 使用 `bun` 作为唯一包管理器。** 不要在此目录跑 `pnpm install` / `npm install`——
+> 它们会写出各自的 lock 文件,不同 contributor 用不同工具就会造成 lock 分叉,进而让
+> 外层 studio 的 `git submodule update` 拒绝 checkout(tracked lock 被本地 install
+> 改脏)。canonical 是 `bun.lock`;`pnpm-lock.yaml` / `package-lock.json` / `pnpm-workspace.yaml`
+> / `.npmrc` 都在 `.gitignore` 里,谁误用也 commit 不上来。
+> `package.json` 的 `packageManager: "bun@1.3.13"` 字段是 corepack / npm 8+ 认的正式标注。
+
 ---
 
 ## 它和 `reel-engine` 不是一回事

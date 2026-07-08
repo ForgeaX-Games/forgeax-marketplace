@@ -170,6 +170,7 @@ export function AssetPreviewDialog({ target, onClose, onAfterUpdate, variant = '
   const removePropVariant = useScenarioStore((s) => s.removePropVariant)
   const mediaLookup = useMediaStore((s) => s.entries)
   const visualStyle = useScenarioStore((s) => s.scenario.visualStyle)
+  const filmLook = useScenarioStore((s) => s.scenario.filmLook)
 
   const imgClient = useMemo(() => createImageProvider(), [])
 
@@ -322,8 +323,9 @@ export function AssetPreviewDialog({ target, onClose, onAfterUpdate, variant = '
     return composeVisualPrompt(
       buildCharacterTurnaroundPrompt(coreChar, { visualStyle }),
       visualStyle,
+      filmLook,
     )
-  }, [target.kind, target.id, target.name, character, prompt, visualStyle])
+  }, [target.kind, target.id, target.name, character, prompt, visualStyle, filmLook])
 
   // ─── 操作 handlers ───
   /*
@@ -535,7 +537,7 @@ export function AssetPreviewDialog({ target, onClose, onAfterUpdate, variant = '
             ? wrapLocationAnglePrompt(userPrompt, selectedLabel)
             : userPrompt
       const result = await imgClient.generate({
-        prompt: composeVisualPrompt(finalPrompt, visualStyle),
+        prompt: composeVisualPrompt(finalPrompt, visualStyle, filmLook),
         referenceImageDataUrl: refUrl,
         size: target.kind === 'character' ? '1536x1024' : undefined,
       })
@@ -596,7 +598,7 @@ export function AssetPreviewDialog({ target, onClose, onAfterUpdate, variant = '
       // 没有主图就退化到 displayUrl (作者还没生过主图的早期阶段)
       const effectiveRef = refUrl ?? (isLocationAngle ? displayUrl : refUrl)
       const result = await imgClient.generate({
-        prompt: composeVisualPrompt(finalPrompt, visualStyle),
+        prompt: composeVisualPrompt(finalPrompt, visualStyle, filmLook),
         referenceImageDataUrl: effectiveRef,
         size: target.kind === 'character' ? '1536x1024' : undefined,
       })

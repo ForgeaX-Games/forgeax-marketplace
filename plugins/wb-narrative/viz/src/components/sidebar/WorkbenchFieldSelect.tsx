@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
+import { useT } from "../../i18n";
 
 export interface WorkbenchSelectOption {
   value: string;
@@ -53,7 +54,7 @@ export function WorkbenchFieldSelect({
   groups,
   placeholder,
   allowEmpty = false,
-  emptyLabel = "不限",
+  emptyLabel,
   disabled = false,
   hint,
   id,
@@ -61,6 +62,8 @@ export function WorkbenchFieldSelect({
   onOpenChange,
   menuMaxHeight = 168,
 }: WorkbenchFieldSelectProps) {
+  const t = useT();
+  const emptyText = emptyLabel ?? t("field.any");
   const fieldId = id ?? `wb-dropdown-${label.replace(/\s+/g, "-")}`;
   const [internalOpen, setInternalOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -80,7 +83,7 @@ export function WorkbenchFieldSelect({
   const selected = allOptions.find((opt) => opt.value === value);
   const isUnset = allowEmpty && !value;
   const triggerLabel = selected?.label
-    ?? (isUnset ? (placeholder ?? emptyLabel) : placeholder ?? "请选择");
+    ?? (isUnset ? (placeholder ?? emptyText) : placeholder ?? t("field.select"));
   const triggerIsPlaceholder = !selected?.label;
 
   const pick = useCallback((next: string) => {
@@ -150,7 +153,7 @@ export function WorkbenchFieldSelect({
 
         {open && (
           <div className="wb-dropdown-menu workbench-pane-scroll" role="listbox" aria-labelledby={`${fieldId}-label`}>
-            {allowEmpty && renderOption({ value: "", label: emptyLabel })}
+            {allowEmpty && renderOption({ value: "", label: emptyText })}
             {options?.map(renderOption)}
             {groups?.map((group) => (
               <div key={group.label} className="wb-dropdown-group">

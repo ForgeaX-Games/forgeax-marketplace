@@ -40,21 +40,21 @@ function shot(overrides: Partial<Shot> = {}): Shot {
 }
 
 describe('buildKineticVideoUserPrompt', () => {
-  it('注入 persona header（未指定 → 维伦纽瓦默认）', () => {
+  it('注入 persona header（未指定 → 极简史诗默认）', () => {
     const p = buildKineticVideoUserPrompt({
       shot: shot(),
       scene: scene('s1'),
     })
-    expect(p).toMatch(/【导演流派】维伦纽瓦 · 史诗/)
+    expect(p).toMatch(/【导演流派】极简史诗 · 以小写大/)
   })
 
-  it('注入显式 persona header（芬奇）', () => {
+  it('注入显式 persona header（冷峻精算）', () => {
     const p = buildKineticVideoUserPrompt({
       shot: shot(),
       scene: scene('s1'),
-      directorStyle: 'fincher-noir',
+      directorStyle: 'precision-noir',
     })
-    expect(p).toMatch(/【导演流派】芬奇 · 黑色惊悚/)
+    expect(p).toMatch(/【导演流派】冷峻精算 · 克制黑色/)
   })
 
   it('输出时长 / 策略 / 景别三要素', () => {

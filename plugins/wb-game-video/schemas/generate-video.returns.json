@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:generate-video returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "queued"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "queued": {
+      "type": "integer",
+      "description": "How many scene video jobs were enqueued."
+    },
+    "sceneIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The scene ids that were enqueued."
+    },
+    "message": { "type": "string" }
+  }
+}

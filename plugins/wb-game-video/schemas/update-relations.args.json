@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:update-relations args",
+  "description": "Incrementally edit the character-relations graph (scenario.characterRelations) of the active (or specified) scenario, shown in the workbench's Relations panel. Edges are directed (from -> to, label); a bidirectional relationship = two edges so you can describe asymmetry (e.g. 'A \u6697\u604b B' != 'B \u628a A \u5f53\u54e5\u4eec'). Endpoints accept a character id, name, OR alias and are auto-resolved to ids (call reel:get-script-meta to see the name<->id map). Prefer upsert/removeIds; never wipes edges you don't touch. Provide at least one of upsert / replace / removeIds.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenarioId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "Optional target scenario id. Defaults to the active scenario."
+    },
+    "upsert": {
+      "type": "array",
+      "description": "Add or update edges. Match by id; without id, dedupe by (from,to,label).",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Existing edge id to update; omit to create." },
+          "from": { "type": "string", "description": "Source character: id, name, or alias." },
+          "to": { "type": "string", "description": "Target character: id, name, or alias." },
+          "label": { "type": "string", "description": "Relation description, e.g. '\u7236\u4eb2' / '\u524d\u4efb' / '\u6697\u4e2d\u8ddf\u8e2a'." },
+          "note": { "type": "string", "description": "Optional note / how the relationship evolves." },
+          "itemHint": { "type": "string", "description": "Optional signature item/prop between the pair (narrative note only)." }
+        }
+      }
+    },
+    "removeIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Edge ids to delete."
+    },
+    "replace": {
+      "type": "array",
+      "description": "Replace the WHOLE relation graph with these edges (drops anything not listed). Use sparingly.",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "label": { "type": "string" },
+          "note": { "type": "string" },
+          "itemHint": { "type": "string" }
+        }
+      }
+    }
+  }
+}

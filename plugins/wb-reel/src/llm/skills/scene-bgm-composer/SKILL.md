@@ -59,11 +59,11 @@ synth pad creeping under the surface. Ends on the pad alone, hovering open-ended
 You will receive in `user` prompt:
 
 - **`SCENES`** — one scene or several consecutive scenes. Each carries: `title`, `background` (director's atmosphere note), `summary` (one-line plot beat), `characters` (names/aliases), `location` (name + descriptor), `dialogueExcerpt` (1–3 representative lines if any), `mood` (tag list if any).
-- **`directorPersona`** *(optional)* — scenario-level director lock (王家卫 → never bombastic, 李安 → never aggressive percussion, 诺兰 → mechanical pulse over melody, …). Respect it.
+- **`directorPersona`** *(optional)* — scenario-level director lock (情绪浮光 → never bombastic, 温润家庭取向 → never aggressive percussion, 非线性科幻 → mechanical pulse over melody, …). Respect it.
 - **`visualPreset`** *(optional)* — the look/era of the show. Should match aurally (黑色电影 visual ⇒ neo-noir score, 港风 ⇒ 80s analogue strings, etc.).
 - **`userHint`** *(optional)* — a free-text input from the author. **This is the colour layer**, can be one of three modes:
   - **Mode A · 中文粗描述**:  e.g. `"再压抑一点"` / `"想要钢琴主导, 不要鼓"` / `"复古港风, 萨克斯"`. Translate intent into instrumentation/BPM/mood. Highest priority over your own judgment.
-  - **Mode B · 参考曲风** (reference style, NOT reference titles): e.g. `"像 90 年代港片的萨克斯独奏夜戏"` / `"那种慢板钢琴 + 弦乐铺底, 没鼓的孤独感"`. **Do not echo movie/composer names.** Extract the *style descriptors* from it (sax-led / 6/8 / felt piano / sparse strings) and bake those into the brief.
+  - **Mode B · 参考曲风** (reference style, NOT reference titles): e.g. `"像 90 年代港片风格的萨克斯独奏夜戏"` / `"那种慢板钢琴 + 弦乐铺底, 没鼓的孤独感"`. **Do not echo movie/composer names.** Extract the *style descriptors* from it (sax-led / 6/8 / felt piano / sparse strings) and bake those into the brief.
   - **Mode C · 直接英文 prompt**: the author wrote the brief themselves in English (≥40 English words). **Pass it through almost verbatim** as `brief`, but still:
     - prepend a soft-entry clause if missing
     - ensure `Instrumental with no vocals` is present
@@ -109,7 +109,7 @@ Return strict JSON, no markdown fence, no commentary:
 - Only return JSON, no markdown fence, no commentary.
 - `brief` must contain: BPM integer + genre phrase + ≥2 named instruments + a soft-entry clause + an open-ended tail clue.
 - `brief` must NOT contain `[Verse]` `[Chorus]` `[Bridge]` `[Hook]`.
-- `brief` must NOT name real composers / real OST titles / real artists / real movie titles (`Hans Zimmer` → no; `taiko-led action score` → yes).
+- `brief` must NOT name real composers / real OST titles / real artists / real movie titles (naming any real composer → no; `taiko-led action score` → yes).
 - `bpm` and the BPM written in `brief` must be the same integer.
 - Every entry of `keyInstruments` must literally appear inside `brief`.
 - NEVER `null`, NEVER empty string, NEVER `"TBD"`.
@@ -150,7 +150,7 @@ SCENES:
   location: 旧警局档案室 · 一盏吊灯, 木地板潮湿
   dialogueExcerpt: ["..."]
   mood: ["压抑","疲惫"]
-directorPersona: "王家卫 —— 雨夜独白 / 错过与回望是他的母题"
+directorPersona: "情绪浮光 —— 雨夜独白 / 错过与回望是母题"
 userHint: "想要钢琴主导, 不要鼓"
 ```
 
@@ -171,7 +171,7 @@ userHint: "想要钢琴主导, 不要鼓"
 
 <reasoning>
 - userHint "钢琴主导, 不要鼓" 严格执行: keyInstruments 第一项是钢琴, 全文无鼓 (paper turning 当替代节奏)
-- 王家卫 → 留白 + 四音动机, 不引用《花样年华》
+- 情绪浮光 → 留白 + 四音动机, 不落俗套引用金曲
 - soft entry (单音淡入) + open-ended tail (pad 收尾) 符合 BGM 纪律
 - 留 vocal pocket: "leaving space for dialogue" 显式声明
 </reasoning>
@@ -232,7 +232,7 @@ SCENES:
   background: 男主在末班巴士上独坐, 窗外霓虹掠过, 他想起八年前的人.
   summary: 巴士独坐, 闪回, 没说话
   mood: ["孤独","怀旧"]
-userHint: "像 90 年代港片的那种萨克斯独奏夜戏, 慢板, 不要鼓"
+userHint: "像 90 年代港片风格的那种萨克斯独奏夜戏, 慢板, 不要鼓"
 ```
 
 期望配乐输出：
@@ -251,7 +251,7 @@ userHint: "像 90 年代港片的那种萨克斯独奏夜戏, 慢板, 不要鼓"
 ```
 
 <reasoning>
-- 用户说"像 90 年代港片", 提取风格描述符 (sax-led / 慢板 / 80s synth) 注入 brief, 不引用任何具体片名或作曲家
+- 用户说"像 90 年代港片风格", 提取风格描述符 (sax-led / 慢板 / 80s synth) 注入 brief, 不引用任何具体片名或作曲家
 - "不要鼓" 严格执行 — brief 显式 "No drums, no percussion"
 - 港风 → 80s synth-noir cinematic + DX7 Rhodes, 这是已知能跑出对味结果的一组关键词
 </reasoning>
@@ -300,7 +300,7 @@ userHint: "A massive 140 BPM cyberpunk synthwave banger that drops hard at 0:08 
 
 ```json
 {
-  "brief": "An epic 128 BPM cinematic banger. [Verse] tense build [Chorus] huge wall of sound with vocal-style lead synth screaming the main melody. Massive drum drop at 0:08. Hans-Zimmer-style brass stabs. About a hero. Featuring drums, synth, brass.",
+  "brief": "An epic 128 BPM cinematic banger. [Verse] tense build [Chorus] huge wall of sound with vocal-style lead synth screaming the main melody. Massive drum drop at 0:08. Brass stabs styled after a famous named film composer. About a hero. Featuring drums, synth, brass.",
   "moodTags": ["epic","huge","cool","awesome"],
   "bpm": 128,
   "genre": "music",
@@ -316,7 +316,7 @@ userHint: "A massive 140 BPM cyberpunk synthwave banger that drops hard at 0:08 
 - ❌ `[Verse]`/`[Chorus]` 出现 — 禁止
 - ❌ "drum drop at 0:08" — 违反 soft entry
 - ❌ "vocal-style lead synth screaming" — 违反 vocal pocket / sustained mood
-- ❌ "Hans-Zimmer-style" — 引用真实作曲家
+- ❌ 点名真实电影配乐家的 "…-style" — 引用真实作曲家
 - ❌ moodTags ["epic","huge","cool","awesome"] — 全空话
 - ❌ genre "music" / keyInstruments ["drums","synth","brass"] — 循环定义, 不具体
 - ❌ chineseSummary "好听的史诗音乐" — 零信息

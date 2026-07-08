@@ -41,6 +41,8 @@ import {
 import { ForgeStageRoll } from './ForgeStageRoll'
 import { chatPanelCss } from './ForgeChatPanel.css'
 import type { Scenario } from '../scenario/types'
+import { coerceDirectorStyleId } from '../llm/config/directorPersonas'
+import { coerceFilmLookId } from '../llm/config/filmLookPresets'
 import { tf, useT } from '../i18n'
 
 /**
@@ -170,6 +172,25 @@ async function runForgeFromChat(params: {
       mode: inferAdoptMode(useScenarioStore.getState().scenario),
     })
     broadcastScenarioAdopt(useScenarioStore.getState().scenario)
+    // 打通"AI 选的导演 → 视频链"：把 style stage 选定的预设导演 id 写入
+    // scenario.directorStyle，让整条视频链(分镜/运镜/剪辑)注入正确 persona，而不是
+    // 永远回退默认。此前 style-curator 的 director 只是自由文本、从不落到 directorStyle。
+    // 作者仍可事后在「导演风格」选择器手动覆盖。
+    {
+      const styleDraft = useForgeChatStore.getState().getSession(scenarioId).stages
+        .records['await-style']?.draft as
+        | { directorStyleId?: string; filmLookId?: string }
+        | undefined
+      const chosenDirector = coerceDirectorStyleId(styleDraft?.directorStyleId)
+      if (chosenDirector) {
+        useScenarioStore.getState().setDirectorStyle(chosenDirector)
+      }
+      // AI 选的电影美学调色 → scenario.filmLook（作者可事后在「风格」手动覆盖）。
+      const chosenLook = coerceFilmLookId(styleDraft?.filmLookId)
+      if (chosenLook) {
+        useScenarioStore.getState().setFilmLook(chosenLook)
+      }
+    }
     const sceneCount = Object.keys(res.scenario.scenes).length
     const charCount = Object.keys(res.scenario.characters ?? {}).length
     const assistantMsg = chat.appendMessage(scenarioId, {

@@ -19,6 +19,8 @@ import {
   synthesizeParentSummary,
   batchCompressSummaries,
   aggregateSubtreeTemplatesRecursive,
+  extractParentOperators,
+  normalizeOperator,
   heuristicExtractUnit,
 } from "../phase2-extract.js";
 import type { LLMClient } from "../../pipeline/llm-client.js";
@@ -307,6 +309,41 @@ describe("batch8 · 逐层递归聚合（§3.3）", () => {
     // 中间层（卷）节点应被写回 template。
     const part = Object.values(dna.nodes).find((n) => n.levelType === "part");
     expect(part?.template).toBeTruthy();
+    // §3.2 父层算子：确定性降级路径下父节点 operators 应为 []（三件套齐全，不留 undefined）。
+    expect(part?.operators).toEqual([]);
+    expect(part?.metadata?.processing_status).toBe("extracted");
+  });
+
+  it("extractParentOperators：按层级维度 LLM 提取父层算子（§3.2）", async () => {
+    const opLlm = {
+      callWithRetry: async (sys: string) => {
+        // 顶层 prompt 应带宏观维度关注（世界观/叙事者定位），中层带承上启下维度。
+        const domain = sys.includes("完整叙事内容") ? "叙事者定位" : "文学风格";
+        return JSON.stringify({ operators: [{ name: "父层算子", definition: "d", knowledge_domain: domain }] });
+      },
+    } as unknown as LLMClient;
+    const tpl = {
+      worldview: { setting: "架空大陆", scene_structure: "", item_inventory: "" },
+      characters: [],
+      story_structure: { topology: { nodeCount: 0, startCount: 0, endCount: 0, pivotCount: 0, mergeCount: 0 } },
+      core_elements: { subject: "玄幻", theme: "成长", core_conflict: "正邪", literature_style: "白描", emotion_experience: "热血" },
+      summary: { characters: ["甲"], scene: "山门", events: "拜师" },
+    };
+    const top = await extractParentOperators(opLlm, { id: "c0", title: "全书", levelType: "complete" }, tpl);
+    expect(top.length).toBe(1);
+    expect(top[0].uid).toBe("c0_op1"); // 缺 uid 时按 node.id 生成
+    expect(top[0].knowledge_domain).toBe("叙事者定位"); // 顶层维度
+    const mid = await extractParentOperators(opLlm, { id: "p1", title: "第一卷", levelType: "part" }, tpl);
+    expect(mid[0].knowledge_domain).toBe("文学风格"); // 中层维度
+    // 无 LLM → 诚实留空（不拿子算子冒充）。
+    expect(await extractParentOperators(undefined, { id: "x", title: "t", levelType: "chapter" }, tpl)).toEqual([]);
+  });
+
+  it("normalizeOperator 补齐 8 字段 + uid 兜底", () => {
+    const op = normalizeOperator({ name: "n" }, "fallback_uid");
+    expect(op.uid).toBe("fallback_uid");
+    expect(op.adaptation).toEqual({ type: "", element: "" });
+    expect(op.knowledge_domain).toBe("");
   });
 });
 

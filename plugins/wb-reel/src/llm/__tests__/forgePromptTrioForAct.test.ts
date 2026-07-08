@@ -134,9 +134,9 @@ function makeMockLLM(rawFn: (req: TextRequest) => string): TextClient {
 describe('buildBatchUserPrompt', () => {
   it('包含 Act 信息、角色锚点、所有 scene 的 sceneId / title / beat / 时长', () => {
     const args = makeArgs(3)
-    const out = buildBatchUserPrompt(args, '维伦纽瓦·史诗派')
+    const out = buildBatchUserPrompt(args, '极简史诗派')
 
-    expect(out).toContain('维伦纽瓦·史诗派')
+    expect(out).toContain('极简史诗派')
     expect(out).toContain('· actId: act_01')
     expect(out).toContain('· 标题: 第一幕 · 启程')
     expect(out).toContain('· beat: 主角离家')

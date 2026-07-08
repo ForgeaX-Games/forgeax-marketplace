@@ -21,7 +21,7 @@
  * 安全：脚本绝不打印 api_key；出错只回显 HTTP 状态码与脱敏的 body 摘要。
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -91,6 +91,26 @@ function extractPresetPrompts(srcPath, idKey = 'id') {
   return out
 }
 
+// ── 通用：从规范 skill 目录 <root>/<id>/SKILL.md 的 `## 海报样张` 段读 prompt ──
+//   导演(directors) / 美术媒介(art-media) / 电影美学(film-looks) 皆用此格式；
+//   海报 prompt 在 `## 海报样张` 段，id 在 frontmatter `name:`（去引号）。
+function extractSkillMdPrompts(root) {
+  if (!existsSync(root)) return []
+  const out = []
+  for (const name of readdirSync(root)) {
+    if (name.startsWith('_')) continue // _shared 等
+    const skillPath = resolve(root, name, 'SKILL.md')
+    if (!existsSync(skillPath)) continue
+    const src = readFileSync(skillPath, 'utf8')
+    const idm = src.match(/^name:\s*(.+)$/m)
+    const id = idm ? idm[1].trim().replace(/^['"]|['"]$/g, '') : name
+    const pm = src.match(/##\s*海报样张\s*\r?\n([\s\S]*?)(?:\r?\n##\s|\s*$)/)
+    const prompt = pm ? pm[1].trim() : ''
+    if (prompt) out.push({ id, posterPrompt: prompt })
+  }
+  return out
+}
+
 // ── 调 Azure gpt-image-2（Node 直连，带简单退避重试） ──────────────────────
 async function generate(cfg, prompt, size) {
   const url =
@@ -143,34 +163,33 @@ async function main() {
   const cfg = loadImageKey()
   mkdirSync(OUT_DIR, { recursive: true })
 
-  const styleSrc = resolve(ROOT, 'src/llm/visualStylePresets.ts')
-  const uiSrc = resolve(ROOT, 'src/llm/uiStylePresets.ts')
-  const directorSrc = resolve(ROOT, 'src/llm/directorPersonas.ts')
+  // 注：ui preset 仍是内联 TS；style(art-media) / filmlook / director 已迁到 SKILL.md。
+  const uiSrc = resolve(ROOT, 'src/llm/config/uiStylePresets.ts')
+  const artMediaRoot = resolve(ROOT, 'src/llm/skills/art-media')
+  const filmLooksRoot = resolve(ROOT, 'src/llm/skills/film-looks')
+  const directorsRoot = resolve(ROOT, 'src/llm/skills/directors')
 
   /** @type {{file:string, prompt:string, size:string}[]} */
   const jobs = []
-  if (ONLY !== 'ui') {
-    for (const { id, posterPrompt } of extractPresetPrompts(styleSrc)) {
+  // 渲染媒介（art-media）→ style-<id>（竖版海报），沿用旧文件名前缀保持向后兼容。
+  if (!ONLY || ONLY === 'style') {
+    for (const { id, posterPrompt } of extractSkillMdPrompts(artMediaRoot)) {
       jobs.push({ file: `style-${id}.jpg`, prompt: posterPrompt, size: '1024x1536' })
     }
   }
-  if (ONLY !== 'style') {
+  // 电影美学调色（film-looks）→ filmlook-<id>（竖版海报）。
+  if (!ONLY || ONLY === 'filmlook') {
+    for (const { id, posterPrompt } of extractSkillMdPrompts(filmLooksRoot)) {
+      jobs.push({ file: `filmlook-${id}.jpg`, prompt: posterPrompt, size: '1024x1536' })
+    }
+  }
+  if (!ONLY || ONLY === 'ui') {
     for (const { id, posterPrompt } of extractPresetPrompts(uiSrc)) {
       jobs.push({ file: `ui-${id}.jpg`, prompt: posterPrompt, size: '1536x1024' })
     }
   }
   if (!ONLY || ONLY === 'director') {
-    for (const { id, posterPrompt } of extractPresetPrompts(directorSrc)) {
-      jobs.push({ file: `director-${id}.jpg`, prompt: posterPrompt, size: '1024x1536' })
-    }
-  }
-  if (!ONLY || ONLY === 'director') {
-    for (const { id, posterPrompt } of extractPresetPrompts(directorSrc)) {
-      jobs.push({ file: `director-${id}.jpg`, prompt: posterPrompt, size: '1024x1536' })
-    }
-  }
-  if (!ONLY || ONLY === 'director') {
-    for (const { id, posterPrompt } of extractPresetPrompts(directorSrc)) {
+    for (const { id, posterPrompt } of extractSkillMdPrompts(directorsRoot)) {
       jobs.push({ file: `director-${id}.jpg`, prompt: posterPrompt, size: '1024x1536' })
     }
   }

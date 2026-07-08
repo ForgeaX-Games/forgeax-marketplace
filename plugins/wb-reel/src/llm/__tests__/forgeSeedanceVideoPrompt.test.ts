@@ -23,7 +23,7 @@ import type { Shot } from '../../scenario/types'
  *   - 兜底包齐全 + 多主体双胞胎兜底 + 非写实风格锚定
  */
 
-const persona = PERSONAS['villeneuve-epic']
+const persona = PERSONAS['minimal-epic']
 
 function shot(order: number, overrides: Partial<Shot> = {}): Shot {
   return {
@@ -171,9 +171,9 @@ describe('一镜一运镜', () => {
   })
 
   it('无 cameraHint 时回退 persona 默认运镜', () => {
-    expect(pickCameraMove(shot(0), PERSONAS['villeneuve-epic'])).toBe('推进')
-    expect(pickCameraMove(shot(0), PERSONAS['fincher-noir'])).toBe('固定')
-    expect(pickCameraMove(shot(0), PERSONAS['miller-kinetic'])).toBe('跟移')
+    expect(pickCameraMove(shot(0), PERSONAS['minimal-epic'])).toBe('推进')
+    expect(pickCameraMove(shot(0), PERSONAS['precision-noir'])).toBe('固定')
+    expect(pickCameraMove(shot(0), PERSONAS['kinetic-clarity'])).toBe('跟移')
   })
 
   it('多镜全程每镜恰好一种运镜', () => {

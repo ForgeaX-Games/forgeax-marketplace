@@ -169,11 +169,11 @@ describe('composeUserPrompt · userHint 优先级注入', () => {
   it('directorPersona / visualStyle 也出现在 prompt 中', () => {
     const input: SceneBgmInput = {
       scenes: [makeScene()],
-      directorPersona: 'wong-karwai',
+      directorPersona: 'mood-neon',
       visualStyle: 'photoreal',
     }
     const p = composeUserPrompt(input)
-    expect(p).toContain('wong-karwai')
+    expect(p).toContain('mood-neon')
     expect(p).toContain('photoreal')
   })
 

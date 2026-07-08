@@ -24,6 +24,7 @@ import type {
   TextOverlayClip,
   UIStyle,
   VisualStyle,
+  FilmLook,
   VideoConfig,
   FilterClip,
   AdjustClip,
@@ -453,6 +454,11 @@ export interface ScenarioStore {
    * 传 undefined 相当于清除（回到默认 photoreal 语义）。
    */
   setVisualStyle: (style: VisualStyle | undefined) => void
+  /**
+   * 全局电影美学调色 —— 与 visualStyle 正交叠加，影响后续所有出图/出片的色板质感。
+   * 传 undefined 清除（回到不加调色）。
+   */
+  setFilmLook: (look: FilmLook | undefined) => void
   /**
    * 全局导演风格 —— 作者在 Forge「导演风格」分区选择，影响后续视频生成的
    * 运镜 / 剪辑节奏 / 色彩基调。传 undefined 清除（回到默认 persona）。
@@ -1989,6 +1995,14 @@ export const useScenarioStore = create<ScenarioStore>()(
       scenario: {
         ...s.scenario,
         visualStyle: style,
+      },
+    })),
+
+  setFilmLook: (look) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        filmLook: look,
       },
     })),
 

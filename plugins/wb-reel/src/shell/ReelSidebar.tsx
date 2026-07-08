@@ -78,6 +78,7 @@ export function ReelSidebar() {
   // 视觉分区「是否已生效」指示灯的数据源 —— 纯展示, 不改任何生成逻辑。
   // 逐项订阅稳定切片(避免 selector 返回新对象导致的快照抖动), 在渲染体里组装。
   const visualStyle = useScenarioStore((s) => s.scenario.visualStyle)
+  const filmLook = useScenarioStore((s) => s.scenario.filmLook)
   const directorStyle = useScenarioStore((s) => s.scenario.directorStyle)
   const uiPrompt = useScenarioStore((s) => s.scenario.uiStyle?.prompt ?? '')
   const minigameCount = useScenarioStore((s) => s.scenario.enabledMinigameIds?.length ?? 0)
@@ -94,7 +95,7 @@ export function ReelSidebar() {
     Object.values(propsMap ?? {}).some((p) => !!p.refImageId)
   // 「已配置」= 该模块当前有可用内容(纯展示用，区别于「已开关」)。
   const sectionConfigured: Record<ImageSection, boolean> = {
-    style: !!visualStyle,
+    style: !!visualStyle || !!filmLook,
     director: !!directorStyle,
     refs: hasRefs,
     ui: !!uiPrompt.trim(),

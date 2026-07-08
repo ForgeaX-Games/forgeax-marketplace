@@ -1757,6 +1757,15 @@ export function TierModeSelector() {
     setTagCustomTexts((prev) => ({ ...prev, [dimKey]: val }));
   }, []);
 
+  // 标签 tab「确认」的可用前提：至少选了一个标签维度，或填了任一自定义补充。
+  // 无任何输入时按钮保持禁用（不亮），无法以空内容建立条目。
+  const hasTagInput = useMemo(
+    () =>
+      Object.keys(tagSelections).length > 0 ||
+      Object.values(tagCustomTexts).some((t) => t?.trim()),
+    [tagSelections, tagCustomTexts],
+  );
+
   // 标签 → 输入框自动同步（仅当 inputTab === "tags" 时生效，避免覆盖手动输入）。
   // 用户在标签 tab 任何选择/输入变化都会实时反映到 userInput，去掉了"✓ 确认标签"按钮的中间步骤。
   useEffect(() => {
@@ -1889,7 +1898,7 @@ export function TierModeSelector() {
                     onClick={handleConfirmText}
                     disabled={!userInput.trim() || (inputConfirmed && !activeEntryStatus && !inputForkPending)}
                   >
-                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? "✓ 确认" : "确认"}
+                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? t("tms.confirmDone") : t("tms.confirm")}
                   </button>
                 </div>
               </div>
@@ -1918,7 +1927,11 @@ export function TierModeSelector() {
                       label={t(dim.nameKey)}
                       value={tagSelections[dim.key] ?? ""}
                       onChange={(v) => setTagValue(dim.key, v)}
-                      options={dim.options.map((o) => ({ value: o, label: o }))}
+                      options={dim.options.map((o) => {
+                        const k = `tagOpt.${dim.key}.${o}`;
+                        const hit = t(k);
+                        return { value: o, label: hit === k ? o : hit };
+                      })}
                       allowEmpty
                       placeholder={t("tms.tags.unlimited")}
                       emptyLabel={t("tms.tags.unlimited")}
@@ -1932,9 +1945,9 @@ export function TierModeSelector() {
                     type="button"
                     className="btn-generate btn-generate--compact ip-stage-btn"
                     onClick={handleConfirmTags}
-                    disabled={inputConfirmed && !activeEntryStatus && !inputForkPending}
+                    disabled={!hasTagInput || (inputConfirmed && !activeEntryStatus && !inputForkPending)}
                   >
-                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? "✓ 确认" : "确认"}
+                    {inputConfirmed && !activeEntryStatus && !inputForkPending ? t("tms.confirmDone") : t("tms.confirm")}
                   </button>
                 </div>
               </div>
@@ -2224,9 +2237,9 @@ export function TierModeSelector() {
                   className="btn-generate btn-generate--compact ip-stage-btn"
                   onClick={handleSaveEntry}
                   disabled={!entryDirty}
-                  title={entryDirty ? "确认并保存当前 INPUT/ROUTING 配置到该条目" : "配置已确认（改动后可再次确认；开始生成也会自动保存）"}
+                  title={entryDirty ? t("tms.saveEntry.dirtyTitle") : t("tms.saveEntry.savedTitle")}
                 >
-                  {entryDirty ? "确认" : "✓ 确认"}
+                  {entryDirty ? t("tms.confirm") : t("tms.confirmDone")}
                 </button>
               </div>
             )}

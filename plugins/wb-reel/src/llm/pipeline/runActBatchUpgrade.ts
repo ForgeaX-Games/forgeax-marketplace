@@ -101,6 +101,7 @@ export async function runActBatchUpgradeOnScenario(
       },
     ],
     visualStyle: scenario.visualStyle,
+    filmLook: scenario.filmLook,
     uiStylePrompt: scenario.uiStyle?.prompt,
     directorStyle: scenario.directorStyle,
     directorCustomPersona: scenario.directorCustomPersona,

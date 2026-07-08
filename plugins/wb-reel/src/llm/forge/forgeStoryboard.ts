@@ -28,7 +28,8 @@
  *   - 纯函数层：`buildStoryboardUserPrompt` / `normalizeStoryboardShots` 可单测。
  */
 
-import type { Scene, Shot, Character, Location, ShotFraming, VisualStyle, DirectorStyleId } from '../../scenario/types'
+import type { Scene, Shot, Character, Location, ShotFraming, VisualStyle, FilmLook, DirectorStyleId } from '../../scenario/types'
+import { FILM_LOOK_PRESETS } from '../config/filmLookPresets'
 import { SKILLS } from '../skills'
 import { parseJSONLoose } from '../util/parseJSONLoose'
 import type { TextClient } from '../config/types'
@@ -48,6 +49,8 @@ export interface ForgeStoryboardArgs {
   location?: Location
   /** 全局视觉风格 —— 让 LLM 知道往哪个美学方向写（不在 prompt 里复读风格词，composeVisualPrompt 负责前缀） */
   visualStyle?: VisualStyle
+  /** 全局电影美学调色 —— 让 LLM 知道整片色彩基调（实际调色前缀由 composeVisualPrompt 注入） */
+  filmLook?: FilmLook
   /** 全局 UI 风格提示词（若有） */
   uiStylePrompt?: string
   /**
@@ -72,7 +75,7 @@ export interface ForgeStoryboardArgs {
   /**
    * 导演流派 —— v3.8 新增。
    * 决定 system prompt 里注入哪一套 persona（剪辑语法/镜头语言/节奏）。
-   * 不填 → directorPersonas 的 DEFAULT_DIRECTOR_STYLE（维伦纽瓦·史诗）。
+   * 不填 → directorPersonas 的 DEFAULT_DIRECTOR_STYLE（极简史诗）。
    */
   directorStyle?: DirectorStyleId
   /**
@@ -231,6 +234,10 @@ export function buildStoryboardUserPrompt(args: ForgeStoryboardArgs): string {
 
   if (args.visualStyle) {
     lines.push(`【全局视觉风格】${args.visualStyle}`)
+  }
+  if (args.filmLook) {
+    const fl = FILM_LOOK_PRESETS[args.filmLook]
+    if (fl) lines.push(`【电影美学】${fl.label} · ${fl.tagline}（整片色彩基调，随昼夜/情绪自适应但保持统一）`)
   }
   if (args.uiStylePrompt?.trim()) {
     lines.push(`【UI 风格】${args.uiStylePrompt.trim()}`)

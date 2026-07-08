@@ -33,7 +33,7 @@ describe('validateReelScenario', () => {
 
   it('长尾未知字段宽松放行（additionalProperties:true）', () => {
     const s = validScenario()
-    s.directorStyle = 'villeneuve-epic'
+    s.directorStyle = 'minimal-epic'
     s.variables = { aff: { value: 0 } }
     ;(s.scenes as Record<string, Record<string, unknown>>)['sc-root']!.textOverlays = [
       { id: 'tx', whatever: true },

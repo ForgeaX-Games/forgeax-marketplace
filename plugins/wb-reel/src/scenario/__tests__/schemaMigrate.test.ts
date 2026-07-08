@@ -279,3 +279,27 @@ describe('ensureSceneHasShots', () => {
     expect(out.keyShotId).toBe('sh_a')
   })
 })
+
+describe('normalizeDirectorStyle（旧导演 id → 原创 slug，版权安全重命名）', () => {
+  it('旧真名 id 归一到新 slug（不丢用户已选风格）', () => {
+    const s = { ...mkV1(), directorStyle: 'wong-karwai' } as unknown as Scenario
+    const out = migrateScenarioToLatest(s)
+    expect(out.directorStyle).toBe('mood-neon')
+  })
+
+  it('已是新 slug → 原样保留（幂等）', () => {
+    const s = { ...mkV1(), directorStyle: 'minimal-epic' } as unknown as Scenario
+    const out = migrateScenarioToLatest(s)
+    expect(out.directorStyle).toBe('minimal-epic')
+  })
+
+  it('cyberpunk-neonoir / custom / 未设置 → 不动', () => {
+    const cyber = migrateScenarioToLatest({
+      ...mkV1(),
+      directorStyle: 'cyberpunk-neonoir',
+    } as unknown as Scenario)
+    expect(cyber.directorStyle).toBe('cyberpunk-neonoir')
+    const none = migrateScenarioToLatest(mkV1())
+    expect(none.directorStyle).toBeUndefined()
+  })
+})

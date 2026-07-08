@@ -71,8 +71,8 @@ afterEach(() => {
 
 describe('runStageStyle', () => {
   const goodReply = JSON.stringify({
-    director: '王家卫 —— 雨夜母题贴合',
-    writer: '金宇澄 —— 上海腔碎句',
+    director: '情绪浮光取向 —— 雨夜母题、手部特写、情绪浓度推进',
+    writer: '都市碎句留白派 —— 上海腔碎句',
     visualPreset: '90s 港片霓虹 · 偏蓝绿噪点 · 雨夜潮湿沥青',
     notes: '节奏天然慢',
   })
@@ -89,8 +89,8 @@ describe('runStageStyle', () => {
     const sess = useForgeChatStore.getState().getSession(SCN)
     const rec = sess.stages.records['await-style']
     expect(rec?.status).toBe('await-confirm')
-    expect(rec?.draft.director).toContain('王家卫')
-    expect(rec?.draft.writer).toContain('金宇澄')
+    expect(rec?.draft.director).toContain('情绪浮光')
+    expect(rec?.draft.writer).toContain('碎句')
     expect(rec?.draft.visualPreset).toContain('霓虹')
     expect(sess.pending).toBeNull()
   })
@@ -102,8 +102,8 @@ describe('runStageStyle', () => {
 
     const llm2 = mockClient([
       JSON.stringify({
-        director: '是枝裕和 —— 家庭日常派',
-        writer: '朱天文',
+        director: '极简克制取向 —— 家庭日常、餐桌小动作游走',
+        writer: '女性家族留白派',
         visualPreset: '南方老厨房 · 自然光',
       }),
     ])
@@ -114,7 +114,7 @@ describe('runStageStyle', () => {
     })
     const userPrompt = llm2.calls[0]!.userPrompt
     expect(userPrompt).toContain('温馨日系家庭风')
-    expect(userPrompt).toContain('王家卫')
+    expect(userPrompt).toContain('情绪浮光')
   })
 
   it('异常路径: LLM 抛错 → status=failed + error 字段写入 + pending 清空', async () => {

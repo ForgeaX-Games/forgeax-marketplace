@@ -116,6 +116,7 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
   const uiStyle = useScenarioStore((s) => s.scenario.uiStyle)
   const toast = useFireToast()
   const visualStyle = useScenarioStore((s) => s.scenario.visualStyle)
+  const filmLook = useScenarioStore((s) => s.scenario.filmLook)
   const synopsis = useScenarioStore((s) => s.scenario.synopsis)
   const retryImage = useSceneImageCache((s) => s.retry)
   const cacheRecord = useSceneImageCache((s) => s.records[scene.id])
@@ -168,7 +169,7 @@ function ScenePromptTab({ scene }: { scene: Scene }) {
         storyContext: synopsis,
         characters: refs,
         uiStyle: uiStyle?.prompt,
-        style: getAuthoringHint(visualStyle) || undefined,
+        style: getAuthoringHint(visualStyle, filmLook) || undefined,
         framing: framingHint
           ? `${t(framingHint.labelKey)}（${framingHint.sub}）`
           : undefined,

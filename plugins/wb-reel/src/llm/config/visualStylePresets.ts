@@ -1,21 +1,43 @@
 import type { VisualStyle } from '../../scenario/types'
 export type { VisualStyle } from '../../scenario/types'
+import {
+  parseStyleSkill,
+  needMeta,
+  needSection,
+  assertId,
+  parseSwatch,
+} from './styleSkillLoader'
+
+import type { FilmLook } from '../../scenario/types'
+import {
+  filmLookColorPrefix,
+  filmLookAuthoringHint,
+} from './filmLookPresets'
+
+import photorealRaw from '../skills/art-media/photoreal/SKILL.md?raw'
+import animeRaw from '../skills/art-media/anime/SKILL.md?raw'
+import cartoonRaw from '../skills/art-media/cartoon/SKILL.md?raw'
+import pixelartRaw from '../skills/art-media/pixelart/SKILL.md?raw'
+import watercolorRaw from '../skills/art-media/watercolor/SKILL.md?raw'
+import inkRaw from '../skills/art-media/ink/SKILL.md?raw'
+import render3d2dRaw from '../skills/art-media/render3d2d/SKILL.md?raw'
 
 /**
- * 全局视觉风格预设 —— 作者在 Forge Tab 选一次，影响**所有**素材生成。
+ * 全局视觉风格预设 —— 「渲染媒介」维度（写实/二次元/卡通/像素/水彩/水墨/三渲二）。
+ * 作者在 Forge「风格」模块选一次，影响**所有**素材生成。
  *
- * 影响对象：
- *   - 场景图（sceneImageCache.startGenerate）
- *   - 角色立绘（CharactersPanel）
- *   - 参考图流水线（ForgeWizard）
- *   - 批量生图（batchImageGen）
+ * 内容源（v8·2026-07）：从内联 TS 迁到规范 skill 目录
+ * `skills/art-media/<id>/SKILL.md`，由 styleSkillLoader 用 Vite `?raw` 解析。
+ * 本文件对外 API（VISUAL_STYLE_PRESETS/LIST/DEFAULT/composeVisualPrompt/
+ * getAuthoringHint）保持不变，下游零改动。
+ *
+ * 影响对象：场景图 / 角色立绘 / 参考图流水线 / 批量生图 / 视频。
  *
  * 设计原则：
- *   1. **Prompt 前缀**：每个风格一段 2-4 行的英文风格引导，
- *      附加在 raw prompt 前面，让 GPT-Image-2 / Gemini / SDXL 系列都能理解
- *   2. **纯数据**：没有依赖，易测试，可序列化
- *   3. **不追溯**：作者改风格只影响"今后"生成的图，现有图不重绘
- *   4. **可选**：字段缺失时 composeVisualPrompt 原样返回，保证向后兼容
+ *   1. **Prompt 前缀**：每个风格一段英文风格引导，附加在 raw prompt 前面，
+ *      让 GPT-Image-2 / Gemini / SDXL 系列都能理解。
+ *   2. **不追溯**：作者改风格只影响"今后"生成的图，现有图不重绘。
+ *   3. **可选**：字段缺失时 composeVisualPrompt 原样返回，保证向后兼容。
  */
 
 export interface VisualStylePreset {
@@ -26,7 +48,7 @@ export interface VisualStylePreset {
   /** 迷你色盘（UI 段式选择器的色标） */
   swatch: [string, string]
   /**
-   * 注入 prompt 的风格前缀 —— 会放在 raw prompt 之前，中间用 "—— " 分隔。
+   * 注入 prompt 的风格前缀 —— 会放在 raw prompt 之前，中间用双换行分隔。
    * 刻意使用英文 + 画面关键词，命中大多数文生图模型的训练语料习惯。
    */
   promptPrefix: string
@@ -37,7 +59,6 @@ export interface VisualStylePreset {
   authoringHint: string
   /**
    * 电影海报专用英文提示词 —— 竖版 one-sheet，强调海报构图 / 标题留白 / 光影氛围。
-   * 末尾统一带 "no text, vertical 2:3" 之类，避免海报里出现乱码文字。
    * 「风格」模块的电影海报式选择器用它生成各风格的海报缩略图。
    */
   posterPrompt: string
@@ -45,92 +66,41 @@ export interface VisualStylePreset {
   tagline: string
 }
 
-export const VISUAL_STYLE_PRESETS: Record<VisualStyle, VisualStylePreset> = {
-  photoreal: {
-    id: 'photoreal',
-    label: '写实',
-    hint: '电影级真实质感 · 自然光影',
-    swatch: ['#d9c2a6', '#2b2a28'],
-    // v7（2026-06）· 写实风格不再在提示词里画人脸马赛克 ——
-    //   作者看到的是**干净的写实真人图**（截图样式：白底、自然光、清晰五官）。
-    //   下游视频模型(Seedance)所需的人脸打码已迁移到「上传期」的 faceMaskTool，
-    //   只有图片真正塞进 Seedance 请求时才走一遍打码工具，不污染展示稿。
-    promptPrefix:
-      'Cinematic photorealistic photograph, shallow depth of field, natural lighting, realistic skin and textures, 8K ultra-detailed.',
-    authoringHint: '风格为电影级写实摄影，措辞重质感、光线、镜头语言。',
-    posterPrompt:
-      'Cinematic theatrical movie poster, photorealistic, dramatic key lighting, lone hero silhouette, deep shadows, 35mm film grain, anamorphic flare, title-safe negative space in the bottom third, no text, professional one-sheet composition, vertical 2:3',
-    tagline: '电影级真实质感 · 光影叙事',
-  },
-  anime: {
-    id: 'anime',
-    label: '二次元',
-    hint: '日系动画风 · 赛璐珞上色',
-    swatch: ['#ffb6c8', '#5b8cff'],
-    // v6.4 · 去掉 "Makoto Shinkai / Kyoto Animation inspired"
-    //   知名商业 IP 名字会让 Azure safety filter 额外收紧（IP 侵权预防）。
-    //   改成纯风格描述，保留审美意图，classifier 无干扰。
-    promptPrefix:
-      'Japanese cel-shaded animation art style, clean linework, vibrant colors, expressive character eyes, high-quality 2D illustration',
-    authoringHint: '风格为日系二次元动画，措辞重情绪、色彩、视觉张力。',
-    posterPrompt:
-      'Anime theatrical key visual poster, Japanese cel-shaded, vibrant saturated sky, expressive hero pose, bloom and lens flare, dynamic composition, title-safe negative space at bottom, no text, vertical 2:3',
-    tagline: '日系动画 · 热血与情绪',
-  },
-  cartoon: {
-    id: 'cartoon',
-    label: '卡通',
-    hint: '西式卡通 · 粗描边平色',
-    swatch: ['#ffd84a', '#ff6ba3'],
-    // v6.4 · 去掉 "Pixar / Disney inspired"（知名商业 IP）
-    promptPrefix:
-      'Western cartoon illustration, bold black outlines, flat vivid colors, exaggerated expressions, family-friendly stylized character design',
-    authoringHint: '风格为西式卡通，措辞轻松夸张，突出角色性格。',
-    posterPrompt:
-      'Western animated feature movie poster, bold outlines, flat vivid colors, playful exaggerated characters, sunny palette, title-safe space at bottom, no text, vertical 2:3 one-sheet',
-    tagline: '西式卡通 · 合家欢冒险',
-  },
-  pixelart: {
-    id: 'pixelart',
-    label: '像素',
-    hint: '复古像素 · 16-bit 色板',
-    swatch: ['#7cd8ff', '#222034'],
-    // v6.4 · 去掉 "SNES / Genesis era" 主机名（classifier 对商业实体敏感）
-    promptPrefix:
-      'Retro 16-bit pixel art, limited color palette, crisp pixel edges, dithered shading, classic console-era game aesthetic',
-    authoringHint: '风格为复古像素游戏，措辞简练，突出轮廓和标志性元素。',
-    posterPrompt:
-      'Retro 16-bit pixel art game cover poster, limited palette, crisp dithered shading, heroic sprite hero, parallax background, title-safe space at bottom, no text, vertical 2:3',
-    tagline: '复古像素 · 街机黄金时代',
-  },
-  watercolor: {
-    id: 'watercolor',
-    label: '水彩',
-    hint: '水彩晕染 · 柔和笔触',
-    swatch: ['#c3d9e8', '#ffc9a8'],
-    promptPrefix:
-      'Traditional watercolor painting, soft wet-on-wet washes, visible paper texture, gentle pastel palette, loose brushwork',
-    authoringHint: '风格为水彩画，措辞柔和抒情，突出色晕与留白。',
-    posterPrompt:
-      'Watercolor illustrated movie poster, soft wet-on-wet washes, paper texture, gentle pastel palette, lyrical mood, title-safe negative space at bottom, no text, vertical 2:3',
-    tagline: '水彩晕染 · 治愈抒情',
-  },
-  ink: {
-    id: 'ink',
-    label: '水墨',
-    hint: '东方水墨 · 留白写意',
-    swatch: ['#e8e2d4', '#1a1a1a'],
-    promptPrefix:
-      'Traditional Chinese ink painting (shuǐ-mò), sumi-e brushstrokes, high contrast black ink on rice paper, abundant negative space, wabi-sabi atmosphere',
-    authoringHint: '风格为东方水墨画，措辞凝练含蓄，突出意境与留白。',
-    posterPrompt:
-      'Chinese ink-wash (shuǐ-mò) movie poster, sumi-e brushstrokes, high contrast black ink on rice paper, abundant negative space, misty mountains, title-safe space at bottom, no text, vertical 2:3',
-    tagline: '东方水墨 · 写意留白',
-  },
+/** 注册表 —— id → raw。顺序即 UI/海报展示顺序（photoreal 默认放首）。 */
+const REGISTRY: Array<[VisualStyle, string]> = [
+  ['photoreal', photorealRaw],
+  ['anime', animeRaw],
+  ['cartoon', cartoonRaw],
+  ['pixelart', pixelartRaw],
+  ['watercolor', watercolorRaw],
+  ['ink', inkRaw],
+  ['render3d2d', render3d2dRaw],
+]
+
+/** 从 SKILL.md 组装 preset，缺字段即 throw（fail-fast）。 */
+function toPreset(id: VisualStyle, raw: string): VisualStylePreset {
+  const p = parseStyleSkill(raw)
+  assertId(p, id)
+  return {
+    id,
+    label: needMeta(p, 'label', id),
+    hint: needMeta(p, 'hint', id),
+    swatch: parseSwatch(needMeta(p, 'swatch', id), id),
+    tagline: needMeta(p, 'tagline', id),
+    promptPrefix: needSection(p, '出图前缀', id),
+    authoringHint: needSection(p, '作者文风', id),
+    posterPrompt: needSection(p, '海报样张', id),
+  }
 }
 
-export const VISUAL_STYLE_LIST: VisualStylePreset[] =
-  Object.values(VISUAL_STYLE_PRESETS)
+export const VISUAL_STYLE_PRESETS: Record<VisualStyle, VisualStylePreset> =
+  Object.fromEntries(
+    REGISTRY.map(([id, raw]) => [id, toPreset(id, raw)]),
+  ) as Record<VisualStyle, VisualStylePreset>
+
+export const VISUAL_STYLE_LIST: VisualStylePreset[] = REGISTRY.map(
+  ([id]) => VISUAL_STYLE_PRESETS[id],
+)
 
 /** 默认视觉风格 —— 没选过时用 photoreal，向后兼容 */
 export const DEFAULT_VISUAL_STYLE: VisualStyle = 'photoreal'
@@ -151,12 +121,15 @@ export const DEFAULT_VISUAL_STYLE: VisualStyle = 'photoreal'
 export function composeVisualPrompt(
   rawPrompt: string,
   style?: VisualStyle | null,
+  look?: FilmLook | null,
 ): string {
-  if (!style) return rawPrompt
-  const preset = VISUAL_STYLE_PRESETS[style]
-  if (!preset) return rawPrompt
-  if (!rawPrompt) return preset.promptPrefix
-  return `${preset.promptPrefix}\n\n${rawPrompt}`
+  const colorPrefix = filmLookColorPrefix(look)
+  const mediumPrefix = style ? VISUAL_STYLE_PRESETS[style]?.promptPrefix ?? '' : ''
+  // 叠加顺序：[电影美学调色锚点] + [渲染媒介出图前缀] + [raw]。
+  const prefix = [colorPrefix, mediumPrefix].filter(Boolean).join('\n\n')
+  if (!prefix) return rawPrompt
+  if (!rawPrompt) return prefix
+  return `${prefix}\n\n${rawPrompt}`
 }
 
 /**
@@ -166,7 +139,11 @@ export function composeVisualPrompt(
  * 把这句话塞进 system prompt，让 LLM 输出的措辞天然带着风格色彩。
  * 不存在 / 未知 → 返回空串，由调用方决定是否回退到默认值。
  */
-export function getAuthoringHint(style?: VisualStyle | null): string {
-  if (!style) return ''
-  return VISUAL_STYLE_PRESETS[style]?.authoringHint ?? ''
+export function getAuthoringHint(
+  style?: VisualStyle | null,
+  look?: FilmLook | null,
+): string {
+  const mediumHint = style ? VISUAL_STYLE_PRESETS[style]?.authoringHint ?? '' : ''
+  const lookHint = filmLookAuthoringHint(look)
+  return [mediumHint, lookHint].filter(Boolean).join('\n')
 }

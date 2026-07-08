@@ -346,9 +346,9 @@ describe('buildStoryboardUserPrompt · v3.8 新增字段', () => {
     const prompt = buildStoryboardUserPrompt({
       scene: scene('s1'),
       characters: [],
-      directorStyle: 'fincher-noir',
+      directorStyle: 'precision-noir',
     })
-    expect(prompt).toMatch(/【导演流派】芬奇 · 黑色惊悚/)
+    expect(prompt).toMatch(/【导演流派】冷峻精算 · 克制黑色/)
   })
 
   it('directorStyle=custom 且 custom 文本非空 → persona header 显示"自定义"', () => {
@@ -361,12 +361,12 @@ describe('buildStoryboardUserPrompt · v3.8 新增字段', () => {
     expect(prompt).toMatch(/【导演流派】自定义/)
   })
 
-  it('未传 directorStyle → 使用默认（维伦纽瓦）', () => {
+  it('未传 directorStyle → 使用默认（极简史诗）', () => {
     const prompt = buildStoryboardUserPrompt({
       scene: scene('s1'),
       characters: [],
     })
-    expect(prompt).toMatch(/维伦纽瓦/)
+    expect(prompt).toMatch(/极简史诗/)
   })
 
   it('sceneDurationSec 被注入且附带时长守恒说明', () => {

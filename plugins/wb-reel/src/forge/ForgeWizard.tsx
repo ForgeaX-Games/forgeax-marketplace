@@ -11,6 +11,7 @@ import { enqueueAuditions, auditionCardKey } from './enqueueAudition'
 import { useCardJob, useGenerationQueue, type GenJob } from './generationQueueStore'
 import { ForgeChatPanel } from './ForgeChatPanel'
 import { VisualStyleSelector } from './VisualStyleSelector'
+import { FilmLookSelector } from './FilmLookSelector'
 import { DirectorStyleSelector } from './DirectorStyleSelector'
 import { UIStyleSelector } from './UIStyleSelector'
 import { MinigamePoolSelector } from './MinigamePoolSelector'
@@ -401,11 +402,12 @@ function RefsPanel() {
     )
   }
 
-  // 「风格」分区：全屏铺满内容区的视觉风格选择器（无二级面板框）。
+  // 「风格」分区：两个正交维度并列 —— 渲染媒介(VisualStyle) + 电影美学调色(FilmLook)。
   if (imageSection === 'style') {
     return (
-      <div className="ks-forge-step ks-forge-step-full">
+      <div className="ks-forge-step ks-forge-step-full ks-forge-style-dual">
         <VisualStyleSelector />
+        <FilmLookSelector />
       </div>
     )
   }
@@ -1033,6 +1035,31 @@ const css = `
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   height: 100%;
   min-height: 0;
+}
+/* 「风格」分区：上=渲染媒介大轮播（占据剩余空间、可压缩），下=电影美学调色滤镜条（固定高度、始终可见）。
+ * 双维度同屏：媒介定"用什么画"，调色定"整片什么色感"，二者叠加拼出更多组合。 */
+.ks-forge-step-full.ks-forge-style-dual {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 上：渲染媒介大轮播 —— 抢占剩余高度，并允许压缩到 0 以给下方滤镜条让位 */
+.ks-forge-style-dual > .ks-vstyle {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 轮播默认 min-height clamp 会把自己顶出一屏；在双维度容器里改为可压缩 */
+.ks-forge-style-dual > .ks-vstyle .pc-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 下：电影美学调色滤镜条 —— 固定高度，始终可见，不被上方轮播挤出屏幕 */
+.ks-forge-style-dual > .ks-flook {
+  flex: 0 0 auto;
 }
 /*
  * chat 已被外壳层托管, wizard 收回单列布局. main 自然占满整宽, 不再为不存在

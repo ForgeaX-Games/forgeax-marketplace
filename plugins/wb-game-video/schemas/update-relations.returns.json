@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reel:update-relations returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "id": { "type": "string", "description": "Edited scenario id." },
+    "updatedAt": { "type": "number" },
+    "activeId": { "type": ["string", "null"] }
+  }
+}

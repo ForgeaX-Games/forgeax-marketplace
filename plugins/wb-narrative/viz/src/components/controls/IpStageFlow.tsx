@@ -754,16 +754,29 @@ export function IpStageFlow(props: IpStageFlowProps) {
       "- 已按确认的改编规划（裁剪范围 + 游戏单元）提取结构化 IP DNA，进入下游叙事管线生成游戏叙事资产。",
     ].join("\n");
     props.onStageProgress?.("ip_dna_extract", "running", "生成 scoped IP DNA", extractText);
+    // §图2 品类透传：把 ROUTING 选定的 genreCode 一并发给 generate，
+    // 后端据其锁定生成品类并派生 pipeline_family，避免 ROUTING 选的叙事需求接不到下游管线。
+    const routedGenre = useNarrativeStore.getState().activeConfig?.genreCode ?? undefined;
     try {
       const resp = await ipDnaGenerate(runId, {
         tier,
         generationMode: mode,
         complexity,
+        ...(routedGenre ? { genreCode: routedGenre } : {}),
         async: true,
       });
       const jobId = (resp as unknown as IpDnaJobStartResponse).jobId;
       if (jobId) {
         props.onGenerateStarted?.(jobId, runId);
+        // §图2：后端为下游生成注册了正式 SSE run → startNewRun 挂载它。
+        // 这样在 ip_* 前驱步之后，前端会随 SSE 铺开下游叙事节点并逐步推进，跑完由 done 帧收尾，
+        // 不再只停在 ip_dna_extract、也不再永久卡「生成中」。
+        const genRunId = (resp as unknown as IpDnaJobStartResponse).generationRunId;
+        if (genRunId) {
+          const st0 = useNarrativeStore.getState();
+          const entryKey = st0.runningEntryKey ?? st0.activeEntryKey ?? runId;
+          st0.startNewRun(genRunId, entryKey, tier, mode);
+        }
         await pollJob(jobId, (result) => {
           setStage("done");
           // 输出流程产出接续到中间预览（点2）：scoped IP DNA + 各游戏单元产出概览。
@@ -1149,7 +1162,7 @@ export function IpStageFlow(props: IpStageFlowProps) {
               {stage === "done" ? (
                 <p className="wb-helper">{t("ipStage.doneHint")}</p>
               ) : stage === "generating" ? (
-                <p className="wb-helper">{t("ipStage.generatingHint", { pct: progress?.pct ?? 0 })}</p>
+                <p className="wb-helper">{t("ipStage.generatingHint", { pct: progress?.pct ?? 0 })}{progress?.message ? ` · ${progress.message}` : ""}</p>
               ) : !routingReady ? (
                 <p className="wb-helper">{t("ipStage.routingRequired")}</p>
               ) : (

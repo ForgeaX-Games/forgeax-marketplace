@@ -182,4 +182,32 @@ describe("orchestrator dry-run (no LLM, heuristic extract)", () => {
     const outFile = path.join(gu.outputDir!, "game_unit_1.json");
     expect(fs.existsSync(outFile)).toBe(true);
   });
+
+  it("§4.6b 系列：结局收束约束注入 + 跨部账本承接", async () => {
+    const calls: { index: number; userInput: string; ledger: unknown }[] = [];
+    const result = await runIpDnaPipeline({
+      files: [{ fileName: "s.md", data: SAMPLE_TEXT, fileType: "text/markdown" }],
+      title: "系列承接",
+      cwd: TMP,
+      mode: "series",
+      runGeneration: true,
+      generate: async ({ userInput, seed, seedCtx }) => {
+        calls.push({ index: calls.length, userInput, ledger: seed.ledger });
+        return { ...seedCtx, user_preference_summary: "mock" };
+      },
+    });
+
+    expect(result.directive.game_unit_plan.mode).toBe("series");
+    const n = result.gameUnits.length;
+    expect(n).toBeGreaterThanOrEqual(2);
+    expect(calls.length).toBe(n);
+
+    // 结局收束：每部注入约束；非末部含"承接结局"，末部标记"最后一部"。
+    expect(calls[0].userInput).toContain("系列结局收束约束");
+    expect(calls[0].userInput).toContain("承接结局");
+    expect(calls[n - 1].userInput).toContain("最后一部");
+
+    // 跨部承接：第 2 部起收到的账本 = 累积账本对象（与第 1 部自身单元账本不是同一引用）。
+    expect(calls[1].ledger).not.toBe(calls[0].ledger);
+  });
 });

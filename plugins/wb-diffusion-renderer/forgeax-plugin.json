@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-plugin/wb-diffusion-renderer",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "Diffusion Renderer · 实时画面增强渲染",
+    "en": "Diffusion Renderer · Live Viewport"
+  },
+  "description": {
+    "zh": "从 Diffusion Renderer 插件面板启动基于 diffusion 的实时画面增强渲染,把引擎视口画面送到增强后端,并在同一个面板中预览结果,不覆盖原始视口。",
+    "en": "Starts live diffusion-based render enhancement from the Diffusion Renderer plugin panel, streams the engine viewport to a realtime enhancement backend, and previews results in the same panel without covering the original viewport."
+  },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
+  "icon": "🎨",
+  "keywords": ["diffusion-renderer", "realtime", "viewport", "diffusion-rendering", "fluxrt"],
+  "provides": {
+    "workbench": {
+      "id": "wb-diffusion-renderer",
+      "icon": "🎨",
+      "position": 160,
+      "panelSize": "md",
+      "surface": "single",
+      "hidden": true
+    }
+  },
+  "entry": {
+    "frontend": "./index.html",
+    "standalone": {
+      "start": "false",
+      "port": 0,
+      "readyProbe": "/",
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+  "requestedEnv": ["ANTHROPIC_API_KEY", "FLUXRT_API_KEY", "FLUXRT_BASE_URL"],
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  }
+}

@@ -18,6 +18,43 @@ import { DEFAULT_UNITS_PER_GAME_UNIT } from "./phase2b-adapt.js";
 /** 每个游戏单元剧情树的最小节点数（恒等约束，§4.6）。 */
 export const MIN_PLOT_TREE_NODES = 25;
 
+/** 系列游戏单元结局总数默认上限（§4.6b，蓝图建议 3-5，取上界防结局爆炸）。 */
+export const DEFAULT_MAX_ENDINGS_PER_SERIES_UNIT = 5;
+
+/**
+ * 系列结局收束 + 跨部承接约束（§4.6b，精简版：以提示词约束注入下游，不新增落盘字段）。
+ *
+ * 覆盖底层管线「结局不设上限」对系列单元的问题——每部约束结局数量、区分承接/收束结局：
+ *   - 非末部：恰好 1（最多 2）个「承接结局」通向下一部（留主角状态/世界变化/悬念钩子），其余就地收束；
+ *   - 末部：全部就地收束，不再留钩子。
+ * 跨部只经承接结局的收尾状态传递，禁止跨部节点直接连边（bounded coupling）。
+ * 返回空串表示非系列/无需注入。
+ */
+export function buildSeriesEndingDirective(
+  mode: GameMode,
+  unitIndex: number,
+  totalUnits: number,
+  maxEndings: number = DEFAULT_MAX_ENDINGS_PER_SERIES_UNIT,
+): string {
+  if (mode !== "series" || totalUnits <= 1) return "";
+  const isLast = unitIndex >= totalUnits;
+  const head = `## 系列结局收束约束（本部为系列第 ${unitIndex}/共 ${totalUnits} 部）`;
+  if (isLast) {
+    return [
+      head,
+      `- 本部是系列最后一部：所有结局均为「就地收束」结局，不再为后续留承接钩子。`,
+      `- 本部结局总数控制在 ${maxEndings} 个以内，避免结局无限膨胀。`,
+    ].join("\n");
+  }
+  return [
+    head,
+    `- 恰好设置 1 个（最多 2 个）「承接结局」作为通向下一部的正典出口：该结局须为下一部留下延续钩子（主角状态、世界关键变化、未竟悬念）。`,
+    `- 其余结局一律为「就地收束」结局，本部内闭合。`,
+    `- 本部结局总数控制在 ${maxEndings} 个以内。`,
+    `- 跨部只通过承接结局的收尾状态传递，禁止本部节点与其他部节点直接连边。`,
+  ].join("\n");
+}
+
 /** 管线家族选择（rpg=层级树管线；vn=互动影游管线）。 */
 export type PipelineFamily = "rpg" | "vn";
 

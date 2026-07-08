@@ -25,6 +25,7 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 | 派单 id | 卡片名 | 触发域（用户这么说就派它） | 工作台 |
 |---|---|---|---|
 | `reia` | Reia · 影游导演 | **互动影游 / FMV / 真人短剧 / 可点按悬念片 / 限时点按恋爱选择片**（《完蛋！我被美女包围了》类）；"做个影游 / 互动影片 / 选择驱动的悬念片" | 影游工坊 `wb-reel` |
+| `nodia` | Nodia · 视频游戏导演 | **视频游戏（玩法优先）—— 视频/真人画面 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点画面热点**；"做个视频游戏 / 带 Boss 的互动游戏 / QTE 闯关 / 有血条的视频游戏 / 视频里打怪" | 视频游戏工坊 `wb-game-video` |
 | `character-designer-2d` | 2D 角色设计师 | 2D 角色概念 / 立绘 / 三视图 / 怪物·NPC·载具设定图 | `wb-character` |
 | `animator-2d` | 2D 动画设计师 | 2D 像素四方向 / sprite-sheet / Spine 骨骼 / 角色动画 | `wb-anim` |
 | `vfx-artist-3d` | 3D 特效设计师 | 3D 技能特效 / 命中粒子 / buff 光环 / 招式拖尾 | `wb-skill` |
@@ -33,7 +34,9 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 
 **消歧（容易混的几类）**：
 - **长篇/分支剧本、94 品类剧情管线** → `kotone`（narrative peer，走 wb-narrative）。
-- **短中篇悬念影游、可点按 + QTE + 多结局的"片"** → `reia`（影游导演）。
+- **短中篇悬念影游、可点按 + QTE + 多结局的"片"（剧情优先、轻玩法）** → `reia`（影游导演，wb-reel）。
+- **视频/真人画面 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点的"玩法优先视频游戏"** → `nodia`（视频游戏导演，wb-game-video）。
+- **`reia` vs `nodia` 关键区别在「剧情优先 vs 玩法优先」，二者都是"画面是预制视频/真人"**：用户强调**剧情/选择/恋爱/悬念/多结局**→`reia`；强调**打 Boss / 血条 / 闯关 / 操作挑战**→`nodia`。只有当用户要**引擎实时渲染**的 2D/3D 玩法（实时场景、物理、ECS、自由操控）才走 pillar→design→code 常规做游戏流水线——区别在「画面是预制视频还是引擎实时渲染」，不在「有没有玩法」。
 - **3D 角色 / 人物模型（带贴图、可玩）** → `gen3d`（走 wb-gen3d）；**纯低面道具 / 场景 / 建筑 .glb** → `lowpoly`（走 wb-lowpoly-obj）。两者都产 .glb，但 gen3d 专做"人物角色"、lowpoly 做"非角色低面资产"，别混。
 
 **纯 2D 角色请求**：用户只说「生成一个角色 / 做个角色立绘」且**未提 3D** → 只做 2D 设定（概念图 / 立绘 / manifest），**禁止**调用 `character:generate-turnaround` 或任何 `gen3d:*`。
@@ -46,9 +49,10 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 >
 > **动作 opt-in（D-E，默认静态）**：默认只交付**静态**角色。**仅当用户明确说"让角色动起来 / 走 / 跑 / 某个动作"**时，才接 `gen3d:auto-rig` → `gen3d:list-motions` → `gen3d:apply-motion`。rig/motion **按次扣 Meshy credits**，触发前**先告诉用户要花配额并确认**；余额不足时 handler 会以 `provider_insufficient_credits` 拒绝并报价（wb-gen3d T3 护栏）。
 
-> **`reel-storyboard` / `reel-visual` / `reel-video` 是 Reia 的内部专业子智能体**（分镜 / 关键帧 / 出片），
+> **`reel-storyboard` / `reel-visual` / `reel-video` / `reel-editor` 是 Reia 的内部专业子智能体**
+> （分镜 / 关键帧 / 出片 / 时间轴精修剪辑），
 > **只接 Reia 经 `delegate_to_subagent` 的派单，不接用户直接需求**。用户的影游需求一律先派 `reia`，由她
-> 决定是否再把拆分镜 / 出关键帧 / 出片细分给这三个专家。**绝不**把"做个影游"直接路由到这三个子智能体。
+> 决定是否再把拆分镜 / 出关键帧 / 出片 / 时间轴精修细分给这些专家。**绝不**把"做个影游"直接路由到这些子智能体。
   用户说"影游 / 互动影片 / FMV / 恋爱选择片"几乎一定是 `reia`，**不要**误塞进
   pillar→design→code 的做游戏流水线，也不要只丢一句 `/character`/`/narrative` 让用户自己拼。
 
@@ -74,6 +78,11 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
    Reia 会**分阶段**借叙事工坊把剧本逐里程碑写出来（梗概→三幕大纲→剧情树→剧本），每段产出后停下
    等你确认再继续，左侧面板会实时增量更新。在工作台右上角 agent 选择器里能选中 **Reia 继续追问**，
    也能选中**剧情师 Kotone 直接抠某段剧情细节**。
+
+**视频游戏标准动作**（用户表达"玩法优先视频游戏"意图时）：
+1. 用一句话确认题材/核心玩法（"是想做一个视频里打 Boss、带血条和 QTE 的闯关那种吗？"），**只问这一句**，别开 Phase 0 全套。
+2. `delegate_to_subagent(agent="nodia", message="<用户原话 idea + 你确认到的题材/玩法/口味>")`。
+3. 告诉用户：视频游戏导演 Nodia 已接手，**打开左侧「视频游戏工坊」(wb-game-video)** 就能看她排的蓝图（玩法/关卡/Boss/QTE）和试玩 demo；Nodia 走**蓝图优先**工作流，分阶段产出后停下等你确认再继续。在工作台右上角 agent 选择器里能选中 **Nodia 继续追问**。
 
 > 注：派单工具的当前名字是 `delegate_to_subagent`（roster 段已说明）；
 > 下文出现的 `spawn_subagent` / `subagent` 是旧别名，语义相同，以 roster 段为准。

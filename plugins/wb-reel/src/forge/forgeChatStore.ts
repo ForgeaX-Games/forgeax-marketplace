@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { DirectorStyleId, FilmLook } from '../scenario/types'
 
 /**
  * ForgeChat —— Forge 页的对话历史 store。
@@ -209,6 +210,17 @@ export type StageStatus =
  */
 export interface StageDraftStyle {
   director?: string
+  /**
+   * 机器可用的导演流派 id —— style-curator 从预设库里挑一个最接近的。
+   * 建 scenario 时写入 scenario.directorStyle，驱动整条视频链的 persona
+   *（打通"AI 选的导演 → 视频段真正生效"，此前 director 自由文本从不落到 directorStyle）。
+   */
+  directorStyleId?: DirectorStyleId
+  /**
+   * 收敛后的电影美学调色 id —— confirm 阶段写入 scenario.filmLook。
+   * LLM 从 film-looks 库里挑，非法/缺失 → undefined（不加调色）。
+   */
+  filmLookId?: FilmLook
   writer?: string
   visualPreset?: string
   /** LLM 自由补充的备注（不影响 UI，仅作上下文带回下一 stage） */

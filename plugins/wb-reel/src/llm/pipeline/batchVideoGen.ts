@@ -19,7 +19,7 @@
  */
 import type { VideoClient } from '../providers/VideoProvider'
 import { composeVisualPrompt } from '../config/visualStylePresets'
-import type { VisualStyle } from '../../scenario/types'
+import type { VisualStyle, FilmLook } from '../../scenario/types'
 import { runWithConcurrency, type BatchResult } from './batchImageGen'
 import { DEFAULT_VIDEO_SIZE, type VideoSize } from '../refsets/seedanceResolution'
 import { VIDEO_BATCH_CONCURRENCY } from '../util/concurrency'
@@ -58,6 +58,8 @@ export async function batchGenerateVideos(args: {
   client: VideoClient
   concurrency?: number
   visualStyle?: VisualStyle
+  /** 全局电影美学调色 —— 叠加进视频文本 prompt 的色彩锚点（首帧图已含调色）。 */
+  filmLook?: FilmLook
   onProgress?: (done: number, total: number) => void
   onPersist?: (success: VideoBatchSuccess) => Promise<void> | void
   /** 单任务进度（异步轮询的消息）—— 用 sceneId 区分是哪个场景 */
@@ -71,7 +73,7 @@ export async function batchGenerateVideos(args: {
     async (task) => {
       const t0 = performance.now()
       const out = await args.client.generate({
-        prompt: composeVisualPrompt(task.prompt, args.visualStyle),
+        prompt: composeVisualPrompt(task.prompt, args.visualStyle, args.filmLook),
         referenceImageDataUrl: task.referenceImageDataUrl,
         referenceImageUrls: task.referenceImageUrls,
         durationSec: task.durationSec,
