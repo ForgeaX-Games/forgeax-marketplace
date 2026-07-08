@@ -5,6 +5,8 @@
   "type": "module",
   "description": "ForgeaX workbench plugin: items.json + 48px icon pipeline with multi-style generation hooks.",
   "scripts": {
+    "prebuild": "bun install --cwd ../../shared/ui-asset-cleanup",
+    "preinstall": "bun install --cwd ../../shared/ui-asset-cleanup",
     "dev": "vite --host",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
