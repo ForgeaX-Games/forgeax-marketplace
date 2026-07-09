@@ -67,7 +67,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const applyLayout = useGraphScenario((s) => s.applyLayout)
   const bumpRun = useGraphScenario((s) => s.bumpRun)
 
-  const [selected, setSelected] = useState<string | null>(null)
+  // 选中节点走共享 store（视频/界面等其它视图据此编辑同一节点）。
+  const selected = useGraphScenario((s) => s.selectedNodeId)
+  const setSelected = useGraphScenario((s) => s.setSelectedNode)
   const [playOpen, setPlayOpen] = useState(false)
   const [videoOptions, setVideoOptions] = useState<string[]>([])
 

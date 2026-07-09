@@ -16,7 +16,8 @@ describe('GraphSession (playable view model)', () => {
     expect(snap.interaction?.handles).toEqual(['opt:light', 'opt:heavy', 'opt:medit', 'opt:ult'])
 
     snap = session.submit('light') // → 变招判定 → 轻攻击演出
-    snap = session.performanceEnd() // 结算 → boss 死 → win 演出
+    snap = session.tick(1000) // 命中时机(at:1000ms) → 结算 → boss 死
+    snap = session.performanceEnd() // 演出结束 → win 演出
     expect(snap.hud.entities['ent-boss']!.hp).toBeLessThanOrEqual(0)
     expect(snap.currentNodeId).toBe('win')
 
@@ -31,6 +32,7 @@ describe('GraphSession (playable view model)', () => {
     session.jump('enter')
     session.performanceEnd() // → wait（技能）
     session.submit('light') // → 轻攻击演出
+    session.tick(1000) // 命中时机(at:1000ms) → 结算(boss 掉 80, 仍存活)
     const snap = session.performanceEnd() // boss 存活 + 我方先手 → 敌方回合 tele（防反 QTE）
     expect(snap.visited).toContain('wait')
     expect(snap.currentNodeId).toBe('tele')

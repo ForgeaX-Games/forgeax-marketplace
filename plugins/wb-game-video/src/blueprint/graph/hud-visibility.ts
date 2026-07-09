@@ -13,6 +13,8 @@ export interface HudCtx {
   phase: string
   /** 当前挂起交互的 kind（用于 show:'qte' 判定）。 */
   interactionKind?: string
+  /** 当前节点是否处于「战斗」（约定 = node.data.hud.preset === 'battle'）——用于 show:'battle' 判定。 */
+  isBattle?: boolean
 }
 
 type ShowMode = 'always' | 'never' | 'battle' | 'qte' | undefined
@@ -23,7 +25,7 @@ function hiddenByShow(show: ShowMode, ctx: HudCtx): boolean {
     case 'never':
       return true
     case 'battle':
-      return ctx.phase === 'ended' // 非战斗（已结束）时隐藏
+      return !ctx.isBattle // 仅当前节点是战斗节点时显示；进入战斗前/离开战斗后隐藏
     case 'qte':
       return ctx.interactionKind !== 'qte' // 仅 QTE 交互时显示
     case 'always':

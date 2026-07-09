@@ -7,13 +7,14 @@
  * 实时高亮当前节点/已走边，点节点=jump 执行，只读（不改图、不出节点配置）。
  * 数据来自共享 graphScenario store（与蓝图/视频/界面/规则同源）。
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { GameScenario } from '../graph-schema'
 import { GraphSession, type SessionSnapshot } from '../session'
 import { GraphCanvas } from './GraphCanvas'
 import { registerCoreRenderers, renderInteraction, renderOverlay, renderHudElement, type HudElementView, type SkinCtx } from './rendererRegistry'
 import { registerCoreSkins } from './skins'
 import { resolveMediaSrc } from './media'
+import { computeVideoContentRect, type VideoContentRect } from './video/videoContentRect'
 import { useGraphScenario } from '../graphScenarioStore'
 
 function autoInput(handles: string[]): unknown {
@@ -76,6 +77,24 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const sessionRef = useRef<GraphSession | null>(null)
   const [snap, setSnap] = useState<SessionSnapshot | null>(null)
 
+  // 视频 object-fit:contain 后的实际画面矩形——HUD/QTE/交互等 overlay 都锚在这块
+  // 视频显示区上（而非整个内容区），视频缩小/换比例时血条等跟着视频走。
+  const videoElRef = useRef<HTMLVideoElement | null>(null)
+  const [contentRect, setContentRect] = useState<VideoContentRect | null>(null)
+  const recomputeRect = useCallback(() => {
+    const v = videoElRef.current
+    setContentRect(v ? computeVideoContentRect(v) : null)
+  }, [])
+  useEffect(() => {
+    const v = videoElRef.current
+    if (!v) return
+    const parent = v.parentElement
+    if (!parent || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => recomputeRect())
+    ro.observe(parent)
+    return () => ro.disconnect()
+  }, [recomputeRect, snap?.clip?.nodeId])
+
   useEffect(() => {
     if (!ready) return
     const s = new GraphSession(useGraphScenario.getState().scn())
@@ -123,16 +142,25 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     background: on ? '#2f2923' : 'rgba(37,32,25,0.9)', color: '#e8eaed',
   })
 
+  // 游戏 overlay 舞台 = 视频实际显示矩形（有黑边时锚在视频那块，不铺满容器）。
+  // 无 contentRect（未加载/无视频）时回退到铺满容器。层内自身 pointerEvents 不变，
+  // 舞台设 none 让空白处点击穿透，交互层单独开 auto。
+  const stageStyle: CSSProperties = contentRect
+    ? { position: 'absolute', left: contentRect.left, top: contentRect.top, width: contentRect.width, height: contentRect.height, pointerEvents: 'none' }
+    : { position: 'absolute', inset: 0, pointerEvents: 'none' }
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden' }}>
       {/* 演出画面 */}
       {videoSrc ? (
         <video
           key={snap?.clip?.nodeId}
+          ref={videoElRef}
           src={videoSrc}
           autoPlay
           muted
           playsInline
+          onLoadedMetadata={recomputeRect}
           onEnded={() => setSnap(sessionRef.current!.performanceEnd())}
           onTimeUpdate={(e) => setSnap(sessionRef.current!.tick(Math.floor(e.currentTarget.currentTime * 1000)))}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
@@ -143,6 +171,9 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         </div>
       )}
 
+      {/* 游戏 overlay 舞台：锚定视频实际显示矩形（object-fit:contain 后带黑边的那块）。
+          HUD / QTE / 交互 / 结局横幅都相对这块定位，视频缩放/换比例时跟着视频走。 */}
+      <div style={stageStyle}>
       {/* 表现叠层 */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
         {(snap?.overlays ?? []).map((o, i) => (
@@ -150,7 +181,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         ))}
       </div>
 
-      {/* 皮肤 HUD：全屏层，各皮肤组件自定位（血条像旧版：玩家右下、Boss 顶部） */}
+      {/* 皮肤 HUD：铺满舞台=视频显示区，各皮肤组件自定位（血条像旧版：玩家右下、Boss 顶部） */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
         {Object.keys(snap?.hud.entities ?? {}).filter((id) => !hudHidden.has(id)).map((id) => {
           const el = hudComp.get(id)
@@ -159,7 +190,9 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         })}
       </div>
 
-      {/* 内置 HUD 列（左上角）：仅未配皮肤组件的实体血条 + 变量 + score */}
+      {/* 内置 HUD 列（左上角）：仅未配皮肤组件的实体血条兜底。
+          变量/score 的原始 dump 已移除——旧蓝图试玩不显示裸变量，HUD 一律由
+          皮肤组件（ui.hud[i].component）或节点 HUD 配置显式渲染。 */}
       <div style={{ position: 'absolute', top: 10, left: 12, width: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudHidden.has(id) && !hudComp.get(id)?.component).map(([id, e]) => {
           const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0
@@ -175,12 +208,6 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
             </div>
           )
         })}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {Object.entries(snap?.hud.vars ?? {}).filter(([k]) => !hudHidden.has(k)).map(([k, v]) => (
-            <span key={k} style={{ fontSize: 11, color: '#fff', textShadow: '0 1px 3px #000', padding: '1px 8px', background: 'rgba(0,0,0,0.5)', borderRadius: 8 }}>{k} {v}</span>
-          ))}
-          {!hudHidden.has('score') && <span style={{ fontSize: 11, color: '#fff', textShadow: '0 1px 3px #000', padding: '1px 8px', background: 'rgba(0,0,0,0.5)', borderRadius: 8 }}>score {snap?.hud.score ?? 0}</span>}
-        </div>
       </div>
 
       {/* 结局横幅 */}
@@ -190,10 +217,12 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         </div>
       )}
 
-      {/* 交互层 */}
+      {/* 交互层：铺满舞台=视频显示区。皮肤（防反/技能条）与默认按钮行各自绝对定位到
+          自己的位置（防反=右侧居中、技能条/默认=底部），故这里只做全区容器、点击穿透。 */}
       {snap?.interaction && (
-        <div style={{ position: 'absolute', bottom: 28, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit, skinCtx)}</div>
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{renderInteraction(snap.interaction, submit, skinCtx)}</div>
       )}
+      </div>
 
       {/* 控制条：右上角悬浮 */}
       <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 10, background: 'rgba(27,23,19,0.7)' }}>

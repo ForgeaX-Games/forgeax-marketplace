@@ -63,7 +63,7 @@ export function BattleSkillLayer({ interaction, submit }: InteractionProps) {
 }
 
 const SKILL_CSS = `
-.pvb-skills { position: absolute; left: 0; right: 0; bottom: 0; z-index: 44; display: flex; flex-wrap: wrap; gap: 26px; justify-content: center; align-items: flex-end; min-height: 40px; padding: 34px 16px 18px; background: linear-gradient(0deg, rgba(0,0,0,.6), rgba(0,0,0,.2) 60%, transparent); pointer-events: auto; }
+.pvb-skills { position: absolute; left: 0; right: 0; bottom: 0; z-index: 44; display: flex; flex-wrap: wrap; gap: 26px; justify-content: center; align-items: flex-end; min-height: 40px; padding: 34px 16px 18px; pointer-events: auto; }
 .pvb-skill { position: relative; display: flex; align-items: center; gap: 9px; cursor: pointer; background: none; border: none; padding: 4px; box-shadow: none; line-height: 1; color: #fbf6ec; transition: transform .14s ease, opacity .14s ease; }
 .pvb-sk-key { position: relative; flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-weight: 800; font-size: 1.18rem; color: #efe7d6; z-index: 1; text-shadow: 0 2px 6px rgba(0,0,0,.85); }
 .pvb-sk-key::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 52% 48% 50% 50% / 50% 52% 48% 50%; background: linear-gradient(180deg, #2b2620, #0c0a08); border: 1.5px solid rgba(239,231,214,.5); box-shadow: 0 2px 6px rgba(0,0,0,.5) inset, 0 2px 7px rgba(0,0,0,.6); filter: url(#inkRough); }

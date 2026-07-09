@@ -12,7 +12,7 @@ import type { GraphTextStyle, GraphTextStylePreset } from '../graph-schema'
 import { useGraphScenario } from '../graphScenarioStore'
 import { matchPresetId, resolvePresets, snapshotPresetStyle, type TextStyleGroup } from '../text-style'
 import { resolveGraphTextCss } from '../text-css'
-import { FONT_PRESETS } from '../../../editor/timeline/fontPresets'
+import { FONT_PRESETS } from '../font-presets'
 import { injectStyleOnce } from '../../../styles/injectStyle'
 
 export function GraphTextStylePicker({

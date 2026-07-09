@@ -29,7 +29,8 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.submitInteraction('skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
     expect(rt.state.vars.qi).toBe(2)
 
-    rt.onPerformanceEnd() // 轻攻击结算(≥80伤害) → boss 死 → 血量判定(折进出边)→win(演出)
+    rt.tick(1000) // 轻攻击命中时机(at:1000ms) → 结算(≥80伤害) → boss 死
+    rt.onPerformanceEnd() // 演出结束 → 血量判定(折进出边)→win(演出)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeLessThanOrEqual(0)
     expect(rt.state.currentNodeId).toBe('win')
 
@@ -49,7 +50,8 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(rt.state.currentNodeId).toBe('wait')
 
     rt.submitInteraction('skill', 'light') // qi+2 → 轻攻击演出
-    rt.onPerformanceEnd() // 结算(boss 掉血, 仍存活) → 血量判定(折进出边: 我方先手→敌方回合) → tele(防反QTE)
+    rt.tick(1000) // 命中时机(at:1000ms) → 结算(boss 掉 80, 仍存活)
+    rt.onPerformanceEnd() // 血量判定(折进出边: 我方先手→敌方回合) → tele(防反QTE)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeGreaterThan(0)
     expect(rt.state.currentNodeId).toBe('tele')
     expect(rt.state.phase).toBe('awaitInteraction')

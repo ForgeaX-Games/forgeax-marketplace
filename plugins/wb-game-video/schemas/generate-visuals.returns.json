@@ -1,9 +1,0 @@
-{
-  "type": "object",
-  "properties": {
-    "ok": { "type": "boolean" },
-    "scope": { "type": "string" },
-    "message": { "type": "string" }
-  },
-  "required": ["ok", "message"]
-}

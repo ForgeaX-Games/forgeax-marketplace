@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gvid:get-graph returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["scenario"],
+  "properties": {
+    "scenario": {
+      "description": "The GameScenario (contains graph.nodes/graph.edges). null if neither disk data nor demo is available.",
+      "type": ["object", "null"]
+    },
+    "source": { "type": "string", "enum": ["disk", "demo"] },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

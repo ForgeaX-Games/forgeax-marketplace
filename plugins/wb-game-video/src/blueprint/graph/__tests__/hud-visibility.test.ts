@@ -16,9 +16,12 @@ describe('hiddenHudKeys', () => {
     expect(h.has('secret')).toBe(true)
   })
 
-  it('battle hidden only when ended', () => {
-    expect(hiddenHudKeys(ui, undefined, { phase: 'playing' }).has('ent-boss')).toBe(false)
-    expect(hiddenHudKeys(ui, undefined, { phase: 'ended' }).has('ent-boss')).toBe(true)
+  it('battle visible only in a battle node (isBattle)', () => {
+    // 非战斗节点：隐藏
+    expect(hiddenHudKeys(ui, undefined, { phase: 'playing' }).has('ent-boss')).toBe(true)
+    expect(hiddenHudKeys(ui, undefined, { phase: 'playing', isBattle: false }).has('ent-boss')).toBe(true)
+    // 战斗节点：显示
+    expect(hiddenHudKeys(ui, undefined, { phase: 'playing', isBattle: true }).has('ent-boss')).toBe(false)
   })
 
   it('qte visible only during a qte interaction', () => {

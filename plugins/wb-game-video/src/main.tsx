@@ -1,9 +1,9 @@
 // 必须最先求值：把历史 reel-studio* localStorage 键迁移到 gamevideo* 命名空间，
 // 早于任何 store 在模块求值期的 hydrate。详见该模块头注。
 import './bootMigrateLegacyKeys'
-import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react'
+import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App'
+import { GraphApp } from './GraphApp'
 import { GraphPlayer } from './blueprint/graph/react/GraphPlayer'
 import { GraphStudio } from './blueprint/graph/react/GraphStudio'
 import { NODIA_DEMO } from './blueprint/graph/demo'
@@ -194,11 +194,10 @@ class TopErrorBoundary extends Component<
   }
 }
 
-// 表面路由：
-//   默认（含 workbench 嵌入 ?pane=left/center、?surface=player、?surface=legacy）
-//                               → 旧 App（蓝图/视频/界面/规则/试玩 tab 壳 + 侧栏，保留原交互）
-//   ?surface=graphstudio        → GraphStudio（可编辑蓝图 + 试玩 + 运行时可视化，新引擎；开发单独看）
-//   ?surface=graphplay          → GraphPlayer（纯试玩，新引擎）
+// 表面路由（新引擎 graph-only）：
+//   默认                         → GraphApp（蓝图/视频/界面/规则/试玩 五 tab，新引擎唯一外壳）
+//   ?surface=graphstudio        → GraphStudio（单独看蓝图编辑 + 试玩）
+//   ?surface=graphplay          → GraphPlayer（纯试玩）
 // graph* 表面不套 StrictMode，避免 start() 被双调用重复推进。
 const _surface = new URLSearchParams(location.search).get('surface')
 if (_surface === 'graphstudio' || _surface === 'graphplay') {
@@ -215,10 +214,8 @@ if (_surface === 'graphstudio' || _surface === 'graphplay') {
   )
 } else {
   createRoot(root).render(
-    <StrictMode>
-      <TopErrorBoundary>
-        <App />
-      </TopErrorBoundary>
-    </StrictMode>,
+    <TopErrorBoundary>
+      <GraphApp />
+    </TopErrorBoundary>,
   )
 }

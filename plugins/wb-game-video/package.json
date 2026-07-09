@@ -29,7 +29,7 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -p tsconfig.build.json && vite build",
-    "build:standalone": "RS_NO_KEY=1 tsc -b && RS_NO_KEY=1 vite build && node scripts/bundle-singlefile.mjs",
+    "build:standalone": "tsc -p tsconfig.build.json && vite build && node scripts/bundle-singlefile.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",

@@ -172,10 +172,13 @@ const btn = (bg: string): CSSProperties => ({
   boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
 })
 
+// 默认按钮行统一贴视频显示区底部居中（皮肤交互各自自定位，不用这个）。
+const bottomRow: CSSProperties = { position: 'absolute', left: 0, right: 0, bottom: '7%', display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', pointerEvents: 'auto' }
+
 function ChoiceButtons({ interaction, submit }: InteractionProps): ReactNode {
   const params = interaction.params as unknown as ChoiceParams
   return (
-    <div className="gv-choice-layer" style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+    <div className="gv-choice-layer" style={bottomRow}>
       {(params.options ?? []).map((o) => (
         <button key={o.key} style={btn('#2563eb')} onClick={() => submit(o.key)}>
           {o.label ?? o.key}
@@ -187,7 +190,7 @@ function ChoiceButtons({ interaction, submit }: InteractionProps): ReactNode {
 
 function QteButtons({ submit }: InteractionProps): ReactNode {
   return (
-    <div className="gv-qte-layer" style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+    <div className="gv-qte-layer" style={bottomRow}>
       <button style={btn('#16a34a')} onClick={() => submit('pass')}>完美</button>
       <button style={btn('#65a30d')} onClick={() => submit('good')}>成功</button>
       <button style={btn('#dc2626')} onClick={() => submit('fail')}>失败</button>
@@ -198,7 +201,7 @@ function QteButtons({ submit }: InteractionProps): ReactNode {
 function HotspotButtons({ interaction, submit }: InteractionProps): ReactNode {
   const params = interaction.params as unknown as HotspotParams
   return (
-    <div className="gv-hotspot-layer" style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+    <div className="gv-hotspot-layer" style={bottomRow}>
       {(params.hotspots ?? []).map((h) => (
         <button key={h.id} style={btn('#0891b2')} onClick={() => submit(h.id)}>
           {h.label ?? h.id}

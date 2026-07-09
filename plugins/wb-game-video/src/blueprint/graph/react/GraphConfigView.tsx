@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { GameScenario } from '../graph-schema'
-import { CatalogShell } from '../../../forge/CatalogTabs'
+import { CatalogShell } from './CatalogShell'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario } from '../graphScenarioStore'

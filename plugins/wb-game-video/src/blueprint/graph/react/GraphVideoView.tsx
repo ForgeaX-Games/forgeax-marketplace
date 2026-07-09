@@ -9,25 +9,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useGraphScenario } from '../graphScenarioStore'
-import { useScenarioStore } from '../../../scenario/scenarioStore'
-import { getGameSlug } from '../../../shell/gameScope'
-import {
-  VIDEO_CLIPS,
-  builtinMediaIdForClip,
-  clipIdFromMediaRef,
-} from '../../../scenario/gameAssetCatalog'
+import { getGameSlug } from '../gameScope'
+import { ZHANDOU_VIDEOS } from '../assets'
 import { listVideoAssetInfos, resolveMediaSrc, type VideoAssetInfo } from './media'
-import { NODIA_NARRATION_VIDEOS } from '../../../scenario/nodiaNarrationMedia'
-import { MaterialTimeline } from '../../../editor/MaterialTimeline'
+import { MaterialTimeline } from './video/MaterialTimeline'
 import {
   type MaterialItem,
   materialClass,
   materialLabel,
-} from '../../../editor/materialTimelineShared'
-import { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from '../../../player/videoContentRect'
+} from './video/materialTimelineShared'
+import { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from './video/videoContentRect'
 import { resolveGraphTextCss } from '../text-css'
 import { GraphTextStylePicker } from './GraphTextStylePicker'
 import { injectStyleOnce } from '../../../styles/injectStyle'
+import { CATALOG_CSS } from './catalogCss'
 import type { EntitySpec, GameGraph, GameNode, GraphTextStyle, TimelineElement } from '../graph-schema'
 import type { QteCue } from '../core-kinds'
 import {
@@ -65,6 +60,8 @@ import {
 
 // 「重新生成 / 添加控件」分段控件 + 右列格子面板（与 gc-prompt 同槽切换）。
 // 复用视频 tab 的 --gc-* token；不改 CatalogTabs 的全局 CSS，样式自持。
+// 视频 tab 的基础栏目/预览台样式（gc-*）复用共享 CATALOG_CSS（原旧 forge/CatalogTabs 全局 CSS）。
+injectStyleOnce('graph-catalog', CATALOG_CSS)
 injectStyleOnce(
   'graph-video-view',
   `
@@ -96,7 +93,8 @@ interface VideoEntry {
 }
 
 function refForEntry(entry: VideoEntry): string {
-  return entry.group === '战斗' ? builtinMediaIdForClip(entry.id) ?? entry.id : entry.id
+  // demo 统一按 basename 引用；绑定即把节点 media.ref 设为该视频文件名。
+  return entry.id
 }
 
 function fmtTime(ms: number): string {
@@ -127,7 +125,9 @@ export function GraphVideoView(): JSX.Element {
   const graph = useGraphScenario((s) => s.graph)
   const setGraph = useGraphScenario((s) => s.setGraph)
   const entities = useGraphScenario((s) => s.meta.entities)
-  const selectedSceneId = useScenarioStore((s) => s.selectedSceneId)
+  // 选中节点来自 graph 共享 store（不再依赖旧 scenarioStore）；无选中则落到首个节点。
+  const selectedNodeId = useGraphScenario((s) => s.selectedNodeId)
+  const selectedSceneId = selectedNodeId ?? graph.nodes[0]?.id ?? ''
 
   const node = findNode(graph, selectedSceneId)
 
@@ -138,13 +138,14 @@ export function GraphVideoView(): JSX.Element {
   }, [game])
 
   const entries = useMemo<VideoEntry[]>(() => {
-    const clips: VideoEntry[] = VIDEO_CLIPS.map((c) => ({ id: c.id, label: c.label, url: c.url, group: '战斗', type: c.type, durMs: c.durMs }))
     const seen = new Set<string>()
+    const clips: VideoEntry[] = []
     const narr: VideoEntry[] = []
-    // 内置 bundle 旁白视频（narr-*）：随游戏打包、灌进 mediaStore，不在运行时 reel 清单里，直接列出。
-    for (const [id, url] of Object.entries(NODIA_NARRATION_VIDEOS)) {
+    // 内置 bundle 视频（assets/zhandou/*.mp4）：按文件名列出，narr-* 归叙事、其余归战斗。
+    for (const [id, url] of Object.entries(ZHANDOU_VIDEOS)) {
       seen.add(id)
-      narr.push({ id, label: id, url, group: '叙事' })
+      const isNarr = id.startsWith('narr-')
+      ;(isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗' })
     }
     // 运行时 reel 库里的其余视频资产（与 bundle 去重）。
     for (const v of assets) {
@@ -156,10 +157,8 @@ export function GraphVideoView(): JSX.Element {
   }, [assets, game])
 
   const boundRef = node?.data.media?.ref
-  const boundClipId = clipIdFromMediaRef(boundRef)
-  const boundEntry = boundClipId
-    ? entries.find((e) => e.id === boundClipId)
-    : entries.find((e) => e.id === boundRef)
+  const boundBare = boundRef?.startsWith('m-') ? boundRef.slice(2) : boundRef
+  const boundEntry = entries.find((e) => e.id === boundBare) ?? entries.find((e) => e.id === boundRef)
   const selectedEntry = entries.find((e) => e.id === selectedId)
   const previewEntry = selectedEntry ?? boundEntry
   const editingBoundClip = Boolean(boundEntry && previewEntry && boundEntry.id === previewEntry.id)

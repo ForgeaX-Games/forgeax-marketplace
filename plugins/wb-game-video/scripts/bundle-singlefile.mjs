@@ -3,7 +3,7 @@
  * 把 `vite build` 的产物压成**一个自包含 HTML 文件**。
  *
  * 用例：把整个编辑器压成**一份 `gamevideo.html`**，发给作者本人或试用者双击即用：
- *   - 不依赖任何外部服务（LLM 凭据已通过 RS_NO_KEY=1 清空，全部走 MockProvider）
+ *   - 纯前端 graph 引擎，不依赖任何外部服务（无 LLM/视频生成，演出视频用内置库）
  *   - 不依赖额外资源文件（JS/CSS 全部 inline）
  *   - 字体走 Google Fonts CDN（首次打开需要联网；离线也只是字体退化，功能完整）
  *
@@ -35,7 +35,7 @@ const HTML_OUT = resolve(DIST, 'gamevideo.html')
 
 if (!existsSync(HTML_IN)) {
   console.error(
-    `✗ 找不到 ${HTML_IN}\n  先跑 \`RS_NO_KEY=1 npm run build\` 生成 dist/index.html`,
+    `✗ 找不到 ${HTML_IN}\n  先跑 \`npm run build\` 生成 dist/index.html`,
   )
   process.exit(1)
 }
@@ -120,5 +120,5 @@ console.log(
     `  · inlined JS  ${inlinedJsCount} file(s) · ${kib(inlinedJsBytes)}\n` +
     `  · inlined CSS ${inlinedCssCount} file(s) · ${kib(inlinedCssBytes)}\n` +
     `  · html ${kib(before)} → ${kib(after)} (含 inline)\n` +
-    `  · RS_NO_KEY=1 已生效 —— 产物里**没有**任何 API key（LLM 走 mock）`,
+    `  · 纯前端 graph 引擎 —— 产物无任何外部服务/凭据依赖`,
 )

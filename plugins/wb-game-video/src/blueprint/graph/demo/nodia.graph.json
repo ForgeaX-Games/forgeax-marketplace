@@ -114,7 +114,7 @@
       },
       {
         "element": "ent-boss",
-        "show": "always",
+        "show": "battle",
         "component": "battleHpBar",
         "label": "小怪",
         "pos": "top"
@@ -716,7 +716,7 @@
           "durationMs": 8080,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-idle"
+            "ref": "idle01"
           },
           "mediaPlayMode": "loop",
           "hud": {
@@ -817,7 +817,7 @@
           "durationMs": 8000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-idle"
+            "ref": "idle01"
           },
           "mediaPlayMode": "loop",
           "hud": {
@@ -842,7 +842,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1000
               },
               "params": {
                 "effects": [
@@ -862,7 +863,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1000
               },
               "params": {
                 "text": "-80",
@@ -875,7 +877,7 @@
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-pugong"
+            "ref": "pugong"
           },
           "hud": {
             "preset": "battle"
@@ -899,7 +901,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 600
               },
               "params": {
                 "effects": [
@@ -919,7 +922,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 600
               },
               "params": {
                 "text": "-104",
@@ -932,7 +936,7 @@
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-pugong2"
+            "ref": "pugong2"
           },
           "hud": {
             "preset": "battle"
@@ -956,7 +960,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1700
               },
               "params": {
                 "effects": [
@@ -976,7 +981,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1700
               },
               "params": {
                 "text": "-144",
@@ -989,7 +995,7 @@
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-zhong"
+            "ref": "zhonggongji"
           },
           "hud": {
             "preset": "battle"
@@ -1013,7 +1019,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2500
               },
               "params": {
                 "effects": [
@@ -1033,7 +1040,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2500
               },
               "params": {
                 "text": "-192",
@@ -1046,7 +1054,7 @@
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-zhong2"
+            "ref": "zhonggongji2"
           },
           "hud": {
             "preset": "battle"
@@ -1070,7 +1078,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2000
               },
               "params": {
                 "effects": [
@@ -1097,7 +1106,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2000
               },
               "params": {
                 "text": "+30",
@@ -1110,7 +1120,7 @@
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-huiqi"
+            "ref": "huiqi"
           },
           "hud": {
             "preset": "battle"
@@ -1134,7 +1144,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 7000
               },
               "params": {
                 "effects": [
@@ -1154,7 +1165,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 7000
               },
               "params": {
                 "text": "-240",
@@ -1167,7 +1179,7 @@
           "durationMs": 12000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-dazhao"
+            "ref": "dazhao"
           },
           "hud": {
             "preset": "battle"
@@ -1208,7 +1220,7 @@
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-qianyao"
+            "ref": "difanggongjiqianyao"
           },
           "hud": {
             "preset": "battle"
@@ -1232,7 +1244,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1800
               },
               "params": {
                 "effects": [
@@ -1252,7 +1265,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 1800
               },
               "params": {
                 "text": "-96",
@@ -1265,7 +1279,7 @@
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-fangfan"
+            "ref": "fangfan"
           },
           "hud": {
             "preset": "battle"
@@ -1289,7 +1303,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2000
               },
               "params": {
                 "effects": [
@@ -1309,7 +1324,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 2000
               },
               "params": {
                 "text": "-64",
@@ -1322,7 +1338,7 @@
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-shanbi"
+            "ref": "shanbi"
           },
           "hud": {
             "preset": "battle"
@@ -1346,7 +1362,8 @@
               "role": "logic",
               "kind": "settle",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 10
               },
               "params": {
                 "effects": [
@@ -1366,7 +1383,8 @@
               "role": "presentation",
               "kind": "floatText",
               "trigger": {
-                "when": "performanceEnd"
+                "when": "at",
+                "ms": 10
               },
               "params": {
                 "text": "-120",
@@ -1379,7 +1397,7 @@
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-shouji"
+            "ref": "shouji"
           },
           "hud": {
             "preset": "battle"
@@ -1401,7 +1419,7 @@
           "durationMs": 10000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-shengli"
+            "ref": "shengli"
           },
           "hud": {
             "preset": "hidden"
@@ -1424,7 +1442,7 @@
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
-            "ref": "vd-wcc-shibai"
+            "ref": "shibai"
           },
           "hud": {
             "preset": "hidden"

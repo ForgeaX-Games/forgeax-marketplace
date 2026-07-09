@@ -4,7 +4,7 @@
  */
 import type { CSSProperties } from 'react'
 import type { GraphTextStyle } from './graph-schema'
-import { resolveFontFamily } from '../../editor/timeline/fontPresets'
+import { resolveFontFamily } from './font-presets'
 
 export function resolveGraphTextCss(
   style: GraphTextStyle | undefined,

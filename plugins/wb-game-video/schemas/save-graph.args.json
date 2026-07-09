@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gvid:save-graph args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scenario"],
+  "properties": {
+    "scenario": {
+      "type": "object",
+      "description": "The full GameScenario to persist (whole-document overwrite). Must contain graph.nodes[] (perf nodes) and graph.edges[] (conditional routing). Structure is validated before write; on validation errors the save is rejected."
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title for this saved version (<=120 chars)."
+    },
+    "gameSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
+      "description": "Target game slug. Omit to use the currently active game."
+    }
+  }
+}

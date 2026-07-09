@@ -22,16 +22,16 @@
       "personaFile": "./persona/zh.md",
       "memoryDir": "./memory/",
       "produces": [
-        "<active_game>.dir/**/*.scenario.json",
-        "<active_game>.dir/**/scenes/**",
+        "<active_game>.dir/**/game-video/scenarios.graph.json",
+        "<active_game>.dir/**/game-video/scenarios.graph.versions/**",
         "<active_game>.dir/**/gamevideo-shotlist.md",
-        "<active_game>.dir/**/qte-pacing.md",
-        ".gamevideo-scenarios/**",
-        ".gamevideo-assets/**"
+        "<active_game>.dir/**/qte-pacing.md"
       ],
-      "agentTags": ["game-video", "video-game", "gameplay", "玩法优先", "视频游戏", "boss", "qte", "hotspot", "blueprint", "scenario"],
+      "agentTags": ["game-video", "video-game", "gameplay", "玩法优先", "视频游戏", "boss", "qte", "hotspot", "blueprint", "graph"],
       "tools": [
-        "gvid:*",
+        "gvid:get-graph",
+        "gvid:save-graph",
+        "gvid:list-videos",
         "narrative:start-pipeline",
         "narrative:resume-pipeline",
         "narrative:get-run-status",

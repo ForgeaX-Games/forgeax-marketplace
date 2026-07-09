@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gvid:save-graph returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "errors": { "type": "array", "items": { "type": "string" }, "description": "Structural validation errors. Non-empty ⇒ ok=false, nothing written." },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "versions": {
+      "type": "array",
+      "description": "Latest version index (most recent first, up to 10).",
+      "items": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "savedAt": { "type": "number" } }
+      }
+    },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

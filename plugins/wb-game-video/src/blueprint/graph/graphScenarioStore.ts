@@ -38,6 +38,9 @@ interface GraphScenarioStore {
   savedTip: string
   fitSignal: number
   runKey: number
+  /** 当前选中的节点 id（跨视图共享：蓝图选中 → 视频/界面等据此编辑该节点）。 */
+  selectedNodeId: string | null
+  setSelectedNode: (id: string | null) => void
   /** 合并出完整 scenario（保存/试玩用）。 */
   scn: () => GameScenario
   /** 首次进入某 game 时载入（草稿>最新版本>磁盘原始>demo）；已 boot 同 game 则跳过。 */
@@ -77,6 +80,8 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
     savedTip: '',
     fitSignal: 0,
     runKey: 0,
+    selectedNodeId: null,
+    setSelectedNode: (id) => set({ selectedNodeId: id }),
 
     scn: () => {
       const { demo, meta, graph } = get()
@@ -92,18 +97,18 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
       }
       set({ game, demo, booted: true })
       void loadStore(game).then((s) => {
-        // 进入优先级：未保存草稿 > 最新版本 > demo（出厂只读原始）。game 目录不参与回落。
+        // 进入优先级：未保存草稿(localStorage) > 磁盘最新已保存版本 > demo（出厂只读原始）。
         if (s.draft?.graph) {
           const laid = layoutIfUnset(s.draft)
           set({ graph: laid.graph, meta: pickMeta(laid), isDraft: true, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null })
-        } else if (s.latestVersion?.graph) {
-          const laid = layoutIfUnset(s.latestVersion)
+        } else if (s.scenario?.graph) {
+          const laid = layoutIfUnset(s.scenario)
           set({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null })
         } else {
-          // 首次（无草稿无版本）→ 用 demo 作第一个版本（localStorage）。
+          // 首次（无草稿、磁盘也没有）→ 用 demo 打底，并把它作为第一个版本落盘。
           const laid = layoutIfUnset(structuredClone(demo))
-          const vs = saveScenario(laid, game)
-          set({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: vs, currentVersionId: vs[0]?.id ?? null })
+          set({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: [], currentVersionId: null })
+          void saveScenario(laid, game).then((vs) => set({ versions: vs, currentVersionId: vs[0]?.id ?? null }))
         }
       })
     },
@@ -141,8 +146,11 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
         vars: Object.keys(scn.variables ?? {}),
         rules: scn.rules,
       }).filter((i) => i.level === 'error')
-      const v = saveScenario(scn, get().game)
-      set({ versions: v, currentVersionId: v[0]?.id ?? null, isDraft: false, savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}` })
+      set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
+      // 落盘（.forgeax/games/<slug>/game-video/），完成后用磁盘版本索引回填。
+      void saveScenario(scn, get().game).then((v) =>
+        set({ versions: v, currentVersionId: v[0]?.id ?? null, savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}` }),
+      )
       // eslint-disable-next-line no-console
       if (errs.length) console.warn('[graph validate] 保存时发现校验错误：', errs)
       return errs.length
@@ -153,13 +161,15 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
       if (get().isDraft && value !== '__draft__' && typeof confirm === 'function') {
         if (!confirm('当前有未保存的修改，切换版本后会丢失。继续？')) return
       }
-      const s = value === '__draft__' ? loadDraft(get().game) : loadVersion(value, get().game)
-      if (s?.graph) {
+      const apply = (s: GameScenario | null) => {
+        if (!s?.graph) return
         clearDraftTimer()
         const laid = layoutIfUnset(s)
         // 载入已保存版本 → 非草稿 + 记为当前版本；载入草稿 → 仍是草稿。
         set({ graph: laid.graph, meta: pickMeta(laid), isDraft: value === '__draft__', ...(value !== '__draft__' ? { currentVersionId: value } : {}) })
       }
+      if (value === '__draft__') apply(loadDraft(get().game))
+      else void loadVersion(value, get().game).then(apply) // 版本快照在磁盘
     },
 
     // 重置：用内置 demo 替换当前内容，清掉未保存草稿，回到"干净"（非草稿）状态。要固化再点保存。

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gvid:get-graph args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "gameSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
+      "description": "Target game slug. Omit to use the currently active game (.forgeax/active-game.json)."
+    }
+  }
+}

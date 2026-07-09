@@ -22,8 +22,8 @@ import type {
   TimelineElement,
 } from '../../graph-schema'
 import type { ChoiceOption, QteCue } from '../../core-kinds'
-import type { MaterialItem, MaterialKind } from '../../../../editor/materialTimelineShared'
-import { clampLayer, clampMs, normalizeLayer } from '../../../../editor/materialTimelineShared'
+import type { MaterialItem, MaterialKind } from './materialTimelineShared'
+import { clampLayer, clampMs, normalizeLayer } from './materialTimelineShared'
 import { elementStartMs } from '../../timeline-geometry'
 import {
   addTimelineElement,

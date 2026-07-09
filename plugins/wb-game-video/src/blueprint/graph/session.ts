@@ -97,7 +97,8 @@ export class GraphSession {
   private computeHudHidden(): string[] {
     const nodeHud = this.nodesById.get(this.runtime.state.currentNodeId ?? '')?.data.hud
     const interactionKind = this.snapshot?.interaction?.kind
-    return [...hiddenHudKeys(this.uiHud, nodeHud, { phase: this.runtime.state.phase, interactionKind })]
+    const isBattle = nodeHud?.preset === 'battle'
+    return [...hiddenHudKeys(this.uiHud, nodeHud, { phase: this.runtime.state.phase, interactionKind, isBattle })]
   }
 
   private freshSnapshot(): SessionSnapshot {
