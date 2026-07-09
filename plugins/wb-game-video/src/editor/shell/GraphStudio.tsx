@@ -11,7 +11,8 @@ import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { NodeInspector } from './NodeInspector'
 import { VersionPicker } from './VersionPicker'
-import { registerCoreRenderers, renderInteraction, renderOverlay } from '../../runtime/skins/rendererRegistry'
+import { PlayerRootContext } from '../../runtime/skins/rendererRegistry'
+import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { listVideoAssets, resolveMediaSrc } from './media'
@@ -49,10 +50,17 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
 }
 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
-  registerCoreRenderers()
   bootEditorSkins()
   ensureToolbarStyle()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
+  const playRootRef = useRef<HTMLDivElement | null>(null)
+  const [playRootEl, setPlayRootEl] = useState<HTMLElement | null>(null)
+  const bindPlayRoot = (el: HTMLDivElement | null) => {
+    playRootRef.current = el
+    setPlayRootEl(el)
+    if (el) claimPlayerFocus(el)
+    else releasePlayerFocus(playRootEl)
+  }
 
   // 共享场景 store（蓝图/实体/变量/规则/场景/试玩 并行视图共用同一份 graph+meta+持久化）。
   const graph = useGraphScenario((s) => s.graph)
@@ -232,7 +240,14 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 <button onClick={() => setPlayOpen(false)} title="隐藏" style={{ background: 'none', border: 'none', color: '#9aa2b1', cursor: 'pointer', padding: 0 }}>✕</button>
               </span>
             </div>
-            <div style={{ position: 'relative', height: 180, background: '#000' }}>
+            <PlayerRootContext.Provider value={playRootEl}>
+            <div
+              ref={bindPlayRoot}
+              tabIndex={0}
+              onPointerDown={() => claimPlayerFocus(playRootRef.current)}
+              onFocus={() => claimPlayerFocus(playRootRef.current)}
+              style={{ position: 'relative', height: 180, background: '#000', outline: 'none' }}
+            >
               {videoSrc ? (
                 <video
                   key={snap.clip?.nodeId}
@@ -251,7 +266,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               )}
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
                 {snap.overlays.map((o, i) => (
-                  <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{renderOverlay(o)}</span>
+                  <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{session.skins.renderOverlay(o)}</span>
                 ))}
               </div>
               {snap.banner && (
@@ -260,9 +275,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 </div>
               )}
               {snap.interaction && (
-                <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit, { hud: snap.hud })}</div>
+                <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0 }}>{session.skins.renderInteraction(snap.interaction, submit, { hud: snap.hud })}</div>
               )}
             </div>
+            </PlayerRootContext.Provider>
             <div style={{ padding: 8, borderTop: '1px solid #2e2924', fontSize: 12, background: '#121316' }}>
               {Object.entries(snap.hud.entities).filter(([id]) => !hudHidden.has(id)).map(([id, e]) => {
                 const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0

@@ -1062,29 +1062,22 @@ async function selectAgent(pluginId) {
 // ─── Persona tab ──────────────────────────────────────────────────────
 async function loadPersona() {
   if (!selectedAgent) return;
-  const preferred = personaPath(selectedAgent, locale);
-  const fallback = personaPath(selectedAgent, locale === 'en' ? 'zh' : 'en');
+  // 经「按 agent id 解析」的服务端端点读 persona —— 跨 L0/L1/L2(插件快照给真实
+  // 路径),故 role.create 造的角色(住 L1 ~/.forgeax 或 L2 <project>/.forgeax,
+  // 不在 packages/marketplace)也能加载。旧的 /api/files 硬编码 L0 路径 → 404。
+  const id = String(selectedAgent.id).replace(/^@[^/]+\//, ''); // slash-free(去 @scope/),避免 path param 编码斜杠;server 端会再剥 agent- 前缀解析
   setStatus('persona-status', t('loading'));
   try {
-    let path = preferred;
-    let r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
-    let usedFallback = false;
-    if (!r.ok && locale === 'en' && path !== fallback) {
-      r = await fetch(`/api/files?path=${encodeURIComponent(fallback)}`);
-      if (r.ok) { path = fallback; usedFallback = true; }
-    }
+    const r = await fetch(`/api/workbench/agents/${encodeURIComponent(id)}/persona?lang=${locale}`);
     if (!r.ok) {
       setStatus('persona-status', t('loadFailed', { status: r.status }), 'warn');
       setPersonaContent('', false);
       return;
     }
     const body = await r.json();
-    setPersonaContent(body.content ?? '', !usedFallback);
-    const msg = usedFallback
-      ? t('personaFallbackZh')
-      : t('loadedChars', { n: (body.content ?? '').length });
-    setStatus('persona-status', msg, usedFallback ? 'warn' : 'ok');
-    personaLoadPath = path;
+    setPersonaContent(body.content ?? '', true);
+    setStatus('persona-status', t('loadedChars', { n: (body.content ?? '').length }), 'ok');
+    personaLoadPath = body.path || '';
   } catch (e) {
     setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
     setPersonaContent('', false);
@@ -1104,13 +1097,14 @@ function setPersonaContent(text, enableSave) {
 async function savePersona() {
   if (!selectedAgent) return;
   const ed = document.getElementById('persona-editor');
-  const path = personaPath(selectedAgent, locale);
+  const id = String(selectedAgent.id).replace(/^@[^/]+\//, ''); // slash-free(去 @scope/),避免 path param 编码斜杠;server 端会再剥 agent- 前缀解析
   setStatus('persona-status', t('saving'));
   try {
-    const r = await fetch('/api/files', {
-      method: 'POST',
+    // 经「按 agent id 解析」端点写 persona(跨 L0/L1/L2)+ 服务端已顺带 reload。
+    const r = await fetch(`/api/workbench/agents/${encodeURIComponent(id)}/persona`, {
+      method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, content: ed.value }),
+      body: JSON.stringify({ lang: locale, content: ed.value }),
     });
     if (!r.ok) {
       const err = await r.text().catch(() => '');
@@ -1120,8 +1114,6 @@ async function savePersona() {
     personaOriginal = ed.value;
     personaDirty = false;
     document.getElementById('persona-reload').disabled = true;
-    setStatus('persona-status', t('savedReloading'));
-    await fetch('/api/plugins/reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     setStatus('persona-status', t('savedReloaded'), 'ok');
   } catch (e) {
     setStatus('persona-status', t('saveException', { msg: e.message }), 'warn');

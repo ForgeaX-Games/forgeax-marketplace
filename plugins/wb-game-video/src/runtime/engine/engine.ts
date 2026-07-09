@@ -15,7 +15,7 @@
 import type { GameEdge, GameGraph, GameNode, GameScenario, GraphCondition, GraphEffect, ReactiveRule, TimelineElement } from '../schema/graph-schema'
 import { applyEffects, type MutableState } from './apply-effects'
 import { initState } from './engine-init'
-import { getKind, hasPlugin, isContinueResult, type RuntimeCtx } from '../registry/kind-registry'
+import { defaultKindRegistry, isContinueResult, type KindRegistry, type RuntimeCtx } from '../registry/kind-registry'
 import type { RuntimeDirective } from './directives'
 import { evaluateCondition, describeCondition, type ConditionTarget } from './condition'
 
@@ -54,12 +54,17 @@ export class GraphRuntime {
   private inExit = false // 跑 exit 元素期间抑制规则消费，避免退出时自跳环
   private returningTo = new Set<string>() // 正在弹回的容器节点：下一次 enter 跳过 subFlowRef 下钻、直接续 out
 
+  /** 本局 Kind / Plugin 表（多局隔离；缺省用模块默认表以兼容旧单测）。 */
+  readonly kinds: KindRegistry
+
   constructor(
     private readonly graph: GameGraph,
     private readonly scenario: GameScenario,
+    kinds: KindRegistry = defaultKindRegistry,
   ) {
+    this.kinds = kinds
     for (const req of scenario.requiredPlugins ?? []) {
-      if (!hasPlugin(req.id, req.version)) {
+      if (!this.kinds.hasPlugin(req.id, req.version)) {
         const ver = req.version ? `@${req.version}` : ''
         throw new Error(`required plugin '${req.id}${ver}' is not registered`)
       }
@@ -72,6 +77,10 @@ export class GraphRuntime {
     }
     this.rules = scenario.rules ?? []
     this.state = { ...initState(scenario), ...control() }
+  }
+
+  private getKind(kind: string) {
+    return this.kinds.getKind(kind)
   }
 
   // ── 指令队列 ────────────────────────────────────────────────────────────────
@@ -195,7 +204,7 @@ export class GraphRuntime {
     if (this.consumeRedirect()) return
 
     // 瞬时节点（无演出时长 且 无交互元素）→ 立即推进，形成逻辑穿链。
-    const hasInteraction = node.data.timeline.some((el) => getKind(el.kind)?.role === 'interaction')
+    const hasInteraction = node.data.timeline.some((el) => this.getKind(el.kind)?.role === 'interaction')
     if (!node.data.durationMs && !hasInteraction) {
       this.runPerformanceEnd(node)
       if (this.consumeRedirect()) return
@@ -268,7 +277,7 @@ export class GraphRuntime {
     const el = node?.data.timeline.find((e) => e.id === elementId)
     if (!node || !el) return this.drain()
     if (this.state.phase !== 'awaitInteraction' || this.pending !== elementId) return this.drain()
-    const plugin = getKind(el.kind)
+    const plugin = this.getKind(el.kind)
     if (!plugin?.resolve) return this.drain()
     const result = plugin.resolve(this.ctx(), el.params, input)
     if (isContinueResult(result)) {
@@ -289,7 +298,7 @@ export class GraphRuntime {
 
   // ── 元素派发 ────────────────────────────────────────────────────────────────
   private runElement(el: TimelineElement): void {
-    const plugin = getKind(el.kind)
+    const plugin = this.getKind(el.kind)
     if (!plugin) return
     this.fired.add(el.id)
     const ctx = { ...this.ctx(), elementId: el.id }
@@ -367,7 +376,7 @@ export class GraphRuntime {
     this.inExit = true
     for (const el of node.data.timeline) {
       if (el.trigger.when !== 'exit' || this.fired.has(el.id)) continue
-      if (getKind(el.kind)?.role === 'interaction') continue // exit 不挂交互
+      if (this.getKind(el.kind)?.role === 'interaction') continue // exit 不挂交互
       this.runElement(el)
     }
     this.inExit = false

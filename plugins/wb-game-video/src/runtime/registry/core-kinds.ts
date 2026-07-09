@@ -13,7 +13,7 @@
  */
 import type { GraphCondition, GraphEffect, GraphTextStyle } from '../schema/graph-schema'
 import type { FormField, KindPlugin } from './kind-registry'
-import { registerKind } from './kind-registry'
+import { KindRegistry, registerKind } from './kind-registry'
 import { evalExpr } from '../engine/expr'
 
 // ── logic: settle ─────────────────────────────────────────────────────────────
@@ -306,7 +306,14 @@ export const CORE_KINDS: KindPlugin[] = [
   hotspotKind as unknown as KindPlugin,
 ]
 
-/** 注册全部核心 kind（幂等：重复调用覆盖同名）。 */
+/** 注册全部核心 kind 到默认表（幂等：重复调用覆盖同名）。编辑器 / 单测用。 */
 export function registerCoreKinds(): void {
   for (const k of CORE_KINDS) registerKind(k)
+}
+
+/** 新建一份已装核心 kind 的隔离注册表（多局 Runtime 各持一份）。 */
+export function createCoreKindRegistry(): KindRegistry {
+  const reg = new KindRegistry()
+  for (const k of CORE_KINDS) reg.registerKind(k)
+  return reg
 }

@@ -168,8 +168,8 @@
         "id": "n_open",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 40,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -190,8 +190,8 @@
         "id": "n_door",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 370,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -231,8 +231,8 @@
         "id": "n_soul",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 700,
+          "y": 270
         },
         "inputs": [],
         "outputs": [],
@@ -267,8 +267,8 @@
         "id": "n_river",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 1030,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -314,8 +314,8 @@
         "id": "n_child",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 1360,
+          "y": 270
         },
         "inputs": [],
         "outputs": [],
@@ -336,8 +336,8 @@
         "id": "n_land",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 1690,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -383,8 +383,8 @@
         "id": "n_mask",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 2020,
+          "y": 270
         },
         "inputs": [],
         "outputs": [],
@@ -405,8 +405,8 @@
         "id": "n_mengpo",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 2350,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -427,8 +427,8 @@
         "id": "n_tea",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 2680,
+          "y": 310
         },
         "inputs": [],
         "outputs": [],
@@ -474,8 +474,8 @@
         "id": "n_drink",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3010,
+          "y": 440
         },
         "inputs": [],
         "outputs": [],
@@ -496,8 +496,8 @@
         "id": "n_nodrink",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3010,
+          "y": 180
         },
         "inputs": [],
         "outputs": [],
@@ -543,8 +543,8 @@
         "id": "n_follow",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3340,
+          "y": 440
         },
         "inputs": [],
         "outputs": [],
@@ -590,8 +590,8 @@
         "id": "n_getlight",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3670,
+          "y": 460
         },
         "inputs": [],
         "outputs": [],
@@ -612,8 +612,8 @@
         "id": "n_nolight",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3670,
+          "y": 320
         },
         "inputs": [],
         "outputs": [],
@@ -634,8 +634,8 @@
         "id": "n_nofollow",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3340,
+          "y": 160
         },
         "inputs": [],
         "outputs": [],
@@ -681,8 +681,8 @@
         "id": "n_lotus",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3670,
+          "y": 180
         },
         "inputs": [],
         "outputs": [],
@@ -703,8 +703,8 @@
         "id": "n_nolotus",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 3670,
+          "y": 40
         },
         "inputs": [],
         "outputs": [],
@@ -725,8 +725,8 @@
         "id": "enter",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4000,
+          "y": 260
         },
         "inputs": [],
         "outputs": [],
@@ -762,8 +762,8 @@
         "id": "a_my",
         "type": "perf",
         "position": {
-          "x": 200,
-          "y": 80
+          "x": 4330,
+          "y": 190
         },
         "inputs": [],
         "outputs": [],
@@ -781,8 +781,8 @@
         "id": "b_ai",
         "type": "perf",
         "position": {
-          "x": 200,
-          "y": -80
+          "x": 4660,
+          "y": 280
         },
         "inputs": [],
         "outputs": [],
@@ -800,8 +800,8 @@
         "id": "wait",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4330,
+          "y": 720
         },
         "inputs": [],
         "outputs": [],
@@ -901,8 +901,8 @@
         "id": "pu",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 1070
         },
         "inputs": [],
         "outputs": [],
@@ -961,8 +961,8 @@
         "id": "pu2",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 930
         },
         "inputs": [],
         "outputs": [],
@@ -1021,8 +1021,8 @@
         "id": "zhong",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 790
         },
         "inputs": [],
         "outputs": [],
@@ -1081,8 +1081,8 @@
         "id": "z2",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 650
         },
         "inputs": [],
         "outputs": [],
@@ -1141,8 +1141,8 @@
         "id": "fuzhu",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 510
         },
         "inputs": [],
         "outputs": [],
@@ -1208,8 +1208,8 @@
         "id": "ult",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 370
         },
         "inputs": [],
         "outputs": [],
@@ -1268,8 +1268,8 @@
         "id": "tele",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4660,
+          "y": 600
         },
         "inputs": [],
         "outputs": [],
@@ -1309,8 +1309,8 @@
         "id": "block",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4990,
+          "y": 740
         },
         "inputs": [],
         "outputs": [],
@@ -1369,8 +1369,8 @@
         "id": "dodgeP",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4990,
+          "y": 600
         },
         "inputs": [],
         "outputs": [],
@@ -1429,8 +1429,8 @@
         "id": "hurt",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4990,
+          "y": 460
         },
         "inputs": [],
         "outputs": [],
@@ -1489,8 +1489,8 @@
         "id": "win",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4990,
+          "y": 140
         },
         "inputs": [],
         "outputs": [],
@@ -1512,8 +1512,8 @@
         "id": "lose",
         "type": "perf",
         "position": {
-          "x": 0,
-          "y": 0
+          "x": 4990,
+          "y": 280
         },
         "inputs": [],
         "outputs": [],

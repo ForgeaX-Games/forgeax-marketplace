@@ -4,10 +4,10 @@
  * 每个时间线元素 kind（qte/settle/floatText/choice/skill/hotspot…）注册一个插件，声明：
  *   - role：view/logic/interaction（决定引擎调哪个契约、渲染归属）
  *   - validate：参数校验（validator 用）
- *   - outputs：该元素贡献哪些**输出 handle**（派生 node.outputs，见 spec §2.3/§2.5）
- * 运行时行为契约（run/render/present/resolve）在 P1/P2 接入；P0 先立注册 + handle 派生骨架。
+ *   - outputs：该元素贡献哪些**输出 handle**
  *
- * 加一个玩法 = 注册一个 kind，引擎/画布/校验都不改。
+ * 多局并行：每个 GraphRuntime / GraphSession 持有自己的 `KindRegistry` 实例；
+ * 模块级 `registerKind` / `getKind` 仍指向 `defaultKindRegistry`（编辑器 / 单测兼容）。
  */
 import type { ElementRole, GameNode, GraphEffect, HandleSpec } from '../schema/graph-schema'
 import type { MutableState } from '../engine/apply-effects'
@@ -81,55 +81,85 @@ export function isContinueResult(r: ResolveResult): r is { continue: true; effec
   return r.continue === true
 }
 
-const REGISTRY = new Map<string, KindPlugin>()
+/** 可注入的 Kind / Plugin 包注册表（每局 Runtime 一份即可隔离）。 */
+export class KindRegistry {
+  private readonly kinds = new Map<string, KindPlugin>()
+  private readonly plugins = new Map<string, { version?: string }>()
 
-/** 插件包元数据（scenario.requiredPlugins 对齐用；与单个 kind 注册正交）。 */
-const PLUGINS = new Map<string, { version?: string }>()
+  registerKind<P>(plugin: KindPlugin<P>): void {
+    this.kinds.set(plugin.kind, plugin as unknown as KindPlugin)
+  }
+  unregisterKind(kind: string): void {
+    this.kinds.delete(kind)
+  }
+  getKind(kind: string): KindPlugin | undefined {
+    return this.kinds.get(kind)
+  }
+  listKinds(): KindPlugin[] {
+    return [...this.kinds.values()]
+  }
+
+  registerPlugin(id: string, meta?: { version?: string }): void {
+    this.plugins.set(id, { version: meta?.version })
+  }
+  unregisterPlugin(id: string): void {
+    this.plugins.delete(id)
+  }
+  hasPlugin(id: string, version?: string): boolean {
+    const meta = this.plugins.get(id)
+    if (!meta) return false
+    if (version != null && version !== '' && meta.version !== version) return false
+    return true
+  }
+  listPlugins(): Array<{ id: string; version?: string }> {
+    return [...this.plugins.entries()].map(([id, m]) => ({ id, version: m.version }))
+  }
+
+  /**
+   * 派生一个节点的输出 handle：默认单一 'out' + 各 interaction 元素 outputs()，按 id 去重。
+   */
+  deriveOutputs(node: GameNode): HandleSpec[] {
+    const out: HandleSpec[] = [{ id: 'out' }]
+    for (const el of node.data.timeline) {
+      const plugin = this.kinds.get(el.kind)
+      if (plugin && plugin.role === 'interaction') {
+        out.push(...plugin.outputs(el.params))
+      }
+    }
+    const seen = new Set<string>()
+    return out.filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)))
+  }
+}
+
+/** 编辑器 / 单测默认表（模块单例）。多局试玩请用 `createCoreKindRegistry()` 新建实例。 */
+export const defaultKindRegistry = new KindRegistry()
 
 export function registerKind<P>(plugin: KindPlugin<P>): void {
-  REGISTRY.set(plugin.kind, plugin as unknown as KindPlugin)
+  defaultKindRegistry.registerKind(plugin)
 }
 export function unregisterKind(kind: string): void {
-  REGISTRY.delete(kind)
+  defaultKindRegistry.unregisterKind(kind)
 }
 export function getKind(kind: string): KindPlugin | undefined {
-  return REGISTRY.get(kind)
+  return defaultKindRegistry.getKind(kind)
 }
 export function listKinds(): KindPlugin[] {
-  return [...REGISTRY.values()]
+  return defaultKindRegistry.listKinds()
 }
-
-/** 声明运行环境已提供的插件包（id + 可选 semver 字符串，精确匹配）。 */
 export function registerPlugin(id: string, meta?: { version?: string }): void {
-  PLUGINS.set(id, { version: meta?.version })
+  defaultKindRegistry.registerPlugin(id, meta)
 }
 export function unregisterPlugin(id: string): void {
-  PLUGINS.delete(id)
+  defaultKindRegistry.unregisterPlugin(id)
 }
 export function hasPlugin(id: string, version?: string): boolean {
-  const meta = PLUGINS.get(id)
-  if (!meta) return false
-  if (version != null && version !== '' && meta.version !== version) return false
-  return true
+  return defaultKindRegistry.hasPlugin(id, version)
 }
 export function listPlugins(): Array<{ id: string; version?: string }> {
-  return [...PLUGINS.entries()].map(([id, m]) => ({ id, version: m.version }))
+  return defaultKindRegistry.listPlugins()
 }
-
-/**
- * 派生一个节点的输出 handle：默认单一 'out'（演出结束自动继续）+ 各 interaction 元素
- * kind 的 outputs() 汇总，按 id 去重（先到先留）。
- */
 export function deriveOutputs(node: GameNode): HandleSpec[] {
-  const out: HandleSpec[] = [{ id: 'out' }]
-  for (const el of node.data.timeline) {
-    const plugin = REGISTRY.get(el.kind)
-    if (plugin && plugin.role === 'interaction') {
-      out.push(...plugin.outputs(el.params))
-    }
-  }
-  const seen = new Set<string>()
-  return out.filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)))
+  return defaultKindRegistry.deriveOutputs(node)
 }
 
 /** 输入永远单一 'in'。 */

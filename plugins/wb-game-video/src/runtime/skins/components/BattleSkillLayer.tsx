@@ -5,7 +5,7 @@
  * 旧的「条件门控/锁定」暂不迁移（新 choice 选项无逐项条件）；含 'ult' 的 key 用金色高亮。
  */
 import { useEffect, useState } from 'react'
-import type { InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
 import type { ChoiceParams } from '../../registry/core-kinds'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
@@ -15,6 +15,7 @@ export function BattleSkillLayer({ interaction, submit }: InteractionProps) {
   injectCss('battle-skill-layer', SKILL_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  const keyOk = usePlayerKeyGate()
   const options = ((interaction.params as unknown as ChoiceParams).options ?? []) as Array<{ key: string; label?: string; _locked?: boolean }>
   const [picked, setPicked] = useState<string | null>(null)
 
@@ -26,7 +27,7 @@ export function BattleSkillLayer({ interaction, submit }: InteractionProps) {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (picked) return
+      if (!keyOk() || picked) return
       const index = SKILL_KEYS.findIndex((k) => k === e.key.toUpperCase())
       if (index < 0) return
       const opt = options[index]

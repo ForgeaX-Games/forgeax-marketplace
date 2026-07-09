@@ -7,9 +7,18 @@
  */
 import type { GameNode, GameScenario } from '../schema/graph-schema'
 import { GraphRuntime } from './engine'
-import { registerCoreKinds } from '../registry/core-kinds'
+import { createCoreKindRegistry } from '../registry/core-kinds'
+import type { KindRegistry } from '../registry/kind-registry'
+import { createCoreSkinRegistry } from '../skins/components'
+import type { SkinRegistry } from '../skins/rendererRegistry'
 import type { RuntimeDirective } from './directives'
 import { hiddenHudKeys } from './hud-visibility'
+
+/** GraphSession 构造选项：可注入隔离注册表；缺省每局新建核心 Kind/Skin 表。 */
+export interface GraphSessionOptions {
+  kinds?: KindRegistry
+  skins?: SkinRegistry
+}
 
 const MAX_LOGS = 60
 
@@ -80,14 +89,17 @@ export interface SessionSnapshot {
 
 export class GraphSession {
   readonly runtime: GraphRuntime
+  /** 本局皮肤表（Player 渲染用；与其它 Session 隔离）。 */
+  readonly skins: SkinRegistry
   snapshot: SessionSnapshot
   private readonly uiHud: unknown
   private readonly nodesById: Map<string, GameNode>
   private pendingEntryReason: string | undefined
 
-  constructor(scenario: GameScenario) {
-    registerCoreKinds()
-    this.runtime = new GraphRuntime(scenario.graph, scenario)
+  constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
+    const kinds = opts.kinds ?? createCoreKindRegistry()
+    this.skins = opts.skins ?? createCoreSkinRegistry()
+    this.runtime = new GraphRuntime(scenario.graph, scenario, kinds)
     this.uiHud = scenario.ui?.hud
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
     this.snapshot = this.freshSnapshot()

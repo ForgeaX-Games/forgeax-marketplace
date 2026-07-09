@@ -1,0 +1,32 @@
+{
+  "summary": {
+    "zh": "团队编制工具。暴露 team:create_role / team:list_roles 两个工具:当 Forge 的队友名单里没有合适角色时,由 Forge 自己铸造一个新队友——写一份 agent-pack 到用户可写插件层(默认全局 L1),reload 后新角色立刻进 roster、跨会话、跨重启、不污染仓库,随后 delegate_to_subagent 即可派它。让「模型知道怎么用插件」延伸到「模型知道怎么创建角色」。",
+    "en": "The team-forge tool. Exposes team:create_role / team:list_roles: when no suitable role exists in Forge's roster, Forge mints a new teammate — writing an agent-pack into the user-writable plugin layer (global L1 by default). After a reload the role instantly joins the roster (cross-session, cross-restart, no repo pollution) and delegate_to_subagent can dispatch it. Extends 'the model knows how to use plugins' into 'the model knows how to create roles'."
+  },
+  "sections": [
+    {
+      "title": { "zh": "做什么", "en": "What it does" },
+      "body": {
+        "zh": "team:create_role → 铸造新队友(agent-pack → L1/L2)\nteam:list_roles → 列出现有可派单角色\n创建持久、跨会话、撞名即拒(不覆盖)",
+        "en": "team:create_role → mint a teammate (agent-pack → L1/L2)\nteam:list_roles → list dispatchable roles\nPersistent, cross-session, duplicate-id rejected"
+      }
+    },
+    {
+      "title": { "zh": "谁在用", "en": "Used by" },
+      "body": {
+        "zh": "Forge(主线制作人)—— 名单里缺角色时先造再派",
+        "en": "Forge (lead producer) — create then delegate when a role is missing"
+      }
+    }
+  ],
+  "history": [
+    {
+      "version": "0.1.0",
+      "date": "2026-07-07",
+      "notes": {
+        "zh": "首版:team:create_role / team:list_roles",
+        "en": "First release: team:create_role / team:list_roles"
+      }
+    }
+  ]
+}

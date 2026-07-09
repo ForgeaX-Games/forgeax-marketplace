@@ -5,13 +5,14 @@
  * params：glyph(叩字)、anchorX/anchorY(归一化锚点)、durationMs(时限)。
  */
 import { useEffect, useRef } from 'react'
-import type { InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
 export function InkKouLayer({ interaction, submit }: InteractionProps) {
   injectCss('ink-kou-layer', KOU_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  const keyOk = usePlayerKeyGate()
   const p = interaction.params as { glyph?: string; anchorX?: number; anchorY?: number; durationMs?: number }
   const glyph = p.glyph ?? '叩'
   const anchorX = p.anchorX ?? 0.58
@@ -28,6 +29,7 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
   useEffect(() => {
     const timeout = window.setTimeout(() => finish('fail'), durationMs)
     function onKeyDown(e: KeyboardEvent): void {
+      if (!keyOk()) return
       if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault()
         finish('pass')

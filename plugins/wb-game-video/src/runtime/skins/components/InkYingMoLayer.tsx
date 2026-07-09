@@ -5,7 +5,7 @@
  * 超时默认由引擎按 params.timeoutMs/defaultKey 自动 submit(undefined) 处理，皮肤不再自管计时。
  */
 import { useEffect, useRef } from 'react'
-import type { InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
 import type { ChoiceParams } from '../../registry/core-kinds'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
@@ -15,6 +15,7 @@ export function InkYingMoLayer({ interaction, submit }: InteractionProps) {
   injectCss('ink-yingmo-layer', YINGMO_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  const keyOk = usePlayerKeyGate()
   const options = ((interaction.params as unknown as ChoiceParams).options ?? []).slice(0, 2)
   const pickedRef = useRef(false)
 
@@ -26,6 +27,7 @@ export function InkYingMoLayer({ interaction, submit }: InteractionProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
+      if (!keyOk()) return
       const k = e.key.toLowerCase()
       let idx = -1
       if (k === 'a' || k === 'e') idx = 0

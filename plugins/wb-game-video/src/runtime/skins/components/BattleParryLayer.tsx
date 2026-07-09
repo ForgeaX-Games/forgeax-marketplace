@@ -5,7 +5,7 @@
  * 超时未操作 → submit('fail')。视觉严格复刻旧原型（A 左下 / B 右上，RAF 逐帧收圈）。
  */
 import { useEffect, useRef, useState } from 'react'
-import type { InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
 type Outcome = 'pass' | 'good' | 'fail'
@@ -18,6 +18,7 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
   injectCss('battle-parry-layer', PARRY_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  const keyOk = usePlayerKeyGate()
   const durationMs = (interaction.params as { durationMs?: number }).durationMs ?? 2600
   const resolvedRef = useRef(false)
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -74,6 +75,7 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
     }
     raf = requestAnimationFrame(loop)
     function onKeyDown(e: KeyboardEvent): void {
+      if (!keyOk()) return
       const index = PARRY_OPTIONS.findIndex((o) => o.key.toLowerCase() === e.key.toLowerCase())
       if (index < 0) return
       e.preventDefault()

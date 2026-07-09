@@ -71,7 +71,7 @@ class TopErrorBoundary extends Component<
   }
 
   private handleClearAll = (): void => {
-    if (!confirm('清除本地缓存并重新加载？（游戏仍保留在磁盘 .gamevideo-scenarios/ 中）')) return
+    if (!confirm('清除本地缓存并重新加载？（已保存版本仍在 .forgeax/games/<slug>/game-video/）')) return
     try {
       localStorage.removeItem('gamevideo:scenarios:v1')
     } catch { /* best-effort */ }

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-team-forge/list-roles.args",
+  "title": "team:list_roles args",
+  "description": "列出当前所有可派单角色。无参数。",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

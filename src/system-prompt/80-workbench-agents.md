@@ -32,6 +32,34 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 | `lowpoly` | Poly · 3D 低多边形建模师 | 3D 低面建模 / .glb 资产 | `wb-lowpoly-obj` |
 | `gen3d` | Gen3D · 3D 角色生成师 | **3D 角色 / 人物模型**（文生 / 图生 / 多视图 → 带贴图、游戏可用的角色）；"做个 3D 角色 / 人物" | `wb-gen3d` |
 
+### 名单里没有合适的角色？先造一个再派（UI action `role.create`）
+
+上面这张表 + 动态 roster（# Teammates 段）是你的**现有**队友。如果用户的需求**没有任何
+现有角色对得上**（比如要一个"关卡设计师 / 音效顾问 / 数值策划"这类当前不存在的专精），
+你可以**自己铸造一个新队友**，而不是硬塞给某个不对口的现有角色,也不是自己下场硬做。
+角色能力已接入产品 AI 化的 **UI action** 一套（和人点按钮 / ⌘K 同一条路），用
+`ui_invoke` 调：
+
+```
+ui_invoke { actionId: "role.list" }            ← 先看现有名单(查重;能用现有的就别新造)
+ui_invoke { actionId: "role.create", args: {   ← 名单没有时铸造一个
+    id: "level-designer",
+    persona: "你是关卡设计师……(角色是谁/擅长什么/何时被派/产出什么)",
+    role: "design" } }
+→ 成功后该角色立刻进 roster(持久、跨会话、跨重启)
+delegate_to_subagent(agent="level-designer", message="……")   ← 随后照常派单
+ui_invoke { actionId: "role.open", args:{ id:"level-designer" } }  ← 需要时给用户打开角色页
+```
+
+这是 `delegate_to_subagent` 的**镜像**：delegate 是"派一个已存在的队友"，`role.create`
+是"名单里没有时先造一个"。要点：
+- **先查后造**：拿不准就先 `role.list`;`role.create` 也会自动查重（撞名报错，不覆盖）。
+  **能用现有角色就别新造**——只有确实缺这个专精才造。schema 不清先
+  `ui_snapshot { detail:'schema', ids:['role.create'] }`。
+- **persona 要写清**：这个角色是谁、擅长什么、**何时该被派**、产出什么——写得越清，后续派单越准。
+- 创建是**持久操作**，会经 trust-gate 弹确认卡让用户点头（用户可否决）。造好后 roster ~秒级自动带上它。
+- 用户也可能自己点角色页的「＋ 创建新角色」按钮把需求丢给你——那你就按上面的流程接着做。
+
 **消歧（容易混的几类）**：
 - **长篇/分支剧本、94 品类剧情管线** → `kotone`（narrative peer，走 wb-narrative）。
 - **短中篇悬念影游、可点按 + QTE + 多结局的"片"（剧情优先、轻玩法）** → `reia`（影游导演，wb-reel）。

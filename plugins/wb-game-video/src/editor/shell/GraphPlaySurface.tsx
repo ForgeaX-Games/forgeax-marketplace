@@ -11,7 +11,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { GameScenario } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
-import { registerCoreRenderers, renderInteraction, renderOverlay, renderHudElement, type HudElementView, type SkinCtx } from '../../runtime/skins/rendererRegistry'
+import { PlayerRootContext, type HudElementView, type SkinCtx } from '../../runtime/skins/rendererRegistry'
+import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
 import { resolveMediaSrc } from './media'
 import { computeVideoContentRect, type VideoContentRect } from '../video/videoContentRect'
@@ -61,7 +62,6 @@ function DraggablePanel({ title, initial, onClose, children }: { title: string; 
 }
 
 export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.Element {
-  registerCoreRenderers()
   bootEditorSkins()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
@@ -76,6 +76,15 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const [showLogs, setShowLogs] = useState(false)
   const sessionRef = useRef<GraphSession | null>(null)
   const [snap, setSnap] = useState<SessionSnapshot | null>(null)
+  const [skins, setSkins] = useState<GraphSession['skins'] | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [rootEl, setRootEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    setRootEl(el)
+    if (el) claimPlayerFocus(el)
+    return () => releasePlayerFocus(el)
+  }, [])
 
   // 视频 object-fit:contain 后的实际画面矩形——HUD/QTE/交互等 overlay 都锚在这块
   // 视频显示区上（而非整个内容区），视频缩小/换比例时血条等跟着视频走。
@@ -99,6 +108,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     if (!ready) return
     const s = new GraphSession(useGraphScenario.getState().scn())
     sessionRef.current = s
+    setSkins(s.skins)
     setSnap(s.start())
   }, [restartKey, ready])
 
@@ -150,7 +160,14 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     : { position: 'absolute', inset: 0, pointerEvents: 'none' }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden' }}>
+    <PlayerRootContext.Provider value={rootEl}>
+    <div
+      ref={rootRef}
+      tabIndex={0}
+      onPointerDown={() => claimPlayerFocus(rootRef.current)}
+      onFocus={() => claimPlayerFocus(rootRef.current)}
+      style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden', outline: 'none' }}
+    >
       {/* 演出画面 */}
       {videoSrc ? (
         <video
@@ -177,7 +194,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       {/* 表现叠层 */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
         {(snap?.overlays ?? []).map((o, i) => (
-          <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{renderOverlay(o)}</span>
+          <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{skins?.renderOverlay(o)}</span>
         ))}
       </div>
 
@@ -185,7 +202,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
         {Object.keys(snap?.hud.entities ?? {}).filter((id) => !hudHidden.has(id)).map((id) => {
           const el = hudComp.get(id)
-          if (el?.component && skinCtx) return <span key={id}>{renderHudElement(el, skinCtx)}</span>
+          if (el?.component && skinCtx && skins) return <span key={id}>{skins.renderHudElement(el, skinCtx)}</span>
           return null
         })}
       </div>
@@ -219,8 +236,8 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
       {/* 交互层：铺满舞台=视频显示区。皮肤（防反/技能条）与默认按钮行各自绝对定位到
           自己的位置（防反=右侧居中、技能条/默认=底部），故这里只做全区容器、点击穿透。 */}
-      {snap?.interaction && (
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{renderInteraction(snap.interaction, submit, skinCtx)}</div>
+      {snap?.interaction && skins && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{skins.renderInteraction(snap.interaction, submit, skinCtx)}</div>
       )}
       </div>
 
@@ -257,5 +274,6 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         </DraggablePanel>
       )}
     </div>
+    </PlayerRootContext.Provider>
   )
 }

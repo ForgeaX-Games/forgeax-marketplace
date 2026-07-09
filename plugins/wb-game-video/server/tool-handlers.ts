@@ -61,18 +61,17 @@ function pickSlug(args: { gameSlug?: string }, ctx: ToolCtx): string | null {
   return resolveActiveGameSlug(ctx)
 }
 
-/** GameGraph 落盘目录：有 slug → 该 game 的 game-video/；无 slug → 包内全局库。 */
-function graphDir(ctx: ToolCtx, slug: string | null): string {
+/** GameGraph 落盘目录：仅 `.forgeax/games/<slug>/game-video/`；缺工程根或 slug 则 null。 */
+function graphDir(ctx: ToolCtx, slug: string | null): string | null {
   const root = findProjectRoot(ctx)
-  if (slug && root) return resolve(root, '.forgeax', 'games', slug, 'game-video')
-  const base = resolve(ctx.cwd ?? process.cwd(), '.gamevideo-scenarios')
-  return slug ? resolve(base, 'games', slug) : base
+  if (!slug || !root) return null
+  return resolve(root, '.forgeax', 'games', slug, 'game-video')
 }
 
 /** 内置 demo（无盘数据时回退的 SSOT 样例）。 */
 function demoScenario(ctx: ToolCtx): unknown {
   try {
-    const p = resolve(ctx.cwd ?? process.cwd(), 'src', 'blueprint', 'graph', 'demo', 'nodia.graph.json')
+    const p = resolve(ctx.cwd ?? process.cwd(), 'src', 'editor', 'demo', 'nodia.graph.json')
     return JSON.parse(readFileSync(p, 'utf-8'))
   } catch {
     return null
@@ -142,8 +141,9 @@ export const tools = {
   'gvid:get-graph': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
     const slug = pickSlug(args, ctx)
     const dir = graphDir(ctx, slug)
-    const canonical = resolve(dir, 'scenarios.graph.json')
-    const container = readJson(canonical) as { items?: { scenario?: unknown }[] } | null
+    const container = dir
+      ? (readJson(resolve(dir, 'scenarios.graph.json')) as { items?: { scenario?: unknown }[] } | null)
+      : null
     const scenario = container?.items?.[0]?.scenario ?? demoScenario(ctx)
     return { scenario, source: container ? 'disk' : 'demo', gameSlug: slug }
   },
@@ -163,6 +163,8 @@ export const tools = {
 
     const slug = pickSlug(args, ctx)
     const dir = graphDir(ctx, slug)
+    if (!dir) return { ok: false, errors: ['无 .forgeax 工程根或无效 gameSlug，无法落盘'] }
+
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const canonical = resolve(dir, 'scenarios.graph.json')
     const vDir = resolve(dir, 'scenarios.graph.versions')

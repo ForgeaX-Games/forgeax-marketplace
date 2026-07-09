@@ -31,7 +31,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /**
  * 从某个起点目录向上找出含 `.forgeax/games` 的工程根。
  * 插件 vite `config.root` 是插件包目录，工程根在更上层，故向上探。
- * 找不到时返回 null（回退到包内 `.gamevideo-scenarios/games/<slug>`）。
+ * 找不到时返回 null（无盘落点；读回空、写拒绝——权威只在 `.forgeax/games/<slug>/game-video/`）。
  */
 function findProjectRootWithForgeax(start: string): string | null {
   let dir = start
@@ -62,13 +62,10 @@ function readGraphReqJson(req: { on: (ev: string, cb: (arg?: unknown) => void) =
   })
 }
 
-function graphDirForSlug(projectRoot: string | null, baseRoot: string, slug: string | null): string {
-  if (slug && GAME_SLUG_RE.test(slug)) {
-    return projectRoot
-      ? resolve(projectRoot, '.forgeax', 'games', slug, 'game-video')
-      : resolve(baseRoot, 'games', slug)
-  }
-  return baseRoot
+/** 仅 `.forgeax/games/<slug>/game-video/`；缺工程根或 slug 则 null。 */
+function graphDirForSlug(projectRoot: string | null, slug: string | null): string | null {
+  if (!projectRoot || !slug || !GAME_SLUG_RE.test(slug)) return null
+  return resolve(projectRoot, '.forgeax', 'games', slug, 'game-video')
 }
 
 /**
@@ -76,15 +73,13 @@ function graphDirForSlug(projectRoot: string | null, baseRoot: string, slug: str
  *   GET  /__graph__/store?game=slug          → { scenario(最新已保存), versions:[{id,savedAt}] }
  *   PUT  /__graph__/store?game=slug {scenario,id?,title?} → 写 scenarios.graph.json + 版本快照(留10) → { versions }
  *   GET  /__graph__/version?game=slug&id=vid → { scenario }
- * 草稿不落盘（走客户端 localStorage）。
+ * 草稿不落盘（走客户端 localStorage）。无 `.forgeax` 工程根时 GET 空、PUT 400。
  */
 function graphStorePlugin(): Plugin {
-  let baseRoot = ''
   let projectRoot: string | null = null
   return {
     name: 'gamevideo-graph-store',
     configResolved(config) {
-      baseRoot = resolve(config.root, '.gamevideo-scenarios')
       projectRoot = findProjectRootWithForgeax(config.root)
     },
     configureServer(server) {
@@ -94,11 +89,7 @@ function graphStorePlugin(): Plugin {
           const path = url.pathname.replace(/\/+$/, '') || '/'
           const method = (req.method ?? 'GET').toUpperCase()
           const slug = (url.searchParams.get('game') ?? '').trim() || null
-          const dir = graphDirForSlug(projectRoot, baseRoot, slug)
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-          const canonical = resolve(dir, 'scenarios.graph.json')
-          const vDir = resolve(dir, 'scenarios.graph.versions')
-          const indexPath = resolve(vDir, 'index.json')
+          const dir = graphDirForSlug(projectRoot, slug)
           const readJson = (p: string): unknown => {
             try {
               return JSON.parse(readFileSync(p, 'utf-8'))
@@ -107,14 +98,22 @@ function graphStorePlugin(): Plugin {
             }
           }
           if (path === '/store' && method === 'GET') {
+            if (!dir) return sendJson(res, 200, { scenario: null, versions: [] })
+            const canonical = resolve(dir, 'scenarios.graph.json')
+            const indexPath = resolve(dir, 'scenarios.graph.versions', 'index.json')
             const container = readJson(canonical) as { items?: { scenario?: unknown }[] } | null
             const scenario = container?.items?.[0]?.scenario ?? null
             return sendJson(res, 200, { scenario, versions: readJson(indexPath) ?? [] })
           }
           if (path === '/store' && method === 'PUT') {
+            if (!dir) return sendJson(res, 400, { error: 'no .forgeax/games root or invalid game slug' })
             const body = await readGraphReqJson(req)
             const scenario = body.scenario as { id?: string } | undefined
             if (!scenario) return sendJson(res, 400, { error: 'no scenario' })
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+            const canonical = resolve(dir, 'scenarios.graph.json')
+            const vDir = resolve(dir, 'scenarios.graph.versions')
+            const indexPath = resolve(vDir, 'index.json')
             const id = (body.id as string) ?? scenario.id ?? 'graph'
             const title = (body.title as string) ?? 'graph'
             writeFileSync(canonical, JSON.stringify({ version: 1, activeId: id, items: [{ id, title, scenario }] }, null, 2))
@@ -126,8 +125,9 @@ function graphStorePlugin(): Plugin {
             return sendJson(res, 200, { versions: index })
           }
           if (path === '/version' && method === 'GET') {
+            if (!dir) return sendJson(res, 404, { scenario: null })
             const vid = url.searchParams.get('id') ?? ''
-            const scenario = readJson(resolve(vDir, `${vid}.json`))
+            const scenario = readJson(resolve(dir, 'scenarios.graph.versions', `${vid}.json`))
             return sendJson(res, scenario ? 200 : 404, { scenario })
           }
           next()

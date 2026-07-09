@@ -1,16 +1,13 @@
 /**
  * Player 渲染器 registry —— 按 `kind` / `component`(皮肤 id) 派发**独立 React 组件**（spec §3.3）。
  *
- * 关键：注册的是**组件类型**（不是被直接调用的函数）。渲染时以 `<Comp key=.. {...props}/>` 挂成子元素——
- * 每个组件有自己的 fiber/hook 作用域，可自由用 useState/useEffect 等（自闭环、可独立运行、可被用户替换的组件）。
- * 若把组件当普通函数调用（内联进父组件），其 hooks 会算作父组件的 → 交互出现/消失时 hook 数变化会崩
- * （"Rendered more hooks than during the previous render"）。故一律走元素化渲染。
- *
- * 三张表：overlay(表现层) / interaction(交互层) / hud(HUD 皮肤)。加新玩法/皮肤 = 注册一个组件，不改 Player 主体。
+ * 多局并行：每个 GraphSession 持有自己的 `SkinRegistry`；模块级 `register*` / `render*`
+ * 仍指向 `defaultSkinRegistry`（编辑器兼容）。
  */
-import { Component, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
+import { Component, createContext, useContext, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import type { OverlaySnap, InteractionSnap, HudSnap } from '../engine/session'
 import type { ChoiceParams, HotspotParams } from '../registry/core-kinds'
+import { isPlayerFocused } from '../input/playerFocus'
 
 /** 皮肤/HUD 组件渲染时可读的游戏态上下文（vars/entities/score/flags）。 */
 export interface SkinCtx {
@@ -51,10 +48,16 @@ export type OverlayComponent = ComponentType<OverlayProps>
 export type InteractionComponent = ComponentType<InteractionProps>
 export type HudComponent = ComponentType<HudProps>
 
+/** Player 根节点（供交互皮做焦点门控）。由 GraphPlayer / PlaySurface 注入。 */
+export const PlayerRootContext = createContext<HTMLElement | null>(null)
+
+/** 交互皮 keydown 前调用：仅当前焦点 Player 放行。 */
+export function usePlayerKeyGate(): (e?: KeyboardEvent) => boolean {
+  const root = useContext(PlayerRootContext)
+  return () => isPlayerFocused(root)
+}
+
 // ── 错误隔离：坏组件只提示、不拖垮引擎 ──────────────────────────────────────────
-// 这些组件只是「盖在视频上的展示层」，绝不应因某个（可能来自用户）组件抛错就把整个 Player/引擎搞崩。
-// 用 React error boundary 捕获其**渲染/生命周期**异常 → 渲染一个可见的错误提示（并可回退到默认组件），
-// 主状态机逻辑不受影响。注意：事件回调/RAF/setTimeout 里的异步错误 boundary 抓不到，故 submit 也包一层 try/catch。
 function SkinErrorChip({ name, message }: { name: string; message: string }): ReactNode {
   return (
     <div
@@ -87,7 +90,6 @@ class SkinErrorBoundary extends Component<{ name: string; fallback?: ReactNode; 
   }
 }
 
-/** 包一层 try/catch，防止组件 submit/事件回调里抛错冒泡打断引擎驱动。 */
 function safe(name: string, submit: (input: unknown) => void): (input: unknown) => void {
   return (input) => {
     try {
@@ -99,64 +101,103 @@ function safe(name: string, submit: (input: unknown) => void): (input: unknown) 
   }
 }
 
-// ── overlay 渲染器 ────────────────────────────────────────────────────────────
-const OVERLAY = new Map<string, OverlayComponent>()
+/** 可注入的 Overlay / Interaction / HUD 渲染表（每局 Session 一份）。 */
+export class SkinRegistry {
+  private readonly overlay = new Map<string, OverlayComponent>()
+  private readonly interaction = new Map<string, InteractionComponent>()
+  private readonly hud = new Map<string, HudComponent>()
+  private coreRenderersRegistered = false
+
+  registerOverlayRenderer(kind: string, c: OverlayComponent): void {
+    this.overlay.set(kind, c)
+  }
+  registerInteractionRenderer(kind: string, c: InteractionComponent): void {
+    this.interaction.set(kind, c)
+  }
+  registerInteractionSkin(id: string, c: InteractionComponent): void {
+    this.interaction.set(id, c)
+  }
+  registerHudRenderer(id: string, c: HudComponent): void {
+    this.hud.set(id, c)
+  }
+
+  renderOverlay(overlay: OverlaySnap): ReactNode {
+    const C = this.overlay.get(overlay.kind)
+    if (!C) return null
+    return (
+      <SkinErrorBoundary key={overlay.elementId} name={overlay.kind}>
+        <C overlay={overlay} />
+      </SkinErrorBoundary>
+    )
+  }
+
+  renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx): ReactNode {
+    const component = (interaction.params as { component?: string }).component
+    const Skin = component ? this.interaction.get(component) : undefined
+    const Default = this.interaction.get(interaction.kind)
+    const C = Skin ?? Default
+    if (!C) return null
+    const name = component ?? interaction.kind
+    const props: InteractionProps = { interaction, submit: safe(name, submit), ctx }
+    const fallback = Skin && Default && Default !== Skin ? <Default {...props} /> : undefined
+    return (
+      <SkinErrorBoundary key={`${interaction.elementId}:${name}`} name={name} fallback={fallback}>
+        <C {...props} />
+      </SkinErrorBoundary>
+    )
+  }
+
+  renderHudElement(element: HudElementView, ctx: SkinCtx): ReactNode {
+    const C = element.component ? this.hud.get(element.component) : undefined
+    if (!C) return null
+    return (
+      <SkinErrorBoundary key={element.element} name={element.component ?? element.element}>
+        <C element={element} ctx={ctx} />
+      </SkinErrorBoundary>
+    )
+  }
+
+  /** 注册核心 kind 默认渲染器（对本实例幂等）。 */
+  registerCoreRenderers(): void {
+    if (this.coreRenderersRegistered) return
+    this.coreRenderersRegistered = true
+    ensureFloatStyle()
+    ensureTransitionStyle()
+    this.registerInteractionRenderer('choice', ChoiceButtons)
+    this.registerInteractionRenderer('skill', ChoiceButtons)
+    this.registerInteractionRenderer('qte', QteButtons)
+    this.registerInteractionRenderer('hotspot', HotspotButtons)
+    this.registerOverlayRenderer('floatText', FloatTextOverlay)
+    this.registerOverlayRenderer('transition', TransitionOverlay)
+    this.registerOverlayRenderer('dialogue', DialogueOverlay)
+  }
+}
+
+export const defaultSkinRegistry = new SkinRegistry()
+
 export function registerOverlayRenderer(kind: string, c: OverlayComponent): void {
-  OVERLAY.set(kind, c)
+  defaultSkinRegistry.registerOverlayRenderer(kind, c)
 }
 export function renderOverlay(overlay: OverlaySnap): ReactNode {
-  const C = OVERLAY.get(overlay.kind)
-  if (!C) return null
-  return (
-    <SkinErrorBoundary key={overlay.elementId} name={overlay.kind}>
-      <C overlay={overlay} />
-    </SkinErrorBoundary>
-  )
+  return defaultSkinRegistry.renderOverlay(overlay)
 }
-
-// ── interaction 渲染器 ───────────────────────────────────────────────────────
-// 一张表同时承载「按 kind 的默认组件」与「按 component id 的皮肤组件」；
-// 渲染时优先取元素 params.component 指定的皮肤，未指定/未知才回退到 kind 默认。
-const INTERACTION = new Map<string, InteractionComponent>()
 export function registerInteractionRenderer(kind: string, c: InteractionComponent): void {
-  INTERACTION.set(kind, c)
+  defaultSkinRegistry.registerInteractionRenderer(kind, c)
 }
-/** 注册一个交互皮肤组件（按 component id）。 */
 export function registerInteractionSkin(id: string, c: InteractionComponent): void {
-  INTERACTION.set(id, c)
+  defaultSkinRegistry.registerInteractionSkin(id, c)
 }
 export function renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx): ReactNode {
-  const component = (interaction.params as { component?: string }).component
-  const Skin = component ? INTERACTION.get(component) : undefined
-  const Default = INTERACTION.get(interaction.kind)
-  const C = Skin ?? Default
-  if (!C) return null
-  const name = component ?? interaction.kind
-  const props: InteractionProps = { interaction, submit: safe(name, submit), ctx }
-  // 皮肤崩了 → 回退到 kind 默认交互组件（保证玩家仍能操作推进流程），并提示错误。
-  const fallback = Skin && Default && Default !== Skin ? <Default {...props} /> : undefined
-  // key 取 elementId + 皮肤 id：切换到别的交互/皮肤时干净重挂，hook 作用域不串。
-  return (
-    <SkinErrorBoundary key={`${interaction.elementId}:${name}`} name={name} fallback={fallback}>
-      <C {...props} />
-    </SkinErrorBoundary>
-  )
+  return defaultSkinRegistry.renderInteraction(interaction, submit, ctx)
 }
-
-// ── HUD 皮肤渲染器（按 component id；每个 ui.hud 元素可指定）──────────────────────
-const HUD = new Map<string, HudComponent>()
 export function registerHudRenderer(id: string, c: HudComponent): void {
-  HUD.set(id, c)
+  defaultSkinRegistry.registerHudRenderer(id, c)
 }
-/** 有指定 component 且命中皮肤则渲染，否则返回 null（调用方回退内置渲染）。 */
 export function renderHudElement(element: HudElementView, ctx: SkinCtx): ReactNode {
-  const C = element.component ? HUD.get(element.component) : undefined
-  if (!C) return null
-  return (
-    <SkinErrorBoundary key={element.element} name={element.component ?? element.element}>
-      <C element={element} ctx={ctx} />
-    </SkinErrorBoundary>
-  )
+  return defaultSkinRegistry.renderHudElement(element, ctx)
+}
+export function registerCoreRenderers(): void {
+  defaultSkinRegistry.registerCoreRenderers()
 }
 
 // ── 核心 kind 的默认渲染组件 ──────────────────────────────────────────────────
@@ -172,7 +213,6 @@ const btn = (bg: string): CSSProperties => ({
   boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
 })
 
-// 默认按钮行统一贴视频显示区底部居中（皮肤交互各自自定位，不用这个）。
 const bottomRow: CSSProperties = { position: 'absolute', left: 0, right: 0, bottom: '7%', display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', pointerEvents: 'auto' }
 
 function ChoiceButtons({ interaction, submit }: InteractionProps): ReactNode {
@@ -264,20 +304,4 @@ function FloatTextOverlay({ overlay }: OverlayProps): ReactNode {
       {p.text}
     </div>
   )
-}
-
-let _registered = false
-/** 注册核心 kind 的默认渲染器（幂等）。 */
-export function registerCoreRenderers(): void {
-  if (_registered) return
-  _registered = true
-  ensureFloatStyle()
-  ensureTransitionStyle()
-  registerInteractionRenderer('choice', ChoiceButtons)
-  registerInteractionRenderer('skill', ChoiceButtons)
-  registerInteractionRenderer('qte', QteButtons)
-  registerInteractionRenderer('hotspot', HotspotButtons)
-  registerOverlayRenderer('floatText', FloatTextOverlay)
-  registerOverlayRenderer('transition', TransitionOverlay)
-  registerOverlayRenderer('dialogue', DialogueOverlay)
 }

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-team-forge/create-role.args",
+  "title": "team:create_role args",
+  "description": "铸造一个新队友(agent-pack)。宿主 host-authoring 缝负责组装 + 自验 + 撞名查重 + 落盘(L1 默认)。",
+  "type": "object",
+  "required": ["id", "persona"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "角色 id,单段(会被小写化)。如 'scout' / 'level-designer'。不得撞已有角色。",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "maxLength": 40
+    },
+    "persona": {
+      "type": "string",
+      "description": "角色的 system 提示词(markdown):这个角色是谁、擅长什么、何时该被派、产出什么。会写进 persona/zh.md。",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "displayName": {
+      "type": "object",
+      "description": "卡片显示名(i18n)。缺省用 id。",
+      "properties": {
+        "zh": { "type": "string" },
+        "en": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "role": {
+      "type": "string",
+      "description": "角色定位,如 'pillar' / 'artist' / 'peer'。缺省 'peer'。",
+      "maxLength": 40
+    },
+    "avatar": {
+      "type": "string",
+      "description": "头像:emoji 或单字符。缺省取 id 首字母。",
+      "maxLength": 8
+    },
+    "color": {
+      "type": "string",
+      "description": "卡片主题色 #hex。缺省固定色。",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "scope": {
+      "type": "string",
+      "description": "持久化范围:'global'=对所有项目可用(L1,默认);'project'=仅当前游戏(L2)。",
+      "enum": ["global", "project"]
+    },
+    "memorySeed": {
+      "type": "string",
+      "description": "可选:角色初始记忆(经验/教训),写进 memory/lessons.md。",
+      "maxLength": 20000
+    },
+    "tools": {
+      "type": "array",
+      "description": "可选:该角色可用的 host 工具 allow glob(如 [\"gen3d:*\"]),首次派单时注入其对话工具清单。",
+      "items": { "type": "string" },
+      "maxItems": 32
+    }
+  },
+  "additionalProperties": false
+}
