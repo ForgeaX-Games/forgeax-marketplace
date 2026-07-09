@@ -391,9 +391,11 @@ function migrateQte(
 
 /** 旧 decision(static/timed) + ext.choiceUi → 新 ChoiceSpec。 */
 function migrateChoice(
-  decision: Record<string, unknown>,
+  decision: Record<string, unknown> | undefined,
   ext: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
+  // oldKind==='choice' 可无 decision（见 migrateV10ToV11 的 isChoice 判定）→ 兜底空对象。
+  decision = decision ?? {}
   const optType = decision.optType
   const timed = optType === 'timed' || decision.mode === 'timed'
   const window = cleanTimeWindow({
@@ -447,7 +449,13 @@ export function migrateV10ToV11(scenario: Scenario): Scenario {
     // （QTE 天生限时），而是"该 decision 其实是 QTE"的旧说法 → 归到 qte 形态。
     const isQte = !isBoss && (optType === 'timed_qte' || oldKind === 'qte' || hasCues)
     const isCalc = !isBoss && !isQte && typeof raw.calcType === 'string'
-    const isChoice = !isBoss && !isQte && !isCalc && (decision != null || oldKind === 'choice')
+    // choice 需真凭据：一个 decision，或至少一个 kind:'choice' 分支。
+    // 光有 oldKind==='choice' 标签不算（历史脏数据里 enter 这类"自动转场"节点被误标
+    // 成 choice，实际只有 kind:'auto' 分支 → 应还原成普通 perf，与 graph 里的语义一致）。
+    const hasChoiceBranch =
+      Array.isArray(raw.branches) &&
+      (raw.branches as Array<Record<string, unknown>>).some((b) => b?.kind === 'choice')
+    const isChoice = !isBoss && !isQte && !isCalc && (decision != null || hasChoiceBranch)
 
     // performance cues → settlement，配对 sticker 搬进 float
     const stickers = Array.isArray(raw.stickerClips)
@@ -465,10 +473,10 @@ export function migrateV10ToV11(scenario: Scenario): Scenario {
       const effects = (Array.isArray(cue.effects) ? cue.effects : existingSettlement?.effects ?? []) as Effect[]
       const float = paired
         ? {
-            ...(typeof paired.text === 'string' ? { text: paired.text } : {}),
-            ...(typeof paired.x === 'number' ? { x: paired.x } : {}),
-            ...(typeof paired.y === 'number' ? { y: paired.y } : {}),
-          }
+          ...(typeof paired.text === 'string' ? { text: paired.text } : {}),
+          ...(typeof paired.x === 'number' ? { x: paired.x } : {}),
+          ...(typeof paired.y === 'number' ? { y: paired.y } : {}),
+        }
         : (existingSettlement?.float as { text?: string; x?: number; y?: number } | undefined)
       return {
         id: cue.id as string,
@@ -527,7 +535,7 @@ export function migrateV10ToV11(scenario: Scenario): Scenario {
     if (isBoss) next.boss = raw.boss
     if (isQte) next.qte = migrateQte(rawQte, decision, ext)
     if (isCalc) next.calc = { calcType: raw.calcType }
-    if (isChoice) next.choice = migrateChoice(decision as Record<string, unknown>, ext)
+    if (isChoice) next.choice = migrateChoice(decision, ext)
 
     scenes[sceneId] = next as unknown as Scene
   }

@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { humanKey } from "./dataReadable";
+import { getLocale } from "../../i18n";
+import { localizeGeneratedMarkdown } from "../../i18n/generatedMarkdown";
 
 // 注意：本文件只导出 React 组件（GenericObjectView / MarkdownBlock）。
 // 工具函数（humanKey / dataToReadableText）放在 ./dataReadable.ts，
@@ -27,7 +29,8 @@ function renderMarkdown(text: string): string {
 }
 
 export function MarkdownBlock({ text }: { text: string }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
+  const display = localizeGeneratedMarkdown(text);
+  const html = useMemo(() => renderMarkdown(display), [display]);
   return (
     <div
       className="md-rendered"
@@ -40,7 +43,8 @@ export function GenericObjectView({ data, depth = 0 }: { data: unknown; depth?: 
   if (data === null || data === undefined) return null;
 
   if (typeof data === "string") {
-    return data.includes("\n") ? <MarkdownBlock text={data} /> : <span className="gov-text">{data}</span>;
+    const display = localizeGeneratedMarkdown(data);
+    return display.includes("\n") ? <MarkdownBlock text={data} /> : <span className="gov-text">{display}</span>;
   }
   if (typeof data === "number" || typeof data === "boolean") {
     return <span className="gov-text">{String(data)}</span>;
@@ -49,7 +53,8 @@ export function GenericObjectView({ data, depth = 0 }: { data: unknown; depth?: 
   if (Array.isArray(data)) {
     if (data.length === 0) return <span className="gov-text gov-dim">(empty)</span>;
     if (data.every((v) => typeof v === "string" || typeof v === "number")) {
-      return <span className="gov-text">{data.join("、")}</span>;
+      const sep = getLocale() === "en" ? ", " : "、";
+      return <span className="gov-text">{data.join(sep)}</span>;
     }
     return (
       <div className="gov-list">

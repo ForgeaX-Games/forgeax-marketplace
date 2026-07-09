@@ -11,7 +11,7 @@ describe('GraphSession (playable view model)', () => {
     expect(snap.clip?.nodeId).toBe('enter')
     expect(snap.hud.entities['ent-boss']!.hp).toBe(60)
 
-    snap = session.performanceEnd() // enter → init → a_my → wait（技能交互）
+    snap = session.performanceEnd() // enter → 出手判断(折进出边) → wait（技能交互）
     expect(snap.interaction?.kind).toBe('skill')
     expect(snap.interaction?.handles).toEqual(['opt:light', 'opt:heavy', 'opt:medit', 'opt:ult'])
 
@@ -31,8 +31,8 @@ describe('GraphSession (playable view model)', () => {
     session.jump('enter')
     session.performanceEnd() // → wait（技能）
     session.submit('light') // → 轻攻击演出
-    const snap = session.performanceEnd() // boss 存活 → 敌方回合 → tele（防反 QTE）
-    expect(snap.visited).toContain('a_my')
+    const snap = session.performanceEnd() // boss 存活 + 我方先手 → 敌方回合 tele（防反 QTE）
+    expect(snap.visited).toContain('wait')
     expect(snap.currentNodeId).toBe('tele')
     expect(snap.traversedEdgeIds.length).toBeGreaterThan(0)
   })
@@ -47,8 +47,8 @@ describe('GraphSession (playable view model)', () => {
   it('jump seeks to any node (debug)', () => {
     const session = new GraphSession(makeNodiaDemo({ bossHp: 700 }))
     session.start()
-    const snap = session.jump('a_my')
-    // 跳到我方回合(subFlow 容器) → 下钻到 wait → 技能交互挂起
+    const snap = session.jump('wait')
+    // 跳到战斗待机 → 技能交互挂起
     expect(snap.currentNodeId).toBe('wait')
     expect(snap.interaction?.kind).toBe('skill')
   })

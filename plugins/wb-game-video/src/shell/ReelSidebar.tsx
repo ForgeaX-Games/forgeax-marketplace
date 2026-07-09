@@ -34,7 +34,6 @@ import { useMemo } from 'react'
  */
 
 const VIEW_DEFS: Array<{ id: ForgeView; label: string; hint: string }> = [
-  { id: 'blueprint', label: '蓝图', hint: '玩法结构总览 · 节点配置（演出编号 / HUD 方案 / 选项）' },
   { id: 'video', label: '视频', hint: '内置演出视频库 · 点一条播放（蓝图「演出编号」数据源）' },
   { id: 'ui', label: '界面', hint: '内置 HUD 界面库 · 点一条预览（蓝图「HUD 方案」数据源）' },
   { id: 'rule', label: '规则', hint: '玩法规则总览 · 点一条查看规则条目' },
@@ -279,9 +278,7 @@ export function ReelSidebar() {
           <span className="rs-foot-text">
             {forgeView === 'script'
               ? `编辑中 · ${STUDIO_TABS.find((t) => t.id === studioTab)?.label ?? ''}`
-              : forgeView === 'blueprint'
-                ? '蓝图 · 玩法结构总览'
-                : forgeView === 'video'
+              : forgeView === 'video'
                   ? '视频 · 内置演出视频库'
                   : forgeView === 'ui'
                     ? '界面 · 内置 HUD 界面库'

@@ -7,7 +7,7 @@ import { getModesForTier, TIER_DEFAULT_MODE, STEP_OUTPUT_FIELDS, getModeConfig }
 import { traceNodeSubtree, buildNodeFilter } from "../pipeline/node-dependency.js";
 import { validateImpactAnalysis, type ChangeCategory } from "../pipeline/impact-validator.js";
 import { buildAutoSteps } from "../pipeline/design-steps/auto-narrative-builder.js";
-import { getGenresByCategory, GENRE_TAXONOMY, findGenreByCode } from "../knowledge/genre-taxonomy.js";
+import { getGenresByCategory, GENRE_TAXONOMY, findGenreByCode, getGenreDisplayName, type ContentLocale } from "../knowledge/genre-taxonomy.js";
 import { getNarrativeType } from "../knowledge/genre-narrative-type.js";
 import { planPipeline } from "../pipeline/planner/index.js";
 import { STEP_IDS as S } from "../pipeline/modes.js";
@@ -26,6 +26,24 @@ import { isSafeKey as isSafeEntryKeyFn, loadEntry as loadEntryFromDir, writeEntr
 
 const OUTPUT_DIR = path.resolve(process.cwd(), "output");
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+function parseContentLocale(raw: unknown): ContentLocale {
+  return raw === "en" ? "en" : "zh";
+}
+
+function resolveRunLocale(opts: {
+  requestLocale?: unknown;
+  checkpointCtx?: NarrativeContext;
+  entryKey?: string;
+}): ContentLocale {
+  if (opts.requestLocale !== undefined) return parseContentLocale(opts.requestLocale);
+  if (opts.checkpointCtx?.content_locale) return parseContentLocale(opts.checkpointCtx.content_locale);
+  if (opts.entryKey) {
+    const entry = loadEntryConfig(opts.entryKey);
+    if (entry?.locale) return parseContentLocale(entry.locale);
+  }
+  return "zh";
+}
 
 // §条目持久化：entry-store 按 OUTPUT_DIR 绑定（逻辑抽到纯模块便于单测）。
 const loadEntryConfig = (key: string): EntryConfig | null => loadEntryFromDir(OUTPUT_DIR, key);
@@ -670,16 +688,17 @@ app.get("/api/narrative/modes", (_req, res) => {
  * A2-1: 品类目录 — 按 15 大类折叠分组返回所有品类。
  * 供前端 TierModeSelector 渲染二级品类面板使用。
  */
-app.get("/api/narrative/genres", (_req, res) => {
+app.get("/api/narrative/genres", (req, res) => {
   try {
-    const grouped = getGenresByCategory();
+    const locale = parseContentLocale(req.query.locale);
+    const grouped = getGenresByCategory(locale);
     const payload = {
       categories: grouped.map((bucket) => ({
         category: bucket.category,
         label: bucket.label,
         genres: bucket.genres.map((g) => ({
           code: g.code,
-          name: g.name,
+          name: getGenreDisplayName(g, locale),
           tier: g.tier,
           narrative_ratio: g.narrative_ratio,
           narrative_type: g.narrative_type,
@@ -882,6 +901,7 @@ app.post("/api/narrative/start", async (req, res) => {
      * 避免另铸时间戳造成"输入条目"与"生成条目"分裂。
      */
     entry_key,
+    locale,
   } = req.body as {
     user_input?: string;
     model?: string;
@@ -895,6 +915,7 @@ app.post("/api/narrative/start", async (req, res) => {
     use_legacy_pipeline?: boolean;
     use_blueprint?: boolean;
     entry_key?: string;
+    locale?: ContentLocale;
     uploaded_script?: {
       content?: string;
       content_base64?: string;
@@ -1025,6 +1046,8 @@ app.post("/api/narrative/start", async (req, res) => {
   };
   runs.set(id, state);
 
+  const contentLocale = parseContentLocale(locale);
+
   // §条目持久化（开始生成自动保存兜底）：把当次最终配置 upsert 回 output/<key>/_entry.json。
   // 即使用户没点 ROUTING「确认保存」，开始生成也会落盘一份，保证条目参数可还原。
   if (isSafeEntryKey) {
@@ -1036,6 +1059,7 @@ app.post("/api/narrative/start", async (req, res) => {
         mode: resolvedMode,
         genreCode: state.genreCode,
         complexity: effectiveComplexity,
+        locale: contentLocale,
       });
     } catch (e) {
       console.error("[Server] writeEntryConfig on start failed:", e);
@@ -1078,6 +1102,7 @@ app.post("/api/narrative/start", async (req, res) => {
     autoDetectTier: hasExplicitGenre ? false : (resolvedRoutingMode === "manual" ? false : (auto_detect !== false)),
     genreCode: hasExplicitGenre ? genre_code!.trim() : undefined,
     usePlanner: use_legacy_pipeline === true ? false : undefined,
+    locale: contentLocale,
   });
 
   writeManifestIncremental(state);
@@ -1170,7 +1195,7 @@ app.post("/api/narrative/start", async (req, res) => {
 });
 
 app.post("/api/narrative/resume", async (req, res) => {
-  const { dir, model } = req.body as { dir?: string; model?: string };
+  const { dir, model, locale } = req.body as { dir?: string; model?: string; locale?: ContentLocale };
   if (!dir?.trim()) {
     res.status(400).json({ error: "dir is required (run directory name)" });
     return;
@@ -1223,6 +1248,12 @@ app.post("/api/narrative/resume", async (req, res) => {
   };
   runs.set(id, state);
 
+  const resumeLocale = resolveRunLocale({
+    requestLocale: locale,
+    checkpointCtx: checkpoint.ctx,
+    entryKey: dir,
+  });
+
   const pipeline = new NarrativePipeline({
     apiKey: API_KEY || undefined,
     proxyUrl: LLM_PROXY_URL || undefined,
@@ -1252,6 +1283,7 @@ app.post("/api/narrative/resume", async (req, res) => {
     autoDetectTier: false,
     resumeCtx: checkpoint.ctx,
     resumeAfterStep: checkpoint.lastCompletedStep,
+    locale: resumeLocale,
   });
 
   // Update manifest status to running (same directory)
@@ -1346,7 +1378,7 @@ app.post("/api/narrative/regenerate", async (req, res) => {
   const {
     sourceDir, fromStepId, userInstructions, stopAfterStep,
     patchedContext, model, skipSteps, nodeFilter,
-    editDrafts,
+    editDrafts, locale,
   } = req.body as {
     sourceDir?: string;
     fromStepId?: string;
@@ -1357,6 +1389,7 @@ app.post("/api/narrative/regenerate", async (req, res) => {
     skipSteps?: string[];
     nodeFilter?: Record<string, string[]>;
     editDrafts?: Record<string, { content?: unknown; userInput?: string }>;
+    locale?: ContentLocale;
   };
 
   if (!sourceDir?.trim()) {
@@ -1465,6 +1498,12 @@ app.post("/api/narrative/regenerate", async (req, res) => {
     }
   }
 
+  const regenLocale = resolveRunLocale({
+    requestLocale: locale,
+    checkpointCtx: checkpoint.ctx,
+    entryKey: sourceDir,
+  });
+
   const pipeline = new NarrativePipeline({
     apiKey: API_KEY || undefined,
     proxyUrl: LLM_PROXY_URL || undefined,
@@ -1492,6 +1531,7 @@ app.post("/api/narrative/regenerate", async (req, res) => {
     tier: checkpoint.tier,
     mode: checkpoint.mode,
     autoDetectTier: false,
+    locale: regenLocale,
   });
 
   // Write initial manifest + checkpoint for the fork

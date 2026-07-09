@@ -11,7 +11,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import type { GameScenario } from '../graph-schema'
 import { GraphSession, type SessionSnapshot } from '../session'
 import { GraphCanvas } from './GraphCanvas'
-import { registerCoreRenderers, renderInteraction, renderOverlay } from './rendererRegistry'
+import { registerCoreRenderers, renderInteraction, renderOverlay, renderHudElement, type HudElementView, type SkinCtx } from './rendererRegistry'
+import { registerCoreSkins } from './skins'
 import { resolveMediaSrc } from './media'
 import { useGraphScenario } from '../graphScenarioStore'
 
@@ -60,9 +61,11 @@ function DraggablePanel({ title, initial, onClose, children }: { title: string; 
 
 export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.Element {
   registerCoreRenderers()
+  registerCoreSkins()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const graph = useGraphScenario((s) => s.graph)
+  const uiHud = useGraphScenario((s) => (s.meta.ui as { hud?: unknown[] } | undefined)?.hud) as HudElementView[] | undefined
   const ready = graph.nodes.length > 0
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
 
@@ -106,6 +109,13 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const traversed = useMemo(() => new Set(snap?.traversedEdgeIds ?? []), [snap?.traversedEdgeIds])
   const hudHidden = useMemo(() => new Set(snap?.hudHidden ?? []), [snap?.hudHidden])
   const currentNode = useMemo(() => graph.nodes.find((n) => n.id === snap?.currentNodeId), [graph, snap?.currentNodeId])
+  // ui.hud 元素 → 组件皮肤查找（按 element id）。
+  const hudComp = useMemo(() => {
+    const m = new Map<string, HudElementView>()
+    ;(uiHud ?? []).forEach((el) => { if (el && el.element) m.set(el.element, el) })
+    return m
+  }, [uiHud])
+  const skinCtx: SkinCtx | undefined = snap ? { hud: snap.hud } : undefined
 
   const toolBtn = (on: boolean): CSSProperties => ({
     padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12,
@@ -140,9 +150,18 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         ))}
       </div>
 
-      {/* HUD 血条（对齐旧试玩视觉） */}
+      {/* 皮肤 HUD：全屏层，各皮肤组件自定位（血条像旧版：玩家右下、Boss 顶部） */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+        {Object.keys(snap?.hud.entities ?? {}).filter((id) => !hudHidden.has(id)).map((id) => {
+          const el = hudComp.get(id)
+          if (el?.component && skinCtx) return <span key={id}>{renderHudElement(el, skinCtx)}</span>
+          return null
+        })}
+      </div>
+
+      {/* 内置 HUD 列（左上角）：仅未配皮肤组件的实体血条 + 变量 + score */}
       <div style={{ position: 'absolute', top: 10, left: 12, width: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudHidden.has(id)).map(([id, e]) => {
+        {Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudHidden.has(id) && !hudComp.get(id)?.component).map(([id, e]) => {
           const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0
           const col = ratio > 0.5 ? '#22c55e' : ratio > 0.2 ? '#eab308' : '#ef4444'
           return (
@@ -173,7 +192,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
       {/* 交互层 */}
       {snap?.interaction && (
-        <div style={{ position: 'absolute', bottom: 28, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit)}</div>
+        <div style={{ position: 'absolute', bottom: 28, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit, skinCtx)}</div>
       )}
 
       {/* 控制条：右上角悬浮 */}

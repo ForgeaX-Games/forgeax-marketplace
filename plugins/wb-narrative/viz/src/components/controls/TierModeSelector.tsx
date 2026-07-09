@@ -30,37 +30,8 @@ import {
   type PipelineTemplateId,
 } from "../../pipeline-templates";
 import type { StepState } from "../../store/narrativeStore";
-import { useT, tStepLabel, t as tGlobal } from "../../i18n";
-import { UI_CATALOGS } from "../../i18n/ui";
-
-// Reverse map of tag dimension labels / option values (in any locale) → i18n key,
-// so a frozen record summary like "Story theme：复仇；Story genre：奇幻" can be
-// re-localized for display without touching the backend generation input.
-const TAG_TEXT_TO_KEY: Map<string, string> = (() => {
-  const m = new Map<string, string>();
-  for (const loc of ["en", "zh"] as const) {
-    for (const [k, v] of Object.entries(UI_CATALOGS[loc])) {
-      if (k.startsWith("tagDim.") || k.startsWith("tagOpt.")) m.set(v, k);
-    }
-  }
-  return m;
-})();
-
-function localizeTagSummary(text: string, t: (k: string, v?: Record<string, string | number>) => string): string {
-  if (!text || !/[；：]/.test(text)) return text;
-  return text.split("；").map((part) => {
-    const idx = part.indexOf("：");
-    if (idx < 0) {
-      const k = TAG_TEXT_TO_KEY.get(part.trim());
-      return k ? t(k) : part;
-    }
-    const label = part.slice(0, idx).trim();
-    const val = part.slice(idx + 1).trim();
-    const lk = TAG_TEXT_TO_KEY.get(label);
-    const vk = TAG_TEXT_TO_KEY.get(val);
-    return `${lk ? t(lk) : label}：${vk ? t(vk) : val}`;
-  }).join("；");
-}
+import { useT, tStepLabel, t as tGlobal, getLocale } from "../../i18n";
+import { localizeTagSummary } from "../../i18n/tagSummary";
 
 type InputTab = "text" | "tags" | "file";
 type RouteGroup = "narrative" | "planning";
@@ -440,6 +411,7 @@ const TAG_DIMENSIONS: TagDimension[] = [
 // ── Main component ──
 export function TierModeSelector() {
   const t = useT();
+  const locale = getLocale();
   const [inputTab, setInputTab] = useState<InputTab>("text");
   const [routeGroup, setRouteGroup] = useState<RouteGroup>("planning");
   const [userInput, setUserInput] = useState("");
@@ -699,10 +671,10 @@ export function TierModeSelector() {
     fetchModes().then(setAvailableModes).catch(() => {});
     setGenresLoading(true);
     setGenresError(null);
-    fetchGenres()
+    fetchGenres(locale)
       .then((cats) => {
         if (!Array.isArray(cats) || cats.length === 0) {
-          console.warn("[TierModeSelector] fetchGenres returned empty payload — 后端可能未启动或品类目录为空");
+          console.warn("[TierModeSelector] fetchGenres returned empty payload — backend may be down or catalog empty");
           setGenresError(t("tms.genres.empty"));
         }
         setGenreCategories(cats ?? []);
@@ -714,7 +686,7 @@ export function TierModeSelector() {
       })
       .finally(() => setGenresLoading(false));
     loadHistory();
-  }, [setAvailableModes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [setAvailableModes, locale]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (routeGroup === "planning") {
@@ -1071,6 +1043,7 @@ export function TierModeSelector() {
         complexity: showComplexity ? complexity : undefined,
         routeGroup,
         genreCode: hasGenre ? selectedGenreCode! : undefined,
+        locale,
         entryKey: reuseKey,
         uploadedScript: scriptFile
           ? {
@@ -1181,7 +1154,7 @@ export function TierModeSelector() {
     setStarting(true);
     setError(null);
     try {
-      const res = await resumeRun(activeEntryKey);
+      const res = await resumeRun(activeEntryKey, { locale });
       const entryKey = (res as any).entryKey ?? activeEntryKey;
       storeStartResume(res.id, entryKey, res.tier ?? undefined, res.mode ?? undefined);
     } catch (e) {
@@ -1190,7 +1163,7 @@ export function TierModeSelector() {
       actionLockRef.current = false;
       setStarting(false);
     }
-  }, [activeEntryKey, storeStartResume]);
+  }, [activeEntryKey, storeStartResume, locale]);
 
   /**
    * Phase 4 阶段 A：调 /api/narrative/analyze-impact，把结果存入 impactPreview state，
@@ -1323,6 +1296,7 @@ export function TierModeSelector() {
         skipSteps: pendingForkPlan.skipSteps.length ? pendingForkPlan.skipSteps : undefined,
         nodeFilter: pendingForkPlan.nodeFilter,
         editDrafts: pendingForkPlan.savedDrafts,
+        locale,
       });
       const newEntryKey = res.newEntryKey ?? `__fork__${res.id}`;
 
@@ -1355,7 +1329,7 @@ export function TierModeSelector() {
       actionLockRef.current = false;
       setStarting(false);
     }
-  }, [pendingForkPlan, activeEntryKey, storeStartFork, ipDnaRunning, cutOffActiveRun]);
+  }, [pendingForkPlan, activeEntryKey, storeStartFork, ipDnaRunning, cutOffActiveRun, locale]);
 
   const cancelRegenerate = useCallback(() => {
     setImpactPreview(null);

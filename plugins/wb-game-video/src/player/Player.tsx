@@ -1348,8 +1348,8 @@ export function Player() {
   }
 
   function exit(): void {
-    // 退出试玩回到蓝图（剧情树/剧本/模块 tab 在视频游戏改版后已移除）。
-    useShellStore.getState().setForgeView('blueprint')
+    // 退出试玩回到蓝图（新引擎 graph 蓝图）。
+    useShellStore.getState().setForgeView('graph')
     setMode('editor')
   }
 

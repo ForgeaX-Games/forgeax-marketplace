@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { StepStatus } from "../../types";
 import { GenericObjectView } from "../shared/GenericObjectView";
+import { resolveGraphNodeLabel } from "../../i18n/graphLabels";
 
 interface NarrativeCardData {
   label: string;
@@ -11,8 +12,9 @@ interface NarrativeCardData {
 
 const PRIORITY_KEYS = new Set(["game_name", "one_liner", "story", "gameplay_mapping", "level_expansion"]);
 
-function NarrativeCardNodeRaw({ data }: NodeProps<NarrativeCardData>) {
+function NarrativeCardNodeRaw({ data, id }: NodeProps<NarrativeCardData>) {
   const { label, status, card } = data;
+  const displayLabel = resolveGraphNodeLabel(id, label);
   const [expanded, setExpanded] = useState(false);
   const extraFields = useMemo(() => {
     if (!card) return null;
@@ -39,13 +41,13 @@ function NarrativeCardNodeRaw({ data }: NodeProps<NarrativeCardData>) {
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-pipeline-header">
         <span style={{ fontSize: 8, color: dotColor }}>✦</span>
-        <span className="rf-pipeline-label">{label}</span>
+        <span className="rf-pipeline-label">{displayLabel}</span>
       </div>
       {expanded && card && (
         <div className="rf-pipeline-overlay rf-narrative-card-overlay">
           <div className="rf-pipeline-header" style={{ marginBottom: 6 }}>
             <span style={{ fontSize: 8, color: dotColor }}>✦</span>
-            <span className="rf-pipeline-label">{label}</span>
+            <span className="rf-pipeline-label">{displayLabel}</span>
             <span className="rf-child-close">✕</span>
           </div>
           {typeof card.game_name === "string" && card.game_name && (

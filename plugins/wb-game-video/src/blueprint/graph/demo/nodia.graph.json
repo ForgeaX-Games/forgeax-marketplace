@@ -53,6 +53,14 @@
       "name": "莲花妖线索",
       "kind": "flag",
       "initial": 0
+    },
+    "mineFirst": {
+      "id": "mineFirst",
+      "name": "我方先手",
+      "kind": "number",
+      "initial": 1,
+      "min": 0,
+      "max": 1
     }
   },
   "entities": {
@@ -99,11 +107,17 @@
     "hud": [
       {
         "element": "ent-player",
-        "show": "always"
+        "show": "always",
+        "component": "battleHpBar",
+        "label": "空藏",
+        "pos": "bottom-right"
       },
       {
         "element": "ent-boss",
-        "show": "always"
+        "show": "always",
+        "component": "battleHpBar",
+        "label": "小怪",
+        "pos": "top"
       },
       {
         "element": "score",
@@ -163,7 +177,9 @@
                 "outcomeLabels": {
                   "pass": "叩中",
                   "fail": "错过"
-                }
+                },
+                "component": "inkKou",
+                "glyph": "叩"
               }
             }
           ],
@@ -188,7 +204,21 @@
         "outputs": [],
         "data": {
           "name": "小魂对话",
-          "timeline": [],
+          "timeline": [
+            {
+              "id": "soul-line",
+              "role": "presentation",
+              "kind": "dialogue",
+              "trigger": {
+                "when": "enter"
+              },
+              "params": {
+                "speaker": "小魂",
+                "text": "……你也是来渡河的吗？",
+                "color": "#ffd54a"
+              }
+            }
+          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
@@ -231,7 +261,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -299,7 +330,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -389,7 +421,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -457,7 +490,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -503,7 +537,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -593,7 +628,8 @@
                     "key": "mo",
                     "label": "默"
                   }
-                ]
+                ],
+                "component": "inkYingMo"
               }
             }
           ],
@@ -662,7 +698,21 @@
         "outputs": [],
         "data": {
           "name": "进战待机",
-          "timeline": [],
+          "timeline": [
+            {
+              "id": "enter-fade",
+              "role": "presentation",
+              "kind": "transition",
+              "trigger": {
+                "when": "enter"
+              },
+              "params": {
+                "durationMs": 700,
+                "style": "fade",
+                "color": "#000"
+              }
+            }
+          ],
           "durationMs": 8080,
           "media": {
             "kind": "VIDEO",
@@ -672,182 +722,6 @@
           "hud": {
             "preset": "battle"
           }
-        }
-      },
-      {
-        "id": "init",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "出手判断",
-          "timeline": []
-        }
-      },
-      {
-        "id": "a_my",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "我方回合(先手)",
-          "timeline": [],
-          "subFlowRef": "wait"
-        }
-      },
-      {
-        "id": "b_ai",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "敌方回合(先手)",
-          "timeline": [],
-          "subFlowRef": "bt"
-        }
-      },
-      {
-        "id": "a_chk",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "血量判定(我方先手后)",
-          "timeline": []
-        }
-      },
-      {
-        "id": "b_chk",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "血量判定(敌方先手后)",
-          "timeline": []
-        }
-      },
-      {
-        "id": "a_ai",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "敌方回合(后手)",
-          "timeline": [],
-          "subFlowRef": "bt"
-        }
-      },
-      {
-        "id": "b_my",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "我方回合(后手)",
-          "timeline": [],
-          "subFlowRef": "wait"
-        }
-      },
-      {
-        "id": "round",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "回合结束判定",
-          "timeline": []
-        }
-      },
-      {
-        "id": "settle",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "胜负判定",
-          "timeline": []
-        }
-      },
-      {
-        "id": "win",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "战斗胜利",
-          "timeline": [],
-          "durationMs": 10000,
-          "media": {
-            "kind": "VIDEO",
-            "ref": "vd-wcc-shengli"
-          },
-          "hud": {
-            "preset": "hidden"
-          },
-          "end": "victory"
-        }
-      },
-      {
-        "id": "lose",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "战斗失败",
-          "timeline": [],
-          "durationMs": 6000,
-          "media": {
-            "kind": "VIDEO",
-            "ref": "vd-wcc-shibai"
-          },
-          "hud": {
-            "preset": "hidden"
-          },
-          "end": "defeat"
         }
       },
       {
@@ -871,6 +745,7 @@
               },
               "params": {
                 "prompt": "选择技能",
+                "component": "battleSkillBar",
                 "options": [
                   {
                     "key": "light",
@@ -896,7 +771,17 @@
                         "op": "add",
                         "value": -2
                       }
-                    ]
+                    ],
+                    "condition": {
+                      "all": [
+                        {
+                          "type": "var",
+                          "varId": "qi",
+                          "op": "gte",
+                          "value": 2
+                        }
+                      ]
+                    }
                   },
                   {
                     "key": "medit",
@@ -913,7 +798,17 @@
                         "op": "set",
                         "value": 0
                       }
-                    ]
+                    ],
+                    "condition": {
+                      "all": [
+                        {
+                          "type": "var",
+                          "varId": "qi",
+                          "op": "gte",
+                          "value": 5
+                        }
+                      ]
+                    }
                   }
                 ]
               }
@@ -928,20 +823,6 @@
           "hud": {
             "preset": "battle"
           }
-        }
-      },
-      {
-        "id": "pjudge",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "变招判定(轻)",
-          "timeline": []
         }
       },
       {
@@ -1056,20 +937,6 @@
           "hud": {
             "preset": "battle"
           }
-        }
-      },
-      {
-        "id": "zjudge",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "变招判定(重)",
-          "timeline": []
         }
       },
       {
@@ -1308,35 +1175,6 @@
         }
       },
       {
-        "id": "my-done",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "行动完毕(我)",
-          "timeline": [],
-          "returnsToCaller": true
-        }
-      },
-      {
-        "id": "bt",
-        "type": "perf",
-        "position": {
-          "x": 0,
-          "y": 0
-        },
-        "inputs": [],
-        "outputs": [],
-        "data": {
-          "name": "行为树决策",
-          "timeline": []
-        }
-      },
-      {
         "id": "tele",
         "type": "perf",
         "position": {
@@ -1357,7 +1195,8 @@
               },
               "params": {
                 "qteKind": "parry",
-                "windowMs": 160,
+                "component": "battleParry",
+                "durationMs": 2600,
                 "outcomeLabels": {
                   "pass": "受击防反",
                   "good": "受击闪避",
@@ -1548,7 +1387,7 @@
         }
       },
       {
-        "id": "ai-done",
+        "id": "win",
         "type": "perf",
         "position": {
           "x": 0,
@@ -1557,9 +1396,40 @@
         "inputs": [],
         "outputs": [],
         "data": {
-          "name": "行动完毕(敌)",
+          "name": "战斗胜利",
           "timeline": [],
-          "returnsToCaller": true
+          "durationMs": 10000,
+          "media": {
+            "kind": "VIDEO",
+            "ref": "vd-wcc-shengli"
+          },
+          "hud": {
+            "preset": "hidden"
+          },
+          "end": "victory"
+        }
+      },
+      {
+        "id": "lose",
+        "type": "perf",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "战斗失败",
+          "timeline": [],
+          "durationMs": 6000,
+          "media": {
+            "kind": "VIDEO",
+            "ref": "vd-wcc-shibai"
+          },
+          "hud": {
+            "preset": "hidden"
+          },
+          "end": "defeat"
         }
       }
     ],
@@ -1743,15 +1613,9 @@
         }
       },
       {
-        "id": "e-enter",
-        "source": "enter",
-        "target": "init",
-        "sourceHandle": "out"
-      },
-      {
         "id": "e-init-me",
-        "source": "init",
-        "target": "a_my",
+        "source": "enter",
+        "target": "wait",
         "sourceHandle": "cond:0",
         "data": {
           "condition": {
@@ -1764,124 +1628,86 @@
                 "op": "gte"
               }
             ]
-          }
+          },
+          "effects": [
+            {
+              "id": "first-me",
+              "kind": "var",
+              "varId": "mineFirst",
+              "op": "set",
+              "value": 1
+            }
+          ]
         }
       },
       {
         "id": "e-init-foe",
-        "source": "init",
-        "target": "b_ai",
-        "sourceHandle": "else"
-      },
-      {
-        "id": "e-amy",
-        "source": "a_my",
-        "target": "a_chk",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-bai",
-        "source": "b_ai",
-        "target": "b_chk",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-achk-ai",
-        "source": "a_chk",
-        "target": "a_ai",
-        "sourceHandle": "cond:0",
+        "source": "enter",
+        "target": "tele",
+        "sourceHandle": "else",
         "data": {
-          "condition": {
-            "all": [
-              {
-                "type": "attrRatio",
-                "entityId": "ent-boss",
-                "attr": "hp",
-                "op": "gt",
-                "value": 0
-              }
-            ]
-          }
+          "effects": [
+            {
+              "id": "first-foe",
+              "kind": "var",
+              "varId": "mineFirst",
+              "op": "set",
+              "value": 0
+            }
+          ]
         }
       },
       {
-        "id": "e-achk-over",
-        "source": "a_chk",
-        "target": "settle",
-        "sourceHandle": "else"
-      },
-      {
-        "id": "e-bchk-my",
-        "source": "b_chk",
-        "target": "b_my",
-        "sourceHandle": "cond:0",
+        "id": "e-sk-light",
+        "source": "wait",
+        "target": "pu",
+        "sourceHandle": "opt:light",
         "data": {
-          "condition": {
-            "all": [
-              {
-                "type": "attrRatio",
-                "entityId": "ent-player",
-                "attr": "hp",
-                "op": "gt",
-                "value": 0
-              }
-            ]
-          }
+          "weight": 1
         }
       },
       {
-        "id": "e-bchk-over",
-        "source": "b_chk",
-        "target": "settle",
-        "sourceHandle": "else"
-      },
-      {
-        "id": "e-aai",
-        "source": "a_ai",
-        "target": "round",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-bmy",
-        "source": "b_my",
-        "target": "round",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-round-next",
-        "source": "round",
-        "target": "init",
-        "sourceHandle": "cond:0",
+        "id": "e-sk-light2",
+        "source": "wait",
+        "target": "pu2",
+        "sourceHandle": "opt:light",
         "data": {
-          "condition": {
-            "all": [
-              {
-                "type": "attrRatio",
-                "entityId": "ent-player",
-                "attr": "hp",
-                "op": "gt",
-                "value": 0
-              },
-              {
-                "type": "attrRatio",
-                "entityId": "ent-boss",
-                "attr": "hp",
-                "op": "gt",
-                "value": 0
-              }
-            ]
-          }
+          "weight": 1
         }
       },
       {
-        "id": "e-round-over",
-        "source": "round",
-        "target": "settle",
-        "sourceHandle": "else"
+        "id": "e-sk-heavy",
+        "source": "wait",
+        "target": "zhong",
+        "sourceHandle": "opt:heavy",
+        "data": {
+          "weight": 1
+        }
       },
       {
-        "id": "e-settle-win",
-        "source": "settle",
+        "id": "e-sk-heavy2",
+        "source": "wait",
+        "target": "z2",
+        "sourceHandle": "opt:heavy",
+        "data": {
+          "weight": 1
+        }
+      },
+      {
+        "id": "e-sk-medit",
+        "source": "wait",
+        "target": "fuzhu",
+        "sourceHandle": "opt:medit"
+      },
+      {
+        "id": "e-sk-ult",
+        "source": "wait",
+        "target": "ult",
+        "sourceHandle": "opt:ult"
+      },
+      {
+        "id": "e-pu-win",
+        "source": "pu",
         "target": "win",
         "sourceHandle": "cond:0",
         "data": {
@@ -1899,112 +1725,243 @@
         }
       },
       {
-        "id": "e-settle-lose",
-        "source": "settle",
-        "target": "lose",
+        "id": "e-pu-foe",
+        "source": "pu",
+        "target": "tele",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-pu-loop",
+        "source": "pu",
+        "target": "enter",
         "sourceHandle": "else"
       },
       {
-        "id": "e-sk-light",
-        "source": "wait",
-        "target": "pjudge",
-        "sourceHandle": "opt:light"
-      },
-      {
-        "id": "e-sk-heavy",
-        "source": "wait",
-        "target": "zjudge",
-        "sourceHandle": "opt:heavy"
-      },
-      {
-        "id": "e-sk-medit",
-        "source": "wait",
-        "target": "fuzhu",
-        "sourceHandle": "opt:medit"
-      },
-      {
-        "id": "e-sk-ult",
-        "source": "wait",
-        "target": "ult",
-        "sourceHandle": "opt:ult"
-      },
-      {
-        "id": "e-pj-pu",
-        "source": "pjudge",
-        "target": "pu",
-        "sourceHandle": "out",
-        "data": {
-          "weight": 1
-        }
-      },
-      {
-        "id": "e-pj-pu2",
-        "source": "pjudge",
-        "target": "pu2",
-        "sourceHandle": "out",
-        "data": {
-          "weight": 1
-        }
-      },
-      {
-        "id": "e-pu",
-        "source": "pu",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-pu2",
+        "id": "e-pu2-win",
         "source": "pu2",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-zj-zhong",
-        "source": "zjudge",
-        "target": "zhong",
-        "sourceHandle": "out",
+        "target": "win",
+        "sourceHandle": "cond:0",
         "data": {
-          "weight": 1
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
         }
       },
       {
-        "id": "e-zj-z2",
-        "source": "zjudge",
-        "target": "z2",
-        "sourceHandle": "out",
-        "data": {
-          "weight": 1
-        }
-      },
-      {
-        "id": "e-zhong",
-        "source": "zhong",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-z2",
-        "source": "z2",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-fuzhu",
-        "source": "fuzhu",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-ult",
-        "source": "ult",
-        "target": "my-done",
-        "sourceHandle": "out"
-      },
-      {
-        "id": "e-bt",
-        "source": "bt",
+        "id": "e-pu2-foe",
+        "source": "pu2",
         "target": "tele",
-        "sourceHandle": "out"
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-pu2-loop",
+        "source": "pu2",
+        "target": "enter",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-zhong-win",
+        "source": "zhong",
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-zhong-foe",
+        "source": "zhong",
+        "target": "tele",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-zhong-loop",
+        "source": "zhong",
+        "target": "enter",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-z2-win",
+        "source": "z2",
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-z2-foe",
+        "source": "z2",
+        "target": "tele",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-z2-loop",
+        "source": "z2",
+        "target": "enter",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-fuzhu-win",
+        "source": "fuzhu",
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-fuzhu-foe",
+        "source": "fuzhu",
+        "target": "tele",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-fuzhu-loop",
+        "source": "fuzhu",
+        "target": "enter",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-ult-win",
+        "source": "ult",
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-ult-foe",
+        "source": "ult",
+        "target": "tele",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-ult-loop",
+        "source": "ult",
+        "target": "enter",
+        "sourceHandle": "else"
       },
       {
         "id": "e-tele-pass",
@@ -2047,22 +2004,190 @@
         }
       },
       {
-        "id": "e-block",
+        "id": "e-block-win",
         "source": "block",
-        "target": "ai-done",
-        "sourceHandle": "out"
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
       },
       {
-        "id": "e-dodgeP",
+        "id": "e-block-lose",
+        "source": "block",
+        "target": "lose",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-player",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-block-loop",
+        "source": "block",
+        "target": "enter",
+        "sourceHandle": "cond:2",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-block-my",
+        "source": "block",
+        "target": "wait",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-dodgeP-win",
         "source": "dodgeP",
-        "target": "ai-done",
-        "sourceHandle": "out"
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
       },
       {
-        "id": "e-hurt",
+        "id": "e-dodgeP-lose",
+        "source": "dodgeP",
+        "target": "lose",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-player",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-dodgeP-loop",
+        "source": "dodgeP",
+        "target": "enter",
+        "sourceHandle": "cond:2",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-dodgeP-my",
+        "source": "dodgeP",
+        "target": "wait",
+        "sourceHandle": "else"
+      },
+      {
+        "id": "e-hurt-win",
         "source": "hurt",
-        "target": "ai-done",
-        "sourceHandle": "out"
+        "target": "win",
+        "sourceHandle": "cond:0",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-boss",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-hurt-lose",
+        "source": "hurt",
+        "target": "lose",
+        "sourceHandle": "cond:1",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "attrRatio",
+                "entityId": "ent-player",
+                "attr": "hp",
+                "op": "lte",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-hurt-loop",
+        "source": "hurt",
+        "target": "enter",
+        "sourceHandle": "cond:2",
+        "data": {
+          "condition": {
+            "all": [
+              {
+                "type": "var",
+                "varId": "mineFirst",
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "e-hurt-my",
+        "source": "hurt",
+        "target": "wait",
+        "sourceHandle": "else"
       }
     ]
   }

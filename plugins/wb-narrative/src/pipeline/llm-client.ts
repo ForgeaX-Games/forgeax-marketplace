@@ -6,6 +6,8 @@ export interface LLMCallOptions {
   maxOutputTokens?: number;
   timeout?: number;
   responseFormat?: "text" | "json";
+  /** Override instance content locale for this call. */
+  contentLocale?: ContentLocale;
 }
 
 /** 多模态图像分块（Gemini inlineData）。data 为 base64 字符串或 Buffer。 */
@@ -20,9 +22,13 @@ export interface LLMClientConfig {
   /** Bearer token for LiteLLM proxy (`LITELLM_PROXY_KEY`). */
   proxyApiKey?: string;
   defaultModel?: string;
+  /** UI locale — when "en", all LLM outputs are instructed to use English. */
+  contentLocale?: ContentLocale;
 }
 
 import { getDefaultModel } from "../utils/plugin-env.js";
+import type { ContentLocale } from "../types/index.js";
+import { finalizeSystemPrompt, finalizeUserPrompt } from "./content-locale.js";
 const DEFAULT_MODEL = getDefaultModel();
 const DEFAULT_TIMEOUT = 300_000;
 /**
@@ -87,10 +93,12 @@ export class LLMClient {
   private proxyUrl: string | null;
   private proxyApiKey: string | null;
   private defaultModel: string;
+  private contentLocale: ContentLocale;
 
   constructor(config: LLMClientConfig) {
     const model = config.defaultModel ?? DEFAULT_MODEL;
     this.defaultModel = model;
+    this.contentLocale = config.contentLocale ?? "zh";
     this.proxyUrl = config.proxyUrl?.replace(/\/+$/, "") ?? null;
     this.proxyApiKey = config.proxyApiKey?.trim() || null;
 
@@ -108,15 +116,32 @@ export class LLMClient {
     }
   }
 
+  private resolveLocale(options: LLMCallOptions): ContentLocale {
+    return options.contentLocale ?? this.contentLocale;
+  }
+
+  private preparePrompts(
+    systemPrompt: string,
+    userPrompt: string,
+    locale: ContentLocale,
+  ): [string, string] {
+    return [
+      finalizeSystemPrompt(systemPrompt, locale),
+      finalizeUserPrompt(userPrompt, locale),
+    ];
+  }
+
   async call(
     systemPrompt: string,
     userPrompt: string,
     options: LLMCallOptions = {},
   ): Promise<string> {
+    const locale = this.resolveLocale(options);
+    const [sp, up] = this.preparePrompts(systemPrompt, userPrompt, locale);
     if (this.proxyUrl) {
-      return this._callViaProxy(systemPrompt, userPrompt, options);
+      return this._callViaProxy(sp, up, options);
     }
-    return this._callViaSdk(systemPrompt, userPrompt, options);
+    return this._callViaSdk(sp, up, options);
   }
 
   private async _callViaSdk(
@@ -133,15 +158,14 @@ export class LLMClient {
     if (options.responseFormat === "json")
       config.responseMimeType = "application/json";
 
-    const response: GenerateContentResponse =
-      await this.client!.models.generateContent({
-        model,
-        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-        config: {
-          systemInstruction: systemPrompt,
-          ...config,
-        },
-      });
+    const response: GenerateContentResponse = await this.client!.models.generateContent({
+      model,
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction: systemPrompt,
+        ...config,
+      },
+    });
 
     const text = response.text;
     if (!text) throw new Error("LLM returned empty response");
@@ -159,11 +183,13 @@ export class LLMClient {
     images: ImagePart[],
     options: LLMCallOptions = {},
   ): Promise<string> {
+    const locale = this.resolveLocale(options);
+    const [sp, up] = this.preparePrompts(systemPrompt, userPrompt, locale);
     const toBase64 = (d: string | Buffer): string =>
       typeof d === "string" ? d : d.toString("base64");
     const parts: Array<Record<string, unknown>> = [
       ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: toBase64(img.data) } })),
-      { text: userPrompt },
+      { text: up },
     ];
     const model = options.model ?? this.defaultModel;
 
@@ -176,7 +202,7 @@ export class LLMClient {
       const timeout = options.timeout ?? DEFAULT_TIMEOUT;
       const body = {
         contents: [{ role: "user", parts }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
+        systemInstruction: { parts: [{ text: sp }] },
         generationConfig: config,
       };
       const url = `${this.proxyUrl}/v1/gemini/generateContent/${model}`;
@@ -207,7 +233,7 @@ export class LLMClient {
     const response: GenerateContentResponse = await this.client!.models.generateContent({
       model,
       contents: [{ role: "user", parts: parts as never }],
-      config: { systemInstruction: systemPrompt, ...config },
+      config: { systemInstruction: sp, ...config },
     });
     const text = response.text;
     if (!text) throw new Error("LLM returned empty response");
@@ -278,10 +304,12 @@ export class LLMClient {
     userPrompt: string,
     options: LLMCallOptions = {},
   ): AsyncGenerator<string> {
+    const locale = this.resolveLocale(options);
+    const [sp, up] = this.preparePrompts(systemPrompt, userPrompt, locale);
     if (this.proxyUrl) {
-      yield* this._streamViaProxy(systemPrompt, userPrompt, options);
+      yield* this._streamViaProxy(sp, up, options);
     } else {
-      yield* this._streamViaSdk(systemPrompt, userPrompt, options);
+      yield* this._streamViaSdk(sp, up, options);
     }
   }
 
@@ -361,14 +389,19 @@ export class LLMClient {
     parseResult?: (raw: string) => unknown,
     onChunk?: (chunk: string, accumulated: string) => void,
   ): Promise<string> {
+    const locale = this.resolveLocale(options);
     const effectiveRetries = DEFAULT_RETRIES;
     let lastError: Error | undefined;
     let adjustedUserPrompt = userPrompt;
 
+    const jsonRuleZh =
+      "\n\n【格式铁律】你的输出必须是且仅是合法JSON。禁止：注释、省略号(...)、尾逗号、未转义换行符、单引号。数组/对象元素之间必须用逗号分隔。";
+    const jsonRuleEn =
+      "\n\n【FORMAT】Your output must be valid JSON only. Forbidden: comments, ellipses (...), trailing commas, unescaped newlines, single quotes. Array/object elements must be comma-separated.";
+
     const effectiveSystemPrompt =
       options.responseFormat === "json"
-        ? systemPrompt +
-          "\n\n【格式铁律】你的输出必须是且仅是合法JSON。禁止：注释、省略号(...)、尾逗号、未转义换行符、单引号。数组/对象元素之间必须用逗号分隔。"
+        ? systemPrompt + (locale === "en" ? jsonRuleEn : jsonRuleZh)
         : systemPrompt;
 
     // json 模式下，若调用方未自定义 parseResult，自动启用截断校验：
@@ -379,6 +412,11 @@ export class LLMClient {
       (options.responseFormat === "json"
         ? (raw: string) => assertJsonNotTruncated(raw, "callWithRetry.json")
         : undefined);
+
+    const retrySuffixZh = (attempt: number, msg: string) =>
+      `\n\n⚠️ 上次输出有误（第${attempt}次重试）：${msg}\n请重新生成。严格要求：\n- 输出必须是合法JSON，禁止任何注释、省略号或多余文字\n- 数组元素之间必须有逗号分隔\n- 对象键值对之间必须有逗号分隔\n- 最后一个元素后禁止尾逗号\n- 字符串中的换行符必须用\\n转义`;
+    const retrySuffixEn = (attempt: number, msg: string) =>
+      `\n\n⚠️ Previous output was invalid (retry ${attempt}): ${msg}\nRegenerate. Requirements:\n- Valid JSON only; no comments, ellipses, or extra prose\n- Commas between array elements and object properties\n- No trailing comma after the last element\n- Escape newlines in strings as \\n`;
 
     for (let i = 0; i < effectiveRetries; i++) {
       try {
@@ -394,7 +432,9 @@ export class LLMClient {
         }
         adjustedUserPrompt =
           userPrompt +
-          `\n\n⚠️ 上次输出有误（第${i + 1}次重试）：${lastError.message}\n请重新生成。严格要求：\n- 输出必须是合法JSON，禁止任何注释、省略号或多余文字\n- 数组元素之间必须有逗号分隔\n- 对象键值对之间必须有逗号分隔\n- 最后一个元素后禁止尾逗号\n- 字符串中的换行符必须用\\n转义`;
+          (locale === "en"
+            ? retrySuffixEn(i + 1, lastError.message)
+            : retrySuffixZh(i + 1, lastError.message));
       }
     }
     throw lastError ?? new Error("callWithRetry exhausted all retries");

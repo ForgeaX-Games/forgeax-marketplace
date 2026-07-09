@@ -22,14 +22,14 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.jumpToNode('enter') // 跳过叙事，seek 到战斗入口（保留初始全局态）
     expect(rt.state.currentNodeId).toBe('enter')
 
-    rt.onPerformanceEnd() // enter → init(先手) → a_my(subFlow) → wait(等技能)
+    rt.onPerformanceEnd() // 进战待机 → 出手判断(折进出边: 速度≥→我方先手, 记 mineFirst=1) → 战斗待机(等技能)
     expect(rt.state.currentNodeId).toBe('wait')
     expect(rt.state.phase).toBe('awaitInteraction')
 
-    rt.submitInteraction('skill', 'light') // qi+2 → 变招判定 → 轻攻击演出
+    rt.submitInteraction('skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
     expect(rt.state.vars.qi).toBe(2)
 
-    rt.onPerformanceEnd() // 轻攻击结算(≥80伤害) → boss 死 → my-done→a_my→a_chk→settle→win(演出)
+    rt.onPerformanceEnd() // 轻攻击结算(≥80伤害) → boss 死 → 血量判定(折进出边)→win(演出)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeLessThanOrEqual(0)
     expect(rt.state.currentNodeId).toBe('win')
 
@@ -39,17 +39,17 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(banner?.kind).toBe('victory')
   })
 
-  it('turn loop: survive a round → back to 我方回合(wait) (回合循环成立)', () => {
+  it('turn loop: 我方先手一整回合(我方攻击→敌方回合)存活 → 回到进战待机(enter) (回合循环成立)', () => {
     const scn = makeNodiaDemo({ bossHp: 700 })
     const rt = new GraphRuntime(scn.graph, scn)
 
     rt.start()
     rt.jumpToNode('enter')
-    rt.onPerformanceEnd() // → wait(等技能)
+    rt.onPerformanceEnd() // → 战斗待机(等技能)，mineFirst=1
     expect(rt.state.currentNodeId).toBe('wait')
 
     rt.submitInteraction('skill', 'light') // qi+2 → 轻攻击演出
-    rt.onPerformanceEnd() // 轻攻击结算(boss 掉血, 仍存活) → my-done→a_my→a_chk(boss存活)→a_ai(subFlow)→bt→tele(防反QTE)
+    rt.onPerformanceEnd() // 结算(boss 掉血, 仍存活) → 血量判定(折进出边: 我方先手→敌方回合) → tele(防反QTE)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeGreaterThan(0)
     expect(rt.state.currentNodeId).toBe('tele')
     expect(rt.state.phase).toBe('awaitInteraction')
@@ -57,12 +57,12 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.submitInteraction('parry', 'pass') // → 受击防反演出 block
     expect(rt.state.currentNodeId).toBe('block')
 
-    rt.onPerformanceEnd() // block 结算(boss-96) → ai-done→a_ai→round(双方存活)→init→a_my→wait
+    rt.onPerformanceEnd() // block 结算(boss-96) → 回合结束判定(折进出边: 双方存活+我方先手→回合结束) → 回进战待机
     expect(rt.state.visited.has('block')).toBe(true)
-    expect(rt.state.currentNodeId).toBe('wait') // 回到我方回合 = 回合循环成立
+    expect(rt.state.currentNodeId).toBe('enter') // 回到进战待机 = 一整回合走完、回合循环成立
   })
 
-  it('initiative: slower player yields enemy-first (敌方回合 tele)', () => {
+  it('initiative: slower player yields enemy-first (直接进敌方回合 tele)', () => {
     const scn = makeNodiaDemo({ bossHp: 700 })
     scn.entities!['ent-player'] = {
       ...(scn.entities!['ent-player'] as object),
@@ -71,7 +71,7 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     rt.jumpToNode('enter')
-    rt.onPerformanceEnd() // enter → init → (player 10 < boss 25 → else) → b_ai(subFlow)→bt→tele
+    rt.onPerformanceEnd() // enter → 出手判断(player 10 < boss 25 → else, mineFirst=0) → tele(敌方先手)
     expect(rt.state.currentNodeId).toBe('tele')
   })
 })

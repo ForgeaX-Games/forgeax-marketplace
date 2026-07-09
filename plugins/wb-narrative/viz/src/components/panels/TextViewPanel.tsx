@@ -20,6 +20,7 @@ import { STEP_CTX_FIELD, PIPELINE_STEPS } from "../../types";
 import { ProgressRing } from "../controls/ProgressRing";
 import { GenericObjectView, MarkdownBlock } from "../shared/GenericObjectView";
 import { dataToReadableText } from "../shared/dataReadable";
+import { localizeTagSummary } from "../../i18n/tagSummary";
 import { NodeEditActions, NodeUserInputBox, NodeEditTextarea } from "../shared/NodeEditActions";
 import { useNodeEdit } from "../../hooks/useNodeEdit";
 import { sendToHost } from "../../lib/bridge";
@@ -528,7 +529,11 @@ function FirstViewTypewriter({
   result: NarrativeContext | null;
   onComplete: () => void;
 }) {
-  const fullText = useMemo(() => dataToReadableText(data), [data]);
+  const t = useT();
+  const fullText = useMemo(() => {
+    const raw = dataToReadableText(data);
+    return stepId === "input" ? localizeTagSummary(raw, t) : raw;
+  }, [data, stepId, t]);
   const displayed = useTypewriter(fullText, true, 30);
   const doneRef = useRef(false);
 
@@ -578,6 +583,7 @@ function StepRenderer({
   result: NarrativeContext | null;
   isRunning: boolean;
 }) {
+  const t = useT();
   if (stepId === "preference_summary" && typeof data === "string") {
     return <StreamText text={data} isRunning={isRunning} />;
   }
@@ -679,7 +685,8 @@ function StepRenderer({
   }
 
   if (typeof data === "string") {
-    return <StreamText text={data} isRunning={isRunning} />;
+    const text = stepId === "input" ? localizeTagSummary(data, t) : data;
+    return <StreamText text={text} isRunning={isRunning} />;
   }
   return <GenericObjectView data={data} />;
 }

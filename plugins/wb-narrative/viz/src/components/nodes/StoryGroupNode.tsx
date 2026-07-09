@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { StepStatus } from "../../types";
 import { useT } from "../../i18n";
+import { resolveGraphNodeLabel } from "../../i18n/graphLabels";
 
 interface PhaseInfo {
   id: string;
@@ -19,9 +20,10 @@ interface StoryGroupData {
   phases?: PhaseInfo[];
 }
 
-function StoryGroupNodeRaw({ data }: NodeProps<StoryGroupData>) {
+function StoryGroupNodeRaw({ data, id }: NodeProps<StoryGroupData>) {
   const t = useT();
   const { label, status, childCount, expanded, progress, phases } = data;
+  const displayLabel = resolveGraphNodeLabel(id, label);
 
   const dotColor =
     status === "completed" ? "rgba(77,255,160,0.85)" :
@@ -40,7 +42,7 @@ function StoryGroupNodeRaw({ data }: NodeProps<StoryGroupData>) {
 
       <div className="rf-story-group-header">
         <span style={{ fontSize: 8, color: dotColor, pointerEvents: "none" }}>◈</span>
-        <span className="rf-story-group-label">{label}</span>
+        <span className="rf-story-group-label">{displayLabel}</span>
         {childCount > 0 && (
           <span className="rf-story-group-count">{childCount}</span>
         )}
@@ -56,7 +58,7 @@ function StoryGroupNodeRaw({ data }: NodeProps<StoryGroupData>) {
             <span key={ph.id} className="rf-phase-item">
               {idx > 0 && <span className="rf-phase-arrow">→</span>}
               <span className={`rf-phase-badge${ph.done ? " done" : ""}${ph.active ? " active" : ""}`}>
-                {ph.label}
+                {resolveGraphNodeLabel(ph.id, ph.label)}
               </span>
             </span>
           ))}

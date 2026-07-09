@@ -23,6 +23,8 @@ export interface EntryConfig {
   mode?: string;
   genreCode?: string;
   complexity?: number;
+  /** UI locale for generated narrative content (en/zh). */
+  locale?: "en" | "zh";
   /** IP 作品桥接指针：指向 input 媒体目录下的运行键（<时间戳>_<标题>）。 */
   ipRunKey?: string;
   /** 完成态分叉来源条目键（本条目由某已完成条目改配置后新建）。 */

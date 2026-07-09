@@ -45,7 +45,6 @@ export type ForgeView =
   | 'script'
   | 'image'
   | 'tree'
-  | 'blueprint'
   | 'video'
   | 'ui'
   | 'rule'
@@ -62,7 +61,6 @@ const FORGE_VIEW_IDS: readonly ForgeView[] = [
   'script',
   'image',
   'tree',
-  'blueprint',
   'video',
   'ui',
   'rule',
@@ -80,10 +78,9 @@ const FORGE_VIEW_IDS: readonly ForgeView[] = [
  *
  * 'script'(剧本) / 'image'(模块) / 'tree'(剧情树) / 'assets'(素材库) 仍保留在
  * ForgeView 联合里（旧链接 / 内部导航兼容），但**不再有侧栏 tab**；hydrate / 兜底
- * 时把它们收敛到 'blueprint'，避免用户落在一个没有 tab 高亮的视图上。
+ * 时把它们收敛到 'graph'（新蓝图），避免用户落在一个没有 tab 高亮的视图上。
  */
 const TABBED_FORGE_VIEWS: readonly ForgeView[] = [
-  'blueprint',
   'video',
   'ui',
   'rule',
@@ -95,9 +92,9 @@ const TABBED_FORGE_VIEWS: readonly ForgeView[] = [
   'graphplay',
 ]
 
-/** 把任意 forgeView 收敛到有 tab 入口的视图（无 tab 的旧视图 → blueprint）。 */
+/** 把任意 forgeView 收敛到有 tab 入口的视图（无 tab 的旧视图 → graph 新蓝图）。 */
 export function coerceTabbedForgeView(view: ForgeView): ForgeView {
-  return (TABBED_FORGE_VIEWS as readonly string[]).includes(view) ? view : 'blueprint'
+  return (TABBED_FORGE_VIEWS as readonly string[]).includes(view) ? view : 'graph'
 }
 
 /** 当前是否处于试玩视图（含旧 activeTab='player' 兼容）。 */
@@ -285,7 +282,7 @@ export const useShellStore = create<ShellState>()(
   persist(
     (set, get) => ({
       activeTab: 'forge',
-      forgeView: 'blueprint',
+      forgeView: 'graph',
       imageSection: 'refs',
       inspectorOpen: false,
       sceneDetailOpen: false,
@@ -317,8 +314,8 @@ export const useShellStore = create<ShellState>()(
           if (get().forgeView === view) return
           set({ forgeView: view })
         } else {
-          // 兜住 'music' (老 view, 已废) 等历史值, 退到默认蓝图
-          set({ forgeView: 'blueprint' })
+          // 兜住 'music' (老 view, 已废) 等历史值, 退到默认(新蓝图 graph)
+          set({ forgeView: 'graph' })
         }
       },
       setImageSection: (section) => {

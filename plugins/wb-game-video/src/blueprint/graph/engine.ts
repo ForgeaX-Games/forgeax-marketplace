@@ -12,7 +12,7 @@
  *  - 交互：openInteraction 挂起 → submitInteraction(resolve) → outcome→handle→edge。
  *  - jumpToNode：seek 到任意节点（默认保留全局态）。
  */
-import type { GameEdge, GameGraph, GameNode, GameScenario, GraphEffect, ReactiveRule, TimelineElement } from './graph-schema'
+import type { GameEdge, GameGraph, GameNode, GameScenario, GraphCondition, GraphEffect, ReactiveRule, TimelineElement } from './graph-schema'
 import { applyEffects, type MutableState } from './apply-effects'
 import { initState } from './engine-init'
 import { getKind, type RuntimeCtx } from './kind-registry'
@@ -297,12 +297,14 @@ export class GraphRuntime {
     } else if (plugin.role === 'interaction') {
       if (plugin.present) for (const d of plugin.present(ctx, el.params)) this.emit(d)
       const timeoutMs = typeof el.params.timeoutMs === 'number' ? (el.params.timeoutMs as number) : undefined
+      // 逐项门控：给带 condition 的选项算出 _locked（当前态不满足即锁定），皮肤据此灰置禁选。
+      const params = this.withOptionLocks(el.params)
       this.emit({
         type: 'openInteraction',
         nodeId: this.state.currentNodeId ?? '',
         elementId: el.id,
         kind: el.kind,
-        params: el.params,
+        params,
         handles: plugin.outputs(el.params).map((h) => h.id),
         ...(timeoutMs && timeoutMs > 0 ? { timeoutMs } : {}),
       })
@@ -312,6 +314,20 @@ export class GraphRuntime {
     }
     // 命中后连锁：触发绑定到本元素的 afterHit 元素（如结算→漂字），除非本步已改道。
     if (!this.redirect) this.fireAfterHit(el.id)
+  }
+
+  /** 给 choice/skill 的选项按 condition 算出 `_locked`（当前态不满足即锁定）；无 condition 原样返回。 */
+  private withOptionLocks(params: Record<string, unknown>): Record<string, unknown> {
+    const opts = params.options
+    if (!Array.isArray(opts)) return params
+    let changed = false
+    const mapped = (opts as Array<Record<string, unknown>>).map((o) => {
+      const cond = o.condition as GraphCondition | undefined
+      const locked = cond ? !evaluateCondition(cond, this.condTarget()) : false
+      if (locked) changed = true
+      return locked ? { ...o, _locked: true } : o
+    })
+    return changed ? { ...params, options: mapped } : params
   }
 
   /** 触发所有 `trigger: { when:'afterHit', ref }` 指向 refId 的元素（fired 去重防环）。 */

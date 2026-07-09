@@ -319,6 +319,7 @@ export class NarrativePipeline {
       proxyUrl: config.proxyUrl,
       proxyApiKey: config.proxyApiKey,
       defaultModel: config.model ?? getDefaultModel(),
+      contentLocale: config.locale ?? "zh",
     });
   }
 
@@ -334,6 +335,9 @@ export class NarrativePipeline {
     // 复杂度档位注入：让不跑 preference_analysis 的管线（tpl-vn-v2 等）也能拿到 UI 选的档位派生节点预算。
     if (this.config.complexity != null && ctx.complexity == null) {
       ctx.complexity = this.config.complexity;
+    }
+    if (this.config.locale && !ctx.content_locale) {
+      ctx.content_locale = this.config.locale;
     }
 
     // M1: 上传剧本独立字段（前端在 /start 时给，resume 时从 checkpoint 还原 ctx.uploaded_script 自然带回）

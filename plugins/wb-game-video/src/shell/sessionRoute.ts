@@ -52,7 +52,6 @@ const VALID_VIEWS: readonly ForgeView[] = [
   'script',
   'image',
   'tree',
-  'blueprint',
   'video',
   'ui',
   'rule',

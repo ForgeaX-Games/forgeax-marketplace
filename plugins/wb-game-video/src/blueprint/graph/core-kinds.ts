@@ -11,7 +11,7 @@
  *  - qte(interaction)   三档判定：pass/good/fail 出口。
  *  - hotspot(interaction) 热点：每热点一个 hs:<id> 出口。
  */
-import type { GraphEffect, GraphTextStyle } from './graph-schema'
+import type { GraphCondition, GraphEffect, GraphTextStyle } from './graph-schema'
 import type { FormField, KindPlugin } from './kind-registry'
 import { registerKind } from './kind-registry'
 import { evalExpr } from './expr'
@@ -94,6 +94,8 @@ export interface ChoiceOption {
   key: string
   label?: string
   effects?: GraphEffect[]
+  /** 逐项门控：条件不成立则该选项被锁定（皮肤灰置禁选）。如「灭世需 qi≥5」。 */
+  condition?: GraphCondition
 }
 /** 选项呈现形态：列表 / 画面热区。 */
 export type ChoicePresentation = 'list' | 'hotspot'
@@ -113,6 +115,8 @@ export interface ChoiceParams {
   fireAt?: ChoiceFireAt
   /** 热区（presentation='hotspot' 时按 key 对应画面区域）。 */
   hotspots?: HotspotItem[]
+  /** 渲染皮肤组件 id（皮肤 registry），缺省=通用按钮。 */
+  component?: string
 }
 const CHOICE_FORM: FormField[] = [
   { t: 'text', key: 'prompt', label: '提示' },
@@ -186,6 +190,10 @@ export interface QteParams {
   /** UI 皮肤 id。 */
   ui?: string
   outcomeLabels?: Record<string, string>
+  /** 渲染皮肤组件 id（皮肤 registry），缺省=通用按钮。 */
+  component?: string
+  /** 皮肤自管时限 ms（如叩击/防反的收圈时长；缺省各皮肤自带）。 */
+  durationMs?: number
 }
 export const qteKind: KindPlugin<QteParams> = {
   kind: 'qte',

@@ -5,6 +5,7 @@ import {
   migrateV6ToV7,
   migrateV7ToV8,
   migrateV8ToV9,
+  migrateV10ToV11,
   migrateV12ToV13,
   migrateScenarioToLatest,
   ensureSceneHasShots,
@@ -272,6 +273,66 @@ describe('migrateV8ToV9', () => {
     expect(out.schemaVersion).toBe(13)
     expect(out.entities).toBeUndefined()
     expect(out.ui).toBeUndefined()
+  })
+})
+
+describe('migrateV10ToV11（交互形态 presence 化）', () => {
+  function mkV10WithScene(sceneExtra: Record<string, unknown>): Scenario {
+    return {
+      ...mkV1(),
+      schemaVersion: 10,
+      scenes: {
+        s1: {
+          id: 's1',
+          title: '场景',
+          media: { kind: 'PLACEHOLDER', meta: {} },
+          durationMs: 4000,
+          dialogue: [],
+          branches: [],
+          ...sceneExtra,
+        } as unknown as Scene,
+      },
+    }
+  }
+
+  it('kind:choice 但无 decision、只有 auto 分支 → 不当作 choice（还原为普通 perf，不崩溃）', () => {
+    // 复现历史脏数据（nodiaBlueprintDemo 的 enter 节点）：光有 kind:'choice' 标签，
+    // 实为自动转场节点。旧实现会 migrateChoice(undefined) 读 optType 崩溃。
+    const out = migrateV10ToV11(
+      mkV10WithScene({
+        kind: 'choice',
+        branches: [{ id: 'b-auto', kind: 'auto', targetSceneId: 't', label: 'Out' }],
+      }),
+    )
+    const s1 = out.scenes.s1 as unknown as Record<string, unknown>
+    expect(s1.choice).toBeUndefined()
+    expect(s1.kind).toBeUndefined()
+  })
+
+  it('kind:choice + decision → 生成 choice 字段', () => {
+    const out = migrateV10ToV11(
+      mkV10WithScene({
+        kind: 'choice',
+        decision: { optType: 'timed', prompt: '选一个', timeoutMs: 8000 },
+        branches: [{ id: 'b1', kind: 'choice', targetSceneId: 't1', label: '甲' }],
+      }),
+    )
+    const s1 = out.scenes.s1 as unknown as Record<string, unknown>
+    const choice = s1.choice as Record<string, unknown> | undefined
+    expect(choice).toBeDefined()
+    expect(choice?.timed).toBe(true)
+    expect(choice?.prompt).toBe('选一个')
+  })
+
+  it('无 decision 但有 choice 分支 → 仍当作 choice（choice 字段存在且为空壳）', () => {
+    const out = migrateV10ToV11(
+      mkV10WithScene({
+        kind: 'choice',
+        branches: [{ id: 'b1', kind: 'choice', targetSceneId: 't1', label: '甲' }],
+      }),
+    )
+    const s1 = out.scenes.s1 as unknown as Record<string, unknown>
+    expect(s1.choice).toBeDefined()
   })
 })
 

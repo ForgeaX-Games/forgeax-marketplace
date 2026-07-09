@@ -4,6 +4,7 @@ import type { StepStatus } from "../../types";
 import { GenericObjectView } from "../shared/GenericObjectView";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import { useT } from "../../i18n";
+import { resolveGraphNodeLabel } from "../../i18n/graphLabels";
 
 interface PipelineStepData {
   label: string;
@@ -14,8 +15,9 @@ interface PipelineStepData {
   stepData?: unknown;
 }
 
-function PipelineStepNodeRaw({ data }: NodeProps<PipelineStepData>) {
+function PipelineStepNodeRaw({ data, id }: NodeProps<PipelineStepData>) {
   const { label, status, stepType, isSelected, progress, stepData } = data;
+  const displayLabel = resolveGraphNodeLabel(id, label);
   const [expanded, setExpanded] = useState(false);
 
   const dotColor =
@@ -43,7 +45,7 @@ function PipelineStepNodeRaw({ data }: NodeProps<PipelineStepData>) {
         <span style={{ fontSize: 8, color: dotColor, pointerEvents: "none" }}>
           {isStory ? "◈" : "◆"}
         </span>
-        <span className="rf-pipeline-label">{label}</span>
+        <span className="rf-pipeline-label">{displayLabel}</span>
         <ProgressRing pct={pct} status={status} size={16} />
       </div>
       <div className="rf-progress-bar">
@@ -54,7 +56,8 @@ function PipelineStepNodeRaw({ data }: NodeProps<PipelineStepData>) {
       </div>
       {expanded && hasData && (
         <ExpandedOverlay
-          label={label}
+          stepId={id}
+          label={displayLabel}
           dotColor={dotColor}
           isStory={isStory}
           stepData={stepData}
@@ -104,9 +107,9 @@ function ProgressRing({ pct, status, size = 16 }: { pct: number; status: string;
 }
 
 function ExpandedOverlay({
-  label, dotColor, isStory, stepData, status,
+  stepId, label, dotColor, isStory, stepData, status,
 }: {
-  label: string; dotColor: string; isStory: boolean; stepData: unknown; status: StepStatus;
+  stepId: string; label: string; dotColor: string; isStory: boolean; stepData: unknown; status: StepStatus;
 }) {
   const t = useT();
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
@@ -135,7 +138,7 @@ function ExpandedOverlay({
             className="rf-overlay-edit-btn"
             onClick={() => {
               useNarrativeStore.getState().setViewMode("text");
-              setTimeout(() => setFocus(label), 50);
+              setTimeout(() => setFocus(stepId), 50);
             }}
             title={t("node.switchToText")}
           >

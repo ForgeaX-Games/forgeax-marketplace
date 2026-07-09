@@ -9,6 +9,19 @@ import type { ReactNode } from 'react'
 import type { GameGraph, ElementRole, GraphCondition, GraphEffect, NodeHud, TimelineElement, TriggerSpec } from '../graph-schema'
 import { connect, disconnect, reconnect, removeNode, updateEdgeData, updateNodeData } from '../graph-edit'
 import { ConditionEditor, EffectsEditor, OptionsEditor, type ChoiceOptionLike } from './editors'
+import { INTERACTION_SKINS } from './skins'
+
+/** 交互皮肤组件下拉：空=通用按钮，其余=注册的皮肤 id。 */
+function ComponentSelect({ value, onChange }: { value: string; onChange: (v: string | undefined) => void }): JSX.Element {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value || undefined)} style={{ flex: 1 }}>
+      <option value="">通用（默认按钮）</option>
+      {INTERACTION_SKINS.map((s) => (
+        <option key={s.id} value={s.id}>{s.label}</option>
+      ))}
+    </select>
+  )
+}
 
 // 下拉中文标签（值保持英文枚举，仅展示对齐原做法）。
 const ROLE_LABEL: Record<string, string> = { presentation: '表现', logic: '逻辑', interaction: '交互' }
@@ -47,6 +60,7 @@ function ElementParamsEditor({
         {row('提示', <input value={str('prompt')} onChange={(e) => merge({ prompt: e.target.value })} style={{ flex: 1 }} />)}
         {row('限时ms', <input type="number" value={num('timeoutMs') ?? 0} onChange={(e) => merge({ timeoutMs: Number(e.target.value) || undefined })} style={{ flex: 1 }} />)}
         {row('超时key', <input value={str('defaultKey')} onChange={(e) => merge({ defaultKey: e.target.value || undefined })} style={{ flex: 1 }} />)}
+        {row('组件', <ComponentSelect value={str('component')} onChange={(c) => merge({ component: c })} />)}
         <div style={{ fontSize: 11, opacity: 0.7, margin: '4px 0 2px' }}>选项</div>
         <OptionsEditor value={params.options as ChoiceOptionLike[] | undefined} onChange={(options) => merge({ options })} />
       </div>
@@ -62,6 +76,7 @@ function ElementParamsEditor({
             {QTE_KINDS.map((q) => <option key={q} value={q}>{QTE_LABEL[q] ?? q}</option>)}
           </select>
         ))}
+        {row('组件', <ComponentSelect value={str('component')} onChange={(c) => merge({ component: c })} />)}
         {row('窗口ms', <input type="number" value={num('windowMs') ?? 0} onChange={(e) => merge({ windowMs: Number(e.target.value) || undefined })} style={{ flex: 1 }} />)}
         {row('过关次', <input type="number" value={num('passingHits') ?? 0} onChange={(e) => merge({ passingHits: Number(e.target.value) || undefined })} style={{ flex: 1 }} />)}
         <div style={{ fontSize: 11, opacity: 0.7, margin: '4px 0 2px' }}>cue 时间点（相对演出 ms）</div>

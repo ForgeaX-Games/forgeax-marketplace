@@ -69,16 +69,16 @@ describe('shellStore · forgeView', () => {
   it('setForgeView(play) 进入试玩视图', () => {
     useShellStore.getState().setForgeView('play')
     expect(useShellStore.getState().forgeView).toBe('play')
-    useShellStore.getState().setForgeView('blueprint')
-    expect(useShellStore.getState().forgeView).toBe('blueprint')
+    useShellStore.getState().setForgeView('graph')
+    expect(useShellStore.getState().forgeView).toBe('graph')
   })
 
-  it('setForgeView 收到非法值时静默归位 blueprint', () => {
+  it('setForgeView 收到非法值时静默归位 graph(新蓝图)', () => {
     const api = useShellStore.getState()
     ;(api.setForgeView as (v: string) => void)('storytree') // 老枚举
-    expect(useShellStore.getState().forgeView).toBe('blueprint')
+    expect(useShellStore.getState().forgeView).toBe('graph')
     ;(api.setForgeView as (v: string) => void)('')
-    expect(useShellStore.getState().forgeView).toBe('blueprint')
+    expect(useShellStore.getState().forgeView).toBe('graph')
   })
 })
 

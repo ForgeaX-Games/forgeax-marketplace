@@ -43,8 +43,12 @@ export interface UploadedScript {
   description?: string;
 }
 
+export type ContentLocale = "en" | "zh";
+
 export interface NarrativeContext {
   user_input: string;
+  /** UI locale for generated narrative content (en/zh). Injected from PipelineConfig at run start. */
+  content_locale?: ContentLocale;
   /**
    * 前端选定的有效复杂度档位（1-5）。由 pipeline.run 从 PipelineConfig.complexity 注入，
    * 供不跑 preference_analysis（即 global_control_params 为空）的管线（如 tpl-vn-v2）读取节点预算。
@@ -1025,6 +1029,8 @@ export interface PipelineConfig {
    * legacy static mode-based step list.
    */
   usePlanner?: boolean;
+  /** UI locale — controls generated narrative text language (en/zh). */
+  locale?: ContentLocale;
 }
 
 // ── Step modification metadata (stored in checkpoint.step_meta, NOT in ctx) ──

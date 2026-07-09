@@ -9,10 +9,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GameScenario } from '../graph-schema'
 import { GraphSession, type SessionSnapshot } from '../session'
 import { registerCoreRenderers, renderInteraction, renderOverlay } from './rendererRegistry'
+import { registerCoreSkins } from './skins'
 import { resolveMediaSrc } from './media'
 
 export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Element {
   registerCoreRenderers()
+  registerCoreSkins()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
   const session = useMemo(() => new GraphSession(scenario), [scenario])
   const sessionRef = useRef(session)
@@ -77,7 +79,7 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
       {/* 交互层 */}
       {snap.interaction && (
         <div className="gv-interaction" style={{ position: 'absolute', bottom: 24, left: 0, right: 0 }}>
-          {renderInteraction(snap.interaction, submit)}
+          {renderInteraction(snap.interaction, submit, { hud: snap.hud })}
         </div>
       )}
 

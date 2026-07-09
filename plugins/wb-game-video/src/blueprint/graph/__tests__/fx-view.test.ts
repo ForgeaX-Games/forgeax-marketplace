@@ -6,10 +6,10 @@ import { registerCoreKinds } from '../core-kinds'
 beforeAll(() => registerCoreKinds())
 
 describe('toFXView', () => {
-  it('derives handles: init has cond:0/else outputs; wait has opt:* outputs', () => {
+  it('derives handles: enter has cond:0/else outputs; wait has opt:* outputs', () => {
     const fx = toFXView(NODIA_DEMO.graph)
-    const init = fx.nodes.find((n) => n.id === 'init')!
-    const outIds = init.outputs.map((h) => h.data?.flowId)
+    const enter = fx.nodes.find((n) => n.id === 'enter')!
+    const outIds = enter.outputs.map((h) => h.data?.flowId)
     expect(outIds).toContain('cond:0')
     expect(outIds).toContain('else')
 

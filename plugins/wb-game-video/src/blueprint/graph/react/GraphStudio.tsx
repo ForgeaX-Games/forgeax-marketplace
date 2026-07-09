@@ -12,6 +12,7 @@ import { GraphCanvas } from './GraphCanvas'
 import { NodeInspector } from './NodeInspector'
 import { VersionPicker } from './VersionPicker'
 import { registerCoreRenderers, renderInteraction, renderOverlay } from './rendererRegistry'
+import { registerCoreSkins } from './skins'
 import { useGraphScenario } from '../graphScenarioStore'
 import { listVideoAssets, resolveMediaSrc } from './media'
 import { addNode } from '../graph-edit'
@@ -49,6 +50,7 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
   registerCoreRenderers()
+  registerCoreSkins()
   ensureToolbarStyle()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
 
@@ -256,7 +258,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 </div>
               )}
               {snap.interaction && (
-                <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit)}</div>
+                <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0 }}>{renderInteraction(snap.interaction, submit, { hud: snap.hud })}</div>
               )}
             </div>
             <div style={{ padding: 8, borderTop: '1px solid #2e2924', fontSize: 12, background: '#121316' }}>

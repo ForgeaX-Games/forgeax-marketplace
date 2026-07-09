@@ -1,17 +1,34 @@
-import type { NarrativeContext } from "../../types/index.js";
+import type { ContentLocale, NarrativeContext } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { appendUserInstructions } from "./design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
 
-const PREFERENCE_SUMMARY_COMPOSER: PromptComposer = {
-  stepId: "preference_summary",
-  skillSlots: [],
-  systemBlockOrder: ["role", "extraction_guide", "output_format"],
-  userBlockOrder: ["context_inputs", "task_instruction"],
-  blocks: {
-    role: "你是叙事需求分析专家，擅长从用户描述中提取关键要素并进行结构化总结。所有输出必须使用中文。",
+function buildComposer(locale: ContentLocale): PromptComposer {
+  const isEn = locale === "en";
+  return {
+    stepId: "preference_summary",
+    skillSlots: [],
+    systemBlockOrder: ["role", "extraction_guide", "output_format"],
+    userBlockOrder: ["context_inputs", "task_instruction"],
+    blocks: {
+      role: isEn
+        ? "You are a narrative requirements analyst. Extract key elements from user descriptions and summarize them structurally. All output must be in English."
+        : "你是叙事需求分析专家，擅长从用户描述中提取关键要素并进行结构化总结。所有输出必须使用中文。",
 
-    extraction_guide: `## 提取要素
+      extraction_guide: isEn
+        ? `## Elements to extract
+
+From the user description, extract:
+1. Protagonist: name, gender, age, race, occupation, etc.
+2. Story theme: core theme (growth, revenge, redemption, love, sacrifice, etc.)
+3. Genre/type: mystery, romance, adventure, growth, etc.
+4. World setting: realistic, sci-fi, fantasy, historical, etc.
+5. Core conflict: what problem the protagonist faces
+6. Tone: epic, heartwarming, dark, humorous, etc.
+7. Desired ending: happy / bad / open
+8. Emotional tone: warm, tense, sad, surprising
+9. Special requirements: user preferences or constraints`
+        : `## 提取要素
 
 从用户描述中提取以下关键信息：
 1. 主角信息：姓名、性别、年龄、种族、职业身份等
@@ -24,14 +41,47 @@ const PREFERENCE_SUMMARY_COMPOSER: PromptComposer = {
 8. 情感倾向：温馨/紧张/悲伤/惊喜
 9. 特殊要求：用户的特殊偏好或禁忌`,
 
-    output_format: `## 输出格式
+      output_format: isEn
+        ? "## Output format\n\nStructured Markdown, clear and readable."
+        : "## 输出格式\n\n结构化Markdown格式，清晰易读。",
 
-结构化Markdown格式，清晰易读。`,
+      context_inputs: (ctx: NarrativeContext): string => isEn
+        ? `## User original request ⭐\n${ctx.user_input}`
+        : `## 用户原始需求⭐\n${ctx.user_input}`,
 
-    context_inputs: (ctx: NarrativeContext): string => `## 用户原始需求⭐
-${ctx.user_input}`,
+      task_instruction: isEn
+        ? `## Task
 
-    task_instruction: `## 任务
+**Important**:
+1. Base your analysis on the user's original request!
+2. Do not invent details the user did not mention!
+3. If a field is unspecified, infer reasonably from the genre/theme.
+
+Summarize user preferences.
+
+Output Markdown directly (do not wrap in code fences):
+
+# User preference summary
+
+## Core elements
+- Protagonist: XXX
+- Story theme: XXX
+- Genre/type: XXX
+- World setting: XXX
+- Core conflict: XXX
+- Tone: XXX
+
+## Expected experience
+- Ending preference: XXX
+- Emotional tone: XXX
+- Pacing preference: XXX
+
+## Special requirements
+- XXX
+
+## Brief overview
+One sentence summarizing the story the user wants.`
+        : `## 任务
 
 **重要**：
 1. 必须基于用户原始需求进行分析！
@@ -62,8 +112,9 @@ ${ctx.user_input}`,
 
 ## 简短概述
 一句话总结用户想要什么样的故事。`,
-  },
-};
+    },
+  };
+}
 
 export async function userPreferenceSummary(
   ctx: NarrativeContext,
@@ -73,8 +124,10 @@ export async function userPreferenceSummary(
     | ((chunk: string, accumulated: string) => void)
     | undefined;
 
-  const sp = composeSystemPrompt(PREFERENCE_SUMMARY_COMPOSER, ctx);
-  const up = composeUserPrompt(PREFERENCE_SUMMARY_COMPOSER, ctx);
+  const locale: ContentLocale = ctx.content_locale === "en" ? "en" : "zh";
+  const composer = buildComposer(locale);
+  const sp = composeSystemPrompt(composer, ctx);
+  const up = composeUserPrompt(composer, ctx);
 
   const result = await llm.callStreamFull(
     sp,

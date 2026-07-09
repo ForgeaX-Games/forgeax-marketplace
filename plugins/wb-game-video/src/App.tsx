@@ -4,14 +4,9 @@ import { useShellStore, isPlayingSession, coerceTabbedForgeView } from './shell/
 import { TopBar } from './ui/TopBar'
 import { ReelSidebar } from './shell/ReelSidebar'
 import { Player } from './player/Player'
-import { BlueprintPlayer } from './player/BlueprintPlayer'
 
-/**
- * 试玩运行时开关 —— true = cinegame 式蓝图状态机运行时（BlueprintPlayer）；
- * false = 旧 Player（保留回退）。一行翻转即可切回。
- */
-const USE_BLUEPRINT_RUNTIME = true
-const PlaySurface = USE_BLUEPRINT_RUNTIME ? BlueprintPlayer : Player
+// 旧蓝图状态机运行时(BlueprintPlayer)已退役；FMV 试玩用 Player。新引擎的图试玩走 graphplay 视图(GraphPlaySurface)。
+const PlaySurface = Player
 import { ForgeTab } from './forge/ForgeTab'
 import { InspectorDrawer } from './shell/InspectorDrawer'
 import { ToastHost } from './ui/ToastHost'

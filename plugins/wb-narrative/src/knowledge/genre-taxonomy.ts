@@ -2,6 +2,9 @@ import type { TierId } from "../types/index.js";
 import type { NarrativeType } from "./genre-narrative-type.js";
 import { getNarrativeType } from "./genre-narrative-type.js";
 import type { PipelineTemplateId } from "../pipeline/templates.js";
+import { GENRE_NAME_EN } from "./genre-names-en.js";
+
+export type ContentLocale = "en" | "zh";
 
 /**
  * 15 大游戏品类大类（A2-1: 二级品类折叠分组用）。
@@ -31,6 +34,33 @@ export const GENRE_CATEGORY_LABELS: Record<GenreCategory, string> = {
   survival: "生存",
   misc: "其他",
 };
+
+export const GENRE_CATEGORY_LABELS_EN: Record<GenreCategory, string> = {
+  rpg: "RPG",
+  action: "Action",
+  strategy: "Strategy",
+  adventure: "Adventure",
+  simulation: "Simulation",
+  shooter: "Shooter",
+  puzzle: "Puzzle",
+  "sports-racing": "Sports / Racing",
+  card: "Card",
+  fighting: "Fighting",
+  rhythm: "Rhythm",
+  horror: "Horror",
+  casual: "Casual",
+  survival: "Survival",
+  misc: "Other",
+};
+
+export function getCategoryLabel(category: GenreCategory, locale: ContentLocale = "zh"): string {
+  return locale === "en" ? GENRE_CATEGORY_LABELS_EN[category] : GENRE_CATEGORY_LABELS[category];
+}
+
+export function getGenreDisplayName(entry: GenreEntry, locale: ContentLocale = "zh"): string {
+  if (locale === "zh") return entry.name;
+  return GENRE_NAME_EN[entry.code] ?? entry.name;
+}
 
 export interface GenreEntry {
   code: string;
@@ -315,7 +345,7 @@ export function findGenreByCode(code: string | null | undefined): GenreEntry | n
  * A2-1: 按二级品类大类（GenreCategory）分组返回 GENRE_TAXONOMY，供前端折叠面板使用。
  * 大类顺序与 GENRE_CATEGORIES 一致；同一大类内按 tier 升序、name 字典序排列。
  */
-export function getGenresByCategory(): Array<{
+export function getGenresByCategory(locale: ContentLocale = "zh"): Array<{
   category: GenreCategory;
   label: string;
   genres: GenreEntry[];
@@ -328,7 +358,7 @@ export function getGenresByCategory(): Array<{
   }
   return GENRE_CATEGORIES.map((category) => ({
     category,
-    label: GENRE_CATEGORY_LABELS[category],
+    label: getCategoryLabel(category, locale),
     genres: (buckets.get(category) ?? []).slice().sort((a, b) => {
       const tierDiff = a.tier.localeCompare(b.tier);
       return tierDiff !== 0 ? tierDiff : a.name.localeCompare(b.name);

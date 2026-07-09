@@ -41,8 +41,9 @@ export interface GenreCategoryGroup {
 }
 
 /** A1-4: 拉取按 15 大类分组的品类目录。 */
-export async function fetchGenres(): Promise<GenreCategoryGroup[]> {
-  const res = await fetch(`${API_BASE}/api/narrative/genres`);
+export async function fetchGenres(locale?: string): Promise<GenreCategoryGroup[]> {
+  const loc = locale === "en" ? "en" : "zh";
+  const res = await fetch(`${API_BASE}/api/narrative/genres?locale=${loc}`);
   if (!res.ok) throw new Error(`Failed to fetch genres: ${res.status}`);
   const body = (await res.json()) as { categories: GenreCategoryGroup[] };
   return body.categories ?? [];
@@ -78,6 +79,8 @@ export async function startRun(
     routingMode?: RoutingMode;
     genreCode?: string;
     uploadedScript?: UploadedScriptPayload;
+    /** UI locale for generated narrative content (en/zh). */
+    locale?: string;
     /** §条目提前建立：复用首次输入确认时铸造的草稿键，使生成产物落回同一条目目录。 */
     entryKey?: string;
   } = {},
@@ -96,6 +99,7 @@ export async function startRun(
       routing_mode: opts.routingMode,
       genre_code: opts.genreCode,
       uploaded_script: opts.uploadedScript,
+      locale: opts.locale === "en" ? "en" : "zh",
       entry_key: opts.entryKey,
     }),
   });
@@ -498,6 +502,7 @@ export interface EntryConfig {
   mode?: ModeId;
   genreCode?: string;
   complexity?: number;
+  locale?: "en" | "zh";
   ipRunKey?: string;
   parentKey?: string;
   createdAt?: string;
@@ -533,12 +538,16 @@ export async function loadHistoryResult(
 /** Resume a run from a saved checkpoint */
 export async function resumeRun(
   dir: string,
-  opts: { model?: string } = {},
+  opts: { model?: string; locale?: string } = {},
 ): Promise<RunStartResponse & { entryKey?: string }> {
   const res = await fetch(`${API_BASE}/api/narrative/resume`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dir, model: opts.model }),
+    body: JSON.stringify({
+      dir,
+      model: opts.model,
+      locale: opts.locale === "en" ? "en" : opts.locale === "zh" ? "zh" : undefined,
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -579,6 +588,7 @@ export async function regenerateStep(
     skipSteps?: string[];
     nodeFilter?: Record<string, string[]>;
     editDrafts?: Record<string, { content?: unknown; userInput?: string }>;
+    locale?: string;
   } = {},
 ): Promise<RegenerateResponse> {
   const res = await fetch(`${API_BASE}/api/narrative/regenerate`, {
@@ -594,6 +604,7 @@ export async function regenerateStep(
       skipSteps: opts.skipSteps,
       nodeFilter: opts.nodeFilter,
       editDrafts: opts.editDrafts,
+      locale: opts.locale === "en" ? "en" : opts.locale === "zh" ? "zh" : undefined,
     }),
   });
   if (!res.ok) {

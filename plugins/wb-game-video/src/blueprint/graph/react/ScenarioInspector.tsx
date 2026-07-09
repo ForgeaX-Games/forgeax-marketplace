@@ -7,6 +7,7 @@
 import type { CSSProperties, JSX } from 'react'
 import type { AttrMeta, EntitySpec, GameScenario, ReactiveRule, VarSpec } from '../graph-schema'
 import { ConditionEditor } from './editors'
+import { HUD_SKINS } from './skins'
 
 export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'rules'>
 
@@ -26,6 +27,10 @@ function field(label: string, node: JSX.Element): JSX.Element {
 }
 
 const HUD_SHOWS = ['always', 'never', 'battle', 'qte']
+const HUD_POS: Array<{ id: string; label: string }> = [
+  { id: 'top-left', label: '左上' }, { id: 'top', label: '顶部居中' }, { id: 'top-right', label: '右上' },
+  { id: 'bottom-left', label: '左下' }, { id: 'bottom', label: '底部居中' }, { id: 'bottom-right', label: '右下' },
+]
 const SHOW_LABEL: Record<string, string> = { always: '常驻', never: '隐藏', battle: '战斗中', qte: 'QTE时' }
 
 /** 记录改键：删旧键、写新键（保持插入顺序尽量稳定）。 */
@@ -41,14 +46,14 @@ export type ScenarioSection = 'scene' | 'hud' | 'variables' | 'entities' | 'rule
 export function ScenarioInspector({ value, nodeIds, section, onChange }: { value: ScenarioMeta; nodeIds: string[]; section?: ScenarioSection; onChange: (next: ScenarioMeta) => void }): JSX.Element {
   const variables = value.variables ?? {}
   const entities = value.entities ?? {}
-  const hud = (value.ui?.hud ?? []) as Array<{ element?: string; show?: string }>
+  const hud = (value.ui?.hud ?? []) as Array<{ element?: string; show?: string; component?: string; label?: string; pos?: string }>
   const seed = value.rng?.seed ?? 0
   const rules = value.rules ?? []
   const show = (s: ScenarioSection) => !section || section === s
 
   const setVariables = (v: Record<string, VarSpec>) => onChange({ ...value, variables: v })
   const setEntities = (e: Record<string, EntitySpec>) => onChange({ ...value, entities: e })
-  const setHud = (h: Array<{ element?: string; show?: string }>) => onChange({ ...value, ui: { ...value.ui, hud: h } })
+  const setHud = (h: Array<{ element?: string; show?: string; component?: string; label?: string; pos?: string }>) => onChange({ ...value, ui: { ...value.ui, hud: h } })
   const setRules = (r: ReactiveRule[]) => onChange({ ...value, rules: r.length ? r : undefined })
   const patchRule = (i: number, p: Partial<ReactiveRule>) => setRules(rules.map((r, idx) => (idx === i ? { ...r, ...p } : r)))
 
@@ -123,6 +128,19 @@ export function ScenarioInspector({ value, nodeIds, section, onChange }: { value
           {field('显示', (
             <select value={h.show ?? 'always'} onChange={(e) => setHud(hud.map((x, idx) => (idx === i ? { ...x, show: e.target.value } : x)))}>
               {HUD_SHOWS.map((s) => <option key={s} value={s}>{SHOW_LABEL[s] ?? s}</option>)}
+            </select>
+          ))}
+          {field('组件', (
+            <select value={h.component ?? ''} onChange={(e) => setHud(hud.map((x, idx) => (idx === i ? { ...x, component: e.target.value || undefined } : x)))} style={{ flex: 1 }}>
+              <option value="">内置（默认血条/数值）</option>
+              {HUD_SKINS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          ))}
+          {field('名称', <input value={h.label ?? ''} onChange={(e) => setHud(hud.map((x, idx) => (idx === i ? { ...x, label: e.target.value || undefined } : x)))} placeholder="空藏" style={{ flex: 1 }} />)}
+          {field('位置', (
+            <select value={h.pos ?? ''} onChange={(e) => setHud(hud.map((x, idx) => (idx === i ? { ...x, pos: e.target.value || undefined } : x)))} style={{ flex: 1 }}>
+              <option value="">默认（按角色）</option>
+              {HUD_POS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           ))}
           <button style={del} onClick={() => setHud(hud.filter((_, idx) => idx !== i))}>删除</button>
