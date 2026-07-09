@@ -182,12 +182,12 @@ export const tools = {
   },
 
   /**
-   * 列出内置演出视频库（`src/assets/zhandou/*.mp4` 的 basename，去扩展名）——
+   * 列出内置演出视频库（`src/editor/assets/zhandou/*.mp4` 的 basename，去扩展名）——
    * 供 AI 编排时知道有哪些 media.ref 可绑。
    */
   'gvid:list-videos': async (_args: Record<string, never>, ctx: ToolCtx) => {
     try {
-      const dir = resolve(ctx.cwd ?? process.cwd(), 'src', 'assets', 'zhandou')
+      const dir = resolve(ctx.cwd ?? process.cwd(), 'src', 'editor', 'assets', 'zhandou')
       const videos = readdirSync(dir)
         .filter((f) => f.toLowerCase().endsWith('.mp4'))
         .map((f) => f.replace(/\.mp4$/i, ''))

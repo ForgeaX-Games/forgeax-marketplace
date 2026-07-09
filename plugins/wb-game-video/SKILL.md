@@ -8,14 +8,14 @@ trigger: /gamevideo
 
 `@forgeax-plugin/wb-game-video` = **玩法优先的视频游戏**蓝图编辑器 + 运行时。
 
-**唯一引擎 = graph 引擎**（`src/blueprint/graph/`）：一张 `GameScenario` 图，纯 TS 状态机直接跑。
+**唯一引擎 = graph 引擎**（`src/runtime/ / src/graph/ / src/editor/`）：一张 `GameScenario` 图，纯 TS 状态机直接跑。
 旧 FMV 内容生产那套（`gvid:*` 工具、剧本/生图/生视频/素材库、`/__reel__` 端点）已**整体删除**，不再存在。
 **硬性规则见 `AGENTS.md`。**
 
 ## 玩法图数据模型（SSOT）
 
 ```text
-GameScenario                         # src/blueprint/graph/graph-schema.ts
+GameScenario                         # src/runtime/ / src/graph/ / src/editor/graph-schema.ts
 ├── variables{} entities{}           # 实体 = 开放数值袋 attrs（hp 只是约定 attr，无特权）
 ├── ui.hud[]  rng.seed  rules?[]     # HUD 元素(可指定皮肤 component/pos) / 种子随机 / 图级反应规则
 └── graph { nodes[], edges[] }
@@ -27,8 +27,8 @@ GameScenario                         # src/blueprint/graph/graph-schema.ts
 > **图 schema 契约（强制）**：
 > - **只有「演出节点」，每个绑视频**；判断折进出边（handle `cond:N`/`else`/`opt:*`/`pass|good|fail`/`out`，边带 `weight`=加权随机）。跨节点记忆用变量+条件边。
 > - **一切声明式、可序列化、无函数**：条件 `GraphCondition`、效果 `GraphEffect`（value 可为 `{expr}`）。
-> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `params.component` / `ui.hud[i].component`（契约见 `src/blueprint/graph/react/skins/CONTRACT.md`）。
-> - 代码级权威：`src/blueprint/graph/graph-schema.ts`（形态）+ `engine.ts`（运行时）+ demo `src/blueprint/graph/demo/nodia.graph.json`（SSOT 样例）。
+> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `params.component` / `ui.hud[i].component`（契约见 `src/runtime/skins/components/CONTRACT.md`）。
+> - 代码级权威：`src/runtime/ / src/graph/ / src/editor/graph-schema.ts`（形态）+ `engine.ts`（运行时）+ demo `src/runtime/ / src/graph/ / src/editor/demo/nodia.graph.json`（SSOT 样例）。
 > - ⚠️ 旧 `Scenario/Scene → scenarioToBlueprint → 蓝图运行时`、以及 `gvid:*` 工具链已**退役删除**，勿再引用。
 
 ## 怎么编辑：AI 工具（graph-native）
@@ -60,9 +60,9 @@ gvid:save-graph({ scenario, title:"..." })  # 整本回写；ok:false 时看 err
 
 ## 校验
 
-改完用图自带校验（`src/blueprint/graph/validate.ts` / `validate-refs.ts`）确认：节点/边 handle 齐全、
+改完用图自带校验（`src/runtime/ / src/graph/ / src/editor/validate.ts` / `validate-refs.ts`）确认：节点/边 handle 齐全、
 媒体引用存在、条件/效果引用的变量存在、皮肤 `component` 有对应注册。测试见
-`src/blueprint/graph/__tests__/`。
+`src/runtime/ / src/graph/ / src/editor/__tests__/`。
 
 ## 与 Nodia Agent 的协作
 

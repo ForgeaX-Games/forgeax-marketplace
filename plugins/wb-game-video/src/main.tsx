@@ -4,9 +4,9 @@ import './bootMigrateLegacyKeys'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GraphApp } from './GraphApp'
-import { GraphPlayer } from './blueprint/graph/react/GraphPlayer'
-import { GraphStudio } from './blueprint/graph/react/GraphStudio'
-import { NODIA_DEMO } from './blueprint/graph/demo'
+import { GraphPlayer } from './editor/shell/GraphPlayer'
+import { GraphStudio } from './editor/shell/GraphStudio'
+import { NODIA_DEMO } from './editor/demo/demo'
 import './styles/global.css'
 
 const root = document.getElementById('root')

@@ -1,7 +1,7 @@
 {
   "name": "@forgeax-plugin/wb-game-video",
   "version": "0.1.0",
-  "description": "ForgeaX workbench plugin — Video Game (gameplay-on-video) editor & player. 视频游戏（玩法优先）编辑器：Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点 + 视频分支（fork of wb-reel）",
+  "description": "ForgeaX workbench plugin \u2014 Video Game (gameplay-on-video) editor & player. \u89c6\u9891\u6e38\u620f\uff08\u73a9\u6cd5\u4f18\u5148\uff09\u7f16\u8f91\u5668\uff1aBoss \u6218 / \u8840\u6761 / QTE \u95ef\u5173 / \u9650\u65f6\u00b7\u6682\u505c\u9009\u62e9 / \u53ef\u70b9\u70ed\u70b9 + \u89c6\u9891\u5206\u652f\uff08fork of wb-reel\uff09",
   "private": true,
   "type": "module",
   "main": "src/mount.tsx",
@@ -31,9 +31,10 @@
     "build": "tsc -p tsconfig.build.json && vite build",
     "build:standalone": "tsc -p tsconfig.build.json && vite build && node scripts/bundle-singlefile.mjs",
     "preview": "vite preview",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && node scripts/check-module-boundaries.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:boundaries": "node scripts/check-module-boundaries.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

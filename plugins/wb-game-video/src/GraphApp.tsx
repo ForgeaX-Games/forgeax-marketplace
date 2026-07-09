@@ -11,14 +11,14 @@
  *   两个 iframe 靠 graphViewStore + BroadcastChannel 同步「当前 tab」。
  */
 import { useEffect, useState } from 'react'
-import { GraphStudio } from './blueprint/graph/react/GraphStudio'
-import { GraphVideoView } from './blueprint/graph/react/GraphVideoView'
-import { GraphConfigView } from './blueprint/graph/react/GraphConfigView'
-import { GraphPlaySurface } from './blueprint/graph/react/GraphPlaySurface'
-import { useGraphScenario } from './blueprint/graph/graphScenarioStore'
-import { useGraphView, installGraphViewSync, type GraphView } from './blueprint/graph/graphViewStore'
-import { NODIA_DEMO } from './blueprint/graph/demo'
-import { getGameSlug } from './blueprint/graph/gameScope'
+import { GraphStudio } from './editor/shell/GraphStudio'
+import { GraphVideoView } from './editor/shell/GraphVideoView'
+import { GraphConfigView } from './editor/shell/GraphConfigView'
+import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
+import { useGraphScenario } from './editor/persist/graphScenarioStore'
+import { useGraphView, installGraphViewSync, type GraphView } from './editor/persist/graphViewStore'
+import { NODIA_DEMO } from './editor/demo/demo'
+import { getGameSlug } from './editor/persist/gameScope'
 import { injectStyleOnce } from './styles/injectStyle'
 
 const NAV: Array<{ id: GraphView; label: string; hint: string }> = [
