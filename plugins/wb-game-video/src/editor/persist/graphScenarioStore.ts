@@ -5,7 +5,9 @@
  * 持久化模型不变（见 persist-client）：磁盘 scenarios.graph.json 只读原始；版本(最近5)+未保存草稿 → localStorage；
  * 保存写 localStorage 版本、不写盘；进入优先级 草稿 > 最新版本 > 磁盘原始 > 内置 demo。
  */
-import { create } from 'zustand'
+import { create, useStore } from 'zustand'
+import { temporal } from 'zundo'
+import type { TemporalState, ZundoOptions } from 'zundo'
 import type { GameGraph, GameScenario, GraphTextStylePreset } from '../../runtime/schema/graph-schema'
 import type { TextStyleGroup } from '../text/text-style'
 import { loadStore, saveScenario, saveDraft, clearDraft, loadVersion, loadDraft, type VersionEntry } from './persist-client'
@@ -35,6 +37,8 @@ interface GraphScenarioStore {
   currentVersionId: string | null
   isDraft: boolean
   booted: boolean
+  /** 每次「载入内容」（boot / 切版本 / 重置）自增；宿主据此清空撤销历史，避免撤销穿越版本。 */
+  loadEpoch: number
   savedTip: string
   fitSignal: number
   runKey: number
@@ -47,6 +51,8 @@ interface GraphScenarioStore {
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
+  /** 标记未保存草稿 + 防抖写盘（撤销/重做后调用，让恢复的状态也落草稿）。 */
+  touchDraft: () => void
   /** 新增/覆盖一个用户自定义文字预设（按 subtitle/overlay 分组持久化）。 */
   addTextStylePreset: (group: TextStyleGroup, preset: GraphTextStylePreset) => void
   /** 删除一个用户自定义文字预设。 */
@@ -61,7 +67,32 @@ interface GraphScenarioStore {
 let draftTimer: ReturnType<typeof setTimeout> | null = null
 const clearDraftTimer = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null } }
 
-export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
+// ── 撤销/重做（zundo）─────────────────────────────────────────────────────────
+/** 仅这两片进历史：图 + 场景级 meta（选中/草稿标记/版本索引等瞬态不追踪）。 */
+type TrackedState = Pick<GraphScenarioStore, 'graph' | 'meta'>
+const HISTORY_LIMIT = 100
+// 连续 set（拖拽每帧 / 连续打字）合并进同一步的时间窗；超过则另起一步。
+const HISTORY_COALESCE_MS = 400
+let historyLastAt = 0
+
+const HISTORY_OPTIONS: ZundoOptions<GraphScenarioStore, TrackedState> = {
+  partialize: (s): TrackedState => ({ graph: s.graph, meta: s.meta }),
+  limit: HISTORY_LIMIT,
+  equality: (a, b) => a.graph === b.graph && a.meta === b.meta,
+  handleSet: (record) => (pastState, replace, currentState, deltaState) => {
+    const ps = pastState as unknown as Partial<TrackedState>
+    const cs = currentState as unknown as Partial<TrackedState>
+    // 图/meta 没变 → 是瞬态 set（isDraft / savedTip / selectedNodeId / versions…），不占历史、不占合并窗。
+    if (ps.graph === cs.graph && ps.meta === cs.meta) return
+    const now = Date.now()
+    if (now - historyLastAt < HISTORY_COALESCE_MS) return
+    historyLastAt = now
+    void deltaState
+    record(pastState, replace)
+  },
+}
+
+export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get) => {
   // 仅由真实编辑（setGraph/setMeta）调用 → 标记未保存草稿 + 防抖写 localStorage 草稿。
   const scheduleDraft = () => {
     set({ isDraft: true })
@@ -77,6 +108,7 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
     currentVersionId: null,
     isDraft: false,
     booted: false,
+    loadEpoch: 0,
     savedTip: '',
     fitSignal: 0,
     runKey: 0,
@@ -100,14 +132,14 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
         // 进入优先级：未保存草稿(localStorage) > 磁盘最新已保存版本 > demo（出厂只读原始）。
         if (s.draft?.graph) {
           const laid = layoutIfUnset(s.draft)
-          set({ graph: laid.graph, meta: pickMeta(laid), isDraft: true, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null })
+          set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: true, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null, loadEpoch: st.loadEpoch + 1 }))
         } else if (s.scenario?.graph) {
           const laid = layoutIfUnset(s.scenario)
-          set({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null })
+          set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null, loadEpoch: st.loadEpoch + 1 }))
         } else {
           // 首次（无草稿、磁盘也没有）→ 用 demo 打底，并把它作为第一个版本落盘。
           const laid = layoutIfUnset(structuredClone(demo))
-          set({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: [], currentVersionId: null })
+          set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: [], currentVersionId: null, loadEpoch: st.loadEpoch + 1 }))
           void saveScenario(laid, game).then((vs) => set({ versions: vs, currentVersionId: vs[0]?.id ?? null }))
         }
       })
@@ -117,6 +149,7 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
       set((st) => ({ graph: typeof g === 'function' ? (g as (x: GameGraph) => GameGraph)(st.graph) : g }))
       scheduleDraft()
     },
+    touchDraft: () => scheduleDraft(),
     setMeta: (m) => {
       set((st) => ({ meta: typeof m === 'function' ? (m as (x: ScenarioMetaFields) => ScenarioMetaFields)(st.meta) : m }))
       scheduleDraft()
@@ -166,7 +199,7 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
         clearDraftTimer()
         const laid = layoutIfUnset(s)
         // 载入已保存版本 → 非草稿 + 记为当前版本；载入草稿 → 仍是草稿。
-        set({ graph: laid.graph, meta: pickMeta(laid), isDraft: value === '__draft__', ...(value !== '__draft__' ? { currentVersionId: value } : {}) })
+        set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: value === '__draft__', loadEpoch: st.loadEpoch + 1, ...(value !== '__draft__' ? { currentVersionId: value } : {}) }))
       }
       if (value === '__draft__') apply(loadDraft(get().game))
       else void loadVersion(value, get().game).then(apply) // 版本快照在磁盘
@@ -179,7 +212,7 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
       const d = layoutIfUnset(structuredClone(demo))
       clearDraftTimer()
       clearDraft(get().game)
-      set((st) => ({ graph: d.graph, meta: pickMeta(d), isDraft: false, currentVersionId: null, savedTip: '已重置为 demo', fitSignal: st.fitSignal + 1, runKey: st.runKey + 1 }))
+      set((st) => ({ graph: d.graph, meta: pickMeta(d), isDraft: false, currentVersionId: null, savedTip: '已重置为 demo', fitSignal: st.fitSignal + 1, runKey: st.runKey + 1, loadEpoch: st.loadEpoch + 1 }))
     },
 
     applyLayout: () => {
@@ -190,4 +223,25 @@ export const useGraphScenario = create<GraphScenarioStore>((set, get) => {
 
     bumpRun: () => set((st) => ({ runKey: st.runKey + 1, savedTip: st.savedTip })),
   }
-})
+}, HISTORY_OPTIONS))
+
+// ── 撤销/重做对外 API ─────────────────────────────────────────────────────────
+/** 订阅撤销历史（past/future 深度等）；用于按钮 disabled 态。 */
+export function useGraphHistory<T>(selector: (s: TemporalState<TrackedState>) => T): T {
+  return useStore(useGraphScenario.temporal, selector)
+}
+/** 撤销一步并把恢复后的状态落草稿。 */
+export function graphUndo(): void {
+  useGraphScenario.temporal.getState().undo()
+  useGraphScenario.getState().touchDraft()
+}
+/** 重做一步并落草稿。 */
+export function graphRedo(): void {
+  useGraphScenario.temporal.getState().redo()
+  useGraphScenario.getState().touchDraft()
+}
+/** 清空撤销历史（载入新内容后调用）。 */
+export function graphHistoryClear(): void {
+  historyLastAt = 0
+  useGraphScenario.temporal.getState().clear()
+}

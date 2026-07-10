@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { resolveSnapGridMs, snapMs } from './timelineMath'
 import {
+  type AudioItem,
   type MaterialItem,
   TIMELINE_LAYER_STEP,
   TIMELINE_LAYER_TOP,
@@ -19,6 +20,9 @@ import {
   materialClass,
   materialDisplayLabel,
 } from './materialTimelineShared'
+
+/** 素材库卡片 → 时间轴拖放时携带的模板类型 MIME。 */
+export const MATERIAL_DND_MIME = 'application/x-fx-material'
 
 /**
  * 视频 tab 与剧情树抽屉共享的「材料时间轴」——
@@ -53,6 +57,16 @@ export interface MaterialTimelineProps {
   ) => void
   /** 提供时，选中可删材料后按 Delete/Backspace 或点击控件上的 × 即删除。 */
   onDeleteMaterial?: (item: MaterialItem) => void
+  /** 提供时，从素材库把控件卡片拖入时间轴 → 在落点时刻 atMs / 轨 layer 新增该模板。 */
+  onDropTemplate?: (template: string, atMs: number, layer: number) => void
+  /** 当前时间轴模式：组件（material）/ 音频（audio）。默认 material。 */
+  mode?: 'material' | 'audio'
+  /** 提供时，materialbar 出现「组件 / 音频」切换段控件。 */
+  onModeChange?: (mode: 'material' | 'audio') => void
+  /** 音频模式下展示的音轨条（当前仅显示 + 拖动，不做实际音频编辑）。 */
+  audioItems?: AudioItem[]
+  /** 音频模式下拖动音轨条的回写（移动 / 换轨）。 */
+  onPatchAudio?: (item: AudioItem, patch: { startMs?: number; endMs?: number; layer?: number }) => void
 }
 
 interface DragState {
@@ -77,16 +91,27 @@ export function MaterialTimeline({
   onSelectMaterial,
   onPatchMaterial,
   onDeleteMaterial,
+  onDropTemplate,
+  mode,
+  onModeChange,
+  audioItems,
+  onPatchAudio,
 }: MaterialTimelineProps) {
   injectStyleOnce('material-timeline', MATERIAL_TIMELINE_CSS)
+  const activeMode: 'material' | 'audio' = mode ?? 'material'
+  const audioList = audioItems ?? []
+  // 当前活动条目列表（几何 + key 通用；只有它们的字段被 drag/render 用到）。
+  const activeList: Array<{ key: string; startMs: number; endMs: number; layer: number; markerMs?: number }> =
+    activeMode === 'audio' ? audioList : materials
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
   const [zoom, setZoom] = useState(1)
   const [viewportW, setViewportW] = useState(0)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [dropHint, setDropHint] = useState<{ ms: number; layer: number } | null>(null)
 
   // 无限轨：可见轨数由数据里最大 layer 派生，并永远多留一条空轨用于「拖到新轨=新增一轨」。
-  const dataMaxLayer = materials.reduce((mx, it) => Math.max(mx, it.layer), 0)
+  const dataMaxLayer = activeList.reduce((mx, it) => Math.max(mx, it.layer), 0)
   const trackCount = Math.max(TIMELINE_MIN_TRACKS, dataMaxLayer + 2)
   // 缩放：画布宽 = 视口宽 × zoom（zoom=1 恰好铺满，无横向滚动）。
   const canvasPx = Math.max(1, (viewportW || 1) * zoom)
@@ -136,20 +161,37 @@ export function MaterialTimeline({
     return () => vp.removeEventListener('wheel', onWheel)
   }, [canvasPx, viewportW])
 
-  function onPointerDown(e: React.PointerEvent, item: MaterialItem, mode: 'move' | 'start' | 'end' | 'marker'): void {
+  // 把当前拖拽的 patch 派发给对应回写（组件→onPatchMaterial / 音频→onPatchAudio）。
+  function dispatchPatch(key: string, patch: { startMs?: number; endMs?: number; layer?: number; markerMs?: number }): void {
+    if (activeMode === 'audio') {
+      const a = audioList.find((x) => x.key === key)
+      if (a) onPatchAudio?.(a, patch)
+      return
+    }
+    const m = materials.find((x) => x.key === key)
+    if (m) onPatchMaterial(m, patch)
+  }
+
+  function onPointerDown(
+    e: React.PointerEvent,
+    item: { key: string; startMs: number; endMs: number; layer: number; markerMs?: number },
+    dragMode: 'move' | 'start' | 'end' | 'marker',
+  ): void {
     e.preventDefault()
     e.stopPropagation()
-    onSelectMaterial(item.key)
+    // 音频条仅显示 + 拖动，不进 material 选中/检视器流。
+    if (activeMode === 'material') onSelectMaterial(item.key)
     // 让视口拿到焦点，Delete/Backspace 键删除才有落点（不滚动画面）。
     timelineViewportRef.current?.focus({ preventScroll: true })
     if (!editable) return
     timelineRef.current?.setPointerCapture(e.pointerId)
-    const anchorMs = mode === 'marker' ? (item.markerMs ?? item.startMs) : item.startMs
-    setDrag({ key: item.key, mode, pointerX: e.clientX, startMs: anchorMs, endMs: item.endMs, layer: item.layer })
+    const anchorMs = dragMode === 'marker' ? (item.markerMs ?? item.startMs) : item.startMs
+    setDrag({ key: item.key, mode: dragMode, pointerX: e.clientX, startMs: anchorMs, endMs: item.endMs, layer: item.layer })
   }
 
   // 选中可删材料后，按 Delete/Backspace 删除（焦点在时间轴视口内时生效）。
   function onViewportKeyDown(e: React.KeyboardEvent): void {
+    if (activeMode !== 'material') return
     if (e.key !== 'Delete' && e.key !== 'Backspace') return
     if (!onDeleteMaterial || !selectedMaterialKey) return
     const item = materials.find((m) => m.key === selectedMaterialKey)
@@ -166,25 +208,24 @@ export function MaterialTimeline({
     }
     const rect = e.currentTarget.getBoundingClientRect()
     if (rect.width <= 0) return
-    const item = materials.find((m) => m.key === drag.key)
-    if (!item) return
+    if (!activeList.some((m) => m.key === drag.key)) return
     const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
     const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect, trackCount - 1) : drag.layer
     // 吸附：默认 100ms 网格；Shift=10ms 精细，Alt=500ms 粗粒度（复用 A 的 snap 语义）。
     const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
     if (drag.mode === 'marker') {
       // 段内命中判定点（菱形）：只改 markerMs，宿主夹回 [出现, 消失] 内。
-      onPatchMaterial(item, { markerMs: clampMs(snapMs(drag.startMs + deltaMs, grid), 0, maxMs) })
+      dispatchPatch(drag.key, { markerMs: clampMs(snapMs(drag.startMs + deltaMs, grid), 0, maxMs) })
       return
     }
     const span = drag.endMs - drag.startMs
     if (drag.mode === 'move') {
       const start = clampMs(snapMs(drag.startMs + deltaMs, grid), 0, Math.max(0, maxMs - span))
-      onPatchMaterial(item, { startMs: start, endMs: start + span, layer: nextLayer })
+      dispatchPatch(drag.key, { startMs: start, endMs: start + span, layer: nextLayer })
     } else if (drag.mode === 'start') {
-      onPatchMaterial(item, { startMs: snapMs(drag.startMs + deltaMs, grid), endMs: drag.endMs })
+      dispatchPatch(drag.key, { startMs: snapMs(drag.startMs + deltaMs, grid), endMs: drag.endMs })
     } else {
-      onPatchMaterial(item, { startMs: drag.startMs, endMs: snapMs(drag.endMs + deltaMs, grid) })
+      dispatchPatch(drag.key, { startMs: drag.startMs, endMs: snapMs(drag.endMs + deltaMs, grid) })
     }
   }
 
@@ -222,14 +263,64 @@ export function MaterialTimeline({
     beginSeek(e)
   }
 
+  // 素材库卡片拖入：x → 时刻（吸附 100ms）、y → 轨。
+  function dropPosFromEvent(e: React.DragEvent): { ms: number; layer: number } {
+    const rect = timelineRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return { ms: 0, layer: 0 }
+    const ratio = (e.clientX - rect.left) / rect.width
+    const ms = clampMs(snapMs(ratio * maxMs, 100), 0, maxMs)
+    const layer = layerFromPointerY(e.clientY, rect, trackCount - 1)
+    return { ms, layer }
+  }
+
+  function onCanvasDragOver(e: React.DragEvent): void {
+    if (!onDropTemplate || !e.dataTransfer.types.includes(MATERIAL_DND_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDropHint(dropPosFromEvent(e))
+  }
+
+  function onCanvasDrop(e: React.DragEvent): void {
+    if (!onDropTemplate) return
+    const template = e.dataTransfer.getData(MATERIAL_DND_MIME)
+    setDropHint(null)
+    if (!template) return
+    e.preventDefault()
+    const { ms, layer } = dropPosFromEvent(e)
+    onDropTemplate(template, ms, layer)
+  }
+
   return (
     <div className="mtl-root">
       <div className="gc-materialbar">
         <span className="gc-materialbar-meta">时间轴 · {fmtDur(maxMs)}</span>
-        {isTimedQteNode ? (
+        {onModeChange ? (
+          <span className="gc-tl-modeseg" role="group" aria-label="时间轴模式切换">
+            <button
+              type="button"
+              className={activeMode === 'material' ? 'is-on' : ''}
+              aria-pressed={activeMode === 'material'}
+              onClick={() => onModeChange('material')}
+            >
+              组件
+            </button>
+            <button
+              type="button"
+              className={activeMode === 'audio' ? 'is-on' : ''}
+              aria-pressed={activeMode === 'audio'}
+              onClick={() => onModeChange('audio')}
+            >
+              音频
+            </button>
+          </span>
+        ) : null}
+        {activeMode === 'material' && isTimedQteNode ? (
           <span className="gc-materialbar-hint">
             QTE 按键点：左缘 = 出现 · 右缘 = 消失 · 菱形 = 命中判定点（计分锚点）
           </span>
+        ) : null}
+        {activeMode === 'audio' ? (
+          <span className="gc-materialbar-hint">音频轨（仅显示 / 可拖动）· 第 1 轨为素材自带声道</span>
         ) : null}
         <span className="gc-zoombar">
           <input
@@ -269,6 +360,9 @@ export function MaterialTimeline({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onLostPointerCapture={onPointerUp}
+          onDragOver={onDropTemplate && activeMode === 'material' ? onCanvasDragOver : undefined}
+          onDrop={onDropTemplate && activeMode === 'material' ? onCanvasDrop : undefined}
+          onDragLeave={onDropTemplate && activeMode === 'material' ? () => setDropHint(null) : undefined}
         >
           <div
             className={`gc-mtimeline-ruler${onSeek ? ' is-seekable' : ''}`}
@@ -290,58 +384,85 @@ export function MaterialTimeline({
             />
           ))}
           <div className="gc-playhead" style={{ left: `${playheadMs * pxPerMs}px` }} aria-hidden />
-          {materials.map((m) => {
-            const left = m.startMs * pxPerMs
-            const width = Math.max(6, (m.endMs - m.startMs) * pxPerMs)
-            const selected = selectedMaterialKey === m.key
-            return (
-              <Fragment key={m.key}>
-              <div
-                className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}`}
-                style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.layer)}px` }}
-                onPointerDown={(e) => onPointerDown(e, m, 'move')}
-                title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}`}
-              >
-                {editable ? (
-                  <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
-                ) : null}
-                <span>{materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}</span>
-                {editable && selected && onDeleteMaterial && canDeleteMaterial(m.kind) ? (
-                  <button
-                    type="button"
-                    className="gc-mdelete"
-                    aria-label="删除控件"
-                    title="删除控件（Delete）"
-                    onPointerDown={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeleteMaterial(m)
-                    }}
+          {dropHint ? (
+            <div
+              className="gc-mdrop"
+              style={{ left: `${dropHint.ms * pxPerMs}px`, top: `${layerTop(dropHint.layer)}px` }}
+              aria-hidden
+            >
+              <span className="gc-mdrop-time">{fmtDur(dropHint.ms)}</span>
+            </div>
+          ) : null}
+          {activeMode === 'audio'
+            ? audioList.map((a) => {
+                const left = a.startMs * pxPerMs
+                const width = Math.max(6, (a.endMs - a.startMs) * pxPerMs)
+                // 音频条：仅显示 + 整体拖动（换轨 / 移时刻），无裁剪把手 / 删除 / marker。
+                return (
+                  <div
+                    key={a.key}
+                    className={`gc-mclip is-audio${a.builtin ? ' is-builtin' : ''}`}
+                    style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(a.layer)}px` }}
+                    onPointerDown={(e) => onPointerDown(e, a, 'move')}
+                    title={`${a.label} · ${fmtDur(a.startMs)} - ${fmtDur(a.endMs)}`}
                   >
-                    ×
-                  </button>
-                ) : null}
-                {editable ? (
-                  <button className="gc-mhandle is-right" onPointerDown={(e) => onPointerDown(e, m, 'end')} aria-label="调整终点" />
-                ) : null}
-              </div>
-              {m.markerMs != null ? (
-                <button
-                  type="button"
-                  className={`gc-mmarker${selected ? ' is-selected' : ''}`}
-                  style={{ left: `${m.markerMs * pxPerMs}px`, top: `${layerTop(m.layer) + 16}px` }}
-                  title={`命中判定点（计分锚点）· ${fmtDur(m.markerMs)}`}
-                  aria-label="命中判定点"
-                  onPointerDown={(e) => (editable ? onPointerDown(e, m, 'marker') : onSelectMaterial(m.key))}
-                />
-              ) : null}
-              </Fragment>
-            )
-          })}
-          {materials.length === 0 && <div className="gc-mempty">{emptyHint}</div>}
+                    <span className="gc-audio-ico" aria-hidden>♪</span>
+                    <span>{a.label}</span>
+                  </div>
+                )
+              })
+            : materials.map((m) => {
+                const left = m.startMs * pxPerMs
+                const width = Math.max(6, (m.endMs - m.startMs) * pxPerMs)
+                const selected = selectedMaterialKey === m.key
+                return (
+                  <Fragment key={m.key}>
+                    <div
+                      className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}`}
+                      style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.layer)}px` }}
+                      onPointerDown={(e) => onPointerDown(e, m, 'move')}
+                      title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}`}
+                    >
+                      {editable ? (
+                        <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
+                      ) : null}
+                      <span>{materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}</span>
+                      {editable && selected && onDeleteMaterial && canDeleteMaterial(m.kind) ? (
+                        <button
+                          type="button"
+                          className="gc-mdelete"
+                          aria-label="删除控件"
+                          title="删除控件（Delete）"
+                          onPointerDown={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteMaterial(m)
+                          }}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                      {editable ? (
+                        <button className="gc-mhandle is-right" onPointerDown={(e) => onPointerDown(e, m, 'end')} aria-label="调整终点" />
+                      ) : null}
+                    </div>
+                    {m.markerMs != null ? (
+                      <button
+                        type="button"
+                        className={`gc-mmarker${selected ? ' is-selected' : ''}`}
+                        style={{ left: `${m.markerMs * pxPerMs}px`, top: `${layerTop(m.layer) + 16}px` }}
+                        title={`命中判定点（计分锚点）· ${fmtDur(m.markerMs)}`}
+                        aria-label="命中判定点"
+                        onPointerDown={(e) => (editable ? onPointerDown(e, m, 'marker') : onSelectMaterial(m.key))}
+                      />
+                    ) : null}
+                  </Fragment>
+                )
+              })}
+          {activeList.length === 0 && <div className="gc-mempty">{activeMode === 'audio' ? '当前素材无音轨' : emptyHint}</div>}
         </div>
       </div>
     </div>
@@ -370,6 +491,14 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-materialbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .mtl-root .gc-materialbar-meta { color: var(--gc-faint); font-size: 12px; }
 .mtl-root .gc-materialbar-hint { color: rgba(184, 240, 238, 0.72); font-size: 11px; }
+.mtl-root .gc-tl-modeseg { display: inline-flex; border: 1px solid var(--gc-accent-line); border-radius: 7px; overflow: hidden; }
+.mtl-root .gc-tl-modeseg button {
+  border: 0; background: rgba(240,136,64,.12); color: var(--gc-faint);
+  padding: 4px 12px; font-size: 11px; line-height: 1; cursor: pointer;
+}
+.mtl-root .gc-tl-modeseg button + button { border-left: 1px solid var(--gc-accent-line); }
+.mtl-root .gc-tl-modeseg button:hover { background: rgba(240,136,64,.24); color: var(--gc-text); }
+.mtl-root .gc-tl-modeseg button.is-on { background: var(--gc-accent); color: #1a1206; font-weight: 700; }
 .mtl-root .gc-zoombar { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .mtl-root .gc-zoombar input[type="range"] { width: 120px; accent-color: var(--gc-accent); cursor: pointer; }
 .mtl-root .gc-zoom-val { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
@@ -449,6 +578,46 @@ const MATERIAL_TIMELINE_CSS = `
   background: var(--gc-accent);
   box-shadow: 0 0 8px rgba(240,136,64,.85);
 }
+.mtl-root .gc-mdrop {
+  position: absolute;
+  width: 3px;
+  height: 32px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--gc-accent);
+  box-shadow: 0 0 10px rgba(240,136,64,.85);
+  z-index: 9;
+  pointer-events: none;
+}
+.mtl-root .gc-mdrop::before {
+  content: "＋";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--gc-accent);
+  color: #1b1206;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mtl-root .gc-mdrop-time {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(20,16,12,0.94);
+  color: var(--gc-accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .mtl-root .gc-mempty {
   position: absolute;
   inset: 22px 0 0;
@@ -510,6 +679,18 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-mmarker.is-selected { background: #fff08a; box-shadow: 0 0 10px rgba(255,213,74,0.95); }
 .mtl-root .gc-mclip.is-option { border-color: rgba(199,155,242,.58); color: #eadbff; }
 .mtl-root .gc-mclip.is-option::before { background: #c79bf2; }
+.mtl-root .gc-mclip.is-audio {
+  border-color: rgba(96,214,196,.55); color: #cdfff4;
+  background: repeating-linear-gradient(90deg, rgba(20,40,38,.92) 0 6px, rgba(26,52,49,.92) 6px 12px);
+  gap: 6px;
+}
+.mtl-root .gc-mclip.is-audio::before { background: #4fd6c0; }
+.mtl-root .gc-mclip.is-audio.is-builtin { border-style: dashed; }
+.mtl-root .gc-audio-ico { font-size: 13px; opacity: .85; }
+.mtl-root .gc-mclip.is-filter { border-color: rgba(126,214,122,.6); color: #d9ffd0; }
+.mtl-root .gc-mclip.is-filter::before { background: #7ed67a; }
+.mtl-root .gc-mclip.is-fx { border-color: rgba(255,138,196,.6); color: #ffd9ee; }
+.mtl-root .gc-mclip.is-fx::before { background: #ff8ac4; }
 .mtl-root .gc-mhandle {
   position: absolute;
   top: 0; bottom: 0;

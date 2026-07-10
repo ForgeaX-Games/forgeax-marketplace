@@ -79,10 +79,11 @@ export const CATALOG_CSS = `
   background: var(--gc-panel);
   border: 1px solid var(--gc-line-soft);
   border-radius: 10px;
-  overflow: auto;
+  overflow: hidden;
   box-shadow: var(--shadow, 0 1px 4px rgba(0,0,0,.22));
 }
 .gc-stage {
+  box-sizing: border-box;
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -96,6 +97,9 @@ export const CATALOG_CSS = `
   height: 100%;
   --gc-timeline-h: clamp(204px, 22dvh, 240px);
 }
+/* 时间轴保持自身高度（内部自带滚动），由视频列吸收纵向伸缩，避免整段被挤压外溢。 */
+.gc-stage-video > .mtl-root { flex: none; min-height: 0; }
+.gc-stage-video > .gc-readonly-note { flex: none; }
 .gc-video-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .gc-video-title { color: var(--gc-text); font-size: 16px; font-weight: 700; }
 .gc-video-sub { color: var(--gc-faint); font-size: 12px; margin-top: 2px; }
@@ -454,30 +458,46 @@ export const CATALOG_CSS = `
 }
 .gc-lib-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .gc-lib-item {
-  min-height: 120px;
+  min-height: 92px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
+  gap: 9px;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--gc-line-soft);
   background: var(--gc-panel2);
   color: var(--gc-text);
   border-radius: 10px;
-  padding: 12px;
-  text-align: left;
+  padding: 14px 10px;
+  text-align: center;
   cursor: pointer;
+  transition: border-color .12s, background .12s, transform .12s;
 }
-.gc-lib-item:hover { border-color: var(--gc-accent-line); background: var(--gc-accent-soft); }
-.gc-lib-item span { color: var(--gc-muted); font-size: 12px; line-height: 1.45; }
+.gc-lib-item[draggable="true"] { cursor: grab; }
+.gc-lib-item[draggable="true"]:active { cursor: grabbing; }
+.gc-lib-item:hover { border-color: var(--gc-accent-line); background: var(--gc-accent-soft); transform: translateY(-1px); }
+.gc-lib-item strong { font-size: 12.5px; font-weight: 650; letter-spacing: .02em; color: var(--gc-text); }
+.gc-lib-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 11px;
+  color: var(--gc-accent);
+  background: var(--gc-accent-soft);
+  border: 1px solid var(--gc-accent-line);
+  transition: background .12s, color .12s, transform .12s;
+}
+.gc-lib-ico svg { width: 22px; height: 22px; display: block; }
+.gc-lib-item:hover .gc-lib-ico { background: rgba(240,136,64,.24); transform: scale(1.06); }
 .gc-lib-item.is-disabled {
   cursor: not-allowed;
-  opacity: 0.48;
+  opacity: 0.46;
   filter: grayscale(0.7);
 }
 .gc-lib-item.is-disabled:hover {
   border-color: rgba(255,255,255,0.1);
   background: var(--gc-panel2);
+  transform: none;
 }
+.gc-lib-item.is-disabled:hover .gc-lib-ico { background: var(--gc-accent-soft); transform: none; }
 .gc-inspector-empty {
   min-height: 180px;
   display: flex;

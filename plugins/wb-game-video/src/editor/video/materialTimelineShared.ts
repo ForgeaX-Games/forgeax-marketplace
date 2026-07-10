@@ -8,7 +8,7 @@
  */
 
 /** 时间轴上一段可编辑材料的种类。 */
-export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option'
+export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx'
 
 /** 时间轴上的一段材料（由 scene 派生，见 CatalogTabs.collectMaterials）。 */
 export interface MaterialItem {
@@ -21,6 +21,20 @@ export interface MaterialItem {
   layer: number
   /** 段内的一个「判定点」标记（当前仅 QTE 用：= cue.targetAt 计分锚点）；缺省无标记。 */
   markerMs?: number
+}
+
+/**
+ * 音频时间轴上的一段音轨（当前仅**显示 + 拖动**，不做实际音频编辑）。
+ * 素材自带音轨（视频内嵌声）默认落在第 0 轨、`builtin: true`。
+ */
+export interface AudioItem {
+  key: string
+  label: string
+  startMs: number
+  endMs: number
+  layer: number
+  /** 素材自带音轨（视频内嵌声道）；仅显示用途，暂不可删。 */
+  builtin?: boolean
 }
 
 export const TIMELINE_RULER_H = 24
@@ -99,6 +113,10 @@ export function materialLabel(kind: MaterialKind): string {
       return 'QTE 按键点'
     case 'option':
       return '选项'
+    case 'filter':
+      return '滤镜'
+    case 'fx':
+      return '特效'
   }
 }
 
@@ -120,7 +138,9 @@ export function canDeleteMaterial(kind: MaterialKind): boolean {
     kind === 'subtitle' ||
     kind === 'overlay' ||
     kind === 'qte' ||
-    kind === 'option'
+    kind === 'option' ||
+    kind === 'filter' ||
+    kind === 'fx'
   )
 }
 
@@ -134,5 +154,9 @@ export function materialClass(kind: MaterialKind): string {
       return 'is-qte'
     case 'option':
       return 'is-option'
+    case 'filter':
+      return 'is-filter'
+    case 'fx':
+      return 'is-fx'
   }
 }
