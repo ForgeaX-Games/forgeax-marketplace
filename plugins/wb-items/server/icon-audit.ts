@@ -1,11 +1,11 @@
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 
 import { evaluateRawQuality, GOLD_RAW_SAMPLE_SIZE } from '../shared/pipeline-quality';
 import type { IconQualityInput, RawQualityInput } from '../shared/pipeline-quality';
+import type { IconDelivery } from '../shared/types';
 import {
-  isPixelSource,
   measureIconContent,
   measureIconContentAfterCutout,
 } from './icon-normalize';
@@ -42,9 +42,7 @@ export async function readRawQualityInput(rawPath: string): Promise<RawQualityIn
 export async function readIconQualityInputInPlace(iconPath: string): Promise<IconQualityInput> {
   const metrics = await measureIconContent(iconPath);
   const { data, info } = await sharp(iconPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const fileStat = await stat(iconPath);
-  const pixel = isPixelSource(info.width, info.height, fileStat.size);
-  const qa = inspectCanvas(Buffer.from(data), info.width, info.height, pixel);
+  const qa = await inspectCanvas(Buffer.from(data), info.width, info.height, false);
   return {
     width: metrics.width,
     height: metrics.height,
@@ -56,7 +54,7 @@ export async function readIconQualityInputInPlace(iconPath: string): Promise<Ico
 
 export async function validateRawIconBuffer(
   buffer: Buffer,
-  opts: { strict?: boolean } = {},
+  opts: { strict?: boolean; delivery?: IconDelivery } = {},
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const tmpDir = resolve(projectRoot(), 'workspace', 'images', 'items', '_raw-qa');
   await mkdir(tmpDir, { recursive: true });
@@ -64,7 +62,7 @@ export async function validateRawIconBuffer(
   try {
     await writeFile(tmp, buffer);
     const input = await readRawQualityInput(tmp);
-    const evalResult = evaluateRawQuality(input, { strict: opts.strict ?? false });
+    const evalResult = evaluateRawQuality(input, { strict: opts.strict ?? false, delivery: opts.delivery });
     if (evalResult.verdict === 'fail') {
       return { ok: false, error: evalResult.notes.join('；') || '生图质量未达金标' };
     }

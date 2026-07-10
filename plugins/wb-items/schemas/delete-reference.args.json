@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "slug": { "type": "string" },
+    "refId": { "type": "string", "minLength": 1 }
+  },
+  "required": ["refId"]
+}

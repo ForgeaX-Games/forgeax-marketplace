@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "@forgeax-plugin/wb-items",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "kind": "workbench",
   "displayName": {
     "zh": "道具 / 图标",
@@ -155,6 +155,46 @@
         "description": {
           "zh": "列出支持的图标视觉风格预设。",
           "en": "List supported icon visual style presets."
+        }
+      },
+      {
+        "id": "items:upload-reference",
+        "args": "./schemas/upload-reference.args.json",
+        "returns": "./schemas/upload-reference.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "上传参考图，生图时作为风格/造型参考。",
+          "en": "Upload a reference image for style-guided icon generation."
+        }
+      },
+      {
+        "id": "items:delete-reference",
+        "args": "./schemas/delete-reference.args.json",
+        "returns": "./schemas/delete-reference.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "删除已上传的参考图。",
+          "en": "Remove an uploaded reference image."
+        }
+      },
+      {
+        "id": "items:optimize-prompt",
+        "args": "./schemas/optimize-prompt.args.json",
+        "returns": "./schemas/optimize-prompt.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "根据图标描述优化生图提示词。",
+          "en": "Optimize an icon generation prompt from a depicts description."
+        }
+      },
+      {
+        "id": "items:regenerate-item",
+        "args": "./schemas/regenerate-item.args.json",
+        "returns": "./schemas/regenerate-item.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为单个道具重新生成图标（可指定风格、提示词与参考图）。",
+          "en": "Regenerate a single item icon with optional style, prompt, and references."
         }
       }
     ]

@@ -8,7 +8,7 @@
  *   bun server/verify-pipeline.ts --gold                  # 验证金标库 default/assets/icons
  *   bun server/verify-pipeline.ts --compare               # 金标 vs demo 对比摘要
  */
-import { copyFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import sharp from 'sharp';
@@ -21,7 +21,7 @@ import {
   GOLD_BATCH_ID,
   type QualityVerdict,
 } from '../shared/pipeline-quality';
-import { applyIconCutout } from './icon-cutout';
+import { cutoutIconAsset } from '@forgeax/ui-asset-cleanup';
 import { countUniqueColorsAtSize, readIconQualityInputInPlace, readRawQualityInput } from './icon-audit';
 import {
   chooseResizeKernel,
@@ -146,10 +146,12 @@ async function writePreviews(normalizedPath: string, outDir: string, base: strin
 }
 
 async function writeCutoutPreview(rawPath: string, outPath: string): Promise<void> {
-  const { data, info } = await sharp(rawPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const buf = Buffer.from(data);
-  applyIconCutout(buf, info.width, info.height);
-  await sharp(buf, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toFile(outPath);
+  const buf = await readFile(rawPath);
+  const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+  const cutoutDataUrl = await cutoutIconAsset(dataUrl, { mode: 'icon' });
+  const match = cutoutDataUrl.match(/^data:[^;]+;base64,(.+)$/s);
+  if (!match) throw new Error('cutout preview failed');
+  await writeFile(outPath, Buffer.from(match[1], 'base64'));
 }
 
 async function auditRawToNormalized(rawPath: string, outDir: string, slug: string): Promise<PipelineReport> {

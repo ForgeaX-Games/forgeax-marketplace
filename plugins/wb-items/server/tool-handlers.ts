@@ -5,12 +5,13 @@ import {
   buildItemFromSlug,
   buildStylePrompt,
   DEFAULT_ICON_SIZE,
-  getStylePreset,
   ICON_NORMALIZE_REV,
   slugifyFileName,
-  STYLE_PRESETS,
   toAsciiSlug,
 } from '../shared/catalog';
+import type { StylePreset, StylePresetHint } from '../shared/types';
+import { loadStyleCatalog, requireStylePreset, resolveStylePreset } from './style-resolve';
+import { uiStyleForIconStyle } from '../shared/ui-style-map';
 import type {
   GenerateIconsResult,
   GenerateStylePlanResult,
@@ -18,7 +19,9 @@ import type {
   ListItemsResult,
   NormalizeBatchResult,
   ItemRecord,
+  OptimizePromptResult,
   ProposedItem,
+  RegenerateItemResult,
   RunPipelineResult,
   SummarizeRequirementsResult,
 } from '../shared/types';
@@ -40,6 +43,12 @@ import {
   workspaceBatchDir,
   writeItemsDocument,
 } from './item-store';
+import {
+  deleteReferenceImage,
+  loadReferenceImagesB64,
+  saveReferenceImage,
+} from './reference-images';
+import { optimizeItemPrompt } from './prompt-optimize';
 
 function itemSlugFromPng(name: string): string {
   return slugifyFileName(name).replace(/-raw$/, '');
@@ -56,12 +65,16 @@ async function listItems(args: { slug?: string }): Promise<ListItemsResult> {
   await ensureGameDirs(slug);
   const document = await readItemsDocument(slug);
   const normalizeRev = document.meta?.iconNormalizeRev ?? 0;
-  const delivery = getStylePreset(document.meta?.iconStyle ?? 'pixel-48')?.delivery ?? 'png-pixel';
   const iconPaths = await listIconFiles(slug);
   let normalizedAny = false;
   for (const rel of iconPaths) {
     const file = rel.split('/').pop() ?? rel;
     const itemSlug = itemSlugFromPng(file);
+    const item = document.items.find((i) => i.slug === itemSlug);
+    const itemPreset = await resolveStylePreset(
+      item?.iconStyle ?? document.meta?.iconStyle ?? 'pixel-48',
+    );
+    const delivery = itemPreset?.delivery ?? 'png-pixel';
     const changed = await ensureIconNormalizedInPlace(resolve(iconsDir(slug), file), document.meta?.iconSize ?? DEFAULT_ICON_SIZE, {
       itemSlug,
       normalizeRev,
@@ -92,12 +105,28 @@ async function listItems(args: { slug?: string }): Promise<ListItemsResult> {
       previewUrl: `/api/game-assets/${encodeURIComponent(slug)}/${iconRel}?v=${cacheV}`,
     };
   }));
+
+  const references = await Promise.all((merged.meta?.referenceImages ?? []).map(async (ref) => {
+    const rel = ref.path.replace(/^\.?\//, '');
+    let cacheV = merged.meta?.updatedAt ?? Date.now();
+    try {
+      cacheV = (await stat(resolve(gameRoot(slug), rel))).mtimeMs;
+    } catch { /* */ }
+    return {
+      id: ref.id,
+      path: ref.path,
+      label: ref.label,
+      previewUrl: `/api/game-assets/${encodeURIComponent(slug)}/${rel}?v=${cacheV}`,
+    };
+  }));
+
   return {
     ok: true,
     slug,
     gameRoot: gameRoot(slug),
     document: merged,
     icons,
+    references,
   };
 }
 
@@ -134,12 +163,17 @@ interface NormalizeSourcesArgs {
   sourceDir?: string;
   targetSize?: number;
   batchId?: string;
+  style?: string;
+  stylePreset?: StylePresetHint;
 }
 
 async function normalizeSources(args: NormalizeSourcesArgs): Promise<NormalizeBatchResult> {
   const slug = requireSlug(args.slug);
   const targetSize = args.targetSize ?? DEFAULT_ICON_SIZE;
-  const batchId = args.batchId ?? `pixel-${targetSize}-${Date.now()}`;
+  const styleId = args.style ?? (await readItemsDocument(slug)).meta?.iconStyle ?? 'pixel-48';
+  const preset = await requireStylePreset(String(styleId), args.stylePreset);
+  const delivery = preset.delivery === 'svg-lucide' ? 'png-pixel' : preset.delivery;
+  const batchId = args.batchId ?? `${preset.id}-${targetSize}-${Date.now()}`;
   const sourceDir = args.sourceDir?.trim()
     ? (existsSync(args.sourceDir.trim())
       ? resolve(args.sourceDir.trim())
@@ -184,16 +218,16 @@ async function normalizeSources(args: NormalizeSourcesArgs): Promise<NormalizeBa
       if (srcPath !== rawCopy) await copyFile(srcPath, rawCopy);
 
       const rawBuf = await readFile(srcPath);
-      const rawQa = await validateRawIconBuffer(rawBuf, { strict: true });
+      const rawQa = await validateRawIconBuffer(rawBuf, { strict: true, delivery });
       if (!rawQa.ok) {
         failed.push({
           slug: itemSlug,
-          error: `HD 生图未达金标，请重新生成（不做后处理修复）：${rawQa.error}`,
+          error: `HD 生图未达质量线，请重新生成（不做后处理修复）：${rawQa.error}`,
         });
         continue;
       }
 
-      const result = await normalizeIconFile(srcPath, batchOut, { targetSize, delivery: 'png-pixel' });
+      const result = await normalizeIconFile(srcPath, batchOut, { targetSize, delivery });
       await copyFile(batchOut, finalOut);
       result.slug = itemSlug;
       result.outputPath = `assets/icons/${itemSlug}.png`;
@@ -204,6 +238,7 @@ async function normalizeSources(args: NormalizeSourcesArgs): Promise<NormalizeBa
         ...draft,
         name: prev?.name ?? draft.name,
         depicts: prev?.depicts ?? draft.depicts,
+        iconStyle: preset.id,
       });
     } catch (e) {
       failed.push({ slug: itemSlug, error: (e as Error).message });
@@ -212,7 +247,8 @@ async function normalizeSources(args: NormalizeSourcesArgs): Promise<NormalizeBa
 
   doc.meta = {
     ...doc.meta,
-    iconStyle: 'pixel-48',
+    iconStyle: preset.id,
+    uiStyle: preset.uiStyleId ?? uiStyleForIconStyle(preset.id),
     iconSize: targetSize,
     iconNormalizeRev: ICON_NORMALIZE_REV,
     updatedAt: Date.now(),
@@ -221,8 +257,8 @@ async function normalizeSources(args: NormalizeSourcesArgs): Promise<NormalizeBa
 
   const manifest = {
     batchId,
-    style: `pixel-${targetSize}`,
-    delivery: 'png-pixel',
+    style: preset.id,
+    delivery,
     targetSize,
     generatedAt: new Date().toISOString(),
     items: normalized,
@@ -251,11 +287,12 @@ interface GenerateStylePlanArgs {
   slugs?: string[];
   proposedItems?: ProposedItem[];
   batchId?: string;
+  stylePreset?: StylePresetHint;
 }
 
 async function buildPlanFromItems(
   slug: string,
-  preset: NonNullable<ReturnType<typeof getStylePreset>>,
+  preset: StylePreset,
   items: Array<{ slug: string; depicts: string; prompt?: string; name?: { zh: string; en: string } }>,
   batchId?: string,
 ): Promise<GenerateStylePlanResult> {
@@ -291,10 +328,7 @@ async function buildPlanFromItems(
 async function generateStylePlan(args: GenerateStylePlanArgs): Promise<GenerateStylePlanResult> {
   const slug = requireSlug(args.slug);
   const styleId = args.style ?? 'pixel-48';
-  const preset = getStylePreset(styleId);
-  if (!preset) {
-    throw Object.assign(new Error(`unknown style: ${styleId}`), { code: 'unknown_style' });
-  }
+  const preset = await requireStylePreset(styleId, args.stylePreset);
 
   if (args.proposedItems?.length) {
     for (const p of args.proposedItems) {
@@ -329,15 +363,13 @@ interface SummarizeRequirementsArgs {
   slug?: string;
   requirements: string;
   style?: string;
+  stylePreset?: StylePresetHint;
 }
 
 async function summarizeRequirements(args: SummarizeRequirementsArgs): Promise<SummarizeRequirementsResult> {
   requireSlug(args.slug);
   const styleId = args.style ?? 'pixel-48';
-  const preset = getStylePreset(styleId);
-  if (!preset) {
-    throw Object.assign(new Error(`unknown style: ${styleId}`), { code: 'unknown_style' });
-  }
+  const preset = await requireStylePreset(styleId, args.stylePreset);
   const { items, source } = await summarizeRequirementsText(args.requirements, preset);
   return { ok: true, source, style: preset.id, items };
 }
@@ -346,12 +378,32 @@ interface GenerateIconsArgs {
   slug?: string;
   batchId: string;
   items: ProposedItem[];
+  referenceImagesB64?: string[];
+  style?: string;
+  stylePreset?: StylePresetHint;
+}
+
+async function resolveReferenceB64(
+  slug: string,
+  explicit?: string[],
+  useStored = true,
+): Promise<string[]> {
+  const fromArgs = (explicit ?? []).map((b) => b.replace(/^data:[^;]+;base64,/, '')).filter(Boolean);
+  if (fromArgs.length > 0) return fromArgs;
+  if (!useStored) return [];
+  const doc = await readItemsDocument(slug);
+  return loadReferenceImagesB64(slug, doc);
 }
 
 async function generateIcons(args: GenerateIconsArgs): Promise<GenerateIconsResult> {
   const slug = requireSlug(args.slug);
   const batchDir = workspaceBatchDir(args.batchId);
   await mkdir(batchDir, { recursive: true });
+
+  const refs = await resolveReferenceB64(slug, args.referenceImagesB64);
+  const styleId = args.style ?? 'pixel-48';
+  const preset = await requireStylePreset(styleId, args.stylePreset);
+  const delivery = preset.delivery === 'svg-lucide' ? 'png-pixel' : preset.delivery;
 
   const generated: Array<{ slug: string; path: string }> = [];
   const failed: Array<{ slug: string; error: string }> = [];
@@ -362,7 +414,7 @@ async function generateIcons(args: GenerateIconsArgs): Promise<GenerateIconsResu
       failed.push({ slug: item.slug, error: '生图服务暂不可用' });
       continue;
     }
-    const result = await generateIconImage(item.prompt);
+    const result = await generateIconImage(item.prompt, { referenceImagesB64: refs, delivery });
     if (!result.ok) {
       failed.push({ slug: item.slug, error: result.error });
       continue;
@@ -374,6 +426,7 @@ async function generateIcons(args: GenerateIconsArgs): Promise<GenerateIconsResu
       ...buildItemFromSlug(item.slug, `assets/icons/${item.slug}.png`),
       name: item.name,
       depicts: item.depicts,
+      iconStyle: preset.id,
     });
   }
 
@@ -393,6 +446,9 @@ interface RunPipelineArgs {
   targetSize?: number;
   skipImageGen?: boolean;
   skipNormalize?: boolean;
+  referenceImagesB64?: string[];
+  useStoredReferences?: boolean;
+  stylePreset?: StylePresetHint;
 }
 
 function sanitizeProposedItems(items: ProposedItem[]): ProposedItem[] {
@@ -414,8 +470,26 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
   const slug = requireSlug(args.slug);
   const targetSize = args.targetSize ?? DEFAULT_ICON_SIZE;
   const styleId = args.style ?? 'pixel-48';
+  const preset = await requireStylePreset(styleId, args.stylePreset);
 
-  const summarizeRaw = await summarizeRequirements({ slug, requirements: args.requirements, style: styleId });
+  const doc0 = await readItemsDocument(slug);
+  await writeItemsDocument(slug, {
+    ...doc0,
+    meta: {
+      ...doc0.meta,
+      iconStyle: preset.id,
+      uiStyle: preset.uiStyleId ?? uiStyleForIconStyle(preset.id),
+      iconSize: targetSize,
+      updatedAt: Date.now(),
+    },
+  });
+
+  const summarizeRaw = await summarizeRequirements({
+    slug,
+    requirements: args.requirements,
+    style: styleId,
+    stylePreset: args.stylePreset,
+  });
   const summarize = { ...summarizeRaw, items: sanitizeProposedItems(summarizeRaw.items) };
   await removeDuplicateNames(
     slug,
@@ -428,11 +502,20 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
     style: styleId,
     proposedItems: summarize.items,
     batchId,
+    stylePreset: args.stylePreset,
   });
 
   let icons: GenerateIconsResult | undefined;
   if (!args.skipImageGen) {
-    icons = await generateIcons({ slug, batchId, items: summarize.items });
+    const refs = await resolveReferenceB64(slug, args.referenceImagesB64, args.useStoredReferences !== false);
+    icons = await generateIcons({
+      slug,
+      batchId,
+      items: summarize.items,
+      referenceImagesB64: refs,
+      style: styleId,
+      stylePreset: args.stylePreset,
+    });
   }
 
   let normalize: NormalizeBatchResult | undefined;
@@ -441,7 +524,14 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
     const hasRaw = existsSync(batchDir)
       && (await readdir(batchDir)).some((f) => f.endsWith('-raw.png') || (f.endsWith('.png') && f !== 'manifest.json'));
     if (hasRaw) {
-      normalize = await normalizeSources({ slug, sourceDir: batchDir, targetSize, batchId });
+      normalize = await normalizeSources({
+        slug,
+        sourceDir: batchDir,
+        targetSize,
+        batchId,
+        style: styleId,
+        stylePreset: args.stylePreset,
+      });
     }
   }
 
@@ -461,8 +551,125 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
   };
 }
 
-async function listStyles(): Promise<{ ok: true; styles: typeof STYLE_PRESETS }> {
+async function listStyles(): Promise<{ ok: true; styles: StylePreset[] }> {
+  const { STYLE_PRESETS } = await loadStyleCatalog();
   return { ok: true, styles: STYLE_PRESETS };
+}
+
+async function uploadReference(args: {
+  slug?: string;
+  base64: string;
+  label?: string;
+}): Promise<{ ok: true; document: ItemsDocument; reference: { id: string; path: string; previewUrl: string; label?: string } }> {
+  const slug = requireSlug(args.slug);
+  if (!args.base64?.trim()) {
+    throw Object.assign(new Error('base64 is required'), { code: 'empty_reference' });
+  }
+  const { document, reference } = await saveReferenceImage(slug, args.base64, args.label);
+  const rel = reference.path.replace(/^\.?\//, '');
+  return {
+    ok: true,
+    document,
+    reference: {
+      id: reference.id,
+      path: reference.path,
+      label: reference.label,
+      previewUrl: `/api/game-assets/${encodeURIComponent(slug)}/${rel}?v=${Date.now()}`,
+    },
+  };
+}
+
+async function deleteReferenceTool(args: {
+  slug?: string;
+  refId: string;
+}): Promise<{ ok: true; document: ItemsDocument }> {
+  const slug = requireSlug(args.slug);
+  const refId = args.refId?.trim();
+  if (!refId) throw Object.assign(new Error('refId is required'), { code: 'invalid_ref_id' });
+  const document = await deleteReferenceImage(slug, refId);
+  return { ok: true, document };
+}
+
+async function optimizePrompt(args: {
+  slug?: string;
+  depicts: string;
+  style?: string;
+  hint?: string;
+  stylePreset?: StylePresetHint;
+}): Promise<OptimizePromptResult> {
+  requireSlug(args.slug);
+  const styleId = args.style ?? 'pixel-48';
+  const preset = await requireStylePreset(styleId, args.stylePreset);
+  const { prompt, source } = await optimizeItemPrompt(args.depicts, preset, args.hint);
+  return { ok: true, prompt, source };
+}
+
+async function regenerateItem(args: {
+  slug?: string;
+  itemSlug: string;
+  style?: string;
+  targetSize?: number;
+  customPrompt?: string;
+  useStoredReferences?: boolean;
+  referenceImagesB64?: string[];
+  stylePreset?: StylePresetHint;
+}): Promise<RegenerateItemResult> {
+  const slug = requireSlug(args.slug);
+  const itemSlug = args.itemSlug?.trim();
+  if (!itemSlug) throw Object.assign(new Error('itemSlug is required'), { code: 'invalid_item_slug' });
+
+  const doc = await readItemsDocument(slug);
+  const item = doc.items.find((i) => i.slug === itemSlug);
+  if (!item) {
+    throw Object.assign(new Error(`item not found: ${itemSlug}`), { code: 'item_not_found' });
+  }
+
+  const styleId = args.style ?? item.iconStyle ?? doc.meta?.iconStyle ?? 'pixel-48';
+  const preset = await requireStylePreset(styleId, args.stylePreset);
+  const targetSize = args.targetSize ?? doc.meta?.iconSize ?? DEFAULT_ICON_SIZE;
+  const depicts = item.depicts || item.name.en || item.name.zh || item.slug;
+  const prompt = args.customPrompt?.trim()
+    || item.customPrompt?.trim()
+    || buildStylePrompt(depicts, preset);
+
+  const batchId = `regen-${itemSlug}-${Date.now()}`;
+  const refs = await resolveReferenceB64(slug, args.referenceImagesB64, args.useStoredReferences !== false);
+
+  if (!litellmImageConfigured()) {
+    return { ok: true, batchId, itemSlug, failed: '生图服务暂不可用' };
+  }
+
+  const gen = await generateIconImage(prompt, { referenceImagesB64: refs, delivery: preset.delivery === 'svg-lucide' ? 'png-pixel' : preset.delivery });
+  if (!gen.ok) {
+    return { ok: true, batchId, itemSlug, failed: gen.error };
+  }
+
+  const batchDir = workspaceBatchDir(batchId);
+  await mkdir(batchDir, { recursive: true });
+  await saveRawIcon(batchDir, itemSlug, gen.buffer);
+
+  const normalize = await normalizeSources({
+    slug,
+    sourceDir: batchDir,
+    targetSize,
+    batchId,
+    style: preset.id,
+    stylePreset: args.stylePreset,
+  });
+  await upsertItem(slug, {
+    ...item,
+    depicts,
+    customPrompt: args.customPrompt?.trim() || item.customPrompt,
+    iconStyle: preset.id,
+  });
+
+  return {
+    ok: true,
+    batchId,
+    itemSlug,
+    generated: { slug: itemSlug, path: `workspace/images/items/${batchId}/${itemSlug}-raw.png` },
+    normalize,
+  };
 }
 
 export const tools = {
@@ -476,6 +683,18 @@ export const tools = {
   'items:generate-icons': async (args: GenerateIconsArgs) => generateIcons(args),
   'items:run-pipeline': async (args: RunPipelineArgs) => runPipeline(args),
   'items:list-styles': async () => listStyles(),
+  'items:upload-reference': async (args: { slug?: string; base64: string; label?: string }) => uploadReference(args),
+  'items:delete-reference': async (args: { slug?: string; refId: string }) => deleteReferenceTool(args),
+  'items:optimize-prompt': async (args: { slug?: string; depicts: string; style?: string; hint?: string }) => optimizePrompt(args),
+  'items:regenerate-item': async (args: {
+    slug?: string;
+    itemSlug: string;
+    style?: string;
+    targetSize?: number;
+    customPrompt?: string;
+    useStoredReferences?: boolean;
+    referenceImagesB64?: string[];
+  }) => regenerateItem(args),
 };
 
 export default tools;

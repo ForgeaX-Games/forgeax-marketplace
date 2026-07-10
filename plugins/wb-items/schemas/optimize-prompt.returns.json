@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "prompt": { "type": "string" },
+    "source": { "type": "string", "enum": ["llm", "heuristic"] }
+  },
+  "required": ["ok", "prompt", "source"]
+}

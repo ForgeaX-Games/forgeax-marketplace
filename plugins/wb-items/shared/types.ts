@@ -16,7 +16,16 @@ export type IconStyleId =
   | 'pixel-64'
   | 'painted-flat'
   | 'fantasy-painted'
-  | 'sci-fi-hud';
+  | 'sci-fi-hud'
+  | 'ui-modern-dark'
+  | 'ui-anime'
+  | 'ui-cute-cartoon'
+  | 'ui-fresh-pastoral'
+  | 'ui-realistic-military'
+  | 'ui-modern-minimal'
+  | 'ui-cyber-neon'
+  | 'ui-watercolor'
+  | 'ui-low-poly';
 
 export type IconDelivery = 'svg-lucide' | 'png-transparent' | 'png-pixel';
 
@@ -47,14 +56,28 @@ export interface ItemRecord {
   sellPrice?: number;
   gameplay?: ItemGameplay;
   depicts?: string;
+  /** 用户自定义生图提示词（覆盖默认 buildStylePrompt） */
+  customPrompt?: string;
+  /** 单条道具偏好的图标风格 */
+  iconStyle?: IconStyleId;
+}
+
+export interface ReferenceImage {
+  id: string;
+  path: string;
+  label?: string;
 }
 
 export interface ItemsDocumentMeta {
   defaultLocale?: string;
   iconStyle?: IconStyleId | 'mixed';
+  /** 对齐 wb-ui 的界面视觉风格 ID */
+  uiStyle?: string;
   iconSize?: number;
   /** 图标规范化管线版本，低于当前值时 list 会从 raw 重跑 */
   iconNormalizeRev?: number;
+  /** 用户上传的参考图（生图时作为风格/造型参考） */
+  referenceImages?: ReferenceImage[];
   updatedAt?: string | number;
 }
 
@@ -70,7 +93,17 @@ export interface StylePreset {
   delivery: IconDelivery;
   targetSize: number;
   promptSuffix: string;
+  /** 对应 wb-ui StylePresetId */
+  uiStyleId?: string;
+  /** 左侧画风选择器是否展示（默认 true） */
+  showInPicker?: boolean;
 }
+
+/** 前端传给后端的画风兜底（服务端 catalog 未热更新时仍可生成） */
+export type StylePresetHint = Pick<
+  StylePreset,
+  'id' | 'delivery' | 'targetSize' | 'promptSuffix' | 'uiStyleId' | 'label'
+>;
 
 export interface NormalizeIconResult {
   slug: string;
@@ -107,6 +140,27 @@ export interface ListItemsResult {
     path: string;
     previewUrl: string;
   }>;
+  references: Array<{
+    id: string;
+    path: string;
+    previewUrl: string;
+    label?: string;
+  }>;
+}
+
+export interface OptimizePromptResult {
+  ok: true;
+  prompt: string;
+  source: 'llm' | 'heuristic';
+}
+
+export interface RegenerateItemResult {
+  ok: true;
+  batchId: string;
+  itemSlug: string;
+  generated?: { slug: string; path: string };
+  normalize?: NormalizeBatchResult;
+  failed?: string;
 }
 
 export interface GenerateStylePlanItem {

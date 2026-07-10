@@ -2,16 +2,15 @@
   "type": "object",
   "properties": {
     "slug": { "type": "string" },
-    "requirements": { "type": "string", "minLength": 2 },
+    "itemSlug": { "type": "string", "minLength": 1 },
     "style": { "type": "string" },
     "targetSize": { "type": "number" },
-    "skipImageGen": { "type": "boolean" },
-    "skipNormalize": { "type": "boolean" },
+    "customPrompt": { "type": "string" },
     "useStoredReferences": { "type": "boolean" },
     "referenceImagesB64": {
       "type": "array",
       "items": { "type": "string" }
     }
   },
-  "required": ["requirements"]
+  "required": ["itemSlug"]
 }

@@ -1,10 +1,12 @@
 {
   "name": "@forgeax-plugin/wb-items",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "ForgeaX workbench plugin: items.json + 48px icon pipeline with multi-style generation hooks.",
   "scripts": {
+    "prebuild": "bun install --cwd ../../shared/ui-asset-cleanup",
+    "preinstall": "bun install --cwd ../../shared/ui-asset-cleanup",
     "dev": "vite --host",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
@@ -13,6 +15,7 @@
     "verify-pipeline": "bun server/verify-pipeline.ts"
   },
   "dependencies": {
+    "@forgeax/ui-asset-cleanup": "file:../../shared/ui-asset-cleanup",
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -1,5 +1,7 @@
-import type { StylePreset } from '@shared/types';
-import { localizedStyleLabel, t, useT } from '@/i18n';
+import type { ListItemsResult, StylePreset } from '@shared/types';
+import { localizedStyleLabel, t, tf, useT } from '@/i18n';
+import { ReferenceUpload } from '@/components/ReferenceUpload';
+import { resolvePickerStyles } from '@shared/catalog';
 
 export interface SidebarProps {
   styles: StylePreset[];
@@ -9,6 +11,10 @@ export interface SidebarProps {
   onRequirementsChange: (v: string) => void;
   targetSize: number;
   onTargetSizeChange: (v: number) => void;
+  references: ListItemsResult['references'];
+  refBusy: boolean;
+  onUploadReference: (base64: string, label?: string) => Promise<void>;
+  onDeleteReference: (refId: string) => Promise<void>;
   busy: boolean;
   message: string | null;
   error: string | null;
@@ -23,16 +29,17 @@ export function Sidebar({
   onRequirementsChange,
   targetSize,
   onTargetSizeChange,
+  references,
+  refBusy,
+  onUploadReference,
+  onDeleteReference,
   busy,
   message,
   error,
   onConfirm,
 }: SidebarProps) {
   useT();
-  const visualStyles = styles.filter(
-    (s) => s.delivery === 'png-pixel' || s.delivery === 'png-transparent',
-  );
-  const styleOptions = visualStyles.length > 0 ? visualStyles : styles;
+  const styleOptions = resolvePickerStyles(styles);
 
   return (
     <div className="gx-left">
@@ -56,10 +63,31 @@ export function Sidebar({
             />
           </label>
 
+          <ReferenceUpload
+            references={references}
+            busy={refBusy || busy}
+            onUpload={onUploadReference}
+            onDelete={onDeleteReference}
+          />
+
           <label className="field">
             <span className="field-label">{t('form.styleLabel')}</span>
+            <p className="step-note">{t('form.stylePixelGroup')}</p>
             <div className="fx-segmented fx-segmented--wrap">
-              {styleOptions.map((s) => (
+              {styleOptions.filter((s) => s.delivery === 'png-pixel').map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`fx-segmented-btn${selectedStyle === s.id ? ' is-selected' : ''}`}
+                  onClick={() => onStyleChange(s.id)}
+                >
+                  {localizedStyleLabel(s)}
+                </button>
+              ))}
+            </div>
+            <p className="step-note">{tf('form.stylePaintedGroup', { count: styleOptions.filter((s) => s.delivery === 'png-transparent').length })}</p>
+            <div className="fx-segmented fx-segmented--wrap wb-style-grid wb-style-grid--painted">
+              {styleOptions.filter((s) => s.delivery === 'png-transparent').map((s) => (
                 <button
                   key={s.id}
                   type="button"

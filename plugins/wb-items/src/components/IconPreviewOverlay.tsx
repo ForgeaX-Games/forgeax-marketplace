@@ -6,6 +6,7 @@ import { localizedItemName, t, useT } from '@/i18n';
 export interface PreviewItem {
   item: ItemRecord;
   src: string;
+  pixelThumb?: boolean;
 }
 
 interface IconPreviewOverlayProps {
@@ -42,7 +43,7 @@ export function IconPreviewOverlay({ preview, onClose }: IconPreviewOverlayProps
             <X size={18} />
           </button>
         </header>
-        <div className="wb-icon-overlay-stage">
+        <div className={`wb-icon-overlay-stage${preview.pixelThumb ? ' wb-icon-overlay-stage--pixel' : ''}`}>
           <img src={preview.src} alt={displayName} />
         </div>
         <p className="wb-icon-overlay-hint">

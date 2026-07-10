@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "document": { "type": "object" },
+    "reference": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "path": { "type": "string" },
+        "previewUrl": { "type": "string" },
+        "label": { "type": "string" }
+      },
+      "required": ["id", "path", "previewUrl"]
+    }
+  },
+  "required": ["ok", "document", "reference"]
+}

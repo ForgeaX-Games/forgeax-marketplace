@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ItemRecord, ItemsDocument, ListItemsResult, RunPipelineResult, StylePreset } from '@shared/types';
-import { DEFAULT_ICON_SIZE } from '@shared/catalog';
-import { callTool } from '@/lib/toolClient';
+import type { ItemRecord, ItemsDocument, ListItemsResult, OptimizePromptResult, RegenerateItemResult, RunPipelineResult, StylePreset } from '@shared/types';
+import { DEFAULT_ICON_SIZE, getStylePreset, pickerStylePresets, resolvePickerStyles, toStylePresetHint } from '@shared/catalog';
+import { uiStyleForIconStyle } from '@shared/ui-style-map';
+import { callTool, reloadPluginsAndRetry } from '@/lib/toolClient';
+import { regenerateItemViaPipeline } from '@/lib/regenerate-item';
 import { activeSlug, hasActiveGame } from '@/lib/gameSlug';
 import { navigateToUiWorkshop } from '@/lib/items-handoff';
 import { broadcastItemsRefresh, installItemsRefreshListener } from '@/lib/paneSync';
@@ -13,15 +15,38 @@ interface AppProps {
   pane: 'left' | 'center' | 'standalone';
 }
 
-function resultMessage(r: RunPipelineResult): string {
+function pipelineFeedback(r: RunPipelineResult): { message: string | null; error: string | null } {
   const total = r.summarize.items.length;
   const saved = r.normalize?.normalized.length ?? 0;
-  const failed = r.normalize?.failed.length ?? 0;
+  const normFailed = r.normalize?.failed.length ?? 0;
+  const genFailed = r.icons?.failed ?? [];
 
-  if (saved > 0 && failed > 0) return tf('messages.partial', { saved, total });
-  if (saved > 0) return tf('messages.done', { count: saved });
-  if (failed > 0) return tf('messages.failed', { count: failed });
-  return t('messages.noOutput');
+  if (saved > 0 && normFailed > 0) {
+    return {
+      message: tf('messages.partial', { saved, total }),
+      error: tf('messages.failed', { count: normFailed }),
+    };
+  }
+  if (saved > 0) {
+    return { message: tf('messages.done', { count: saved }), error: null };
+  }
+  if (normFailed > 0) {
+    const detail = r.normalize!.failed[0]?.error;
+    return {
+      message: null,
+      error: detail
+        ? tf('messages.failedDetail', { count: normFailed, detail })
+        : tf('messages.failed', { count: normFailed }),
+    };
+  }
+  if (genFailed.length > 0) {
+    const detail = genFailed[0]?.error ?? t('messages.genFailed');
+    return { message: null, error: detail };
+  }
+  if (r.icons && r.icons.generated.length === 0 && total > 0) {
+    return { message: null, error: t('messages.genFailed') };
+  }
+  return { message: null, error: t('messages.noOutput') };
 }
 
 export function App({ pane }: AppProps) {
@@ -29,12 +54,14 @@ export function App({ pane }: AppProps) {
   const gameActive = hasActiveGame();
   const [document, setDocument] = useState<ItemsDocument | null>(null);
   const [icons, setIcons] = useState<ListItemsResult['icons']>([]);
-  const [styles, setStyles] = useState<StylePreset[]>([]);
+  const [references, setReferences] = useState<ListItemsResult['references']>([]);
+  const [styles, setStyles] = useState<StylePreset[]>(() => resolvePickerStyles([]));
   const [selectedStyle, setSelectedStyle] = useState('pixel-48');
   const [requirements, setRequirements] = useState('');
   const [targetSize, setTargetSize] = useState(DEFAULT_ICON_SIZE);
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [refBusy, setRefBusy] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,18 +75,32 @@ export function App({ pane }: AppProps) {
     }
     setDocument(r.result.document);
     setIcons(r.result.icons);
+    setReferences(r.result.references ?? []);
     setError(null);
   }, [gameActive]);
 
   useEffect(() => {
     void refresh();
-    void callTool<{ ok: true; styles: StylePreset[] }>('items:list-styles', {}).then((r) => {
-      if (r.ok) setStyles(r.result.styles);
-    });
+    void (async () => {
+      const r = await callTool<{ ok: true; styles: StylePreset[] }>('items:list-styles', {});
+      const merged = resolvePickerStyles(r.ok ? r.result.styles : undefined);
+      setStyles(merged);
+      const expected = pickerStylePresets().length;
+      if (r.ok && r.result.styles.length < expected) {
+        const again = await reloadPluginsAndRetry<{ ok: true; styles: StylePreset[] }>('items:list-styles', {});
+        if (again.ok) setStyles(resolvePickerStyles(again.result.styles));
+      }
+    })();
     return installItemsRefreshListener(() => {
       void refresh();
     });
   }, [refresh]);
+
+  const styleOptions = useMemo(() => resolvePickerStyles(styles), [styles]);
+  const selectedPreset = useMemo(
+    () => styleOptions.find((s) => s.id === selectedStyle),
+    [styleOptions, selectedStyle],
+  );
 
   const filteredItems = useMemo(() => {
     const items = document?.items ?? [];
@@ -81,21 +122,21 @@ export function App({ pane }: AppProps) {
       requirements,
       style: selectedStyle,
       targetSize,
+      useStoredReferences: true,
+      stylePreset: selectedPreset ? toStylePresetHint(selectedPreset) : undefined,
     });
     if (!r.ok) {
       setBusy(false);
       setError(r.error);
       return;
     }
-    const msg = resultMessage(r.result);
-    setMessage(msg);
-    if (r.result.normalize?.failed.length) {
-      setError(tf('messages.failed', { count: r.result.normalize.failed.length }));
-    }
+    const feedback = pipelineFeedback(r.result);
+    setMessage(feedback.message);
+    setError(feedback.error);
     await refresh();
     broadcastItemsRefresh('pipeline-done');
     setBusy(false);
-  }, [requirements, selectedStyle, targetSize, refresh]);
+  }, [requirements, selectedStyle, selectedPreset, targetSize, refresh]);
 
   const onSaveItem = useCallback(async (item: ItemRecord) => {
     setEditorBusy(true);
@@ -129,8 +170,87 @@ export function App({ pane }: AppProps) {
 
   const onOpenInUi = useCallback((item: ItemRecord) => {
     if (!activeSlug) return;
-    navigateToUiWorkshop(activeSlug, [item.slug]);
-  }, []);
+    const preset = getStylePreset(selectedStyle);
+    const uiStyleId = preset?.uiStyleId ?? uiStyleForIconStyle(selectedStyle);
+    navigateToUiWorkshop(activeSlug, [item.slug], uiStyleId);
+  }, [selectedStyle]);
+
+  const onUploadReference = useCallback(async (base64: string, label?: string) => {
+    setRefBusy(true);
+    setError(null);
+    const r = await callTool<{ ok: true; document: ItemsDocument }>('items:upload-reference', { base64, label });
+    setRefBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    setMessage(t('form.refUploaded'));
+    await refresh();
+    broadcastItemsRefresh('ref-uploaded');
+  }, [refresh]);
+
+  const onDeleteReference = useCallback(async (refId: string) => {
+    setRefBusy(true);
+    setError(null);
+    const r = await callTool<{ ok: true; document: ItemsDocument }>('items:delete-reference', { refId });
+    setRefBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    await refresh();
+    broadcastItemsRefresh('ref-deleted');
+  }, [refresh]);
+
+  const onOptimizePrompt = useCallback(async (depicts: string, style: string, hint?: string) => {
+    const preset = styleOptions.find((s) => s.id === style);
+    const r = await callTool<OptimizePromptResult>('items:optimize-prompt', {
+      depicts,
+      style,
+      hint,
+      stylePreset: preset ? toStylePresetHint(preset) : undefined,
+    });
+    if (!r.ok) {
+      setError(r.error);
+      return null;
+    }
+    return r.result.prompt;
+  }, [styleOptions]);
+
+  const onRegenerateItem = useCallback(async (item: ItemRecord, style: string, customPrompt: string) => {
+    setEditorBusy(true);
+    setError(null);
+    await callTool<{ ok: true; document: ItemsDocument }>('items:upsert-item', { item });
+
+    const preset = styleOptions.find((s) => s.id === style);
+    const stylePreset = preset ? toStylePresetHint(preset) : undefined;
+
+    let r = await callTool<RegenerateItemResult>('items:regenerate-item', {
+      itemSlug: item.slug,
+      style,
+      targetSize,
+      customPrompt: customPrompt || undefined,
+      useStoredReferences: true,
+      stylePreset,
+    });
+
+    if (!r.ok && r.code === 'not_found') {
+      r = await regenerateItemViaPipeline(item, style, targetSize, customPrompt || undefined, stylePreset);
+    }
+
+    setEditorBusy(false);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    if (r.result.failed) {
+      setError(r.result.failed);
+      return;
+    }
+    setMessage(t('editor.regenerated'));
+    await refresh();
+    broadcastItemsRefresh('item-regenerated');
+  }, [styleOptions, targetSize, refresh]);
 
   const sidebarProps = {
     styles,
@@ -140,6 +260,10 @@ export function App({ pane }: AppProps) {
     onRequirementsChange: setRequirements,
     targetSize,
     onTargetSizeChange: setTargetSize,
+    references,
+    refBusy,
+    onUploadReference,
+    onDeleteReference,
     busy,
     message,
     error,
@@ -159,24 +283,35 @@ export function App({ pane }: AppProps) {
     return <Sidebar {...sidebarProps} />;
   }
 
-  const selected = styles.find((s) => s.id === selectedStyle);
-  const styleLabel = selected ? localizedStyleLabel(selected) : 'pixel-48';
+  const selected = styleOptions.find((s) => s.id === selectedStyle);
+  const styleLabel = selected ? localizedStyleLabel(selected) : selectedStyle;
 
   return (
     <div className="gx-root gx-root--standalone">
       {pane === 'standalone' && <Sidebar {...sidebarProps} />}
+      {(message || error) && (
+        <div className="wb-items-toast-stack">
+          {message && <div className="status-banner ok">{message}</div>}
+          {error && <div className="status-banner err">{error}</div>}
+        </div>
+      )}
       <ItemLibrary
         items={filteredItems}
         icons={icons}
+        styles={styles}
+        targetSize={targetSize}
+        defaultIconStyle={document?.meta?.iconStyle}
+        hasReferences={references.length > 0}
         filter={filter}
         onFilterChange={setFilter}
-        targetSize={targetSize}
         styleLabel={styleLabel}
         totalCount={document?.items.length ?? 0}
         editorBusy={editorBusy}
         onSaveItem={onSaveItem}
         onDeleteItem={onDeleteItem}
         onOpenInUi={onOpenInUi}
+        onOptimizePrompt={onOptimizePrompt}
+        onRegenerateItem={onRegenerateItem}
       />
     </div>
   );

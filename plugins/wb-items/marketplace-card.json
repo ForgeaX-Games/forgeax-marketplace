@@ -21,6 +21,14 @@
   ],
   "history": [
     {
+      "version": "0.1.5",
+      "date": "2026-07-07",
+      "notes": {
+        "zh": "完整工作台：SSOT 抠图、14 个 tools、items.json + 48px 图标管线",
+        "en": "Full workbench: SSOT cutout, 14 tools, items.json + 48px icon pipeline"
+      }
+    },
+    {
       "version": "0.1.0",
       "date": "2026-07-06",
       "notes": {

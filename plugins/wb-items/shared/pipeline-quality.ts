@@ -22,12 +22,30 @@ export const GOLD_OUTPUT_FILL_PASS = 0.45;
 export const GOLD_OUTPUT_FILL_WARN = 0.33;
 export const GOLD_OUTPUT_FILL_FAIL = 0.32;
 
+/** 彩绘类 raw：允许更高色数（平滑渐变 / 手绘） */
+export const PAINTED_RAW_SAMPLE_COLORS_PASS = 4200;
+export const PAINTED_RAW_SAMPLE_COLORS_WARN = 5500;
+/** 彩绘 raw 采样色数下限 — 低于金标像素 raw≈709 视为误生像素风，strict 重试 */
+export const PAINTED_RAW_SAMPLE_COLORS_MIN = 820;
+
+/** 彩绘 48px 输出允许更高色数 */
+export const PAINTED_OUTPUT_COLORS_PASS = 2200;
+export const PAINTED_OUTPUT_COLORS_WARN = 3200;
+export const PAINTED_OUTPUT_COLORS_FAIL = 4500;
+
 /** 金标 48px 调色板（min≈23，max≈1226，中位≈534） */
 export const GOLD_OUTPUT_COLORS_PASS = 1050;
 export const GOLD_OUTPUT_COLORS_WARN = 1226;
 export const GOLD_OUTPUT_COLORS_FAIL = 1300;
 
+import type { IconDelivery } from './types';
+
 export type QualityVerdict = 'pass' | 'warn' | 'fail';
+
+export function isPixelDelivery(delivery?: IconDelivery): boolean {
+  if (delivery == null) return true;
+  return delivery === 'png-pixel';
+}
 
 export interface RawQualityInput {
   width: number;
@@ -55,10 +73,14 @@ function bump(current: QualityVerdict, next: QualityVerdict): QualityVerdict {
   return rank[next] > rank[current] ? next : current;
 }
 
-export function evaluateRawQuality(input: RawQualityInput, opts: { strict?: boolean } = {}): QualityEvaluation {
+export function evaluateRawQuality(
+  input: RawQualityInput,
+  opts: { strict?: boolean; delivery?: IconDelivery } = {},
+): QualityEvaluation {
   const notes: string[] = [];
   let verdict: QualityVerdict = 'pass';
   const strict = opts.strict ?? false;
+  const pixel = isPixelDelivery(opts.delivery);
 
   const square = input.width === input.height;
   const exactGold = input.width === GOLD_RAW_SIZE && input.height === GOLD_RAW_SIZE;
@@ -81,7 +103,7 @@ export function evaluateRawQuality(input: RawQualityInput, opts: { strict?: bool
     verdict = bump(verdict, strict ? 'fail' : 'warn');
   }
 
-  if (input.sampleColors != null) {
+  if (input.sampleColors != null && pixel) {
     if (input.sampleColors > GOLD_RAW_SAMPLE_COLORS_WARN) {
       notes.push(
         `${GOLD_RAW_SAMPLE_SIZE}px 采样色数 ${input.sampleColors} 过高（插画伪像素，金标≈709）`,
@@ -93,17 +115,35 @@ export function evaluateRawQuality(input: RawQualityInput, opts: { strict?: bool
       );
       verdict = bump(verdict, strict ? 'fail' : 'warn');
     }
+  } else if (input.sampleColors != null && !pixel) {
+    if (input.sampleColors < PAINTED_RAW_SAMPLE_COLORS_MIN) {
+      notes.push(
+        `彩绘 raw 采样色数 ${input.sampleColors} 过低（疑似像素块/retro sprite；应选「像素 48」或重生成平滑插画风）`,
+      );
+      verdict = bump(verdict, strict ? 'fail' : 'warn');
+    } else if (input.sampleColors > PAINTED_RAW_SAMPLE_COLORS_WARN) {
+      notes.push(`彩绘 raw 采样色数 ${input.sampleColors} 过高，可能噪点过多`);
+      verdict = bump(verdict, strict ? 'fail' : 'warn');
+    } else if (input.sampleColors > PAINTED_RAW_SAMPLE_COLORS_PASS) {
+      notes.push(`彩绘 raw 采样色数 ${input.sampleColors} 偏高`);
+      verdict = bump(verdict, 'warn');
+    }
   }
 
   return { verdict, notes };
 }
 
-export function evaluateIconQuality(input: IconQualityInput): QualityEvaluation {
+export function evaluateIconQuality(
+  input: IconQualityInput,
+  opts: { delivery?: IconDelivery; targetSize?: number } = {},
+): QualityEvaluation {
   const notes: string[] = [];
   let verdict: QualityVerdict = 'pass';
+  const pixel = isPixelDelivery(opts.delivery);
+  const targetSize = opts.targetSize ?? 48;
 
-  if (input.width !== 48 || input.height !== 48) {
-    notes.push(`输出尺寸 ${input.width}×${input.height}，应为 48×48`);
+  if (input.width !== targetSize || input.height !== targetSize) {
+    notes.push(`输出尺寸 ${input.width}×${input.height}，应为 ${targetSize}×${targetSize}`);
     verdict = bump(verdict, 'fail');
   }
 
@@ -113,22 +153,35 @@ export function evaluateIconQuality(input: IconQualityInput): QualityEvaluation 
   }
 
   if (input.fillRatio < GOLD_OUTPUT_FILL_FAIL) {
-    notes.push(`48px 主体过小 ${(input.fillRatio * 100).toFixed(1)}%（金标 min≈33%）`);
+    notes.push(`${targetSize}px 主体过小 ${(input.fillRatio * 100).toFixed(1)}%`);
     verdict = bump(verdict, 'fail');
   } else if (input.fillRatio < GOLD_OUTPUT_FILL_PASS) {
-    notes.push(`48px 主体偏小 ${(input.fillRatio * 100).toFixed(1)}%（金标 p25≈47%）`);
+    notes.push(`${targetSize}px 主体偏小 ${(input.fillRatio * 100).toFixed(1)}%`);
     verdict = bump(verdict, 'warn');
   }
 
-  if (input.uniqueColors > GOLD_OUTPUT_COLORS_FAIL) {
-    notes.push(`48px 色数过多 ${input.uniqueColors}（金标 max≈1226，易为插画糊边）`);
-    verdict = bump(verdict, 'fail');
-  } else if (input.uniqueColors > GOLD_OUTPUT_COLORS_WARN) {
-    notes.push(`48px 色数偏高 ${input.uniqueColors}（金标 max≈1226）`);
-    verdict = bump(verdict, 'warn');
-  } else if (input.uniqueColors > GOLD_OUTPUT_COLORS_PASS) {
-    notes.push(`48px 色数略高 ${input.uniqueColors}（金标中位≈534）`);
-    verdict = bump(verdict, 'warn');
+  if (pixel) {
+    if (input.uniqueColors > GOLD_OUTPUT_COLORS_FAIL) {
+      notes.push(`${targetSize}px 色数过多 ${input.uniqueColors}（像素金标 max≈1226）`);
+      verdict = bump(verdict, 'fail');
+    } else if (input.uniqueColors > GOLD_OUTPUT_COLORS_WARN) {
+      notes.push(`${targetSize}px 色数偏高 ${input.uniqueColors}`);
+      verdict = bump(verdict, 'warn');
+    } else if (input.uniqueColors > GOLD_OUTPUT_COLORS_PASS) {
+      notes.push(`${targetSize}px 色数略高 ${input.uniqueColors}`);
+      verdict = bump(verdict, 'warn');
+    }
+  } else {
+    if (input.uniqueColors > PAINTED_OUTPUT_COLORS_FAIL) {
+      notes.push(`彩绘 ${targetSize}px 色数过多 ${input.uniqueColors}`);
+      verdict = bump(verdict, 'fail');
+    } else if (input.uniqueColors > PAINTED_OUTPUT_COLORS_WARN) {
+      notes.push(`彩绘 ${targetSize}px 色数偏高 ${input.uniqueColors}`);
+      verdict = bump(verdict, 'warn');
+    } else if (input.uniqueColors > PAINTED_OUTPUT_COLORS_PASS) {
+      notes.push(`彩绘 ${targetSize}px 色数略高 ${input.uniqueColors}`);
+      verdict = bump(verdict, 'warn');
+    }
   }
 
   return { verdict, notes };

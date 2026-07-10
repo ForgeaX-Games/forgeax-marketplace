@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "batchId": { "type": "string" },
+    "itemSlug": { "type": "string" },
+    "generated": { "type": "object" },
+    "normalize": { "type": "object" },
+    "failed": { "type": "string" }
+  },
+  "required": ["ok", "batchId", "itemSlug"]
+}

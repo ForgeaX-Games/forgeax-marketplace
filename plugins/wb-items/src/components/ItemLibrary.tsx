@@ -1,34 +1,44 @@
 import { Search } from 'lucide-react';
-import type { ItemRecord, ListItemsResult } from '@shared/types';
+import type { IconStyleId, ItemRecord, ListItemsResult, StylePreset } from '@shared/types';
 import { t, tf, useT } from '@/i18n';
 import { ItemGrid } from '@/components/ItemGrid';
 
 interface ItemLibraryProps {
   items: ItemRecord[];
   icons: ListItemsResult['icons'];
+  styles: StylePreset[];
+  targetSize: number;
+  hasReferences: boolean;
   filter: string;
   onFilterChange: (v: string) => void;
-  targetSize: number;
+  defaultIconStyle?: IconStyleId | 'mixed';
   styleLabel: string;
   totalCount: number;
   editorBusy?: boolean;
   onSaveItem: (item: ItemRecord) => void | Promise<void>;
   onDeleteItem: (item: ItemRecord) => void | Promise<void>;
   onOpenInUi: (item: ItemRecord) => void;
+  onOptimizePrompt: (depicts: string, style: string, hint?: string) => Promise<string | null>;
+  onRegenerateItem: (item: ItemRecord, style: string, customPrompt: string) => Promise<void>;
 }
 
 export function ItemLibrary({
   items,
   icons,
+  styles,
+  targetSize,
+  hasReferences,
   filter,
   onFilterChange,
-  targetSize,
+  defaultIconStyle,
   styleLabel,
   totalCount,
   editorBusy,
   onSaveItem,
   onDeleteItem,
   onOpenInUi,
+  onOptimizePrompt,
+  onRegenerateItem,
 }: ItemLibraryProps) {
   useT();
 
@@ -54,11 +64,17 @@ export function ItemLibrary({
       <ItemGrid
         items={items}
         icons={icons}
+        styles={styles}
+        targetSize={targetSize}
+        defaultIconStyle={defaultIconStyle}
+        hasReferences={hasReferences}
         filterActive={filter.trim().length > 0}
         editorBusy={editorBusy}
         onSaveItem={onSaveItem}
         onDeleteItem={onDeleteItem}
         onOpenInUi={onOpenInUi}
+        onOptimizePrompt={onOptimizePrompt}
+        onRegenerateItem={onRegenerateItem}
       />
     </main>
   );

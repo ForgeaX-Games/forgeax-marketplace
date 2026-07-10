@@ -13,10 +13,19 @@ describe('pipeline quality bar (gold standard)', () => {
   test('illustration-like raw fails on sample color count', () => {
     const r = evaluateRawQuality(
       { width: 1024, height: 1024, cutoutFillRatio: 0.53, sampleColors: 2902 },
-      { strict: true },
+      { strict: true, delivery: 'png-pixel' },
     );
     expect(r.verdict).toBe('fail');
     expect(r.notes.some((n) => n.includes('采样色数'))).toBe(true);
+  });
+
+  test('painted raw rejects pixel-art sample color count in strict mode', () => {
+    const r = evaluateRawQuality(
+      { width: 1024, height: 1024, cutoutFillRatio: 0.44, sampleColors: 709 },
+      { strict: true, delivery: 'png-transparent' },
+    );
+    expect(r.verdict).toBe('fail');
+    expect(r.notes.some((n) => n.includes('过低'))).toBe(true);
   });
 
   test('gold-like raw passes strict gate', () => {
@@ -51,7 +60,7 @@ describe('pipeline quality bar (gold standard)', () => {
       fillRatio: 0.67,
       uniqueColors: 1350,
       qaPassed: true,
-    });
+    }, { delivery: 'png-pixel' });
     expect(r.verdict).toBe('fail');
   });
 

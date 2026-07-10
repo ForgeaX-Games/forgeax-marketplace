@@ -5,11 +5,13 @@ export const ITEMS_HANDOFF_KEY = 'forgeax:items-handoff';
 export interface ItemsHandoff {
   slug: string;
   itemSlugs: string[];
+  /** wb-ui StylePresetId，与道具图标画风对齐 */
+  uiStyleId?: string;
   targetPluginId: '@forgeax-plugin/wb-ui';
   ts: number;
 }
 
-export function writeItemsHandoff(payload: Pick<ItemsHandoff, 'slug' | 'itemSlugs'>): void {
+export function writeItemsHandoff(payload: Pick<ItemsHandoff, 'slug' | 'itemSlugs' | 'uiStyleId'>): void {
   try {
     window.localStorage.setItem(ITEMS_HANDOFF_KEY, JSON.stringify({
       ...payload,
@@ -32,11 +34,11 @@ export function readItemsHandoff(maxAgeMs = 30 * 60_000): ItemsHandoff | null {
   }
 }
 
-export function navigateToUiWorkshop(slug: string, itemSlugs: string[]): void {
-  writeItemsHandoff({ slug, itemSlugs });
+export function navigateToUiWorkshop(slug: string, itemSlugs: string[], uiStyleId?: string): void {
+  writeItemsHandoff({ slug, itemSlugs, uiStyleId });
   window.parent?.postMessage({
     type: 'FORGEAX_NAVIGATE',
     targetPluginId: '@forgeax-plugin/wb-ui',
-    payload: { slug, itemSlugs },
+    payload: { slug, itemSlugs, uiStyleId },
   }, '*');
 }

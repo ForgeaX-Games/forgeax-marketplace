@@ -45,6 +45,10 @@ describe('icon normalize', () => {
     expect(chooseResizeKernel(false, false, 1024, 1024, 39, 39)).toBe('lanczos3');
   });
 
+  test('chooseResizeKernel uses nearest for pixel delivery heavy downscale', () => {
+    expect(chooseResizeKernel(false, true, 1024, 1024, 39, 39)).toBe('nearest');
+  });
+
   test('chooseResizeKernel uses nearest for native pixel upscale', () => {
     expect(chooseResizeKernel(true, false, 8, 8, 42, 42)).toBe('nearest');
   });

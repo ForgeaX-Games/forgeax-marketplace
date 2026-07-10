@@ -1,18 +1,27 @@
-import sharp from 'sharp';
+import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { readdir, rename, stat, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import sharp from 'sharp';
+
+import {
+  cutoutIconAsset,
+  inspectUiAssetCanvas,
+  isIconInspectionRejected,
+  isIconInspectionRejectedRelaxed,
+  normalizeStandaloneUiAsset,
+  normalizeUiAssetForCanvas,
+  type UiAssetCanvasInspection,
+} from '@forgeax/ui-asset-cleanup';
 
 import type { IconDelivery, NormalizeIconResult } from '../shared/types';
 import { ICON_NORMALIZE_REV } from '../shared/catalog';
-import { applyIconCutout } from './icon-cutout';
-import { inspectCanvas } from './icon-inspect';
 import { projectRoot } from './item-store';
 
-export { inspectCanvas } from './icon-inspect';
+export { inspectCanvas, inspectCanvasFromDataUrl } from './icon-inspect';
 
 const ALPHA_THRESHOLD = 16;
-/** 统一视觉占比 — 与 default/scripts/normalize-icons-48.py 金标批处理一致 */
+/** 统一视觉占比 — 与 UI 工坊 icon mode 一致 */
 const ICON_CONTENT_FILL_PIXEL = 0.88;
 const ICON_CONTENT_FILL_PAINTED = 0.82;
 /** 低于此文件体积的 48px 图标多为 nearest 压坏，需从 raw 重跑 */
@@ -20,15 +29,28 @@ const LOW_QUALITY_ICON_BYTES = 1800;
 /** 低于此面积占比视为未规范化，list 时会自动重跑 normalize */
 const MIN_ACCEPTABLE_FILL_RATIO = 0.45;
 
-interface RawStats {
-  width: number;
-  height: number;
-  data: Buffer;
+async function readPathAsDataUrl(path: string): Promise<string> {
+  const buf = await readFile(path);
+  return `data:image/png;base64,${buf.toString('base64')}`;
 }
 
-async function loadRgba(path: string): Promise<RawStats> {
-  const { data, info } = await sharp(path).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return { width: info.width, height: info.height, data };
+async function writeDataUrlToPath(dataUrl: string, path: string): Promise<void> {
+  const match = dataUrl.match(/^data:[^;]+;base64,(.+)$/s);
+  if (!match) throw new Error('invalid data url');
+  await writeFile(path, Buffer.from(match[1], 'base64'));
+}
+
+function qaFromInspection(report: UiAssetCanvasInspection, pixelDelivery: boolean) {
+  return {
+    opaqueEdgePixels: report.opaqueEdgePixels,
+    transparentCornerDirtyPixels: report.transparentCornerDirtyPixels,
+    fragmentationRatio: report.fragmentationRatio,
+    largestComponentRatio: report.largestComponentRatio,
+    opaqueBoundsFillRatio: report.opaqueBoundsFillRatio,
+    passed: pixelDelivery
+      ? !isIconInspectionRejectedRelaxed(report)
+      : !isIconInspectionRejected(report),
+  };
 }
 
 function bbox(data: Buffer, width: number, height: number): { left: number; top: number; right: number; bottom: number } | null {
@@ -52,7 +74,6 @@ function bbox(data: Buffer, width: number, height: number): { left: number; top:
 }
 
 export function isPixelSource(width: number, height: number, fileSize: number): boolean {
-  // 与金标 normalize-icons-48.py 一致：≤64px 且小文件视为原生像素源
   return Math.max(width, height) <= 64 && fileSize < 80_000;
 }
 
@@ -64,7 +85,7 @@ export interface NormalizeIconOptions {
 /** 大图缩小用 lanczos；原生小像素源或整数放大用 nearest */
 export function chooseResizeKernel(
   pixel: boolean,
-  _pixelDelivery: boolean,
+  pixelDelivery: boolean,
   cropW: number,
   cropH: number,
   dstW: number,
@@ -73,17 +94,13 @@ export function chooseResizeKernel(
   const srcMax = Math.max(cropW, cropH);
   const dstMax = Math.max(dstW, dstH);
   const upscaling = dstW > cropW || dstH > cropH;
-  const heavyDownscale = srcMax > dstMax * 3;
+  if (pixelDelivery && !pixel && srcMax > dstMax * 2) return 'nearest';
   if (pixel && upscaling) return 'nearest';
   if (pixel && srcMax <= 64) return 'nearest';
-  if (heavyDownscale) return 'lanczos3';
   return 'lanczos3';
 }
 
-function midMaxFor(srcMax: number, dstMax: number): number {
-  return Math.max(dstMax * 2, Math.round(srcMax * 0.35));
-}
-
+/** 与 UI 工坊组件库同一套抠图 + 质检 + 落盘尺寸规范化 */
 export async function normalizeIconFile(
   inputPath: string,
   outputPath: string,
@@ -94,102 +111,38 @@ export async function normalizeIconFile(
     ? { targetSize: targetSizeOrOpts, ...maybeOpts }
     : targetSizeOrOpts;
   const targetSize = opts.targetSize ?? 48;
+  const pixelDelivery = opts.delivery === 'png-pixel';
 
   const meta = await sharp(inputPath).metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
   const fileStat = await stat(inputPath);
   const pixelNative = isPixelSource(width, height, fileStat.size);
-  const pixel = pixelNative;
+  const pixel = pixelDelivery && pixelNative;
+  const fill = pixelDelivery ? ICON_CONTENT_FILL_PIXEL : ICON_CONTENT_FILL_PAINTED;
 
-  const raw = await loadRgba(inputPath);
-  applyIconCutout(raw.data, raw.width, raw.height);
-  const box = bbox(raw.data, raw.width, raw.height);
-  if (!box) {
-    await sharp({
-      create: {
-        width: targetSize,
-        height: targetSize,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      },
-    })
-      .png()
-      .toFile(outputPath);
-    const qa = inspectCanvas(Buffer.alloc(targetSize * targetSize * 4), targetSize, targetSize, pixel);
-    return {
-      slug: '',
-      source: inputPath,
-      outputPath,
-      sourceSize: [width, height],
-      pixelSource: pixel,
-      qa,
-    };
-  }
+  const dataUrl = await readPathAsDataUrl(inputPath);
+  const cutoutDataUrl = await normalizeStandaloneUiAsset(dataUrl, { mode: 'icon', fillRatio: fill });
+  const cutReport = await inspectUiAssetCanvas(cutoutDataUrl);
 
-  const cropW = box.right - box.left;
-  const cropH = box.bottom - box.top;
-  if (!Number.isFinite(cropW) || !Number.isFinite(cropH) || cropW < 1 || cropH < 1) {
-    throw new Error(`invalid crop bbox: ${cropW}x${cropH}`);
-  }
-  const fill = pixelNative ? ICON_CONTENT_FILL_PIXEL : ICON_CONTENT_FILL_PAINTED;
+  const cropW = Math.max(1, cutReport.contentWidth);
+  const cropH = Math.max(1, cutReport.contentHeight);
   const maxContent = Math.max(1, Math.floor(targetSize * fill));
   const scale = Math.min(maxContent / cropW, maxContent / cropH);
   const nw = Math.max(1, Math.round(cropW * scale));
   const nh = Math.max(1, Math.round(cropH * scale));
-  const ox = Math.floor((targetSize - nw) / 2);
-  const oy = Math.floor((targetSize - nh) / 2);
+  const kernel = chooseResizeKernel(pixel, pixelDelivery, cropW, cropH, nw, nh);
 
-  const kernel = chooseResizeKernel(pixel, false, cropW, cropH, nw, nh);
-  const cutoutBuf = await sharp(raw.data, {
-    raw: { width: raw.width, height: raw.height, channels: 4 },
-  }).png().toBuffer();
+  const finalDataUrl = await normalizeUiAssetForCanvas(cutoutDataUrl, {
+    targetWidth: targetSize,
+    targetHeight: targetSize,
+    maxFillWidth: fill,
+    maxFillHeight: fill,
+    kernel: kernel === 'lanczos3' ? 'lanczos3' : 'nearest',
+  });
 
-  const srcMax = Math.max(cropW, cropH);
-  const dstMax = Math.max(nw, nh);
-
-  const extracted = sharp(cutoutBuf).extract({ left: box.left, top: box.top, width: cropW, height: cropH });
-  let resized: sharp.Sharp;
-  if (kernel === 'lanczos3' && srcMax > dstMax * 4) {
-    resized = extracted
-      .resize(midMaxFor(srcMax, dstMax), midMaxFor(srcMax, dstMax), { fit: 'inside', kernel: sharp.kernel.lanczos3 })
-      .resize(nw, nh, { kernel: sharp.kernel.lanczos3 })
-      .sharpen({ sigma: 0.65, m1: 0.5, m2: 0.25 });
-  } else {
-    resized = extracted.resize(nw, nh, { kernel: sharp.kernel[kernel] });
-    if (kernel === 'lanczos3' && srcMax > dstMax * 2) {
-      resized = resized.sharpen({ sigma: 0.5, m1: 0.4, m2: 0.2 });
-    }
-  }
-
-  const cropped = await resized
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  applyIconCutout(cropped.data, cropped.info.width, cropped.info.height);
-  const croppedPng = await sharp(cropped.data, {
-    raw: { width: cropped.info.width, height: cropped.info.height, channels: 4 },
-  }).png().toBuffer();
-
-  await sharp({
-    create: {
-      width: targetSize,
-      height: targetSize,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    },
-  })
-    .composite([{ input: croppedPng, left: ox, top: oy }])
-    .png()
-    .toFile(outputPath);
-
-  const outRaw = await loadRgba(outputPath);
-  applyIconCutout(outRaw.data, outRaw.width, outRaw.height);
-  await sharp(outRaw.data, {
-    raw: { width: outRaw.width, height: outRaw.height, channels: 4 },
-  }).png().toFile(outputPath);
-  const qa = inspectCanvas(outRaw.data, outRaw.width, outRaw.height, pixel);
+  await writeDataUrlToPath(finalDataUrl, outputPath);
+  const qaReport = await inspectUiAssetCanvas(finalDataUrl);
 
   return {
     slug: '',
@@ -197,7 +150,7 @@ export async function normalizeIconFile(
     outputPath,
     sourceSize: [width, height],
     pixelSource: pixel,
-    qa,
+    qa: qaFromInspection(qaReport, pixelDelivery),
   };
 }
 
@@ -211,15 +164,27 @@ export interface IconContentMetrics {
 }
 
 export async function measureIconContent(iconPath: string): Promise<IconContentMetrics> {
-  const raw = await loadRgba(iconPath);
-  return measureContentFromRgba(raw.data, raw.width, raw.height, countWhitePixels(raw.data));
+  const meta = await sharp(iconPath).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  const { data } = await sharp(iconPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return measureContentFromRgba(Buffer.from(data), width, height, countWhitePixels(Buffer.from(data)));
 }
 
 /** 抠底后的真实主体占比 — 用于评估生图阶段主体是否过小 */
 export async function measureIconContentAfterCutout(iconPath: string): Promise<IconContentMetrics> {
-  const raw = await loadRgba(iconPath);
-  applyIconCutout(raw.data, raw.width, raw.height);
-  return measureContentFromRgba(raw.data, raw.width, raw.height, 0);
+  const dataUrl = await readPathAsDataUrl(iconPath);
+  const cutoutDataUrl = await cutoutIconAsset(dataUrl, { mode: 'icon' });
+  const report = await inspectUiAssetCanvas(cutoutDataUrl);
+  const area = Math.max(1, report.width * report.height);
+  return {
+    width: report.width,
+    height: report.height,
+    contentWidth: report.contentWidth,
+    contentHeight: report.contentHeight,
+    fillRatio: (report.contentWidth * report.contentHeight) / area,
+    whitePixels: 0,
+  };
 }
 
 function countWhitePixels(data: Buffer): number {
@@ -320,7 +285,6 @@ export async function renormalizeIconInPlace(
 
 export interface EnsureIconOptions {
   itemSlug?: string;
-  /** items.json meta.iconNormalizeRev，缺省视为 0 */
   normalizeRev?: number;
   delivery?: IconDelivery;
 }

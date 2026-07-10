@@ -14,6 +14,24 @@ export interface ToolResultErr {
 
 export type ToolResult<T> = ToolResultOk<T> | ToolResultErr;
 
+let reloadPromise: Promise<boolean> | null = null;
+
+async function reloadPluginSnapshot(): Promise<boolean> {
+  if (!reloadPromise) {
+    reloadPromise = (async () => {
+      try {
+        const resp = await fetch('/api/plugins/reload', { method: 'POST' });
+        return resp.ok;
+      } catch {
+        return false;
+      } finally {
+        reloadPromise = null;
+      }
+    })();
+  }
+  return reloadPromise;
+}
+
 function withSlug(args: unknown): unknown {
   if (args && typeof args === 'object' && !Array.isArray(args)) {
     const obj = args as Record<string, unknown>;
@@ -23,7 +41,7 @@ function withSlug(args: unknown): unknown {
   return args;
 }
 
-export async function callTool<T>(toolId: string, args: unknown): Promise<ToolResult<T>> {
+async function callToolOnce<T>(toolId: string, args: unknown): Promise<ToolResult<T>> {
   let resp: Response;
   try {
     resp = await fetch('/api/tools/call', {
@@ -41,9 +59,33 @@ export async function callTool<T>(toolId: string, args: unknown): Promise<ToolRe
     if (err.includes('does not export handler')) {
       return { ok: false, error: t('error.pluginReload'), code: body.code };
     }
+    if (body.code === 'not_found' || /tool not found/i.test(err)) {
+      return { ok: false, error: t('error.pluginReload'), code: 'not_found' };
+    }
     if (/EUNKNOWN|ENOENT|EINVAL/i.test(err) && /open|write|path/i.test(err)) {
       return { ok: false, error: t('error.saveFailed'), code: body.code };
     }
   }
   return body;
+}
+
+export async function callTool<T>(toolId: string, args: unknown): Promise<ToolResult<T>> {
+  const first = await callToolOnce<T>(toolId, args);
+  if (first.ok) return first;
+  const retryable = first.code === 'not_found' || first.code === 'unknown_style';
+  if (!retryable) return first;
+
+  const reloaded = await reloadPluginSnapshot();
+  if (!reloaded) return first;
+
+  return callToolOnce<T>(toolId, args);
+}
+
+export async function reloadPluginsAndRetry<T>(
+  toolId: string,
+  args: unknown,
+): Promise<ToolResult<T>> {
+  const reloaded = await reloadPluginSnapshot();
+  if (!reloaded) return { ok: false, error: t('error.pluginReload'), code: 'reload_failed' };
+  return callToolOnce<T>(toolId, args);
 }
