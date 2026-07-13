@@ -31,7 +31,7 @@
     "build": "tsc -p tsconfig.build.json && vite build",
     "build:standalone": "tsc -p tsconfig.build.json && vite build && node scripts/bundle-singlefile.mjs",
     "preview": "vite preview",
-    "lint": "tsc --noEmit && node scripts/check-module-boundaries.mjs",
+    "lint": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && node scripts/check-module-boundaries.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check:boundaries": "node scripts/check-module-boundaries.mjs"

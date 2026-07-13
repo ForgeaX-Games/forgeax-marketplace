@@ -3,8 +3,12 @@ import { defineConfig } from 'vitest/config'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
-import type { ServerResponse } from 'http'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, createReadStream, statSync } from 'fs'
+import type { ServerResponse, IncomingMessage } from 'http'
+import { assetsDir, listAssets, getAsset, getStyleAxes, setStyleAxes, resolveAssetFilePath, mimeForPath } from './server/asset-registry'
+import { generateKeyframe, generateVideo, type OrchestrateCtx } from './server/generation/orchestrate'
+import { importCharacterRefs, importSceneRefs } from './server/intake'
+import type { MediaKind } from './src/editor/assets/registry-types'
 
 /**
  * 视频游戏工坊 · dev/build 配置（graph-only）。
@@ -139,6 +143,142 @@ function graphStorePlugin(): Plugin {
   }
 }
 
+// ─── 游戏级共享素材层端点 ─────────────────────────────────────────────────
+const GVA_ROUTE_PREFIX = '/__gva__'
+
+/**
+ * 素材层读端点（磁盘权威 = `.forgeax/games/<slug>/assets/`，写方=服务端 gen:* 工具）：
+ *   GET /__gva__/assets?game=slug[&kind=video|image]   → { assets: MediaAsset[] }
+ *   GET /__gva__/media/<id>?game=slug                   → 流式回二进制（支持 Range，便于视频拖播）
+ * 无 `.forgeax/games` 工程根或无 slug 时 assets 返回空、media 404。
+ */
+function gameVideoAssetsPlugin(): Plugin {
+  let projectRoot: string | null = null
+  return {
+    name: 'gamevideo-shared-assets',
+    configResolved(config) {
+      projectRoot = findProjectRootWithForgeax(config.root)
+    },
+    configureServer(server) {
+      server.middlewares.use(GVA_ROUTE_PREFIX, (req: IncomingMessage, res, next) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost')
+          const path = url.pathname.replace(/\/+$/, '') || '/'
+          const method = (req.method ?? 'GET').toUpperCase()
+          const slug = (url.searchParams.get('game') ?? '').trim() || null
+          const dir = assetsDir(projectRoot, slug)
+
+          if (path === '/assets' && method === 'GET') {
+            if (!dir) return sendJson(res, 200, { assets: [] })
+            const kindParam = url.searchParams.get('kind')
+            const kind = kindParam === 'video' || kindParam === 'image' ? (kindParam as MediaKind) : undefined
+            return sendJson(res, 200, { assets: listAssets(dir, kind ? { kind } : undefined) })
+          }
+
+          if (path.startsWith('/asset/') && method === 'GET') {
+            if (!dir) return sendJson(res, 200, { asset: null })
+            const id = decodeURIComponent(path.slice('/asset/'.length))
+            return sendJson(res, 200, { asset: getAsset(dir, id) })
+          }
+
+          // 游戏级风格三轴（P3）：GET 读 manifest.styleAxes；POST 浅合并写回。
+          if (path === '/style-axes' && method === 'GET') {
+            if (!dir) return sendJson(res, 200, { styleAxes: null })
+            return sendJson(res, 200, { styleAxes: getStyleAxes(dir) ?? null })
+          }
+          if (path === '/style-axes' && method === 'POST') {
+            if (!dir) return sendJson(res, 400, { styleAxes: null, error: 'no assets dir / invalid slug' })
+            readGraphReqJson(req)
+              .then((body) => sendJson(res, 200, { styleAxes: setStyleAxes(dir, (body ?? {}) as Parameters<typeof setStyleAxes>[1]) }))
+              .catch((e) => sendJson(res, 200, { styleAxes: null, error: (e as Error).message }))
+            return
+          }
+
+          // 服务端 headless 生成（编辑器「重新生成」直触，dev 中间件内跑）：
+          //   POST /__gva__/generate-video     body: VideoGenInput（缺 character/scene ref 硬闸报错）
+          //   POST /__gva__/generate-keyframe  body: KeyframeInput
+          if (path === '/generate-video' && method === 'POST') {
+            if (!dir) return sendJson(res, 400, { asset: null, error: 'no assets dir / invalid slug' })
+            const octx: OrchestrateCtx = { dir, env: process.env }
+            readGraphReqJson(req)
+              .then((body) => generateVideo(octx, body as unknown as Parameters<typeof generateVideo>[1]))
+              .then((asset) => sendJson(res, 200, { asset }))
+              .catch((e) => sendJson(res, 200, { asset: null, error: (e as Error).message }))
+            return
+          }
+          if (path === '/generate-keyframe' && method === 'POST') {
+            if (!dir) return sendJson(res, 400, { asset: null, error: 'no assets dir / invalid slug' })
+            const octx: OrchestrateCtx = { dir, env: process.env }
+            readGraphReqJson(req)
+              .then((body) => generateKeyframe(octx, body as unknown as Parameters<typeof generateKeyframe>[1]))
+              .then((asset) => sendJson(res, 200, { asset }))
+              .catch((e) => sendJson(res, 200, { asset: null, error: (e as Error).message }))
+            return
+          }
+
+          // 跨模块只读拿料（编辑器「导入参考图」直触）：
+          //   POST /__gva__/import-character-refs  → 扫 characters/ 登记 character_ref
+          //   POST /__gva__/import-scene-refs      → 扫 textures/ 登记 scene_ref
+          if (path === '/import-character-refs' && method === 'POST') {
+            if (!dir) return sendJson(res, 400, { refs: [], error: 'no assets dir / invalid slug' })
+            try {
+              const charactersDir = resolve(dir, '..', 'characters')
+              return sendJson(res, 200, { refs: importCharacterRefs({ assetsDir: dir, charactersDir }) })
+            } catch (e) {
+              return sendJson(res, 200, { refs: [], error: (e as Error).message })
+            }
+          }
+          if (path === '/import-scene-refs' && method === 'POST') {
+            if (!dir) return sendJson(res, 400, { refs: [], error: 'no assets dir / invalid slug' })
+            try {
+              const texturesDir = resolve(dir, '..', 'textures')
+              return sendJson(res, 200, { refs: importSceneRefs({ assetsDir: dir, texturesDir }) })
+            } catch (e) {
+              return sendJson(res, 200, { refs: [], error: (e as Error).message })
+            }
+          }
+
+          if (path.startsWith('/media/') && (method === 'GET' || method === 'HEAD')) {
+            if (!dir) return sendJson(res, 404, { error: 'no assets dir' })
+            const id = decodeURIComponent(path.slice('/media/'.length))
+            const asset = getAsset(dir, id)
+            const file = asset ? resolveAssetFilePath(dir, asset) : null
+            if (!asset || !file || !existsSync(file)) return sendJson(res, 404, { error: 'not found' })
+            const size = statSync(file).size
+            const mime = asset.mime ?? mimeForPath(file)
+            res.setHeader('content-type', mime)
+            res.setHeader('accept-ranges', 'bytes')
+            res.setHeader('cache-control', 'no-store')
+            const range = req.headers.range
+            if (range) {
+              const m = /bytes=(\d*)-(\d*)/.exec(range)
+              const start = m && m[1] ? Number(m[1]) : 0
+              const end = m && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
+              if (start >= size || start > end) {
+                res.statusCode = 416
+                res.setHeader('content-range', `bytes */${size}`)
+                return res.end()
+              }
+              res.statusCode = 206
+              res.setHeader('content-range', `bytes ${start}-${end}/${size}`)
+              res.setHeader('content-length', String(end - start + 1))
+              if (method === 'HEAD') return res.end()
+              return createReadStream(file, { start, end }).pipe(res)
+            }
+            res.statusCode = 200
+            res.setHeader('content-length', String(size))
+            if (method === 'HEAD') return res.end()
+            return createReadStream(file).pipe(res)
+          }
+          next()
+        } catch (e) {
+          sendJson(res, 500, { error: String(e) })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(() => {
   // 作为 forgeax-studio 插件 build 时，host 把产物挂在 `/plugins/wb-game-video/`
   // 子路径下，需要绝对 base；独立 dev/preview/standalone 用相对 './'。
@@ -147,7 +287,7 @@ export default defineConfig(() => {
 
   return {
     base: pluginBase,
-    plugins: [react(), graphStorePlugin()],
+    plugins: [react(), graphStorePlugin(), gameVideoAssetsPlugin()],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

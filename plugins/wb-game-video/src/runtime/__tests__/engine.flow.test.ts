@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerKind, unregisterKind } from '../registry/kind-registry'
 import { isRenderOverlay, isOpenInteraction } from '../engine/directives'
-import type { GameGraph, GameNode, GameScenario, GraphEffect, ReactiveRule, TimelineElement } from '../schema/graph-schema'
+import type { GameGraph, GameNode, GameScenario, GraphEffect, ReactiveRule, SubFlowPack, TimelineElement } from '../schema/graph-schema'
+
+const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
 // Minimal kinds: a logic "hit" that damages boss, a presentation "float", a choice-like.
 const KINDS = ['hit', 'floatT', 'markT', 'choiceX']
@@ -136,11 +138,52 @@ describe('subflow (subFlowRef)', () => {
     rt.start()
     // 首次进入容器 → 下钻到 sub（压栈 wrap）
     expect(rt.state.currentNodeId).toBe('sub')
-    expect(rt.state.callStack).toEqual(['wrap'])
+    expect(callers(rt)).toEqual(['wrap'])
     // sub 演出结束 → returnsToCaller 弹回 wrap → 容器不重播、直接走 out → after
     rt.onPerformanceEnd()
     expect(rt.state.currentNodeId).toBe('after')
     expect(rt.state.callStack).toEqual([])
+  })
+})
+
+describe('subflow pack (subFlowPack)', () => {
+  it('switches to external pack graph and returns to continue container out', () => {
+    const main: GameGraph = {
+      nodes: [
+        node('wrap', { subFlowPack: { id: 'enemy-turn', version: '1' }, durationMs: 100 }),
+        node('after', { end: 'ending' }),
+      ],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out' }],
+    }
+    const packGraph: GameGraph = {
+      nodes: [node('tele', { durationMs: 100, returnsToCaller: true })],
+      edges: [],
+    }
+    const pack: SubFlowPack = {
+      schemaVersion: 'wb-game-video.pack.v1',
+      id: 'enemy-turn',
+      version: '1',
+      entry: 'tele',
+      graph: packGraph,
+    }
+    const rt = new GraphRuntime(main, scnOf(main), undefined, [pack])
+    rt.start()
+    expect(rt.state.currentNodeId).toBe('tele')
+    expect(callers(rt)).toEqual(['wrap'])
+    expect(rt.state.callStack[0]?.returnGraph).toBe(main)
+    // pack 图里没有 after；弹回主图后才能走到 after
+    rt.onPerformanceEnd()
+    expect(rt.state.currentNodeId).toBe('after')
+    expect(rt.state.callStack).toEqual([])
+  })
+
+  it('throws when referenced pack is not loaded', () => {
+    const main: GameGraph = {
+      nodes: [node('wrap', { subFlowPack: { id: 'missing' } })],
+      edges: [],
+    }
+    const rt = new GraphRuntime(main, scnOf(main))
+    expect(() => rt.start()).toThrow(/subFlowPack 'missing' is not loaded/)
   })
 })
 
@@ -244,7 +287,7 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
     expect(rt.state.currentNodeId).toBe('hub')
     rt.onPerformanceEnd() // call edge → push hub → enter sub
     expect(rt.state.currentNodeId).toBe('sub')
-    expect(rt.state.callStack).toEqual(['hub'])
+    expect(callers(rt)).toEqual(['hub'])
     rt.onPerformanceEnd() // sub ends, no out edge, returnsToCaller → pop → hub
     expect(rt.state.currentNodeId).toBe('hub')
     expect(rt.state.callStack).toEqual([])

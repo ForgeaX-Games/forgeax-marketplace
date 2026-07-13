@@ -12,7 +12,18 @@
  *  - 交互：openInteraction 挂起 → submitInteraction(resolve) → outcome→handle→edge。
  *  - jumpToNode：seek 到任意节点（默认保留全局态）。
  */
-import type { GameEdge, GameGraph, GameNode, GameScenario, GraphCondition, GraphEffect, ReactiveRule, TimelineElement } from '../schema/graph-schema'
+import type {
+  GameEdge,
+  GameGraph,
+  GameNode,
+  GameScenario,
+  GraphCondition,
+  GraphEffect,
+  ReactiveRule,
+  SubFlowPack,
+  SubFlowPackRef,
+  TimelineElement,
+} from '../schema/graph-schema'
 import { applyEffects, type MutableState } from './apply-effects'
 import { initState } from './engine-init'
 import { defaultKindRegistry, isContinueResult, type KindRegistry, type RuntimeCtx } from '../registry/kind-registry'
@@ -21,21 +32,40 @@ import { evaluateCondition, describeCondition, type ConditionTarget } from './co
 
 export type GraphPhase = 'idle' | 'playing' | 'awaitInteraction' | 'ended'
 
+/** call/return 栈帧：弹回时恢复 caller 所在图（同图 subflow 时 returnGraph === 当前图）。 */
+export interface CallFrame {
+  callerNodeId: string
+  returnGraph: GameGraph
+}
+
 export interface RuntimeState extends MutableState {
   currentNodeId: string | null
   phase: GraphPhase
   elapsedMs: number
   visited: Set<string>
   traversedEdgeIds: Set<string>
-  callStack: string[]
+  callStack: CallFrame[]
   log: string[]
 }
 
 const CHAIN_GUARD = 200
 
+function isSubflowContainer(node: GameNode): boolean {
+  return !!(node.data.subFlowRef || node.data.subFlowPack)
+}
+
+function packLookupKey(id: string, version?: string): string {
+  return version ? `${id}@${version}` : id
+}
+
 export class GraphRuntime {
   private readonly nodes = new Map<string, GameNode>()
   private readonly outgoing = new Map<string, GameEdge[]>()
+  /** 主图（构造时传入）；jump/start 始终回到这里。 */
+  private readonly rootGraph: GameGraph
+  /** 当前正在执行的图（主图或某个 pack.graph）。 */
+  private activeGraph: GameGraph
+  private readonly packsByKey = new Map<string, SubFlowPack>()
   readonly state: RuntimeState
   private queue: RuntimeDirective[] = []
 
@@ -52,31 +82,67 @@ export class GraphRuntime {
   private readonly firedRules = new Set<string>()
   private redirect: { goto: string; resetGlobals?: boolean } | null = null
   private inExit = false // 跑 exit 元素期间抑制规则消费，避免退出时自跳环
-  private returningTo = new Set<string>() // 正在弹回的容器节点：下一次 enter 跳过 subFlowRef 下钻、直接续 out
+  private returningTo = new Set<string>() // 正在弹回的容器节点：下一次 enter 跳过 subFlow 下钻、直接续 out
 
   /** 本局 Kind / Plugin 表（多局隔离；缺省用模块默认表以兼容旧单测）。 */
   readonly kinds: KindRegistry
 
   constructor(
-    private readonly graph: GameGraph,
+    graph: GameGraph,
     private readonly scenario: GameScenario,
     kinds: KindRegistry = defaultKindRegistry,
+    packs: readonly SubFlowPack[] = [],
   ) {
+    this.rootGraph = graph
+    this.activeGraph = graph
     this.kinds = kinds
+    for (const p of packs) {
+      this.packsByKey.set(packLookupKey(p.id, p.version), p)
+      if (!this.packsByKey.has(p.id)) this.packsByKey.set(p.id, p) // 无版本时也可按 id 命中
+    }
     for (const req of scenario.requiredPlugins ?? []) {
       if (!this.kinds.hasPlugin(req.id, req.version)) {
         const ver = req.version ? `@${req.version}` : ''
         throw new Error(`required plugin '${req.id}${ver}' is not registered`)
       }
     }
+    this.indexGraph(graph)
+    this.rules = scenario.rules ?? []
+    this.state = { ...initState(scenario), ...control() }
+  }
+
+  private indexGraph(graph: GameGraph): void {
+    this.nodes.clear()
+    this.outgoing.clear()
     for (const node of graph.nodes) this.nodes.set(node.id, node)
     for (const edge of graph.edges) {
       const list = this.outgoing.get(edge.source)
       if (list) list.push(edge)
       else this.outgoing.set(edge.source, [edge])
     }
-    this.rules = scenario.rules ?? []
-    this.state = { ...initState(scenario), ...control() }
+  }
+
+  private switchGraph(graph: GameGraph): void {
+    this.activeGraph = graph
+    this.indexGraph(graph)
+  }
+
+  private resolvePack(ref: SubFlowPackRef): SubFlowPack {
+    const keyed = ref.version ? this.packsByKey.get(packLookupKey(ref.id, ref.version)) : undefined
+    const pack = keyed ?? this.packsByKey.get(ref.id)
+    if (!pack) {
+      const ver = ref.version ? `@${ref.version}` : ''
+      throw new Error(`subFlowPack '${ref.id}${ver}' is not loaded`)
+    }
+    const entry = ref.entry ?? pack.entry
+    if (!pack.graph.nodes.some((n) => n.id === entry)) {
+      throw new Error(`subFlowPack '${pack.id}' missing entry node '${entry}'`)
+    }
+    return pack
+  }
+
+  private pushCall(callerNodeId: string): void {
+    this.state.callStack.push({ callerNodeId, returnGraph: this.activeGraph })
   }
 
   private getKind(kind: string) {
@@ -108,7 +174,8 @@ export class GraphRuntime {
 
   // ── 控制入口 ────────────────────────────────────────────────────────────────
   start(): RuntimeDirective[] {
-    const entry = this.graph.nodes[0]
+    this.switchGraph(this.rootGraph)
+    const entry = this.rootGraph.nodes[0]
     if (!entry) {
       this.setPhase('ended')
       return this.drain()
@@ -122,6 +189,7 @@ export class GraphRuntime {
   /** seek 到任意节点从头跑（调试/可视化点击）。默认保留全局态，resetGlobals 干净复现。 */
   jumpToNode(id: string, opts: { resetGlobals?: boolean } = {}): RuntimeDirective[] {
     if (opts.resetGlobals) this.resetGlobalsState()
+    this.switchGraph(this.rootGraph)
     this.state.callStack = []
     this.chain = 0
     this.returningTo = new Set()
@@ -155,11 +223,22 @@ export class GraphRuntime {
       this.setPhase('ended')
       return
     }
-    // 子流程下钻：首次进入容器 → 压栈 + 跳到子流程入口（不播容器自身演出）。
+    // 跨图子蓝图：压栈（含 returnGraph）→ 切到 pack 图 → 进入口。
+    if (node.data.subFlowPack && !this.returningTo.has(id)) {
+      const pack = this.resolvePack(node.data.subFlowPack)
+      const entry = node.data.subFlowPack.entry ?? pack.entry
+      this.state.currentNodeId = id
+      this.state.visited.add(id)
+      this.pushCall(id)
+      this.switchGraph(pack.graph)
+      this.enterNode(entry)
+      return
+    }
+    // 同图子流程：压栈 + 跳到本图入口（不播容器自身演出）。
     if (node.data.subFlowRef && !this.returningTo.has(id)) {
       this.state.currentNodeId = id
       this.state.visited.add(id)
-      this.state.callStack.push(id)
+      this.pushCall(id)
       this.enterNode(node.data.subFlowRef)
       return
     }
@@ -167,8 +246,8 @@ export class GraphRuntime {
     this.state.currentNodeId = id
     this.state.elapsedMs = 0
     this.state.visited.add(id)
-    // 子流程容器弹回：不重播演出、不跑 enter 元素，直接沿 out 续走。
-    if (returning && node.data.subFlowRef) {
+    // 子流程/子蓝图容器弹回：不重播演出、不跑 enter 元素，直接沿 out 续走。
+    if (returning && isSubflowContainer(node)) {
       this.fired = new Set()
       this.firedReactive = new Set()
       this.pending = null
@@ -482,10 +561,11 @@ export class GraphRuntime {
       // 无自动出边：若本节点声明 returnsToCaller 且调用栈非空 → 弹回 caller（call/return）。
       const node = this.nodes.get(nodeId)
       if (node?.data.returnsToCaller && this.state.callStack.length > 0) {
-        const caller = this.state.callStack.pop() as string
+        const frame = this.state.callStack.pop() as CallFrame
         this.runExit(node)
-        this.returningTo.add(caller) // 标记：弹回容器时跳过 subFlowRef 再下钻
-        this.enterNode(caller)
+        this.returningTo.add(frame.callerNodeId) // 标记：弹回容器时跳过 subFlow 再下钻
+        this.switchGraph(frame.returnGraph)
+        this.enterNode(frame.callerNodeId)
         return
       }
       this.finishEnd(nodeId)
@@ -509,8 +589,8 @@ export class GraphRuntime {
     this.state.traversedEdgeIds.add(edge.id)
     const cur = this.node(this.state.currentNodeId)
     if (cur) this.runExit(cur)
-    // call 边：压栈 source，子流程结束后可 returnsToCaller 弹回。
-    if (edge.data?.call && this.state.currentNodeId) this.state.callStack.push(this.state.currentNodeId)
+    // call 边：压栈 source（含当前图），子流程结束后可 returnsToCaller 弹回。
+    if (edge.data?.call && this.state.currentNodeId) this.pushCall(this.state.currentNodeId)
     this.enterNode(edge.target)
   }
 

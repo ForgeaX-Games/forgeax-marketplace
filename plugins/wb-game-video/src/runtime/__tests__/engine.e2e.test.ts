@@ -5,6 +5,8 @@ import { makeNodiaDemo } from '../../editor/demo/demo'
 import { validateGraph } from '../validate/validate'
 import type { BannerDirective } from '../engine/directives'
 
+const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
+
 beforeAll(() => registerCoreKinds())
 
 describe('nodia graph e2e (runs on GraphRuntime)', () => {
@@ -35,7 +37,7 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
 
     rt.onPerformanceEnd() // enter → a_my(subflow) → wait(等技能)，mineFirst=1
     expect(rt.state.currentNodeId).toBe('wait')
-    expect(rt.state.callStack).toEqual(['a_my'])
+    expect(callers(rt)).toEqual(['a_my'])
     expect(rt.state.phase).toBe('awaitInteraction')
 
     rt.submitInteraction('skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
@@ -64,14 +66,14 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.jumpToNode('enter')
     rt.onPerformanceEnd() // → a_my → wait，mineFirst=1
     expect(rt.state.currentNodeId).toBe('wait')
-    expect(rt.state.callStack).toEqual(['a_my'])
+    expect(callers(rt)).toEqual(['a_my'])
 
     rt.submitInteraction('skill', 'light') // qi+2 → 轻攻击演出
     rt.tick(1000) // 命中时机(at:1000ms) → 结算(boss 掉 80, 仍存活)
     rt.onPerformanceEnd() // returns → a_my → b_ai(subflow) → tele(防反QTE)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeGreaterThan(0)
     expect(rt.state.currentNodeId).toBe('tele')
-    expect(rt.state.callStack).toEqual(['b_ai'])
+    expect(callers(rt)).toEqual(['b_ai'])
     expect(rt.state.phase).toBe('awaitInteraction')
 
     rt.submitInteraction('parry', 'pass') // → 受击防反演出 block
@@ -96,6 +98,6 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.jumpToNode('enter')
     rt.onPerformanceEnd() // enter → b_ai(subflow) → tele，mineFirst=0
     expect(rt.state.currentNodeId).toBe('tele')
-    expect(rt.state.callStack).toEqual(['b_ai'])
+    expect(callers(rt)).toEqual(['b_ai'])
   })
 })

@@ -11,7 +11,39 @@ import type { CSSProperties } from 'react'
 import { useGraphScenario, useGraphHistory, graphUndo, graphRedo, graphHistoryClear } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
-import { listVideoAssetInfos, resolveMediaSrc, type VideoAssetInfo } from './media'
+import {
+  listVideoAssetInfos,
+  listRegistryAssets,
+  requestGenerateVideo,
+  requestGenerateKeyframe,
+  getGameStyleAxes,
+  setGameStyleAxes,
+  importCharacterRefs,
+  importSceneRefs,
+  resolveMediaSrc,
+  registryMediaUrl,
+  type VideoAssetInfo,
+} from './media'
+import type { MediaAsset, MediaStatus, StyleAxes } from '../assets/registry-types'
+
+// 风格三轴 UI 选项（id 对齐 server/engine/scenario/types.ts 的 VisualStyle/FilmLook/DirectorStyleId；
+// 权威 coerce 在服务端 composeAxes，未知 id 自动回退，故此处仅作便捷选择器）。
+const ART_MEDIA_OPTIONS: Array<[string, string]> = [
+  ['', '（默认）'], ['photoreal', '写实'], ['anime', '日系动画'], ['cartoon', '卡通'],
+  ['pixelart', '像素'], ['watercolor', '水彩'], ['ink', '水墨'], ['render3d2d', '3D转2D'],
+]
+const FILM_LOOK_OPTIONS: Array<[string, string]> = [
+  ['', '（默认）'], ['teal-orange', '蒂尔橙'], ['noir-lowkey', '黑色低调'], ['warm-nostalgia', '暖怀旧'],
+  ['bleach-bypass', '漂白'], ['clinical-scifi', '冷科幻'], ['morandi-muted', '莫兰迪'],
+  ['bronze-epic', '青铜史诗'], ['retro-future', '复古未来'], ['baroque-chiaroscuro', '巴洛克明暗'],
+  ['pastel-symmetry', '粉彩对称'],
+]
+const DIRECTOR_OPTIONS: Array<[string, string]> = [
+  ['', '（默认）'], ['minimal-epic', '极简史诗'], ['precision-noir', '克制黑色'],
+  ['foreknowledge-suspense', '预知悬疑'], ['mood-neon', '情绪霓虹'], ['luminous-anime', '通透动画'],
+  ['kinetic-clarity', '动感清晰'], ['cyberpunk-neonoir', '赛博霓虹黑'], ['unseen-horror', '未见恐怖'],
+  ['nonlinear-scifi', '非线性科幻'], ['pulp-dialogue', '话痨黑色'],
+]
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
 import {
   type AudioItem,
@@ -98,6 +130,22 @@ injectStyleOnce(
 .gvv-history button:disabled { opacity: 0.36; cursor: default; }
 .gvv-fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
 .gvv-fx-layer > div { position: absolute; inset: 0; }
+.gvv-row-status { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; line-height: 1.6; white-space: nowrap; }
+.gvv-row-status.is-generating { background: rgba(240,136,64,.22); color: var(--gc-accent); }
+.gvv-row-status.is-failed { background: rgba(224,72,72,.2); color: #ff8f8f; }
+.gvv-row-status.is-placeholder { background: var(--gc-accent-soft); color: var(--gc-faint); }
+.gvv-gen { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.gvv-gen button { border: 1px solid var(--gc-accent-line); background: var(--gc-accent); color: #1a1206; font-weight: 700; padding: 9px 12px; border-radius: 9px; cursor: pointer; font-size: 13px; }
+.gvv-gen button:hover:not(:disabled) { filter: brightness(1.06); }
+.gvv-gen button:disabled { opacity: 0.5; cursor: default; }
+.gvv-gen-hint { font-size: 11px; color: var(--gc-faint); line-height: 1.5; }
+.gvv-gen-hint.is-error { color: #ff8f8f; }
+.gvv-axes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.gvv-axes label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--gc-faint); letter-spacing: .04em; }
+.gvv-axes select { background: var(--gc-panel2); color: var(--gc-text); border: 1px solid var(--gc-line-soft); border-radius: 7px; padding: 5px 6px; font-size: 12px; }
+.gvv-gen-row { display: flex; gap: 8px; }
+.gvv-gen-row button { flex: 1; }
+.gvv-gen-row button.gvv-gen-alt { background: var(--gc-accent-soft); color: var(--gc-text); border-color: var(--gc-accent-line); font-weight: 600; }
 `,
 )
 
@@ -108,6 +156,8 @@ interface VideoEntry {
   group: string
   type?: string
   durMs?: number
+  status?: MediaStatus
+  fromRegistry?: boolean
 }
 
 function refForEntry(entry: VideoEntry): string {
@@ -125,6 +175,11 @@ function fmtTime(ms: number): string {
 export function GraphVideoView(): JSX.Element {
   const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const [assets, setAssets] = useState<VideoAssetInfo[]>([])
+  const [regAssets, setRegAssets] = useState<MediaAsset[]>([])
+  const [genBusy, setGenBusy] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
+  // 游戏级风格三轴（P3）：加载 manifest.styleAxes，改动即写回；喂给生成请求。
+  const [styleAxes, setStyleAxes] = useState<StyleAxes>({})
   const listBodyRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -158,11 +213,46 @@ export function GraphVideoView(): JSX.Element {
 
   const node = findNode(graph, selectedSceneId)
 
+  // 共享素材层轮询（mtime 级 5s）：驱动库缩略图三态 + 生成中占位实时转就绪。
   useEffect(() => {
     let alive = true
-    void listVideoAssetInfos(game).then((vs) => { if (alive) setAssets(vs) })
+    const pull = async (): Promise<void> => {
+      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
+      if (!alive) return
+      setAssets(vs)
+      setRegAssets(all)
+    }
+    void pull()
+    const timer = window.setInterval(() => void pull(), 5000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [game])
+
+  const characterRefs = useMemo(() => regAssets.filter((a) => a.productionType === 'character_ref'), [regAssets])
+  const sceneRefs = useMemo(() => regAssets.filter((a) => a.productionType === 'scene_ref'), [regAssets])
+
+  // 载入游戏级风格三轴（一次）。
+  useEffect(() => {
+    let alive = true
+    void getGameStyleAxes(game).then((a) => { if (alive && a) setStyleAxes(a) })
     return () => { alive = false }
   }, [game])
+
+  // 改一轴：本地即时 + 写回 manifest（浅合并；空串=清该轴）。
+  function updateAxis(axis: keyof StyleAxes, value: string): void {
+    const next: StyleAxes = { ...styleAxes, [axis]: value || undefined }
+    setStyleAxes(next)
+    void setGameStyleAxes(game, { [axis]: value || undefined } as StyleAxes)
+  }
+
+  // 跨模块只读拿料：把角色/场景模块产物登记成 ref，随后刷新 registry。
+  async function importRefs(kind: 'character' | 'scene'): Promise<void> {
+    setGenError(null)
+    const res = kind === 'character' ? await importCharacterRefs(game) : await importSceneRefs(game)
+    if (res.error && res.refs.length === 0) {
+      setGenError(`导入${kind === 'character' ? '角色' : '场景'}参考图失败：${res.error}`)
+    }
+    setRegAssets(await listRegistryAssets(game))
+  }
 
   const entries = useMemo<VideoEntry[]>(() => {
     const seen = new Set<string>()
@@ -174,11 +264,18 @@ export function GraphVideoView(): JSX.Element {
       const isNarr = id.startsWith('narr-')
       ;(isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗' })
     }
-    // 运行时 reel 库里的其余视频资产（与 bundle 去重）。
+    // 共享素材层里的自产视频资产（与 bundle 去重）：带三态 status。
     for (const v of assets) {
       if (seen.has(v.id)) continue
       seen.add(v.id)
-      narr.push({ id: v.id, label: v.id, url: resolveMediaSrc(v.id, game) ?? '', group: '叙事' })
+      narr.push({
+        id: v.id,
+        label: v.label ?? v.id,
+        url: v.status === 'ready' ? registryMediaUrl(v.id, game) : '',
+        group: '生成',
+        status: v.status,
+        fromRegistry: true,
+      })
     }
     return [...clips, ...narr]
   }, [assets, game])
@@ -304,6 +401,73 @@ export function GraphVideoView(): JSX.Element {
 
   function setPrompt(next: string): void {
     editGraph((g, n) => setNodePromptGraph(g, n, next))
+  }
+
+  // 「重新生成」→ 真实服务端 headless 生成（P3/P4 编排）。必传角色+场景参考图（缺则闸住）。
+  // 成功后把成片资产绑到当前节点 media.ref；轮询由上面的 5s registry 拉取接管三态。
+  async function generateVideoForNode(): Promise<void> {
+    if (!node || genBusy) return
+    setGenError(null)
+    if (characterRefs.length === 0 || sceneRefs.length === 0) {
+      setGenError('缺参考图：需先从上游模块导入至少 1 张角色参考图 + 1 张场景参考图，才能生成视频。')
+      return
+    }
+    setGenBusy(true)
+    try {
+      const res = await requestGenerateVideo(game, {
+        sceneNodeId: node.id,
+        nodeName: node.data.name || node.id,
+        storyText: node.data.media?.prompt ?? node.data.name ?? '',
+        durationSeconds: Math.max(4, Math.round((node.data.durationMs ?? 8000) / 1000)),
+        characterRefIds: characterRefs.map((a) => a.id),
+        sceneRefIds: sceneRefs.map((a) => a.id),
+        label: `视频 · ${node.data.name || node.id}`,
+        styleAxes,
+      })
+      if (res.error || !res.asset) {
+        setGenError(res.error ?? '生成失败')
+        return
+      }
+      const asset = res.asset
+      editGraph((g, n) => bindVideoGraph(g, n, asset.id, asset.durationMs ?? maxMs))
+      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
+      setAssets(vs)
+      setRegAssets(all)
+      setSelectedId(asset.id)
+    } catch (e) {
+      setGenError((e as Error).message)
+    } finally {
+      setGenBusy(false)
+    }
+  }
+
+  // 「分镜故事板」分支（P4）：生成 6 面板黑白 previs（grid_storyboard），落素材层、不改绑定。
+  async function generateStoryboardForNode(): Promise<void> {
+    if (!node || genBusy) return
+    setGenError(null)
+    setGenBusy(true)
+    try {
+      const res = await requestGenerateKeyframe(game, {
+        sceneNodeId: node.id,
+        nodeName: node.data.name || node.id,
+        beat: node.data.media?.prompt ?? node.data.name ?? '',
+        refAssetIds: [...characterRefs.map((a) => a.id), ...sceneRefs.map((a) => a.id)],
+        label: `分镜故事板 · ${node.data.name || node.id}`,
+        styleAxes,
+        mode: 'grid_storyboard',
+      })
+      if (res.error || !res.asset) {
+        setGenError(res.error ?? '故事板生成失败')
+        return
+      }
+      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
+      setAssets(vs)
+      setRegAssets(all)
+    } catch (e) {
+      setGenError((e as Error).message)
+    } finally {
+      setGenBusy(false)
+    }
   }
 
   function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; layer?: number }): void {
@@ -471,6 +635,11 @@ export function GraphVideoView(): JSX.Element {
             >
               <span className="gc-row-mark" aria-hidden>{it.id === boundEntry?.id ? '✓' : ''}</span>
               <span className="gc-row-label">{it.group} · {it.label}</span>
+              {it.status && it.status !== 'ready' ? (
+                <span className={`gvv-row-status is-${it.status}`}>
+                  {it.status === 'generating' ? '生成中…' : it.status === 'failed' ? '失败' : '占位'}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -652,6 +821,59 @@ export function GraphVideoView(): JSX.Element {
                     disabled={!node}
                     placeholder="写给视频生成模型的镜头、动作、氛围提示词"
                   />
+                  <div className="gvv-gen">
+                    <div className="gvv-axes" role="group" aria-label="风格三轴">
+                      <label>
+                        <span>渲染媒介</span>
+                        <select value={styleAxes.artMedia ?? ''} onChange={(e) => updateAxis('artMedia', e.target.value)}>
+                          {ART_MEDIA_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span>导演流派</span>
+                        <select value={styleAxes.director ?? ''} onChange={(e) => updateAxis('director', e.target.value)}>
+                          {DIRECTOR_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span>电影调色</span>
+                        <select value={styleAxes.filmLook ?? ''} onChange={(e) => updateAxis('filmLook', e.target.value)}>
+                          {FILM_LOOK_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="gvv-toolseg" role="group" aria-label="导入参考图">
+                      <button type="button" onClick={() => void importRefs('character')} disabled={genBusy}>
+                        导入角色图 ({characterRefs.length})
+                      </button>
+                      <button type="button" onClick={() => void importRefs('scene')} disabled={genBusy}>
+                        导入场景图 ({sceneRefs.length})
+                      </button>
+                    </div>
+                    <div className="gvv-gen-row">
+                      <button
+                        type="button"
+                        disabled={!node || genBusy}
+                        onClick={() => void generateVideoForNode()}
+                      >
+                        {genBusy ? '生成中…' : '▶ 生成视频'}
+                      </button>
+                      <button
+                        type="button"
+                        className="gvv-gen-alt"
+                        disabled={!node || genBusy}
+                        title="生成 6 面板黑白 previs 故事板（分镜图分支，落素材层，不改当前绑定）"
+                        onClick={() => void generateStoryboardForNode()}
+                      >
+                        ▦ 分镜故事板
+                      </button>
+                    </div>
+                    <span className={`gvv-gen-hint${genError ? ' is-error' : ''}`}>
+                      {genError
+                        ? genError
+                        : `参考图：角色 ${characterRefs.length} · 场景 ${sceneRefs.length}（视频生成必传各 ≥1；缺则先「导入」）`}
+                    </span>
+                  </div>
                 </label>
               )}
             </div>

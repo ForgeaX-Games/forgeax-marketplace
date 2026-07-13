@@ -165,11 +165,42 @@ export interface PerfNodeData {
    */
   returnsToCaller?: boolean
   /**
-   * 子流程下钻：本节点是一个「子流程容器」——首次进入即压栈并跳到 `subFlowRef` 指向的子流程入口；
+   * 同图子流程下钻：本节点是容器——首次进入即压栈并跳到 `subFlowRef` 指向的**本图**入口；
    * 子流程内某节点 `returnsToCaller` 结束时弹回本节点，本节点**不重播演出**、直接沿 `out` 继续。
-   * 容器一般不配自身演出/元素（纯包装）。
+   * 与 `subFlowPack` 互斥（同节点只应有一个）。
    */
   subFlowRef?: string
+  /**
+   * 跨图子蓝图引用（方案 B）：进入本容器后加载外部 pack 图，从 pack.entry（或本字段 entry）跑，
+   * `returnsToCaller` 时弹回本节点并恢复主图。包本体不内联进主 graph。
+   */
+  subFlowPack?: SubFlowPackRef
+}
+
+/** 调用节点上的包引用（主图只存指针，不存 pack 内节点）。 */
+export interface SubFlowPackRef {
+  /** 包 id（与 SubFlowPack.id 对齐）。 */
+  id: string
+  /** 可选版本钉死；解析时优先 `id@version`，否则回退 `id`。 */
+  version?: string
+  /** 覆盖包内默认入口；缺省用 SubFlowPack.entry。 */
+  entry?: string
+}
+
+/**
+ * 可独立编辑/落盘的子蓝图包（跨图 call/return 的被调方）。
+ * 运行时由 GraphRuntime 预加载注入；主 scenario 的 vars/entities/rules 仍为一局 SSOT。
+ */
+export interface SubFlowPack {
+  schemaVersion: 'wb-game-video.pack.v1'
+  id: string
+  version: string
+  title?: string
+  /** 包内入口节点 id。 */
+  entry: string
+  graph: GameGraph
+  /** 可选：主图须具备的变量/实体（缺则启动/校验失败；P0 引擎仅在 resolve 时检查 entry 存在）。 */
+  requires?: { vars?: string[]; entities?: string[] }
 }
 
 /** 边路由数据（edge.data）——条件只在此/entryGate/trigger 出现。 */

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gen:list-assets args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "gameSlug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$", "description": "Target game slug. Omit to use the active game." },
+    "kind": { "enum": ["image", "video"], "description": "Filter by media kind." },
+    "productionType": { "enum": ["character_ref", "scene_ref", "shot_image", "video_clip"], "description": "Filter by production type." },
+    "sceneNodeId": { "type": "string", "description": "Filter by owning node id." }
+  }
+}
