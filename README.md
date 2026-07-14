@@ -50,7 +50,7 @@ manifest.json            # the registry: id / version / schemaVersion / agents /
 src/system-prompt/       # ordered prompt fragments (+ peers/, shared/)
 src/skills/              # reusable skills (e.g. make-game-design)
 src/memory/              # long-term-memory templates
-plugins/                 # the plugin fleet:
+extensions/                 # the plugin fleet:
   agent-*                #   named-agent personas
   wb-*                   #   visual workbench editors (scene / character / narrative / reel / …)
   cli-*                  #   model/runtime drivers

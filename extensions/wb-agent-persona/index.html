@@ -1,0 +1,1690 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>Agent Manager</title>
+<style>
+  :root {
+    color-scheme: dark;
+    /* 对齐宿主壳的中性黑阶（packages/interface/src/styles/tokens.css）：
+     * canvas #0D0D0D（最深，与左右两栏一致）/ base #191919 / elevated #242424。
+     * 之前用的是 GitHub 风格带蓝的深色（#0d1117…），跟两侧纯黑面板对不上。 */
+    --bg-0: #0d0d0d; --bg-1: #191919; --bg-2: #242424;
+    --text-primary: #e6edf3; --text-secondary: #8b949e; --text-tertiary: #6e7681;
+    --border: #333333;
+    /* Aligned with main visual: brand lime (#D4FF48, matches
+     * --color-brand-primary in packages/interface/src/styles/tokens.css)
+     * as the active/primary accent so this iframe matches the host shell. */
+    --accent: #D4FF48; --accent-warn: #d29922; --accent-ok: #3fb950;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0);
+               color: var(--text-primary);
+               font: 13px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif; }
+  body[data-pane="left"]   .pane-center { display: none; }
+  body[data-pane="center"] .pane-left   { display: none; }
+  /* Marketplace preview capture — show agent list + detail panes together */
+  body[data-pane="marketplace"] {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+  }
+  body[data-pane="marketplace"] .pane-left,
+  body[data-pane="marketplace"] .pane-center {
+    display: flex !important;
+  }
+  body[data-pane="marketplace"] .pane-left {
+    width: min(280px, 26vw);
+    flex-shrink: 0;
+  }
+  body[data-pane="marketplace"] .pane-center {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ── Left pane ── */
+  .pane-left { height: 100%; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  .pane-left h2 { font-size: 11px; text-transform: uppercase; color: var(--text-tertiary);
+                  letter-spacing: 0.06em; padding: 10px 12px 6px; margin: 0; }
+  .agent-list { flex: 1; overflow-y: auto; padding: 4px 6px 12px; }
+  .agent-item {
+    width: 100%; text-align: left; padding: 8px 10px; margin: 2px 0;
+    background: transparent; border: 1px solid transparent; border-radius: 5px;
+    color: var(--text-secondary); cursor: pointer; font-size: 12px;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .agent-item:hover { background: var(--bg-2); color: var(--text-primary); }
+  .agent-item.active { background: var(--bg-2); color: var(--text-primary); border-color: var(--accent); }
+  .agent-item .avatar {
+    font-size: 18px; line-height: 1; flex-shrink: 0;
+    /* 状态机头像 (见 ADR-0019). 默认是 emoji 字, 有 avatarRules 的 agent 会
+     * 把这个槽变成 video. 圆角 + cover 跟主仓 React 端 .agent-avatar-video
+     * 的视觉对齐. */
+    width: 28px; height: 28px; border-radius: 50%; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-2);
+  }
+  .agent-item .avatar video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    /* 立绘头顶留白多, center top 让脸贴顶部 (跟 React 端 agent-avatar-video.css 一致). */
+    object-position: center top;
+    pointer-events: none;
+    transform: translateZ(0);
+  }
+  /* suzu 美术资源头顶留白比其它 agent 多, 单独缩放 + 上移 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="suzu"] .avatar video {
+    transform: scale(1.10) translate3d(0, -12%, 0);
+    transform-origin: center top;
+  }
+  /* arin / kotone / tsumugi 脸部相对偏小, 各自单独缩放 + 微抬 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="arin"] .avatar video {
+    transform: scale(1.10) translate3d(0, -4%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="kotone"] .avatar video {
+    transform: scale(1.18) translate3d(0, -3%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="tsumugi"] .avatar video {
+    transform: scale(1.06) translate3d(0, -2%, 0);
+    transform-origin: center top;
+  }
+  /* lock / cc-coder 立绘也偏小, 同步放大 (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="lock"] .avatar video {
+    transform: scale(1.12) translate3d(0, -10%, 0);
+    transform-origin: center top;
+  }
+  .agent-item[data-agent-id="cc-coder"] .avatar video {
+    transform: scale(1.12) translate3d(0, -5%, 0);
+    transform-origin: center top;
+  }
+  /* iori 立绘头部偏高, 微微下移. 纯 translate 用不上 transform-origin (跟主仓 React 端 一致). */
+  .agent-item[data-agent-id="iori"] .avatar video {
+    transform: translate3d(0, 5%, 0);
+  }
+  .agent-item .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .agent-item .name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-item .role { font-size: 10.5px; color: var(--text-tertiary); }
+
+  /* ── Catalog group fold (ADR-0019 §9, 2026-06-22) ─────────────────────
+   * Mirrors the AgentsMainArea grouping logic from the React side. See
+   * GROUP_REGISTRY below for the registry. This iframe lives in its own
+   * bundle so the registry data is duplicated here intentionally (kept in
+   * sync with packages/interface/src/data/agent-groups.ts by convention).
+   *
+   * Visual treatment is a VERTICAL tree: a lead (iro / reia / mochi)
+   * renders at its natural position, and its subs / sibling skins render
+   * underneath indented with a dashed left-border so the parent ↔ child
+   * relationship reads at a glance. */
+  .agent-item.is-sub {
+    margin-left: 16px;
+    padding-left: 10px;
+    border-left: 1px dashed var(--border-strong, var(--border));
+    border-radius: 0 5px 5px 0;
+  }
+  .agent-item.is-sub .name { font-size: 11.5px; }
+  .agent-item.is-sub .role { font-size: 10px; }
+  .agent-item.is-sub .avatar { width: 22px; height: 22px; font-size: 14px; }
+
+  /* ── Center pane ── */
+  .pane-center { height: 100%; display: flex; flex-direction: column; padding: 10px 14px; gap: 8px; }
+  .header { display: flex; align-items: baseline; gap: 12px; }
+  .header h1 { font-size: 14px; margin: 0; }
+  .header .role-pill {
+    font-size: 10.5px; color: var(--text-secondary); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 3px; text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .header .path { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, monospace; margin-left: auto; }
+
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 4px 0 6px; }
+  .tab {
+    background: transparent; border: none; color: var(--text-secondary);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { background: #2d333b; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
+  .status.ok { color: var(--accent-ok); }
+  .status.warn { color: var(--accent-warn); }
+
+  textarea.editor {
+    flex: 1; min-height: 280px;
+    background: var(--bg-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 12px; resize: none;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+    tab-size: 2;
+  }
+  textarea.editor:focus { outline: none; border-color: var(--accent); }
+  .empty { padding: 30px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
+  /* ── Memory tab layout ── */
+  .mem-pane { display: flex; gap: 10px; flex: 1; min-height: 0; }
+  .mem-files { width: 200px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 4px;
+               background: var(--bg-1); display: flex; flex-direction: column; overflow: hidden; }
+  .mem-files-header { padding: 6px 10px; font-size: 10.5px; text-transform: uppercase;
+                      color: var(--text-tertiary); letter-spacing: 0.06em;
+                      border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: center; }
+  .mem-files-list { flex: 1; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+  /* 列表项统一范式：纯文字标签，两栏完全同样式（长宽 / 字体 / hover / active 一致）。 */
+  .mem-file {
+    width: 100%; text-align: left; background: transparent; border: 1px solid transparent;
+    color: var(--text-secondary); font-size: 12.5px; font-weight: 500;
+    font-family: inherit; line-height: 1.4;
+    padding: 6px 9px; cursor: pointer; border-radius: 4px;
+    display: block; box-sizing: border-box;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mem-file:hover { background: var(--bg-2); color: var(--text-primary); }
+  .mem-file.active { background: var(--bg-2); color: var(--text-primary); border-color: var(--accent); }
+  /* 用户画像(全局) 与 本 agent 记忆 之间的轻量分隔，独立元素，不影响任一列表项的尺寸/hover。 */
+  .mem-sep { height: 1px; background: var(--border); margin: 5px 6px; flex-shrink: 0; }
+  .mem-edit { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+  /* ── 用户画像槽位视图 ── */
+  .slots { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+  .slots-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; padding: 2px 2px 0; }
+  .slots-list { display: flex; flex-direction: column; gap: 8px; }
+  .slot {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 10px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .slot:focus-within { border-color: var(--accent); }
+  .slot-head { display: flex; align-items: center; gap: 8px; }
+  .slot-key {
+    flex: 1; min-width: 0; background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+    font-size: 12px; font-weight: 600; font-family: inherit;
+  }
+  .slot-key:focus { outline: none; border-color: var(--accent); }
+  .slot-del {
+    flex-shrink: 0; background: transparent; border: 1px solid var(--border);
+    color: var(--text-tertiary); border-radius: 4px; padding: 3px 8px;
+    font-size: 11px; cursor: pointer;
+  }
+  .slot-del:hover { border-color: var(--accent-warn); color: var(--accent-warn); }
+  .slot-val {
+    width: 100%; background: var(--bg-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;
+    font-size: 12.5px; line-height: 1.5; font-family: inherit; resize: vertical;
+    min-height: 38px; box-sizing: border-box;
+  }
+  .slot-val:focus { outline: none; border-color: var(--accent); }
+  .slot-add { align-self: flex-start; }
+  .btn.ghost { background: transparent; color: var(--text-secondary); }
+  .slots-empty { padding: 18px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
+  /* ── 记忆日记视图（带人设口吻的只读呈现，可切到源码模式编辑） ── */
+  .diary { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+  .diary-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; padding: 2px 2px 0; }
+  .diary-list { display: flex; flex-direction: column; gap: 10px; }
+  .diary-entry {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 11px 13px 11px 15px; position: relative;
+  }
+  .diary-entry::before {
+    content: ''; position: absolute; left: 0; top: 11px; bottom: 11px; width: 2px;
+    background: var(--accent); border-radius: 2px; opacity: 0.55;
+  }
+  .diary-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 6px; flex-wrap: wrap; }
+  .diary-date {
+    font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, monospace;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1px 8px; flex-shrink: 0;
+  }
+  .diary-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .diary-body { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+  .diary-empty { padding: 18px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+
+  .new-input {
+    background: var(--bg-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 3px 6px; font-size: 11.5px; flex: 1;
+    font-family: ui-monospace, monospace;
+  }
+  .new-input:focus { outline: none; border-color: var(--accent); }
+
+  /* ── Skills / Workbench list ── */
+  .info-card {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px 12px; margin-bottom: 8px;
+  }
+  .info-card-title { font-size: 11px; color: var(--text-tertiary);
+                     text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .info-card-body { font-size: 12.5px; line-height: 1.6; }
+  .info-row { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+  .info-row .k { color: var(--text-tertiary); flex-shrink: 0; min-width: 110px; font-size: 11.5px; }
+  .info-row .v { color: var(--text-primary); font-family: ui-monospace, monospace; font-size: 12px; }
+  .pill {
+    display: inline-block; padding: 1px 7px; margin: 2px 4px 2px 0;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 11px; color: var(--text-secondary);
+  }
+  .wb-row {
+    display: flex; gap: 10px; padding: 8px 10px; align-items: center;
+    border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 6px; background: var(--bg-1);
+  }
+  .wb-row .icon { font-size: 18px; flex-shrink: 0; }
+  .wb-row .body { flex: 1; min-width: 0; }
+  .wb-row .body .name { font-size: 12.5px; font-weight: 600; }
+  .wb-row .body .desc { font-size: 11px; color: var(--text-tertiary); margin-top: 2px;
+                        overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+                        -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+</style>
+<script>
+(function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get('locale') === 'en' || q.get('marketplace') === '1') {
+      localStorage.setItem('forgeax.locale', 'en');
+      document.documentElement.lang = 'en';
+    }
+  } catch (_) { /* ignore */ }
+})();
+</script>
+</head>
+<body>
+
+<div class="pane-left">
+  <h2>AGENTS</h2>
+  <div class="agent-list" id="agent-list"></div>
+</div>
+
+<div class="pane-center">
+  <div class="header">
+    <h1 id="title">No agent selected</h1>
+    <span class="role-pill" id="role-pill" style="display:none"></span>
+    <span class="path" id="header-path"></span>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="persona">Persona</button>
+    <button class="tab" data-tab="memory">Long-term memory</button>
+    <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="workbench">Workbench</button>
+  </div>
+
+  <!-- Persona tab -->
+  <div class="tab-body" id="tab-persona">
+    <div class="toolbar">
+      <button class="btn primary" id="persona-save" disabled>Save persona</button>
+      <button class="btn" id="persona-reload" disabled>Discard changes</button>
+      <span class="status" id="persona-status"></span>
+    </div>
+    <textarea class="editor" id="persona-editor" spellcheck="false" disabled
+              placeholder="Select an agent in the left pane to load persona…"></textarea>
+  </div>
+
+  <!-- Memory tab -->
+  <div class="tab-body" id="tab-memory" style="display:none">
+    <div class="mem-pane">
+      <div class="mem-files">
+        <div class="mem-files-header">
+          <span>FILES</span>
+          <input class="new-input" id="mem-new-name" placeholder="new-note.md" />
+          <button class="btn" id="mem-new-btn" title="新建记忆文件">+</button>
+        </div>
+        <div class="mem-files-list" id="mem-files-list"></div>
+      </div>
+      <div class="mem-edit">
+        <div class="toolbar">
+          <button class="btn primary" id="mem-save" disabled>保存</button>
+          <button class="btn" id="mem-reload" disabled>放弃改动</button>
+          <button class="btn ghost" id="mem-raw-toggle" style="display:none">源码模式</button>
+          <span class="status" id="mem-status"></span>
+        </div>
+        <!-- 用户画像：结构化槽位视图（默认）。每条画像 = 一个可查看 / 修改的槽位。 -->
+        <div class="slots" id="mem-slots" style="display:none">
+          <div class="slots-hint">关于「你」的长期事实，会作为每个 agent 的开场上下文注入。可直接修改、删除或新增。</div>
+          <div class="slots-list" id="slots-list"></div>
+          <button class="btn slot-add" id="slot-add">＋ 添加一条画像</button>
+        </div>
+        <!-- 普通记忆文件：默认「日记视图」（带人设口吻的只读卡片）。 -->
+        <div class="diary" id="mem-diary" style="display:none">
+          <div class="diary-hint"></div>
+          <div class="diary-list" id="diary-list"></div>
+        </div>
+        <!-- 源码模式 / 普通文本编辑器。 -->
+        <textarea class="editor" id="mem-editor" spellcheck="false" disabled
+                  placeholder="左侧选一个记忆文件，或新建一个 .md..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skills tab -->
+  <div class="tab-body" id="tab-skills" style="display:none">
+    <div id="skills-content"></div>
+  </div>
+
+  <!-- Workbench tab -->
+  <div class="tab-body" id="tab-workbench" style="display:none">
+    <div id="workbench-content"></div>
+  </div>
+</div>
+
+<script type="module">
+const params = new URLSearchParams(location.search);
+const pane = params.get('marketplace') === '1' ? 'marketplace' : (params.get('pane') || 'center');
+document.body.dataset.pane = pane;
+
+function getLocale() {
+  try {
+    const url = new URLSearchParams(location.search).get('locale');
+    if (url === 'en' || url === 'zh') return url;
+    const v = localStorage.getItem('forgeax.locale');
+    return v === 'zh' ? 'zh' : 'en';
+  } catch { return 'en'; }
+}
+let locale = getLocale();
+
+async function onLocaleChanged(next) {
+  if (next !== 'en' && next !== 'zh') return;
+  if (next === locale) return;
+  locale = next;
+  applyChrome();
+  await loadAgents();
+  if (selectedAgent) {
+    const nm = agentNaming(selectedAgent);
+    document.getElementById('title').textContent = nm.title;
+    if (selectedAgent.agent?.role) {
+      const rolePill = document.getElementById('role-pill');
+      rolePill.textContent = selectedAgent.agent.role;
+    }
+    renderMemFiles();
+    if (memSelected && memSelected !== userProfile().id) {
+      // Re-resolve the memory file for the new locale (picks the matching variant).
+      await loadMemoryFile(memSelected);
+    } else if (memSelected) {
+      setMemMode(memMode);
+    }
+    if (activeTab === 'skills') renderSkills();
+    if (activeTab === 'workbench') renderWorkbench();
+    if (activeTab === 'persona') await loadPersona();
+  }
+}
+
+const UI = {
+  en: {
+    noAgent: 'No agent selected',
+    tabMemory: 'Long-term memory',
+    savePersona: 'Save persona',
+    discard: 'Discard changes',
+    save: 'Save',
+    rawMode: 'Source mode',
+    memNewPlaceholder: 'new-note.md',
+    memNewTitle: 'New memory file',
+    personaPlaceholder: 'Select an agent in the left pane to load persona…',
+    memPlaceholder: 'Select a memory file on the left, or create a new .md…',
+    slotsHint: 'Long-term facts about you — injected as opening context for every agent. Edit, delete, or add freely.',
+    slotAdd: '＋ Add profile fact',
+    diaryHintBefore: 'Long-term memory from working with you, shown as a diary. Read-only — switch to ',
+    diaryHintAfter: ' above to edit.',
+    diaryOwner: 'this agent',
+    userProfile: 'User profile',
+    userProfileTitle: 'Global user profile · auto-captured from chat, editable',
+    profileHeader: '# User profile\n\n> Auto-captured from chat + manual edits. Lines dedupe by `key` (trailing `<!-- k:... -->` is the dedupe marker — do not remove).\n',
+    agentListFailed: 'Failed to load agent list: {status}',
+    loadError: 'Load error: {msg}',
+    personaUnsaved: 'Persona edits unsaved. Discard changes?',
+    memUnsaved: 'Memory file unsaved. Discard changes?',
+    unsavedDiscard: 'Unsaved changes. Discard?',
+    saving: 'Saving…',
+    saveFailed: 'Save failed: {status} {err}',
+    savedReloading: 'Saved · reloading plugin…',
+    savedReloaded: 'Saved · plugin reloaded',
+    saveException: 'Save error: {msg}',
+    noMemoryDir: 'This agent has no memoryDir (global user profile still editable)',
+    noProfileYet: 'Not created yet · add facts and save',
+    noProfileSlots: 'No profile facts yet · click below to add one',
+    savedProfileCount: 'Saved · {n} profile facts',
+    saved: 'Saved',
+    emptyNoAgent: 'No agent selected',
+    loading: 'Loading…',
+    loadFailed: 'Load failed: {status}',
+    personaFallbackZh: 'No English persona — showing Chinese source',
+    loadedChars: 'Loaded ({n} chars)',
+    scanningMemDir: 'Scanning memory folder…',
+    memoryDirUnreadable: 'memoryDir missing or unreadable: {status}',
+    memFileCount: '{n} memory files',
+    noMemFilesEmpty: 'This agent has no memory files yet · enter a filename above and click +',
+    profileFactCount: '{n} profile facts',
+    agentDiary: "{name}'s diary",
+    slotsMode: 'Slots mode',
+    diaryMode: 'Diary mode',
+    slotKeyPlaceholder: 'Fact name (e.g. Timezone / Language)',
+    delete: 'Delete',
+    slotValPlaceholder: 'Fact body (e.g. Asia/Shanghai (UTC+8))',
+    diaryEmpty: 'This diary is empty · switch to Source mode to write the first entry',
+    noMemoryDirWarn: 'This agent has no memoryDir',
+    enterFilename: 'Enter a filename',
+    fileExists: '{name} already exists',
+    creating: 'Creating…',
+    createFailed: 'Create failed: {status}',
+    created: 'Created {name}',
+    createException: 'Create error: {msg}',
+    noDefaultSkill: 'No default skills declared',
+    noOwnSkill: 'No bundled skills',
+    noOwnTool: 'No bundled tools',
+    noProduces: 'No produces declared',
+    wbPluginsTitle: 'Matching workbench plugins',
+    wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-extension.json under provides.workbench:',
+    wbMatchCount: 'Matching workbench plugins ({n})',
+    diaryHint: 'Long-term memory from {owner}, shown as a diary. Read-only — switch to Source mode above to edit.',
+    memFallback: 'No {lang} memory yet — showing the other language. Saving creates the {lang} copy.',
+  },
+  zh: {
+    noAgent: '未选 agent',
+    tabMemory: '长期记忆',
+    savePersona: '保存 persona',
+    discard: '放弃改动',
+    save: '保存',
+    rawMode: '源码模式',
+    memNewPlaceholder: 'new-note.md',
+    memNewTitle: '新建记忆文件',
+    personaPlaceholder: '左栏选一个 agent 加载 persona...',
+    memPlaceholder: '左侧选一个记忆文件，或新建一个 .md...',
+    slotsHint: '关于「你」的长期事实，会作为每个 agent 的开场上下文注入。可直接修改、删除或新增。',
+    slotAdd: '＋ 添加一条画像',
+    diaryHintBefore: '这是 ',
+    diaryHintAfter: ' 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
+    diaryOwner: '该 agent',
+    userProfile: '用户画像',
+    userProfileTitle: '全局用户画像 · 由对话自动沉淀,可手动编辑',
+    profileHeader: '# 用户画像\n\n> 由对话自动捕捉 + 可手动编辑。每条按 `key` 去重 upsert(末尾 `<!-- k:... -->` 是去重标记,勿删)。\n',
+    agentListFailed: 'agent 列表加载失败: {status}',
+    loadError: '加载异常: {msg}',
+    personaUnsaved: 'Persona 编辑未保存，丢弃改动?',
+    memUnsaved: '记忆文件未保存，丢弃改动?',
+    unsavedDiscard: '未保存，丢弃改动?',
+    saving: '保存中…',
+    saveFailed: '保存失败: {status} {err}',
+    savedReloading: '已保存 · 重载插件中…',
+    savedReloaded: '已保存 · 插件已重载',
+    saveException: '保存异常: {msg}',
+    noMemoryDir: '该 agent 未声明 memoryDir（仍可编辑全局用户画像）',
+    noProfileYet: '尚未创建 · 可直接添加画像后保存',
+    noProfileSlots: '还没有任何用户画像 · 点下方「添加一条画像」开始',
+    savedProfileCount: '已保存 · {n} 条画像',
+    saved: '已保存',
+    emptyNoAgent: '未选 agent',
+    loading: '加载中…',
+    loadFailed: '加载失败: {status}',
+    personaFallbackZh: '暂无英文 persona，显示中文原文',
+    loadedChars: '已加载 ({n} 字符)',
+    scanningMemDir: '扫描记忆目录…',
+    memoryDirUnreadable: 'memoryDir 不存在或不可读: {status}',
+    memFileCount: '{n} 个记忆文件',
+    noMemFilesEmpty: '该 agent 暂无独立记忆文件 · 右上输入文件名 + 号新建',
+    profileFactCount: '{n} 条画像',
+    agentDiary: '{name} 的日记',
+    slotsMode: '槽位模式',
+    diaryMode: '日记模式',
+    slotKeyPlaceholder: '画像名（如 时区 / 语言偏好）',
+    delete: '删除',
+    slotValPlaceholder: '事实正文（如 Asia/Shanghai (UTC+8)）',
+    diaryEmpty: '这本日记还是空的 · 切到「源码模式」写下第一条',
+    noMemoryDirWarn: '该 agent 没有 memoryDir',
+    enterFilename: '请输入文件名',
+    fileExists: '{name} 已存在',
+    creating: '新建中…',
+    createFailed: '新建失败: {status}',
+    created: '已新建 {name}',
+    createException: '新建异常: {msg}',
+    noDefaultSkill: '未声明 default skill',
+    noOwnSkill: '无自带 skill',
+    noOwnTool: '无自带 tool',
+    noProduces: '未声明 produces',
+    wbPluginsTitle: '配套 workbench 插件',
+    wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-extension.json 的 provides.workbench 加一行：',
+    wbMatchCount: '配套 workbench 插件 ({n})',
+    diaryHint: '这是 {owner} 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
+    memFallback: '暂无{lang}记忆，显示另一种语言的原文。保存后会生成{lang}副本。',
+  },
+};
+
+/** 语言显示名，用于 memFallback 提示。 */
+function langLabel(l) {
+  if (locale === 'zh') return l === 'en' ? '英文' : '中文';
+  return l === 'en' ? 'English' : 'Chinese';
+}
+
+// ─── locale-aware memory file variants ────────────────────────────────
+// Memory files mirror the persona convention: `<base>.en.md` / `<base>.zh.md`
+// (or a legacy language-neutral `<base>.md`). The list shows one row per base;
+// loading picks the current-locale variant, falling back to neutral then the
+// other language. Kept in lockstep with packages/cli/src/agents/memory-locale.ts.
+function memParts(name) {
+  const m = name.match(/^(.*)\.(en|zh)\.md$/i);
+  if (m) return { base: m[1], lang: m[2].toLowerCase() };
+  return { base: name.replace(/\.md$/i, ''), lang: '' };
+}
+function memBases() {
+  const seen = new Set();
+  const out = [];
+  for (const f of memFiles) {
+    const { base } = memParts(f);
+    if (!seen.has(base)) { seen.add(base); out.push(base); }
+  }
+  return out;
+}
+/** Resolve a base + locale to the actual on-disk filename, with fallback.
+ *  Returns { name, fallback } or null when the base has no file yet. */
+function resolveMemName(base, lang = locale) {
+  const other = lang === 'en' ? 'zh' : 'en';
+  const want = `${base}.${lang}.md`;
+  const neutral = `${base}.md`;
+  const otherName = `${base}.${other}.md`;
+  if (memFiles.includes(want)) return { name: want, fallback: false };
+  if (memFiles.includes(neutral)) return { name: neutral, fallback: false };
+  if (memFiles.includes(otherName)) return { name: otherName, fallback: true };
+  return null;
+}
+function t(key, vars) {
+  let s = UI[locale][key] ?? UI.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+  return s;
+}
+function userProfile() {
+  return { id: '__user_profile__', label: t('userProfile'), path: '.forgeax/user/USER.md' };
+}
+function profileHeader() { return t('profileHeader'); }
+
+// State — must be declared before applyChrome() (it reads selectedAgent).
+let agents = [];           // BusPluginInfo[] of kind=agent
+let workbenches = [];      // BusPluginInfo[] of kind=workbench (for cross-ref)
+let avatarRulesById = {};  // short agent id (e.g. "iori") → AgentAvatarRules. ADR-0019.
+let namingById = {};       // short agent id → { title, sub } from /api/workbench/agents?lang=
+let selected = null;       // pluginId
+let selectedAgent = null;  // BusPluginInfo (full slim) of the active agent
+let activeTab = 'persona';
+
+// Persona state
+let personaOriginal = '';
+let personaDirty = false;
+let personaLoadPath = '';
+
+// Memory state
+let memFiles = [];
+let memSelected = null;    // filename within memoryDir, or userProfile().id
+let memOriginal = '';      // 规范化后的 USER.md 原文(用于 dirty 比较)
+let memDirty = false;
+let memMode = 'text';      // 'slots'(用户画像结构化视图) | 'text'(自由文本)
+
+function applyChrome() {
+  const title = document.getElementById('title');
+  if (title && !selectedAgent) title.textContent = t('noAgent');
+  const memTab = document.querySelector('.tab[data-tab="memory"]');
+  if (memTab) memTab.textContent = t('tabMemory');
+  const personaSave = document.getElementById('persona-save');
+  if (personaSave) personaSave.textContent = t('savePersona');
+  const personaReload = document.getElementById('persona-reload');
+  if (personaReload) personaReload.textContent = t('discard');
+  const memSave = document.getElementById('mem-save');
+  if (memSave) memSave.textContent = t('save');
+  const memReload = document.getElementById('mem-reload');
+  if (memReload) memReload.textContent = t('discard');
+  const memRaw = document.getElementById('mem-raw-toggle');
+  if (memRaw) memRaw.textContent = t('rawMode');
+  const personaEditor = document.getElementById('persona-editor');
+  if (personaEditor) personaEditor.placeholder = t('personaPlaceholder');
+  const memEditor = document.getElementById('mem-editor');
+  if (memEditor) memEditor.placeholder = t('memPlaceholder');
+  const memNew = document.getElementById('mem-new-name');
+  if (memNew) memNew.placeholder = t('memNewPlaceholder');
+  const memNewBtn = document.getElementById('mem-new-btn');
+  if (memNewBtn) memNewBtn.title = t('memNewTitle');
+  const slotsHint = document.querySelector('.slots-hint');
+  if (slotsHint) slotsHint.textContent = t('slotsHint');
+  const slotAdd = document.getElementById('slot-add');
+  if (slotAdd) slotAdd.textContent = t('slotAdd');
+  updateDiaryHint();
+}
+function updateDiaryHint(ownerName) {
+  const hint = document.querySelector('.diary-hint');
+  if (!hint) return;
+  const owner = ownerName ?? t('diaryOwner');
+  hint.textContent = t('diaryHint', { owner });
+}
+window.addEventListener('storage', (e) => {
+  if (e.key === 'forgeax.locale' && (e.newValue === 'en' || e.newValue === 'zh')) {
+    onLocaleChanged(e.newValue);
+  }
+});
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.type !== 'forgeax:locale-changed') return;
+  onLocaleChanged(d.locale);
+});
+applyChrome();
+
+const channel = new BroadcastChannel('wb-agent-persona');
+
+// 全局用户画像(USER.md)—— 与具体 agent 无关,固定置顶,所有 agent 详情页共享。
+const PROFILE_LINE_RE = /^- \*\*(.+?)\*\* — ([\s\S]*?)\s*<!-- k:([^\s]+) -->\s*$/;
+
+/** 与后端 slug() 同源:小写、空白转 -、去非字母数字、截断 48。 */
+function profileSlug(s) {
+  return (
+    (s || '')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\p{L}\p{N}-]+/gu, '')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'fact'
+  );
+}
+
+/** USER.md 文本 → 槽位数组 [{name, body, k}]。 */
+function parseProfile(text) {
+  const out = [];
+  for (const line of (text || '').split('\n')) {
+    const m = line.match(PROFILE_LINE_RE);
+    if (m) out.push({ name: m[1].trim(), body: m[2].trim(), k: m[3] });
+  }
+  return out;
+}
+
+/** 槽位数组 → 规范化 USER.md 文本(按 key 去重 + 排序,与后端 upsert 输出一致)。 */
+function serializeProfile(slots) {
+  const map = new Map();
+  for (const s of slots) {
+    const name = (s.name || '').trim();
+    const body = (s.body || '').replace(/\s*\n+\s*/g, ' ').trim();
+    if (!body) continue;
+    const k = name ? profileSlug(name) : profileSlug(body);
+    map.set(k, { name: name || k, body });
+  }
+  const lines = [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `- **${v.name}** — ${v.body} <!-- k:${k} -->`);
+  return `${profileHeader()}\n${lines.join('\n')}\n`;
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────
+function shortId(pluginId) { return pluginId.replace(/^@[^/]+\//, ''); }
+function pluginDir(pluginId) {
+  return `packages/marketplace/extensions/${shortId(pluginId)}`;
+}
+function personaDir(agent) {
+  const f = agent?.agent?.personaFile?.replace(/^\.\//, '') ?? 'persona/zh.md';
+  const dir = f.replace(/\/[^/]+$/, '');
+  return `${pluginDir(agent.id)}/${dir}`;
+}
+function personaPath(agent, lang = locale) {
+  return `${personaDir(agent)}/${lang}.md`;
+}
+function memoryDir(agent) {
+  const m = agent?.agent?.memoryDir;
+  if (!m) return null;
+  return `${pluginDir(agent.id)}/${m.replace(/^\.\//, '').replace(/\/$/, '')}`;
+}
+function pickLang(text) {
+  if (!text) return '';
+  if (typeof text === 'string') return text;
+  return locale === 'en' ? (text.en ?? text.zh ?? '') : (text.zh ?? text.en ?? '');
+}
+
+// 统一命名：zh → server naming（中文职能·英文名）；en → workbench agents API 或 displayName.en。
+function agentNaming(a) {
+  const sid = shortAgentId(a);
+  if (sid && namingById[sid]?.title) return namingById[sid];
+  if (locale === 'en') {
+    if (a?.naming?.title && !/[\u4e00-\u9fff]/.test(a.naming.title)) return a.naming;
+    const enTitle = pickLang(a?.displayName);
+    if (enTitle) return { title: enTitle, sub: a?.naming?.sub ?? a?.agent?.role ?? '' };
+  }
+  if (a && a.naming && a.naming.title) return a.naming;
+  return { title: pickLang(a && a.displayName), sub: '' };
+}
+
+function setStatus(elId, text, kind) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+// ─── left pane ────────────────────────────────────────────────────────
+//
+// GROUP_REGISTRY — catalog-side fold for the agent list. Mirrors
+// packages/interface/src/data/agent-groups.ts (the canonical TS source).
+// Iframe is a separate bundle so we can't import that file; keep the two
+// in sync by convention.
+//
+// Two relationships are folded (both rendered the same way here — lead +
+// indented sub list):
+//   1. skin family → representative (e.g. mochi) treated as the visual
+//      "lead", other personas (rin / sakura / ...) as indented siblings.
+//      Note: this iframe deliberately treats skin like subagent-family
+//      because here every persona is a separately-editable file — the
+//      "replaceable skin" vs "delegated sub" distinction only matters for
+//      the chat-side surface (AgentsMainArea), NOT for the persona editor.
+//   2. subagent-family → lead (e.g. iro, reia) in place + indented subs.
+//
+// Provider-default coders (cc-coder / claude-code-default / etc.) stay
+// flat — they differ by *driver*, not persona/family.
+//
+// Click semantics here: EVERY agent / sub / skin member is a real persona
+// file the user must be able to open and edit, so all clicks call
+// selectAgent() regardless of role. The "subs aren't directly addressable"
+// rule only applies to chat routing (handled in packages/interface/.../
+// open-agent-detail.ts via switchChat=false from sub-card click).
+const GROUP_REGISTRY = [
+  {
+    // Producer family — mirrors agent-groups.ts. NOTE: the canonical TS
+    // registry leads this group with `forge` (主线制作人), but `forge` is a
+    // runtime orchestrator alias that has NO persona plugin, so it never
+    // appears in this iframe's `/api/extensions/list?kind=agent` source. Here the
+    // group degrades to lead=`arin` (the editable 制作人 persona) with
+    // forgeax-default folded under it — same lead+indented-subs treatment as
+    // the art family.
+    id: 'producer-family',
+    kind: 'subagent-family',
+    leadShortId: 'arin',
+    memberShortIds: ['forgeax-default'],
+  },
+  {
+    id: 'coder-skins',
+    kind: 'skin',
+    representativeShortId: 'mochi',
+    memberShortIds: ['mochi', 'rin', 'sakura', 'kaede', 'kumo'],
+    // Provider-default coders folded into the same tree under mochi. They
+    // get the same `is-sub` indented treatment as skin members in this
+    // iframe — the persona editor doesn't visually distinguish driver vs
+    // tone (both are independently editable persona files). The catalog
+    // surface in AgentsMainArea DOES distinguish them via a separate
+    // mini-card column.
+    providerDefaultShortIds: ['cc-coder', 'claude-code-default', 'codex-default', 'cursor-default'],
+  },
+  {
+    id: 'art-family',
+    kind: 'subagent-family',
+    leadShortId: 'iro',
+    memberShortIds: ['animator-2d', 'character-designer-2d', 'vfx-artist-3d', 'lowpoly', 'ui-designer'],
+  },
+  {
+    id: 'reel-family',
+    kind: 'subagent-family',
+    leadShortId: 'reia',
+    memberShortIds: ['reel-storyboard', 'reel-video', 'reel-visual'],
+  },
+  {
+    // Scene-asset pipeline family — mirrors agent-groups.ts. `director`
+    // (场景总监) leads, delegating to `sino` (场景构图) + `mira` (2D 资产).
+    // Unlike producer-family, `director` is a real agent plugin so it shows
+    // up in /api/extensions/list?kind=agent — no lead degradation needed.
+    // `mira` moved here out of art-family.
+    id: 'scene-pipeline-family',
+    kind: 'subagent-family',
+    leadShortId: 'director',
+    memberShortIds: ['sino', 'mira'],
+  },
+];
+
+function shortAgentId(a) { return a.agent?.id ?? ''; }
+
+// Return the (leadShortId, subShortIds) view of a group regardless of kind.
+// Skin: representative = lead; rest of skin members + provider-default
+// coders all become subs (they're all independently editable persona
+// files). Subagent-family: native leadShortId, native memberShortIds.
+function leadAndSubsOf(g) {
+  if (g.kind === 'subagent-family') {
+    return { leadShortId: g.leadShortId, subShortIds: g.memberShortIds };
+  }
+  // skin
+  return {
+    leadShortId: g.representativeShortId,
+    subShortIds: [
+      ...g.memberShortIds.filter((id) => id !== g.representativeShortId),
+      ...(g.providerDefaultShortIds ?? []),
+    ],
+  };
+}
+
+// Lookup a short agent id's tree role in the registry. Returns the same
+// shape regardless of group kind so the renderer can stay generic.
+function treeForAgent(shortId) {
+  for (const g of GROUP_REGISTRY) {
+    const { leadShortId, subShortIds } = leadAndSubsOf(g);
+    if (leadShortId === shortId) return { group: g, role: 'lead', leadShortId, subShortIds };
+    if (subShortIds.includes(shortId)) return { group: g, role: 'sub', leadShortId, subShortIds };
+  }
+  return null;
+}
+
+async function loadAgents() {
+  try {
+    // ADR-0019: 第三个 fetch 拿 avatarRules. server `/api/workbench/agents` 已经把
+    // AVATAR.md 解析好挂在 agent.avatarRules 上, 我们只需要按 short id 索引一下.
+    const [aRes, wRes, wbAgRes] = await Promise.all([
+      fetch('/api/extensions/list?kind=agent'),
+      fetch('/api/extensions/list?kind=workbench'),
+      fetch(`/api/workbench/agents?lang=${locale}`),
+    ]);
+    if (!aRes.ok) { setStatus('persona-status', t('agentListFailed', { status: aRes.status }), 'warn'); return; }
+    agents = (await aRes.json()).items;
+    workbenches = wRes.ok ? (await wRes.json()).items : [];
+    if (wbAgRes.ok) {
+      const wbAg = await wbAgRes.json();
+      avatarRulesById = {};
+      namingById = {};
+      for (const a of wbAg.agents ?? []) {
+        if (a.id && a.avatarRules) avatarRulesById[a.id] = a.avatarRules;
+        if (a.id && a.naming) namingById[a.id] = a.naming;
+      }
+    }
+    renderList();
+  } catch (e) {
+    setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
+  }
+}
+
+// Build one agent row. `extraClass` ('' | 'is-sub') drives indent for
+// subagent-family members.
+function createAgentItem(a, extraClass) {
+  const btn = document.createElement('button');
+  btn.className = 'agent-item' + (a.id === selected ? ' active' : '') + (extraClass ? ' ' + extraClass : '');
+  btn.dataset.id = a.id;
+  // ADR-0019: per-agent CSS hook (e.g. suzu 立绘要再上移). short id 来自 manifest.
+  const sid = shortAgentId(a);
+  if (sid) btn.dataset.agentId = sid;
+
+  const av = document.createElement('div'); av.className = 'avatar';
+  const rules = avatarRulesById[sid];
+  const defaultState = rules ? rules.states[rules.default] : null;
+  if (defaultState?.url) {
+    // ADR-0019: 用 default state (期待) 循环, idle 模式 — 不订阅 chat 事件,
+    // 跟主仓 AgentAvatarVideo mode='idle' 行为对齐.
+    const v = document.createElement('video');
+    v.src = defaultState.url;
+    v.autoplay = true;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    av.appendChild(v);
+  } else {
+    av.textContent = a.agent?.card?.avatar ?? '🤖';
+  }
+
+  const meta = document.createElement('div'); meta.className = 'meta';
+  const nm = agentNaming(a);
+  const name = document.createElement('div'); name.className = 'name';
+  name.textContent = nm.title;
+  const role = document.createElement('div'); role.className = 'role';
+  role.textContent = nm.sub || (a.agent?.role ?? '');
+  meta.append(name, role);
+  btn.append(av, meta);
+  btn.addEventListener('click', () => {
+    channel.postMessage({ type: 'select-agent', pluginId: a.id });
+    selectAgent(a.id);
+  });
+  return btn;
+}
+
+function renderList() {
+  const root = document.getElementById('agent-list');
+  root.innerHTML = '';
+
+  // Pre-index by short agent id so we can render subs on demand without
+  // O(n) lookups inside the loop.
+  const bySid = new Map();
+  for (const a of agents) {
+    const sid = shortAgentId(a);
+    if (sid) bySid.set(sid, a);
+  }
+
+  const consumedIds = new Set();
+
+  for (const a of agents) {
+    if (consumedIds.has(a.id)) continue;
+    const sid = shortAgentId(a);
+    const link = sid ? treeForAgent(sid) : null;
+
+    // Sub: defer until its lead is rendered. Same code path for skin
+    // members (rin/sakura/...) and subagent-family members (mira/...).
+    if (link && link.role === 'sub') {
+      const lead = bySid.get(link.leadShortId);
+      if (lead && !consumedIds.has(lead.id)) continue;
+      // Lead missing (e.g. uninstalled) → render flat at the bottom pass.
+      root.appendChild(createAgentItem(a, ''));
+      consumedIds.add(a.id);
+      continue;
+    }
+
+    // Lead: render in place, then all subs indented.
+    if (link && link.role === 'lead') {
+      root.appendChild(createAgentItem(a, ''));
+      consumedIds.add(a.id);
+      for (const subSid of link.subShortIds) {
+        const sub = bySid.get(subSid);
+        if (!sub || consumedIds.has(sub.id)) continue;
+        root.appendChild(createAgentItem(sub, 'is-sub'));
+        consumedIds.add(sub.id);
+      }
+      continue;
+    }
+
+    // Flat / ungrouped agent.
+    root.appendChild(createAgentItem(a, ''));
+    consumedIds.add(a.id);
+  }
+
+  // Defensive pass: any agent we deferred but never got to render (lead
+  // was missing entirely). Should be rare.
+  for (const a of agents) {
+    if (consumedIds.has(a.id)) continue;
+    root.appendChild(createAgentItem(a, ''));
+    consumedIds.add(a.id);
+  }
+}
+
+// ─── tab switching ────────────────────────────────────────────────────
+function setTab(name) {
+  activeTab = name;
+  for (const el of document.querySelectorAll('.tab')) {
+    el.classList.toggle('active', el.dataset.tab === name);
+  }
+  for (const t of ['persona', 'memory', 'skills', 'workbench']) {
+    document.getElementById(`tab-${t}`).style.display = t === name ? 'flex' : 'none';
+  }
+  // Lazy-load tab content when first switching
+  if (name === 'memory' && selectedAgent) loadMemoryFiles();
+  if (name === 'skills' && selectedAgent) renderSkills();
+  if (name === 'workbench' && selectedAgent) renderWorkbench();
+}
+for (const el of document.querySelectorAll('.tab')) {
+  el.addEventListener('click', () => setTab(el.dataset.tab));
+}
+
+// ─── center pane: agent selected ──────────────────────────────────────
+async function selectAgent(pluginId) {
+  if (personaDirty && !confirm(t('personaUnsaved'))) return;
+  if (memDirty && !confirm(t('memUnsaved'))) return;
+  try { localStorage.setItem('wb-agent-persona:selected-agent-id', pluginId); } catch { /* private mode */ }
+  selected = pluginId;
+  selectedAgent = agents.find((a) => a.id === pluginId) ?? null;
+
+  for (const el of document.querySelectorAll('.agent-item')) {
+    el.classList.toggle('active', el.dataset.id === pluginId);
+  }
+
+  // Header
+  document.getElementById('title').textContent = selectedAgent ? agentNaming(selectedAgent).title : shortId(pluginId);
+  const rolePill = document.getElementById('role-pill');
+  if (selectedAgent?.agent?.role) {
+    rolePill.textContent = selectedAgent.agent.role;
+    rolePill.style.display = 'inline-block';
+    rolePill.style.borderColor = selectedAgent.agent.card?.color ?? 'var(--border)';
+    rolePill.style.color = selectedAgent.agent.card?.color ?? 'var(--text-secondary)';
+  } else {
+    rolePill.style.display = 'none';
+  }
+  document.getElementById('header-path').textContent = pluginDir(pluginId);
+
+  // Reset memory state
+  memFiles = []; memSelected = null; memOriginal = ''; memDirty = false; memMode = 'text';
+  document.getElementById('mem-files-list').innerHTML = '';
+  document.getElementById('slots-list').innerHTML = '';
+  document.getElementById('mem-editor').value = '';
+  document.getElementById('mem-editor').disabled = true;
+  document.getElementById('mem-slots').style.display = 'none';
+  document.getElementById('mem-diary').style.display = 'none';
+  document.getElementById('diary-list').innerHTML = '';
+  document.getElementById('mem-editor').style.display = '';
+  document.getElementById('mem-raw-toggle').style.display = 'none';
+  document.getElementById('mem-save').disabled = true;
+  document.getElementById('mem-reload').disabled = true;
+  setStatus('mem-status', '');
+
+  // Always reload persona — that's the default tab
+  await loadPersona();
+  // If user is currently on a non-persona tab, refresh it too
+  if (activeTab === 'memory') loadMemoryFiles();
+  if (activeTab === 'skills') renderSkills();
+  if (activeTab === 'workbench') renderWorkbench();
+}
+
+// ─── Persona tab ──────────────────────────────────────────────────────
+async function loadPersona() {
+  if (!selectedAgent) return;
+  // 经「按 agent id 解析」的服务端端点读 persona —— 跨 L0/L1/L2(插件快照给真实
+  // 路径),故 role.create 造的角色(住 L1 ~/.forgeax 或 L2 <project>/.forgeax,
+  // 不在 packages/marketplace)也能加载。旧的 /api/files 硬编码 L0 路径 → 404。
+  const id = String(selectedAgent.id).replace(/^@[^/]+\//, ''); // slash-free(去 @scope/),避免 path param 编码斜杠;server 端会再剥 agent- 前缀解析
+  setStatus('persona-status', t('loading'));
+  try {
+    const r = await fetch(`/api/workbench/agents/${encodeURIComponent(id)}/persona?lang=${locale}`);
+    if (!r.ok) {
+      setStatus('persona-status', t('loadFailed', { status: r.status }), 'warn');
+      setPersonaContent('', false);
+      return;
+    }
+    const body = await r.json();
+    setPersonaContent(body.content ?? '', true);
+    setStatus('persona-status', t('loadedChars', { n: (body.content ?? '').length }), 'ok');
+    personaLoadPath = body.path || '';
+  } catch (e) {
+    setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
+    setPersonaContent('', false);
+  }
+}
+
+function setPersonaContent(text, enableSave) {
+  const ed = document.getElementById('persona-editor');
+  ed.value = text;
+  ed.disabled = false;
+  personaOriginal = text;
+  personaDirty = false;
+  document.getElementById('persona-save').disabled = !enableSave;
+  document.getElementById('persona-reload').disabled = true;
+}
+
+async function savePersona() {
+  if (!selectedAgent) return;
+  const ed = document.getElementById('persona-editor');
+  const id = String(selectedAgent.id).replace(/^@[^/]+\//, ''); // slash-free(去 @scope/),避免 path param 编码斜杠;server 端会再剥 agent- 前缀解析
+  setStatus('persona-status', t('saving'));
+  try {
+    // 经「按 agent id 解析」端点写 persona(跨 L0/L1/L2)+ 服务端已顺带 reload。
+    const r = await fetch(`/api/workbench/agents/${encodeURIComponent(id)}/persona`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lang: locale, content: ed.value }),
+    });
+    if (!r.ok) {
+      const err = await r.text().catch(() => '');
+      setStatus('persona-status', t('saveFailed', { status: r.status, err }), 'warn');
+      return;
+    }
+    personaOriginal = ed.value;
+    personaDirty = false;
+    document.getElementById('persona-reload').disabled = true;
+    setStatus('persona-status', t('savedReloaded'), 'ok');
+  } catch (e) {
+    setStatus('persona-status', t('saveException', { msg: e.message }), 'warn');
+  }
+}
+
+document.getElementById('persona-save').addEventListener('click', savePersona);
+document.getElementById('persona-reload').addEventListener('click', loadPersona);
+document.getElementById('persona-editor').addEventListener('input', () => {
+  const ed = document.getElementById('persona-editor');
+  personaDirty = ed.value !== personaOriginal;
+  document.getElementById('persona-reload').disabled = !personaDirty;
+});
+
+// ─── Memory tab ───────────────────────────────────────────────────────
+async function loadMemoryFiles() {
+  if (!selectedAgent) return;
+  const memDir = memoryDir(selectedAgent);
+  if (!memDir) {
+    // 没有 per-plugin memoryDir 也要能编辑全局用户画像 → 仍渲染置顶项。
+    memFiles = [];
+    renderMemFiles();
+    setStatus('mem-status', t('noMemoryDir'), '');
+    autoSelectMemory();
+    return;
+  }
+  setStatus('mem-status', t('scanningMemDir'));
+  try {
+    const r = await fetch(`/api/files/tree?root=${encodeURIComponent(memDir)}`);
+    if (!r.ok) {
+      memFiles = [];
+      renderMemFiles();
+      setStatus('mem-status', t('memoryDirUnreadable', { status: r.status }), '');
+      autoSelectMemory();
+      return;
+    }
+    const body = await r.json();
+    const tree = body.tree;
+    memFiles = (tree?.children ?? [])
+      .filter((c) => c.type === 'file' && c.name.endsWith('.md'))
+      .map((c) => c.name);
+    renderMemFiles();
+    setStatus('mem-status', t('memFileCount', { n: memFiles.length }), '');
+    autoSelectMemory();
+  } catch (e) {
+    renderMemFiles();
+    setStatus('mem-status', t('loadError', { msg: e.message }), 'warn');
+  }
+}
+
+/** 打开记忆 tab 时自动选中一条记录，让内容 + 源码切换按钮立刻可见：
+ *  优先选「XX 的日记」(lessons)，否则第一份记忆文件，再否则全局用户画像。 */
+function autoSelectMemory() {
+  if (memSelected) return;
+  const bases = memBases();
+  const diary = bases.find((b) => b.toLowerCase() === 'lessons');
+  const target = diary || bases[0] || userProfile().id;
+  loadMemoryFile(target);
+}
+
+/** 统一的列表项：纯文字标签，所有项同一范式（长宽/字体/hover 一致）。 */
+function makeMemFileItem(label, name, opts = {}) {
+  const btn = document.createElement('button');
+  btn.className = 'mem-file' + (name === memSelected ? ' active' : '');
+  btn.dataset.name = name;
+  btn.textContent = label;
+  if (opts.title) btn.title = opts.title;
+  btn.addEventListener('click', () => loadMemoryFile(name));
+  return btn;
+}
+
+/** 当前 agent 的短名(英文名/人名),用于"XX 的日记"。命名是「中文职能·英文名」,
+ *  取 · 之后那段;无人名则退回整段标题。 */
+function agentShortName() {
+  if (!selectedAgent) return t('diaryOwner');
+  const title = agentNaming(selectedAgent).title || shortId(selectedAgent.id);
+  if (locale === 'en') return title.split(' · ')[0].trim() || title;
+  const parts = title.split(/[·・]/);
+  return (parts.length > 1 ? parts[parts.length - 1] : parts[0]).trim() || title;
+}
+
+/** 记忆基名 → 友好标签:lessons → "XX's diary";其余原样(已去 .md/语言后缀)。 */
+function memFileLabel(base) {
+  if (base.toLowerCase() === 'lessons') return t('agentDiary', { name: agentShortName() });
+  return base;
+}
+
+function renderMemFiles() {
+  const list = document.getElementById('mem-files-list');
+  list.innerHTML = '';
+  // 全局用户画像固定置顶（与当前 agent 无关），与文件项完全同样式。
+  list.appendChild(
+    makeMemFileItem(userProfile().label, userProfile().id, { title: t('userProfileTitle') }),
+  );
+  // 轻量分隔(独立元素,不改变任一列表项的尺寸/hover)。
+  const sep = document.createElement('div');
+  sep.className = 'mem-sep';
+  list.appendChild(sep);
+
+  const bases = memBases();
+  if (bases.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = t('noMemFilesEmpty');
+    list.appendChild(empty);
+    return;
+  }
+  for (const base of bases) {
+    list.appendChild(makeMemFileItem(memFileLabel(base), base, { title: base }));
+  }
+}
+
+async function loadMemoryFile(base) {
+  if (memDirty && !confirm(t('unsavedDiscard'))) return;
+  if (!selectedAgent) return;
+  const isProfile = base === userProfile().id;
+  let path;
+  let memFallback = false;
+  if (isProfile) {
+    path = userProfile().path;
+  } else {
+    const memDir = memoryDir(selectedAgent);
+    if (!memDir) return;
+    const resolved = resolveMemName(base, locale);
+    // No file yet for this base → target the current-locale name so a save creates it.
+    path = `${memDir}/${resolved ? resolved.name : `${base}.${locale}.md`}`;
+    memFallback = resolved ? resolved.fallback : false;
+  }
+  memSelected = base;
+  renderMemFiles();
+  setStatus('mem-status', t('loading'));
+  try {
+    // 用户画像可能尚未创建 → optional=1，缺文件返回 200 {exists:false}。
+    const r = await fetch(`/api/files?path=${encodeURIComponent(path)}${isProfile ? '&optional=1' : ''}`);
+    if (!r.ok) { setStatus('mem-status', t('loadFailed', { status: r.status }), 'warn'); return; }
+    const body = await r.json();
+    const content = body.content ?? '';
+    document.getElementById('mem-save').disabled = false;
+    document.getElementById('mem-reload').disabled = true;
+    memDirty = false;
+
+    if (isProfile) {
+      const slots = parseProfile(content);
+      memOriginal = serializeProfile(slots);
+      setMemMode('slots');
+      renderSlots(slots);
+      if (body.exists === false) setStatus('mem-status', t('noProfileYet'), 'ok');
+      else setStatus('mem-status', t('profileFactCount', { n: slots.length }), 'ok');
+    } else {
+      const ed = document.getElementById('mem-editor');
+      ed.value = content;
+      ed.disabled = false;
+      memOriginal = content;
+      updateDiaryHint(agentShortName());
+      renderDiary(content);
+      setMemMode('diary');
+      if (memFallback) setStatus('mem-status', t('memFallback', { lang: langLabel(locale) }), 'warn');
+      else setStatus('mem-status', t('loadedChars', { n: content.length }), 'ok');
+    }
+  } catch (e) {
+    setStatus('mem-status', t('loadError', { msg: e.message }), 'warn');
+  }
+}
+
+/** 切换结构化视图(slots 画像 / diary 日记) ↔ 源码(text)。任意选中文件都可切。 */
+function setMemMode(mode) {
+  memMode = mode;
+  const slots = document.getElementById('mem-slots');
+  const diary = document.getElementById('mem-diary');
+  const ed = document.getElementById('mem-editor');
+  const toggle = document.getElementById('mem-raw-toggle');
+  const isProfile = memSelected === userProfile().id;
+  slots.style.display = mode === 'slots' ? 'flex' : 'none';
+  diary.style.display = mode === 'diary' ? 'flex' : 'none';
+  ed.style.display = mode === 'text' ? '' : 'none';
+  toggle.style.display = memSelected ? 'inline-block' : 'none';
+  if (isProfile) toggle.textContent = mode === 'slots' ? t('rawMode') : t('slotsMode');
+  else toggle.textContent = mode === 'diary' ? t('rawMode') : t('diaryMode');
+}
+
+/** 当前编辑内容:用户画像槽位模式从 DOM 序列化;其余(画像源码模式 / 普通文件)取 textarea 原文。 */
+function currentMemContent() {
+  if (memSelected === userProfile().id && memMode === 'slots') {
+    return serializeProfile(readSlotsFromDom());
+  }
+  return document.getElementById('mem-editor').value;
+}
+
+/** 重新评估 dirty 并刷新「放弃改动」可用态。 */
+function recomputeMemDirty() {
+  memDirty = currentMemContent() !== memOriginal;
+  document.getElementById('mem-reload').disabled = !memDirty;
+}
+
+/** 从 DOM 收集槽位。 */
+function readSlotsFromDom() {
+  return [...document.querySelectorAll('#slots-list .slot')].map((el) => ({
+    name: el.querySelector('.slot-key').value,
+    body: el.querySelector('.slot-val').value,
+    k: el.dataset.k || '',
+  }));
+}
+
+/** 渲染槽位列表。 */
+function renderSlots(slots) {
+  const list = document.getElementById('slots-list');
+  list.innerHTML = '';
+  if (!slots.length) {
+    const empty = document.createElement('div');
+    empty.className = 'slots-empty';
+    empty.textContent = t('noProfileSlots');
+    list.appendChild(empty);
+    return;
+  }
+  for (const s of slots) list.appendChild(makeSlot(s));
+}
+
+/** 造一个槽位卡片(key 标题 + value 正文 + 删除)。 */
+function makeSlot(s = { name: '', body: '', k: '' }) {
+  const el = document.createElement('div');
+  el.className = 'slot';
+  if (s.k) el.dataset.k = s.k;
+
+  const head = document.createElement('div');
+  head.className = 'slot-head';
+  const key = document.createElement('input');
+  key.className = 'slot-key';
+  key.value = s.name || '';
+  key.placeholder = t('slotKeyPlaceholder');
+  const del = document.createElement('button');
+  del.className = 'slot-del';
+  del.textContent = t('delete');
+  del.addEventListener('click', () => { el.remove(); recomputeMemDirty(); });
+  head.append(key, del);
+
+  const val = document.createElement('textarea');
+  val.className = 'slot-val';
+  val.value = s.body || '';
+  val.placeholder = t('slotValPlaceholder');
+  val.rows = 1;
+
+  el.append(head, val);
+  el.addEventListener('input', recomputeMemDirty);
+  return el;
+}
+
+/** 记忆 markdown → 日记条目。`## 日期 · 标题` 起一条；`# ...` 作整本标题；标题里
+ *  的 ` · ` 拆成 [日期, 标题]（没有就整段当标题）。容忍任意 .md，不强制格式。 */
+function parseDiary(text) {
+  const entries = [];
+  let title = '';
+  let cur = null;
+  const push = () => { if (cur) { cur.body = cur.body.replace(/\s+$/, ''); entries.push(cur); cur = null; } };
+  for (const line of (text || '').split('\n')) {
+    const h2 = line.match(/^#{2,}\s+(.*)$/);
+    const h1 = line.match(/^#\s+(.*)$/);
+    if (h2) {
+      push();
+      const head = h2[1].trim();
+      const seg = head.split(/\s+[·・]\s+/);
+      cur = seg.length > 1
+        ? { date: seg[0].trim(), title: seg.slice(1).join(' · ').trim(), body: '' }
+        : { date: '', title: head, body: '' };
+    } else if (h1) {
+      push();
+      title = h1[1].trim();
+    } else if (cur) {
+      cur.body += (cur.body ? '\n' : '') + line;
+    } else if (line.trim()) {
+      cur = { date: '', title: '', body: line };
+    }
+  }
+  push();
+  return { title, entries };
+}
+
+/** 渲染日记卡片到 #diary-list（只读）。 */
+function renderDiary(text) {
+  const root = document.getElementById('diary-list');
+  root.innerHTML = '';
+  const { entries } = parseDiary(text);
+  if (!entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'diary-empty';
+    empty.textContent = t('diaryEmpty');
+    root.appendChild(empty);
+    return;
+  }
+  for (const e of entries) {
+    const card = document.createElement('div');
+    card.className = 'diary-entry';
+    if (e.date || e.title) {
+      const head = document.createElement('div');
+      head.className = 'diary-head';
+      if (e.date) { const d = document.createElement('span'); d.className = 'diary-date'; d.textContent = e.date; head.appendChild(d); }
+      if (e.title) { const t = document.createElement('span'); t.className = 'diary-title'; t.textContent = e.title; head.appendChild(t); }
+      card.appendChild(head);
+    }
+    const body = document.createElement('div');
+    body.className = 'diary-body';
+    body.textContent = e.body.trim();
+    card.appendChild(body);
+    root.appendChild(card);
+  }
+}
+
+async function saveMemory() {
+  if (!selectedAgent || !memSelected) return;
+  let path;
+  let savedName = null;
+  if (memSelected === userProfile().id) {
+    path = userProfile().path;
+  } else {
+    const memDir = memoryDir(selectedAgent);
+    if (!memDir) return;
+    // Always write the current-locale variant, so editing a fallback creates it.
+    savedName = `${memSelected}.${locale}.md`;
+    path = `${memDir}/${savedName}`;
+  }
+  const content = currentMemContent();
+  setStatus('mem-status', t('saving'));
+  try {
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    });
+    if (!r.ok) {
+      const err = await r.text().catch(() => '');
+      setStatus('mem-status', t('saveFailed', { status: r.status, err }), 'warn');
+      return;
+    }
+    memOriginal = content;
+    memDirty = false;
+    document.getElementById('mem-reload').disabled = true;
+    if (memSelected === userProfile().id) {
+      const slots = parseProfile(content);
+      if (memMode === 'slots') renderSlots(slots);
+      else document.getElementById('mem-editor').value = content;
+      setStatus('mem-status', t('savedProfileCount', { n: slots.length }), 'ok');
+    } else {
+      if (savedName && !memFiles.includes(savedName)) {
+        memFiles = [...memFiles, savedName].sort();
+        renderMemFiles();
+      }
+      if (memMode === 'diary') renderDiary(content);
+      setStatus('mem-status', t('saved'), 'ok');
+    }
+  } catch (e) {
+    setStatus('mem-status', t('saveException', { msg: e.message }), 'warn');
+  }
+}
+
+async function newMemoryFile() {
+  if (!selectedAgent) return;
+  const memDir = memoryDir(selectedAgent);
+  if (!memDir) { setStatus('mem-status', t('noMemoryDirWarn'), 'warn'); return; }
+  const input = document.getElementById('mem-new-name');
+  let raw = (input.value || '').trim();
+  if (!raw) { setStatus('mem-status', t('enterFilename'), 'warn'); return; }
+  // Normalize whatever the author typed to a base name (drop .md / language suffix).
+  const base = memParts(raw.endsWith('.md') ? raw : `${raw}.md`).base;
+  const name = `${base}.${locale}.md`;
+  if (memFiles.includes(name)) { setStatus('mem-status', t('fileExists', { name }), 'warn'); return; }
+  const path = `${memDir}/${name}`;
+  setStatus('mem-status', t('creating'));
+  try {
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content: `# ${base}\n\n` }),
+    });
+    if (!r.ok) {
+      setStatus('mem-status', t('createFailed', { status: r.status }), 'warn');
+      return;
+    }
+    input.value = '';
+    memFiles = [...memFiles, name].sort();
+    renderMemFiles();
+    await loadMemoryFile(base);
+    setStatus('mem-status', t('created', { name }), 'ok');
+  } catch (e) {
+    setStatus('mem-status', t('createException', { msg: e.message }), 'warn');
+  }
+}
+
+document.getElementById('mem-save').addEventListener('click', saveMemory);
+document.getElementById('mem-reload').addEventListener('click', () => memSelected && loadMemoryFile(memSelected));
+document.getElementById('mem-new-btn').addEventListener('click', newMemoryFile);
+document.getElementById('mem-new-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); newMemoryFile(); }
+});
+document.getElementById('mem-editor').addEventListener('input', recomputeMemDirty);
+
+// 新增一条画像槽位。
+document.getElementById('slot-add').addEventListener('click', () => {
+  const list = document.getElementById('slots-list');
+  const empty = list.querySelector('.slots-empty');
+  if (empty) empty.remove();
+  const el = makeSlot();
+  list.appendChild(el);
+  el.querySelector('.slot-key').focus();
+  recomputeMemDirty();
+});
+
+// 结构化 ↔ 源码 双向切换(内容随切换同步,不丢改动)。
+// 用户画像:槽位 ↔ 源码;普通记忆:日记 ↔ 源码。
+document.getElementById('mem-raw-toggle').addEventListener('click', () => {
+  if (!memSelected) return;
+  const ed = document.getElementById('mem-editor');
+  if (memSelected === userProfile().id) {
+    if (memMode === 'slots') {
+      ed.value = serializeProfile(readSlotsFromDom());
+      ed.disabled = false;
+      setMemMode('text');
+    } else {
+      renderSlots(parseProfile(ed.value));
+      setMemMode('slots');
+    }
+  } else {
+    if (memMode === 'diary') {
+      setMemMode('text'); // textarea 已持有源码
+    } else {
+      renderDiary(ed.value);
+      setMemMode('diary');
+    }
+  }
+  recomputeMemDirty();
+});
+
+// ─── Skills tab ───────────────────────────────────────────────────────
+function renderSkills() {
+  const root = document.getElementById('skills-content');
+  if (!selectedAgent) { root.innerHTML = `<div class="empty">${t('emptyNoAgent')}</div>`; return; }
+
+  const a = selectedAgent.agent ?? {};
+  const defaultSkills = Array.isArray(a.defaultSkills) ? a.defaultSkills : [];
+  const ownSkills = Array.isArray(selectedAgent.skills) ? selectedAgent.skills : [];
+  const ownTools = Array.isArray(selectedAgent.tools) ? selectedAgent.tools : [];
+  const produces = Array.isArray(a.produces) ? a.produces : [];
+
+  let html = `
+    <div class="info-card">
+      <div class="info-card-title">Identity</div>
+      <div class="info-card-body">
+        <div class="info-row"><div class="k">id</div><div class="v">${a.id ?? '?'}</div></div>
+        <div class="info-row"><div class="k">role</div><div class="v">${a.role ?? '?'}</div></div>
+        <div class="info-row"><div class="k">multiInstance</div><div class="v">${a.multiInstance ? 'yes' : 'no'}</div></div>
+        <div class="info-row"><div class="k">defaultLang</div><div class="v">${a.defaultLang ?? '-'}</div></div>
+        <div class="info-row"><div class="k">preferredCli</div><div class="v">${a.preferredCliProvider ?? '-'}</div></div>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Default skills (manifest provides.agent.defaultSkills)</div>
+      <div class="info-card-body">
+        ${defaultSkills.length === 0
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noDefaultSkill'))}</span>`
+          : defaultSkills.map((s) => `<span class="pill">${escapeHtml(typeof s === 'string' ? s : JSON.stringify(s))}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Plugin's own skills (provides.skills)</div>
+      <div class="info-card-body">
+        ${ownSkills.length === 0
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnSkill'))}</span>`
+          : ownSkills.map((s) => `<span class="pill">${escapeHtml(s.id)}${s.trigger ? ` <code style="opacity:0.6">${escapeHtml(s.trigger)}</code>` : ''}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Plugin's own tools (provides.tools)</div>
+      <div class="info-card-body">
+        ${ownTools.length === 0
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnTool'))}</span>`
+          : ownTools.map((tl) => `<span class="pill">${escapeHtml(tl.id)}${tl.exposedToAI ? ' <span style="color:var(--accent-ok)">·exposed</span>' : ''}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Produces (file glob — tells Forge orchestrator which files this agent owns)</div>
+      <div class="info-card-body">
+        ${produces.length === 0
+          ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noProduces'))}</span>`
+          : produces.map((p) => `<span class="pill"><code>${escapeHtml(p)}</code></span>`).join('')}
+      </div>
+    </div>
+  `;
+  root.innerHTML = html;
+}
+
+// ─── Workbench tab ────────────────────────────────────────────────────
+function renderWorkbench() {
+  const root = document.getElementById('workbench-content');
+  if (!selectedAgent) { root.innerHTML = `<div class="empty">${t('emptyNoAgent')}</div>`; return; }
+  const matches = workbenches.filter((w) => w.workbench?.preferredAgent === selectedAgent.id);
+  if (matches.length === 0) {
+    root.innerHTML = `
+      <div class="info-card">
+        <div class="info-card-title">${escapeHtml(t('wbPluginsTitle'))}</div>
+        <div class="info-card-body" style="color:var(--text-tertiary)">
+          ${escapeHtml(t('wbNoMatch'))}
+          <pre style="background:var(--bg-2);padding:8px;border-radius:3px;margin:6px 0 0;overflow:auto">
+"preferredAgent": "${selectedAgent.id}"</pre>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  let html = `<div class="info-card-title">${escapeHtml(t('wbMatchCount', { n: matches.length }))}</div>`;
+  for (const w of matches) {
+    const desc = pickLang(w.description) || '';
+    html += `
+      <div class="wb-row">
+        <div class="icon">${w.workbench?.icon ?? w.icon ?? '🧩'}</div>
+        <div class="body">
+          <div class="name">${escapeHtml(pickLang(w.displayName))}</div>
+          <div class="desc">${escapeHtml(desc)}</div>
+        </div>
+        <code style="font-size:11px;color:var(--text-tertiary)">${escapeHtml(w.id)}</code>
+      </div>
+    `;
+  }
+  root.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[c]);
+}
+
+// ─── boot ─────────────────────────────────────────────────────────────
+const SELECTED_LS_KEY = 'wb-agent-persona:selected-agent-id';
+
+// Resolve a host-supplied id (either short `iori` from /api/workbench/agents,
+// or full `@forgeax-extension/agent-iori` plugin id) to a real agent in our list.
+function resolveAgentId(input) {
+  if (!input) return null;
+  // Legacy orchestrator alias — no persona plugin; degrade to arin (see GROUP_REGISTRY).
+  if (input === 'forge') {
+    const arin = agents.find((a) => a.agent?.id === 'arin');
+    if (arin) return arin.id;
+  }
+  const direct = agents.find((a) => a.id === input);
+  if (direct) return direct.id;
+  const byShort = agents.find((a) => a.agent?.id === input);
+  if (byShort) return byShort.id;
+  // Tolerate `agent-iori` short forms too
+  const byTail = agents.find((a) => a.id.endsWith(`/${input}`));
+  return byTail ? byTail.id : null;
+}
+
+channel.addEventListener('message', (e) => {
+  const msg = e.data;
+  if (msg?.type !== 'select-agent') return;
+  const requested = msg.pluginId ?? msg.id ?? msg.agentId;
+  const resolved = resolveAgentId(requested);
+  if (resolved && resolved !== selected) selectAgent(resolved);
+});
+
+loadAgents().then(() => {
+  if (pane !== 'center' || agents.length === 0) return;
+  let initial = null;
+  try {
+    initial = resolveAgentId(localStorage.getItem(SELECTED_LS_KEY));
+  } catch { /* private mode */ }
+  selectAgent(initial ?? agents[0].id);
+});
+
+</script>
+</body>
+</html>

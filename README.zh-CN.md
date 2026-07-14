@@ -45,7 +45,7 @@ manifest.json            # 注册表:id / version / schemaVersion / agents / ski
 src/system-prompt/       # 有序提示片段(+ peers/、shared/)
 src/skills/              # 可复用技能(如 make-game-design)
 src/memory/              # 长期记忆模板
-plugins/                 # 插件舰队:
+extensions/                 # 插件舰队:
   agent-*                #   具名 agent 人格
   wb-*                   #   可视化 workbench 编辑器(场景 / 角色 / 剧情 / reel / …)
   cli-*                  #   模型/运行时驱动
