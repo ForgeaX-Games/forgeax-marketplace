@@ -44,13 +44,13 @@ function notifyChanged(msg: string): void {
 }
 
 // Build the standard bracket-field alias from a raw filename: 13 empty fields
-// with the filename (sans extension) dropped into the item-name slot (idx 4).
+// with the filename (sans extension) dropped into the item-name slot (idx 2).
 function repairAlias(rawAlias: string): string {
   const dot = rawAlias.lastIndexOf('.')
   const ext = dot >= 0 ? rawAlias.slice(dot) : ''
   const name = (dot >= 0 ? rawAlias.slice(0, dot) : rawAlias).trim()
   const fields = Array.from({ length: 13 }, () => '')
-  fields[4] = name
+  fields[2] = name
   return fields.map((f) => `[${f}]`).join('_') + ext
 }
 
@@ -60,18 +60,41 @@ export async function registerPrivateLibraryRoutes(app: FastifyInstance): Promis
   // Import one file. Body is JSON { filename, mimeType?, dataBase64, zone? } —
   // the plugin iframe sandbox blocks multipart, so the frontend base64-encodes.
   app.post('/api/v1/library/import', async (req, reply) => {
-    const b = (req.body ?? {}) as { filename?: string; mimeType?: string; dataBase64?: string; zone?: string }
+    const b = (req.body ?? {}) as {
+      filename?: string
+      mimeType?: string
+      dataBase64?: string
+      zone?: string
+      sourceBlobId?: string
+      anchorX?: number | null
+      anchorY?: number | null
+      geometryJson?: string
+      assetKind?: string
+      cropTypeOriginal?: string
+      sourceTag?: 'manual' | 'pipeline' | 'ai_gen'
+    }
     if (!b.filename || !b.dataBase64) {
       return reply.code(400).send({ error: 'filename and dataBase64 are required' })
     }
-    const rec = await importPrivateAsset({
-      filename: b.filename,
-      mimeType: b.mimeType,
-      dataBase64: b.dataBase64,
-      zone: b.zone,
-    })
-    notifyChanged(`import ${rec.alias} (${rec.sizeBytes}B)`)
-    return rec
+    try {
+      const rec = await importPrivateAsset({
+        filename: b.filename,
+        mimeType: b.mimeType,
+        dataBase64: b.dataBase64,
+        zone: b.zone,
+        sourceBlobId: b.sourceBlobId,
+        anchorX: b.anchorX,
+        anchorY: b.anchorY,
+        geometryJson: b.geometryJson,
+        assetKind: b.assetKind,
+        cropTypeOriginal: b.cropTypeOriginal,
+        sourceTag: b.sourceTag,
+      })
+      notifyChanged(`import ${rec.alias} (${rec.sizeBytes}B)`)
+      return rec
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
+    }
   })
 
   // Texture-pipeline PUBLISH BRIDGE. Atomically lands a 2D-generated PNG into

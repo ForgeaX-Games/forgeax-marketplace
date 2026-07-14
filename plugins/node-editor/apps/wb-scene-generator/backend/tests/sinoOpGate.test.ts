@@ -1,29 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { checkSinoOpAllowlist, isSinoBatch, SINO_TOP_LEVEL_OPID_ALLOWLIST } from '../src/routes/sinoOpGate.js'
+import {
+  checkSinoOpAllowlist,
+  filterComposerUtilityOps,
+  isSinoBatch,
+  SINO_FORBIDDEN_BATCH_TYPES,
+  SINO_TOP_LEVEL_OPID_ALLOWLIST,
+} from '../src/routes/sinoOpGate.js'
 
 describe('isSinoBatch', () => {
   it('detects sino via opts.actor', () => {
     expect(isSinoBatch({ actor: 'ai:sino' }, undefined)).toBe(true)
     expect(isSinoBatch({ actor: 'sino' }, undefined)).toBe(true)
-    expect(isSinoBatch({ actor: 'ai:sino-2' }, undefined)).toBe(true)
   })
 
   it('detects sino via caller agent-id header', () => {
     expect(isSinoBatch(undefined, 'sino')).toBe(true)
-    expect(isSinoBatch({ actor: 'ui' }, 'sino')).toBe(true)
+    expect(isSinoBatch({ actor: 'ui' }, 'sino-whitebox')).toBe(true)
   })
 
-  it('is OFF for any non-sino caller (default behaviour preserved)', () => {
+  it('is OFF for non-sino callers', () => {
     expect(isSinoBatch(undefined, undefined)).toBe(false)
-    expect(isSinoBatch({ actor: 'ui' }, undefined)).toBe(false)
     expect(isSinoBatch({ actor: 'editor' }, undefined)).toBe(false)
-    expect(isSinoBatch({ actor: 'ai:scene' }, undefined)).toBe(false)
-    expect(isSinoBatch({ actor: 'cli' }, 'lowpoly')).toBe(false)
   })
 })
 
 describe('checkSinoOpAllowlist', () => {
-  it('allows whitelisted top-level createNodes', () => {
+  it('allows whitelisted composer utilities + connect', () => {
     const ops = [
       { type: 'createNode', nodeId: 'seed', opId: 'seed_control', position: { x: 0, y: 0 }, params: {} },
       { type: 'createNode', nodeId: 'out', opId: 'scene_output', position: { x: 0, y: 0 }, params: {} },
@@ -33,75 +35,77 @@ describe('checkSinoOpAllowlist', () => {
     expect(checkSinoOpAllowlist(ops)).toBeNull()
   })
 
-  it('rejects a top-level createNode whose opId is outside the whitelist', () => {
-    const ops = [
-      { type: 'createNode', nodeId: 'bad', opId: 'alg_random_rect_zone_gen', position: { x: 0, y: 0 }, params: {} },
-    ]
-    const r = checkSinoOpAllowlist(ops)
-    expect(r).not.toBeNull()
-    expect(r!.opIndex).toBe(0)
-    expect(r!.opId).toBe('alg_random_rect_zone_gen')
-    expect(r!.reason).toMatch(/sino-op-not-allowed/)
+  it('rejects template-internal opIds at top level', () => {
+    for (const opId of ['alg_random_rect_zone_gen', 'rect_grid', 'grid2node', 'add_child']) {
+      const ops = [{ type: 'createNode', nodeId: 'bad', opId, position: { x: 0, y: 0 }, params: {} }]
+      const r = checkSinoOpAllowlist(ops)
+      expect(r?.opId).toBe(opId)
+      expect(r?.fix).toMatch(/instantiateTemplate|composerUtilities/)
+    }
   })
 
-  it('exempts group-private member createNodes (alg_* allowed inside a template group)', () => {
+  it('rejects createGroup even when batch includes group-private members (no hand-built templates)', () => {
     const ops = [
-      // group-private members use arbitrary opIds — exempt because adopted below
-      { type: 'createNode', nodeId: 'ar_n1', opId: 'scene_passthrough', position: { x: 0, y: 0 }, params: {} },
-      { type: 'createNode', nodeId: 'ar_n2', opId: 'alg_random_rect_zone_gen', position: { x: 0, y: 0 }, params: {} },
-      { type: 'connect', edgeId: 'ar_e1', source: { nodeId: 'ar_n1', port: 'scene' }, target: { nodeId: 'ar_n2', port: 'grid' } },
       {
         type: 'createGroup',
         groupId: 'g_arch',
-        name: 'ArchitectureRegions',
+        name: 'HandBuilt',
         memberNodeIds: ['ar_n1', 'ar_n2'],
         position: { x: 0, y: 0 },
         exposedPorts: { inputs: [], outputs: [] },
       },
-      // top-level whitelisted utility
-      { type: 'createNode', nodeId: 'out', opId: 'scene_output', position: { x: 0, y: 0 }, params: {} },
-    ]
-    expect(checkSinoOpAllowlist(ops)).toBeNull()
-  })
-
-  it('still rejects a non-member alg_* even when other ops include a createGroup', () => {
-    const ops = [
-      { type: 'createNode', nodeId: 'm1', opId: 'scene_passthrough', position: { x: 0, y: 0 }, params: {} },
-      { type: 'createGroup', groupId: 'g', name: 'G', memberNodeIds: ['m1'], position: { x: 0, y: 0 } },
-      // NOT a member of any group → must be gated
-      { type: 'createNode', nodeId: 'loose', opId: 'alg_topology_connect_points', position: { x: 0, y: 0 }, params: {} },
+      { type: 'createNode', nodeId: 'ar_n1', opId: 'scene_passthrough', position: { x: 0, y: 0 }, params: {} },
+      { type: 'createNode', nodeId: 'ar_n2', opId: 'alg_random_rect_zone_gen', position: { x: 0, y: 0 }, params: {} },
     ]
     const r = checkSinoOpAllowlist(ops)
-    expect(r).not.toBeNull()
-    expect(r!.opId).toBe('alg_topology_connect_points')
+    expect(r?.opId).toBe('createGroup')
+    expect(SINO_FORBIDDEN_BATCH_TYPES.has('createGroup')).toBe(true)
   })
 
-  it('never gates structural ops (connect/updateNode/deleteGroup/...)', () => {
+  it('allows POI derivation utilities for PathConnection wiring', () => {
+    for (const opId of ['scene_focus_path', 'node_explode', 'building_footprint_mask']) {
+      expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has(opId)).toBe(true)
+    }
+  })
+
+  it('allows scene_focus_children for sub-zone fanout (AreaPartition output consumption)', () => {
+    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('scene_focus_children')).toBe(true)
+  })
+
+  it('rejects template-private / structural opIds from allowlist', () => {
+    for (const opId of ['scene_passthrough', '__group__', 'rect_grid', 'grid2node']) {
+      expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has(opId)).toBe(false)
+    }
+  })
+
+  it('never gates structural connect/update/delete ops', () => {
     const ops = [
       { type: 'connect', edgeId: 'e', source: { nodeId: 'a', port: 'x' }, target: { nodeId: 'b', port: 'y' } },
       { type: 'updateNode', nodeId: 'a', params: { foo: 1 } },
       { type: 'deleteNode', nodeId: 'a' },
-      { type: 'deleteGroup', groupId: 'g' },
-      { type: 'ungroup', groupId: 'g' },
-      { type: 'setMetadata', key: 'viewport', value: {} },
+      { type: 'deleteEdge', edgeId: 'e' },
     ]
     expect(checkSinoOpAllowlist(ops)).toBeNull()
   })
+})
 
-  it('whitelist contains the 6-template-group sentinel and core utilities', () => {
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('__group__')).toBe(true)
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('seed_control')).toBe(true)
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('tree_merge')).toBe(true)
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('scene_output')).toBe(true)
-    // manual point source for the manualPoint → PointSampleBuilding workflow
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('manual_points')).toBe(true)
-    expect(SINO_TOP_LEVEL_OPID_ALLOWLIST.has('alg_random_rect_zone_gen')).toBe(false)
-  })
-
-  it('allows a top-level manual_points createNode (manualPoint placement workflow)', () => {
-    const ops = [
-      { type: 'createNode', nodeId: 'pt', opId: 'manual_points', position: { x: 0, y: 0 }, params: {} },
+describe('filterComposerUtilityOps', () => {
+  it('filterComposerUtilityOps returns only allowlisted ops from full catalog', () => {
+    const catalog = [
+      { id: 'text_panel', name: 'Text' },
+      { id: 'rect_grid', name: 'Grid' },
+      { id: 'tree_merge', name: 'Merge' },
+      { id: 'scene_focus_path', name: 'Focus' },
+      { id: 'node_explode', name: 'Explode' },
+      { id: 'building_footprint_mask', name: 'Mask' },
     ]
-    expect(checkSinoOpAllowlist(ops)).toBeNull()
+    const filtered = filterComposerUtilityOps(catalog)
+    expect(filtered.map((o) => o.id)).toEqual([
+      'text_panel',
+      'tree_merge',
+      'scene_focus_path',
+      'node_explode',
+      'building_footprint_mask',
+    ])
   })
 })

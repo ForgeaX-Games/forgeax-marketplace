@@ -7,7 +7,7 @@
 // The adapter returns plain values (not the legacy `{ data }` envelope); the
 // stores ported in this stage are updated to consume these shapes directly.
 
-import type { ActivateProjectResult, ApiClient, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto } from '../../api/ApiClient.js'
+import type { ActivateProjectResult, ApiClient, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto, ViewProjectResult } from '../../api/ApiClient.js'
 import type {
   AssetDeletePolicy,
   ExecutionResult,
@@ -151,6 +151,8 @@ function groupTemplateToBattery(template: GroupTemplateBattery): Battery {
     description: template.description ?? `Group template: ${template.name}`,
     descriptionEn: template.descriptionEn,
     version: template.version ?? '1.0.0',
+    ...(template.author !== undefined ? { author: template.author } : {}),
+    ...(template.createdAt !== undefined ? { createdAt: template.createdAt } : {}),
     inputs: [],
     outputs: [],
     params: [],
@@ -481,8 +483,16 @@ export class EditorApiAdapter {
   // ── Execution ──────────────────────────────────────────────────────────
 
   /** Run the pipeline, or a node's upstream closure when startNodeId is given. */
-  async executePipeline(opts?: { startNodeId?: string }): Promise<ExecutionResult> {
-    return this.client.execute(opts?.startNodeId ? { nodeId: opts.startNodeId } : undefined)
+  async executePipeline(opts?: { startNodeId?: string; quietErrors?: boolean }): Promise<ExecutionResult> {
+    return this.client.execute({
+      ...(opts?.startNodeId ? { nodeId: opts.startNodeId } : {}),
+      ...(opts?.quietErrors ? { quietErrors: true } : {}),
+    })
+  }
+
+  /** Clear the kernel execution cache (state/outputs/) for the active project. */
+  async clearOutputCache(): Promise<{ ok: true }> {
+    return this.client.clearOutputCache()
   }
 
   /**
@@ -769,16 +779,34 @@ export class EditorApiAdapter {
   }
 
   /**
-   * Open / activate a project — the server step of the open cascade. The
-   * backend swaps the active runtime + broadcasts graph:applied; the
+   * Switch the UI viewing project — the server step of the open cascade. The
+   * backend sets viewingProjectId + broadcasts project:viewing; the
    * projectStore then loadPipeline()s (→ pipelineRevision++ → reconcile),
    * clearHistory()s, and resets node outputs.
    */
-  async activateProject(id: string): Promise<ActivateProjectResult> {
-    if (!this.client.activateProject) {
-      throw new Error('[editor] transport does not support activateProject (no project routes)')
+  async viewProject(id: string): Promise<ViewProjectResult> {
+    const view = this.client.viewProject ?? this.client.activateProject
+    if (!view) {
+      throw new Error('[editor] transport does not support viewProject (no project routes)')
     }
-    return this.client.activateProject(id)
+    return view.call(this.client, id)
+  }
+
+  /** @deprecated Use viewProject(). */
+  async activateProject(id: string): Promise<ActivateProjectResult> {
+    return this.viewProject(id)
+  }
+
+  /** Read-only lock holder for agent execution badges. */
+  async getProjectLock(id: string): Promise<{ lock: { agentId: string; kind: string; acquiredAt: string; sessionId?: string } | null } | null> {
+    if (!this.client.getProjectLock) return null
+    return this.client.getProjectLock(id)
+  }
+
+  /** Batch-fetch all active agent locks (project panel badges). */
+  async listWorkspaceLocks(): Promise<{ locks: readonly { projectId: string; agentId: string; kind: string; acquiredAt: string; sessionId?: string }[] } | null> {
+    if (!this.client.listWorkspaceLocks) return null
+    return this.client.listWorkspaceLocks()
   }
 
   /** Read the workspace doc. */

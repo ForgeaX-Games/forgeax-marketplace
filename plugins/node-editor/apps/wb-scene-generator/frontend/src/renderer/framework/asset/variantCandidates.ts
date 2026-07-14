@@ -11,7 +11,7 @@
 // 变体 bug 的根因。本模块把该判定收敛为一个纯函数,只吃一个最小 RGBA 视图,render
 // 和 export 都喂各自解出来的像素进来,得到逐字节一致的候选集。
 
-import type { FaceRule, RuleSprite } from './ruleCache'
+import type { FaceRule, RandomRule, RuleSprite } from './ruleCache'
 
 /**
  * 最小 RGBA 视图。浏览器侧用 `ctx.getImageData(...).data`(Uint8ClampedArray),
@@ -22,6 +22,12 @@ export interface RgbaView {
   height: number
   /** Straight RGBA8, row-major; length = width*height*4. */
   data: { readonly length: number; readonly [i: number]: number }
+}
+
+/** 像素过滤后的变体候选；weights 与 idxs 等长时按权重采样，否则等概率。 */
+export interface VariantPool {
+  idxs: number[]
+  weights?: number[]
 }
 
 /**
@@ -53,6 +59,48 @@ export function spriteHasVisiblePixel(img: RgbaView | null, sprite: RuleSprite):
   return false
 }
 
+export function filterVisibleVariantPool(
+  idxs: ReadonlyArray<number>,
+  weights: ReadonlyArray<number> | undefined,
+  sprites: ReadonlyArray<RuleSprite>,
+  img: RgbaView | null,
+): VariantPool {
+  const outIdxs: number[] = []
+  const outWeights: number[] = []
+  const useWeights = weights && weights.length === idxs.length
+  for (let i = 0; i < idxs.length; i++) {
+    const idx = idxs[i]!
+    if (idx < 0 || idx >= sprites.length) continue
+    if (!spriteHasVisiblePixel(img, sprites[idx]!)) continue
+    outIdxs.push(idx)
+    if (useWeights) outWeights.push(weights[i]!)
+  }
+  return {
+    idxs: outIdxs,
+    weights: useWeights && outWeights.length === outIdxs.length ? outWeights : undefined,
+  }
+}
+
+/** Resolve raw idx/weight lists for one randomRules entry (before pixel filter). */
+export function resolveRandomRuleRawPool(
+  face: FaceRule,
+  rule: RandomRule,
+  spriteCount: number,
+): { idxs: number[]; weights?: number[] } {
+  const idxs = rule.variantIdxs?.length
+    ? rule.variantIdxs.slice()
+    : face.variantIdxs?.length
+      ? face.variantIdxs.slice()
+      : rawVariantCandidates(face, spriteCount)
+  let weights = rule.variantWeights?.length
+    ? rule.variantWeights.slice()
+    : face.variantWeights?.length
+      ? face.variantWeights.slice()
+      : undefined
+  if (weights && weights.length !== idxs.length) weights = undefined
+  return { idxs, weights }
+}
+
 /**
  * 给定 face + 全部 sprite 矩形 + 解出的 sheet 像素,返回**非透明**变体候选 idx。
  * randomRules 只会从这个集合里采样,因此透明占位块永远不会被选中。RENDER 与 EXPORT
@@ -65,10 +113,78 @@ export function computeValidVariantIdxs(
   sprites: ReadonlyArray<RuleSprite>,
   img: RgbaView | null,
 ): number[] {
-  const candidates = rawVariantCandidates(face, sprites.length)
-  const out: number[] = []
-  for (const i of candidates) {
-    if (i >= 0 && i < sprites.length && spriteHasVisiblePixel(img, sprites[i]!)) out.push(i)
+  return computeValidVariantPool(face, sprites, img).idxs
+}
+
+export function computeValidVariantPool(
+  face: FaceRule,
+  sprites: ReadonlyArray<RuleSprite>,
+  img: RgbaView | null,
+): VariantPool {
+  const idxs = rawVariantCandidates(face, sprites.length)
+  const weights = face.variantWeights?.length === idxs.length ? face.variantWeights : undefined
+  return filterVisibleVariantPool(idxs, weights, sprites, img)
+}
+
+/** Face slice used when a randomRule declares its own variantIdxs pool. */
+export function faceForRandomRulePool(face: FaceRule, rule: RandomRule): FaceRule {
+  if (!rule.variantIdxs?.length) return face
+  return {
+    basePieces: face.basePieces,
+    map: face.map,
+    variantIdxs: rule.variantIdxs,
+    ...(rule.variantWeights?.length ? { variantWeights: rule.variantWeights } : {}),
+  }
+}
+
+/**
+ * Pixel-filtered variant pools keyed by randomRules tileId.
+ * Entries without variantIdxs reuse the face-level pool (same as pickFaceSprite fallback).
+ */
+export function computeValidVariantIdxsByTileId(
+  face: FaceRule,
+  sprites: ReadonlyArray<RuleSprite>,
+  img: RgbaView | null,
+): Map<number, number[]> {
+  const pools = computeValidVariantPoolsByTileId(face, sprites, img)
+  const out = new Map<number, number[]>()
+  for (const [tileId, pool] of pools) out.set(tileId, pool.idxs)
+  return out
+}
+
+export function computeValidVariantPoolsByTileId(
+  face: FaceRule,
+  sprites: ReadonlyArray<RuleSprite>,
+  img: RgbaView | null,
+): Map<number, VariantPool> {
+  const out = new Map<number, VariantPool>()
+  if (!face.randomRules?.length) return out
+  const facePool = computeValidVariantPool(face, sprites, img)
+  for (const r of face.randomRules) {
+    if (r.variantIdxs?.length || r.variantWeights?.length) {
+      const raw = resolveRandomRuleRawPool(face, r, sprites.length)
+      out.set(r.tileId, filterVisibleVariantPool(raw.idxs, raw.weights, sprites, img))
+    } else {
+      out.set(r.tileId, facePool)
+    }
   }
   return out
+}
+
+/** Pick one sprite idx from a pool; `rngUnit` ∈ [0,1). Uniform when weights absent. */
+export function pickWeightedVariant(pool: VariantPool, rngUnit: number): number {
+  const { idxs, weights } = pool
+  if (idxs.length === 0) return 0
+  if (!weights || weights.length !== idxs.length) {
+    return idxs[Math.floor(rngUnit * idxs.length)]!
+  }
+  let total = 0
+  for (const w of weights) total += w > 0 ? w : 0
+  if (total <= 0) return idxs[0]!
+  let roll = rngUnit * total
+  for (let i = 0; i < idxs.length; i++) {
+    roll -= weights[i]! > 0 ? weights[i]! : 0
+    if (roll <= 0) return idxs[i]!
+  }
+  return idxs[idxs.length - 1]!
 }

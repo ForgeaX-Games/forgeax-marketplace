@@ -240,7 +240,7 @@ class VFXPipelineUI {
 
   private setupVfxIntentBus(): void {
     if (this._bcVfx) return
-    try { this._bcVfx = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-skill.vfx-intent') } catch { this._bcVfx = null }
+    try { this._bcVfx = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-skill.vfx-intent') } catch { this._bcVfx = null }
     if (!this._bcVfx) return
     this._bcVfx.onmessage = (e: MessageEvent) => {
       const data = (e.data ?? {}) as { kind?: string; source?: string; defId?: string }

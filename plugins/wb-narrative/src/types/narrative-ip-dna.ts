@@ -472,6 +472,22 @@ export interface GameUnit {
 }
 
 /**
+ * 目标输出形态（target_output，§4.4d 本轮新增）——把"这次要做什么形态的游戏"变成一等契约，
+ * 避免 IP 改编默认漂移到 rpg/design_auto（互动叙事产物缺席）。来源=叙事第二步 ROUTING；
+ * 子仓库无对话时缺省 = 互动叙事(vn_full + tpl-vn-v2 + adv-interactive)，是 IP 改编旗舰场景。
+ */
+export interface TargetOutput {
+  /** 目标品类编码（如 adv-interactive 互动电影/影游 / rpg-jrpg）。 */
+  genre_code?: string;
+  /** 目标管线模板（tpl-vn-v2 / tpl-rpg / ...）。 */
+  pipeline_template?: string;
+  /** 目标生成模式（vn_full / design_vn_full / design_auto / ...）。 */
+  generation_mode?: string;
+  /** 复杂度档（节点数/规模控制，对齐 §4.6 global_control_params）。 */
+  complexity?: number;
+}
+
+/**
  * 游戏单元规划（game_unit_plan）= 第②步分配结果（§4.4 / §4.4b / §3.1c）。
  * 默认体量 ≈25 节点 / 25000 字 / 20 分钟；末单元 < 25 节并入前一单元。
  */
@@ -481,6 +497,8 @@ export interface GameUnitPlan {
   units: GameUnit[];
   /** 是否用户精确选填（覆盖默认体量与软硬区间）。 */
   userSpecified: boolean;
+  /** 目标输出形态（§4.4d）：决定对接哪条生成管线；缺省 = 互动叙事(VN)。 */
+  target_output?: TargetOutput;
 }
 
 /** 改编维度（dimensions）= 叙事层级数 + 叙事模板（§4.4 第 3 点）。 */
@@ -539,6 +557,23 @@ export type OperatorPerspective = "author" | "reader" | "character";
 export type OperatorSource = "extracted" | "retrieved" | "generated";
 
 /**
+ * 提取层级（§3.2 三层提炼策略 + 全局贯穿）——决定该算子注入到"哪一级生成环节"（§3.1c/§4.6）。
+ *   - top   顶层（完整叙事内容）：世界观/角色弧光/关系/情感/叙事者定位/表达 → worldview/logline/框架L0
+ *   - mid   中层（章/部/卷/季）：文学风格/主题/整体情节/框架-节奏-策略/情节技巧 → 大纲L1/细纲L2/vn幕P0
+ *   - leaf  底层（节/话/集/PLOT）：对白/独白/语气/局部情节/腔调 → 情节L3/剧本/分镜/vn情节点P1
+ *   - global 全局贯穿（人称/认知/情感/关系/环境）：所有消费算子的环节贯穿注入
+ */
+export type ExtractionLayer = "top" | "mid" | "leaf" | "global";
+
+/** 分层算子桶（§3.2）：一个游戏单元按提取层归好的算子池，供生成期按环节所属层取用。 */
+export interface LayeredOperators {
+  top: NarrativeOperator[];
+  mid: NarrativeOperator[];
+  leaf: NarrativeOperator[];
+  global: NarrativeOperator[];
+}
+
+/**
  * 一个视角对某槽位的候选算子（§7.2 / §7.2b）。
  * 选取优先级：不与新需求冲突的提取算子 > 检索算子 > LLM 生成算子 >（冲突的提取算子作废）。
  */
@@ -547,6 +582,8 @@ export interface OperatorSlotCandidate {
   operator: NarrativeOperator;
   /** 来源类型（不写进算子本体）。 */
   source: OperatorSource;
+  /** 提取层来源（§3.2，哪一提取层的算子被注入本步；显式可查）。 */
+  sourceLayer?: ExtractionLayer;
 }
 
 /**
@@ -579,6 +616,8 @@ export interface OperatorSolution {
   creative_directive: string;
   /** 阶段B：采纳/取舍说明（each_operator_uid → 如何被采纳/取舍）。 */
   adoption_notes?: Record<string, string>;
+  /** 本步声明消费的提取层（§3.2，显式记录"哪些层→本步"）。 */
+  step_layers?: ExtractionLayer[];
 }
 
 /**

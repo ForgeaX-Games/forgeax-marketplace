@@ -1,6 +1,8 @@
 # 河流样条化 (river_spline)
 
-将一组折线控制点经过**法线扰动 + 五种平滑算法**生成自然弯曲的河流，光栅化写入二维整数网格。算法逻辑完整迁移自 `picture_processor.py`。
+将一组折线控制点经过**法线扰动 + 五种平滑算法**生成自然弯曲的河流，光栅化写入单张二维整数网格。算法逻辑完整迁移自 `picture_processor.py`。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
@@ -18,7 +20,7 @@
 
 ## 基本使用方法
 
-1. 将上游地形电池的 `outputGrid` 连接到 `基准网格`
+1. 将上游地形电池的 `outputGrid` 连接到 `inputGrid`
 2. 将控制点数组（`[[col,row],...]`）连接到 `控制点`
 3. 在 `平滑算法` 下拉框选择算法
 4. 调整扰动参数和算法专用参数后执行
@@ -37,7 +39,7 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | grid | — | 基准输入网格 |
+| inputGrid | grid | — | 单张基准输入网格（DataTree 逐张处理） |
 | points | array | — | 控制点 `[[col,row],...]`，至少 2 个 |
 | algorithm | string | cubic_spline | 平滑算法选择器（下拉框） |
 | riverWidth | number | 3 | 河流宽度（格），笔刷直径 |

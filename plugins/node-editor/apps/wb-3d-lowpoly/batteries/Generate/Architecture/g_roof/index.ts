@@ -5,6 +5,7 @@
  */
 
 import {
+  ARCH_DEFAULTS,
   emit,
   freshId,
   isValidId,
@@ -36,14 +37,27 @@ export function gRoof(input: Record<string, unknown>): Record<string, unknown> {
     type: str(type),
   };
 
-  const overhang = Number(input.overhang ?? 0.3);
+  const overhang = Number(input.overhang ?? ARCH_DEFAULTS.roof.overhang);
   if (Number.isFinite(overhang) && overhang > 0) args.overhang = num(overhang);
 
+  const eave = Number(input.eave_overhang ?? NaN);
+  if (Number.isFinite(eave) && eave >= 0) args.eave_overhang = num(eave);
+  const verge = Number(input.verge_overhang ?? NaN);
+  if (Number.isFinite(verge) && verge >= 0) args.verge_overhang = num(verge);
+
   if (type === 'flat') {
-    const thickness = Number(input.thickness ?? 0.15);
+    const thickness = Number(input.thickness ?? ARCH_DEFAULTS.roof.flatThickness);
     if (Number.isFinite(thickness) && thickness > 0) args.thickness = num(thickness);
+    const parapetH = Number(input.parapet_height ?? 0);
+    if (Number.isFinite(parapetH) && parapetH > 0) {
+      args.parapet_height = num(parapetH);
+      const pt = Number(input.parapet_thickness ?? 0);
+      if (Number.isFinite(pt) && pt > 0) args.parapet_thickness = num(pt);
+      const coping = Number(input.coping_width ?? 0);
+      if (Number.isFinite(coping) && coping > 0) args.coping_width = num(coping);
+    }
   } else {
-    const height = Number(input.height ?? 1.6);
+    const height = Number(input.height ?? ARCH_DEFAULTS.roof.height);
     if (!Number.isFinite(height) || height <= 0) {
       return { geometry: incoming, id: '', error: 'roof: height must be positive for non-flat roofs' };
     }

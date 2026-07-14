@@ -3,6 +3,7 @@ import type { ApiClient } from '@forgeax/node-runtime-react'
 import type { GraphNode } from '@forgeax/node-runtime'
 import { flattenWire } from './flattenWire'
 import { useViewerStore } from './store/viewerStore'
+import type { AuthoredJointAnimationClip } from './viewer3d/urdf-joint-motion'
 
 // Live-sync the embedded URDF viewer to the graph. Modeled on the scene
 // generator's `useNodePreviews`: the kernel exec bus carries no payloads, so the
@@ -20,6 +21,20 @@ import { useViewerStore } from './store/viewerStore'
 const PREVIEW_OP = 'urdf_preview'
 const FALLBACK_OP = 'g_to_urdf'
 const URDF_PORT = 'urdf'
+// Authored joint animation: the g_bake_animation battery emits a parsed
+// JointAnimationClip on its `animation` port. We pull it alongside the URDF so
+// the GLB export can bake the authored motion instead of the procedural preview.
+const ANIMATION_OP = 'g_bake_animation'
+const ANIMATION_PORT = 'animation'
+
+/** Duck-type guard: a wire value shaped like an AuthoredJointAnimationClip. */
+function isAuthoredClip(value: unknown): value is AuthoredJointAnimationClip {
+  if (!value || typeof value !== 'object') return false
+  const c = value as Partial<AuthoredJointAnimationClip>
+  if (typeof c.fps !== 'number' || typeof c.frameCount !== 'number') return false
+  if (!c.channels || typeof c.channels !== 'object') return false
+  return true
+}
 
 /**
  * Pick the best URDF source node: prefer `urdf_preview` nodes; if none exist,
@@ -36,7 +51,12 @@ function pickSourceNode(nodes: readonly GraphNode[]): GraphNode | null {
   return pool[pool.length - 1] ?? null
 }
 
-export function useUrdfLiveSync(client: ApiClient): void {
+// `projectKey` gates + re-keys the sync: the client is project-scoped, so a pull
+// before the viewing project is bound throws "no viewing project". Passing the
+// resolved project id (null until known) re-runs this effect once it lands and
+// again on every project switch, so a freshly-bound viewer pulls immediately
+// instead of waiting for the next exec/graph event.
+export function useUrdfLiveSync(client: ApiClient, projectKey?: string | null): void {
   useEffect(() => {
     let cancelled = false
     // Track the last source we pushed so we can skip redundant setSource calls
@@ -51,8 +71,30 @@ export function useUrdfLiveSync(client: ApiClient): void {
       lastUrdf = null
     }
 
+    // Pull the authored joint animation clip (if any g_bake_animation node
+    // exists) and push it into the viewer store. Independent of the URDF source:
+    // runs even when the viewer is cleared, so a stale clip never lingers.
+    async function syncAuthoredAnimation(nodes: readonly GraphNode[]): Promise<void> {
+      const animNodes = nodes.filter((n) => n.opId === ANIMATION_OP)
+      const completed = animNodes.filter((n) => n.status === 'completed')
+      const pool = completed.length ? completed : animNodes
+      const node = pool[pool.length - 1] ?? null
+      const setAuthoredAnimation = useViewerStore.getState().setAuthoredAnimation
+      if (!node) {
+        if (useViewerStore.getState().authoredAnimation) setAuthoredAnimation(null)
+        return
+      }
+      const value = await client.getNodeOutput(node.id, ANIMATION_PORT)
+      if (cancelled) return
+      const clip = flattenWire<unknown>(value)[0]
+      setAuthoredAnimation(isAuthoredClip(clip) ? clip : null)
+    }
+
     async function refresh(): Promise<void> {
       const nodes = await client.listNodes()
+      if (cancelled) return
+      // Keep the authored-animation mirror fresh regardless of URDF state below.
+      await syncAuthoredAnimation(nodes)
       if (cancelled) return
       const node = pickSourceNode(nodes)
       if (!node) {
@@ -121,5 +163,5 @@ export function useUrdfLiveSync(client: ApiClient): void {
       unsubExec()
       unsubGraph()
     }
-  }, [client])
+  }, [client, projectKey])
 }

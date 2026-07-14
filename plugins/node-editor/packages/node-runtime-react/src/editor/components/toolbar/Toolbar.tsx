@@ -75,6 +75,15 @@ function Activity({ size = 13 }: IconProps) {
   )
 }
 
+function RotateCcw({ size = 18 }: IconProps) {
+  return (
+    <svg {...svgIconProps(size)}>
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  )
+}
+
 function Languages({ size = 13 }: IconProps) {
   return (
     <svg {...svgIconProps(size)}>
@@ -180,7 +189,7 @@ export interface ToolbarProps {
 }
 
 function Toolbar({ title = 'Node Editor', showRunControl = true, actions, onSave, onOpen, settingsActions, settingsStatusExtra, isFullscreen, onToggleFullscreen, domainPortTypes, showSettingsButton = true }: ToolbarProps) {
-  const { pipelineStatus, executePipeline, stopPipeline } = usePipelineStore()
+  const { pipelineStatus, executePipeline, stopPipeline, clearCacheAndExecutePipeline } = usePipelineStore()
   const {
     probeMode,
     toggleProbeMode,
@@ -251,6 +260,16 @@ function Toolbar({ title = 'Node Editor', showRunControl = true, actions, onSave
             onClick={() => toggleProbeMode()}
           >
             <Activity size={18} />
+          </button>
+
+          <button
+            className="toolbar-btn toolbar-btn-clear-reexec"
+            title={en ? 'Clear output cache and re-run pipeline' : '清除计算缓存并重新执行'}
+            aria-label={en ? 'Clear output cache and re-run pipeline' : '清除计算缓存并重新执行'}
+            disabled={isRunning}
+            onClick={() => void clearCacheAndExecutePipeline()}
+          >
+            <RotateCcw size={18} />
           </button>
 
           <div

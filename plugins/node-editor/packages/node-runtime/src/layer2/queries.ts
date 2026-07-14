@@ -345,3 +345,9 @@ export async function resolveGroupInnerNodeInputs(
   }
   return inputs
 }
+
+/** Discard every persisted execution cache entry under state/outputs/. */
+export function clearOutputCache(runtime: Runtime): { ok: true } {
+  runtime.outputs.clearAll()
+  return { ok: true }
+}

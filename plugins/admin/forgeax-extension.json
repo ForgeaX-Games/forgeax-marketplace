@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/admin",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "面板管理",
+    "en": "Admin"
+  },
+  "description": {
+    "zh": "面板管理工作台 · 四个区:工作台启用 / 排序、多模态模型绑定、cli-provider 认证健康、marketplace 插件计数;与 Studio 设置面板(SettingsPanel)的 sections 同源。",
+    "en": "Admin workbench — four sections: workbench enable/order, multi-modal model bindings, cli-provider auth health, and marketplace plugin counts; kept in sync with Studio's SettingsPanel sections."
+  },
+  "provides": {
+    "workbench": {
+      "id": "admin",
+      "lens": "by-category",
+      "icon": "⚙",
+      "position": 210,
+      "panelSize": "lg",
+      "matchProduces": [
+        "**/.forgeax/**",
+        "**/marketplace/**"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

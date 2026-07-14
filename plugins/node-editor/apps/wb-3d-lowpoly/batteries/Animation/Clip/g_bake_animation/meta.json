@@ -1,0 +1,119 @@
+{
+  "id": "g_bake_animation",
+  "label": "烘焙动画 clip",
+  "name-en": "GBakeAnimation",
+  "description": "把作者关节轨迹 q(t)（以 URDF 关节名为键的每关节标量数组，弧度/米）校验后写入 Geometry 的 animation 语句，并在 animation 端口输出已解析的 clip。q(t) 来源优先级：motion 端口 > q_json 内联 JSON > q_path 项目文件。何时用：想让导出的 GLB 播放手写 / 重定向的关节动画，而不是程序化预览。校验失败时几何原样透传、error 返回错误，不中断整条链路。",
+  "description-en": "Validate authored joint trajectories q(t) (per-joint scalar arrays keyed by URDF joint name, radians/meters) and append an `animation` statement to the Geometry, also emitting the parsed clip on the `animation` port. q(t) source priority: `motion` port > `q_json` inline JSON > `q_path` project file. Use when you want the exported GLB to play a hand-authored / retargeted joint animation instead of the procedural preview. On validation failure the geometry passes through unchanged and `error` carries the message so the chain never breaks.",
+  "version": "1.0.0",
+  "autoIterate": false,
+  "tags": [
+    "animation",
+    "clip",
+    "joint",
+    "urdf",
+    "glb"
+  ],
+  "tag_labels": [
+    "动画",
+    "clip",
+    "关节",
+    "URDF",
+    "GLB"
+  ],
+  "inputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "required": true,
+      "label": "几何",
+      "description": "上游 Geometry（提供 URDF 关节以对齐 q(t)）",
+      "description-en": "Upstream Geometry (supplies URDF joints to align q(t) against)."
+    },
+    {
+      "name": "motion",
+      "type": "motion",
+      "required": false,
+      "label": "运动 q(t)",
+      "description": "q(t) 端口：JointAnimationClip 对象或 JSON 字符串（为将来的重定向 / 步态节点预留，优先级最高）",
+      "description-en": "q(t) port: a JointAnimationClip object or JSON string (reserved for future retarget/gait nodes; highest priority)."
+    },
+    {
+      "name": "q_json",
+      "type": "string",
+      "required": false,
+      "label": "q(t) 内联 JSON",
+      "default": "",
+      "description": "内联 q(t) JSON：{ \"channels\": { 关节名: number[] }, \"fps\"?, \"frameCount\"?, \"loop\"? }",
+      "description-en": "Inline q(t) JSON: { \"channels\": { jointName: number[] }, \"fps\"?, \"frameCount\"?, \"loop\"? }."
+    },
+    {
+      "name": "q_path",
+      "type": "string",
+      "required": false,
+      "label": "q(t) 文件路径",
+      "default": "",
+      "description": "项目相对（或绝对）路径的 q(t) JSON 文件；仅当 motion 与 q_json 都为空时读取",
+      "description-en": "Project-relative (or absolute) path to a q(t) JSON file; read only when both motion and q_json are empty."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": false,
+      "label": "clip 名",
+      "default": "",
+      "description": "覆盖 clip 名；空 = 用 q(t) 里的 name（也可为空）",
+      "description-en": "Override the clip name; empty = keep the q(t)'s name (may be empty)."
+    },
+    {
+      "name": "fps",
+      "type": "number",
+      "required": false,
+      "label": "帧率",
+      "default": 30,
+      "description": "覆盖采样帧率（帧/秒）；q(t) 未带 fps 时用作默认",
+      "description-en": "Override sample rate (frames/second); also the default when q(t) omits fps."
+    },
+    {
+      "name": "loop",
+      "type": "bool",
+      "required": false,
+      "label": "循环",
+      "default": false,
+      "description": "是否循环播放（写入 clip.loop）",
+      "description-en": "Whether the clip loops (written to clip.loop)."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "geometry",
+      "type": "geometry",
+      "label": "几何",
+      "description": "追加 animation 语句后的 Geometry（校验失败时原样透传）",
+      "description-en": "Geometry after appending the animation statement (passthrough on validation failure)."
+    },
+    {
+      "name": "animation",
+      "type": "object",
+      "label": "动画 clip",
+      "description": "已解析并夹取到限位的 JointAnimationClip（{ name, fps, frameCount, loop?, channels }）",
+      "description-en": "Parsed and limit-clamped JointAnimationClip ({ name, fps, frameCount, loop?, channels })."
+    },
+    {
+      "name": "report",
+      "type": "object",
+      "label": "报告",
+      "description": "结构化校验报告：fps / frameCount / durationSec / channelCount / movableJointCount / restingJointCount / clamped / warnings / errors",
+      "description-en": "Structured validation report: fps / frameCount / durationSec / channelCount / movableJointCount / restingJointCount / clamped / warnings / errors."
+    },
+    {
+      "name": "error",
+      "type": "string",
+      "label": "错误",
+      "description": "非致命错误信息（校验失败时返回，几何原样透传）",
+      "description-en": "Non-fatal error string (returned on validation failure; geometry passes through unchanged)."
+    }
+  ],
+  "projectTypes": [
+    "asset3d"
+  ]
+}

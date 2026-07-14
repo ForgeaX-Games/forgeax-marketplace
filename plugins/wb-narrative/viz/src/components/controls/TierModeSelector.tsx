@@ -2301,9 +2301,10 @@ export function TierModeSelector() {
                         </div>
                         {entry.userInput && (() => {
                           const summary = localizeTagSummary(entry.userInput, t);
+                          // 宽度自适应交给 CSS（.hi-input-preview 两行截断）；此处只做超长兜底，避免超大字符串。
                           return (
-                            <div className="hi-input-preview">
-                              {summary.length > 40 ? summary.slice(0, 40) + "…" : summary}
+                            <div className="hi-input-preview" title={summary}>
+                              {summary.length > 120 ? summary.slice(0, 120) + "…" : summary}
                             </div>
                           );
                         })()}

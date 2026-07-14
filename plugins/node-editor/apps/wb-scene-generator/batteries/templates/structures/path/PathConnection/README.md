@@ -1,11 +1,16 @@
-# PathConnection（道路连接）
+# PathConnection（道路连接 · RandomWalk 算法）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781857907971_zblc6`，也可用 basename `PathConnection`。
-> 内部 24 个节点、1 个嵌套子组。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
+> **instantiate 用 basename `PathConnection`**（JSON 内 displayName 为 `PathConnectionRandomWalk`）。
+> Link 版（MST+A*）见 [`PathConnectionLink/README.md`](../PathConnectionLink/README.md) — **端口 schema 相同**，仅内部算法不同。
+> templateId：`group_1781857907971_zblc6`。
 
 ## 功能说明
 
 在 **POI 点集**（point2d 列表）与 **可铺路的上游 Scene** 约束下，用 MST + 正交 A* 生成连通道路网，输出 Path + Rest。
+
+> ### 📍 POI 点位约束（接 `in_3` 前必读）
+> 每个 POI 必须在**可铺路 region 内**或**区域边缘合理锚点**上；须通过 **体素/footprint 导出 + 推理** 得出（如 `outer_door`、`building_footprint_mask` 门格、建筑外侧邻格），**禁止拍坐标**。
+> 接入前逐点确认：**不在区域外、不在建筑体内、不悬空无效格**。Sino 操作手册详见 [PathConnection 管线文档](../../../../skills/compose-sino-scene/instructions/pipelines/PathConnection.md) §1。
 
 **整图通常只需一个 PathConnection**——多个连接点（门、路口、地图边界锚点等）先用 `tree_merge`（`inferredAccess:"item"`）合并为 **point2d 列表**，再接入 `in_3`。
 
@@ -21,12 +26,15 @@
 
 | portName | portType | access | 语义 | 必接 | 怎么喂 |
 |---|---|---|---|---|---|
-| `in_2` | scene | tree | 上游可铺路空间 | **是** | 上一组 **Rest** → `in_2` |
+| `in_2` | scene | tree | 上游可铺路空间 | **是** | **`PickOne.out_2` → `tree_flatten` → `scene_focus_path`（path=`/父区域/划分子区域1/rest`）→ `in_2`**。禁止裸连 Rest（多分支 → `voxel_slice` 报错）。 |
+| `in_15` | scene | tree | 障碍（绕开建筑） | **建议** | **`PickOne.out_1`(Building) → `in_15`**；未接时障碍切片可能空跑 |
 | `in_3` | point2d | **list** | **POI 点列表** | **是** | 多个 `manual_points` → `tree_merge`(item) → `in_3` |
 | `in_0` | string | item | RoadName | 建议 | `text_panel` |
 | `in_1` | string | tree | RoadAsset | 建议 | `text_panel`，如 `石路` |
+| `in_15` | scene | tree | **Obstacles** 道路需绕开的障碍场景 | 否 | 任意 Scene（建筑/水体等）→ `in_15`；不接时与原行为一致 |
 
 > 无显式 Seed。隐藏 `in_4..in_14` 默认即可。
+> `in_15`(Obstacles) 可选：接入的场景会被切片成障碍网格，并与内部"非可铺路区"求并后一起喂给寻路，道路据此绕行；悬空则不产生额外障碍。
 
 ### POI 列表合并（可照抄）
 
@@ -42,7 +50,7 @@
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
 | `out_1` | scene | **Path** 道路（主产物） | `tree_merge` |
-| `out_2` | scene | **Rest** 非道路剩余 | 下一组 Scene |
+| `out_2` | scene | **Rest** 非道路剩余 | 下一组 Scene（`out_2` 为多分支 DataTree，下游须 `scene_focus_path` 再接入） |
 | `out_0` | scene | Scene 中间态 | 调试 |
 | `out_3` / `out_4` | string | PathPath / RestPath | 可选 |
 
@@ -221,7 +229,7 @@ jq -r '.data[0].items[0][] | "\(.type)\t\(.name)"' outputs/out/names.json | sort
 - 实证基线（verified-town +道路）：节点 15 / 边 17，`out.layers` 多出 `石路` tile×1。
 - 反例（crowded-block `p_mqax7pj3_eaa3by` 修复前）：`in_0`（POI）悬空 → `outputs/paths/` 不存在、`names` 无"石路"、下游 natdec 连带无"行道树"，但整图仍 `completed`。
 
-看到道路 tile 图层出现，且建筑之间在截图里被路连起来，即说明本层正确。
+看到道路 tile 图层出现，且建筑之间在 Preview 里被路连起来，即说明本层正确。
 
 ### 读回端口内容验证（像 grep 一样查某端口）
 
@@ -239,3 +247,44 @@ forgeax pipeline execute --batteries $BATT $G \
 工具通路同理对 `scene:pipeline.execute` 返回投影。预期：`out_0` 树里出现名为 PathAsset 文本（如 `石路`）的道路子节点。
 
 > ⚠️ **绝不要整体打印 `outputs`**（整图可达约 28MB 含全 voxel 网格）；**必须 jq 投影到具体 `nodeId.portName`**，scene 端口只取 `.[].items[0].tree.children[].name` 摘要。
+
+---
+
+## ⚠️ 上文「in_0=POI / in_1=Rest」为旧 schema（已废弃）
+
+> **当前 JSON SSOT（2026-07 验证链）**：`in_0`=RoadName，`in_1`=RoadAsset，`in_2`=Scene(Rest)，`in_3`=POI point2d 列表。上文 ArchitectureRegions 示例保留作历史参考；**新接线用本文输入端口表 + 下节「南边入口 POI」**。
+
+---
+
+## 南边入口 POI 完整示例（M4 验证链）
+
+POI **禁止拍中心格**；须 **导出 → 推理 → 校验 → 组装**（端口 **`in_2`/`in_3`**）：
+
+1. **聚焦 Rest（Path `in_2` 必做）**：`PickOne.out_2` → **`tree_flatten`** → `scene_focus_path.scene`；`text_panel("/父区域/划分子区域1/rest")` → `scene_focus_path.path` → **`Path.in_2`**
+2. **障碍（建议）**：`PickOne.out_1`(Building) → **`in_15`**
+    '3. **南边入口**：须落在 **`in_2` Rest 体素内**（`points_to_grid` 会忽略区域外点；全空 mask 曾导致满图铺路，已修）。验证链从 Rest 南缘推理，勿拍 `{36,58}` 等固定坐标。'
+3. **门 POI**（有 BuildingStructures）：`PickOne.out_3` + `string_concat("/outer_door")` → `scene_focus_path`(BS.out_0) → `node_explode.2dPoints`
+4. **组装**：两路 POI → `tree_merge` `{inferredAccess:"item", inferredType:"point2d", portCount:2}` → **`in_3`**
+5. **道路名/资产**：`驿道`/`石路` → `in_0`/`in_1`
+
+---
+
+## 已验证调用示例
+
+| 项 | 值 |
+|---|---|
+| **projectId** | `p_mr4b9s3j_dycp8k` |
+| **报告** | [`step-m4-pathconnection.json`](../../../../../../../aw-support/battery-verify/p_mr4b9s3j_dycp8k/step-m4-pathconnection.json) |
+| **groupId** | `verify_path1` |
+| **restFocusPath** | `/父区域/划分子区域1/rest` |
+| **instantiate** | `templateId: "PathConnection"` |
+
+```bash
+PID=p_mr4b9s3j_dycp8k
+curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute" \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -d '{"narrativeLocationNames":["父区域","驿道"]}' \
+  | jq '.outputs.verify_path1.out_1 | length'
+```
+
+完整 ops 见报告（`path_south_pt`、`path_door_concat`、`path_poi_merge`）。

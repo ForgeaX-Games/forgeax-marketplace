@@ -2,7 +2,7 @@
   "id": "g_clevis_bracket",
   "label": "U 形支架",
   "name-en": "GClevisBracket",
-  "description": "在 Geometry DSL 末尾追加 clevis_bracket(...) 一行（articraft 语义零件，编译期烘成 mesh）。当 prompt 提到 U 形支架 / 双耳支架 / 叉耳 / 铰接座 / clevis / bracket 时使用。",
+  "description": "在 Geometry DSL 末尾追加 clevis_bracket(...) 一行（语义零件，编译期烘成 mesh）。当 prompt 提到 U 形支架 / 双耳支架 / 叉耳 / 铰接座 / clevis / bracket 时使用。",
   "description-en": "Append a `clevis_bracket(...)` line to the Geometry DSL (semantic part; sidecar bakes to mesh). Use when the prompt mentions a clevis / U-bracket / double-eared mounting bracket / pinned bracket.",
   "version": "1.0.0",
   "autoIterate": true,

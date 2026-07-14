@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useScenarioStore } from '../scenario/scenarioStore'
 import {
   FILM_LOOK_LIST,
@@ -16,8 +16,11 @@ import { injectStyleOnce } from '../styles/injectStyle'
  * 设计意图（与上方 VisualStyleSelector 的大轮播刻意区分）：
  *   - 上方：渲染媒介（写实 / 二次元 / 三渲二…）= "用什么画"，大海报 cover-flow。
  *   - 下方：电影美学调色（复古未来 / 蒂尔橙 / 莫兰迪…）= "整片什么色感"，
- *     横向滤镜缩略条，像相机滤镜一样一排小图铺开，一眼看全、随手叠加。
+ *     横向滤镜缩略条，一排小图铺开、随手叠加。
  *   两者正交叠加（例：写实 + 蒂尔橙），拼出更多组合。
+ *
+ * 滑动交互（与上方大轮播统一）：不显示滚动条（滑轨），改用鼠标滚轮横向滑动
+ *   + 两侧 ‹ › 按钮翻页；到头/到尾时对应按钮置灰。
  *
  * 交互：单选 + 可取消。点某格 → 写入 scenario.filmLook；再点当前格 → 取消（回落原色）。
  * 首格「原色」= 显式不加调色。智能体（style-curator）挑的 filmLook 也会高亮到这里，作者可改。
@@ -68,6 +71,39 @@ export function FilmLookSelector() {
     }
   }, [client])
 
+  // ── 滑动交互（与上方大轮播一致：无滚动条，滚轮横滑 + ‹ › 翻页） ──────────────
+  const stripRef = useRef<HTMLDivElement | null>(null)
+  const [edges, setEdges] = useState({ prev: false, next: true })
+
+  const updateEdges = useCallback(() => {
+    const el = stripRef.current
+    if (!el) return
+    const max = el.scrollWidth - el.clientWidth
+    setEdges({ prev: el.scrollLeft > 2, next: el.scrollLeft < max - 2 })
+  }, [])
+
+  const scrollByPage = useCallback((dir: -1 | 1) => {
+    const el = stripRef.current
+    if (!el) return
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: 'smooth' })
+  }, [])
+
+  // 竖向滚轮 → 横向滑动；用非被动监听以便 preventDefault，避免连带滚动整页。
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+      if (delta === 0) return
+      e.preventDefault()
+      el.scrollLeft += delta
+      updateEdges()
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    updateEdges()
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [updateEdges])
+
   return (
     <section className="ks-flook" aria-label="全局电影美学调色">
       <div className="fl-head">
@@ -84,7 +120,23 @@ export function FilmLookSelector() {
         </span>
       </div>
 
-      <div className="fl-strip" role="listbox" aria-label="电影美学调色滤镜">
+      <div className="fl-viewport">
+        <button
+          type="button"
+          className="fl-nav is-prev"
+          aria-label="向前"
+          disabled={!edges.prev}
+          onClick={() => scrollByPage(-1)}
+        >
+          ‹
+        </button>
+        <div
+          className="fl-strip"
+          role="listbox"
+          aria-label="电影美学调色滤镜"
+          ref={stripRef}
+          onScroll={updateEdges}
+        >
         <button
           type="button"
           role="option"
@@ -126,6 +178,16 @@ export function FilmLookSelector() {
             </button>
           )
         })}
+        </div>
+        <button
+          type="button"
+          className="fl-nav is-next"
+          aria-label="向后"
+          disabled={!edges.next}
+          onClick={() => scrollByPage(1)}
+        >
+          ›
+        </button>
       </div>
     </section>
   )
@@ -192,13 +254,51 @@ const css = `
   background: currentColor;
   opacity: 0.85;
 }
+.fl-viewport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .fl-strip {
   display: flex;
   gap: 10px;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 4px 2px 8px;
-  scrollbar-width: thin;
+  flex: 1 1 auto;
+  min-width: 0;
+  scroll-behavior: smooth;
+  /* 无滑轨：交互交给滚轮 + ‹ › 翻页按钮（与上方大轮播一致） */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.fl-strip::-webkit-scrollbar {
+  display: none;
+}
+.fl-nav {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-default, rgba(255, 255, 255, 0.18));
+  background: var(--color-background-elevated, rgba(20, 20, 26, 0.85));
+  color: var(--color-text-primary, #fff);
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+.fl-nav:hover:not(:disabled) {
+  border-color: var(--color-brand-primary, #6c8cff);
+  background: var(--color-brand-primary, #6c8cff);
+}
+.fl-nav:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 .fl-chip {
   position: relative;

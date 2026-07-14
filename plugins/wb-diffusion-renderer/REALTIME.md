@@ -24,8 +24,13 @@ logic. If a second backend appears, this file is the place to introduce selectio
 ## FRFP wire format (host stream ⇄ server)
 
 - **Uplink** (binary): `[4B meta_len LE][meta JSON][JPEG]`
-  - meta: `{ seq:int, ts:float, params?:{ prompt?, seed?, steps?, interp?, lora? } }`
-  - `params` sent **only when changed** (avoids per-frame overhead; backends are stateful re: current params).
+  - meta: `{ seq:int, ts:float, params?:{ prompt?, seed?, steps?, interp?, reset_cache? } }`
+  - `prompt` / `seed` / `steps` / `interp` are sent with each captured frame. FluxRT
+    reports `stateful:false`, so each frame must be self-contained for stable output.
+  - `reset_cache:true` is a **one-shot** the host attaches to a single frame when the
+    **global style prompt** is (re)applied, so the backend rebuilds its KV cache for a
+    large style change. **Game prompt-fragment updates never set it** — they are
+    prompt-only and keep the cache for temporal coherence.
 - **Downlink** (binary): `[4B header_len LE][header JSON][JPEG × n]`
   - header: `{ type:'out', seq, ts, serverMs, n, sizes:[int...] }` — split trailing bytes by `sizes` in order.
 - **Control** (JSON text): `ready | drop{seq} | busy | unauthorized | error{message} | style-switching{etaMs}`.
@@ -45,8 +50,10 @@ logic. If a second backend appears, this file is the place to introduce selectio
 - `ts` = capture `performance.now()` echoed → true e2e latency = `now - ts`. `serverMs` =
   backend infer time (for the metrics line).
 - Backend `drop{seq}` → decrement in-flight + metrics only; render nothing for that seq.
-- **`lora` switch = 1–3 s stall.** On change: send once, emit `style-switching{etaMs}`,
-  and keep showing the last good frame (never blank the plugin panel).
+- **`prompt` change is cheap** (FluxRT dropped `lora`, so prompt is the only style knob):
+  the new effective prompt rides the next captured frame; there is no multi-second
+  style-switch stall to mask. Keep showing the last good frame across any transition,
+  never blank the plugin panel.
 - Single client clock (capture + display in the same window) → no cross-machine sync.
 - **Fixed seed for temporal coherence.** FluxRT is `stateful:false`, so a random per-frame
   seed (`-1`) stylizes each frame independently → "boiling"/dirty churn (worsened by RIFE
@@ -68,8 +75,8 @@ trim only tens of ms. Realistic e2e ≈ **250–500 ms**; `interp` makes playbac
 
 ## Backend capabilities (drives the UI)
 
-`capabilities()` → `{ streaming:boolean, supportsPrompt, supportsLora, supportsInterp,
-loraPresets:string[], outputResolution:{w,h} }`. The inline panel renders knobs from
-this: hide `interp` when unsupported, populate the `lora` dropdown per backend, and
-letterbox the plugin panel to `outputResolution`. `streaming:false` backends
-(async-batch, e.g. Seedance) are excluded from this plugin's live path (different feature).
+`capabilities()` → `{ streaming:boolean, supportsPrompt, supportsInterp,
+outputResolution:{w,h} }`. The inline panel renders knobs from this: hide `interp`
+when unsupported and letterbox the plugin panel to `outputResolution`. `streaming:false`
+backends (async-batch, e.g. Seedance) are excluded from this plugin's live path
+(different feature).

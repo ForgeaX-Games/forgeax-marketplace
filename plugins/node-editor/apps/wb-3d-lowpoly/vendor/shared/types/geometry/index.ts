@@ -25,4 +25,7 @@ export * from './mutate.js';
 export * from './resolve.js';
 export * from './surface.js';
 export * from './subgraph.js';
-export * from './arch-layout.js';
+export * from './fk.js';
+export * from './arch-defaults.js';
+export * from './parse-quad.js';
+export * from './animation.js';

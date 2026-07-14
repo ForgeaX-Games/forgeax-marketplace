@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cookBakedScene } from '../src/scene-export/cooker.js'
 import { setRulesDir } from '../src/scene-export/tileRules.js'
-import type { BakedLayer } from '../src/baked/store.js'
+import type { BakedCell, BakedLayer } from '../src/baked/store.js'
 
 function baseLayer(partial: Partial<BakedLayer> & Pick<BakedLayer, 'nodePath' | 'nodeName'>): BakedLayer {
   return {
@@ -71,6 +71,60 @@ describe('cookBakedScene', () => {
     expect(result.terrain.cells['0']![0]!.graphic_index).toEqual([0])
   })
 
+  it('reads area_L attributes past the old 0..4 cap, stopping at the first gap', () => {
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/Ground',
+          nodeName: 'Ground',
+          assetName: 'Grass',
+          assetType: 'tile',
+          cells: [{ x: 0, y: 0, z: 0 }],
+          attributes: {
+            export_role: 'terrain',
+            template_id: 'grass',
+            area_L0: 'L0', area_L1: 'L1', area_L2: 'L2', area_L3: 'L3',
+            area_L4: 'L4', area_L5: 'L5', area_L6: 'L6',
+          },
+        }),
+      ],
+      aliases: [],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(result.terrain.cells['0']![0]!.areaTags).toEqual({
+      area_L0: ['L0'], area_L1: ['L1'], area_L2: ['L2'], area_L3: ['L3'],
+      area_L4: ['L4'], area_L5: ['L5'], area_L6: ['L6'],
+    })
+  })
+
+  it('stops the area_L scan at the first missing depth, ignoring tags past the gap', () => {
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/Ground',
+          nodeName: 'Ground',
+          assetName: 'Grass',
+          assetType: 'tile',
+          cells: [{ x: 0, y: 0, z: 0 }],
+          attributes: {
+            export_role: 'terrain',
+            template_id: 'grass',
+            area_L0: 'L0', area_L2: 'gap-skipped-should-not-appear',
+          },
+        }),
+      ],
+      aliases: [],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(result.terrain.cells['0']![0]!.areaTags).toEqual({ area_L0: ['L0'] })
+  })
+
   it('records every painted layer on a shared cell in draw order', () => {
     const result = cookBakedScene({
       bundleId: 'demo-bundle',
@@ -129,22 +183,49 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    // The object now rides the terrain stack (ppu===16 sprite) so higher terrain
-    // can occlude it; it is NOT emitted through objects[]. The anchor pick still
-    // mirrors the renderer: anchor (x=3,y=5,z=0) → terrain cell (x=3, screenRow=5,
-    // elevation/height=0).
     expect(result.terrain.objects).toEqual([])
     const oakCells = Object.values(result.terrain.cells).flat()
       .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
     expect(oakCells).toHaveLength(1)
-    expect(oakCells[0]).toMatchObject({ x: 3, y: 5, height: 0 })
+    // Footprint-centered placement (paintCell.objectFootprintAnchorPoint parity):
+    // centerX=(3+4+1)/2=4 → grid x=3.5; maxY=5, minZ=0 → grid y=5.
+    expect(oakCells[0]).toMatchObject({ x: 3.5, y: 5, height: 0 })
   })
 
-  it('chooses the anchor of an unmarked group like the renderer (min z, then FRONT row)', () => {
-    // No cell carries role:'anchor', so the cook must mirror the renderer's
-    // chooseObjectAnchor: columnDz/z ASC, then footprintDy/y DESC (front-most
-    // row), then x ASC. A z=0 group spanning y∈{5,7} must anchor on y=7 (front),
-    // projecting the object to the same screen row (y-z=7) the renderer draws.
+  it('places siheyuan 18×18 at footprint center (renderer paintCell parity)', () => {
+    const cells: BakedCell[] = []
+    for (let x = 21; x <= 38; x++) {
+      for (let y = 21; y <= 38; y++) {
+        for (let z = 1; z <= 6; z++) {
+          cells.push({ x, y, z, token: '' })
+        }
+      }
+    }
+    const result = cookBakedScene({
+      bundleId: 'siheyuan',
+      sceneName: '623',
+      layers: [
+        baseLayer({
+          nodePath: '/ground/四合院',
+          nodeName: '四合院',
+          assetName: '四合院',
+          assetAlias: 'siheyuan-alias',
+          assetType: 'object',
+          cells,
+          attributes: { export_role: 'object', object_type_id: 'siheyuan' },
+        }),
+      ],
+      aliases: [{ alias: 'siheyuan-alias', anchorX: 0.5, anchorY: 0.007, widthPx: 288, heightPx: 96, ppu: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+    const objCells = Object.values(result.terrain.cells).flat()
+      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
+    expect(objCells).toHaveLength(1)
+    // paintCell.test: objectFootprintAnchorPoint → { x: 30, y: 37.5 } → grid {29.5, 37}
+    expect(objCells[0]).toMatchObject({ x: 29.5, y: 37, height: 1 })
+  })
+
+  it('chooses front-bottom footprint row for vertical extent (renderer parity)', () => {
     const result = cookBakedScene({
       bundleId: 'demo-bundle',
       sceneName: 'Demo Scene',
@@ -167,17 +248,15 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    // Anchor = (x=4, y=7, z=0) → terrain cell (x=4, screenRow=7-0=7, height=0). A
-    // naive z,y,x-all-ASC pick would have chosen y=5 and misplaced it two rows back.
-    // The object rides the terrain stack now, so it is not in objects[].
     expect(result.terrain.objects).toEqual([])
     const hutCells = Object.values(result.terrain.cells).flat()
       .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
     expect(hutCells).toHaveLength(1)
+    // centerX=4.5 → x=4; maxY=7, minZ=0 → y=7
     expect(hutCells[0]).toMatchObject({ x: 4, y: 7, height: 0 })
   })
 
-  it('emits legacy object cells as separate object instances', () => {
+  it('emits one object instance per baked layer when cells have no instanceId (renderer parity)', () => {
     const result = cookBakedScene({
       bundleId: 'demo-bundle',
       sceneName: 'Demo Scene',
@@ -195,13 +274,75 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    expect(result.terrain.objects).toMatchObject([
-      { instanceId: '/World/Rocks:1,2,0', typeId: 'rock', x: 1, y: 2, height: 0 },
-      { instanceId: '/World/Rocks:2,2,0', typeId: 'rock', x: 2, y: 2, height: 0 },
-    ])
+    expect(result.terrain.objects).toHaveLength(1)
+    expect(result.terrain.objects[0]).toMatchObject({
+      instanceId: 'layer:/World/Rocks',
+      typeId: 'rock',
+      x: 1.5,
+      y: 2,
+      height: 0,
+    })
   })
 
-  // ── Object↔terrain occlusion via terrain-stack encoding ───────────────────
+  it('emits one terrain-stack tile for a multi-voxel object layer without instanceId', () => {
+    const footprint = [
+      { x: 21, y: 21, z: 1 }, { x: 22, y: 21, z: 1 }, { x: 21, y: 22, z: 1 }, { x: 22, y: 22, z: 1 },
+    ]
+    const result = cookBakedScene({
+      bundleId: 'siheyuan',
+      sceneName: '623',
+      layers: [
+        baseLayer({
+          nodePath: '/ground/四合院',
+          nodeName: '四合院',
+          assetName: '四合院',
+          assetAlias: 'siheyuan-alias',
+          assetType: 'object',
+          cells: footprint,
+          attributes: { export_role: 'object', object_type_id: 'siheyuan' },
+        }),
+      ],
+      aliases: [{ alias: 'siheyuan-alias', anchorX: 0.5, anchorY: 0.2, widthPx: 288, heightPx: 96, ppu: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(result.terrain.objects).toEqual([])
+    const objCells = Object.values(result.terrain.cells).flat()
+      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
+    expect(objCells).toHaveLength(1)
+    expect(objCells[0]).toMatchObject({ x: 21.5, y: 21, height: 1 })
+  })
+
+  it('emits one terrain-stack tile per cell for same-z multi-cell interior floors', () => {
+    const floorCells: BakedCell[] = []
+    for (let x = 35; x <= 44; x++) {
+      for (let y = 25; y <= 30; y++) {
+        floorCells.push({ x, y, z: 1, token: '地板02' })
+      }
+    }
+    const result = cookBakedScene({
+      bundleId: 'interior-floor',
+      sceneName: 'Inn',
+      layers: [
+        baseLayer({
+          nodePath: '/ground/清水镇/望江客栈',
+          nodeName: '望江客栈',
+          assetName: '地板02',
+          assetAlias: 'floor02-alias',
+          assetType: 'object',
+          cells: floorCells,
+          attributes: { export_role: 'object', asset_name: '地板02' },
+        }),
+      ],
+      aliases: [{ alias: 'floor02-alias', anchorX: 0.5, anchorY: 0.5, widthPx: 16, heightPx: 16, ppu: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    const objCells = Object.values(result.terrain.cells).flat()
+      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
+    expect(objCells.length).toBe(floorCells.length)
+  })
+
   // The shipped viewer paints the per-cell terrain stack ELEVATION-ASCENDING then
   // all objects[] strictly last, so objects[] can never be occluded by terrain.
   // To let higher walls occlude an object (the ambulance-in-pocket, IMAGE 2), a
@@ -270,14 +411,19 @@ describe('cookBakedScene', () => {
       sceneName: 'Demo Scene',
       layers: [
         baseLayer({
-          nodePath: '/World/Rocks',
-          nodeName: 'Rocks',
+          nodePath: '/World/FarRock',
+          nodeName: 'FarRock',
           assetName: 'Rock',
           assetType: 'object',
-          // Cell iteration deliberately lists the FAR (small y) cell first, then
-          // the NEAR (large y) cell. Painter order must put the near (y=9) object
-          // AFTER the far (y=3) object so it paints over it.
-          cells: [{ x: 5, y: 3, z: 0 }, { x: 5, y: 9, z: 0 }],
+          cells: [{ x: 5, y: 3, z: 0 }],
+          attributes: { export_role: 'object', object_type_id: 'rock' },
+        }),
+        baseLayer({
+          nodePath: '/World/NearRock',
+          nodeName: 'NearRock',
+          assetName: 'Rock',
+          assetType: 'object',
+          cells: [{ x: 5, y: 9, z: 0 }],
           attributes: { export_role: 'object', object_type_id: 'rock' },
         }),
       ],
@@ -285,8 +431,8 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
     expect(result.terrain.objects.map((o) => o.instanceId)).toEqual([
-      '/World/Rocks:5,3,0',
-      '/World/Rocks:5,9,0',
+      'layer:/World/FarRock',
+      'layer:/World/NearRock',
     ])
   })
 
@@ -316,10 +462,9 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
     const ids = result.terrain.objects.map((o) => o.instanceId)
-    expect(ids).toEqual(['/World/Objs:2,7,0', 'bld-1'])
-    // The building still anchors at its anchor cell (x=4, y-z=5), unaffected by
-    // the ordering key.
-    expect(result.terrain.objects.find((o) => o.instanceId === 'bld-1')).toMatchObject({ x: 4, y: 5, height: 0 })
+    expect(ids).toEqual(['layer:/World/Objs', 'bld-1'])
+    // Footprint anchor matches objectFootprintAnchorPoint (center x, front-bottom row).
+    expect(result.terrain.objects.find((o) => o.instanceId === 'bld-1')).toMatchObject({ x: 4, y: 8, height: 0 })
   })
 
   it('interleaves objects ACROSS layers by painter order, not layer iteration order', () => {
@@ -352,8 +497,8 @@ describe('cookBakedScene', () => {
     // Painter order sorts by footprint depth first: B's far object (y=2) draws
     // before A's near object (y=9), regardless of layer order.
     expect(result.terrain.objects.map((o) => o.instanceId)).toEqual([
-      '/World/B:1,2,0',
-      '/World/A:1,9,0',
+      'layer:/World/B',
+      'layer:/World/A',
     ])
   })
 
@@ -384,11 +529,8 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
     expect(result.terrain.objects.map((o) => o.instanceId)).toEqual([
-      // layerIdx 0, collection order within layer (x=1 cell then x=2 cell)
-      '/World/Lo:1,4,0',
-      '/World/Lo:2,4,0',
-      // layerIdx 1 last
-      '/World/Hi:3,4,0',
+      'layer:/World/Lo',
+      'layer:/World/Hi',
     ])
   })
 
@@ -676,8 +818,8 @@ describe('cookBakedScene content resolution', () => {
           attributes: { export_role: 'terrain', template_id: '地板' },
         }),
       ],
-      // non-cutout alias whose 5th bracket field (index 4) matches the name.
-      aliases: [{ alias: '[a]_[b]_[c]_[d]_[地板]_[f]_[g]_[h]_[i]_[16]' }],
+      // non-cutout alias whose 3rd bracket field (index 2) matches the name.
+      aliases: [{ alias: '[a]_[b]_[地板]_[d]_[e]_[f]_[g]_[h]_[16]' }],
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
@@ -685,7 +827,7 @@ describe('cookBakedScene content resolution', () => {
     // builder fetches real pixels) rather than emitting a contentless tile.
     const gid = result.terrainConfig.templates['地板']!.graphic_id
     const input = result.terrainAtlasInputs.find((i) => i.id === gid[0])!
-    expect(input.alias).toBe('[a]_[b]_[c]_[d]_[地板]_[f]_[g]_[h]_[i]_[16]')
+    expect(input.alias).toBe('[a]_[b]_[地板]_[d]_[e]_[f]_[g]_[h]_[16]')
   })
 
   // ── Defect #1 (real-pipeline root cause): renderer-faithful skip gate ────────
@@ -728,7 +870,7 @@ describe('cookBakedScene content resolution', () => {
           attributes: { export_role: 'terrain', template_id: 'tagged' },
         }),
       ],
-      aliases: [{ alias: '[a]_[b]_[c]_[d]_[地板]_[f]_[g]_[h]_[i]_[16]' }],
+      aliases: [{ alias: '[a]_[b]_[地板]_[d]_[e]_[f]_[g]_[h]_[16]' }],
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
@@ -742,3 +884,156 @@ describe('cookBakedScene content resolution', () => {
     expect(all.some((c) => c.x === 5)).toBe(false)
   })
 })
+
+// ── Same-asset identity: alias-first type/template binding ─────────────────
+// Bug: objectTypeNameFor()/templateIdFor() used to fall back to `assetName ??
+// nodeName` when no explicit object_type_id/template_id was set. `nodeName`
+// always differs per layer, and `assetName` can be blank/inconsistent even
+// when two layers resolve to the IDENTICAL library asset (same alias) — so
+// two instances of the same asset could fragment into different object
+// types / obj__ terrain templates while still sharing one atlas graphic id.
+// Fix: prefer the RESOLVED alias's own display name (the field `findByName`
+// itself matches assetName against) before falling back to assetName/nodeName.
+describe('cookBakedScene same-asset identity (alias-first type binding)', () => {
+  const treeAlias = '[武侠]_[自然]_[大树]_[]_[无]_[写实]_[正常]_[asset]_[16]_[静态]_[]_[0].png'
+
+  it('merges two object layers that resolve to the same alias into ONE object type + ONE obj__ template, even when assetName is blank and nodeName differs', () => {
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/TreeA',
+          nodeName: 'TreeA',
+          assetName: '', // blank — must not fall through to nodeName when an alias resolves
+          assetAlias: treeAlias, // exact-alias binding, mirrors an explicit asset pick
+          assetType: 'object',
+          cells: [{ x: 1, y: 1, z: 0, state: { instanceId: 't-a' } }],
+          attributes: { export_role: 'object' },
+        }),
+        baseLayer({
+          nodePath: '/World/TreeB',
+          nodeName: 'TreeB',
+          assetName: '',
+          assetAlias: treeAlias,
+          assetType: 'object',
+          cells: [{ x: 5, y: 5, z: 0, state: { instanceId: 't-b' } }],
+          attributes: { export_role: 'object' },
+        }),
+      ],
+      aliases: [{ alias: treeAlias, ppu: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    // One object type, named after the resolved alias's display name (field 2: "大树").
+    expect(Object.keys(result.objectTypeConfig.types)).toEqual(['大树'])
+    // One obj__ terrain template — not two.
+    const objTemplates = Object.keys(result.terrainConfig.templates).filter((k) => k.startsWith('obj__'))
+    expect(objTemplates).toEqual(['obj__大树'])
+    const objCells = Object.values(result.terrain.cells).flat().filter((c) => c.template_id.includes('obj__大树'))
+    expect(objCells).toHaveLength(2)
+  })
+
+  it('still honours an explicit object_type_id override even for the same underlying asset (authored contract wins)', () => {
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/FriendlyTree',
+          nodeName: 'FriendlyTree',
+          assetAlias: treeAlias,
+          assetType: 'object',
+          cells: [{ x: 1, y: 1, z: 0, state: { instanceId: 't-a' } }],
+          attributes: { export_role: 'object', object_type_id: 'friendly_tree' },
+        }),
+        baseLayer({
+          nodePath: '/World/HauntedTree',
+          nodeName: 'HauntedTree',
+          assetAlias: treeAlias,
+          assetType: 'object',
+          cells: [{ x: 5, y: 5, z: 0, state: { instanceId: 't-b' } }],
+          attributes: { export_role: 'object', object_type_id: 'haunted_tree' },
+        }),
+      ],
+      aliases: [{ alias: treeAlias, ppu: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(Object.keys(result.objectTypeConfig.types).sort()).toEqual(['friendly_tree', 'haunted_tree'])
+  })
+
+  const mossAlias = '[外]_[室外]_[青苔]_[]_[无]_[自然]_[正常]_[瓦片组]_[16]_[静态]_[]_[0].png'
+
+  it('merges two terrain layers that resolve to the same alias into ONE template_id, even when assetName is blank and nodeName differs', () => {
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/PatchA',
+          nodeName: 'PatchA',
+          assetName: '',
+          assetAlias: mossAlias,
+          assetType: 'tile',
+          cells: [{ x: 1, y: 1, z: 0 }],
+          attributes: { export_role: 'terrain' },
+        }),
+        baseLayer({
+          nodePath: '/World/PatchB',
+          nodeName: 'PatchB',
+          assetName: '',
+          assetAlias: mossAlias,
+          assetType: 'tile',
+          cells: [{ x: 5, y: 5, z: 0 }],
+          attributes: { export_role: 'terrain' },
+        }),
+      ],
+      aliases: [{ alias: mossAlias }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(Object.keys(result.terrainConfig.templates)).toEqual(['青苔'])
+    const all = Object.values(result.terrain.cells).flat()
+    expect(all.every((c) => c.template_id.every((t) => t === '青苔'))).toBe(true)
+  })
+
+  it('still forks distinct sheets that happen to share the same display name (pre-existing disambiguation, unaffected by alias-first naming)', () => {
+    // Field index 2 (the matched "name") is "土地" for BOTH — the trailing variant
+    // index differs, so these are genuinely different sheets that happen to share
+    // a display name, not accidental exact duplicates.
+    const dirtAliasA = '[外]_[室外]_[土地]_[]_[无]_[自然]_[正常]_[瓦片组]_[16]_[静态]_[]_[0].png'
+    const dirtAliasB = '[外]_[室外]_[土地]_[]_[无]_[自然]_[正常]_[瓦片组]_[16]_[静态]_[]_[1].png'
+    const result = cookBakedScene({
+      bundleId: 'demo-bundle',
+      sceneName: 'Demo Scene',
+      layers: [
+        baseLayer({
+          nodePath: '/World/DirtA',
+          nodeName: 'DirtA',
+          assetName: '',
+          assetAlias: dirtAliasA,
+          assetType: 'tile',
+          cells: [{ x: 1, y: 1, z: 0 }],
+          attributes: { export_role: 'terrain' },
+        }),
+        baseLayer({
+          nodePath: '/World/DirtB',
+          nodeName: 'DirtB',
+          assetName: '',
+          assetAlias: dirtAliasB, // DIFFERENT sheet, SAME display name ("土地" at field 4)
+          assetType: 'tile',
+          cells: [{ x: 5, y: 5, z: 0 }],
+          attributes: { export_role: 'terrain' },
+        }),
+      ],
+      aliases: [{ alias: dirtAliasA }, { alias: dirtAliasB }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    // Same display name ("土地") from two different resolved sheets still forks
+    // into two templates instead of silently colliding onto one.
+    expect(Object.keys(result.terrainConfig.templates).sort()).toEqual(['土地', `土地__${dirtAliasB}`])
+  })
+})
+

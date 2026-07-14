@@ -1,4 +1,4 @@
-// P3.0+ placeholder entry shim — @forgeax-plugin/wb-balance (kind=workbench)
+// P3.0+ placeholder entry shim — @forgeax-extension/wb-balance (kind=workbench)
 // modules/02 §55 + §530 step #3 — entry.frontend file must exist for
 // schemaValidation; Phase 6+ replaces with built ./dist/panel.esm.js
 // (browser ESM mounted into the workbench iframe).
@@ -14,7 +14,7 @@ export interface WorkbenchPanelHandle {
 }
 
 const PHASE_6_PLUS_MESSAGE =
-  "[Phase 6+ shim] @forgeax-plugin/wb-balance · WorkbenchPanel React render 未实现。" +
+  "[Phase 6+ shim] @forgeax-extension/wb-balance · WorkbenchPanel React render 未实现。" +
   "当前为 marketplace placeholder · Phase 6+ 拆 plugin 时填实际 React panel impl";
 
 export function render(_target: unknown): WorkbenchPanelHandle {

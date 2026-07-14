@@ -25,8 +25,6 @@ import type { RuleSprite } from '../../../framework/asset/ruleCache'
 import { colorForLayerIdx, colorForValue, rgbaToCss } from '../../../framework/palette'
 import type { DrawMode } from '../../../types'
 import { TEXTURE_PPU } from '../../../framework/geometry/constants'
-import { computeCollisionFootprint } from '../../../framework/geometry/objectPlacement'
-import type { AssetMatch } from '../../../framework/asset/matchAssetEntry'
 import type { CollectedCell, LayerAssetBinding, ResolvedDrawSink, ResolvedFace } from './types'
 import { pickFaceSprite } from './pickFaceSprite'
 
@@ -80,7 +78,6 @@ export function paintCell(
   coordsByLayerIdx?: Map<number, Set<string>>,
   capture?: ResolveCapture,
   objectAnchorPoint?: { x: number; y: number },
-  objectFootprintScale?: number,
 ): void {
   const top = billboardTopFaceCanvasXY(cell, bbox, cellSize)
   const front = billboardFrontFaceCanvasXY(cell, bbox, cellSize)
@@ -97,7 +94,6 @@ export function paintCell(
     if (!img) return
     const paintedRects = paintAssetCell(
       ctx, cell, bbox, top, front, cellSize, binding, coordsByLayerIdx, img, capture, objectAnchorPoint,
-      objectFootprintScale,
     )
     if (cell.isSelected) paintSelectedAssetHighlight(ctx, paintedRects)
     return
@@ -160,7 +156,6 @@ function paintAssetCell(
   img: HTMLImageElement,
   capture?: ResolveCapture,
   objectAnchorPoint?: { x: number; y: number },
-  objectFootprintScale?: number,
 ): PaintedRect[] {
   const paintedRects: PaintedRect[] = []
   if (binding.rule) {
@@ -171,6 +166,8 @@ function paintAssetCell(
         face: topFace, faceTag: 'top',
         sprites: binding.rule.sprites,
         validVariantIdxs: binding.validVariantIdxs.top,
+        validVariantWeights: binding.validVariantWeights.top,
+        validVariantPoolsByTileId: binding.validVariantPoolsByTileId.top,
         cell, coordsByLayerIdx, regions: binding.regions,
       })
       if (topSprite) {
@@ -185,6 +182,8 @@ function paintAssetCell(
         face: frontFace, faceTag: 'front',
         sprites: binding.rule.sprites,
         validVariantIdxs: binding.validVariantIdxs.front,
+        validVariantWeights: binding.validVariantWeights.front,
+        validVariantPoolsByTileId: binding.validVariantPoolsByTileId.front,
         cell, coordsByLayerIdx, regions: binding.regions,
       })
       if (sprite) {
@@ -209,7 +208,7 @@ function paintAssetCell(
     // object (no rule): keep the image's real size per PPU and align its library
     // anchor to the cell-footprint centre, drawn ONCE (not stretched to the cell).
     paintedRects.push(
-      drawAnchoredObject(ctx, img, binding.match.anchor, cell, bbox, cellSize, objectAnchorPoint, objectFootprintScale),
+      drawAnchoredObject(ctx, img, binding.match.anchor, cell, bbox, cellSize, objectAnchorPoint),
     )
     emitResolved(capture, cell, 'object', -1, null)
   }
@@ -217,9 +216,8 @@ function paintAssetCell(
 }
 
 /**
- * Draw an object sprite at PPU-correct size (image px / ppu = cells), positioned
- * so its anchor (anchorX: 0=left…1=right; anchorY: 0=bottom…1=top; default centre)
- * lands on the cell-footprint centre. `cellPx` is one cell in the target space.
+ * Draw an object sprite at 16 PPU (image px / 16 = cells, no scaling). Sprite
+ * bottom lands on the voxel bottom anchor; horizontal uses library anchorX.
  */
 function drawAnchoredObject(
   ctx: Ctx,
@@ -229,9 +227,8 @@ function drawAnchoredObject(
   bbox: VoxelBbox,
   cellPx: number,
   anchorPoint?: { x: number; y: number },
-  footprintScale = 1,
 ): PaintedRect {
-  const rect = objectSpriteGridRect(cell, img, anchor, anchorPoint, footprintScale)
+  const rect = objectSpriteGridRect(cell, img, anchor, anchorPoint)
   const dx = (rect.x - bbox.worldOffsetX) * cellPx
   const dy = (rect.y - bbox.worldOffsetY) * cellPx
   const drawW = rect.w * cellPx
@@ -245,39 +242,31 @@ export interface VoxelBottomFootprint {
   depth: number
 }
 
-export function objectVoxelBottomFootprint(cells: ReadonlyArray<CollectedCell>): VoxelBottomFootprint {
+export interface VoxelBottomBounds extends VoxelBottomFootprint {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+}
+
+export function objectVoxelBottomBounds(cells: ReadonlyArray<CollectedCell>): VoxelBottomBounds {
   const minX = Math.min(...cells.map((c) => c.x))
   const maxX = Math.max(...cells.map((c) => c.x))
   const minY = Math.min(...cells.map((c) => c.y))
   const maxY = Math.max(...cells.map((c) => c.y))
   return {
+    minX,
+    maxX,
+    minY,
+    maxY,
     width: maxX - minX + 1,
     depth: maxY - minY + 1,
   }
 }
 
-/** Uniform scale ≤1 so collision footprint fits inside the voxel bottom face (no overflow). */
-export function objectFootprintContainScale(
-  voxel: VoxelBottomFootprint,
-  match: AssetMatch,
-  img: HTMLImageElement,
-): number {
-  const ppu = match.ppu ?? TEXTURE_PPU
-  const natW = img.naturalWidth || img.width || ppu
-  const natH = img.naturalHeight || img.height || ppu
-  const anchorGeo = {
-    widthPx: match.widthPx ?? natW,
-    heightPx: match.heightPx ?? natH,
-    anchorX: match.anchor?.x,
-    anchorY: match.anchor?.y,
-  }
-  const collision = match.geometry?.collisionMask
-    ? computeCollisionFootprint(match.geometry.collisionMask, ppu, anchorGeo)
-    : null
-  const assetW = collision?.width ?? Math.max(1, natW / ppu)
-  const assetD = collision?.height ?? Math.max(1, natW / ppu)
-  if (voxel.width <= 0 || voxel.depth <= 0 || assetW <= 0 || assetD <= 0) return 1
-  return Math.min(1, voxel.width / assetW, voxel.depth / assetD)
+export function objectVoxelBottomFootprint(cells: ReadonlyArray<CollectedCell>): VoxelBottomFootprint {
+  const bounds = objectVoxelBottomBounds(cells)
+  return { width: bounds.width, depth: bounds.depth }
 }
 
 export function objectFootprintAnchorPoint(cells: ReadonlyArray<CollectedCell>): { x: number; y: number } {
@@ -293,25 +282,26 @@ export function objectFootprintAnchorPoint(cells: ReadonlyArray<CollectedCell>):
   }
 }
 
+/**
+ * Object sprite rect at fixed 16 PPU (no scaling). Bottom edge on `anchorPoint`
+ * (voxel bottom anchor); horizontal pivot from library anchorX.
+ */
 export function objectSpriteGridRect(
   cell: CollectedCell,
   img: HTMLImageElement,
   anchor: { x: number; y: number } | undefined,
   anchorPoint?: { x: number; y: number },
-  footprintScale = 1,
 ): ObjectSpriteGridRect {
   const natW = img.naturalWidth || img.width || TEXTURE_PPU
   const natH = img.naturalHeight || img.height || TEXTURE_PPU
-  const scale = footprintScale > 0 && footprintScale <= 1 ? footprintScale : 1
-  const w = (natW / TEXTURE_PPU) * scale
-  const h = (natH / TEXTURE_PPU) * scale
+  const w = natW / TEXTURE_PPU
+  const h = natH / TEXTURE_PPU
   const ax = anchor?.x ?? 0.5
-  const ay = anchor?.y ?? 0.5
   const anchorX = anchorPoint?.x ?? cell.x + 0.5
   const anchorY = anchorPoint?.y ?? objectSpriteAnchorScreenY(cell)
   return {
     x: anchorX - ax * w,
-    y: anchorY - (1 - ay) * h,
+    y: anchorY - h,
     w,
     h,
   }
@@ -323,6 +313,19 @@ export function objectSpriteAnchorScreenY(cell: CollectedCell): number {
 
 export function objectSpriteAnchorDepthY(cell: CollectedCell): number {
   return cell.y
+}
+
+/**
+ * Painter-sort y for a billboard object sprite. Object rects live in screen-row
+ * space (anchor uses y-z); tiles at z=0 sort by world y which equals their front
+ * screen row. Use the sprite's front-most screen row so ground in front of the
+ * footprint (world y > footprintDepthY) does not paint over the facade.
+ */
+export function objectSpritePainterSortY(
+  rect: ObjectSpriteGridRect,
+  footprintDepthY: number,
+): number {
+  return Math.max(footprintDepthY, rect.y + rect.h)
 }
 
 function drawSprite(

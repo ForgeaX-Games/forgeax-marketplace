@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path'
 import { broadcastToClients } from '../routes/ws.js'
 import { getActiveProjectDir } from '../runtime.js'
 import { deriveAliasMeta, type AliasMeta, type AssetRecord } from './service.js'
-import { EXPORTED_TILE_GROUP, composeRendererAlias } from './privateStore.js'
+import { composeRendererAlias } from './privateStore.js'
 
 /** One asset's entry in `<sandbox>/index.json`, written by asset2d:publishToGame. */
 interface GameTextureDescriptor {
@@ -43,7 +43,10 @@ interface GameTextureDescriptor {
 // The bound sandbox `textures/` dir (absolute). Set by `scene:library.useGameTextures`
 // (resolved from the host tool process's cwd). Cached in-process + persisted to a
 // small ref file under the active project so it survives a backend restart.
+// `boundForProjectDir` tracks which project's ref file `boundDir` came from —
+// each scene project points at its own `.forgeax/games/<slug>/textures/` tree.
 let boundDir: string | null = null
+let boundForProjectDir: string | null = null
 let watchedDir: string | null = null
 let sandboxWatcher: FSWatcher | null = null
 let sandboxDebounce: ReturnType<typeof setTimeout> | null = null
@@ -152,14 +155,33 @@ async function persistGameTexturesDir(dir: string): Promise<void> {
 
 export async function setGameTexturesDir(dir: string): Promise<void> {
   boundDir = dir
+  boundForProjectDir = await getActiveProjectDir()
   startGameSandboxWatcher(dir)
   await persistGameTexturesDir(dir)
 }
 
+/** Drop the in-process sandbox binding (e.g. before re-reading another project's ref). */
+export function clearGameTexturesBinding(): void {
+  boundDir = null
+  boundForProjectDir = null
+  stopGameSandboxWatcher()
+}
+
+/** Re-read the viewing project's `.game-textures-dir` ref after a project switch. */
+export async function reloadGameTexturesBinding(): Promise<string | null> {
+  clearGameTexturesBinding()
+  return getGameTexturesDir()
+}
+
 export async function getGameTexturesDir(): Promise<string | null> {
+  const projDir = await getActiveProjectDir()
+  if (boundForProjectDir !== projDir) {
+    clearGameTexturesBinding()
+    boundForProjectDir = projDir
+  }
   if (boundDir) return boundDir
   try {
-    const ref = join(await getActiveProjectDir(), REF_FILE)
+    const ref = join(projDir, REF_FILE)
     if (existsSync(ref)) {
       const dir = readFileSync(ref, 'utf-8').trim()
       if (dir) {
@@ -198,7 +220,6 @@ function aliasOf(d: GameTextureDescriptor): string {
 }
 
 function toRecord(d: GameTextureDescriptor): AssetRecord {
-  const isTile = d.assetType === 'tile'
   return {
     id: `game-sandbox:${d.sha256}`,
     alias: aliasOf(d),
@@ -212,18 +233,16 @@ function toRecord(d: GameTextureDescriptor): AssetRecord {
     anchorY: d.anchorY ?? null,
     private: true,
     ...(d.geometryJson ? { geometryJson: d.geometryJson } : {}),
-    ...(isTile ? { assetKind: d.autotileKind ?? null, cropTypeOriginal: EXPORTED_TILE_GROUP } : {}),
   }
 }
 
 function toMeta(d: GameTextureDescriptor): AliasMeta {
-  const isTile = d.assetType === 'tile'
+  // aliasOf() already encodes the rule alias into the type field (idx 7) via
+  // composeRendererAlias, so deriveAliasMeta reads tileType straight from it.
   return deriveAliasMeta({
     alias: aliasOf(d),
     anchor_x: d.anchorX ?? null,
     anchor_y: d.anchorY ?? null,
-    asset_kind: isTile ? (d.autotileKind ?? null) : null,
-    crop_type_original: isTile ? EXPORTED_TILE_GROUP : null,
     width_px: d.widthPx ?? null,
     height_px: d.heightPx ?? null,
     geometry_json: d.geometryJson ?? null,
@@ -239,6 +258,41 @@ export async function listGameSandboxRecords(opts: { zone?: string; search?: str
   return loadDescriptors(dir)
     .filter((d) => !q || d.assetName.toLowerCase().includes(q) || aliasOf(d).toLowerCase().includes(q))
     .map(toRecord)
+}
+
+/** Read a project's persisted game-sandbox textures dir without touching the in-process binding. */
+export function readGameTexturesDirRef(projDir: string): string | null {
+  try {
+    const ref = join(projDir, REF_FILE)
+    if (existsSync(ref)) {
+      const dir = readFileSync(ref, 'utf-8').trim()
+      if (dir) return dir
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+/** Renderer matching-pool metas for one project's sandbox (zone `raw` only). */
+export function gameSandboxAliasMetasForProjectDir(projDir: string, zone: string): AliasMeta[] {
+  if (zone !== 'raw') return []
+  const dir = readGameTexturesDirRef(projDir)
+  if (!dir) return []
+  return loadDescriptors(dir).map(toMeta)
+}
+
+/** Disk path of a sandbox blob for a composed alias within one project, or null. */
+export function resolveGameSandboxBlobByAliasForProjectDir(
+  projDir: string,
+  alias: string,
+): { path: string; mimeType: string } | null {
+  const dir = readGameTexturesDirRef(projDir)
+  if (!dir) return null
+  const d = loadDescriptors(dir).find((x) => aliasOf(x) === alias)
+  if (!d) return null
+  const path = join(dir, d.file)
+  return existsSync(path) ? { path, mimeType: d.mimeType } : null
 }
 
 /** Renderer matching-pool metas for the sandbox (zone `raw` only). */

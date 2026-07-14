@@ -8,7 +8,7 @@
  *
  * Imported via the `@server-lib/character-forge` tsconfig path alias.
  * Previously this lived at `packages/marketplace/plugins/wb-character-forge/src/`
- * and was imported as `@forgeax-plugin/wb-character-forge` — the plugin shell was
+ * and was imported as `@forgeax-extension/wb-character-forge` — the plugin shell was
  * removed in 2026-05-21 Phase 6 (see docs/v2-vision/modules/16-three-pane-embedding.md).
  */
 

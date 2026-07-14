@@ -42,7 +42,7 @@ function makeAnimSnapshot(): PluginSnapshot {
       issues: [],
       tools: [
         {
-          pluginId: '@forgeax-plugin/wb-anim',
+          pluginId: '@forgeax-extension/wb-anim',
           layer: 'L0',
           toolId: 'anim:generate-spine',
           exposedToAI: true,
@@ -51,7 +51,7 @@ function makeAnimSnapshot(): PluginSnapshot {
           pluginDir: '/fake/wb-anim',
         },
         {
-          pluginId: '@forgeax-plugin/wb-anim',
+          pluginId: '@forgeax-extension/wb-anim',
           layer: 'L0',
           toolId: 'anim:generate-video',
           exposedToAI: true,

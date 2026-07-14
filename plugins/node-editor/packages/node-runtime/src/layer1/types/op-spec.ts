@@ -115,6 +115,15 @@ export interface ExecutionContext {
    * — never written into node.params — so it cannot collide with user params.
    */
   connectionInference?: { access?: OpAccess; type?: string }
+  /**
+   * When `'summary'`, per-node failure lines are collected in `execFailures`
+   * instead of being logged immediately — the walker emits one rollup at the
+   * end. Used by clear-cache + full re-execute so expected cascade failures
+   * do not flood the server console.
+   */
+  execLogMode?: 'normal' | 'summary'
+  /** Populated during a summary-mode run; read by the walker after the closure. */
+  execFailures?: string[]
 }
 
 /** Argument bag passed to op.execute — keys match input port + param names. */

@@ -15,9 +15,9 @@
  * baked-specific DFS (`projectBaked`) that keeps cell-less nodes and surfaces
  * each layer's bound asset (attributes.asset_name / asset_alias / asset_type) inline.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { getActiveProjectDir } from '../runtime.js'
+import { getActiveProjectDir, getProjectDir } from '../runtime.js'
 import {
   emptyTree,
   readNode,
@@ -32,6 +32,12 @@ import {
 const FILE = 'baked-scene.json'
 const HISTORY_FILE = 'baked-scene-history.json'
 const DEFAULT_HISTORY_LIMIT = 50
+/** Skip undo snapshots larger than this (prevents Invalid string length on history file). */
+const MAX_HISTORY_SNAPSHOT_BYTES = 2_000_000
+/** Summary/browse must never parse multi‑MB baked trees (blocks the whole backend). */
+const MAX_SUMMARY_BAKED_BYTES = 8 * 1024 * 1024
+/** History metadata-only reads skip corrupt/huge files without JSON.parse. */
+const MAX_HISTORY_FILE_BYTES = 4 * 1024 * 1024
 
 // One cached tree per project file path (the active project rarely changes
 // within a process; switching projects just resolves a different path).
@@ -174,7 +180,13 @@ function pickRicher(a: SceneNodeSnapshot, b: SceneNodeSnapshot): SceneNodeSnapsh
 /** Recursively re-sort children by name + merge duplicate same-name siblings,
  *  preserving the pre-merge display order via `__order`. Idempotent. Exported
  *  for one-off maintenance migration of already-corrupted project files. */
-export function healTree(node: SceneNodeSnapshot): SceneNodeSnapshot {
+export function healTree(node: SceneNodeSnapshot, visited: WeakSet<object> = new WeakSet()): SceneNodeSnapshot {
+  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——vendor 的不可变 tree API 理论
+  // 上不会产生结构环,但这里不依赖那份保证。撞到已下探过的节点引用直接原样返回
+  // (放弃继续 heal 这一层,而不是无限递归),把潜在死循环/栈溢出降级成"该重复
+  // 子树跳过愈合",绝不挂死 backend。
+  if (visited.has(node)) return node
+  visited.add(node)
   const kids = node.children ?? []
   // Current display order (mirrors projectBaked's sort) — captured BEFORE dedup
   // so survivors keep their place.
@@ -198,7 +210,7 @@ export function healTree(node: SceneNodeSnapshot): SceneNodeSnapshot {
 
   const nextChildren = [...merged.values()]
     .map((child) => {
-      const healedChild = healTree(child)
+      const healedChild = healTree(child, visited)
       const rank = rankByName.get(child.name)!
       const withOrder = orderRank(healedChild) === rank
         ? healedChild
@@ -249,6 +261,11 @@ function loadHistory(projDir: string): BakedHistoryFile {
   const path = historyPath(projDir)
   if (!existsSync(path)) return defaultHistory()
   try {
+    const size = statSync(path).size
+    if (size > MAX_HISTORY_FILE_BYTES) {
+      console.warn(`[baked] history file ${size} bytes — too large, treating as empty (truncate ${path})`)
+      return defaultHistory()
+    }
     return normalizeHistory(JSON.parse(readFileSync(path, 'utf-8')))
   } catch {
     return defaultHistory()
@@ -287,6 +304,11 @@ function historyStatus(history: BakedHistoryFile): BakedHistoryStatus {
 }
 
 function pushBakedHistory(projDir: string, entry: Omit<BakedHistoryEntry, 'id' | 'createdAt'>): void {
+  const beforeBytes = JSON.stringify(entry.before).length
+  const afterBytes = JSON.stringify(entry.after).length
+  if (beforeBytes + afterBytes > MAX_HISTORY_SNAPSHOT_BYTES) {
+    return
+  }
   const history = loadHistory(projDir)
   const next: BakedHistoryFile = {
     version: 1,
@@ -304,17 +326,28 @@ function pushBakedHistory(projDir: string, entry: Omit<BakedHistoryEntry, 'id' |
   persistHistory(projDir, next)
 }
 
-async function commitBakedMutation(
+async function commitBakedMutationForDir(
+  projDir: string,
   meta: BakedMutationMeta,
   apply: (tree: SceneNodeSnapshot, projDir: string) => SceneNodeSnapshot,
+  opts?: { recordHistory?: boolean },
 ): Promise<{ before: SceneNodeSnapshot; after: SceneNodeSnapshot; recorded: boolean }> {
-  const projDir = await getActiveProjectDir()
   const before = load(projDir)
   const after = apply(before, projDir)
   if (sceneEqual(before, after)) return { before, after, recorded: false }
   persist(projDir, after)
-  pushBakedHistory(projDir, { ...meta, before, after })
-  return { before, after, recorded: true }
+  if (opts?.recordHistory !== false) {
+    pushBakedHistory(projDir, { ...meta, before, after })
+    return { before, after, recorded: true }
+  }
+  return { before, after, recorded: false }
+}
+
+async function commitBakedMutation(
+  meta: BakedMutationMeta,
+  apply: (tree: SceneNodeSnapshot, projDir: string) => SceneNodeSnapshot,
+): Promise<{ before: SceneNodeSnapshot; after: SceneNodeSnapshot; recorded: boolean }> {
+  return commitBakedMutationForDir(await getActiveProjectDir(), meta, apply)
 }
 
 function nextVersion(tree: SceneNodeSnapshot): number {
@@ -330,7 +363,12 @@ function attrString(attrs: Readonly<Record<string, unknown>> | undefined, key: s
  *  added (cell-less) layer still shows in the panel. value is 1-based DFS order. */
 function projectBaked(tree: SceneNodeSnapshot): BakedLayer[] {
   const out: BakedLayer[] = []
+  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——撞到已下探过的节点引用直接
+  // 跳过(不再递归),绝不因潜在结构环挂死 backend。
+  const visited = new WeakSet<object>()
   const walk = (node: SceneNodeSnapshot): void => {
+    if (visited.has(node)) return
+    visited.add(node)
     if (node.path !== '/') {
       out.push({
         nodePath: node.path,
@@ -369,6 +407,55 @@ function projectBaked(tree: SceneNodeSnapshot): BakedLayer[] {
   }
   walk(tree)
   return out
+}
+
+export type BakedLayerSummary = Omit<BakedLayer, 'cells'> & { cellCount: number }
+
+/** Like projectBaked but never copies voxel cells — browse/summary only. */
+function projectBakedSummary(tree: SceneNodeSnapshot): BakedLayerSummary[] {
+  const out: BakedLayerSummary[] = []
+  const visited = new WeakSet<object>()
+  const walk = (node: SceneNodeSnapshot): void => {
+    if (visited.has(node)) return
+    visited.add(node)
+    if (node.path !== '/') {
+      out.push({
+        nodePath: node.path,
+        nodeName: node.name === '' ? '/' : node.name,
+        value: out.length + 1,
+        schema: node.schema,
+        assetName: attrString(node.attributes, 'asset_name') ?? '',
+        assetAlias: attrString(node.attributes, 'asset_alias'),
+        assetType: attrString(node.attributes, 'asset_type') ?? node.schema,
+        cellCount: node.cells?.length ?? 0,
+        attributes: { ...(node.attributes ?? {}) },
+        version: node.version,
+        ...(node.bounds ? { bounds: { width: node.bounds.width, height: node.bounds.height } } : {}),
+      })
+    }
+    const ordered = [...node.children].sort((a, b) => {
+      const ra = orderRank(a)
+      const rb = orderRank(b)
+      if (ra !== undefined && rb !== undefined && ra !== rb) return ra - rb
+      if (ra !== undefined && rb === undefined) return -1
+      if (ra === undefined && rb !== undefined) return 1
+      if (a.version !== b.version) return a.version - b.version
+      return a.name.localeCompare(b.name)
+    })
+    for (const child of ordered) walk(child)
+  }
+  walk(tree)
+  return out
+}
+
+function bakedSceneBytes(projDir: string): number {
+  const path = filePath(projDir)
+  if (!existsSync(path)) return 0
+  try {
+    return statSync(path).size
+  } catch {
+    return 0
+  }
 }
 
 function sanitizeSegment(name: string): string {
@@ -476,8 +563,51 @@ function nextLayerName(parent: SceneNodeSnapshot): string {
 
 // ── Public API (all resolve the active project's file) ──────────────────────
 
+export function listBakedLayersForProjectDir(projDir: string): BakedLayer[] {
+  return projectBaked(load(projDir))
+}
+
+export interface BakedLayersSummaryResult {
+  layers: BakedLayerSummary[]
+  /** True when baked-scene.json is too large to parse on the browse path. */
+  truncated?: boolean
+}
+
+/** Layer metadata without voxel cells — for UI browse / project switch. */
+export function listBakedLayersSummaryForProjectDir(projDir: string): BakedLayersSummaryResult {
+  const bytes = bakedSceneBytes(projDir)
+  if (bytes > MAX_SUMMARY_BAKED_BYTES) {
+    console.warn(
+      `[baked] summary skipped: baked-scene.json ${bytes} bytes (limit ${MAX_SUMMARY_BAKED_BYTES}) — UI browse returns empty; run replace bake to rebuild`,
+    )
+    return { layers: [], truncated: true }
+  }
+  return { layers: projectBakedSummary(load(projDir)) }
+}
+
+/** Wipe baked tree + history (orchestration replace bake). */
+export function clearBakedSceneForProjectDir(projDir: string): void {
+  const path = filePath(projDir)
+  cache.delete(path)
+  persist(projDir, emptyTree())
+  persistHistory(projDir, defaultHistory())
+}
+
+export async function listBakedLayersForProject(projectId: string): Promise<BakedLayer[]> {
+  const projDir = await getProjectDir(projectId)
+  if (!projDir) throw new Error(`project not found: ${projectId}`)
+  return listBakedLayersForProjectDir(projDir)
+}
+
 export async function listBakedLayers(): Promise<BakedLayer[]> {
-  return projectBaked(load(await getActiveProjectDir()))
+  const projDir = await getActiveProjectDir()
+  const bytes = bakedSceneBytes(projDir)
+  if (bytes > MAX_SUMMARY_BAKED_BYTES) {
+    throw new Error(
+      `baked-scene.json too large (${bytes} bytes) — clear or replace before loading full cells`,
+    )
+  }
+  return listBakedLayersForProjectDir(projDir)
 }
 
 /** A child path under `parentPath` that does not collide with an existing node.
@@ -687,16 +817,29 @@ export async function removeBakedLayer(path: string): Promise<void> {
  * together, keeping its internal structure. Layers must arrive in DFS order
  * (parent before child) so ascending versions reflect their order.
  */
-export async function bakeLayers(
+export async function bakeLayersForProject(
+  projectId: string,
   layers: ReadonlyArray<{ nodePath?: string; nodeName?: string; cells: readonly BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>,
+  opts?: { replace?: boolean; recordHistory?: boolean },
 ): Promise<string[]> {
-  const baseTree = load(await getActiveProjectDir())
-  let tree = baseTree
-  // Per top-level segment: a stable remap (collision-free against existing baked
-  // nodes + other roots in this batch). Children inherit their root's remap.
+  const projDir = await getProjectDir(projectId)
+  if (!projDir) throw new Error(`project not found: ${projectId}`)
+  return bakeLayersForProjectDir(projDir, layers, opts)
+}
+
+async function bakeLayersForProjectDir(
+  projDir: string,
+  layers: ReadonlyArray<{ nodePath?: string; nodeName?: string; cells: readonly BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>,
+  opts?: { replace?: boolean; recordHistory?: boolean },
+): Promise<string[]> {
+  if (opts?.replace) {
+    clearBakedSceneForProjectDir(projDir)
+  }
+  let tree = opts?.replace ? emptyTree() : load(projDir)
   const rename = new Map<string, string>()
   const reserved = new Set<string>()
   const remapPath = (rawPath: string): string => {
+    if (opts?.replace) return rawPath
     const segs = splitPath(rawPath)
     if (segs.length === 0) return rawPath
     const head = segs[0]!
@@ -743,12 +886,18 @@ export async function bakeLayers(
     tree = setAttribute(tree, path, BAKED_ORDER_ATTR, nextRankUnder(parentPathOf(path)), nextVersion(tree))
     created.push(path)
   }
-  await commitBakedMutation({
-    label: 'Bake selected layers',
+  await commitBakedMutationForDir(projDir, {
+    label: opts?.replace ? 'Replace baked from execute' : 'Bake selected layers',
     tool: 'bake',
     summary: { paths: created },
-  }, () => tree)
+  }, () => tree, { recordHistory: opts?.recordHistory ?? !opts?.replace })
   return created
+}
+
+export async function bakeLayers(
+  layers: ReadonlyArray<{ nodePath?: string; nodeName?: string; cells: readonly BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>,
+): Promise<string[]> {
+  return bakeLayersForProjectDir(await getActiveProjectDir(), layers)
 }
 
 // ── Reorder / reparent (drag-and-drop in the Editable panel) ────────────────

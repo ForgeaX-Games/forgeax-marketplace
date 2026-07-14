@@ -20,6 +20,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getActiveProjectDir } from '../runtime.js'
+import { SLOT } from './aliasName.js'
 import { validateTileAtlasDimensions } from './tileRuleAtlasValidation.js'
 
 /** A user-owned asset record. Superset of the base `AssetRecord` with origin/time
@@ -39,13 +40,11 @@ export interface PrivateAssetRecord {
   createdAt: string
   updatedAt: string
   private: true
-  /** Autotile rule binding for published tiles (e.g. `common_16`). Paired with
-   *  `cropTypeOriginal='瓦片组'` so `deriveAliasMeta` resolves `tileType` to the
-   *  exact rule — covers rules that the field[8] legacy map can't (slope_9, …). */
+  /** Autotile rule binding for published tiles (e.g. `common_16`). A non-empty,
+   *  non-`asset`/`object` value marks an exported tile group, so `deriveAliasMeta`
+   *  reads it as the exact rule — covers rules the field[8] legacy map can't
+   *  reach (slope_9, …). Unset for cutout objects. */
   assetKind?: string
-  /** Marks an exported tile group so `deriveAliasMeta` reads `assetKind` as the
-   *  rule. Set to `瓦片组` for tiles published via the texture bridge. */
-  cropTypeOriginal?: string
   /** Optional placement geometry JSON (object_height / collision_mask) for
    *  object assets, mirrored from the base library's `geometry_json`. */
   geometryJson?: string
@@ -208,6 +207,15 @@ export interface ImportInput {
    *  so the frontend reads the File as base64 and POSTs JSON). */
   dataBase64: string
   zone?: string
+  /** Prefab / pipeline provenance — idempotent re-import by this key. */
+  sourceBlobId?: string
+  anchorX?: number | null
+  anchorY?: number | null
+  geometryJson?: string
+  assetKind?: string
+  cropTypeOriginal?: string
+  /** Override `source` discriminator (default `manual`). */
+  sourceTag?: 'manual' | 'pipeline' | 'ai_gen'
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -225,34 +233,53 @@ function guessMime(filename: string, given?: string): string {
   return MIME_BY_EXT[ext] ?? 'application/octet-stream'
 }
 
-/** Import one file as a private staging asset. The alias is the raw filename
- *  (non-standard, i.e. no bracket fields) — the repair flow can later normalize
- *  it into the `[..]_[..]_…` convention. */
+/** Import one file as a private asset. The alias is the raw filename
+ *  (bracket-field exports keep their full alias as-is). */
 export async function importPrivateAsset(input: ImportInput): Promise<PrivateAssetRecord> {
   const projDir = await getActiveProjectDir()
   const list = load(projDir)
   const bytes = Buffer.from(input.dataBase64, 'base64')
+  if (bytes.length === 0) throw new Error('empty asset bytes (dataBase64)')
   const sha = createHash('sha256').update(bytes).digest('hex')
   writeBlob(projDir, sha, bytes)
   const dims = sniffDimensions(bytes)
   const now = new Date().toISOString()
   const alias = input.filename.trim() || `import-${sha.slice(0, 8)}`
-  const rec: PrivateAssetRecord = {
-    id: randomUUID(),
+  const zone = input.zone ?? STAGING_ZONE
+
+  const fields = {
     alias,
-    zone: input.zone ?? STAGING_ZONE,
+    zone,
     blobSha256: sha,
     mimeType: guessMime(input.filename, input.mimeType),
     sizeBytes: bytes.length,
     ...(dims.widthPx ? { widthPx: dims.widthPx } : {}),
     ...(dims.heightPx ? { heightPx: dims.heightPx } : {}),
-    anchorX: null,
-    anchorY: null,
-    source: 'manual',
-    createdAt: now,
+    anchorX: input.anchorX ?? null,
+    anchorY: input.anchorY ?? null,
+    source: input.sourceTag ?? ('manual' as const),
     updatedAt: now,
-    private: true,
+    private: true as const,
+    ...(input.geometryJson ? { geometryJson: input.geometryJson } : {}),
+    ...(input.assetKind ? { assetKind: input.assetKind } : {}),
+    ...(input.cropTypeOriginal ? { cropTypeOriginal: input.cropTypeOriginal } : {}),
+    ...(input.sourceBlobId ? { sourceBlobId: input.sourceBlobId } : {}),
   }
+
+  const idx = input.sourceBlobId
+    ? list.findIndex((r) => r.sourceBlobId === input.sourceBlobId)
+    : list.findIndex((r) => r.alias === alias && r.zone === zone)
+  if (idx >= 0) {
+    const prev = list[idx]
+    const next: PrivateAssetRecord = { ...prev, ...fields }
+    const copy = [...list]
+    copy[idx] = next
+    persist(projDir, copy)
+    gcBlob(projDir, prev.blobSha256, copy)
+    return next
+  }
+
+  const rec: PrivateAssetRecord = { id: randomUUID(), createdAt: now, ...fields }
   persist(projDir, [...list, rec])
   return rec
 }
@@ -266,13 +293,12 @@ export async function importPrivateAsset(input: ImportInput): Promise<PrivateAss
 // rule → land in raw → record provenance), so the orchestration skill never
 // has to hand-stitch import + repair + field-edit + move.
 
-export const CUTOUT_TYPE_FIELD = '抠图'
-export const EXPORTED_TILE_GROUP = '瓦片组'
+export const CUTOUT_TYPE_FIELD = 'asset'
 
-/** Compose the renderer's 13-bracket alias from a semantic descriptor. Shared by
+/** Compose the renderer's 12-bracket alias from a semantic descriptor. Shared by
  *  the private publish bridge AND the shared-game-sandbox reader so a texture
- *  matches identically no matter which source surfaced it. field4=item-name,
- *  field8=autotile rule (tile) | 抠图 (object). */
+ *  matches identically no matter which source surfaced it. field2=item-name,
+ *  field7=autotile rule (tile) | asset (cutout object). */
 export function composeRendererAlias(input: {
   assetName: string
   assetType: 'tile' | 'object'
@@ -284,13 +310,13 @@ export function composeRendererAlias(input: {
     const i = Number(idx)
     if (Number.isInteger(i) && i >= 0 && i < 13) fields[i] = String(val).trim()
   }
-  fields[4] = input.assetName.trim()
-  fields[8] = input.assetType === 'tile' ? (input.autotileKind ?? '').trim() : CUTOUT_TYPE_FIELD
+  fields[2] = input.assetName.trim()
+  fields[7] = input.assetType === 'tile' ? (input.autotileKind ?? '').trim() : CUTOUT_TYPE_FIELD
   return fields.map((f) => `[${f}]`).join('_') + '.png'
 }
 
 export interface PublishExternalInput {
-  /** field[4] semantic item-name the renderer matches on (e.g. `grassland`). */
+  /** field[2] semantic item-name the renderer matches on (e.g. `grassland`). */
   assetName: string
   /** `tile` → non-cutout pool + autotile rule; `object` → cutout pool. */
   assetType: 'tile' | 'object'
@@ -305,12 +331,12 @@ export interface PublishExternalInput {
   anchorY?: number | null
   /** Optional placement geometry JSON (object_height / collision_mask). */
   geometryJson?: string
-  /** Extra bracket fields by 0-based index (place/style/scene/…). field 4 and 8
-   *  are owned by this bridge and ignored here. */
+  /** Extra bracket fields by 0-based index (index/place/style/…). field 2 (name)
+   *  and field 7 (type/rule) are owned by this bridge and ignored here. */
   extraFields?: Record<number, string>
 }
 
-/** 13 bracket fields with item-name (4) + type (8) set, plus any extras. */
+/** 13 bracket fields with item-name (2) + type (7) set, plus any extras. */
 function composePublishAlias(input: PublishExternalInput): string {
   return composeRendererAlias({
     assetName: input.assetName,
@@ -360,7 +386,7 @@ export async function publishExternalAsset(input: PublishExternalInput): Promise
     source: 'pipeline' as const,
     updatedAt: now,
     private: true as const,
-    ...(isTile ? { assetKind: input.autotileKind!.trim(), cropTypeOriginal: EXPORTED_TILE_GROUP } : {}),
+    ...(isTile ? { assetKind: input.autotileKind!.trim() } : {}),
     ...(input.geometryJson ? { geometryJson: input.geometryJson } : {}),
     ...(input.sourceBlobId ? { sourceBlobId: input.sourceBlobId } : {}),
   }
@@ -447,8 +473,6 @@ export async function deletePrivate(id: string): Promise<boolean> {
   return true
 }
 
-// ── Filtering / faceting (mirrors service.ts semantics for the merge) ────────
-
 /** Bracket fields of an alias, trimmed. `[a]_[]_[b]` → ['a','','b']. */
 export function bracketFields(alias: string): string[] {
   const out: string[] = []
@@ -463,18 +487,24 @@ function fieldAt(alias: string, idx: number): string {
   return idx < f.length ? f[idx] : ''
 }
 
+type PrivateFacetScheme = 'type' | 'place' | 'style' | 'size' | 'index'
+
 export interface PrivateFilter {
   zone: string
   search?: string
   fieldFilters?: Array<{ fieldIdx: number; value: string }>
-  by?: 'type' | 'place' | 'style' | 'size' | 'scene'
+  by?: PrivateFacetScheme
   value?: string
   parent?: string
 }
 
-const FIELD_INDEX: Record<string, number> = { type: 8, style: 6, size: 9, scene: 0 }
-const PLACE_INDOOR = 1
-const PLACE_ROOM = 3
+const FIELD_INDEX: Record<string, number> = {
+  type: SLOT.cropType,
+  style: SLOT.themeStyle,
+  size: SLOT.size,
+  index: SLOT.index,
+}
+const PLACE_INDOOR = SLOT.indoorOutdoor
 const UNCLASSIFIED = '__none__'
 
 function isBlank(v: string): boolean {
@@ -484,37 +514,55 @@ function isBlank(v: string): boolean {
 function matchesFacet(alias: string, by?: string, value?: string, parent?: string): boolean {
   if (!by || value == null) return true
   if (by === 'place') {
-    if (parent != null) {
-      const lvl1 = fieldAt(alias, PLACE_INDOOR)
-      const lvl2 = fieldAt(alias, PLACE_ROOM)
-      const okParent = parent === UNCLASSIFIED ? isBlank(lvl1) : lvl1 === parent
-      const okVal = value === UNCLASSIFIED ? isBlank(lvl2) : lvl2 === value
-      return okParent && okVal
-    }
+    // single-level: match 室内/室外 only (parent kept for API compat)
+    const target = parent != null ? parent : value
     const lvl1 = fieldAt(alias, PLACE_INDOOR)
-    return value === UNCLASSIFIED ? isBlank(lvl1) : lvl1 === value
+    return target === UNCLASSIFIED ? isBlank(lvl1) : lvl1 === target
   }
-  if (by === 'scene') {
-    const raw = fieldAt(alias, FIELD_INDEX.scene)
+  if (by === 'index') {
+    const raw = fieldAt(alias, FIELD_INDEX.index)
     if (value === UNCLASSIFIED) return isBlank(raw)
-    return raw.split('-').map((s) => s.trim()).includes(value)
+    // Hierarchy leaf = whole subtree: the node itself or any descendant.
+    return raw === value || raw.startsWith(`${value}-`)
   }
   const f = fieldAt(alias, FIELD_INDEX[by])
   return value === UNCLASSIFIED ? isBlank(f) : f === value
 }
 
 /** Private records matching a list query, sorted by alias (same order as base). */
-export async function filterPrivate(q: PrivateFilter): Promise<PrivateAssetRecord[]> {
-  const list = await listAllPrivate()
+function filterPrivateList(list: PrivateAssetRecord[], q: PrivateFilter): PrivateAssetRecord[] {
   const term = (q.search ?? '').trim().toLowerCase()
   return list
     .filter((r) => r.zone === q.zone)
-    .filter((r) => (term ? r.alias.toLowerCase().includes(term) : true))
+    .filter((r) => {
+      if (!term) return true
+      const alias = r.alias.toLowerCase()
+      const itemName = fieldAt(r.alias, SLOT.name).toLowerCase()
+      return alias.includes(term) || itemName.includes(term)
+    })
     .filter((r) =>
       (q.fieldFilters ?? []).every((ff) => fieldAt(r.alias, ff.fieldIdx).includes(ff.value.trim())),
     )
     .filter((r) => matchesFacet(r.alias, q.by, q.value, q.parent))
     .sort((a, b) => a.alias.localeCompare(b.alias))
+}
+
+export function filterPrivateForProjectDir(projDir: string, q: PrivateFilter): PrivateAssetRecord[] {
+  return filterPrivateList(load(projDir), q)
+}
+
+/** All private records across every zone except trash (renderer matching pool). */
+export function filterPrivateAllZonesForProjectDir(projDir: string): PrivateAssetRecord[] {
+  return load(projDir).filter((r) => r.zone !== TRASH_ZONE)
+}
+
+export function getPrivateByAliasForProjectDir(projDir: string, alias: string): PrivateAssetRecord | null {
+  const list = load(projDir)
+  return list.find((r) => r.alias === alias && r.zone !== TRASH_ZONE) ?? list.find((r) => r.alias === alias) ?? null
+}
+
+export async function filterPrivate(q: PrivateFilter): Promise<PrivateAssetRecord[]> {
+  return filterPrivateList(await listAllPrivate(), q)
 }
 
 export interface PrivateFacetItem {
@@ -527,32 +575,26 @@ export interface PrivateFacetItem {
 /** Bucket private records of a zone into taxonomy folders (mirrors service.listFacets). */
 export async function facetPrivate(
   zone: string,
-  by: 'type' | 'place' | 'style' | 'size' | 'scene',
+  by: PrivateFacetScheme,
   parent?: string,
 ): Promise<PrivateFacetItem[]> {
+  // place is single-level now (小区域/roomType removed): drill-in has no sub-rooms.
+  if (by === 'place' && parent != null) return []
   const list = (await listAllPrivate()).filter((r) => r.zone === zone)
-  const groupIdx = by === 'place' ? (parent != null ? PLACE_ROOM : PLACE_INDOOR) : FIELD_INDEX[by]
-  const multi = by === 'scene'
+  // `index` is a `-`-joined hierarchy: enumerate direct child segments under `parent`.
+  if (by === 'index') return facetPrivateIndexChildren(list, parent)
+  const groupIdx = by === 'place' ? PLACE_INDOOR : FIELD_INDEX[by]
   const buckets = new Map<string, { count: number; samples: string[] }>()
   for (const r of list) {
-    if (by === 'place' && parent != null) {
-      const lvl1 = fieldAt(r.alias, PLACE_INDOOR)
-      const ok = parent === UNCLASSIFIED ? isBlank(lvl1) : lvl1 === parent
-      if (!ok) continue
-    }
     const raw = fieldAt(r.alias, groupIdx)
-    const tokens = multi ? raw.split('-').map((s) => s.trim()).filter((s) => s.length > 0) : [raw]
-    const keys = tokens.length > 0 ? tokens : ['']
-    for (const k of keys) {
-      const value = isBlank(k) ? UNCLASSIFIED : k
-      let entry = buckets.get(value)
-      if (!entry) {
-        entry = { count: 0, samples: [] }
-        buckets.set(value, entry)
-      }
-      entry.count += 1
-      if (entry.samples.length < 4) entry.samples.push(r.alias)
+    const value = isBlank(raw) ? UNCLASSIFIED : raw
+    let entry = buckets.get(value)
+    if (!entry) {
+      entry = { count: 0, samples: [] }
+      buckets.set(value, entry)
     }
+    entry.count += 1
+    if (entry.samples.length < 4) entry.samples.push(r.alias)
   }
   return [...buckets.entries()].map(([value, e]) => ({
     value,
@@ -560,6 +602,36 @@ export async function facetPrivate(
     count: e.count,
     samples: e.samples,
   }))
+}
+
+/** Direct child segments of the `index` (f0) hierarchy under `parent` (mirrors service.facetIndexChildren). */
+function facetPrivateIndexChildren(list: PrivateAssetRecord[], parent?: string): PrivateFacetItem[] {
+  const prefix = (parent ?? '').trim()
+  const buckets = new Map<string, { label: string; count: number; samples: string[] }>()
+  for (const r of list) {
+    const f0 = fieldAt(r.alias, 0)
+    let rest: string
+    if (prefix) {
+      if (f0 === prefix || !f0.startsWith(`${prefix}-`)) continue
+      rest = f0.slice(prefix.length + 1)
+    } else if (isBlank(f0)) {
+      const entry = buckets.get(UNCLASSIFIED) ?? { label: '未分类', count: 0, samples: [] }
+      entry.count += 1
+      if (entry.samples.length < 4) entry.samples.push(r.alias)
+      buckets.set(UNCLASSIFIED, entry)
+      continue
+    } else {
+      rest = f0
+    }
+    const seg = rest.split('-')[0]
+    if (!seg) continue
+    const childPath = prefix ? `${prefix}-${seg}` : seg
+    const entry = buckets.get(childPath) ?? { label: seg, count: 0, samples: [] }
+    entry.count += 1
+    if (entry.samples.length < 4) entry.samples.push(r.alias)
+    buckets.set(childPath, entry)
+  }
+  return [...buckets.entries()].map(([value, e]) => ({ value, label: e.label, count: e.count, samples: e.samples }))
 }
 
 /** Per-zone aggregate counts of private records (library-info panel). */

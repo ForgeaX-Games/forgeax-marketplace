@@ -855,6 +855,9 @@ function buildStatementShape(
           ensureReplicadShape(buildRefShape(ctx, memo, stmt, 'b', byId, visiting), 'intersection'),
         );
       }
+      case 'fillet':
+      case 'chamfer':
+        return buildFilletChamferShape(ctx, memo, stmt, byId, visiting);
       case 'extrude':
         return buildExtrudeShape(ctx, stmt, byId);
       case 'extrude_with_holes':
@@ -931,6 +934,55 @@ function buildProfilePreviewShape(ctx: OpContext, stmt: Statement): BakeableShap
   const sketch = drawingFromPoints(ctx, profilePoints(stmt))
     .sketchOnPlane('XY', -PROFILE_PREVIEW_THICKNESS / 2) as unknown as SolidSketch;
   return sketch.extrude(PROFILE_PREVIEW_THICKNESS);
+}
+
+/** replicad Shape3D 的 fillet/chamfer 表面：第二参数是可选的边过滤回调。 */
+type EdgeFinder = { inDirection: (dir: [number, number, number]) => unknown };
+type FilletChamferShape = {
+  fillet: (radius: number, filter?: (e: EdgeFinder) => unknown) => BakeableShape;
+  chamfer: (radius: number, filter?: (e: EdgeFinder) => unknown) => BakeableShape;
+};
+
+/**
+ * fillet（圆角）/ chamfer（斜角）：对引用实体的边做半径 radius 的圆角或斜切。
+ *
+ * - 只作用于 OCCT 实体（ReplicadShape）；mesh-backed（pipe/sweep/section_loft）拒绝。
+ * - edges="vertical" 只倒平行 Z 的竖直边（复用零件 builder 的 `e.inDirection([0,0,1])`）；
+ *   edges="all"（默认）无过滤器，倒所有边。
+ * - OCCT 对过大半径 / 病态边集会抛异常 —— 包成 BakerError，交由 g_to_urdf 走 AABB 兜底。
+ */
+function buildFilletChamferShape(
+  ctx: OpContext,
+  memo: BakeBuildMemo,
+  stmt: Statement,
+  byId: ReadonlyMap<string, Statement>,
+  visiting: Set<string>,
+): BakeProduct {
+  const radius = readNumber(stmt.args.radius);
+  if (radius === undefined || radius <= 0) throw new BakerError(`${stmt.op}: radius must be positive`);
+  const edges = (readString(stmt.args.edges) ?? 'all').toLowerCase();
+  if (edges !== 'all' && edges !== 'vertical') {
+    throw new BakerError(`${stmt.op}: edges must be "all" or "vertical"`);
+  }
+  const solid = ensureReplicadShape(buildRefShape(ctx, memo, stmt, 'shape', byId, visiting), stmt.op);
+  const filter = edges === 'vertical'
+    ? (e: EdgeFinder) => e.inDirection([0, 0, 1])
+    : undefined;
+  const s = solid as unknown as FilletChamferShape;
+  try {
+    const result = stmt.op === 'chamfer' ? s.chamfer(radius, filter) : s.fillet(radius, filter);
+    safeDelete(solid);
+    return result;
+  } catch (e) {
+    safeDelete(solid);
+    const detail = e instanceof Error
+      ? (e.message || 'Error with no message')
+      : typeof e === 'number' ? `OCCT error code ${e}` : String(e);
+    throw new BakerError(
+      `${stmt.op}: OCCT failed (radius=${radius}, edges=${edges}) — ${detail}. ` +
+      `Try a smaller radius, or edges="vertical" to limit which edges are beveled.`,
+    );
+  }
 }
 
 function buildExtrudeShape(

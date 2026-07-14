@@ -5,6 +5,17 @@ import { useBakedLayers, refreshBakedLayers } from '../useBakedLayers'
 import { bakedApi } from '../bakedApi'
 import type { BakedLayerDTO } from '../bakedApi'
 import { hasLocalBakedLayerEdits, useRenderStore } from '../../store'
+import { writeEditMode } from '../../../surfaces/library/editToolbarBus'
+
+let mockEditMode = false
+vi.mock('../../../surfaces/library/editToolbarBus', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../surfaces/library/editToolbarBus')>()
+  return {
+    readEditMode: () => mockEditMode,
+    subscribeEditMode: actual.subscribeEditMode,
+    writeEditMode: actual.writeEditMode,
+  }
+})
 
 vi.mock('../bakedApi', () => ({
   bakedApi: {
@@ -28,6 +39,7 @@ class FakeWebSocket {
 
 describe('useBakedLayers', () => {
   beforeEach(() => {
+    mockEditMode = false
     useRenderStore.getState().reset()
     FakeWebSocket.last = null
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket)
@@ -39,7 +51,38 @@ describe('useBakedLayers', () => {
     vi.unstubAllGlobals()
   })
 
+  it('loads full baked cells when edit mode turns on in the same iframe', async () => {
+    vi.mocked(bakedApi.list)
+      .mockResolvedValueOnce([
+        { nodePath: '/Layer', nodeName: 'Layer', value: 1, assetName: 'grass', assetType: 'tile', cellCount: 5 },
+      ])
+      .mockResolvedValueOnce([
+        {
+          nodePath: '/Layer',
+          nodeName: 'Layer',
+          value: 1,
+          assetName: 'grass',
+          assetType: 'tile',
+          cells: [{ x: 1, y: 2, z: 0, token: 'grass' }],
+        },
+      ])
+
+    renderHook(() => useBakedLayers())
+    await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
+    expect(bakedApi.list).toHaveBeenLastCalledWith('summary')
+    expect(useRenderStore.getState().bakedLayers['baked:/Layer']?.cells).toEqual([])
+
+    writeEditMode(true)
+
+    await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(2))
+    expect(bakedApi.list).toHaveBeenLastCalledWith('full')
+    expect(useRenderStore.getState().bakedLayers['baked:/Layer']?.cells).toEqual([
+      { x: 1, y: 2, z: 0, token: 'grass' },
+    ])
+  })
+
   it('refreshes baked layers when the backend broadcasts baked:changed', async () => {
+    mockEditMode = true
     vi.mocked(bakedApi.list)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -110,7 +153,8 @@ describe('useBakedLayers', () => {
     ])
   })
 
-  it('clears dirty baked layers immediately when the workbench switches project', async () => {
+  it('keeps baked layers visible during project switch until the new fetch lands', async () => {
+    mockEditMode = true
     let resolveProjectList: (layers: BakedLayerDTO[]) => void = () => {}
     vi.mocked(bakedApi.list)
       .mockResolvedValueOnce([
@@ -140,15 +184,64 @@ describe('useBakedLayers', () => {
       }))
     })
 
-    expect(useRenderStore.getState().bakedLayers).toEqual({})
-    expect(useRenderStore.getState().activeBakedLayerKey).toBeNull()
+    // Stale-while-revalidate: no blank flash while the next project loads.
+    expect(useRenderStore.getState().bakedLayers['baked:/Layer']?.cells).toEqual([
+      { x: 9, y: 9, z: 0, token: 'grass' },
+    ])
     expect(bakedApi.list).toHaveBeenCalledTimes(2)
 
     resolveProjectList([])
     await waitFor(() => expect(useRenderStore.getState().bakedLayers).toEqual({}))
   })
 
-  it('reloads project-activated baked layers without preserving same-path dirty cells', async () => {
+  it('still refreshes baked layers for the viewing project while another project executes', async () => {
+    mockEditMode = true
+    vi.mocked(bakedApi.list)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          nodePath: '/Layer',
+          nodeName: 'Layer',
+          value: 1,
+          assetName: 'grass',
+          assetType: 'tile',
+          cells: [{ x: 4, y: 5, z: 0, token: 'grass' }],
+        },
+      ])
+
+    renderHook(() => useBakedLayers())
+    await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'workbench:project-changed', projectId: 'project-viewing' },
+      }))
+    })
+    await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(2))
+
+    FakeWebSocket.last!.onmessage?.({
+      data: JSON.stringify({
+        event: 'runtime',
+        payload: { kind: 'project:executing', projectId: 'project-other' },
+      }),
+    })
+
+    FakeWebSocket.last!.onmessage?.({
+      data: JSON.stringify({
+        event: 'baked:changed',
+        payload: { projectId: 'project-viewing' },
+      }),
+    })
+
+    await waitFor(() => {
+      expect(useRenderStore.getState().bakedLayers['baked:/Layer']?.cells).toEqual([
+        { x: 4, y: 5, z: 0, token: 'grass' },
+      ])
+    })
+  })
+
+  it('reloads baked layers on project:viewing without preserving same-path dirty cells', async () => {
+    mockEditMode = true
     vi.mocked(bakedApi.list)
       .mockResolvedValueOnce([
         {
@@ -182,7 +275,7 @@ describe('useBakedLayers', () => {
     FakeWebSocket.last!.onmessage?.({
       data: JSON.stringify({
         event: 'runtime',
-        payload: { kind: 'project:activated', projectId: 'project-2' },
+        payload: { kind: 'project:viewing', projectId: 'project-2' },
       }),
     })
 

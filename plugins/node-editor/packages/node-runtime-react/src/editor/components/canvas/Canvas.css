@@ -120,16 +120,26 @@
   background-color: transparent !important;
 }
 
+/* 空白画布默认箭头；节点拖拽把手、连线等交互元素单独设 cursor */
+.canvas .react-flow__pane {
+  cursor: default;
+  user-select: none;
+}
+
+.canvas .react-flow__pane.selection {
+  cursor: default;
+}
+
+.canvas .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
 .react-flow__node {
-  cursor: grab;
+  cursor: default;
 }
 
 .react-flow__node *:not(.react-flow__handle):not(svg):not(path) {
   color: #fff !important;
-}
-
-.react-flow__node:active {
-  cursor: grabbing;
 }
 
 /* 自定义覆盖画布右下角的小地图面板背景与蒙版遮罩 */

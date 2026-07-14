@@ -49,7 +49,8 @@
       "randomRules": [
         { "tileId": 6, "keepProbability": 0.6 }
       ],
-      "variantIdxs": [16, 17, 18, 19]
+      "variantIdxs": [16, 17, 18, 19],
+      "variantWeights": [4, 2, 2, 2]
     }
   }
 }

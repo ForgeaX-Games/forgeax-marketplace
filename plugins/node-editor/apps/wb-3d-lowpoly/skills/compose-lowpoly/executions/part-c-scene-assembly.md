@@ -3,8 +3,16 @@
 > [SKILL.md](../SKILL.md) 的**意图分诊**把「场景 / 城市 / 多物体 + 建筑的空间组合」路由到此。
 > 本文件是 **SCENE 编排**的完整执行步骤——它**包裹** [PART A](part-a-asset.md) /
 > [PART B](part-b-building.md) 的逐件建模，再以本文件的**组装阶段**收尾。
-> 共享参考：op 写法 / 图结构见 [pipeline-schema.md](../pipeline-schema.md)；电池速查见
-> [battery-catalog.md](../battery-catalog.md)；各家族页见 [modeling-guide.md](../modeling-guide.md)。
+> 授权参考：DSL 语法 [dsl-quickref.md](../dsl-quickref.md)、op 签名 [op-directory.md](../op-directory.md)；
+> 选型拿不准再查 [battery-catalog.md](../battery-catalog.md)。按需读取，别一次全读。
+
+> **DSL-first（读这条，覆盖下方旧写法）**：逐件建模 + 烘焙用 `lowpoly:model.apply({ source, bake })`
+> （每件 `baked.filename`=`<sha>.obj`，`lowpoly:parts.list` 可查）。**组装阶段只写 DSL**：每实例
+> `mesh(filename="<sha>.obj", bbox_min=..., bbox_max=...)` → `part(origin=位姿, rpy, material=...)`，
+> **不写 joint**（`g_to_urdf` 自动把无 joint 的根缝成一棵树），一次 `model.apply` 收尾。大量同款复用 =
+> **同一 `<sha>.obj` + 多个不同 origin 的 `part`**（别用 `translate`/`array_*` 摆位，会重烘）。完成判定
+> 看回执——`meshQc` 穿模才是硬信号（`mesh` 必须带 `bbox_min/max`）。语法见
+> [dsl-quickref.md](../dsl-quickref.md)，op 签名见 [op-directory.md](../op-directory.md)。
 
 适用：用户要的不是单个物件，而是**多个各自独立的物体 / 建筑共处一个环境**——一条街、一个村子、
 一座小城、一片柱列 + 道具阵、一整个小院落。SCENE 编排是一个**单 agent 内部循环**：
@@ -73,6 +81,9 @@
   流程建模 + bake。
 - 每烘出一个 unique item，**记下它的 `<sha>.obj` filename + `bbox_min`/`bbox_max`/`size`**——
   组装阶段摆位和填 `g_mesh.bbox_*` 都要用。
+- **记完账就 `deleteNode` 删掉这个 item 的建模子图**（级联删边）：往后只需要记下的
+  `<sha>.obj`/`<sha>.glb` filename + bbox，不必把每件的搭建子图留在场景项目图里。这样分发循环里
+  unique item 再多，场景项目的图也不会越堆越大——组装阶段从一张干净的图起步。
 - **多色 item 有两条路**（详见下方「组装阶段限制」）：①**首选 `g_bake_object`**——把 item 的各 part
   用**真形状**建在一个图里 + 各配 `g_material`，整组烘成**一个带色 `<sha>.glb`**，场景里当一个 mesh 摆
   （引用它的 `g_part` 不要再上 material；**别先 `g_bake_part` 成 OBJ 再喂**）；适合配色固定、整体复用。
@@ -112,8 +123,8 @@ workspace）**服务。若部署给不同项目起了不同后端实例（不同
 ——此时**没有任何理由跨项目**，老老实实回到同项目 bake 默认即可。
 
 > 注：跨项目可行性结论来自后端源码核对（singleton library + content-addressed blob route），
-> 不是一次 live viewer 实跑。真要跨项目用，建议先用一个真实 `<sha>.obj` 跑一遍组装阶段（阶段4）+
-> `urdf_preview` 截图确认 mesh 真的渲染出来了，再批量摆放。
+> 不是一次 live viewer 实跑。真要跨项目用，建议先用一个真实 `<sha>.obj` 跑一遍组装阶段（阶段4），
+> 看回执 `meshQc.meshResolved` 是否解析到该 mesh，确认引用有效后再批量摆放。
 
 ## 组装阶段限制：OBJ 不带材质 → 颜色是「每 part 一种」（多色物体要分件 bake）
 
@@ -218,8 +229,8 @@ g_box/g_cylinder/g_revolve/g_knob…（各 part 的真形状） → g_material(�
   进阶（跨项目引用，见上方注脚）：filename 取自源项目的 bake 返回值。
 - **同时记下每个件的 `bbox_min` / `bbox_max` / `size`**（`g_bake_part` 输出）——摆位与填
   `g_mesh.bbox_*` 都要用。
-- `lowpoly:batteries.get` 把 `g_mesh` / `g_part`（确认 `origin` / `rpy` 端口名）/ `g_material` 的
-  端口名查清（**绝不凭记忆编**），`lowpoly:pipeline.get` 读现状。
+- `mesh` / `part`（`origin` / `rpy`）/ `material` 的参数名查 [op-directory.md](../op-directory.md)
+  （**绝不凭记忆编**）；要读当前 DSL 用 `lowpoly:model.get`。
 
 ## 阶段4 · 搭场景图（一段干净 DSL）
 
@@ -241,8 +252,8 @@ material)`，不写 `g_joint_fixed`**，靠 auto-stitch 成树：
      （真正有机构联动的子装配——比如一扇会开的门——才在那个子装配内部用 `g_joint_*`；场景层级的
      纯摆放不用。）
 3. **重复**直到所有实例都建好。同款复用 = **同一 `<sha>.obj` + 多个不同 origin 的 `g_part`**。
-4. **QC + 导出**：`g_geometry_qc` → `g_validate` → `g_to_urdf` → `urdf_preview` →
-   `lowpoly:screenshot.capture` 看整场。读 QC structured signals：
+4. **一次 `model.apply({ source })`**：编译器自动追加 QC + URDF 终端，回执把信号定位到 DSL 行号。
+   完成判定看回执的 QC structured signals：
    - **`aabb_overlap`（warning，硬信号）**：rest pose 下相邻件 AABB 互相穿插——只要 `g_mesh` 填了
      bbox 就会报出来。有 overlap 就回去**改对应 `g_part` origin / 布局步距**（拉开间距、修落地高度），
      重跑 QC，直到不再报穿模。**这是场景模式下最该看的信号。**
@@ -251,12 +262,11 @@ material)`，不写 `g_joint_fixed`**，靠 auto-stitch 成树：
      别为消掉 islands 去乱加 joint，那只会把场景层级的位姿搬错地方。
    - Phase 全是 `g_mesh` 引用，`g_to_urdf` 应报 `bakeFallbacks=0`、`report.meshFileCount=0`、
      `stats.meshProvenance` 全 `native`（不应重新 bake）。
-5. **导出整场**：确认 QC 无穿模/错位、截图四视图也看过之后，才 `lowpoly:export-glb`（`name` = 输出
-   文件名，落到项目 `assets/3d/<name>.glb`）。
+5. **导出整场**：确认 QC 无穿模/错位（`aabb_overlap` 干净）之后，**用户要成品文件时**才
+   `lowpoly:export-glb`（`name` = 输出文件名，落到项目 `assets/3d/<name>.glb`）。
 
-每个阶段各自一个 `applyBatch`（`opts.actor="ai:lowpoly"` + 简短 `label`）+ `execute`；**每次
-applyBatch 后立刻 `lowpoly:pipeline.get`** 确认 `nodes` 真变了（防「ok 却空」）。布局不对**只调
-`g_part` origin / rpy / 配色**——别回头改 mesh 内部几何（那要回 PART A/B 重 bake）。
+组装是一次 `model.apply({ source })`——回执把错误/QC 信号定位到 DSL 行号，读回执即可，不必额外拉图。
+布局不对**只调 `part` 的 origin / rpy / 配色**——别回头改 mesh 内部几何（那要回 PART A/B 重 bake）。
 
 > ⚠️ **重烘陷阱：别用 transform / 阵列给引用 mesh 摆位。** `g_translate` / `g_rotate` / `g_scale` /
 > `g_array_linear` / `g_array_radial` 都在 `SUBGRAPH_BAKE_OPS` 里——**它们会把每个实例重新烘成一个
@@ -266,15 +276,16 @@ applyBatch 后立刻 `lowpoly:pipeline.get`** 确认 `nodes` 真变了（防「o
 
 ## 迭代
 
-复盘顺序：**先读 `g_geometry_qc` 的 structured signals（场景模式只盯 `aabb_overlap`，`islands` 当
-噪声忽略），再看 `lowpoly:screenshot.capture` 返回的正交四视图 contact sheet**，逐视图对照 brief 看
-摆位、间距、朝向、配色、有没有穿模/悬空。两者都过才算摆放正确。有穿模/错位 → 改 `g_part` origin /
-布局步距 / 落地高度，重跑 QC + 截图，别只截一张就说没问题。要换某个件的造型 → 回
-[PART A](part-a-asset.md) / [PART B](part-b-building.md) 重建 + 重 bake 那一个，filename / bbox
-变了再回这里把对应 `g_mesh` 的 `filename` 与 `bbox_min`/`bbox_max` 一起换掉。
+**完成判定看 `g_geometry_qc` 的 structured signals**（场景模式只盯 `aabb_overlap`，`islands` 当
+噪声忽略）：对照 brief 用 bbox/size 核对每个实例的摆位、间距、朝向、配色，有没有穿模/悬空。有穿模/
+错位 → 改 `g_part` origin / 布局步距 / 落地高度，重跑 QC，直到不再报 `aabb_overlap`。
+要换某个件的造型 → 回 [PART A](part-a-asset.md) /
+[PART B](part-b-building.md) 重建 +
+重 bake 那一个，filename / bbox 变了再回这里把对应 `g_mesh` 的 `filename` 与
+`bbox_min`/`bbox_max` 一起换掉。
 
-场景层迭代分两层：**先逐件**（unique item 各自在 A/B 里建对、bake 对），**再整场**（组装后看整场 QC +
-四视图）。先把单件建对，再谈全场摆位，别在场景图里反复试探单件造型。
+场景层迭代分两层：**先逐件**（unique item 各自在 A/B 里建对、bake 对），**再整场**（组装后看整场
+QC）。先把单件建对，再谈全场摆位，别在场景图里反复试探单件造型。
 
 ---
 

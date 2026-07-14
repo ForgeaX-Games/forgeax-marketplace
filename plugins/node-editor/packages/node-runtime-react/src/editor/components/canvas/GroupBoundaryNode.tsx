@@ -10,7 +10,7 @@ import { Handle, Position, useUpdateNodeInternals, type NodeProps } from 'reactf
 import { getPortTypeColor, normalizeType, resolveCanonicalTypeMeta, type DomainPortTypes } from '../../utils/portTypes.js'
 import type { ExposedPort } from '../../types.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
-import { getGroupPortDisplayLabel, getVisibleGroupPorts, sortGroupPorts } from './groupViewUtils.js'
+import { getGroupPortDisplayLabel, getVisibleGroupPorts, sortGroupPorts, resolveGroupExposedInputValue } from './groupViewUtils.js'
 import { TooltipPortal, useNodeTooltip, useNodeValueFormatters } from './nodeTooltip.js'
 import './GroupBoundaryNode.css'
 
@@ -160,9 +160,15 @@ const GroupBoundaryNode = memo(function GroupBoundaryNode({
   const showPortValueTooltip = useCallback((e: React.MouseEvent, port: ExposedPort) => {
     const val = usePipelineStore.getState().nodeOutputs[id]?.[port.portName]
     const canonical = normalizeType(port.portType)
-    const label = isInput ? 'input:' : 'output:'
-    const valueLine = val !== undefined
-      ? { label, text: formatPortValue(val), extra: formatPortValueExtra(val) }
+    // Unconnected input shell: fall back to the inner source port's default so
+    // the shell shows the same default the inner port carries (not "no value").
+    const fallback = val === undefined && isInput && currentGroup
+      ? resolveGroupExposedInputValue(currentGroup, port)
+      : undefined
+    const shown = val !== undefined ? val : fallback?.value
+    const label = fallback?.isDefault ? 'default:' : (isInput ? 'input:' : 'output:')
+    const valueLine = shown !== undefined
+      ? { label, text: formatPortValue(shown), extra: formatPortValueExtra(shown), muted: fallback?.isDefault === true }
       : { label, text: en ? 'no value' : '暂无数据', muted: true as const }
     showImmediate({
       x: e.clientX + 16,
@@ -172,7 +178,7 @@ const GroupBoundaryNode = memo(function GroupBoundaryNode({
       subtitleColor: getPortTypeColor(port.portType, domainPortTypes),
       valueLine,
     })
-  }, [id, isInput, en, showImmediate, formatPortValue, formatPortValueExtra, domainPortTypes])
+  }, [id, isInput, en, currentGroup, showImmediate, formatPortValue, formatPortValueExtra, domainPortTypes])
 
   const [editingPort, setEditingPort] = useState<string | null>(null)
   const [labelDraft, setLabelDraft] = useState('')

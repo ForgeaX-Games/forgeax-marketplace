@@ -1,27 +1,25 @@
 /**
- * bspRectGen: 以中心点为锚，在给定区域内向外播撒一片紧凑的 BSP 矩形地块
+ * bspRectGen: 以中心点为锚，在单张网格区域内向外播撒一片紧凑的 BSP 矩形地块
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  *
  * 核心策略：
  *   1. 对 bounding box 做 BSP 分割，得到候选矩形列表
  *   2. 按距中心点距离排序，从近到远依次处理
- *   3. 每个候选矩形：先放入，检测是否有格子越出掩码
- *   4. 如有越界，计算越界重心方向，逐步平移修正
- *   5. 修正后仍有越界 → 跳过该矩形，换下一个
+ *   3. 每个候选矩形：原位合法直接放入，否则就近吸附到最近合法锚点
+ *   4. 所有地块写入同一张多值网格（每个地块一个递增 id）
  */
 
 interface Rect { x: number; y: number; w: number; h: number; }
 interface NameEntry { id: number; name: string; type: string; }
 
-/** 将输入统一解析为 Grid[]，支持单个网格或网格列表 */
-function parseInputGrids(raw: unknown): number[][][] | null {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as number[][]];
-  }
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as number[][][];
-  }
-  return null;
+/** 判断 v 是单张网格 number[][] */
+function isGrid(v: unknown): v is number[][] {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  const first = (v as unknown[])[0];
+  if (!Array.isArray(first) || (first as unknown[]).length === 0) return false;
+  return typeof (first as unknown[])[0] === "number";
 }
 
 // ─── LCG RNG ──────────────────────────────────────────────────────────────────
@@ -217,15 +215,17 @@ function tryFitInMask(
 function processOneGrid(
   inputGrid: number[][],
   centerPos: number,
+  centerPoint: { x: number; y: number } | null,
   targetCount: number,
   minSize: number,
   maxSize: number,
   splitRatio: number,
   seed: number,
-): { outputGridList: number[][][]; outputNameList: NameEntry[] } {
+): { outputGrid: number[][]; outputNameList: NameEntry[] } {
   const rows = inputGrid.length;
   const cols = inputGrid[0]?.length ?? 0;
-  if (cols === 0) return { outputGridList: [], outputNameList: [] };
+  const emptyGrid = (): number[][] => Array.from({ length: rows }, () => new Array(cols).fill(0));
+  if (cols === 0) return { outputGrid: emptyGrid(), outputNameList: [] };
 
   const rng = makeRng(seed);
 
@@ -244,27 +244,32 @@ function processOneGrid(
     }
   }
 
-  if (maxX < 0) return { outputGridList: [], outputNameList: [] };
+  if (maxX < 0) return { outputGrid: emptyGrid(), outputNameList: [] };
 
   const bboxW = maxX - minX + 1;
   const bboxH = maxY - minY + 1;
 
-  let norm: { nx: number; ny: number };
-  if (centerPos >= 1 && centerPos <= 9) {
-    norm = gridPositionToNorm(centerPos);
+  // 中心定位：优先用显式 point2d（x→列, y→行，裁剪到 bbox 内）；
+  // 否则回退九宫格 centerPos；centerPos 越界时随机。
+  let centerX: number;
+  let centerY: number;
+  if (centerPoint && Number.isFinite(centerPoint.x) && Number.isFinite(centerPoint.y)) {
+    centerX = Math.min(maxX, Math.max(minX, centerPoint.x));
+    centerY = Math.min(maxY, Math.max(minY, centerPoint.y));
   } else {
-    norm = { nx: 0.1 + rng() * 0.8, ny: 0.1 + rng() * 0.8 };
+    const norm = (centerPos >= 1 && centerPos <= 9)
+      ? gridPositionToNorm(centerPos)
+      : { nx: 0.1 + rng() * 0.8, ny: 0.1 + rng() * 0.8 };
+    centerX = minX + norm.nx * (bboxW - 1);
+    centerY = minY + norm.ny * (bboxH - 1);
   }
-
-  const centerX = minX + norm.nx * (bboxW - 1);
-  const centerY = minY + norm.ny * (bboxH - 1);
 
   // BSP 对 bounding box 分割，生成候选矩形
   const root: Rect = { x: minX, y: minY, w: bboxW, h: bboxH };
   const allRects = bspSplitAll(root, minSize, maxSize, splitRatio, rng);
   allRects.sort((a, b) => rectCenterDist(a, centerX, centerY) - rectCenterDist(b, centerX, centerY));
 
-  const outputGridList: number[][][] = [];
+  const outputGrid: number[][] = emptyGrid();
   const outputNameList: NameEntry[] = [];
   let parcelId = 1;
 
@@ -275,74 +280,43 @@ function processOneGrid(
     const fitted = tryFitInMask(rect, mask, rows, cols);
     if (!fitted) continue;
 
-    // 写入真实矩形（已保证每格都在掩码内）
-    const singleGrid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    // 写入同一张多值网格，每个地块一个递增 id（重叠时后写入的覆盖）
     for (let r = fitted.y; r < fitted.y + fitted.h; r++) {
       for (let c = fitted.x; c < fitted.x + fitted.w; c++) {
-        singleGrid[r][c] = parcelId;
+        outputGrid[r][c] = parcelId;
       }
     }
 
-    outputGridList.push(singleGrid);
     outputNameList.push({ id: parcelId, name: `地块 ${parcelId}`, type: "tile" });
     parcelId++;
   }
 
-  return { outputGridList, outputNameList };
+  return { outputGrid, outputNameList };
 }
 
 // ─── 主导出函数 ───────────────────────────────────────────────────────────────
 
 export function bspRectGen(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.inputGrid);
-  if (!grids) {
-    return { error: "inputGrid is required", outputGridList: [], outputNameList: [] };
+  const rawGrid = input.inputGrid;
+  if (!isGrid(rawGrid)) {
+    return { error: "inputGrid is required (number[][])" };
   }
+  const grid = rawGrid as number[][];
 
   const centerPos   = typeof input.centerPosition === "number" ? Math.round(input.centerPosition) : 5;
+  const centerPoint = parsePoint(input.centerPoint);
   const targetCount = clampInt(input.targetCount, 1, 5000, 10);
   const minSize     = clampInt(input.minSize,     1, 500,  4);
   const maxSizeRaw  = clampInt(input.maxSize,     0, 2000, 12);
   const maxSize     = maxSizeRaw === 0 ? 0 : Math.max(minSize, maxSizeRaw);
   const splitRatio  = clampFloat(input.splitRatio, 0.1, 0.49, 0.35);
   const seedRaw     = typeof input.seed === "number" ? Math.round(input.seed) : 0;
-  const doMerge     = input.merge !== false;
 
-  const allGridList: number[][][] = [];
-  const allNameList: NameEntry[] = [];
+  const { outputGrid, outputNameList } = processOneGrid(
+    grid, centerPos, centerPoint, targetCount, minSize, maxSize, splitRatio, seedRaw,
+  );
 
-  for (let i = 0; i < grids.length; i++) {
-    const g = grids[i];
-    if (!Array.isArray(g) || g.length === 0) continue;
-    const { outputGridList: gl, outputNameList: nl } = processOneGrid(
-      g, centerPos, targetCount, minSize, maxSize, splitRatio,
-      seedRaw === 0 ? 0 : seedRaw + i * 1000003,
-    );
-    allGridList.push(...gl);
-    allNameList.push(...nl);
-  }
-
-  if (doMerge) {
-    if (allGridList.length === 0) {
-      return { outputGridList: [], outputNameList: [] };
-    }
-    const rows = allGridList[0].length;
-    const cols = allGridList[0][0]?.length ?? 0;
-    const merged: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-    for (const grid of allGridList) {
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (grid[r][c] !== 0) merged[r][c] = 1;
-        }
-      }
-    }
-    return {
-      outputGridList: [merged],
-      outputNameList: [{ id: 1, name: "地块", type: "tile" }],
-    };
-  }
-
-  return { outputGridList: allGridList, outputNameList: allNameList };
+  return { outputGrid, outputNameList };
 }
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
@@ -355,4 +329,14 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== "number" || !isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+/** 解析 point2d 输入 {x,y}（x→列, y→行）；非法返回 null */
+function parsePoint(value: unknown): { x: number; y: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const p = value as { x?: unknown; y?: unknown };
+  const x = Number(p.x);
+  const y = Number(p.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
 }

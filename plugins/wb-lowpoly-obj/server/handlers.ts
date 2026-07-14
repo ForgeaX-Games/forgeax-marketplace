@@ -14,7 +14,7 @@
  *   - publishToWorkspaceGame / playgroundSnapshot
  *       → fs copy / decode + write
  *
- * Wire-up contract (host ↔ plugin) lives in forgeax-plugin.json:provides.tools.
+ * Wire-up contract (host ↔ plugin) lives in forgeax-extension.json:provides.tools.
  */
 
 type ToolResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string }

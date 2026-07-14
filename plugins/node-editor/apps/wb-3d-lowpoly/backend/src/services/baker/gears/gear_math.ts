@@ -1,13 +1,13 @@
 /**
  * Gear math —— 渐开线齿廓的纯数学计算（不依赖 replicad/OCCT）。
  *
- * 1:1 移植自 `articraft/sdk/v0/gears.py` 的 SpurGear / RingGear / RackGear 初始化
- * 部分，但用 TypeScript 表达。返回 2D 多边形点列，由上层用 replicad `draw(...)`
+ * SpurGear / RingGear / RackGear 初始化部分的 TypeScript 实现。
+ * 返回 2D 多边形点列，由上层用 replicad `draw(...)`
  * 拼成 Drawing，再 `sketchOnPlane('XY').extrude(width, { twistAngle })` 成 Shape3D。
  *
  * 设计要点：
- *   - 输入采用 SI 公制（米），articraft 用米也用毫米，注意 module=0.001 对应 1mm 模数
- *   - 渐开线用 20 个等距径向点近似 — articraft 默认值
+ *   - 输入采用 SI 公制（米），注意 module=0.001 对应 1mm 模数
+ *   - 渐开线用 20 个等距径向点近似
  *   - 齿根用 3 点圆弧近似（cq_gears 同款）
  *   - 单齿模板按 CCW 顺序：左齿面 → 齿顶 → 右齿面 → 齿根
  *     完整轮廓 = z 个齿模板按 tau 角度旋转拼接
@@ -33,9 +33,9 @@ export interface SpurGearSpec {
   readonly helixAngleDeg: number;
   readonly clearance: number;
   readonly backlash: number;
-  /** addendum 系数；articraft 默认 1.0 */
+  /** addendum 系数；默认 1.0 */
   readonly addCoeff: number;
-  /** dedendum 系数；articraft 默认 1.25 */
+  /** dedendum 系数；默认 1.25 */
   readonly dedCoeff: number;
 }
 
@@ -67,7 +67,7 @@ export const SPUR_DEFAULTS = {
   dedCoeff: 1.25,
 };
 
-const CURVE_POINTS = 20; // articraft 默认值
+const CURVE_POINTS = 20; // 渐开线采样点数
 
 // ── 内部数学助手 ────────────────────────────────────────────────────
 
@@ -207,7 +207,7 @@ export function computeSpurGearGeom(spec: SpurGearSpec): SpurGearGeom {
   if (t2 < 0) t2 += Math.PI * 2;
   const tMin = Math.min(t1, t2);
   const tMax = Math.max(t1, t2);
-  // articraft 选 (t1+2pi, t2+2pi)，方向保证圆弧"凹向中心"
+  // 选 (t1+2pi, t2+2pi)，方向保证圆弧"凹向中心"
   const tArr = linspace(tMin + Math.PI * 2.0, tMax + Math.PI * 2.0, CURVE_POINTS);
   const root: Point2D[] = tArr.map((t) => [
     bcxy[0] + bcr * Math.cos(t),
@@ -347,7 +347,7 @@ export interface RackGearGeom {
   readonly z: number;
   /** 齿廓周期长度 = pi * module */
   readonly pitch: number;
-  /** 齿根负向偏移 = ld（articraft 同名变量） */
+  /** 齿根负向偏移 = ld */
   readonly ld: number;
   /** 齿顶正向偏移 = la */
   readonly la: number;

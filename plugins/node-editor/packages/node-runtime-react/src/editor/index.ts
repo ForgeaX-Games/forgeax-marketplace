@@ -66,7 +66,7 @@ export type {
 } from './sync/editorBridge.js'
 // Shared editor chrome used by host apps for Open/Save and project management.
 export { PipelineFileDialog, ProjectsDialog, ProjectPanel, EditorControlsPanel } from './components/chrome/index.js'
-export type { PipelineFileDialogProps, ProjectsDialogProps, ProjectPanelProps, EditorControlsPanelProps } from './components/chrome/index.js'
+export type { PipelineFileDialogProps, ProjectsDialogProps, ProjectPanelProps, EditorControlsPanelProps, ActivePipelineRunInfo } from './components/chrome/index.js'
 // Composed editor: Toolbar · BatteryBar · Canvas in the legacy layout.
 export { Editor } from './Editor.js'
 export type { EditorProps } from './Editor.js'

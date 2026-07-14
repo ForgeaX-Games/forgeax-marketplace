@@ -43,4 +43,4 @@ order: 8
 
 ## 海报样张
 
-Epic cinematic sci-fi poster, large-format scale, monumental practical set with a lone figure dwarfed, cold steel-blue and earth palette, naturalistic light, geometric centered composition, cerebral awe, no text, vertical 2:3
+Sci-fi-film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, large-format naturalistic look, cold steel-blue and earth palette, centered geometric mathematical composition. Panel 1: a monumental practical set with a lone figure dwarfed at large-format scale. Panel 2: a handheld walk-through of a real physical set. Panel 3: a locked single-person shot, restrained and clinical. Panel 4: two parallel-timeline frames edge to edge as if cross-cut and converging. Panel 5: a face-close subjective shot. Panel 6: a geometric centered wide with a ticking-clock motif. Cerebral awe, practical realism; consistent grade across all panels, no text, no captions, vertical 2:3

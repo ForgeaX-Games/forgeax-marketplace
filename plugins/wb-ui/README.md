@@ -1,6 +1,6 @@
 # ForgeaX Workbench UI Workshop
 
-`@forgeax-plugin/wb-ui` is the standard Workbench UI workshop plugin. It migrates the complete local `ui-design-module-transfer` feature into a standalone Workbench plugin.
+`@forgeax-extension/wb-ui` is the standard Workbench UI workshop plugin. It migrates the complete local `ui-design-module-transfer` feature into a standalone Workbench plugin.
 
 ## What It Does
 

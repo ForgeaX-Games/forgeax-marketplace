@@ -31,6 +31,23 @@ function jsonValue(value) {
   return value == null ? null : JSON.stringify(value)
 }
 
+const NON_TILE_KINDS = new Set(['', 'asset', 'object', '抠图'])
+
+/**
+ * Old 13-field export alias → new 12-field renderer alias:
+ * drops 大区域(idx2)/小区域(idx3), inserts a blank 材质 after 物体名, and folds
+ * the rule (asset_kind) into the type field (idx 7). Non-bracketed filenames
+ * pass through. Keep in sync with backend composeRendererAlias / deriveAliasMeta.
+ */
+export function toRendererAlias(fileName, assetKind) {
+  const f = [...String(fileName).matchAll(/\[([^\]]*)\]/g)].map((m) => m[1].trim())
+  if (f.length < 13) return fileName
+  const ak = (assetKind ?? '').trim()
+  const type7 = NON_TILE_KINDS.has(ak) ? 'asset' : ak
+  const nf = [f[0], f[1], f[4], '', f[5], f[6], f[7], type7, f[9], f[10], f[11], f[12]]
+  return nf.map((x) => `[${x}]`).join('_') + '.png'
+}
+
 function parseArgs(argv) {
   const opts = { root: process.cwd(), overlayPath: join(scriptRoot, 'materials', 'legacy-asset-overlays.json') }
   for (let i = 0; i < argv.length; i++) {
@@ -89,10 +106,10 @@ export function applyLegacyAssetOverlays({
   const insertAsset = db.prepare(`
     INSERT INTO assets (
       id, alias, zone, blob_sha256, mime_type, size_bytes, width_px, height_px, anchor_x, anchor_y,
-      tag_layers_json, tags_json, geometry_json, library_path, organize_folder_path, export_path, asset_kind, crop_type_original
+      geometry_json
     ) VALUES (
       @id, @alias, @zone, @blob_sha256, @mime_type, @size_bytes, @width_px, @height_px, @anchor_x, @anchor_y,
-      @tag_layers_json, @tags_json, @geometry_json, @library_path, @organize_folder_path, @export_path, @asset_kind, @crop_type_original
+      @geometry_json
     )
     ON CONFLICT(id) DO UPDATE SET
       alias = excluded.alias,
@@ -104,14 +121,7 @@ export function applyLegacyAssetOverlays({
       height_px = excluded.height_px,
       anchor_x = excluded.anchor_x,
       anchor_y = excluded.anchor_y,
-      tag_layers_json = excluded.tag_layers_json,
-      tags_json = excluded.tags_json,
-      geometry_json = excluded.geometry_json,
-      library_path = excluded.library_path,
-      organize_folder_path = excluded.organize_folder_path,
-      export_path = excluded.export_path,
-      asset_kind = excluded.asset_kind,
-      crop_type_original = excluded.crop_type_original
+      geometry_json = excluded.geometry_json
   `)
 
   let applied = 0
@@ -145,7 +155,7 @@ export function applyLegacyAssetOverlays({
       })
       insertAsset.run({
         id: asset.id,
-        alias: asset.alias,
+        alias: toRendererAlias(asset.alias, asset.assetKind),
         zone: asset.zone,
         blob_sha256: digest,
         mime_type: asset.mimeType,
@@ -154,14 +164,7 @@ export function applyLegacyAssetOverlays({
         height_px: height,
         anchor_x: asset.anchorX ?? null,
         anchor_y: asset.anchorY ?? null,
-        tag_layers_json: jsonValue(asset.tagLayers),
-        tags_json: jsonValue(asset.tags),
         geometry_json: jsonValue(asset.geometry),
-        library_path: asset.libraryPath ?? null,
-        organize_folder_path: asset.organizeFolderPath ?? null,
-        export_path: asset.exportPath ?? null,
-        asset_kind: asset.assetKind ?? null,
-        crop_type_original: asset.cropTypeOriginal ?? null,
       })
       applied++
     }

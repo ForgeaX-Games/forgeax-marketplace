@@ -43,4 +43,4 @@ order: 0
 
 ## 海报样张
 
-Epic cinematic sci-fi poster, vast ultra-wide establishing shot, tiny lone figure against monumental brutalist scale, muted earthy palette, atmospheric haze, awe and solitude, minimal composition, no text, vertical 2:3
+Film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, muted sandy earthy monochrome, atmospheric haze, single natural light source. Panel 1: extreme ultra-wide, a tiny lone figure dwarfed by a monumental brutalist structure. Panel 2: the figure pushed to the edge of the frame, powerless. Panel 3: the figure centered and small, a fate-bearer. Panel 4: an insert close-up of a hand or a single object. Panel 5: a hazy silhouette against vast scale. Panel 6: a slow monumental reveal of overwhelming scale. Awe and solitude, minimal composition, short-lens depth; consistent earthy grade across all panels, no text, no captions, vertical 2:3

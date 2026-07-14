@@ -1,10 +1,14 @@
 /**
- * preciseDecorationScatter: 以指定坐标为中心，在目标区域内播撒一片自然装饰物
+ * preciseDecorationScatter: 以指定坐标为中心，在单张网格目标区域内播撒一片自然装饰物
  * 若中心坐标不在目标区域内，BFS 就近吸附到最近目标格后再播撒
- * 输入：grid (any) — 单/列表网格; targetValue (number) — 0=自动取最大值;
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张网格（目标值自动取最大值）;
  *       decorations (array) — [{decoration, count},...]; center (array) — [x, y];
  *       algorithm (string); scatterRadius (number); seed (number)
- * 输出：outputGrid (any); decorationNameList (array); placedCount (number)
+ * 输出：outputGrid (grid) — 单张多值网格（每种装饰物一个递增 id）; outputNameList (array); placedCount (number)
  */
 
 type Grid = number[][];
@@ -389,8 +393,9 @@ function processGrid(
 export function preciseDecorationScatter(
   input: Record<string, unknown>
 ): Record<string, unknown> {
-  const rawGrid = input.grid;
-  if (rawGrid == null) return { error: "grid is required" };
+  const rawGrid = input.inputGrid;
+  if (!isGrid(rawGrid)) return { error: "inputGrid is required (number[][])" };
+  const grid = rawGrid as Grid;
 
   const center = parseCenter(input.center);
 
@@ -407,62 +412,36 @@ export function preciseDecorationScatter(
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
 
-  // 统一转换为网格列表
-  let gridList: Grid[];
-  if (isGridList(rawGrid)) {
-    gridList = rawGrid as Grid[];
-  } else if (isGrid(rawGrid)) {
-    gridList = [rawGrid as Grid];
+  const tv = gridMax(grid);
+
+  // center 未提供时，从目标区域（非零格）中随机选一个点
+  let effectiveCenter: [number, number];
+  if (center) {
+    effectiveCenter = center;
   } else {
-    return { error: "grid must be a 2D grid (number[][]) or a list of 2D grids (number[][][])" };
+    const nonZero: [number, number][] = [];
+    for (let r = 0; r < grid.length; r++) {
+      for (let c = 0; c < (grid[0]?.length ?? 0); c++) {
+        if (grid[r][c] !== 0) nonZero.push([c, r]);
+      }
+    }
+    if (nonZero.length === 0) {
+      const empty: Grid = grid.map(row => row.map(() => 0));
+      return { outputGrid: empty, outputNameList: [], placedCount: 0 };
+    }
+    const rng = new LCG(baseSeed);
+    effectiveCenter = nonZero[Math.floor(rng.next() * nonZero.length)];
   }
 
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  let totalPlaced = 0;
+  // 单张多值网格：每种装饰物一个递增 id
+  const { outputGrid, nameList, placedCount } = processGrid(
+    grid, effectiveCenter, tv, decorations, algorithm, scatterRadius, baseSeed
+  );
 
-  for (let i = 0; i < gridList.length; i++) {
-    const g = gridList[i];
-    const tv = gridMax(g);
-    const effectiveSeed = baseSeed + i * 999983;
-    // center 未提供时，从目标区域（非零格）中随机选一个点
-    let effectiveCenter: [number, number];
-    if (center) {
-      effectiveCenter = center;
-    } else {
-      const nonZero: [number, number][] = [];
-      for (let r = 0; r < g.length; r++) {
-        for (let c = 0; c < (g[0]?.length ?? 0); c++) {
-          if (g[r][c] !== 0) nonZero.push([c, r]);
-        }
-      }
-      if (nonZero.length === 0) continue;
-      const rng = new LCG(effectiveSeed);
-      effectiveCenter = nonZero[Math.floor(rng.next() * nonZero.length)];
-    }
-    const { outputGrid, nameList, placedCount } = processGrid(
-      g, effectiveCenter, tv, decorations, algorithm, scatterRadius, effectiveSeed
-    );
-    totalPlaced += placedCount;
+  // 仅保留实际写入网格的装饰物条目
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
+  const outputNameList: NameEntry[] = nameList.filter(e => present.has(e.id));
 
-    // 每种装饰物单独拆出一张单值网格，与 outputNameList 一一对应
-    const rows = outputGrid.length;
-    const cols = outputGrid[0]?.length ?? 0;
-    for (const entry of nameList) {
-      const single: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (outputGrid[r][c] === entry.id) single[r][c] = entry.id;
-        }
-      }
-      outputGridList.push(single);
-      outputNameList.push(entry);
-    }
-  }
-
-  return {
-    outputGridList,
-    outputNameList,
-    placedCount: totalPlaced,
-  };
+  return { outputGrid, outputNameList, placedCount };
 }

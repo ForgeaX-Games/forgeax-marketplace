@@ -41,6 +41,33 @@ async function shaOf(lib: FakeLibrary, op: string, args: Record<string, Arg>): P
   return r.blobSha256 ?? r.sha256;
 }
 
+// 烘焙一个 shape 并从生成的 OBJ 里解析出顶点，用于几何断言（如屋脊朝向）。
+async function bakeVerts(lib: FakeLibrary, op: string, args: Record<string, Arg>): Promise<Array<[number, number, number]>> {
+  lib.bytesByAlias.clear();
+  const r = await bakeShape(op, args, lib);
+  if (r.vertexCount === 0 || r.triangleCount === 0) throw new Error(`${op}: empty mesh`);
+  const buf = [...lib.bytesByAlias.values()].pop();
+  if (!buf) throw new Error(`${op}: no OBJ buffer captured`);
+  const verts: Array<[number, number, number]> = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    if (!line.startsWith('v ')) continue;
+    const p = line.trim().split(/\s+/);
+    verts.push([Number(p[1]), Number(p[2]), Number(p[3])]);
+  }
+  return verts;
+}
+
+// 屋脊沿哪根水平轴：取靠近最高 Z 的顶点，比较其在 X / Y 上的展布，展布大者即屋脊方向。
+function ridgeAxis(verts: Array<[number, number, number]>): 'x' | 'y' {
+  const maxZ = Math.max(...verts.map(v => v[2]));
+  const top = verts.filter(v => v[2] >= maxZ - 1e-4);
+  const spread = (i: 0 | 1): number => {
+    const vals = top.map(v => v[i]);
+    return Math.max(...vals) - Math.min(...vals);
+  };
+  return spread(0) >= spread(1) ? 'x' : 'y';
+}
+
 function check(name: string, cond: boolean, detail = ''): void {
   if (cond) { console.log(`OK   ${name} ${detail}`); passed++; }
   else { console.error(`FAIL ${name} ${detail}`); failed++; }
@@ -97,6 +124,16 @@ async function main(): Promise<void> {
   const wheelPlain = await shaOf(lib, 'wheel', { radius: num(0.05), width: num(0.025) });
   const wheelSpokes = await shaOf(lib, 'wheel', { radius: num(0.05), width: num(0.025), spoke_count: num(5) });
   check('wheel spokes != plain', wheelPlain !== wheelSpokes, `${wheelPlain.slice(0, 8)} vs ${wheelSpokes.slice(0, 8)}`);
+
+  // 9) roof 屋脊统一沿 footprint 较长边（宽>深 → 沿 X；深>宽 → 沿 Y），gable/gambrel/shed/hip 一致。
+  //    修复前 gable/gambrel/shed 恒沿 Y、hip 恒沿 X，且 hip 在 bd>bw 时退化。
+  const fp = (x: number, y: number): Arg => ({ kind: 'list', items: [num(x), num(y)] } as Arg);
+  for (const rtype of ['gable', 'gambrel', 'shed', 'hip']) {
+    const wideX = await bakeVerts(lib, 'roof', { type: { kind: 'string', value: rtype } as Arg, footprint: fp(10, 4), height: num(2) });
+    const wideY = await bakeVerts(lib, 'roof', { type: { kind: 'string', value: rtype } as Arg, footprint: fp(4, 10), height: num(2) });
+    check(`roof ${rtype} ridge along X when width>depth`, ridgeAxis(wideX) === 'x', `axis=${ridgeAxis(wideX)}`);
+    check(`roof ${rtype} ridge along Y when depth>width`, ridgeAxis(wideY) === 'y', `axis=${ridgeAxis(wideY)}`);
+  }
 
   console.log(`\n[param-parts smoke] ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

@@ -43,4 +43,4 @@ order: 6
 
 ## 海报样张
 
-Cyberpunk neo-noir film poster, rain-soaked neon city at night, wet reflective streets, cyan-magenta neon glow, low FPV drone angle, volumetric haze, moody urban future, no text, vertical 2:3
+Cyberpunk-film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, rain-soaked neon night, wet reflective streets as a second composition, cyan-magenta-violet neon glowing only near light sources while shadows stay neutral, volumetric haze. Panel 1: extreme wide neon city skyline over wet streets. Panel 2: an 85mm close-up of a half-lit face against giant neon bokeh. Panel 3: a low FPV drone gliding through a neon alley. Panel 4: extreme close-up — glowing screen UI, prosthetic hydraulics, rain on the lens. Panel 5: a full scene mirrored in a rain puddle. Panel 6: a handheld shaky moment of disorder. Moody urban future; consistent grade across all panels, no text, no captions, vertical 2:3

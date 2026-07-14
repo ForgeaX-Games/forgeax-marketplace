@@ -8,6 +8,7 @@
 
 import { buildTopFaceKey, lookupWithWildcard } from '../../../framework/asset/neighborKey'
 import type { FaceRule, RuleSprite } from '../../../framework/asset/ruleCache'
+import { pickWeightedVariant, type VariantPool } from '../../../framework/asset/variantCandidates'
 import type { CollectedCell } from './types'
 
 /**
@@ -19,7 +20,12 @@ export interface PickFaceContext {
   face: FaceRule
   faceTag: 'top' | 'front'
   sprites: ReadonlyArray<RuleSprite>
+  /** Face-level fallback pool (face.variantIdxs filtered); used when a randomRule has no own pool. */
   validVariantIdxs: ReadonlyArray<number>
+  /** Parallel to validVariantIdxs when face declares variantWeights. */
+  validVariantWeights?: ReadonlyArray<number>
+  /** Per-tileId filtered pools (idxs + optional weights). */
+  validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
   cell: CollectedCell
   /** per-layer 3D 坐标集,邻域 has() 查这里 */
   coordsByLayerIdx: Map<number, Set<string>>
@@ -42,7 +48,7 @@ export function pickFaceSprite(ctx: PickFaceContext): RuleSprite | null {
  * returns a valid index into `ctx.sprites` (clamped to 0).
  */
 export function pickFaceSpriteIndex(ctx: PickFaceContext): number {
-  const { face, faceTag, sprites, validVariantIdxs, cell, coordsByLayerIdx, regions } = ctx
+  const { face, faceTag, sprites, validVariantIdxs, cell, coordsByLayerIdx, regions } = ctx // ctx also carries validVariantWeights / validVariantPoolsByTileId
   const layerSet = coordsByLayerIdx.get(cell.layerIdx)
   const has = (dx: number, dy: number, dz: number): boolean =>
     !!layerSet && layerSet.has(`${cell.x + dx},${cell.y + dy},${cell.z + dz}`)
@@ -80,13 +86,21 @@ export function pickFaceSpriteIndex(ctx: PickFaceContext): number {
 
   // ③ 查表 + randomRules 变体替换
   let idx = lookupWithWildcard(map, key) ?? 0
-  if (face.randomRules && face.randomRules.length > 0 && validVariantIdxs.length > 0) {
+  if (face.randomRules && face.randomRules.length > 0) {
     // saltBase 把 face 拉开,避免同一 (x,y) 顶面立面变体撞车
     const saltBase = faceTag === 'top' ? 0 : 100
     for (const r of face.randomRules) {
       if (idx !== r.tileId) continue
+      const tilePool = ctx.validVariantPoolsByTileId?.get(r.tileId)
+      const pool: VariantPool = tilePool ?? {
+        idxs: [...validVariantIdxs],
+        weights: ctx.validVariantWeights?.length === validVariantIdxs.length
+          ? [...ctx.validVariantWeights]
+          : undefined,
+      }
+      if (pool.idxs.length === 0) break
       if (cellRng(cell.x, cell.y, saltBase) < r.keepProbability) break
-      idx = validVariantIdxs[Math.floor(cellRng(cell.x, cell.y, saltBase + 1) * validVariantIdxs.length)]
+      idx = pickWeightedVariant(pool, cellRng(cell.x, cell.y, saltBase + 1))
       break
     }
   }

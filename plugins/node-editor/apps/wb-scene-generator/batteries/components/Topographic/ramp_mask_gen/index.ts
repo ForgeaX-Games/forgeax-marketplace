@@ -1,16 +1,21 @@
 /**
- * rampMaskGen（坡道掩码生成）v1.3
+ * rampMaskGen（坡道掩码生成）v2.0
+ *
+ * 读取单张二维网格，对其中每个非零区域在底边生成 2×2 坡道掩码块：
+ * 上两格在区域内、下两格在区域外，坡道格保留原区域值。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
  * 输入：
- *   input        (array)   — 网格列表，每项为一个二维网格
- *   rampPosition (number)  — 坡道横向位置 0~1；-1 或缺省 → 随机
- *   seed         (number)  — 随机种子（仅随机模式生效）
- *   merge        (boolean) — 默认 true：将所有坡道合并为单张网格 + 单条名称清单
+ *   inputGrid    (grid)   — 单张二维网格
+ *   rampPosition (number) — 坡道横向位置 0~1；-1 或缺省 → 随机
+ *   seed         (number) — 随机种子（仅随机模式生效）
  * 输出：
- *   output         (array) — 合并模式：单张网格；非合并：网格列表
- *   outputNameList (array) — 合并模式：[{id:1,name:'坡道',type:'tile'}]；非合并：每网格一条
+ *   outputGrid   (grid)   — 坡道掩码网格（坡道格为原区域值，其余为 0）
  */
 
-type NameEntry = { id: number; name: string; type?: string };
+type Grid = number[][];
 
 function hashSeed(seed: number): number {
   let h = (seed ^ 0xdeadbeef) >>> 0;
@@ -28,8 +33,18 @@ function makeLCG(seed: number): () => number {
   };
 }
 
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
+    return raw as Grid;
+  }
+  return null;
+}
+
 /**
- * 生成单个网格的坡道掩码。
+ * 生成单张网格的坡道掩码。
  *
  * @param grid         输入二维网格
  * @param rampPosition 0~1 表示固定位置比例；-1 表示随机
@@ -37,10 +52,10 @@ function makeLCG(seed: number): () => number {
  * @returns            坡道掩码网格
  */
 function generateRampMask(
-  grid: number[][],
+  grid: Grid,
   rampPosition: number,
   rng: () => number,
-): number[][] {
+): Grid {
   const H = grid.length;
   const W = H > 0 ? grid[0].length : 0;
 
@@ -63,7 +78,7 @@ function generateRampMask(
     }
   }
 
-  const ramp: number[][] = Array.from({ length: H }, () => new Array(W).fill(0));
+  const ramp: Grid = Array.from({ length: H }, () => new Array(W).fill(0));
 
   const useFixed = rampPosition >= 0 && rampPosition <= 1;
 
@@ -73,8 +88,7 @@ function generateRampMask(
     let chosen: { r: number; c: number };
 
     if (useFixed) {
-      // 按位置比例选：list 已经是从左到右排列的合法位置
-      // 先找最左和最右候选列，再按比例插值选最近的候选
+      // 按位置比例选：先按列从左到右排序，再按比例插值选最近候选
       const sortedByC = [...list].sort((a, b) => a.c - b.c);
       const targetIdx = Math.round(rampPosition * (sortedByC.length - 1));
       chosen = sortedByC[Math.max(0, Math.min(sortedByC.length - 1, targetIdx))];
@@ -94,69 +108,19 @@ function generateRampMask(
 }
 
 export function rampMaskGen(input: Record<string, unknown>): Record<string, unknown> {
-  // ── 解析输入 ──────────────────────────────────────────────────────────────
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) return { error: "inputGrid is required" };
+  if (grid.length === 0 || grid[0].length === 0) return { error: "inputGrid is empty" };
+
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
-  const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
+  const baseSeed = seedRaw === 0 ? (Date.now() & 0x7fffffff) : seedRaw;
 
   const rampPosRaw = typeof input.rampPosition === "number" ? input.rampPosition : -1;
   // -1 或超出 [0,1] 范围视为随机
   const rampPosition = rampPosRaw >= 0 && rampPosRaw <= 1 ? rampPosRaw : -1;
 
-  // merge 默认 true
-  const doMerge = input.merge !== false;
-
-  const data = input.input;
-  if (!Array.isArray(data) || data.length === 0) {
-    return { error: "input 必须是非空网格列表" };
-  }
-
-  // ── 确定列表中的每个网格 ──────────────────────────────────────────────────
-  // 支持两种格式：
-  //   1. 网格列表：data[0] 是二维数组（number[][]）
-  //   2. 单个网格（向后兼容）：data[0] 是一维数组（number[]）
-  let grids: number[][][];
-
-  if (Array.isArray(data[0]) && Array.isArray((data[0] as unknown[][])[0])) {
-    grids = data as number[][][];
-  } else if (Array.isArray(data[0])) {
-    // 单个网格包装成列表
-    grids = [data as number[][]];
-  } else {
-    return { error: "input 格式无法识别，期望二维网格列表" };
-  }
-
-  // ── 生成每个网格的坡道掩码 ────────────────────────────────────────────────
   const rng = makeLCG(baseSeed);
-  const masks = grids.map(g => generateRampMask(g, rampPosition, rng));
+  const outputGrid = generateRampMask(grid, rampPosition, rng);
 
-  // ── 合并模式：所有掩码叠加为一张网格，名称清单合并为单条 ──────────────────
-  if (doMerge) {
-    // 以最大行列数为画布，逐格取最后一个非零值（后写覆盖前写）
-    const H = Math.max(...grids.map(g => g.length));
-    const W = Math.max(...grids.map(g => (g[0]?.length ?? 0)));
-    const merged: number[][] = Array.from({ length: H }, () => new Array(W).fill(0));
-    for (const mask of masks) {
-      for (let r = 0; r < mask.length; r++) {
-        for (let c = 0; c < mask[r].length; c++) {
-          if (mask[r][c] !== 0) merged[r][c] = 1;  // 统一写 1，输出单值 01 网格
-        }
-      }
-    }
-    return {
-      output: [merged],
-      outputNameList: [{ id: 1, name: "坡道", type: "tile" }] as NameEntry[],
-    };
-  }
-
-  // ── 非合并模式：列表格式，每个网格对应一条坡道条目 ───────────────────────
-  const outputNameList: NameEntry[] = grids.map((_, i) => ({
-    id: i + 1,
-    name: `坡道_${i + 1}`,
-    type: "tile",
-  }));
-
-  return {
-    output: masks,
-    outputNameList,
-  };
+  return { outputGrid };
 }

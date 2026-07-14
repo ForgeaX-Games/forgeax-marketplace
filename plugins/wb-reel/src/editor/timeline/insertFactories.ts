@@ -234,6 +234,50 @@ export function makeInsertStickerClip(
 }
 
 /**
+ * UI 覆盖层素材拖入 —— 产出一个 image StickerClip，带 blendMode/uiAssetId(v9)。
+ *
+ * pinToScene=true → 钉到整场(endMs=场景末，Tier B 单场常驻);否则用素材默认时长(Tier A 瞬时)。
+ * 锚点/缩放取素材 defaultAnchor(缺省居中偏上)。
+ */
+export function makeInsertUiOverlay(
+  opts: InsertOpts & {
+    uiAssetId: string
+    mediaId?: string
+    blendMode?: import('../../scenario/types').UIBlendMode
+    anchor?: { x: number; y: number; scale?: number }
+    defaultDurationMs?: number
+    pinToScene?: boolean
+  },
+): StickerClip {
+  const maxStart = Math.max(0, opts.sceneDurationMs - 100)
+  const startMs = clampMs(opts.ms, 0, maxStart)
+  const endMs = opts.pinToScene
+    ? opts.sceneDurationMs
+    : clampMs(
+        startMs + (opts.defaultDurationMs ?? FX_DEFAULT_DURATION),
+        startMs + 100,
+        opts.sceneDurationMs,
+      )
+  return {
+    id: makeId('stk'),
+    startMs,
+    endMs,
+    kind: 'image',
+    mediaId: opts.mediaId,
+    uiAssetId: opts.uiAssetId,
+    blendMode: opts.blendMode,
+    pinToScene: opts.pinToScene,
+    x: opts.anchor?.x ?? 0.5,
+    y: opts.anchor?.y ?? 0.4,
+    sizePct: opts.anchor?.scale ?? 20,
+    scale: 1,
+    rotation: 0,
+    opacity: 1,
+    enter: opts.pinToScene ? undefined : 'pop',
+  }
+}
+
+/**
  * 复制台词 —— 新 id + 同步偏移。
  *
  *   offset > 0 → 紧跟原台词后面，撞墙时贴右边

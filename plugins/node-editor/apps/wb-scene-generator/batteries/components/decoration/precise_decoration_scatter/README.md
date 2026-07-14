@@ -1,6 +1,8 @@
 # 精准装饰物播撒 (precise_decoration_scatter)
 
-以指定坐标为中心，在目标区域内播撒一片自然装饰物。若中心坐标不在目标区域内，自动 BFS 就近吸附到最近的目标格，再从该落点向外播撒。
+以指定坐标为中心，在单张网格的目标区域内播撒一片自然装饰物。若中心坐标不在目标区域内，自动 BFS 就近吸附到最近的目标格，再从该落点向外播撒。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
@@ -8,7 +10,7 @@
 2. **BFS 自动吸附**：若指定坐标不在目标区域内（值不等于 targetValue），全图 BFS 搜索最近合法格并以其为新中心，保证必定能播撒。
 3. **多种装饰物**：装饰物清单支持多种类型，按列表顺序依次占用剩余目标格，前一种装饰物占用后剩余格子由后续使用。
 4. **5 种播撒算法**：random（均匀）、cluster（中心密）、ring（环形）、poisson（间距均匀）、noise（噪声斑块），适应不同自然场景风格。
-5. **格式透传**：支持单网格和网格列表输入，输出格式与输入完全一致。
+5. **多值网格输出**：每种装饰物一个递增 id 写入同一张 `outputGrid`，配合 `outputNameList` 可接 `grid_split_by_value` 拆分。
 
 ## 适用情况
 
@@ -18,8 +20,8 @@
 
 ## 基本使用方法
 
-1. 将上游地形网格接入 `grid` 端口。
-2. 在 `center` 端口输入坐标 `[x, y]`（列号, 行号）。
+1. 将上游地形网格接入 `inputGrid` 端口。
+2. 在 `center` 端口输入坐标 `[x, y]`（列号, 行号）；不填则从目标区域随机选点。
 3. 在 `decorations` 端口输入装饰物清单，格式见下方说明。
 4. 选择 `algorithm` 和调节 `scatterRadius`，按需设置 `seed`。
 
@@ -27,10 +29,9 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | any | - | 输入网格：单网格 `number[][]` 或网格列表 `number[][][]` |
-| targetValue | number | 0 | 目标区域掩码值，0 = 自动取网格最大值 |
+| inputGrid | grid | - | 单张输入网格 `number[][]`（DataTree 逐张处理，目标值自动取最大值） |
 | decorations | array | - | 装饰物清单，见下方格式说明 |
-| center | array | - | 播撒中心坐标 `[x, y]`，支持数组或 JSON 字符串 |
+| center | array | - | 播撒中心坐标 `[x, y]`，不填则随机；支持数组或 JSON 字符串 |
 | algorithm | string | "random" | 播撒算法：random / cluster / ring / poisson / noise |
 | scatterRadius | number | 12 | 播撒半径（格子数），只有在此范围内的目标格才会参与 |
 | seed | number | 0 | 随机种子，0 = 每次不同 |
@@ -39,8 +40,8 @@
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | any | 写入装饰物 ID 后的网格，格式与输入一致 |
-| decorationNameList | array | 装饰物名称清单：`[{id, name}]` |
+| outputGrid | grid | 单张多值网格：每种装饰物一个递增 id，未放置处为 0 |
+| outputNameList | array | 网格中实际出现的装饰物清单：`[{id, name, type}]`，type 固定为 asset |
 | placedCount | number | 实际放置的装饰物格子总数 |
 
 ## 装饰物清单格式
@@ -90,8 +91,7 @@
 
 ```json
 {
-  "grid": "...",
-  "targetValue": 0,
+  "inputGrid": "...",
   "center": [64, 32],
   "decorations": [
     { "decoration": "树木", "count": 25 },
@@ -108,9 +108,9 @@
 ```json
 {
   "outputGrid": "...",
-  "decorationNameList": [
-    { "id": 5, "name": "树木" },
-    { "id": 6, "name": "灌木" }
+  "outputNameList": [
+    { "id": 5, "name": "树木", "type": "asset" },
+    { "id": 6, "name": "灌木", "type": "asset" }
   ],
   "placedCount": 38
 }
@@ -119,7 +119,7 @@
 ## 注意事项
 
 1. **坐标从 0 起始**：`x` 是列号，`y` 是行号，均从 0 开始。
-2. **目标值自动推断**：`targetValue = 0` 时自动取网格当前最大值，适合大多数流水线场景。
+2. **目标值自动推断**：目标区域值自动取网格当前最大值，适合大多数流水线场景。
 3. **装饰物 ID 顺延**：新装饰物 ID 从 `gridMax + 1` 开始递增，不会与现有掩码冲突。
 4. **半径不足时**：若目标区域内可用格子少于 `count`，已有多少放多少，不会报错。
-5. **多网格模式**：网格列表输入时，同一中心坐标和装饰物清单应用于每张网格，每张使用不同随机种子保证多样性。
+5. **DataTree 逐张处理**：网格列表由引擎自动逐张 fanout，相同 `center` 与装饰物清单应用于每张网格。

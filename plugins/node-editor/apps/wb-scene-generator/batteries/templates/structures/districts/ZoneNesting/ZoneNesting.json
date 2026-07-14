@@ -2,6 +2,7 @@
   "id": "group_zonenesting_district",
   "name": "ZoneNesting",
   "nameEn": "ZoneNesting",
+  "author": "zyw",
   "nodes": [
     {
       "id": "zn_in",

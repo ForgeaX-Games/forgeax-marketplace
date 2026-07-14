@@ -398,14 +398,16 @@ body[data-pane='left'] #root {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 
 .scene-left-pane .proj-panel__list::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  width: 6px;
+}
+.scene-left-pane .proj-panel__list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
 }
 
 .scene-left-pane .proj-panel__list .proj-card {
@@ -1525,6 +1527,20 @@ body[data-pane='left'] #root {
   text-align: right;
   color: var(--color-text-primary, #f3f7ee);
   font-variant-numeric: tabular-nums;
+}
+.asp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.asp-tag {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary, #9aa4b2);
 }
 .asp-info-summary {
   font-size: 11px;

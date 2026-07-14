@@ -100,7 +100,7 @@ describe('group-templates: instantiate (one-shot template materialisation)', () 
     expect((body.opCount ?? 0)).toBeGreaterThan(0)
 
     // The materialised group node is now present in the live graph.
-    const nodes = await app.inject({ method: 'GET', url: '/api/v1/nodes' })
+    const nodes = await app.inject({ method: 'GET', url: '/api/v1/projects/main/nodes' })
     expect((nodes.json() as Array<{ id: string }>).some((n) => n.id === body.groupId)).toBe(true)
   })
 

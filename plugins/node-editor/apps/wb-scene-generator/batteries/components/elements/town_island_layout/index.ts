@@ -1,138 +1,86 @@
 /**
- * townIslandLayout: 城镇岛状布局生成器
+ * townIslandLayout: 城镇岛状布局生成器（DataTree 单网格形态）
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  *
  * 输入：
- *   inputGrid         (array)   — 源掩码网格或网格列表
+ *   inputGrid         (grid)    — 单张源掩码网格，所有非零单元格视为可生成道路的区域
  *   roadWidth         (number)  — 道路宽度，默认 1
  *   blockMinSize      (number)  — BSP块最小边长，控制路网与地块密度，默认 3
  *   shapeType         (string)  — 岛型形状：circle / ellipse / organic，默认 ellipse
  *   shapeScale        (number)  — 岛型面积占bbox面积比例（0.2–0.9），默认 0.6
  *   coverageThreshold (number)  — 地块保留覆盖率阈值（0–1），默认 0.6
  *   seed              (number)  — 随机种子（0 = 当前时间戳）
- *   merge             (boolean) — 默认 true：叠加所有输入为2张01网格（道路+地块）
  *
  * 输出：
- *   outputGridList (array) — 合并模式：[道路(id=1), 地块(id=2)]，2张01单值网格
- *                            非合并模式：[道路, 地块_pid1, 地块_pid2, ...]，每地块独立网格
- *   outputNameList (array) — 合并模式：[{id:1,name:'道路'},{id:2,name:'地块'}]
- *                            非合并模式：[{id:1,name:'道路'}, {id:pid,...}, ...]，与网格一一对应
+ *   outputGrid     (grid)  — 单张多值网格：道路=1，各地块从 2 起递增 id
+ *   outputNameList (array) — [{id:1,name:'道路'}, {id:2,name:'地块 1'}, ...]，与网格 id 一一对应
  */
 
 import { generateTownIsland, type TownIslandOptions } from "./generator";
 
-function parseInputGrids(raw: unknown): number[][][] | null {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as number[][]];
-  }
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as number[][][];
-  }
-  return null;
-}
-
-function mergeToSingleValue(grids: number[][][], id: number): number[][] {
-  if (grids.length === 0) return [];
-  const H = Math.max(...grids.map(g => g.length));
-  const W = Math.max(...grids.map(g => g[0]?.length ?? 0));
-  const out: number[][] = Array.from({ length: H }, () => new Array(W).fill(0));
-  for (const g of grids) {
-    for (let r = 0; r < g.length; r++) {
-      for (let c = 0; c < g[r].length; c++) {
-        if (g[r][c] !== 0) out[r][c] = id;
-      }
-    }
-  }
-  return out;
+/** 判断 v 是单张网格 number[][] */
+function isGrid(v: unknown): v is number[][] {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  const first = (v as unknown[])[0];
+  if (!Array.isArray(first) || (first as unknown[]).length === 0) return false;
+  return typeof (first as unknown[])[0] === "number";
 }
 
 export function townIslandLayout(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.inputGrid);
-  if (!grids) {
-    return { error: "inputGrid is required", outputGridList: [], outputNameList: [] };
+  const rawGrid = input.inputGrid;
+  if (!isGrid(rawGrid)) {
+    return { error: "inputGrid is required (number[][])", outputGrid: [], outputNameList: [] };
   }
+  const inputGrid = rawGrid as number[][];
 
   const baseSeed = typeof input.seed === "number" ? Math.round(input.seed) : 0;
-  const doMerge  = input.merge !== false;
 
-  const allRoads:   number[][][] = [];
-  const allParcels: number[][][] = [];
-  const allNameLists: { id: number; name: string; type: string }[][] = [];
+  const opts: TownIslandOptions = {
+    roadWidth:         clampInt(input.roadWidth,           1, 10,  1),
+    blockMinSize:      clampInt(input.blockMinSize,        2, 200, 3),
+    shapeType:         pickOption(input.shapeType, ["circle", "ellipse", "organic"], "ellipse"),
+    shapeScale:        clampFloat(input.shapeScale,        0.2, 0.9, 0.6),
+    coverageThreshold: clampFloat(input.coverageThreshold, 0,   1,   0.6),
+    seed:              baseSeed,
+  };
 
-  for (let i = 0; i < grids.length; i++) {
-    const inputGrid = grids[i];
-    if (!Array.isArray(inputGrid) || inputGrid.length === 0) continue;
+  const { road, parcels, nameList } = generateTownIsland(inputGrid, opts);
+  const rows = road.length;
+  const cols = road[0]?.length ?? 0;
 
-    const opts: TownIslandOptions = {
-      roadWidth:         clampInt(input.roadWidth,           1, 10,  1),
-      blockMinSize:      clampInt(input.blockMinSize,        2, 200, 3),
-      shapeType:         pickOption(input.shapeType, ["circle", "ellipse", "organic"], "ellipse"),
-      shapeScale:        clampFloat(input.shapeScale,        0.2, 0.9, 0.6),
-      coverageThreshold: clampFloat(input.coverageThreshold, 0,   1,   0.6),
-      seed:              baseSeed === 0 ? 0 : baseSeed + i * 1000003,
-    };
-
-    const { road, parcels, nameList } = generateTownIsland(inputGrid, opts);
-    allRoads.push(road);
-    allParcels.push(parcels);
-    allNameLists.push(nameList);
+  // 单张多值网格：道路 id=1，各地块 pid 重映射为 2,3,4...
+  const ROAD_ID = 1;
+  const pidToId = new Map<number, number>();
+  let nextId = 2;
+  const outputNameList: { id: number; name: string; type: string }[] = [
+    { id: ROAD_ID, name: "道路", type: "tile" },
+  ];
+  for (const entry of nameList) {
+    const newId = nextId++;
+    pidToId.set(entry.id, newId);
+    outputNameList.push({ id: newId, name: entry.name, type: entry.type });
   }
 
-  // ── 合并模式：道路叠一张(id=1)，地块叠一张(id=2)，固定2条名称清单 ──────────
-  if (doMerge) {
-    return {
-      outputGridList: [
-        mergeToSingleValue(allRoads,   1),
-        mergeToSingleValue(allParcels, 2),
-      ],
-      outputNameList: [
-        { id: 1, name: "道路", type: "tile" },
-        { id: 2, name: "地块", type: "tile" },
-      ],
-    };
-  }
-
-  // ── 非合并模式：地块按 pid 炸开，每个地块一张独立单值网格 ────────────────────
-  // 输出顺序：[道路, 地块_pid1, 地块_pid2, ..., 道路, ...]（多输入时按输入顺序追加）
-  // 名称清单：[{id:1,name:'道路'}, {id:pid1,...}, {id:pid2,...}, ...]
-  const outputGridList: number[][][] = [];
-  const outputNameList: { id: number; name: string; type: string }[] = [];
-
-  for (let i = 0; i < allRoads.length; i++) {
-    const road    = allRoads[i];
-    const parcels = allParcels[i];
-    const nameList = allNameLists[i];
-
-    const rows = road.length;
-    const cols = road[0]?.length ?? 0;
-
-    // 道路：格子值写 1，名称清单 id=1
-    const roadGrid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (road[r][c] !== 0) roadGrid[r][c] = 1;
+  const outputGrid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const pid = parcels[r][c];
+      if (pid > 0 && pidToId.has(pid)) {
+        outputGrid[r][c] = pidToId.get(pid)!;
+      } else if (road[r][c] !== 0) {
+        outputGrid[r][c] = ROAD_ID;
       }
     }
-    outputGridList.push(roadGrid);
-    if (!outputNameList.some(e => e.id === 1)) {
-      outputNameList.push({ id: 1, name: "道路", type: "tile" });
-    }
-
-    // 每个地块独立拆成一张网格，格子值 = pid，名称清单一一对应
-    for (const entry of nameList) {
-      const pid = entry.id;
-      const parcelGrid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (parcels[r][c] === pid) parcelGrid[r][c] = pid;
-        }
-      }
-      outputGridList.push(parcelGrid);
-      outputNameList.push(entry);
-    }
   }
 
-  return { outputGridList, outputNameList };
+  // 仅保留实际出现的条目（道路或地块可能为空）
+  const present = new Set<number>();
+  for (const rowArr of outputGrid) for (const v of rowArr) if (v !== 0) present.add(v);
+  const filteredNameList = outputNameList.filter(e => present.has(e.id));
+
+  return { outputGrid, outputNameList: filteredNameList };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

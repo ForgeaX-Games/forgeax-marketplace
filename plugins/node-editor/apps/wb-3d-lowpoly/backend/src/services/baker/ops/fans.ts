@@ -1,7 +1,7 @@
 /**
  * Fans 家族 —— fan_rotor / blower_wheel。
  *
- * articraft 暴露给 DSL 的子集只包含 body 几何，没有 FanRotorBlade / FanRotorHub /
+ * DSL 暴露的子集只包含 body 几何，没有 FanRotorBlade / FanRotorHub /
  * FanRotorShroud / BlowerWheel 之子规格。v1 全部使用默认值：
  *   fan_rotor : blade.shape=straight, hub.style=flat, no shroud, no bore
  *   blower_wheel: 跳过 drum_window 切口（次要可视细节，主拓扑不影响）
@@ -156,7 +156,7 @@ export const fanRotor: OpBuilder = (ctx, args) => {
   if (Math.max(rootChord, tipChord) >= outerR * 1.6)
     throw new BakerError('fan_rotor: blade chords are too large for the rotor envelope');
 
-  // v1 defaults（articraft FanRotorBlade / FanRotorHub）：
+  // v1 defaults（FanRotorBlade / FanRotorHub）：
   // blade.shape="straight" → chord_scale=1.0, sweep_factor(t)=t, skew_gain=0
   // hub.style="flat" → 无 front cap
   const tipPitchDeg = pitchDeg * 0.56;

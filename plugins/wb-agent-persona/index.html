@@ -482,7 +482,7 @@ const UI = {
     noOwnTool: 'No bundled tools',
     noProduces: 'No produces declared',
     wbPluginsTitle: 'Matching workbench plugins',
-    wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-plugin.json under provides.workbench:',
+    wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-extension.json under provides.workbench:',
     wbMatchCount: 'Matching workbench plugins ({n})',
     diaryHint: 'Long-term memory from {owner}, shown as a diary. Read-only — switch to Source mode above to edit.',
     memFallback: 'No {lang} memory yet — showing the other language. Saving creates the {lang} copy.',
@@ -550,7 +550,7 @@ const UI = {
     noOwnTool: '无自带 tool',
     noProduces: '未声明 produces',
     wbPluginsTitle: '配套 workbench 插件',
-    wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-plugin.json 的 provides.workbench 加一行：',
+    wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-extension.json 的 provides.workbench 加一行：',
     wbMatchCount: '配套 workbench 插件 ({n})',
     diaryHint: '这是 {owner} 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
     memFallback: '暂无{lang}记忆，显示另一种语言的原文。保存后会生成{lang}副本。',
@@ -788,7 +788,7 @@ const GROUP_REGISTRY = [
     // Producer family — mirrors agent-groups.ts. NOTE: the canonical TS
     // registry leads this group with `forge` (主线制作人), but `forge` is a
     // runtime orchestrator alias that has NO persona plugin, so it never
-    // appears in this iframe's `/api/bus/plugins?kind=agent` source. Here the
+    // appears in this iframe's `/api/extensions/list?kind=agent` source. Here the
     // group degrades to lead=`arin` (the editable 制作人 persona) with
     // forgeax-default folded under it — same lead+indented-subs treatment as
     // the art family.
@@ -826,7 +826,7 @@ const GROUP_REGISTRY = [
     // Scene-asset pipeline family — mirrors agent-groups.ts. `director`
     // (场景总监) leads, delegating to `sino` (场景构图) + `mira` (2D 资产).
     // Unlike producer-family, `director` is a real agent plugin so it shows
-    // up in /api/bus/plugins?kind=agent — no lead degradation needed.
+    // up in /api/extensions/list?kind=agent — no lead degradation needed.
     // `mira` moved here out of art-family.
     id: 'scene-pipeline-family',
     kind: 'subagent-family',
@@ -871,8 +871,8 @@ async function loadAgents() {
     // ADR-0019: 第三个 fetch 拿 avatarRules. server `/api/workbench/agents` 已经把
     // AVATAR.md 解析好挂在 agent.avatarRules 上, 我们只需要按 short id 索引一下.
     const [aRes, wRes, wbAgRes] = await Promise.all([
-      fetch('/api/bus/plugins?kind=agent'),
-      fetch('/api/bus/plugins?kind=workbench'),
+      fetch('/api/extensions/list?kind=agent'),
+      fetch('/api/extensions/list?kind=workbench'),
       fetch(`/api/workbench/agents?lang=${locale}`),
     ]);
     if (!aRes.ok) { setStatus('persona-status', t('agentListFailed', { status: aRes.status }), 'warn'); return; }
@@ -1651,7 +1651,7 @@ function escapeHtml(s) {
 const SELECTED_LS_KEY = 'wb-agent-persona:selected-agent-id';
 
 // Resolve a host-supplied id (either short `iori` from /api/workbench/agents,
-// or full `@forgeax-plugin/agent-iori` plugin id) to a real agent in our list.
+// or full `@forgeax-extension/agent-iori` plugin id) to a real agent in our list.
 function resolveAgentId(input) {
   if (!input) return null;
   // Legacy orchestrator alias — no persona plugin; degrade to arin (see GROUP_REGISTRY).

@@ -15,6 +15,20 @@
 
 **典型位置：管线最起点**（紧接 `empty_scene` 之后）。它取代了过去"手搓 `rect_grid` + `grid2node` 铺初始草地"的旧起手式——基础网格的尺寸/底图/挂接/聚焦都封装在这一个模板组里。
 
+## ⚠️ 易错：`in_1` 与 `in_4` 千万别对调
+
+| 口 | 语义 | 接什么 | 示例 |
+|----|------|--------|------|
+| **`in_1`** | **BaseName** 场景树**节点名** | 叙事/世界名 | `"京畿南境驿道"` |
+| **`in_4`** | **BaseAsset** catalog **底图 tile** | prefab itemName | `"草地"` |
+
+**接反症状**：execute 可能 `completed`，但体素全 0 / 无底图 tile → M1+ 全空。
+
+- ❌ `in_1` ← `"草地"`（这是 tile，不是节点名）
+- ❌ `in_4` ← `"京畿南境驿道"`（这是场景名，不是 catalog 资产）
+
+checklist 字段：`baseName` → `in_1`；`baseAsset` → `in_4`。
+
 ## 输入端口（IN）
 
 可见（非 hidden）端口（"怎么喂"= 用哪个上游电池经 `node connect` / `connect` op 接上；portType 决定喂进去的数据格式）：
@@ -22,10 +36,10 @@
 | portName | portType | 语义 | 是否必接 | 怎么喂（来源电池 → 本端口） | 数据格式（DataTree.items） |
 |---|---|---|---|---|---|
 | `in_0` | scene | **RootScene** 挂接起点（接上游场景） | **必接** | 第一块基础网格：`empty_scene.scene` → `in_0`；多区域拼接：上一块 `AddBaseGrid.out_2`（RootScene） → `in_0` | scene 树 `{tree:{name,children,...}}` |
-| `in_1` | string | **BaseName** 基础网格节点名 | 建议接 | `text_panel.output` → `in_1` | 字符串，如 `"ground"` |
+| `in_1` | string | **BaseName** 基础网格**节点名**（叙事/世界名，不是 tile） | 建议接 | `text_panel.output` → `in_1` | 字符串，如 `"京畿南境驿道"` |
 | `in_2` | number | **Width** 网格宽度 | 建议接 | `number_const.value` → `in_2` | 数值，如 `50` |
 | `in_3` | number | **Height** 网格高度 | 建议接 | `number_const.value` → `in_3` | 数值，如 `50` |
-| `in_4` | string(tree) | **BaseAsset** 底图资产名 | 可选（推荐） | `text_panel.output` → `in_4` | 字符串，如 `"grassland"` |
+| `in_4` | string(tree) | **BaseAsset** 底图 **catalog itemName**（tile，不是场景名） | 可选（推荐） | `text_panel.output` → `in_4` | 字符串，如 `"草地"` |
 
 > 隐藏高级端口：`in_5`（schema）、`in_6`（token）、`in_7`（zRange）、`in_8`（fillValue）——网格 schema / 鉴权 token / 高程范围 / 填充值等高级调参，**默认即可、日常不接**。
 >
@@ -39,6 +53,33 @@
 | `out_2` | scene | **RootScene**（整棵根场景透传） | → 下一块 `AddBaseGrid.in_0`（多区域）；→ `tree_merge`（整根汇总） |
 | `out_3` | string | **BaseNodePath**（基础网格节点路径句柄） | 一般不接 |
 | `out_0` | scene | 原始 grid scene（grid2node 直出，**未 focus**） | **❌ 装饰链不要接**；日常不用 |
+
+> 输入/输出命令写法标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。
+
+## 如何用命令消费输出（输出侧）
+
+| 本端口 | 下游场景 | 白名单 opId + connect |
+|--------|----------|------------------------|
+| **`out_1` BaseNode** | 后续模板 `in_0`（AreaPartition / 建筑 / 装饰…） | 直接 `connect`：`verify_abg.out_1` → `<Next>.in_0` |
+| **`out_2` RootScene** | 多区域拼接下一块 `AddBaseGrid.in_0`；最终 `tree_merge` | `connect` → 下一块 `in_0` 或 `m0_merge.item_*` |
+| **`out_3` BaseNodePath** | 按路径聚焦到基础网格节点 | `text_panel` 或已知 path → **`scene_focus_path`**(scene+path) |
+| `out_0` raw grid | — | **禁止**作为装饰/分区入口（无 focus，语义错误） |
+
+**模式 · 单 BaseNode 再施工（最常见）：**
+
+```json
+{ "type": "connect", "edgeId": "e_abg2ap",
+  "source": { "nodeId": "<G_ABG>", "port": "out_1" },
+  "target": { "nodeId": "<G_AP>", "port": "in_0" } }
+```
+
+**模式 · 多区域拼接：** 第一块 `out_2` → 第二块 `in_0`；各块 `out_1` 分别接不同功能组。
+
+**读回：**
+
+```bash
+curl -s …/execute -d '{}' | jq '.outputs.<G_ABG>.out_1[0].items[0].tree.children[0] | {name, cells:(.cells|length)}'
+```
 
 ## 推荐参数与设置考虑要素
 
@@ -64,7 +105,7 @@
 { "type":"createNode","nodeId":"base_name",  "opId":"text_panel",  "position":{"x":-1300,"y":120},"params":{"text":"ground"} },        // BaseName
 { "type":"createNode","nodeId":"base_w",     "opId":"number_const","position":{"x":-1300,"y":240},"params":{"value":50} },             // Width
 { "type":"createNode","nodeId":"base_h",     "opId":"number_const","position":{"x":-1300,"y":360},"params":{"value":50} },             // Height
-{ "type":"createNode","nodeId":"base_asset", "opId":"text_panel",  "position":{"x":-1300,"y":480},"params":{"text":"grassland"} },     // BaseAsset = 底图图层名
+{ "type":"createNode","nodeId":"base_asset", "opId":"text_panel",  "position":{"x":-1300,"y":480},"params":{"text":"草地"} },     // BaseAsset = catalog tile 名（非 grassland 别名）
 // in_0=RootScene 接空场景；in_1=BaseName；in_2/in_3=Width/Height；in_4=BaseAsset
 { "type":"connect","edgeId":"e_bg_scene","source":{"nodeId":"empty","port":"scene"},       "target":{"nodeId":"<G_BASE>","port":"in_0"} },
 { "type":"connect","edgeId":"e_bg_name", "source":{"nodeId":"base_name","port":"output"},  "target":{"nodeId":"<G_BASE>","port":"in_1"} },
@@ -90,7 +131,7 @@ forgeax node create --node-id empty      --op empty_scene  --params '{}'        
 forgeax node create --node-id base_name  --op text_panel   --params '{"text":"ground"}'   --x -1300 --y 120 $G --batteries $BATT
 forgeax node create --node-id base_w     --op number_const --params '{"value":50}'        --x -1300 --y 240 $G --batteries $BATT
 forgeax node create --node-id base_h     --op number_const --params '{"value":50}'        --x -1300 --y 360 $G --batteries $BATT
-forgeax node create --node-id base_asset --op text_panel   --params '{"text":"grassland"}' --x -1300 --y 480 $G --batteries $BATT
+forgeax node create --node-id base_asset --op text_panel   --params '{"text":"草地"}' --x -1300 --y 480 $G --batteries $BATT
 # 3) 连线（--from/--to 用 node:port）
 forgeax node connect --edge-id e_bg_scene --from empty:scene       --to base:in_0 $G
 forgeax node connect --edge-id e_bg_name  --from base_name:output  --to base:in_1 $G
@@ -140,5 +181,63 @@ forgeax pipeline execute --batteries $BATT $G \
 - **RootScene（`out_2`）** 的树里挂着这个基础网格节点（多区域时挂着多块）。
 
 看到以 BaseName 命名、带 BaseAsset tile 的基础网格节点出现，即说明起点正确，可接后续模板组（其 `in_0` 接本组 `out_1`）。
+
+---
+
+## 已验证调用示例（project `p_mr3flg6p_io9iu4` · 2026-07-02）
+
+**四拍**：`instantiateTemplate` → 一条 `applyBatch` 连完 → `execute` → jq 读端口。
+
+### 1) 实例化
+
+```json
+{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+  "args":{ "projectId":"p_mr3flg6p_io9iu4", "templateId":"AddBaseGrid", "groupId":"verify_abg",
+           "position":{"x":-400,"y":0}, "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid"} } }
+```
+
+### 2) M0 起手 + 出口链（一条 applyBatch）
+
+```json
+{
+  "projectId": "p_mr3flg6p_io9iu4",
+  "opts": { "actor": "ai:sino", "label": "M0 AddBaseGrid + export" },
+  "ops": [
+    { "type": "createNode", "nodeId": "m0_empty", "opId": "empty_scene", "params": {} },
+    { "type": "createNode", "nodeId": "m0_name", "opId": "text_panel", "params": { "text": "大昭九州" } },
+    { "type": "createNode", "nodeId": "m0_w", "opId": "number_const", "params": { "value": 73 } },
+    { "type": "createNode", "nodeId": "m0_h", "opId": "number_const", "params": { "value": 73 } },
+    { "type": "createNode", "nodeId": "m0_asset", "opId": "text_panel", "params": { "text": "草地" } },
+    { "type": "createNode", "nodeId": "m0_seed", "opId": "seed_control", "params": { "seed": 42 } },
+    { "type": "createNode", "nodeId": "m0_merge", "opId": "tree_merge", "params": { "inferredAccess": "tree", "inferredType": "scene", "portCount": 1 } },
+    { "type": "createNode", "nodeId": "m0_flatten", "opId": "tree_flatten", "params": {} },
+    { "type": "createNode", "nodeId": "m0_compose", "opId": "scene_merge_subtrees", "params": {} },
+    { "type": "createNode", "nodeId": "m0_output", "opId": "scene_output", "params": {} },
+    { "type": "connect", "edgeId": "e_m0_empty2abg", "source": { "nodeId": "m0_empty", "port": "scene" }, "target": { "nodeId": "verify_abg", "port": "in_0" } },
+    { "type": "connect", "edgeId": "e_m0_name2abg", "source": { "nodeId": "m0_name", "port": "output" }, "target": { "nodeId": "verify_abg", "port": "in_1" } },
+    { "type": "connect", "edgeId": "e_m0_w2abg", "source": { "nodeId": "m0_w", "port": "value" }, "target": { "nodeId": "verify_abg", "port": "in_2" } },
+    { "type": "connect", "edgeId": "e_m0_h2abg", "source": { "nodeId": "m0_h", "port": "value" }, "target": { "nodeId": "verify_abg", "port": "in_3" } },
+    { "type": "connect", "edgeId": "e_m0_asset2abg", "source": { "nodeId": "m0_asset", "port": "output" }, "target": { "nodeId": "verify_abg", "port": "in_4" } },
+    { "type": "connect", "edgeId": "e_m0_seed2abg", "source": { "nodeId": "m0_seed", "port": "seed" }, "target": { "nodeId": "verify_abg", "port": "in_8" } },
+    { "type": "connect", "edgeId": "e_m0_abg2merge", "source": { "nodeId": "verify_abg", "port": "out_2" }, "target": { "nodeId": "m0_merge", "port": "item_0" } },
+    { "type": "connect", "edgeId": "e_m0_merge2flat", "source": { "nodeId": "m0_merge", "port": "tree" }, "target": { "nodeId": "m0_flatten", "port": "tree" } },
+    { "type": "connect", "edgeId": "e_m0_flat2compose", "source": { "nodeId": "m0_flatten", "port": "tree" }, "target": { "nodeId": "m0_compose", "port": "scenes" } },
+    { "type": "connect", "edgeId": "e_m0_compose2out", "source": { "nodeId": "m0_compose", "port": "scene" }, "target": { "nodeId": "m0_output", "port": "scene" } }
+  ]
+}
+```
+
+### 3) 验收（headless）
+
+```bash
+curl -s -H 'content-type: application/json' -X POST \
+  http://127.0.0.1:9557/api/v1/projects/p_mr3flg6p_io9iu4/execute -d '{}' \
+  | jq '.outputs.verify_abg.out_1[0].items[0].tree.children[0] | {name, cells:(.cells|length)}'
+# 预期：name="大昭九州", cells=5329
+```
+
+**Studio 可视化**：打开 http://127.0.0.1:18920 → wb-scene-generator → 项目 `battery-verify-20260702`（id `p_mr3flg6p_io9iu4`）→ Execute → Preview 应见 73×73 草地底图。
+
+> 完整 ops 与报告见 `aw-support/battery-verify/p_mr3flg6p_io9iu4/step-m0-addbasegrid.json`。
 
 > ⚠️ **绝不要整体打印 `outputs`**：整图 execute 的 outputs 可能极大（含全 voxel 网格），会刷屏 / 爆上下文。**必须用 jq 投影到具体 `nodeId.portName`**，scene 端口只取 `.[0].items[0].tree.children[].name` 之类摘要。

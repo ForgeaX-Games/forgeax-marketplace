@@ -60,7 +60,7 @@ function genId(): string {
   return `e-${Date.now().toString(36)}-${counter.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const PLUGIN_ID = '@forgeax-plugin/wb-anim';
+const PLUGIN_ID = '@forgeax-extension/wb-anim';
 const FROM = { kind: 'plugin' as const, pluginId: PLUGIN_ID };
 
 interface PendingReq {

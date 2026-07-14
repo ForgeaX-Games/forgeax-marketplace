@@ -7,7 +7,7 @@
 //   * history.jsonl chain validation
 //   * outputs/<id>/<port>.json read/write/invalidate
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -206,6 +206,45 @@ describe('OutputCache', () => {
     expect(cache.read('n1', 'out1')).toBeNull()
   })
 
+  it('pruneOrphans removes cache dirs whose node id is not in the graph', () => {
+    const cache = new OutputCache(join(scratchDir, 'outputs'))
+    cache.write('alive', 'out', {
+      valid: true,
+      executedAt: '2026-01-01T00:00:00Z',
+      executedHash: 'abc',
+      type: 'string',
+      data: 1,
+    })
+    cache.write('stranded_inner', 'out', {
+      valid: true,
+      executedAt: '2026-01-01T00:00:00Z',
+      executedHash: 'abc',
+      type: 'string',
+      data: 2,
+    })
+    expect(cache.pruneOrphans(new Set(['alive']))).toBe(1)
+    expect(cache.read('alive', 'out')).not.toBeNull()
+    expect(cache.read('stranded_inner', 'out')).toBeNull()
+  })
+
+  it('pruneByRetention drops oversized dirs and caps count', () => {
+    const cache = new OutputCache(join(scratchDir, 'outputs'))
+    cache.write('keep', 'out', {
+      valid: true,
+      executedAt: '2026-01-01T00:00:00Z',
+      executedHash: 'a',
+      type: 'string',
+      data: 1,
+    })
+    const hugeDir = join(scratchDir, 'outputs', 'huge')
+    mkdirSync(hugeDir, { recursive: true })
+    writeFileSync(join(hugeDir, 'x.bin'), Buffer.alloc(200 * 1024))
+    const pruned = cache.pruneByRetention({ maxDirBytes: 128 * 1024, maxNodeDirs: 10 })
+    expect(pruned.removed).toBe(1)
+    expect(cache.read('keep', 'out')).not.toBeNull()
+    expect(existsSync(hugeDir)).toBe(false)
+  })
+
   // Large DataTreeEntry[] payloads must round-trip without ever building a
   // string near V8's single-string limit. The wire shape is sharded one chunk
   // per (branch-path, item); read regroups it back into identical entries.
@@ -270,6 +309,51 @@ describe('OutputCache', () => {
     expect(meta.dataChunks).toBeUndefined()
     expect(meta.data).toEqual(data)
     expect(cache.read('s', 'out')?.data).toEqual(data)
+  })
+
+  it('writes voxel cells in compact encoding on disk and expands on read', () => {
+    const cache = new OutputCache(join(scratchDir, 'outputs'))
+    const cells = [
+      { x: 0, y: 0, z: 0, token: 'ground' },
+      { x: 3, y: 1, z: 2, token: 'wall' },
+    ]
+    const data = [
+      {
+        path: [0],
+        items: [
+          {
+            tree: {
+              name: '',
+              path: '/',
+              version: 1,
+              children: [
+                {
+                  name: 'L',
+                  path: '/L',
+                  version: 1,
+                  schema: 'layer',
+                  cells,
+                  children: [],
+                },
+              ],
+            },
+            focus: '/L',
+          },
+        ],
+      },
+    ]
+    cache.write('scene', 'out', {
+      valid: true,
+      executedAt: '2026-01-01T00:00:00Z',
+      executedHash: 'abc',
+      type: 'scene',
+      data,
+    })
+    const onDisk = JSON.parse(readFileSync(cache.jsonPath('scene', 'out'), 'utf-8')) as Record<string, unknown>
+    const diskData = onDisk.data as Array<{ items: Array<{ tree: { children: Array<{ cells: unknown }> } }> }>
+    const diskCells = diskData[0]?.items[0]?.tree.children[0]?.cells
+    expect(diskCells).toMatchObject({ __voxelCells: 1 })
+    expect(cache.read('scene', 'out')?.data).toEqual(data)
   })
 
   it('clears a stale shard dir when a later write is small (no resurrection)', () => {

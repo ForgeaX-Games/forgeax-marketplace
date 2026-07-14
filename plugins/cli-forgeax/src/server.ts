@@ -1,4 +1,4 @@
-// P3.0+ placeholder entry shim — @forgeax-plugin/cli-forgeax (kind=cli-provider)
+// P3.0+ placeholder entry shim — @forgeax-extension/cli-forgeax (kind=cli-provider)
 // modules/02 §530 schemaValidation step #3 requires entry.backend file to exist.
 // Phase 6+ will replace this with the actual ChatRequest runner shim that
 // forgeax chat --stream subprocess 适配 (走 packages/cli). Until then: import is side-effect free (no top-level throw,
@@ -13,7 +13,7 @@ export interface CliProviderHandle {
 }
 
 const PHASE_6_PLUS_MESSAGE =
-  "[Phase 6+ shim] @forgeax-plugin/cli-forgeax · CliProvider runner 未实现。" +
+  "[Phase 6+ shim] @forgeax-extension/cli-forgeax · CliProvider runner 未实现。" +
   "当前为 marketplace placeholder · Phase 6+ 拆 plugin 时填实际 forgeax chat --stream subprocess 适配 (走 packages/cli)";
 
 export function activate(_ctx: unknown): CliProviderHandle {

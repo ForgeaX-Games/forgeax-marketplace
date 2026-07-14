@@ -7,7 +7,7 @@
 //
 //   switchProject(id):
 //     1. persistSession()            ← flush the outgoing project's canvas
-//     2. api.activateProject(id)     ← server swaps the active runtime/storage
+//     2. api.viewProject(id)        ← server sets the UI viewing target
 //     3. reset node outputs / dynamic ports / selection / group view
 //     4. loadPipeline()              ← pipelineRevision++ → useCanvasGraphSync
 //                                       reconcile rebuild → preview refresh
@@ -17,38 +17,90 @@
 //
 // Steps 1–7 reuse the SAME paths every other actor uses (loadPipeline →
 // graph:applied → reconcile), so no editor behaviour is regressed. The app
-// (e.g. scene-generator) observes `activeProjectId` to clear/reload its preview
+// (e.g. scene-generator) observes `viewingProjectId` to clear/reload its preview
 // iframe (the renderer `projectChanged` signal) — that wiring stays app-level.
 
 import { create } from 'zustand'
 
 import type { CreateProjectRequest } from '../../api/ApiClient.js'
-import type { ProjectMeta } from '@forgeax/node-runtime'
+import type { ProjectMeta, WorkspaceState } from '@forgeax/node-runtime'
 
 import { getEditorTransport } from '../transport/index.js'
 import { useHistoryStore } from './historyStore.js'
-import { usePipelineStore } from './pipelineStore.js'
+import {
+  cancelDeferredProjectSwitchOutputRefresh,
+  clearOutputMetaCache,
+  usePipelineStore,
+} from './pipelineStore.js'
 import { useUIStore } from './uiStore.js'
+
+function resetPipelineUiForProjectSwitch(): void {
+  cancelDeferredProjectSwitchOutputRefresh()
+  clearOutputMetaCache()
+  usePipelineStore.setState({
+    nodeOutputs: {},
+    dynamicOutputPorts: {},
+    pipelineStatus: 'idle',
+    selectedNode: null,
+    selectedNodeIds: [],
+    pendingSelectNodeIds: null,
+    groupViewStack: [],
+  })
+}
+
+function refreshOutputsAfterProjectSwitch(_agentBusy: boolean): void {
+  // Always hydrate the viewing project from server-retained outputs. Agents
+  // executing on *other* projects must not defer or skip this — that left the
+  // preview blank until every unrelated session went idle.
+  cancelDeferredProjectSwitchOutputRefresh()
+  void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
+}
+
+function reloadHistoryAfterProjectSwitch(agentBusy: boolean): void {
+  const { api } = getEditorTransport()
+  useHistoryStore.getState().clearHistory()
+  if (agentBusy) {
+    void api
+      .getHistory()
+      .then((entries) => useHistoryStore.getState().hydrate(entries))
+      .catch((e) => console.warn('[projectStore] deferred history reload failed:', e))
+    return
+  }
+  void (async () => {
+    try {
+      useHistoryStore.getState().hydrate(await api.getHistory())
+    } catch (e) {
+      console.warn('[projectStore] history reload after switch failed:', e)
+      useHistoryStore.getState().clearHistory()
+    }
+  })()
+}
+
+function viewingIdFromWorkspace(workspace: WorkspaceState | null | undefined): string | null {
+  if (!workspace) return null
+  return workspace.viewingProjectId ?? (workspace as { activeProjectId?: string | null }).activeProjectId ?? null
+}
 
 interface ProjectState {
   projects: ProjectMeta[]
-  activeProjectId: string | null
+  viewingProjectId: string | null
+  executingProjectIds: string[]
   recentProjectIds: string[]
   isLoading: boolean
   isSwitching: boolean
   error: string | null
 
-  /** Load the project list + workspace, syncing the active project type. */
+  /** Load the project list + workspace, syncing the viewing project type. */
   fetchProjects: () => Promise<void>
-  /** fetchProjects then open the active project (cold boot). */
+  /** fetchProjects then open the viewing project (cold boot). */
   bootstrap: () => Promise<void>
-  /** Open a project: the full faithful cascade (flush → activate → reconcile → clearHistory). */
+  /** Open a project: the full faithful cascade (flush → view → reconcile → clearHistory). */
   switchProject: (id: string) => Promise<void>
   /**
-   * Listen for `project:activated` broadcast by the backend when ANOTHER client
-   * (a sibling iframe, or an agent tool) switches the active project, and
-   * re-sync this client to it. Returns an unsubscribe. Wire alongside
-   * pipelineStore.subscribeLiveSync at boot.
+   * Listen for `project:viewing` (and legacy `project:activated`) broadcast by
+   * the backend when ANOTHER client switches the viewing project, and re-sync
+   * this client to it. Also tracks `project:executing` for agent lock badges.
+   * Returns an unsubscribe. Wire alongside pipelineStore.subscribeLiveSync at boot.
    */
   subscribeProjectActivation: () => () => void
   /** Create a project then open it. */
@@ -61,7 +113,8 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
-  activeProjectId: null,
+  viewingProjectId: null,
+  executingProjectIds: [],
   recentProjectIds: [],
   isLoading: false,
   isSwitching: false,
@@ -72,15 +125,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const { api } = getEditorTransport()
       const [projects, workspace] = await Promise.all([api.listProjects(), api.getWorkspace()])
-      const activeProjectId = workspace?.activeProjectId ?? null
+      const viewingProjectId = viewingIdFromWorkspace(workspace)
       set({
         projects: [...projects],
-        activeProjectId,
+        viewingProjectId,
+        executingProjectIds: workspace?.executingProjectIds ?? [],
         recentProjectIds: workspace?.recentProjectIds ?? [],
       })
-      // Keep the battery filter aligned with the active project's type.
-      const active = projects.find((p) => p.id === activeProjectId)
-      useUIStore.getState().setActiveProjectType(active?.type ?? null)
+      const viewing = projects.find((p) => p.id === viewingProjectId)
+      useUIStore.getState().setActiveProjectType(viewing?.type ?? null)
     } catch (e) {
       set({ error: (e as Error).message })
     } finally {
@@ -90,61 +143,59 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   bootstrap: async () => {
     await get().fetchProjects()
-    const activeId = get().activeProjectId
-    if (activeId) {
-      await get().switchProject(activeId)
+    const viewingId = get().viewingProjectId
+    if (viewingId) {
+      await get().switchProject(viewingId)
     }
   },
 
   switchProject: async (id: string) => {
     if (get().isSwitching) return
+    // Page refresh: fetchProjects already set viewingProjectId, but the graph /
+    // nodeOutputs cache are empty — still run the full open cascade (viewProject,
+    // loadPipeline, refreshConnectedOutputs). Skip only when this project is
+    // already loaded in memory (user re-clicking the same row in the panel).
+    if (id === get().viewingProjectId && usePipelineStore.getState().currentPipeline) return
     set({ isSwitching: true, error: null })
     try {
       const { api } = getEditorTransport()
+      const leavingId = get().viewingProjectId
+      const agentBusy = get().executingProjectIds.length > 0
+      const leavingIsExecuting =
+        leavingId != null && get().executingProjectIds.includes(leavingId)
 
-      // 1. Flush the OUTGOING project's canvas before we swap storage.
-      try {
-        await usePipelineStore.getState().persistSession()
-      } catch (e) {
-        console.warn('[projectStore] persistSession before switch failed:', e)
+      if (!leavingIsExecuting) {
+        try {
+          await usePipelineStore.getState().persistSession()
+        } catch (e) {
+          console.warn('[projectStore] persistSession before switch failed:', e)
+        }
       }
 
-      // 2. Server swaps the active runtime → its isolated graph/history/outputs.
-      const { project } = await api.activateProject(id)
+      const view = api.viewProject ?? api.activateProject
+      if (!view) throw new Error('[projectStore] transport does not support viewProject')
+      const { project, pipeline } = await view.call(api, id)
 
-      // 3. Reset transient per-pipeline editor state (outputs/ports/selection).
-      usePipelineStore.setState({
-        nodeOutputs: {},
-        dynamicOutputPorts: {},
-        pipelineStatus: 'idle',
-        selectedNode: null,
-        selectedNodeIds: [],
-        pendingSelectNodeIds: null,
-        groupViewStack: [],
-      })
+      set({ viewingProjectId: id })
+      resetPipelineUiForProjectSwitch()
 
-      // 4. Load the activated project's graph → pipelineRevision++ → reconcile.
-      await usePipelineStore.getState().loadPipeline()
-      void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
-
-      // 5. Rebuild the history panel from the INCOMING project's persistent log
-      // (history.jsonl). Hydrated rows are display-only; the live undo stack does
-      // not cross projects. Degrade to a clear if the log can't be read.
-      try {
-        useHistoryStore.getState().hydrate(await api.getHistory())
-      } catch (e) {
-        console.warn('[projectStore] history reload after switch failed:', e)
-        useHistoryStore.getState().clearHistory()
+      if (pipeline) {
+        usePipelineStore.getState().hydratePipelineFromSnapshot(pipeline)
+      } else {
+        await usePipelineStore.getState().loadPipeline()
       }
 
-      // 6. Keep the battery palette filter correct for the new project type.
+      refreshOutputsAfterProjectSwitch(agentBusy)
+      reloadHistoryAfterProjectSwitch(agentBusy)
+
       useUIStore.getState().setActiveProjectType(project?.manifest?.type ?? null)
 
-      set({ activeProjectId: id })
-
-      // 7. Refresh the recent list from the authoritative workspace doc.
-      const ws = await api.getWorkspace()
-      set({ recentProjectIds: ws?.recentProjectIds ?? [] })
+      void api.getWorkspace().then((ws) => {
+        set({
+          recentProjectIds: ws?.recentProjectIds ?? [],
+          executingProjectIds: ws?.executingProjectIds ?? get().executingProjectIds,
+        })
+      })
     } catch (e) {
       console.error('[projectStore] switchProject failed:', e)
       set({ error: (e as Error).message })
@@ -156,48 +207,81 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   subscribeProjectActivation: () => {
     const { ws } = getEditorTransport()
     ws.connect()
-    return ws.on('project:activated', ({ projectId }) => {
-      // Ignore our own switch — switchProject() sets activeProjectId
-      // synchronously before the server round-trip, so the echo is a no-op here
-      // (this is the feedback-loop guard). Also skip if we're mid-switch.
-      if (projectId === get().activeProjectId) return
+
+    const syncViewingProject = (projectId: string) => {
+      if (projectId === get().viewingProjectId) return
       if (get().isSwitching) return
       void (async () => {
         set({ isSwitching: true, error: null })
         try {
-          // Reset transient per-pipeline state. No persistSession(): this client
-          // is an OBSERVER of a switch another client owns.
-          usePipelineStore.setState({
-            nodeOutputs: {},
-            dynamicOutputPorts: {},
-            pipelineStatus: 'idle',
-            selectedNode: null,
-            selectedNodeIds: [],
-            pendingSelectNodeIds: null,
-            groupViewStack: [],
-          })
-          set({ activeProjectId: projectId })
-          // The server already swapped the active runtime; just load its graph.
-          // Do NOT call api.activateProject (would re-broadcast → feedback loop).
+          const agentBusy = get().executingProjectIds.length > 0
+          set({ viewingProjectId: projectId })
+          resetPipelineUiForProjectSwitch()
           await usePipelineStore.getState().loadPipeline()
-          void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
-          // Rebuild the panel from the now-active project's persistent log.
-          try {
-            useHistoryStore.getState().hydrate(await getEditorTransport().api.getHistory())
-          } catch (e) {
-            console.warn('[projectStore] history reload on project:activated failed:', e)
-            useHistoryStore.getState().clearHistory()
-          }
-          // Pick up the new project's type (battery filter) + recents + list.
+          refreshOutputsAfterProjectSwitch(agentBusy)
+          reloadHistoryAfterProjectSwitch(agentBusy)
           await get().fetchProjects()
         } catch (e) {
-          console.error('[projectStore] project:activated sync failed:', e)
+          console.error('[projectStore] project:viewing sync failed:', e)
           set({ error: (e as Error).message })
         } finally {
           set({ isSwitching: false })
         }
       })()
-    })
+    }
+
+    const refreshExecuting = () => {
+      void (async () => {
+        try {
+          const ws = await getEditorTransport().api.getWorkspace()
+          if (ws?.executingProjectIds) {
+            set({ executingProjectIds: ws.executingProjectIds })
+          }
+        } catch {
+          /* ignore — badge degrades gracefully */
+        }
+      })()
+    }
+
+    const unsubs = [
+      ws.on('project:viewing', ({ projectId }) => syncViewingProject(projectId)),
+      ws.on('project:activated', ({ projectId }) => syncViewingProject(projectId)),
+      ws.on('project:executing', ({ projectId }) => {
+        set((s) => ({
+          executingProjectIds: s.executingProjectIds.includes(projectId)
+            ? s.executingProjectIds
+            : [...s.executingProjectIds, projectId],
+        }))
+        refreshExecuting()
+        // aw-support creates projects out-of-band; refresh so the new row appears.
+        void get().fetchProjects()
+      }),
+      ws.on('project:list-changed', () => {
+        void get().fetchProjects()
+      }),
+      // The project list changed elsewhere (an agent created/removed a project
+      // via the tool bridge). Refetch so the navigation pane reflects it without
+      // a manual reload. Idempotent for the client that made the change locally.
+      ws.on('project:created', () => {
+        void get().fetchProjects()
+      }),
+      ws.on('project:deleted', () => {
+        void get().fetchProjects()
+      }),
+      ws.on('project:idle', ({ projectId }) => {
+        set((s) => {
+          const next = s.executingProjectIds.filter((id) => id !== projectId)
+          if (next.length === 0) {
+            queueMicrotask(() => {
+              cancelDeferredProjectSwitchOutputRefresh()
+              void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
+            })
+          }
+          return { executingProjectIds: next }
+        })
+      }),
+    ]
+    return () => unsubs.forEach((u) => u())
   },
 
   createProject: async (input: CreateProjectRequest) => {
@@ -210,17 +294,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   deleteProject: async (id: string, assetPolicy?: 'detach' | 'delete') => {
     const { api } = getEditorTransport()
-    const wasActive = get().activeProjectId === id
+    const wasViewing = get().viewingProjectId === id
     const res = await api.deleteProject(id, assetPolicy ? { assetPolicy } : undefined)
     set((s) => ({
       projects: s.projects.filter((p) => p.id !== id),
       recentProjectIds: s.recentProjectIds.filter((rid) => rid !== id),
+      executingProjectIds: s.executingProjectIds.filter((eid) => eid !== id),
     }))
-    // The server always leaves a valid active project; open it if we removed
-    // the one currently open.
-    const nextActive = res.workspace.activeProjectId
-    if (wasActive && nextActive) {
-      await get().switchProject(nextActive)
+    const nextViewing = viewingIdFromWorkspace(res.workspace)
+    if (wasViewing && nextViewing) {
+      await get().switchProject(nextViewing)
     } else {
       await get().fetchProjects()
     }

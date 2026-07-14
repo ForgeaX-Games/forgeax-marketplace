@@ -5,7 +5,7 @@ export const ITEMS_HANDOFF_KEY = 'forgeax:items-handoff';
 export interface ItemsHandoff {
   slug: string;
   itemSlugs: string[];
-  targetPluginId: '@forgeax-plugin/wb-ui';
+  targetPluginId: '@forgeax-extension/wb-ui';
   ts: number;
 }
 
@@ -13,7 +13,7 @@ export function writeItemsHandoff(payload: Pick<ItemsHandoff, 'slug' | 'itemSlug
   try {
     window.localStorage.setItem(ITEMS_HANDOFF_KEY, JSON.stringify({
       ...payload,
-      targetPluginId: '@forgeax-plugin/wb-ui',
+      targetPluginId: '@forgeax-extension/wb-ui',
       ts: Date.now(),
     } satisfies ItemsHandoff));
   } catch { /* private mode */ }
@@ -36,7 +36,7 @@ export function navigateToUiWorkshop(slug: string, itemSlugs: string[]): void {
   writeItemsHandoff({ slug, itemSlugs });
   window.parent?.postMessage({
     type: 'FORGEAX_NAVIGATE',
-    targetPluginId: '@forgeax-plugin/wb-ui',
+    targetPluginId: '@forgeax-extension/wb-ui',
     payload: { slug, itemSlugs },
   }, '*');
 }

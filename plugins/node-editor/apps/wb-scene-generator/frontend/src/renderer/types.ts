@@ -44,6 +44,8 @@ export interface RendererVoxelLayer {
   value: number
   schema?: string
   cells: Point3D[]
+  /** Summary-only fetch: cell count without loading the full cell array. */
+  cellCount?: number
   visible: boolean
   updatedAt: number
   assetName: string

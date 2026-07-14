@@ -4,12 +4,12 @@
 // path. Ported from the legacy editor (components/canvas/useCanvasDrop.ts),
 // retargeted onto the editor stores.
 //
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { Node, ReactFlowInstance } from 'reactflow'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { createEmptyPipeline } from '../../stores/pipelineStore.helpers.js'
 import type { Battery, PipelineNode } from '../../types.js'
-import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth } from './canvasConstants.js'
+import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth, mintCanvasNodeId } from './canvasConstants.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import { RELAY_BATTERY_ID, RELAY_NODE_HEIGHT, RELAY_NODE_WIDTH } from './RelayNode.js'
 import { getEditorTransport } from '../../transport/index.js'
@@ -20,6 +20,22 @@ import { isTemplateBattery, getSmallLabel } from '../sidebar/batteryGrouping.js'
 
 /** Shared kernel op id backing every saved-prompt node (see PromptNode). */
 const PROMPT_OP_ID = 'prompt_template'
+
+/** Resolve a battery from a drop event: slim id payload (catalog lookup) or legacy full JSON. */
+function resolveDroppedBattery(event: React.DragEvent): Battery | null {
+  const batteryId = event.dataTransfer.getData('application/battery-id')
+  if (batteryId) {
+    const fromCatalog = usePipelineStore.getState().batteries.find((b) => b.id === batteryId)
+    if (fromCatalog) return fromCatalog
+  }
+  const batteryData = event.dataTransfer.getData('application/battery')
+  if (!batteryData) return null
+  try {
+    return JSON.parse(batteryData) as Battery
+  } catch {
+    return null
+  }
+}
 
 interface UseCanvasDropParams {
   reactFlowInstance: ReactFlowInstance | null
@@ -57,6 +73,10 @@ export type PlaceBatteryFn = (
 ) => string | null
 
 export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterGroup, onExternalDrop, onInnerNodeAdd }: UseCanvasDropParams) {
+  // Canvas wrapper + ReactFlow both register onDrop; the same native drop can
+  // invoke both handlers. Dedupe by timeStamp+position so placeBattery runs once.
+  const lastDropSigRef = useRef<string | null>(null)
+
   const addNode = usePipelineStore((s) => s.addNode)
   const addGroup = usePipelineStore((s) => s.addGroup)
   const addAnnotation = usePipelineStore((s) => s.addAnnotation)
@@ -190,7 +210,7 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       // survives reload — PromptNode renders its ports from these params, not
       // from the catalog battery (which on reload is the bare shared op).
       if (battery.nodeType === 'prompt') {
-        const nodeId = `node-${Date.now()}`
+        const nodeId = mintCanvasNodeId('node')
         const promptVars = battery.inputs.map((i) => i.name)
         const params: Record<string, unknown> = {
           ...(battery.dropParams ?? {}),
@@ -223,7 +243,7 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       }
 
       if (battery.id === RELAY_BATTERY_ID) {
-        const nodeId = `relay-${Date.now()}`
+        const nodeId = mintCanvasNodeId('relay')
         const params = { portType: 'any' }
         const newNode: Node = {
           id: nodeId,
@@ -281,7 +301,7 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
         return annotationId
       }
 
-      const nodeId = `node-${Date.now()}`
+      const nodeId = mintCanvasNodeId('node')
 
       const specialInit: Record<string, { style?: Record<string, number>; params?: Record<string, unknown> }> = {
         text_panel: { style: { width: DEFAULT_BATTERY_WIDTH, height: 150 } },
@@ -350,20 +370,23 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       event.preventDefault()
       event.stopPropagation()
 
+      const sig = `${event.timeStamp}:${event.clientX}:${event.clientY}`
+      if (lastDropSigRef.current === sig) return
+      lastDropSigRef.current = sig
+
       if (!reactFlowInstance) return
 
-      const batteryData = event.dataTransfer.getData('application/battery')
       const position = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      const battery = resolveDroppedBattery(event)
 
       // No battery payload: this may be an app/domain external drop (e.g. an
       // image dragged from an embedded asset panel in another iframe, whose
       // native dataTransfer does not cross the boundary). Defer to the consumer.
-      if (!batteryData) {
+      if (!battery) {
         onExternalDrop?.(position, event, placeBattery)
         return
       }
 
-      const battery: Battery = JSON.parse(batteryData)
       const presetText = event.dataTransfer.getData('application/preset-text')
 
       placeBattery(battery, position, presetText ? { presetText } : undefined)

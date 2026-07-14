@@ -18,12 +18,13 @@
 import { create } from 'zustand'
 import type { Node, Edge } from 'reactflow'
 
-import type { ExecutionResult } from '@forgeax/node-runtime'
+import type { ExecutionResult, PipelineSnapshot } from '@forgeax/node-runtime'
 
 import { getEditorTransport } from '../transport/index.js'
+import { snapshotToPipeline } from '../transport/mappers.js'
 import { makeGroupBoundaryNodeId, makeGroupContextNodeId } from '../components/canvas/groupBoundaryIds.js'
 import { useHistoryStore } from './historyStore.js'
-import { createEmptyPipeline, getDownstreamIds } from './pipelineStore.helpers.js'
+import { createEmptyPipeline, collectVisibleOutputPorts, getDownstreamIds, listMissingVisibleOutputPorts } from './pipelineStore.helpers.js'
 import { bridgeBatchToHistory } from './pipelineHistoryBridge.js'
 import { formatIdAsLabel } from '../utils/batteryLabels.js'
 import {
@@ -33,10 +34,12 @@ import {
   logPersistSchedule,
   logRefreshEnd,
   logRefreshStart,
+  refreshTraceEnabled,
   setPersistTraceReason,
   type RefreshReason,
   type RefreshPortStat,
 } from '../utils/refreshTrace.js'
+import { syncTrace, summarizeNodeOutputs } from '../utils/syncTrace.js'
 import {
   deferGraphAppliedBatch,
   deferRefreshUntilViewportEnd,
@@ -142,6 +145,7 @@ let _outputsRefreshInFlight: Promise<void> | null = null
 let _outputsRefreshAgain = false
 /** StrictMode / coalesced mount calls share one fan-out per editor session. */
 let _mountRefreshInFlight: Promise<void> | null = null
+let _autoExecInFlight: Promise<void> | null = null
 /** Sharded (multi-MB) ports skipped on mount — hydrated one-at-a-time when idle. */
 let _deferredLargePortTimer: ReturnType<typeof setTimeout> | null = null
 const _deferredLargePorts: Array<{ nodeId: string; port: string }> = []
@@ -155,6 +159,47 @@ const OUTPUTS_REFRESH_CONCURRENCY = 3
 
 /** executedHash per (nodeId, port) — skip full GET when cache entry unchanged. */
 const _outputMetaByPort: Record<string, Record<string, string>> = {}
+
+/** Trailing output refresh after project switch while an agent was busy. */
+let _projectSwitchOutputTimer: ReturnType<typeof setTimeout> | null = null
+
+function carryPreviewEnabledNodes(
+  prevNodes: ReadonlyArray<PipelineNode> | undefined,
+  pipeline: Pipeline,
+): PipelineNode[] {
+  const prevPreview = new Map(
+    (prevNodes ?? []).map((n) => [n.id, n.previewEnabled] as const),
+  )
+  return pipeline.nodes.map((n) => {
+    if (n.previewEnabled !== undefined) return n
+    const prev = prevPreview.get(n.id)
+    return prev !== undefined ? { ...n, previewEnabled: prev } : n
+  })
+}
+
+export function clearOutputMetaCache(): void {
+  for (const k of Object.keys(_outputMetaByPort)) delete _outputMetaByPort[k]
+}
+
+export function cancelDeferredProjectSwitchOutputRefresh(): void {
+  if (_projectSwitchOutputTimer) {
+    clearTimeout(_projectSwitchOutputTimer)
+    _projectSwitchOutputTimer = null
+  }
+}
+
+/** When an agent holds an execute lock, defer output hydration so browse switches stay snappy. */
+export function scheduleDeferredProjectSwitchOutputRefresh(run: () => void): void {
+  cancelDeferredProjectSwitchOutputRefresh()
+  const schedule =
+    typeof requestIdleCallback === 'function'
+      ? (fn: () => void) => requestIdleCallback(fn, { timeout: 12_000 })
+      : (fn: () => void) => setTimeout(fn, 2000)
+  _projectSwitchOutputTimer = setTimeout(() => {
+    _projectSwitchOutputTimer = null
+    schedule(run)
+  }, 1500)
+}
 
 function edgeTopologySignature(pipeline: Pipeline | null | undefined): string {
   if (!pipeline) return ''
@@ -196,7 +241,7 @@ function nextLocalParamEditBatchId(): string {
 }
 
 // While a slider/inspector param edit is actively churning, each tick's execute
-// response is applied directly (see incrementalExecute), so the trailing WS
+// response is applied directly (see hydrateExecutionResult), so the trailing WS
 // `exec:completed` -> refreshConnectedOutputs() per-port GET storm is pure
 // redundant network churn competing with the drag. Mark a short window after
 // each local-param exec; the exec:completed handler skips its re-pull inside it.
@@ -208,6 +253,83 @@ function markLocalParamEditActive(): void {
 }
 function isLocalParamEditActive(): boolean {
   return Date.now() < _localParamEditUntil
+}
+
+/** Apply inline execute-response outputs into the editor probe/preview cache. */
+function isEmptyPortValue(value: unknown): boolean {
+  if (value === null) return true
+  if (Array.isArray(value)) return value.length === 0
+  if (typeof value === 'object') return Object.keys(value as object).length === 0
+  return false
+}
+
+function applyExecutionResultOutputs(
+  get: () => PipelineState,
+  result: Pick<ExecutionResult, 'outputs' | 'status'> | null | undefined,
+): void {
+  if (!result?.outputs) return
+  syncTrace('hydrate:inline-outputs', {
+    nodes: summarizeNodeOutputs(result.outputs as Record<string, Record<string, unknown>>),
+  })
+  const onError = result.status === 'error'
+  const setOut = get().setNodeOutput
+  for (const [outNodeId, ports] of Object.entries(result.outputs)) {
+    for (const [portName, value] of Object.entries(ports)) {
+      if (value === undefined) continue
+      if (onError && isEmptyPortValue(value)) continue
+      setOut(outNodeId, portName, value)
+    }
+  }
+}
+
+type ExecuteRequest = { startNodeId?: string; quietErrors?: boolean }
+
+/** Kernel execute — full pipeline or a node's downstream closure. */
+async function callPipelineExecute(request?: ExecuteRequest): Promise<ExecutionResult> {
+  const { api } = getEditorTransport()
+  if (request?.startNodeId) {
+    return api.executePipeline({
+      startNodeId: request.startNodeId,
+      ...(request.quietErrors ? { quietErrors: true } : {}),
+    })
+  }
+  return api.executePipeline(request?.quietErrors ? { quietErrors: true } : undefined)
+}
+
+/**
+ * Single post-execute hydration path for every actor (human connect/param, Run,
+ * agent, clear-cache). Inline small ports land immediately; sharded ports fan
+ * out from the output cache. Param-drag defers the fan-out briefly because
+ * exec:completed refresh is suppressed during the quiet window.
+ */
+async function hydrateExecutionResult(
+  get: () => PipelineState,
+  result: ExecutionResult | null | undefined,
+  options: { deferCacheFanOut?: boolean } = {},
+): Promise<void> {
+  syncTrace('hydrate:start', {
+    deferCacheFanOut: !!options.deferCacheFanOut,
+    status: result?.status,
+    inlineNodes: result?.outputs ? Object.keys(result.outputs).length : 0,
+  })
+  applyExecutionResultOutputs(get, result)
+  const fanOut = (): Promise<void> => get().refreshConnectedOutputs('exec:completed')
+  if (options.deferCacheFanOut) {
+    setTimeout(() => {
+      void (async () => {
+        try {
+          getEditorTransport()
+          syncTrace('hydrate:deferred-fanout', {})
+          await fanOut()
+        } catch {
+          /* editor torn down between drag tick and trailing refresh */
+        }
+      })()
+    }, LOCAL_PARAM_EDIT_QUIET_MS + 20)
+    return
+  }
+  syncTrace('hydrate:immediate-fanout', {})
+  await fanOut()
 }
 
 // Live-sync reconciler: the canvas updates only when a `graph:applied` WS frame
@@ -326,8 +448,14 @@ function enqueuePipelinePersist(snapshot: Pipeline, seq: number, actor = 'editor
   const clientBatchId = batchId ?? crypto.randomUUID()
   const run = async () => {
     if (seq !== _localMutationSeq) return null
+    let transport: ReturnType<typeof getEditorTransport>
+    try {
+      transport = getEditorTransport()
+    } catch {
+      return null
+    }
     const t0 = performance.now()
-    const res = await getEditorTransport().api.updatePipeline(snapshot, actor, clientBatchId)
+    const res = await transport.api.updatePipeline(snapshot, actor, clientBatchId)
     const hashUpdated = !!(res?.status === 'ok' && res.newHash)
     // The canvas already reflects this local edit (RF setters / store writes),
     // so adopt the resulting hash as our sync baseline. Otherwise the live-sync
@@ -410,10 +538,11 @@ function enqueueParamWrite(
   return drain()
 }
 
-function fanOutScopeForReason(reason: RefreshReason): 'edges' | 'all' {
-  // Cold open: hydrate wire/probe sources first; unconnected visible ports load
-  // on hover / a trailing idle pass — avoids 100MB+ on the critical path.
-  return reason === 'mount' ? 'edges' : 'all'
+function fanOutScopeForReason(_reason: RefreshReason): 'edges' | 'all' {
+  // Always hydrate visible output ports — edge-only scope left wire probes on
+  // terminal sinks (scene_output) and unconnected batteries showing "no result"
+  // after refresh until a manual Rerun.
+  return 'all'
 }
 
 function scheduleDeferredLargePortHydration(
@@ -454,7 +583,7 @@ function scheduleDeferredLargePortHydration(
             _outputMetaByPort[next.nodeId][next.port] = meta.executedHash
           }
         }
-        if (typeof import.meta !== 'undefined' && (import.meta as ImportMeta & { env?: { PROD?: boolean } }).env?.PROD !== true) {
+        if (refreshTraceEnabled()) {
           const bytes = estimateValueBytes(value)
           if (bytes > 256 * 1024) {
             console.log(
@@ -495,44 +624,7 @@ async function fanOutConnectedOutputs(
     return { ...stats, abortedForViewport: true }
   }
   const { api } = getEditorTransport()
-  // Distinct (sourceNodeId, sourcePort) pairs feeding any wire, plus every
-  // visible output port. Tooltips read nodeOutputs even when a port is not
-  // connected, while probes read the same cache for connected edges.
-  const seen = new Set<string>()
-  const ports: Array<{ nodeId: string; port: string }> = []
-  const addPort = (nodeId: string, port: string) => {
-    const key = `${nodeId}\u0000${port}`
-    if (seen.has(key)) return
-    seen.add(key)
-    ports.push({ nodeId, port })
-  }
-  for (const edge of currentPipeline.edges) {
-    addPort(edge.source.nodeId, edge.source.port)
-  }
-  if (scope === 'all') {
-  const groupsById = new Map((currentPipeline.groups ?? []).map((g) => [g.id, g] as const))
-  for (const node of currentPipeline.nodes) {
-    if (node.batteryId === '__group__') {
-      const groupId = typeof node.params?.groupId === 'string' ? node.params.groupId : node.id
-      const group = groupsById.get(groupId)
-      if (group) {
-        for (const ep of group.exposedOutputs) {
-          if (!ep.hidden) addPort(node.id, ep.portName)
-        }
-      }
-    } else {
-      const battery = batteries.find((b) => b.id === node.batteryId)
-      if (battery && !battery.hideOutputs) {
-        for (const port of battery.outputs) {
-          if (!port.hidden) addPort(node.id, port.name)
-        }
-      }
-    }
-    for (const port of dynamicOutputPorts[node.id] ?? []) {
-      addPort(node.id, port.name)
-    }
-  }
-  }
+  const ports = collectVisibleOutputPorts(currentPipeline, batteries, dynamicOutputPorts, scope)
 
   let cursor = 0
   let abortedForViewport = false
@@ -563,15 +655,6 @@ async function fanOutConnectedOutputs(
           stats.topPorts.push({ nodeId, port, bytes: 0, ms: performance.now() - t0, skipped: true })
           continue
         }
-        // Sharded cache entries (tree_merge / tree_flatten with hundreds of scene
-        // subtrees) must never be inline-fetched — reassembly + JSON.stringify
-        // exceeds V8's single-string limit and 500s the preview bridge.
-        if (meta?.sharded) {
-          deferredLarge.push({ nodeId, port })
-          stats.skipped += 1
-          stats.topPorts.push({ nodeId, port, bytes: 0, ms: performance.now() - t0, skipped: true })
-          continue
-        }
         if (isViewportMoving()) {
           abortedForViewport = true
           return
@@ -585,11 +668,20 @@ async function fanOutConnectedOutputs(
             if (!_outputMetaByPort[nodeId]) _outputMetaByPort[nodeId] = {}
             _outputMetaByPort[nodeId][port] = meta.executedHash
           }
+        } else {
+          syncTrace('probe:fetch-empty', {
+            nodeId,
+            port,
+            valid: meta?.valid,
+            sharded: meta?.sharded,
+            missing: (meta as { missing?: boolean } | null)?.missing,
+          })
         }
         stats.fetched += 1
         stats.totalBytes += bytes
         stats.topPorts.push({ nodeId, port, bytes, ms, skipped: false })
-      } catch {
+      } catch (err) {
+        syncTrace('probe:fetch-error', { nodeId, port, error: String(err) })
         /* port has no value yet / transient — ignore */
       }
     }
@@ -820,7 +912,9 @@ interface PipelineState {
   /** Debounced best-effort session persist for high-frequency layout/UI changes. */
   schedulePersistSession: (reason?: string) => void
   incrementalExecute: (nodeId: string, fullExec?: boolean, options?: { persist?: boolean; localParamEdit?: boolean }) => Promise<void>
-  executePipeline: () => Promise<void>
+  executePipeline: (opts?: { quietErrors?: boolean }) => Promise<void>
+  /** Wipe server + in-memory output caches, then run the full pipeline. */
+  clearCacheAndExecutePipeline: () => Promise<void>
   /**
    * Run the whole pipeline once on project open IFF the output cache is cold
    * (no retained values hydrated). After a cache wipe / first open the graph has
@@ -834,6 +928,8 @@ interface PipelineState {
 
   // Loading
   loadPipeline: () => Promise<void>
+  /** Apply a pipeline snapshot already returned by POST /view (avoids a duplicate GET). */
+  hydratePipelineFromSnapshot: (pipeline: Pipeline | PipelineSnapshot) => void
 
   // AI-agent operations (same path as human edits: history + data + RF + exec)
   registerRfSetters: (setters: {
@@ -962,6 +1058,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       if (outputValuesEqual(prev, value)) {
         return state
       }
+      syncTrace('probe:nodeOutput-set', { nodeId, port: portName, hadPrev: prev !== undefined })
       return {
         nodeOutputs: {
           ...state.nodeOutputs,
@@ -1500,6 +1597,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
     if (silent) return
 
+    syncTrace('param:update', { nodeId, key, value })
+
     // Drive execution as a continuous "latest value wins" stream rather than a
     // fixed-interval throttle. The slider already coalesces pushes to one per
     // animation frame; here we additionally ensure we never run two executes for
@@ -1557,6 +1656,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   incrementalExecute: async (nodeId, fullExec = false, options = {}) => {
     const { currentPipeline, addLog } = get()
     if (!currentPipeline) return
+    syncTrace('exec:start', { nodeId, fullExec, localParamEdit: !!options.localParamEdit, persist: options.persist !== false })
     const downstreamIds = getDownstreamIds(nodeId, currentPipeline.edges)
     const seq = _localMutationSeq
     try {
@@ -1595,41 +1695,38 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           await enqueuePipelinePersist(currentPipeline, seq, 'editor')
         }
       }
-      // The execute response already carries the freshly computed outputs
-      // (nodeId -> portId -> wire value, same shape as getNodeOutput). Apply them
-      // directly so the preview updates the instant the HTTP response lands,
-      // instead of waiting for the trailing WS `exec:completed` -> per-port
-      // getNodeOutput re-pull (a full extra round-trip + GET storm that is the
-      // felt slider lag). The kernel stays the single source of truth — we are
-      // only consuming the answer it already returned rather than re-fetching it.
+      // Execute + hydrate through the shared post-exec path (see hydrateExecutionResult).
       const result = fullExec
-        ? await getEditorTransport().api.executePipeline()
-        : await getEditorTransport().api.executePipeline({ startNodeId: nodeId })
-      if (result?.outputs) {
-        const setOut = get().setNodeOutput
-        for (const [outNodeId, ports] of Object.entries(result.outputs)) {
-          for (const [portName, value] of Object.entries(ports)) {
-            setOut(outNodeId, portName, value)
-          }
-        }
-      }
+        ? await callPipelineExecute()
+        : await callPipelineExecute({ startNodeId: nodeId })
+      await hydrateExecutionResult(get, result, { deferCacheFanOut: !!options.localParamEdit })
+      syncTrace('exec:done', {
+        nodeId,
+        status: result?.status,
+        error: result?.error?.message,
+        inlineOutputs: result?.outputs ? summarizeNodeOutputs(result.outputs as Record<string, Record<string, unknown>>) : '(none)',
+      })
       addLog(
         fullExec
           ? `Full exec: pipeline (${currentPipeline.nodes.length} nodes)`
           : `Incremental exec: node ${nodeId}, ${downstreamIds.length} downstream node(s)`,
       )
     } catch (error) {
+      syncTrace('exec:error', { nodeId, error: String(error) })
       addLog(`Execution failed: ${error}`)
     }
   },
 
-  executePipeline: async () => {
+  executePipeline: async (opts?: { quietErrors?: boolean }) => {
     const { addLog, setCompileInfo } = get()
     try {
       set({ pipelineStatus: 'running' })
       addLog('Executing pipeline…')
       setCompileInfo({ status: 'compiling', message: 'Compiling…' })
-      const result: ExecutionResult = await getEditorTransport().api.executePipeline()
+      const result: ExecutionResult = await callPipelineExecute(
+        opts?.quietErrors ? { quietErrors: true } : undefined,
+      )
+      await hydrateExecutionResult(get, result)
       setCompileInfo({ status: 'success', message: 'Compiled successfully' })
       addLog('Pipeline execution complete')
       set({ pipelineStatus: result.status === 'error' ? 'error' : 'completed' })
@@ -1641,27 +1738,49 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     }
   },
 
+  clearCacheAndExecutePipeline: async () => {
+    const { addLog, pipelineStatus, setCompileInfo } = get()
+    if (pipelineStatus === 'running') return
+    syncTrace('rerun:clear-cache-and-exec', {})
+    try {
+      addLog('Clearing output cache…')
+      await getEditorTransport().api.clearOutputCache()
+      set({ nodeOutputs: {} })
+      addLog('Output cache cleared — re-executing pipeline…')
+      await get().executePipeline({ quietErrors: true })
+    } catch (error) {
+      console.error('Clear & re-execute failed:', error)
+      addLog(`Clear & re-execute failed: ${error}`)
+      setCompileInfo({ status: 'error', message: String(error) })
+      set({ pipelineStatus: 'error' })
+    }
+  },
+
   autoExecuteOnOpen: async () => {
-    const { currentPipeline, nodeOutputs, batteries, addLog } = get()
-    if (!currentPipeline || currentPipeline.nodes.length === 0) return
-    // Only the cold-cache case: if refreshConnectedOutputs already hydrated any
-    // retained value, the graph has been run before — leave it untouched.
-    const hasAnyOutput = Object.values(nodeOutputs).some(
-      (ports) => ports && Object.keys(ports).length > 0,
-    )
-    if (hasAnyOutput) return
-    // A graph made up exclusively of manual-trigger (AI) nodes must never be
-    // auto-fired — those run only on the explicit Run button. The full-pipeline
-    // walker already skips manualTrigger nodes, but if EVERY node is one there is
-    // nothing to compute, so don't bother.
-    const hasRunnable = currentPipeline.nodes.some((n) => {
-      if (n.batteryId === '__group__') return true
-      const battery = batteries.find((b) => b.id === n.batteryId)
-      return battery?.type !== 'ai'
+    if (_autoExecInFlight) return _autoExecInFlight
+    _autoExecInFlight = (async () => {
+      const { currentPipeline, nodeOutputs, batteries, dynamicOutputPorts, addLog } = get()
+      if (!currentPipeline || currentPipeline.nodes.length === 0) return
+      const missing = listMissingVisibleOutputPorts(
+        currentPipeline,
+        batteries,
+        dynamicOutputPorts,
+        nodeOutputs,
+      )
+      if (missing.length === 0) return
+      syncTrace('autoExecOnOpen:missing', { count: missing.length, ports: missing.slice(0, 8).map((p) => `${p.nodeId}/${p.port}`) })
+      const hasRunnable = currentPipeline.nodes.some((n) => {
+        if (n.batteryId === '__group__') return true
+        const battery = batteries.find((b) => b.id === n.batteryId)
+        return battery?.type !== 'ai'
+      })
+      if (!hasRunnable) return
+      addLog(`Missing ${missing.length} cached output(s) on open — auto-running pipeline`)
+      await get().executePipeline()
+    })().finally(() => {
+      _autoExecInFlight = null
     })
-    if (!hasRunnable) return
-    addLog('No cached outputs on open — auto-running pipeline')
-    await get().executePipeline()
+    return _autoExecInFlight
   },
 
   stopPipeline: async () => {
@@ -1682,36 +1801,29 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       addLog('Loading pipeline…')
       const pipeline = await getEditorTransport().api.getPipeline()
       if (pipeline) {
-        set((s) => {
-          // `previewEnabled` is a CLIENT-ONLY toggle (the editor preview switch);
-          // the kernel graph has no such field, so a re-pull returns it undefined
-          // for every node. Carry the user's prior choice forward so a re-exec /
-          // live-sync refetch does not silently re-enable previews the user turned
-          // off. (The `!== undefined` guard is defensive for hand-built fixtures.)
-          const prevPreview = new Map(
-            (s.currentPipeline?.nodes ?? []).map((n) => [n.id, n.previewEnabled] as const),
-          )
-          const nodes = pipeline.nodes.map((n) => {
-            if (n.previewEnabled !== undefined) return n
-            const prev = prevPreview.get(n.id)
-            return prev !== undefined ? { ...n, previewEnabled: prev } : n
-          })
-          // Exposed-port presentation overlay (hidden / order / customLabel*) is
-          // kernel-persisted: createGroup/updateGroup write it to graph.json and
-          // getPipeline reads it back verbatim, so the freshly-pulled groups are
-          // the single authority — no client carry-forward needed.
-          return {
-            currentPipeline: { ...pipeline, nodes },
-            pipelineStatus: pipeline.status,
-            pipelineRevision: s.pipelineRevision + 1,
-          }
-        })
+        set((s) => ({
+          currentPipeline: { ...pipeline, nodes: carryPreviewEnabledNodes(s.currentPipeline?.nodes, pipeline) },
+          pipelineStatus: pipeline.status,
+          pipelineRevision: s.pipelineRevision + 1,
+        }))
         addLog('Pipeline loaded')
       }
     } catch (error) {
       console.error('Failed to load pipeline:', error)
       addLog(`Load failed: ${error}`)
     }
+  },
+
+  hydratePipelineFromSnapshot: (pipeline) => {
+    const full =
+      Array.isArray((pipeline as Pipeline).nodes)
+        ? (pipeline as Pipeline)
+        : snapshotToPipeline(pipeline as PipelineSnapshot)
+    set((s) => ({
+      currentPipeline: { ...full, nodes: carryPreviewEnabledNodes(s.currentPipeline?.nodes, full) },
+      pipelineStatus: full.status,
+      pipelineRevision: s.pipelineRevision + 1,
+    }))
   },
 
   // ── AI-agent operations ──────────────────────────────────────────────
@@ -2007,7 +2119,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       // per-port getNodeOutput re-pull here is redundant churn competing with the
       // drag. Skip it inside the quiet window; the drag-stop settle (which falls
       // outside the window) runs the full refresh once.
-      if (isLocalParamEditActive()) return
+      if (isLocalParamEditActive()) {
+        syncTrace('probe:exec-completed-skipped', { reason: 'localParamEditActive' })
+        return
+      }
+      syncTrace('probe:exec-completed-refresh', {})
       void get().refreshConnectedOutputs('exec:completed')
       // If the user is INSIDE a group's internal view, the run just changed the
       // collapsed group's outputs, but refreshConnectedOutputs only covers the
@@ -2038,6 +2154,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   },
 
   refreshConnectedOutputs: (reason: RefreshReason = 'manual') => {
+    try {
+      getEditorTransport()
+    } catch {
+      return Promise.resolve()
+    }
     if (isViewportMoving()) {
       deferRefreshUntilViewportEnd(reason)
       return Promise.resolve()
@@ -2066,7 +2187,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         const startedAt = logRefreshStart(reason, { portCount: portEstimate, lastSyncedHash: _lastSyncedHash })
         const stats = await fanOutConnectedOutputs(get, reason)
         logRefreshEnd(reason, startedAt, stats)
-        if (reason === 'mount' && stats.deferredLarge?.length) {
+        if (stats.deferredLarge?.length) {
           scheduleDeferredLargePortHydration(get, stats.deferredLarge)
         }
       } while (_outputsRefreshAgain)

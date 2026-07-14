@@ -21,6 +21,12 @@ import {
 } from '../surfaces/library/assetControlBus.js'
 import { DragTitle, SectionTitle } from './controlSections.js'
 import { applySectionDragDelta, usePanelDragMinHeight } from './sectionDragResize.js'
+import {
+  DIRECTION_OPTIONS,
+  fieldAt,
+  MATERIAL_DEFAULT_OPTIONS,
+  SLOT,
+} from '../surfaces/library/aliasName.js'
 
 const LS_HEIGHTS = 'wb-scene-generator.assetstore-heights'
 const LS_COLLAPSED = 'wb-scene-generator.assetstore-collapsed'
@@ -105,7 +111,11 @@ function saveHeights(h: Heights): void {
   }
 }
 
-// 13-field filter definitions (field labels in English; option values match library data).
+// 13-field filter definitions. Labels + option values mirror the asset-library
+// generator's SSOT (asset_manager FILTER_FIELD_DEFS / fieldDropdownOptions), so
+// the two apps' schema stay in lockstep. `select` fields merge these static
+// defaults with the library's live distinct values (see FieldFilterRow), so
+// e.g. Material stays open-ended (纸/布/竹… appear automatically once ingested).
 interface FieldDef {
   idx: number
   label: string
@@ -114,27 +124,28 @@ interface FieldDef {
 }
 
 const FIELD_DEFS: FieldDef[] = [
-  { idx: 0, label: 'Appears in', type: 'input' },
-  { idx: 1, label: 'Indoor / Outdoor', type: 'select', staticOptions: ['室内', '室外'] },
-  { idx: 2, label: 'Parent place', type: 'input' },
-  { idx: 3, label: 'Specific place', type: 'input' },
-  { idx: 4, label: 'Item name', type: 'input' },
-  { idx: 5, label: 'Direction', type: 'select', staticOptions: ['无', '靠上', '靠下', '靠左', '靠右'] },
+  { idx: SLOT.index, label: '索引', type: 'input' },
+  { idx: SLOT.indoorOutdoor, label: '内外', type: 'select', staticOptions: ['室内', '室外'] },
+  { idx: SLOT.name, label: '名称', type: 'input' },
+  { idx: SLOT.material, label: '材质', type: 'select', staticOptions: [...MATERIAL_DEFAULT_OPTIONS] },
+  { idx: SLOT.direction, label: '朝向', type: 'select', staticOptions: [...DIRECTION_OPTIONS] },
+  { idx: SLOT.themeStyle, label: '题材风格', type: 'select' },
+  { idx: SLOT.state, label: '状态', type: 'select', staticOptions: ['正常', '破损'] },
+  { idx: SLOT.cropType, label: '类型/规则', type: 'select' },
+  { idx: SLOT.size, label: '尺寸', type: 'select' },
+  { idx: SLOT.isStatic, label: '静态', type: 'select', staticOptions: ['静态', '动态'] },
   {
-    idx: 6,
-    label: 'Art style',
+    idx: SLOT.filterTemplate,
+    label: '滤镜模板',
     type: 'select',
     staticOptions: [
-      '现代日常', '中式恐怖', '国风仙侠', '地狱岩浆', '复古华丽', '日式和风', '末日废土',
-      '梦境童话', '生化变异', '科技太空', '蒸汽朋克', '血腥深渊', '西式奇幻', '赛博朋克', '黑暗奇幻',
+      '无', '中式仙侠', '中式恐怖', '日式和风', '标准西幻', '黑暗奇幻', '历史/维多利亚',
+      '赛博朋克', '太空高科', '废土黄沙', '血腥深渊', '生化异星', '梦境糖果',
     ],
   },
-  { idx: 7, label: 'Condition', type: 'select', staticOptions: ['正常', '破损'] },
-  { idx: 8, label: 'Type', type: 'select', staticOptions: ['抠图', 'tilemap', 'flower_bed', 'cliff', 'fence', 'wall'] },
-  { idx: 9, label: 'Pixel size', type: 'select', staticOptions: ['8', '16', '32', '64', '128', '256', '512', '1024'] },
-  { idx: 10, label: 'Motion', type: 'select', staticOptions: ['静态', '动态'] },
-  { idx: 11, label: 'Color template', type: 'input' },
-  { idx: 12, label: 'Variant', type: 'input' },
+  // 变体：任意 ≥0 整数皆合法 → 自由输入(子串匹配)，不锁定成固定下拉。
+  { idx: SLOT.serial, label: '变体', type: 'input' },
+  { idx: SLOT.appearancePlace, label: '出现场所', type: 'input' },
 ]
 
 type NameFilters = Record<number, string>
@@ -149,6 +160,12 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function formatWhen(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
 }
 
 function sortOptions(opts: string[]): string[] {
@@ -875,7 +892,42 @@ function PreviewAnchorCollisionBody({ asset }: { asset: AssetRecord | null }): J
           <dt>Source</dt>
           <dd>{asset.private ? 'Project private' : 'Built-in (read-only)'}</dd>
         </div>
+        {fieldAt(asset.alias, SLOT.appearancePlace) && (
+          <div>
+            <dt>出现场所</dt>
+            <dd>{fieldAt(asset.alias, SLOT.appearancePlace)}</dd>
+          </div>
+        )}
+        {formatWhen(asset.createdAt) && (
+          <div>
+            <dt>创建</dt>
+            <dd>{formatWhen(asset.createdAt)}</dd>
+          </div>
+        )}
+        {formatWhen(asset.updatedAt) && (
+          <div>
+            <dt>更新</dt>
+            <dd>{formatWhen(asset.updatedAt)}</dd>
+          </div>
+        )}
+        {(asset.hasError || asset.isPlaceholder) && (
+          <div>
+            <dt>状态标记</dt>
+            <dd>
+              {asset.hasError ? '⚠ 有错误' : ''}
+              {asset.hasError && asset.isPlaceholder ? ' · ' : ''}
+              {asset.isPlaceholder ? '占位' : ''}
+            </dd>
+          </div>
+        )}
       </dl>
+      {asset.tags && asset.tags.length > 0 && (
+        <div className="asp-tags">
+          {asset.tags.map((t) => (
+            <span key={t} className="asp-tag">{t}</span>
+          ))}
+        </div>
+      )}
 
       <h3 className="asp-subhead">Anchor</h3>
       <p className="asp-hint asp-hint--muted">

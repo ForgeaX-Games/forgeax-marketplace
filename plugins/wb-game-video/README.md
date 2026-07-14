@@ -38,7 +38,7 @@ npx tsc --noEmit       # 类型检查（当前全绿）
 | 皮肤/HUD/QTE 组件契约（props/submit/自闭环/错误隔离） | [`src/runtime/skins/components/CONTRACT.md`](./src/runtime/skins/components/CONTRACT.md) |
 | AI 工具调用（get/save/list GameGraph） | [`SKILL.md`](./SKILL.md)（trigger `/gamevideo`） |
 | 引擎设计规格 + 分期 + 实施状态 | `<repo>/docs/superpowers/specs/2026-07-06-wb-game-video-blueprint-orchestration-design.md` |
-| 插件声明（surface / tool / port / permissions） | `forgeax-plugin.json` |
+| 插件声明（surface / tool / port / permissions） | `forgeax-extension.json` |
 
 ## License
 

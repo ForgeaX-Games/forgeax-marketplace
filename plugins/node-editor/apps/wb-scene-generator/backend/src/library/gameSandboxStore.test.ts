@@ -27,6 +27,7 @@ describe('gameSandboxStore watcher', () => {
   afterEach(async () => {
     const mod = await import('./gameSandboxStore.js')
     mod._resetGameSandboxWatcherForTests()
+    mod.clearGameTexturesBinding()
     rmSync(sandboxDir, { recursive: true, force: true })
   })
 
@@ -68,6 +69,52 @@ describe('gameSandboxStore watcher', () => {
     }, { timeout: 3000 }) // covers the 1.5s mtime-poll fallback if fs.watch misses
 
     mod._resetGameSandboxWatcherForTests()
+    mod.clearGameTexturesBinding()
     rmSync(lateDir, { recursive: true, force: true })
+  })
+})
+
+describe('gameSandboxStore project binding', () => {
+  let projectADir: string
+  let projectBDir: string
+  let sandboxA: string
+  let sandboxB: string
+  let activeProjectDir: string
+
+  beforeEach(async () => {
+    vi.resetModules()
+    broadcast.mockClear()
+    const stamp = Date.now()
+    projectADir = join(tmpdir(), `game-sandbox-proj-a-${stamp}`)
+    projectBDir = join(tmpdir(), `game-sandbox-proj-b-${stamp}`)
+    sandboxA = join(tmpdir(), `game-sandbox-a-${stamp}`)
+    sandboxB = join(tmpdir(), `game-sandbox-b-${stamp}`)
+    activeProjectDir = projectADir
+    for (const d of [projectADir, projectBDir, sandboxA, sandboxB]) mkdirSync(d, { recursive: true })
+    mkdirSync(join(projectADir, 'private-assets'), { recursive: true })
+    mkdirSync(join(projectBDir, 'private-assets'), { recursive: true })
+    writeFileSync(join(projectADir, 'private-assets', '.game-textures-dir'), sandboxA, 'utf-8')
+    writeFileSync(join(projectBDir, 'private-assets', '.game-textures-dir'), sandboxB, 'utf-8')
+    writeFileSync(join(sandboxA, 'index.json'), '[]', 'utf-8')
+    writeFileSync(join(sandboxB, 'index.json'), '[]', 'utf-8')
+
+    vi.doMock('../runtime.js', () => ({
+      getActiveProjectDir: async () => activeProjectDir,
+    }))
+  })
+
+  afterEach(async () => {
+    const mod = await import('./gameSandboxStore.js')
+    mod._resetGameSandboxWatcherForTests()
+    mod.clearGameTexturesBinding()
+    for (const d of [projectADir, projectBDir, sandboxA, sandboxB]) rmSync(d, { recursive: true, force: true })
+  })
+
+  it('re-reads the ref file when the viewing project changes', async () => {
+    const mod = await import('./gameSandboxStore.js')
+    expect(await mod.getGameTexturesDir()).toBe(sandboxA)
+
+    activeProjectDir = projectBDir
+    expect(await mod.getGameTexturesDir()).toBe(sandboxB)
   })
 })

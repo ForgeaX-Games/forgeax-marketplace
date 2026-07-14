@@ -17,7 +17,7 @@
 
 | 顶层项 | 角色 | 说明（三个 app 一致） |
 |---|---|---|
-| `forgeax-plugin.json` | 插件清单 | `id @forgeax-plugin/<name>`、`kind workbench` |
+| `forgeax-extension.json` | 插件清单 | `id @forgeax-extension/<name>`、`kind workbench` |
 | `package.json` / `tsconfig.json` | 包定义 | 以 `workspace:*` 引内核包 |
 | `backend/` | Fastify 后端进程 | 独立端口、独立 `FORGEAX_PROJECT_ROOT`（见根 [`AGENTS.md`](../AGENTS.md) §4 运行时隔离） |
 | `frontend/` | Vite + React 前端 | 挂内核 `<Editor>` + 本 app 的 surfaces |

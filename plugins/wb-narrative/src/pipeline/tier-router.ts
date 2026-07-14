@@ -2,7 +2,7 @@ import type { NarrativeContext, TierId, TierDetectionResult } from "../types/ind
 import type { DemandAnalysis, GameplayStage, ResourceNode } from "../types/game-design.js";
 import type { LLMClient } from "./llm-client.js";
 import { extractJSON } from "./llm-client.js";
-import { GENRE_TAXONOMY, matchGenre } from "../knowledge/genre-taxonomy.js";
+import { GENRE_TAXONOMY, matchGenre, findGenreByCode } from "../knowledge/genre-taxonomy.js";
 import { getNarrativeType } from "../knowledge/genre-narrative-type.js";
 import type { NarrativeType } from "../knowledge/genre-narrative-type.js";
 import { getRequiredAndRecommended } from "../knowledge/game-design/system-matrix.js";
@@ -194,6 +194,28 @@ export async function detectTier(
   ctx: NarrativeContext,
   llm: LLMClient,
 ): Promise<void> {
+  // P0-1（§4.4d）：IP 改编种子已指定目标品类时，短路"源料品类识别"——
+  // 避免"上传小说 → 被 LLM 识别成 rpg-jrpg"覆盖用户"我要做影游/互动叙事"的意图。
+  // 注：显式 config.genreCode 已在 pipeline 层优先命中（explicitGenre），此处兜底覆盖
+  // "未透传 config.genreCode 但改编指令携带 target_output.genre_code"的情形。
+  const seededGenreCode = ctx.adaptation_directive?.game_unit_plan?.target_output?.genre_code;
+  if (seededGenreCode) {
+    const g = findGenreByCode(seededGenreCode);
+    if (g) {
+      ctx.tier_detection = {
+        tier: g.tier,
+        genre_code: g.code,
+        genre_name: g.name,
+        reasoning: `IP 改编目标品类锁定（短路源料识别）: ${g.name} (${g.code})`,
+      };
+      ctx.demand_analysis = buildDemandAnalysis(
+        g.code, g.name, g.tier, "auto", "自动识别", "full_design_doc", 0,
+        "IP 改编目标品类锁定（短路源料识别）",
+      );
+      return;
+    }
+  }
+
   const userInput = ctx.user_input;
 
   // 快速路径：关键词匹配

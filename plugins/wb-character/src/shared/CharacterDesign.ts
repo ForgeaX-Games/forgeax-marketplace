@@ -891,7 +891,7 @@ export class CharacterDesign {
   private setupBroadcast(): void {
     if (this._bc) return
     try {
-      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-character.cd-state')
+      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-character.cd-state')
     } catch {
       this._bc = null
       return
@@ -2277,7 +2277,7 @@ export class CharacterDesign {
     try {
       window.parent?.postMessage({
         type: 'FORGEAX_NAVIGATE',
-        targetPluginId: '@forgeax-plugin/wb-gen3d',
+        targetPluginId: '@forgeax-extension/wb-gen3d',
         payload: {
           views: this.turnaround3DViews,
           name,
@@ -2333,7 +2333,7 @@ export class CharacterDesign {
     try {
       window.parent?.postMessage({
         type: 'FORGEAX_NAVIGATE',
-        targetPluginId: '@forgeax-plugin/wb-anim',
+        targetPluginId: '@forgeax-extension/wb-anim',
         payload: { charId, role, slug, portraitUrl },
       }, '*')
     } catch { /* not embedded — no-op */ }

@@ -2,23 +2,21 @@
   "id": "g_collision_clustered",
   "label": "碰撞盒簇（CSG/array 拆分）",
   "name-en": "GCollisionClustered",
-  "description": "为指定 part 派生多个 box <collision>（articraft autocollide_part clustered 模式）。沿 part.shape ref 链拆分自然簇：union(a,b) 拆 a/b、array_linear/array_radial 按实例展开、其它形状退化为单 box。比 g_collision_box 更贴合实际几何，但 broadphase 比单 box 慢。已存在 collision 语句时默认追加；replace=true 先清理。",
-  "description-en": "Append multiple box <collision> entries for the target part (articraft autocollide_part clustered mode). Splits the shape ref chain into natural clusters: union(a,b) → a + b, array_linear/array_radial → per-instance, others → single box. Closer to the real geometry than g_collision_box but slower broadphase.",
+  "description": "为指定 part 派生多个 box <collision>（autocollide 聚簇模式）。沿 part.shape ref 链拆分自然簇：union(a,b) 拆 a/b、array_linear/array_radial 按实例展开、其它形状退化为单 box。比 g_collision_box 更贴合实际几何，但 broadphase 比单 box 慢。已存在 collision 语句时默认追加；replace=true 先清理。",
+  "description-en": "Append multiple box <collision> entries for the target part (autocollide clustered mode). Splits the shape ref chain into natural clusters: union(a,b) → a + b, array_linear/array_radial → per-instance, others → single box. Closer to the real geometry than g_collision_box but slower broadphase.",
   "version": "1.0.0",
   "autoIterate": false,
   "tags": [
     "geometry",
     "collision",
     "physics",
-    "urdf",
-    "articraft"
+    "urdf"
   ],
   "tag_labels": [
     "几何",
     "碰撞",
     "物理",
-    "URDF",
-    "articraft"
+    "URDF"
   ],
   "inputs": [
     {

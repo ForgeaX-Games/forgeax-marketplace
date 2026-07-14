@@ -20,7 +20,7 @@
 //     here for back-compat (`./themes` remains the canonical import path).
 
 // API contract ---------------------------------------------------------------
-export type { ApiClient, ActivateProjectResult, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto } from './api/index.js'
+export type { ApiClient, ActivateProjectResult, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto, ViewProjectResult } from './api/index.js'
 
 // Theme bundles + token resolver --------------------------------------------
 export { defaultTheme, legacyTheme, resolveTheme } from './themes/index.js'

@@ -94,7 +94,7 @@ export function logOutputFetch(
   portId: string,
   durationMs: number,
   bytesOut: number,
-  meta?: { sharded?: boolean; dataChunks?: number; assembleMs?: number },
+  meta?: { sharded?: boolean; dataChunks?: number; assembleMs?: number; skipped?: boolean },
 ): void {
   if (!isCanvasPerfVerbose()) return
   if (bytesOut < 1024 * 1024 && durationMs < 200) return

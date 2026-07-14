@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/wb-lowpoly-obj",
+  "name": "@forgeax-extension/wb-lowpoly-obj",
   "version": "0.1.0",
   "private": true,
   "type": "module",

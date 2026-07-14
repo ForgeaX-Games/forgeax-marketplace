@@ -43,4 +43,4 @@ order: 3
 
 ## 海报样张
 
-Cinematic mood film poster, intimate handheld framing, shallow depth of field, saturated neon wash of red and green, step-printed motion blur, melancholic romance, warm tungsten glow, no text, vertical 2:3
+Film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, saturated low-contrast water-stained film look, single-side neon wash of red and green, ultra-shallow depth of field. Panel 1: intimate handheld medium-close, half the face bathed in neon. Panel 2: peeking through a railing or window frame. Panel 3: background dissolved into large circular bokeh light orbs. Panel 4: step-printed smeared motion blur of a turning figure. Panel 5: extreme close-up of a hand, a clock, a cigarette. Panel 6: a reflection glimpsed in a mirror gap, melancholic tungsten glow. Wistful romance; consistent grade across all panels, no text, no captions, vertical 2:3

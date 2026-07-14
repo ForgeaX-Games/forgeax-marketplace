@@ -865,7 +865,7 @@ function vnLinearToStoryNodes(stepId: string, arr: Record<string, unknown>[]): S
     const isScene = stepId === "vn_scenes";
     const name = isScene
       ? `场${item.scene_id ?? i + 1}${item.location_name ? ` · ${pickZhText(item.location_name)}` : ""}`
-      : deriveBeatTitle(pickZhText(item.content ?? item.summary), String(item.beat_id ?? `b${i + 1}`));
+      : pickZhText(item.title) || deriveBeatTitle(pickZhText(item.content ?? item.summary), String(item.beat_id ?? `b${i + 1}`));
     const fn = isScene
       ? [item.act_id ? `第${item.act_id}幕` : "", pickZhText(item.time_of_day), pickZhText(item.indoor_outdoor)]
           .filter(Boolean).join(" · ")
@@ -1010,7 +1010,8 @@ function vnBranchedToStoryNodes(data: unknown): StoryNode[] {
     const summary = pickZhText(b.content ?? b.summary);
     return {
       id: uid,
-      title: deriveBeatTitle(summary, origIdOf(uid)),
+      // 后端产出真标题时直接用；旧数据无 title 时回落到正文首句派生。
+      title: pickZhText(b.title) || deriveBeatTitle(summary, origIdOf(uid)),
       summary,
       scene_role: b.is_ending ? "ending" : pivot,
       node_kind: pivot === "branch_qte" ? "qte_climax" : "normal",

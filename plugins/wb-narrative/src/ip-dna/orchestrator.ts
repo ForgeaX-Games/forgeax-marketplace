@@ -32,6 +32,7 @@ import type {
   IpMediaType,
   StoryTimestamp,
   UserAssetManifest,
+  LayeredOperators,
 } from "../types/narrative-ip-dna.js";
 import { archiveAndBuildManifest, type IncomingFile, inferMediaType, modalityOf } from "./phase0-foundation.js";
 import { transcribeMediaFiles, type VideoFrameSampler, type VideoTranscriber } from "./phase1-multimodal.js";
@@ -60,14 +61,18 @@ import {
   aggregateTemplates,
   aggregateSubtreeTemplates,
   aggregateSubtreeTemplatesRecursive,
+  synthesizeParentTemplateFields,
   analyzeHierarchy,
   buildGenerationInput,
   assessExtractionQuality,
+  extractParentOperators,
+  collectLayeredOperators,
+  flattenLayeredOperators,
 } from "./phase2-extract.js";
 import type { QualityCheck } from "./job.js";
 import { saveIpDna, outputRunDir, processingDir, saveOperatorSolution, extractionOutputDir, saveNodeProcessingMarkdown, saveManifest, loadManifest, loadFullIpDna, saveHierarchyIndexOnly, loadStandardizedText, loadHierarchyIndex, loadHierarchyIndexByRun, saveAdaptationDirective, saveIpDnaRunManifest, packageDir } from "./filesystem.js";
 import { buildCorpusRetriever, equipAndConsume } from "./phase3-rag.js";
-import { resolveVnActCount, mapGameUnitToPipeline, representativeGenreForFamily, buildSeriesEndingDirective, type PipelineFamily, type GameUnitPipelinePlan } from "./phase2c-gen-adapt.js";
+import { resolveVnActCount, mapGameUnitToPipeline, buildUnitActMap, representativeGenreForFamily, familyFromTargetOutput, buildSeriesEndingDirective, type PipelineFamily, type GameUnitPipelinePlan } from "./phase2c-gen-adapt.js";
 import { buildKagFromTemplate, renderRelationInjection } from "./phase3b-kag.js";
 import { buildLedgerFromTemplate, appendLedger, saveLedger, loadLedger, mergeLedger, harvestLedgerFromGenerated, type LongMemoryLedger } from "./phase5-polish.js";
 import { hydrateContextFromSeed, type GenerationSeed } from "./generation-seed.js";
@@ -564,12 +569,28 @@ export async function runExtractAndGenerate(
 
     const leafTemplates = leafIds.map((id) => dna.nodes[id]?.template).filter((t): t is NarrativeTemplate => !!t);
     const topTemplate = leafTemplates.length > 0 ? aggregateTemplates(leafTemplates) : emptyTemplate();
-    const operatorPool = dedupeOperators(leafIds.flatMap((id) => dna.nodes[id]?.operators ?? []));
+    // P0-2（§5.1b / Bug E）：游戏单元顶层模板（喂生成）的世界观/核心要素做 LLM 综合，
+    // 替换多叶朴素拼接的冗长流水账——直接决定下游 vn/rpg 生成 prompt 的内核质量。多叶且有 LLM 时才综合。
+    if (leafTemplates.length > 1 && options.llm) {
+      const synth = await synthesizeParentTemplateFields(options.llm, title, topTemplate);
+      topTemplate.worldview = synth.worldview;
+      topTemplate.core_elements = synth.core_elements;
+    }
+    // §3.2 顶层算子：对游戏单元聚合 template 按 complete 层维度提取（与叶子微观算子并列）。
+    const topOperators = options.llm
+      ? await extractParentOperators(
+          options.llm,
+          { id: `gu_${unit.index}_top`, title: `${title}·游戏单元${unit.index}`, levelType: "complete" },
+          topTemplate,
+        )
+      : [];
+    const operatorLayers = collectLayeredOperators(dna, leafIds, topOperators);
+    const operatorPool = flattenLayeredOperators(operatorLayers);
 
     emit({ phase: "mapping", message: `映射游戏单元 ${unit.index}（${leafIds.length} 单元）`, ratio: 0.6 });
 
-    // 构建该游戏单元的 scoped IP DNA 切片（§5.1 第③步）：合成根挂聚合 template + 算子池，
-    // 子节点为该单元的最小叙事单元，供生成期算子注入适配器（§7.2b）就地消费。
+    // 构建该游戏单元的 scoped IP DNA 切片（§5.1 第③步）：合成根挂聚合 template + 分层算子整池，
+    // 子节点为该单元的最小叙事单元，供生成期按层选池注入（§3.2 / §7.2b）。
     const scopedDna = buildScopedDna(dna, unit.index, leafIds, topTemplate, operatorPool, {
       story_id: story_timestamp,
       title,
@@ -598,11 +619,36 @@ export async function runExtractAndGenerate(
     // Phase2c（§4.6）：把游戏单元映射到生成管线节点控制——
     //   RPG → global_control_params.target_structure（层级节点数控制）；
     //   VN  → vn_target_act_count（开放幕数）。
-    const family: PipelineFamily = options.pipelineFamily ?? "rpg";
+    // P0-1（§4.4d 目标输出形态锁定）：family 优先显式参数 → target_output 反推 → 缺省 vn。
+    // IP 改编旗舰场景 = 互动叙事(影游/VN)，不再默认漂移到 rpg（修"上传小说想做影游却跑成 JRPG"）。
+    const family: PipelineFamily =
+      options.pipelineFamily ??
+      familyFromTargetOutput(directive.game_unit_plan.target_output) ??
+      "vn";
     const pipelinePlan = mapGameUnitToPipeline(unit, directive.game_unit_plan.mode, {
       family,
       defaultComplexity: options.targetComplexity,
+      unitCount: leafIds.length, // P1-1：VN 开放幕数 = 源单元数（章→幕锚定）。
     });
+
+    // P1-1（§5.1b 章→幕锚定）：VN 家族构建"幕↔源最小叙事单元"映射，让每幕忠实对应源作章节、
+    // 按其事件脉络密度展开，修"E2 自由重切丢原文 + per-unit 提取被浪费"。仅 VN 构建；RPG/普通 VN 无此字段。
+    const unitActMap =
+      family === "vn"
+        ? buildUnitActMap(
+            leafIds.map((id) => {
+              const n = dna.nodes[id];
+              const s = n?.template?.summary;
+              return {
+                id,
+                title: n?.title ?? id,
+                summary: s?.events ?? "",
+                characters: s?.characters ?? [],
+                scene: s?.scene ?? "",
+              };
+            }),
+          )
+        : undefined;
 
     // KAG 关系网络注入（§8）：构图 → 简报 → 追加到用户输入 + 落盘图谱。
     let relationBrief: string | undefined;
@@ -637,6 +683,7 @@ export async function runExtractAndGenerate(
       storyTimestamp: story_timestamp,
       topTemplate,
       scopedDna,
+      operatorLayers,
       ledger: unitLedger,
       adaptationDirective: directive,
       assetManifest: manifest,
@@ -645,7 +692,9 @@ export async function runExtractAndGenerate(
       complexity: pipelinePlan.complexity,
       family,
       targetStructure: family === "rpg" ? pipelinePlan.targetStructure : undefined,
-      vnActCount: pipelinePlan.vnActCount ?? resolveVnActCount(unit.targetNodeCount ?? 25),
+      // 幕数与幕锚定映射一致（章→幕）：有 map 时以 map 幕数为准，否则回退管线派生。
+      vnActCount: unitActMap?.acts.length ?? pipelinePlan.vnActCount ?? resolveVnActCount(unit.targetNodeCount ?? 25),
+      unitToActMap: unitActMap,
       relationNetwork: relationBrief,
     };
     const seedContext = hydrateContextFromSeed(seed);
@@ -797,10 +846,15 @@ export function buildGenerationPipelineConfig(
     const repGenre = representativeGenreForFamily(family);
     if (repGenre) base.genreCode = repGenre;
   }
+  // P0-1（§4.4d）：VN 家族缺省 = 纯互动叙事 vn_full——未显式指定或仅为通用 design_auto 时锁定 vn_full
+  // （不跑 D0-D4 策划文档）；显式 vn_full / design_vn_full 等 VN 模式则尊重不覆盖。修"IP 改编跑成 design_auto"。
+  const resolvedMode = options.generationMode ?? base.mode;
+  const mode =
+    family === "vn" && (!resolvedMode || resolvedMode === "design_auto") ? "vn_full" : resolvedMode;
   return {
     ...base,
     tier: options.tier ?? base.tier,
-    mode: options.generationMode ?? base.mode,
+    mode,
   };
 }
 

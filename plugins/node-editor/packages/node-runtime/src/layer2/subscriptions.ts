@@ -20,13 +20,22 @@ export type AssetEvent =
   | { kind: 'asset:changed'; path: string; type: string }
   | { kind: 'asset:removed'; path: string }
 
-// Workspace-lifecycle events. `project:activated` is broadcast to ALL connected
-// clients when the active project changes (in one iframe / via an agent tool) so
-// every other client pointed at the same backend re-syncs to it. It travels on
-// the 'graph' channel (the client transport demuxes any non-exec/non-asset kind
-// onto 'graph'), so no new subscription channel is required.
+// Workspace-lifecycle events. `project:viewing` is broadcast when the UI
+// viewing project changes. `project:executing` when an agent acquires a lock.
+// `project:idle` when an agent releases a lock. Legacy `project:activated` is
+// retained as an alias for `project:viewing`.
+// `project:created` / `project:deleted` announce that the project *list* itself
+// changed (e.g. an agent created a project via the tool bridge) so other clients
+// can refetch — creation/deletion previously broadcast nothing, leaving sibling
+// panes (the workbench navigation) stale until a manual reload.
 export type WorkspaceEvent =
+  | { kind: 'project:viewing'; projectId: string; pipelineId: string; newHash: string }
+  | { kind: 'project:executing'; projectId: string; pipelineId: string; agentId: string; sessionId?: string }
+  | { kind: 'project:idle'; projectId: string; agentId?: string }
+  | { kind: 'project:list-changed'; reason: 'created' | 'deleted' }
   | { kind: 'project:activated'; projectId: string; pipelineId: string; newHash: string }
+  | { kind: 'project:created'; projectId: string }
+  | { kind: 'project:deleted'; projectId: string }
 
 export type RuntimeEvent = GraphEvent | ExecutionEvent | AssetEvent | WorkspaceEvent
 

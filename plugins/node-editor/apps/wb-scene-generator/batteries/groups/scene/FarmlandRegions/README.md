@@ -108,7 +108,7 @@ forgeax node connect --edge-id e_fm_out0  --from farm:out_0       --to merge_all
 
 `pipeline.get` 核对 `<G_FARM>` 的 6 个可见输入（in_0..in_5）真的接上，`out_0` 进了汇总。
 
-`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出田块图层（名为 FarmlandAsset，如 `农田`）+ 作物图层（名为 CropAsset，如 `小麦`）**。作物图层的密集程度随 `CropDensity` 变化（0.9 较密）。截图里应在剩余空地出现成块的田地与其上的作物，即说明本层正确。
+`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出田块图层（名为 FarmlandAsset，如 `农田`）+ 作物图层（名为 CropAsset，如 `小麦`）**。作物图层的密集程度随 `CropDensity` 变化（0.9 较密）。Preview 里应在剩余空地出现成块的田地与其上的作物，即说明本层正确。
 
 ### 读回端口内容验证（像 grep 一样查某端口）
 

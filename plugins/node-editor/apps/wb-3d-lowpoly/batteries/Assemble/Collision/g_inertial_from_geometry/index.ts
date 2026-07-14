@@ -2,21 +2,21 @@
  * g_inertial_from_geometry —— 解析上游 part 引用的 shape，根据 mass 解析出
  * 惯性张量并追加 `id = inertial(link=<ref>, mass=..., ixx=..., iyy=..., izz=...)`。
  *
- * 解析公式（articraft Inertial.from_geometry 的 TS 等价）：
+ * 解析公式（Inertial.from_geometry）：
  *   - box(size=[w, d, h])      → Ixx = m/12 * (d² + h²),  Iyy = m/12 * (w² + h²),  Izz = m/12 * (w² + d²)
  *   - cylinder(radius=r, length=l, axis=Z)
  *                              → Ixx = Iyy = m/12 * (3r² + l²),                    Izz = m*r²/2
  *   - sphere(radius=r)         → Ixx = Iyy = Izz = 2/5 * m * r²
  *   - capsule(radius=r, length=l)（轴 = Z；length = 圆柱段长度，不含两半球；总长 = l + 2r）
  *                              先按"圆柱 + 两半球"组合分别算然后用平行轴定理合并；
- *                              半球质心距胶囊中心 = l/2 + 3r/8 沿 Z（articraft 同公式）
+ *                              半球质心距胶囊中心 = l/2 + 3r/8 沿 Z
  *   - cone(radius=r, height=h)  实心圆锥（轴 = Z，底心位于 z=-h/2）
  *                              → Iz = (3/10) * m * r²,  Ix = Iy = (3/20) * m * (r² + h²/4)（绕过质心）
- *                              注意：articraft 没单独 cone 类型；这里按教科书公式来。
+ *                              注意：按教科书公式来。
  *   - torus(R, r)               实心圆环（中线半径 R，截面半径 r，轴 = Z）
  *                              → Iz = m * (R² + 3/4 * r²),  Ix = Iy = m * (R²/2 + 5/8 * r²)
  *   - dome(radius=r, height=h)  视作半球（h ≈ r）：
- *                              → 全部三轴 = (2/5) m r² 的近似（articraft 用 box 兜底，我们这里给个略好的近似）
+ *                              → 全部三轴 = (2/5) m r² 的近似
  *
  * 复合 / 语义形状（clevis_bracket / spur_gear / union / array_radial / extrude / ...）：
  *   走 AABB 兜底——解析"形状 ref 链"后获得整体 AABB，等效为一块实心 box 套用 box 公式。
@@ -193,9 +193,9 @@ function inertiaFromShape(
       // 两半球合并 = 一个实心球（绕球心）；两球心在 ±(bodyLength/2 + 3r/8) 沿 Z
       // 整球的中心惯量 = 2/5 m_sph r²；两个半球绕胶囊中心使用平行轴：
       //   每个半球质量 = mSph/2，单个半球绕"半球质心"的张量 ≈ 视作半球教科书值；
-      //   工程上 articraft 的简化是直接把"两半球"合在一起当作一个球放在中心，
+      //   工程上的简化是直接把"两半球"合在一起当作一个球放在中心，
       //   但更精确的 capsule（mujoco / pinocchio）做法：把两半球看作"位于 ±d 处的点质量 + 球壳"。
-      // 这里取 articraft 简化：两半球合并 = 一个实心球绕胶囊中心。
+      // 这里取简化：两半球合并 = 一个实心球绕胶囊中心。
       const sphereTensor = (2 / 5) * mSph * r * r;
 
       return {
@@ -211,7 +211,7 @@ function inertiaFromShape(
       };
     }
     case 'cone': {
-      // 实心圆锥，轴 = Z，articraft 当前没有 cone 类型，公式取自标准刚体动力学：
+      // 实心圆锥，轴 = Z，公式取自标准刚体动力学：
       // 绕过质心：Iz = 3/10 m r²；Ix = Iy = m * (3 r² / 20 + 3 h² / 80)（轴向与底径耦合）
       const r = readNumber(shape.args.radius);
       const h = readNumber(shape.args.height);
@@ -238,7 +238,7 @@ function inertiaFromShape(
       };
     }
     case 'dome': {
-      // 球冠（articraft 没有这个 op，本仓特有）；当 height ≈ radius 时是半球。
+      // 球冠；当 height ≈ radius 时是半球。
       // 简化：按 AABB 等效 box 兜底已经接近了，这里给个"实心半球"近似（绕过质心，轴 = Z）：
       //   Iz = 2/5 m r²；Ix = Iy = (83/320) m r²（半球绕过质心轴）
       // h < r 时退化到 AABB box（兜底），保持既有保守行为。

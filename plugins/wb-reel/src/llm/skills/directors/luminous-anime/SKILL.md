@@ -43,4 +43,4 @@ order: 4
 
 ## 海报样张
 
-Anime film key visual poster, luminous backlit sky with hyper-detailed clouds, lens flare and god rays, lush saturated colors, small figure gazing upward, wistful emotional mood, no text, vertical 2:3
+Anime-film-director-style storyboard contact sheet, 6 large key-visual frames in a 2-column by 3-row grid with thin gutters, lush saturated blue skies with orange-gold complementary light, hyper-detailed multi-layer clouds, sharp backlit rim light. Panel 1: wide luminous backlit sky over a small figure. Panel 2: close-up of a face touched by god rays. Panel 3: an empty insert shot — power lines, water reflection, dappled leaf light. Panel 4: a rising crane view as the sky seems to turn. Panel 5: a single restrained lens flare as an emotional anchor. Panel 6: a tiny detail close-up — a hair strand, a water drop. Wistful, radiant, high detail; consistent grade across all panels, no text, no captions, vertical 2:3

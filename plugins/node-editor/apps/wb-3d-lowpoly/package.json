@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/wb-3d-lowpoly",
+  "name": "@forgeax-extension/wb-3d-lowpoly",
   "version": "0.1.0",
   "private": true,
   "description": "3D Lowpoly Generator — ForgeaX node-programming plugin built on @forgeax/node-runtime",

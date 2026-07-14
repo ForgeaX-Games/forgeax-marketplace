@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Gear battery">
+  <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#10211d" stroke="#4f6f63" stroke-width="1.2"/>
+  <g fill="#b7ff5a" fill-opacity=".18" stroke="#e7f5ee" stroke-width="1.4" stroke-linejoin="round">
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(45 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(90 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(135 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(180 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(225 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(270 12 12)"/>
+    <rect x="10.9" y="3" width="2.2" height="3" rx=".5" transform="rotate(315 12 12)"/>
+  </g>
+  <circle cx="12" cy="12" r="6" fill="#b7ff5a" fill-opacity=".16" stroke="#e7f5ee" stroke-width="1.5"/>
+  <circle cx="12" cy="12" r="2.3" fill="none" stroke="#e7f5ee" stroke-width="1.5"/>
+  <circle cx="12" cy="12" r=".9" fill="#b7ff5a"/>
+</svg>

@@ -66,7 +66,7 @@ frontend/                   # Vite + React UI
 batteries/                  # ~276 scene domain batteries (file-based; scanned by kernel loader)
 vendor/shared/types/        # vendored shared types; build:vendor → vendor/dist/ (gitignored)
 schemas/                    # JSON schemas for batteries / ops
-forgeax-plugin.json         # ForgeaX plugin manifest (id @forgeax-plugin/wb-2d-scene-asset-generator)
+forgeax-extension.json         # ForgeaX plugin manifest (id @forgeax-extension/wb-2d-scene-asset-generator)
 SKILL.md                    # AI-readable op + workflow guide
 ```
 

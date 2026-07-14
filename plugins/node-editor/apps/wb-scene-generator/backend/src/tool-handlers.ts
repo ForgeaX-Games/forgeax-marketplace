@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 
+import { resolveNarrativeLocationNames } from './resolve-narrative-names.js'
+
 type Caller = {
   kind: 'user' | 'ai' | 'skill' | 'workbench' | 'cli'
   sessionId?: string
@@ -17,9 +19,9 @@ type ToolCtx = {
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
 
-const PLUGIN_ID = '@forgeax-plugin/wb-scene-generator'
+const PLUGIN_ID = '@forgeax-extension/wb-scene-generator'
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:9557'
-const ASSET2D_PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
+const ASSET2D_PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
 const DEFAULT_ASSET2D_BACKEND_URL = 'http://127.0.0.1:9567'
 
 function objectArgs(args: unknown): Record<string, unknown> {
@@ -126,7 +128,7 @@ async function request(ctx: ToolCtx, method: string, path: string, body?: unknow
       const reopen = await sceneRawFetch(
         ctx,
         'POST',
-        `/api/v1/projects/${encodeURIComponent(p.projectId)}/activate`,
+        `/api/v1/projects/${encodeURIComponent(p.projectId)}/open`,
         {},
       )
       if (reopen.res.ok) {
@@ -189,48 +191,54 @@ function stripBatteryIcon(op: Record<string, unknown>): Record<string, unknown> 
   return stripInlineImages(op) as Record<string, unknown>
 }
 
-// agent 运行时（tool-normalizer.createToolResultMessage）对工具结果做 isContentPartArray
-// 判定：命中则走多模态分支，让 LLM 真正“看到”图片。后端 REST 路由刻意只返回路径 JSON
-// （避免 base64 污染上下文 / 供 UI 等非 agent 调用方复用），所以把它包装成 image_file
-// ContentPart[] 是 agent 工具适配层（本文件）的职责，而非后端路由的职责。
-type AgentScreenshotView = { captureId: string; width: number; height: number; path: string; relPath?: string; capturedAt?: string }
-
-function screenshotContentParts(view: AgentScreenshotView): unknown[] {
-  const { captureId, width, height, path } = view
-  return [
-    { type: 'image_file', path, mimeType: 'image/png' },
-    {
-      type: 'text',
-      text:
-        `以上是图片内容块，你的模型 claude-opus-4-8 完全支持图片输入，可以直接查看这张截图。` +
-        `严禁声称“模型不支持图片输入 / 读不了图”而跳过视觉验证——那是修复前的错误旧认知，现已不成立。` +
-        `请直接观察画面（布局/建筑/道路/装饰是否正确）判断对错。` +
-        `（截图已捕获：${width}x${height}，captureId=${captureId}，path=${path}）`,
-    },
-  ]
+type WorkspaceSnapshot = {
+  viewingProjectId?: string | null
+  executingProjectIds?: string[]
 }
 
-/** Test-phase escape hatch (`FORGEAX_SCENE_SCREENSHOT_NO_VISION=1|true|on`): when
- *  set, screenshot tools return the plain capture metadata (path + size) WITHOUT
- *  the `image_file` content part, so the agent never ingests the screenshot into
- *  its context. The renderer still captures it (the human can open the path); the
- *  agent just doesn't "see" it. Default (unset) → vision ON, unchanged behaviour. */
-function screenshotVisionDisabled(ctx: ToolCtx): boolean {
-  const v = (ctx.env.FORGEAX_SCENE_SCREENSHOT_NO_VISION ?? '').trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on'
+type ProjectLockSnapshot = {
+  lock?: { agentId?: string } | null
 }
 
-function screenshotResult(view: AgentScreenshotView, ctx: ToolCtx): unknown {
-  if (screenshotVisionDisabled(ctx)) {
-    return {
-      ...view,
-      visionDisabled: true,
-      note:
-        '截图视觉已按测试配置关闭（FORGEAX_SCENE_SCREENSHOT_NO_VISION）。本工具只返回截图路径与尺寸，' +
-        '未把图片读进你的上下文。请勿声称“看过这张图”；改用 scene:pipeline.execute 的摘要 + names 投影来判定每组是否产出。',
+/** Explicit `projectId` in args, else agent-held lock, else UI viewing project (non-AI only). */
+async function resolveProjectId(ctx: ToolCtx, args: Record<string, unknown>): Promise<string> {
+  const explicit = args.projectId
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
+
+  const ws = (await request(ctx, 'GET', '/api/v1/workspace')) as WorkspaceSnapshot
+  const executing = ws.executingProjectIds ?? []
+
+  if (ctx.caller.kind === 'ai') {
+    if (ctx.caller.agentId) {
+      for (const pid of executing) {
+        const lockInfo = (await request(
+          ctx,
+          'GET',
+          `/api/v1/projects/${encodeURIComponent(pid)}/lock`,
+        )) as ProjectLockSnapshot
+        if (lockInfo?.lock?.agentId === ctx.caller.agentId) return pid
+      }
     }
+    if (executing.length === 1) return executing[0]!
+    throw new Error(
+      'missing projectId: AI must pass projectId on every pipeline tool call. ' +
+      'scene:projects.open does NOT switch the UI viewing project — omitting projectId reads the wrong graph. ' +
+      (executing.length > 0
+        ? `Held locks: [${executing.join(', ')}] — pass the one you opened.`
+        : 'Call scene:projects.open first, then pass that id as projectId.'),
+    )
   }
-  return screenshotContentParts(view)
+
+  const viewing = ws.viewingProjectId
+  if (typeof viewing === 'string' && viewing.trim()) return viewing.trim()
+
+  throw new Error(
+    'missing projectId: pass projectId in args, or scene:projects.open a project first (AI agents must open before mutating)',
+  )
+}
+
+function projectPath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}${suffix}`
 }
 
 export const tools: Record<string, ToolHandler> = {
@@ -239,7 +247,7 @@ export const tools: Record<string, ToolHandler> = {
   'scene:projects.open': async (args, ctx) => {
     const body = objectArgs(args)
     const id = stringArg(body, 'id')
-    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/activate`, {})
+    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/open`, {})
   },
   'scene:projects.close': async (args, ctx) => {
     const id = stringArg(objectArgs(args), 'id')
@@ -252,6 +260,7 @@ export const tools: Record<string, ToolHandler> = {
   },
   // Strip inline-image fields so the catalog is always clean text (see
   // `stripBatteryIcon` / `stripInlineImages` above).
+  // Full battery catalog — human/workbench only (exposedToAI:false). Sino uses composerUtilities.*
   'scene:batteries.list': async (_args, ctx) => {
     const ops = await request(ctx, 'GET', '/api/v1/ops') as Array<Record<string, unknown>>
     return Array.isArray(ops) ? ops.map(stripBatteryIcon) : ops
@@ -261,6 +270,26 @@ export const tools: Record<string, ToolHandler> = {
     const ops = await request(ctx, 'GET', '/api/v1/ops') as Array<Record<string, unknown>>
     const op = ops.find((candidate) => candidate.id === id)
     if (!op) throw new Error(`scene battery not found: ${id}`)
+    return stripBatteryIcon(op)
+  },
+  // Sino-facing catalog: composer wiring utilities only (matches sinoOpGate allowlist).
+  'scene:composerUtilities.list': async (_args, ctx) => {
+    const { filterComposerUtilityOps } = await import('./routes/sinoOpGate.js')
+    const ops = await request(ctx, 'GET', '/api/v1/ops') as Array<Record<string, unknown>>
+    const list = Array.isArray(ops) ? filterComposerUtilityOps(ops) : []
+    return list.map(stripBatteryIcon)
+  },
+  'scene:composerUtilities.get': async (args, ctx) => {
+    const { filterComposerUtilityOps, SINO_TOP_LEVEL_OPID_ALLOWLIST } = await import('./routes/sinoOpGate.js')
+    const id = stringArg(objectArgs(args), 'id')
+    if (!SINO_TOP_LEVEL_OPID_ALLOWLIST.has(id)) {
+      throw new Error(
+        `composer utility not exposed to Sino: ${id}. Use instantiateTemplate for template groups.`,
+      )
+    }
+    const ops = await request(ctx, 'GET', '/api/v1/ops') as Array<Record<string, unknown>>
+    const op = filterComposerUtilityOps(Array.isArray(ops) ? ops : []).find((candidate) => candidate.id === id)
+    if (!op) throw new Error(`composer utility not found: ${id}`)
     return stripBatteryIcon(op)
   },
   // Group templates (the 6 prebuilt scene template groups + saved group
@@ -285,10 +314,58 @@ export const tools: Record<string, ToolHandler> = {
   'scene:pipeline.instantiateTemplate': async (args, ctx) => {
     const body = objectArgs(args)
     const id = stringArg(body, 'templateId')
-    return request(ctx, 'POST', `/api/v1/group-templates/${encodeURIComponent(id)}/instantiate`, body)
+    const projectId = await resolveProjectId(ctx, body)
+    const result = await request(ctx, 'POST', `/api/v1/group-templates/${encodeURIComponent(id)}/instantiate`, {
+      ...body,
+      projectId,
+    }) as Record<string, unknown>
+    if (result.status !== 'ok' || typeof result.groupId !== 'string') {
+      return result
+    }
+    const snap = await request(ctx, 'GET', projectPath(projectId, '/pipeline')) as {
+      nodes?: Record<string, unknown> | unknown[]
+    }
+    const nodes = snap?.nodes
+    const nodeIds = Array.isArray(nodes)
+      ? nodes.map((n) => (n as { id?: string }).id).filter(Boolean)
+      : nodes && typeof nodes === 'object'
+        ? Object.keys(nodes)
+        : []
+    const graphVerified = nodeIds.includes(result.groupId)
+    return {
+      ...result,
+      graphVerified,
+      graphNodeCount: nodeIds.length,
+      ...(graphVerified
+        ? { verifyHint: `groupId ${result.groupId} confirmed in graph (${nodeIds.length} nodes)` }
+        : {
+          verifyError:
+            `groupId ${result.groupId} NOT in graph after instantiate — call pipeline.get before applyBatch; do NOT fabricate wiring`,
+        }),
+    }
   },
-  'scene:pipeline.get': async (_args, ctx) => request(ctx, 'GET', '/api/v1/pipeline'),
-  'scene:pipeline.applyBatch': async (args, ctx) => request(ctx, 'POST', '/api/v1/batch', objectArgs(args)),
+  'scene:pipeline.get': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    if (body.raw === true) {
+      return request(ctx, 'GET', projectPath(projectId, '/pipeline'))
+    }
+    const q = new URLSearchParams()
+    if (body.mode === 'hash') q.set('mode', 'hash')
+    if (typeof body.groupId === 'string' && body.groupId.trim()) q.set('groupId', body.groupId.trim())
+    if (Array.isArray(body.nodeIds)) {
+      const ids = body.nodeIds.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      if (ids.length > 0) q.set('nodeIds', ids.join(','))
+    }
+    const suffix = q.size > 0 ? `/pipeline/summary?${q}` : '/pipeline/summary'
+    return request(ctx, 'GET', projectPath(projectId, suffix))
+  },
+  'scene:pipeline.applyBatch': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const { projectId: _omit, ...batchBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/batch'), batchBody)
+  },
   // The agent must never pour a full ExecutionResult into its context (a real
   // graph is ~28MB and a huge scene can exceed V8's single-string limit, which
   // would throw `Invalid string length` while serializing the HTTP body). So by
@@ -300,13 +377,93 @@ export const tools: Record<string, ToolHandler> = {
   'scene:pipeline.execute': async (args, ctx) => {
     const body = objectArgs(args)
     const raw = body.raw === true
+    const projectIdHint =
+      typeof body.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined
+    let narrativeLocationNames = Array.isArray(body.narrativeLocationNames)
+      ? body.narrativeLocationNames.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      : []
+    if (!raw && ctx.caller.kind === 'ai' && narrativeLocationNames.length === 0) {
+      narrativeLocationNames = resolveNarrativeLocationNames(ctx.env, [], projectIdHint)
+    }
+    const projectId = await resolveProjectId(ctx, body)
+    if (!raw && ctx.caller.kind === 'ai' && narrativeLocationNames.length === 0) {
+      narrativeLocationNames = resolveNarrativeLocationNames(ctx.env, [], projectId)
+    }
     const forward: Record<string, unknown> = {}
     if (typeof body.nodeId === 'string') forward.nodeId = body.nodeId
-    const path = raw ? '/api/v1/execute' : '/api/v1/execute/summary'
-    return request(ctx, 'POST', path, forward)
+    if (!raw && ctx.caller.kind === 'ai') {
+      if (narrativeLocationNames.length === 0) {
+        throw new Error(
+          'pipeline.execute requires narrativeLocationNames:[...] (upstream location names). ' +
+          'Copy the JSON array from the dispatch message — do not execute without it.',
+        )
+      }
+      forward.narrativeLocationNames = narrativeLocationNames
+    } else if (!raw && narrativeLocationNames.length > 0) {
+      forward.narrativeLocationNames = narrativeLocationNames
+    }
+    const path = raw ? projectPath(projectId, '/execute') : projectPath(projectId, '/execute/summary')
+    const payload = await request(ctx, 'POST', path, forward)
+    if (!raw && ctx.caller.kind === 'ai' && payload && typeof payload === 'object') {
+      const summary = payload as {
+        status?: string
+        verification?: {
+          ok?: boolean
+          hints?: string[]
+          locationNameAlignment?: { ok?: boolean; missing?: Array<{ name: string }>; fix?: string }
+        }
+      }
+      if (summary.status === 'completed' && summary.verification?.ok === false) {
+        const hints = summary.verification.hints ?? []
+        const loc = summary.verification.locationNameAlignment
+        if (loc?.ok === false) {
+          const missing = (loc.missing ?? []).map((m) => m.name).join('、')
+          throw new Error(
+            `pipeline.execute locationNameAlignment failed — missing narrative names: ${missing}. ` +
+            `${loc.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}`,
+          )
+        }
+        throw new Error(
+          `pipeline.execute verification failed (empty/disconnected group outputs). ` +
+          `Fix wiring via pipeline.get(groupId) + applyBatch, then re-execute. ` +
+          (hints[0] ?? 'See verification.hints'),
+        )
+      }
+    }
+    return payload
   },
-  'scene:pipeline.import': async (args, ctx) => request(ctx, 'POST', '/api/v1/pipeline/import', objectArgs(args)),
-  'scene:pipeline.export': async (args, ctx) => request(ctx, 'POST', '/api/v1/pipeline/export', objectArgs(args)),
+  'scene:pipeline.import': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const { projectId: _omit, ...importBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/pipeline/import'), importBody)
+  },
+  'scene:pipeline.export': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const { projectId: _omit, ...exportBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/pipeline/export'), exportBody)
+  },
+  // 复盘(2026-07-01 sino bake/export 工具缺口):bake/export 一直只有 HTTP 路由 +
+  // UI 按钮,agent 完全没有工具能触达——sino 走到"图搭完了"就没有下一步了。这两个
+  // 工具补上 M7（收尾)：先 bakeFromExecute 把当前图的执行结果快照成可编辑的 baked
+  // 图层（原地在服务端投影出体素,agent 不搬 cells),再 export.cook 把 baked 图层
+  // 烘焙打包成 scene.zip。都不需要参数拼 cells——分别对应 SKILL.md 的 M7 步骤。
+  'scene:baked.bakeFromExecute': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const forward: Record<string, unknown> = {}
+    if (typeof body.nodeId === 'string') forward.nodeId = body.nodeId
+    return request(ctx, 'POST', projectPath(projectId, '/baked/bake-from-execute'), forward)
+  },
+  'scene:sceneExport.cook': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const forward: Record<string, unknown> = {}
+    if (typeof body.sceneName === 'string') forward.sceneName = body.sceneName
+    if (body.allowMissingAssets === true) forward.allowMissingAssets = true
+    return request(ctx, 'POST', projectPath(projectId, '/scene-export/cook'), forward)
+  },
   'scene:assets.list': async (args, ctx) => request(ctx, 'GET', `/api/v1/assets${query(objectArgs(args))}`),
   // Library listing (base ∪ project-private, paginated) — the ONLY way for an
   // agent to SEE/verify what it published via `scene:library.publishExternal`.
@@ -353,18 +510,8 @@ export const tools: Record<string, ToolHandler> = {
     delete a.from2dBlobId
     return request(ctx, 'POST', '/api/v1/library/publish-external', a)
   },
-  // capture 成功 → 包装成 image_file ContentPart[]，经 host_tool_bridge 透传给 agent
-  // 运行时，命中多模态分支让 sino 真正看到截图。无 renderer client 时后端返回 504，
-  // request() 会抛错（"... capture timeout (no renderer connected?)"），sino 由此明确
-  // 知道“没截到图”，绝不会被当成成功。
-  'scene:screenshot.capture': async (args, ctx) => {
-    const view = await request(ctx, 'POST', '/api/v1/agent/screenshot/capture', objectArgs(args)) as AgentScreenshotView
-    return screenshotResult(view, ctx)
-  },
-  'scene:screenshot.latest': async (_args, ctx) => {
-    const view = await request(ctx, 'GET', '/api/v1/agent/screenshot/latest') as AgentScreenshotView
-    return screenshotResult(view, ctx)
-  },
+  // screenshot.capture / screenshot.latest 已不再向 AI 注册（截图视觉验证模块退役）；
+  // 仅保留 store 作为渲染器内部回写端点（exposedToAI:false，供 studio 截图按钮等非 agent 调用方使用）。
   'scene:screenshot.store': async (args, ctx) => request(ctx, 'POST', '/api/v1/agent/screenshot/store', objectArgs(args)),
   'scene:renderer.info': async (_args, ctx) => request(ctx, 'GET', '/api/v1/agent/renderer/info'),
   'scene:renderer.setViewMode': async (args, ctx) => request(ctx, 'PATCH', '/api/v1/agent/renderer/view-mode', objectArgs(args)),

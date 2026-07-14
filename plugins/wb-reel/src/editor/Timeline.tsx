@@ -59,6 +59,7 @@ import {
   makeInsertAdjustClip,
   makeInsertEffectClip,
   makeInsertStickerClip,
+  makeInsertUiOverlay,
 } from './timeline/insertFactories'
 import {
   TimelineContextMenu,
@@ -2055,6 +2056,21 @@ export function Timeline({ scene, hoverMs, setHoverMs, onPreviewChange, onShowDi
           presetId: payload.presetId,
           mediaId: payload.mediaId,
           defaultDurationMs: payload.defaultDurationMs,
+        })
+        addStickerClip(scene.id, clip)
+        setToolbarSel({ kind: 'sticker', id: clip.id })
+        break
+      }
+      case 'uiOverlay': {
+        const clip = makeInsertUiOverlay({
+          ms,
+          sceneDurationMs: total,
+          uiAssetId: payload.uiAssetId,
+          mediaId: payload.mediaId,
+          blendMode: payload.blendMode,
+          anchor: payload.anchor,
+          defaultDurationMs: payload.defaultDurationMs,
+          pinToScene: payload.pinToScene,
         })
         addStickerClip(scene.id, clip)
         setToolbarSel({ kind: 'sticker', id: clip.id })

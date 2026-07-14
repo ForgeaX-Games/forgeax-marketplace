@@ -74,4 +74,62 @@ describe('buildReelGameAsset', () => {
     expect(sc['scenes']!['1.1']!.media.ref).toBe('m-aaa')
     expect(res.external).toHaveLength(1)
   })
+
+  it('emits a VideoAsset media asset for VIDEO media and fills the entry refs', async () => {
+    const res = await buildReelGameAsset(scenario, {
+      guid: '0190a0b1-0000-7000-8000-000000000010',
+      resolveBlob: async () => ({ kind: 'blob', bytes: new Uint8Array([1, 2, 3]), ext: 'mp4' }),
+    })
+    const entry = res.packJson.assets[0]!
+    const media = res.packJson.assets.slice(1)
+    expect(media).toHaveLength(1)
+    const vid = media[0]!
+    expect(vid.kind).toBe('video') // VideoAsset (引擎自有 kind)
+    expect(vid.payload.url).toMatch(/^\.\/reel-media\/[0-9a-f]{16}\.mp4$/)
+    expect(vid.payload).not.toHaveProperty('mime') // VideoAsset 只带 url
+    expect(vid.refs).toEqual([])
+    // 入口 refs = 引用到的媒体 GUID
+    expect(entry.refs).toEqual([vid.guid])
+    // GUID 是合法 UUIDv8 形态
+    expect(vid.guid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+
+  it('emits a raw-file media asset (with mime) for image media', async () => {
+    const imgScenario = {
+      id: 's-img', title: 'img', rootSceneId: '1.1', schemaVersion: 8, defaultCharMs: 30,
+      scenes: { '1.1': { id: '1.1', title: 'a', durationMs: 1000, media: { kind: 'IMAGE', ref: 'm-a' }, dialogue: [], branches: [] } },
+    } as never
+    const res = await buildReelGameAsset(imgScenario, {
+      guid: '0190a0b1-0000-7000-8000-000000000011',
+      resolveBlob: async () => ({ kind: 'blob', bytes: new Uint8Array([7, 7]), ext: 'png' }),
+    })
+    const img = res.packJson.assets[1]!
+    expect(img.kind).toBe('raw-file')
+    expect(img.payload.url).toMatch(/^\.\/reel-media\/[0-9a-f]{16}\.png$/)
+    expect(img.payload.mime).toBe('image/png')
+  })
+
+  it('deduplicates identical bytes into a single media asset + single ref, deterministic GUID', async () => {
+    const twoRefs = {
+      id: 's2', title: 'dup', rootSceneId: '1.1', schemaVersion: 8, defaultCharMs: 30,
+      scenes: {
+        '1.1': { id: '1.1', title: 'a', durationMs: 1000, media: { kind: 'IMAGE', ref: 'm-a' }, dialogue: [], branches: [] },
+        '1.2': { id: '1.2', title: 'b', durationMs: 1000, media: { kind: 'IMAGE', ref: 'm-b' }, dialogue: [], branches: [] },
+      },
+    } as never
+    const res = await buildReelGameAsset(twoRefs, {
+      guid: '0190a0b1-0000-7000-8000-000000000012',
+      resolveBlob: async () => ({ kind: 'blob', bytes: new Uint8Array([9, 9]), ext: 'png' }),
+    })
+    expect(res.mediaFiles).toHaveLength(1)
+    const media = res.packJson.assets.slice(1)
+    expect(media).toHaveLength(1)
+    expect(res.packJson.assets[0]!.refs).toEqual([media[0]!.guid])
+    // 同字节 ⇒ 同 GUID（内容寻址确定性）
+    const res2 = await buildReelGameAsset(twoRefs, {
+      guid: '0190a0b1-0000-7000-8000-000000000099',
+      resolveBlob: async () => ({ kind: 'blob', bytes: new Uint8Array([9, 9]), ext: 'png' }),
+    })
+    expect(res2.packJson.assets[1]!.guid).toBe(media[0]!.guid)
+  })
 })

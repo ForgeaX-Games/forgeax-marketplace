@@ -66,13 +66,26 @@ export async function runIpDnaCli(args: string[], env: IpDnaCliEnv): Promise<voi
     process.exit(1);
   }
 
+  // 二进制扩展名（zip/图片/视频/PDF）按 Buffer 读，避免 utf-8 读取损坏压缩包/媒体字节；
+  // 文本仍按 utf-8。修：此前一律 utf-8 读取导致 `--ip x.zip` 无法解压（zip 全流程测试踩坑）。
+  const BINARY_EXT = new Set([
+    ".zip", ".tar", ".gz", ".tgz", ".pdf",
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".mp4", ".mov", ".mkv", ".webm",
+  ]);
   const incoming: IncomingFile[] = files.map((p) => {
     const abs = path.resolve(p);
     if (!fs.existsSync(abs)) {
       console.error(`❌ 文件不存在: ${abs}`);
       process.exit(1);
     }
-    return { fileName: path.basename(abs), data: fs.readFileSync(abs, "utf-8"), fileType: "text/plain" };
+    const ext = path.extname(abs).toLowerCase();
+    const isBinary = BINARY_EXT.has(ext);
+    return {
+      fileName: path.basename(abs),
+      data: isBinary ? fs.readFileSync(abs) : fs.readFileSync(abs, "utf-8"),
+      fileType: isBinary ? ext.slice(1) : "text/plain",
+    };
   });
 
   const hasLlm = !!(env.apiKey || env.proxyUrl);

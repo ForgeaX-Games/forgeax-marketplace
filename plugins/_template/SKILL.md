@@ -33,5 +33,5 @@ This plugin demonstrates the spec in
 - No pane query = standalone three-column dev mode.
 
 State sync flows:
-- transient UI ↔ `BroadcastChannel('forgeax-plugin.@forgeax-plugin/_template')`
+- transient UI ↔ `BroadcastChannel('forgeax-plugin.@forgeax-extension/_template')`
 - business state ↔ bus surface `template` (visible to forgeax-cli)

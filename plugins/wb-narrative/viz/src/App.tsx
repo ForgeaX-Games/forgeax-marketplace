@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { AlignLeft, Network, Download, ArrowLeftRight, Trash2 } from "lucide-react";
 import { useT } from "./i18n";
 import { NarrativeCanvas } from "./components/NarrativeCanvas";
@@ -21,6 +21,23 @@ function getPaneMode(): PaneMode {
   const p = new URLSearchParams(window.location.search).get("pane");
   if (p === "left" || p === "center") return p;
   return "full";
+}
+
+// 侧栏宽度：默认占屏宽 1/5，可拖拽（min/max 夹取），结果记忆到 localStorage。
+const SIDEBAR_WIDTH_KEY = "forgeax.narrative.sidebarW";
+const SIDEBAR_MIN_WIDTH = 220;
+const sidebarMaxWidth = (): number => Math.round((window.innerWidth || 1200) * 0.6);
+const defaultSidebarWidth = (): number =>
+  Math.max(SIDEBAR_MIN_WIDTH, Math.round((window.innerWidth || 1200) / 5));
+
+function getInitialSidebarWidth(): number {
+  try {
+    const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(raw) && raw >= SIDEBAR_MIN_WIDTH) {
+      return Math.min(raw, sidebarMaxWidth());
+    }
+  } catch { /* ignore */ }
+  return defaultSidebarWidth();
 }
 
 export function App() {
@@ -142,6 +159,50 @@ export function App() {
 
   const showSidebar = pane === "left" || pane === "full";
   const showCenter = pane === "center" || pane === "full";
+  // 拖拽条仅在左右两栏同时可见（独立/并排 full 模式）时有意义；嵌入平台的 left 全宽模式不需要。
+  const resizable = pane === "full";
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(getInitialSidebarWidth);
+  const draggingRef = useRef(false);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      const startX = e.clientX;
+      const startW = sidebarWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (ev: MouseEvent) => {
+        if (!draggingRef.current) return;
+        const next = Math.min(
+          sidebarMaxWidth(),
+          Math.max(SIDEBAR_MIN_WIDTH, startW + (ev.clientX - startX)),
+        );
+        setSidebarWidth(next);
+      };
+      const onUp = () => {
+        draggingRef.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        setSidebarWidth((w) => {
+          try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w)); } catch { /* ignore */ }
+          return w;
+        });
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [sidebarWidth],
+  );
+
+  const handleResizeReset = useCallback(() => {
+    const w = defaultSidebarWidth();
+    setSidebarWidth(w);
+    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w)); } catch { /* ignore */ }
+  }, []);
 
   return (
     <div className="app-root">
@@ -161,7 +222,11 @@ export function App() {
 
       <main className="app-main">
         {showSidebar && (
-          <aside className="app-sidebar tool-left-panel" aria-label={t("app.sidebarAria")}>
+          <aside
+            className="app-sidebar tool-left-panel"
+            aria-label={t("app.sidebarAria")}
+            style={resizable ? { width: sidebarWidth } : undefined}
+          >
             <header className="workbench-pane-header">
               <span className="workbench-pane-title">{t("app.title")}</span>
               <span className={`workbench-pane-pill ${displayStatus === "running" ? "running" : ""}`}>
@@ -172,6 +237,18 @@ export function App() {
               <TierModeSelector />
             </div>
           </aside>
+        )}
+
+        {showSidebar && showCenter && resizable && (
+          <div
+            className="app-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("app.resizeAria")}
+            onMouseDown={handleResizeStart}
+            onDoubleClick={handleResizeReset}
+            title={t("app.resizeTitle")}
+          />
         )}
 
         {showCenter && (

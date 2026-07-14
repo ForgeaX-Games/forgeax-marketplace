@@ -4,7 +4,13 @@
 
 import { paintDiffusionRendererOutput, setDiffusionRendererOutputVisible } from './output-store';
 
-export interface StreamParams { prompt?: string; steps?: number; interp?: number; lora?: string; seed?: number }
+export interface StreamParams { prompt?: string; steps?: number; interp?: number; seed?: number }
+export type StreamGameOverrides = Partial<StreamParams>;
+export interface StreamControlSnapshot {
+  base: StreamParams;
+  game: StreamGameOverrides;
+  effective: StreamParams;
+}
 export type StreamState = 'connecting' | 'live' | 'stopped' | 'error' | 'busy' | 'unauthorized';
 export interface StreamStatus {
   state: StreamState;
@@ -34,6 +40,17 @@ let queue: string[] = [];
 let lastUrl: string | null = null;
 let sentParams: StreamParams = {};
 let onStatus: (s: StreamStatus) => void = () => {};
+let lastStatus: StreamStatus = { state: 'stopped' };
+let baseParams: StreamParams = {};
+let gameOverrides: StreamGameOverrides = {};
+// One-shot: set when the GLOBAL style prompt is (re)applied so the next uplink
+// frame carries reset_cache:true and the backend rebuilds its KV cache. Game
+// fragment updates deliberately never set this — they are prompt-only and keep
+// the cache to stay temporally coherent.
+let pendingCacheReset = false;
+const statusListeners = new Set<(s: StreamStatus) => void>();
+const controlListeners = new Set<() => void>();
+const MAX_GAME_PROMPT_CHARS = 600;
 
 export function isStreaming(): boolean { return running; }
 
@@ -42,7 +59,29 @@ function findCanvas(): HTMLCanvasElement | null {
 }
 
 function emit(state: StreamState, error?: string): void {
-  onStatus({ state, fps: shown.length, modelFps: completed.length, e2eMs: lastE2E ?? undefined, serverMs: lastSrv ?? undefined, dropped, error });
+  const status = { state, fps: shown.length, modelFps: completed.length, e2eMs: lastE2E ?? undefined, serverMs: lastSrv ?? undefined, dropped, error };
+  lastStatus = status;
+  onStatus(status);
+  statusListeners.forEach((fn) => fn(status));
+}
+
+function notifyControl(): void {
+  controlListeners.forEach((fn) => fn());
+}
+
+function effectiveParams(): StreamParams {
+  const basePrompt = baseParams.prompt?.trim() ?? '';
+  const gamePrompt = gameOverrides.prompt?.trim() ?? '';
+  const prompt = [basePrompt, gamePrompt].filter(Boolean).join(', ');
+  const steps = gameOverrides.steps ?? baseParams.steps;
+  const interp = gameOverrides.interp ?? baseParams.interp;
+  const seed = gameOverrides.seed ?? baseParams.seed;
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(steps !== undefined ? { steps } : {}),
+    ...(interp !== undefined ? { interp } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+  };
 }
 
 function changedParams(p: StreamParams): Record<string, unknown> | undefined {
@@ -50,7 +89,7 @@ function changedParams(p: StreamParams): Record<string, unknown> | undefined {
   // FluxRT currently reports stateful:false, so every frame must carry the
   // rendering knobs that affect output count/quality.
   const out: Record<string, unknown> = {};
-  (['prompt', 'steps', 'interp', 'lora', 'seed'] as const).forEach((k) => {
+  (['prompt', 'steps', 'interp', 'seed'] as const).forEach((k) => {
     if (p[k] !== undefined) out[k] = p[k];
   });
   return Object.keys(out).length ? out : undefined;
@@ -113,18 +152,74 @@ async function pump(): Promise<void> {
     if (done) break;
     if (pending > 0 || netInflight >= MAX_INFLIGHT) { frame.close(); continue; }
     pending = 1;
-    worker.postMessage({ type: 'frame', frame, seq: seq++, ts: performance.now(), params: changedParams(getParams()) }, [frame]);
+    let params = changedParams(effectiveParams());
+    if (pendingCacheReset) {
+      params = { ...(params ?? {}), reset_cache: true };
+      pendingCacheReset = false;
+    }
+    worker.postMessage({ type: 'frame', frame, seq: seq++, ts: performance.now(), params }, [frame]);
   }
 }
 
-let getParams: () => StreamParams = () => ({});
+export function updateParams(p: StreamParams): void {
+  // A change to the global style prompt triggers a cache reset on the next frame;
+  // steps/interp/seed-only changes do not.
+  if ((p.prompt ?? '') !== (baseParams.prompt ?? '')) pendingCacheReset = true;
+  baseParams = { ...p };
+  notifyControl();
+}
 
-export function updateParams(p: StreamParams): void { getParams = () => p; }
+export function getStreamControlSnapshot(): StreamControlSnapshot {
+  return { base: { ...baseParams }, game: { ...gameOverrides }, effective: effectiveParams() };
+}
+
+export function subscribeStreamControl(listener: () => void): () => void {
+  controlListeners.add(listener);
+  return () => {
+    controlListeners.delete(listener);
+  };
+}
+
+export function subscribeStreamStatus(listener: (s: StreamStatus) => void): () => void {
+  statusListeners.add(listener);
+  listener(lastStatus);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+export function setGameOverrides(p: StreamGameOverrides): void {
+  const next = { ...gameOverrides };
+  if ('prompt' in p) {
+    const prompt = p.prompt?.trim() ?? '';
+    if (prompt) next.prompt = prompt.slice(0, MAX_GAME_PROMPT_CHARS);
+    else delete next.prompt;
+  }
+  if ('steps' in p) {
+    if (typeof p.steps === 'number' && Number.isFinite(p.steps)) next.steps = p.steps;
+    else delete next.steps;
+  }
+  if ('interp' in p) {
+    if (typeof p.interp === 'number' && Number.isFinite(p.interp)) next.interp = p.interp;
+    else delete next.interp;
+  }
+  if ('seed' in p) {
+    if (typeof p.seed === 'number' && Number.isFinite(p.seed)) next.seed = p.seed;
+    else delete next.seed;
+  }
+  gameOverrides = next;
+  notifyControl();
+}
+
+export function clearGameOverrides(): void {
+  gameOverrides = {};
+  notifyControl();
+}
 
 export async function startStream(params: StreamParams, statusCb: (s: StreamStatus) => void): Promise<void> {
   if (running) return;
   onStatus = statusCb;
-  getParams = () => params;
+  updateParams(params);
   sentParams = {};
   const canvas = findCanvas();
   if (!canvas) { emit('error', 'no viewport canvas'); return; }

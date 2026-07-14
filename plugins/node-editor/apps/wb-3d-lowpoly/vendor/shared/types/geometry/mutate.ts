@@ -26,7 +26,7 @@ import { geometryFromStatements, list, num } from './make.js';
  * 找不到 partId 或目标 op 不是 'part' → 抛异常（避免静默丢失偏移）。
  *
  * 注意：source 会被重新序列化，原 source 中的注释 / 空行 / 自定义排版都会丢失；
- * 这是当前 articraft 风格 placement 工具链的可接受代价 —— DSL 主导是 statements，
+ * 这是当前 placement 工具链的可接受代价 —— DSL 主导是 statements，
  * source 仅做诊断展示。后续如果需要保留原始排版，可以走"按行替换"的更精细路径。
  */
 export function withPartOrigin(

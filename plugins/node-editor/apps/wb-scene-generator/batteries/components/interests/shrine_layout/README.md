@@ -1,6 +1,8 @@
 # 祭坛 (shrine_layout)
 
-生成以**中心焦点**为核心的神殿/空地/竞技场区域布局，输出多值网格供下游贴图/摆件使用。
+在单张区域掩码上生成以**中心焦点**为核心的神殿/空地/竞技场区域布局，输出单张多值网格供下游贴图/摆件使用。
+
+> **DataTree 形式**：每次只处理单张 `inputGrid`，网格列表的 fanout/重组由引擎自动完成。
 
 ## 功能特点
 
@@ -19,7 +21,7 @@
 
 ## 基本使用方法
 
-1. 提供一个表示可用区域的掩码 `grid`
+1. 提供一个表示可用区域的掩码 `inputGrid`
 2. 选择布局类型 `algorithm`
 3. 输出网格中不同数值代表不同区域，用于控制贴图选择或道具摆放
 
@@ -27,7 +29,7 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| gridList | array | — | 区域掩码列表，每项非零单元格为有效区域 |
+| inputGrid | grid (item) | — | 单张区域掩码，非零单元格为有效区域 |
 | algorithm | string | "clearing" | 布局类型（`clearing` / `cruciform` / `arena`），见下方说明 |
 | decorCount | number | 8 | 装饰位数量，用于 clearing / arena 模式，范围 3–12 |
 | pathWidth | number | 2 | 围墙厚度（格数），用于 cruciform 模式，最小为 1 |
@@ -42,7 +44,8 @@
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | grid | 多值布局网格（见下方数值说明） |
+| outputGrid | grid (item) | 单张多值布局网格（见下方数值说明） |
+| outputNameList | array (item) | 名称清单，仅含实际出现的 id（神坛/装饰 type=asset，其余 tile） |
 
 ### 输出数值含义
 

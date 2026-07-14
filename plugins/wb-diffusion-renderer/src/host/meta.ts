@@ -2,25 +2,24 @@ export interface DiffusionRendererMeta {
   ready: boolean;
   backend?: string;
   statusText: string;
-  loraPresets: string[];
+  /** Upper bound for `steps`, probed from the service `/health` (see service.md §2). */
+  maxSteps?: number;
 }
 
 export async function fetchDiffusionRendererMeta(): Promise<DiffusionRendererMeta> {
   try {
-    const [h, b] = await Promise.all([
-      fetch('/api/wb/diffusion-renderer/health').then((r) => r.json()),
-      fetch('/api/wb/diffusion-renderer/backends').then((r) => r.json()).catch(() => null),
-    ]);
-    const data = h?.data as { status?: string } | undefined;
+    const h = await fetch('/api/wb/diffusion-renderer/health').then((r) => r.json());
+    const data = h?.data as { status?: string; max_steps?: number } | undefined;
     const ready = Boolean(h?.ready && (data ? data.status === 'ready' : h.ok));
-    const caps = b?.backends?.find((x: { name: string }) => x.name === h?.backend) ?? b?.backends?.[0];
+    const maxSteps =
+      typeof data?.max_steps === 'number' && Number.isFinite(data.max_steps) ? data.max_steps : undefined;
     return {
       ready,
       backend: h?.backend,
       statusText: ready ? `ready · ${h?.backend ?? ''}` : (h?.error ?? data?.status ?? 'not ready'),
-      loraPresets: caps?.capabilities?.loraPresets ?? [],
+      maxSteps,
     };
   } catch {
-    return { ready: false, statusText: 'server unreachable', loraPresets: [] };
+    return { ready: false, statusText: 'server unreachable' };
   }
 }

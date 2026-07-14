@@ -1,6 +1,8 @@
 # 道路连接连连看 (road_connect_link)
 
-从 POI 网格中提取连接点，用连连看式折线路径（最多 2 次转弯）全部连通，在障碍物间寻找干净的正交折线通道。
+从单张 POI 网格中提取连接点，用连连看式折线路径（最多 2 次转弯）全部连通，在障碍物间寻找干净的正交折线通道。
+
+> **v2.0.0 起为 datatree/item 形态**：输入/输出都是**单张 grid（item）**，网格列表由引擎按 DataTree 自动逐张 fanout（不再在电池内部做批处理）。这与 `alg_topology_connect_points`（随机游走版）的 I/O 完全一致，可直接互换包进同一套模板骨架。
 
 ## 功能特点
 
@@ -18,29 +20,30 @@
 
 ## 基本使用方法
 
-1. 准备 POI 网格（目标点格子值为固定值，如 1）。
-2. 设置 `点位填充值` 为 POI 网格中点的值。
-3. 如有障碍物，将障碍物 grid 接入 `障碍物网格`。
-4. 调整 `最大转弯数`（默认 2，即标准连连看规则）。
-5. 调整 `道路宽度` 和 `道路值`。
-6. 输出 `道路网格` 可直接叠加到地形 grid 上。
+1. 准备 POI 网格（连接点 = 网格中值最大的格子，自动提取，无需手动指定点值）。
+2. 如有障碍物，将障碍物 grid 接入 `obstacle`（障碍场）。
+3. 调整 `maxTurns`（最大转弯数，默认 2，即标准连连看规则）。
+4. 调整 `roadWidth` / `roadValue`。
+5. `coverPoi=false`（默认）时输出会扣掉 POI 格点；`true` 则保留。
+6. 输出 `topology`（道路拓扑）可直接叠加到地形 grid 上。
 
 ## 输入参数
 
-| 参数名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| poiGrid | grid | — | POI 网格，提取值=poiValue 的格子作为连接点 |
-| poiValue | number | 1 | 要提取的 POI 格子值 |
-| obstacleGrid | grid | — | 障碍物网格，非零格不可通行（可选） |
-| roadWidth | number | 1 | 道路宽度（格），通过膨胀实现 |
-| roadValue | number | 1 | 道路写入的数值 |
-| maxTurns | number | 2 | 连连看路径最大转弯次数（0=直线，1=L形，2=Z/S形） |
+| 参数名 | 类型 | access | 默认值 | 说明 |
+|--------|------|--------|--------|------|
+| poiGrid | grid | item | — | 单张 POI 网格，自动取**值最大**的格子作为连接点；列表由引擎逐张 fanout |
+| obstacle | grid | item | — | 障碍物网格，非零格不可通行（可选，不传则按 poiGrid 尺寸建空白障碍） |
+| roadWidth | number | item | 1 | 道路宽度（格），通过膨胀实现 |
+| roadValue | number | item | 1 | 道路写入的数值 |
+| maxTurns | number | item | 2 | 连连看路径最大转弯次数（0=直线，1=L形，2=Z/S形） |
+| coverPoi | boolean | item | false | false 时从道路中扣掉 POI 格点；true 时保留 |
 
 ## 输出参数
 
-| 参数名 | 类型 | 说明 |
-|--------|------|------|
-| outputGrid | grid | 道路网格，道路格=roadValue，其余=0 |
+| 参数名 | 类型 | access | 说明 |
+|--------|------|--------|------|
+| topology | grid | item | 道路网格，道路格=roadValue，其余=0 |
+| outputNameList | array | item | 名称清单 `[{id, name, type}]`，含道路项 |
 
 ## 连连看路径说明
 

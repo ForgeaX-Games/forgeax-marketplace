@@ -40,9 +40,11 @@ export function BranchTreeOverlay({
   onClose,
 }: Props) {
   const totalScenes = useScenarioStore((s) => Object.keys(s.scenario.scenes).length)
+  const treeTitle = useScenarioStore((s) => s.scenario.treeTheme?.title)
   // visited 里可能含当前场景，按玩家认知合并去重
   const visitedUnique = new Set([...visitedSceneIds, currentSceneId])
   const progress = `${visitedUnique.size}/${totalScenes}`
+  const displayTitle = treeTitle?.trim() || scenarioTitle
 
   // 打开时批量从磁盘预填缓存 —— 作者锻造阶段已生成的缩略图会直接显示，
   // 没生过的保持 NO PREVIEW（不主动发网络请求，避免 Player 消耗 token）
@@ -86,7 +88,7 @@ export function BranchTreeOverlay({
         <header className="ks-btov-bar">
           <div className="ks-btov-titleblock">
             <div className="ks-btov-kicker ks-mono">STORY · TREE</div>
-            <div className="ks-btov-title ks-cn">{scenarioTitle}</div>
+            <div className="ks-btov-title ks-cn">{displayTitle}</div>
           </div>
           <div className="ks-btov-progress ks-mono">
             <span className="ks-btov-progress-num">{progress}</span>
@@ -131,8 +133,12 @@ export function BranchTreeOverlay({
             已探索
           </span>
           <span className="ks-btov-legend-item">
+            <span className="ks-btov-dot is-frontier" />
+            可前往
+          </span>
+          <span className="ks-btov-legend-item">
             <span className="ks-btov-dot is-unvisited" />
-            未抵达
+            未解锁
           </span>
           <span className="ks-btov-legend-hint">
             点击场景可跳转 · ESC 返回游戏
@@ -314,6 +320,10 @@ const css = `
 }
 .ks-btov-dot.is-visited {
   background: rgba(255, 179, 71, 0.6);
+}
+.ks-btov-dot.is-frontier {
+  background: rgba(125, 211, 252, 0.85);
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.22);
 }
 .ks-btov-dot.is-unvisited {
   background: transparent;

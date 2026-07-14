@@ -25,9 +25,11 @@ import type {
   NarrativeTemplate,
   OperatorSlot,
   OperatorSolution,
+  ExtractionLayer,
+  LayeredOperators,
 } from "../../types/narrative-ip-dna.js";
 import { DEFAULT_CONFLICT_PRIORITY } from "../../types/narrative-ip-dna.js";
-import { collectOperatorPool } from "../phase2-extract.js";
+import { collectOperatorPool, selectOperatorsForStep } from "../phase2-extract.js";
 import {
   fillSlot,
   precheckConflict,
@@ -267,7 +269,10 @@ export async function buildOperatorInjection(
 
   const storyTitle = ctx.story_title ?? dna.title ?? "";
   const story_id = ctx.story_timestamp ?? dna.story_id ?? "";
-  const operatorPool = collectOperatorPool(dna, dna.rootId);
+  const fallbackPool = collectOperatorPool(dna, dna.rootId);
+  const layered = (ctx as Record<string, unknown>)._operator_layers as LayeredOperators | undefined;
+  const stepLayers: ExtractionLayer[] = spec.layers ?? ["leaf"];
+  const { pool: operatorPool, layerByUid } = selectOperatorsForStep(layered, stepLayers, fallbackPool);
   const retriever = getSharedRetriever();
   const needText = [ctx.user_input, ctx.user_preference_summary]
     .filter((s): s is string => typeof s === "string")
@@ -291,6 +296,16 @@ export async function buildOperatorInjection(
     slots.push(slot);
     const conflict = precheckConflict(slot.candidates);
     if (conflict.hasConflict && conflict.detail) tensions.push(`${slotName}:${conflict.detail}`);
+  }
+
+  // 为提取算子标注 sourceLayer（§3.2 显式可查）。
+  for (const slot of slots) {
+    for (const c of slot.candidates) {
+      if (c.source === "extracted" && c.operator.uid) {
+        const layer = layerByUid.get(c.operator.uid);
+        if (layer) c.sourceLayer = layer;
+      }
+    }
   }
 
   const sections: OperatorInjectionSections = {};
@@ -344,6 +359,7 @@ export async function buildOperatorInjection(
     slots,
     creative_directive: directive,
     adoption_notes: adoptionNotes,
+    step_layers: stepLayers,
   };
 
   // 向后兼容的合并片段（沿用旧顺序：算子 → 关系 → 账本，不含 objective_truth）。

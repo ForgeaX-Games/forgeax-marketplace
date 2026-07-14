@@ -6,7 +6,7 @@ trigger: /narrative
 
 # Narrative Studio · AI Skill
 
-`@forgeax-plugin/wb-narrative` 是一个 AI 驱动的游戏叙事生成管线。覆盖 117 种游戏品类，通过 Tier/Mode 双层路由 + Planner 动态选步，自动选择 9 种管线模板之一，生成从世界观到剧本的完整叙事资产。
+`@forgeax-extension/wb-narrative` 是一个 AI 驱动的游戏叙事生成管线。覆盖 117 种游戏品类，通过 Tier/Mode 双层路由 + Planner 动态选步，自动选择 9 种管线模板之一，生成从世界观到剧本的完整叙事资产。
 
 ## 管线概览
 

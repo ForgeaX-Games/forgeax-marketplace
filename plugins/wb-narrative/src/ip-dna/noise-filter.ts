@@ -31,6 +31,16 @@ export const NON_CONTENT_PREFIXES = [
   "广告", "廣告", "推广", "推廣",
 ];
 
+/**
+ * 非正文子串（P2 新增）：即便标题带章节号，命中这些"促销/公告"强信号子串也判为非正文，
+ * 修"第8章 月份签名明信片赠送！"这类带号公告绕过白名单（旧逻辑：有章号即视为正文）。
+ * 仅收强信号词（正文极少出现），避免误伤（如不收"赠送/签名"这类可能是剧情的泛词）。
+ */
+export const NON_CONTENT_SUBSTRINGS = [
+  "明信片", "月票", "推荐票", "推薦票", "打赏", "打賞", "求订阅", "求訂閱",
+  "书友群", "書友群", "抽奖", "抽獎", "红包", "紅包", "签名照", "簽名照",
+];
+
 /** 非正文完整匹配模式（标题完全匹配这些则过滤）。 */
 const NON_CONTENT_EXACT_PATTERNS: RegExp[] = [
   /^引[言子]$/,
@@ -119,8 +129,9 @@ export function extractChapterNumber(title: string): number | undefined {
   return undefined;
 }
 
-/** 白名单：是否为「有效叙事单元标题」（能抽出章节号 或 特殊章节）。 */
+/** 白名单：是否为「有效叙事单元标题」（能抽出章节号 或 特殊章节；但促销/公告子串即便带章号也不算）。 */
 export function isValidChapterTitle(title: string): boolean {
+  if (isNonContentTitle(title)) return false; // P2：带章号的促销/公告（如"第8章…明信片赠送"）不算有效正文
   return isSpecialChapter(title) || extractChapterNumber(title) !== undefined;
 }
 
@@ -129,6 +140,8 @@ export function isNonContentTitle(title: string): boolean {
   const t = normalizeTitle(title);
   if (!t) return false;
   if (isSpecialChapter(t)) return false;
+  // P2：促销/公告强信号子串——即便标题带章节号也判为非正文（二次判别，先于前缀/精确匹配）。
+  if (NON_CONTENT_SUBSTRINGS.some((s) => t.includes(s))) return true;
   if (NON_CONTENT_PREFIXES.some((p) => t.startsWith(p))) return true;
   if (NON_CONTENT_EXACT_PATTERNS.some((re) => re.test(t))) return true;
   return false;

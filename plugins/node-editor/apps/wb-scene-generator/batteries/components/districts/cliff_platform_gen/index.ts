@@ -220,9 +220,9 @@ function defaultPatchCounts(tierCount: number): number[] {
 // ─── 主导出函数 ──────────────────────────────────────────────────────────────
 
 export function cliffPlatformGen(input: Record<string, unknown>): Record<string, unknown> {
-  const grid = input.grid as number[][] | undefined;
+  const grid = input.inputGrid as number[][] | undefined;
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) {
-    return { error: "grid is required" };
+    return { error: "inputGrid is required" };
   }
 
   const rows = grid.length;
@@ -385,6 +385,7 @@ export function cliffPlatformGen(input: Record<string, unknown>): Record<string,
   const outputNameList = Array.from({ length: tierCount }, (_, i) => ({
     id: i + 1,
     name: i < namePool.length ? namePool[i] : `层${i + 1}`,
+    type: "tile",
   }));
 
   return { outputGrid: finalGrid, outputNameList };

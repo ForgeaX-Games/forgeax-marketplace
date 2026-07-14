@@ -1,5 +1,5 @@
 /**
- * @forgeax-plugin/wb-team-forge — 团队编制 host 工具 handler map。
+ * @forgeax-extension/wb-team-forge — 团队编制 host 工具 handler map。
  *
  * 跑在宿主(cli)进程里(ToolRegistry `await import(entry.backend)`)。**注意**:
  * 本文件不能裸 import `@forgeax/*`(从插件目录向上解析不到);一切宿主能力经

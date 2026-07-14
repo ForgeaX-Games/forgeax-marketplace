@@ -453,7 +453,7 @@ interface GenreEntry {
 | **Phase 0 · 输入地基** | `phase0-foundation.ts` / `phase0-compress.ts` | 多模态分家归档到各媒体 `*_original`、生成《用户资产参考清单》；压缩包/PDF 展开、媒体压缩（720p / 抽帧）|
 | **Phase 1 · 标准化** | `phase1-understanding.ts` / `phase1-multimodal.ts` / `noise-filter.ts` / `unit-identity.ts` | 建**轻量层级树**（部/卷→章→最小单元）、多模态转写为叙事文本、干扰项过滤、体量水准线评估。详见下方 |
 | **Phase 2 · scoped 提取** | `phase2-extract.ts` | 按最小叙事单元切片，自底向上逐层聚合出"三件套"（角色/场景/事件 + 方法）模板 |
-| **Phase 2b/2c · 改编规划** | `phase2b-adapt.ts` / `phase2c-gen-adapt.ts` | 改编范围裁剪（全量/局部）、游戏单元划分（超体量成系列）、A→B 映射到目标生成管线；系列多部按部串行生成、跨部经长记忆账本承接（第 N 部续第 N-1 部）、每部结局收束（1-2 个 bridge 承接结局通向下一部 + 其余 terminal 就地收束 + 每部结局总数设上限，§4.6b）|
+| **Phase 2b/2c · 改编规划** | `phase2b-adapt.ts` / `phase2c-gen-adapt.ts` | 改编范围裁剪（全量/局部）、游戏单元划分（超体量成系列）、A→B 映射到目标生成管线（`target_output` 锁定，**IP 改编默认互动叙事 VN/`vn_full`**、不漂移到 rpg/design_auto；**开放幕数=源单元数即"章→幕锚定"**、每幕忠实对应源章并按密度展开，仅 IP 改编路径激活）；系列多部按部串行生成、跨部经长记忆账本承接（第 N 部续第 N-1 部）、每部结局收束（1-2 个 bridge 承接结局通向下一部 + 其余 terminal 就地收束 + 每部结局总数设上限，§4.6b）|
 | **Phase 3 · 算子装备** | `phase3-rag.ts` / `phase3-vector.ts` / `phase3b-kag.ts` | 从 `knowledge_base/` 检索叙事方法算子（vector / scope+tag / KAG），装备到生成输入 |
 | **Phase 4/5 · 精修** | `phase4-rewrite.ts` / `phase5-polish.ts` | 忠实改写与产物润色 |
 

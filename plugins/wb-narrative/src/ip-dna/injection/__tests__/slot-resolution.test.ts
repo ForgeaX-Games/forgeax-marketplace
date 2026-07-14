@@ -29,6 +29,13 @@ describe("slot spec resolution (T1 declarative)", () => {
     expect(isOperatorConsumingStep("plot_generation")).toBe(true);
   });
 
+  it("registry steps declare extraction layers (§3.2)", () => {
+    expect(getSlotSpec("worldview")?.layers).toEqual(["top"]);
+    expect(getSlotSpec("outline_batch")?.layers).toEqual(["mid"]);
+    expect(getSlotSpec("vn_beats")?.layers).toEqual(["leaf"]);
+    expect(getSlotSpec("vn_outline_acts")?.layers).toEqual(["mid"]);
+  });
+
   it("returns undefined for non-consuming steps", () => {
     expect(getSlotSpec("tier_router")).toBeUndefined();
     expect(isOperatorConsumingStep("tier_router")).toBe(false);

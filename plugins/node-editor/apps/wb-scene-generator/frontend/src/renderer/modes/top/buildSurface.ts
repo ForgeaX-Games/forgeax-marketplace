@@ -22,6 +22,7 @@ import { matchAssetEntry } from '../../framework/asset/matchAssetEntry'
 import { getOrLoadImage, getRegisteredAssetUrl, getLoadTick } from '../../framework/asset/imageCache'
 import { getOrLoadRule, getRuleLoadTick, type FaceRule, type NormalizedRule } from '../../framework/asset/ruleCache'
 import { buildTopFaceKey, lookupWithWildcard } from '../../framework/asset/neighborKey'
+import { pickWeightedVariant, resolveRandomRuleRawPool, filterVisibleVariantPool } from '../../framework/asset/variantCandidates'
 
 /** 多值 wire 模式：按值索引分配不同透明度红色，便于区分相邻区域（与 legacy render2d 一致） */
 const MULTI_VALUE_ALPHAS = [0.75, 0.55, 0.38, 0.62, 0.45, 0.28, 0.68, 0.50, 0.33, 0.72, 0.52, 0.35]
@@ -154,14 +155,14 @@ function pickTopSprite(
   let idx = lookupWithWildcard(face.map, key) ?? 0
 
   if (face.randomRules && face.randomRules.length > 0) {
-    const variantIdxs = face.variantIdxs ?? defaultVariantRange(face, rule.sprites.length)
-    if (variantIdxs.length > 0) {
-      for (const r of face.randomRules) {
-        if (idx !== r.tileId) continue
-        if (cellRng(col, row, 0) < r.keepProbability) break
-        idx = variantIdxs[Math.floor(cellRng(col, row, 1) * variantIdxs.length)]
-        break
-      }
+    for (const r of face.randomRules) {
+      if (idx !== r.tileId) continue
+      const raw = resolveRandomRuleRawPool(face, r, rule.sprites.length)
+      const pool = filterVisibleVariantPool(raw.idxs, raw.weights, rule.sprites, null)
+      if (pool.idxs.length === 0) break
+      if (cellRng(col, row, 0) < r.keepProbability) break
+      idx = pickWeightedVariant(pool, cellRng(col, row, 1))
+      break
     }
   }
   return rule.sprites[idx] ?? rule.sprites[0] ?? null

@@ -115,7 +115,7 @@ export class AutoBindTab implements StudioTab {
 
   private setupBindingSync(): void {
     try {
-      this.bindBc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-anim.spine-binding');
+      this.bindBc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-anim.spine-binding');
     } catch {
       this.bindBc = null;
       return;

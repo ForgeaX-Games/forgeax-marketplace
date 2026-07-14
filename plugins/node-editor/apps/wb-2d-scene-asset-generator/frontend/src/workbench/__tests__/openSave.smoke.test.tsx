@@ -32,7 +32,7 @@ vi.mock('@forgeax/node-runtime-react/editor', () => ({
       fetchProjects: vi.fn().mockResolvedValue(undefined),
       subscribeProjectActivation: () => () => {},
       projects: PROJECTS,
-      activeProjectId: 'p1',
+      viewingProjectId: 'p1',
       createProject,
       switchProject,
     }),
@@ -54,7 +54,7 @@ function fakeClient(over: Partial<HttpApiClient> = {}): HttpApiClient {
   return {
     subscribe: () => () => {},
     async listProjects() { return [] },
-    async getWorkspace() { return { activeProjectId: 'p1' } },
+    async getWorkspace() { return { viewingProjectId: 'p1', recentProjectIds: ['p1'], lastOpenedAt: '' } },
     async listOps() { return [] },
     async listNodes() { return [] },
     async getPipeline() { return SAMPLE_GRAPH },

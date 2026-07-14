@@ -272,6 +272,39 @@ describe('skills · outline-architect alias 字段约束 (PR5)', () => {
   })
 })
 
+describe('skills · ui-curator 关键纪律 marker (v9 · UI 素材库)', () => {
+  /**
+   * ui-curator 产出叠加式 UI 素材规格。它的两条核心纪律必须留在文档里,
+   * 否则模型很容易(1) 试图要透明底而不是靠 matte+blend 去背,(2) 引用真实 IP:
+   *   - 去背靠图层混合(screen-black / multiply-white),不靠原生透明
+   *   - 版权安全(NEVER 引用真实品牌/IP/人名)
+   * 外加自检块与输出契约锚点。防后续 PR 误删。
+   */
+
+  it('uiCurator 含 screen-black / multiply-white 去背纪律', () => {
+    const md = SKILLS.uiCurator
+    expect(md).toMatch(/screen-black/)
+    expect(md).toMatch(/multiply-white/)
+  })
+
+  it('uiCurator 含版权安全 NEVER 约束', () => {
+    const md = SKILLS.uiCurator
+    expect(md).toMatch(/NEVER/)
+    expect(md).toMatch(/版权|copyright|brand|IP/i)
+  })
+
+  it('uiCurator 含 Output contract 与自检块', () => {
+    const md = SKILLS.uiCurator
+    expect(md).toMatch(/Output contract/i)
+    expect(md).toMatch(/Self-check|自检/)
+  })
+
+  it('uiCurator 输出契约含 valueBindVarId(数值绑定)', () => {
+    const md = SKILLS.uiCurator
+    expect(md).toMatch(/valueBindVarId/)
+  })
+})
+
 describe('skills · 全量 fence 收支平衡', () => {
   /**
    * 历史上出过 "skill 顶部丢了 ` ``` ` 闭合, 整段被当成代码块" 的事故。

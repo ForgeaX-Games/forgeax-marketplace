@@ -14,6 +14,15 @@ export interface AssetRecord {
   anchorY: number | null
   /** Set on project-private (user-imported) records — the grid badges these. */
   private?: true
+  /** Presence drives the list view's "几何" column (matches asset_manager's `hasGeometry`). */
+  geometryJson?: string | null
+  /** Free-text tags (asset-store `tags_json`), separate from the 13 alias fields. */
+  tags?: string[]
+  createdAt?: string
+  updatedAt?: string
+  /** asset-store QA flags surfaced in the preview panel. */
+  hasError?: boolean
+  isPlaceholder?: boolean
 }
 
 /** A 13-field name filter: a substring that must appear in `fieldIdx`'s bracket. */
@@ -45,9 +54,9 @@ export interface AssetPage {
 }
 
 // Folder taxonomies: bucket a flat zone into folders by one alias field.
-//   type → asset type · place → indoor/outdoor then room · style → art theme
-//   size → ppu · scene → applicable-scene tags (overlapping)
-export type FacetScheme = 'type' | 'place' | 'style' | 'size' | 'scene'
+//   type → asset type · place → indoor/outdoor · style → art theme
+//   size → ppu · index → f0 索引/分类路径 (a `-`-joined hierarchy, drilled level by level)
+export type FacetScheme = 'type' | 'place' | 'style' | 'size' | 'index'
 
 // Sentinel folder value (assets with a blank field). Mirrors backend UNCLASSIFIED.
 export const UNCLASSIFIED = '__none__'

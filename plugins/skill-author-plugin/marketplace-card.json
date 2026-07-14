@@ -1,7 +1,7 @@
 {
   "summary": {
-    "zh": "插件作者向导技能。在对话里输入 /author-plugin 触发,手把手带不会 TypeScript 的玩家在大约 10 分钟内做出第一个能被 forgeax-server 加载的插件:一个过 schema 的 forgeax-plugin.json、一个最小可运行的 hello tool,以及一份把插件热加载进去的 reload + 验证脚本。每一步都明确说明改哪个文件、改成什么、怎么知道改对了。",
-    "en": "The plugin-author guide skill. Type /author-plugin in chat and it walks a non-TypeScript user, in about ten minutes, to their first server-loadable plugin: a schema-valid forgeax-plugin.json, a minimal runnable hello tool, and a reload-and-verify step that hot-loads it. Every step states which file to edit, what to write, and how to know it worked."
+    "zh": "插件作者向导技能。在对话里输入 /author-plugin 触发,手把手带不会 TypeScript 的玩家在大约 10 分钟内做出第一个能被 forgeax-server 加载的插件:一个过 schema 的 forgeax-extension.json、一个最小可运行的 hello tool,以及一份把插件热加载进去的 reload + 验证脚本。每一步都明确说明改哪个文件、改成什么、怎么知道改对了。",
+    "en": "The plugin-author guide skill. Type /author-plugin in chat and it walks a non-TypeScript user, in about ten minutes, to their first server-loadable plugin: a schema-valid forgeax-extension.json, a minimal runnable hello tool, and a reload-and-verify step that hot-loads it. Every step states which file to edit, what to write, and how to know it worked."
   },
   "sections": [
     {
@@ -20,8 +20,8 @@
         "en": "Outputs"
       },
       "body": {
-        "zh": "有效 forgeax-plugin.json + 最小 hello tool + reload 验证",
-        "en": "A valid forgeax-plugin.json + minimal hello tool + reload/verify"
+        "zh": "有效 forgeax-extension.json + 最小 hello tool + reload 验证",
+        "en": "A valid forgeax-extension.json + minimal hello tool + reload/verify"
       }
     }
   ],

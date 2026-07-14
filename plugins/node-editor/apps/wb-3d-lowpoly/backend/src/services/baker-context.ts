@@ -17,6 +17,7 @@ import type { Arg, Geometry } from './baker/shared-types.js'
 import type { BakerLibraryHandle } from './baker/types.js'
 import { listBakeableOps } from './baker/ops/index.js'
 import { getLibraryService } from './library.service.js'
+import { withTimeout, bakeTimeoutMs, warmupTimeoutMs } from './timeout.js'
 
 export interface BakeResultShape {
   url: string
@@ -81,21 +82,25 @@ function makeLibraryHandle(libRoot: string): BakerLibraryHandle {
 export function createBakerServices(libRoot: string): BakerServices {
   const library = makeLibraryHandle(libRoot)
 
+  // Every bake path is wrapped in withTimeout: a pathological CSG / gear input can
+  // make the OCCT WASM kernel spin (or hang) indefinitely, which previously froze
+  // the tool call and kept burning tokens. On timeout the bake rejects with a clear
+  // TimeoutError the caller surfaces as an actionable failure instead of hanging.
   const baker: BakerHandle = {
     async bake(opName, args) {
       const { bakeShape } = await import('./baker/baker.service.js')
       // The battery passes args as Record<string, unknown>; it guarantees they
       // are DSL Args, so the cast is safe — a bad arg throws BakerError inside
       // the op builder and is caught by the caller's Promise.allSettled.
-      return bakeShape(opName, args as Record<string, Arg>, library)
+      return withTimeout(bakeShape(opName, args as Record<string, Arg>, library), bakeTimeoutMs(), `bake(${opName})`)
     },
     async bakeGeometryShape(rootId, geometry) {
       const { bakeGeometryShape } = await import('./baker/baker.service.js')
-      return bakeGeometryShape(rootId, geometry, library)
+      return withTimeout(bakeGeometryShape(rootId, geometry, library), bakeTimeoutMs(), `bakeGeometryShape(${rootId})`)
     },
     async bakeColoredAssembly(parts, geometry) {
       const { bakeColoredAssembly } = await import('./baker/baker.service.js')
-      return bakeColoredAssembly(parts, geometry, library)
+      return withTimeout(bakeColoredAssembly(parts, geometry, library), bakeTimeoutMs(), 'bakeColoredAssembly')
     },
     listBakeableOps() {
       return listBakeableOps()
@@ -105,8 +110,9 @@ export function createBakerServices(libRoot: string): BakerServices {
   return { baker, library }
 }
 
-/** Non-blocking OCCT WASM warmup; safe to call once after the server listens. */
+/** Non-blocking OCCT WASM warmup; safe to call once after the server listens.
+ * Bounded by a timeout so a stuck WASM boot can never wedge the caller. */
 export async function warmUpBaker(): Promise<void> {
   const { initBakerService } = await import('./baker/baker.service.js')
-  await initBakerService()
+  await withTimeout(Promise.resolve(initBakerService()), warmupTimeoutMs(), 'baker warmup')
 }

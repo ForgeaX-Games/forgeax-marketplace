@@ -1,4 +1,4 @@
-// 💡 三维场景的灯光 / 网格 / 坐标 / 环境贴图：与 articraft 保持一致的 studio-grade 光照
+// 💡 三维场景的灯光 / 网格 / 坐标 / 环境贴图：studio-grade 光照
 import * as THREE from 'three'
 
 export function createLightingRig(): THREE.Group {
@@ -92,7 +92,7 @@ export function createGridHelper(): THREE.Group {
  * 坐标轴：3 条 1m 主轴（红 X / 绿 Y / 蓝 Z）+ 0.1m 处 / 0.5m 处的小刻度立方块，
  * 让用户在不依赖文字标注的情况下也能直接读出 "这是 0.1 米还是 1 米"。
  *
- * size 默认 1（= 1m）；这是个 URDF 常见量级 sweet spot，比 articraft 的 2m 收敛些。
+ * size 默认 1（= 1m）；这是个 URDF 常见量级 sweet spot。
  * 不要从外面再乘 scale；要更长就改 size 默认值。
  */
 export function createAxisHelper(size: number = 1): THREE.Group {

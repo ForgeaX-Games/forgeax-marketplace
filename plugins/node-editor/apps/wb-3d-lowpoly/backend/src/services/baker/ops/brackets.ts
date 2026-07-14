@@ -1,12 +1,11 @@
 /**
  * Brackets 家族：clevis_bracket / pivot_fork / trunnion_yoke。
  *
- * 1:1 对照 articraft sdk/_core/v0/_mesh/brackets.py 实现，保证视觉一致。
  *
  * 坐标约定：
  *   - cadquery `Workplane("XY").box(w, d, h)` 在三轴全居中（origin in middle）
  *   - replicad `makeBaseBox(w, d, h)` 在 X/Y 居中但 z∈[0, h]
- *   → 这里统一用 `centeredBox(w, d, h)` 包一层，再做和 articraft 一样的 translate
+ *   → 这里统一用 `centeredBox(w, d, h)` 包一层，再做对应的 translate
  *
  *   - cadquery `Workplane("YZ").circle(r).extrude(L)` 沿 +X 拉出长 L 的圆柱
  *   - replicad `makeCylinder(r, L, location, direction=[1,0,0])` 沿 +X
@@ -15,7 +14,7 @@
  * 关于 `corner_radius`：cadquery `edges("|Z").fillet(r)` 倒所有平行 Z 轴的竖直边。
  * 对应 replicad `shape.fillet(r, (e) => e.inDirection([0,0,1]))`。
  *
- * 关于 `center: false`：articraft 里语义是"把模型平移到 z=0 起的位置"。这里
+ * 关于 `center: false`：语义是"把模型平移到 z=0 起的位置"。这里
  * v1 默认 center=true，false 时整体 +z 平移 height/2 以让底面贴 z=0。
  */
 
@@ -66,7 +65,7 @@ export const clevisBracket: OpBuilder = (ctx, args) => {
   const baseT       = requireNumber(args, 'base_thickness', 'clevis_bracket');
   const cornerR     = optionalNumber(args, 'corner_radius', 0);
 
-  // 几何合法性（与 articraft 同等约束）
+  // 几何合法性约束
   if (w <= 0 || d <= 0 || h <= 0)        throw new BakerError('clevis_bracket: overall_size must be positive');
   if (gap <= 0 || gap >= w)               throw new BakerError('clevis_bracket: gap_width must be > 0 and < width');
   const cheekT = 0.5 * (w - gap);

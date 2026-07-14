@@ -17,7 +17,7 @@ type ToolCtx = {
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
 
-const PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
+const PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:9567'
 
 function objectArgs(args: unknown): Record<string, unknown> {
@@ -32,6 +32,14 @@ function stringArg(args: Record<string, unknown>, key: string): string {
     throw new Error(`missing string arg: ${key}`)
   }
   return value
+}
+
+function projectIdArg(args: Record<string, unknown>): string {
+  return stringArg(args, 'projectId')
+}
+
+function projectPath(projectId: string, suffix: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}${suffix}`
 }
 
 function backendUrlFromOverrides(file: string | undefined): string | null {
@@ -98,7 +106,7 @@ async function request(ctx: ToolCtx, method: string, path: string, body?: unknow
       const reopen = await rawFetch(
         ctx,
         'POST',
-        `/api/v1/projects/${encodeURIComponent(p.projectId)}/activate`,
+        `/api/v1/projects/${encodeURIComponent(p.projectId)}/open`,
         {},
       )
       if (reopen.res.ok) {
@@ -223,7 +231,7 @@ export const tools: Record<string, ToolHandler> = {
   'asset2d:projects.open': async (args, ctx) => {
     const body = objectArgs(args)
     const id = stringArg(body, 'id')
-    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/activate`, {})
+    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/open`, {})
   },
   'asset2d:projects.close': async (args, ctx) => {
     const id = stringArg(objectArgs(args), 'id')
@@ -287,9 +295,10 @@ export const tools: Record<string, ToolHandler> = {
   // / fill the inputs, then trigger each inner image_gen via
   // `generation.generateImage({ nodeId })`. Inline images / `_gen_*` payloads are
   // stripped (agents need ports + ids, never pixels).
-  'asset2d:groups.list': async (_args, ctx) => {
+  'asset2d:groups.list': async (args, ctx) => {
+    const projectId = projectIdArg(objectArgs(args))
     const [groups, manualOps] = await Promise.all([
-      request(ctx, 'GET', '/api/v1/groups') as Promise<Array<Record<string, unknown>>>,
+      request(ctx, 'GET', projectPath(projectId, '/groups')) as Promise<Array<Record<string, unknown>>>,
       fetchManualTriggerOps(ctx),
     ])
     if (!Array.isArray(groups)) return groups
@@ -303,17 +312,27 @@ export const tools: Record<string, ToolHandler> = {
     }))
   },
   'asset2d:groups.get': async (args, ctx) => {
-    const id = stringArg(objectArgs(args), 'id')
+    const body = objectArgs(args)
+    const projectId = projectIdArg(body)
+    const id = stringArg(body, 'id')
     const [group, manualOps] = await Promise.all([
-      request(ctx, 'GET', `/api/v1/groups/${encodeURIComponent(id)}`) as Promise<Record<string, unknown> | null>,
+      request(ctx, 'GET', projectPath(projectId, `/groups/${encodeURIComponent(id)}`)) as Promise<Record<string, unknown> | null>,
       fetchManualTriggerOps(ctx),
     ])
     if (!group || typeof group !== 'object') throw new Error(`asset2d group not found: ${id}`)
     const cleaned = stripInlineImages(group) as Record<string, unknown>
     return { ...cleaned, runButtons: runButtonsFor(group, manualOps) }
   },
-  'asset2d:pipeline.get': async (_args, ctx) => request(ctx, 'GET', '/api/v1/pipeline'),
-  'asset2d:pipeline.applyBatch': async (args, ctx) => request(ctx, 'POST', '/api/v1/batch', objectArgs(args)),
+  'asset2d:pipeline.get': async (args, ctx) => {
+    const projectId = projectIdArg(objectArgs(args))
+    return request(ctx, 'GET', projectPath(projectId, '/pipeline'))
+  },
+  'asset2d:pipeline.applyBatch': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = projectIdArg(body)
+    const { projectId: _omit, ...batchBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/batch'), batchBody)
+  },
   // By default we hit the backend's summary route, which projects the result to a
   // KB-scale summary (status + per-port shape notes) BEFORE it is serialized —
   // never pouring image/base64 payloads into the agent context. Pass a `nodeId`
@@ -324,13 +343,26 @@ export const tools: Record<string, ToolHandler> = {
   // the context if it's large).
   'asset2d:pipeline.execute': async (args, ctx) => {
     const body = objectArgs(args)
+    const projectId = projectIdArg(body)
     const forward: Record<string, unknown> = {}
     if (typeof body.nodeId === 'string') forward.nodeId = body.nodeId
-    const path = body.raw === true ? '/api/v1/execute' : '/api/v1/execute/summary'
+    const path = body.raw === true
+      ? projectPath(projectId, '/execute')
+      : projectPath(projectId, '/execute/summary')
     return request(ctx, 'POST', path, forward)
   },
-  'asset2d:pipeline.import': async (args, ctx) => request(ctx, 'POST', '/api/v1/pipeline/import', objectArgs(args)),
-  'asset2d:pipeline.export': async (args, ctx) => request(ctx, 'POST', '/api/v1/pipeline/export', objectArgs(args)),
+  'asset2d:pipeline.import': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = projectIdArg(body)
+    const { projectId: _omit, ...importBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/pipeline/import'), importBody)
+  },
+  'asset2d:pipeline.export': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = projectIdArg(body)
+    const { projectId: _omit, ...exportBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/pipeline/export'), exportBody)
+  },
   'asset2d:assets.list': async (args, ctx) => request(ctx, 'GET', `/api/v1/generated-assets${query(objectArgs(args))}`),
   'asset2d:assets.get': async (args, ctx) => {
     const alias = stringArg(objectArgs(args), 'alias')
@@ -398,8 +430,6 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     return request(ctx, 'GET', `/api/v1/generated-assets${query({ folder: body.folder })}`)
   },
-  'asset2d:preview.latest': async (_args, ctx) => request(ctx, 'GET', '/api/v1/preview/latest'),
-  'asset2d:preview.capture': async (_args, ctx) => request(ctx, 'GET', '/api/v1/preview/latest'),
   'asset2d:preview.selectAsset': async (args, ctx) => request(ctx, 'POST', '/api/v1/preview/select-asset', objectArgs(args)),
   'asset2d:generation.generateImage': async (args, ctx) => request(ctx, 'POST', '/api/v1/ai/image', objectArgs(args)),
 }

@@ -1120,8 +1120,10 @@ body.bb-resizing .bb-resize-handle {
 }
 
 .battery-row-thumb {
-  flex: 0 0 62%;
-  width: 62%;
+  /* 缩略图固定尺寸（默认栏宽下的大小）：无论拉宽还是收窄电池栏，图尺寸都不变，
+     多余/不足的宽度只作用于文字。 */
+  flex: 0 0 164px;
+  width: 164px;
   position: relative;
   /* 黄金比例矩形：宽 : 高 = 1.618 : 1 */
   aspect-ratio: 1.618 / 1;
@@ -1195,13 +1197,58 @@ body.bb-resizing .bb-resize-handle {
   gap: 3px;
 }
 
+/* 文字整体缩放由行内 --tpl-scale 驱动（JS 测量得出）：名称 / 版本 / 作者 / 日期
+   共用同一系数，保持相对大小一致。--tpl-scale 默认 1（窄栏不放大）。 */
 .battery-row-template-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--tpl-scale, 1));
   line-height: 1.35;
   color: var(--color-text-primary);
-  /* 过长按单词换行；超长单词才强制断行 */
+  /* 默认（未能单行容纳时）：过长按单词换行，确保全部文字显示、绝不截断 */
   white-space: normal;
   overflow-wrap: break-word;
   word-break: normal;
   hyphens: auto;
+}
+
+/* 名称能单行完整容纳后才切换单行（此时由 --tpl-scale 等比放大，宽度始终够用，不会截断） */
+.battery-row-template-name.is-oneline {
+  white-space: nowrap;
+}
+
+/* 模板信息：版本 · 作者 · 制作时间戳（名称下方、弱化显示） */
+.battery-row-template-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.battery-row-template-info-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.battery-row-template-ver {
+  font-size: calc(9.5px * var(--tpl-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: rgba(251, 191, 36, 0.85);
+}
+
+.battery-row-template-author {
+  font-size: calc(9.5px * var(--tpl-scale, 1));
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.battery-row-template-date {
+  font-size: calc(9px * var(--tpl-scale, 1));
+  color: var(--color-text-tertiary, rgba(255, 255, 255, 0.45));
+  font-variant-numeric: tabular-nums;
 }

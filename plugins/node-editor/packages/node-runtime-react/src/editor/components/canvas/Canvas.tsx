@@ -595,31 +595,36 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
   }, [isInGroupView, groupSelectedNodes, handleUngroup, handleEnterGroup])
 
   // ── Double-click search popover ───────────────────────────────────────────
-  // ReactFlow v11 has no onPaneDoubleClick; onPaneClick emulates a double-click
-  // with a 300ms / 8px threshold (zoomOnDoubleClick is disabled). On a hit we
-  // record both the screen coordinate (popover position) and the flow coordinate
-  // (battery insert position, pan/zoom already removed by screenToFlowPosition).
+  // Native dblclick on the pane (zoomOnDoubleClick disabled). Screen coords
+  // position the popover; flow coords place the inserted battery.
   const [searchPopover, setSearchPopover] = useState<{
     screenX: number
     screenY: number
     flowX: number
     flowY: number
   } | null>(null)
-  const lastPaneClickRef = useRef<{ time: number; x: number; y: number } | null>(null)
 
-  const onPaneClick = useCallback((e: React.MouseEvent) => {
-    if (!reactFlowInstance) return
-    const now = performance.now()
-    const last = lastPaneClickRef.current
-    const isDouble = !!last && now - last.time < 300 && Math.abs(e.clientX - last.x) < 8 && Math.abs(e.clientY - last.y) < 8
-    if (isDouble) {
-      lastPaneClickRef.current = null
+  useEffect(() => {
+    if (isInGroupView || !reactFlowInstance) return
+    const pane = reactFlowWrapper.current?.querySelector('.react-flow__pane')
+    if (!(pane instanceof HTMLElement)) return
+
+    const onPaneDoubleClick = (e: MouseEvent) => {
+      // Only the empty background opens the search popover. Nodes are descendants
+      // of the pane, so a dblclick on e.g. a TextPanel body bubbles here too; we
+      // must NOT stopPropagation in that case, or React's delegated onDoubleClick
+      // on the node never fires (panel can't enter edit mode).
+      const target = e.target as HTMLElement | null
+      if (target?.closest('.react-flow__node')) return
+      e.preventDefault()
+      e.stopPropagation()
       const flow = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY })
       setSearchPopover({ screenX: e.clientX, screenY: e.clientY, flowX: flow.x, flowY: flow.y })
-    } else {
-      lastPaneClickRef.current = { time: now, x: e.clientX, y: e.clientY }
     }
-  }, [reactFlowInstance])
+
+    pane.addEventListener('dblclick', onPaneDoubleClick)
+    return () => pane.removeEventListener('dblclick', onPaneDoubleClick)
+  }, [isInGroupView, reactFlowInstance])
 
   const closeSearchPopover = useCallback(() => setSearchPopover(null), [])
 
@@ -655,7 +660,6 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
         onMove={handleViewportMove}
         onMoveEnd={handleViewportMoveEnd}
         zoomOnDoubleClick={false}
-        onPaneClick={isInGroupView ? undefined : onPaneClick}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onSelectionDragStop={onSelectionDragStop}

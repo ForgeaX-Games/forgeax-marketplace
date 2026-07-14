@@ -1,14 +1,17 @@
 /**
  * point_zone_gen: 点生区域
  *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
  * 输入：
- *   grids   (array)  — 输入网格或网格列表，仅用于确定输出尺寸与起始 ID
- *   regions (string) — 区域定义 JSON 字符串：[[x, y, area, height], ...]
- *   seed    (number) — 随机种子，0=当前时间
+ *   inputGrid (grid)   — 单张输入网格，仅用于确定输出尺寸与起始 ID
+ *   regions   (string) — 区域定义 JSON 字符串：[[x, y, area, height], ...]
+ *   seed      (number) — 随机种子，0=当前时间
  *
  * 输出：
- *   outputGridList  (array) — 单值网格列表，每个区域一张
- *   outputNameList  (array) — [{id, name, type, height}]，与 outputGridList 顺序一致
+ *   outputGrid     (grid)  — 单张多值网格，每个区域一个递增 id
+ *   outputNameList (array) — [{id, name, type, height}]，与网格中的 id 一一对应
  *
  * 算法（移植自 zone_nesting）：
  *   1. 从种子点出发做"欧氏距离 + FBM 噪声"加权优先级 BFS，生长出
@@ -200,16 +203,12 @@ function applySplineSmoothing(inRegion: boolean[][]): boolean[][] {
 
 // ---------- Parsers ----------
 
-/** 输入网格统一解析为 Grid[]，支持单网格或网格列表 */
-function parseInputGrids(raw: unknown): Grid[] | null {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as Grid];
-  }
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as Grid[];
-  }
-  return null;
+/** 判断 v 是单张网格 number[][] */
+function isGrid(v: unknown): v is Grid {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  const first = (v as unknown[])[0];
+  if (!Array.isArray(first) || (first as unknown[]).length === 0) return false;
+  return typeof (first as unknown[])[0] === "number";
 }
 
 /** 解析区域定义：JSON 字符串或数组，每项为 [x, y, area, height] */
@@ -233,12 +232,10 @@ function parseRegions(raw: unknown): RegionSpec[] {
   });
 }
 
-function gridMax(grids: Grid[]): number {
+function gridMax(g: Grid): number {
   let max = 0;
-  for (const g of grids) {
-    for (const row of g) {
-      for (const v of row) if (v > max) max = v;
-    }
+  for (const row of g) {
+    for (const v of row) if (v > max) max = v;
   }
   return max;
 }
@@ -246,25 +243,22 @@ function gridMax(grids: Grid[]): number {
 // ---------- Main entry ----------
 
 export function pointZoneGen(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.grids);
-  if (!grids) {
-    return { error: "grids is required (single grid or grid list)" };
+  const baseGrid = input.inputGrid;
+  if (!isGrid(baseGrid)) {
+    return { error: "inputGrid is required (number[][])" };
   }
 
-  const baseGrid = grids[0];
   const rows = baseGrid.length;
-  if (rows === 0 || baseGrid[0].length === 0) {
-    return { error: "input grid is empty" };
-  }
   const cols = baseGrid[0].length;
 
   const regions = parseRegions(input.regions);
-  const baseID = gridMax(grids) + 1;
+  const baseID = gridMax(baseGrid) + 1;
 
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
 
-  const outputGridList: Grid[] = [];
+  // 单张多值网格：每个区域一个递增 id（重叠处后写入者覆盖）
+  const outputGrid: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
   const outputNameList: NameEntry[] = [];
 
   regions.forEach((spec, i) => {
@@ -274,18 +268,22 @@ export function pointZoneGen(input: Record<string, unknown>): Record<string, unk
     const region = growOrganicRegion(rows, cols, spec.x, spec.y, spec.area, effectiveSeed);
     const smoothed = applySplineSmoothing(region);
 
-    const grid: Grid = Array.from({ length: rows }, (_, r) =>
-      Array.from({ length: cols }, (_, c) => smoothed[r][c] ? id : 0)
-    );
+    let painted = false;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (smoothed[r][c]) { outputGrid[r][c] = id; painted = true; }
+      }
+    }
 
-    outputGridList.push(grid);
-    outputNameList.push({
-      id,
-      name: `区域 ${i + 1}`,
-      type: "tile",
-      height: spec.height,
-    });
+    if (painted) {
+      outputNameList.push({
+        id,
+        name: `区域 ${i + 1}`,
+        type: "tile",
+        height: spec.height,
+      });
+    }
   });
 
-  return { outputGridList, outputNameList };
+  return { outputGrid, outputNameList };
 }

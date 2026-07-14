@@ -3,6 +3,7 @@ import type { HttpApiClient } from '../../api/HttpApiClient'
 import { useRenderStore } from '../store'
 import { flattenWire, flattenWireList } from './flattenWire'
 import type { NameListEntry, VoxelLayer } from '../types'
+import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../../debug/syncTrace.js'
 
 // Project every executed node's renderable outputs into the render store so the
 // preview updates live as a graph is wired up — matching the legacy behavior.
@@ -92,6 +93,7 @@ let _liveProjector: LiveProjector | null = null
  * from the renderer's `workbench:preview-data` handler on every drag tick.
  */
 export function projectLiveOutputs(outputs: Record<string, Record<string, unknown>>): void {
+  syncTrace('preview:live-push', { nodes: summarizeNodeOutputs(outputs) })
   _liveProjector?.(outputs)
 }
 
@@ -104,6 +106,7 @@ export function useNodePreviews(client: HttpApiClient): void {
   const retainPreviewLayers = useRenderStore((s) => s.retainPreviewLayers)
 
   useEffect(() => {
+    syncTraceHintOnce()
     let cancelled = false
     // opId → output port specs, fetched lazily once (the catalog is static for a
     // session). A failed fetch leaves the cache null so a later run can retry.
@@ -159,24 +162,54 @@ export function useNodePreviews(client: HttpApiClient): void {
       return keys
     }
 
-    // Register the live direct-push projector: the editor forwards freshly
-    // executed outputs over `workbench:preview-data`; we paint them straight into
-    // the render store using the cached catalog/meta, with zero network. Only the
-    // grid bucket is pushed live (the felt slider preview); voxel sinks still ride
-    // the trailing WS refresh. No-op for nodes we have no meta for yet (the first
-    // full refresh seeds it). Honors the same previewOverrides gate as the WS path.
-    _liveProjector = (outputs) => {
-      const overrides = useRenderStore.getState().previewOverrides
-      for (const [nodeId, ports] of Object.entries(outputs)) {
-        const meta = nodeMeta.get(nodeId)
-        if (!meta) continue
-        const override = overrides[nodeId]
-        const previewEnabled = override !== undefined ? override : true
-        desiredGridKeysFor(nodeId, meta.opId, meta.name, previewEnabled, (portName) => ports[portName])
+    const projectVoxelLayersFor = (
+      nodeId: string,
+      opId: string,
+      previewEnabled: boolean,
+      getValue: (portName: string) => unknown,
+    ): void => {
+      const ports = (opOutputs?.get(opId)) ?? []
+      const voxelPort = ports.find((p) => p.type === 'voxel_layers')
+      if (!voxelPort) return
+      const raw = getValue(voxelPort.name)
+      if (raw === undefined) return
+      const layers = flattenWireList<VoxelLayer>(raw)
+      const namePort = ports.find((p) => p.type === 'name_list')
+      const names = namePort
+        ? flattenWireList<NameListEntry>(getValue(namePort.name))
+        : []
+      if (previewEnabled && layers.length) {
+        setLayers(nodeId, opId, layers, names)
+      } else if (!previewEnabled) {
+        clearLayers(nodeId)
       }
     }
 
+    // Register the live direct-push projector: the editor forwards freshly
+    // executed outputs over `workbench:preview-data`; we paint them straight into
+    // the render store using the cached catalog/meta, with zero network. Grids
+    // AND voxel_layers sinks (scene_output) ride this path so param edits on the
+    // root graph update the preview in the same frame as the wire probe.
+    _liveProjector = (outputs) => {
+      const overrides = useRenderStore.getState().previewOverrides
+      let missingMeta = false
+      for (const [nodeId, ports] of Object.entries(outputs)) {
+        const meta = nodeMeta.get(nodeId)
+        if (!meta) {
+          missingMeta = true
+          continue
+        }
+        const override = overrides[nodeId]
+        const previewEnabled = override !== undefined ? override : true
+        projectVoxelLayersFor(nodeId, meta.opId, previewEnabled, (portName) => ports[portName])
+        desiredGridKeysFor(nodeId, meta.opId, meta.name, previewEnabled, (portName) => ports[portName])
+      }
+      if (missingMeta) scheduleRefresh()
+    }
+
     async function refresh(onlyNodeIds?: ReadonlySet<string>): Promise<void> {
+      syncTrace('preview:refresh-start', { narrowed: onlyNodeIds?.size ?? 'full' })
+      await client.ensureViewingProject()
       const [allNodes, specs] = await Promise.all([client.listNodes(), ensureOpOutputs()])
       if (cancelled) return
       // Refresh the node meta cache used by the live push projector.
@@ -192,7 +225,18 @@ export function useNodePreviews(client: HttpApiClient): void {
       // here. GC is skipped on a narrowed pass (it needs the full node set); the
       // graph:applied / initial full refresh owns eviction.
       const narrowed = onlyNodeIds !== undefined && onlyNodeIds.size > 0
-      const nodes = narrowed ? allNodes.filter((n) => onlyNodeIds!.has(n.id)) : allNodes
+      // Narrowed exec refresh (param-drag fast path): re-pull only nodes touched
+      // this run — EXCEPT voxel_layers sinks (scene_output). Upstream group /
+      // const edits always change the final scene even when the sink did not emit
+      // exec:node:output in a partial frame; always re-fetch sinks so preview ==
+      // probe == manual wiring.
+      const nodes = narrowed
+        ? allNodes.filter((n) => {
+            if (onlyNodeIds!.has(n.id)) return true
+            const ports = specs.get(n.opId) ?? []
+            return ports.some((p) => p.type === 'voxel_layers')
+          })
+        : allNodes
 
       const desiredGridKeys = new Set<string>()
       const nodeIds = new Set<string>()
@@ -222,8 +266,14 @@ export function useNodePreviews(client: HttpApiClient): void {
             ? flattenWireList<NameListEntry>(await client.getNodeOutput(node.id, namePort.name))
             : []
           if (cancelled) return
-          if (previewEnabled && layers.length) setLayers(node.id, node.opId, layers, names)
-          else clearLayers(node.id)
+          if (previewEnabled && layers.length) {
+            setLayers(node.id, node.opId, layers, names)
+          } else if (!previewEnabled) {
+            clearLayers(node.id)
+          }
+          // preview on + empty payload: keep the last good frame. Param-drag emits
+          // graph:applied (cache invalidated) BEFORE execute finishes, so a refresh
+          // in that window would clearLayers and black out the preview until rerun.
         }
 
         // ── grid previews (any node) ──
@@ -237,7 +287,6 @@ export function useNodePreviews(client: HttpApiClient): void {
           continue
         }
         for (const port of gridPorts) {
-          if (await isShardedOutput(client, node.id, port.name)) continue
           const raw = await client.getNodeOutput(node.id, port.name)
           if (cancelled) return
           // Declared grid ports: one flattened item == one dense grid. Wider
@@ -267,20 +316,21 @@ export function useNodePreviews(client: HttpApiClient): void {
         retainPreviewLayers(desiredGridKeys)
         retainVoxelNodes(nodeIds)
       }
+      syncTrace('preview:refresh-done', {
+        voxelNodes: nodeIds.size,
+        gridKeys: desiredGridKeys.size,
+        narrowed,
+      })
     }
 
     // Coalesce bursts (a delete can fire graph:applied, and downstream re-exec
     // can fire exec:completed) into a single refresh, and never overlap two
     // in-flight refreshes; if a trigger lands mid-flight, run exactly one more.
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    let graphRefreshTimer: ReturnType<typeof setTimeout> | null = null
+    const GRAPH_REFRESH_DEBOUNCE_MS = 400
     let inFlight = false
     let pending = false
-    // Drag-tick fast path: nodes whose output changed in the CURRENT execution,
-    // accumulated from `exec:node:output` between `exec:started` and
-    // `exec:completed`. When non-empty at completion, the next refresh is
-    // narrowed to just these nodes, avoiding the whole-graph re-pull. A
-    // `graph:applied` (structural change) forces a full refresh by clearing it.
-    let liveAffected = new Set<string>()
     let pendingNarrow: Set<string> | null = null
     async function runRefresh(): Promise<void> {
       if (inFlight) { pending = true; return }
@@ -290,6 +340,7 @@ export function useNodePreviews(client: HttpApiClient): void {
       try {
         await refresh(scope ?? undefined)
       } catch (err) {
+        syncTrace('preview:refresh-error', { error: String(err) })
         // Refresh can race graph edits while outputs are temporarily unavailable.
         // Keep the bridge quiet by default; opt in with localStorage when debugging.
         if (debugPreviewErrors()) {
@@ -325,23 +376,48 @@ export function useNodePreviews(client: HttpApiClient): void {
     // broadcasts it over WS, so the renderer iframe (subscribed to the 'graph'
     // channel) re-runs the GC and the orphaned grid/voxel layers vanish.
     const unsubExec = client.subscribe('execution', (e) => {
-      // Track which nodes this execution touched so the completion refresh can be
-      // narrowed to just them (drag-tick fast path). exec:started clears the
-      // scope; each exec:node:output adds its node; exec:completed flushes.
-      if (e.kind === 'exec:started') {
-        liveAffected = new Set()
-      } else if (e.kind === 'exec:node:output') {
-        const id = (e as { nodeId?: string }).nodeId
-        if (id) liveAffected.add(id)
-      } else if (e.kind === 'exec:completed') {
-        const scope = liveAffected.size > 0 ? liveAffected : undefined
-        liveAffected = new Set()
-        scheduleRefresh(scope)
+      // Always full refresh after execute — scene_output must re-pull even when
+      // upstream-only exec:node:output events fired. Narrow scope caused stale
+      // sinks; racing graph:applied before exec caused empty cache → black preview.
+      if (e.kind === 'exec:completed') {
+        syncTrace('preview:exec-completed', {})
+        if (graphRefreshTimer) {
+          clearTimeout(graphRefreshTimer)
+          graphRefreshTimer = null
+        }
+        scheduleRefresh()
       }
     })
     const unsubGraph = client.subscribe('graph', (e) => {
-      if (e.kind === 'graph:applied') scheduleRefresh() // full (GC) refresh
+      // Ephemeral param-drag batches emit graph:applied BEFORE execute lands;
+      // debounce so exec:completed owns the live refresh and we don't pull an
+      // invalidated (empty) scene_output mid-flight. Structural edits still GC
+      // after the debounce window (delete/disconnect with no exec).
+      if (e.kind === 'graph:applied') {
+        syncTrace('preview:graph-applied-debounced', {})
+        if (graphRefreshTimer) clearTimeout(graphRefreshTimer)
+        graphRefreshTimer = setTimeout(() => {
+          graphRefreshTimer = null
+          scheduleRefresh()
+        }, GRAPH_REFRESH_DEBOUNCE_MS)
+      }
+      if (e.kind === 'project:viewing' || e.kind === 'project:activated') {
+        const projectId = (e as { projectId?: string }).projectId
+        if (projectId) {
+          client.syncViewingProjectId(projectId)
+          scheduleRefresh()
+        }
+      }
     })
+    const onWorkbenchMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; projectId?: unknown } | null
+      if (!data || data.type !== 'workbench:project-changed') return
+      const projectId = typeof data.projectId === 'string' ? data.projectId : null
+      if (!projectId) return
+      client.syncViewingProjectId(projectId)
+      scheduleRefresh()
+    }
+    window.addEventListener('message', onWorkbenchMessage)
     // Re-project when the editor's preview toggles arrive (override map changes),
     // so flipping a node's preview off/on adds/removes its layers immediately
     // without waiting for a graph mutation or re-execution. Compare by CONTENT
@@ -362,9 +438,11 @@ export function useNodePreviews(client: HttpApiClient): void {
       cancelled = true
       _liveProjector = null
       if (refreshTimer) clearTimeout(refreshTimer)
+      if (graphRefreshTimer) clearTimeout(graphRefreshTimer)
       unsubExec()
       unsubGraph()
       unsubOverrides()
+      window.removeEventListener('message', onWorkbenchMessage)
     }
   }, [client, setLayers, clearLayers, retainVoxelNodes, setPreviewLayer, clearPreviewLayers, retainPreviewLayers])
 }

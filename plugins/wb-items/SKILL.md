@@ -5,7 +5,7 @@ description: Use for ForgeaX Workbench items & icons tasks — items.json editin
 
 # Workbench Items & Icons
 
-Use when working on `@forgeax-plugin/wb-items`.
+Use when working on `@forgeax-extension/wb-items`.
 
 ## Tools
 

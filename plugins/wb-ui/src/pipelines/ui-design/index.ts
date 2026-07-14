@@ -543,7 +543,7 @@ class UIDesignPipelineUI {
 
   private setupStateSync(): void {
     if (this.stateChannel || typeof BroadcastChannel === 'undefined') return
-    this.stateChannel = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-ui.ui-design-state')
+    this.stateChannel = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-ui.ui-design-state')
     this.stateChannel.onmessage = (event: MessageEvent<UiDesignChannelMessage>) => {
       const msg = event.data
       if (!msg || msg.sourceId === this.instanceId) return

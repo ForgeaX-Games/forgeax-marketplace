@@ -1,31 +1,37 @@
 import type { FastifyInstance } from 'fastify'
-import { executeNode } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import { executeNode, type ExecuteNodeRequest } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
 
+interface ProjectParams {
+  projectId: string
+}
+
+function parseExecuteBody(body: unknown): ExecuteNodeRequest {
+  const b = (body ?? {}) as { nodeId?: string; quietErrors?: boolean }
+  return {
+    ...(b.nodeId ? { nodeId: b.nodeId } : {}),
+    ...(b.quietErrors ? { quietErrors: true } : {}),
+  }
+}
+
 export async function registerExecuteRoutes(app: FastifyInstance): Promise<void> {
-  // Kick off execution and await completion, returning the FULL ExecutionResult.
-  // UI / REST callers depend on the full payload, so this route stays as-is.
-  // Live exec:* events still stream over /ws (execution channel).
-  app.post('/api/v1/execute', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+  const prefix = '/api/v1/projects/:projectId'
+
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute`, async (req, reply) => {
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
+    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
     return handle.done
   })
 
-  // Agent-facing execute: run the pipeline and return ONLY a KB-scale summary
-  // (status + per-port item/shape notes), never raw image/base64 payloads. This
-  // is what `asset2d:pipeline.execute` calls by default. Summarizing on the
-  // backend — before the result is serialized into an HTTP body — keeps the
-  // payload tiny regardless of how many assets the graph emits.
-  app.post('/api/v1/execute/summary', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute/summary`, async (req, reply) => {
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
+    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
     const full = await handle.done
     return summarizeExecutionResult(full)
   })

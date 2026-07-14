@@ -484,6 +484,11 @@ export interface HistoryEntry {
   forkReason?: string;
   /** 运行类型标记（"ip-dna" = IP 摄入/改编运行）。 */
   kind?: string;
+  /**
+   * IP 改编下游生成的可 stream run id（ipgen_<story_timestamp>_<rand>）。
+   * 仅当该 IP 条目正处于下游生成阶段时后端才回填；前端据此 attach /stream 直播中间预览。
+   */
+  generationRunId?: string;
 }
 
 /**

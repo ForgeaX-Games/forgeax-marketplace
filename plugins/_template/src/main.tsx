@@ -12,7 +12,7 @@ import './ui/styles.css';
 // Tailwind utilities (preflight off).
 import './styles/app.css';
 
-const PLUGIN_ID = '@forgeax-plugin/_template';
+const PLUGIN_ID = '@forgeax-extension/_template';
 const SURFACE_ID = 'template';
 
 type Pane = 'left' | 'center' | 'standalone';

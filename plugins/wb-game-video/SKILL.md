@@ -6,7 +6,7 @@ trigger: /gamevideo
 
 # 视频游戏工坊 · AI Skill
 
-`@forgeax-plugin/wb-game-video` = **玩法优先的视频游戏**蓝图编辑器 + 运行时。
+`@forgeax-extension/wb-game-video` = **玩法优先的视频游戏**蓝图编辑器 + 运行时。
 
 **唯一引擎 = graph 引擎**（`src/runtime/ / src/graph/ / src/editor/`）：一张 `GameScenario` 图，纯 TS 状态机直接跑。
 旧 FMV 内容生产那套（`gvid:*` 工具、剧本/生图/生视频/素材库、`/__reel__` 端点）已**整体删除**，不再存在。

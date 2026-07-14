@@ -1,5 +1,5 @@
 /**
- * g_joint_on_surface —— 先计算 articraft 风格表面贴合位姿，再追加 joint。
+ * g_joint_on_surface —— 先计算表面贴合位姿，再追加 joint。
  */
 
 import {

@@ -7,6 +7,7 @@ import { buildApp } from '../src/main.js'
 
 let app: Awaited<ReturnType<typeof buildApp>>
 let projectRoot: string
+const MAIN = '/api/v1/projects/main'
 beforeAll(async () => {
   projectRoot = mkdtempSync(join(tmpdir(), 'wb-asset2d-test-'))
   process.env.FORGEAX_PROJECT_ROOT = projectRoot
@@ -52,21 +53,21 @@ describe('bridge REST', () => {
     })
   })
 
-  it('POST /api/v1/batch creates a node, GET /nodes returns it', async () => {
+  it('POST /api/v1/projects/:id/batch creates a node, GET /nodes returns it', async () => {
     const ops = [{ type: 'createNode', nodeId: 'n1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 5 } }]
-    const post = await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops } })
+    const post = await app.inject({ method: 'POST', url: `${MAIN}/batch`, payload: { ops } })
     expect(post.json().status).toBe('ok')
-    const nodes = await app.inject({ method: 'GET', url: '/api/v1/nodes' })
+    const nodes = await app.inject({ method: 'GET', url: `${MAIN}/nodes` })
     expect(nodes.json().some((n: { id: string }) => n.id === 'n1')).toBe(true)
   })
 })
 
 describe('execute', () => {
-  it('POST /api/v1/execute runs the pipeline and reports completed', async () => {
-    await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops: [
+  it('POST /api/v1/projects/:id/execute runs the pipeline and reports completed', async () => {
+    await app.inject({ method: 'POST', url: `${MAIN}/batch`, payload: { ops: [
       { type: 'createNode', nodeId: 'e1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 7 } },
     ] } })
-    const r = await app.inject({ method: 'POST', url: '/api/v1/execute', payload: {} })
+    const r = await app.inject({ method: 'POST', url: `${MAIN}/execute`, payload: {} })
     expect(r.statusCode).toBe(200)
     expect(r.json()).toMatchObject({ status: 'completed' })
   })
@@ -86,10 +87,10 @@ describe('ws', () => {
     await delay(50)
     // applyBatch emits no event to subscribers, but executeNode emits exec:* on
     // the execution channel — so trigger a run and observe a real forwarded event.
-    await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops: [
+    await app.inject({ method: 'POST', url: `${MAIN}/batch`, payload: { ops: [
       { type: 'createNode', nodeId: 'wsN', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 1 } },
     ] } })
-    await app.inject({ method: 'POST', url: '/api/v1/execute', payload: {} })
+    await app.inject({ method: 'POST', url: `${MAIN}/execute`, payload: {} })
     await delay(100)
     sock.close()
     expect(received.length).toBeGreaterThan(0)

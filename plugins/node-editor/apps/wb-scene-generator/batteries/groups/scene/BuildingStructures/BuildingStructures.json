@@ -466,6 +466,68 @@
         "y": 2554.0608507878233
       },
       "params": {}
+    },
+    {
+      "id": "node-bs-room-zmin-get",
+      "opId": "list_get_single",
+      "name": "room_z_min",
+      "position": {
+        "x": 3050,
+        "y": 2880
+      },
+      "params": {}
+    },
+    {
+      "id": "node-bs-room-zminus1-const",
+      "opId": "number_const",
+      "name": "room_z_minus1",
+      "position": {
+        "x": 3050,
+        "y": 2940
+      },
+      "params": {
+        "value": 1,
+        "min": 0,
+        "max": 10,
+        "precision": 0
+      }
+    },
+    {
+      "id": "node-bs-room-zfloor-math",
+      "opId": "basic_math_op",
+      "name": "room_z_floor",
+      "position": {
+        "x": 3140,
+        "y": 2910
+      },
+      "params": {
+        "op": "-"
+      }
+    },
+    {
+      "id": "node-bs-room-zfloor-range",
+      "opId": "range_list",
+      "name": "room_z_floor_list",
+      "position": {
+        "x": 3180,
+        "y": 2980
+      },
+      "params": {}
+    },
+    {
+      "id": "node-bs-room-zmin-idx",
+      "opId": "number_const",
+      "name": "room_z_min_index",
+      "position": {
+        "x": 3050,
+        "y": 2820
+      },
+      "params": {
+        "value": 0,
+        "min": 0,
+        "max": 10,
+        "precision": 0
+      }
     }
   ],
   "edges": [
@@ -1163,17 +1225,6 @@
       }
     },
     {
-      "id": "edge-1781855286085-61fmv",
-      "source": {
-        "nodeId": "node-1781855286085-lvbkz",
-        "port": "zRange"
-      },
-      "target": {
-        "nodeId": "node-1781855286085-y5f2n",
-        "port": "zRange"
-      }
-    },
-    {
       "id": "edge-1781855286085-uyaqi",
       "source": {
         "nodeId": "node-1781855286085-k4bk6",
@@ -1248,6 +1299,83 @@
       "target": {
         "nodeId": "node-1781855286085-6bnx1",
         "port": "region"
+      }
+    },
+    {
+      "id": "edge-bs-room-zrange-to-zmin",
+      "source": {
+        "nodeId": "node-1781855286085-lvbkz",
+        "port": "zRange"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zmin-get",
+        "port": "list"
+      }
+    },
+    {
+      "id": "edge-bs-room-zmin-to-math-a",
+      "source": {
+        "nodeId": "node-bs-room-zmin-get",
+        "port": "item"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zfloor-math",
+        "port": "a"
+      }
+    },
+    {
+      "id": "edge-bs-room-zminus1-to-math-b",
+      "source": {
+        "nodeId": "node-bs-room-zminus1-const",
+        "port": "value"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zfloor-math",
+        "port": "b"
+      }
+    },
+    {
+      "id": "edge-bs-room-zfloor-to-range-start",
+      "source": {
+        "nodeId": "node-bs-room-zfloor-math",
+        "port": "result"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zfloor-range",
+        "port": "start"
+      }
+    },
+    {
+      "id": "edge-bs-room-zfloor-to-range-end",
+      "source": {
+        "nodeId": "node-bs-room-zfloor-math",
+        "port": "result"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zfloor-range",
+        "port": "end"
+      }
+    },
+    {
+      "id": "edge-bs-room-zfloor-range-to-g2n",
+      "source": {
+        "nodeId": "node-bs-room-zfloor-range",
+        "port": "list"
+      },
+      "target": {
+        "nodeId": "node-1781855286085-y5f2n",
+        "port": "zRange"
+      }
+    },
+    {
+      "id": "edge-bs-room-zmin-idx",
+      "source": {
+        "nodeId": "node-bs-room-zmin-idx",
+        "port": "value"
+      },
+      "target": {
+        "nodeId": "node-bs-room-zmin-get",
+        "port": "index"
       }
     }
   ],

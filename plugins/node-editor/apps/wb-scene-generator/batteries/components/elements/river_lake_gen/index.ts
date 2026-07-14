@@ -1,7 +1,11 @@
 /**
- * riverGen: 在输入网格上生成河流和湖泊系统
- * 输入：grid (grid) — 基准网格; riverCount/algorithm/minWidth/maxWidth/lakeCount/waterItems/seed 参数
- * 输出：waterGrid (grid) — 含水域掩码的网格; nameList (array) — 水域ID名称清单
+ * riverLakeGen: 在单张输入网格上生成河流和湖泊系统
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 waterGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 基准网格; riverCount/algorithm/minWidth/maxWidth/lakeCount/waterItems/seed 参数
+ * 输出：waterGrid (grid) — 含水域掩码的多值网格; nameList (array) — 水域ID名称清单
  */
 
 // ─────────────────────────────────────────────────────────────
@@ -520,9 +524,9 @@ function placeWaterItems(
 // ─────────────────────────────────────────────────────────────
 
 export function riverLakeGen(input: Record<string, unknown>): Record<string, unknown> {
-  const grid = input.grid as number[][] | undefined;
+  const grid = input.inputGrid as number[][] | undefined;
   if (!grid || grid.length === 0 || grid[0].length === 0) {
-    return { error: "grid is required" };
+    return { error: "inputGrid is required" };
   }
 
   const riverCount = typeof input.riverCount === "number" && input.riverCount > 0

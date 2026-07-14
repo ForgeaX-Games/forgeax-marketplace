@@ -55,7 +55,7 @@ export function WorkbenchHost(): JSX.Element {
   // lives in the left pane's <ProjectPanel>; the center pane only observes the
   // active project id so it can signal the renderer when the project changes (via
   // the kernel's project:activated cross-client sync, wired in <Editor>).
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
   // Bump to force the preview iframe to clear + reload on a project switch.
   const [rendererReloadKey, setRendererReloadKey] = useState(0)
 
@@ -135,7 +135,7 @@ export function WorkbenchHost(): JSX.Element {
   // switchProject here — the kernel Editor already loadPipeline()s the active
   // project's graph on mount, so this only populates the modal + battery filter.
   useEffect(() => {
-    void useProjectStore.getState().fetchProjects()
+    void useProjectStore.getState().bootstrap()
   }, [])
 
   // Clear + reload the preview when the active project changes: remount the
@@ -143,15 +143,15 @@ export function WorkbenchHost(): JSX.Element {
   // via the activate route's graph:applied broadcast.
   const prevProjectRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeProjectId === null) return
+    if (viewingProjectId === null) return
     if (prevProjectRef.current === null) {
-      prevProjectRef.current = activeProjectId
+      prevProjectRef.current = viewingProjectId
       return
     }
-    if (prevProjectRef.current === activeProjectId) return
-    prevProjectRef.current = activeProjectId
+    if (prevProjectRef.current === viewingProjectId) return
+    prevProjectRef.current = viewingProjectId
     setRendererReloadKey((k) => k + 1)
-  }, [activeProjectId])
+  }, [viewingProjectId])
 
   const beginRowResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()

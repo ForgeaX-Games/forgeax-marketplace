@@ -91,31 +91,29 @@ describe('import-exported-assets script', () => {
         expect((db.prepare('SELECT COUNT(*) AS c FROM assets').get() as { c: number }).c).toBe(4)
         expect((db.prepare('SELECT COUNT(DISTINCT id) AS c FROM assets').get() as { c: number }).c).toBe(4)
 
-        const row = db.prepare('SELECT * FROM assets WHERE asset_kind = ? LIMIT 1').get('common_16') as Record<string, unknown>
-        expect(row.alias).toBe('[外]_[室外]__[地形]_[草地]_[草]_[无]_[自然]_[正常]_[瓦片组]_[16]__[静态]_[]_[0].png')
+        // asset_kind column was folded into the alias type field (idx 7) and dropped;
+        // rows are now addressed by their 12-field renderer alias.
+        const row = db.prepare("SELECT * FROM assets WHERE alias LIKE '%_[common_16]_%' LIMIT 1").get() as Record<string, unknown>
+        expect(row.alias).toBe('[外]_[室外]_[草]_[]_[无]_[自然]_[正常]_[common_16]_[16]_[静态]_[]_[0].png')
         expect(row.zone).toBe('raw')
         expect(row.mime_type).toBe('image/png')
         expect(row.width_px).toBe(2)
         expect(row.height_px).toBe(3)
         expect(row.anchor_x).toBe(0.25)
         expect(row.anchor_y).toBe(0.75)
-        expect(row.asset_kind).toBe('common_16')
-        expect(row.crop_type_original).toBe('瓦片组')
-        expect(JSON.parse(String(row.tags_json))).toEqual({ cropType: '瓦片组', size: '16' })
         expect(JSON.parse(String(row.geometry_json))).toEqual({ pivot: [0.25, 0.75] })
 
         const blob = db.prepare('SELECT * FROM blobs WHERE sha256 = ?').get(row.blob_sha256) as Record<string, unknown>
         expect(blob.sha256).toBe(row.blob_sha256)
         expect(readFileSync(join(root, 'materials', 'asset-store', 'blobs', String(blob.sha256).slice(0, 2), String(blob.sha256).slice(2, 4), String(blob.sha256))).length).toBe(row.size_bytes)
 
-        const floor = db.prepare('SELECT * FROM assets WHERE asset_kind = ?').get('floor_1') as Record<string, unknown>
-        expect(floor.alias).toContain('_[floor]_[16]_')
-        expect(floor.crop_type_original).toBe('瓦片组')
+        const floor = db.prepare("SELECT * FROM assets WHERE alias LIKE '%_[floor_1]_%'").get() as Record<string, unknown>
+        expect(floor.alias).toContain('_[floor_1]_[16]_')
         expect(floor.width_px).toBe(16)
         expect(floor.height_px).toBe(16)
         expect(existsSync(join(root, 'materials', 'asset-store', 'blobs', String(floor.blob_sha256).slice(0, 2), String(floor.blob_sha256).slice(2, 4), String(floor.blob_sha256)))).toBe(true)
 
-        const object = db.prepare('SELECT * FROM assets WHERE asset_kind = ?').get('object') as Record<string, unknown>
+        const object = db.prepare("SELECT * FROM assets WHERE alias LIKE '%_[床]_%'").get() as Record<string, unknown>
         expect(object.geometry_json).toBeTruthy()
         expect(object.width_px).toBeGreaterThan(0)
         expect(object.height_px).toBeGreaterThan(0)

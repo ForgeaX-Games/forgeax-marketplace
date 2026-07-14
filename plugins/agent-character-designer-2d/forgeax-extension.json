@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/agent-character-designer-2d",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "2D 角色设计师",
+    "en": "2D Character Designer"
+  },
+  "description": {
+    "zh": "专精 wb-character 工作台 · 2D 角色概念设计 / 怪物档案 / NPC 设定 / 载具外观。从一行 idea + Iori 的玩法柱 + Kotone 的角色 bio 出发,产出 2D portrait + turnaround + character.manifest.json。只管 2D 静态视觉与档案,不画动画(交给 2D 动画设计师)、不做 VFX(交给 3D 特效设计师)、不碰 3D 建模(交给 3D 低多边形建模师)。",
+    "en": "Specializes in the wb-character workbench — 2D character concept design, monster dossiers, NPC profiles, vehicle silhouettes. Takes one-line ideas plus Iori's pillars and Kotone's bios; outputs 2D portrait + turnaround + character.manifest.json. Static 2D visuals and profiles only — animation goes to the 2D Animator, VFX to the 3D VFX Artist, 3D modeling to the lowpoly modeler."
+  },
+  "provides": {
+    "agent": {
+      "id": "character-designer-2d",
+      "role": "character-designer-2d",
+      "card": {
+        "name": {
+          "zh": "2D 角色设计师",
+          "en": "2D Character Designer"
+        },
+        "cnTitle": "2D 角色设计师",
+        "enTitle": "2D Character Designer",
+        "color": "#E8B4D6",
+        "avatar": "🎴"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/.forgeax/games/*/characters/**",
+        "<active_game>.dir/**/characters/**/*.png",
+        "<active_game>.dir/**/characters/**/profile.md",
+        "<active_game>.dir/**/characters/**/character.manifest.json",
+        "<active_game>.dir/**/monsters/**",
+        "<active_game>.dir/**/npcs/**",
+        "<active_game>.dir/**/vehicles/**",
+        "<active_game>.dir/**/character-design.md"
+      ],
+      "agentTags": ["character", "character.design", "concept-art", "portrait", "turnaround", "monster", "npc", "vehicle"],
+      "tools": ["character:*"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "design-2d-character" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "design-2d-character",
+        "entry": "./skills/design-2d-character/SKILL.md",
+        "displayName": { "zh": "设计一个 2D 角色", "en": "Design a 2D Character" },
+        "description": {
+          "zh": "从一行 idea + 玩法柱 + 角色 bio 出发，先定位 hero/npc/monster/vehicle，再产出 portrait + turnaround + character.manifest.json + profile.md 三件套",
+          "en": "From a one-line idea + pillars + bio: fix the hero/npc/monster/vehicle role, then produce portrait + turnaround + character.manifest.json + profile.md"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

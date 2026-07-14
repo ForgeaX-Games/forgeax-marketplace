@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { VoxelBbox } from '../../../framework/geometry/topBillboard'
 import { getRegisteredAssetUrl, setServerImageResolver } from '../../../framework/asset/imageCache'
 import type { CollectedCell, LayerAssetBinding } from './types'
-import { objectFootprintAnchorPoint, objectFootprintContainScale, objectSpriteGridRect, objectVoxelBottomFootprint, paintCell } from './paintCell'
-import type { AssetMatch } from '../../../framework/asset/matchAssetEntry'
+import { objectFootprintAnchorPoint, objectSpriteGridRect, objectSpritePainterSortY, paintCell } from './paintCell'
 
 type Op =
   | { type: 'drawImage'; args: unknown[] }
@@ -46,6 +45,8 @@ function makeBinding(): LayerAssetBinding {
     rule: null,
     imgUrl: getRegisteredAssetUrl('grass'),
     validVariantIdxs: { top: [], front: [] },
+    validVariantWeights: { top: undefined, front: undefined },
+    validVariantPoolsByTileId: { top: new Map(), front: new Map() },
     regions: new Map(),
   }
 }
@@ -132,67 +133,55 @@ describe('topBillboard paintCell asset selection highlight', () => {
     expect(objectFootprintAnchorPoint(cells)).toEqual({ x: 30, y: 37.5 })
   })
 
-  it('scales object draw down when collision footprint exceeds voxel bottom face', () => {
-    const img = { width: 288, height: 288, naturalWidth: 288, naturalHeight: 288 } as HTMLImageElement
-    const match: AssetMatch = {
-      primary: 'big',
-      variants: ['big'],
-      ppu: 16,
-      widthPx: 288,
-      heightPx: 288,
-      anchor: { x: 0.5, y: 0.007 },
-      geometry: {
-        collisionMask: {
-          kind: 'rectangle',
-          x: 0,
-          y: 0,
-          width: 288,
-          height: 288,
-        },
-      },
-    }
-    const scale = objectFootprintContainScale({ width: 10, depth: 10 }, match, img)
-    expect(scale).toBeCloseTo(10 / 18, 5)
-    const rect = objectSpriteGridRect(makeCell(false), img, match.anchor, { x: 5.5, y: 10.5 }, scale)
-    expect(rect.w).toBeCloseTo(10, 5)
-    expect(rect.h).toBeCloseTo(10, 5)
+  it('draws objects at fixed 16 PPU with bottom anchor on voxel bottom point', () => {
+    const img = { width: 192, height: 96, naturalWidth: 192, naturalHeight: 96 } as HTMLImageElement
+    const anchorPoint = { x: 11, y: 15.5 }
+    const rect = objectSpriteGridRect(makeCell(false), img, { x: 0.5, y: 0.01 }, anchorPoint)
+    expect(rect.w).toBe(12)
+    expect(rect.h).toBe(6)
+    expect(rect.y + rect.h).toBeCloseTo(anchorPoint.y, 5)
+    expect(rect.x + rect.w / 2).toBeCloseTo(anchorPoint.x, 5)
   })
 
-  it('keeps scale 1 when collision fits inside voxel bottom face', () => {
+  it('does not scale large sprites down to fit voxel footprint', () => {
     const img = { width: 288, height: 288, naturalWidth: 288, naturalHeight: 288 } as HTMLImageElement
-    const match: AssetMatch = {
-      primary: 'siheyuan',
-      variants: ['siheyuan'],
-      ppu: 16,
-      widthPx: 288,
-      heightPx: 288,
-      anchor: { x: 0.5, y: 0.0069444444 },
-      geometry: {
-        collisionMask: {
-          kind: 'rectangle',
-          x: 26,
-          y: 2,
-          width: 236,
-          height: 224,
-        },
-      },
-    }
-    expect(objectFootprintContainScale({ width: 18, depth: 18 }, match, img)).toBe(1)
+    const anchorPoint = { x: 5.5, y: 10.5 }
+    const rect = objectSpriteGridRect(makeCell(false), img, { x: 0.5, y: 0.007 }, anchorPoint)
+    expect(rect.w).toBe(18)
+    expect(rect.h).toBe(18)
+    expect(rect.y + rect.h).toBeCloseTo(anchorPoint.y, 4)
   })
 
-  it('aligns asymmetric object sprite anchors to the selected cell center', () => {
+  it('sorts objects after ground tiles south of the footprint', () => {
+    const column = Array.from({ length: 4 }, (_, i) => ({
+      ...makeCell(false),
+      x: 10,
+      y: 50,
+      z: i + 1,
+    }))
+    const anchorPoint = objectFootprintAnchorPoint(column)
+    const img = { width: 192, height: 192, naturalWidth: 192, naturalHeight: 192 } as HTMLImageElement
+    const rect = objectSpriteGridRect(column[0], img, { x: 0.5, y: 1 }, anchorPoint)
+    const painterY = objectSpritePainterSortY(rect, 50)
+    expect(painterY).toBeGreaterThanOrEqual(50)
+    expect(rect.y + rect.h).toBeCloseTo(anchorPoint.y, 5)
+  })
+
+  it('aligns asymmetric object sprite anchors horizontally only', () => {
     const rect = objectSpriteGridRect(
       { ...makeCell(false), x: 10, y: 20 },
       { width: 64, height: 64, naturalWidth: 64, naturalHeight: 64 } as HTMLImageElement,
       { x: 0.75, y: 0.5 },
+      { x: 12, y: 20.5 },
     )
 
     expect(rect).toMatchObject({
-      x: 7.5,
-      y: 18.5,
+      x: 9,
+      y: 16.5,
       w: 4,
       h: 4,
     })
+    expect(rect.y + rect.h).toBeCloseTo(20.5, 5)
   })
 
   it('draws tile fallback images at source pixels divided by global PPU', () => {

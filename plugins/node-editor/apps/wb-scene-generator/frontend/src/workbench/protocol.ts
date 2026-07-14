@@ -53,10 +53,9 @@ export interface PreviewChangeMessage {
  * the instant an execute response lands, bypassing the WS `exec:completed` →
  * `getNodeOutput` re-pull round-trip. During a slider drag the editor's
  * `incrementalExecute` already holds the freshly computed outputs in memory; we
- * forward the changed (nodeId, port) grid payloads straight to the renderer so
+ * forward the changed (nodeId, port) payloads straight to the renderer so
  * the preview repaints in the same frame instead of waiting ~200ms for the WS +
- * GET detour. The renderer projects these exactly like a `getNodeOutput` result
- * (setPreviewLayer). View-only — carries no graph mutation; the trailing
+ * GET detour. Includes grid previews AND voxel_layers sinks (scene_output).
  * exec:completed / graph:applied still own GC and the durable post-drag refresh.
  */
 export interface PreviewDataMessage {

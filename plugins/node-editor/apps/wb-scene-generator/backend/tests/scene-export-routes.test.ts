@@ -22,6 +22,10 @@ describe('scene export routes', () => {
   })
 
   it('cooks active baked layers into scene.zip and an unpacked mirror', async () => {
+    const workspaceRes = await app.inject({ method: 'GET', url: '/api/v1/workspace' })
+    const projectId = (workspaceRes.json() as { viewingProjectId?: string }).viewingProjectId
+    expect(projectId).toBeTruthy()
+
     await app.inject({
       method: 'PATCH',
       url: '/api/v1/baked/layers/cells',
@@ -54,7 +58,7 @@ describe('scene export routes', () => {
     expect(existsSync(body.zipPath)).toBe(true)
     expect(existsSync(join(body.unpackedDir, 'terrain.json'))).toBe(true)
     expect(body.zipPath).toContain(join(ws, 'exports', 'scene'))
-    expect(body.downloadUrl).toBe(`http://192.168.50.20:9557/api/v1/scene-export/download/${body.bundleId}`)
+    expect(body.downloadUrl).toBe(`http://192.168.50.20:9557/api/v1/projects/${encodeURIComponent(projectId!)}/scene-export/download/${body.bundleId}`)
     expect(body.warnings).toEqual([])
 
     const download = await app.inject({
@@ -70,13 +74,57 @@ describe('scene export routes', () => {
     expect(Buffer.from(download.rawPayload).subarray(0, 2).toString()).toBe('PK')
   })
 
+  it('applies narrative area tags to the cooked terrain.json when narrative is provided', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/baked/layers/cells',
+      payload: { path: '/Town/Ground', cells: [{ x: 0, y: 0, z: 0 }], asset: { name: 'grass', type: 'tile' } },
+    })
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/baked/layers/attributes',
+      payload: { path: '/Town/Ground', attributes: { export_role: 'terrain', template_id: 'grass' } },
+    })
+
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/scene-export/cook',
+      payload: {
+        sceneName: 'Narrative Demo',
+        narrative: { sceneName: 'Narrative World', locations: [{ name: 'Town', parent: null }] },
+      },
+    })
+
+    expect(r.statusCode).toBe(200)
+    const body = r.json() as { unpackedDir: string }
+    const { readFileSync } = await import('node:fs')
+    const terrain = JSON.parse(readFileSync(join(body.unpackedDir, 'terrain.json'), 'utf-8'))
+    expect(terrain.cells['0'][0].areaTags).toEqual({ area_L0: ['Town'] })
+    const terrainConfig = JSON.parse(readFileSync(join(body.unpackedDir, 'terrain-config.json'), 'utf-8'))
+    expect(terrainConfig.templates.grass.region).toBe('Narrative World')
+  })
+
+  it('fails the cook with a 400 listing all narrative problems', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/scene-export/cook',
+      payload: {
+        sceneName: 'Broken Narrative Demo',
+        narrative: { locations: [{ name: 'NoSuchLayer', parent: null }] },
+      },
+    })
+
+    expect(r.statusCode).toBe(400)
+    expect((r.json() as { error: string }).error).toMatch(/missing: location "NoSuchLayer"/)
+  })
+
   it('uses a LAN IPv4 host for download URLs when the request host is local', () => {
     const req = {
       protocol: 'http',
       headers: { host: 'localhost:9557' },
     }
 
-    expect(buildSceneExportDownloadUrl(req as never, 'local-export', () => ({
+    expect(buildSceneExportDownloadUrl(req as never, 'p_test_project', 'local-export', () => ({
       lo: [{
         address: '127.0.0.1',
         family: 'IPv4',
@@ -93,7 +141,7 @@ describe('scene export routes', () => {
         mac: '00:00:00:00:00:01',
         cidr: '10.11.12.13/24',
       }],
-    }))).toBe('http://10.11.12.13:9557/api/v1/scene-export/download/local-export')
+    }))).toBe('http://10.11.12.13:9557/api/v1/projects/p_test_project/scene-export/download/local-export')
   })
 
   it('returns 404 for a missing scene export bundle download', async () => {

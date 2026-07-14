@@ -1,7 +1,7 @@
 # 自然地物 - LakeRegions（湖泊区域）
 
 > 权威详情（含可照抄 applyBatch/CLI + 验证）：[../../../../batteries/templates/scene/LakeRegions/README.md](../../../../batteries/templates/scene/LakeRegions/README.md)
-> templateId：`LakeRegions`。完整端口以 `scene:templates.get` 为准。
+> templateId：`LakeRegions`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
 
 ## 1. 管线电池的基本介绍
 

@@ -238,6 +238,61 @@ export function migrateV7ToV8(scenario: Scenario): Scenario {
 }
 
 /**
+ * v8 → v9：UI 素材库 + 常驻 HUD。
+ *
+ * 增量：
+ *   1. Scenario.uiAssets?: Record<string, UIAsset> —— UI 覆盖层素材注册表
+ *   2. Scenario.hud?: HudElement[]                 —— 跨场常驻 HUD 绑定层
+ *   3. StickerClip.blendMode / uiAssetId / pinToScene —— 均为可选,渲染层兜底。
+ *
+ * 与 v6/v7 同理：字段全可选、运行时已 `?? {}`/`?? []` 兜底,旧数据不写也能播放。
+ * 迁移仅显式建空 uiAssets 字典 + 空 hud 数组并 bump 版本号,保证「有没有 UI 素材库」可判定。
+ */
+export function migrateV8ToV9(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 9) return scenario
+  return {
+    ...scenario,
+    schemaVersion: 9,
+    uiAssets: scenario.uiAssets ?? {},
+    hud: scenario.hud ?? [],
+  }
+}
+
+/**
+ * v9 → v10：剧情树主题(游戏内剧情树 per-scenario 皮肤 + 章节/关卡选择导航)。
+ *
+ * 增量：Scenario.treeTheme?: TreeTheme —— 全字段可选,缺省(undefined)时播放器回落
+ * 现有内置深色样式(向后兼容)。故迁移**不写 treeTheme**(保持默认外观),仅显式 bump
+ * 版本号,保证「有没有自定义剧情树主题」可判定。节点框/背景走 uiAssets 生成管线。
+ */
+export function migrateV9ToV10(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 10) return scenario
+  return {
+    ...scenario,
+    schemaVersion: 10,
+  }
+}
+
+/**
+ * v10 → v11：全屏 UI 页面系统(真背包 / 主菜单 / 开宝箱 / 搜刮页 / 自定义)。
+ *
+ * 增量：
+ *   1. Scenario.uiScreens?: Record<string, UIScreen> —— 全屏页面注册表
+ *   2. Scene.screens?: ScreenClip[]                  —— 时间轴触发全屏页面
+ *
+ * 与 v8/v9 同理：字段全可选、运行时已 `?? {}`/`?? []` 兜底,旧数据不写也能播放。
+ * 迁移仅显式建空 uiScreens 字典并 bump 版本号,保证「有没有全屏页面系统」可判定。
+ */
+export function migrateV10ToV11(scenario: Scenario): Scenario {
+  if (scenario.schemaVersion >= 11) return scenario
+  return {
+    ...scenario,
+    schemaVersion: 11,
+    uiScreens: scenario.uiScreens ?? {},
+  }
+}
+
+/**
  * 防御层：确保 scenes 是 Record<string, Scene> 而非 Array。
  * LLM 工具调用 / 旧版序列化 / 外部导入偶尔会把 scenes 存成数组；
  * 一旦作为数组进入迁移链，Object.entries 会产出 "0","1","2" 等数字 key，
@@ -296,6 +351,9 @@ export function migrateScenarioToLatest(scenario: Scenario): Scenario {
   if (s.schemaVersion === 5) s = migrateV5ToV6(s)
   if (s.schemaVersion === 6) s = migrateV6ToV7(s)
   if (s.schemaVersion === 7) s = migrateV7ToV8(s)
+  if (s.schemaVersion === 8) s = migrateV8ToV9(s)
+  if (s.schemaVersion === 9) s = migrateV9ToV10(s)
+  if (s.schemaVersion === 10) s = migrateV10ToV11(s)
   // 末尾无条件兜底：跨过 v4 守卫导致 episodes 缺失的历史剧本也能拿回剧集。
   s = ensureEpisodes(s)
   return s

@@ -10,16 +10,19 @@ export interface FolderCrumb {
   label: string
 }
 
-// `place` is the only two-level taxonomy (室内/室外 → 房间); everything else is
-// flat folders. A "leaf" path (assets shown instead of folders) is reached at
-// depth 2 for place, depth 1 for the rest.
+// Fixed-depth taxonomies are single-level (`place`/`type`/…); `index` is dynamic
+// (a `-`-joined hierarchy drilled segment by segment).
 function leafDepth(taxonomy: FacetScheme): number {
-  return taxonomy === 'place' ? 2 : 1
+  return 1
 }
 
 function isLeaf(taxonomy: FacetScheme | null, path: FolderCrumb[]): boolean {
-  return taxonomy != null && path.length >= leafDepth(taxonomy)
+  return taxonomy != null && taxonomy !== 'index' && path.length >= leafDepth(taxonomy)
 }
+
+// Synthetic folder value for the "全部（含子类）" leaf card offered at any
+// non-root `index` node that has children — opening it lists the whole subtree.
+export const INDEX_ALL = '\u0000index-all'
 
 // Pseudo-zone sentinel for the dropdown's "Rules" entry. Distinct from any real
 // DB zone name; selecting it switches the grid to tilemap-rule cards instead of
@@ -61,6 +64,13 @@ interface AssetStoreState {
   folderPath: FolderCrumb[]
   folders: FacetItem[]
   loadingFolders: boolean
+  // Whether the grid should render folder cards (true) or the asset list (false).
+  // Drives the surface directly so `index`'s dynamic-depth leaf works without a
+  // fixed leafDepth. Set by loadView/fetchFolders.
+  folderView: boolean
+  // `index` only: the user clicked "全部（含子类）" on a node that has children,
+  // so show that node's whole subtree as assets instead of drilling further.
+  forceLeaf: boolean
   // The full asset list for the active zone — the grid is one continuous scroll
   // area over all of these (legacy AssetStore model, no per-page batching).
   assets: AssetRecord[]
@@ -107,22 +117,33 @@ function totalPagesOf(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / Math.max(1, pageSize)))
 }
 
-const TAXONOMIES: FacetScheme[] = ['type', 'place', 'style', 'size', 'scene']
+const TAXONOMIES: FacetScheme[] = ['type', 'place', 'style', 'size', 'index']
 
 function readTaxonomyLs(): FacetScheme | null {
   const v = readLs(LS_TAXONOMY, '')
   return (TAXONOMIES as string[]).includes(v) ? (v as FacetScheme) : null
 }
 
+// The `-`-joined path of the current `index` breadcrumb (last crumb holds the
+// full accumulated path; '' at root).
+function indexPath(folderPath: FolderCrumb[]): string {
+  return folderPath.length ? folderPath[folderPath.length - 1].value : ''
+}
+
 // Translate the current breadcrumb into the list-route's facet filter args.
-// place uses (parent = level-1 value, value = level-2 value); others just value.
+// `place` is single-level (室内/室外); `index` passes the accumulated path.
 function facetArgs(
   taxonomy: FacetScheme | null,
   folderPath: FolderCrumb[],
 ): { by?: FacetScheme; value?: string; parent?: string } {
-  if (!taxonomy || !isLeaf(taxonomy, folderPath)) return {}
+  if (!taxonomy) return {}
+  if (taxonomy === 'index') {
+    const path = indexPath(folderPath)
+    return path ? { by: 'index', value: path } : {}
+  }
+  if (!isLeaf(taxonomy, folderPath)) return {}
   if (taxonomy === 'place') {
-    return { by: 'place', parent: folderPath[0].value, value: folderPath[1].value }
+    return { by: 'place', value: folderPath[0].value }
   }
   return { by: taxonomy, value: folderPath[0].value }
 }
@@ -148,6 +169,8 @@ export const useAssetStoreStore = create<AssetStoreState>((set, get) => ({
   folderPath: [],
   folders: [],
   loadingFolders: false,
+  folderView: false,
+  forceLeaf: false,
 
   init: async () => {
     try {
@@ -166,10 +189,29 @@ export const useAssetStoreStore = create<AssetStoreState>((set, get) => ({
   // summaries (Rules zone), folder cards (taxonomy mid-level), or the filtered
   // asset list (flat, or a taxonomy leaf).
   loadView: async () => {
-    const { activeZone, taxonomy, folderPath } = get()
-    if (activeZone !== RULES_ZONE && taxonomy && !isLeaf(taxonomy, folderPath)) {
+    const { activeZone, taxonomy, folderPath, forceLeaf } = get()
+    if (activeZone === RULES_ZONE || !taxonomy) {
+      set({ folderView: false })
+      await get().fetchAssets()
+      return
+    }
+    if (taxonomy === 'index') {
+      // Dynamic depth: unless the user forced a subtree leaf, ask the backend for
+      // this node's child folders — fetchFolders falls through to assets when the
+      // node turns out to be childless (a real leaf).
+      if (forceLeaf) {
+        set({ folderView: false })
+        await get().fetchAssets()
+      } else {
+        await get().fetchFolders()
+      }
+      return
+    }
+    if (!isLeaf(taxonomy, folderPath)) {
+      set({ folderView: true })
       await get().fetchFolders()
     } else {
+      set({ folderView: false })
       await get().fetchAssets()
     }
   },
@@ -183,7 +225,7 @@ export const useAssetStoreStore = create<AssetStoreState>((set, get) => ({
       set({ selectedRule: null })
       writeSelectedRule(null)
     }
-    set({ activeZone: zone, page: 1, pendingScrollToPage: 1, selected: null, folderPath: [], folders: [] })
+    set({ activeZone: zone, page: 1, pendingScrollToPage: 1, selected: null, folderPath: [], folders: [], forceLeaf: false })
     void get().loadView()
   },
 
@@ -224,24 +266,30 @@ export const useAssetStoreStore = create<AssetStoreState>((set, get) => ({
   // Switch the folder scheme (or back to flat). Always resets to the top level.
   setTaxonomy: (t) => {
     writeLs(LS_TAXONOMY, t ?? '')
-    set({ taxonomy: t, folderPath: [], folders: [], selected: null, page: 1, pendingScrollToPage: 1 })
+    set({ taxonomy: t, folderPath: [], folders: [], forceLeaf: false, selected: null, page: 1, pendingScrollToPage: 1 })
     void get().loadView()
   },
 
   // Drill into a folder card: push the crumb, then show its sub-folders (place
-  // level 1 → rooms) or, at a leaf, its filtered assets.
+  // level 1 → rooms, index next segment) or, at a leaf, its filtered assets. The
+  // synthetic "全部（含子类）" card (index only) shows the current subtree instead.
   openFolder: (item) => {
     const { taxonomy, folderPath } = get()
     if (!taxonomy) return
+    if (taxonomy === 'index' && item.value === INDEX_ALL) {
+      set({ forceLeaf: true, selected: null, page: 1, pendingScrollToPage: 1 })
+      void get().loadView()
+      return
+    }
     const next = [...folderPath, { value: item.value, label: item.label }]
-    set({ folderPath: next, selected: null, page: 1, pendingScrollToPage: 1 })
+    set({ folderPath: next, forceLeaf: false, selected: null, page: 1, pendingScrollToPage: 1 })
     void get().loadView()
   },
 
   // Breadcrumb jump: keep `level` crumbs (0 = taxonomy root folder grid).
   goToCrumb: (level) => {
     const next = get().folderPath.slice(0, Math.max(0, level))
-    set({ folderPath: next, selected: null, page: 1, pendingScrollToPage: 1 })
+    set({ folderPath: next, forceLeaf: false, selected: null, page: 1, pendingScrollToPage: 1 })
     void get().loadView()
   },
 
@@ -250,10 +298,33 @@ export const useAssetStoreStore = create<AssetStoreState>((set, get) => ({
     if (!taxonomy) return
     set({ loadingFolders: true })
     try {
-      // place level-1 drills into rooms scoped to the chosen 室内/室外 value.
-      const parent = taxonomy === 'place' && folderPath.length === 1 ? folderPath[0].value : undefined
+      // place level-1 drills into rooms scoped to the chosen 室内/室外 value;
+      // index passes the full accumulated ancestor path.
+      const parent =
+        taxonomy === 'place'
+          ? folderPath.length === 1 ? folderPath[0].value : undefined
+          : taxonomy === 'index'
+            ? indexPath(folderPath)
+            : undefined
       const folders = await libraryApi.facets(activeZone, taxonomy, parent)
-      set({ folders, total: folders.length })
+      if (taxonomy === 'index' && folders.length === 0) {
+        // Childless node → it is a real leaf; show its assets (subtree filter).
+        set({ folders: [], folderView: false, loadingFolders: false })
+        await get().fetchAssets()
+        return
+      }
+      if (taxonomy === 'index' && folderPath.length > 0) {
+        // Non-root node with children: offer a "全部（含子类）" leaf card up top.
+        const all: FacetItem = {
+          value: INDEX_ALL,
+          label: '全部（含子类）',
+          count: folders.reduce((n, f) => n + f.count, 0),
+          samples: folders.flatMap((f) => f.samples).slice(0, 4),
+        }
+        set({ folders: [all, ...folders], total: folders.length + 1, folderView: true })
+        return
+      }
+      set({ folders, total: folders.length, folderView: true })
     } catch {
       set({ folders: [], total: 0 })
     } finally {

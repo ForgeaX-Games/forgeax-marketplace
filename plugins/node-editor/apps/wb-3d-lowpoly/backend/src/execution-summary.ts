@@ -24,36 +24,73 @@ export interface ExecutionResult {
   durationMs: number
 }
 
-// Cap how many items per port we inline, and how long a scalar string may be
-// before it collapses to a shape note (data URIs / base64 / serialized meshes).
+// Cap how many items per port we inline, how long a scalar string may be
+// before it collapses to a shape note (data URIs / base64 / serialized meshes),
+// how many array elements get summarized element-by-element instead of just a
+// length note, and how deep the recursive object walk goes.
 const MAX_INLINE_ITEMS = 8
-const MAX_STRING_CHARS = 256
+const MAX_STRING_CHARS = 4000
+const MAX_ARRAY_INLINE = 20
+const MAX_DEPTH = 4
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
+// Long strings with no whitespace at all (data URIs, base64, hashes) are never
+// something the agent should read as text — collapse those to a length-only
+// shape note regardless of size. Human-readable text (QC reports, validation
+// errors, diagnostics) is exactly what fix loops need to read, so it is kept
+// verbatim up to a generous cap instead of nuked at 256 chars.
+function isOpaqueBlob(s: string): boolean {
+  if (s.startsWith('data:')) return true
+  return s.length > 200 && !/\s/.test(s)
+}
+
+function summarizeString(s: string): unknown {
+  if (isOpaqueBlob(s)) return { kind: 'string', length: s.length }
+  if (s.length > MAX_STRING_CHARS) {
+    return { kind: 'string', length: s.length, preview: s.slice(0, MAX_STRING_CHARS) }
+  }
+  return s
+}
+
+/**
+ * Summarize an arbitrary value found inside a DataTreeEntry item, recursively
+ * and depth-capped. This is the fix for a bug where structured QC/validation
+ * output (e.g. g_geometry_qc's `report`/`signals`, g_validate's `errors`,
+ * g_to_urdf's `report`/`diagnostics`) was destroyed by the summary: any array
+ * (including a short `signals[]` list of {code, severity, message} objects)
+ * collapsed to `{kind:'array', length}` with zero content, and any object
+ * (including that report object itself) kept only a hardcoded mesh-record key
+ * allowlist (name/vertexCount/.../sizeBytes) and dropped every other field —
+ * so the AI calling the default `lowpoly:pipeline.execute` tool could never
+ * actually read *what* QC found, only that something ran. Small/shallow
+ * structures (QC signals, diagnostics, report objects) are now inlined field
+ * by field; large/deep ones (mesh vertex/index buffers, big nested graphs)
+ * still collapse to a shape note so the context never blows up.
+ */
+function summarizeValue(value: unknown, depth: number): unknown {
+  if (typeof value === 'string') return summarizeString(value)
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    if (depth >= MAX_DEPTH || value.length > MAX_ARRAY_INLINE) {
+      return { kind: 'array', length: value.length }
+    }
+    return value.map((v) => summarizeValue(v, depth + 1))
+  }
+  const keys = Object.keys(value).slice(0, 32)
+  if (depth >= MAX_DEPTH) return { kind: 'object', keys }
+  const out: Record<string, unknown> = { kind: 'object', keys }
+  for (const k of keys) {
+    out[k] = summarizeValue((value as Record<string, unknown>)[k], depth + 1)
+  }
+  return out
+}
+
 /** Summarize a single item inside a DataTreeEntry.items array (one wire payload). */
 function summarizeItem(item: unknown): unknown {
-  // Long strings (data URIs, base64, big text) → shape note, never inlined.
-  if (typeof item === 'string' && item.length > MAX_STRING_CHARS) {
-    return { kind: 'string', length: item.length }
-  }
-  // Small scalars pass through unchanged (string/number/boolean/null).
-  if (item === null || typeof item !== 'object') return item
-  // Arrays (e.g. raw vertex / index buffers) — never inline; just shape it.
-  if (Array.isArray(item)) {
-    return { kind: 'array', length: item.length }
-  }
-  // Object payload (e.g. a mesh record): report keys + any small scalar counts,
-  // but never the heavy buffers themselves.
-  const keys = Object.keys(item).slice(0, 32)
-  const dims: Record<string, unknown> = {}
-  for (const k of ['name', 'vertexCount', 'triangleCount', 'mimeType', 'alias', 'blobId', 'sizeBytes']) {
-    const v = (item as Record<string, unknown>)[k]
-    if ((typeof v === 'number' || typeof v === 'string') && String(v).length <= MAX_STRING_CHARS) dims[k] = v
-  }
-  return { kind: 'object', keys, ...dims }
+  return summarizeValue(item, 0)
 }
 
 interface PortSummary {

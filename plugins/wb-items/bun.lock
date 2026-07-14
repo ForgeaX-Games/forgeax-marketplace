@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/wb-items",
+      "name": "@forgeax-extension/wb-items",
       "dependencies": {
         "lucide-react": "^0.460.0",
         "react": "^19.0.0",

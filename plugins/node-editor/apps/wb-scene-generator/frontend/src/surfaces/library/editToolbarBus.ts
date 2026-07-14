@@ -52,11 +52,26 @@ function normalizeZ(value: number): number {
   return Math.trunc(Number.isFinite(value) ? value : 0)
 }
 
-// edit mode (renderer → left)
-export const writeEditMode = (on: boolean): void => writeBool(LS_EDIT_MODE, on)
+// edit mode (renderer → left). Same-window listeners: `storage` events do not
+// fire in the document that wrote localStorage, so the renderer must notify
+// in-process subscribers (e.g. useBakedLayers → full cell fetch on edit-on).
+const editModeLocalListeners = new Set<(on: boolean) => void>()
+
+export const writeEditMode = (on: boolean): void => {
+  writeBool(LS_EDIT_MODE, on)
+  for (const cb of editModeLocalListeners) cb(on)
+}
+
 export const readEditMode = (): boolean => readBool(LS_EDIT_MODE, false)
-export const subscribeEditMode = (cb: (on: boolean) => void): (() => void) =>
-  subscribeBool(LS_EDIT_MODE, cb, false)
+
+export const subscribeEditMode = (cb: (on: boolean) => void): (() => void) => {
+  editModeLocalListeners.add(cb)
+  const unsubStorage = subscribeBool(LS_EDIT_MODE, cb, false)
+  return () => {
+    editModeLocalListeners.delete(cb)
+    unsubStorage()
+  }
+}
 
 // show grid (left → renderer)
 export const writeShowGrid = (on: boolean): void => writeBool(LS_SHOW_GRID, on)

@@ -162,9 +162,11 @@ body {
 }
 
 .app-sidebar {
-  width: 260px;
+  width: 20vw;
+  min-width: 220px;
   flex-shrink: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   border-right: 1px solid var(--dt-green-faint);
   background: var(--dt-surface);
 }
@@ -206,8 +208,53 @@ body {
   color: #d4ff48;
 }
 
+.app-resizer {
+  position: relative;
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 1px solid rgba(212, 255, 72, 0.12);
+  transition: background 0.12s ease, border-color 0.12s ease;
+  z-index: 20;
+  touch-action: none;
+}
+/* 扩大命中区（左右各 ±6px），不改变布局宽度，让"细缝"更好抓。 */
+.app-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  right: -6px;
+}
+/* 中部把手视觉提示：竖排三点，hover/拖拽时更明显。 */
+.app-resizer::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 26px;
+  border-radius: 2px;
+  background: rgba(212, 255, 72, 0.28);
+  transition: background 0.12s ease, height 0.12s ease;
+}
+.app-resizer:hover,
+.app-resizer:active {
+  background: rgba(212, 255, 72, 0.18);
+  border-left-color: rgba(212, 255, 72, 0.55);
+}
+.app-resizer:hover::before,
+.app-resizer:active::before {
+  background: rgba(212, 255, 72, 0.85);
+  height: 40px;
+}
+
 .app-right-panel {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -963,6 +1010,7 @@ body[data-pane="center"] .app-header { display: none; }
 
 .history-panel {
   padding: 2px 6px 6px;
+  min-width: 0;
 }
 .history-loading,
 .history-empty {
@@ -978,11 +1026,14 @@ body[data-pane="center"] .app-header { display: none; }
   gap: 3px;
   /* 不再限制高度：STEP3 随内容自由伸展，整条左栏由 tms-scroll-area 统一滚动 */
   padding: 2px 0;
+  min-width: 0;
 }
 .history-item {
   background: var(--dt-dot);
   border: 1px solid var(--dt-green-glow);
   border-radius: var(--prim-radius-4);
+  min-width: 0;
+  overflow: hidden;
   padding: 5px 7px;
   font-size: 10px;
   font-family: var(--font-mono);
@@ -1043,9 +1094,13 @@ body[data-pane="center"] .app-header { display: none; }
 .hi-input-preview {
   font-size: 11px;
   color: var(--dt-text-sec);
-  white-space: nowrap;
+  /* 随左栏宽度自适应：最多两行，超出省略号，不再横向溢出被遮挡 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   margin-bottom: 3px;
   opacity: 0.7;
 }
@@ -3116,6 +3171,7 @@ body[data-pane="center"] .app-header { display: none; }
 .rf-child-id {
   font-size: 7.5px;
   color: var(--dt-edge-done);
+  flex-shrink: 0;
 }
 .rf-child-cid {
   font-size: 7px;
@@ -3178,15 +3234,30 @@ body[data-pane="center"] .app-header { display: none; }
   to { opacity: 1; }
 }
 
+/* 标题：与序号同处第一行，占满剩余宽度，单行省略 */
 .rf-child-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 10px;
   font-weight: 600;
   color: var(--dt-text);
   line-height: 1.3;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 正文预览：第二行，最多两行、超出省略号 */
+.rf-child-body {
+  font-size: 8px;
+  color: var(--color-text-secondary);
+  line-height: 1.35;
+  overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .rf-child-func {

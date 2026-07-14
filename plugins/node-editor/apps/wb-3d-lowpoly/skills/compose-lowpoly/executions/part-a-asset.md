@@ -1,9 +1,17 @@
 # PART A · 资产 / 机械（逐件建模 → 引用 mesh 组装）
 
 > [SKILL.md](../SKILL.md) 路由到此。本文件是 **PART A** 的完整执行步骤。
-> 共享参考：ToolRegistry-first 工作流见 [quickstart.md](../quickstart.md)；各家族页见
-> [modeling-guide.md](../modeling-guide.md)；电池速查见 [battery-catalog.md](../battery-catalog.md)；
-> 图结构 / 可跑的两阶段示例见 [pipeline-schema.md](../pipeline-schema.md)。
+> 授权参考只需两份：DSL 语法 + 可跑示例 [dsl-quickref.md](../dsl-quickref.md)、op 签名
+> [op-directory.md](../op-directory.md)。选型拿不准再查 [battery-catalog.md](../battery-catalog.md)
+> 的路由表——按需，别一次全读。
+
+> **DSL-first（唯一流程）**：**只写 DSL、用 `lowpoly:model.apply({ source })` 提交**——后端一次完成
+> 校验+编译成图+执行+QC，回执把错误/QC 信号**定位到 DSL 行号**。**阶段1 烘焙**用
+> `model.apply({ source, bake: "<shape_id>" })`（回执 `baked.filename`=`<sha>.obj`，自动登记
+> `parts.json`，`lowpoly:parts.list` 可查）；**阶段2 组装**写 `mesh(filename="<sha>.obj")` → `part`
+> → `joint` 再 `model.apply`。语法见 [dsl-quickref.md](../dsl-quickref.md)，op 签名见
+> [op-directory.md](../op-directory.md)（authoring SSOT，不必再读 battery-catalog / modeling-guide）。
+> **完成门禁 = 回执干净**（无 errors / `qc.valid` / `meshQc.clean` / 无 urdf 错误）——完成判定只看回执。
 
 适用：单个物件 / 机械件 / 装配体（枪、宝箱、齿轮组、机械臂…）——任何非平凡物件都走下面的
 **强制两阶段工作流**。建筑走 [PART B](part-b-building.md)；把已 bake 的件摆成场景走
@@ -11,78 +19,27 @@
 
 ---
 
-## Compose Lowpoly 3D Pipeline
+## Workflow spine — model each part → bake → assemble
 
-## Purpose
+`caller.kind = "ai"`. Every non-trivial object is built in two passes and **never
+in a single mega-model**:
 
-Build and iterate a **3D Lowpoly Generator** project by calling Studio
-ToolRegistry tools (`/api/tools/call`) that proxy to the plugin backend
-`/api/v1/*` contract. Do not directly edit runtime files, do not drive the UI by
-clicking, and do not use the legacy scene/renderer APIs.
+1. **Set up.** Open/create a project with `lowpoly:projects.*`. Get op signatures
+   from [op-directory.md](../op-directory.md) — do **not** call `batteries.list` /
+   `batteries.get`.
+2. **Phase 0 — part manifest (hard gate).** One detailed row per part *before* any
+   DSL (see below). No manifest, no building.
+3. **Phase 1 — model + bake each part (loop).** For each part write a small DSL that
+   builds the real detail (CSG / Parts / gears / Architecture) and submit
+   `model.apply({ source, bake: "<shape_id>" })`. Record the returned `<sha>.obj`
+   filename + bbox. One part per `apply`.
+4. **Phase 2 — assemble (one clean DSL).** `mesh(filename=<sha>.obj)` → `part` →
+   `material` → `joint` into one rooted tree, then `model.apply({ source })` (the
+   compiler auto-appends the QC + URDF terminals — you do not write them).
+5. **Iterate on the assembly only** from the receipt signals. To change a part's
+   geometry, re-model + re-bake that single part in Phase 1.
 
-## Official Tool Path
-
-Call tools with `caller.kind = "ai"` unless the host provides a different
-caller context:
-
-```json
-{
-  "toolId": "lowpoly:pipeline.applyBatch",
-  "args": { "ops": [], "opts": { "actor": "ai:lowpoly", "label": "compose model" } },
-  "caller": { "kind": "ai" }
-}
-```
-
-Use these tools:
-
-- `lowpoly:projects.list`, `lowpoly:projects.create`, `lowpoly:projects.open`,
-  `lowpoly:projects.remove`
-- `lowpoly:batteries.list`, `lowpoly:batteries.get`
-- `lowpoly:pipeline.get`, `lowpoly:pipeline.applyBatch`,
-  `lowpoly:pipeline.execute`, `lowpoly:pipeline.import`,
-  `lowpoly:pipeline.export`
-- `lowpoly:assets.list`
-- `lowpoly:screenshot.capture`, `lowpoly:screenshot.latest`
-
-`lowpoly:projects.remove` requires destructive confirmation for AI callers.
-`lowpoly:screenshot.store` is an internal renderer callback and is not exposed
-to AI.
-
-## Workflow — the normalized pipeline: **model Parts → assemble URDF**
-
-The pipeline is fixed and non-negotiable. Every non-trivial object is built in
-two passes: **(1) model each part on its own and bake it to a mesh, then
-(2) assemble those meshes into one URDF.** Never build the whole object in a
-single batch (see [the mandatory two-phase workflow](#mandatory-two-phase-workflow-read-before-the-first-applybatch)
-below for the full rules — this list is the spine, that section is the law).
-
-1. **Set up.** Open/create a project with `lowpoly:projects.*`. Inspect ops with
-   `lowpoly:batteries.list` / `lowpoly:batteries.get` (never guess port names).
-   Read the current graph with `lowpoly:pipeline.get`.
-2. **Phase 0 — part manifest (hard gate).** Write one row per part *before* any
-   node: name → real form → family/op route → key dimensions → detail points →
-   per-primitive justification. No manifest, no building.
-3. **Phase 1 — model + bake each part (loop, one part per pass).** For each part:
-   build an independent `CSG` / `Parts` (incl. gears) / `Architecture` subgraph
-   that makes the real detail, end it with `g_bake_part`, and record the returned
-   `filename` (`<sha>.obj`). One small `applyBatch` + `execute` per part.
-4. **Phase 2 — assemble (one clean rewrite).** Reference each staged mesh with
-   `g_mesh(filename=<sha>.obj)` → wrap in `g_part` → color with `g_material` →
-   connect with `g_joint_*` into a single rooted tree → end with
-   `g_geometry_qc` + `g_validate` + `g_to_urdf` + `urdf_preview`. Trivial
-   primitive parts stay `g_box`/`g_cylinder`/`g_sphere` directly.
-5. **Iterate on the assembly only.** Use `lowpoly:assets.list` /
-   `lowpoly:screenshot.capture` / `lowpoly:screenshot.latest` as feedback; in
-   Phase 2 only adjust joints / placement / color. To change a part's geometry,
-   re-model + re-bake that single part in Phase 1.
-6. When it matches the request, optionally save a template with
-   `lowpoly:pipeline.export`.
-
-Use `opts.actor = "ai:lowpoly"` and a concise `opts.label` on every
-`applyBatch`. Each phase is its own `applyBatch`/`execute` pass (a small batch
-per part in Phase 1) — never one mega-batch.
-
-## Mandatory Two-Phase Workflow (read before the first `applyBatch`)
+## Mandatory Two-Phase Workflow (read before the first `model.apply`)
 
 > **The default failure mode of this skill is laziness: the agent heaps the whole
 > object into one big batch, stacks a few `g_box`/`g_cylinder` primitives, the
@@ -126,7 +83,7 @@ filler parts). Then write **one row per part** with **all** of these fields:
 - **family / op route** — the concrete modeling route, as an op sketch, not just a
   family name: e.g. "Profile→CSG: `g_profile_rounded_rect` → `g_extrude` →
   `g_difference` (bore the cavity)", or "Parts: `g_knob` (body_style=domed,
-  bore_d=…)". Use the [modeling-guide.md](../modeling-guide.md) routing table.
+  bore_d=…)". Use the [battery-catalog.md](../battery-catalog.md) routing table.
 - **key dimensions** — meters, with the axis each one runs along (length X / depth
   Y / height Z, radii, wall thickness) **and** rough proportion to neighbouring
   parts so scale stays consistent across the assembly.
@@ -173,21 +130,22 @@ the row before modeling, not during.
 
 Iterate over the manifest, **one part at a time**. For each part:
 
-1. Build an **independent subgraph from an empty geometry** (do not thread it into
-   any other part's wire). Use `CSG` / `Parts` (incl. gears) / `Architecture` to
-   make the real detail — this is where form quality is won or lost.
-2. End the subgraph with **`g_bake_part`** (`shape_id` = the terminal shape's id,
-   wired from the upstream `id` output or set as a literal). It bakes that shape
-   into a staged mesh in `library/blobs/` and returns `filename = <sha>.obj`.
-3. **Record the returned `filename`** for Phase 2.
-4. Move to the next part.
+1. Write a **small standalone DSL** for just this part. Use `CSG` / `Parts` (incl.
+   gears) / `Architecture` to make the real detail — this is where form quality is
+   won or lost.
+2. Submit `model.apply({ source, bake: "<shape_id>" })` where `<shape_id>` is the
+   terminal shape's `id`. The backend bakes it into `library/blobs/` and returns
+   `baked.filename = <sha>.obj` (plus `bbox_min` / `bbox_max` / `size`), and
+   auto-registers it (query later via `lowpoly:parts.list`).
+3. **Record the returned `<sha>.obj` filename + bbox** for Phase 2.
+4. Move to the next part — each `bake` apply replaces the graph, so nothing
+   accumulates; you carry only the recorded filenames forward.
 
 Phase-1 quality is enforced **only in prose**: pay attention to each part's detail
-and formal plausibility as you model it. For efficiency, Phase 1 deliberately
-**does not** require per-part screenshots and **does not** run a per-part detail
-QC gate — bake as soon as the part looks right and move on. Model each part around
-its **own local origin / assembly datum**: the bake stores *local* coordinates, so
-all placement happens later in Phase 2 via part/joint origins.
+and formal plausibility as you model it. Phase 1 has **no per-part QC gate** — bake
+as soon as the part reads right and move on. Model each part around its **own local
+origin / assembly datum**: the bake stores *local* coordinates, so all placement
+happens later in Phase 2 via part/joint origins.
 
 The anti-primitive rules still govern Phase-1 modeling. Real objects are
 **shells, cuts, curves, recesses, grilles, gears, hinges and fillets** — almost
@@ -201,9 +159,10 @@ CSG/Parts op builds this for real?":
 - round / domed / bottle / nozzle / barrel body → `g_revolve` / `g_lathe` /
   `g_loft`, **not** a cylinder.
 - pipe / cable / handle / duct → `g_pipe` / `g_sweep`, **not** stacked cylinders.
-- knob, bezel, wheel, tire, hinge, fan, gear → the matching `Parts` battery
-  (gears via `g_gear` + `tooth_profile`; parametric and already correct), **not**
-  an approximation.
+- knob, bezel, wheel, tire, hinge, fan, gear → the matching `Parts` op (gears via
+  the `spur_gear` / `herringbone_gear` / `bevel_gear` / `ring_gear` / `rack_gear` /
+  `worm` / `planetary_gearset` DSL ops in op-directory.md; parametric and already
+  correct), **not** an approximation.
 - rounded edges / chamfers / fillets → build them into the profile
   (`g_profile_rounded_rect`) or via CSG, **not** ignored.
 
@@ -226,8 +185,9 @@ each part:
   URDF `<material>` on the link, it does **not** go into the mesh.
 - connect parts with `g_joint_*` into a **single rooted tree**.
 - optionally `g_auto_collision` (a mesh visual gets an AABB collision).
-- end with `g_geometry_qc` + `g_validate` + `g_to_urdf` + `urdf_preview`, then
-  take a **whole-object screenshot**.
+- submit `model.apply({ source })`. The compiler auto-appends the QC + URDF
+  terminals; judge completion from the receipt signals (see
+  [quickstart.md](../quickstart.md#iteration-loop)).
 
 If the assembled object is wrong, only adjust **joints / placement / color** in
 Phase 2 — do **not** reach back into a part's internals. To change a part's
@@ -255,36 +215,23 @@ already staged in `library/blobs/` during Phase 1.
 
 ### Forbidden anti-pattern
 
-A single mega-`applyBatch` that heaps the entire object's shapes, parts and joints
-at once. It always degrades into primitive stacking and under-modeled parts.
-Phase 1 (per-part subgraph → `g_bake_part`) and Phase 2 (mesh references →
-assembly) are mandatory and separate.
+A single mega-model that heaps the entire object's shapes, parts and joints into
+one DSL. It always degrades into primitive stacking and under-modeled parts.
+Phase 1 (per-part bake) and Phase 2 (mesh references → assembly) are mandatory
+and separate.
 
 ## Modeling Decisions
 
-- Prefer semantic lowpoly batteries when available; inspect the op catalog
-  first (`lowpoly:batteries.list` → families in
-  [battery-catalog.md](../battery-catalog.md)).
-- **Follow the two-phase workflow above for any non-trivial object**: Phase 1
-  models + bakes each part with `g_bake_part` (one independent subgraph per part,
-  staged to a `<sha>.obj`), Phase 2 references those meshes with `g_mesh` and
-  assembles. Each phase is its own `applyBatch`/`execute` pass (or a small batch
-  per part in Phase 1) — never one mega-batch.
-- Use node-runtime graph batches for creation, connection, parameter updates,
-  grouping, and deletion. Do not write `state/graph.json` by hand.
-- Keep model units in meters and preserve the plugin's Z-up viewer convention.
-- For previewable results, wire generated geometry toward the URDF preview path
-  used by the current battery catalog.
-- Use assets and screenshots as feedback for multi-turn iteration; do not
-  declare completion from graph edits alone.
+- Prefer semantic ops (Parts, gears, Architecture, CSG) over stacked primitives;
+  route with the table in [battery-catalog.md](../battery-catalog.md). Op
+  signatures come from [op-directory.md](../op-directory.md) — never guess, never
+  call `batteries.list` / `batteries.get`.
+- **Two-phase for any non-trivial object**: Phase 1 bakes each part to a
+  `<sha>.obj` (one `model.apply({bake})` per part), Phase 2 references them with
+  `mesh` and assembles in one `model.apply`. Keep units in meters, Z-up.
+- Judge completion from the receipt signals (`errors` / `qc` / `meshQc` / `urdf`).
 
 ## References
 
-- [quickstart.md](../quickstart.md): ToolRegistry-first workflow + brief/QC loop.
-- [modeling-guide.md](../modeling-guide.md): per-family pages (when to use, key
-  params, minimal wiring snippets).
-- [battery-catalog.md](../battery-catalog.md): family list + routing table + how to
-  discover batteries.
-- [pipeline-schema.md](../pipeline-schema.md): graph/batch shape, id-port wiring,
-  a runnable multi-part assembly example, and a runnable **two-phase**
-  (`g_bake_part` stage → `g_mesh` assemble) example.
+- [dsl-quickref.md](../dsl-quickref.md): DSL grammar + a minimal runnable example.
+- [op-directory.md](../op-directory.md): the authoritative op signatures (SSOT).

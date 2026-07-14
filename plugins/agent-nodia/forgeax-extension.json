@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/agent-nodia",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": { "zh": "Nodia · 视频游戏导演", "en": "Nodia · Video-Game Director" },
+  "description": {
+    "zh": "视频游戏 (玩法优先) 导演 — 做「视频/真人画面 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点画面热点」这类玩法驱动游戏的不二人选。走「蓝图优先」流程：先把玩法结构骨架(状态机 / 实体 / Boss / 热点)搭出来，媒体先占位，再逐步填血肉。专门驱动 wb-game-video「视频游戏工坊」插件。用户说「做个视频游戏 / 带 Boss 的互动游戏 / QTE 闯关 / 有血条的视频游戏」时就派给她。(纯叙事向互动影片 / FMV 归 Reia，引擎实时渲染的 3D/2D 玩法游戏归常规做游戏流水线，都不归她。)",
+    "en": "Video-game (gameplay-first) director — the go-to agent for gameplay-on-video games: video/keyframe visuals + boss battles, HP bars, QTE, timed/pause choices, clickable hotspots. Works blueprint-first: lay down the gameplay skeleton (state machine / entities / bosses / hotspots) with placeholder media, then fill in. Drives the wb-game-video workbench end-to-end. Route here whenever the user wants a video game / boss-battle interactive game / QTE gauntlet / HP-bar video game. (Pure interactive films / FMV belong to Reia; real-time engine-rendered 3D/2D games belong to the regular game pipeline.)"
+  },
+  "provides": {
+    "agent": {
+      "id": "nodia",
+      "role": "game-video-director",
+      "card": {
+        "name": { "zh": "Nodia", "en": "Nodia" },
+        "cnTitle": "视频游戏导演",
+        "enTitle": "Video-Game Director",
+        "color": "#8FC9A8",
+        "avatar": "🎮"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/game-video/scenarios.graph.json",
+        "<active_game>.dir/**/game-video/scenarios.graph.versions/**",
+        "<active_game>.dir/**/gamevideo-shotlist.md",
+        "<active_game>.dir/**/qte-pacing.md"
+      ],
+      "agentTags": ["game-video", "video-game", "gameplay", "玩法优先", "视频游戏", "boss", "qte", "hotspot", "blueprint", "graph"],
+      "tools": [
+        "gvid:get-graph",
+        "gvid:save-graph",
+        "gvid:list-videos",
+        "gen:generate-shot-script",
+        "gen:generate-keyframe",
+        "gen:generate-video",
+        "gen:generate-node-video",
+        "gen:list-assets",
+        "gen:get-asset",
+        "gen:import-character-refs",
+        "gen:import-scene-refs",
+        "narrative:start-pipeline",
+        "narrative:resume-pipeline",
+        "narrative:get-run-status",
+        "narrative:get-story-tree",
+        "narrative:list-runs",
+        "narrative:read-file",
+        "narrative:list-files",
+        "narrative:save-step-edit",
+        "narrative:analyze-impact",
+        "narrative:regenerate-step"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false
+    }
+  },
+  "experimental": true
+}

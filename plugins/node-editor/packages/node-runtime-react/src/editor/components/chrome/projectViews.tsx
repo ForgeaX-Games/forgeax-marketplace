@@ -11,6 +11,49 @@ import { useProjectStore } from '../../stores/projectStore.js'
 import type { ImportTemplate, ProjectMeta } from '@forgeax/node-runtime'
 import './ProjectsDialog.css'
 
+export interface ProjectExecutionLock {
+  agentId: string
+  sessionId?: string
+  acquiredAt?: string
+}
+
+/** aw-support export pipeline still in flight (may not hold a scene lock). */
+export interface ActivePipelineRunInfo {
+  runId: string
+  sceneProjectId: string
+  sceneName?: string
+  sessionId?: string
+  stage?: string
+}
+
+/** Human-readable agent lock badge: agent + session + aw-support run hint from name. */
+export function formatProjectLockLabel(lock: ProjectExecutionLock, projectName?: string): string {
+  const agent =
+    lock.agentId === 'sino' || lock.agentId.startsWith('sino-')
+      ? 'Sino'
+      : lock.agentId.startsWith('ai:')
+        ? lock.agentId.slice(3)
+        : lock.agentId
+  const session = lock.sessionId ? lock.sessionId.slice(0, 8) : null
+  const runMatch = projectName?.match(/aw-support · .+? · ([\w-]+)/)
+  const runHint = runMatch?.[1]
+  const parts = [`Executing · ${agent}`]
+  if (session) parts.push(`session ${session}`)
+  if (runHint) parts.push(`run ${runHint}`)
+  return parts.join(' · ')
+}
+
+/** Pipeline-run badge when ForgeaX agents are working but scene lock may be idle. */
+export function formatPipelineRunLabel(run: ActivePipelineRunInfo): string {
+  const session = run.sessionId ? run.sessionId.slice(0, 8) : null
+  const shortRun = run.runId.replace(/^pure-asset-\d{8}-/, '').replace(/^export-\d{8}-/, '')
+  const parts = ['Pipeline run']
+  if (session) parts.push(`session ${session}`)
+  parts.push(`run ${shortRun}`)
+  if (run.stage && run.stage !== 'agents') parts.push(run.stage)
+  return parts.join(' · ')
+}
+
 /**
  * Pick a project name that doesn't collide with existing ones. The first choice
  * is `base` ("My scene"); if taken, append " (2)", " (3)", … until free.
@@ -30,6 +73,8 @@ export function ProjectCard({
   isActive,
   isSwitching,
   lockLabel,
+  executingLock,
+  pipelineRun,
   canDelete = true,
   extraActions,
   onActivate,
@@ -39,8 +84,12 @@ export function ProjectCard({
   project: ProjectMeta
   isActive: boolean
   isSwitching: boolean
-  /** When set, the project is held by an agent — render a "busy" badge. */
+  /** @deprecated Prefer executingLock — kept for custom lockLabelOf overrides. */
   lockLabel?: string | null
+  /** When set, the project is held by an agent — render an executing badge. */
+  executingLock?: ProjectExecutionLock | null
+  /** aw-support pipeline still running on this project (even without scene lock). */
+  pipelineRun?: ActivePipelineRunInfo | null
   /** When false, the Delete action is disabled (e.g. the last remaining project). */
   canDelete?: boolean
   /** Optional extra action(s) injected into the card's action column (e.g. Save). */
@@ -51,9 +100,12 @@ export function ProjectCard({
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(project.name)
+  const executingLabel =
+    lockLabel ?? (executingLock ? formatProjectLockLabel(executingLock, project.name) : null)
+  const pipelineLabel = pipelineRun ? formatPipelineRunLabel(pipelineRun) : null
 
   return (
-    <div className={`proj-card${isActive ? ' proj-card--active' : ''}`}>
+    <div className={`proj-card${isActive ? ' proj-card--active' : ''}${executingLock || pipelineRun ? ' proj-card--executing' : ''}`}>
       <button type="button" className="proj-card__open" disabled={isSwitching} onClick={onActivate}>
         <span className="proj-card__type">{project.type}</span>
         {editing ? (
@@ -74,8 +126,19 @@ export function ProjectCard({
         ) : (
           <span className="proj-card__name">{project.name}</span>
         )}
-        {isActive && <span className="proj-card__badge">active</span>}
-        {lockLabel && <span className="proj-card__badge proj-card__badge--lock">{lockLabel}</span>}
+        <span className="proj-card__badges">
+          {isActive && <span className="proj-card__badge proj-card__badge--viewing">Viewing</span>}
+          {pipelineLabel && (
+            <span className="proj-card__badge proj-card__badge--pipeline" title={pipelineLabel}>
+              {pipelineLabel}
+            </span>
+          )}
+          {executingLabel && (
+            <span className="proj-card__badge proj-card__badge--lock" title={executingLabel}>
+              {executingLabel}
+            </span>
+          )}
+        </span>
       </button>
       <div className="proj-card__actions">
         {extraActions}

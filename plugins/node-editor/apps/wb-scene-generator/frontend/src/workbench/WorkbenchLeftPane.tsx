@@ -6,6 +6,7 @@ import {
   createEditorTransport,
   useProjectStore,
 } from '@forgeax/node-runtime-react/editor'
+import type { ActivePipelineRunInfo } from '@forgeax/node-runtime-react/editor'
 import type { HttpApiClient } from '../api/HttpApiClient.js'
 import { SceneGeneratorControlsPanel } from './SceneGeneratorControlsPanel.js'
 import { scenePortTypes } from './scenePortTypes.js'
@@ -49,6 +50,11 @@ const LS_RENDERER = 'wb-scene-generator.rendererInline'
 const LS_ASSETSTORE = 'wb-scene-generator.assetStoreInline'
 const LS_EDITOR = 'wb-scene-generator.editorInline'
 
+const AW_SUPPORT_BASE =
+  typeof location !== 'undefined'
+    ? `${location.protocol}//${location.hostname}:8787`
+    : 'http://127.0.0.1:8787'
+
 interface Props {
   client: HttpApiClient
 }
@@ -63,6 +69,27 @@ interface LeftPaneSnapshot {
 export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   const [, setSnapshot] = useState<LeftPaneSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activePipelineRuns, setActivePipelineRuns] = useState<ActivePipelineRunInfo[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = async (): Promise<void> => {
+      try {
+        const r = await fetch(`${AW_SUPPORT_BASE}/api/v1/export/scene/runs/active`)
+        if (!r.ok) return
+        const body = (await r.json()) as { runs?: ActivePipelineRunInfo[] }
+        if (!cancelled) setActivePipelineRuns(body.runs ?? [])
+      } catch {
+        if (!cancelled) setActivePipelineRuns([])
+      }
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
 
   // The left pane is its own iframe/document, so it owns its own editor
   // transport + project store. Wiring it here lets <ProjectPanel> drive
@@ -71,7 +98,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   useEffect(() => {
     const transport = createEditorTransport(client)
     configureEditorTransport(transport)
-    void useProjectStore.getState().fetchProjects()
+    void useProjectStore.getState().bootstrap()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsub()
@@ -84,9 +111,11 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
     let cancelled = false
     async function loadSnapshot(): Promise<void> {
       try {
-        const [projects, workspace, ops, nodes] = await Promise.all([
+        const [projects, workspace] = await Promise.all([
           client.listProjects(),
           client.getWorkspace(),
+        ])
+        const [ops, nodes] = await Promise.all([
           client.listOps(),
           client.listNodes(),
         ])
@@ -154,8 +183,12 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
     }
   }, [])
   useEffect(() => {
+    if (!editMode) {
+      setBakedHistory(null)
+      return
+    }
     void refreshBakedHistory()
-  }, [refreshBakedHistory, selectedLayersState])
+  }, [editMode, refreshBakedHistory, selectedLayersState])
   const toggleGrid = useCallback(() => {
     setShowGrid((prev) => {
       const next = !prev
@@ -231,7 +264,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   const handleSaveProject = useCallback(
     async (project: ProjectMeta) => {
       try {
-        if (useProjectStore.getState().activeProjectId !== project.id) {
+        if (useProjectStore.getState().viewingProjectId !== project.id) {
           await useProjectStore.getState().switchProject(project.id)
         }
         const [snap, groups] = await Promise.all([client.getPipeline(), client.listGroups()])
@@ -349,6 +382,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
         <ProjectPanel
           defaultProjectType="scene"
           defaultProjectName="My scene"
+          activePipelineRuns={activePipelineRuns}
           headerActions={
             <button
               type="button"

@@ -119,9 +119,22 @@ export function CanvasSearchPopover({
     }
   }, [screenX, screenY])
 
+  // Focus after the browser finishes its native dblclick handling so typing
+  // works immediately without an extra click on the input.
   useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 0)
-    return () => clearTimeout(t)
+    let raf2 = 0
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        const input = inputRef.current
+        if (!input) return
+        input.focus({ preventScroll: true })
+        input.select()
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
+    }
   }, [])
 
   // Close on outside click.
@@ -200,10 +213,12 @@ export function CanvasSearchPopover({
         <input
           ref={inputRef}
           type="text"
+          autoFocus
           placeholder={langMode === 'en' ? 'Search nodes...' : '搜索节点... 名称 / 标签 / 描述'}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
+          onMouseDown={(e) => e.preventDefault()}
         />
         <span className="canvas-search-count">{filtered.length}</span>
       </div>

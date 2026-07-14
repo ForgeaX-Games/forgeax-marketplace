@@ -8,6 +8,7 @@ import {
   stickerAnimAt,
   type StageFxFrame,
 } from '../fx/fxPresets'
+import { uiBlendModeToCss } from '../forge/modules/uiAssetArt'
 
 /**
  * SceneFxLayers —— 剪映式后期效果的「实时渲染叠层」，编辑器预览与播放器共用。
@@ -94,6 +95,8 @@ export function stickerStyle(c: StickerClip, ms?: number): CSSProperties {
     color: c.color ?? '#ffd24a',
     lineHeight: 1,
     whiteSpace: 'nowrap',
+    // v9 · UI 素材去背/叠加:纯黑底+screen / 纯白底+multiply 等图层混合。
+    mixBlendMode: uiBlendModeToCss(c.blendMode) as CSSProperties['mixBlendMode'],
   }
 }
 

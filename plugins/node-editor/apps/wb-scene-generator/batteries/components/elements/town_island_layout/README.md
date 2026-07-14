@@ -1,14 +1,16 @@
 # 城镇岛状布局 (town_island_layout)
 
-在输入网格内用双层 BSP 生成均匀的棋盘格道路，再用几何形状（圆 / 椭圆 / 有机不规则形）将其裁剪为孤岛状城镇轮廓，边界处的道路随机向外延伸后断开，形成自然的城镇入口桩。
+在单张输入网格内用 BSP 生成均匀的棋盘格道路，再用几何形状（圆 / 椭圆 / 有机不规则形）将其裁剪为孤岛状城镇轮廓，边界处的道路随机向外延伸后断开，形成自然的城镇入口桩。输出一张多值网格（道路 + 各地块）。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
-1. **双层 BSP 道路**：完整复刻 `chess_road_bsp` 算法，主路宽度与辅路宽度均可通过参数控制，生成均匀的棋盘格网格。
+1. **BSP 棋盘格道路**：通过 `roadWidth` 控制道路宽度、`blockMinSize` 控制路网与地块的疏密，生成均匀的棋盘格网格。
 2. **三种岛型形状**：正圆（circle）、随机旋转椭圆（ellipse）、正弦波扰动有机形（organic），覆盖规整到自然的各种风格。
 3. **基于覆盖率的块级过滤**：以 BSP 地块为单位计算形状覆盖率，超过阈值的地块保留，低于阈值的消除，产生自然的岛屿轮廓。
 4. **边界道路延伸桩**：岛屿边缘的道路向外随机延伸若干格后断开，模拟城镇出入口路桩效果。
-5. **独立输出三层网格**：主路掩码、辅路掩码、多值地块，可分别连接下游电池继续处理。
+5. **单张多值网格输出**：道路 = 1，各地块从 2 起递增 id；可接 `grid_split_by_value` 拆分为道路与各地块。
 
 ## 适用情况
 
@@ -22,33 +24,26 @@
 1. 将任意网格（如全 1 矩形、或经过 noise 处理的掩码）接入 `inputGrid`
 2. 调整 `shapeType` 和 `shapeScale` 决定岛的形状和大小
 3. 调整 `coverageThreshold`（默认 0.6）控制边界粗糙度：值越高边缘越整齐，越低越参差
-4. 将输出的 `mainRoad` / `subRoad` / `parcels` 分别接入建筑生成、贴图着色等后续电池
+4. 将输出的 `outputGrid` 接入下游电池，或接 `grid_split_by_value` 拆分道路与地块后分别处理
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| inputGrid | grid | — | 源掩码网格，非零单元格为可用区域 |
-| mainRoadWidth | number | 2 | 主干道宽度（单元格数），推荐 2–4 |
-| subRoadWidth | number | 1 | 支路宽度（单元格数），推荐 1–2 |
-| mainBlockMinSize | number | 20 | 主路 BSP 叶块最小边长，控制主路稀疏度 |
-| parcelMinSize | number | 8 | 辅路 BSP 叶块最小边长，控制地块大小 |
-| splitRatio | number | 0.4 | BSP 分割比例下限（0–0.5），越大越均匀 |
+| inputGrid | grid | — | 单张源掩码网格，非零单元格为可用区域（DataTree 逐张处理） |
+| roadWidth | number | 1 | 道路宽度（单元格数） |
+| blockMinSize | number | 3 | BSP 叶块最小边长，控制路网与地块的疏密 |
 | shapeType | string | "ellipse" | 岛型形状：circle / ellipse / organic |
-| shapeScale | number | 0.5 | 岛型面积占 bbox 面积比例（0.2–0.9） |
+| shapeScale | number | 0.6 | 岛型面积占 bbox 面积比例（0.2–0.9） |
 | coverageThreshold | number | 0.6 | 地块保留覆盖率阈值（0–1） |
-| borderExtendMin | number | 1 | 边界道路向外延伸最小格数 |
-| borderExtendMax | number | 4 | 边界道路向外延伸最大格数 |
 | seed | number | 0 | 随机种子（0 = 每次随机） |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| mainRoad | grid | 主干道掩码：主路格 = 1，其余 = 0 |
-| subRoad | grid | 支路掩码：支路格 = 1，其余 = 0 |
-| parcels | grid | 多值地块：每块唯一整数 ID，非地块 = 0 |
-| nameList | array | 保留地块的 [{id, name}] 清单 |
+| outputGrid | grid | 单张多值网格：道路 = 1，各地块从 2 起递增 id，非占用 = 0 |
+| outputNameList | array | `[{id:1,name:'道路'}, {id:2,name:'地块 1'}, ...]`，type 均为 tile，仅含网格中实际出现的 id |
 
 ## 参数说明
 
@@ -76,8 +71,8 @@
 
 ## 注意事项
 
-1. **网格尺寸建议 80×80 以上**：BSP 最小块尺寸（`mainBlockMinSize` + `parcelMinSize`）决定了最小可用网格大小，过小的网格可能无法进行有效分割。
+1. **网格尺寸建议 80×80 以上**：BSP 最小块尺寸（`blockMinSize`）决定了最小可用网格大小，过小的网格可能无法进行有效分割。
 2. **seed = 0 每次结果不同**：中心点、形状参数均由 RNG 决定，`seed=0` 时使用时间戳作为种子。固定 seed 可以复现结果。
-3. **先执行再连线（动态端口规则）**：`nameList` 是数组输出，下游需要执行一次后再连线。
-4. **mainRoad 优先于 parcels**：当 `mainRoad[r][c] = 1` 时，`parcels[r][c] = 0`，两者不重叠。
-5. **borderExtendMax 建议不超过 10**：过长的道路延伸桩可能超出 inputGrid 边界，电池内部会自动截断到网格边界。
+3. **先执行再连线（动态端口规则）**：`outputNameList` 是数组输出，下游需要执行一次后再连线。
+4. **道路与地块不重叠**：`outputGrid` 中道路写 1，地块写各自 id（≥2），同一格不会同时是道路和地块。
+5. **边界道路延伸**：岛屿边缘道路向外延伸 1–4 格后断开，超出 inputGrid 边界时电池内部会自动截断。

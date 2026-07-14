@@ -77,6 +77,12 @@ describe('BatteryBar grouping labels', () => {
     it('returns null when there is no sourcePath', () => {
       expect(getTemplateSmallLabel(tpl(undefined))).toBeNull()
     })
+    // 用户「保存到模板」落盘结构：templates/My templates/<smallTag>/<模板>/file.json
+    // 必须保留模板文件夹一层，才能把 <smallTag> 识别为小标签（修复小标签失效）。
+    it('returns the small tag for a user template saved with a per-template folder', () => {
+      expect(getTemplateSmallLabel(tpl('.forgeax/user-content/templates/My templates/my_tag/My Template/My Template.json')))
+        .toBe('my_tag')
+    })
   })
 
   // Template-vs-group bucketing keys off the BIG label, not an exact displayGroup

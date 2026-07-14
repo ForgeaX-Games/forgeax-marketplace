@@ -23,7 +23,7 @@ pnpm serve
 `pnpm serve` runs `scripts/serve-dist.mjs`: serves `frontend/dist`, spawns
 `backend/dist/main.js`, and self-proxies `/api` and `/ws` at the same origin.
 
-> **Note:** `forgeax-plugin.json` lists `"start":"pnpm dev"` in the standalone
+> **Note:** `forgeax-extension.json` lists `"start":"pnpm dev"` in the standalone
 > entry for legacy compatibility. The real production run path is `pnpm serve`
 > (serve-dist). Use `pnpm dev` only for per-subpackage development (hot-reload
 > of frontend or backend individually).
@@ -54,33 +54,34 @@ frontend/                        # Vite + React UI
     api/HttpApiClient.ts         # ApiClient over REST + WS (with backoff reconnect)
     theme.ts                     # plugin colour / icon overrides
 batteries/                       # 85 geometry domain ops
-  Generate/                      # 创建几何
+  Generate/                      # create geometry
     Primitive/    (8 ops)
     Profile/      (5 ops)
-    Parts/        (20 ops)       # 含 6 个齿轮族：g_gear + bevel/ring/rack/planetary/worm
+    Parts/        (20 ops)       # incl. 6 gear families: g_gear + bevel/ring/rack/planetary/worm
     Architecture/ (10 ops)
-  Modify/                        # 修改 / 变换
+  Modify/                        # modify / transform
     CSG/          (11 ops)
     Transform/    (6 ops)
     Material/     (2 ops)
     Placement/    (3 ops)
-  Assemble/                      # 装配 / 关节 / 碰撞
+  Assemble/                      # assemble / joints / collision
     Assembly/     (9 ops)
     Collision/    (4 ops)
-  Output/                        # 烘焙 / 校验 / 导出
+  Output/                        # bake / QC / export
     Bake/         (2 ops)
     QC/           (2 ops)
     Export/       (3 ops)
-# 注：以上为快照；运行期权威清单是 `lowpoly:batteries.list` 工具（SSOT）。
-# 文件夹名即调色板大类（无数字前缀）；rail 顺序由 batteryGrouping.ts 的显式
-# 阶段顺序 Generate→Modify→Assemble→Output 决定。
+# Counts above are a snapshot; the runtime source of truth is the
+# `lowpoly:batteries.list` tool. Folder names are the palette categories
+# (no numeric prefix); rail order is the explicit stage order
+# Generate → Modify → Assemble → Output from batteryGrouping.ts.
 vendor/                          # vendored geometry DSL types → vendor/dist (gitignored)
 schemas/                         # .gitkeep stubs (schema files land here as batteries mature)
 scripts/
   build-vendor.mjs               # compiles vendor/shared/types → vendor/dist (run before backend)
   serve-dist.mjs                 # `pnpm serve` entry
   headless-renderer.mjs          # Playwright headless URDF renderer for agent screenshots
-forgeax-plugin.json              # plugin manifest (id @forgeax-plugin/wb-3d-lowpoly, 17 tools; 16 AI-exposed, screenshot.store internal)
+forgeax-extension.json              # plugin manifest (id @forgeax-extension/wb-3d-lowpoly, 17 tools; 16 AI-exposed, screenshot.store internal)
 SKILL.md                         # AI-readable op + workflow guide
 ```
 
@@ -96,11 +97,6 @@ must be re-created with `g_gear`), though the baker still understands every
 underlying gear DSL op. OCCT/replicad WASM baker (flat/faceted low-poly tessellation), content-
 addressed OBJ/GLB blob library, three.js URDF viewer with live-sync, per-agent
 project lock, agent screenshot and GLB export tools, headless renderer daemon.
-
-## Architecture
-
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full subsystem map and
-"改 X 看哪?" reverse index.
 
 ## License
 

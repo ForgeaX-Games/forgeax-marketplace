@@ -55,6 +55,7 @@ export interface HttpApiClientOptions {
 export class HttpApiClient implements ApiClient {
   readonly pipelineId: string
   private base: string
+  private viewingProjectId: string | null = null
   private ws: WebSocket | null = null
   private listeners = new Map<RuntimeChannel, Set<Listener>>()
   private disposed = false
@@ -64,6 +65,34 @@ export class HttpApiClient implements ApiClient {
   constructor(opts: HttpApiClientOptions) {
     this.pipelineId = opts.pipelineId
     this.base = opts.baseUrl ?? ''
+  }
+
+  syncViewingProjectId(id: string): void {
+    this.viewingProjectId = id
+  }
+
+  async ensureViewingProject(): Promise<string> {
+    if (this.viewingProjectId) return this.viewingProjectId
+    const ws = await this.getWorkspace()
+    const id =
+      ws.viewingProjectId ?? (ws as { activeProjectId?: string | null }).activeProjectId ?? null
+    if (!id) {
+      throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    }
+    this.viewingProjectId = id
+    return id
+  }
+
+  private effectiveProjectId(): string | null {
+    return this.viewingProjectId
+  }
+
+  private projectPrefix(): string {
+    const id = this.effectiveProjectId()
+    if (!id) {
+      throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    }
+    return `/api/v1/projects/${encodeURIComponent(id)}`
   }
 
   private async get<T>(path: string): Promise<T> {
@@ -101,34 +130,34 @@ export class HttpApiClient implements ApiClient {
   async applyBatch(ops: readonly Op[], opts?: ApplyBatchOptions): Promise<ApplyBatchResult> {
     // No local graph:applied synthesis — the backend WS forwards the kernel's
     // single graph:applied (layout-only batches emit none). See the class doc.
-    return this.post<ApplyBatchResult>('/api/v1/batch', { ops, opts })
+    return this.post<ApplyBatchResult>(`${this.projectPrefix()}/batch`, { ops, opts })
   }
 
   getPipeline(): Promise<PipelineSnapshot | null> {
-    return this.get<PipelineSnapshot | null>('/api/v1/pipeline')
+    return this.get<PipelineSnapshot | null>(`${this.projectPrefix()}/pipeline`)
   }
 
   getNode(nodeId: string): Promise<GraphNode | null> {
-    return this.get<GraphNode | null>(`/api/v1/nodes/${encodeURIComponent(nodeId)}`)
+    return this.get<GraphNode | null>(`${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}`)
   }
 
   listNodes(_filter?: NodeFilter): Promise<readonly GraphNode[]> {
-    return this.get<readonly GraphNode[]>('/api/v1/nodes')
+    return this.get<readonly GraphNode[]>(`${this.projectPrefix()}/nodes`)
   }
 
   listEdges(): Promise<readonly GraphEdge[]> {
-    return this.get<readonly GraphEdge[]>('/api/v1/edges')
+    return this.get<readonly GraphEdge[]>(`${this.projectPrefix()}/edges`)
   }
 
   async getNodeOutput(nodeId: string, portId: string): Promise<unknown> {
     const r = await this.get<{ value: unknown }>(
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
+      `${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
     )
     return r.value
   }
 
   getHistory(_opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]> {
-    return this.get<readonly HistoryEntryV1[]>('/api/v1/history')
+    return this.get<readonly HistoryEntryV1[]>(`${this.projectPrefix()}/history`)
   }
 
   listOps(): Promise<readonly OpSpec[]> {
@@ -136,11 +165,11 @@ export class HttpApiClient implements ApiClient {
   }
 
   getGroup(groupId: string): Promise<NodeGroup | null> {
-    return this.get<NodeGroup | null>(`/api/v1/groups/${encodeURIComponent(groupId)}`)
+    return this.get<NodeGroup | null>(`${this.projectPrefix()}/groups/${encodeURIComponent(groupId)}`)
   }
 
   listGroups(): Promise<readonly NodeGroup[]> {
-    return this.get<readonly NodeGroup[]>('/api/v1/groups')
+    return this.get<readonly NodeGroup[]>(`${this.projectPrefix()}/groups`)
   }
 
   // READ-ONLY probe of a group's inner sub-graph; powers the internal view's
@@ -148,7 +177,7 @@ export class HttpApiClient implements ApiClient {
   // intermediates). Keyed innerNodeId -> { port -> value }.
   async probeGroupInner(groupId: string): Promise<Record<string, Record<string, unknown>> | null> {
     return this.get<Record<string, Record<string, unknown>> | null>(
-      `/api/v1/groups/${encodeURIComponent(groupId)}/probe`,
+      `${this.projectPrefix()}/groups/${encodeURIComponent(groupId)}/probe`,
     )
   }
 
@@ -160,7 +189,7 @@ export class HttpApiClient implements ApiClient {
 
   /** List graph templates the backend discovered under its templates dir. */
   listImportTemplates(): Promise<readonly ImportTemplate[]> {
-    return this.get<readonly ImportTemplate[]>('/api/v1/pipeline/templates')
+    return this.get<readonly ImportTemplate[]>(`${this.projectPrefix()}/pipeline/templates`)
   }
 
   /**
@@ -175,7 +204,7 @@ export class HttpApiClient implements ApiClient {
     source?: string
     options?: ImportPipelineExecuteOptions
   }): Promise<ImportPipelineResponse> {
-    return this.post<ImportPipelineResponse>('/api/v1/pipeline/import', {
+    return this.post<ImportPipelineResponse>(`${this.projectPrefix()}/pipeline/import`, {
       file: { path: req.path, source: req.source },
       options: req.options,
     })
@@ -197,7 +226,7 @@ export class HttpApiClient implements ApiClient {
     // Unlike the generic `post`, read the body even on a non-2xx so a rejected
     // import (HTTP 422 → `{ status:'rejected', reason, diagnostics }`) surfaces the
     // kernel's actual reason (e.g. "unknown opId 'foo'") instead of a bare status.
-    const r = await fetch(`${this.base}/api/v1/pipeline/import`, {
+    const r = await fetch(`${this.base}${this.projectPrefix()}/pipeline/import`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ format: req.format, graph: req.graph, options: req.options }),
@@ -216,7 +245,7 @@ export class HttpApiClient implements ApiClient {
 
   /** Export the current graph to a backend template file. */
   exportPipelineFile(req: { name?: string; source?: string }): Promise<{ path: string; name: string }> {
-    return this.post<{ path: string; name: string }>('/api/v1/pipeline/export', req)
+    return this.post<{ path: string; name: string }>(`${this.projectPrefix()}/pipeline/export`, req)
   }
 
   listGroupTemplates(scope: 'all' | 'groups' | 'templates' = 'all'): Promise<readonly GroupTemplateBattery[]> {
@@ -261,8 +290,12 @@ export class HttpApiClient implements ApiClient {
   }
 
   /** Execute the pipeline (or a single node) via the backend bridge. */
-  execute(request?: { nodeId?: string }): Promise<ExecutionResult> {
-    return this.post('/api/v1/execute', request ?? {}) as Promise<ExecutionResult>
+  execute(request?: { nodeId?: string; quietErrors?: boolean }): Promise<ExecutionResult> {
+    return this.post(`${this.projectPrefix()}/execute`, request ?? {}) as Promise<ExecutionResult>
+  }
+
+  clearOutputCache(): Promise<{ ok: true }> {
+    return this.post(`${this.projectPrefix()}/outputs/clear`, {}) as Promise<{ ok: true }>
   }
 
   // ── Multi-project management (thin REST over the kernel ProjectRegistry) ──
@@ -291,18 +324,25 @@ export class HttpApiClient implements ApiClient {
     return this.del<{ ok: true; workspace: WorkspaceState }>(`/api/v1/projects/${encodeURIComponent(id)}${q}`)
   }
 
-  /**
-   * Open / activate a project. The backend swaps the active runtime + forwards
-   * graph:applied over /ws; the projectStore then loadPipeline()s (reconcile)
-   * and clearHistory()s. We do NOT synthesize a graph event here — the backend
-   * broadcast drives the live refresh (same path as a file import).
-   */
-  activateProject(id: string): Promise<ActivateProjectResult> {
-    return this.post<ActivateProjectResult>(`/api/v1/projects/${encodeURIComponent(id)}/activate`, {})
+  async viewProject(id: string): Promise<ActivateProjectResult> {
+    const res = await this.post<ActivateProjectResult>(`/api/v1/projects/${encodeURIComponent(id)}/view`, {})
+    this.viewingProjectId = id
+    return res
   }
 
-  getWorkspace(): Promise<WorkspaceState> {
-    return this.get<WorkspaceState>('/api/v1/workspace')
+  activateProject(id: string): Promise<ActivateProjectResult> {
+    return this.viewProject(id)
+  }
+
+  getProjectLock(id: string): Promise<{ lock: { agentId: string; kind: string; acquiredAt: string } | null }> {
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/lock`)
+  }
+
+  async getWorkspace(): Promise<WorkspaceState> {
+    const ws = await this.get<WorkspaceState>('/api/v1/workspace')
+    const id = ws.viewingProjectId ?? (ws as { activeProjectId?: string | null }).activeProjectId
+    if (id) this.viewingProjectId = id
+    return ws
   }
 
   setWorkspace(patch: Partial<WorkspaceState>): Promise<WorkspaceState> {

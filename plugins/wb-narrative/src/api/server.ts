@@ -2562,6 +2562,12 @@ interface HistoryItem {
   forkReason?: string;
   /** 运行类型标记（"ip-dna" = IP DNA 摄入/改编运行；缺省为普通叙事/策划运行）。 */
   kind?: string;
+  /**
+   * IP 改编下游生成的「内存 SSE run」id（ipgen_<story_timestamp>_<rand>）。
+   * generate 时新建的 ipgen run 不落 outputDir、也不进磁盘条目，重载/换会话后前端无从得知其 id
+   * → 中间管线空。此处按目录时间戳前缀反查暴露，供前端 attach 后经 /stream 直播下游进度。
+   */
+  generationRunId?: string;
 }
 
 /** IP DNA 输入侧资产清单（媒体优先：主媒体 extraction_output；legacy 兜底），用于无 output 清单时回填历史。 */
@@ -2580,6 +2586,56 @@ function outputHasGameUnits(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 读取 IP 多单元产物中最低序号单元的完整 NarrativeContext。
+ *
+ * IP 改编 run 不落 full_result.json / _checkpoint.json —— 整条下游产物打包在 game_unit_N.json.result
+ * 里（N 从 1 起）。此前 /history/:key/load 找不到结果，回落到 _entry.json 分支返回 result:null + 仅 IP
+ * 前驱步，故中间管线只见 5 个 IP 预处理步、缺失全部下游叙事步骤。此处取序号最小的单元作可展示 ctx。
+ */
+function loadGameUnitCtx(dir: string): NarrativeContext | null {
+  try {
+    const files = fs
+      .readdirSync(path.join(OUTPUT_DIR, dir))
+      .filter((f) => /^game_unit_.*\.json$/.test(f))
+      .sort();
+    if (files.length === 0) return null;
+    const raw = JSON.parse(fs.readFileSync(path.join(OUTPUT_DIR, dir, files[0]), "utf-8"));
+    const ctx = (raw?.result ?? raw) as NarrativeContext;
+    return ctx && typeof ctx === "object" ? ctx : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 下游叙事步骤的规范展示序（按管线实际执行顺序）。用于 IP 多单元产物加载时重建中间管线——
+ * 这些 run 无 checkpoint / manifest.pipelineOrder 可依，只能按此规范序过滤出「产物字段确已落入 ctx」的步骤。
+ */
+const DOWNSTREAM_STEP_ORDER = [
+  "preference_summary", "preference_analysis", "initial_plan",
+  "core_concept", "system_architecture", "system_detail", "value_framework", "design_doc",
+  "worldview", "character_enrichment", "item_database", "story_framework",
+  "outline_batch", "detailed_outline", "plot_generation", "script_generation",
+  "scene_generation", "quest_generation", "script_scene_generation",
+  "vn_logline", "vn_script_normalize", "vn_segment_confirm", "vn_outline_acts",
+  "vn_scenes", "vn_beats", "vn_branched_beats", "vn_state_ledger",
+  "vn_screenplay", "vn_storyboard",
+  "narrative_card", "lore_generation",
+];
+
+/** 从已落盘的 ctx 反推「哪些下游步骤实际产出」（其 STEP_OUTPUT_FIELDS 任一字段非空即视为已完成）。 */
+function deriveCompletedStepsFromCtx(ctx: NarrativeContext): string[] {
+  const rec = ctx as unknown as Record<string, unknown>;
+  const present = (v: unknown): boolean =>
+    v != null &&
+    (Array.isArray(v) ? v.length > 0 : typeof v === "object" ? Object.keys(v as object).length > 0 : true);
+  return DOWNSTREAM_STEP_ORDER.filter((sid) => {
+    const fields = STEP_OUTPUT_FIELDS[sid];
+    return !!fields && fields.some((f) => present(rec[f]));
+  });
 }
 
 /**
@@ -2616,6 +2672,21 @@ const IP_PREPROCESS_STAGES = new Set(["pending", "phase0", "phase1", "standardiz
  *  - "preprocessing" 半自动预处理中 / 暂停在确认门（awaiting_confirmation，或 running 且 stage 属预处理阶段）→ 显示「待生成」，绝不「生成中」
  *  - null            无活跃 job
  */
+/**
+ * 关联「IP 改编下游生成」的内存 SSE run（ipgen_<story_timestamp>_<rand>）。
+ *
+ * 根因：POST /ip-dna/:runId/generate(async) 会为下游叙事管线新建一条 ipgen run 存入 runs Map，
+ * 但它既不设 outputDir（parseDirEntry 的 activeRun 匹配不上）也不进 /history 磁盘条目，其随机 id 仅在
+ * 那一次响应里返回一次。前端一旦重载/换会话（如嵌入 Studio）就丢了这个 id，无法再 attach /stream，
+ * 中间管线遂长期空白。此处按目录时间戳前缀反查活跃 ipgen run，把 id 暴露到 history 供前端重连。
+ */
+function findIpGenerationRun(key: string): RunState | undefined {
+  const ts = key.match(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}/)?.[0];
+  if (!ts) return undefined;
+  const prefix = `ipgen_${ts}_`;
+  return [...runs.values()].find((r) => r.status === "running" && r.id.startsWith(prefix));
+}
+
 function classifyActiveIpJob(key: string): "generating" | "preprocessing" | null {
   let cls: "generating" | "preprocessing" | null = null;
   for (const j of listJobs()) {
@@ -2634,6 +2705,7 @@ function buildIpDnaHistoryItem(
   jobClass: "generating" | "preprocessing" | null,
   hasEdits: boolean,
 ): HistoryItem {
+  const generationRunId = findIpGenerationRun(key)?.id;
   const hasUnits = outputHasGameUnits(key);
   // 预处理中/暂停在确认门 → 待生成（config），不是「生成中」，也不是「中断」。
   const status = jobClass === "generating" ? "running"
@@ -2652,10 +2724,11 @@ function buildIpDnaHistoryItem(
     lastCompletedStep: null,
     completedSteps: null,
     canResume: false,
-    // 有层级树即可被 IP 回放（§6 历史还原输入模块）或加载已生成产物。
-    canLoad: hasFullResult || desc.hasHierarchy,
+    // 有层级树即可被 IP 回放（§6 历史还原输入模块）或加载已生成产物（含 game_unit_*.json 多单元产物）。
+    canLoad: hasFullResult || desc.hasHierarchy || outputHasGameUnits(key),
     userInput: desc.title,
     kind: "ip-dna",
+    generationRunId,
   };
 }
 
@@ -2718,6 +2791,8 @@ function parseDirEntry(dir: string): HistoryItem {
   // IP DNA 运行不进 runs Map，其活跃态由进程内 job 注册表反映（重启即清）。
   // §状态机：区分「生成中」（下游生成）与「预处理中/暂停确认门」（待生成），后者不显示生成中。
   const ipJobClass = classifyActiveIpJob(dir);
+  // IP 改编下游生成的可 stream run id（供前端重连中间预览，见 findIpGenerationRun）。
+  const ipGenerationRunId = findIpGenerationRun(dir)?.id;
 
   try {
     const raw = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
@@ -2748,13 +2823,14 @@ function parseDirEntry(dir: string): HistoryItem {
       lastCompletedStep: checkpoint?.lastCompletedStep ?? null,
       completedSteps: migrateLegacyCompletedSteps(checkpoint?.completedSteps ?? raw.completedSteps ?? null),
       canResume: !!checkpoint && effectiveStatus !== "completed" && effectiveStatus !== "running",
-      canLoad: hasFullResult || !!checkpoint,
+      canLoad: hasFullResult || !!checkpoint || outputHasGameUnits(dir),
       userInput: raw.userInput ?? activeRun?.userInput,
       routeGroup: raw.routeGroup ?? activeRun?.routeGroup,
       complexity: raw.complexity ?? activeRun?.complexity,
       parentKey: raw.parentKey ?? undefined,
       forkReason: raw.forkReason ?? undefined,
       kind: raw.kind ?? undefined,
+      generationRunId: ipGenerationRunId,
     };
   } catch {
     // §条目持久化：无 output 运行清单但有 _entry.json（未生成的条目）→ 返回 status="config" 项，
@@ -2782,6 +2858,7 @@ function parseDirEntry(dir: string): HistoryItem {
         complexity: entryCfg.complexity,
         parentKey: entryCfg.parentKey,
         kind: entryCfg.ipRunKey ? "ip-dna" : undefined,
+        generationRunId: ipGenerationRunId,
       };
     }
     // 无 output 运行清单：先尝试用 IP DNA 输入侧资产回填（user_asset_manifest.json 或 _hierarchy.json）。
@@ -2811,6 +2888,7 @@ function parseDirEntry(dir: string): HistoryItem {
       complexity: activeRun?.complexity ?? (checkpoint as any)?.complexity,
       parentKey: activeRun?.parentKey,
       forkReason: activeRun?.forkReason,
+      generationRunId: ipGenerationRunId,
     };
   }
 }
@@ -3065,6 +3143,34 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
       routingMode:
         checkpoint.routingMode ??
         (manifest.routingMode as "auto" | "semi" | "manual" | undefined),
+    });
+    return;
+  }
+
+  // IP 多单元产物加载：无 full_result.json / _checkpoint.json，但已落 game_unit_*.json →
+  // 取序号最小的单元的 result 作可展示 ctx，并按规范序反推下游已完成步骤，重建中间管线。
+  // 修复「IP run 跑完后中间只剩 5 个 IP 预处理步、下游叙事管线全不显示」。
+  const gameUnitCtx = loadGameUnitCtx(key);
+  if (gameUnitCtx) {
+    const downstream = deriveCompletedStepsFromCtx(gameUnitCtx);
+    const fullOrder = withIpPredecessorOrder(key, downstream) ?? downstream;
+    res.json({
+      id: (manifest.runId as string) ?? key,
+      tier: manifest.tier,
+      mode: manifest.mode,
+      status: "completed",
+      result: gameUnitCtx,
+      completedSteps: fullOrder,
+      userInput: (manifest.userInput as string) ?? gameUnitCtx.user_input,
+      complexity: manifest.complexity,
+      genre_code:
+        (manifest.genre_code as string | undefined) ??
+        (gameUnitCtx.tier_detection?.genre_code !== "manual"
+          ? gameUnitCtx.tier_detection?.genre_code
+          : undefined) ??
+        gameUnitCtx.demand_analysis?.genre_code,
+      pipelineOrder: fullOrder,
+      routingMode: manifest.routingMode as "auto" | "semi" | "manual" | undefined,
     });
     return;
   }
@@ -3857,12 +3963,14 @@ app.post("/api/narrative/ip-dna/:runId/confirm-units", (req, res) => {
     res.status(404).json({ error: `未找到层级树：${req.params.runId}（请先 ingest）` });
     return;
   }
-  const body = req.body as { game_unit_plan?: unknown; adaptation_dimensions?: unknown; mode?: "single" | "series"; target_units?: number };
+  const body = req.body as { game_unit_plan?: unknown; adaptation_dimensions?: unknown; mode?: "single" | "series"; target_units?: number; target_output?: import("../ip-dna/index.js").TargetOutput };
   const merged = saveAdaptationConfirmation(source.story_timestamp, source.title, {
     game_unit_plan: body.game_unit_plan,
     adaptation_dimensions: body.adaptation_dimensions,
     mode: body.mode,
     target_units: body.target_units,
+    // P0-1（§4.4d）：持久化目标输出形态（品类/管线/模式/复杂度），extract/generate 消费为 family/mode 兜底。
+    target_output: body.target_output,
   });
   res.json({ run_id: req.params.runId, confirmation: merged, awaiting: "extract|generate" });
 });
@@ -3875,17 +3983,22 @@ function buildStageExtractOptions(
   runtime?: Awaited<ReturnType<typeof resolveIpDnaRuntimeAdapters>>,
 ) {
   const c = loadAdaptationConfirmation(source.story_timestamp, source.title) ?? {};
+  const targetOutput = c.target_output as import("../ip-dna/index.js").TargetOutput | undefined;
   const selections = (c.scope_selections as import("../ip-dna/index.js").AdaptationScopeSelection[] | undefined) ?? [];
   const scope = selections.length ? { full: false, selections } : { full: true };
   const llm = ipDnaLlm(body.model);
-  // ROUTING 透传（§5.1/§L，与一把梭 buildOptions 对齐）：显式 genre_code → 锁定生成品类，
-  // 并据模板派生 pipeline_family，避免 ROUTING 选 vn 仍误跑 rpg 层级链。pipeline_family 显式优先。
+  // ROUTING/target_output 透传（§5.1/§L/§4.4d）：genre 优先 body → 确认态 target_output；据模板派生 pipeline_family，
+  // 避免 ROUTING 选 vn 仍误跑 rpg 层级链。pipeline_family 显式优先，其次 genre 派生，再次 target_output 模板派生。
   const explicitGenre =
-    typeof body.genre_code === "string" && body.genre_code.trim().length > 0 ? body.genre_code.trim() : undefined;
+    (typeof body.genre_code === "string" && body.genre_code.trim().length > 0 ? body.genre_code.trim() : undefined) ??
+    (typeof targetOutput?.genre_code === "string" && targetOutput.genre_code.trim().length > 0 ? targetOutput.genre_code.trim() : undefined);
   const familyFromGenre: "rpg" | "vn" | undefined = explicitGenre
     ? (findGenreByCode(explicitGenre)?.pipelineTemplate?.includes("vn") ? "vn" : "rpg")
     : undefined;
-  const effectiveFamily = body.pipeline_family ?? familyFromGenre;
+  const familyFromTemplate: "rpg" | "vn" | undefined = targetOutput?.pipeline_template
+    ? (targetOutput.pipeline_template.includes("vn") ? "vn" : targetOutput.pipeline_template.includes("rpg") ? "rpg" : undefined)
+    : undefined;
+  const effectiveFamily = body.pipeline_family ?? familyFromGenre ?? familyFromTemplate;
   return {
     files: [] as IncomingFile[],
     title: source.title,
@@ -3896,7 +4009,7 @@ function buildStageExtractOptions(
     dimensions: c.adaptation_dimensions as Partial<import("../ip-dna/index.js").AdaptationDimensions> | undefined,
     adaptationNotes: c.adaptation_notes as string | undefined,
     targetUnits: c.target_units as number | undefined,
-    targetComplexity: body.complexity,
+    targetComplexity: body.complexity ?? targetOutput?.complexity,
     pipelineFamily: effectiveFamily,
     llm,
     queryEmbedder: runtime?.queryEmbedder,
@@ -3910,12 +4023,12 @@ function buildStageExtractOptions(
     injectRelations: body.inject_relations,
     maxGameUnits: body.max_game_units,
     tier: body.tier,
-    generationMode: body.generation_mode,
+    generationMode: body.generation_mode ?? (targetOutput?.generation_mode as ModeId | undefined),
     pipelineConfig: {
       apiKey: API_KEY || undefined,
       proxyUrl: LLM_PROXY_URL || undefined,
       model: body.model ?? getDefaultModel(),
-      complexity: body.complexity,
+      complexity: body.complexity ?? targetOutput?.complexity,
       // 显式品类锁定生成模板（buildGenerationPipelineConfig 仅在未设时才用 family 代表品类兜底）。
       ...(explicitGenre ? { genreCode: explicitGenre } : {}),
     },

@@ -1,6 +1,6 @@
 /**
- * g_auto_collision —— 从每个 part 的 visual 自动派生 <collision>（对标 articraft
- * exact_collisions.py：原生 primitive 精确复制，其余用 AABB box 兜底）。
+ * g_auto_collision —— 从每个 part 的 visual 自动派生 <collision>：
+ * 原生 primitive 精确复制，其余用 AABB box 兜底。
  *
  * 规则（逐 part 处理整张 Geometry）：
  *   - 已有显式 collision 语句的 part：默认跳过（除非 replace=true 先清掉旧的）

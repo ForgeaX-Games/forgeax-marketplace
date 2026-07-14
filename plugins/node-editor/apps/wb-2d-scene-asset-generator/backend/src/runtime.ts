@@ -6,6 +6,7 @@ import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
 import { copyGeneratedImage, readImageBytesFromRef, writeProcessedImage, createGeneratedImage, resolveGrayscaleRoot } from './assets/generatedAssets.js'
 import { encodePng, decodeImageBytes, type DecodedImage } from './utils/png_codec.js'
 import { generateImageAsset } from './ai/imageGeneration.js'
+import { matteImage } from './ai/matting.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
@@ -16,7 +17,7 @@ export function resolveWorkspaceRoot(): string {
   return process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
 }
 
-const PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
+const PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
 
 let registry: ProjectRegistry | null = null
 let sharedOps: OpRegistry | null = null
@@ -206,6 +207,11 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
               },
               generateImage: (input: { prompt?: string; images?: string[]; nodeId?: string; model?: string; role?: 'concept-art' | 'sprite-frame'; imageSize?: string }) =>
                 generateImageAsset(rt, input),
+              // BiRefNet 语义抠图：模型跑在独立的 birefnet-server 服务里，ai/matting.ts
+              // 只是 HTTP 客户端（POST 图、收 matte、合成落盘）。电池经
+              // ctx.services.asset2d.matteImage 调用；服务地址走 serviceUrl 或 FORGEAX_BIREFNET_URL。
+              matteImage: (input: { image: string; softEdges?: boolean; crop?: boolean; suffix?: string; serviceUrl?: string }) =>
+                matteImage(rt, input),
               createImage: (
                 pixels: Buffer,
                 width: number,
@@ -247,25 +253,39 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
   return reg
 }
 
-/** The active project's Runtime. All existing routes funnel through this. */
+/** The UI viewing project's Runtime (legacy alias). */
 export async function getRuntime(): Promise<Runtime> {
   const reg = await getProjectRegistry()
-  return reg.getActiveRuntime()
+  return reg.getViewingRuntime()
 }
 
-/**
- * Absolute directory of the active project — the parent of its `state/` dir,
- * derived from the manifest's graphFile (`<projDir>/state/graph.json`). Works
- * for both the legacy `main` project (dir = workspaceRoot) and new projects
- * (dir = `<workspaceRoot>/projects/<id>`). Other services (e.g. the baked
- * scene-layer store) persist per-project files here, alongside `state/`.
- */
-export async function getActiveProjectDir(): Promise<string> {
+export async function getRuntimeForProject(projectId: string): Promise<Runtime> {
+  const reg = await getProjectRegistry()
+  if (!reg.getProject(projectId)) throw new Error(`project not found: ${projectId}`)
+  return reg.getRuntimeFor(projectId)
+}
+
+export async function getViewingProjectDir(): Promise<string> {
   const reg = await getProjectRegistry()
   const ws = resolveWorkspaceRoot()
-  const id = reg.getActiveProjectId()
+  const id = reg.getViewingProjectId()
   const rec = id ? reg.getProject(id) : null
   const graphRel = rec?.manifest.storage.graphFile ?? join('state', 'graph.json')
+  const graphAbs = isAbsolute(graphRel) ? graphRel : join(ws, graphRel)
+  return dirname(dirname(graphAbs))
+}
+
+/** @deprecated Use getViewingProjectDir(). */
+export async function getActiveProjectDir(): Promise<string> {
+  return getViewingProjectDir()
+}
+
+export async function getProjectDir(id: string): Promise<string | null> {
+  const reg = await getProjectRegistry()
+  const rec = reg.getProject(id)
+  if (!rec) return null
+  const ws = resolveWorkspaceRoot()
+  const graphRel = rec.manifest.storage.graphFile
   const graphAbs = isAbsolute(graphRel) ? graphRel : join(ws, graphRel)
   return dirname(dirname(graphAbs))
 }

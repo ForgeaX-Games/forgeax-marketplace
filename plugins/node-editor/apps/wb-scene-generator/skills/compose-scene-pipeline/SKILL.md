@@ -39,11 +39,8 @@ Use these tools:
 - `scene:assets.list`
 - `scene:renderer.info`, `scene:renderer.setViewMode`,
   `scene:renderer.selectLayer`, `scene:renderer.openAllSubLayers`
-- `scene:screenshot.capture`, `scene:screenshot.latest`
 
 `scene:projects.remove` requires destructive confirmation for AI callers.
-`scene:screenshot.store` is an internal renderer callback and is not exposed to
-AI.
 
 ## Workflow
 
@@ -54,9 +51,10 @@ AI.
 4. Apply graph changes with `scene:pipeline.applyBatch`, using
    `opts.actor = "ai:scene"` and a concise `opts.label`.
 5. Execute with `scene:pipeline.execute`.
-6. Drive the preview with `scene:renderer.*`, inspect assets with
-   `scene:assets.list`, and capture/read preview pixels with
-   `scene:screenshot.capture` / `scene:screenshot.latest`.
+6. Drive the preview view mode with `scene:renderer.*` and verify results from
+   the `scene:pipeline.execute` output summary (no errors, expected layer/asset
+   names) plus `scene:assets.list`; pixel-level visual confirmation is done by
+   the user in the Preview panel.
 7. Iterate until the scene matches the request, then optionally save a graph
    template with `scene:pipeline.export`.
 
@@ -67,9 +65,9 @@ AI.
   grouping, and deletion. Do not write `state/graph.json` by hand.
 - Preserve the renderer's supported view modes (`top`, `topBillboard`, `iso`,
   `free3d`) and layer selection contract.
-- Use renderer screenshots, generated project assets, and node outputs as
-  feedback for multi-turn iteration; do not declare completion from graph edits
-  alone.
+- Use the execute output summary (no errors, expected layer/asset names),
+  generated project assets, and node outputs as feedback for multi-turn
+  iteration; do not declare completion from graph edits alone.
 
 ## References
 

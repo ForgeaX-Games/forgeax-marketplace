@@ -67,4 +67,4 @@
 
 ## 验证要点
 
-`pipeline.execute` 应 `status:completed`，`out.layers` 多出名为 DistrictAsset（如 `灌木`）的图层，截图中其像素应成团粘附在原区域内缘、形状不规则、数量约等于 Count。
+`pipeline.execute` 应 `status:completed`，`out.layers` 多出名为 DistrictAsset（如 `灌木`）的图层，Preview 中其像素应成团粘附在原区域内缘、形状不规则、数量约等于 Count。

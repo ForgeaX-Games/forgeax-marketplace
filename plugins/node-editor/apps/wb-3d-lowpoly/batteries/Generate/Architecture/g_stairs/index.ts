@@ -5,6 +5,7 @@
  */
 
 import {
+  bool,
   emit,
   freshId,
   isValidId,
@@ -56,6 +57,22 @@ export function gStairs(input: Record<string, unknown>): Record<string, unknown>
     args.radius = num(radius);
     args.inner_radius = num(innerRadius);
     args.sweep_deg = num(sweepDeg);
+  }
+
+  const treadThickness = Number(input.tread_thickness ?? 0);
+  if (Number.isFinite(treadThickness) && treadThickness > 0) args.tread_thickness = num(treadThickness);
+  if (input.open_riser === true || String(input.open_riser ?? '').toLowerCase() === 'true') {
+    args.open_riser = bool(true);
+  }
+  if (type !== 'spiral') {
+    const landingDepth = Number(input.landing_depth ?? 0);
+    if (Number.isFinite(landingDepth) && landingDepth > 0) {
+      args.landing_depth = num(landingDepth);
+      const landingAfter = Math.round(Number(input.landing_after ?? NaN));
+      if (Number.isFinite(landingAfter) && landingAfter >= 1 && landingAfter <= stepCount) {
+        args.landing_after = num(landingAfter);
+      }
+    }
   }
 
   const rawId = String(input.id ?? '').trim();

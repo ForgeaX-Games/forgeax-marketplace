@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BranchTreeOverlay } from './BranchTreeOverlay'
 import { useCinemaHold } from './cinemaGate'
 import { injectStyleOnce } from '../styles/injectStyle'
+import type { UIScreen } from '../scenario/types'
 
 interface Props {
   scenarioTitle: string
@@ -16,6 +17,10 @@ interface Props {
   /** 字幕（DialogueBox）可见性；与时间轴 DIA 轨开关同步的 pref */
   subtitlesVisible: boolean
   onToggleSubtitles: () => void
+  /** 可从菜单打开的全屏页面(背包 / 主菜单 / 自定义)。 */
+  screens?: UIScreen[]
+  /** 打开某个全屏页面。 */
+  onOpenScreen?: (screenId: string) => void
 }
 
 /**
@@ -44,6 +49,8 @@ export function PlayerMenu({
   onExit,
   subtitlesVisible,
   onToggleSubtitles,
+  screens = [],
+  onOpenScreen,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [treeOpen, setTreeOpen] = useState(false)
@@ -119,6 +126,24 @@ export function PlayerMenu({
                 onClick={onToggleSubtitles}
               />
             </SettingSection>
+
+            {screens.length > 0 && onOpenScreen && (
+              <SettingSection>
+                {screens.map((s) => (
+                  <SettingRow
+                    key={s.id}
+                    glyph={<BagGlyph />}
+                    label={s.name}
+                    hint={s.kind === 'inventory' ? 'INVENTORY' : s.kind === 'mainMenu' ? 'MENU' : 'SCREEN'}
+                    trailing={<Chevron />}
+                    onClick={() => {
+                      setOpen(false)
+                      onOpenScreen(s.id)
+                    }}
+                  />
+                ))}
+              </SettingSection>
+            )}
 
             <SettingSection>
               <SettingRow
@@ -279,6 +304,14 @@ function TreeGlyph() {
       <circle cx="14" cy="9" r="1.4" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="12" cy="14" r="1.4" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="6" cy="19" r="1.4" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+function BagGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M6 8 H18 L17 20 H7 Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M9 8 V6.5 a3 3 0 0 1 6 0 V8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )
 }

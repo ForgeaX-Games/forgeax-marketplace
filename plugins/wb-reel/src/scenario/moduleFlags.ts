@@ -13,7 +13,7 @@ import type { ModuleId, Scenario } from './types'
 
 /** isModuleEnabled 接受的最小剧本形状(modules + 内容字段，用于推断默认值)。 */
 type ModuleScenarioLike = Pick<Scenario, 'modules'> &
-  Partial<Pick<Scenario, 'variables' | 'items'>>
+  Partial<Pick<Scenario, 'variables' | 'items' | 'uiScreens'>>
 
 /**
  * 生产链路模块默认开 —— 旧剧本零回归。
@@ -31,10 +31,12 @@ const ALWAYS_ON_DEFAULT: ReadonlySet<ModuleId> = new Set<ModuleId>([
  * 模块「未显式设置时」的默认开关。
  *
  * - 生产链路模块(style/director/refs/ui/minigame): 默认开。
- * - 玩法内容模块(numeric/inventory): **按内容判定** ——
- *     · 作者已经搭过内容(有变量 / 有物品) → 默认开，避免「我做过的东西怎么是关的」；
- *     · 全新空剧本(无变量 / 无物品) → 默认关，必须作者主动 opt-in，
- *       否则边栏/面板显示成「已启用」却空空如也，造成「我没选它怎么就开了」的困惑。
+ * - 玩法内容模块(numeric/inventory/uiScreen): **按内容判定** ——
+ *     · 作者已经搭过内容(有变量 / 有物品 / 有全屏页面) → 默认开，避免「我做过的东西怎么是关的」；
+ *     · 全新空剧本 → 默认关，必须作者主动 opt-in，否则面板显示成「已启用」却空空如也。
+ *
+ *   uiScreen(全屏页面:真背包 / 游戏化主界面 / 开宝箱 / 搜刮页)尤其要默认关 ——
+ *   几乎所有互动影游都有剧情树,但不一定要背包 / 游戏化主界面,不能凭空塞给作者。
  */
 function moduleDefaultEnabled(
   scenario: ModuleScenarioLike | null | undefined,
@@ -43,6 +45,7 @@ function moduleDefaultEnabled(
   if (ALWAYS_ON_DEFAULT.has(id)) return true
   if (id === 'numeric') return Object.keys(scenario?.variables ?? {}).length > 0
   if (id === 'inventory') return Object.keys(scenario?.items ?? {}).length > 0
+  if (id === 'uiScreen') return Object.keys(scenario?.uiScreens ?? {}).length > 0
   return true
 }
 
@@ -85,4 +88,20 @@ export function effectiveUiStylePrompt(scenario: Scenario): string {
 export function effectiveMinigameIds(scenario: Scenario): string[] {
   if (!isModuleEnabled(scenario, 'minigame')) return []
   return scenario.enabledMinigameIds ?? []
+}
+
+/**
+ * 全屏页面注册表(生效后)—— 两级过滤:
+ *   1. 总闸 uiScreen 关 → 空表(一键屏蔽整套游戏化整页 UI,只留剧情树等基础体验);
+ *   2. 单页 enabled===false → 从表里剔除(逐个取舍:留背包、关游戏化主界面…)。
+ * PlayerMenu 入口 / 时间轴 ScreenClip 触发 / 跨页 openScreen 跳转都读这里,自动生效。
+ */
+export function effectiveUIScreens(scenario: Scenario): NonNullable<Scenario['uiScreens']> {
+  if (!isModuleEnabled(scenario, 'uiScreen')) return {}
+  const all = scenario.uiScreens ?? {}
+  const out: NonNullable<Scenario['uiScreens']> = {}
+  for (const [id, scr] of Object.entries(all)) {
+    if (scr.enabled !== false) out[id] = scr
+  }
+  return out
 }

@@ -22,7 +22,7 @@ import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
-import { FIVE_ELEMENT_NOTE, getStreamEmit } from "./_shared.js";
+import { FIVE_ELEMENT_NOTE, getStreamEmit, getVnBudget } from "./_shared.js";
 
 interface CombinedOutput {
   outline_acts: VnOutlineActs;
@@ -45,13 +45,36 @@ export function resolveActCount(ctx: NarrativeContext): number {
   return 3;
 }
 
+/** 复杂度档位（1-4）→ 建议幕数区间（软约束，仅用于提示引导，不做幕数精确校验）。 */
+const ACT_RANGE_BY_LEVEL: Record<number, [number, number]> = {
+  1: [2, 3], // 极简
+  2: [3, 4], // 短篇
+  3: [3, 5], // 标准
+  4: [4, 7], // 丰富（史诗已在 resolveVnComplexity 封顶到丰富）
+};
+
+/**
+ * 解析幕数区间（§4.6 开放幕数 · 软约束）：
+ *   - 显式给定 vn_target_act_count（IP 改编：幕数=源单元数）→ 精确区间 [t, t]，须忠实
+ *   - 否则按复杂度档位取建议区间 [min, max]，由 LLM 依剧情繁简在区间内自定；缺省档为标准 [3,5]
+ */
+export function resolveActRange(ctx: NarrativeContext): { min: number; max: number; explicit: boolean } {
+  const n = ctx.vn_target_act_count;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 2) {
+    const t = Math.min(10, Math.round(n));
+    return { min: t, max: t, explicit: true };
+  }
+  const [min, max] = ACT_RANGE_BY_LEVEL[getVnBudget(ctx).level] ?? [3, 5];
+  return { min, max, explicit: false };
+}
+
 /** 期望的幕编号序列（一..N）。 */
 function expectedActIds(count: number): string[] {
   return Array.from({ length: count }, (_, i) => actNumeral(i + 1));
 }
 
-/** 按幕数生成"幕职能"指引：首幕建置、末幕解决、中间幕对抗/发展。 */
-function buildActSpec(count: number): string {
+/** 固定幕数的逐幕"职能"指引（用于 IP 改编等幕数精确场景）。 */
+function buildFixedActSpec(count: number): string {
   if (count <= 1) return `- 一（单幕）：完整起承转合，约 400 字。`;
   const lines: string[] = [];
   lines.push(`- ${actNumeral(1)}（建置）：约 150 字。介绍主角处境、关键关系、世界规则、推动主角离开常态的引爆事件`);
@@ -62,6 +85,18 @@ function buildActSpec(count: number): string {
   return lines.join("\n");
 }
 
+/** 区间幕数的"职能范式"指引（软约束：幕数由 LLM 依剧情在 [min,max] 内自定）。 */
+function buildRangeActSpec(min: number, max: number): string {
+  const midLo = Math.max(1, min - 2);
+  const midHi = Math.max(midLo, max - 2);
+  return [
+    `- 首幕（建置）：约 150 字。介绍主角处境、关键关系、世界规则、推动主角离开常态的引爆事件`,
+    `- 中间幕（对抗 / 发展，共 ${midLo}-${midHi} 幕）：每幕约 300 字。主角连续尝试与挫折、反派/阻力逐步显影，每幕至少 1 个低谷或反转；戏够就收、不足才增`,
+    `- 末幕（解决）：约 150 字。最终对峙与代价；为后续"剧情树改造"留出可分支的高潮空间`,
+    `- 幕数为**软约束**：建议 ${min}-${max} 幕，依剧情繁简自定——宁精勿凑，既不为凑数注水，也不必硬压成固定三幕`,
+  ].join("\n");
+}
+
 export const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
   stepId: "vn_outline_acts",
   skillSlots: ["style_guide", "constraints"],
@@ -69,17 +104,26 @@ export const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
     ip_dna: IP_DNA_SLOT_BLOCK,
-    role: `你是互动影游主笔。基于 logline，扩写出严格三幕剧本骨架、全员人物小传与贯穿剧情的关键道具。`,
+    role: (ctx: NarrativeContext): string => {
+      const { min, max, explicit } = resolveActRange(ctx);
+      const clause = explicit ? `严格 ${min} 幕` : `${min}-${max} 幕（依剧情繁简自定，软约束）`;
+      return `你是互动影游主笔。基于 logline，扩写出${clause}剧本骨架、全员人物小传与贯穿剧情的关键道具。`;
+    },
 
     task: (ctx: NarrativeContext): string => {
-      const count = resolveActCount(ctx);
-      return `## 幕结构（严格 ${count} 幕，不允许新增或删减幕；幕编号用汉字 ${expectedActIds(count).join("/")}）
-${buildActSpec(count)}
+      const { min, max, explicit } = resolveActRange(ctx);
+      const ids = expectedActIds(explicit ? min : max);
+      const actStructure = explicit ? buildFixedActSpec(min) : buildRangeActSpec(min, max);
+      const headline = explicit
+        ? `严格 ${min} 幕，不允许新增或删减幕`
+        : `建议 ${min}-${max} 幕（软约束，依剧情繁简在区间内自定；至少 2 幕，首幕建置、末幕解决）`;
+      return `## 幕结构（${headline}；幕编号用连续汉字 一/二/三…，从"一"起不跳号）
+${actStructure}
 
 ## 双轮驱动（必须在各幕中显化）
 - 外驱（external_motivation）：来自世界事件、他人压力、时间窗口的外部紧迫
 - 内驱（internal_motivation）：主角的性格缺陷、未愈伤口、价值观挣扎
-- 两者须在第二幕交叉、第三幕收束
+- 两者须在中段交叉、末幕收束
 
 ## 人物小传（最少 3 人：主角 + 1 反派/对立 + 1 关键关系人）
 每人必须包含：
@@ -96,29 +140,33 @@ ${buildActSpec(count)}
 - description（外形、来历、质感，可被镜头看见）
 - narrative_function（在剧情中的具体作用：推动 / 转折 / 揭示真相 / 制造制约 / 完成代价）——必须能与具体幕的事件挂钩
 - bound_character（关联人物，需与人物小传中的 name 呼应；若为无主线索可留空）
-- act_appearance（出现/起关键作用的幕，用 [${expectedActIds(count).map((a) => `"${a}"`).join(",")}] 子集）
+- act_appearance（出现/起关键作用的幕，用连续汉字幕号的子集，如 ["${ids[0]}"${ids[1] ? `, "${ids[1]}"` : ""}]）
 - symbolism（象征意涵：道具如何外化主角的内驱或中心主题）
-要求：至少 1 件道具贯穿后半程并在末幕（${actNumeral(count)}）的对峙/代价中扮演关键角色。
+要求：至少 1 件道具贯穿后半程并在**末幕**的对峙/代价中扮演关键角色。
 
 ${FIVE_ELEMENT_NOTE}
 
 ## 编号约定（本步骤产出）
-- act_id：使用汉字数字序列 ${expectedActIds(count).join(" / ")}（共 ${count} 幕，顺序连续）
+- act_id：使用连续汉字数字序列 一 / 二 / 三 …（从"一"起，顺序连续、不跳号、不用英文）
 - act_name：建置 / 对抗 / 发展 / 解决（或保留同义中文，不允许英文）`;
     },
 
     output_format: (ctx: NarrativeContext): string => {
-      const count = resolveActCount(ctx);
-      const ids = expectedActIds(count);
+      const { min, max, explicit } = resolveActRange(ctx);
+      const sampleCount = explicit ? min : Math.min(max, Math.max(min, 3));
+      const ids = expectedActIds(sampleCount);
       const actLines = ids
         .map((id, i) => {
-          const name = i === 0 ? "建置" : i === count - 1 ? "解决" : "对抗";
-          const hint = i === 0 ? "约 150 字的五要素融合段落" : i === count - 1 ? "约 150 字" : "约 300 字";
+          const name = i === 0 ? "建置" : i === sampleCount - 1 ? "解决" : "对抗";
+          const hint = i === 0 ? "约 150 字的五要素融合段落" : i === sampleCount - 1 ? "约 150 字" : "约 300 字";
           return `      { "act_id": "${id}", "act_name": "${name}", "content": "${hint}" }`;
         })
         .join(",\n");
+      const countRule = explicit
+        ? `acts 恰好 ${min} 幕`
+        : `acts 数量依剧情在 ${min}-${max} 幕间自定（下方示例为 ${sampleCount} 幕，仅示意；act_id 须从"一"起连续汉字编号）`;
       const sample = ids.length >= 2 ? [ids[ids.length - 2], ids[ids.length - 1]] : [ids[0]];
-      return `## 输出格式（严格 JSON，单一根对象包含三个子结构；acts 恰好 ${count} 幕）
+      return `## 输出格式（严格 JSON，单一根对象包含三个子结构；${countRule}）
 {
   "outline_acts": {
     "title": "故事标题（沿用 logline.title 或微调）",
@@ -167,23 +215,35 @@ ${buildIpSourceReference(ctx)}`;
     },
 
     task_instruction: (ctx: NarrativeContext): string => {
-      const count = resolveActCount(ctx);
+      const { min, max, explicit } = resolveActRange(ctx);
+      const clause = explicit ? `严格 ${min} 幕` : `${min}-${max} 幕（软约束，依剧情繁简自定）`;
       return `## 任务
-基于上述 logline 扩写：(1) 严格 ${count} 幕剧本骨架；(2) 全员人物小传；(3) 贯穿剧情的关键道具。三者在同一份 JSON 中分别落到 outline_acts / character_bios / key_items 三个键。关键道具须与各幕事件、人物驱动真正咬合，不得是可有可无的摆设。`;
+基于上述 logline 扩写：(1) ${clause} 剧本骨架；(2) 全员人物小传；(3) 贯穿剧情的关键道具。三者在同一份 JSON 中分别落到 outline_acts / character_bios / key_items 三个键。关键道具须与各幕事件、人物驱动真正咬合，不得是可有可无的摆设。`;
     },
   },
 };
 
-function validateOutput(parsed: CombinedOutput, expectedCount = 3): void {
+function validateOutput(
+  parsed: CombinedOutput,
+  range: { min: number; max: number; explicit: boolean } = { min: 2, max: 10, explicit: false },
+): void {
   const oa = parsed.outline_acts;
   if (!oa?.title?.trim()) throw new Error("缺少 outline_acts.title");
-  if (!Array.isArray(oa.acts) || oa.acts.length !== expectedCount) {
-    throw new Error(`acts 必须恰好 ${expectedCount} 项（${expectedActIds(expectedCount).join("/")}）`);
+  if (!Array.isArray(oa.acts) || oa.acts.length < 2) {
+    throw new Error("acts 至少 2 幕");
   }
-  const expected = expectedActIds(expectedCount);
+  // 幕数软约束：普通路径不因落在建议区间外而失败（只保证 ≥2 幕、编号连续、内容非空 + 防跑飞上限）；
+  // IP 改编（explicit）幕数=源单元数，须精确校验。
+  if (range.explicit && oa.acts.length !== range.min) {
+    throw new Error(`IP 改编需恰好 ${range.min} 幕（幕数=源单元数）`);
+  }
+  if (oa.acts.length > 10) {
+    throw new Error(`acts 幕数过多（${oa.acts.length}），至多 10 幕`);
+  }
+  const expected = expectedActIds(oa.acts.length);
   oa.acts.forEach((act, idx) => {
     if (act.act_id !== expected[idx]) {
-      throw new Error(`acts[${idx}].act_id 必须为 "${expected[idx]}"`);
+      throw new Error(`acts[${idx}].act_id 必须为 "${expected[idx]}"（幕号须从"一"起连续汉字）`);
     }
     if (!act.content?.trim()) throw new Error(`acts[${idx}].content 不能为空`);
   });
@@ -214,13 +274,13 @@ function validateOutput(parsed: CombinedOutput, expectedCount = 3): void {
 
 export async function vnOutlineActs(ctx: NarrativeContext, llm: LLMClient): Promise<void> {
   const streamEmit = getStreamEmit(ctx);
-  const actCount = resolveActCount(ctx);
+  const actRange = resolveActRange(ctx);
 
   const raw = await llm.callWithRetry(
     composeSystemPrompt(VN_OUTLINE_ACTS_COMPOSER, ctx),
     appendUserInstructions(composeUserPrompt(VN_OUTLINE_ACTS_COMPOSER, ctx), ctx),
     { temperature: 0.7, responseFormat: "json" },
-    (r) => validateOutput(extractJSON<CombinedOutput>(r), actCount),
+    (r) => validateOutput(extractJSON<CombinedOutput>(r), actRange),
     streamEmit,
   );
 

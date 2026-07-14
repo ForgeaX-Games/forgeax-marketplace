@@ -2,7 +2,9 @@
 
 > templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781857569273_sw86m`，也可用 basename `PickMultiBuildings`。
 
-一次放置**多栋**建筑（points 列表 + 各栋宽高/高度/资产）。多栋串联时用 `out_1`(Rest) → 下一批 `in_6`(Scene)。
+一次放置**多栋**建筑（points 列表 + 各栋宽高/高度/资产）。**城镇补充散布**：读 runDir `town-building-scatter.json` 的 `supplementaryBuildings[]`，`BuildingAssets` 必须来自 catalog `itemName`，每栋 footprint ≥10×10。
+
+**接线**：`out_2`(Buildings) → `BuildingStructures.in_0`；`out_1`(Rest) → 下一批 `in_6`(Scene) 或下一组 `AreaPartition.in_0`。
 
 ## 主要可见端口
 

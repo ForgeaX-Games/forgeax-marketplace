@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/wb-ui",
+      "name": "@forgeax-extension/wb-ui",
       "dependencies": {
         "sharp": "^0.34.5",
       },

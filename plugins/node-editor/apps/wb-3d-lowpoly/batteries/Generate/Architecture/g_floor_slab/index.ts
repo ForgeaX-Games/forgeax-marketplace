@@ -13,25 +13,20 @@ import {
   num,
   numList,
   parseGeometryPort,
+  parseQuadList,
   type Arg,
 } from '../../../../vendor/dist/shared/types/index.js';
 
-/** 解析 holes 输入为 number[4][]。 */
+/**
+ * 解析 holes 输入为 number[4][]。
+ * 复用共享的 parseQuadList（与 g_wall 的 openings 同一实现），仅传入本电池的错误文案。
+ */
 export function parseHoles(value: unknown): number[][] | { error: string } {
-  if (value === undefined || value === null || value === '') return [];
-  let parsed: unknown = value;
-  if (typeof value === 'string') {
-    try { parsed = JSON.parse(value); } catch { return { error: 'holes must be valid JSON, e.g. [[1,1,1.2,2.8]]' }; }
-  }
-  if (!Array.isArray(parsed)) return { error: 'holes must be an array of [x, y, w, d]' };
-  const out: number[][] = [];
-  for (const row of parsed) {
-    if (!Array.isArray(row) || row.length !== 4 || !row.every(n => Number.isFinite(Number(n)))) {
-      return { error: 'each hole must be [x, y, w, d] of 4 finite numbers' };
-    }
-    out.push(row.map(Number));
-  }
-  return out;
+  return parseQuadList(value, {
+    json: 'holes must be valid JSON, e.g. [[1,1,1.2,2.8]]',
+    notArray: 'holes must be an array of [x, y, w, d]',
+    badRow: 'each hole must be [x, y, w, d] of 4 finite numbers',
+  });
 }
 
 export function gFloorSlab(input: Record<string, unknown>): Record<string, unknown> {
@@ -52,6 +47,20 @@ export function gFloorSlab(input: Record<string, unknown>): Record<string, unkno
     thickness: num(thickness),
   };
   if (holes.length > 0) args.holes = list(holes.map(h => numList(h)));
+
+  const beamDepth = Number(input.beam_depth ?? 0);
+  if (Number.isFinite(beamDepth) && beamDepth > 0) {
+    args.beam_depth = num(beamDepth);
+    const beamWidth = Number(input.beam_width ?? 0);
+    if (Number.isFinite(beamWidth) && beamWidth > 0) {
+      if (2 * beamWidth >= Math.min(width, depth)) {
+        return { geometry: incoming, id: '', error: 'floor_slab: beam_width too large for slab' };
+      }
+      args.beam_width = num(beamWidth);
+    }
+  }
+  const chamfer = Number(input.edge_chamfer ?? 0);
+  if (Number.isFinite(chamfer) && chamfer > 0) args.edge_chamfer = num(chamfer);
 
   const rawId = String(input.id ?? '').trim();
   const id = rawId !== '' ? rawId : freshId(incoming, 'slab');

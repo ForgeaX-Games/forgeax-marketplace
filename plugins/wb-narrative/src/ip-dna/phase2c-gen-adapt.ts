@@ -11,12 +11,15 @@
  */
 
 import type { PipelineTemplateId } from "../pipeline/templates.js";
-import type { TargetStructure } from "../types/index.js";
+import type { TargetStructure, VnUnitActMap, VnActUnitSeed } from "../types/index.js";
 import type { GameUnit, GameUnitPlan, GameMode } from "../types/narrative-ip-dna.js";
 import { DEFAULT_UNITS_PER_GAME_UNIT } from "./phase2b-adapt.js";
 
 /** 每个游戏单元剧情树的最小节点数（恒等约束，§4.6）。 */
 export const MIN_PLOT_TREE_NODES = 25;
+
+/** VN 开放幕数上限（P1-1）：章→幕锚定时，源单元数超此上限则按序分桶到该上限个幕。 */
+export const MAX_OPEN_ACTS = 12;
 
 /** 系列游戏单元结局总数默认上限（§4.6b，蓝图建议 3-5，取上界防结局爆炸）。 */
 export const DEFAULT_MAX_ENDINGS_PER_SERIES_UNIT = 5;
@@ -76,13 +79,56 @@ export interface GameUnitPipelinePlan {
 }
 
 /**
- * VN 开放幕数解析（§4.6 关键适配）：按目标节点数派生幕数，替代固定三幕。
- * 经验：每幕 ≈ 8-10 个情节点；clamp 到 [2, 6] 幕，保留戏剧节拍。
+ * VN 开放幕数解析（§4.6 关键适配）：
+ *   - P1-1（章→幕锚定）：给定 unitCount（裁剪范围内源最小叙事单元数）时，**开放幕数 = 单元数**，
+ *     clamp 到 [2, MAX_OPEN_ACTS]——每源单元锚定一幕（忠实章边界），修"幕数与章数无关"。
+ *   - 回退（无 unitCount，如轻需求/普通 VN）：按目标节点数派生（每幕 ≈ 9 情节点），clamp [2, 6]。
  */
-export function resolveVnActCount(targetNodeCount: number): number {
+export function resolveVnActCount(targetNodeCount: number, unitCount?: number): number {
+  if (unitCount && unitCount >= 1) return Math.max(2, Math.min(MAX_OPEN_ACTS, unitCount));
   const n = Math.max(MIN_PLOT_TREE_NODES, targetNodeCount);
   const acts = Math.round(n / 9);
   return Math.max(2, Math.min(6, acts));
+}
+
+/** 汉字幕号（1-based；超 10 直接用阿拉伯数字，仅作序号语义）。 */
+const CN_ACT_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+function actNumeral(n: number): string {
+  return CN_ACT_NUMERALS[n - 1] ?? String(n);
+}
+
+/**
+ * 构建"章→幕锚定映射"（P1-1，IP 改编专用）：把裁剪范围内的源最小叙事单元映射为 VN 幕。
+ *   - 单元数 ≤ MAX_OPEN_ACTS：1 源单元 = 1 幕（忠实章边界）；
+ *   - 单元数 > MAX_OPEN_ACTS：按序把相邻单元均分到 MAX_OPEN_ACTS 个幕（分桶合并）。
+ * 每幕携带源单元的标题/事件脉络/角色/场景，供 vn-segment-confirm 按密度展开且不截断丢弃。
+ */
+export function buildUnitActMap(
+  units: { id: string; title: string; summary: string; characters: string[]; scene: string }[],
+  maxActs: number = MAX_OPEN_ACTS,
+): VnUnitActMap {
+  const n = units.length;
+  if (n === 0) return { acts: [] };
+  const actCount = Math.max(1, Math.min(maxActs, n));
+  const acts: VnActUnitSeed[] = [];
+  // 均匀分布到恰好 actCount 个桶（覆盖全部单元、不丢失）：n ≤ 上限时天然 1:1；超上限则相邻分桶。
+  for (let k = 0; k < actCount; k++) {
+    const start = Math.floor((k * n) / actCount);
+    const end = Math.floor(((k + 1) * n) / actCount);
+    const bucket = units.slice(start, end);
+    if (bucket.length === 0) continue;
+    const idx = acts.length + 1;
+    acts.push({
+      actIndex: idx,
+      actId: actNumeral(idx),
+      sourceUnitIds: bucket.map((u) => u.id),
+      title: bucket.map((u) => u.title).filter(Boolean).join(" / "),
+      summary: bucket.map((u) => u.summary).filter(Boolean).join("；"),
+      characters: [...new Set(bucket.flatMap((u) => u.characters))],
+      scene: bucket.map((u) => u.scene).filter(Boolean).join(" / "),
+    });
+  }
+  return { acts };
 }
 
 /**
@@ -109,6 +155,8 @@ export interface MapToPipelineOptions {
   family: PipelineFamily;
   /** 缺省复杂度（单元未指定时）。 */
   defaultComplexity?: number;
+  /** P1-1：本游戏单元内的源最小叙事单元数——VN 据此定"开放幕数=单元数"（章→幕锚定）。 */
+  unitCount?: number;
 }
 
 /** 单个游戏单元 → 管线计划。 */
@@ -128,7 +176,7 @@ export function mapGameUnitToPipeline(
       pipelineTemplate: "tpl-vn-v2",
       complexity,
       targetNodeCount,
-      vnActCount: resolveVnActCount(targetNodeCount),
+      vnActCount: resolveVnActCount(targetNodeCount, opts.unitCount),
       topLevelMapping,
     };
   }
@@ -156,6 +204,25 @@ export function mapGameUnitToPipeline(
  */
 export function representativeGenreForFamily(family: PipelineFamily): string | undefined {
   return family === "vn" ? "adv-interactive" : undefined;
+}
+
+/**
+ * 目标输出形态 → 管线家族（§4.4d，与 representativeGenreForFamily 互为逆向）。
+ * 依 pipeline_template（含 "vn" → vn / "rpg" → rpg）优先，再看 genre_code 关键词兜底。
+ * 无法判定返回 undefined（由调用方回退缺省——IP 改编缺省 = vn）。
+ */
+export function familyFromTargetOutput(
+  target?: { genre_code?: string; pipeline_template?: string },
+): PipelineFamily | undefined {
+  if (!target) return undefined;
+  const tpl = (target.pipeline_template ?? "").toLowerCase();
+  if (tpl.includes("vn")) return "vn";
+  if (tpl.includes("rpg")) return "rpg";
+  const g = (target.genre_code ?? "").toLowerCase();
+  if (!g) return undefined;
+  if (/(vn|interactive|adv|avg|galgame|visual)/.test(g)) return "vn";
+  if (/rpg/.test(g)) return "rpg";
+  return undefined;
 }
 
 /** 整套游戏单元规划 → 一组管线计划（单品=1 个；系列=N 个）。 */

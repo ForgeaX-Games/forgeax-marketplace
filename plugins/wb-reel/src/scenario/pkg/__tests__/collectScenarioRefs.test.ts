@@ -194,6 +194,70 @@ describe('collectScenarioRefs · 全字段覆盖', () => {
     expect(sh1.videoMediaRef).toBe('pkg:m-shv1')
   })
 
+  it('每个 cell 带正确的 media 类别（video / image / audio）', () => {
+    const sc = minimalScenario()
+    const cells = collectScenarioRefs(sc)
+    const kindOf = (label: string) => cells.find((c) => c.label === label)?.media
+    expect(kindOf('scene/sc1/sceneVideos/0')).toBe('video')
+    expect(kindOf('scene/sc1/shot/sh1/video')).toBe('video')
+    expect(kindOf('scene/sc1/shot/sh1/keyframe')).toBe('image')
+    expect(kindOf('scene/sc1/audio/a1')).toBe('audio')
+    expect(kindOf('character/c1/refImage')).toBe('image')
+    // scene.media.ref 的 kind 非 VIDEO → image
+    expect(kindOf('scene/sc1/media')).toBe('image')
+  })
+
+  it('补齐扫描缺口：character.appearanceVariants[] 与 prop.variants[] 的 mediaId', () => {
+    const sc = minimalScenario()
+    sc.characters!.c1!.appearanceVariants = [
+      { id: 'var-suit', label: '便装', prompt: '', mediaId: 'm-var-suit' },
+      { id: 'var-none', label: '未上传', prompt: '' }, // 无 mediaId → 跳过
+    ]
+    sc.props!.p1!.variants = [
+      { id: 'pv-broken', label: '破损', prompt: '', mediaId: 'm-pv-broken' },
+    ]
+    const cells = collectScenarioRefs(sc)
+    const byLabel = new Map(cells.map((c) => [c.label, c]))
+    expect(byLabel.get('character/c1/variant/var-suit')?.get()).toBe('m-var-suit')
+    expect(byLabel.get('character/c1/variant/var-suit')?.media).toBe('image')
+    expect(byLabel.has('character/c1/variant/var-none')).toBe(false)
+    expect(byLabel.get('prop/p1/variant/pv-broken')?.get()).toBe('m-pv-broken')
+  })
+
+  it('补齐扫描：uiAssets[].mediaId 与 refMediaIds[]（v9 · UI 素材库）', () => {
+    const sc = minimalScenario()
+    sc.uiAssets = {
+      ui1: {
+        id: 'ui1',
+        name: '主角血条',
+        role: 'hp-bar',
+        matte: 'screen-black',
+        blendMode: 'screen',
+        lifecycle: 'hud',
+        mediaId: 'm-ui1',
+        refMediaIds: ['m-ui1-ref', 'none'],
+      },
+      ui2: {
+        id: 'ui2',
+        name: '未生成',
+        role: 'affinity',
+        matte: 'screen-black',
+        blendMode: 'screen',
+        lifecycle: 'transient',
+        // 无 mediaId → 跳过
+      },
+    }
+    const cells = collectScenarioRefs(sc)
+    const byLabel = new Map(cells.map((c) => [c.label, c]))
+    expect(byLabel.get('uiAsset/ui1/media')?.get()).toBe('m-ui1')
+    expect(byLabel.get('uiAsset/ui1/media')?.media).toBe('image')
+    expect(byLabel.get('uiAsset/ui1/ref/0')?.get()).toBe('m-ui1-ref')
+    // 'none' 占位跳过 → 无 ref/1
+    expect(byLabel.has('uiAsset/ui1/ref/1')).toBe(false)
+    // ui2 无成品图 → 无 media cell
+    expect(byLabel.has('uiAsset/ui2/media')).toBe(false)
+  })
+
   it('空 scenarios / 没有 shots / 没有 characters 等字段缺失也不抛', () => {
     const empty: Scenario = {
       id: 's',

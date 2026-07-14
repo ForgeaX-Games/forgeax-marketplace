@@ -21,6 +21,10 @@
  *   剧本级：
  *     · 删除 characters / locations / props （生图参考资料，Player 不直接引用）
  *     · 删除 uiStyle（Player 里目前不读，未来加 LOGO/封面再放回）
+ *     · 保留 uiAssets / hud（v9）—— 但只留被常驻 HUD 或存活场景贴纸引用到的
+ *       UI 素材(HudLayer / StickerLayer 运行时要用),未引用的裁掉省体积
+ *     · 保留 treeTheme（v10）—— 游戏内剧情树皮肤/关卡选择;其引用的背景/节点框
+ *       UI 部件也计入"被引用"集合,一并保留
  *     · 删除 originIdea / directorCustomPersona / directorStyle / visualStyle
  *       （这些都是生成阶段的 persona/prompt，和"播放"无关）
  *     · 保留 id / title / synopsis / rootSceneId / scenes / defaultCharMs / schemaVersion
@@ -76,6 +80,44 @@ export function prunePlaybackScenario(
     scenes[id] = scrubScene(s, opts)
   }
 
+  // UI 素材库(v9)：只保留运行时真正会用到的素材 —— 被常驻 HUD(scenario.hud)
+  // 或存活场景里的图片贴纸(stickerClip.uiAssetId)引用的那些；HUD 全保留(跨场)。
+  const referencedUiAssetIds = new Set<string>()
+  for (const el of scenario.hud ?? []) {
+    if (el.uiAssetId) referencedUiAssetIds.add(el.uiAssetId)
+  }
+  for (const s of Object.values(scenes)) {
+    for (const stk of s.stickerClips ?? []) {
+      if (stk.uiAssetId) referencedUiAssetIds.add(stk.uiAssetId)
+    }
+  }
+  // 剧情树主题(v10)：背景/节点框引用的 UI 部件也是运行时(BranchTreeReadonly)所需,不裁。
+  const tt = scenario.treeTheme
+  if (tt) {
+    for (const aid of [
+      tt.backgroundAssetId,
+      tt.nodeFrameAssetId,
+      tt.nodeFrameCurrentAssetId,
+      tt.nodeFrameLockedAssetId,
+    ]) {
+      if (aid) referencedUiAssetIds.add(aid)
+    }
+  }
+  // 全屏页面(v11)：页面背景/外框/自定义 slot 引用的 UI 部件都是运行时(ScreenOverlay)所需,不裁。
+  for (const scr of Object.values(scenario.uiScreens ?? {})) {
+    if (scr.backgroundAssetId) referencedUiAssetIds.add(scr.backgroundAssetId)
+    if (scr.frameAssetId) referencedUiAssetIds.add(scr.frameAssetId)
+    for (const slot of scr.slots ?? []) {
+      if (slot.assetId) referencedUiAssetIds.add(slot.assetId)
+    }
+  }
+  const prunedUiAssets: Scenario['uiAssets'] = {}
+  for (const [id, ua] of Object.entries(scenario.uiAssets ?? {})) {
+    if (referencedUiAssetIds.has(id)) prunedUiAssets[id] = ua
+  }
+  const hasUiAssets = Object.keys(prunedUiAssets).length > 0
+  const prunedHud = (scenario.hud ?? []).filter((el) => prunedUiAssets[el.uiAssetId])
+
   const next: Scenario = {
     id: scenario.id,
     title: scenario.title,
@@ -90,6 +132,15 @@ export function prunePlaybackScenario(
     // 背包系统：物品注册表（含图标 mediaId）+ 模块开关都是运行时所必需的
     ...(scenario.items ? { items: scenario.items } : {}),
     ...(scenario.modules ? { modules: scenario.modules } : {}),
+    // UI 素材库 / 常驻 HUD(v9)：运行时叠层与 HudLayer 所需(uiStyle 仍被丢)
+    ...(hasUiAssets ? { uiAssets: prunedUiAssets } : {}),
+    ...(prunedHud.length ? { hud: prunedHud } : {}),
+    // 剧情树主题(v10)：游戏内剧情树皮肤/关卡选择配置,运行时 BranchTreeReadonly 所需
+    ...(scenario.treeTheme ? { treeTheme: scenario.treeTheme } : {}),
+    // 全屏页面(v11)：真背包 / 主菜单 / 开宝箱 / 搜刮页等整页 UI 定义,运行时 ScreenOverlay 所需
+    ...(scenario.uiScreens && Object.keys(scenario.uiScreens).length
+      ? { uiScreens: scenario.uiScreens }
+      : {}),
   }
 
   return { scenario: next, includedScenes, droppedScenes }
@@ -166,6 +217,8 @@ function scrubScene(scene: Scene, opts: PrunePlaybackOptions): Scene {
   // 文字叠加（剪映式贴字）+ 搜索段（定格循环找物）都参与运行时叠层/玩法
   if (scene.textOverlays) next.textOverlays = scene.textOverlays.slice()
   if (scene.searchSegments) next.searchSegments = scene.searchSegments.slice()
+  // 全屏页面触发(v11)：时间轴到点弹全屏页面,运行时导航/玩法所需
+  if (scene.screens) next.screens = scene.screens.slice()
   // 剪映式后期效果（滤镜/调节/特效/贴纸/转场/首尾动画）—— 全是运行时实时渲染所需
   if (scene.filterClips) next.filterClips = scene.filterClips.slice()
   if (scene.adjustClips) next.adjustClips = scene.adjustClips.slice()

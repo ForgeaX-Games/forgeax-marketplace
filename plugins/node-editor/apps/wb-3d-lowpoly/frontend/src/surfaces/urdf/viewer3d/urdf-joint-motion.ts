@@ -118,6 +118,56 @@ export function computePreviewJointValuesAtTime(spec: UrdfSpec, timeSec: number)
   return resolveJointValues(explicit, spec)
 }
 
+/**
+ * 在全局时间 t（秒）下，从作者 clip q(t) 计算所有关节值（含 mimic）。
+ * 相邻帧线性插值；loop 时以 frameCount/fps 为周期无缝循环（frame 末尾回绕到 0），
+ * 非 loop 时把时间夹到 [0, (frameCount-1)/fps] 并停在末帧。无值 / mimic 关节由
+ * resolveJointValues 按 URDF 关系补齐。clip 非法（frameCount<2）时全部回落到 0。
+ * 与 buildAuthoredAnimationClip 同源，供实时预览（autoAnimate）复用。
+ */
+export function computeAuthoredJointValuesAtTime(
+  spec: UrdfSpec,
+  clip: AuthoredJointAnimationClip,
+  timeSec: number,
+): Map<string, number> {
+  const explicit = new Map<string, number>()
+  const frameCount = clip.frameCount
+  const fps = Number.isFinite(clip.fps) && clip.fps > 0 ? clip.fps : 30
+  if (!Number.isFinite(frameCount) || frameCount < 2) {
+    return resolveJointValues(explicit, spec)
+  }
+  const loop = clip.loop ?? false
+
+  let framePos: number
+  if (loop) {
+    // 周期 = frameCount 帧：末帧后回绕到 frame 0（作者 q(t) 通常是周期的）。
+    framePos = THREE.MathUtils.euclideanModulo(timeSec * fps, frameCount)
+  } else {
+    framePos = Math.max(0, Math.min(frameCount - 1, timeSec * fps))
+  }
+  const i0 = Math.floor(framePos)
+  const frac = framePos - i0
+  const i1 = loop ? (i0 + 1) % frameCount : Math.min(frameCount - 1, i0 + 1)
+
+  for (const [jointName, series] of Object.entries(clip.channels)) {
+    if (series.length === 0) continue
+    const a = series[Math.min(series.length - 1, i0)]
+    if (!Number.isFinite(a)) continue
+    const b = series[Math.min(series.length - 1, i1)]
+    const value = Number.isFinite(b) ? a + (b - a) * frac : a
+    explicit.set(jointName, value)
+  }
+  return resolveJointValues(explicit, spec)
+}
+
+/** 作者 clip 的预览循环时长（秒）：loop 用 frameCount/fps，非 loop 用 (frameCount-1)/fps。 */
+export function authoredAnimationDuration(clip: AuthoredJointAnimationClip): number {
+  const frameCount = clip.frameCount
+  const fps = Number.isFinite(clip.fps) && clip.fps > 0 ? clip.fps : 30
+  if (!Number.isFinite(frameCount) || frameCount < 2) return 0
+  return (clip.loop ? frameCount : frameCount - 1) / fps
+}
+
 export function applyJointValue(
   node: THREE.Object3D,
   spec: UrdfJoint,
@@ -234,4 +284,96 @@ export function buildUrdfPreviewAnimationClip(
 
   if (tracks.length === 0) return null
   return new THREE.AnimationClip(`${spec.name}_joint_preview`, duration, tracks)
+}
+
+/**
+ * 作者关节轨迹 q(t)：以 URDF 关节名为键的每关节标量数组（弧度 revolute/continuous |
+ * 米 prismatic）。结构与后端 g_bake_animation 的 `animation` 端口输出一致（跨包无法
+ * 直接共享类型，此处保持结构兼容的本地定义）。
+ */
+export interface AuthoredJointAnimationClip {
+  name: string
+  fps: number
+  frameCount: number
+  loop?: boolean
+  channels: Record<string, number[]>
+}
+
+/**
+ * 按作者 clip 烘焙一条 AnimationClip：采样循环与 buildUrdfPreviewAnimationClip 一致，
+ * 只是每帧的显式关节值来自 clip.channels（其余关节走 resolveJointValues 补 mimic / 静止 0）。
+ * clip 非法（frameCount < 2 / 无可烘关节 / 无 track）时返回 null，交由调用方回退。
+ */
+export function buildAuthoredAnimationClip(
+  spec: UrdfSpec,
+  clip: AuthoredJointAnimationClip,
+  jointNodes: Map<string, THREE.Object3D>,
+  exportRoot: THREE.Object3D,
+): THREE.AnimationClip | null {
+  const frameCount = clip.frameCount
+  if (!Number.isFinite(frameCount) || frameCount < 2) return null
+  const fps = Number.isFinite(clip.fps) && clip.fps > 0 ? clip.fps : 30
+  const duration = (frameCount - 1) / fps
+  const times = Array.from({ length: frameCount }, (_, i) => (i / (frameCount - 1)) * duration)
+
+  const animatable = spec.joints.filter((joint) => {
+    if (!isAnimatableJoint(joint)) return false
+    return jointNodes.has(joint.name)
+  })
+  if (animatable.length === 0) return null
+
+  const positionSamples = new Map<string, number[]>()
+  const rotationSamples = new Map<string, number[]>()
+  for (const joint of animatable) {
+    if (joint.type === 'prismatic') positionSamples.set(joint.name, [])
+    else rotationSamples.set(joint.name, [])
+  }
+
+  for (let frame = 0; frame < frameCount; frame++) {
+    const explicit = new Map<string, number>()
+    for (const [jointName, series] of Object.entries(clip.channels)) {
+      if (series.length === 0) continue
+      const idx = Math.max(0, Math.min(series.length - 1, frame))
+      const value = series[idx]
+      if (Number.isFinite(value)) explicit.set(jointName, value)
+    }
+    // resolveJointValues 会填 mimic（按 URDF 关系）并把无值关节兜底为 0。
+    const resolved = resolveJointValues(explicit, spec)
+    applyJointValuesToNodes(jointNodes, spec, resolved)
+    exportRoot.updateMatrixWorld(true)
+
+    for (const joint of animatable) {
+      const node = jointNodes.get(joint.name)
+      if (!node) continue
+      if (joint.type === 'prismatic') {
+        positionSamples.get(joint.name)?.push(node.position.x, node.position.y, node.position.z)
+      } else {
+        rotationSamples.get(joint.name)?.push(
+          node.quaternion.x,
+          node.quaternion.y,
+          node.quaternion.z,
+          node.quaternion.w,
+        )
+      }
+    }
+  }
+
+  const tracks: THREE.KeyframeTrack[] = []
+  for (const joint of animatable) {
+    const node = jointNodes.get(joint.name)
+    if (!node) continue
+    if (joint.type === 'prismatic') {
+      const values = positionSamples.get(joint.name)
+      if (!values || values.length === 0) continue
+      tracks.push(new THREE.VectorKeyframeTrack(`${node.name}.position`, times, values))
+      continue
+    }
+    const values = rotationSamples.get(joint.name)
+    if (!values || values.length === 0) continue
+    tracks.push(new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, values))
+  }
+
+  if (tracks.length === 0) return null
+  const clipName = clip.name?.trim() ? clip.name.trim() : `${spec.name}_authored`
+  return new THREE.AnimationClip(clipName, duration, tracks)
 }

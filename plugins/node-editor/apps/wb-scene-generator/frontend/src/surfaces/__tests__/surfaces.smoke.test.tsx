@@ -274,6 +274,22 @@ describe('RendererSurface', () => {
     expect(splitter.getAttribute('aria-orientation')).toBe('horizontal')
   })
 
+  it('provides a draggable splitter to resize the layers panel width', () => {
+    const { container } = render(<RendererSurface client={fakeClient()} />)
+    const splitter = container.querySelector('.renderer-layers__width-splitter') as HTMLElement
+    expect(splitter.getAttribute('aria-orientation')).toBe('vertical')
+    const panel = container.querySelector('.renderer-layers') as HTMLElement
+    expect(panel.style.width).toBe('220px')
+
+    act(() => {
+      fireEvent.mouseDown(splitter, { clientX: 400 })
+      fireEvent.mouseMove(window, { clientX: 360 })
+      fireEvent.mouseUp(window)
+    })
+
+    expect(Number.parseInt(panel.style.width, 10)).toBe(260)
+  })
+
   it('selects, scrolls, and starts renaming a newly added editable layer', async () => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
@@ -402,7 +418,7 @@ describe('RendererSurface', () => {
     ]))
     expect(rows[1].classList.contains('renderer-layer-row--child')).toBe(true)
     expect(rows[2].classList.contains('renderer-layer-row--child')).toBe(true)
-    expect((rows[2] as HTMLElement).style.paddingLeft).toBe('34px')
+    expect((rows[2] as HTMLElement).style.paddingLeft).toBe('28px')
   })
 
   it('collapses descendants for output rows whose parent is also a layer', () => {

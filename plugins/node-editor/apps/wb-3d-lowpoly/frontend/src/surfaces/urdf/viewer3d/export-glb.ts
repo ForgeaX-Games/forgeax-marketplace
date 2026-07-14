@@ -2,9 +2,11 @@
 import * as THREE from 'three'
 import type { UrdfSpec } from './urdf-parser'
 import {
+  buildAuthoredAnimationClip,
   buildUrdfPreviewAnimationClip,
   findJointMotionNodes,
   previewAnimationDuration,
+  type AuthoredJointAnimationClip,
 } from './urdf-joint-motion'
 
 /** PropertyBinding / glTF 会把 `.` `:` `/` 当作路径分隔符，URDF 节点名需先清洗。 */
@@ -43,15 +45,19 @@ async function parseToGlbBlob(
     : new Blob([JSON.stringify(glb)], { type: 'model/gltf+json' })
 }
 
-// 带动画的 GLB：把 URDF 关节预览轨迹烘成 glTF animation track。需要 spec 来推导
-// 每个关节的运动范围；clip 必须在 sanitize 之后构建，否则 track 的目标节点名对不上。
+// 带动画的 GLB：把关节轨迹烘成 glTF animation track。需要 spec 来推导每个关节的
+// 运动范围 / mimic 关系；clip 必须在 sanitize 之后构建，否则 track 的目标节点名对不上。
+// 有作者 clip（authoredClip，来自 g_bake_animation）就烘它，否则回退到程序化预览。
 export async function exportAnimatedGlbBlob(
   exportRoot: THREE.Object3D,
   spec: UrdfSpec,
+  authoredClip?: AuthoredJointAnimationClip | null,
 ): Promise<Blob> {
   const jointNodes = findJointMotionNodes(exportRoot)
   sanitizeExportSceneNames(exportRoot)
-  const clip = buildUrdfPreviewAnimationClip(spec, jointNodes, exportRoot)
+  const clip = authoredClip
+    ? buildAuthoredAnimationClip(spec, authoredClip, jointNodes, exportRoot)
+    : buildUrdfPreviewAnimationClip(spec, jointNodes, exportRoot)
   return parseToGlbBlob(exportRoot, clip ? [clip] : [])
 }
 

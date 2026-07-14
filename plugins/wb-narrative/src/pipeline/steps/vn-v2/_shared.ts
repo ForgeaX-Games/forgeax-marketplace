@@ -15,6 +15,20 @@ import type { NarrativeContext, VnBranchedBeat } from "../../../types/index.js";
 import { chunkArray } from "../../topo-sort.js";
 import { runParallel, type ParallelTask } from "../../parallel-runner.js";
 
+/**
+ * 从正文首句派生一个简短标题（后端兜底）。
+ * 仅当 LLM 未产出 title 时启用；正常情况下用 LLM 给的真标题。前端读不到 title 时的
+ * 兜底逻辑与此同源，两端一致。
+ */
+export function deriveBeatTitleFromContent(content: string | undefined, fallback: string): string {
+  const text = (content ?? "").trim();
+  if (!text) return fallback;
+  const first = text.split(/[。！？!?\n;；，,]/)[0]?.trim() ?? "";
+  const base = first || text;
+  const MAX = 14;
+  return base.length > MAX ? base.slice(0, MAX) : base;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
  *  复杂度档位 → VN 节点预算（与前端 COMPLEXITY_LEVELS 挡位对齐）
  *  ────────────────────────────────────────────────────────────────────────

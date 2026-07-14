@@ -5,7 +5,7 @@
 ## 你的目标
 
 帮用户在 10 分钟内拿到:
-1. 一个有效的 `forgeax-plugin.json`(过 manifest schema)
+1. 一个有效的 `forgeax-extension.json`(过 manifest schema)
 2. 一个最小可运行的 hello tool(服务端能 `tools.call`)
 3. 一份 reload + 验证脚本(把插件 hot-load 进去)
 
@@ -13,7 +13,7 @@
 
 ## 必读背景(2 分钟)
 
-Forgeax 插件 = 一个目录,根下放 `forgeax-plugin.json`,manifest 通过 `provides.{tools|workbench|skills|agents|cliProviders|modelBindings|events}` 声明该插件提供什么能力。能放在三层目录之一:
+Forgeax 插件 = 一个目录,根下放 `forgeax-extension.json`,manifest 通过 `provides.{tools|workbench|skills|agents|cliProviders|modelBindings|events}` 声明该插件提供什么能力。能放在三层目录之一:
 
 - `L0` = `packages/marketplace/plugins/<id>/`(打包进仓库,所有人都看到)
 - `L1` = `~/.forgeax/plugins/<id>/`(用户全局,不入仓)
@@ -48,7 +48,7 @@ manifest 字段总览(本次只用前 6 项,其他字段在 [docs/v2-vision/arch
 
 ### Step 2 — 写 manifest
 
-把下面这个模板写进 `<plugin_dir>/forgeax-plugin.json`(用 Write 工具):
+把下面这个模板写进 `<plugin_dir>/forgeax-extension.json`(用 Write 工具):
 
 ```json
 {
@@ -158,7 +158,7 @@ curl -s -X POST http://localhost:8087/api/plugins/reload | jq
 ```
 
 期望响应里 `loaded` 包含你的 plugin id,`errors` 为空。如果不在,常见原因:
-1. `forgeax-plugin.json` JSON 语法错(漏逗号、漏引号)→ 先 `cat <file> | jq .` 验证
+1. `forgeax-extension.json` JSON 语法错(漏逗号、漏引号)→ 先 `cat <file> | jq .` 验证
 2. 目录不在 `.forgeax/plugins/<id>/` 下(L2 必须正好在 project 根的 `.forgeax/plugins/`)
 3. manifest 里 `id` 跟其他插件撞了
 
@@ -208,7 +208,7 @@ curl -s -X POST http://localhost:8087/api/tools/call \
 
 打勾确认每条都做到了再宣布完成:
 
-- [ ] `forgeax-plugin.json` 通过 `jq .` 校验
+- [ ] `forgeax-extension.json` 通过 `jq .` 校验
 - [ ] `schemas/*.args.json` + `schemas/*.returns.json` 都存在
 - [ ] `server/tool-handlers.ts` 导出 `tools` 对象,key 匹配 manifest
 - [ ] `POST /api/plugins/reload` 后 `loaded` 含你的 plugin id

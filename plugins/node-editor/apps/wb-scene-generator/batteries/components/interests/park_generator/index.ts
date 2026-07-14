@@ -1,11 +1,11 @@
 /**
- * park_generator: 根据区域掩码列表批量生成公园布局（草坪/小径/花圃/树木/水景）
- * 输入：gridList (array | grid) — 可用区域掩码列表或单个掩码网格; algorithm (string) — 布局算法;
+ * park_generator: 在单张区域掩码上生成公园布局（草坪/小径/花圃/树木/水景）（DataTree 形式）
+ * 输入：inputGrid (grid/item) — 单张可用区域掩码网格; algorithm (string) — 布局算法;
  *       pathWidth/treeCount/spokeCount (number) — 布局参数; seed (number) — 随机种子
- *       mergeOutput (boolean, default true) — 是否将所有网格的同语义层合并为一张网格
  * 输出：
- *   outputGridList (array) — 单值网格列表（拍平）：每张公园按语义拆分，每张只含一种语义
- *   outputNameList (array) — 名称清单，格式 [{id, name, type:"tile"}]
+ *   outputGrid (grid/item) — 单张多值网格（1=草坪，2=小径，3=花圃，4=树木，5=池塘）
+ *   outputNameList (array/item) — 名称清单，仅含实际出现的 id，格式 [{id, name, type}]
+ * 网格列表由引擎按 DataTree 自动逐张 fanout。
  */
 
 type Grid = number[][];
@@ -313,134 +313,48 @@ const PARK_LABELS: Record<number, string> = {
 // Values that should be output as "asset" type (point-object placements)
 const PARK_ASSET_VALS = new Set([4]); // 树木 = asset
 
-/**
- * 非合并模式：将单张多值网格拆分为单值网格列表 + 名称清单。
- */
-function splitToSingleValueGrids(
-  multiGrid: Grid,
-  parkIndex: number,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
-  const rows = multiGrid.length;
-  const cols = multiGrid[0]?.length ?? 0;
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  const valSet = new Set<number>();
-  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  for (const val of sortedVals) {
-    const singleGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        if (multiGrid[r][c] === val) singleGrid[r][c] = nextId.value;
-
-    const label = PARK_LABELS[val] ?? `类型${val}`;
-    const entryType = PARK_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(singleGrid);
-    nameList.push({ id: nextId.value, name: `公园${parkIndex}-${label}`, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+function isGrid(v: unknown): v is Grid {
+  return Array.isArray(v) && Array.isArray((v as unknown[])[0]) &&
+    typeof (v as Grid)[0]?.[0] === "number";
 }
 
-/**
- * 合并模式：将所有多值网格按语义值合并，相同语义值的格子写入同一张网格（使用同一 ID）。
- */
-function mergeBySemantics(
-  multiGrids: Grid[],
-  rows: number,
-  cols: number,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
+// Build the name list for the values actually present in the multi-value grid.
+function buildNameList(multiGrid: Grid): NameEntry[] {
   const valSet = new Set<number>();
-  for (const mg of multiGrids)
-    for (const row of mg)
-      for (const v of row)
-        if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  for (const val of sortedVals) {
-    const merged: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    const id = nextId.value;
-    for (const mg of multiGrids)
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (mg[r]?.[c] === val) merged[r][c] = id;
-
-    const label = PARK_LABELS[val] ?? `类型${val}`;
-    const entryType = PARK_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(merged);
-    nameList.push({ id, name: label, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
+  return [...valSet].sort((a, b) => a - b).map((val) => ({
+    id: val,
+    name: PARK_LABELS[val] ?? `类型${val}`,
+    type: PARK_ASSET_VALS.has(val) ? "asset" : "tile",
+  }));
 }
 
 export function parkGenerator(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGridList = input.gridList;
+  const rawGrid     = input.inputGrid;
   const algorithm   = typeof input.algorithm  === "string" ? input.algorithm  : "organic";
   const pathWidth   = typeof input.pathWidth  === "number" ? Math.max(1, Math.floor(input.pathWidth))  : 2;
   const treeCount   = typeof input.treeCount  === "number" ? Math.max(0, Math.floor(input.treeCount))  : 20;
   const spokeCount  = typeof input.spokeCount === "number" ? Math.max(3, Math.min(8, Math.floor(input.spokeCount))) : 6;
   const seed        = typeof input.seed       === "number" ? Math.floor(input.seed) : 0;
-  const mergeOutput = input.mergeOutput === false ? false : true; // default true
 
-  // Support both a single grid and an array of grids
-  let gridList: Grid[];
-  if (Array.isArray(rawGridList)) {
-    if (rawGridList.length === 0) return { error: "gridList is required" };
-    if (typeof rawGridList[0]?.[0] === "number") {
-      gridList = [rawGridList as unknown as Grid];
-    } else {
-      gridList = rawGridList as Grid[];
-    }
-  } else {
-    return { error: "gridList is required" };
+  if (!isGrid(rawGrid) || rawGrid.length === 0 || !rawGrid[0] || rawGrid[0].length === 0) {
+    return { error: "inputGrid is required" };
   }
+  const grid = rawGrid as Grid;
 
-  const rows = gridList[0]?.length ?? 0;
-  const cols = gridList[0]?.[0]?.length ?? 0;
   const baseSeed = seed === 0 ? Date.now() : seed;
-  const nextId = { value: 1 };
-  const multiGrids: Grid[] = [];
-
-  gridList.forEach((grid, i) => {
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return;
-    const rng = makeLCG(baseSeed + i * 999983);
-    let multiGrid: Grid;
-    switch (algorithm) {
-      case "geometric":
-        multiGrid = generateGeometric(grid, pathWidth, treeCount, rng);
-        break;
-      case "radial":
-        multiGrid = generateRadial(grid, pathWidth, treeCount, spokeCount, rng);
-        break;
-      default: // "organic"
-        multiGrid = generateOrganic(grid, pathWidth, treeCount, rng);
-    }
-    multiGrids.push(multiGrid);
-  });
-
-  if (multiGrids.length === 0) return { outputGridList: [], outputNameList: [] };
-
-  if (mergeOutput) {
-    const { grids, nameList } = mergeBySemantics(multiGrids, rows, cols, nextId);
-    return { outputGridList: grids, outputNameList: nameList };
+  const rng = makeLCG(baseSeed);
+  let multiGrid: Grid;
+  switch (algorithm) {
+    case "geometric":
+      multiGrid = generateGeometric(grid, pathWidth, treeCount, rng);
+      break;
+    case "radial":
+      multiGrid = generateRadial(grid, pathWidth, treeCount, spokeCount, rng);
+      break;
+    default: // "organic"
+      multiGrid = generateOrganic(grid, pathWidth, treeCount, rng);
   }
 
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  multiGrids.forEach((mg, i) => {
-    const { grids, nameList } = splitToSingleValueGrids(mg, i + 1, nextId);
-    outputGridList.push(...grids);
-    outputNameList.push(...nameList);
-  });
-  return { outputGridList, outputNameList };
+  return { outputGrid: multiGrid, outputNameList: buildNameList(multiGrid) };
 }

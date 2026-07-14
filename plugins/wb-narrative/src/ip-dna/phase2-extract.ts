@@ -25,6 +25,10 @@ import type {
   TemplateStoryStructure,
   PlotTreeTopology,
   PlotTree,
+  PlotTreeNode,
+  EndingType,
+  ExtractionLayer,
+  LayeredOperators,
 } from "../types/narrative-ip-dna.js";
 import type {
   NarrativeContext,
@@ -80,13 +84,23 @@ export function aggregateTemplates(children: NarrativeTemplate[]): NarrativeTemp
     emotion_experience: joinNonEmpty(children.map((c) => c.core_elements.emotion_experience), "；"),
   };
 
-  // 保留 plot_tree（§4.3）：把子单元的剧情树并入父级，避免上卷时丢失实质剧情结构。
+  // 保留 plot_tree（§4.3）：把子单元的剧情树并入父级（加单元前缀防碰撞），避免上卷丢失实质剧情结构。
   const childTrees = children
     .map((c) => c.story_structure.plot_tree)
     .filter((t): t is PlotTree => !!t && t.nodes.length > 0);
+  const mergedTree = childTrees.length > 0 ? mergePlotTrees(childTrees) : undefined;
   const story_structure: TemplateStoryStructure = {
-    topology: rollupTopology(children.map((c) => c.story_structure.topology)),
-    plot_tree: childTrees.length > 0 ? mergePlotTrees(childTrees) : undefined,
+    // topology 与合并后剧情树的实际节点一致；无 plot_tree 时才回退按子拓扑求和（best-effort）。
+    topology: mergedTree
+      ? mergedTree.topology
+      : {
+          nodeCount: sum(children.map((c) => c.story_structure.topology.nodeCount)),
+          startCount: sum(children.map((c) => c.story_structure.topology.startCount)),
+          endCount: sum(children.map((c) => c.story_structure.topology.endCount)),
+          pivotCount: sum(children.map((c) => c.story_structure.topology.pivotCount)),
+          mergeCount: sum(children.map((c) => c.story_structure.topology.mergeCount)),
+        },
+    plot_tree: mergedTree,
   };
 
   return {
@@ -99,29 +113,60 @@ export function aggregateTemplates(children: NarrativeTemplate[]): NarrativeTemp
 }
 
 /**
- * 合并多个子单元剧情树为一棵（§4.3）：按 id 去重拼接节点，entry 取首棵，topology 重算。
- * 上卷保留实质剧情结构（节点/边/分支），而非仅留拓扑计数。
+ * 合并多个子单元剧情树为一棵（§4.3）——修"topology 计数与实际节点断裂"：
+ *   ① 给每棵子树的节点 id 加**单元前缀**（各章都从 1.1 起编号会跨单元互撞、被去重丢弃），
+ *      同步重写所有引用（prevNodes / nextNodes.to / options.leadsTo）；拼接后无碰撞、不丢节点。
+ *   ② topology 按合并后的**实际节点** nodeTypes 重算（不再简单相加子 topology，杜绝 58≠12）。
+ * entry 取首棵（对齐 collectLeafIds 的 index 序）。
  */
 function mergePlotTrees(trees: PlotTree[]): PlotTree {
-  const byId = new Map<string, PlotTree["nodes"][number]>();
-  for (const tree of trees) {
-    for (const n of tree.nodes) if (!byId.has(n.id)) byId.set(n.id, n);
-  }
-  const nodes = [...byId.values()];
+  const prefixed = trees.map((t, i) => prefixPlotTree(t, `u${i + 1}:`));
+  const nodes = prefixed.flatMap((t) => t.nodes);
   return {
     nodes,
-    entryNodeId: trees[0]?.entryNodeId ?? nodes[0]?.id ?? "",
-    topology: rollupTopology(trees.map((t) => t.topology)),
+    entryNodeId: prefixed[0]?.entryNodeId ?? nodes[0]?.id ?? "",
+    topology: recomputeTopology(nodes),
   };
 }
 
-function rollupTopology(tops: PlotTreeTopology[]): PlotTreeTopology {
+/** 给剧情树整棵加节点 id 前缀，并同步重写所有引用，避免跨单元 id 碰撞。 */
+function prefixPlotTree(tree: PlotTree, prefix: string): PlotTree {
+  const remap = (id: string): string => `${prefix}${id}`;
+  const nodes: PlotTreeNode[] = tree.nodes.map((n) => ({
+    ...n,
+    id: remap(n.id),
+    prevNodes: (n.prevNodes ?? []).map(remap),
+    nextNodes: (n.nextNodes ?? []).map((e) => ({ ...e, to: remap(e.to) })),
+    ...(n.options ? { options: n.options.map((o) => ({ ...o, leadsTo: remap(o.leadsTo) })) } : {}),
+  }));
   return {
-    nodeCount: sum(tops.map((t) => t.nodeCount)),
-    startCount: sum(tops.map((t) => t.startCount)),
-    endCount: sum(tops.map((t) => t.endCount)),
-    pivotCount: sum(tops.map((t) => t.pivotCount)),
-    mergeCount: sum(tops.map((t) => t.mergeCount)),
+    nodes,
+    entryNodeId: tree.entryNodeId ? remap(tree.entryNodeId) : (nodes[0]?.id ?? ""),
+    topology: tree.topology,
+  };
+}
+
+/** 按实际节点 nodeTypes 重算拓扑（nodeCount = 节点数；各类型按命中计数；统计结局分型）。 */
+function recomputeTopology(nodes: PlotTreeNode[]): PlotTreeTopology {
+  let startCount = 0, endCount = 0, pivotCount = 0, mergeCount = 0;
+  const endingCountsByType: Partial<Record<EndingType, number>> = {};
+  for (const n of nodes) {
+    const types = n.nodeTypes ?? [];
+    if (types.includes("start")) startCount++;
+    if (types.includes("pivot")) pivotCount++;
+    if (types.includes("merge")) mergeCount++;
+    if (types.includes("end")) {
+      endCount++;
+      if (n.endingType) endingCountsByType[n.endingType] = (endingCountsByType[n.endingType] ?? 0) + 1;
+    }
+  }
+  return {
+    nodeCount: nodes.length,
+    startCount,
+    endCount,
+    pivotCount,
+    mergeCount,
+    ...(Object.keys(endingCountsByType).length > 0 ? { endingCountsByType } : {}),
   };
 }
 
@@ -240,6 +285,62 @@ export async function synthesizeParentSummary(
   }
 }
 
+const PARENT_TEMPLATE_SYNTHESIS_SYSTEM = loadIpDnaPrompt(
+  "parent-template-synthesis",
+  `你是叙事内核综合助手。给定由若干下层叙事单元「拼接」而来的世界观与核心要素（往往重复、冗长、多段罗列），请**综合提炼**成该父层级**连贯统一的一份**：合并同类、去重、抽象出贯穿主线，保留关键差异与张力；忠实原著、不臆造原文没有的设定。
+- worldview.setting：统一的世界基本规则与背景（整体连贯，非各段罗列）。
+- worldview.scene_structure：主要场景的结构脉络（可分点，但整体连贯）。
+- worldview.item_inventory：关键道具/资产清单（去重归并）。
+- core_elements.core_conflict：贯穿本层级的**核心冲突主线**（一段连贯陈述，非多段并列流水账）。
+- core_elements.emotion_experience：整体情感体验基调（凝练，非逐章罗列）。
+仅输出 JSON：{"worldview":{"setting":"","scene_structure":"","item_inventory":""},"core_elements":{"core_conflict":"","emotion_experience":""}}。`,
+);
+
+/**
+ * LLM 综合父层级的世界观 + 核心要素（§4.2c / §5.1b 重整）——修 Bug E"顶层 core_conflict/世界观是多章朴素拼接"。
+ * 输入 = 确定性上卷后的 template（其 core_conflict/emotion/worldview 为多子单元 joinNonEmpty 拼接串）；
+ * 输出 = 综合后连贯统一的 worldview + core_elements 子字段。subject/theme/literature_style 仍取确定性首非空（稳定不动）。
+ * 无 LLM / 失败 → 原样返回确定性拼接结果（诚实降级，不抛错；算子/质量只增强不阻断，§3.3）。
+ */
+export async function synthesizeParentTemplateFields(
+  llm: LLMClient | undefined,
+  title: string,
+  aggregated: NarrativeTemplate,
+): Promise<Pick<NarrativeTemplate, "worldview" | "core_elements">> {
+  const worldview = aggregated.worldview;
+  const core_elements = aggregated.core_elements;
+  if (!llm) return { worldview, core_elements };
+  try {
+    const input = [
+      `# 父层级标题\n${title}`,
+      `# 世界观设定（拼接待综合）\n${worldview.setting}`,
+      `# 主要场景结构（拼接待综合）\n${worldview.scene_structure}`,
+      `# 道具清单（拼接待综合）\n${worldview.item_inventory}`,
+      `# 核心冲突（拼接待综合）\n${core_elements.core_conflict}`,
+      `# 情感体验（拼接待综合）\n${core_elements.emotion_experience}`,
+    ].join("\n\n");
+    const raw = await llm.callWithRetry(PARENT_TEMPLATE_SYNTHESIS_SYSTEM, input, {
+      responseFormat: "json",
+      temperature: 0.3,
+    });
+    const parsed = parseJSON<{ worldview?: Partial<TemplateWorldview>; core_elements?: Partial<TemplateCoreElements> }>(raw);
+    return {
+      worldview: {
+        setting: parsed.worldview?.setting?.trim() || worldview.setting,
+        scene_structure: parsed.worldview?.scene_structure?.trim() || worldview.scene_structure,
+        item_inventory: parsed.worldview?.item_inventory?.trim() || worldview.item_inventory,
+      },
+      core_elements: {
+        ...core_elements,
+        core_conflict: parsed.core_elements?.core_conflict?.trim() || core_elements.core_conflict,
+        emotion_experience: parsed.core_elements?.emotion_experience?.trim() || core_elements.emotion_experience,
+      },
+    };
+  } catch {
+    return { worldview, core_elements }; // 降级：保留确定性拼接。
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 父层算子提取（§3.2 分层提炼策略）：父层算子的关注维度与底层不同——
 //   中层（章/部/卷/季）：文学风格 / 主题 / 整体情节 / 叙事框架-顺序-节奏-策略 / 情节技巧；
@@ -275,7 +376,8 @@ export function normalizeOperator(raw: Partial<NarrativeOperator>, fallbackUid: 
     usage_guide: (raw.usage_guide ?? "").trim(),
     example: (raw.example ?? "").trim(),
     knowledge_location: (raw.knowledge_location ?? "").trim(),
-    knowledge_domain: (raw.knowledge_domain ?? "").trim(),
+    // P1-2：归一到五大核心分类（原自由文本/空值 → 规范分类），供三视角分组与覆盖统计。
+    knowledge_domain: classifyOperatorDomain(raw),
   };
 }
 
@@ -374,6 +476,10 @@ export async function aggregateSubtreeTemplatesRecursive(
         childSummaries.length > batchSize
           ? await batchCompressSummaries(options.llm, node.title, childSummaries, batchSize)
           : await synthesizeParentSummary(options.llm, node.title, childSummaries);
+      // P0-2（§5.1b）：世界观/核心要素也做 LLM 综合（替换朴素拼接），产出连贯统一的层级内核。
+      const synth = await synthesizeParentTemplateFields(options.llm, node.title, aggregated);
+      aggregated.worldview = synth.worldview;
+      aggregated.core_elements = synth.core_elements;
     }
     node.template = aggregated;
     // §3.2 父层算子：按本层维度 LLM 提取自身算子（与叶子微观算子并列，非其并集）。
@@ -403,6 +509,143 @@ export function collectOperatorPool(dna: NarrativeIpDna, rootId: string): Narrat
   return [...pool.values()];
 }
 
+/** levelType → 提取层（§3.2）：complete→top、part/chapter→mid、unit→leaf。 */
+export function levelTypeToLayer(levelType: HierarchyLevelType): ExtractionLayer {
+  if (levelType === "complete") return "top";
+  if (levelType === "unit") return "leaf";
+  return "mid";
+}
+
+function dedupeOperatorsByUid(ops: NarrativeOperator[]): NarrativeOperator[] {
+  const map = new Map<string, NarrativeOperator>();
+  for (const op of ops) if (op?.uid && !map.has(op.uid)) map.set(op.uid, op);
+  return [...map.values()];
+}
+
+/** 判定算子是否属于全局贯穿子集（情感体验/关系/环境/人称/认知类，§3.2 global）。 */
+function isGlobalOperator(op: NarrativeOperator): boolean {
+  if (classifyOperatorDomain(op) === "情感体验") return true;
+  const hay = `${op.name} ${op.definition} ${op.usage_guide} ${op.knowledge_domain} ${op.knowledge_location}`.toLowerCase();
+  return /关系|环境|人称|认知|视角|弧光|性格|空间|版图|贯穿/.test(hay);
+}
+
+/**
+ * 按提取层归桶（§3.2）：top=顶层/complete、mid=章部祖先、leaf=选中叶子、global=贯穿子集。
+ * extraTopOps：游戏单元 scoped 合成根的顶层算子（extractParentOperators 产出）。
+ */
+export function collectLayeredOperators(
+  dna: NarrativeIpDna,
+  leafIds: string[],
+  extraTopOps: NarrativeOperator[] = [],
+): LayeredOperators {
+  const top: NarrativeOperator[] = [...extraTopOps];
+  const mid: NarrativeOperator[] = [];
+  const leaf: NarrativeOperator[] = [];
+
+  const root = dna.nodes[dna.rootId];
+  if (root?.operators?.length) top.push(...root.operators);
+
+  const midNodeIds = new Set<string>();
+  for (const id of leafIds) {
+    let cur: string | null = dna.nodes[id]?.parent ?? null;
+    while (cur && cur !== dna.rootId) {
+      const node = dna.nodes[cur];
+      if (node && (node.levelType === "part" || node.levelType === "chapter")) {
+        midNodeIds.add(cur);
+      }
+      cur = node?.parent ?? null;
+    }
+  }
+  for (const midId of midNodeIds) {
+    for (const op of dna.nodes[midId]?.operators ?? []) mid.push(op);
+  }
+
+  for (const id of leafIds) {
+    for (const op of dna.nodes[id]?.operators ?? []) leaf.push(op);
+  }
+
+  const topDeduped = dedupeOperatorsByUid(top);
+  const midDeduped = dedupeOperatorsByUid(mid);
+  const leafDeduped = dedupeOperatorsByUid(leaf);
+
+  // global：跨层复现（同 uid 出现于 ≥2 层）+ 全局贯穿类算子子集。
+  const layerByUid = new Map<string, Set<ExtractionLayer>>();
+  const uidOp = new Map<string, NarrativeOperator>();
+  const ingest = (ops: NarrativeOperator[], layer: ExtractionLayer) => {
+    for (const op of ops) {
+      if (!op?.uid) continue;
+      uidOp.set(op.uid, op);
+      const set = layerByUid.get(op.uid) ?? new Set();
+      set.add(layer);
+      layerByUid.set(op.uid, set);
+    }
+  };
+  ingest(topDeduped, "top");
+  ingest(midDeduped, "mid");
+  ingest(leafDeduped, "leaf");
+
+  const global: NarrativeOperator[] = [];
+  for (const [uid, layers] of layerByUid) {
+    if (layers.size >= 2) global.push(uidOp.get(uid)!);
+  }
+  for (const op of [...topDeduped, ...midDeduped, ...leafDeduped]) {
+    if (isGlobalOperator(op)) global.push(op);
+  }
+
+  return {
+    top: topDeduped,
+    mid: midDeduped,
+    leaf: leafDeduped,
+    global: dedupeOperatorsByUid(global),
+  };
+}
+
+/** 扁平化分层桶（去重），供 scoped root.operators 兜底整池。 */
+export function flattenLayeredOperators(layers: LayeredOperators): NarrativeOperator[] {
+  return dedupeOperatorsByUid([
+    ...layers.top,
+    ...layers.mid,
+    ...layers.leaf,
+    ...layers.global,
+  ]);
+}
+
+/**
+ * 按 step 声明的层从分层桶选候选池（§3.2）：
+ *   - 取 spec.layers 对应桶之并集 + global（恒注入）；
+ *   - mid 桶空 → 回退 top；全空 → 回退 fallbackPool（整池）。
+ */
+export function selectOperatorsForStep(
+  layered: LayeredOperators | undefined,
+  stepLayers: ExtractionLayer[],
+  fallbackPool: NarrativeOperator[],
+): { pool: NarrativeOperator[]; layerByUid: Map<string, ExtractionLayer> } {
+  const layerByUid = new Map<string, ExtractionLayer>();
+  const record = (ops: NarrativeOperator[], layer: ExtractionLayer) => {
+    for (const op of ops) {
+      if (op?.uid && !layerByUid.has(op.uid)) layerByUid.set(op.uid, layer);
+    }
+  };
+
+  if (!layered) {
+    return { pool: fallbackPool, layerByUid };
+  }
+
+  const buckets: NarrativeOperator[] = [];
+  for (const layer of stepLayers) {
+    if (layer === "global") continue;
+    let ops = layered[layer] ?? [];
+    if (layer === "mid" && ops.length === 0) ops = layered.top ?? [];
+    record(ops, layer === "mid" && (layered.mid?.length ?? 0) === 0 ? "top" : layer);
+    buckets.push(...ops);
+  }
+  record(layered.global ?? [], "global");
+  buckets.push(...(layered.global ?? []));
+
+  const pool = dedupeOperatorsByUid(buckets);
+  return { pool: pool.length > 0 ? pool : fallbackPool, layerByUid };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // LLM 提取 seam：从单元正文抽取三件套
 // ─────────────────────────────────────────────────────────────────
@@ -425,11 +668,12 @@ export async function extractUnitTemplate(
   );
   const parsed = parseJSON<{ template?: NarrativeTemplate; operators?: NarrativeOperator[] }>(raw);
   if (parsed.template) node.template = normalizeTemplate(parsed.template);
-  node.operators = parsed.operators ?? [];
+  // P1-2：叶子算子也走 normalizeOperator（补齐 8 字段 + 五大类归一），修"叶子算子未归一、覆盖 0/5、三视角失效"。
+  node.operators = (parsed.operators ?? []).map((op, i) => normalizeOperator(op, `${node.id}_op${i + 1}`));
   node.metadata = {
     processing_status: "extracted",
     adaptation_status: "未改编",
-    stats: { char_count: unitText.length, operator_count: (parsed.operators ?? []).length },
+    stats: { char_count: unitText.length, operator_count: node.operators.length },
     updated_at: new Date().toISOString(),
   };
 }
@@ -701,6 +945,39 @@ import type { OperatorDomain } from "../types/narrative-ip-dna.js";
 /** 五大核心算子分类（§3.2），用于覆盖度统计。 */
 const OPERATOR_DOMAINS: OperatorDomain[] = ["叙事者定位", "情感体验", "文学风格", "故事内容", "叙事技巧"];
 
+/** 五大分类关键词映射（§3.2/§4.5）：把 LLM 返回的自由文本归一到规范分类。 */
+const OPERATOR_DOMAIN_KEYWORDS: Record<OperatorDomain, string[]> = {
+  叙事者定位: ["视角", "人称", "叙事者", "认知", "全知", "限知", "旁白", "第一人称", "第三人称", "上帝视角", "聚焦", "pov", "narrator"],
+  情感体验: ["情感", "情绪", "共鸣", "张力", "爽", "燃", "泪", "感染", "氛围", "悬念", "代入", "期待", "震撼", "压抑", "沉浸", "emotion"],
+  文学风格: ["风格", "文风", "腔调", "语言", "修辞", "意象", "笔法", "文学", "描写", "比喻", "美学", "style"],
+  叙事技巧: ["结构", "技巧", "节奏", "顺序", "框架", "伏笔", "铺垫", "蒙太奇", "闪回", "开局", "反转", "线索", "叙事手法", "开篇", "黄金三章", "技法", "plot", "structure", "pacing"],
+  故事内容: ["角色", "人物", "世界观", "设定", "情节", "冲突", "关系", "台词", "对白", "场景", "道具", "主题", "事件", "剧情", "character", "world"],
+};
+
+/**
+ * 把算子归一到五大核心分类之一（§3.2/§4.5，P1-2）——修"算子 knowledge_domain 是自由文本、五大类 0/5 覆盖、三视角分组失效"。
+ * 已是规范分类直接返回；否则按 knowledge_domain/adaptation/name/definition 的关键词计分取最高命中；无命中兜底"故事内容"。
+ * 三视角分组依赖此归一（读者←情感体验；作者←叙事者定位/叙事技巧/文学风格；角色←故事内容），属前置刚需。
+ */
+export function classifyOperatorDomain(op: Partial<NarrativeOperator>): OperatorDomain {
+  const raw = (op.knowledge_domain ?? "").trim();
+  if ((OPERATOR_DOMAINS as string[]).includes(raw)) return raw as OperatorDomain;
+  const hay = [op.knowledge_domain, op.adaptation?.type, op.adaptation?.element, op.name, op.definition, op.knowledge_location]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  let best: OperatorDomain = "故事内容";
+  let bestScore = 0;
+  for (const d of OPERATOR_DOMAINS) {
+    const score = OPERATOR_DOMAIN_KEYWORDS[d].reduce((s, kw) => s + (hay.includes(kw.toLowerCase()) ? 1 : 0), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = d;
+    }
+  }
+  return best;
+}
+
 /**
  * 评估一次 scoped 提取的质量（§14.2 D3）：把"结构完整性 + 三件套齐全 + 算子统计"这套
  * 蓝图要求的质量闸门接到提取链路上（此前 runWithRetry/QualityCheck 仅有定义、无调用）。
@@ -758,9 +1035,11 @@ export function assessExtractionQuality(
   checks.push({ name: "核心要素非空", passed: coreOk });
   if (!coreOk) warnings.push("顶层核心要素（题材/主题/冲突/风格/情感）全空，提取可能过于稀薄。");
 
-  // ④ 五大类算子覆盖统计（缺类仅告警）。
-  const operators = selectedLeafIds.flatMap((id) => dna.nodes[id]?.operators ?? []);
-  const presentDomains = new Set(operators.map((o) => o.knowledge_domain).filter(Boolean));
+  // ④ 五大类算子覆盖统计（缺类仅告警）。P1-2：按归一后的规范分类统计（不再依赖 LLM 恰好填规范值）。
+  // 分层注入：统计选中子树 top+mid+leaf 全层算子（§3.2），使顶层叙事者定位/中层文学风格可被计入。
+  const layered = collectLayeredOperators(dna, selectedLeafIds);
+  const operators = flattenLayeredOperators(layered);
+  const presentDomains = new Set(operators.map((o) => classifyOperatorDomain(o)));
   const missingDomains = OPERATOR_DOMAINS.filter((d) => !presentDomains.has(d));
   checks.push({
     name: "算子分类覆盖",

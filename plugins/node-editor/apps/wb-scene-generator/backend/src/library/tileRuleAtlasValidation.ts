@@ -17,6 +17,9 @@ export type TileAtlasValidationResult =
 /** Rules that accept a shorter atlas when optional variant sprites are omitted. */
 const FLEXIBLE_VARIANT_ROW_RULES = new Set(['common_16'])
 
+/** Rules that accept multiple single-tile atlas heights (16×16 or 16×17 PNG exports). */
+const FLEXIBLE_SQUARE_TILE_RULES = new Set(['square_1'])
+
 function spriteBounds(sprites: ReadonlyArray<{ x: number; y: number; w: number; h: number }>): AtlasSize {
   let widthPx = 0
   let heightPx = 0
@@ -52,6 +55,12 @@ function baseAtlasBounds(rule: TileRule): AtlasSize | null {
 
 function allowedSizesForRule(rule: TileRule, ruleName: string): AtlasSize[] {
   const full = spriteBounds(rule.sprites)
+  if (FLEXIBLE_SQUARE_TILE_RULES.has(ruleName)) {
+    const base = full.widthPx === 16 && full.heightPx === 16
+      ? [{ widthPx: 16, heightPx: 16 }, { widthPx: 16, heightPx: 17 }]
+      : [full]
+    return dedupeSizes(base)
+  }
   if (!FLEXIBLE_VARIANT_ROW_RULES.has(ruleName)) {
     return [full]
   }

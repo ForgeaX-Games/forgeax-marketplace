@@ -18,7 +18,7 @@ export function ProjectsDialog({
   defaultProjectName = 'My project',
 }: ProjectsDialogProps): JSX.Element {
   const projects = useProjectStore((s) => s.projects)
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
   const isSwitching = useProjectStore((s) => s.isSwitching)
   const fetchProjects = useProjectStore((s) => s.fetchProjects)
   const switchProject = useProjectStore((s) => s.switchProject)
@@ -40,14 +40,14 @@ export function ProjectsDialog({
 
   const handleActivate = useCallback(
     async (id: string) => {
-      if (id === activeProjectId) {
+      if (id === viewingProjectId) {
         onClose()
         return
       }
       await switchProject(id)
       onClose()
     },
-    [activeProjectId, switchProject, onClose],
+    [viewingProjectId, switchProject, onClose],
   )
 
   const sorted = useMemo(() => [...projects].sort((a, b) => a.name.localeCompare(b.name)), [projects])
@@ -80,7 +80,7 @@ export function ProjectsDialog({
                 <ProjectCard
                   key={p.id}
                   project={p}
-                  isActive={p.id === activeProjectId}
+                  isActive={p.id === viewingProjectId}
                   isSwitching={isSwitching}
                   // Never let the workspace go empty: the sole remaining
                   // (active) project can't be deleted.

@@ -241,6 +241,7 @@ export function useCanvasGroupView({
   const popGroupViewToStore = usePipelineStore((s) => s.popGroupViewTo)
   const updateGroup = usePipelineStore((s) => s.updateGroup)
   const removeEdge = usePipelineStore((s) => s.removeEdge)
+  const schedulePersistSession = usePipelineStore((s) => s.schedulePersistSession)
 
   const currentGroupId = groupViewStack.length > 0 ? groupViewStack[groupViewStack.length - 1] : null
   const isInGroupView = currentGroupId !== null
@@ -669,6 +670,17 @@ export function useCanvasGroupView({
     return true
   }, [currentGroupId, updateGroup])
 
+  // Durably persist a live inner edit. Inner edits are staged in refs and were
+  // previously flushed to the kernel ONLY on exit (`exitGroupView`), so a page
+  // refresh while still inside the group view lost every unflushed inner change
+  // (deleted nodes/wires reappeared on reload — "没有持久化到 json"). Flush the
+  // refs into the store group now and schedule a debounced durable persist, so an
+  // inner structural edit survives a refresh just like a root-canvas edit does.
+  const scheduleInnerPersist = useCallback(() => {
+    flushInnerEdits()
+    schedulePersistSession('group-inner-edit')
+  }, [flushInnerEdits, schedulePersistSession])
+
   // Enter a group view. The useEffect on currentGroupId rebuilds the canvas after
   // pushing. When going deeper, flush the current level's dirty edits first.
   const enterGroupView = useCallback((groupId: string) => {
@@ -756,7 +768,8 @@ export function useCanvasGroupView({
   const syncInnerNodePosition = useCallback((nodeId: string, position: { x: number; y: number }) => {
     innerLayoutRef.current[nodeId] = position
     isDirtyRef.current = true
-  }, [])
+    scheduleInnerPersist()
+  }, [scheduleInnerPersist])
 
   const syncInnerNodesDelete = useCallback((deleted: Node[]) => {
     if (!currentGroupId) return
@@ -828,7 +841,8 @@ export function useCanvasGroupView({
       ),
     )
     isDirtyRef.current = true
-  }, [currentGroupId, removeEdge, setEdges, setNodes, updateGroup])
+    scheduleInnerPersist()
+  }, [currentGroupId, removeEdge, setEdges, setNodes, updateGroup, scheduleInnerPersist])
 
   // A battery dropped / inserted while inside a group view belongs to the group,
   // not the root graph. Push it into the live inner refs (the canvas node was
@@ -838,7 +852,8 @@ export function useCanvasGroupView({
     innerNodesRef.current = [...innerNodesRef.current.filter((n) => n.id !== node.id), node]
     innerLayoutRef.current[node.id] = node.position
     isDirtyRef.current = true
-  }, [])
+    scheduleInnerPersist()
+  }, [scheduleInnerPersist])
 
   // An inner node's param edit (text panel content, slider/toggle value, resize…)
   // updates the live ref + the on-canvas node data, and marks dirty. Returns false
@@ -855,8 +870,9 @@ export function useCanvasGroupView({
         : node,
     ))
     isDirtyRef.current = true
+    scheduleInnerPersist()
     return true
-  }, [setNodes])
+  }, [setNodes, scheduleInnerPersist])
 
   // Register the inner param-edit sink while a group view is active so the store's
   // generic updateNodeParam routes an inner node's param edit here instead of the
@@ -871,13 +887,15 @@ export function useCanvasGroupView({
     innerEdgesRef.current = innerEdgesRef.current.filter((e) => e.id !== edge.id)
     innerEdgesRef.current.push(edge)
     isDirtyRef.current = true
-  }, [])
+    scheduleInnerPersist()
+  }, [scheduleInnerPersist])
 
   const syncInnerEdgeRemove = useCallback((edgeId: string) => {
     if (edgeId.startsWith(BOUNDARY_EDGE_PREFIX) || edgeId.startsWith(BOUNDARY_MAP_PREFIX)) return
     innerEdgesRef.current = innerEdgesRef.current.filter((e) => e.id !== edgeId)
     isDirtyRef.current = true
-  }, [])
+    scheduleInnerPersist()
+  }, [scheduleInnerPersist])
 
   // Breadcrumbs.
   const { currentPipeline } = usePipelineStore.getState()

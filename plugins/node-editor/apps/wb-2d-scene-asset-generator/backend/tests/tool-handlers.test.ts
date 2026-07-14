@@ -34,7 +34,7 @@ describe('ToolRegistry asset2d handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-plugin/wb-2d-scene-asset-generator': { frontendPort: 5001, backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-extension/wb-2d-scene-asset-generator': { frontendPort: 5001, backendPort: port } } }),
     )
 
     try {
@@ -55,7 +55,7 @@ describe('ToolRegistry asset2d handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-plugin/wb-2d-scene-asset-generator': { backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-extension/wb-2d-scene-asset-generator': { backendPort: port } } }),
     )
 
     try {
@@ -76,7 +76,7 @@ describe('ToolRegistry asset2d handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-plugin/wb-2d-scene-asset-generator': { backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-extension/wb-2d-scene-asset-generator': { backendPort: port } } }),
     )
 
     try {
@@ -110,7 +110,7 @@ describe('ToolRegistry asset2d handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-plugin/wb-2d-scene-asset-generator': { backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-extension/wb-2d-scene-asset-generator': { backendPort: port } } }),
     )
 
     try {

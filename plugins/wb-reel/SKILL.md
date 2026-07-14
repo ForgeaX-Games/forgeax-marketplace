@@ -11,7 +11,7 @@ trigger: /reel
 > 在此目录跑 pnpm/npm 会写出被 `.gitignore` 屏蔽的 lock 文件,同时污染下次 submodule
 > checkout(外层 studio 会拒绝 update)。See README §Package manager for the full story.
 
-`@forgeax-plugin/wb-reel` 是一个互动影游 (Full Motion Video) 编辑器与运行时。
+`@forgeax-extension/wb-reel` 是一个互动影游 (Full Motion Video) 编辑器与运行时。
 作者用它把「提示词 / 视频 / QTE / 选项分支」拼装成可序列化的 `Scenario` JSON，
 运行时按 `elapsedMs` 确定性回放。
 

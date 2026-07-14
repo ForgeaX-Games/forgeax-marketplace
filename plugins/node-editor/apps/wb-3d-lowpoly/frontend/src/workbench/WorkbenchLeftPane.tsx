@@ -40,7 +40,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   useEffect(() => {
     const transport = createEditorTransport(client)
     configureEditorTransport(transport)
-    void useProjectStore.getState().fetchProjects()
+    void useProjectStore.getState().bootstrap()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsub()
@@ -53,9 +53,11 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
     let cancelled = false
     async function loadSnapshot(): Promise<void> {
       try {
-        const [projects, workspace, ops, nodes] = await Promise.all([
+        const [projects, workspace] = await Promise.all([
           client.listProjects(),
           client.getWorkspace(),
+        ])
+        const [ops, nodes] = await Promise.all([
           client.listOps(),
           client.listNodes(),
         ])
@@ -74,7 +76,9 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   }, [client])
 
   const activeProject = useMemo(() => {
-    const activeId = snapshot?.workspace?.activeProjectId
+    const activeId =
+      snapshot?.workspace?.viewingProjectId ??
+      (snapshot?.workspace as { activeProjectId?: string | null } | undefined)?.activeProjectId
     return snapshot?.projects.find((project) => project.id === activeId) ?? snapshot?.projects[0] ?? null
   }, [snapshot])
 

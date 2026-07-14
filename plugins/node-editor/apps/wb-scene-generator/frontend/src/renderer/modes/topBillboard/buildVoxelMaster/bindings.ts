@@ -19,7 +19,11 @@ import {
   getOrLoadRule, getRuleLoadTick,
   type FaceRule, type RuleSprite,
 } from '../../../framework/asset/ruleCache'
-import { computeValidVariantIdxs as computeValidVariantIdxsShared } from '../../../framework/asset/variantCandidates'
+import {
+  computeValidVariantPool as computeValidVariantPoolShared,
+  computeValidVariantPoolsByTileId as computeValidVariantPoolsByTileIdShared,
+  type VariantPool,
+} from '../../../framework/asset/variantCandidates'
 import type { LayerAssetBinding, VoxelLayerInput } from './types'
 
 /**
@@ -51,14 +55,23 @@ export function buildLayerAssetBindings(
     // 变体候选:per-face 各扫一份(basePieces 不同,变体区段不同)。图未加载完 → 空数组,
     // 等 readiness pulse 重 build 时再扫。
     const validVariantIdxs = { top: [] as number[], front: [] as number[] }
+    const validVariantWeights = { top: undefined as number[] | undefined, front: undefined as number[] | undefined }
+    const validVariantPoolsByTileId = { top: new Map<number, VariantPool>(), front: new Map<number, VariantPool>() }
     if (rule && m.tileType) {
       const img = getOrLoadImage(imgUrl)
       if (img) {
+        const rgba = readImageRgba(img)
         if (rule.faces.top?.randomRules?.length) {
-          validVariantIdxs.top = computeValidVariantIdxs(img, imgUrl, rule.sprites, rule.faces.top, m.tileType, 'top')
+          const topPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.top, m.tileType, 'top', rgba)
+          validVariantIdxs.top = topPool.idxs
+          validVariantWeights.top = topPool.weights
+          validVariantPoolsByTileId.top = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.top, m.tileType, 'top', rgba)
         }
         if (rule.faces.front?.randomRules?.length) {
-          validVariantIdxs.front = computeValidVariantIdxs(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front')
+          const frontPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front', rgba)
+          validVariantIdxs.front = frontPool.idxs
+          validVariantWeights.front = frontPool.weights
+          validVariantPoolsByTileId.front = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front', rgba)
         }
       }
     }
@@ -76,6 +89,8 @@ export function buildLayerAssetBindings(
       rule,
       imgUrl,
       validVariantIdxs,
+      validVariantWeights,
+      validVariantPoolsByTileId,
       regions,
     })
   }
@@ -90,24 +105,42 @@ export function buildLayerAssetBindings(
 // 槽非透明 —— 透明判定逻辑只此一份(variantCandidates.ts),导出端喂自己解出的像素
 // 调用同一函数,二者候选集逐字节一致。结果按 (imgUrl, ruleAlias) 加各自 loadTick 缓存。
 
-const visibleVariantsCache = new Map<string, number[]>()
+const visibleVariantPoolCache = new Map<string, VariantPool>()
+const visibleVariantPoolsByTileIdCache = new Map<string, Map<number, VariantPool>>()
 
-function computeValidVariantIdxs(
+function computeValidVariantPoolCached(
   img: HTMLImageElement,
   imgUrl: string,
   sprites: ReadonlyArray<RuleSprite>,
   face: FaceRule,
   ruleAlias: string,
   faceTag: 'top' | 'front',
-): number[] {
-  // cacheKey 含 face 区分,因为同一 atlas + 同一 rule 的 top / front 变体扫描结果不同
-  const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}`
-  const cached = visibleVariantsCache.get(cacheKey)
+  rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
+): VariantPool {
+  const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|pool`
+  const cached = visibleVariantPoolCache.get(cacheKey)
   if (cached) return cached
-  // 整张 sheet → RGBA(取不到 ctx 时传 null,共用函数据此乐观保留全部候选)。
-  const rgba = readImageRgba(img)
-  const out = computeValidVariantIdxsShared(face, sprites, rgba)
-  visibleVariantsCache.set(cacheKey, out)
+  const sheet = rgba ?? readImageRgba(img)
+  const out = computeValidVariantPoolShared(face, sprites, sheet)
+  visibleVariantPoolCache.set(cacheKey, out)
+  return out
+}
+
+function computeValidVariantPoolsByTileIdCached(
+  img: HTMLImageElement,
+  imgUrl: string,
+  sprites: ReadonlyArray<RuleSprite>,
+  face: FaceRule,
+  ruleAlias: string,
+  faceTag: 'top' | 'front',
+  rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
+): Map<number, VariantPool> {
+  const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|byTileId`
+  const cached = visibleVariantPoolsByTileIdCache.get(cacheKey)
+  if (cached) return cached
+  const sheet = rgba ?? readImageRgba(img)
+  const out = computeValidVariantPoolsByTileIdShared(face, sprites, sheet)
+  visibleVariantPoolsByTileIdCache.set(cacheKey, out)
   return out
 }
 

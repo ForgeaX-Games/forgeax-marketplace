@@ -51,7 +51,6 @@ describe('texture publish bridge', () => {
     expect(rec.private).toBe(true)
     expect(rec.source).toBe('pipeline')
     expect(rec.assetKind).toBe('common_16')
-    expect(rec.cropTypeOriginal).toBe('瓦片组')
     // alias: field4=grassland, field8=common_16 (non-cutout)
     expect(rec.alias).toContain('[grassland]')
     expect(rec.alias).toContain('[common_16]')
@@ -68,7 +67,7 @@ describe('texture publish bridge', () => {
       assetName: 'rocky_slope', assetType: 'tile', autotileKind: 'slope_9', dataBase64: pngBase64(48, 48), sourceBlobId: 'blob-slope',
     })).json()
     const pool = (await app.inject({ method: 'GET', url: '/api/v1/library/aliases-meta?zone=raw' })).json() as AliasMeta[]
-    // assetKind+cropTypeOriginal path binds the EXACT rule (not via KNOWN_TILE_TYPES).
+    // assetKind path binds the EXACT rule (not via KNOWN_TILE_TYPES).
     expect(pool.find((m) => m.alias === rec.alias)?.tileType).toBe('slope_9')
     await app.close()
   })
@@ -78,7 +77,7 @@ describe('texture publish bridge', () => {
     const rec = (await publish(app, {
       assetName: 'wooden_barrel', assetType: 'object', dataBase64: PNG_1x1, sourceBlobId: 'blob-barrel',
     })).json()
-    expect(rec.alias).toContain('[抠图]')
+    expect(rec.alias).toContain('[asset]')
     expect(rec.assetKind).toBeUndefined()
     const pool = (await app.inject({ method: 'GET', url: '/api/v1/library/aliases-meta?zone=raw' })).json() as AliasMeta[]
     expect(pool.find((m) => m.alias === rec.alias)?.tileType).toBeUndefined()

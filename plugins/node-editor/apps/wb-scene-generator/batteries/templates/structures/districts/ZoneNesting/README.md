@@ -78,7 +78,7 @@
 
 `pipeline.get` 核对 `<G_ZONE>` 的 `in_0`（上游）、`in_1`/`in_2`/`in_3` 真的接上，`out_0` 进了汇总。
 
-`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出名为你传入 DistrictAsset 文本（如 `广场`）的地块图层**。截图里应在剩余空地上出现一块有机轮廓的地块。
+`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出名为你传入 DistrictAsset 文本（如 `广场`）的地块图层**。Preview 里应在剩余空地上出现一块有机轮廓的地块。
 
 ### 读回端口内容验证（像 grep 一样查某端口）
 

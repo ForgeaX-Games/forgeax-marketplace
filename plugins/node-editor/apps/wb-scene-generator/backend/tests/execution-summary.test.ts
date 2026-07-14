@@ -118,4 +118,89 @@ describe('summarizeExecutionResult', () => {
     expect(summary.status).toBe('error')
     expect(summary.error).toEqual({ nodeId: 'x', message: 'boom' })
   })
+
+  it('adds verification.hints when completed but zero scene cells (not whitelist)', () => {
+    const empty = {
+      executionId: 'exec_empty',
+      status: 'completed' as const,
+      durationMs: 10,
+      outputs: {
+        g: {
+          out_0: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 3, cells: [], children: [] } }] }],
+        },
+      },
+    }
+    const summary = summarizeExecutionResult(empty) as Record<string, any>
+    expect(summary.verification.ok).toBe(false)
+    expect(summary.verification.totalSceneCells).toBe(0)
+    expect(summary.verification.hints[0]).toMatch(/NOT template whitelist/)
+    expect(summary.verification.hints[0]).toMatch(/disconnected/)
+  })
+
+  it('verification ok when completed with cells', () => {
+    const summary = summarizeExecutionResult(fullResult) as Record<string, any>
+    expect(summary.verification.ok).toBe(true)
+    expect(summary.verification.totalSceneCells).toBeGreaterThan(0)
+    expect(summary.verification.hints).toBeUndefined()
+  })
+
+  // 2026-07-01: 硬门控 stage3.location_names — narrativeLocationNames 是可选的，
+  // 不传时完全不跑（上面所有既有用例都印证了这点：不受影响）。
+  describe('stage3.location_names alignment (expectedLocationNames)', () => {
+    it('does nothing when expectedLocationNames is omitted (default-off, no regression)', () => {
+      const summary = summarizeExecutionResult(fullResult) as Record<string, any>
+      expect(summary.verification.locationNameAlignment).toBeUndefined()
+    })
+
+    it('passes when every narrative location name is found (possibly as a prefix/suffix) among scene node names', () => {
+      // fullResult's scene tree has names: '', 'block_ground', 'architecture_0', 'rest'.
+      const summary = summarizeExecutionResult(fullResult, ['block_ground', 'architecture_0']) as Record<string, any>
+      expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
+      expect(summary.verification.hints).toBeUndefined()
+    })
+
+    it('fails and reports the missing narrative name when it truly is not in the scene graph', () => {
+      const summary = summarizeExecutionResult(fullResult, ['block_ground', '望江客栈']) as Record<string, any>
+      expect(summary.verification.ok).toBe(false)
+      expect(summary.verification.locationNameAlignment.ok).toBe(false)
+      expect(summary.verification.locationNameAlignment.missing).toEqual([
+        expect.objectContaining({ name: '望江客栈' }),
+      ])
+      expect(summary.verification.hints[0]).toMatch(/stage3\.location_names/)
+      expect(summary.verification.hints[0]).toContain('望江客栈')
+    })
+
+    it('fuzzy match tolerates a scene node name that embeds the narrative name as a substring', () => {
+      const withSuffix = {
+        executionId: 'exec_fuzzy',
+        status: 'completed' as const,
+        durationMs: 5,
+        outputs: {
+          g: {
+            out_0: [
+              {
+                path: [0],
+                items: [
+                  {
+                    focus: '/',
+                    tree: {
+                      name: '',
+                      path: '/',
+                      version: 3,
+                      cells: [],
+                      children: [
+                        { name: '望江客栈_主楼', path: '/望江客栈_主楼', version: 3, cells: [{ x: 0, y: 0, z: 0 }], children: [] },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }
+      const summary = summarizeExecutionResult(withSuffix, ['望江客栈']) as Record<string, any>
+      expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
+    })
+  })
 })

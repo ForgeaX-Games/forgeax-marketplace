@@ -1,5 +1,5 @@
 /**
- * @forgeax-plugin/tool-balance-resim — in-process resim worker.
+ * @forgeax-extension/tool-balance-resim — in-process resim worker.
  *
  * Exposes `balance:resim` (modules/02 §201-§214). Pure-tool plugin: no UI,
  * no agent state. Algorithm is intentionally simple (mulberry32 RNG + flat

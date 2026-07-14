@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/wb-skill",
+      "name": "@forgeax-extension/wb-skill",
       "dependencies": {
         "file-saver": "^2.0.5",
         "jszip": "^3.10.1",

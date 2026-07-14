@@ -1,6 +1,8 @@
 # 河流湖泊生成 (river_lake_gen)
 
-在输入网格上程序化生成河流和湖泊系统，自动划分河岸/浅水/中水/深水四层深度带，并可在水域中随机放置自定义物品。
+在单张输入网格上程序化生成河流和湖泊系统，自动划分河岸/浅水/中水/深水四层深度带，并可在水域中随机放置自定义物品。
+
+> **DataTree 数据格式**：`inputGrid` / `waterGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
@@ -19,15 +21,15 @@
 
 ## 基本使用方法
 
-1. 将上游地形电池的 `outputGrid` 接入 `输入网格`
+1. 将上游地形电池的 `outputGrid` 接入 `inputGrid`
 2. 选择生成算法和河流宽度范围
-3. 执行后 `水域网格` 即含完整水域掩码，`名称清单` 含所有 ID 映射
+3. 执行后 `waterGrid` 即含完整水域掩码，`nameList` 含所有 ID 映射
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | grid | — | 基准输入网格 |
+| inputGrid | grid | — | 单张基准输入网格（DataTree 逐张处理） |
 | inputNameList | array | [] | 输入网格名称清单 [{id, name}]，与水域清单合并输出 |
 | riverCount | number | 2 | 生成的河流条数 |
 | algorithm | string | meandering | 路径算法：straight / meandering / branching / random |

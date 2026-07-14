@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/agent-suzu",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "Suzu · 体验设计师",
+    "en": "Suzu · UX Flow Designer"
+  },
+  "description": {
+    "zh": "体验设计师 Agent(设计角色)· 把 Iori 的玩法柱翻译成玩家可感知的体验节拍——先看到什么、先做什么、第几秒解锁,产出 ux-flow / hud-spec / onboarding / wireframe 规格。自带「30 秒节拍表」技能,再反推 HUD。",
+    "en": "UX-flow designer agent — translates Iori's gameplay pillars into the player's moment-to-moment experience (what they see, do and unlock first), emitting ux-flow / hud-spec / onboarding / wireframe specs. Built-in 30s beat-sheet skill that reverse-derives the HUD."
+  },
+  "provides": {
+    "agent": {
+      "id": "suzu",
+      "role": "design",
+      "card": {
+        "name": {
+          "zh": "Suzu",
+          "en": "Suzu"
+        },
+        "cnTitle": "体验设计师",
+        "enTitle": "UX Flow Designer",
+        "color": "#DB61A2",
+        "avatar": "📐"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/**/ux-flow.md",
+        "<active_game>.dir/**/hud-spec.md",
+        "<active_game>.dir/**/onboarding.md",
+        "<active_game>.dir/**/wireframe-*.md"
+      ],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        {
+          "source": "inline",
+          "skillId": "beat-sheet-flow"
+        }
+      ]
+    },
+    "skills": [
+      {
+        "id": "beat-sheet-flow",
+        "entry": "./skills/beat-sheet-flow/SKILL.md",
+        "displayName": {
+          "zh": "30 秒节拍表",
+          "en": "Beat-Sheet Flow"
+        },
+        "description": {
+          "zh": "把玩法柱翻译成玩家前 3 分钟的四列节拍表，再反推 HUD",
+          "en": "Translate pillars into a four-column 30s beat sheet, then reverse-derive HUD"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

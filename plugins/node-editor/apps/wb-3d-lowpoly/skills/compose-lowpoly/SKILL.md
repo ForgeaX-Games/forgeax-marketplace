@@ -7,15 +7,15 @@ description: >-
   two-phase workflow: write a part manifest → model + bake each part on its own
   with g_bake_part → reference the staged g_mesh meshes and assemble one rooted
   URDF tree); PART B — static low-poly BUILDINGS (walls, floors, stairs, doors,
-  windows, roofs, facades, railings, columns via the Architecture family and
-  g_building_shell); SCENE orchestration (terminal stage = PART C) — for a
+  windows, roofs, facades, railings, columns via the Architecture family,
+  assembled by hand into one rooted tree with g_part + g_joint_fixed); SCENE
+  orchestration (terminal stage = PART C) — for a
   scene / city / multi-object + building composition: list the scene inventory,
   loop each unique item through PART A/B + bake, then place the baked meshes into
   one URDF tree by setting each g_part's origin/rpy (no g_joint — g_to_urdf
   auto-stitches the jointless roots into one tree), QC, and export the whole
-  scene to .glb. Use when the user asks to create, modify, preview, screenshot,
-  export, or iterate a low-poly 3D model, mechanical part, building, or a composed
-  scene. First triage the intent (single object/assembly → A; building → B;
+  scene to .glb. Use when the user asks to create, modify, export, or iterate a
+  low-poly 3D model, mechanical part, building, or a composed scene. First triage the intent (single object/assembly → A; building → B;
   scene → SCENE orchestration), then route to the right PART and follow its
   execution file.
 trigger: /compose-lowpoly
@@ -23,32 +23,54 @@ trigger: /compose-lowpoly
 
 # Compose Lowpoly · 入口与路由
 
-在「3D 低多边形生成器」（wb-3d-lowpoly）里，通过**摆放电池 + 连边 + 运行**产出引擎中立的
-低多边形 `.glb`。所有操作走 Studio ToolRegistry 工具（`lowpoly:*`，代理到插件后端
-`/api/v1/*`），不要直接改运行时文件，不要点 UI 模拟人工，也不要用旧版 scene/renderer API。
+在「3D 低多边形生成器」（wb-3d-lowpoly）里产出引擎中立的低多边形 `.glb`。所有操作走 Studio
+ToolRegistry 工具（`lowpoly:*`，代理到插件后端 `/api/v1/*`），不要直接改运行时文件，不要点 UI
+模拟人工，也不要用旧版 scene/renderer API。
+
+> **DSL-first（首要）**：几何 **DSL 是唯一真源**。用 `lowpoly:model.apply({ source })` 提交
+> **完整 DSL 文本**，后端一次完成 **校验 → 编译成图 → 执行 → 烘焙 → QC**，返回**紧凑回执**（错误 /
+> QC 信号**定位到 DSL 行号**、mesh-aware 穿模硬信号 + 具体平移修正量、URDF 指纹）。你**只写 DSL、
+> 绝不手工连线**（不发 `createNode`/`connect`/`applyBatch`）。DSL 语法见
+> [dsl-quickref.md](dsl-quickref.md)，全部 op 签名见自动生成的 [op-directory.md](op-directory.md)
+> （SSOT，无需再调 `batteries.list`）。下方旧的 applyBatch/连边流程为**过渡期**保留，agent 不再使用。
 
 > **本文件只负责路由 + 每个 PART 的要点提要。** 拿到需求先**判断走哪套流程**，再打开对应的
 > execution 文件按步骤执行；动手前与执行中遇到的通用规则查「共享参考」。**无论哪个 PART，都先
-> 问清/想清需求，再搭管线并运行；不要拿一次绿色 batch 当成品交付——读 QC 信号和截图。**
+> 问清/想清需求，再搭管线并运行；不要拿一次绿色 batch 当成品交付——读 QC 信号判断完成度。**
+
+## Token 纪律（精简循环，先读这条）
+
+这套流程的 token 开销主要来自**反复重读目录/端口**和**图越堆越大**，不是引擎问题。DSL-first
+本身就把往返压到最小——按下面几条走，既保住正确性护栏又不浪费 context，这是全套技能里关于
+「怎么发现 op / 何时读态 / 何时算完成」的**唯一权威表述**，其余文件引用它：
+
+1. **只写 DSL，用 `model.apply` 一次成图**：不再 `batteries.list`/`get` 逐个查端口——op 签名从
+   [op-directory.md](op-directory.md)（自动生成的 SSOT）取，语法查 [dsl-quickref.md](dsl-quickref.md)。
+   一次 `model.apply(source)` 就完成校验+编译+执行+QC，无需手工 `createNode`/`connect`/`applyBatch`。
+2. **读态用 `model.get` / `parts.list`**：要看当前模型就 `model.get`（返回 DSL 源，人在编辑器改过图也
+   round-trip 回等价 DSL）；要查已烘焙的 mesh 就 `lowpoly:parts.list`（`name→sha+bbox+dims`）——不再
+   例行 `pipeline.get` 拉整张 node/edge JSON。
+3. **每件 bake 完只携带 `<sha>.obj` + bbox**：`parts.list` 随时可查，图/上下文始终很小。
+4. **完成门禁 = `model.apply` 回执干净**：无 `errors`、`qc.valid`、`meshQc.clean`、`urdf` 无错误
+   （回执已把 QC/穿模信号定位到 DSL 行号，并给出具体平移修正量）+ 对照 Phase-0 清单核对尺寸/AABB。
+   回执里的 mesh-aware QC 就是形态判据；`export-glb` 仅在用户明确要导出成品文件时才调。
 
 ## 官方工具路径
 
-`caller.kind = "ai"`（除非宿主另给 caller 上下文），`opts.actor = "ai:lowpoly"` + 简短
-`opts.label`：
+`caller.kind = "ai"`（除非宿主另给 caller 上下文）。DSL-first 主入口 —— 提交完整 DSL 文本：
 
 ```json
 {
-  "toolId": "lowpoly:pipeline.applyBatch",
-  "args": { "ops": [], "opts": { "actor": "ai:lowpoly", "label": "compose model" } },
+  "toolId": "lowpoly:model.apply",
+  "args": { "source": "b1 = box(size=[1,1,1])\np1 = part(shape=b1)", "name": "demo" },
   "caller": { "kind": "ai" }
 }
 ```
 
 可用工具：`lowpoly:projects.*`（list/create/open/close/remove，remove 需破坏性确认）、
-`lowpoly:batteries.list` / `lowpoly:batteries.get`、`lowpoly:pipeline.get` /
-`pipeline.applyBatch` / `pipeline.execute` / `pipeline.import` / `pipeline.export`、
-`lowpoly:assets.list`、`lowpoly:screenshot.capture` / `screenshot.latest`、
-`lowpoly:export-glb`。（`lowpoly:screenshot.store` 是渲染器内部回调，不对 AI 暴露。）
+**`lowpoly:model.apply`（主入口）/ `lowpoly:model.get` / `lowpoly:parts.list`**、
+`lowpoly:assets.list`、`lowpoly:export-glb`（仅用户要导出成品时）。低层 `lowpoly:batteries.*` /
+`pipeline.*` 供人工/旧流程，agent 不用。
 
 ---
 
@@ -95,19 +117,22 @@ trigger: /compose-lowpoly
   名称+功能 / 真实形态 / op 路由 / 带轴尺寸 / 细节特征及位置 / 局部原点基准 / 装配关节 /
   材质 / 用 primitive 的逐件理由）。
 - **阶段1 逐件建模 + 烘焙**：每件从空几何起搭**独立子图**（CSG / Parts，齿轮也在 Parts 里），末端
-  `g_bake_part` 烘成 `<sha>.obj`，记下 filename。一件一个小 batch + execute。
-- **阶段2 引用 mesh 组装**：`g_mesh(filename=<sha>.obj)` → `g_part` → `g_material` 配色 →
-  `g_joint_*` 连成单一根树 → `g_geometry_qc` + `g_validate` + `g_to_urdf` + `urdf_preview` →
-  整体截图。平凡件（真就是一块板/一根杆）才直接 `g_box`/`g_cylinder`/`g_sphere`。
+  `g_bake_part` 烘成 `<sha>.obj`，记下 filename/bbox 后 `deleteNode` 删掉该件子图再建下一件。一件
+  一个小 batch + execute。
+- **阶段2 引用 mesh 组装**：写 DSL —— `mesh(filename=<sha>.obj)` → `part` → `material` 配色 →
+  `joint(...)` 连成单一根树，`model.apply(source)` 一次跑完编译+执行+QC+URDF（QC/URDF 是编译器自动
+  追加的终端节点，你不用手写）。完成判定看回执信号。平凡件
+  （真就是一块板/一根杆）才直接 `box`/`cylinder`/`sphere`。
 
 ### PART B · 建筑 → [executions/part-b-building.md](executions/part-b-building.md)
 - **工具/传输/QC 循环与 PART A 完全一致**，变的是**建模哲学**：建筑里 **Architecture 家族
   （`g_wall` / `g_floor_slab` / `g_stairs` / `g_roof` / `g_window` / `g_door` / `g_railing` /
   `g_column`）是默认**，裸 `g_box` 是例外。
-- **先写建筑 brief**（footprint & 层数 / explicit 还是 procedural 布局 / 流线楼梯 / 各墙开洞 /
+- **先写建筑 brief**（footprint & 层数 / 房间矩形与墙中线布局 / 流线楼梯 / 各墙开洞 /
   屋顶类型）再动手。
-- 整栋优先 **`g_building_shell`**（单房间就 `floors=1, rooms_per_floor=1, roof_type=none`），
-  别手工连几十面墙；末端同样 `g_geometry_qc` → `g_to_urdf` → `urdf_preview`。
+- **没有整栋编排器**：逐条写 Architecture op 的 DSL，各自 `part(...)` 包壳后用
+  `joint(type="fixed",...)`（可开的门窗扇用 `type="revolute"`）连到单一根件（如地面楼板），元件靠
+  joint `origin`/`rpy` 摆位；共享内墙去重。`model.apply` 会自动追加 QC + URDF 终端节点跑完校验。
 
 ### SCENE 编排（终段 = PART C） → [executions/part-c-scene-assembly.md](executions/part-c-scene-assembly.md)
 - 定位：**SCENE 编排的最终组装阶段**。前置是先口播场景清单、逐件走 A/B 建模 + bake；PART C 把这些
@@ -132,19 +157,23 @@ trigger: /compose-lowpoly
   整体复用首选；只适合静态物体）。②`g_bake_part` 按颜色分件成多个 `<sha>.obj` + 组装阶段各上一次
   `g_material`（同款换色 / 配色多变）。**单个 `<sha>.obj` 不带材质 = 单色**；跨项目引用前提见 part-c。
 
-## 四、共享参考（通用规则 / 防呆，随时查）
+## 四、共享参考（按需读取，不要一次全读）
 
-| 内容 | 文件 |
-|---|---|
-| ToolRegistry-first 工作流 + brief/QC 循环 | [quickstart.md](quickstart.md) |
-| 各家族页（何时用、关键参数、最小连线片段；含 **Architecture**） | [modeling-guide.md](modeling-guide.md) |
-| 电池速查（家族列表 + 路由表 + 如何发现电池） | [battery-catalog.md](battery-catalog.md) |
-| 图/batch 形状、id-port 连线、可跑的多件装配与**两阶段**（bake→mesh）示例 | [pipeline-schema.md](pipeline-schema.md) |
+一次标准建模只需要：**对应的 execution 文件（A/B/C）+ 下面前两份**。其余仅在需要时才查。
 
-**最常踩的三条铁律**：
+| 何时读 | 内容 | 文件 |
+|---|---|---|
+| **必读** | 全部 op 签名（authoring SSOT） | [op-directory.md](op-directory.md) |
+| **必读** | DSL 语法速查（grammar + 值类型 + 最小示例 + 铁律） | [dsl-quickref.md](dsl-quickref.md) |
+| 选型拿不准时 | 家族列表 + 路由表 | [battery-catalog.md](battery-catalog.md) |
+| 忘了流程时 | DSL-first 工作流 + 回执/QC 循环 | [quickstart.md](quickstart.md) |
+| ⚠️ 旧格式，一般不用 | modeling-guide / pipeline-schema 仍是 **legacy `createNode` JSON** 写法（非 DSL），只在想看某家族概念时参考，**别照它的格式写**——授权一律走 DSL + op-directory | modeling-guide.md · pipeline-schema.md |
 
-1. **op id / 端口名只从 `lowpoly:batteries.list` / `batteries.get` 取**，绝不凭记忆编。
-2. **每次 `applyBatch` 后立刻 `lowpoly:pipeline.get`**，确认 `nodes` 真变了——op 的 `type`
-   拼错时内核既不命中也不报错，照样返回 `{ok:true}`，但图没变（「ok 却空」陷阱）。
-3. **两阶段，不堆 mega-batch**：把整个物件/场景堆进一个 batch 必然退化成方块拼接。每阶段
-   （PART A 每件一个小 batch）各自 `applyBatch`/`execute`，先 bake/暂存再引用组装。
+**最常踩的三条铁律**（展开与依据见顶部「Token 纪律」）：
+
+1. **op 名 / 参数以 [op-directory.md](op-directory.md) 为权威、绝不凭记忆编**——它由 op-registry
+   自动生成，覆盖全部 op 签名；`model.apply` 回执会对未知 op / 参数错误**报出具体 DSL 行号**。
+2. **只写 DSL、交给 `model.apply`**：编译器按 op→电池映射自动建图连线、自动追加 QC/URDF 终端节点；
+   遇到映射表外的 op 会显式报错（带行号），不会静默降级。不要手写 `createNode`/`connect`。
+3. **两阶段，不堆 mega-model**：把整个物件/场景写进一坨 DSL 必然退化成方块拼接。PART A 每件单独建模、
+   `g_bake_part` 烘成 `<sha>.obj`（`parts.list` 可查），阶段2 再用 `mesh(filename=...)` 引用组装。

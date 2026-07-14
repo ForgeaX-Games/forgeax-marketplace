@@ -144,7 +144,7 @@ interface RenderState {
   /** The resolved leaf the current stroke writes into (may be a routed sub-layer). */
   activePaintTargetKey: string | null
   /** Replace the whole baked bucket from the service's projected layers. */
-  setBakedLayers: (layers: BakedLayerDTO[]) => void
+  setBakedLayers: (layers: BakedLayerDTO[], opts?: { summary?: boolean }) => void
   /** Clear project-scoped baked layer state before loading a different project. */
   clearBakedLayers: () => void
   setEditMode: (on: boolean) => void
@@ -550,13 +550,17 @@ export const useRenderStore = create<RenderState>((set) => ({
       if (prev.length === ids.length && prev.every((v, i) => v === ids[i])) return s
       return { selectedEditorNodeIds: ids }
     }),
-  setBakedLayers: (layers) =>
+  setBakedLayers: (layers, opts) =>
     set((state) => {
       const now = Date.now()
+      const summary = opts?.summary === true
       const next: Record<string, RendererVoxelLayer> = {}
       for (const b of layers) {
         const key = `baked:${b.nodePath}`
         const prev = state.bakedLayers[key]
+        const incomingCells = b.cells ?? []
+        const cellsSource = summary ? [] : incomingCells
+        const cellCount = summary ? (b.cellCount ?? incomingCells.length) : incomingCells.length
         const assetAlias = b.assetAlias ?? (typeof b.attributes?.asset_alias === 'string' ? b.attributes.asset_alias : undefined)
         const candidate: RendererVoxelLayer = {
           key,
@@ -565,7 +569,8 @@ export const useRenderStore = create<RenderState>((set) => ({
           nodeName: b.nodeName,
           value: b.value,
           schema: b.schema,
-          cells: b.cells.map((c) => ({ x: c.x, y: c.y, z: c.z, ...(c.token ? { token: c.token } : {}), ...(c.state ? { state: c.state } : {}) })),
+          cells: cellsSource.map((c) => ({ x: c.x, y: c.y, z: c.z, ...(c.token ? { token: c.token } : {}), ...(c.state ? { state: c.state } : {}) })),
+          cellCount,
           // Carry the user's prior show/hide across refetches; new layers default on.
           visible: prev ? prev.visible : true,
           updatedAt: now,

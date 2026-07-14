@@ -14,6 +14,8 @@ import type {
   SearchSegmentClip,
   Shot,
   QTECue,
+  UIScreen,
+  UIScreenAction,
 } from '../scenario/types'
 import { DialogueBox } from './DialogueBox'
 import { QTEOverlay } from './QTEOverlay'
@@ -23,12 +25,16 @@ import { PlaybackControls } from './PlaybackControls'
 import { SettlementOverlay } from './SettlementOverlay'
 import { MinigameOverlay } from './MinigameOverlay'
 import { SearchLayer, InventoryHUD } from './SearchLayer'
+import { ScreenOverlay } from './ScreenOverlay'
+import { BranchTreeOverlay } from './BranchTreeOverlay'
 import { TextOverlayLayer } from './TextOverlayLayer'
 import { FxOverlayLayer, FadeLayer, StickerLayer } from './SceneFxLayers'
+import { HudLayer } from './HudLayer'
 import { useTrackPrefsStore } from '../editor/timeline/trackPrefsStore'
 import { composeStageFx } from '../fx/fxPresets'
-import { isModuleEnabled } from '../scenario/moduleFlags'
+import { isModuleEnabled, effectiveUIScreens } from '../scenario/moduleFlags'
 import { nextMinigameToTrigger, pendingMinigamesAtEnd } from './minigameHit'
+import { nextScreenToTrigger, pendingScreensAtEnd } from './screenHit'
 import { nextSearchToTrigger, segmentHotspots, isSegmentComplete } from './searchSegmentHit'
 import {
   applyEffects,
@@ -177,6 +183,11 @@ export function Player() {
   // 搜索段触发状态：当前正卡在哪一段 / 已完成过哪些（不再重触）
   const [activeSearch, setActiveSearch] = useState<SearchSegmentClip | null>(null)
   const completedSearchRef = useRef<Set<string>>(new Set())
+  // 全屏页面(v11)：当前打开的页面 / 已按时间轴触发过的 ScreenClip id。
+  const [activeScreen, setActiveScreen] = useState<UIScreen | null>(null)
+  const triggeredScreensRef = useRef<Set<string>>(new Set())
+  // 全屏页面「关卡选择」动作 → 复用剧情树 overlay(与 PlayerMenu 内的那份独立)。
+  const [levelSelectOpen, setLevelSelectOpen] = useState(false)
   /*
    * 字幕（DialogueBox）可见性 —— 与时间轴的 "DIA 轨" 开关同步。
    *
@@ -265,6 +276,8 @@ export function Player() {
     triggeredMinigamesRef.current = new Set()
     setActiveSearch(null)
     completedSearchRef.current = new Set()
+    setActiveScreen(null)
+    triggeredScreensRef.current = new Set()
     setResetTick((t) => t + 1)
   }, [scenario])
 
@@ -394,6 +407,8 @@ export function Player() {
     triggeredMinigamesRef.current = new Set()
     setActiveSearch(null)
     completedSearchRef.current = new Set()
+    setActiveScreen(null)
+    triggeredScreensRef.current = new Set()
     // 进新场景时把 video 的速率/currentTime 复位
     if (videoRef.current) {
       try {
@@ -512,6 +527,7 @@ export function Player() {
     if (paused) return
     if (activeMinigame) return
     if (activeSearch) return
+    if (activeScreen) return
     const duration = scene.durationMs
     const effectiveEnd = computeEffectiveEndMs(scene)
     const isVideo = scene.media.kind === 'VIDEO'
@@ -646,6 +662,27 @@ export function Player() {
         }
       }
 
+      // 6.6) 全屏页面触发检测：到达某未触发过的 ScreenClip startMs → 暂停并弹页面
+      {
+        const sc = nextScreenToTrigger({
+          clips: scene!.screens ?? [],
+          elapsedMs: e,
+          triggeredIds: triggeredScreensRef.current,
+        })
+        if (sc) {
+          const ui = effectiveUIScreens(scenario)[sc.screenId]
+          triggeredScreensRef.current.add(sc.id)
+          if (ui) {
+            if (isVideo && videoRef.current) {
+              try { videoRef.current.pause() } catch { /* 还没 ready */ }
+            }
+            rafRef.current = null
+            setActiveScreen(ui)
+            return
+          }
+        }
+      }
+
       if (!reachedEnd) {
         rafRef.current = requestAnimationFrame(step)
       } else {
@@ -665,6 +702,22 @@ export function Player() {
           setActiveMinigame(pending)
           return
         }
+        // 兜底：scene 播完前弹出所有还没触发过的全屏页面(startMs 可能在 effectiveEnd 之后)
+        const pendingScreen = pendingScreensAtEnd({
+          clips: scene!.screens ?? [],
+          triggeredIds: triggeredScreensRef.current,
+        })
+        if (pendingScreen) {
+          const ui = effectiveUIScreens(scenario)[pendingScreen.screenId]
+          triggeredScreensRef.current.add(pendingScreen.id)
+          if (ui) {
+            if (isVideo && videoRef.current) {
+              try { videoRef.current.pause() } catch { /* ignore */ }
+            }
+            setActiveScreen(ui)
+            return
+          }
+        }
         console.log('[Player] scene end (no pending minigame)', { sceneId, effectiveEnd })
         handleSceneEnd()
       }
@@ -674,7 +727,7 @@ export function Player() {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId, paused, resetTick, activeMinigame, activeSearch])
+  }, [sceneId, paused, resetTick, activeMinigame, activeSearch, activeScreen])
 
   /** 搜索段结束 → 标记完成、视频跳到段末继续播放、退出搜查态。 */
   function resumeFromSearch(sg: SearchSegmentClip): void {
@@ -938,6 +991,61 @@ export function Player() {
     setGateNotice(`获得「${itemName}」`)
   }
 
+  /** 关闭当前全屏页面并续播(VIDEO 场景恢复播放,刷新墙钟基准防 dt 跳变)。 */
+  function closeScreen(): void {
+    setActiveScreen(null)
+    lastTickWallRef.current = performance.now()
+    const v = videoRef.current
+    if (scene?.media.kind === 'VIDEO' && v) {
+      try { void v.play().catch(() => {}) } catch { /* 还没 ready */ }
+    }
+  }
+
+  /** 全屏页面动作分发(发物品/改数值/导航/开别的页面等)。 */
+  function handleScreenAction(action: UIScreenAction): void {
+    switch (action.type) {
+      case 'close':
+        closeScreen()
+        break
+      case 'restart':
+        setActiveScreen(null)
+        restart()
+        break
+      case 'home':
+      case 'exit':
+        setActiveScreen(null)
+        exit()
+        break
+      case 'levelSelect':
+        setLevelSelectOpen(true)
+        break
+      case 'jumpScene':
+        setActiveScreen(null)
+        setLevelSelectOpen(false)
+        setSceneId(action.sceneId)
+        break
+      case 'openScreen': {
+        const ui = effectiveUIScreens(scenario)[action.screenId]
+        if (ui) setActiveScreen(ui)
+        break
+      }
+      case 'giveItems':
+        setOwnedItems((o) => applyItemEffects(action.effects, o))
+        break
+      case 'applyVars':
+        setVars((vs) => applyEffects(action.effects, vs, scenario))
+        break
+      default:
+        break
+    }
+  }
+
+  /** 从菜单打开一个全屏页面(背包 / 主菜单 / 自定义)。 */
+  function openScreenById(id: string): void {
+    const ui = effectiveUIScreens(scenario)[id]
+    if (ui) setActiveScreen(ui)
+  }
+
   function replayScene(): void {
     setResetTick((t) => t + 1)
   }
@@ -954,6 +1062,10 @@ export function Player() {
     setActiveSearch(null)
     completedSearchRef.current = new Set()
     appliedEnterRef.current = new Set()
+    // 全屏页面：从头玩 → 关掉当前页面、清空「已触发」记录,让时间轴页面可重新弹。
+    setActiveScreen(null)
+    setLevelSelectOpen(false)
+    triggeredScreensRef.current = new Set()
     if (sceneId === scenario.rootSceneId) {
       setResetTick((t) => t + 1)
     } else {
@@ -1070,6 +1182,14 @@ export function Player() {
 
       {txtTrackVisible && <TextOverlayLayer scene={scene} elapsed={elapsed} />}
 
+      {/* Tier C · 跨场常驻 HUD(血条/技能框…),绑 GameVariable 实时更新 + 条件显隐 */}
+      <HudLayer
+        scenario={scenario}
+        vars={vars}
+        visited={visited}
+        ownedItems={ownedItems}
+      />
+
       {scene.qte && (
         <QTEOverlay
           spec={scene.qte}
@@ -1154,6 +1274,32 @@ export function Player() {
         />
       )}
 
+      {activeScreen && (
+        <ScreenOverlay
+          screen={activeScreen}
+          scenario={scenario}
+          ownedItems={ownedItems}
+          vars={vars}
+          visitedSceneIds={visited}
+          onClose={closeScreen}
+          onAction={handleScreenAction}
+        />
+      )}
+
+      {levelSelectOpen && (
+        <BranchTreeOverlay
+          scenarioTitle={scenario.title}
+          currentSceneId={scene.id}
+          visitedSceneIds={visited}
+          onJump={(id) => {
+            setLevelSelectOpen(false)
+            setActiveScreen(null)
+            setSceneId(id)
+          }}
+          onClose={() => setLevelSelectOpen(false)}
+        />
+      )}
+
       {settlement && (
         <SettlementOverlay
           score={tallyQTE(scene.qte ?? defaultQTESpec(), verdictsRef.current).total}
@@ -1213,6 +1359,10 @@ export function Player() {
         onExit={exit}
         subtitlesVisible={showSubtitles}
         onToggleSubtitles={toggleSubtitles}
+        screens={Object.values(effectiveUIScreens(scenario) ?? {}).filter(
+          (s) => s.kind === 'inventory' || s.kind === 'mainMenu' || s.kind === 'custom',
+        )}
+        onOpenScreen={openScreenById}
       />
 
       <PlaybackControls

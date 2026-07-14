@@ -1,7 +1,11 @@
 /**
- * poiScatter: 在网格指定区域值上随机散布兴趣点（POI）。
- * 输入：grid (any) — 单网格/多值网格/网格列表; poiRules (array) — POI规则; poiBaseId (number) — POI起始ID; maxAttempts (number); seed (number)
- * 输出：outputGrid (any) — 写入POI后的网格（格式与输入一致）; poiNameList (array); placedCount (number)
+ * poiScatter: 在单张网格指定区域值上随机散布兴趣点（POI）。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张网格; poiRules (array) — POI规则; seed (number)
+ * 输出：outputGrid (grid) — 单张多值网格（每种 POI 一个递增 id）; outputNameList (array); placedCount (number)
  */
 
 type Grid = number[][];
@@ -208,55 +212,27 @@ function scatterOnGrid(
 const MAX_ATTEMPTS = 1000;
 
 export function poiScatter(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGrid = input.grid;
+  const rawGrid = input.inputGrid;
   const rawRules = input.poiRules;
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
 
-  if (rawGrid == null) return { error: "grid is required" };
+  if (!isGrid(rawGrid)) return { error: "inputGrid is required (number[][])" };
+  const grid = rawGrid as Grid;
 
   const rules = parsePoiRules(rawRules);
   if (rules.length === 0) return { error: "poiRules must be a non-empty array of {decoration, targetValue}" };
 
-  // 统一转换为网格列表
-  let gridList: Grid[];
-  if (isGridList(rawGrid)) {
-    gridList = rawGrid as Grid[];
-  } else if (isGrid(rawGrid)) {
-    gridList = [rawGrid as Grid];
-  } else {
-    return { error: "grid must be a 2D grid (number[][]) or a list of 2D grids (number[][][])" };
-  }
-
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  let totalCount = 0;
+  const rng = new LCG(baseSeed);
+  const baseId = gridMax(grid) + 1;
 
-  let maxVal = 0;
-  for (const g of gridList) { const m = gridMax(g); if (m > maxVal) maxVal = m; }
-  const globalBaseId = maxVal + 1;
+  // 单张多值网格：每种 POI 一个递增 id
+  const { outputGrid, nameList, count } = scatterOnGrid(grid, rules, baseId, MAX_ATTEMPTS, rng);
 
-  for (let i = 0; i < gridList.length; i++) {
-    const effectiveSeed = baseSeed + i * 999983;
-    const rng = new LCG(effectiveSeed);
-    const baseId = globalBaseId + i * rules.length;
-    const { outputGrid, nameList, count } = scatterOnGrid(gridList[i], rules, baseId, MAX_ATTEMPTS, rng);
-    totalCount += count;
+  // 仅保留实际写入网格的 POI 条目
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
+  const outputNameList: NameEntry[] = nameList.filter(e => present.has(e.id));
 
-    // 每种 POI 单独拆出一张单值网格，与 outputNameList 一一对应
-    const rows = outputGrid.length;
-    const cols = outputGrid[0]?.length ?? 0;
-    for (const entry of nameList) {
-      const single: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (outputGrid[r][c] === entry.id) single[r][c] = entry.id;
-        }
-      }
-      outputGridList.push(single);
-      outputNameList.push(entry);
-    }
-  }
-
-  return { outputGridList, outputNameList, placedCount: totalCount };
+  return { outputGrid, outputNameList, placedCount: count };
 }

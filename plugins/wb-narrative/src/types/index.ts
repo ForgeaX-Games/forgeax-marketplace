@@ -106,6 +106,8 @@ export interface NarrativeContext {
   vn_logline?: VnLogline;                       // E1-01
   /** VN 目标幕数（§4.6 开放幕数）：由复杂度/目标节点数派生（resolveVnActCount）；缺省 3 幕。 */
   vn_target_act_count?: number;
+  /** 章→幕锚定映射（P1-1，IP 改编专用）：幕数=源单元数，每幕锚定源单元供密度展开；普通 VN 无此字段。 */
+  vn_unit_act_map?: VnUnitActMap;
   vn_outline_acts?: VnOutlineActs;              // E1-02 (开放幕数，默认三幕)
   vn_character_bios?: VnCharacterBios;          // E1-02 (人物小传)
   vn_key_items?: VnKeyItems;                    // E1-02 (关键道具)
@@ -131,6 +133,25 @@ export interface NarrativeContext {
 export interface VnLogline {
   title: string;
   content: string;       // 五要素融合的一段叙述
+}
+
+/**
+ * 幕↔源最小叙事单元锚定种子（§5.1b / P1-1，IP 改编专用）。
+ * 让每一幕忠实对应源作章节（章→幕锚定），并把该源单元的事件脉络作为幕内密度展开的依据，
+ * 从而修"E2 自由重切、只取 10-20 场丢弃大量原文"和"per-unit 提取被浪费"。
+ * 仅在 IP 改编（有 scoped IP DNA）时由 orchestrator 构建并注入；普通 VN 无此字段、行为不变。
+ */
+export interface VnActUnitSeed {
+  actIndex: number;          // 1-based 幕序
+  actId: string;             // 汉字幕号 一/二/…
+  sourceUnitIds: string[];   // 源最小叙事单元 id（通常 1 个；单元数超上限时按序分桶多个）
+  title: string;             // 幕标题（源单元标题，或分桶合并标题）
+  summary: string;           // 该幕对应源单元的事件脉络（供幕内密度展开）
+  characters: string[];      // 该幕主要出场角色
+  scene: string;             // 该幕主要场景
+}
+export interface VnUnitActMap {
+  acts: VnActUnitSeed[];
 }
 
 /** 三幕剧本结构（act_id 用汉字 一/二/三） */
@@ -210,6 +231,8 @@ export interface VnBeat {
    * 最终 `场.序` beat_id 由剧情树拓扑定稿后的确定性场号导出统一分配（§4.6c）。
    */
   beat_id: string;
+  /** 简短标题（4-14 字概括，供剧情树节点标题位展示；区别于正文 content）。 */
+  title?: string;
   content: string;                            // 五要素融合段落
   /** 所属幕（供场号导出时分组/校验；开放幕数，汉字数字序列）。 */
   act_id?: string;
@@ -276,6 +299,8 @@ export interface VnBranchedBeat {
    * 下游（G-02/G-03/前端/落盘）只见导出后的 `场.序` 形态。
    */
   beat_id: string;
+  /** 简短标题（4-14 字概括，供剧情树节点标题位展示；区别于正文 content）。 */
+  title?: string;
   /** 场号——由确定性场号导出按三维状态分组后回填（LLM 阶段不产、留空/占位）。 */
   scene_id: string;
   content: string;

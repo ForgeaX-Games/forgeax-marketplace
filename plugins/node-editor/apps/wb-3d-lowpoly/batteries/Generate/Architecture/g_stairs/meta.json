@@ -4,7 +4,7 @@
   "name-en": "GStairs",
   "description": "追加 stairs(...)：type=straight 直梯段 / spiral 螺旋梯。当 prompt 提到 楼梯 / 台阶 / 梯段 / 螺旋楼梯 / 旋转楼梯 / stairs / steps / spiral staircase 时使用。",
   "description-en": "Append `stairs(...)` — type=straight (stepped boxes) or spiral (treads around a center pole). Use for stairs, steps, staircase, spiral staircase.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autoIterate": true,
   "tags": ["geometry", "architecture", "stairs", "cad"],
   "tag_labels": ["几何", "建筑", "楼梯", "CAD"],
@@ -19,6 +19,10 @@
     { "name": "radius", "type": "number", "required": false, "label": "螺旋外半径", "default": 1.2, "description": "spiral：踏步外半径（米）", "description-en": "spiral: outer tread radius." },
     { "name": "inner_radius", "type": "number", "required": false, "label": "中柱半径", "default": 0.15, "description": "spiral：中柱半径（米）", "description-en": "spiral: center pole radius." },
     { "name": "sweep_deg", "type": "number", "required": false, "label": "旋转角", "default": 270, "description": "spiral：总旋转角（度）", "description-en": "spiral: total sweep angle (deg)." },
+    { "name": "tread_thickness", "type": "number", "required": false, "label": "踏板厚", "default": 0, "description": "空踢面时薄踏板厚度（米）；0=自动", "description-en": "Thin tread thickness for open-riser stairs; 0 = auto." },
+    { "name": "open_riser", "type": "bool", "required": false, "label": "空踢面", "default": false, "description": "空踢面：仅悬浮薄踏板，无实心踢面", "description-en": "Open-riser: floating thin treads without solid risers." },
+    { "name": "landing_depth", "type": "number", "required": false, "label": "休息平台进深", "default": 0, "description": "直梯中段休息平台进深（X，米）；0=无", "description-en": "Straight-flight mid landing depth (X); 0 = none." },
+    { "name": "landing_after", "type": "number", "required": false, "label": "平台位置", "default": 0, "description": "休息平台插在第几级之后；0=居中", "description-en": "Insert the landing after this step index; 0 = middle." },
     { "name": "id", "type": "string", "required": false, "label": "id", "default": "", "description": "自定义 id；空 = 自动 stair{n}", "description-en": "Custom id; empty = auto stair{n}." }
   ],
   "outputs": [

@@ -18,6 +18,36 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Fixed
+- **Vite dev 默认端口改回 9575→9577（此前误抄 3d-lowpoly 的 9565/9567）。**
+  `frontend/vite.config.ts`：`VITE_DEV_PORT` 默认 9575、`VITE_API_TARGET` 默认 `http://localhost:9577`。
+  *为什么：* 脱离 `bun fx start` 单独 `pnpm dev` 时会与 lowpoly 抢端口或代理到错误后端，iframe 空白。
+
+- **用户「保存到模板」的小标签失效——保存路径补一层「模板文件夹」使其与内置模板同构。**
+  此前 save-user 写到 `templates/My templates/<smallTag>/<name>.json`，与扁平内置模板结构相同，
+  前端 `getTemplateSmallLabel` 把 `<smallTag>` 误判为模板文件夹 → 小标签丢失。现改写到
+  `templates/My templates/<smallTag>/<name>/<name>.json`（`backend/src/routes/groupTemplates.ts` save-user），
+  与内置 `templates/{大}/{小}/{模板}/file.json` 同构，小标签恢复；删除路径自下而上清理变空目录。
+  *为什么：* 模板支持二级标题后，用户模板因少一层目录被误判，小标签整体失效。
+
+### Added
+- **`/api/v1/group-templates` 列表返回模板的 `version` / `author` / `createdAt`，供前端 Templates 行展示。**
+  `backend/src/routes/groupTemplates.ts`：`collectCatalogItems` 从模板 JSON 顶层读 `version`（缺省 `1.0.0`）、`author`、`createdAt`（缺省回退文件 mtimeMs）；
+  `GroupTemplateBattery` 接口同步新增 `author?` / `createdAt?`。保存路径（`/save`、`/save-user`）经新增 `stampTemplateMeta` 把 `version`/`createdAt`（缺省 `Date.now()`）落盘进模板 JSON（已有值保留）。
+  *为什么：* 模板列表要显示版本、作者、制作时间，需后端从模板 JSON 读取并在保存时持久化。
+
+### Changed
+- **`scene_asset_pixel` 电池强化 2.5D 纯俯视视角约束**：新增核心约束第 6 条 + 独立「视角要求」段 + 验收勾选项，强制**只可见顶面与正面、绝不可见左右两个侧面**，禁止 3/4 斜角/等距/透视露出侧壁。`prompts/scene_asset_pixel.json`。
+  *为什么：* 资产需与 2.5D 俯视场景无缝摆放，侧面露出会与场景透视冲突；此前模板未约束视角，模型常默认出 3/4 视角。
+
+### Added
+- **新增 4 条四方连续/俯视场景提示词电池**（A 组），提炼自 `Four_Way_Seamless_Scene_Assets` skill 的 Prompt Inserts，落到 `prompts/`（builtin 只读，小标签 `four_way_seamless`）：`material_seamless`（无语义地表四方连续材质）、`decal_sprite`（平躺地面语义贴花，不可平铺）、`modular_tileset`（可对齐拼接结构 tile）、`prop_sprite`（透明底俯视独立道具）。画风做成 `[style]` 变量、视角做成 `[view]` 变量，纯提示词不掺运行时 metadata；每条都内置 skill 的路由防混淆约束（语义物禁入材质、贴花禁平铺、tile 禁烘焙 prop、prop 禁烘焙地面）。
+  *为什么：* 把 skill 里散落的提示词范式固化为可拖拽电池，复用 skill 的"分类路由 + 防烘焙"经验，避免 agent 每次重写提示词导致语义物被平铺等已知翻车。`vars` 经校验与模板 `[占位符]` 解析逐一一致（端口生成正确）。
+- **新增 3 条横版 side-scroller 提示词电池**（B 组），提炼自 `2D_sidescroller_assets` skill 的 Prompt Templates，落到 `prompts/`（builtin，小标签 `side_scroller`）：`parallax_background`（三层视差背景，左右无缝、无独特天体/地标、无可站立地面条）、`side_platform`（纯正侧视薄板浮空平台，禁 3/4 透视）、`side_prop`（横版装饰物）。画风用 `[style]` 变量、可去底背景用 `[source_background]` 变量（绿色系→magenta/hot-pink 的选色规则留待 C 组/用户填充），纯提示词。`vars` 经校验与模板占位符一致。
+  *为什么：* 与 A 组同源思路，把横版侧视相机的背景/平台/道具范式固化为电池，内置 skill 的无缝平铺与纯侧视防错约束。
+- **新增 1 条前景抠图源图背景色规则电池**（C 组），提炼自 `Foreground_AI_Matting_Workflow` skill，落到 `prompts/`（builtin，小标签 `matting`）：`foreground_matting_bg_rule` 输入主体描述 `[subject]`，输出"生成前按语义选源图背景色"指引（绿色系→magenta/hot-pink、glow→black、其他→green/高对比纯色）+ 源图生成要求 + 仅 AI 抠图/RGB 中和/不无限重试的验收。作为可注入 A/B 组各 sprite `[source_background]` 的跨切面片段。
+  *为什么：* 抠图背景色选择是 A/B 两组透明类资产共用的前置决策，单独成片段便于复用，根治绿色主体被绿底误删等已知抠图翻车。
+
 ### Changed
 - **`generate-2d-asset` skill 的"触发生图"步骤重写，根治 agent 把 `pipeline.execute` 当触发器用而全流程翻车的问题。** 实测复盘（Mira 真实运行 + 直连后端复刻）确认：模板链「实例化→喂参数→生图→后处理」整条**后端完全可跑通**（已端到端产出 32×64 绿萝：`out_4` 贴图 PNG、`out_5` 碰撞 mask、`out_7` 几何 `{object_height,collision_mask,pivot}`），唯一卡点是 **skill 没讲清"触发生图只能用 `generation.generateImage({nodeId})`"**——agent 误用 `pipeline.execute` 去触发组内 `image_gen`（manualTrigger 按设计被跳过 / 组内节点顶层寻址不到 `target node not found`），便误判"没有触发工具"并放弃模板。
   `skills/generate-2d-asset/SKILL.md`：明确「触发生图 = `generation.generateImage({nodeId=runButtons[].nodeId})` = 点 Run」，新增「⛔ 三条死路」表逐条列出 Mira 走过的错误触发路径及其"按设计如此、非 bug"的原因；铁律 2 强化为"生图唯一入口"，并澄清 asset_generation 不接参考图 = 合法文生图（此前"几毫秒空转"是误用 execute、非缺参考图）。
@@ -37,7 +67,7 @@ calendar dates in the project timezone.
   此前 `groups.list/get` 只看见画布上**已实例化**的组——空画布时 agent 拿不到任何模板，skill 只能「提示用户拖入」，agent 无法自主操作模板。现补齐两条能力：
   ①**库发现**：`templates.list`（转发 `GET /api/v1/group-templates?scope=templates`）列出随插件发布的 5 套模板 + 用户模板的 `id/name/category`；`templates.get` 读单个模板完整定义（`exposedInputs/Outputs` 即 `in_N/out_N` 端口契约）。均剥离内联预览图（`stripInlineImages`）。
   ②**一步实例化**：`groups.instantiateTemplate` 转发新路由 `POST /api/v1/group-templates/:id/instantiate`——读模板 JSON → `buildTemplateOps` 重映射内部 node/edge/group id（同模板可重复实例化不冲突、对外 `in_N/out_N` 端口名稳定）→ 盖 `__groupIsTemplate` provenance → 一条原子 `applyBatch` 落地为一个 `__group__` 顶层组节点，返回运行时 `groupId` + 端口清单供接线。
-  新增 `backend/src/lib/templateOps.ts`（`buildTemplateOps`/`splitTemplate`，与 `wb-scene-generator` 同名 lib 及 CLI `node-create-template` 保持等价）；路由加在 `backend/src/routes/groupTemplates.ts`（复用 `findGroupFile`/`readGroup`/`categoryFor`/`templateRoots`，经 `ensureMutationAccess` 走同一把 per-agent 项目锁）；三工具声明于 `forgeax-plugin.json`。
+  新增 `backend/src/lib/templateOps.ts`（`buildTemplateOps`/`splitTemplate`，与 `wb-scene-generator` 同名 lib 及 CLI `node-create-template` 保持等价）；路由加在 `backend/src/routes/groupTemplates.ts`（复用 `findGroupFile`/`readGroup`/`categoryFor`/`templateRoots`，经 `ensureMutationAccess` 走同一把 per-agent 项目锁）；三工具声明于 `forgeax-extension.json`。
   配套把 `skills/generate-2d-asset/SKILL.md` 的操作流程从「等用户拖入模板」改为「`templates.list` 发现 → `groups.instantiateTemplate` 自实例化 → `groups.get` 取 runButtons → 喂入参 → 触发 → execute → 读产出」，并更新 id 来源铁律（`groupId` 取自 instantiate 返回、`runButtons.nodeId` 取自 `groups.get`，禁止手拼展开模板）。
   *为什么：* 把 `wb-scene-generator` 早有的 `templates.*` + `instantiateTemplate` 通路移植到 2D app，补齐 agent 自主操作模板的最后一环。验证：`backend/tests/templateInstantiate.test.ts`（4 项，含把内置 `conceptual_scene_design` 模板实例化进 app runtime、断言 `__group__` 影子节点 + 稳定 `in_N/out_N` 端口 + 同模板二次实例化不撞 id）；既有 `tool-handlers`/`group-templates` 测试不受影响。
 - **新增 MCP 工具 `asset2d:groups.list` / `asset2d:groups.get`，让 agent 能像人一样驱动画布上的组合电池（模板组）。**
@@ -46,7 +76,7 @@ calendar dates in the project timezone.
   `runButtons` 复刻前端 `GroupNode.tsx` 外侧映射 Run 按钮——**组内每个 `manualTrigger` 电池（image_gen/text_gen）各出一个可单独触发的入口**（`{nodeId, opId, kind:image|text}`），
   agent 据此对内部节点 id 调 `generation.generateImage` 即与人点外侧 Run 走完全相同的后端路径（`ai/routes.ts` 的 `findNodeWithGroup` 跨组解析）。
   *为什么：* 此前 `pipeline.get` 只返回顶层 nodes/edges，组合电池内部的 `image_gen` 节点 id 既不可见又在实例化时被重映射，agent 无法定位并触发模板组的内部生图。
-  `forgeax-plugin.json` 声明这两个工具。验证：`backend/tests/tool-handlers.test.ts` 新增用例（建 text_panel→image_gen 组合电池，断言 `groups.list/get` 暴露端口齐全且 image_gen 出一个 `kind:image` 的 runButton），3 项全过。
+  `forgeax-extension.json` 声明这两个工具。验证：`backend/tests/tool-handlers.test.ts` 新增用例（建 text_panel→image_gen 组合电池，断言 `groups.list/get` 暴露端口齐全且 image_gen 出一个 `kind:image` 的 runButton），3 项全过。
 - **`image_atlas_compose` / `cliff_atlas_extract` 新增 `enable` 开关输入端口（bool，默认 true）。** 端口为 false 时跳过加工、所有输出端口返回空（execute 顶部 `if (!enable) return {}`，先于必填校验/IO，故关闭时即使未连源图也不报错）；默认开，行为与原先一致。`batteries/image/tiles/image_atlas_compose/{meta.json,index.ts}`、`batteries/image/tiles/cliff_atlas_extract/{meta.json,index.ts}`。*为什么：* 便于在流水线中按条件门控这两步重计算。
 - **新增 helper 电池 `tile_type`（Tile 种类下拉框）。** `batteries/helper/tile_type/`：输入端口 `tile`（带 `options` 下拉：floor / cliff / forest / flower_bed / tilemap / slope，默认 floor）原样输出到字符串端口 `value`（`index.ts:tileType`，非法值兜底 floor）。*为什么：* 供下游按统一的 tile 种类字符串选择/路由资产生成分支。
 - **右侧 Preview 资产信息新增「生成时间」行（`Created`）。** `frontend/src/surfaces/ImagePreviewSurface.tsx`
@@ -74,7 +104,7 @@ calendar dates in the project timezone.
   ② `backend/src/routes/groupTemplates.ts` 新增 `POST /api/v1/group-templates/:id/instantiate`（仅扫 `templates/`，经内核 `applyBatch` 一次性把模板组落成
   **单个锁定组节点**并回填 `__groupIsTemplate` provenance，受 `ensureMutationAccess` 项目锁保护）；
   ③ `backend/src/tool-handlers.ts` 新增 3 个 op handler（`templates.list`/`templates.get` 走 `?scope=templates` 并 `stripInlineImages` 防 base64 污染上下文；
-  `pipeline.instantiateTemplate` 转发 `/instantiate`）；④ `forgeax-plugin.json` 声明这 3 个 `exposedToAI` 工具及 schema。
+  `pipeline.instantiateTemplate` 转发 `/instantiate`）；④ `forgeax-extension.json` 声明这 3 个 `exposedToAI` 工具及 schema。
   *为什么：* 用户指出「生成建筑只需一个 `dechouse_gen` 模板电池，手搭一系列节点连接是过时错误做法」——2D 必须像场景侧一样支持一键实例化模板组。
   验证：`backend/tests/group-templates.test.ts` 新增「实例化内置 `dechouse_gen` 得到单组节点 + 对外 `in_0`/`out_3`/`out_4` 端口」「不存在的模板 404」两例；
   `tsc --noEmit` 对新增 3 份文件干净（既存 `src/ai/*` 的 `findNodeWithGroup` 报错为环境内核未重建，与本改动无关）。
@@ -421,7 +451,7 @@ calendar dates in the project timezone.
 
 ### Changed
 - **generate-2d-asset skill documents `tree_merge` and `expectedPrevHash`.**
-  `part-c-shaped-house.md`, `pipeline-schema.md`, `common-base.md`, `forgeax-plugin.json`.
+  `part-c-shaped-house.md`, `pipeline-schema.md`, `common-base.md`, `forgeax-extension.json`.
 
 ### Added
 - **Workbench CN 场景资产 skill 迁移为可编排电池与模板。** 新增 Four-Way 场景资产电池
@@ -437,7 +467,7 @@ calendar dates in the project timezone.
   metadata 约定沉淀为普通可复跑电池。新增模板
   `FourWayMaterialSeamless` / `SideScrollerBackgroundLayer`
   （`batteries/templates/*`），并补 `asset2d:templates.list/get` 与
-  `asset2d:pipeline.instantiateTemplate`（`forgeax-plugin.json`、
+  `asset2d:pipeline.instantiateTemplate`（`forgeax-extension.json`、
   `backend/src/tool-handlers.ts`、`routes/groupTemplates.ts`、
   `lib/templateOps.ts`），让 AI 可先实例化高频模板再触发 `image_gen` 和下游
   `pipeline.execute`。同步更新 `generate-2d-asset` PART D/PART E 执行文档、
@@ -876,7 +906,7 @@ calendar dates in the project timezone.
   三 PART 防呆清单移到 `skills/generate-2d-asset/notes/common-base.md`。SKILL.md 现仅含路由表、
   各 PART 要点提要、注意事项索引，并通过相对链接路由到 executions/ 与 notes/；execution 文件
   用 `../` 回链 SKILL 及 `battery-catalog.md`/`pipeline-schema.md`/`tile-pipeline.md`。
-  入口仍是 `skills/generate-2d-asset/SKILL.md`（`forgeax-plugin.json:46` 不变）。
+  入口仍是 `skills/generate-2d-asset/SKILL.md`（`forgeax-extension.json:46` 不变）。
   *为什么：* 单文件 426 行过长、检索困难；按「SKILL 路由 + 各部分独立」拆分后格式更清晰，
   改某一条 pipeline 不再牵动整份文档。
 
@@ -1281,7 +1311,7 @@ calendar dates in the project timezone.
   - **后端：** 删 `backend/src/library/`（SQLite 资产库 db/service/routes）、
     `backend/src/agent/`（截图 + renderer 命令路由）、`backend/src/baked/`、
     `backend/src/routes/assets.ts`，并从 `main.ts` 注销对应注册。
-  - **AI 工具：** 从 `forgeax-plugin.json` 与 `tool-handlers.ts` 删去 7 个
+  - **AI 工具：** 从 `forgeax-extension.json` 与 `tool-handlers.ts` 删去 7 个
     `screenshot.*` / `renderer.*` 工具声明与映射。
   - **数据：** 删除已成孤儿的 `materials/asset-store/`（13MB `library.db` + `blobs/`）、
     `materials/export_2026-06-04/`、`materials/legacy-asset-overlays.json`——删掉
@@ -1412,7 +1442,7 @@ calendar dates in the project timezone.
 - **从本工作台注册表移除误串入的 `compose-scene-pipeline` skill。** 该 skill 实属
   `wb-scene-generator`（场景生成器），在本 app 初建（`add image scene asset app`）时被
   连同模板拷入 `skills/compose-scene-pipeline/`，并在「绑定 Mira」一改中被误当作"漏注册"
-  补进了 `forgeax-plugin.json` 的 `provides.skills` 及 agent-mira 的 `defaultSkills`，与
+  补进了 `forgeax-extension.json` 的 `provides.skills` 及 agent-mira 的 `defaultSkills`，与
   专属的 `generate-2d-asset` 职责重叠/混淆。现从 `provides.skills` 和 agent-mira
   `defaultSkills` 解绑，UI 不再展示该条；磁盘文件 `skills/compose-scene-pipeline/` 暂保留
   （初建带入、非本次新增，留待后续清理）。本工作台现仅暴露 `author-guide` 与
@@ -1452,7 +1482,7 @@ calendar dates in the project timezone.
 
 - **新增 `generate-2d-asset` skill — 教 AI 用图生图/文生图管线生成 2D 资产。** 新建
   `skills/generate-2d-asset/{SKILL.md,battery-catalog.md,pipeline-schema.md}`，并在
-  `forgeax-plugin.json` 的 `provides.skills` 注册（trigger `/generate-2d-asset`）。
+  `forgeax-extension.json` 的 `provides.skills` 注册（trigger `/generate-2d-asset`）。
   内容分两阶段：先问清需求（生成什么 / 文生图还是图生图 / 尺寸 / 是否抠图 / 是否批量），
   再搭 `text_panel → image_gen ← image_source` 主链并按需接 `image_remove_bg` /
   `image_resize` / `image_preview` / `image_output`。明确 `image_gen` 是 `manualTrigger`：
@@ -1460,13 +1490,13 @@ calendar dates in the project timezone.
   节点只点一次运行**（结果经 `writeNodeOutput` 写入输出缓存，下游 `pipeline.execute` 不会
   重触发生图，避免重复消耗网关额度）。op id / 端口以 `batteries.list` / `batteries.get`
   为准。配套在 agent-mira（Mira · 织绘师）的 `defaultSkills` 引用此 skill。
-- **绑定 `Mira · 织绘师` agent（`@forgeax-plugin/agent-mira`）为本工作台的
-  `preferredAgent`，并注册 `compose-scene-pipeline` skill。** `forgeax-plugin.json`
+- **绑定 `Mira · 织绘师` agent（`@forgeax-extension/agent-mira`）为本工作台的
+  `preferredAgent`，并注册 `compose-scene-pipeline` skill。** `forgeax-extension.json`
   的 `provides.workbench` 新增 `preferredAgent`，使进入本工作台时 agent picker 默认
   选中 Mira；`provides.skills` 补注册原已存在但未登记的 `compose-scene-pipeline`
   （`./skills/compose-scene-pipeline/SKILL.md`），让 Mira 的 `defaultSkills` 能解析到它。
   仿照 `wb-3d-lowpoly` ↔ `agent-lowpoly`（Poly）的工作台/agent 配对模式，给 2D 资产
-  生成提供专职 agent。见 `forgeax-plugin.json` provides.workbench / provides.skills。
+  生成提供专职 agent。见 `forgeax-extension.json` provides.workbench / provides.skills。
 
 ### Changed
 - **RemoveBG (`image_remove_bg`) 的 `lab_tolerance` 默认值 50 → 9。** `meta.json`

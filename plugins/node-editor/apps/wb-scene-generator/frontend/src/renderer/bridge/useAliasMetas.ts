@@ -3,12 +3,18 @@ import { useRenderStore } from '../store'
 import type { AliasMeta } from '../framework/asset/matchAssetEntry'
 import { clearAllImgCache } from '../framework/asset/imageCache'
 
-// Fetch the 'raw' zone's alias metadata and push it into the store. The asset
+// Fetch the alias metadata matching pool and push it into the store. The asset
 // drawMode matcher resolves each layer's asset_name against this pool.
 //
+// Zone-agnostic on purpose: the request omits `zone` so the backend returns the
+// merged pool across ALL zones (except trash). A painted alias can live in any
+// zone — e.g. after the base library was migrated raw→staging — so pinning the
+// pool to a single zone (the old `?zone=raw`) left it empty and every asset-mode
+// cell skipped (no texture) while color mode still worked.
+//
 // The pool is NOT static: it grows whenever a texture is imported / published
-// into the active project's private `raw` zone (e.g. the texture-pipeline
-// publish bridge `scene:library.publishExternal`), and it differs per project.
+// into the active project's private store (e.g. the texture-pipeline publish
+// bridge `scene:library.publishExternal`), and it differs per project.
 // So besides the initial fetch we MUST re-pull on:
 //   - `library:changed`  — any library mutation (import / publish-external / …)
 //                          broadcasts this; without it a freshly published
@@ -19,7 +25,7 @@ import { clearAllImgCache } from '../framework/asset/imageCache'
 
 async function refreshAliasMetas(): Promise<void> {
   try {
-    const res = await fetch('/api/v1/library/aliases-meta?zone=raw')
+    const res = await fetch('/api/v1/library/aliases-meta')
     if (!res.ok) return
     const metas = (await res.json()) as AliasMeta[]
     if (Array.isArray(metas)) {
@@ -33,9 +39,10 @@ async function refreshAliasMetas(): Promise<void> {
   }
 }
 
-function isProjectActivated(msg: { event?: string; payload?: unknown }): boolean {
+function isProjectViewing(msg: { event?: string; payload?: unknown }): boolean {
   if (msg.event !== 'runtime' || !msg.payload || typeof msg.payload !== 'object') return false
-  return (msg.payload as { kind?: unknown }).kind === 'project:activated'
+  const kind = (msg.payload as { kind?: unknown }).kind
+  return kind === 'project:activated' || kind === 'project:viewing'
 }
 
 export function useAliasMetas(): void {
@@ -52,7 +59,7 @@ export function useAliasMetas(): void {
         } catch {
           return
         }
-        if (msg.event === 'library:changed' || isProjectActivated(msg)) void refreshAliasMetas()
+        if (msg.event === 'library:changed' || isProjectViewing(msg)) void refreshAliasMetas()
       }
     }
     const onWorkbenchMessage = (event: MessageEvent) => {

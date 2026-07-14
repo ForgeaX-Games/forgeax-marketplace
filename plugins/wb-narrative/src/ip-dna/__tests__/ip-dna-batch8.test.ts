@@ -339,11 +339,12 @@ describe("batch8 · 逐层递归聚合（§3.3）", () => {
     expect(await extractParentOperators(undefined, { id: "x", title: "t", levelType: "chapter" }, tpl)).toEqual([]);
   });
 
-  it("normalizeOperator 补齐 8 字段 + uid 兜底", () => {
+  it("normalizeOperator 补齐 8 字段 + uid 兜底 + knowledge_domain 归一（P1-2）", () => {
     const op = normalizeOperator({ name: "n" }, "fallback_uid");
     expect(op.uid).toBe("fallback_uid");
     expect(op.adaptation).toEqual({ type: "", element: "" });
-    expect(op.knowledge_domain).toBe("");
+    // P1-2：knowledge_domain 归一到五大类；无有效分类线索时兜底"故事内容"（不再留空，保证三视角分组可用）。
+    expect(op.knowledge_domain).toBe("故事内容");
   });
 });
 

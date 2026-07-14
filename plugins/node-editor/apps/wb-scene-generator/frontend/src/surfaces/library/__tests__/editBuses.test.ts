@@ -48,14 +48,15 @@ describe('paintAsset bus', () => {
 })
 
 describe('alias field extraction', () => {
-  const obj = '[仓库-地窖-营地-集市]_[室内]__[城镇建筑]_[储藏室]_[木箱]_[无]_[西式奇幻]_[正常]_[抠图]_[16]__[静态]_[]_[0].png'
-  const tile = '[]_[]__[]_[]_[森林]_[]_[国风仙侠]_[正常]_[forest]_[32]__[静态]_[]_[].png'
-  it('aliasItemName reads field 4 (item name), falls back to the raw string', () => {
+  // 13-field asset-store contract: idx2 = name, idx8 = size/PPU.
+  const obj = '[A场景资产-家居-家具-储物]_[室内]_[木箱]_[木]_[无]_[西式奇幻]_[正常]_[asset]_[16]_[静态]_[无]_[0]_[].png'
+  const tile = '[T地形块-自然]_[室外]_[森林]_[]_[无]_[国风仙侠]_[正常]_[forest_16]_[32]_[静态]_[无]_[]_[].png'
+  it('aliasItemName reads field index 2 (item name), falls back to the raw string', () => {
     expect(aliasItemName(obj)).toBe('木箱')
     expect(aliasItemName(tile)).toBe('森林')
     expect(aliasItemName('no-brackets-here')).toBe('no-brackets-here')
   })
-  it('aliasPpu reads field 9, null when absent/invalid', () => {
+  it('aliasPpu reads field index 8, null when absent/invalid', () => {
     expect(aliasPpu(obj)).toBe(16)
     expect(aliasPpu(tile)).toBe(32)
     expect(aliasPpu('[a]_[b]')).toBeNull()
@@ -95,6 +96,15 @@ describe('editToolbar bus', () => {
     window.dispatchEvent(new StorageEvent('storage', { key: 'wb-scene-generator.preview.editMode' }))
     window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }))
     expect(seen).toEqual([true])
+    unsub()
+  })
+
+  it('editMode notifies same-window subscribers immediately on write', () => {
+    const seen: boolean[] = []
+    const unsub = subscribeEditMode((v) => seen.push(v))
+    writeEditMode(true)
+    writeEditMode(false)
+    expect(seen).toEqual([true, false])
     unsub()
   })
 

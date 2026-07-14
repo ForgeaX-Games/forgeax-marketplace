@@ -121,7 +121,16 @@ function formatDomainValueList(
  */
 export function resolveInputPortValue(nodeId: string, portName: string): unknown {
   const state = usePipelineStore.getState()
-  const edges = state.currentPipeline?.edges ?? []
+  // Inside a group's inner view the wiring between inner nodes lives in the
+  // group's own edges, not the root pipeline edges. Consult those first so an
+  // inner node (e.g. scene_structure) can trace its upstream inner producer and
+  // read the value the probe hydrated under that producer's real id.
+  const currentGroupId =
+    state.groupViewStack.length > 0 ? state.groupViewStack[state.groupViewStack.length - 1] : null
+  const groupEdges = currentGroupId
+    ? state.currentPipeline?.groups?.find((g) => g.id === currentGroupId)?.edges ?? []
+    : []
+  const edges = [...groupEdges, ...(state.currentPipeline?.edges ?? [])]
   // External context nodes render under a synthetic prefixed id in the inner
   // view, but the real wiring (and cached value) lives on their original id in
   // the container graph — trace by the real id so their ports resolve too.

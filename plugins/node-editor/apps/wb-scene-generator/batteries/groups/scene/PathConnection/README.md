@@ -228,7 +228,7 @@ jq -r '.data[0].items[0][] | "\(.type)\t\(.name)"' outputs/out/names.json | sort
 - 实证基线（verified-town +道路）：节点 15 / 边 17，`out.layers` 多出 `石路` tile×1。
 - 反例（crowded-block `p_mqax7pj3_eaa3by` 修复前）：`in_0`（POI）悬空 → `outputs/paths/` 不存在、`names` 无"石路"、下游 natdec 连带无"行道树"，但整图仍 `completed`。
 
-看到道路 tile 图层出现，且建筑之间在截图里被路连起来，即说明本层正确。
+看到道路 tile 图层出现，且建筑之间在 Preview 里被路连起来，即说明本层正确。
 
 ### 读回端口内容验证（像 grep 一样查某端口）
 

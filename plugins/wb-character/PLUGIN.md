@@ -1,12 +1,12 @@
-# `@forgeax-plugin/wb-character` — ForgeaX Workbench plugin
+# `@forgeax-extension/wb-character` — ForgeaX Workbench plugin
 
-> 这是 `@forgeax-plugin/wb-character` 的 plugin 包装层。下层引擎仍然是 9-pipeline 的 character-editor (Three.js / Vite)，详见 `README.md`。
+> 这是 `@forgeax-extension/wb-character` 的 plugin 包装层。下层引擎仍然是 9-pipeline 的 character-editor (Three.js / Vite)，详见 `README.md`。
 
 ## 仓库定位
 
 - **GitHub**: `ForgeaX-Games/forgeax-wb-character` (private)
 - **挂载点**: `packages/marketplace/plugins/wb-character/` (二级 submodule，宿主仓 = `ForgeaX-Games/forgeax-marketplace`)
-- **Plugin manifest**: `forgeax-plugin.json` — kind=workbench, 12 tools, 全部 exposedToAI
+- **Plugin manifest**: `forgeax-extension.json` — kind=workbench, 12 tools, 全部 exposedToAI
 
 ## 双模态契约
 

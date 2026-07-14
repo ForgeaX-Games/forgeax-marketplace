@@ -1,13 +1,16 @@
 /**
  * multi_layer_grass: 多层地面生成
  * 原版管线内置：perlin_noise → grid_binarize → grid_mask_apply → 后处理过滤小碎片
- * 支持单个网格或网格列表作为基准输入，每层输出独立的单值网格。
- * 输入：baseGrid (grid|array) — 基准网格或网格列表;
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张基准网格;
  *       layerCount (number) — 草地层数; threshold (number) — 二值化阈值(0~1);
  *       frequency (number) — 噪声频率; octaves (number) — 分形倍频;
  *       seed (number) — 随机种子
- * 输出：outputGridList (array) — 单值网格列表，每个元素只含一层草地值和0;
- *       nameList (array) — [{id, name}]
+ * 输出：outputGrid (grid) — 单张多值网格（每层一个递增 id，从 max+1 起；重叠处取较高层）;
+ *       nameList (array) — [{id, name, type:"tile"}]
  */
 
 type Grid = number[][];
@@ -213,30 +216,22 @@ function gridMax(grid: Grid): number {
   return max;
 }
 
-// 将 input.baseGrid 统一解析为 Grid[]
-function parseBaseGridInput(raw: unknown): Grid[] | null {
-  if (!raw) return null;
-
-  // 单个网格：number[][]
-  if (Array.isArray(raw) && raw.length > 0 && Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as Grid];
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
+    return raw as Grid;
   }
-
-  // 网格列表：number[][][]
-  if (Array.isArray(raw) && raw.length > 0 && Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as Grid[];
-  }
-
   return null;
 }
 
 // ===== 主导出函数 =====
 
 export function multiLayerGrass(input: Record<string, unknown>): Record<string, unknown> {
-  const baseGrids = parseBaseGridInput(input.baseGrid);
-  if (!baseGrids || baseGrids.length === 0) {
-    return { error: "baseGrid is required (grid or grid[])" };
-  }
+  const baseGrid = parseGrid(input.inputGrid);
+  if (!baseGrid) return { error: "inputGrid is required" };
+  if (baseGrid.length === 0 || baseGrid[0].length === 0) return { error: "inputGrid is empty" };
 
   const layerCount = typeof input.layerCount === "number" ? Math.max(1, Math.round(input.layerCount)) : 4;
   const threshold = typeof input.threshold === "number" ? Math.min(1, Math.max(0, input.threshold)) : 0.6;
@@ -245,72 +240,55 @@ export function multiLayerGrass(input: Record<string, unknown>): Record<string, 
   const rawSeed = typeof input.seed === "number" ? input.seed : 0;
   const baseSeed = rawSeed === 0 ? (Date.now() & 0x7fffffff) : rawSeed;
 
-  const nameList: NameEntry[] = [];
   const layerNames = [
     "浅色土地", "深色土地", "斑驳地面", "苔藓地面", "荒草土地", "枯草地面", "杂草土地", "野草地面",
     "砂砾土地", "泥泞地面", "碎石土地", "腐叶地面", "干裂土地", "湿润地面", "沙质土地", "板结地面",
   ];
-  // outputGridList[i] 对应第 i 层草地，跨所有输入网格合并（max-merge）
-  // 每个元素是只含该层值和0的单值网格
-  const outputGridList: Grid[] = [];
 
-  // 用第一个基准网格推断尺寸和 targetValue（各基准网格应同尺寸）
-  const refGrid = baseGrids[0];
-  const rows = refGrid.length;
-  const cols = refGrid[0].length;
+  const rows = baseGrid.length;
+  const cols = baseGrid[0].length;
   const totalPixels = rows * cols;
   const minArea = Math.max(1, Math.floor(totalPixels / 200));
 
-  // targetValue 自动从第一个基准网格推断最大值
-  const targetValue = gridMax(refGrid);
+  // targetValue 自动从基准网格推断最大值
+  const targetValue = gridMax(baseGrid);
   const baseLayerId = targetValue + 1;
+
+  // 单张多值网格：每层一个递增 id，重叠处取较高层（后层覆盖前层）
+  const outputGrid: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  const nameList: NameEntry[] = [];
 
   for (let i = 0; i < layerCount; i++) {
     const fillValue = baseLayerId + i;
-    // 每层跨多个基准网格使用不同种子偏移（基准偏移 + 层偏移）
     const layerSeed = baseSeed + i * 999983;
 
-    // 对所有基准网格生成该层，然后 max-merge 合并到一张单值网格
-    // 初始化为全0
-    let merged: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    // Step 1: perlin_noise
+    const noiseGrid = generatePerlinGrid(cols, rows, layerSeed, frequency, octaves);
+    // Step 2: grid_binarize
+    const binarized = binarizeGrid(noiseGrid, threshold);
+    // Step 3: grid_mask_apply（只在目标区域内生效：基准网格值 === targetValue 才允许写入）
+    let layer: Grid = Array.from({ length: rows }, (_, r) => {
+      const out = new Array<number>(cols);
+      for (let c = 0; c < cols; c++) {
+        out[c] = (baseGrid[r][c] === targetValue && binarized[r][c] === 1) ? fillValue : 0;
+      }
+      return out;
+    });
+    // Step 4: 后处理——过滤面积 < totalPixels/200 的碎片连通区域
+    layer = filterSmallRegions(layer, fillValue, minArea);
 
-    for (let gi = 0; gi < baseGrids.length; gi++) {
-      const bg = baseGrids[gi];
-      const bgRows = bg.length;
-      const bgCols = bg[0].length;
-      // 每个基准网格再额外偏移种子，保证不同基准网格的同一层也不同
-      const gridSeed = layerSeed + gi * 7919;
-
-      // Step 1: perlin_noise
-      const noiseGrid = generatePerlinGrid(bgCols, bgRows, gridSeed, frequency, octaves);
-
-      // Step 2: grid_binarize
-      const binarized = binarizeGrid(noiseGrid, threshold);
-
-      // Step 3: grid_mask_apply（只在目标区域内生效：基准网格值 === targetValue 才允许写入）
-      const masked: Grid = Array.from({ length: bgRows }, (_, r) => {
-        const out = new Array<number>(bgCols);
-        for (let c = 0; c < bgCols; c++) {
-          out[c] = (bg[r][c] === targetValue && binarized[r][c] === 1) ? fillValue : 0;
-        }
-        return out;
-      });
-
-      // max-merge 到 merged
-      for (let r = 0; r < bgRows; r++) {
-        for (let c = 0; c < bgCols; c++) {
-          if (masked[r][c] > merged[r][c]) merged[r][c] = masked[r][c];
-        }
+    // 合并到多值网格：较高层覆盖较低层
+    let hasAny = false;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (layer[r][c] === fillValue) { outputGrid[r][c] = fillValue; hasAny = true; }
       }
     }
 
-    // Step 4: 后处理——过滤面积 < totalPixels/200 的碎片连通区域
-    merged = filterSmallRegions(merged, fillValue, minArea);
-
-    outputGridList.push(merged);
-
-    nameList.push({ id: fillValue, name: layerNames[Math.floor(Math.random() * layerNames.length)]!, type: 'tile' });
+    if (hasAny) {
+      nameList.push({ id: fillValue, name: layerNames[Math.floor(Math.random() * layerNames.length)]!, type: 'tile' });
+    }
   }
 
-  return { outputGridList, nameList };
+  return { outputGrid, nameList };
 }

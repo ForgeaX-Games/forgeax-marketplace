@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/external-asset-meta",
+  "name": "@forgeax-extension/external-asset-meta",
   "version": "0.1.0",
   "private": true,
   "type": "module",

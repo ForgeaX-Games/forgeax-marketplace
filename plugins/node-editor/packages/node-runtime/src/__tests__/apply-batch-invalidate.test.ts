@@ -173,4 +173,43 @@ describe('applyBatch output-cache invalidation', () => {
     expect(runtime.outputs.read('d1', 'out')).toBeNull()
     expect(runtime.outputs.read('d2', 'out')).not.toBeNull()
   })
+
+  it('updateNode param change invalidates the edited node and its downstream closure', async () => {
+    const runtime = fresh()
+    await applyBatch(runtime, [
+      { type: 'createNode', nodeId: 's', opId: 'kernel.source', position: { x: 0, y: 0 }, params: { value: 5 } },
+      { type: 'createNode', nodeId: 'd1', opId: 'kernel.double', position: { x: 100, y: 0 }, params: {} },
+      { type: 'createNode', nodeId: 'd2', opId: 'kernel.double', position: { x: 200, y: 0 }, params: {} },
+      { type: 'connect', edgeId: 'e1', source: { nodeId: 's', port: 'out' }, target: { nodeId: 'd1', port: 'in' } },
+      { type: 'connect', edgeId: 'e2', source: { nodeId: 'd1', port: 'out' }, target: { nodeId: 'd2', port: 'in' } },
+    ])
+    await (await executeNode(runtime, { nodeId: 's' })).done
+    expect(runtime.outputs.read('d2', 'out')).not.toBeNull()
+
+    await applyBatch(runtime, [{ type: 'updateNode', nodeId: 's', params: { value: 9 } }])
+    expect(runtime.outputs.read('s', 'out')).toBeNull()
+    expect(runtime.outputs.read('d1', 'out')).toBeNull()
+    expect(runtime.outputs.read('d2', 'out')).toBeNull()
+  })
+
+  it('deleteGroup removes inner member output caches (not just the group shadow)', async () => {
+    const runtime = fresh()
+    await applyBatch(runtime, [
+      { type: 'createNode', nodeId: 'a', opId: 'kernel.source', position: { x: 0, y: 0 }, params: { value: 1 } },
+      { type: 'createNode', nodeId: 'b', opId: 'kernel.double', position: { x: 100, y: 0 }, params: {} },
+      { type: 'connect', edgeId: 'e_ab', source: { nodeId: 'a', port: 'out' }, target: { nodeId: 'b', port: 'in' } },
+      { type: 'createGroup', groupId: 'g1', name: 'Pair', memberNodeIds: ['a', 'b'], position: { x: 0, y: 0 } },
+    ])
+    // Simulate prior execution: inner nodes still own outputs/<id>/ dirs.
+    writeNodeOutput(runtime, 'a', 'out', 1)
+    writeNodeOutput(runtime, 'b', 'out', 2)
+    expect(runtime.outputs.read('a', 'out')).not.toBeNull()
+    expect(runtime.outputs.read('b', 'out')).not.toBeNull()
+
+    await applyBatch(runtime, [{ type: 'deleteGroup', groupId: 'g1' }])
+
+    expect(runtime.outputs.read('g1', 'out_0')).toBeNull()
+    expect(runtime.outputs.read('a', 'out')).toBeNull()
+    expect(runtime.outputs.read('b', 'out')).toBeNull()
+  })
 })

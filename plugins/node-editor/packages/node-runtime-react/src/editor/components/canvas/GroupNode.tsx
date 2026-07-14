@@ -19,7 +19,7 @@ import { GroupSaveDialog, saveGroupToLibrary } from './GroupSaveDialog.js'
 import { GroupTemplateSaveDialog } from './GroupTemplateSaveDialog.js'
 import { getEditorTransport } from '../../transport/index.js'
 import { RELAY_BATTERY_ID } from './RelayNode.js'
-import { getGroupPortDisplayLabel, getVisibleGroupPorts, sortGroupPorts } from './groupViewUtils.js'
+import { getGroupPortDisplayLabel, getVisibleGroupPorts, sortGroupPorts, resolveGroupExposedInputValue } from './groupViewUtils.js'
 import {
   readGroupProvenance,
   deriveGroupSaveStatus,
@@ -613,15 +613,27 @@ const GroupNode = memo(function GroupNode({ id, data, selected, dragging, domain
                   style={{ background: color, border: `2px solid ${color}` }}
                   onMouseEnter={(e) => {
                     const val = resolveInputPortValue(groupId, port.portName)
-                    const text = formatPortValue(val)
-                    const extra = Array.isArray(val) || (val !== null && typeof val === 'object')
-                      ? formatPortValueExtra(val) : undefined
+                    // Unconnected exposed input: fall back to the inner source
+                    // port's default so the collapsed face shows the same default
+                    // a plain battery would (instead of "no value").
+                    const fallback = val === undefined && currentGroup
+                      ? resolveGroupExposedInputValue(currentGroup, port)
+                      : undefined
+                    const shown = val !== undefined ? val : fallback?.value
+                    const text = formatPortValue(shown)
+                    const extra = Array.isArray(shown) || (shown !== null && typeof shown === 'object')
+                      ? formatPortValueExtra(shown) : undefined
                     showImmediate({
                       x: e.clientX + 16, y: e.clientY - 8,
                       title: portDisplayLabel,
                       subtitle: typeDisplay,
                       subtitleColor: color,
-                      valueLine: { label: 'value', text, extra, muted: val === undefined },
+                      valueLine: {
+                        label: val === undefined && fallback?.isDefault ? 'default' : 'value',
+                        text,
+                        extra,
+                        muted: shown === undefined || (val === undefined && fallback?.isDefault === true),
+                      },
                     })
                   }}
                   onMouseLeave={hide}

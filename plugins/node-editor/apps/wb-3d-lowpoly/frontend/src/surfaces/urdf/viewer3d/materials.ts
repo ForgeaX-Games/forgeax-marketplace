@@ -1,5 +1,5 @@
 // 💡 URDF 材质处理：根据 URDF material 节点解析 + 应用命名预设 + 生成 THREE 物理材质
-//    迁移自 CAD/articraft viewer，逻辑保持一致
+//    迁移自 CAD viewer，逻辑保持一致
 import * as THREE from 'three'
 import type { UrdfVisual } from './urdf-parser'
 

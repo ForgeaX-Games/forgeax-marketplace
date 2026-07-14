@@ -1,7 +1,7 @@
 /**
  * g_place_on_face —— 把 child part 摆到 parent 的某个轴对齐外表面上。
  *
- * 对应 articraft.SDK.placement.place_on_face(parent_link, face, ...) → Origin
+ * place_on_face(parent_link, face, ...) → Origin
  *
  * 思路：
  *   1) parent / child 都视为局部 AABB（来自其 shape 的 size/radius）

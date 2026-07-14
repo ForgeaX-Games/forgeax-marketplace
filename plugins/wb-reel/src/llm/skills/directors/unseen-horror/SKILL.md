@@ -43,4 +43,4 @@ order: 7
 
 ## 海报样张
 
-Cinematic supernatural horror film poster, dim haunted interior, vast negative space swallowing a lone figure, unseen threat implied in deep shadow, single cold rim light, muted desaturated palette, dread and anticipation, no text, vertical 2:3
+Horror-film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, dim haunted interior, low-key lighting with vast negative space and cold desaturated old textures. Panel 1: a wide room where a lone small figure is swallowed by empty space. Panel 2: an unseen threat implied deep in shadow to one side. Panel 3: a slow retreating dolly down a corridor. Panel 4: a locked static frame with a faint figure barely visible in the dark depth. Panel 5: an insert — a door gap, a hand reaching from behind a frame, a music box. Panel 6: a single cold rim light on a dreading face. Dread and anticipation, the unseen more frightening than the seen; consistent grade across all panels, no text, no captions, vertical 2:3

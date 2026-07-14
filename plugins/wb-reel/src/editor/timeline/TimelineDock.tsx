@@ -18,7 +18,7 @@
  *   - 受 props.scenario.scenes 驱动：分支 Tab 列出候选 targetSceneId
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AudioRole,
   DialogueLine,
@@ -30,6 +30,7 @@ import type {
 } from '../../scenario/types'
 import { FONT_PRESETS } from './fontPresets'
 import { buildSearchLoopVideoPrompt } from '../../forge/modules/searchLoopVideo'
+import { uiBlendModeToCss } from '../../forge/modules/uiAssetArt'
 import { useMediaStore, type MediaEntry } from '../../media/mediaStore'
 import { useScenarioStore } from '../../scenario/scenarioStore'
 import { isModuleEnabled } from '../../scenario/moduleFlags'
@@ -58,6 +59,7 @@ type Tab =
   | 'dialogue'
   | 'text'
   | 'cue'
+  | 'ui'
   | 'audio'
   | 'minigame'
   | 'search'
@@ -109,6 +111,7 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
         <DockTab cur={tab} me="dialogue" onSel={setTab} icon="💬" label={t('dock.tab.dialogue')} />
         <DockTab cur={tab} me="text" onSel={setTab} icon="🆎" label={t('dock.tab.text')} />
         <DockTab cur={tab} me="cue" onSel={setTab} icon="⚡" label={t('dock.tab.cue')} />
+        <DockTab cur={tab} me="ui" onSel={setTab} icon="🖼" label={t('dock.tab.ui')} />
         <DockTab cur={tab} me="audio" onSel={setTab} icon="♪" label={t('dock.tab.audio')} />
         <DockTab cur={tab} me="minigame" onSel={setTab} icon="🎮" label={t('dock.tab.minigame')} />
         <DockTab cur={tab} me="search" onSel={setTab} icon="🔍" label={t('dock.tab.search')} />
@@ -118,6 +121,7 @@ export function TimelineDock({ scenario, currentSceneId }: Props) {
         {tab === 'dialogue' && <DialogueDock />}
         {tab === 'text' && <TextOverlayDock />}
         {tab === 'cue' && <CueDock />}
+        {tab === 'ui' && <UiOverlayDock />}
         {tab === 'audio' && <AudioDock currentSceneId={currentSceneId} />}
         {tab === 'minigame' && <MinigameDock />}
         {tab === 'search' && <SearchSegmentDock scenario={scenario} currentSceneId={currentSceneId} />}
@@ -552,6 +556,107 @@ function CueDock() {
         payload={payload}
         label={`QTE · ${shape.toUpperCase()}${label ? ' · ' + label : ''}`}
       />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// UI 覆盖层素材（v9 · UI 素材库拖入时间轴）
+// ─────────────────────────────────────────────────────────────────────
+//
+// 从 scenario.uiAssets（全局 UI 素材注册表）取已生成图的素材，逐条渲染为
+// 缩略图 chip（缩略图按素材 blendMode 盖在深底上预览去背效果）。拖到时间轴
+// 由 Timeline.onTrackDrop 的 'uiOverlay' case 建成带 blendMode 的 image
+// StickerClip。顶部「钉到整场」开关 → payload.pinToScene（Tier B 单场常驻），
+// 关闭则用素材默认时长（Tier A 瞬时）。
+//
+// 没有素材时给一个「打开 UI 素材库」CTA → forgeView='ui'（在 ForgeWizard 里
+// 由 UIModule 承载：风格 / 素材库 / HUD 布局）。
+function UiOverlayDock() {
+  const t = useT()
+  const uiAssets = useScenarioStore((s) => s.scenario.uiAssets)
+  const entries = useMediaStore((s) => s.entries)
+  const setForgeView = useShellStore((s) => s.setForgeView)
+  const setImageSection = useShellStore((s) => s.setImageSection)
+  const [pinToScene, setPinToScene] = useState(false)
+
+  const assets = useMemo(
+    () => Object.values(uiAssets ?? {}).filter((a) => !!a.mediaId),
+    [uiAssets],
+  )
+
+  return (
+    <div className="ks-dock-card ks-ui-dock">
+      <button
+        type="button"
+        className="ks-assets-dock-btn"
+        onClick={() => {
+          setForgeView('image')
+          setImageSection('ui')
+        }}
+        title={t('dock.ui.openLibraryTitle')}
+      >
+        <span aria-hidden>🖼</span>
+        {t('dock.ui.openLibrary')}
+        <span aria-hidden>→</span>
+      </button>
+
+      <label className="ks-ui-pin">
+        <input
+          type="checkbox"
+          checked={pinToScene}
+          onChange={(e) => setPinToScene(e.target.checked)}
+        />
+        <span>{t('dock.ui.pinToScene')}</span>
+      </label>
+
+      {assets.length === 0 ? (
+        <div className="ks-dock-empty ks-mono">{t('dock.ui.empty')}</div>
+      ) : (
+        <ul className="ks-ui-list">
+          {assets.map((a) => {
+            const url = a.mediaId ? entries[a.mediaId]?.url : undefined
+            const payload: DockDropPayload = {
+              kind: 'uiOverlay',
+              uiAssetId: a.id,
+              mediaId: a.mediaId,
+              blendMode: a.blendMode,
+              label: a.name,
+              anchor: a.defaultAnchor,
+              defaultDurationMs: a.defaultDurationMs,
+              pinToScene,
+            }
+            return (
+              <li
+                key={a.id}
+                className="ks-ui-chip"
+                draggable={!!url}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(DOCK_MIME, serializeDockPayload(payload))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+                title={tf('dock.ui.dragTitle', { name: a.name })}
+              >
+                <div className="ks-ui-thumb">
+                  {url ? (
+                    <img
+                      src={url}
+                      alt={a.name}
+                      draggable={false}
+                      style={{ mixBlendMode: uiBlendModeToCss(a.blendMode) as CSSProperties['mixBlendMode'] }}
+                    />
+                  ) : (
+                    <span className="ks-mono">—</span>
+                  )}
+                </div>
+                <div className="ks-ui-chip-name" title={a.name}>
+                  {a.name}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }
@@ -1545,9 +1650,9 @@ const dockCss = `
 }
 .ks-dock-tabs {
   display: grid;
-  /* 7 个 tab（素材库 / 字幕 / 文字 / QTE / 音频 / 小游戏 / 搜索）图标化平铺。
+  /* 8 个 tab（素材库 / 字幕 / 文字 / QTE / UI / 音频 / 小游戏 / 搜索）图标化平铺。
    * 分支、数值已在剧情树连线 / 数值模块编辑器里编辑, 不再占用本面板。 */
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   padding: 4px;
   border-bottom: 1px solid var(--ks-border-soft);
@@ -1934,6 +2039,51 @@ const dockCss = `
 .ks-assets-dock-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px color-mix(in srgb, var(--ks-amber, #d4ff48) 50%, transparent);
+}
+
+/* UiOverlayDock（v9 · UI 素材拖入时间轴） */
+.ks-ui-dock { gap: 8px; }
+.ks-ui-pin {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; color: var(--ks-text-dim); cursor: pointer;
+  letter-spacing: 0.08em;
+}
+.ks-ui-list {
+  list-style: none; padding: 0; margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.ks-ui-chip {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 4px;
+  background: var(--ks-panel-solid);
+  border: 1px solid var(--ks-border);
+  border-radius: var(--ks-radius-sm);
+  cursor: grab;
+  user-select: none;
+  transition: border-color var(--ks-dur-fast) var(--ks-ease);
+}
+.ks-ui-chip:hover { border-color: var(--ks-amber-soft); }
+.ks-ui-chip:active { cursor: grabbing; }
+.ks-ui-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: calc(var(--ks-radius-sm) - 2px);
+  /* 深底 + 网格,让 screen/multiply 去背预览与最终盖视频接近 */
+  background:
+    repeating-conic-gradient(#2a2620 0% 25%, #211d18 0% 50%) 50% / 12px 12px,
+    #1a1712;
+  overflow: hidden;
+}
+.ks-ui-thumb img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.ks-ui-thumb .ks-mono { color: var(--ks-text-faint); font-size: 12px; }
+.ks-ui-chip-name {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ks-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* DialogueDock v3.10 —— 上拖拽源 / 下详情面板 */

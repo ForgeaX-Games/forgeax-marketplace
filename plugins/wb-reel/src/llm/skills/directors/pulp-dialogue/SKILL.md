@@ -43,4 +43,4 @@ order: 9
 
 ## 海报样张
 
-Cinematic pulp poster, saturated retro exploitation-film look, film grain, bold two-shot standoff composition, warm vintage palette, cool-and-dangerous mood, low trunk-shot angle hint, no text, vertical 2:3
+Pulp-film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, saturated retro exploitation-and-western film look with heavy grain, warm vintage palette. Panel 1: a long two-shot dialogue at a diner table, deceptively calm. Panel 2: a trunk shot — a low upward POV as if looking up from inside a car trunk. Panel 3: a tense triangular face-off of several characters frozen mid-conversation, coiled unspoken tension. Panel 4: a sudden crash zoom onto a startled face. Panel 5: an extreme close-up of cowboy boots on a dusty floor. Panel 6: a stylized kinetic quick-cut beat — an overturned chair and a spilled drink, sharp motion energy. Cool-and-dangerous mood, film grain; consistent grade across all panels, no text, no captions, vertical 2:3

@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/wb-character",
+  "name": "@forgeax-extension/wb-character",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -18,11 +18,13 @@
     "prepare": "tsc -b"
   },
   "dependencies": {
-    "@forgeax/batteries-common": "workspace:*"
+    "@forgeax/batteries-common": "workspace:*",
+    "@forgeax/node-runtime": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "fastify": "^5.0.0"
   },
   "engines": {
     "node": ">=20.19"

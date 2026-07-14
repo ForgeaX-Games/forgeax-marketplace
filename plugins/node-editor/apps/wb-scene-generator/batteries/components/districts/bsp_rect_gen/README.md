@@ -1,10 +1,12 @@
 # BSP矩形生成 (bsp_rect_gen)
 
-以九宫格指定的中心点为锚，在给定区域内向外播撒一片紧凑的 BSP 矩形地块，可控制矩形数量、最小/最大宽高。
+以九宫格指定的中心点为锚，在单张网格区域内向外播撒一片紧凑的 BSP 矩形地块，可控制矩形数量、最小/最大宽高。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
-1. **中心点可控**：通过 1-9 九宫格编号指定播撒中心，矩形从中心由近到远依次分配
+1. **中心点可控**：可接精确采样点 `centerPoint`（point2d，优先）或用 1-9 九宫格编号 `centerPosition`，矩形从中心由近到远依次分配
 2. **数量精确**：`targetCount` 直接控制最终矩形数，从最近的矩形开始取，满足数量后停止
 3. **尺寸双限**：同时支持最小宽高（`minSize`）和最大宽高（`maxSize`），超过最大值的块会被强制继续分割
 4. **掩码兼容**：支持任意形状区域，矩形裁剪到掩码边界内
@@ -23,14 +25,15 @@
 2. 设置 `centerPosition`（1-9）决定从哪个方位开始播撒
 3. 调整 `targetCount` 控制矩形数量
 4. 用 `minSize` / `maxSize` 控制矩形大小范围
-5. 执行后得到 `parcels`（多值 ID 网格）和 `nameList`
+5. 执行后得到 `outputGrid`（多值 ID 网格）和 `outputNameList`
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | inputGrid | grid | — | 源掩码网格，非零区域为合法放置区域 |
-| centerPosition | number | 5 | 1-9 九宫格中心点位置（见下方说明），0=随机 |
+| centerPoint | point2d | — | 精确播撒中心点（x→列, y→行），连线时优先并覆盖 centerPosition |
+| centerPosition | number | 5 | 1-9 九宫格中心点位置（见下方说明），0=随机；centerPoint 未连线时生效 |
 | targetCount | number | 10 | 期望矩形数量 |
 | minSize | number | 2 | 矩形最小宽高（单元格数） |
 | maxSize | number | 12 | 矩形最大宽高（单元格数），0=不限制 |
@@ -41,8 +44,8 @@
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| parcels | grid | 多值矩形地块网格：每个矩形唯一整数 ID（1,2,3…），其余 = 0 |
-| nameList | array | 矩形名称清单：[{id, name}] 列表 |
+| outputGrid | grid | 多值矩形地块网格：每个矩形唯一整数 ID（1,2,3…），其余 = 0；可接 grid_split_by_value 拆分 |
+| outputNameList | array | 矩形名称清单：[{id, name:'地块 N', type:'tile'}] |
 
 ## 参数说明
 
@@ -93,18 +96,18 @@
 
 ```json
 {
-  "parcels": [
+  "outputGrid": [
     [3,3,3,4,4],
     [3,3,3,4,4],
     [1,1,2,2,2],
     [1,1,2,2,2],
     [0,0,0,0,0]
   ],
-  "nameList": [
-    {"id": 1, "name": "矩形 1"},
-    {"id": 2, "name": "矩形 2"},
-    {"id": 3, "name": "矩形 3"},
-    {"id": 4, "name": "矩形 4"}
+  "outputNameList": [
+    {"id": 1, "name": "地块 1", "type": "tile"},
+    {"id": 2, "name": "地块 2", "type": "tile"},
+    {"id": 3, "name": "地块 3", "type": "tile"},
+    {"id": 4, "name": "地块 4", "type": "tile"}
   ]
 }
 ```

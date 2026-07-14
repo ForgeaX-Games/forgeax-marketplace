@@ -69,15 +69,19 @@ function StoryChildNodeRaw({ data }: NodeProps<StoryChildData>) {
       <Handle type="target" position={Position.Left} className="rf-handle-sm" />
 
       <div className="rf-child-collapsed">
+        {/* 第一行：序号 + 标题（单行省略）；徽标与进度环靠右 */}
         <div className="rf-child-header">
           <span className="rf-child-id">{displayId}</span>
+          <span className="rf-child-name" title={name}>{name}</span>
           {badge && <span className="rf-child-badge">{badge}</span>}
           <ChildProgressRing enterDelay={enterDelay} skipAnim={skipAnim} ringDuration={ringDuration} />
         </div>
-        <div className="rf-child-name">{name}</div>
-        {narrativeFunction && (
+        {/* 第二行：正文预览，最多两行、超出以省略号结束；无正文时回落到叙事功能 */}
+        {content ? (
+          <div className="rf-child-body" title={content}>{content}</div>
+        ) : narrativeFunction ? (
           <div className="rf-child-func">{narrativeFunction}</div>
-        )}
+        ) : null}
       </div>
 
       {expanded && (

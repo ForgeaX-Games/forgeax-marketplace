@@ -12,8 +12,13 @@ import { randomUUID } from 'node:crypto'
 import { executeNode as executeNodeL1, executeGroupSubgraph } from '../layer1/index.js'
 import type { ExecutionContext, GraphEdge, GraphNode, OpAccess, OpRegistry } from '../layer1/index.js'
 import { busFor, type EventBus } from './event-bus.js'
-import { GROUP_OP_ID } from './apply-batch.js'
-import { buildExecutionClosure, resolveNodeInputs, type ExecutionClosure } from './resolve-inputs.js'
+import { collectCachedNodeIds, GROUP_OP_ID } from './apply-batch.js'
+import {
+  buildExecutionClosure,
+  expandClosureForMissingBoundaryCaches,
+  resolveNodeInputs,
+  type ExecutionClosure,
+} from './resolve-inputs.js'
 import type { Runtime } from './runtime.js'
 
 // Mirrors the relay sentinel in layer1/executor.ts (a wire pass-through node).
@@ -22,6 +27,8 @@ const RELAY_OP_ID = '__relay__'
 export interface ExecuteNodeRequest {
   // Run this node's downstream closure. Omit to run the whole pipeline.
   nodeId?: string
+  /** Collect per-node failures and emit one summary line instead of flooding logs. */
+  quietErrors?: boolean
 }
 
 export interface ExecutionResult {
@@ -30,6 +37,8 @@ export interface ExecutionResult {
   // nodeId -> portId -> wire value (DataTreeEntry[] form).
   outputs: Record<string, Record<string, unknown>>
   error?: { nodeId?: string; message: string }
+  /** Present when `quietErrors: true`; mirrors Studio execute failure summary. */
+  execFailures?: string[]
   durationMs: number
 }
 
@@ -90,6 +99,7 @@ async function runWalk(
   closure: ExecutionClosure,
   executionId: string,
   signal: AbortSignal,
+  quietErrors = false,
 ): Promise<ExecutionResult> {
   const startedAt = Date.now()
   const pipelineId = runtime.config.pipelineId
@@ -146,7 +156,12 @@ async function runWalk(
     if ((consumersRemaining.get(consumerId) ?? 0) <= 0) produced.delete(consumerId)
   }
 
-  const baseCtx: ExecutionContext = { pipelineId, log: () => {}, signal }
+  const baseCtx: ExecutionContext = {
+    pipelineId,
+    log: () => {},
+    signal,
+    ...(quietErrors ? { execLogMode: 'summary' as const, execFailures: [] } : {}),
+  }
   // Generic seam: a host may enrich the context (e.g. inject `services`) via RuntimeConfig.createExecutionContext. Default = base context unchanged.
   const ctx: ExecutionContext = runtime.config.createExecutionContext
     ? runtime.config.createExecutionContext(baseCtx)
@@ -165,6 +180,7 @@ async function runWalk(
     status,
     outputs: resultOutputs,
     ...(error ? { error } : {}),
+    ...(ctx.execFailures && ctx.execFailures.length > 0 ? { execFailures: [...ctx.execFailures] } : {}),
     durationMs: Date.now() - startedAt,
   })
 
@@ -313,6 +329,13 @@ async function runWalk(
     }
 
     bus.emit({ kind: 'exec:completed', pipelineId, executionId })
+    runtime.outputs.pruneByRetention({ protectedNodeIds: collectCachedNodeIds(graphFile) })
+    if (ctx.execLogMode === 'summary' && ctx.execFailures && ctx.execFailures.length > 0) {
+      const n = ctx.execFailures.length
+      const sample = ctx.execFailures.slice(0, 4).join(' | ')
+      const more = n > 4 ? ` (+${n - 4} more)` : ''
+      ctx.log('warn', `Execute finished with ${n} node failure(s): ${sample}${more}`)
+    }
     return finalize('completed')
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -360,15 +383,29 @@ export async function executeNode(
 
   // Build the execution closure. An unknown / cyclic target is a client/timing
   // error, not a server fault, so it resolves as a structured error result.
+  // The freshness probe lets a partial (target) run pull in cold upstream
+  // ancestors (never executed / cache-invalidated) so the target's inputs are
+  // actually computed instead of resolving to empty — fresh upstream stays a
+  // cached boundary, keeping the incremental param-edit path fast.
+  const isFresh = (nodeId: string, port: string): boolean =>
+    runtime.outputs.readMeta(nodeId, port)?.valid === true
   let closure: ExecutionClosure
   try {
-    closure = buildExecutionClosure(graphFile.nodes, graphFile.edges, request.nodeId)
+    closure = buildExecutionClosure(graphFile.nodes, graphFile.edges, request.nodeId, isFresh)
+    if (request.nodeId !== undefined) {
+      closure = expandClosureForMissingBoundaryCaches(
+        graphFile.nodes,
+        graphFile.edges,
+        closure,
+        (nodeId, port) => runtime.outputs.read(nodeId, port)?.data,
+      )
+    }
   } catch (err) {
     return failed(err instanceof Error ? err.message : String(err))
   }
 
   bus.emit({ kind: 'exec:started', pipelineId, executionId })
 
-  const done = runWalk(runtime, bus, graphFile, closure, executionId, controller.signal)
+  const done = runWalk(runtime, bus, graphFile, closure, executionId, controller.signal, request.quietErrors === true)
   return { executionId, abort: () => controller.abort(), done }
 }

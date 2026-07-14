@@ -21,7 +21,7 @@ import {
  *   - title '新的故事'（作者可改）
  *   - 至少 1 个占位 scene（rootSceneId 对得上）
  *   - characters / locations 都空，QTE / dialogue / branches 都空
- *   - schemaVersion 固定为最新（目前 = 5）
+ *   - schemaVersion 固定为最新（目前 = 11）
  */
 
 describe('makeBlankScenario', () => {
@@ -55,7 +55,7 @@ describe('makeBlankScenario', () => {
 
   it('是最新 schema 版本（避免首次加载就触发迁移）', () => {
     const s = makeBlankScenario()
-    expect(s.schemaVersion).toBe(8)
+    expect(s.schemaVersion).toBe(11)
   })
 
   it('传 title 覆盖默认值', () => {

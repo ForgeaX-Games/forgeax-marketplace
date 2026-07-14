@@ -245,6 +245,124 @@ describe('prunePlaybackScenario', () => {
     expect(new Set(includedScenes)).toEqual(new Set(['a', 'b']))
   })
 
+  it('treeTheme(v10)：保留主题本身,并把其引用的 UI 部件计入"被引用"不裁', () => {
+    const sc: Scenario = {
+      ...makeFullScenario(),
+      schemaVersion: 10,
+      uiAssets: {
+        bg1: {
+          id: 'bg1',
+          name: '剧情树背景',
+          role: 'tree-background',
+          mediaId: 'm-tree-bg',
+          matte: 'opaque',
+          blendMode: 'normal',
+          lifecycle: 'scene',
+        },
+        frame1: {
+          id: 'frame1',
+          name: '剧情树节点框',
+          role: 'tree-node-frame',
+          mediaId: 'm-tree-frame',
+          matte: 'multiply-white',
+          blendMode: 'multiply',
+          lifecycle: 'scene',
+        },
+        unused: {
+          id: 'unused',
+          name: '没人用的部件',
+          role: 'custom',
+          mediaId: 'm-unused',
+          matte: 'screen-black',
+          blendMode: 'screen',
+          lifecycle: 'transient',
+        },
+      },
+      treeTheme: {
+        preset: 'chinese',
+        backgroundAssetId: 'bg1',
+        nodeFrameAssetId: 'frame1',
+        jumpScope: 'visited',
+      },
+    }
+    const { scenario } = prunePlaybackScenario(sc, { includeSubtitles: true })
+    expect(scenario.treeTheme?.preset).toBe('chinese')
+    expect(scenario.treeTheme?.backgroundAssetId).toBe('bg1')
+    // 被 treeTheme 引用的部件保留,未被引用的裁掉
+    expect(scenario.uiAssets?.bg1).toBeDefined()
+    expect(scenario.uiAssets?.frame1).toBeDefined()
+    expect(scenario.uiAssets?.unused).toBeUndefined()
+  })
+
+  it('无 treeTheme 时不写该字段(向后兼容)', () => {
+    const sc = makeFullScenario()
+    const { scenario } = prunePlaybackScenario(sc, { includeSubtitles: true })
+    expect(scenario.treeTheme).toBeUndefined()
+  })
+
+  it('uiScreens(v11)：保留页面定义,并把其引用的 UI 部件计入"被引用"不裁', () => {
+    const sc: Scenario = {
+      ...makeFullScenario(),
+      schemaVersion: 11,
+      uiAssets: {
+        scrbg: {
+          id: 'scrbg',
+          name: '背包背景',
+          role: 'screen-background',
+          mediaId: 'm-scr-bg',
+          matte: 'opaque',
+          blendMode: 'normal',
+          lifecycle: 'scene',
+        },
+        slotimg: {
+          id: 'slotimg',
+          name: '装饰部件',
+          role: 'custom',
+          mediaId: 'm-slot',
+          matte: 'screen-black',
+          blendMode: 'screen',
+          lifecycle: 'transient',
+        },
+        orphan: {
+          id: 'orphan',
+          name: '没人用的部件',
+          role: 'custom',
+          mediaId: 'm-orphan',
+          matte: 'screen-black',
+          blendMode: 'screen',
+          lifecycle: 'transient',
+        },
+      },
+      uiScreens: {
+        bag: {
+          id: 'bag',
+          name: '背包',
+          kind: 'inventory',
+          backgroundAssetId: 'scrbg',
+        },
+        home: {
+          id: 'home',
+          name: '主界面',
+          kind: 'custom',
+          slots: [{ id: 'w1', kind: 'widget', assetId: 'slotimg', x: 0.5, y: 0.5 }],
+        },
+      },
+    }
+    const { scenario } = prunePlaybackScenario(sc, { includeSubtitles: true })
+    expect(scenario.uiScreens?.bag?.kind).toBe('inventory')
+    expect(scenario.uiScreens?.home?.slots?.[0]?.assetId).toBe('slotimg')
+    // 被 uiScreens 引用的部件保留,未被引用的裁掉
+    expect(scenario.uiAssets?.scrbg).toBeDefined()
+    expect(scenario.uiAssets?.slotimg).toBeDefined()
+    expect(scenario.uiAssets?.orphan).toBeUndefined()
+  })
+
+  it('无 uiScreens 时不写该字段(向后兼容)', () => {
+    const sc = makeFullScenario()
+    const { scenario } = prunePlaybackScenario(sc, { includeSubtitles: true })
+    expect(scenario.uiScreens).toBeUndefined()
+  })
+
   it('branch 指向不存在的 scene → 跳过，不抛错', () => {
     const sc: Scenario = {
       id: 'sc-dangling',

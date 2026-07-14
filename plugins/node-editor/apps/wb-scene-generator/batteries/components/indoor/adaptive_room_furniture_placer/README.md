@@ -1,6 +1,8 @@
 # 自适应逐房间家具放置器 (adaptive_room_furniture_placer)
 
-按房间面积自动选择合适尺寸的家具，逐房间独立放置，保证每个房间都有与之匹配的家具。
+按房间面积自动选择合适尺寸的家具，在单张房间网格内逐房间独立放置，保证每个房间都有与之匹配的家具。
+
+> **DataTree 数据格式**：`roomGrid` / `doorGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张房间网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组；`furnitureList` 作为家具目录广播到每张网格。
 
 ## 功能特点
 
@@ -19,9 +21,9 @@
 
 | 面积 | 档位 | 可用家具尺寸 |
 |------|------|------------|
-| ≤ smallMaxArea（默认30） | small | small_* 只 |
-| smallMaxArea ~ largeMinArea | medium | small_* + medium_* |
-| ≥ largeMinArea（默认100） | large | 所有尺寸 |
+| ≤ 10 | small | small_* 只 |
+| 11 ~ 39 | medium | small_* + medium_* |
+| ≥ 40 | large | 所有尺寸 |
 
 ## furniture_id 命名规范
 
@@ -35,23 +37,22 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| layoutGrid | grid | — | complex_indoor_gen 输出（0=墙,1=房,2=廊,3=门） |
-| mainList | array | [] | 主家具清单（furniture_rank_split.main_list），可含多种尺寸 |
-| fillList | array | [] | 填充家具清单（furniture_rank_split.fill_list） |
-| smallMaxArea | number | 30 | 小房间面积上限（格数） |
-| largeMinArea | number | 100 | 大房间面积下限（格数） |
+| roomGrid | grid | — | 单张房间网格（1=可用房间格，0=墙/其他），DataTree 逐张处理 |
+| doorGrid | grid | — | 门位置网格（非0=门），用于门口设置禁区，与 roomGrid 逐张配对 |
+| furnitureList | array | [] | 统一家具清单，rank 1-7 自动归为主家具，rank 8-9 自动归为填充家具（广播到每张网格） |
 | seed | number | 42 | 随机种子，0=当前时间 |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| newMaskA | grid | 合并后的家具掩码网格，非零值为家具编号 |
-| furnitureIndex | array | 已放置家具编号列表 [{rank, name, isGroup}] |
+| outputGrid | grid | 折叠后的家具网格，像素值对应 nameList 中的 id |
+| nameList | array | 每个家具实例独立一条记录 [{id, name, type, direction}] |
+| furnitureIndex | array | 原始家具编号列表（未折叠），含 rank/name/isGroup/direction |
 | roomReport | array | 每个房间摘要 [{area, category, placedCount}]，可接调试输出 |
 
 ## 注意事项
 
 1. 家具清单里建议同时包含 small/medium/large 三种尺寸，电池会自动选择
-2. 只有值为 `1` 的格子才会放家具（走廊=2、门=3 不放）
+2. 只有值为 `1` 的格子才会放家具
 3. 面积小于 6 格的连通块会被跳过

@@ -1,7 +1,7 @@
 /**
- * Gears 家族 —— 15 个 op，按 articraft `sdk/v0/gears.py` 的几何拓扑实现。
+ * Gears 家族 —— 15 个 op 的几何拓扑实现。
  *
- * 与 articraft 的差异（v1 简化）：
+ * v1 简化：
  *   1) 单齿轮（spur/herringbone/crossed_helical/hyperbolic）：
  *      - 采用渐开线"折线"近似（CURVE_POINTS=20），而不是 cq_gears 的 spline
  *        approximated NURBS surface。视觉上几乎一致，OCCT 处理速度快很多。
@@ -9,15 +9,15 @@
  *      - 人字齿（herringbone）= 上下两半反向 twist 后 fuse。
  *   2) 内齿圈（ring）：外圆柱 cut(齿廓圆柱)；齿尖向内。
  *   3) 齿条（rack / herringbone_rack）：一个齿廓重复 z 次，加背板矩形封口。
- *      - v1 不实现 helix → straight extrude，articraft 用 helix 仅是齿啮合细节，
+ *      - v1 不实现 helix → straight extrude，helix 仅是齿啮合细节，
  *        URDF 视觉上影响极小。
  *   4) 锥齿轮（bevel）：cq_gears 用球面渐开线 + 锥体切割；
  *      v1 用 frustum + 浅角齿槽的近似（视觉占位）。
  *   5) 蜗杆（worm）：cq_gears 用螺旋 sweep；v1 用圆柱 + 仅 1 道螺旋刀槽近似。
  *   6) 齿轮对（bevel_pair / crossed_pair / hyperbolic_pair）：
- *      bake 两侧子齿轮，按 articraft 同款放置矩阵 fuse 在一个 compound 里。
+ *      bake 两侧子齿轮，按放置矩阵 fuse 在一个 compound 里。
  *   7) 行星齿轮组（planetary / herringbone_planetary）：
- *      sun + N planet + ring 全 bake 后按 articraft assemble 公式拼成 compound。
+ *      sun + N planet + ring 全 bake 后按 assemble 公式拼成 compound。
  *
  * 坐标约定：与 Parts 一致，圆盘在 XY 面，转轴 = +Z；center=false 时整体 +Z 平移 h/2。
  */
@@ -74,7 +74,7 @@ export const spurGear: OpBuilder = (ctx, args) => {
 /**
  * Herringbone = 上下两半反向 stepped-twist 后用 makeCompound 合成 V 形齿。
  *
- * 当 spec.helixAngleDeg = 0（articraft 默认）时退化为直齿，等价 spur。所以
+ * 当 spec.helixAngleDeg = 0 时退化为直齿，等价 spur。所以
  * herringboneGear / herringbonePlanetary 在我们 op 层会强制一个 helix 默认值（见
  * helixOrDefault 与 HERRINGBONE_DEFAULT_HELIX_DEG），让用户不传 helix 时也能看到
  * 真正的人字。
@@ -92,8 +92,8 @@ function buildHerringboneBody(
   return extrudeDrawingHerringbone(ctx, drawing, spec.width, geom.twistAngle);
 }
 
-/** 给 herringbone / planetary herringbone 默认螺旋角。articraft 没默认，但 helix=0
- *  时人字齿无意义，会和 spur 一样。 */
+/** 给 herringbone / planetary herringbone 默认螺旋角。helix=0
+ *  时人字齿无意义，会和 spur 一样，所以兜底一个默认值。 */
 const HERRINGBONE_DEFAULT_HELIX_DEG = 25;
 function helixOrDefault(args: Record<string, Arg>, fallback: number): number {
   const v = optionalNumber(args, 'helix_angle', 0);
@@ -111,9 +111,9 @@ export const herringboneGear: OpBuilder = (ctx, args) => {
   return maybeShiftToZ0(shape, spec.width, args);
 };
 
-/** CrossedHelicalGear: articraft 的 a/cos(helix) 换算让齿尺寸跟 helix 走，
- *  v1 直接复用 SpurGearSpec → SpurGearGeom（articraft 在 d0/rb 算式里包含 helix 修正，
- *  但仅影响 helical mesh 啮合细节；URDF 视觉等价）。
+/** CrossedHelicalGear: a/cos(helix) 换算让齿尺寸跟 helix 走，
+ *  v1 直接复用 SpurGearSpec → SpurGearGeom（d0/rb 算式里的 helix 修正
+ *  仅影响 helical mesh 啮合细节；URDF 视觉等价）。
  *
  *  helix_angle 默认 0 时退化为 spur，没有"交错"语义，所以 op 层会兜底一个 15°。 */
 const CROSSED_HELICAL_DEFAULT_HELIX_DEG = 15;
@@ -128,7 +128,7 @@ export const crossedHelicalGear: OpBuilder = (ctx, args) => {
   return maybeShiftToZ0(shape, spec.width, args);
 };
 
-/** HyperbolicGear: articraft 把 twist_angle 直接当总扭转；helix_angle 强制 0。
+/** HyperbolicGear: twist_angle 直接当总扭转；helix_angle 强制 0。
  *  在我们的 SpurGearSpec 里没有 twist 字段，所以 read 后把它换算成等效 helix_angle。
  *
  *  width / (r0 * tan(pi/2 - helix)) = twist  ⇒  tan(pi/2 - helix) = width / (r0 * twist)
@@ -227,7 +227,7 @@ export const herringboneRingGear: OpBuilder = (ctx, args) => {
  * 等价 cq_gears Workplane("XY") + rect/extrude。
  *
  * 这里改用：截面在 XY 平面（X=length, Y=齿向高度），沿 +Z extrude width。
- * 与 articraft 坐标转一次（articraft 用 X=length, Z=齿向, Y=width；我们这里把
+ * 与参考坐标系转一次（参考用 X=length, Z=齿向, Y=width；我们这里把
  * 齿向放到 Y，width 放到 Z），但 AABB 已记录此约定，URDF 视觉一致。
  */
 /**
@@ -266,7 +266,7 @@ function buildRackBody(
   geom: RackGearGeom,
 ): BakeableShape {
   const drawing = buildRackDrawing(ctx, spec, geom);
-  // 沿 +Z extrude width（沿 articraft 的 width 方向）
+  // 沿 +Z extrude width（沿 width 方向）
   type SolidSketch = { extrude: (d: number) => BakeableShape };
   const sketch = drawing.sketchOnPlane('XY', 0) as unknown as SolidSketch;
   return sketch.extrude(spec.width);
@@ -346,13 +346,13 @@ export const herringboneRackGear: OpBuilder = (ctx, args) => {
 /**
  * 行星齿轮组：sun + N planets + ring 全部 bake 后用 csgFuse 拼成一个 compound。
  *
- * articraft 的 assemble 公式：
+ * assemble 公式：
  *   - sun: 居中（planet.z 奇数时绕 Z 旋转 tau_sun/2）
  *   - planet: orbit_r = sun.r0 + planet.r0，绕 Z 等分 N 个位置
- *     每个 planet 绕 Z 旋转 planet.tau/2 让齿啮合（articraft 默认）
+ *     每个 planet 绕 Z 旋转 planet.tau/2 让齿啮合
  *   - ring: 居中，绕 Z 旋转 ring.tau/2
  *
- * v1 沿用此布局。helix_angle 在 planet 取反（articraft 同款）。
+ * v1 沿用此布局。helix_angle 在 planet 取反。
  */
 /**
  * 关于复合齿轮组的策略：
@@ -523,16 +523,16 @@ export const herringbonePlanetaryGearset: OpBuilder = (ctx, args) => {
  * spur gear，半径按锥角线性递减（module 同步缩，保持 z 不变）。N 个盘 stack 在
  * 一起用 `makeCompound` 拼合，视觉是"带齿的圆台"。
  *
- * 与 articraft `BevelGear` 的差异：
- *   - articraft 用球面渐开线 + spline 出真正的球面齿面；我们用 N 个平面齿廓
+ * 相比真正的球面渐开线锥齿轮：
+ *   - 球面渐开线 + spline 才是真正的球面齿面；我们用 N 个平面齿廓
  *     堆叠近似，能看到清晰的齿轮齿，但每片之间有微小台阶
  *   - 不做"小端切口"修整，齿廓在 r 缩到接近 0 时会自相交，故 face_width 不能
  *     超过 cone_h * 0.9
  *
- * 参数语义沿用 articraft：
+ * 参数语义：
  *   rp = m * z / 2      节圆半径（大端）
  *   gs_r = rp / sin(γ)  锥顶球面半径
- *   coneH = cos(γ_r) * gs_r 大端到锥顶高度（articraft cone_h）
+ *   coneH = cos(γ_r) * gs_r 大端到锥顶高度（cone_h）
  *
  * 我们的 z 轴：大端在 z=0，沿 +Z 向锥顶；slice 高度 = face_width * cos(γ) / N
  */
@@ -565,8 +565,8 @@ function buildBevelSlices(
 
   const coneRad = (coneDeg * Math.PI) / 180;
   const rp = (m * z) / 2;
-  const gs_r = rp / Math.sin(coneRad);   // articraft gs_r
-  const coneH = Math.cos(coneRad) * gs_r; // articraft cone_h
+  const gs_r = rp / Math.sin(coneRad);   // gs_r
+  const coneH = Math.cos(coneRad) * gs_r; // cone_h
   const totalH = face * Math.cos(coneRad);
   if (face >= gs_r * 0.95)
     throw new BakerError(`${opName}: face_width too large (max ${(gs_r * 0.95).toFixed(4)})`);
@@ -634,7 +634,7 @@ export const bevelGearPair: OpBuilder = (ctx, args) => {
   const backlash = optionalNumber(args, 'backlash', SPUR_DEFAULTS.backlash);
   if (gT < 3 || pT < 3) throw new BakerError('bevel_gear_pair: teeth >= 3');
 
-  // articraft 公式
+  // 装配公式
   const aa = (axisDeg * Math.PI) / 180;
   const deltaGear = Math.atan(Math.sin(aa) / (pT / gT + Math.cos(aa)));
   const deltaPinion = Math.atan(Math.sin(aa) / (gT / pT + Math.cos(aa)));
@@ -675,7 +675,7 @@ export const bevelGearPair: OpBuilder = (ctx, args) => {
 
 /**
  * Worm（蜗杆，v1 占位）：cq_gears 用 makeSplineApprox 出螺旋齿面 + sweep；
- * v1 用 cylinder 大半径 ≈ pitch_r + addendum，长 length，沿 X 轴（articraft 同款轴向）。
+ * v1 用 cylinder 大半径 ≈ pitch_r + addendum，长 length，沿 X 轴。
  *   - 单道螺旋槽用 makeHelix + sweep 一个小圆柱当占位（v1 不做，仅圆柱即可）。
  *   - bore_d 沿 X 轴挖中心孔。
  *
@@ -685,7 +685,7 @@ export const bevelGearPair: OpBuilder = (ctx, args) => {
  * Worm（蜗杆）：用 stepped-twist 的横截面是"齿数 = n_threads 的渐开线齿轮"，
  * 沿蜗杆轴线旋转出螺纹。
  *
- * 物理原理（articraft 同款）：
+ * 物理原理：
  *   d0 = n_threads * m / tan(lead_angle)    节圆直径
  *   pitch_axial = π * d0 * tan(lead_angle)  轴向螺距（一圈走多长）
  *   total_twist = 2π * length / pitch_axial = 2π * length * tan(lead) / (π*d0)
@@ -693,7 +693,7 @@ export const bevelGearPair: OpBuilder = (ctx, args) => {
  * 实现：
  *   1) 横截面在 XY 平面 = 一个 n_threads 齿的"伪 spur"（每齿就代表一道螺纹）
  *   2) 沿 +Z 方向 stepped-twist extrude，总扭转 = total_twist
- *   3) 最后绕 Y 轴 +90° 让蜗杆躺平到 X 轴（articraft 约定）
+ *   3) 最后绕 Y 轴 +90° 让蜗杆躺平到 X 轴
  *
  * 注意：n_threads=1 时单齿的渐开线退化，所以最少强制 z>=3 当模板，看上去是
  *   "3 道交替的螺纹"。如果想准确反映 n_threads=1，把齿数 ×3，把 lead 同步缩。
@@ -718,7 +718,7 @@ export const worm: OpBuilder = (ctx, args) => {
   //   轴向螺距 p_a = π·module
   //   导程     L   = n_threads · p_a          （螺纹每转一圈的轴向前进）
   //   导程角 γ 与节圆直径关系： tan(γ) = L / (π·d0)
-  //              ⇒ d0 = L / (π·tan(γ)) = n_threads·module / tan(γ)   （与 articraft 一致）
+  //              ⇒ d0 = L / (π·tan(γ)) = n_threads·module / tan(γ)
   const axialPitch = Math.PI * m;
   const lead = nT * axialPitch;
   const realD0 = lead / (Math.PI * Math.abs(Math.tan(leadRad)));
@@ -789,7 +789,7 @@ export const worm: OpBuilder = (ctx, args) => {
     for (const s of slices) safeDelete(s);
   }
 
-  // 躺平到 X 轴（articraft 约定：worm 沿 X）
+  // 躺平到 X 轴（worm 沿 X）
   const rotated = shape.rotate(90, [0, 0, 0], [0, 1, 0]);
   safeDelete(shape);
   shape = rotated;
@@ -807,7 +807,7 @@ export const worm: OpBuilder = (ctx, args) => {
 
 /**
  * Crossed gear pair：两个 crossed_helical_gear 在 shaft_angle 上对置。
- * articraft 的 transform_gear2:
+ * transform_gear2:
  *   gear1 居中放置
  *   gear2 平移 (gear1.r0+gear2.r0, 0, gear1.width/2)
  *        再绕 X 轴旋转 shaft_angle
@@ -853,7 +853,7 @@ export const crossedGearPair: OpBuilder = (ctx, args) => {
   const gear1 = buildSpurBodyClean(ctx, spec1, geom1);
   let gear2 = buildSpurBodyClean(ctx, spec2, geom2);
 
-  // articraft 链：T(r1+r2, 0, w1/2) * R_x(shaft) * T(0, 0, -w2/2) * R_z(align)
+  // 变换链：T(r1+r2, 0, w1/2) * R_x(shaft) * T(0, 0, -w2/2) * R_z(align)
   // 在 OCCT 里依次右乘，等价于：先对 gear2 做 align (R_z)，再 T(-w2/2),再 R_x，再 T(r1+r2, 0, w1/2)
   const r1 = geom1.r0, r2 = geom2.r0;
   const a1 = gear2.rotate(alignDeg, [0, 0, 0], [0, 0, 1]);
@@ -885,7 +885,7 @@ export const hyperbolicGearPair: OpBuilder = (ctx, args) => {
   const backlash = optionalNumber(args, 'backlash', SPUR_DEFAULTS.backlash);
   if (z1 < 3 || z2 < 3) throw new BakerError('hyperbolic_gear_pair: teeth >= 3');
 
-  // articraft 同款 helix→twist 换算
+  // helix→twist 换算
   const g1R0 = (m * z1) / 2;
   const g2R0 = (m * z2) / 2;
   const alpha = ((shaftDeg / 2) * Math.PI) / 180;
@@ -918,7 +918,7 @@ export const hyperbolicGearPair: OpBuilder = (ctx, args) => {
   const geom1 = computeSpurGearGeom(spec1);
   const geom2 = computeSpurGearGeom(spec2);
 
-  // articraft 用 throat_r 替代 r0；v1 取 r0 近似（差异 < 1 模数）
+  // 精确实现用 throat_r 替代 r0；v1 取 r0 近似（差异 < 1 模数）
   const r1 = geom1.r0, r2 = geom2.r0;
   const ratio = z1 / z2;
   const baseAlign = z2 % 2 === 0 ? 180.0 / z2 : 0;

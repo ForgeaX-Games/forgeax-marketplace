@@ -73,6 +73,10 @@ export interface Battery {
   description: string
   descriptionEn?: string
   version: string
+  /** Template authoring metadata (group/template batteries): author name. */
+  author?: string
+  /** Template creation timestamp (ms epoch); shown in the Templates palette. */
+  createdAt?: number
   inputs: BatteryPort[]
   outputs: BatteryPort[]
   params: BatteryParam[]
@@ -188,6 +192,10 @@ export interface NodeGroup {
   id: string
   name: string
   nameEn?: string
+  /** Template authoring metadata, persisted in saved template JSON. */
+  version?: string
+  author?: string
+  createdAt?: number
   nodes: PipelineNode[]
   edges: PipelineEdge[]
   position: Position

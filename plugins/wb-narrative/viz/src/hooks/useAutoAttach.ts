@@ -42,19 +42,30 @@ export function useAutoAttach(): void {
         const history = await fetchHistory();
         if (cancelled) return;
 
-        // 仅挂载真正的下游生成 run：排除 IP DNA 预处理条目（其活跃 job 为 awaiting_confirmation，
-        // 后端仍标 running）。draft/ip-dna kind 或对应 job 未进入下游生成的，一律不挂。
-        const running = history.find((e) => e.status === "running" && !!e.id);
-        if (!running || !running.id) return;
+        // 挂载正在跑的 run。IP 改编条目（kind==="ip-dna"）的磁盘 runId **不是**可 stream 的 run
+        // （/status /stream 对它是 Run not found）——其下游生成挂在后端内存里的 ipgen_* run 上，
+        // 由后端在 history 回填为 generationRunId。故：
+        //   - 普通 run：直接用 e.id 挂载；
+        //   - ip-dna run：仅当拿到 generationRunId（下游确在生成）时挂那条可 stream 的 run；
+        //     否则（纯预处理/停在确认门）跳过——绝不把 ip-dna 磁盘 id 当标准 run 挂，
+        //     那只会得到"假生成中 + 中间管线空"（SSE 连了个不存在的 /stream）。
+        const running = history.find((e) => {
+          if (e.status !== "running") return false;
+          if (e.kind === "ip-dna") return !!e.generationRunId;
+          return !!e.id;
+        });
+        if (!running) return;
+        const attachId = running.kind === "ip-dna" ? running.generationRunId : running.id;
+        if (!attachId) return;
         // 二次防线：本地若已锚定同名草稿/预处理条目，交给用户的「开始生成」显式驱动，不自动抢。
         if (running.key && running.key === st.activeEntryKey && st.inputConfirmed && !st.activeEntryStatus) return;
-        if (attemptedRef.current.has(running.id)) return;
+        if (attemptedRef.current.has(attachId)) return;
 
         // 二次确认：异步间隙里用户/SSE 可能已抢先挂载。
         if (useNarrativeStore.getState().runningRunId) return;
 
-        attemptedRef.current.add(running.id);
-        st.startNewRun(running.id, running.key, running.tier, running.mode);
+        attemptedRef.current.add(attachId);
+        st.startNewRun(attachId, running.key, running.tier, running.mode);
         st.setActiveConfig({
           userInput: running.userInput,
           routeGroup: running.routeGroup,

@@ -5,7 +5,7 @@
 
 export interface RegionDef {
   name: string;
-  area: number;    // 面积占比（0~1 浮点），表示占可用区域总像素的比例
+  area: number;    // 面积值，以「满铺基准」为分母换算成占可用区域的比例
   position: number; // 1-9 九宫格方位
 }
 
@@ -217,13 +217,30 @@ export function quotaVoronoiAssign(
     if (!changed) break;
   }
 
-  // ③ 配额总量可能小于总可用像素（areaRatios 加和 < 1），
-  //    多余像素保持标准 Voronoi 的分配（不强制置 -1），视觉更完整。
-  //    真正要截断的话取消下面注释：
-  // for (const [r, c] of usableCells) {
-  //   const k = label[r * cols + c];
-  //   if (k >= 0 && filled[k] > quota[k]) { label[r * cols + c] = -1; filled[k]--; }
-  // }
+  // ③ 部分填充：当占比加和 < 1（面积加和未达满铺基准）时，把每个区域中
+  //    超出配额、且离种子最远的像素置空（-1），使区域收缩到方位种子周围，
+  //    合计只占据 加和/基准 的比例，其余区域留空。
+  //    加和 ≥ 1 时占比恰好瓜分整张可用区域，本步不触发，保持满铺。
+  const ratioTotal = areaRatios.reduce((s, v) => s + v, 0);
+  if (ratioTotal < 1 - 1e-6) {
+    for (let k = 0; k < n; k++) {
+      const excess = filled[k] - quota[k];
+      if (excess <= 0) continue;
+      const pix: { idx: number; dist: number }[] = [];
+      for (const [r, c] of usableCells) {
+        const idx = r * cols + c;
+        if (label[idx] !== k) continue;
+        const dr = r - seeds[k].y, dc = c - seeds[k].x;
+        pix.push({ idx, dist: dr * dr + dc * dc });
+      }
+      // 离种子最远的先置空，保留种子周围的连通块（贴合方位特征）
+      pix.sort((a, b) => b.dist - a.dist);
+      for (let i = 0; i < excess && i < pix.length; i++) {
+        label[pix[i].idx] = -1;
+        filled[k]--;
+      }
+    }
+  }
 
   return label;
 }

@@ -92,7 +92,7 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
         const node: GraphNode = {
           id: op.nodeId,
           opId: op.opId,
-          position: op.position,
+          position: op.position ?? { x: 0, y: 0 },
           params: { ...op.params },
           ...(op.name !== undefined ? { name: op.name } : {}),
         }
@@ -121,12 +121,13 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
         return
       }
       case 'connect': {
+        const edgeId = op.edgeId ?? `edge-${state.edges.size}`
         const edge: GraphEdge = {
-          id: op.edgeId,
+          id: edgeId,
           source: { ...op.source },
           target: { ...op.target },
         }
-        state.edges.set(op.edgeId, edge)
+        state.edges.set(edgeId, edge)
         return
       }
       case 'disconnect': {
@@ -205,12 +206,12 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
           // alongside it, and the diff's provenance pass compares against this —
           // seeding `{}` here made an empty group look like it had lost its
           // groupId and emitted a spurious updateNode on every persist.
-          position: op.position, params: { groupId: op.groupId },
+          position: op.position ?? { x: 0, y: 0 }, params: { groupId: op.groupId },
         })
         state.groups.set(op.groupId, {
           id: op.groupId, name: op.name, nameEn: op.nameEn,
           nodes: innerNodes, edges: innerEdges,
-          position: op.position,
+          position: op.position ?? { x: 0, y: 0 },
           exposedInputs, exposedOutputs,
         })
         // Mirror the kernel: seed the persisted presentation overlay onto the
@@ -296,7 +297,7 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
       return { status: 'ok', newHash, batchId }
     },
 
-    async execute(request?: { nodeId?: string }): Promise<ExecutionResult> {
+    async execute(request?: { nodeId?: string; quietErrors?: boolean }): Promise<ExecutionResult> {
       const executionId = `exec-${++execCounter}`
       emit('execution', { kind: 'exec:started', pipelineId: state.pipelineId, executionId })
       // Simulated walk: emit a token output event per node. The mock does not
@@ -315,6 +316,10 @@ export function createMockApiClient(seed: Partial<MockSeed> = {}): MockApiClient
       }
       emit('execution', { kind: 'exec:completed', pipelineId: state.pipelineId, executionId })
       return { executionId, status: 'completed', outputs: {}, durationMs: 0 }
+    },
+
+    async clearOutputCache(): Promise<{ ok: true }> {
+      return { ok: true }
     },
 
     async getPipeline(): Promise<PipelineSnapshot | null> {

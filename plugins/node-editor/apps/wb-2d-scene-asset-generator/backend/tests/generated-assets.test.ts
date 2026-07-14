@@ -31,7 +31,7 @@ function runtime() {
   return createRuntime({
     projectRoot: root,
     pipelineId: 'main',
-    pluginId: '@forgeax-plugin/wb-2d-scene-asset-generator',
+    pluginId: '@forgeax-extension/wb-2d-scene-asset-generator',
     registry: new OpRegistry(),
   })
 }

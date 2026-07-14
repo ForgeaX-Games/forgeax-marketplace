@@ -13,8 +13,8 @@
     "schemaVersion": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 8,
-      "description": "Scenario 编辑器版本(types.ts:1749 的 1..8);读入时 migrateScenarioToLatest 链式升级。超出范围说明 payload 不是本 runtime 认识的影游剧本。"
+      "maximum": 11,
+      "description": "Scenario 编辑器版本(types.ts 的 1..11);读入时 migrateScenarioToLatest 链式升级。超出范围说明 payload 不是本 runtime 认识的影游剧本。"
     },
     "scenes": {
       "type": "object",

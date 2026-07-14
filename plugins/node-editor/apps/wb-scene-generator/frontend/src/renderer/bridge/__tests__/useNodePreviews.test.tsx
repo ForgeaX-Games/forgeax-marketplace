@@ -61,6 +61,7 @@ function makeFakeClient(opts?: { sinkPreviewOff?: boolean }) {
     async listNodes() {
       return nodes
     },
+    async ensureViewingProject() {},
     async getNodeOutput(nodeId: string, port: string) {
       return outputs[`${nodeId}:${port}`]
     },
@@ -180,5 +181,72 @@ describe('useNodePreviews', () => {
     // Editor turns it back ON (override cleared) → grid layer comes back.
     useRenderStore.getState().setPreviewOverrides({})
     await waitFor(() => expect(useRenderStore.getState().previewLayers['noise:grid']).toBeDefined())
+  })
+
+  it('projects scene_output voxels from a live workbench:preview-data push', async () => {
+    const wire = (v: unknown) => [{ path: [0], items: [v] }]
+    const { client } = makeFakeClient()
+    renderHook(() => useNodePreviews(client))
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']).toBeDefined())
+
+    useRenderStore.getState().reset()
+    expect(useRenderStore.getState().layers['sink:/A']).toBeUndefined()
+
+    const { projectLiveOutputs } = await import('../useNodePreviews')
+    projectLiveOutputs({
+      sink: {
+        layers: wire([{ nodePath: '/A', nodeName: 'A', value: 1, cells: [{ x: 2, y: 2, z: 0 }] }]),
+        names: wire([{ id: 1, name: 'wall', type: 'tile' }]),
+      },
+    })
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']?.cells[0]).toEqual({ x: 2, y: 2, z: 0 }))
+  })
+
+  it('keeps the last voxel frame when a refresh sees an empty scene_output (param-drag race)', async () => {
+    let execCb: ((e: { kind: string }) => void) | null = null
+    const wire = (v: unknown) => [{ path: [0], items: [v] }]
+    let sinkCells = [{ x: 0, y: 0, z: 0 }]
+    const outputs: Record<string, unknown> = {
+      'noise:grid': wire([[0, 1], [1, 0]]),
+      get 'sink:layers'() {
+        return wire([{ nodePath: '/A', nodeName: 'A', value: 1, cells: sinkCells }])
+      },
+      'sink:names': wire([{ id: 1, name: 'wall', type: 'tile' }]),
+    }
+    const client = {
+      subscribe(channel: string, cb: (e: { kind: string }) => void) {
+        if (channel === 'execution') execCb = cb
+        return () => { execCb = null }
+      },
+      async ensureViewingProject() {},
+      async listOps() {
+        return [
+          { id: 'cellular_noise', outputs: [{ name: 'grid', type: 'grid' }] },
+          { id: 'scene_output', outputs: [{ name: 'layers', type: 'voxel_layers' }, { name: 'names', type: 'name_list' }] },
+        ]
+      },
+      async listNodes() {
+        return [
+          { id: 'noise', opId: 'cellular_noise', position: { x: 0, y: 0 }, params: {} },
+          { id: 'sink', opId: 'scene_output', position: { x: 0, y: 0 }, params: {} },
+        ]
+      },
+      async getNodeOutput(nodeId: string, port: string) {
+        return outputs[`${nodeId}:${port}`]
+      },
+    } as unknown as HttpApiClient
+
+    renderHook(() => useNodePreviews(client))
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']).toBeDefined())
+    expect(useRenderStore.getState().layers['sink:/A'].cells).toHaveLength(1)
+
+    // Cache invalidated mid-drag: empty payload must NOT wipe the preview.
+    sinkCells = []
+    execCb?.({ kind: 'exec:completed' })
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']?.cells).toHaveLength(1))
+
+    sinkCells = [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }]
+    execCb?.({ kind: 'exec:completed' })
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']?.cells).toHaveLength(2))
   })
 })

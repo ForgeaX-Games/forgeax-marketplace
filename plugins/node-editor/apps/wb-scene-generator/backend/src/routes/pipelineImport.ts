@@ -15,7 +15,7 @@ import type {
   ImportTemplate,
   Runtime,
 } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import { getRuntime, getRuntimeForProject, resolveWorkspaceRoot } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 
 // Where graph templates live. Kept under the runtime project root so an
@@ -64,10 +64,15 @@ interface ImportBody {
   options?: ImportPipelineExecuteOptions
 }
 
+interface ProjectParams {
+  projectId: string
+}
+
 export async function registerPipelineImportRoutes(app: FastifyInstance): Promise<void> {
-  // List discoverable graph templates (flat *.json under <projectRoot>/templates/).
-  app.get('/api/v1/pipeline/templates', async () => {
-    const rt = await getRuntime()
+  const prefix = '/api/v1/projects/:projectId/pipeline'
+
+  app.get<{ Params: ProjectParams }>(`${prefix}/templates`, async (req) => {
+    const rt = await getRuntimeForProject(req.params.projectId)
     const dir = templatesDir(rt)
     if (!existsSync(dir)) return [] as ImportTemplate[]
     const items: ImportTemplate[] = []
@@ -96,10 +101,11 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
   // ({ file: { path, source } }). Applies via the kernel importPipelineGraph
   // (single applyBatch → graph:applied → live-sync). Honours executeAfter so
   // the preview reflects the imported graph.
-  app.post('/api/v1/pipeline/import', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+  app.post<{ Params: ProjectParams }>(`${prefix}/import`, async (req, reply) => {
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ status: 'rejected', reason: access.reason, code: access.code, projectId: access.projectId })
-    const rt = await getRuntime()
+    const rt = await getRuntimeForProject(projectId)
     const body = (req.body ?? {}) as ImportBody
     const options = body.options ?? {}
 
@@ -164,8 +170,8 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
 
   // Export the current graph to a template file (kernel-graph-v1). The faithful
   // kernel-batch equivalent of the legacy savePipelineAs route.
-  app.post('/api/v1/pipeline/export', async (req, reply) => {
-    const rt = await getRuntime()
+  app.post<{ Params: ProjectParams }>(`${prefix}/export`, async (req, reply) => {
+    const rt = await getRuntimeForProject(req.params.projectId)
     const { name, source: _source } = (req.body ?? {}) as { name?: string; source?: string }
     const snap = getPipeline(rt)
     if (!snap) return reply.code(404).send({ reason: 'no pipeline to export' })

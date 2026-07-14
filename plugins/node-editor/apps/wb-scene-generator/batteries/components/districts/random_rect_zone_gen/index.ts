@@ -1,14 +1,17 @@
 /**
- * rectZoneGen: 在网格指定区域内随机生成不重叠矩形地块
- * 填充值自动取输入网格最大值+1，每个地块独立递增。
- * 输入：grid (array); targetValue (number) — 目标区域掩码（0=任意非零）;
+ * rectZoneGen: 在单张网格指定区域内随机生成不重叠矩形地块
+ * 填充值自动取输入网格最大值+1，每个地块独立递增，全部写入同一张多值网格。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid); targetValue (number) — 目标区域掩码（0=任意非零）;
  *       count (number); minSize/maxSize (number) — 宽高范围（宽高各自独立随机，共用同一范围）;
  *       minDistance (number) — 相邻矩形最近边之间的最小格数间距;
- *       dispersion (number, 0–1) — 离散程度，越大越分散;
- *       merge (boolean) — 开启时仅合并名称清单为单条"地块"，地块网格列表保持独立；关闭时每个地块独立网格和独立名称条目;
- *       seed (number)
- * 输出：outputGridList (array) — 合并模式：单值网格列表，每个地块一张网格（名称统一为"地块"）；非合并模式：同左，但名称各自独立
- *       outputNameList (array) — 合并模式：[{id:1, name:'地块', type:'tile'}]；非合并模式：[{id, name:'地块 N', type:'tile'}]
+ *       dispersion (number, 0–1) — 离散程度，越大越分散; seed (number)
+ * 输出：outputGrid (grid) — 单张多值网格，每个地块一个递增 id;
+ *       outputNameList (array) — [{id, name:'地块 N', type:'tile'}]，与网格中的 id 一一对应;
+ *       placedCount (number) — 成功放置的矩形数量
  */
 
 class LCG {
@@ -125,19 +128,15 @@ function sampleAnchor(
   return candidates[candidates.length - 1];
 }
 
-/** 将输入统一解析为 Grid[]，支持单个网格或网格列表 */
-function parseInputGrids(raw: unknown): number[][][] | null {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as number[][]];
-  }
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as number[][][];
-  }
-  return null;
+/** 判断 v 是单张网格 number[][] */
+function isGrid(v: unknown): v is number[][] {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  const first = (v as unknown[])[0];
+  if (!Array.isArray(first) || (first as unknown[]).length === 0) return false;
+  return typeof (first as unknown[])[0] === "number";
 }
 
-/** 对单个网格执行矩形放置，返回单值网格列表和名称清单 */
+/** 对单个网格执行矩形放置，写入同一张多值网格并返回名称清单 */
 function processOneGrid(
   grid: number[][],
   targetValue: number,
@@ -148,9 +147,10 @@ function processOneGrid(
   dispersion: number,
   maxAttempts: number,
   seed: number,
-): { gridList: number[][][]; nameList: { id: number; name: string; type: string }[] } {
+): { outputGrid: number[][]; nameList: { id: number; name: string; type: string }[]; placedCount: number } {
   const rows = grid.length;
   const cols = grid[0].length;
+  const outputGrid: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
 
   let maxVal = 0;
   for (const row of grid) for (const v of row) if (v > maxVal) maxVal = v;
@@ -168,15 +168,13 @@ function processOneGrid(
     }
   }
 
-  if (candidates.length === 0) return { gridList: [], nameList: [] };
+  if (candidates.length === 0) return { outputGrid, nameList: [], placedCount: 0 };
 
   const placedCenters: [number, number][] = [];
   const placedRects: [number, number, number, number][] = []; // [x, y, w, h]
-  const gridList: number[][][] = [];
   const nameList: { id: number; name: string; type: string }[] = [];
 
   for (let i = 0; i < count; i++) {
-    let success = false;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const [anchorX, anchorY] = sampleAnchor(candidates, placedCenters, dispersion, rng);
       const w = minSize + rng.intn(maxSize - minSize + 1);
@@ -185,28 +183,25 @@ function processOneGrid(
       const y = anchorY - rng.intn(h);
 
       if (canPlace(grid, placedMask, x, y, w, h, rows, cols, targetValue, placedRects, minDistance)) {
-        const rectGrid: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-        placeRect(rectGrid, placedMask, x, y, w, h, nextFillValue);
-        gridList.push(rectGrid);
+        placeRect(outputGrid, placedMask, x, y, w, h, nextFillValue);
         nameList.push({ id: nextFillValue, name: `地块 ${nextFillValue}`, type: "tile" });
         placedCenters.push([x + w / 2, y + h / 2]);
         placedRects.push([x, y, w, h]);
         nextFillValue++;
-        success = true;
         break;
       }
     }
-    void success;
   }
 
-  return { gridList, nameList };
+  return { outputGrid, nameList, placedCount: nameList.length };
 }
 
 export function rectZoneGen(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.grid);
-  if (!grids) {
-    return { error: "grid is required" };
+  const rawGrid = input.inputGrid;
+  if (!isGrid(rawGrid)) {
+    return { error: "inputGrid is required (number[][])" };
   }
+  const grid = rawGrid as number[][];
 
   const targetValue = typeof input.targetValue === "number" ? Math.round(input.targetValue)                    : 0;
   const count       = typeof input.count       === "number" ? Math.max(1, Math.round(input.count))            : 5;
@@ -217,34 +212,10 @@ export function rectZoneGen(input: Record<string, unknown>): Record<string, unkn
   const maxAttempts = 1000;
   const seedRaw     = typeof input.seed        === "number" ? input.seed : 0;
   const baseSeed    = seedRaw === 0 ? Date.now() : seedRaw;
-  const doMerge     = input.merge !== false;
 
-  const allGridList: number[][][] = [];
-  const allNameList: { id: number; name: string; type: string }[] = [];
+  const { outputGrid, nameList, placedCount } = processOneGrid(
+    grid, targetValue, count, minSize, maxSize, minDistance, dispersion, maxAttempts, baseSeed,
+  );
 
-  for (let i = 0; i < grids.length; i++) {
-    const g = grids[i];
-    if (!g || g.length === 0 || g[0].length === 0) continue;
-    const { gridList, nameList } = processOneGrid(
-      g, targetValue, count, minSize, maxSize, minDistance, dispersion, maxAttempts,
-      baseSeed + i * 1000003,
-    );
-    allGridList.push(...gridList);
-    allNameList.push(...nameList);
-  }
-
-  // ── 合并模式：地块网格列表保持独立，仅合并名称清单为单条"地块" ────────────
-  if (doMerge) {
-    if (allGridList.length === 0) {
-      return { outputGridList: [], outputNameList: [], placedCount: 0 };
-    }
-    return {
-      outputGridList: allGridList,
-      outputNameList: [{ id: 1, name: "地块", type: "tile" }],
-      placedCount: allGridList.length,
-    };
-  }
-
-  // ── 非合并模式：每个地块独立单值网格和独立名称条目 ──────────────────────────
-  return { outputGridList: allGridList, outputNameList: allNameList, placedCount: allGridList.length };
+  return { outputGrid, outputNameList: nameList, placedCount };
 }

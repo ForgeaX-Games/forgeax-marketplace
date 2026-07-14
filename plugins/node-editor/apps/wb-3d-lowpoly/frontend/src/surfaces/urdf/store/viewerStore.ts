@@ -1,5 +1,6 @@
 // 💡 URDF Viewer 全局状态：URDF 源文本 / 渲染开关 / 面板开关 / 状态消息 / 语言模式
 import { create } from 'zustand'
+import type { AuthoredJointAnimationClip } from '../viewer3d/urdf-joint-motion'
 
 export type LangMode = 'zh' | 'en'
 
@@ -40,6 +41,13 @@ export interface ViewerStoreState {
   setSource: (source: string, opts?: { baseUrl?: string; sourceLabel?: string; assetRevisionKey?: string | null }) => void
   clearSource: () => void
 
+  /**
+   * 作者关节动画 clip（来自 g_bake_animation 的 `animation` 端口）。存在时 GLB 导出
+   * 烘它而不是程序化预览；null = 无作者动画，回退到预览轨迹。
+   */
+  authoredAnimation: AuthoredJointAnimationClip | null
+  setAuthoredAnimation: (clip: AuthoredJointAnimationClip | null) => void
+
   render: RenderOptions
   toggleRenderOption: (key: keyof RenderOptions) => void
   setRenderOption: <K extends keyof RenderOptions>(key: K, value: RenderOptions[K]) => void
@@ -76,6 +84,9 @@ export const useViewerStore = create<ViewerStoreState>((set) => ({
     }),
   clearSource: () =>
     set({ source: '', baseUrl: '', sourceLabel: '', assetRevisionKey: null, errorMessage: null }),
+
+  authoredAnimation: null,
+  setAuthoredAnimation: (clip) => set({ authoredAnimation: clip }),
 
   render: {
     showGrid: true,

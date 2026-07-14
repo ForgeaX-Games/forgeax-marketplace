@@ -1,14 +1,20 @@
 import { createRuntime, createBatteryLoader, OpRegistry, ProjectRegistry } from '@forgeax/node-runtime'
 import type { Runtime, BatteryLoader, LoaderEvent } from '@forgeax/node-runtime'
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
 import { createBakerServices } from './services/baker-context.js'
+import { createPartsRegistry } from './services/parts-registry.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
-const PLUGIN_ID = '@forgeax-plugin/wb-3d-lowpoly'
+
+export function resolveWorkspaceRoot(): string {
+  return process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
+}
+
+const PLUGIN_ID = '@forgeax-extension/wb-3d-lowpoly'
 
 let registry: ProjectRegistry | null = null
 let sharedOps: OpRegistry | null = null
@@ -84,31 +90,51 @@ export function stopBatteryWatch(): void {
 
 export async function getProjectRegistry(): Promise<ProjectRegistry> {
   if (registry) return registry
-  const projectRoot = process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
+  const workspaceRoot = resolveWorkspaceRoot()
   // Content-addressed blob root for baked meshes; served by GET /api/v1/library/blob.
-  const libRoot = join(projectRoot, 'library')
+  const libRoot = join(workspaceRoot, 'library')
   const bakerServices = createBakerServices(libRoot)
   sharedOps = sharedOps ?? (await buildSharedOps())
   const ops = sharedOps
   const reg = new ProjectRegistry({
-    workspaceRoot: projectRoot,
+    workspaceRoot,
     defaultType: 'lowpoly',
     defaultProjectName: 'Default Lowpoly',
     defaultProjectId: 'main',
     legacyStateDir: 'state',
     createRuntime: (req) =>
       createRuntime({
-        projectRoot,
+        projectRoot: workspaceRoot,
         pipelineId: req.pipelineId,
         pluginId: PLUGIN_ID,
         registry: ops,
         // Inject the baker/library bag so g_to_urdf can tessellate composites into
-        // real OBJ meshes instead of falling back to AABB boxes. Generic kernel seam.
-        createExecutionContext: (base) => ({ ...base, services: { ...bakerServices } }),
+        // real OBJ meshes instead of falling back to AABB boxes. Also inject a
+        // per-project parts registry (state/parts.json, sibling of graph.json) so
+        // g_bake_part can auto-register every baked mesh for cheap discovery via
+        // lowpoly:parts.list and for mesh-aware QC. Generic kernel seam.
+        createExecutionContext: (base) => {
+          const graphAbs = isAbsolute(req.graphFile) ? req.graphFile : join(workspaceRoot, req.graphFile)
+          const parts = createPartsRegistry(dirname(graphAbs))
+          return { ...base, services: { ...bakerServices, parts } }
+        },
         layout: {
           graphFile: req.graphFile,
           historyFile: req.historyFile,
           outputsDir: req.outputsDir,
+          // Without an explicit assetsDir, the kernel defaults every project's
+          // AssetResolver to `<workspaceRoot>/assets` — the SAME shared folder
+          // for every project, since `projectRoot` above is always the global
+          // workspaceRoot (per-project isolation only happens via the `layout`
+          // overrides). That silently broke `lowpoly:assets.list` for any
+          // non-default project: `lowpoly:export-glb` / the screenshot cache
+          // write under this project's OWN dir (`getProjectDir()` in
+          // agent/routes.ts, i.e. two segments up from graphFile), but
+          // assets.list was scanning the wrong (global) folder and would never
+          // find them — the "path" mismatch agents hit after exporting a GLB
+          // and then trying to list/verify it. Deriving assetsDir the same way
+          // `getProjectDir()` does keeps both in lockstep.
+          assetsDir: join(dirname(dirname(req.graphFile)), 'assets'),
         },
       }),
   })
@@ -117,9 +143,41 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
   return reg
 }
 
+/** The UI viewing project's Runtime (legacy alias). */
 export async function getRuntime(): Promise<Runtime> {
   const reg = await getProjectRegistry()
-  return reg.getActiveRuntime()
+  return reg.getViewingRuntime()
+}
+
+export async function getRuntimeForProject(projectId: string): Promise<Runtime> {
+  const reg = await getProjectRegistry()
+  if (!reg.getProject(projectId)) throw new Error(`project not found: ${projectId}`)
+  return reg.getRuntimeFor(projectId)
+}
+
+export async function getViewingProjectDir(): Promise<string> {
+  const reg = await getProjectRegistry()
+  const ws = resolveWorkspaceRoot()
+  const id = reg.getViewingProjectId()
+  const rec = id ? reg.getProject(id) : null
+  const graphRel = rec?.manifest.storage.graphFile ?? join('state', 'graph.json')
+  const graphAbs = isAbsolute(graphRel) ? graphRel : join(ws, graphRel)
+  return dirname(dirname(graphAbs))
+}
+
+/** @deprecated Use getViewingProjectDir(). */
+export async function getActiveProjectDir(): Promise<string> {
+  return getViewingProjectDir()
+}
+
+export async function getProjectDir(id: string): Promise<string | null> {
+  const reg = await getProjectRegistry()
+  const rec = reg.getProject(id)
+  if (!rec) return null
+  const ws = resolveWorkspaceRoot()
+  const graphRel = rec.manifest.storage.graphFile
+  const graphAbs = isAbsolute(graphRel) ? graphRel : join(ws, graphRel)
+  return dirname(dirname(graphAbs))
 }
 
 export function resetRuntimeForTests(): void {

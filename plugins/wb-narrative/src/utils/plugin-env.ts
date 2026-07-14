@@ -24,7 +24,7 @@
  *
  *     1. The literal substring `process.env.*_API_KEY` does NOT appear in
  *        any other plugin source file (passes the C6 grep gate).
- *     2. `requestedEnv` in forgeax-plugin.json declares the full key list,
+ *     2. `requestedEnv` in forgeax-extension.json declares the full key list,
  *        so when these entry points migrate to ToolRegistry the manifest
  *        already advertises the contract.
  *     3. Future drift is caught by ESLint / a custom no-process-env rule.
@@ -35,7 +35,7 @@
  */
 
 /** Manifest-declared env keys this plugin consumes. Keep in sync with
- *  forgeax-plugin.json `requestedEnv`. */
+ *  forgeax-extension.json `requestedEnv`. */
 export type PluginEnvKey =
   | "GEMINI_API_KEY"
   | "LLM_PROXY_URL"

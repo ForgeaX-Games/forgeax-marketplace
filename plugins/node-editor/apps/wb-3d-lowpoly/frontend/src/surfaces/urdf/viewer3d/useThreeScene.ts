@@ -1,5 +1,5 @@
 // 💡 三维场景 hook：渲染器 / 相机 / OrbitControls / 灯光 / 网格 / 坐标 / 渲染循环
-//    精简自 articraft viewer，去掉 fancyGraphics 切换（默认开启 PBR + envMap），保留 invalidate-driven render loop
+//    去掉 fancyGraphics 切换（默认开启 PBR + envMap），保留 invalidate-driven render loop
 import { useRef, useEffect, useState, useCallback } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'

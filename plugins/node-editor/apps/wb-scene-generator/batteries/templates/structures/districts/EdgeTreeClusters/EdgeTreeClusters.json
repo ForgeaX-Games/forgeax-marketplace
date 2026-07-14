@@ -2,6 +2,7 @@
   "id": "group_edge_tree_clusters",
   "name": "EdgeTreeClusters",
   "nameEn": "EdgeTreeClusters",
+  "author": "zyw",
   "nodes": [
     {
       "id": "eg_in",
@@ -36,7 +37,7 @@
       "opId": "edge_green_cluster",
       "name": "eg_clusters",
       "position": { "x": 1120, "y": 0 },
-      "params": {}
+      "params": { "count": 17, "clusterSize": 267 }
     },
     {
       "id": "eg_name",

@@ -15,8 +15,10 @@ import {
   buildPreviewMotions,
   isPreviewJoint,
   previewJointValue,
+  computeAuthoredJointValuesAtTime,
   type PreviewJointMotion,
 } from './urdf-joint-motion'
+import { useViewerStore } from '../store/viewerStore'
 
 export interface UseUrdfSceneOptions {
   source: string
@@ -67,7 +69,7 @@ export interface UseUrdfSceneResult {
 const PREVIEW_UI_SYNC_MS = 100
 
 /**
- * 与 articraft 同源：URDF 默认 Z-up（地面=Z=0 平面），THREE 默认 Y-up。
+ * URDF 默认 Z-up（地面=Z=0 平面），THREE 默认 Y-up。
  * 把 spec.root 包到一个外层 Group 里：
  *   1) 绕 X 轴旋转 -90°，将 URDF 的 Z 轴对齐到 THREE 的 Y 轴；
  *   2) 把模型整体落到地面：center 对齐 (x=0, z=0)，box.min.y=0（脚踩网格）。
@@ -127,7 +129,7 @@ export function useUrdfScene(
 
   // useThreeScene 内部把 scene/camera/... 都用 useRef 持有，返回值里读 *Ref.current；
   // 因此 scene.scene / scene.camera / scene.invalidate 这些字段在多次 render 之间是稳定引用，
-  // 直接进 effect 依赖列表是安全的（与 articraft 的 useUrdfLoader 一致）。
+  // 直接进 effect 依赖列表是安全的。
   const { scene: sceneObj3d, camera, controls, gridGroup, axisGroup, invalidate, getFrameCanvas, renderFrame, captureContactSheet: captureContactSheetRaw, sceneReady } = scene
 
   // Capture the contact sheet framed to the current robot root (falls back to
@@ -192,7 +194,7 @@ export function useUrdfScene(
     // 关键：URDF Z-up → THREE Y-up 的坐标系换算 + 落地居中。
     // 不做包裹，box(1,1,1) 会以 [-0.5,0.5]³ 居中在原点（非 Z-up 也"恰好"显示），但
     // 一旦 URDF 用了 origin xyz/rpy 或多 link 关节链路，模型就会以 Z-up 视角散开，
-    // 与 THREE 默认 Y-up 视角错位，造成视觉上"看不到模型"。articraft 同款修复。
+    // 与 THREE 默认 Y-up 视角错位，造成视觉上"看不到模型"。
     const robotGroup = new THREE.Group()
     robotGroup.name = ROBOT_GROUP_NAME
     robotGroup.rotation.x = -Math.PI / 2
@@ -478,6 +480,10 @@ export function useUrdfScene(
   const jointValuesRef = useRef<Map<string, number>>(new Map())
   useEffect(() => { jointValuesRef.current = jointValues }, [jointValues])
 
+  // 作者关节轨迹 q(t)（来自 g_bake_animation → useUrdfLiveSync）。存在时实时预览
+  // 直接播它，否则回退到程序化预览运动 —— 与 GLB 导出的 clip 选择逻辑保持一致。
+  const authoredAnimation = useViewerStore((s) => s.authoredAnimation)
+
   const [previewJointValues, setPreviewJointValues] = useState<Map<string, number>>(new Map())
   useEffect(() => {
     if (!spec || !options.autoAnimate) {
@@ -486,37 +492,67 @@ export function useUrdfScene(
       invalidate()
       return
     }
-    const motions: PreviewJointMotion[] = buildPreviewMotions(spec)
-    if (motions.length === 0) {
-      setPreviewJointValues((prev) => (prev.size === 0 ? prev : new Map()))
-      return
-    }
+
+    // 作者 clip 至少要有一条落在本 URDF 可动关节上的 channel 才驱动预览，
+    // 否则（空 clip / 关节名对不上）回退到程序化运动。
+    const movableJointNames = new Set(spec.joints.filter(isPreviewJoint).map((j) => j.name))
+    const authoredDrivesPreview =
+      authoredAnimation != null &&
+      Number.isFinite(authoredAnimation.frameCount) &&
+      authoredAnimation.frameCount >= 2 &&
+      Object.entries(authoredAnimation.channels).some(
+        ([name, series]) => series.length > 0 && movableJointNames.has(name),
+      )
 
     let frameId = 0
     let lastUiSync = 0
-    const tick = (now: number) => {
-      const t = now / 1000
-      const nextValues = new Map<string, number>()
-      for (const m of motions) {
-        const phase = THREE.MathUtils.euclideanModulo((t / m.cycleSeconds) + m.phaseOffset, 1)
-        nextValues.set(m.joint.name, previewJointValue(m.joint, phase))
+
+    if (authoredDrivesPreview) {
+      const clip = authoredAnimation!
+      const startNow = performance.now()
+      const tick = (now: number) => {
+        const t = (now - startNow) / 1000
+        const nextValues = computeAuthoredJointValuesAtTime(spec, clip, t)
+        if (now - lastUiSync >= PREVIEW_UI_SYNC_MS) {
+          lastUiSync = now
+          startTransition(() => setPreviewJointValues(new Map(nextValues)))
+        }
+        applyJointValues(nextValues)
+        invalidate()
+        frameId = requestAnimationFrame(tick)
       }
-      if (now - lastUiSync >= PREVIEW_UI_SYNC_MS) {
-        lastUiSync = now
-        startTransition(() => setPreviewJointValues(new Map(nextValues)))
+      frameId = requestAnimationFrame(tick)
+    } else {
+      const motions: PreviewJointMotion[] = buildPreviewMotions(spec)
+      if (motions.length === 0) {
+        setPreviewJointValues((prev) => (prev.size === 0 ? prev : new Map()))
+        return
       }
-      applyJointValues(nextValues)
-      invalidate()
+      const tick = (now: number) => {
+        const t = now / 1000
+        const nextValues = new Map<string, number>()
+        for (const m of motions) {
+          const phase = THREE.MathUtils.euclideanModulo((t / m.cycleSeconds) + m.phaseOffset, 1)
+          nextValues.set(m.joint.name, previewJointValue(m.joint, phase))
+        }
+        if (now - lastUiSync >= PREVIEW_UI_SYNC_MS) {
+          lastUiSync = now
+          startTransition(() => setPreviewJointValues(new Map(nextValues)))
+        }
+        applyJointValues(nextValues)
+        invalidate()
+        frameId = requestAnimationFrame(tick)
+      }
       frameId = requestAnimationFrame(tick)
     }
-    frameId = requestAnimationFrame(tick)
+
     return () => {
       cancelAnimationFrame(frameId)
       setPreviewJointValues((prev) => (prev.size === 0 ? prev : new Map()))
       applyJointValues(jointValuesRef.current)
       invalidate()
     }
-  }, [spec, options.autoAnimate, applyJointValues, invalidate])
+  }, [spec, options.autoAnimate, authoredAnimation, applyJointValues, invalidate])
 
   const wrappedSetJointValue = useCallback((name: string, value: number) => {
     setJointValue(name, value)

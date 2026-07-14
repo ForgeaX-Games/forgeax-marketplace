@@ -12,6 +12,117 @@
 
 ### Added
 
+- **New CSG battery `g_fillet` (Modify/CSG) — general-purpose edge fillet/chamfer
+  on any solid.** Why: replicad's `.fillet()`/`.chamfer()` were only used *inside*
+  individual part builders (`brackets`/`controls`/`panels`/`architecture`); there
+  was no way for an agent to round or bevel the edges of an arbitrary CSG/primitive
+  solid (a box enclosure, a differenced shell, an extruded plate). This closes the
+  single highest-leverage modeling gap (Blender's Bevel modifier equivalent) with
+  zero new kernel dependency.
+  - Battery `batteries/Modify/CSG/g_fillet/` (`meta.json`+`index.ts`+`icon.svg`):
+    inputs `shape_id` (upstream solid), `radius`, `type` (`round` fillet / `chamfer`
+    bevel), `edges` (`all` / `vertical` = only edges parallel to Z). Emits DSL
+    `fillet(...)` or `chamfer(...)` depending on `type`; reads `error` on bad
+    ref / non-positive radius / invalid enum like the other CSG ops.
+  - DSL grammar: two new `OpSpec`s (`fillet`, `chamfer`) in `op-registry.ts`, both
+    added to `SUBGRAPH_BAKE_OPS` so `g_bake_part` / `g_to_urdf` route them through
+    the geometry-subgraph bake path (like `translate`/`rotate`). Rebuild via
+    `pnpm build:vendor`.
+  - Baker: `buildStatementShape` in `baker.service.ts` handles `fillet`/`chamfer`
+    by resolving the referenced solid then calling replicad `.fillet/.chamfer`
+    (all edges, or `e.inDirection([0,0,1])` for `edges="vertical"`). Rejects
+    mesh-backed operands (pipe/sweep/section_loft) via `ensureReplicadShape`, and
+    wraps OCCT failures (e.g. radius larger than the adjacent face) in a
+    `BakerError` so `g_to_urdf` falls back to an AABB box.
+  - QC: `aabb.ts` resolves `fillet`/`chamfer` to the referenced shape's AABB
+    (conservative — beveling only shrinks corners), so QC overlap checks keep
+    working instead of reporting the op as an unregistered shape.
+
+- **Architecture assembly/placement contract documented + placement-hint outputs
+  on `g_wall`/`g_door` (both bumped to `1.2.0`).** Why: agents produced buildings
+  where wall holes and windows didn't line up, door leaves poked out of frames,
+  floors were mis-sized / the upper storey had no slab, and stairs were missing —
+  none of which are baker geometry bugs. The baker's coordinate convention
+  (elements X/Y-centered, base at Z=0; opening `x`=offset from wall midpoint,
+  `sill`/`head`=absolute Z) lived only in `ops/architecture.ts` comments, never in
+  the agent-facing skill docs, so the assembly step had no alignment recipe.
+  - Docs: new **对齐配方 · Placement recipes** section in
+    `skills/compose-lowpoly/executions/part-b-building.md` (opening↔window/door
+    mapping `width=w, height=head−sill, origin=[x,0,sill]`, parent to the *wall*
+    not the root slab; door-leaf hinge origin; per-storey slab sized to footprint;
+    stairs↔upper-slab well), plus a runnable end-to-end aligned example and a
+    Placement-contract summary in the Architecture page of `modeling-guide.md`.
+  - `g_wall` now returns **`opening_placements`** (JSON per opening:
+    `{origin:[x,0,sill], width, height, depth}`) so agents copy the window/door
+    placement instead of recomputing it.
+  - `g_door` now returns **`frame_origin`**, **`leaf_origin`** and
+    **`leaf_origins`** (JSON) — the leaf's local origin is at the hinge edge, so
+    the suggested joint origin is `[∓clearW/2,0,0]` (one per jamb for double doors),
+    preventing leaves placed concentric with the frame from poking out.
+- **Building guidance: overlap discipline + the moving-joint QC trap, and
+  "not limited to Architecture ops".** Why: after the alignment fix, windows lined
+  up but doors still failed QC. Root cause is `g_geometry_qc` behavior, not the
+  door battery — in an all-`g_joint_fixed` assembly, benign architectural AABB
+  overlaps (wall corners, embedded frames, leaf-in-frame, stairs-in-well) are only
+  warnings, but a **single moving joint** (`g_joint_revolute` for an openable door)
+  promotes **every** overlap in the model to fatal. New **R5** in
+  `part-b-building.md` (mirrored in `modeling-guide.md`): prefer `g_joint_fixed` for
+  static buildings; if a door must swing, whitelist benign pairs via
+  `g_geometry_qc` `allow_pairs`/`allow_joints`, and use `g_metrics`
+  (`max_penetration`/`overlap_ratio`) to separate real clashes from conservative
+  AABB false positives; the aligned example now uses a fixed leaf. Also new **§1.5**
+  encouraging non-Architecture families (Primitive/CSG/Parts/Transform/Material) to
+  enrich detail (chimneys, sills, bay windows, handles, vents, arrays, color) rather
+  than restricting buildings to the 9 Architecture ops.
+- **Architecture batteries (9) gained optional shaping parameters (all
+  backward-compatible, defaults preserve prior geometry); each battery `meta`
+  bumped to `1.1.0`.** Why: the arch family only exposed bare massing knobs, so
+  producing believable buildings needed post-processing. New parameters are
+  implemented natively in the OCCT baker (`backend/src/services/baker/ops/architecture.ts`),
+  declared in `op-registry.ts`, defaulted in `arch-defaults.ts`, and sized in
+  `aabb.ts`:
+  - `g_wall`: auto horizontal `window_band` (`band_sill`/`band_head`/`band_margin`,
+    optional `pane_width` + `mullion` division) and a `plinth_height` /
+    `plinth_projection` base.
+  - `g_roof`: split `eave_overhang` (span) vs `verge_overhang` (ridge) for pitched
+    roofs; flat-roof `parapet_height` / `parapet_thickness` with optional
+    `coping_width` cap; consistent ridge orientation.
+  - `g_stairs`: `tread_thickness` + `open_riser` for thin open treads, an optional
+    mid-run landing (`landing_depth` / `landing_after`), and cleaner spiral wedge
+    treads.
+  - `g_column`: `taper` (top/bottom radius ratio), `base_style` / `capital_style`
+    (`plain`/`stepped`), and optional `flutes` count (round shafts).
+  - `g_door`: multi-`leaves`, `panel_rows` / `panel_cols` recessed grid, optional
+    `transom` and `sidelight`.
+  - `g_window`: automatic pane division by target `pane_width`, projecting `sill`,
+    optional `arch_top`.
+  - `g_railing`: `post_shape` (`round`/`square`) + `post_radius`, baluster count from
+    `post_spacing`, optional `bottom_rail` / `mid_rail`, `top_rail_width` /
+    `top_rail_height`.
+  - `g_floor_slab`: perimeter downstand beam (`beam_depth` / `beam_width`) and edge
+    `edge_chamfer`.
+  - `g_facade_panel`: `groove_direction` (`horizontal`/`vertical`/`both`), groove
+    layout by `groove_spacing`, and `board_style` (`flush`/`lap`/`shiplap`) lap
+    offset.
+
+- **New `g_metrics` battery (`batteries/Output/QC/g_metrics/`) — quantitative
+  geometry evaluation + a 0–100 health score.** Why: `g_geometry_qc` emits boolean
+  signals (is there a problem, for fix loops); nothing quantified *how bad* /
+  *how good* a result is. `g_metrics` reports basic info (parts/joints/DOF, overall
+  bbox size + footprint area, rich vs primitive, arch/csg counts) and quality
+  metrics (sibling AABB `overlap_pairs`/`overlap_volume`/`max_penetration`/
+  `overlap_ratio`, `moving_joint_collisions`, `islands`/`floating_links`/
+  `joints_with_gap`/`max_joint_gap`, grounding `ground_offset`, richness, poly
+  budget) as a multiline `report` + scalar ports + `score`/`grade`. Read-only,
+  auto-scanned by `lowpoly:batteries.list`, reuses the shared FK/AABB math. See
+  `batteries/Output/QC/g_metrics/index.ts`.
+- **New shared vendor geometry modules (SSOT / de-dup targets).**
+  `vendor/shared/types/geometry/fk.ts` (world-frame forward kinematics
+  `computeWorldTransforms` + AABB overlap/point-AABB/AABB-AABB distance + rpy→mat3,
+  extracted from `g_geometry_qc` so QC and `g_metrics` share one implementation);
+  `arch-defaults.ts` (`ARCH_DEFAULTS` — roof/wall/floor defaults);
+  `parse-quad.ts` (`parseQuadList` — shared "[a,b,c,d] list" parser). All
+  re-exported from `vendor/shared/types/geometry/index.ts`.
 - **Gears consolidated 15 → 6 parametric Parts batteries (`g_gear` + friends).**
   Why: 15 near-duplicate gear batteries diverged on tooth math and tessellation and
   buried the common 90% case. The 6 survivors live under `batteries/Generate/Parts/`
@@ -24,6 +135,16 @@
 
 ### Removed
 
+- **`g_building_shell` orchestrator battery + its BSP layout dead code.** Why: the
+  giant "one battery → whole multi-storey building" orchestrator was judged redundant
+  (walls/floors/stairs/roof + `g_joint_*` compose a building by hand just as well) and
+  its only-consumer procedural-layout code was pure carrying cost. Removed
+  `batteries/Generate/Architecture/g_building_shell/`, the BSP helpers
+  (`subdivideFootprint`/`roomToWalls`/`RoomRect`/`WallSeg`/`LayoutOptions`) in
+  `vendor/shared/types/geometry/arch-layout.ts` + its re-export
+  `backend/src/services/baker/arch/layout.ts` + the vendor index export. Trade-off:
+  no more "programmatic multi-room / one-click whole building" (accepted). Compose a
+  building from `g_wall`/`g_floor_slab`/`g_stairs`/`g_roof` + `g_joint_fixed` instead.
 - **Deprecated per-profile gear battery IDs and the `Legacy/Gears` palette group.**
   Why: keeping `g_spur_gear` / `g_herringbone_*` / `g_crossed_*` / `g_hyperbolic_*`
   / `*_pair` around as folded shells just cluttered the palette with a standalone
@@ -77,6 +198,29 @@
 
 ### Changed
 
+- **`g_geometry_qc` FK + AABB math extracted to shared `vendor/.../fk.ts` (de-dup).**
+  Why: `g_metrics` needs the same world-frame FK + interpenetration math; keeping it
+  inlined in QC would fork into a second drifting copy. `computeWorldTransforms`,
+  `transformAabbByOriginRpy`/`transformAabbByMatOrigin`, `aabbOverlapDepth`,
+  `pointAabbDistance`, `aabbAabbDistance`, `rpyToMat3`, `mat3*`, `readVec3` now live in
+  `fk.ts`; `g_geometry_qc/index.ts` imports them. Behaviour is byte-for-byte unchanged
+  (QC regression test guards this).
+- **Architecture defaults centralised in `ARCH_DEFAULTS` (SSOT).** Why: roof defaults
+  drifted between `g_roof` (height=1.6, overhang=0.3) and the baker (overhang=0.3,
+  height=min(bw,bd)*0.4). `g_roof/index.ts`, `baker/ops/architecture.ts` and
+  `aabb.ts` now all read `ARCH_DEFAULTS` from `arch-defaults.ts`.
+- **`facade_panel` gains an `orientation` param (`wall` vertical default / `slab`
+  flat).** Why: the baker built the panel lying flat (thickness→Z) while its meta
+  labelled `panel_h` as "Y" — reversed from how a hung cladding panel actually stands,
+  and no battery could stand it up. `orientation=wall` (default) now builds it vertical
+  (w→X, h→Z, base Z=0, thickness→Y, like a wall) with horizontal reveal grooves; `slab`
+  keeps the old flat behaviour. `baker/ops/architecture.ts`, `op-registry.ts`,
+  `aabb.ts`, `batteries/.../g_facade_panel/{index.ts,meta.json}`. Note: the default
+  AABB orientation for `facade_panel` changed accordingly.
+- **`openings`/`holes` parsers de-duplicated.** Battery side: `g_wall.parseOpenings` and
+  `g_floor_slab.parseHoles` now delegate to shared `parseQuadList`
+  (`vendor/.../parse-quad.ts`). Baker side: `readOpenings`+`readRectHoles` merged into
+  one `readQuadList` in `baker/ops/architecture.ts`. Error messages preserved verbatim.
 - **URDF `<collision>` defaults to a coarse AABB box proxy.** Why: copying the full
   visual mesh into `<collision>` for every composite/baked part made physics both
   slower and less stable. `g_to_urdf` now wraps composite/baked-mesh collisions in an
@@ -132,6 +276,24 @@
 
 ### Fixed
 
+- **Roof ridge orientation unified along the footprint's longer edge (`baker/ops/architecture.ts`).**
+  Why: `gable`/`gambrel`/`shed` drew their cross-section in XZ and extruded along **Y**
+  (ridge along Y), while `hip` put its ridge rectangle along **X** — so the same
+  footprint produced perpendicular ridges when the roof type changed. Worse, `hip`'s
+  `ridgeLen = Math.max(bw - bd, bw*0.25)` degenerated to `bw*0.25` (wrong geometry) when
+  `bd > bw`. Fix: build all four in a canonical "ridge along Y" frame and rotate 90°
+  about Z when the longer edge is X (`alongX = bw >= bd`); `hip` ridge length is now
+  `max(longer − shorter, shorter*0.25)` on the long axis. `pyramid`/`mansard`/`flat`
+  are footprint-symmetric and unchanged.
+- **Battery-side validations aligned with the baker (`g_window`/`g_door`/`g_railing`).**
+  Why: these emitted values the baker would then throw on, surfacing as a bake error
+  instead of a clean battery `error`. Added: `g_window` frame `< min(size)/2` and
+  glass `< depth`; `g_door` frame `< height`; `g_railing` `post_size < length` and
+  `rail_height < height`. Geometry output for valid inputs is unchanged.
+- **Agent screenshot/glb-export tools were effectively broken for any project other than whichever one the UI happened to be viewing — the "对话时调用截图工具会出错/路径错误" report.** Two compounding bugs, both in the AI project workflow (`projects.open` → `pipeline.*` → `screenshot.capture`/`export-glb`):
+  1. `lowpoly:projects.open` acquired the agent's exclusive lock but never made that project the renderer's "viewing" project, and no AI-facing tool existed to set viewing either (`projects.view`/`/view` was UI-only). Since `screenshot.capture`/`export-glb`/`assets.list` all resolve their target project as "explicit `projectId` else the *viewing* project" (`resolveProjectId` in `backend/src/tool-handlers.ts`) and the backend's `resolveAgentTarget` (`backend/src/agent/routes.ts`) hard-rejects any `projectId` that isn't the viewing one, an agent that created+opened a fresh project (the normal workflow) got a permanent `409 "project X is not the viewing project"` on every screenshot/export call, with no recovery path. Fixed at the kernel: `ProjectRegistry.openProject()` (`packages/node-runtime/src/layer2/project-registry.ts`) now also calls `viewProject()` for an `ai` caller; `routes/projects.ts`'s `/open` handler broadcasts the same `project:viewing` frame `/view` does, so connected UI clients (editor canvas, URDF viewer) cross-sync live instead of only on next poll. Non-AI opens are unaffected.
+  2. `lowpoly:assets.list` could never find a GLB the agent had just exported for a non-default project. `runtime.ts`'s `createRuntime(...)` factory never set `layout.assetsDir`, so the kernel's `AssetResolver` defaulted every project to the *same* global `<workspaceRoot>/assets` folder (since `projectRoot` passed in is always the shared workspace root, not per-project) — while `export-glb`/screenshot caching correctly write under `<workspaceRoot>/projects/<id>/assets/...` (via `getProjectDir()` in `agent/routes.ts`). Fixed by deriving `assetsDir` from `dirname(dirname(graphFile))` the same way `getProjectDir()` does, so both agree per project.
+  Regression coverage: `packages/node-runtime/src/__tests__/project-registry.test.ts` (existing, unchanged, still green), new `apps/wb-3d-lowpoly/backend/tests/agent-project-scoping.test.ts`. `apps/wb-scene-generator` and `apps/wb-2d-scene-asset-generator` share the identical `createRuntime`/`/open` pattern and likely need the matching `assetsDir` + view-broadcast fix too (only the kernel half — `ProjectRegistry.openProject` — is already shared and fixed for them; their own `routes/projects.ts` `/open` and `runtime.ts` were not touched here since this pass was scoped to wb-3d-lowpoly).
 - **CSG / Assembly / Architecture correctness pass.** Reconciled `meta.json`
   defaults with code defaults, fixed staircase rendering and `facade_panel` Z
   alignment, emitted proper errors for missing/invalid joints, validated `mimic`
@@ -206,12 +368,12 @@
     same ToolRegistry/QC loop, recasts the modeling philosophy as a *building
     brief*); enumerated the Architecture family in top-level `SKILL.md`, the
     `battery-catalog.md` family table + routing, and a new **Architecture** page
-    in `modeling-guide.md`; registered the skill in `forgeax-plugin.json`.
+    in `modeling-guide.md`; registered the skill in `forgeax-extension.json`.
   - **Tests**: `backend/tests/architecture.test.ts` — real OCCT bakes
     (wall ±opening, slab, stairs, gable/hip/shed roof, window, door leaf),
     `g_wall`/`g_window`/`g_door` DSL emission + validate, `subdivideFootprint`
     determinism, and `g_building_shell` single-rooted-tree checks.
-- **Parametric Parts templates (articraft-style).** Wired new optional, genuinely
+- **Parametric Parts templates.** Wired new optional, genuinely
   geometric parameters into both the baker and the battery meta/index:
   - `Parts/g_knob`: `bore_d` (center bore), `skirt_diameter`/`skirt_height` (base
     skirt), `indicator` (top pointer groove).
@@ -222,7 +384,7 @@
   - `Parts/g_wheel`: `spoke_count` (N radial spokes replacing the solid twin discs)
     plus `bore_d` (optional center bore, removing the hard-coded `0.18*radius`).
 - **`Utils/g_auto_collision`** — derive `<collision>` for *every* part from its
-  visual in one pass (mirrors articraft `exact_collisions.py`): native primitives
+  visual in one pass: native primitives
   are copied exactly (box→box, cylinder→cylinder, sphere→sphere), everything else
   falls back to an AABB box; parts that already have a collision are skipped unless
   `replace=true`.
@@ -306,7 +468,7 @@
   - Companion `agent-lowpoly` persona/manifest (no CHANGELOG in that plugin):
     `persona/zh.md` + `AGENT.md` rewritten to the three-tier spine with intent
     triage and the self-check/self-fix loop (replacing the "screenshot critique,
-    hand it back to the user" anti-pattern); `forgeax-plugin.json` description
+    hand it back to the user" anti-pattern); `forgeax-extension.json` description
     widened from props/mechanical to also cover buildings and scenes/cities.
 - **`primitive_only` QC signal now fires for box-stacks wrapped in parts/joints.**
   The original gate required `no part` **and** `no joint`, so the moment a model
@@ -394,7 +556,7 @@
   `g_cylinder` stacks even though the catalog ships full `CSG` / `Parts` / `Gears`
   / `Assembly` families, because the skill was ~90% tool-call mechanics with
   primitive-biased modeling advice, the families were never enumerated, and the
-  `*_id` wiring (plus its silent failure) was undocumented. Ported the articraft
+  `*_id` wiring (plus its silent failure) was undocumented. Reworked the
   approach:
   - **Skill rewrite** (`skills/compose-lowpoly-3d-pipeline/`): added a *Modeling
     Philosophy* (realistic-geometry-first, explicit anti-primitive rule, a
@@ -418,7 +580,7 @@
     signal** — when the model is all bare primitives with no CSG/Parts/Gears and
     no `part`/`joint`, it appends a `primitive_only` note to `report` and exposes
     a new `primitive_only` boolean output. Does not affect `valid` or block
-    execution; it is the articraft-style "QC as a sensor" gate the loop reads.
+    execution; it is the "QC as a sensor" gate the loop reads.
 
 - **Kernel cascade: bump `external/forgeax-wb-node-core` to `f831fe6`.** The
   kernel retires the obsolete `asset_grid` core port type and the legacy
@@ -469,7 +631,7 @@
 - **The canvas top-right "projects" button + modal were removed** in favour of the
   left-pane `<ProjectPanel>` (`frontend/src/workbench/WorkbenchHost.tsx`). *Why:*
   one project-management surface, in the left pane, for both the human and the LLM.
-  - New AI tool **`lowpoly:export-glb`** (`forgeax-plugin.json` provides.tools, `exposedToAI`):
+  - New AI tool **`lowpoly:export-glb`** (`forgeax-extension.json` provides.tools, `exposedToAI`):
     bakes the current pipeline model to an engine-neutral `.glb` (with joint-preview
     animation) under `<projectRoot>/assets/3d/<name>.glb`. Mirrors the screenshot WS
     round-trip — backend `/api/v1/agent/glb/{export,store}` (`backend/src/agent/{routes,

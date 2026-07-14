@@ -43,4 +43,4 @@ order: 2
 
 ## 海报样张
 
-Cinematic suspense thriller film poster, voyeuristic high-angle composition, lone silhouette in deep shadow, isolated pool of warm light, muted desaturated tones, ominous negative space, dread and tension, no text, vertical 2:3
+Film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, cold high-contrast palette with a single warm accent, top-lit faces half in shadow. Panel 1: high-angle wide revealing a hidden danger the unaware character cannot see. Panel 2: voyeuristic over-the-shoulder framing, as if secretly watching. Panel 3: extreme close-up of a danger object — a doorknob, an eye, a finger — lit by the lone warm light. Panel 4: subjective POV peering through a narrow gap. Panel 5: a reaction shot, half the face crushed into top-light shadow. Panel 6: a dolly-zoom vertigo distortion on a face at the moment of realization. Dread and tension, ominous negative space; consistent grade across all panels, no text, no captions, vertical 2:3

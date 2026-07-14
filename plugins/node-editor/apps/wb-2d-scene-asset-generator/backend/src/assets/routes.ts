@@ -37,13 +37,57 @@ interface ImportBody {
 
 let selectedPreviewAlias: string | null = null
 
-// PNG IHDR width/height (bytes 16..24). Stored in the sandbox descriptor so the
-// scene side can derive ppu / placement without re-reading every blob.
-function sniffPngDimensions(bytes: Buffer): { widthPx?: number; heightPx?: number } {
+// PNG IHDR / JPEG SOF width+height. Stored in the sandbox descriptor so the scene
+// side can derive ppu / placement without re-reading every blob (dechouse_gen often
+// lands as JPEG).
+function sniffImageDimensions(bytes: Buffer): { widthPx?: number; heightPx?: number } {
   if (bytes.length >= 24 && bytes.readUInt32BE(0) === 0x89504e47) {
     return { widthPx: bytes.readUInt32BE(16), heightPx: bytes.readUInt32BE(20) }
   }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2
+    while (i < bytes.length - 8) {
+      if (bytes[i] !== 0xff) {
+        i += 1
+        continue
+      }
+      const marker = bytes[i + 1]!
+      if (marker === 0xc0 || marker === 0xc2) {
+        return { heightPx: bytes.readUInt16BE(i + 5), widthPx: bytes.readUInt16BE(i + 7) }
+      }
+      if (marker === 0xd8) {
+        i += 2
+        continue
+      }
+      const len = bytes.readUInt16BE(i + 2)
+      i += 2 + len
+    }
+  }
   return {}
+}
+
+// geometry_json.pivot is the AUTHORITATIVE object anchor — [anchorX, anchorY] in
+// bottom-left-origin normalized coords (0=bottom…1=top), computed from the
+// collision footprint by image_object_geometry. It MUST win over any separately
+// passed anchorX/anchorY: callers (the AI publish flow) often send placeholder
+// defaults like 0.5/1, which would seat the sprite's TOP on the ground and sink
+// the whole object below it. Keeping the descriptor anchor identical to the
+// geometry pivot is what lets the scene renderer plant the sprite's base on the
+// contact cell (see scene renderer objectSpriteGridRect: y = screenY - (1-ay)*h).
+function pivotAnchorFromGeometry(geometryJson?: string): { x: number; y: number } | null {
+  if (!geometryJson) return null
+  try {
+    const parsed = JSON.parse(geometryJson) as Record<string, unknown>
+    const pivot = parsed.pivot
+    if (Array.isArray(pivot) && pivot.length >= 2) {
+      const x = Number(pivot[0])
+      const y = Number(pivot[1])
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y }
+    }
+  } catch {
+    /* malformed geometry → fall back to passed anchors */
+  }
+  return null
 }
 
 // One asset's entry in the shared game sandbox manifest
@@ -317,7 +361,7 @@ export async function registerGeneratedAssetRoutes(app: FastifyInstance): Promis
     const bytes = Buffer.from(found.bytes)
     if (bytes.length === 0) return reply.code(422).send({ error: 'asset has empty bytes' })
 
-    const dims = sniffPngDimensions(bytes)
+    const dims = sniffImageDimensions(bytes)
     if (b.assetType === 'tile') {
       const check = validateTileAtlasDimensions(b.autotileKind!.trim(), dims.widthPx, dims.heightPx)
       if (!check.ok) {
@@ -330,12 +374,16 @@ export async function registerGeneratedAssetRoutes(app: FastifyInstance): Promis
     mkdirSync(join(targetDir, 'blobs'), { recursive: true })
     writeFileSync(join(targetDir, join('blobs', `${sha}.png`)), bytes)
 
+    // Geometry pivot is the source of truth for an object's anchor; fall back to
+    // the passed anchorX/anchorY only when there's no usable pivot (e.g. tiles, or
+    // objects published without computed geometry).
+    const pivotAnchor = pivotAnchorFromGeometry(b.geometryJson)
     const desc: GameTextureDescriptor = {
       assetName,
       assetType: b.assetType,
       ...(b.assetType === 'tile' ? { autotileKind: b.autotileKind!.trim() } : {}),
-      anchorX: b.anchorX ?? null,
-      anchorY: b.anchorY ?? null,
+      anchorX: pivotAnchor?.x ?? b.anchorX ?? null,
+      anchorY: pivotAnchor?.y ?? b.anchorY ?? null,
       ...(b.geometryJson ? { geometryJson: b.geometryJson } : {}),
       sha256: sha,
       file,

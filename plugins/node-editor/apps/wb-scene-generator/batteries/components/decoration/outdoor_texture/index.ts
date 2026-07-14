@@ -1,10 +1,14 @@
 /**
- * outdoor_texture: 根据掩码网格（支持单网格或列表）和温度/湿度参数，使用 Whittaker 双参数生物群系模型 + 多层噪声
+ * outdoor_texture: 根据单张掩码网格和温度/湿度参数，使用 Whittaker 双参数生物群系模型 + 多层噪声
  * 生成室外地面纹理分布（草地/泥土/碎石/沙地/湿草/落叶/苔藓/雪地）
- * 输入：gridList (array) — 掩码网格或网格列表; temperature (number) — 温度偏置(0-1);
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张掩码网格; temperature (number) — 温度偏置(0-1);
  *       moisture (number) — 湿度偏置(0-1); seed (number) — 随机种子
- * 输出：outputGridList (array) — 单值网格列表（每种纹理 id 一张，OR 合并所有输入网格，按 id 1→8）;
- *       nameList (array) — 与 outputGridList 逐项对应 [{id, name, type:"tile"}]
+ * 输出：outputGrid (grid) — 单张多值生物群系网格（每格为纹理 id 1～8 或 0）;
+ *       nameList (array) — 实际出现的纹理条目 [{id, name, type:"tile"}]
  */
 
 type Grid = number[][];
@@ -336,14 +340,14 @@ function transitionPass(output: Grid, mask: Grid): void {
 //  归一化输入：支持单网格或网格列表
 // ═══════════════════════════════════════════════════════════
 
-function normalizeGridList(raw: unknown): Grid[] | null {
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-  const first = raw[0];
-  // 若第一个元素是数字数组（而非数组的数组），视为单个网格
-  if (Array.isArray(first) && (first.length === 0 || !Array.isArray(first[0]))) {
-    return [raw as Grid];
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
+    return raw as Grid;
   }
-  return raw as Grid[];
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -385,63 +389,19 @@ const TILE_VARIANT_THEMES: string[][] = [
 ];
 
 export function outdoorTexture(input: Record<string, unknown>): Record<string, unknown> {
-  // 优先读 gridList，兼容旧字段 grid
-  const rawGridList = input.gridList ?? (input.grid !== undefined ? input.grid : undefined);
-  const gridList = normalizeGridList(rawGridList);
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) return { error: "inputGrid is required" };
+  if (grid.length === 0 || !grid[0] || grid[0].length === 0) return { error: "inputGrid is empty" };
 
   const temperature = clamp01(typeof input.temperature === "number" ? input.temperature : 0.5);
   const moisture    = clamp01(typeof input.moisture    === "number" ? input.moisture    : 0.5);
   const seedRaw     = typeof input.seed === "number" ? Math.floor(input.seed) : 0;
-
-  if (!gridList || gridList.length === 0) {
-    return { error: "gridList is required" };
-  }
-
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
 
-  // 按 id 合并各网格同类型单值层（OR 叠加，非零覆盖零）
-  const mergedByTid = new Map<number, Grid>();
+  // 单张多值生物群系网格（每格为纹理 id 1～8 或 0）
+  const outputGrid = processOneGrid(grid, temperature, moisture, baseSeed);
 
-  for (let i = 0; i < gridList.length; i++) {
-    const grid = gridList[i];
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) continue;
-
-    const effectiveSeed = baseSeed + i * 999983;
-    const multi = processOneGrid(grid, temperature, moisture, effectiveSeed);
-    const rows = multi.length;
-    const cols = multi[0]?.length ?? 0;
-
-    for (let tid = 1; tid <= TEXTURE_COUNT; tid++) {
-      let hasAny = false;
-      const single: Grid = Array.from({ length: rows }, (_, r) =>
-        Array.from({ length: cols }, (_, c) => {
-          const v = multi[r][c];
-          const cell = v === tid ? tid : 0;
-          if (cell !== 0) hasAny = true;
-          return cell;
-        }),
-      );
-      if (!hasAny) continue;
-
-      const existing = mergedByTid.get(tid);
-      if (!existing) {
-        mergedByTid.set(tid, single);
-      } else {
-        const mRows = Math.max(existing.length, single.length);
-        const mCols = Math.max(existing[0]?.length ?? 0, single[0]?.length ?? 0);
-        const merged: Grid = Array.from({ length: mRows }, (_, r) =>
-          Array.from({ length: mCols }, (_, c) => {
-            const a = existing[r]?.[c] ?? 0;
-            const b = single[r]?.[c] ?? 0;
-            return b !== 0 ? b : a;
-          }),
-        );
-        mergedByTid.set(tid, merged);
-      }
-    }
-  }
-
-  // 用 seed 生成 1-8 的随机数，命中对应词库
+  // 用 seed 选定一整套「同材质 tile 变体」8 连名
   const nameRng = makeLCG(baseSeed);
   const poolIdx = Math.floor(nameRng() * TILE_VARIANT_THEMES.length);
   const pool = [...TILE_VARIANT_THEMES[poolIdx]];
@@ -451,14 +411,15 @@ export function outdoorTexture(input: Record<string, unknown>): Record<string, u
   }
   const pickedNames = pool.slice(0, TEXTURE_COUNT);
 
-  const outputGridList: Grid[] = [];
+  // 仅输出实际出现的纹理条目，按 id 1→8 有序
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
+
   const nameList: { id: number; name: string; type: string }[] = [];
   for (let tid = 1; tid <= TEXTURE_COUNT; tid++) {
-    const g = mergedByTid.get(tid);
-    if (!g) continue;
-    outputGridList.push(g);
+    if (!present.has(tid)) continue;
     nameList.push({ id: tid, name: pickedNames[tid - 1] ?? `变体${tid}`, type: "tile" });
   }
 
-  return { outputGridList, nameList };
+  return { outputGrid, nameList };
 }

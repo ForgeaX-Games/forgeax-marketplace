@@ -4,6 +4,9 @@ import {
   migrateV2ToV3,
   migrateV6ToV7,
   migrateV7ToV8,
+  migrateV8ToV9,
+  migrateV9ToV10,
+  migrateV10ToV11,
   migrateScenarioToLatest,
   ensureSceneHasShots,
 } from '../schemaMigrate'
@@ -74,9 +77,14 @@ describe('migrateV1ToV2', () => {
 })
 
 describe('migrateScenarioToLatest', () => {
-  it('v1 → v8（链式迁移到最新版本）', () => {
+  it('v1 → v10（链式迁移到最新版本）', () => {
     const out = migrateScenarioToLatest(mkV1())
-    expect(out.schemaVersion).toBe(8)
+    expect(out.schemaVersion).toBe(11)
+  })
+  it('v1 迁到最新后有空 uiAssets / hud 容器', () => {
+    const out = migrateScenarioToLatest(mkV1())
+    expect(out.uiAssets).toEqual({})
+    expect(out.hud).toEqual([])
   })
   it('v1 迁到最新后有空 items 容器', () => {
     const out = migrateScenarioToLatest(mkV1())
@@ -232,6 +240,99 @@ describe('migrateV7ToV8', () => {
   it('已经是 v8 时幂等返回（引用相等）', () => {
     const v8: Scenario = { ...mkV7(), schemaVersion: 8 }
     expect(migrateV7ToV8(v8)).toBe(v8)
+  })
+})
+
+describe('migrateV8ToV9', () => {
+  function mkV8(): Scenario {
+    return { ...mkV1(), schemaVersion: 8, items: {} }
+  }
+
+  it('版本号升到 9 并补齐空 uiAssets / hud', () => {
+    const out = migrateV8ToV9(mkV8())
+    expect(out.schemaVersion).toBe(9)
+    expect(out.uiAssets).toEqual({})
+    expect(out.hud).toEqual([])
+  })
+
+  it('已有 uiAssets / hud 时保留', () => {
+    const v8: Scenario = {
+      ...mkV8(),
+      uiAssets: {
+        ui1: {
+          id: 'ui1',
+          name: '主角血条',
+          role: 'hp-bar',
+          matte: 'screen-black',
+          blendMode: 'screen',
+          lifecycle: 'hud',
+        },
+      },
+      hud: [{ id: 'h1', uiAssetId: 'ui1', anchor: { x: 0.2, y: 0.1 } }],
+    }
+    const out = migrateV8ToV9(v8)
+    expect(out.uiAssets?.ui1?.name).toBe('主角血条')
+    expect(out.hud?.[0]?.uiAssetId).toBe('ui1')
+  })
+
+  it('已经是 v9 时幂等返回（引用相等）', () => {
+    const v9: Scenario = { ...mkV8(), schemaVersion: 9, uiAssets: {}, hud: [] }
+    expect(migrateV8ToV9(v9)).toBe(v9)
+  })
+})
+
+describe('migrateV9ToV10', () => {
+  function mkV9(): Scenario {
+    return { ...mkV1(), schemaVersion: 9, uiAssets: {}, hud: [] }
+  }
+
+  it('版本号升到 10（treeTheme 可选,迁移不写,保持内置外观）', () => {
+    const out = migrateV9ToV10(mkV9())
+    expect(out.schemaVersion).toBe(10)
+    expect(out.treeTheme).toBeUndefined()
+  })
+
+  it('已有 treeTheme 时保留', () => {
+    const v9: Scenario = {
+      ...mkV9(),
+      treeTheme: { preset: 'chinese', jumpScope: 'visited' },
+    }
+    const out = migrateV9ToV10(v9)
+    expect(out.treeTheme?.preset).toBe('chinese')
+    expect(out.treeTheme?.jumpScope).toBe('visited')
+  })
+
+  it('已经是 v10 时幂等返回（引用相等）', () => {
+    const v10: Scenario = { ...mkV9(), schemaVersion: 10 }
+    expect(migrateV9ToV10(v10)).toBe(v10)
+  })
+})
+
+describe('migrateV10ToV11', () => {
+  function mkV10(): Scenario {
+    return { ...mkV1(), schemaVersion: 10, uiAssets: {}, hud: [] }
+  }
+
+  it('版本号升到 11 并建空 uiScreens（无全屏页面,向后兼容）', () => {
+    const out = migrateV10ToV11(mkV10())
+    expect(out.schemaVersion).toBe(11)
+    expect(out.uiScreens).toEqual({})
+  })
+
+  it('已有 uiScreens 时保留', () => {
+    const v10: Scenario = {
+      ...mkV10(),
+      uiScreens: {
+        bag: { id: 'bag', name: '背包', kind: 'inventory' },
+      },
+    }
+    const out = migrateV10ToV11(v10)
+    expect(out.uiScreens?.bag?.kind).toBe('inventory')
+  })
+
+  it('已经是 v11 时幂等返回（引用相等）', () => {
+    const v11: Scenario = { ...mkV10(), schemaVersion: 11, uiScreens: {} }
+    expect(migrateV10ToV11(v11)).toBe(v11)
   })
 })
 

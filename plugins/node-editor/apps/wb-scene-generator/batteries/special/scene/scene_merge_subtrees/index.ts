@@ -123,7 +123,12 @@ function deepMergeChildren(
   destPath: string,
   source: SceneNodeSnapshot,
   ctx: MergeCtx,
+  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——沿 `source` 树下探,撞到已下
+  // 探过的 source 节点引用直接跳过(不再递归/不再 graft),绝不因潜在结构环挂死。
+  visited: WeakSet<object> = new WeakSet(),
 ): SceneNodeSnapshot {
+  if (visited.has(source)) return master;
+  visited.add(source);
   let out = master;
   const ordered = [...source.children].sort((a, b) => a.version - b.version);
   for (const child of ordered) {
@@ -133,7 +138,7 @@ function deepMergeChildren(
       dbg(`    graft ${childDest}`);
     } else {
       out = fillScalarProps(out, childDest, child, ctx);
-      out = deepMergeChildren(out, childDest, child, ctx);
+      out = deepMergeChildren(out, childDest, child, ctx, visited);
     }
   }
   return out;

@@ -9,6 +9,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { SLOT } from './aliasName.js'
 import { getSharedDb, ASSET_STORE_DIR, repoRoot } from './db.js'
 
 export interface AssetRecord {
@@ -24,14 +25,14 @@ export interface AssetRecord {
   anchorY: number | null
   /** Set on project-private (user-imported) records so the grid can badge them. */
   private?: true
-  tagLayersJson?: string | null
-  tagsJson?: string | null
   geometryJson?: string | null
-  libraryPath?: string | null
-  organizeFolderPath?: string | null
-  exportPath?: string | null
-  assetKind?: string | null
-  cropTypeOriginal?: string | null
+  /** Free-text tags (asset-store `tags_json`), separate from the 13 alias fields. */
+  tags?: string[]
+  createdAt?: string
+  updatedAt?: string
+  /** asset-store QA flags: the generator marked this asset broken / a placeholder. */
+  hasError?: boolean
+  isPlaceholder?: boolean
 }
 
 interface AssetRow {
@@ -45,14 +46,25 @@ interface AssetRow {
   height_px: number | null
   anchor_x: number | null
   anchor_y: number | null
-  tag_layers_json?: string | null
-  tags_json?: string | null
   geometry_json?: string | null
-  library_path?: string | null
-  organize_folder_path?: string | null
-  export_path?: string | null
-  asset_kind?: string | null
-  crop_type_original?: string | null
+  tags_json?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  has_error?: number | null
+  is_placeholder?: number | null
+}
+
+/** Parse the asset-store `tags_json` column into a string[] (empty → undefined). */
+function parseTags(raw?: string | null): string[] | undefined {
+  if (!raw) return undefined
+  try {
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return undefined
+    const tags = arr.map((t) => String(t).trim()).filter((t) => t.length > 0)
+    return tags.length ? tags : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function normalizeAlias(raw: string): string {
@@ -71,14 +83,12 @@ function rowToRecord(row: AssetRow): AssetRecord {
     heightPx: row.height_px ?? undefined,
     anchorX: row.anchor_x,
     anchorY: row.anchor_y,
-    tagLayersJson: row.tag_layers_json ?? null,
-    tagsJson: row.tags_json ?? null,
     geometryJson: row.geometry_json ?? null,
-    libraryPath: row.library_path ?? null,
-    organizeFolderPath: row.organize_folder_path ?? null,
-    exportPath: row.export_path ?? null,
-    assetKind: row.asset_kind ?? null,
-    cropTypeOriginal: row.crop_type_original ?? null,
+    ...(parseTags(row.tags_json) ? { tags: parseTags(row.tags_json) } : {}),
+    ...(row.created_at ? { createdAt: row.created_at } : {}),
+    ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
+    ...(row.has_error ? { hasError: true } : {}),
+    ...(row.is_placeholder ? { isPlaceholder: true } : {}),
   }
 }
 
@@ -91,30 +101,30 @@ const LEGACY_TILETYPE_TO_RULE_ALIAS: Record<string, string> = {
   wall: 'wall_outer_16',
 }
 
-const KNOWN_TILE_TYPES = [
-  'tilemap', 'flower_bed', 'cliff', 'fence', 'wall', 'floor', 'slope', 'forest',
-  'wall_top', 'wall_mid', 'wall_bottom',
-  'common_16', 'flower_bed_11', 'fence_7', 'floor_1', 'wall_outer_16',
-]
+// Non-tile type-field sentinels (cutout objects). Anything else in the alias
+// type field (idx 7) IS the autotile rule alias (e.g. common_16 / wall_outer_16).
+const NON_TILE_ASSET_KINDS = new Set(['', 'asset', 'object', '抠图'])
 
-function isExportedTileGroup(cropTypeOriginal?: string | null): boolean {
-  const v = (cropTypeOriginal ?? '').trim()
-  return v === '瓦片组' || v.toLowerCase() === 'wall'
+function isTileAssetKind(assetKind?: string | null): boolean {
+  return !NON_TILE_ASSET_KINDS.has((assetKind ?? '').trim())
 }
 
 function extractAliasTypeField(alias: string): string {
   const matches = alias.match(/\[([^\]]*)\]/g)
-  if (!matches || matches.length <= 8) return ''
-  return matches[8].slice(1, -1).trim()
+  if (!matches || matches.length <= 7) return ''
+  return matches[7].slice(1, -1).trim()
 }
 
 export function deriveAliasMeta(row: Pick<
   AssetRow,
-  'alias' | 'anchor_x' | 'anchor_y' | 'asset_kind' | 'crop_type_original' | 'width_px' | 'height_px' | 'geometry_json'
+  'alias' | 'anchor_x' | 'anchor_y' | 'width_px' | 'height_px' | 'geometry_json'
 >): AliasMeta {
+  // The alias type field (idx 7) now carries the rule alias directly for tiles
+  // ('asset'/'' for cutout objects); the standalone asset_kind column was dropped.
   const typeField = extractAliasTypeField(row.alias)
-  const ruleAlias = LEGACY_TILETYPE_TO_RULE_ALIAS[typeField] ?? typeField
-  const exportedTileType = isExportedTileGroup(row.crop_type_original) ? row.asset_kind?.trim() : ''
+  const tileType = isTileAssetKind(typeField)
+    ? (LEGACY_TILETYPE_TO_RULE_ALIAS[typeField] ?? typeField)
+    : ''
   const placement = parsePlacementGeometry(row.geometry_json, row.width_px, row.height_px)
   return {
     alias: row.alias,
@@ -122,7 +132,7 @@ export function deriveAliasMeta(row: Pick<
     ...(row.anchor_y !== null ? { anchorY: row.anchor_y } : {}),
     ...(row.width_px !== null ? { widthPx: row.width_px } : {}),
     ...(row.height_px !== null ? { heightPx: row.height_px } : {}),
-    ...(exportedTileType ? { tileType: exportedTileType } : KNOWN_TILE_TYPES.includes(typeField) ? { tileType: ruleAlias } : {}),
+    ...(tileType ? { tileType } : {}),
     ...placement,
   }
 }
@@ -145,7 +155,7 @@ export type CollisionMask =
   | { kind: 'rectangle'; x: number; y: number; width: number; height: number }
   | { kind: 'polygon'; points: Array<{ x: number; y: number }> }
 
-function parsePlacementGeometry(raw?: string | null, widthPx?: number | null, heightPx?: number | null): Pick<AliasMeta, 'geometry' | 'objectHeightPx' | 'ppu'> {
+function parsePlacementGeometry(raw?: string | null, widthPx?: number | null, heightPx?: number | null): Pick<AliasMeta, 'geometry' | 'objectHeightPx' | 'ppu' | 'anchorX' | 'anchorY'> {
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
@@ -153,14 +163,29 @@ function parsePlacementGeometry(raw?: string | null, widthPx?: number | null, he
     const maskRaw = parsed.collision_mask ?? parsed.collisionMask
     const category = typeof parsed.collision_category === 'string' ? parsed.collision_category : typeof parsed.collisionCategory === 'string' ? parsed.collisionCategory : ''
     const collisionMask = parseCollisionMask(maskRaw, category, widthPx, heightPx)
+    // pivot is the authoritative object anchor — [anchorX, anchorY], bottom-left
+    // origin (0=bottom…1=top), exactly the convention the renderer expects. When
+    // present it WINS over the descriptor's stored anchor_x/anchor_y, which the
+    // publish flow sometimes fills with placeholder defaults (0.5/1) that would
+    // seat the sprite's top on the ground and sink the object below it.
+    const pivot = parsePivotAnchor(parsed.pivot)
     return {
       ppu: 16,
       ...(objectHeight !== undefined ? { objectHeightPx: objectHeight } : {}),
       ...(collisionMask ? { geometry: { collisionMask } } : {}),
+      ...(pivot ? { anchorX: pivot.x, anchorY: pivot.y } : {}),
     }
   } catch {
     return {}
   }
+}
+
+/** geometry_json.pivot → { x: anchorX, y: anchorY } (bottom-left origin), or null. */
+function parsePivotAnchor(raw: unknown): { x: number; y: number } | null {
+  if (!Array.isArray(raw) || raw.length < 2) return null
+  const x = numberFrom(raw[0])
+  const y = numberFrom(raw[1])
+  return x !== undefined && y !== undefined ? { x, y } : null
 }
 
 function numberFrom(value: unknown): number | undefined {
@@ -248,21 +273,20 @@ export interface AssetPage {
 // Each asset alias is a 13-field bracketed name: `[f0]_[f1]__…_[f12].ext`.
 // A "taxonomy" buckets a zone into folders by one (or two, for `place`) of those
 // fields, so the AssetStore can present folders instead of one flat pile.
-//   type  → f8  (抠图 / tilemap / forest / wall / floor / …)
-//   place → f1 (室内/室外) then f3 (房间: 厨房/卧室/浴室/客厅/…)  ← two-level
-//   style → f6  (现代日常 / 赛博朋克 / 国风仙侠 / …)
-//   size  → f9  (8 / 16 / 32 / 64 / 128 / …)  ← sorted numerically
-//   scene → f0  (适用场所, a `-`-joined multi-value tag list; folders overlap)
-export type FacetScheme = 'type' | 'place' | 'style' | 'size' | 'scene'
+//   type  → f7  (asset / autotile 规则别名: common_16 / wall_outer_16 / …)
+//   place → f1 (室内/室外)  ← single-level (小区域/roomType 字段已移除)
+//   style → f5  (现代日常 / 赛博朋克 / 国风仙侠 / …)
+//   size  → f8  (8 / 16 / 32 / 64 / 128 / …)  ← sorted numerically
+//   index → f0  (索引/分类路径, a `-`-joined HIERARCHY; drilled level by level)
+export type FacetScheme = 'type' | 'place' | 'style' | 'size' | 'index'
 
 const FIELD_INDEX: Record<Exclude<FacetScheme, 'place'>, number> = {
-  type: 8,
-  style: 6,
-  size: 9,
-  scene: 0,
+  type: SLOT.cropType,
+  style: SLOT.themeStyle,
+  size: SLOT.size,
+  index: SLOT.index,
 }
-const PLACE_INDOOR = 1 // f1 室内/室外
-const PLACE_ROOM = 3 // f3 房间/具体场所
+const PLACE_INDOOR = SLOT.indoorOutdoor
 
 // Sentinel folder value for assets whose field is blank/`—` (e.g. AI raw nodes).
 export const UNCLASSIFIED = '__none__'
@@ -279,7 +303,9 @@ export interface FacetItem {
 export interface ListFacetsQuery {
   zone: string
   by: FacetScheme
-  /** For `place`: the level-1 value (室内/室外) whose rooms to enumerate. */
+  /** For `place`: the level-1 value (室内/室外) whose rooms to enumerate.
+   *  For `index`: the `-`-joined ancestor path whose direct child segments to
+   *  enumerate (undefined/'' = the root level). */
   parent?: string
 }
 
@@ -345,14 +371,7 @@ function eqOrBlankClause(idx: number, value: string): { sql: string; params: unk
 function optionalAssetColumns(db: import('better-sqlite3').Database): string {
   const cols = new Set((db.prepare('PRAGMA table_info(assets)').all() as Array<{ name: string }>).map((c) => c.name))
   const optional = [
-    'tag_layers_json',
-    'tags_json',
     'geometry_json',
-    'library_path',
-    'organize_folder_path',
-    'export_path',
-    'asset_kind',
-    'crop_type_original',
   ]
   return optional.map((col) => (cols.has(col) ? col : `NULL AS ${col}`)).join(', ')
 }
@@ -361,26 +380,58 @@ function optionalAssetColumns(db: import('better-sqlite3').Database): string {
 function facetClause(by?: FacetScheme, value?: string, parent?: string): { sql: string; params: unknown[] } | null {
   if (!by || value == null) return null
   if (by === 'place') {
-    const clauses: string[] = []
-    const params: unknown[] = []
-    if (parent != null) {
-      const lvl1 = eqOrBlankClause(PLACE_INDOOR, parent)
-      const lvl2 = eqOrBlankClause(PLACE_ROOM, value)
-      clauses.push(lvl1.sql, lvl2.sql)
-      params.push(...lvl1.params, ...lvl2.params)
-    } else {
-      const lvl1 = eqOrBlankClause(PLACE_INDOOR, value)
-      clauses.push(lvl1.sql)
-      params.push(...lvl1.params)
-    }
-    return { sql: clauses.join(' AND '), params }
+    // Single-level after 小区域(roomType) field removal: filter by 室内/室外 only.
+    return eqOrBlankClause(PLACE_INDOOR, parent != null ? parent : value)
   }
-  if (by === 'scene') {
-    if (value === UNCLASSIFIED) return eqOrBlankClause(FIELD_INDEX.scene, value)
-    // f0 is a `-`-joined tag list; match `value` as a whole dash-delimited token.
-    return { sql: `('-' || bracket_value(alias, ${FIELD_INDEX.scene}) || '-') LIKE ?`, params: [`%-${value}-%`] }
+  if (by === 'index') {
+    if (value === UNCLASSIFIED) return eqOrBlankClause(FIELD_INDEX.index, value)
+    // f0 is a `-`-joined hierarchy path. A folder leaf shows the whole subtree:
+    // the node itself OR any descendant (path followed by a `-` boundary).
+    return {
+      sql: `(bracket_value(alias, ${FIELD_INDEX.index}) = ? OR bracket_value(alias, ${FIELD_INDEX.index}) LIKE ?)`,
+      params: [value, `${value}-%`],
+    }
   }
   return eqOrBlankClause(FIELD_INDEX[by], value)
+}
+
+/**
+ * Enumerate the direct child segments of the `index` (f0) hierarchy under the
+ * `-`-joined ancestor path `parent` (undefined/'' = root). Each returned folder's
+ * `value` is the full path so far and `label` is just the new segment; `count` is
+ * the size of that whole subtree. A node's OWN direct assets (f0 === parent) are
+ * NOT a child folder — the surface offers a "全部(含子类)" leaf card for those.
+ */
+function facetIndexChildren(rows: Array<{ alias: string }>, parent?: string): FacetItem[] {
+  const prefix = (parent ?? '').trim()
+  const buckets = new Map<string, { label: string; count: number; samples: string[] }>()
+  for (const { alias } of rows) {
+    const f0 = fieldAt(alias, 0)
+    let rest: string
+    if (prefix) {
+      if (f0 === prefix || !f0.startsWith(`${prefix}-`)) continue
+      rest = f0.slice(prefix.length + 1)
+    } else if (isBlankField(f0)) {
+      // Root level: blank-index assets bucket into the 未分类 sentinel folder.
+      const entry = buckets.get(UNCLASSIFIED) ?? { label: '未分类', count: 0, samples: [] }
+      entry.count += 1
+      if (entry.samples.length < 4) entry.samples.push(alias)
+      buckets.set(UNCLASSIFIED, entry)
+      continue
+    } else {
+      rest = f0
+    }
+    const seg = rest.split('-')[0]
+    if (!seg) continue
+    const childPath = prefix ? `${prefix}-${seg}` : seg
+    const entry = buckets.get(childPath) ?? { label: seg, count: 0, samples: [] }
+    entry.count += 1
+    if (entry.samples.length < 4) entry.samples.push(alias)
+    buckets.set(childPath, entry)
+  }
+  return [...buckets.entries()]
+    .map(([value, e]) => ({ value, label: e.label, count: e.count, samples: e.samples }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-Hans'))
 }
 
 /** Per-face summary of a tilemap rule (autotile stitching), for the AssetStore card + left-pane detail. */
@@ -415,6 +466,8 @@ export interface LibraryService {
   resolveAssetContent(alias: string, zone?: string): { bytes: Buffer; mimeType: string; widthPx?: number; heightPx?: number } | null
   listAliases(zone: string): string[]
   listAliasesWithMeta(zone: string): AliasMeta[]
+  /** Renderer matching pool across ALL zones except trash (deduped by alias). */
+  listAllAliasesWithMeta(): AliasMeta[]
   listZones(): string[]
   listRecords(query: ListRecordsQuery): AssetPage
   /** Offset/limit slice + total (for merging base + private into one stream). */
@@ -455,8 +508,8 @@ function buildListWhere(q: {
   const params: unknown[] = [q.zone]
   const term = (q.search ?? '').trim()
   if (term) {
-    clauses.push('alias LIKE ?')
-    params.push(`%${term}%`)
+    clauses.push('(alias LIKE ? OR bracket_value(alias, 2) LIKE ?)')
+    params.push(`%${term}%`, `%${term}%`)
   }
   const facet = facetClause(q.by, q.value, q.parent)
   if (facet) {
@@ -561,7 +614,18 @@ function createService(): LibraryService {
       if (!db) return []
       const rows = db
         .prepare(`SELECT alias, anchor_x, anchor_y, width_px, height_px, ${optionalAssetColumns(db)} FROM assets WHERE zone = ? ORDER BY alias`)
-        .all(zone) as Array<Pick<AssetRow, 'alias' | 'anchor_x' | 'anchor_y' | 'asset_kind' | 'crop_type_original' | 'width_px' | 'height_px' | 'geometry_json'>>
+        .all(zone) as Array<Pick<AssetRow, 'alias' | 'anchor_x' | 'anchor_y' | 'width_px' | 'height_px' | 'geometry_json'>>
+      return rows.map(deriveAliasMeta)
+    },
+    listAllAliasesWithMeta() {
+      const db = getSharedDb()
+      if (!db) return []
+      // All zones except trash, one row per alias (GROUP BY dedupes an alias that
+      // happens to live in more than one zone). The renderer matches a painted
+      // alias regardless of which zone it currently sits in (mirrors serve-by-alias).
+      const rows = db
+        .prepare(`SELECT alias, anchor_x, anchor_y, width_px, height_px, ${optionalAssetColumns(db)} FROM assets WHERE zone IS NOT NULL AND zone <> 'trash' GROUP BY alias ORDER BY alias`)
+        .all() as Array<Pick<AssetRow, 'alias' | 'anchor_x' | 'anchor_y' | 'width_px' | 'height_px' | 'geometry_json'>>
       return rows.map(deriveAliasMeta)
     },
     listZones() {
@@ -635,31 +699,26 @@ function createService(): LibraryService {
       const db = getSharedDb()
       if (!db) return []
       // One pass over the zone's aliases; bucket by the taxonomy's field(s) in JS
-      // (the `scene` field is multi-valued, and we collect up to 4 cover samples
-      // per folder — both awkward to do in pure SQL GROUP BY).
+      // (multi-valued / hierarchical fields need JS bucketing + cover samples).
+      // place is single-level now (小区域/roomType removed): a drill-in request
+      // (parent != null) has no sub-rooms → return an empty facet list.
+      if (by === 'place' && parent != null) return []
       const rows = db.prepare('SELECT alias FROM assets WHERE zone = ? ORDER BY alias').all(zone) as Array<{ alias: string }>
-      const groupIdx = by === 'place' ? (parent != null ? PLACE_ROOM : PLACE_INDOOR) : FIELD_INDEX[by]
-      const multi = by === 'scene'
+      // `index` is a `-`-joined hierarchy: enumerate the DIRECT child segments
+      // under the ancestor path `parent` (label = segment, value = full path).
+      if (by === 'index') return facetIndexChildren(rows, parent)
+      const groupIdx = by === 'place' ? PLACE_INDOOR : FIELD_INDEX[by]
       const buckets = new Map<string, { count: number; samples: string[] }>()
       for (const { alias } of rows) {
-        if (by === 'place' && parent != null) {
-          const lvl1 = fieldAt(alias, PLACE_INDOOR)
-          const matchParent = parent === UNCLASSIFIED ? isBlankField(lvl1) : lvl1 === parent
-          if (!matchParent) continue
-        }
         const raw = fieldAt(alias, groupIdx)
-        const tokens = multi ? raw.split('-').map((s) => s.trim()).filter((s) => s.length > 0) : [raw]
-        const keys = tokens.length > 0 ? tokens : ['']
-        for (const k of keys) {
-          const value = isBlankField(k) ? UNCLASSIFIED : k
-          let entry = buckets.get(value)
-          if (!entry) {
-            entry = { count: 0, samples: [] }
-            buckets.set(value, entry)
-          }
-          entry.count += 1
-          if (entry.samples.length < 4) entry.samples.push(alias)
+        const value = isBlankField(raw) ? UNCLASSIFIED : raw
+        let entry = buckets.get(value)
+        if (!entry) {
+          entry = { count: 0, samples: [] }
+          buckets.set(value, entry)
         }
+        entry.count += 1
+        if (entry.samples.length < 4) entry.samples.push(alias)
       }
       const items: FacetItem[] = [...buckets.entries()].map(([value, e]) => ({
         value,

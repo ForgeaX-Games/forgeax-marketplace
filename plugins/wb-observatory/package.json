@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/wb-observatory",
+  "name": "@forgeax-extension/wb-observatory",
   "private": true,
   "version": "0.1.0",
   "type": "module",

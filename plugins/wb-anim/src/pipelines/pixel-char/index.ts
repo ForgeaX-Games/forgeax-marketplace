@@ -440,7 +440,7 @@ class PixelPipelineUI {
   private setupBroadcast(): void {
     if (this._bc) return
     try {
-      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-character.pixel-char-state')
+      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-character.pixel-char-state')
     } catch {
       this._bc = null
     }

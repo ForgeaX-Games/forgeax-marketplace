@@ -15,7 +15,7 @@ import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
-import { FIVE_ELEMENT_NOTE, STAGING_NOTE, TOPO_BEAT_ID_NOTE, getStreamEmit, getLinearBeatBudget } from "./_shared.js";
+import { FIVE_ELEMENT_NOTE, STAGING_NOTE, TOPO_BEAT_ID_NOTE, getStreamEmit, getLinearBeatBudget, deriveBeatTitleFromContent } from "./_shared.js";
 
 export const VN_BEATS_COMPOSER: PromptComposer = {
   stepId: "vn_beats",
@@ -40,16 +40,18 @@ ${STAGING_NOTE}
 ## 内容写作
 ${FIVE_ELEMENT_NOTE}
 - 每个情节点 50-100 字
-- 必须显化"该情节点的剧情净增量"（之前不知道什么、现在知道了什么；之前不会做什么、现在做了什么）`,
+- 必须显化"该情节点的剧情净增量"（之前不知道什么、现在知道了什么；之前不会做什么、现在做了什么）
+- 每个情节点必须给一个 **title**：4-14 字的短标题（像章节名/镜头名，凝练概括本情节点的戏核，例如"雪夜进城""密信败露""断桥诀别"）。**title 不是正文的截取或首句复述**，而是对情节点的命名；同一部剧里各 title 应各具辨识度、不重复。`,
 
     output_format: `## 输出格式（严格 JSON）
 {
   "beats": [
-    { "beat_id": "b1", "act_id": "一", "content": "约 50-100 字", "location_name": "雪山脚下的小镇市集", "time_of_day": "日", "indoor_outdoor": "外" },
-    { "beat_id": "b2", "act_id": "一", "content": "...", "location_name": "客栈大堂", "time_of_day": "夜", "indoor_outdoor": "内" }
+    { "beat_id": "b1", "act_id": "一", "title": "雪夜进城", "content": "约 50-100 字", "location_name": "雪山脚下的小镇市集", "time_of_day": "日", "indoor_outdoor": "外" },
+    { "beat_id": "b2", "act_id": "一", "title": "客栈密谈", "content": "...", "location_name": "客栈大堂", "time_of_day": "夜", "indoor_outdoor": "内" }
   ]
 }
-- beat_id 按黄金线叙事顺序 b1, b2, b3... 递增；act_id 用汉字数字（一/二/…）标注所属幕。`,
+- beat_id 按黄金线叙事顺序 b1, b2, b3... 递增；act_id 用汉字数字（一/二/…）标注所属幕。
+- title 为每个情节点的短标题（4-14 字），必填。`,
 
     context_inputs: (ctx: NarrativeContext): string => {
       if (!ctx.vn_outline_acts) throw new Error("vn_beats 需要 ctx.vn_outline_acts（E1-02 未完成）");
@@ -117,5 +119,11 @@ export async function vnBeats(ctx: NarrativeContext, llm: LLMClient): Promise<vo
     streamEmit,
   );
 
-  ctx.vn_beats = extractJSON<VnBeats>(raw);
+  const parsed = extractJSON<VnBeats>(raw);
+  // 标题兜底：LLM 未给 title 时从正文派生一个短标题，保证每个情节点都有可展示的标题
+  //（前端剧情树标题位不再回落成正文首句）。
+  for (const b of parsed.beats) {
+    if (!b.title?.trim()) b.title = deriveBeatTitleFromContent(b.content, b.beat_id);
+  }
+  ctx.vn_beats = parsed;
 }

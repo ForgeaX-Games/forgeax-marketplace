@@ -99,7 +99,7 @@ export async function projectCreate(opts: Record<string, unknown>): Promise<void
     ...(fromTemplate ? { fromTemplate } : {}),
   })
 
-  reg.activateProject(meta.id)
+  reg.viewProject(meta.id)
   makeEmitter(mode(opts)).record({ project: meta, workspace: reg.getWorkspace() })
 }
 
@@ -107,7 +107,7 @@ export async function projectCreate(opts: Record<string, unknown>): Promise<void
 export async function projectOpen(opts: Record<string, unknown>): Promise<void> {
   const reg = await buildRegistry(opts)
   const id = requireStr(opts, 'id', '--id')
-  const rt = reg.activateProject(id)
+  const rt = reg.viewProject(id)
   makeEmitter(mode(opts)).record({
     project: reg.getProject(id),
     workspace: reg.getWorkspace(),

@@ -29,8 +29,20 @@ export interface EditorEventMap {
   'exec:error': { executionId: string; nodeId?: string; message: string }
   /** A node produced output on a port during execution. */
   'node:output': { nodeId: string; portId: string; outputType: string }
-  /** The active project changed elsewhere (another iframe / an agent tool). */
+  /** The UI viewing project changed elsewhere (another iframe / tab). */
+  'project:viewing': { projectId: string; pipelineId: string; newHash: string }
+  /** @deprecated Legacy alias for project:viewing. */
   'project:activated': { projectId: string; pipelineId: string; newHash: string }
+  /** An agent acquired an execution lock on a project. */
+  'project:executing': { projectId: string; pipelineId: string; agentId: string; sessionId?: string }
+  /** A project was created elsewhere (e.g. by an agent) — refetch the list. */
+  'project:created': { projectId: string }
+  /** A project was deleted elsewhere — refetch the list. */
+  'project:deleted': { projectId: string }
+  /** An agent released an execution lock on a project. */
+  'project:idle': { projectId: string; agentId?: string }
+  /** Project index changed (aw-support provision, create, delete). */
+  'project:list-changed': { reason: 'created' | 'deleted' }
   /** The op catalog changed on the backend (battery hot-reload in dev). */
   'ops:changed': { opId?: string; kind?: string }
 }
@@ -126,12 +138,38 @@ export class WsAdapter {
       case 'exec:node:output':
         this.emit('node:output', { nodeId: e.nodeId, portId: e.portId, outputType: e.outputType })
         return
+      case 'project:viewing':
+        this.emit('project:viewing', { projectId: e.projectId, pipelineId: e.pipelineId, newHash: e.newHash })
+        return
       case 'project:activated':
         this.emit('project:activated', { projectId: e.projectId, pipelineId: e.pipelineId, newHash: e.newHash })
         return
-      default:
+      case 'project:executing':
+        this.emit('project:executing', {
+          projectId: e.projectId,
+          pipelineId: e.pipelineId,
+          agentId: e.agentId,
+          ...('sessionId' in e && typeof e.sessionId === 'string' ? { sessionId: e.sessionId } : {}),
+        })
+        return
+      case 'project:idle':
+        this.emit('project:idle', { projectId: e.projectId, agentId: e.agentId })
+        return
+      case 'project:created':
+        this.emit('project:created', { projectId: e.projectId })
+        return
+      case 'project:deleted':
+        this.emit('project:deleted', { projectId: e.projectId })
+        return
+      default: {
+        const kind = (e as { kind?: string }).kind
+        if (kind === 'project:list-changed') {
+          const reason = (e as { reason?: 'created' | 'deleted' }).reason ?? 'created'
+          this.emit('project:list-changed', { reason })
+        }
         // Asset events are not consumed by the generic editor stores.
         return
+      }
     }
   }
 }

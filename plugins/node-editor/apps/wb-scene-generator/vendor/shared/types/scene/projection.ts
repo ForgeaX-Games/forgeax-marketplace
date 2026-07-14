@@ -60,7 +60,13 @@ function getStringAttr(
 function collect(
   node: SceneNodeSnapshot,
   out: VoxelOutputBundle,
+  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——tree.ts 的不可变 API 理论上
+  // 不会产生结构环,但这里不依赖那份保证。撞到已下探过的节点引用直接跳过(而不是
+  // 继续递归),把潜在死循环/栈溢出降级成"该重复子树不重复展平",绝不挂死 backend。
+  visited: WeakSet<object> = new WeakSet(),
 ): void {
+  if (visited.has(node)) return;
+  visited.add(node);
   if (node.cells && node.cells.length > 0) {
     const value = out.layers.length + 1;
     const nodeName = node.name === '' ? '/' : node.name;
@@ -119,7 +125,7 @@ function collect(
   // 可接受,需要更严格时再加 creationVersion 字段(现在不做,YAGNI)。
   const sorted = [...node.children].sort((a, b) => a.version - b.version);
   for (const child of sorted) {
-    collect(child, out);
+    collect(child, out, visited);
   }
 }
 

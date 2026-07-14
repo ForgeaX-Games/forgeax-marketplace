@@ -15,9 +15,13 @@ import type {
   ImportTemplate,
   Runtime,
 } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import { getProjectRegistry, getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { IMPORT_BODY_LIMIT } from './body-limits.js'
+
+interface ProjectParams {
+  projectId: string
+}
 
 function templatesDir(rt: Runtime): string {
   return resolve(rt.config.projectRoot, 'templates')
@@ -57,8 +61,13 @@ interface ImportBody {
 }
 
 export async function registerPipelineImportRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/v1/pipeline/templates', async () => {
-    const rt = await getRuntime()
+  const prefix = '/api/v1/projects/:projectId/pipeline'
+
+  app.get<{ Params: ProjectParams }>(`${prefix}/templates`, async (req, reply) => {
+    const { projectId } = req.params
+    const reg = await getProjectRegistry()
+    if (!reg.getProject(projectId)) return reply.code(404).send({ reason: `project not found: ${projectId}` })
+    const rt = await getRuntimeForProject(projectId)
     const dir = templatesDir(rt)
     if (!existsSync(dir)) return [] as ImportTemplate[]
     const items: ImportTemplate[] = []
@@ -83,7 +92,7 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
     return items
   })
 
-  app.post('/api/v1/pipeline/import', {
+  app.post<{ Params: ProjectParams }>(`${prefix}/import`, {
     // Full-graph imports can be large (all nodes + inline templates), but still
     // bounded — an unbounded body is a DoS vector. The graph/file union is
     // validated below (400 on missing graph), so the schema only enforces shape.
@@ -103,9 +112,10 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
       },
     },
   }, async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ status: 'rejected', reason: access.reason, code: access.code, projectId: access.projectId })
-    const rt = await getRuntime()
+    const rt = await getRuntimeForProject(projectId)
     const body = (req.body ?? {}) as ImportBody
     const options = body.options ?? {}
 
@@ -164,8 +174,11 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
     return { ...result, executed } satisfies ImportPipelineResponse
   })
 
-  app.post('/api/v1/pipeline/export', async (req, reply) => {
-    const rt = await getRuntime()
+  app.post<{ Params: ProjectParams }>(`${prefix}/export`, async (req, reply) => {
+    const { projectId } = req.params
+    const reg = await getProjectRegistry()
+    if (!reg.getProject(projectId)) return reply.code(404).send({ reason: `project not found: ${projectId}` })
+    const rt = await getRuntimeForProject(projectId)
     const { name } = (req.body ?? {}) as { name?: string; source?: string }
     const snap = getPipeline(rt)
     if (!snap) return reply.code(404).send({ reason: 'no pipeline to export' })

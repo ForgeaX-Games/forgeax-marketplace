@@ -40,7 +40,7 @@ function makeSkillSnapshot(): PluginSnapshot {
       issues: [],
       tools: [
         {
-          pluginId: '@forgeax-plugin/wb-skill',
+          pluginId: '@forgeax-extension/wb-skill',
           layer: 'L0',
           toolId: 'skill:generate-vfx',
           exposedToAI: true,

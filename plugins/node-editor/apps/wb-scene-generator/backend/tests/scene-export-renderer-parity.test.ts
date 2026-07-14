@@ -17,10 +17,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cookBakedScene } from '../src/scene-export/cooker.js'
-import { loadTileRule, setRulesDir, type TileRule } from '../src/scene-export/tileRules.js'
+import { loadTileRule, setRulesDir, computeValidTopVariantPoolsByTileId, type TileRule } from '../src/scene-export/tileRules.js'
 import type { BakedLayer } from '../src/baked/store.js'
 import {
   computeValidVariantIdxs,
+  computeValidVariantPoolsByTileId,
   pickFaceSpriteIndex,
   type CollectedCell,
   type FaceRule,
@@ -263,7 +264,10 @@ describe('parseRule shipped-rule parity', () => {
     const common = loadTileRule('common_16')
     expect(common).not.toBeNull()
     expect(common!.faces.top?.variantIdxs).toEqual([16, 17, 18, 19])
-    expect(common!.faces.top?.randomRules).toEqual([{ tileId: 6, keepProbability: 0.6 }])
+    expect(common!.faces.top?.variantWeights).toEqual([4, 2, 2, 2])
+    expect(common!.faces.top?.randomRules).toEqual([
+      { tileId: 6, keepProbability: 0.6, variantWeights: [4, 2, 2, 2] },
+    ])
 
     // wall_outer_16: regions + front face must survive (v2 multi-face).
     const wall = loadTileRule('wall_outer_16')
@@ -454,5 +458,68 @@ describe('cookBakedScene variant pixel filtering', () => {
       coordsByLayerIdx: new Map([[0, coords]]), regions: new Map(),
     })
     expect(interiorGi).toBe(resolverIdx)
+  })
+
+  it('randomRules: per-tileId variantIdxs pools are parsed and sampled independently', () => {
+    rulesDir = mkdtempSync(join(tmpdir(), 'scene-per-tile-variant-'))
+    writeFileSync(join(rulesDir, 'per_tile_variant.json'), JSON.stringify({
+      schemaVersion: 2,
+      ppu: 16,
+      sprites: [
+        { x: 0, y: 0, w: 16, h: 16 },
+        { x: 16, y: 0, w: 16, h: 16 },
+        { x: 32, y: 0, w: 16, h: 16 },
+        { x: 48, y: 0, w: 16, h: 16 },
+        { x: 0, y: 16, w: 16, h: 16 },
+        { x: 16, y: 16, w: 16, h: 16 },
+      ],
+      faces: {
+        top: {
+          basePieces: 4,
+          map: { '1,1,1,1': 1, '0,0,1,1': 2, '*,*,*,*': 0 },
+          randomRules: [
+            { tileId: 1, keepProbability: 0, variantIdxs: [4] },
+            { tileId: 2, keepProbability: 0, variantIdxs: [5] },
+          ],
+          variantIdxs: [4, 5],
+        },
+      },
+    }))
+    setRulesDir(rulesDir)
+
+    const rule = loadTileRule('per_tile_variant')!
+    expect(rule.faces.top?.randomRules?.[0]?.variantIdxs).toEqual([4])
+    expect(rule.faces.top?.randomRules?.[1]?.variantIdxs).toEqual([5])
+
+    const img = { width: 64, height: 32, data: new Uint8Array(64 * 32 * 4).fill(255) }
+    const byTileCook = computeValidTopVariantPoolsByTileId(rule, 'sheet-a', img)
+    const byTileResolver = computeValidVariantPoolsByTileId(rule.faces.top! as unknown as FaceRule, rule.sprites, img)
+    expect(byTileCook.get(1)?.idxs).toEqual([4])
+    expect(byTileCook.get(2)?.idxs).toEqual([5])
+    expect(byTileResolver.get(1)?.idxs).toEqual([4])
+    expect(byTileResolver.get(2)?.idxs).toEqual([5])
+
+    const blockCoords = new Set([
+      '0,0,0', '1,0,0', '2,0,0',
+      '0,1,0', '1,1,0', '2,1,0',
+      '0,2,0', '1,2,0', '2,2,0',
+    ])
+    const stripCoords = new Set(['-1,0,0', '0,0,0', '1,0,0'])
+    const top = rule.faces.top! as unknown as FaceRule
+    const facePool = computeValidVariantIdxs(top, rule.sprites, img)
+    expect(pickFaceSpriteIndex({
+      face: top, faceTag: 'top', sprites: rule.sprites,
+      validVariantIdxs: facePool,
+      validVariantPoolsByTileId: byTileResolver,
+      cell: { x: 1, y: 1, z: 0, layerIdx: 0 },
+      coordsByLayerIdx: new Map([[0, blockCoords]]), regions: new Map(),
+    })).toBe(4)
+    expect(pickFaceSpriteIndex({
+      face: top, faceTag: 'top', sprites: rule.sprites,
+      validVariantIdxs: facePool,
+      validVariantPoolsByTileId: byTileResolver,
+      cell: { x: 0, y: 0, z: 0, layerIdx: 0 },
+      coordsByLayerIdx: new Map([[0, stripCoords]]), regions: new Map(),
+    })).toBe(5)
   })
 })

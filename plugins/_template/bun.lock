@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/_template",
+      "name": "@forgeax-extension/_template",
       "dependencies": {
         "@radix-ui/react-slot": "^1.2.4",
         "class-variance-authority": "^0.7.1",

@@ -6,14 +6,16 @@ import {
 } from '../llm/config/directorPersonas'
 import type { DirectorStyleId } from '../scenario/types'
 import { PosterCarousel, type PosterItem } from './PosterCarousel'
+import { prebuiltDirectorPoster } from '../media/prebuiltPosters'
 import { injectStyleOnce } from '../styles/injectStyle'
 
 /**
  * DirectorStyleSelector —— Forge「导演风格」分区的导演流派选择器（cover-flow）。
  *
  * 交互（与 VisualStyleSelector 一致）：
- *   - 每个导演流派一张卡（暂用 swatch 渐变 + 流派名占位；后续可补海报样张），
- *     中间大卡、左右切换。
+ *   - 每个导演流派一张竖版海报卡：入仓的预制「6 格分镜 contact sheet」
+ *     （director-<id>.jpg，image2 生成，演绎该导演招牌镜头语言），
+ *     中间大卡、左右切换；缺图回落 swatch 渐变 + 流派名占位。
  *   - 浏览（居中项）只更新本地 viewingId，不动 scenario；
  *     点中间「选为此导演」才写入 scenario.directorStyle。
  *
@@ -57,6 +59,7 @@ export function DirectorStyleSelector() {
         label: o.displayName,
         tagline: o.tagline,
         swatch: DIRECTOR_SWATCHES[o.id] ?? ['#888888', '#222222'],
+        posterUrl: prebuiltDirectorPoster(o.id),
       })),
     [options],
   )

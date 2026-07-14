@@ -23,6 +23,7 @@ import './urdf/theme.css'
 import './urdf/UrdfViewerSurface.css'
 
 const EDITOR_SELECTION_MESSAGE = 'workbench:editor-selection'
+const PROJECT_CHANGED_MESSAGE = 'workbench:project-changed'
 
 type ExportFormat = 'obj' | 'glb' | 'glb-static' | 'urdf'
 
@@ -80,7 +81,41 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
   // (e.g. when `?pane=urdf` is opened standalone). Same-origin `/api` + `/ws`.
   const fallbackClient = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
   const client = props.client ?? fallbackClient
-  useUrdfLiveSync(client)
+
+  // Resolve which project this viewer mirrors. The backend API is project-scoped
+  // (/api/v1/projects/:id/...), so the client needs a `viewingProjectId` before
+  // any listNodes/getNodeOutput call — otherwise every pull throws "no viewing
+  // project", useUrdfLiveSync swallows it, and the viewport stays permanently
+  // blank. Bootstrap from the backend workspace on mount, then follow the host's
+  // `workbench:project-changed` notifications. `activeProjectId` re-runs the
+  // live-sync effect once the project is known / changes.
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const bindProject = (id: string | null | undefined): void => {
+      if (cancelled || !id) return
+      // syncViewingProjectId is concrete on HttpApiClient (not on the ApiClient
+      // interface); a host-supplied transport may omit it — bind best-effort.
+      ;(client as { syncViewingProjectId?: (id: string) => void }).syncViewingProjectId?.(id)
+      setActiveProjectId(id)
+    }
+    void client
+      .getWorkspace?.()
+      .then((ws) => bindProject(ws?.viewingProjectId ?? (ws as { activeProjectId?: string | null })?.activeProjectId))
+      .catch(() => { /* workspace fetch failed — a project-changed message can still bind us */ })
+    const onMessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: unknown; projectId?: unknown } | null
+      if (!data || typeof data !== 'object' || data.type !== PROJECT_CHANGED_MESSAGE) return
+      if (typeof data.projectId === 'string') bindProject(data.projectId)
+    }
+    window.addEventListener('message', onMessage)
+    return () => {
+      cancelled = true
+      window.removeEventListener('message', onMessage)
+    }
+  }, [client])
+
+  useUrdfLiveSync(client, activeProjectId)
 
   // Dispose the client we own (the fallback) on unmount so its WebSocket +
   // reconnect timer are released. A host-supplied client is owned by the host,
@@ -92,6 +127,7 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
   const assetRevisionKey = useViewerStore((s) => s.assetRevisionKey)
   const render = useViewerStore((s) => s.render)
   const sectionHeight = useViewerStore((s) => s.sectionHeight)
+  const authoredAnimation = useViewerStore((s) => s.authoredAnimation)
   const setErrorMessage = useViewerStore((s) => s.setErrorMessage)
   const errorMessage = useViewerStore((s) => s.errorMessage)
 
@@ -247,7 +283,7 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
           animated ? 'Binary glTF (animated)' : 'Binary glTF (static)',
           'model/gltf-binary',
           'glb',
-          () => (animated ? exportAnimatedGlbBlob(exportRoot, spec!) : exportStaticGlbBlob(exportRoot)),
+          () => (animated ? exportAnimatedGlbBlob(exportRoot, spec!, authoredAnimation) : exportStaticGlbBlob(exportRoot)),
         )
       } finally {
         // 导出克隆是 root.clone(true) 的临时副本（geometry/material 在 GLB/OBJ
@@ -259,7 +295,7 @@ export function UrdfViewerSurface(props: UrdfViewerSurfaceProps = {}): JSX.Eleme
       if (msg.includes('aborted') || msg.includes('AbortError')) return
       setErrorMessage(`Export failed: ${msg}`)
     }
-  }, [getExportObject, setErrorMessage, source, spec])
+  }, [getExportObject, setErrorMessage, source, spec, authoredAnimation])
 
   return (
     <ViewerErrorBoundary>

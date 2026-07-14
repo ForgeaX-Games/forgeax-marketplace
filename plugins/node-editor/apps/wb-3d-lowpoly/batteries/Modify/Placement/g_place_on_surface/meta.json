@@ -6,8 +6,8 @@
   "description-en": "Place a child on a parent's local surface normal. Uses analytic surfaces for box/cylinder/sphere and falls back to AABB for complex shapes. Rewrites child part origin/rpy and outputs ox/oy/oz/rr/rp/ry for joints.",
   "version": "1.0.0",
   "autoIterate": false,
-  "tags": ["geometry", "placement", "surface", "mount", "articraft"],
-  "tag_labels": ["几何", "放置", "表面", "装配", "articraft"],
+  "tags": ["geometry", "placement", "surface", "mount"],
+  "tag_labels": ["几何", "放置", "表面", "装配"],
   "inputs": [
     { "name": "geometry", "type": "geometry", "required": true, "label": "几何", "description": "上游 Geometry", "description-en": "Upstream Geometry." },
     { "name": "parent_id", "type": "string", "required": true, "label": "父部件 id", "description": "父 part id；也支持可自动包裹的 shape id", "description-en": "Parent part id; auto-wrappable shape id is also accepted." },

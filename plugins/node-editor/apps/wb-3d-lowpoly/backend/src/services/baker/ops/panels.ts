@@ -3,10 +3,10 @@
  *
  * 三者都是"XY 平面薄板 + 各种切槽 / 切孔"模式，所以共用一些 helper：
  *   - centeredBox：复用 brackets 的 z 居中盒
- *   - centeredAxisPositions：对齐 articraft `_centered_axis_positions`：从原点
+ *   - centeredAxisPositions `_centered_axis_positions`：从原点
  *     向两侧均匀展开整数个位置，使得 |pos| ≤ limit。stagger 时偶数行多偏移 pitch/2。
  *
- * vent_grille 在 articraft 里有大量 sub-spec（slats / frame_profile / mounts /
+ * vent_grille 有大量 sub-spec（slats / frame_profile / mounts /
  * sleeve），DSL 没承载它们，v1 全走默认值：
  *   - slats.profile="flat" / direction="down" / inset=0 / divider_count=0
  *   - frame_profile.style="flush" (无 chamfer/fillet 侧)
@@ -31,7 +31,7 @@ function filletVerticalEdges(shape: BakeableShape, r: number): BakeableShape {
   return shape.fillet(r, (e) => e.inDirection([0, 0, 1]));
 }
 
-/** 复刻 articraft `_centered_axis_positions`：从中点向两侧用 pitch 均匀采样。 */
+/** `_centered_axis_positions`：从中点向两侧用 pitch 均匀采样。 */
 function centeredAxisPositions(limit: number, pitch: number): number[] {
   if (limit < -1e-9) return [];
   if (limit <= 1e-9) return [0];

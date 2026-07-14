@@ -59,6 +59,56 @@ interface ImageGenResp {
   error?: { code?: string; message?: string }
 }
 
+/**
+ * 模型能力守卫：该 deployment/model 是否支持原生透明底(background:'transparent')。
+ *
+ * 实证(2026-07 · UI 素材库 spike)：**gpt-image-2 明确不支持**,发 background:transparent
+ * 会返回 HTTP 400 "Transparent background is not supported for this model."。仅
+ * gpt-image-1 / gpt-image-1-mini 系支持。故默认 false,只有 model 名含 gpt-image-1
+ * 且不含 gpt-image-2 时才放行。UI 素材去背因此以「纯黑+screen / 纯白+multiply 图层
+ * 混合」为主力,原生透明仅作预留能力。
+ */
+export function supportsTransparentBackground(model: string): boolean {
+  const m = (model || '').toLowerCase()
+  if (m.includes('gpt-image-2')) return false
+  return m.includes('gpt-image-1')
+}
+
+/** 把 UI 素材/生图请求里的 background/outputFormat 按能力安全落进 Azure body(就地改)。 */
+function applyBackgroundAndFormat(
+  body: Record<string, unknown>,
+  req: ImageRequest,
+  model: string,
+): void {
+  if (req.outputFormat) body.output_format = req.outputFormat
+  if (!req.background) return
+  if (req.background === 'transparent' && !supportsTransparentBackground(model)) {
+    console.warn(
+      `[GptImageProvider] background:transparent 不受 ${model} 支持,已丢弃回落到不透明底` +
+        `(UI 素材应改用纯黑+screen / 纯白+multiply 图层去背)。`,
+    )
+    return
+  }
+  body.background = req.background
+}
+
+/** 同上,用于 multipart FormData(/images/edits)。 */
+function appendBackgroundAndFormat(
+  form: FormData,
+  req: ImageRequest,
+  model: string,
+): void {
+  if (req.outputFormat) form.append('output_format', req.outputFormat)
+  if (!req.background) return
+  if (req.background === 'transparent' && !supportsTransparentBackground(model)) {
+    console.warn(
+      `[GptImageProvider] background:transparent 不受 ${model} 支持(edits),已丢弃回落到不透明底。`,
+    )
+    return
+  }
+  form.append('background', req.background)
+}
+
 export class GptImageProvider implements ImageClient {
   private readonly apiKey: string
   private readonly apiBase: string
@@ -122,8 +172,9 @@ export class GptImageProvider implements ImageClient {
       prompt: req.prompt,
       n: req.n ?? 1,
       size: req.size ?? '1024x1024',
-      quality: 'medium',
+      quality: req.quality ?? 'medium',
     }
+    applyBackgroundAndFormat(body, req, this.deployment)
 
     return this.postWithRetry(
       url,
@@ -158,7 +209,8 @@ export class GptImageProvider implements ImageClient {
     form.append('model', 'gpt-image-2')
     form.append('n', String(req.n ?? 1))
     form.append('size', req.size ?? '1024x1024')
-    form.append('quality', 'medium')
+    form.append('quality', req.quality ?? 'medium')
+    appendBackgroundAndFormat(form, req, this.deployment)
 
     const MAX_REFS = 16
     const effective = refs.slice(0, MAX_REFS)

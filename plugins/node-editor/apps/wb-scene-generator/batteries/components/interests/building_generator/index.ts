@@ -1,5 +1,7 @@
 /**
- * building_generator: 完整建筑生成管线
+ * building_generator: 完整建筑生成管线（DataTree 形式）
+ *
+ * 每次只处理单张建筑地块掩码 inputGrid，网格列表的 fanout/重组由引擎自动完成。
  *
  * 内联了以下原始电池的全部逻辑（无外部依赖）：
  *   building_carve → mask_outline → building_inner_wall →
@@ -7,16 +9,12 @@
  *   building_door → building_inner_door → building_window →
  *   mask_subtract (纯墙/室内地面) → grid_split_by_connectivity (按房间拆分)
  *
- * 输出层（均为 array 格式，一条 nameList 与一条 gridList 一一对应）：
- *   outputGridList  — 拍平的单值网格列表
- *   outputNameList  — [{id, name, type}] 名称清单
- *
- * 各语义层名称模板（per 建筑 i）：
- *   "建筑{i}-外墙"      type: tile
- *   "建筑{i}-大门"      type: tile
- *   "建筑{i}-内门"      type: tile
- *   "建筑{i}-窗户"      type: tile
- *   "建筑{i}-室内{j}"   type: tile  (j = 房间序号，按连通分量拆分)
+ * 输出：
+ *   outputGrid (grid/item)      — 单张多值网格，固定 id：墙顶=1，外墙体=2，内墙体=3，窗户=4，
+ *                                  室内地面从 5 起（mergeOutput=true 合为一张地板=5；false 时每房间一个递增 id）。
+ *                                  重叠时按 地板 → 内墙体 → 外墙体 → 窗户 → 墙顶 顺序后写覆盖。
+ *   outputNameList (array/item) — [{id, name, type}]；墙体打包条目 id=[3,2,4,1]，仅含实际出现的 id。
+ *   doorGrid (grid/item)        — 大门（外门）单张网格，门格=1。
  */
 
 // ─── 类型 ─────────────────────────────────────────────────────────────────────
@@ -168,11 +166,6 @@ function carveOne(inputGrid: Grid, seedRaw: number): Grid {
   const cBBox = getBoundingBox(carved);
   if (!cBBox) return Array.from({ length: rows }, () => new Array(cols).fill(0));
   return scaleToFitBBox(carved, cBBox, bbox, rows, cols);
-}
-
-function buildingCarve(gridList: Grid[], seedRaw: number): Grid[] {
-  const base = seedRaw === 0 ? Date.now() : seedRaw;
-  return gridList.map((g, i) => (!g || g.length === 0 || !g[0] || g[0].length === 0) ? [] : carveOne(g, base + i * 999983));
 }
 
 // ─── 2. mask_outline (向内, thickness=1) ──────────────────────────────────────
@@ -617,8 +610,8 @@ function splitByConnectivity(grid: Grid): Grid[] {
 
 // ─── 9. 主入口 ────────────────────────────────────────────────────────────────
 export function buildingGenerator(input: Record<string, unknown>): Record<string, unknown> {
-  // ── 参数解析 ──
-  const rawGridList = input.gridList;
+  // ── 参数解析（DataTree：单张 inputGrid） ──
+  const rawGrid = input.inputGrid;
   const wallThickness      = typeof input.wallThickness      === "number" ? Math.max(1, Math.round(input.wallThickness))    : 1;
   const externalInnerWallDensity = typeof input.innerWallDensity === "number" ? Math.max(0, Math.min(1, input.innerWallDensity)) : undefined;
   const doorCount          = typeof input.doorCount          === "number" ? Math.max(0, Math.round(input.doorCount))          : 1;
@@ -630,332 +623,239 @@ export function buildingGenerator(input: Record<string, unknown>): Record<string
   const mergeOutput        = input.mergeOutput !== false && input.mergeOutput !== "false";
   const seed               = typeof input.seed               === "number" ? Math.floor(input.seed)                            : 0;
 
-  // ── 输入 gridList 标准化 ──
-  let gridList: Grid[];
-  if (!Array.isArray(rawGridList) || rawGridList.length === 0) return { error: "gridList is required" };
-  if (typeof rawGridList[0]?.[0] === "number") {
-    gridList = [rawGridList as unknown as Grid];
-  } else {
-    gridList = rawGridList as Grid[];
+  // ── 输入校验（单张网格，列表 fanout 交给引擎） ──
+  if (!Array.isArray(rawGrid) || rawGrid.length === 0 || !Array.isArray(rawGrid[0]) ||
+      typeof (rawGrid as Grid)[0]?.[0] !== "number" || (rawGrid as Grid)[0].length === 0) {
+    return { error: "inputGrid is required" };
   }
+  const inputBldg = rawGrid as Grid;
 
-  const baseSeed = seed === 0 ? Date.now() : seed;
+  const bldgSeed = seed === 0 ? Date.now() : seed;
 
   // 输出网格在原始尺寸基础上顶部扩展 buildingHeight 行，让墙顶不被截断。
-  // 所有原始坐标统一向下偏移 H 行写入扩展后的网格。
   const H = buildingHeight;
 
-  // ── 固定 ID 分配（墙体包内层固定） ──
-  const WALL_ID: Record<string, number> = { roofTop: 1, outerBody: 2, innerBody: 3, window: 4 };
+  // ── 固定 ID 分配 ──
+  const WALL_ID = { roofTop: 1, outerBody: 2, innerBody: 3, window: 4 } as const;
   const FLOOR_ID_START = 5;
 
-  // 墙体各层格点积累桶（所有建筑合并，使用扩展坐标系）
-  interface CellBucket { cells: Array<[number, number]> }
-  const wb: Record<string, CellBucket> = {
-    roofTop:   { cells: [] },
-    outerBody: { cells: [] },
-    innerBody: { cells: [] },
-    window:    { cells: [] },
-  };
+  // Step 1: building_carve（始终执行两层退线雕刻）
+  const carved = carveOne(inputBldg, bldgSeed);
+  if (!carved || carved.length === 0) return { outputGrid: [], outputNameList: [], doorGrid: [] };
 
-  // 地板房间积累
-  interface FloorRoom { cells: Array<[number, number]> }
-  const floorMergedCells: Array<[number, number]> = [];  // mergeOutput=true 时用
-  const floorRooms: FloorRoom[] = [];                    // mergeOutput=false 时用
+  const rows = carved.length, cols = carved[0].length;
+  const outRows = rows + H;   // 扩展后的总行数
 
-  // 大门积累（所有建筑合并到一张网格）
-  const doorMergedCells: Array<[number, number]> = [];
+  // Step 2: mask_outline → 外轮廓 (=外墙形状)
+  const outline = outlineOne(carved, wallThickness);
 
-  let rows0 = 0, cols0 = 0;
-  const outputGridList: unknown[] = [];
-  const outputNameList: NameEntry[] = [];
-  let nextFloorId = FLOOR_ID_START;
+  // Step 3: building_inner_wall → 内墙
+  // 外部未传入时按网格宽度自动推算密度：width≤20→0.25，width=50→0.6，width≥50→0.6（线性插值）
+  const autoInnerWallDensity = (() => {
+    if (externalInnerWallDensity !== undefined) return externalInnerWallDensity;
+    const w = cols;
+    if (w <= 20) return 0.25;
+    if (w >= 50) return 0.6;
+    return 0.25 + (w - 20) / (50 - 20) * (0.6 - 0.25);
+  })();
+  const innerWalls = innerWallOne(carved, autoInnerWallDensity, bldgSeed + 1);
 
-  // 格点积累辅助
-  function pushCells(bucket: CellBucket, grid: Grid, rowOffset = 0) {
-    for (let r = 0; r < grid.length; r++)
-      for (let c = 0; c < grid[r].length; c++)
-        if (grid[r][c] !== 0) bucket.cells.push([r + rowOffset, c]);
+  // Step 4: 外轮廓 - 内墙 → 纯外墙
+  const outerWallOnly = subtractGrids(outline, innerWalls);
+
+  // Step 5: 外轮廓 + 内墙 → 全墙
+  const allWalls = maxMergeGrids([outline, innerWalls]);
+
+  // Step 6: building_door（在外墙上开外门）
+  const doorResult = doorOne(outerWallOnly, doorCount, doorWidth, bldgSeed + 2);
+  const outerWallAfterDoor = doorResult.outputGrid;  // 外墙去掉门洞
+  const outerDoorGrid = doorResult.doorGrid;          // 大门位置
+
+  // Step 7: building_inner_door（在全墙上开内门，确保所有室内连通）
+  const innerDoorResult = innerDoorOne(allWalls, bldgSeed + 3);
+  const innerDoorGrid = innerDoorResult.doorGrid;     // 内门位置
+
+  // Step 8: 全门格 = 外门 + 内门
+  const allDoors = maxMergeGrids([outerDoorGrid, innerDoorGrid]);
+
+  // Step 9: 全墙 - 全门 → 纯墙（无门洞）
+  const wallNoDoors = subtractGrids(allWalls, allDoors);
+
+  // Step 12/13: 室内地面拆分（提前到开窗前，便于自动窗数按房间数推算）
+  // 用完整墙体（含内门洞）做减法，保持房间间不连通，确保 splitByConnectivity 能正确分出独立房间
+  const indoorFloorBase = subtractGrids(carved, allWalls);  // 不含门洞
+  const roomComponents = splitByConnectivity(indoorFloorBase);
+
+  // 将门洞格（外门 + 内门）加回各房间：与门洞格 4-邻接的房间分量获得对应门洞格
+  const dirs4: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (outerDoorGrid[r][c] === 0 && innerDoorGrid[r][c] === 0) continue;
+      for (const [dr, dc] of dirs4) {
+        const nr = r + dr, nc = c + dc;
+        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+        for (const roomGrid of roomComponents) {
+          if (roomGrid[nr][nc] !== 0) { roomGrid[r][c] = roomGrid[nr][nc]; break; }
+        }
+        if (roomComponents.some(g => g[r][c] !== 0)) break;
+      }
+    }
   }
 
-  // ── 辅助：把原始网格（rows×cols）写入扩展后的网格（(rows+H)×cols），原坐标偏移+H ──
-  function expandGrid(src: Grid, rows: number, cols: number, outRows: number): Grid {
-    const out: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+  // Step 10: building_window（在外墙（减去内墙后再减门洞的）上开窗）
+  // 外部未传入时，窗户数量 = 房间数 / 2（向下取整，最少0）
+  const autoWindowCount = externalWindowCount !== undefined
+    ? externalWindowCount
+    : Math.max(0, Math.floor(roomComponents.length / 2));
+  const windowResult = windowOne(outerWallAfterDoor, autoWindowCount, windowWidth, windowRandom, bldgSeed + 4);
+  const windowGrid = windowResult.windowGrid;         // 窗户位置
+
+  // Step 11: 纯墙 - 窗户 → 最终外墙
+  const finalWall = subtractGrids(wallNoDoors, windowGrid);
+
+  // ── 生成"墙顶"：外墙面（finalWall ∪ windowGrid）向上平移 H 行 ──
+  // 原格 (r, c) → 扩展后 (r + H, c)；向上平移 H 后落在 [0, rows) 区间。
+  let roofTopGrid: Grid | null = null;
+  if (H > 0) {
+    const roofTop: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+    let hasAny = false;
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++)
-        if (src[r][c] !== 0) out[r + H][c] = src[r][c];
-    return out;
+        if (finalWall[r][c] !== 0 || windowGrid[r][c] !== 0) {
+          roofTop[r][c] = 1;
+          hasAny = true;
+        }
+    if (hasAny) roofTopGrid = roofTop;
   }
 
-  // ── 对每栋建筑执行管线 ──
-  gridList.forEach((inputBldg, bldgIdx) => {
-    if (!inputBldg || inputBldg.length === 0 || !inputBldg[0] || inputBldg[0].length === 0) return;
+  // ── 生成墙体（外墙体 + 内墙体），仅当 buildingHeight > 0 时 ──
+  let outerWallBodyGrid: Grid | null = null;
+  let innerWallBodyGrid: Grid | null = null;
 
-    const bldgSeed = baseSeed + bldgIdx * 999983;
-    const label = `建筑${bldgIdx + 1}`;
+  if (H > 0 && roofTopGrid) {
+    // Step A: BFS 标记外部（carved 为障碍）
+    const isExterior: boolean[][] = Array.from({ length: rows }, () => new Array<boolean>(cols).fill(false));
+    const q: Array<[number, number]> = [];
+    const enqueue = (r: number, c: number) => {
+      if (r >= 0 && r < rows && c >= 0 && c < cols && !isExterior[r][c] && carved[r][c] === 0) {
+        isExterior[r][c] = true; q.push([r, c]);
+      }
+    };
+    for (let r = 0; r < rows; r++) { enqueue(r, 0); enqueue(r, cols - 1); }
+    for (let c = 0; c < cols; c++) { enqueue(0, c); enqueue(rows - 1, c); }
+    const bfsDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]] as const;
+    let qi = 0;
+    while (qi < q.length) {
+      const [r, c] = q[qi++];
+      for (const [dr, dc] of bfsDirs) enqueue(r + dr, c + dc);
+    }
 
-    // Step 1: building_carve（内置，始终执行两层退线雕刻）
-    const carved = carveOne(inputBldg, bldgSeed);
-    if (!carved || carved.length === 0) return;
+    // Step B: 构建完整墙体（roofTopGrid 每格向下 H 格）
+    const wallBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        if (roofTopGrid[r][c] !== 0)
+          for (let k = 1; k <= H; k++)
+            wallBody[r + k][c] = 1;
 
-    const rows = carved.length, cols = carved[0].length;
-    const outRows = rows + H;   // 扩展后的总行数
-    if (rows0 === 0) { rows0 = outRows; cols0 = cols; }
-
-    // Step 2: mask_outline → 外轮廓 (=外墙形状)
-    const outline = outlineOne(carved, wallThickness);
-
-    // Step 3: building_inner_wall → 内墙
-    // 外部未传入时按网格宽度自动推算密度：width≤20→0.25，width=50→0.6，width≥50→0.6（线性插值）
-    const autoInnerWallDensity = (() => {
-      if (externalInnerWallDensity !== undefined) return externalInnerWallDensity;
-      const w = cols;
-      if (w <= 20) return 0.25;
-      if (w >= 50) return 0.6;
-      return 0.25 + (w - 20) / (50 - 20) * (0.6 - 0.25);
-    })();
-    const innerWalls = innerWallOne(carved, autoInnerWallDensity, bldgSeed + 1);
-
-    // Step 4: 外轮廓 - 内墙 → 纯外墙  (对应 emik1: mask_subtract)
-    const outerWallOnly = subtractGrids(outline, innerWalls);
-
-    // Step 5: 外轮廓 + 内墙 → 全墙 (对应 n4wsp: batch_max_merge)
-    const allWalls = maxMergeGrids([outline, innerWalls]);
-
-    // Step 6: building_door（在外墙上开外门）
-    const doorResult = doorOne(outerWallOnly, doorCount, doorWidth, bldgSeed + 2);
-    const outerWallAfterDoor = doorResult.outputGrid;  // 外墙去掉门洞
-    const outerDoorGrid = doorResult.doorGrid;          // 大门位置
-
-    // Step 7: building_inner_door（在全墙上开内门，确保所有室内连通）
-    const innerDoorResult = innerDoorOne(allWalls, bldgSeed + 3);
-    const innerDoorGrid = innerDoorResult.doorGrid;     // 内门位置
-
-    // 积累大门格点（扩展坐标系偏移 H 行）
-    for (let r = 0; r < outerDoorGrid.length; r++)
-      for (let c = 0; c < outerDoorGrid[r].length; c++)
-        if (outerDoorGrid[r][c] !== 0) doorMergedCells.push([r + H, c]);
-
-    // Step 8: 全门格 = 外门 + 内门 (对应 n9lio: batch_max_merge)
-    const allDoors = maxMergeGrids([outerDoorGrid, innerDoorGrid]);
-
-    // Step 9: 全墙 - 全门 → 纯墙（无门洞） (对应 1vgnd: mask_subtract)
-    const wallNoDoors = subtractGrids(allWalls, allDoors);
-
-    // Step 10: building_window（在外墙（减去内墙后再减门洞的）上开窗）
-    // 外部未传入时，窗户数量 = 当前建筑房间数 / 2（向下取整，最少0）
-    const autoWindowCount = externalWindowCount !== undefined
-      ? externalWindowCount
-      : Math.max(0, Math.floor(roomComponents.length / 2));
-    const windowResult = windowOne(outerWallAfterDoor, autoWindowCount, windowWidth, windowRandom, bldgSeed + 4);
-    const windowGrid = windowResult.windowGrid;         // 窗户位置
-
-    // Step 11: 纯墙 - 窗户 → 最终外墙 (对应 g13oa: mask_subtract)
-    const finalWall = subtractGrids(wallNoDoors, windowGrid);
-
-    // Step 12: 室内地面拆分
-    // 拆分时用完整墙体（含内门洞）做减法，保持房间间不连通，确保 splitByConnectivity 能正确分出独立房间
-    // 拆分完成后，将外门格并入每个与其相邻的房间（让地板覆盖可通行门洞）
-    const indoorFloorBase = subtractGrids(carved, allWalls);  // 不含门洞，用于连通分量拆分
-
-    // Step 13: 室内地面按连通分量拆分为独立房间 (对应 xyfkq: grid_split_by_connectivity)
-    const roomComponents = splitByConnectivity(indoorFloorBase);
-
-    // 将门洞格（外门 + 内门）加回各房间：与门洞格 4-邻接的房间分量获得对应门洞格
-    const dirs4: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
+    // Step C: 找外墙顶点并收集外墙体
+    const outerWallSet = new Set<number>();
+    const outerBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        if (outerDoorGrid[r][c] === 0 && innerDoorGrid[r][c] === 0) continue;
-        for (const [dr, dc] of dirs4) {
-          const nr = r + dr, nc = c + dc;
-          if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-          for (const roomGrid of roomComponents) {
-            if (roomGrid[nr][nc] !== 0) { roomGrid[r][c] = roomGrid[nr][nc]; break; }
-          }
-          if (roomComponents.some(g => g[r][c] !== 0)) break;
-        }
-      }
-    }
-
-    // ── 生成"墙顶"：外墙面（finalWall ∪ windowGrid）向上平移 H 行 ──
-    // 在扩展坐标系（原坐标 + H 偏移）下：
-    //   原格 (r, c) → 扩展后 (r + H, c)
-    //   向上平移 H → (r + H - H, c) = (r, c)
-    // 即：墙顶直接写在扩展网格的 [0, rows) 区间，原始层写在 [H, rows+H) 区间，完全不重叠不截断。
-    let roofTopGrid: Grid | null = null;
-    if (H > 0) {
-      const roofTop: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
-      let hasAny = false;
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (finalWall[r][c] !== 0 || windowGrid[r][c] !== 0) {
-            // 原坐标 r 在扩展坐标系为 r+H，向上平移 H 后回到 r
-            roofTop[r][c] = 1;
-            hasAny = true;
-          }
-      if (hasAny) roofTopGrid = roofTop;
-    }
-
-    // ── 生成墙体（外墙体 + 内墙体），仅当 buildingHeight > 0 时 ──
-    //
-    // 算法：
-    //   Step A: 从网格四周 BFS，将所有可达（不穿越 carved）的格子标记为"建筑外部"。
-    //   Step B: 构建完整墙体：roofTopGrid 每格向下 H 格写入 wallBody。
-    //   Step C: 遍历 roofTopGrid 中每个格，检查其正下方是否为"建筑外部"。
-    //           若是 → 该格为"外墙顶点"，从此格向下在 wallBody 中收集连续有效格 → 外墙体。
-    //   Step D: 内墙体 = wallBody − 外墙体。
-    //   Step E: 从外墙体和内墙体中减去 roofTopGrid（墙顶是独立图层，不重叠）。
-    let outerWallBodyGrid: Grid | null = null;
-    let innerWallBodyGrid: Grid | null = null;
-
-    if (H > 0 && roofTopGrid) {
-      // Step A: BFS 标记外部（carved 为障碍）
-      const isExterior: boolean[][] = Array.from({ length: rows }, () => new Array<boolean>(cols).fill(false));
-      const q: Array<[number, number]> = [];
-      const enqueue = (r: number, c: number) => {
-        if (r >= 0 && r < rows && c >= 0 && c < cols && !isExterior[r][c] && carved[r][c] === 0) {
-          isExterior[r][c] = true; q.push([r, c]);
-        }
-      };
-      for (let r = 0; r < rows; r++) { enqueue(r, 0); enqueue(r, cols - 1); }
-      for (let c = 0; c < cols; c++) { enqueue(0, c); enqueue(rows - 1, c); }
-      const dirs4 = [[-1, 0], [1, 0], [0, -1], [0, 1]] as const;
-      let qi = 0;
-      while (qi < q.length) {
-        const [r, c] = q[qi++];
-        for (const [dr, dc] of dirs4) enqueue(r + dr, c + dc);
-      }
-
-      // Step B: 构建完整墙体（roofTopGrid 每格向下 H 格）
-      const wallBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (roofTopGrid[r][c] !== 0)
-            for (let k = 1; k <= H; k++)
-              wallBody[r + k][c] = 1;
-
-      // Step C: 找外墙顶点并收集外墙体
-      //   外墙顶点 (r,c)：roofTopGrid 非零且正下方 (r+1) 是建筑外部（或超出边界）
-      const outerWallSet = new Set<number>();
-      const outerBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (roofTopGrid[r][c] === 0) continue;
-          const southIsExterior = (r + 1 >= rows) || isExterior[r + 1][c];
-          if (!southIsExterior) continue;
-          // 从外墙顶点向下，在 wallBody 中连续收集有效格
-          for (let k = 1; k <= H; k++) {
-            const nr = r + k;
-            if (nr < outRows && wallBody[nr][c] !== 0) {
-              outerBody[nr][c] = 1;
-              outerWallSet.add(nr * cols + c);
-            }
+        if (roofTopGrid[r][c] === 0) continue;
+        const southIsExterior = (r + 1 >= rows) || isExterior[r + 1][c];
+        if (!southIsExterior) continue;
+        for (let k = 1; k <= H; k++) {
+          const nr = r + k;
+          if (nr < outRows && wallBody[nr][c] !== 0) {
+            outerBody[nr][c] = 1;
+            outerWallSet.add(nr * cols + c);
           }
         }
       }
-
-      // Step D: 内墙体 = 墙体 − 外墙体
-      const innerBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
-      for (let r = 0; r < outRows; r++)
-        for (let c = 0; c < cols; c++)
-          if (wallBody[r][c] !== 0 && !outerWallSet.has(r * cols + c))
-            innerBody[r][c] = 1;
-
-      // Step E: 减去墙顶（避免与 roofTopGrid 重叠）
-      for (let r = 0; r < outRows; r++)
-        for (let c = 0; c < cols; c++)
-          if (roofTopGrid[r][c] !== 0) { outerBody[r][c] = 0; innerBody[r][c] = 0; }
-
-      if (outerBody.some(row => row.some(v => v !== 0))) outerWallBodyGrid = outerBody;
-      if (innerBody.some(row => row.some(v => v !== 0))) innerWallBodyGrid = innerBody;
     }
 
-    // ── 窗户输出位置处理 ──
-    // H=0 或 H=1：偏移 = H（位置不变）
-    // H>1：偏移 = H-1（向上平移 1 格）
-    // 同时过滤：平移后落在 roofTopGrid 掩码内的格子不输出
-    const winExpOffset = H > 1 ? H - 1 : H;
-    const windowOutputGrid: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++) {
-        if (windowGrid[r][c] === 0) continue;
-        const er = r + winExpOffset;
-        if (er >= outRows) continue;
-        if (roofTopGrid && roofTopGrid[er][c] !== 0) continue;  // 被墙顶遮住，跳过
-        windowOutputGrid[er][c] = 1;
-      }
+    // Step D: 内墙体 = 墙体 − 外墙体
+    const innerBody: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+    for (let r = 0; r < outRows; r++)
+      for (let c = 0; c < cols; c++)
+        if (wallBody[r][c] !== 0 && !outerWallSet.has(r * cols + c))
+          innerBody[r][c] = 1;
 
-    // ── 积累各层格点（扩展坐标系）──
-    // 墙体层（固定 ID，所有建筑合并）
-    if (roofTopGrid)       pushCells(wb.roofTop,   roofTopGrid,       0);
-    if (outerWallBodyGrid) pushCells(wb.outerBody,  outerWallBodyGrid, 0);
-    if (innerWallBodyGrid) pushCells(wb.innerBody,  innerWallBodyGrid, 0);
-    pushCells(wb.window, windowOutputGrid, 0);
+    // Step E: 减去墙顶（避免与 roofTopGrid 重叠）
+    for (let r = 0; r < outRows; r++)
+      for (let c = 0; c < cols; c++)
+        if (roofTopGrid[r][c] !== 0) { outerBody[r][c] = 0; innerBody[r][c] = 0; }
 
-    // 地板层（室内）
-    for (const roomGrid of roomComponents) {
-      if (!roomGrid.some(row => row.some(v => v !== 0))) continue;
-      if (mergeOutput) {
-        // 合并所有建筑的地板到同一桶
-        pushCells({ cells: floorMergedCells }, expandGrid(roomGrid, rows, cols, outRows), 0);
-      } else {
-        // 独立模式：每个房间独立
-        const expanded = expandGrid(roomGrid, rows, cols, outRows);
-        const cells: Array<[number, number]> = [];
-        pushCells({ cells }, expanded, 0);
-        floorRooms.push({ cells });
-      }
+    if (outerBody.some(row => row.some(v => v !== 0))) outerWallBodyGrid = outerBody;
+    if (innerBody.some(row => row.some(v => v !== 0))) innerWallBodyGrid = innerBody;
+  }
+
+  // ── 窗户输出位置处理 ──
+  const winExpOffset = H > 1 ? H - 1 : H;
+  const windowOutputGrid: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      if (windowGrid[r][c] === 0) continue;
+      const er = r + winExpOffset;
+      if (er >= outRows) continue;
+      if (roofTopGrid && roofTopGrid[er][c] !== 0) continue;  // 被墙顶遮住，跳过
+      windowOutputGrid[er][c] = 1;
     }
-  });
 
-  if (rows0 === 0 || cols0 === 0) return { outputGridList, outputNameList };
+  // ── 组装单张多值 outputGrid（扩展坐标系 outRows×cols） ──
+  const outputGrid: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+  const present = new Set<number>();
+  const outputNameList: NameEntry[] = [];
 
-  // ── 构建地板层（先输出）──
+  // 地板层（先写，作为最底层）。室内房间（原坐标偏移 +H 写入扩展网格）
+  const validRooms = roomComponents.filter(g => g.some(row => row.some(v => v !== 0)));
   if (mergeOutput) {
-    if (floorMergedCells.length > 0) {
-      const floorId = nextFloorId++;
-      const floorG: Grid = Array.from({ length: rows0 }, () => new Array<number>(cols0).fill(0));
-      for (const [r, c] of floorMergedCells)
-        if (r < rows0 && c < cols0) floorG[r][c] = floorId;
-      outputGridList.push(floorG);
+    if (validRooms.length > 0) {
+      const floorId = FLOOR_ID_START;
+      for (const roomGrid of validRooms)
+        for (let r = 0; r < rows; r++)
+          for (let c = 0; c < cols; c++)
+            if (roomGrid[r][c] !== 0) outputGrid[r + H][c] = floorId;
+      present.add(floorId);
       outputNameList.push({ id: floorId, name: "地板", type: "tile" });
     }
   } else {
-    for (let ri = 0; ri < floorRooms.length; ri++) {
-      const room = floorRooms[ri];
-      const roomId = nextFloorId++;
-      const roomG: Grid = Array.from({ length: rows0 }, () => new Array<number>(cols0).fill(0));
-      for (const [r, c] of room.cells)
-        if (r < rows0 && c < cols0) roomG[r][c] = roomId;
-      outputGridList.push(roomG);
-      outputNameList.push({ id: roomId, name: `地板${ri + 1}`, type: "tile" });
-    }
+    let fid = FLOOR_ID_START;
+    validRooms.forEach((roomGrid, i) => {
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < cols; c++)
+          if (roomGrid[r][c] !== 0) outputGrid[r + H][c] = fid;
+      present.add(fid);
+      outputNameList.push({ id: fid, name: `地板${i + 1}`, type: "tile" });
+      fid++;
+    });
   }
 
-  // ── 构建墙体包（后输出）：顺序 内墙体(id3), 外墙体(id2), 窗户(id4), 墙顶(id1) ──
-  const hasWall = Object.values(wb).some(b => b.cells.length > 0);
-  if (hasWall) {
-    const buildLayer = (bucket: CellBucket, fixedId: number): Grid => {
-      const g: Grid = Array.from({ length: rows0 }, () => new Array<number>(cols0).fill(0));
-      for (const [r, c] of bucket.cells)
-        if (r < rows0 && c < cols0) g[r][c] = fixedId;
-      return g;
-    };
-    const innerBodyG = buildLayer(wb.innerBody, WALL_ID.innerBody);  // id=3
-    const outerBodyG = buildLayer(wb.outerBody, WALL_ID.outerBody);  // id=2
-    const windowG    = buildLayer(wb.window,    WALL_ID.window);     // id=4
-    const roofTopG   = buildLayer(wb.roofTop,   WALL_ID.roofTop);    // id=1
+  // 墙体层（覆盖顺序：内墙体 → 外墙体 → 窗户 → 墙顶，后写覆盖；与原墙体包 [3,2,4,1] 一致）
+  const writeLayer = (grid: Grid | null, id: number) => {
+    if (!grid) return;
+    let any = false;
+    for (let r = 0; r < outRows; r++)
+      for (let c = 0; c < cols; c++)
+        if (grid[r][c] !== 0) { outputGrid[r][c] = id; any = true; }
+    if (any) present.add(id);
+  };
+  writeLayer(innerWallBodyGrid, WALL_ID.innerBody);  // 3
+  writeLayer(outerWallBodyGrid, WALL_ID.outerBody);  // 2
+  writeLayer(windowOutputGrid,  WALL_ID.window);     // 4
+  writeLayer(roofTopGrid,       WALL_ID.roofTop);    // 1
 
-    // 打包：grid 列表顺序与 id 列表 [3,2,4,1] 一一对应
-    outputGridList.push([innerBodyG, outerBodyG, windowG, roofTopG]);
-    outputNameList.push({ id: [3, 2, 4, 1], name: "墙体", type: "tile" });
-  }
+  // 墙体打包名称条目（id=[3,2,4,1]，仅含实际出现的层）
+  const wallIds = [3, 2, 4, 1].filter(id => present.has(id));
+  if (wallIds.length > 0) outputNameList.push({ id: wallIds, name: "墙体", type: "tile" });
 
-  // ── 构建大门网格（所有建筑大门合并到一张 grid） ──
-  const doorGrid: Grid = Array.from({ length: rows0 }, () => new Array<number>(cols0).fill(0));
-  const DOOR_ID = 1;
-  for (const [r, c] of doorMergedCells)
-    if (r < rows0 && c < cols0) doorGrid[r][c] = DOOR_ID;
+  // ── 大门网格（外门，扩展坐标系偏移 +H） ──
+  const doorGrid: Grid = Array.from({ length: outRows }, () => new Array<number>(cols).fill(0));
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (outerDoorGrid[r][c] !== 0) doorGrid[r + H][c] = 1;
 
-  return { outputGridList, outputNameList, doorGrid };
+  return { outputGrid, outputNameList, doorGrid };
 }

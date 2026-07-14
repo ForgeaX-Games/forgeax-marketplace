@@ -74,6 +74,15 @@ export interface FaceVariant {
  */
 export type FaceKeyMode = 'adjacent4' | 'edgeDist2'
 
+/** randomRules 单条：可选 per-tileId 变体池与权重，缺省回退 face.variantIdxs / face.variantWeights */
+export interface RandomRule {
+  tileId: number
+  keepProbability: number
+  variantIdxs?: number[]
+  /** 与 variantIdxs（或回退的 face.variantIdxs）等长；缺省则变体等概率 */
+  variantWeights?: number[]
+}
+
 /** 单一 face 的查表 + 变体规则 */
 export interface FaceRule {
   /** sprites[] 中归本 face 的"基础"贴图数(不含变体行);仅供 RulePreview 显示 + v1 推导变体 */
@@ -93,8 +102,8 @@ export interface FaceRule {
    * 其它字段(randomRules / variantIdxs)对默认 map 和 variant map 共用。
    */
   variants?: FaceVariant[]
-  /** 命中某 idx 时按 keepProbability 决定保留还是从 variantIdxs 选变体 */
-  randomRules?: Array<{ tileId: number; keepProbability: number }>
+  /** 命中某 idx 时按 keepProbability 决定保留还是从变体池选变体;可选 per-entry variantIdxs */
+  randomRules?: RandomRule[]
   /**
    * 变体候选 sprite idx 列表(再经透明像素探测过滤后才采样)。
    *   * 缺省 = `sprites[basePieces..length-1]` —— 适合 v1 单 face / 顶面专用场景
@@ -102,6 +111,8 @@ export interface FaceRule {
    *     不显式给 variantIdxs 会让"顶面的变体扫到立面的基础"
    */
   variantIdxs?: number[]
+  /** 与 variantIdxs 等长；randomRules 未声明 variantWeights 时作 face 级 fallback */
+  variantWeights?: number[]
 }
 
 /**
@@ -266,14 +277,16 @@ function parseFace(raw: unknown): FaceRule | null {
     && f.variantIdxs.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)
     ? (f.variantIdxs as number[])
     : undefined
+  const variantWeights = parseVariantWeights(f.variantWeights, variantIdxs?.length)
   const variants = parseFaceVariants(f.variants)
   const keyMode = f.keyMode === 'edgeDist2' ? 'edgeDist2' : undefined
   return {
     basePieces: f.basePieces,
     map: f.map as Record<string, number>,
-    randomRules: parseRandomRules(f.randomRules),
+    randomRules: parseRandomRules(f.randomRules, variantIdxs, variantWeights),
     ...(keyMode ? { keyMode } : {}),
     ...(variantIdxs ? { variantIdxs } : {}),
+    ...(variantWeights ? { variantWeights } : {}),
     ...(variants ? { variants } : {}),
   }
 }
@@ -328,14 +341,39 @@ function validateMap(m: Record<string, unknown>): boolean {
   return true
 }
 
-function parseRandomRules(raw: unknown): FaceRule['randomRules'] {
+function parseVariantWeights(raw: unknown, expectedLen?: number): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  if (!raw.every((n) => typeof n === 'number' && n >= 0 && Number.isFinite(n))) return undefined
+  const weights = raw as number[]
+  if (weights.length === 0) return undefined
+  if (expectedLen !== undefined && weights.length !== expectedLen) return undefined
+  return weights
+}
+
+function parseRandomRules(
+  raw: unknown,
+  faceVariantIdxs?: number[],
+  faceVariantWeights?: number[],
+): FaceRule['randomRules'] {
   if (!Array.isArray(raw)) return undefined
   const out: NonNullable<FaceRule['randomRules']> = []
   for (const r of raw) {
     if (!r || typeof r !== 'object') continue
     const rr = r as Record<string, unknown>
     if (typeof rr.tileId !== 'number' || typeof rr.keepProbability !== 'number') continue
-    out.push({ tileId: rr.tileId, keepProbability: rr.keepProbability })
+    const variantIdxs = Array.isArray(rr.variantIdxs)
+      && rr.variantIdxs.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)
+      ? (rr.variantIdxs as number[])
+      : undefined
+    const poolLen = variantIdxs?.length ?? faceVariantIdxs?.length
+    const variantWeights = parseVariantWeights(rr.variantWeights, poolLen)
+      ?? (variantIdxs ? undefined : faceVariantWeights)
+    out.push({
+      tileId: rr.tileId,
+      keepProbability: rr.keepProbability,
+      ...(variantIdxs?.length ? { variantIdxs } : {}),
+      ...(variantWeights?.length ? { variantWeights } : {}),
+    })
   }
   return out.length > 0 ? out : undefined
 }

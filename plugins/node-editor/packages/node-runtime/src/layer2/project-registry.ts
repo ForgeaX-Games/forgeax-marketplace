@@ -9,7 +9,7 @@
 // Storage layout (under `workspaceRoot`):
 //
 //   <workspaceRoot>/
-//     workspace.json                      ← { activeProjectId, recentProjectIds, lastOpenedAt }
+//     workspace.json                      ← { viewingProjectId, recentProjectIds, lastOpenedAt }
 //     projects/
 //       index.json                        ← { schemaVersion, projects: ProjectMeta[] }
 //       <id>/
@@ -21,9 +21,9 @@
 //
 // Each project maps to its own Runtime (created lazily through an app-supplied
 // factory that points the kernel storage classes at the project's `state/`
-// dir). `activateProject(id)` makes that Runtime the active one; the app's
-// route layer reads `getActiveRuntime()` so subsequent applyBatch / queries /
-// history all hit the active project's isolated storage. Per-project history
+// dir). `viewProject(id)` sets the UI viewing target; agent `openProject`
+// acquires an exclusive lock without changing viewing. Pipeline routes are
+// project-scoped; per-project history
 // isolation therefore falls out for free — each Runtime owns its own
 // history.jsonl path.
 //
@@ -37,6 +37,7 @@ import { isAbsolute, join } from 'node:path'
 
 import { importPipelineGraph } from './import-graph.js'
 import type { ImportGraphInput, ImportGraphOptions } from './import-graph.js'
+import { collectCachedNodeIds } from './apply-batch.js'
 import type { Runtime } from './runtime.js'
 
 // Asset deletion policy on project delete (app interprets it; kernel just forwards).
@@ -56,6 +57,7 @@ export interface ProjectLockInfo {
   agentId: string
   kind: CallerIdentity['kind']
   acquiredAt: string
+  sessionId?: string
 }
 
 // Machine-readable lock-denial codes. `mutation-denied-not-open` is the ONLY
@@ -70,7 +72,7 @@ export type LockDeniedCode =
   | 'project-locked-by-other'
   | 'agent-holds-another'
   | 'lock-not-owned'
-  | 'mutation-denied-no-active-project'
+  | 'mutation-denied-no-project'
   | 'mutation-denied-not-open'
   | 'mutation-denied-locked-by-other'
 
@@ -121,11 +123,13 @@ export interface ProjectIndex {
   projects: ProjectMeta[]
 }
 
-// Workspace-level state (`workspace.json`). Invariant: activeProjectId ∈ index.
+// Workspace-level state (`workspace.json`). Invariant: viewingProjectId ∈ index.
 export interface WorkspaceState {
-  activeProjectId: string | null
+  viewingProjectId: string | null
   recentProjectIds: string[]
   lastOpenedAt: string
+  /** Populated at read time from the in-memory lock table (not persisted). */
+  executingProjectIds?: string[]
 }
 
 // A full project record (manifest only; the graph is fetched via the Runtime).
@@ -231,7 +235,7 @@ function metaFromManifest(m: ProjectManifest): ProjectMeta {
 }
 
 // Generic multi-project registry. One instance owns one workspace: call init() once at startup,
-// thereafter getActiveRuntime() returns the active project's Runtime, swapped by activateProject.
+// thereafter getViewingRuntime() returns the UI viewing project's Runtime.
 export class ProjectRegistry {
   private readonly root: string
   private readonly factory: ProjectRuntimeFactory
@@ -243,12 +247,12 @@ export class ProjectRegistry {
 
   private index: ProjectIndex = { schemaVersion: 1, projects: [] }
   private workspace: WorkspaceState = {
-    activeProjectId: null,
+    viewingProjectId: null,
     recentProjectIds: [],
     lastOpenedAt: '',
   }
   private readonly pool = new Map<string, Runtime>()
-  private active: Runtime | null = null
+  private viewing: Runtime | null = null
   private initialized = false
 
   // ── exclusive lock table ─────────────────────────────────────────────────
@@ -297,10 +301,10 @@ export class ProjectRegistry {
     if (loadedIndex && Array.isArray(loadedIndex.projects)) {
       this.index = { schemaVersion: 1, projects: loadedIndex.projects }
     }
-    const loadedWs = readJsonSafe<WorkspaceState>(this.workspacePath)
+    const loadedWs = readJsonSafe<WorkspaceState & { activeProjectId?: string | null }>(this.workspacePath)
     if (loadedWs) {
       this.workspace = {
-        activeProjectId: loadedWs.activeProjectId ?? null,
+        viewingProjectId: loadedWs.viewingProjectId ?? loadedWs.activeProjectId ?? null,
         recentProjectIds: Array.isArray(loadedWs.recentProjectIds) ? loadedWs.recentProjectIds : [],
         lastOpenedAt: loadedWs.lastOpenedAt ?? nowIso(),
       }
@@ -310,20 +314,20 @@ export class ProjectRegistry {
       this.backfillDefault()
     }
 
-    // Drop a stale active id that no longer resolves to a project.
+    // Drop a stale viewing id that no longer resolves to a project.
     if (
-      this.workspace.activeProjectId &&
-      !this.index.projects.some((p) => p.id === this.workspace.activeProjectId)
+      this.workspace.viewingProjectId &&
+      !this.index.projects.some((p) => p.id === this.workspace.viewingProjectId)
     ) {
-      this.workspace.activeProjectId = null
+      this.workspace.viewingProjectId = null
     }
-    if (!this.workspace.activeProjectId && this.index.projects.length > 0) {
-      this.workspace.activeProjectId = this.index.projects[0].id
+    if (!this.workspace.viewingProjectId && this.index.projects.length > 0) {
+      this.workspace.viewingProjectId = this.index.projects[0]!.id
     }
     this.saveWorkspace()
 
-    if (this.workspace.activeProjectId) {
-      this.active = this.getRuntimeFor(this.workspace.activeProjectId)
+    if (this.workspace.viewingProjectId) {
+      this.viewing = this.getRuntimeFor(this.workspace.viewingProjectId)
     }
     this.initialized = true
   }
@@ -348,7 +352,7 @@ export class ProjectRegistry {
     writeJsonAtomic(this.manifestPath(this.defaultId), manifest)
     this.index = { schemaVersion: 1, projects: [metaFromManifest(manifest)] }
     writeJsonAtomic(this.indexPath, this.index)
-    this.workspace.activeProjectId = this.defaultId
+    this.workspace.viewingProjectId = this.defaultId
     this.workspace.recentProjectIds = [this.defaultId]
   }
 
@@ -365,11 +369,20 @@ export class ProjectRegistry {
   }
 
   getWorkspace(): WorkspaceState {
-    return { ...this.workspace, recentProjectIds: [...this.workspace.recentProjectIds] }
+    return {
+      ...this.workspace,
+      recentProjectIds: [...this.workspace.recentProjectIds],
+      executingProjectIds: this.listLockedProjectIds(),
+    }
   }
 
-  getActiveProjectId(): string | null {
-    return this.workspace.activeProjectId
+  getViewingProjectId(): string | null {
+    return this.workspace.viewingProjectId
+  }
+
+  /** All project ids currently held by an AI agent lock. */
+  listLockedProjectIds(): string[] {
+    return [...this.locks.keys()]
   }
 
   // ── exclusive lock (open-then-operate, one agent ↔ one project) ──────────
@@ -399,7 +412,12 @@ export class ProjectRegistry {
         reason: `agent-holds-another: agent ${caller.agentId} already holds project ${held}; close it first`,
       }
     }
-    this.locks.set(projectId, { agentId: caller.agentId, kind: caller.kind, acquiredAt: nowIso() })
+    this.locks.set(projectId, {
+      agentId: caller.agentId,
+      kind: caller.kind,
+      acquiredAt: nowIso(),
+      ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
+    })
     this.agentLock.set(caller.agentId, projectId)
     return { ok: true }
   }
@@ -421,11 +439,26 @@ export class ProjectRegistry {
     return { ok: true }
   }
 
-  // Gate a mutation against the lock. Humans always pass; an AI caller may mutate ONLY the project it holds AND only while that project is active — so it can never clobber a project it didn't open, and is blocked if a human switched the active project out from under it.
+  // Gate a mutation against the lock. Humans may mutate any existing project
+  // when addressed by id (project-scoped routes). An AI caller may mutate ONLY
+  // a project it holds an exclusive lock on — independent of the UI viewing
+  // project, so multiple agents can execute different projects concurrently.
   checkMutationAccess(projectId: string | null, caller: CallerIdentity): LockResult {
-    if (caller.kind !== 'ai') return { ok: true }
+    if (caller.kind !== 'ai') {
+      if (!projectId) {
+        return {
+          ok: false,
+          code: 'mutation-denied-no-project',
+          reason: 'mutation-denied: project id is required',
+        }
+      }
+      if (!this.index.projects.some((p) => p.id === projectId)) {
+        return { ok: false, code: 'project-not-found', reason: `project-not-found: ${projectId}` }
+      }
+      return { ok: true }
+    }
     if (!projectId) {
-      return { ok: false, code: 'mutation-denied-no-active-project', reason: 'mutation-denied: no active project' }
+      return { ok: false, code: 'mutation-denied-no-project', reason: 'mutation-denied: project id is required' }
     }
     const lock = this.locks.get(projectId)
     if (!lock) {
@@ -455,12 +488,27 @@ export class ProjectRegistry {
     return lock ? { ...lock } : null
   }
 
-  // The active project's Runtime. Throws if init() has not run / no project.
-  getActiveRuntime(): Runtime {
-    if (!this.active) {
-      throw new Error('[project-registry] no active runtime — call init() first')
+  /** All active agent locks — for workspace diagnostics / project panel. */
+  listAllProjectLocks(): Array<{ projectId: string } & ProjectLockInfo> {
+    return [...this.locks.entries()].map(([projectId, lock]) => ({ projectId, ...lock }))
+  }
+
+  // The UI viewing project's Runtime. Throws if init() has not run / no project.
+  getViewingRuntime(): Runtime {
+    if (!this.viewing) {
+      throw new Error('[project-registry] no viewing runtime — call init() first')
     }
-    return this.active
+    return this.viewing
+  }
+
+  /** @deprecated Use getViewingRuntime(). */
+  getActiveRuntime(): Runtime {
+    return this.getViewingRuntime()
+  }
+
+  /** @deprecated Use getViewingProjectId(). */
+  getActiveProjectId(): string | null {
+    return this.getViewingProjectId()
   }
 
   // Get (or lazily build) the Runtime for a project by id.
@@ -563,19 +611,68 @@ export class ProjectRegistry {
     return meta
   }
 
-  // Open / activate a project: makes its Runtime the active one (so subsequent applyBatch / queries / history hit its isolated storage), bumps the recent list, and persists the workspace. The outgoing project's graph is already durable, so no extra flush is needed. Returns the active Runtime.
-  activateProject(id: string): Runtime {
+  // Set the UI viewing project: bumps recents and persists workspace. Does NOT
+  // acquire or release agent locks.
+  viewProject(id: string): Runtime {
     if (!readJsonSafe<ProjectManifest>(this.manifestPath(id))) {
       throw new Error(`[project-registry] project not found: ${id}`)
     }
-    this.workspace.activeProjectId = id
+    this.workspace.viewingProjectId = id
     this.workspace.recentProjectIds = [
       id,
       ...this.workspace.recentProjectIds.filter((rid) => rid !== id),
     ].slice(0, RECENT_LIMIT)
     this.saveWorkspace()
-    this.active = this.getRuntimeFor(id)
-    return this.active
+    const rt = this.getRuntimeFor(id)
+    const graph = rt.graph.load()
+    const pruned = rt.outputs.pruneByRetention(
+      graph ? { protectedNodeIds: collectCachedNodeIds(graph) } : undefined,
+    )
+    if (pruned.removed > 0) {
+      process.stderr.write(
+        `[project-registry] pruned ${pruned.removed} output dir(s) (${Math.round(pruned.freedBytes / (1024 * 1024))}MB) on view ${id}\n`,
+      )
+    }
+    this.viewing = rt
+    return rt
+  }
+
+  /** @deprecated Use viewProject(). */
+  activateProject(id: string): Runtime {
+    return this.viewProject(id)
+  }
+
+  /**
+   * Agent open: acquire exclusive lock and ensure the project's Runtime exists
+   * in the pool. For an AI caller this ALSO makes the project the UI viewing
+   * target (see `viewProject`).
+   *
+   * Why: every host app has exactly one shared render surface (the embedded
+   * `?pane=urdf`-style viewer / headless renderer) and its screenshot-capture
+   * and glb-export routes key their target project off `getViewingProjectId()`
+   * — never off any agent's lock. Before this, `projects.open` deliberately
+   * left viewing untouched, but no AI-facing tool exists to call `viewProject`
+   * either (it's a human-UI-only route). Net effect: an agent's own
+   * `projects.open` → `screenshot.capture`/`export-glb` calls permanently
+   * 409'd with "project X is not the viewing project" (or silently rendered
+   * some unrelated project) unless a human happened to already be looking at
+   * exactly that project. Folding the view-switch into `openProject` for AI
+   * callers makes the tool-documented "打开/查看的项目" (open/viewed project)
+   * wording actually true, and lets a human watch the agent's project live
+   * (the existing `project:viewing` WS broadcast cross-client sync already
+   * supports this — it just never fired from here). A human's explicit
+   * `viewProject` call still always wins the next time it's invoked; this only
+   * changes what an AI `open` does on its own.
+   */
+  openProject(projectId: string, caller: CallerIdentity): LockResult {
+    const lock = this.acquireProjectLock(projectId, caller)
+    if (!lock.ok) return lock
+    if (caller.kind === 'ai') {
+      this.viewProject(projectId)
+    } else {
+      this.getRuntimeFor(projectId)
+    }
+    return { ok: true }
   }
 
   async deleteProject(id: string, opts: DeleteProjectOptions = {}): Promise<void> {
@@ -605,24 +702,25 @@ export class ProjectRegistry {
     writeJsonAtomic(this.indexPath, this.index)
     this.workspace.recentProjectIds = this.workspace.recentProjectIds.filter((rid) => rid !== id)
 
-    if (this.workspace.activeProjectId === id) {
+    if (this.workspace.viewingProjectId === id) {
       const next = this.index.projects[0]
       if (next) {
-        this.workspace.activeProjectId = next.id
-        this.active = this.getRuntimeFor(next.id)
+        this.workspace.viewingProjectId = next.id
+        this.viewing = this.getRuntimeFor(next.id)
       } else {
         // Never leave the workspace empty — mint a fresh default.
         const meta = await this.createProject({ type: this.defaultType, name: this.defaultName })
-        this.workspace.activeProjectId = meta.id
-        this.active = this.getRuntimeFor(meta.id)
+        this.workspace.viewingProjectId = meta.id
+        this.viewing = this.getRuntimeFor(meta.id)
       }
     }
     this.saveWorkspace()
   }
 
-  setWorkspace(patch: Partial<Pick<WorkspaceState, 'activeProjectId' | 'recentProjectIds'>>): WorkspaceState {
-    if (patch.activeProjectId) {
-      this.activateProject(patch.activeProjectId)
+  setWorkspace(patch: Partial<Pick<WorkspaceState, 'viewingProjectId' | 'recentProjectIds'>> & { activeProjectId?: string | null }): WorkspaceState {
+    const viewingId = patch.viewingProjectId ?? patch.activeProjectId
+    if (viewingId) {
+      this.viewProject(viewingId)
     }
     if (patch.recentProjectIds !== undefined) {
       this.workspace.recentProjectIds = patch.recentProjectIds.slice(0, RECENT_LIMIT)

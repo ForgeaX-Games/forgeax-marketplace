@@ -84,6 +84,10 @@ export interface GroupTemplateBattery {
   description?: string
   descriptionEn?: string
   version?: string
+  /** Authoring metadata persisted in the template json (read-only display). */
+  author?: string
+  /** Creation timestamp (ms epoch) persisted in the template json; falls back to the file mtime. */
+  createdAt?: number
   iconSvg?: string
   /** Base64 data URL of icon.png beside the template json, when present. */
   iconPng?: string
@@ -95,12 +99,15 @@ export interface GroupTemplateBattery {
   builtin?: boolean
 }
 
-/** Server response of POST /projects/:id/activate. */
-export interface ActivateProjectResult {
+/** Server response of POST /projects/:id/view. */
+export interface ViewProjectResult {
   project: ProjectRecord
-  /** The newly-activated project's graph snapshot (null when empty/unwritten). */
+  /** The viewed project's graph snapshot (null when empty/unwritten). */
   pipeline: PipelineSnapshot | null
 }
+
+/** @deprecated Use ViewProjectResult / viewProject(). */
+export type ActivateProjectResult = ViewProjectResult
 
 /** A saved text preset (built-in or user). `builtin` entries are read-only. */
 export interface TextPresetDto {
@@ -139,7 +146,9 @@ export interface ApiClient {
   // Execution ------------------------------------------------------------
   /** Run the pipeline (omit nodeId) or a node's upstream closure. Resolves
    *  when the run finishes; live progress arrives on the 'execution' channel. */
-  execute(request?: { nodeId?: string }): Promise<ExecutionResult>
+  execute(request?: { nodeId?: string; quietErrors?: boolean }): Promise<ExecutionResult>
+  /** Remove every persisted outputs/<nodeId>/ cache directory for this project. */
+  clearOutputCache(): Promise<{ ok: true }>
 
   // Queries ---------------------------------------------------------------
   getPipeline(): Promise<PipelineSnapshot | null>
@@ -253,9 +262,9 @@ export interface ApiClient {
   // Faithful port of the legacy project registry. OPTIONAL + additive: a
   // transport fronting an app that exposes the project routes implements them
   // (see scene-generator's HttpApiClient); minimal transports omit them and the
-  // projectStore degrades to a single implicit pipeline. `activateProject` is
-  // the open cascade's server step — it swaps the active runtime so subsequent
-  // getPipeline()/applyBatch() observe the activated project's isolated graph.
+  // projectStore degrades to a single implicit pipeline. `viewProject` is
+  // the open cascade's server step — it sets the UI viewing target so subsequent
+  // getPipeline()/applyBatch() observe the viewed project's isolated graph.
 
   /** List all projects in the workspace. */
   listProjects?(): Promise<readonly ProjectMeta[]>
@@ -273,9 +282,15 @@ export interface ApiClient {
   updateProject?(id: string, patch: { name?: string; description?: string; thumbnail?: string; type?: string }): Promise<ProjectMeta>
   /** Delete a project; the server enforces "never empty" and returns the new workspace. */
   deleteProject?(id: string, opts?: { assetPolicy?: AssetDeletePolicy }): Promise<{ ok: true; workspace: WorkspaceState }>
-  /** Open / activate a project (the server step of the open cascade). */
-  activateProject?(id: string): Promise<ActivateProjectResult>
-  /** Read the workspace doc (activeProjectId / recentProjectIds). */
+  /** Switch the UI viewing project (the server step of the open cascade). */
+  viewProject?(id: string): Promise<ViewProjectResult>
+  /** @deprecated Use viewProject(). */
+  activateProject?(id: string): Promise<ViewProjectResult>
+  /** Read-only lock holder for a project (agent execution badge). */
+  getProjectLock?(id: string): Promise<{ lock: { agentId: string; kind: string; acquiredAt: string; sessionId?: string } | null }>
+  /** All active agent locks — batch fetch for the project panel. */
+  listWorkspaceLocks?(): Promise<{ locks: readonly { projectId: string; agentId: string; kind: string; acquiredAt: string; sessionId?: string }[] }>
+  /** Read the workspace doc (viewingProjectId / recentProjectIds / executingProjectIds). */
   getWorkspace?(): Promise<WorkspaceState>
   /** Patch the workspace doc. */
   setWorkspace?(patch: Partial<WorkspaceState>): Promise<WorkspaceState>

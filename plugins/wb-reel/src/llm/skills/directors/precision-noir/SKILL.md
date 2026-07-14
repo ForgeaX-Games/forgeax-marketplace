@@ -43,4 +43,4 @@ order: 1
 
 ## 海报样张
 
-Cinematic neo-noir thriller poster, rigid symmetrical framing, cold teal-green color cast, crushed blacks, sodium-vapor highlights, clinical precise mood, rain-slick city at night, no text, vertical 2:3
+Film-director-style storyboard contact sheet, 6 large cinematic frames arranged in 2 columns by 3 rows with thin dark gutters, cold desaturated teal-green grade with crushed blacks and single-source lighting throughout. Panel 1: locked-off wide of a dim room lit only by one desk lamp, shadow filling most of the frame. Panel 2: asymmetric over-the-shoulder two-shot, one face half-sunk in shadow, the other flatly lit. Panel 3: long-lens compressed close-up of a still, cold face. Panel 4: extreme close-up of evidence — a hand, a screen, a stain. Panel 5: rain-slick city street at night seen through a window, teal-green cast. Panel 6: an almost imperceptible slow push-in on a lone seated figure. Clinical, precise, restrained; consistent grade across all panels, no text, no captions, vertical 2:3

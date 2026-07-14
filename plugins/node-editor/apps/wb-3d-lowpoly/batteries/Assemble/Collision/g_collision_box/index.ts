@@ -1,7 +1,7 @@
 /**
  * g_collision_box —— 为 part 自动派生一个 AABB box 形 <collision>。
  *
- * 对应 articraft.SDK.collision_helpers.autocollide_part(mode="single") 的简化等价：
+ * autocollide_part(mode="single") 的简化实现：
  *   - 沿 part.shape ref 链解析出该 part 的局部 AABB（不烘焙、纯几何）
  *   - 套上可选 padding / min_size 后 emit 一条
  *       `collision(link=part, box=[w,d,h], origin=[cx,cy,cz])`
@@ -9,9 +9,9 @@
  *
  * 设计要点：
  *   - 完全独立于 g_inertial_from_geometry：那一行用 box/cyl/sphere 解析公式算惯量，
- *     但 URDF <collision> 必须是个具体几何元素，最稳妥就是 box；articraft 也是这个选择。
+ *     但 URDF <collision> 必须是个具体几何元素，最稳妥就是 box。
  *   - 复杂 visual（CSG / array_radial / spur_gear ...）走 AABB 时单 box 会很保守 →
- *     用户嫌不准时改用 g_collision_clustered（articraft "clustered" 模式，多 box 簇）。
+ *     用户嫌不准时改用 g_collision_clustered（"clustered" 模式，多 box 簇）。
  *   - 不要尝试自动调用：用户主动放这个电池 = 显式选择"快但保守"，否则旧的 visual=collision
  *     行为继续保留。
  */
@@ -111,7 +111,7 @@ function readNonNeg(raw: unknown, fallback: number): number {
 }
 
 /**
- * 按 articraft autocollide_part(replace=True) 的语义：先把同 link 的现有 collision
+ * 按 autocollide_part(replace=True) 的语义：先把同 link 的现有 collision
  * 全部清掉再加新的。仅删除"显式 collision 语句"，不动 part 本身。
  */
 function removeCollisionsFor(geom: Geometry, linkId: string): Geometry {

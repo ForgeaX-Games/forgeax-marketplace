@@ -1,10 +1,15 @@
 # Modeling Guide — per-family pages
 
+> ⚠️ **Legacy format — optional read.** The JSON snippets below use the old
+> `createNode` node-wiring form, **not** DSL. For DSL-first authoring you do **not**
+> need this file: get op signatures from [op-directory.md](op-directory.md) and
+> syntax from [dsl-quickref.md](dsl-quickref.md). Read this only for per-family
+> *concepts* (when to use a family, which params matter) — translate any snippet to
+> the equivalent DSL statement; never emit `createNode` or call `batteries.get`.
+
 Use this **after** writing the decomposition brief
 ([executions/part-a-asset.md](executions/part-a-asset.md#phase-0--part-manifest-hard-gate)) to
-pick the right family for each part. Op ids and exact port names are
-authoritative from `lowpoly:batteries.get` — the snippets below show the *shape*
-of the wiring, not a substitute for inspecting the battery.
+pick the right family for each part.
 
 Conventions used in every snippet:
 
@@ -68,7 +73,7 @@ Key params: shape dimensions (`width`/`height`/`radius`/`points`); `id`. Output
 
 ---
 
-## CSG — `g_difference` `g_union` `g_intersection` `g_extrude` `g_extrude_with_holes` `g_loft` `g_revolve` `g_sweep` `g_lathe` `g_pipe` `g_section_loft`
+## CSG — `g_difference` `g_union` `g_intersection` `g_extrude` `g_extrude_with_holes` `g_loft` `g_revolve` `g_sweep` `g_lathe` `g_pipe` `g_section_loft` `g_fillet`
 
 **When to use:** the form is hollow, has a cut/hole/recess, or is a lofted /
 revolved / swept / extruded body. This is the anti-primitive workhorse — reach
@@ -76,8 +81,9 @@ here before stacking boxes.
 
 Id ports (reference *shape* / *profile* ids): `base_id`+`tool_id` (difference),
 `a_id`+`b_id` (union/intersection), `profile_id` (extrude/revolve/lathe),
-`outer_id`+`hole_ids` (extrude_with_holes), `profile_ids` (loft). On a bad ref
-the op appends nothing and returns `{ error }` — read it.
+`outer_id`+`hole_ids` (extrude_with_holes), `profile_ids` (loft),
+`shape_id` (fillet). On a bad ref the op appends nothing and returns `{ error }` —
+read it.
 
 ```jsonc
 // cut an opening out of a body instead of faking it with a box
@@ -87,6 +93,21 @@ the op appends nothing and returns `{ error }` — read it.
 // solid from a profile
 { "type": "createNode", "nodeId": "n_ext", "opId": "g_extrude",
   "params": { "profile_id": "face", "height": 0.05, "id": "panel" } }
+```
+
+**`g_fillet`** — round (`type=round`, arc) or bevel (`type=chamfer`, flat cut) the
+edges of a solid: the general edge-treatment op (soften an enclosure, break a
+sharp corner). `shape_id` references the solid; `radius` is the fillet radius /
+chamfer distance (meters, keep < half the adjacent face or OCCT rejects it and
+`g_to_urdf` falls back to an AABB box); `edges` = `all` (default) or `vertical`
+(only edges parallel to Z, e.g. a box's four uprights). Works on CSG/primitive
+**solids only** — not on the meshes from `g_pipe`/`g_sweep`/`g_section_loft`.
+
+```jsonc
+// round the four upright edges of a box body by 8 mm
+{ "type": "createNode", "nodeId": "n_fil", "opId": "g_fillet",
+  "params": { "shape_id": "body", "radius": 0.008, "type": "round",
+              "edges": "vertical", "id": "body_soft" } }
 ```
 
 ---
@@ -161,7 +182,7 @@ must be re-created with `g_gear`. Do not approximate a gear with a bare cylinder
 
 ---
 
-## Architecture — `g_wall` `g_floor_slab` `g_stairs` `g_roof` `g_facade_panel` `g_window` `g_door` `g_railing` `g_column` + `g_building_shell`
+## Architecture — `g_wall` `g_floor_slab` `g_stairs` `g_roof` `g_facade_panel` `g_window` `g_door` `g_railing` `g_column`
 
 **When to use:** the object is a building / house / room / interior, or a single
 building element. These semantic ops are the **default** for architecture — do
@@ -175,46 +196,151 @@ Element ops (each appends one shape `geometry` + `id`, wrap with `g_part`):
 
 - `g_wall` — straight wall `length`×`height`×`thickness`. `openings` is a JSON
   list `[[x, width, sill, head], …]` (x = hole center offset from the wall
-  midpoint) that cuts doors/windows out of the wall in one shot.
+  midpoint) that cuts doors/windows out of the wall in one shot. Optional
+  `window_band` cuts one continuous horizontal opening (`band_sill` / `band_head`
+  / `band_margin`) instead of listing each hole, and `pane_width` + `mullion`
+  drop evenly spaced vertical mullions into it. Optional `plinth_height` adds a
+  thicker base course projecting `plinth_projection` per face.
 - `g_floor_slab` — slab `width`×`depth`×`thickness`; `holes` JSON `[[x,y,w,d]]`
-  for stair/shaft wells.
+  for stair/shaft wells. Optional `beam_depth` (+`beam_width`) hangs a perimeter
+  downstand beam below the slab; `edge_chamfer` bevels the top edges.
 - `g_stairs` — `type=straight` (flight from `total_rise` / `run` / `width` /
   `step_count`) or `type=spiral` (treads around a center pole; `radius` /
-  `inner_radius` / `sweep_deg`).
+  `inner_radius` / `sweep_deg`). Optional `tread_thickness` + `open_riser` give
+  thin floating treads with no risers; `landing_depth` inserts a mid-run landing
+  after step `landing_after` (straight only).
 - `g_roof` — `type` = `flat` / `shed` / `gable` / `hip` / `gambrel` / `mansard` /
   `pyramid` over a `width`×`depth` footprint, with `height` (ridge) and `overhang`.
-- `g_facade_panel` — cladding/siding sheet with optional horizontal `groove_count`
-  reveals.
+  For pitched roofs `eave_overhang` / `verge_overhang` override `overhang`
+  independently along the slope vs the ridge. Flat roofs take a `parapet_height`
+  (+`parapet_thickness`) upstand with an optional `coping_width` cap.
+- `g_facade_panel` — cladding/siding sheet with optional `groove_count` reveals.
+  `groove_direction` = `horizontal` (default) / `vertical` / `both`, or set
+  `groove_spacing` to lay grooves by pitch instead of count; `board_style` =
+  `flush` (default) / `lap` / `shiplap` steps the boards for a lapped look.
+  `orientation=wall` (default) stands it up like a wall (`panel_h` along Z, base
+  at Z=0); `orientation=slab` lays it flat (`panel_h` along Y).
 - `g_window` — frame + `type` = `cross` / `grid` (`rows`×`cols`) / `louver`
   (`rows` slats) + optional `glass`, one fused shape; `depth` matches the wall.
+  Optional `pane_width` auto-divides the glazing into columns of that target
+  width, `sill` adds a projecting ledge, and `arch_top` rounds the head into a
+  semicircular arch (needs `height` > `width`/2 + `frame`).
 - `g_door` — emits a `door_frame` + **separate** `door_leaf` shape(s) (returns
   `frame_id` + `leaf_id`/`leaf_ids`). `leaves=2` makes a double door; `style` =
-  `flush` / `panel` / `glazed`. Wrap a leaf with `g_part` and join it
+  `flush` / `panel` / `glazed`. `panel` style takes a `panel_rows`×`panel_cols`
+  recessed grid. The frame accepts an optional `transom` (glazed head band) and
+  `sidelight` (glazed side lights). Wrap a leaf with `g_part` and join it
   `g_joint_revolute` for an openable door or `g_joint_fixed` for a static one.
 - `g_railing` — balustrade: end posts + top handrail + evenly spaced balusters
-  (`length` / `height` / `baluster_count`). Good for balconies, landings, stairs.
+  (`length` / `height` / `baluster_count`). Optional `post_shape` = `round`
+  (+`post_radius`) / `square`, `post_spacing` derives the baluster count from a
+  target pitch, `bottom_rail` / `mid_rail` add lower rails, and
+  `top_rail_width` / `top_rail_height` size the handrail. Good for balconies,
+  landings, stairs.
 - `g_column` — `round` / `square` pillar with optional `base_height` /
-  `capital_height` plinth & capital.
+  `capital_height` plinth & capital. `taper` sets the top/bottom radius ratio
+  (entasis), `base_style` / `capital_style` = `plain` / `stepped`, and `flutes`
+  cuts that many vertical grooves into round shafts.
 
-Generator (emits a whole shape→part→fixed-joint subtree; returns `root_id`):
+Assembling a building: there is **no whole-building orchestrator** — emit the
+elements above and wire them by hand into one rooted tree. Wrap each element shape
+in a `g_part`, then connect with `g_joint_fixed` (openable leaves →
+`g_joint_revolute`) so every part reaches a single root (e.g. the ground slab).
+Place each element via the **joint origin** (`origin=[cx, cy, z]`, meters, Z up);
+a wall running along Y is rotated with joint `rpy=[0,0,π/2]`; stack floors with
+`origin=[0,0,floorIndex*storeyH]`. Deduplicate shared interior walls so adjacent
+rooms don't each emit an overlapping wall on their common edge.
 
-- `g_building_shell` — multi-storey orchestrator. **Dual-mode layout**: pass an
-  explicit `rooms` JSON `[[x,y,w,d], …]` (room centers + sizes), **or** go
-  procedural with `rooms_per_floor` + `seed` (recursive BSP split of the
-  footprint). Adds per-floor slabs, interior/exterior walls, an optional stair
-  well, and a roof — all under a single root part. For a single room use
-  `floors=1, rooms_per_floor=1, roof_type=none`.
+### Placement contract (get this right or holes/windows/doors won't line up)
+
+All element shapes are **X/Y-centered, base at Z=0**. Misalignment is almost never
+a baker bug — it's this contract not being followed. The full recipes (opening↔
+window/door, door-leaf hinge origin, per-storey slabs, stairs↔well) live in the
+**对齐配方 · Placement recipes** section of
+[PART B · 建筑](executions/part-b-building.md). Essentials:
+
+- **Opening ↔ window/door**: a wall `openings=[[x,w,sill,head]]` entry only cuts a
+  hole; the matching `g_window`/`g_door` is a *separate* shape you must place into
+  it. Use `width=w`, **`height=head−sill`**, `depth=wall thickness`, and
+  **parent the window/door part to that wall part** with joint `origin=[x,0,sill]`
+  (Z→`sill`, since the shape's base is at Z=0). Parenting to the wall (not the root
+  slab) is what makes a wall running along Y still line up. `g_wall` returns
+  ready-made **`opening_placements`** JSON (`{origin,width,height,depth}` per hole).
+- **Door leaf origin is at the hinge, not the center**: don't place a leaf concentric
+  with its frame or it pokes out. Use the `leaf_origin`/`leaf_origins` JSON that
+  `g_door` returns (single `[∓clearW/2,0,0]`; double = one per jamb).
+- **Every storey needs its own `g_floor_slab`** sized to the footprint (defaults are
+  `6×4` — set `width`/`depth`) at `origin=[0,0,i*storeyH]`; the **roof is not a floor**.
+- **Stairs need a matching well**: put `g_stairs` (`total_rise=storeyH`) at `[sx,sy,…]`
+  and cut an aligned `holes=[[sx,sy,wellW,wellD]]` in the slab **above** it.
+- **Overlap + the moving-joint trap (why doors fail when windows don't)**: in an
+  **all-`g_joint_fixed`** building, benign AABB overlaps (wall corners, an embedded
+  window/door frame, a leaf inside its frame, stairs in a well) are only *warnings*.
+  The moment you add **one moving joint** (`g_joint_revolute` for an openable door),
+  `g_geometry_qc` promotes **every** overlap in the whole model to a **fatal** issue.
+  So prefer `g_joint_fixed` for a static building; only go `g_joint_revolute` when the
+  door truly needs to swing, and then whitelist the benign pairs via
+  `g_geometry_qc` `allow_pairs` (e.g. `"door1:wall_s"`, `"door1:door1_leaf"`). Use
+  `g_metrics` (`max_penetration`/`overlap_ratio`) to tell real clashes from
+  conservative AABB false positives. Still eliminate *real* overlaps: dedupe shared
+  walls, fill (not overrun) openings, keep stairs out of solid slabs.
+
+**Not limited to the 9 Architecture ops.** They're the default for the shell/main
+structure, but enrich detail with other families: Primitive/CSG for chimneys,
+sills, bay/dormer windows, cornices; `g_column`/`g_railing`/`g_facade_panel` for
+porches, balconies, cladding; Parts (`g_knob`→handles, `g_vent_grille`→vents);
+`g_array_*` to repeat windows/balusters; `g_material`/`g_named_color` for color
+variety. Wire every added piece into the same rooted tree under R1–R5. See
+[PART B §1.5](executions/part-b-building.md).
 
 ```jsonc
-// a windowed exterior wall
+// ground slab (root) sized to the 6×8 footprint
+{ "type": "createNode", "nodeId": "n_slab0", "opId": "g_floor_slab",
+  "params": { "width": 6, "depth": 8, "thickness": 0.2, "id": "slab0" } }
+{ "type": "createNode", "nodeId": "n_slab0_p", "opId": "g_part", "params": { "shape_id": "slab0", "id": "slab0_part" } }
+
+// south wall with a window hole (x=-1.5) and a door hole (x=1.5)
 { "type": "createNode", "nodeId": "n_wall", "opId": "g_wall",
   "params": { "length": 6, "height": 2.8, "thickness": 0.2,
               "openings": "[[ -1.5, 1.2, 0.9, 2.2 ], [ 1.5, 0.9, 0, 2.1 ]]", "id": "wall_s" } }
+{ "type": "createNode", "nodeId": "n_wall_p", "opId": "g_part", "params": { "shape_id": "wall_s", "id": "wall_s_part" } }
+{ "type": "createNode", "nodeId": "n_wall_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "slab0_part", "child_id": "wall_s_part", "origin": "[0, -4, 0.2]" } }
 
-// a whole 2-storey building, procedural layout
-{ "type": "createNode", "nodeId": "n_bldg", "opId": "g_building_shell",
-  "params": { "footprint_w": 12, "footprint_d": 8, "floors": 2,
-              "rooms_per_floor": 3, "seed": 7, "roof_type": "gable", "id": "house" } }
+// window sized to the hole (w=1.2, h=2.2-0.9=1.3), parented to the WALL, origin=[x,0,sill]
+{ "type": "createNode", "nodeId": "n_win", "opId": "g_window",
+  "params": { "width": 1.2, "height": 1.3, "depth": 0.2, "id": "win1" } }
+{ "type": "createNode", "nodeId": "n_win_p", "opId": "g_part", "params": { "shape_id": "win1", "id": "win1_part" } }
+{ "type": "createNode", "nodeId": "n_win_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "wall_s_part", "child_id": "win1_part", "origin": "[-1.5, 0, 0.9]" } }
+
+// door: frame at the hole, leaf placed at leaf_origin (hinge edge), openable via revolute
+{ "type": "createNode", "nodeId": "n_door", "opId": "g_door",
+  "params": { "width": 0.9, "height": 2.1, "depth": 0.2, "hinge": "left", "id": "door1" } }
+{ "type": "createNode", "nodeId": "n_df_p", "opId": "g_part", "params": { "shape_id": "door1", "id": "door1_part" } }
+{ "type": "createNode", "nodeId": "n_df_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "wall_s_part", "child_id": "door1_part", "origin": "[1.5, 0, 0]" } }
+{ "type": "createNode", "nodeId": "n_leaf_p", "opId": "g_part", "params": { "shape_id": "door1_leaf", "id": "door1_leaf_part" } }
+// Static building → fixed leaf at door1.leaf_origin (≈ [-clearW/2, 0, 0]), no moving
+// joint so architectural AABB overlaps stay non-fatal. To make it swing, swap to
+// g_joint_revolute (az=1, lower=0, upper=1.57) AND whitelist the benign overlaps on
+// g_geometry_qc: allow_pairs=["door1:wall_s","door1:door1_leaf"].
+{ "type": "createNode", "nodeId": "n_leaf_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "door1_part", "child_id": "door1_leaf_part", "origin": "<door1.leaf_origin>" } }
+
+// upper floor: its own slab, sized to footprint, at storey height, with a stair well
+{ "type": "createNode", "nodeId": "n_slab1", "opId": "g_floor_slab",
+  "params": { "width": 6, "depth": 8, "thickness": 0.2, "holes": "[[ 2, 3, 1.2, 3 ]]", "id": "slab1" } }
+{ "type": "createNode", "nodeId": "n_slab1_p", "opId": "g_part", "params": { "shape_id": "slab1", "id": "slab1_part" } }
+{ "type": "createNode", "nodeId": "n_slab1_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "slab0_part", "child_id": "slab1_part", "origin": "[0, 0, 3.0]" } }
+
+// stairs spanning the storey, landing under the well at the same [sx,sy]=[2,3]
+{ "type": "createNode", "nodeId": "n_stair", "opId": "g_stairs",
+  "params": { "total_rise": 3.0, "run": 0.28, "width": 1.0, "step_count": 15, "id": "stair1" } }
+{ "type": "createNode", "nodeId": "n_stair_p", "opId": "g_part", "params": { "shape_id": "stair1", "id": "stair1_part" } }
+{ "type": "createNode", "nodeId": "n_stair_j", "opId": "g_joint_fixed",
+  "params": { "parent_id": "slab0_part", "child_id": "stair1_part", "origin": "[2, 3, 0.2]" } }
 ```
 
 ---

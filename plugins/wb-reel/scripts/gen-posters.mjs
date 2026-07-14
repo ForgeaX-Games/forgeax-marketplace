@@ -59,7 +59,8 @@ function loadImageKey() {
     apiKey: img.api_key,
     apiBase: String(img.api_base).replace(/\/$/, ''),
     apiVersion: img.api_version || '2024-02-01',
-    deployment: 'gpt-image-2',
+    // deployment 名以 Azure 后台为准；json 显式写就用它，否则用 model 名兜底
+    deployment: img.deployment || 'gpt-image-2',
   }
 }
 

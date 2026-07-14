@@ -43,7 +43,8 @@ export function parseEndpoint(s: string): { nodeId: string; port: string } {
 export async function applyMany(opts: Record<string, unknown>, ops: readonly Op[]): Promise<void> {
   const serverUrl = resolveServerUrl(opts)
   if (serverUrl) {
-    const result = await postBatch(serverUrl, ops, { actor: 'cli' })
+    const projectId = typeof opts.projectId === 'string' && opts.projectId ? opts.projectId : undefined
+    const result = await postBatch(serverUrl, ops, { actor: 'cli', ...(projectId ? { projectId } : {}) })
     makeEmitter(mode(opts)).record(result)
     if (result.status === 'rejected') {
       throw new CliError(`apply rejected: ${result.diagnostics?.[0]?.message ?? result.reason ?? 'unknown'}`, 1)

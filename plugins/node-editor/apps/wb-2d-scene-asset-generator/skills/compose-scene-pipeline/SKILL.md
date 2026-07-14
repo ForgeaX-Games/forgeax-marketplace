@@ -39,11 +39,8 @@ Use these tools:
 - `asset2d:assets.list`
 - `asset2d:renderer.info`, `asset2d:renderer.setViewMode`,
   `asset2d:renderer.selectLayer`, `asset2d:renderer.openAllSubLayers`
-- `asset2d:screenshot.capture`, `asset2d:screenshot.latest`
 
 `asset2d:projects.remove` requires destructive confirmation for AI callers.
-`asset2d:screenshot.store` is an internal renderer callback and is not exposed to
-AI.
 
 ## Workflow
 
@@ -54,9 +51,9 @@ AI.
 4. Apply graph changes with `asset2d:pipeline.applyBatch`, using
    `opts.actor = "ai:scene"` and a concise `opts.label`.
 5. Execute with `asset2d:pipeline.execute`.
-6. Drive the preview with `asset2d:renderer.*`, inspect assets with
-   `asset2d:assets.list`, and capture/read preview pixels with
-   `asset2d:screenshot.capture` / `asset2d:screenshot.latest`.
+6. Drive the preview view mode with `asset2d:renderer.*` and inspect generated
+   assets via metadata with `asset2d:assets.list` / `asset2d:assets.get`
+   (dimensions / byte size / errors / out fields).
 7. Iterate until the scene matches the request, then optionally save a graph
    template with `asset2d:pipeline.export`.
 
@@ -67,9 +64,9 @@ AI.
   grouping, and deletion. Do not write `state/graph.json` by hand.
 - Preserve the renderer's supported view modes (`top`, `topBillboard`, `iso`,
   `free3d`) and layer selection contract.
-- Use renderer screenshots, generated project assets, and node outputs as
-  feedback for multi-turn iteration; do not declare completion from graph edits
-  alone.
+- Use the execute output summary (no errors, expected layer/asset names),
+  generated project assets, and node outputs as feedback for multi-turn
+  iteration; do not declare completion from graph edits alone.
 
 ## References
 

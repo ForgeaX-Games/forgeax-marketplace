@@ -1,11 +1,11 @@
 /**
- * fence_farm: 在区域掩码列表上批量生成农场栅栏与栅栏门布局
- * 输入：gridList (array | grid) — 可用区域掩码列表或单个掩码网格; fenceMode (string) — 栅栏形式;
+ * fence_farm: 在单张区域掩码上生成农场栅栏与栅栏门布局（DataTree 形式）
+ * 输入：inputGrid (grid/item) — 单张可用区域掩码网格; fenceMode (string) — 栅栏形式;
  *       gateCount/sectionCount/gateWidth/plotWidth/plotHeight (number) — 布局参数
- *       mergeOutput (boolean, default true) — 是否将所有网格的同语义层合并为一张网格
  * 输出：
- *   outputGridList (array) — 单值网格列表（拍平）：每张农场按语义拆分，每张只含一种语义
- *   outputNameList (array) — 名称清单，格式 [{id, name, type:"tile"}]
+ *   outputGrid (grid/item) — 单张多值网格（1=内部地面，2=栅栏，3=栅栏门）
+ *   outputNameList (array/item) — 名称清单，仅含实际出现的 id，格式 [{id, name, type}]
+ * 网格列表由引擎按 DataTree 自动逐张 fanout。
  */
 
 type Grid = number[][];
@@ -249,78 +249,24 @@ const FENCE_LABELS: Record<number, string> = {
 // Values that should be output as "asset" type (point/object placements)
 const FENCE_ASSET_VALS = new Set([3]); // 栅栏门 = asset
 
-/**
- * 非合并模式：将单张多值网格拆分为单值网格列表 + 名称清单。
- */
-function splitToSingleValueGrids(
-  multiGrid: Grid,
-  farmIndex: number,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
-  const rows = multiGrid.length;
-  const cols = multiGrid[0]?.length ?? 0;
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  const valSet = new Set<number>();
-  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  for (const val of sortedVals) {
-    const singleGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        if (multiGrid[r][c] === val) singleGrid[r][c] = nextId.value;
-
-    const label = FENCE_LABELS[val] ?? `类型${val}`;
-    const entryType = FENCE_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(singleGrid);
-    nameList.push({ id: nextId.value, name: `农场${farmIndex}-${label}`, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+function isGrid(v: unknown): v is Grid {
+  return Array.isArray(v) && Array.isArray((v as unknown[])[0]) &&
+    typeof (v as Grid)[0]?.[0] === "number";
 }
 
-/**
- * 合并模式：将所有多值网格按语义值合并，相同语义值的格子写入同一张网格（使用同一 ID）。
- */
-function mergeBySemantics(
-  multiGrids: Grid[],
-  rows: number,
-  cols: number,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
+// Build the name list for the values actually present in the multi-value grid.
+function buildNameList(multiGrid: Grid): NameEntry[] {
   const valSet = new Set<number>();
-  for (const mg of multiGrids)
-    for (const row of mg)
-      for (const v of row)
-        if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  for (const val of sortedVals) {
-    const merged: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    const id = nextId.value;
-    for (const mg of multiGrids)
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (mg[r]?.[c] === val) merged[r][c] = id;
-
-    const label = FENCE_LABELS[val] ?? `类型${val}`;
-    const entryType = FENCE_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(merged);
-    nameList.push({ id, name: label, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
+  return [...valSet].sort((a, b) => a - b).map((val) => ({
+    id: val,
+    name: FENCE_LABELS[val] ?? `类型${val}`,
+    type: FENCE_ASSET_VALS.has(val) ? "asset" : "tile",
+  }));
 }
 
 export function fenceFarm(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGridList  = input.gridList;
+  const rawGrid      = input.inputGrid;
   const fenceMode    = typeof input.fenceMode    === "string" ? input.fenceMode    : "border";
   const gateCount    = typeof input.gateCount    === "number" ? Math.max(1, Math.min(4, Math.floor(input.gateCount)))   : 2;
   const sectionCount = typeof input.sectionCount === "number" ? Math.max(2, Math.floor(input.sectionCount))             : 3;
@@ -328,56 +274,24 @@ export function fenceFarm(input: Record<string, unknown>): Record<string, unknow
   const plotWidth    = typeof input.plotWidth    === "number" ? Math.max(2, Math.floor(input.plotWidth))                : 8;
   const plotHeight   = typeof input.plotHeight   === "number" ? Math.max(2, Math.floor(input.plotHeight))               : 8;
   const seed         = typeof input.seed         === "number" ? Math.floor(input.seed)                                  : 0;
-  const mergeOutput  = input.mergeOutput === false ? false : true; // default true
 
-  // Support both a single grid and an array of grids
-  let gridList: Grid[];
-  if (Array.isArray(rawGridList)) {
-    if (rawGridList.length === 0) return { error: "gridList is required" };
-    if (typeof rawGridList[0]?.[0] === "number") {
-      gridList = [rawGridList as unknown as Grid];
-    } else {
-      gridList = rawGridList as Grid[];
-    }
-  } else {
-    return { error: "gridList is required" };
+  if (!isGrid(rawGrid) || rawGrid.length === 0 || !rawGrid[0] || rawGrid[0].length === 0) {
+    return { error: "inputGrid is required" };
   }
+  const grid = rawGrid as Grid;
 
-  const rows = gridList[0]?.length ?? 0;
-  const cols = gridList[0]?.[0]?.length ?? 0;
   const rng = makeRng(seed);
-  const nextId = { value: 1 };
-  const multiGrids: Grid[] = [];
-
-  gridList.forEach((grid) => {
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return;
-    let multiGrid: Grid;
-    switch (fenceMode) {
-      case "sections":
-        multiGrid = generateSections(grid, sectionCount, gateWidth, rng);
-        break;
-      case "plots":
-        multiGrid = generatePlots(grid, plotWidth, plotHeight);
-        break;
-      default: // "border"
-        multiGrid = generateBorder(grid, gateCount);
-    }
-    multiGrids.push(multiGrid);
-  });
-
-  if (multiGrids.length === 0) return { outputGridList: [], outputNameList: [] };
-
-  if (mergeOutput) {
-    const { grids, nameList } = mergeBySemantics(multiGrids, rows, cols, nextId);
-    return { outputGridList: grids, outputNameList: nameList };
+  let multiGrid: Grid;
+  switch (fenceMode) {
+    case "sections":
+      multiGrid = generateSections(grid, sectionCount, gateWidth, rng);
+      break;
+    case "plots":
+      multiGrid = generatePlots(grid, plotWidth, plotHeight);
+      break;
+    default: // "border"
+      multiGrid = generateBorder(grid, gateCount);
   }
 
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  multiGrids.forEach((mg, i) => {
-    const { grids, nameList } = splitToSingleValueGrids(mg, i + 1, nextId);
-    outputGridList.push(...grids);
-    outputNameList.push(...nameList);
-  });
-  return { outputGridList, outputNameList };
+  return { outputGrid: multiGrid, outputNameList: buildNameList(multiGrid) };
 }

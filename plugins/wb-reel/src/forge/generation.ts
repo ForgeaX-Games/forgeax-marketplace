@@ -1,5 +1,5 @@
 /**
- * 素材生成模块 · 对外可调用边界（subpath: `@forgeax-plugin/wb-reel/generation`）。
+ * 素材生成模块 · 对外可调用边界（subpath: `@forgeax-extension/wb-reel/generation`）。
  *
  * 影游把「素材生成」当成一个可解耦的下游模块来调用：影游(编排器)负责拆角色/场景/道具、
  * 组织参考锚点、决定素材归属哪个 game；本模块只负责「给定提示词 + 参考素材 + 参数

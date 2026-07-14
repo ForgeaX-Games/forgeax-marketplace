@@ -55,6 +55,7 @@ export interface HttpApiClientOptions {
 export class HttpApiClient implements ApiClient {
   readonly pipelineId: string
   private base: string
+  private viewingProjectId: string | null = null
   private ws: WebSocket | null = null
   private listeners = new Map<RuntimeChannel, Set<Listener>>()
   private disposed = false
@@ -64,6 +65,34 @@ export class HttpApiClient implements ApiClient {
   constructor(opts: HttpApiClientOptions) {
     this.pipelineId = opts.pipelineId
     this.base = opts.baseUrl ?? ''
+  }
+
+  syncViewingProjectId(id: string): void {
+    this.viewingProjectId = id
+  }
+
+  async ensureViewingProject(): Promise<string> {
+    if (this.viewingProjectId) return this.viewingProjectId
+    const ws = await this.getWorkspace()
+    const id =
+      ws.viewingProjectId ?? (ws as { activeProjectId?: string | null }).activeProjectId ?? null
+    if (!id) {
+      throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    }
+    this.viewingProjectId = id
+    return id
+  }
+
+  private effectiveProjectId(): string | null {
+    return this.viewingProjectId
+  }
+
+  private projectPrefix(): string {
+    const id = this.effectiveProjectId()
+    if (!id) {
+      throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    }
+    return `/api/v1/projects/${encodeURIComponent(id)}`
   }
 
   private async get<T>(path: string): Promise<T> {
@@ -101,34 +130,68 @@ export class HttpApiClient implements ApiClient {
   async applyBatch(ops: readonly Op[], opts?: ApplyBatchOptions): Promise<ApplyBatchResult> {
     // No local graph:applied synthesis — the backend WS forwards the kernel's
     // single graph:applied (layout-only batches emit none). See the class doc.
-    return this.post<ApplyBatchResult>('/api/v1/batch', { ops, opts })
+    return this.post<ApplyBatchResult>(`${this.projectPrefix()}/batch`, { ops, opts })
   }
 
   getPipeline(): Promise<PipelineSnapshot | null> {
-    return this.get<PipelineSnapshot | null>('/api/v1/pipeline')
+    return this.get<PipelineSnapshot | null>(`${this.projectPrefix()}/pipeline`)
+  }
+
+  /**
+   * Lightweight hash of the current pipeline, used by the live-sync reconciler
+   * to cheaply detect missed `graph:applied` frames. Without it the kernel's
+   * adapter (`getPipelineHash`) returns null every tick and the reconciler
+   * degrades to a full `getPipeline()` snapshot pull every ~1.5s.
+   */
+  getPipelineHash(): Promise<{ hash: string | null }> {
+    return this.get<{ hash: string | null }>(`${this.projectPrefix()}/pipeline/hash`)
   }
 
   getNode(nodeId: string): Promise<GraphNode | null> {
-    return this.get<GraphNode | null>(`/api/v1/nodes/${encodeURIComponent(nodeId)}`)
+    return this.get<GraphNode | null>(`${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}`)
   }
 
   listNodes(_filter?: NodeFilter): Promise<readonly GraphNode[]> {
-    return this.get<readonly GraphNode[]>('/api/v1/nodes')
+    return this.get<readonly GraphNode[]>(`${this.projectPrefix()}/nodes`)
   }
 
   listEdges(): Promise<readonly GraphEdge[]> {
-    return this.get<readonly GraphEdge[]>('/api/v1/edges')
+    return this.get<readonly GraphEdge[]>(`${this.projectPrefix()}/edges`)
   }
 
   async getNodeOutput(nodeId: string, portId: string): Promise<unknown> {
-    const r = await this.get<{ value: unknown }>(
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
+    // Sharded/large outputs (big geometry, dense URDF probes) are cached in
+    // chunks and the full GET responds 413 Payload Too Large. Callers that need
+    // those should consult `getNodeOutputMeta` first; here we degrade gracefully
+    // (return undefined) instead of throwing, so a single oversized output can't
+    // break URDF live-sync / cable probes that iterate connected outputs.
+    const r = await fetch(
+      `${this.base}${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
+      { method: 'GET' },
     )
-    return r.value
+    if (r.status === 413) return undefined
+    if (!r.ok) throw new Error(`getNodeOutput → ${r.status}`)
+    const body = (await r.json()) as { value: unknown }
+    return body.value
+  }
+
+  /**
+   * Metadata-only output read — a cheap "is this output present / sharded / how
+   * big" check the kernel's `refreshConnectedOutputs` does before a full GET, so
+   * it can skip pulling oversized (413) payloads. Backed by the backend
+   * `/nodes/:nid/outputs/:pid/meta` route registered by registerProjectPipelineRoutes.
+   */
+  getNodeOutputMeta(
+    nodeId: string,
+    portId: string,
+  ): Promise<{ executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; missing?: boolean }> {
+    return this.get(
+      `${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}/meta`,
+    )
   }
 
   getHistory(_opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]> {
-    return this.get<readonly HistoryEntryV1[]>('/api/v1/history')
+    return this.get<readonly HistoryEntryV1[]>(`${this.projectPrefix()}/history`)
   }
 
   listOps(): Promise<readonly OpSpec[]> {
@@ -136,11 +199,11 @@ export class HttpApiClient implements ApiClient {
   }
 
   getGroup(groupId: string): Promise<NodeGroup | null> {
-    return this.get<NodeGroup | null>(`/api/v1/groups/${encodeURIComponent(groupId)}`)
+    return this.get<NodeGroup | null>(`${this.projectPrefix()}/groups/${encodeURIComponent(groupId)}`)
   }
 
   listGroups(): Promise<readonly NodeGroup[]> {
-    return this.get<readonly NodeGroup[]>('/api/v1/groups')
+    return this.get<readonly NodeGroup[]>(`${this.projectPrefix()}/groups`)
   }
 
   async resolveAssetPath(template: string, _vars?: Record<string, string>): Promise<string> {
@@ -148,7 +211,7 @@ export class HttpApiClient implements ApiClient {
   }
 
   listImportTemplates(): Promise<readonly ImportTemplate[]> {
-    return this.get<readonly ImportTemplate[]>('/api/v1/pipeline/templates')
+    return this.get<readonly ImportTemplate[]>(`${this.projectPrefix()}/pipeline/templates`)
   }
 
   importPipelineFile(req: {
@@ -156,14 +219,14 @@ export class HttpApiClient implements ApiClient {
     source?: string
     options?: ImportPipelineExecuteOptions
   }): Promise<ImportPipelineResponse> {
-    return this.post<ImportPipelineResponse>('/api/v1/pipeline/import', {
+    return this.post<ImportPipelineResponse>(`${this.projectPrefix()}/pipeline/import`, {
       file: { path: req.path, source: req.source },
       options: req.options,
     })
   }
 
   exportPipelineFile(req: { name?: string; source?: string }): Promise<{ path: string; name: string }> {
-    return this.post<{ path: string; name: string }>('/api/v1/pipeline/export', req)
+    return this.post<{ path: string; name: string }>(`${this.projectPrefix()}/pipeline/export`, req)
   }
 
   listGroupTemplates(scope: 'all' | 'groups' | 'templates' = 'all'): Promise<readonly GroupTemplateBattery[]> {
@@ -192,8 +255,12 @@ export class HttpApiClient implements ApiClient {
   }
 
   /** Execute the pipeline (or a single node) via the backend bridge. */
-  execute(request?: { nodeId?: string }): Promise<ExecutionResult> {
-    return this.post('/api/v1/execute', request ?? {}) as Promise<ExecutionResult>
+  execute(request?: { nodeId?: string; quietErrors?: boolean }): Promise<ExecutionResult> {
+    return this.post(`${this.projectPrefix()}/execute`, request ?? {}) as Promise<ExecutionResult>
+  }
+
+  clearOutputCache(): Promise<{ ok: true }> {
+    return this.post(`${this.projectPrefix()}/outputs/clear`, {}) as Promise<{ ok: true }>
   }
 
   listProjects(): Promise<readonly ProjectMeta[]> {
@@ -220,12 +287,25 @@ export class HttpApiClient implements ApiClient {
     return this.del<{ ok: true; workspace: WorkspaceState }>(`/api/v1/projects/${encodeURIComponent(id)}${q}`)
   }
 
-  activateProject(id: string): Promise<ActivateProjectResult> {
-    return this.post<ActivateProjectResult>(`/api/v1/projects/${encodeURIComponent(id)}/activate`, {})
+  async viewProject(id: string): Promise<ActivateProjectResult> {
+    const res = await this.post<ActivateProjectResult>(`/api/v1/projects/${encodeURIComponent(id)}/view`, {})
+    this.viewingProjectId = id
+    return res
   }
 
-  getWorkspace(): Promise<WorkspaceState> {
-    return this.get<WorkspaceState>('/api/v1/workspace')
+  activateProject(id: string): Promise<ActivateProjectResult> {
+    return this.viewProject(id)
+  }
+
+  getProjectLock(id: string): Promise<{ lock: { agentId: string; kind: string; acquiredAt: string } | null }> {
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/lock`)
+  }
+
+  async getWorkspace(): Promise<WorkspaceState> {
+    const ws = await this.get<WorkspaceState>('/api/v1/workspace')
+    const id = ws.viewingProjectId ?? (ws as { activeProjectId?: string | null }).activeProjectId
+    if (id) this.viewingProjectId = id
+    return ws
   }
 
   setWorkspace(patch: Partial<WorkspaceState>): Promise<WorkspaceState> {
@@ -270,6 +350,17 @@ export class HttpApiClient implements ApiClient {
         }
         if (msg.event !== 'runtime') return
         const kind = (msg.payload as { kind?: string }).kind ?? ''
+        // Cross-client project switch: the backend broadcasts `project:viewing`
+        // (+ legacy `project:activated`) when the viewing project changes. The
+        // kernel's projectStore reacts by calling loadPipeline() synchronously,
+        // so our internal viewingProjectId MUST already point at the new project
+        // BEFORE we dispatch — otherwise getPipeline()/applyBatch()/execute()
+        // would still hit the OLD project's prefix and the canvas would load /
+        // mutate the wrong project. Update it here, ahead of listener dispatch.
+        if (kind === 'project:viewing' || kind === 'project:activated') {
+          const pid = (msg.payload as { projectId?: string }).projectId
+          if (pid) this.viewingProjectId = pid
+        }
         const channel: RuntimeChannel = kind.startsWith('exec')
           ? 'execution'
           : kind.startsWith('asset')

@@ -54,4 +54,74 @@ PlaceOneDecoration.out_2(Rest)       → 下一层 in_1 或 LakeRegions
 - `in_1` Scene 悬空 → 静默空跑，无 Decoration 输出。
 - Point 落在区域外 0 格 → 算法取最近有效格再贴合矩形。
 - 区域放不下目标 footprint → 自动缩小，仍尽量靠近 Point。
-- execute 后本组 outputs 中 Decoration 子节点非空，Rest 为扣除 footprint 后的区域。
+- 验收：execute 后 Decoration 子节点非空，Rest 为扣除 footprint 后的区域。
+
+---
+
+## 如何用命令调用（输入侧）
+
+> 文档标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。
+
+### 通道 A · 实例化
+
+```json
+{ "templateId": "PlaceOneDecoration", "groupId": "verify_p1dec", "position": { "x": -400, "y": 1500 } }
+```
+
+### 通道 B · 必接输入
+
+| 本端口 | 语义 | 怎么喂 |
+|--------|------|--------|
+| `in_1` | Scene（可放置 Rest） | **`PickOneBuilding.out_2` → `scene_focus_path`（path=`/父区域/划分子区域1/rest`）→ `in_1`**。禁止直连 `PathConnection.out_2`（多分支 DataTree 会空跑）。Path 与 PlaceOne 共用同一 Pick Rest 源 + 聚焦路径。 |
+| `in_3` | Point | `manual_points` → point；须在有效 Rest 格内（可用 `node_explode.2dPoints` 选点） |
+| `in_5` / `in_6` | **FootprintWidth × FootprintHeight** | `number_const` — **底面矩形占地格数**（`alg_point2rect` 贴合用） |
+| `in_2` | **DecorationHeight** | `number_const` — **竖向包围盒高度**（写入 grid2node zRange），**与底面 footprint 分离** |
+| `in_0` / `in_4` | DecorationName / DecorationAsset | `text_panel` |
+
+验证链参数：**Footprint 7×5**，**DecorationHeight 4**，点 `{20,20}`，名 `路口石灯`，资产 `草地`。
+
+### 底面占地 vs 竖向高度
+
+| 参数 | 端口 | 含义 |
+|------|------|------|
+| FootprintWidth × FootprintHeight | `in_5` / `in_6` | 装饰物**底面**占多少格（平面矩形） |
+| DecorationHeight | `in_2` | 体素柱**有多高**（z 方向层数） |
+
+---
+
+## 如何用命令消费输出（输出侧）
+
+| 本端口 | 典型下游 | 说明 |
+|--------|---------|------|
+| `out_1` | `tree_merge` | Decoration scene（主产物） |
+| `out_2` | 下一装饰 `in_1` | Rest（扣除 footprint 后；节点名固定 **`rest`**，路径随层级嵌套如 `…/rest/rest`） |
+| `out_3` | 路径句柄 | DecorationPath；headless 可 jq 验收 |
+
+---
+
+## 已验证调用示例
+
+| 项 | 值 |
+|---|---|
+| **projectId** | `p_mr4b9s3j_dycp8k` |
+| **报告** | [`step-m5-placeonedecoration.json`](../../../../../../aw-support/battery-verify/p_mr4b9s3j_dycp8k/step-m5-placeonedecoration.json) |
+| **groupId** | `verify_p1dec` |
+| **restFocusPath** | `/父区域/划分子区域1/rest` |
+| **Scene 源** | `verify_pk1.out_2`（PickOne Rest，非 Path.out_2） |
+
+**headless 验收：**
+
+```bash
+PID=p_mr4b9s3j_dycp8k
+curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -d '{"narrativeLocationNames":["父区域","路口石灯"]}' \
+  | jq '.outputs.verify_p1dec | {out_1:.out_1.totalCellCount, out_2:.out_2.totalCellCount, out_3:.out_3.itemCount}'
+# 预期：out_1/out_2 totalCellCount > 0；out_3 itemCount ≥ 1
+```
+
+完整 ops 见报告（`p1_rest_path` + `p1_rest_focus` + `verify_pk1.out_2`）。
+
+### Preview 汇总（必做）
+
+装饰链完成后，须把 **`LocalPreciseDecoration.out_1`（或最后一组主产物）→ `m0_merge` → `scene_output`**，否则 Preview 仍只有 M1 的四区草地。见 [`step-m8-exportpreview.json`](../../../../../../aw-support/battery-verify/p_mr4b9s3j_dycp8k/step-m8-exportpreview.json)。

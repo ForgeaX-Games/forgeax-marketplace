@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/wb-anim",
+      "name": "@forgeax-extension/wb-anim",
       "dependencies": {
         "file-saver": "^2.0.5",
         "gif.js": "^0.2.0",

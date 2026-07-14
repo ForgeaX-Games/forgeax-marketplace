@@ -41,7 +41,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   useEffect(() => {
     const transport = createEditorTransport(client)
     configureEditorTransport(transport)
-    void useProjectStore.getState().fetchProjects()
+    void useProjectStore.getState().bootstrap()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsub()
@@ -54,9 +54,11 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
     let cancelled = false
     async function loadSnapshot(): Promise<void> {
       try {
-        const [projects, workspace, ops, nodes] = await Promise.all([
+        const [projects, workspace] = await Promise.all([
           client.listProjects(),
           client.getWorkspace(),
+        ])
+        const [ops, nodes] = await Promise.all([
           client.listOps(),
           client.listNodes(),
         ])
@@ -119,7 +121,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   const handleSaveProject = useCallback(
     async (project: ProjectMeta) => {
       try {
-        if (useProjectStore.getState().activeProjectId !== project.id) {
+        if (useProjectStore.getState().viewingProjectId !== project.id) {
           await useProjectStore.getState().switchProject(project.id)
         }
         const [snap, groups] = await Promise.all([client.getPipeline(), client.listGroups()])

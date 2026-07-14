@@ -1,19 +1,22 @@
 {
   "id": "natural_decoration",
   "label": "自然装饰填充",
-  "description": "自动将输入网格所有非零格子视为目标区域，按装饰物清单多轮散布装饰物；输出网格只含装饰物格子（其余为0），每轮在上一轮剩余格子中继续填充。",
-  "description-en": "Treats all non-zero cells in each input grid as the target region, then fills decorations in rounds per the decoration list. Output grids contain only decoration cells (all others are 0); each round fills remaining cells from the previous round.",
+  "name-en": "NaturalDecoration",
+  "description": "自动将单张输入网格所有非零格子视为目标区域，按装饰物清单多轮散布装饰物；输出单张多值网格（每种装饰物一个递增 id，其余为0），每轮在上一轮剩余格子中继续填充。网格列表由引擎按 DataTree 自动逐张 fanout。",
+  "description-en": "Treats all non-zero cells in a single input grid as the target region, then fills decorations in rounds per the decoration list. Outputs one multi-value grid (each decoration type gets an ascending id, others are 0). The engine fans out a DataTree of grids one-by-one.",
   "icon": "俯视网格图，目标区域内散落若干小树木或花朵符号，绿色装饰点分布其中，扁平插画风格，简洁小图标，主色2种。",
-  "version": "3.3.0",
-  "tags": ["decoration", "scatter", "natural", "grid", "fill", "cluster", "poisson"],
-  "tag_labels": ["装饰", "散布", "自然", "网格", "填充", "簇状", "泊松"],
+  "version": "4.0.0",
+  "tags": ["decoration", "scatter", "natural", "grid", "fill", "cluster", "poisson", "datatree"],
+  "tag_labels": ["装饰", "散布", "自然", "网格", "填充", "簇状", "泊松", "数据树"],
   "inputs": [
     {
-      "name": "grid",
-      "type": "array",
+      "name": "inputGrid",
+      "type": "grid",
+      "access": "item",
+      "required": true,
       "label": "输入网格",
-      "description": "单个二维整数网格或网格数组；所有非零格子作为可填充区域（旧参数名 gridList 仍兼容）",
-      "description-en": "A single 2D integer grid or an array of grids; non-zero cells are the fillable region (legacy key gridList still accepted)."
+      "description": "单张二维整数网格（grid[y][x]）；所有非零格子作为可填充区域。网格列表由引擎按 DataTree 自动逐张 fanout。",
+      "description-en": "A single 2D integer grid (grid[y][x]); non-zero cells are the fillable region. The engine fans out a DataTree of grids one-by-one."
     },
     {
       "name": "decorations",
@@ -25,6 +28,7 @@
     {
       "name": "algorithm",
       "type": "string",
+      "access": "item",
       "label": "填充算法",
       "description": "random=均匀随机；cluster=簇状聚集；edge=边缘优先；noise=噪声分布；poisson=泊松盘（间距均匀）",
       "description-en": "Fill algorithm: random, cluster, edge, noise, or poisson.",
@@ -34,6 +38,7 @@
     {
       "name": "densityMode",
       "type": "boolean",
+      "access": "item",
       "label": "密度模式",
       "description": "true=密度模式（density 字段表示百分比概率，0-100）；false=数量模式（density 字段表示在目标区域内准确放置的格子数量）",
       "description-en": "true=density mode (density is a percentage 0-100); false=count mode (density is the exact number of cells to place in the target region).",
@@ -42,6 +47,7 @@
     {
       "name": "seed",
       "type": "number",
+      "access": "item",
       "label": "随机种子",
       "description": "随机种子，0 表示每次随机结果不同",
       "description-en": "Random seed; 0 produces a different result each run.",
@@ -50,18 +56,20 @@
   ],
   "outputs": [
     {
-      "name": "outputGridList",
-      "type": "array",
-      "label": "输出网格列表",
-      "description": "多个单值网格的平铺列表：每个输入网格按装饰物种类的顺序，各输出一张仅含该种类 id（其余为 0）的网格；总长度约为「输入网格数 × 每份清单装饰物数」（空输入不贡献网格）",
-      "description-en": "Flat list of single-value grids: per input grid, one layer per decoration entry (only that id or 0). Length ≈ inputs × decoration count (empty inputs contribute none)."
+      "name": "outputGrid",
+      "type": "grid",
+      "access": "item",
+      "label": "输出网格",
+      "description": "单张多值网格，每种装饰物一个递增 id（从输入网格 max+1 起），其余为 0；下游可按值拆分。输入为网格列表时引擎逐张产出对应的 DataTree。",
+      "description-en": "A single multi-value grid; each decoration type uses an ascending id (from max(grid)+1), others are 0. With a grid-list input the engine emits one per branch as a DataTree."
     },
     {
       "name": "outputNameList",
       "type": "array",
+      "access": "item",
       "label": "名称清单",
-      "description": "与 outputGridList 一一对应的拍平名称清单；每条为 {id, name, type}，type 固定为 asset",
-      "description-en": "Flat name list aligned 1:1 with outputGridList; each item is {id, name, type} with type always \"asset\"."
+      "description": "实际写入网格的装饰物条目；每条为 {id, name, type}，type 固定为 asset",
+      "description-en": "Decoration entries actually written to the grid; each is {id, name, type} with type always \"asset\"."
     }
   ]
 }

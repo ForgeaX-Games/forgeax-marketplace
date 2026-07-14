@@ -1,6 +1,8 @@
 # 湖泊生成 (lake_gen)
 
-在掩码网格的指定区域内随机生成有机形态的湖泊，每个湖泊分配唯一掩码ID，输出多值网格和名称清单。
+在单张掩码网格的指定区域内随机生成有机形态的湖泊，每个湖泊分配唯一掩码ID，输出一张多值网格和名称清单。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
@@ -28,7 +30,7 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| inputGrid | grid | — | 源掩码网格 |
+| inputGrid | grid | — | 单张源掩码网格（DataTree 逐张处理） |
 | targetId | number | 1 | 允许放置湖泊的单元格掩码值 |
 | lakeCount | number | 3 | 要生成的湖泊数量 |
 | lakeSize | number | 50 | 每个湖泊的目标单元格数量 |
@@ -41,8 +43,8 @@
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | grid | 叠加了湖泊的输出网格 |
-| outputNameList | array | 湖泊名称清单 `[{id, name}]` |
+| outputGrid | grid | 单张多值网格：每个湖泊一个递增 id，0=空白；可接 grid_split_by_value 拆分为独立湖泊 |
+| outputNameList | array | 湖泊名称清单 `[{id, name, type}]`，与网格中的 id 一一对应 |
 
 ## 算法说明
 
@@ -79,7 +81,7 @@
 
 ```json
 {
-  "grid": [
+  "inputGrid": [
     [0,0,0,0,0,0,0,0],
     [0,1,1,1,1,1,1,0],
     [0,1,1,1,1,1,1,0],
@@ -103,9 +105,9 @@
     [0,0,0,0,0,0,0,0]
   ],
   "outputNameList": [
-    {"id": 2, "name": "湖泊1"},
-    {"id": 3, "name": "湖泊2"},
-    {"id": 4, "name": "湖泊3"}
+    {"id": 2, "name": "湖泊1", "type": "tile"},
+    {"id": 3, "name": "湖泊2", "type": "tile"},
+    {"id": 4, "name": "湖泊3", "type": "tile"}
   ]
 }
 ```

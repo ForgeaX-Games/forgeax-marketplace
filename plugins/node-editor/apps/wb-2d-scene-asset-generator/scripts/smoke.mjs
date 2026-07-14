@@ -16,7 +16,7 @@ mkdirSync(root, { recursive: true })
 const runtime = createRuntime({
   projectRoot: root,
   pipelineId: 'smoke-pipeline',
-  pluginId: '@forgeax-plugin/wb-2d-scene-asset-generator',
+  pluginId: '@forgeax-extension/wb-2d-scene-asset-generator',
 })
 
 const result = await applyBatch(

@@ -1,4 +1,4 @@
-# @forgeax-plugin/wb-items
+# @forgeax-extension/wb-items
 
 ForgeaX Workbench plugin for **items.json** + **48×48 icon** pipeline.
 

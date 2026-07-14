@@ -10,15 +10,13 @@
     "geometry",
     "joint",
     "surface",
-    "assembly",
-    "articraft"
+    "assembly"
   ],
   "tag_labels": [
     "几何",
     "关节",
     "表面",
-    "装配",
-    "articraft"
+    "装配"
   ],
   "inputs": [
     {

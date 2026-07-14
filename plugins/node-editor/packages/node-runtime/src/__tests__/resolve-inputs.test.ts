@@ -57,6 +57,26 @@ describe('buildExecutionClosure', () => {
     expect(closure.sorted).toEqual(['b', 'c'])
   })
 
+  it('pulls in cold (uncached) upstream ancestors so the target inputs are computed', () => {
+    // No output is fresh → executing terminal `c` must also compute `a` and `b`.
+    const closure = buildExecutionClosure(nodes, edges, 'c', () => false)
+    expect(closure.sorted).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps fresh upstream as a cached boundary (fast incremental path)', () => {
+    // `a` and `b` already have fresh cached outputs → only `c` re-runs.
+    const isFresh = (id: string) => id === 'a' || id === 'b'
+    const closure = buildExecutionClosure(nodes, edges, 'c', isFresh)
+    expect(closure.sorted).toEqual(['c'])
+  })
+
+  it('stops climbing at the first fresh ancestor (mixed cold/fresh chain)', () => {
+    // `b` is cold but `a` (its upstream) is fresh → compute `b` and `c`, not `a`.
+    const isFresh = (id: string) => id === 'a'
+    const closure = buildExecutionClosure(nodes, edges, 'c', isFresh)
+    expect(closure.sorted).toEqual(['b', 'c'])
+  })
+
   it('throws on an unknown target node', () => {
     expect(() => buildExecutionClosure(nodes, edges, 'nope')).toThrow(/not found/)
   })

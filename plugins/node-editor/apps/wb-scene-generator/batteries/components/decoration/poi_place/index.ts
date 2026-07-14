@@ -1,8 +1,12 @@
 /**
- * poiPlace: 在指定坐标放置兴趣点（POI）。
- * 若坐标格子的值不等于 targetValue，则 BFS 搜索整个网格找最近的合法格子，从等距候选格中随机选取。
- * 输入：grid (any) — 单/列表网格; poiRules (array) — [{decoration, targetValue, points: [[x,y],...]}]; seed
- * 输出：outputGrid (any); poiNameList (array); placedCount (number)
+ * poiPlace: 在单张网格的指定坐标放置兴趣点（POI）。
+ * 若坐标格子的值不等于 targetValue，则搜索整个网格找最近的合法格子，从等距候选格中随机选取。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张网格; poiRules (array) — [{decoration, targetValue, points: [[x,y],...]}]; seed
+ * 输出：outputGrid (grid) — 单张多值网格（每种 POI 一个递增 id）; outputNameList (array); placedCount (number)
  */
 
 type Grid = number[][];
@@ -230,57 +234,29 @@ function placeOnGrid(
 }
 
 export function poiPlace(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGrid = input.grid;
+  const rawGrid = input.inputGrid;
   const rawRules = input.poiRules;
   const scatterR = typeof input.scatterR === "number" ? Math.max(0, input.scatterR) : 5;
   const minDistance = typeof input.minDistance === "number" ? Math.max(1, input.minDistance) : 8;
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
 
-  if (rawGrid == null) return { error: "grid is required" };
+  if (!isGrid(rawGrid)) return { error: "inputGrid is required (number[][])" };
+  const grid = rawGrid as Grid;
 
   const rules = parsePlaceRules(rawRules);
   if (rules.length === 0) return { error: "poiRules must be a non-empty array of {decoration, targetValue, points: [[x,y],...]}" };
 
-  // 统一转换为网格列表
-  let gridList: Grid[];
-  if (isGridList(rawGrid)) {
-    gridList = rawGrid as Grid[];
-  } else if (isGrid(rawGrid)) {
-    gridList = [rawGrid as Grid];
-  } else {
-    return { error: "grid must be a 2D grid (number[][]) or a list of 2D grids (number[][][])" };
-  }
-
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
+  const rng = new LCG(baseSeed);
+  const baseId = gridMax(grid) + 1;
 
-  let maxVal = 0;
-  for (const g of gridList) { const m = gridMax(g); if (m > maxVal) maxVal = m; }
-  const globalBaseId = maxVal + 1;
+  // 单张多值网格：每种 POI 一个递增 id
+  const { outputGrid, nameList, count } = placeOnGrid(grid, rules, baseId, scatterR, minDistance, rng);
 
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  let totalCount = 0;
+  // 仅保留实际写入网格的 POI 条目
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
+  const outputNameList: NameEntry[] = nameList.filter(e => present.has(e.id));
 
-  for (let i = 0; i < gridList.length; i++) {
-    const rng = new LCG(baseSeed + i * 999983);
-    const baseId = globalBaseId + i * rules.length;
-    const { outputGrid, nameList, count } = placeOnGrid(gridList[i], rules, baseId, scatterR, minDistance, rng);
-    totalCount += count;
-
-    // 每种 POI 单独拆出一张单值网格，与 outputNameList 一一对应
-    const rows = outputGrid.length;
-    const cols = outputGrid[0]?.length ?? 0;
-    for (const entry of nameList) {
-      const single: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (outputGrid[r][c] === entry.id) single[r][c] = entry.id;
-        }
-      }
-      outputGridList.push(single);
-      outputNameList.push(entry);
-    }
-  }
-
-  return { outputGridList, outputNameList, placedCount: totalCount };
+  return { outputGrid, outputNameList, placedCount: count };
 }

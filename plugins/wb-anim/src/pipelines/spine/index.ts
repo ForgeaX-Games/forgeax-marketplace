@@ -258,7 +258,7 @@ class SpineInlineUI {
 
   private setupTabSync(): void {
     try {
-      this.tabBc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-anim.spine-active-tab')
+      this.tabBc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-anim.spine-active-tab')
     } catch {
       this.tabBc = null
       return

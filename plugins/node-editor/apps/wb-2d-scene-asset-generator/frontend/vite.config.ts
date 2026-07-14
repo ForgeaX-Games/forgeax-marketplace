@@ -20,8 +20,8 @@ const kernelAlias = [
   { find: /^@forgeax\/node-runtime$/, replacement: kernel('node-runtime/src/index.ts') },
 ]
 
-const devPort = Number(process.env.VITE_DEV_PORT ?? 9565)
-const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:9567'
+const devPort = Number(process.env.VITE_DEV_PORT ?? 9575)
+const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:9577'
 const wsTarget = apiTarget.replace(/^http/, 'ws')
 const cert = process.env.VITE_DEV_HTTPS_CERT
 const key = process.env.VITE_DEV_HTTPS_KEY

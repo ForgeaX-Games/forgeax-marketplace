@@ -34,7 +34,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  computeValidVariantIdxs as computeValidVariantIdxsShared,
+  computeValidVariantPool as computeValidVariantPoolShared,
+  computeValidVariantPoolsByTileId as computeValidVariantPoolsByTileIdShared,
+  type VariantPool,
   pickFaceSpriteIndex,
   type CollectedCell,
   type FaceRule as RendererFaceRule,
@@ -56,13 +58,23 @@ export interface FaceVariant {
   map: Record<string, number>
 }
 
+export type { VariantPool }
+
+export interface RandomRule {
+  tileId: number
+  keepProbability: number
+  variantIdxs?: number[]
+  variantWeights?: number[]
+}
+
 export interface FaceRule {
   basePieces: number
   keyMode?: FaceKeyMode
   map: Record<string, number>
   variants?: FaceVariant[]
-  randomRules?: Array<{ tileId: number; keepProbability: number }>
+  randomRules?: RandomRule[]
   variantIdxs?: number[]
+  variantWeights?: number[]
 }
 
 export interface TileRule {
@@ -83,6 +95,7 @@ export function setRulesDir(dir: string | undefined): void {
   rulesDirOverride = dir
   cache.clear()
   validVariantCache.clear()
+  validVariantPoolsByTileIdCache.clear()
 }
 
 /**
@@ -172,14 +185,17 @@ function parseFace(raw: unknown): FaceRule | null {
     && f.variantIdxs.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)
     ? (f.variantIdxs as number[])
     : undefined
+  const variantWeights = parseVariantWeights(f.variantWeights, variantIdxs?.length)
   const variants = parseFaceVariants(f.variants)
   const keyMode = f.keyMode === 'edgeDist2' ? 'edgeDist2' : undefined
+  const randomRules = parseRandomRules(f.randomRules, variantIdxs, variantWeights)
   return {
     basePieces: f.basePieces,
     map: f.map as Record<string, number>,
-    ...(parseRandomRules(f.randomRules) ? { randomRules: parseRandomRules(f.randomRules) } : {}),
+    ...(randomRules ? { randomRules } : {}),
     ...(keyMode ? { keyMode } : {}),
     ...(variantIdxs ? { variantIdxs } : {}),
+    ...(variantWeights ? { variantWeights } : {}),
     ...(variants ? { variants } : {}),
   }
 }
@@ -234,14 +250,39 @@ function validateMap(m: Record<string, unknown>): boolean {
   return true
 }
 
-function parseRandomRules(raw: unknown): FaceRule['randomRules'] {
+function parseVariantWeights(raw: unknown, expectedLen?: number): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  if (!raw.every((n) => typeof n === 'number' && n >= 0 && Number.isFinite(n))) return undefined
+  const weights = raw as number[]
+  if (weights.length === 0) return undefined
+  if (expectedLen !== undefined && weights.length !== expectedLen) return undefined
+  return weights
+}
+
+function parseRandomRules(
+  raw: unknown,
+  faceVariantIdxs?: number[],
+  faceVariantWeights?: number[],
+): FaceRule['randomRules'] {
   if (!Array.isArray(raw)) return undefined
   const out: NonNullable<FaceRule['randomRules']> = []
   for (const r of raw) {
     if (!r || typeof r !== 'object') continue
     const rr = r as Record<string, unknown>
     if (typeof rr.tileId !== 'number' || typeof rr.keepProbability !== 'number') continue
-    out.push({ tileId: rr.tileId, keepProbability: rr.keepProbability })
+    const variantIdxs = Array.isArray(rr.variantIdxs)
+      && rr.variantIdxs.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)
+      ? (rr.variantIdxs as number[])
+      : undefined
+    const poolLen = variantIdxs?.length ?? faceVariantIdxs?.length
+    const variantWeights = parseVariantWeights(rr.variantWeights, poolLen)
+      ?? (variantIdxs ? undefined : faceVariantWeights)
+    out.push({
+      tileId: rr.tileId,
+      keepProbability: rr.keepProbability,
+      ...(variantIdxs?.length ? { variantIdxs } : {}),
+      ...(variantWeights?.length ? { variantWeights } : {}),
+    })
   }
   return out.length > 0 ? out : undefined
 }
@@ -288,6 +329,8 @@ function faceContext(
   occ: (dx: number, dy: number, dz: number) => boolean,
   validVariantIdxs: ReadonlyArray<number>,
   regions: Map<string, Set<string>> | undefined,
+  validVariantWeights?: ReadonlyArray<number>,
+  validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>,
 ): PickFaceContext {
   const cell: CollectedCell = { layerIdx: 0, x, y, z }
   return {
@@ -295,6 +338,8 @@ function faceContext(
     faceTag,
     sprites: rule.sprites,
     validVariantIdxs,
+    ...(validVariantWeights?.length ? { validVariantWeights } : {}),
+    ...(validVariantPoolsByTileId?.size ? { validVariantPoolsByTileId } : {}),
     cell,
     coordsByLayerIdx: occToCoords(x, y, z, occ),
     regions: regions ?? new Map(),
@@ -316,13 +361,15 @@ export function pickTopSpriteIndex(
   occ: (dx: number, dy: number, dz: number) => boolean,
   opts?: {
     validVariantIdxs?: ReadonlyArray<number>
+    validVariantWeights?: ReadonlyArray<number>
+    validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
     regions?: Map<string, Set<string>>
   },
 ): number {
   const face = rule.faces.top
   if (!face) return 0
   return pickFaceSpriteIndex(
-    faceContext(face, 'top', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions),
+    faceContext(face, 'top', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId),
   )
 }
 
@@ -340,17 +387,21 @@ export function pickFrontSpriteIndex(
   occ: (dx: number, dy: number, dz: number) => boolean,
   opts?: {
     validVariantIdxs?: ReadonlyArray<number>
+    validVariantWeights?: ReadonlyArray<number>
+    validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
     regions?: Map<string, Set<string>>
   },
 ): number | null {
   const face = rule.faces.front
   if (!face) return null
   return pickFaceSpriteIndex(
-    faceContext(face, 'front', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions),
+    faceContext(face, 'front', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId),
   )
 }
 
 const validVariantCache = new Map<string, number[]>()
+const validVariantWeightsCache = new Map<string, number[] | undefined>()
+const validVariantPoolsByTileIdCache = new Map<string, Map<number, VariantPool>>()
 
 /**
  * Resolve a rule's top-level `regions` declaration to concrete `name → Set<"x,y">`
@@ -375,11 +426,35 @@ export function resolveRuleRegions(
 }
 
 export function computeValidTopVariantIdxs(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] {
-  return computeValidFaceVariantIdxs(rule, rule.faces.top, 'top', sheetKey, img)
+  return computeValidFaceVariantPool(rule, rule.faces.top, 'top', sheetKey, img).idxs
 }
 
 export function computeValidFrontVariantIdxs(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] {
-  return computeValidFaceVariantIdxs(rule, rule.faces.front, 'front', sheetKey, img)
+  return computeValidFaceVariantPool(rule, rule.faces.front, 'front', sheetKey, img).idxs
+}
+
+export function computeValidTopVariantWeights(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] | undefined {
+  return computeValidFaceVariantPool(rule, rule.faces.top, 'top', sheetKey, img).weights
+}
+
+export function computeValidFrontVariantWeights(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] | undefined {
+  return computeValidFaceVariantPool(rule, rule.faces.front, 'front', sheetKey, img).weights
+}
+
+export function computeValidTopVariantPoolsByTileId(rule: TileRule, sheetKey: string, img: RgbaImage | null): Map<number, VariantPool> {
+  return computeValidFaceVariantPoolsByTileId(rule, rule.faces.top, 'top', sheetKey, img)
+}
+
+export function computeValidFrontVariantPoolsByTileId(rule: TileRule, sheetKey: string, img: RgbaImage | null): Map<number, VariantPool> {
+  return computeValidFaceVariantPoolsByTileId(rule, rule.faces.front, 'front', sheetKey, img)
+}
+
+/** @deprecated alias — use computeValidTopVariantPoolsByTileId */
+export function computeValidTopVariantIdxsByTileId(rule: TileRule, sheetKey: string, img: RgbaImage | null): Map<number, number[]> {
+  const pools = computeValidTopVariantPoolsByTileId(rule, sheetKey, img)
+  const out = new Map<number, number[]>()
+  for (const [k, p] of pools) out.set(k, p.idxs)
+  return out
 }
 
 // Variant opacity-filter — DELEGATED to the renderer's shared computeValidVariantIdxs
@@ -395,22 +470,45 @@ export function computeValidFrontVariantIdxs(rule: TileRule, sheetKey: string, i
 // with identical sheet dims, so a tileType+dims cache key collides across distinct
 // sheets and leaks the first sheet's candidate set to the rest — exactly the
 // transparent-variant divergence this filter exists to prevent.
-function computeValidFaceVariantIdxs(
+function computeValidFaceVariantPool(
   rule: TileRule,
   face: FaceRule | undefined,
   faceTag: 'top' | 'front',
   sheetKey: string,
   img: RgbaImage | null,
-): number[] {
-  if (!face || !face.randomRules || face.randomRules.length === 0) return []
-  const cacheKey = `${sheetKey}|${img ? `${img.width}x${img.height}` : 'noimg'}|${faceTag}`
-  const cached = validVariantCache.get(cacheKey)
-  if (cached) return cached
-  const out = computeValidVariantIdxsShared(
+): VariantPool {
+  if (!face || !face.randomRules || face.randomRules.length === 0) return { idxs: [] }
+  const cacheKey = `${sheetKey}|${img ? `${img.width}x${img.height}` : 'noimg'}|${faceTag}|pool`
+  const cachedIdxs = validVariantCache.get(cacheKey)
+  if (cachedIdxs) {
+    return { idxs: cachedIdxs, weights: validVariantWeightsCache.get(cacheKey) }
+  }
+  const out = computeValidVariantPoolShared(
     face as unknown as RendererFaceRule,
     rule.sprites,
     img,
   )
-  validVariantCache.set(cacheKey, out)
+  validVariantCache.set(cacheKey, out.idxs)
+  validVariantWeightsCache.set(cacheKey, out.weights)
+  return out
+}
+
+function computeValidFaceVariantPoolsByTileId(
+  rule: TileRule,
+  face: FaceRule | undefined,
+  faceTag: 'top' | 'front',
+  sheetKey: string,
+  img: RgbaImage | null,
+): Map<number, VariantPool> {
+  if (!face || !face.randomRules || face.randomRules.length === 0) return new Map()
+  const cacheKey = `${sheetKey}|${img ? `${img.width}x${img.height}` : 'noimg'}|${faceTag}|byTileId`
+  const cached = validVariantPoolsByTileIdCache.get(cacheKey)
+  if (cached) return cached
+  const out = computeValidVariantPoolsByTileIdShared(
+    face as unknown as RendererFaceRule,
+    rule.sprites,
+    img,
+  )
+  validVariantPoolsByTileIdCache.set(cacheKey, out)
   return out
 }

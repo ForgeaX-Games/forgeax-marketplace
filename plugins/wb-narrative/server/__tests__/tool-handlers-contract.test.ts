@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import tools from "../tool-handlers.js";
 
 /**
- * 批3 平台对接契约校验：forgeax-plugin.json 声明的 tools 与 server/tool-handlers.ts
+ * 批3 平台对接契约校验：forgeax-extension.json 声明的 tools 与 server/tool-handlers.ts
  * 暴露的 handler 必须一一对应（无孤儿声明、无孤儿 handler），并确认 IP DNA 三工具已暴露。
  */
-const PLUGIN_JSON = path.resolve(fileURLToPath(new URL("../../forgeax-plugin.json", import.meta.url)));
+const PLUGIN_JSON = path.resolve(fileURLToPath(new URL("../../forgeax-extension.json", import.meta.url)));
 
 const PLUGIN_DIR = path.dirname(PLUGIN_JSON);
 

@@ -23,9 +23,19 @@ async function readResponseBody(r: Response): Promise<string> {
 export async function postBatch(
   serverUrl: string,
   ops: readonly Op[],
-  opts?: { actor?: string; label?: string; batchId?: string; ephemeral?: boolean; expectedPrevHash?: string },
+  opts?: {
+    actor?: string
+    label?: string
+    batchId?: string
+    ephemeral?: boolean
+    expectedPrevHash?: string
+    projectId?: string
+  },
 ): Promise<ApplyBatchResult> {
-  const r = await fetch(`${serverUrl}/api/v1/batch`, {
+  const batchPath = opts?.projectId
+    ? `/api/v1/projects/${encodeURIComponent(opts.projectId)}/batch`
+    : '/api/v1/batch'
+  const r = await fetch(`${serverUrl}${batchPath}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

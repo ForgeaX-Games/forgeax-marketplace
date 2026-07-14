@@ -1,9 +1,13 @@
 /**
- * organic_island_shape: 柏林噪声 + 椭圆距离场，将网格列表中每个网格重塑为有机海岛轮廓
- * 输入：grids (number[][][] | number[][]) — 网格列表或单个网格，非零区域决定生成范围
+ * organic_island_shape: 柏林噪声 + 椭圆距离场，将单张网格重塑为有机海岛轮廓
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张网格，非零区域决定生成范围
  * 输出：
- *   outputGrids (number[][][]) — 岛屿轮廓网格列表，陆地=1，海洋=0
- *   nameList ({ id: number; name: string; type: string }[]) — 海岛名称清单
+ *   outputGrid (grid) — 单张多值网格：地面=1、浅水=2、中水=3、深水=4，0=范围外
+ *   nameList ({ id, name, type }[]) — 固定名称清单
  */
 
 // ─── LCG 伪随机数生成器 ─────────────────────────────────────────────────────
@@ -161,15 +165,10 @@ function generateOrganicIsland(
 
 /**
  * 对已生成的岛屿网格（陆地=1，海洋=0）进行 BFS 距离场计算，
- * 将海洋格子按距陆地的最短步数分为浅水、中水、深水三层。
- *
- * 返回4张独立的单值网格（对应层的格子=1，其余=0）：
- *   [0] 地面网格
- *   [1] 浅水网格（distance 1 ~ 1/3 max）
- *   [2] 中水网格（distance 1/3 ~ 2/3 max）
- *   [3] 深水网格（distance > 2/3 max）
+ * 将海洋格子按距陆地的最短步数分为浅水、中水、深水三层，
+ * 写入同一张多值网格：地面=1、浅水=2、中水=3、深水=4。
  */
-function splitOceanLayers(grid: number[][]): number[][][] {
+function buildOceanLayerGrid(grid: number[][]): number[][] {
   const rows = grid.length;
   const cols = grid[0].length;
 
@@ -206,35 +205,30 @@ function splitOceanLayers(grid: number[][]): number[][][] {
   const shallowMax = third;
   const midMax = third * 2;
 
-  // 4张单值网格
-  const landGrid:    number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-  const shallowGrid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-  const midGrid:     number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-  const deepGrid:    number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-
+  // 单张多值网格：地面=1、浅水=2、中水=3、深水=4
+  const out: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const d = dist[r][c];
       if (d === 0) {
-        landGrid[r][c] = 1;
+        out[r][c] = 1;
       } else if (d <= shallowMax) {
-        shallowGrid[r][c] = 1;
+        out[r][c] = 2;
       } else if (d <= midMax) {
-        midGrid[r][c] = 1;
+        out[r][c] = 3;
       } else {
-        deepGrid[r][c] = 1;
+        out[r][c] = 4;
       }
     }
   }
 
-  return [landGrid, shallowGrid, midGrid, deepGrid];
+  return out;
 }
 
 // ─── 类型守卫：判断是否为单个 grid（number[][]） ─────────────────────────────
 
 function isSingleGrid(value: unknown): value is number[][] {
   if (!Array.isArray(value) || value.length === 0) return false;
-  // 如果第一个元素是数组且元素是数字，则视为 grid
   const first = value[0];
   if (!Array.isArray(first)) return false;
   if (first.length === 0) return true;
@@ -244,27 +238,13 @@ function isSingleGrid(value: unknown): value is number[][] {
 // ─── 主导出函数 ──────────────────────────────────────────────────────────────
 
 export function organicIslandShape(input: Record<string, unknown>): Record<string, unknown> {
-  // 解析输入：支持 grids（网格列表）或 grid（单个网格，向后兼容）
-  let rawGrids = input.grids ?? input.grid;
-
-  if (rawGrids === undefined || rawGrids === null) {
-    return { error: "grids is required" };
+  const rawGrid = input.inputGrid;
+  if (!isSingleGrid(rawGrid)) {
+    return { error: "inputGrid is required (number[][])" };
   }
-
-  // 统一为 number[][][] 列表
-  let gridList: number[][][];
-  if (isSingleGrid(rawGrids)) {
-    // 单个 grid，包装为列表
-    gridList = [rawGrids as number[][]];
-  } else if (Array.isArray(rawGrids) && rawGrids.length > 0 && isSingleGrid(rawGrids[0])) {
-    // 已经是网格列表
-    gridList = rawGrids as number[][][];
-  } else {
-    return { error: "grids must be a grid (number[][]) or a list of grids (number[][][])" };
-  }
-
-  if (gridList.length === 0) {
-    return { error: "grids list is empty" };
+  const grid = rawGrid as number[][];
+  if (grid.length === 0 || grid[0].length === 0) {
+    return { error: "inputGrid is empty" };
   }
 
   const noiseScale    = typeof input.noiseScale    === "number" ? input.noiseScale    : 3;
@@ -278,7 +258,6 @@ export function organicIslandShape(input: Record<string, unknown>): Record<strin
   const seedRaw = typeof input.seed === "number" ? input.seed : 0;
   const baseSeed = seedRaw === 0 ? Date.now() : seedRaw;
 
-  const outputGrids: number[][][] = [];
   // 名称清单固定：地面/浅水/中水/深水，id 与网格值一一对应
   const nameList: { id: number; name: string; type: string }[] = [
     { id: 1, name: "地面", type: "tile" },
@@ -287,33 +266,20 @@ export function organicIslandShape(input: Record<string, unknown>): Record<strin
     { id: 4, name: "深水", type: "tile" },
   ];
 
-  for (let i = 0; i < gridList.length; i++) {
-    const grid = gridList[i];
+  const rows = grid.length;
+  const cols = grid[0].length;
+  const bbox = getBoundingBox(grid);
 
-    if (!grid || grid.length === 0 || grid[0].length === 0) {
-      outputGrids.push([]);
-      continue;
-    }
+  const rng = makeLCG(baseSeed);
+  const perm = buildPermTable(rng);
 
-    const rows = grid.length;
-    const cols = grid[0].length;
-    const bbox = getBoundingBox(grid);
+  const shaped = generateOrganicIsland(
+    rows, cols, bbox, perm,
+    noiseScale, noiseStrength, islandRatio, octaves
+  );
 
-    // 每个网格使用偏移种子，保证形态各异
-    const rng = makeLCG(baseSeed + i * 999983);
-    const perm = buildPermTable(rng);
+  // 海洋距离场分层，合并到单张多值网格
+  const outputGrid = buildOceanLayerGrid(shaped);
 
-    const shaped = generateOrganicIsland(
-      rows, cols, bbox, perm,
-      noiseScale, noiseStrength, islandRatio, octaves
-    );
-
-    // 对海洋区域做距离场分层，展开为4张单值网格追加到列表
-    const layers = splitOceanLayers(shaped);
-    for (const layer of layers) {
-      outputGrids.push(layer);
-    }
-  }
-
-  return { outputGrids, nameList };
+  return { outputGrid, nameList };
 }

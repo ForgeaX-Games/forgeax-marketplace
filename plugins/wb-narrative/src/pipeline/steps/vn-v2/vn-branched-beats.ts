@@ -36,6 +36,7 @@ import {
   TOPO_BEAT_ID_NOTE,
   getStreamEmit,
   getVnBudget,
+  deriveBeatTitleFromContent,
 } from "./_shared.js";
 import { runGraphQA, type GraphAdapter, type QaGraph } from "../../../utils/graph-qa.js";
 
@@ -148,8 +149,8 @@ export const VN_BRANCHED_BEATS_COMPOSER: PromptComposer = {
 - 全程**只有"决策型 QTE"（branch_qte / choice）**：每个 pivot 都影响剧情走向。**演出型 QTE 已停用**，不要规划任何"不影响剧情的演出/蓄力/触点"互动——剧情完全靠决策推进。
 
 ## 内容复用（黄金线薄骨架，省篇幅）
-- 黄金线（输入 vn_beats）的每个 beat：**beat_id 与 content 原样保留**，只允许改它的 next_nodes（在其上原地插 pivot）——这是编号稳定的保证。
-- 新增 beat（分支后果 / 挣扎回归 / 下坠链 / 局部结局型推进）：content 写 50-100 字简述即可（详细正文是 G-02 的事）。**这些新增 beat 是树的主体，数量应明显多于黄金线 beat**——若产出里新增 beat 远少于黄金线，说明又退化成"主线+贴片"了，重做。
+- 黄金线（输入 vn_beats）的每个 beat：**beat_id、title 与 content 原样保留**，只允许改它的 next_nodes（在其上原地插 pivot）——这是编号稳定的保证。
+- 新增 beat（分支后果 / 挣扎回归 / 下坠链 / 局部结局型推进）：content 写 50-100 字简述即可（详细正文是 G-02 的事）；同样必须给一个 **title**（4-14 字短标题，凝练戏核、区别于正文、各具辨识度）。**这些新增 beat 是树的主体，数量应明显多于黄金线 beat**——若产出里新增 beat 远少于黄金线，说明又退化成"主线+贴片"了，重做。
 
 ## pivot 内容三段式（content 字段写法）
 pivot beat 的 content 按三段写：① **现状**（把当下处境 / 困境讲清，玩家凭这段就该明白此刻处境）；② **抛问题**（独立一句，世界 / 处境向角色的考验，推荐第二人称"你会…？"）；③ 选项本身走 next_nodes[].label + condition，**content 里绝不剧透选择后果**。
@@ -212,7 +213,7 @@ ${FIVE_ELEMENT_NOTE}`,
   "acts": [ ... 三幕（沿用 E1-02） ],
   "beats": [
     {
-      "beat_id": "b1", "act_id": "一", "content": "...",
+      "beat_id": "b1", "act_id": "一", "title": "杂役房觉醒", "content": "...",
       "location_name": "青云宗·外门杂役房", "time_of_day": "日", "indoor_outdoor": "内",
       "prev_nodes": [], "next_nodes": [ { "to": "b2", "kind": "linear" } ],
       "is_main_line": true, "is_ending": false,
@@ -222,7 +223,7 @@ ${FIVE_ELEMENT_NOTE}`,
       ]
     },
     {
-      "beat_id": "b8", "act_id": "一",
+      "beat_id": "b8", "act_id": "一", "title": "演武场抉择",
       "content": "① 现状：…… ② 抛问题：你会留下还是离开？",
       "location_name": "青云宗·演武场", "time_of_day": "日", "indoor_outdoor": "外",
       "prev_nodes": ["b7"],
@@ -236,7 +237,7 @@ ${FIVE_ELEMENT_NOTE}`,
       "state_deltas": []
     },
     {
-      "beat_id": "b12", "act_id": "二",
+      "beat_id": "b12", "act_id": "二", "title": "返老还童",
       "content": "服下灵果后浑身剧痛，骨骼重塑，白发变黑，皱纹消退...",
       "location_name": "青云宗·灵药谷", "time_of_day": "日", "indoor_outdoor": "外",
       "prev_nodes": ["b11"],
@@ -251,7 +252,7 @@ ${FIVE_ELEMENT_NOTE}`,
       ]
     },
     {
-      "beat_id": "b13", "act_id": "二", "content": "...",
+      "beat_id": "b13", "act_id": "二", "title": "灵谷夜险", "content": "...",
       "location_name": "青云宗·灵药谷", "time_of_day": "夜", "indoor_outdoor": "外",
       "prev_nodes": ["b12"],
       "next_nodes": [
@@ -1109,6 +1110,17 @@ export async function vnBranchedBeats(ctx: NarrativeContext, llm: LLMClient): Pr
 
   // Phase 3: 撞号合并兜底（单次生成已基本无撞号，仍保留作安全网，对清洁产出为 no-op）。
   const cleanBeats = dedupeBeats(beats);
+
+  // 标题兜底：LLM 未给 title 时——黄金线 beat 沿用 vn_beats 阶段的原标题（此时仍是拓扑序 id，
+  // 与 ctx.vn_beats.beats 的 beat_id 对齐），其余从正文派生。保证每个 beat 都有可展示标题，
+  // 前端剧情树标题位不再回落成正文首句。（此处在场号导出前执行，id 尚为 b<n>。）
+  const goldenTitle = new Map(
+    (ctx.vn_beats?.beats ?? []).map((b) => [b.beat_id, b.title?.trim()] as const),
+  );
+  for (const b of cleanBeats) {
+    if (b.title?.trim()) continue;
+    b.title = goldenTitle.get(b.beat_id) || deriveBeatTitleFromContent(b.content, b.beat_id);
+  }
 
   // 结局 scope 缺省补全：未标 scope 的视为 global（向后兼容旧数据）。
   for (const e of endings) if (!e.scope) e.scope = "global";

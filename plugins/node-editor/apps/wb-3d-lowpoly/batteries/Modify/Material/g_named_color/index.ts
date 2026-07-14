@@ -3,7 +3,7 @@
  *
  * 不动 Geometry；下游接 g_material 的 r/g/b/a 端口完成上色。
  *
- * 配色取自 articraft viewer 的 "named material preset" 风格 + 常见 URDF 渲染颜色：
+ * 配色采用 "named material preset" 风格 + 常见 URDF 渲染颜色：
  *   - 中性：white / gray / black / silver
  *   - 金属：steel / brass / copper / gold
  *   - 暖色：red / orange / yellow

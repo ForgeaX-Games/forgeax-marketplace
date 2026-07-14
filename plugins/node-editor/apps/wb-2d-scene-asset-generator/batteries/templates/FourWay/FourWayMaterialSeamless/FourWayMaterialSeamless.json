@@ -2,6 +2,7 @@
   "id": "tpl_fourway_material_seamless",
   "name": "FourWayMaterialSeamless",
   "nameEn": "FourWay Material Seamless",
+  "author": "zyw",
   "nodes": [
     { "id": "fw_subject", "opId": "text_panel", "name": "subject", "position": { "x": -900, "y": 0 }, "params": { "text": "grass dirt stone asphalt water material" } },
     { "id": "fw_style", "opId": "text_panel", "name": "style", "position": { "x": -900, "y": 140 }, "params": { "text": "top-down orthographic 2D game texture, clean readable style" } },

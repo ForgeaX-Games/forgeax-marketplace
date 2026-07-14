@@ -43,4 +43,4 @@ order: 5
 
 ## 海报样张
 
-Kinetic action film poster, dynamic centered golden-triangle composition, motion blur and speed, sun-scorched orange-and-teal desert palette, chrome and dust, explosive energy, no text, vertical 2:3
+Action-film-director-style storyboard contact sheet, 6 large cinematic frames in a 2-column by 3-row grid with thin dark gutters, high-contrast hard light with dust and haze, saturated orange-and-teal desert palette, subject always snapped to dead center. Panel 1: low-angle tracking shot of motion, subject centered. Panel 2: a whip-pan smear with the subject re-centered. Panel 3: a bullet-time slow-motion at the key impact. Panel 4: medium-close action kept perfectly readable. Panel 5: a wide breather shot. Panel 6: an insert — spinning gears, fierce eyes, debris hitting the lens. Explosive kinetic energy, crystal clarity; consistent grade across all panels, no text, no captions, vertical 2:3

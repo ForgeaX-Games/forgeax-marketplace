@@ -89,6 +89,8 @@ export type AgentStructure =
 export interface ConsumesIpDnaSpec {
   /** 需要的三视角算子槽位名（顺序即注入顺序）。 */
   slots: string[];
+  /** 消费的提取层（§3.2）；缺省 ["leaf"]；global 恒注入不必声明。 */
+  layers?: import("../../types/narrative-ip-dna.js").ExtractionLayer[];
   /** 是否注入 KAG 关系网络子图（§8）。 */
   kag?: boolean;
   /** 是否注入长记忆账本一致性约束（§10）。 */

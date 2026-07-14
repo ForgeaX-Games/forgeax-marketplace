@@ -1,7 +1,7 @@
 /**
  * g_align_centers —— 计算把 child 的 AABB 中心对齐到 parent AABB 中心所需的 [ox, oy, oz] 偏移。
  *
- * 对应 articraft.SDK.placement.align_centers(child_aabb, parent_aabb, axes=...) → Origin
+ * align_centers(child_aabb, parent_aabb, axes=...) → Origin
  *
  * 输出：
  *   - ox / oy / oz：建议的偏移量；可手动接到 g_joint 的 origin

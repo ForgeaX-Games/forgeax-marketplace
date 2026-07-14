@@ -8,9 +8,9 @@
  *     精度对 placement 足够，对惯性张量也可作"等效实心 box"退化用。
  *   - mesh 形状无法解析；返回 null，由调用方决定退化策略（手填或报错）。
  *
- * 与 articraft.SDK.placement.part_local_aabb 的简化等价；不读 mesh 文件、不走 trimesh。
+ * 纯几何推导：不读 mesh 文件、不走 trimesh。
  *
- * ── 坐标约定（已与 articraft cadquery 源码对齐，截至 2026-05）────────────
+ * ── 坐标约定 ──────────────────────────────────────────────────────────
  *   panels (perforated/slot/vent_grille)  : panel_w→X, panel_h→Y, thickness→Z
  *   brackets (clevis/fork/yoke)           : overall_size = [w, d, h] → [X, Y, Z]
  *   fans (fan_rotor / blower_wheel)       : 圆盘在 XY，轴 = Z
@@ -30,6 +30,7 @@
  */
 
 import type { Arg, Statement } from './types.js';
+import { ARCH_DEFAULTS } from './arch-defaults.js';
 
 export interface LocalAABB {
   /** 包围盒中心（在 shape 局部坐标，box/cyl/sphere 缺省都是原点 0） */
@@ -38,11 +39,11 @@ export interface LocalAABB {
   readonly halfExtent: readonly [number, number, number];
 }
 
-// ── articraft 默认值常量（仅用于 AABB 估算；与 sidecar 烘出来的真实 mesh 可能略不同）
+// ── 默认值常量（仅用于 AABB 估算；与 sidecar 烘出来的真实 mesh 可能略不同）
 // 这些值的存在仅是让"用户没在 DSL 里 emit 的可选参数"也能得到一个合理 AABB；
-// sidecar 真正建模时会用 articraft Python 自己的默认值。两边要尽量保持一致。
+// sidecar 真正建模时会用自己的默认值。两边要尽量保持一致。
 const DEFAULT_VENT_FACE_T   = 0.005;   // VentGrille face_thickness 默认 ≈ 5mm
-const DEFAULT_HINGE_KNUCKLE = 1.6;     // knuckle_outer_diameter ≈ pin_d * 1.6（articraft 经验）
+const DEFAULT_HINGE_KNUCKLE = 1.6;     // knuckle_outer_diameter ≈ pin_d * 1.6（经验值）
 const DEFAULT_HELIX_ANGLE_DEG    = 0;
 const DEFAULT_BEVEL_AXIS_ANGLE_DEG = 90;
 const DEFAULT_CROSSED_SHAFT_ANGLE_DEG = 90;
@@ -239,7 +240,7 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
       const w   = readNumber(shape.args.width);
       const rim = readNumber(shape.args.rim_width);
       if (m === undefined || z === undefined || w === undefined || rim === undefined) return null;
-      // 内齿圈：齿在内壁，外壁 = 节圆半径 + rim_width（articraft RingGear 约定）
+      // 内齿圈：齿在内壁，外壁 = 节圆半径 + rim_width（RingGear 约定）
       const rOuter = (m * z) / 2 + rim;
       return centered([rOuter, rOuter, w / 2]);
     }
@@ -271,7 +272,7 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
       const lead = readNumber(shape.args.lead_angle);
       const nT   = readNumber(shape.args.n_threads);
       if (m === undefined || len === undefined || lead === undefined || nT === undefined) return null;
-      // articraft Worm: d0 = n_threads * module / abs(tan(lead_angle)); 齿顶半径 = d0/2 + module
+      // Worm: d0 = n_threads * module / abs(tan(lead_angle)); 齿顶半径 = d0/2 + module
       const leadRad = (lead * Math.PI) / 180;
       const tanLead = Math.max(Math.abs(Math.tan(leadRad)), 0.01);  // 0° 兜底
       const rOuter = (m * nT) / (2 * tanLead) + m;
@@ -347,13 +348,23 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
       const height = readNumber(shape.args.height);
       const thickness = readNumber(shape.args.thickness);
       if (length === undefined || height === undefined || thickness === undefined) return null;
-      return { center: [0, 0, height / 2], halfExtent: [length / 2, thickness / 2, height / 2] };
+      const plinthH = readNumber(shape.args.plinth_height) ?? 0;
+      const proj = plinthH > 0
+        ? (readNumber(shape.args.plinth_projection) ?? ARCH_DEFAULTS.wall.plinthProjection)
+        : 0;
+      return { center: [0, 0, height / 2], halfExtent: [length / 2, thickness / 2 + Math.max(0, proj), height / 2] };
     }
     case 'floor_slab': {
       const size = readNumList(shape.args.size, 2);
       const t = readNumber(shape.args.thickness);
       if (!size || t === undefined) return null;
-      return { center: [0, 0, t / 2], halfExtent: [size[0] / 2, size[1] / 2, t / 2] };
+      const beamDepth = Math.max(0, readNumber(shape.args.beam_depth) ?? 0);
+      const zLo = -beamDepth;
+      const zHi = t;
+      return {
+        center: [0, 0, (zLo + zHi) / 2],
+        halfExtent: [size[0] / 2, size[1] / 2, (zHi - zLo) / 2],
+      };
     }
     case 'stairs': {
       const totalRise = readNumber(shape.args.total_rise);
@@ -367,7 +378,8 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
         const radius = readNumber(shape.args.radius) ?? Math.max(width, 1.0);
         return { center: [0, 0, totalRise / 2], halfExtent: [radius, radius, totalRise / 2] };
       }
-      const lenX = run * Math.max(1, Math.round(steps));
+      const landingDepth = Math.max(0, readNumber(shape.args.landing_depth) ?? 0);
+      const lenX = run * Math.max(1, Math.round(steps)) + landingDepth;
       return { center: [lenX / 2, 0, totalRise / 2], halfExtent: [lenX / 2, width / 2, totalRise / 2] };
     }
     case 'roof': {
@@ -375,20 +387,56 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
       if (!fp) return null;
       const type = readString(shape.args.type) ?? 'gable';
       const overhang = readNumber(shape.args.overhang) ?? 0;
-      const bw = fp[0] + 2 * overhang;
-      const bd = fp[1] + 2 * overhang;
-      const zSpan = type === 'flat'
-        ? (readNumber(shape.args.thickness) ?? 0.15)
-        : (readNumber(shape.args.height) ?? Math.min(bw, bd) * 0.4);
+      const eave = readNumber(shape.args.eave_overhang) ?? overhang;
+      const verge = readNumber(shape.args.verge_overhang) ?? overhang;
+      const pitched = type === 'gable' || type === 'shed' || type === 'gambrel' || type === 'hip';
+      let bw: number;
+      let bd: number;
+      if (pitched) {
+        const longIsX = fp[0] >= fp[1];
+        const spanTotal = Math.min(fp[0], fp[1]) + 2 * Math.max(0, eave);
+        const ridgeTotal = Math.max(fp[0], fp[1]) + 2 * Math.max(0, verge);
+        bw = longIsX ? ridgeTotal : spanTotal;
+        bd = longIsX ? spanTotal : ridgeTotal;
+      } else {
+        bw = fp[0] + 2 * overhang;
+        bd = fp[1] + 2 * overhang;
+      }
+      if (type === 'flat') {
+        const thickness = readNumber(shape.args.thickness) ?? ARCH_DEFAULTS.roof.flatThickness;
+        const parapetH = Math.max(0, readNumber(shape.args.parapet_height) ?? 0);
+        const coping = Math.max(0, readNumber(shape.args.coping_width) ?? 0);
+        const zSpan = thickness + parapetH + (coping > 0 ? ARCH_DEFAULTS.roof.copingThickness : 0);
+        const hx = bw / 2 + coping;
+        const hy = bd / 2 + coping;
+        return { center: [0, 0, zSpan / 2], halfExtent: [hx, hy, zSpan / 2] };
+      }
+      const zSpan = readNumber(shape.args.height) ?? Math.min(bw, bd) * ARCH_DEFAULTS.roof.heightFactor;
       return { center: [0, 0, zSpan / 2], halfExtent: [bw / 2, bd / 2, zSpan / 2] };
     }
     case 'facade_panel': {
       const ps = readNumList(shape.args.panel_size, 2);
       const t = readNumber(shape.args.thickness);
       if (!ps || t === undefined) return null;
-      return centered([ps[0] / 2, ps[1] / 2, t / 2]);
+      // orientation=wall（默认，竖直挂板）：w→X、h→Z（底面 Z=0）、thickness→Y（居中）；
+      // orientation=slab（平躺）：w→X、h→Y、thickness→Z（底面 Z=0）。
+      const orientation = readString(shape.args.orientation) ?? 'wall';
+      if (orientation === 'slab') {
+        return { center: [0, 0, t / 2], halfExtent: [ps[0] / 2, ps[1] / 2, t / 2] };
+      }
+      return { center: [0, 0, ps[1] / 2], halfExtent: [ps[0] / 2, t / 2, ps[1] / 2] };
     }
-    case 'window':
+    case 'window': {
+      const size = readNumList(shape.args.size, 2);
+      const depth = readNumber(shape.args.depth);
+      if (!size || depth === undefined) return null;
+      const sill = Math.max(0, readNumber(shape.args.sill) ?? 0);
+      const ext = sill > 0 ? 0.03 : 0;
+      return {
+        center: [0, 0, size[1] / 2],
+        halfExtent: [size[0] / 2 + ext, depth / 2 + sill, size[1] / 2],
+      };
+    }
     case 'door_frame': {
       const size = readNumList(shape.args.size, 2);
       const depth = readNumber(shape.args.depth);
@@ -409,7 +457,12 @@ export function localAabbFromShape(shape: Statement): LocalAABB | null {
       if (length === undefined || height === undefined) return null;
       const thickness = readNumber(shape.args.thickness) ?? 0.04;
       const postSize = readNumber(shape.args.post_size) ?? Math.max(thickness * 2.2, 0.08);
-      return { center: [0, 0, height / 2], halfExtent: [length / 2, Math.max(thickness, postSize) / 2, height / 2] };
+      const postShape = readString(shape.args.post_shape) ?? 'square';
+      const postRadius = readNumber(shape.args.post_radius) ?? postSize / 2;
+      const railDepth = readNumber(shape.args.top_rail_width) ?? Math.max(thickness, postSize);
+      const postY = postShape === 'round' ? 2 * postRadius : postSize;
+      const yHalf = Math.max(railDepth, postY, thickness) / 2;
+      return { center: [0, 0, height / 2], halfExtent: [length / 2, yHalf, height / 2] };
     }
     case 'column': {
       const height = readNumber(shape.args.height);
@@ -591,6 +644,11 @@ function localAabbFromShapeRecursive(
       }
       case 'difference': {
         return refAabb(shape.args.base, byId, visiting);
+      }
+      case 'fillet':
+      case 'chamfer': {
+        // 圆角/斜角只会略微收缩实体的边角，引用实体的 AABB 是安全的保守上界。
+        return refAabb(shape.args.shape, byId, visiting);
       }
       case 'intersection': {
         const a = refAabb(shape.args.a, byId, visiting);

@@ -286,4 +286,4 @@ export function createPanel(): WorkbenchPanelHandle {
   throw new Error('wb-plugin-author: use render(target) or import PluginAuthorPanel directly');
 }
 
-export const WB_PLUGIN_AUTHOR_ID = '@forgeax-plugin/wb-plugin-author';
+export const WB_PLUGIN_AUTHOR_ID = '@forgeax-extension/wb-plugin-author';

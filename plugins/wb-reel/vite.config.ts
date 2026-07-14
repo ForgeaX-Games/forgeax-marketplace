@@ -563,6 +563,18 @@ function ensureStorage(rootDir: string): AssetStorage {
   return { rootDir, blobsDir, manifestPath }
 }
 
+/**
+ * 只算路径、**不建目录**的媒体桶句柄（复活防线用）：工程已删除时返回它，读操作
+ * (readManifest) 遇缺失文件返回空清单，写操作由中间件守卫拦下，绝不 mkdir 复活。
+ */
+function assetPathsOnly(rootDir: string): AssetStorage {
+  return {
+    rootDir,
+    blobsDir: resolve(rootDir, 'blobs'),
+    manifestPath: resolve(rootDir, 'manifest.json'),
+  }
+}
+
 function readManifest(s: AssetStorage): Manifest {
   try {
     const raw = readFileSync(s.manifestPath, 'utf-8')
@@ -1110,11 +1122,19 @@ function reelAssetsPlugin(): Plugin {
    *   - 无 slug   → `<noSlugRoot>/.reel-workbench/<kind>`（裸 dev 兜底）
    */
   function resolveBucket(slug: string | null, kind: MediaKind): AssetStorage {
-    const key = `${slug && isValidGameSlug(slug) ? slug : '~global'}::${kind}`
+    const valid = Boolean(slug && isValidGameSlug(slug))
+    const key = `${valid ? slug : '~global'}::${kind}`
+    // 复活防线：per-game 工程基目录已删 → 弃缓存 + 返回只读路径壳（不 mkdir），避免
+    // boot 时对已删 game 的媒体 GET 重建 workbench/<kind>/manifest.json。先于缓存判定，
+    // 防止「同一 dev session 内先访问(进缓存)后删除」时缓存旁路复活。
+    if (valid && !gameBaseAlive(projectRoot, slug)) {
+      buckets.delete(key)
+      return assetPathsOnly(workbenchMediaDir(projectRoot, slug as string, kind))
+    }
     const cached = buckets.get(key)
     if (cached) return cached
-    const dir = isValidGameSlug(slug)
-      ? workbenchMediaDir(projectRoot, slug, kind)
+    const dir = valid
+      ? workbenchMediaDir(projectRoot, slug as string, kind)
       : resolve(noSlugRoot, '.reel-workbench', kind)
     const st = ensureStorage(dir)
     buckets.set(key, st)
@@ -1146,6 +1166,10 @@ function reelAssetsPlugin(): Plugin {
             return sendJson(res, status, body)
           }
           if (method === 'POST') {
+            // 复活防线：工程已删除 → no-op（否则 handleCreate 会建桶复活已删 game）。
+            if (!gameBaseAlive(projectRoot, slug)) {
+              return sendJson(res, 200, { ok: false, skipped: 'game-deleted' })
+            }
             const body = (await readJsonBody(req)) as CreateBody
             const storage = resolveBucket(slug, createBodyKind(body))
             const { status, body: out } = await handleCreate(storage, body)
@@ -1157,6 +1181,10 @@ function reelAssetsPlugin(): Plugin {
         if (path === '/binary') {
           if (method !== 'POST') {
             return sendJson(res, 405, { error: 'method not allowed' })
+          }
+          // 复活防线：工程已删除 → no-op（避免建桶复活已删 game）。
+          if (!gameBaseAlive(projectRoot, slug)) {
+            return sendJson(res, 200, { ok: false, skipped: 'game-deleted' })
           }
           const buf = await readBinaryBody(req)
           const mime = (req.headers['content-type'] as string | undefined) ?? ''
@@ -1262,6 +1290,18 @@ function ensureScenarioStorage(rootDir: string): ScenarioStorage {
     )
   }
   return { rootDir, dbPath, versionsDir }
+}
+
+/**
+ * 只算路径、**不建目录**的剧本库句柄（复活防线用）：工程已删除时返回它，读操作遇
+ * 缺失文件自然返回空库，写操作由中间件守卫拦下，绝不 mkdir 复活已删 game。
+ */
+function scenarioPathsOnly(rootDir: string): ScenarioStorage {
+  return {
+    rootDir,
+    dbPath: resolve(rootDir, 'scenarios.json'),
+    versionsDir: resolve(rootDir, 'versions'),
+  }
 }
 
 function readScenarioDb(s: ScenarioStorage): unknown {
@@ -1378,6 +1418,23 @@ function findProjectRootWithForgeax(start: string): string | null {
 }
 
 /**
+ * per-game 工程是否"仍存活" —— `<projectRoot>/.forgeax/games/<slug>/` 基目录是否还在。
+ *
+ * 复活防线（2026-07）：用户删除某 game 后，若浏览器 tab 仍停在该 game，boot 时前端
+ * 对 `?game=<slug>` 的 GET/PUT 会让 reel 插件在 resolveStorage/resolveBucket 里无脑
+ * `mkdirSync(recursive)` 重建 `workbench/reel|<kind>` 目录、并把 localStorage 缓存回写，
+ * 把已删工程"复活"（scenarios.json 连同空 manifest 一起重现）。写入/建目录前先确认
+ * 基目录仍在：
+ *   - 无 projectRoot / 非法或空 slug（全局库、裸 dev）→ 恒 true，不影响既有行为；
+ *   - per-game 且基目录已删 → false，调用方须拒绝建目录/写入（不复活）。
+ * 新建 game 时 studio 会先建好基目录，故合法新建不受影响。
+ */
+function gameBaseAlive(projectRoot: string | null, slug: string | null): boolean {
+  if (!projectRoot || !isValidGameSlug(slug)) return true
+  return existsSync(resolve(projectRoot, '.forgeax', 'games', slug))
+}
+
+/**
  * 按 game slug + 媒体类型解析 workbench 原始媒体桶目录（per-kind 硬切换）：
  *   - 合法 slug：`<base>/.forgeax/games/<slug>/workbench/<kind>`（game 自包含，
  *     导出器/迁移器直接读该 game 的原始素材）。
@@ -1473,11 +1530,18 @@ function reelScenariosPlugin(): Plugin {
    */
   function resolveStorage(slug: string | null): ScenarioStorage {
     if (!isValidGameSlug(slug)) return storage
-    const cached = gameStorages.get(slug)
-    if (cached) return cached
     const dir = projectRoot
       ? workbenchReelDir(projectRoot, slug)
       : resolve(baseRoot, 'games', slug)
+    // 复活防线：per-game 工程基目录已删 → 弃缓存 + 返回只读路径壳（不 mkdir），避免
+    // boot 时对已删 game 的剧本/队列 GET 重建 workbench/reel/scenarios.json。先于缓存
+    // 判定，防止「同一 dev session 内先访问(进缓存)后删除」时缓存旁路复活。
+    if (!gameBaseAlive(projectRoot, slug)) {
+      gameStorages.delete(slug)
+      return scenarioPathsOnly(dir)
+    }
+    const cached = gameStorages.get(slug)
+    if (cached) return cached
     const st = ensureScenarioStorage(dir)
     gameStorages.set(slug, st)
     return st
@@ -1503,6 +1567,11 @@ function reelScenariosPlugin(): Plugin {
             return sendJson(res, 200, { db })
           }
           if (method === 'PUT') {
+            // 复活防线：工程已删除 → 直接 no-op（否则 writeScenarioDbFile 会 mkdir
+            // 重建 workbench/reel/ 并把客户端 localStorage 缓存回写，复活已删 game）。
+            if (!gameBaseAlive(projectRoot, gameSlugOf(url))) {
+              return sendJson(res, 200, { ok: false, skipped: 'game-deleted' })
+            }
             // 读取并严检 body —— 前端写入前会 sanitize，这里只做 size 兜底
             const raw = await readJsonBody(req)
             const parsed = raw as { db?: unknown }
@@ -1630,6 +1699,11 @@ function reelScenariosPlugin(): Plugin {
             return sendJson(res, 200, { scenario: body })
           }
           if (method === 'POST' || method === 'PUT') {
+            // 复活防线：工程已删除 → no-op（writeVersionFile→versionFilePath 会
+            // mkdir(recursive) 重建 workbench/reel/versions/，同样会复活已删 game）。
+            if (!gameBaseAlive(projectRoot, gameSlugOf(url))) {
+              return sendJson(res, 200, { ok: false, skipped: 'game-deleted' })
+            }
             const raw = (await readJsonBody(req)) as { scenario?: unknown }
             if (!raw || typeof raw !== 'object' || !raw.scenario) {
               return sendJson(res, 400, {

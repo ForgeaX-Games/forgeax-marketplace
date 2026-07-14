@@ -1,5 +1,9 @@
 .lowpoly-left-pane {
-  min-height: 100vh;
+  /* The host mounts this pane inside #root, which design-system.css pins to
+     height:100% + overflow:hidden. A min-height:100vh here would grow the aside
+     past the clipped root (no scrollbar), so use height:100% and let the pane
+     own its own vertical scroll. */
+  height: 100%;
   box-sizing: border-box;
   padding: 12px;
   overflow-y: auto;

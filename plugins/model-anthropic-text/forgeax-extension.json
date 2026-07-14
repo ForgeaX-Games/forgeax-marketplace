@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/model-anthropic-text",
+  "version": "0.1.0",
+  "kind": "model-binding",
+  "displayName": {
+    "zh": "Anthropic Text",
+    "en": "Anthropic Text"
+  },
+  "description": {
+    "zh": "Anthropic 文本模型绑定 · 在 text 通道把推理 / 起草 / 摘要三档分别映射到 opus-4.7 / sonnet-4.6 / haiku-4.5,让 Studio 各档任务用合适的 Claude 模型(HTTP 由 server 统一调度)。",
+    "en": "Anthropic text model binding — on the text channel, maps the reasoning / draft / summarize tiers to opus-4.7 / sonnet-4.6 / haiku-4.5 so each Studio task uses the right Claude model (HTTP routed by the server)."
+  },
+  "provides": {
+    "modelBinding": {
+      "channel": "text",
+      "vendor": "anthropic",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ],
+      "roles": [
+        "reasoning",
+        "draft",
+        "summarize"
+      ]
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

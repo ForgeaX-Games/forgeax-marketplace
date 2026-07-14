@@ -96,7 +96,7 @@ forgeax node connect --edge-id e_lk_out0  --from lake:out_0       --to merge_all
 
 `pipeline.get` 核对 `<G_LAKE>` 的 `in_0`（上游）、`in_1`/`in_2`/`in_3`（湖数/名/种子）真的接上，`out_0` 进了汇总。
 
-`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出名为你传入 LakeAsset 文本（如 `湖`）的水体图层**（scene/tile）。截图里应在剩余空地上出现若干水面，数量大致随 `ExpectedLakes` 变化。看到水体图层即说明本层正确。
+`pipeline.execute` 应 `status:completed`，`out.layers` 应**多出名为你传入 LakeAsset 文本（如 `湖`）的水体图层**（scene/tile）。Preview 里应在剩余空地上出现若干水面，数量大致随 `ExpectedLakes` 变化。看到水体图层即说明本层正确。
 
 ### 读回端口内容验证（像 grep 一样查某端口）
 

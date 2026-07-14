@@ -33,6 +33,10 @@ import type {
   TransitionSpec,
   ClipAnimSpec,
   TimelineMarker,
+  UIAsset,
+  HudElement,
+  TreeTheme,
+  UIScreen,
 } from './types'
 import { getDemoScenario } from './demoScenario'
 import { makeBlankScenario } from './blankScenario'
@@ -447,6 +451,31 @@ export interface ScenarioStore {
   upsertItem: (item: import('./types').InventoryItem) => void
   /** 背包系统(v7)：删除一个物品定义。 */
   removeItem: (id: string) => void
+
+  /** UI 素材库(v9)：写入/更新一个 UI 素材定义。 */
+  upsertUIAsset: (asset: UIAsset) => void
+  /** UI 素材库(v9)：局部更新一个 UI 素材(不覆盖未传字段)。 */
+  updateUIAsset: (id: string, patch: Partial<Omit<UIAsset, 'id'>>) => void
+  /** UI 素材库(v9)：删除一个 UI 素材,并清理引用它的 HUD 元素。 */
+  removeUIAsset: (id: string) => void
+  /** 常驻 HUD(v9)：追加一个 HUD 元素。 */
+  addHudElement: (el: HudElement) => void
+  /** 常驻 HUD(v9)：局部更新一个 HUD 元素。 */
+  updateHudElement: (id: string, patch: Partial<Omit<HudElement, 'id'>>) => void
+  /** 常驻 HUD(v9)：删除一个 HUD 元素。 */
+  removeHudElement: (id: string) => void
+
+  /** 剧情树主题(v10)：整体设置(传 undefined 清除,回落内置样式)。 */
+  setTreeTheme: (theme: TreeTheme | undefined) => void
+  /** 剧情树主题(v10)：局部更新(不覆盖未传字段;无既有主题时以 preset 'custom' 起底)。 */
+  updateTreeTheme: (patch: Partial<TreeTheme>) => void
+
+  /** 全屏页面(v11)：写入/更新一个页面定义。 */
+  upsertUIScreen: (screen: UIScreen) => void
+  /** 全屏页面(v11)：局部更新一个页面(不覆盖未传字段)。 */
+  updateUIScreen: (id: string, patch: Partial<Omit<UIScreen, 'id'>>) => void
+  /** 全屏页面(v11)：删除一个页面,并清理引用它的场景 ScreenClip。 */
+  removeUIScreen: (id: string) => void
 
   setUIStyle: (patch: Partial<UIStyle>) => void
   /**
@@ -1965,6 +1994,112 @@ export const useScenarioStore = create<ScenarioStore>()(
       const next = { ...(s.scenario.items ?? {}) }
       delete next[id]
       return { scenario: { ...s.scenario, items: next } }
+    }),
+
+  upsertUIAsset: (asset) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        uiAssets: { ...(s.scenario.uiAssets ?? {}), [asset.id]: asset },
+      },
+    })),
+
+  updateUIAsset: (id, patch) =>
+    set((s) => {
+      const cur = s.scenario.uiAssets?.[id]
+      if (!cur) return {}
+      return {
+        scenario: {
+          ...s.scenario,
+          uiAssets: { ...s.scenario.uiAssets, [id]: { ...cur, ...patch } },
+        },
+      }
+    }),
+
+  removeUIAsset: (id) =>
+    set((s) => {
+      const next = { ...(s.scenario.uiAssets ?? {}) }
+      delete next[id]
+      // 级联清理:引用该素材的 HUD 元素一并移除,避免悬挂引用。
+      const hud = (s.scenario.hud ?? []).filter((h) => h.uiAssetId !== id)
+      // 级联清理:剧情树主题里引用该素材的背景/节点框字段清空,避免悬挂引用。
+      let treeTheme = s.scenario.treeTheme
+      if (treeTheme) {
+        const t = { ...treeTheme }
+        if (t.backgroundAssetId === id) t.backgroundAssetId = undefined
+        if (t.nodeFrameAssetId === id) t.nodeFrameAssetId = undefined
+        if (t.nodeFrameCurrentAssetId === id) t.nodeFrameCurrentAssetId = undefined
+        if (t.nodeFrameLockedAssetId === id) t.nodeFrameLockedAssetId = undefined
+        treeTheme = t
+      }
+      return { scenario: { ...s.scenario, uiAssets: next, hud, treeTheme } }
+    }),
+
+  addHudElement: (el) =>
+    set((s) => ({
+      scenario: { ...s.scenario, hud: [...(s.scenario.hud ?? []), el] },
+    })),
+
+  updateHudElement: (id, patch) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        hud: (s.scenario.hud ?? []).map((h) => (h.id === id ? { ...h, ...patch } : h)),
+      },
+    })),
+
+  removeHudElement: (id) =>
+    set((s) => ({
+      scenario: { ...s.scenario, hud: (s.scenario.hud ?? []).filter((h) => h.id !== id) },
+    })),
+
+  setTreeTheme: (theme) =>
+    set((s) => ({ scenario: { ...s.scenario, treeTheme: theme } })),
+
+  updateTreeTheme: (patch) =>
+    set((s) => {
+      const cur: TreeTheme = s.scenario.treeTheme ?? { preset: 'custom' }
+      return { scenario: { ...s.scenario, treeTheme: { ...cur, ...patch } } }
+    }),
+
+  upsertUIScreen: (screen) =>
+    set((s) => ({
+      scenario: {
+        ...s.scenario,
+        uiScreens: { ...(s.scenario.uiScreens ?? {}), [screen.id]: screen },
+      },
+    })),
+
+  updateUIScreen: (id, patch) =>
+    set((s) => {
+      const cur = s.scenario.uiScreens?.[id]
+      if (!cur) return {}
+      return {
+        scenario: {
+          ...s.scenario,
+          uiScreens: { ...s.scenario.uiScreens, [id]: { ...cur, ...patch } },
+        },
+      }
+    }),
+
+  removeUIScreen: (id) =>
+    set((s) => {
+      const next = { ...(s.scenario.uiScreens ?? {}) }
+      delete next[id]
+      // 级联清理:引用该页面的场景 ScreenClip 一并移除,避免悬挂触发。
+      const scenes: Record<string, Scene> = {}
+      let touched = false
+      for (const [sid, sc] of Object.entries(s.scenario.scenes)) {
+        if (sc.screens?.some((c) => c.screenId === id)) {
+          touched = true
+          scenes[sid] = { ...sc, screens: sc.screens.filter((c) => c.screenId !== id) }
+        } else {
+          scenes[sid] = sc
+        }
+      }
+      return {
+        scenario: { ...s.scenario, uiScreens: next, ...(touched ? { scenes } : {}) },
+      }
     }),
 
   setPropRefImage: (id, refImageId) =>

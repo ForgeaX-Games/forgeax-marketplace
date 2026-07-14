@@ -1,13 +1,12 @@
 /**
- * shrine_layout: 根据区域掩码列表批量生成神殿/空地/竞技场布局
- * 输入：gridList (array | grid) — 区域掩码列表或单个掩码网格; algorithm (string) — 布局类型;
+ * shrine_layout: 在单张区域掩码上生成神殿/空地/竞技场布局（DataTree 形式）
+ * 输入：inputGrid (grid/item) — 单张区域掩码网格; algorithm (string) — 布局类型;
  *       decorCount (number) — 装饰点数量; pathWidth (number) — 十字厅墙厚度
  *       seed (number) — 随机种子（0 = 使用随机值）
- *       mergeOutput (boolean, default true) — 是否将所有网格的同语义层合并为一张网格
  * 输出：
- *   outputGridList (array) — 单值网格列表（拍平）：每个神殿按语义拆分，每张只含一种语义
- *   outputNameList (array) — 名称清单，格式 [{id, name, type:"tile"}]
- * 祭坛方向：每个网格随机朝向 上/右/下/左 四方向之一
+ *   outputGrid (grid/item) — 单张多值网格（1=外围墙，2=地板，3=中心焦点区，4=神坛祭台，5=装饰位）
+ *   outputNameList (array/item) — 名称清单，仅含实际出现的 id，格式 [{id, name, type}]
+ * 祭坛方向：每张网格随机朝向 上/右/下/左 四方向之一；网格列表由引擎按 DataTree 自动逐张 fanout。
  */
 
 type Grid = number[][];
@@ -284,136 +283,49 @@ function getShrineLabel(val: number, algorithm: string): string {
   return SHRINE_LABELS[val] ?? `类型${val}`;
 }
 
-/**
- * 非合并模式：将单张多值网格拆分为单值网格列表 + 名称清单。
- */
-function splitToSingleValueGrids(
-  multiGrid: Grid,
-  shrineIndex: number,
-  algorithm: string,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
-  const rows = multiGrid.length;
-  const cols = multiGrid[0]?.length ?? 0;
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  const valSet = new Set<number>();
-  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  for (const val of sortedVals) {
-    const singleGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        if (multiGrid[r][c] === val) singleGrid[r][c] = nextId.value;
-
-    const label = getShrineLabel(val, algorithm);
-    const entryType = SHRINE_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(singleGrid);
-    nameList.push({ id: nextId.value, name: `神殿${shrineIndex}-${label}`, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+function isGrid(v: unknown): v is Grid {
+  return Array.isArray(v) && Array.isArray((v as unknown[])[0]) &&
+    typeof (v as Grid)[0]?.[0] === "number";
 }
 
-/**
- * 合并模式：将所有多值网格按语义值合并，相同语义值的格子写入同一张网格（使用同一 ID）。
- */
-function mergeBySemantics(
-  multiGrids: Grid[],
-  rows: number,
-  cols: number,
-  algorithm: string,
-  nextId: { value: number },
-): { grids: Grid[]; nameList: NameEntry[] } {
+// Build the name list for the values actually present in the multi-value grid.
+function buildNameList(multiGrid: Grid, algorithm: string): NameEntry[] {
   const valSet = new Set<number>();
-  for (const mg of multiGrids)
-    for (const row of mg)
-      for (const v of row)
-        if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  for (const val of sortedVals) {
-    const merged: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    const id = nextId.value;
-    for (const mg of multiGrids)
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (mg[r]?.[c] === val) merged[r][c] = id;
-
-    const label = getShrineLabel(val, algorithm);
-    const entryType = SHRINE_ASSET_VALS.has(val) ? "asset" : "tile";
-    grids.push(merged);
-    nameList.push({ id, name: label, type: entryType });
-    nextId.value++;
-  }
-
-  return { grids, nameList };
+  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
+  return [...valSet].sort((a, b) => a - b).map((val) => ({
+    id: val,
+    name: getShrineLabel(val, algorithm),
+    type: SHRINE_ASSET_VALS.has(val) ? "asset" : "tile",
+  }));
 }
 
 export function shrineLayout(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGridList = input.gridList;
+  const rawGrid     = input.inputGrid;
   const algorithm   = typeof input.algorithm  === "string" ? input.algorithm  : "clearing";
   const decorCount  = typeof input.decorCount === "number" ? Math.max(3, Math.min(12, Math.floor(input.decorCount))) : 8;
   const pathWidth   = typeof input.pathWidth  === "number" ? Math.max(1, Math.floor(input.pathWidth))               : 2;
   const rawSeed     = typeof input.seed       === "number" ? Math.floor(input.seed) : 0;
-  const mergeOutput = input.mergeOutput === false ? false : true; // default true
 
-  // Support both a single grid and an array of grids
-  let gridList: Grid[];
-  if (Array.isArray(rawGridList)) {
-    if (rawGridList.length === 0) return { error: "gridList is required" };
-    if (typeof rawGridList[0]?.[0] === "number") {
-      gridList = [rawGridList as unknown as Grid];
-    } else {
-      gridList = rawGridList as Grid[];
-    }
-  } else {
-    return { error: "gridList is required" };
+  if (!isGrid(rawGrid) || rawGrid.length === 0 || !rawGrid[0] || rawGrid[0].length === 0) {
+    return { error: "inputGrid is required" };
   }
+  const grid = rawGrid as Grid;
 
-  const rows = gridList[0]?.length ?? 0;
-  const cols = gridList[0]?.[0]?.length ?? 0;
   const baseSeed = rawSeed !== 0 ? rawSeed : Math.floor(Math.random() * 2147483647) + 1;
   const rng = makeLCG(baseSeed);
-  const nextId = { value: 1 };
-  const multiGrids: Grid[] = [];
+  const dir = Math.floor(rng() * 4); // 0=north 1=east 2=south 3=west
 
-  gridList.forEach((grid) => {
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return;
-    const dir = Math.floor(rng() * 4); // 0=north 1=east 2=south 3=west
-    let multiGrid: Grid;
-    switch (algorithm) {
-      case "cruciform":
-        multiGrid = generateCruciform(grid, pathWidth, dir);
-        break;
-      case "arena":
-        multiGrid = generateArena(grid, decorCount, dir);
-        break;
-      default: // "clearing"
-        multiGrid = generateClearing(grid, decorCount, dir);
-    }
-    multiGrids.push(multiGrid);
-  });
-
-  if (multiGrids.length === 0) return { outputGridList: [], outputNameList: [] };
-
-  if (mergeOutput) {
-    const { grids, nameList } = mergeBySemantics(multiGrids, rows, cols, algorithm, nextId);
-    return { outputGridList: grids, outputNameList: nameList };
+  let multiGrid: Grid;
+  switch (algorithm) {
+    case "cruciform":
+      multiGrid = generateCruciform(grid, pathWidth, dir);
+      break;
+    case "arena":
+      multiGrid = generateArena(grid, decorCount, dir);
+      break;
+    default: // "clearing"
+      multiGrid = generateClearing(grid, decorCount, dir);
   }
 
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  multiGrids.forEach((mg, i) => {
-    const { grids, nameList } = splitToSingleValueGrids(mg, i + 1, algorithm, nextId);
-    outputGridList.push(...grids);
-    outputNameList.push(...nameList);
-  });
-  return { outputGridList, outputNameList };
+  return { outputGrid: multiGrid, outputNameList: buildNameList(multiGrid, algorithm) };
 }

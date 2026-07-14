@@ -7,6 +7,7 @@ import { paneUrl } from './paneUrls.js'
 import { isWorkbenchMessage, type WorkbenchFocus } from './protocol.js'
 import { sceneValueFormatter } from './sceneValueFormatter.js'
 import { scenePortTypes } from './scenePortTypes.js'
+import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../debug/syncTrace.js'
 import './WorkbenchHost.css'
 
 const sceneValueFormatters = [sceneValueFormatter]
@@ -57,7 +58,8 @@ export function WorkbenchHost(): JSX.Element {
   // lives in the left pane's <ProjectPanel>; the center pane only observes the
   // active project id so it can signal the renderer when the project changes (via
   // the kernel's project:activated cross-client sync, wired in <Editor>).
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
+  const executingProjectIds = useProjectStore((s) => s.executingProjectIds)
   // Bump to force the preview iframe to clear + reload on a project switch.
   const [rendererReloadKey, setRendererReloadKey] = useState(0)
 
@@ -184,6 +186,7 @@ export function WorkbenchHost(): JSX.Element {
   // durable post-drag refresh, so this is a pure latency shortcut, not a new SSOT.
   const postPreviewDataToRenderer = useCallback((outputs: Record<string, Record<string, unknown>>) => {
     if (Object.keys(outputs).length === 0) return
+    syncTrace('preview:postMessage', { nodes: summarizeNodeOutputs(outputs) })
     rendererIframeRef.current?.contentWindow?.postMessage(
       { type: 'workbench:preview-data', outputs },
       '*',
@@ -204,32 +207,33 @@ export function WorkbenchHost(): JSX.Element {
     })
   }, [postPreviewDataToRenderer])
 
-  // Bootstrap the project list + active project type on mount. We do NOT
-  // switchProject here — the kernel Editor already loadPipeline()s the active
-  // project's graph on mount, so this only populates the modal + battery filter.
+  // Bootstrap the project list + viewing project on mount. switchProject sets
+  // the HttpApiClient viewingProjectId and loads the graph via the view cascade.
   useEffect(() => {
-    void useProjectStore.getState().fetchProjects()
+    syncTraceHintOnce()
+    void useProjectStore.getState().bootstrap()
   }, [])
 
-  // Clear + reload the preview when the active project changes (the renderer's
+  // Clear + reload the preview when the viewing project changes (the renderer's
   // `projectChanged` signal): remount the iframe so its caches/layers reset,
-  // and post a project-changed message for any in-iframe listeners. The graph
-  // itself live-syncs via the activate route's graph:applied broadcast.
+  // and post a project-changed message for any in-iframe listeners.
   const prevProjectRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeProjectId === null) return
-    if (prevProjectRef.current === null) {
-      prevProjectRef.current = activeProjectId
-      return
+    if (viewingProjectId === null) return
+    const prev = prevProjectRef.current
+    if (prev === viewingProjectId) return
+    prevProjectRef.current = viewingProjectId
+    if (prev !== null) {
+      const agentBusy = executingProjectIds.length > 0
+      if (!agentBusy) {
+        setRendererReloadKey((k) => k + 1)
+      }
     }
-    if (prevProjectRef.current === activeProjectId) return
-    prevProjectRef.current = activeProjectId
-    setRendererReloadKey((k) => k + 1)
     rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:project-changed', projectId: activeProjectId },
+      { type: 'workbench:project-changed', projectId: viewingProjectId },
       '*',
     )
-  }, [activeProjectId])
+  }, [viewingProjectId, executingProjectIds])
 
   const beginRowResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()

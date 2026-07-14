@@ -20,6 +20,15 @@ const RELAY_INPUT_PORT = 'input'
 const RELAY_OUTPUT_PORT = 'output'
 const GROUP_OP_ID = '__group__'
 
+function logNodeFailure(ctx: ExecutionContext, message: string): void {
+  if (ctx.execLogMode === 'summary') {
+    if (!ctx.execFailures) ctx.execFailures = []
+    ctx.execFailures.push(message)
+    return
+  }
+  ctx.log('error', message)
+}
+
 // ── Diagnostics ──────────────────────────────────────────────────────────────
 // Compact, bounded shape descriptor for a wire value (DataTreeEntry[] = [{path,
 // items}]). Surfaces the signals that explain WHY a scene op (e.g. add_child)
@@ -258,7 +267,7 @@ export async function executeNode(
       ...(fnError ? { error: fnError } : {}),
     }
   } catch (err) {
-    ctx.log('error', `Op execution error [${op.id}]: ${err instanceof Error ? err.message : String(err)}`)
+    logNodeFailure(ctx, `Op execution error [${op.id}]: ${err instanceof Error ? err.message : String(err)}`)
     return {
       nodeId: node.id,
       outputs: {},
@@ -474,8 +483,8 @@ export async function executeGroupSubgraph(
       // Include the resolved inputs the node received: an inner scene op that
       // "stops" the chain (add_child et al.) almost always fails because an
       // upstream port arrived empty/malformed — the input shape pinpoints which.
-      ctx.log(
-        'error',
+      logNodeFailure(
+        ctx,
         `[Group ${group.id}] Inner node error [${innerNodeId}] op=${innerNode.opId}: ${result.error} | inputs: ${summarizeWireInputs(innerInputValues)}`,
       )
     } else {
@@ -502,12 +511,14 @@ export async function executeGroupSubgraph(
       // empty / undefined) or the source PORT name doesn't match the inner
       // node's actual output port (a nested group emits keys = its OWN exposed
       // portName, so the outer ep.sourcePortName must equal that).
-      ctx.log(
-        'warn',
-        `[Group ${group.id}] exposed output "${ep.portName}" empty: ` +
-          `source=${ep.sourceNodeId}.${ep.sourcePortName} ` +
-          `bagPorts=[${bag ? Object.keys(bag).join(',') : '<no-bag>'}]`,
-      )
+      if (ctx.execLogMode !== 'summary') {
+        ctx.log(
+          'warn',
+          `[Group ${group.id}] exposed output "${ep.portName}" empty: ` +
+            `source=${ep.sourceNodeId}.${ep.sourcePortName} ` +
+            `bagPorts=[${bag ? Object.keys(bag).join(',') : '<no-bag>'}]`,
+        )
+      }
     }
   }
   return groupOutputs

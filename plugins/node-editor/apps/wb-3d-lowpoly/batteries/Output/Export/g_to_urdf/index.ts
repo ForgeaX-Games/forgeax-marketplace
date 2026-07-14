@@ -77,7 +77,7 @@ interface UrdfStats {
   autoJoints: number;
   bakeFallbacks: number;
   /**
-   * 每条 visual / collision 几何的来源追溯（articraft `_mesh_provenance` 的轻量等价）。
+   * 每条 visual / collision 几何的来源追溯（`_mesh_provenance`）。
    * 调试 CSG 链路出错 / 找出哪些 part 走了 AABB fallback 时，直接看这里。
    */
   meshProvenance: MeshProvenanceEntry[];
@@ -138,6 +138,10 @@ interface CompileState {
   stats: UrdfStats;
   fallbackShapes: Set<string>;
 }
+
+// 纯创作 / 元数据 op：不产出任何 URDF，编译期静默忽略（不写 <!-- error --> 注释）。
+// `animation`（作者关节轨迹 q(t)）由前端 GLB 烘焙链路消费，URDF 里没有对应元素。
+const NON_URDF_OPS = new Set(['animation']);
 
 // 这些 primitive 形状 URDF 原生支持，无需烘焙
 const URDF_NATIVE_SHAPES = new Set(listUrdfNativeShapeOps());
@@ -331,7 +335,7 @@ interface BakeOutcome {
   cacheHit?: boolean;
 }
 
-/** articraft 式 compile report —— 供 agent 修复循环消费的结构化交付物。 */
+/** compile report —— 供 agent 修复循环消费的结构化交付物。 */
 interface CompileReport {
   /** 成功烘成 mesh 的文件数 */
   meshFileCount: number;
@@ -476,7 +480,7 @@ function compileToUrdf(
     if (linkRef && linkRef.kind === 'ref') inertialByLink.set(linkRef.name, s);
   }
 
-  // 把 collision 语句按目标 link 索引（articraft 的 box-cluster 模式：一个 link 可挂多条）。
+  // 把 collision 语句按目标 link 索引（box-cluster 模式：一个 link 可挂多条）。
   // 没有 collision 语句的 part 仍走旧路径：visual = collision（向后兼容）。
   const collisionsByLink = new Map<string, Statement[]>();
   for (const s of geom.statements) {
@@ -752,6 +756,9 @@ function addAssetKindDiagnostics(
 }
 
 function isShapeOp(op: string): boolean {
+  // 纯创作 op（animation 等）永远不是 URDF 形状：显式排除，避免被 orphan-shape
+  // 自动包裹逻辑误当成待渲染几何。
+  if (NON_URDF_OPS.has(op)) return false;
   if (URDF_NATIVE_SHAPES.has(op)) return true;
   if (CSG_SUBGRAPH_BAKE_OPS.has(op)) return true;
   // Composite shapes (clevis_bracket / spur_gear / ...) 由 baker 烘成 mesh 后也按 shape 处理
@@ -865,7 +872,7 @@ function emitPart(
     if (materialXml) out.push(`      ${materialXml}`);
     out.push(`    </visual>`);
 
-    // <collision>：优先消费显式 collision 语句（articraft 的 box-cluster 模式）；
+    // <collision>：优先消费显式 collision 语句（box-cluster 模式）；
     // 否则退化到 visual = collision 的旧行为。
     if (collisionStmts && collisionStmts.length > 0) {
       for (const c of collisionStmts) {

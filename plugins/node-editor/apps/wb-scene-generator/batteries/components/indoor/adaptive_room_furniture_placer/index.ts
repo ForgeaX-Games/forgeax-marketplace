@@ -1,5 +1,8 @@
 /**
- * adaptive_room_furniture_placer v2.0 - 独立版（所有依赖内联，无外部 import 依赖其他电池）
+ * adaptive_room_furniture_placer - 独立版（所有依赖内联，无外部 import 依赖其他电池）
+ *
+ * DataTree 数据格式：roomGrid / doorGrid / outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张房间网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  *
  * 输入：roomGrid     (grid)  - 房间网格（1=可用）
  *       doorGrid     (grid)  - 门位置网格（非0=门格）

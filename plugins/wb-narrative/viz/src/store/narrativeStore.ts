@@ -1295,7 +1295,7 @@ export function tryRestoreFromStorage(): boolean {
  * transient animation / streaming state stays local.
  * ================================================================ */
 
-const BC_CHANNEL_NAME = "forgeax-plugin.@forgeax-plugin/wb-narrative";
+const BC_CHANNEL_NAME = "forgeax-plugin.@forgeax-extension/wb-narrative";
 
 const SYNC_KEYS: Array<keyof NarrativeState> = [
   "activeEntryKey",

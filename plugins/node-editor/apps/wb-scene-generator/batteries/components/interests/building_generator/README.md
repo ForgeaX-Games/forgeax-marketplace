@@ -1,15 +1,17 @@
 # 建筑生成 (Building Generator)
 
-根据区域掩码列表批量生成完整的建筑平面结构，包含外墙、内墙分区、大门、内门、窗户和室内各房间地面。
+在单张区域掩码上生成完整的建筑平面结构，包含外墙体、内墙体、墙顶、大门、内门、窗户和室内各房间地面，输出单张多值网格 + 大门网格。
+
+> **DataTree 形式**：每次只处理单张 `inputGrid`，网格列表的 fanout/重组由引擎自动完成。
 
 ## 功能特点
 
 1. **完整建筑管线**：一次性完成从地块到室内的全部生成步骤，无需手动连线
-2. **随机建筑雕刻**：对每个输入地块内置执行两层退线随机雕刻，生成自然凹凸的建筑轮廓
+2. **随机建筑雕刻**：对输入地块内置执行两层退线随机雕刻，生成自然凹凸的建筑轮廓
 3. **BSP内墙分区**：使用二叉空间分区（BSP）算法在建筑内部生成内墙，将室内划分为多个房间
-4. **智能开门**：外门优先选择外墙中段（避免角落），内门使用 Kruskal MST 保证所有室内房间互通
+4. **智能开门**：外门优先选择外墙中段（避免角落），内门使用并查集 MST 保证所有室内房间互通
 5. **均匀/随机开窗**：仅在内外均为空格的外墙格上开窗，支持随机布局和均匀布局两种模式
-6. **按房间输出**：室内地面按4连通分量拆分，每个房间独立输出一张网格，便于分层渲染
+6. **单张多值输出**：墙顶/外墙体/内墙体/窗户/地板合并为一张多值网格（固定 id），便于下游 `grid_split_by_value` 拆层渲染
 
 ## 适用情况
 
@@ -20,42 +22,45 @@
 
 ## 基本使用方法
 
-1. 将建筑地块掩码列表（`gridList`）连接到此电池
+1. 将建筑地块掩码（`inputGrid`）连接到此电池
 2. 根据需要调整外墙厚度、内墙密度、门窗参数和随机种子
-3. `outputGridList` + `outputNameList` 即可直接传入渲染器或后续处理节点
+3. `outputGrid` + `outputNameList` + `doorGrid` 即可直接传入渲染器或后续处理节点
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| gridList | array | - | 建筑地块掩码列表，也可传入单个网格 |
+| inputGrid | grid (item) | - | 单张建筑地块掩码 |
 | wallThickness | number | 1 | 外墙向内厚度（格数），最小值1 |
-| innerWallDensity | number | 0.5 | BSP内墙密度，0=无内墙，1=最大分割深度 |
-| doorCount | number | 1 | 每栋建筑的外门（大门）数量 |
+| innerWallDensity | number | 0.25 | BSP内墙密度，0=无内墙，1=最大分割深度 |
+| doorCount | number | 1 | 外门（大门）数量 |
 | doorWidth | number | 2 | 外门宽度（格数） |
-| windowCount | number | 4 | 每栋建筑的窗户数量 |
+| windowCount | number | 4 | 窗户数量 |
 | windowWidth | number | 2 | 窗户宽度（格数） |
+| buildingHeight | number | 1 | 建筑格高 H，>0 生成墙顶/墙体层 |
 | windowRandom | boolean | true | 窗户随机布局（false=均匀分布） |
 | seed | number | 0 | 随机种子，0使用当前时间戳 |
-| mergeOutput | boolean | true | 输出合并：同类语义跨建筑合为一张网格；false 时每栋建筑独立分层 |
+| mergeOutput | boolean | true | 地板合并：所有房间合为一张地板（id=5）；false 时每房间一个递增 id |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGridList | array | 拍平的单值网格列表，每张只含一种语义，ID全局递增 |
-| outputNameList | array | 名称清单，格式 `[{id, name, type}]` |
+| outputGrid | grid (item) | 单张多值网格（固定 id，见下方层表） |
+| outputNameList | array (item) | 名称清单，仅含实际出现的 id，格式 `[{id, name, type}]` |
+| doorGrid | grid (item) | 大门（外门）单张网格，门格=1 |
 
-### 每栋建筑的输出层顺序
+### outputGrid 的固定语义 id
 
-| 层名称 | type | 说明 |
-|--------|------|------|
-| 建筑N-外墙 | tile | 外轮廓减去门窗后的纯墙体 |
-| 建筑N-大门 | tile | 外墙上的门洞位置 |
-| 建筑N-内门 | tile | 内墙上的门洞位置（Kruskal MST保证连通） |
-| 建筑N-窗户 | tile | 外墙上的窗洞位置 |
-| 建筑N-室内1 | tile | 第1个连通室内区域（地面） |
-| 建筑N-室内2 | tile | 第2个连通室内区域（地面），以此类推 |
+| id | 层名称 | type | 说明 |
+|----|--------|------|------|
+| 1 | 墙顶 | tile | 外墙面（finalWall ∪ 窗户）向上平移 H 行 |
+| 2 | 外墙体 | tile | 朝外侧的墙体（H>0 时生成） |
+| 3 | 内墙体 | tile | 非朝外的墙体（H>0 时生成） |
+| 4 | 窗户 | tile | 外墙上的窗洞位置 |
+| 5+ | 地板 / 地板N | tile | 室内地面（mergeOutput=true 合为 id=5；false 时每房间递增 id） |
+
+名称清单中墙体层以打包条目 `{id:[3,2,4,1], name:"墙体"}` 给出（仅含实际出现的 id）；重叠按 地板→内墙体→外墙体→窗户→墙顶 顺序后写覆盖。大门单独由 `doorGrid` 输出。
 
 ## 内部管线说明
 
@@ -83,13 +88,14 @@ grid_split_by_connectivity → 室内地面按房间拆分
 
 ```json
 {
-  "gridList": [[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]]],
+  "inputGrid": [[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],
   "wallThickness": 1,
   "innerWallDensity": 0.5,
   "doorCount": 1,
   "doorWidth": 2,
   "windowCount": 4,
   "windowWidth": 2,
+  "buildingHeight": 1,
   "seed": 42
 }
 ```
@@ -98,18 +104,12 @@ grid_split_by_connectivity → 室内地面按房间拆分
 
 ```json
 {
-  "outputGridList": [
-    [[0,0,0,0,0],[0,1,1,1,0],[0,1,0,1,0],[0,0,0,0,0]],
-    [[0,0,0,0,0],[0,0,0,0,0],[0,0,1,0,0],[0,0,0,0,0]],
-    "..."
-  ],
+  "outputGrid": "...单张多值网格，墙顶=1/外墙体=2/内墙体=3/窗户=4/地板=5...",
   "outputNameList": [
-    {"id": 1, "name": "建筑1-外墙", "type": "tile"},
-    {"id": 2, "name": "建筑1-大门", "type": "tile"},
-    {"id": 3, "name": "建筑1-内门", "type": "tile"},
-    {"id": 4, "name": "建筑1-窗户", "type": "tile"},
-    {"id": 5, "name": "建筑1-室内1", "type": "tile"}
-  ]
+    {"id": 5, "name": "地板", "type": "tile"},
+    {"id": [3, 2, 4, 1], "name": "墙体", "type": "tile"}
+  ],
+  "doorGrid": "...大门网格，门格=1..."
 }
 ```
 

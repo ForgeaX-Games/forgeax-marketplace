@@ -4,16 +4,17 @@
   "description": "在指定坐标放置兴趣点，若坐标不在目标区域值内则BFS搜索整个网格找最近的合法格子，并从等距候选格中随机选取，支持多条规则批量放置。",
   "description-en": "Places POI points at given coordinates; if a coordinate does not match the target value, BFS searches the entire grid for the nearest valid cells and randomly picks one.",
   "icon": "深色网格上若干精确定位的彩色圆点，每个圆点带一根细线指向原始坐标位置，扁平插画风格，简洁小图标，主色2种。",
-  "version": "1.0.0",
-  "tags": ["poi", "place", "precise", "landmark", "grid", "snap"],
-  "tag_labels": ["兴趣点", "精准放置", "坐标", "地标", "网格", "就近吸附"],
+  "version": "2.0.0",
+  "tags": ["poi", "place", "precise", "landmark", "grid", "snap", "datatree"],
+  "tag_labels": ["兴趣点", "精准放置", "坐标", "地标", "网格", "就近吸附", "数据树"],
   "inputs": [
     {
-      "name": "grid",
-      "type": "array",
+      "name": "inputGrid",
+      "type": "grid",
+      "access": "item",
       "label": "输入网格",
-      "description": "输入网格列表 (number[][][])，也支持单网格 (number[][]) 自动包装",
-      "description-en": "Input list of 2D grids (number[][][]); single grid is auto-wrapped."
+      "description": "单张输入网格 (number[][])，网格列表由 DataTree 引擎自动逐张处理",
+      "description-en": "Single input grid (number[][]); grid lists are handled per-item by the DataTree engine."
     },
     {
       "name": "poiRules",
@@ -25,6 +26,7 @@
     {
       "name": "minDistance",
       "type": "number",
+      "access": "item",
       "label": "最小间距",
       "default": 8,
       "description": "所有POI点之间的最小格距（欧式距离），防止重叠堆积",
@@ -33,6 +35,7 @@
     {
       "name": "scatterR",
       "type": "number",
+      "access": "item",
       "label": "散播半径",
       "default": 5,
       "description": "找到最近合法格后，在额外半径范围内随机散播（格数），0=精确就近",
@@ -41,6 +44,7 @@
     {
       "name": "seed",
       "type": "number",
+      "access": "item",
       "label": "随机种子",
       "default": 0,
       "description": "随机种子，0表示使用当前时间自动随机",
@@ -49,22 +53,25 @@
   ],
   "outputs": [
     {
-      "name": "outputGridList",
-      "type": "array",
-      "label": "输出网格列表",
-      "description": "单值网格的平铺列表：每种POI一张，仅含该id与0；与 outputNameList 一一对应",
-      "description-en": "Flat list of single-value grids: one per POI type (only that id or 0); aligned 1:1 with outputNameList."
+      "name": "outputGrid",
+      "type": "grid",
+      "access": "item",
+      "label": "输出网格",
+      "description": "单张多值网格：每种POI一个递增id，未放置处为0；可接 grid_split_by_value 拆分",
+      "description-en": "Single multi-value grid: each POI type gets an increasing id, 0 elsewhere; pipe to grid_split_by_value to separate."
     },
     {
       "name": "outputNameList",
       "type": "array",
+      "access": "item",
       "label": "名称清单",
-      "description": "与 outputGridList 一一对应的拍平名称清单，格式为 [{id, name, type}]，type 固定为 asset",
-      "description-en": "Flat name list aligned 1:1 with outputGridList: [{id, name, type}], type is always \"asset\"."
+      "description": "网格中实际出现的POI条目，格式为 [{id, name, type}]，type 固定为 asset",
+      "description-en": "Name list for POI ids actually present in the grid: [{id, name, type}], type is always \"asset\"."
     },
     {
       "name": "placedCount",
       "type": "number",
+      "access": "item",
       "label": "成功放置数量",
       "description": "成功放置的POI点总数",
       "description-en": "Total number of POI points successfully placed."

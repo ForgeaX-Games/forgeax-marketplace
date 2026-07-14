@@ -84,7 +84,7 @@ describe('ProjectRegistry — backfill', () => {
     expect(list).toHaveLength(1)
     expect(list[0]!.id).toBe('main')
     expect(list[0]!.type).toBe('scene')
-    expect(reg.getWorkspace().activeProjectId).toBe('main')
+    expect(reg.getWorkspace().viewingProjectId).toBe('main')
     expect(reg.getWorkspace().recentProjectIds).toEqual(['main'])
   })
 
@@ -106,7 +106,7 @@ describe('ProjectRegistry — backfill', () => {
     const reg = makeRegistry()
     reg.init()
     expect(reg.listProjects()).toHaveLength(1)
-    const snap = getPipeline(reg.getActiveRuntime())!
+    const snap = getPipeline(reg.getViewingRuntime())!
     expect(snap.nodes.legacy1).toBeDefined()
     expect(snap.nodes.legacy1!.opId).toBe('demo.a')
   })
@@ -122,29 +122,29 @@ describe('ProjectRegistry — lifecycle + activate swap', () => {
     expect(reg.listProjects().map((p) => p.id).sort()).toEqual(['main', a.id, b.id].sort())
 
     // Put a distinct graph into each project's storage via the active runtime.
-    reg.activateProject(a.id)
-    await applyBatch(reg.getActiveRuntime(), [
+    reg.viewProject(a.id)
+    await applyBatch(reg.getViewingRuntime(), [
       { type: 'createNode', nodeId: 'aNode', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} },
     ])
 
-    reg.activateProject(b.id)
-    await applyBatch(reg.getActiveRuntime(), [
+    reg.viewProject(b.id)
+    await applyBatch(reg.getViewingRuntime(), [
       { type: 'createNode', nodeId: 'bNode', opId: 'demo.b', position: { x: 5, y: 5 }, params: {} },
     ])
 
     // Activate A: the active graph must reflect A only.
-    reg.activateProject(a.id)
-    let snap = getPipeline(reg.getActiveRuntime())!
+    reg.viewProject(a.id)
+    let snap = getPipeline(reg.getViewingRuntime())!
     expect(Object.keys(snap.nodes)).toEqual(['aNode'])
-    expect(reg.getWorkspace().activeProjectId).toBe(a.id)
+    expect(reg.getWorkspace().viewingProjectId).toBe(a.id)
 
     // Activate B: the active graph must reflect B only.
-    reg.activateProject(b.id)
-    snap = getPipeline(reg.getActiveRuntime())!
+    reg.viewProject(b.id)
+    snap = getPipeline(reg.getViewingRuntime())!
     expect(Object.keys(snap.nodes)).toEqual(['bNode'])
 
     // A subsequent applyBatch lands in the active (B) project's storage.
-    await applyBatch(reg.getActiveRuntime(), [
+    await applyBatch(reg.getViewingRuntime(), [
       { type: 'createNode', nodeId: 'bNode2', opId: 'demo.a', position: { x: 9, y: 9 }, params: {} },
     ])
     expect(Object.keys(getPipeline(reg.getRuntimeFor(b.id))!.nodes).sort()).toEqual(['bNode', 'bNode2'])
@@ -153,8 +153,8 @@ describe('ProjectRegistry — lifecycle + activate swap', () => {
     // Delete B (the active one) → falls back to another project, never empty.
     await reg.deleteProject(b.id)
     expect(reg.listProjects().some((p) => p.id === b.id)).toBe(false)
-    expect(reg.getWorkspace().activeProjectId).not.toBe(b.id)
-    expect(reg.getWorkspace().activeProjectId).toBeTruthy()
+    expect(reg.getWorkspace().viewingProjectId).not.toBe(b.id)
+    expect(reg.getWorkspace().viewingProjectId).toBeTruthy()
   })
 
   it('isolates per-project history (history.jsonl is per project)', async () => {
@@ -163,13 +163,13 @@ describe('ProjectRegistry — lifecycle + activate swap', () => {
     const a = await reg.createProject({ name: 'A' })
     const b = await reg.createProject({ name: 'B' })
 
-    reg.activateProject(a.id)
-    await applyBatch(reg.getActiveRuntime(), [
+    reg.viewProject(a.id)
+    await applyBatch(reg.getViewingRuntime(), [
       { type: 'createNode', nodeId: 'a1', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} },
     ], { actor: 'ai:a', label: 'A op' })
 
-    reg.activateProject(b.id)
-    await applyBatch(reg.getActiveRuntime(), [
+    reg.viewProject(b.id)
+    await applyBatch(reg.getViewingRuntime(), [
       { type: 'createNode', nodeId: 'b1', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} },
     ], { actor: 'ai:b', label: 'B op' })
 
@@ -219,12 +219,12 @@ describe('ProjectRegistry — lifecycle + activate swap', () => {
     const reg1 = makeRegistry()
     reg1.init()
     const p = await reg1.createProject({ name: 'Persisted' })
-    reg1.activateProject(p.id)
+    reg1.viewProject(p.id)
 
     const reg2 = makeRegistry()
     reg2.init()
     expect(reg2.listProjects().some((x) => x.id === p.id)).toBe(true)
-    expect(reg2.getWorkspace().activeProjectId).toBe(p.id)
+    expect(reg2.getWorkspace().viewingProjectId).toBe(p.id)
   })
 })
 
@@ -313,7 +313,24 @@ describe('ProjectRegistry — exclusive per-agent lock', () => {
     expect((conflict as { code: string }).code).toBe('mutation-denied-locked-by-other')
     // No active project → its own code.
     const noActive = reg.checkMutationAccess(null, ai('A'))
-    expect((noActive as { code: string }).code).toBe('mutation-denied-no-active-project')
+    expect((noActive as { code: string }).code).toBe('mutation-denied-no-project')
+  })
+
+  it('agents can mutate locked projects while UI views a different project', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const a = await reg.createProject({ name: 'A' })
+    const b = await reg.createProject({ name: 'B' })
+    reg.openProject(a.id, ai('A'))
+    reg.openProject(b.id, ai('B'))
+    reg.viewProject(a.id)
+    expect(reg.checkMutationAccess(a.id, ai('A'))).toEqual({ ok: true })
+    expect(reg.checkMutationAccess(b.id, ai('B'))).toEqual({ ok: true })
+    await applyBatch(reg.getRuntimeFor(b.id), [
+      { type: 'createNode', nodeId: 'bOnly', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} },
+    ])
+    expect(Object.keys(getPipeline(reg.getRuntimeFor(b.id))!.nodes)).toEqual(['bOnly'])
+    expect(reg.getViewingProjectId()).toBe(a.id)
   })
 
   it('deleting a locked project releases its lock', async () => {

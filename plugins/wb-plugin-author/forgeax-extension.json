@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/wb-plugin-author",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "插件作者",
+    "en": "Plugin Author"
+  },
+  "description": {
+    "zh": "插件作者工作台 · 在 Studio 内编辑 .forgeax/plugins/<slug>/ 下的本地插件:左侧文件树 + 右侧文本编辑器,保存即写回并后台热重载注册表;配合 fork / record-as-skill 创建插件。",
+    "en": "Plugin Author workbench — an in-app editor for local plugins under .forgeax/plugins/<slug>/: a left file tree + right text editor; saving writes back and hot-reloads the plugin registry in the background. Pairs with fork / record-as-skill to create a plugin."
+  },
+  "provides": {
+    "workbench": {
+      "id": "plugin-author",
+      "hidden": true,
+      "lens": "by-author",
+      "icon": "📝",
+      "position": 200,
+      "panelSize": "lg",
+      "matchProduces": [
+        ".forgeax/plugins/**"
+      ]
+    }
+  },
+  "entry": {
+    "frontend": "./src/panel.tsx"
+  },
+  "experimental": true
+}

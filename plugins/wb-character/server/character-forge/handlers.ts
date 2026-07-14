@@ -117,7 +117,7 @@ export interface StatusResult {
 
 export function getStatus(ctx: HandlerCtx): StatusResult {
   return {
-    plugin: '@forgeax-plugin/wb-character',
+    plugin: '@forgeax-extension/wb-character',
     version: '0.1.0',
     vendors: dispatcherFor(ctx).isReady(),
     styles: STYLE_IDS,

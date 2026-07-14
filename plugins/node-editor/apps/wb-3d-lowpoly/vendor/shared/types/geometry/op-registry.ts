@@ -48,6 +48,7 @@ const SUBGRAPH_BAKE_OPS = [
   'profile_rounded_rect', 'profile_regular_polygon',
   'union', 'difference', 'intersection',
   'extrude', 'extrude_with_holes', 'lathe', 'revolve',
+  'fillet', 'chamfer',
   'translate', 'rotate', 'scale', 'mirror', 'array_linear', 'array_radial',
   'loft', 'section_loft', 'pipe', 'sweep',
 ] as const;
@@ -297,6 +298,26 @@ const SPECS: OpSpec[] = [
     ],
   },
   {
+    name: 'fillet',
+    desc: '实体倒圆角；对 shape 的边做半径 radius 的圆角（弧面过渡）',
+    produces: 'shape',
+    params: [
+      { name: 'shape',  kinds: ['ref'],    required: true, desc: '被倒角的实体 shape 引用' },
+      { name: 'radius', kinds: ['number'], required: true, desc: '圆角半径（米）' },
+      { name: 'edges',  kinds: ['string'], desc: '选边：all（默认，所有边）/ vertical（仅平行 Z 的竖直边）' },
+    ],
+  },
+  {
+    name: 'chamfer',
+    desc: '实体倒斜角；对 shape 的边做距离 radius 的平切斜角',
+    produces: 'shape',
+    params: [
+      { name: 'shape',  kinds: ['ref'],    required: true, desc: '被倒角的实体 shape 引用' },
+      { name: 'radius', kinds: ['number'], required: true, desc: '斜角边长/距离（米）' },
+      { name: 'edges',  kinds: ['string'], desc: '选边：all（默认，所有边）/ vertical（仅平行 Z 的竖直边）' },
+    ],
+  },
+  {
     name: 'translate',
     desc: '平移 shape；offset=[x,y,z]',
     produces: 'shape',
@@ -404,7 +425,7 @@ const SPECS: OpSpec[] = [
   },
 
   // — Collision（附着到 part 的简化碰撞体；URDF 编译时变成 <link>/<collision>）—
-  // 一个 part 可以挂多条 collision 语句，对应多 <collision> 元素（articraft 的 box-cluster 模式）。
+  // 一个 part 可以挂多条 collision 语句，对应多 <collision> 元素（box-cluster 模式）。
   // 若一个 part 没有任何 collision 语句，编译器仍会用 visual 当 collision（保持现状向后兼容）。
   {
     name: 'collision',
@@ -420,6 +441,22 @@ const SPECS: OpSpec[] = [
       { name: 'origin', kinds: ['list'],   desc: 'collision 局部 [x, y, z]（相对 part 原点）' },
       { name: 'rpy',    kinds: ['list'],   desc: '[r, p, y]' },
       { name: 'name',   kinds: ['string'], desc: '可选 collision 名（URDF <collision name=...>）' },
+    ],
+  },
+
+  // — Animation（作者关节轨迹 q(t)；不产出 URDF，由前端 GLB 烘焙链路消费）—
+  // 以 URDF 关节名为键的每关节标量轨迹。轴/类型/限位由 URDF 提供，clip 不带几何。
+  // q(t) 存为 JSON 字符串 arg `data`（v1；clip 变大时改内容寻址 blob）。
+  {
+    name: 'animation',
+    desc: '关节动画 clip：每关节标量轨迹 q(t)（弧度/米），键=URDF 关节名',
+    produces: 'misc',
+    params: [
+      { name: 'name',   kinds: ['string'], desc: 'clip 名（可空）' },
+      { name: 'fps',    kinds: ['number'], required: true, desc: '采样帧率（帧/秒）' },
+      { name: 'frames', kinds: ['number'], required: true, desc: '帧数 F（>= 2）' },
+      { name: 'loop',   kinds: ['bool'],   desc: '是否循环播放' },
+      { name: 'data',   kinds: ['string'], required: true, desc: 'q(t) JSON：{ 关节名: number[] }' },
     ],
   },
 
@@ -448,13 +485,13 @@ const SPECS: OpSpec[] = [
   // ════════════════════════════════════════════════════════════════════
   // Composite shapes (semantic parts; sidecar bakes to mesh at export time)
   // 与 box/cylinder/sphere/mesh 在 part(shape=ref(...)) 消费侧完全一致；
-  // 区别只是 g_to_urdf 编译期需要先调 articraft sidecar 烘成 OBJ，再写 <mesh filename="..."/>。
+  // 区别只是 g_to_urdf 编译期需要先调 sidecar 烘成 OBJ，再写 <mesh filename="..."/>。
   // ════════════════════════════════════════════════════════════════════
 
   // — Brackets & mounts (sdk._mesh.brackets) —
   {
     name: 'clevis_bracket',
-    desc: 'U 形耳轴支架 (articraft ClevisBracketGeometry)',
+    desc: 'U 形耳轴支架',
     produces: 'shape',
     params: [
       { name: 'overall_size',   kinds: ['list'],   required: true, desc: '[w, d, h]' },
@@ -468,7 +505,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'pivot_fork',
-    desc: '前开式枢轴叉 (articraft PivotForkGeometry)',
+    desc: '前开式枢轴叉',
     produces: 'shape',
     params: [
       { name: 'overall_size',     kinds: ['list'],   required: true, desc: '[w, d, h]' },
@@ -482,7 +519,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'trunnion_yoke',
-    desc: '耳轴支座 (articraft TrunnionYokeGeometry)',
+    desc: '耳轴支座',
     produces: 'shape',
     params: [
       { name: 'overall_size',      kinds: ['list'],   required: true, desc: '[w, d, h]' },
@@ -498,7 +535,7 @@ const SPECS: OpSpec[] = [
   // — Panels & grilles (sdk._mesh.panels) —
   {
     name: 'perforated_panel',
-    desc: '穿孔板 (articraft PerforatedPanelGeometry)',
+    desc: '穿孔板',
     produces: 'shape',
     params: [
       { name: 'panel_size',    kinds: ['list'],   required: true, desc: '[w, h]' },
@@ -513,7 +550,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'slot_panel',
-    desc: '槽孔板 (articraft SlotPatternPanelGeometry)',
+    desc: '槽孔板',
     produces: 'shape',
     params: [
       { name: 'panel_size',     kinds: ['list'],   required: true, desc: '[w, h]' },
@@ -529,7 +566,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'vent_grille',
-    desc: '通风格栅 (articraft VentGrilleGeometry)',
+    desc: '通风格栅',
     produces: 'shape',
     params: [
       { name: 'panel_size',     kinds: ['list'],   required: true, desc: '[w, h]' },
@@ -549,7 +586,7 @@ const SPECS: OpSpec[] = [
   // — Fans & rotors (sdk._mesh.fans) —
   {
     name: 'fan_rotor',
-    desc: '轴流风扇转子 (articraft FanRotorGeometry)',
+    desc: '轴流风扇转子',
     produces: 'shape',
     params: [
       { name: 'outer_radius',    kinds: ['number'], required: true },
@@ -565,7 +602,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'blower_wheel',
-    desc: '离心鼓风机叶轮 (articraft BlowerWheelGeometry)',
+    desc: '离心鼓风机叶轮',
     produces: 'shape',
     params: [
       { name: 'outer_radius',    kinds: ['number'], required: true },
@@ -583,7 +620,7 @@ const SPECS: OpSpec[] = [
   // — Controls (sdk._mesh.controls) —
   {
     name: 'knob',
-    desc: '旋钮 / 控制帽 (articraft KnobGeometry)',
+    desc: '旋钮 / 控制帽',
     produces: 'shape',
     params: [
       { name: 'diameter',       kinds: ['number'], required: true },
@@ -599,7 +636,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'bezel',
-    desc: '框边 / 显示框 (articraft BezelGeometry)',
+    desc: '框边 / 显示框',
     produces: 'shape',
     params: [
       { name: 'opening_size',          kinds: ['list'],   required: true, desc: '[w, h]' },
@@ -617,7 +654,7 @@ const SPECS: OpSpec[] = [
   // — Wheels & tires (sdk._mesh.wheels) —
   {
     name: 'wheel',
-    desc: '车轮（沿 local X 旋转）(articraft WheelGeometry)',
+    desc: '车轮（沿 local X 旋转）',
     produces: 'shape',
     params: [
       { name: 'radius',   kinds: ['number'], required: true },
@@ -627,7 +664,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'tire',
-    desc: '轮胎（沿 local X 旋转）(articraft TireGeometry)',
+    desc: '轮胎（沿 local X 旋转）',
     produces: 'shape',
     params: [
       { name: 'outer_radius', kinds: ['number'], required: true },
@@ -640,7 +677,7 @@ const SPECS: OpSpec[] = [
   // — Hinges (sdk._mesh.hinges) —
   {
     name: 'barrel_hinge',
-    desc: '桶式两叶铰链 (articraft BarrelHingeGeometry)',
+    desc: '桶式两叶铰链',
     produces: 'shape',
     params: [
       { name: 'length',                  kinds: ['number'], required: true },
@@ -657,7 +694,7 @@ const SPECS: OpSpec[] = [
   },
   {
     name: 'piano_hinge',
-    desc: '钢琴 / 连续铰链 (articraft PianoHingeGeometry)',
+    desc: '钢琴 / 连续铰链',
     produces: 'shape',
     params: [
       { name: 'length',         kinds: ['number'], required: true },
@@ -673,7 +710,7 @@ const SPECS: OpSpec[] = [
   },
 
   // ════════════════════════════════════════════════════════════════════
-  // Gears (sdk.gears.* via cadquery + articraft mesh_from_cadquery)
+  // Gears (via cadquery mesh export)
   // ════════════════════════════════════════════════════════════════════
 
   // — Single gears —
@@ -926,6 +963,14 @@ const SPECS: OpSpec[] = [
       { name: 'height',    kinds: ['number'], required: true, desc: '墙高（Z）' },
       { name: 'thickness', kinds: ['number'], required: true, desc: '墙厚（Y）' },
       { name: 'openings',  kinds: ['list'],   desc: '开口列表，每项 [x, width, sill, head]（米）' },
+      { name: 'plinth_height',     kinds: ['number'], desc: '底部勒脚基座高度（Z），0=无' },
+      { name: 'plinth_projection', kinds: ['number'], desc: '勒脚相对墙面每侧外挑（Y）' },
+      { name: 'window_band',       kinds: ['bool'],   desc: '开自动水平窗带（连续窗洞）' },
+      { name: 'band_sill',         kinds: ['number'], desc: '窗带下沿高度（Z）' },
+      { name: 'band_head',         kinds: ['number'], desc: '窗带上沿高度（Z）' },
+      { name: 'band_margin',       kinds: ['number'], desc: '窗带两端预留墙垛宽（X）' },
+      { name: 'pane_width',        kinds: ['number'], desc: '窗带按目标单块宽度加竖挺划分，0=不划分' },
+      { name: 'mullion',           kinds: ['number'], desc: '窗带竖挺宽度' },
     ],
   },
   {
@@ -936,6 +981,9 @@ const SPECS: OpSpec[] = [
       { name: 'size',      kinds: ['list'],   required: true, desc: '[w, d]' },
       { name: 'thickness', kinds: ['number'], required: true, desc: '板厚（Z）' },
       { name: 'holes',     kinds: ['list'],   desc: '矩形洞列表，每项 [x, y, w, d]（米）' },
+      { name: 'beam_depth',   kinds: ['number'], desc: '周边下翻梁深度（Z，向下），0=无' },
+      { name: 'beam_width',   kinds: ['number'], desc: '下翻梁宽度（水平）' },
+      { name: 'edge_chamfer', kinds: ['number'], desc: '楼板底缘倒角尺寸，0=无' },
     ],
   },
   {
@@ -951,6 +999,10 @@ const SPECS: OpSpec[] = [
       { name: 'radius',       kinds: ['number'], desc: 'spiral：踏步外半径' },
       { name: 'inner_radius', kinds: ['number'], desc: 'spiral：中柱半径' },
       { name: 'sweep_deg',    kinds: ['number'], desc: 'spiral：总旋转角（度），默认 270' },
+      { name: 'tread_thickness', kinds: ['number'], desc: '薄踏板厚度（open_riser 时生效）' },
+      { name: 'open_riser',      kinds: ['bool'],   desc: '空踢面：仅悬浮薄踏板，无实心踢面' },
+      { name: 'landing_depth',   kinds: ['number'], desc: '直梯中段休息平台进深（X），0=无' },
+      { name: 'landing_after',   kinds: ['number'], desc: '休息平台插在第几级之后' },
     ],
   },
   {
@@ -963,18 +1015,27 @@ const SPECS: OpSpec[] = [
       { name: 'height',    kinds: ['number'], desc: '屋脊高度（非 flat）' },
       { name: 'thickness', kinds: ['number'], desc: 'flat 屋顶厚度' },
       { name: 'overhang',  kinds: ['number'], desc: '出檐宽度，默认 0' },
+      { name: 'eave_overhang',  kinds: ['number'], desc: '檐口出挑（短边/坡向），缺省回退 overhang' },
+      { name: 'verge_overhang', kinds: ['number'], desc: '山墙出挑（屋脊/长边），缺省回退 overhang' },
+      { name: 'parapet_height',    kinds: ['number'], desc: 'flat：女儿墙高度，0=无' },
+      { name: 'parapet_thickness', kinds: ['number'], desc: 'flat：女儿墙壁厚' },
+      { name: 'coping_width',      kinds: ['number'], desc: 'flat：女儿墙压顶外挑宽，0=无压顶' },
     ],
   },
   {
     name: 'facade_panel',
-    desc: '外墙挂板 / siding：薄板 + 可选水平 reveal 凹槽阵列',
+    desc: '外墙挂板 / siding：薄板 + 可选 reveal 凹槽阵列',
     produces: 'shape',
     params: [
       { name: 'panel_size',   kinds: ['list'],   required: true, desc: '[w, h]' },
-      { name: 'thickness',    kinds: ['number'], required: true, desc: '板厚（Z）' },
-      { name: 'groove_count', kinds: ['number'], desc: '横向板缝数量，默认 0' },
+      { name: 'thickness',    kinds: ['number'], required: true, desc: '板厚' },
+      { name: 'orientation',  kinds: ['string'], desc: 'wall 竖直挂板（默认，h→Z）/ slab 平躺（h→Y）' },
+      { name: 'groove_count', kinds: ['number'], desc: '板缝数量，默认 0' },
       { name: 'groove_depth', kinds: ['number'], desc: '板缝深度，默认 0.4×厚' },
       { name: 'groove_width', kinds: ['number'], desc: '板缝宽度' },
+      { name: 'groove_direction', kinds: ['string'], desc: 'horizontal（默认）/ vertical / both' },
+      { name: 'groove_spacing',   kinds: ['number'], desc: '按间距布缝（优先于 groove_count）' },
+      { name: 'board_style',      kinds: ['string'], desc: 'flush（默认）/ lap / shiplap 搭接偏移' },
     ],
   },
   {
@@ -990,16 +1051,21 @@ const SPECS: OpSpec[] = [
       { name: 'type',    kinds: ['string'], desc: 'cross（默认）/ grid / louver' },
       { name: 'rows',    kinds: ['number'], desc: 'grid 行数 / louver 百叶片数' },
       { name: 'cols',    kinds: ['number'], desc: 'grid 列数' },
+      { name: 'pane_width', kinds: ['number'], desc: '按目标单块宽度自动划分竖挺，0=不用' },
+      { name: 'sill',       kinds: ['number'], desc: '窗台外挑深度（+Y），0=无' },
+      { name: 'arch_top',   kinds: ['bool'],   desc: '顶部拱券（上框做半圆拱）' },
     ],
   },
   {
     name: 'door_frame',
-    desc: '门框：两侧门挺 + 上槛（底部开口）',
+    desc: '门框：两侧门挺 + 上槛（底部开口）；可选亮子横挺 + 侧窗竖挺',
     produces: 'shape',
     params: [
       { name: 'size',  kinds: ['list'],   required: true, desc: '[w, h]（洞口尺寸）' },
       { name: 'depth', kinds: ['number'], required: true, desc: '进深（Y，对齐墙厚）' },
       { name: 'frame', kinds: ['number'], desc: '门框宽度' },
+      { name: 'transom',   kinds: ['number'], desc: '门头亮子高度（在门扇上方加横挺），0=无' },
+      { name: 'sidelight', kinds: ['number'], desc: '每侧侧窗宽度（在门洞两侧加竖挺），0=无' },
     ],
   },
   {
@@ -1011,11 +1077,13 @@ const SPECS: OpSpec[] = [
       { name: 'thickness', kinds: ['number'], required: true, desc: '门扇厚（Y）' },
       { name: 'hinge',     kinds: ['string'], desc: 'left / right / center，铰接边落在 X=0' },
       { name: 'style',     kinds: ['string'], desc: 'flush 平板（默认）/ panel 嵌板 / glazed 上玻璃' },
+      { name: 'panel_rows', kinds: ['number'], desc: 'panel 样式嵌板行数' },
+      { name: 'panel_cols', kinds: ['number'], desc: 'panel 样式嵌板列数' },
     ],
   },
   {
     name: 'railing',
-    desc: '栏杆/护栏：沿 X 一段，两端方立柱 + 顶扶手 + 均布竖向栏杆条',
+    desc: '栏杆/护栏：沿 X 一段，端立柱 + 顶扶手 + 均布竖向栏杆条 + 可选底/中横杆',
     produces: 'shape',
     params: [
       { name: 'length',         kinds: ['number'], required: true, desc: '总长（X）' },
@@ -1024,11 +1092,18 @@ const SPECS: OpSpec[] = [
       { name: 'post_size',      kinds: ['number'], desc: '端立柱方截面边长' },
       { name: 'rail_height',    kinds: ['number'], desc: '顶扶手高度' },
       { name: 'baluster_count', kinds: ['number'], desc: '竖向栏杆条数量' },
+      { name: 'post_shape',   kinds: ['string'], desc: '端立柱截面 round / square（默认 square）' },
+      { name: 'post_radius',  kinds: ['number'], desc: 'round 立柱半径' },
+      { name: 'post_spacing', kinds: ['number'], desc: '按间距推算栏杆条数量（优先于 baluster_count）' },
+      { name: 'bottom_rail',  kinds: ['bool'],   desc: '加底横杆' },
+      { name: 'mid_rail',     kinds: ['bool'],   desc: '加中横杆' },
+      { name: 'top_rail_width',  kinds: ['number'], desc: '顶扶手宽度（截面 X 向不变，Y 向厚度）' },
+      { name: 'top_rail_height', kinds: ['number'], desc: '顶扶手高度别名（同 rail_height）' },
     ],
   },
   {
     name: 'column',
-    desc: '柱子：圆/方柱身 + 可选柱础(base)、柱头(capital)；底面 Z=0',
+    desc: '柱子：圆/方柱身 + 可选柱础(base)、柱头(capital)、收分、凹槽；底面 Z=0',
     produces: 'shape',
     params: [
       { name: 'height',         kinds: ['number'], required: true, desc: '总高（Z）' },
@@ -1036,6 +1111,10 @@ const SPECS: OpSpec[] = [
       { name: 'shape',          kinds: ['string'], desc: 'round（默认）/ square' },
       { name: 'base_height',    kinds: ['number'], desc: '柱础高度，0=无' },
       { name: 'capital_height', kinds: ['number'], desc: '柱头高度，0=无' },
+      { name: 'taper',         kinds: ['number'], desc: '柱顶半径相对柱底比例（0~1），1=无收分' },
+      { name: 'base_style',    kinds: ['string'], desc: 'plain（默认）/ stepped 分级柱础' },
+      { name: 'capital_style', kinds: ['string'], desc: 'plain（默认）/ stepped 分级柱头' },
+      { name: 'flutes',        kinds: ['number'], desc: '圆柱竖向凹槽数量，0=无' },
     ],
   },
 ];

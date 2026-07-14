@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
-import { getRuntime } from '../runtime.js'
+import { getProjectRegistry, getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { buildTemplateOps, splitTemplate } from '../lib/templateOps.js'
 
@@ -57,6 +57,10 @@ interface GroupTemplateBattery {
   category: string
   description?: string
   version?: string
+  /** Author persisted in the template json (top-level `author` field). */
+  author?: string
+  /** Creation timestamp (ms epoch); template json `createdAt`, else the file mtime. */
+  createdAt?: number
   iconSvg?: string
   /** Base64 data URL loaded from icon.png beside the template json, when present. */
   iconPng?: string
@@ -214,6 +218,10 @@ async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTempl
               : undefined)
           : undefined
         const iconPng = kind === 'templates' ? await readIconPng(file) : undefined
+        const meta = group as { version?: unknown; author?: unknown; createdAt?: unknown }
+        const createdAt = typeof meta.createdAt === 'number'
+          ? meta.createdAt
+          : await stat(file).then((s) => s.mtimeMs).catch(() => undefined)
         items.push({
           id: group.id,
           name: group.name ?? basename(file, '.json'),
@@ -223,7 +231,9 @@ async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTempl
           description: kind === 'templates'
             ? `Group template: ${group.name ?? group.id}`
             : `Group battery: ${group.name ?? group.id}`,
-          version: '1.0.0',
+          version: typeof meta.version === 'string' && meta.version.trim() ? meta.version : '1.0.0',
+          ...(typeof meta.author === 'string' && meta.author.trim() ? { author: meta.author } : {}),
+          ...(createdAt !== undefined ? { createdAt } : {}),
           sourcePath,
           // 用户内容（userTemplateRoot 下）= builtin:false（可右击删除）；
           // 其余 groups/ 与内置 templates/ = builtin:true（只读，不可删除）。
@@ -255,6 +265,19 @@ function safeName(value: unknown): string {
   // `value.trim is not a function` → opaque 500). Coerce/skip before trimming.
   if (typeof value !== 'string') return 'Group'
   return value.trim().replace(/[\\/]/g, '-').replace(/\s+/g, ' ') || 'Group'
+}
+
+// Persist authoring metadata (version / author / createdAt) into the saved
+// template json so the Templates palette can display it. Existing values are
+// preserved; only missing ones get a sensible default stamp.
+function stampTemplateMeta<T extends NodeGroup>(group: T): T {
+  const meta = group as unknown as { version?: unknown; author?: unknown; createdAt?: unknown }
+  return {
+    ...group,
+    version: typeof meta.version === 'string' && meta.version.trim() ? meta.version : '1.0.0',
+    createdAt: typeof meta.createdAt === 'number' ? meta.createdAt : Date.now(),
+    ...(typeof meta.author === 'string' && meta.author.trim() ? { author: meta.author } : {}),
+  }
 }
 
 export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise<void> {
@@ -327,7 +350,7 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
     // 保存按钮产出普通成组电池 → batteries/groups/<cat>/<name>/<name>.json
     const dir = resolve(appGroupRoot, categoryName, batteryName)
     const filePath = resolve(dir, `${batteryName}.json`)
-    const group = { ...body.group, name: batteryName, nameEn: body.group.nameEn ?? batteryName }
+    const group = stampTemplateMeta({ ...body.group, name: batteryName, nameEn: body.group.nameEn ?? batteryName })
     try {
       await mkdir(dir, { recursive: true })
       await writeFile(filePath, `${JSON.stringify(group, null, 2)}\n`, 'utf8')
@@ -376,8 +399,11 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
   })
 
   // 用户「保存到模板」：把成组电池作为用户内容写入 workspace `.forgeax` 区域，
-  // 固定大标签 "My templates"，小标签为子目录：
-  //   <workspaceRoot>/user-content/templates/My templates/<smallTag>/<name>.json
+  // 固定大标签 "My templates"，小标签为子目录，模板自身再占一层文件夹：
+  //   <workspaceRoot>/user-content/templates/My templates/<smallTag>/<name>/<name>.json
+  // 必须保留「模板文件夹」这一层，使路径与内置模板（templates/{大}/{小}/{模板}/file.json）
+  // 同构——前端 getTemplateSmallLabel 据此把 <smallTag> 识别为小标签；若把 json 直接放在
+  // <smallTag>/ 下，小标签会被误判为模板文件夹而丢失（小标签失效）。
   // 列表接口 /api/v1/group-templates 会一并扫描该根，内置+用户模板统一显示。
   app.post<{
     Body: { group: NodeGroup; smallTag: string; templateName: string }
@@ -395,9 +421,9 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
 
     const smallTag = safeName(body.smallTag)
     const templateName = safeName(body.templateName)
-    const dir = resolve(userTemplateRoot(), USER_TEMPLATE_BIG_LABEL, smallTag)
+    const dir = resolve(userTemplateRoot(), USER_TEMPLATE_BIG_LABEL, smallTag, templateName)
     const filePath = resolve(dir, `${templateName}.json`)
-    const group = { ...body.group, name: templateName, nameEn: body.group.nameEn ?? templateName }
+    const group = stampTemplateMeta({ ...body.group, name: templateName, nameEn: body.group.nameEn ?? templateName })
     try {
       await mkdir(dir, { recursive: true })
       await writeFile(filePath, `${JSON.stringify(group, null, 2)}\n`, 'utf8')
@@ -418,9 +444,16 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
     if (!file) return reply.code(404).send({ error: 'user template not found' })
     try {
       await rm(file)
-      const dir = dirname(file)
-      const remaining = await readdir(dir).catch(() => [] as string[])
-      if (remaining.length === 0) await rmdir(dir).catch(() => {})
+      // 删除模板 json 后，自下而上清理变空的目录（模板文件夹 → 小标签文件夹），
+      // 到 userTemplateRoot 为止，避免残留空的小标签分组。
+      const stopAt = resolve(userTemplateRoot())
+      let dir = dirname(file)
+      while (resolve(dir).startsWith(stopAt + sep) && resolve(dir) !== stopAt) {
+        const remaining = await readdir(dir).catch(() => null)
+        if (remaining === null || remaining.length > 0) break
+        await rmdir(dir).catch(() => {})
+        dir = dirname(dir)
+      }
     } catch (err) {
       app.log.error({ err, file }, 'failed to delete user template')
       const message = err instanceof Error ? err.message : String(err)
@@ -453,15 +486,19 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
       opts?: { actor?: string; label?: string }
     }
   }>('/api/v1/group-templates/:id/instantiate', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
-    if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-
     const body = (req.body ?? {}) as {
       templateId?: string
+      projectId?: string
       position?: { x?: number; y?: number }
       groupId?: string
       opts?: { actor?: string; label?: string }
     }
+    const reg = await getProjectRegistry()
+    const projectId = body.projectId ?? reg.getViewingProjectId()
+    if (!projectId) return reply.code(400).send({ error: 'missing projectId' })
+    const access = await ensureMutationAccess(req, projectId)
+    if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
+
     const templateId = body.templateId ?? req.params.id
     if (typeof templateId !== 'string' || !templateId.trim()) {
       return reply.code(400).send({ error: 'missing templateId' })
@@ -475,17 +512,20 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
       return reply.code(422).send({ error: `template '${templateId}' is not a valid NodeGroup` })
     }
 
-    const position = {
-      x: typeof body.position?.x === 'number' ? body.position.x : 0,
-      y: typeof body.position?.y === 'number' ? body.position.y : 0,
-    }
+    const rootPosition =
+      body.position === undefined
+        ? undefined
+        : {
+            x: typeof body.position.x === 'number' ? body.position.x : 0,
+            y: typeof body.position.y === 'number' ? body.position.y : 0,
+          }
     const explicitGroupId =
       typeof body.groupId === 'string' && body.groupId.trim() ? body.groupId : undefined
 
     const { ops, rootGroupId, exposedInputs, exposedOutputs } = buildTemplateOps(
       split.root,
       split.deps,
-      position,
+      rootPosition,
       explicitGroupId,
     )
 
@@ -511,7 +551,7 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
       })
     }
 
-    const rt = await getRuntime()
+    const rt = await getRuntimeForProject(projectId)
     const result = await applyBatch(rt, batchOps as never, {
       actor: typeof body.opts?.actor === 'string' ? body.opts.actor : 'instantiate-template',
       label:

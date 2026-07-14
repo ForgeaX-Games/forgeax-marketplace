@@ -22,6 +22,68 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Fixed
+- **电池栏拖入画布不再卡死（重复 onDrop + 巨型拖拽载荷 + 节点 id 碰撞 + Edge 拖拽幽灵图快照）。**
+  `Canvas.tsx` 外层 `.canvas` 与内层 `<ReactFlow>` 均注册了 `onDrop`，同一原生 drop 事件会触发两次 `placeBattery`：两次 `node-${Date.now()}` 在同一毫秒内碰撞 → ReactFlow 节点表出现重复 id → 主线程卡死、刷新后仍异常。
+  `useCanvasDrop.ts` 以 `timeStamp+clientX+clientY` 去重；新节点 id 改用 `mintCanvasNodeId()`（与 copy/paste、ctrl-drag 一致的随机后缀）。
+  `BatteryBar.tsx` 对 catalog 内电池改传 `application/battery-id`（落盘时从 store 查完整 Battery），避免 Templates 行把 multi-MB `iconPng` base64 塞进 `dataTransfer` 再在 drop 时 `JSON.parse` 阻塞主线程。
+  以上修完后用户反馈 Edge 上拖拽仍卡死（Chrome 不卡）——定位到第四个独立成因：Templates 行内联 `<img src={battery.iconPng}>`（`BatteryBar.tsx:416`），原生 HTML5 DnD 默认会同步栅格化被拖拽的 DOM 节点作为拖拽幽灵图，Edge 对大体积内联图片走同步慢路径（Chrome 走合成层缓存，不受影响）——鼠标停在「拖拽中」形状、整页点不动，正是 OS 级 drag 会话卡在幽灵图生成上。
+  `BatteryBar.tsx:60-83`（`getDragGhostCanvas`）新增一个预渲染的 28×28 占位 canvas，两处 `handleDragStart`（`:1253` 电池行、`:184` 文本预设行）都在 `dragstart` 里 `e.dataTransfer.setDragImage(ghost, 14, 14)`，用固定小图接管幽灵图，绕开对巨图的隐式快照，与 iconPng 大小无关。
+  `relayCreate.smoke.test.tsx` 仍通过；`pnpm --filter @forgeax/node-runtime-react build` 通过。
+  *为什么：* 三插件共用内核编辑器，拖电池卡死是共享 drop 路径的回归，非单 app 问题。
+
+- **`ProjectRegistry.openProject()`（AI 调用者）现在会同时把该项目设为「查看中」项目，不再只加锁。**
+  `packages/node-runtime/src/layer2/project-registry.ts:627`（`ProjectRegistry.openProject`）。
+  *为什么：* 每个 app 只有一个共享渲染面（`?pane=urdf` 之类的实时查看器/无头渲染器），其截图/GLB 导出路由都以
+  `getViewingProjectId()`（「查看中」项目）为准，从不看任何 agent 的独占锁。此前 `projects.open` 刻意不改查看中项目，
+  但也没有任何 AI 可调用的工具能设置查看中项目（`viewProject`/`/view` 只挂在人类 UI 上）——于是 agent 一旦
+  `projects.open` 一个不是当前查看中的项目（新建项目后的常规流程），其自身的 `screenshot.capture`/`export-glb`
+  就会永久 409「project X is not the viewing project」，且无法自行恢复，正是用户报告的「调用截图等工具时对话
+  异常中断/出现路径错误」。人类的显式 `viewProject`/非 AI 调用者的 `open` 行为不变（见新增测试
+  `apps/wb-3d-lowpoly/backend/tests/agent-project-scoping.test.ts`、`packages/node-runtime/src/__tests__/project-registry.test.ts`
+  既有用例仍全部通过）。
+
+- **Panel（TextPanel）节点重新支持双击进入编辑输入文字。** `Canvas.tsx` 画布空白处双击搜索弹窗用的原生 `dblclick` 监听挂在 `.react-flow__pane` 上，而节点是该 pane 的后代，节点上的双击会冒泡到此监听并被 `e.stopPropagation()` 截断，导致 React 委托的节点 `onDoubleClick` 永不触发（panel 无法进入编辑）。监听里加 `e.target.closest('.react-flow__node')` 守卫：命中节点时直接 return、不拦截，仅空白背景才弹搜索框。*为什么：* `200c201` 引入原生 pane 双击监听时未排除节点，破坏了 Panel 的双击输入。
+- **组内视图里删除/新增节点、增删内部连线、移动或改参数，现在会立即（去抖）持久化，不再「刷新后全部重现」。**
+  此前组内编辑只写进内存 ref + 标脏（`useCanvasGroupView.ts` 的 `syncInnerNodesDelete`/`syncInnerNodeAdd`/`syncInnerEdgeAdd`/`syncInnerEdgeRemove`/`syncInnerNodePosition`/`syncInnerNodeParam` 仅设 `isDirtyRef`），
+  只有**退出组视图**（`exitGroupView` 的 `flushInnerEdits`+`persistSession`）才落盘。于是在组内「删干净」后直接刷新网页、未先退出，未落盘的删除全部丢失、节点重现（用户报告「没有持久化到 json」）。
+  新增 `scheduleInnerPersist`（`flushInnerEdits` 把 ref 写回 store group + `schedulePersistSession('group-inner-edit')`），接到上述六个结构性内编辑回调上，使组内编辑与根画布编辑一样去抖落盘、可跨刷新存活；退出时仍做最终 flush（幂等）。`syncInnerNodePosition` 仅在拖拽停止（`onNodeDragStop`）触发，无逐帧抖动。`tsc --noEmit` 通过（`node-runtime-react`）。
+  *为什么：* 组内编辑与根画布编辑应有一致的持久化语义，不能依赖「必须先退出组」才保存（根画布删除本就经 `useCanvasDelete` 直接 `persistSession` 落盘，已验证正常）。
+- **组内视图下输入端口取值现会查 group 自身的 edges（之前只查根 `currentPipeline.edges`，导致组内节点取不到上游内部节点的输出）。** `nodeTooltip.tsx` `resolveInputPortValue`：进入某组内视图时，先用 `groupViewStack` 末项定位当前 group，把 `group.edges` 拼到 `currentPipeline.edges` 前面再追溯上游；上游内部节点的真实输出由 `probeGroupInnerOutputs` 已 hydrate 到其真实 id 下，故能解析。*为什么：* 组内的连线存在 `group.edges` 而非根 edges，叶子可视化节点（`scene_structure`/`mask_structure` 等）因此在组内视图无法解析输入、只显示占位提示。
+
+### Changed
+- **电池栏左下角「开发/模板」切换图标改为环形双箭头（循环）形状。** `BatteryBar.tsx` `ModeToggleRailIcon`：由上下双箭头（swap）改为两段半圆弧 + 左上/右下箭头的环形循环图标。*为什么：* 用户要求该图标改为更直观的循环刷新形状。
+- **Templates 行：拉宽电池栏时缩略图不再放大，名称 / 版本 / 作者 / 时间戳整体等比放大（先保证全部文字显示、再放大、绝不截断）。**
+  `BatteryBar.css`：`.battery-row-thumb` 固定 `flex:0 0 164px; width:164px`（默认栏宽下的尺寸，拉宽/收窄电池栏均不变，宽度变化只作用于文字）；
+  改 CSS 容器查询为 JS 测量驱动：用 canvas 逐行测量名称、版本+作者行、日期的单行自然宽度。
+  **列表层**（`BatteryBar`）对全列模板（`visibleBatteries`）求出**全局最宽文字行** `templateMaxLineW` 下发给每个 `BatteryRow`，
+  使全列所有行共用同一约束、同一缩放系数 `--tpl-scale`（行间大小一致）：只要最宽行还放不进一行就整体保持换行不放大（不截断），
+  全部能单行容纳后才统一加 `.is-oneline`（`nowrap`）并整体等比放大，高度封顶约缩略图高（`imageH / TPL_BASE_BLOCK_H`）。
+  名称 / `-ver` / `-author` / `-date` 字号均改为 `calc(基准 * var(--tpl-scale,1))`，相对大小一致、同步放大。
+  *为什么：* 用户希望拉宽时所有文字同步等比放大、且优先保证文字完整显示后再放大（旧实现仅放大标题且会省略号截断）。
+
+### Added
+- **「保存到模板」对话框新增「作者」输入框（写入模板 JSON 的 `author`，配合 Templates 行展示）。**
+  `GroupTemplateSaveDialog.tsx` 新增 `authorInput` 态与输入框（可选），保存时把 `author` 合并进 `savedGroup`；
+  编辑器 `NodeGroup`（`editor/types.ts`）新增可选 `version?`/`author?`/`createdAt?` 以承载模板元数据。
+  后端 save-user 的 `stampTemplateMeta` 会保留该 `author` 并补 `createdAt`，故无需改 API 签名。
+  *为什么：* 用户保存模板时需要直接录入作者名，而非只能事后手改 JSON。
+
+### Added
+- **Templates 模式电池行除名称外，新增显示「版本号 · 作者 · 制作时间戳」（持久化在模板 JSON 中，读取到前端展示）。**
+  契约扩展：`GroupTemplateBattery`（`api/ApiClient.ts`）与编辑器 `Battery`（`editor/types.ts`）新增可选 `author?: string` / `createdAt?: number`（`version` 已有）；
+  `groupTemplateToBattery`（`editor/transport/apiAdapter.ts`）透传二者。
+  前端 `BatteryRow`（`editor/components/sidebar/BatteryBar.tsx`，仅 templateMode）在名称下方渲染 `vX.Y.Z` + `作者 …` 行与一行时间戳（新增 `formatTemplateDate`），样式见 `BatteryBar.css`（`.battery-row-template-info/-ver/-author/-date`）。
+  数据来源由 app 后端 `/api/v1/group-templates` 提供（见各 app CHANGELOG：从模板 JSON 读 `version`/`author`/`createdAt`，缺省时 `version=1.0.0`、`createdAt` 回退文件 mtime；保存时落盘 stamp）。
+  *为什么：* 用户需要在模板列表上一眼看到模板的版本、作者与制作时间，而非仅名称。
+
+### Fixed
+- **template/group 折叠面与内部视图壳的输入端口现在能显示内部映射端口的默认数据（此前未连线恒显示「暂无数据」）。**
+  普通电池输入端口 hover 时未连线会回退显示 meta `default`（`BatteryNode.tsx:440`），但 group 走另一套：折叠面用 `resolveInputPortValue(groupId, portName)`（只查根图连线 / group shadow 节点 params，后者无逐端口默认值），内部壳只读 `nodeOutputs[shellId]`（仅在有真实上游缓存时由 `hydrateGroupBoundaryAliases` 写入），两者未连线时恒为 `undefined`。
+  新增共享解析 `resolveGroupExposedInputValue(group, port)`（`groupViewUtils.ts`）：顺 `ExposedPort.sourceNodeId`/`sourcePortName` 找组内源节点——源是嵌套 `__group__` 则递归进子组对应暴露输入；否则源节点 `params[sourcePortName]` 有值当 `value`，无则查电池目录 `inputs[name].default` 当 `default`（muted）。
+  折叠面（`GroupNode.tsx` 输入端口 `onMouseEnter`）与内部壳（`GroupBoundaryNode.tsx` `showPortValueTooltip`）在原值为空时回退该解析，按 `value:`/`default:` 显示，与普通电池一致。`tsc --noEmit` 通过。
+  *为什么：* 组合电池的暴露输入应像普通电池一样在未连线时展示内部端口的默认值，便于用户判断「不连会取什么」。
+
 ### Added
 - **电池栏大标签 rail 底部新增 Develop ⇄ Templates 切换按钮（在收起与五角星之间）。**
   `BatteryBar.tsx` `.bb-rail-group--collection` 内、收起按钮之下、收藏星标之上插入一个图标按钮，

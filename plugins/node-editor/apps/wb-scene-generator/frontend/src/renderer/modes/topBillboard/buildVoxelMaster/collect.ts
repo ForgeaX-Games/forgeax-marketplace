@@ -109,7 +109,8 @@ export interface PainterSortOverride {
 /**
  * Pipeline 第 ③ 步:painter sort(y, z, layerIdx) ASC。
  *   * tile/autotile 维持原始 (y, z) 语义
- *   * non-tile object 可传入投影后 sprite bottom y,避免高 z sprite 用 raw y 错排
+ *   * non-tile object 可传入 sprite 最前缘 screen row,避免 footprint 南侧 z=0 地面
+ *     在 object 之后绘制盖住立面
  *   * layerIdx 兜底:同 (y, z) 不同 layer 时,晚 layer 后画 → 覆盖早 layer
  */
 export function painterSort(

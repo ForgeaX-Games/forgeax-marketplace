@@ -47,4 +47,24 @@ declare module '*/vendor/dist/shared/types/scene/index.js' {
     source: SceneNodeSnapshot,
     newVersion: number,
   ): SceneNodeSnapshot
+  export interface VoxelLayer {
+    nodePath: string
+    nodeName: string
+    value: number
+    schema?: string
+    cells: ReadonlyArray<{ x: number; y: number; z: number }>
+  }
+  export interface NameListEntry {
+    id: number
+    name: string
+    type?: string
+  }
+  export interface VoxelOutputBundle {
+    layers: readonly VoxelLayer[]
+    names: readonly NameListEntry[]
+  }
+  export function projectSceneToVoxelLayers(
+    tree: SceneNodeSnapshot,
+    focus: string,
+  ): VoxelOutputBundle
 }

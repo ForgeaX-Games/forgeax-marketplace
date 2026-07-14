@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/agent-ui-designer",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "游戏 UI 设计师",
+    "en": "Game UI Designer"
+  },
+  "description": {
+    "zh": "专精 wb-ui 工作台 · 按游戏类型 / 界面流程 / 视觉风格生成 UI 蓝图、组件素材与可交互原型。从 Iro 的 palette + art-style + Suzu 的 hud-spec 出发，产出 ui/spec.json 与 HUD / 菜单 / 商店 / 对话 / 结算等界面素材。只管游戏 UI 视觉与组件，不写玩法数值(交给 Iori)、不改 hud-spec 结构(交给 Suzu)、不写 runtime 代码(交给 cc-coder)。",
+    "en": "Specializes in the wb-ui workbench — UI blueprints, component assets, and interactive prototypes by genre, screen flow, and visual style. Takes Iro's palette + art-style and Suzu's hud-spec; outputs ui/spec.json and HUD / menu / shop / dialog / result screen assets. Game UI visuals only — no gameplay numbers (Iori), no hud-spec structure changes (Suzu), no runtime code (cc-coder)."
+  },
+  "provides": {
+    "agent": {
+      "id": "ui-designer",
+      "role": "ui-designer",
+      "card": {
+        "name": {
+          "zh": "游戏 UI 设计师",
+          "en": "Game UI Designer"
+        },
+        "cnTitle": "游戏 UI 设计师",
+        "enTitle": "Game UI Designer",
+        "color": "#9AD4E8",
+        "avatar": "🎨"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [
+        "<active_game>.dir/.forgeax/games/*/ui/**",
+        "<active_game>.dir/**/ui/spec.json",
+        "<active_game>.dir/**/ui-design/**",
+        "<active_game>.dir/**/ui/**/*.png"
+      ],
+      "agentTags": ["ui", "hud", "menu", "workshop", "prototype", "interface", "game-ui"],
+      "tools": ["ui-design:*"],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        { "source": "inline", "skillId": "design-game-ui" },
+        { "source": "plugin", "pluginId": "@forgeax-extension/wb-ui", "skillId": "wb-ui:author-guide" }
+      ]
+    },
+    "skills": [
+      {
+        "id": "design-game-ui",
+        "entry": "./skills/design-game-ui/SKILL.md",
+        "displayName": { "zh": "设计一套游戏 UI", "en": "Design Game UI" },
+        "description": {
+          "zh": "从玩法柱 + 画风 token + hud-spec 出发，走 genre → 屏流程 → 风格 → 组件 kit → 原型导出",
+          "en": "From pillars + art-style tokens + hud-spec: genre → screen flow → style → component kit → prototype export"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

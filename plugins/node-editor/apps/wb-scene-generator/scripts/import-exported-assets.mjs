@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyLegacyAssetOverlays } from './legacy-asset-overlays.mjs'
+import { applyLegacyAssetOverlays, toRendererAlias } from './legacy-asset-overlays.mjs'
 
 const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(join(scriptRoot, 'backend', 'package.json'))
@@ -81,14 +81,7 @@ function createSchema(db) {
       height_px INTEGER,
       anchor_x REAL,
       anchor_y REAL,
-      tag_layers_json TEXT,
-      tags_json TEXT,
-      geometry_json TEXT,
-      library_path TEXT,
-      organize_folder_path TEXT,
-      export_path TEXT,
-      asset_kind TEXT,
-      crop_type_original TEXT
+      geometry_json TEXT
     );
 
     CREATE INDEX idx_assets_zone_alias ON assets(zone, alias);
@@ -126,10 +119,10 @@ function buildStore({ root, exportRoot, storeDir, tempDir }) {
   const insertAsset = db.prepare(`
     INSERT INTO assets (
       id, alias, zone, blob_sha256, mime_type, size_bytes, width_px, height_px, anchor_x, anchor_y,
-      tag_layers_json, tags_json, geometry_json, library_path, organize_folder_path, export_path, asset_kind, crop_type_original
+      geometry_json
     ) VALUES (
       @id, @alias, @zone, @blob_sha256, @mime_type, @size_bytes, @width_px, @height_px, @anchor_x, @anchor_y,
-      @tag_layers_json, @tags_json, @geometry_json, @library_path, @organize_folder_path, @export_path, @asset_kind, @crop_type_original
+      @geometry_json
     )
   `)
   const insertBlob = db.prepare(`
@@ -163,7 +156,7 @@ function buildStore({ root, exportRoot, storeDir, tempDir }) {
       })
       insertAsset.run({
         id: sha256(Buffer.from(`${asset.fileName}\0${asset.exportPath}\0${originalIndex}`)),
-        alias: asset.fileName,
+        alias: toRendererAlias(asset.fileName, asset.assetKind),
         zone: 'raw',
         blob_sha256: digest,
         mime_type: 'image/png',
@@ -172,14 +165,7 @@ function buildStore({ root, exportRoot, storeDir, tempDir }) {
         height_px: height,
         anchor_x: anchor.x,
         anchor_y: anchor.y,
-        tag_layers_json: jsonValue(asset.tagLayers),
-        tags_json: jsonValue(asset.tags),
         geometry_json: jsonValue(asset.geometry),
-        library_path: asset.libraryPath ?? null,
-        organize_folder_path: asset.organizeFolderPath ?? null,
-        export_path: asset.exportPath,
-        asset_kind: asset.assetKind ?? null,
-        crop_type_original: asset.cropTypeOriginal ?? null,
       })
       imported++
     }

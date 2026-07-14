@@ -226,7 +226,7 @@ type_string.value    ← 运行时 path 字符串（如 /architecture_0/...）
 | 核心 | `alg_topology_connect_points` |
 | 输出 | Path + Rest（Non-Path）+ 双 Path 句柄 |
 
-**静默空跑条件**：POI 悬空 → 整组无道路输出，下游全空。
+**静默空跑条件**：POI 悬空 → 整组无道路输出，下游全空。**POI 坐标非法**（区域外/建筑内/不贴边）→ 道路畸形或空跑，`execute` 仍可能 `completed`。
 
 ### 4.5 PlaceOneDecoration（精准单点装饰）
 

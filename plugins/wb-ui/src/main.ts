@@ -33,7 +33,7 @@ async function bootstrap(): Promise<void> {
     pipeline.dispose?.()
   })
 
-  window.parent?.postMessage({ type: 'forgeax:plugin-ready', pluginId: '@forgeax-plugin/wb-ui', pane }, '*')
+  window.parent?.postMessage({ type: 'forgeax:plugin-ready', pluginId: '@forgeax-extension/wb-ui', pane }, '*')
 }
 
 bootstrap().catch(error => {

@@ -27,6 +27,7 @@ export function GroupTemplateSaveDialog({ group, onClose, onSaved }: GroupTempla
 
   const [smallTagInput, setSmallTagInput] = useState('')
   const [templateName, setTemplateName] = useState(group.name || (en ? 'My Template' : '我的模板'))
+  const [authorInput, setAuthorInput] = useState(group.author ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const tagInputRef = useRef<HTMLInputElement>(null)
@@ -50,6 +51,7 @@ export function GroupTemplateSaveDialog({ group, onClose, onSaved }: GroupTempla
   const handleSave = useCallback(async () => {
     const tag = smallTagInput.trim()
     const name = templateName.trim()
+    const author = authorInput.trim()
     if (!tag) { setError(en ? 'Small tag is required' : '请填写小标签'); return }
     if (!name) { setError(en ? 'Template name is required' : '请填写模板名称'); return }
 
@@ -62,7 +64,12 @@ export function GroupTemplateSaveDialog({ group, onClose, onSaved }: GroupTempla
       const nested = collectNestedDependencies(group, lookup)
       const groupToSave: NodeGroup =
         nested.length > 0 ? { ...group, _nestedGroups: nested } : group
-      const savedGroup = { ...groupToSave, name, nameEn: name }
+      const savedGroup = {
+        ...groupToSave,
+        name,
+        nameEn: name,
+        ...(author ? { author } : {}),
+      }
 
       await getEditorTransport().api.saveUserTemplate({
         group: savedGroup,
@@ -78,7 +85,7 @@ export function GroupTemplateSaveDialog({ group, onClose, onSaved }: GroupTempla
     } finally {
       setSaving(false)
     }
-  }, [smallTagInput, templateName, group, onSaved, onClose, en])
+  }, [smallTagInput, templateName, authorInput, group, onSaved, onClose, en])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onClose()
@@ -139,6 +146,17 @@ export function GroupTemplateSaveDialog({ group, onClose, onSaved }: GroupTempla
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
               placeholder={en ? 'Enter template name…' : '输入模板名称…'}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+
+          <div className="gsd-field">
+            <label className="gsd-label">{en ? 'Author' : '作者'}</label>
+            <input
+              className="gsd-input"
+              value={authorInput}
+              onChange={(e) => setAuthorInput(e.target.value)}
+              placeholder={en ? 'Enter author name (optional)…' : '输入作者名称（可选）…'}
               onKeyDown={handleKeyDown}
             />
           </div>

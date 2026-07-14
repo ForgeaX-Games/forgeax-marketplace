@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HttpApiClient } from '../api/HttpApiClient.js'
 import { libraryApi, type AssetRecord, type FacetItem, type FacetScheme } from './library/libraryApi.js'
+import { SLOT, fieldAt } from './library/aliasName.js'
 import { writePaintAsset, aliasItemName } from './library/paintAssetBus.js'
 import { readSelectedLayer, subscribeSelectedLayer } from './library/selectedLayerBus.js'
 import { useAssetStoreStore, type AssetViewMode, RULES_ZONE } from './library/assetStoreStore.js'
@@ -36,7 +37,7 @@ const TAXONOMY_OPTIONS: { value: FacetScheme | null; label: string; icon: JSX.El
   { value: 'place', label: 'By Place', icon: <MapPin size={14} /> },
   { value: 'style', label: 'By Style', icon: <Palette size={14} /> },
   { value: 'size', label: 'By Size', icon: <Ruler size={14} /> },
-  { value: 'scene', label: 'By Scene', icon: <Tags size={14} /> },
+  { value: 'index', label: 'By Index', icon: <Tags size={14} /> },
 ]
 
 function taxonomyLabel(t: FacetScheme | null): string {
@@ -45,10 +46,6 @@ function taxonomyLabel(t: FacetScheme | null): string {
 
 function taxonomyIcon(t: FacetScheme | null): JSX.Element {
   return TAXONOMY_OPTIONS.find((o) => o.value === t)?.icon ?? <LayoutList size={14} />
-}
-
-function leafDepth(t: FacetScheme): number {
-  return t === 'place' ? 2 : 1
 }
 
 // Faithful asset-library pane, aligned to the legacy AssetStore chrome:
@@ -94,6 +91,76 @@ const VIEW_OPTIONS: { mode: AssetViewMode; label: string; icon: JSX.Element }[] 
 ]
 
 type OpenMenu = 'zone' | 'view' | 'taxonomy' | null
+
+// ===== List-view table header (columns match asset_manager's AssetReviewTable) =====
+
+type ListColKey =
+  | 'area' | 'io' | 'name' | 'mat' | 'dir' | 'theme' | 'state' | 'type'
+  | 'size' | 'static' | 'filter' | 'serial' | 'place' | 'coll' | 'date' | 'kb'
+
+type ListSortDir = 'asc' | 'desc'
+
+const LIST_COL_LABEL: Record<ListColKey, string> = {
+  area: '索引', io: '内外', name: '名称', mat: '材质', dir: '朝向',
+  theme: '题材风格', state: '状态', type: '类型/规则', size: '尺寸', static: '静态',
+  filter: '滤镜模板', serial: '变体', place: '出现场所', coll: '几何', date: '时间戳', kb: '大小',
+}
+
+const LIST_COL_ORDER: ListColKey[] = [
+  'area', 'io', 'name', 'mat', 'dir', 'theme', 'state',
+  'type', 'size', 'static', 'filter', 'serial', 'place', 'coll', 'date', 'kb',
+]
+
+// 13-field bracket index each column reads from `alias` (missing = derived elsewhere).
+const LIST_COL_SLOT: Partial<Record<ListColKey, number>> = {
+  area: SLOT.index, io: SLOT.indoorOutdoor, name: SLOT.name, mat: SLOT.material,
+  dir: SLOT.direction, theme: SLOT.themeStyle, state: SLOT.state, type: SLOT.cropType,
+  size: SLOT.size, static: SLOT.isStatic, filter: SLOT.filterTemplate, serial: SLOT.serial,
+  place: SLOT.appearancePlace,
+}
+
+function listColText(a: AssetRecord, col: ListColKey): string {
+  if (col === 'coll') return a.geometryJson ? '有' : '—'
+  if (col === 'date') {
+    const raw = a.updatedAt ?? a.createdAt
+    return raw ? formatListDate(raw) : '—'
+  }
+  if (col === 'kb') return formatBytes(a.sizeBytes)
+  const idx = LIST_COL_SLOT[col]
+  const v = idx != null ? fieldAt(a.alias, idx) : ''
+  return v || '—'
+}
+
+function listSortValue(a: AssetRecord, col: ListColKey): string | number {
+  if (col === 'date') {
+    const raw = a.updatedAt ?? a.createdAt
+    const t = raw ? new Date(raw).getTime() : 0
+    return Number.isNaN(t) ? 0 : t
+  }
+  if (col === 'kb') return a.sizeBytes ?? 0
+  if (col === 'coll') return a.geometryJson ? 1 : 0
+  const idx = LIST_COL_SLOT[col]
+  const raw = idx != null ? fieldAt(a.alias, idx) : ''
+  if (col === 'size') return Number(raw) || 0
+  return raw.toLowerCase()
+}
+
+function compareListAssets(col: ListColKey, dir: ListSortDir): (a: AssetRecord, b: AssetRecord) => number {
+  const mul = dir === 'asc' ? 1 : -1
+  return (a, b) => {
+    const va = listSortValue(a, col)
+    const vb = listSortValue(b, col)
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * mul
+    return String(va).localeCompare(String(vb), 'zh') * mul
+  }
+}
+
+function formatListDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 // ===== Continuous-scroll helpers (operate on the scroll container) =====
 
@@ -172,6 +239,7 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
     folderPath,
     folders,
     loadingFolders,
+    folderView,
     batchMode,
     selectedIds,
     init,
@@ -195,8 +263,10 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
     fetchAssets,
   } = useAssetStoreStore()
   const isRules = activeZone === RULES_ZONE
-  // Folder view: a taxonomy is active and we haven't drilled to a leaf yet.
-  const showFolders = !isRules && taxonomy != null && folderPath.length < leafDepth(taxonomy)
+  // Folder view is decided by the store (loadView/fetchFolders): true = folder
+  // cards, false = the asset list. `index`'s dynamic depth needs this runtime
+  // decision instead of a fixed leaf depth.
+  const showFolders = !isRules && folderView
   const { isFocused, requestFocus, reportStatus } = useWorkbenchChild('assetstore')
 
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
@@ -209,6 +279,28 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
     const info = readSelectedLayer()
     return info?.kind === 'baked' && info.assetName ? info.assetName : null
   })
+
+  // List-view header sort: click a column → asc; click again → desc; a third
+  // click clears it (mirrors asset_manager's AssetReviewTable/ScenePage).
+  const [listSortKey, setListSortKey] = useState<ListColKey | null>(null)
+  const [listSortDir, setListSortDir] = useState<ListSortDir>('asc')
+  const handleSortListColumn = useCallback((col: ListColKey) => {
+    if (listSortKey !== col) {
+      setListSortKey(col)
+      setListSortDir('asc')
+      return
+    }
+    if (listSortDir === 'asc') {
+      setListSortDir('desc')
+      return
+    }
+    setListSortKey(null)
+    setListSortDir('asc')
+  }, [listSortKey, listSortDir])
+  const sortedListAssets = useMemo(() => {
+    if (!listSortKey) return assets
+    return [...assets].sort(compareListAssets(listSortKey, listSortDir))
+  }, [assets, listSortKey, listSortDir])
 
   useEffect(() => {
     void init()
@@ -263,6 +355,17 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
     const unsub = client.subscribe('asset', () => void fetchAssets())
     return () => unsub()
   }, [client, fetchAssets])
+
+  // Switching the viewing project changes the private store + game-sandbox ref;
+  // re-init zones and reload the grid (mirrors useAliasMetas / useBakedLayers).
+  useEffect(() => {
+    const onWorkbenchMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown } | null
+      if (data?.type === 'workbench:project-changed') void init()
+    }
+    window.addEventListener('message', onWorkbenchMessage)
+    return () => window.removeEventListener('message', onWorkbenchMessage)
+  }, [init])
 
   // Close any open titlebar menu on an outside click.
   useEffect(() => {
@@ -603,35 +706,57 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
             ))}
           </ul>
         ) : (
-          <ul className="asset-grid asset-grid--list">
-            {assets.map((a) => (
-              <li
-                key={a.id}
-                className={`asset-card${selected?.id === a.id ? ' selected' : ''}${batchMode && selectedIds.has(a.id) ? ' batch-selected' : ''}${batchMode && !a.private ? ' batch-locked' : ''}${selectedLayerAssetName && aliasItemName(a.alias) === selectedLayerAssetName ? ' is-layer-asset' : ''}`}
-                onClick={() => handleCardClick(a)}
-                onDoubleClick={() => copyAlias(a.alias)}
-                title={a.alias}
-              >
-                <div className="asset-card-thumb">
-                  {a.private && <span className="asset-card-private" title="项目私有资产">私</span>}
-                  {batchMode && a.private && (
-                    <span className={`asset-card-check${selectedIds.has(a.id) ? ' is-on' : ''}`} aria-hidden="true" />
-                  )}
-                  <img
-                    className="asset-card-img"
-                    src={libraryApi.serveUrl(a.alias)}
-                    alt={a.alias}
-                    loading="lazy"
-                  />
-                </div>
-                <div className="asset-card-name">{a.alias}</div>
-                <div className="asset-card-dims">
-                  {a.widthPx && a.heightPx ? `${a.widthPx}×${a.heightPx}` : '—'}
-                </div>
-                <div className="asset-card-size">{formatBytes(a.sizeBytes)}</div>
-              </li>
-            ))}
-          </ul>
+          <div className="asset-list-table">
+            <div className="asset-list-head">
+              <div className="asset-list-head-thumb" aria-hidden="true" />
+              {LIST_COL_ORDER.map((col) => {
+                const active = listSortKey === col
+                return (
+                  <button
+                    key={col}
+                    type="button"
+                    className={`asset-list-head-cell asset-list-head-cell--${col}${active ? ' is-active' : ''}`}
+                    title="点击按此列排序"
+                    onClick={() => handleSortListColumn(col)}
+                  >
+                    <span>{LIST_COL_LABEL[col]}</span>
+                    <span className={`asset-list-head-sort${active ? '' : ' is-hint'}`}>
+                      {active ? (listSortDir === 'asc' ? '▲' : '▼') : '−'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <ul className="asset-grid asset-grid--list">
+              {sortedListAssets.map((a) => (
+                <li
+                  key={a.id}
+                  className={`asset-card${selected?.id === a.id ? ' selected' : ''}${batchMode && selectedIds.has(a.id) ? ' batch-selected' : ''}${batchMode && !a.private ? ' batch-locked' : ''}${selectedLayerAssetName && aliasItemName(a.alias) === selectedLayerAssetName ? ' is-layer-asset' : ''}`}
+                  onClick={() => handleCardClick(a)}
+                  onDoubleClick={() => copyAlias(a.alias)}
+                  title={a.alias}
+                >
+                  <div className="asset-card-thumb">
+                    {a.private && <span className="asset-card-private" title="项目私有资产">私</span>}
+                    {batchMode && a.private && (
+                      <span className={`asset-card-check${selectedIds.has(a.id) ? ' is-on' : ''}`} aria-hidden="true" />
+                    )}
+                    <img
+                      className="asset-card-img"
+                      src={libraryApi.serveUrl(a.alias)}
+                      alt={a.alias}
+                      loading="lazy"
+                    />
+                  </div>
+                  {LIST_COL_ORDER.map((col) => (
+                    <div key={col} className={`asset-list-cell asset-list-cell--${col}`}>
+                      {listColText(a, col)}
+                    </div>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

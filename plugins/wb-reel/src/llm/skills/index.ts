@@ -39,6 +39,7 @@ import forgeChatAlignerSkill from './forge-chat-aligner/SKILL.md?raw'
 import characterVoiceCasterSkill from './character-voice-caster/SKILL.md?raw'
 import sceneBgmComposerSkill from './scene-bgm-composer/SKILL.md?raw'
 import seedance2PromptOptimizerSkill from './seedance2-prompt-optimizer/SKILL.md?raw'
+import uiCuratorSkill from './ui-curator/SKILL.md?raw'
 
 /**
  * 剥掉 SKILL.md 顶部的 YAML frontmatter（`--- ... ---`）。
@@ -106,6 +107,12 @@ export const SKILLS = {
    *   定位: cinema-video-prompt / kinetic-video-prompt 的 Seedance 2.0 升级规范。
    */
   seedance2PromptOptimizer: body(seedance2PromptOptimizerSkill),
+  /**
+   * Forge · 影游 UI 素材策展师 (v9) ——
+   *   按剧本 + 视觉风格产出一套叠加式 UI 素材规格(role/prompt/matte/lifecycle/anchor),
+   *   去背靠图层混合(纯黑+滤色 / 纯白+相乘),版权安全。供 UIAssetLibrary「AI 生成整套」。
+   */
+  uiCurator: body(uiCuratorSkill),
 } as const
 
 export type SkillName = keyof typeof SKILLS

@@ -1,6 +1,17 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { publishDiffusionRendererControl } from './host/control';
 import { fetchDiffusionRendererMeta } from './host/meta';
-import { isStreaming, startStream, stopStream, updateParams, type StreamStatus } from './host/stream';
+import {
+  clearGameOverrides,
+  getStreamControlSnapshot,
+  isStreaming,
+  startStream,
+  stopStream,
+  subscribeStreamControl,
+  updateParams,
+  type StreamControlSnapshot,
+  type StreamStatus,
+} from './host/stream';
 import {
   getDiffusionRendererOutputSnapshot,
   setDiffusionRendererOutputTarget,
@@ -9,32 +20,66 @@ import {
   type DiffusionRendererOutputSnapshot,
 } from './host/output-store';
 
-export const WB_DIFFUSION_RENDERER_PLUGIN_ID = '@forgeax-plugin/wb-diffusion-renderer';
+export const WB_DIFFUSION_RENDERER_PLUGIN_ID = '@forgeax-extension/wb-diffusion-renderer';
 
-const DEFAULT_PROMPT = 'photorealistic game screenshot, realistic PBR materials and lighting, natural global illumination, highly detailed, sharp focus, cinematic';
-const FIXED_LORA = 'sim-to-real';
+const DEFAULT_PROMPT = 'high quality stylized 3D game render, preserve original geometry and camera composition, upgraded game assets, detailed PBR materials, soft lighting, crisp detail';
+const STYLE_PRESETS = [
+  {
+    label: 'Game Asset',
+    prompt: DEFAULT_PROMPT,
+  },
+  {
+    label: 'Photoreal',
+    prompt: 'photorealistic render, preserve original geometry and camera composition, realistic materials, natural daylight, soft shadows, sharp focus',
+  },
+  {
+    label: 'Anime',
+    prompt: 'anime game render, preserve original geometry and camera composition, clean cel shading, vibrant colors, crisp linework, soft lighting',
+  },
+  {
+    label: 'Cyberpunk',
+    prompt: 'cyberpunk stylized 3D game render, preserve original geometry and camera composition, neon accent lighting, glossy wet-looking materials, high contrast night-city color grading, crisp detail',
+  },
+  {
+    label: 'Adventure Toon',
+    prompt: 'colorful adventure toon 3D game render, preserve original geometry and camera composition, painterly cel shading, warm fantasy colors, soft ambient lighting, clean readable shapes',
+  },
+  {
+    label: 'Clay',
+    prompt: 'clay-style 3D render, preserve original geometry and camera composition, matte materials, soft studio lighting, smooth forms',
+  },
+] as const;
 const OUTPUT_RES = '576x320';
 
 export function DiffusionRendererPanel() {
   const imgRef = useRef<HTMLImageElement | null>(null);
+  // `prompt` is the editable draft in the box; `appliedPrompt` is what actually
+  // drives the stream. The draft is only pushed to the backend when the user
+  // applies it (Apply button / Enter / Go Live), never on every keystroke.
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [appliedPrompt, setAppliedPrompt] = useState(DEFAULT_PROMPT);
   const [steps, setSteps] = useState('2');
-  const [interp, setInterp] = useState('2');
+  const [interp, setInterp] = useState('1');
+  // Steps upper bound comes from the service /health probe; 4 is the always-safe
+  // real-time fallback until we learn the real max (service.md §2).
+  const [maxSteps, setMaxSteps] = useState(4);
   const [meta, setMeta] = useState('checking...');
   const [ready, setReady] = useState(false);
   const [stream, setStream] = useState<StreamStatus>({ state: isStreaming() ? 'live' : 'stopped' });
   const [output, setOutput] = useState<DiffusionRendererOutputSnapshot>(() => getDiffusionRendererOutputSnapshot());
+  const [control, setControl] = useState<StreamControlSnapshot>(() => getStreamControlSnapshot());
   const [settingsOpen, setSettingsOpen] = useState(true);
 
-  const params = () => ({
-    prompt: prompt.trim() || DEFAULT_PROMPT,
+  const buildParams = (promptValue: string) => ({
+    prompt: promptValue.trim() || DEFAULT_PROMPT,
     steps: parseInt(steps || '2', 10),
     interp: parseInt(interp || '0', 10),
-    lora: FIXED_LORA,
     seed: 42,
   });
 
   useEffect(() => subscribeDiffusionRendererOutput(() => setOutput(getDiffusionRendererOutputSnapshot())), []);
+  useEffect(() => subscribeStreamControl(() => setControl(getStreamControlSnapshot())), []);
+  useEffect(() => publishDiffusionRendererControl(), []);
   useEffect(() => {
     const img = imgRef.current;
     setDiffusionRendererOutputTarget(img);
@@ -51,21 +96,59 @@ export function DiffusionRendererPanel() {
       if (cancelled) return;
       setReady(m.ready);
       setMeta(m.statusText);
+      if (m.maxSteps && m.maxSteps >= 1) {
+        setMaxSteps(m.maxSteps);
+        setSteps((s) => String(Math.min(parseInt(s || '2', 10), m.maxSteps!)));
+      }
     };
     void refresh();
     const timer = setInterval(refresh, 5000);
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
+  // Only the APPLIED prompt (plus the discrete Steps/Smooth selects) reaches the
+  // backend; typing in the box does not.
   useEffect(() => {
-    if (isStreaming()) updateParams(params());
-  }, [prompt, steps, interp]);
+    updateParams(buildParams(appliedPrompt));
+  }, [appliedPrompt, steps, interp]);
+
+  const promptDirty = prompt !== appliedPrompt;
+
+  const applyPrompt = () => setAppliedPrompt(prompt);
+  const resetPrompt = () => {
+    setPrompt(DEFAULT_PROMPT);
+    setAppliedPrompt(DEFAULT_PROMPT);
+  };
+  const applyStylePreset = (nextPrompt: string) => {
+    if (!nextPrompt) return;
+    setPrompt(nextPrompt);
+    setAppliedPrompt(nextPrompt);
+  };
+  const activePresetPrompt = STYLE_PRESETS.some((preset) => preset.prompt === appliedPrompt) ? appliedPrompt : '';
+
+  // Shield the prompt controls from the host's global keyboard shortcuts so
+  // ctrl/cmd+A/C/V (and typing) behave natively inside the field. Enter applies.
+  const onPromptInputKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyPrompt();
+    }
+  };
+  const onPromptTextareaKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      applyPrompt();
+    }
+  };
 
   const start = () => {
+    setAppliedPrompt(prompt);
     setDiffusionRendererOutputVisible(true);
     setSettingsOpen(false);
     setStream({ state: 'connecting' });
-    void startStream(params(), setStream);
+    void startStream(buildParams(prompt), setStream);
   };
 
   const toggleLive = () => {
@@ -111,16 +194,54 @@ export function DiffusionRendererPanel() {
   // streaming/shown they collapse into a floating slim bar + popover so they
   // never cover the output.
   const idle = !hasOutput && !live;
+  const gamePrompt = control.game.prompt?.trim() ?? '';
+  const effectivePrompt = control.effective.prompt ?? '';
+  const gameControlled = gamePrompt.length > 0;
 
   const promptField = (
     <div style={styles.promptField}>
       <div style={styles.labelRow}>
         <label style={styles.label}>Prompt</label>
-        {prompt !== DEFAULT_PROMPT && (
-          <button type="button" style={styles.linkButton} onClick={() => setPrompt(DEFAULT_PROMPT)}>reset</button>
-        )}
+        <div style={styles.labelActions}>
+          <select
+            style={styles.styleSelect}
+            value={activePresetPrompt}
+            onChange={(e) => applyStylePreset(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            aria-label="Style preset"
+            title="Apply a global style preset"
+          >
+            <option value="">Custom</option>
+            {STYLE_PRESETS.map((preset) => (
+              <option key={preset.label} value={preset.prompt}>{preset.label}</option>
+            ))}
+          </select>
+          {gameControlled && <span style={styles.gameBadge}>game</span>}
+          {promptDirty && (
+            <button type="button" style={styles.linkButtonAccent} onClick={applyPrompt}>apply</button>
+          )}
+          {prompt !== DEFAULT_PROMPT && (
+            <button type="button" style={styles.linkButton} onClick={resetPrompt}>reset</button>
+          )}
+        </div>
       </div>
-      <textarea style={styles.textarea} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <textarea
+        style={styles.textarea}
+        rows={3}
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={onPromptTextareaKeyDown}
+      />
+      {promptDirty && (
+        <div style={styles.dirtyHint}>Unapplied — press ⌘/Ctrl+Enter or Apply to send</div>
+      )}
+      {gameControlled && (
+        <div style={styles.controlHint}>
+          <div style={styles.controlHintLine}>Game fragment: {gamePrompt}</div>
+          <div style={styles.controlHintLine}>Effective: {effectivePrompt}</div>
+          <button type="button" style={styles.reclaimButton} onClick={clearGameOverrides}>reclaim manual control</button>
+        </div>
+      )}
     </div>
   );
 
@@ -129,7 +250,9 @@ export function DiffusionRendererPanel() {
       <label style={styles.field}>
         <span style={styles.label}>Steps</span>
         <select style={styles.input} value={steps} onChange={(e) => setSteps(e.target.value)}>
-          <option>1</option><option>2</option><option>3</option><option>4</option>
+          {Array.from({ length: Math.max(1, maxSteps) }, (_, i) => i + 1).map((n) => (
+            <option key={n}>{n}</option>
+          ))}
         </select>
       </label>
       <label style={styles.field}>
@@ -231,15 +354,44 @@ export function DiffusionRendererPanel() {
       {!idle && (
         <div style={styles.promptBar}>
           <span style={styles.promptTag}>Prompt</span>
+          {gameControlled && <span style={styles.gameBadge}>game</span>}
+          <select
+            style={styles.promptPresetSelect}
+            value={activePresetPrompt}
+            onChange={(e) => applyStylePreset(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            aria-label="Style preset"
+            title="Apply a global style preset"
+          >
+            <option value="">Custom</option>
+            {STYLE_PRESETS.map((preset) => (
+              <option key={preset.label} value={preset.prompt}>{preset.label}</option>
+            ))}
+          </select>
           <input
-            style={styles.promptInput}
+            style={{ ...styles.promptInput, ...(promptDirty ? styles.promptInputDirty : null) }}
             value={prompt}
             placeholder={DEFAULT_PROMPT}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={onPromptInputKeyDown}
             aria-label="Diffusion prompt"
+            title={gameControlled ? `Effective: ${effectivePrompt}` : 'Enter or Apply to send the prompt'}
           />
+          {gameControlled && <span style={styles.effectiveText} title={effectivePrompt}>+ {gamePrompt}</span>}
+          <button
+            type="button"
+            style={promptDirty ? styles.applyButton : styles.applyButtonIdle}
+            disabled={!promptDirty}
+            title={promptDirty ? 'Send this prompt to the renderer' : 'Prompt already applied'}
+            onClick={applyPrompt}
+          >
+            Apply
+          </button>
+          {gameControlled && (
+            <button type="button" style={styles.promptReset} onClick={clearGameOverrides}>reclaim</button>
+          )}
           {prompt !== DEFAULT_PROMPT && (
-            <button type="button" style={styles.promptReset} onClick={() => setPrompt(DEFAULT_PROMPT)}>reset</button>
+            <button type="button" style={styles.promptReset} onClick={resetPrompt}>reset</button>
           )}
         </div>
       )}
@@ -339,15 +491,28 @@ const styles: Record<string, CSSProperties> = {
   popover: { position: 'absolute', top: 46, right: 10, width: 220, maxWidth: 'calc(100% - 20px)', display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: t.elevated, border: `1px solid ${t.borderDefault}`, borderRadius: t.radLg, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', zIndex: 3 },
   promptField: { display: 'flex', flexDirection: 'column' },
   labelRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  labelActions: { display: 'flex', alignItems: 'center', gap: 8 },
   label: { display: 'block', color: t.textSecondary, fontSize: 11, fontWeight: 500, marginBottom: 5 },
+  styleSelect: { minWidth: 96, maxWidth: 128, background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radSm, padding: '3px 6px', fontSize: 11, fontFamily: t.sans },
   linkButton: { background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: 0 },
+  linkButtonAccent: { background: 'none', border: 'none', color: t.green, cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: 0 },
+  dirtyHint: { marginTop: 5, color: t.orange, fontSize: 10, lineHeight: 1.4 },
   textarea: { resize: 'vertical', minHeight: 56, background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radMd, padding: 8, fontSize: 12, lineHeight: 1.5, fontFamily: t.sans },
+  gameBadge: { flex: '0 0 auto', padding: '1px 5px', borderRadius: 999, background: 'rgba(99,156,248,0.16)', border: `1px solid ${t.blue}`, color: t.blue, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' },
+  controlHint: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, padding: 8, background: 'rgba(99,156,248,0.08)', border: `1px solid ${t.borderSubtle}`, borderRadius: t.radMd },
+  controlHintLine: { color: t.textSecondary, fontSize: 11, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  reclaimButton: { alignSelf: 'flex-start', background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: 0 },
   row: { display: 'flex', gap: 10 },
   field: { flex: 1 },
   input: { width: '100%', boxSizing: 'border-box', background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radSm, padding: '6px 8px', fontSize: 12, fontFamily: t.sans },
 
   promptBar: { position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'linear-gradient(to top, rgba(0,0,0,0.82), rgba(0,0,0,0))', zIndex: 2 },
   promptTag: { flex: '0 0 auto', color: t.textTertiary, fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' },
+  promptPresetSelect: { flex: '0 0 98px', minWidth: 0, boxSizing: 'border-box', background: 'rgba(0,0,0,0.35)', color: t.textPrimary, border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, padding: '5px 6px', fontSize: 11, fontFamily: t.sans },
   promptInput: { flex: 1, minWidth: 0, boxSizing: 'border-box', background: 'rgba(0,0,0,0.35)', color: t.textPrimary, border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, padding: '5px 8px', fontSize: 12, fontFamily: t.sans },
+  promptInputDirty: { borderColor: t.orange },
+  effectiveText: { flex: '0 1 28%', minWidth: 0, color: t.textSecondary, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  applyButton: { flex: '0 0 auto', background: t.green, border: '1px solid transparent', borderRadius: t.radSm, color: '#0d0d0d', cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '4px 10px' },
+  applyButtonIdle: { flex: '0 0 auto', background: 'transparent', border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, color: t.textTertiary, cursor: 'default', fontSize: 11, fontWeight: 600, padding: '4px 10px' },
   promptReset: { flex: '0 0 auto', background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: 0 },
 };

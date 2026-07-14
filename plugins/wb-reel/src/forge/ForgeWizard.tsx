@@ -13,7 +13,7 @@ import { ForgeChatPanel } from './ForgeChatPanel'
 import { VisualStyleSelector } from './VisualStyleSelector'
 import { FilmLookSelector } from './FilmLookSelector'
 import { DirectorStyleSelector } from './DirectorStyleSelector'
-import { UIStyleSelector } from './UIStyleSelector'
+import { UIModule } from './modules/UIModule'
 import { MinigamePoolSelector } from './MinigamePoolSelector'
 import { NumericModule } from './modules/NumericModule'
 import { InventoryModule } from './modules/InventoryModule'
@@ -424,7 +424,7 @@ function RefsPanel() {
   if (imageSection === 'ui') {
     return (
       <div className="ks-forge-step ks-forge-step-full">
-        <UIStyleSelector />
+        <UIModule />
       </div>
     )
   }

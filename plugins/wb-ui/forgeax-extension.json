@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/wb-ui",
+  "version": "0.1.0",
+  "kind": "workbench",
+  "displayName": {
+    "zh": "UI 工坊",
+    "en": "UI Workshop"
+  },
+  "description": {
+    "zh": "UI 工坊(工作台)· 按游戏类型 / 界面流程 / 视觉风格生成 UI 蓝图与组件素材(经 Gemini 生图),预览 HUD / 菜单 / 商店 / 对话 / 结算等界面并导出可交互原型;视觉对齐 ForgeaX 设计系统 token。",
+    "en": "UI Workshop workbench — generate UI blueprints and component assets by game genre / screen flow / visual style (via Gemini image gen), preview HUD / menu / shop / dialog / result screens and export an interactive prototype; visuals aligned to the ForgeaX design-system tokens."
+  },
+  "icon": "LayoutTemplate",
+  "keywords": [
+    "ui",
+    "hud",
+    "workshop",
+    "prototype",
+    "interface",
+    "game-ui"
+  ],
+  "provides": {
+    "workbench": {
+      "id": "ui",
+      "lens": "by-category",
+      "icon": "LayoutTemplate",
+      "position": 130,
+      "panelSize": "lg",
+      "panes": {
+        "left": {
+          "defaultWidth": 360,
+          "minWidth": 300,
+          "collapsible": true,
+          "scrollable": true
+        },
+        "center": {
+          "scrollable": false
+        }
+      },
+      "matchProduces": [
+        "**/ui/**",
+        "**/ui/spec.json",
+        "**/ui-design/**"
+      ],
+      "preferredAgent": "@forgeax-extension/agent-ui-designer"
+    },
+    "skills": [
+      {
+        "id": "wb-ui:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/ui-workshop"
+      }
+    ],
+    "tools": [
+      {
+        "id": "ui-design:generate-assets",
+        "args": "./schemas/generate-assets.args.json",
+        "returns": "./schemas/generate-assets.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "为 UI 工坊生成按钮、标题、面板、图标、背景、NPC 等素材。"
+        }
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./server/api-plugin.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "embeddedAlso": true
+    }
+  },
+  "experimental": true
+}

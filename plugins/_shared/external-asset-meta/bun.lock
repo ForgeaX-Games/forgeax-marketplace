@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@forgeax-plugin/external-asset-meta",
+      "name": "@forgeax-extension/external-asset-meta",
       "dependencies": {
         "@gltf-transform/core": "^4.4.1",
         "@gltf-transform/extensions": "^4.4.1",

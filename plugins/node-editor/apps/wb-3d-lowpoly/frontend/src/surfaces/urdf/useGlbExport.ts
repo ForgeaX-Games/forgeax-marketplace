@@ -3,6 +3,7 @@ import type * as THREE from 'three'
 import type { UrdfSpec } from './viewer3d/urdf-parser'
 import { exportAnimatedGlbBlob, exportStaticGlbBlob } from './viewer3d/export-glb'
 import { cloneObject3DForExport, disposeObject3D } from './viewer3d/three-dispose'
+import { useViewerStore } from './store/viewerStore'
 
 // Accessors into the live viewer so the agent-triggered GLB export reuses the
 // exact same path as the titlebar "Export ▸ glb" button.
@@ -60,9 +61,14 @@ export function useGlbExport(accessors: GlbExportAccessors): void {
         }
         root.updateMatrixWorld(true)
         const exportRoot = cloneObject3DForExport(root)
+        // Authored clip (from g_bake_animation) takes precedence over the
+        // procedural joint preview when present; export-glb falls back on null.
+        const authoredClip = useViewerStore.getState().authoredAnimation
         let blob: Blob
         try {
-          blob = animated ? await exportAnimatedGlbBlob(exportRoot, spec!) : await exportStaticGlbBlob(exportRoot)
+          blob = animated
+            ? await exportAnimatedGlbBlob(exportRoot, spec!, authoredClip)
+            : await exportStaticGlbBlob(exportRoot)
         } finally {
           // 导出克隆持有独立 geometry/material，用完即释放，避免每次 agent 导出泄漏。
           disposeObject3D(exportRoot)

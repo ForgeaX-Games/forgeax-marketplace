@@ -216,6 +216,8 @@ function gridMax(grid: Grid): number {
 // ─── 从 POI 网格中提取点坐标 ──────────────────────────────────────────────────
 
 function extractPoints(poiGrid: Grid, poiValue: number): Point[] {
+  // poiValue=0 且 mask 全 0 时，若仍用 ===0 匹配会把整张 grid 当成 POI（灾难性满图铺路）
+  if (poiValue <= 0) return [];
   const points: Point[] = [];
   for (let r = 0; r < poiGrid.length; r++) {
     for (let c = 0; c < poiGrid[r].length; c++) {

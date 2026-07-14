@@ -196,30 +196,23 @@ describe('assetStoreStore', () => {
     expect(seen.some((u) => u.includes('/library/list') && u.includes('by=type') && u.includes('value=tilemap'))).toBe(true)
   })
 
-  it('place is two-level: indoor→rooms (folders), then a room (filtered assets, parent+value)', async () => {
+  it('place is single-level: opening 室内/室外 loads filtered assets (no room drill-down)', async () => {
     const seen: string[] = []
     const fetchMock = vi.fn(async (url: string) => {
       seen.push(url)
       if (url.includes('/library/facets')) {
-        return jsonResponse([{ value: '客厅', label: '客厅', count: 5, samples: [] }])
+        return jsonResponse([{ value: '室内', label: '室内', count: 30, samples: [] }])
       }
       return jsonResponse({ items: [], total: 0, page: 1, pageSize: 500 })
     })
     vi.stubGlobal('fetch', fetchMock)
 
     useAssetStoreStore.setState({ taxonomy: 'place', folderPath: [] })
-    // Level 1: open 室内 → still folders (rooms), fetched with parent=室内.
     useAssetStoreStore.getState().openFolder({ value: '室内', label: '室内', count: 30, samples: [] })
     await flush()
-    expect(seen.some((u) => u.includes('/library/facets') && u.includes('parent=%E5%AE%A4%E5%86%85'))).toBe(true)
-    expect(useAssetStoreStore.getState().folders.map((f) => f.value)).toEqual(['客厅'])
-
-    seen.length = 0
-    // Level 2: open a room → leaf, filtered assets with by=place & parent & value.
-    useAssetStoreStore.getState().openFolder({ value: '客厅', label: '客厅', count: 5, samples: [] })
-    await flush()
-    expect(useAssetStoreStore.getState().folderPath.map((c) => c.value)).toEqual(['室内', '客厅'])
-    expect(seen.some((u) => u.includes('/library/list') && u.includes('by=place') && u.includes('parent=') && u.includes('value='))).toBe(true)
+    expect(useAssetStoreStore.getState().folderPath.map((c) => c.value)).toEqual(['室内'])
+    expect(seen.some((u) => u.includes('/library/list') && u.includes('by=place') && u.includes('value=%E5%AE%A4%E5%86%85'))).toBe(true)
+    expect(seen.some((u) => u.includes('/library/facets') && u.includes('parent='))).toBe(false)
   })
 
   it('goToCrumb(0) climbs back from a leaf to the taxonomy root folders', async () => {

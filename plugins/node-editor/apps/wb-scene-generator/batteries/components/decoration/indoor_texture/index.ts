@@ -1,8 +1,12 @@
 /**
- * indoor_texture: 根据楼层掩码网格列表批量生成室内纹理分布（普通/青苔/裂纹/木/石板地板）
- * 输入：gridList (array) — 楼层掩码网格列表（支持单个网格或网格数组）; algorithm (string) — 算法类型; seed (number) — 随机种子
- * 输出：outputGridList (array) — 单值网格的平铺列表：每个输入楼层的多类别结果按纹理 id 1～5 拆分，每张网格仅含 0 或该 id；无该类型的层不输出；
- *       nameList (array) — 与 outputGridList 一一对应 [{id, name, type:"tile"}]
+ * indoor_texture: 根据单张楼层掩码网格生成室内纹理分布（普通/青苔/裂纹/木/石板地板）
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张楼层掩码网格; algorithm (string) — 算法类型; seed (number) — 随机种子
+ * 输出：outputGrid (grid) — 单张多值纹理网格（每格为纹理 id 1～5 或 0）;
+ *       nameList (array) — 实际出现的纹理条目 [{id, name, type:"tile"}]
  */
 
 type Grid = number[][];
@@ -258,90 +262,38 @@ const TEXTURE_NAMES: { id: number; name: string }[] = [
   { id: 5, name: "石板地板" },
 ];
 
-/**
- * 归一化 gridList 输入：支持单个网格（number[][]）或网格数组（number[][][]）。
- * 若第一个元素是数字数组（而非数组的数组），视为单个网格并包装为列表。
- */
-function normalizeGridList(raw: unknown): Grid[] | null {
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-  const first = raw[0];
-  if (Array.isArray(first) && (first.length === 0 || !Array.isArray(first[0]))) {
-    return [raw as Grid];
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
+    return raw as Grid;
   }
-  return raw as Grid[];
-}
-
-/** 多类别纹理网格 → 单值网格列表：每种出现的纹理 id 一张网（仅含 0 与该 id），顺序 id 1…5。 */
-function splitMultiToSingleValueLayers(multi: Grid): { id: number; grid: Grid }[] {
-  if (!multi.length || !multi[0]?.length) return [];
-  const rows = multi.length;
-  const cols = multi[0].length;
-  const out: { id: number; grid: Grid }[] = [];
-  for (let tid = 1; tid <= TEXTURE_COUNT; tid++) {
-    let hasAny = false;
-    const g: Grid = Array.from({ length: rows }, (_, i) =>
-      Array.from({ length: cols }, (_, j) => {
-        const v = multi[i][j];
-        const cell = v === tid ? tid : 0;
-        if (cell !== 0) hasAny = true;
-        return cell;
-      }),
-    );
-    if (hasAny) out.push({ id: tid, grid: g });
-  }
-  return out;
+  return null;
 }
 
 export function indoorTexture(input: Record<string, unknown>): Record<string, unknown> {
-  const gridList = normalizeGridList(input.gridList);
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) return { error: "inputGrid is required" };
+  if (grid.length === 0 || !grid[0] || grid[0].length === 0) return { error: "inputGrid is empty" };
+
   const algorithm = typeof input.algorithm === "string" ? input.algorithm : "nature";
   const seed = typeof input.seed === "number" ? Math.floor(input.seed) : 0;
-
-  if (!gridList || gridList.length === 0) {
-    return { error: "gridList is required" };
-  }
-
   const baseSeed = seed === 0 ? Date.now() : seed;
 
-  // 按 id 合并：多个楼层同一纹理类型叠加到同一张单值网格（后楼层覆盖前楼层，非零优先）
-  const mergedByTid = new Map<number, Grid>();
+  // 单张多值纹理网格（每格为纹理 id 1～5 或 0）
+  const outputGrid = processOneGrid(grid, algorithm, baseSeed);
 
-  for (let i = 0; i < gridList.length; i++) {
-    const grid = gridList[i];
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) continue;
+  // 仅输出实际出现的纹理条目，按 id 1→5 有序
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
 
-    const effectiveSeed = baseSeed + i * 999983;
-    const multi = processOneGrid(grid, algorithm, effectiveSeed);
-    for (const { id, grid: single } of splitMultiToSingleValueLayers(multi)) {
-      const existing = mergedByTid.get(id);
-      if (!existing) {
-        mergedByTid.set(id, single);
-      } else {
-        // OR 合并：非零覆盖零
-        const rows = Math.max(existing.length, single.length);
-        const cols = Math.max(existing[0]?.length ?? 0, single[0]?.length ?? 0);
-        const merged: Grid = Array.from({ length: rows }, (_, r) =>
-          Array.from({ length: cols }, (_, c) => {
-            const a = existing[r]?.[c] ?? 0;
-            const b = single[r]?.[c] ?? 0;
-            return b !== 0 ? b : a;
-          }),
-        );
-        mergedByTid.set(id, merged);
-      }
-    }
-  }
-
-  // 按 id 1→5 有序输出
-  const outputGridList: Grid[] = [];
   const nameList: { id: number; name: string; type: string }[] = [];
   for (let tid = 1; tid <= TEXTURE_COUNT; tid++) {
-    const g = mergedByTid.get(tid);
-    if (!g) continue;
-    outputGridList.push(g);
+    if (!present.has(tid)) continue;
     const meta = TEXTURE_NAMES.find(t => t.id === tid);
     nameList.push({ id: tid, name: meta?.name ?? `类型${tid}`, type: "tile" });
   }
 
-  return { outputGridList, nameList };
+  return { outputGrid, nameList };
 }

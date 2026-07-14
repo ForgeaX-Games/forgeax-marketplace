@@ -1,6 +1,8 @@
 # 栅栏农场 (fence_farm)
 
-在区域掩码上生成农场栅栏与栅栏门布局，支持三种围栏形式，输出含内部地面/栅栏/门的多值网格。
+在单张区域掩码上生成农场栅栏与栅栏门布局，支持三种围栏形式，输出含内部地面/栅栏/门的单张多值网格。
+
+> **DataTree 形式**：每次只处理单张 `inputGrid`，网格列表的 fanout/重组由引擎自动完成。
 
 ## 功能特点
 
@@ -17,7 +19,7 @@
 
 ## 基本使用方法
 
-1. 将区域掩码连接到 `grid` 端口（非零 = 有效区域）
+1. 将区域掩码连接到 `inputGrid` 端口（非零 = 有效区域）
 2. 选择 `fenceMode` 下拉框确定围栏形式
 3. 按所选模式调整对应参数
 4. 输出 `outputGrid` 中：值 2 = 栅栏，值 3 = 栅栏门，值 1 = 内部可走地面
@@ -26,19 +28,20 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | grid | - | 区域掩码，非零为有效格 |
+| inputGrid | grid (item) | - | 单张区域掩码，非零为有效格 |
 | fenceMode | string | border | 围栏形式（见下方说明） |
 | gateCount | number | 2 | border 模式：门数 1-4（顺时针：上/右/下/左） |
 | sectionCount | number | 3 | sections 模式：水平分区数（最少 2） |
 | gateWidth | number | 2 | sections 模式：分隔门洞宽度（格） |
-| plotWidth | number | 5 | plots 模式：围栏地块列数（最少 2） |
-| plotHeight | number | 5 | plots 模式：围栏地块行数（最少 2） |
+| plotWidth | number | 8 | plots 模式：围栏地块列数（最少 2） |
+| plotHeight | number | 8 | plots 模式：围栏地块行数（最少 2） |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | grid | 多值网格（0=空，1=内部地面，2=栅栏，3=栅栏门） |
+| outputGrid | grid (item) | 单张多值网格（0=空，1=内部地面，2=栅栏，3=栅栏门） |
+| outputNameList | array (item) | 名称清单，仅含实际出现的 id（栅栏门 type=asset，其余 tile） |
 
 ## 栅栏形式说明
 
@@ -86,6 +89,6 @@ plots 模式（plotWidth=3，plotHeight=3）：
 ## 注意事项
 
 1. **参数作用域**：gateCount 只对 border 有效，sectionCount/gateWidth 只对 sections 有效，plotWidth/plotHeight 只对 plots 有效
-2. **与 farmland_grid 组合**：先用 farmland_grid 生成地块，再将相同 grid 传入 fence_farm，两个输出叠加可同时呈现地块分区与围栏
+2. **与 farmland_grid 组合**：先用 farmland_grid 生成地块，再将相同 inputGrid 传入 fence_farm，两个输出叠加可同时呈现地块分区与围栏
 3. **plots 门位置**：门在每个围栏地块的水平栅栏线中央（即地块宽的中点），向上或向下进入地块
 4. **border gateCount**：建议设 1-2，设 4 时四面都有门适合开放式围栏

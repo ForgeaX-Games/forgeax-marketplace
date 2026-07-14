@@ -58,6 +58,34 @@ import {
 // Width is intentionally NOT persisted: the battery bar resets to its default
 // on every reload, and drag changes stay local to the session.
 
+// Native HTML5 DnD auto-generates its drag ghost by rasterizing the dragged DOM
+// node; template rows embed a multi-MB base64 iconPng thumbnail, and Edge (unlike
+// Chrome) does this rasterization synchronously on the main thread — the OS-level
+// drag session blocks waiting for it, which reads as a full page freeze (cursor
+// stuck in "dragging", clicks dead). A tiny pre-rendered canvas as the explicit
+// drag image sidesteps that snapshot entirely, regardless of thumbnail size.
+let dragGhostCanvas: HTMLCanvasElement | null = null
+function getDragGhostCanvas(): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null
+  if (dragGhostCanvas) return dragGhostCanvas
+  const canvas = document.createElement('canvas')
+  canvas.width = 28
+  canvas.height = 28
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.fillStyle = 'rgba(90, 140, 255, 0.9)'
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath()
+      ctx.roundRect(0, 0, 28, 28, 6)
+      ctx.fill()
+    } else {
+      ctx.fillRect(0, 0, 28, 28)
+    }
+  }
+  dragGhostCanvas = canvas
+  return dragGhostCanvas
+}
+
 // 合成大标签 + 小标签：固定钉在大标签栏顶端，专门收录用户收藏的电池。
 const FAVORITES_BIG = '__favorites__'
 const FAVORITES_SMALL = 'favorites'
@@ -145,14 +173,14 @@ function PresetsRailIcon({ size = 15 }: { size?: number }) {
   )
 }
 
-/** Develop ⇄ Templates 模式切换图标：上下双箭头（swap），随模式高亮由按钮 color 决定。 */
+/** Develop ⇄ Templates 模式切换图标：环形双箭头（循环），随模式高亮由按钮 color 决定。 */
 function ModeToggleRailIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="7 8 4 5 1 8" transform="translate(4 1)" />
-      <path d="M8 6v8a4 4 0 0 0 4 4" />
-      <polyline points="13 16 16 19 19 16" transform="translate(0 -1)" />
-      <path d="M16 18V10a4 4 0 0 0-4-4" />
+      <path d="M4.5 12 A 7.5 7.5 0 0 1 19.5 12" />
+      <polyline points="17.4 9.5 19.5 12 21.6 9.5" />
+      <path d="M19.5 12 A 7.5 7.5 0 0 1 4.5 12" />
+      <polyline points="2.4 14.5 4.5 12 6.6 14.5" />
     </svg>
   )
 }
@@ -191,6 +219,8 @@ const PresetsRailPanel = memo(function PresetsRailPanel({ batteries, langMode }:
     e.dataTransfer.effectAllowed = 'copy'
     e.dataTransfer.setData('application/battery', JSON.stringify(textPanelBattery))
     e.dataTransfer.setData('application/preset-text', text)
+    const ghost = getDragGhostCanvas()
+    if (ghost) e.dataTransfer.setDragImage(ghost, 14, 14)
   }, [batteries])
 
   if (textPresets.length === 0) {
@@ -255,10 +285,59 @@ interface BatteryRowProps {
   isContextActive?: boolean
   /** Templates mode renders a large golden-ratio preview image + wrapping name. */
   templateMode?: boolean
+  /** 列表层算出的「全局最宽文字行」单行宽度（base 字号）：所有模板行共用以保持缩放一致。 */
+  templateMaxLineW?: number
   onDragStart: (e: React.DragEvent, battery: Battery) => void
   onContextMenu: (e: React.MouseEvent, battery: Battery) => void
   /** When set, renders an inline (hover) delete button that calls this with the row's battery. */
   onDelete?: (battery: Battery) => void
+}
+
+/** Format a template's creation timestamp (ms epoch) as a compact `YYYY-MM-DD HH:mm`. */
+function formatTemplateDate(ms: number): string {
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// 模板行文字整体缩放：用 canvas 测量名称单行自然宽度（与当前 DOM 换行状态无关），
+// 据此决定「先保证全部文字显示、再等比放大」的逻辑。基准字号见 CSS。
+let _tplMeasureCanvas: HTMLCanvasElement | null = null
+function measureTextWidth(text: string, font: string): number {
+  if (typeof document === 'undefined') return 0
+  if (!_tplMeasureCanvas) _tplMeasureCanvas = document.createElement('canvas')
+  const ctx = _tplMeasureCanvas.getContext('2d')
+  if (!ctx) return 0
+  ctx.font = font
+  return ctx.measureText(text).width
+}
+const TPL_NAME_BASE_PX = 12      // 与 .battery-row-template-name 基准字号一致
+const TPL_VER_BASE_PX = 9.5      // 与 .battery-row-template-ver / -author 一致
+const TPL_DATE_BASE_PX = 9       // 与 .battery-row-template-date 一致
+const TPL_BASE_BLOCK_H = 44      // 缩放系数 1 时文字块约高（名称单行 + 信息 + 日期）
+const TPL_MAX_SCALE = 3
+
+// 单个模板行「最宽文字行」的单行自然宽度（名称 / 版本+作者 / 日期，取最宽）。
+// 用于在列表层求全局最大值，使所有行共用同一缩放系数、大小一致。
+function templateRowMaxLineWidth(args: {
+  displayName: string
+  version?: string
+  author?: string
+  createdAt?: number
+  langMode: string
+  fam: string
+}): number {
+  const { displayName, version, author, createdAt, langMode, fam } = args
+  const measure = (text: string, px: number, weight = '400') =>
+    text ? measureTextWidth(text, `${weight} ${px}px ${fam}`) : 0
+  const byLabel = langMode === 'en' ? 'by ' : '作者 '
+  const verW = version ? measure(`v${version}`, TPL_VER_BASE_PX, '600') : 0
+  const authorW = author ? measure(`${byLabel}${author}`, TPL_VER_BASE_PX) : 0
+  const infoW = verW + authorW + (verW > 0 && authorW > 0 ? 6 : 0)
+  const dateW = createdAt !== undefined ? measure(formatTemplateDate(createdAt), TPL_DATE_BASE_PX) : 0
+  const nameW = measure(displayName, TPL_NAME_BASE_PX)
+  return Math.max(nameW, infoW, dateW)
 }
 
 const BatteryRow = memo(function BatteryRow({
@@ -270,6 +349,7 @@ const BatteryRow = memo(function BatteryRow({
   isFavorite,
   isContextActive = false,
   templateMode = false,
+  templateMaxLineW = 0,
   onDragStart,
   onContextMenu,
   onDelete,
@@ -304,6 +384,53 @@ const BatteryRow = memo(function BatteryRow({
   const hasMeta = showStars || showCount
   const cappedStars = Math.min(stars, 9)   // 行内宽度有限，最多显示 9 颗
 
+  // 模板行：拉宽电池栏时，先确保名称单行完整显示（否则保持换行不截断），
+  // 一旦能单行容纳，再把名称 + 信息 + 日期整体等比放大（共用 --tpl-scale，保持相对大小一致），
+  // 直到文字块高度接近缩略图高度封顶。缩略图尺寸固定，多余宽度只作用于文字。
+  const tplThumbRef = useRef<HTMLSpanElement>(null)
+  const tplBodyRef = useRef<HTMLSpanElement>(null)
+  const tplNameRef = useRef<HTMLSpanElement>(null)
+  const [tplScale, setTplScale] = useState(1)
+  const [tplOneLine, setTplOneLine] = useState(false)
+
+  useLayoutEffect(() => {
+    if (!templateMode) return
+    const body = tplBodyRef.current
+    const name = tplNameRef.current
+    if (!body || !name) return
+    const recompute = () => {
+      const availW = body.clientWidth
+      if (availW <= 0) return
+      const thumb = tplThumbRef.current
+      const imageH = thumb ? thumb.getBoundingClientRect().height : 0
+      // 约束宽度优先用列表层算出的「全局最宽文字行」，使全列所有行共用同一系数、大小一致；
+      // 缺省（未传入）时回退本行自身的最宽行。
+      const constraintW = templateMaxLineW > 0
+        ? templateMaxLineW
+        : templateRowMaxLineWidth({
+            displayName: name.textContent || '',
+            version: battery.version,
+            author: battery.author,
+            createdAt: battery.createdAt,
+            langMode,
+            fam: getComputedStyle(name).fontFamily,
+          })
+      const fits = constraintW > 0 && constraintW <= availW
+      let next = 1
+      if (fits) {
+        const wScale = availW / constraintW
+        const hScale = imageH > 0 ? imageH / TPL_BASE_BLOCK_H : TPL_MAX_SCALE
+        next = Math.max(1, Math.min(wScale, hScale, TPL_MAX_SCALE))
+      }
+      setTplScale(prev => (Math.abs(prev - next) > 0.01 ? next : prev))
+      setTplOneLine(prev => (prev !== fits ? fits : prev))
+    }
+    recompute()
+    const ro = new ResizeObserver(recompute)
+    ro.observe(body)
+    return () => ro.disconnect()
+  }, [templateMode, templateMaxLineW, displayName, battery.version, battery.author, battery.createdAt, langMode])
+
   if (templateMode) {
     return (
       <div
@@ -315,7 +442,7 @@ const BatteryRow = memo(function BatteryRow({
         onMouseLeave={hide}
         onContextMenu={handleContextMenu}
       >
-        <span className="battery-row-thumb">
+        <span className="battery-row-thumb" ref={tplThumbRef}>
           {battery.iconPng
             ? <img className="battery-row-thumb-img" src={battery.iconPng} alt={displayName} draggable={false} />
             : <span className="battery-row-thumb-empty">
@@ -329,8 +456,30 @@ const BatteryRow = memo(function BatteryRow({
             </span>
           )}
         </span>
-        <span className="battery-row-template-body">
-          <span className="battery-row-template-name">{displayName}</span>
+        <span
+          className="battery-row-template-body"
+          ref={tplBodyRef}
+          style={{ '--tpl-scale': tplScale } as React.CSSProperties}
+        >
+          <span
+            className={`battery-row-template-name${tplOneLine ? ' is-oneline' : ''}`}
+            ref={tplNameRef}
+          >{displayName}</span>
+          <span className="battery-row-template-info">
+            <span className="battery-row-template-info-line">
+              {battery.version && (
+                <span className="battery-row-template-ver">v{battery.version}</span>
+              )}
+              {battery.author && (
+                <span className="battery-row-template-author" title={battery.author}>
+                  {langMode === 'en' ? 'by ' : '作者 '}{battery.author}
+                </span>
+              )}
+            </span>
+            {battery.createdAt !== undefined && (
+              <span className="battery-row-template-date">{formatTemplateDate(battery.createdAt)}</span>
+            )}
+          </span>
           {hasMeta && (
             <span className="battery-row-meta">
               {showStars && <span className="battery-row-stars">{'★'.repeat(cappedStars)}</span>}
@@ -869,6 +1018,33 @@ function BatteryBar() {
     return searchBatteries.length
   }, [searchBatteries, searchQuery])
 
+  // Templates 模式：算出全列模板行「最宽文字行」的单行宽度（base 字号），
+  // 下发给每个 BatteryRow 作为统一缩放约束，保证所有行大小一致、同步放大/换行。
+  const [templateMaxLineW, setTemplateMaxLineW] = useState(0)
+  useLayoutEffect(() => {
+    if (batteryFilterMode !== 'templates') {
+      setTemplateMaxLineW(prev => (prev !== 0 ? 0 : prev))
+      return
+    }
+    const root = asideRef.current
+    if (!root) return
+    const fam = getComputedStyle(root).fontFamily
+    let max = 0
+    for (const b of visibleBatteries) {
+      const dn = langMode === 'zh' ? b.name : (b.nameEn || formatIdAsLabel(b.id))
+      const w = templateRowMaxLineWidth({
+        displayName: dn,
+        version: b.version,
+        author: b.author,
+        createdAt: b.createdAt,
+        langMode,
+        fam,
+      })
+      if (w > max) max = w
+    }
+    setTemplateMaxLineW(prev => (Math.abs(prev - max) > 0.5 ? max : prev))
+  }, [batteryFilterMode, visibleBatteries, langMode])
+
   const getRawSmallLabelsForBig = useCallback((bigLabel: string): string[] => {
     if (bigLabel === FAVORITES_BIG) return [FAVORITES_SMALL]
     if (bigLabel === PRESETS_BIG) return [] // presets render via a dedicated panel, not battery sub-groups
@@ -1106,8 +1282,17 @@ function BatteryBar() {
   // 否则 handleGroupDragStart 会把 effectAllowed 覆盖为 'move'，画布 onDrop 不触发
   const handleDragStart = (e: React.DragEvent, battery: Battery) => {
     e.stopPropagation()
-    e.dataTransfer.setData('application/battery', JSON.stringify(battery))
     e.dataTransfer.effectAllowed = 'copy'
+    // Slim id-only payload when the op is in the live catalog — avoids
+    // JSON.stringify of multi-MB template iconPng through dataTransfer (main-thread
+    // freeze on drop). Off-catalog favorites still ship the legacy full JSON.
+    if (batteries.some((b) => b.id === battery.id)) {
+      e.dataTransfer.setData('application/battery-id', battery.id)
+    } else {
+      e.dataTransfer.setData('application/battery', JSON.stringify(battery))
+    }
+    const ghost = getDragGhostCanvas()
+    if (ghost) e.dataTransfer.setDragImage(ghost, 14, 14)
   }
 
   // ── 右键菜单 ────────────────────────────────────────────────────────────
@@ -1287,6 +1472,7 @@ function BatteryBar() {
       isFavorite={!inFavoritesView && favoriteIds.has(battery.id)}
       isContextActive={contextMenu?.battery.id === battery.id}
       templateMode={batteryFilterMode === 'templates'}
+      templateMaxLineW={templateMaxLineW}
       onDragStart={handleDragStart}
       onContextMenu={handleRowContextMenu}
       onDelete={canDeleteGroups && getDeletableKind(battery)?.kind === 'group' ? handleRowDelete : undefined}

@@ -1,8 +1,18 @@
 /**
- * Frontend refresh / persist tracing — pairs with backend [persist-trace] / [output-trace].
- * On by default in dev (VITE_CANVAS_PERF_DEBUG); logs to browser console.
+ * Frontend refresh / persist tracing — pairs with backend [persist-trace].
+ * Opt-in: localStorage.setItem('wb-scene-generator.debugSync', 'true')
  */
 
+const LS_KEY = 'wb-scene-generator.debugSync'
+
+export function refreshTraceEnabled(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    return localStorage.getItem(LS_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 export type RefreshReason =
   | 'graph:applied'
   | 'reconcile'
@@ -31,10 +41,7 @@ export function getPersistTraceReason(): string | undefined {
 }
 
 function enabled(): boolean {
-  const env = (typeof import.meta !== 'undefined'
-    ? (import.meta as ImportMeta & { env?: Record<string, string | boolean> }).env
-    : undefined)
-  return env?.VITE_CANVAS_PERF_DEBUG === 'true' || env?.VITE_CANVAS_PERF_DEBUG === true
+  return refreshTraceEnabled()
 }
 
 export function logPersistSchedule(reason: string): void {

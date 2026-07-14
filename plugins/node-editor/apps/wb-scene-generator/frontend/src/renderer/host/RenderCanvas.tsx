@@ -409,7 +409,7 @@ export function RenderCanvas({
         // Reconcile only AFTER the dirty flag clears: if an external baked:changed
         // (or a deferred host refresh) arrived during the persist, replay it now
         // against fresh server state. Forced because local edits are drained.
-        if (consumeDeferredBakedLayersRefresh()) await refreshBakedLayers({ deferIfLocalPending: false })
+        if (consumeDeferredBakedLayersRefresh()) await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
       })
       .catch((e) => {
         markBakedLayerPersistSettled(key, false)
@@ -743,7 +743,7 @@ export function RenderCanvas({
           // Local edits are fully drained here; force a refresh so the undone/
           // redone server state replaces the optimistic cells (this is what makes
           // "undo removes painted content" actually take effect on the canvas).
-          await refreshBakedLayers({ deferIfLocalPending: false })
+          await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
           await onBakedEditCommitted?.()
         } catch (err) {
           console.warn(`[baked] ${redo ? 'redo' : 'undo'} failed`, err)

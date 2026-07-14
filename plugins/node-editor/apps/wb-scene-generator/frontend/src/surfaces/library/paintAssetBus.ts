@@ -4,6 +4,8 @@
 // iframes, so this rides the localStorage + `storage` event bus (same pattern as
 // rulesApi.ts).
 
+import { aliasItemName, aliasPpu } from './aliasName.js'
+
 export interface PaintAsset {
   /** Library alias of the selected tile — also what the baked layer binds to. */
   alias: string
@@ -15,28 +17,7 @@ export interface PaintAsset {
 
 const LS_PAINT_ASSET = 'wb-scene-generator.assetstore.paintAsset'
 
-// Asset aliases are `[..]_[..]_…` bracket-field strings. The renderer's
-// `matchAssetEntry` keys layers by field 4 (the item name) with fuzzy=false, and
-// field 9 carries the PPU. We surface both so a painted layer binds an asset_name
-// that actually resolves, and the renderer can size sprites by PPU.
-function bracketFields(alias: string): string[] {
-  const m = alias.match(/\[([^\]]*)\]/g)
-  return m ? m.map((s) => s.slice(1, -1).trim()) : []
-}
-
-/** Item-name field (index 4) of an asset alias; falls back to the full alias. */
-export function aliasItemName(alias: string): string {
-  const f = bracketFields(alias)
-  return f.length > 4 && f[4] ? f[4] : alias
-}
-
-/** PPU field (index 9) of an asset alias; null when absent/invalid. */
-export function aliasPpu(alias: string): number | null {
-  const f = bracketFields(alias)
-  if (f.length <= 9) return null
-  const n = parseInt(f[9], 10)
-  return Number.isFinite(n) && n > 0 ? n : null
-}
+export { aliasItemName, aliasPpu }
 
 export function writePaintAsset(asset: PaintAsset | null): void {
   if (typeof localStorage === 'undefined') return

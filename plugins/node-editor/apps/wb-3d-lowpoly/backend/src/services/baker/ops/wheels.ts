@@ -1,12 +1,12 @@
 /**
  * Wheels 家族 —— wheel / tire。
  *
- * Articraft 的 WheelGeometry / TireGeometry 暴露大量 sub-spec（spokes / flange /
+ * WheelGeometry / TireGeometry 可有大量 sub-spec（spokes / flange /
  * bolt / tread / sidewall / shoulder ...），但我们这边 DSL 只承载 radius / width
- * （+ inner_radius for tire）；所以 v1 仅复刻"主形态" —— 外圈 + 轮毂 + 中心孔，
+ * （+ inner_radius for tire）；所以 v1 仅实现"主形态" —— 外圈 + 轮毂 + 中心孔，
  * 不做辐条 / 法兰 / 螺栓孔。等 DSL 扩字段时再补。
  *
- * 坐标约定（articraft 同）：
+ * 坐标约定：
  *   - wheel 沿 local X 旋转，所以 axis is X
  *   - 圆环 / 圆柱沿 X 居中（_cq_annulus_x: extrude(width/2, both=True)）
  *   - 用 replicad 时 makeCylinder 的 location 是底面圆心，需把底面挪到 x=-width/2
@@ -18,7 +18,7 @@ import { csgCut, csgFuse } from '../csg_helpers.js';
 import { optionalBool, optionalNumber, requireNumber } from '../arg_readers.js';
 import type { Arg } from '../shared-types.js';
 
-// ── 工具：沿 +X 轴的圆柱（articraft `Workplane("YZ").circle(r).extrude(w, both=True)`）
+// ── 工具：沿 +X 轴的圆柱（`Workplane("YZ").circle(r).extrude(w, both=True)`）
 
 function xAxisCylinder(
   ctx: OpContext,
@@ -47,7 +47,7 @@ function xAxisAnnulus(
   return csgCut(outer, inner);
 }
 
-/** center=false 时把整体沿 +X 平移 width/2，使 -X 端贴 x=0（articraft `_mesh_geometry_shifted_to_axis0(geom, 0)`）。 */
+/** center=false 时把整体沿 +X 平移 width/2，使 -X 端贴 x=0（`_mesh_geometry_shifted_to_axis0(geom, 0)`）。 */
 function maybeShiftToX0(shape: BakeableShape, width: number, args: Record<string, Arg>): BakeableShape {
   const center = optionalBool(args, 'center', true);
   return center ? shape : shape.translateX(width / 2);
@@ -61,12 +61,12 @@ export const wheel: OpBuilder = (ctx, args) => {
 
   if (radius <= 0 || width <= 0) throw new BakerError('wheel: radius and width must be positive');
 
-  // articraft 默认：rim outer = radius, rim inner = radius * 0.68；hub = 0.18*radius / 0.55*width
+  // 默认：rim outer = radius, rim inner = radius * 0.68；hub = 0.18*radius / 0.55*width
   const rimOuter = radius;
   const rimInner = radius * 0.68;
   const hubRadius = radius * 0.18;
   const hubWidth = width * 0.55;
-  // bore_d 可选参数：>0 时用用户值（直径），否则回退 articraft 默认 0.18*radius。
+  // bore_d 可选参数：>0 时用用户值（直径），否则回退默认 0.18*radius。
   const boreOverride = optionalNumber(args, 'bore_d', 0);
   const boreDiameter = boreOverride > 0
     ? boreOverride
@@ -82,7 +82,7 @@ export const wheel: OpBuilder = (ctx, args) => {
 
   let shape: BakeableShape = csgFuse(rim, hub);
 
-  // 3) 轮盘连接：spoke_count>0 → 用 N 根辐条；否则用 articraft 默认双侧 face disc。
+  // 3) 轮盘连接：spoke_count>0 → 用 N 根辐条；否则用默认双侧 face disc。
   const spokeCount = Math.round(optionalNumber(args, 'spoke_count', 0));
   if (spokeCount > 0) {
     const n = Math.min(spokeCount, 12); // 控制布尔次数
@@ -130,7 +130,7 @@ export const tire: OpBuilder = (ctx, args) => {
 
   let shape = xAxisAnnulus(ctx, outerR, innerR, width);
 
-  // ── 参数化胎面/胎侧（articraft tire：tread / sidewall） ──
+  // ── 参数化胎面/胎侧（tire：tread / sidewall） ──
 
   // tread：沿胎宽方向切若干圈周向花纹槽（每槽是一圈外缘环带 cut）
   const treadDepth = optionalNumber(args, 'tread_depth', 0);

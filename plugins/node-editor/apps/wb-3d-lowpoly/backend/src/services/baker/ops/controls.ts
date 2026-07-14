@@ -1,11 +1,11 @@
 /**
  * Controls 家族 —— knob / bezel。
  *
- * 简化策略（articraft 暴露给 DSL 的子集是 body 几何，skirt/grip/indicator/
+ * 简化策略（DSL 暴露的子集是 body 几何，skirt/grip/indicator/
  * top_feature/bore/reliefs 等都没承载，v1 全部跳过）：
  *   knob:
  *     - body_style ∈ {cylindrical, tapered, domed, mushroom, skirted, hourglass, faceted, lobed}
- *     - 5 段 loft（articraft 同款偏移 0 / 0.18 / 0.42 / 0.72 / 1.0）
+ *     - 5 段 loft（偏移 0 / 0.18 / 0.42 / 0.72 / 1.0）
  *     - 顶角 crown_radius（>Z 面边缘）+ 侧边 edge_radius（|Z）
  *   bezel:
  *     - opening_shape / outer_shape ∈ {rect, rounded_rect, circle, ellipse, superellipse}
@@ -23,8 +23,8 @@ import { optionalBool, optionalNumber, optionalString, requireNumber, requireNum
 // ── knob 几何 ─────────────────────────────────────────────────────
 
 /**
- * 复刻 articraft `body_radius_at(t)`：给定归一化高度 t∈[0,1] 返回该高度的半径。
- * 内部不做拔模角处理，但 domed 用 side_draft_deg 微调（与 articraft 一致）。
+ * `body_radius_at(t)`：给定归一化高度 t∈[0,1] 返回该高度的半径。
+ * 内部不做拔模角处理，但 domed 用 side_draft_deg 微调。
  */
 function bodyRadiusAt(
   bodyStyle: string,
@@ -89,7 +89,7 @@ function bodyRadiusAt(
 }
 
 /**
- * 复刻 articraft `section_outline(radius, t)`：仅 faceted / lobed 用多边形，
+ * `section_outline(radius, t)`：仅 faceted / lobed 用多边形，
  * 其它一律 null（→ 用圆形截面）。
  */
 function sectionPolygonPoints(
@@ -194,7 +194,7 @@ export const knob: OpBuilder = (ctx, args) => {
     } catch { /* 圆角失败保留原 shape */ }
   }
 
-  // ── 参数化附加几何（articraft controls.py：skirt / indicator / bore） ──
+  // ── 参数化附加几何（skirt / indicator / bore） ──
 
   // skirt：底部加一圈更宽的裙边圆台（skirt_diameter > body 时才有意义）
   const skirtD = optionalNumber(args, 'skirt_diameter', 0);
@@ -321,7 +321,7 @@ export const bezel: OpBuilder = (ctx, args) => {
   type SolidSketch = { extrude: (d: number) => BakeableShape };
   let shape = (sketch as unknown as SolidSketch).extrude(depth);
 
-  // ── 参数化附加几何（articraft bezel：recess / flange） ──
+  // ── 参数化附加几何（bezel：recess / flange） ──
 
   // flange：背面（-Z 端）加一圈更宽的安装法兰（薄板，超出 outer flange_width）
   const flangeWidth = optionalNumber(args, 'flange_width', 0);

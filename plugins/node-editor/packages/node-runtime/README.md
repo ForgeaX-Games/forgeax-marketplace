@@ -89,9 +89,11 @@ const runtime = createRuntime({
 // 2. Register the plugin's ops into runtime.registry (OpSpec.execute closures),
 //    e.g. via the loader scanning battery folders.
 
-// 3. Mutate the graph atomically.
+// 3. Mutate the graph atomically. Headless callers may omit `position` on
+//    createNode (and createGroup root shadow) — the kernel assigns an
+//    edge-aware layout for nodes added in that batch only.
 await applyBatch(runtime, [
-  { type: 'createNode', nodeId: 'n1', opId: 'my.op', position: { x: 0, y: 0 }, params: {} },
+  { type: 'createNode', nodeId: 'n1', opId: 'my.op', params: {} },
 ])
 
 // 4. Execute a node's downstream closure (or omit nodeId for the whole pipeline).

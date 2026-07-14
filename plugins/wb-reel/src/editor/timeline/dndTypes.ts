@@ -8,7 +8,7 @@
  * payload schema 由 DockDropPayload 联合类型描述；序列化走 JSON.stringify。
  */
 
-import type { AudioRole, BranchKind, DialogueRole, QTECueShape } from '../../scenario/types'
+import type { AudioRole, BranchKind, DialogueRole, QTECueShape, UIBlendMode } from '../../scenario/types'
 
 export const DOCK_MIME = 'application/x-reel-timeline-drop'
 
@@ -108,6 +108,21 @@ export type DockDropPayload =
       presetId?: string
       mediaId?: string
       defaultDurationMs?: number
+    }
+  | {
+      kind: 'uiOverlay'
+      /** UI 素材库资产 id（Scenario.uiAssets）。 */
+      uiAssetId: string
+      /** 该资产的图 mediaId（用作 image sticker 内容）。 */
+      mediaId?: string
+      /** 叠加混合模式(去背)。 */
+      blendMode?: UIBlendMode
+      label?: string
+      /** 默认锚点/缩放(来自素材)。 */
+      anchor?: { x: number; y: number; scale?: number }
+      defaultDurationMs?: number
+      /** true = 钉到整场(endMs=场景末, Tier B)。 */
+      pinToScene?: boolean
     }
 
 export function serializeDockPayload(p: DockDropPayload): string {

@@ -38,9 +38,12 @@ trigger: /generate-2d-asset
 |---|---|---|
 | 单个物件 / 贴图（文生图或图生图，默认同出**物体贴图 + 底部碰撞 mask + 放置几何**） | **asset_generation** | [templates/asset_generation.md](templates/asset_generation.md) |
 | 一张**完整游戏场景实景图**（给后续美术对齐像素颗粒度/配色/光照的基准图） | **conceptual_scene_design** | [templates/conceptual_scene_design.md](templates/conceptual_scene_design.md) |
-| **指定形状/掩码的整栋装饰房屋贴图**（房顶掩码 → 灰度底图 → 图生图，同出底面碰撞） | **dechouse_gen** | [templates/dechouse_gen.md](templates/dechouse_gen.md) |
+| **指定形状/掩码的整栋装饰房屋贴图**（房顶掩码 → 灰度底图 → 图生图，同出底面碰撞） | **dechouse_gen** | [templates/dechouse_gen.md](templates/dechouse_gen.md) — `in_0` **必须**来自 Scene `building_footprint_mask` → `grid_to_json` |
 | **可无缝平铺的地形瓦片 / Autotile atlas**（大块纹理 → 提取 → 合成 atlas） | **tile_gen** | [templates/tile_gen.md](templates/tile_gen.md) |
 | **背包物品 / UI 图标**（按 name/label/level/… + 参考图生成纯底像素图标） | **ui_item_gen** | [templates/ui_item_gen.md](templates/ui_item_gen.md) |
+
+> 🎨 **风格地基：成套出资产时，先用 `conceptual_scene_design` 出一张基准参考图，再让其余资产都引用它。**
+> 当一次要出**一整套**风格需统一的场景资产（地形 tile + 建筑/装饰 object 等，常由调度/Sino 协作发起）时：**第一步**用 `conceptual_scene_design` 吃透整场景的叙事+背景出一张实景基准图，拿到它的 alias；**随后每个资产都把这张基准图 alias 作参考图喂进对应模板的参考口**（`image_source` 指向该 alias → 连到参考端口），做图生图——这样全套资产的像素颗粒度/配色/光照/透视才统一。各模板参考口：`asset_generation` `in_10`(reference1)、`dechouse_gen` `in_3`(referenced_scene)、`ui_item_gen` `in_7`(reference1)、`tile_gen` `in_1`（**hidden 高级口，需显式连**）；以子文档 / `groups.get` 为准。基准图本身通常不 `publishToGame`，只作风格地基。单出一张资产、无需成套统一时可跳过。
 
 > **端口名（`in_N`/`out_N`）是稳定的**（随模板固化、实例化不变），各端口含义已在对应子文档列明——
 > **照子文档掌握「端口含义 + 喂什么」即可，无需逐实例去读对外端口列表**。
@@ -57,11 +60,11 @@ trigger: /generate-2d-asset
 
 | 目录 | 模板 |
 |---|---|
-| `pixel_asset_gen/` | asset_generation |
-| `pixel_conceptual_scene_design/` | conceptual_scene_design |
-| `pixel_dechouse_gen/` | dechouse_gen |
-| `pixel_tile_gen/` | tile_gen |
-| `pixel_UI_item_gen/` | ui_item_gen |
+| `(pixel)asset_gen/` | asset_generation |
+| `(pixel)conceptual_scene_design/` | conceptual_scene_design |
+| `(pixel)dechouse_gen/` | dechouse_gen |
+| `(pixel)tile_gen/` | tile_gen |
+| `(pixel)UI_item_gen/` | ui_item_gen |
 
 它们在编辑器左侧「**Templates**」栏可见。**你（AI）用 `asset2d:templates.list` 列出库里这些模板、用
 `asset2d:groups.instantiateTemplate` 自己把目标模板放上画布**（一步落地一个组合电池节点，返回运行时
@@ -91,7 +94,7 @@ trigger: /generate-2d-asset
 然后用 `asset2d:groups.get({ id: <groupId> })` 取 **`runButtons`**（组内每个 image_gen 一个
 `{ nodeId, opId, kind:"image"|"text" }`，即触发目标的真实 nodeId）。
 > 端口名照子文档（稳定）；只有 `groupId`（从 instantiate 返回取）、`runButtons.nodeId`（从 `groups.get` 取）是实例运行时值。
-> 一次只实例化/操作**一个**模板组；同一模板可重复实例化，每次返回全新 `groupId`，连线一律用最新返回的那个。
+> 🧬 **每件资产 = 一套独立实例（不复用、可追溯）**：要出 N 件资产就 `instantiateTemplate` **N 次**，每次返回**全新 `groupId`**，每套配自己的输入常量节点、自己的 run、自己的 `out_N`。**绝不**复用同一个组、只改输入重跑下一件——那会覆盖上一件的提示词/参考图/产出，整批不可追溯、无法定向返工。多套可同时留在画布上（各 `groupId` 独立、互不干扰），只是**逐套串行操作**（一套生完→发布→再做下一套），每次连线用**对应那套**返回的 `groupId`（不是"最新那个"）。
 
 ### 2. 喂入参（照子文档的 `in_N` 连线）
 打开该模板的子文档，照表把常量电池连到 **`<groupId>.in_N`**（走 `asset2d:pipeline.applyBatch`）：
@@ -109,6 +112,7 @@ trigger: /generate-2d-asset
 {"type":"connect","edgeId":"e_name","source":{"nodeId":"p_name","port":"output"},"target":{"nodeId":"<groupId>","port":"in_5"}}
 ```
 
+- **`position` / `edgeId` 可省略**：`createNode.position` 与 `connect.edgeId` 不填时由内核兜底（position 自动排到不重叠网格、edgeId 自动铸唯一 id）。position 仅画布显示、不影响运行，别为它纠结；只有要稳定引用某条边时才显式给 `edgeId`。
 - **下拉端口**（子文档标「下拉」，如 tile_gen 的 `tile`、dechouse_gen 的 `roofType`）：是 `string` 端口，连一个 `text_panel`（`params.text` 填某个合法选项值）即可。
 - **参考图端口是可选的**：不接 = **文生图**（合法，image_gen 不会因此被跳过；之前"整组 execute 几毫秒空转"是用错了 execute、不是缺参考图）。要图生图时参考图 `image_source` 通常由用户从 generated asset 面板拖入画布生成；没有就用 `asset2d:assets.list` 找已有 alias 再建。
 - **每次 `applyBatch` 后立刻 `asset2d:pipeline.get` 复核** `nodes`/`edges` 真变了（防"ok 却空"）。
@@ -162,16 +166,20 @@ trigger: /generate-2d-asset
 
 ### 6. 读产出 / 入库 / 发布
 - 从 execute 摘要或该组 `out_N`（`image`/`collision`/`geometry_json`/`error`）读结果。
-- 内部 `image_output` 已按 `item_name`/`name` 入库；`asset2d:assets.list` / `asset2d:preview.latest` / `asset2d:preview.selectAsset` 查看与核对。
+- 内部 `image_output` 已按 `item_name`/`name` 入库；`asset2d:assets.list` / `asset2d:assets.get` 查看与核对（尺寸 / 字节 / error / 入库名）。
+- **验收门（发布前必过）**：`publishToGame` 前，**先过该模板子文档的「自检 / 验收」小节**（建筑看建筑、物件看物件、瓦片看瓦片、UI 看 UI、概念图看概念图）；不合格**只重出该项**（重跑 `generateImage` → `execute({})`）再发布，**不波及同批其它资产**。
 - 需要进游戏沙箱：`asset2d:publishToGame`（object 传 `geometryJson`+`anchorX/Y`；tile 传 `autotileKind`）。
 
 ---
 
 ## 四、铁律（防呆，随时查）
 
-1. **端口名 `in_N`/`out_N` 稳定、照子文档用**；**`groupId` 从 `groups.instantiateTemplate` 返回（或已在画布上则从 `groups.list`）取、`runButtons.nodeId` 从 `groups.get` 取**——都是运行时值，**绝不硬编、不抄模板 JSON 旧 id**。同模板重复实例化每次返回新 `groupId`，连线只用最新那个。
+1. **端口名 `in_N`/`out_N` 稳定、照子文档用**；**`groupId` 从 `groups.instantiateTemplate` 返回（或已在画布上则从 `groups.list`）取、`runButtons.nodeId` 从 `groups.get` 取**——都是运行时值，**绝不硬编、不抄模板 JSON 旧 id**。同模板重复实例化每次返回新 `groupId`，**操作哪套就用哪套自己的 `groupId`**（见铁律 8：逐件独立实例）。
 2. **生图唯一入口 = `generation.generateImage({ nodeId })`**（= 点 Run）；**`pipeline.execute` 既不能、也不会触发生图**（manualTrigger 边界被跳过；组内节点顶层寻址不到 → `target node not found`）。**生图前后各跑一遍管线**，顺序固定：**`execute({})` 预热 → 对每个 image_gen 各 `generateImage` 一次（成功）→ `execute({})` 跑后处理**。不先预热则生图拿空参数；用 execute 硬触发或找 `runNode` 都没用。
 3. **每个 image_gen 只点一次，且多个 gen 必须串行**：`generateImage` 写入输出缓存且是数据边界，`execute` 不会重触发；重复点 = 重复生成、重复耗额度。**有多个 gen 时一定要等上一张生成成功后再点下一张**——不可并发/连点，否则下游 gen 拿不到上游参考图会失败。
 4. **每次 `applyBatch` 后立刻 `pipeline.get`** 确认图真变了（"ok 却空"陷阱）。并发防覆盖：`pipeline.get` 的 `hash` 写入 `opts.expectedPrevHash` 再提交。
 5. **只喂未 `hidden` 的暴露端口**；参考图来自用户拖入的 `image_source`，AI 不凭空造图。
 6. **优先用 `groups.instantiateTemplate` 落模板**（自动重映射内部 id、稳定端口），**不要**用 `pipeline.applyBatch` 手拼 createNode+connect+createGroup 去展开模板、也不要抄模板 JSON 里的旧 id。**库里查不到目标模板（`templates.list` 没有）才如实上报能力缺口**，不要自己编 op id 或手搭电池绕过模板。
+7. **发布前过对应模板的「自检 / 验收」，且定向重生成不波及兄弟**：每项产出按其模板子文档的自检小节逐条核对；不合格**只重出该一项并幂等覆盖同名**（`publishToGame` 同名覆盖），**绝不重跑 / 覆盖同批其它已合格的资产**。发布时 `assetName` **必须等于资产契约里的 `name`**（与 Sino / 渲染器三方一致），别改名、别加前缀。
+8. **逐件独立实例、可追溯**：批量出 N 件资产时，**每件各 `instantiateTemplate` 一套独立子图**（独立 `groupId` + 独立输入常量节点 + 独立 `out_N`），**不要复用一个组反复改输入重跑**。每件的输入（name/description/参考图）、run、产出 alias 都留在画布上，事后可逐件查询、定向返工、核对来源；复用同一组改输入 = 上一件状态被覆盖、丢失可追溯性，返工时也分不清是哪件。多套并存于画布无妨（`groupId` 各自独立），仍**逐套串行**生成发布。
+9. **不做视觉核验**：**绝不调用 `preview.capture` / `preview.latest` / `screenshot.capture` / `screenshot.latest`**（即便工具列表里还能看到它们）——本环境渲染器截图视觉默认关闭，AI"看不到"返回的图，调它只是白白烧一轮、还容易接着空转。核验**一律靠元数据**：`assets.get`（尺寸 / 字节 / error / 入库名）+ 该组 `out_N`（`image` / `collision` / `geometry_json` / `error`）+ 各模板子文档的「自检 / 验收」条目。像素级肉眼确认是**用户在 Preview 面板**的事，不是 AI 的活。

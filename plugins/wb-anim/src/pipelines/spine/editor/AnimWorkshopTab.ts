@@ -110,7 +110,7 @@ export class AnimWorkshopTab implements StudioTab {
 
   private setupWorkshopSync(): void {
     try {
-      this.workshopBc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-anim.spine-workshop');
+      this.workshopBc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-anim.spine-workshop');
     } catch {
       this.workshopBc = null;
       return;

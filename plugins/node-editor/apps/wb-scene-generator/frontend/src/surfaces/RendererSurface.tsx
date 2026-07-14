@@ -11,6 +11,7 @@ import { useScreenshotCapture } from '../renderer/bridge/useScreenshotCapture.js
 import { useRendererCommands } from '../renderer/bridge/useRendererCommands.js'
 import { useBakedLayers, refreshBakedLayers } from '../renderer/bridge/useBakedLayers.js'
 import { bakedApi } from '../renderer/bridge/bakedApi.js'
+import { syncTrace } from '../debug/syncTrace.js'
 import { sceneExportApi, type SceneExportCookResult } from '../renderer/bridge/sceneExportApi.js'
 import { defaultPaintTargetName } from '../renderer/framework/paintTarget.js'
 import { buildPathTree, pathParent, type PathTreeNode } from '../renderer/framework/pathTree.js'
@@ -50,6 +51,32 @@ const DRAW_LABELS: Record<DrawMode, string> = {
   wire: 'Wire',
   color: 'Color',
   asset: 'Asset',
+}
+
+const LS_LAYERS_WIDTH_KEY = 'wb-scene-generator.renderer-layers-width'
+const DEFAULT_LAYERS_WIDTH = 220
+const MIN_LAYERS_WIDTH = 140
+const MAX_LAYERS_WIDTH = 520
+const LAYER_INDENT_STEP = 10
+const LAYER_INDENT_MAX = 52
+
+function loadLayersPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(LS_LAYERS_WIDTH_KEY)
+    if (raw) {
+      const n = Number.parseInt(raw, 10)
+      if (Number.isFinite(n)) return Math.max(MIN_LAYERS_WIDTH, Math.min(MAX_LAYERS_WIDTH, n))
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_LAYERS_WIDTH
+}
+
+function saveLayersPanelWidth(width: number): void {
+  try { localStorage.setItem(LS_LAYERS_WIDTH_KEY, String(width)) } catch { /* ignore */ }
+}
+
+function layerRowPadding(depth: number): number {
+  return 8 + Math.min(depth * LAYER_INDENT_STEP, LAYER_INDENT_MAX)
 }
 
 type SceneExportState =
@@ -131,6 +158,7 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
   // Pure VIEW state (no graph/runtime mutation) — kept local to the renderer.
   const [showViewMenu, setShowViewMenu] = useState(false)
   const [layersPanelOpen, setLayersPanelOpen] = useState(true)
+  const [layersPanelWidth, setLayersPanelWidth] = useState(loadLayersPanelWidth)
   const [editablePanelHeight, setEditablePanelHeight] = useState(180)
   const [sceneExport, setSceneExport] = useState<SceneExportState>({ status: 'idle' })
   const [screenshot, setScreenshot] = useState<ScreenshotState>({ status: 'idle' })
@@ -291,6 +319,23 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
     window.addEventListener('mouseup', onUp)
   }, [editablePanelHeight])
 
+  const beginLayersPanelWidthResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = layersPanelWidth
+    const onMove = (mv: MouseEvent): void => {
+      const next = Math.max(MIN_LAYERS_WIDTH, Math.min(MAX_LAYERS_WIDTH, startWidth + startX - mv.clientX))
+      setLayersPanelWidth(next)
+      saveLayersPanelWidth(next)
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [layersPanelWidth])
+
   // Editor-selection bridge: the workbench host forwards the kernel editor's
   // current node selection over `workbench:editor-selection`. We mirror it into
   // the render store so the canvas + Layers panel highlight the selected node's
@@ -310,6 +355,11 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
         for (const id of ids) overrides[id] = false
         useRenderStore.getState().setPreviewOverrides(overrides)
       } else if (data.type === 'workbench:preview-data') {
+        syncTrace('preview:iframe-received', {
+          nodes: data.outputs && typeof data.outputs === 'object'
+            ? Object.keys(data.outputs as object).join(',')
+            : '(none)',
+        })
         // Live direct-push from the editor: freshly executed outputs, painted into
         // the render store with zero network. This is the slider-drag fast path —
         // it bypasses the WS exec:completed → getNodeOutput re-pull so the preview
@@ -364,7 +414,7 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
   // authoritative and the panel reflects it synchronously.
   const structuralBakedRefresh = useCallback(async () => {
     await paintPersistsRef.current?.()
-    await refreshBakedLayers({ deferIfLocalPending: false })
+    await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
   }, [])
   const addBakedLayer = async () => {
     try {
@@ -409,6 +459,7 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
   // Sent in DFS order with their nodePath so the backend preserves the layers'
   // parent/child hierarchy + order (e.g. /House before /House/Roof).
   const bakeSelectedLayers = async () => {
+    syncTrace('baked:ui-bake-selected', { count: selectedOutputKeys.size })
     const all = useRenderStore.getState().layers
     const payload = orderedOutputKeys
       .filter((k) => selectedOutputKeys.has(k))
@@ -857,7 +908,18 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
           />
         </div>
         {layersPanelOpen && (
-          <aside className="renderer-layers" aria-label="Scene layers">
+          <>
+            <div
+              className="renderer-layers__width-splitter"
+              role="separator"
+              aria-label="Resize layers panel"
+              aria-orientation="vertical"
+              aria-valuenow={layersPanelWidth}
+              aria-valuemin={MIN_LAYERS_WIDTH}
+              aria-valuemax={MAX_LAYERS_WIDTH}
+              onMouseDown={beginLayersPanelWidthResize}
+            />
+            <aside className="renderer-layers" aria-label="Scene layers" style={{ width: layersPanelWidth }}>
             {/* Editable (baked) layers — hand-edited, persisted outside the graph. */}
             <div className="renderer-layers__section renderer-layers__section--editable" style={{ flexBasis: editablePanelHeight }}>
               <div className="renderer-layers__section-head">
@@ -954,6 +1016,7 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
               )}
             </div>
           </aside>
+          </>
         )}
       </div>
       {pendingPaintTarget && (
@@ -1048,7 +1111,7 @@ function LayerTreeRows({
         // Collapsible sink/path container row: chevron toggles its subtree.
         <li
           className={`renderer-layer-row renderer-layer-row--container${depth > 0 ? ' renderer-layer-row--child' : ''}`}
-          style={{ paddingLeft: 8 + depth * 13 }}
+          style={{ paddingLeft: layerRowPadding(depth) }}
           role="presentation"
         >
           <button
@@ -1117,7 +1180,7 @@ function LayerRow({
     <>
       <li
         className={`renderer-layer-row${depth > 0 ? ' renderer-layer-row--child' : ''}${layer.visible ? '' : ' is-hidden'}${selected ? ' is-selected' : ''}${editorSelected ? ' is-editor-selected' : ''}`}
-        style={{ paddingLeft: 8 + depth * 13 }}
+        style={{ paddingLeft: layerRowPadding(depth) }}
         role="option"
         aria-selected={selected}
         onClick={onSelect}
@@ -1155,7 +1218,7 @@ function LayerRow({
         <span className="renderer-layer-name" title={layer.nodePath || label}>
           {label}
         </span>
-        <span className="renderer-layer-count">{layer.cells.length}</span>
+        <span className="renderer-layer-count">{layer.cells.length || layer.cellCount || 0}</span>
         <button
           type="button"
           className="renderer-layer-eye"
@@ -1178,7 +1241,7 @@ function LayerRow({
             <li
               key={token || `#${i}`}
               className={`renderer-layer-row renderer-layer-row--child renderer-layer-row--sub${subVisible ? '' : ' is-hidden'}`}
-              style={{ paddingLeft: 8 + (depth + 1) * 13 }}
+              style={{ paddingLeft: layerRowPadding(depth + 1) }}
               role="presentation"
             >
               <span className="renderer-layer-caret renderer-layer-caret--spacer" aria-hidden />
@@ -1278,7 +1341,7 @@ function BakedLayerTreeRows({
       ) : (
         <li
           className={`renderer-layer-row renderer-layer-row--container${depth > 0 ? ' renderer-layer-row--child' : ''}`}
-          style={{ paddingLeft: 8 + depth * 13 }}
+          style={{ paddingLeft: layerRowPadding(depth) }}
           role="presentation"
         >
           <button
@@ -1400,7 +1463,7 @@ function BakedLayerRow({
     <li
       ref={rowRef}
       className={`renderer-layer-row renderer-layer-row--baked${depth > 0 ? ' renderer-layer-row--child' : ''}${layer.visible ? '' : ' is-hidden'}${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${dropZone ? ` drop-${dropZone}` : ''}`}
-      style={{ paddingLeft: 8 + depth * 13 }}
+      style={{ paddingLeft: layerRowPadding(depth) }}
       role="option"
       aria-selected={selected}
       title={layer.assetName ? `${layer.nodePath} · ${layer.assetName}` : layer.nodePath}
@@ -1448,7 +1511,7 @@ function BakedLayerRow({
       ) : (
         <span className="renderer-layer-name" onDoubleClick={(e) => { e.stopPropagation(); onStartRename() }}>{label}</span>
       )}
-      <span className="renderer-layer-count">{layer.cells.length}</span>
+      <span className="renderer-layer-count">{layer.cells.length || layer.cellCount || 0}</span>
       <button
         type="button"
         className="renderer-layer-eye"

@@ -53,7 +53,7 @@ export function WorkbenchHost(): JSX.Element {
   // <ProjectPanel>; the center pane only observes the active project id so it
   // can reload the embedded URDF viewer when the project changes (via the
   // kernel's project:activated cross-client sync, wired in <Editor>).
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
 
   // Mirror URDF embed flips made in the left pane (which writes LS_URDF).
   // `storage` fires only in OTHER same-origin documents, so this is exactly the
@@ -91,24 +91,24 @@ export function WorkbenchHost(): JSX.Element {
   }, [postSelectionToUrdf])
 
   useEffect(() => {
-    void useProjectStore.getState().fetchProjects()
+    void useProjectStore.getState().bootstrap()
   }, [])
 
   const prevProjectRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeProjectId === null) return
+    if (viewingProjectId === null) return
     if (prevProjectRef.current === null) {
-      prevProjectRef.current = activeProjectId
+      prevProjectRef.current = viewingProjectId
       return
     }
-    if (prevProjectRef.current === activeProjectId) return
-    prevProjectRef.current = activeProjectId
+    if (prevProjectRef.current === viewingProjectId) return
+    prevProjectRef.current = viewingProjectId
     setUrdfReloadKey((k) => k + 1)
     urdfIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:project-changed', projectId: activeProjectId },
+      { type: 'workbench:project-changed', projectId: viewingProjectId },
       '*',
     )
-  }, [activeProjectId])
+  }, [viewingProjectId])
 
   const beginRowResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()

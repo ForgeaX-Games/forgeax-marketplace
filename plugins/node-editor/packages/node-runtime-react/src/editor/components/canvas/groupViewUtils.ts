@@ -132,6 +132,58 @@ export function getNodeMeta(nodeId: string): NodeMeta | undefined {
   return batteries.find(b => b.id === pNode.batteryId)
 }
 
+/**
+ * Resolve the effective/default value of a group's exposed INPUT port by tracing
+ * its `sourceNodeId`/`sourcePortName` into the group's inner node. A group's
+ * shadow node carries no per-port params, so an unconnected exposed input would
+ * otherwise read empty even though the inner port has a meaningful default — this
+ * surfaces that inner default on the collapsed face and the inner-view shell,
+ * matching how a plain battery's input port falls back to its `default`.
+ *
+ * Returns `{ value, isDefault }` (isDefault → a meta default, shown muted) or
+ * undefined when nothing resolves. Recurses through nested `__group__` sources.
+ */
+export function resolveGroupExposedInputValue(
+  group: NodeGroup,
+  port: ExposedPort,
+): { value: unknown; isDefault: boolean } | undefined {
+  const { batteries, currentPipeline } = usePipelineStore.getState()
+  const allGroups = currentPipeline?.groups ?? []
+  const seen = new Set<string>()
+
+  function resolve(g: NodeGroup, sourceNodeId: string, sourcePortName: string): { value: unknown; isDefault: boolean } | undefined {
+    if (!sourceNodeId || !sourcePortName) return undefined
+    const inner = g.nodes.find(n => n.id === sourceNodeId)
+    if (!inner) return undefined
+
+    // A user-set inner param overrides the meta default → treat it as a value.
+    if (inner.params && inner.params[sourcePortName] !== undefined) {
+      return { value: inner.params[sourcePortName], isDefault: false }
+    }
+
+    // Nested group source: descend into the child group's matching exposed input.
+    if (inner.batteryId === '__group__') {
+      const childId = typeof inner.params?.groupId === 'string' ? inner.params.groupId : ''
+      if (!childId || seen.has(childId)) return undefined
+      seen.add(childId)
+      const child = allGroups.find(cg => cg.id === childId) ?? g._nestedGroups?.find(cg => cg.id === childId)
+      const childPort = child?.exposedInputs.find(p => p.portName === sourcePortName)
+      if (!child || !childPort) return undefined
+      return resolve(child, childPort.sourceNodeId, childPort.sourcePortName)
+    }
+
+    // Plain battery: fall back to the catalog input port's meta default.
+    const battery = batteries.find(b => b.id === inner.batteryId)
+    const metaPort = battery?.inputs.find(p => p.name === sourcePortName)
+    if (metaPort && metaPort.default !== undefined) {
+      return { value: metaPort.default, isDefault: true }
+    }
+    return undefined
+  }
+
+  return resolve(group, port.sourceNodeId, port.sourcePortName)
+}
+
 /** Generate a unique id (prefix + timestamp + random suffix). */
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`

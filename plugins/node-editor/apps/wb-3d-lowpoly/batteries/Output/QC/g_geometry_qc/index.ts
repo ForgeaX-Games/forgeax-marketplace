@@ -1,5 +1,5 @@
 /**
- * g_geometry_qc —— 静态几何质量检查（articraft geometry_qc 的轻量 TS 等价）。
+ * g_geometry_qc —— 静态几何质量检查。
  *
  * 这里只跑 4 项"在没有 mesh 烘焙、没有 fcl/trimesh"也能做的检查：
  *
@@ -13,34 +13,42 @@
  *      下游能力同时失效，需要尽早暴露。
  *
  *   ③ **joint origin 距 part AABB 异常远**
- *      articraft 在 fcl 里用点-AABB 距离判断；这里走"point-AABB 距离"代数式：
+ *      这里走"point-AABB 距离"代数式：
  *      把 joint.origin 投到 parent / child AABB 上，超过 tol 就报告。
- *      其它分支（sphere / cylinder / mesh）走更精确的算法是 articraft 用 fcl 的
- *      原因；TS 端我们走 AABB 即可，对绝大多数 bug case 已经够诊断。
+ *      更精确的算法可用 fcl；TS 端我们走 AABB 即可，对绝大多数 bug case 已经够诊断。
  *
  *   ④ **兄弟 part AABB rest-pose 重叠**
  *      把每个 part 的 AABB 用 part.origin / part.rpy 旋转到"父坐标系"，
- *      然后两两 AABB-vs-AABB depth 检测。articraft 里用 OBB SAT；
+ *      然后两两 AABB-vs-AABB depth 检测。更精确的做法可用 OBB SAT；
  *      这里采用"先把 AABB 用 origin 平移 + rpy=0 时直接比较"，rpy 非零时把
  *      AABB 八角点旋转后取重新包络（保守 AABB），保持算法简单且永远不漏报，
  *      只可能因为 rotated AABB 膨胀产生少量误报（注释里有说明）。
  *
  * 设计取舍：
  *   - 完全静态、纯几何，不需要 baker / fcl，可以在画布每次 tick 都跑
- *   - rest pose 检测；没有 articraft 的 pose-sampling，这是当前 TS 端能做的最大范围
+ *   - rest pose 检测；没有 pose-sampling，这是当前 TS 端能做的最大范围
  *   - 输出 multiline 字符串便于直接接到 g_validate 的展示链
  */
 
 import {
+  aabbAabbDistance,
+  aabbOverlapDepth,
+  addVec,
+  computeWorldTransforms,
+  IDENTITY_XFORM,
   isGeometry,
   localAabbFromPart,
+  mat3Vec3,
+  pointAabbDistance,
+  readVec3,
+  transformAabbByMatOrigin,
+  transformAabbByOriginRpy,
   type Arg,
   type Geometry,
   type LocalAABB,
   type Statement,
+  type Vec3,
 } from '../../../../vendor/dist/shared/types/index.js';
-
-type Vec3 = [number, number, number];
 
 /**
  * 「裸 primitive」shape op（Primitive 家族，mesh 除外 —— mesh 引用外部网格，
@@ -65,17 +73,15 @@ const NON_SHAPE_AUX_OPS: ReadonlySet<string> = new Set([
   'joint',
 ]);
 
-/** 2D profile op（被 extrude / loft / lathe / part 等消费；自身不应孤立残留）。 */
-const PROFILE_OPS: ReadonlySet<string> = new Set([
-  'profile_rect',
-  'profile_circle',
-  'profile_polygon',
-]);
-
 /**
  * 2D sketch / profile op 全集（含圆角矩形 / 正多边形）。
  * profile 是 2D 截面、不是实体 shape，**不计入「几何丰富度」**——
  * 一段 profile 必须被 extrude/loft/revolve 消费后才产出真实建模。
+ *
+ * 注意：孤立 profile（orphan）与 lathe/revolve XY 误用两项检查都必须覆盖**全部** 5 个
+ * profile op。此前它们只查 rect/circle/polygon，漏掉了 rounded_rect / regular_polygon
+ * —— 一个孤立的 g_profile_rounded_rect 或喂进 lathe 的 g_profile_regular_polygon 会被
+ * 静默放过（前者烘成 ~2mm 薄片，后者按 (r,z) 误读产出错误回转体）。统一用 SKETCH_OPS。
  */
 const SKETCH_OPS: ReadonlySet<string> = new Set([
   'profile_rect',
@@ -85,12 +91,11 @@ const SKETCH_OPS: ReadonlySet<string> = new Set([
   'profile_regular_polygon',
 ]);
 
-/** XY 语义（居中于原点）的 profile op —— 喂给 lathe/revolve 会被误读为 r,z。 */
-const XY_PROFILE_OPS: ReadonlySet<string> = new Set([
-  'profile_rect',
-  'profile_circle',
-  'profile_polygon',
-]);
+/** 孤立 profile 检测集合 == 全部 sketch op。 */
+const PROFILE_OPS: ReadonlySet<string> = SKETCH_OPS;
+
+/** XY 语义（居中于原点）的 profile op —— 喂给 lathe/revolve 会被误读为 r,z。全部 5 个都居中。 */
+const XY_PROFILE_OPS: ReadonlySet<string> = SKETCH_OPS;
 
 /** mesh-backed 曲线/曲面 op —— 不能作为布尔操作的操作数（baker 会抛错）。 */
 const MESH_BACKED_OPS: ReadonlySet<string> = new Set([
@@ -165,8 +170,8 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
   const issues: string[] = [];
   // joint origin/距离启发式信号：对**可动**关节（revolute/prismatic/...）是致命错误
   // （origin 必须落在转轴/滑轴上，靠近父子件）；对**fixed** 关节降级为 note ——
-  // 静态装配（如 g_building_shell 把屋顶/上层楼板用 fixed joint 以世界式偏移挂到
-  // 单一根 slab）下，"子件远离父级 AABB" 是合法摆位而非 bug。
+  // 静态装配（如用 g_wall/g_floor_slab/g_stairs/g_roof + fixed joint 以世界式偏移
+  // 手工拼一栋楼时把屋顶/上层楼板挂到单一根 slab）下，"子件远离父级 AABB" 是合法摆位而非 bug。
   const jointHeuristicSignals: QcSignal[] = [];
   // 静态全 fixed 装配（建筑外壳：墙在墙角/T 形接头按一个墙厚交叠、楼梯占楼梯井
   // 与楼板 AABB 交叠）在休止位的 AABB 互穿属于低模常态，非致命；仅当模型含可动
@@ -187,7 +192,7 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
     );
   }
 
-  // 正向运动学：沿 joint 树累计每个 part 的世界变换。生成器（g_building_shell）
+  // 正向运动学：沿 joint 树累计每个 part 的世界变换。建筑拼装流程通常
   // 把元素摆位编码在 joint.origin 而非 part.origin —— 不做 FK
   // 会把所有 part 误判为堆在世界原点（假 aabb_overlap），并把"墙立在楼板上"
   // 误判为 joint 远离父级（假 joint_attaches_distant_child）。所有 joint 都在
@@ -313,7 +318,7 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
   }
 
   // ════════════════════════════════════════════════════════════════════
-  // ⑤ 几何丰富度信号（非致命警告，articraft 式「QC 作为传感器」闸门）
+  // ⑤ 几何丰富度信号（非致命警告，「QC 作为传感器」闸门）
   //    判据只看「形状」：模型里**所有** shape 都是裸 primitive
   //    （box/cylinder/sphere/...），完全没有任何富几何 —— 即没有 CSG 实体
   //    (extrude/revolve/loft/union/difference/...)、没有 Parts（含齿轮）/Architecture
@@ -586,253 +591,13 @@ function listComponents(
 }
 
 // ════════════════════════════════════════════════════════════════════
-// AABB 几何工具
-// ════════════════════════════════════════════════════════════════════
-
-function transformAabbByOriginRpy(
-  local: LocalAABB,
-  origin: Vec3,
-  rpy: Vec3,
-): LocalAABB {
-  // rpy = [0,0,0] 时简化为平移
-  if (rpy[0] === 0 && rpy[1] === 0 && rpy[2] === 0) {
-    return translateAabb(local, origin);
-  }
-  // rpy 非零：八角点旋转后取重新包络（保守 AABB），可能比原始 OBB 略大但不漏报
-  const corners = aabbCorners(local);
-  const rot = rpyToMat3(rpy);
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const c of corners) {
-    const r = mat3Vec3(rot, c);
-    const x = r[0] + origin[0];
-    const y = r[1] + origin[1];
-    const z = r[2] + origin[2];
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (z < minZ) minZ = z;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-    if (z > maxZ) maxZ = z;
-  }
-  return {
-    center: [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2],
-    halfExtent: [(maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2],
-  };
-}
-
-function translateAabb(a: LocalAABB, offset: Vec3): LocalAABB {
-  return {
-    center: [a.center[0] + offset[0], a.center[1] + offset[1], a.center[2] + offset[2]],
-    halfExtent: a.halfExtent,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 正向运动学（joint 树 → 每个 part 的世界位姿）
-// ════════════════════════════════════════════════════════════════════
-
-type Mat3 = readonly [Vec3, Vec3, Vec3];
-interface Xform {
-  readonly rot: Mat3;
-  readonly origin: Vec3;
-}
-const IDENTITY_XFORM: Xform = { rot: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], origin: [0, 0, 0] };
-
-/**
- * 沿 joint 树（parent→child）累计每个 part 的世界变换。
- *   childWorld.rot    = parentWorld.rot · jointRot(rpy)
- *   childWorld.origin = parentWorld.origin + parentWorld.rot · jointOrigin
- * 根 part（不是任何 joint.child）取恒等。未连通到根的 part（孤岛/环）兜底恒等。
- * 每个 link 只认第一条父 joint（URDF 树约束）。
- */
-function computeWorldTransforms(parts: readonly Statement[], joints: readonly Statement[]): Map<string, Xform> {
-  const partIds = new Set(parts.map(p => p.id));
-  const edge = new Map<string, { parent: string; origin: Vec3; rpy: Vec3 }>();
-  const childrenOf = new Map<string, string[]>();
-  for (const id of partIds) childrenOf.set(id, []);
-  for (const j of joints) {
-    const p = j.args.parent;
-    const c = j.args.child;
-    if (!p || p.kind !== 'ref' || !c || c.kind !== 'ref') continue;
-    if (!partIds.has(p.name) || !partIds.has(c.name)) continue;
-    if (edge.has(c.name)) continue;
-    const origin = readVec3(j.args.origin) ?? [0, 0, 0];
-    const rpy = readVec3(j.args.rpy) ?? [0, 0, 0];
-    edge.set(c.name, { parent: p.name, origin, rpy });
-    childrenOf.get(p.name)!.push(c.name);
-  }
-  const world = new Map<string, Xform>();
-  const queue: string[] = [];
-  for (const id of partIds) {
-    if (!edge.has(id)) { world.set(id, IDENTITY_XFORM); queue.push(id); }
-  }
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    const curW = world.get(cur)!;
-    for (const ch of childrenOf.get(cur) ?? []) {
-      if (world.has(ch)) continue;
-      const e = edge.get(ch)!;
-      const rot = mat3Mul(curW.rot, rpyToMat3(e.rpy));
-      const origin = addVec(curW.origin, mat3Vec3(curW.rot, e.origin));
-      world.set(ch, { rot, origin });
-      queue.push(ch);
-    }
-  }
-  for (const id of partIds) if (!world.has(id)) world.set(id, IDENTITY_XFORM);
-  return world;
-}
-
-function transformAabbByMatOrigin(local: LocalAABB, rot: Mat3, origin: Vec3): LocalAABB {
-  const corners = aabbCorners(local);
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const c of corners) {
-    const r = mat3Vec3(rot, c);
-    const x = r[0] + origin[0];
-    const y = r[1] + origin[1];
-    const z = r[2] + origin[2];
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (z < minZ) minZ = z;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-    if (z > maxZ) maxZ = z;
-  }
-  return {
-    center: [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2],
-    halfExtent: [(maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2],
-  };
-}
-
-/** 两 AABB 的最近间距（相交 → 0）。 */
-function aabbAabbDistance(a: LocalAABB, b: LocalAABB): number {
-  const aMin: Vec3 = [a.center[0] - a.halfExtent[0], a.center[1] - a.halfExtent[1], a.center[2] - a.halfExtent[2]];
-  const aMax: Vec3 = [a.center[0] + a.halfExtent[0], a.center[1] + a.halfExtent[1], a.center[2] + a.halfExtent[2]];
-  const bMin: Vec3 = [b.center[0] - b.halfExtent[0], b.center[1] - b.halfExtent[1], b.center[2] - b.halfExtent[2]];
-  const bMax: Vec3 = [b.center[0] + b.halfExtent[0], b.center[1] + b.halfExtent[1], b.center[2] + b.halfExtent[2]];
-  const dx = Math.max(0, bMin[0] - aMax[0], aMin[0] - bMax[0]);
-  const dy = Math.max(0, bMin[1] - aMax[1], aMin[1] - bMax[1]);
-  const dz = Math.max(0, bMin[2] - aMax[2], aMin[2] - bMax[2]);
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-function mat3Mul(a: Mat3, b: Mat3): Mat3 {
-  const out: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      out[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
-    }
-  }
-  return [
-    [out[0][0], out[0][1], out[0][2]],
-    [out[1][0], out[1][1], out[1][2]],
-    [out[2][0], out[2][1], out[2][2]],
-  ];
-}
-
-function addVec(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function aabbCorners(a: LocalAABB): Vec3[] {
-  const c = a.center;
-  const h = a.halfExtent;
-  const out: Vec3[] = [];
-  for (const sx of [-1, 1]) {
-    for (const sy of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        out.push([c[0] + sx * h[0], c[1] + sy * h[1], c[2] + sz * h[2]]);
-      }
-    }
-  }
-  return out;
-}
-
-/** 点到 AABB 的最短距离；点在内部 → 0 */
-function pointAabbDistance(p: Vec3, a: LocalAABB): number {
-  const minX = a.center[0] - a.halfExtent[0];
-  const minY = a.center[1] - a.halfExtent[1];
-  const minZ = a.center[2] - a.halfExtent[2];
-  const maxX = a.center[0] + a.halfExtent[0];
-  const maxY = a.center[1] + a.halfExtent[1];
-  const maxZ = a.center[2] + a.halfExtent[2];
-  const dx = Math.max(0, Math.max(minX - p[0], p[0] - maxX));
-  const dy = Math.max(0, Math.max(minY - p[1], p[1] - maxY));
-  const dz = Math.max(0, Math.max(minZ - p[2], p[2] - maxZ));
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-/** 两 AABB 在三轴上的重叠深度；任何轴 ≤ 0 表示该轴未重叠 */
-function aabbOverlapDepth(a: LocalAABB, b: LocalAABB): Vec3 {
-  const aMin: Vec3 = [
-    a.center[0] - a.halfExtent[0],
-    a.center[1] - a.halfExtent[1],
-    a.center[2] - a.halfExtent[2],
-  ];
-  const aMax: Vec3 = [
-    a.center[0] + a.halfExtent[0],
-    a.center[1] + a.halfExtent[1],
-    a.center[2] + a.halfExtent[2],
-  ];
-  const bMin: Vec3 = [
-    b.center[0] - b.halfExtent[0],
-    b.center[1] - b.halfExtent[1],
-    b.center[2] - b.halfExtent[2],
-  ];
-  const bMax: Vec3 = [
-    b.center[0] + b.halfExtent[0],
-    b.center[1] + b.halfExtent[1],
-    b.center[2] + b.halfExtent[2],
-  ];
-  return [
-    Math.min(aMax[0], bMax[0]) - Math.max(aMin[0], bMin[0]),
-    Math.min(aMax[1], bMax[1]) - Math.max(aMin[1], bMin[1]),
-    Math.min(aMax[2], bMax[2]) - Math.max(aMin[2], bMin[2]),
-  ];
-}
-
-function rpyToMat3(rpy: Vec3): readonly [Vec3, Vec3, Vec3] {
-  const [r, p, y] = rpy;
-  const cr = Math.cos(r);
-  const sr = Math.sin(r);
-  const cp = Math.cos(p);
-  const sp = Math.sin(p);
-  const cy = Math.cos(y);
-  const sy = Math.sin(y);
-  // R = Rz(yaw) * Ry(pitch) * Rx(roll)（与 articraft / URDF 一致）
-  return [
-    [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-    [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-    [-sp, cp * sr, cp * cr],
-  ];
-}
-
-function mat3Vec3(m: readonly [Vec3, Vec3, Vec3], v: Vec3): Vec3 {
-  return [
-    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-  ];
-}
-
-// ════════════════════════════════════════════════════════════════════
 // Arg 读取 / 格式化
+//   （FK / AABB 数学抽到 vendor/shared/types/geometry/fk.ts，QC 与 g_metrics 共享）
 // ════════════════════════════════════════════════════════════════════
 
 function readString(arg: Arg | undefined): string | undefined {
   if (!arg || arg.kind !== 'string') return undefined;
   return arg.value;
-}
-
-function readVec3(arg: Arg | undefined): Vec3 | undefined {
-  if (!arg || arg.kind !== 'list' || arg.items.length !== 3) return undefined;
-  const out: number[] = [];
-  for (const item of arg.items) {
-    if (item.kind !== 'number') return undefined;
-    out.push(item.value);
-  }
-  return [out[0], out[1], out[2]];
 }
 
 function readPositiveNumber(raw: unknown, fallback: number): number {

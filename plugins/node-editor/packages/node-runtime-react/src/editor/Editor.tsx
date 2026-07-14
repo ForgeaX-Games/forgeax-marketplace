@@ -118,7 +118,32 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
     // of the catalog + pipeline means we're live (the legacy editor surfaced
     // this via its ws bus; here we derive it from the transport round-trips).
     ui.setConnectionStatus('connecting')
-    Promise.all([store.loadBatteries(), store.loadPipeline()])
+    Promise.all([
+      store.loadBatteries(),
+      // Hosted apps (scene-generator WorkbenchHost) run projectStore.bootstrap()
+      // which switchProject → loadPipeline. Avoid racing an early pull before
+      // viewProject sets the client routing id, and skip a duplicate load when
+      // bootstrap already populated the snapshot.
+      (async () => {
+        const projectStore = useProjectStore.getState()
+        if (projectStore.viewingProjectId === null) {
+          await projectStore.fetchProjects()
+        }
+        if (projectStore.isSwitching) {
+          await new Promise<void>((resolve) => {
+            const unsub = useProjectStore.subscribe((state) => {
+              if (!state.isSwitching) {
+                unsub()
+                resolve()
+              }
+            })
+          })
+        }
+        if (!usePipelineStore.getState().currentPipeline) {
+          await store.loadPipeline()
+        }
+      })(),
+    ])
       .then(() => {
         useUIStore.getState().setConnectionStatus('connected')
         // Seed the nodeOutputs cache from the backend's retained last-run values

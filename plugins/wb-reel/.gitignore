@@ -69,3 +69,9 @@ server.log
 
 # 本地 dev server 多端口运行日志
 server-*.log
+
+# Reel 运行产物 / 本地工作区（非源码，不入库）
+.reel-workbench/
+.reel-scenarios/
+.reel-backup-*/
+tsconfig.tsbuildinfo

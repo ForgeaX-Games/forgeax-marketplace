@@ -34,6 +34,11 @@ import CanvasFrameNode from './CanvasFrameNode.js'
 export const DEFAULT_BATTERY_WIDTH = 180
 export const DEFAULT_GROUP_WIDTH = 200
 
+/** Mint a collision-resistant canvas node id (matches copy/paste + ctrl-drag). */
+export function mintCanvasNodeId(prefix = 'node'): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
 const PORT_CHAR_WIDTH = 7.2
 const TITLE_CHAR_WIDTH = 8
 const NODE_HORIZONTAL_CHROME = 88

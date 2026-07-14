@@ -1,7 +1,7 @@
 /**
  * Geometry id 解析辅助 —— 把"shape id"宽容地解析成"part id"，必要时隐式补一行 part。
  *
- * articraft.placement 语义：align_centers / place_on_face 这类操作的对象是 URDF link
+ * placement 语义：align_centers / place_on_face 这类操作的对象是 URDF link
  * （DSL 里的 `part(...)`），而不是裸的 shape。但用户在编辑器里手填 id 时，往往把
  * primitive battery 的 `id` 输出（box1 / cyl1 / ...）直接接到 placement 电池的
  * parent_id / child_id —— 这种语义错误后端会 throw、整节点没有输出，前端只能看到

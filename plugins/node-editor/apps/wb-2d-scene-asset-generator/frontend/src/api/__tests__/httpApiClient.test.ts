@@ -29,18 +29,21 @@ describe('HttpApiClient', () => {
     expect(ops[0].id).toBe('relu')
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/ops', expect.anything())
   })
-  it('applyBatch POSTs ops to /api/v1/batch and does NOT synthesize a graph event', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 }))
+  it('applyBatch POSTs ops to the viewing project batch route and does NOT synthesize a graph event', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/v1/workspace') {
+        return new Response(JSON.stringify({ viewingProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ status: 'ok' }), { status: 200 })
+    })
     vi.stubGlobal('fetch', fetchMock)
     const c = new HttpApiClient({ baseUrl: '', pipelineId: 'main' })
+    await c.getWorkspace()
     const graphEvents: unknown[] = []
     c.subscribe('graph', (e) => graphEvents.push(e))
     const r = await c.applyBatch([{ type: 'createNode', nodeId: 'n', opId: 'relu', position: { x: 0, y: 0 }, params: {} }] as never)
     expect(r.status).toBe('ok')
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/batch', expect.objectContaining({ method: 'POST' }))
-    // Single source: graph reactivity comes from the backend WS forwarding the
-    // kernel's graph:applied — NOT a locally synthesized copy (which double-fired
-    // loadPipeline on every mutation).
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/projects/main/batch', expect.objectContaining({ method: 'POST' }))
     expect(graphEvents.length).toBe(0)
   })
   it('forwards a WS runtime graph:applied frame to graph listeners (single source)', () => {
@@ -61,19 +64,25 @@ describe('HttpApiClient', () => {
     expect((graphEvents[0] as { batchId: string }).batchId).toBe('b1')
     c.dispose()
   })
-  it('execute({}) POSTs to /api/v1/execute and returns the parsed ExecutionResult', async () => {
+  it('execute({}) POSTs to the viewing project execute route and returns the parsed ExecutionResult', async () => {
     const result = {
       executionId: 'e1',
       status: 'completed',
       outputs: {},
       durationMs: 5,
     }
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(result), { status: 200 }))
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/v1/workspace') {
+        return new Response(JSON.stringify({ viewingProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }), { status: 200 })
+      }
+      return new Response(JSON.stringify(result), { status: 200 })
+    })
     vi.stubGlobal('fetch', fetchMock)
     const c = new HttpApiClient({ baseUrl: '', pipelineId: 'main' })
+    await c.getWorkspace()
     const r = await c.execute({})
     expect(r.executionId).toBe('e1')
     expect(r.status).toBe('completed')
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/execute', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/projects/main/execute', expect.objectContaining({ method: 'POST' }))
   })
 })

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { getPipeline } from '@forgeax/node-runtime'
 import type { CallerIdentity, ImportGraphFormat, ImportGraphInput } from '@forgeax/node-runtime'
-import { getProjectRegistry, getRuntime } from '../runtime.js'
+import { getProjectRegistry, resolveWorkspaceRoot } from '../runtime.js'
 import { broadcastToClients, rebindWsSubscriptions } from './ws.js'
 
 interface ProjectIdParams {
@@ -12,11 +12,6 @@ interface ProjectIdParams {
 
 const CALLER_KINDS: ReadonlyArray<CallerIdentity['kind']> = ['ai', 'user', 'workbench', 'cli', 'skill']
 
-/**
- * Parse the caller identity forwarded by the tool proxy (tool-handlers.ts). When
- * the headers are absent — i.e. a direct UI REST call — default to kind 'user'
- * so humans are never subject to the per-agent lock.
- */
 export function extractCaller(req: FastifyRequest): CallerIdentity {
   const rawKind = req.headers['x-forgeax-caller-kind']
   const kind = (CALLER_KINDS as readonly string[]).includes(rawKind as string)
@@ -31,18 +26,13 @@ export function extractCaller(req: FastifyRequest): CallerIdentity {
   }
 }
 
-/**
- * Gate a graph mutation against the per-agent lock: an AI caller may only mutate
- * the active project it has opened. Humans always pass. Used by the batch /
- * execute / import routes.
- */
 export async function ensureMutationAccess(
   req: FastifyRequest,
-): Promise<{ ok: true } | { ok: false; reason: string; code: string; projectId: string | null }> {
+  projectId: string,
+): Promise<{ ok: true; projectId: string } | { ok: false; reason: string; code: string; projectId: string }> {
   const reg = await getProjectRegistry()
-  const projectId = reg.getActiveProjectId()
   const result = reg.checkMutationAccess(projectId, extractCaller(req))
-  if (result.ok) return result
+  if (result.ok) return { ok: true, projectId }
   return { ok: false, reason: result.reason, code: result.code, projectId }
 }
 
@@ -60,13 +50,19 @@ function detectFormat(graph: unknown, declared?: string): ImportGraphFormat {
 }
 
 async function resolveTemplate(rel: string): Promise<ImportGraphInput | null> {
-  const rt = await getRuntime()
-  const dir = resolve(rt.config.projectRoot, 'templates')
+  const ws = resolveWorkspaceRoot()
+  const dir = resolve(ws, 'templates')
   const full = resolve(dir, basename(rel))
   if (!full.startsWith(resolve(dir)) || !existsSync(full)) return null
   const parsed = JSON.parse(readFileSync(full, 'utf-8')) as { format?: string; graph?: unknown }
   const graph = parsed.graph ?? parsed
   return { format: detectFormat(graph, parsed.format), graph } as ImportGraphInput
+}
+
+function broadcastViewing(projectId: string, pipelineId: string, newHash: string): void {
+  const payload = { kind: 'project:viewing' as const, projectId, pipelineId, newHash }
+  broadcastToClients({ event: 'runtime', payload })
+  broadcastToClients({ event: 'runtime', payload: { kind: 'project:activated', projectId, pipelineId, newHash } })
 }
 
 export async function registerProjectRoutes(app: FastifyInstance): Promise<void> {
@@ -80,6 +76,14 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     const record = reg.getProject(req.params.id)
     if (!record) return reply.code(404).send({ reason: `project not found: ${req.params.id}` })
     return record
+  })
+
+  app.get<{ Params: ProjectIdParams }>('/api/v1/projects/:id/lock', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    if (!reg.getProject(req.params.id)) {
+      return reply.code(404).send({ reason: `project not found: ${req.params.id}` })
+    }
+    return { lock: reg.getProjectLock(req.params.id) }
   })
 
   app.post('/api/v1/projects', async (req, reply) => {
@@ -106,6 +110,10 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(fromTemplate ? { fromTemplate } : {}),
       })
+      // Announce the new project so sibling clients (the workbench navigation
+      // pane, other tabs) refetch their list. Agents create via this route but
+      // never `view`, so without this broadcast the left nav stayed stale.
+      broadcastToClients({ event: 'runtime', payload: { kind: 'project:created', projectId: meta.id } })
       return reply.code(201).send(meta)
     } catch (e) {
       return reply.code(400).send({ reason: (e as Error).message })
@@ -130,6 +138,7 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
       try {
         await reg.deleteProject(req.params.id, { assetPolicy })
         await rebindWsSubscriptions()
+        broadcastToClients({ event: 'runtime', payload: { kind: 'project:deleted', projectId: req.params.id } })
         return { ok: true, assetPolicy, workspace: reg.getWorkspace() }
       } catch (e) {
         return reply.code(404).send({ reason: (e as Error).message })
@@ -137,59 +146,86 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     },
   )
 
-  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/activate', async (req, reply) => {
+  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/view', async (req, reply) => {
     const reg = await getProjectRegistry()
-    // Enforce the exclusive open-then-operate lock for AI callers (humans bypass).
-    const lock = reg.acquireProjectLock(req.params.id, extractCaller(req))
-    if (!lock.ok) return reply.code(409).send({ reason: lock.reason })
     try {
-      const rt = reg.activateProject(req.params.id)
+      const rt = reg.viewProject(req.params.id)
       await rebindWsSubscriptions()
       const snap = getPipeline(rt)
-      // Tell ALL clients (sibling iframes + headless renderer) the active project
-      // changed so each re-syncs (projectStore.subscribeProjectActivation). This
-      // replaces the old synthetic graph:applied — one event drives one reload.
-      broadcastToClients({
-        event: 'runtime',
-        payload: {
-          kind: 'project:activated',
-          projectId: req.params.id,
-          pipelineId: rt.config.pipelineId,
-          newHash: snap?.hash ?? '',
-        },
-      })
-      return { project: reg.getProject(req.params.id), pipeline: snap }
+      broadcastViewing(req.params.id, rt.config.pipelineId, snap?.hash ?? '')
+      return { project: reg.getProject(req.params.id), pipeline: snap, workspace: reg.getWorkspace() }
     } catch (e) {
       return reply.code(404).send({ reason: (e as Error).message })
     }
   })
 
-  // Release an AI agent's exclusive lock so it (or another agent) can open a
-  // different project. Idempotent; humans are a no-op (never locked).
+  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/open', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    const caller = extractCaller(req)
+    const open = reg.openProject(req.params.id, caller)
+    if (!open.ok) return reply.code(409).send({ reason: open.reason, code: open.code })
+    const rt = reg.getRuntimeFor(req.params.id)
+    await rebindWsSubscriptions()
+    const snap = getPipeline(rt)
+    if (caller.kind === 'ai' && caller.agentId) {
+      broadcastToClients({
+        event: 'runtime',
+        payload: {
+          kind: 'project:executing',
+          projectId: req.params.id,
+          pipelineId: rt.config.pipelineId,
+          agentId: caller.agentId,
+        },
+      })
+      // ProjectRegistry.openProject() makes an AI's open ALSO the viewing
+      // project (see its doc comment) — broadcast the same `project:viewing`
+      // frame `/view` sends so every connected client (editor canvas, URDF
+      // viewer) cross-syncs immediately instead of only on their next poll.
+      // Without this, screenshot.capture/export-glb would already target the
+      // right project server-side, but a human watching the workspace would
+      // not see it switch until something else nudged a refetch.
+      broadcastViewing(req.params.id, rt.config.pipelineId, snap?.hash ?? '')
+    }
+    return { project: reg.getProject(req.params.id), pipeline: snap, workspace: reg.getWorkspace() }
+  })
+
   app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/close', async (req, reply) => {
     const reg = await getProjectRegistry()
     const res = reg.releaseProjectLock(req.params.id, extractCaller(req))
     if (!res.ok) return reply.code(409).send({ reason: res.reason })
-    return { ok: true }
+    await rebindWsSubscriptions()
+    return { ok: true, workspace: reg.getWorkspace() }
   })
 
-  app.get('/api/v1/workspace', async () => {
+  app.get('/api/v1/workspace', async (req) => {
     const reg = await getProjectRegistry()
-    return reg.getWorkspace()
+    const ws = reg.getWorkspace()
+    // For an AI caller, also surface the project THIS agent currently holds the
+    // exclusive lock on. `viewingProjectId` is a single global pointer shared by
+    // every client, so a concurrent agent's `open` (or a human switching views)
+    // silently redirects an omitted-`projectId` tool call to the wrong project —
+    // which then fails the per-agent mutation gate. The agent's own lock is the
+    // real SSOT for "what am I working on" (see ProjectRegistry.checkMutationAccess),
+    // so we expose it and let resolveProjectId prefer it over viewing.
+    const caller = extractCaller(req)
+    if (caller.kind === 'ai' && caller.agentId) {
+      const mine = reg
+        .listLockedProjectIds()
+        .find((projectId) => reg.getProjectLock(projectId)?.agentId === caller.agentId)
+      if (mine) return { ...ws, agentProjectId: mine }
+    }
+    return ws
   })
 
-  app.put('/api/v1/workspace', async (req, reply) => {
+  app.put('/api/v1/workspace', async (req) => {
     const reg = await getProjectRegistry()
-    const patch = (req.body ?? {}) as { activeProjectId?: string; recentProjectIds?: string[] }
-    // Switching the active project here must honour the same exclusive open-then-
-    // operate lock as POST /projects/:id/activate — otherwise an AI caller could
-    // clobber another agent's active project by writing the workspace directly.
-    if (patch.activeProjectId) {
-      const lock = reg.acquireProjectLock(patch.activeProjectId, extractCaller(req))
-      if (!lock.ok) return reply.code(409).send({ reason: lock.reason })
+    const patch = (req.body ?? {}) as {
+      viewingProjectId?: string
+      activeProjectId?: string
+      recentProjectIds?: string[]
     }
     const ws = reg.setWorkspace(patch)
-    if (patch.activeProjectId) await rebindWsSubscriptions()
+    if (patch.viewingProjectId || patch.activeProjectId) await rebindWsSubscriptions()
     return ws
   })
 }

@@ -1,10 +1,10 @@
 /**
- * g_collision_clustered —— articraft autocollide_part(mode="clustered") 的 TS 等价。
+ * g_collision_clustered —— autocollide_part(mode="clustered")。
  *
  * 算法：沿 part.shape 引用链做"自然簇拆分"——把组合形状（union / array_linear /
  * array_radial）拆开成多个独立的 AABB，每簇 emit 一条 box collision。
  *
- * 拆分规则（与 articraft 行为一致）：
+ * 拆分规则：
  *   - union(a, b)        → 簇 = clusters(a) ⊕ clusters(b)
  *   - array_linear       → 把单个 base AABB 沿 step 复制 count 份，每份一簇
  *   - array_radial       → 每份是 base AABB 绕 axis 旋转 i*angle/total
@@ -13,12 +13,11 @@
  *   - translate / rotate / scale / mirror → 对每个 sub 簇做几何变换
  *   - 其它（叶子 / 解析不出簇）→ 单簇 = 该 shape 的整体 AABB
  *
- * articraft 还有"AABB-touch 邻接合并"那一步，用来把"无意拆出来的细碎簇"重新粘起来。
- * 我们这里也实现了 cluster_tol（默认 0.005m）的邻接合并，与 articraft 一致。
+ * 还有"AABB-touch 邻接合并"那一步，用来把"无意拆出来的细碎簇"重新粘起来。
+ * 这里用 cluster_tol（默认 0.005m）做邻接合并。
  *
  * 安全阈值 max_clusters：array_radial(count=128) 真按 128 个簇展开会让 URDF 巨大且
- * 仿真器 broadphase 也吃不消，超出则退化为单 box（与 articraft 不同的工程取舍，
- * articraft 因为有 fcl + cluster_tol 自动合并所以问题没那么严重）。
+ * 仿真器 broadphase 也吃不消，超出则退化为单 box。
  */
 
 import {
@@ -41,7 +40,7 @@ import {
 
 type Vec3 = [number, number, number];
 
-/** 簇间合并容差（articraft 默认值，米） */
+/** 簇间合并容差（米） */
 const CLUSTER_MERGE_TOL = 0.005;
 
 export function gCollisionClustered(input: Record<string, unknown>): Record<string, unknown> {
@@ -76,7 +75,7 @@ export function gCollisionClustered(input: Record<string, unknown>): Record<stri
   // 1) 拆簇（递归）
   let clusters = clusterShape(shape, byId, new Set());
 
-  // 2) 合并相邻簇（articraft cluster_tol 行为；幂等收敛）
+  // 2) 合并相邻簇（cluster_tol 行为；幂等收敛）
   clusters = mergeTouchingClusters(clusters, CLUSTER_MERGE_TOL);
 
   // 3) 上限 / 退化
@@ -255,7 +254,7 @@ function clusterRef(
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 邻接合并（articraft cluster_tol）
+// 邻接合并（cluster_tol）
 // ════════════════════════════════════════════════════════════════════
 
 function mergeTouchingClusters(clusters: LocalAABB[], tol: number): LocalAABB[] {

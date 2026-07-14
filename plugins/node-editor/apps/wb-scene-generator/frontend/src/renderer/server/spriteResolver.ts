@@ -28,9 +28,14 @@ export {
 export { buildTopFaceKey, lookupWithWildcard } from '../framework/asset/neighborKey'
 export {
   computeValidVariantIdxs,
+  computeValidVariantPool,
+  computeValidVariantIdxsByTileId,
+  computeValidVariantPoolsByTileId,
+  pickWeightedVariant,
   rawVariantCandidates,
   spriteHasVisiblePixel,
   type RgbaView,
+  type VariantPool,
 } from '../framework/asset/variantCandidates'
 export type { FaceRule, RuleSprite, NormalizedRule, FaceKeyMode } from '../framework/asset/ruleCache'
 export type { CollectedCell } from '../modes/topBillboard/buildVoxelMaster/types'

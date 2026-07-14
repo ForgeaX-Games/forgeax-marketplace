@@ -26,7 +26,7 @@
     },
     "requestedBy": {
       "type": "string",
-      "description": "Plugin id that invoked balance:resim (PluginId form: '@forgeax-plugin/<slug>' or layer-anonymous '')",
+      "description": "Plugin id that invoked balance:resim (PluginId form: '@forgeax-extension/<slug>' or layer-anonymous '')",
       "maxLength": 200
     }
   },

@@ -90,7 +90,7 @@ function uid(prefix: string): string {
 function buildTemplateOps(
   root: RawGroup,
   deps: RawGroup[],
-  rootPosition: RawPos,
+  rootPosition: RawPos | undefined,
   explicitGroupId: string | undefined,
 ): { ops: Op[]; rootGroupId: string; exposedInputs: string[]; exposedOutputs: string[] } {
   const allGroups = [root, ...deps]
@@ -191,7 +191,9 @@ function buildTemplateOps(
       groupId: groupIdMap[g.id]!,
       name: g.name ?? g.id,
       ...(g.nameEn !== undefined ? { nameEn: g.nameEn } : {}),
-      position: isRoot ? rootPosition : g.position ?? { x: 0, y: 0 },
+      ...(isRoot && rootPosition === undefined
+        ? {}
+        : { position: isRoot ? rootPosition! : (g.position ?? { x: 0, y: 0 }) }),
       memberNodeIds: memberIds,
       ...(exposedPorts ? { exposedPorts } : {}),
     })
@@ -223,13 +225,16 @@ export async function nodeCreateTemplate(opts: Record<string, unknown>): Promise
   const deps = raw._nestedGroups ?? []
   const { _nestedGroups, ...root } = raw
   void _nestedGroups
-  const position = { x: numOpt(opts.x, 0), y: numOpt(opts.y, 0) }
+  const rootPosition =
+    opts.x === undefined && opts.y === undefined
+      ? undefined
+      : { x: numOpt(opts.x, 0), y: numOpt(opts.y, 0) }
   const explicitGroupId = typeof opts.groupId === 'string' && opts.groupId ? opts.groupId : undefined
 
   const { ops, rootGroupId, exposedInputs, exposedOutputs } = buildTemplateOps(
     root as RawGroup,
     deps as RawGroup[],
-    position,
+    rootPosition,
     explicitGroupId,
   )
 

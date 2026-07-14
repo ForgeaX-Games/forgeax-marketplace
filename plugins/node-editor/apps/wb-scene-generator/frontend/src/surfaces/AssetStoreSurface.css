@@ -1009,9 +1009,82 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* List view: compact rows */
+/* List view: table with a sortable header. Column set + labels mirror
+   asset_manager's `AssetReviewTable` (`COL_LABEL`/`COL_ORDER`) so the two apps
+   present the same 13-field-plus-metadata columns. */
+.asset-list-table {
+  /* thumb + 索引/内外/名称/材质/朝向/题材风格/状态/类型规则/尺寸/静态/滤镜模板/变体/出现场所/几何/时间戳/大小 */
+  --asset-list-cols: 28px 70px 36px 72px 36px 36px 58px 40px 64px 36px 40px 58px 36px 72px 36px 76px 50px;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 100%;
+}
+
+.assetstore-main--list {
+  overflow-x: auto;
+}
+
+.asset-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: var(--asset-list-cols);
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  background: var(--color-bg-secondary, #101912);
+  border-bottom: 1px solid var(--color-border-strong, #3a4b38);
+}
+
+.asset-list-head-thumb {
+  width: 24px;
+}
+
+.asset-list-head-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  padding: 2px 3px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-text-secondary, #9aa894);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color var(--transition-fast, 0.15s ease),
+    color var(--transition-fast, 0.15s ease);
+}
+
+.asset-list-head-cell:hover {
+  background: var(--color-accent-hover, rgba(212, 255, 72, 0.14));
+  color: var(--color-text-primary, #f3f7ee);
+}
+
+.asset-list-head-cell.is-active {
+  color: var(--color-accent, #d4ff48);
+}
+
+.asset-list-head-sort {
+  flex-shrink: 0;
+  font-size: 8px;
+  opacity: 0.9;
+}
+
+.asset-list-head-sort.is-hint {
+  opacity: 0.35;
+}
+
+/* List rows become a grid matching the header's column template. */
 .asset-grid--list .asset-card {
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: var(--asset-list-cols);
   align-items: center;
   gap: 8px;
   padding: 3px 8px;
@@ -1031,28 +1104,44 @@
   border-radius: 2px;
 }
 
-.asset-grid--list .asset-card-name {
-  flex: 1;
-  font-size: 11px;
+.asset-list-cell {
+  font-size: 10px;
+  line-height: 1.3;
   text-align: left;
+  color: var(--color-text-primary, #f3f7ee);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.asset-grid--list .asset-card-dims {
-  flex-shrink: 0;
-  width: 70px;
-  font-size: 10px;
+.asset-list-cell--name {
+  font-weight: 600;
+}
+
+.asset-list-cell--coll,
+.asset-list-cell--static,
+.asset-list-cell--io {
+  text-align: center;
+  color: var(--color-text-secondary, #9aa894);
+}
+
+.asset-list-cell--date,
+.asset-list-cell--kb {
   text-align: right;
   color: var(--color-text-secondary, #9aa894);
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
-.asset-grid--list .asset-card-size {
-  flex-shrink: 0;
-  width: 48px;
-  font-size: 10px;
-  text-align: right;
-  opacity: 0.7;
+.asset-list-head-cell--coll,
+.asset-list-head-cell--static,
+.asset-list-head-cell--io {
+  justify-content: center;
+}
+
+.asset-list-head-cell--date,
+.asset-list-head-cell--kb {
+  flex-direction: row-reverse;
 }
 
 /* ===== Rules pseudo-zone: metadata cards (no atlas thumbnail) ===== */

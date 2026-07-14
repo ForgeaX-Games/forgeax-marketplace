@@ -5,7 +5,7 @@
  * private records flagged `private: true`:
  *   GET /api/v1/library/serve/<alias>     → blob bytes (base → private → rule JSON)
  *   GET /api/v1/library/aliases?zone=      → string[]   (base only; renderer use)
- *   GET /api/v1/library/aliases-meta?zone= → meta[]     (base only; renderer use)
+ *   GET /api/v1/library/aliases-meta[?zone=] → meta[]   (renderer pool; no zone = all zones)
  *   GET /api/v1/library/zones              → base ∪ private zones (+ staging/trash)
  *   GET /api/v1/library/list               → merged, paginated (private first)
  *   GET /api/v1/library/facets             → merged folder counts
@@ -20,7 +20,11 @@ import type { FastifyInstance } from 'fastify'
 import { createReadStream, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getActiveProjectDir } from '../runtime.js'
-import { deriveAliasMeta, getLibraryService, resolveBlobPath, rulesDir, type AliasMeta, type AssetRecord, type FacetItem, type FacetScheme } from './service.js'
+import { getLibraryService, resolveBlobPath, rulesDir, type AssetRecord, type FacetItem, type FacetScheme } from './service.js'
+import {
+  listMergedAliasMetas,
+  listMergedAliasMetasAllZones,
+} from './mergedLibraryPool.js'
 import {
   STAGING_ZONE,
   TRASH_ZONE,
@@ -32,28 +36,9 @@ import {
   type PrivateAssetRecord,
 } from './privateStore.js'
 import {
-  gameSandboxAliasMetas,
   listGameSandboxRecords,
   resolveGameSandboxBlobByAlias,
 } from './gameSandboxStore.js'
-
-/** Project-private record → the renderer's `AliasMeta` (tileType / anchor /
- *  placement). Routed through the SAME `deriveAliasMeta` the base library uses,
- *  so a published tile binds to its autotile rule identically. This is what lets
- *  imported/published assets enter the renderer's MATCHING POOL (previously the
- *  pool was base-library-only, so cross-app textures never matched). */
-function toAliasMeta(r: PrivateAssetRecord): AliasMeta {
-  return deriveAliasMeta({
-    alias: r.alias,
-    anchor_x: r.anchorX,
-    anchor_y: r.anchorY,
-    asset_kind: r.assetKind ?? null,
-    crop_type_original: r.cropTypeOriginal ?? null,
-    width_px: r.widthPx ?? null,
-    height_px: r.heightPx ?? null,
-    geometry_json: r.geometryJson ?? null,
-  })
-}
 
 /** Project-private record → the AssetRecord shape the grid consumes (+ flag). */
 function toAssetRecord(r: PrivateAssetRecord): AssetRecord {
@@ -68,6 +53,8 @@ function toAssetRecord(r: PrivateAssetRecord): AssetRecord {
     ...(r.heightPx ? { heightPx: r.heightPx } : {}),
     anchorX: r.anchorX,
     anchorY: r.anchorY,
+    ...(r.createdAt ? { createdAt: r.createdAt } : {}),
+    ...(r.updatedAt ? { updatedAt: r.updatedAt } : {}),
     private: true,
   }
 }
@@ -142,15 +129,10 @@ export async function registerLibraryRoutes(app: FastifyInstance): Promise<void>
   // imported/published (cross-app) assets are matchable, not just built-ins. A
   // private record with the same alias OVERRIDES the base one (the user's wins).
   app.get('/api/v1/library/aliases-meta', async (req) => {
-    const zone = (req.query as { zone?: string }).zone ?? 'raw'
-    const base = svc.listAliasesWithMeta(zone)
-    const privMetas = (await filterPrivate({ zone })).map(toAliasMeta)
-    const sandboxMetas = await gameSandboxAliasMetas(zone)
-    // User sources (sandbox first, then private) override base on alias clash.
-    const userMetas = [...sandboxMetas, ...privMetas]
-    if (userMetas.length === 0) return base
-    const overridden = new Set(userMetas.map((m) => m.alias))
-    return [...userMetas, ...base.filter((m) => !overridden.has(m.alias))]
+    // No `zone` → zone-agnostic pool (all zones except trash); the renderer must
+    // match a painted alias wherever it lives. A `zone=` param stays zone-scoped.
+    const zone = (req.query as { zone?: string }).zone
+    return zone ? listMergedAliasMetas(zone) : listMergedAliasMetasAllZones()
   })
 
   // Zones: base ∪ private, with `staging` always offered (import target) and

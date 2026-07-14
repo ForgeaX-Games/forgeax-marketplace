@@ -1,11 +1,15 @@
 /**
- * naturalDecoration: 按装饰物清单对输入网格多轮填充自然装饰物
- * 自动将各网格所有非零格子作为目标区域；输出网格只含装饰物格子，其余清零。
- * 输入：grid (array) — 输入网格，支持单个二维网格或网格数组（兼容旧键 gridList）;
+ * naturalDecoration: 按装饰物清单对单张输入网格多轮填充自然装饰物
+ * 自动将网格所有非零格子作为目标区域；输出网格只含装饰物格子，其余清零。
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 单张输入网格;
  *       decorations (array) — [{name, density},...] 或 [{名称: 密度}, ...] 简化格式;
  *       algorithm (string); seed (number); densityMode (boolean, default true)
- * 输出：outputGridList (array) — 多个单值网格平铺列表（每种装饰物一张，仅含该 id 与 0）；
- *       nameListList (array) — 与输入网格一一对应；名称项含 { id, name, type: "asset" }
+ * 输出：outputGrid (grid) — 单张多值网格（每种装饰物一个递增 id，从 max+1 起）；
+ *       outputNameList (array) — 名称项含 { id, name, type: "asset" }
  */
 
 type RandFn = () => number;
@@ -459,16 +463,14 @@ function processGrid(
   return { outputGrid: output, nameList };
 }
 
-/**
- * 归一化输入网格：支持单个 number[][] 或 number[][][]。
- */
-function normalizeGridList(raw: unknown): number[][][] | null {
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-  const first = raw[0];
-  if (Array.isArray(first) && (first.length === 0 || !Array.isArray(first[0]))) {
-    return [raw as number[][]];
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): number[][] | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
+    return raw as number[][];
   }
-  return raw as number[][][];
+  return null;
 }
 
 /**
@@ -535,17 +537,9 @@ function parseDecorations(raw: unknown): DecorationEntry[] {
 export function naturalDecoration(
   input: Record<string, unknown>
 ): Record<string, unknown> {
-  const rawGrids =
-    input.grid !== undefined ? input.grid : input.gridList;
-  const gridList = normalizeGridList(rawGrids);
-
-  if (!gridList || gridList.length === 0) {
-    return {
-      error: "grid is required",
-      outputGridList: [],
-      nameListList: [],
-    };
-  }
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) return { error: "inputGrid is required" };
+  if (grid.length === 0 || grid[0].length === 0) return { error: "inputGrid is empty" };
 
   const decRaw = input.decorations;
   // 未接线、未填参、空串、空数组：不生成任何装饰输出（避免仅靠字符串解析误产生清单）
@@ -555,21 +549,13 @@ export function naturalDecoration(
     (typeof decRaw === "string" && decRaw.trim() === "") ||
     (Array.isArray(decRaw) && decRaw.length === 0)
   ) {
-    return {
-      error: "decorations is required",
-      outputGridList: [],
-      nameListList: [],
-    };
+    return { error: "decorations is required" };
   }
 
   const decorations = parseDecorations(normalizeDecorationsInput(decRaw));
 
   if (decorations.length === 0) {
-    return {
-      error: "decorations is required and must be a non-empty array",
-      outputGridList: [],
-      nameListList: [],
-    };
+    return { error: "decorations is required and must be a non-empty array" };
   }
 
   const algorithm =
@@ -580,31 +566,14 @@ export function naturalDecoration(
     input.densityMode === false ? false : true;
 
   const baseSeed = seed === 0 ? Date.now() : seed;
-  /** 平铺：每个输入网格每种装饰物各一张单值网格（与 0 二值化，非该 id 一律为 0） */
-  const outputGridList: number[][][] = [];
-  const outputNameList: NameEntry[] = [];
 
-  for (let i = 0; i < gridList.length; i++) {
-    const grid = gridList[i];
-    if (!grid || grid.length === 0 || grid[0].length === 0) {
-      continue;
-    }
-    const effectiveSeed = baseSeed + i * 999983;
-    const { outputGrid, nameList } = processGrid(grid, decorations, algorithm, effectiveSeed, densityMode);
+  // 单张多值网格：每种装饰物一个递增 id（从 max+1 起），其余为 0
+  const { outputGrid, nameList } = processGrid(grid, decorations, algorithm, baseSeed, densityMode);
 
-    const rows = outputGrid.length;
-    const cols = outputGrid[0]?.length ?? 0;
-    for (const entry of nameList) {
-      const single: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (outputGrid[r][c] === entry.id) single[r][c] = entry.id;
-        }
-      }
-      outputGridList.push(single);
-      outputNameList.push(entry);
-    }
-  }
+  // 仅保留实际写入网格的装饰物条目
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
+  const outputNameList: NameEntry[] = nameList.filter(e => present.has(e.id));
 
-  return { outputGridList, outputNameList };
+  return { outputGrid, outputNameList };
 }

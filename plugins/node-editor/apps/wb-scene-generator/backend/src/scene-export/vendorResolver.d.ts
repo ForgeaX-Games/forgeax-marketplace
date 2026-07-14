@@ -23,13 +23,20 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     when: { regionContains: { region: string; offset: [number, number] } }
     map: Record<string, number>
   }
+  export interface RandomRule {
+    tileId: number
+    keepProbability: number
+    variantIdxs?: number[]
+    variantWeights?: number[]
+  }
   export interface FaceRule {
     basePieces: number
     keyMode?: FaceKeyMode
     map: Record<string, number>
     variants?: FaceVariant[]
-    randomRules?: Array<{ tileId: number; keepProbability: number }>
+    randomRules?: RandomRule[]
     variantIdxs?: number[]
+    variantWeights?: number[]
   }
   export interface CollectedCell {
     layerIdx: number
@@ -38,11 +45,17 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     z: number
     [extra: string]: unknown
   }
+  export interface VariantPool {
+    idxs: number[]
+    weights?: number[]
+  }
   export interface PickFaceContext {
     face: FaceRule
     faceTag: 'top' | 'front'
     sprites: ReadonlyArray<RuleSprite>
     validVariantIdxs: ReadonlyArray<number>
+    validVariantWeights?: ReadonlyArray<number>
+    validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
     cell: CollectedCell
     coordsByLayerIdx: Map<number, Set<string>>
     regions: Map<string, Set<string>>
@@ -77,4 +90,20 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     sprites: ReadonlyArray<RuleSprite>,
     img: RgbaView | null,
   ): number[]
+  export function computeValidVariantPool(
+    face: FaceRule,
+    sprites: ReadonlyArray<RuleSprite>,
+    img: RgbaView | null,
+  ): VariantPool
+  export function computeValidVariantIdxsByTileId(
+    face: FaceRule,
+    sprites: ReadonlyArray<RuleSprite>,
+    img: RgbaView | null,
+  ): Map<number, number[]>
+  export function computeValidVariantPoolsByTileId(
+    face: FaceRule,
+    sprites: ReadonlyArray<RuleSprite>,
+    img: RgbaView | null,
+  ): Map<number, VariantPool>
+  export function pickWeightedVariant(pool: VariantPool, rngUnit: number): number
 }

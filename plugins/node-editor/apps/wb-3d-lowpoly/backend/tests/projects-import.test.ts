@@ -30,9 +30,9 @@ describe('projects/import routes', () => {
 
       const workspace = await app.inject({ method: 'GET', url: '/api/v1/workspace' })
       expect(workspace.statusCode).toBe(200)
-      expect(workspace.json()).toEqual(expect.objectContaining({ activeProjectId: 'main' }))
+      expect(workspace.json()).toEqual(expect.objectContaining({ viewingProjectId: 'main' }))
 
-      const templates = await app.inject({ method: 'GET', url: '/api/v1/pipeline/templates' })
+      const templates = await app.inject({ method: 'GET', url: '/api/v1/projects/main/pipeline/templates' })
       expect(templates.statusCode).toBe(200)
       expect(templates.json()).toEqual([])
     } finally {

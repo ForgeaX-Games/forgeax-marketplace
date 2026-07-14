@@ -53,6 +53,20 @@ describe("GenerationSeed hydrate (T4)", () => {
     expect(ctx.vn_target_act_count).toBe(5);
   });
 
+  it("hydrates operatorLayers into ctx._operator_layers (§3.2)", () => {
+    const seed = {
+      ...makeSeed(),
+      operatorLayers: {
+        top: [{ uid: "t1", name: "顶", definition: "", adaptation: { type: "", element: "" }, usage_guide: "", example: "", knowledge_location: "", knowledge_domain: "叙事者定位" }],
+        mid: [],
+        leaf: [],
+        global: [],
+      },
+    };
+    const ctx = hydrateContextFromSeed(seed);
+    expect((ctx as Record<string, unknown>)._operator_layers).toBeTruthy();
+  });
+
   it("isIpDnaSeeded predicate gates the short-circuit", () => {
     expect(isIpDnaSeeded(hydrateContextFromSeed(makeSeed()))).toBe(true);
     expect(isIpDnaSeeded({ user_input: "x" } as NarrativeContext)).toBe(false);

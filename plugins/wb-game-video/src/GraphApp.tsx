@@ -3,7 +3,7 @@
  * 视觉/交互（rs-* 胶囊 tab）：蓝图/视频/界面/规则/试玩 五个 tab，点击时中间区域
  * 显示对应 graph 视图。完全不依赖旧 FMV（scenario/editor/player/llm/media/forge）。
  *
- * split-pane 适配（对齐旧 App，见 forgeax-plugin.json `surface: split`）：
+ * split-pane 适配（对齐旧 App，见 forgeax-extension.json `surface: split`）：
  *   宿主给同一表面挂两个 iframe，URL 分别带 `?pane=left` / `?pane=center`。
  *   - pane=left   → 只渲染侧栏（五个 tab），是 sidebar iframe 的全部内容。
  *   - pane=center → 只渲染当前 tab 对应的主区内容（不含侧栏）。

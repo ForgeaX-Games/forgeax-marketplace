@@ -1,6 +1,6 @@
 // Path slot resolver.
 //
-// Each plugin declares slots in its forgeax-plugin.json `requestedPathSlots`.
+// Each plugin declares slots in its forgeax-extension.json `requestedPathSlots`.
 // The resolver layers four precedence levels (highest first):
 //
 //   1. Per-session API override (`setSlot(id, value, persist=false)`)

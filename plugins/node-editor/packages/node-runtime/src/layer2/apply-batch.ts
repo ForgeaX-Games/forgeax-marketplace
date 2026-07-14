@@ -18,6 +18,7 @@ import { gcOrphanGroups } from './group-reachability.js'
 import { busFor } from './event-bus.js'
 import { markGraphSelfWrite } from './graph-external-sync.js'
 import { GROUP_OP_ID } from './group-constants.js'
+import { layoutIncrementalNewNodes } from './layout-incremental.js'
 import type { Runtime } from './runtime.js'
 
 export { GROUP_OP_ID } from './group-constants.js'
@@ -81,7 +82,12 @@ export type Op =
       type: 'createNode'
       nodeId: string
       opId: string
-      position: { x: number; y: number }
+      // Display-only canvas coordinate. OPTIONAL: headless callers (AI / CLI)
+      // may omit it and the kernel auto-assigns an edge-aware incremental layout
+      // slot for nodes added in this batch only (see `layoutIncrementalNewNodes`).
+      // When `autoLayoutNew: false`, falls back to the legacy grid slot
+      // (`autoNodePosition`). The editor always supplies a real drag pos.
+      position?: { x: number; y: number }
       params: Record<string, unknown>
       // Optional display name (additive; preserves labels on graph import).
       name?: string
@@ -90,7 +96,9 @@ export type Op =
   | { type: 'deleteNode'; nodeId: string }
   | {
       type: 'connect'
-      edgeId: string
+      // OPTIONAL: omit and the kernel mints a unique edge id (see `mintEdgeId`).
+      // The editor supplies its own stable id; headless callers need not bother.
+      edgeId?: string
       source: { nodeId: string; port: string }
       target: { nodeId: string; port: string }
     }
@@ -117,7 +125,11 @@ export type Op =
       groupId: string
       name: string
       memberNodeIds: readonly string[]
-      position: { x: number; y: number }
+      // Display-only canvas coordinate. OPTIONAL for headless callers — same
+      // incremental layout as createNode when omitted. Nested template groups
+      // still carry template-relative positions; only the root shadow is
+      // typically omitted by instantiateTemplate.
+      position?: { x: number; y: number }
       nameEn?: string
       // AUTHORITATIVE exposed-port contract. When present, the caller OWNS the
       // boundary identity of the group: each entry binds a STABLE `portName`
@@ -219,6 +231,12 @@ export interface ApplyBatchOptions {
    * final state — not every drag tick. Default false.
    */
   ephemeral?: boolean
+  /**
+   * When true (default), nodes created without an explicit `position` in this
+   * batch are placed using edge-aware incremental layout. Existing nodes are
+   * never moved. Set false to fall back to the legacy grid slot assignment.
+   */
+  autoLayoutNew?: boolean
 }
 
 export type Diagnostic = { opIndex: number; severity: 'error' | 'warn'; message: string }
@@ -287,7 +305,7 @@ export function summarizeBatchOps(ops: readonly Op[]): string {
         case 'setMetadata':
           return `setMetadata:${op.key}`
         case 'connect':
-          return `connect:${op.edgeId}`
+          return `connect:${op.edgeId ?? 'auto'}`
         case 'disconnect':
           return `disconnect:${op.edgeId}`
         case 'createNode':
@@ -321,6 +339,71 @@ function emptyGraph(pipelineId: string, ts: string): Omit<GraphFileV1, 'hash'> {
   }
 }
 
+// Legacy grid fallback when `autoLayoutNew: false` or before incremental layout runs.
+function autoNodePosition(graph: GraphFileV1): Position {
+  const n = Object.keys(graph.nodes).length
+  const COLS = 6
+  const DX = 220
+  const DY = 140
+  return { x: (n % COLS) * DX, y: Math.floor(n / COLS) * DY }
+}
+
+// Mint a unique edge id when a connect op omits `edgeId`. Collision-checked
+// against the live graph so a batch creating several auto edges stays unique.
+function mintEdgeId(graph: GraphFileV1): string {
+  let id: string
+  do {
+    id = `e_${randomUUID().slice(0, 8)}`
+  } while (graph.edges[id])
+  return id
+}
+
+// 2026-07-01 复盘 (postmortem): Sino 在一次场景搭建 session 里把 createNode 的
+// 节点 id 字段写成了 `id`（内核 Op 类型只认 `nodeId`）。`applyBatch` 的 HTTP 边界
+// 对 ops 数组只有 TS 类型、没有真正的运行时 schema 校验（`ops as never`），于是
+// `op.nodeId` 实际是 `undefined`——而 JS 允许用 `undefined` 当对象 key（会被强转
+// 成字符串 "undefined"），旧代码在这里毫无防御地直接
+// `graph.nodes[op.nodeId] = {...}`，静默造出一个 id 字面量是 "undefined" 的
+// "僵尸节点"，`applyBatch` 还照样回 `status:'ok'`。Sino 之后所有想连到这个节点
+// "真实" id（比如 "seed"）的 op 全部查无此节点，只能反复试错才能定位到问题出在
+// 最初那次 createNode 用错了字段名。`requireIdentifier` 把"标识符字段缺失/类型
+// 错误"在第一时间变成一条指名 opIndex + 期望字段名（命中同批次常见别名如 `id`
+// 时还会给出提示）的显式错误，绝不再让 undefined 静默溜进图里。
+function requireIdentifier(
+  rec: Record<string, unknown>,
+  field: string,
+  opType: string,
+  opIndex: number,
+  aliasCandidates: readonly string[] = ['id'],
+): Diagnostic | null {
+  const value = rec[field]
+  if (typeof value === 'string' && value.trim().length > 0) return null
+  const hitAlias = aliasCandidates.find(
+    (a) => a !== field && typeof rec[a] === 'string' && (rec[a] as string).trim().length > 0,
+  )
+  const gotDesc = value === undefined ? 'missing' : `invalid value ${JSON.stringify(value)}`
+  const aliasHint = hitAlias
+    ? ` — this op has a "${hitAlias}" field instead; the required field name for ${opType} is "${field}", not "${hitAlias}"`
+    : ''
+  return {
+    opIndex,
+    severity: 'error',
+    message: `${opType} op[${opIndex}] is missing a valid "${field}" (${gotDesc})${aliasHint}`,
+  }
+}
+
+/** Loud diagnostic for a connect/disconnect endpoint that resolves to no live node — see requireIdentifier's 2026-07-01 postmortem note above: this is the other half of the same failure mode (a LATER op referencing an id that was never actually created). */
+function unresolvedNodeRef(opIndex: number, opType: string, field: string, nodeId: string): Diagnostic {
+  return {
+    opIndex,
+    severity: 'error',
+    message:
+      `${opType} op[${opIndex}]: "${field}" nodeId "${nodeId}" does not exist — not created earlier in this ` +
+      'batch and not present in the existing graph. Check for a field-name typo in the createNode op that ' +
+      'was supposed to create it (e.g. "id" instead of "nodeId"), or a plain id mismatch.',
+  }
+}
+
 function applyOps(
   graph: GraphFileV1,
   ops: readonly Op[],
@@ -329,8 +412,14 @@ function applyOps(
   const diagnostics: Diagnostic[] = []
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i]
+    const rec = op as unknown as Record<string, unknown>
     switch (op.type) {
       case 'createNode': {
+        const idErr = requireIdentifier(rec, 'nodeId', 'createNode', i)
+        if (idErr) {
+          diagnostics.push(idErr)
+          break
+        }
         if (graph.nodes[op.nodeId]) {
           diagnostics.push({ opIndex: i, severity: 'error', message: `node ${op.nodeId} already exists` })
           break
@@ -338,13 +427,18 @@ function applyOps(
         graph.nodes[op.nodeId] = {
           id: op.nodeId,
           opId: op.opId,
-          position: op.position,
+          position: op.position ?? autoNodePosition(graph),
           params: op.params ?? {},
           ...(op.name !== undefined ? { name: op.name } : {}),
         }
         break
       }
       case 'updateNode': {
+        const idErr = requireIdentifier(rec, 'nodeId', 'updateNode', i)
+        if (idErr) {
+          diagnostics.push(idErr)
+          break
+        }
         const node = graph.nodes[op.nodeId]
         if (node) {
           if (op.params !== undefined) node.params = { ...node.params, ...op.params }
@@ -375,6 +469,11 @@ function applyOps(
         break
       }
       case 'deleteNode': {
+        const idErr = requireIdentifier(rec, 'nodeId', 'deleteNode', i)
+        if (idErr) {
+          diagnostics.push(idErr)
+          break
+        }
         if (!graph.nodes[op.nodeId]) {
           diagnostics.push({ opIndex: i, severity: 'error', message: `node ${op.nodeId} does not exist` })
           break
@@ -389,30 +488,50 @@ function applyOps(
         break
       }
       case 'connect': {
-        if (graph.edges[op.edgeId]) {
-          diagnostics.push({ opIndex: i, severity: 'error', message: `edge ${op.edgeId} already exists` })
+        // Endpoints are nested objects (`{ nodeId, port }`), not top-level fields, so
+        // requireIdentifier can't probe them directly — validate shape first to avoid
+        // a bare `op.source.nodeId` throwing when `source`/`target` itself is missing
+        // or malformed (a crash is its own kind of loud-but-unhelpful failure).
+        const sourceRec = (rec.source ?? {}) as Record<string, unknown>
+        const targetRec = (rec.target ?? {}) as Record<string, unknown>
+        const sourceErr =
+          typeof rec.source !== 'object' || rec.source === null
+            ? { opIndex: i, severity: 'error' as const, message: `connect op[${i}] is missing a valid "source" object (got ${JSON.stringify(rec.source)})` }
+            : requireIdentifier(sourceRec, 'nodeId', 'connect.source', i)
+        if (sourceErr) {
+          diagnostics.push(sourceErr)
+          break
+        }
+        const targetErr =
+          typeof rec.target !== 'object' || rec.target === null
+            ? { opIndex: i, severity: 'error' as const, message: `connect op[${i}] is missing a valid "target" object (got ${JSON.stringify(rec.target)})` }
+            : requireIdentifier(targetRec, 'nodeId', 'connect.target', i)
+        if (targetErr) {
+          diagnostics.push(targetErr)
+          break
+        }
+        const edgeId = op.edgeId ?? mintEdgeId(graph)
+        if (graph.edges[edgeId]) {
+          diagnostics.push({ opIndex: i, severity: 'error', message: `edge ${edgeId} already exists` })
           break
         }
         if (!graph.nodes[op.source.nodeId]) {
-          diagnostics.push({
-            opIndex: i,
-            severity: 'error',
-            message: `connect.source.nodeId ${op.source.nodeId} does not exist`,
-          })
+          diagnostics.push(unresolvedNodeRef(i, 'connect', 'source.nodeId', op.source.nodeId))
           break
         }
         if (!graph.nodes[op.target.nodeId]) {
-          diagnostics.push({
-            opIndex: i,
-            severity: 'error',
-            message: `connect.target.nodeId ${op.target.nodeId} does not exist`,
-          })
+          diagnostics.push(unresolvedNodeRef(i, 'connect', 'target.nodeId', op.target.nodeId))
           break
         }
-        graph.edges[op.edgeId] = { id: op.edgeId, source: op.source, target: op.target }
+        graph.edges[edgeId] = { id: edgeId, source: op.source, target: op.target }
         break
       }
       case 'disconnect': {
+        const idErr = requireIdentifier(rec, 'edgeId', 'disconnect', i)
+        if (idErr) {
+          diagnostics.push(idErr)
+          break
+        }
         if (!graph.edges[op.edgeId]) {
           diagnostics.push({ opIndex: i, severity: 'error', message: `edge ${op.edgeId} does not exist` })
           break
@@ -568,6 +687,12 @@ function applyCreateGroup(
   opIndex: number,
   registry?: OpRegistry,
 ): { error?: Diagnostic } {
+  // Same zombie-node risk as createNode's `nodeId` (see the 2026-07-01 postmortem
+  // note on `requireIdentifier` above): `groupId` is the object key for both
+  // `graph.nodes` and `graph.groups`, so a missing/mistyped field would otherwise
+  // silently key a group under the string "undefined".
+  const idErr = requireIdentifier(op as unknown as Record<string, unknown>, 'groupId', 'createGroup', opIndex)
+  if (idErr) return { error: idErr }
   if (graph.nodes[op.groupId]) {
     return { error: { opIndex, severity: 'error', message: `node ${op.groupId} already exists` } }
   }
@@ -763,11 +888,12 @@ function applyCreateGroup(
   }
 
   // Create the group shadow node + sub-graph entry.
+  const shadowPosition = op.position ?? autoNodePosition(graph)
   graph.nodes[op.groupId] = {
     id: op.groupId,
     opId: GROUP_OP_ID,
     name: op.name,
-    position: op.position,
+    position: shadowPosition,
     params: { groupId: op.groupId },
   }
   if (!graph.groups) graph.groups = {}
@@ -777,7 +903,7 @@ function applyCreateGroup(
     nameEn: op.nameEn,
     nodes: innerNodes,
     edges: innerEdges,
-    position: op.position,
+    position: shadowPosition,
     exposedInputs,
     exposedOutputs,
   }
@@ -795,6 +921,8 @@ function applyCreateGroup(
 }
 
 function applyUpdateGroup(graph: GraphFileV1, op: UpdateGroupOp, opIndex: number): { error?: Diagnostic } {
+  const idErr = requireIdentifier(op as unknown as Record<string, unknown>, 'groupId', 'updateGroup', opIndex)
+  if (idErr) return { error: idErr }
   const group = graph.groups?.[op.groupId]
   if (!group) {
     return { error: { opIndex, severity: 'error', message: `group ${op.groupId} does not exist` } }
@@ -869,7 +997,11 @@ function patchExposedPortOverlay(
     if (patch.customLabel !== undefined) port.customLabel = patch.customLabel
     if (patch.customLabelEn !== undefined) port.customLabelEn = patch.customLabelEn
   }
-}function applyDeleteGroup(graph: GraphFileV1, op: DeleteGroupOp, opIndex: number): { error?: Diagnostic } {
+}
+
+function applyDeleteGroup(graph: GraphFileV1, op: DeleteGroupOp, opIndex: number): { error?: Diagnostic } {
+  const idErr = requireIdentifier(op as unknown as Record<string, unknown>, 'groupId', 'deleteGroup', opIndex)
+  if (idErr) return { error: idErr }
   const group = graph.groups?.[op.groupId]
   const node = graph.nodes[op.groupId]
   if (!group && !node) {
@@ -890,6 +1022,8 @@ function patchExposedPortOverlay(
 }
 
 function applyUngroup(graph: GraphFileV1, op: UngroupOp, opIndex: number): { error?: Diagnostic } {
+  const idErr = requireIdentifier(op as unknown as Record<string, unknown>, 'groupId', 'ungroup', opIndex)
+  if (idErr) return { error: idErr }
   const group = graph.groups?.[op.groupId]
   if (!group) {
     return { error: { opIndex, severity: 'error', message: `group ${op.groupId} does not exist` } }
@@ -937,6 +1071,33 @@ function applyUngroup(graph: GraphFileV1, op: UngroupOp, opIndex: number): { err
   return {}
 }
 
+/** Every node id that may legitimately own an outputs/<id>/ cache directory. */
+export function collectCachedNodeIds(graph: GraphFileV1): Set<string> {
+  const ids = new Set(Object.keys(graph.nodes))
+  for (const group of Object.values(graph.groups ?? {})) {
+    for (const inner of group.nodes) ids.add(inner.id)
+  }
+  return ids
+}
+
+/** Inner member ids for one group, including nested sub-groups (deleteGroup GC). */
+function collectGroupMemberNodeIds(graph: GraphFileV1, groupId: string): Set<string> {
+  const out = new Set<string>()
+  const walk = (gid: string): void => {
+    const group = graph.groups?.[gid]
+    if (!group) return
+    for (const inner of group.nodes) {
+      out.add(inner.id)
+      if (inner.opId === GROUP_OP_ID) {
+        const childGid = typeof inner.params?.groupId === 'string' ? inner.params.groupId : ''
+        if (childGid) walk(childGid)
+      }
+    }
+  }
+  walk(groupId)
+  return out
+}
+
 /**
  * Collect the nodes whose INPUT topology a batch changes — the seeds for output-
  * cache invalidation. Deleting / adding an incoming edge, or deleting a node /
@@ -973,10 +1134,29 @@ function collectInvalidationSeeds(
         seeds.add(op.nodeId)
         addDownstreamTargetsOf(op.nodeId)
         break
-      case 'deleteGroup':
+      case 'deleteGroup': {
+        seeds.add(op.groupId)
+        addDownstreamTargetsOf(op.groupId)
+        // Inner members are removed with the group but are not downstream of
+        // the shadow node in the outer edge graph — invalidate them explicitly.
+        for (const id of collectGroupMemberNodeIds(before, op.groupId)) {
+          seeds.add(id)
+        }
+        break
+      }
       case 'ungroup':
         seeds.add(op.groupId)
         addDownstreamTargetsOf(op.groupId)
+        break
+      // Param / inner-subgraph edits change what downstream nodes resolve without
+      // any edge mutation — invalidate the edited node (or group shadow) and its
+      // downstream closure so the next partial execute cannot re-hydrate stale
+      // scene_output / tree_merge caches (the "slider moves but sink stays" bug).
+      case 'updateNode':
+        seeds.add(op.nodeId)
+        break
+      case 'updateGroup':
+        seeds.add(op.groupId)
         break
       default:
         break
@@ -1039,6 +1219,10 @@ export async function applyBatch(
       reason: 'op validation failed',
       diagnostics: apply.diagnostics,
     }
+  }
+
+  if (opts.autoLayoutNew !== false) {
+    layoutIncrementalNewNodes(current, next, ops, runtime.registry)
   }
 
   if (opts.dryRun) {
@@ -1112,6 +1296,10 @@ export async function applyBatch(
     invalidatedNodeCount = toInvalidate.size
     for (const id of toInvalidate) runtime.outputs.invalidate(id)
   }
+
+  // Sweep any output dirs left behind by deleted inner nodes / replaced ids.
+  runtime.outputs.pruneOrphans(collectCachedNodeIds(next))
+  runtime.outputs.pruneByRetention({ protectedNodeIds: collectCachedNodeIds(next) })
 
   const layoutOnly = batchIsLayoutOnly(ops)
 

@@ -2,42 +2,108 @@
 name: compose-sino-scene
 description: >-
   Sino 用既有「场景模板组」(管线电池) 与白名单工具电池，在 wb-scene-generator 工作台里连线拼出整张大场景的操作手册。
-  当 Sino 被要求布局 / 搭建 / 迭代一张场景（地图主体、建筑、道路、湖泊、自然装饰）时使用。
+  当 Sino 被要求布局 / 搭建 / 迭代一张场景（地图主体、地形分区/岛屿、山地等高线、建筑、道路、湖泊、自然装饰）时使用。
   Sino 只做场景布局构图，不生成图片/资产——贴图/物件由 Mira 生成，Sino 只负责把 Mira 的产物正确导入并验收。
 ---
 
 # 管线操作手册（Sino · 场景构图）
 
-> 本手册沿用 `scene_creator` 的章节结构（场景设计 → 选电池 → 连线 → 协作 → 归档），
-> 但**管线电池与工具电池一律使用 wb-scene-generator 的白名单电池**（见第二步目录），
-> 连线细节见 [instructions/session_operation.md](instructions/session_operation.md)，
-> 资产协作见 [instructions/asset-collaboration.md](instructions/asset-collaboration.md)。
+> ### ⬛ 模板组 = 黑盒（比双通道更优先）
+> **`instantiateTemplate` 整组落地** — 组内有 `scene_set_attribute` / `rect_grid` / 任意 op **都正常**，**禁止** `templates.get` 打开组内 JSON 研究实现。
+> **你唯一需要知道的**：返回的 **`exposedInputs` / `exposedOutputs`** → `text_panel` / `manual_points` 接到 exposed 口 → connect → execute。**会用、能用、快用。**
+
+> ### 🚦 构图双通道（搞混 applyBatch 顶层 = 422，与组内无关）
+> **通道 A** `instantiateTemplate` → 一次落地整组场景模板组（AreaPartition/IslandRegions/建筑/道路/装饰…；**整组落地，组内部实现无需你关心**）  
+> **通道 B** `applyBatch` → **仅** connect + 工具电池（empty_scene、panels、tree_merge…）  
+> 完整 SSOT：[instructions/mutation-lanes.md](instructions/mutation-lanes.md)
+
+> 连线细节见 [instructions/session_operation.md](instructions/session_operation.md)。  
+> **Phase 0 自规划** → [design-and-checklist.md](instructions/design-and-checklist.md)（Sino **一次性**写 `{runDir}/scene-composition-checklist.json`）  
+> **Rest 填充与面积**：[instructions/spatial-fill-and-rest.md](instructions/spatial-fill-and-rest.md)  
+> **快循环**：[instructions/fast-loop.md](instructions/fast-loop.md)  
+> 纯资产模式跳过 [asset-collaboration.md](instructions/asset-collaboration.md)。
+
+> ### 📋 Keypoint → 估算 → Phase 0（必须先读再规划）
+> 编排层已跑 keypoint_layout 求解并落盘 **`keypoint-layout-estimate.json`**（gridPosition、画布尺度、suggestedBBox）。  
+> Phase 0：**先读 estimate + scatter + contract**，再写 checklist — 禁止跳过估算直接 instantiate。
+
+> ### 📋 aw-support 纯资产（一次写 checklist → 按 batch 施工）
+> 编排层只落盘输入；Sino Phase 0 **写一次** checklist（含 `batchId`）。  
+> Phase 1+：**读 SSOT、从 next batch 接着做** — 只选电池/设参/连线，**禁止重写 checklist**。
+
+> ### 🚦 构图双通道
+> **四拍**：`instantiateTemplate`(A) → applyBatch 连线(B) → get → execute → 读摘要（含 `verification.hints`）。
+> **M0**：empty_scene → AddBaseGrid → merge 链 → execute — **完成后立刻 M1+，不要停**。
+> **aw-support**：**一次派工跑完阶段 3**（全部 LOC/路/装饰）；M0 **不是**交卷点。
+> **M1+（可分步批量）**：允许一次连多组，但依赖上游 execute 真值的须分步 — **PathConnectionLink/RW** POI 须提门、**Hill/Mountain 须 Rest 串链**、装饰围绕已生成建筑。下一组接上一组 **Rest**，禁止 BaseNode / 同 Rest fan-out。详见 [fast-loop.md](instructions/fast-loop.md)。
+
+> ### 🚫 零起点纪律（aw-support / 新场景任务）
+> - **禁止**读 `executions/` 历史归档、open 非本次 projectId
+> - **禁止**批量 read pipeline.md 再动手；422 时才读 **一个** md
+> - **禁止** shell/python 直改 `state/graph.json`（hash 失步 → open 500；删边用 applyBatch `deleteEdge`）
+> - 坐标真值：runDir `keypoint-layout-solved.json`
+
+> ### 🏷️ 命名对齐 + 结构展开（硬门控 `stage3.location_names`，2026-07-01：命名对齐现有真正的服务端校验，不再只是口头要求）
+> - 上游每个地点 `name` 必须原样出现在场景节点名 — 通过 **exposed Name 端口**（`text_panel` 喂 BuildingName/ZoneNames 等）。
+> - **禁止在 applyBatch 顶层 createNode `scene_set_attribute` 来命名** — 那是通道 B 误用。
+> - **模板组内部的 `scene_set_attribute` 是正常实现** — `instantiateTemplate` 后你**不要**打开组内审计；与你无关。
+> - **自检方式（收尾前必做）**：`scene:pipeline.execute` 传 `narrativeLocationNames:[...]`（aw-support 派单给你的上游地点 name 原样清单），摘要会多出 `verification.locationNameAlignment: {ok, missing:[{name,reason}]}`——**收尾前必须自己跑一次，确认 `ok:true`**；`ok:false` 就照着 `missing` 里的 `reason` 把缺的 name 补成场景节点（可加前后缀/作子节点名，如 `望江客栈_主楼` 仍算命中 `望江客栈`，但不能整体换成泛化名或漏项），再重新 `execute` 复核，不要带着 `ok:false` idle。
+> - 缺任一上游 name → 门控不过、任务不算完。上游名是**下限**：在保留原名节点前提下**必须**展开丰富子结构（市集/城镇补足够建筑物、神社补主殿+参道+石柱+彼岸花丛…）——这是要求，不是可选加分项。**反过来，多出的补充/装饰节点从不会导致门控失败**，只有核心命名缺失才算。
 
 ---
 
-## 第一步：场景设计
+## 第一步：Phase 0 一次性自规划
 
-根据用户输入，先确定目标场景是什么、想要什么效果，再决定**地图主体、建筑、道路、自然装饰**分别如何规划和摆放。
+**aw-support 不替你写施工顺序。** 见 [design-and-checklist.md](instructions/design-and-checklist.md)。
+
+1. **Tier 1** 读 runDir：`keypoint-layout-estimate.json` → `location-layout-contract.json` → `town-building-scatter.json`
+2. **Tier 2（按需）**：`prefab-scene-picks.json` · `prefab-footprint-summary.json` — **禁止** Phase 0 read `prefab-catalog.json` / `preprocessed.json`
+3. 按 **规划要点** 写出完整 `scene-composition-checklist.json`（含 `keypointEstimateRef`、`townBuildingPlan`、`restFrom`、`structureParams`）
+3. **此后禁止重写 checklist** — 续跑读 SSOT、从 next batch 接着做
+
+## 第二步：按 checklist batch 施工（快循环）
+
+**每 turn 只想：选电池 · 设 params · 连线。** 同 `batchId` 可一批 instantiate+execute。详见 [fast-loop.md](instructions/fast-loop.md)。
+
+> ### 📐 坐标方位约定（把"东北角""靠南"等意图换算成 Point 坐标时，逐字按此，别凭直觉）
+> **原点 `(0,0)` 在左上角**；**右 = 东 = `+x`，下 = 南 = `+y`**（即 西 = `-x`、北 = `-y`，x 横 y 纵）。
+>
+> | 方位 | 方向 | 坐标偏移 | | 方位 | 方向 | 坐标偏移 |
+> |---|---|---|---|---|---|---|
+> | 东 | 右 | `+x` | | 东北 | 右上 | `+x, -y` |
+> | 西 | 左 | `-x` | | 东南 | 右下 | `+x, +y` |
+> | 南 | 下 | `+y` | | 西北 | 左上 | `-x, -y` |
+> | 北 | 上 | `-y` | | 西南 | 左下 | `-x, +y` |
+>
+> 例：W×H 网格里"东北角" ≈ `(x≈W-1, y≈0)`、"中心偏南" ≈ `(x≈W/2, y>H/2)`。所有 `manual_points` / Point（`PickOneBuilding`/`PickMultiBuildings`/`PlaceOneDecoration`/`PathConnection` POI）一律按此约定。
 
 地图层级体系（从大到小，分层推进）：
 
 | 层级 | 说明 | 本套白名单对应管线电池 | 典型输出 |
 |------|------|----------------------|----------|
 | **地图主体（起点）** | 确立场景尺寸与底图，聚焦基础网格节点 | `AddBaseGrid` | BaseNode + RootScene |
+| **功能分区（可选，默认分区手段）** | 把父区域按中心点 + 面积**纯划分**成若干命名子区（铺满、无剩余） | `AreaPartition` | 仅 Zones（无 Rest） |
+| **海岛分区（可选，仅海洋/群岛场景）** | 按指定锚点在区域里**造岛**，分出陆地 / 水域 —— **只在需要水域时用** | `IslandRegions` | Island(陆地) + Rest(水域) |
+| **地形分带（可选）** | 在已有区域内部按到边界的距离再分近/远两带（深海/浅海、海岸/内陆） | `DistanceZones` | Near(近) + Far(远) |
 | **建筑层级** | 在基础网格上放置建筑（单栋 / 多栋 / 村庄） | `PickOneBuilding`、`PickMultiBuildings` | Building(s) + Rest |
-| **建筑结构（可选）** | 在建筑区域上盖墙/房间，生成 `outer_door` 门 | `BuildingStructures` | 含结构与门的建筑场景 |
-| **道路层级** | 在建筑（门）之间连通道路 | `PathConnection` | Path + Non-Path(剩余) |
-| **自然地物 / 装饰层级** | 在剩余空地撒植被、挖湖 | `NaturalDecorationDistribution`、`LakeRegions` | 装饰 / 湖 + Rest |
+| **建筑结构（可选）** | 在建筑区域上盖墙/房间，生成 `outer_door` 门；**narrative_interior 默认 bottomDoor=true** | `BuildingStructures` | 含结构与门的建筑场景 |
 
-**设计原则：** 必须从大到小、分层级推进。先确定地图主体（`AddBaseGrid`），再放建筑，再连道路，最后做自然装饰。每一层只在上一层留下的 **Rest / 剩余空地** 上继续布置，互不覆盖。
+> **建筑占地铁律**：**叙事内构**（需 BuildingStructures 的可进入建筑）**≥15×15 格**（与 catalog footprint 取较大值）；**装饰外观**小建筑可 ≥10×10。城镇须读 `town-building-scatter.json` 规划补充散布建筑。
+| **道路层级** | 在建筑（门）之间连通道路 | `PathConnectionLink` / `PathConnectionRandomWalk` | Path + Rest |
+| **地形层级** | Rest 上叠加高差/缓丘 | `MountainContourGenerate` / `HillContourGenerate` | 主产物 + Rest（**须 Rest 串链**） |
+| **地形等高（可选）** | 在**剩余区域**上添加整数高度分层以体现层次感（见下方高差约束） | `MountainContourGenerate` | Mountain(多层) + Rest |
+| **自然地物 / 装饰层级** | 在剩余空地**叠加多种**装饰（须组合使用，禁止单一模板） | `NaturalDecorationDistribution` + `LocalPreciseDecoration` + `PlaceOneDecoration` + `LakeRegions` | 装饰 / 湖 + Rest |
+
+**设计原则：** 必须从大到小、分层级推进。先确定地图主体（`AddBaseGrid`），需要把地图切成**功能区**（城镇/森林/湖区…）用 `AreaPartition`（默认分区手段，无水域）、**只有需要海岛/水域**场景才用 `IslandRegions` 划出陆地与水域、需要把某片区域按到边界距离再分深浅/海岸则用 `DistanceZones`，**先放建筑并连好道路**（见第二步「高差与连通」），再在**不影响叙事区域**的剩余范围用 **`MountainContourGenerate`** 做适度高差（`MaxElevationLayers` **建议 ≤ 2**），**最后**叠加多种装饰（见第二步「装饰叠加」）。每一层只在上一层留下的 **Rest / 剩余空地**（或上一层的陆地主产物）上继续布置，互不覆盖。
 
 **优秀场景的标准：**
 1. 层级从大到小条理清晰，不存在反复横跳的工具调用；
 2. 每一层的电池调用数量逐层递增（装饰层最密）；
-3. 对合理目标区域大面积、多层次地使用装饰；
-4. 结构丰富，最终 `scene_output` 产出一张完整可用的场景。
+3. **装饰须多种方式叠加**（随机散布 + 局部播撒 + 精准单点），避免单一模板铺满；
+4. **地形高差优先于装饰播撒**，且避开建筑/道路/地标等叙事核心区；
+5. 结构丰富，最终 `scene_output` 产出一张完整可用的场景。
 
-> **特别注意：禁止大面积无装饰的空白区域。**
+> **特别注意：禁止大面积无装饰的空白区域；也禁止只用一种装饰模板导致整图单调。**
 
 ---
 
@@ -45,47 +111,88 @@ description: >-
 
 电池分两类：**管线电池**（成组的场景模板组，封装某一层级的完整制作方法）与**工具电池**（顶层编排/数据转换/桥接）。
 
-> ⚠️ **硬边界**：Sino 只能用下表两类白名单电池。后端对 `actor=ai:sino` 的 `/api/v1/batch` 开了 **opId 白名单硬门**，清单外的顶层 `createNode.opId` 会被直接拒绝。模板组内部的 `alg_*` 算法电池是私有实现，**禁止在顶层直接摆放**——它们只随模板组实例化一并出现。
+> ### ⛰️ 高差与连通（选电池前必读）
+> **当前尚无坡道/台阶系统**，不同高度层之间无法自动衔接。因此：
+> 1. **先**完成关键内容布局（建筑、结构、道路 POI）并 **`PathConnectionLink` 或 `PathConnectionRandomWalk` 确认连通**；
+> 2. **再**在道路/建筑/地标等**叙事核心区之外**的剩余范围上使用 **`MountainContourGenerate`** 添加高差（核心区保持平地）；
+> 3. **`MaxElevationLayers` 建议不超过 `2`**（`0`=平地，`1`=一层抬升，`2`=两层抬升）；除非用户明确要求更强地形，否则不要用更大值；
+> 4. **地形完成之后**再进入装饰播撒（见下方「装饰叠加」）。
+>
+> 典型顺序：`AddBaseGrid` →（可选分区/分带）→ 建筑 →（可选结构）→ **道路连通** → **`MountainContourGenerate`（外围 Rest，≤2 层）** → **多种装饰叠加** → 湖。
 
-### 管线电池目录（场景模板组，共 7 个）
+> ### 📍 道路 POI（PathConnectionLink / RandomWalk）
+> **`in_3` POI 禁止拍脑袋坐标。** 须从上游 Rest / 建筑体素 **导出并推理**（门 `outer_door`、`building_footprint_mask` 门格=2、建筑外侧邻格、经校验的边界锚点）。每个点必须在**可铺路区域内或区域边缘**；接入前确认 **不在区域外、不在建筑体内、不悬空无效格**。详见 [PathConnection.md](instructions/pipelines/PathConnection.md) §1。
 
-> 实例化一律用 `scene:pipeline.instantiateTemplate`（返回全新运行时 `groupId`，连线用返回值，不要硬编下表的库 id）。总览索引以 [batteries/templates/scene/TEMPLATES_INDEX.md](../../batteries/templates/scene/TEMPLATES_INDEX.md) + `scene:templates.get` 为准。
+> ### 🌿 地形与装饰叠加（选电池前必读）
+>
+> **地形优先于装饰播撒**  
+> `MountainContourGenerate`（及可选的 `IslandRegions` / `DistanceZones`）应在**道路连通之后、任何装饰组之前**完成。高差只加在**不影响叙事区域**的剩余范围——建筑 footprint、道路走廊、广场/地标周边等**叙事核心区保持平地**；丘陵/层次留给外围 Rest、背景带、非剧情空地。
+>
+> **装饰必须多种方式叠加，禁止只用一种**  
+> `NaturalDecorationDistribution`（全区域随机散布）、`LocalPreciseDecoration`（兴趣点局部播撒）、`PlaceOneDecoration`（精准单点地标）**分工不同，须在同一张场景里组合使用**。只跑其中一种会导致整图**单调、缺乏层次**（例如全是同质行道树，或只有零星单点无背景植被）。
+>
+> | 方式 | 模板 | 典型用途 | 在链中的位置 |
+> |------|------|---------|-------------|
+> | 精准地标 | `PlaceOneDecoration` | 入口雕像、主树、标志性物件 | 装饰链**靠前**（先定叙事锚点） |
+> | 局部簇/环 | `LocalPreciseDecoration` | 建筑旁、路口、兴趣点周围点缀 | 地标之后，**围绕 keypoint** |
+> | 背景填充 | `NaturalDecorationDistribution` | 剩余空地防大片空白、背景植被 | 局部播撒之后，**大面积 Rest 上** |
+> | 水体 | `LakeRegions` | 湖/池 | 可与上述穿插，常靠后 |
+>
+> 推荐链式：`… → MountainContour(Rest 外围) → PlaceOne(地标) → LocalPrecise(锚点旁) → NaturalDecoration(填充) → Lake …`，每组 `out_2`→下一组 `in_1`，**至少用到 2～3 种装饰模板**。
+
+> ⚠️ **硬边界（通道 B 顶层 createNode 限制）**：`applyBatch` 顶层只能放**工具电池**（见下表）。**模板组一律走通道 A `instantiateTemplate` 整组落地**——组内部实现是私有的，你既不需要也无法直接摆放。422 = 你在通道 B 顶层放了非白名单电池（多半是想手搭某个模板组的内部）→ 改用 `instantiateTemplate` 落那个模板组，见 [mutation-lanes.md](instructions/mutation-lanes.md)。
+
+### 管线电池目录（场景模板组）
+
+> 实例化一律用 `scene:pipeline.instantiateTemplate`。**端口以 instantiate 返回的 `exposedInputs` 为准**（Skill 目录表 + 各 README 作参考；**禁止**为查端口先 `templates.get` 读组内 nodes）。总览：[batteries/templates/scene/TEMPLATES_INDEX.md](../../batteries/templates/scene/TEMPLATES_INDEX.md)。
 
 | 层级 | 管线电池 | 详细文档（本 skill） | 权威 README | 管线效果 | 必需输入 | 主要输出 |
 |------|---------|--------------------|------------|---------|---------|---------|
-| 地图主体 | **AddBaseGrid** | [pipelines/AddBaseGrid.md](instructions/pipelines/AddBaseGrid.md) | [README](../../batteries/templates/scene/AddBaseGrid/README.md) | 基础网格区域 + 底图 | `in_0`RootScene | `out_1`BaseNode / `out_2`RootScene |
+| 地图主体 | **AddBaseGrid** | [pipelines/AddBaseGrid.md](instructions/pipelines/AddBaseGrid.md) | [README](../../batteries/templates/general/grid/AddBaseGrid/README.md) | 基础网格区域 + 底图 | `in_0`RootScene | `out_1`BaseNode / `out_2`RootScene |
+| 功能分区 | **AreaPartition** | [pipelines/AreaPartition.md](instructions/pipelines/AreaPartition.md) | [README](../../batteries/templates/structures/districts/AreaPartition/README.md) | 纯划分父区域（**默认 organic**；无 Rest） | `in_0`Scene / `in_1`Points | `out_0`Scene / `out_1`Zones / `out_2`ZonesPath |
+| 海岛分区 | **IslandRegions** | [pipelines/IslandRegions.md](instructions/pipelines/IslandRegions.md) | [README](../../batteries/templates/scene/IslandRegions/README.md) | 指定锚点造岛（每点一岛）+ 水域 —— **仅海洋/群岛场景** | `in_0`Scene / `in_1`Points | `out_1`Island / `out_2`Rest(水域) |
+| 地形分带 | **DistanceZones** | [pipelines/DistanceZones.md](instructions/pipelines/DistanceZones.md) | [README](../../batteries/templates/scene/DistanceZones/README.md) | 按到边界距离把区域分近/远两带（深浅海、海岸内陆） | `in_0`Scene / `in_1`Threshold | `out_1`Near / `out_2`Far |
+| 地形等高 | **MountainContourGenerate** | [pipelines/MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md) | [README](../../batteries/templates/structures/topographic/MountainContourGenerate/README.md) | 剩余区域有机高度分层（**道路连通之后**；`MaxElevationLayers` **≤2**） | `in_0`Scene / `in_3`MaxElevationLayers / `in_1`AssetName | `out_2`Mountain / `out_1`Rest |
 | 建筑 | **PickOneBuilding** | [pipelines/PickOneBuilding.md](instructions/pipelines/PickOneBuilding.md) | [README](../../batteries/templates/scene/PickOneBuilding/README.md) | 指定坐标放一栋建筑 | `in_3`Point / `in_1`Scene | `out_1`Building / `out_2`Rest |
 | 建筑 | **PickMultiBuildings** | [pipelines/PickMultiBuildings.md](instructions/pipelines/PickMultiBuildings.md) | [README](../../batteries/templates/scene/PickMultiBuildings/README.md) | 一次放多栋建筑 | `in_6`Scene / `in_5`points | `out_2`Buildings / `out_1`Rest |
 | 建筑结构 | **BuildingStructures** | [pipelines/BuildingStructures.md](instructions/pipelines/BuildingStructures.md) | [README](../../batteries/templates/scene/BuildingStructures/README.md) | 盖墙/房间（含门） | `in_0`Scene(建筑区域) | `out_0`Scene / `out_1`Rooms |
-| 道路 | **PathConnection** | [pipelines/PathConnection.md](instructions/pipelines/PathConnection.md) | [README](../../batteries/templates/scene/PathConnection/README.md) | POI 点集连通道路（**单实例**） | `in_2`Scene / `in_3`POI列表 | `out_1`Path / `out_2`Rest |
-| 自然装饰 | **NaturalDecorationDistribution** | [pipelines/NaturalDecorationDistribution.md](instructions/pipelines/NaturalDecorationDistribution.md) | [README](../../batteries/templates/scene/NaturalDecorationDistribution/README.md) | 空地撒植被/装饰 | `in_1`Scene | `out_1`Decoration / `out_2`Rest |
-| 自然地物 | **LakeRegions** | [pipelines/LakeRegions.md](instructions/pipelines/LakeRegions.md) | [README](../../batteries/templates/scene/LakeRegions/README.md) | 剩余空地挖湖 | `in_0`Scene | `out_0`Lake / `out_1`Rest |
+| 道路 | **PathConnectionLink** / **PathConnectionRandomWalk** | [PathConnectionLink.md](instructions/pipelines/PathConnectionLink.md) / [PathConnection.md](instructions/pipelines/PathConnection.md) | 连连看 / 自然路网（**旧名 PathConnection 已废弃**） | `in_2`Scene / `in_3`POI | `out_1`Path / `out_2`Rest |
+| 地形 | **MountainContourGenerate** | [pipelines/MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md) | 外围等高线山头 | `in_0`←**Rest** | `out_1`Rest / `out_2`Mountain |
+| 地形 | **HillContourGenerate** | [pipelines/HillContourGenerate.md](instructions/pipelines/HillContourGenerate.md) | 局部小山包 | `in_0`←**Rest** | `out_2`Rest / `out_1`Hill |
+| 自然装饰 | **NaturalDecorationDistribution** | [pipelines/NaturalDecorationDistribution.md](instructions/pipelines/NaturalDecorationDistribution.md) | [README](../../batteries/templates/structures/decorations/NaturalDecorationDistribution/README.md) | 空地**随机散布**植被/装饰（多棵） | `in_1`Scene | `out_1`Decoration / `out_2`Rest |
+| 自然装饰 | **LocalPreciseDecoration** | [pipelines/LocalPreciseDecoration.md](instructions/pipelines/LocalPreciseDecoration.md) | [README](../../batteries/templates/structures/decorations/LocalPreciseDecoration/README.md) | 以兴趣点为中心**局部播撒**小型装饰（多颗） | `in_1`Scene / `in_2`Point | `out_1`Decoration / `out_2`Rest |
+| 自然装饰 | **PlaceOneDecoration** | [pipelines/PlaceOneDecoration.md](instructions/pipelines/PlaceOneDecoration.md) | [README](../../batteries/templates/scene/PlaceOneDecoration/README.md) | 在参考点**精准放置单个**指定装饰物（占地精确矩形贴合） | `in_1`Scene / `in_3`Point | `out_1`Decoration / `out_2`Rest |
+| 自然地物 | **LakeRegions** | [pipelines/LakeRegions.md](instructions/pipelines/LakeRegions.md) | [README](../../batteries/templates/structures/interests/LakeRegions/README.md) | 剩余空地挖湖 | `in_0`Scene | `out_0`Lake / `out_1`Rest |
 
-> 各模板组其余 `in_*` 多为 `[hidden]` 高级调参，默认即可。**端口名以 `scene:templates.get` / `instantiateTemplate` 返回为准，不要猜。**
+> 各模板组 hidden 参数默认即可。**端口名以 `instantiateTemplate` 返回的 exposedInputs 为准，不要猜、不要 templates.get 预读。**
+>
+> **模板 README 必含两节：**「如何用命令调用（输入侧）」与「如何用命令消费输出（输出侧）」——标准见 [`batteries/templates/_DOC_STANDARD.md`](../../batteries/templates/_DOC_STANDARD.md)。范例：`AreaPartition` README。
 
-### 工具电池目录（白名单，顶层可直接 `createNode`）
+### 工具电池目录（通道 B · 顶层 applyBatch 可用）
+
+> 模板组 **不在此表** — 仅 **`instantiateTemplate`（通道 A）** 落地。  
+> **完整端口定义**：`scene:composerUtilities.list` / `scene:composerUtilities.get`（Sino 唯一可见的电池目录）。  
+> **`scene:batteries.*` 对 Sino 不可调用**（全量 ~300 ops，人类/Workbench 专用）。
 
 | 工具电池（opId） | 功能 | 主要输入 | 主要输出 |
 |----------------|------|---------|---------|
-| `empty_scene` | 空场景起点（管线最起点） | 无 | `scene` |
-| `text_panel` | 文本面板：输出资产名/语义名/路径段 | `params.text` | `output`(string) |
-| `number_const` | 数值常量：尺寸/数量/密度 | `params.value` | `value`(number) |
-| `seed_control` | 统一随机种子（扇出到各组 Seed） | — | `seed`(number) |
-| `string_concat` | 拼路径（如 BuildingPath + `/outer_door`） | `a`、`b` | `result`(string) |
-| `manual_points` | 手动点位（x,y → 单个 point2d） | `params.x/y` 或接 `number_const` | `point` |
-| `tree_merge` | 合并 DataTree：**scene 汇总**用 `inferredAccess:"tree"`；**POI 点列表**用 `inferredAccess:"item"` | `item_0..item_N` | `tree` |
-| `scene_focus_children` | 展开焦点节点的直接子节点列表 | `scene` | `scenes`、`childCount` |
-| `scene_get_attribute` | 读焦点节点属性 | `scene`、`key` | `value`、`exists` |
-| `node_explode` | 检视节点内部（子路径/体素数） | `scene` | `childPaths`、`voxelCount`… |
-| `scene_focus_path` | 按路径聚焦到子节点（提门作 POI） | `scene`、`path` | `scene` |
+| `empty_scene` | 空场景起点 | 无 | `scene` |
+| `text_panel` | 资产名/语义名/路径 | `params.text` | `output` |
+| `number_const` | 尺寸/数量/面积权重 | `params.value` | `value` |
+| `toggle` | 布尔常量 | `params.value` | `value` |
+| `seed_control` | 随机种子（**扇出到各模板 Seed 口**；**禁止**接 AddBaseGrid.in_8 fillValue） | — | `seed` |
+| `string_concat` | 拼路径 | `a`、`b` | `result` |
+| `scene_focus_path` | 按路径聚焦 scene 子节点（**提门 POI / 单个子区**） | `scene`、`path` | `scene` |
+| `scene_focus_children` | 扇出 focus 的每个直接子节点（**多子区分支**） | `scene` | `scenes`(list) |
+| `node_explode` | 展开 focus 节点体素/2dPoints（**POI 坐标真值**） | `scene` | `2dPoints`、`voxels`… |
+| `building_footprint_mask` | 建筑占地掩码（0/1/2 门格） | `scene` | `grid` |
+| `manual_points` | 手动 point2d（**须先 region 校验**） | `params.x/y` | `point` |
+| `tree_merge` | 合并 DataTree（scene=`tree`；points/areas=`item`） | `item_0..N` | `tree` |
 | `tree_flatten` | 树拍平 | `tree` | `tree` |
 | `scene_merge_subtrees` | 合并子树 | `scenes` | `scene` |
-| `scene_output` | 场景终端输出 | `scene` | — |
-| `add_child` | 给场景节点挂子节点 | `scene`、`child` | `scene` |
-| `rect_grid` / `grid2node` / `voxel_slice` / `scene_passthrough` | 网格/桥接件（一般随模板组用，少在顶层手摆） | 见 `batteries.get` | — |
-| `__group__` | 成组哨兵（模板组实例化落地） | — | — |
+| `scene_output` | Preview 终端 | `scene` | — |
 
-> 工具电池的精确端口名查 `scene:batteries.get`（模板组查 `scene:templates.*`，不在 `batteries` 里）。
+> 手搓 `rect_grid` / `grid2node` / `add_child` / `alg_*` / `createGroup` → **403**（服务端硬拒）。需要算法能力时用对应 **模板组** `instantiateTemplate`。
 
 ---
 
@@ -97,17 +204,21 @@ description: >-
 1. **`connect` 必带全图唯一 `edgeId`**（字段名是 `edgeId`，不是 `id`；漏了报 `edge undefined already exists`）。
 2. **`applyBatch` 后必 `scene:pipeline.get` 核对** nodes/edges 真进图（防"ok 却空"）。
 3. **`scene:pipeline.execute` 返回 `completed` ≠ 每组都成功**——必接 scene 端口悬空会静默空跑；每加一组逐组验证。
-4. **`PathConnection` 的 `in_2`(Scene) 与 `in_3`(POI 点列表) 必接**；多点 POI 用 `tree_merge`（`inferredAccess:"item"`）合并后接 `in_3`，**禁止**每个方向各实例化一个 PathConnection（见 PathConnection 文档）。
+4. **`PathConnectionLink` / `PathConnectionRandomWalk`** 的 `in_2`+`in_3` 必接；**禁止**旧 templateId `PathConnection`；POI 须提门（见 PathConnection.md §1）。
 5. **`tree_merge` 必带 params**：scene 汇总 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`；POI 列表 `{"inferredAccess":"item","inferredType":"point2d","portCount":N}`。
 6. **`applyBatch` 必带 `opts.actor:"ai:sino"`**——这是白名单硬门的身份标记。
-7. **强制顺序**：`empty_scene → AddBaseGrid`（拿 BaseNode）+ seed + 汇总骨架先跑通 → 再逐组实例化 → 后续组 `in_0` 接 BaseNode/上一组 Rest。
+7. **强制顺序**：`empty_scene → AddBaseGrid`（拿 BaseNode）+ seed + 汇总骨架先跑通（M0 execute）→ 再实例化后续组（**参数已知的相邻组可批量连完再一起 execute；依赖上游 execute 结果的组分步来**，见「可分步批量」）→ 后续组 `in_0` 接 BaseNode/上一组 Rest。
 
 **链式串联范式（速记）：**
 - 起手：`empty_scene` → `AddBaseGrid` → `out_1`(BaseNode) 作后续 `in_0` 起点。
+- 功能分区(可选，默认分区手段)：上一组 Rest/BaseNode → `AreaPartition.in_0`；读 checklist `partitionPointsJson`/`partitionAreasJson`；`in_6` 默认 **organic**（勿改 rectilinear）；各区中心 `manual_points` → `tree_merge`(item) → `in_1`。**无水域** — 详见 [AreaPartition.md](instructions/pipelines/AreaPartition.md)。
+- 海岛分区(可选，**仅海洋/群岛场景**)：`AddBaseGrid.out_1` → `IslandRegions.in_0`；多个 `manual_points` → `tree_merge`(item) → `in_1`(各岛锚点)；`in_2` 接各岛 IslandSizes、`in_4` 接岛屿资产名。**`out_1`(Island) 陆地作后续建筑/装饰层的 `in_0`**，`out_2`(Rest) = 水域。
+- 地形分带(可选，深浅海/海岸内陆)：把某区域节点 → `DistanceZones.in_0`；`number_const` → `in_1`(Threshold 带宽格数)；近/远资产名接 `in_4`/`in_6`。**海洋分深浅** `in_2` 留默认(false)：`out_1`=浅海、`out_2`=深海；**岛屿分海岸**用 `toggle`(value=true) → `in_2`：`out_1`=海岸线、`out_2`=内陆。常接在 `IslandRegions` 的 `out_2`(水域，分深浅) 或 `out_1`(岛屿，分海岸) 之后。
+- 地形等高(可选，**道路连通之后、装饰之前**)：在**叙事核心区之外**的 Rest 上接 **`MountainContourGenerate.in_0`**（建筑/道路/广场周边不加高差）；`number_const` → `in_3`(MaxElevationLayers，**建议 `1~2`，不超过 `2`**)；`text_panel` → `in_1`(AssetName)。**`out_2`(Mountain) → `tree_merge`**；**`out_1`(Rest) → 装饰链**。
 - 建筑：`PickOneBuilding`(单栋) / `PickMultiBuildings`(多栋，`out_1`Rest 串联)。
 - 结构(可选)：`Building.out_*` → `BuildingStructures.in_0` → `out_0` 供道路 POI 提门。
-- 道路：**单个** `PathConnection` — 上一组 **Rest** → `in_2`；多个 `manual_points` → `tree_merge`(item) → `in_3`(POI 列表)；`in_1` 接道路资产名。
-- 装饰/湖：上一组 **Rest** → `NaturalDecorationDistribution.in_1` → `LakeRegions.in_1`。
+- 道路：**单个** `PathConnectionLink`（城镇）或 `PathConnectionRandomWalk`（野路）— Rest → `in_2`；POI 提门 → `in_3`。**确认连通后再 Hill/Mountain（Rest 串链，禁止 fan-out）。**
+- 装饰/湖（**须叠加多种，禁止只用一种**）：高差之后的 Rest → **`PlaceOneDecoration`**(地标单点) → **`LocalPreciseDecoration`**(keypoint 旁局部播撒) → **`NaturalDecorationDistribution`**(剩余空地背景填充) → **`LakeRegions`**（按需）。每组 `out_2`→下一组 `in_1`；**至少 2～3 种装饰模板** + 不同 AssetName，避免整图单调。
 - 汇总：各组主产物 → `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`。
 - 统一种子：`seed_control.seed` 扇出到各组 Seed。
 
@@ -118,15 +229,15 @@ description: >-
 **Sino 不生成任何图片/贴图/物件。** 构图时一律用**语义资产名**（写进 `text_panel`，如 `草地` / `石路` / `橡木屋` / `行道树`）。完整协作协议（含 `asset-requirements.json` 契约格式与导入验收）见 [instructions/asset-collaboration.md](instructions/asset-collaboration.md)。四阶段速记：
 
 1. **布局**：用语义名拼完整张场景布局，跑通 `execute`（此时用内置素材占位即可）。
-2. **收集需求**：把场景里引用到的每个资产汇总成 `asset-requirements.json`（`name` / `description` / `type`=`tile|object` / `footprint`{w,d 格} / `heightRatio`），交给调度 agent → Mira。
+2. **收集需求**：把场景里引用到的每个资产汇总成 `asset-requirements.json`（`name` / `description` / `type`=`tile|object` / `footprint`{w,d 格} / `heightRatio`），写入 runDir 供 aw-support 调度 Mira。
 3. **等待生成**：Mira 出图并发布到共享游戏沙箱，回传 `gameSlug` / 结果路径。
-4. **导入验收**：Sino 用 `scene:library.useGameTextures({gameSlug})` 绑定沙箱 → `scene:library.list` 核对资产名 → `execute` + `screenshot.capture` **真的看图**验收；不符则回退第 1/2 步调整或回提需求。
+4. **导入验收**（精简、一次到位、基于元数据）：`scene:library.useGameTextures({gameSlug, projectRoot})`——**`projectRoot` 必传**（=契约绝对路径 `/.forgeax/` 之前那段，否则绑到空目录、误命中内置同名预设）→ `scene:library.list` **逐一核对每个 `name` 就位且确来自沙箱**（`id` 以 `game-sandbox:` 开头、非 `Asset_Library/` 内置、尺寸/`assetKind` 与契约一致）→ `execute` 跑一次确认无 error。这是落沙箱的**权威判定**。详见 [asset-collaboration.md §四](instructions/asset-collaboration.md)；不符则回退第 1/2 步或回提需求。
 
 ---
 
-## 第五步：总结归档
+## 第六步：总结归档
 
-完成场景制作后，将本次执行总结写入工作区 `executions/` 目录，文件以场景名命名，含：
+完成场景制作后，将**本次**执行总结写入工作区 `executions/` 目录（**仅作归档输出，勿供后续任务当配方读** — 见 [executions/README.md](executions/README.md)），文件以场景名命名，含：
 1. **电池清单**：用到的每个管线/工具电池及其层级；
 2. **参数记录**：关键参数选择（网格尺寸、建筑数、密度、seed 等）；
 3. **资产清单**：本次 `asset-requirements.json` 里的资产及 Mira 产出/导入结果；
@@ -138,6 +249,7 @@ description: >-
 
 - [ ] 场景设计完成，层级从大到小清晰
 - [ ] 仅使用第二步目录里的白名单管线/工具电池（`opts.actor:"ai:sino"`）
-- [ ] 每加一组都 `pipeline.get` + `execute` + 截图逐组验证过
-- [ ] 资产需求已汇总成 `asset-requirements.json` 交付，Mira 产物已 `useGameTextures` 导入并截图验收
+- [ ] 每加一组都 `pipeline.get` + `execute` 逐组验证过（无 error、摘要符合预期）
+- [ ] 资产需求已汇总成 `asset-requirements.json` 交付，Mira 产物已 `useGameTextures` 导入并经 `library.list` 核对每个 `name` 就位（来源为沙箱产物）
+- [ ] `verification.locationNameAlignment` 通过（execute 摘要）
 - [ ] 已将执行总结写入 `executions/`

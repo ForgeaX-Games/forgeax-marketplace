@@ -12,7 +12,7 @@ workbench tab. It exists purely as a copy-paste starting point.
 cp -r packages/marketplace/plugins/_template packages/marketplace/plugins/wb-my-thing
 cd packages/marketplace/plugins/wb-my-thing
 
-# 1. Rename in forgeax-plugin.json:  id, displayName, workbench.id, workbench.bus.surfaceId
+# 1. Rename in forgeax-extension.json:  id, displayName, workbench.id, workbench.bus.surfaceId
 # 2. Rename in package.json:         name
 # 3. Replace tools in schemas/, server/router.ts and src/ui/* with your own
 # 4. Drop "hidden": true once you want it shown
@@ -32,7 +32,7 @@ npm run dev   # standalone mode, opens at http://localhost:7820
 ## File map
 
 ```
-forgeax-plugin.json          manifest (split-surface declared here)
+forgeax-extension.json          manifest (split-surface declared here)
 index.html                   single entry — both panes load it
 src/main.ts                  reads ?pane=, mounts only what's visible
 src/state/GlobalState.ts     BroadcastChannel-backed pub/sub

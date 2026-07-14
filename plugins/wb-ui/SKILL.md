@@ -5,7 +5,7 @@ description: Use for ForgeaX Workbench UI workshop tasks, including game UI flow
 
 # Workbench UI Workshop
 
-Use this skill when working on `@forgeax-plugin/wb-ui`.
+Use this skill when working on `@forgeax-extension/wb-ui`.
 
 ## Rules
 

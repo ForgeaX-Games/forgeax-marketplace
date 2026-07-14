@@ -18,7 +18,207 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Added
+- **Asset Store「列表」视图新增可点击排序的表头，字段集与列序对齐 asset_manager 的 `AssetReviewTable`（索引/内外/名称/材质/朝向/题材风格/状态/类型规则/尺寸/静态/滤镜模板/变体/出现场所/几何/时间戳/大小）。** `frontend/src/surfaces/AssetStoreSurface.tsx`：新增 `LIST_COL_ORDER`/`LIST_COL_LABEL`/`LIST_COL_SLOT`（13 项经既有 `aliasName.ts` 的 `SLOT`+`fieldAt` 从 `alias` 拆列，几何取 `geometryJson` 有无、时间戳取 `updatedAt`??`createdAt`、大小复用既有 `formatBytes`），列表行改为按此列集渲染分列文本；表头按钮点击走三态排序（未排序→升序→降序→取消，逻辑对齐 asset_manager `ScenePage.handleSortColumn`）驱动纯前端 `[...assets].sort(compareListAssets(...))`（`assets` 本就是当前 zone 的全量列表，见 `assetStoreStore.ts fetchAssets` 的「整 zone 一次性加载、连续滚动」模型，client-side 排序无需分页协调）。`AssetRecord`（`frontend/src/surfaces/library/libraryApi.ts`）补充 `geometryJson?: string | null`（后端已返回，此前前端类型缺失）。新增 `AssetStoreSurface.css` 表格样式（`.asset-list-*`，CSS Grid + 共享 `--asset-list-cols` 变量对齐表头/行列宽，超宽横向滚动）。仅改列表视图展示与排序，不影响网格视图、批量操作、渲染器绑定等既有交互。*为什么：* 用户要求 Asset Store 顶部资产列表按表头方式组织展示（参照 `asset_manager/apps` 的审阅表格），并支持点击表头依据该字段排序。
+
+- **`variantWeights` — 变体加权采样。** `FaceRule` / `randomRules[]` 可选声明与 `variantIdxs` 等长的 `variantWeights`；`randomRules` 命中且未保留 base 时经 `pickWeightedVariant` 按权重采样（缺省仍等权）。透明像素过滤后 idx/weight 成对剔除；前后端共用 `VariantPool` + `computeValidVariantPoolsByTileId`。*为什么:* common_16 中心 tile 的 4 个变体需不同出现概率（如 4:2:2:2），原先只能等概率随机。
+- **`randomRules[].variantIdxs` — per-tileId 变体池。** `FaceRule.randomRules` 每条可声明独立 `variantIdxs`;缺省仍回退 face 级 `variantIdxs`。`pickFaceSpriteIndex` / `bindings` / `cookBakedScene` 经 `computeValidVariantPoolsByTileId` 共享像素过滤,前后端 parity 测试覆盖。*为什么:* 不同 base tile 需要采样不同变体 slot(如 common_16 中心 vs 内角),原先全 face 共池无法表达。
+
 ### Changed
+- **资产库对齐 asset_manager 新版 13 字段契约（`@forgeax/asset-2d` SSOT）。** 新增 `backend/src/library/aliasName.ts` + `frontend/src/surfaces/library/aliasName.ts` 统一 `SLOT`/字段语义；`paintAssetBus` 修正名称=PPU 索引（name→f2、size→f8）；taxonomy `scene` 改为 **`index`**（f0 分类路径分层 drill-down）；过滤器/预览面板补齐 13 项（索引/内外/名称/材质/朝向/题材/状态/类型/尺寸/静态/滤镜/变体/出现场所）并透出 `tags`/`createdAt`/`updatedAt`/`hasError`/`isPlaceholder`；材质默认含纸/布/竹且与库内 distinct 值合并；变体改为自由输入以支持任意 ≥0 整数。*为什么：* 新版 `materials/asset-store/library.db` 与 wb-asset-manager 生成器格式打通，消除半迁移状态下的刷绘/匹配/浏览错位。
+
+### Fixed
+- **scene-export 与 baked 层 vendor 类型补全，后端 `tsc -b` 恢复通过、dev 后端可稳定拉起。**
+  `backend/src/baked/vendorScene.d.ts` 补 `projectSceneToVoxelLayers` 等投影类型；
+  `backend/src/scene-export/routes.ts` 预加载 rule atlas PNG 到同步 cache（`cookBakedScene` 的 `resolveRuleImage` 必须同步）。
+  *为什么：* 构建失败/类型断裂时 `tsx --watch` 后端起不来，Studio iframe 能开壳但 API 全挂，表现为「插件打不开」。
+
+- **补全缺失的 `debug/syncTrace` 模块，修复插件前后端无法启动。** `frontend/src/debug/syncTrace.ts`（浏览器 localStorage 开关）与 `backend/src/debug/syncTrace.ts`（`FORGEAX_DEBUG_SYNC=1` 环境变量开关）此前被多处引用但文件未入库；同时修复 `frontend/src/renderer/bridge/bakedApi.ts` 的自引用 type import（阻断 `pnpm build:vendor`）并重建 `vendor/dist/renderer-resolve`，恢复后端 `tileRules` 对 `computeValidVariantIdxs` 的导入。*为什么：* 克隆后场景生成器 vite 能起但后端 `ERR_MODULE_NOT_FOUND`/vendor 断裂，iframe 空白且 API 500。
+- **Billboard 预览 asset 模式重新贴出贴图（此前画笔画上的格子在 color 模式显示色块、切到 asset 模式却空白无贴图）。** 根因是资产库最近把全部 2909 条 base 资产的 `zone` 由 `raw` 迁到 `staging`（见下方 Changed），而渲染器的匹配池 `useAliasMetas.ts` 固定拉 `/api/v1/library/aliases-meta?zone=raw` → 池恒为空 → `matchAssetEntry` 永远 null → billboard asset 分支对每个 cell 直接 skip（`buildVoxelMaster/paintCell.ts:89-94` 刻意「缺 binding 就不画、不退色块」）；color 分支不碰这个池，故照常显示。修复：**渲染器/导出的匹配池改为 zone-agnostic**（一个 alias 可能落在任意 zone，取图 serve 本就跨 zone，匹配池理应对齐）。
+  - 后端 `GET /api/v1/library/aliases-meta` **不带 `zone` 时返回全 zone（除 trash）合并、按 alias 去重的池**（`routes.ts:129`）；带 `zone=` 仍按原 zone 作用域（现有测试不受影响）。新增 `service.ts` `listAllAliasesWithMeta()`（`WHERE zone <> 'trash' GROUP BY alias`）、`privateStore.ts` `filterPrivateAllZonesForProjectDir()`、`mergedLibraryPool.ts` `listMergedAliasMetasAllZones[/ForProjectDir]()`。
+  - 前端 `renderer/bridge/useAliasMetas.ts` 改请求 `/api/v1/library/aliases-meta`（去掉 `?zone=raw`）。
+  - 同根因顺带修复导出/无头预览：`scene-export/routes.ts` cook 与 `scripts/preview.mjs` 的匹配池由 `listMergedAliasMetas('raw')` 改为 all-zones 变体（否则迁移后导出/预览同样匹配不到贴图）。
+  - 测试：`backend/tests/library.test.ts` 新增「no zone 返回 zone-agnostic 池」用例（raw 空、staging 非空时 no-zone 池仍非空且为单 zone 超集）。*为什么：* 把「渲染池 = raw」这个随资产迁移而失效的硬假设，改成与 serve 一致的跨 zone 匹配，从根上杜绝「某 zone 一动整屏无贴图」。
+- **同一资产的多个对象图层不再被拆分成不同的 `object-type-config.json` 类型 / `obj__*` 地形模板。** `cooker.ts` 的 `objectTypeNameFor()`/`templateIdFor()` 原先在没有手填 `object_type_id`/`template_id` 时按 `assetName → nodeName` 兜底——`nodeName` 每个图层天然不同、`assetName` 也可能漏填或填法不一致，导致两个渲染出来是同一张贴图的图层（`objectGraphicId()` 已经正确按解析出的 `alias` 去重共享同一个 atlas 图格）却各自注册成独立的对象类型/独立的 `obj__` 地形模板。新增共享的 `typeIdentityFor()`：无显式属性时优先用**解析到的资源库条目自身的显示名**（`assetMatch.ts` 新导出的 `aliasDisplayName()`，即匹配逻辑本身拿来比对 `assetName` 的字段），兜底顺序变为「显式属性 → 解析别名显示名 → assetName → nodeName」——只要两个图层解析到同一个 alias 就必然合并；显式 `object_type_id`/`template_id` 仍然优先生效（保留"同贴图但故意分成不同游戏逻辑类型"的手动契约），两个不同表（sheet）恰好显示名相同时的既有分叉保护（`templateIdAlias` 冲突检测）不受影响。*为什么：* 用户要求"使用同一类资产的肯定要属于同一个对象模板，不能变成多个不同对象"；用一个可复现的最小用例验证过旧逻辑确实会分裂（同贴图、`assetName` 一个填了一个空，产出两个 `objectTypes` 键和两个 `obj__` 模板）。折叠进地形的对象丢失 `instanceId`/`direction`/`interacted` 仍是已知且暂时接受的权衡——本轮曾原型实现一个新增的 `object_instances[]` 字段来保留这些数据，但因参考查看器 `viewer.js` 是禁止修改的冻结资产、根本不会读这个新字段而回退，不引入没有消费者的 schema 面。
+
+### Added
+- **`scene-export/cook` 接口新增可选 `narrative` 字段，可依据场景叙事节点列表自动推导并覆盖 `area_L{depth}` 区域标记**（新增 `backend/src/scene-export/narrativeAreaTags.ts`；接入 `routes.ts` 的 `cookSceneForProject()`、`cooker.ts` 的 `areaTags()`）。传入 `{ locations: [{ name, parent }] }`（可直接整体传入原始叙事 JSON `scene_nodes.*.json`，多余字段如 `scale`/`adjacent`/`description` 被忽略）后：先做叙事自身结构自检（唯一名、父引用有效、无环），再按 `name` 精确匹配同名 baked 图层（0 个报 `missing`、≥2 个报 `ambiguous`），再校验叙事 `parent` 链在 baked 树里是否保持祖先/后代包含关系（允许中间插入额外层，不要求直接父子）；全部通过后按叙事深度把 `area_L{depth}`（字符串，`cooker.ts` 侧仍按原有 `[value]` 包装成数组）覆盖式写入每个匹配子树下的所有图层——同层已手填的 `area_L{depth}` 被覆盖，未被叙事覆盖到的更深层手填值保留。同时把 `cooker.ts` 原先硬编码的 `area_L0..area_L4`（i<=4）读取上限改为从 0 开始连续扫描、遇首个缺口即停，不再有层数上限。任一环节的问题（缺失/歧义/包含关系错误/叙事结构错误）都会被收集后合并成一条错误一次性返回（`POST` 400），不是報第一个就中止。*为什么：* 让叙事驱动的场景区域标记可自动化生成并强校验一致性，替代逐图层手填 `area_L0..area_L4` 的人工流程。
+- **`narrative` 输入的 `sceneName` 字段自动填充所有图层的 `region` 属性**（同一 `narrativeAreaTags.ts`）。与按子树作用域的 `area_L{depth}` 不同，`region` 是全场景统一标识（参考包里全部地形模板的 `region` 都等于场景名），所以只要叙事校验整体通过、且 `sceneName` 非空白，就会覆盖式写到**全部**烘焙图层（不局限于叙事匹配到的子树），未提供或为空白 `sceneName` 时完全不改动 `region`（沿用手填值或 `cooker.ts` 的 `"default"` 兜底）。*为什么：* `region` 是导出格式里唯一还依赖人工逐图层手填、且没有自动化机制的场景元数据字段，而叙事输入本身已经携带了场景名，顺手补上成本很低。
+- **新增三条 autotile 规则,切自参考图 `assets/rules/{房墙02,草坡,院墙}.png`(ppu=16,schemaVersion 2,billboard 双面 top+front):** `grass_slope_7.json`(草坡:top=草地顶面+随机点缀变体,front=泥土台地立面坡)、`courtyard_wall_18.json`(院墙:top=石压顶环形 autotile,front=米色墙身+石基座立面)、`house_wall_10.json`(房墙:top=压顶帽,front=米色压顶+青砖墙身立面)。三者均按 `wall_outer_16.json` 的面/键语义编写——top key=(u,d,l,r) 同层 4 邻、front key=(t,b,l,r) z 上下+同层左右——`sprites` 仅列实际取用格(绝对 atlas 坐标,仿 `flower_bed_11.json`),atlas 包围盒分别 80×64 / 96×144 / 48×144。*为什么:* 用户要求为这三张参考图各配一条可绑定 `autotileKind` 的瓦片规则;首版按参考图 16px 网格逐格映射,像素级效果待 Preview 校验微调。
+- **新增国风仙侠资产 13 字段清单 `materials/国风仙侠资产清单-13字段.csv`(289 行)**:依 `资产库大纲.md` §4 物品 / §5 瓦片 / §3 地形把所有资产展开为编辑器 13 字段(可能区域 / 室内外 / 大区域 / 小区域 / 物体名 / 朝向 / 题材风格 / 状态 / 是否抠图 / 尺寸 / 是否静态 / 滤镜模板序号 / 变体序号)。题材风格统一「国风仙侠」;大区域 / 小区域名按国风仙侠场所规范化为 40 个大区域(门派 / 道观 / 丹房 / 仙山 / 园林 / 古镇 等),`可能区域` 用 `-` 连接且 token 均为规范大区域;`是否抠图`(物件=抠图 / 瓦片地形=未裁剪)、`尺寸`(瓦 16 / 小 32 / 中 64 / 大 128 / 建筑 256)、`是否静态`(火 / 水 / 旗幡 / 喷泉 / 水车 等=动态)按物理类目派生。已剔除与古代国风不兼容的现代 / 科幻专属物(电视 / 电脑 / ATM / 霓虹灯 / 空间站 等),少量改写为国风等价(辐射污染带→瘴气带)。*为什么:* 用户需要把大纲里的资产按编辑器 13 字段成表、风格收敛为国风仙侠并保证覆盖全面,供后续批量标注 / 生成使用。
+- **新增按场所导向的资产清单 `materials/资产清单-按场所.md`**（以「场所」为单位的可勾选施工清单，配套 `资产库大纲.md` 使用）。覆盖室外自然环境（15 类生物群系）、农业聚落（农场/牧场/村镇/都市/公园）、特殊与末日（废墟/营地/避难所/遗迹/军事/工业/港口/交通）、室内居住（客厅/卧室/厨卫/书房等）、公共商业（学校/商铺/酒馆/医院/警局/教堂/寺庙等）、特殊异世界室内（魔法工坊/地牢/实验室/飞船/邪教祭坛/凶宅/工厂/监狱），并含横切资产（角色占位/天气特效/昼夜光照/季节皮肤/UI）与 P0–P3 制作优先级。每个场所按「地形/瓦片→大型结构→中型→点缀→光源→墙面→动态」七组列出具体资产，标注瓦片/地面/墙面/动态分类。*为什么：* 用户需要一份以「可出现场所」为导向、可直接对照制作的资产待办清单。
+- **新增资产库大纲文档 `materials/资产库大纲.md`**（与 `materials/export_2026-06-04/meta.json` 的 13 层 `tagLayerSchema`、15 题材风格、`organizeFolders` 三大物理分类对齐）。内容含：标签 schema 复述、题材风格表（现有 15 + 建议补充）、§3 场所大纲（室外自然/农业聚落/末日特殊 + 室内居住/公共商业/异世界，按「大区域 buildingType → 小区域 roomType」组织）、§4 物品大纲（20 个功能类目的 name 词典，标注地面/墙面/瓦片物理分类）、§5 瓦片/地形规则集、§6 覆盖矩阵与 P0–P3 施工优先级。*为什么：* 用户筹备星露谷/奈斯启示录风格 PCG 2D 像素游戏，需要覆盖面广、组织严谨且可标注的资产库蓝图来指导素材采集/生成，现有素材太少。
+- **`building_cluster` 小标签新增电池 `siheyuan_cluster`（四合院组群）**（`batteries/scene30/building_cluster/siheyuan_cluster/`）。按传统四合院范式生成院落组群：外围一圈贴齐 region 非零包围盒外边界的围墙（可开底墙院门），沿进深叠 `courtyards`（进数）个院落，每院由「横向房屋带（正房/厅堂/倒座房，贯穿院宽，共 N+1 条）+ 左右纵向厢房 + 环绕中庭的围廊」连接而成；房屋数量=3×进数+1（进数=1 即标准四合院 4 座房屋，控制房屋数量即调进数）。`hallDepth`/`wingWidth` 放不下时自动缩小以容纳进数与中庭。输出 `outputGrid`（合并多值：房屋各递增 id + 围廊 + 围墙各一值）/ `houses`（0/1 房屋列表，序为 正房→厅堂…→倒座房→各院西/东厢房）/ `wall` / `corridor` / `outputNameList`。已用 16×16（进数1，输出标准四合院四面房屋+中庭围廊+院门）、34×22（进数3，10 座房屋、三进院落形态）、8×8（极小仍成形）三组脚本验证。*为什么：* 用户要求一个可控房屋数量、忠实还原「矩形房屋由围墙+围廊连接、围墙贴齐外边界」的四合院组群生成电池。
+- **`building_cluster` 小标签新增电池 `random_rect_scatter`（随机生成矩形）**（`batteries/scene30/building_cluster/random_rect_scatter/`）。输入 `region`（grid，定义输出尺寸）+ `points`（point2d，list），对每个点在其周围随机生成 `countPerPoint` 个矩形：随机方向、与点保持可控的大致中心距（`distance` ± `distanceJitter`）、随机宽高（`minSize..maxSize`），按 region 边界裁剪。双输出：`outputGrid`（多值网格，每矩形递增 id）+ `rects`（0/1 网格列表），可直接接 `siheyuan_wall_frame` 串成围墙。`seed` 可复现。算法已用 24×24 单点 5 矩形脚本验证：各矩形中心距点约等于设定 distance（7±），且能链入围墙电池。*为什么：* 用户需要按点位在其周围随机布置矩形（建筑），并能控制矩形与点的大致距离。
+- **新增 scene30 小标签 `siheyuan`（四合院），内含电池 `siheyuan_wall_frame`（四合院围墙）**（`batteries/scene30/siheyuan/siheyuan_wall_frame/`）。输入多个矩形（`rects`，`grid`+`access:list`：0/1 网格列表，每张一个矩形；或单张多值网格，按不同非零 id 自动拆分），对每个矩形取最小包围盒、沿其长边方向画中心线（脊线），按围绕整体质心的极角排成环形，再贪心首尾相接（脊线 + 连接段）串成一条闭合折线，Bresenham 光栅化为线宽 `thickness`（默认 1）的 `wall` 网格输出。坐标约定 x→列、y→行。算法已用 12×12 四矩形（四合院四面房屋）独立脚本验证：输出为穿过每个矩形长边中心线、把四块串成的闭合方框围墙；多值网格拆分路径同样正确。*为什么：* 用户需要把若干矩形（如 `points2rects`/`bsp_rect_gen` 产出的房屋地块）用一道穿过各自长边中心线的闭合围墙串成四合院院落。
+
+### Removed
+- **资产库 `library.db` 删除 `asset_kind` 列（信息融入 alias 类型域）**（`materials/asset-store/library.db` 就地 `ALTER TABLE DROP COLUMN`+`VACUUM`；`backend/src/library/service.ts`(`AssetRecord.assetKind`/`AssetRow.asset_kind`/`rowToRecord`/`deriveAliasMeta` 入参/`optionalAssetColumns`)、`gameSandboxStore.ts`、`mergedLibraryPool.ts`、导入脚本 `scripts/{import-exported-assets,legacy-asset-overlays}.mjs`、相关测试同步去引用）。*为什么：* `asset_kind` 与 alias 类型域表达同一信息（瓦片=规则别名 / 物件=抠图），合并后 alias 自洽、消除并列真源。
+- **资产库 `library.db` 再精简 2 个死列：`tags_json` / `library_path`，并剔除 `geometry_json` 里冗余的 `name` 键**（`materials/asset-store/library.db` 就地 `ALTER TABLE DROP COLUMN`+`VACUUM`，2923 资产全保留；`geometry_json.name` 逐行删除 2838 处；导入脚本 `scripts/{import-exported-assets,legacy-asset-overlays}.mjs`、`backend/src/library/service.ts`(`AssetRecord`/`AssetRow`/`rowToRecord`/`optionalAssetColumns`)、`backend/tests/import-exported-assets.test.ts` 同步去引用）。*为什么：* 调研确认 `tags_json` 的信息已可由 alias 13 字段完全派生、运行时无任何读取方；`library_path` 全仓无消费；`geometry_json.name` 只是 alias 的重复，解析从不读取。
+- **资产库 `library.db` 精简 4 个冗余列：`tag_layers_json` / `organize_folder_path` / `export_path` / `crop_type_original`**（`materials/asset-store/library.db` 就地 `ALTER TABLE DROP COLUMN`+`VACUUM`，2909 资产/2900 blob 全部保留；导入脚本 `scripts/{import-exported-assets,legacy-asset-overlays}.mjs` 同步去列）。*为什么：* 用户要求合并标签 JSON、删除无用溯源列与重复的抠图判别列——`tag_layers_json` 的 label/zone/index 对每行恒等（属字段 schema 非每行数据），`tags_json` 已含其 value；`organize_folder_path`/`export_path` 运行时从不读取；`crop_type_original` 与 `asset_kind` 表达同一信息。
+
+### Deferred
+- **项目 baked 引用未随 alias 12 字段重构迁移（仅报告，未执行）。** 已烘焙的项目图层里存的旧版 alias 字符串（name 在 idx4、type 在 idx8、含 `__` 长连接、带大/小区域），在新代码下按 idx2=name / idx7=type 解析会错位 → 精确 `assetAlias` 绑定与按名匹配都可能失效，渲染/导出对这些历史图层暂时匹配不到贴图。影响面：任何在本次重构前保存的 `.forgeax` 项目 baked 快照 / cook 输入。迁移方案（待用户确认后单独执行）：对每份 baked 数据里的 `assetAlias` 用与 DB 相同的 `toRendererAlias(旧alias, 旧asset_kind)` 转换重写一遍；`assetName`（纯物体名，不含括号）不受影响，仅靠名字匹配的图层无需迁移。*为什么：* 用户明确「迁移项目 baked 引用先不做，报告即可」。
+
+### Changed
+- **alias 类型域(idx7)的物件裁剪标记由 `抠图` 改为 `asset`（承接上条 12 字段重构）**：`library.db` 就地把 2866 条物件 alias 的 idx7 `抠图` 重写为 `asset`（瓦片的规则别名不变）；`privateStore.ts`(`CUTOUT_TYPE_FIELD='asset'`)、`service.ts`(`NON_TILE_ASSET_KINDS` 增 `asset`)、`scene-export/assetMatch.ts` 与 `frontend/renderer/framework/asset/matchAssetEntry.ts`(cutout 池判据新增 `isCutoutTypeField`，同时兼容旧 `抠图`)、`legacy-asset-overlays.mjs::toRendererAlias`(非瓦片输出 `asset`) 同步。代码仍保留识别旧 `抠图`（历史/baked 数据向后兼容）。测试同步：修正上次 12 字段重构遗漏、未随之更新的前端 `buildVoxelMaster/index.test.ts`（旧布局 name@idx4/cutout@idx8 → 新 name@idx2/cutout@idx7/`asset`），后端 cutout 用例改用 `asset`。*为什么：* 用户要求把裁剪物件的类型标记语义从中文「抠图」改为通用 `asset`。
+- **alias 字段契约由 13 字段重构为 12 字段（不可逆命名契约变更）**：删除 `大区域`(旧 idx2)/`小区域`(旧 idx3)、在 `物体名` 后插入空 `材质` 域(新 idx3)、`asset_kind` 融入 `类型/规则` 域(新 idx7：瓦片=规则别名如 `common_16`/物件=`抠图`)、连接符统一为单下划线 `_`。DB 就地重写全部 2909 条括号 alias（14 条无括号测试图保持原样），并同步下移所有硬编码索引：`service.ts`(`FIELD_INDEX` type8→7/style6→5/size9→8、`extractAliasTypeField` idx8→7、`deriveAliasMeta` 改读 idx7、搜索字段 idx4→2、`place` facet 降为单级 室内/室外)、`privateStore.ts`(`composeRendererAlias` 长度 13→12/name idx4→2/type idx8→7、`FIELD_INDEX`、`matchesFacet`/`facetPrivate` 单级 place)、`privateRoutes.repairAlias`(12 字段/name idx2)、`scene-export/assetMatch.ts`(name idx4→2/cutout idx8→7)、`frontend/renderer/framework/asset/matchAssetEntry.ts`(name idx4→2/cutout idx8→7/ppu idx9→8/变体组前 11 字段)、`frontend/workbench/AssetStorePanel.tsx`(FIELD_DEFS 12 字段)、导入脚本新增 `toRendererAlias()` 旧→新转换。25 个新 alias 因仅在被删的大/小区域上不同而碰撞（50 行，全部保留，匹配池按 alias `GROUP BY` 去重）。*为什么：* 用户要求去掉大/小区域、加材质域、asset_kind 回归 alias、统一下划线，收敛为单一自洽命名契约。
+- **资产库 `library.db` 清理「默认圆整 anchor」：`anchor_x`、`anchor_y` 均 ≤2 位小数（如 0.5/0.38，判据 `x=round(x,2)`）的 994 条资产，其 `anchor_x/anchor_y` 置 NULL、并从 `geometry_json` 移除对应的 `pivot`（否则 pivot 会以 0.5 覆盖回 anchor）、清空该资产 collision（`collision_mask=[]`、`collision_category="None"`，541 条）**（`materials/asset-store/library.db` 就地迁移；要求 x、y 同时 ≤2dp 才清，精确计算得到的锚点/碰撞如 `0.4973…` 保留）。*为什么：* 这类圆整值是历史导出塞进去的默认占位、并非真实处理结果；渲染本就有 `?? 0.5` 兜底，且运行时发布路径已不再落默认值——留库反而与「无 anchor 即空」的语义冲突。anchor null 数 269→1263。
+- **资产库 `library.db` 全部 2909 条资产 `zone` 由 `raw` 改为 `staging`**（`materials/asset-store/library.db` 就地 `UPDATE assets SET zone = 'staging'`）。*为什么：* 用户要求将现有素材库划入 staging 分区，与后续 raw 新素材区分。
+- **瓦片判别由 `crop_type_original`（'瓦片组'/'wall'）改为 `asset_kind`**（`backend/src/library/service.ts`：新增 `isTileAssetKind`，`asset_kind` 非空且非 `抠图`/`object` 即视为瓦片组、其值即 autotile 规则别名）。同步清理 `service.ts`(`AssetRecord`/`AssetRow`/`rowToRecord`/`deriveAliasMeta`/`optionalAssetColumns`)、`privateStore.ts`、`gameSandboxStore.ts`、`routes.ts` 中对已删字段的引用；`PrivateAssetRecord` 去掉 `cropTypeOriginal`，发布桥仅靠 `assetKind` 绑定瓦片规则。*为什么：* 删除 `crop_type_original` 后需要等价的瓦片判别来源，避免 autotile 规则绑定失效。
+- **scene30 小标签 `siheyuan` 重命名为 `building_cluster`（建筑组群）**（`batteries/scene30/siheyuan/` → `batteries/scene30/building_cluster/`，`siheyuan_wall_frame` 电池随目录迁移，id 不变）。*为什么：* 用户要求把该小标签改名为「建筑组群」。
+
+- **interests 模板新增四个兴趣点 scene 模板：`FenceFarm`(`fence_farm`) / `ParkGenerator`(`park_generator`) / `ShrineLayout`(`shrine_layout`) / `FarmlandGrid`(`farmland_grid`)**（`batteries/templates/structures/interests/{FenceFarm,ParkGenerator,ShrineLayout,FarmlandGrid}/`）。四个电池均为标准 `inputGrid→outputGrid` 形态，按 `BspDistrictCluster` 范式包成 scene 组：输入 Scene → `scene_passthrough→node_explode→rect_grid→voxel_slice` 取顶层切片做掩码 → 电池产多值网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、`asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（Scene / 主产物 / Rest / 主Path / RestPath）。暴露端口：FenceFarm=FenceMode/GateCount/SectionCount/GateWidth/PlotWidth/PlotHeight；ParkGenerator=Algorithm/PathWidth/TreeCount/SpokeCount；ShrineLayout=Algorithm/DecorCount/PathWidth；FarmlandGrid=Layout/PlotWidth/PlotHeight/PathWidth/PlantDensity（`fillValue`/`z`/`schema`/`token`/`zRange` 隐藏）。已校验 JSON、无悬空边、暴露端口源有效、核心节点 inputGrid/seed/outputGrid 接线正确。*为什么：* 用户要求把这四个兴趣点电池按结构模板范式封装为可套用 scene 模板。
+- **新增小标签 `structures/indoor`，封装两个室内家具放置 scene 模板：`AdaptiveRoomFurniturePlacer`(`adaptive_room_furniture_placer`) / `RoomLayoutPlacer`(`room_layout_placer`)**（`batteries/templates/structures/indoor/{AdaptiveRoomFurniturePlacer,RoomLayoutPlacer}/`）。同 `BspDistrictCluster` 范式包成 scene 组：输入 Scene → `scene_passthrough→node_explode→rect_grid→voxel_slice` 取顶层切片做房间掩码 → 电池产家具网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、`asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（Scene / Furniture / Rest / FurniturePath / RestPath）。两电池核心网格入口为 `roomGrid`（已据此改接 slice→核心边，区别于其它电池的 `inputGrid`）；`doorGrid`(门位置网格,可选)、`furnitureList`(家具清单,不接则无家具) 作为暴露输入由组外接入。暴露端口：AdaptiveRoomFurniturePlacer=DoorGrid/FurnitureList；RoomLayoutPlacer=DoorGrid/FurnitureList/LayoutMode/LayoutConfig（`fillValue`/`z`/`schema`/`token`/`zRange` 隐藏）。已校验 JSON、无悬空边、暴露端口源有效、核心节点 roomGrid/seed/outputGrid 接线正确。*为什么：* 用户要求把这两个室内家具电池按结构模板范式封装为可套用 scene 模板。命名沿用 `AssetName`+`str_to_list_branches`（仓内暂无「逐实例 `nameList`→按分支对齐」算子）。
+- **water 模板新增两个 scene 模板：`RiverSpline`(`river_spline`) / `RiverLakeGen`(`river_lake_gen`)**（`batteries/templates/structures/water/{RiverSpline,RiverLakeGen}/`）。同 `BspDistrictCluster` 范式包成 scene 组：输入 Scene → 取顶层切片做基准 → 电池产网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、`asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（Scene / River(Water) / Rest / RiverPath(WaterPath) / RestPath）。`RiverLakeGen` 核心输出端口为 `waterGrid`（已据此改接核心输出边，区别于其它电池的 `outputGrid`）。暴露端口：RiverSpline=Points(必填)/Algorithm/RiverWidth/NumMidPoints/OffsetMin/OffsetMax/SegmentUniformity（`WindowSize`/`Sigma`/`BezierDegree` 隐藏）；RiverLakeGen=RiverCount/Algorithm/MinWidth/MaxWidth/LakeCount/WaterItems（`inputNameList` 隐藏）。已校验 JSON、无悬空边、暴露端口源有效、核心节点 inputGrid/seed/(out) 接线正确。*为什么：* 用户要求把这两个水系电池按装饰模板范式封装为可套用 scene 模板。
+- **新增两个结构 scene 模板：`HillContourGenerate`(`hill_contour_generate`，归入 `structures/topographic`) / `TownIslandLayout`(`town_island_layout`，新建小标签 `structures/interests`)**（`batteries/templates/structures/{topographic/HillContourGenerate,interests/TownIslandLayout}/`）。同 `BspDistrictCluster` 范式包成 scene 组：输入 Scene → 取顶层切片做掩码 → 电池产多值网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、`asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（Scene / Hill(Town) / Rest / HillPath(TownPath) / RestPath）。暴露端口：HillContourGenerate=ContourLevels/HillCount/Roundness/PeakRadius/NoiseAmount/PeakPosition（`MinHoleSize`/`MinIslandSize` 隐藏）；TownIslandLayout=RoadWidth/BlockMinSize/ShapeType/ShapeScale/CoverageThreshold。已校验 JSON、无悬空边、暴露端口源有效、核心节点 inputGrid/seed/outputGrid 接线正确。*为什么：* 用户要求把这两个电池按装饰模板范式封装为可套用 scene 模板；`interests` 为兴趣点类结构新建小标签。
+- **新增两个结构 scene 模板：`OrganicIslandShape`(`organic_island_shape`，新建小标签 `structures/topographic`) / `PointZoneGen`(`point_zone_gen`，归入现有 `structures/districts`)**（`batteries/templates/structures/{topographic/OrganicIslandShape,districts/PointZoneGen}/`）。把这两个 grid→多值网格电池按 `BspDistrictCluster` 同款流水线包成 scene 组：输入 Scene → `scene_passthrough→node_explode→rect_grid→voxel_slice` 取顶层切片做掩码 → 电池产多值网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、嵌套 `TileAssetName` 写 `asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（`out_0..4`：Scene / Island(Zone) / Rest / IslandPath(ZonePath) / RestPath）。暴露端口：OrganicIslandShape=NoiseScale/NoiseStrength/IslandRatio/Octaves；PointZoneGen=Regions（`[x,y,area,height]` JSON，必填否则无产物）。已校验 JSON、无悬空边、暴露端口源有效、核心节点 inputGrid/seed/outputGrid 接线正确。*为什么：* 用户要求把这两个电池按装饰模板范式封装为「输入 scene、五个固定输出」的可套用模板；`topographic` 为地形类结构新建小标签。
+- **decorations 模板新增三个纹理地面 scene 模板：`IndoorTextureGround`(`indoor_texture`) / `MultiLayerGround`(`multi_layer_ground`) / `OutdoorTextureGround`(`outdoor_texture`)**（`batteries/templates/structures/decorations/{IndoorTextureGround,MultiLayerGround,OutdoorTextureGround}/`）。把 `components/decoration/{indoor_texture,multi_layer_ground,outdoor_texture}` 三个 grid→多值纹理网格电池按 `BspDistrictCluster` 同款流水线包成 scene 组：输入 Scene → `scene_passthrough→node_explode→rect_grid→voxel_slice` 取顶层切片做掩码 → 纹理电池产多值网格 → `grid_split_by_value`→`grid2node`(按 `AssetName` 命名、嵌套 `TileAssetName` 写 `asset_type=tile`)→`add_child` → `alg_region_subtract` 求 Rest → **严格 5 个固定输出**（`out_0..4`：Scene / Texture(Ground) / Rest / TexturePath(GroundPath) / RestPath，与 `NaturalDecorationDistribution`/`PoiPlace` 等装饰结构契约一致）。各模板额外暴露对应电池参数端口（indoor: Algorithm；ground: LayerCount/Threshold/Frequency/Octaves；outdoor: Temperature/Moisture）。已校验 JSON、无悬空边、暴露端口源节点/端口均有效、核心节点 inputGrid/seed/outputGrid 接线正确。*为什么：* 用户要求把这三个纹理电池按 `NaturalDecorationDistribution` 范式封装为「输入 scene、对 scene 操作、输出五个固定端口」的可一键套用模板。命名沿用已验证的 `AssetName`+`str_to_list_branches` 机制（仓内暂无「`nameList` 数组→按分支对齐的名称流」算子，故未直接消费电池 `nameList`）。
+- **decorations 模板新增三个 scene 流水线模板：`DecorationBorder`(规则装饰物) / `PoiScatter`(随机POI分布) / `PoiPlace`(精准POI分布)**（`batteries/templates/structures/decorations/{DecorationBorder,PoiScatter,PoiPlace}/`，与 `NaturalDecorationDistribution` 同目录、同范式）。仿 `NaturalDecorationDistribution` 包成 scene 组：输入 Scene，内部 `scene_passthrough→node_explode→rect_grid→voxel_slice` 取区域 → 对应 `components/decoration/{decoration_border,poi_scatter,poi_place}` 电池在区域内布置 → `grid2node`+嵌套 `ObjectAssetName` 写资产名挂树 → `alg_region_subtract` 求剩余空地 → **严格 5 个输出**（`out_0..4`：Scene / 主产物 / Rest / 主Path / RestPath）。已通过真实后端 REST（instantiate + batch + execute）端到端验证：12×12 区域下 DecorationBorder 产出 decoration(20 体素)+rest(124)、PoiScatter/PoiPlace 在给定规则下产出 poi 层+rest，五件套路径句柄正确。*为什么：* 用户要求这三个装饰电池按 `NaturalDecorationDistribution` 范式封装为「输入 scene、对 scene 操作、严格五输出」的可一键套用模板，而非裸 grid 端口的薄封装。
+
+### Changed
+- **`PathConnectionLink` 模板的「道路宽度」默认值由 1 改为 2**（`batteries/templates/structures/path/PathConnectionLink/PathConnectionLink.json`：`road_connect_link` 节点 `params.roadWidth=2`）。*为什么：* 该模板期望更宽的默认道路，避免每次套用后手动调整。
+
+### Fixed
+- **`Scene Structure` 节点在组内视图（group inner view）现可正常显示逻辑树结构，不再卡在「连接 scene 端口以查看结构」占位。** `frontend/src/workbench/SceneStructureNode.tsx`：改为订阅整张 `nodeOutputs` 而非仅本节点输出——组内叶子可视化节点自身输出不会被持久化，scene 仅在异步 group-probe hydrate 上游生产者后到达，订阅全表才能在其落地后重渲染；配合内核 `nodeTooltip.tsx` `resolveInputPortValue` 现在会查 `group.edges` 追溯组内上游。*为什么：* 组内连线在 `group.edges` 而非根 edges，旧逻辑取不到输入。
+
+### Added
+- **新增 `BspDistrictCluster` district 模板（`batteries/templates/structures/districts/BspDistrictCluster/`）：输入一个点（Point）+ 矩形数量（RectCount）→ 围绕该点播撒一簇 BSP 矩形建筑地块，每块拆为独立子节点，并产出 Rest 空地。** 复用 `Regions` 同款六段流水线（passthrough→explode→rect_grid→voxel_slice→`bsp_rect_gen`→grid_split→grid2node→add_child→subtract→五件套），仅把分区算法换成 `bsp_rect_gen` 并暴露 Point/RectCount/MinSize/MaxSize 端口；嵌套 `TileAssetName` 子组写资产名。已用 `splitTemplate`+`buildTemplateOps`+`applyBatch` 验证实例化 `status:ok`。*为什么：* 缺少「点锚定的矩形建筑簇」模板（`Regions` 按方位配额、`ZoneNesting` 单块有机，均非矩形簇）。
+- **`bsp_rect_gen` 新增可选 `centerPoint`（point2d）输入（`batteries/components/districts/bsp_rect_gen/`，v3.1.0）：** 连线时以精确采样点 `{x,y}`（裁剪到区域 bbox 内）作为播撒中心、覆盖九宫格 `centerPosition`；未连线时回退原九宫格行为，完全向后兼容（`index.ts:215,251` 中心定位分支 + `parsePoint`）。*为什么：* `BspDistrictCluster` 模板需要「输入一个真正的点」来锚定建筑簇，而原电池只接九宫格 1-9。
+- **新增 `str_to_list_branches` 电池（`batteries/basic/trans/str_to_list_branches/`）：列表字符串 → 每元素一个独立子分支（`items`/`access:list`）。**
+  容错解析：先按 JSON 解析，失败再退回「去外层方括号→顶层逗号切分→逐段 trim/数字转换」，故 `[test2,test3]`（元素不加引号）也能用；
+  **非列表的裸标量（如 `TEST2`）按「单元素列表」处理、绝不返回 error**（否则单个输入会让节点失败、打断整条下游链）。空串→`[]`。
+  与 `grid_split_by_value.grids` 同形态，可直接喂 item 端口逐个 fanout（如 `grid2node.name`）。
+  *为什么：* `str_to_list` 只输出「单分支里的一个数组」，无法按分支与 `grid_split_by_value` 的网格分支对齐 fanout；需要一个把名称列表炸成分支、且对单值输入鲁棒的原语。
+
+### Added
+- **`PathConnection` / `PathConnectionLink` 模板新增可选 `Obstacles`(in_15, scene) 端口。** 模板内新增 `scene_passthrough→node_explode→voxel_slice→alg_region_union` 子链（`templates/structures/path/*/{PathConnection,PathConnectionLink}.json`）：接入的障碍场景在与主场景同一基准 grid/同一 z 高度上切片成障碍网格，再与内部"非可铺路区"(`alg_region_subtract`) 求并后喂给寻路节点 `obstacle`，道路据此绕行；端口悬空时 `node_explode` 返回空、并集等于原障碍，**与原行为完全一致**。*为什么：* 之前道路只能绕开"非可铺路区"，无法显式指定额外障碍场景（如特定建筑/水体）让道路避让。
+
+### Fixed
+- **`points_to_grid` 边界点不再被静默丢弃（`batteries/scene/point/points_to_grid/index.ts:21-30`）。** 原先 `c < cols && r < rows` 的硬越界判断会把「坐标==地图尺寸」的边界点（如 200 宽地图的 `x=200`）直接丢掉，导致 PathConnectionRandomWalk/Link 这类连点路网连不上该点，只能退一格输入 `x=199`。改为把越界坐标 `clamp` 到最近的边界格（`x=200`→第 199 列），落在区域外（0 格）的点仍忽略。*为什么：* 用户以地图尺寸级坐标定位边界点是自然预期，硬丢弃造成「差一格才连得上」的反直觉行为。
+
+### Changed
+- **`region_zone_generator` 改为「满铺基准」控制占地（`batteries/components/districts/region_zone_generator/`）。** 新增 `areaScale`（默认 10）参数：面积值以其为分母——加和 < 基准时各区域只占据 `面积/基准` 的比例（如 `[[3,8],[1,4]]` 加和=4 → 合计约 40%，分别约 30%/10%，区域收缩在方位种子周围、其余留空）；加和 ≥ 基准时按比例瓜分铺满（保持原行为）。改动点：`index.ts:91-101` 分母 `Math.max(areaScale, ratioSum)`；`placement.ts:220` `quotaVoronoiAssign` 在占比加和 < 1 时把各区域离种子最远的超额像素置空；`index.ts` 边界后处理改用 `effectiveMask`（仅已分配像素），避免 `rectilinear` 等风格重新铺满整张掩码抹掉留空。*为什么：* 原实现把面积权重归一化后恒满铺，无法表达「区域只占整体一部分」的需求；改为绝对面积/基准后既能部分占地又能贴合方位特征。
+- **五个 interests 电池重写为 DataTree 形式（`building_generator` / `farmland_grid` / `fence_farm` / `park_generator` / `shrine_layout`）。**
+  `batteries/components/interests/{building_generator,farmland_grid,fence_farm,park_generator,shrine_layout}/`：
+  入参由 `gridList`(array/手动遍历) 统一改为 `inputGrid`(`grid`/`access:item`)，标量参数加 `access:item`，移除列表级 `mergeOutput`（building 的 `mergeOutput` 改为「该建筑房间地板是否合并」语义保留）；
+  每次只处理单张网格，列表 fanout/重组交给引擎。输出统一为**单张多值 `outputGrid`**(`grid`/item) + `outputNameList`(array/item，仅含实际出现 id)。其中：
+  `fence_farm`/`park_generator`/`shrine_layout` 各自的布局算法本就产出单张多值网格（栅栏/公园/神殿语义值），直接输出并按值生成名称清单（含 tile/asset 区分）；
+  `farmland_grid` 移除「田地满铺 + 作物点位稀疏」双层拍平，合并为单张多值网格（田垄=1、田地=2、作物点位 3–6 按 `plantDensity` 稀疏，tile/asset 区分）；
+  `building_generator` 移除跨建筑积累与墙体打包成 `outputGridList` 子列表的做法，墙顶=1/外墙体=2/内墙体=3/窗户=4/地板从5 写入同一张多值网格（重叠按 地板→内墙体→外墙体→窗户→墙顶 后写覆盖），`outputNameList` 保留墙体打包条目 `id=[3,2,4,1]`，大门继续由独立 `doorGrid`(item) 输出；同时把室内拆分提前到开窗前以修正自动窗数对 `roomComponents` 的引用顺序。各自的雕刻/BSP/开门窗/布局算法不变。
+  版本：building 1.0.0→2.0.0、farmland 1.0.0→2.0.0、fence 1.0.0→2.0.0、park 1.0.0→2.0.0、shrine 1.0.0→2.0.0。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；当前均无图/模板引用，可安全改契约。
+- **四个电池重写为 DataTree 形式（`river_spline` / `town_island_layout` / `adaptive_room_furniture_placer` / `room_layout_placer`）。**
+  `batteries/components/elements/{river_spline,town_island_layout}/` 与 `batteries/components/indoor/{adaptive_room_furniture_placer,room_layout_placer}/`：
+  入参统一为单网格 `grid`/`access:item`，标量参数加 `access:item`；每次只处理单张网格，列表 fanout/重组交给引擎。其中：
+  `river_spline` 仅端口 `grid`→`inputGrid` 并加 item 访问（本就单网格进出）；`town_island_layout` 移除列表级 `merge` 参数，
+  道路+地块合并为**单张多值 `outputGrid`**（道路=1、各地块从 2 起递增 id）+ `outputNameList`(仅含实际出现 id)；
+  `adaptive_room_furniture_placer`、`room_layout_placer` 本就单网格处理（roomGrid/doorGrid 进、单张多值 outputGrid 出），
+  仅为各端口（含 doorGrid 同步配对）与标量加 item 访问，`furnitureList` 作为家具目录广播。各自的样条/BSP/家具放置算法不变。
+  版本：river_spline 2.0.0→3.0.0、town_island_layout 1.3.0→2.0.0、adaptive 2.0.0→3.0.0、room_layout 1.5.0→2.0.0。
+  顺带订正 town_island_layout / adaptive 的 README 过期端口名（mainRoad/subRoad/parcels、layoutGrid/newMaskA 等）。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；当前均无图/模板引用，可安全改契约。
+- **`Regions` 模板重写为「按分区 fanout 成多个同级子节点」（`batteries/templates/structures/districts/Regions/Regions.json`）。**
+  数据流由「单张多值网格 → 一个 `grid2node` → 一个 district 节点」改为
+  `region_zone_generator.outputGrid → grid_split_by_value(按 zone 值拆分) → grid2node(逐 zone fanout) → add_child`；
+  每个 zone 生成 1 个同级子节点，节点名按顺序取 `DistrictAsset`（经 `str_to_list_branches` 解析的列表），外加 1 个 `rest` 节点。
+  暴露输入修正：`DistrictAsset(in_1)` 现映射到 `rz_names.str`、`Regions(in_3)` 现直接映射到 `rz_zone.regions`（消费端输入口，连线即覆盖内部默认面板）——
+  旧版 `in_3` 错误地映射到 `text_panel` 的 **output** 端口，导致外部 Regions 永远被丢弃、只用内部默认值。
+  仍保持 5 个输出端口（out_0 主 scene / Rest / District / DistrictPath / RestPath），`DistrictPath` 现为各 zone 的路径列表。
+  *为什么：* 用户期望 `DistrictAsset`、`Regions` 支持 datatree，在当前 focus 节点下挂载多个同级子节点、`DistrictPath` 输出为列表；
+  旧模板既丢弃 Regions 输入、又只产出单个合并节点，不满足需求。
+  `batteries/components/elements/{hill_contour_generate,lake_gen,river_lake_gen}/`：入参统一为 `inputGrid`(`grid`/`access:item`)，
+  标量参数加 `access:item`；每次只处理单张网格，列表 fanout/重组交给引擎。其中：`hill_contour_generate` 由「每输入网格
+  contourLevels 张单值层网格 `contourLayers`」合并为**单张多值 `outputGrid`**（格值=等高带层序号 1..N），`outputNameList` 仅含实际出现层；
+  `lake_gen` 移除列表级 `merge` 参数，各湖泊写入同一张多值 `outputGrid`（每湖一个递增 id）+ `outputNameList`(item)；
+  `river_lake_gen` 本就单网格处理，仅将端口 `grid`→`inputGrid`、`grid`/`waterGrid`/`nameList`/标量加 item 访问。各自的高斯距离场/
+  随机洪泛/河流路径算法不变。版本：hill 1.0.0→2.0.0、lake 1.1.0→2.0.0、river 1.0.0→2.0.0。`region_zone_generator` 已是 DataTree 形式，未改动。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；除 `region_zone_generator`(已 DataTree)外当前均无图/模板引用，可安全改契约。
+- **四个 districts 电池重写为 DataTree 形式（`cliff_platform_gen` / `organic_island_shape` / `point_zone_gen` / `random_rect_zone_gen`）。**
+  `batteries/components/districts/{cliff_platform_gen,organic_island_shape,point_zone_gen,random_rect_zone_gen}/`：
+  入参由 `grid`/`grids`/`inputGrid`(array/手动遍历) 统一改为 `inputGrid`(`grid`/`access:item`)，标量参数加 `access:item`；
+  输出统一为**单张多值 `outputGrid`**(`grid`/item) + `outputNameList`/`nameList`(array/item)，每次只处理单张网格，列表 fanout/重组交给引擎。
+  其中：`organic_island_shape` 由「每输入网格 4 张单值网格」合并为单张多值网格（地面=1/浅水=2/中水=3/深水=4）；
+  `point_zone_gen` 各区域写入同一张多值网格（每区域递增 id，保留 height）；`random_rect_zone_gen` 移除列表级 `merge` 参数、
+  各矩形写入同一张多值网格并保留 `placedCount`；`cliff_platform_gen` 仅重命名端口 + 加 item 访问（本就单网格处理）。
+  各自的圆形平台/柏林噪声海岛/BFS 生长/矩形放置算法不变。版本：cliff 1.0.0→2.0.0、organic 2.0.0→3.0.0、point 1.0.0→2.0.0、rect 1.1.0→2.0.0。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；当前均无图/模板引用，可安全改契约。
+- **POI/装饰/地块四电池重写为 DataTree 形式（`poi_place` / `poi_scatter` / `precise_decoration_scatter` / `bsp_rect_gen`）。**
+  `batteries/components/decoration/{poi_place,poi_scatter,precise_decoration_scatter}/` 与
+  `batteries/components/districts/bsp_rect_gen/`：入参由 `grid`/`inputGrid`(array，手动遍历网格列表) 统一改为
+  `inputGrid`(`grid`/`access:item`)；输出从「单值网格平铺列表 `outputGridList`」改为**单张多值 `outputGrid`**
+  (`grid`/item，每种 POI/装饰/地块一个递增 id)，保留 `outputNameList`(array/item，仅含实际出现条目)；
+  三个散布电池保留 `placedCount`(number/item)。`bsp_rect_gen` 同时移除列表级 `merge` 参数（合并/拆分交由下游
+  `grid_split_by_value`），所有地块写入同一张多值网格、重叠处后写入者覆盖。各自的 BFS 就近/随机散布/泊松/BSP 分割
+  算法不变。版本：poi_place 1.0.0→2.0.0、poi_scatter 1.0.0→2.0.0、precise 1.0.0→2.0.0、bsp_rect_gen 2.1.0→3.0.0。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；当前均无图/模板引用，可安全改契约。
+- **四个装饰电池重写为 DataTree 形式（`indoor_texture` / `outdoor_texture` / `natural_decoration` / `multi_layer_ground`）。**
+  `batteries/components/decoration/{indoor_texture,outdoor_texture,natural_decoration,multi_layer_ground}/`：
+  入参从 `gridList`/`grid`/`baseGrid`(array，手动遍历 + 跨网格合并) 统一改为 `inputGrid`(`grid`/`access:item`)；
+  输出从「单值网格平铺列表 `outputGridList`」改为**单张多值 `outputGrid`**(`grid`/item，每类纹理/装饰/层一个递增值)，
+  保留 `nameList`/`outputNameList`(array/item，仅含实际出现的条目，映射值→名称，下游可 `grid_split_by_value` 拆分后命名)。
+  各自的纹理/生物群系/散布/Perlin 多层算法不变；`multi_layer_ground` 多层合并到一张多值网格、重叠处取较高层。
+  版本：indoor 1.2.0→2.0.0、outdoor 2.0.0→3.0.0、natural 3.3.0→4.0.0、multi_layer 1.1.0→2.0.0。
+  *为什么：* 与 DataTree 网格电池统一数据流，列表 fanout/重组交给引擎；当前均无图/模板引用，可安全改契约。
+- **`river_bridge`（河流架桥）重写为 DataTree 形式。**
+  `batteries/components/Topographic/river_bridge/`：端口由 `input`(array，手动遍历网格列表)/`outputGridList`
+  改为 `inputGrid`/`outputGrid`(`grid`/`access:item`)，对齐 `road_connect_link`；算子每次只处理单张网格，
+  列表 fanout/重组交给引擎。保留 `outputNameList`(array/item，固定 `[{id:1,name:'桥',type:'tile'}]`)。
+  PCA/连连看/对角补点等架桥算法不变。版本 1.1.0 → 2.0.0。
+  *为什么：* 与同组地形电池统一为 DataTree 数据流；当前无图/模板引用，可安全改契约。
+- **`decoration_border`（规则装饰物）重写为 DataTree 形式。**
+  `batteries/components/decoration/decoration_border/`：入参 `baseGridList`(array) → `inputGrid`(`grid`/item)，
+  输出 `outputGridList`(每种装饰物一张) → 单张多值 `outputGrid`(`grid`/item，每种装饰物一个递增 fillValue)；
+  保留 `nameList`(array/item，映射 fillValue→名称，下游可 `grid_split_by_value` 拆分后命名)。fillValue 改为按本网格
+  `max+1` 起算。摆放/填充/解析算法不变。版本 2.0.0 → 3.0.0。
+  *为什么：* 与 DataTree 网格电池统一；多值网格+nameList 保留用户自定义资产名映射，当前无图/模板引用，可安全改契约。
+- **`ramp_mask_gen`（坡道掩码生成）重写为 DataTree 形式。**
+  `batteries/components/Topographic/ramp_mask_gen/`：端口由 `input/output`(array，手动遍历网格列表 + `merge` 合并)
+  改为 `inputGrid`/`outputGrid`(`grid`/`access:item`)，对齐 `zone_nesting`、`zone_nesting_riverbank`；
+  算子每次只处理单张网格，列表 fanout/重组交给引擎。移除 `merge` 端口与 `outputNameList` 输出（列表级语义在 DataTree 下由引擎承担），
+  坡道格保留原区域值。版本 1.3.0 → 2.0.0。
+  *为什么：* 与同组地形电池统一为 DataTree 数据流；当前无任何图/模板引用该算子，可安全改契约。
+
+### Fixed
+- **`EdgeGrassClusters` 模板 District/Rest 两个 scene 输出端口内容对调。**
+  `batteries/templates/structures/districts/EdgeGrassClusters/EdgeGrassClusters.json`：
+  `out_1`(Rest) 与 `out_2`(District) 的 `sourceNodeId` 互换（`rb_out_rest` ↔ `rb_out_zone`），
+  使 District 端口输出地块本体、Rest 端口输出剩余空地。
+  *为什么：* 实测该模板运行时两端口输出内容反了；按用户要求仅交换本模板这两个端口。
+- **用户「保存到模板」的小标签失效——保存路径补一层「模板文件夹」使其与内置模板同构。**
+  此前 save-user 写到 `templates/My templates/<smallTag>/<name>.json`（json 直接放在小标签目录下），
+  与扁平内置模板 `templates/{大}/{模板}/file.json` 结构相同，前端 `getTemplateSmallLabel` 把 `<smallTag>`
+  误判为模板文件夹 → 返回 null → 小标签丢失、模板被平铺。现改写到
+  `templates/My templates/<smallTag>/<name>/<name>.json`（`backend/src/routes/groupTemplates.ts` save-user），
+  结构与内置 `templates/{大}/{小}/{模板}/file.json` 同构，小标签正确恢复；删除路径自下而上清理变空目录。
+  测试 `backend/tests/groupTemplates.test.ts` 更新断言为新路径（含模板文件夹层）。
+  *为什么：* 模板支持二级标题后，用户模板因少一层目录被误判，小标签整体失效。
+
+### Added
+- **新建 `PathConnectionLink` 模板（道路连接·连连看变体）。**
+  `batteries/templates/structures/path/PathConnectionLink/`：复刻 `PathConnection` 骨架，仅把中间连点算子
+  从 `alg_topology_connect_points`（A* 随机游走）换成 `road_connect_link`（连连看折线，最多 2 次转弯，A* 兜底），
+  输入/输出端口完全一致、连线无需改动。新 group id `group_1782300000000_pclnk`。
+  *为什么：* 用户要把另一种 road 电池（连连看）也包成与随机游走版并列的模板。
+- **`/api/v1/group-templates` 列表返回模板的 `version` / `author` / `createdAt`，供前端 Templates 行展示。**
+  `backend/src/routes/groupTemplates.ts`：`collectCatalogItems` 从模板 JSON 顶层读 `version`（缺省 `1.0.0`）、`author`、`createdAt`（缺省回退文件 mtimeMs）；
+  `GroupTemplateBattery` 接口同步新增 `author?` / `createdAt?`。保存路径（`/save`、`/save-user`）经新增 `stampTemplateMeta` 把 `version`/`createdAt`（缺省 `Date.now()`）落盘进模板 JSON（已有值保留）。
+  *为什么：* 模板列表要显示版本、作者、制作时间，需后端从模板 JSON 读取并在保存时持久化。
+
+### Changed
+- **`road_connect_link` 电池重写为 datatree/item 形态（v1→v2.0.0）。**
+  `batteries/components/Topographic/road_connect_link/{meta.json,index.ts}`：I/O 从「array 进 / 列表出、内部批处理」
+  改为与 `alg_topology_connect_points` 完全一致的「单张 grid 进/出 + 引擎 DataTree fanout」：`poiGrid`/`obstacle`(item grid)
+  进、`topology`(item grid)+`outputNameList` 出，新增 `coverPoi`；连连看算法（`linkPath`+A* 兜底+`maxTurns`）保持不变。
+  *为什么：* 让连连看电池能像随机游走版一样干净地包进 `PathConnection` 模板骨架（端口对齐、可直接互换）。
+- **`PathConnection` 模板显示名改为 `PathConnectionRandomWalk`**（仅 `name`/`nameEn`）。
+  保留文件名 `PathConnection.json`、folder、group id `…zblc6` 不变——`instantiateTemplate` 按 group id / 文件 basename
+  解析，Sino skill 文档仍以 basename `PathConnection` 实例化，故不动 basename 以**零破坏**，只改调色板显示名以与 Link 版区分。
+  *为什么：* 用户要两个 road 模板分别改名、可区分随机游走 vs 连连看。
+- **`EdgeTreeClusters` 模板：内部电池默认值调整。**
+  `batteries/templates/structures/districts/EdgeTreeClusters/EdgeTreeClusters.json`：
+  `eg_clusters`(`edge_green_cluster`) 节点 `params` 写入 `count: 17`、`clusterSize: 267`，
+  覆盖算子默认值（原 12 / 18）。*为什么：* 该模板需要更多、更大的边缘树簇默认表现。
 - **`LakeRegions` 模板：暴露 `LakeSize` 输入以控制单个湖的大小。**
   `batteries/templates/structures/water/LakeRegions/LakeRegions.json`：删除原本硬喂
   `alg_region_flood_grow.size` 的 `number_const`(=50) 及其连线，改为把 flood_grow 的 `size`
@@ -249,7 +449,7 @@ calendar dates in the project timezone.
   records sort first, `private:true`). Binding broadcasts `library:changed` so
   the AssetStore + renderer re-pull. No app-internal store is written. Files:
   `backend/src/library/{gameSandboxStore.ts,routes.ts,privateRoutes.ts,privateStore.ts}`,
-  `backend/src/tool-handlers.ts`, `forgeax-plugin.json`,
+  `backend/src/tool-handlers.ts`, `forgeax-extension.json`,
   `skills/texture-pipeline/SKILL.md`; 2D side mirrored in `wb-2d-scene-asset-generator`.
 
 ### Changed
@@ -293,13 +493,13 @@ calendar dates in the project timezone.
   `scene:library.list` and list the "texture not applied" diagnosis checklist
   (field4 == template `xxxAsset`; right active project; `asset_type=tile` →
   non-cutout pool; `raw` not `staging`). Files: `backend/src/tool-handlers.ts`,
-  `forgeax-plugin.json`, `skills/texture-pipeline/SKILL.md`,
+  `forgeax-extension.json`, `skills/texture-pipeline/SKILL.md`,
   `agent-sino/persona/zh.md`. (`scene:assets.list`'s description now states it
   is filesystem-only.)
 
 ### Removed
 
-- **Dropped the standalone `@forgeax-plugin/agent-atlas` supervisor agent;
+- **Dropped the standalone `@forgeax-extension/agent-atlas` supervisor agent;
   folded the texture-pipeline capability into Sino instead.** Supersedes the
   Phase-3 "supervisor agent" entry below. Why: in testing, Atlas could not
   connect the scene graph correctly — its connection know-how lived only in the
@@ -325,7 +525,7 @@ calendar dates in the project timezone.
   template `xxxAsset` from a built-in name to a contract semantic name and add
   generate→publish→verify steps.
 - **Sino agent gains the 2D / texture capability (opt-in).**
-  `agent-sino/forgeax-plugin.json`: `tools` now `["scene:*","asset2d:*"]`;
+  `agent-sino/forgeax-extension.json`: `tools` now `["scene:*","asset2d:*"]`;
   `defaultSkills` adds `texture-pipeline` + `generate-2d-asset`; `produces` adds
   the contract + generated-assets paths; description updated. `persona/zh.md`
   adds a clearly-scoped "扩展能力：现生成贴图（按需触发，默认不用）" section + a
@@ -348,7 +548,7 @@ calendar dates in the project timezone.
 
 - **Texture pipeline — screenshot-vision test toggle
   (`FORGEAX_SCENE_SCREENSHOT_NO_VISION`).** New env flag (declared in
-  `forgeax-plugin.json::requestedEnv`, read in `backend/src/tool-handlers.ts`)
+  `forgeax-extension.json::requestedEnv`, read in `backend/src/tool-handlers.ts`)
   that, when set (`1|true|yes|on`), makes `scene:screenshot.capture/latest`
   return the plain capture metadata (path + size + `visionDisabled:true`)
   **without** the `image_file` content part, so the agent never ingests the
@@ -362,7 +562,7 @@ calendar dates in the project timezone.
 
 - **Texture pipeline Phase 3 — orchestration skill + supervisor agent.** New
   plugin skill `texture-pipeline` (`skills/texture-pipeline/SKILL.md`, registered
-  in `forgeax-plugin.json`) is the top-level conductor manual: it pins the naming
+  in `forgeax-extension.json`) is the top-level conductor manual: it pins the naming
   contract carrier at `<active_game>.dir/texture-pipeline/contract.json` (a
   plugin-internal SSOT in the game workspace, since the two apps'
   `FORGEAX_PROJECT_ROOT`s are isolated), gives the 8-rule autotile alignment
@@ -370,10 +570,10 @@ calendar dates in the project timezone.
   `bridge_vertical_15`/`common_16`/`wall_outer_16`, all ppu=16) tiles must match,
   the object cutout flow, the per-asset publish loop, and the `topBillboard`
   verification loop. Paired with a NEW agent plugin
-  `@forgeax-plugin/agent-atlas` (Atlas · map-texture supervisor) that wields BOTH
+  `@forgeax-extension/agent-atlas` (Atlas · map-texture supervisor) that wields BOTH
   `scene:*` and `asset2d:*` tool sets and discloses three skills on demand
   (`texture-pipeline` + `compose-sino-scene` + `generate-2d-asset`). Files:
-  `skills/texture-pipeline/SKILL.md`, `forgeax-plugin.json` (scene skill reg),
+  `skills/texture-pipeline/SKILL.md`, `forgeax-extension.json` (scene skill reg),
   `ARCHITECTURE.md`; new plugin under `packages/marketplace/plugins/agent-atlas/`.
 - **Texture pipeline Phase 2 — scene-side publish bridge
   (`scene:library.publishExternal`).** New atomic, idempotent endpoint
@@ -388,7 +588,7 @@ calendar dates in the project timezone.
   is the single write entry-point the supervisor agent uses instead of
   hand-stitching import→repair→field-edit→move. Files: `library/privateStore.ts`
   (`publishExternalAsset` + `PublishExternalInput`), `library/privateRoutes.ts`,
-  `tool-handlers.ts`, `forgeax-plugin.json`; covered by
+  `tool-handlers.ts`, `forgeax-extension.json`; covered by
   `tests/library-publish-external.test.ts`.
 - **Texture pipeline Phase 1 — renderer matching pool now merges private
   assets.** `GET /api/v1/library/aliases-meta` previously returned base-library

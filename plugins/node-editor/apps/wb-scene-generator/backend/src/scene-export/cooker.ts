@@ -1,8 +1,8 @@
 import type { BakedCell, BakedLayer } from '../baked/store.js'
 import type { AliasMeta } from '../library/service.js'
-import { resolveLayerAlias } from './assetMatch.js'
+import { aliasDisplayName, resolveLayerAlias } from './assetMatch.js'
 import { orderBakedLayersForExport } from './layerOrder.js'
-import { computeValidFrontVariantIdxs, computeValidTopVariantIdxs, loadTileRule, pickFrontSpriteIndex, pickTopSpriteIndex, resolveRuleRegions, type TileRule } from './tileRules.js'
+import { computeValidFrontVariantIdxs, computeValidFrontVariantPoolsByTileId, computeValidFrontVariantWeights, computeValidTopVariantIdxs, computeValidTopVariantPoolsByTileId, computeValidTopVariantWeights, loadTileRule, pickFrontSpriteIndex, pickTopSpriteIndex, resolveRuleRegions, type TileRule, type VariantPool } from './tileRules.js'
 import {
   compareBillboardDrawOrder,
   buildTopFaceKey,
@@ -71,20 +71,46 @@ export function layerExportRole(layer: BakedLayer, aliases: readonly AliasMeta[]
   return 'metadata'
 }
 
-function templateIdFor(layer: BakedLayer): string {
-  return slug(stringAttr(layer.attributes, 'template_id') ?? layer.assetName ?? layer.nodeName)
+/**
+ * Shared type/template identity derivation for both terrain and object
+ * layers: an explicit attribute always wins (an authored contract, e.g. two
+ * layers sharing art but meant to stay distinct game-logic types); otherwise
+ * prefer the RESOLVED library entry's own display name over the layer's own
+ * `assetName`/`nodeName`. This guarantees "same underlying asset -> same
+ * type/template" even when a layer's `assetName` is blank or was authored
+ * inconsistently across sibling layers (`nodeName` always differs and must
+ * never be the ONLY thing distinguishing two instances of the same asset).
+ * When no alias resolves (or it isn't in the bracketed-name format), falls
+ * back to the previous `assetName ?? nodeName` behaviour unchanged.
+ */
+function typeIdentityFor(explicitAttr: string | undefined, layer: BakedLayer, meta: AliasMeta | undefined): string {
+  if (explicitAttr) return slug(explicitAttr)
+  const aliasName = meta?.alias ? aliasDisplayName(meta.alias) : ''
+  return slug(aliasName || layer.assetName || layer.nodeName)
 }
 
-function objectTypeNameFor(layer: BakedLayer): string {
-  return slug(stringAttr(layer.attributes, 'object_type_id') ?? layer.assetName ?? layer.nodeName)
+function templateIdFor(layer: BakedLayer, meta: AliasMeta | undefined): string {
+  return typeIdentityFor(stringAttr(layer.attributes, 'template_id'), layer, meta)
 }
 
+function objectTypeNameFor(layer: BakedLayer, meta: AliasMeta | undefined): string {
+  return typeIdentityFor(stringAttr(layer.attributes, 'object_type_id'), layer, meta)
+}
+
+/**
+ * Depth is unbounded (no fixed area_L0..area_L4 cap): scan contiguously from
+ * depth 0 and stop at the first gap. Tags are always written contiguously
+ * from 0 (both by hand-authored attribute templates and by
+ * narrativeAreaTags.ts's stampAreaTags), so a gap reliably marks "how deep
+ * this cell actually got tagged".
+ */
 function areaTags(attrs: Readonly<Record<string, unknown>>): Record<string, string[]> | undefined {
   const tags: Record<string, string[]> = {}
-  for (let i = 0; i <= 4; i++) {
+  for (let i = 0; ; i++) {
     const key = `area_L${i}`
     const value = stringAttr(attrs, key)
-    if (value) tags[key] = [value]
+    if (!value) break
+    tags[key] = [value]
   }
   return Object.keys(tags).length > 0 ? tags : undefined
 }
@@ -245,27 +271,31 @@ function compareTerrainCells(a: TerrainCellExport, b: TerrainCellExport): number
   return a.height - b.height || a.y - b.y || a.x - b.x
 }
 
-// Pick the anchor cell that the RENDERER's `chooseObjectAnchor`
-// (buildVoxelMaster/index.ts) would pick for this object instance, because the
-// exported (x, y) placement is the anchor cell projected to the viewer's flat
-// grid. The renderer's order is: an explicit `state.role === 'anchor'` cell wins;
-// otherwise sort by columnDz ASC (bottom of the column), then footprintDy DESC
-// (front-most / largest depth row), then x ASC. `columnDz`/`footprintDy` fall
-// back to the raw z/y when the baked cell carries no such state. NOTE the y tie
-// is DESCENDING (front row): a prior z,y,x-all-ASC ordering picked the BACK row
-// and misplaced multi-cell objects onto the wrong screen row.
-function anchorCell(cells: readonly BakedCell[]): BakedCell {
-  const explicit = cells.find((cell) => stateString(cell, 'role') === 'anchor')
-  if (explicit) return explicit
-  return [...cells].sort((a, b) => {
-    const adz = stateNumber(a, 'columnDz') ?? a.z
-    const bdz = stateNumber(b, 'columnDz') ?? b.z
-    if (adz !== bdz) return adz - bdz
-    const ady = stateNumber(a, 'footprintDy') ?? a.y
-    const bdy = stateNumber(b, 'footprintDy') ?? b.y
-    if (ady !== bdy) return bdy - ady
-    return a.x - b.x
-  })[0]!
+// Mirror paintCell.objectFootprintAnchorPoint → viewer grid coords.
+// Renderer draws at centerX = (minX+maxX+1)/2 and front-bottom row maxY-minZ+0.5;
+// viewer uses anchor at (gridX+0.5, gridY+0.5) in cell space, so export gridX/Y
+// are those anchor fractions minus 0.5.
+function objectFootprintAnchorGrid(cells: readonly BakedCell[]): { x: number; y: number; z: number } {
+  const minX = Math.min(...cells.map((c) => c.x))
+  const maxX = Math.max(...cells.map((c) => c.x))
+  const maxY = Math.max(...cells.map((c) => c.y))
+  const minZ = Math.min(...cells.map((c) => c.z))
+  const centerX = (minX + maxX + 1) / 2
+  const anchorPointY = maxY - minZ + 0.5
+  return {
+    x: centerX - 0.5,
+    y: anchorPointY - 0.5,
+    z: minZ,
+  }
+}
+
+/** BuildingStructures interior floors: many same-z cells on one layer with no instanceId. */
+function isMultiCellFlatFloor(cells: readonly BakedCell[]): boolean {
+  if (cells.length <= 1) return false
+  const z0 = cells[0]!.z
+  if (!cells.every((c) => c.z === z0)) return false
+  const positions = new Set(cells.map((c) => `${c.x},${c.y}`))
+  return positions.size === cells.length
 }
 
 function buildManifest(bundleId: string, generatedAt: Date): CookedScene['manifest'] {
@@ -372,6 +402,10 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
   // bindings.validVariantIdxs.{top,front}) — randomRules samples from these.
   const templateTopVariantIdxs = new Map<string, number[]>()
   const templateFrontVariantIdxs = new Map<string, number[]>()
+  const templateTopVariantWeights = new Map<string, number[] | undefined>()
+  const templateFrontVariantWeights = new Map<string, number[] | undefined>()
+  const templateTopVariantPoolsByTileId = new Map<string, Map<number, VariantPool>>()
+  const templateFrontVariantPoolsByTileId = new Map<string, Map<number, VariantPool>>()
   const templateTileType = new Map<string, string | undefined>()
   const registerTerrainTemplate = (
     templateId: string,
@@ -437,9 +471,17 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       const variantKey = resolvedAlias ?? templateId
       templateTopVariantIdxs.set(templateId, computeValidTopVariantIdxs(rule, variantKey, ruleImg))
       templateFrontVariantIdxs.set(templateId, computeValidFrontVariantIdxs(rule, variantKey, ruleImg))
+      templateTopVariantWeights.set(templateId, computeValidTopVariantWeights(rule, variantKey, ruleImg))
+      templateFrontVariantWeights.set(templateId, computeValidFrontVariantWeights(rule, variantKey, ruleImg))
+      templateTopVariantPoolsByTileId.set(templateId, computeValidTopVariantPoolsByTileId(rule, variantKey, ruleImg))
+      templateFrontVariantPoolsByTileId.set(templateId, computeValidFrontVariantPoolsByTileId(rule, variantKey, ruleImg))
     } else {
       templateTopVariantIdxs.set(templateId, [])
       templateFrontVariantIdxs.set(templateId, [])
+      templateTopVariantWeights.set(templateId, undefined)
+      templateFrontVariantWeights.set(templateId, undefined)
+      templateTopVariantPoolsByTileId.set(templateId, new Map())
+      templateFrontVariantPoolsByTileId.set(templateId, new Map())
     }
     terrainTemplates[templateId] = terrainConfigFor(layer.attributes, ids)
     return ids
@@ -563,7 +605,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       // template_id attribute and its base id is already claimed by a DIFFERENT
       // resolved alias, derive a per-sheet unique id so each sheet gets its own
       // graphic_id list + variant filter, matching the renderer's per-binding art.
-      const baseTemplateId = templateIdFor(layer)
+      const baseTemplateId = templateIdFor(layer, meta)
       const hasExplicitTemplateId = !!stringAttr(layer.attributes, 'template_id')
       let templateId = baseTemplateId
       if (!hasExplicitTemplateId && meta?.alias) {
@@ -592,7 +634,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       continue
     }
 
-    const typeName = objectTypeNameFor(layer)
+    const typeName = objectTypeNameFor(layer, resolved)
     const graphicId = objectGraphicId(layer, typeName)
     emittedObject++
     objectTypes[typeName] = objectTypes[typeName] ?? objectConfigFor(typeName, layer.attributes, resolved, graphicId)
@@ -610,7 +652,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     const objTags = areaTags(layer.attributes)
 
     const grouped = new Map<string, BakedCell[]>()
-    const legacy: BakedCell[] = []
+    const ungrouped: BakedCell[] = []
     // Preserve the renderer's intra-layer collection order: cells are collected in
     // `layer.cells` iteration order; the renderer's stable painter sort keeps that
     // order among draws sharing the same (y,z,layerIdx). For grouped objects the
@@ -619,41 +661,50 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     for (let i = 0; i < layer.cells.length; i++) {
       const cell = layer.cells[i]!
       const instanceId = stateString(cell, 'instanceId')
-      if (!instanceId) { legacy.push(cell); continue }
+      if (!instanceId) { ungrouped.push(cell); continue }
       if (!grouped.has(instanceId)) { grouped.set(instanceId, []); groupFirstSeq.set(instanceId, i) }
       grouped.get(instanceId)!.push(cell)
     }
-    // Billboard objects anchor on their FRONT/footprint face (screen row y - z,
-    // see billboardObjectAnchorCanvasXY / objectSpriteAnchorScreenY). The viewer
-    // draws an object at flat (x, y) using the tsj pivot, so the exported y must
-    // be the projected screen row; `height` keeps the source elevation.
-    //
-    // OCCLUSION (object↔object): the shipped viewer paints objects strictly in
-    // `terrain.json.objects[]` ARRAY ORDER, on top of all terrain. The renderer
-    // instead interleaves each object by the SHARED billboard painter key
-    // (compareBillboardDrawOrder) using the instance's FOOTPRINT DEPTH (max cell
-    // y) and COLUMN TOP (max cell z) — see collectObjectVisuals' sortOverride
-    // `{ y: footprintDepthY, z: topZ }`. So to make the viewer reproduce the
-    // renderer's object stacking we must EMIT objects in that painter order. We
-    // stamp each object with its painter key here and sort the whole array once
-    // after every layer is processed (below). Do NOT sort within a layer by
-    // instanceId/coords — that diverges from the renderer's cross-layer order.
+    // Renderer parity (buildVoxelMaster collectObjectInstanceGroups): one baked
+    // export layer = one billboard sprite. Cells without instanceId belong to the
+    // same layer-scoped instance — NOT one sprite per voxel.
+    if (ungrouped.length > 0) {
+      if (objTerrainTemplateId && isMultiCellFlatFloor(ungrouped)) {
+        for (let i = 0; i < ungrouped.length; i++) {
+          const cell = ungrouped[i]!
+          const place = objectFootprintAnchorGrid([cell])
+          pushTerrainLayer(
+            terrainCells,
+            place.x,
+            place.y,
+            place.z,
+            objTerrainTemplateId,
+            0,
+            { y: cell.y, z: cell.z, layerIdx: rendererLayerIdx, face: 'object' },
+            objTags,
+          )
+        }
+      } else {
+        const layerInstanceId = `layer:${layer.nodePath}`
+        grouped.set(layerInstanceId, ungrouped)
+        groupFirstSeq.set(layerInstanceId, 0)
+      }
+    }
+
     for (const [instanceId, groupCells] of grouped) {
-      const anchor = anchorCell(groupCells)
+      const place = objectFootprintAnchorGrid(groupCells)
       const footprintDepthY = Math.max(...groupCells.map((c) => c.y))
       const topZ = Math.max(...groupCells.map((c) => c.z))
       if (objTerrainTemplateId) {
         // Emit the object sprite INTO the terrain stack at its footprint elevation
         // so the viewer's elevation-ascending terrain paint lets higher walls
-        // occlude it. Screen row = anchor.y − anchor.z (same projection the
-        // `objects[]` path used), elevation group = anchor.z. Within a merged cell
-        // it sorts via the shared billboard comparator using the instance footprint
-        // depth/top + face:'object'.
+        // occlude it. Placement matches objectFootprintAnchorPoint + drawTerrainTile
+        // anchor math (center of footprint, front-bottom row).
         pushTerrainLayer(
           terrainCells,
-          anchor.x,
-          anchor.y - anchor.z,
-          anchor.z,
+          place.x,
+          place.y,
+          place.z,
           objTerrainTemplateId,
           0,
           { y: footprintDepthY, z: topZ, layerIdx: rendererLayerIdx, face: 'object' },
@@ -661,34 +712,16 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
         )
         continue
       }
-      objects.push({ instanceId, typeId: typeName, x: anchor.x, y: anchor.y - anchor.z, height: anchor.z, direction, interacted: false })
-      objectOrder.push({ orderY: footprintDepthY, orderZ: topZ, layerIdx: rendererLayerIdx, seq: groupFirstSeq.get(instanceId)! })
-    }
-    for (const cell of legacy) {
-      if (objTerrainTemplateId) {
-        pushTerrainLayer(
-          terrainCells,
-          cell.x,
-          cell.y - cell.z,
-          cell.z,
-          objTerrainTemplateId,
-          0,
-          { y: cell.y, z: cell.z, layerIdx: rendererLayerIdx, face: 'object' },
-          objTags,
-        )
-        continue
-      }
       objects.push({
-        instanceId: `${layer.nodePath}:${cell.x},${cell.y},${cell.z}`,
+        instanceId,
         typeId: typeName,
-        x: cell.x,
-        y: cell.y - cell.z,
-        height: cell.z,
+        x: place.x,
+        y: place.y,
+        height: place.z,
         direction,
         interacted: false,
       })
-      // Legacy single-voxel objects: footprint depth = own y, column top = own z.
-      objectOrder.push({ orderY: cell.y, orderZ: cell.z, layerIdx: rendererLayerIdx, seq: layer.cells.indexOf(cell) })
+      objectOrder.push({ orderY: footprintDepthY, orderZ: topZ, layerIdx: rendererLayerIdx, seq: groupFirstSeq.get(instanceId)! })
     }
   }
 
@@ -758,6 +791,10 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     const occ = occByLayerSeq[layerSeq]
     const topVariants = templateTopVariantIdxs.get(templateId) ?? []
     const frontVariants = templateFrontVariantIdxs.get(templateId) ?? []
+    const topVariantWeights = templateTopVariantWeights.get(templateId)
+    const frontVariantWeights = templateFrontVariantWeights.get(templateId)
+    const topVariantPoolsByTileId = templateTopVariantPoolsByTileId.get(templateId) ?? new Map()
+    const frontVariantPoolsByTileId = templateFrontVariantPoolsByTileId.get(templateId) ?? new Map()
     const tags = areaTags(layer.attributes)
     const regions = rule
       ? resolveRuleRegions(rule, selfXyByLayerSeq[layerSeq]!, xyByParentPath.get(parentOfNodePath(layer.nodePath)) ?? new Set())
@@ -769,7 +806,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       if (!rule || rule.faces.top) {
         const occCell = has(cell)
         const topIndex = rule && rule.faces.top && occ
-          ? pickTopSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: topVariants, regions })
+          ? pickTopSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: topVariants, validVariantWeights: topVariantWeights, validVariantPoolsByTileId: topVariantPoolsByTileId, regions })
           : 0
         pushTerrainLayer(terrainCells, cell.x, cell.y - cell.z - 1, cell.z, templateId, topIndex,
           { y: cell.y, z: cell.z, layerIdx: layerSeq, face: 'top' }, tags)
@@ -781,7 +818,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       // Front wall at screen row y - z (only rules that declare a front face).
       if (rule && rule.faces.front && occ) {
         const occCell = has(cell)
-        const frontIndex = pickFrontSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: frontVariants, regions })
+        const frontIndex = pickFrontSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: frontVariants, validVariantWeights: frontVariantWeights, validVariantPoolsByTileId: frontVariantPoolsByTileId, regions })
         if (frontIndex !== null) {
           pushTerrainLayer(terrainCells, cell.x, cell.y - cell.z, cell.z, templateId, frontIndex,
             { y: cell.y, z: cell.z, layerIdx: layerSeq, face: 'front' }, tags)

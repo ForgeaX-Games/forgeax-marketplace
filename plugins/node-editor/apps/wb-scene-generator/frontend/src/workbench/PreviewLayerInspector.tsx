@@ -38,7 +38,7 @@ export function PreviewLayerInspector({ layers }: Props): JSX.Element {
     setStatus(null)
     try {
       await bakedApi.patchAttributes(bakedPaths, attributes, { overwrite })
-      await refreshBakedLayers()
+      await refreshBakedLayers({ mode: 'full' })
       setStatus('Saved')
     } catch (e) {
       setStatus((e as Error).message)
@@ -68,7 +68,7 @@ export function PreviewLayerInspector({ layers }: Props): JSX.Element {
         setStatus('No new fields to apply')
         return
       }
-      await refreshBakedLayers()
+      await refreshBakedLayers({ mode: 'full' })
       setStatus('Template applied')
     } catch (e) {
       setStatus((e as Error).message)

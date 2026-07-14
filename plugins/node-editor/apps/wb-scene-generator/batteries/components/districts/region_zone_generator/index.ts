@@ -90,6 +90,8 @@ export default function regionZoneGenerator(input: Record<string, unknown>): { o
   const relaxIterations = typeof input.relaxIterations === 'number' ? input.relaxIterations : 5;
   const smoothIterations = typeof input.smoothIterations === 'number' ? input.smoothIterations : 5;
   const seed = typeof input.seed === 'number' ? input.seed : 0;
+  // 满铺基准：面积加和达到该值即铺满整张可用区域；不足则按 加和/基准 的比例只占据一部分
+  const areaScale = typeof input.areaScale === 'number' && input.areaScale > 0 ? input.areaScale : 10;
 
   const grid = parseGrid(input.inputGrid);
   if (!grid) return { outputGrid: [] };
@@ -117,12 +119,16 @@ export default function regionZoneGenerator(input: Record<string, unknown>): { o
   const mask = new Int32Array(rows * cols);
   for (const [r, c] of usableCells) mask[r * cols + c] = 1;
 
-  // --- Step 2: 面积占比归一化 ---
+  // --- Step 2: 面积占比换算 ---
+  // 以 areaScale（默认 10）为满铺基准：
+  //   · 加和 < areaScale → 各区域占可用区域的 area/areaScale，合计 加和/areaScale（< 100%），其余留空
+  //   · 加和 ≥ areaScale → 以加和为分母按比例瓜分，铺满整张可用区域
   const rawRatios = regions.map(r => Math.max(0, r.area));
   const ratioSum = rawRatios.reduce((s, v) => s + v, 0);
+  const denom = Math.max(areaScale, ratioSum);
   const areaRatios = ratioSum <= 0
     ? rawRatios.map(() => 1 / regions.length)
-    : rawRatios.map(r => r / ratioSum);
+    : rawRatios.map(r => r / denom);
 
   // --- Step 3: 种子定位 ---
   const seeds = placeSeedPoints(regions, rows, cols, usableCells, rng);
@@ -133,8 +139,14 @@ export default function regionZoneGenerator(input: Record<string, unknown>): { o
   );
 
   // --- Step 5: 边界后处理 ---
+  // 部分填充时 label 中已有留空像素（-1）。边界处理只能在「已分配像素」内进行，
+  // 否则 rectilinear 等风格会把整张掩码重新铺满，抹掉留空效果。
+  const effectiveMask = new Int32Array(rows * cols);
+  for (let i = 0; i < rows * cols; i++) {
+    effectiveMask[i] = mask[i] && label[i] >= 0 ? 1 : 0;
+  }
   const processedLabel = applyBoundaryStyle(
-    boundaryStyle, label, mask, rows, cols,
+    boundaryStyle, label, effectiveMask, rows, cols,
     relaxedSeeds.map(s => ({ x: s.x, y: s.y })),
     areaRatios, Math.max(1, smoothIterations)
   );

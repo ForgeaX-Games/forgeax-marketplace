@@ -8,7 +8,10 @@
  *   moving_avg    — 滑动窗口移动平均平滑
  *   gaussian      — 高斯核加权平均平滑
  *
- * 输入：grid (grid) — 基准网格; points (array) — 控制点 [[col,row],...];
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+ *
+ * 输入：inputGrid (grid) — 基准网格; points (array) — 控制点 [[col,row],...];
  *       algorithm (string) — 平滑算法; riverWidth (number) — 河流宽度(格);
  *       numMidPoints / offsetMin / offsetMax / segmentUniformity — 扰动参数;
  *       windowSize (moving_avg) / sigma (gaussian) / bezierDegree (bezier) — 各算法参数
@@ -396,9 +399,9 @@ function parsePoints(raw: unknown[]): Vec2[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function riverSpline(input: Record<string, unknown>): Record<string, unknown> {
-  const grid = input.grid as number[][] | undefined;
+  const grid = input.inputGrid as number[][] | undefined;
   if (!grid || grid.length === 0 || grid[0].length === 0) {
-    return { error: "grid is required" };
+    return { error: "inputGrid is required" };
   }
 
   const rawPts = input.points as unknown[] | undefined;

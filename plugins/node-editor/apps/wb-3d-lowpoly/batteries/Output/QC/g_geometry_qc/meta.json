@@ -2,21 +2,19 @@
   "id": "g_geometry_qc",
   "label": "几何 QC（连通/孤岛/AABB）",
   "name-en": "GGeometryQC",
-  "description": "对 Geometry 做静态几何质量检查（articraft geometry_qc 的轻量等价）：① part-joint 连通分量，孤岛 part；② 每个 part 的 shape 是否能解析出 AABB；③ joint origin 距 parent / child AABB 中心是否合理；④ 兄弟 part AABB 两两重叠（rest pose 静态干涉）；⑤ 几何丰富度信号（仅裸 primitive 时提示）；⑥ 悬空件（无关节路径到根）；⑦ 孤立 profile（未被 extrude/loft/revolve/part 消费）；⑧ lathe/revolve 误喂 XY profile；⑨ mesh-backed 布尔误用（pipe/sweep/section_loft 进布尔）。输出结构化 signals 供修复循环读取。只读分析，不改 Geometry。",
-  "description-en": "Static geometry quality checks (lightweight equivalent of articraft geometry_qc): (1) connected components from joints; (2) parts whose shape cannot reduce to an AABB; (3) joint origins far from parent/child AABB centers; (4) sibling AABB overlaps in rest pose; (5) primitive-only richness hint; (6) floating links with no joint path to root; (7) orphan profiles not consumed by extrude/loft/revolve/part; (8) lathe/revolve fed an XY-centered profile; (9) mesh-backed boolean misuse (pipe/sweep/section_loft into a boolean). Emits a structured signals array for fix loops. Read-only.",
+  "description": "对 Geometry 做静态几何质量检查：① part-joint 连通分量，孤岛 part；② 每个 part 的 shape 是否能解析出 AABB；③ joint origin 距 parent / child AABB 中心是否合理；④ 兄弟 part AABB 两两重叠（rest pose 静态干涉）；⑤ 几何丰富度信号（仅裸 primitive 时提示）；⑥ 悬空件（无关节路径到根）；⑦ 孤立 profile（未被 extrude/loft/revolve/part 消费）；⑧ lathe/revolve 误喂 XY profile；⑨ mesh-backed 布尔误用（pipe/sweep/section_loft 进布尔）。输出结构化 signals 供修复循环读取。只读分析，不改 Geometry。",
+  "description-en": "Static geometry quality checks: (1) connected components from joints; (2) parts whose shape cannot reduce to an AABB; (3) joint origins far from parent/child AABB centers; (4) sibling AABB overlaps in rest pose; (5) primitive-only richness hint; (6) floating links with no joint path to root; (7) orphan profiles not consumed by extrude/loft/revolve/part; (8) lathe/revolve fed an XY-centered profile; (9) mesh-backed boolean misuse (pipe/sweep/section_loft into a boolean). Emits a structured signals array for fix loops. Read-only.",
   "version": "1.0.0",
   "autoIterate": false,
   "tags": [
     "geometry",
     "qc",
-    "validate",
-    "articraft"
+    "validate"
   ],
   "tag_labels": [
     "几何",
     "质量",
-    "校验",
-    "articraft"
+    "校验"
   ],
   "inputs": [
     {
@@ -32,8 +30,8 @@
       "type": "number",
       "label": "joint origin 容差 (m)",
       "default": 0.05,
-      "description": "joint origin 距 parent / child AABB 任一面距离超出该值 → 报告。articraft 默认 0.015，这里给一个略宽松的 0.05。",
-      "description-en": "Joint origin tolerance from parent/child AABB face. Defaults to 0.05m (articraft uses 0.015)."
+      "description": "joint origin 距 parent / child AABB 任一面距离超出该值 → 报告。默认给一个略宽松的 0.05。",
+      "description-en": "Joint origin tolerance from parent/child AABB face. Defaults to 0.05m."
     },
     {
       "name": "overlap_tol",

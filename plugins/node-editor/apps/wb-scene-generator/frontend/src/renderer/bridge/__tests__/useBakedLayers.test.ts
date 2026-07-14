@@ -7,6 +7,7 @@
 // deferIfLocalPending:false to force the server state in.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { refreshBakedLayers } from '../useBakedLayers'
+import { bakedApi } from '../bakedApi'
 import {
   hasLocalBakedLayerEdits,
   markBakedLayerPersisting,
@@ -16,15 +17,7 @@ import {
 import type { BakedLayerDTO } from '../bakedApi'
 
 function mockList(layers: BakedLayerDTO[]): void {
-  globalThis.fetch = vi.fn(async (url: unknown) => {
-    if (typeof url === 'string' && url.includes('/baked/layers')) {
-      return new Response(JSON.stringify({ layers }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })
-    }
-    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
-  }) as unknown as typeof fetch
+  vi.spyOn(bakedApi, 'list').mockResolvedValue(layers)
 }
 
 const FLOOR = (cells: BakedLayerDTO['cells'], version: number): BakedLayerDTO => ({
@@ -46,8 +39,7 @@ describe('refreshBakedLayers reconcile semantics', () => {
     s.paintBakedCells('baked:/Floor', [{ x: 0, y: 0, z: 0, token: 'grass' }])
     expect(hasLocalBakedLayerEdits()).toBe(true)
 
-    const fetchSpy = vi.fn()
-    globalThis.fetch = fetchSpy as unknown as typeof fetch
+    const fetchSpy = vi.spyOn(bakedApi, 'list').mockResolvedValue([])
 
     await refreshBakedLayers() // default deferIfLocalPending: true
 
@@ -83,7 +75,7 @@ describe('refreshBakedLayers reconcile semantics', () => {
 
     // e.g. an undo reverted the layer server-side.
     mockList([FLOOR([], 2)])
-    await refreshBakedLayers({ deferIfLocalPending: false })
+    await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
 
     expect(useRenderStore.getState().bakedLayers['baked:/Floor'].cells).toEqual([])
   })
@@ -95,7 +87,7 @@ describe('refreshBakedLayers reconcile semantics', () => {
     expect(hasLocalBakedLayerEdits()).toBe(true)
 
     mockList([FLOOR([{ x: 2, y: 0, z: 0, token: 'grass' }], 3)])
-    await refreshBakedLayers({ deferIfLocalPending: false })
+    await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
 
     expect(useRenderStore.getState().bakedLayers['baked:/Floor'].cells).toEqual([
       { x: 2, y: 0, z: 0, token: 'grass' },

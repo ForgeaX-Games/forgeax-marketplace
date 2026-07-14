@@ -10,11 +10,14 @@
  *      使等高线边缘呈有机感而非完美圆形
  *   3. 对非零区域的高度值做等面积重映射（分位数拉伸），
  *      使每层等高带的格子数相近
- *   4. 按层号切分为网格列表（外层序号小，内层序号大）
- *   5. 内置后处理：合并所有层 → 填孔洞 → 删孤立块 → 归并空白 → 拆回各层
+ *   4. 按层号生成多值网格（外层序号小，内层序号大）
+ *   5. 内置后处理：合并所有层 → 填孔洞 → 删孤立块 → 归并空白
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  *
  * 输入：
- *   grid          (grid)   — 输入掩码网格，仅对非 0 格子生成等高线
+ *   inputGrid     (grid)   — 输入掩码网格，仅对非 0 格子生成等高线
  *   contourLevels (number) — 等高线层数（默认 6）
  *   hillCount     (number) — 山头数量（默认 1）
  *   roundness     (number) — 圆度 0~1（默认 0.85）
@@ -26,24 +29,20 @@
  *   seed          (number) — 随机种子（默认 0）
  *
  * 输出：
- *   contourLayers  (array<grid>) — 每层填充 mask，外→内层序号递增
- *   outputNameList (array)       — 各层名称清单
+ *   outputGrid     (grid)  — 单张多值网格：每格写入其等高带层序号（1..contourLevels），其余 0
+ *   outputNameList (array) — 各层名称清单
  */
 
 type Grid = number[][];
 type NameEntry = { id: number; name: string; type: string };
 type Point = { x: number; y: number };
 
-/** 将输入统一解析为 Grid[]，支持单个网格或网格列表 */
-function parseInputGrids(raw: unknown): Grid[] | null {
-  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as Grid];
-  }
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as Grid[];
-  }
-  return null;
+/** 判断 v 是单张网格 number[][] */
+function isGrid(v: unknown): v is Grid {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  const first = (v as unknown[])[0];
+  if (!Array.isArray(first) || (first as unknown[]).length === 0) return false;
+  return typeof (first as unknown[])[0] === "number";
 }
 
 // ─── PRNG ─────────────────────────────────────────────────────────────────────
@@ -426,7 +425,7 @@ function postProcess(layers: Grid[], minHoleSize: number, minIslandSize: number)
 
 // ─── 主导出函数 ────────────────────────────────────────────────────────────────
 
-/** 对单个网格执行等高线生成 */
+/** 对单个网格执行等高线生成，返回单张多值网格 + 名称清单 */
 function processOneGrid(
   grid: Grid,
   contourLevels: number,
@@ -438,7 +437,7 @@ function processOneGrid(
   minIslandSize: number,
   seed: number,
   peakPositionRaw: unknown,
-): { contourLayers: Grid[]; outputNameList: NameEntry[] } {
+): { outputGrid: Grid; outputNameList: NameEntry[] } {
   const rows = grid.length;
   const cols = grid[0].length;
   const rng  = new SeededRandom(seed);
@@ -461,17 +460,10 @@ function processOneGrid(
     }
   }
 
-  const emptyNameList: NameEntry[] = Array.from({ length: contourLevels }, (_, i) => ({
-    id: i + 1, name: `山包层${i + 1}`, type: "tile",
-  }));
+  const emptyGrid = (): Grid => Array.from({ length: rows }, () => new Array(cols).fill(0));
 
   if (nonZeroCells.length === 0) {
-    return {
-      contourLayers: Array.from({ length: contourLevels }, () =>
-        Array.from({ length: rows }, () => new Array(cols).fill(0))
-      ),
-      outputNameList: emptyNameList,
-    };
+    return { outputGrid: emptyGrid(), outputNameList: [] };
   }
 
   const fixedPeak = numpadToNormalized(peakPosition);
@@ -485,18 +477,25 @@ function processOneGrid(
   const rawLayers = buildContourLayers(rows, cols, nonZeroMask, remapped, contourLevels);
   const contourLayers = postProcess(rawLayers, minHoleSize, minIslandSize);
 
+  // 各层互斥，合并到单张多值网格（格值=层序号）
+  const outputGrid = mergeLayers(contourLayers);
+
+  // 仅保留实际出现的层
+  const present = new Set<number>();
+  for (const row of outputGrid) for (const v of row) if (v !== 0) present.add(v);
   const outputNameList: NameEntry[] = Array.from({ length: contourLevels }, (_, i) => ({
     id: i + 1, name: `山包层${i + 1}`, type: "tile",
-  }));
+  })).filter(e => present.has(e.id));
 
-  return { contourLayers, outputNameList };
+  return { outputGrid, outputNameList };
 }
 
 export function hillContourGenerate(input: Record<string, unknown>): Record<string, unknown> {
-  const grids = parseInputGrids(input.grid);
-  if (!grids) {
-    return { contourLayers: [], outputNameList: [] };
+  const rawGrid = input.inputGrid;
+  if (!isGrid(rawGrid)) {
+    return { error: "inputGrid is required (number[][])" };
   }
+  const grid = rawGrid as Grid;
 
   const contourLevels = typeof input.contourLevels === "number" ? Math.max(2, Math.round(input.contourLevels)) : 6;
   const hillCount     = typeof input.hillCount     === "number" ? Math.max(1, Math.round(input.hillCount))     : 1;
@@ -507,19 +506,10 @@ export function hillContourGenerate(input: Record<string, unknown>): Record<stri
   const minIslandSize = typeof input.minIslandSize === "number" ? Math.max(1, Math.round(input.minIslandSize)): 8;
   const baseSeed      = typeof input.seed          === "number" ? input.seed : 0;
 
-  const contourLayers: Grid[] = [];
-  let outputNameList: NameEntry[] = [];
+  const { outputGrid, outputNameList } = processOneGrid(
+    grid, contourLevels, hillCount, roundness, peakRadius, noiseAmount,
+    minHoleSize, minIslandSize, baseSeed, input.peakPosition,
+  );
 
-  for (let i = 0; i < grids.length; i++) {
-    const g = grids[i];
-    if (!g || g.length === 0 || !g[0] || g[0].length === 0) continue;
-    const { contourLayers: layers, outputNameList: nameList } = processOneGrid(
-      g, contourLevels, hillCount, roundness, peakRadius, noiseAmount,
-      minHoleSize, minIslandSize, baseSeed + i * 1000003, input.peakPosition,
-    );
-    contourLayers.push(...layers);
-    outputNameList = nameList;
-  }
-
-  return { contourLayers, outputNameList };
+  return { outputGrid, outputNameList };
 }

@@ -13,7 +13,7 @@
     { "name": "geometry", "type": "geometry", "required": false, "label": "几何", "description": "上游 Geometry；缺省视为空", "description-en": "Upstream Geometry; empty when absent." },
     { "name": "panel_w", "type": "number", "label": "板宽", "default": 0.12, "description": "面板宽度（米）", "description-en": "Panel width (meters)." },
     { "name": "panel_h", "type": "number", "label": "板高", "default": 0.08, "description": "面板高度（米）", "description-en": "Panel height (meters)." },
-    { "name": "frame", "type": "number", "label": "外框宽", "default": 0, "description": "0 = 用 articraft 默认", "description-en": "Outer frame width; 0 = library default." },
+    { "name": "frame", "type": "number", "label": "外框宽", "default": 0, "description": "0 = 用库默认值", "description-en": "Outer frame width; 0 = library default." },
     { "name": "face_thickness", "type": "number", "label": "面板厚", "default": 0, "description": "面板厚度；0 = 默认", "description-en": "Face plate thickness; 0 = default." },
     { "name": "duct_depth", "type": "number", "label": "风管深", "default": 0, "description": "背部风管深度；0 = 默认 0.026", "description-en": "Rear duct depth; 0 = default 0.026." },
     { "name": "duct_wall", "type": "number", "label": "风管壁厚", "default": 0, "description": "风管壁厚；0 = 默认", "description-en": "Duct wall thickness; 0 = default." },

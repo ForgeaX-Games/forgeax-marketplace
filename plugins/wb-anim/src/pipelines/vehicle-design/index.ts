@@ -284,7 +284,7 @@ class VehiclePipelineUI {
   private setupBroadcast(): void {
     if (this._bc) return
     try {
-      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-character.vehicle-design-state')
+      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-character.vehicle-design-state')
     } catch { this._bc = null }
     if (this._bc) this._bc.onmessage = (e) => { void this.handleBroadcast(e) }
     if (typeof window !== 'undefined') {

@@ -2,6 +2,7 @@
   "id": "tpl_sidescroller_background_layer",
   "name": "SideScrollerBackgroundLayer",
   "nameEn": "SideScroller Background Layer",
+  "author": "zyw",
   "nodes": [
     { "id": "ss_scene", "opId": "text_panel", "name": "scene", "position": { "x": -900, "y": 0 }, "params": { "text": "gothic forest side-scrolling game background" } },
     { "id": "ss_style", "opId": "text_panel", "name": "style", "position": { "x": -900, "y": 140 }, "params": { "text": "hand-painted 2D game art, unified palette" } },

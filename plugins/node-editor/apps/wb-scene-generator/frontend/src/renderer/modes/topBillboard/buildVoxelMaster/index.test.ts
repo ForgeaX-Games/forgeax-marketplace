@@ -82,7 +82,7 @@ function sourceFromCells(
 
 function objectAlias(name: string, anchor = { x: 0.5, y: 0 }) {
   return {
-    alias: `[0][1][2][3][${name}][5][6][7][抠图][16][10][11][v]`,
+    alias: `[0][1][${name}][3][4][5][6][asset][16][10][11][v]`,
     anchorX: anchor.x,
     anchorY: anchor.y,
   }
@@ -130,7 +130,7 @@ function objectInputWithCells(
 
 function tileAlias(name: string) {
   return {
-    alias: `[0][1][2][3][${name}][5][6][7][floor][16][10][11][v]`,
+    alias: `[0][1][${name}][3][4][5][6][floor][16][10][11][v]`,
   }
 }
 
@@ -155,7 +155,7 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
     })
     setServerImageResolver((alias) => {
       const match = alias.match(/\[([^\]]*)\]/g)
-      const name = match?.[4]?.slice(1, -1) ?? alias
+      const name = match?.[2]?.slice(1, -1) ?? alias
       return { alias: name, width: 32, height: 64, naturalWidth: 32, naturalHeight: 64 }
     })
   })
@@ -179,7 +179,7 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
 
   it('renders the exact selected alias when display names collide', () => {
     const aliasA = objectAlias('盆栽').alias
-    const aliasB = '[0][1][2][3][盆栽][5][6][7][抠图][32][10][11][v]'
+    const aliasB = '[0][1][盆栽][3][4][5][6][asset][32][10][11][v]'
 
     buildVoxelMaster(
       [objectInputWithAlias('盆栽', aliasB, 0, 0, 0, 0)],

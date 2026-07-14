@@ -88,7 +88,7 @@ function uid(prefix: string): string {
 export function buildTemplateOps(
   root: RawGroup,
   deps: RawGroup[],
-  rootPosition: RawPos,
+  rootPosition: RawPos | undefined,
   explicitGroupId: string | undefined,
 ): BuildTemplateOpsResult {
   const allGroups = [root, ...deps]
@@ -190,7 +190,9 @@ export function buildTemplateOps(
       groupId: groupIdMap[g.id]!,
       name: g.name ?? g.id,
       ...(g.nameEn !== undefined ? { nameEn: g.nameEn } : {}),
-      position: isRoot ? rootPosition : g.position ?? { x: 0, y: 0 },
+      ...(isRoot && rootPosition === undefined
+        ? {}
+        : { position: isRoot ? rootPosition! : (g.position ?? { x: 0, y: 0 }) }),
       memberNodeIds: memberIds,
       ...(exposedPorts ? { exposedPorts } : {}),
     } as Op)

@@ -31,7 +31,7 @@ import type { DrawMode } from '../../../types'
 import { collectCells, cullOccluded, painterSort, type PainterSortOverride } from './collect'
 import { buildLayerAssetBindings } from './bindings'
 import { buildCellBuckets } from './incrementalBake'
-import { objectSpriteAnchorDepthY, objectSpriteGridRect, objectFootprintAnchorPoint, objectFootprintContainScale, objectVoxelBottomFootprint, paintCell } from './paintCell'
+import { objectSpriteGridRect, objectFootprintAnchorPoint, objectSpritePainterSortY, paintCell } from './paintCell'
 import type {
   VoxelLayerInput, BuildVoxelMasterOpts, VoxelMaster, LayerAssetBinding, CollectedCell,
   IncrementalBakeState,
@@ -67,17 +67,8 @@ export function buildVoxelMaster(
   const objectGroups = collectObjectInstanceGroups(visible, assetByLayer)
   const objectColumnCells = new Set<CollectedCell>()
   const objectAnchorPointByLayer = new Map<number, { x: number; y: number }>()
-  const objectFootprintScaleByLayer = new Map<number, number>()
   for (const group of objectGroups) {
     objectAnchorPointByLayer.set(group.anchor.layerIdx, objectFootprintAnchorPoint(group.cells))
-    const binding = assetByLayer?.get(group.anchor.layerIdx)
-    const img = binding ? getOrLoadImage(binding.imgUrl) : null
-    if (binding && img) {
-      objectFootprintScaleByLayer.set(
-        group.anchor.layerIdx,
-        objectFootprintContainScale(objectVoxelBottomFootprint(group.cells), binding.match, img),
-      )
-    }
     for (const cell of group.cells) {
       if (cell !== group.anchor) objectColumnCells.add(cell)
     }
@@ -85,9 +76,8 @@ export function buildVoxelMaster(
   const objectVisuals = collectObjectVisuals(visible, assetByLayer, objectGroups)
 
   // ③ painter sort:tiles/autotiles keep raw y/z ordering; non-tile objects use
-  // the 3D footprint depth of their anchor. Drawing still projects the anchor
-  // with y-z; ordering must keep raw y so elevated objects at the same footprint
-  // draw after lower tiles via the z tie-breaker.
+  // the sprite's front-most screen row so tiles south of the footprint (world y
+  // > footprintDepthY, z=0) do not paint over the object facade after it.
   painterSort(visible, objectVisuals.sortOverrides)
   const lite: VoxelCellLite[] = visible.map(c => ({ x: c.x, y: c.y, z: c.z }))
   const bbox = computeVoxelMasterBbox(lite, objectVisuals.bounds)
@@ -119,12 +109,9 @@ export function buildVoxelMaster(
     const objectAnchor = binding && !binding.match.tileType
       ? objectAnchorPointByLayer.get(c.layerIdx)
       : undefined
-    const objectScale = binding && !binding.match.tileType
-      ? objectFootprintScaleByLayer.get(c.layerIdx)
-      : undefined
     paintCell(
       ctx, c, bbox, cellSize, opts.drawMode, assetByLayer, collected.coordsByLayerIdx, capture,
-      objectAnchor, objectScale,
+      objectAnchor,
     )
   }
 
@@ -146,7 +133,6 @@ export function buildVoxelMaster(
     objectColumnCells: objectColumnCells.size > 0 ? objectColumnCells : undefined,
     objectBoundsByCell: objectVisuals.boundsByCell.size > 0 ? objectVisuals.boundsByCell : undefined,
     objectAnchorPointByLayer: objectAnchorPointByLayer.size > 0 ? objectAnchorPointByLayer : undefined,
-    objectFootprintScaleByLayer: objectFootprintScaleByLayer.size > 0 ? objectFootprintScaleByLayer : undefined,
     cellBuckets: buildCellBuckets(visible),
   }
   return { canvas, bbox, incremental }
@@ -249,15 +235,19 @@ function collectObjectVisuals(
   for (const group of objectGroups) {
     const binding = assetByLayer.get(group.anchor.layerIdx)
     if (!binding || binding.match.tileType) continue
+    const img = getOrLoadImage(binding.imgUrl)
+    const anchorPoint = objectFootprintAnchorPoint(group.cells)
+    const rect = img
+      ? objectSpriteGridRect(group.anchor, img, binding.match.anchor, anchorPoint)
+      : null
+    const painterY = rect
+      ? objectSpritePainterSortY(rect, group.footprintDepthY)
+      : group.footprintDepthY
     for (const cell of group.cells) {
       groupedCells.add(cell)
-      sortOverrides.set(cell, { y: group.footprintDepthY, z: group.topZ })
+      sortOverrides.set(cell, { y: painterY, z: group.topZ })
     }
-    const img = getOrLoadImage(binding.imgUrl)
-    if (!img) continue
-    const anchorPoint = objectFootprintAnchorPoint(group.cells)
-    const scale = objectFootprintContainScale(objectVoxelBottomFootprint(group.cells), binding.match, img)
-    const rect = objectSpriteGridRect(group.anchor, img, binding.match.anchor, anchorPoint, scale)
+    if (!img || !rect) continue
     const b: VoxelVisualBoundsLite = {
       minX: rect.x,
       minY: rect.y,

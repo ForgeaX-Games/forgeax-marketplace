@@ -2,7 +2,12 @@
  * riverBridge（河流架桥）
  * straight：垂直局部流向的投影直线桥
  * zigzag  ：连连看折线桥（≤2次H/V转弯），连接两侧河岸端点，路宽膨胀
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  */
+
+type NameEntry = { id: number; name: string; type?: string };
 
 // ── PCA ──────────────────────────────────────────────────────────────────────
 
@@ -433,39 +438,34 @@ function buildBridgeMask(grid: Grid, width: number, position: number, algorithm:
   return out;
 }
 
-/** 解析输入，统一返回网格列表 */
-function parseGrids(raw: unknown): number[][][] | null {
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
   if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
-  // 网格列表：number[][][]
-  if (Array.isArray(raw[0]) && Array.isArray((raw[0] as unknown[])[0])) {
-    return raw as number[][][];
-  }
-  // 单个网格：number[][]
   if (Array.isArray(raw[0]) && typeof (raw[0] as unknown[])[0] === "number") {
-    return [raw as number[][]];
+    return raw as Grid;
   }
   return null;
 }
 
 export function riverBridge(input: Record<string, unknown>): Record<string, unknown> {
+  const grid = parseGrid(input.inputGrid);
+  if (!grid) return { error: "inputGrid is required" };
+  if (grid.length === 0 || grid[0].length === 0) return { error: "inputGrid is empty" };
+
   const width = typeof input.width === "number" ? Math.max(1, Math.trunc(input.width)) : 1;
   const position = typeof input.position === "number" ? Math.min(1, Math.max(0, input.position)) : 0.5;
   const algorithm = typeof input.algorithm === "string" && input.algorithm === "zigzag" ? "zigzag" : "straight";
   const extendToLand = typeof input.extendToLand === "boolean" ? input.extendToLand : true;
   const landExt = extendToLand ? 1 : 0;
 
-  const grids = parseGrids(input.input);
-  if (!grids) return { error: "input 必须是网格或网格列表", outputGridList: [], outputNameList: [] };
-
   const BRIDGE_ID = 1;
 
-  const outputGridList: number[][][] = grids.map(g => {
-    const raw = buildBridgeMask(g, width, position, algorithm, landExt);
-    // 将桥格统一改写为 BRIDGE_ID，与名称清单对应
-    return raw.map(row => row.map(v => (v !== 0 ? BRIDGE_ID : 0)));
-  });
+  const raw = buildBridgeMask(grid, width, position, algorithm, landExt);
+  // 将桥格统一改写为 BRIDGE_ID，与名称清单对应
+  const outputGrid = raw.map(row => row.map(v => (v !== 0 ? BRIDGE_ID : 0)));
 
-  const outputNameList = [{ id: BRIDGE_ID, name: "桥", type: "tile" }];
+  const outputNameList: NameEntry[] = [{ id: BRIDGE_ID, name: "桥", type: "tile" }];
 
-  return { outputGridList, outputNameList };
+  return { outputGrid, outputNameList };
 }

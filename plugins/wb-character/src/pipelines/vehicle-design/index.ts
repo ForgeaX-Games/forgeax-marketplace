@@ -449,7 +449,7 @@ class VehicleDesignUI {
     try {
       window.parent?.postMessage({
         type: 'FORGEAX_NAVIGATE',
-        targetPluginId: '@forgeax-plugin/wb-anim',
+        targetPluginId: '@forgeax-extension/wb-anim',
         payload: { charId, role: 'vehicle', slug },
       }, '*')
     } catch { /* not embedded */ }

@@ -68,7 +68,7 @@ export function pointsToDrawing(
  * `i * twistRad / N`，最后用 `makeCompound` 包成一个 TopoDS_Compound。
  *
  * 视觉效果：远看是螺旋齿，近看每两片之间有"小棱"（约 STEP_DEG/2 度）。STEP_DEG
- * 越小越平滑，但段数越多 → bake 时间越长。15° 是 articraft 默认 spline 段数对应
+ * 越小越平滑，但段数越多 → bake 时间越长。15° 是默认 spline 段数对应
  * 的近似分辨率。
  *
  * twist=0 时退化成 1 段直 extrude，与之前性能等价。

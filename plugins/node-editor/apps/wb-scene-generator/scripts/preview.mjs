@@ -70,8 +70,8 @@ if (args.mode === 'free3d') {
 const projectRoot = args.projectRoot || mkdtempSync(join(tmpdir(), 'wb-scene-preview-'))
 process.env.FORGEAX_PROJECT_ROOT = projectRoot
 
-const rt = createRuntime({ projectRoot, pipelineId: 'preview', pluginId: '@forgeax-plugin/wb-scene-generator' })
-const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-plugin/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
+const rt = createRuntime({ projectRoot, pipelineId: 'preview', pluginId: '@forgeax-extension/wb-scene-generator' })
+const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-extension/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
 await loader.scan()
 
 // Execute the persisted graph. A fresh project root has no graph.json; the
@@ -101,21 +101,18 @@ for (const node of sceneOutNodes) {
 
 // Asset draw mode: preload sprite blobs and inject the server image resolver.
 if (args.draw === 'asset' && layers.length > 0) {
-  const { getLibraryService, resolveBlobPath } = await import('../backend/src/library/service.ts')
+  const { listMergedAliasMetasAllZones, resolveMergedAssetContent } = await import('../backend/src/library/mergedLibraryPool.ts')
   const { loadImage } = await import('@napi-rs/canvas')
-  const svc = getLibraryService()
-  const aliasMetas = svc.listAliasesWithMeta('raw')
+  const aliasMetas = await listMergedAliasMetasAllZones()
   const imageByAlias = new Map()
   for (const layer of layers) {
     const match = matchAssetEntry({ assetName: layer.assetName, assetType: layer.assetType }, aliasMetas, false)
     if (!match) continue
     for (const alias of match.variants) {
       if (imageByAlias.has(alias)) continue
-      const rec = svc.getByAlias(alias)
-      if (!rec) continue
-      const path = resolveBlobPath(rec)
-      if (!existsSync(path)) continue
-      imageByAlias.set(alias, await loadImage(path))
+      const content = await resolveMergedAssetContent(alias)
+      if (!content) continue
+      imageByAlias.set(alias, await loadImage(content.bytes))
     }
   }
   setServerImageResolver((alias) => imageByAlias.get(alias) ?? null)

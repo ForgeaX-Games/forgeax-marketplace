@@ -8,7 +8,7 @@
  *   3) 用 \n 拼接成完整字符串，UTF-8 编码成 Buffer
  *
  * 为什么是 ASCII OBJ 而不是 binary STL？
- *   - viewer 端 OBJLoader 是 three.js 内置零依赖，与 articraft 现有视觉一致
+ *   - viewer 端 OBJLoader 是 three.js 内置零依赖，与现有视觉一致
  *   - ASCII 体积大，但 baker.service 算 sha256 时拿到 stable 字节流方便去重
  *   - 同形状不同浮点表达不会产生重复 blob（toFixed(6) 截断后稳定）
  *

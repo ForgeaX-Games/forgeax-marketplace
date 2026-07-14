@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import type { RuntimeChannel } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import type { RuntimeChannel, RuntimeEvent } from '@forgeax/node-runtime'
+import { getProjectRegistry, getRuntimeForProject } from '../runtime.js'
 
 interface Socketish {
   send: (data: string) => void
@@ -9,7 +9,7 @@ interface Socketish {
 interface ClientEntry {
   socket: Socketish
   channels: RuntimeChannel[] | null
-  unsub: (() => void) | null
+  unsubs: Array<() => void>
 }
 
 const clients = new Map<Socketish, ClientEntry>()
@@ -28,18 +28,34 @@ export function broadcastToClients(msg: unknown): number {
   return n
 }
 
+async function subscribedProjectIds(): Promise<string[]> {
+  const reg = await getProjectRegistry()
+  const ids = new Set<string>()
+  const viewing = reg.getViewingProjectId()
+  if (viewing) ids.add(viewing)
+  for (const id of reg.listLockedProjectIds()) ids.add(id)
+  return [...ids]
+}
+
 async function bind(entry: ClientEntry): Promise<void> {
-  entry.unsub?.()
-  entry.unsub = null
+  for (const unsub of entry.unsubs) unsub()
+  entry.unsubs = []
   if (!entry.channels) return
-  const rt = await getRuntime()
-  entry.unsub = rt.subscriptions.subscribe(rt.config.pipelineId, entry.channels, (event) => {
+
+  const projectIds = await subscribedProjectIds()
+  const handler = (event: RuntimeEvent) => {
     try {
       entry.socket.send(JSON.stringify({ event: 'runtime', payload: event }))
     } catch {
       /* drop */
     }
-  })
+  }
+
+  for (const projectId of projectIds) {
+    const rt = await getRuntimeForProject(projectId)
+    const unsub = rt.subscriptions.subscribe(rt.config.pipelineId, entry.channels, handler)
+    entry.unsubs.push(unsub)
+  }
 }
 
 export async function rebindWsSubscriptions(): Promise<void> {
@@ -49,8 +65,8 @@ export async function rebindWsSubscriptions(): Promise<void> {
 export async function registerWsRoutes(app: FastifyInstance): Promise<void> {
   await app.register(import('@fastify/websocket'))
   app.get('/ws', { websocket: true }, async (socket) => {
-    await getRuntime()
-    const entry: ClientEntry = { socket, channels: null, unsub: null }
+    await getProjectRegistry()
+    const entry: ClientEntry = { socket, channels: null, unsubs: [] }
     clients.set(socket, entry)
     socket.on('message', (raw: Buffer) => {
       let msg: { action?: string; channels?: RuntimeChannel[] }
@@ -61,7 +77,7 @@ export async function registerWsRoutes(app: FastifyInstance): Promise<void> {
       }
     })
     socket.on('close', () => {
-      entry.unsub?.()
+      for (const unsub of entry.unsubs) unsub()
       clients.delete(socket)
     })
   })

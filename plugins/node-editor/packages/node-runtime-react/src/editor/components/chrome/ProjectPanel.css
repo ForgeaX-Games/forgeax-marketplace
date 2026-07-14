@@ -22,6 +22,40 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.7;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.proj-panel__count {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+.proj-panel__filter {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
+
+.proj-panel__filter::placeholder {
+  opacity: 0.45;
+}
+
+.proj-panel__filter:focus {
+  outline: none;
+  border-color: rgba(212, 255, 72, 0.35);
 }
 
 .proj-panel__list {
@@ -30,14 +64,112 @@
   gap: 6px;
 }
 
+.proj-panel__status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.proj-panel__status-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.proj-panel__status-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+}
+
+.proj-panel__status-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj-panel__status-row--executing .proj-panel__status-value,
+.proj-panel__status-row--executing .proj-panel__status-action {
+  color: #fbbf24;
+}
+
+.proj-panel__status-action {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.proj-panel__status-action:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.proj-panel__status-action:disabled {
+  cursor: default;
+  opacity: 0.95;
+}
+
+.proj-panel__status-row--pipeline .proj-panel__status-value {
+  color: #c4b5fd;
+}
+
 /* The shared ProjectCard is a horizontal card in the modal grid; in the narrow
    left pane it should fill the column. */
 .proj-panel__list .proj-card {
   width: 100%;
 }
 
-/* "Held by agent" badge — distinct from the blue "active" badge. */
+/* "Viewing" badge — blue, distinct from agent lock. */
+.proj-card__badge--viewing {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* "Held by agent" badge — distinct from the blue "Viewing" badge. */
 .proj-card__badge--lock {
   background: #b45309;
   color: #fff;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj-card__badge--pipeline {
+  background: #7c3aed;
+  color: #fff;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj-card--executing:not(.proj-card--active) {
+  outline: 1px solid rgba(180, 83, 9, 0.45);
+}
+
+.proj-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
 }

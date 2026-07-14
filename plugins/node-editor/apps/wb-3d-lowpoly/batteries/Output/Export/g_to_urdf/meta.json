@@ -123,8 +123,8 @@
       "name": "report",
       "type": "object",
       "label": "编译报告",
-      "description": "articraft 式 compile report：meshFileCount/meshTotalBytes/totalVertices/totalTriangles/bakeMs/cacheHits/bakeFallbacks/fingerprint，以及 signalBundle（errors/warnings/notes/codes）。供 agent 修复循环判定产物变化与告警计数。",
-      "description-en": "articraft-style compile report: meshFileCount/meshTotalBytes/totalVertices/totalTriangles/bakeMs/cacheHits/bakeFallbacks/fingerprint plus signalBundle (errors/warnings/notes/codes) for agent fix loops."
+      "description": "compile report：meshFileCount/meshTotalBytes/totalVertices/totalTriangles/bakeMs/cacheHits/bakeFallbacks/fingerprint，以及 signalBundle（errors/warnings/notes/codes）。供 agent 修复循环判定产物变化与告警计数。",
+      "description-en": "Compile report: meshFileCount/meshTotalBytes/totalVertices/totalTriangles/bakeMs/cacheHits/bakeFallbacks/fingerprint plus signalBundle (errors/warnings/notes/codes) for agent fix loops."
     }
   ],
   "projectTypes": [

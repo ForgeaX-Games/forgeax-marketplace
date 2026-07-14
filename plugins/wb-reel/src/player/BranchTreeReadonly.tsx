@@ -17,9 +17,12 @@ import '@xyflow/react/dist/style.css'
 
 import { useScenarioStore } from '../scenario/scenarioStore'
 import { useSceneImageCache } from '../media/sceneImageCache'
+import { useMediaStore } from '../media/mediaStore'
 import { computeStoryGraphLayout } from '../scenario/layout'
 import { injectStyleOnce } from '../styles/injectStyle'
-import { isPastBranch, sceneVariant } from './branchTreeStyling'
+import { isPastBranch } from './branchTreeStyling'
+import { computeNodeAccess, isJumpable, type TreeNodeAccess } from './treeNav'
+import { DEFAULT_TREE_EDGE } from '../forge/modules/treeThemePresets'
 
 /**
  * BranchTreeReadonly —— Player 全屏 Overlay 里的只读剧情树。
@@ -47,8 +50,15 @@ interface Props {
 
 interface ReadonlyNodeData {
   title: string
-  variant: 'current' | 'visited' | 'unvisited'
+  /** 可达性(章节/关卡选择):current / visited / frontier / locked。 */
+  access: TreeNodeAccess
   thumbnailUrl?: string
+  /** 主题节点框图(按状态选好的);无则回落内置 CSS 框。 */
+  frameUrl?: string
+  /** 是否显示缩略图(主题 showThumbnails=false → 纯标题框)。 */
+  showThumb: boolean
+  /** 是否可点跳转(由 jumpScope + access 决定)。 */
+  jumpable: boolean
   isRoot: boolean
   branchCount: number
   [key: string]: unknown
@@ -64,36 +74,52 @@ const NODE_TYPES: NodeTypes = {
 }
 
 function ReadonlySceneNode({ data }: { data: ReadonlyNodeData }) {
+  const cls = [
+    'ks-btro-card',
+    `is-${data.access}`,
+    data.frameUrl ? 'is-themed' : '',
+    data.showThumb ? '' : 'is-noThumb',
+    data.jumpable ? 'is-jumpable' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   return (
-    <div className={`ks-btro-card is-${data.variant}`}>
+    <div className={cls}>
       {/* 隐形 handles —— 仅用于 xyflow 计算 edge 端点，不参与交互（CSS 置 opacity:0 + pointer-events:none） */}
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
-      <div className="ks-btro-card-thumb">
-        {data.thumbnailUrl ? (
-          <img src={data.thumbnailUrl} alt={data.title} draggable={false} />
-        ) : (
-          <div className="ks-btro-card-placeholder ks-mono">⌗ NO PREVIEW</div>
-        )}
-        <div className="ks-btro-card-veil" />
-        {data.isRoot && (
-          <div className="ks-btro-card-badge ks-mono">START</div>
-        )}
-        {data.branchCount >= 2 && (
-          <div className="ks-btro-card-badge-branch ks-mono" title="分歧点">
-            ⎇ {data.branchCount}
-          </div>
-        )}
-        {data.variant === 'current' && (
-          <div className="ks-btro-card-pulse" aria-hidden />
-        )}
-        {data.variant === 'current' && (
-          <div className="ks-btro-card-now ks-mono">NOW</div>
-        )}
-      </div>
+      {data.showThumb && (
+        <div className="ks-btro-card-thumb">
+          {data.thumbnailUrl ? (
+            <img src={data.thumbnailUrl} alt={data.title} draggable={false} />
+          ) : (
+            <div className="ks-btro-card-placeholder ks-mono">⌗ NO PREVIEW</div>
+          )}
+          <div className="ks-btro-card-veil" />
+        </div>
+      )}
+      {data.isRoot && <div className="ks-btro-card-badge ks-mono">START</div>}
+      {data.branchCount >= 2 && (
+        <div className="ks-btro-card-badge-branch ks-mono" title="分歧点">
+          ⎇ {data.branchCount}
+        </div>
+      )}
+      {data.access === 'locked' && (
+        <div className="ks-btro-card-lock ks-mono" title="尚未解锁">
+          🔒
+        </div>
+      )}
+      {data.access === 'current' && !data.frameUrl && (
+        <div className="ks-btro-card-pulse" aria-hidden />
+      )}
+      {data.access === 'current' && <div className="ks-btro-card-now ks-mono">NOW</div>}
       <div className="ks-btro-card-title ks-cn" title={data.title}>
         {data.title}
       </div>
+      {/* 主题节点框:整框覆盖(生成图中心留空,盖在缩略图上不挡内容)。 */}
+      {data.frameUrl && (
+        <img className="ks-btro-card-frame" src={data.frameUrl} alt="" aria-hidden draggable={false} />
+      )}
     </div>
   )
 }
@@ -109,9 +135,26 @@ export function BranchTreeReadonly(props: Props) {
 function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
   const scenario = useScenarioStore((s) => s.scenario)
   const cacheRecords = useSceneImageCache((s) => s.records)
+  const mediaEntries = useMediaStore((s) => s.entries)
   const visited = useMemo(() => new Set(visitedSceneIds), [visitedSceneIds])
   const flow = useReactFlow()
   const reactFlowReadyRef = useRef(false)
+
+  const theme = scenario.treeTheme
+  const jumpScope = theme?.jumpScope ?? (theme ? 'visited' : 'none')
+  const showThumb = theme?.showThumbnails ?? true
+  const edge = { ...DEFAULT_TREE_EDGE, ...(theme?.edge ?? {}) }
+
+  /** treeTheme 引用的 UI 部件 assetId → mediaStore url。 */
+  const assetUrl = (assetId: string | undefined): string | undefined => {
+    if (!assetId) return undefined
+    const mid = scenario.uiAssets?.[assetId]?.mediaId
+    return mid ? mediaEntries[mid]?.url : undefined
+  }
+  const bgUrl = assetUrl(theme?.backgroundAssetId)
+  const frameDefaultUrl = assetUrl(theme?.nodeFrameAssetId)
+  const frameCurrentUrl = assetUrl(theme?.nodeFrameCurrentAssetId) ?? frameDefaultUrl
+  const frameLockedUrl = assetUrl(theme?.nodeFrameLockedAssetId) ?? frameDefaultUrl
 
   /**
    * 打开剧情树时把视口居中到"当前正在播的场景"。
@@ -142,20 +185,25 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
       nodeHeight: NODE_H,
       nodeSep: 32,
       rankSep: 120,
+      ...(theme?.direction ? { direction: theme.direction } : {}),
     })
+    const access = computeNodeAccess({ scenario, currentSceneId, visited })
     const nodes: ReadonlyFlowNode[] = []
     const edges: Edge[] = []
     for (const sc of Object.values(scenario.scenes)) {
       const rect = layout[sc.id]
       if (!rect) continue
-      const variant = sceneVariant({
-        sceneId: sc.id,
-        currentSceneId,
-        visited,
-      })
+      const acc: TreeNodeAccess = access[sc.id] ?? 'locked'
+      const jumpable = isJumpable(acc, jumpScope)
       const rec = cacheRecords[sc.id]
       const thumbnailUrl =
         rec?.status === 'ready' ? rec.dataUrl : undefined
+      const frameUrl =
+        acc === 'current'
+          ? frameCurrentUrl
+          : acc === 'locked'
+            ? frameLockedUrl
+            : frameDefaultUrl
       nodes.push({
         id: sc.id,
         type: 'readonly-scene',
@@ -164,13 +212,16 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
         height: NODE_H,
         data: {
           title: sc.title || sc.id,
-          variant,
+          access: acc,
           thumbnailUrl,
+          frameUrl,
+          showThumb,
+          jumpable,
           isRoot: sc.id === scenario.rootSceneId,
           branchCount: sc.branches.length,
         },
         draggable: false,
-        selectable: true,
+        selectable: jumpable,
       })
       for (const br of sc.branches) {
         if (!br.targetSceneId || !scenario.scenes[br.targetSceneId]) continue
@@ -191,17 +242,39 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
           // 干扰玩家看清"下一步会去哪个分镜"。选择文案已经在 DialogueBox /
           // ChoiceOverlay 里当一等公民展示，这里不再重复。
           className: isPast ? 'is-past' : 'is-future',
+          // 未走分支用主题连线样式;已走分支保留琥珀高亮(靠 CSS is-past)。
+          style: isPast
+            ? undefined
+            : {
+                stroke: edge.color,
+                strokeWidth: edge.width,
+                ...(edge.dashed ? { strokeDasharray: '6 4' } : {}),
+              },
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 16,
             height: 16,
-            color: isPast ? '#ffb347' : 'rgba(255,255,255,0.35)',
+            color: isPast ? '#ffb347' : edge.color,
           },
         })
       }
     }
     return { nodes, edges }
-  }, [scenario, currentSceneId, visited, cacheRecords])
+  }, [
+    scenario,
+    currentSceneId,
+    visited,
+    cacheRecords,
+    theme?.direction,
+    showThumb,
+    jumpScope,
+    frameCurrentUrl,
+    frameLockedUrl,
+    frameDefaultUrl,
+    edge.color,
+    edge.width,
+    edge.dashed,
+  ])
 
   /**
    * 用我们自己的 nodes 数组读坐标来 setCenter —— 不依赖 ReactFlow internal
@@ -228,6 +301,9 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
   const handleNodeClick = useCallback<NodeMouseHandler>(
     (_e, node) => {
       if (node.id === currentSceneId) return
+      // 关卡选择:仅允许 jumpScope 许可的节点跳转(未解锁/只读时点击无效)。
+      const data = node.data as ReadonlyNodeData | undefined
+      if (data && data.jumpable === false) return
       onJump(node.id)
     },
     [currentSceneId, onJump],
@@ -256,6 +332,14 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
 
   return (
     <div className="ks-btro">
+      {/* 主题全屏背景(在节点/连线之下)。无主题时不渲染,保持内置深色。 */}
+      {bgUrl && (
+        <div
+          className="ks-btro-bg"
+          style={{ backgroundImage: `url(${bgUrl})` }}
+          aria-hidden
+        />
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -279,12 +363,14 @@ function Inner({ currentSceneId, visitedSceneIds, onJump }: Props) {
         zoomOnDoubleClick={false}
         defaultEdgeOptions={{ type: 'smoothstep' }}
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={22}
-          size={1}
-          color="rgba(125, 211, 252, 0.1)"
-        />
+        {!bgUrl && (
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={22}
+            size={1}
+            color="rgba(125, 211, 252, 0.1)"
+          />
+        )}
       </ReactFlow>
     </div>
   )
@@ -294,7 +380,20 @@ const css = `
 .ks-btro {
   width: 100%;
   height: 100%;
+  position: relative;
+  overflow: hidden;
 }
+
+/* 主题全屏背景(在 React Flow 之下)。 */
+.ks-btro-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+  pointer-events: none;
+}
+.ks-btro .react-flow { position: relative; z-index: 1; }
 
 /* ─── 场景卡片 ─────────────────────────────────────────────── */
 .ks-btro-card {
@@ -307,7 +406,7 @@ const css = `
   background: rgba(10, 12, 18, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  cursor: pointer;
+  cursor: default;
   transition:
     transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
     border-color 180ms ease,
@@ -316,13 +415,39 @@ const css = `
   position: relative;
   box-sizing: border-box;
 }
-.ks-btro-card:hover {
+.ks-btro-card.is-jumpable { cursor: pointer; }
+.ks-btro-card.is-jumpable:hover {
   transform: translateY(-3px) scale(1.03);
   border-color: rgba(232, 162, 58, 0.55);
   box-shadow:
     0 12px 32px rgba(0, 0, 0, 0.6),
     0 0 0 1px rgba(232, 162, 58, 0.3),
     0 0 20px rgba(232, 162, 58, 0.18);
+}
+/* 主题节点框:整框覆盖(中心镂空),盖住内置边框。 */
+.ks-btro-card.is-themed {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.ks-btro-card-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  z-index: 4;
+}
+.ks-btro-card.is-noThumb { height: 56px; }
+.ks-btro-card-lock {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  font-size: 11px;
+  z-index: 5;
+  opacity: 0.85;
 }
 .ks-btro-card-thumb {
   position: relative;
@@ -407,7 +532,7 @@ const css = `
   text-overflow: ellipsis;
 }
 
-/* ── 三态：current / visited / unvisited ──────────────────────── */
+/* ── 四态：current / visited / frontier / locked ─────────────── */
 .ks-btro-card.is-current {
   border-color: rgba(232, 162, 58, 0.95);
   box-shadow:
@@ -415,6 +540,7 @@ const css = `
     0 0 24px rgba(232, 162, 58, 0.4),
     0 10px 30px rgba(0, 0, 0, 0.6);
 }
+.ks-btro-card.is-current.is-themed { box-shadow: 0 0 24px rgba(232, 162, 58, 0.4); }
 .ks-btro-card.is-current .ks-btro-card-title {
   color: #fff;
   background: linear-gradient(180deg, rgba(232,162,58,0.18), rgba(8,10,16,0.98));
@@ -437,13 +563,21 @@ const css = `
 }
 .ks-btro-card.is-visited .ks-btro-card-thumb img { filter: saturate(0.95) contrast(1.05); }
 
-.ks-btro-card.is-unvisited {
+/* frontier = 下一步可推进的未访问节点:冷色可用高亮,不压暗。 */
+.ks-btro-card.is-frontier {
+  border-color: rgba(125, 211, 252, 0.55);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.25), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.ks-btro-card.is-frontier .ks-btro-card-title { color: rgba(255, 255, 255, 0.9); }
+
+/* locked = 尚不可达:压暗 + 灰度 + 虚线。 */
+.ks-btro-card.is-locked {
   border-style: dashed;
   border-color: rgba(255, 255, 255, 0.18);
-  filter: grayscale(0.7) brightness(0.7);
+  filter: grayscale(0.7) brightness(0.62);
 }
-.ks-btro-card.is-unvisited:hover { filter: grayscale(0) brightness(1); }
-.ks-btro-card.is-unvisited .ks-btro-card-title { color: rgba(255, 255, 255, 0.55); }
+.ks-btro-card.is-locked.is-jumpable:hover { filter: grayscale(0) brightness(1); }
+.ks-btro-card.is-locked .ks-btro-card-title { color: rgba(255, 255, 255, 0.5); }
 
 /* ─── 分支（xyflow edge 层） ───────────────────────────────── */
 .ks-btro .react-flow__edge.is-past .react-flow__edge-path {

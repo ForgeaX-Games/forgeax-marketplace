@@ -12,6 +12,7 @@ import type {
   UploadedScript,
   TargetStructure,
   GlobalControlParams,
+  VnUnitActMap,
 } from "../types/index.js";
 import type {
   NarrativeIpDna,
@@ -19,6 +20,7 @@ import type {
   StoryTimestamp,
   AdaptationDirective,
   UserAssetManifest,
+  LayeredOperators,
 } from "../types/narrative-ip-dna.js";
 import type { LongMemoryLedger } from "./phase5-polish.js";
 import type { PipelineFamily } from "./phase2c-gen-adapt.js";
@@ -34,6 +36,8 @@ export interface GenerationSeed {
   topTemplate: NarrativeTemplate;
   /** 游戏单元 scoped IP DNA 切片（生成期算子注入就地消费）。 */
   scopedDna: NarrativeIpDna;
+  /** 分层算子桶（§3.2 top/mid/leaf/global），供生成期按环节所属层选池注入。 */
+  operatorLayers?: LayeredOperators;
   /** 长记忆一致性账本（§10）。 */
   ledger: LongMemoryLedger;
   adaptationDirective?: AdaptationDirective;
@@ -48,6 +52,8 @@ export interface GenerationSeed {
   targetStructure?: TargetStructure;
   /** VN 开放幕数（family=vn 时生效）。 */
   vnActCount?: number;
+  /** 章→幕锚定映射（P1-1，family=vn 且 IP 改编时生效）：每幕锚定源最小叙事单元供密度展开。 */
+  unitToActMap?: VnUnitActMap;
   /** KAG 关系网络注入简报（如有）。 */
   relationNetwork?: string;
 }
@@ -67,6 +73,9 @@ export function hydrateContextFromSeed(seed: GenerationSeed): NarrativeContext {
   });
 
   (ctx as Record<string, unknown>)._long_memory_ledger = seed.ledger;
+  if (seed.operatorLayers) {
+    (ctx as Record<string, unknown>)._operator_layers = seed.operatorLayers;
+  }
   ctx.user_input = seed.userInput;
   if (seed.uploadedScript) ctx.uploaded_script = seed.uploadedScript;
   if (seed.complexity != null) ctx.complexity = seed.complexity;
@@ -80,6 +89,11 @@ export function hydrateContextFromSeed(seed: GenerationSeed): NarrativeContext {
     ctx.global_control_params = gcp;
   }
   if (seed.vnActCount != null) ctx.vn_target_act_count = seed.vnActCount;
+  // P1-1：章→幕锚定映射注入（仅 IP 改编 VN 有）；幕数以映射为准，供 vn-segment-confirm 忠实分幕。
+  if (seed.unitToActMap && seed.unitToActMap.acts.length > 0) {
+    ctx.vn_unit_act_map = seed.unitToActMap;
+    ctx.vn_target_act_count = seed.unitToActMap.acts.length;
+  }
   if (seed.relationNetwork) ctx.relation_network = seed.relationNetwork;
 
   return ctx;

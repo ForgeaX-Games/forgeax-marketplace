@@ -191,8 +191,10 @@ describe('POST /api/v1/group-templates/save-user', () => {
     const body = res.json() as { filePath: string; groupId: string; smallTag: string; templateName: string }
     expect(body.groupId).toBe('u-test-1')
     expect(body.smallTag).toBe('my_tag')
-    // File lands under <ws>/user-content/templates/My templates/my_tag/My Template.json
-    expect(body.filePath.replace(/\\/g, '/')).toContain('/user-content/templates/My templates/my_tag/My Template.json')
+    // File lands under <ws>/user-content/templates/My templates/my_tag/My Template/My Template.json
+    // (the per-template folder layer keeps the structure isomorphic to built-in
+    //  templates/{大}/{小}/{模板}/file.json so the small tag is preserved).
+    expect(body.filePath.replace(/\\/g, '/')).toContain('/user-content/templates/My templates/my_tag/My Template/My Template.json')
     const written = JSON.parse(await readFile(body.filePath, 'utf8'))
     expect(written.name).toBe('My Template')
 

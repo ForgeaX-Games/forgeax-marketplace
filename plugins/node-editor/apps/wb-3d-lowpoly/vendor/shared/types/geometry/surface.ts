@@ -1,5 +1,5 @@
 /**
- * Analytic surface placement helpers inspired by articraft.sdk.placement.
+ * Analytic surface placement helpers.
  *
  * For analytic parent shapes (box / cylinder / sphere / cone / capsule / torus
  * / dome) this queries the actual local surface and normal. Complex shapes fall

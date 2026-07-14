@@ -260,6 +260,55 @@ describe('pipelineStore live-sync backbone', () => {
     expect(usePipelineStore.getState().pipelineStatus).toBe('completed')
   })
 
+  it('executePipeline hydrates nodeOutputs from the execute response (same path as incrementalExecute)', async () => {
+    const sceneWire = [{ path: [0], items: [{ focus: '/', name: '' }] }]
+    vi.spyOn(client, 'execute').mockResolvedValue({
+      executionId: 'exec-test',
+      status: 'completed',
+      durationMs: 1,
+      outputs: { empty: { scene: sceneWire } },
+    })
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [
+          { id: 'empty', batteryId: 'empty_scene', name: 'empty', position: { x: 0, y: 0 }, params: {} },
+        ],
+      },
+    })
+
+    await usePipelineStore.getState().executePipeline()
+
+    expect(usePipelineStore.getState().nodeOutputs.empty?.scene).toEqual(sceneWire)
+  })
+
+  it('clearCacheAndExecutePipeline clears nodeOutputs then hydrates from execute', async () => {
+    const sceneWire = [{ path: [0], items: [{ focus: '/' }] }]
+    vi.spyOn(client, 'execute').mockResolvedValue({
+      executionId: 'exec-clear',
+      status: 'completed',
+      durationMs: 1,
+      outputs: { empty: { scene: sceneWire } },
+    })
+    vi.spyOn(client, 'clearOutputCache').mockResolvedValue({ ok: true })
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [
+          { id: 'empty', batteryId: 'empty_scene', name: 'empty', position: { x: 0, y: 0 }, params: {} },
+        ],
+      },
+      nodeOutputs: { stale: { scene: [{ path: [0], items: ['old'] }] } },
+    })
+
+    await usePipelineStore.getState().clearCacheAndExecutePipeline()
+
+    expect(usePipelineStore.getState().nodeOutputs.stale).toBeUndefined()
+    expect(usePipelineStore.getState().nodeOutputs.empty?.scene).toEqual(sceneWire)
+  })
+
   it('refreshConnectedOutputs hydrates unconnected visible output ports for tooltips', async () => {
     client.__reset({
       ops: [
@@ -300,6 +349,64 @@ describe('pipelineStore live-sync backbone', () => {
       { path: [0, 0], items: ['/Root/A'] },
       { path: [0, 1], items: ['/Root/B'] },
     ])
+  })
+
+  it('autoExecuteOnOpen runs when some visible outputs are missing (partial cache)', async () => {
+    client.__reset({
+      ops: [
+        spec('empty_scene', 'Empty', [{ name: 'scene', type: 'scene', access: 'tree' }]),
+        spec('scene_output', 'Out', [{ name: 'voxel_layers', type: 'voxel_layers', access: 'list' }]),
+      ],
+    })
+    const execSpy = vi.spyOn(client, 'execute').mockResolvedValue({
+      executionId: 'exec-partial',
+      status: 'completed',
+      durationMs: 1,
+      outputs: {},
+    } as never)
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [
+          { id: 'empty', batteryId: 'empty_scene', name: 'empty', position: { x: 0, y: 0 }, params: {} },
+          { id: 'sink', batteryId: 'scene_output', name: 'out', position: { x: 200, y: 0 }, params: {} },
+        ],
+      },
+      nodeOutputs: { sink: { voxel_layers: [{ path: [0], items: [[]] }] } },
+    })
+    await usePipelineStore.getState().loadBatteries()
+
+    await usePipelineStore.getState().autoExecuteOnOpen()
+
+    expect(execSpy).toHaveBeenCalled()
+  })
+
+  it('autoExecuteOnOpen skips when every visible output port is hydrated', async () => {
+    client.__reset({
+      ops: [spec('empty_scene', 'Empty', [{ name: 'scene', type: 'scene', access: 'tree' }])],
+    })
+    const execSpy = vi.spyOn(client, 'execute').mockResolvedValue({
+      executionId: 'exec-full',
+      status: 'completed',
+      durationMs: 1,
+      outputs: {},
+    } as never)
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [
+          { id: 'empty', batteryId: 'empty_scene', name: 'empty', position: { x: 0, y: 0 }, params: {} },
+        ],
+      },
+      nodeOutputs: { empty: { scene: [{ path: [0], items: [{ focus: '/' }] }] } },
+    })
+    await usePipelineStore.getState().loadBatteries()
+
+    await usePipelineStore.getState().autoExecuteOnOpen()
+
+    expect(execSpy).not.toHaveBeenCalled()
   })
 
   it('renameGroup syncs both the NodeGroup name and the __group__ shadow node mirror', () => {

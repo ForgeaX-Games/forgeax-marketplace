@@ -1,8 +1,11 @@
 /**
- * decoration_border: 在一组基准网格周围按规则摆放 1×1 装饰物，支持列表批量处理
+ * decoration_border: 在单张基准网格周围按规则摆放 1×1 装饰物
+ *
+ * DataTree 数据格式：输入 inputGrid 与输出 outputGrid 均为 grid/access:item——
+ * 本算子每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
  *
  * 输入：
- *   baseGridList (array)  — 基准网格列表（支持单个网格或网格数组）
+ *   inputGrid (grid)      — 单张基准网格，非零区域作为参考边界
  *   decorationName        — 装饰物规格，支持三种格式：
  *       1. 字符串单名称：  "树木"
  *       2. 字符串多名称：  "树木，小草，花朵"（逗号/顿号/分号/换行/竖线均可）
@@ -16,8 +19,8 @@
  *   startCount (number, sequential 专用); itemSpacing (number, sequential 专用)
  *
  * 输出：
- *   outputGridList (array) — 仅含装饰物的输出网格列表（装饰物值从各网格 max+1 起）
- *   nameList (array)       — 装饰物名称清单 [{id, name}]（每种对应独立 id）
+ *   outputGrid (grid)     — 仅含装饰物的单张多值网格（每种装饰物一个递增 fillValue，从 max+1 起）
+ *   nameList (array)      — 装饰物名称清单 [{id, name, type}]（每种对应独立 id）
  */
 
 type Grid = number[][];
@@ -497,23 +500,27 @@ function processOneGrid(
 
 // ── 主导出函数 ────────────────────────────────────────────────────────────────
 
-/** 将输入统一为 Grid[] 格式：单个网格（number[][]）自动包装为单元素列表，网格数组直接返回。 */
-function normalizeBaseGridList(raw: unknown): Grid[] | null {
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-
-  // 若 raw[0] 是数字数组（或空数组），则 raw 本身是单个网格
+/** 解析单张二维网格（number[][]）；非法返回 null。
+ * DataTree 模型下引擎按 access:item 对网格列表自动 fanout，本算子每次只收到一张网格。 */
+function parseGrid(raw: unknown): Grid | null {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
   const first = raw[0];
-  if (Array.isArray(first) && (first.length === 0 || !Array.isArray(first[0]))) {
-    return [raw as Grid];
+  // 单张网格：raw[0] 是数字数组（或空行）
+  if (Array.isArray(first) && (first.length === 0 || typeof first[0] === "number")) {
+    return raw as Grid;
   }
-
-  // 否则视为网格数组
-  return raw as Grid[];
+  return null;
 }
 
-/** 主入口：解析参数、批量处理每个基准网格、放置边界装饰物，返回输出网格列表与名称清单。 */
+/** 主入口（DataTree item 形态）：解析单张基准网格、放置边界装饰物，
+ * 输出单张多值装饰物网格（每种装饰物一个递增 fillValue）与名称清单。 */
 export function decorationBorder(input: Record<string, unknown>): Record<string, unknown> {
-  const baseGridList = normalizeBaseGridList(input.baseGridList);
+  const baseGrid = parseGrid(input.inputGrid);
+  if (!baseGrid) return { error: "inputGrid is required" };
+  if (baseGrid.length === 0 || !baseGrid[0] || baseGrid[0].length === 0) {
+    return { error: "inputGrid is empty" };
+  }
+
   // 解析装饰物规格（支持字符串单/多名称 或 [{名称:数量}] 对象数组）
   const specs = parseDecorationSpecs(input.decorationName);
   const count = typeof input.count === "number" ? Math.max(0, Math.floor(input.count)) : 20;
@@ -524,82 +531,33 @@ export function decorationBorder(input: Record<string, unknown>): Record<string,
   const startCount = typeof input.startCount === "number" ? Math.max(1, Math.floor(input.startCount)) : 4;
   const itemSpacing = typeof input.itemSpacing === "number" ? Math.floor(input.itemSpacing) : 8;
 
-  if (!baseGridList || baseGridList.length === 0) {
-    return { error: "baseGridList is required" };
-  }
-
   if (specs.length === 0) {
-    return { outputGridList: [], nameList: [] };
+    const empty: Grid = Array.from({ length: baseGrid.length }, () => new Array(baseGrid[0].length).fill(0));
+    return { outputGrid: empty, nameList: [] };
   }
 
   const baseSeed = seed === 0 ? Date.now() : seed;
 
-  // 为每种规格分配独立的连续 fillValue（从所有基准网格最大值 + 1 开始）
-  let globalMax = 0;
-  for (const grid of baseGridList) {
-    if (Array.isArray(grid)) {
-      const m = maxGrid(grid);
-      if (m > globalMax) globalMax = m;
-    }
-  }
+  // 为每种规格分配独立的连续 fillValue（从本网格最大值 + 1 开始）
+  const globalMax = maxGrid(baseGrid);
   const slots = specs.map((spec, i) => ({
     fillValue: globalMax + 1 + i,
     count: spec.count,
     name: spec.name,
   }));
 
-  // 多装饰物时，为每种装饰物单独生成一张输出网格（只含该种类的值）。
-  // 单种装饰物时，outputGridList 与输入网格列表一一对应（保持原有行为）。
+  // 单张多值网格：每种装饰物各占一个 fillValue（下游可按值拆分 / 命名）
+  const outputGrid = processOneGrid(
+    baseGrid, slots, count, rotate, fillMode, offset, startCount, itemSpacing, baseSeed,
+  );
+
   const usedValues = new Set<number>();
-
-  let outputGridList: Grid[];
-
-  if (slots.length <= 1) {
-    // 单种：每个 baseGrid 出一张，结构不变
-    outputGridList = baseGridList.map((baseGrid, i) => {
-      if (!baseGrid || baseGrid.length === 0 || !baseGrid[0] || baseGrid[0].length === 0) {
-        return [];
-      }
-      const effectiveSeed = baseSeed + i * 999983;
-      const grid = processOneGrid(baseGrid, slots, count, rotate, fillMode, offset, startCount, itemSpacing, effectiveSeed);
-      for (const row of grid) for (const v of row) if (v !== 0) usedValues.add(v);
-      return grid;
-    });
-  } else {
-    // 多种：每个 baseGrid × 每种装饰物 各出一张（只含该种 fillValue）
-    outputGridList = [];
-    for (let i = 0; i < baseGridList.length; i++) {
-      const baseGrid = baseGridList[i];
-      if (!baseGrid || baseGrid.length === 0 || !baseGrid[0] || baseGrid[0].length === 0) {
-        // 每种对应一张空网格占位
-        for (let _k = 0; _k < slots.length; _k++) outputGridList.push([]);
-        continue;
-      }
-      const effectiveSeed = baseSeed + i * 999983;
-      // 先跑完整的合并网格，再按 fillValue 拆分
-      const merged = processOneGrid(baseGrid, slots, count, rotate, fillMode, offset, startCount, itemSpacing, effectiveSeed);
-      const rows = merged.length;
-      const cols = merged[0]?.length ?? 0;
-
-      for (const slot of slots) {
-        const single: Grid = Array.from({ length: rows }, () => new Array(cols).fill(0));
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            if (merged[r][c] === slot.fillValue) {
-              single[r][c] = slot.fillValue;
-              usedValues.add(slot.fillValue);
-            }
-          }
-        }
-        outputGridList.push(single);
-      }
-    }
-  }
+  for (const row of outputGrid) for (const v of row) if (v !== 0) usedValues.add(v);
 
   // 只输出在输出网格中实际出现的名称条目，补充 type: "asset"
   const nameList = slots
     .filter(s => usedValues.has(s.fillValue))
     .map(s => ({ id: s.fillValue, name: s.name, type: "asset" }));
 
-  return { outputGridList, nameList };
+  return { outputGrid, nameList };
 }

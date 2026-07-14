@@ -2,6 +2,8 @@
 
 **显式圆形平台放置算法**：每层地形由指定数量的独立有机平台构成，精确控制块数、面积占比、贴边程度，生成真正多块、层次清晰的梯田悬崖地形。
 
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
+
 ## 与前代方案的根本区别
 
 | 对比项 | 高度场切割方案 | 本方案（显式放置） |
@@ -29,7 +31,7 @@
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | grid | — | 输入网格 |
+| inputGrid | grid | — | 单张输入网格（DataTree 逐张处理） |
 | tierCount | number | 4 | 地形层数（含底层），建议 3~5 |
 | tierAreaRatios | string | 自动 | 各层面积占比 JSON，从最高到倒数第二层，长度=tierCount-1 |
 | tierPatchCounts | string | 自动 | 各层平台数量 JSON，从最高到倒数第二层，长度=tierCount-1 |

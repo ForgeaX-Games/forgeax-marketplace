@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/cli-claude-code",
+  "version": "0.1.0",
+  "kind": "cli-provider",
+  "displayName": {
+    "zh": "the reference agent CLI",
+    "en": "the reference agent CLI CLI"
+  },
+  "description": {
+    "zh": "the reference agent CLI CLI 后端 · 把 Anthropic 的 claude-code(`claude --mode stream`)接成 Studio 的推理后端,支持流式 / 思考 / 工具调用 / 子 agent / 会话;模型 opus-4.7 / sonnet-4.6 / haiku-4.5。",
+    "en": "the reference agent CLI CLI backend — wires Anthropic's claude-code (`claude --mode stream`) in as a Studio reasoning backend with streaming, thinking, tool calls, sub-agents and sessions; models opus-4.7 / sonnet-4.6 / haiku-4.5."
+  },
+  "provides": {
+    "cliProvider": {
+      "id": "@forgeax-extension/cli-claude-code",
+      "displayName": "the reference agent CLI",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ],
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "toolCalls": true,
+        "subAgents": true,
+        "sessions": true
+      },
+      "runner": {
+        "cmd": "claude",
+        "args": [
+          "--mode",
+          "stream"
+        ]
+      }
+    }
+  },
+  "entry": {
+    "backend": "./src/server.ts"
+  },
+  "experimental": true
+}

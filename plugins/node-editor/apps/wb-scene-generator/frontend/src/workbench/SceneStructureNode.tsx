@@ -189,7 +189,11 @@ function SceneStructureNode(props: NodeProps<SceneStructureNodeData>): JSX.Eleme
   const updateNodeParam = usePipelineStore((s) => s.updateNodeParam)
   const schedulePersistSession = usePipelineStore((s) => s.schedulePersistSession)
   const { setNodes } = useReactFlow()
-  const nodeOutputs = usePipelineStore((s) => s.nodeOutputs[id])
+  // Subscribe to the whole outputs map (not just this node's own output): in a
+  // group's inner view a leaf visualize node has no persisted output, so the
+  // scene arrives only when the async group-probe hydrates the UPSTREAM
+  // producer. Watching the full map re-renders the panel once that lands.
+  const nodeOutputs = usePipelineStore((s) => s.nodeOutputs)
   const edges = usePipelineStore((s) => s.currentPipeline?.edges)
 
   useEffect(() => {

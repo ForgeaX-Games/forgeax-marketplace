@@ -10,7 +10,7 @@ import type {
   RuntimeEvent,
   WorkspaceState,
 } from '@forgeax/node-runtime'
-import type { ActivateProjectResult, CreateProjectRequest } from '../../api/ApiClient.js'
+import type { CreateProjectRequest, ViewProjectResult } from '../../api/ApiClient.js'
 
 import { configureEditorTransport, createEditorTransport, type EditorTransport } from '../transport/index.js'
 import { useProjectStore } from '../stores/projectStore.js'
@@ -63,20 +63,20 @@ function makeProjectClient(onCreate: (req: CreateProjectRequest) => void): ApiCl
       return meta
     },
     updateProject: async (id: string) => projects[id],
-    deleteProject: async () => ({ ok: true as const, workspace: { activeProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' } }),
-    activateProject: async (id: string): Promise<ActivateProjectResult> => ({
+    deleteProject: async () => ({ ok: true as const, workspace: { viewingProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' } }),
+    viewProject: async (id: string): Promise<ViewProjectResult> => ({
       project: { manifest: { schemaVersion: 1, ...projects[id], storage: { graphFile: '', historyFile: '', outputsDir: '' } } },
       pipeline,
     }),
-    getWorkspace: async (): Promise<WorkspaceState> => ({ activeProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }),
-    setWorkspace: async (): Promise<WorkspaceState> => ({ activeProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }),
+    getWorkspace: async (): Promise<WorkspaceState> => ({ viewingProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }),
+    setWorkspace: async (): Promise<WorkspaceState> => ({ viewingProjectId: 'main', recentProjectIds: ['main'], lastOpenedAt: '' }),
   }
 }
 
 let transport: EditorTransport | null = null
 
 beforeEach(() => {
-  useProjectStore.setState({ projects: [], activeProjectId: null, recentProjectIds: [], isLoading: false, isSwitching: false, error: null })
+  useProjectStore.setState({ projects: [], viewingProjectId: null, executingProjectIds: [], recentProjectIds: [], isLoading: false, isSwitching: false, error: null })
 })
 
 afterEach(() => {

@@ -1,48 +1,56 @@
 import type { FastifyInstance } from 'fastify'
-import { executeNode } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import { executeNode, type ExecuteNodeRequest } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { EXECUTE_BODY_LIMIT } from './body-limits.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
 
+interface ProjectParams {
+  projectId: string
+}
+
+function parseExecuteBody(body: unknown): ExecuteNodeRequest {
+  const b = (body ?? {}) as { nodeId?: string; quietErrors?: boolean }
+  return {
+    ...(b.nodeId ? { nodeId: b.nodeId } : {}),
+    ...(b.quietErrors ? { quietErrors: true } : {}),
+  }
+}
+
 export async function registerExecuteRoutes(app: FastifyInstance): Promise<void> {
-  // FULL ExecutionResult — UI / REST callers depend on the full payload.
-  app.post('/api/v1/execute', {
+  const prefix = '/api/v1/projects/:projectId'
+
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute`, {
     bodyLimit: EXECUTE_BODY_LIMIT,
     schema: {
       body: {
         type: 'object',
-        properties: { nodeId: { type: 'string' } },
+        properties: { nodeId: { type: 'string' }, quietErrors: { type: 'boolean' } },
         additionalProperties: true,
       },
     },
   }, async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
+    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
     return handle.done
   })
 
-  // Agent-facing execute: run the pipeline and return ONLY a KB-scale summary
-  // (status + per-port item/shape notes), never raw mesh / buffer payloads. This
-  // is what `lowpoly:pipeline.execute` calls by default. Summarizing on the
-  // backend — before serialization into an HTTP body — keeps the payload tiny
-  // regardless of how heavy the produced meshes are.
-  app.post('/api/v1/execute/summary', {
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute/summary`, {
     bodyLimit: EXECUTE_BODY_LIMIT,
     schema: {
       body: {
         type: 'object',
-        properties: { nodeId: { type: 'string' } },
+        properties: { nodeId: { type: 'string' }, quietErrors: { type: 'boolean' } },
         additionalProperties: true,
       },
     },
   }, async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
+    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
     const full = await handle.done
     return summarizeExecutionResult(full)
   })

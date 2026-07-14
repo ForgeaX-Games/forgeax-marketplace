@@ -46,6 +46,17 @@ export function gColumn(input: Record<string, unknown>): Record<string, unknown>
   if (base > 0) args.base_height = num(base);
   if (cap > 0) args.capital_height = num(cap);
 
+  const taper = Number(input.taper ?? 1);
+  if (Number.isFinite(taper) && taper > 0 && taper < 1) args.taper = num(taper);
+  if (base > 0 && String(input.base_style ?? '').trim().toLowerCase() === 'stepped') {
+    args.base_style = str('stepped');
+  }
+  if (cap > 0 && String(input.capital_style ?? '').trim().toLowerCase() === 'stepped') {
+    args.capital_style = str('stepped');
+  }
+  const flutes = Math.round(Number(input.flutes ?? 0));
+  if (Number.isFinite(flutes) && flutes > 0 && shape === 'round') args.flutes = num(flutes);
+
   const rawId = String(input.id ?? '').trim();
   const id = rawId !== '' ? rawId : freshId(incoming, 'col');
   if (!isValidId(id)) return { geometry: incoming, id: '', error: `invalid id "${id}"` };

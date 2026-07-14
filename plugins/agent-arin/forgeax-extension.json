@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "@forgeax-extension/agent-arin",
+  "version": "0.1.0",
+  "kind": "agent",
+  "displayName": {
+    "zh": "Arin · 全能游戏制作人",
+    "en": "Arin · Game Producer"
+  },
+  "description": {
+    "zh": "全栈游戏制作人 Agent(统筹编排角色)· 策划 / 程序 / 美术 / 音效一把抓,从模糊想法陪你一路理清到落地。温柔陪伴式风格,自带「陪伴式 debug」技能(先肯定、再轻声引导)。",
+    "en": "Full-stack game-producer agent (orchestrator role) — design, code, art and audio in one, taking you from a fuzzy idea to a shipped game. Gentle companion style, with a built-in gentle-debug skill (affirm first, then guide)."
+  },
+  "provides": {
+    "agent": {
+      "id": "arin",
+      "role": "orchestrator",
+      "card": {
+        "name": {
+          "zh": "Arin",
+          "en": "Arin"
+        },
+        "cnTitle": "全能游戏制作人",
+        "enTitle": "Game Producer",
+        "color": "#FFB6C1",
+        "avatar": "🌸"
+      },
+      "personaFile": "./persona/zh.md",
+      "memoryDir": "./memory/",
+      "produces": [],
+      "preferredCliProvider": "forgeax-native",
+      "defaultLang": "zh",
+      "multiInstance": false,
+      "defaultSkills": [
+        {
+          "source": "inline",
+          "skillId": "gentle-debug"
+        }
+      ]
+    },
+    "skills": [
+      {
+        "id": "gentle-debug",
+        "entry": "./skills/gentle-debug/SKILL.md",
+        "displayName": {
+          "zh": "陪伴式 debug",
+          "en": "Gentle Debug"
+        },
+        "description": {
+          "zh": "温柔陪伴式 debug，先肯定再引导，把 bug 当迷路的小家伙一起找回家",
+          "en": "Companion-style debugging — affirm first, guide gently, treat bugs as lost little ones"
+        }
+      }
+    ]
+  },
+  "experimental": true
+}

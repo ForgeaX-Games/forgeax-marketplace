@@ -7,6 +7,16 @@ import { buildApp } from '../src/main.js'
 
 let app: Awaited<ReturnType<typeof buildApp>>
 let projectRoot: string
+
+async function mainProjectId(): Promise<string> {
+  const ws = await app.inject({ method: 'GET', url: '/api/v1/workspace' })
+  return ws.json().viewingProjectId as string
+}
+
+async function projectBase(): Promise<string> {
+  return `/api/v1/projects/${await mainProjectId()}`
+}
+
 beforeAll(async () => {
   projectRoot = mkdtempSync(join(tmpdir(), 'wb-scene-test-'))
   process.env.FORGEAX_PROJECT_ROOT = projectRoot
@@ -52,21 +62,23 @@ describe('bridge REST', () => {
     })
   })
 
-  it('POST /api/v1/batch creates a node, GET /nodes returns it', async () => {
+  it('POST project-scoped batch creates a node, GET /nodes returns it', async () => {
+    const base = await projectBase()
     const ops = [{ type: 'createNode', nodeId: 'n1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 5 } }]
-    const post = await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops } })
+    const post = await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops } })
     expect(post.json().status).toBe('ok')
-    const nodes = await app.inject({ method: 'GET', url: '/api/v1/nodes' })
+    const nodes = await app.inject({ method: 'GET', url: `${base}/nodes` })
     expect(nodes.json().some((n: { id: string }) => n.id === 'n1')).toBe(true)
   })
 })
 
 describe('execute', () => {
-  it('POST /api/v1/execute runs the pipeline and reports completed', async () => {
-    await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops: [
+  it('POST project-scoped execute runs the pipeline and reports completed', async () => {
+    const base = await projectBase()
+    await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops: [
       { type: 'createNode', nodeId: 'e1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 7 } },
     ] } })
-    const r = await app.inject({ method: 'POST', url: '/api/v1/execute', payload: {} })
+    const r = await app.inject({ method: 'POST', url: `${base}/execute`, payload: {} })
     expect(r.statusCode).toBe(200)
     expect(r.json()).toMatchObject({ status: 'completed' })
   })
@@ -78,9 +90,10 @@ describe('execute', () => {
     // "target node not found". With logger:false the throw surfaced as an opaque
     // HTTP 500. The kernel now resolves an unknown / cyclic target as a structured
     // ExecutionResult error instead of rejecting.
+    const base = await projectBase()
     const r = await app.inject({
       method: 'POST',
-      url: '/api/v1/execute',
+      url: `${base}/execute`,
       payload: { nodeId: 'node-that-does-not-exist' },
     })
     expect(r.statusCode).toBe(200)
@@ -106,10 +119,11 @@ describe('ws', () => {
     await delay(50)
     // applyBatch emits no event to subscribers, but executeNode emits exec:* on
     // the execution channel — so trigger a run and observe a real forwarded event.
-    await app.inject({ method: 'POST', url: '/api/v1/batch', payload: { ops: [
+    const base = await projectBase()
+    await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops: [
       { type: 'createNode', nodeId: 'wsN', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 1 } },
     ] } })
-    await app.inject({ method: 'POST', url: '/api/v1/execute', payload: {} })
+    await app.inject({ method: 'POST', url: `${base}/execute`, payload: {} })
     await delay(100)
     sock.close()
     expect(received.length).toBeGreaterThan(0)

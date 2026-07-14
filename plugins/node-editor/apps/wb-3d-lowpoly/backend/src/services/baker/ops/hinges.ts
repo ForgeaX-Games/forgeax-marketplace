@@ -1,17 +1,17 @@
 /**
  * Hinges 家族 —— barrel_hinge / piano_hinge。
  *
- * Articraft `BarrelHingeGeometry`：
+ * `BarrelHingeGeometry`：
  *   - 两片叶（leaf_a / leaf_b）沿 X 方向延展、Y=厚度、Z=length
  *   - leaf_b 绕 Z 轴旋转 (180 - open_angle_deg)°
  *   - knuckle_count 个圆柱（沿 Z 轴）叠在 Z 方向，整体居中
  *   - 销钉：一根贯穿 length 的细圆柱
  *
- * Articraft `PianoHingeGeometry`：
+ * `PianoHingeGeometry`：
  *   - 等价于 BarrelHinge 自动算 knuckle_count = max(3, length/knuckle_pitch)，
  *     强制奇数（让两叶 knuckle 互相错开），knuckle_outer_diameter = pin_diameter*1.55
  *
- * v1 不实现：HingeHolePattern / HingePinStyle（DSL 未暴露 → articraft 默认值 = 无）
+ * v1 不实现：HingeHolePattern / HingePinStyle（DSL 未暴露 → 默认值 = 无）
  */
 
 import type { OpBuilder, BakeableShape } from '../types.js';
@@ -157,8 +157,8 @@ export const pianoHinge: OpBuilder = (ctx, args) => {
 
   if (knucklePitch <= 0) throw new BakerError('piano_hinge: knuckle_pitch must be positive');
   let knuckleCount = Math.max(3, Math.floor(length / knucklePitch));
-  if (knuckleCount % 2 === 0) knuckleCount += 1; // articraft 强制奇数
-  const knuckleOuter = pinDiameter * 1.55;       // articraft 写死
+  if (knuckleCount % 2 === 0) knuckleCount += 1; // 强制奇数
+  const knuckleOuter = pinDiameter * 1.55;       // 写死系数
 
   const shape = buildBarrelHinge(ctx, {
     length, leafWidthA, leafWidthB, leafThickness, pinDiameter,

@@ -9,6 +9,7 @@ import { registerScreenshotRoutes } from './agent/routes.js'
 import { registerProjectRoutes } from './routes/projects.js'
 import { registerGroupTemplateRoutes } from './routes/groupTemplates.js'
 import { registerAssetRoutes } from './routes/assets.js'
+import { registerModelRoutes } from './routes/model.js'
 import { getRuntime, stopBatteryWatch } from './runtime.js'
 import { warmUpBaker } from './services/baker-context.js'
 
@@ -28,6 +29,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerProjectRoutes(app)
   await registerGroupTemplateRoutes(app)
   await registerAssetRoutes(app)
+  await registerModelRoutes(app)
   await getRuntime()
   // Non-blocking OCCT WASM warmup: the first bake otherwise pays the ~1-2s WASM
   // boot inline. Fire-and-forget so the server starts serving immediately; a

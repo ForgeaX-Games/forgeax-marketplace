@@ -5,13 +5,17 @@
  * (and any other client) re-pulls. The node graph is never touched here.
  */
 import type { FastifyInstance } from 'fastify'
+import { executeNode, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
 import { broadcastToClients } from '../routes/ws.js'
 import {
   addBakedLayer,
   bakeLayers,
+  bakeLayersForProject,
   ensurePaintTarget,
   getBakedHistoryStatus,
   listBakedLayers,
+  listBakedLayersForProjectDir,
+  listBakedLayersSummaryForProjectDir,
   moveBakedLayer,
   patchBakedCustomAttributes,
   redoBakedHistory,
@@ -21,16 +25,39 @@ import {
   undoBakedHistory,
   type BakedCell,
 } from './store.js'
+import { buildBakeLayersFromExecutionResult, collectTerminalPorts } from './snapshot-from-execute.js'
+import { getProjectDir, getActiveProjectDir, getRuntimeForProject } from '../runtime.js'
+import { ensureMutationAccess } from '../routes/projects.js'
+import { syncTrace } from '../debug/syncTrace.js'
 
 // Broadcast + log every mutation so the baked-layer edit flow is traceable in
 // the backend console (these are infrequent, user-driven actions).
-function notifyChanged(msg: string): void {
+function notifyChanged(msg: string, projectId?: string): void {
+  syncTrace('backend:baked-mutation', { msg, projectId })
   console.log(`[baked] ${msg}`)
-  broadcastToClients({ event: 'baked:changed', payload: {} })
+  broadcastToClients({ event: 'baked:changed', payload: projectId ? { projectId } : {} })
 }
 
 export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/v1/baked/layers', async () => ({ layers: await listBakedLayers() }))
+  app.get<{ Querystring: { mode?: string } }>('/api/v1/baked/layers', async (req) => {
+    if (req.query.mode === 'summary') {
+      const projDir = await getActiveProjectDir()
+      return listBakedLayersSummaryForProjectDir(projDir)
+    }
+    return { layers: await listBakedLayers() }
+  })
+
+  app.get<{ Params: { id: string }; Querystring: { mode?: string } }>(
+    '/api/v1/projects/:id/baked/layers',
+    async (req, reply) => {
+      const projDir = await getProjectDir(req.params.id)
+      if (!projDir) return reply.code(404).send({ error: 'project not found' })
+      if (req.query.mode === 'summary') {
+        return listBakedLayersSummaryForProjectDir(projDir)
+      }
+      return { layers: listBakedLayersForProjectDir(projDir) }
+    },
+  )
 
   app.get('/api/v1/baked/history', async () => getBakedHistoryStatus())
 
@@ -142,4 +169,78 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
     notifyChanged(`bake ${paths.length} → [${paths.join(', ')}]`)
     return { paths }
   })
+
+  app.post<{ Params: { id: string } }>('/api/v1/projects/:id/baked/bake', async (req, reply) => {
+    const b = (req.body ?? {}) as {
+      layers?: Array<{ nodePath?: string; nodeName?: string; cells?: BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>
+    }
+    try {
+      const paths = await bakeLayersForProject(req.params.id, (b.layers ?? []).map((l) => ({ ...l, cells: l.cells ?? [] })))
+      notifyChanged(`bake ${paths.length} → [${paths.join(', ')}] (project ${req.params.id})`)
+      return { paths }
+    } catch (e) {
+      return reply.code(404).send({ error: (e as Error).message })
+    }
+  })
+
+  // 复盘(2026-07-01 sino bake/export 工具缺口):agent 侧只有 `scene:pipeline.execute`
+  // 的**摘要**版本(无 cells),没法像 UI 那样先拿 raw execute 的 cells 再手工拼
+  // bake payload。这个路由把「raw execute → 投影成体素图层 → bake」三步合成
+  // 一次服务端内部调用,cells 全程不出服务器进程,更不进模型上下文。
+  // agent 工具见 tool-handlers.ts `scene:baked.bakeFromExecute`。
+  app.post<{ Params: { id: string }; Body: { nodeId?: string; replace?: boolean } }>(
+    '/api/v1/projects/:id/baked/bake-from-execute',
+    async (req, reply) => {
+      syncTrace('backend:bake-from-execute', {
+        projectId: req.params.id,
+        nodeId: req.body?.nodeId,
+        replace: req.body?.replace,
+        referer: req.headers.referer,
+      })
+      const { id: projectId } = req.params
+      const replace = req.body?.replace === true
+      const access = await ensureMutationAccess(req, projectId)
+      if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
+      const execBody: ExecuteNodeRequest = typeof req.body?.nodeId === 'string' ? { nodeId: req.body.nodeId } : {}
+      const runtime = await getRuntimeForProject(projectId)
+      const handle = await executeNode(runtime, execBody)
+      const full = await handle.done
+      if (full.status !== 'completed') {
+        return reply.code(422).send({
+          error: `execute did not complete (status=${full.status})`,
+          executionId: full.executionId,
+          detail: full.error,
+        })
+      }
+      // Only bake the port(s) that directly feed the graph's `scene_output`
+      // sink — a whitelist, not a "no downstream consumer" blacklist, because
+      // a blacklist can't see wiring *inside* nested `__group__` template
+      // subgraphs (24/185 nodes here) and still re-bakes their internal
+      // intermediate scene outputs (measured 4432 redundant layers vs. a
+      // handful of real ones on a 185-node graph, ~40s). See
+      // snapshot-from-execute.ts. Falls back to bake-all when the graph has
+      // no wired scene_output (empty set).
+      const snapshot = getPipeline(runtime)
+      const terminalPorts = snapshot
+        ? collectTerminalPorts(Object.values(snapshot.nodes), Object.values(snapshot.edges))
+        : undefined
+      const layers = buildBakeLayersFromExecutionResult(full, terminalPorts)
+      if (layers.length === 0) {
+        return reply.code(422).send({
+          error: 'execute completed but produced zero scene layers to bake — nothing to snapshot',
+          executionId: full.executionId,
+        })
+      }
+      try {
+        const paths = await bakeLayersForProject(projectId, layers, { replace, recordHistory: !replace })
+        notifyChanged(
+          `bake-from-execute${replace ? ' (replace)' : ''} ${paths.length} → [${paths.slice(0, 8).join(', ')}${paths.length > 8 ? ', …' : ''}] (project ${projectId})`,
+          projectId,
+        )
+        return { paths, executionId: full.executionId, layerCount: layers.length }
+      } catch (e) {
+        return reply.code(404).send({ error: (e as Error).message })
+      }
+    },
+  )
 }

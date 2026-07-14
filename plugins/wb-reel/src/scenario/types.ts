@@ -209,6 +209,15 @@ export interface StickerClip {
   enter?: string
   /** 出场动画预设 id。 */
   exit?: string
+  /**
+   * 图层混合模式(v9)—— UI 素材去背/叠加用。默认 normal。
+   * screen/lighten 让纯黑底消失(保辉光/粒子);multiply 让纯白底消失(保暗线稿)。
+   */
+  blendMode?: UIBlendMode
+  /** 关联的 UI 素材库资产 id（Scenario.uiAssets）；从 UI 库拖入时回填(v9)。 */
+  uiAssetId?: string
+  /** true = 钉到整场(endMs 跟随场景时长, Tier B 单场常驻)(v9)。 */
+  pinToScene?: boolean
 }
 
 /** 转场（节点级入场）：在 scene 开头一段时间内跑转场动画。 */
@@ -782,6 +791,300 @@ export interface UIStyle {
   /** 全局 UI 风格描述（暗黑赛博 / 民国手绘 / 极简日漫……） */
   prompt: string
   refImageId?: string
+}
+
+// ============================================================================
+// UI 素材库（v9 新增）—— 影游叠加式 UI 覆盖层的资产注册表 + 常驻 HUD 绑定
+// ============================================================================
+
+/**
+ * 图层混合模式 —— UI 素材「去背 + 叠加」核心机制。
+ *
+ * 影游 UI 多为发光/粒子/半透明,无法硬抠图。改用图层属性去背(实证:gpt-image-2
+ * 不支持原生透明,但能产出真·纯黑/纯白底):
+ *   - screen/lighten:纯黑(#000)底消失,辉光/金光/粒子加光叠加保留(好感度飘字/光效)。
+ *   - multiply:纯白(#fff)底消失,暗色线稿/描边保留(水墨边框)。
+ *   - overlay/hard-light:对比增强叠加。normal:直接盖(配透明 PNG / 已抠图)。
+ */
+export type UIBlendMode =
+  | 'normal'
+  | 'screen'
+  | 'multiply'
+  | 'overlay'
+  | 'hard-light'
+  | 'lighten'
+  | 'add'
+
+/**
+ * 去背方式 —— 决定生成时用什么底、运行时靠什么让底消失。
+ *   - screen-black（默认）：纯黑底 + screen 混合(发光/金色/粒子首选)。
+ *   - multiply-white：纯白底 + multiply 混合(暗色线稿/描边)。
+ *   - alpha：原生透明 PNG(仅 gpt-image-1.x 支持;或已 chroma 抠好);normal 直接盖。
+ *   - chroma：洋红底 + cutoutToTransparent 手动抠图(硬边纯色底);产出 alpha。
+ *   - opaque：不去背(有底,靠 blendMode/透明度盖)。
+ */
+export type UIMatte =
+  | 'screen-black'
+  | 'multiply-white'
+  | 'alpha'
+  | 'chroma'
+  | 'opaque'
+
+/**
+ * UI 素材角色 —— 高频影游叠加类型,驱动模板化生成 prompt 与默认锚点/生命周期。
+ */
+export type UIAssetRole =
+  | 'affinity' // 好感度增减飘字
+  | 'nameplate' // 人员出场 / 姓名下三分之一
+  | 'location-title' // 地域名称标题卡
+  | 'act-transition' // 幕次切换 / 第二日等时间流逝
+  | 'exposition' // 背景交代艺术文字
+  | 'interaction-hint' // 交互点 / QTE / 选择前提示
+  | 'pip-silhouette' // 画中画卡通剪影
+  | 'hp-bar' // 角色 / boss 血条
+  | 'avatar-frame' // 角色 / boss 头像框
+  | 'skill-box' // 技能框
+  | 'attack-box' // 攻击框
+  | 'ending-card' // 结局卡
+  | 'tree-background' // 剧情树/关卡选择页全屏背景
+  | 'tree-node-frame' // 剧情树节点框(叠在场景缩略图上)
+  | 'screen-background' // 全屏 UI 页面背景(背包/主菜单/宝箱/搜刮)
+  | 'screen-frame' // 全屏 UI 页面外框/边饰
+  | 'custom' // 自定义
+
+/** 数值绑定 —— HUD 元素把某变量映射到填充比例(血条)或数字显示。 */
+export interface UIValueBind {
+  /** 绑定的变量 id（Scenario.variables）。 */
+  varId: string
+  /** fill = 按 min~max 归一化成 0~1 填充宽度(血条);number = 直接显示数值。 */
+  kind: 'fill' | 'number'
+  /** fill 归一化下限(默认取变量 min 或 0)。 */
+  min?: number
+  /** fill 归一化上限(默认取变量 max 或 100)。 */
+  max?: number
+}
+
+/**
+ * UI 素材 —— 全局注册表(镜像 InventoryItem)。一份素材可被:
+ *   - 拖入某场时间轴当瞬时/单场叠层(Tier A/B,生成 StickerClip)；
+ *   - 绑成跨场常驻 HUD(Tier C,Scenario.hud 的 HudElement 引用)。
+ */
+export interface UIAsset {
+  id: string
+  /** 显示名(如「好感度提升」「主角血条」)。 */
+  name: string
+  role: UIAssetRole
+  /** 生成/抠图后的图 mediaId(mediaStore)。 */
+  mediaId?: string
+  /** 生成用英文 prompt(含单色底约束)。 */
+  prompt?: string
+  /** 图生图参考图 mediaId 列表(素材库挑)。 */
+  refMediaIds?: string[]
+  /** 去背方式;决定生成底色与默认 blendMode。 */
+  matte: UIMatte
+  /** 默认叠加混合模式(由 matte 推导默认,可覆盖)。 */
+  blendMode: UIBlendMode
+  /** 默认锚点(归一化 0~1)+ 缩放(画面高度百分比基准)。 */
+  defaultAnchor?: { x: number; y: number; scale?: number }
+  /** 瞬时类默认时长(ms);拖入时间轴的初始 clip 长度。 */
+  defaultDurationMs?: number
+  /** 默认生命周期意图:transient 瞬时 / scene 单场常驻 / hud 跨场常驻。 */
+  lifecycle: 'transient' | 'scene' | 'hud'
+  /** HUD 用默认数值绑定建议(血条等);可在 HudElement 覆盖。 */
+  valueBind?: UIValueBind
+  /** 作者备注。 */
+  desc?: string
+}
+
+/**
+ * 常驻 HUD 元素（Tier C）—— 跨场景、随游戏状态显隐、可绑数值实时更新。
+ *
+ * 由 Player 顶层 HudLayer 渲染(独立于单场时间轴):
+ *   - visibleWhen 命中(如「战斗中」flag)才显示,跨多个 scene 节点持续。
+ *   - valueBind 把变量实时映射到血条填充/数字。
+ */
+export interface HudElement {
+  id: string
+  /** 引用的 UI 素材(Scenario.uiAssets)。 */
+  uiAssetId: string
+  /** 屏幕锚点(归一化 0~1)+ 缩放(画面高度百分比基准,默认由素材定)。 */
+  anchor: { x: number; y: number; scale?: number }
+  /** 叠加混合模式(默认取素材 blendMode)。 */
+  blendMode?: UIBlendMode
+  /** 显示条件(复用分支条件:var/flag/visited/hasItem);缺省=恒显。 */
+  visibleWhen?: BranchCondition
+  /** 数值绑定(血条填充/数字)。 */
+  valueBind?: UIValueBind
+  /** 叠放层级(大在上,默认 0)。 */
+  z?: number
+}
+
+/**
+ * 剧情树主题预设 —— 决定连线/方向默认值与生成背景/节点框的 prompt 基调。
+ *   default 用现有内置深色风;chinese=金线水墨;cartoon=明快描边;scifi=霓虹 HUD;
+ *   custom=作者完全自定义(仅用显式字段,不套预设默认)。
+ */
+export type TreeThemePreset = 'default' | 'chinese' | 'cartoon' | 'scifi' | 'custom'
+
+/** 剧情树布局导航模式:map=自由地图;linear=线性关卡列表(预留)。 */
+export type TreeNavMode = 'map' | 'linear'
+
+/**
+ * 玩家可跳转范围:
+ *   none    = 只读(现有行为,只能看)。
+ *   visited = 可跳回已访问节点(回放) + 已访问节点的直接可达分支(推进)。
+ *   all     = 任意节点自由跳(调试/自由探索)。
+ */
+export type TreeJumpScope = 'visited' | 'all' | 'none'
+
+/** 剧情树连线样式。 */
+export interface TreeEdgeStyle {
+  /** 连线颜色(CSS color);缺省由预设定。 */
+  color?: string
+  /** 线宽(px)。 */
+  width?: number
+  /** 是否虚线。 */
+  dashed?: boolean
+}
+
+/**
+ * 剧情树主题(Tier: 游戏内剧情树 per-scenario 皮肤 + 章节/关卡选择导航)。
+ *
+ * 由播放器 BranchTreeReadonly / BranchTreeOverlay 消费:
+ *   - 背景/节点框走 UI 部件(scenario.uiAssets)生成管线,这里只引用 assetId。
+ *   - 全字段可选;整体缺省(scenario.treeTheme == undefined)时回落现有内置样式。
+ */
+export interface TreeTheme {
+  preset: TreeThemePreset
+  /** 全屏背景图,引用 uiAssets(role 'tree-background')。 */
+  backgroundAssetId?: string
+  /** 节点框(默认态),引用 uiAssets(role 'tree-node-frame')。 */
+  nodeFrameAssetId?: string
+  /** 当前节点高亮框(可选)。 */
+  nodeFrameCurrentAssetId?: string
+  /** 未解锁节点框(可选)。 */
+  nodeFrameLockedAssetId?: string
+  /** 连线样式(缺省由预设)。 */
+  edge?: TreeEdgeStyle
+  /** dagre 布局方向(默认 'TB')。 */
+  direction?: 'TB' | 'LR'
+  /** 节点是否显示场景缩略图(默认 true;false=纯标题框)。 */
+  showThumbnails?: boolean
+  /** 导航模式(默认 'map')。 */
+  navMode?: TreeNavMode
+  /** 玩家可跳转范围(默认 'visited')。 */
+  jumpScope?: TreeJumpScope
+  /** 关卡选择页标题(缺省用剧本名)。 */
+  title?: string
+}
+
+/**
+ * 全屏 UI 页面类型(v11)—— 仿《底特律:变人》类深度互动影游的整页 UI。
+ *   - inventory:真背包(读运行时 ownedItems + scenario.items 出网格,可查看/丢弃)。
+ *   - mainMenu:主菜单(继续/重开/关卡选择/退出等按钮)。
+ *   - chest:开宝箱(点击开启 → 发 loot 给玩家,一次性)。
+ *   - search:搜刮页(整页背景 + 归一化热点,点击拾取,搜打撤)。
+ *   - custom:自定义(纯 slot 拼装:装饰部件 + 按钮 + 动作绑定)。
+ */
+export type UIScreenKind = 'inventory' | 'mainMenu' | 'chest' | 'search' | 'custom'
+
+/**
+ * 全屏页面动作 —— 按钮/热点触发的行为。运行时由 Player 的 ScreenOverlay 分发。
+ */
+export type UIScreenAction =
+  | { type: 'close' } // 关闭本页,续播
+  | { type: 'restart' } // 从头开始
+  | { type: 'home' } // 返回主页
+  | { type: 'exit' } // 退出试玩
+  | { type: 'levelSelect' } // 打开剧情树/关卡选择
+  | { type: 'jumpScene'; sceneId: string } // 跳到某场
+  | { type: 'openScreen'; screenId: string } // 打开另一个全屏页面
+  | { type: 'giveItems'; effects: ItemEffect[] } // 发/扣物品
+  | { type: 'applyVars'; effects: VarEffect[] } // 改数值
+
+/**
+ * 全屏页面槽位 —— custom 页的拼装单元(也可用于其它 kind 追加装饰/按钮)。
+ * 坐标/尺寸均为归一化(相对页面 0~1)。
+ */
+export interface UIScreenSlot {
+  id: string
+  /** widget=纯装饰部件图;button=可点按钮;text=文本标签。 */
+  kind: 'widget' | 'button' | 'text'
+  /** 引用的 UI 部件(scenario.uiAssets)mediaId 来源;widget/button 背景图用。 */
+  assetId?: string
+  /** 文案(button 标签 / text 内容)。 */
+  label?: string
+  /** 归一化位置(中心点)+ 尺寸(相对页宽/页高)。 */
+  x: number
+  y: number
+  w?: number
+  h?: number
+  /** button 点击动作。 */
+  action?: UIScreenAction
+  /**
+   * 数值绑定(与 HUD 同一套 UIValueBind)—— widget 槽位可把变量实时映射成
+   * 血条填充(fill,按 min~max 揭开图像)或数字(number,叠字)。缺省=纯静态图。
+   */
+  valueBind?: UIValueBind
+  /**
+   * 显示条件(复用分支条件 var/flag/visited/hasItem)—— 缺省=恒显。
+   * 用于"血量低于 X 才显示警示图标""拿到钥匙才显示某按钮"等数值联动。
+   */
+  visibleWhen?: BranchCondition
+  /** 叠放层级(大在上,默认 0)。 */
+  z?: number
+}
+
+/**
+ * 全屏 UI 页面定义(v11)—— 全局注册表 scenario.uiScreens。
+ *
+ * 由 Player 顶层 ScreenOverlay(portal)按 kind 渲染,读运行时 ownedItems / vars。
+ * 触发:PlayerMenu 菜单项(inventory/mainMenu/custom)或时间轴 ScreenClip(chest/search)。
+ */
+export interface UIScreen {
+  id: string
+  /** 显示名(菜单项/编辑器列表用)。 */
+  name: string
+  kind: UIScreenKind
+  /**
+   * 单页独立开关(缺省 = 开)。关掉这一页 → 运行时菜单入口 / 时间轴触发 / 跨页跳转
+   * 都跳过它,但保留定义方便随时开回。让作者能按"背包 / 游戏化主界面"逐个取舍,
+   * 而不用连整套全屏页面系统一起关。runtime 由 effectiveUIScreens 统一过滤。
+   */
+  enabled?: boolean
+  /** 全屏背景图,引用 uiAssets(role 'screen-background')。 */
+  backgroundAssetId?: string
+  /** 页面外框图(可选),引用 uiAssets(role 'screen-frame')。 */
+  frameAssetId?: string
+  /** 页面标题 / 副标题(缺省用 name)。 */
+  title?: string
+  subtitle?: string
+  /** 拼装槽位(custom 主用;其它 kind 可追加装饰/按钮)。 */
+  slots?: UIScreenSlot[]
+  /** chest:开启时发放的战利品(一次性)。 */
+  loot?: ItemEffect[]
+  /** chest:开启时同时应用的数值奖励(如金币 +100、经验 +50)。与 loot 并行。 */
+  lootVars?: VarEffect[]
+  /** chest:开启后置位的 flag 变量 id(防重复开箱;可选)。 */
+  openedVarId?: string
+  /** search:整页搜刮热点(归一化坐标,点击拾取)。 */
+  hotspots?: SearchHotspot[]
+  /** mainMenu:显示哪些内置按钮(缺省全显)。 */
+  menuActions?: UIScreenAction['type'][]
+  /** 是否可被玩家用 ESC / 关闭按钮关掉(mainMenu 可设 false 强制选择)。 */
+  dismissible?: boolean
+}
+
+/**
+ * 全屏页面时间轴触发 clip(v11)—— 挂在 Scene.screens,到点弹出对应页面。
+ * 镜像 MinigameClip:播放到 startMs 时暂停并打开 screenId 指向的全屏页面。
+ */
+export interface ScreenClip {
+  id: string
+  /** 指向 scenario.uiScreens 的页面 id。 */
+  screenId: string
+  /** 触发时间(相对本场,ms)。 */
+  startMs: number
 }
 
 /**
@@ -1477,6 +1780,11 @@ export interface Scene {
    */
   searchSegments?: SearchSegmentClip[]
   /**
+   * 全屏 UI 页面触发 clip —— v11 新增。播放到 startMs 时暂停并弹出对应全屏页面
+   * (开宝箱 / 搜刮页 / 自定义等)。缺省 / 空数组 = 这场戏不自动弹全屏页面。
+   */
+  screens?: ScreenClip[]
+  /**
    * 剪映式后期效果 —— v8 新增。全部为「作者元数据 + 实时渲染」，不重编码 mp4。
    * 缺省 / 空 = 这场戏没有该类效果。
    */
@@ -1747,6 +2055,8 @@ export type ModuleId =
   | 'minigame'
   | 'numeric'
   | 'inventory'
+  /** 全屏页面系统(v11)：真背包 / 游戏化主界面 / 开宝箱 / 搜刮页等整页 UI + 玩法。 */
+  | 'uiScreen'
 
 export interface Scenario {
   id: string
@@ -1767,7 +2077,7 @@ export interface Scenario {
    * v6 = 加入 variables{} + Branch.condition/effects/gateMode + Scene.onEnterEffects（数值系统）。
    * 读入时按版本链式升级（migrateScenarioToLatest 负责）。
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
 
   /**
    * 模块开关 —— v7 新增。
@@ -1810,6 +2120,30 @@ export interface Scenario {
   episodes?: Episode[]
   /** 全局 UI 视觉风格 —— 喂给生图模型当 prefix；保证按钮/字幕条/QTE icon 风格统一 */
   uiStyle?: UIStyle
+  /**
+   * UI 素材库 —— v9 新增。影游叠加式 UI 覆盖层的全局资产注册表(好感度飘字 / 姓名条 /
+   * 血条 / 技能框……)。素材可拖入某场时间轴当瞬时/单场叠层,或绑成常驻 HUD。
+   * 缺失 / 空对象 = 没有自定义 UI 素材(旧数据默认)。
+   */
+  uiAssets?: Record<string, UIAsset>
+  /**
+   * 常驻 HUD 绑定层 —— v9 新增(Tier C)。跨场景、随状态显隐、可绑数值实时更新的
+   * UI 元素(血条 / 技能框)。由 Player 顶层 HudLayer 渲染,独立于单场时间轴。
+   * 缺失 / 空数组 = 无常驻 HUD(旧数据默认,播放器保持零常驻 HUD 行为)。
+   */
+  hud?: HudElement[]
+  /**
+   * 剧情树主题 —— v10 新增。游戏内剧情树(BranchTreeOverlay)的 per-scenario 皮肤:
+   * 节点框 / 背景图 / 连线风格(中式/卡通/科幻/默认) + 章节/关卡选择导航配置。
+   * 缺失 = 回落播放器内置深色样式(向后兼容)。节点框/背景走 uiAssets 生成管线。
+   */
+  treeTheme?: TreeTheme
+  /**
+   * 全屏 UI 页面注册表 —— v11 新增。仿深度互动影游的整页 UI(真背包 / 主菜单 /
+   * 开宝箱 / 搜刮页 / 自定义)。由 Player 顶层 ScreenOverlay 渲染,菜单或时间轴触发。
+   * 缺失 / 空对象 = 无全屏页面(旧数据默认)。
+   */
+  uiScreens?: Record<string, UIScreen>
   /**
    * 全局"美术风格"—— 影响**所有**素材生成（场景图 / 角色立绘 / 参考图 / 批量生图）。
    * 与 uiStyle 的区别：uiStyle 约束 UI 外观（按钮/字幕），visualStyle 约束"画面内容"。

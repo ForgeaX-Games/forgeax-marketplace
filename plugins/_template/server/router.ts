@@ -19,7 +19,7 @@ export interface TemplatePluginCtx {
 export function createTemplateRouter(ctx: TemplatePluginCtx) {
   const app = new Hono();
 
-  app.get('/status', (c) => c.json({ ok: true, pluginId: '@forgeax-plugin/_template' }));
+  app.get('/status', (c) => c.json({ ok: true, pluginId: '@forgeax-extension/_template' }));
 
   app.post('/echo', async (c) => {
     const body = await c.req.json().catch(() => ({}));

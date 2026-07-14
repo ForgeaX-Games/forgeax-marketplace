@@ -1,14 +1,15 @@
 # 随机POI分布 (poi_scatter)
 
-在网格指定区域值上随机散布兴趣点（POI），支持单网格、多值网格和网格列表三种输入格式，输出格式与输入保持一致，仅在目标格上写入 POI 点位 ID。
+在单张网格指定区域值上随机散布兴趣点（POI），仅在目标格上写入 POI 点位 ID。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
-1. **三种输入格式通用**：自动识别 `number[][]`（单/多值网格）和 `number[][][]`（网格列表），输出格式与输入完全对应。
+1. **单张多值网格输出**：每种 POI 一个递增 id 写入同一张 `outputGrid`，配合 `outputNameList` 可接 `grid_split_by_value` 拆分。
 2. **多类 POI 同时布置**：通过 `poiRules` 数组一次声明多种 POI，每种有独立的目标区域值、数量和间距约束。
 3. **最小间距保护**：同一网格内所有已放置点（含跨规则）共享最小间距检测，避免 POI 堆叠。
 4. **ID 自动递增**：自动从输入网格最大值+1 开始分配 POI ID，不与已有掩码冲突。
-5. **列表模式每网格独立随机**：网格列表输入时，每张网格使用不同随机种子，保证输出差异化。
 
 ## 适用情况
 
@@ -19,26 +20,25 @@
 
 ## 基本使用方法
 
-1. 将上游地形网格（或网格列表）接入 `grid` 端口。
+1. 将上游地形网格接入 `inputGrid` 端口。
 2. 在 `poiRules` 端口输入规则数组，每条规则至少包含 `decoration`（名称）和 `targetValue`（目标格值）。
 3. 调整 `seed` 控制随机结果，POI ID 自动从网格最大值+1开始分配。
-4. `outputGrid` 输出格式与输入完全一致，可直接传给下游渲染或足迹写回节点。
+4. `outputGrid` 为单张多值网格，可接 `grid_split_by_value` 拆分后传给下游渲染或足迹写回节点。
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | any | - | 输入网格：单网格 `number[][]` 或网格列表 `number[][][]` |
+| inputGrid | grid | - | 单张输入网格 `number[][]`（DataTree 逐张处理） |
 | poiRules | array | - | POI规则列表，见下方"POI规则格式"说明 |
-| maxAttempts | number | 200 | 每个 POI 点位的最大随机采样次数 |
 | seed | number | 0 | 随机种子，0 使用当前时间自动随机 |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | any | 写入 POI 点后的网格，格式与输入完全一致 |
-| poiNameList | array | 已放置的 POI 类型清单：`[{id, name}]` |
+| outputGrid | grid | 单张多值网格：每种 POI 一个递增 id，未放置处为 0 |
+| outputNameList | array | 网格中实际出现的 POI 清单：`[{id, name, type}]`，type 固定为 asset |
 | placedCount | number | 成功放置的 POI 总点数 |
 
 ## POI规则格式
@@ -73,11 +73,11 @@
 
 ## 使用示例
 
-### 单网格输入
+### 输入示例
 
 ```json
 {
-  "grid": [[4,4,7,4],[4,4,4,7],[3,3,3,3]],
+  "inputGrid": [[4,4,7,4],[4,4,4,7],[3,3,3,3]],
   "poiRules": [
     {"decoration": "洞穴", "targetValue": 7, "count": 2, "minDistance": 4},
     {"decoration": "营火", "targetValue": 4, "count": 3, "minDistance": 3}
@@ -86,27 +86,14 @@
 }
 ```
 
-### 网格列表输入
-
-```json
-{
-  "grid": [
-    [[4,4,7],[4,4,4]],
-    [[4,7,4],[7,4,4]]
-  ],
-  "poiRules": [{"decoration": "营火", "targetValue": 4, "count": 2, "minDistance": 2}],
-  "seed": 0
-}
-```
-
 ### 输出示例
 
 ```json
 {
-  "outputGrid": [[4,101,7,4],[4,4,4,100],[3,3,3,3]],
-  "poiNameList": [
-    {"id": 100, "name": "洞穴"},
-    {"id": 101, "name": "营火"}
+  "outputGrid": [[0,101,7,0],[0,0,0,100],[0,0,0,0]],
+  "outputNameList": [
+    {"id": 100, "name": "洞穴", "type": "asset"},
+    {"id": 101, "name": "营火", "type": "asset"}
   ],
   "placedCount": 2
 }
@@ -116,5 +103,4 @@
 
 1. **只写点位，不改地形**：输出网格中 POI 仅在中心格写入新 ID，不覆盖周边格子。如需足迹写回，请在下游接专用节点。
 2. **跨规则共享间距**：同一网格内，不同规则的 POI 之间也会相互排斥（共享间距检测），密度过高时部分 POI 会找不到位置并被跳过。
-3. **网格列表模式的 ID 分配**：先计算所有网格的最大值，再从全局最大值+1开始，每张网格按规则数量递进 ID（`globalBaseId + i * ruleCount`），避免不同网格间 ID 冲突。
-4. **输入格式自动识别**：通过检测 `grid[0][0]` 是否为数字来区分单网格和列表，确保输入格式正确（不要传嵌套超过三层的结构）。
+3. **ID 分配**：POI ID 从当前网格最大值+1 开始递增，避免与已有掩码冲突。

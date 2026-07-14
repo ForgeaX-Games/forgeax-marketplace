@@ -5,7 +5,7 @@ for the plugin's marketplace listing** (the rich card + detail modal on the publ
 The website is *derived* from this file by `scripts/website/build-marketplace.mjs` — never
 hand-write card copy into the website HTML.
 
-If this file is absent, the build auto-derives a thin card from `forgeax-plugin.json` +
+If this file is absent, the build auto-derives a thin card from `forgeax-extension.json` +
 git history. Ship this file to get a real, 100+character, multi-section listing.
 
 ## Schema (bilingual; every text field has `zh` + `en`)

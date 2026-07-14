@@ -136,6 +136,23 @@ export interface ImageRequest {
    * 未来若有 provider 支持更多维度（mask / 权重），扩展此类型即可。
    */
   referenceImages?: ImageReference[]
+  /**
+   * 背景控制（v9 · UI 素材库）。
+   *   - 'transparent'：请求原生透明底(仅 gpt-image-1.x 支持;gpt-image-2 会 400,
+   *     provider 层有能力守卫会自动丢弃回落到不透明)。
+   *   - 'opaque'/'auto'：透传给模型(多数场景不需要)。
+   * 缺省 = 不发该字段(模型默认)。
+   */
+  background?: 'transparent' | 'opaque' | 'auto'
+  /**
+   * 输出格式（v9）。透明底必须 png/webp;jpeg 无 alpha。缺省 = 不发(png)。
+   */
+  outputFormat?: 'png' | 'jpeg' | 'webp'
+  /**
+   * 生成质量（v9）。gpt-image-2 必带 quality;缺省由 provider 兜底 'medium'。
+   * UI 素材(线条/发光)建议 'high' 以保边缘锐利。
+   */
+  quality?: 'low' | 'medium' | 'high'
 }
 
 export interface ImageResult {

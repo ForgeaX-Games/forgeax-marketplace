@@ -160,7 +160,7 @@ export class PipelinePanel {
    *  不再回播（用 _applyingBroadcast guard）。 */
   private setupSplitPaneSync(): void {
     try {
-      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-anim.active-pipeline')
+      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-anim.active-pipeline')
     } catch {
       this._bc = null
       return

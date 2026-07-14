@@ -1,5 +1,5 @@
 /** split-pane 下 left/center 各跑一份 React，生成完成后需广播刷新图标库。 */
-const CHANNEL = 'forgeax-plugin.@forgeax-plugin/wb-items.refresh';
+const CHANNEL = 'forgeax-plugin.@forgeax-extension/wb-items.refresh';
 
 export function broadcastItemsRefresh(reason = 'items-changed'): void {
   if (typeof BroadcastChannel === 'undefined') return;

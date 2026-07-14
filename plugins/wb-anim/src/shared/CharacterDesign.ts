@@ -620,7 +620,7 @@ export class CharacterDesign {
   private setupBroadcast(): void {
     if (this._bc) return
     try {
-      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-plugin/wb-character.cd-state')
+      this._bc = new BroadcastChannel('forgeax-plugin.@forgeax-extension/wb-character.cd-state')
     } catch {
       this._bc = null
       return

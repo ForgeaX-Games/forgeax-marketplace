@@ -24,3 +24,7 @@ const cmd = [
 
 execSync(cmd, { stdio: 'inherit', cwd: appRoot })
 console.log('[build-vendor] OK — vendor/dist/shared/types compiled')
+
+// Regenerate the compact DSL op directory (SSOT: the freshly-built op-registry)
+// so the compose skill never drifts from the registry.
+execSync('node scripts/gen-op-directory.mjs', { stdio: 'inherit', cwd: appRoot })

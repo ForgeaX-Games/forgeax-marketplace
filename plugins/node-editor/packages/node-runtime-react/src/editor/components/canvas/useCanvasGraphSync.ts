@@ -153,6 +153,20 @@ export function buildCanvasNodes(groupCallbacks?: GroupNodeCallbacks): Node[] {
   return result
 }
 
+/** True when the snapshot has battery-backed nodes but the catalog is still empty. */
+function pipelineAwaitingBatteryCatalog(): boolean {
+  const { currentPipeline, batteries } = usePipelineStore.getState()
+  if (!currentPipeline || batteries.length > 0) return false
+  return currentPipeline.nodes.some(
+    (n) => n.batteryId !== RELAY_BATTERY_ID && n.batteryId !== '__group__',
+  )
+}
+
+function scheduleOpenFitView(instance: ReactFlowInstance): void {
+  // Defer one tick so ReactFlow has measured the freshly-set nodes.
+  setTimeout(() => instance.fitView({ padding: 0.15, duration: 400 }), 60)
+}
+
 // ── Diff-based reconcile ─────────────────────────────────────────────────────
 // Ported from the legacy incremental-update contract: the legacy editor NEVER
 // rebuilt the whole ReactFlow layer on a graph mutation — a full rebuild fired
@@ -380,9 +394,18 @@ export function useCanvasGraphSync({
   const batteriesReady = batteries.length > 0
   // Node-id set of the previous rebuild, to detect a wholesale graph replace.
   const prevNodeIdsRef = useRef<Set<string>>(new Set())
+  // Cold open / project switch: fitView may need to wait for onInit (reactFlowInstance
+  // is still null when loadPipeline fires). Without this, the first successful rebuild
+  // skips fitView and the follow-up rebuild sees full id overlap → still no fitView,
+  // leaving the canvas looking empty until the user switches panes (which remounts).
+  const pendingOpenFitRef = useRef(false)
+  const openFitDoneRef = useRef(false)
   const rebuild = useCallback(() => {
     // In a group view, useCanvasGroupView owns the RF layer — don't clobber it.
     if (isInGroupView) return
+    // Snapshot arrived before the battery catalog — wait; rebuilding now would drop
+    // every battery node and write an empty RF layer.
+    if (pipelineAwaitingBatteryCatalog()) return
     // Diff-based reconcile (NOT a blanket replace): added/changed/removed nodes
     // update while every untouched node keeps its previous object reference, so
     // `memo(BatteryNode)` does not re-render. This is the legacy incremental
@@ -404,17 +427,47 @@ export function useCanvasGraphSync({
     const prevIds = prevNodeIdsRef.current
     const builtIds = builtNodes.map((n) => n.id)
     prevNodeIdsRef.current = new Set(builtIds)
-    const overlap = builtIds.reduce((acc, id) => acc + (prevIds.has(id) ? 1 : 0), 0)
-    const wholesaleReplace = builtIds.length > 0 && overlap === 0
-    if (wholesaleReplace && reactFlowInstance) {
-      // Defer one tick so ReactFlow has measured the freshly-set nodes.
-      setTimeout(() => reactFlowInstance.fitView({ padding: 0.15, duration: 400 }), 60)
+    // Ignore synthetic/terminal nodes (ids like `__qc__`, `__urdf__`, `__bake__`)
+    // when measuring overlap. Compilers auto-append these and they persist across
+    // otherwise-disjoint graphs — e.g. a loop of DSL bakes that each `replace` the
+    // whole graph shares only `__bake__`, and sequential `model.apply` runs share
+    // `__qc__`/`__urdf__`. Counting them made a genuine wholesale replace look like
+    // an incremental edit (`overlap > 0`), so the refit was skipped and every graph
+    // after the first landed off-screen — the "only the first part shows" bug.
+    const isSynthetic = (id: string): boolean => /^__.+__$/.test(id)
+    const prevReal = [...prevIds].filter((id) => !isSynthetic(id))
+    const builtReal = builtIds.filter((id) => !isSynthetic(id))
+    const realOverlap = builtReal.reduce((acc, id) => acc + (prevIds.has(id) ? 1 : 0), 0)
+    // Ratio-based: treat a near-disjoint real-node set as a wholesale replace (so a
+    // swap that happens to reuse a couple of ids still refits) while a normal
+    // incremental edit (high overlap) does not, avoiding jarring viewport jumps.
+    const denom = Math.max(builtReal.length, prevReal.length)
+    const wholesaleReplace = builtReal.length > 0 && (denom === 0 || realOverlap / denom < 0.5)
+    if (wholesaleReplace) openFitDoneRef.current = false
+    const needsOpenFit =
+      builtIds.length > 0 && (wholesaleReplace || !openFitDoneRef.current)
+    if (needsOpenFit) {
+      if (reactFlowInstance) {
+        openFitDoneRef.current = true
+        pendingOpenFitRef.current = false
+        scheduleOpenFitView(reactFlowInstance)
+      } else {
+        pendingOpenFitRef.current = true
+      }
     }
   }, [setNodes, setEdges, isInGroupView, groupCallbacks, domainPortTypes, reactFlowInstance])
   useEffect(() => {
     rebuild()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipelineRevision, batteriesReady, rebuild])
+
+  // onInit fires after the first rebuild on cold open — honour a deferred fitView.
+  useEffect(() => {
+    if (isInGroupView || !reactFlowInstance || !pendingOpenFitRef.current) return
+    openFitDoneRef.current = true
+    pendingOpenFitRef.current = false
+    scheduleOpenFitView(reactFlowInstance)
+  }, [isInGroupView, reactFlowInstance])
 
   // Battery meta hot-update: refresh the battery snapshot on existing nodes so
   // titles / ports don't keep showing stale names.

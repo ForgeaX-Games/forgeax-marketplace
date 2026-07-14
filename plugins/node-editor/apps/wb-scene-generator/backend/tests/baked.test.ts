@@ -469,4 +469,56 @@ describe('baked scene-layer service', () => {
     expect(ls.find((l) => l.nodePath === '/A2')!.attributes?.biome).toBe('tundra')
     expect(ls.find((l) => l.nodePath === '/A1')!.attributes?.area_id).toBe('z1')
   })
+
+  it('GET /baked/layers?mode=summary omits cells but includes cellCount', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/baked/layers/cells',
+      payload: {
+        path: '/SummaryLayer',
+        cells: [{ x: 0, y: 0, z: 0, token: 'grass' }],
+        asset: { name: 'grass', type: 'tile' },
+      },
+    })
+    const r = await app.inject({ method: 'GET', url: '/api/v1/baked/layers?mode=summary' })
+    expect(r.statusCode).toBe(200)
+    const body = r.json() as { layers: Array<{ nodePath: string; cellCount?: number; cells?: unknown[] }> }
+    const layer = body.layers.find((l) => l.nodePath === '/SummaryLayer')
+    expect(layer).toBeDefined()
+    expect(layer!.cellCount).toBe(1)
+    expect(layer!.cells).toBeUndefined()
+  })
+
+  it('bake replace overwrites prior layers instead of appending /ground 2', async () => {
+    const {
+      clearBakedSceneForProjectDir,
+      bakeLayersForProject,
+      listBakedLayersForProjectDir,
+    } = await import('../src/baked/store.js')
+    const { getActiveProjectDir } = await import('../src/runtime.js')
+    const projDir = await getActiveProjectDir()
+    clearBakedSceneForProjectDir(projDir)
+    const wsRes = await app.inject({ method: 'GET', url: '/api/v1/workspace' })
+    const projectId = (wsRes.json() as { viewingProjectId?: string }).viewingProjectId
+    expect(projectId).toBeTruthy()
+
+    await bakeLayersForProject(
+      projectId!,
+      [
+        { nodePath: '/ground', nodeName: 'ground', cells: [{ x: 0, y: 0, z: 0 }], assetName: 'grass' },
+        { nodePath: '/trees', nodeName: 'trees', cells: [{ x: 1, y: 1, z: 0 }], assetName: 'tree' },
+      ],
+      { recordHistory: false },
+    )
+    expect(listBakedLayersForProjectDir(projDir).map((l) => l.nodePath).sort()).toEqual(['/ground', '/trees'])
+
+    await bakeLayersForProject(
+      projectId!,
+      [{ nodePath: '/ground', nodeName: 'ground', cells: [{ x: 5, y: 5, z: 0 }], assetName: 'sand' }],
+      { replace: true, recordHistory: false },
+    )
+    const after = listBakedLayersForProjectDir(projDir)
+    expect(after.map((l) => l.nodePath)).toEqual(['/ground'])
+    expect(after[0]!.cells).toEqual([{ x: 5, y: 5, z: 0, token: 'sand' }])
+  })
 })

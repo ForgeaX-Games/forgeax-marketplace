@@ -1,1 +1,1 @@
-export type { ApiClient, ActivateProjectResult, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto } from './ApiClient.js'
+export type { ApiClient, ActivateProjectResult, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto, ViewProjectResult } from './ApiClient.js'

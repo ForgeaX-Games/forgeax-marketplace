@@ -70,16 +70,16 @@ describe('forgeax project', () => {
     // open A → its templated graph is the active pipeline
     out = captureNdjson()
     await run(base('project', 'open', '--id', a.id))
-    const opened = out().at(-1) as { workspace: { activeProjectId: string }; pipeline: { nodes: Record<string, unknown> } }
-    expect(opened.workspace.activeProjectId).toBe(a.id)
+    const opened = out().at(-1) as { workspace: { viewingProjectId: string }; pipeline: { nodes: Record<string, unknown> } }
+    expect(opened.workspace.viewingProjectId).toBe(a.id)
     expect(Object.keys(opened.pipeline.nodes)).toEqual(['s'])
 
     // delete A → workspace stays valid + non-empty
     out = captureNdjson()
     await run(base('project', 'delete', '--id', a.id))
-    const del = out().at(-1) as { ok: boolean; workspace: { activeProjectId: string } }
+    const del = out().at(-1) as { ok: boolean; workspace: { viewingProjectId: string } }
     expect(del.ok).toBe(true)
-    expect(del.workspace.activeProjectId).toBeTruthy()
-    expect(del.workspace.activeProjectId).not.toBe(a.id)
+    expect(del.workspace.viewingProjectId).toBeTruthy()
+    expect(del.workspace.viewingProjectId).not.toBe(a.id)
   })
 })

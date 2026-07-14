@@ -1,16 +1,13 @@
 /**
- * farmland_grid: 根据可用区域掩码列表批量生成农田分区布局
- * 输入：gridList (array) — 可用区域掩码列表（每项非零为可种植区）; layout (string) — 布局算法;
+ * farmland_grid: 在单张可用区域掩码上生成农田分区布局（DataTree 形式）
+ * 输入：inputGrid (grid/item) — 单张可种植区掩码（非零为可种植区）; layout (string) — 布局算法;
  *       plotWidth/plotHeight/pathWidth (number) — 地块与小径宽度; seed (number) — 随机种子
  *       plantDensity (number, 0~1, default 0.9) — 作物点位铺设密度，1=满铺
- *       mergeOutput (boolean, default true) — 是否将所有网格的同语义层合并为一张网格
  * 输出：
- *   outputGridList (array) — 单值网格列表：
- *     每个作物类型输出两张：①田地网格（type:"tile"，名称"田地"）；②满铺点位网格（type:"asset"，名称为作物名）
- *     mergeOutput=true:  按语义合并，每类只输出一对（田垄/田地×作物），ID全局唯一
- *     mergeOutput=false: 每张农田独立拆分（农田N-田垄 / 农田N-田地 / 农田N-水稻 / …）
- *   outputNameList (array) — 名称清单（与 outputGridList 一一对应），
- *                             格式：{id, name, type:"tile"|"asset"}
+ *   outputGrid (grid/item) — 单张多值网格：
+ *     1=田垄(tile)，2=田地(tile，未铺作物点位的地块格)，3=水稻/4=小麦/5=玉米/6=蔬菜(asset，按 plantDensity 稀疏)
+ *   outputNameList (array/item) — 名称清单，仅含实际出现的 id，格式 {id, name, type:"tile"|"asset"}
+ * 网格列表由引擎按 DataTree 自动逐张 fanout。
  */
 
 type Grid = number[][];
@@ -275,198 +272,92 @@ interface NameEntry {
   type: string;
 }
 
-/**
- * 非合并模式：将单张多值网格拆分为单值网格列表 + 名称清单。
- * farmIndex 为农田序号（1起）；nextId 为全局 ID 计数器引用。
- * 对于作物类型，额外输出一张按 plantDensity 随机稀疏的点位网格（type:"asset"）。
- */
-function splitToSingleValueGrids(
-  multiGrid: Grid,
-  farmIndex: number,
-  nextId: { value: number },
-  plantDensity: number,
-  rng: () => number
-): { grids: Grid[]; nameList: NameEntry[] } {
-  const rows = multiGrid.length;
-  const cols = multiGrid[0]?.length ?? 0;
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
+const FARM_PATH_ID = 1; // 田垄
+const FARM_LAND_ID = 2; // 田地（未铺作物点位的地块格）
 
-  const valSet = new Set<number>();
-  for (const row of multiGrid) for (const v of row) if (v !== 0) valSet.add(v);
+// 作物 plot 值 → 作物点位 id（plotVal 2..5 → 3..6）；逆映射用 id-1 取 CROP_NAMES
+function cropAssetId(plotVal: number): number {
+  return plotVal + 1;
+}
 
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  for (const val of sortedVals) {
-    const singleGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        if (multiGrid[r][c] === val) singleGrid[r][c] = nextId.value;
-
-    if (val === PATH) {
-      // 田垄：直接输出，type:"tile"
-      nameList.push({ id: nextId.value, name: `农田${farmIndex}-${PATH_NAME}`, type: "tile" });
-      grids.push(singleGrid);
-      nextId.value++;
-    } else {
-      const cropName = CROP_NAMES[val] ?? `地块${val}`;
-
-      // ① 田地网格，type:"tile"
-      const landId = nextId.value;
-      nameList.push({ id: landId, name: `农田${farmIndex}-田地`, type: "tile" });
-      grids.push(singleGrid);
-      nextId.value++;
-
-      // ② 点位网格（按 plantDensity 随机稀疏），type:"asset"
-      const assetId = nextId.value;
-      const assetGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (singleGrid[r][c] === landId && rng() < plantDensity) assetGrid[r][c] = assetId;
-      nameList.push({ id: assetId, name: `农田${farmIndex}-${cropName}`, type: "asset" });
-      grids.push(assetGrid);
-      nextId.value++;
-    }
-  }
-
-  return { grids, nameList };
+function isGrid(v: unknown): v is Grid {
+  return Array.isArray(v) && Array.isArray((v as unknown[])[0]) &&
+    typeof (v as Grid)[0]?.[0] === "number";
 }
 
 /**
- * 合并模式：将所有多值网格按语义值合并。
- * - 田垄：所有农田的田垄合并为一张（type:"tile"）
- * - 田地：所有作物类型的田地合并为同一张（type:"tile"，名称"田地"），共用同一 ID
- * - 作物点位：每种作物各输出一张按 plantDensity 随机稀疏的点位网格（type:"asset"，名称为作物名）
- * 输出顺序：田垄 → 田地（合并） → 各作物点位
+ * 将单张多值布局网格（田垄 + 各作物地块）转换为最终 DataTree 输出网格：
+ *   田垄 → FARM_PATH_ID(tile)
+ *   作物地块格：按 plantDensity 随机命中 → 作物点位 id(asset)，未命中 → 田地 FARM_LAND_ID(tile)
+ * 仅输出实际出现的 id 名称。
  */
-function mergeBySemantics(
-  multiGrids: Grid[],
-  rows: number,
-  cols: number,
-  nextId: { value: number },
+function buildOutput(
+  multiGrid: Grid,
   plantDensity: number,
-  rng: () => number
-): { grids: Grid[]; nameList: NameEntry[] } {
-  // 收集所有出现的语义值
-  const valSet = new Set<number>();
-  for (const mg of multiGrids)
-    for (const row of mg)
-      for (const v of row)
-        if (v !== 0) valSet.add(v);
-
-  const sortedVals = [...valSet].sort((a, b) => a - b);
-  const cropVals = sortedVals.filter(v => v !== PATH);
-
-  const grids: Grid[] = [];
-  const nameList: NameEntry[] = [];
-
-  // ── 田垄 ──
-  if (valSet.has(PATH)) {
-    const merged: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    const id = nextId.value;
-    for (const mg of multiGrids)
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (mg[r]?.[c] === PATH) merged[r][c] = id;
-    nameList.push({ id, name: PATH_NAME, type: "tile" });
-    grids.push(merged);
-    nextId.value++;
-  }
-
-  // ── 田地（所有作物类型合并为一张）──
-  if (cropVals.length > 0) {
-    const landId = nextId.value;
-    const landGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-    for (const mg of multiGrids)
-      for (let r = 0; r < rows; r++)
-        for (let c = 0; c < cols; c++)
-          if (mg[r]?.[c] !== 0 && mg[r]?.[c] !== PATH) landGrid[r][c] = landId;
-    nameList.push({ id: landId, name: "田地", type: "tile" });
-    grids.push(landGrid);
-    nextId.value++;
-
-    // ── 各作物点位（每种作物单独一张，按 plantDensity 随机稀疏）──
-    for (const val of cropVals) {
-      const assetId = nextId.value;
-      const assetGrid: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
-      for (const mg of multiGrids)
-        for (let r = 0; r < rows; r++)
-          for (let c = 0; c < cols; c++)
-            if (mg[r]?.[c] === val && rng() < plantDensity) assetGrid[r][c] = assetId;
-      const cropName = CROP_NAMES[val] ?? `地块${val}`;
-      nameList.push({ id: assetId, name: cropName, type: "asset" });
-      grids.push(assetGrid);
-      nextId.value++;
+  rng: () => number,
+): { grid: Grid; nameList: NameEntry[] } {
+  const rows = multiGrid.length;
+  const cols = multiGrid[0]?.length ?? 0;
+  const out: Grid = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
+  const present = new Set<number>();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = multiGrid[r][c];
+      if (v === 0) continue;
+      if (v === PATH) {
+        out[r][c] = FARM_PATH_ID;
+        present.add(FARM_PATH_ID);
+      } else if (rng() < plantDensity) {
+        const aid = cropAssetId(v);
+        out[r][c] = aid;
+        present.add(aid);
+      } else {
+        out[r][c] = FARM_LAND_ID;
+        present.add(FARM_LAND_ID);
+      }
     }
   }
 
-  return { grids, nameList };
+  const nameList: NameEntry[] = [...present].sort((a, b) => a - b).map((id) => {
+    if (id === FARM_PATH_ID) return { id, name: PATH_NAME, type: "tile" };
+    if (id === FARM_LAND_ID) return { id, name: "田地", type: "tile" };
+    return { id, name: CROP_NAMES[id - 1] ?? `地块${id}`, type: "asset" };
+  });
+  return { grid: out, nameList };
 }
 
 export function farmlandGrid(input: Record<string, unknown>): Record<string, unknown> {
-  const rawGridList  = input.gridList;
+  const rawGrid      = input.inputGrid;
   const layout       = typeof input.layout       === "string"  ? input.layout                                           : "grid";
   const plotWidth    = typeof input.plotWidth    === "number"  ? Math.max(2, Math.floor(input.plotWidth))               : 4;
   const plotHeight   = typeof input.plotHeight   === "number"  ? Math.max(2, Math.floor(input.plotHeight))              : 4;
   const pathWidth    = typeof input.pathWidth    === "number"  ? Math.max(1, Math.floor(input.pathWidth))               : 1;
   const seed         = typeof input.seed         === "number"  ? Math.floor(input.seed)                                 : 0;
   const plantDensity = typeof input.plantDensity === "number"  ? Math.min(1, Math.max(0, input.plantDensity))           : 0.9;
-  const mergeOutput  = input.mergeOutput === false ? false : true; // default true
 
-  // Support both a single grid and an array of grids
-  let gridList: Grid[];
-  if (Array.isArray(rawGridList)) {
-    if (rawGridList.length === 0) return { error: "gridList is required" };
-    if (typeof rawGridList[0]?.[0] === "number") {
-      gridList = [rawGridList as unknown as Grid];
-    } else {
-      gridList = rawGridList as Grid[];
-    }
-  } else {
-    return { error: "gridList is required" };
+  if (!isGrid(rawGrid) || rawGrid.length === 0 || !rawGrid[0] || rawGrid[0].length === 0) {
+    return { error: "inputGrid is required" };
   }
+  const grid = rawGrid as Grid;
 
   const minPlotSize = Math.min(plotWidth, plotHeight);
   const baseSeed = seed === 0 ? Date.now() : seed;
-  const nextId = { value: 1 };
+  const rng = makeLCG(baseSeed);
   // 专用于点位密度随机，与布局 rng 独立，保证可复现
   const densityRng = makeLCG(baseSeed ^ 0xdeadbeef);
 
-  // Generate multi-value grids for all inputs
-  const rows = gridList[0]?.length ?? 0;
-  const cols = gridList[0]?.[0]?.length ?? 0;
-  const multiGrids: Grid[] = [];
-
-  gridList.forEach((grid, i) => {
-    if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return;
-    const rng = makeLCG(baseSeed + i * 999983);
-    let multiGrid: Grid;
-    switch (layout) {
-      case "strip":
-        multiGrid = generateStrip(grid, plotHeight, pathWidth, rng);
-        break;
-      case "bsp":
-        multiGrid = generateBSP(grid, minPlotSize, pathWidth, rng);
-        break;
-      default:
-        multiGrid = generateGrid(grid, plotWidth, plotHeight, pathWidth, rng);
-    }
-    multiGrids.push(multiGrid);
-  });
-
-  if (multiGrids.length === 0) return { outputGridList: [], outputNameList: [] };
-
-  if (mergeOutput) {
-    const { grids, nameList } = mergeBySemantics(multiGrids, rows, cols, nextId, plantDensity, densityRng);
-    return { outputGridList: grids, outputNameList: nameList };
+  let multiGrid: Grid;
+  switch (layout) {
+    case "strip":
+      multiGrid = generateStrip(grid, plotHeight, pathWidth, rng);
+      break;
+    case "bsp":
+      multiGrid = generateBSP(grid, minPlotSize, pathWidth, rng);
+      break;
+    default:
+      multiGrid = generateGrid(grid, plotWidth, plotHeight, pathWidth, rng);
   }
 
-  // Non-merge: split each farmland independently
-  const outputGridList: Grid[] = [];
-  const outputNameList: NameEntry[] = [];
-  multiGrids.forEach((mg, i) => {
-    const { grids, nameList } = splitToSingleValueGrids(mg, i + 1, nextId, plantDensity, densityRng);
-    outputGridList.push(...grids);
-    outputNameList.push(...nameList);
-  });
-  return { outputGridList, outputNameList };
+  const { grid: outputGrid, nameList } = buildOutput(multiGrid, plantDensity, densityRng);
+  return { outputGrid, outputNameList: nameList };
 }

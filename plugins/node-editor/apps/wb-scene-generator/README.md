@@ -67,7 +67,7 @@ batteries/                  # ~276 scene domain batteries (file-based; scanned b
 materials/asset-store/      # built-in content-addressed asset library (library.db + blobs/)
 vendor/shared/types/        # vendored shared types; build:vendor → vendor/dist/ (gitignored)
 schemas/                    # JSON schemas for batteries / ops
-forgeax-plugin.json         # ForgeaX plugin manifest (id @forgeax-plugin/wb-scene-generator)
+forgeax-extension.json         # ForgeaX plugin manifest (id @forgeax-extension/wb-scene-generator)
 SKILL.md                    # AI-readable op + workflow guide
 ```
 

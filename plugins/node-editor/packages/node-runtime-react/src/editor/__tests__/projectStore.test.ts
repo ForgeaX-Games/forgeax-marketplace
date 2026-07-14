@@ -1,7 +1,7 @@
 // projectStore — the faithful open cascade reuses the live-sync machinery.
 //
 // Proves switchProject():
-//   1. calls the transport activateProject (server swaps the active runtime),
+//   1. calls the transport viewProject (server sets the UI viewing target),
 //   2. drives loadPipeline() so pipelineRevision bumps (→ useCanvasGraphSync
 //      reconcile rebuild) and currentPipeline reflects the OPENED project,
 //   3. clears the undo history (it must not cross projects),
@@ -19,7 +19,7 @@ import type {
   RuntimeEvent,
   WorkspaceState,
 } from '@forgeax/node-runtime'
-import type { ActivateProjectResult, CreateProjectRequest } from '../../api/ApiClient.js'
+import type { CreateProjectRequest, ViewProjectResult } from '../../api/ApiClient.js'
 
 import { configureEditorTransport, createEditorTransport, type EditorTransport } from '../transport/index.js'
 import { usePipelineStore } from '../stores/pipelineStore.js'
@@ -38,6 +38,10 @@ function snap(id: string, nodeId: string): PipelineSnapshot {
   }
 }
 
+function workspace(active: string, recent: string[], executing: string[] = []): WorkspaceState {
+  return { viewingProjectId: active, recentProjectIds: recent, lastOpenedAt: '', executingProjectIds: executing }
+}
+
 /** A minimal in-memory ApiClient with the project surface + per-project graphs. */
 function makeClient(): ApiClient {
   const graphs: Record<string, PipelineSnapshot> = {
@@ -48,15 +52,19 @@ function makeClient(): ApiClient {
     p1: { id: 'p1', type: 'scene', name: 'P1', description: '', createdAt: '', updatedAt: '' },
     p2: { id: 'p2', type: 'lowpoly', name: 'P2', description: '', createdAt: '', updatedAt: '' },
   }
-  let active = 'p1'
+  let viewing = 'p1'
   const recent = ['p1']
+  const viewResult = (id: string): ViewProjectResult => ({
+    project: { manifest: { schemaVersion: 1, ...metas[id], storage: { graphFile: '', historyFile: '', outputsDir: '' } } },
+    pipeline: graphs[id] ?? null,
+  })
   return {
     pipelineId: 'main',
     applyBatch: async () => ({ status: 'ok', newHash: 'h', batchId: 'b' }),
     execute: async () => ({ status: 'completed' }) as never,
-    getPipeline: async () => graphs[active] ?? null,
+    getPipeline: async () => graphs[viewing] ?? null,
     getNode: async () => null,
-    listNodes: async () => Object.values(graphs[active]?.nodes ?? {}),
+    listNodes: async () => Object.values(graphs[viewing]?.nodes ?? {}),
     listEdges: async () => [],
     getNodeOutput: async () => undefined,
     getHistory: async () => [],
@@ -70,17 +78,14 @@ function makeClient(): ApiClient {
       metas[id] ? { manifest: { schemaVersion: 1, ...metas[id], storage: { graphFile: '', historyFile: '', outputsDir: '' } } } : null,
     createProject: async (_req: CreateProjectRequest) => metas.p2,
     updateProject: async (id: string) => metas[id],
-    deleteProject: async () => ({ ok: true as const, workspace: { activeProjectId: active, recentProjectIds: recent, lastOpenedAt: '' } }),
-    activateProject: async (id: string): Promise<ActivateProjectResult> => {
-      active = id
+    deleteProject: async () => ({ ok: true as const, workspace: workspace(viewing, recent) }),
+    viewProject: async (id: string): Promise<ViewProjectResult> => {
+      viewing = id
       if (!recent.includes(id)) recent.unshift(id)
-      return {
-        project: { manifest: { schemaVersion: 1, ...metas[id], storage: { graphFile: '', historyFile: '', outputsDir: '' } } },
-        pipeline: graphs[id] ?? null,
-      }
+      return viewResult(id)
     },
-    getWorkspace: async (): Promise<WorkspaceState> => ({ activeProjectId: active, recentProjectIds: recent, lastOpenedAt: '' }),
-    setWorkspace: async (): Promise<WorkspaceState> => ({ activeProjectId: active, recentProjectIds: recent, lastOpenedAt: '' }),
+    getWorkspace: async (): Promise<WorkspaceState> => workspace(viewing, recent),
+    setWorkspace: async (): Promise<WorkspaceState> => workspace(viewing, recent),
   }
 }
 
@@ -96,7 +101,13 @@ beforeEach(() => {
     dynamicOutputPorts: {},
   })
   useHistoryStore.setState({ entries: [], cursor: 0, _redoTip: null })
-  useProjectStore.setState({ projects: [], activeProjectId: null, recentProjectIds: [], isSwitching: false })
+  useProjectStore.setState({
+    projects: [],
+    viewingProjectId: null,
+    executingProjectIds: [],
+    recentProjectIds: [],
+    isSwitching: false,
+  })
 })
 
 afterEach(() => {
@@ -106,7 +117,6 @@ afterEach(() => {
 
 describe('projectStore open cascade', () => {
   it('switchProject swaps the graph via loadPipeline (revision++) and clears history', async () => {
-    // Seed a stale undo entry + node output to prove they are reset on switch.
     useHistoryStore.setState({ entries: [{ id: 'x' } as never], cursor: 1, _redoTip: null })
     usePipelineStore.setState({ nodeOutputs: { ghost: { out: 1 } } })
     const revBefore = usePipelineStore.getState().pipelineRevision
@@ -120,37 +130,64 @@ describe('projectStore open cascade', () => {
     expect(pipe.nodeOutputs.ghost).toBeUndefined()
     expect(useHistoryStore.getState().entries).toHaveLength(0)
     expect(useUIStore.getState().activeProjectType).toBe('lowpoly')
-    expect(useProjectStore.getState().activeProjectId).toBe('p2')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p2')
   })
 
-  it('fetchProjects loads the list + syncs the active project type', async () => {
+  it('bootstrap opens the viewing project even when viewingProjectId is already set (page refresh)', async () => {
+    await useProjectStore.getState().fetchProjects()
+    expect(useProjectStore.getState().viewingProjectId).toBe('p1')
+    expect(usePipelineStore.getState().currentPipeline).toBeNull()
+
+    const refreshSpy = vi.spyOn(usePipelineStore.getState(), 'refreshConnectedOutputs').mockResolvedValue()
+    await useProjectStore.getState().switchProject('p1')
+
+    expect(usePipelineStore.getState().currentPipeline?.id).toBe('p1')
+    expect(refreshSpy).toHaveBeenCalledWith('project-switch')
+    refreshSpy.mockRestore()
+  })
+
+  it('fetchProjects loads the list + syncs the viewing project type', async () => {
     await useProjectStore.getState().fetchProjects()
     expect(useProjectStore.getState().projects.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
-    expect(useProjectStore.getState().activeProjectId).toBe('p1')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p1')
     expect(useUIStore.getState().activeProjectType).toBe('scene')
+  })
+
+  it('fetchProjects falls back to legacy activeProjectId in workspace', async () => {
+    const base = makeClient()
+    const client: ApiClient = {
+      ...base,
+      getWorkspace: async () =>
+        ({ activeProjectId: 'p2', recentProjectIds: ['p2'], lastOpenedAt: '' }) as WorkspaceState,
+    }
+    transport.dispose()
+    transport = createEditorTransport(client)
+    configureEditorTransport(transport)
+    await useProjectStore.getState().fetchProjects()
+    expect(useProjectStore.getState().viewingProjectId).toBe('p2')
   })
 })
 
 describe('projectStore cross-client sync (subscribeProjectActivation)', () => {
-  // Build a client whose `subscribe` captures channel listeners so the test can
-  // emit a `project:activated` as if the backend broadcast it (e.g. the left
-  // pane / an agent switched the project), and count activateProject calls.
-  // `setServerActive` mutates the backing active project WITHOUT going through
-  // this client's activateProject — modelling the fact that ANOTHER client
-  // already activated server-side before the broadcast reached us.
   function makeCapturingTransport(): {
     listeners: Record<string, Set<(e: RuntimeEvent) => void>>
-    activateCalls: () => number
-    setServerActive: (id: string) => Promise<void>
+    viewCalls: () => number
+    listProjectsCalls: number[]
+    setServerViewing: (id: string) => Promise<void>
   } {
     const base = makeClient()
     const listeners: Record<string, Set<(e: RuntimeEvent) => void>> = {}
-    let activateCalls = 0
+    let viewCalls = 0
+    const listProjectsCalls: number[] = []
     const client: ApiClient = {
       ...base,
-      activateProject: async (id: string) => {
-        activateCalls++
-        return base.activateProject!(id)
+      viewProject: async (id: string) => {
+        viewCalls++
+        return base.viewProject!(id)
+      },
+      listProjects: async () => {
+        listProjectsCalls.push(Date.now())
+        return base.listProjects!()
       },
       subscribe: (c: RuntimeChannel, l: (e: RuntimeEvent) => void) => {
         ;(listeners[c] ??= new Set()).add(l)
@@ -163,63 +200,116 @@ describe('projectStore cross-client sync (subscribeProjectActivation)', () => {
     configureEditorTransport(transport)
     return {
       listeners,
-      activateCalls: () => activateCalls,
-      // Flip the backing store's active project via the UNWRAPPED activateProject
-      // (does not bump our counter) — models another client having switched
-      // server-side before the broadcast reaches us.
-      setServerActive: async (id) => {
-        await base.activateProject!(id)
+      viewCalls: () => viewCalls,
+      listProjectsCalls,
+      setServerViewing: async (id) => {
+        await base.viewProject!(id)
       },
     }
   }
 
-  function emitProjectActivated(
+  function emitProjectViewing(
     listeners: Record<string, Set<(e: RuntimeEvent) => void>>,
     projectId: string,
+    kind: 'project:viewing' | 'project:activated' = 'project:viewing',
   ): void {
-    // project:activated rides the 'graph' channel (client demux).
     for (const l of listeners.graph ?? []) {
-      l({ kind: 'project:activated', projectId, pipelineId: projectId, newHash: `${projectId}-hash` } as RuntimeEvent)
+      l({ kind, projectId, pipelineId: projectId, newHash: `${projectId}-hash` } as RuntimeEvent)
     }
   }
 
-  it('re-syncs to a project activated elsewhere WITHOUT re-calling activateProject', async () => {
-    const { listeners, activateCalls, setServerActive } = makeCapturingTransport()
+  it('re-syncs to a project viewed elsewhere WITHOUT re-calling viewProject', async () => {
+    const { listeners, viewCalls, setServerViewing } = makeCapturingTransport()
     await useProjectStore.getState().fetchProjects()
-    expect(useProjectStore.getState().activeProjectId).toBe('p1')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p1')
 
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     const revBefore = usePipelineStore.getState().pipelineRevision
-    const callsBefore = activateCalls()
+    const callsBefore = viewCalls()
 
-    // Another client switched the server to p2, then the backend broadcast it.
-    await setServerActive('p2')
-    emitProjectActivated(listeners, 'p2')
+    await setServerViewing('p2')
+    emitProjectViewing(listeners, 'p2')
 
-    // Wait for the full cascade to settle (set activeProjectId BEFORE
-    // loadPipeline, so gate on the last-loaded state, not activeProjectId).
     await vi.waitFor(() => {
       expect(useProjectStore.getState().isSwitching).toBe(false)
       expect(usePipelineStore.getState().currentPipeline?.id).toBe('p2')
     })
-    expect(useProjectStore.getState().activeProjectId).toBe('p2')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p2')
     expect(usePipelineStore.getState().pipelineRevision).toBeGreaterThan(revBefore)
     expect(useUIStore.getState().activeProjectType).toBe('lowpoly')
-    // Must NOT re-activate (that would re-broadcast → feedback loop).
-    expect(activateCalls()).toBe(callsBefore)
+    expect(viewCalls()).toBe(callsBefore)
     unsub()
   })
 
-  it('ignores its own activation echo (incoming id === activeProjectId)', async () => {
+  it('handles legacy project:activated alias', async () => {
+    const { listeners, setServerViewing } = makeCapturingTransport()
+    await useProjectStore.getState().fetchProjects()
+    const unsub = useProjectStore.getState().subscribeProjectActivation()
+
+    await setServerViewing('p2')
+    emitProjectViewing(listeners, 'p2', 'project:activated')
+
+    await vi.waitFor(() => {
+      expect(useProjectStore.getState().viewingProjectId).toBe('p2')
+    })
+    unsub()
+  })
+
+  it('tracks project:executing in executingProjectIds', async () => {
+    const { listeners, listProjectsCalls } = makeCapturingTransport()
+    const unsub = useProjectStore.getState().subscribeProjectActivation()
+
+    for (const l of listeners.graph ?? []) {
+      l({ kind: 'project:executing', projectId: 'p2', pipelineId: 'p2', agentId: 'agent-1' } as RuntimeEvent)
+    }
+
+    await vi.waitFor(() => {
+      expect(useProjectStore.getState().executingProjectIds).toContain('p2')
+      expect(listProjectsCalls.length).toBeGreaterThan(0)
+    })
+    unsub()
+  })
+
+  it('refreshes project list on project:list-changed', async () => {
+    const { listeners, listProjectsCalls } = makeCapturingTransport()
+    const unsub = useProjectStore.getState().subscribeProjectActivation()
+    const before = listProjectsCalls.length
+
+    for (const l of listeners.graph ?? []) {
+      l({ kind: 'project:list-changed', reason: 'created' } as RuntimeEvent)
+    }
+
+    await vi.waitFor(() => {
+      expect(listProjectsCalls.length).toBeGreaterThan(before)
+    })
+    unsub()
+  })
+
+  it('removes project from executingProjectIds on project:idle', async () => {
+    const { listeners } = makeCapturingTransport()
+    useProjectStore.setState({ executingProjectIds: ['p2', 'p3'] })
+    const unsub = useProjectStore.getState().subscribeProjectActivation()
+
+    for (const l of listeners.graph ?? []) {
+      l({ kind: 'project:idle', projectId: 'p2', agentId: 'agent-1' } as RuntimeEvent)
+    }
+
+    await vi.waitFor(() => {
+      expect(useProjectStore.getState().executingProjectIds).toEqual(['p3'])
+    })
+    unsub()
+  })
+
+  it('ignores its own viewing echo (incoming id === viewingProjectId)', async () => {
     const { listeners } = makeCapturingTransport()
     await useProjectStore.getState().fetchProjects()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     const revBefore = usePipelineStore.getState().pipelineRevision
 
-    emitProjectActivated(listeners, 'p1') // same as current active → no-op
+    emitProjectViewing(listeners, 'p1')
     await new Promise((r) => setTimeout(r, 10))
 
-    expect(useProjectStore.getState().activeProjectId).toBe('p1')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p1')
     expect(usePipelineStore.getState().pipelineRevision).toBe(revBefore)
     unsub()
   })

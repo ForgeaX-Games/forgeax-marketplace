@@ -11,6 +11,7 @@ import type { DrawMode } from '../../../types'
 import type { AliasMeta } from '../../../framework/asset/matchAssetEntry'
 import type { NormalizedRule } from '../../../framework/asset/ruleCache'
 import type { AssetMatch } from '../../../framework/asset/matchAssetEntry'
+import type { VariantPool } from '../../../framework/asset/variantCandidates'
 
 // ── 输入(公开)─────────────────────────────────────────────────────────
 
@@ -117,8 +118,6 @@ export interface IncrementalBakeState {
   objectBoundsByCell?: ReadonlyMap<CollectedCell, { minX: number; minY: number; maxX: number; maxY: number }>
   /** Footprint-center anchor for grouped object layers (geometry anchor lands here). */
   objectAnchorPointByLayer?: ReadonlyMap<number, { x: number; y: number }>
-  /** Per-layer uniform scale so asset collision fits voxel bottom face. */
-  objectFootprintScaleByLayer?: ReadonlyMap<number, number>
   /** Spatial bucket index: coarse master-grid screen tile → cells whose footprint
    *  touches it. Lets the incremental append visit only the O(k) cells near the
    *  dirty rect instead of scanning all N cells every paint. Buckets are keyed in
@@ -159,6 +158,9 @@ export interface LayerAssetBinding {
    * 变体区段也不同)。空数组 = 该 face 没变体或图未加载完。
    */
   validVariantIdxs: { top: number[]; front: number[] }
+  /** 与 validVariantIdxs 等长；face.variantWeights 过滤后 */
+  validVariantWeights: { top?: number[]; front?: number[] }
+  validVariantPoolsByTileId: { top: Map<number, VariantPool>; front: Map<number, VariantPool> }
   /**
    * rule.regions 解析后的 cell 集合,key 是 region 名,value 是 "x,y" 形式 set。
    *   * source: "parent" → 渲染当下,本 layer 直接父路径下所有 voxel 的 xy 并集

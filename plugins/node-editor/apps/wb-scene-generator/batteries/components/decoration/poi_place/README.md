@@ -1,6 +1,8 @@
 # 精准POI分布 (poi_place)
 
-在指定坐标处放置兴趣点（POI）。若坐标格子的值不等于 `targetValue`，则 BFS 搜索整个网格找到最近的合法格子，从所有等距候选格中必定随机选取一个，保证 POI 始终落在目标地形上且具有自然随机感。
+在单张网格的指定坐标处放置兴趣点（POI）。若坐标格子的值不等于 `targetValue`，则搜索整个网格找到最近的合法格子，从所有等距候选格中必定随机选取一个，保证 POI 始终落在目标地形上且具有自然随机感。
+
+> **DataTree 数据格式**：`inputGrid` / `outputGrid` 均为 `grid`（`access: item`）。本电池每次只处理单张网格，网格列表由引擎按 DataTree 自动逐张 fanout / 重组。
 
 ## 功能特点
 
@@ -8,7 +10,7 @@
 2. **全图 BFS 就近搜索**：若坐标不在目标区域值内，BFS 遍历整个网格直到找到最近的合法格，不设搜索半径上限，一定能放置成功（只要网格中存在 targetValue）。
 3. **必定随机选取**：无论坐标合法与否，都从所有等距最近的候选格中随机选取一个，保证自然感。
 4. **同名共享 ID**：相同 `decoration` 名称的 POI 共用同一掩码 ID，方便下游按类型筛选。
-5. **格式透传**：支持单网格和网格列表输入，输出格式与输入完全一致。
+5. **多值网格输出**：每种 POI 一个递增 id 写入同一张 `outputGrid`，配合 `outputNameList` 可接 `grid_split_by_value` 拆分。
 
 ## 适用情况
 
@@ -18,24 +20,26 @@
 
 ## 基本使用方法
 
-1. 将上游地形网格接入 `grid` 端口。
-2. 在 `poiRules` 端口输入规则数组，每条规则需要 `decoration`、`targetValue`、`x`、`y` 四个字段。
+1. 将上游地形网格接入 `inputGrid` 端口。
+2. 在 `poiRules` 端口输入规则数组，每条规则需要 `decoration`、`targetValue`、`points` 字段。
 3. `seed=0` 时随机，固定 seed 可复现结果。
 
 ## 输入参数
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| grid | any | - | 输入网格：单网格 `number[][]` 或网格列表 `number[][][]` |
+| inputGrid | grid | - | 单张输入网格 `number[][]`（DataTree 逐张处理） |
 | poiRules | array | - | POI规则列表，见下方说明 |
+| minDistance | number | 8 | 所有 POI 点之间的最小格距 |
+| scatterR | number | 5 | 找到最近合法格后的额外随机散播半径，0=精确就近 |
 | seed | number | 0 | 随机种子，0 使用当前时间自动随机 |
 
 ## 输出参数
 
 | 参数名 | 类型 | 说明 |
 |--------|------|------|
-| outputGrid | any | 写入 POI 点后的网格，格式与输入完全一致 |
-| poiNameList | array | 已放置的 POI 类型清单：`[{id, name}]` |
+| outputGrid | grid | 单张多值网格：每种 POI 一个递增 id，未放置处为 0 |
+| outputNameList | array | 网格中实际出现的 POI 清单：`[{id, name, type}]`，type 固定为 asset |
 | placedCount | number | 成功放置的 POI 点总数 |
 
 ## POI规则格式
@@ -87,7 +91,7 @@
 
 ```json
 {
-  "grid": [[4,4,7,4],[4,4,4,7],[3,3,3,3]],
+  "inputGrid": [[4,4,7,4],[4,4,4,7],[3,3,3,3]],
   "poiRules": [
     {"decoration": "洞穴", "targetValue": 7, "points": [[1, 0], [3, 1]]},
     {"decoration": "营火", "targetValue": 4, "points": [[0, 2]]}
@@ -103,10 +107,10 @@
 
 ```json
 {
-  "outputGrid": [[4,4,9,4],[4,4,4,9],[3,10,3,3]],
-  "poiNameList": [
-    {"id": 9, "name": "洞穴"},
-    {"id": 10, "name": "营火"}
+  "outputGrid": [[0,0,9,0],[0,0,0,9],[0,10,0,0]],
+  "outputNameList": [
+    {"id": 9, "name": "洞穴", "type": "asset"},
+    {"id": 10, "name": "营火", "type": "asset"}
   ],
   "placedCount": 3
 }

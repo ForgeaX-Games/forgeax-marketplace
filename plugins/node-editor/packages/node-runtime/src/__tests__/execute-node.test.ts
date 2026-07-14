@@ -144,6 +144,18 @@ describe('executeNode (Layer 2)', () => {
     expect(entries(result.outputs.d!.out)[0]!.items).toEqual([42])
   })
 
+  it('partial re-run re-executes boundary upstream nodes when their cache was pruned', async () => {
+    const runtime = fresh()
+    await seedChain(runtime)
+    await (await executeNode(runtime, {})).done
+    // Simulate retention pruning the upstream const node while leaving the sink cache.
+    runtime.outputs.invalidate('s')
+    const result = await (await executeNode(runtime, { nodeId: 'd' })).done
+    expect(result.status).toBe('completed')
+    expect(Object.keys(result.outputs).sort()).toEqual(['d', 's'])
+    expect(entries(result.outputs.d!.out)[0]!.items).toEqual([42])
+  })
+
   it('a partial run does not abort on an unrelated, un-included upstream error', async () => {
     const runtime = fresh()
     // good: s -> d   and a separate broken sink fed by boom: boom -> bd

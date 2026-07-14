@@ -5,6 +5,7 @@ output_*.json
 .env
 viz/node_modules/
 viz/dist/
+*.tsbuildinfo
 sync.sh
 bun.lock
 

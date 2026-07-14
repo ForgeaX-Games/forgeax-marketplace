@@ -289,7 +289,6 @@ export function appendCellsToVoxelMaster(
   }
   const columnCells = state.objectColumnCells
   const anchorPointsByLayer = state.objectAnchorPointByLayer
-  const footprintScaleByLayer = state.objectFootprintScaleByLayer
   // Gather candidates near the dirty rect + force-repaint objects, then paint in
   // global painter order (sorting only this small set).
   const candidateSet = new Set<CollectedCell>(cellsNearDirty(buckets, dirty, bbox, cellSize))
@@ -313,12 +312,9 @@ export function appendCellsToVoxelMaster(
     const anchorPoint = binding && !binding.match.tileType && !(columnCells?.has(c))
       ? anchorPointsByLayer?.get(c.layerIdx)
       : undefined
-    const footprintScale = binding && !binding.match.tileType && !(columnCells?.has(c))
-      ? footprintScaleByLayer?.get(c.layerIdx)
-      : undefined
     paintCell(
       ctx, c, bbox, cellSize, state.drawMode, state.assetByLayer, state.coordsByLayerIdx,
-      undefined, anchorPoint, footprintScale,
+      undefined, anchorPoint,
     )
     cellsPainted++
   }

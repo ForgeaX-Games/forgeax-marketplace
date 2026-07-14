@@ -3,7 +3,7 @@
 // classes, that the generic Run control renders, and that a consumer-injected
 // `actions` node appears in the toolbar (non-vacuous assertions).
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
 
 import { createMockApiClient } from '../../test/mockApiClient.js'
@@ -126,6 +126,22 @@ describe('faithful toolbar smoke', () => {
     fireEvent.click(getByTitle('Data probe on wires'))
     expect(useUIStore.getState().probeMode).toBe(true)
     expect(probeButton).toHaveClass('active')
+  })
+
+  it('clear-cache button wipes server cache and re-runs the pipeline', async () => {
+    const clearSpy = vi.spyOn(transport.api, 'clearOutputCache').mockResolvedValue({ ok: true })
+    const execSpy = vi.spyOn(transport.api, 'executePipeline').mockResolvedValue({
+      executionId: 'e1',
+      status: 'completed',
+      outputs: {},
+      durationMs: 0,
+    })
+    const { container, getByTitle } = render(<Toolbar />)
+    expect(container.querySelector('.toolbar-btn-clear-reexec')).not.toBeNull()
+    fireEvent.click(getByTitle('Clear output cache and re-run pipeline'))
+    await vi.waitFor(() => expect(clearSpy).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(execSpy).toHaveBeenCalledWith({ quietErrors: true }))
+    expect(usePipelineStore.getState().nodeOutputs).toEqual({})
   })
 
   it('opens the settings dropdown and renders the status / history / data-types panels', () => {

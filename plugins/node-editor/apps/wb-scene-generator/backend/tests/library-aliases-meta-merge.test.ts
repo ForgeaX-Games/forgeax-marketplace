@@ -38,8 +38,8 @@ async function publishRawAlias(app: FastifyInstance, alias: string): Promise<str
 describe('aliases-meta matching pool merges private assets', () => {
   it('a private TILE alias enters the raw pool and binds to its autotile rule', async () => {
     const app = await buildApp()
-    // field[4]=item-name=grassland, field[8]=type=common_16 (a vendored rule).
-    const alias = '[]_[]_[]_[]_[grassland]_[]_[]_[]_[common_16]_[]_[]_[]_[].png'
+    // field[2]=item-name=grassland, field[7]=type=common_16 (a vendored rule).
+    const alias = '[]_[]_[grassland]_[]_[]_[]_[]_[common_16]_[]_[]_[]_[].png'
     await publishRawAlias(app, alias)
 
     const pool = (await app.inject({ method: 'GET', url: '/api/v1/library/aliases-meta?zone=raw' })).json() as AliasMeta[]
@@ -51,8 +51,8 @@ describe('aliases-meta matching pool merges private assets', () => {
 
   it('a private OBJECT alias enters the pool with NO tileType (cutout pool)', async () => {
     const app = await buildApp()
-    // field[8]=抠图 (cutout) → object, not a tile, so no rule binding.
-    const alias = '[]_[]_[]_[]_[wooden_barrel]_[]_[]_[]_[抠图]_[]_[]_[]_[].png'
+    // field[7]=asset (cutout) → object, not a tile, so no rule binding.
+    const alias = '[]_[]_[wooden_barrel]_[]_[]_[]_[]_[asset]_[]_[]_[]_[].png'
     await publishRawAlias(app, alias)
 
     const pool = (await app.inject({ method: 'GET', url: '/api/v1/library/aliases-meta?zone=raw' })).json() as AliasMeta[]

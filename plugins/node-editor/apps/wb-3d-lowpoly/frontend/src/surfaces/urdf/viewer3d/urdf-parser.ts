@@ -1,5 +1,5 @@
 // 💡 URDF 解析器：将 URDF XML 文本解析为结构化 spec（links / joints / 材质库）
-//    迁移自 CAD/articraft viewer，保持纯函数 + 浏览器 DOMParser 实现
+//    迁移自 CAD viewer，保持纯函数 + 浏览器 DOMParser 实现
 import * as THREE from 'three';
 
 export interface UrdfJoint {

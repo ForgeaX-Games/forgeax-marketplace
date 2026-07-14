@@ -5,10 +5,48 @@ import type { FastifyInstance } from 'fastify'
 import { getScreenshotService } from '@forgeax/editor-host/backend'
 import { getGlbService } from './glb.service.js'
 import { broadcastToClients } from '../routes/ws.js'
+import { getProjectDir, getProjectRegistry } from '../runtime.js'
 
 // backend/src/agent/routes.ts → plugin repo root is three dirs up.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const PROJECT_ROOT = process.env.FORGEAX_PROJECT_ROOT ?? resolve(REPO_ROOT, '.forgeax-runtime')
+
+/**
+ * Resolve which project an agent screenshot / GLB export belongs to, and the
+ * directory its artifact should be written under.
+ *
+ * Subtlety this guards: the single `?pane=urdf` viewer renders the workspace's
+ * VIEWING project. So a capture/export is always a frame of whatever is being
+ * viewed — never of some other "open" project. If the caller asks for a project
+ * that isn't the viewing one, we reject with a clear instruction instead of
+ * silently handing back the wrong project's frame (the old behavior also dumped
+ * every artifact into the global PROJECT_ROOT, so per-project `assets.list`
+ * never saw them). Output now lands in the resolved project's own directory.
+ */
+async function resolveAgentTarget(
+  requestedProjectId: unknown,
+): Promise<
+  | { ok: true; projectId: string; dir: string }
+  | { ok: false; code: number; error: string }
+> {
+  const reg = await getProjectRegistry()
+  const viewingId = reg.getViewingProjectId()
+  if (!viewingId) {
+    return { ok: false, code: 409, error: 'no viewing project — open/view a project before capturing' }
+  }
+  const requested =
+    typeof requestedProjectId === 'string' && requestedProjectId.trim() ? requestedProjectId : viewingId
+  if (requested !== viewingId) {
+    return {
+      ok: false,
+      code: 409,
+      error: `project "${requested}" is not the viewing project ("${viewingId}"); the renderer only captures the viewing project — set "${requested}" as viewing first`,
+    }
+  }
+  const dir = await getProjectDir(requested)
+  if (!dir) return { ok: false, code: 404, error: `project not found: ${requested}` }
+  return { ok: true, projectId: requested, dir }
+}
 
 function safeName(raw: unknown): string {
   const base = (typeof raw === 'string' && raw.trim() ? raw : 'lowpoly-model')
@@ -28,9 +66,9 @@ function safeName(raw: unknown): string {
 type ScreenshotRecord = { captureId: string; dataUrl: string; width: number; height: number; capturedAt: string }
 type AgentScreenshotView = Omit<ScreenshotRecord, 'dataUrl'> & { path: string; relPath: string }
 
-function persistForAgent(rec: ScreenshotRecord): AgentScreenshotView {
+function persistForAgent(rec: ScreenshotRecord, baseDir: string): AgentScreenshotView {
   const base64 = rec.dataUrl.includes(',') ? rec.dataUrl.slice(rec.dataUrl.indexOf(',') + 1) : rec.dataUrl
-  const dir = join(PROJECT_ROOT, '.cache', 'screenshots')
+  const dir = join(baseDir, '.cache', 'screenshots')
   mkdirSync(dir, { recursive: true })
   const file = join(dir, `${rec.captureId}.png`)
   writeFileSync(file, Buffer.from(base64, 'base64'))
@@ -40,7 +78,7 @@ function persistForAgent(rec: ScreenshotRecord): AgentScreenshotView {
     height: rec.height,
     capturedAt: rec.capturedAt,
     path: file,
-    relPath: relative(PROJECT_ROOT, file),
+    relPath: relative(baseDir, file),
   }
 }
 
@@ -52,14 +90,17 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
   const glb = getGlbService()
 
   app.post('/api/v1/agent/screenshot/capture', { bodyLimit: 20 * 1024 * 1024 }, async (req, reply) => {
+    const body = (req.body as { timeout?: number; projectId?: unknown }) ?? {}
+    const target = await resolveAgentTarget(body.projectId)
+    if (!target.ok) return reply.code(target.code).send({ error: target.error })
     // Default 10s (was 5s): a cold render of a heavy URDF in the headless
     // renderer (re-sync graph → render → encode 600KB+ PNG → POST) can exceed
     // 5s and surface as a misleading "no renderer connected" timeout.
-    const timeout = Math.min((req.body as { timeout?: number })?.timeout ?? 10000, 20000)
+    const timeout = Math.min(body.timeout ?? 10000, 20000)
     const { captureId, promise } = svc.createCapture(timeout)
     broadcastToClients({ event: 'screenshot:request', payload: { captureId } })
     try {
-      return persistForAgent(await promise)
+      return persistForAgent(await promise, target.dir)
     } catch (e) {
       // A renderer-reported failure (empty scene / encode error) rejects fast with
       // its own reason; only a genuine no-reply hits the timeout message.
@@ -93,9 +134,12 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
     return { ok }
   })
 
-  app.get('/api/v1/agent/screenshot/latest', async (_req, reply) => {
+  app.get('/api/v1/agent/screenshot/latest', async (req, reply) => {
     const latest = svc.getLatest()
-    return latest ? persistForAgent(latest) : reply.code(404).send({ error: 'no screenshot yet' })
+    if (!latest) return reply.code(404).send({ error: 'no screenshot yet' })
+    const target = await resolveAgentTarget((req.query as { projectId?: unknown })?.projectId)
+    if (!target.ok) return reply.code(target.code).send({ error: target.error })
+    return persistForAgent(latest, target.dir)
   })
 
   // ── GLB export ──────────────────────────────────────────────────────────
@@ -103,12 +147,16 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
   // scene to binary glTF (with joint-preview animation) and POSTs it to /store,
   // which writes it under <projectRoot>/assets/3d/<name>.glb and resolves.
   app.post('/api/v1/agent/glb/export', { bodyLimit: 1 * 1024 * 1024 }, async (req, reply) => {
-    const body = (req.body as { name?: string; animated?: boolean; timeout?: number }) ?? {}
+    const body = (req.body as { name?: string; animated?: boolean; timeout?: number; projectId?: unknown }) ?? {}
+    const target = await resolveAgentTarget(body.projectId)
+    if (!target.ok) return reply.code(target.code).send({ error: target.error })
     // glb bake (render + GLTFExporter parse + base64 + POST) is heavier than a
     // screenshot, so default 30s / cap 60s. (timeout is MILLISECONDS.)
     const timeout = Math.min(body.timeout ?? 30000, 60000)
     const name = safeName(body.name)
-    const { requestId, promise } = glb.createExport(timeout)
+    // Capture the target now so the renderer's /store callback (which has no
+    // project context) writes the .glb under the right project directory.
+    const { requestId, promise } = glb.createExport(timeout, { projectId: target.projectId, dir: target.dir })
     broadcastToClients({ event: 'glb:request', payload: { requestId, name, animated: body.animated !== false } })
     try {
       return await promise
@@ -132,14 +180,17 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
     }
     const base64 = b.dataUrl.includes(',') ? b.dataUrl.slice(b.dataUrl.indexOf(',') + 1) : b.dataUrl
     const buf = Buffer.from(base64, 'base64')
-    const outDir = join(PROJECT_ROOT, 'assets', '3d')
+    // Write under the project directory captured at export time (falls back to
+    // the global runtime root only if the pending export is gone — e.g. timed out).
+    const baseDir = glb.getTarget(b.requestId)?.dir ?? PROJECT_ROOT
+    const outDir = join(baseDir, 'assets', '3d')
     mkdirSync(outDir, { recursive: true })
     const file = join(outDir, `${safeName(b.name)}.glb`)
     writeFileSync(file, buf)
     const ok = glb.resolveExport(b.requestId, {
       requestId: b.requestId,
       path: file,
-      relPath: relative(PROJECT_ROOT, file),
+      relPath: relative(baseDir, file),
       bytes: buf.length,
     })
     return { ok }

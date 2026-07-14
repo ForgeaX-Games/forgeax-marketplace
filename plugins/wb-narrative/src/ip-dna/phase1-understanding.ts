@@ -342,7 +342,21 @@ export function buildHierarchyFromSegments(
   const partByKey = new Map<string, string>(); // 累积目录路径 → part 节点 id
 
   for (let si = 0; si < segments.length; si++) {
-    if (!keepFile(si)) continue; // 同目录同号重复单元：仅保留末次出现。
+    if (!keepFile(si)) {
+      // P2：同号折叠告警——异标题同号被丢弃时提示（去重逻辑保留不改；便于用户察觉合法异章被误折叠）。
+      const dn = unitNums[si];
+      const keptIdx = dn !== undefined ? lastByDirNum.get(`${dirSegsList[si].join("/")}#${dn}`) : undefined;
+      if (keptIdx !== undefined && keptIdx !== si) {
+        const droppedTitle = baseName(segments[si].path);
+        const keptTitle = baseName(segments[keptIdx].path);
+        if (droppedTitle !== keptTitle) {
+          console.warn(
+            `[ip-dna] 同号折叠：丢弃「${droppedTitle}」保留「${keptTitle}」(序号 ${dn})——若二者为不同合法章节，请错开序号或分卷目录。`,
+          );
+        }
+      }
+      continue; // 同目录同号重复单元：仅保留末次出现。
+    }
     const seg = segments[si];
     let parentId = root.id;
     let accFull = "";
@@ -552,10 +566,20 @@ function annotateDisplayAndLineage(dna: NarrativeIpDna): void {
 
 /** 落定结构元信息（在每个建树出口调用）：写入 structureType + aggregationTimes + 展示名/链。 */
 function finalizeStructure(dna: NarrativeIpDna): NarrativeIpDna {
+  sortChildrenByIndex(dna); // P2：children 按叙事序号排序，使 _hierarchy.json/前端展示为叙事序（喂料侧 collectLeafIds 本已排序）。
   dna.structureType = classifyStructureType(dna);
   dna.aggregationTimes = computeAggregationTimes(dna);
   annotateDisplayAndLineage(dna);
   return dna;
+}
+
+/** P2：每个节点 children 按 index（叙事序号）升序——修 _hierarchy.json 展示乱序（物理上传/拼接序）。 */
+function sortChildrenByIndex(dna: NarrativeIpDna): void {
+  for (const node of Object.values(dna.nodes)) {
+    if (node.children.length > 1) {
+      node.children.sort((a, b) => (dna.nodes[a]?.index ?? 0) - (dna.nodes[b]?.index ?? 0));
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────

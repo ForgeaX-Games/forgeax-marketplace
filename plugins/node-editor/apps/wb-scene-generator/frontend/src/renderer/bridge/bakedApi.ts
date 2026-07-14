@@ -14,7 +14,9 @@ export interface BakedLayerDTO {
   assetName: string
   assetAlias?: string
   assetType?: string
-  cells: BakedCellDTO[]
+  /** Omitted in summary mode (`?mode=summary`); use cellCount instead. */
+  cells?: BakedCellDTO[]
+  cellCount?: number
   attributes?: Record<string, unknown>
   version?: number
   bounds?: { width: number; height: number }
@@ -64,17 +66,32 @@ export interface BakedHistoryStatusDTO {
   entries: BakedHistoryItemDTO[]
 }
 
+import { syncTraceEnabled } from '../../debug/syncTrace.js'
+
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init)
+  const method = init?.method ?? 'GET'
+  const isMutation = method !== 'GET' && method !== 'HEAD'
+  if (isMutation && syncTraceEnabled()) {
+    console.log(`[sync-trace] baked:api ${method} ${url}`, {
+      bodyPreview: typeof init?.body === 'string' ? init.body.slice(0, 200) : undefined,
+    })
+  }
+  const r = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) })
   if (!r.ok) throw new Error(`${url} → ${r.status}`)
   return r.json() as Promise<T>
 }
 
+export type BakedLayersMode = 'summary' | 'full'
+
 export const bakedApi = {
-  list(): Promise<BakedLayerDTO[]> {
-    return req<{ layers: BakedLayerDTO[] }>('/api/v1/baked/layers').then((r) => r.layers)
+  list(mode: BakedLayersMode = 'full'): Promise<BakedLayerDTO[]> {
+    const qs = mode === 'summary' ? '?mode=summary' : ''
+    return req<{ layers: BakedLayerDTO[]; truncated?: boolean }>(`/api/v1/baked/layers${qs}`).then((r) => r.layers ?? [])
+  },
+  listSummary(): Promise<BakedLayerDTO[]> {
+    return bakedApi.list('summary')
   },
   history(): Promise<BakedHistoryStatusDTO> {
     return req<BakedHistoryStatusDTO>('/api/v1/baked/history')

@@ -1,38 +1,53 @@
 import type { FastifyInstance } from 'fastify'
-import { executeNode } from '@forgeax/node-runtime'
-import { getRuntime } from '../runtime.js'
+import { executeNode, type ExecuteNodeRequest } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
+import { syncTrace } from '../debug/syncTrace.js'
+
+interface ProjectParams {
+  projectId: string
+}
+
+function parseExecuteBody(body: unknown): ExecuteNodeRequest {
+  const b = (body ?? {}) as { nodeId?: string; quietErrors?: boolean }
+  return {
+    ...(b.nodeId ? { nodeId: b.nodeId } : {}),
+    ...(b.quietErrors ? { quietErrors: true } : {}),
+  }
+}
 
 export async function registerExecuteRoutes(app: FastifyInstance): Promise<void> {
-  // Kick off execution and await completion, returning the ExecutionResult.
-  // Live exec:* events still stream over /ws (execution channel).
-  //
-  // This route intentionally returns the FULL ExecutionResult — every node/port
-  // carries its DataTreeEntry[] with all voxel cells. UI / other REST callers
-  // depend on the full payload, so it stays as-is.
-  app.post('/api/v1/execute', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+  const prefix = '/api/v1/projects/:projectId'
+
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute`, async (req, reply) => {
+    const { projectId } = req.params
+    const body = parseExecuteBody(req.body)
+    syncTrace('backend:execute', { projectId, nodeId: (body as { nodeId?: string }).nodeId ?? '(full)', quietErrors: body.quietErrors })
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
-    return handle.done
+    const handle = await executeNode(await getRuntimeForProject(projectId), body)
+    const result = await handle.done
+    syncTrace('backend:execute-done', {
+      projectId,
+      status: result.status,
+      outputNodes: result.outputs ? Object.keys(result.outputs).length : 0,
+    })
+    return result
   })
 
-  // Agent-facing execute: run the pipeline and return ONLY the KB-scale summary
-  // (status + per-port child names / cell counts), never the raw cells. This is
-  // what the `scene:pipeline.execute` tool calls by default. Summarizing on the
-  // backend — before the result is serialized into an HTTP body — is what keeps
-  // a huge scene (hundreds of subtree nodes) from ever materializing a multi-
-  // hundred-MB JSON string at the Fastify seam, which would otherwise throw
-  // `Invalid string length` exactly the way the full route can. The summary is
-  // always tiny, so it serializes safely no matter how large the scene is.
-  app.post('/api/v1/execute/summary', async (req, reply) => {
-    const access = await ensureMutationAccess(req)
+  app.post<{ Params: ProjectParams }>(`${prefix}/execute/summary`, async (req, reply) => {
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const body = (req.body ?? {}) as { nodeId?: string }
-    const handle = await executeNode(await getRuntime(), body.nodeId ? { nodeId: body.nodeId } : {})
+    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
     const full = await handle.done
-    return summarizeExecutionResult(full)
+    // 2026-07-01：可选的上游叙事/契约地点名单——传了就顺带跑一遍 stage3.location_names
+    // 硬门控（见 execution-summary.ts / lib/locationNameGate.ts）。不传则完全不变。
+    const narrativeLocationNames = (req.body as { narrativeLocationNames?: unknown } | undefined)?.narrativeLocationNames
+    return summarizeExecutionResult(
+      full,
+      Array.isArray(narrativeLocationNames) ? narrativeLocationNames.filter((n): n is string => typeof n === 'string') : undefined,
+    )
   })
 }

@@ -31,10 +31,11 @@
 //
 // Non-DataTreeEntry array payloads (rare) fall back to per-element sharding.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { OutputCacheV1 } from './types.js'
+import { compressPayload, expandPayload, compressedPayloadByteLength } from './voxel-cells-codec.js'
 
 // Above this total serialized size (bytes) a port's `data` switches from inline
 // JSON to sharded chunk files. Chosen well under V8's ~512MB single-string
@@ -50,7 +51,8 @@ const INLINE_DATA_MAX_BYTES = 32 * 1024 * 1024
 // ~4.1× blow-up on outputs with millions of cells. Compact also roughly
 // quarters the transient string built by JSON.stringify, easing the memory
 // spike that was tipping the (already memory-saturated) backend into OOM.
-const stringifyEntry = (entry: OutputCacheV1): string => JSON.stringify(entry)
+const stringifyEntry = (entry: OutputCacheV1): string =>
+  JSON.stringify(compressPayload(entry) as OutputCacheV1)
 
 /** One sharded unit: a single item tagged with its branch path so read can regroup entries. */
 interface DataChunk {
@@ -75,6 +77,53 @@ function isDataTreeEntry(v: unknown): v is { path: number[]; items: unknown[] } 
     Array.isArray((v as { path?: unknown }).path) &&
     Array.isArray((v as { items?: unknown }).items)
   )
+}
+
+export interface OutputCacheRetention {
+  /** Max node output directories to keep (by mtime, newest first). */
+  maxNodeDirs?: number
+  /** Max total bytes under outputs/ for one project. */
+  maxTotalBytes?: number
+  /** Drop any single node dir larger than this (oldest oversized first). */
+  maxDirBytes?: number
+  /** In-graph node ids never dropped by the maxNodeDirs cap (still subject to maxTotalBytes / maxDirBytes). */
+  protectedNodeIds?: ReadonlySet<string>
+}
+
+export interface OutputCachePruneResult {
+  removed: number
+  kept: number
+  freedBytes: number
+}
+
+export const DEFAULT_OUTPUT_CACHE_RETENTION: Required<Omit<OutputCacheRetention, 'protectedNodeIds'>> = {
+  maxNodeDirs: 30,
+  maxTotalBytes: 1024 * 1024 * 1024,
+  maxDirBytes: 128 * 1024 * 1024,
+}
+
+function directoryByteSize(dir: string): number {
+  let total = 0
+  const stack = [dir]
+  while (stack.length > 0) {
+    const cur = stack.pop()!
+    let entries
+    try {
+      entries = readdirSync(cur, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      const p = join(cur, e.name)
+      try {
+        if (e.isDirectory()) stack.push(p)
+        else if (e.isFile()) total += statSync(p).size
+      } catch {
+        /* concurrent write */
+      }
+    }
+  }
+  return total
 }
 
 export interface OutputCacheMeta {
@@ -148,8 +197,10 @@ export class OutputCache {
       // Sharded `data`: reassemble from per-item chunk files. Each chunk is
       // parsed on its own (never one giant string), then regrouped in memory.
       if (typeof parsed.dataChunks === 'number' && parsed.dataChunks >= 0) {
-        parsed.data = this.readDataChunks(nodeId, portId, parsed.dataChunks)
+        parsed.data = expandPayload(this.readDataChunks(nodeId, portId, parsed.dataChunks))
         delete parsed.dataChunks
+      } else if (parsed.data !== undefined) {
+        parsed.data = expandPayload(parsed.data)
       }
       return parsed
     } catch {
@@ -174,7 +225,7 @@ export class OutputCache {
           out.push(current)
           current = null
         }
-        out.push(chunk.item)
+        out.push(expandPayload(chunk.item))
         continue
       }
       // Open (or switch to) the entry for this branch path. An `empty` chunk
@@ -183,7 +234,7 @@ export class OutputCache {
         if (current) out.push(current)
         current = { path: [...chunk.path], items: [] }
       }
-      if (!chunk.empty) current.items.push(chunk.item)
+      if (!chunk.empty) current.items.push(expandPayload(chunk.item))
     }
     if (current) out.push(current)
     return out
@@ -248,11 +299,11 @@ export class OutputCache {
     for (const element of data) {
       if (isDataTreeEntry(element)) {
         for (const item of element.items) {
-          total += Buffer.byteLength(JSON.stringify(item) ?? 'null', 'utf-8')
+          total += compressedPayloadByteLength(item)
           if (total > INLINE_DATA_MAX_BYTES) return true
         }
       } else {
-        total += Buffer.byteLength(JSON.stringify(element) ?? 'null', 'utf-8')
+        total += compressedPayloadByteLength(element)
         if (total > INLINE_DATA_MAX_BYTES) return true
       }
     }
@@ -290,7 +341,11 @@ export class OutputCache {
 
   private writeChunk(dir: string, index: number, chunk: DataChunk): void {
     // One item per chunk → serializes independently, never near the limit.
-    writeFileSync(join(dir, chunkName(index)), JSON.stringify(chunk), 'utf-8')
+    const payload =
+      chunk.item !== undefined
+        ? { ...chunk, item: compressPayload(chunk.item) }
+        : chunk
+    writeFileSync(join(dir, chunkName(index)), JSON.stringify(payload), 'utf-8')
   }
 
   /** Mark a node's cache invalid by removing its directory (json + bin + shards). */
@@ -300,10 +355,97 @@ export class OutputCache {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  /**
+   * Remove output-cache directories whose node id no longer exists in the
+   * graph (top-level nodes + inner group members). Returns how many dirs were
+   * removed. Safe to call after every applyBatch — catches stranded inner-node
+   * caches when a group is deleted without cascading invalidate.
+   */
+  pruneOrphans(validNodeIds: ReadonlySet<string>): number {
+    if (!existsSync(this.root)) return 0
+    let removed = 0
+    for (const name of readdirSync(this.root)) {
+      if (validNodeIds.has(name)) continue
+      const dir = join(this.root, name)
+      try {
+        rmSync(dir, { recursive: true, force: true })
+        removed++
+      } catch {
+        // Best-effort sweep; a concurrent write may recreate the dir.
+      }
+    }
+    return removed
+  }
+
   /** Clear the entire cache root. */
   clearAll(): void {
     if (!existsSync(this.root)) return
     rmSync(this.root, { recursive: true, force: true })
+  }
+
+  /**
+   * Cap disk use under outputs/ — prevents agent runs from accumulating multi-GB
+   * shard dirs that make project switch / listProjects unbearably slow.
+   */
+  pruneByRetention(opts?: OutputCacheRetention): OutputCachePruneResult {
+    if (!existsSync(this.root)) return { removed: 0, kept: 0, freedBytes: 0 }
+
+    const retention = { ...DEFAULT_OUTPUT_CACHE_RETENTION, ...opts }
+    const entries = readdirSync(this.root, { withFileTypes: true }).filter((e) => e.isDirectory())
+    if (entries.length === 0) return { removed: 0, kept: 0, freedBytes: 0 }
+
+    type Row = { name: string; bytes: number; mtime: number }
+    const rows: Row[] = []
+    for (const e of entries) {
+      const p = join(this.root, e.name)
+      try {
+        rows.push({ name: e.name, bytes: directoryByteSize(p), mtime: statSync(p).mtimeMs })
+      } catch {
+        /* race */
+      }
+    }
+
+    const toRemove = new Set<string>()
+    const mark = (name: string) => toRemove.add(name)
+
+    for (const row of [...rows].sort((a, b) => a.mtime - b.mtime)) {
+      if (row.bytes > retention.maxDirBytes) mark(row.name)
+    }
+
+    let survivors = rows.filter((r) => !toRemove.has(r.name))
+    const protectedIds = retention.protectedNodeIds
+    const unprotected = protectedIds
+      ? survivors.filter((r) => !protectedIds.has(r.name))
+      : survivors
+    unprotected.sort((a, b) => b.mtime - a.mtime)
+    for (const row of unprotected.slice(retention.maxNodeDirs)) {
+      mark(row.name)
+    }
+
+    survivors = rows.filter((r) => !toRemove.has(r.name))
+    survivors.sort((a, b) => a.mtime - b.mtime)
+    let total = survivors.reduce((s, r) => s + r.bytes, 0)
+    for (const row of survivors) {
+      if (total <= retention.maxTotalBytes) break
+      mark(row.name)
+      total -= row.bytes
+    }
+
+    let freedBytes = 0
+    let removed = 0
+    for (const name of toRemove) {
+      const row = rows.find((r) => r.name === name)
+      const p = join(this.root, name)
+      try {
+        rmSync(p, { recursive: true, force: true })
+        removed += 1
+        if (row) freedBytes += row.bytes
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return { removed, kept: rows.length - removed, freedBytes }
   }
 }
 

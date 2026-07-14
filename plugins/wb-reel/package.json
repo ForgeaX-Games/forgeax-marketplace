@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-plugin/wb-reel",
+  "name": "@forgeax-extension/wb-reel",
   "version": "0.1.0",
   "description": "ForgeaX workbench plugin — Interactive FMV (Reel) editor & player. 互动影游编辑器（Opus/Gemini 提示词 + GPT-Image 占位图 + Seedance 视频 + QTE + 剧情分支）",
   "private": true,
@@ -20,7 +20,11 @@
       "types": "./src/forge/generation.ts",
       "import": "./src/forge/generation.ts"
     },
-    "./forgeax-plugin.json": "./forgeax-plugin.json"
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "import": "./src/runtime/index.ts"
+    },
+    "./forgeax-extension.json": "./forgeax-extension.json"
   },
   "keywords": [
     "forgeax-plugin",
