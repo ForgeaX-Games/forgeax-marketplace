@@ -2,7 +2,9 @@
  * 叩击 QTE 皮肤（component id: `inkKou`）—— 从旧 player/InkKouLayer 迁移。
  *
  * 单点：点击/空格/回车 → submit('pass')；超时未叩 → submit('fail')。
- * params：glyph(叩字)、anchorX/anchorY(归一化锚点)、durationMs(时限)。
+ * 时限同源：interaction.timeoutMs（引擎从 timeoutMs/windowMs/durationMs 归一）>
+ * params.timeoutMs > params.windowMs > params.durationMs > 1500。
+ * 引擎已挂 timeoutMs 时由 Player 自动 submit(undefined)→fail，皮肤不再自管超时。
  */
 import { useEffect, useRef } from 'react'
 import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
@@ -13,11 +15,26 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const p = interaction.params as { glyph?: string; anchorX?: number; anchorY?: number; durationMs?: number }
+  const p = interaction.params as {
+    glyph?: string
+    anchorX?: number
+    anchorY?: number
+    durationMs?: number
+    timeoutMs?: number
+    windowMs?: number
+    outcomeLabels?: Record<string, string>
+  }
   const glyph = p.glyph ?? '叩'
+  const passHint = p.outcomeLabels?.pass ?? `${glyph}，空格键或点击确认`
   const anchorX = p.anchorX ?? 0.58
   const anchorY = p.anchorY ?? 0.39
-  const durationMs = p.durationMs ?? 1500
+  const engineTimeout = interaction.timeoutMs
+  const durationMs =
+    engineTimeout
+    ?? (typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined)
+    ?? (typeof p.windowMs === 'number' ? p.windowMs : undefined)
+    ?? (typeof p.durationMs === 'number' ? p.durationMs : undefined)
+    ?? 1500
   const resolvedRef = useRef(false)
 
   function finish(outcome: 'pass' | 'fail'): void {
@@ -27,7 +44,10 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
   }
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => finish('fail'), durationMs)
+    // 引擎已管超时（Player 到时 submit(undefined)→fail）时皮肤只响应命中，不双开定时器。
+    const timeout = engineTimeout
+      ? undefined
+      : window.setTimeout(() => finish('fail'), durationMs)
     function onKeyDown(e: KeyboardEvent): void {
       if (!keyOk()) return
       if (e.key === ' ' || e.key === 'Enter') {
@@ -37,11 +57,11 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => {
-      window.clearTimeout(timeout)
+      if (timeout !== undefined) window.clearTimeout(timeout)
       window.removeEventListener('keydown', onKeyDown, true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durationMs])
+  }, [durationMs, engineTimeout])
 
   const anchorStyle = {
     ['--pvn-opt-x' as string]: `${anchorX * 100}%`,
@@ -49,7 +69,7 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
   }
   return (
     <div className="pvn-opts pvn-opts--kou pvn-opts--anchored show" style={anchorStyle} aria-label="叩 QTE">
-      <button type="button" className="pvn-opt pvn-opt--kou" aria-label={`${glyph}，空格键或点击确认`} onClick={() => finish('pass')}>
+      <button type="button" className="pvn-opt pvn-opt--kou" aria-label={passHint} onClick={() => finish('pass')}>
         <span className="pvn-kou-orn" aria-hidden="true">
           <i className="pvn-kou-dot" />
           <i className="pvn-kou-diamond" />

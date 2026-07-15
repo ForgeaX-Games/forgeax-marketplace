@@ -4,8 +4,7 @@
  * 每个 kind 只声明：role + params 校验 + 输出 handle + 运行时契约（run/resolve）。引擎按 role 调用；
  * presentation 由引擎发泛型 renderOverlay，Player 按 kind 渲染。新增玩法 = 加一个这样的模块，核心不改。
  *
- * 覆盖 nodia 所需：
- *  - settle(logic)   数值结算：应用一组 effect（可含公式/随机）。
+ * 覆盖 nodia 所需（数值结算/副作用一律走 node.data.reactions 的生命周期相位，无 logic 结算组件）：
  *  - floatText(view) 漂字：纯展示，params 交给 Player。
  *  - choice(interaction) / skill(interaction) 选择/技能：每选项一个 opt:<key> 出口。
  *  - qte(interaction)   三档判定：pass/good/fail 出口。
@@ -16,21 +15,6 @@ import type { FormField, KindPlugin } from './kind-registry'
 import { KindRegistry, registerKind } from './kind-registry'
 import { evalExpr } from '../engine/expr'
 
-// ── logic: settle ─────────────────────────────────────────────────────────────
-export interface SettleParams {
-  effects: GraphEffect[]
-}
-export const settleKind: KindPlugin<SettleParams> = {
-  kind: 'settle',
-  role: 'logic',
-  label: '结算',
-  defaults: () => ({ effects: [] }),
-  form: [{ t: 'effects', key: 'effects', label: '效果' }],
-  validate: (p) => (Array.isArray(p.effects) ? [] : ['settle.effects must be an array']),
-  outputs: () => [],
-  run: (_ctx, p) => ({ effects: p.effects ?? [] }),
-}
-
 // ── presentation: floatText（花字/飘字：文案飘起淡出，支持固定文案或动态表达式）──────
 export interface FloatTextParams {
   /** 固定文案；含 `{v}` 时用 expr 求值替换（如 "气力 {v}"）。 */
@@ -40,7 +24,7 @@ export interface FloatTextParams {
   /** 归一化锚点（0~1，画面中心 0.5,0.5）。 */
   x?: number
   y?: number
-  /** 文本样式（预设快照，含 fontSizePct/描边/色/投影）。 */
+  /** 文本样式（预设快照，含 fontSize/描边/色/投影）。 */
   style?: GraphTextStyle
   /** 兜底文字色（无 style.color 时用；伤害飘字用）。 */
   color?: string
@@ -82,11 +66,29 @@ export const floatTextKind: KindPlugin<FloatTextParams> = {
         type: 'renderOverlay',
         nodeId: ctx.nodeId,
         elementId: ctx.elementId ?? 'float',
-        kind: 'floatText',
+        component: 'floatText',
         params: { text: display, x: p.x, y: p.y, color: p.color, style: p.style, durationMs: p.durationMs, enter: p.enter, exit: p.exit, float: true },
       },
     ]
   },
+}
+
+// ── presentation: hud（血条等；皮 id 如 battleHpBar 为 alias）──────────────────
+export interface HudParams {
+  bind?: string
+  label?: string
+  accent?: string
+}
+export const hudKind: KindPlugin<HudParams> = {
+  kind: 'hud',
+  role: 'presentation',
+  surface: 'hud',
+  aliases: ['battleHpBar'],
+  label: 'HUD',
+  defaults: () => ({}),
+  validate: () => [],
+  outputs: () => [],
+  events: [],
 }
 
 // ── interaction: choice / skill ───────────────────────────────────────────────
@@ -101,8 +103,6 @@ export interface ChoiceOption {
 export type ChoicePresentation = 'list' | 'hotspot'
 /** 选项 UI 皮肤（对齐 legacy ChoiceUi）。 */
 export type ChoiceUi = 'default' | 'battleSkillBar' | 'inkYingMo'
-/** 何时触发选择：立即结算 / 演出结束。 */
-export type ChoiceFireAt = 'on_pick' | 'video_end'
 export interface ChoiceParams {
   options: ChoiceOption[]
   /** 限时 ms（0/缺省=不限时）。 */
@@ -112,7 +112,6 @@ export interface ChoiceParams {
   prompt?: string
   presentation?: ChoicePresentation
   ui?: ChoiceUi
-  fireAt?: ChoiceFireAt
   /** 热区（presentation='hotspot' 时按 key 对应画面区域）。 */
   hotspots?: HotspotItem[]
   /** 渲染皮肤组件 id（皮肤 registry），缺省=通用按钮。 */
@@ -122,7 +121,6 @@ const CHOICE_FORM: FormField[] = [
   { t: 'text', key: 'prompt', label: '提示' },
   { t: 'select', key: 'presentation', label: '呈现', options: [{ value: 'list', label: '列表' }, { value: 'hotspot', label: '热区' }] },
   { t: 'select', key: 'ui', label: '皮肤', options: [{ value: 'default', label: '默认' }, { value: 'battleSkillBar', label: '战斗技能条' }, { value: 'inkYingMo', label: '水墨影魔' }] },
-  { t: 'select', key: 'fireAt', label: '触发', options: [{ value: 'on_pick', label: '选择即结算' }, { value: 'video_end', label: '演出结束' }] },
   { t: 'number', key: 'timeoutMs', label: '限时ms' },
   { t: 'text', key: 'defaultKey', label: '超时key' },
   { t: 'options', key: 'options', label: '选项' },
@@ -132,11 +130,11 @@ function choiceLike(kind: string, label: string): KindPlugin<ChoiceParams> {
     kind,
     role: 'interaction',
     label,
-    defaults: () => ({ options: [{ key: 'opt0', label: '选项一' }], presentation: 'list', ui: 'default', fireAt: 'on_pick' }),
+    defaults: () => ({ options: [{ key: 'opt0', label: '选项一' }], presentation: 'list', ui: 'default' }),
     form: CHOICE_FORM,
     validate: (p) =>
       Array.isArray(p.options) && p.options.length > 0 ? [] : [`${kind}.options must be non-empty`],
-    outputs: (p) => (p.options ?? []).map((o) => ({ id: `opt:${o.key}`, label: o.label, kind })),
+    outputs: (p) => (p.options ?? []).map((o) => ({ id: `opt:${o.key}`, label: o.label })),
     resolve: (_ctx, p, input) => {
       // input = 选项 key（超时/缺省时用 defaultKey）
       const key = typeof input === 'string' ? input : p.defaultKey ?? p.options[0]?.key
@@ -145,7 +143,10 @@ function choiceLike(kind: string, label: string): KindPlugin<ChoiceParams> {
     },
   }
 }
-export const choiceKind = choiceLike('choice', '选项')
+export const choiceKind = {
+  ...choiceLike('choice', '选项'),
+  aliases: ['inkYingMo', 'battleSkillBar'],
+} as KindPlugin<ChoiceParams>
 export const skillKind = choiceLike('skill', '技能')
 
 // ── interaction: qte ──────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ export interface QteCue {
   triggerKey?: string
   /** 慢动作系数（<1 减速）。 */
   slowMo?: number
-  layer?: number
+  zIndex?: number
 }
 export interface QteParams {
   qteKind?: 'parry' | 'timing' | 'mash' | 'sequence' | 'sweep'
@@ -195,10 +196,16 @@ export interface QteParams {
   /** 皮肤自管时限 ms（如叩击/防反的收圈时长；缺省各皮肤自带）。 */
   durationMs?: number
 }
-export const qteKind: KindPlugin<QteParams> = {
+export const qteKind: KindPlugin<QteParams & { exits?: Array<{ key: string; label?: string }>; defaultKey?: string; timeoutMs?: number }> = {
   kind: 'qte',
   role: 'interaction',
+  aliases: ['battleParry', 'inkKou'],
   label: 'QTE',
+  events: [
+    { id: 'pass', label: '完美' },
+    { id: 'good', label: '良好' },
+    { id: 'fail', label: '失败' },
+  ],
   defaults: () => ({ qteKind: 'parry', cues: [], passingHits: 1 }),
   form: [
     { t: 'select', key: 'qteKind', label: 'QTE型', options: [{ value: 'parry', label: '完美防反' }, { value: 'timing', label: '打点' }, { value: 'mash', label: '连打' }, { value: 'sequence', label: '连招' }, { value: 'sweep', label: '划动' }] },
@@ -211,16 +218,36 @@ export const qteKind: KindPlugin<QteParams> = {
     { t: 'qteCues', key: 'cues', label: '拍点' },
   ],
   validate: () => [],
-  outputs: () => [{ id: 'pass', kind: 'qte' }, { id: 'good', kind: 'qte' }, { id: 'fail', kind: 'qte' }],
+  outputs: (p) => {
+    const exits = p.exits
+    if (Array.isArray(exits) && exits.length > 0) {
+      return exits.map((e) => ({ id: e.key, label: e.label ?? p.outcomeLabels?.[e.key] }))
+    }
+    // inkKou 只出 pass|fail；其余 QTE 默认三档（可用 outcomeLabels 补文案）
+    if (p.component === 'inkKou') {
+      return [
+        { id: 'pass', label: p.outcomeLabels?.pass },
+        { id: 'fail', label: p.outcomeLabels?.fail },
+      ]
+    }
+    return [
+      { id: 'pass', label: p.outcomeLabels?.pass },
+      { id: 'good', label: p.outcomeLabels?.good },
+      { id: 'fail', label: p.outcomeLabels?.fail },
+    ]
+  },
   resolve: (_ctx, p, input) => {
-    // input 允许两种：① 直接给三档结果字符串 'pass'|'good'|'fail'；② { hits:number } 由 passingHits 判。
-    if (input === 'pass' || input === 'good' || input === 'fail') return { outcome: input }
+    // ① 字符串 outcome（含 exits key / pass|good|fail）；② { hits } 由 passingHits 判；③ 超时 defaultKey。
+    if (typeof input === 'string' && input) return { outcome: input }
+    if (input && typeof input === 'object' && 'key' in input && typeof (input as { key: unknown }).key === 'string') {
+      return { outcome: (input as { key: string }).key }
+    }
     if (input && typeof input === 'object' && 'hits' in input) {
       const hits = Number((input as { hits: number }).hits)
       const need = p.passingHits ?? 1
       return { outcome: hits >= need ? 'pass' : 'fail' }
     }
-    return { outcome: 'fail' }
+    return { outcome: p.defaultKey ?? 'fail' }
   },
 }
 
@@ -291,13 +318,13 @@ export const hotspotKind: KindPlugin<HotspotParams> = {
   defaults: () => ({ hotspots: [] }),
   form: [{ t: 'hotspots', key: 'hotspots', label: '热点' }],
   validate: (p) => (Array.isArray(p.hotspots) ? [] : ['hotspot.hotspots must be an array']),
-  outputs: (p) => (p.hotspots ?? []).map((h) => ({ id: `hs:${h.id}`, label: h.label, kind: 'hotspot' })),
+  outputs: (p) => (p.hotspots ?? []).map((h) => ({ id: `hs:${h.id}`, label: h.label })),
   resolve: (_ctx, _p, input) => ({ outcome: `hs:${String(input)}` }),
 }
 
 export const CORE_KINDS: KindPlugin[] = [
-  settleKind as unknown as KindPlugin,
   floatTextKind as unknown as KindPlugin,
+  hudKind as unknown as KindPlugin,
   dialogueKind as unknown as KindPlugin,
   transitionKind as unknown as KindPlugin,
   choiceKind as unknown as KindPlugin,

@@ -29,16 +29,14 @@ export interface Node<TData = unknown, TType extends string = string, THandleDat
   inputs: Handle<THandleData>[]
   outputs: Handle<THandleData>[]
   data: TData
-  parentId?: string
-  extent?: 'parent'
 }
 
 export interface Edge<TData = unknown> {
   id: string
   source: string
   target: string
-  sourceHandle?: string
-  targetHandle?: string
+  sourceHandle: string
+  targetHandle: string
   label?: string
   data?: TData
 }
@@ -52,24 +50,12 @@ export interface FXHandleData {
   flowId: string
 }
 
-export type FXNodeType = 'input' | 'default' | 'output' | 'group'
-
 export interface FXNodeData {
   label: string
-  subtitle: string
-  elementType: string
+  /** 节点角标：overlay / subflow / pack 等，驱动标题条样式。 */
   badge: string
-  /** 玩法角标（sceneKind / hud / clipId），给编辑器节点渲染用。 */
-  sceneKind: string
-  hud: string
 }
 
-export interface FXEdgeData {
-  edgeId: string
-  conditionExpression?: string
-  kind?: string
-}
-
-export type FXNode = Node<FXNodeData, FXNodeType, FXHandleData>
-export type FXEdge = Edge<FXEdgeData>
+export type FXNode = Node<FXNodeData, string, FXHandleData>
+export type FXEdge = Edge
 export type FXGraph = Graph<FXNode, FXEdge>

@@ -4,9 +4,10 @@
  *
  * 覆盖：悬空边、sourceHandle 与派生 outputs 不匹配、未注册 kind、kind 参数非法、不可达节点；
  * 传 `opts`（实体/变量/道具 id）后还查**引用**：condition/effect/expr 里引用的 entity/var/item/nodeId
- * 是否存在、rules.goto 是否指向真实节点；并对**纯瞬时环**（全为无演出/无交互节点 + 无条件边）给告警。
+ * 是否存在、reactions 中 goto 是否指向真实节点；并对**纯瞬时环**（全为无演出/无交互节点 + 无条件边）给告警。
  */
-import type { GameGraph, GameScenario, ReactiveRule } from '../schema/graph-schema'
+import type { GameGraph, GameScenario, Overlay, Reaction } from '../schema/graph-schema'
+import { expandNodeOverlays } from '../schema/expand-overlay'
 import { deriveOutputs, getKind, hasPlugin } from '../registry/kind-registry'
 
 export interface Issue {
@@ -21,8 +22,10 @@ export interface ValidateOpts {
   entities?: Iterable<string>
   vars?: Iterable<string>
   items?: Iterable<string>
-  /** 图级反应规则（scenario.rules）——一并校验 when 引用与 goto 目标。 */
-  rules?: ReactiveRule[]
+  /** 局级 reactions（scenario.reactions）——一并校验 when 引用与 goto 目标。 */
+  reactions?: Reaction[]
+  /** scenario.ui.overlays —— 展开 OverlayNode 做 kind / handle 校验。 */
+  overlays?: Record<string, Overlay>
 }
 
 /** 路由/网关 handle（out、else、cond:N）由 edge 声明、非某 kind 产出，始终合法。 */
@@ -93,11 +96,15 @@ function walkRefs(value: unknown, ctx: RefCtx, at: string, issues: Issue[]): voi
   for (const v of Object.values(o)) walkRefs(v, ctx, at, issues)
 }
 
-/** 纯瞬时环告警：环内全是「无演出时长 + 无交互元素」的节点、且构成环的边都无 condition → 可能同步空转。 */
-function checkInstantCycle(graph: GameGraph, issues: Issue[]): void {
+/** 纯瞬时环告警：环内全是「无演出时长 + 无交互 child」的节点、且构成环的边都无 condition → 可能同步空转。 */
+function checkInstantCycle(graph: GameGraph, overlays: Record<string, Overlay> | undefined, issues: Issue[]): void {
   const instant = new Set(
     graph.nodes
-      .filter((n) => !n.data.durationMs && !n.data.timeline.some((el) => getKind(el.kind)?.role === 'interaction'))
+      .filter((n) => {
+        const children = expandNodeOverlays(overlays, n).flatMap((i) => i.children)
+        const hasInteraction = children.some((el) => getKind(el.component)?.role === 'interaction')
+        return !n.data.durationMs && !hasInteraction
+      })
       .map((n) => n.id),
   )
   const adj = new Map<string, string[]>()
@@ -129,6 +136,7 @@ function checkInstantCycle(graph: GameGraph, issues: Issue[]): void {
 export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
   const issues: Issue[] = []
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const overlays = opts?.overlays
 
   // 1) 边：悬空 source/target + sourceHandle 是否在派生 outputs 内
   for (const e of graph.edges) {
@@ -141,7 +149,7 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     if (e.sourceHandle && !isRoutingHandle(e.sourceHandle)) {
       const src = byId.get(e.source)
       if (src) {
-        const outs = deriveOutputs(src).map((h) => h.id)
+        const outs = deriveOutputs(src, overlays).map((h) => h.id)
         if (!outs.includes(e.sourceHandle)) {
           issues.push({
             level: 'error',
@@ -154,16 +162,27 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
   }
 
-  // 2) 元素 kind：是否注册 + 参数校验
+  // 2) overlay children component：是否注册 + 参数校验
   for (const n of graph.nodes) {
-    for (const el of n.data.timeline) {
-      const plugin = getKind(el.kind)
+    const children = expandNodeOverlays(overlays, n).flatMap((i) => i.children)
+    for (const el of children) {
+      const plugin = getKind(el.component)
       if (!plugin) {
-        issues.push({ level: 'error', code: 'kind.unknown', msg: `unknown element kind '${el.kind}'`, at: `${n.id}/${el.id}` })
+        issues.push({
+          level: 'error',
+          code: 'component.unknown',
+          msg: `unknown component '${el.component}'`,
+          at: `${n.id}/${el.id}`,
+        })
         continue
       }
       for (const problem of plugin.validate(el.params)) {
-        issues.push({ level: 'error', code: 'kind.invalid', msg: `${el.kind}: ${problem}`, at: `${n.id}/${el.id}` })
+        issues.push({
+          level: 'error',
+          code: 'component.invalid',
+          msg: `${el.component}: ${problem}`,
+          at: `${n.id}/${el.id}`,
+        })
       }
     }
   }
@@ -196,9 +215,9 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
   }
 
   // 4) 纯瞬时环告警（静态）
-  checkInstantCycle(graph, issues)
+  checkInstantCycle(graph, overlays, issues)
 
-  // 5) 引用检查（需 opts 提供已声明的 entity/var/item id）：condition/effect/expr + rules
+  // 5) 引用检查（需 opts 提供已声明的 entity/var/item id）：condition/effect/expr + reactions
   if (opts) {
     const ctx: RefCtx = {
       entities: new Set(opts.entities ?? []),
@@ -208,21 +227,33 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
     for (const n of graph.nodes) walkRefs(n.data, ctx, n.id, issues)
     for (const e of graph.edges) walkRefs(e.data, ctx, e.id, issues)
-    for (let i = 0; i < (opts.rules ?? []).length; i++) {
-      const r = opts.rules![i]!
-      const at = `rules[${i}]`
-      walkRefs(r.when, ctx, at, issues)
-      if (!ctx.nodeIds.has(r.goto)) issues.push({ level: 'error', code: 'ref.node.missing', msg: `rule goto 指向未知节点 '${r.goto}'`, at })
+    if (overlays) {
+      for (const [oid, ov] of Object.entries(overlays)) {
+        for (const ch of ov.children) walkRefs(ch, ctx, `overlay:${oid}/${ch.id}`, issues)
+      }
+    }
+    for (let i = 0; i < (opts.reactions ?? []).length; i++) {
+      const r = opts.reactions![i]!
+      const at = `reactions[${i}]`
+      if (r.when.type === 'state') walkRefs(r.when.condition, ctx, at, issues)
+      if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
+      for (const a of r.do) {
+        if (a.kind === 'effect') walkRefs(a.effects, ctx, at, issues)
+        if (a.kind === 'goto' && !ctx.nodeIds.has(a.targetNodeId)) {
+          issues.push({ level: 'error', code: 'ref.node.missing', msg: `reaction goto 指向未知节点 '${a.targetNodeId}'`, at })
+        }
+      }
     }
   }
 
   return issues
 }
 
-/** 是否存在「attr 可归零」的致死出口：rules 或边条件上的 attrRatio ≤ 0。 */
-function hasLethalExit(graph: GameGraph, rules: ReactiveRule[] | undefined, attr: string): boolean {
-  for (const r of rules ?? []) {
-    for (const c of r.when.all) {
+/** 是否存在「attr 可归零」的致死出口：reactions 或边条件上的 attrRatio ≤ 0。 */
+function hasLethalExit(graph: GameGraph, reactions: Reaction[] | undefined, attr: string): boolean {
+  for (const r of reactions ?? []) {
+    if (r.when.type !== 'state') continue
+    for (const c of r.when.condition.all) {
       if (c.type === 'attrRatio' && c.attr === attr && (c.op === 'lte' || c.op === 'lt') && c.value <= 0) return true
       if (c.type === 'attr' && c.attr === attr && (c.op === 'lte' || c.op === 'lt') && c.value <= 0) return true
     }
@@ -252,7 +283,8 @@ export function validateScenario(scenario: GameScenario): Issue[] {
   const issues = validateGraph(scenario.graph, {
     entities: Object.keys(scenario.entities ?? {}),
     vars: Object.keys(scenario.variables ?? {}),
-    rules: scenario.rules,
+    reactions: scenario.reactions,
+    overlays: scenario.ui?.overlays,
   })
 
   for (const req of scenario.requiredPlugins ?? []) {
@@ -275,11 +307,11 @@ export function validateScenario(scenario: GameScenario): Issue[] {
   }
   for (const attr of zeroable) {
     if (!mutatesAttr(scenario.graph, attr)) continue
-    if (!hasLethalExit(scenario.graph, scenario.rules, attr)) {
+    if (!hasLethalExit(scenario.graph, scenario.reactions, attr)) {
       issues.push({
         level: 'warn',
         code: 'lethal.no-exit',
-        msg: `mutates attr '${attr}' but no win/lose rules or attrRatio≤0 edge exit found`,
+        msg: `mutates attr '${attr}' but no win/lose reactions or attrRatio≤0 edge exit found`,
         at: `attr:${attr}`,
       })
     }

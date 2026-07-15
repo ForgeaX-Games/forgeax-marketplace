@@ -6,6 +6,8 @@
  */
 import { Component, createContext, useContext, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import type { OverlaySnap, InteractionSnap, HudSnap } from '../engine/session'
+import type { Layout } from '../schema/node-config-schema'
+import { layoutToCss } from '../schema/layout'
 import type { ChoiceParams, HotspotParams } from '../registry/core-kinds'
 import { isPlayerFocused } from '../input/playerFocus'
 
@@ -17,7 +19,7 @@ export interface SkinCtx {
 /** HUD 元素在屏幕上的锚点位置（皮肤自定位用；缺省由皮肤按角色推断）。 */
 export type HudPos = 'top-left' | 'top' | 'top-right' | 'bottom-left' | 'bottom' | 'bottom-right'
 
-/** 单个 HUD 元素定义（scenario.ui.hud[i]）——渲染层视图。 */
+/** 单个 HUD 元素定义 —— 渲染层视图。 */
 export interface HudElementView {
   element: string
   show?: 'always' | 'never' | 'battle' | 'qte'
@@ -27,8 +29,10 @@ export interface HudElementView {
   bind?: string
   label?: string
   accent?: string
-  /** 屏幕锚点（皮肤自定位）。 */
+  /** @deprecated 用 layout（CSS inset）；皮肤内硬编码定位的遗留字段。 */
   pos?: HudPos
+  /** OverlayChild.layout；有则外包一层绝对定位。 */
+  layout?: Layout
 }
 
 // ── 组件 props 契约（每类渲染组件的统一入参）──────────────────────────────────────
@@ -122,22 +126,22 @@ export class SkinRegistry {
   }
 
   renderOverlay(overlay: OverlaySnap): ReactNode {
-    const C = this.overlay.get(overlay.kind)
+    const C = this.overlay.get(overlay.component)
     if (!C) return null
     return (
-      <SkinErrorBoundary key={overlay.elementId} name={overlay.kind}>
+      <SkinErrorBoundary key={overlay.elementId} name={overlay.component}>
         <C overlay={overlay} />
       </SkinErrorBoundary>
     )
   }
 
   renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx): ReactNode {
-    const component = (interaction.params as { component?: string }).component
-    const Skin = component ? this.interaction.get(component) : undefined
-    const Default = this.interaction.get(interaction.kind)
+    const paramComponent = (interaction.params as { component?: string }).component
+    const Skin = this.interaction.get(paramComponent ?? interaction.component)
+    const Default = this.interaction.get(interaction.component)
     const C = Skin ?? Default
     if (!C) return null
-    const name = component ?? interaction.kind
+    const name = paramComponent ?? interaction.component
     const props: InteractionProps = { interaction, submit: safe(name, submit), ctx }
     const fallback = Skin && Default && Default !== Skin ? <Default {...props} /> : undefined
     return (
@@ -150,11 +154,21 @@ export class SkinRegistry {
   renderHudElement(element: HudElementView, ctx: SkinCtx): ReactNode {
     const C = element.component ? this.hud.get(element.component) : undefined
     if (!C) return null
-    return (
+    const body = (
       <SkinErrorBoundary key={element.element} name={element.component ?? element.element}>
         <C element={element} ctx={ctx} />
       </SkinErrorBoundary>
     )
+    if (!element.layout) return body
+    // 无宽高时视为「整舞台锚点」：水墨血条等皮肤内部用 absolute 自定位，
+    // 若包在 left/top=0 的零尺寸盒里会全部飞出可视区。
+    const hasBox = element.layout.width != null || element.layout.height != null
+      || (element.layout.left != null && element.layout.right != null)
+      || (element.layout.top != null && element.layout.bottom != null)
+    const wrapStyle: CSSProperties = hasBox
+      ? { ...layoutToCss(element.layout), pointerEvents: 'none' }
+      : { position: 'absolute', inset: 0, pointerEvents: 'none' }
+    return <div style={wrapStyle}>{body}</div>
   }
 
   /** 注册核心 kind 默认渲染器（对本实例幂等）。 */

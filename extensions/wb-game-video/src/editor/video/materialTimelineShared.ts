@@ -18,7 +18,7 @@ export interface MaterialItem {
   label: string
   startMs: number
   endMs: number
-  layer: number
+  zIndex: number
   /** 段内的一个「判定点」标记（当前仅 QTE 用：= cue.targetAt 计分锚点）；缺省无标记。 */
   markerMs?: number
 }
@@ -32,7 +32,7 @@ export interface AudioItem {
   label: string
   startMs: number
   endMs: number
-  layer: number
+  zIndex: number
   /** 素材自带音轨（视频内嵌声道）；仅显示用途，暂不可删。 */
   builtin?: boolean
 }
@@ -87,8 +87,8 @@ export function layerFromPointerY(clientY: number, rect: DOMRect, maxLayer: numb
   return Math.max(0, Math.min(maxLayer, raw))
 }
 
-export function layerTop(layer: number): number {
-  return TIMELINE_LAYER_TOP + Math.max(0, layer) * TIMELINE_LAYER_STEP
+export function layerTop(zIndex: number): number {
+  return TIMELINE_LAYER_TOP + Math.max(0, zIndex) * TIMELINE_LAYER_STEP
 }
 
 /** ruler 刻度：按缩放挑一个「整」间隔，保证相邻刻度像素间距足够读。 */

@@ -2,7 +2,7 @@
  * fx-kinds —— 滤镜 / 特效两个 presentation kind（独立于 core-kinds，避免与运行时负责人
  * 的 core-kinds 改动冲突）。
  *
- * 两者都是「一段时间 + 一图层 + 一组参数」，复用 TimelineElement 的 window/layer/params，
+ * 两者都是「一段时间 + 叠层顺序 + 一组参数」，复用 OverlayChild 的 window/layout(zIndex)/params，
  * **不新增任何 schema 字段**。预设与视觉解析在 `../fx/video-fx`（SSOT）：
  *   · filter：调色滤镜（黑白/怀旧/暖冷调/鲜艳/梦幻…）
  *   · fx：画面特效（闪白/染色/暗角/震屏/变焦冲击）

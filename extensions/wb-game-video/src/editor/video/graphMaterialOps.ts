@@ -1,42 +1,63 @@
 /**
- * graphMaterialOps —— 「新引擎 › 视频」编辑器的 graph 原生数据层（读投影 + 写映射）。
+ * graphMaterialOps —— 「新引擎 › 视频」编辑器的 scenario 原生数据层（读投影 + 写映射）。
  *
- * 权威数据 = `graphScenarioStore` 的 GameGraph。一个演出节点（`node.id === scene.id`）的
- * `node.data.timeline[]` + `node.data.media` + 出边（`graph.edges`）就是旧 Scene 的
- * dialogue/overlays/qte/choice/branches 的**统一容器**。这里把它投影成时间轴用的
- * `MaterialItem[]` / 预览叠层，并把编辑（拖拽/检视器/增删/选项分支）经 `graph-edit` 原语
- * 写回 —— 全程不落任何 Scene 拷贝（对齐用户「重写数据层、不做 Scene projection」的决策）。
+ * 权威数据 = `graphScenarioStore` 合出的 `GameScenario`（graph + `ui.overlays`）。一个演出节点
+ * （`node.id === scene.id`）经 `node.data.overlayNodes` 指向 `scenario.ui.overlays[id]`，
+ * 该 overlay 的 `children[]`（`OverlayChild[]`）就是旧 Scene 的 dialogue/overlays/qte/choice/branches
+ * 的**统一容器**。这里把它投影成时间轴用的 `MaterialItem[]` / 预览叠层，并把编辑（拖拽/检视器/增删/
+ * 选项分支）经 `overlay-edit` + `graph-edit` 原语写回 —— 全程不落任何 Scene 拷贝。
+ *
+ * 每个节点专属一张 overlay（`node:<nodeId>`，见 `ensureNodeOverlay`）：本编辑器只直写该 overlay 的
+ * `children`。挂载侧仅 `overlay` + `layout` + `reactions`，不补丁子组件。
  *
  * 旧 → 新 kind 映射：
  *   字幕 dialogue[]     → kind 'dialogue'   （MaterialItem 'subtitle'）
- *   飘字 overlays[]      → kind 'floatText'  （'overlay'）+ 结算联动 kind 'settle'（id `${floatId}-settle`）
+ *   飘字 overlays[]      → kind 'floatText'  （'overlay'）+ 结算联动 = 节点 reaction（effect.id `${floatId}-settle`）
  *   QTE  qte.cues[]      → kind 'qte'（params.cues[]）→ 每 cue 一个 'qte' 项（整段 QTE 跨度由 cues 派生，不再单列 'qte_window' 轨）
  *   选项 choice+branches → kind 'choice'（params.options[]）+ 分支跳转 = 出边 `opt:<key>`
  */
 import type {
-  EntitySpec,
-  GameGraph,
+  Entity,
   GameNode,
+  GameScenario,
   GraphEffect,
   GraphTextStyle,
-  TimelineElement,
+  OverlayChild,
+  Reaction,
+  Trigger,
 } from '../../runtime/schema/graph-schema'
 import type { ChoiceOption, QteCue } from '../../runtime/registry/core-kinds'
 import { FILTER_PRESETS, FX_PRESETS } from '../../runtime/fx/video-fx'
 import type { MaterialItem, MaterialKind } from './materialTimelineShared'
 import { clampLayer, clampMs, normalizeLayer } from './materialTimelineShared'
-import { elementStartMs } from '../../graph/canvas/timeline-geometry'
 import {
-  addTimelineElement,
   connect,
   disconnect,
   newElementId,
-  patchTimelineElement,
-  removeTimelineElement,
   teardownInteraction,
   updateNodeData,
   upsertBranchEdge,
 } from '../../graph/edit/graph-edit'
+import { addOverlayChild, ensureNodeOverlay, patchOverlayChild, removeOverlayChild } from '../../runtime/schema/overlay-edit'
+
+// ── overlay children 读取小工具（本节点专属 overlay 的 children） ────────────────
+function overlayIdOf(node: GameNode | undefined): string | undefined {
+  return node?.data.overlayNodes?.find((m) => m.overlay === `node:${node.id}`)?.overlay ?? node?.data.overlayNodes?.[0]?.overlay
+}
+function childrenOf(scenario: GameScenario, node: GameNode | undefined): OverlayChild[] {
+  const id = overlayIdOf(node)
+  if (!id) return []
+  return scenario.ui?.overlays?.[id]?.children ?? []
+}
+/** 拆掉一整段交互：先摘掉承载它的 overlay child，再删占用的出边（`teardownInteraction` 只管边）。 */
+function teardownInteractionScenario(
+  scenario: GameScenario,
+  node: GameNode,
+  opts: { kind: string; handlePrefixes: string[]; continueHandle?: string; childId?: string },
+): GameScenario {
+  const s = opts.childId ? removeOverlayChild(scenario, node.id, opts.childId) : scenario
+  return { ...s, graph: teardownInteraction(s.graph, node.id, opts) }
+}
 
 // ── 预览叠层 ─────────────────────────────────────────────────────────────────
 export type PreviewTarget =
@@ -51,7 +72,7 @@ export interface PreviewOverlay {
   label: string
   x: number
   y: number
-  layer: number
+  zIndex: number
   movable: boolean
   style?: GraphTextStyle
   target: PreviewTarget
@@ -68,11 +89,16 @@ const CHOICE_HANDLE = 'opt:'
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
-function cuesOf(el: TimelineElement | undefined): QteCue[] {
-  return el && Array.isArray(el.params.cues) ? (el.params.cues as QteCue[]) : []
+function paramsOf(el: OverlayChild | undefined): Record<string, unknown> {
+  return el?.params ?? {}
 }
-function optionsOf(el: TimelineElement | undefined): ChoiceOption[] {
-  return el && Array.isArray(el.params.options) ? (el.params.options as ChoiceOption[]) : []
+function cuesOf(el: OverlayChild | undefined): QteCue[] {
+  const cues = paramsOf(el).cues
+  return Array.isArray(cues) ? (cues as QteCue[]) : []
+}
+function optionsOf(el: OverlayChild | undefined): ChoiceOption[] {
+  const options = paramsOf(el).options
+  return Array.isArray(options) ? (options as ChoiceOption[]) : []
 }
 function filterLabel(id: unknown): string {
   return FILTER_PRESETS.find((p) => p.id === id)?.label ?? '滤镜'
@@ -81,7 +107,7 @@ function fxLabel(id: unknown): string {
   return FX_PRESETS.find((p) => p.id === id)?.label ?? '特效'
 }
 
-function firstEntityId(entities: Record<string, EntitySpec> | undefined, kind: 'boss' | 'player'): string {
+function firstEntityId(entities: Record<string, Entity> | undefined, kind: 'boss' | 'player'): string {
   for (const [id, e] of Object.entries(entities ?? {})) if (e.kind === kind) return e.id ?? id
   return `ent-${kind}`
 }
@@ -92,13 +118,18 @@ export function parseDamageFromContent(content: string): number {
   return m ? Math.abs(Number(m[0])) || 0 : 0
 }
 
-function settleIdFor(floatId: string): string {
+/**
+ * 「飘字联动结算」的结算副作用 = 挂在**节点 reactions** 上的一条 effect（不再是 settle 组件）。
+ * 通过 effect.id = `${floatId}-settle` 把结算与对应飘字绑定，便于检视器定位/删改。
+ */
+function settleEffectId(floatId: string): string {
   return `${floatId}-settle`
 }
 function hpEffect(
-  entities: Record<string, EntitySpec> | undefined,
+  entities: Record<string, Entity> | undefined,
   target: 'boss' | 'player',
   amount: number,
+  floatId: string,
 ): GraphEffect {
   return {
     kind: 'attr',
@@ -106,110 +137,154 @@ function hpEffect(
     attr: 'hp',
     op: 'add',
     value: -Math.abs(amount),
-    id: `ov-${target}-hp`,
+    id: settleEffectId(floatId),
   }
 }
-/** settle 元素里 hp effect 的绝对伤害（无则 0）。 */
-export function settleDamage(settle: TimelineElement | undefined): number {
-  const effects = (settle?.params.effects as GraphEffect[] | undefined) ?? []
-  const hp = effects.find((e) => e.kind === 'attr' && e.attr === 'hp') as { value?: unknown } | undefined
+/** 飘字出现时机 → 结算 reaction 的相位（at:ms 优先，否则 enter）。 */
+function floatSettleWhen(float: OverlayChild | undefined): Reaction['when'] {
+  const t = float?.trigger
+  if (t?.when === 'at') return { type: 'at', ms: t.ms }
+  const start = float?.window?.startMs
+  return typeof start === 'number' && start > 0 ? { type: 'at', ms: start } : { type: 'enter' }
+}
+/** 定位某飘字对应的结算 reaction（node.data.reactions 中含 effect.id=`${floatId}-settle` 的那条）。 */
+export function settleElementFor(scenario: GameScenario, node: GameNode | undefined, floatId: string): Reaction | undefined {
+  const eid = settleEffectId(floatId)
+  return (node?.data.reactions ?? []).find((r) =>
+    r.do.some((a) => a.kind === 'effect' && a.effects.some((e) => e.id === eid)),
+  )
+}
+function settleHpEffect(settle: Reaction | undefined): { value?: unknown; entityId?: string } | undefined {
+  for (const a of settle?.do ?? []) {
+    if (a.kind !== 'effect') continue
+    const hp = a.effects.find((e) => e.kind === 'attr' && e.attr === 'hp')
+    if (hp) return hp as { value?: unknown; entityId?: string }
+  }
+  return undefined
+}
+/** 结算 reaction 的绝对伤害（无则 0）。 */
+export function settleDamage(settle: Reaction | undefined): number {
+  const hp = settleHpEffect(settle)
   return hp && typeof hp.value === 'number' ? Math.abs(hp.value) : 0
 }
-/** settle 的 hp effect 作用于 boss 还是 player。 */
+/** 结算作用于 boss 还是 player。 */
 export function settleTargetKind(
-  settle: TimelineElement | undefined,
-  entities: Record<string, EntitySpec> | undefined,
+  settle: Reaction | undefined,
+  entities: Record<string, Entity> | undefined,
 ): 'boss' | 'player' {
-  const effects = (settle?.params.effects as GraphEffect[] | undefined) ?? []
-  const hp = effects.find((e) => e.kind === 'attr' && e.attr === 'hp') as { entityId?: string } | undefined
+  const hp = settleHpEffect(settle)
   const ent = hp?.entityId ? entities?.[hp.entityId] : undefined
   return ent?.kind === 'player' ? 'player' : 'boss'
 }
+/** 写入/覆盖某飘字的结算 reaction。 */
+function upsertSettleReaction(
+  scenario: GameScenario,
+  node: GameNode,
+  floatId: string,
+  when: Reaction['when'],
+  entities: Record<string, Entity> | undefined,
+  target: 'boss' | 'player',
+  amount: number,
+): GameScenario {
+  const eid = settleEffectId(floatId)
+  const kept = (node.data.reactions ?? []).filter(
+    (r) => !r.do.some((a) => a.kind === 'effect' && a.effects.some((e) => e.id === eid)),
+  )
+  kept.push({ when, do: [{ kind: 'effect', effects: [hpEffect(entities, target, amount, floatId)] }] })
+  return { ...scenario, graph: updateNodeData(scenario.graph, node.id, { reactions: kept }) }
+}
+/** 删除某飘字的结算 reaction。 */
+function removeSettleReaction(scenario: GameScenario, node: GameNode, floatId: string): GameScenario {
+  const eid = settleEffectId(floatId)
+  const kept = (node.data.reactions ?? []).filter(
+    (r) => !r.do.some((a) => a.kind === 'effect' && a.effects.some((e) => e.id === eid)),
+  )
+  return { ...scenario, graph: updateNodeData(scenario.graph, node.id, { reactions: kept.length ? kept : undefined }) }
+}
 
 // ── 节点/元素定位 ─────────────────────────────────────────────────────────────
-export function findNode(graph: GameGraph, nodeId: string | undefined): GameNode | undefined {
+export function findNode(graph: GameScenario['graph'], nodeId: string | undefined): GameNode | undefined {
   if (!nodeId) return undefined
   return graph.nodes.find((n) => n.id === nodeId)
 }
-export function findElement(node: GameNode | undefined, elId: string): TimelineElement | undefined {
-  return node?.data.timeline.find((e) => e.id === elId)
+export function findElement(scenario: GameScenario, node: GameNode | undefined, elId: string): OverlayChild | undefined {
+  return childrenOf(scenario, node).find((e) => e.id === elId)
 }
-export function qteElementOfCue(node: GameNode | undefined, cueId: string): TimelineElement | undefined {
-  return node?.data.timeline.find((e) => e.kind === 'qte' && cuesOf(e).some((c) => c.id === cueId))
+export function qteElementOfCue(scenario: GameScenario, node: GameNode | undefined, cueId: string): OverlayChild | undefined {
+  return childrenOf(scenario, node).find((e) => e.component === 'qte' && cuesOf(e).some((c) => c.id === cueId))
 }
-export function qteElement(node: GameNode | undefined): TimelineElement | undefined {
-  return node?.data.timeline.find((e) => e.kind === 'qte')
+export function qteElement(scenario: GameScenario, node: GameNode | undefined): OverlayChild | undefined {
+  return childrenOf(scenario, node).find((e) => e.component === 'qte')
 }
-export function choiceElement(node: GameNode | undefined): TimelineElement | undefined {
-  return node?.data.timeline.find((e) => e.kind === 'choice')
-}
-export function settleElementFor(node: GameNode | undefined, floatId: string): TimelineElement | undefined {
-  return findElement(node, settleIdFor(floatId))
+export function choiceElement(scenario: GameScenario, node: GameNode | undefined): OverlayChild | undefined {
+  return childrenOf(scenario, node).find((e) => e.component === 'choice')
 }
 
-function timedStart(el: TimelineElement): number {
-  const s = elementStartMs(el)
-  return s < 0 ? 0 : s
+/** 起点：window.startMs 优先；否则 trigger='at' 用 ms；其余（含缺省 trigger）落 0。 */
+function timedStart(el: OverlayChild): number {
+  if (el.window?.startMs != null) return el.window.startMs
+  if (el.trigger?.when === 'at') return el.trigger.ms
+  return 0
 }
 
 // ── 读投影：node → MaterialItem[] ─────────────────────────────────────────────
-export function collectMaterialsFromNode(node: GameNode | undefined, maxMs: number): MaterialItem[] {
+export function collectMaterialsFromNode(scenario: GameScenario, node: GameNode | undefined, maxMs: number): MaterialItem[] {
   if (!node) return []
   const out: MaterialItem[] = []
-  for (const el of node.data.timeline) {
-    if (el.kind === 'dialogue') {
+  for (const el of childrenOf(scenario, node)) {
+    if (el.component === 'dialogue') {
       const start = timedStart(el)
       out.push({
         key: `subtitle:${el.id}`,
         id: el.id,
         kind: 'subtitle',
-        label: str(el.params.text) || '字幕',
+        label: str(paramsOf(el).text) || '字幕',
         startMs: start,
         endMs: el.window?.endMs ?? Math.min(maxMs, start + 2000),
-        layer: normalizeLayer(el.layer, 0),
+        zIndex: normalizeLayer(el.layout?.zIndex, 0),
       })
-    } else if (el.kind === 'floatText') {
+    } else if (el.component === 'floatText') {
       const start = timedStart(el)
       out.push({
         key: `overlay:${el.id}`,
         id: el.id,
         kind: 'overlay',
-        label: (str(el.params.text) ?? '').trim() || '飘字',
+        label: (str(paramsOf(el).text) ?? '').trim() || '飘字',
         startMs: start,
         endMs: el.window?.endMs ?? Math.min(maxMs, start + 1200),
-        layer: normalizeLayer(el.layer, 1),
+        zIndex: normalizeLayer(el.layout?.zIndex, 1),
       })
-    } else if (el.kind === 'choice') {
+    } else if (el.component === 'choice') {
       out.push({
         key: `option:${el.id}`,
         id: el.id,
         kind: 'option',
-        label: str(el.params.prompt) || '选项',
+        label: str(paramsOf(el).prompt) || '选项',
         startMs: el.window?.startMs ?? 0,
         endMs: el.window?.endMs ?? maxMs,
-        layer: normalizeLayer(el.layer, 3),
+        zIndex: normalizeLayer(el.layout?.zIndex, 3),
       })
-    } else if (el.kind === 'filter') {
+    } else if (el.component === 'filter') {
       out.push({
         key: `filter:${el.id}`,
         id: el.id,
         kind: 'filter',
-        label: filterLabel(el.params.filter),
+        label: filterLabel(paramsOf(el).filter),
         startMs: el.window?.startMs ?? 0,
         endMs: el.window?.endMs ?? maxMs,
-        layer: normalizeLayer(el.layer, 4),
+        zIndex: normalizeLayer(el.layout?.zIndex, 4),
       })
-    } else if (el.kind === 'fx') {
+    } else if (el.component === 'fx') {
       out.push({
         key: `fx:${el.id}`,
         id: el.id,
         kind: 'fx',
-        label: fxLabel(el.params.fx),
+        label: fxLabel(paramsOf(el).fx),
         startMs: el.window?.startMs ?? 0,
         endMs: el.window?.endMs ?? maxMs,
-        layer: normalizeLayer(el.layer, 5),
+        zIndex: normalizeLayer(el.layout?.zIndex, 5),
       })
-    } else if (el.kind === 'qte') {
+    } else if (el.component === 'qte') {
       for (const c of cuesOf(el)) {
         // 左缘=出现(appearAt) 右缘=消失(endAt) 菱形=命中判定(targetAt，计分锚点)。
         const s = c.appearAt ?? 0
@@ -223,7 +298,7 @@ export function collectMaterialsFromNode(node: GameNode | undefined, maxMs: numb
           startMs: s,
           endMs: end,
           markerMs: Math.min(Math.max(target, s), end),
-          layer: normalizeLayer(c.layer, 2),
+          zIndex: normalizeLayer(c.zIndex, 2),
         })
       }
     }
@@ -233,50 +308,52 @@ export function collectMaterialsFromNode(node: GameNode | undefined, maxMs: numb
 
 // ── 读投影：预览叠层 ──────────────────────────────────────────────────────────
 export function activePreviewOverlaysFromNode(
+  scenario: GameScenario,
   node: GameNode | undefined,
   ms: number,
   maxMs: number,
 ): PreviewOverlay[] {
   if (!node) return []
   const out: PreviewOverlay[] = []
-  for (const el of node.data.timeline) {
-    if (el.kind === 'dialogue') {
+  for (const el of childrenOf(scenario, node)) {
+    const params = paramsOf(el)
+    if (el.component === 'dialogue') {
       const start = timedStart(el)
       const end = el.window?.endMs ?? Math.min(maxMs, start + 2000)
       if (ms < start || ms > end) continue
-      const speaker = str(el.params.speaker)
-      const text = str(el.params.text) ?? ''
+      const speaker = str(params.speaker)
+      const text = str(params.text) ?? ''
       out.push({
         id: `subtitle:${el.id}`,
         materialKey: `subtitle:${el.id}`,
         kind: 'subtitle',
         label: speaker ? `${speaker}：${text}` : text,
-        x: (el.params.x as number) ?? SUBTITLE_XY.x,
-        y: (el.params.y as number) ?? SUBTITLE_XY.y,
-        layer: normalizeLayer(el.layer, 0),
+        x: (params.x as number) ?? SUBTITLE_XY.x,
+        y: (params.y as number) ?? SUBTITLE_XY.y,
+        zIndex: normalizeLayer(el.layout?.zIndex, 0),
         movable: true,
-        style: el.params.style as GraphTextStyle | undefined,
+        style: params.style as GraphTextStyle | undefined,
         target: { kind: 'element', elementId: el.id },
       })
-    } else if (el.kind === 'floatText') {
+    } else if (el.component === 'floatText') {
       const start = timedStart(el)
       const end = el.window?.endMs ?? Math.min(maxMs, start + 1200)
       if (ms < start || ms > end) continue
-      const text = (str(el.params.text) ?? '').trim()
+      const text = (str(params.text) ?? '').trim()
       if (!text) continue
       out.push({
         id: `overlay:${el.id}`,
         materialKey: `overlay:${el.id}`,
         kind: 'overlay',
         label: text,
-        x: (el.params.x as number) ?? OVERLAY_XY.x,
-        y: (el.params.y as number) ?? OVERLAY_XY.y,
-        layer: normalizeLayer(el.layer, 1),
+        x: (params.x as number) ?? OVERLAY_XY.x,
+        y: (params.y as number) ?? OVERLAY_XY.y,
+        zIndex: normalizeLayer(el.layout?.zIndex, 1),
         movable: true,
-        style: el.params.style as GraphTextStyle | undefined,
+        style: params.style as GraphTextStyle | undefined,
         target: { kind: 'element', elementId: el.id },
       })
-    } else if (el.kind === 'qte') {
+    } else if (el.component === 'qte') {
       for (const c of cuesOf(el)) {
         const s = c.appearAt ?? 0
         if (ms < s || ms > (c.targetAt ?? s) + QTE_GOOD_WINDOW) continue
@@ -287,12 +364,12 @@ export function activePreviewOverlaysFromNode(
           label: c.label ?? (c.shape ?? 'tap').toUpperCase(),
           x: c.x ?? 0.5,
           y: c.y ?? 0.55,
-          layer: normalizeLayer(c.layer, 2),
+          zIndex: normalizeLayer(c.zIndex, 2),
           movable: true,
           target: { kind: 'qteCue', elementId: el.id, cueId: c.id },
         })
       }
-    } else if (el.kind === 'choice') {
+    } else if (el.component === 'choice') {
       const start = el.window?.startMs ?? 0
       const end = el.window?.endMs ?? maxMs
       if (ms < start || ms > end) continue
@@ -300,48 +377,48 @@ export function activePreviewOverlaysFromNode(
         id: `option:list:${el.id}`,
         materialKey: `option:${el.id}`,
         kind: 'option',
-        label: str(el.params.prompt) ?? '请选择',
+        label: str(params.prompt) ?? '请选择',
         x: OPTION_XY.x,
         y: OPTION_XY.y,
-        layer: normalizeLayer(el.layer, 3),
+        zIndex: normalizeLayer(el.layout?.zIndex, 3),
         movable: false,
         target: { kind: 'readonly' },
       })
     }
   }
-  return out.sort((a, b) => a.layer - b.layer)
+  return out.sort((a, b) => a.zIndex - b.zIndex)
 }
 
-// ── 写映射：时间轴拖拽（start/end/layer）──────────────────────────────────────
+// ── 写映射：时间轴拖拽（start/end/zIndex）──────────────────────────────────────
 export function patchMaterialGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   maxMs: number,
   item: MaterialItem,
-  patch: { startMs?: number; endMs?: number; layer?: number; markerMs?: number },
-): GameGraph {
+  patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number },
+): GameScenario {
   const start = clampMs(patch.startMs ?? item.startMs, 0, Math.max(0, maxMs - 100))
   const end = clampMs(patch.endMs ?? item.endMs, start + 100, maxMs)
-  const layer = patch.layer == null ? item.layer : clampLayer(patch.layer)
+  const zIndex = patch.zIndex == null ? item.zIndex : clampLayer(patch.zIndex)
   switch (item.kind) {
     case 'subtitle':
     case 'overlay':
     case 'filter':
     case 'fx':
-      return patchTimelineElement(graph, node.id, item.id, {
+      return patchOverlayChild(scenario, node.id, item.id, {
         window: { startMs: start, endMs: end },
         trigger: { when: 'at', ms: start },
-        layer,
+        layout: { zIndex },
       })
     case 'option':
-      return patchTimelineElement(graph, node.id, item.id, {
+      return patchOverlayChild(scenario, node.id, item.id, {
         window: { startMs: start, endMs: end },
-        layer,
+        layout: { zIndex },
       })
     case 'qte': {
-      const el = qteElementOfCue(node, item.id)
-      if (!el) return graph
-      const isMove = patch.layer != null && patch.startMs != null && patch.endMs != null
+      const el = qteElementOfCue(scenario, node, item.id)
+      if (!el) return scenario
+      const isMove = patch.zIndex != null && patch.startMs != null && patch.endMs != null
       const cues = cuesOf(el).map((c) => {
         if (c.id !== item.id) return c
         const next: QteCue = { ...c }
@@ -358,55 +435,55 @@ export function patchMaterialGraph(
           next.appearAt = start
           next.endAt = end
           if (c.targetAt != null) next.targetAt = clampMs(c.targetAt + shift, start, end)
-          next.layer = layer
+          next.zIndex = zIndex
           return next
         }
         // 拖边缘：左缘→出现(appearAt)，右缘→消失(endAt)；命中点夹回窗内。
         next.appearAt = start
         next.endAt = end
         if (c.targetAt != null) next.targetAt = clampMs(c.targetAt, start, end)
-        next.layer = layer
+        next.zIndex = zIndex
         return next
       })
-      return patchTimelineElement(graph, node.id, el.id, {
+      return patchOverlayChild(scenario, node.id, el.id, {
         params: { ...el.params, cues },
       })
     }
     default:
-      return graph
+      return scenario
   }
 }
 
 // ── 写映射：预览拖拽定位（x/y）─────────────────────────────────────────────────
 export function patchOverlayPositionGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   target: PreviewTarget,
   x: number,
   y: number,
-): GameGraph {
+): GameScenario {
   if (target.kind === 'element') {
-    const el = findElement(node, target.elementId)
-    if (!el) return graph
-    return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, x, y } })
+    const el = findElement(scenario, node, target.elementId)
+    if (!el) return scenario
+    return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, x, y } })
   }
   if (target.kind === 'qteCue') {
-    const el = findElement(node, target.elementId)
-    if (!el) return graph
+    const el = findElement(scenario, node, target.elementId)
+    if (!el) return scenario
     const cues = cuesOf(el).map((c) => (c.id === target.cueId ? { ...c, x, y } : c))
-    return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, cues } })
+    return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, cues } })
   }
-  return graph
+  return scenario
 }
 
 // ── 写映射：删除 + 二次确认 ────────────────────────────────────────────────────
-function isWholeInteractionDelete(node: GameNode, item: MaterialItem): boolean {
+function isWholeInteractionDelete(scenario: GameScenario, node: GameNode, item: MaterialItem): boolean {
   if (item.kind === 'option') return true
-  if (item.kind === 'qte') return cuesOf(qteElementOfCue(node, item.id)).length <= 1
+  if (item.kind === 'qte') return cuesOf(qteElementOfCue(scenario, node, item.id)).length <= 1
   return false
 }
-export function confirmMaterialDelete(node: GameNode, item: MaterialItem): boolean {
-  if (!isWholeInteractionDelete(node, item)) return true
+export function confirmMaterialDelete(scenario: GameScenario, node: GameNode, item: MaterialItem): boolean {
+  if (!isWholeInteractionDelete(scenario, node, item)) return true
   if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
   const message =
     item.kind === 'option'
@@ -414,29 +491,37 @@ export function confirmMaterialDelete(node: GameNode, item: MaterialItem): boole
       : '删除整段 QTE 交互？\n该节点将改回叙事节点，并自动续连到「通过 QTE」原本指向的场景。\n这会同步更改蓝图上的节点连接关系，是否确认？'
   return window.confirm(message)
 }
-export function deleteMaterialGraph(graph: GameGraph, node: GameNode, item: MaterialItem): GameGraph {
+export function deleteMaterialGraph(scenario: GameScenario, node: GameNode, item: MaterialItem): GameScenario {
   switch (item.kind) {
     case 'subtitle':
     case 'filter':
     case 'fx':
-      return removeTimelineElement(graph, node.id, item.id)
+      return removeOverlayChild(scenario, node.id, item.id)
     case 'overlay': {
-      const g = removeTimelineElement(graph, node.id, item.id)
-      return removeTimelineElement(g, node.id, settleIdFor(item.id))
+      const s1 = removeOverlayChild(scenario, node.id, item.id)
+      const s1Node = findNode(s1.graph, node.id) ?? node
+      return removeSettleReaction(s1, s1Node, item.id)
     }
     case 'qte': {
-      const el = qteElementOfCue(node, item.id)
-      if (!el) return graph
+      const el = qteElementOfCue(scenario, node, item.id)
+      if (!el) return scenario
       if (cuesOf(el).length <= 1) {
-        return teardownInteraction(graph, node.id, { kind: 'qte', handlePrefixes: QTE_HANDLES, continueHandle: 'pass' })
+        return teardownInteractionScenario(scenario, node, {
+          kind: 'qte',
+          handlePrefixes: QTE_HANDLES,
+          continueHandle: 'pass',
+          childId: el.id,
+        })
       }
       const cues = cuesOf(el).filter((c) => c.id !== item.id)
-      return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, cues } })
+      return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, cues } })
     }
-    case 'option':
-      return teardownInteraction(graph, node.id, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE] })
+    case 'option': {
+      const el = choiceElement(scenario, node)
+      return teardownInteractionScenario(scenario, node, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE], childId: el?.id })
+    }
     default:
-      return graph
+      return scenario
   }
 }
 
@@ -444,26 +529,26 @@ export function deleteMaterialGraph(graph: GameGraph, node: GameNode, item: Mate
 export type MaterialTemplate = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx'
 
 export interface AddResult {
-  graph: GameGraph
+  scenario: GameScenario
   selectKey: string | null
 }
 
-function firstOtherNodeId(graph: GameGraph, nodeId: string): string {
+function firstOtherNodeId(graph: GameScenario['graph'], nodeId: string): string {
   return graph.nodes.find((n) => n.id !== nodeId)?.id ?? nodeId
 }
 
-/** 从素材库拖入时间轴的落点：ms = 落点时刻，layer = 落点所在轨。 */
+/** 从素材库拖入时间轴的落点：ms = 落点时刻，zIndex = 落点所在轨。 */
 export interface DropAt {
   ms: number
-  layer: number
+  zIndex: number
 }
 
 export function addMaterialGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   maxMs: number,
   template: MaterialTemplate,
-  entities: Record<string, EntitySpec> | undefined,
+  entities: Record<string, Entity> | undefined,
   playheadMs: number,
   at?: DropAt,
 ): AddResult {
@@ -473,83 +558,75 @@ export function addMaterialGraph(
   const endMs = clampMs(startMs + dur, startMs + 100, maxMs)
   if (template === 'subtitle') {
     const id = newElementId()
-    const el: TimelineElement = {
+    const el: OverlayChild = {
       id,
-      role: 'presentation',
-      kind: 'dialogue',
+      component: 'dialogue',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
-      layer: at ? at.layer : 0,
+      layout: { zIndex: at ? at.zIndex : 0 },
       params: { text: '新字幕' },
     }
-    return { graph: addTimelineElement(graph, node.id, el), selectKey: `subtitle:${id}` }
+    return { scenario: addOverlayChild(scenario, node.id, el), selectKey: `subtitle:${id}` }
   }
   if (template === 'overlay') {
     const id = newElementId()
-    const float: TimelineElement = {
+    const float: OverlayChild = {
       id,
-      role: 'presentation',
-      kind: 'floatText',
+      component: 'floatText',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
-      layer: at ? at.layer : 1,
+      layout: { zIndex: at ? at.zIndex : 1 },
       params: { text: '-100', x: OVERLAY_XY.x, y: 0.45 },
     }
-    const settle: TimelineElement = {
-      id: settleIdFor(id),
-      role: 'logic',
-      kind: 'settle',
-      trigger: { when: 'enter' },
-      params: { effects: [hpEffect(entities, 'boss', 100)] },
-    }
-    const g = addTimelineElement(addTimelineElement(graph, node.id, float), node.id, settle)
-    return { graph: g, selectKey: `overlay:${id}` }
+    const s1 = addOverlayChild(scenario, node.id, float)
+    const s1Node = findNode(s1.graph, node.id) ?? node
+    // 结算副作用挂节点 reaction（默认对 boss 扣 100，与飘字同相位出现）。
+    const s2 = upsertSettleReaction(s1, s1Node, id, floatSettleWhen(float), entities, 'boss', 100)
+    return { scenario: s2, selectKey: `overlay:${id}` }
   }
   if (template === 'filter' || template === 'fx') {
     const id = newElementId()
-    const el: TimelineElement = {
+    const el: OverlayChild = {
       id,
-      role: 'presentation',
-      kind: template,
+      component: template,
       trigger: { when: 'at', ms: startMs },
       window: { startMs, endMs },
-      layer: at ? at.layer : template === 'filter' ? 4 : 5,
+      layout: { zIndex: at ? at.zIndex : template === 'filter' ? 4 : 5 },
       params: template === 'filter' ? { filter: 'warm', intensity: 1 } : { fx: 'flash', intensity: 1 },
     }
-    return { graph: addTimelineElement(graph, node.id, el), selectKey: `${template}:${id}` }
+    return { scenario: addOverlayChild(scenario, node.id, el), selectKey: `${template}:${id}` }
   }
   if (template === 'qte') {
-    return addQteCueGraph(graph, node, maxMs, at ? at.ms : playheadMs)
+    return addQteCueGraph(scenario, node, maxMs, at ? at.ms : playheadMs)
   }
   // option
-  const existing = choiceElement(node)
-  if (existing) return { graph, selectKey: `option:${existing.id}` }
-  const g0 = teardownInteraction(graph, node.id, { kind: 'qte', handlePrefixes: QTE_HANDLES })
+  const existing = choiceElement(scenario, node)
+  if (existing) return { scenario, selectKey: `option:${existing.id}` }
+  const s0 = teardownInteractionScenario(scenario, node, { kind: 'qte', handlePrefixes: QTE_HANDLES })
   const id = newElementId()
   const key = 'opt0'
-  const el: TimelineElement = {
+  const el: OverlayChild = {
     id,
-    role: 'interaction',
-    kind: 'choice',
+    component: 'choice',
     trigger: { when: 'enter' },
     window: { startMs: 0, endMs: dur },
-    layer: 3,
+    layout: { zIndex: 3 },
     params: { options: [{ key, label: '选项一' }], prompt: '请选择', presentation: 'list' },
   }
-  let g = addTimelineElement(g0, node.id, el)
-  g = connect(g, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: firstOtherNodeId(g, node.id) })
-  return { graph: g, selectKey: `option:${id}` }
+  let s = addOverlayChild(s0, node.id, el)
+  s = { ...s, graph: connect(s.graph, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: firstOtherNodeId(s.graph, node.id) }) }
+  return { scenario: s, selectKey: `option:${id}` }
 }
 
 /** 新增一个 QTE 按键点（无 qte 元素则新建整段 QTE，并清掉 choice）。 */
 export function addQteCueGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   maxMs: number,
   playheadMs: number,
   afterCueId?: string,
 ): AddResult {
-  const el = qteElement(node)
+  const el = qteElement(scenario, node)
   const cues = cuesOf(el)
   const base = afterCueId ? cues.find((c) => c.id === afterCueId) : cues[cues.length - 1]
   const appear = clampMs((base?.targetAt ?? playheadMs) + 500, 0, Math.max(0, maxMs - 200))
@@ -566,21 +643,21 @@ export function addQteCueGraph(
     targetAt: target,
     endAt: end,
     label: `QTE ${cues.length + 1}`,
-    layer: base?.layer ?? 2,
+    zIndex: base?.zIndex ?? 2,
   }
   if (el) {
-    const g = patchTimelineElement(graph, node.id, el.id, {
+    const s = patchOverlayChild(scenario, node.id, el.id, {
       params: { ...el.params, cues: [...cues, cue] },
     })
-    return { graph: g, selectKey: `qte:${el.id}:${cueId}` }
+    return { scenario: s, selectKey: `qte:${el.id}:${cueId}` }
   }
   // 首次建 QTE：清掉 choice（互斥），新建 qte 元素。
-  const g0 = teardownInteraction(graph, node.id, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE] })
+  const choice = choiceElement(scenario, node)
+  const s0 = teardownInteractionScenario(scenario, node, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE], childId: choice?.id })
   const id = newElementId()
-  const newEl: TimelineElement = {
+  const newEl: OverlayChild = {
     id,
-    role: 'interaction',
-    kind: 'qte',
+    component: 'qte',
     trigger: { when: 'enter' },
     params: {
       qteKind: 'parry',
@@ -588,22 +665,27 @@ export function addQteCueGraph(
       cues: [cue],
     },
   }
-  return { graph: addTimelineElement(g0, node.id, newEl), selectKey: `qte:${id}:${cueId}` }
+  return { scenario: addOverlayChild(s0, node.id, newEl), selectKey: `qte:${id}:${cueId}` }
 }
 
 /** 删一个 QTE 按键点（删到最后一个 = 拆整段 QTE）。 */
-export function removeQteCueGraph(graph: GameGraph, node: GameNode, cueId: string): GameGraph {
-  const el = qteElementOfCue(node, cueId)
-  if (!el) return graph
+export function removeQteCueGraph(scenario: GameScenario, node: GameNode, cueId: string): GameScenario {
+  const el = qteElementOfCue(scenario, node, cueId)
+  if (!el) return scenario
   if (cuesOf(el).length <= 1) {
-    return teardownInteraction(graph, node.id, { kind: 'qte', handlePrefixes: QTE_HANDLES, continueHandle: 'pass' })
+    return teardownInteractionScenario(scenario, node, {
+      kind: 'qte',
+      handlePrefixes: QTE_HANDLES,
+      continueHandle: 'pass',
+      childId: el.id,
+    })
   }
   const cues = cuesOf(el).filter((c) => c.id !== cueId)
-  return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, cues } })
+  return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, cues } })
 }
 
 // ── 写映射：检视器 params 编辑 ────────────────────────────────────────────────
-function mergeParams(el: TimelineElement, patch: Record<string, unknown>): Record<string, unknown> {
+function mergeParams(el: OverlayChild, patch: Record<string, unknown>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...el.params }
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) delete next[k]
@@ -614,86 +696,73 @@ function mergeParams(el: TimelineElement, patch: Record<string, unknown>): Recor
 
 /** 字幕/QTE-cue/选项的通用 params 编辑（飘字见 patchOverlayGraph）。 */
 export function patchSelectedGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   item: MaterialItem,
   patch: Record<string, unknown>,
-): GameGraph {
+): GameScenario {
   if (item.kind === 'subtitle' || item.kind === 'filter' || item.kind === 'fx') {
-    const el = findElement(node, item.id)
-    if (!el) return graph
-    return patchTimelineElement(graph, node.id, el.id, { params: mergeParams(el, patch) })
+    const el = findElement(scenario, node, item.id)
+    if (!el) return scenario
+    return patchOverlayChild(scenario, node.id, el.id, { params: mergeParams(el, patch) })
   }
   if (item.kind === 'qte') {
-    const el = qteElementOfCue(node, item.id)
-    if (!el) return graph
+    const el = qteElementOfCue(scenario, node, item.id)
+    if (!el) return scenario
     const cues = cuesOf(el).map((c) => (c.id === item.id ? { ...c, ...patch } : c))
-    return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, cues } })
+    return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, cues } })
   }
   if (item.kind === 'option') {
-    const el = findElement(node, item.id)
-    if (!el) return graph
+    const el = findElement(scenario, node, item.id)
+    if (!el) return scenario
     const next = mergeParams(el, patch)
-    return patchTimelineElement(graph, node.id, el.id, { params: next })
+    return patchOverlayChild(scenario, node.id, el.id, { params: next })
   }
-  return graph
+  return scenario
 }
 
-/** 飘字（floatText + 联动 settle）的 params 编辑：content/settlementOn/effectTarget/style/x/y。 */
+/** 飘字（floatText 展示 + 联动结算 reaction）的 params 编辑：content/settlementOn/effectTarget/style/x/y。 */
 export function patchOverlayGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   floatId: string,
   patch: Record<string, unknown>,
-  entities: Record<string, EntitySpec> | undefined,
-): GameGraph {
-  const float = findElement(node, floatId)
-  if (!float) return graph
-  let g = graph
-  const settle = settleElementFor(node, floatId)
-  const settleParams = (): Record<string, unknown> => ({
-    effects: [hpEffect(entities, settleTargetKind(settle, entities), 0)],
-  })
+  entities: Record<string, Entity> | undefined,
+): GameScenario {
+  const float = findElement(scenario, node, floatId)
+  if (!float) return scenario
+  let s = scenario
+  const curNode = () => findNode(s.graph, node.id) ?? node
 
   for (const [key, value] of Object.entries(patch)) {
     if (key === 'content') {
       const content = String(value)
-      g = patchTimelineElement(g, node.id, floatId, { params: { ...findElement(findNode(g, node.id), floatId)!.params, text: content } })
+      const cur = findElement(s, node, floatId)
+      s = patchOverlayChild(s, node.id, floatId, { params: { ...cur?.params, text: content } })
       // 有结算时，伤害从内容派生同步。
-      const s = settleElementFor(findNode(g, node.id), floatId)
-      if (s) {
-        const target = settleTargetKind(s, entities)
-        g = patchTimelineElement(g, node.id, settleIdFor(floatId), {
-          params: { effects: [hpEffect(entities, target, parseDamageFromContent(content))] },
-        })
+      const settleNow = settleElementFor(s, curNode(), floatId)
+      if (settleNow) {
+        s = upsertSettleReaction(s, curNode(), floatId, floatSettleWhen(float), entities, settleTargetKind(settleNow, entities), parseDamageFromContent(content))
       }
     } else if (key === 'settlementOn') {
-      const has = !!settleElementFor(findNode(g, node.id), floatId)
+      const has = !!settleElementFor(s, curNode(), floatId)
       if (value && !has) {
-        const dmg = parseDamageFromContent(str(float.params.text) ?? '')
-        g = addTimelineElement(g, node.id, {
-          id: settleIdFor(floatId),
-          role: 'logic',
-          kind: 'settle',
-          trigger: float.trigger,
-          params: { effects: [hpEffect(entities, 'boss', dmg)] },
-        })
+        const dmg = parseDamageFromContent(str(paramsOf(float).text) ?? '')
+        s = upsertSettleReaction(s, curNode(), floatId, floatSettleWhen(float), entities, 'boss', dmg)
       } else if (!value && has) {
-        g = removeTimelineElement(g, node.id, settleIdFor(floatId))
+        s = removeSettleReaction(s, curNode(), floatId)
       }
     } else if (key === 'effectTarget') {
-      const s = settleElementFor(findNode(g, node.id), floatId)
-      if (s) {
-        g = patchTimelineElement(g, node.id, settleIdFor(floatId), {
-          params: { effects: [hpEffect(entities, value === 'player' ? 'player' : 'boss', settleDamage(s))] },
-        })
+      const settleNow = settleElementFor(s, curNode(), floatId)
+      if (settleNow) {
+        s = upsertSettleReaction(s, curNode(), floatId, floatSettleWhen(float), entities, value === 'player' ? 'player' : 'boss', settleDamage(settleNow))
       }
     } else {
-      const cur = findElement(findNode(g, node.id), floatId)
-      if (cur) g = patchTimelineElement(g, node.id, floatId, { params: mergeParams(cur, { [key]: value }) })
+      const cur = findElement(s, node, floatId)
+      if (cur) s = patchOverlayChild(s, node.id, floatId, { params: mergeParams(cur, { [key]: value }) })
     }
   }
-  return g
+  return s
 }
 
 // ── 写映射：选项分支（= 出边 opt:<key>）───────────────────────────────────────
@@ -703,62 +772,80 @@ export interface OptionBranchView {
   targetId: string | undefined
   edgeId: string | undefined
 }
-export function listOptionBranches(graph: GameGraph, node: GameNode): OptionBranchView[] {
-  const el = choiceElement(node)
+export function listOptionBranches(scenario: GameScenario, node: GameNode): OptionBranchView[] {
+  const el = choiceElement(scenario, node)
   if (!el) return []
   return optionsOf(el).map((o) => {
-    const edge = graph.edges.find((e) => e.source === node.id && e.sourceHandle === `${CHOICE_HANDLE}${o.key}`)
+    const edge = scenario.graph.edges.find((e) => e.source === node.id && e.sourceHandle === `${CHOICE_HANDLE}${o.key}`)
     return { key: o.key, label: o.label ?? o.key, targetId: edge?.target, edgeId: edge?.id }
   })
 }
-export function addOptionBranchGraph(graph: GameGraph, node: GameNode): GameGraph {
-  const el = choiceElement(node)
-  if (!el) return graph
+export function addOptionBranchGraph(scenario: GameScenario, node: GameNode): GameScenario {
+  const el = choiceElement(scenario, node)
+  if (!el) return scenario
   const options = optionsOf(el)
   const key = `opt${options.length}-${Date.now().toString(36).slice(-3)}`
   const label = `选项 ${options.length + 1}`
-  let g = patchTimelineElement(graph, node.id, el.id, {
+  let s = patchOverlayChild(scenario, node.id, el.id, {
     params: { ...el.params, options: [...options, { key, label }] },
   })
-  g = connect(g, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: firstOtherNodeId(g, node.id) })
-  return g
+  s = { ...s, graph: connect(s.graph, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: firstOtherNodeId(s.graph, node.id) }) }
+  return s
 }
-export function updateOptionLabelGraph(graph: GameGraph, node: GameNode, key: string, label: string): GameGraph {
-  const el = choiceElement(node)
-  if (!el) return graph
+export function updateOptionLabelGraph(scenario: GameScenario, node: GameNode, key: string, label: string): GameScenario {
+  const el = choiceElement(scenario, node)
+  if (!el) return scenario
   const options = optionsOf(el).map((o) => (o.key === key ? { ...o, label } : o))
-  return patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, options } })
+  return patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, options } })
 }
-export function setOptionTargetGraph(graph: GameGraph, node: GameNode, key: string, targetId: string): GameGraph {
-  return upsertBranchEdge(graph, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: targetId })
+export function setOptionTargetGraph(scenario: GameScenario, node: GameNode, key: string, targetId: string): GameScenario {
+  return { ...scenario, graph: upsertBranchEdge(scenario.graph, { source: node.id, sourceHandle: `${CHOICE_HANDLE}${key}`, target: targetId }) }
 }
-export function removeOptionBranchGraph(graph: GameGraph, node: GameNode, key: string): GameGraph {
-  const el = choiceElement(node)
-  if (!el) return graph
+export function removeOptionBranchGraph(scenario: GameScenario, node: GameNode, key: string): GameScenario {
+  const el = choiceElement(scenario, node)
+  if (!el) return scenario
   const options = optionsOf(el).filter((o) => o.key !== key)
   // 删到 0 个选项 = 拆整段选项交互（回落叙事 + 自动续连）。
   if (options.length === 0) {
-    return teardownInteraction(graph, node.id, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE] })
+    return teardownInteractionScenario(scenario, node, { kind: 'choice', handlePrefixes: [CHOICE_HANDLE], childId: el.id })
   }
-  let g = patchTimelineElement(graph, node.id, el.id, { params: { ...el.params, options } })
-  const edge = g.edges.find((e) => e.source === node.id && e.sourceHandle === `${CHOICE_HANDLE}${key}`)
-  if (edge) g = disconnect(g, edge.id)
-  return g
+  let s = patchOverlayChild(scenario, node.id, el.id, { params: { ...el.params, options } })
+  const edge = s.graph.edges.find((e) => e.source === node.id && e.sourceHandle === `${CHOICE_HANDLE}${key}`)
+  if (edge) s = { ...s, graph: disconnect(s.graph, edge.id) }
+  return s
 }
 
 // ── 写映射：视频绑定 ──────────────────────────────────────────────────────────
 export function bindVideoGraph(
-  graph: GameGraph,
+  scenario: GameScenario,
   node: GameNode,
   ref: string,
   durationMs: number | undefined,
-): GameGraph {
-  return updateNodeData(graph, node.id, {
-    media: { kind: 'VIDEO', ref },
-    ...(durationMs != null ? { durationMs } : {}),
-  })
+): GameScenario {
+  return {
+    ...scenario,
+    graph: updateNodeData(scenario.graph, node.id, {
+      media: { ...(node.data.media ?? {}), kind: 'VIDEO', ref },
+      ...(durationMs != null ? { durationMs } : {}),
+    }),
+  }
 }
-export function setNodePromptGraph(graph: GameGraph, node: GameNode, prompt: string): GameGraph {
+
+/** 写节点媒体提示词（生成面板）；空串清掉 `prompt`。 */
+export function setNodePromptGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  prompt: string,
+): GameScenario {
   const media = node.data.media ?? { kind: 'VIDEO' }
-  return updateNodeData(graph, node.id, { media: { ...media, prompt: prompt || undefined } })
+  return {
+    ...scenario,
+    graph: updateNodeData(scenario.graph, node.id, {
+      media: { ...media, prompt: prompt || undefined },
+    }),
+  }
 }
+
+// 保留 ensureNodeOverlay 引用路径可见（供上层需要时显式确保节点已有专属 overlay）。
+export { ensureNodeOverlay }
+export type { Trigger }

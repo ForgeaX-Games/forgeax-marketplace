@@ -12,19 +12,30 @@ import type { GameGraph, GameScenario, GraphTextStylePreset } from '../../runtim
 import type { TextStyleGroup } from '../text/text-style'
 import { loadStore, saveScenario, saveDraft, clearDraft, loadVersion, loadDraft, type VersionEntry } from './persist-client'
 import { computeGraphLayout } from '../../graph/edit/graph-layout'
+import { normalizeSubFlowFields } from '../../graph/edit/graph-edit'
 import { validateGraph } from '../../runtime/validate/validate'
 
-export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'rules' | 'textStylePresets'>
+export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'reactions' | 'textStylePresets' | 'packs'>
 
-const pickMeta = (s: GameScenario): ScenarioMetaFields => ({ variables: s.variables, entities: s.entities, ui: s.ui, rng: s.rng, rules: s.rules, textStylePresets: s.textStylePresets })
+const pickMeta = (s: GameScenario): ScenarioMetaFields => ({
+  variables: s.variables,
+  entities: s.entities,
+  ui: s.ui,
+  rng: s.rng,
+  reactions: s.reactions,
+  textStylePresets: s.textStylePresets,
+  packs: s.packs,
+})
 const EMPTY_GRAPH: GameGraph = { nodes: [], edges: [] }
 
-/** 位置全 0（未布局）→ dagre 自动排一版。 */
+/** 位置全 0（未布局）→ dagre 自动排一版；顺带归一遗留 subFlowRef。 */
 function layoutIfUnset(s: GameScenario): GameScenario {
-  const allZero = s.graph.nodes.every((n) => !n.position || (n.position.x === 0 && n.position.y === 0))
-  if (!allZero) return s
-  const pos = computeGraphLayout(s.graph)
-  return { ...s, graph: { ...s.graph, nodes: s.graph.nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position })) } }
+  const graph = normalizeSubFlowFields(s.graph)
+  const base = graph === s.graph ? s : { ...s, graph }
+  const allZero = base.graph.nodes.every((n) => !n.position || (n.position.x === 0 && n.position.y === 0))
+  if (!allZero) return base
+  const pos = computeGraphLayout(base.graph)
+  return { ...base, graph: { ...base.graph, nodes: base.graph.nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position })) } }
 }
 
 interface GraphScenarioStore {
@@ -51,6 +62,8 @@ interface GraphScenarioStore {
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
+  /** 原子写回整份 scenario（graph + meta 一次 set，避免拆两次 set 产生额外历史步）。 */
+  setScenario: (s: GameScenario) => void
   /** 标记未保存草稿 + 防抖写盘（撤销/重做后调用，让恢复的状态也落草稿）。 */
   touchDraft: () => void
   /** 新增/覆盖一个用户自定义文字预设（按 subtitle/overlay 分组持久化）。 */
@@ -149,6 +162,10 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       set((st) => ({ graph: typeof g === 'function' ? (g as (x: GameGraph) => GameGraph)(st.graph) : g }))
       scheduleDraft()
     },
+    setScenario: (s) => {
+      set({ graph: s.graph, meta: pickMeta(s) })
+      scheduleDraft()
+    },
     touchDraft: () => scheduleDraft(),
     setMeta: (m) => {
       set((st) => ({ meta: typeof m === 'function' ? (m as (x: ScenarioMetaFields) => ScenarioMetaFields)(st.meta) : m }))
@@ -177,7 +194,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       const errs = validateGraph(scn.graph, {
         entities: Object.keys(scn.entities ?? {}),
         vars: Object.keys(scn.variables ?? {}),
-        rules: scn.rules,
+        reactions: scn.reactions,
       }).filter((i) => i.level === 'error')
       set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
       // 落盘（.forgeax/games/<slug>/game-video/），完成后用磁盘版本索引回填。

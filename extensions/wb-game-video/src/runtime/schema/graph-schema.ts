@@ -1,15 +1,62 @@
 /**
- * 域 graph schema —— 新引擎/蓝图的**持久化 SSOT 形态**（存 scenarios.json）。
+ * 域 graph schema —— 新引擎/蓝图的**持久化 SSOT 形态**（存 scenarios.graph.json）。
  *
  * 在 `./react-flow-schema.ts` 的泛型骨架（Node/Handle/Edge/Graph）之上落定本引擎的数据契约。
- * **图原生类型**（GraphEffect / GraphCondition / EntitySpec…）与 legacy `scenario/types` 解耦，
- * 保持通用、无品类假设：
+ * 视频覆盖物见 `./node-config-schema.ts`：
+ *   - **Overlay** → `GameScenario.ui.overlays`（含 `children`）
+ *   - **OverlayNode** → `NodeData.overlayNodes[]`
+ *
+ * **图原生类型**（GraphEffect / GraphCondition / Entity…）保持通用、无品类假设：
  *   - 实体 = 一袋开放数值 `attrs` + 可选约束 `attrMeta`（min/max/initial）；**没有 hp 特权字段**——
- *     hp 只是"名为 hp、attrMeta 带 max/initial 的一个 attr"的**约定**。换品类（竞速无血条）只需换 attrs。
- *   - 条件/副作用全走 attr/var，`attrRatio` = `attrs[attr] / attrMeta[attr].max`（通用比例）。
+ *     hp 只是"名为 hp、attrMeta 带 max/initial 的一个 attr"的**约定**。
+ *   - 条件/副作用全走 attr/var，`attrRatio` = `attrs[attr] / attrMeta[attr].max`。
  *   - 一切逻辑声明式、可序列化、无函数入库。
  */
 import type { Graph, Node, Edge, Handle } from './react-flow-schema'
+import type { GameScenarioUi, OverlayNode, Reaction } from './node-config-schema'
+
+export type {
+  BindValue,
+  Layout,
+  LayoutValue,
+  OverlayChild,
+  Overlay,
+  GameScenarioUi,
+  OverlayNode,
+  OverlayInstanceChild,
+  OverlayInstance,
+  ComponentInput,
+  ComponentEvent,
+  ComponentManifest,
+  NodeAction,
+  Reaction,
+  ReactionTrigger,
+  OverlayEventRef,
+} from './node-config-schema'
+
+export { overlayMountId } from './node-config-schema'
+
+export { layoutValueToCss, layoutToCss } from './layout'
+
+export {
+  expandOverlayMount,
+  expandNodeOverlays,
+  expandNodeChildren,
+  nodeOverlayChildren,
+  nodeOverlayMounts,
+  overlayInstanceChildId,
+} from './expand-overlay'
+
+export {
+  aggregateOverlayEvents,
+  aggregateNodeOverlayEvents,
+  deriveEdgesFromReactions,
+  deriveEdgesFromNodeOverlays,
+  eventsFromParams,
+  resolveEventReactionDo,
+  resolveEventReactions,
+  completeReactions,
+} from './overlay-events'
 
 /** 常量或声明式表达式（见 expr.ts）。 */
 export type NumOrExpr = number | { expr: string }
@@ -49,8 +96,9 @@ export interface AttrMeta {
   /** HUD/编辑器显示名。 */
   label?: string
 }
-export interface EntitySpec {
-  id?: string
+export interface Entity {
+  /** 与 `GameScenario.entities` 的 Record key 对齐；编辑器添加时自动生成，不可手填。 */
+  id: string
   name?: string
   kind?: string
   /** 开放数值袋：attack/defense/speed/hp/… 任意扩展；公式按 entity.<id>.attr.<name> 引用。 */
@@ -58,10 +106,10 @@ export interface EntitySpec {
   /** 每个 attr 的约束（clamp 上下界 / 初值 / 显示名）；可选。 */
   attrMeta?: Record<string, AttrMeta>
 }
-export interface VarSpec {
-  id?: string
+export interface Variable {
+  /** 与 `GameScenario.variables` 的 Record key 对齐；编辑器添加时自动生成，不可手填。 */
+  id: string
   name?: string
-  kind?: 'number' | 'flag'
   initial?: number
   min?: number
   max?: number
@@ -69,23 +117,23 @@ export interface VarSpec {
 
 // ── 文字样式（图原生，镜像 legacy TextStyle；floatText / dialogue 共用底座）──────────
 /**
- * 文字「长什么样」描述。位置/尺寸不进这里（那是元素自己的 params.x/y/sizePct）；
- * 样式只管字体/色/描边/字号/对齐/底色/投影。全部可选，缺省由呈现层兜底。
+ * 文字「长什么样」。位置/尺寸见 `Layout`。
+ * 字段名与 CSS / React.CSSProperties 一一对应；呈现层只做单位换算与缺省兜底。
+ * · `fontSize`：数值 = 画面高度百分比，渲染为 `${n}cqh`
+ * · `WebkitTextStroke*`：对应 `-webkit-text-stroke-color/width`
  */
 export interface GraphTextStyle {
   fontFamily?: string
   fontWeight?: number
-  italic?: boolean
-  underline?: boolean
   color?: string
-  strokeColor?: string
-  strokeWidth?: number
-  /** 字号：画面高度百分比（用 cqh 渲染，与分辨率无关）。 */
-  fontSizePct?: number
-  align?: 'left' | 'center' | 'right'
-  bgColor?: string
+  fontSize?: number
+  textAlign?: 'left' | 'center' | 'right'
+  textDecoration?: string
+  backgroundColor?: string
   opacity?: number
-  shadow?: boolean
+  textShadow?: string
+  WebkitTextStrokeColor?: string
+  WebkitTextStrokeWidth?: number
 }
 
 /** 文字预设样式（预设网格一格）；内置在 text-style.ts，用户自定义存 GameScenario.textStylePresets。 */
@@ -99,99 +147,112 @@ export interface GraphTextStylePreset {
   builtin?: boolean
 }
 
-/** 触发时机（相对本节点演出时间线）。 */
-export type TriggerSpec =
+/**
+ * 触发时机（相对**本演出节点**的生命周期 / 时间线）。
+ * 引擎按 when 在对应时刻跑该元素（`fired` 去重）。
+ * 收尾 / 离场副作用走 `Reaction`（`complete` / `exit`），不在 Trigger 上表达。
+ */
+export type Trigger =
+  /** 进入本节点、演出开始时立刻触发（开场 HUD / 进门对话等）。 */
   | { when: 'enter' }
+  /**
+   * 相对本节点演出起点经过 `ms` 毫秒后触发（卡点 QTE、中段飘字等）。
+   * `ms` 与视频时间轴对齐；同一元素只触发一次。
+   */
   | { when: 'at'; ms: number }
-  | { when: 'performanceEnd' }
-  | { when: 'exit' }
-  | { when: 'afterHit'; ref: string }
-  | { when: 'stateChange'; condition: GraphCondition }
 
-/** 三职责：表现 / 逻辑 / 交互。 */
-export type ElementRole = 'presentation' | 'logic' | 'interaction'
+/**
+ * Kind 插件职责（presentation 渲染 / interaction 交互）。副作用不在组件层，走 node.data.reactions。
+ * 覆盖物见 OverlayChild.component（无落盘 role）。
+ */
+export type ElementRole = 'presentation' | 'interaction'
 
-/** 时间线元素统一信封；params 由各 kind 解释与校验（kind-registry）。 */
-export interface TimelineElement {
-  id: string
-  role: ElementRole
-  kind: string
-  trigger: TriggerSpec
-  window?: { startMs?: number; endMs?: number }
-  layer?: number
-  params: Record<string, unknown>
-}
-
-/** 派生输出/输入端口的最小描述（kind.outputs() 返回）。 */
-export interface HandleSpec {
+/** 节点端口描述（`outputs()` / `deriveOutputs` 返回）；边经 `sourceHandle`/`targetHandle` 引用其 `id`。 */
+export interface NodeHandle {
   id: string
   label?: string
-  kind?: string
-}
-
-/** HUD 节点级显示规则（两层模型的第 2 层）。 */
-export interface HudElementRule {
-  element: string
-  visible?: boolean
-  windows?: { startMs?: number; endMs?: number }[]
-  showDuring?: 'always' | 'battle' | 'qte'
-}
-export interface NodeHud {
-  preset?: string
-  elements?: HudElementRule[]
 }
 
 export interface NodeMedia {
   kind: string
   ref?: string
+  /** 写给视频生成模型的镜头/动作/氛围提示词（图编辑器「重新生成」面板）。 */
   prompt?: string
   meta?: Record<string, unknown>
 }
 
-/** 演出节点数据（node.data）。 */
-export interface PerfNodeData {
+/**
+ * 图节点 `data` **基类**（普通演出节点）。
+ *
+ * 子流程 / 子蓝图容器用特化类型：
+ *   - `SubFlowNodeData` — 同图下钻
+ *   - `SubFlowPackNodeData` — 跨图 pack 引用
+ * `GameNode.data` = `GameNodeData` 联合；读写嵌套字段用 `getSubFlow` / `getSubFlowPack`。
+ *
+ * 覆盖物一律经 `overlayNodes` 引用并展开；视频上只能挂 Overlay，不能直挂裸组件。
+ */
+export interface NodeData {
   name: string
   media?: NodeMedia
-  clipId?: string
   mediaPlayMode?: 'once' | 'loop'
   durationMs?: number
-  timeline: TimelineElement[]
-  hud?: NodeHud
-  /** 终点标记：到此节点且无出边时弹对应结局横幅。 */
-  end?: 'victory' | 'defeat' | 'ending'
-  /**
-   * call/return：本节点结束且无可走自动出边时，从调用栈弹回 caller（而非结束）。
-   * 典型：热点子场景看完 → 返回热点中枢节点。栈空则退化为正常结束。
-   */
-  returnsToCaller?: boolean
-  /**
-   * 同图子流程下钻：本节点是容器——首次进入即压栈并跳到 `subFlowRef` 指向的**本图**入口；
-   * 子流程内某节点 `returnsToCaller` 结束时弹回本节点，本节点**不重播演出**、直接沿 `out` 继续。
-   * 与 `subFlowPack` 互斥（同节点只应有一个）。
-   */
-  subFlowRef?: string
-  /**
-   * 跨图子蓝图引用（方案 B）：进入本容器后加载外部 pack 图，从 pack.entry（或本字段 entry）跑，
-   * `returnsToCaller` 时弹回本节点并恢复主图。包本体不内联进主 graph。
-   */
-  subFlowPack?: SubFlowPackRef
+  /** 本节点上的 overlay 挂载列表；纯过场可省略。 */
+  overlayNodes?: OverlayNode[]
+  reactions?: Reaction[]
 }
 
-/** 调用节点上的包引用（主图只存指针，不存 pack 内节点）。 */
-export interface SubFlowPackRef {
-  /** 包 id（与 SubFlowPack.id 对齐）。 */
+/**
+ * 跨图子蓝图包指针（主图只存指针，不存 pack 内节点）。
+ * 完整包本体见 `SubFlowPackDef`（`scenario.packs`）。
+ */
+export interface SubFlowPack {
+  /** 包 id（与 SubFlowPackDef.id 对齐）。 */
   id: string
   /** 可选版本钉死；解析时优先 `id@version`，否则回退 `id`。 */
   version?: string
-  /** 覆盖包内默认入口；缺省用 SubFlowPack.entry。 */
+  /** 覆盖包内默认入口；缺省用 SubFlowPackDef.entry。 */
   entry?: string
 }
 
 /**
- * 可独立编辑/落盘的子蓝图包（跨图 call/return 的被调方）。
- * 运行时由 GraphRuntime 预加载注入；主 scenario 的 vars/entities/rules 仍为一局 SSOT。
+ * 同图子流程容器：首次进入压栈并跳到 `subFlow`；
+ * 子流程叶子无自动出边时弹回，容器不重播、沿 `out` 续走。回环用显式边。
  */
-export interface SubFlowPack {
+export interface SubFlowNodeData extends NodeData {
+  subFlow: string
+}
+
+/**
+ * 跨图子蓝图容器：进入后加载 pack，从 entry 跑；包内叶子无出边时弹回主图。
+ */
+export interface SubFlowPackNodeData extends NodeData {
+  subFlowPack: SubFlowPack
+}
+
+/** 图上节点 data 联合（基类 ∪ 子流程特化）。 */
+export type GameNodeData = NodeData | SubFlowNodeData | SubFlowPackNodeData
+
+export function getSubFlow(d: GameNodeData): string | undefined {
+  const rec = d as SubFlowNodeData & { subFlowRef?: string }
+  // subFlow 为现行字段；subFlowRef 为更名兼容（旧草稿/落盘）。
+  const v = rec.subFlow ?? rec.subFlowRef
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+export function getSubFlowPack(d: GameNodeData): SubFlowPack | undefined {
+  const p = (d as SubFlowPackNodeData).subFlowPack
+  return p && typeof p === 'object' && typeof p.id === 'string' ? p : undefined
+}
+
+export function isSubflowContainerData(d: GameNodeData): boolean {
+  return getSubFlow(d) != null || getSubFlowPack(d) != null
+}
+
+/**
+ * 可独立编辑/落盘的子蓝图包（跨图 call/return 的被调方）。
+ * 运行时由 GraphRuntime 预加载注入；主 scenario 的 vars/entities/reactions 仍为一局 SSOT。
+ */
+export interface SubFlowPackDef {
   schemaVersion: 'wb-game-video.pack.v1'
   id: string
   version: string
@@ -203,40 +264,26 @@ export interface SubFlowPack {
   requires?: { vars?: string[]; entities?: string[] }
 }
 
-/** 边路由数据（edge.data）——条件只在此/entryGate/trigger 出现。 */
+/** 边路由数据（edge.data）——仅条件 / 权重 / 标签；副作用走 reactions / option.effects。 */
 export interface EdgeRouting {
   condition?: GraphCondition
-  effects?: GraphEffect[]
   weight?: number
-  showAtMs?: number
   label?: string
-  /**
-   * call：走这条边时把 source 节点压入调用栈（"我会回来"）。目标子流程结束且带
-   * `returnsToCaller` 时弹栈回到本 source。缺省=单向 goto（不压栈）。
-   */
-  call?: boolean
 }
 
+/** 当前图节点 type 字面量；新品类在此联合扩展。 */
+export type GameNodeType = 'perf'
+
 export type GameHandle = Handle<{ flowId?: string }>
-export type GameNode = Node<PerfNodeData, 'perf', { flowId?: string }>
+export type GameNode = Node<GameNodeData, GameNodeType, { flowId?: string }>
 export type GameEdge = Edge<EdgeRouting>
 export type GameGraph = Graph<GameNode, GameEdge>
 
 /**
- * 图级反应规则（spec §2.6）——每次状态变化后求值，条件成立即"即时"跳转，
- * 不必等演出结束。典型用途：任一方 HP≤0 立刻判负/判胜（`when: attrRatio hp lte 0 → goto: lose`），
- * 免得每个节点重复配死亡出口。放全局一处即对整图生效。
+ * 局级 reactions（多为 `when.type === 'state'`）：状态变化后求值，
+ * do 含 goto 则硬打断跳转。典型：HP≤0 → 胜/负。与挂载/节点共用瘦 Reaction。
  */
-export interface ReactiveRule {
-  id?: string
-  when: GraphCondition
-  /** 命中即进入的节点 id。 */
-  goto: string
-  /** 仅首次命中触发（默认每次命中都触发；但通常 goto 到结局节点后即结束）。 */
-  once?: boolean
-  /** 跳转时复位全局态（默认保留）。 */
-  resetGlobals?: boolean
-}
+// （类型 Reaction 由上方 export type 与 node-config 导出）
 
 /** scenario 声明依赖的插件包（运行环境须 `registerPlugin` 同名；缺则 load 失败）。 */
 export interface RequiredPlugin {
@@ -245,20 +292,28 @@ export interface RequiredPlugin {
   version?: string
 }
 
-/** 顶层容器（scenarios.json 的 scenario 内容形态）。 */
+/** 顶层容器（scenarios.graph.json 的 scenario 内容形态）。 */
 export interface GameScenario {
   schemaVersion: string
-  variables?: Record<string, VarSpec>
-  entities?: Record<string, EntitySpec>
+  /** Record key === Variable.id（添加时自动生成）。 */
+  variables?: Record<string, Variable>
+  /** Record key === Entity.id（添加时自动生成）。 */
+  entities?: Record<string, Entity>
   statuses?: Record<string, unknown>
-  ui?: { hud?: unknown[]; accentColor?: string }
+  /** overlay 目录（`ui.overlays`）+ 可选主题色。 */
+  ui?: GameScenarioUi
   rng?: { seed: number }
-  /** 图级反应规则（即时判负/判胜等）；每次状态变化后求值。 */
-  rules?: ReactiveRule[]
+  /** 局级 reactions（即时判负/判胜等）；每次状态变化后求值。 */
+  reactions?: Reaction[]
   /** 扩展图依赖的插件包；缺插件或版本不满足 → validateScenario error。 */
   requiredPlugins?: RequiredPlugin[]
   /** 用户自定义文字预设（内置在 text-style.ts；这里只存用户新建的，按 subtitle/overlay 分组）。 */
   textStylePresets?: { subtitle?: GraphTextStylePreset[]; overlay?: GraphTextStylePreset[] }
+  /**
+   * 本局挂载的子蓝图包。容器节点用 `SubFlowPackNodeData.subFlowPack` 存指针；包本体在此。
+   * 缺包而节点引用了 → 运行时 resolve 失败。
+   */
+  packs?: SubFlowPackDef[]
   graph: GameGraph
 }
 
@@ -271,7 +326,6 @@ export function isGameGraph(v: unknown): v is GameGraph {
     if (!n || typeof n !== 'object') return false
     const node = n as { type?: unknown; data?: unknown }
     if (node.type !== 'perf') return false
-    const data = node.data as { timeline?: unknown } | undefined
-    return !!data && Array.isArray(data.timeline)
+    return !!node.data && typeof node.data === 'object'
   })
 }

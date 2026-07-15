@@ -16,14 +16,10 @@ export function initState(scenario: GameScenario): MutableState {
   const varMeta: Record<string, { min?: number; max?: number }> = {}
   const flags: Record<string, number> = {}
 
+  // 声明变量一律进 vars 桶（带 min/max clamp）；flag 为纯运行时概念，由 flag effect 写 flags 桶（默认 0）。
   for (const [id, raw] of Object.entries(scenario.variables ?? {})) {
-    const initial = raw.initial ?? 0
-    if (raw.kind === 'flag') {
-      flags[id] = initial ? 1 : 0
-    } else {
-      vars[id] = initial
-      if (raw.min !== undefined || raw.max !== undefined) varMeta[id] = { min: raw.min, max: raw.max }
-    }
+    vars[id] = raw.initial ?? 0
+    if (raw.min !== undefined || raw.max !== undefined) varMeta[id] = { min: raw.min, max: raw.max }
   }
 
   const entities: Record<string, MutableEntity> = {}

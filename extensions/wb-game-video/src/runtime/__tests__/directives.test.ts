@@ -12,25 +12,38 @@ describe('directives', () => {
       type: 'renderOverlay',
       nodeId: 'n1',
       elementId: 'e1',
-      kind: 'floatText',
+      component: 'floatText',
       params: { text: '+30' },
     }
     const inter: RuntimeDirective = {
       type: 'openInteraction',
       nodeId: 'n1',
       elementId: 'e2',
-      kind: 'qte',
+      component: 'qte',
       params: {},
       handles: ['pass', 'good', 'fail'],
     }
     expect(play.type).toBe('playClip')
-    expect(overlay.kind).toBe('floatText')
+    expect(overlay.component).toBe('floatText')
     expect(inter.handles).toEqual(['pass', 'good', 'fail'])
   })
 
   it('type guards discriminate', () => {
-    const inter: RuntimeDirective = { type: 'openInteraction', nodeId: 'n', elementId: 'e', kind: 'qte', params: {}, handles: [] }
-    const overlay: RuntimeDirective = { type: 'renderOverlay', nodeId: 'n', elementId: 'e', kind: 'x', params: {} }
+    const inter: RuntimeDirective = {
+      type: 'openInteraction',
+      nodeId: 'n',
+      elementId: 'e',
+      component: 'qte',
+      params: {},
+      handles: [],
+    }
+    const overlay: RuntimeDirective = {
+      type: 'renderOverlay',
+      nodeId: 'n',
+      elementId: 'e',
+      component: 'x',
+      params: {},
+    }
     expect(isOpenInteraction(inter)).toBe(true)
     expect(isOpenInteraction(overlay)).toBe(false)
     expect(isRenderOverlay(overlay)).toBe(true)

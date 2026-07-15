@@ -241,31 +241,6 @@ export const CATALOG_CSS = `
   0%, 100% { transform: scale(1); opacity: .8; }
   50% { transform: scale(1.14); opacity: 1; }
 }
-.gc-prompt {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 0;
-  background: var(--gc-panel2);
-  border: 1px solid var(--gc-line-soft);
-  border-radius: 12px;
-  padding: 12px;
-}
-.gc-prompt span { color: var(--gc-faint); font-size: 11px; letter-spacing: 0.1em; }
-.gc-prompt textarea {
-  flex: 1;
-  width: 100%;
-  min-height: clamp(72px, 16dvh, 160px);
-  resize: vertical;
-  border: 1px solid var(--gc-line);
-  background: rgba(0,0,0,0.28);
-  color: var(--gc-text);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.5;
-}
 .gc-materialbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .gc-materialbar-meta { color: var(--gc-faint); font-size: 12px; }
 .gc-materialbar-hint { color: rgba(184, 240, 238, 0.72); font-size: 11px; }
@@ -600,17 +575,12 @@ export const CATALOG_CSS = `
     max-height: 42dvh;
     justify-self: center;
   }
-  .gc-prompt textarea {
-    min-height: clamp(56px, 10dvh, 96px);
-  }
 }
 
 @media (max-height: 760px) {
   .gc-stage-video { --gc-timeline-h: 204px; }
   .gc-video-head { gap: 8px; }
   .gc-video-title { font-size: 14px; }
-  .gc-prompt { padding: 9px; }
-  .gc-prompt textarea { min-height: 56px; }
 }
 
 .gc-meta { display: flex; flex-wrap: wrap; gap: 10px; }

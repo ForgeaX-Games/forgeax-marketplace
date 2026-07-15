@@ -37,7 +37,7 @@ describe('lethal.no-exit warning', () => {
     const scn: GameScenario = {
       schemaVersion: 't',
       entities: {
-        'ent-boss': { attrs: { hp: 10 }, attrMeta: { hp: { min: 0, max: 10 } } },
+        'ent-boss': { id: 'ent-boss', attrs: { hp: 10 }, attrMeta: { hp: { min: 0, max: 10 } } },
       },
       graph: {
         nodes: [
@@ -49,16 +49,8 @@ describe('lethal.no-exit warning', () => {
             outputs: [],
             data: {
               name: 'a',
-              timeline: [
-                {
-                  id: 's',
-                  role: 'logic',
-                  kind: 'settle',
-                  trigger: { when: 'enter' },
-                  params: {
-                    effects: [{ kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -5 }],
-                  },
-                },
+              reactions: [
+                { when: { type: 'enter' }, do: [{ kind: 'effect', effects: [{ kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -5 }] }] },
               ],
             },
           },
@@ -69,17 +61,16 @@ describe('lethal.no-exit warning', () => {
     expect(validateScenario(scn).filter((i) => i.code === 'lethal.no-exit').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('no lethal warn when rules cover attrRatio hp', () => {
+  it('no lethal warn when reactions cover attrRatio hp', () => {
     const scn: GameScenario = {
       schemaVersion: 't',
       entities: {
-        'ent-boss': { attrs: { hp: 10 }, attrMeta: { hp: { min: 0, max: 10 } } },
+        'ent-boss': { id: 'ent-boss', attrs: { hp: 10 }, attrMeta: { hp: { min: 0, max: 10 } } },
       },
-      rules: [
+      reactions: [
         {
-          id: 'win',
-          when: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] },
-          goto: 'win',
+          when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
+          do: [{ kind: 'goto', targetNodeId: 'win' }],
         },
       ],
       graph: {
@@ -92,16 +83,8 @@ describe('lethal.no-exit warning', () => {
             outputs: [],
             data: {
               name: 'a',
-              timeline: [
-                {
-                  id: 's',
-                  role: 'logic',
-                  kind: 'settle',
-                  trigger: { when: 'enter' },
-                  params: {
-                    effects: [{ kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -5 }],
-                  },
-                },
+              reactions: [
+                { when: { type: 'enter' }, do: [{ kind: 'effect', effects: [{ kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -5 }] }] },
               ],
             },
           },
@@ -111,7 +94,7 @@ describe('lethal.no-exit warning', () => {
             position: { x: 0, y: 0 },
             inputs: [],
             outputs: [],
-            data: { name: 'win', timeline: [], end: 'victory' },
+            data: { name: 'win' },
           },
         ],
         edges: [],

@@ -5,19 +5,20 @@
  * 当前演出片段 / 活动叠层(表现层) / 当前交互 / HUD 数值 / 结局横幅 / 执行态(供蓝图可视化)。
  * React Player 只需订阅 snapshot 渲染 + 把玩家输入回灌 submit()——UI 与引擎彻底解耦。
  */
-import type { GameNode, GameScenario } from '../schema/graph-schema'
+import type { GameNode, GameScenario, SubFlowPackDef } from '../schema/graph-schema'
 import { GraphRuntime } from './engine'
 import { createCoreKindRegistry } from '../registry/core-kinds'
 import type { KindRegistry } from '../registry/kind-registry'
 import { createCoreSkinRegistry } from '../skins/components'
 import type { SkinRegistry } from '../skins/rendererRegistry'
 import type { RuntimeDirective } from './directives'
-import { hiddenHudKeys } from './hud-visibility'
 
 /** GraphSession 构造选项：可注入隔离注册表；缺省每局新建核心 Kind/Skin 表。 */
 export interface GraphSessionOptions {
   kinds?: KindRegistry
   skins?: SkinRegistry
+  /** 覆盖 scenario.packs；缺省用 scenario.packs。 */
+  packs?: readonly SubFlowPackDef[]
 }
 
 const MAX_LOGS = 60
@@ -28,13 +29,13 @@ function logLine(d: RuntimeDirective): string | undefined {
     case 'playClip':
       return `▶ 进入「${d.name}」${d.loop ? ' (Loop)' : ''}`
     case 'openInteraction':
-      return `❓ 交互 ${d.kind}${d.handles.length ? ` · 出口 [${d.handles.join(', ')}]` : ''}`
+      return `❓ 交互 ${d.component}${d.handles.length ? ` · 出口 [${d.handles.join(', ')}]` : ''}`
     case 'renderOverlay':
-      return `✦ ${d.kind}`
+      return `✦ ${d.component}`
     case 'routeInfo':
       return `↳ 走「${d.via}」→ ${d.target}：${d.reason}`
     case 'banner':
-      return `🏁 ${d.kind === 'victory' ? '胜利' : d.kind === 'defeat' ? '失败' : '结束'}${d.title ? ` · ${d.title}` : ''}`
+      return `🏁 结束${d.title ? ` · ${d.title}` : ''}`
     case 'log':
       return d.message
     default:
@@ -45,20 +46,19 @@ function logLine(d: RuntimeDirective): string | undefined {
 export interface ClipSnap {
   nodeId: string
   name: string
-  clipId?: string
   mediaId?: string
   loop: boolean
   durationMs?: number
 }
 export interface OverlaySnap {
   elementId: string
-  kind: string
+  component: string
   params: Record<string, unknown>
-  layer?: number
+  zIndex?: number
 }
 export interface InteractionSnap {
   elementId: string
-  kind: string
+  component: string
   params: Record<string, unknown>
   handles: string[]
   /** 限时 ms（>0 时 Player 到时自动 submit(undefined)）。 */
@@ -76,10 +76,8 @@ export interface SessionSnapshot {
   clip?: ClipSnap
   overlays: OverlaySnap[]
   interaction?: InteractionSnap
-  banner?: { kind: 'victory' | 'defeat' | 'ending'; title: string }
+  banner?: { kind: 'ending'; title: string }
   hud: HudSnap
-  /** 当前上下文下应隐藏的 HUD 元素键（实体 id / 变量 id / 'score'）；渲染层据此过滤。 */
-  hudHidden: string[]
   /** 进入当前节点所走的边 + 命中条件（含实时值）；起始节点为 undefined。 */
   entryReason?: string
   visited: string[]
@@ -92,25 +90,16 @@ export class GraphSession {
   /** 本局皮肤表（Player 渲染用；与其它 Session 隔离）。 */
   readonly skins: SkinRegistry
   snapshot: SessionSnapshot
-  private readonly uiHud: unknown
   private readonly nodesById: Map<string, GameNode>
   private pendingEntryReason: string | undefined
 
   constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
     const kinds = opts.kinds ?? createCoreKindRegistry()
     this.skins = opts.skins ?? createCoreSkinRegistry()
-    this.runtime = new GraphRuntime(scenario.graph, scenario, kinds)
-    this.uiHud = scenario.ui?.hud
+    const packs = opts.packs ?? scenario.packs ?? []
+    this.runtime = new GraphRuntime(scenario.graph, scenario, kinds, packs)
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
     this.snapshot = this.freshSnapshot()
-  }
-
-  /** 当前 phase / 交互下应隐藏的 HUD 元素键。 */
-  private computeHudHidden(): string[] {
-    const nodeHud = this.nodesById.get(this.runtime.state.currentNodeId ?? '')?.data.hud
-    const interactionKind = this.snapshot?.interaction?.kind
-    const isBattle = nodeHud?.preset === 'battle'
-    return [...hiddenHudKeys(this.uiHud, nodeHud, { phase: this.runtime.state.phase, interactionKind, isBattle })]
   }
 
   private freshSnapshot(): SessionSnapshot {
@@ -119,7 +108,6 @@ export class GraphSession {
       currentNodeId: this.runtime.state.currentNodeId,
       overlays: [],
       hud: this.readHud(),
-      hudHidden: this.computeHudHidden(),
       visited: [],
       traversedEdgeIds: [],
       log: [],
@@ -171,7 +159,6 @@ export class GraphSession {
           this.snapshot.clip = {
             nodeId: d.nodeId,
             name: d.name,
-            clipId: d.clipId,
             mediaId: d.mediaId,
             loop: d.loop,
             durationMs: d.durationMs,
@@ -182,13 +169,24 @@ export class GraphSession {
           this.pendingEntryReason = undefined
           break
         case 'renderOverlay':
-          this.snapshot.overlays.push({ elementId: d.elementId, kind: d.kind, params: d.params, layer: d.layer })
+          this.snapshot.overlays.push({
+            elementId: d.elementId,
+            component: d.component,
+            params: d.params,
+            zIndex: d.zIndex,
+          })
           break
         case 'removeOverlay':
           this.snapshot.overlays = this.snapshot.overlays.filter((o) => o.elementId !== d.elementId)
           break
         case 'openInteraction':
-          this.snapshot.interaction = { elementId: d.elementId, kind: d.kind, params: d.params, handles: d.handles, timeoutMs: d.timeoutMs }
+          this.snapshot.interaction = {
+            elementId: d.elementId,
+            component: d.component,
+            params: d.params,
+            handles: d.handles,
+            timeoutMs: d.timeoutMs,
+          }
           break
         case 'banner':
           this.snapshot.banner = { kind: d.kind, title: d.title }
@@ -208,7 +206,6 @@ export class GraphSession {
     this.snapshot.phase = s.phase
     this.snapshot.currentNodeId = s.currentNodeId
     this.snapshot.hud = this.readHud()
-    this.snapshot.hudHidden = this.computeHudHidden()
     this.snapshot.visited = [...s.visited]
     this.snapshot.traversedEdgeIds = [...s.traversedEdgeIds]
     // 返回**新的对象引用**——GraphSession 内部快照是原地累积的，若直接返回同一引用，
@@ -222,7 +219,6 @@ export class GraphSession {
     return {
       ...s,
       overlays: [...s.overlays],
-      hudHidden: [...s.hudHidden],
       visited: [...s.visited],
       traversedEdgeIds: [...s.traversedEdgeIds],
       log: [...s.log],

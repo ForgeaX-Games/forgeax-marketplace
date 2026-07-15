@@ -2,8 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerCoreKinds } from '../registry/core-kinds'
 import { makeNodiaDemo } from '../../editor/demo/demo'
-import { validateGraph } from '../validate/validate'
+import { validateScenario } from '../validate/validate'
 import type { BannerDirective } from '../engine/directives'
+import { getSubFlow } from '../schema/graph-schema'
 
 const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
@@ -12,7 +13,7 @@ beforeAll(() => registerCoreKinds())
 describe('nodia graph e2e (runs on GraphRuntime)', () => {
   it('authored graph passes the validator', () => {
     const scn = makeNodiaDemo()
-    const issues = validateGraph(scn.graph)
+    const issues = validateScenario(scn)
     expect(issues.filter((i) => i.level === 'error')).toEqual([])
   })
 
@@ -20,11 +21,8 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     const scn = makeNodiaDemo()
     const aMy = scn.graph.nodes.find((n) => n.id === 'a_my')
     const bAi = scn.graph.nodes.find((n) => n.id === 'b_ai')
-    expect(aMy?.data.subFlowRef).toBe('wait')
-    expect(bAi?.data.subFlowRef).toBe('tele')
-    expect(scn.graph.nodes.filter((n) => n.data.returnsToCaller).map((n) => n.id).sort()).toEqual(
-      ['block', 'dodgeP', 'fuzhu', 'hurt', 'pu', 'pu2', 'ult', 'z2', 'zhong'].sort(),
-    )
+    expect(getSubFlow(aMy!.data)).toBe('wait')
+    expect(getSubFlow(bAi!.data)).toBe('tele')
   })
 
   it('quick win: light skill kills a low-hp boss → victory banner', () => {
@@ -40,22 +38,27 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(callers(rt)).toEqual(['a_my'])
     expect(rt.state.phase).toBe('awaitInteraction')
 
-    rt.submitInteraction('skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
+    rt.submitInteraction('ov-wait/skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
     expect(rt.state.vars.qi).toBe(2)
 
-    rt.tick(1000) // 轻攻击命中 → 结算致死 → scenario.rules 安全点 redirect → win
+    rt.tick(1000) // 轻攻击命中 → 结算致死 → scenario.reactions 安全点 redirect → win
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeLessThanOrEqual(0)
     expect(rt.state.currentNodeId).toBe('win')
 
     const dirs = rt.onPerformanceEnd() // win 演出结束 → 胜利横幅
     expect(rt.state.phase).toBe('ended')
     const banner = dirs.find((d): d is BannerDirective => d.type === 'banner')
-    expect(banner?.kind).toBe('victory')
+    expect(banner?.kind).toBe('ending')
   })
 
-  it('scenario.rules provide win/lose fallback', () => {
+  it('scenario.reactions provide win/lose fallback', () => {
     const scn = makeNodiaDemo()
-    expect(scn.rules?.map((r) => r.id).sort()).toEqual(['lose', 'win'])
+    const gotos = scn.reactions
+      ?.flatMap((r) => r.do)
+      .filter((a): a is { kind: 'goto'; targetNodeId: string } => a.kind === 'goto')
+      .map((a) => a.targetNodeId)
+      .sort()
+    expect(gotos).toEqual(['lose', 'win'])
   })
 
   it('turn loop: 我方先手一整回合(我方攻击→敌方回合)存活 → 回到进战待机(enter) (回合循环成立)', () => {
@@ -68,7 +71,7 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(rt.state.currentNodeId).toBe('wait')
     expect(callers(rt)).toEqual(['a_my'])
 
-    rt.submitInteraction('skill', 'light') // qi+2 → 轻攻击演出
+    rt.submitInteraction('ov-wait/skill', 'light') // qi+2 → 轻攻击演出
     rt.tick(1000) // 命中时机(at:1000ms) → 结算(boss 掉 80, 仍存活)
     rt.onPerformanceEnd() // returns → a_my → b_ai(subflow) → tele(防反QTE)
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeGreaterThan(0)
@@ -76,7 +79,7 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(callers(rt)).toEqual(['b_ai'])
     expect(rt.state.phase).toBe('awaitInteraction')
 
-    rt.submitInteraction('parry', 'pass') // → 受击防反演出 block
+    rt.submitInteraction('ov-tele/parry', 'pass') // → 受击防反演出 block
     expect(rt.state.currentNodeId).toBe('block')
 
     rt.onPerformanceEnd() // returns → b_ai 回合结束判定(双方存活+我方先手) → enter

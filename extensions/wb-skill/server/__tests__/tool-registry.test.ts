@@ -14,14 +14,14 @@ import {
   _setSnapshotForTests,
   _resetSnapshotForTests,
   type PluginSnapshot,
-} from '../../../../../server/src/extensions/registry'
+} from '../../../../../../cli/src/extensions/registry'
 import {
   callTool,
   listTools,
   _resetToolHandlerCacheForTests,
   _resetConfirmsForTests,
-} from '../../../../../server/src/tools/registry'
-import { _resetEventBusForTests } from '../../../../../server/src/events/bus'
+} from '../../../../../../cli/src/tools/registry'
+import { _resetEventBusForTests } from '../../../../../../cli/src/events/bus'
 
 /** Minimal PluginSnapshot with skill:generate-vfx. */
 function makeSkillSnapshot(): PluginSnapshot {

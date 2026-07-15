@@ -6,8 +6,8 @@ import type { GameScenario } from '../schema/graph-schema'
 const scn = (): GameScenario => ({
   schemaVersion: 'test',
   variables: {
-    qi: { id: 'qi', name: '气力', kind: 'number', initial: 1, min: 0, max: 5 },
-    lotusClue: { id: 'lotusClue', name: '线索', kind: 'flag', initial: 0 },
+    qi: { id: 'qi', name: '气力', initial: 1, min: 0, max: 5 },
+    lotusClue: { id: 'lotusClue', name: '线索', initial: 0 },
   },
   entities: {
     'ent-player': { id: 'ent-player', kind: 'player', attrs: { speed: 30, hp: 300 }, attrMeta: { hp: { max: 300, initial: 300 } } },
@@ -18,11 +18,12 @@ const scn = (): GameScenario => ({
 })
 
 describe('initState', () => {
-  it('seeds vars, varMeta, flags, entities(attrs), rng', () => {
+  it('seeds vars, varMeta, entities(attrs), rng', () => {
     const st = initState(scn())
     expect(st.vars.qi).toBe(1)
     expect(st.varMeta?.qi).toEqual({ min: 0, max: 5 })
-    expect(st.flags.lotusClue).toBe(0)
+    // 声明变量一律进 vars（flag 桶仅运行时 flag effect 填充）
+    expect(st.vars.lotusClue).toBe(0)
     expect(st.entities['ent-player']!.attrs.hp).toBe(300)
     expect(st.entities['ent-player']!.attrs.speed).toBe(30)
     expect(st.entities['ent-player']!.attrMeta?.hp?.max).toBe(300)

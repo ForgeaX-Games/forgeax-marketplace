@@ -79,7 +79,7 @@ function GraphMain(): JSX.Element {
     <main className="ga-main">
       {view === 'graph' && <GraphStudio scenario={NODIA_DEMO} />}
       {view === 'video' && <GraphVideoView />}
-      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'hud', label: '全局 HUD' }]} scenario={NODIA_DEMO} />}
+      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '全局 HUD' }]} scenario={NODIA_DEMO} />}
       {view === 'rule' && (
         <GraphConfigView
           title="规则"
@@ -88,7 +88,7 @@ function GraphMain(): JSX.Element {
             { section: 'entities', label: '实体' },
             { section: 'variables', label: '变量' },
             { section: 'scene', label: '场景设置' },
-            { section: 'rules', label: '反应规则' },
+            { section: 'rules', label: '局级 reactions' },
           ]}
           scenario={NODIA_DEMO}
         />

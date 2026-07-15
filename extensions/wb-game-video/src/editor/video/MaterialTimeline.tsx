@@ -26,11 +26,11 @@ export const MATERIAL_DND_MIME = 'application/x-fx-material'
 
 /**
  * 视频 tab 与剧情树抽屉共享的「材料时间轴」——
- *   · layer 堆叠的材料条（字幕 / 结算 / QTE / 选项 / QTE 窗口）
+ *   · zIndex 堆叠的材料条（字幕 / 结算 / QTE / 选项 / QTE 窗口）
  *   · Ctrl/⌘ 锚点缩放 + Shift 横滚 + 普通滚轮纵向滚动
  *   · ruler 刻度 + 平滑播放头（宿主每帧喂 playheadMs）
  *   · 拖动 move/start/end（吸附 100ms，Shift=10ms/Alt=500ms）
- *   · 无限纵向轨：轨数由数据 layer 派生并多留一条空投放轨
+ *   · 无限纵向轨：轨数由数据 zIndex 派生并多留一条空投放轨
  *
  * 组件本身**不碰 scenario**：材料由宿主 `collectMaterials(scene)` 传入，编辑经
  * `onPatchMaterial` 回写。gating 由宿主通过 props 决定（如剧情树关掉某些交互）。
@@ -53,12 +53,12 @@ export interface MaterialTimelineProps {
   onSelectMaterial: (key: string) => void
   onPatchMaterial: (
     item: MaterialItem,
-    patch: { startMs?: number; endMs?: number; layer?: number; markerMs?: number },
+    patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number },
   ) => void
   /** 提供时，选中可删材料后按 Delete/Backspace 或点击控件上的 × 即删除。 */
   onDeleteMaterial?: (item: MaterialItem) => void
-  /** 提供时，从素材库把控件卡片拖入时间轴 → 在落点时刻 atMs / 轨 layer 新增该模板。 */
-  onDropTemplate?: (template: string, atMs: number, layer: number) => void
+  /** 提供时，从素材库把控件卡片拖入时间轴 → 在落点时刻 atMs / 轨 zIndex 新增该模板。 */
+  onDropTemplate?: (template: string, atMs: number, zIndex: number) => void
   /** 当前时间轴模式：组件（material）/ 音频（audio）。默认 material。 */
   mode?: 'material' | 'audio'
   /** 提供时，materialbar 出现「组件 / 音频」切换段控件。 */
@@ -66,7 +66,7 @@ export interface MaterialTimelineProps {
   /** 音频模式下展示的音轨条（当前仅显示 + 拖动，不做实际音频编辑）。 */
   audioItems?: AudioItem[]
   /** 音频模式下拖动音轨条的回写（移动 / 换轨）。 */
-  onPatchAudio?: (item: AudioItem, patch: { startMs?: number; endMs?: number; layer?: number }) => void
+  onPatchAudio?: (item: AudioItem, patch: { startMs?: number; endMs?: number; zIndex?: number }) => void
 }
 
 interface DragState {
@@ -75,7 +75,7 @@ interface DragState {
   pointerX: number
   startMs: number
   endMs: number
-  layer: number
+  zIndex: number
 }
 
 export function MaterialTimeline({
@@ -101,17 +101,17 @@ export function MaterialTimeline({
   const activeMode: 'material' | 'audio' = mode ?? 'material'
   const audioList = audioItems ?? []
   // 当前活动条目列表（几何 + key 通用；只有它们的字段被 drag/render 用到）。
-  const activeList: Array<{ key: string; startMs: number; endMs: number; layer: number; markerMs?: number }> =
+  const activeList: Array<{ key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number }> =
     activeMode === 'audio' ? audioList : materials
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
   const [zoom, setZoom] = useState(1)
   const [viewportW, setViewportW] = useState(0)
   const [drag, setDrag] = useState<DragState | null>(null)
-  const [dropHint, setDropHint] = useState<{ ms: number; layer: number } | null>(null)
+  const [dropHint, setDropHint] = useState<{ ms: number; zIndex: number } | null>(null)
 
-  // 无限轨：可见轨数由数据里最大 layer 派生，并永远多留一条空轨用于「拖到新轨=新增一轨」。
-  const dataMaxLayer = activeList.reduce((mx, it) => Math.max(mx, it.layer), 0)
+  // 无限轨：可见轨数由数据里最大 zIndex 派生，并永远多留一条空轨用于「拖到新轨=新增一轨」。
+  const dataMaxLayer = activeList.reduce((mx, it) => Math.max(mx, it.zIndex), 0)
   const trackCount = Math.max(TIMELINE_MIN_TRACKS, dataMaxLayer + 2)
   // 缩放：画布宽 = 视口宽 × zoom（zoom=1 恰好铺满，无横向滚动）。
   const canvasPx = Math.max(1, (viewportW || 1) * zoom)
@@ -162,7 +162,7 @@ export function MaterialTimeline({
   }, [canvasPx, viewportW])
 
   // 把当前拖拽的 patch 派发给对应回写（组件→onPatchMaterial / 音频→onPatchAudio）。
-  function dispatchPatch(key: string, patch: { startMs?: number; endMs?: number; layer?: number; markerMs?: number }): void {
+  function dispatchPatch(key: string, patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number }): void {
     if (activeMode === 'audio') {
       const a = audioList.find((x) => x.key === key)
       if (a) onPatchAudio?.(a, patch)
@@ -174,7 +174,7 @@ export function MaterialTimeline({
 
   function onPointerDown(
     e: React.PointerEvent,
-    item: { key: string; startMs: number; endMs: number; layer: number; markerMs?: number },
+    item: { key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number },
     dragMode: 'move' | 'start' | 'end' | 'marker',
   ): void {
     e.preventDefault()
@@ -186,7 +186,7 @@ export function MaterialTimeline({
     if (!editable) return
     timelineRef.current?.setPointerCapture(e.pointerId)
     const anchorMs = dragMode === 'marker' ? (item.markerMs ?? item.startMs) : item.startMs
-    setDrag({ key: item.key, mode: dragMode, pointerX: e.clientX, startMs: anchorMs, endMs: item.endMs, layer: item.layer })
+    setDrag({ key: item.key, mode: dragMode, pointerX: e.clientX, startMs: anchorMs, endMs: item.endMs, zIndex: item.zIndex })
   }
 
   // 选中可删材料后，按 Delete/Backspace 删除（焦点在时间轴视口内时生效）。
@@ -210,7 +210,7 @@ export function MaterialTimeline({
     if (rect.width <= 0) return
     if (!activeList.some((m) => m.key === drag.key)) return
     const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
-    const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect, trackCount - 1) : drag.layer
+    const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect, trackCount - 1) : drag.zIndex
     // 吸附：默认 100ms 网格；Shift=10ms 精细，Alt=500ms 粗粒度（复用 A 的 snap 语义）。
     const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
     if (drag.mode === 'marker') {
@@ -221,7 +221,7 @@ export function MaterialTimeline({
     const span = drag.endMs - drag.startMs
     if (drag.mode === 'move') {
       const start = clampMs(snapMs(drag.startMs + deltaMs, grid), 0, Math.max(0, maxMs - span))
-      dispatchPatch(drag.key, { startMs: start, endMs: start + span, layer: nextLayer })
+      dispatchPatch(drag.key, { startMs: start, endMs: start + span, zIndex: nextLayer })
     } else if (drag.mode === 'start') {
       dispatchPatch(drag.key, { startMs: snapMs(drag.startMs + deltaMs, grid), endMs: drag.endMs })
     } else {
@@ -251,7 +251,7 @@ export function MaterialTimeline({
     e.stopPropagation()
     onScrubStart?.() // 宿主据此暂停正在播放的视频
     timelineRef.current?.setPointerCapture(e.pointerId)
-    setDrag({ key: '__seek__', mode: 'move', pointerX: e.clientX, startMs: 0, endMs: 0, layer: 0 })
+    setDrag({ key: '__seek__', mode: 'move', pointerX: e.clientX, startMs: 0, endMs: 0, zIndex: 0 })
     seekFromPointer(e)
   }
 
@@ -264,13 +264,13 @@ export function MaterialTimeline({
   }
 
   // 素材库卡片拖入：x → 时刻（吸附 100ms）、y → 轨。
-  function dropPosFromEvent(e: React.DragEvent): { ms: number; layer: number } {
+  function dropPosFromEvent(e: React.DragEvent): { ms: number; zIndex: number } {
     const rect = timelineRef.current?.getBoundingClientRect()
-    if (!rect || rect.width <= 0) return { ms: 0, layer: 0 }
+    if (!rect || rect.width <= 0) return { ms: 0, zIndex: 0 }
     const ratio = (e.clientX - rect.left) / rect.width
     const ms = clampMs(snapMs(ratio * maxMs, 100), 0, maxMs)
-    const layer = layerFromPointerY(e.clientY, rect, trackCount - 1)
-    return { ms, layer }
+    const zIndex = layerFromPointerY(e.clientY, rect, trackCount - 1)
+    return { ms, zIndex }
   }
 
   function onCanvasDragOver(e: React.DragEvent): void {
@@ -286,8 +286,8 @@ export function MaterialTimeline({
     setDropHint(null)
     if (!template) return
     e.preventDefault()
-    const { ms, layer } = dropPosFromEvent(e)
-    onDropTemplate(template, ms, layer)
+    const { ms, zIndex } = dropPosFromEvent(e)
+    onDropTemplate(template, ms, zIndex)
   }
 
   return (
@@ -387,7 +387,7 @@ export function MaterialTimeline({
           {dropHint ? (
             <div
               className="gc-mdrop"
-              style={{ left: `${dropHint.ms * pxPerMs}px`, top: `${layerTop(dropHint.layer)}px` }}
+              style={{ left: `${dropHint.ms * pxPerMs}px`, top: `${layerTop(dropHint.zIndex)}px` }}
               aria-hidden
             >
               <span className="gc-mdrop-time">{fmtDur(dropHint.ms)}</span>
@@ -402,7 +402,7 @@ export function MaterialTimeline({
                   <div
                     key={a.key}
                     className={`gc-mclip is-audio${a.builtin ? ' is-builtin' : ''}`}
-                    style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(a.layer)}px` }}
+                    style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(a.zIndex)}px` }}
                     onPointerDown={(e) => onPointerDown(e, a, 'move')}
                     title={`${a.label} · ${fmtDur(a.startMs)} - ${fmtDur(a.endMs)}`}
                   >
@@ -419,7 +419,7 @@ export function MaterialTimeline({
                   <Fragment key={m.key}>
                     <div
                       className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}`}
-                      style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.layer)}px` }}
+                      style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.zIndex)}px` }}
                       onPointerDown={(e) => onPointerDown(e, m, 'move')}
                       title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}`}
                     >
@@ -453,7 +453,7 @@ export function MaterialTimeline({
                       <button
                         type="button"
                         className={`gc-mmarker${selected ? ' is-selected' : ''}`}
-                        style={{ left: `${m.markerMs * pxPerMs}px`, top: `${layerTop(m.layer) + 16}px` }}
+                        style={{ left: `${m.markerMs * pxPerMs}px`, top: `${layerTop(m.zIndex) + 16}px` }}
                         title={`命中判定点（计分锚点）· ${fmtDur(m.markerMs)}`}
                         aria-label="命中判定点"
                         onPointerDown={(e) => (editable ? onPointerDown(e, m, 'marker') : onSelectMaterial(m.key))}

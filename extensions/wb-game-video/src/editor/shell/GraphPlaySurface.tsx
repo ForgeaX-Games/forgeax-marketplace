@@ -17,6 +17,8 @@ import { bootEditorSkins } from '../init'
 import { resolveMediaSrc } from './media'
 import { computeVideoContentRect, type VideoContentRect } from '../video/videoContentRect'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { expandNodeOverlays } from '../../runtime/schema/expand-overlay'
+import { getKind } from '../../runtime/registry/kind-registry'
 
 function autoInput(handles: string[]): unknown {
   const h = handles[0] ?? ''
@@ -66,7 +68,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const graph = useGraphScenario((s) => s.graph)
-  const uiHud = useGraphScenario((s) => (s.meta.ui as { hud?: unknown[] } | undefined)?.hud) as HudElementView[] | undefined
+  const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
   const ready = graph.nodes.length > 0
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
 
@@ -136,14 +138,27 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const submit = (input: unknown) => setSnap(sessionRef.current!.submit(input))
   const doJump = (nodeId: string) => setSnap(sessionRef.current!.jump(nodeId))
   const traversed = useMemo(() => new Set(snap?.traversedEdgeIds ?? []), [snap?.traversedEdgeIds])
-  const hudHidden = useMemo(() => new Set(snap?.hudHidden ?? []), [snap?.hudHidden])
   const currentNode = useMemo(() => graph.nodes.find((n) => n.id === snap?.currentNodeId), [graph, snap?.currentNodeId])
-  // ui.hud 元素 → 组件皮肤查找（按 element id）。
+  // 皮肤 HUD：从当前节点 overlay 展开后取 surface:'hud' 的组件。
   const hudComp = useMemo(() => {
     const m = new Map<string, HudElementView>()
-    ;(uiHud ?? []).forEach((el) => { if (el && el.element) m.set(el.element, el) })
+    if (!currentNode) return m
+    const children = expandNodeOverlays(overlays, currentNode).flatMap((i) => i.children)
+    for (const c of children) {
+      const plugin = getKind(c.component)
+      if (plugin?.surface !== 'hud') continue
+      const params = c.params as { bind?: string; label?: string; accent?: string }
+      const bind = params.bind ?? c.id
+      m.set(bind, {
+        element: bind,
+        component: c.component,
+        label: params.label,
+        accent: params.accent,
+        layout: c.layout,
+      })
+    }
     return m
-  }, [uiHud])
+  }, [overlays, currentNode])
   const skinCtx: SkinCtx | undefined = snap ? { hud: snap.hud } : undefined
 
   const toolBtn = (on: boolean): CSSProperties => ({
@@ -177,8 +192,12 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
           autoPlay
           muted
           playsInline
+          loop={!!snap?.clip?.loop}
           onLoadedMetadata={recomputeRect}
-          onEnded={() => setSnap(sessionRef.current!.performanceEnd())}
+          onEnded={() => {
+            if (snap?.clip?.loop) return
+            setSnap(sessionRef.current!.performanceEnd())
+          }}
           onTimeUpdate={(e) => setSnap(sessionRef.current!.tick(Math.floor(e.currentTarget.currentTime * 1000)))}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
         />
@@ -198,20 +217,18 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         ))}
       </div>
 
-      {/* 皮肤 HUD：铺满舞台=视频显示区，各皮肤组件自定位（血条像旧版：玩家右下、Boss 顶部） */}
+      {/* 皮肤 HUD：仅当前节点挂了 surface:'hud' 时显示（叙事段不挂 battleHud → 无血条）。 */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
-        {Object.keys(snap?.hud.entities ?? {}).filter((id) => !hudHidden.has(id)).map((id) => {
+        {hudComp.size > 0 && Object.keys(snap?.hud.entities ?? {}).map((id) => {
           const el = hudComp.get(id)
           if (el?.component && skinCtx && skins) return <span key={id}>{skins.renderHudElement(el, skinCtx)}</span>
           return null
         })}
       </div>
 
-      {/* 内置 HUD 列（左上角）：仅未配皮肤组件的实体血条兜底。
-          变量/score 的原始 dump 已移除——旧蓝图试玩不显示裸变量，HUD 一律由
-          皮肤组件（ui.hud[i].component）或节点 HUD 配置显式渲染。 */}
+      {/* 内置 HUD 列：仅节点声明了 HUD 挂载、且实体未配皮肤组件时兜底。 */}
       <div style={{ position: 'absolute', top: 10, left: 12, width: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudHidden.has(id) && !hudComp.get(id)?.component).map(([id, e]) => {
+        {hudComp.size > 0 && Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudComp.get(id)?.component).map(([id, e]) => {
           const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0
           const col = ratio > 0.5 ? '#22c55e' : ratio > 0.2 ? '#eab308' : '#ef4444'
           return (
@@ -230,7 +247,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       {/* 结局横幅 */}
       {snap?.banner && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44, color: '#fff', background: 'rgba(0,0,0,0.6)' }}>
-          {snap.banner.kind === 'victory' ? '胜利' : snap.banner.kind === 'defeat' ? '失败' : '结束'}
+          结束{snap.banner.title ? ` · ${snap.banner.title}` : ''}
         </div>
       )}
 

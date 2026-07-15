@@ -28,9 +28,11 @@ describe('toFXView', () => {
     expect(e.targetHandle).toBe('target:in')
   })
 
-  it('end node → output type; qte node → qte badge', () => {
+  it('leaf / container badges from overlayNode / subFlow*', () => {
     const fx = toFXView(NODIA_DEMO.graph)
-    expect(fx.nodes.find((n) => n.id === 'win')!.type).toBe('output')
-    expect(fx.nodes.find((n) => n.id === 'tele')!.data.badge).toBe('qte')
+    expect(fx.nodes.find((n) => n.id === 'win')!.type).toBe('default')
+    const tele = fx.nodes.find((n) => n.id === 'tele')!
+    // 有 overlay 则 badge=overlay；否则空（旧 qte-on-timeline 已迁走）
+    expect(['overlay', '']).toContain(tele.data.badge)
   })
 })

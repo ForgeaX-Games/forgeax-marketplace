@@ -1,6 +1,6 @@
 /**
  * GraphTextStyle → React CSSProperties（图原生，编辑器与播放器共用）。
- * 字号用 cqh（container query height）保证与分辨率无关；描边走 -webkit-text-stroke。
+ * 字段已与 CSS 同名；此处只做 fontSize→cqh、字体解析、缺省兜底，以及底色时的 padding 糖。
  */
 import type { CSSProperties } from 'react'
 import type { GraphTextStyle } from '../../runtime/schema/graph-schema'
@@ -12,22 +12,21 @@ export function resolveGraphTextCss(
 ): CSSProperties {
   const s = style ?? {}
   const fill = opts?.fillDefaults ?? false
-  const strokeColor = s.strokeColor ?? (fill ? '#000000' : undefined)
-  const strokeWidth = s.strokeWidth ?? (fill ? 2 : undefined)
+  const strokeColor = s.WebkitTextStrokeColor ?? (fill ? '#000000' : undefined)
+  const strokeWidth = s.WebkitTextStrokeWidth ?? (fill ? 2 : undefined)
   const stroke = strokeColor && strokeWidth ? `${strokeWidth}px ${strokeColor}` : undefined
   return {
     fontFamily: resolveFontFamily(s.fontFamily),
     color: s.color ?? opts?.fallbackColor ?? (fill ? '#ffffff' : undefined),
     fontWeight: s.fontWeight ?? (fill ? 700 : undefined),
-    fontStyle: s.italic ? 'italic' : undefined,
-    textDecoration: s.underline ? 'underline' : undefined,
-    fontSize: s.fontSizePct != null ? `${s.fontSizePct}cqh` : undefined,
-    textAlign: s.align ?? undefined,
-    background: s.bgColor,
-    opacity: s.opacity ?? undefined,
+    textDecoration: s.textDecoration,
+    fontSize: s.fontSize != null ? `${s.fontSize}cqh` : undefined,
+    textAlign: s.textAlign,
+    backgroundColor: s.backgroundColor,
+    opacity: s.opacity,
     WebkitTextStroke: stroke,
-    textShadow: s.shadow === false ? undefined : fill || s.shadow ? '0 2px 6px rgba(0,0,0,0.6)' : undefined,
-    padding: s.bgColor ? '2px 8px' : undefined,
-    borderRadius: s.bgColor ? 4 : undefined,
+    textShadow: s.textShadow ?? (fill ? '0 2px 6px rgba(0,0,0,0.6)' : undefined),
+    padding: s.backgroundColor ? '2px 8px' : undefined,
+    borderRadius: s.backgroundColor ? 4 : undefined,
   }
 }

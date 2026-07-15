@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerKind, unregisterKind } from '../registry/kind-registry'
 import type { GameGraph, GameNode, GameScenario, GraphEffect } from '../schema/graph-schema'
+import { node, scnOf as scnOfGraph, rid } from './test-fixtures'
 
 const KIND = 'multiStep'
 beforeEach(() => {
@@ -27,28 +28,19 @@ afterEach(() => {
   unregisterKind('lethalStep')
 })
 
-const node = (id: string, extra: Partial<GameNode['data']> = {}): GameNode => ({
-  id,
-  type: 'perf',
-  position: { x: 0, y: 0 },
-  inputs: [],
-  outputs: [],
-  data: { name: id, timeline: [], ...extra },
-})
-
-function scn(graph: GameGraph, over: Partial<GameScenario> = {}): GameScenario {
-  return {
-    schemaVersion: 't',
-    variables: { hits: { id: 'hits', kind: 'number', initial: 0 } },
+function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameScenario {
+  return scnOfGraph(graph, {
+    variables: { hits: { id: 'hits', initial: 0 }, ...(over.variables ?? {}) },
     entities: {
       'ent-boss': {
+        id: 'ent-boss',
         attrs: { hp: 10 },
         attrMeta: { hp: { min: 0, max: 10, initial: 10 } },
       },
+      ...(over.entities ?? {}),
     },
-    graph,
     ...over,
-  }
+  })
 }
 
 describe('submitInteraction continue', () => {
@@ -67,23 +59,23 @@ describe('submitInteraction continue', () => {
             },
           ],
         }),
-        node('b', { end: 'victory' }),
+        node('b', { }),
       ],
-      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'done' }],
+      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'done', targetHandle: 'in' }],
     }
-    const rt = new GraphRuntime(graph, scn(graph))
+    const rt = ((s => new GraphRuntime(s.graph, s))(scnOf(graph)))
     rt.start()
     expect(rt.state.phase).toBe('awaitInteraction')
 
-    rt.submitInteraction('ms', 'hit')
+    rt.submitInteraction(rid('a', 'ms'), 'hit')
     expect(rt.state.phase).toBe('awaitInteraction')
     expect(rt.state.vars.hits).toBe(1)
 
-    rt.submitInteraction('ms', 'hit')
+    rt.submitInteraction(rid('a', 'ms'), 'hit')
     expect(rt.state.phase).toBe('awaitInteraction')
     expect(rt.state.vars.hits).toBe(2)
 
-    rt.submitInteraction('ms', 'hit')
+    rt.submitInteraction(rid('a', 'ms'), 'hit')
     expect(rt.state.vars.hits).toBe(3)
     expect(rt.state.currentNodeId).toBe('b')
     expect(rt.state.phase).toBe('ended')
@@ -114,25 +106,21 @@ describe('submitInteraction continue', () => {
             },
           ],
         }),
-        node('win', { end: 'victory' }),
+        node('win', { }),
       ],
       edges: [],
     }
-    const rt = new GraphRuntime(
-      graph,
-      scn(graph, {
-        rules: [
+    const scn = scnOf(graph, {
+        reactions: [
           {
-            id: 'win',
-            when: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] },
-            goto: 'win',
-            once: true,
+            when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
+            do: [{ kind: 'goto', targetNodeId: 'win' }],
           },
         ],
-      }),
-    )
+      })
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
-    rt.submitInteraction('ms', 'x')
+    rt.submitInteraction(rid('a', 'ms'), 'x')
     expect(rt.state.currentNodeId).toBe('win')
     expect(rt.state.phase).not.toBe('awaitInteraction')
   })

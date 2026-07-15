@@ -2,28 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerKind, unregisterKind } from '../registry/kind-registry'
 import { isRenderOverlay, isOpenInteraction } from '../engine/directives'
-import type { GameGraph, GameNode, GameScenario, GraphEffect, ReactiveRule, SubFlowPack, TimelineElement } from '../schema/graph-schema'
+import type { GameGraph, GameNode, GameScenario, Reaction, SubFlowPackDef } from '../schema/graph-schema'
+import { node, scnOf, rid } from './test-fixtures'
 
 const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
-// Minimal kinds: a logic "hit" that damages boss, a presentation "float", a choice-like.
-const KINDS = ['hit', 'floatT', 'markT', 'choiceX']
+// Minimal kinds: a presentation "float", a choice-like（副作用改由 node.data.reactions 承载）。
+const KINDS = ['floatT', 'choiceX']
 beforeEach(() => {
-  registerKind({
-    kind: 'hit',
-    role: 'logic',
-    validate: () => [],
-    outputs: () => [],
-    run: (_c, p) => ({ effects: ((p as { effects?: GraphEffect[] }).effects ?? []) }),
-  })
   registerKind({ kind: 'floatT', role: 'presentation', validate: () => [], outputs: () => [] })
-  registerKind({
-    kind: 'markT',
-    role: 'logic',
-    validate: () => [],
-    outputs: () => [],
-    run: () => ({ effects: [{ id: 'm', kind: 'var', varId: 'mark', op: 'add', value: 1 }] }),
-  })
   registerKind({
     kind: 'choiceX',
     role: 'interaction',
@@ -38,68 +25,28 @@ beforeEach(() => {
 })
 afterEach(() => KINDS.forEach(unregisterKind))
 
-const node = (id: string, extra: Partial<GameNode['data']> = {}): GameNode => ({
-  id,
-  type: 'perf',
-  position: { x: 0, y: 0 },
-  inputs: [],
-  outputs: [],
-  data: { name: id, timeline: [], ...extra },
-})
 
-const scnOf = (graph: GameGraph, over: Partial<GameScenario> = {}): GameScenario => ({
-  schemaVersion: 't',
-  variables: { mark: { id: 'mark', name: 'mark', kind: 'number', initial: 0, min: 0, max: 99 } },
-  entities: {
-    'ent-player': { id: 'ent-player', kind: 'player', attrs: { hp: 300 }, attrMeta: { hp: { max: 300, initial: 300 } } },
-    'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 50 }, attrMeta: { hp: { max: 700, initial: 700 } } },
-  },
-  rng: { seed: 1 },
-  graph,
-  ...over,
-})
-
-describe('exit trigger', () => {
-  it('runs exit elements before traversing to the next node', () => {
+describe('exit reaction', () => {
+  it('applies exit-phase reaction effects before traversing to the next node', () => {
     const graph: GameGraph = {
       nodes: [
         node('a', {
           durationMs: 100,
-          timeline: [
-            { id: 'x', role: 'logic', kind: 'markT', trigger: { when: 'exit' }, params: {} },
-          ] as TimelineElement[],
+          reactions: [
+            { when: { type: 'exit' }, do: [{ kind: 'effect', effects: [{ id: 'm', kind: 'var', varId: 'mark', op: 'add', value: 1 }] }] },
+          ],
         }),
-        node('b', { end: 'ending' }),
+        node('b', { }),
       ],
-      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'out' }],
+      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph))
+    const scn = scnOf(graph, { variables: { mark: { id: 'mark', initial: 0 } } })
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     expect(rt.state.vars.mark).toBe(0) // not yet — still on a
     rt.onPerformanceEnd()
     expect(rt.state.currentNodeId).toBe('b')
     expect(rt.state.vars.mark).toBe(1) // exit ran while leaving a
-  })
-})
-
-describe('afterHit trigger', () => {
-  it('fires an element bound to a just-run element id', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 100,
-          timeline: [
-            { id: 'dmg', role: 'logic', kind: 'hit', trigger: { when: 'enter' }, params: { effects: [] } },
-            { id: 'fx', role: 'presentation', kind: 'floatT', trigger: { when: 'afterHit', ref: 'dmg' }, params: { text: 'hit!' } },
-          ] as TimelineElement[],
-        }),
-      ],
-      edges: [],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph))
-    const dirs = rt.start()
-    // floatT rendered as a generic overlay right after dmg ran (afterHit)
-    expect(dirs.some((d) => isRenderOverlay(d) && d.kind === 'floatT')).toBe(true)
   })
 })
 
@@ -111,35 +58,37 @@ describe('element window (startMs/endMs)', () => {
           durationMs: 5000,
           timeline: [
             { id: 'w', role: 'presentation', kind: 'floatT', trigger: { when: 'enter' }, window: { startMs: 2000, endMs: 4000 }, params: { text: 'x' } },
-          ] as TimelineElement[],
+          ],
         }),
       ],
       edges: [],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph))
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     expect(rt.tick(1000).some(isRenderOverlay)).toBe(false) // 未到 startMs
-    expect(rt.tick(2500).some((d) => isRenderOverlay(d) && d.elementId === 'w')).toBe(true) // 进入窗口 → 显示
-    expect(rt.tick(4500).some((d) => d.type === 'removeOverlay' && d.elementId === 'w')).toBe(true) // 过 endMs → 移除
+    expect(rt.tick(2500).some((d) => isRenderOverlay(d) && d.elementId === rid('a', 'w'))).toBe(true) // 进入窗口 → 显示
+    expect(rt.tick(4500).some((d) => d.type === 'removeOverlay' && d.elementId === rid('a', 'w'))).toBe(true) // 过 endMs → 移除
   })
 })
 
-describe('subflow (subFlowRef)', () => {
+describe('subflow (subFlow)', () => {
   it('descends into subflow on enter and returns to continue container out', () => {
     const graph: GameGraph = {
       nodes: [
-        node('wrap', { subFlowRef: 'sub', durationMs: 100 }),
-        node('sub', { durationMs: 100, returnsToCaller: true }),
-        node('after', { end: 'ending' }),
+        node('wrap', { subFlow: 'sub', durationMs: 100 }),
+        node('sub', { durationMs: 100 }),
+        node('after', { }),
       ],
-      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out' }],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out', targetHandle: 'in' }],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph))
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     // 首次进入容器 → 下钻到 sub（压栈 wrap）
     expect(rt.state.currentNodeId).toBe('sub')
     expect(callers(rt)).toEqual(['wrap'])
-    // sub 演出结束 → returnsToCaller 弹回 wrap → 容器不重播、直接走 out → after
+    // sub 演出结束 → 无出边自动弹回 wrap → 容器不重播、直接走 out → after
     rt.onPerformanceEnd()
     expect(rt.state.currentNodeId).toBe('after')
     expect(rt.state.callStack).toEqual([])
@@ -151,15 +100,15 @@ describe('subflow pack (subFlowPack)', () => {
     const main: GameGraph = {
       nodes: [
         node('wrap', { subFlowPack: { id: 'enemy-turn', version: '1' }, durationMs: 100 }),
-        node('after', { end: 'ending' }),
+        node('after', { }),
       ],
-      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out' }],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out', targetHandle: 'in' }],
     }
     const packGraph: GameGraph = {
-      nodes: [node('tele', { durationMs: 100, returnsToCaller: true })],
+      nodes: [node('tele', { durationMs: 100 })],
       edges: [],
     }
-    const pack: SubFlowPack = {
+    const pack: SubFlowPackDef = {
       schemaVersion: 'wb-game-video.pack.v1',
       id: 'enemy-turn',
       version: '1',
@@ -182,7 +131,8 @@ describe('subflow pack (subFlowPack)', () => {
       nodes: [node('wrap', { subFlowPack: { id: 'missing' } })],
       edges: [],
     }
-    const rt = new GraphRuntime(main, scnOf(main))
+    const scn = scnOf(main)
+    const rt = new GraphRuntime(scn.graph, scn)
     expect(() => rt.start()).toThrow(/subFlowPack 'missing' is not loaded/)
   })
 })
@@ -194,14 +144,15 @@ describe('transition kind', () => {
       nodes: [
         node('a', {
           durationMs: 1000,
-          timeline: [{ id: 't', role: 'presentation', kind: 'transition', trigger: { when: 'enter' }, params: { durationMs: 500 } }] as TimelineElement[],
+          timeline: [{ id: 't', role: 'presentation', kind: 'transition', trigger: { when: 'enter' }, params: { durationMs: 500 } }],
         }),
       ],
       edges: [],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph))
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
     const dirs = rt.start()
-    expect(dirs.some((d) => isRenderOverlay(d) && d.kind === 'transition')).toBe(true)
+    expect(dirs.some((d) => isRenderOverlay(d) && d.component === 'transition')).toBe(true)
     unregisterKind('transition')
   })
 })
@@ -219,31 +170,59 @@ describe('choice timeout', () => {
               trigger: { when: 'enter' },
               params: { options: [{ key: 'a' }, { key: 'b' }], timeoutMs: 3000, defaultKey: 'b' },
             },
-          ] as TimelineElement[],
+          ],
         }),
-        node('win', { end: 'victory' }),
-        node('lose', { end: 'defeat' }),
+        node('win', { }),
+        node('lose', { }),
       ],
       edges: [
-        { id: 'e-a', source: 'a', target: 'win', sourceHandle: 'opt:a' },
-        { id: 'e-b', source: 'a', target: 'lose', sourceHandle: 'opt:b' },
+        { id: 'e-a', source: 'a', target: 'win', sourceHandle: 'opt:a', targetHandle: 'in' },
+        { id: 'e-b', source: 'a', target: 'lose', sourceHandle: 'opt:b', targetHandle: 'in' },
       ],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph))
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
     const dirs = rt.start()
     const open = dirs.find(isOpenInteraction)
     expect(open?.timeoutMs).toBe(3000)
     // 模拟到点未选：submit(undefined) → defaultKey 'b' → lose
-    rt.submitInteraction('c', undefined)
+    rt.submitInteraction(rid('a', 'c'), undefined)
     expect(rt.state.currentNodeId).toBe('lose')
+  })
+
+  it('openInteraction maps windowMs to timeoutMs when timeoutMs absent', () => {
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          timeline: [
+            {
+              id: 'q',
+              role: 'interaction',
+              kind: 'choiceX',
+              trigger: { when: 'enter' },
+              params: { options: [{ key: 'pass' }, { key: 'fail' }], windowMs: 200, defaultKey: 'fail' },
+            },
+          ],
+        }),
+        node('ok', {}),
+        node('miss', {}),
+      ],
+      edges: [
+        { id: 'e-p', source: 'a', target: 'ok', sourceHandle: 'opt:pass', targetHandle: 'in' },
+        { id: 'e-f', source: 'a', target: 'miss', sourceHandle: 'opt:fail', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
+    const open = rt.start().find(isOpenInteraction)
+    expect(open?.timeoutMs).toBe(200)
   })
 })
 
 describe('graph-level reactive rules (instant defeat/victory)', () => {
-  const bossDead: ReactiveRule = {
-    id: 'boss-dead',
-    when: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] },
-    goto: 'win',
+  const bossDead: Reaction = {
+    when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
+    do: [{ kind: 'goto', targetNodeId: 'win' }],
   }
 
   it('jumps to goto immediately when a rule matches mid-performance (at trigger)', () => {
@@ -251,46 +230,27 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
       nodes: [
         node('a', {
           durationMs: 5000,
-          timeline: [
-            {
-              id: 'dmg',
-              role: 'logic',
-              kind: 'hit',
-              trigger: { when: 'at', ms: 500 },
-              // boss hp 50 → -60 kills it
-              params: { effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -60 }] },
-            },
-          ] as TimelineElement[],
+          // boss hp 50 → -60 kills it (at:500 reaction effect)
+          reactions: [
+            { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -60 }] }] },
+          ],
         }),
-        node('win', { end: 'victory' }),
+        node('win', { }),
       ],
       edges: [],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph, { rules: [bossDead] }))
+    const scn = scnOf(graph, {
+      reactions: [bossDead],
+      entities: {
+        'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 50 }, attrMeta: { hp: { max: 50, initial: 50 } } },
+      },
+    })
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     expect(rt.state.currentNodeId).toBe('a')
-    const dirs = rt.tick(600) // dmg fires → boss dead → instant jump to win
+    const dirs = rt.tick(600) // at:500 reaction fires → boss dead → instant jump to win
     expect(rt.state.currentNodeId).toBe('win')
-    expect(dirs.some((d) => d.type === 'banner' && d.kind === 'victory')).toBe(true)
-  })
-
-  it('call edge pushes caller; returnsToCaller pops back', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('hub', { durationMs: 100 }),
-        node('sub', { durationMs: 100, returnsToCaller: true }),
-      ],
-      edges: [{ id: 'e', source: 'hub', target: 'sub', sourceHandle: 'out', data: { call: true } }],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph))
-    rt.start()
-    expect(rt.state.currentNodeId).toBe('hub')
-    rt.onPerformanceEnd() // call edge → push hub → enter sub
-    expect(rt.state.currentNodeId).toBe('sub')
-    expect(callers(rt)).toEqual(['hub'])
-    rt.onPerformanceEnd() // sub ends, no out edge, returnsToCaller → pop → hub
-    expect(rt.state.currentNodeId).toBe('hub')
-    expect(rt.state.callStack).toEqual([])
+    expect(dirs.some((d) => d.type === 'banner' && d.kind === 'ending')).toBe(true)
   })
 
   it('does not jump when the rule condition is not met', () => {
@@ -298,21 +258,21 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
       nodes: [
         node('a', {
           durationMs: 5000,
-          timeline: [
-            {
-              id: 'dmg',
-              role: 'logic',
-              kind: 'hit',
-              trigger: { when: 'at', ms: 500 },
-              params: { effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -10 }] },
-            },
-          ] as TimelineElement[],
+          reactions: [
+            { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -10 }] }] },
+          ],
         }),
-        node('win', { end: 'victory' }),
+        node('win', { }),
       ],
       edges: [],
     }
-    const rt = new GraphRuntime(graph, scnOf(graph, { rules: [bossDead] }))
+    const scn = scnOf(graph, {
+      reactions: [bossDead],
+      entities: {
+        'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 50 }, attrMeta: { hp: { max: 50, initial: 50 } } },
+      },
+    })
+    const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     rt.tick(600) // boss 50 → 40, still alive
     expect(rt.state.currentNodeId).toBe('a')

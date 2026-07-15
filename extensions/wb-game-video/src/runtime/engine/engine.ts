@@ -1,15 +1,16 @@
 /**
  * GraphRuntime —— 纯 TS 状态机，**直接执行 GameGraph**（无 Scene/branches/编译层）。
  *
- * 走法（spec §3）：进入节点 → 跑 enter 计算 + emit playClip → tick 时按 trigger 触发时间线元素
- * → 按 role 派发（logic 改状态 / presentation 出画面 / interaction 挂起等输入）→ 演出结束/交互判定
+ * 走法（spec §3）：进入节点 → 跑 enter reactions + emit playClip → tick 时按 trigger 触发 overlay 子件
+ * → 按 role 派发（presentation 出画面 / interaction 挂起等输入）→ 演出结束/交互判定
  * → 选出口 handle → 沿 edge → 进入下一节点。产**泛型 directive**，Player 消费。
  *
  * 关键机制：
- *  - 触发时机 TriggerSpec：enter / at(ms) / performanceEnd / exit / stateChange(反应式)。
- *  - 出口=handle：语义在 sourceHandle（out、cond:N、else、pass、opt:N …），edge 只管连接 + 条件/副作用/权重。
+ *  - 触发时机 Trigger：enter / at(ms)。
+ *  - 出口=handle：语义在 sourceHandle（out、cond:N、else、pass、opt:N …），edge 只管连接 + 条件/权重。
  *  - 条件网关：cond:N 按序求值，else/out 兜底；加权随机：多条候选带 weight → rng 加权。
  *  - 交互：openInteraction 挂起 → submitInteraction(resolve) → outcome→handle→edge。
+ *  - 副作用：reactions / option.effects（边不带 effects）。
  *  - jumpToNode：seek 到任意节点（默认保留全局态）。
  */
 import type {
@@ -19,11 +20,14 @@ import type {
   GameScenario,
   GraphCondition,
   GraphEffect,
-  ReactiveRule,
   SubFlowPack,
-  SubFlowPackRef,
-  TimelineElement,
+  SubFlowPackDef,
 } from '../schema/graph-schema'
+import { getSubFlowPack, getSubFlow, isSubflowContainerData } from '../schema/graph-schema'
+import { nodeOverlayChildren, nodeOverlayMounts } from '../schema/expand-overlay'
+import { resolveEventReactions, completeReactions } from '../schema/overlay-events'
+import type { NodeAction, OverlayInstanceChild, Reaction } from '../schema/node-config-schema'
+import { overlayMountId } from '../schema/node-config-schema'
 import { applyEffects, type MutableState } from './apply-effects'
 import { initState } from './engine-init'
 import { defaultKindRegistry, isContinueResult, type KindRegistry, type RuntimeCtx } from '../registry/kind-registry'
@@ -51,7 +55,7 @@ export interface RuntimeState extends MutableState {
 const CHAIN_GUARD = 200
 
 function isSubflowContainer(node: GameNode): boolean {
-  return !!(node.data.subFlowRef || node.data.subFlowPack)
+  return isSubflowContainerData(node.data)
 }
 
 function packLookupKey(id: string, version?: string): string {
@@ -65,21 +69,21 @@ export class GraphRuntime {
   private readonly rootGraph: GameGraph
   /** 当前正在执行的图（主图或某个 pack.graph）。 */
   private activeGraph: GameGraph
-  private readonly packsByKey = new Map<string, SubFlowPack>()
+  private readonly packsByKey = new Map<string, SubFlowPackDef>()
   readonly state: RuntimeState
   private queue: RuntimeDirective[] = []
 
   // 每节点重置的运行游标
-  private fired = new Set<string>() // 已触发的 at/enter/perfEnd/exit/afterHit 元素 id
-  private firedReactive = new Set<string>() // 已触发的 stateChange 元素 id
+  private fired = new Set<string>() // 已触发的 enter/at 元素 id
+  private firedAtReactions = new Set<number>() // 已触发的 at reaction 下标（按 node.data.reactions 顺序）
   private windowShown = new Set<string>() // 已按 window.startMs 显示的元素 id
   private windowRemoved = new Set<string>() // 已按 window.endMs 移除的元素 id
   private pending: string | null = null // 挂起中的 interaction 元素 id
   private chain = 0 // 同步穿链计数（anti-runaway）
 
-  // 图级反应规则（即时判负/判胜）：命中即设 redirect，在安全边界消费为一次跳转。
-  private readonly rules: ReactiveRule[]
-  private readonly firedRules = new Set<string>()
+  // 局级 state reactions（即时判负/判胜）：命中即设 redirect，在安全边界消费为一次跳转。
+  private readonly reactions: Reaction[]
+  private readonly firedStateReactions = new Set<number>()
   private redirect: { goto: string; resetGlobals?: boolean } | null = null
   private inExit = false // 跑 exit 元素期间抑制规则消费，避免退出时自跳环
   private returningTo = new Set<string>() // 正在弹回的容器节点：下一次 enter 跳过 subFlow 下钻、直接续 out
@@ -91,7 +95,7 @@ export class GraphRuntime {
     graph: GameGraph,
     private readonly scenario: GameScenario,
     kinds: KindRegistry = defaultKindRegistry,
-    packs: readonly SubFlowPack[] = [],
+    packs: readonly SubFlowPackDef[] = [],
   ) {
     this.rootGraph = graph
     this.activeGraph = graph
@@ -107,7 +111,7 @@ export class GraphRuntime {
       }
     }
     this.indexGraph(graph)
-    this.rules = scenario.rules ?? []
+    this.reactions = scenario.reactions ?? []
     this.state = { ...initState(scenario), ...control() }
   }
 
@@ -127,7 +131,7 @@ export class GraphRuntime {
     this.indexGraph(graph)
   }
 
-  private resolvePack(ref: SubFlowPackRef): SubFlowPack {
+  private resolvePack(ref: SubFlowPack): SubFlowPackDef {
     const keyed = ref.version ? this.packsByKey.get(packLookupKey(ref.id, ref.version)) : undefined
     const pack = keyed ?? this.packsByKey.get(ref.id)
     if (!pack) {
@@ -145,8 +149,14 @@ export class GraphRuntime {
     this.state.callStack.push({ callerNodeId, returnGraph: this.activeGraph })
   }
 
-  private getKind(kind: string) {
-    return this.kinds.getKind(kind)
+  private getComponent(componentId: string) {
+    return this.kinds.getComponent(componentId)
+  }
+
+  /** 本节点展开后的 overlay children（无挂载则 []）。 */
+  private childrenOf(node: GameNode | null | undefined): OverlayInstanceChild[] {
+    if (!node) return []
+    return nodeOverlayChildren(this.scenario, node)
   }
 
   // ── 指令队列 ────────────────────────────────────────────────────────────────
@@ -224,9 +234,10 @@ export class GraphRuntime {
       return
     }
     // 跨图子蓝图：压栈（含 returnGraph）→ 切到 pack 图 → 进入口。
-    if (node.data.subFlowPack && !this.returningTo.has(id)) {
-      const pack = this.resolvePack(node.data.subFlowPack)
-      const entry = node.data.subFlowPack.entry ?? pack.entry
+    const packRef = getSubFlowPack(node.data)
+    if (packRef && !this.returningTo.has(id)) {
+      const pack = this.resolvePack(packRef)
+      const entry = packRef.entry ?? pack.entry
       this.state.currentNodeId = id
       this.state.visited.add(id)
       this.pushCall(id)
@@ -235,11 +246,12 @@ export class GraphRuntime {
       return
     }
     // 同图子流程：压栈 + 跳到本图入口（不播容器自身演出）。
-    if (node.data.subFlowRef && !this.returningTo.has(id)) {
+    const subRef = getSubFlow(node.data)
+    if (subRef && !this.returningTo.has(id)) {
       this.state.currentNodeId = id
       this.state.visited.add(id)
       this.pushCall(id)
-      this.enterNode(node.data.subFlowRef)
+      this.enterNode(subRef)
       return
     }
     const returning = this.returningTo.delete(id)
@@ -249,14 +261,13 @@ export class GraphRuntime {
     // 子流程/子蓝图容器弹回：不重播演出、不跑 enter 元素，直接沿 out 续走。
     if (returning && isSubflowContainer(node)) {
       this.fired = new Set()
-      this.firedReactive = new Set()
       this.pending = null
       this.setPhase('playing')
       this.advanceAuto()
       return
     }
     this.fired = new Set()
-    this.firedReactive = new Set()
+    this.firedAtReactions = new Set()
     this.windowShown = new Set()
     this.windowRemoved = new Set()
     this.pending = null
@@ -267,7 +278,6 @@ export class GraphRuntime {
       type: 'playClip',
       nodeId: id,
       name: node.data.name,
-      clipId: node.data.clipId,
       mediaId: node.data.media?.ref,
       loop: node.data.mediaPlayMode === 'loop',
       durationMs: node.data.durationMs,
@@ -275,17 +285,20 @@ export class GraphRuntime {
     this.setPhase('playing')
 
     // enter 计算（可能开交互 → 挂起；或触发图级规则 → 即时改道）。带 window 的元素改由时钟窗口驱动，跳过。
-    for (const el of node.data.timeline) {
+    for (const el of this.childrenOf(node)) {
       if (el.trigger.when === 'enter' && !el.window) this.runElement(el)
       if (this.state.phase === 'awaitInteraction' || this.redirect) break
     }
+    // enter 相位 reactions 的副作用（生命周期效果）。
+    if (this.state.phase !== 'awaitInteraction' && !this.redirect) this.applyPhaseReactionEffects(node, 'enter')
     if (this.state.phase === 'awaitInteraction') return
     if (this.consumeRedirect()) return
 
     // 瞬时节点（无演出时长 且 无交互元素）→ 立即推进，形成逻辑穿链。
-    const hasInteraction = node.data.timeline.some((el) => this.getKind(el.kind)?.role === 'interaction')
+    const hasInteraction = this.childrenOf(node).some(
+      (el) => this.getComponent(el.component)?.role === 'interaction',
+    )
     if (!node.data.durationMs && !hasInteraction) {
-      this.runPerformanceEnd(node)
       if (this.consumeRedirect()) return
       if (this.state.phase === 'playing') this.advanceAuto()
     }
@@ -297,12 +310,14 @@ export class GraphRuntime {
     this.state.elapsedMs = elapsedMs
     const node = this.node(this.state.currentNodeId)
     if (!node || this.state.phase !== 'playing') return this.drain()
-    for (const el of node.data.timeline) {
+    for (const el of this.childrenOf(node)) {
       if (el.trigger.when === 'at' && !el.window && el.trigger.ms <= elapsedMs && !this.fired.has(el.id)) {
         this.runElement(el)
         if ((this.state.phase as GraphPhase) === 'awaitInteraction' || this.redirect) break
       }
     }
+    // at 相位 reactions 的副作用（到点施加）。
+    if (this.state.phase === 'playing' && !this.redirect) this.applyAtReactionEffects(node, elapsedMs)
     this.tickWindows(node, elapsedMs)
     this.consumeRedirect()
     return this.drain()
@@ -310,7 +325,7 @@ export class GraphRuntime {
 
   /** window 时段：到 startMs 显示、到 endMs 移除（表现层叠层的可见时段，如漂字/计时器只显示某段）。 */
   private tickWindows(node: GameNode, elapsedMs: number): void {
-    for (const el of node.data.timeline) {
+    for (const el of this.childrenOf(node)) {
       if (!el.window) continue
       const start = el.window.startMs ?? 0
       const end = el.window.endMs
@@ -327,22 +342,14 @@ export class GraphRuntime {
     }
   }
 
-  /** 演出（视频/时长）结束：跑 performanceEnd 元素，若未挂起则自动沿出口推进。 */
+  /** 演出（视频/时长）结束：若未挂起则自动沿出口推进（收尾副作用见 complete reactions）。 */
   onPerformanceEnd(): RuntimeDirective[] {
     const node = this.node(this.state.currentNodeId)
     if (!node || this.state.phase !== 'playing') return this.drain()
     this.chain = 0
-    this.runPerformanceEnd(node)
     if (this.consumeRedirect()) return this.drain()
     if (this.state.phase === 'playing') this.advanceAuto()
     return this.drain()
-  }
-
-  private runPerformanceEnd(node: GameNode): void {
-    for (const el of node.data.timeline) {
-      if (el.trigger.when === 'performanceEnd' && !el.window && !this.fired.has(el.id)) this.runElement(el)
-      if (this.state.phase === 'awaitInteraction' || this.redirect) return
-    }
   }
 
   // ── 交互 ────────────────────────────────────────────────────────────────────
@@ -353,10 +360,10 @@ export class GraphRuntime {
    */
   submitInteraction(elementId: string, input: unknown): RuntimeDirective[] {
     const node = this.node(this.state.currentNodeId)
-    const el = node?.data.timeline.find((e) => e.id === elementId)
+    const el = this.childrenOf(node).find((e) => e.id === elementId)
     if (!node || !el) return this.drain()
     if (this.state.phase !== 'awaitInteraction' || this.pending !== elementId) return this.drain()
-    const plugin = this.getKind(el.kind)
+    const plugin = this.getComponent(el.component)
     if (!plugin?.resolve) return this.drain()
     const result = plugin.resolve(this.ctx(), el.params, input)
     if (isContinueResult(result)) {
@@ -369,55 +376,105 @@ export class GraphRuntime {
     this.setPhase('playing')
     this.chain = 0
     if (this.consumeRedirect()) return this.drain()
+
+    // reactions = 效果（不含走向）：命中 outcome 的 event reaction 先施加副作用，再由**边**决定去向。
+    const mountReactions =
+      nodeOverlayMounts(node).find((m) => overlayMountId(m) === el.source.mountId)?.reactions
+      ?? nodeOverlayMounts(node)[0]?.reactions
+    const evReactions = resolveEventReactions(mountReactions, result.outcome, el.source.childId, el.source.mountId)
+    for (const r of evReactions) this.runEffectActions(r.do)
+    if (this.consumeRedirect()) return this.drain()
+
     const edge = this.selectHandleEdge(node.id, result.outcome)
     if (edge) this.traverse(edge)
     else this.advanceAuto()
     return this.drain()
   }
 
+  /** 施加 reaction.do 中的 effect（忽略 goto——走向属于边）。 */
+  private runEffectActions(actions: NodeAction[]): void {
+    for (const a of actions) {
+      if (a.kind === 'effect' && a.effects.length) this.applyAndReact(a.effects)
+    }
+  }
+
+  /** 施加节点某生命周期相位（enter/exit）reactions 的副作用。 */
+  private applyPhaseReactionEffects(node: GameNode, phase: 'enter' | 'exit'): void {
+    for (const r of node.data.reactions ?? []) {
+      if (r.when.type === phase) this.runEffectActions(r.do)
+      if (this.state.phase === 'awaitInteraction' || this.redirect) return
+    }
+  }
+
+  /** 施加节点 at 相位 reactions 的副作用（到点、去重）。 */
+  private applyAtReactionEffects(node: GameNode, elapsedMs: number): void {
+    const reactions = node.data.reactions ?? []
+    for (let i = 0; i < reactions.length; i++) {
+      const r = reactions[i]!
+      if (r.when.type !== 'at' || this.firedAtReactions.has(i) || r.when.ms > elapsedMs) continue
+      this.firedAtReactions.add(i)
+      this.runEffectActions(r.do)
+      if ((this.state.phase as GraphPhase) === 'awaitInteraction' || this.redirect) return
+    }
+  }
+
+  /**
+   * 节点收尾（complete）reactions 的副作用：按作者顺序取首个 `if` 成立的分支（否则无 `if` 兜底），施加其 effect。
+   * 仅副作用，不决定走向（走向由 selectAutoEdge 的边负责）。
+   */
+  private applyCompleteReactionEffects(node: GameNode): void {
+    const completes = completeReactions(node.data.reactions)
+    if (!completes.length) return
+    const target = this.condTarget()
+    const chosen =
+      completes.find((r) => r.when.type === 'complete' && r.when.if && evaluateCondition(r.when.if, target)) ??
+      completes.find((r) => r.when.type === 'complete' && !r.when.if)
+    if (chosen) this.runEffectActions(chosen.do)
+  }
+
   // ── 元素派发 ────────────────────────────────────────────────────────────────
-  private runElement(el: TimelineElement): void {
-    const plugin = this.getKind(el.kind)
-    if (!plugin) return
+  private runElement(el: OverlayInstanceChild): void {
+    const plugin = this.getComponent(el.component)
+    const role = plugin?.role ?? 'presentation'
     this.fired.add(el.id)
     const ctx = { ...this.ctx(), elementId: el.id }
-    if (plugin.role === 'logic' && plugin.run) {
-      const { effects } = plugin.run(ctx, el.params)
-      this.applyAndReact(effects as GraphEffect[])
-    } else if (plugin.role === 'presentation') {
-      // 有 render() 的 kind（如 floatText 需按当前状态算动态值）用其产出；否则发泛型 renderOverlay。
-      if (plugin.render) {
-        for (const d of plugin.render(ctx, el.params)) this.emit(d)
+    const params = el.params.component == null ? { ...el.params, component: el.component } : el.params
+    if (role === 'presentation') {
+      if (plugin?.render) {
+        for (const d of plugin.render(ctx, params)) this.emit(d)
       } else {
         this.emit({
           type: 'renderOverlay',
           nodeId: this.state.currentNodeId ?? '',
           elementId: el.id,
-          kind: el.kind,
-          params: el.params,
-          layer: el.layer,
+          component: el.component,
+          params,
+          zIndex: el.layout?.zIndex,
         })
       }
-    } else if (plugin.role === 'interaction') {
-      if (plugin.present) for (const d of plugin.present(ctx, el.params)) this.emit(d)
-      const timeoutMs = typeof el.params.timeoutMs === 'number' ? (el.params.timeoutMs as number) : undefined
-      // 逐项门控：给带 condition 的选项算出 _locked（当前态不满足即锁定），皮肤据此灰置禁选。
-      const params = this.withOptionLocks(el.params)
+    } else if (role === 'interaction') {
+      if (!plugin) return
+      if (plugin.present) for (const d of plugin.present(ctx, params)) this.emit(d)
+      // 限时：timeoutMs（choice）/ windowMs（QTE 窗口）/ durationMs（皮肤时限）同源。
+      const timeoutRaw =
+        (typeof params.timeoutMs === 'number' ? params.timeoutMs : undefined)
+        ?? (typeof params.windowMs === 'number' ? params.windowMs : undefined)
+        ?? (typeof params.durationMs === 'number' ? params.durationMs : undefined)
+      const timeoutMs = typeof timeoutRaw === 'number' && timeoutRaw > 0 ? timeoutRaw : undefined
+      const lockedParams = this.withOptionLocks(params)
       this.emit({
         type: 'openInteraction',
         nodeId: this.state.currentNodeId ?? '',
         elementId: el.id,
-        kind: el.kind,
-        params,
-        handles: plugin.outputs(el.params).map((h) => h.id),
-        ...(timeoutMs && timeoutMs > 0 ? { timeoutMs } : {}),
+        component: el.component,
+        params: lockedParams,
+        handles: plugin.outputs(params).map((h) => h.id),
+        ...(timeoutMs ? { timeoutMs } : {}),
       })
       this.setPhase('awaitInteraction')
       this.pending = el.id
-      return // 挂起等输入：不连锁 afterHit
+      return
     }
-    // 命中后连锁：触发绑定到本元素的 afterHit 元素（如结算→漂字），除非本步已改道。
-    if (!this.redirect) this.fireAfterHit(el.id)
   }
 
   /** 给 choice/skill 的选项按 condition 算出 `_locked`（当前态不满足即锁定）；无 condition 原样返回。 */
@@ -434,45 +491,26 @@ export class GraphRuntime {
     return changed ? { ...params, options: mapped } : params
   }
 
-  /** 触发所有 `trigger: { when:'afterHit', ref }` 指向 refId 的元素（fired 去重防环）。 */
-  private fireAfterHit(refId: string): void {
-    const node = this.node(this.state.currentNodeId)
-    if (!node) return
-    for (const el of node.data.timeline) {
-      if (
-        el.trigger.when === 'afterHit' &&
-        el.trigger.ref === refId &&
-        !this.fired.has(el.id) &&
-        (this.state.phase as GraphPhase) !== 'awaitInteraction'
-      ) {
-        this.runElement(el)
-      }
-    }
-  }
-
-  /** 离开节点前跑其 exit 元素（logic/presentation；exit 不开交互）。spec §3.2。 */
+  /** 离开节点前跑 exit 相位 reactions（副作用）；UI 槽不再用 Trigger.exit。 */
   private runExit(node: GameNode): void {
     this.inExit = true
-    for (const el of node.data.timeline) {
-      if (el.trigger.when !== 'exit' || this.fired.has(el.id)) continue
-      if (this.getKind(el.kind)?.role === 'interaction') continue // exit 不挂交互
-      this.runElement(el)
-    }
+    this.applyPhaseReactionEffects(node, 'exit')
     this.inExit = false
   }
 
-  /** 图级反应规则：状态变化后求值，首个命中的规则设 redirect（在安全边界消费为跳转）。 */
+  /** 局级 state reactions：状态变化后求值，首个命中且含 goto 的设 redirect。 */
   private checkRules(): void {
     if (this.inExit || this.redirect || this.state.phase === 'ended') return
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i]!
-      const key = rule.id ?? `${rule.goto}#${i}`
-      if (rule.once && this.firedRules.has(key)) continue
-      if (evaluateCondition(rule.when, this.condTarget())) {
-        if (rule.once) this.firedRules.add(key)
-        this.redirect = { goto: rule.goto, resetGlobals: rule.resetGlobals }
-        return
-      }
+    for (let i = 0; i < this.reactions.length; i++) {
+      const r = this.reactions[i]!
+      if (r.when.type !== 'state') continue
+      if (this.firedStateReactions.has(i)) continue
+      if (!evaluateCondition(r.when.condition, this.condTarget())) continue
+      const goto = r.do.find((a): a is Extract<NodeAction, { kind: 'goto' }> => a.kind === 'goto')
+      if (!goto) continue
+      this.firedStateReactions.add(i)
+      this.redirect = { goto: goto.targetNodeId }
+      return
     }
   }
 
@@ -486,6 +524,10 @@ export class GraphRuntime {
     this.pending = null
     this.setPhase('playing')
     if (resetGlobals) this.resetGlobalsState()
+    // 图级规则是硬打断（判胜/判负等）：清调用栈并回到主图，再进目标节点。
+    this.state.callStack = []
+    this.returningTo.clear()
+    this.switchGraph(this.rootGraph)
     this.enterNode(goto)
     return true
   }
@@ -493,21 +535,7 @@ export class GraphRuntime {
   private applyAndReact(effects: GraphEffect[]): void {
     applyEffects(this.state, effects)
     this.emit({ type: 'stateChanged' })
-    this.reactive()
     this.checkRules()
-  }
-
-  /** 反应式：状态变化后评估本节点 stateChange 元素，条件成立即触发（如阈值提示/死亡结算）。 */
-  private reactive(): void {
-    const node = this.node(this.state.currentNodeId)
-    if (!node) return
-    for (const el of node.data.timeline) {
-      if (el.trigger.when !== 'stateChange' || this.firedReactive.has(el.id)) continue
-      if (evaluateCondition(el.trigger.condition, this.condTarget())) {
-        this.firedReactive.add(el.id)
-        this.runElement(el)
-      }
-    }
   }
 
   // ── 出口选择 / 边遍历 ───────────────────────────────────────────────────────
@@ -556,14 +584,20 @@ export class GraphRuntime {
   private advanceAuto(): void {
     const nodeId = this.state.currentNodeId
     if (!nodeId) return
+    // 收尾副作用（complete reactions）先施加，再由边决定走向；副作用可能触发局级规则改道。
+    const curNode = this.nodes.get(nodeId)
+    if (curNode) {
+      this.applyCompleteReactionEffects(curNode)
+      if (this.consumeRedirect()) return
+    }
     const edge = this.selectAutoEdge(nodeId)
     if (!edge) {
-      // 无自动出边：若本节点声明 returnsToCaller 且调用栈非空 → 弹回 caller（call/return）。
+      // 无自动出边 + 调用栈非空 → 弹回 caller（subFlow / subFlowPack）；回环用显式边。
       const node = this.nodes.get(nodeId)
-      if (node?.data.returnsToCaller && this.state.callStack.length > 0) {
+      if (this.state.callStack.length > 0) {
         const frame = this.state.callStack.pop() as CallFrame
-        this.runExit(node)
-        this.returningTo.add(frame.callerNodeId) // 标记：弹回容器时跳过 subFlow 再下钻
+        if (node) this.runExit(node)
+        this.returningTo.add(frame.callerNodeId) // 弹回容器时跳过 subFlow 再下钻
         this.switchGraph(frame.returnGraph)
         this.enterNode(frame.callerNodeId)
         return
@@ -582,23 +616,17 @@ export class GraphRuntime {
       target: edge.target,
       reason: describeCondition(edge.data?.condition, this.condTarget()),
     })
-    if (edge.data?.effects) {
-      this.applyAndReact(edge.data.effects as GraphEffect[])
-      if (this.consumeRedirect()) return // 边副作用触发图级规则 → 改道，放弃本边
-    }
     this.state.traversedEdgeIds.add(edge.id)
     const cur = this.node(this.state.currentNodeId)
     if (cur) this.runExit(cur)
-    // call 边：压栈 source（含当前图），子流程结束后可 returnsToCaller 弹回。
-    if (edge.data?.call && this.state.currentNodeId) this.pushCall(this.state.currentNodeId)
     this.enterNode(edge.target)
   }
 
   private finishEnd(nodeId: string): void {
     this.setPhase('ended')
     const node = this.nodes.get(nodeId)
-    const kind = node?.data.end ?? 'ending'
-    this.emit({ type: 'banner', kind, nodeId, title: node?.data.name ?? '' })
+    // 结局横幅不靠节点 end 标记；无出边即结束。胜负表现走 overlay / 图规则。
+    this.emit({ type: 'banner', kind: 'ending', nodeId, title: node?.data.name ?? '' })
   }
 }
 

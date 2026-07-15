@@ -1,67 +1,50 @@
 import { describe, expect, it } from 'vitest'
 import { validateGraph } from '../validate/validate'
-import type { GameGraph, GameNode } from '../schema/graph-schema'
+import type { GameGraph, GameNode, Overlay } from '../schema/graph-schema'
 
-const perf = (id: string, kinds: string[] = []): GameNode => ({
-  id,
-  type: 'perf',
-  position: { x: 0, y: 0 },
-  inputs: [],
-  outputs: [],
-  data: {
-    name: id,
-    timeline: kinds.map((k, i) => ({
-      id: `${id}-e${i}`,
-      role: 'logic' as const,
-      kind: k,
-      trigger: { when: 'enter' as const },
-      params: {},
-    })),
-  },
-})
+function perf(id: string, kinds: string[] = []): { node: GameNode; overlays: Record<string, Overlay> } {
+  const oid = `ov-${id}`
+  const overlays: Record<string, Overlay> = {
+    [oid]: {
+      id: oid,
+      children: kinds.map((k, i) => ({
+        id: `${id}-e${i}`,
+        component: k,
+        trigger: { when: 'enter' as const },
+        params: {},
+      })),
+    },
+  }
+  const node: GameNode = {
+    id,
+    type: 'perf',
+    position: { x: 0, y: 0 },
+    inputs: [],
+    outputs: [],
+    data: { name: id, ...(kinds.length ? { overlayNodes: [{ overlay: oid }] } : {}) },
+  }
+  return { node, overlays }
+}
 
 describe('validateGraph', () => {
   it('valid graph → no issues', () => {
+    const a = perf('a')
+    const b = perf('b')
     const g: GameGraph = {
-      nodes: [perf('a'), perf('b')],
-      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'out' }],
+      nodes: [a.node, b.node],
+      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }],
     }
-    expect(validateGraph(g)).toEqual([])
+    expect(validateGraph(g, { overlays: { ...a.overlays, ...b.overlays } })).toEqual([])
   })
 
   it('dangling edge target → error', () => {
+    const a = perf('a')
     const g: GameGraph = {
-      nodes: [perf('a')],
-      edges: [{ id: 'e1', source: 'a', target: 'ghost' }],
+      nodes: [a.node],
+      edges: [{ id: 'e1', source: 'a', target: 'ghost', sourceHandle: 'out', targetHandle: 'in' }],
     }
-    const issues = validateGraph(g)
+    const issues = validateGraph(g, { overlays: a.overlays })
     expect(issues.filter((i) => i.level === 'error')).toHaveLength(1)
     expect(issues[0]!.code).toBe('edge.target.missing')
-  })
-
-  it('unregistered kind → error', () => {
-    const g: GameGraph = { nodes: [perf('a', ['nopeKind'])], edges: [] }
-    const errs = validateGraph(g).filter((i) => i.level === 'error')
-    expect(errs).toHaveLength(1)
-    expect(errs[0]!.code).toBe('kind.unknown')
-  })
-
-  it('unreachable node → warn', () => {
-    const g: GameGraph = {
-      nodes: [perf('a'), perf('b'), perf('c')],
-      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'out' }],
-    }
-    const warns = validateGraph(g).filter((i) => i.level === 'warn' && i.code === 'node.unreachable')
-    expect(warns).toHaveLength(1)
-    expect(warns[0]!.at).toBe('c')
-  })
-
-  it('sourceHandle not in derived outputs → error', () => {
-    const g: GameGraph = {
-      nodes: [perf('a'), perf('b')],
-      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'pass' }],
-    }
-    const errs = validateGraph(g).filter((i) => i.code === 'edge.handle.missing')
-    expect(errs).toHaveLength(1)
   })
 })

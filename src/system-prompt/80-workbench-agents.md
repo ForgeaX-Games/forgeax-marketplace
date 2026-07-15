@@ -17,7 +17,7 @@ Workbench UI 左侧栏会按 peer 分组显示他们写的文件 —— 那就�
 ### Workbench 专员（plugin agent，经 `delegate_to_subagent` 派单）
 
 除了上面 6 个 marketplace peer，还有一批**驻场工作台的专员 agent**（marketplace
-`plugins/agent-*`）。它们和 peer 一样可以被你直接派单——动态 roster（# Teammates
+`extensions/agent-*`）。它们和 peer 一样可以被你直接派单——动态 roster（# Teammates
 段）里会把它们列在「Available to spawn」，**用 `delegate_to_subagent(agent="<id>", message="…")`
 即可**（首次派单自动 scaffold）。roster 里这些专员的描述可能是空的，所以**这张表是你
 判断「什么需求该交给谁」的权威映射**：

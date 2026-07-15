@@ -2,19 +2,20 @@
  * GraphPlayer —— 试玩运行时 React 组件。**只订阅 GraphSession 的 snapshot 渲染 + 回灌输入**，
  * 不含任何游戏逻辑（逻辑全在纯 TS 引擎/会话里，已 headless 单测）。
  *
- * 驱动：有 durationMs 的演出节点 → setTimeout 到时 performanceEnd 自动推进；有交互 → 等玩家点。
- * 渲染：clip（视频/占位）+ overlays（表现层）+ interaction（交互层）+ HUD + banner，均走本局 skins。
+ * HUD 与 GraphPlaySurface 同源：仅当当前节点挂了 `surface:'hud'` overlay 时渲染皮肤血条。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GameScenario } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
-import { PlayerRootContext } from '../../runtime/skins/rendererRegistry'
+import { PlayerRootContext, type HudElementView, type SkinCtx } from '../../runtime/skins/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
 import { resolveMediaSrc } from './media'
+import { expandNodeOverlays } from '../../runtime/schema/expand-overlay'
+import { getKind } from '../../runtime/registry/kind-registry'
 
 export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Element {
-  bootEditorSkins() // 字体 URL（全局）；Kind/Skin 表由 GraphSession 每局自建
+  bootEditorSkins()
   const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
   const session = useMemo(() => new GraphSession(scenario), [scenario])
   const sessionRef = useRef(session)
@@ -23,6 +24,31 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [rootEl, setRootEl] = useState<HTMLElement | null>(null)
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
+  const overlays = scenario.ui?.overlays
+  const currentNode = useMemo(
+    () => scenario.graph.nodes.find((n) => n.id === snap.currentNodeId),
+    [scenario.graph.nodes, snap.currentNodeId],
+  )
+  const hudComp = useMemo(() => {
+    const m = new Map<string, HudElementView>()
+    if (!currentNode) return m
+    const children = expandNodeOverlays(overlays, currentNode).flatMap((i) => i.children)
+    for (const c of children) {
+      const plugin = getKind(c.component)
+      if (plugin?.surface !== 'hud') continue
+      const params = c.params as { bind?: string; label?: string; accent?: string }
+      const bind = params.bind ?? c.id
+      m.set(bind, {
+        element: bind,
+        component: c.component,
+        label: params.label,
+        accent: params.accent,
+        layout: c.layout,
+      })
+    }
+    return m
+  }, [overlays, currentNode])
+  const skinCtx: SkinCtx = { hud: snap.hud }
 
   useEffect(() => {
     const el = rootRef.current
@@ -31,14 +57,12 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
     return () => releasePlayerFocus(el)
   }, [])
 
-  // 演出时长 durationMs 到点推进（视频作为视觉；video onEnded 也会推进，取先到者；tick 由 currentTime 驱动）。
   useEffect(() => {
     if (snap.interaction || snap.phase === 'ended' || !snap.clip?.durationMs) return
     const t = setTimeout(() => setSnap(sessionRef.current.performanceEnd()), snap.clip.durationMs)
     return () => clearTimeout(t)
   }, [snap.clip?.nodeId, snap.interaction, snap.phase, snap.clip?.durationMs])
 
-  // 限时交互 timeoutMs：到点自动 submit(undefined) → 走 defaultKey / 缺省出口。
   useEffect(() => {
     const inter = snap.interaction
     if (!inter?.timeoutMs) return
@@ -59,7 +83,6 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
         onFocus={() => claimPlayerFocus(rootRef.current)}
         style={{ position: 'relative', width: '100%', height: '100%', background: '#000', color: '#fff', outline: 'none' }}
       >
-        {/* 演出画面 */}
         <div className="gv-stage" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {videoSrc ? (
             <video
@@ -68,7 +91,11 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
               autoPlay
               muted
               playsInline
-              onEnded={() => setSnap(sessionRef.current.performanceEnd())}
+              loop={!!snap.clip?.loop}
+              onEnded={() => {
+                if (snap.clip?.loop) return
+                setSnap(sessionRef.current.performanceEnd())
+              }}
               onTimeUpdate={(e) => setSnap(sessionRef.current.tick(Math.floor(e.currentTarget.currentTime * 1000)))}
               style={{ maxWidth: '100%', maxHeight: '100%' }}
             />
@@ -77,34 +104,29 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
           )}
         </div>
 
-        {/* 表现层叠加（漂字等） */}
         <div className="gv-overlays" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           {snap.overlays.map((o, i) => (
             <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{skins.renderOverlay(o)}</span>
           ))}
         </div>
 
-        {/* HUD（按 hudHidden 过滤：全局 ui.hud show + 节点 node.data.hud） */}
-        <div className="gv-hud" style={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: 16 }}>
-          {Object.entries(snap.hud.entities).filter(([id]) => !snap.hudHidden.includes(id)).map(([id, e]) => (
-            <div key={id} className="gv-hud-hp">
-              {id}: {e.hp}/{e.maxHp}
-            </div>
-          ))}
-          {!snap.hudHidden.includes('score') && <div className="gv-hud-score">score: {snap.hud.score}</div>}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+          {hudComp.size > 0 && Object.keys(snap.hud.entities).map((id) => {
+            const el = hudComp.get(id)
+            if (el?.component) return <span key={id}>{skins.renderHudElement(el, skinCtx)}</span>
+            return null
+          })}
         </div>
 
-        {/* 交互层 */}
         {snap.interaction && (
-          <div className="gv-interaction" style={{ position: 'absolute', bottom: 24, left: 0, right: 0 }}>
-            {skins.renderInteraction(snap.interaction, submit, { hud: snap.hud })}
+          <div className="gv-interaction" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            {skins.renderInteraction(snap.interaction, submit, skinCtx)}
           </div>
         )}
 
-        {/* 结局横幅 */}
         {snap.banner && (
-          <div className="gv-banner" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40, background: 'rgba(0,0,0,0.6)' }}>
-            {snap.banner.kind === 'victory' ? '胜利' : snap.banner.kind === 'defeat' ? '失败' : '结束'} · {snap.banner.title}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40, background: 'rgba(0,0,0,0.55)' }}>
+            结束{snap.banner.title ? ` · ${snap.banner.title}` : ''}
           </div>
         )}
       </div>

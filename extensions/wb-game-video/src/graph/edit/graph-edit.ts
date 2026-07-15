@@ -1,10 +1,8 @@
 /**
- * 图编辑操作（P3 数据层）—— 画布手势最终落到这些**纯函数**上（不可变返回新 graph），
- * 由编辑器的 onConnect/onEdgesDelete/onNodesDelete/onReconnect 调用，写回 GameGraph（SSOT）。
- *
- * handle 派生、语义在 handle：连边即写 { source, sourceHandle, target }，edge.data 承载条件/副作用/权重。
+ * 图编辑操作 —— 画布手势落到这些纯函数（不可变返回新 graph）。
+ * Overlay 目录在 scenario.ui.overlays；节点挂 overlayNodes[]。
  */
-import type { EdgeRouting, GameEdge, GameGraph, GameNode, TimelineElement } from '../../runtime/schema/graph-schema'
+import type { EdgeRouting, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -12,13 +10,112 @@ function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${_seq}`
 }
 
-/** 生成一个新的时间线元素 id（供编辑器新建元素用）。 */
+/** 生成新的 overlay child id（供编辑器新建用）。 */
 export function newElementId(): string {
   return newId('el')
 }
 
+/** 空子蓝图包：单入口叶子（无出边时运行时自动弹回主图容器）。 */
+export function makeEmptySubFlowPack(opts: { id?: string; title?: string; version?: string } = {}): SubFlowPackDef {
+  const id = opts.id ?? newId('pack')
+  const entry = 'entry'
+  return {
+    schemaVersion: 'wb-game-video.pack.v1',
+    id,
+    version: opts.version ?? '1',
+    title: opts.title ?? '子蓝图',
+    entry,
+    graph: {
+      nodes: [
+        {
+          id: entry,
+          type: 'perf',
+          position: { x: 80, y: 80 },
+          inputs: [],
+          outputs: [],
+          data: { name: '入口', durationMs: 100 },
+        },
+      ],
+      edges: [],
+    },
+  }
+}
+
+/** 主图上的子蓝图容器节点（引用 pack，自身不播演出）。 */
+export function makeSubFlowPackContainer(
+  pack: SubFlowPackDef,
+  opts: { id?: string; name?: string; position?: { x: number; y: number } } = {},
+): GameNode {
+  return {
+    id: opts.id ?? newId('n'),
+    type: 'perf',
+    position: opts.position ?? { x: 40 + Math.random() * 80, y: 40 + Math.random() * 80 },
+    inputs: [],
+    outputs: [],
+    data: {
+      name: opts.name ?? pack.title ?? pack.id,
+      subFlowPack: { id: pack.id, version: pack.version },
+    },
+  }
+}
+
 export function addNode(graph: GameGraph, node: GameNode): GameGraph {
   return { ...graph, nodes: [...graph.nodes, node] }
+}
+
+/**
+ * 在指定节点后方插入新演出节点并自动接线。
+ */
+export function insertNodeAfter(
+  graph: GameGraph,
+  afterId: string,
+  opts: { name?: string; gapX?: number; node?: GameNode } = {},
+): { graph: GameGraph; nodeId: string } {
+  const after = graph.nodes.find((n) => n.id === afterId)
+  if (!after) return { graph, nodeId: afterId }
+  const gapX = opts.gapX ?? 220
+  const node: GameNode = opts.node ?? {
+    id: newId('n'),
+    type: 'perf',
+    position: { x: after.position.x + gapX, y: after.position.y },
+    inputs: [],
+    outputs: [],
+    data: { name: opts.name ?? '新演出节点' },
+  }
+  const id = node.id
+  let g = addNode(graph, node)
+  const outEdges = g.edges.filter((e) => e.source === afterId && (e.sourceHandle ?? 'out') === 'out')
+  if (outEdges.length === 0) {
+    g = connect(g, { source: afterId, sourceHandle: 'out', target: id })
+  } else {
+    for (const e of outEdges) {
+      g = disconnect(g, e.id)
+      g = connect(g, { source: id, sourceHandle: 'out', target: e.target, data: e.data })
+    }
+    g = connect(g, { source: afterId, sourceHandle: 'out', target: id })
+  }
+  return { graph: g, nodeId: id }
+}
+
+/** 在指定节点后方插入子蓝图容器并自动接线。 */
+export function insertSubFlowPackAfter(
+  graph: GameGraph,
+  afterId: string,
+  opts: { title?: string; gapX?: number } = {},
+): { graph: GameGraph; nodeId: string; pack: SubFlowPackDef } {
+  const after = graph.nodes.find((n) => n.id === afterId)
+  if (!after) {
+    const pack = makeEmptySubFlowPack({ title: opts.title })
+    return { graph, nodeId: afterId, pack }
+  }
+  const pack = makeEmptySubFlowPack({ title: opts.title ?? '子蓝图' })
+  const gapX = opts.gapX ?? 220
+  const container = makeSubFlowPackContainer(pack, {
+    name: pack.title,
+    position: { x: after.position.x + gapX, y: after.position.y },
+  })
+  const { graph: next, nodeId } = insertNodeAfter(graph, afterId, { node: container, gapX })
+  return { graph: next, nodeId, pack }
 }
 
 export function removeNode(graph: GameGraph, id: string): GameGraph {
@@ -28,45 +125,145 @@ export function removeNode(graph: GameGraph, id: string): GameGraph {
   }
 }
 
-export function setNodePosition(graph: GameGraph, id: string, pos: { x: number; y: number }): GameGraph {
+/** 深拷贝节点 data（overlayNodes 引用同一 overlay 目录项；child id 在目录侧）。 */
+function cloneNodePayload(src: GameNode, nodeId: string, offset: { x: number; y: number }): GameNode {
+  const data = structuredClone(src.data)
+  const name = data.name?.trim() ?? ''
+  if (name && !name.endsWith(' 副本')) data.name = `${name} 副本`
   return {
-    ...graph,
-    nodes: graph.nodes.map((n) => (n.id === id ? { ...n, position: pos } : n)),
+    ...src,
+    id: nodeId,
+    position: { x: src.position.x + offset.x, y: src.position.y + offset.y },
+    data,
   }
 }
 
-/** 局部更新某节点的 data（配置面板用；浅合并）。 */
-export function updateNodeData(
+/**
+ * 复制一组节点（及它们之间的内部边）。
+ */
+export function duplicateNodes(
   graph: GameGraph,
-  id: string,
-  patch: Partial<GameNode['data']>,
-): GameGraph {
+  sourceIds: readonly string[],
+  opts: { offset?: { x: number; y: number } } = {},
+): { graph: GameGraph; nodeIds: string[] } {
+  const idSet = new Set(sourceIds)
+  const sources = graph.nodes.filter((n) => idSet.has(n.id))
+  if (sources.length === 0) return { graph, nodeIds: [] }
+  const offset = opts.offset ?? { x: 48, y: 48 }
+  const idMap = new Map<string, string>()
+  const created: GameNode[] = []
+  for (const src of sources) {
+    const nid = newId('n')
+    idMap.set(src.id, nid)
+    created.push(cloneNodePayload(src, nid, offset))
+  }
+  const newEdges: GameEdge[] = []
+  for (const e of graph.edges) {
+    if (!idSet.has(e.source) || !idSet.has(e.target)) continue
+    const ns = idMap.get(e.source)!
+    const nt = idMap.get(e.target)!
+    newEdges.push({
+      ...structuredClone(e),
+      id: newId('edge'),
+      source: ns,
+      target: nt,
+    })
+  }
+  return {
+    graph: {
+      nodes: [...graph.nodes, ...created],
+      edges: [...graph.edges, ...newEdges],
+    },
+    nodeIds: created.map((n) => n.id),
+  }
+}
+
+export function setNodePosition(graph: GameGraph, id: string, position: { x: number; y: number }): GameGraph {
   return {
     ...graph,
-    nodes: graph.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
+    nodes: graph.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
   }
+}
+
+/** 节点 data 补丁：`undefined` 表示删除该键（用于清掉 subFlow*）。 */
+export type NodeDataPatch = Partial<NodeData> & {
+  subFlow?: string | undefined
+  subFlowPack?: SubFlowPack | undefined
+}
+
+/** 把遗留 `subFlowRef` 归一成 `subFlow`（旧草稿/落盘兼容）。 */
+export function normalizeSubFlowFields(graph: GameGraph): GameGraph {
+  let changed = false
+  const nodes = graph.nodes.map((n) => {
+    const d = n.data as NodeData & { subFlow?: string; subFlowRef?: string }
+    if (typeof d.subFlowRef !== 'string' || !d.subFlowRef) return n
+    changed = true
+    const { subFlowRef, ...rest } = d
+    return { ...n, data: { ...rest, subFlow: d.subFlow ?? subFlowRef } as GameNode['data'] }
+  })
+  return changed ? { ...graph, nodes } : graph
+}
+
+export function patchNodeData(graph: GameGraph, nodeId: string, patch: NodeDataPatch): GameGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n) => {
+      if (n.id !== nodeId) return n
+      const next: Record<string, unknown> = { ...n.data }
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined) delete next[k]
+        else next[k] = v
+      }
+      // 写 subFlow 时清掉遗留 subFlowRef，避免双字段分叉。
+      if ('subFlow' in patch) delete next.subFlowRef
+      return { ...n, data: next as unknown as GameNode['data'] }
+    }),
+  }
+}
+
+/** @deprecated 使用 patchNodeData */
+export const updateNodeData = patchNodeData
+
+export function setOverlayNodes(graph: GameGraph, nodeId: string, overlayNodes: OverlayNode[] | undefined): GameGraph {
+  return patchNodeData(graph, nodeId, { overlayNodes })
+}
+
+/** @deprecated 用 setOverlayNodes；保留为「设为单挂载」。 */
+export function setOverlayNode(graph: GameGraph, nodeId: string, overlayNode: OverlayNode | undefined): GameGraph {
+  return setOverlayNodes(graph, nodeId, overlayNode ? [overlayNode] : undefined)
 }
 
 export interface ConnectSpec {
   source: string
-  sourceHandle: string
   target: string
+  sourceHandle?: string
+  targetHandle?: string
   data?: EdgeRouting
   id?: string
 }
 
-/** 连边：拒绝自环、拒绝完全重复（同 source+handle+target）。 */
 export function connect(graph: GameGraph, spec: ConnectSpec): GameGraph {
+  // 自环拒绝（回环请画多节点环）；同 source+handle+target 去重。
   if (spec.source === spec.target) return graph
-  const dup = graph.edges.some(
-    (e) => e.source === spec.source && e.sourceHandle === spec.sourceHandle && e.target === spec.target,
-  )
-  if (dup) return graph
+  const sourceHandle = spec.sourceHandle ?? 'out'
+  const targetHandle = spec.targetHandle ?? 'in'
+  if (
+    graph.edges.some(
+      (e) =>
+        e.source === spec.source &&
+        e.target === spec.target &&
+        (e.sourceHandle ?? 'out') === sourceHandle &&
+        (e.targetHandle ?? 'in') === targetHandle,
+    )
+  ) {
+    return graph
+  }
   const edge: GameEdge = {
     id: spec.id ?? newId('edge'),
     source: spec.source,
     target: spec.target,
-    sourceHandle: spec.sourceHandle,
+    sourceHandle,
+    targetHandle,
     data: spec.data,
   }
   return { ...graph, edges: [...graph.edges, edge] }
@@ -76,17 +273,22 @@ export function disconnect(graph: GameGraph, edgeId: string): GameGraph {
   return { ...graph, edges: graph.edges.filter((e) => e.id !== edgeId) }
 }
 
-/** 重连：改一条边的 target（或 sourceHandle）。 */
 export function reconnect(
   graph: GameGraph,
   edgeId: string,
-  next: { target?: string; sourceHandle?: string },
+  patch: { source?: string; target?: string; sourceHandle?: string; targetHandle?: string },
 ): GameGraph {
   return {
     ...graph,
     edges: graph.edges.map((e) =>
       e.id === edgeId
-        ? { ...e, target: next.target ?? e.target, sourceHandle: next.sourceHandle ?? e.sourceHandle }
+        ? {
+            ...e,
+            source: patch.source ?? e.source,
+            target: patch.target ?? e.target,
+            sourceHandle: patch.sourceHandle ?? e.sourceHandle,
+            targetHandle: patch.targetHandle ?? e.targetHandle,
+          }
         : e,
     ),
   }
@@ -99,51 +301,8 @@ export function updateEdgeData(graph: GameGraph, edgeId: string, data: EdgeRouti
   }
 }
 
-// ── 时间线元素编辑（node.data.timeline[]）─────────────────────────────────────
-function mapNodeTimeline(
-  graph: GameGraph,
-  nodeId: string,
-  fn: (timeline: TimelineElement[]) => TimelineElement[],
-): GameGraph {
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, timeline: fn(n.data.timeline) } } : n)),
-  }
-}
-
-export function addTimelineElement(graph: GameGraph, nodeId: string, el: TimelineElement): GameGraph {
-  return mapNodeTimeline(graph, nodeId, (tl) => [...tl, el])
-}
-
-export function removeTimelineElement(graph: GameGraph, nodeId: string, elId: string): GameGraph {
-  return mapNodeTimeline(graph, nodeId, (tl) => tl.filter((e) => e.id !== elId))
-}
-
-export function patchTimelineElement(
-  graph: GameGraph,
-  nodeId: string,
-  elId: string,
-  patch: Partial<TimelineElement>,
-): GameGraph {
-  return mapNodeTimeline(graph, nodeId, (tl) => tl.map((e) => (e.id === elId ? { ...e, ...patch } : e)))
-}
-
-/** 移动时间线元素次序（from → to，越界裁剪）。 */
-export function reorderTimeline(graph: GameGraph, nodeId: string, from: number, to: number): GameGraph {
-  return mapNodeTimeline(graph, nodeId, (tl) => {
-    if (from < 0 || from >= tl.length) return tl
-    const next = [...tl]
-    const [moved] = next.splice(from, 1)
-    if (!moved) return tl
-    next.splice(Math.max(0, Math.min(to, next.length)), 0, moved)
-    return next
-  })
-}
-
-// ── 分支即边（choice 选项 / qte pass·fail / auto → 出边）──────────────────────
 /**
- * 按 (source, sourceHandle) 唯一性 upsert 一条出边：已存在则改 target/data，否则新建。
- * 语义等价 legacy 的「一个分支 handle 只连一个目标」。
+ * 按 (source, sourceHandle) upsert 出边。
  */
 export function upsertBranchEdge(graph: GameGraph, spec: ConnectSpec): GameGraph {
   const existing = graph.edges.find(
@@ -158,11 +317,8 @@ export function upsertBranchEdge(graph: GameGraph, spec: ConnectSpec): GameGraph
 }
 
 /**
- * 拆掉一段交互（对齐 legacy `qteTeardownPatch` / 选项删除自动续连语义）：
- *  1. 从节点 timeline 移除该 kind 的元素；
- *  2. 删掉该交互占用的全部出边（sourceHandle 命中 handlePrefixes）；
- *  3. 挑一个「续连目标」（优先 continueHandle 对应边，否则任一交互出边的 target），
- *     若尚无 'out' 边指向它，则自动补一条 out 续连边——节点回退为线性叙事。
+ * 拆掉一段交互出边（不再改 overlay children —— 目录侧另编）：
+ * 删交互 handle 出边，必要时补 out 续连。
  */
 export function teardownInteraction(
   graph: GameGraph,
@@ -179,8 +335,10 @@ export function teardownInteraction(
     outEdges.find((e) => isHandle(e.sourceHandle))
   const continueTarget = contEdge?.target
 
-  let g: GameGraph = mapNodeTimeline(graph, nodeId, (tl) => tl.filter((el) => el.kind !== opts.kind))
-  g = { ...g, edges: g.edges.filter((e) => !(e.source === nodeId && isHandle(e.sourceHandle))) }
+  let g: GameGraph = {
+    ...graph,
+    edges: graph.edges.filter((e) => !(e.source === nodeId && isHandle(e.sourceHandle))),
+  }
 
   if (
     continueTarget &&

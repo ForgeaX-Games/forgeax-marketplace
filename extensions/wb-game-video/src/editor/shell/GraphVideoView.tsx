@@ -53,12 +53,12 @@ import {
 } from '../video/materialTimelineShared'
 import { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from '../video/videoContentRect'
 import { registerFxKinds } from '../../runtime/registry/fx-kinds'
-import { FILTER_OPTIONS, FX_OPTIONS, fxNeedsColor, resolveVideoFxRender } from '../../runtime/fx/video-fx'
+import { FILTER_OPTIONS, FX_OPTIONS, fxNeedsColor, resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { resolveGraphTextCss } from '../text/text-css'
 import { GraphTextStylePicker } from './GraphTextStylePicker'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { CATALOG_CSS } from './catalogCss'
-import type { EntitySpec, GameGraph, GameNode, GraphTextStyle, TimelineElement } from '../../runtime/schema/graph-schema'
+import type { Entity, GameNode, GameScenario, GraphTextStyle } from '../../runtime/schema/graph-schema'
 import type { QteCue } from '../../runtime/registry/core-kinds'
 import {
   type MaterialTemplate,
@@ -84,16 +84,16 @@ import {
   qteElementOfCue,
   removeOptionBranchGraph,
   removeQteCueGraph,
-  setNodePromptGraph,
   setOptionTargetGraph,
   settleDamage,
   settleElementFor,
   settleTargetKind,
+  setNodePromptGraph,
   updateOptionLabelGraph,
   activePreviewOverlaysFromNode,
 } from '../video/graphMaterialOps'
 
-// 「重新生成 / 添加控件」分段控件 + 右列格子面板（与 gc-prompt 同槽切换）。
+// 「添加控件」/「重新生成」右列与检视器同槽切换（对齐 main 生成面板）。
 // 复用视频 tab 的 --gc-* token；不改 CatalogTabs 的全局 CSS，样式自持。
 // 视频 tab 的基础栏目/预览台样式（gc-*）复用共享 CATALOG_CSS（原旧 forge/CatalogTabs 全局 CSS）。
 // 注册滤镜/特效 kind（registry 全局单例 → 校验 + 运行时可见）；幂等。
@@ -146,6 +146,31 @@ injectStyleOnce(
 .gvv-gen-row { display: flex; gap: 8px; }
 .gvv-gen-row button { flex: 1; }
 .gvv-gen-row button.gvv-gen-alt { background: var(--gc-accent-soft); color: var(--gc-text); border-color: var(--gc-accent-line); font-weight: 600; }
+.gc-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  background: var(--gc-panel2);
+  border: 1px solid var(--gc-line-soft);
+  border-radius: 12px;
+  padding: 12px;
+}
+.gc-prompt > span { color: var(--gc-faint); font-size: 11px; letter-spacing: 0.1em; }
+.gc-prompt textarea {
+  flex: 1;
+  width: 100%;
+  min-height: clamp(72px, 16dvh, 160px);
+  resize: vertical;
+  border: 1px solid var(--gc-line);
+  background: rgba(0,0,0,0.28);
+  color: var(--gc-text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
 `,
 )
 
@@ -185,8 +210,7 @@ export function GraphVideoView(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [selectedId, setSelectedId] = useState<string>('')
   const [contentRect, setContentRect] = useState<VideoContentRect | null>(null)
-  // 右列那一格三态：库（添加控件）/ 提示词（重新生成）/ 检视器（素材属性）。
-  // 选中控件→inspector；未选中→library；重新生成为另一个 tab。
+  // 右列：库（添加控件）/ 提示词（重新生成）/ 检视器（素材属性）。
   const [topPanel, setTopPanel] = useState<'library' | 'prompt' | 'inspector'>('library')
   const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null)
   const [playheadMs, setPlayheadMs] = useState(0)
@@ -205,13 +229,19 @@ export function GraphVideoView(): JSX.Element {
   const loadEpoch = useGraphScenario((s) => s.loadEpoch)
 
   const graph = useGraphScenario((s) => s.graph)
-  const setGraph = useGraphScenario((s) => s.setGraph)
+  const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
+  const setScenario = useGraphScenario((s) => s.setScenario)
   const entities = useGraphScenario((s) => s.meta.entities)
   // 选中节点来自 graph 共享 store（不再依赖旧 scenarioStore）；无选中则落到首个节点。
   const selectedNodeId = useGraphScenario((s) => s.selectedNodeId)
   const selectedSceneId = selectedNodeId ?? graph.nodes[0]?.id ?? ''
 
   const node = findNode(graph, selectedSceneId)
+  // 读投影只需 graph + ui.overlays；随两者变化重建，不必拉全量 scenario（省一次深拷贝）。
+  const scenario = useMemo<GameScenario>(
+    () => ({ schemaVersion: 'wb-game-video.graph.v1', graph, ui: { overlays: overlays ?? {} } }),
+    [graph, overlays],
+  )
 
   // 共享素材层轮询（mtime 级 5s）：驱动库缩略图三态 + 生成中占位实时转就绪。
   useEffect(() => {
@@ -262,7 +292,7 @@ export function GraphVideoView(): JSX.Element {
     for (const [id, url] of Object.entries(ZHANDOU_VIDEOS)) {
       seen.add(id)
       const isNarr = id.startsWith('narr-')
-      ;(isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗' })
+        ; (isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗' })
     }
     // 共享素材层里的自产视频资产（与 bundle 去重）：带三态 status。
     for (const v of assets) {
@@ -290,16 +320,16 @@ export function GraphVideoView(): JSX.Element {
   const previewSrc = timelineEntry?.url || (timelineEntry ? resolveMediaSrc(timelineEntry.id, game) : undefined)
   const maxMs = Math.max(1000, videoDurationMs ?? timelineEntry?.durMs ?? node?.data.durationMs ?? 0)
   const hasEditableVideo = Boolean(node && editingBoundClip && timelineEntry)
-  const isTimedQteNode = Boolean(qteElement(node))
+  const isTimedQteNode = Boolean(qteElement(scenario, node))
 
-  const materials = useMemo(() => collectMaterialsFromNode(node, maxMs), [node, maxMs])
+  const materials = useMemo(() => collectMaterialsFromNode(scenario, node, maxMs), [scenario, node, maxMs])
   const previewOverlays = useMemo(
-    () => (node && editingBoundClip ? activePreviewOverlaysFromNode(node, playheadMs, maxMs) : []),
-    [node, editingBoundClip, playheadMs, maxMs],
+    () => (node && editingBoundClip ? activePreviewOverlaysFromNode(scenario, node, playheadMs, maxMs) : []),
+    [scenario, node, editingBoundClip, playheadMs, maxMs],
   )
   // 滤镜/特效预览：按当前播放头解析出 filter / transform / 覆盖层，实时施加到预览视频。
   const videoFx = useMemo(
-    () => (node && editingBoundClip ? resolveVideoFxRender(node, playheadMs, maxMs) : { overlays: [] }),
+    () => (node && editingBoundClip ? resolveVideoFxForNode(node, overlays, playheadMs, maxMs) : { overlays: [] }),
     [node, editingBoundClip, playheadMs, maxMs],
   )
   const selectedMaterial = materials.find((m) => m.key === selectedMaterialKey) ?? null
@@ -328,7 +358,7 @@ export function GraphVideoView(): JSX.Element {
   // 音频条（仅显示）：编辑绑定 clip 时，用素材自带声道占满第 0 轨；否则清空。
   useEffect(() => {
     if (editingBoundClip && timelineEntry) {
-      setAudioItems([{ key: 'clip-audio', label: `素材音轨 · ${timelineEntry.label}`, startMs: 0, endMs: maxMs, layer: 0, builtin: true }])
+      setAudioItems([{ key: 'clip-audio', label: `素材音轨 · ${timelineEntry.label}`, startMs: 0, endMs: maxMs, zIndex: 0, builtin: true }])
     } else {
       setAudioItems([])
     }
@@ -386,21 +416,21 @@ export function GraphVideoView(): JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [isVideoPlaying, maxMs])
 
-  // ── graph 写入封装：始终以最新 graph re-find 节点 ──────────────────────────
-  function editGraph(fn: (g: GameGraph, n: GameNode) => GameGraph): void {
-    setGraph((g) => {
-      const n = findNode(g, selectedSceneId)
-      return n ? fn(g, n) : g
-    })
+  // ── scenario 写入封装：始终以最新 scenario re-find 节点（overlay children 住在 ui.overlays）。
+  function editScenario(fn: (s: GameScenario, n: GameNode) => GameScenario): void {
+    const s = useGraphScenario.getState().scn()
+    const n = findNode(s.graph, selectedSceneId)
+    if (!n) return
+    setScenario(fn(s, n))
   }
 
   function bindCurrent(): void {
     if (!node || !previewEntry) return
-    editGraph((g, n) => bindVideoGraph(g, n, refForEntry(previewEntry), previewEntry.durMs ?? maxMs))
+    editScenario((s, n) => bindVideoGraph(s, n, refForEntry(previewEntry), previewEntry.durMs ?? maxMs))
   }
 
   function setPrompt(next: string): void {
-    editGraph((g, n) => setNodePromptGraph(g, n, next))
+    editScenario((g, n) => setNodePromptGraph(g, n, next))
   }
 
   // 「重新生成」→ 真实服务端 headless 生成（P3/P4 编排）。必传角色+场景参考图（缺则闸住）。
@@ -429,7 +459,7 @@ export function GraphVideoView(): JSX.Element {
         return
       }
       const asset = res.asset
-      editGraph((g, n) => bindVideoGraph(g, n, asset.id, asset.durationMs ?? maxMs))
+      editScenario((g, n) => bindVideoGraph(g, n, asset.id, asset.durationMs ?? maxMs))
       const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
       setAssets(vs)
       setRegAssets(all)
@@ -470,16 +500,16 @@ export function GraphVideoView(): JSX.Element {
     }
   }
 
-  function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; layer?: number }): void {
-    editGraph((g, n) => patchMaterialGraph(g, n, maxMs, item, patch))
+  function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; zIndex?: number }): void {
+    editScenario((g, n) => patchMaterialGraph(g, n, maxMs, item, patch))
   }
 
   // 音频条拖动（仅本地展示态；不写回 graph）。
-  function patchAudio(item: AudioItem, patch: { startMs?: number; endMs?: number; layer?: number }): void {
+  function patchAudio(item: AudioItem, patch: { startMs?: number; endMs?: number; zIndex?: number }): void {
     setAudioItems((list) =>
       list.map((a) =>
         a.key === item.key
-          ? { ...a, startMs: patch.startMs ?? a.startMs, endMs: patch.endMs ?? a.endMs, layer: patch.layer ?? a.layer }
+          ? { ...a, startMs: patch.startMs ?? a.startMs, endMs: patch.endMs ?? a.endMs, zIndex: patch.zIndex ?? a.zIndex }
           : a,
       ),
     )
@@ -487,8 +517,8 @@ export function GraphVideoView(): JSX.Element {
 
   function deleteMaterial(item: MaterialItem): void {
     if (!node) return
-    if (!confirmMaterialDelete(node, item)) return
-    editGraph((g, n) => deleteMaterialGraph(g, n, item))
+    if (!confirmMaterialDelete(scenario, node, item)) return
+    editScenario((s, n) => deleteMaterialGraph(s, n, item))
     if (selectedMaterialKey === item.key) {
       setSelectedMaterialKey(null)
       setTopPanel('library')
@@ -497,45 +527,45 @@ export function GraphVideoView(): JSX.Element {
 
   function addMaterial(template: MaterialTemplate): void {
     if (!node) return
-    const res = addMaterialGraph(graph, node, maxMs, template, entities, playheadMs)
-    setGraph(res.graph)
+    const res = addMaterialGraph(scenario, node, maxMs, template, entities, playheadMs)
+    setScenario(res.scenario)
     if (res.selectKey) setSelectedMaterialKey(res.selectKey)
     setTopPanel('inspector')
   }
 
   // 从素材库把控件卡片拖进时间轴 → 在落点时刻/轨新增。
-  function addMaterialAt(template: string, atMs: number, layer: number): void {
+  function addMaterialAt(template: string, atMs: number, zIndex: number): void {
     if (!node) return
     if (template !== 'subtitle' && template !== 'overlay' && template !== 'qte' && template !== 'option' && template !== 'filter' && template !== 'fx') return
     if (template === 'option' ? optionDisabled : !hasEditableVideo) return
-    const res = addMaterialGraph(graph, node, maxMs, template, entities, playheadMs, { ms: atMs, layer })
-    setGraph(res.graph)
+    const res = addMaterialGraph(scenario, node, maxMs, template, entities, playheadMs, { ms: atMs, zIndex })
+    setScenario(res.scenario)
     if (res.selectKey) setSelectedMaterialKey(res.selectKey)
     setTopPanel('inspector')
   }
 
   function addQteCue(afterCueId?: string): void {
     if (!node) return
-    const res = addQteCueGraph(graph, node, maxMs, playheadMs, afterCueId)
-    setGraph(res.graph)
+    const res = addQteCueGraph(scenario, node, maxMs, playheadMs, afterCueId)
+    setScenario(res.scenario)
     if (res.selectKey) setSelectedMaterialKey(res.selectKey)
   }
 
   function removeQteCue(cueId: string): void {
     if (!node) return
-    const whole = (qteElementOfCue(node, cueId)?.params.cues as QteCue[] | undefined)?.length ?? 0
+    const whole = (qteElementOfCue(scenario, node, cueId)?.params?.cues as QteCue[] | undefined)?.length ?? 0
     if (whole <= 1) {
       const cueItem = materials.find((m) => m.kind === 'qte' && m.id === cueId)
-      if (cueItem && !confirmMaterialDelete(node, cueItem)) return
-      editGraph((g, n) => removeQteCueGraph(g, n, cueId))
+      if (cueItem && !confirmMaterialDelete(scenario, node, cueItem)) return
+      editScenario((s, n) => removeQteCueGraph(s, n, cueId))
       setSelectedMaterialKey(null)
       setTopPanel('library')
       return
     }
-    editGraph((g, n) => removeQteCueGraph(g, n, cueId))
+    editScenario((s, n) => removeQteCueGraph(s, n, cueId))
     if (selectedMaterialKey?.endsWith(`:${cueId}`)) {
-      const rest = (qteElementOfCue(node, cueId)?.params.cues as QteCue[] | undefined)?.find((c) => c.id !== cueId)
-      const el = qteElement(node)
+      const rest = (qteElementOfCue(scenario, node, cueId)?.params?.cues as QteCue[] | undefined)?.find((c) => c.id !== cueId)
+      const el = qteElement(scenario, node)
       setSelectedMaterialKey(rest && el ? `qte:${el.id}:${rest.id}` : null)
     }
   }
@@ -543,9 +573,9 @@ export function GraphVideoView(): JSX.Element {
   function patchSelected(patch: Record<string, unknown>): void {
     if (!node || !selectedMaterial) return
     if (selectedMaterial.kind === 'overlay') {
-      editGraph((g, n) => patchOverlayGraph(g, n, selectedMaterial.id, patch, entities))
+      editScenario((s, n) => patchOverlayGraph(s, n, selectedMaterial.id, patch, entities))
     } else {
-      editGraph((g, n) => patchSelectedGraph(g, n, selectedMaterial, patch))
+      editScenario((s, n) => patchSelectedGraph(s, n, selectedMaterial, patch))
     }
   }
 
@@ -556,7 +586,7 @@ export function GraphVideoView(): JSX.Element {
     return pointerToVideoNorm(e.clientX, e.clientY, frame, videoRef.current)
   }
   function moveOverlay(o: PreviewOverlay, x: number, y: number): void {
-    editGraph((g, n) => patchOverlayPositionGraph(g, n, o.target, x, y))
+    editScenario((s, n) => patchOverlayPositionGraph(s, n, o.target, x, y))
   }
   function onOverlayPointerDown(e: React.PointerEvent<HTMLDivElement>, o: PreviewOverlay): void {
     e.preventDefault()
@@ -697,100 +727,102 @@ export function GraphVideoView(): JSX.Element {
             </div>
             <div className="gc-video-top">
               <div className="gvv-video-col">
-              <div ref={frameRef} className="gc-frame" data-type={timelineEntry.type ?? 'video'}>
-                <span className="gc-badge">
-                  {timelineEntry.label}
-                  {timelineEntry.type ? <em>{timelineEntry.type}</em> : null}
-                </span>
-                <video
-                  key={timelineEntry.id}
-                  ref={videoRef}
-                  className="gc-video"
-                  src={previewSrc}
-                  style={{ filter: videoFx.filter, transform: videoFx.transform }}
-                  autoPlay
-                  muted
-                  playsInline
-                  loop={timelineEntry.type === 'loop'}
-                  onLoadedMetadata={(e) => {
-                    const dur = e.currentTarget.duration
-                    if (Number.isFinite(dur) && dur > 0) {
-                      const ms = Math.round(dur * 1000)
-                      setVideoDurationMs(ms)
-                      if (node && editingBoundClip && node.data.durationMs !== ms) editGraph((g, n) => bindVideoGraph(g, n, n.data.media?.ref ?? '', ms))
-                    }
-                  }}
-                  onPlay={() => setIsVideoPlaying(true)}
-                  onPause={() => setIsVideoPlaying(false)}
-                  onVolumeChange={(e) => setIsMuted(e.currentTarget.muted)}
-                  onTimeUpdate={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
-                  onSeeked={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
-                  onEnded={() => { setIsVideoPlaying(false); setPlayheadMs(maxMs) }}
-                />
-                {videoFx.overlays.length > 0 ? (
-                  <div className="gvv-fx-layer" aria-hidden>
-                    {videoFx.overlays.map((o) => (
-                      <div key={o.id} style={o.style as CSSProperties} />
-                    ))}
-                  </div>
-                ) : null}
-                <div className="gc-content-anchor" style={previewContentStyle}>
-                  <div className="gc-preview-overlays">
-                    {previewOverlays.map((o) => {
-                      const selected = selectedMaterialKey === o.materialKey
-                      return (
-                        <div
-                          key={o.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${materialLabel(o.kind)}：${o.label}${o.movable ? '，可拖动' : ''}`}
-                          className={`gc-preview-overlay ${materialClass(o.kind)}${selected ? ' is-selected' : ''}${o.movable ? ' is-movable' : ''}`}
-                          style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, zIndex: 20 + o.layer }}
-                          onPointerDown={(e) => onOverlayPointerDown(e, o)}
-                          onPointerMove={(e) => onOverlayPointerMove(e, o)}
-                          onPointerUp={onOverlayPointerUp}
-                          onLostPointerCapture={onOverlayPointerUp}
-                        >
-                          {o.kind === 'qte' ? <span className="gc-preview-ring" /> : null}
-                          <span
-                            className="gc-preview-label"
-                            style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveGraphTextCss(o.style) : undefined}
+                <div ref={frameRef} className="gc-frame" data-type={timelineEntry.type ?? 'video'}>
+                  <span className="gc-badge">
+                    {timelineEntry.label}
+                    {timelineEntry.type ? <em>{timelineEntry.type}</em> : null}
+                  </span>
+                  <video
+                    key={timelineEntry.id}
+                    ref={videoRef}
+                    className="gc-video"
+                    src={previewSrc}
+                    style={{ filter: videoFx.filter, transform: videoFx.transform }}
+                    autoPlay
+                    muted
+                    playsInline
+                    loop={timelineEntry.type === 'loop'}
+                    onLoadedMetadata={(e) => {
+                      const dur = e.currentTarget.duration
+                      if (Number.isFinite(dur) && dur > 0) {
+                        const ms = Math.round(dur * 1000)
+                        setVideoDurationMs(ms)
+                        if (node && editingBoundClip && node.data.durationMs !== ms) {
+                          editScenario((s, n) => bindVideoGraph(s, n, n.data.media?.ref ?? '', ms))
+                        }
+                      }
+                    }}
+                    onPlay={() => setIsVideoPlaying(true)}
+                    onPause={() => setIsVideoPlaying(false)}
+                    onVolumeChange={(e) => setIsMuted(e.currentTarget.muted)}
+                    onTimeUpdate={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
+                    onSeeked={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
+                    onEnded={() => { setIsVideoPlaying(false); setPlayheadMs(maxMs) }}
+                  />
+                  {videoFx.overlays.length > 0 ? (
+                    <div className="gvv-fx-layer" aria-hidden>
+                      {videoFx.overlays.map((o) => (
+                        <div key={o.id} style={o.style as CSSProperties} />
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="gc-content-anchor" style={previewContentStyle}>
+                    <div className="gc-preview-overlays">
+                      {previewOverlays.map((o) => {
+                        const selected = selectedMaterialKey === o.materialKey
+                        return (
+                          <div
+                            key={o.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`${materialLabel(o.kind)}：${o.label}${o.movable ? '，可拖动' : ''}`}
+                            className={`gc-preview-overlay ${materialClass(o.kind)}${selected ? ' is-selected' : ''}${o.movable ? ' is-movable' : ''}`}
+                            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, zIndex: 20 + o.zIndex }}
+                            onPointerDown={(e) => onOverlayPointerDown(e, o)}
+                            onPointerMove={(e) => onOverlayPointerMove(e, o)}
+                            onPointerUp={onOverlayPointerUp}
+                            onLostPointerCapture={onOverlayPointerUp}
                           >
-                            {o.label}
-                          </span>
-                        </div>
-                      )
-                    })}
+                            {o.kind === 'qte' ? <span className="gc-preview-ring" /> : null}
+                            <span
+                              className="gc-preview-label"
+                              style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveGraphTextCss(o.style) : undefined}
+                            >
+                              {o.label}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="gvv-controls">
-                <button type="button" onClick={togglePlay} title={isVideoPlaying ? '暂停' : '播放'} aria-label={isVideoPlaying ? '暂停' : '播放'}>
-                  {isVideoPlaying ? '⏸' : '▶'}
-                </button>
-                <span className="gvv-time">{fmtTime(playheadMs)} / {fmtTime(maxMs)}</span>
-                <button type="button" className="gvv-mute" onClick={toggleMute} title={isMuted ? '取消静音' : '静音'} aria-label={isMuted ? '取消静音' : '静音'}>
-                  {isMuted ? '🔇' : '🔊'}
-                </button>
-              </div>
+                <div className="gvv-controls">
+                  <button type="button" onClick={togglePlay} title={isVideoPlaying ? '暂停' : '播放'} aria-label={isVideoPlaying ? '暂停' : '播放'}>
+                    {isVideoPlaying ? '⏸' : '▶'}
+                  </button>
+                  <span className="gvv-time">{fmtTime(playheadMs)} / {fmtTime(maxMs)}</span>
+                  <button type="button" className="gvv-mute" onClick={toggleMute} title={isMuted ? '取消静音' : '静音'} aria-label={isMuted ? '取消静音' : '静音'}>
+                    {isMuted ? '🔇' : '🔊'}
+                  </button>
+                </div>
               </div>
               {editingBoundClip && topPanel === 'inspector' && selectedMaterial ? (
                 <div className="gvv-toolpanel">
                   <span className="gvv-toolpanel-head">素材属性</span>
                   <GraphMaterialInspector
+                    scenario={scenario}
                     node={node}
-                    graph={graph}
                     item={selectedMaterial}
                     entities={entities}
                     onPatch={patchSelected}
                     onTiming={(item, start, end) => patchMaterial(item, { startMs: start, endMs: end })}
                     onAddQteCue={addQteCue}
                     onRemoveQteCue={removeQteCue}
-                    onSelectQteCue={(cueId) => { const el = qteElement(node); if (el) setSelectedMaterialKey(`qte:${el.id}:${cueId}`) }}
-                    onAddBranch={() => editGraph((g, n) => addOptionBranchGraph(g, n))}
-                    onSetBranchLabel={(key, label) => editGraph((g, n) => updateOptionLabelGraph(g, n, key, label))}
-                    onSetBranchTarget={(key, target) => editGraph((g, n) => setOptionTargetGraph(g, n, key, target))}
-                    onRemoveBranch={(key) => editGraph((g, n) => removeOptionBranchGraph(g, n, key))}
+                    onSelectQteCue={(cueId) => { const el = qteElement(scenario, node); if (el) setSelectedMaterialKey(`qte:${el.id}:${cueId}`) }}
+                    onAddBranch={() => editScenario((s, n) => addOptionBranchGraph(s, n))}
+                    onSetBranchLabel={(key, label) => editScenario((s, n) => updateOptionLabelGraph(s, n, key, label))}
+                    onSetBranchTarget={(key, target) => editScenario((s, n) => setOptionTargetGraph(s, n, key, target))}
+                    onRemoveBranch={(key) => editScenario((s, n) => removeOptionBranchGraph(s, n, key))}
                   />
                 </div>
               ) : editingBoundClip && topPanel === 'library' ? (
@@ -909,9 +941,14 @@ export function GraphVideoView(): JSX.Element {
 }
 
 // ── 检视器 ───────────────────────────────────────────────────────────────────
+function cuesOfEl(el: { params?: Record<string, unknown> } | undefined): QteCue[] | undefined {
+  const cues = el?.params?.cues
+  return Array.isArray(cues) ? (cues as QteCue[]) : undefined
+}
+
 function GraphMaterialInspector({
+  scenario,
   node,
-  graph,
   item,
   entities,
   onPatch,
@@ -924,10 +961,10 @@ function GraphMaterialInspector({
   onSetBranchTarget,
   onRemoveBranch,
 }: {
+  scenario: GameScenario
   node: GameNode | undefined
-  graph: GameGraph
   item: MaterialItem | null
-  entities: Record<string, EntitySpec> | undefined
+  entities: Record<string, Entity> | undefined
   onPatch: (patch: Record<string, unknown>) => void
   onTiming: (item: MaterialItem, startMs: number, endMs: number) => void
   onAddQteCue: (afterCueId?: string) => void
@@ -941,13 +978,13 @@ function GraphMaterialInspector({
   if (!node || !item) {
     return <div className="gc-inspector-empty"><span>选择时间轴上的素材以编辑属性</span></div>
   }
-  const el = item.kind === 'qte' ? qteElementOfCue(node, item.id) : findElement(node, item.id)
+  const el = item.kind === 'qte' ? qteElementOfCue(scenario, node, item.id) : findElement(scenario, node, item.id)
   const params = (el?.params ?? {}) as Record<string, unknown>
-  const cue = item.kind === 'qte' ? (el?.params.cues as QteCue[] | undefined)?.find((c) => c.id === item.id) : undefined
-  const settle = item.kind === 'overlay' ? settleElementFor(node, item.id) : undefined
-  const cues = item.kind === 'qte' ? ((el?.params.cues as QteCue[] | undefined) ?? []) : []
-  const branches = item.kind === 'option' ? listOptionBranches(graph, node) : []
-  const nodeOptions = graph.nodes.filter((n) => n.id !== node.id)
+  const cue = item.kind === 'qte' ? cuesOfEl(el)?.find((c) => c.id === item.id) : undefined
+  const settle = item.kind === 'overlay' ? settleElementFor(scenario, node, item.id) : undefined
+  const cues = item.kind === 'qte' ? (cuesOfEl(el) ?? []) : []
+  const branches = item.kind === 'option' ? listOptionBranches(scenario, node) : []
+  const nodeOptions = scenario.graph.nodes.filter((n) => n.id !== node.id)
   const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
@@ -1152,12 +1189,6 @@ function GraphMaterialInspector({
               <option value="hotspot">画面热区</option>
             </select>
           </label>
-          <label className="gc-field"><span>选完跳转</span>
-            <select value={str(params.fireAt) || 'on_pick'} onChange={(e) => onPatch({ fireAt: e.target.value })}>
-              <option value="on_pick">立即</option>
-              <option value="video_end">等视频结束</option>
-            </select>
-          </label>
           <label className="gc-field"><span>倒计时 ms（0=不限时）</span>
             <input type="number" min={0} step={100} value={num(params.timeoutMs, 0) || ''} placeholder="不限时"
               onChange={(e) => onPatch({ timeoutMs: e.target.value === '' ? undefined : Number(e.target.value) })} />
@@ -1257,9 +1288,9 @@ function MaterialCard({
       onDragStart={
         enabled
           ? (e) => {
-              e.dataTransfer.setData(MATERIAL_DND_MIME, template)
-              e.dataTransfer.effectAllowed = 'copy'
-            }
+            e.dataTransfer.setData(MATERIAL_DND_MIME, template)
+            e.dataTransfer.effectAllowed = 'copy'
+          }
           : undefined
       }
     >

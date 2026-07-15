@@ -3,19 +3,12 @@ import {
   choiceKind,
   hotspotKind,
   qteKind,
-  settleKind,
   floatTextKind,
 } from '../registry/core-kinds'
 
 const ctx = { state: {} as never, nodeId: 'n', elapsedMs: 0 }
 
 describe('core-kinds', () => {
-  it('settle: run returns its effects; validate', () => {
-    expect(settleKind.run!(ctx, { effects: [{ id: 'e', kind: 'var', varId: 'qi', op: 'add', value: 1 }] }).effects).toHaveLength(1)
-    expect(settleKind.validate({ effects: [] })).toEqual([])
-    expect(settleKind.validate({ effects: undefined as never })).toHaveLength(1)
-  })
-
   it('floatText: validate requires text; no outputs', () => {
     expect(floatTextKind.validate({ text: '+30' })).toEqual([])
     expect(floatTextKind.validate({ text: '' })).toHaveLength(1)

@@ -15,20 +15,21 @@ trigger: /gamevideo
 ## 玩法图数据模型（SSOT）
 
 ```text
-GameScenario                         # src/runtime/ / src/graph/ / src/editor/graph-schema.ts
+GameScenario                         # src/runtime/schema/graph-schema.ts
 ├── variables{} entities{}           # 实体 = 开放数值袋 attrs（hp 只是约定 attr，无特权）
-├── ui.hud[]  rng.seed  rules?[]     # HUD 元素(可指定皮肤 component/pos) / 种子随机 / 图级反应规则
+├── ui.overlays{}  rng.seed  reactions?[]  # Overlay 包 / 种子 / 局级 state→goto
 └── graph { nodes[], edges[] }
-     nodes[] 全是「演出节点」(type:'perf')：media(视频) + timeline[](role/kind/trigger/params) + hud
-     edges[] 条件/加权/效果出边：判断(出手/血量/胜负/变招…)一律折这里，无独立网关节点
+     nodes[] 全是「演出节点」(type:'perf')：media + overlayNodes + reactions
+     edges[] 条件/加权出边：判断一律折这里（无独立网关；边不带 effects）
 ```
 
 > [!IMPORTANT]
 > **图 schema 契约（强制）**：
 > - **只有「演出节点」，每个绑视频**；判断折进出边（handle `cond:N`/`else`/`opt:*`/`pass|good|fail`/`out`，边带 `weight`=加权随机）。跨节点记忆用变量+条件边。
+> - **三层心智**：edges=路由；reactions=副作用；overlays=UI。
 > - **一切声明式、可序列化、无函数**：条件 `GraphCondition`、效果 `GraphEffect`（value 可为 `{expr}`）。
-> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `params.component` / `ui.hud[i].component`（契约见 `src/runtime/skins/components/CONTRACT.md`）。
-> - 代码级权威：`src/runtime/ / src/graph/ / src/editor/graph-schema.ts`（形态）+ `engine.ts`（运行时）+ demo `src/runtime/ / src/graph/ / src/editor/demo/nodia.graph.json`（SSOT 样例）。
+> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `component` / `params.component`（契约见 `src/runtime/skins/components/CONTRACT.md`）。
+> - 代码级权威：`graph-schema.ts` + `node-config-schema.ts` + `engine.ts` + demo `nodia.graph.json`。
 > - ⚠️ 旧 `Scenario/Scene → scenarioToBlueprint → 蓝图运行时`、以及 `gvid:*` 工具链已**退役删除**，勿再引用。
 
 ## 怎么编辑：AI 工具（graph-native）
@@ -60,9 +61,9 @@ gvid:save-graph({ scenario, title:"..." })  # 整本回写；ok:false 时看 err
 
 ## 校验
 
-改完用图自带校验（`src/runtime/ / src/graph/ / src/editor/validate.ts` / `validate-refs.ts`）确认：节点/边 handle 齐全、
+改完用图自带校验（`src/runtime/validate/validate.ts` / `validate-refs.ts`）确认：节点/边 handle 齐全、
 媒体引用存在、条件/效果引用的变量存在、皮肤 `component` 有对应注册。测试见
-`src/runtime/ / src/graph/ / src/editor/__tests__/`。
+`src/runtime/__tests__/` / `src/graph/__tests__/`。
 
 ## 与 Nodia Agent 的协作
 

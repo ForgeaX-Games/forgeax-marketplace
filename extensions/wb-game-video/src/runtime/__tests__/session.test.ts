@@ -12,7 +12,7 @@ describe('GraphSession (playable view model)', () => {
     expect(snap.hud.entities['ent-boss']!.hp).toBe(60)
 
     snap = session.performanceEnd() // enter → a_my(subflow) → wait（技能交互）
-    expect(snap.interaction?.kind).toBe('skill')
+    expect(snap.interaction?.component).toBe('skill')
     expect(snap.interaction?.handles).toEqual(['opt:light', 'opt:heavy', 'opt:medit', 'opt:ult'])
 
     snap = session.submit('light') // → 变招判定 → 轻攻击演出
@@ -21,7 +21,7 @@ describe('GraphSession (playable view model)', () => {
     expect(snap.currentNodeId).toBe('win')
 
     snap = session.performanceEnd() // win 演出结束 → 胜利横幅
-    expect(snap.banner?.kind).toBe('victory')
+    expect(snap.banner?.kind).toBe('ending')
     expect(snap.phase).toBe('ended')
   })
 
@@ -52,6 +52,6 @@ describe('GraphSession (playable view model)', () => {
     const snap = session.jump('wait')
     // 跳到战斗待机 → 技能交互挂起
     expect(snap.currentNodeId).toBe('wait')
-    expect(snap.interaction?.kind).toBe('skill')
+    expect(snap.interaction?.component).toBe('skill')
   })
 })

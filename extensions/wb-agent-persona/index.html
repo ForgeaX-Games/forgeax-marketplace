@@ -616,7 +616,6 @@ let activeTab = 'persona';
 // Persona state
 let personaOriginal = '';
 let personaDirty = false;
-let personaLoadPath = '';
 
 // Memory state
 let memFiles = [];
@@ -717,13 +716,24 @@ function serializeProfile(slots) {
 
 // ─── helpers ──────────────────────────────────────────────────────────
 function shortId(pluginId) { return pluginId.replace(/^@[^/]+\//, ''); }
-function pluginDir(pluginId) {
-  return `packages/marketplace/extensions/${shortId(pluginId)}`;
+/** Bus source metadata is required; never reconstruct a filesystem path from id. */
+function pluginDir(agent) {
+  const rel = agent.source.relativeManifestPath;
+  if (!rel || !rel.endsWith('/forgeax-extension.json')) {
+    throw new Error('agent.source.relativeManifestPath missing or not an extension manifest');
+  }
+  const bases = {
+    L0: 'packages/marketplace/extensions',
+    L1: '.forgeax/extensions',
+    L2: '.forgeax/extensions',
+  };
+  return `${bases[agent.source.layer]}/${rel.slice(0, -'/forgeax-extension.json'.length)}`;
+}
 }
 function personaDir(agent) {
   const f = agent?.agent?.personaFile?.replace(/^\.\//, '') ?? 'persona/zh.md';
   const dir = f.replace(/\/[^/]+$/, '');
-  return `${pluginDir(agent.id)}/${dir}`;
+  return `${pluginDir(agent)}/${dir}`;
 }
 function personaPath(agent, lang = locale) {
   return `${personaDir(agent)}/${lang}.md`;
@@ -731,7 +741,7 @@ function personaPath(agent, lang = locale) {
 function memoryDir(agent) {
   const m = agent?.agent?.memoryDir;
   if (!m) return null;
-  return `${pluginDir(agent.id)}/${m.replace(/^\.\//, '').replace(/\/$/, '')}`;
+  return `${pluginDir(agent)}/${m.replace(/^\.\//, '').replace(/\/$/, '')}`;
 }
 function pickLang(text) {
   if (!text) return '';
@@ -1034,7 +1044,7 @@ async function selectAgent(pluginId) {
   } else {
     rolePill.style.display = 'none';
   }
-  document.getElementById('header-path').textContent = pluginDir(pluginId);
+  document.getElementById('header-path').textContent = selectedAgent ? pluginDir(selectedAgent) : '';
 
   // Reset memory state
   memFiles = []; memSelected = null; memOriginal = ''; memDirty = false; memMode = 'text';
@@ -1077,7 +1087,6 @@ async function loadPersona() {
     const body = await r.json();
     setPersonaContent(body.content ?? '', true);
     setStatus('persona-status', t('loadedChars', { n: (body.content ?? '').length }), 'ok');
-    personaLoadPath = body.path || '';
   } catch (e) {
     setStatus('persona-status', t('loadError', { msg: e.message }), 'warn');
     setPersonaContent('', false);

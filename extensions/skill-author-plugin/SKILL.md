@@ -154,7 +154,7 @@ export default tools;
 让 forgeax-server 重新扫盘:
 
 ```bash
-curl -s -X POST http://localhost:8087/api/extensions/reload | jq
+curl -s -X POST http://localhost:18900/api/extensions/reload | jq
 ```
 
 期望响应里 `loaded` 包含你的 plugin id,`errors` 为空。如果不在,常见原因:
@@ -165,7 +165,7 @@ curl -s -X POST http://localhost:8087/api/extensions/reload | jq
 确认 tool 已注册:
 
 ```bash
-curl -s http://localhost:8087/api/tools | jq '.tools[] | select(.id == "hello:say")'
+curl -s http://localhost:18900/api/tools | jq '.tools[] | select(.id == "hello:say")'
 ```
 
 期望看到 `{ id: "hello:say", hasHandler: true, exposedToAI: true, ... }`。`hasHandler:false` 说明 `entry.backend` 路径没找到——回头检查 manifest 里的 `./server/tool-handlers.ts` 跟磁盘上文件名是否一致。
@@ -173,7 +173,7 @@ curl -s http://localhost:8087/api/tools | jq '.tools[] | select(.id == "hello:sa
 实际跑一把:
 
 ```bash
-curl -s -X POST http://localhost:8087/api/tools/call \
+curl -s -X POST http://localhost:18900/api/tools/call \
   -H 'content-type: application/json' \
   -d '{
     "toolId": "hello:say",

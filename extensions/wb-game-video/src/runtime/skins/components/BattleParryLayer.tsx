@@ -1,30 +1,54 @@
 /**
- * 防反 QTE 皮肤（component id: `battleParry`）—— 从旧 player/BattleParryLayer 迁移到新引擎皮肤 registry。
+ * 防反 QTE 皮肤（component id: `battleParry`）—— 复刻旧原型视觉：
+ * 右侧纵向居中、A 左下 / B 右上两枚水墨小键，RAF 收圈。
  *
- * 契约对齐新引擎交互：读 InteractionSnap.params（durationMs 收圈时长），玩家按 A/B/点击 → submit('pass'|'good')，
- * 超时未操作 → submit('fail')。视觉严格复刻旧原型（A 左下 / B 右上，RAF 逐帧收圈）。
+ * 提交：默认 A→pass、B→good；有 params.exits 时按 exits[0]/[1].key 提交。
+ * 超时 → defaultKey ?? 'fail'。键位始终 A/B（不跟 exits.label / outcomeLabels 走，避免长文案撑大按钮）。
  */
 import { useEffect, useRef, useState } from 'react'
 import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
-type Outcome = 'pass' | 'good' | 'fail'
-const PARRY_OPTIONS: Array<{ key: 'A' | 'B'; outcome: Outcome }> = [
-  { key: 'A', outcome: 'pass' },
-  { key: 'B', outcome: 'good' },
-]
+type ExitOpt = { key: string; glyph: 'A' | 'B' }
+
+function exitsOf(params: Record<string, unknown>): ExitOpt[] {
+  const exits = params.exits
+  if (Array.isArray(exits) && exits.length >= 2) {
+    const keys = exits
+      .filter((e): e is { key: string } => !!e && typeof e === 'object' && typeof (e as { key?: unknown }).key === 'string')
+      .slice(0, 2)
+      .map((e) => e.key)
+    if (keys.length >= 2) {
+      return [
+        { key: keys[0]!, glyph: 'A' },
+        { key: keys[1]!, glyph: 'B' },
+      ]
+    }
+  }
+  return [
+    { key: 'pass', glyph: 'A' },
+    { key: 'good', glyph: 'B' },
+  ]
+}
 
 export function BattleParryLayer({ interaction, submit }: InteractionProps) {
   injectCss('battle-parry-layer', PARRY_CSS)
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const durationMs = (interaction.params as { durationMs?: number }).durationMs ?? 2600
+  const params = interaction.params as Record<string, unknown>
+  const durationMs = (typeof params.durationMs === 'number' ? params.durationMs : undefined)
+    ?? (typeof params.timeoutMs === 'number' ? params.timeoutMs : undefined)
+    ?? (typeof params.windowMs === 'number' ? params.windowMs : undefined)
+    ?? interaction.timeoutMs
+    ?? 2600
+  const options = exitsOf(params)
+  const missKey = typeof params.defaultKey === 'string' ? params.defaultKey : 'fail'
   const resolvedRef = useRef(false)
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [settled, setSettled] = useState<{ kind: 'hit'; index: number } | { kind: 'miss' } | null>(null)
 
-  function finish(outcome: Outcome): void {
+  function finish(outcome: string): void {
     if (resolvedRef.current) return
     resolvedRef.current = true
     submit(outcome)
@@ -32,14 +56,14 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
   function hit(index: number): void {
     if (resolvedRef.current) return
     setSettled({ kind: 'hit', index })
-    window.setTimeout(() => finish(PARRY_OPTIONS[index]?.outcome ?? 'fail'), 180)
+    window.setTimeout(() => finish(options[index]?.key ?? missKey), 180)
   }
 
   useEffect(() => {
     const D = durationMs
     const approach = Math.min(750, D * 0.24)
     const tol = Math.min(240, D * 0.13)
-    const centers = PARRY_OPTIONS.map((_, i) => (i === 0 ? D * 0.32 : D * 0.72))
+    const centers = options.map((_, i) => (i === 0 ? D * 0.32 : D * 0.72))
     const start = performance.now()
     let raf = 0
     function setRing(el: HTMLButtonElement, scale: number): void {
@@ -68,7 +92,7 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
       })
       if (now >= D + 200) {
         setSettled({ kind: 'miss' })
-        window.setTimeout(() => finish('fail'), 180)
+        window.setTimeout(() => finish(missKey), 180)
         return
       }
       raf = requestAnimationFrame(loop)
@@ -76,7 +100,7 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
     raf = requestAnimationFrame(loop)
     function onKeyDown(e: KeyboardEvent): void {
       if (!keyOk()) return
-      const index = PARRY_OPTIONS.findIndex((o) => o.key.toLowerCase() === e.key.toLowerCase())
+      const index = options.findIndex((o) => o.glyph.toLowerCase() === e.key.toLowerCase())
       if (index < 0) return
       e.preventDefault()
       hit(index)
@@ -87,12 +111,12 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
       window.removeEventListener('keydown', onKeyDown, true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durationMs])
+  }, [durationMs, missKey])
 
   return (
     <div className="pvb-parry show" aria-label="防反 QTE">
       <div className="pvb-parry-keys">
-        {PARRY_OPTIONS.map((option, index) => {
+        {options.map((option, index) => {
           const hitHere = settled?.kind === 'hit' && settled.index === index
           const missed = settled?.kind === 'miss'
           const cls = hitHere ? 'good hit' : missed ? 'miss' : ''
@@ -104,11 +128,12 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
               }}
               type="button"
               className={`pvb-key ${cls}`}
+              aria-label={option.glyph}
               onClick={() => hit(index)}
               disabled={!!settled}
             >
               <span className="pvb-key-ring" />
-              <span className="pvb-key-label">{option.key}</span>
+              <span className="pvb-key-label">{option.glyph}</span>
               {hitHere && <span className="pvb-key-spark" />}
             </button>
           )
@@ -118,28 +143,29 @@ export function BattleParryLayer({ interaction, submit }: InteractionProps) {
   )
 }
 
+/** 严格复刻旧 Hud/BattleParry：右侧居中、62px 水墨键、A 左下 / B 右上。 */
 const PARRY_CSS = `
-.pvb-parry { position: absolute; right: 8%; top: 48%; transform: translateY(-50%); z-index: 46; display: none; flex-direction: column; align-items: center; gap: 12px; cursor: pointer; user-select: none; pointer-events: auto; }
-.pvb-parry.show { display: flex; }
-.pvb-parry-keys { position: relative; width: 190px; height: 158px; }
-.pvb-parry-keys .pvb-key:nth-child(1) { position: absolute; left: 0; bottom: 0; }
-.pvb-parry-keys .pvb-key:nth-child(2) { position: absolute; right: 0; top: 0; }
-.pvb-key { position: relative; width: 62px; height: 62px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: .5; transform: scale(.86); transition: opacity .14s, transform .14s, filter .14s; background: none; border: none; padding: 0; }
-.pvb-key::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 52% 48% 50% 50% / 50% 52% 48% 50%; background: linear-gradient(180deg, #2b2620, #0c0a08); border: 1.5px solid rgba(239,231,214,.5); box-shadow: 0 2px 6px rgba(0,0,0,.5) inset, 0 2px 7px rgba(0,0,0,.6); filter: url(#inkRough); transition: border-color .14s, background-color .14s; }
-.pvb-key.armed { opacity: 1; transform: scale(1); }
-.pvb-key.armed::before { border-color: #ffd9a8; box-shadow: 0 0 16px rgba(255,200,120,.5), 0 2px 6px rgba(0,0,0,.5) inset; }
-.pvb-key-ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid rgba(243,234,216,.55); transform: scale(2.4); transform-origin: center; pointer-events: none; opacity: 0; z-index: 1; }
-.pvb-key.armed .pvb-key-ring { opacity: .9; }
-.pvb-key.sweet .pvb-key-ring { border-color: rgba(95,224,138,.9); box-shadow: 0 0 12px rgba(95,224,138,.6); }
-.pvb-key.sweet { transform: scale(1.08); }
-.pvb-key.sweet::before { border-color: #5fe08a; box-shadow: 0 0 20px rgba(95,224,138,.8), 0 2px 6px rgba(0,0,0,.5) inset; }
-.pvb-key.good { opacity: 1; transform: scale(1.16); }
-.pvb-key.good::before { border-color: #5fe08a; background: linear-gradient(180deg, #234a32, #0e2417); box-shadow: 0 0 22px rgba(95,224,138,.95); }
-.pvb-key.hit { animation: pvbKeyHit .4s ease; }
-@keyframes pvbKeyHit { 0% { transform: scale(1.5); } 45% { transform: scale(.92); } 100% { transform: scale(1.16); } }
-.pvb-key-spark { position: absolute; inset: -12px; border-radius: 50%; border: 2.5px solid #7dffae; pointer-events: none; z-index: 3; box-shadow: 0 0 18px rgba(125,255,174,.8); animation: pvbKeySpark .5s ease forwards; }
-@keyframes pvbKeySpark { 0% { transform: scale(.45); opacity: .95; } 100% { transform: scale(2); opacity: 0; } }
-.pvb-key.miss { opacity: .4; }
-.pvb-key.miss::before { border-color: #ff6a5a; background: linear-gradient(180deg, #3a201d, #16100e); }
-.pvb-key-label { font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-size: 1.45rem; font-weight: 800; color: #efe7d6; z-index: 2; text-shadow: 0 2px 6px rgba(0,0,0,.85); pointer-events: none; }
+.pvb-parry{position:absolute;right:8%;top:48%;transform:translateY(-50%);z-index:46;display:none;flex-direction:column;align-items:center;gap:12px;cursor:pointer;user-select:none;pointer-events:auto}
+.pvb-parry.show{display:flex}
+.pvb-parry-keys{position:relative;width:190px;height:158px}
+.pvb-parry-keys .pvb-key:nth-child(1){position:absolute;left:0;bottom:0}
+.pvb-parry-keys .pvb-key:nth-child(2){position:absolute;right:0;top:0}
+.pvb-key{position:relative;width:62px;height:62px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.5;transform:scale(.86);transition:opacity .14s,transform .14s,filter .14s;background:none;border:none;padding:0}
+.pvb-key::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:52% 48% 50% 50%/50% 52% 48% 50%;background:linear-gradient(180deg,#2b2620,#0c0a08);border:1.5px solid rgba(239,231,214,.5);box-shadow:0 2px 6px rgba(0,0,0,.5) inset,0 2px 7px rgba(0,0,0,.6);filter:url(#inkRough);transition:border-color .14s,background-color .14s}
+.pvb-key.armed{opacity:1;transform:scale(1)}
+.pvb-key.armed::before{border-color:#ffd9a8;box-shadow:0 0 16px rgba(255,200,120,.5),0 2px 6px rgba(0,0,0,.5) inset}
+.pvb-key-ring{position:absolute;inset:-4px;border-radius:50%;border:2px solid rgba(243,234,216,.55);transform:scale(2.4);transform-origin:center;pointer-events:none;opacity:0;z-index:1}
+.pvb-key.armed .pvb-key-ring{opacity:.9}
+.pvb-key.sweet .pvb-key-ring{border-color:rgba(95,224,138,.9);box-shadow:0 0 12px rgba(95,224,138,.6)}
+.pvb-key.sweet{transform:scale(1.08)}
+.pvb-key.sweet::before{border-color:#5fe08a;box-shadow:0 0 20px rgba(95,224,138,.8),0 2px 6px rgba(0,0,0,.5) inset}
+.pvb-key.good{opacity:1;transform:scale(1.16)}
+.pvb-key.good::before{border-color:#5fe08a;background:linear-gradient(180deg,#234a32,#0e2417);box-shadow:0 0 22px rgba(95,224,138,.95)}
+.pvb-key.hit{animation:pvbKeyHit .4s ease}
+@keyframes pvbKeyHit{0%{transform:scale(1.5)}45%{transform:scale(.92)}100%{transform:scale(1.16)}}
+.pvb-key-spark{position:absolute;inset:-12px;border-radius:50%;border:2.5px solid #7dffae;pointer-events:none;z-index:3;box-shadow:0 0 18px rgba(125,255,174,.8);animation:pvbKeySpark .5s ease forwards}
+@keyframes pvbKeySpark{0%{transform:scale(.45);opacity:.95}100%{transform:scale(2);opacity:0}}
+.pvb-key.miss{opacity:.4}
+.pvb-key.miss::before{border-color:#ff6a5a;background:linear-gradient(180deg,#3a201d,#16100e)}
+.pvb-key-label{font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:1.45rem;font-weight:800;color:#efe7d6;z-index:2;text-shadow:0 2px 6px rgba(0,0,0,.85);pointer-events:none}
 `

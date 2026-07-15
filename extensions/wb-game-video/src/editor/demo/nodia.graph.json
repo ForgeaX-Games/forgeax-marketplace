@@ -4,7 +4,6 @@
     "qi": {
       "id": "qi",
       "name": "气力",
-      "kind": "number",
       "initial": 0,
       "min": 0,
       "max": 5
@@ -12,52 +11,25 @@
     "lizhi": {
       "id": "lizhi",
       "name": "理智",
-      "kind": "number",
       "initial": 5,
-      "min": 0,
-      "max": 12
-    },
-    "foxing": {
-      "id": "foxing",
-      "name": "佛性",
-      "kind": "number",
-      "initial": 10,
       "min": 0,
       "max": 12
     },
     "yezhang": {
       "id": "yezhang",
       "name": "业障",
-      "kind": "number",
       "initial": 1,
       "min": 0,
       "max": 12
-    },
-    "chi": {
-      "id": "chi",
-      "name": "痴",
-      "kind": "number",
-      "initial": 1,
-      "min": 0,
-      "max": 12
-    },
-    "guihuo": {
-      "id": "guihuo",
-      "name": "鬼火种",
-      "kind": "number",
-      "initial": 0,
-      "min": 0
     },
     "lotusClue": {
       "id": "lotusClue",
       "name": "莲花妖线索",
-      "kind": "flag",
       "initial": 0
     },
     "mineFirst": {
       "id": "mineFirst",
       "name": "我方先手",
-      "kind": "number",
       "initial": 1,
       "min": 0,
       "max": 1
@@ -104,64 +76,565 @@
     }
   },
   "ui": {
-    "hud": [
-      {
-        "element": "ent-player",
-        "show": "always",
-        "component": "battleHpBar",
-        "label": "空藏",
-        "pos": "bottom-right"
+    "overlays": {
+      "ov-n_door": {
+        "id": "ov-n_door",
+        "children": [
+          {
+            "id": "kou",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "qteKind": "parry",
+              "windowMs": 200,
+              "outcomeLabels": {
+                "pass": "叩中",
+                "fail": "错过"
+              },
+              "component": "inkKou",
+              "glyph": "叩",
+              "timeoutMs": 200
+            },
+            "component": "qte"
+          }
+        ]
       },
-      {
-        "element": "ent-boss",
-        "show": "battle",
-        "component": "battleHpBar",
-        "label": "小怪",
-        "pos": "top"
+      "ov-n_soul": {
+        "id": "ov-n_soul",
+        "children": [
+          {
+            "id": "soul-line",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "speaker": "小魂",
+              "text": "……你也是来渡河的吗？",
+              "color": "#ffd54a"
+            },
+            "component": "dialogue"
+          }
+        ]
       },
-      {
-        "element": "score",
-        "show": "always"
+      "ov-n_river": {
+        "id": "ov-n_river",
+        "children": [
+          {
+            "id": "n_river-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-n_land": {
+        "id": "ov-n_land",
+        "children": [
+          {
+            "id": "n_land-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-n_tea": {
+        "id": "ov-n_tea",
+        "children": [
+          {
+            "id": "n_tea-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-n_nodrink": {
+        "id": "ov-n_nodrink",
+        "children": [
+          {
+            "id": "n_nodrink-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-n_follow": {
+        "id": "ov-n_follow",
+        "children": [
+          {
+            "id": "n_follow-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-n_nofollow": {
+        "id": "ov-n_nofollow",
+        "children": [
+          {
+            "id": "n_nofollow-c",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "應 / 默",
+              "timeoutMs": 8000,
+              "defaultKey": "mo",
+              "options": [
+                {
+                  "key": "ying",
+                  "label": "應"
+                },
+                {
+                  "key": "mo",
+                  "label": "默"
+                }
+              ],
+              "component": "inkYingMo"
+            },
+            "component": "choice"
+          }
+        ]
+      },
+      "ov-enter": {
+        "id": "ov-enter",
+        "children": [
+          {
+            "id": "enter-fade",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "durationMs": 700,
+              "style": "fade",
+              "color": "#000"
+            },
+            "component": "transition"
+          }
+        ]
+      },
+      "ov-wait": {
+        "id": "ov-wait",
+        "children": [
+          {
+            "id": "skill",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "prompt": "选择技能",
+              "component": "battleSkillBar",
+              "options": [
+                {
+                  "key": "light",
+                  "label": "轻攻击",
+                  "effects": [
+                    {
+                      "id": "sk-light-qi",
+                      "kind": "var",
+                      "varId": "qi",
+                      "op": "add",
+                      "value": 2
+                    }
+                  ]
+                },
+                {
+                  "key": "heavy",
+                  "label": "重攻击",
+                  "effects": [
+                    {
+                      "id": "sk-heavy-qi",
+                      "kind": "var",
+                      "varId": "qi",
+                      "op": "add",
+                      "value": -2
+                    }
+                  ],
+                  "condition": {
+                    "all": [
+                      {
+                        "type": "var",
+                        "varId": "qi",
+                        "op": "gte",
+                        "value": 2
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": "medit",
+                  "label": "冥想"
+                },
+                {
+                  "key": "ult",
+                  "label": "灭世",
+                  "effects": [
+                    {
+                      "id": "sk-ult-qi",
+                      "kind": "var",
+                      "varId": "qi",
+                      "op": "set",
+                      "value": 0
+                    }
+                  ],
+                  "condition": {
+                    "all": [
+                      {
+                        "type": "var",
+                        "varId": "qi",
+                        "op": "gte",
+                        "value": 5
+                      },
+                      {
+                        "type": "var",
+                        "varId": "lizhi",
+                        "op": "gte",
+                        "value": 4
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "component": "skill"
+          }
+        ]
+      },
+      "ov-pu": {
+        "id": "ov-pu",
+        "children": [
+          {
+            "id": "pu-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1000
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-pu2": {
+        "id": "ov-pu2",
+        "children": [
+          {
+            "id": "pu2-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 600
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-zhong": {
+        "id": "ov-zhong",
+        "children": [
+          {
+            "id": "zhong-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1700
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-z2": {
+        "id": "ov-z2",
+        "children": [
+          {
+            "id": "z2-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2500
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-fuzhu": {
+        "id": "ov-fuzhu",
+        "children": [
+          {
+            "id": "fuzhu-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2000
+            },
+            "params": {
+              "text": "+30",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#5fbf7f"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-ult": {
+        "id": "ov-ult",
+        "children": [
+          {
+            "id": "ult-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 7000
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 3)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-tele": {
+        "id": "ov-tele",
+        "children": [
+          {
+            "id": "parry",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "qteKind": "parry",
+              "component": "battleParry",
+              "durationMs": 2600,
+              "outcomeLabels": {
+                "pass": "受击防反",
+                "good": "受击闪避",
+                "fail": "受击"
+              },
+              "exits": [
+                {
+                  "key": "pass"
+                },
+                {
+                  "key": "good"
+                },
+                {
+                  "key": "fail"
+                }
+              ],
+              "defaultKey": "fail"
+            },
+            "component": "qte"
+          }
+        ]
+      },
+      "ov-block": {
+        "id": "ov-block",
+        "children": [
+          {
+            "id": "block-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1800
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 21)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-dodgeP": {
+        "id": "ov-dodgeP",
+        "children": [
+          {
+            "id": "dodgeP-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2000
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-boss.attr.attack - entity.ent-player.attr.defense / 4)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "ov-hurt": {
+        "id": "ov-hurt",
+        "children": [
+          {
+            "id": "hurt-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 10
+            },
+            "params": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ff5a5a",
+              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 45)"
+            },
+            "component": "floatText"
+          }
+        ]
+      },
+      "battleHud": {
+        "id": "battleHud",
+        "title": "战斗 HUD（双血条）",
+        "children": [
+          {
+            "id": "playerHp",
+            "component": "battleHpBar",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "bind": "ent-player",
+              "label": "空藏"
+            }
+          },
+          {
+            "id": "bossHp",
+            "component": "battleHpBar",
+            "trigger": {
+              "when": "enter"
+            },
+            "params": {
+              "bind": "ent-boss",
+              "label": "小怪"
+            }
+          }
+        ]
       }
-    ]
+    }
   },
   "rng": {
     "seed": 7
   },
-  "rules": [
-    {
-      "id": "win",
-      "when": {
-        "all": [
-          {
-            "type": "attrRatio",
-            "entityId": "ent-boss",
-            "attr": "hp",
-            "op": "lte",
-            "value": 0
-          }
-        ]
-      },
-      "goto": "win",
-      "once": true
-    },
-    {
-      "id": "lose",
-      "when": {
-        "all": [
-          {
-            "type": "attrRatio",
-            "entityId": "ent-player",
-            "attr": "hp",
-            "op": "lte",
-            "value": 0
-          }
-        ]
-      },
-      "goto": "lose",
-      "once": true
-    }
-  ],
   "graph": {
     "nodes": [
       {
@@ -175,14 +648,10 @@
         "outputs": [],
         "data": {
           "name": "序章",
-          "timeline": [],
           "durationMs": 15975,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-open"
-          },
-          "hud": {
-            "preset": "hidden"
           }
         }
       },
@@ -197,34 +666,16 @@
         "outputs": [],
         "data": {
           "name": "慈悲狱门口",
-          "timeline": [
-            {
-              "id": "kou",
-              "role": "interaction",
-              "kind": "qte",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "qteKind": "parry",
-                "windowMs": 200,
-                "outcomeLabels": {
-                  "pass": "叩中",
-                  "fail": "错过"
-                },
-                "component": "inkKou",
-                "glyph": "叩"
-              }
-            }
-          ],
           "durationMs": 15100,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-door"
           },
-          "hud": {
-            "preset": "hidden"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_door"
+            }
+          ]
         }
       },
       {
@@ -238,29 +689,16 @@
         "outputs": [],
         "data": {
           "name": "小魂对话",
-          "timeline": [
-            {
-              "id": "soul-line",
-              "role": "presentation",
-              "kind": "dialogue",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "speaker": "小魂",
-                "text": "……你也是来渡河的吗？",
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-soul"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_soul"
+            }
+          ]
         }
       },
       {
@@ -274,40 +712,16 @@
         "outputs": [],
         "data": {
           "name": "划船渡河",
-          "timeline": [
-            {
-              "id": "n_river-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 15069,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-river"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_river"
+            }
+          ]
         }
       },
       {
@@ -321,14 +735,10 @@
         "outputs": [],
         "data": {
           "name": "小孩对话",
-          "timeline": [],
           "durationMs": 12887,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-child"
-          },
-          "hud": {
-            "preset": "narrative"
           }
         }
       },
@@ -343,40 +753,16 @@
         "outputs": [],
         "data": {
           "name": "上岸",
-          "timeline": [
-            {
-              "id": "n_land-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 16200,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-land"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_land"
+            }
+          ]
         }
       },
       {
@@ -390,14 +776,10 @@
         "outputs": [],
         "data": {
           "name": "灯笼对话",
-          "timeline": [],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-mask"
-          },
-          "hud": {
-            "preset": "narrative"
           }
         }
       },
@@ -412,14 +794,10 @@
         "outputs": [],
         "data": {
           "name": "过桥见孟婆",
-          "timeline": [],
           "durationMs": 17136,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-mengpo"
-          },
-          "hud": {
-            "preset": "narrative"
           }
         }
       },
@@ -434,40 +812,16 @@
         "outputs": [],
         "data": {
           "name": "喝孟婆汤",
-          "timeline": [
-            {
-              "id": "n_tea-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-tea"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_tea"
+            }
+          ]
         }
       },
       {
@@ -481,15 +835,39 @@
         "outputs": [],
         "data": {
           "name": "饮汤应答",
-          "timeline": [],
           "durationMs": 14489,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-drink"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "reactions": [
+            {
+              "when": {
+                "type": "complete"
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "drink-lizhi",
+                      "kind": "var",
+                      "varId": "lizhi",
+                      "op": "add",
+                      "value": -1
+                    },
+                    {
+                      "id": "drink-yezhang",
+                      "kind": "var",
+                      "varId": "yezhang",
+                      "op": "add",
+                      "value": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -503,40 +881,16 @@
         "outputs": [],
         "data": {
           "name": "不喝",
-          "timeline": [
-            {
-              "id": "n_nodrink-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-nodrink"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_nodrink"
+            }
+          ]
         }
       },
       {
@@ -550,40 +904,16 @@
         "outputs": [],
         "data": {
           "name": "跟随引魂",
-          "timeline": [
-            {
-              "id": "n_follow-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-follow"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_follow"
+            }
+          ]
         }
       },
       {
@@ -597,14 +927,10 @@
         "outputs": [],
         "data": {
           "name": "获取道具",
-          "timeline": [],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-getlight"
-          },
-          "hud": {
-            "preset": "narrative"
           }
         }
       },
@@ -619,14 +945,10 @@
         "outputs": [],
         "data": {
           "name": "没能道具",
-          "timeline": [],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-nolight"
-          },
-          "hud": {
-            "preset": "narrative"
           }
         }
       },
@@ -641,40 +963,16 @@
         "outputs": [],
         "data": {
           "name": "不跟随",
-          "timeline": [
-            {
-              "id": "n_nofollow-c",
-              "role": "interaction",
-              "kind": "choice",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "應 / 默",
-                "timeoutMs": 8000,
-                "defaultKey": "mo",
-                "options": [
-                  {
-                    "key": "ying",
-                    "label": "應"
-                  },
-                  {
-                    "key": "mo",
-                    "label": "默"
-                  }
-                ],
-                "component": "inkYingMo"
-              }
-            }
-          ],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-nofollow"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "ov-n_nofollow"
+            }
+          ]
         }
       },
       {
@@ -688,15 +986,39 @@
         "outputs": [],
         "data": {
           "name": "接过莲藕",
-          "timeline": [],
           "durationMs": 15093,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-lotus"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "reactions": [
+            {
+              "when": {
+                "type": "complete"
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "lotus-clue",
+                      "kind": "var",
+                      "varId": "lotusClue",
+                      "op": "set",
+                      "value": 1
+                    },
+                    {
+                      "id": "lotus-qi",
+                      "kind": "var",
+                      "varId": "qi",
+                      "op": "add",
+                      "value": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -710,15 +1032,32 @@
         "outputs": [],
         "data": {
           "name": "不要莲藕",
-          "timeline": [],
           "durationMs": 15069,
           "media": {
             "kind": "VIDEO",
             "ref": "narr-nolotus"
           },
-          "hud": {
-            "preset": "narrative"
-          }
+          "reactions": [
+            {
+              "when": {
+                "type": "complete"
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "nolotus-clue",
+                      "kind": "var",
+                      "varId": "lotusClue",
+                      "op": "set",
+                      "value": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -732,30 +1071,71 @@
         "outputs": [],
         "data": {
           "name": "进战待机",
-          "timeline": [
-            {
-              "id": "enter-fade",
-              "role": "presentation",
-              "kind": "transition",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "durationMs": 700,
-                "style": "fade",
-                "color": "#000"
-              }
-            }
-          ],
-          "durationMs": 8080,
+          "durationMs": 2000,
           "media": {
             "kind": "VIDEO",
             "ref": "idle01"
           },
           "mediaPlayMode": "loop",
-          "hud": {
-            "preset": "battle"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-enter"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "complete",
+                "if": {
+                  "all": [
+                    {
+                      "type": "attrCompare",
+                      "left": "ent-player",
+                      "right": "ent-boss",
+                      "attr": "speed",
+                      "op": "gte"
+                    }
+                  ]
+                }
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "first-me",
+                      "kind": "var",
+                      "varId": "mineFirst",
+                      "op": "set",
+                      "value": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "when": {
+                "type": "complete"
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "first-foe",
+                      "kind": "var",
+                      "varId": "mineFirst",
+                      "op": "set",
+                      "value": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -769,12 +1149,8 @@
         "outputs": [],
         "data": {
           "name": "我方回合",
-          "timeline": [],
           "durationMs": 0,
-          "hud": {
-            "preset": "battle"
-          },
-          "subFlowRef": "wait"
+          "subFlow": "wait"
         }
       },
       {
@@ -788,12 +1164,8 @@
         "outputs": [],
         "data": {
           "name": "敌方回合",
-          "timeline": [],
           "durationMs": 0,
-          "hud": {
-            "preset": "battle"
-          },
-          "subFlowRef": "tele"
+          "subFlow": "tele"
         }
       },
       {
@@ -807,94 +1179,20 @@
         "outputs": [],
         "data": {
           "name": "战斗待机",
-          "timeline": [
-            {
-              "id": "skill",
-              "role": "interaction",
-              "kind": "skill",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "prompt": "选择技能",
-                "component": "battleSkillBar",
-                "options": [
-                  {
-                    "key": "light",
-                    "label": "轻攻击",
-                    "effects": [
-                      {
-                        "id": "sk-light-qi",
-                        "kind": "var",
-                        "varId": "qi",
-                        "op": "add",
-                        "value": 2
-                      }
-                    ]
-                  },
-                  {
-                    "key": "heavy",
-                    "label": "重攻击",
-                    "effects": [
-                      {
-                        "id": "sk-heavy-qi",
-                        "kind": "var",
-                        "varId": "qi",
-                        "op": "add",
-                        "value": -2
-                      }
-                    ],
-                    "condition": {
-                      "all": [
-                        {
-                          "type": "var",
-                          "varId": "qi",
-                          "op": "gte",
-                          "value": 2
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": "medit",
-                    "label": "冥想"
-                  },
-                  {
-                    "key": "ult",
-                    "label": "灭世",
-                    "effects": [
-                      {
-                        "id": "sk-ult-qi",
-                        "kind": "var",
-                        "varId": "qi",
-                        "op": "set",
-                        "value": 0
-                      }
-                    ],
-                    "condition": {
-                      "all": [
-                        {
-                          "type": "var",
-                          "varId": "qi",
-                          "op": "gte",
-                          "value": 5
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          ],
           "durationMs": 8000,
           "media": {
             "kind": "VIDEO",
             "ref": "idle01"
           },
           "mediaPlayMode": "loop",
-          "hud": {
-            "preset": "battle"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-wait"
+            }
+          ]
         }
       },
       {
@@ -908,53 +1206,44 @@
         "outputs": [],
         "data": {
           "name": "轻攻击",
-          "timeline": [
-            {
-              "id": "pu-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 1000
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "pu-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -80
-                  }
-                ]
-              }
-            },
-            {
-              "id": "pu-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 1000
-              },
-              "params": {
-                "text": "-80",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
             "ref": "pugong"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-pu"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 1000
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "pu-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-player.attr.attack)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -968,53 +1257,44 @@
         "outputs": [],
         "data": {
           "name": "轻攻击·变招",
-          "timeline": [
-            {
-              "id": "pu2-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 600
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "pu2-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -104
-                  }
-                ]
-              }
-            },
-            {
-              "id": "pu2-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 600
-              },
-              "params": {
-                "text": "-104",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
             "ref": "pugong2"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-pu2"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 600
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "pu2-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1028,53 +1308,44 @@
         "outputs": [],
         "data": {
           "name": "重攻击",
-          "timeline": [
-            {
-              "id": "zhong-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 1700
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "zhong-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -144
-                  }
-                ]
-              }
-            },
-            {
-              "id": "zhong-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 1700
-              },
-              "params": {
-                "text": "-144",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
             "ref": "zhonggongji"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-zhong"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 1700
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "zhong-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1088,53 +1359,44 @@
         "outputs": [],
         "data": {
           "name": "重攻击·变招",
-          "timeline": [
-            {
-              "id": "z2-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 2500
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "z2-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -192
-                  }
-                ]
-              }
-            },
-            {
-              "id": "z2-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 2500
-              },
-              "params": {
-                "text": "-192",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
             "ref": "zhonggongji2"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-z2"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 2500
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "z2-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1148,60 +1410,49 @@
         "outputs": [],
         "data": {
           "name": "冥想",
-          "timeline": [
-            {
-              "id": "fuzhu-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 2000
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "fuzhu-heal",
-                    "kind": "attr",
-                    "entityId": "ent-player",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": 30
-                  },
-                  {
-                    "id": "fuzhu-qi",
-                    "kind": "var",
-                    "varId": "qi",
-                    "op": "add",
-                    "value": 2
-                  }
-                ]
-              }
-            },
-            {
-              "id": "fuzhu-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 2000
-              },
-              "params": {
-                "text": "+30",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#5fbf7f"
-              }
-            }
-          ],
           "durationMs": 5000,
           "media": {
             "kind": "VIDEO",
             "ref": "huiqi"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-fuzhu"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 2000
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "fuzhu-heal",
+                      "kind": "attr",
+                      "entityId": "ent-player",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": 30
+                    },
+                    {
+                      "id": "fuzhu-qi",
+                      "kind": "var",
+                      "varId": "qi",
+                      "op": "add",
+                      "value": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1215,53 +1466,44 @@
         "outputs": [],
         "data": {
           "name": "灭世",
-          "timeline": [
-            {
-              "id": "ult-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 7000
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "ult-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -240
-                  }
-                ]
-              }
-            },
-            {
-              "id": "ult-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 7000
-              },
-              "params": {
-                "text": "-240",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 12000,
           "media": {
             "kind": "VIDEO",
             "ref": "dazhao"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-ult"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 7000
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "ult-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-player.attr.attack * 3)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1275,34 +1517,61 @@
         "outputs": [],
         "data": {
           "name": "攻击前摇·防反QTE",
-          "timeline": [
-            {
-              "id": "parry",
-              "role": "interaction",
-              "kind": "qte",
-              "trigger": {
-                "when": "enter"
-              },
-              "params": {
-                "qteKind": "parry",
-                "component": "battleParry",
-                "durationMs": 2600,
-                "outcomeLabels": {
-                  "pass": "受击防反",
-                  "good": "受击闪避",
-                  "fail": "受击"
-                }
-              }
-            }
-          ],
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
             "ref": "difanggongjiqianyao"
           },
-          "hud": {
-            "preset": "battle"
-          }
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-tele",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "good"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "dodge-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": -1
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "fail"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "hurt-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": 1
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1316,53 +1585,44 @@
         "outputs": [],
         "data": {
           "name": "受击防反",
-          "timeline": [
-            {
-              "id": "block-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 1800
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "block-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -96
-                  }
-                ]
-              }
-            },
-            {
-              "id": "block-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 1800
-              },
-              "params": {
-                "text": "-96",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
             "ref": "fangfan"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-block"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 1800
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "block-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 21)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1376,53 +1636,44 @@
         "outputs": [],
         "data": {
           "name": "受击闪避",
-          "timeline": [
-            {
-              "id": "dodgeP-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 2000
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "dodge-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-boss",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -64
-                  }
-                ]
-              }
-            },
-            {
-              "id": "dodgeP-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 2000
-              },
-              "params": {
-                "text": "-64",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ffd54a"
-              }
-            }
-          ],
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
             "ref": "shanbi"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-dodgeP"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 2000
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "dodge-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-boss",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-boss.attr.attack - entity.ent-player.attr.defense / 4)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1436,53 +1687,44 @@
         "outputs": [],
         "data": {
           "name": "受击",
-          "timeline": [
-            {
-              "id": "hurt-settle",
-              "role": "logic",
-              "kind": "settle",
-              "trigger": {
-                "when": "at",
-                "ms": 10
-              },
-              "params": {
-                "effects": [
-                  {
-                    "id": "hurt-dmg",
-                    "kind": "attr",
-                    "entityId": "ent-player",
-                    "attr": "hp",
-                    "op": "add",
-                    "value": -120
-                  }
-                ]
-              }
-            },
-            {
-              "id": "hurt-fx",
-              "role": "presentation",
-              "kind": "floatText",
-              "trigger": {
-                "when": "at",
-                "ms": 10
-              },
-              "params": {
-                "text": "-120",
-                "x": 0.5,
-                "y": 0.42,
-                "color": "#ff5a5a"
-              }
-            }
-          ],
           "durationMs": 4000,
           "media": {
             "kind": "VIDEO",
             "ref": "shouji"
           },
-          "hud": {
-            "preset": "battle"
-          },
-          "returnsToCaller": true
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            },
+            {
+              "overlay": "ov-hurt"
+            }
+          ],
+          "reactions": [
+            {
+              "when": {
+                "type": "at",
+                "ms": 10
+              },
+              "do": [
+                {
+                  "kind": "effect",
+                  "effects": [
+                    {
+                      "id": "hurt-dmg",
+                      "kind": "attr",
+                      "entityId": "ent-player",
+                      "attr": "hp",
+                      "op": "add",
+                      "value": {
+                        "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 45)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1496,16 +1738,16 @@
         "outputs": [],
         "data": {
           "name": "战斗胜利",
-          "timeline": [],
           "durationMs": 10000,
           "media": {
             "kind": "VIDEO",
             "ref": "shengli"
           },
-          "hud": {
-            "preset": "hidden"
-          },
-          "end": "victory"
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            }
+          ]
         }
       },
       {
@@ -1519,16 +1761,16 @@
         "outputs": [],
         "data": {
           "name": "战斗失败",
-          "timeline": [],
           "durationMs": 6000,
           "media": {
             "kind": "VIDEO",
             "ref": "shibai"
           },
-          "hud": {
-            "preset": "hidden"
-          },
-          "end": "defeat"
+          "overlayNodes": [
+            {
+              "overlay": "battleHud"
+            }
+          ]
         }
       }
     ],
@@ -1537,185 +1779,176 @@
         "id": "e-open",
         "source": "n_open",
         "target": "n_door",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-door-pass",
         "source": "n_door",
         "target": "n_soul",
-        "sourceHandle": "pass"
-      },
-      {
-        "id": "e-door-good",
-        "source": "n_door",
-        "target": "n_soul",
-        "sourceHandle": "good"
+        "sourceHandle": "pass",
+        "targetHandle": "in"
       },
       {
         "id": "e-door-fail",
         "source": "n_door",
         "target": "n_river",
-        "sourceHandle": "fail"
+        "sourceHandle": "fail",
+        "targetHandle": "in"
       },
       {
         "id": "e-soul",
         "source": "n_soul",
         "target": "n_river",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-river-ying",
         "source": "n_river",
         "target": "n_child",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-river-mo",
         "source": "n_river",
         "target": "n_land",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-child",
         "source": "n_child",
         "target": "n_land",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-land-ying",
         "source": "n_land",
         "target": "n_mask",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-land-mo",
         "source": "n_land",
         "target": "n_mengpo",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-mask",
         "source": "n_mask",
         "target": "n_mengpo",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-mengpo",
         "source": "n_mengpo",
         "target": "n_tea",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-tea-ying",
         "source": "n_tea",
         "target": "n_drink",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-tea-mo",
         "source": "n_tea",
         "target": "n_nodrink",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-drink",
         "source": "n_drink",
         "target": "n_follow",
         "sourceHandle": "out",
-        "data": {
-          "effects": [
-            {
-              "id": "drink-lizhi",
-              "kind": "var",
-              "varId": "lizhi",
-              "op": "add",
-              "value": -1
-            },
-            {
-              "id": "drink-yezhang",
-              "kind": "var",
-              "varId": "yezhang",
-              "op": "add",
-              "value": 1
-            }
-          ]
-        }
+        "targetHandle": "in"
       },
       {
         "id": "e-nodrink-ying",
         "source": "n_nodrink",
         "target": "n_follow",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-nodrink-mo",
         "source": "n_nodrink",
         "target": "n_nofollow",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-follow-ying",
         "source": "n_follow",
         "target": "n_getlight",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-follow-mo",
         "source": "n_follow",
         "target": "n_nolight",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-getlight",
         "source": "n_getlight",
         "target": "enter",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-nolight",
         "source": "n_nolight",
         "target": "enter",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-nofollow-ying",
         "source": "n_nofollow",
         "target": "n_lotus",
-        "sourceHandle": "opt:ying"
+        "sourceHandle": "opt:ying",
+        "targetHandle": "in"
       },
       {
         "id": "e-nofollow-mo",
         "source": "n_nofollow",
         "target": "n_nolotus",
-        "sourceHandle": "opt:mo"
+        "sourceHandle": "opt:mo",
+        "targetHandle": "in"
       },
       {
         "id": "e-lotus",
         "source": "n_lotus",
         "target": "enter",
-        "sourceHandle": "out"
+        "sourceHandle": "out",
+        "targetHandle": "in"
       },
       {
         "id": "e-nolotus",
         "source": "n_nolotus",
         "target": "enter",
         "sourceHandle": "out",
-        "data": {
-          "effects": [
-            {
-              "id": "nolotus-flag",
-              "kind": "flag",
-              "varId": "lotusClue",
-              "value": true
-            }
-          ]
-        }
+        "targetHandle": "in"
       },
       {
         "id": "e-init-me",
         "source": "enter",
         "target": "a_my",
         "sourceHandle": "cond:0",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1727,16 +1960,7 @@
                 "op": "gte"
               }
             ]
-          },
-          "effects": [
-            {
-              "id": "first-me",
-              "kind": "var",
-              "varId": "mineFirst",
-              "op": "set",
-              "value": 1
-            }
-          ]
+          }
         }
       },
       {
@@ -1744,23 +1968,14 @@
         "source": "enter",
         "target": "b_ai",
         "sourceHandle": "else",
-        "data": {
-          "effects": [
-            {
-              "id": "first-foe",
-              "kind": "var",
-              "varId": "mineFirst",
-              "op": "set",
-              "value": 0
-            }
-          ]
-        }
+        "targetHandle": "in"
       },
       {
         "id": "e-sk-light",
         "source": "wait",
         "target": "pu",
         "sourceHandle": "opt:light",
+        "targetHandle": "in",
         "data": {
           "weight": 1
         }
@@ -1770,6 +1985,7 @@
         "source": "wait",
         "target": "pu2",
         "sourceHandle": "opt:light",
+        "targetHandle": "in",
         "data": {
           "weight": 1
         }
@@ -1779,6 +1995,7 @@
         "source": "wait",
         "target": "zhong",
         "sourceHandle": "opt:heavy",
+        "targetHandle": "in",
         "data": {
           "weight": 1
         }
@@ -1788,6 +2005,7 @@
         "source": "wait",
         "target": "z2",
         "sourceHandle": "opt:heavy",
+        "targetHandle": "in",
         "data": {
           "weight": 1
         }
@@ -1796,59 +2014,43 @@
         "id": "e-sk-medit",
         "source": "wait",
         "target": "fuzhu",
-        "sourceHandle": "opt:medit"
+        "sourceHandle": "opt:medit",
+        "targetHandle": "in"
       },
       {
         "id": "e-sk-ult",
         "source": "wait",
         "target": "ult",
-        "sourceHandle": "opt:ult"
+        "sourceHandle": "opt:ult",
+        "targetHandle": "in"
       },
       {
         "id": "e-tele-pass",
         "source": "tele",
         "target": "block",
-        "sourceHandle": "pass"
+        "sourceHandle": "pass",
+        "targetHandle": "in"
       },
       {
         "id": "e-tele-good",
         "source": "tele",
         "target": "dodgeP",
         "sourceHandle": "good",
-        "data": {
-          "effects": [
-            {
-              "id": "dodge-qi",
-              "kind": "var",
-              "varId": "qi",
-              "op": "add",
-              "value": -1
-            }
-          ]
-        }
+        "targetHandle": "in"
       },
       {
         "id": "e-tele-fail",
         "source": "tele",
         "target": "hurt",
         "sourceHandle": "fail",
-        "data": {
-          "effects": [
-            {
-              "id": "hurt-qi",
-              "kind": "var",
-              "varId": "qi",
-              "op": "add",
-              "value": 1
-            }
-          ]
-        }
+        "targetHandle": "in"
       },
       {
         "id": "e-amy-win",
         "source": "a_my",
         "target": "win",
         "sourceHandle": "cond:0",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1868,6 +2070,7 @@
         "source": "a_my",
         "target": "b_ai",
         "sourceHandle": "cond:1",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1885,13 +2088,15 @@
         "id": "e-amy-loop",
         "source": "a_my",
         "target": "enter",
-        "sourceHandle": "else"
+        "sourceHandle": "else",
+        "targetHandle": "in"
       },
       {
         "id": "e-bai-win",
         "source": "b_ai",
         "target": "win",
         "sourceHandle": "cond:0",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1911,6 +2116,7 @@
         "source": "b_ai",
         "target": "lose",
         "sourceHandle": "cond:1",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1930,6 +2136,7 @@
         "source": "b_ai",
         "target": "enter",
         "sourceHandle": "cond:2",
+        "targetHandle": "in",
         "data": {
           "condition": {
             "all": [
@@ -1947,8 +2154,55 @@
         "id": "e-bai-my",
         "source": "b_ai",
         "target": "a_my",
-        "sourceHandle": "else"
+        "sourceHandle": "else",
+        "targetHandle": "in"
       }
     ]
-  }
+  },
+  "reactions": [
+    {
+      "when": {
+        "type": "state",
+        "condition": {
+          "all": [
+            {
+              "type": "attrRatio",
+              "entityId": "ent-boss",
+              "attr": "hp",
+              "op": "lte",
+              "value": 0
+            }
+          ]
+        }
+      },
+      "do": [
+        {
+          "kind": "goto",
+          "targetNodeId": "win"
+        }
+      ]
+    },
+    {
+      "when": {
+        "type": "state",
+        "condition": {
+          "all": [
+            {
+              "type": "attrRatio",
+              "entityId": "ent-player",
+              "attr": "hp",
+              "op": "lte",
+              "value": 0
+            }
+          ]
+        }
+      },
+      "do": [
+        {
+          "kind": "goto",
+          "targetNodeId": "lose"
+        }
+      ]
+    }
+  ]
 }

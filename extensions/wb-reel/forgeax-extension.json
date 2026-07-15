@@ -51,7 +51,7 @@
         ".reel-workbench/**",
         ".reel-scenarios/**"
       ],
-      "preferredAgent": "@forgeax-extension/agent-reia"
+      "preferredAgent": "reia"
     },
     "skills": [
       {
@@ -310,6 +310,230 @@
             "exposedToAI": true
           }
         ]
+      }
+    ],
+    "agents": [
+      {
+        "id": "reia",
+        "role": "reel-director",
+        "card": {
+          "name": {
+            "zh": "Reia",
+            "en": "Reia"
+          },
+          "cnTitle": "影游导演",
+          "enTitle": "Reel Director",
+          "color": "#D4A5A5",
+          "avatar": "🎬",
+          "avatarSet": {
+            "rulesFile": "./agents/reia/avatar/AVATAR.md"
+          }
+        },
+        "personaFile": "./agents/reia/persona/zh.md",
+        "memoryDir": "./agents/reia/memory/",
+        "produces": [
+          "<active_game>.dir/**/*.scenario.json",
+          "<active_game>.dir/**/scenes/**",
+          "<active_game>.dir/**/reel-shotlist.md",
+          "<active_game>.dir/**/qte-pacing.md",
+          ".reel-scenarios/**",
+          ".reel-assets/**"
+        ],
+        "agentTags": [
+          "reel",
+          "fmv",
+          "interactive-film",
+          "影游",
+          "互动影游",
+          "qte",
+          "branch",
+          "scenario",
+          "suspense"
+        ],
+        "tools": [
+          "reel:*",
+          "narrative:start-pipeline",
+          "narrative:resume-pipeline",
+          "narrative:get-run-status",
+          "narrative:get-story-tree",
+          "narrative:list-runs",
+          "narrative:read-file",
+          "narrative:list-files",
+          "narrative:save-step-edit",
+          "narrative:analyze-impact",
+          "narrative:regenerate-step"
+        ],
+        "preferredCliProvider": "forgeax-native",
+        "defaultLang": "zh",
+        "multiInstance": false
+      },
+      {
+        "id": "reel-storyboard",
+        "role": "reel-storyboard",
+        "card": {
+          "name": {
+            "zh": "Koma",
+            "en": "Koma"
+          },
+          "cnTitle": "分镜师",
+          "enTitle": "Storyboard Director",
+          "color": "#b8c4e8",
+          "avatar": "🎞️",
+          "avatarSet": {
+            "rulesFile": "./agents/reel-storyboard/avatar/AVATAR.md"
+          }
+        },
+        "personaFile": "./agents/reel-storyboard/persona/zh.md",
+        "memoryDir": "./agents/reel-storyboard/memory/",
+        "produces": [
+          ".reel-scenarios/**"
+        ],
+        "agentTags": [
+          "reel",
+          "storyboard",
+          "分镜",
+          "shots",
+          "影游",
+          "director"
+        ],
+        "tools": [
+          "reel:list-scenarios",
+          "reel:get-scenario",
+          "reel:generate-storyboard"
+        ],
+        "preferredCliProvider": "forgeax-native",
+        "defaultLang": "zh",
+        "multiInstance": false
+      },
+      {
+        "id": "reel-video",
+        "role": "reel-video",
+        "card": {
+          "name": {
+            "zh": "Mai",
+            "en": "Mai"
+          },
+          "cnTitle": "出片师",
+          "enTitle": "Video Output Artist",
+          "color": "#7dd3fc",
+          "avatar": "🎥",
+          "avatarSet": {
+            "rulesFile": "./agents/reel-video/avatar/AVATAR.md"
+          }
+        },
+        "personaFile": "./agents/reel-video/persona/zh.md",
+        "memoryDir": "./agents/reel-video/memory/",
+        "produces": [
+          ".reel-scenarios/**",
+          ".reel-assets/**"
+        ],
+        "agentTags": [
+          "reel",
+          "video",
+          "出片",
+          "seedance",
+          "shot",
+          "影游"
+        ],
+        "tools": [
+          "reel:list-scenarios",
+          "reel:get-scenario",
+          "reel:produce-node",
+          "reel:generate-video",
+          "reel:get-video-task"
+        ],
+        "preferredCliProvider": "forgeax-native",
+        "defaultLang": "zh",
+        "multiInstance": false
+      },
+      {
+        "id": "reel-visual",
+        "role": "reel-visual",
+        "card": {
+          "name": {
+            "zh": "Aya",
+            "en": "Aya"
+          },
+          "cnTitle": "视觉关键帧师",
+          "enTitle": "Visual & Keyframe Artist",
+          "color": "#a8e6cf",
+          "avatar": "🖼️",
+          "avatarSet": {
+            "rulesFile": "./agents/reel-visual/avatar/AVATAR.md"
+          }
+        },
+        "personaFile": "./agents/reel-visual/persona/zh.md",
+        "memoryDir": "./agents/reel-visual/memory/",
+        "produces": [
+          ".reel-scenarios/**",
+          ".reel-assets/**"
+        ],
+        "agentTags": [
+          "reel",
+          "visual",
+          "keyframe",
+          "关键帧",
+          "锚点",
+          "影游"
+        ],
+        "tools": [
+          "reel:list-scenarios",
+          "reel:get-scenario",
+          "reel:list-assets",
+          "reel:generate-visuals",
+          "reel:generate-keyframes"
+        ],
+        "preferredCliProvider": "forgeax-native",
+        "defaultLang": "zh",
+        "multiInstance": false
+      },
+      {
+        "id": "reel-editor",
+        "role": "reel-editor",
+        "card": {
+          "name": {
+            "zh": "剪辑师",
+            "en": "Timeline Editor"
+          },
+          "color": "#e8c4b8",
+          "avatar": "✂️",
+          "avatarSet": {
+            "rulesFile": "./agents/reel-editor/avatar/AVATAR.md"
+          }
+        },
+        "personaFile": "./agents/reel-editor/persona/zh.md",
+        "memoryDir": "./agents/reel-editor/memory/",
+        "produces": [
+          ".reel-scenarios/**"
+        ],
+        "agentTags": [
+          "reel",
+          "editor",
+          "剪辑",
+          "timeline",
+          "时间轴",
+          "影游",
+          "变速",
+          "字幕",
+          "花字",
+          "qte",
+          "audio"
+        ],
+        "tools": [
+          "reel:list-scenarios",
+          "reel:get-scenario",
+          "reel:get-scene-timeline",
+          "reel:list-assets",
+          "reel:update-shot",
+          "reel:edit-dialogue",
+          "reel:edit-qte",
+          "reel:edit-text-overlay",
+          "reel:edit-audio",
+          "reel:edit-marker"
+        ],
+        "preferredCliProvider": "forgeax-native",
+        "defaultLang": "zh",
+        "multiInstance": false
       }
     ]
   },

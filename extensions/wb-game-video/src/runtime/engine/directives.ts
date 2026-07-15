@@ -12,20 +12,19 @@ export interface PlayClipDirective {
   type: 'playClip'
   nodeId: string
   name: string
-  clipId?: string
   mediaId?: string
   loop: boolean
   durationMs?: number
 }
 
-/** 表现层元素（漂字/贴纸/字幕/转场…）→ 由 renderer registry 按 kind 渲染。 */
+/** 表现层元素（漂字/贴纸/字幕/转场…）→ 由 renderer registry 按 component 渲染。 */
 export interface RenderOverlayDirective {
   type: 'renderOverlay'
   nodeId: string
   elementId: string
-  kind: string
+  component: string
   params: Record<string, unknown>
-  layer?: number
+  zIndex?: number
 }
 
 /** 交互层元素（qte/choice/skill/hotspot…）→ 呈现并等待玩家输入；handles = 可产出的出口。 */
@@ -33,10 +32,10 @@ export interface OpenInteractionDirective {
   type: 'openInteraction'
   nodeId: string
   elementId: string
-  kind: string
+  component: string
   params: Record<string, unknown>
   handles: string[]
-  /** 限时 ms（choice/skill 的 timeoutMs）；>0 时 Player 到时自动 submit(undefined) 走缺省出口。 */
+  /** 限时 ms（choice/skill 的 timeoutMs；QTE 亦接受 windowMs/durationMs 归一）。>0 时 Player 到时自动 submit(undefined) 走缺省出口。 */
   timeoutMs?: number
 }
 
@@ -66,10 +65,10 @@ export interface RouteInfoDirective {
   reason: string
 }
 
-/** 结局横幅。 */
+/** 结局横幅（无出边且调用栈空时发出；胜负表现走 overlay / 图规则，不靠节点 end 标记）。 */
 export interface BannerDirective {
   type: 'banner'
-  kind: 'victory' | 'defeat' | 'ending'
+  kind: 'ending'
   nodeId: string
   title: string
 }

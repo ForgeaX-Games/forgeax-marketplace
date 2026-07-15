@@ -81,17 +81,17 @@ export function GraphTextStylePicker({
               {FONT_PRESETS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
             </select>
           </label>
-          <label className="gtsp-field"><span>字号 {(style.fontSizePct ?? 5).toFixed(1)}</span>
-            <input type="range" min={2} max={14} step={0.2} value={style.fontSizePct ?? 5} onChange={(e) => set({ fontSizePct: Number(e.target.value) })} />
+          <label className="gtsp-field"><span>字号 {(style.fontSize ?? 5).toFixed(1)}</span>
+            <input type="range" min={2} max={14} step={0.2} value={style.fontSize ?? 5} onChange={(e) => set({ fontSize: Number(e.target.value) })} />
           </label>
           <label className="gtsp-field"><span>字色</span>
             <input type="text" value={style.color ?? ''} placeholder="#ffffff" onChange={(e) => set({ color: e.target.value || undefined })} />
           </label>
           <label className="gtsp-field"><span>描边色</span>
-            <input type="text" value={style.strokeColor ?? ''} placeholder="#000000" onChange={(e) => set({ strokeColor: e.target.value || undefined })} />
+            <input type="text" value={style.WebkitTextStrokeColor ?? ''} placeholder="#000000" onChange={(e) => set({ WebkitTextStrokeColor: e.target.value || undefined })} />
           </label>
-          <label className="gtsp-field"><span>描边宽 {style.strokeWidth ?? 0}</span>
-            <input type="range" min={0} max={8} step={0.5} value={style.strokeWidth ?? 0} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+          <label className="gtsp-field"><span>描边宽 {style.WebkitTextStrokeWidth ?? 0}</span>
+            <input type="range" min={0} max={8} step={0.5} value={style.WebkitTextStrokeWidth ?? 0} onChange={(e) => set({ WebkitTextStrokeWidth: Number(e.target.value) })} />
           </label>
           <label className="gtsp-field"><span>粗细</span>
             <select value={style.fontWeight ?? 500} onChange={(e) => set({ fontWeight: Number(e.target.value) })}>
@@ -99,15 +99,12 @@ export function GraphTextStylePicker({
             </select>
           </label>
           <label className="gtsp-field"><span>对齐</span>
-            <select value={style.align ?? 'center'} onChange={(e) => set({ align: e.target.value as GraphTextStyle['align'] })}>
+            <select value={style.textAlign ?? 'center'} onChange={(e) => set({ textAlign: e.target.value as GraphTextStyle['textAlign'] })}>
               <option value="left">左</option><option value="center">中</option><option value="right">右</option>
             </select>
           </label>
           <label className="gtsp-check">
-            <input type="checkbox" checked={style.italic ?? false} onChange={(e) => set({ italic: e.target.checked || undefined })} /><span>斜体</span>
-          </label>
-          <label className="gtsp-check">
-            <input type="checkbox" checked={style.underline ?? false} onChange={(e) => set({ underline: e.target.checked || undefined })} /><span>下划线</span>
+            <input type="checkbox" checked={style.textDecoration === 'underline'} onChange={(e) => set({ textDecoration: e.target.checked ? 'underline' : undefined })} /><span>下划线</span>
           </label>
         </div>
       )}

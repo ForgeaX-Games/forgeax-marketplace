@@ -9,6 +9,7 @@
  */
 import type { FXEdge, FXGraph, FXNode, Handle } from '../../runtime/schema/react-flow-schema'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
 import { deriveInputs, deriveOutputs } from '../../runtime/registry/kind-registry'
 
 function nodeOutputHandleIds(graph: GameGraph, node: GameNode): string[] {
@@ -67,35 +68,29 @@ export function toFXView(graph: GameGraph): FXGraph {
   return {
     nodes: graph.nodes.map((node): FXNode => ({
       id: node.id,
-      type: node.data.end ? 'output' : 'default',
+      type: 'default',
       position: layout?.[node.id] ?? node.position,
       inputs: deriveInputs().map((h) => toHandle(h.id, 'target')),
       outputs: nodeOutputHandleIds(graph, node).map((id) => toHandle(id, 'source')),
       data: {
         label: node.data.name,
-        subtitle: node.data.clipId ?? node.data.media?.ref ?? '',
-        elementType: 'perf',
         badge: badgeOf(node),
-        sceneKind: '',
-        hud: node.data.hud?.preset ?? '',
       },
     })),
     edges: graph.edges.map((e): FXEdge => ({
       id: e.id,
       source: e.source,
       target: e.target,
-      sourceHandle: e.sourceHandle ? `source:${e.sourceHandle}` : undefined,
+      sourceHandle: `source:${e.sourceHandle}`,
       targetHandle: 'target:in',
       label: e.data?.label,
-      data: { edgeId: e.id, conditionExpression: e.data?.condition ? '有条件' : undefined },
     })),
   }
 }
 
 function badgeOf(node: GameNode): string {
-  const kinds = new Set(node.data.timeline.map((t) => t.kind))
-  if (kinds.has('qte')) return 'qte'
-  if (kinds.has('skill') || kinds.has('choice')) return 'choice'
-  if (node.data.end) return node.data.end
+  if (getSubFlowPack(node.data)) return 'pack'
+  if (getSubFlow(node.data)) return 'subflow'
+  if (node.data.overlayNodes?.length) return 'overlay'
   return ''
 }
