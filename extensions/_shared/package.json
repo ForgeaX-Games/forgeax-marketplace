@@ -1,0 +1,8 @@
+{
+  "name": "@forgeax-extension/shared-packages",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "external-asset-meta"
+  ]
+}

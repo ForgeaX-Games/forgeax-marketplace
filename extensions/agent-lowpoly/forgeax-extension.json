@@ -3,10 +3,11 @@
   "id": "@forgeax-extension/agent-lowpoly",
   "version": "0.1.0",
   "kind": "agent",
+  "entry": { "backend": "./server/tool-handlers.ts" },
   "displayName": { "zh": "Poly · 低多边形建模师", "en": "Poly · Lowpoly Modeler" },
   "description": {
-    "zh": "专职 3D 低多边形建模师。在「3D 低多边形生成器」工作台里用节点 + 电池流水线把需求建成引擎中立的 .glb 模型，覆盖三个层级：单物件 / 机械装配、建筑（房屋 / 房间 / 构件），以及把它们摆成的场景 / 城市；并自查自修迭代。只做 3D 低面建模，不碰 2D 立绘 / 角色 bio / 引擎代码。",
-    "en": "Dedicated 3D lowpoly modeler. Builds engine-neutral .glb models in the 3D Lowpoly Generator workbench via the node + battery pipeline across three tiers: single objects / mechanical assemblies, buildings (houses / rooms / elements), and scenes / cities composed from them; self-checks and iterates with screenshots. 3D lowpoly only — no 2D art, character bios, or engine code."
+    "zh": "专职 3D 低多边形建模师：把自然语言需求程序化建成真实 .glb，覆盖单物件、机械装配、建筑与场景；用户要求交付时，可写入当前会话绑定游戏并验证 Edit 识别。不做 2D、角色 bio 或游戏玩法代码。",
+    "en": "Dedicated 3D lowpoly modeler: turns natural-language requests into real programmatic .glb assets across props, mechanical assemblies, architecture, and scenes. When delivery is requested, it writes to the session-bound game and verifies Edit recognition. No 2D art, character bios, or gameplay code."
   },
   "provides": {
     "agent": {
@@ -29,9 +30,71 @@
       "multiInstance": false,
       "tools": ["lowpoly:*"],
       "defaultSkills": [
-        { "source": "plugin", "pluginId": "@forgeax-extension/wb-3d-lowpoly", "skillId": "compose-lowpoly" }
+        { "source": "plugin", "pluginId": "@forgeax-extension/wb-3d-lowpoly", "skillId": "compose-lowpoly" },
+        { "source": "inline", "skillId": "agent-native-lowpoly-delivery" }
       ]
-    }
+    },
+    "skills": [
+      {
+        "id": "agent-native-lowpoly-delivery",
+        "entry": "./skills/agent-native-lowpoly-delivery/SKILL.md",
+        "displayName": {
+          "zh": "低模生成与游戏交付闭环",
+          "en": "Lowpoly Creation and Game Delivery"
+        },
+        "description": {
+          "zh": "根据任务复杂度选择建模策略，并把真实 GLB 交付到当前会话绑定游戏后复验。",
+          "en": "Choose a modeling strategy by task complexity, then deliver and re-verify a real GLB in the session-bound game."
+        }
+      }
+    ],
+    "tools": [
+      {
+        "id": "lowpoly:game-import-status",
+        "args": {
+          "type": "object",
+          "required": ["assetPath"],
+          "properties": {
+            "assetPath": {
+              "type": "string",
+              "description": "lowpoly:export-glb 返回的绝对 path，或相对低模工作区的 assets/3d/<name>.glb"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "只读检查：当前会话绑定游戏是否已收到这份低模 GLB，且引擎身份证与当前源文件一致。",
+          "en": "Read-only check that the session-bound game contains this lowpoly GLB and its engine identity matches the current source."
+        }
+      },
+      {
+        "id": "lowpoly:import-to-game",
+        "args": {
+          "type": "object",
+          "required": ["assetPath"],
+          "properties": {
+            "assetPath": {
+              "type": "string",
+              "description": "lowpoly:export-glb 返回的绝对 path，或相对低模工作区的 assets/3d/<name>.glb"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "requireConfirm": "destructive",
+        "confirmMessage": {
+          "zh": "允许 Poly 把这份 3D 模型写入当前游戏资产库？",
+          "en": "Allow Poly to write this 3D model into the current game's asset library?"
+        },
+        "description": {
+          "zh": "把低模工作台导出的真实 GLB 交付到当前会话绑定游戏，并生成 Edit 可识别的引擎身份证。",
+          "en": "Deliver a real GLB exported by the lowpoly workbench into the session-bound game and create the engine identity required by Edit."
+        }
+      }
+    ]
   },
   "experimental": true
 }

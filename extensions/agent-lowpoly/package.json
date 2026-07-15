@@ -1,0 +1,19 @@
+{
+  "name": "@forgeax-extension/agent-lowpoly",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@forgeax-extension/external-asset-meta": "file:../_shared/external-asset-meta"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.4.1",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}
