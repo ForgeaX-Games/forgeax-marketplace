@@ -3,7 +3,7 @@
  * 侧的**渲染器 registry**按 `kind` 派发成实际 UI（视频/HUD/QTE/选项/漂字…）。
  *
  * 关键设计（spec §3.3）：presentation / interaction 用**泛型** `renderOverlay` / `openInteraction`
- * 携带 `{ kind, params }`，而不是每种玩法一个 directive 类型——这样新增 kind 时 Player 只需在
+ * 携带 `{ kind, inputs }`，而不是每种玩法一个 directive 类型——这样新增 kind 时 Player 只需在
  * registry 注册一个渲染器，**不必改 Player 的 switch**（消除旧 BlueprintPlayer 的 else-if 爆炸）。
  */
 
@@ -17,14 +17,26 @@ export interface PlayClipDirective {
   durationMs?: number
 }
 
+import type { Layout } from '../schema/node-config-schema'
+
 /** 表现层元素（漂字/贴纸/字幕/转场…）→ 由 renderer registry 按 component 渲染。 */
 export interface RenderOverlayDirective {
   type: 'renderOverlay'
   nodeId: string
+  /** 挂载键（节点 overlayNodes 或 spawn 瞬态 id）；kind.render 可省略，由引擎补齐。 */
+  mountId?: string
+  /** 挂载级排版：相对视频舞台；无显式尺寸 → 自适应内容。 */
+  mountLayout?: Layout
   elementId: string
   component: string
-  params: Record<string, unknown>
-  zIndex?: number
+  inputs: Record<string, unknown>
+  /** 子组件级排版：相对挂载盒；挂载有尺寸时缺省 = 左上角。 */
+  childLayout?: Layout
+  /**
+   * 组件自定位：内部用 %/inset 相对父框摆放（如 floatText 用 x/y）。
+   * 为真时子盒需铺满挂载盒且点击穿透，否则组件的百分比会相对零尺寸盒塌成左上角。
+   */
+  selfPositioned?: boolean
 }
 
 /** 交互层元素（qte/choice/skill/hotspot…）→ 呈现并等待玩家输入；handles = 可产出的出口。 */
@@ -33,7 +45,7 @@ export interface OpenInteractionDirective {
   nodeId: string
   elementId: string
   component: string
-  params: Record<string, unknown>
+  inputs: Record<string, unknown>
   handles: string[]
   /** 限时 ms（choice/skill 的 timeoutMs；QTE 亦接受 windowMs/durationMs 归一）。>0 时 Player 到时自动 submit(undefined) 走缺省出口。 */
   timeoutMs?: number
@@ -65,14 +77,6 @@ export interface RouteInfoDirective {
   reason: string
 }
 
-/** 结局横幅（无出边且调用栈空时发出；胜负表现走 overlay / 图规则，不靠节点 end 标记）。 */
-export interface BannerDirective {
-  type: 'banner'
-  kind: 'ending'
-  nodeId: string
-  title: string
-}
-
 /** 日志（调试 / 可视化事件流）。 */
 export interface LogDirective {
   type: 'log'
@@ -87,7 +91,6 @@ export type RuntimeDirective =
   | HudUpdateDirective
   | StateChangedDirective
   | RouteInfoDirective
-  | BannerDirective
   | LogDirective
 
 export function isOpenInteraction(d: RuntimeDirective): d is OpenInteractionDirective {

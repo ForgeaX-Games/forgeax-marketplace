@@ -1,29 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
-import { registerKind, unregisterKind } from '../registry/kind-registry'
+import { registerComponent, unregisterComponent } from '../registry/component-registry'
 import { isRenderOverlay, isOpenInteraction } from '../engine/directives'
 import type { GameGraph, GameNode, GameScenario, Reaction, SubFlowPackDef } from '../schema/graph-schema'
 import { node, scnOf, rid } from './test-fixtures'
 
 const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
-// Minimal kinds: a presentation "float", a choice-like（副作用改由 node.data.reactions 承载）。
-const KINDS = ['floatT', 'choiceX']
+// Minimal components: a presentation "float", a choice-like（副作用改由 node.data.reactions 承载）。
+const COMPONENT_IDS = ['floatT', 'choiceX']
 beforeEach(() => {
-  registerKind({ kind: 'floatT', role: 'presentation', validate: () => [], outputs: () => [] })
-  registerKind({
-    kind: 'choiceX',
+  registerComponent('floatT', { role: 'presentation' })
+  registerComponent('choiceX', {
     role: 'interaction',
-    validate: () => [],
-    outputs: (p) => ((p as { options?: { key: string }[] }).options ?? []).map((o) => ({ id: `opt:${o.key}` })),
-    resolve: (_c, p, input) => {
-      const pp = p as { options?: { key: string }[]; defaultKey?: string }
-      const key = typeof input === 'string' ? input : pp.defaultKey ?? pp.options?.[0]?.key
-      return { outcome: `opt:${key}` }
-    },
+    // 出口由实例 inputs.events 派生（handlesOf）；无需声明 outputs。
   })
 })
-afterEach(() => KINDS.forEach(unregisterKind))
+afterEach(() => COMPONENT_IDS.forEach(unregisterComponent))
 
 
 describe('exit reaction', () => {
@@ -38,7 +31,7 @@ describe('exit reaction', () => {
         }),
         node('b', { }),
       ],
-      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }],
+      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'default', targetHandle: 'in' }],
     }
     const scn = scnOf(graph, { variables: { mark: { id: 'mark', initial: 0 } } })
     const rt = new GraphRuntime(scn.graph, scn)
@@ -57,7 +50,7 @@ describe('element window (startMs/endMs)', () => {
         node('a', {
           durationMs: 5000,
           timeline: [
-            { id: 'w', role: 'presentation', kind: 'floatT', trigger: { when: 'enter' }, window: { startMs: 2000, endMs: 4000 }, params: { text: 'x' } },
+            { id: 'w', role: 'presentation', kind: 'floatT', trigger: { when: 'enter' }, window: { startMs: 2000, endMs: 4000 }, inputs: { text: 'x' } },
           ],
         }),
       ],
@@ -80,7 +73,7 @@ describe('subflow (subFlow)', () => {
         node('sub', { durationMs: 100 }),
         node('after', { }),
       ],
-      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out', targetHandle: 'in' }],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'default', targetHandle: 'in' }],
     }
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)
@@ -102,7 +95,7 @@ describe('subflow pack (subFlowPack)', () => {
         node('wrap', { subFlowPack: { id: 'enemy-turn', version: '1' }, durationMs: 100 }),
         node('after', { }),
       ],
-      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'out', targetHandle: 'in' }],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'default', targetHandle: 'in' }],
     }
     const packGraph: GameGraph = {
       nodes: [node('tele', { durationMs: 100 })],
@@ -137,14 +130,14 @@ describe('subflow pack (subFlowPack)', () => {
   })
 })
 
-describe('transition kind', () => {
+describe('transition component', () => {
   it('emits a transition overlay on enter (generic renderOverlay)', () => {
-    registerKind({ kind: 'transition', role: 'presentation', validate: () => [], outputs: () => [] })
+    registerComponent('transition', { role: 'presentation' })
     const graph: GameGraph = {
       nodes: [
         node('a', {
           durationMs: 1000,
-          timeline: [{ id: 't', role: 'presentation', kind: 'transition', trigger: { when: 'enter' }, params: { durationMs: 500 } }],
+          timeline: [{ id: 't', role: 'presentation', kind: 'transition', trigger: { when: 'enter' }, inputs: { durationMs: 500 } }],
         }),
       ],
       edges: [],
@@ -153,12 +146,12 @@ describe('transition kind', () => {
     const rt = new GraphRuntime(scn.graph, scn)
     const dirs = rt.start()
     expect(dirs.some((d) => isRenderOverlay(d) && d.component === 'transition')).toBe(true)
-    unregisterKind('transition')
+    unregisterComponent('transition')
   })
 })
 
 describe('choice timeout', () => {
-  it('openInteraction carries timeoutMs; submit(undefined) falls back to defaultKey', () => {
+  it('openInteraction carries timeoutMs; submit(undefined) falls back to defaultEvent', () => {
     const graph: GameGraph = {
       nodes: [
         node('a', {
@@ -168,7 +161,7 @@ describe('choice timeout', () => {
               role: 'interaction',
               kind: 'choiceX',
               trigger: { when: 'enter' },
-              params: { options: [{ key: 'a' }, { key: 'b' }], timeoutMs: 3000, defaultKey: 'b' },
+              inputs: { events: [{ id: 'a' }, { id: 'b' }], timeoutMs: 3000, defaultEvent: 'b' },
             },
           ],
         }),
@@ -176,8 +169,8 @@ describe('choice timeout', () => {
         node('lose', { }),
       ],
       edges: [
-        { id: 'e-a', source: 'a', target: 'win', sourceHandle: 'opt:a', targetHandle: 'in' },
-        { id: 'e-b', source: 'a', target: 'lose', sourceHandle: 'opt:b', targetHandle: 'in' },
+        { id: 'e-a', source: 'a', target: 'win', sourceHandle: 'a', targetHandle: 'in' },
+        { id: 'e-b', source: 'a', target: 'lose', sourceHandle: 'b', targetHandle: 'in' },
       ],
     }
     const scn = scnOf(graph)
@@ -185,7 +178,7 @@ describe('choice timeout', () => {
     const dirs = rt.start()
     const open = dirs.find(isOpenInteraction)
     expect(open?.timeoutMs).toBe(3000)
-    // 模拟到点未选：submit(undefined) → defaultKey 'b' → lose
+    // 模拟到点未选：submit(undefined) → defaultEvent 'b' → lose
     rt.submitInteraction(rid('a', 'c'), undefined)
     expect(rt.state.currentNodeId).toBe('lose')
   })
@@ -200,7 +193,7 @@ describe('choice timeout', () => {
               role: 'interaction',
               kind: 'choiceX',
               trigger: { when: 'enter' },
-              params: { options: [{ key: 'pass' }, { key: 'fail' }], windowMs: 200, defaultKey: 'fail' },
+              inputs: { events: [{ id: 'pass' }, { id: 'fail' }], windowMs: 200, defaultEvent: 'fail' },
             },
           ],
         }),
@@ -208,8 +201,8 @@ describe('choice timeout', () => {
         node('miss', {}),
       ],
       edges: [
-        { id: 'e-p', source: 'a', target: 'ok', sourceHandle: 'opt:pass', targetHandle: 'in' },
-        { id: 'e-f', source: 'a', target: 'miss', sourceHandle: 'opt:fail', targetHandle: 'in' },
+        { id: 'e-p', source: 'a', target: 'ok', sourceHandle: 'pass', targetHandle: 'in' },
+        { id: 'e-f', source: 'a', target: 'miss', sourceHandle: 'fail', targetHandle: 'in' },
       ],
     }
     const scn = scnOf(graph)
@@ -219,10 +212,59 @@ describe('choice timeout', () => {
   })
 })
 
+describe('submitInteraction · event 结算只读 mount.reactions（选项/通用组件结算修复的运行时证明）', () => {
+  // 复现「素材属性编辑面板统一化」修复的真实运行时后果：2026-07-16 边路由统一重构曾把
+  // 选项/通用组件结算误写进 node.data.reactions，但 submitInteraction 从头到尾只读
+  // nodeOverlayMounts(node)[...].reactions（见 engine.ts:467-470），配了但从不生效。
+  function seedChoiceNode(reactionsOn: 'mount' | 'legacyNode'): { graph: GameGraph; scn: GameScenario } {
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          durationMs: 1000,
+          timeline: [
+            { id: 'c', role: 'interaction', kind: 'choiceX', trigger: { when: 'enter' }, params: { events: [{ id: 'hit' }] } },
+          ],
+        }),
+      ],
+      edges: [],
+    }
+    const scn = scnOf(graph, {
+      entities: { 'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 700 }, attrMeta: { hp: { max: 700 } } } },
+    })
+    const a = scn.graph.nodes.find((n) => n.id === 'a')!
+    const effects = [{ id: 'hit-fx', kind: 'attr' as const, entityId: 'ent-boss', attr: 'hp', op: 'add' as const, value: -100 }]
+    if (reactionsOn === 'mount') {
+      a.data.overlayNodes = [{
+        overlay: 'ov-a',
+        reactions: [{ when: { type: 'event', id: 'hit' }, do: [{ kind: 'effect', effects }] }],
+      }]
+    } else {
+      a.data.reactions = [{ when: { type: 'event', id: 'hit' }, do: [{ kind: 'effect', effects }] }]
+    }
+    return { graph: scn.graph, scn }
+  }
+
+  it('写在 mount.reactions（新统一写入位置）：submitInteraction 后 effect 真的生效', () => {
+    const { graph, scn } = seedChoiceNode('mount')
+    const rt = new GraphRuntime(graph, scn)
+    rt.start()
+    rt.submitInteraction(rid('a', 'c'), 'hit')
+    expect(rt.state.entities['ent-boss']?.attrs.hp).toBe(600)
+  })
+
+  it('写在 node.data.reactions（历史 bug 位置）：submitInteraction 不读它，effect 不生效', () => {
+    const { graph, scn } = seedChoiceNode('legacyNode')
+    const rt = new GraphRuntime(graph, scn)
+    rt.start()
+    rt.submitInteraction(rid('a', 'c'), 'hit')
+    expect(rt.state.entities['ent-boss']?.attrs.hp).toBe(700)
+  })
+})
+
 describe('graph-level reactive rules (instant defeat/victory)', () => {
   const bossDead: Reaction = {
     when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
-    do: [{ kind: 'goto', targetNodeId: 'win' }],
+    do: [{ kind: 'advance', edgeId: 'e-win' }],
   }
 
   it('jumps to goto immediately when a rule matches mid-performance (at trigger)', () => {
@@ -237,7 +279,7 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
         }),
         node('win', { }),
       ],
-      edges: [],
+      edges: [{ id: 'e-win', source: 'a', target: 'win', sourceHandle: 'win', targetHandle: 'in' }],
     }
     const scn = scnOf(graph, {
       reactions: [bossDead],
@@ -248,9 +290,9 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
     const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
     expect(rt.state.currentNodeId).toBe('a')
-    const dirs = rt.tick(600) // at:500 reaction fires → boss dead → instant jump to win
+    rt.tick(600) // at:500 reaction fires → boss dead → instant jump to win
     expect(rt.state.currentNodeId).toBe('win')
-    expect(dirs.some((d) => d.type === 'banner' && d.kind === 'ending')).toBe(true)
+    expect(rt.state.phase).toBe('ended') // win 无出边 & 栈空 → 本局结束（不强制结局文案）
   })
 
   it('does not jump when the rule condition is not met', () => {
@@ -264,7 +306,7 @@ describe('graph-level reactive rules (instant defeat/victory)', () => {
         }),
         node('win', { }),
       ],
-      edges: [],
+      edges: [{ id: 'e-win', source: 'a', target: 'win', sourceHandle: 'win', targetHandle: 'in' }],
     }
     const scn = scnOf(graph, {
       reactions: [bossDead],

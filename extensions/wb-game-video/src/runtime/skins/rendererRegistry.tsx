@@ -1,19 +1,26 @@
 /**
- * Player 渲染器 registry —— 按 `kind` / `component`(皮肤 id) 派发**独立 React 组件**（spec §3.3）。
+ * Player 渲染器 registry —— 按 `component`（顶层组件 id）派发**独立 React 组件**（spec §3.3）。
  *
  * 多局并行：每个 GraphSession 持有自己的 `SkinRegistry`；模块级 `register*` / `render*`
  * 仍指向 `defaultSkinRegistry`（编辑器兼容）。
  */
 import { Component, createContext, useContext, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
-import type { OverlaySnap, InteractionSnap, HudSnap } from '../engine/session'
+import type { OverlaySnap, OverlayChildSnap, OverlayMountSnap, InteractionSnap, HudSnap } from '../engine/session'
+import type { ConditionTarget } from '../engine/condition'
 import type { Layout } from '../schema/node-config-schema'
-import { layoutToCss } from '../schema/layout'
-import type { ChoiceParams, HotspotParams } from '../registry/core-kinds'
+import { childWrapStyle, layoutHasExplicitSize, layoutIsEffectivelyEmpty, layoutToCss, mountWrapStyle } from '../schema/layout'
+import type { ChoiceParams, HotspotParams } from '../registry/core-components'
 import { isPlayerFocused } from '../input/playerFocus'
+import { isOptionLocked } from './optionLock'
 
 /** 皮肤/HUD 组件渲染时可读的游戏态上下文（vars/entities/score/flags）。 */
 export interface SkinCtx {
   hud: HudSnap
+  /**
+   * 选项门控求值目标（与引擎 condition 同源）。
+   * 试玩面应注入 `runtime.state`；缺省时 `isOptionLocked` 用 hud 拼弱化态。
+   */
+  condition?: ConditionTarget
 }
 
 /** HUD 元素在屏幕上的锚点位置（皮肤自定位用；缺省由皮肤按角色推断）。 */
@@ -27,6 +34,8 @@ export interface HudElementView {
   component?: string
   /** 可选：绑定的实体/变量 id（缺省用 element 本身）。 */
   bind?: string
+  /** 绑定的属性名（缺省 hp；来自 OverlayChild.inputs.attr）。 */
+  attr?: string
   label?: string
   accent?: string
   /** @deprecated 用 layout（CSS inset）；皮肤内硬编码定位的遗留字段。 */
@@ -38,15 +47,26 @@ export interface HudElementView {
 // ── 组件 props 契约（每类渲染组件的统一入参）──────────────────────────────────────
 export interface OverlayProps {
   overlay: OverlaySnap
+  /** 展示组件的非阻塞事件回调（按钮点击等）；由试玩面注入，路由到 session.emitEvent。 */
+  emit?: (key: string) => void
+  /** 编辑器预览：纯 CSS 动画已由宿主 `.gc-preview-clock.is-paused` 统一冻住，多数皮肤无需接这两个。 */
+  preview?: boolean
+  previewTimeMs?: number
 }
 export interface InteractionProps {
   interaction: InteractionSnap
   submit: (input: unknown) => void
   ctx?: SkinCtx
+  /** 编辑器预览：由 previewTimeMs 驱动显隐/动画冻结，不吃键、不 submit。 */
+  preview?: boolean
+  previewTimeMs?: number
 }
 export interface HudProps {
   element: HudElementView
   ctx: SkinCtx
+  /** 编辑器预览：同 OverlayProps，多数 HUD 皮肤（常驻血条等）无需接。 */
+  preview?: boolean
+  previewTimeMs?: number
 }
 export type OverlayComponent = ComponentType<OverlayProps>
 export type InteractionComponent = ComponentType<InteractionProps>
@@ -124,44 +144,132 @@ export class SkinRegistry {
   registerHudRenderer(id: string, c: HudComponent): void {
     this.hud.set(id, c)
   }
+  /** 是否已注册 HUD 皮肤（预览分流用；与 ComponentDef.surface 解耦）。 */
+  hasHudRenderer(id: string): boolean {
+    return this.hud.has(id)
+  }
+  /** 是否已注册表现层 overlay 渲染器。 */
+  hasOverlayRenderer(id: string): boolean {
+    return this.overlay.has(id)
+  }
+  /** 是否已注册交互/皮肤渲染器。 */
+  hasInteractionRenderer(id: string): boolean {
+    return this.interaction.has(id)
+  }
 
-  renderOverlay(overlay: OverlaySnap): ReactNode {
+  /**
+   * 渲染一份挂载的全部 children。
+   * - 表现层（dialogue / floatText …）走 overlay 表；
+   * - **HUD（battleHpBar 等）走 hud 表**：引擎仍把它们放进 overlayMounts（enter 即发射），
+   *   但皮肤注册在 hud registry——无 ctx 时只能静默跳过，试玩必须传入 `{ hud }`。
+   */
+  /** 子项是否「舞台锚定」：自定位表现层（floatText 用 x/y）或走 hud 表的皮肤（血条按 CSS 角锚定舞台）。 */
+  private isStageAnchoredChild(child: OverlayChildSnap): boolean {
+    if (this.overlay.get(child.component)) return !!child.selfPositioned
+    return !!this.hud.get(child.component)
+  }
+
+  renderOverlayMount(
+    mount: OverlayMountSnap,
+    emit?: (elementId: string, key: string) => void,
+    ctx?: SkinCtx,
+  ): ReactNode {
+    const mountHasSize = layoutHasExplicitSize(mount.mountLayout)
+    // 无显式 layout 且含舞台锚定子项（HUD 血条 / 自定位飘字）→ 挂载盒必须铺满舞台，否则 fit-content 会塌成
+    // 左上角 0×0，子项的角锚定（right/bottom/left:50%…）相对 0×0 盒解析 → 跑到屏幕外/挤到左上角。
+    const stageAnchored =
+      layoutIsEffectivelyEmpty(mount.mountLayout) && mount.children.some((c) => this.isStageAnchoredChild(c))
+    const wrapStyle: CSSProperties = stageAnchored
+      ? { position: 'absolute', inset: 0, pointerEvents: 'none' }
+      : mountWrapStyle(mount.mountLayout)
+    return (
+      <div key={mount.mountId} style={wrapStyle}>
+        {mount.children.map((child) => {
+          const C = this.overlay.get(child.component)
+          if (C) {
+            const snap: OverlaySnap = {
+              elementId: child.elementId,
+              component: child.component,
+              inputs: child.inputs,
+            }
+            // 自定位组件（floatText 等用 x/y）：子盒铺满挂载盒且点击穿透，
+            // 让组件内部的百分比相对完整父框解析（否则会塌成左上角、被裁切）。
+            const wrapStyle: CSSProperties = child.selfPositioned
+              ? { position: 'absolute', inset: 0, pointerEvents: 'none' }
+              : childWrapStyle(child.childLayout, mountHasSize)
+            return (
+              <div key={child.elementId} style={wrapStyle}>
+                <SkinErrorBoundary name={child.component}>
+                  <C overlay={snap} emit={(key) => emit?.(child.elementId, key)} />
+                </SkinErrorBoundary>
+              </div>
+            )
+          }
+          // HUD 回退：挂载的静态方案（血条/气力）等 surface:'hud' 组件不在 overlay 表。
+          if (ctx) {
+            const inputs = child.inputs as { bind?: string; label?: string; accent?: string }
+            const Hud = this.hud.get(child.component)
+            if (Hud) {
+              const bind = typeof inputs.bind === 'string' ? inputs.bind : child.elementId
+              const el: HudElementView = {
+                element: bind,
+                component: child.component,
+                bind,
+                label: typeof inputs.label === 'string' ? inputs.label : undefined,
+                accent: typeof inputs.accent === 'string' ? inputs.accent : undefined,
+                layout: child.childLayout,
+              }
+              return (
+                <span key={child.elementId} style={{ display: 'contents' }}>
+                  {this.renderHudElement(el, ctx)}
+                </span>
+              )
+            }
+          }
+          return null
+        })}
+      </div>
+    )
+  }
+
+  /** @deprecated 用 renderOverlayMount */
+  renderOverlay(overlay: OverlaySnap, emit?: (key: string) => void, preview?: { timeMs?: number }): ReactNode {
     const C = this.overlay.get(overlay.component)
     if (!C) return null
     return (
       <SkinErrorBoundary key={overlay.elementId} name={overlay.component}>
-        <C overlay={overlay} />
+        <C overlay={overlay} emit={emit} preview={!!preview} previewTimeMs={preview?.timeMs} />
       </SkinErrorBoundary>
     )
   }
 
-  renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx): ReactNode {
-    const paramComponent = (interaction.params as { component?: string }).component
-    const Skin = this.interaction.get(paramComponent ?? interaction.component)
-    const Default = this.interaction.get(interaction.component)
-    const C = Skin ?? Default
+  renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx, preview?: { timeMs?: number }): ReactNode {
+    const C = this.interaction.get(interaction.component)
     if (!C) return null
-    const name = paramComponent ?? interaction.component
-    const props: InteractionProps = { interaction, submit: safe(name, submit), ctx }
-    const fallback = Skin && Default && Default !== Skin ? <Default {...props} /> : undefined
+    const name = interaction.component
+    const props: InteractionProps = {
+      interaction,
+      submit: safe(name, submit),
+      ctx,
+      preview: !!preview,
+      previewTimeMs: preview?.timeMs,
+    }
     return (
-      <SkinErrorBoundary key={`${interaction.elementId}:${name}`} name={name} fallback={fallback}>
+      <SkinErrorBoundary key={`${interaction.elementId}:${name}`} name={name}>
         <C {...props} />
       </SkinErrorBoundary>
     )
   }
 
-  renderHudElement(element: HudElementView, ctx: SkinCtx): ReactNode {
+  renderHudElement(element: HudElementView, ctx: SkinCtx, preview?: { timeMs?: number }): ReactNode {
     const C = element.component ? this.hud.get(element.component) : undefined
     if (!C) return null
     const body = (
       <SkinErrorBoundary key={element.element} name={element.component ?? element.element}>
-        <C element={element} ctx={ctx} />
+        <C element={element} ctx={ctx} preview={!!preview} previewTimeMs={preview?.timeMs} />
       </SkinErrorBoundary>
     )
     if (!element.layout) return body
-    // 无宽高时视为「整舞台锚点」：水墨血条等皮肤内部用 absolute 自定位，
-    // 若包在 left/top=0 的零尺寸盒里会全部飞出可视区。
     const hasBox = element.layout.width != null || element.layout.height != null
       || (element.layout.left != null && element.layout.right != null)
       || (element.layout.top != null && element.layout.bottom != null)
@@ -192,8 +300,15 @@ export const defaultSkinRegistry = new SkinRegistry()
 export function registerOverlayRenderer(kind: string, c: OverlayComponent): void {
   defaultSkinRegistry.registerOverlayRenderer(kind, c)
 }
-export function renderOverlay(overlay: OverlaySnap): ReactNode {
-  return defaultSkinRegistry.renderOverlay(overlay)
+export function renderOverlayMount(
+  mount: OverlayMountSnap,
+  emit?: (elementId: string, key: string) => void,
+  ctx?: SkinCtx,
+): ReactNode {
+  return defaultSkinRegistry.renderOverlayMount(mount, emit, ctx)
+}
+export function renderOverlay(overlay: OverlaySnap, emit?: (key: string) => void, preview?: { timeMs?: number }): ReactNode {
+  return defaultSkinRegistry.renderOverlay(overlay, emit, preview)
 }
 export function registerInteractionRenderer(kind: string, c: InteractionComponent): void {
   defaultSkinRegistry.registerInteractionRenderer(kind, c)
@@ -201,14 +316,19 @@ export function registerInteractionRenderer(kind: string, c: InteractionComponen
 export function registerInteractionSkin(id: string, c: InteractionComponent): void {
   defaultSkinRegistry.registerInteractionSkin(id, c)
 }
-export function renderInteraction(interaction: InteractionSnap, submit: (input: unknown) => void, ctx?: SkinCtx): ReactNode {
-  return defaultSkinRegistry.renderInteraction(interaction, submit, ctx)
+export function renderInteraction(
+  interaction: InteractionSnap,
+  submit: (input: unknown) => void,
+  ctx?: SkinCtx,
+  preview?: { timeMs?: number },
+): ReactNode {
+  return defaultSkinRegistry.renderInteraction(interaction, submit, ctx, preview)
 }
 export function registerHudRenderer(id: string, c: HudComponent): void {
   defaultSkinRegistry.registerHudRenderer(id, c)
 }
-export function renderHudElement(element: HudElementView, ctx: SkinCtx): ReactNode {
-  return defaultSkinRegistry.renderHudElement(element, ctx)
+export function renderHudElement(element: HudElementView, ctx: SkinCtx, preview?: { timeMs?: number }): ReactNode {
+  return defaultSkinRegistry.renderHudElement(element, ctx, preview)
 }
 export function registerCoreRenderers(): void {
   defaultSkinRegistry.registerCoreRenderers()
@@ -229,15 +349,47 @@ const btn = (bg: string): CSSProperties => ({
 
 const bottomRow: CSSProperties = { position: 'absolute', left: 0, right: 0, bottom: '7%', display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', pointerEvents: 'auto' }
 
-function ChoiceButtons({ interaction, submit }: InteractionProps): ReactNode {
-  const params = interaction.params as unknown as ChoiceParams
+/**
+ * 归一化锚点（0~1，画面中心 0.5,0.5）→ 居中于该点的绝对定位样式。
+ * 与编辑器预览拖拽手柄（`activePreviewOverlaysFromNode` / `GraphVideoView` 的 `o.x/o.y`）用同一套坐标语义，
+ * 保证「预览手柄在哪、试玩/成片就画在哪」——这两处历史上各写各的定位 CSS，是「拖动手柄能动、真实呈现不动」的根因。
+ */
+function anchorStyle(x: number, y: number, extra?: CSSProperties): CSSProperties {
+  return {
+    position: 'absolute',
+    left: `${x * 100}%`,
+    top: `${y * 100}%`,
+    transform: 'translate(-50%, -50%)',
+    maxWidth: '84%',
+    ...extra,
+  }
+}
+
+/** x/y 均为有限数字才算「有锚点」；否则回退各组件自带的固定布局（历史默认样式不变）。 */
+function hasAnchor(x: unknown, y: unknown): x is number {
+  return typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y)
+}
+
+function ChoiceButtons({ interaction, submit, ctx }: InteractionProps): ReactNode {
+  const inputs = interaction.inputs as unknown as ChoiceParams
+  const rowStyle = hasAnchor(inputs.x, inputs.y)
+    ? anchorStyle(inputs.x as number, inputs.y as number, { display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', pointerEvents: 'auto' })
+    : bottomRow
   return (
-    <div className="gv-choice-layer" style={bottomRow}>
-      {(params.options ?? []).map((o) => (
-        <button key={o.key} style={btn('#2563eb')} onClick={() => submit(o.key)}>
-          {o.label ?? o.key}
-        </button>
-      ))}
+    <div className="gv-choice-layer" style={rowStyle}>
+      {(inputs.events ?? []).map((e) => {
+        const locked = isOptionLocked(e, ctx)
+        return (
+          <button
+            key={e.id}
+            style={{ ...btn('#2563eb'), ...(locked ? { opacity: 0.4, cursor: 'not-allowed' } : null) }}
+            disabled={locked}
+            onClick={() => { if (!locked) submit(e.id) }}
+          >
+            {e.label ?? e.id}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -253,12 +405,36 @@ function QteButtons({ submit }: InteractionProps): ReactNode {
 }
 
 function HotspotButtons({ interaction, submit }: InteractionProps): ReactNode {
-  const params = interaction.params as unknown as HotspotParams
+  const inputs = interaction.inputs as unknown as HotspotParams
+  const spots = inputs.events ?? []
+  const positioned = spots.some((e) => typeof e.x === 'number' || typeof e.y === 'number')
+  if (!positioned) {
+    return (
+      <div className="gv-hotspot-layer" style={bottomRow}>
+        {spots.map((e) => (
+          <button key={e.id} style={btn('#0891b2')} onClick={() => submit(e.id)}>
+            {e.label ?? e.id}
+          </button>
+        ))}
+      </div>
+    )
+  }
   return (
-    <div className="gv-hotspot-layer" style={bottomRow}>
-      {(params.hotspots ?? []).map((h) => (
-        <button key={h.id} style={btn('#0891b2')} onClick={() => submit(h.id)}>
-          {h.label ?? h.id}
+    <div className="gv-hotspot-layer" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      {spots.map((e) => (
+        <button
+          key={e.id}
+          style={{
+            ...btn('#0891b2'),
+            position: 'absolute',
+            left: `${(e.x ?? 0.5) * 100}%`,
+            top: `${(e.y ?? 0.5) * 100}%`,
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'auto',
+          }}
+          onClick={() => submit(e.id)}
+        >
+          {e.label ?? e.id}
         </button>
       ))}
     </div>
@@ -283,7 +459,7 @@ function ensureTransitionStyle(): void {
 }
 
 function TransitionOverlay({ overlay }: OverlayProps): ReactNode {
-  const p = overlay.params as { durationMs?: number; color?: string }
+  const p = overlay.inputs as { durationMs?: number; color?: string }
   const dur = p.durationMs ?? 600
   return (
     <div
@@ -293,13 +469,23 @@ function TransitionOverlay({ overlay }: OverlayProps): ReactNode {
   )
 }
 
+const dialogueBoxStyle: CSSProperties = {
+  padding: '12px 16px',
+  borderRadius: 12,
+  background: 'rgba(12,14,18,0.82)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  color: '#f0f0f0',
+  pointerEvents: 'none',
+  boxShadow: '0 6px 24px rgba(0,0,0,0.5)',
+}
+
 function DialogueOverlay({ overlay }: OverlayProps): ReactNode {
-  const p = overlay.params as { speaker?: string; text?: string; color?: string }
+  const p = overlay.inputs as { speaker?: string; text?: string; color?: string; x?: number; y?: number }
+  const boxPos = hasAnchor(p.x, p.y)
+    ? anchorStyle(p.x as number, p.y as number)
+    : { position: 'absolute', left: '8%', right: '8%', bottom: '10%' } as CSSProperties
   return (
-    <div
-      className="gv-dialogue"
-      style={{ position: 'absolute', left: '8%', right: '8%', bottom: '10%', padding: '12px 16px', borderRadius: 12, background: 'rgba(12,14,18,0.82)', border: '1px solid rgba(255,255,255,0.12)', color: '#f0f0f0', pointerEvents: 'none', boxShadow: '0 6px 24px rgba(0,0,0,0.5)' }}
-    >
+    <div className="gv-dialogue" style={{ ...boxPos, ...dialogueBoxStyle }}>
       {p.speaker && <div style={{ fontWeight: 700, fontSize: 13, color: p.color ?? '#ffd54a', marginBottom: 4 }}>{p.speaker}</div>}
       <div style={{ fontSize: 15, lineHeight: 1.5 }}>{p.text}</div>
     </div>
@@ -307,7 +493,7 @@ function DialogueOverlay({ overlay }: OverlayProps): ReactNode {
 }
 
 function FloatTextOverlay({ overlay }: OverlayProps): ReactNode {
-  const p = overlay.params as { text?: string; x?: number; y?: number; color?: string; durationMs?: number }
+  const p = overlay.inputs as { text?: string; x?: number; y?: number; color?: string; durationMs?: number }
   const dur = p.durationMs ?? 1100
   const neg = typeof p.text === 'string' && p.text.trim().startsWith('-')
   return (

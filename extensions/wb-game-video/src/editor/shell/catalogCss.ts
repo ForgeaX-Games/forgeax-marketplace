@@ -3,7 +3,10 @@
  * 原样搬来（解耦自已删的 FMV 外壳），供 GraphVideoView（视频 tab）与 CatalogShell
  * （界面/规则）共用。两处都经 injectStyleOnce('graph-catalog') 注入，去重后只落一份。
  */
+import { PREVIEW_CLOCK_CSS } from './previewClock'
+
 export const CATALOG_CSS = `
+${PREVIEW_CLOCK_CSS}
 .gc-tab {
   --gc-bg: var(--work, #0e0c09);
   --gc-panel: var(--panel, #1b1713);
@@ -156,8 +159,10 @@ export const CATALOG_CSS = `
   position: absolute;
   transform: translate(-50%, -50%);
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   min-width: 0;
   max-width: 78%;
   color: var(--gc-text);
@@ -213,6 +218,66 @@ export const CATALOG_CSS = `
 .gc-preview-overlay.is-qte .gc-preview-label {
   color: #cfe4ff;
   border-color: rgba(95,163,247,.48);
+}
+.gc-preview-overlay.is-component .gc-preview-label {
+  color: #e2e8f0;
+  border-color: rgba(148,163,184,.48);
+}
+.gc-preview-detail {
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.66);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.9);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+  text-align: left;
+}
+.gc-preview-skin-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+}
+/* 挂皮肤时，皮肤自身已画在 cue 的 x/y 上（有样式）；这里只叠一个「平时透明、hover / 选中
+   才显描边」的可拖热区，避免与皮肤重复出现一个常驻的定位符号。拖它即改该 cue 的 x/y。 */
+.gc-preview-overlay.is-skinned {
+  width: 56px;
+  height: 56px;
+}
+.gc-preview-overlay.is-skinned .gc-preview-ring {
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-style: dashed;
+  border-color: transparent;
+  box-shadow: none;
+  animation: none;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.gc-preview-overlay.is-skinned:hover .gc-preview-ring,
+.gc-preview-overlay.is-skinned.is-selected .gc-preview-ring {
+  border-color: rgba(240,136,64,.95);
+  box-shadow: 0 0 14px rgba(240,136,64,.5);
+}
+.gc-preview-overlay.is-skinned .gc-preview-label,
+.gc-preview-overlay.is-skinned .gc-preview-detail {
+  display: none;
+}
+.gc-preview-overlay.is-skinned:hover .gc-preview-label,
+.gc-preview-overlay.is-skinned.is-selected .gc-preview-label {
+  display: block;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: rgba(0,0,0,.72);
+  border-color: rgba(240,136,64,.55);
+  color: #ffd8bf;
+  font-size: 11px;
 }
 .gc-preview-ring {
   position: absolute;

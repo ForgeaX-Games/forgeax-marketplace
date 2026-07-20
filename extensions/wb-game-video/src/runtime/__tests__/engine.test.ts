@@ -1,21 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
-import { registerKind, unregisterKind } from '../registry/kind-registry'
+import { registerComponent, unregisterComponent } from '../registry/component-registry'
 import { isOpenInteraction, isRenderOverlay } from '../engine/directives'
 import type { GameGraph, GameNode, GameScenario } from '../schema/graph-schema'
 import { node, scnOf, rid } from './test-fixtures'
 
-const KINDS = ['floatT', 'qteT']
-afterEach(() => KINDS.forEach(unregisterKind))
+const COMPONENT_IDS = ['floatT', 'qteT']
+afterEach(() => COMPONENT_IDS.forEach(unregisterComponent))
 
 function registerCore() {
-  registerKind({ kind: 'floatT', role: 'presentation', validate: () => [], outputs: () => [] })
-  registerKind({
-    kind: 'qteT',
+  registerComponent('floatT', { role: 'presentation' })
+  registerComponent('qteT', {
     role: 'interaction',
-    validate: () => [],
-    outputs: () => [{ id: 'pass' }, { id: 'good' }, { id: 'fail' }],
-    resolve: (_c, _p, input) => ({ outcome: input === 'hit' ? 'pass' : 'fail' }),
+    events: [{ id: 'pass' }, { id: 'good' }, { id: 'fail' }],
   })
 }
 
@@ -24,7 +21,7 @@ describe('GraphRuntime advance', () => {
   it('auto edge advance on performanceEnd', () => {
     const graph: GameGraph = {
       nodes: [node('a', { durationMs: 100 }), node('b', { })],
-      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }],
+      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'default', targetHandle: 'in' }],
     }
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)
@@ -43,8 +40,8 @@ describe('GraphRuntime advance', () => {
     const mk = (): GameGraph => ({
       nodes: [node('round'), node('init', { }), node('settle', { })],
       edges: [
-        { id: 'r-next', source: 'round', target: 'init', sourceHandle: 'cond:0', targetHandle: 'in', data: { condition: bothAlive } },
-        { id: 'r-over', source: 'round', target: 'settle', sourceHandle: 'else', targetHandle: 'in' },
+        { id: 'r-next', source: 'round', target: 'init', sourceHandle: 'default', targetHandle: 'in', data: { condition: bothAlive } },
+        { id: 'r-over', source: 'round', target: 'settle', sourceHandle: 'default', targetHandle: 'in' },
       ],
     })
     // both alive → init
@@ -76,7 +73,7 @@ describe('GraphRuntime advance', () => {
             { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'q', kind: 'var', varId: 'qi', op: 'add', value: 1 }] }] },
           ],
           timeline: [
-            { id: 'f', role: 'presentation', kind: 'floatT', trigger: { when: 'at', ms: 1000 }, params: { text: '+1' } },
+            { id: 'f', role: 'presentation', kind: 'floatT', trigger: { when: 'at', ms: 1000 }, inputs: { text: '+1' } },
           ],
         }),
       ],
@@ -96,7 +93,7 @@ describe('GraphRuntime advance', () => {
     registerCore()
     const graph: GameGraph = {
       nodes: [
-        node('a', { timeline: [{ id: 'q', role: 'interaction', kind: 'qteT', trigger: { when: 'enter' }, params: {} }] }),
+        node('a', { timeline: [{ id: 'q', role: 'interaction', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }] }),
         node('win', { }),
         node('lose', { }),
       ],
@@ -110,7 +107,7 @@ describe('GraphRuntime advance', () => {
     const dirs = rt.start()
     expect(dirs.some(isOpenInteraction)).toBe(true)
     expect(rt.state.phase).toBe('awaitInteraction')
-    rt.submitInteraction(rid('a', 'q'), 'hit')
+    rt.submitInteraction(rid('a', 'q'), 'pass') // 皮肤自判定后 emit 最终 event id
     expect(rt.state.currentNodeId).toBe('win')
   })
 
@@ -118,7 +115,7 @@ describe('GraphRuntime advance', () => {
     registerCore()
     const graph: GameGraph = {
       nodes: [node('a', { durationMs: 100 }), node('b', { durationMs: 100 }), node('c', { durationMs: 100 })],
-      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'out', targetHandle: 'in' }],
+      edges: [{ id: 'e', source: 'a', target: 'b', sourceHandle: 'default', targetHandle: 'in' }],
     }
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)

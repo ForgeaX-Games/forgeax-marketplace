@@ -7,8 +7,11 @@
  * 互相 import 造成的循环依赖。
  */
 
-/** 时间轴上一段可编辑材料的种类。 */
-export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx'
+/**
+ * 时间轴材料种类 —— 主要用于「添加控件」图标槽与条带配色。
+ * 未落入默认六槽的挂载组件一律用 `component`（默认图标），时间轴仍会显示。
+ */
+export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx' | 'component'
 
 /** 时间轴上的一段材料（由 scene 派生，见 CatalogTabs.collectMaterials）。 */
 export interface MaterialItem {
@@ -19,8 +22,15 @@ export interface MaterialItem {
   startMs: number
   endMs: number
   zIndex: number
+  /** 落盘 OverlayChild.component（含皮肤 alias）；检视器 / 添加通用组件用。 */
+  componentId?: string
   /** 段内的一个「判定点」标记（当前仅 QTE 用：= cue.targetAt 计分锚点）；缺省无标记。 */
   markerMs?: number
+  /**
+   * 该素材所在的组件已脱离共享方案跟随（挂载上有它的 override / 新增）。
+   * 未标记 = 仍跟随方案，改方案会同步；标记后可在素材属性里「↺ 回连方案」。
+   */
+  overridden?: boolean
 }
 
 /**
@@ -33,6 +43,8 @@ export interface AudioItem {
   startMs: number
   endMs: number
   zIndex: number
+  /** 音源 URL（用于时间轴波形解码）；缺省则只画底纹条。 */
+  src?: string
   /** 素材自带音轨（视频内嵌声道）；仅显示用途，暂不可删。 */
   builtin?: boolean
 }
@@ -47,11 +59,25 @@ export const TIMELINE_MIN_TRACKS = 5
 export const ZOOM_MIN = 1
 export const ZOOM_MAX = 20
 
+/** 前端时间输入分度：0.01 秒（底层仍存毫秒）。 */
+export const TIME_STEP_SEC = 0.01
+
+export function msToSec(ms: number): number {
+  return Math.round(ms) / 1000
+}
+
+/** 秒 → 毫秒（四舍五入到整数 ms）。 */
+export function secToMs(sec: number): number {
+  if (!Number.isFinite(sec)) return 0
+  return Math.round(sec * 1000)
+}
+
+/** m:ss.cc（秒保留两位小数）。 */
 export function fmtDur(ms: number): string {
-  const total = Math.round(ms / 1000)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
+  const totalSec = Math.max(0, ms) / 1000
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec - m * 60
+  return `${m}:${s.toFixed(2).padStart(5, '0')}`
 }
 
 export function clampMs(v: number, min: number, max: number): number {
@@ -117,6 +143,8 @@ export function materialLabel(kind: MaterialKind): string {
       return '滤镜'
     case 'fx':
       return '特效'
+    case 'component':
+      return '组件'
   }
 }
 
@@ -140,7 +168,8 @@ export function canDeleteMaterial(kind: MaterialKind): boolean {
     kind === 'qte' ||
     kind === 'option' ||
     kind === 'filter' ||
-    kind === 'fx'
+    kind === 'fx' ||
+    kind === 'component'
   )
 }
 
@@ -158,5 +187,7 @@ export function materialClass(kind: MaterialKind): string {
       return 'is-filter'
     case 'fx':
       return 'is-fx'
+    case 'component':
+      return 'is-component'
   }
 }

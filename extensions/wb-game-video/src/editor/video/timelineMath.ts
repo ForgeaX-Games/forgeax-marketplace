@@ -78,11 +78,11 @@ export function snapMs(ms: number, gridMs: number | undefined): number {
 }
 
 /**
- * 修饰键 → 吸附粒度。
+ * 修饰键 → 吸附粒度（对齐前端 0.01 秒分度）。
  *
- * 默认 100ms（电影剪辑常用半秒以下精度）；
- * Shift = 精细 10ms（细微调整 lipsync）；
- * Alt = 粗粒度 500ms（大结构布块）。
+ * 默认 10ms（0.01s）；
+ * Shift = 10ms（同默认，精细）；
+ * Alt = 100ms（0.1s 粗调）。
  *
  * Shift 优先于 Alt（同时按下时取 Shift）。
  */
@@ -93,6 +93,6 @@ export interface SnapModifiers {
 
 export function resolveSnapGridMs(mods: SnapModifiers): number {
   if (mods.shift) return 10
-  if (mods.alt) return 500
-  return 100
+  if (mods.alt) return 100
+  return 10
 }

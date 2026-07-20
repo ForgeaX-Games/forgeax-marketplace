@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <title>LingBot Fixture Smoke</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: #090b11; color: #eef1f7; }
+    main { width: min(1120px, 100%); margin: 0 auto; padding: 24px; display: grid; gap: 16px; }
+    h1 { margin: 0; font-size: 20px; }
+    p { margin: 0; color: #aeb6c7; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, .9fr); gap: 16px; }
+    .card { border: 1px solid #293248; border-radius: 12px; background: #111622; padding: 16px; }
+    .video-frame { position: relative; aspect-ratio: 16 / 9; background: #030406; border-radius: 8px; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    .empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #8e9ab0; }
+    .controls, label { display: grid; gap: 8px; }
+    .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }
+    label { margin-top: 12px; color: #b9c3d5; font-size: 12px; }
+    select, textarea, button { width: 100%; border: 1px solid #35415a; border-radius: 6px; padding: 9px 10px; background: #171e2d; color: inherit; font: inherit; }
+    textarea { resize: vertical; min-height: 112px; }
+    button { cursor: pointer; font-weight: 650; }
+    button.primary { background: #246c4f; border-color: #41b67f; }
+    button.danger { background: #592a33; border-color: #a64a5d; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .status { display: grid; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .status strong { color: #edf2ff; }
+    .notice { border-left: 3px solid #4a80e9; padding-left: 10px; color: #bdc9e0; }
+    kbd { padding: 2px 5px; border: 1px solid #4b5872; border-radius: 4px; background: #1d2537; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .controls { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div>
+      <h1>LingBot Fixture Smoke</h1>
+      <p>Drives the production Generative Visuals Presenter + LingBot adapter with fixed image/prompt fixtures and the ForgeaX token broker. Provider SDK and token broker remain the only external seams.</p>
+    </div>
+    <div class="grid">
+      <section class="card">
+        <div class="video-frame">
+          <video id="main-video" autoplay muted playsinline aria-label="Generated presentation video"></video>
+          <div class="empty" id="empty-output">Connect a fixture to wait for the presentation stream.</div>
+        </div>
+        <div class="notice" style="margin-top: 14px">
+          Hold <kbd>W</kbd>/<kbd>S</kbd>, <kbd>A</kbd>/<kbd>D</kbd>, or arrow keys through a model chunk. The keys map directly to LingBot movement and look controls.
+        </div>
+      </section>
+      <aside class="card">
+        <label>
+          Fixture
+          <select id="fixture" aria-label="Fixture"></select>
+        </label>
+        <div class="controls">
+          <button class="primary" id="connect" type="button">Connect fixture</button>
+          <button id="reset" type="button">Reset fixture</button>
+          <button class="danger" id="disconnect" type="button">Disconnect</button>
+        </div>
+        <label>
+          Live prompt
+          <textarea id="prompt" aria-label="Live prompt"></textarea>
+        </label>
+        <button id="apply-prompt" type="button">Apply prompt without resetting</button>
+        <div class="status" style="margin-top: 16px" aria-live="polite">
+          <div>phase: <strong id="phase">idle</strong></div>
+          <div>message: <span id="message">Loading fixtures…</span></div>
+          <div>last command: <span id="last-command">—</span></div>
+          <div>lease: <span id="lease">—</span></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

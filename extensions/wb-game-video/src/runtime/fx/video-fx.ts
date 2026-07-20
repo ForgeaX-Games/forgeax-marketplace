@@ -97,16 +97,16 @@ export function resolveVideoFxRender(children: OverlayInstanceChild[], ms: numbe
     const zIndex = num(el.layout?.zIndex, 0)
 
     if (el.component === 'filter') {
-      const preset = FILTER_BY_ID.get((el.params.filter as string) ?? 'warm')
-      const css = preset?.css(num(el.params.intensity, 1)) ?? ''
+      const preset = FILTER_BY_ID.get((el.inputs.filter as string) ?? 'warm')
+      const css = preset?.css(num(el.inputs.intensity, 1)) ?? ''
       if (css) filters.push(css)
       continue
     }
     if (el.component !== 'fx') continue
 
-    const fx = (el.params.fx as FxKindId) ?? 'flash'
-    const intensity = clamp01(num(el.params.intensity, 1))
-    const color = (el.params.color as string) || FX_PRESETS.find((p) => p.id === fx)?.defaultColor || '#ffffff'
+    const fx = (el.inputs.fx as FxKindId) ?? 'flash'
+    const intensity = clamp01(num(el.inputs.intensity, 1))
+    const color = (el.inputs.color as string) || FX_PRESETS.find((p) => p.id === fx)?.defaultColor || '#ffffff'
     const span = Math.max(1, end - start)
     const progress = clamp01((ms - start) / span)
 

@@ -77,38 +77,51 @@
   },
   "ui": {
     "overlays": {
-      "ov-n_door": {
-        "id": "ov-n_door",
+      "node:n_door": {
+        "id": "node:n_door",
         "children": [
           {
             "id": "kou",
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "qteKind": "parry",
               "windowMs": 200,
-              "outcomeLabels": {
-                "pass": "叩中",
-                "fail": "错过"
-              },
-              "component": "inkKou",
               "glyph": "叩",
-              "timeoutMs": 200
+              "timeoutMs": 200,
+              "events": [
+                {
+                  "id": "pass",
+                  "label": "叩中"
+                },
+                {
+                  "id": "fail",
+                  "label": "错过"
+                }
+              ],
+              "cues": [
+                {
+                  "id": "kou-0",
+                  "appearAt": 0,
+                  "targetAt": 100,
+                  "endAt": 200
+                }
+              ]
             },
-            "component": "qte"
+            "component": "inkKou"
           }
         ]
       },
-      "ov-n_soul": {
-        "id": "ov-n_soul",
+      "node:n_soul": {
+        "id": "node:n_soul",
         "children": [
           {
             "id": "soul-line",
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "speaker": "小魂",
               "text": "……你也是来渡河的吗？",
               "color": "#ffd54a"
@@ -117,183 +130,171 @@
           }
         ]
       },
-      "ov-n_river": {
-        "id": "ov-n_river",
+      "node:n_river": {
+        "id": "node:n_river",
         "children": [
           {
             "id": "n_river-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-n_land": {
-        "id": "ov-n_land",
+      "node:n_land": {
+        "id": "node:n_land",
         "children": [
           {
             "id": "n_land-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-n_tea": {
-        "id": "ov-n_tea",
+      "node:n_tea": {
+        "id": "node:n_tea",
         "children": [
           {
             "id": "n_tea-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-n_nodrink": {
-        "id": "ov-n_nodrink",
+      "node:n_nodrink": {
+        "id": "node:n_nodrink",
         "children": [
           {
             "id": "n_nodrink-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-n_follow": {
-        "id": "ov-n_follow",
+      "node:n_follow": {
+        "id": "node:n_follow",
         "children": [
           {
             "id": "n_follow-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-n_nofollow": {
-        "id": "ov-n_nofollow",
+      "node:n_nofollow": {
+        "id": "node:n_nofollow",
         "children": [
           {
             "id": "n_nofollow-c",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "應 / 默",
+            "inputs": {
               "timeoutMs": 8000,
-              "defaultKey": "mo",
-              "options": [
+              "events": [
                 {
-                  "key": "ying",
+                  "id": "ying",
                   "label": "應"
                 },
                 {
-                  "key": "mo",
+                  "id": "mo",
                   "label": "默"
                 }
               ],
-              "component": "inkYingMo"
+              "defaultEvent": "mo"
             },
-            "component": "choice"
+            "component": "inkYingMo"
           }
         ]
       },
-      "ov-enter": {
-        "id": "ov-enter",
+      "node:enter": {
+        "id": "node:enter",
         "children": [
           {
             "id": "enter-fade",
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "durationMs": 700,
               "style": "fade",
               "color": "#000"
@@ -302,43 +303,23 @@
           }
         ]
       },
-      "ov-wait": {
-        "id": "ov-wait",
+      "node:wait": {
+        "id": "node:wait",
         "children": [
           {
             "id": "skill",
             "trigger": {
               "when": "enter"
             },
-            "params": {
-              "prompt": "选择技能",
-              "component": "battleSkillBar",
-              "options": [
+            "inputs": {
+              "events": [
                 {
-                  "key": "light",
-                  "label": "轻攻击",
-                  "effects": [
-                    {
-                      "id": "sk-light-qi",
-                      "kind": "var",
-                      "varId": "qi",
-                      "op": "add",
-                      "value": 2
-                    }
-                  ]
+                  "id": "light",
+                  "label": "轻攻击"
                 },
                 {
-                  "key": "heavy",
-                  "label": "重攻击",
-                  "effects": [
-                    {
-                      "id": "sk-heavy-qi",
-                      "kind": "var",
-                      "varId": "qi",
-                      "op": "add",
-                      "value": -2
-                    }
-                  ],
+                  "id": "heavy",
+                  "label": "重攻击（气≥2）",
                   "condition": {
                     "all": [
                       {
@@ -351,21 +332,12 @@
                   }
                 },
                 {
-                  "key": "medit",
+                  "id": "medit",
                   "label": "冥想"
                 },
                 {
-                  "key": "ult",
-                  "label": "灭世",
-                  "effects": [
-                    {
-                      "id": "sk-ult-qi",
-                      "kind": "var",
-                      "varId": "qi",
-                      "op": "set",
-                      "value": 0
-                    }
-                  ],
+                  "id": "ult",
+                  "label": "灭世（气≥5·理智≥4）",
                   "condition": {
                     "all": [
                       {
@@ -385,12 +357,12 @@
                 }
               ]
             },
-            "component": "skill"
+            "component": "battleSkillBar"
           }
         ]
       },
-      "ov-pu": {
-        "id": "ov-pu",
+      "node:pu": {
+        "id": "node:pu",
         "children": [
           {
             "id": "pu-fx",
@@ -398,7 +370,7 @@
               "when": "at",
               "ms": 1000
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -409,8 +381,8 @@
           }
         ]
       },
-      "ov-pu2": {
-        "id": "ov-pu2",
+      "node:pu2": {
+        "id": "node:pu2",
         "children": [
           {
             "id": "pu2-fx",
@@ -418,7 +390,7 @@
               "when": "at",
               "ms": 600
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -429,8 +401,8 @@
           }
         ]
       },
-      "ov-zhong": {
-        "id": "ov-zhong",
+      "node:zhong": {
+        "id": "node:zhong",
         "children": [
           {
             "id": "zhong-fx",
@@ -438,7 +410,7 @@
               "when": "at",
               "ms": 1700
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -449,8 +421,8 @@
           }
         ]
       },
-      "ov-z2": {
-        "id": "ov-z2",
+      "node:z2": {
+        "id": "node:z2",
         "children": [
           {
             "id": "z2-fx",
@@ -458,7 +430,7 @@
               "when": "at",
               "ms": 2500
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -469,8 +441,8 @@
           }
         ]
       },
-      "ov-fuzhu": {
-        "id": "ov-fuzhu",
+      "node:fuzhu": {
+        "id": "node:fuzhu",
         "children": [
           {
             "id": "fuzhu-fx",
@@ -478,7 +450,7 @@
               "when": "at",
               "ms": 2000
             },
-            "params": {
+            "inputs": {
               "text": "+30",
               "x": 0.5,
               "y": 0.42,
@@ -488,8 +460,8 @@
           }
         ]
       },
-      "ov-ult": {
-        "id": "ov-ult",
+      "node:ult": {
+        "id": "node:ult",
         "children": [
           {
             "id": "ult-fx",
@@ -497,7 +469,7 @@
               "when": "at",
               "ms": 7000
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -508,42 +480,47 @@
           }
         ]
       },
-      "ov-tele": {
-        "id": "ov-tele",
+      "node:tele": {
+        "id": "node:tele",
         "children": [
           {
             "id": "parry",
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "qteKind": "parry",
-              "component": "battleParry",
               "durationMs": 2600,
-              "outcomeLabels": {
-                "pass": "受击防反",
-                "good": "受击闪避",
-                "fail": "受击"
-              },
-              "exits": [
+              "events": [
                 {
-                  "key": "pass"
+                  "id": "pass",
+                  "label": "受击防反"
                 },
                 {
-                  "key": "good"
+                  "id": "good",
+                  "label": "受击闪避"
                 },
                 {
-                  "key": "fail"
+                  "id": "fail",
+                  "label": "受击"
                 }
               ],
-              "defaultKey": "fail"
+              "defaultEvent": "fail",
+              "cues": [
+                {
+                  "id": "parry-0",
+                  "appearAt": 0,
+                  "targetAt": 1300,
+                  "endAt": 2600
+                }
+              ]
             },
-            "component": "qte"
+            "component": "battleParry"
           }
         ]
       },
-      "ov-block": {
-        "id": "ov-block",
+      "node:block": {
+        "id": "node:block",
         "children": [
           {
             "id": "block-fx",
@@ -551,7 +528,7 @@
               "when": "at",
               "ms": 1800
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -562,8 +539,8 @@
           }
         ]
       },
-      "ov-dodgeP": {
-        "id": "ov-dodgeP",
+      "node:dodgeP": {
+        "id": "node:dodgeP",
         "children": [
           {
             "id": "dodgeP-fx",
@@ -571,7 +548,7 @@
               "when": "at",
               "ms": 2000
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -582,8 +559,8 @@
           }
         ]
       },
-      "ov-hurt": {
-        "id": "ov-hurt",
+      "node:hurt": {
+        "id": "node:hurt",
         "children": [
           {
             "id": "hurt-fx",
@@ -591,7 +568,7 @@
               "when": "at",
               "ms": 10
             },
-            "params": {
+            "inputs": {
               "text": "{v}",
               "x": 0.5,
               "y": 0.42,
@@ -612,7 +589,7 @@
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "bind": "ent-player",
               "label": "空藏"
             }
@@ -623,9 +600,113 @@
             "trigger": {
               "when": "enter"
             },
-            "params": {
+            "inputs": {
               "bind": "ent-boss",
               "label": "小怪"
+            }
+          }
+        ]
+      },
+      "hitCheer": {
+        "id": "hitCheer",
+        "title": "受击加油横幅（右上角，点击追加英雄名）",
+        "children": [
+          {
+            "id": "banner",
+            "component": "bossHitCheer",
+            "layout": {
+              "right": 0,
+              "top": 0
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "heroName": {
+                "ref": "entity.ent-player.name"
+              }
+            }
+          }
+        ]
+      },
+      "hpPanel": {
+        "id": "hpPanel",
+        "title": "回合按钮面板（A / B1 / B2）",
+        "children": [
+          {
+            "id": "panelA",
+            "component": "panelA",
+            "layout": {
+              "left": 0,
+              "top": 0
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {}
+          },
+          {
+            "id": "panelB",
+            "component": "panelB",
+            "layout": {
+              "right": 0,
+              "top": 0
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "readouts": {
+        "id": "readouts",
+        "title": "血量读数（spawn 模板）",
+        "children": [
+          {
+            "id": "bossHp",
+            "component": "floatText",
+            "layout": {},
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "x": 0.08,
+              "y": 0.16
+            }
+          },
+          {
+            "id": "heroHp",
+            "component": "floatText",
+            "layout": {},
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "x": 0.92,
+              "y": 0.16
+            }
+          }
+        ]
+      },
+      "node:breathe": {
+        "id": "node:breathe",
+        "title": "调息（方案B：非阻塞改气力）",
+        "children": [
+          {
+            "id": "breathe",
+            "component": "panelA",
+            "layout": {
+              "left": "4%",
+              "bottom": "22%",
+              "width": "120px",
+              "height": "40px"
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "label": "调息 +2气"
             }
           }
         ]
@@ -652,7 +733,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-open"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -673,7 +755,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_door"
+              "overlay": "node:n_door",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "pass"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-door-pass"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "fail"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-door-fail"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -696,7 +804,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_soul"
+              "overlay": "node:n_soul"
             }
           ]
         }
@@ -719,7 +827,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_river"
+              "overlay": "node:n_river",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-river-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-river-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -739,7 +873,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-child"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -760,7 +895,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_land"
+              "overlay": "node:n_land",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-land-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-land-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -780,7 +941,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-mask"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -798,7 +960,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-mengpo"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -819,7 +982,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_tea"
+              "overlay": "node:n_tea",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-tea-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-tea-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -867,7 +1056,8 @@
                 }
               ]
             }
-          ]
+          ],
+          "overlayNodes": []
         }
       },
       {
@@ -888,7 +1078,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_nodrink"
+              "overlay": "node:n_nodrink",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-nodrink-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-nodrink-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -911,7 +1127,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_follow"
+              "overlay": "node:n_follow",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-follow-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-follow-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -931,7 +1173,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-getlight"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -949,7 +1192,8 @@
           "media": {
             "kind": "VIDEO",
             "ref": "narr-nolight"
-          }
+          },
+          "overlayNodes": []
         }
       },
       {
@@ -970,7 +1214,33 @@
           },
           "overlayNodes": [
             {
-              "overlay": "ov-n_nofollow"
+              "overlay": "node:n_nofollow",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ying"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-nofollow-ying"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "mo"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-nofollow-mo"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -1018,7 +1288,8 @@
                 }
               ]
             }
-          ]
+          ],
+          "overlayNodes": []
         }
       },
       {
@@ -1057,7 +1328,8 @@
                 }
               ]
             }
-          ]
+          ],
+          "overlayNodes": []
         }
       },
       {
@@ -1071,18 +1343,17 @@
         "outputs": [],
         "data": {
           "name": "进战待机",
-          "durationMs": 2000,
           "media": {
             "kind": "VIDEO",
             "ref": "idle01"
           },
-          "mediaPlayMode": "loop",
+          "mediaPlayMode": "once",
           "overlayNodes": [
             {
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-enter"
+              "overlay": "node:enter"
             }
           ],
           "reactions": [
@@ -1150,7 +1421,113 @@
         "data": {
           "name": "我方回合",
           "durationMs": 0,
-          "subFlow": "wait"
+          "subFlow": "wait",
+          "reactions": [
+            {
+              "when": {
+                "type": "watch",
+                "of": "entity.ent-boss.attr.hp",
+                "on": "dec"
+              },
+              "do": [
+                {
+                  "kind": "spawn",
+                  "from": "hitCheer/banner",
+                  "inputs": {
+                    "dmg": {
+                      "expr": "abs(delta)"
+                    },
+                    "remain": {
+                      "expr": "entity.ent-boss.attr.hp"
+                    },
+                    "heroName": {
+                      "ref": "entity.ent-player.name"
+                    }
+                  },
+                  "ttlMs": 3000
+                }
+              ]
+            }
+          ],
+          "overlayNodes": [
+            {
+              "overlay": "hpPanel",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1
+              },
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "A"
+                  },
+                  "do": [
+                    {
+                      "kind": "spawn",
+                      "from": "readouts/bossHp",
+                      "inputs": {
+                        "text": {
+                          "expr": "entity.ent-boss.attr.hp"
+                        }
+                      },
+                      "ttlMs": 1500
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B1"
+                  },
+                  "do": [
+                    {
+                      "kind": "spawn",
+                      "from": "readouts/heroHp",
+                      "inputs": {
+                        "text": {
+                          "expr": "entity.ent-player.attr.hp"
+                        }
+                      },
+                      "ttlMs": 1500
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B2"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": 2
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B3"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-adv-a_my-n_drink-0"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1165,7 +1542,86 @@
         "data": {
           "name": "敌方回合",
           "durationMs": 0,
-          "subFlow": "tele"
+          "subFlow": "tele",
+          "overlayNodes": [
+            {
+              "overlay": "hpPanel",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1
+              },
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "A"
+                  },
+                  "do": [
+                    {
+                      "kind": "spawn",
+                      "from": "readouts/bossHp",
+                      "inputs": {
+                        "text": {
+                          "expr": "entity.ent-boss.attr.hp"
+                        }
+                      },
+                      "ttlMs": 1500
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B1"
+                  },
+                  "do": [
+                    {
+                      "kind": "spawn",
+                      "from": "readouts/heroHp",
+                      "inputs": {
+                        "text": {
+                          "expr": "entity.ent-player.attr.hp"
+                        }
+                      },
+                      "ttlMs": 1500
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B2"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": 2
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "B3"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-adv-b_ai-n_drink-1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1190,7 +1646,110 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-wait"
+              "overlay": "node:wait",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "light"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "sk-light-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": 2
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "heavy"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "sk-heavy-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": -2
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "medit"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-sk-medit"
+                    }
+                  ]
+                },
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "ult"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "sk-ult-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "set",
+                          "value": 0
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-sk-ult"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "overlay": "node:breathe",
+              "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "A"
+                  },
+                  "do": [
+                    {
+                      "kind": "effect",
+                      "effects": [
+                        {
+                          "id": "breathe-qi",
+                          "kind": "var",
+                          "varId": "qi",
+                          "op": "add",
+                          "value": 2
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -1216,7 +1775,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-pu"
+              "overlay": "node:pu"
             }
           ],
           "reactions": [
@@ -1267,7 +1826,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-pu2"
+              "overlay": "node:pu2"
             }
           ],
           "reactions": [
@@ -1318,7 +1877,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-zhong"
+              "overlay": "node:zhong"
             }
           ],
           "reactions": [
@@ -1369,7 +1928,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-z2"
+              "overlay": "node:z2"
             }
           ],
           "reactions": [
@@ -1420,7 +1979,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-fuzhu"
+              "overlay": "node:fuzhu"
             }
           ],
           "reactions": [
@@ -1476,7 +2035,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-ult"
+              "overlay": "node:ult"
             }
           ],
           "reactions": [
@@ -1527,8 +2086,20 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-tele",
+              "overlay": "node:tele",
               "reactions": [
+                {
+                  "when": {
+                    "type": "event",
+                    "id": "pass"
+                  },
+                  "do": [
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-tele-pass"
+                    }
+                  ]
+                },
                 {
                   "when": {
                     "type": "event",
@@ -1546,6 +2117,10 @@
                           "value": -1
                         }
                       ]
+                    },
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-tele-good"
                     }
                   ]
                 },
@@ -1566,6 +2141,10 @@
                           "value": 1
                         }
                       ]
+                    },
+                    {
+                      "kind": "advance",
+                      "edgeId": "e-tele-fail"
                     }
                   ]
                 }
@@ -1595,7 +2174,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-block"
+              "overlay": "node:block"
             }
           ],
           "reactions": [
@@ -1646,7 +2225,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-dodgeP"
+              "overlay": "node:dodgeP"
             }
           ],
           "reactions": [
@@ -1697,7 +2276,7 @@
               "overlay": "battleHud"
             },
             {
-              "overlay": "ov-hurt"
+              "overlay": "node:hurt"
             }
           ],
           "reactions": [
@@ -1779,7 +2358,7 @@
         "id": "e-open",
         "source": "n_open",
         "target": "n_door",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
@@ -1800,154 +2379,154 @@
         "id": "e-soul",
         "source": "n_soul",
         "target": "n_river",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-river-ying",
         "source": "n_river",
         "target": "n_child",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-river-mo",
         "source": "n_river",
         "target": "n_land",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-child",
         "source": "n_child",
         "target": "n_land",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-land-ying",
         "source": "n_land",
         "target": "n_mask",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-land-mo",
         "source": "n_land",
         "target": "n_mengpo",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-mask",
         "source": "n_mask",
         "target": "n_mengpo",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-mengpo",
         "source": "n_mengpo",
         "target": "n_tea",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-tea-ying",
         "source": "n_tea",
         "target": "n_drink",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-tea-mo",
         "source": "n_tea",
         "target": "n_nodrink",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-drink",
         "source": "n_drink",
         "target": "n_follow",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-nodrink-ying",
         "source": "n_nodrink",
         "target": "n_follow",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-nodrink-mo",
         "source": "n_nodrink",
         "target": "n_nofollow",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-follow-ying",
         "source": "n_follow",
         "target": "n_getlight",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-follow-mo",
         "source": "n_follow",
         "target": "n_nolight",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-getlight",
         "source": "n_getlight",
         "target": "enter",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-nolight",
         "source": "n_nolight",
         "target": "enter",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-nofollow-ying",
         "source": "n_nofollow",
         "target": "n_lotus",
-        "sourceHandle": "opt:ying",
+        "sourceHandle": "ying",
         "targetHandle": "in"
       },
       {
         "id": "e-nofollow-mo",
         "source": "n_nofollow",
         "target": "n_nolotus",
-        "sourceHandle": "opt:mo",
+        "sourceHandle": "mo",
         "targetHandle": "in"
       },
       {
         "id": "e-lotus",
         "source": "n_lotus",
         "target": "enter",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-nolotus",
         "source": "n_nolotus",
         "target": "enter",
-        "sourceHandle": "out",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-init-me",
         "source": "enter",
         "target": "a_my",
-        "sourceHandle": "cond:0",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -1967,14 +2546,14 @@
         "id": "e-init-foe",
         "source": "enter",
         "target": "b_ai",
-        "sourceHandle": "else",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-sk-light",
         "source": "wait",
         "target": "pu",
-        "sourceHandle": "opt:light",
+        "sourceHandle": "light",
         "targetHandle": "in",
         "data": {
           "weight": 1
@@ -1984,7 +2563,7 @@
         "id": "e-sk-light2",
         "source": "wait",
         "target": "pu2",
-        "sourceHandle": "opt:light",
+        "sourceHandle": "light",
         "targetHandle": "in",
         "data": {
           "weight": 1
@@ -1994,7 +2573,7 @@
         "id": "e-sk-heavy",
         "source": "wait",
         "target": "zhong",
-        "sourceHandle": "opt:heavy",
+        "sourceHandle": "heavy",
         "targetHandle": "in",
         "data": {
           "weight": 1
@@ -2004,7 +2583,7 @@
         "id": "e-sk-heavy2",
         "source": "wait",
         "target": "z2",
-        "sourceHandle": "opt:heavy",
+        "sourceHandle": "heavy",
         "targetHandle": "in",
         "data": {
           "weight": 1
@@ -2014,14 +2593,14 @@
         "id": "e-sk-medit",
         "source": "wait",
         "target": "fuzhu",
-        "sourceHandle": "opt:medit",
+        "sourceHandle": "medit",
         "targetHandle": "in"
       },
       {
         "id": "e-sk-ult",
         "source": "wait",
         "target": "ult",
-        "sourceHandle": "opt:ult",
+        "sourceHandle": "ult",
         "targetHandle": "in"
       },
       {
@@ -2049,7 +2628,7 @@
         "id": "e-amy-win",
         "source": "a_my",
         "target": "win",
-        "sourceHandle": "cond:0",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -2069,7 +2648,7 @@
         "id": "e-amy-foe",
         "source": "a_my",
         "target": "b_ai",
-        "sourceHandle": "cond:1",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -2088,14 +2667,14 @@
         "id": "e-amy-loop",
         "source": "a_my",
         "target": "enter",
-        "sourceHandle": "else",
+        "sourceHandle": "default",
         "targetHandle": "in"
       },
       {
         "id": "e-bai-win",
         "source": "b_ai",
         "target": "win",
-        "sourceHandle": "cond:0",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -2115,7 +2694,7 @@
         "id": "e-bai-lose",
         "source": "b_ai",
         "target": "lose",
-        "sourceHandle": "cond:1",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -2135,7 +2714,7 @@
         "id": "e-bai-loop",
         "source": "b_ai",
         "target": "enter",
-        "sourceHandle": "cond:2",
+        "sourceHandle": "default",
         "targetHandle": "in",
         "data": {
           "condition": {
@@ -2154,7 +2733,21 @@
         "id": "e-bai-my",
         "source": "b_ai",
         "target": "a_my",
-        "sourceHandle": "else",
+        "sourceHandle": "default",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-adv-a_my-n_drink-0",
+        "source": "a_my",
+        "target": "n_drink",
+        "sourceHandle": "B3",
+        "targetHandle": "in"
+      },
+      {
+        "id": "e-adv-b_ai-n_drink-1",
+        "source": "b_ai",
+        "target": "n_drink",
+        "sourceHandle": "B3",
         "targetHandle": "in"
       }
     ]
@@ -2177,8 +2770,8 @@
       },
       "do": [
         {
-          "kind": "goto",
-          "targetNodeId": "win"
+          "kind": "advance",
+          "edgeId": "e-amy-win"
         }
       ]
     },
@@ -2199,8 +2792,8 @@
       },
       "do": [
         {
-          "kind": "goto",
-          "targetNodeId": "lose"
+          "kind": "advance",
+          "edgeId": "e-bai-lose"
         }
       ]
     }

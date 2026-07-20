@@ -71,6 +71,7 @@ function ensureCanvasStyle(): void {
   `
 }
 import type { GameEdge, GameGraph, GameNode } from '../../runtime/schema/graph-schema'
+import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { getSubFlowPack, isSubflowContainerData } from '../../runtime/schema/graph-schema'
 import type { FXNode } from '../../runtime/schema/react-flow-schema'
 import { toFXView } from './fx-view'
@@ -103,18 +104,17 @@ const BADGE_COLOR: Record<string, string> = {
   subflow: '#eab308',
 }
 const HANDLE_COLOR: Record<string, string> = {
+  default: '#6b7280',
   pass: '#22c55e',
   good: '#84cc16',
   fail: '#ef4444',
   win: '#22c55e',
   lose: '#ef4444',
-  else: '#a3a3a3',
 }
 function handleColor(id: string): string {
   if (HANDLE_COLOR[id]) return HANDLE_COLOR[id]!
-  if (id.startsWith('cond:')) return '#eab308'
-  if (id.startsWith('opt:')) return '#3b82f6'
-  return '#6b7280'
+  if (id === 'default') return '#6b7280'
+  return '#3b82f6' // 交互出口（pass/fail/选项/热点…）
 }
 
 const Ico = {
@@ -187,10 +187,11 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
       <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
         {fx.outputs.map((h) => {
           const fid = h.data?.flowId ?? h.id
+          const display = h.data?.displayLabel ?? h.label ?? fid
           const c = handleColor(fid)
           return (
             <div key={h.id} style={{ position: 'relative', fontSize: 10, color: c, display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8 }}>
-              <span>{fid}</span>
+              <span title={fid}>{display}</span>
               <Handle id={h.id} type="source" position={Position.Right} style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, background: c, border: 'none' }} />
             </div>
           )
@@ -284,6 +285,8 @@ const edgeTypes = { flow: FlowEdge }
 export interface GraphCanvasProps {
   graph: GameGraph
   onChange: (next: GameGraph) => void
+  /** ui.overlays —— 派生节点出口引脚中文标签（与节点配置「何时走」一致）。 */
+  overlays?: Record<string, Overlay>
   activeNodeId?: string | null
   traversedEdgeIds?: Set<string>
   /** 只渲染这些节点（子流程下钻视图）；undefined = 全部。编辑仍作用于完整 graph。 */
@@ -319,6 +322,7 @@ export function GraphCanvas(props: GraphCanvasProps): JSX.Element {
 function GraphCanvasInner({
   graph,
   onChange,
+  overlays,
   activeNodeId,
   traversedEdgeIds,
   visibleNodeIds,
@@ -343,7 +347,7 @@ function GraphCanvasInner({
   const boxSelecting = useRef(false)
   /** 跳过 mount 时的 effect：首帧 fit 交给 onInit（节点已度量）；effect 只响应后续下钻/自适应。 */
   const skipFitEffectOnce = useRef(true)
-  const fx = useMemo(() => toFXView(graph), [graph])
+  const fx = useMemo(() => toFXView(graph, overlays), [graph, overlays])
   const containerIds = useMemo(
     () => new Set(graph.nodes.filter((n) => isSubflowContainerData(n.data)).map((n) => n.id)),
     [graph],
@@ -574,7 +578,7 @@ function GraphCanvasInner({
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!conn.source || !conn.target) return
-      const sourceHandle = (conn.sourceHandle ?? 'source:out').replace(/^source:/, '')
+      const sourceHandle = (conn.sourceHandle ?? 'source:default').replace(/^source:/, '')
       onChange(connect(graph, { source: conn.source, sourceHandle, target: conn.target }))
     },
     [graph, onChange],
@@ -619,7 +623,6 @@ function GraphCanvasInner({
         selectionKeyCode="Shift"
         multiSelectionKeyCode={null}
         selectionMode={SelectionMode.Partial}
-        autoPanOnSelection={false}
         deleteKeyCode={['Delete', 'Backspace']}
         proOptions={{ hideAttribution: true }}
       >

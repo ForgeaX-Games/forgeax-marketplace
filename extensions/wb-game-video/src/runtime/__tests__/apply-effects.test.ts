@@ -68,4 +68,17 @@ describe('applyEffects', () => {
     applyEffects(st, [{ id: 's', kind: 'attr', entityId: 'ent-boss', attr: 'speed', op: 'set', value: 35 }])
     expect(st.entities['ent-boss']!.attrs.speed).toBe(35)
   })
+
+  it('mul / set / negative add on attr and var', () => {
+    const st = state()
+    applyEffects(st, [
+      { kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'mul', value: 0.5 },
+      { kind: 'var', varId: 'qi', op: 'set', value: 2.5 },
+      { kind: 'var', varId: 'qi', op: 'add', value: -1.5 },
+    ])
+    // 700 × 0.5 = 350
+    expect(st.entities['ent-boss']!.attrs.hp).toBe(350)
+    // set 2.5 then add -1.5 → 1；再被 varMeta.min=0 夹住仍为 1
+    expect(st.vars.qi).toBe(1)
+  })
 })

@@ -2,7 +2,7 @@
  * 图原生文字预设库（SSOT）—— 字幕 / 花字各一套内置预设。图版对齐 legacy
  * `scenario/textStylePresets.ts`，但用 `GraphTextStyle`，与 legacy 解耦。
  *
- * · 应用采用**快照**语义：把 `preset.style` 深拷到目标元素 params.style，之后各自独立微调。
+ * · 应用采用**快照**语义：把 `preset.style` 深拷到目标元素 inputs.style，之后各自独立微调。
  * · 「默认字幕」预设 style = {} —— 空样式=不覆盖，让呈现层 CSS 基线透出。
  * · 用户「+」新建的自定义预设存 GameScenario.textStylePresets，与内置合并展示。
  */

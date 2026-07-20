@@ -71,14 +71,17 @@ export async function loadStore(game?: string): Promise<GraphStore> {
  * 版本快照，留最近 10）并清掉未保存草稿。返回磁盘版本索引。
  */
 export async function saveScenario(scenario: GameScenario, game?: string): Promise<VersionEntry[]> {
-  removeLocal(draftKey(game))
   try {
     const r = await fetch(`${BASE}/store${gq(game)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ scenario, id: 'nodia-graph', title: '战斗蓝图(graph)' }),
     })
-    if (r.ok) return ((await r.json()) as { versions?: VersionEntry[] }).versions ?? []
+    if (r.ok) {
+      // 落盘成功后再清草稿；失败时保留 localStorage 草稿，刷新还能恢复。
+      removeLocal(draftKey(game))
+      return ((await r.json()) as { versions?: VersionEntry[] }).versions ?? []
+    }
   } catch {
     /* 离线/无端点 → best-effort */
   }

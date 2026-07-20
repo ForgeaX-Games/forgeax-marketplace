@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { validateGraph } from '../validate/validate'
-import { registerCoreKinds } from '../registry/core-kinds'
+import { registerCoreComponents } from '../registry/core-components'
 import type { GameGraph, Overlay } from '../schema/graph-schema'
 
-beforeAll(() => registerCoreKinds())
+beforeAll(() => registerCoreComponents())
 
 const optsBase = { entities: ['ent-player', 'ent-boss'], vars: ['qi'] }
 
@@ -37,7 +37,7 @@ describe('validateGraph reference checks', () => {
         id: 's',
         component: 'settle',
         trigger: { when: 'enter' },
-        params: {
+        inputs: {
           effects: [
             {
               id: 'd',
@@ -56,7 +56,7 @@ describe('validateGraph reference checks', () => {
     expect(issues.some((i) => i.code === 'ref.var.missing' && i.msg.includes('missingVar'))).toBe(true)
   })
 
-  it('flags unknown entity in condition and unknown rule goto', () => {
+  it('flags unknown entity in condition and unknown rule advance edge', () => {
     const graph: GameGraph = {
       nodes: [
         {
@@ -73,7 +73,7 @@ describe('validateGraph reference checks', () => {
           id: 'e',
           source: 'a',
           target: 'a',
-          sourceHandle: 'out',
+          sourceHandle: 'default',
           targetHandle: 'in',
           data: {
             condition: { all: [{ type: 'attrRatio', entityId: 'ent-ghost', attr: 'hp', op: 'lte', value: 0 }] },
@@ -83,9 +83,9 @@ describe('validateGraph reference checks', () => {
     }
     const issues = validateGraph(graph, {
       ...optsBase,
-      reactions: [{ when: { type: 'state', condition: { all: [] } }, do: [{ kind: 'goto', targetNodeId: 'missing-node' }] }],
+      reactions: [{ when: { type: 'state', condition: { all: [] } }, do: [{ kind: 'advance', edgeId: 'missing-edge' }] }],
     })
     expect(issues.some((i) => i.code === 'ref.entity.missing')).toBe(true)
-    expect(issues.some((i) => i.code === 'ref.node.missing' && i.msg.includes('missing-node'))).toBe(true)
+    expect(issues.some((i) => i.code === 'ref.edge.missing' && i.msg.includes('missing-edge'))).toBe(true)
   })
 })

@@ -9,25 +9,29 @@
  */
 import type { FXEdge, FXGraph, FXNode, Handle } from '../../runtime/schema/react-flow-schema'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
+import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
-import { deriveInputs, deriveOutputs } from '../../runtime/registry/kind-registry'
+import { deriveInputs, deriveOutputs } from '../../runtime/registry/component-registry'
+import { flowHandleDisplay, mergeFlowHandles } from '../flow-handle-labels'
 
-function nodeOutputHandleIds(graph: GameGraph, node: GameNode): string[] {
-  const ids = new Set<string>(deriveOutputs(node).map((h) => h.id))
-  // 加上该节点出边实际用到的路由 handle（cond:N/else/out 等）——它们由 edge 声明。
-  for (const e of graph.edges) {
-    if (e.source === node.id && e.sourceHandle) ids.add(e.sourceHandle)
-  }
-  return [...ids]
+function nodeOutputHandles(
+  graph: GameGraph,
+  node: GameNode,
+  overlays?: Record<string, Overlay>,
+): Array<{ value: string; label: string }> {
+  const extra = graph.edges
+    .filter((e) => e.source === node.id && e.sourceHandle)
+    .map((e) => e.sourceHandle!)
+  return mergeFlowHandles(deriveOutputs(node, overlays), extra)
 }
 
-function toHandle(id: string, type: 'source' | 'target'): Handle<{ flowId: string }> {
+function toHandle(id: string, label: string, type: 'source' | 'target'): Handle<{ flowId: string; displayLabel: string }> {
   return {
     id: `${type}:${id}`,
     type,
     position: type === 'source' ? 'right' : 'left',
-    label: id,
-    data: { flowId: id },
+    label,
+    data: { flowId: id, displayLabel: label },
   }
 }
 
@@ -62,7 +66,7 @@ function autoLayout(graph: GameGraph): Record<string, { x: number; y: number }> 
   return out
 }
 
-export function toFXView(graph: GameGraph): FXGraph {
+export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): FXGraph {
   const degenerate = graph.nodes.length > 1 && graph.nodes.every((n) => n.position.x === 0 && n.position.y === 0)
   const layout = degenerate ? autoLayout(graph) : undefined
   return {
@@ -70,8 +74,8 @@ export function toFXView(graph: GameGraph): FXGraph {
       id: node.id,
       type: 'default',
       position: layout?.[node.id] ?? node.position,
-      inputs: deriveInputs().map((h) => toHandle(h.id, 'target')),
-      outputs: nodeOutputHandleIds(graph, node).map((id) => toHandle(id, 'source')),
+      inputs: deriveInputs().map((h) => toHandle(h.id, '入口', 'target')),
+      outputs: nodeOutputHandles(graph, node, overlays).map((h) => toHandle(h.value, h.label, 'source')),
       data: {
         label: node.data.name,
         badge: badgeOf(node),
@@ -81,9 +85,9 @@ export function toFXView(graph: GameGraph): FXGraph {
       id: e.id,
       source: e.source,
       target: e.target,
-      sourceHandle: `source:${e.sourceHandle}`,
+      sourceHandle: `source:${e.sourceHandle ?? 'default'}`,
       targetHandle: 'target:in',
-      label: e.data?.label,
+      label: e.data?.label ?? flowHandleDisplay(e.sourceHandle ?? 'default'),
     })),
   }
 }

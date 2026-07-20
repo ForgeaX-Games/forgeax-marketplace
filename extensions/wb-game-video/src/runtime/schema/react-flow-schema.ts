@@ -48,6 +48,8 @@ export interface Graph<TNode extends Node = Node, TEdge extends Edge = Edge> {
 
 export interface FXHandleData {
   flowId: string
+  /** 引脚旁展示的中文标签（与 flow-handle-labels 一致）。 */
+  displayLabel?: string
 }
 
 export interface FXNodeData {

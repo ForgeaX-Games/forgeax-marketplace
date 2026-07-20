@@ -36,7 +36,7 @@ export type {
 
 export { overlayMountId } from './node-config-schema'
 
-export { layoutValueToCss, layoutToCss } from './layout'
+export { layoutValueToCss, layoutToCss, layoutWrapStyle, layoutHasExplicitSize, layoutIsEffectivelyEmpty, mountWrapStyle, childWrapStyle } from './layout'
 
 export {
   expandOverlayMount,
@@ -50,22 +50,39 @@ export {
 export {
   aggregateOverlayEvents,
   aggregateNodeOverlayEvents,
-  deriveEdgesFromReactions,
-  deriveEdgesFromNodeOverlays,
   eventsFromParams,
   resolveEventReactionDo,
   resolveEventReactions,
   completeReactions,
 } from './overlay-events'
 
-/** 常量或声明式表达式（见 expr.ts）。 */
-export type NumOrExpr = number | { expr: string }
+/**
+ * 数值 = 常量或表达式字符串。求值语法只此一套，见 expr.ts —— `pick` 不是第二套表达式。
+ * `pick` 是编辑器专属 sidecar：记录「用下拉选取式拼出该 expr」时的选择结构，供重开时复原
+ * 下拉；由编辑器编译进 `expr`。引擎只读 `expr`，从不读 `pick`。
+ */
+export type NumOrExpr = number | { expr: string; pick?: ValuePick }
+/** `pick` 的选取式结构（运行时忽略）：常量，或一条左结合的 ±×÷ 条款链。 */
+export type ValuePick =
+  | { mode: 'const'; const: number }
+  | { mode: 'pick'; terms: ValueTerm[] }
+export type ValueTermOp = '+' | '-' | '*' | '/'
+/** 一项：与前项做 op（首项仅 ±）；取值按 source —— entity.<refId>.attr.<attr> / var.<refId> / const。 */
+export type ValueTerm = {
+  op?: ValueTermOp
+  source: 'entity' | 'var' | 'const'
+  refId: string
+  attr?: string
+  constValue?: number
+}
 export type CmpOp = 'gte' | 'lte' | 'gt' | 'lt' | 'eq' | 'neq'
 
 // ── 副作用（图原生，通用）────────────────────────────────────────────────────
+/** 数值类 effect 的运算：加 / 乘 / 设为（减 = 增加负数）。 */
+export type NumericEffectOp = 'add' | 'mul' | 'set'
 export type GraphEffect =
-  | { kind: 'attr'; entityId: string; attr: string; op: 'add' | 'set'; value: NumOrExpr; once?: boolean; id?: string }
-  | { kind: 'var'; varId: string; op: 'add' | 'set'; value: NumOrExpr; once?: boolean; id?: string }
+  | { kind: 'attr'; entityId: string; attr: string; op: NumericEffectOp; value: NumOrExpr; once?: boolean; id?: string }
+  | { kind: 'var'; varId: string; op: NumericEffectOp; value: NumOrExpr; once?: boolean; id?: string }
   | { kind: 'flag'; varId: string; value: boolean; id?: string }
   | { kind: 'item'; itemId: string; op: 'give' | 'take'; count: number; id?: string }
 
@@ -195,9 +212,21 @@ export interface NodeData {
   name: string
   media?: NodeMedia
   mediaPlayMode?: 'once' | 'loop'
+  /**
+   * 可选播放时长上限（ms，作者可配）。
+   * - 无视频节点：作停留节拍 / 时间轴标尺。
+   * - 有视频节点：`>0` 且 `≤ 视频本身长度` 时，到点提前收演出；未填 / `≤0` / 超过视频长度
+   *   → 视为无效、丢弃，以视频本身长度为准（不截断，交给 onEnded）。
+   */
   durationMs?: number
   /** 本节点上的 overlay 挂载列表；纯过场可省略。 */
   overlayNodes?: OverlayNode[]
+  /**
+   * 默认样式方案：目录里一张 overlay 的 id。不挂载、不进 `overlayNodes`、不出现在时间轴/预览里——
+   * 纯粹是"新增字幕/飘字/滤镜/特效时套用什么默认参数"的查表源。同类型（`component` 相同）在该方案里
+   * 有多个 child 时取第一个当默认，其余可在素材检视器「方案样式」下拉里切换。
+   */
+  styleScheme?: string
   reactions?: Reaction[]
 }
 
@@ -281,7 +310,7 @@ export type GameGraph = Graph<GameNode, GameEdge>
 
 /**
  * 局级 reactions（多为 `when.type === 'state'`）：状态变化后求值，
- * do 含 goto 则硬打断跳转。典型：HP≤0 → 胜/负。与挂载/节点共用瘦 Reaction。
+ * do 含显式 advance 则硬打断跳转。典型：HP≤0 → 胜/负。与挂载/节点共用瘦 Reaction。
  */
 // （类型 Reaction 由上方 export type 与 node-config 导出）
 

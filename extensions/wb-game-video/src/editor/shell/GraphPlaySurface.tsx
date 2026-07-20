@@ -7,24 +7,24 @@
  * 实时高亮当前节点/已走边，点节点=jump 执行，只读（不改图、不出节点配置）。
  * 数据来自共享 graphScenario store（与蓝图/视频/界面/规则同源）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { GameScenario } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { PlayerRootContext, type HudElementView, type SkinCtx } from '../../runtime/skins/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
-import { resolveMediaSrc } from './media'
-import { computeVideoContentRect, type VideoContentRect } from '../video/videoContentRect'
+import { resolveMediaSrc, videoDurationCapReached } from './media'
+import { VideoOverlayStage } from '../video/VideoOverlayStage'
+import { useVideoContentRect } from '../video/useVideoContentRect'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { getGameSlug } from '../persist/gameScope'
 import { expandNodeOverlays } from '../../runtime/schema/expand-overlay'
-import { getKind } from '../../runtime/registry/kind-registry'
+import { getComponent } from '../../runtime/registry/component-registry'
 
 function autoInput(handles: string[]): unknown {
-  const h = handles[0] ?? ''
-  if (h.startsWith('opt:')) return h.slice(4)
-  if (h.startsWith('hs:')) return h.slice(3)
-  return h
+  // handle === event id（无前缀）；auto 演示直接提交首个非默认出口。
+  return handles.find((h) => h !== 'default') ?? handles[0] ?? ''
 }
 
 // ── 可拖拽 + 可缩放浮层（对齐旧 BlueprintPlayer DraggablePanel）──────────────────
@@ -65,7 +65,8 @@ function DraggablePanel({ title, initial, onClose, children }: { title: string; 
 
 export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
-  const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
+  // 宿主 iframe 传 `?slug=`（见 gameScope.ts）；勿只读 `?game=`，否则会落到默认 demo 命名空间。
+  const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const graph = useGraphScenario((s) => s.graph)
   const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
@@ -88,39 +89,30 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     return () => releasePlayerFocus(el)
   }, [])
 
-  // 视频 object-fit:contain 后的实际画面矩形——HUD/QTE/交互等 overlay 都锚在这块
-  // 视频显示区上（而非整个内容区），视频缩小/换比例时血条等跟着视频走。
   const videoElRef = useRef<HTMLVideoElement | null>(null)
-  const [contentRect, setContentRect] = useState<VideoContentRect | null>(null)
-  const recomputeRect = useCallback(() => {
-    const v = videoElRef.current
-    setContentRect(v ? computeVideoContentRect(v) : null)
-  }, [])
-  useEffect(() => {
-    const v = videoElRef.current
-    if (!v) return
-    const parent = v.parentElement
-    if (!parent || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => recomputeRect())
-    ro.observe(parent)
-    return () => ro.disconnect()
-  }, [recomputeRect, snap?.clip?.nodeId])
+  const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [snap?.clip?.nodeId])
 
+  // 实体从空被回填后要重建 session（否则 HUD bind 不到 ent-*）。
+  const entitySig = useGraphScenario((s) => {
+    const e = s.meta.entities ?? s.demo?.entities
+    return e ? Object.keys(e).sort().join(',') : ''
+  })
   useEffect(() => {
     if (!ready) return
     const s = new GraphSession(useGraphScenario.getState().scn())
     sessionRef.current = s
     setSkins(s.skins)
     setSnap(s.start())
-  }, [restartKey, ready])
+  }, [restartKey, ready, entitySig])
 
   const videoSrc = resolveMediaSrc(snap?.clip?.mediaId, game)
 
   useEffect(() => {
-    if (!snap || snap.interaction || snap.phase === 'ended' || !snap.clip?.durationMs) return
+    // 无视频：durationMs 到点推进；有视频：durationMs 作播放时长上限，走 <video> onTimeUpdate。
+    if (!snap || snap.interaction || snap.phase === 'ended' || !snap.clip?.durationMs || snap.clip.mediaId) return
     const t = setTimeout(() => setSnap(sessionRef.current!.performanceEnd()), snap.clip.durationMs)
     return () => clearTimeout(t)
-  }, [snap?.clip?.nodeId, snap?.interaction, snap?.phase, snap?.clip?.durationMs])
+  }, [snap?.clip?.nodeId, snap?.interaction, snap?.phase, snap?.clip?.durationMs, snap?.clip?.mediaId])
 
   useEffect(() => {
     if (!snap?.interaction?.timeoutMs) return
@@ -145,21 +137,29 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     if (!currentNode) return m
     const children = expandNodeOverlays(overlays, currentNode).flatMap((i) => i.children)
     for (const c of children) {
-      const plugin = getKind(c.component)
+      const plugin = getComponent(c.component)
       if (plugin?.surface !== 'hud') continue
-      const params = c.params as { bind?: string; label?: string; accent?: string }
-      const bind = params.bind ?? c.id
+      const inputs = c.inputs as { bind?: string; label?: string; accent?: string }
+      const bind = inputs.bind ?? c.id
       m.set(bind, {
         element: bind,
         component: c.component,
-        label: params.label,
-        accent: params.accent,
+        label: inputs.label,
+        accent: inputs.accent,
         layout: c.layout,
       })
     }
     return m
   }, [overlays, currentNode])
-  const skinCtx: SkinCtx | undefined = snap ? { hud: snap.hud } : undefined
+  const rt = sessionRef.current?.runtime
+  const skinCtx: SkinCtx | undefined = snap && rt
+    ? {
+        hud: snap.hud,
+        condition: { state: rt.state, visited: rt.state.visited },
+      }
+    : snap
+      ? { hud: snap.hud }
+      : undefined
 
   const toolBtn = (on: boolean): CSSProperties => ({
     padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12,
@@ -168,12 +168,6 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   })
 
   // 游戏 overlay 舞台 = 视频实际显示矩形（有黑边时锚在视频那块，不铺满容器）。
-  // 无 contentRect（未加载/无视频）时回退到铺满容器。层内自身 pointerEvents 不变，
-  // 舞台设 none 让空白处点击穿透，交互层单独开 auto。
-  const stageStyle: CSSProperties = contentRect
-    ? { position: 'absolute', left: contentRect.left, top: contentRect.top, width: contentRect.width, height: contentRect.height, pointerEvents: 'none' }
-    : { position: 'absolute', inset: 0, pointerEvents: 'none' }
-
   return (
     <PlayerRootContext.Provider value={rootEl}>
     <div
@@ -198,7 +192,16 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
             if (snap?.clip?.loop) return
             setSnap(sessionRef.current!.performanceEnd())
           }}
-          onTimeUpdate={(e) => setSnap(sessionRef.current!.tick(Math.floor(e.currentTarget.currentTime * 1000)))}
+          onTimeUpdate={(e) => {
+            const el = e.currentTarget
+            const nowMs = Math.floor(el.currentTime * 1000)
+            // 播放时长上限：到点提前收演出（awaitInteraction 下 performanceEnd 为 no-op，故加 interaction 卫护省无谓渲染）。
+            if (!snap?.interaction && videoDurationCapReached(nowMs, snap?.clip?.durationMs, el.duration)) {
+              setSnap(sessionRef.current!.performanceEnd())
+              return
+            }
+            setSnap(sessionRef.current!.tick(nowMs))
+          }}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
         />
       ) : (
@@ -209,24 +212,21 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
       {/* 游戏 overlay 舞台：锚定视频实际显示矩形（object-fit:contain 后带黑边的那块）。
           HUD / QTE / 交互 / 结局横幅都相对这块定位，视频缩放/换比例时跟着视频走。 */}
-      <div style={stageStyle}>
-      {/* 表现叠层 */}
+      <VideoOverlayStage contentRect={contentRect}>
+      {/* 表现叠层 + 挂载 HUD（battleHpBar 等）：必须传 skinCtx，否则 HUD 皮肤在 overlay 表里找不到会静默丢弃。 */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-        {(snap?.overlays ?? []).map((o, i) => (
-          <span key={`${o.elementId}-${i}`} style={{ display: 'contents' }}>{skins?.renderOverlay(o)}</span>
+        {(snap?.overlayMounts ?? []).map((m) => (
+          <span key={m.mountId} style={{ display: 'contents' }}>
+            {skins?.renderOverlayMount(
+              m,
+              (elementId, key) => { const s = sessionRef.current; if (s) setSnap(s.emitEvent(elementId, key)) },
+              skinCtx,
+            )}
+          </span>
         ))}
       </div>
 
-      {/* 皮肤 HUD：仅当前节点挂了 surface:'hud' 时显示（叙事段不挂 battleHud → 无血条）。 */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
-        {hudComp.size > 0 && Object.keys(snap?.hud.entities ?? {}).map((id) => {
-          const el = hudComp.get(id)
-          if (el?.component && skinCtx && skins) return <span key={id}>{skins.renderHudElement(el, skinCtx)}</span>
-          return null
-        })}
-      </div>
-
-      {/* 内置 HUD 列：仅节点声明了 HUD 挂载、且实体未配皮肤组件时兜底。 */}
+      {/* 内置 HUD 列：节点挂了 surface:'hud'、但实体未配已注册皮肤时兜底（有 battleHpBar 时走上方 overlayMounts）。 */}
       <div style={{ position: 'absolute', top: 10, left: 12, width: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {hudComp.size > 0 && Object.entries(snap?.hud.entities ?? {}).filter(([id]) => !hudComp.get(id)?.component).map(([id, e]) => {
           const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0
@@ -244,19 +244,12 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
         })}
       </div>
 
-      {/* 结局横幅 */}
-      {snap?.banner && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44, color: '#fff', background: 'rgba(0,0,0,0.6)' }}>
-          结束{snap.banner.title ? ` · ${snap.banner.title}` : ''}
-        </div>
-      )}
-
       {/* 交互层：铺满舞台=视频显示区。皮肤（防反/技能条）与默认按钮行各自绝对定位到
           自己的位置（防反=右侧居中、技能条/默认=底部），故这里只做全区容器、点击穿透。 */}
       {snap?.interaction && skins && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{skins.renderInteraction(snap.interaction, submit, skinCtx)}</div>
       )}
-      </div>
+      </VideoOverlayStage>
 
       {/* 控制条：右上角悬浮 */}
       <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 10, background: 'rgba(27,23,19,0.7)' }}>
@@ -269,7 +262,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       {/* 蓝图浮层：可拖拽 + 可缩放，复用 GraphCanvas */}
       {showBlueprint && (
         <DraggablePanel title="蓝图状态机 · 点节点跳转执行" initial={{ x: 40, y: 56, w: 540, h: 420 }} onClose={() => setShowBlueprint(false)}>
-          <GraphCanvas graph={graph} onChange={() => {}} activeNodeId={snap?.currentNodeId} traversedEdgeIds={traversed} onJump={doJump} />
+          <GraphCanvas graph={graph} onChange={() => {}} overlays={overlays} activeNodeId={snap?.currentNodeId} traversedEdgeIds={traversed} onJump={doJump} />
         </DraggablePanel>
       )}
 

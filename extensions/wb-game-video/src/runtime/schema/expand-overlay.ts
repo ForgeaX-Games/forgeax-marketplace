@@ -21,21 +21,53 @@ export function nodeOverlayMounts(node: GameNode | undefined): OverlayNode[] {
   return node?.data.overlayNodes ?? []
 }
 
+/** 字段级合并：顶层覆盖 + inputs/layout 各自浅合（与旧 patchOverlayChild 同款语义）。 */
+export function mergeChild(base: OverlayChild, patch: Partial<OverlayChild>): OverlayChild {
+  return {
+    ...base,
+    ...patch,
+    inputs: patch.inputs ? { ...base.inputs, ...patch.inputs } : base.inputs,
+    layout: patch.layout ? { ...base.layout, ...patch.layout } : base.layout,
+  }
+}
+
+/**
+ * Prototype + sparse override 解析：`mount.overlay` 的 children 为原型基底，
+ * 逐组件套 `mount.overrides`（字段级覆盖）、按 `mount.removed` 屏蔽、末尾追加 `mount.added`。
+ * 未出现在 overrides/added/removed 里的组件原样跟随原型（编辑方案即同步）。
+ * 孤儿 override/removed（原型已删该 childId）静默忽略。
+ */
+export function resolveMountChildren(
+  overlays: Record<string, Overlay> | undefined,
+  mount: OverlayNode,
+): OverlayChild[] {
+  const base = overlays?.[mount.overlay]?.children ?? []
+  const removed = mount.removed
+  const overrides = mount.overrides
+  const out: OverlayChild[] = []
+  for (const child of base) {
+    if (removed?.includes(child.id)) continue
+    const patch = overrides?.[child.id]
+    out.push(patch ? mergeChild(child, patch) : child)
+  }
+  if (mount.added?.length) out.push(...mount.added)
+  return out
+}
+
 function toInstanceChild(
   def: OverlayChild,
   meta: { mountId: string; overlayId: string; nodeId: string },
 ): OverlayInstanceChild {
   const catalogId = def.id
   const runtimeId = overlayInstanceChildId(meta.mountId, catalogId)
-  const params = { ...(def.params ?? {}) }
-  if (params.component == null) params.component = def.component
+  const inputs = { ...(def.inputs ?? {}) }
   return {
     id: runtimeId,
     component: def.component,
     trigger: def.trigger ?? { when: 'enter' },
     window: def.window,
     layout: def.layout,
-    params,
+    inputs,
     source: {
       mountId: meta.mountId,
       overlayId: meta.overlayId,
@@ -55,7 +87,7 @@ export function expandOverlayMount(
   if (!def) return null
   const mountId = overlayMountId(mount)
   const children: OverlayInstanceChild[] = []
-  for (const child of def.children) {
+  for (const child of resolveMountChildren(overlays, mount)) {
     children.push(
       toInstanceChild(child, {
         mountId,

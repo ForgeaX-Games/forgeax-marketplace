@@ -1,81 +1,129 @@
 /**
  * 應/默 限时抉择皮肤（component id: `inkYingMo`）—— 从旧 player/InkYingMoLayer 迁移。
  *
- * 读 InteractionSnap.params.options（水墨字形取 option.label，如「應」「默」）；点击/键盘(A/E=第0项, B/Q=第1项) → submit(key)。
- * 超时默认由引擎按 params.timeoutMs/defaultKey 自动 submit(undefined) 处理，皮肤不再自管计时。
+ * 读 InteractionSnap.inputs.events（水墨字形取 event.label，如「應」「默」）；点击/键盘(A/E=第0项, B/Q=第1项) → submit(id)。
+ * 超时默认由引擎按 inputs.timeoutMs/defaultEvent 自动 submit(undefined) 处理，皮肤不再自管计时。
+ *
+ * 预览态：与 inkKou 同一套 --preview-t 负 delay 冻结契约——preview 时加 is-frozen，
+ * 入场动画按播放头定帧，且禁键/禁点（不吃提交）。
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
-import type { ChoiceParams } from '../../registry/core-kinds'
-import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import { isOptionLocked } from '../optionLock'
+import type { ChoiceParams } from '../../registry/core-components'
+import type { OverlayChild } from '../../schema/graph-schema'
+import { injectCss, ensureInkFilters, ensureBrushFont, previewFreezeClass, previewTStyle } from './skinRuntime'
 
 const KEY_LABELS = ['A', 'B'] as const
 
-export function InkYingMoLayer({ interaction, submit }: InteractionProps) {
+/** 皮肤默认玩法参数（样式锁选项 / 新建预设 / 锚点共用）。 */
+export const inkYingMoDefaults: Pick<ChoiceParams, 'events' | 'x' | 'y'> = {
+  events: [
+    { id: 'ying', label: '應' },
+    { id: 'mo', label: '默' },
+  ],
+  x: 0.72,
+  y: 0.78,
+}
+
+/** OverlayChild 预设（顶栏 component = 皮肤 id）。 */
+export function inkYingMoPreset(id: string): OverlayChild {
+  return {
+    id,
+    component: 'inkYingMo',
+    trigger: { when: 'enter' },
+    inputs: { ...inkYingMoDefaults },
+  }
+}
+
+export function InkYingMoLayer({ interaction, submit, ctx, preview, previewTimeMs }: InteractionProps) {
   injectCss('ink-yingmo-layer', YINGMO_CSS)
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const options = ((interaction.params as unknown as ChoiceParams).options ?? []).slice(0, 2)
+  const inputs = interaction.inputs as unknown as ChoiceParams
+  const events = (inputs.events ?? []).slice(0, 2)
+  const x = typeof inputs.x === 'number' ? inputs.x : inkYingMoDefaults.x!
+  const y = typeof inputs.y === 'number' ? inputs.y : inkYingMoDefaults.y!
   const pickedRef = useRef(false)
 
-  function pick(key: string): void {
-    if (pickedRef.current) return
+  function pick(id: string, locked: boolean): void {
+    if (preview || pickedRef.current || locked) return
     pickedRef.current = true
-    submit(key)
+    submit(id)
   }
 
   useEffect(() => {
+    if (preview) return
     function onKey(e: KeyboardEvent): void {
       if (!keyOk()) return
       const k = e.key.toLowerCase()
       let idx = -1
       if (k === 'a' || k === 'e') idx = 0
       else if (k === 'b' || k === 'q') idx = 1
-      const target = idx >= 0 ? options[idx] : undefined
+      const target = idx >= 0 ? events[idx] : undefined
       if (!target) return
       e.preventDefault()
-      pick(target.key)
+      pick(target.id, isOptionLocked(target, ctx))
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options])
+  }, [events, ctx, preview])
 
+  const style: CSSProperties = { left: `${x * 100}%`, top: `${y * 100}%` }
+  if (preview) Object.assign(style, previewTStyle(previewTimeMs ?? 0))
   return (
-    <div className="pvn-opts pvn-opts--yingmo show" aria-label="应默抉择">
+    <div
+      className={`pvn-opts pvn-opts--yingmo show${previewFreezeClass(preview)}`}
+      aria-label="应默抉择"
+      style={style}
+    >
       <div className="pvn-yingmo-pair">
-        {options.map((o, i) => (
+        {events.map((o, i) => {
+          const locked = isOptionLocked(o, ctx)
+          return (
           <button
-            key={o.key}
+            key={o.id}
             type="button"
-            className="pvn-opt pvn-opt--kou pvn-opt--ying"
+            className={`pvn-opt pvn-opt--kou pvn-opt--ying${locked ? ' dis' : ''}`}
             data-key={KEY_LABELS[i] ?? ''}
-            aria-label={`${o.label ?? o.key}，${KEY_LABELS[i] ?? ''}键或点击确认`}
-            onClick={() => pick(o.key)}
+            aria-label={`${o.label ?? o.id}，${KEY_LABELS[i] ?? ''}键或点击确认`}
+            disabled={locked || preview}
+            onClick={() => pick(o.id, locked)}
           >
             <span className="pvn-kou-orn" aria-hidden="true">
               <i className="pvn-kou-dot" />
               <i className="pvn-kou-diamond" />
               <i className="pvn-kou-dot" />
             </span>
-            <span className="pvn-kou-glyph">{o.label ?? o.key}</span>
+            <span className="pvn-kou-glyph">{o.label ?? o.id}</span>
             <span className="pvn-kou-hint" aria-hidden="true">
               <span className="pvn-kou-key">{KEY_LABELS[i] ?? ''}</span>
             </span>
           </button>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
 }
 
 const YINGMO_CSS = `
-.pvn-opts--yingmo{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:flex-end;padding:0 8% 16% 0;pointer-events:none;}
+.pvn-opts--yingmo{position:absolute;z-index:6;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%);pointer-events:none;}
 .pvn-opts--yingmo.show{pointer-events:auto;}
+.pvn-opts--yingmo.is-frozen{pointer-events:none!important;}
+.pvn-opts--yingmo.is-frozen .pvn-kou-orn,.pvn-opts--yingmo.is-frozen .pvn-kou-glyph,.pvn-opts--yingmo.is-frozen .pvn-kou-hint{animation-play-state:paused;}
+.pvn-opts--yingmo.is-frozen .pvn-kou-orn{animation-delay:calc(0s - var(--preview-t,0ms));}
+.pvn-opts--yingmo.is-frozen .pvn-kou-glyph{animation-delay:calc(0.12s - var(--preview-t,0ms));}
+.pvn-opts--yingmo.is-frozen .pvn-kou-hint{animation-delay:calc(0.38s - var(--preview-t,0ms));}
+.pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-orn{animation-delay:calc(0.28s - var(--preview-t,0ms));}
+.pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-glyph{animation-delay:calc(0.2s - var(--preview-t,0ms));}
+.pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-hint{animation-delay:calc(0.46s - var(--preview-t,0ms));}
 .pvn-yingmo-pair{display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:clamp(32px,9vw,64px);}
 .pvn-opts--yingmo .pvn-opt--kou{position:relative;padding:0;border:none;background:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;color:#f8f4ec;}
-.pvn-opts--yingmo .pvn-opt--kou:hover{transform:translateY(-2px) scale(1.03);}
+.pvn-opts--yingmo .pvn-opt--kou:hover:not(.dis):not(:disabled){transform:translateY(-2px) scale(1.03);}
+.pvn-opts--yingmo .pvn-opt--kou.dis,.pvn-opts--yingmo .pvn-opt--kou:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.35);}
 .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-orn{animation-delay:.28s;}
 .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-glyph{animation-delay:.2s;}
 .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-hint{animation-delay:.46s;}

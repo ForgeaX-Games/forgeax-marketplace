@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { injectStyleOnce } from '../../styles/injectStyle'
+import { AudioWaveform } from './audioWaveform'
 import { resolveSnapGridMs, snapMs } from './timelineMath'
 import {
   type AudioItem,
@@ -29,7 +30,7 @@ export const MATERIAL_DND_MIME = 'application/x-fx-material'
  *   · zIndex 堆叠的材料条（字幕 / 结算 / QTE / 选项 / QTE 窗口）
  *   · Ctrl/⌘ 锚点缩放 + Shift 横滚 + 普通滚轮纵向滚动
  *   · ruler 刻度 + 平滑播放头（宿主每帧喂 playheadMs）
- *   · 拖动 move/start/end（吸附 100ms，Shift=10ms/Alt=500ms）
+ *   · 拖动 move/start/end（吸附 0.01s=10ms；Alt=0.1s）
  *   · 无限纵向轨：轨数由数据 zIndex 派生并多留一条空投放轨
  *
  * 组件本身**不碰 scenario**：材料由宿主 `collectMaterials(scene)` 传入，编辑经
@@ -211,7 +212,7 @@ export function MaterialTimeline({
     if (!activeList.some((m) => m.key === drag.key)) return
     const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
     const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect, trackCount - 1) : drag.zIndex
-    // 吸附：默认 100ms 网格；Shift=10ms 精细，Alt=500ms 粗粒度（复用 A 的 snap 语义）。
+    // 吸附：默认 0.01s（10ms）；Alt=0.1s 粗粒度。
     const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
     if (drag.mode === 'marker') {
       // 段内命中判定点（菱形）：只改 markerMs，宿主夹回 [出现, 消失] 内。
@@ -263,12 +264,12 @@ export function MaterialTimeline({
     beginSeek(e)
   }
 
-  // 素材库卡片拖入：x → 时刻（吸附 100ms）、y → 轨。
+  // 素材库卡片拖入：x → 时刻（吸附 0.01s）、y → 轨。
   function dropPosFromEvent(e: React.DragEvent): { ms: number; zIndex: number } {
     const rect = timelineRef.current?.getBoundingClientRect()
     if (!rect || rect.width <= 0) return { ms: 0, zIndex: 0 }
     const ratio = (e.clientX - rect.left) / rect.width
-    const ms = clampMs(snapMs(ratio * maxMs, 100), 0, maxMs)
+    const ms = clampMs(snapMs(ratio * maxMs, 10), 0, maxMs)
     const zIndex = layerFromPointerY(e.clientY, rect, trackCount - 1)
     return { ms, zIndex }
   }
@@ -406,8 +407,11 @@ export function MaterialTimeline({
                     onPointerDown={(e) => onPointerDown(e, a, 'move')}
                     title={`${a.label} · ${fmtDur(a.startMs)} - ${fmtDur(a.endMs)}`}
                   >
-                    <span className="gc-audio-ico" aria-hidden>♪</span>
-                    <span>{a.label}</span>
+                    <AudioWaveform src={a.src} width={width} height={TIMELINE_LAYER_STEP - 2} />
+                    <span className="gc-audio-label">
+                      <span className="gc-audio-ico" aria-hidden>♪</span>
+                      {a.label}
+                    </span>
                   </div>
                 )
               })
@@ -418,10 +422,10 @@ export function MaterialTimeline({
                 return (
                   <Fragment key={m.key}>
                     <div
-                      className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}`}
+                      className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}${m.overridden ? ' is-overridden' : ''}`}
                       style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.zIndex)}px` }}
                       onPointerDown={(e) => onPointerDown(e, m, 'move')}
-                      title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}`}
+                      title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}${m.overridden ? ' · 已脱离方案跟随' : ''}`}
                     >
                       {editable ? (
                         <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
@@ -655,6 +659,19 @@ const MATERIAL_TIMELINE_CSS = `
 }
 .mtl-root .gc-mclip:active { cursor: grabbing; }
 .mtl-root .gc-mclip.is-selected { outline: 2px solid var(--gc-accent); outline-offset: 2px; overflow: visible; }
+.mtl-root .gc-mclip.is-overridden { overflow: visible; }
+.mtl-root .gc-mclip.is-overridden::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffd54a;
+  box-shadow: 0 0 6px rgba(255,213,74,.85), 0 0 0 1px rgba(0,0,0,.4);
+  pointer-events: none;
+}
 .mtl-root .gc-mclip.is-subtitle { border-color: rgba(95,201,128,.58); color: #d6ffe2; }
 .mtl-root .gc-mclip.is-subtitle::before { background: #62c980; }
 .mtl-root .gc-mclip.is-overlay { border-color: rgba(240,136,64,.58); color: #ffd8bf; }
@@ -681,16 +698,36 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-mclip.is-option::before { background: #c79bf2; }
 .mtl-root .gc-mclip.is-audio {
   border-color: rgba(96,214,196,.55); color: #cdfff4;
-  background: repeating-linear-gradient(90deg, rgba(20,40,38,.92) 0 6px, rgba(26,52,49,.92) 6px 12px);
-  gap: 6px;
+  /* 波形未解出/无音轨时的兜底底纹 */
+  background: linear-gradient(rgba(16,34,32,.94), rgba(16,34,32,.94)),
+    repeating-linear-gradient(90deg, rgba(20,40,38,.9) 0 6px, rgba(26,52,49,.9) 6px 12px);
+  justify-content: flex-start;
+  padding: 0 6px;
 }
-.mtl-root .gc-mclip.is-audio::before { background: #4fd6c0; }
+.mtl-root .gc-mclip.is-audio::before { background: #4fd6c0; z-index: 2; }
 .mtl-root .gc-mclip.is-audio.is-builtin { border-style: dashed; }
-.mtl-root .gc-audio-ico { font-size: 13px; opacity: .85; }
+.mtl-root .gc-audio-wave {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.mtl-root .gc-audio-label {
+  position: relative; z-index: 3;
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: calc(100% - 8px);
+  padding: 1px 7px; border-radius: 6px;
+  background: rgba(6,20,18,.5);
+  font-size: 11px; line-height: 1.5;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.mtl-root .gc-audio-ico { font-size: 12px; opacity: .85; }
 .mtl-root .gc-mclip.is-filter { border-color: rgba(126,214,122,.6); color: #d9ffd0; }
 .mtl-root .gc-mclip.is-filter::before { background: #7ed67a; }
 .mtl-root .gc-mclip.is-fx { border-color: rgba(255,138,196,.6); color: #ffd9ee; }
 .mtl-root .gc-mclip.is-fx::before { background: #ff8ac4; }
+.mtl-root .gc-mclip.is-component { border-color: rgba(180,190,210,.55); color: #e2e8f0; }
+.mtl-root .gc-mclip.is-component::before { background: #94a3b8; }
 .mtl-root .gc-mhandle {
   position: absolute;
   top: 0; bottom: 0;

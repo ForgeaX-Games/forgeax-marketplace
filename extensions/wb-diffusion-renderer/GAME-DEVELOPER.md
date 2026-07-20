@@ -1,237 +1,139 @@
-# Diffusion Renderer — Game Developer Guide
+# Game-facing visual generation API
 
-This guide is for game code that wants to drive the Diffusion Renderer prompt from
-runtime state. You do not need to know the FluxRT protocol or the Studio plugin
-internals.
+Games integrate through `@forgeax/types/visual-generation`; they do not import
+this plugin and do not call browser globals. `VisualSource` and the resolved
+effect frame are Studio/plugin host contracts, not game APIs.
 
-## What You Can Control
-
-The plugin exposes an optional browser global while the Diffusion Renderer panel is
-mounted:
-
-```ts
-window.forgeaxDiffusion
-```
-
-Use it to send a **game-state prompt fragment**. The plugin composes that fragment
-with the prompt the human typed in the panel:
-
-```text
-effective prompt = panel base prompt + ", " + game fragment
-```
-
-Example:
-
-```text
-Panel base prompt:
-polished 3D game render, detailed models, clean geometry, rich materials, cinematic lighting
-
-Game fragment:
-night, heavy rain, wet reflections
-
-Effective prompt sent to FluxRT:
-polished 3D game render, detailed models, clean geometry, rich materials, cinematic lighting, night, heavy rain, wet reflections
-```
-
-This means game code should describe **what changed in the scene**, not restate the
-whole visual style.
-
-## Basic Usage
-
-Always use optional chaining. The API is available only when the inline Diffusion
-Renderer panel is mounted.
+> [!WARNING]
+> This document describes the target v2 program contract. Phase 1 deliberately
+> does not migrate existing games; use the schema exports as the authoritative
+> source until Phase 2 updates the samples.
 
 ```ts
-window.forgeaxDiffusion?.setPrompt('night, heavy rain, wet reflections');
-```
+import {
+  commitVisualPresentation,
+  setVisualIntent,
+} from '@forgeax/types/visual-generation';
 
-Clear the game fragment when the condition no longer applies:
+setVisualIntent(world, {
+  scene: {
+    location: 'rainy market street',
+    tags: ['night', 'rain'],
+    continuityKey: 'market-night',
+    actors: [{ id: 'hero', role: 'player', stateTags: ['walking'] }],
+  },
+  camera: {
+    mode: 'third-person',
+    motion: 'follow',
+  },
+});
 
-```ts
-window.forgeaxDiffusion?.setPrompt('');
-```
-
-Or hand control fully back to the panel:
-
-```ts
-window.forgeaxDiffusion?.clearGameOverrides();
-```
-
-The game does **not** start or stop the live stream. The human still opens the panel
-and clicks `Go Live`. Game code only adjusts the live rendering params if the panel is
-present.
-
-## ECS Pattern
-
-Set the fragment from a system or `ctx.registerUpdate`. Prefer deriving a small
-fragment from game state and updating it only when the fragment changes.
-
-```ts
-let lastFragment = '';
-
-function setDiffusionFragment(fragment: string): void {
-  if (fragment === lastFragment) return;
-  lastFragment = fragment;
-  window.forgeaxDiffusion?.setPrompt(fragment);
-}
-
-export async function bootstrap(world: World, ctx: GameContext) {
-  ctx.registerUpdate(() => {
-    const player = findPlayer(world);
-    if (!player) {
-      setDiffusionFragment('');
-      return;
-    }
-
-    if (player.onFire) {
-      setDiffusionFragment('engulfed in flames, embers, heat haze');
-      return;
-    }
-
-    if (player.inCave) {
-      setDiffusionFragment('dark damp cave, torchlight, deep shadows');
-      return;
-    }
-
-    if (player.weather === 'storm') {
-      setDiffusionFragment('heavy rain, wet ground, dramatic storm clouds');
-      return;
-    }
-
-    setDiffusionFragment('');
-  });
-}
-```
-
-`findPlayer`, `World`, and `GameContext` above are placeholders for your game's actual
-ECS helpers/types.
-
-## API Reference
-
-```ts
-interface ForgeaxDiffusionControl {
-  readonly version: 1;
-  isLive(): boolean;
-  setPrompt(fragment: string): void;
-  setParams(params: Partial<{
-    prompt: string;
-    steps: number;
-    interp: number;
-    seed: number;
-  }>): void;
-  clearGameOverrides(): void;
-  subscribe(cb: (status: ForgeaxDiffusionStreamStatus) => void): () => void;
-}
-```
-
-### `setPrompt(fragment)`
-
-Sets only the game prompt fragment. This is the normal game integration path.
-
-```ts
-window.forgeaxDiffusion?.setPrompt('low fog, cold moonlight');
-```
-
-An empty string removes the game fragment but keeps the panel base prompt.
-
-### `setParams(params)`
-
-Advanced API for overriding non-text parameters:
-
-```ts
-window.forgeaxDiffusion?.setParams({
-  prompt: 'fast motion blur, racing speed lines',
-  steps: 1,
+commitVisualPresentation(world, {
+  operationId: 'hero-posture-42',
+  state: {
+    signals: { 'input.move-y': 1 },
+    activeBehaviors: [{
+      recipeKey: 'cover-duck',
+      instanceId: 'hero-posture',
+      actorId: 'hero',
+    }],
+  },
 });
 ```
 
-Only `prompt` composes with the panel base prompt. `steps`, `interp`, and `seed` are
-plain overrides of the panel values while they are set.
+`setVisualPresentationIntent` is the game-facing way to change player-authored
+direction or request `paused` playback. Use the helpers
+`pauseVisualPresentation`, `resumeVisualPresentation`, and
+`restartVisualPresentation` for lifecycle changes; games never call Reactor
+commands directly.
 
-Use these sparingly:
+## Publishing image priors
 
-- `steps`: lower is faster, higher is more detailed. Valid FluxRT range is `1`-`4`.
-- `interp`: `0` off, `1` = 2x, `2` = 4x smoothing.
-- `seed`: keep stable unless you intentionally want style variation.
+`continuityKey` is an opaque game-owned key. The game must publish a matching
+catalog at `visual-priors/manifest.json`; the Studio host resolves the catalog
+entry before a seed-image backend session is created.
 
-### `clearGameOverrides()`
-
-Clears all game-provided overrides. The panel returns to manual-only control.
-
-```ts
-window.forgeaxDiffusion?.clearGameOverrides();
+```text
+.forgeax/games/<slug>/
+├── main.ts
+└── visual-priors/
+    ├── manifest.json
+    └── market-night.jpg
 ```
 
-### `isLive()`
+Presentation recipes live in `visual-presentation/manifest.json`. They use the
+same game-owned `continuityKey` as the prior catalog, but never contain image
+paths or Provider fields:
 
-Returns whether the stream is currently live.
-
-```ts
-if (window.forgeaxDiffusion?.isLive()) {
-  window.forgeaxDiffusion.setPrompt('boss arena, red warning lights');
+```json
+{
+  "version": 2,
+  "entries": [
+    {
+      "continuityKey": "market-night",
+      "signals": [{ "key": "input.move-y", "type": "number", "default": 0 }],
+      "baseline": {},
+      "recipes": [{ "key": "cover-duck", "active": { "prompt": [{
+        "id": "duck", "slot": "world", "mode": "append",
+        "text": "The courier takes cover."
+      }] } }]
+    }
+  ]
 }
 ```
 
-### `subscribe(cb)`
+Recipes may be combined only by publishing multiple behavior instances. They
+cannot nest, activate other recipes, carry provider-specific fields, or encode
+arbitrary expressions.
 
-Subscribe to stream status if you want an in-game HUD or debug display.
+`image` paths are relative to the **game root**, not the `visual-priors/`
+directory. A file at `visual-priors/market-night.jpg` must be declared as
+`visual-priors/market-night.jpg` (or live elsewhere under the game root, e.g.
+`assets/seed.jpg`).
 
-```ts
-const unsubscribe = window.forgeaxDiffusion?.subscribe((status) => {
-  console.log(status.state, status.fps, status.e2eMs);
-});
-
-// Later:
-unsubscribe?.();
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "continuityKey": "market-night",
+      "label": "Rainy market",
+      "image": "visual-priors/market-night.jpg"
+    }
+  ]
+}
 ```
 
-## Types
+> [!WARNING]
+> A missing catalog, or an unknown `continuityKey`, fails the presentation
+> request before Reactor or another provider is contacted. Panel defaults also
+> skip seed-image backends when the active game has no catalog. Do not add
+> provider URLs or fallback keys to game code.
 
-The types-only declaration lives at:
+## Publishing rules
 
-```text
-packages/marketplace/extensions/wb-diffusion-renderer/src/game-api.d.ts
-```
+| Data | API | Semantics |
+| :-- | :-- | :-- |
+| Durable scene, actor, camera facts | `setVisualIntent` | Full snapshot; identical values keep their revision |
+| Signals, active behaviors, lifecycle | `commitVisualPresentation` | One atomic commit; enter/exit transitions are derived from active state |
+| Scene/continuity change | `commitVisualPresentation` with a new `continuityKey` in `VisualIntent` | Presenter resets Provider continuity without guessing gameplay |
 
-It declares `window.forgeaxDiffusion` and the status/params types. Game code can also
-remain untyped and use optional chaining directly; the runtime does not require an
-import.
+> [!WARNING]
+> Never branch deterministic gameplay on visual presenter status or generated
+> pixels. Provider latency, moderation, quota, and networking are asynchronous
+> presentation concerns.
 
-## Runtime Notes
+The City Stroll sample is the reference consumer. It derives visual state from
+its auxiliary scene frame, third-person camera, and autoplay/movement state.
 
-- The API is optional. If the panel is closed, `window.forgeaxDiffusion` is undefined.
-- The API is currently same-window and targets the in-process edit viewport
-  (`canvas#app`). The `/preview/` iframe runtime is a separate realm and does not have
-  this direct channel yet.
-- The panel shows a `game` badge when a game fragment is active. The human can click
-  `reclaim` to clear the game fragment.
-- The stream already coalesces params per captured frame. Avoid doing expensive string
-  work every frame, but it is safe for a game loop to call `setPrompt` after checking
-  that the fragment changed.
-- Keep fragments short and concrete. The runtime caps game prompt fragments before
-  sending them.
+## Phase 2 reference application
 
-## Prompt Fragment Tips
+`.forgeax/games/visual-probe` is the interactive LingBot Presentation Lab. It
+ports Noir Alley Patrol, Battlefield Horseman, and Jet Ski Cruise into
+manifest-v2 recipes with the same `event-1` recipe key. Each selected scene
+gives that key different game-owned prompt semantics, proving the plugin does
+not interpret physical input or recipe names.
 
-Good fragments describe current state:
-
-```text
-night market, neon signs, wet pavement
-```
-
-```text
-inside lava cave, orange glow, smoke and sparks
-```
-
-```text
-underwater, blue caustics, floating particles
-```
-
-Avoid repeating the panel's base style:
-
-```text
-photorealistic, PBR, high quality, detailed, cinematic, night market...
-```
-
-The panel is already responsible for stable style. The game fragment should carry
-gameplay and environment state.
+Generated video remains in the Diffusion Renderer panel. Do not add the
+provider output stream to game code: the game must remain usable when no
+Provider is selected, a session fails, or generated media is delayed.

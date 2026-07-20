@@ -59,3 +59,18 @@ export function ensureBrushFont(): void {
     `@font-face{font-family:'HYShangWei';src:url('${brushFontUrl}') format('woff2');font-weight:normal;font-style:normal;font-display:swap;}`,
   )
 }
+
+/**
+ * 编辑器预览 scrub 精度 opt-in 辅助——**不接也没事**：宿主 `.gc-preview-clock.is-paused` 已统一
+ * 冻住子树内全部纯 CSS animation（暂停即停）。只有想让「拖播放头」精确对上入场动画某一帧的皮肤
+ * 才需要这套：配合 `animation-delay: calc(<固有 delay> - var(--preview-t, 0ms))` +
+ * preview 时整体 `animation-play-state: paused`（见 inkKou / inkYingMo 的 is-frozen 规则）。
+ */
+export function previewFreezeClass(preview: boolean | undefined): string {
+  return preview ? ' is-frozen' : ''
+}
+
+/** `--preview-t` CSS 变量：给 previewFreezeClass 配套的负 delay 表达式用。 */
+export function previewTStyle(localMs: number): Record<string, string> {
+  return { ['--preview-t']: `${Math.max(0, localMs)}ms` }
+}

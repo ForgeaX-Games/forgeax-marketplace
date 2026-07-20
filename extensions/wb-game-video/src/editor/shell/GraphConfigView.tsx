@@ -3,12 +3,13 @@
  * 左栏分区列表 + 右栏预览）。与蓝图共用 graphScenario store；顶部工具条：保存 / 版本 / 重置。
  * 单分区（界面=全局HUD）左栏一行；多分区（规则=实体/变量/场景设置/反应规则）左栏多行切换。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import type { GameScenario } from '../../runtime/schema/graph-schema'
 import { CatalogShell } from './CatalogShell'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { getGameSlug } from '../persist/gameScope'
 
 export interface ConfigTab {
   section: ScenarioSection
@@ -16,7 +17,8 @@ export interface ConfigTab {
 }
 
 export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario }: { tabs: ConfigTab[]; title?: string; icon?: string; scenario: GameScenario }): JSX.Element {
-  const game = useMemo(() => new URLSearchParams(location.search).get('game') ?? 'game-nodia-fighting', [])
+  // 宿主 iframe 传 `?slug=`（见 gameScope.ts）；勿只读 `?game=`，否则会落到默认 demo 命名空间。
+  const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const meta = useGraphScenario((s) => s.meta)
   const graph = useGraphScenario((s) => s.graph)
   const isDraft = useGraphScenario((s) => s.isDraft)
@@ -29,6 +31,30 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
   const [active, setActive] = useState<ScenarioSection>(tabs[0]?.section ?? 'entities')
   const nodeIds = graph.nodes.map((n) => n.id)
+  // overlay 资源池「已用/未用」：统计每个 overlay 被多少节点挂载引用。
+  const overlayUsage = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const n of graph.nodes) {
+      for (const mount of n.data.overlayNodes ?? []) {
+        m[mount.overlay] = (m[mount.overlay] ?? 0) + 1
+      }
+    }
+    return m
+  }, [graph.nodes])
+  const nodeLabel = useCallback((id: string) => {
+    const n = graph.nodes.find((x) => x.id === id)
+    const name = n?.data.name?.trim()
+    if (!name || name === id) return id
+    return `${name} (${id})`
+  }, [graph.nodes])
+  const edgeOptions = useMemo(
+    () =>
+      graph.edges.map((e) => ({
+        value: e.id,
+        label: `${nodeLabel(e.source)} ─${e.sourceHandle ?? 'default'}→ ${nodeLabel(e.target)}`,
+      })),
+    [graph.edges, nodeLabel],
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--work, #0e0c09)' }}>
@@ -47,7 +73,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
           onSelect={(id) => setActive(id as ScenarioSection)}
           renderPreview={() => (
             <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-              <ScenarioInspector value={meta} nodeIds={nodeIds} section={active} onChange={setMeta} />
+              <ScenarioInspector value={meta} nodeIds={nodeIds} nodeLabel={nodeLabel} edgeOptions={edgeOptions} section={active} overlayUsage={overlayUsage} onChange={setMeta} />
             </div>
           )}
         />

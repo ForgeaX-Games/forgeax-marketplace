@@ -10,7 +10,7 @@ type LegacyEl = Partial<OverlayChild> & {
   role?: string
   component?: string
   trigger?: OverlayChild['trigger']
-  params?: Record<string, unknown>
+  inputs?: Record<string, unknown>
   window?: OverlayChild['window']
   layout?: OverlayChild['layout']
   /** @deprecated 写入 layout.zIndex */
@@ -65,7 +65,7 @@ export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameS
           },
           trigger: el.trigger ?? { when: 'enter' },
           window: el.window,
-          params: el.params ?? {},
+          inputs: el.inputs ?? {},
           note: el.note,
         } satisfies OverlayChild
       }),

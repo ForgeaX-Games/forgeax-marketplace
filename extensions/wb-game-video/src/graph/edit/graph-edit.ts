@@ -1,8 +1,12 @@
 /**
  * 图编辑操作 —— 画布手势落到这些纯函数（不可变返回新 graph）。
  * Overlay 目录在 scenario.ui.overlays；节点挂 overlayNodes[]。
+ *
+ * 连/删边会同步 event reactions 里的 `advance.edgeId`（显式走向）；
+ * 未写 advance 时运行时仍可「有边则默认推进」。
  */
 import type { EdgeRouting, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
+import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -84,15 +88,15 @@ export function insertNodeAfter(
   }
   const id = node.id
   let g = addNode(graph, node)
-  const outEdges = g.edges.filter((e) => e.source === afterId && (e.sourceHandle ?? 'out') === 'out')
+  const outEdges = g.edges.filter((e) => e.source === afterId && (e.sourceHandle ?? 'default') === 'default')
   if (outEdges.length === 0) {
-    g = connect(g, { source: afterId, sourceHandle: 'out', target: id })
+    g = connect(g, { source: afterId, sourceHandle: 'default', target: id })
   } else {
     for (const e of outEdges) {
       g = disconnect(g, e.id)
-      g = connect(g, { source: id, sourceHandle: 'out', target: e.target, data: e.data })
+      g = connect(g, { source: id, sourceHandle: 'default', target: e.target, data: e.data })
     }
-    g = connect(g, { source: afterId, sourceHandle: 'out', target: id })
+    g = connect(g, { source: afterId, sourceHandle: 'default', target: id })
   }
   return { graph: g, nodeId: id }
 }
@@ -119,9 +123,12 @@ export function insertSubFlowPackAfter(
 }
 
 export function removeNode(graph: GameGraph, id: string): GameGraph {
+  const removed = graph.edges.filter((e) => e.source === id || e.target === id).map((e) => e.id)
+  let g = graph
+  for (const edgeId of removed) g = unbindAdvanceFromEdge(g, edgeId)
   return {
-    nodes: graph.nodes.filter((n) => n.id !== id),
-    edges: graph.edges.filter((e) => e.source !== id && e.target !== id),
+    nodes: g.nodes.filter((n) => n.id !== id),
+    edges: g.edges.filter((e) => e.source !== id && e.target !== id),
   }
 }
 
@@ -242,17 +249,153 @@ export interface ConnectSpec {
   id?: string
 }
 
+// ── advance.edgeId ↔ 边 同步 ──────────────────────────────────────────────────
+
+/** 映射节点上全部 reactions（node.data + 各挂载）；`null` = 删除该条。 */
+function mapNodeReactions(node: GameNode, map: (r: Reaction) => Reaction | null): GameNode {
+  const mapList = (list: Reaction[] | undefined): Reaction[] | undefined => {
+    if (!list?.length) return list
+    const next: Reaction[] = []
+    for (const r of list) {
+      const m = map(r)
+      if (m) next.push(m)
+    }
+    return next.length ? next : undefined
+  }
+  const dataReactions = mapList(node.data.reactions)
+  const dataChanged = dataReactions !== node.data.reactions
+  let mountsChanged = false
+  const overlayNodes = node.data.overlayNodes?.map((m) => {
+    const reactions = mapList(m.reactions)
+    if (reactions === m.reactions) return m
+    mountsChanged = true
+    return { ...m, reactions }
+  })
+  if (!dataChanged && !mountsChanged) return node
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      ...(dataChanged ? { reactions: dataReactions } : {}),
+      ...(mountsChanged ? { overlayNodes } : {}),
+    },
+  }
+}
+
+/** 源节点上 `sourceHandle === handle` 的出边数（含刚连上的边）。 */
+function countHandleEdges(graph: GameGraph, source: string, handle: string): number {
+  return graph.edges.filter((e) => e.source === source && (e.sourceHandle ?? 'default') === handle).length
+}
+
+/**
+ * 在源节点写入一条 `when.event.id === handle` 的 advance reaction。
+ * 挂载选择：已有同名 event reaction 的挂载 > 已有任意 event reaction 的挂载 > 首个挂载；
+ * 无挂载则挂 `node.data.reactions`（避免写到 HUD 这类无交互事件的挂载上）。
+ */
+function ensureEventAdvanceReaction(node: GameNode, handle: string, edgeId: string): GameNode {
+  const action: NodeAction = { kind: 'advance', edgeId }
+  const reaction: Reaction = { when: { type: 'event', id: handle }, do: [action] }
+  const mounts = node.data.overlayNodes
+  if (mounts?.length) {
+    let best = 0
+    let bestScore = -1
+    for (let i = 0; i < mounts.length; i++) {
+      const rs = mounts[i]!.reactions ?? []
+      const same = rs.some((r) => r.when.type === 'event' && r.when.id === handle)
+      const anyEv = rs.some((r) => r.when.type === 'event')
+      const score = (same ? 2 : 0) + (anyEv ? 1 : 0)
+      if (score > bestScore) {
+        bestScore = score
+        best = i
+      }
+    }
+    const overlayNodes = mounts.map((m, i) =>
+      i === best ? { ...m, reactions: [...(m.reactions ?? []), reaction] } : m,
+    )
+    return { ...node, data: { ...node.data, overlayNodes } }
+  }
+  return {
+    ...node,
+    data: { ...node.data, reactions: [...(node.data.reactions ?? []), reaction] },
+  }
+}
+
+/**
+ * 连边后同步显式走向（让作者在 reactions 里能看见「去哪」）：
+ * - 非 `default` 且该 handle **仅一条边**：回填/补上 `{ kind:'advance', edgeId }`；
+ *   若尚无同名 event reaction，则自动建一条只含 advance 的 reaction。
+ * - 同 handle **多条边**（权重/条件池）：去掉独占 `advance`，运行时走边池。
+ * - `default` 口不注入（播完走 selectAutoEdge）。
+ */
+export function bindAdvanceToEdge(graph: GameGraph, edge: GameEdge): GameGraph {
+  const handle = edge.sourceHandle ?? 'default'
+  if (handle === 'default') return graph
+  const multi = countHandleEdges(graph, edge.source, handle) > 1
+  let changed = false
+  const nodes = graph.nodes.map((n) => {
+    if (n.id !== edge.source) return n
+    let foundMatch = false
+    let next = mapNodeReactions(n, (r) => {
+      if (r.when.type !== 'event' || r.when.id !== handle) return r
+      foundMatch = true
+      if (multi) {
+        // 多边同 handle：独占 advance 会锁死边池，去掉后靠默认推进选边。
+        const filtered = r.do.filter((a) => a.kind !== 'advance')
+        if (filtered.length === r.do.length) return r
+        changed = true
+        return filtered.length ? { ...r, do: filtered } : null
+      }
+      const existing = r.do.find((a): a is Extract<NodeAction, { kind: 'advance' }> => a.kind === 'advance')
+      if (!existing) {
+        changed = true
+        return { ...r, do: [...r.do, { kind: 'advance', edgeId: edge.id }] }
+      }
+      if (existing.edgeId === edge.id) return r
+      // 原 edgeId 已失效 → 改挂到新边；仍有效则不覆盖（作者手选）
+      const prevAlive = graph.edges.some((e) => e.id === existing.edgeId)
+      if (prevAlive) return r
+      changed = true
+      return {
+        ...r,
+        do: r.do.map((a) => (a.kind === 'advance' ? { kind: 'advance' as const, edgeId: edge.id } : a)),
+      }
+    })
+    if (!foundMatch && !multi) {
+      changed = true
+      next = ensureEventAdvanceReaction(next, handle, edge.id)
+    }
+    return next
+  })
+  return changed ? { ...graph, nodes } : graph
+}
+
+/** 删边后：清除全图 reactions 中指向该 edgeId 的 advance；若 event reaction 的 do 因此变空则删掉该 reaction。 */
+export function unbindAdvanceFromEdge(graph: GameGraph, edgeId: string): GameGraph {
+  let changed = false
+  const nodes = graph.nodes.map((n) => {
+    const next = mapNodeReactions(n, (r) => {
+      const filtered = r.do.filter((a) => !(a.kind === 'advance' && a.edgeId === edgeId))
+      if (filtered.length === r.do.length) return r
+      changed = true
+      if (filtered.length === 0 && r.when.type === 'event') return null
+      return { ...r, do: filtered }
+    })
+    return next
+  })
+  return changed ? { ...graph, nodes } : graph
+}
+
 export function connect(graph: GameGraph, spec: ConnectSpec): GameGraph {
   // 自环拒绝（回环请画多节点环）；同 source+handle+target 去重。
   if (spec.source === spec.target) return graph
-  const sourceHandle = spec.sourceHandle ?? 'out'
+  const sourceHandle = spec.sourceHandle ?? 'default'
   const targetHandle = spec.targetHandle ?? 'in'
   if (
     graph.edges.some(
       (e) =>
         e.source === spec.source &&
         e.target === spec.target &&
-        (e.sourceHandle ?? 'out') === sourceHandle &&
+        (e.sourceHandle ?? 'default') === sourceHandle &&
         (e.targetHandle ?? 'in') === targetHandle,
     )
   ) {
@@ -266,11 +409,12 @@ export function connect(graph: GameGraph, spec: ConnectSpec): GameGraph {
     targetHandle,
     data: spec.data,
   }
-  return { ...graph, edges: [...graph.edges, edge] }
+  return bindAdvanceToEdge({ ...graph, edges: [...graph.edges, edge] }, edge)
 }
 
 export function disconnect(graph: GameGraph, edgeId: string): GameGraph {
-  return { ...graph, edges: graph.edges.filter((e) => e.id !== edgeId) }
+  const next = { ...graph, edges: graph.edges.filter((e) => e.id !== edgeId) }
+  return unbindAdvanceFromEdge(next, edgeId)
 }
 
 export function reconnect(
@@ -278,7 +422,8 @@ export function reconnect(
   edgeId: string,
   patch: { source?: string; target?: string; sourceHandle?: string; targetHandle?: string },
 ): GameGraph {
-  return {
+  const before = graph.edges.find((e) => e.id === edgeId)
+  const next: GameGraph = {
     ...graph,
     edges: graph.edges.map((e) =>
       e.id === edgeId
@@ -292,6 +437,14 @@ export function reconnect(
         : e,
     ),
   }
+  const after = next.edges.find((e) => e.id === edgeId)
+  if (!before || !after) return next
+  const handleChanged =
+    (patch.sourceHandle !== undefined && (patch.sourceHandle ?? 'default') !== (before.sourceHandle ?? 'default')) ||
+    (patch.source !== undefined && patch.source !== before.source)
+  if (!handleChanged) return next
+  // handle/源变了：先清旧绑定，再按新 handle 回填
+  return bindAdvanceToEdge(unbindAdvanceFromEdge(next, edgeId), after)
 }
 
 export function updateEdgeData(graph: GameGraph, edgeId: string, data: EdgeRouting): GameGraph {
@@ -342,9 +495,9 @@ export function teardownInteraction(
 
   if (
     continueTarget &&
-    !g.edges.some((e) => e.source === nodeId && (e.sourceHandle ?? 'out') === 'out' && e.target === continueTarget)
+    !g.edges.some((e) => e.source === nodeId && (e.sourceHandle ?? 'default') === 'default' && e.target === continueTarget)
   ) {
-    g = connect(g, { source: nodeId, sourceHandle: 'out', target: continueTarget })
+    g = connect(g, { source: nodeId, sourceHandle: 'default', target: continueTarget })
   }
   return g
 }

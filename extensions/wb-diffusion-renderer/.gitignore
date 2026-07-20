@@ -1,0 +1,6 @@
+# Local / bulky fixtures — keep smoke + integration harness sources tracked.
+test/examples/
+test/target/
+test/**/*.mp4
+test/**/*.npy
+.DS_Store

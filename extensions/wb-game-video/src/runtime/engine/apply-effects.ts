@@ -4,7 +4,7 @@
  * 通用化（方向 C）：**没有 hp 特权**。实体只是一袋 attrs（+可选 attrMeta 约束）；`attr` effect 写任意
  * attr，按 attrMeta 的 min/max clamp。value 可为常量或表达式 `{expr}`（公式，就地声明，去 combatRules 散耦合）。
  */
-import type { AttrMeta, GraphEffect } from '../schema/graph-schema'
+import type { AttrMeta, GraphEffect, NumericEffectOp } from '../schema/graph-schema'
 import { evalExpr, type EvalCtx } from './expr'
 import type { Rng } from './rng'
 
@@ -50,6 +50,19 @@ function clamp(v: number, meta?: { min?: number; max?: number }): number {
   return out
 }
 
+/** 数值 op：add=加、mul=乘、set=设为。 */
+export function applyNumericOp(op: NumericEffectOp, cur: number, val: number): number {
+  switch (op) {
+    case 'set':
+      return val
+    case 'mul':
+      return cur * val
+    case 'add':
+    default:
+      return cur + val
+  }
+}
+
 /** 把一组 effect 顺序作用到 state（原地修改）。 */
 export function applyEffects(state: MutableState, effects: readonly GraphEffect[]): void {
   for (const eff of effects) {
@@ -63,7 +76,7 @@ export function applyEffects(state: MutableState, effects: readonly GraphEffect[
       case 'var': {
         const cur = state.vars[eff.varId] ?? 0
         const val = resolveValue(eff.value, state)
-        state.vars[eff.varId] = clamp(eff.op === 'set' ? val : cur + val, state.varMeta?.[eff.varId])
+        state.vars[eff.varId] = clamp(applyNumericOp(eff.op, cur, val), state.varMeta?.[eff.varId])
         break
       }
       case 'attr': {
@@ -71,7 +84,7 @@ export function applyEffects(state: MutableState, effects: readonly GraphEffect[
         if (!ent) break
         const cur = ent.attrs[eff.attr] ?? 0
         const val = resolveValue(eff.value, state)
-        ent.attrs[eff.attr] = clamp(eff.op === 'set' ? val : cur + val, ent.attrMeta?.[eff.attr])
+        ent.attrs[eff.attr] = clamp(applyNumericOp(eff.op, cur, val), ent.attrMeta?.[eff.attr])
         break
       }
       case 'flag': {

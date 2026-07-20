@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { registerPlugin, unregisterPlugin } from '../registry/kind-registry'
+import { registerPlugin, unregisterPlugin } from '../registry/component-registry'
 import { validateScenario } from '../validate/validate'
 import type { GameScenario } from '../schema/graph-schema'
 
@@ -70,7 +70,7 @@ describe('lethal.no-exit warning', () => {
       reactions: [
         {
           when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
-          do: [{ kind: 'goto', targetNodeId: 'win' }],
+          do: [{ kind: 'advance', edgeId: 'e-win' }],
         },
       ],
       graph: {
@@ -97,7 +97,7 @@ describe('lethal.no-exit warning', () => {
             data: { name: 'win' },
           },
         ],
-        edges: [],
+        edges: [{ id: 'e-win', source: 'a', target: 'win', sourceHandle: 'win', targetHandle: 'in' }],
       },
     }
     expect(validateScenario(scn).filter((i) => i.code === 'lethal.no-exit')).toEqual([])

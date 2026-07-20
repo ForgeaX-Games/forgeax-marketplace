@@ -30,6 +30,11 @@ export interface EvalCtx {
   flags?: Record<string, number>
   score?: number
   rng?: Rng
+  /**
+   * 临时局部量（单段引用，如 `delta` / `prev` / `next`）。
+   * 仅在 watch 反应执行期由引擎注入；优先于其它符号。
+   */
+  locals?: Record<string, number>
 }
 
 // ── AST ──────────────────────────────────────────────────────────────────────
@@ -201,6 +206,8 @@ export function parseExpr(src: string): Node {
 // ── Evaluator ─────────────────────────────────────────────────────────────────
 function resolveRef(path: string[], ctx: EvalCtx): number {
   const [head, ...rest] = path
+  // 单段局部量（watch 注入的 prev/next/delta 等）优先。
+  if (path.length === 1 && ctx.locals && head! in ctx.locals) return ctx.locals[head!]!
   if (head === 'score') return ctx.score ?? 0
   if (head === 'var') {
     const id = rest.join('.')
@@ -239,9 +246,16 @@ function evalNode(n: Node, ctx: EvalCtx): number {
     case 'unary':
       return n.op === '-' ? -evalNode(n.x, ctx) : evalNode(n.x, ctx) === 0 ? 1 : 0
     case 'call': {
+      const a = n.args.map((x) => evalNode(x, ctx))
+      // 纯函数（无需 rng，可复现）。
+      if (n.name === 'abs') return Math.abs(a[0] ?? 0)
+      if (n.name === 'floor') return Math.floor(a[0] ?? 0)
+      if (n.name === 'round') return Math.round(a[0] ?? 0)
+      if (n.name === 'min') return Math.min(...(a.length ? a : [0]))
+      if (n.name === 'max') return Math.max(...(a.length ? a : [0]))
+      // 随机函数走 ctx.rng，保证可复现。
       const rng = ctx.rng
       if (!rng) throw new ExprError(`rng required for '${n.name}()'`)
-      const a = n.args.map((x) => evalNode(x, ctx))
       if (n.name === 'rand') return rng.next()
       if (n.name === 'randInt') return rng.randInt(a[0] ?? 0, a[1] ?? 0)
       if (n.name === 'chance') return rng.chance(a[0] ?? 0) ? 1 : 0
@@ -286,6 +300,16 @@ function evalNode(n: Node, ctx: EvalCtx): number {
 
 export function evalExpr(src: string, ctx: EvalCtx): number {
   return evalNode(parseExpr(src), ctx)
+}
+
+/** 预览/摘要用：求值失败或非有限数返回 null，不抛错。 */
+export function tryEvalExpr(src: string, ctx: EvalCtx): number | null {
+  try {
+    const v = evalExpr(src, ctx)
+    return Number.isFinite(v) ? v : null
+  } catch {
+    return null
+  }
 }
 
 // ── 静态引用采集（validator 用）────────────────────────────────────────────────

@@ -4,27 +4,26 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "Diffusion Renderer · 实时画面增强渲染",
-    "en": "Diffusion Renderer · Live Viewport"
+    "zh": "Diffusion Renderer",
+    "en": "Diffusion Renderer"
   },
   "description": {
-    "zh": "从 Diffusion Renderer 插件面板启动基于 diffusion 的实时画面增强渲染,把引擎视口画面送到增强后端,并在同一个面板中预览结果,不覆盖原始视口。",
-    "en": "Starts live diffusion-based render enhancement from the Diffusion Renderer plugin panel, streams the engine viewport to a realtime enhancement backend, and previews results in the same panel without covering the original viewport."
+    "zh": "从游戏世界的语义状态、动作、相机与可选视口媒体生成独立表现层画面。支持 FluxRT 与 LingBot World 2，且绝不反向驱动游戏 ECS。",
+    "en": "Generates a separate presentation stream from semantic game state, actions, camera state, and optional viewport media. Supports FluxRT and LingBot World 2 without ever driving game ECS."
   },
   "author": {
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
   "icon": "🎨",
-  "keywords": ["diffusion-renderer", "realtime", "viewport", "diffusion-rendering", "fluxrt"],
+  "keywords": ["diffusion-renderer", "realtime", "viewport", "fluxrt", "lingbot"],
   "provides": {
     "workbench": {
       "id": "wb-diffusion-renderer",
       "icon": "🎨",
       "position": 160,
       "panelSize": "md",
-      "surface": "single",
-      "hidden": true
+      "surface": "single"
     }
   },
   "entry": {
@@ -37,7 +36,7 @@
       "devOnly": false
     }
   },
-  "requestedEnv": ["ANTHROPIC_API_KEY", "FLUXRT_API_KEY", "FLUXRT_BASE_URL"],
+  "requestedEnv": ["FLUXRT_API_KEY", "FLUXRT_BASE_URL", "REACTOR_API_KEY", "REACTOR_COORDINATOR_URL"],
   "experimental": true,
   "compatibleWith": {
     "forgeax-bus": "^1.0.0"

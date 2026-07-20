@@ -1,518 +1,681 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { publishDiffusionRendererControl } from './host/control';
-import { fetchDiffusionRendererMeta } from './host/meta';
 import {
-  clearGameOverrides,
-  getStreamControlSnapshot,
-  isStreaming,
-  startStream,
-  stopStream,
-  subscribeStreamControl,
-  updateParams,
-  type StreamControlSnapshot,
-  type StreamStatus,
-} from './host/stream';
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import type { VisualBackendProfile, VisualSessionPhase } from '@forgeax/types/visual-generation';
+import type {
+  VisualBackendAdapter,
+  VisualDirection,
+  VisualSource,
+} from './adapter';
 import {
-  getDiffusionRendererOutputSnapshot,
-  setDiffusionRendererOutputTarget,
-  setDiffusionRendererOutputVisible,
-  subscribeDiffusionRendererOutput,
-  type DiffusionRendererOutputSnapshot,
-} from './host/output-store';
+  GenerativeVisualsPresenter,
+} from './presenter';
+import { firstSelection, profileRequiresSeedImage } from './selection';
+import {
+  canRetryIssue,
+  costWarning,
+  formatSessionClock,
+  panelStatusText,
+  stopReasonText,
+} from './status';
 
 export const WB_DIFFUSION_RENDERER_PLUGIN_ID = '@forgeax-extension/wb-diffusion-renderer';
+export { firstSelection } from './selection';
+export {
+  canRetryIssue,
+  costWarning,
+  formatSessionClock,
+  panelStatusText,
+  phaseStatusLabel,
+  stopReasonText,
+} from './status';
 
-const DEFAULT_PROMPT = 'high quality stylized 3D game render, preserve original geometry and camera composition, upgraded game assets, detailed PBR materials, soft lighting, crisp detail';
-const STYLE_PRESETS = [
-  {
-    label: 'Game Asset',
-    prompt: DEFAULT_PROMPT,
-  },
-  {
-    label: 'Photoreal',
-    prompt: 'photorealistic render, preserve original geometry and camera composition, realistic materials, natural daylight, soft shadows, sharp focus',
-  },
-  {
-    label: 'Anime',
-    prompt: 'anime game render, preserve original geometry and camera composition, clean cel shading, vibrant colors, crisp linework, soft lighting',
-  },
-  {
-    label: 'Cyberpunk',
-    prompt: 'cyberpunk stylized 3D game render, preserve original geometry and camera composition, neon accent lighting, glossy wet-looking materials, high contrast night-city color grading, crisp detail',
-  },
-  {
-    label: 'Adventure Toon',
-    prompt: 'colorful adventure toon 3D game render, preserve original geometry and camera composition, painterly cel shading, warm fantasy colors, soft ambient lighting, clean readable shapes',
-  },
-  {
-    label: 'Clay',
-    prompt: 'clay-style 3D render, preserve original geometry and camera composition, matte materials, soft studio lighting, smooth forms',
-  },
-] as const;
-const OUTPUT_RES = '576x320';
+export interface GenerativeVisualsRuntime {
+  createSource(): VisualSource;
+  readonly adapters: readonly VisualBackendAdapter[];
+}
 
-export function DiffusionRendererPanel() {
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  // `prompt` is the editable draft in the box; `appliedPrompt` is what actually
-  // drives the stream. The draft is only pushed to the backend when the user
-  // applies it (Apply button / Enter / Go Live), never on every keystroke.
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [appliedPrompt, setAppliedPrompt] = useState(DEFAULT_PROMPT);
-  const [steps, setSteps] = useState('2');
-  const [interp, setInterp] = useState('1');
-  // Steps upper bound comes from the service /health probe; 4 is the always-safe
-  // real-time fallback until we learn the real max (service.md §2).
-  const [maxSteps, setMaxSteps] = useState(4);
-  const [meta, setMeta] = useState('checking...');
-  const [ready, setReady] = useState(false);
-  const [stream, setStream] = useState<StreamStatus>({ state: isStreaming() ? 'live' : 'stopped' });
-  const [output, setOutput] = useState<DiffusionRendererOutputSnapshot>(() => getDiffusionRendererOutputSnapshot());
-  const [control, setControl] = useState<StreamControlSnapshot>(() => getStreamControlSnapshot());
-  const [settingsOpen, setSettingsOpen] = useState(true);
+// Games own the initial scene prompt. This remains an optional panel-level
+// modifier so fixture smoke and the first Studio run send identical prose.
+const DEFAULT_DIRECTION = '';
 
-  const buildParams = (promptValue: string) => ({
-    prompt: promptValue.trim() || DEFAULT_PROMPT,
-    steps: parseInt(steps || '2', 10),
-    interp: parseInt(interp || '0', 10),
-    seed: 42,
-  });
+type DirectionQuality = NonNullable<VisualDirection['quality']>;
 
-  useEffect(() => subscribeDiffusionRendererOutput(() => setOutput(getDiffusionRendererOutputSnapshot())), []);
-  useEffect(() => subscribeStreamControl(() => setControl(getStreamControlSnapshot())), []);
-  useEffect(() => publishDiffusionRendererControl(), []);
+function parseSeed(value: string): number | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parseRotationSpeed(value: string): number | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 30 ? parsed : undefined;
+}
+
+function directionForProfile(
+  profile: VisualBackendProfile,
+  prompt: string,
+  quality: DirectionQuality,
+  seedText: string,
+  rotationSpeedText: string,
+  attentionWindow: NonNullable<VisualDirection['attentionWindow']>,
+  kvCacheResetMode: NonNullable<VisualDirection['kvCacheResetMode']>,
+  kvCacheResetSequence: number,
+): VisualDirection | undefined {
+  const controls = new Set(profile.controls ?? []);
+  const seed = parseSeed(seedText);
+  const rotationSpeedDeg = parseRotationSpeed(rotationSpeedText);
+  if (controls.has('seed') && seedText.trim() && seed === undefined) return undefined;
+  if (controls.has('rotation-speed') && rotationSpeedText.trim() && rotationSpeedDeg === undefined) return undefined;
+  return {
+    prompt: controls.has('prompt') ? prompt.trim() || DEFAULT_DIRECTION : DEFAULT_DIRECTION,
+    ...(controls.has('quality') ? { quality } : {}),
+    ...(controls.has('seed') && seed !== undefined ? { seed } : {}),
+    ...(controls.has('rotation-speed') && rotationSpeedDeg !== undefined ? { rotationSpeedDeg } : {}),
+    ...(controls.has('attention-window') ? { attentionWindow } : {}),
+    ...(controls.has('kv-cache-reset')
+      ? { kvCacheResetMode, kvCacheResetSequence }
+      : {}),
+  };
+}
+
+function usePresenter(runtime: GenerativeVisualsRuntime) {
+  const presenterRef = useRef<GenerativeVisualsPresenter | undefined>(undefined);
+  const pendingDisposalRef = useRef<{
+    cancelled: boolean;
+    presenter: GenerativeVisualsPresenter;
+  } | undefined>(undefined);
+  const [, redraw] = useState(0);
+  if (!presenterRef.current) {
+    presenterRef.current = new GenerativeVisualsPresenter(runtime.createSource(), runtime.adapters);
+  }
+  const presenter = presenterRef.current;
   useEffect(() => {
-    const img = imgRef.current;
-    setDiffusionRendererOutputTarget(img);
+    // React Strict Mode runs an effect setup → cleanup → setup probe in
+    // development. Defer permanent disposal by one microtask so the second
+    // setup can cancel it instead of reusing a presenter that the probe
+    // already destroyed.
+    if (pendingDisposalRef.current?.presenter === presenter) {
+      pendingDisposalRef.current.cancelled = true;
+    }
+    const release = presenter.subscribe(() => redraw((revision) => revision + 1));
     return () => {
-      setDiffusionRendererOutputTarget(null);
-      if (isStreaming()) stopStream();
+      release();
+      const pending = { cancelled: false, presenter };
+      pendingDisposalRef.current = pending;
+      queueMicrotask(() => {
+        if (!pending.cancelled) void presenter.dispose();
+      });
     };
-  }, []);
+  }, [presenter]);
+  return presenter;
+}
+
+function OutputVideo({ stream }: { stream: MediaStream | undefined }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.srcObject = stream ?? null;
+    if (stream) void video.play().catch(() => {});
+  }, [stream]);
+  return <video ref={ref} muted autoPlay playsInline style={styles.video} aria-label="Generated visual output" />;
+}
+
+/** Studio injects source + adapters. This panel renders only the controls
+ * declared by the selected profile; the game publishes semantic state only. */
+export function GenerativeVisualsPanel({ runtime }: { runtime: GenerativeVisualsRuntime }) {
+  const presenter = usePresenter(runtime);
+  const snapshot = presenter.getSnapshot();
+  const initial = snapshot.selection ?? firstSelection(runtime, {
+    priorCatalogAvailable: snapshot.priorCatalogAvailable,
+  });
+  const [backendId, setBackendId] = useState(initial.backendId);
+  const [profileId, setProfileId] = useState(initial.profileId);
+  const [prompt, setPrompt] = useState(initial.direction.prompt);
+  const [quality, setQuality] = useState<DirectionQuality>(initial.direction.quality ?? 'realtime');
+  const [seedText, setSeedText] = useState(initial.direction.seed?.toString() ?? '42');
+  const [rotationSpeedText, setRotationSpeedText] = useState(
+    initial.direction.rotationSpeedDeg?.toString() ?? '5',
+  );
+  const [attentionWindow, setAttentionWindow] = useState<NonNullable<VisualDirection['attentionWindow']>>(
+    initial.direction.attentionWindow ?? 'auto',
+  );
+  const [kvCacheResetMode, setKvCacheResetMode] = useState<NonNullable<VisualDirection['kvCacheResetMode']>>(
+    initial.direction.kvCacheResetMode ?? 'auto',
+  );
+  const [kvCacheResetSequence, setKvCacheResetSequence] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(true);
+  const [userPickedBackend, setUserPickedBackend] = useState(false);
+  const selectedDescriptor = snapshot.descriptors.find((descriptor) => descriptor.id === backendId);
+  const profiles = selectedDescriptor?.profiles ?? [];
+  const selectedProfile = profiles.find((candidate) => candidate.id === profileId) ?? profiles[0];
+  const controls = new Set(selectedProfile?.controls ?? []);
+  const seedInvalid = controls.has('seed') && Boolean(seedText.trim()) && parseSeed(seedText) === undefined;
+  const rotationSpeedInvalid = controls.has('rotation-speed')
+    && Boolean(rotationSpeedText.trim())
+    && parseRotationSpeed(rotationSpeedText) === undefined;
+  const providerState = snapshot.status.runtime ?? {};
+  const live = snapshot.status.phase === 'connecting'
+    || snapshot.status.phase === 'waiting'
+    || snapshot.status.phase === 'live';
+  const paused = providerState.paused === true;
+  const canPause = live && providerState.started === true && !paused;
+  const canResume = live && paused;
+  const retryable = canRetryIssue({
+    phase: snapshot.status.phase,
+    issue: snapshot.status.issue,
+  });
+  const sessionClock = formatSessionClock(snapshot.cost);
+  const warning = costWarning(snapshot.cost, paused);
 
   useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      const m = await fetchDiffusionRendererMeta();
-      if (cancelled) return;
-      setReady(m.ready);
-      setMeta(m.statusText);
-      if (m.maxSteps && m.maxSteps >= 1) {
-        setMaxSteps(m.maxSteps);
-        setSteps((s) => String(Math.min(parseInt(s || '2', 10), m.maxSteps!)));
-      }
-    };
-    void refresh();
-    const timer = setInterval(refresh, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, []);
+    if (userPickedBackend || snapshot.selection || live) return;
+    if (snapshot.priorCatalogAvailable !== false) return;
+    if (!profileRequiresSeedImage(selectedProfile)) return;
+    const next = firstSelection(runtime, { priorCatalogAvailable: false });
+    setBackendId(next.backendId);
+    setProfileId(next.profileId);
+  }, [
+    live,
+    runtime,
+    selectedProfile,
+    snapshot.priorCatalogAvailable,
+    snapshot.selection,
+    userPickedBackend,
+  ]);
 
-  // Only the APPLIED prompt (plus the discrete Steps/Smooth selects) reaches the
-  // backend; typing in the box does not.
   useEffect(() => {
-    updateParams(buildParams(appliedPrompt));
-  }, [appliedPrompt, steps, interp]);
-
-  const promptDirty = prompt !== appliedPrompt;
-
-  const applyPrompt = () => setAppliedPrompt(prompt);
-  const resetPrompt = () => {
-    setPrompt(DEFAULT_PROMPT);
-    setAppliedPrompt(DEFAULT_PROMPT);
-  };
-  const applyStylePreset = (nextPrompt: string) => {
-    if (!nextPrompt) return;
-    setPrompt(nextPrompt);
-    setAppliedPrompt(nextPrompt);
-  };
-  const activePresetPrompt = STYLE_PRESETS.some((preset) => preset.prompt === appliedPrompt) ? appliedPrompt : '';
-
-  // Shield the prompt controls from the host's global keyboard shortcuts so
-  // ctrl/cmd+A/C/V (and typing) behave natively inside the field. Enter applies.
-  const onPromptInputKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      applyPrompt();
-    }
-  };
-  const onPromptTextareaKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    e.stopPropagation();
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      applyPrompt();
-    }
-  };
+    const onVisibilityChange = () => presenter.setPageVisible(!document.hidden);
+    const onPageHide = () => { void presenter.stop('pagehide'); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    onVisibilityChange();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [presenter]);
 
   const start = () => {
-    setAppliedPrompt(prompt);
-    setDiffusionRendererOutputVisible(true);
+    const profile = selectedProfile;
+    if (!profile) return;
+    const direction = directionForProfile(
+      profile,
+      prompt,
+      quality,
+      seedText,
+      rotationSpeedText,
+      attentionWindow,
+      kvCacheResetMode,
+      kvCacheResetSequence,
+    );
+    if (!direction) return;
+    setProfileId(profile.id);
+    void presenter.select({
+      backendId,
+      profileId: profile.id,
+      direction,
+    });
     setSettingsOpen(false);
-    setStream({ state: 'connecting' });
-    void startStream(buildParams(prompt), setStream);
   };
 
-  const toggleLive = () => {
-    if (isStreaming()) {
-      stopStream();
-      return;
+  const retry = () => {
+    if (!retryable || !selectedProfile) return;
+    const direction = directionForProfile(
+      selectedProfile,
+      prompt,
+      quality,
+      seedText,
+      rotationSpeedText,
+      attentionWindow,
+      kvCacheResetMode,
+      kvCacheResetSequence,
+    )
+      ?? snapshot.selection?.direction;
+    if (!direction) return;
+    void presenter.select({
+      backendId: snapshot.selection?.backendId ?? backendId,
+      profileId: snapshot.selection?.profileId ?? selectedProfile.id,
+      direction,
+    });
+  };
+
+  const switchBackend = (nextBackendId: string) => {
+    const next = snapshot.descriptors.find((descriptor) => descriptor.id === nextBackendId);
+    const profile = next?.profiles[0];
+    if (!profile) return;
+    setUserPickedBackend(true);
+    setBackendId(nextBackendId);
+    setProfileId(profile.id);
+  };
+
+  const applyDirection = (nextKvCacheResetSequence = kvCacheResetSequence) => {
+    if (!selectedProfile) return;
+    const direction = directionForProfile(
+      selectedProfile,
+      prompt,
+      quality,
+      seedText,
+      rotationSpeedText,
+      attentionWindow,
+      kvCacheResetMode,
+      nextKvCacheResetSequence,
+    );
+    if (!direction) return;
+    void presenter.updateDirection(direction);
+  };
+  const onPromptKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    event.stopPropagation();
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      applyDirection();
     }
-    start();
   };
-
-  const live = stream.state === 'live' || stream.state === 'connecting';
-  const connecting = stream.state === 'connecting';
-  const errored = stream.state === 'error' || stream.state === 'unauthorized' || stream.state === 'busy';
-
-  const statusText =
-    stream.state === 'live'
-      ? 'live'
-      : stream.state === 'connecting'
-        ? 'connecting...'
-        : stream.state === 'stopped'
-          ? meta
-          : stream.error ?? stream.state;
-  const statusTone: 'ok' | 'warn' | 'bad' =
-    stream.state === 'live' ? 'ok'
-      : connecting ? 'warn'
-        : errored ? 'bad'
-          : ready ? 'ok' : 'bad';
-
-  const fpsValue =
-    stream.modelFps !== undefined && stream.fps !== undefined && stream.fps > stream.modelFps
-      ? `${stream.modelFps}->${stream.fps}`
-      : stream.fps !== undefined ? String(stream.fps) : '-';
-  const metricItems = [
-    { label: 'FPS', value: fpsValue, hint: 'Frames rendered by the model -> frames shown after smoothing, per second' },
-    { label: 'E2E', value: stream.e2eMs !== undefined ? `${Math.round(stream.e2eMs)}ms` : '-', hint: 'End-to-end latency: capture -> server -> back to this panel' },
-    { label: 'Server', value: stream.serverMs !== undefined ? `${Math.round(stream.serverMs)}ms` : '-', hint: 'Time the backend spent on inference per frame' },
-    { label: 'Drops', value: String(stream.dropped ?? 0), hint: 'Frames dropped to keep latency bounded (drop-to-newest)' },
-  ];
-
-  const hasOutput = Boolean(output.src);
-  // Idle = nothing to preview yet. In that state the settings render INLINE
-  // (centered form), since there is no frame to keep clear; once a frame is
-  // streaming/shown they collapse into a floating slim bar + popover so they
-  // never cover the output.
-  const idle = !hasOutput && !live;
-  const gamePrompt = control.game.prompt?.trim() ?? '';
-  const effectivePrompt = control.effective.prompt ?? '';
-  const gameControlled = gamePrompt.length > 0;
-
-  const promptField = (
-    <div style={styles.promptField}>
-      <div style={styles.labelRow}>
-        <label style={styles.label}>Prompt</label>
-        <div style={styles.labelActions}>
-          <select
-            style={styles.styleSelect}
-            value={activePresetPrompt}
-            onChange={(e) => applyStylePreset(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            aria-label="Style preset"
-            title="Apply a global style preset"
-          >
-            <option value="">Custom</option>
-            {STYLE_PRESETS.map((preset) => (
-              <option key={preset.label} value={preset.prompt}>{preset.label}</option>
-            ))}
-          </select>
-          {gameControlled && <span style={styles.gameBadge}>game</span>}
-          {promptDirty && (
-            <button type="button" style={styles.linkButtonAccent} onClick={applyPrompt}>apply</button>
-          )}
-          {prompt !== DEFAULT_PROMPT && (
-            <button type="button" style={styles.linkButton} onClick={resetPrompt}>reset</button>
-          )}
-        </div>
-      </div>
-      <textarea
-        style={styles.textarea}
-        rows={3}
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onKeyDown={onPromptTextareaKeyDown}
-      />
-      {promptDirty && (
-        <div style={styles.dirtyHint}>Unapplied — press ⌘/Ctrl+Enter or Apply to send</div>
-      )}
-      {gameControlled && (
-        <div style={styles.controlHint}>
-          <div style={styles.controlHintLine}>Game fragment: {gamePrompt}</div>
-          <div style={styles.controlHintLine}>Effective: {effectivePrompt}</div>
-          <button type="button" style={styles.reclaimButton} onClick={clearGameOverrides}>reclaim manual control</button>
-        </div>
-      )}
-    </div>
-  );
-
-  const tuningFields = (
-    <div style={styles.row}>
-      <label style={styles.field}>
-        <span style={styles.label}>Steps</span>
-        <select style={styles.input} value={steps} onChange={(e) => setSteps(e.target.value)}>
-          {Array.from({ length: Math.max(1, maxSteps) }, (_, i) => i + 1).map((n) => (
-            <option key={n}>{n}</option>
-          ))}
-        </select>
-      </label>
-      <label style={styles.field}>
-        <span style={styles.label}>Smooth</span>
-        <select style={styles.input} value={interp} onChange={(e) => setInterp(e.target.value)}>
-          <option value="0">off</option><option value="1">2x</option><option value="2">4x</option>
-        </select>
-      </label>
-    </div>
-  );
+  const statusText = warning
+    ?? (paused
+      ? 'Paused'
+      : panelStatusText({
+      phase: snapshot.status.phase,
+      issue: snapshot.status.issue,
+      activity: snapshot.status.activity,
+      }));
+  const stoppedReason = stopReasonText(snapshot.cost.stopReason);
 
   return (
-    <div style={{ ...styles.root, background: idle ? t.base : t.canvas }} data-fx-diffusion-renderer-panel="1">
-      <style>{spinKeyframes}</style>
-
-      {/* Full-bleed preview: sized to fill the panel so it matches the raw
-          viewport next to it (Fit / object-fit: contain). */}
-      <img ref={imgRef} alt="Diffusion rendered output" style={styles.image} />
-
-      {/* Idle: settings inline + a short hint, centered. No floating card over
-          an empty void. */}
-      {idle && (
-        <div style={styles.idleWrap}>
-          {settingsOpen && <div style={styles.idleCard}>{promptField}{tuningFields}</div>}
-          <div style={styles.idleHint}>
-            Open a game in the viewport, then <b style={styles.emphasis}>Go Live</b> to render the enhanced frame here beside it.
-          </div>
-        </div>
-      )}
-      {hasOutput && !output.visible && (
-        <div style={styles.empty}>Output hidden. Click Go Live to show new frames in this panel.</div>
-      )}
-
-      {connecting && (
-        <div style={styles.overlayCenter}>
-          <span style={styles.spinner} />
-          <span style={styles.overlayText}>connecting...</span>
+    <section style={styles.root} data-fx-diffusion-renderer-panel="1">
+      <OutputVideo stream={snapshot.output} />
+      {!snapshot.output && (
+        <div style={styles.empty}>
+          {snapshot.sourceAvailable
+            ? 'Generated visuals will appear here.'
+            : 'Open a game in the Studio viewport to provide visual state.'}
         </div>
       )}
 
-      {errored && (
-        <div style={styles.errorOverlay}>
-          <div style={styles.errorTitle}>{errorTitle[stream.state] ?? 'Stream error'}</div>
-          {stream.error && <div style={styles.errorMsg}>{stream.error}</div>}
-          {ready && <button type="button" style={styles.retryButton} onClick={start}>Retry</button>}
-        </div>
-      )}
-
-      {/* Floating slim control bar: overlays the preview instead of stacking
-          above it, so the frame stays full-bleed. */}
-      <div style={styles.bar}>
-        <div style={styles.barLeft}>
-          <span style={{ ...styles.dot, background: toneColor[statusTone], boxShadow: statusTone === 'ok' && live ? `0 0 6px ${toneColor.ok}` : 'none' }} />
-          <span style={styles.barTitle}>Diffusion Renderer</span>
-          <span style={styles.barSep}>|</span>
-          <span style={{ ...styles.barStatus, color: toneColor[statusTone] }}>{statusText}</span>
-          <span style={styles.barRes}>{OUTPUT_RES}</span>
-        </div>
-        {stream.state === 'live' && (
-          <div style={styles.barMetrics} aria-label="Diffusion Renderer realtime metrics">
-            {metricItems.map((item) => (
-              <span key={item.label} style={styles.barMetric} title={item.hint}>
-                <span style={styles.barMetricLabel}>{item.label}</span>
-                <span style={styles.barMetricValue}>{item.value}</span>
-              </span>
-            ))}
-          </div>
+      <div style={styles.topBar}>
+        <span style={{ ...styles.dot, background: colorForPhase(snapshot.status.phase) }} />
+        <strong style={styles.title}>Diffusion Renderer</strong>
+        <span style={styles.status} title={statusText}>{statusText}</span>
+        {sessionClock && <span style={styles.clock}>{sessionClock}</span>}
+        <div style={styles.grow} />
+        <button type="button" style={styles.secondaryButton} onClick={() => setSettingsOpen((open) => !open)}>
+          {settingsOpen ? 'Hide settings' : 'Settings'}
+        </button>
+        {retryable && (
+          <button type="button" style={styles.retryButton} onClick={retry} data-fx-diffusion-renderer-retry="1">
+            Retry
+          </button>
         )}
-        <div style={styles.barRight}>
-          <button
-            type="button"
-            style={{ ...styles.gearButton, ...(settingsOpen ? styles.gearActive : null) }}
-            aria-label={settingsOpen ? 'Hide settings' : 'Show settings'}
-            title={settingsOpen ? 'Hide settings' : 'Show settings'}
-            onClick={() => setSettingsOpen((v) => !v)}
-          >
-          Settings
+        {canPause && (
+          <button type="button" style={styles.secondaryButton} onClick={() => void presenter.pause()}>
+            Pause
           </button>
-          <button
-            type="button"
-            style={live ? styles.stopButton : { ...styles.liveButton, opacity: ready ? 1 : 0.5 }}
-            disabled={!ready && !live}
-            title={!ready && !live ? 'Backend not ready yet' : live ? 'Stop the live stream' : 'Start the live stream'}
-            onClick={toggleLive}
-          >
-            {live ? 'Stop' : 'Go Live'}
+        )}
+        {canResume && (
+          <button type="button" style={styles.secondaryButton} onClick={() => void presenter.resume()}>
+            Resume
           </button>
-        </div>
+        )}
+        {live && providerState.started === true && (
+          <button type="button" style={styles.secondaryButton} onClick={() => void presenter.restart()}>
+            Restart
+          </button>
+        )}
+        {warning?.startsWith('Idle') && snapshot.cost.canExtendIdle && (
+          <button type="button" style={styles.secondaryButton} onClick={() => presenter.extendIdle()}>
+            Continue 60s
+          </button>
+        )}
+        <button
+          type="button"
+          style={live ? styles.stopButton : styles.liveButton}
+          onClick={() => (live ? void presenter.stop() : start())}
+        >
+          {live ? 'Stop' : 'Go Live'}
+        </button>
       </div>
 
-      {/* Tuning popover (gear): only Steps/Smooth; floats over the preview so
-          it does not push the frame. Prompt lives in the bottom bar instead. */}
-      {!idle && settingsOpen && (
-        <div style={styles.popover}>{tuningFields}</div>
-      )}
-
-      {/* Bottom prompt bar: always available while a frame is present/streaming
-          so the prompt can be tweaked live during gameplay. */}
-      {!idle && (
-        <div style={styles.promptBar}>
-          <span style={styles.promptTag}>Prompt</span>
-          {gameControlled && <span style={styles.gameBadge}>game</span>}
-          <select
-            style={styles.promptPresetSelect}
-            value={activePresetPrompt}
-            onChange={(e) => applyStylePreset(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            aria-label="Style preset"
-            title="Apply a global style preset"
-          >
-            <option value="">Custom</option>
-            {STYLE_PRESETS.map((preset) => (
-              <option key={preset.label} value={preset.prompt}>{preset.label}</option>
-            ))}
-          </select>
-          <input
-            style={{ ...styles.promptInput, ...(promptDirty ? styles.promptInputDirty : null) }}
-            value={prompt}
-            placeholder={DEFAULT_PROMPT}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={onPromptInputKeyDown}
-            aria-label="Diffusion prompt"
-            title={gameControlled ? `Effective: ${effectivePrompt}` : 'Enter or Apply to send the prompt'}
-          />
-          {gameControlled && <span style={styles.effectiveText} title={effectivePrompt}>+ {gamePrompt}</span>}
-          <button
-            type="button"
-            style={promptDirty ? styles.applyButton : styles.applyButtonIdle}
-            disabled={!promptDirty}
-            title={promptDirty ? 'Send this prompt to the renderer' : 'Prompt already applied'}
-            onClick={applyPrompt}
-          >
-            Apply
-          </button>
-          {gameControlled && (
-            <button type="button" style={styles.promptReset} onClick={clearGameOverrides}>reclaim</button>
+      {settingsOpen && (
+        <div style={styles.settings}>
+          <label style={styles.field}>
+            <span>Backend</span>
+            <select style={styles.input} value={backendId} onChange={(event) => switchBackend(event.target.value)}>
+              {snapshot.descriptors.map((descriptor) => (
+                <option key={descriptor.id} value={descriptor.id}>{descriptor.label}</option>
+              ))}
+            </select>
+          </label>
+          <label style={styles.field}>
+            <span>Profile</span>
+            <select style={styles.input} value={profileId} onChange={(event) => setProfileId(event.target.value)}>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.label}</option>
+              ))}
+            </select>
+          </label>
+          {controls.has('prompt') && (
+            <label style={{ ...styles.field, gridColumn: '1 / -1' }}>
+              <span>Creative direction</span>
+              <textarea
+                style={styles.textarea}
+                rows={3}
+                value={prompt}
+                placeholder="Optional global art direction"
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={onPromptKeyDown}
+              />
+            </label>
           )}
-          {prompt !== DEFAULT_PROMPT && (
-            <button type="button" style={styles.promptReset} onClick={resetPrompt}>reset</button>
+          {controls.has('quality') && (
+            <label style={styles.field}>
+              <span>Budget</span>
+              <select style={styles.input} value={quality} onChange={(event) => setQuality(event.target.value as DirectionQuality)}>
+                <option value="realtime">Realtime</option>
+                <option value="balanced">Balanced</option>
+                <option value="quality">Quality</option>
+              </select>
+            </label>
+          )}
+          {controls.has('seed') && (
+            <label style={styles.field}>
+              <span>Seed</span>
+              <input
+                style={styles.input}
+                type="number"
+                step="1"
+                value={seedText}
+                aria-invalid={seedInvalid}
+                onChange={(event) => setSeedText(event.target.value)}
+              />
+              {seedInvalid && <small style={styles.error}>Seed must be a safe integer.</small>}
+            </label>
+          )}
+          {controls.has('rotation-speed') && (
+            <label style={styles.field}>
+              <span>Rotation speed</span>
+              <input
+                style={styles.input}
+                type="number"
+                min="0"
+                max="30"
+                step="0.5"
+                value={rotationSpeedText}
+                aria-invalid={rotationSpeedInvalid}
+                onChange={(event) => setRotationSpeedText(event.target.value)}
+              />
+              {rotationSpeedInvalid && <small style={styles.error}>Use a value from 0 to 30.</small>}
+            </label>
+          )}
+          {controls.has('attention-window') && (
+            <label style={styles.field}>
+              <span>Attention window</span>
+              <select
+                style={styles.input}
+                value={attentionWindow}
+                onChange={(event) => setAttentionWindow(event.target.value as typeof attentionWindow)}
+              >
+                <option value="auto">Auto</option>
+                <option value="small">Small</option>
+                <option value="large">Large</option>
+              </select>
+            </label>
+          )}
+          {controls.has('kv-cache-reset') && (
+            <label style={styles.field}>
+              <span>KV cache reset</span>
+              <select
+                style={styles.input}
+                value={kvCacheResetMode}
+                onChange={(event) => setKvCacheResetMode(event.target.value as typeof kvCacheResetMode)}
+              >
+                <option value="auto">Auto</option>
+                <option value="manual">Manual</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          )}
+          {controls.has('kv-cache-reset') && (
+            <div style={{ ...styles.field, justifyContent: 'end' }}>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                disabled={kvCacheResetMode === 'off'}
+                onClick={() => {
+                  const nextSequence = kvCacheResetSequence + 1;
+                  setKvCacheResetSequence(nextSequence);
+                  applyDirection(nextSequence);
+                }}
+              >
+                Reset model cache
+              </button>
+            </div>
+          )}
+          <div style={{ ...styles.field, justifyContent: 'end' }}>
+            <button type="button" style={styles.secondaryButton} onClick={() => applyDirection()}>Apply direction</button>
+          </div>
+          <div style={styles.hint}>
+            The game remains authoritative. This panel consumes semantic intent, presentation programs, camera state, and viewport media only to produce a presentation stream.
+          </div>
+          {snapshot.manifestRevision && (
+            <div style={styles.hint}>
+              Manifest: {snapshot.manifestRevision}
+            </div>
+          )}
+          {stoppedReason && (
+            <div style={styles.hint}>
+              Cost guard: {stoppedReason}
+            </div>
+          )}
+          {Object.keys(providerState).length > 0 && (
+            <div style={styles.hint}>
+              Provider state: {typeof providerState.currentAction === 'string' ? providerState.currentAction : 'still'}
+              {typeof providerState.currentChunk === 'number' ? ` · chunk ${providerState.currentChunk}` : ''}
+              {providerState.currentPrompt ? ' · prompt accepted' : ''}
+            </div>
+          )}
+          {snapshot.status.appliedTransitionSequence !== undefined && (
+            <div style={styles.hint}>
+              Applied transition: {snapshot.status.appliedTransitionSequence}
+            </div>
+          )}
+          {snapshot.status.issue && (
+            <div
+              style={{
+                ...styles.diagnostics,
+                ...(snapshot.status.issue.retryable ? styles.diagnosticsRetryable : styles.diagnosticsFatal),
+              }}
+              data-fx-diffusion-renderer-diagnostics="1"
+            >
+              <strong>Status</strong>
+              <span>{snapshot.status.issue.message}</span>
+              {snapshot.status.issue.retryable && (
+                <button type="button" style={styles.retryButton} onClick={retry}>
+                  Retry without refreshing
+                </button>
+              )}
+            </div>
+          )}
+          {snapshot.diagnostics.length > 0 && (
+            <div style={{ ...styles.diagnostics, ...styles.diagnosticsRetryable }}>
+              <strong>Effect diagnostics</strong>
+              {snapshot.diagnostics.map((diagnostic, index) => (
+                <span key={`${diagnostic.code}:${diagnostic.instanceId ?? ''}:${index}`}>
+                  {diagnostic.message}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-const spinKeyframes = '@keyframes fx-dr-spin { to { transform: rotate(360deg); } }';
-
-// Host design tokens (packages/interface/src/styles/tokens.css) with static
-// fallbacks so the panel also renders sanely outside Studio. Keeping colors,
-// radii and fonts on the shared scale is what makes the panel look consistent
-// with the rest of the app instead of a bag of ad-hoc hex values.
-const t = {
-  canvas: 'var(--color-background-canvas, #0d0d0d)',
-  base: 'var(--color-background-base, #191919)',
-  elevated: 'var(--color-background-elevated, #242424)',
-  floating: 'var(--color-background-floating, #333333)',
-  textPrimary: 'var(--color-text-primary, #ffffff)',
-  textSecondary: 'var(--color-text-secondary, rgba(255,255,255,0.6))',
-  textTertiary: 'var(--color-text-tertiary, rgba(255,255,255,0.3))',
-  borderSubtle: 'var(--color-border-subtle, #333333)',
-  borderDefault: 'var(--color-border-default, #404040)',
-  borderStrong: 'var(--color-border-strong, #737373)',
-  blue: 'var(--color-accent-blue-default, #639cf8)',
-  green: 'var(--color-accent-green-default, #4fd17f)',
-  orange: 'var(--color-accent-orange-default, #ffb056)',
-  error: 'var(--color-accent-error-default, #f26a6a)',
-  sans: 'var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif)',
-  mono: "var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace)",
-  radSm: 'var(--radius-sm, 4px)',
-  radMd: 'var(--radius-md, 8px)',
-  radLg: 'var(--radius-lg, 12px)',
-} as const;
-
-const toneColor: Record<'ok' | 'warn' | 'bad', string> = {
-  ok: t.green,
-  warn: t.orange,
-  bad: t.error,
-};
-
-const errorTitle: Partial<Record<StreamStatus['state'], string>> = {
-  unauthorized: 'Unauthorized',
-  busy: 'Backend busy',
-  error: 'Stream error',
-};
-
-const baseButton: CSSProperties = {
-  border: `1px solid ${t.borderDefault}`,
-  borderRadius: t.radMd,
-  color: t.textPrimary,
-  cursor: 'pointer',
-  fontWeight: 600,
-  fontSize: 12,
-  lineHeight: 1.2,
-  padding: '6px 12px',
-};
+function colorForPhase(phase: VisualSessionPhase): string {
+  if (phase === 'live') return 'var(--color-accent-green-default, #4FD17F)';
+  if (phase === 'connecting' || phase === 'waiting') return 'var(--color-accent-orange-default, #FFB056)';
+  if (phase === 'failed') return 'var(--color-accent-error-default, #F26A6A)';
+  if (phase === 'degraded') return 'var(--color-accent-orange-default, #FFB056)';
+  return 'var(--color-text-tertiary, rgba(255,255,255,0.30))';
+}
 
 const styles: Record<string, CSSProperties> = {
-  root: { position: 'relative', height: '100%', minHeight: 0, overflow: 'hidden', background: t.base, color: t.textPrimary, fontFamily: t.sans },
-
-  image: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', display: 'none' },
-
-  empty: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: t.textSecondary, fontSize: 12, lineHeight: 1.6 },
-  emphasis: { color: t.textPrimary, fontWeight: 600 },
-
-  idleWrap: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 20 },
-  idleCard: { width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10, padding: 14, background: t.elevated, border: `1px solid ${t.borderDefault}`, borderRadius: t.radLg },
-  idleHint: { maxWidth: 340, color: t.textSecondary, fontSize: 12, lineHeight: 1.6, textAlign: 'center' },
-
-  overlayCenter: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, pointerEvents: 'none' },
-  spinner: { width: 24, height: 24, borderRadius: '50%', border: `2px solid ${t.borderSubtle}`, borderTopColor: t.blue, animation: 'fx-dr-spin 0.8s linear infinite' },
-  overlayText: { color: t.textSecondary, fontSize: 12 },
-
-  errorOverlay: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 20, textAlign: 'center', background: 'var(--color-overlay-modal, rgba(0,0,0,0.5))' },
-  errorTitle: { color: t.error, fontSize: 13, fontWeight: 700 },
-  errorMsg: { color: t.textSecondary, fontSize: 11, maxWidth: 280, lineHeight: 1.5 },
-  retryButton: { ...baseButton, marginTop: 4, background: t.blue, borderColor: 'transparent', color: '#0d0d0d', fontWeight: 700, padding: '6px 16px' },
-
-  bar: { position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.72), rgba(0,0,0,0))', zIndex: 2 },
-  barLeft: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
-  dot: { width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto' },
-  barTitle: { fontSize: 12, fontWeight: 700, letterSpacing: 0.1, color: t.textPrimary, whiteSpace: 'nowrap' },
-  barSep: { color: t.textTertiary, fontSize: 12 },
-  barStatus: { fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 },
-  barRes: { marginLeft: 4, color: t.textTertiary, fontSize: 10, fontFamily: t.mono, whiteSpace: 'nowrap' },
-  barMetrics: { display: 'flex', alignItems: 'center', gap: 10, flex: '0 1 auto', minWidth: 0, overflow: 'hidden' },
-  barMetric: { display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap' },
-  barMetricLabel: { color: t.textTertiary, fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase' },
-  barMetricValue: { color: t.textPrimary, fontSize: 11, fontWeight: 600, fontFamily: t.mono },
-  barRight: { display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' },
-  gearButton: { ...baseButton, padding: '5px 9px', fontSize: 13, lineHeight: 1, background: 'rgba(0,0,0,0.4)', color: t.textSecondary, borderColor: t.borderSubtle },
-  gearActive: { color: t.textPrimary, borderColor: t.borderStrong, background: t.floating },
-  liveButton: { ...baseButton, background: t.blue, borderColor: 'transparent', color: '#0d0d0d', fontWeight: 700 },
-  stopButton: { ...baseButton, background: t.error, borderColor: 'transparent', color: '#0d0d0d', fontWeight: 700 },
-
-  popover: { position: 'absolute', top: 46, right: 10, width: 220, maxWidth: 'calc(100% - 20px)', display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: t.elevated, border: `1px solid ${t.borderDefault}`, borderRadius: t.radLg, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', zIndex: 3 },
-  promptField: { display: 'flex', flexDirection: 'column' },
-  labelRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  labelActions: { display: 'flex', alignItems: 'center', gap: 8 },
-  label: { display: 'block', color: t.textSecondary, fontSize: 11, fontWeight: 500, marginBottom: 5 },
-  styleSelect: { minWidth: 96, maxWidth: 128, background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radSm, padding: '3px 6px', fontSize: 11, fontFamily: t.sans },
-  linkButton: { background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: 0 },
-  linkButtonAccent: { background: 'none', border: 'none', color: t.green, cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: 0 },
-  dirtyHint: { marginTop: 5, color: t.orange, fontSize: 10, lineHeight: 1.4 },
-  textarea: { resize: 'vertical', minHeight: 56, background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radMd, padding: 8, fontSize: 12, lineHeight: 1.5, fontFamily: t.sans },
-  gameBadge: { flex: '0 0 auto', padding: '1px 5px', borderRadius: 999, background: 'rgba(99,156,248,0.16)', border: `1px solid ${t.blue}`, color: t.blue, fontSize: 9, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' },
-  controlHint: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, padding: 8, background: 'rgba(99,156,248,0.08)', border: `1px solid ${t.borderSubtle}`, borderRadius: t.radMd },
-  controlHintLine: { color: t.textSecondary, fontSize: 11, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  reclaimButton: { alignSelf: 'flex-start', background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: 0 },
-  row: { display: 'flex', gap: 10 },
-  field: { flex: 1 },
-  input: { width: '100%', boxSizing: 'border-box', background: t.base, color: t.textPrimary, border: `1px solid ${t.borderDefault}`, borderRadius: t.radSm, padding: '6px 8px', fontSize: 12, fontFamily: t.sans },
-
-  promptBar: { position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'linear-gradient(to top, rgba(0,0,0,0.82), rgba(0,0,0,0))', zIndex: 2 },
-  promptTag: { flex: '0 0 auto', color: t.textTertiary, fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' },
-  promptPresetSelect: { flex: '0 0 98px', minWidth: 0, boxSizing: 'border-box', background: 'rgba(0,0,0,0.35)', color: t.textPrimary, border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, padding: '5px 6px', fontSize: 11, fontFamily: t.sans },
-  promptInput: { flex: 1, minWidth: 0, boxSizing: 'border-box', background: 'rgba(0,0,0,0.35)', color: t.textPrimary, border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, padding: '5px 8px', fontSize: 12, fontFamily: t.sans },
-  promptInputDirty: { borderColor: t.orange },
-  effectiveText: { flex: '0 1 28%', minWidth: 0, color: t.textSecondary, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  applyButton: { flex: '0 0 auto', background: t.green, border: '1px solid transparent', borderRadius: t.radSm, color: '#0d0d0d', cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '4px 10px' },
-  applyButtonIdle: { flex: '0 0 auto', background: 'transparent', border: `1px solid ${t.borderSubtle}`, borderRadius: t.radSm, color: t.textTertiary, cursor: 'default', fontSize: 11, fontWeight: 600, padding: '4px 10px' },
-  promptReset: { flex: '0 0 auto', background: 'none', border: 'none', color: t.blue, cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: 0 },
+  root: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 320,
+    overflow: 'hidden',
+    background: 'var(--color-background-canvas, #0D0D0D)',
+    color: 'var(--color-text-primary, #FFFFFF)',
+    font: '12px/1.45 ui-sans-serif, system-ui, sans-serif',
+  },
+  video: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    background: 'var(--color-background-canvas, #0D0D0D)',
+  },
+  empty: {
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    padding: 32,
+    color: 'var(--color-text-secondary, rgba(255,255,255,0.60))',
+    textAlign: 'center',
+  },
+  topBar: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    zIndex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 10px',
+    background: 'color-mix(in srgb, var(--color-background-elevated, #242424) 92%, transparent)',
+    border: '1px solid var(--color-border-subtle, #333333)',
+    borderRadius: 8,
+    backdropFilter: 'blur(8px)',
+  },
+  dot: { width: 8, height: 8, borderRadius: '50%', flex: '0 0 auto' },
+  title: { color: 'var(--color-text-primary, #FFFFFF)' },
+  status: {
+    color: 'var(--color-text-secondary, rgba(255,255,255,0.60))',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  clock: {
+    color: 'var(--color-text-tertiary, rgba(255,255,255,0.45))',
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  grow: { flex: 1 },
+  settings: {
+    position: 'absolute',
+    zIndex: 1,
+    top: 58,
+    right: 10,
+    width: 'min(430px, calc(100% - 20px))',
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 10,
+    padding: 12,
+    background: 'color-mix(in srgb, var(--color-background-elevated, #242424) 96%, transparent)',
+    border: '1px solid var(--color-border-subtle, #333333)',
+    borderRadius: 8,
+    backdropFilter: 'blur(10px)',
+  },
+  field: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 5,
+    color: 'var(--color-text-secondary, rgba(255,255,255,0.60))',
+  },
+  error: { color: 'var(--color-accent-error-default, #F26A6A)', fontSize: 10 },
+  input: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 5,
+    border: '1px solid var(--color-border-default, #404040)',
+    padding: '6px 7px',
+    background: 'var(--color-background-floating, #333333)',
+    color: 'var(--color-text-primary, #FFFFFF)',
+  },
+  textarea: {
+    width: '100%',
+    boxSizing: 'border-box',
+    resize: 'vertical',
+    borderRadius: 5,
+    border: '1px solid var(--color-border-default, #404040)',
+    padding: '7px',
+    background: 'var(--color-background-floating, #333333)',
+    color: 'var(--color-text-primary, #FFFFFF)',
+  },
+  hint: {
+    gridColumn: '1 / -1',
+    color: 'var(--color-text-tertiary, rgba(255,255,255,0.30))',
+    fontSize: 11,
+  },
+  diagnostics: {
+    gridColumn: '1 / -1',
+    display: 'grid',
+    gap: 6,
+    padding: '8px 9px',
+    borderRadius: 5,
+    fontSize: 11,
+  },
+  diagnosticsRetryable: {
+    background: 'var(--color-accent-orange-soft, #633C10)',
+    color: 'var(--color-accent-orange-default, #FFB056)',
+    border: '1px solid color-mix(in srgb, var(--color-accent-orange-default, #FFB056) 35%, transparent)',
+  },
+  diagnosticsFatal: {
+    background: 'var(--color-accent-error-soft, #5C1A1A)',
+    color: 'var(--color-accent-error-default, #F26A6A)',
+    border: '1px solid color-mix(in srgb, var(--color-accent-error-default, #F26A6A) 35%, transparent)',
+  },
+  secondaryButton: {
+    border: '1px solid var(--color-border-default, #404040)',
+    borderRadius: 5,
+    padding: '5px 8px',
+    background: 'var(--color-background-floating, #333333)',
+    color: 'var(--color-text-primary, #FFFFFF)',
+    cursor: 'pointer',
+  },
+  retryButton: {
+    border: '1px solid color-mix(in srgb, var(--color-accent-orange-default, #FFB056) 50%, transparent)',
+    borderRadius: 5,
+    padding: '5px 8px',
+    background: 'var(--color-accent-orange-soft, #633C10)',
+    color: 'var(--color-accent-orange-default, #FFB056)',
+    cursor: 'pointer',
+  },
+  liveButton: {
+    border: '1px solid color-mix(in srgb, var(--color-brand-primary, #D4FF48) 45%, transparent)',
+    borderRadius: 5,
+    padding: '5px 9px',
+    background: 'var(--color-brand-primary-soft, #6A7F24)',
+    color: 'var(--color-brand-primary, #D4FF48)',
+    cursor: 'pointer',
+  },
+  stopButton: {
+    border: '1px solid color-mix(in srgb, var(--color-accent-error-default, #F26A6A) 45%, transparent)',
+    borderRadius: 5,
+    padding: '5px 9px',
+    background: 'var(--color-accent-error-soft, #5C1A1A)',
+    color: 'var(--color-accent-error-default, #F26A6A)',
+    cursor: 'pointer',
+  },
 };

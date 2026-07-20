@@ -2,8 +2,11 @@
  * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / rng / reactions。
  */
 import type { CSSProperties, JSX } from 'react'
-import type { AttrMeta, Entity, GameScenario, Reaction, Variable } from '../../runtime/schema/graph-schema'
-import { ConditionEditor } from './editors'
+import type { AttrMeta, Entity, GameScenario, Overlay, Reaction, Variable } from '../../runtime/schema/graph-schema'
+import { ConditionEditor, type EditorPickerCtx } from './editors'
+import { OverlayCatalogPreview } from './OverlayCatalogPreview'
+import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
+import { NEW_COMPONENT_PRESETS } from '../demo/builtin-schemes'
 
 export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'reactions'>
 
@@ -40,17 +43,48 @@ function allocId(prefix: string, existing: Record<string, unknown>): string {
   return id
 }
 
+
+/** 引用角标：被 N 个节点挂载引用；0 = 未被引用（灰）。 */
+function UsageBadge({ count }: { count: number }): JSX.Element {
+  const used = count > 0
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        padding: '1px 6px',
+        borderRadius: 8,
+        whiteSpace: 'nowrap',
+        background: used ? 'rgba(80,180,120,0.16)' : 'rgba(255,255,255,0.06)',
+        color: used ? '#7fdda6' : '#8a8a8a',
+        border: `1px solid ${used ? 'rgba(80,180,120,0.4)' : 'rgba(255,255,255,0.12)'}`,
+      }}
+      title={used ? `被 ${count} 个节点的 overlayNodes 引用` : '资源池里的闲置界面包（可保留）'}
+    >
+      {used ? `被 ${count} 个节点引用` : '未被引用'}
+    </span>
+  )
+}
+
 export type ScenarioSection = 'scene' | 'overlays' | 'variables' | 'entities' | 'rules'
 
 export function ScenarioInspector({
   value,
   nodeIds,
+  nodeLabel,
+  edgeOptions,
   section,
+  overlayUsage,
   onChange,
 }: {
   value: ScenarioMeta
   nodeIds: string[]
+  /** 节点下拉展示；缺省用 id。 */
+  nodeLabel?: (id: string) => string
+  /** 全图出边目录（advance.edgeId 选择用）。 */
+  edgeOptions?: Array<{ value: string; label: string }>
   section?: ScenarioSection
+  /** overlayId → 被多少节点挂载引用（资源池「已用/未用」角标）。 */
+  overlayUsage?: Record<string, number>
   onChange: (next: ScenarioMeta) => void
 }): JSX.Element {
   const show = (s: ScenarioSection) => !section || section === s
@@ -58,7 +92,55 @@ export function ScenarioInspector({
   const entities = value.entities ?? {}
   const reactions = value.reactions ?? []
   const seed = value.rng?.seed ?? 0
-  const overlayIds = Object.keys(value.ui?.overlays ?? {})
+  const pickers: EditorPickerCtx = { entities, variables, nodeLabel }
+  const allOverlays = value.ui?.overlays ?? {}
+  // 「通用样式」= 自由方案；排除每节点自动内容 overlay（node:*，那是时间轴的内容容器）。
+  const schemeIds = Object.keys(allOverlays).filter((id) => !id.startsWith('node:'))
+  const setOverlays = (overlays: Record<string, Overlay>) => onChange({ ...value, ui: { ...value.ui, overlays } })
+  const patchOverlayChildInMeta = (overlayId: string, childId: string, patch: { inputs?: Record<string, unknown>; component?: string }) => {
+    const ov = allOverlays[overlayId]
+    if (!ov) return
+    setOverlays({
+      ...allOverlays,
+      [overlayId]: {
+        ...ov,
+        children: ov.children.map((c) =>
+          c.id !== childId
+            ? c
+            : {
+                ...c,
+                ...(patch.component != null ? { component: patch.component } : {}),
+                inputs: patch.inputs ? { ...c.inputs, ...patch.inputs } : c.inputs,
+              },
+        ),
+      },
+    })
+  }
+  const addSchemeChild = (overlayId: string, presetId: string) => {
+    const ov = allOverlays[overlayId]
+    const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === presetId)
+    if (!ov || !preset) return
+    const childId = `${presetId}-${Object.keys(ov.children).length}-${Date.now().toString(36)}`
+    setOverlays({ ...allOverlays, [overlayId]: { ...ov, children: [...ov.children, preset.make(childId)] } })
+  }
+  const removeSchemeChild = (overlayId: string, childId: string) => {
+    const ov = allOverlays[overlayId]
+    if (!ov) return
+    setOverlays({ ...allOverlays, [overlayId]: { ...ov, children: ov.children.filter((c) => c.id !== childId) } })
+  }
+  const renameScheme = (overlayId: string, title: string) => {
+    const ov = allOverlays[overlayId]
+    if (!ov) return
+    setOverlays({ ...allOverlays, [overlayId]: { ...ov, title } })
+  }
+  const addScheme = () => {
+    const id = allocId('scheme-', allOverlays)
+    setOverlays({ ...allOverlays, [id]: { id, title: '新方案', children: [] } })
+  }
+  const removeScheme = (overlayId: string) => {
+    const { [overlayId]: _drop, ...rest } = allOverlays
+    setOverlays(rest)
+  }
   const setVariables = (v: Record<string, Variable>) => onChange({ ...value, variables: v })
   const setEntities = (e: Record<string, Entity>) => onChange({ ...value, entities: e })
   const setReactions = (r: Reaction[]) => onChange({ ...value, reactions: r.length ? r : undefined })
@@ -80,22 +162,62 @@ export function ScenarioInspector({
       {show('overlays') && (
         <>
           <div style={sectionTitle}>
-            <b>Overlays</b>
+            <b>通用样式 · 界面方案</b>
+            <button onClick={addScheme}>+ 方案</button>
           </div>
           <div style={{ opacity: 0.55, fontSize: 11, marginBottom: 6 }}>
-            可复用界面包目录（children 在界面编辑器维护；节点经 overlayNodes 挂载）。
+            自由可复用的界面方案（与节点解耦）：预览显示该方案的全部组件；节点在蓝图/挂载处引用方案。
           </div>
-          {overlayIds.length === 0 ? (
-            <div style={{ opacity: 0.5 }}>暂无 overlays</div>
+          {schemeIds.length === 0 ? (
+            <div style={{ opacity: 0.5 }}>暂无方案</div>
           ) : (
-            overlayIds.map((id) => (
-              <div key={id} style={box}>
-                {id}
-                <span style={{ opacity: 0.5, marginLeft: 8 }}>
-                  {(value.ui?.overlays?.[id]?.children.length ?? 0)} children
-                </span>
-              </div>
-            ))
+            schemeIds.map((id) => {
+              const ov = allOverlays[id]
+              if (!ov) return null
+              return (
+                <div key={id} style={box}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                    <input
+                      value={ov.title ?? ''}
+                      placeholder={id}
+                      onChange={(e) => renameScheme(id, e.target.value)}
+                      style={{ flex: 1, fontWeight: 600 }}
+                    />
+                    <UsageBadge count={overlayUsage?.[id] ?? 0} />
+                    <button style={del} onClick={() => removeScheme(id)}>删除</button>
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 8 }}>{id}</div>
+                  <OverlayCatalogPreview overlay={ov} entities={entities} variables={variables} />
+                  <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600 }}>组件（{ov.children.length}）</span>
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) addSchemeChild(id, e.target.value) }}
+                        style={{ fontSize: 11 }}
+                      >
+                        <option value="">+ 添加组件…</option>
+                        {NEW_COMPONENT_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {ov.children.map((child) => (
+                      <div key={child.id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <OverlayChildStyleEditor
+                            child={child}
+                            onPatchParams={(patch) => patchOverlayChildInMeta(id, child.id, { inputs: patch })}
+                            onPatchComponent={(component) => patchOverlayChildInMeta(id, child.id, { component })}
+                          />
+                        </div>
+                        <button style={{ ...del, marginTop: 6 }} onClick={() => removeSchemeChild(id, child.id)} title="移除组件">×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })
           )}
         </>
       )}
@@ -185,7 +307,7 @@ export function ScenarioInspector({
                   ...reactions,
                   {
                     when: { type: 'state', condition: { all: [] } },
-                    do: [{ kind: 'goto', targetNodeId: nodeIds[0] ?? '' }],
+                    do: [{ kind: 'advance', edgeId: edgeOptions?.[0]?.value ?? '' }],
                   },
                 ])
               }
@@ -195,25 +317,25 @@ export function ScenarioInspector({
           </div>
           {reactions.map((r, i) => {
             const cond = r.when.type === 'state' ? r.when.condition : { all: [] }
-            const goto = r.do.find((a) => a.kind === 'goto')
+            const adv = r.do.find((a) => a.kind === 'advance')
             return (
               <div key={i} style={box}>
                 {field(
-                  '跳转到',
+                  '沿边跳转',
                   <select
-                    value={goto && goto.kind === 'goto' ? goto.targetNodeId : ''}
+                    value={adv && adv.kind === 'advance' ? adv.edgeId : ''}
                     onChange={(e) =>
                       patchReaction(i, {
                         when: { type: 'state', condition: cond },
-                        do: [{ kind: 'goto', targetNodeId: e.target.value }],
+                        do: [{ kind: 'advance', edgeId: e.target.value }],
                       })
                     }
                     style={{ flex: 1 }}
                   >
-                    <option value="">（选节点）</option>
-                    {nodeIds.map((id) => (
-                      <option key={id} value={id}>
-                        {id}
+                    <option value="">（选出边）</option>
+                    {(edgeOptions ?? []).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </select>,
@@ -221,6 +343,9 @@ export function ScenarioInspector({
                 <ConditionEditor
                   value={cond}
                   nodeIds={nodeIds}
+                  pickers={pickers}
+                  entities={entities}
+                  variables={variables}
                   onChange={(when) =>
                     patchReaction(i, {
                       when: { type: 'state', condition: when ?? { all: [] } },
@@ -255,6 +380,11 @@ function EntityRow({
   const attrMeta = ent.attrMeta ?? {}
   const setAttrs = (a: Record<string, number>) => onChange({ ...ent, id: entKey, attrs: a })
   const setAttrMeta = (m: Record<string, AttrMeta>) => onChange({ ...ent, id: entKey, attrMeta: m })
+  const removeAttr = (ak: string) => {
+    const { [ak]: _a, ...restAttrs } = attrs
+    const { [ak]: _m, ...restMeta } = attrMeta
+    onChange({ ...ent, id: entKey, attrs: restAttrs, attrMeta: Object.keys(restMeta).length ? restMeta : undefined })
+  }
 
   return (
     <div style={box}>
@@ -267,23 +397,41 @@ function EntityRow({
           style={{ flex: 1 }}
         />,
       )}
-      <div style={{ fontSize: 11, opacity: 0.7, margin: '4px 0 2px' }}>attrs</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 2px' }}>
+        <span style={{ fontSize: 11, opacity: 0.7 }}>attrs（公式里 entity.{entKey}.attr.&lt;名&gt; 引用）</span>
+        <button
+          style={{ fontSize: 11 }}
+          onClick={() => {
+            const id = allocId('attr', attrs)
+            setAttrs({ ...attrs, [id]: 0 })
+          }}
+        >
+          + 属性
+        </button>
+      </div>
       {Object.entries(attrs).map(([ak, av]) => (
         <div key={ak} style={rowStyle}>
-          <input value={ak} readOnly style={{ flex: 1 }} />
+          <input value={ak} readOnly style={{ width: 64, opacity: 0.7 }} title="属性 id：添加后固定，改「显示名」即可" />
+          <input
+            value={attrMeta[ak]?.label ?? ''}
+            placeholder="显示名"
+            onChange={(e) => setAttrMeta({ ...attrMeta, [ak]: { ...attrMeta[ak], label: e.target.value || undefined } })}
+            style={{ flex: 1 }}
+          />
           <input
             type="number"
             value={av}
             onChange={(e) => setAttrs({ ...attrs, [ak]: Number(e.target.value) || 0 })}
-            style={{ width: 90 }}
+            style={{ width: 70 }}
+            title="当前/初始数值"
           />
+          <button style={del} onClick={() => removeAttr(ak)} title="删除该属性">×</button>
         </div>
       ))}
+      {Object.keys(attrs).length === 0 ? <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 4 }}>暂无属性</div> : null}
       <button style={{ ...del, marginTop: 6 }} onClick={onDelete}>
         删除实体
       </button>
-      {/* silence unused */}
-      <span style={{ display: 'none' }}>{Object.keys(attrMeta).length}{setAttrMeta.length}</span>
     </div>
   )
 }

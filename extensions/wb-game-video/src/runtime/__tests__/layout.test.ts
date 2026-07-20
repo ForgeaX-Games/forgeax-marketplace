@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { layoutValueToCss, layoutToCss } from '../schema/layout'
+import {
+  childWrapStyle,
+  layoutHasExplicitSize,
+  layoutIsEffectivelyEmpty,
+  layoutValueToCss,
+  layoutToCss,
+  mountWrapStyle,
+} from '../schema/layout'
 
 describe('layout', () => {
   it('layoutValueToCss maps fraction and strings', () => {
@@ -8,6 +15,51 @@ describe('layout', () => {
     expect(layoutValueToCss(-0.5)).toBe('-50%')
     expect(layoutValueToCss('12px')).toBe('12px')
     expect(layoutValueToCss('50%')).toBe('50%')
+  })
+
+  it('layoutIsEffectivelyEmpty', () => {
+    expect(layoutIsEffectivelyEmpty(undefined)).toBe(true)
+    expect(layoutIsEffectivelyEmpty({})).toBe(true)
+    expect(layoutIsEffectivelyEmpty({ left: 0 })).toBe(false)
+  })
+
+  it('layoutHasExplicitSize', () => {
+    expect(layoutHasExplicitSize({ width: 1 })).toBe(true)
+    expect(layoutHasExplicitSize({ left: 0, top: 0 })).toBe(false)
+  })
+
+  it('mountWrapStyle: auto-size when no layout', () => {
+    expect(mountWrapStyle()).toEqual({
+      position: 'absolute',
+      pointerEvents: 'none',
+      left: 0,
+      top: 0,
+      width: 'fit-content',
+      height: 'fit-content',
+    })
+  })
+
+  it('mountWrapStyle: explicit width, auto height', () => {
+    expect(mountWrapStyle({ left: 0, top: 0, width: 1 })).toMatchObject({
+      position: 'absolute',
+      left: '0%',
+      top: '0%',
+      width: '100%',
+      height: 'fit-content',
+    })
+  })
+
+  it('childWrapStyle: default top-left when mount has size', () => {
+    expect(childWrapStyle(undefined, true)).toEqual({
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      pointerEvents: 'auto',
+    })
+  })
+
+  it('childWrapStyle: flow when mount auto-size', () => {
+    expect(childWrapStyle(undefined, false)).toEqual({ pointerEvents: 'auto' })
   })
 
   it('layoutToCss: vertical center left-aligned', () => {

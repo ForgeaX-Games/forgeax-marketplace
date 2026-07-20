@@ -1,85 +1,234 @@
 /**
- * 叩击 QTE 皮肤（component id: `inkKou`）—— 从旧 player/InkKouLayer 迁移。
+ * 叩击 QTE 皮肤（component id: `inkKou`）—— 单点「叩」字拍点，支持多拍点组合。
  *
- * 单点：点击/空格/回车 → submit('pass')；超时未叩 → submit('fail')。
- * 时限同源：interaction.timeoutMs（引擎从 timeoutMs/windowMs/durationMs 归一）>
- * params.timeoutMs > params.windowMs > params.durationMs > 1500。
- * 引擎已挂 timeoutMs 时由 Player 自动 submit(undefined)→fail，皮肤不再自管超时。
+ * cues 决定拍点数、位置、时序；皮肤提供形状 + 动画 + 默认锚点。
+ *  - 运行态：RAF 相对时钟；窗内 ±perfectMs 于 targetAt = 完美，窗内其余 = 成功，窗外/超时 = 失败。
+ *  - 预览态：播放头 previewTimeMs 驱动显隐 + CSS 负 delay 冻结入场动画。
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
-import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import type { OverlayChild } from '../../schema/graph-schema'
+import { injectCss, ensureInkFilters, ensureBrushFont, previewFreezeClass, previewTStyle } from './skinRuntime'
 
-export function InkKouLayer({ interaction, submit }: InteractionProps) {
+/** 皮肤默认玩法参数（出口 / 新建预设共用；不进 core-kinds 特判）。 */
+export const inkKouDefaults = {
+  glyph: '叩',
+  events: [
+    { id: 'pass', label: '完美' },
+    { id: 'fail', label: '失败' },
+  ],
+  defaultEvent: 'fail',
+  cues: [{ id: 'k0', x: 0.5, y: 0.45, appearAt: 0, targetAt: 400, endAt: 1000 }],
+}
+
+/** OverlayChild 预设（顶栏 component = 皮肤 id）。 */
+export function inkKouPreset(id: string): OverlayChild {
+  return {
+    id,
+    component: 'inkKou',
+    trigger: { when: 'enter' },
+    inputs: { ...inkKouDefaults },
+  }
+}
+
+interface KouCueParam {
+  id?: string
+  x?: number
+  y?: number
+  appearAt?: number
+  targetAt?: number
+  endAt?: number
+  durationMs?: number
+}
+interface KouItem {
+  key: string
+  x: number
+  y: number
+  absAppear: number
+  absEnd: number
+  absTarget?: number
+  appear: number
+  end: number
+}
+type HitTier = 'perfect' | 'good'
+
+export function InkKouLayer({ interaction, submit, preview, previewTimeMs }: InteractionProps) {
   injectCss('ink-kou-layer', KOU_CSS)
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const p = interaction.params as {
+  const p = interaction.inputs as {
     glyph?: string
     anchorX?: number
     anchorY?: number
     durationMs?: number
     timeoutMs?: number
     windowMs?: number
-    outcomeLabels?: Record<string, string>
+    perfectMs?: number
+    cues?: KouCueParam[]
+    passingHits?: number
+    events?: Array<{ id: string; label?: string }>
   }
   const glyph = p.glyph ?? '叩'
-  const passHint = p.outcomeLabels?.pass ?? `${glyph}，空格键或点击确认`
-  const anchorX = p.anchorX ?? 0.58
-  const anchorY = p.anchorY ?? 0.39
-  const engineTimeout = interaction.timeoutMs
-  const durationMs =
-    engineTimeout
-    ?? (typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined)
-    ?? (typeof p.windowMs === 'number' ? p.windowMs : undefined)
-    ?? (typeof p.durationMs === 'number' ? p.durationMs : undefined)
-    ?? 1500
-  const resolvedRef = useRef(false)
+  const passLabel = p.events?.find((e) => e.id === 'pass')?.label
+  const passHint = passLabel ?? `${glyph}，空格键或点击确认`
+  const hasCues = Array.isArray(p.cues) && p.cues.length > 0
+  const perfectMs = typeof p.perfectMs === 'number' && p.perfectMs > 0 ? p.perfectMs : undefined
 
-  function finish(outcome: 'pass' | 'fail'): void {
+  const items = useMemo<KouItem[]>(() => {
+    const raw =
+      hasCues && p.cues
+        ? p.cues
+        : [{ x: p.anchorX ?? 0.58, y: p.anchorY ?? 0.39, durationMs: p.durationMs }]
+    const base = Math.min(...raw.map((c) => c.appearAt ?? 0))
+    return raw.map((c, i) => {
+      const absAppear = c.appearAt ?? 0
+      const dur = c.durationMs ?? p.durationMs ?? 1500
+      const absEnd = c.endAt != null ? Math.max(absAppear + 200, c.endAt) : absAppear + dur
+      return {
+        key: c.id ?? `kou${i}`,
+        x: c.x ?? p.anchorX ?? 0.58,
+        y: c.y ?? p.anchorY ?? 0.39,
+        absAppear,
+        absEnd,
+        absTarget: c.targetAt,
+        appear: Math.max(0, absAppear - base),
+        end: Math.max(0, absEnd - base),
+      }
+    })
+  }, [p, hasCues])
+
+  const baseAbs = useMemo(() => Math.min(...items.map((c) => c.absAppear)), [items])
+  const need = p.passingHits ?? items.length
+  const engineTimeout = interaction.timeoutMs
+  const maxEnd = useMemo(() => {
+    const skinEnd = Math.max(...items.map((c) => c.end))
+    return engineTimeout ? Math.min(skinEnd, Math.max(200, engineTimeout)) : skinEnd
+  }, [items, engineTimeout])
+  const startRef = useRef(0)
+  const hitRef = useRef<Map<string, HitTier>>(new Map())
+  const resolvedRef = useRef(false)
+  const [nowMs, setNowMs] = useState(0)
+
+  const engineOwnsTimeout = !preview && !hasCues && engineTimeout != null
+
+  function classifyHit(tAbs: number, c: KouItem): HitTier | null {
+    if (tAbs < c.absAppear || tAbs > c.absEnd) return null
+    if (perfectMs != null && c.absTarget != null && Math.abs(tAbs - c.absTarget) <= perfectMs) return 'perfect'
+    if (perfectMs != null && c.absTarget != null) return 'good'
+    return 'perfect'
+  }
+
+  function finish(outcome: 'pass' | 'good' | 'fail'): void {
     if (resolvedRef.current) return
     resolvedRef.current = true
     submit(outcome)
   }
 
+  function resolveOutcome(hits: Map<string, HitTier>): void {
+    const n = hits.size
+    const allPerfect = n >= items.length && items.every((c) => hits.get(c.key) === 'perfect')
+    if (allPerfect) finish('pass')
+    else if (n >= need) finish('good')
+    else finish('fail')
+  }
+
   useEffect(() => {
-    // 引擎已管超时（Player 到时 submit(undefined)→fail）时皮肤只响应命中，不双开定时器。
-    const timeout = engineTimeout
-      ? undefined
-      : window.setTimeout(() => finish('fail'), durationMs)
+    if (preview) return
+    resolvedRef.current = false
+    hitRef.current = new Map()
+    if (engineOwnsTimeout) return
+    startRef.current = performance.now()
+    let raf = 0
+    const tick = (): void => {
+      const t = performance.now() - startRef.current
+      setNowMs(t)
+      if (t >= maxEnd && !resolvedRef.current) {
+        resolveOutcome(hitRef.current)
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxEnd, engineOwnsTimeout, preview])
+
+  function hitCue(key: string, tAbs: number): void {
+    if (preview || resolvedRef.current) return
+    if (engineOwnsTimeout) {
+      finish('pass')
+      return
+    }
+    const c = items.find((x) => x.key === key)
+    if (!c || hitRef.current.has(key)) return
+    const tier = classifyHit(tAbs, c)
+    if (!tier) return
+    hitRef.current.set(key, tier)
+    if (hitRef.current.size >= items.length) resolveOutcome(hitRef.current)
+    setNowMs(tAbs - baseAbs)
+  }
+
+  useEffect(() => {
+    if (preview) return
     function onKeyDown(e: KeyboardEvent): void {
       if (!keyOk()) return
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault()
+      if (e.key !== ' ' && e.key !== 'Enter') return
+      e.preventDefault()
+      if (engineOwnsTimeout) {
         finish('pass')
+        return
       }
+      const tRel = performance.now() - startRef.current
+      const tAbs = baseAbs + tRel
+      const c = items.find((x) => {
+        if (hitRef.current.has(x.key)) return false
+        return classifyHit(tAbs, x) != null
+      })
+      if (c) hitCue(c.key, tAbs)
     }
     window.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      if (timeout !== undefined) window.clearTimeout(timeout)
-      window.removeEventListener('keydown', onKeyDown, true)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durationMs, engineTimeout])
+  }, [items, engineOwnsTimeout, preview, perfectMs, baseAbs])
 
-  const anchorStyle = {
-    ['--pvn-opt-x' as string]: `${anchorX * 100}%`,
-    ['--pvn-opt-y' as string]: `${anchorY * 100}%`,
-  }
+  const t = preview ? (previewTimeMs ?? 0) : 0
   return (
-    <div className="pvn-opts pvn-opts--kou pvn-opts--anchored show" style={anchorStyle} aria-label="叩 QTE">
-      <button type="button" className="pvn-opt pvn-opt--kou" aria-label={passHint} onClick={() => finish('pass')}>
-        <span className="pvn-kou-orn" aria-hidden="true">
-          <i className="pvn-kou-dot" />
-          <i className="pvn-kou-diamond" />
-          <i className="pvn-kou-dot" />
-        </span>
-        <span className="pvn-kou-glyph">{glyph}</span>
-        <span className="pvn-kou-hint" aria-hidden="true">
-          <i className="pvn-kou-space" />
-        </span>
-      </button>
+    <div className={`pvn-opts pvn-opts--kou pvn-opts--anchored show${previewFreezeClass(preview)}`} aria-label="叩 QTE">
+      {items.map((c) => {
+        const hit = hitRef.current.has(c.key)
+        const active = preview
+          ? t >= c.absAppear && t <= c.absEnd
+          : engineOwnsTimeout
+            ? !hit
+            : nowMs >= c.appear && nowMs <= c.end && !hit
+        if (!active) return null
+        const anchorStyle: Record<string, string> = {
+          ['--pvn-opt-x']: `${c.x * 100}%`,
+          ['--pvn-opt-y']: `${c.y * 100}%`,
+        }
+        if (preview) Object.assign(anchorStyle, previewTStyle(t - c.absAppear))
+        return (
+          <button
+            key={c.key}
+            type="button"
+            className="pvn-opt pvn-opt--kou"
+            style={anchorStyle as CSSProperties}
+            aria-label={passHint}
+            onClick={() => hitCue(c.key, preview ? t : baseAbs + (performance.now() - startRef.current))}
+          >
+            <span className="pvn-kou-orn" aria-hidden="true">
+              <i className="pvn-kou-dot" />
+              <i className="pvn-kou-diamond" />
+              <i className="pvn-kou-dot" />
+            </span>
+            <span className="pvn-kou-glyph">{glyph}</span>
+            <span className="pvn-kou-hint" aria-hidden="true">
+              <i className="pvn-kou-space" />
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -87,6 +236,12 @@ export function InkKouLayer({ interaction, submit }: InteractionProps) {
 const KOU_CSS = `
 .pvn-opts--kou{position:absolute;inset:0;z-index:6;pointer-events:none;}
 .pvn-opts--kou.show{pointer-events:auto;}
+.pvn-opts--kou.is-frozen{pointer-events:none!important;}
+.pvn-opts--kou.is-frozen .pvn-kou-orn,.pvn-opts--kou.is-frozen .pvn-kou-glyph,.pvn-opts--kou.is-frozen .pvn-kou-hint,.pvn-opts--kou.is-frozen .pvn-kou-space{animation-play-state:paused;}
+.pvn-opts--kou.is-frozen .pvn-kou-orn{animation-delay:calc(0s - var(--preview-t,0ms));}
+.pvn-opts--kou.is-frozen .pvn-kou-glyph{animation-delay:calc(0.12s - var(--preview-t,0ms));}
+.pvn-opts--kou.is-frozen .pvn-kou-hint{animation-delay:calc(0.38s - var(--preview-t,0ms));}
+.pvn-opts--kou.is-frozen .pvn-kou-space{animation-delay:calc(0s - var(--preview-t,0ms));}
 .pvn-opts--kou.pvn-opts--anchored .pvn-opt--kou{position:absolute;left:var(--pvn-opt-x,58%);top:var(--pvn-opt-y,39%);transform:translate(-50%,-86%);}
 .pvn-opts--kou.pvn-opts--anchored .pvn-opt--kou:hover{transform:translate(-50%,calc(-86% - 2px)) scale(1.03);}
 .pvn-opt--kou{border:none;background:none;cursor:pointer;padding:0;display:flex;flex-direction:column;align-items:center;gap:2px;color:#f8f4ec;}

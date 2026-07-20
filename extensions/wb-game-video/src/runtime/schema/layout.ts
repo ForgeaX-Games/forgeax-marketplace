@@ -1,5 +1,5 @@
 /**
- * Layout → CSS（绝对定位）。overlay 内组件 / 挂载相对视频等共用。
+ * Layout → CSS（绝对定位）。overlay 挂载 / 子组件 / HUD 皮肤共用。
  */
 import type { CSSProperties } from 'react'
 import type { Layout, LayoutValue } from './node-config-schema'
@@ -8,6 +8,106 @@ import type { Layout, LayoutValue } from './node-config-schema'
 export function layoutValueToCss(v: LayoutValue): string {
   if (typeof v === 'number') return `${v * 100}%`
   return v
+}
+
+/** 是否配置了显式盒尺寸（宽/高或双锚点撑满）。 */
+export function layoutHasExplicitSize(layout: Layout | undefined): boolean {
+  if (!layout) return false
+  return (
+    layout.width != null ||
+    layout.height != null ||
+    (layout.left != null && layout.right != null) ||
+    (layout.top != null && layout.bottom != null)
+  )
+}
+
+/** layout 是否实质为空（{} 或全 undefined）。 */
+export function layoutIsEffectivelyEmpty(layout: Layout | undefined): boolean {
+  if (!layout) return true
+  return (
+    layout.top == null &&
+    layout.right == null &&
+    layout.bottom == null &&
+    layout.left == null &&
+    layout.width == null &&
+    layout.height == null &&
+    layout.translateX == null &&
+    layout.translateY == null &&
+    layout.zIndex == null
+  )
+}
+
+/** 挂载级外包盒：相对视频舞台；无显式尺寸时 width/height = fit-content（自适应内容）。 */
+export function mountWrapStyle(layout?: Layout): CSSProperties {
+  const style: CSSProperties = { position: 'absolute', pointerEvents: 'none' }
+  if (!layout || layoutIsEffectivelyEmpty(layout)) {
+    return { ...style, left: 0, top: 0, width: 'fit-content', height: 'fit-content' }
+  }
+  if (layout.top != null) style.top = layoutValueToCss(layout.top)
+  if (layout.right != null) style.right = layoutValueToCss(layout.right)
+  if (layout.bottom != null) style.bottom = layoutValueToCss(layout.bottom)
+  if (layout.left != null) style.left = layoutValueToCss(layout.left)
+  if (layout.zIndex != null) style.zIndex = layout.zIndex
+  const tx = layout.translateX != null ? layoutValueToCss(layout.translateX) : null
+  const ty = layout.translateY != null ? layoutValueToCss(layout.translateY) : null
+  if (tx != null || ty != null) {
+    style.transform = `translate(${tx ?? '0'}, ${ty ?? '0'})`
+  }
+
+  const hasSize = layoutHasExplicitSize(layout)
+  if (hasSize) {
+    if (layout.width != null) style.width = layoutValueToCss(layout.width)
+    if (layout.height != null) style.height = layoutValueToCss(layout.height)
+    if (layout.left != null && layout.right != null && layout.width == null) {
+      style.left = layoutValueToCss(layout.left)
+      style.right = layoutValueToCss(layout.right)
+    }
+    if (layout.top != null && layout.bottom != null && layout.height == null) {
+      style.top = layoutValueToCss(layout.top)
+      style.bottom = layoutValueToCss(layout.bottom)
+    }
+    if (layout.width != null && layout.height == null && !(layout.top != null && layout.bottom != null)) {
+      style.height = 'fit-content'
+    }
+    if (layout.height != null && layout.width == null && !(layout.left != null && layout.right != null)) {
+      style.width = 'fit-content'
+    }
+    return style
+  }
+
+  style.width = 'fit-content'
+  style.height = 'fit-content'
+  return style
+}
+
+/**
+ * 子组件级外包盒：相对挂载盒。
+ * - 挂载有显式尺寸、子项无 layout → 默认左上角 (0,0)。
+ * - 挂载自适应、子项无 layout → 流式排布（单组件时挂载=组件大小）。
+ */
+export function childWrapStyle(childLayout: Layout | undefined, mountHasSize: boolean): CSSProperties {
+  const hasChildPos =
+    childLayout != null &&
+    (childLayout.left != null ||
+      childLayout.right != null ||
+      childLayout.top != null ||
+      childLayout.bottom != null ||
+      childLayout.width != null ||
+      childLayout.height != null ||
+      childLayout.translateX != null ||
+      childLayout.translateY != null)
+  if (hasChildPos && childLayout) {
+    return { ...layoutToCss(childLayout), pointerEvents: 'auto' }
+  }
+  if (mountHasSize) {
+    return { position: 'absolute', left: 0, top: 0, pointerEvents: 'auto' }
+  }
+  return { pointerEvents: 'auto' }
+}
+
+/** @deprecated 用 mountWrapStyle / childWrapStyle */
+export function layoutWrapStyle(layout: Layout, pointerEvents: 'auto' | 'none' = 'auto'): CSSProperties {
+  return { ...mountWrapStyle(layout), pointerEvents }
 }
 
 /** 转成可直接挂到绝对定位节点上的 style。无 layout 时仅 `position:absolute`。 */
