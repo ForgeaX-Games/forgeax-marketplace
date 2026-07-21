@@ -34,11 +34,13 @@ import {
   aabbAabbDistance,
   aabbOverlapDepth,
   addVec,
+  buildJointMotionEdges,
   computeWorldTransforms,
   IDENTITY_XFORM,
   isGeometry,
   localAabbFromPart,
   mat3Vec3,
+  partsMoveRelativeToEachOther,
   pointAabbDistance,
   readVec3,
   transformAabbByMatOrigin,
@@ -102,6 +104,7 @@ const MESH_BACKED_OPS: ReadonlySet<string> = new Set([
   'pipe',
   'sweep',
   'section_loft',
+  'rock',
 ]);
 
 /** 单输入变换 op：解析布尔操作数 / profile 消费链时需要穿透。 */
@@ -183,7 +186,9 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
   // ════════════════════════════════════════════════════════════════════
   const partIds = parts.map(p => p.id);
   const islands = countIslands(partIds, joints);
-  if (parts.length > 1 && islands > 1) {
+  // 无 joint 的纯摆放场景（PART C）：每个 part 各自是根，islands>1 是预期行为，
+  // auto-stitch 会缝成单根树 —— 不算缺陷，也不应 fail valid。
+  if (joints.length > 0 && parts.length > 1 && islands > 1) {
     const components = listComponents(partIds, joints);
     issues.push(
       `islands: ${islands} disconnected component(s) — URDF requires a single root tree. ` +
@@ -289,10 +294,17 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
 
   // ════════════════════════════════════════════════════════════════════
   // ④ 兄弟 part rest-pose AABB 重叠（sibling pair-wise interpenetration）
+  //
+  //    重叠**一律不 fail valid** —— 低模里少量 AABB 交叠（墙角/T 形接头/嵌框/门扇落位/
+  //    楼梯井…）很常见，agent 不应为了消 overlap 去硬挪 part 或摘 joint（那会制造
+  //    真正该修的孤立 part）。信号分级：
+  //      · 刚性子树内交叠 → note（纯信息，默认忽略）
+  //      · 运动学路径上有非 fixed joint 的交叠 → warning（视情况审查，仍不 fail valid）
+  //    用 `allow_pairs` 白名单或 `g_metrics max_penetration/overlap_ratio` 辅助判断。
   // ════════════════════════════════════════════════════════════════════
   let overlapCount = 0;
   if (checkOverlaps) {
-    const hasMovingJoint = joints.some(j => (readString(j.args.type) ?? 'fixed') !== 'fixed');
+    const motionEdges = buildJointMotionEdges(joints);
     const ids = Array.from(partAabbs.keys()).sort();
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
@@ -303,15 +315,24 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
           if (pairAllowed(ids[i], ids[j], allowPairs)) continue;
           overlapCount++;
           const minDepth = Math.min(depth[0], depth[1], depth[2]);
+          const movesRelative = partsMoveRelativeToEachOther(ids[i], ids[j], motionEdges);
           const message =
             `aabb_overlap: parts "${ids[i]}" and "${ids[j]}" interpenetrate in rest pose ` +
             `(min depth=${fmt(minDepth)}m, tol=${fmt(overlapTol)}m). ` +
-            `note: AABB-only check, conservative for rotated meshes.`;
-          if (hasMovingJoint) {
-            issues.push(message);
-          } else {
-            overlapAdvisories.push({ code: 'aabb_overlap', severity: 'warning', ids: [ids[i], ids[j]], message });
-          }
+            (movesRelative
+              ? `these parts move relative to each other through a non-fixed joint — review if this is a real ` +
+                `collision risk or an intentional rest pose (e.g. door leaf parked in frame). do NOT detach or ` +
+                `reposition parts just to silence this — that creates isolated parts. note: AABB-only check, ` +
+                `conservative for rotated meshes.`
+              : `rigidly linked (fixed joints only) — likely a benign low-poly overlap (corner/T-joint/embedded ` +
+                `frame/stair well), not a defect. whitelist with allow_pairs if intentional, or check ` +
+                `g_metrics max_penetration/overlap_ratio if unsure. note: AABB-only check, conservative for rotated meshes.`);
+          overlapAdvisories.push({
+            code: 'aabb_overlap',
+            severity: movesRelative ? 'warning' : 'note',
+            ids: [ids[i], ids[j]],
+            message,
+          });
         }
       }
     }
@@ -355,17 +376,14 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
   }
 
   // ⑥ 悬空件：有 joint 时，未被任何 joint 连接到根树的 part（无关节路径到根）
+  //    → 致命 error：URDF 只渲染根连通树，这些 part 会被静默丢弃。这才是关节要修的硬伤。
   const floating = findFloatingLinks(parts, joints);
   if (floating.length > 0) {
-    advisories.push({
-      code: 'floating_link',
-      severity: 'warning',
-      ids: floating,
-      message:
-        `${floating.length} part(s) have no joint path to the root: [${floating.join(', ')}]. ` +
+    issues.push(
+      `floating_link: ${floating.length} part(s) have no joint path to the root: [${floating.join(', ')}]. ` +
         `URDF only renders the root-connected tree, so these will be dropped at runtime — ` +
-        `attach them with g_joint_* (fixed/revolute/...).`,
-    });
+        `attach them with g_joint_* (fixed/revolute/...). do NOT "fix" overlap warnings by detaching parts.`,
+    );
   }
 
   // ⑦ 孤立 profile：profile_* 未被任何下游消费（extrude/loft/lathe/part/...）
@@ -406,7 +424,7 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
   }
 
   // ⑨ mesh-backed 布尔误用：union/difference/intersection 操作数（穿透 transform）
-  //    最终落到 pipe/sweep/section_loft → baker 会抛 "boolean on mesh-backed" 错。
+  //    最终落到 pipe/sweep/section_loft/rock → baker 会抛 "boolean on mesh-backed" 错。
   const meshBoolMisuse: string[] = [];
   for (const s of geom.statements) {
     if (!BOOLEAN_OPS.has(s.op)) continue;
@@ -423,7 +441,7 @@ export function gGeometryQc(input: Record<string, unknown>): Record<string, unkn
       code: 'mesh_boolean_misuse',
       severity: 'error',
       message:
-        `boolean op operand(s) resolve to mesh-backed pipe/sweep/section_loft: [${meshBoolMisuse.join(', ')}]. ` +
+        `boolean op operand(s) resolve to mesh-backed pipe/sweep/section_loft/rock: [${meshBoolMisuse.join(', ')}]. ` +
         `union/difference/intersection cannot consume triangle meshes and the baker will throw. ` +
         `build the boolean from solids (box/cylinder/sphere/extrude/loft/revolve) instead.`,
     });
@@ -470,40 +488,26 @@ function collectAllRefs(statements: readonly Statement[]): Set<string> {
 }
 
 /**
- * 悬空件：选出根（不是任何 joint.child 的 part），从根集合沿 joint 边 BFS，
- * 返回不可达的 part id。无 joint 时不报（单件/纯 shape 场景由其它信号覆盖）。
+ * 悬空件：有 joint 时，从未出现在任何 joint parent/child 里的 part。
+ * URDF 只渲染 joint 连通树里的 link —— 完全没挂 joint 的 part 会被静默丢弃。
+ * （与 islands 不同：islands 是 joint 图的多连通分量；floating 是"压根没接线"的 part。）
  */
 function findFloatingLinks(parts: readonly Statement[], joints: readonly Statement[]): string[] {
   if (parts.length <= 1 || joints.length === 0) return [];
   const partIds = new Set(parts.map(p => p.id));
-  const children = new Set<string>();
-  const adj = new Map<string, string[]>();
-  for (const id of partIds) adj.set(id, []);
+  const linked = new Set<string>();
   for (const j of joints) {
     const p = j.args.parent;
     const c = j.args.child;
-    if (!p || p.kind !== 'ref' || !c || c.kind !== 'ref') continue;
-    if (!partIds.has(p.name) || !partIds.has(c.name)) continue;
-    adj.get(p.name)!.push(c.name);
-    adj.get(c.name)!.push(p.name);
-    children.add(c.name);
+    if (p?.kind === 'ref' && partIds.has(p.name)) linked.add(p.name);
+    if (c?.kind === 'ref' && partIds.has(c.name)) linked.add(c.name);
   }
-  const roots = [...partIds].filter(id => !children.has(id));
-  const seen = new Set<string>();
-  const queue = roots.length > 0 ? [...roots] : [parts[0].id];
-  for (const r of queue) seen.add(r);
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    for (const nb of adj.get(cur) ?? []) {
-      if (!seen.has(nb)) { seen.add(nb); queue.push(nb); }
-    }
-  }
-  return [...partIds].filter(id => !seen.has(id)).sort();
+  return [...partIds].filter(id => !linked.has(id)).sort();
 }
 
 /**
  * 从一个 ref name 出发，穿透单输入 transform op，判断其几何源是否 mesh-backed
- * (pipe/sweep/section_loft)。是 → 返回该源的 "id(op)"；否则 undefined。
+ * (pipe/sweep/section_loft/rock)。是 → 返回该源的 "id(op)"；否则 undefined。
  */
 function resolveMeshBackedSource(
   name: string,

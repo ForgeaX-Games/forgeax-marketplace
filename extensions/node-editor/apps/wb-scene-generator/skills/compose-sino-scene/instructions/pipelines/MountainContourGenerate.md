@@ -1,7 +1,7 @@
 # 地形等高 - MountainContourGenerate（等高线山头生成）
 
 > 权威详情：[../../../../batteries/templates/structures/topographic/MountainContourGenerate/README.md](../../../../batteries/templates/structures/topographic/MountainContourGenerate/README.md)
-> templateId：`MountainContourGenerate`（库 id `group_mountain_contour_generate`）。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`MountainContourGenerate`（库 id `group_mountain_contour_generate`）。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 > 核心算法为模板组私有实现（顶层看不到、不可摆放）；整组走 `instantiateTemplate` 落地即可。
 
 ## 1. 管线电池的基本介绍
@@ -49,7 +49,7 @@
 
 ## 3. 管线电池的总输出端口
 
-> ⚠️ **连线用 `portName`，不是 customLabelEn。** 本模板与 LakeRegions 等同源五件套，主/Rest 的 portName 与语义标签交叉编号。
+> ⚠️ **主/Rest 的 portName 编号是交叉的**（`out_2`=Mountain 主产物，`out_1`=Rest——跟大多数模板"out_1=主产物、out_2=Rest"的常见顺序相反）。2026-07-15 起 `applyBatch` 的 `connect` 支持直接按语义 `{"port":{"label":"Mountain"}}` / `{"port":{"label":"Rest"}}` 寻址——**优先用这个写法**，正好绕开这里编号交叉的坑，不用先查表再心算映射成 `out_1`/`out_2`。只有确实需要写 portName（比如离线核对、写文档）时才照下表用 `out_2`/`out_1`，别凭"其他模板都是 out_1=主产物"的记忆直接套过来。
 
 | portName | customLabelEn | 类型 | 说明 | 典型去向 |
 |----------|---------------|------|------|---------|
@@ -73,7 +73,7 @@
 - 在父区域 footprint 内生成**互斥高度层**子节点，每层独立命名（`NamePrefix`+序号），**共用同一 `AssetName` tile**（由 Mira 提供贴图）。
 - **无坡道**：高差只应加在已连通的关键内容之外的剩余区域；`MaxElevationLayers` **建议 ≤ 2**。
 - 高度场/分层算法均为模板组私有实现，随 `instantiateTemplate` 间接使用——顶层无需也不可摆放。
-- 典型串联：建筑 → 道路 → **`PathConnection*.out_2`(Rest) → `MountainContourGenerate.in_0`** → `out_1`(Rest) → Hill 或装饰；`out_2`(Mountain) → `tree_merge`。
+- 典型串联：建筑 → 道路 → **`PathConnection*.out_2`(Rest) → `MountainContourGenerate.in_0`** → `out_1`(Rest) → Hill 或装饰；`out_2`(Mountain，即 `{"label":"Mountain"}`）→ 用 `appendMergeItem` 接入根 `aw_m0_merge`（不要手动算 `item_N`/`portCount`）。
 
 ## 6. instantiateTemplate 示例
 

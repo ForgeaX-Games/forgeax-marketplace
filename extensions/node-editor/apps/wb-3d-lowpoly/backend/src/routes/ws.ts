@@ -52,9 +52,18 @@ async function bind(entry: ClientEntry): Promise<void> {
   }
 
   for (const projectId of projectIds) {
-    const rt = await getRuntimeForProject(projectId)
-    const unsub = rt.subscriptions.subscribe(rt.config.pipelineId, entry.channels, handler)
-    entry.unsubs.push(unsub)
+    // A viewing/locked project can be deleted while a client stays subscribed
+    // (stale viewing pointer, closed project, etc). getRuntimeForProject throws
+    // "project not found" in that case; since bind() is invoked as `void bind()`
+    // below, that rejection would surface as an unhandled rejection and crash
+    // the whole backend. Skip the stale id instead of taking the process down.
+    try {
+      const rt = await getRuntimeForProject(projectId)
+      const unsub = rt.subscriptions.subscribe(rt.config.pipelineId, entry.channels, handler)
+      entry.unsubs.push(unsub)
+    } catch {
+      /* stale/deleted project still in subscribed set — skip */
+    }
   }
 }
 
@@ -73,7 +82,9 @@ export async function registerWsRoutes(app: FastifyInstance): Promise<void> {
       try { msg = JSON.parse(raw.toString()) } catch { return }
       if (msg.action === 'subscribe') {
         entry.channels = (msg.channels ?? ['graph', 'execution', 'asset']) as RuntimeChannel[]
-        void bind(entry)
+        void bind(entry).catch(() => {
+          /* never let a subscribe bind failure crash the backend */
+        })
       }
     })
     socket.on('close', () => {

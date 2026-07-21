@@ -29,11 +29,24 @@ export interface BakeResultShape {
   blobSha256?: string
 }
 
+export interface ColoredAssemblyPartTextureInput {
+  imageBytes: Buffer
+  mime: string
+  repeatU?: number
+  repeatV?: number
+  offsetU?: number
+  offsetV?: number
+  rotation?: number
+}
+
 export interface ColoredAssemblyPartInput {
   shapeId: string
   rgba: [number, number, number, number]
   origin?: [number, number, number]
   rpy?: [number, number, number]
+  metalness?: number
+  roughness?: number
+  texture?: ColoredAssemblyPartTextureInput
 }
 
 export interface BakeResultShapeWithBbox extends BakeResultShape {
@@ -67,6 +80,9 @@ function makeLibraryHandle(libRoot: string): BakerLibraryHandle {
     },
     resolveBlobPath(alias, zone) {
       return svc.resolveBlobPath(alias, zone)
+    },
+    resolveBlobPathBySha(sha256) {
+      return svc.resolveBlobPathBySha(sha256)
     },
     async importFromBuffer(buffer, filename, alias, opts) {
       const record = await svc.importFromBuffer(buffer, filename, alias, opts)

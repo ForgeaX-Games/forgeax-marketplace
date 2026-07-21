@@ -77,508 +77,6 @@
   },
   "ui": {
     "overlays": {
-      "node:n_door": {
-        "id": "node:n_door",
-        "children": [
-          {
-            "id": "kou",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "qteKind": "parry",
-              "windowMs": 200,
-              "glyph": "叩",
-              "timeoutMs": 200,
-              "events": [
-                {
-                  "id": "pass",
-                  "label": "叩中"
-                },
-                {
-                  "id": "fail",
-                  "label": "错过"
-                }
-              ],
-              "cues": [
-                {
-                  "id": "kou-0",
-                  "appearAt": 0,
-                  "targetAt": 100,
-                  "endAt": 200
-                }
-              ]
-            },
-            "component": "inkKou"
-          }
-        ]
-      },
-      "node:n_soul": {
-        "id": "node:n_soul",
-        "children": [
-          {
-            "id": "soul-line",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "speaker": "小魂",
-              "text": "……你也是来渡河的吗？",
-              "color": "#ffd54a"
-            },
-            "component": "dialogue"
-          }
-        ]
-      },
-      "node:n_river": {
-        "id": "node:n_river",
-        "children": [
-          {
-            "id": "n_river-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:n_land": {
-        "id": "node:n_land",
-        "children": [
-          {
-            "id": "n_land-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:n_tea": {
-        "id": "node:n_tea",
-        "children": [
-          {
-            "id": "n_tea-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:n_nodrink": {
-        "id": "node:n_nodrink",
-        "children": [
-          {
-            "id": "n_nodrink-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:n_follow": {
-        "id": "node:n_follow",
-        "children": [
-          {
-            "id": "n_follow-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:n_nofollow": {
-        "id": "node:n_nofollow",
-        "children": [
-          {
-            "id": "n_nofollow-c",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "timeoutMs": 8000,
-              "events": [
-                {
-                  "id": "ying",
-                  "label": "應"
-                },
-                {
-                  "id": "mo",
-                  "label": "默"
-                }
-              ],
-              "defaultEvent": "mo"
-            },
-            "component": "inkYingMo"
-          }
-        ]
-      },
-      "node:enter": {
-        "id": "node:enter",
-        "children": [
-          {
-            "id": "enter-fade",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "durationMs": 700,
-              "style": "fade",
-              "color": "#000"
-            },
-            "component": "transition"
-          }
-        ]
-      },
-      "node:wait": {
-        "id": "node:wait",
-        "children": [
-          {
-            "id": "skill",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "events": [
-                {
-                  "id": "light",
-                  "label": "轻攻击"
-                },
-                {
-                  "id": "heavy",
-                  "label": "重攻击（气≥2）",
-                  "condition": {
-                    "all": [
-                      {
-                        "type": "var",
-                        "varId": "qi",
-                        "op": "gte",
-                        "value": 2
-                      }
-                    ]
-                  }
-                },
-                {
-                  "id": "medit",
-                  "label": "冥想"
-                },
-                {
-                  "id": "ult",
-                  "label": "灭世（气≥5·理智≥4）",
-                  "condition": {
-                    "all": [
-                      {
-                        "type": "var",
-                        "varId": "qi",
-                        "op": "gte",
-                        "value": 5
-                      },
-                      {
-                        "type": "var",
-                        "varId": "lizhi",
-                        "op": "gte",
-                        "value": 4
-                      }
-                    ]
-                  }
-                }
-              ]
-            },
-            "component": "battleSkillBar"
-          }
-        ]
-      },
-      "node:pu": {
-        "id": "node:pu",
-        "children": [
-          {
-            "id": "pu-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 1000
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-player.attr.attack)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:pu2": {
-        "id": "node:pu2",
-        "children": [
-          {
-            "id": "pu2-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 600
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:zhong": {
-        "id": "node:zhong",
-        "children": [
-          {
-            "id": "zhong-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 1700
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:z2": {
-        "id": "node:z2",
-        "children": [
-          {
-            "id": "z2-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 2500
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:fuzhu": {
-        "id": "node:fuzhu",
-        "children": [
-          {
-            "id": "fuzhu-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 2000
-            },
-            "inputs": {
-              "text": "+30",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#5fbf7f"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:ult": {
-        "id": "node:ult",
-        "children": [
-          {
-            "id": "ult-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 7000
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-player.attr.attack * 3)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:tele": {
-        "id": "node:tele",
-        "children": [
-          {
-            "id": "parry",
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "qteKind": "parry",
-              "durationMs": 2600,
-              "events": [
-                {
-                  "id": "pass",
-                  "label": "受击防反"
-                },
-                {
-                  "id": "good",
-                  "label": "受击闪避"
-                },
-                {
-                  "id": "fail",
-                  "label": "受击"
-                }
-              ],
-              "defaultEvent": "fail",
-              "cues": [
-                {
-                  "id": "parry-0",
-                  "appearAt": 0,
-                  "targetAt": 1300,
-                  "endAt": 2600
-                }
-              ]
-            },
-            "component": "battleParry"
-          }
-        ]
-      },
-      "node:block": {
-        "id": "node:block",
-        "children": [
-          {
-            "id": "block-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 1800
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 21)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:dodgeP": {
-        "id": "node:dodgeP",
-        "children": [
-          {
-            "id": "dodgeP-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 2000
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ffd54a",
-              "expr": "-(entity.ent-boss.attr.attack - entity.ent-player.attr.defense / 4)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
-      "node:hurt": {
-        "id": "node:hurt",
-        "children": [
-          {
-            "id": "hurt-fx",
-            "trigger": {
-              "when": "at",
-              "ms": 10
-            },
-            "inputs": {
-              "text": "{v}",
-              "x": 0.5,
-              "y": 0.42,
-              "color": "#ff5a5a",
-              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 45)"
-            },
-            "component": "floatText"
-          }
-        ]
-      },
       "battleHud": {
         "id": "battleHud",
         "title": "战斗 HUD（双血条）",
@@ -592,6 +90,12 @@
             "inputs": {
               "bind": "ent-player",
               "label": "空藏"
+            },
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
             }
           },
           {
@@ -603,6 +107,12 @@
             "inputs": {
               "bind": "ent-boss",
               "label": "小怪"
+            },
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
             }
           }
         ]
@@ -666,31 +176,70 @@
           {
             "id": "bossHp",
             "component": "floatText",
-            "layout": {},
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
             "trigger": {
               "when": "enter"
             },
             "inputs": {
               "x": 0.08,
-              "y": 0.16
+              "y": 0.16,
+              "text": "{v}"
             }
           },
           {
             "id": "heroHp",
             "component": "floatText",
-            "layout": {},
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
             "trigger": {
               "when": "enter"
             },
             "inputs": {
               "x": 0.92,
-              "y": 0.16
+              "y": 0.16,
+              "text": "{v}"
             }
           }
         ]
       },
-      "node:breathe": {
-        "id": "node:breathe",
+      "block": {
+        "id": "block",
+        "title": "格挡飘字",
+        "children": [
+          {
+            "id": "block-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1800
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 21)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "breathe": {
+        "id": "breathe",
         "title": "调息（方案B：非阻塞改气力）",
         "children": [
           {
@@ -707,6 +256,643 @@
             },
             "inputs": {
               "label": "调息 +2气"
+            }
+          }
+        ]
+      },
+      "dodgeP": {
+        "id": "dodgeP",
+        "title": "闪避飘字",
+        "children": [
+          {
+            "id": "dodgeP-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2000
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-boss.attr.attack - entity.ent-player.attr.defense / 4)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "enter": {
+        "id": "enter",
+        "title": "入场转场",
+        "children": [
+          {
+            "id": "enter-fade",
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "durationMs": 700,
+              "style": "fade",
+              "color": "#000"
+            },
+            "component": "transition",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "fuzhu": {
+        "id": "fuzhu",
+        "title": "辅助回血飘字",
+        "children": [
+          {
+            "id": "fuzhu-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2000
+            },
+            "inputs": {
+              "text": "+30",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#5fbf7f"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "hurt": {
+        "id": "hurt",
+        "title": "受击飘字",
+        "children": [
+          {
+            "id": "hurt-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 10
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ff5a5a",
+              "expr": "-(entity.ent-boss.attr.attack + var.yezhang * 45)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_door": {
+        "id": "n_door",
+        "title": "叩门 QTE",
+        "children": [
+          {
+            "id": "kou",
+            "trigger": {
+              "when": "at",
+              "ms": 9000
+            },
+            "inputs": {
+              "glyph": "叩",
+              "events": [
+                {
+                  "id": "pass",
+                  "label": "叩中"
+                },
+                {
+                  "id": "fail",
+                  "label": "错过"
+                }
+              ],
+              "cues": [
+                {
+                  "id": "kou-0",
+                  "x": 0.58,
+                  "y": 0.39,
+                  "appearAt": 0,
+                  "targetAt": 1000,
+                  "endAt": 6100
+                }
+              ],
+              "timeoutMs": 6100,
+              "defaultEvent": "fail"
+            },
+            "component": "inkKou",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_follow": {
+        "id": "n_follow",
+        "title": "跟随 · 應默",
+        "children": [
+          {
+            "id": "n_follow-c",
+            "trigger": {
+              "when": "at",
+              "ms": 12093
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_land": {
+        "id": "n_land",
+        "title": "上岸 · 應默",
+        "children": [
+          {
+            "id": "n_land-c",
+            "trigger": {
+              "when": "at",
+              "ms": 13200
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_nodrink": {
+        "id": "n_nodrink",
+        "title": "不饮 · 應默",
+        "children": [
+          {
+            "id": "n_nodrink-c",
+            "trigger": {
+              "when": "at",
+              "ms": 12093
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_nofollow": {
+        "id": "n_nofollow",
+        "title": "不跟随 · 應默",
+        "children": [
+          {
+            "id": "n_nofollow-c",
+            "trigger": {
+              "when": "at",
+              "ms": 12093
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_river": {
+        "id": "n_river",
+        "title": "渡河 · 應默",
+        "children": [
+          {
+            "id": "n_river-c",
+            "trigger": {
+              "when": "at",
+              "ms": 12069
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_soul": {
+        "id": "n_soul",
+        "title": "小魂对白",
+        "children": [
+          {
+            "id": "soul-line",
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "speaker": "小魂",
+              "text": "……你也是来渡河的吗？",
+              "color": "#ffd54a"
+            },
+            "component": "dialogue",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "n_tea": {
+        "id": "n_tea",
+        "title": "饮茶 · 應默",
+        "children": [
+          {
+            "id": "n_tea-c",
+            "trigger": {
+              "when": "at",
+              "ms": 12093
+            },
+            "inputs": {
+              "timeoutMs": 8000,
+              "events": [
+                {
+                  "id": "ying",
+                  "label": "應"
+                },
+                {
+                  "id": "mo",
+                  "label": "默"
+                }
+              ],
+              "defaultEvent": "mo",
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "inkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "pu": {
+        "id": "pu",
+        "title": "普攻飘字",
+        "children": [
+          {
+            "id": "pu-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1000
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "pu2": {
+        "id": "pu2",
+        "title": "普攻2飘字",
+        "children": [
+          {
+            "id": "pu2-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 600
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "tele": {
+        "id": "tele",
+        "title": "受击防反 QTE",
+        "children": [
+          {
+            "id": "parry",
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "qteKind": "parry",
+              "durationMs": 2600,
+              "events": [
+                {
+                  "id": "pass",
+                  "label": "受击防反"
+                },
+                {
+                  "id": "good",
+                  "label": "受击闪避"
+                },
+                {
+                  "id": "fail",
+                  "label": "受击"
+                }
+              ],
+              "defaultEvent": "fail",
+              "cues": [
+                {
+                  "id": "parry-0",
+                  "appearAt": 0,
+                  "targetAt": 1300,
+                  "endAt": 2600
+                }
+              ]
+            },
+            "component": "battleParry",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "ult": {
+        "id": "ult",
+        "title": "灭世飘字",
+        "children": [
+          {
+            "id": "ult-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 7000
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 3)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "wait": {
+        "id": "wait",
+        "title": "技能条（轻/重/冥想/灭世）",
+        "children": [
+          {
+            "id": "skill",
+            "trigger": {
+              "when": "enter"
+            },
+            "inputs": {
+              "events": [
+                {
+                  "id": "light",
+                  "label": "轻攻击"
+                },
+                {
+                  "id": "heavy",
+                  "label": "重攻击",
+                  "condition": {
+                    "all": [
+                      {
+                        "type": "var",
+                        "varId": "qi",
+                        "op": "gte",
+                        "value": 2
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "medit",
+                  "label": "冥想"
+                },
+                {
+                  "id": "ult",
+                  "label": "灭世",
+                  "condition": {
+                    "all": [
+                      {
+                        "type": "var",
+                        "varId": "qi",
+                        "op": "gte",
+                        "value": 5
+                      },
+                      {
+                        "type": "var",
+                        "varId": "lizhi",
+                        "op": "gte",
+                        "value": 4
+                      }
+                    ]
+                  }
+                }
+              ],
+              "x": 0.5,
+              "y": 0.88
+            },
+            "component": "battleSkillBar",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "z2": {
+        "id": "z2",
+        "title": "重击2飘字",
+        "children": [
+          {
+            "id": "z2-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 2500
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            }
+          }
+        ]
+      },
+      "zhong": {
+        "id": "zhong",
+        "title": "重击飘字",
+        "children": [
+          {
+            "id": "zhong-fx",
+            "trigger": {
+              "when": "at",
+              "ms": 1700
+            },
+            "inputs": {
+              "text": "{v}",
+              "x": 0.5,
+              "y": 0.42,
+              "color": "#ffd54a",
+              "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
+            },
+            "component": "floatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
             }
           }
         ]
@@ -755,7 +941,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_door",
+              "overlay": "n_door",
               "reactions": [
                 {
                   "when": {
@@ -781,7 +967,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -804,7 +996,13 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_soul"
+              "overlay": "n_soul",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -827,7 +1025,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_river",
+              "overlay": "n_river",
               "reactions": [
                 {
                   "when": {
@@ -853,7 +1051,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -895,7 +1099,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_land",
+              "overlay": "n_land",
               "reactions": [
                 {
                   "when": {
@@ -921,7 +1125,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -982,7 +1192,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_tea",
+              "overlay": "n_tea",
               "reactions": [
                 {
                   "when": {
@@ -1008,7 +1218,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -1032,7 +1248,7 @@
           "reactions": [
             {
               "when": {
-                "type": "complete"
+                "type": "enter"
               },
               "do": [
                 {
@@ -1078,7 +1294,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_nodrink",
+              "overlay": "n_nodrink",
               "reactions": [
                 {
                   "when": {
@@ -1104,7 +1320,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -1127,7 +1349,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_follow",
+              "overlay": "n_follow",
               "reactions": [
                 {
                   "when": {
@@ -1153,7 +1375,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -1214,7 +1442,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "node:n_nofollow",
+              "overlay": "n_nofollow",
               "reactions": [
                 {
                   "when": {
@@ -1240,7 +1468,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -1261,34 +1495,6 @@
             "kind": "VIDEO",
             "ref": "narr-lotus"
           },
-          "reactions": [
-            {
-              "when": {
-                "type": "complete"
-              },
-              "do": [
-                {
-                  "kind": "effect",
-                  "effects": [
-                    {
-                      "id": "lotus-clue",
-                      "kind": "var",
-                      "varId": "lotusClue",
-                      "op": "set",
-                      "value": 1
-                    },
-                    {
-                      "id": "lotus-qi",
-                      "kind": "var",
-                      "varId": "qi",
-                      "op": "add",
-                      "value": 1
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
           "overlayNodes": []
         }
       },
@@ -1311,7 +1517,7 @@
           "reactions": [
             {
               "when": {
-                "type": "complete"
+                "type": "enter"
               },
               "do": [
                 {
@@ -1322,7 +1528,7 @@
                       "kind": "var",
                       "varId": "lotusClue",
                       "op": "set",
-                      "value": 0
+                      "value": 1
                     }
                   ]
                 }
@@ -1343,6 +1549,7 @@
         "outputs": [],
         "data": {
           "name": "进战待机",
+          "durationMs": 3000,
           "media": {
             "kind": "VIDEO",
             "ref": "idle01"
@@ -1350,10 +1557,22 @@
           "mediaPlayMode": "once",
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:enter"
+              "overlay": "enter",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -1455,7 +1674,8 @@
               "layout": {
                 "left": 0,
                 "top": 0,
-                "width": 1
+                "width": 1,
+                "height": 1
               },
               "reactions": [
                 {
@@ -1468,9 +1688,8 @@
                       "kind": "spawn",
                       "from": "readouts/bossHp",
                       "inputs": {
-                        "text": {
-                          "expr": "entity.ent-boss.attr.hp"
-                        }
+                        "text": "{v}",
+                        "expr": "entity.ent-boss.attr.hp"
                       },
                       "ttlMs": 1500
                     }
@@ -1486,9 +1705,8 @@
                       "kind": "spawn",
                       "from": "readouts/heroHp",
                       "inputs": {
-                        "text": {
-                          "expr": "entity.ent-player.attr.hp"
-                        }
+                        "text": "{v}",
+                        "expr": "entity.ent-player.attr.hp"
                       },
                       "ttlMs": 1500
                     }
@@ -1549,7 +1767,8 @@
               "layout": {
                 "left": 0,
                 "top": 0,
-                "width": 1
+                "width": 1,
+                "height": 1
               },
               "reactions": [
                 {
@@ -1562,9 +1781,8 @@
                       "kind": "spawn",
                       "from": "readouts/bossHp",
                       "inputs": {
-                        "text": {
-                          "expr": "entity.ent-boss.attr.hp"
-                        }
+                        "text": "{v}",
+                        "expr": "entity.ent-boss.attr.hp"
                       },
                       "ttlMs": 1500
                     }
@@ -1580,9 +1798,8 @@
                       "kind": "spawn",
                       "from": "readouts/heroHp",
                       "inputs": {
-                        "text": {
-                          "expr": "entity.ent-player.attr.hp"
-                        }
+                        "text": "{v}",
+                        "expr": "entity.ent-player.attr.hp"
                       },
                       "ttlMs": 1500
                     }
@@ -1643,10 +1860,16 @@
           "mediaPlayMode": "loop",
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:wait",
+              "overlay": "wait",
               "reactions": [
                 {
                   "when": {
@@ -1724,32 +1947,13 @@
                     }
                   ]
                 }
-              ]
-            },
-            {
-              "overlay": "node:breathe",
-              "reactions": [
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "A"
-                  },
-                  "do": [
-                    {
-                      "kind": "effect",
-                      "effects": [
-                        {
-                          "id": "breathe-qi",
-                          "kind": "var",
-                          "varId": "qi",
-                          "op": "add",
-                          "value": 2
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -1772,10 +1976,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:pu"
+              "overlay": "pu",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -1823,10 +2039,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:pu2"
+              "overlay": "pu2",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -1874,10 +2102,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:zhong"
+              "overlay": "zhong",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -1925,10 +2165,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:z2"
+              "overlay": "z2",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -1976,10 +2228,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:fuzhu"
+              "overlay": "fuzhu",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -2032,10 +2296,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:ult"
+              "overlay": "ult",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -2083,10 +2359,16 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:tele",
+              "overlay": "tele",
               "reactions": [
                 {
                   "when": {
@@ -2148,7 +2430,13 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -2171,10 +2459,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:block"
+              "overlay": "block",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -2222,10 +2522,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:dodgeP"
+              "overlay": "dodgeP",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -2273,10 +2585,22 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             },
             {
-              "overlay": "node:hurt"
+              "overlay": "hurt",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ],
           "reactions": [
@@ -2324,7 +2648,13 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }
@@ -2347,7 +2677,13 @@
           },
           "overlayNodes": [
             {
-              "overlay": "battleHud"
+              "overlay": "battleHud",
+              "layout": {
+                "left": 0,
+                "top": 0,
+                "width": 1,
+                "height": 1
+              }
             }
           ]
         }

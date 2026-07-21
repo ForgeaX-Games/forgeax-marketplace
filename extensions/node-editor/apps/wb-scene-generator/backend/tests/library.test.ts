@@ -338,6 +338,24 @@ describe('library service (read-only)', () => {
       tileType: 'common_16',
     })
   })
+  it('maps taxonomy junk 瓦片组 / wa_inner to vendored stitch rules', () => {
+    expect(deriveAliasMeta({
+      alias: '[]_[]_[草地]_[]_[]_[中式国风]_[未裁剪]_[瓦片组]_[64]_[]_[]_[]_[].png',
+      anchor_x: null,
+      anchor_y: null,
+      width_px: 64,
+      height_px: 64,
+      geometry_json: null,
+    })).toMatchObject({ tileType: 'common_16' })
+    expect(deriveAliasMeta({
+      alias: '[T地形块-人造结构-墙]_[室内]_[墙体]_[]_[]_[中式国风]_[]_[wa_inner]_[64]_[]_[无]_[0]_[客厅].png',
+      anchor_x: null,
+      anchor_y: null,
+      width_px: 64,
+      height_px: 64,
+      geometry_json: null,
+    })).toMatchObject({ tileType: 'wall_outer_16' })
+  })
   it('exposes a tile asset with rule alias from the type field (f7)', () => {
     const svc = getLibraryService()
     const aliases = svc.listAliasesWithMeta('raw')

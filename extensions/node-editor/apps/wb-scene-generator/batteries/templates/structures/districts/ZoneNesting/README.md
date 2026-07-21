@@ -7,7 +7,7 @@
 
 在**上游剩余空地上侵蚀出一块有机嵌套地块**（district）：消费一块上游空间，用 `zone_nesting`（多层侵蚀 + 闭合样条平滑）把可用区域退格成自然有机轮廓的地块，剩下没被占用的地作为 Rest 继续往下传。
 
-**典型位置：结构/分区层**。通常接在 `PathConnection.out_1`（Non-Path 非道路区域）或上一个结构组的 Rest 之后。
+**典型位置：结构/分区层**。通常接在 `PathConnection*.out_2`（Rest/非道路区域；`out_1` 是 Path 本身）或上一个结构组的 Rest 之后。
 
 内部数据流：`scene → node_explode → rect_grid + voxel_slice`（取占用区 grid）`→ zone_nesting`（侵蚀+样条）`→ grid2node`（转场景节点）`→ add_child`（挂回上游 scene）；Rest = `区域求差(占用区 − 地块)`。
 
@@ -15,7 +15,7 @@
 
 | portName | portType | 语义 | 是否必接 | 怎么喂（来源电池 → 本端口） |
 |---|---|---|---|---|
-| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection.out_1`（Non-Path）或上一组 Rest → `in_0` |
+| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection*.out_2`（Rest；不是 `out_1`）或上一组 Rest → `in_0` |
 | `in_1` | string | DistrictAsset 地块名（=场景节点名 + 资产名） | 建议接 | `text_panel.output` → `in_1` |
 | `in_2` | number | Seed 随机种子 | 建议接 | `seed_control.seed` → `in_2` |
 | `in_3` | number | ErosionStrength 退格程度（>1 按 0~100，默认 20） | 建议接 | `number_const.value` → `in_3` |

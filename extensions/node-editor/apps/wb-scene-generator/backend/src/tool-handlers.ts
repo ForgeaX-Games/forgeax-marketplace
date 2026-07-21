@@ -19,9 +19,9 @@ type ToolCtx = {
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
 
-const PLUGIN_ID = '@forgeax-extension/wb-scene-generator'
+const PLUGIN_ID = '@forgeax-plugin/wb-scene-generator'
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:9557'
-const ASSET2D_PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
+const ASSET2D_PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
 const DEFAULT_ASSET2D_BACKEND_URL = 'http://127.0.0.1:9567'
 
 function objectArgs(args: unknown): Record<string, unknown> {
@@ -241,6 +241,179 @@ function projectPath(projectId: string, suffix: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}${suffix}`
 }
 
+// ── P0-2: applyBatch `connect` by semantic label ───────────────────────────
+//
+// 复盘（2026-07-15 tool 升级方案 P0-2）：`instantiateTemplate` 已经在返回值
+// 的 exposedInputs/exposedOutputs 里带上了 label（见 templateOps.ts 的
+// `portInfo()`），但 applyBatch 的 connect op 一直只认 `in_N`/`out_N` 这种
+// 编号 port——agent 手上明明有语义化的名字，却还要在 in_N/out_N 和
+// label 之间做一次心算映射，一旦模板端口顺序和直觉不一致（比如 Rest 不是
+// out_1 而是 out_2）就容易接错。这里让 `connect` op 的 source.port /
+// target.port 除了字符串外，还能写 `{ label: "IslandName" }`，由这层负责查
+// 该节点的 exposedInputs/exposedOutputs 解出真实 portName 再转发给后端——
+// 后端 /batch 收到的永远是解析好的字符串 port，不用改动核心 apply-batch。
+type PortLabelRef = { label: string }
+
+function isPortLabelRef(port: unknown): port is PortLabelRef {
+  return Boolean(port) && typeof port === 'object' && typeof (port as { label?: unknown }).label === 'string'
+}
+
+interface ExposedPortLike {
+  portName: string
+  customLabel?: string
+  customLabelEn?: string
+}
+
+interface NodeGroupLike {
+  exposedInputs?: ExposedPortLike[]
+  exposedOutputs?: ExposedPortLike[]
+}
+
+/** Resolve one connect endpoint's `{ label }` into a real portName by querying that node's group definition. Returns `null` (no-op) when `port` isn't a label ref. */
+async function resolveConnectEndpointLabel(
+  ctx: ToolCtx,
+  projectId: string,
+  groupCache: Map<string, NodeGroupLike | null>,
+  opIndex: number,
+  endpoint: unknown,
+  direction: 'source' | 'target',
+): Promise<{ nodeId: string; port: string } | null> {
+  const e = endpoint as { nodeId?: unknown; port?: unknown } | undefined
+  if (!e || typeof e.nodeId !== 'string' || !isPortLabelRef(e.port)) return null
+  const nodeId = e.nodeId
+  const label = e.port.label
+
+  let group = groupCache.get(nodeId)
+  if (group === undefined) {
+    group = (await request(ctx, 'GET', projectPath(projectId, `/groups/${encodeURIComponent(nodeId)}`))) as NodeGroupLike | null
+    groupCache.set(nodeId, group)
+  }
+  if (!group) {
+    throw new Error(
+      `applyBatch ops[${opIndex}].${direction}: cannot resolve port label "${label}" — node "${nodeId}" is not a __group__ ` +
+      '(or does not exist in this project). Label addressing only works on group nodes returned by instantiateTemplate; ' +
+      'for plain battery nodes, pass the raw port name instead.',
+    )
+  }
+  const candidates = direction === 'target' ? group.exposedInputs : group.exposedOutputs
+  const matches = (candidates ?? []).filter((p) => p.customLabelEn === label || p.customLabel === label)
+  if (matches.length === 0) {
+    const available = (candidates ?? [])
+      .map((p) => p.customLabelEn ?? p.customLabel ?? p.portName)
+      .filter((l): l is string => Boolean(l))
+    throw new Error(
+      `applyBatch ops[${opIndex}].${direction}: label "${label}" not found on node "${nodeId}"'s exposed${direction === 'target' ? 'Inputs' : 'Outputs'}. ` +
+      `Available labels: [${available.join(', ')}]. Re-check instantiateTemplate's return value for this group, or pass the raw in_N/out_N port name.`,
+    )
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `applyBatch ops[${opIndex}].${direction}: label "${label}" matches ${matches.length} ports on node "${nodeId}" ` +
+      `(${matches.map((m) => m.portName).join(', ')}) — ambiguous, pass the raw port name instead.`,
+    )
+  }
+  return { nodeId, port: matches[0]!.portName }
+}
+
+async function resolvePortLabelsInOps(ctx: ToolCtx, projectId: string, ops: unknown[]): Promise<unknown[]> {
+  const groupCache = new Map<string, NodeGroupLike | null>()
+  const out: unknown[] = []
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i] as Record<string, unknown> | undefined
+    if (!op || op.type !== 'connect') {
+      out.push(ops[i])
+      continue
+    }
+    const resolvedSource = await resolveConnectEndpointLabel(ctx, projectId, groupCache, i, op.source, 'source')
+    const resolvedTarget = await resolveConnectEndpointLabel(ctx, projectId, groupCache, i, op.target, 'target')
+    if (!resolvedSource && !resolvedTarget) {
+      out.push(op)
+      continue
+    }
+    out.push({
+      ...op,
+      ...(resolvedSource ? { source: resolvedSource } : {}),
+      ...(resolvedTarget ? { target: resolvedTarget } : {}),
+    })
+  }
+  return out
+}
+
+// ── P0-4: applyBatch `appendMergeItem` composite op ────────────────────────
+//
+// 复盘（2026-07-15 tool 升级方案 P0-4）：接一个新内容到 tree_merge（最典型是
+// 根节点 aw_m0_merge）本来需要 agent 自己：1) 先 pipeline.get 读出当前
+// portCount，2) updateNode 把 portCount+1，3) 再 connect 到新算出来的
+// `item_N`——见 connect-node-task/SKILL.md 的「往 aw_m0_merge 追加一路」真实
+// 案例，纯手动数数很容易因为漏算/图已经变了而接错 item 号。这里把三步压成一
+// 个 op：`{ type: 'appendMergeItem', mergeNodeId, source: { nodeId, port } }`，
+// 由这一层负责读当前 portCount、算出下一个 item_N、展开成
+// updateNode+connect 两个真实 op 再转发——同一批里连续追加多个会正确地依次
+// 递增，不会重复用同一个 item 号。展开后的 op 完全是后端已支持的
+// updateNode/connect，不需要改动核心 apply-batch 或 sinoOpGate 白名单。
+interface GraphNodeLike {
+  opId?: string
+  params?: Record<string, unknown>
+}
+
+async function loadMergePortCount(ctx: ToolCtx, projectId: string, mergeNodeId: string): Promise<number> {
+  const node = (await request(ctx, 'GET', projectPath(projectId, `/nodes/${encodeURIComponent(mergeNodeId)}`))) as GraphNodeLike | null
+  if (!node) {
+    throw new Error(`appendMergeItem: mergeNodeId "${mergeNodeId}" was not found in this project's graph.`)
+  }
+  if (node.opId !== 'tree_merge') {
+    throw new Error(
+      `appendMergeItem: mergeNodeId "${mergeNodeId}" is opId "${node.opId ?? '?'}", not "tree_merge". ` +
+      'appendMergeItem only targets tree_merge nodes (e.g. the root aw_m0_merge).',
+    )
+  }
+  const count = node.params?.portCount
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0
+}
+
+let appendMergeItemEdgeSeq = 0
+
+async function expandAppendMergeItemOps(ctx: ToolCtx, projectId: string, ops: unknown[]): Promise<unknown[]> {
+  if (!ops.some((op) => op && typeof op === 'object' && (op as Record<string, unknown>).type === 'appendMergeItem')) {
+    return ops
+  }
+  const portCountByMergeNode = new Map<string, number>()
+  const out: unknown[] = []
+  for (const rawOp of ops) {
+    const op = rawOp as Record<string, unknown> | undefined
+    if (!op || op.type !== 'appendMergeItem') {
+      out.push(rawOp)
+      continue
+    }
+    const mergeNodeId = typeof op.mergeNodeId === 'string' ? op.mergeNodeId.trim() : ''
+    const source = op.source as { nodeId?: unknown; port?: unknown } | undefined
+    const hasSourcePort = typeof source?.port === 'string' || isPortLabelRef(source?.port)
+    if (!mergeNodeId || !source || typeof source.nodeId !== 'string' || !hasSourcePort) {
+      throw new Error(
+        'appendMergeItem op requires { mergeNodeId: string, source: { nodeId: string, port: string | { label } } } — got: ' +
+        JSON.stringify(rawOp),
+      )
+    }
+    let currentCount = portCountByMergeNode.get(mergeNodeId)
+    if (currentCount === undefined) currentCount = await loadMergePortCount(ctx, projectId, mergeNodeId)
+    const newCount = currentCount + 1
+    portCountByMergeNode.set(mergeNodeId, newCount)
+
+    const edgeId =
+      typeof op.edgeId === 'string' && op.edgeId.trim()
+        ? op.edgeId.trim()
+        : `e_append_${mergeNodeId}_${currentCount}_${appendMergeItemEdgeSeq++}`
+    out.push({ type: 'updateNode', nodeId: mergeNodeId, params: { portCount: newCount } })
+    out.push({
+      type: 'connect',
+      edgeId,
+      source: { nodeId: source.nodeId, port: source.port },
+      target: { nodeId: mergeNodeId, port: `item_${currentCount}` },
+    })
+  }
+  return out
+}
+
 export const tools: Record<string, ToolHandler> = {
   'scene:projects.list': async (_args, ctx) => request(ctx, 'GET', '/api/v1/projects'),
   'scene:projects.create': async (args, ctx) => request(ctx, 'POST', '/api/v1/projects', objectArgs(args)),
@@ -357,6 +530,17 @@ export const tools: Record<string, ToolHandler> = {
       const ids = body.nodeIds.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
       if (ids.length > 0) q.set('nodeIds', ids.join(','))
     }
+    // grep 式模糊过滤 —— nameContains 按节点 name 子串（大小写不敏感）匹配，
+    // opIdIn 按 opId 精确匹配任意一个。命中的节点 + 其一跳邻居一起返回（跟
+    // groupId/nodeIds 的行为一致），不用先 pipeline.get() 全图肉眼翻找再回填
+    // 具体 nodeId。两者可以和 groupId/nodeIds 同时传，取并集。
+    if (typeof body.nameContains === 'string' && body.nameContains.trim()) {
+      q.set('nameContains', body.nameContains.trim())
+    }
+    if (Array.isArray(body.opIdIn)) {
+      const ids = body.opIdIn.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      if (ids.length > 0) q.set('opIdIn', ids.join(','))
+    }
     const suffix = q.size > 0 ? `/pipeline/summary?${q}` : '/pipeline/summary'
     return request(ctx, 'GET', projectPath(projectId, suffix))
   },
@@ -364,7 +548,14 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const { projectId: _omit, ...batchBody } = body
-    return request(ctx, 'POST', projectPath(projectId, '/batch'), batchBody)
+    const rawOps = Array.isArray(batchBody.ops) ? batchBody.ops : []
+    // P0-4 先展开 appendMergeItem（复合操作 → updateNode+connect），再统一做
+    // P0-2 的 label 端口寻址解析——这样 appendMergeItem 里 source.port 也能用
+    // label 写，不用先查一次 in_N/out_N。两步都只在真的用到新写法时才发起额外
+    // 的 HTTP 查询，普通 ops（全是字符串 port、没有 appendMergeItem）零额外开销。
+    const expandedOps = await expandAppendMergeItemOps(ctx, projectId, rawOps)
+    const resolvedOps = await resolvePortLabelsInOps(ctx, projectId, expandedOps)
+    return request(ctx, 'POST', projectPath(projectId, '/batch'), { ...batchBody, ops: resolvedOps })
   },
   // The agent must never pour a full ExecutionResult into its context (a real
   // graph is ~28MB and a huge scene can exceed V8's single-string limit, which
@@ -410,17 +601,59 @@ export const tools: Record<string, ToolHandler> = {
         verification?: {
           ok?: boolean
           hints?: string[]
-          locationNameAlignment?: { ok?: boolean; missing?: Array<{ name: string }>; fix?: string }
+          locationNameAlignment?: {
+            ok?: boolean
+            missing?: Array<{ name: string }>
+            fix?: string
+            actualNodeNames?: string[]
+            actualNodeNamesTruncated?: boolean
+          }
+          topologyIssues?: Array<{
+            kind: 'rest-fan-out' | 'illegal-local-merge' | 'manual-points-zero-default'
+            reason: string
+            fix: string
+            suggestedOps?: unknown[]
+          }>
         }
+      }
+      // 2026-07-15：topologyIssues 里 rest-fan-out / illegal-local-merge 这两类
+      // 在拓扑上从来没有"暂时这样、后面再改"的合法中间态——一旦出现就是真的接错了
+      // （不像"还没接完全部装饰"那种正常施工中的状态）。即便 status=completed 且
+      // verification.ok=true（这两类目前不参与 ok 判定，见 execution-summary.ts），
+      // 也在这里强制抛出，不能让 agent 只看 ok=true 就以为万事大吉——这正是
+      // connect-node-task/SKILL.md 记录的真实翻车案例（fan-out/局部 merge 卡住
+      // 几十 turn）本该被当场拦下的地方。manual-points-zero-default 允许有"确实
+      // 就想放原点"的合法情况，不在这里强制抛出，只随 hints 一起返回。
+      const blockingTopologyIssues = (summary.verification?.topologyIssues ?? []).filter(
+        (i) => i.kind === 'rest-fan-out' || i.kind === 'illegal-local-merge',
+      )
+      if (blockingTopologyIssues.length > 0) {
+        const detail = blockingTopologyIssues
+          .map((i, idx) => `[${idx + 1}] ${i.reason}\n${i.fix}${i.suggestedOps ? `\nsuggestedOps: ${JSON.stringify(i.suggestedOps)}` : ''}`)
+          .join('\n\n')
+        throw new Error(
+          `pipeline.execute detected ${blockingTopologyIssues.length} topology violation(s) that are NEVER a legitimate mid-construction state ` +
+          '(Rest fan-out / illegal local tree_merge) — fix these before doing anything else, do not adjust tree_merge params first:\n\n' +
+          detail,
+        )
       }
       if (summary.status === 'completed' && summary.verification?.ok === false) {
         const hints = summary.verification.hints ?? []
         const loc = summary.verification.locationNameAlignment
         if (loc?.ok === false) {
           const missing = (loc.missing ?? []).map((m) => m.name).join('、')
+          // 2026-07-10 复盘：这条抛出的 Error message 才是 agent 实际看到的报错文本
+          // （summary.verification 里的结构化字段不一定会被上层完整回显）。之前只报
+          // "缺了什么"，agent 只能反复调用 raw execute 去人工翻找场景里实际的节点名，
+          // 卡在这一步来回试错。把 actualNodeNames 直接拼进错误文本，一次报错就给
+          // 全部信息（预期 vs 实际），彻底不需要再摸黑重试。
+          const actualList = loc.actualNodeNames ?? []
+          const actualNote = actualList.length > 0
+            ? ` 当前场景实际节点名（共 ${actualList.length}${loc.actualNodeNamesTruncated ? '+' : ''} 个，无需再跑 raw execute 翻找）：${actualList.join('、')}`
+            : ''
           throw new Error(
             `pipeline.execute locationNameAlignment failed — missing narrative names: ${missing}. ` +
-            `${loc.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}`,
+            `${loc.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}${actualNote}`,
           )
         }
         throw new Error(
@@ -463,6 +696,16 @@ export const tools: Record<string, ToolHandler> = {
     if (typeof body.sceneName === 'string') forward.sceneName = body.sceneName
     if (body.allowMissingAssets === true) forward.allowMissingAssets = true
     return request(ctx, 'POST', projectPath(projectId, '/scene-export/cook'), forward)
+  },
+  'scene:mesh3dExport.cook': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const forward: Record<string, unknown> = {}
+    if (typeof body.sceneName === 'string') forward.sceneName = body.sceneName
+    if (typeof body.sceneId === 'string') forward.sceneId = body.sceneId
+    if (typeof body.gameSlug === 'string') forward.gameSlug = body.gameSlug
+    if (body.allowMissingAssets === true) forward.allowMissingAssets = true
+    return request(ctx, 'POST', projectPath(projectId, '/mesh3d-export/cook'), forward)
   },
   'scene:assets.list': async (args, ctx) => request(ctx, 'GET', `/api/v1/assets${query(objectArgs(args))}`),
   // Library listing (base ∪ project-private, paginated) — the ONLY way for an

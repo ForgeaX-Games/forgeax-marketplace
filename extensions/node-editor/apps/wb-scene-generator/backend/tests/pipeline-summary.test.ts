@@ -40,4 +40,42 @@ describe('pipeline-summary', () => {
     expect(h.nodeCount).toBe(3)
     expect(Object.keys(h)).not.toContain('nodes')
   })
+
+  // P0-3 (2026-07-15 tool 升级方案): grep 式模糊过滤。
+  describe('nameContains / opIdIn fuzzy filter (P0-3)', () => {
+    it('nameContains matches case-insensitively and expands to neighbors (same nodeTouchesSet behavior as groupId/nodeIds)', () => {
+      const s = summarizePipeline(snap, { nameContains: '望江' })!
+      // n1 直接命中；g1 是 n1 的一跳邻居（e2）；o1 又是 g1 的邻居（e1）——这跟已有
+      // groupId/nodeIds 的邻居展开算法完全一致（filter 用的是同一个 nodeTouchesSet），
+      // 这里只验证新的命中源（name 子串）接入了同一套既有展开逻辑，不是重新发明。
+      expect(s.nodes.map((n) => n.id).sort()).toEqual(['g1', 'n1', 'o1'])
+      expect(s.search).toEqual({ matchCount: 1 })
+    })
+
+    it('opIdIn matches by exact opId and reports matchCount', () => {
+      const s = summarizePipeline(snap, { opIdIn: ['tree_merge', 'scene_output'] })!
+      expect(s.search).toEqual({ matchCount: 2 })
+      expect(s.nodes.map((n) => n.id).sort()).toEqual(['g1', 'n1', 'o1'])
+    })
+
+    it('returns an EMPTY node list (not a silent fallback to the full graph) when the filter matches nothing', () => {
+      const s = summarizePipeline(snap, { nameContains: 'no-such-name-anywhere' })!
+      expect(s.search).toEqual({ matchCount: 0 })
+      expect(s.nodes).toEqual([])
+      expect(s.edges).toEqual([])
+    })
+
+    it('unions with groupId/nodeIds when combined', () => {
+      const s = summarizePipeline(snap, { groupId: 'o1', nameContains: '望江' })!
+      // o1's neighborhood (g1) ∪ n1's neighborhood (g1) — g1 links both, so this
+      // still converges on {g1, n1, o1}, but matchCount only counts the search hit (n1).
+      expect(s.nodes.map((n) => n.id).sort()).toEqual(['g1', 'n1', 'o1'])
+      expect(s.search).toEqual({ matchCount: 1 })
+    })
+
+    it('omits `search` entirely when neither filter is passed (no regression for groupId/nodeIds-only callers)', () => {
+      const s = summarizePipeline(snap, { groupId: 'g1' })!
+      expect(s.search).toBeUndefined()
+    })
+  })
 })

@@ -27,7 +27,7 @@
 0. **对照 batch 内 tasks**：template / locationId / assets / connects
 1. **落组（通道 A）**：对本 batch 每项 `instantiateTemplate`（可多个）
 2. **接线（通道 B）**：一个 `applyBatch` 连完本 batch 全部 connect
-3. **核对**：`pipeline.get({ groupId })` 或 `{ mode: "hash" }` — 摘要
+3. **核对**：`pipeline.get({ groupId })` 或 `{ mode: "hash" }` — 摘要；忘了具体 `groupId` 就用 `pipeline.get({ nameContains: "关键字" })` / `{ opIdIn: [...] }` 模糊查，不用 `raw:true` 翻整图
 4. **执行**：`pipeline.execute` + checklist.`narrativeLocationNames`
 
 **禁止**在 M0 第一个 `execute` 之前：连读多个 pipeline.md、长篇文字重规划。M0 只搭底图（AddBaseGrid）先出 Preview。
@@ -47,8 +47,9 @@ projects.open → pipeline.get(确认 aw_kp_* 可选)
 ```
 
 - 第一组汇总用 `AddBaseGrid.out_2`(RootScene) 接 `tree_merge`，不是 `out_1`
-- `tree_merge` 必带 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`，N = 已接入主产物数
+- `tree_merge` **建组时**必带 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`，N = 这一步已接入的主产物数（通常 M0 阶段就是 1）
 - **M0 完成 = execute `status: completed` + 摘要里底图格数（如 24×24=576）**
+- **M1+ 每加一个模板的主产物时**，不要再手动 `updateNode(portCount)`+`connect` 两步，改用 `appendMergeItem`（见 [session_operation.md](session_operation.md) 「op schema 速查」），一个 op 顶两步，同一批里连写多个也会正确依次递增
 
 ---
 
@@ -105,23 +106,27 @@ instantiateTemplate(组A) + instantiateTemplate(组B) + …
 | 第二栋建筑（同区） | 上一栋 **`PickOneBuilding.out_2` Rest** → 下一栋 `in_1` | 两栋都接同一 BaseNode |
 | **城镇补充散布** | **每条** scatter 一条 **PickOneBuilding**；Rest 串 `out_2→in_1` | **暂禁 PickMultiBuildings** |
 | 道路 | **`in_2` 同源 Rest** ← 上一组 Rest | 拍脑袋 POI / 未提门 |
-| 装饰链 | 组1 Rest → 组2 `in_1` → …；**Natural 多次、各一种 asset** | 只有一组装饰 / 单次 Natural 高密度 |
+| 装饰链 | 组1 Rest → 组2 `in_1` → …；有尺寸落点优先 PlaceOne；Local/Natural 只挂简单物件 | 并联 fan-out / 复杂物件丢进 Natural |
+
+> **装饰链首组的 Scene 输入接哪里**：装饰链**第一组**的 `in_1` 接的是"进入装饰阶段前、最后一次产出可放置区域的那个节点的主产物"（通常是同层 `IslandRegions.out_1`/`AreaPartition` 某子区/`PathConnection.out_2` 等——链路里排在装饰之前的最后一个结构性 Rest 或主产物），**不是**该结构节点更早期的祖先节点、也不是随意换成 `out_0`(整树 root)。换 Scene 源前先用 `pipeline.get` 摘要确认该节点 `subtreeCellCount` 是否真的覆盖预期落点坐标，而不是靠猜"根节点数据更全"去换端口——`out_0` 只是同一份数据从根 focus 看的视图，并不会让原本为空的子树变得有 cell。若装饰模板持续空输出，先怀疑 **in_1 悬空 / 坐标落在区域外 / footprint 太大**（见 [PlaceOneDecoration.md](pipelines/PlaceOneDecoration.md) 「已验证」案例），不要在没有实测坐标覆盖范围前就切换 Scene 输入源或删组重建。
 
 ---
 
 ## 常见出口速查
 
-| 模板组 | 主产物（→ tree_merge / 结构） | Rest（→ 下一组 Scene in） |
+| 模板组 | 主产物（→ `appendMergeItem` 到 `aw_m0_merge` / 结构） | Rest（→ 下一组 Scene in） |
 |--------|------------------------------|---------------------------|
-| AddBaseGrid | `out_2` RootScene 或 `out_1` BaseNode（仅首接） | — |
+| AddBaseGrid | `out_2` RootScene（M0 首次建 `tree_merge` 用）或 `out_1` BaseNode（仅首接） | — |
 | **AreaPartition** | `out_0` Scene（全部分子区） | `out_1` Zones（无 Rest） |
 | IslandRegions | `out_1` Island | `out_2` Rest(水域) |
 | PickOneBuilding | `out_1` Building → BuildingStructures | `out_2` Rest |
 | **PickOneBuilding（补充）** | `out_1` Building → BuildingStructures（叙事内构） | `out_2` Rest → 下一栋 PickOne / 装饰 |
 | PathConnectionLink / RW | `out_1` Path | `out_2` Rest → 下一组（**禁止**同 Rest fan-out 到 Mountain+装饰） |
-| MountainContourGenerate | `out_2` Mountain | `out_1` Rest |
+| MountainContourGenerate | `out_2` Mountain（该模板主/Rest 编号交叉，优先用 `{"label":"Mountain"}`） | `out_1` Rest |
 | HillContourGenerate | `out_1` Hill | `out_2` Rest |
 | NaturalDecorationDistribution 等 | `out_1` Decoration | `out_2` Rest |
+
+> 上表所有「禁止 fan-out」的地方，`pipeline.execute` 现在会自动检测同一上游 Rest/Scene 端口并行接给 ≥2 个组、以及非根节点的局部 `tree_merge` 汇总 ≥2 份内容，命中会在 `verification.topologyIssues` 里直接抛错并给出 `suggestedOps`——不用等到自己顺着报错排查半天才发现，也不用靠这张表死记硬背。
 
 ---
 
@@ -131,7 +136,7 @@ instantiateTemplate(组A) + instantiateTemplate(组B) + …
 
 | 场景 | 正确 | 禁止 |
 |------|------|------|
-| 删重复边 / 修 Rest 口 | `applyBatch` + `deleteEdge` / `connect` | Python 脚本改 graph.json |
+| 删重复边 / 修 Rest 口 | `applyBatch` + `disconnect`（`deleteEdge` 是等价别名）/ `connect` | Python 脚本改 graph.json |
 | execute 验证失败 | `pipeline.get(groupId)` → applyBatch 补线 → 再 execute | `pipeline.import({})` 或 import 刷盘 |
 | 整图替换（极少） | `pipeline.import` + `file: { path: "templates/下文件名.json" }` | `file` 传字符串路径；指向 `state/graph.json` |
 | 项目「打不开」 | 报告 orchestrator 修 hash / restart backend | `projects.remove` 删项目 |

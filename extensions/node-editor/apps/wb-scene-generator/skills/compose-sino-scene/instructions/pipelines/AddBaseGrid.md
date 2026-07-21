@@ -1,10 +1,11 @@
 # 地图主体 - AddBaseGrid（基础网格区域）
 
 > 权威详情（含可照抄 applyBatch/CLI、templateId、验证）：  
-> `packages/marketplace/extensions/node-editor/apps/wb-scene-generator/batteries/templates/general/grid/AddBaseGrid/README.md`  
+> `packages/marketplace/plugins/node-editor/apps/wb-scene-generator/batteries/templates/general/grid/AddBaseGrid/README.md`  
 > （**不是** repo 根目录 `batteries/templates/...` — 该路径不存在，glob 会 ENOENT）
 >
 > templateId：`AddBaseGrid`（basename，`instantiateTemplate` 返回全新运行时 groupId）。
+> 端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## ⚠️ 易错：in_1 与 in_4 千万别对调
 

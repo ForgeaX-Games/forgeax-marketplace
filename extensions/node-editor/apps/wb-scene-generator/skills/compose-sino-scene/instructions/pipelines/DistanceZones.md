@@ -1,7 +1,7 @@
 # 地形分带 - DistanceZones（按距离场分近/远区域）
 
 > 权威详情（含端口表 + 内部流程 + 校验）：[../../../../batteries/templates/scene/DistanceZones/README.md](../../../../batteries/templates/scene/DistanceZones/README.md)
-> templateId：`DistanceZones`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`DistanceZones`。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 > 核心算法为模板组私有实现（到边界的距离场 + 阈值二分近/远），顶层看不到、不可摆放；整组走 `instantiateTemplate` 落地。
 
 ## 1. 管线电池的基本介绍
@@ -35,8 +35,8 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Near 近处区域（浅海 / 海岸线，focus 已聚焦该子节点） | 在近带上继续铺贴图 / 撒装饰 / `tree_merge` 汇总 |
-| `out_2` | scene | Far 远处区域（深海 / 内陆） | 在远带上继续布置 / 汇总 |
+| `out_1` | scene | Near 近处区域（浅海 / 海岸线，focus 已聚焦该子节点） | 在近带上继续铺贴图 / 撒装饰 / 最终内容用 `appendMergeItem` 汇总到 `aw_m0_merge` |
+| `out_2` | scene | Far 远处区域（深海 / 内陆） | 在远带上继续布置 / 最终内容同样用 `appendMergeItem` 汇总 |
 | `out_0` | scene | Scene 整棵合并后场景树 | 调试 / 汇总根 |
 | `out_3` / `out_4` | string | NearPath / FarPath 路径句柄 | 一般不接 |
 

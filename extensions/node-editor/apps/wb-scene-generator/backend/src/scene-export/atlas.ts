@@ -1,4 +1,4 @@
-import type { CookedScene } from './types.js'
+import type { CookedScene, SceneTileCollider } from './types.js'
 import { blankImage, blit, cropImage, decodePng, encodePng, type RgbaImage } from './png.js'
 
 export interface SceneTilesetTile {
@@ -8,7 +8,7 @@ export interface SceneTilesetTile {
   width: number
   height: number
   pivot: { x: number; y: number }
-  collider: { type: 'none' }
+  collider: SceneTileCollider
 }
 
 export interface SceneTileset {
@@ -66,6 +66,7 @@ interface PackedTile {
   height: number
   anchorX?: number
   anchorY?: number
+  collider?: SceneTileCollider
 }
 
 async function buildAtlas(
@@ -107,6 +108,7 @@ async function buildAtlas(
       height: Math.max(1, height),
       ...(input.anchorX !== undefined ? { anchorX: input.anchorX } : {}),
       ...(input.anchorY !== undefined ? { anchorY: input.anchorY } : {}),
+      ...(input.collider ? { collider: input.collider } : {}),
     })
   }
 
@@ -135,7 +137,7 @@ async function buildAtlas(
         x: tile.anchorX !== undefined ? tile.anchorX : 0.5,
         y: tile.anchorY !== undefined ? tile.anchorY : 0.5,
       },
-      collider: { type: 'none' },
+      collider: tile.collider ?? { type: 'none' },
     })
     cursorX += tile.width + TILE_SPACING
   }

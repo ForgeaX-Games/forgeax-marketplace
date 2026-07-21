@@ -66,6 +66,14 @@
       "label": "随机种子",
       "description": "随机种子，0 使用当前时间。",
       "description-en": "Random seed; 0 uses current time."
+    },
+    {
+      "name": "edgeFalloffCells",
+      "type": "number",
+      "default": 6,
+      "label": "边缘衰减格数",
+      "description": "从区域外缘向内平滑抬升的带宽（格）。避免高度场在掩码边界被硬切成「矩形截断」；0=关闭。",
+      "description-en": "Soft rise band (cells) from the region perimeter inward. Prevents hard rectangular truncation at the mask edge; 0=off."
     }
   ],
   "outputs": [

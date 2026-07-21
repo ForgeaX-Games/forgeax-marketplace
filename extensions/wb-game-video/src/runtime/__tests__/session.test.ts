@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { GraphSession } from '../engine/session'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 
+function overlayChild(snap: ReturnType<GraphSession['start']>, component: string) {
+  return snap.overlayMounts.flatMap((m) => m.children).find((c) => c.component === component)
+}
+
+function eventIds(child: { inputs: Record<string, unknown> } | undefined): string[] {
+  const events = child?.inputs.events
+  if (!Array.isArray(events)) return []
+  return events.map((e) => (e as { id: string }).id)
+}
+
 describe('GraphSession (playable view model)', () => {
   it('drives nodia to a rendered interaction, then wins', () => {
     const session = new GraphSession(makeNodiaDemo({ bossHp: 60 }))
@@ -12,10 +22,11 @@ describe('GraphSession (playable view model)', () => {
     expect(snap.hud.entities['ent-boss']!.hp).toBe(60)
 
     snap = session.performanceEnd() // enter → a_my(subflow) → wait（技能交互）
-    expect(snap.interaction?.component).toBe('battleSkillBar')
-    expect(snap.interaction?.handles).toEqual(['light', 'heavy', 'medit', 'ult'])
+    const skill = overlayChild(snap, 'battleSkillBar')
+    expect(skill?.elementId).toBe('wait/skill')
+    expect(eventIds(skill)).toEqual(['light', 'heavy', 'medit', 'ult'])
 
-    snap = session.submit('light') // → 变招判定 → 轻攻击演出
+    snap = session.emitEvent('wait/skill', 'light') // → 变招判定 → 轻攻击演出
     snap = session.tick(1000) // 命中 → 结算致死 → rules redirect → win
     expect(snap.hud.entities['ent-boss']!.hp).toBeLessThanOrEqual(0)
     expect(snap.currentNodeId).toBe('win')
@@ -29,7 +40,7 @@ describe('GraphSession (playable view model)', () => {
     session.start()
     session.jump('enter')
     session.performanceEnd() // → a_my → wait（技能）
-    session.submit('light') // → 轻攻击演出
+    session.emitEvent('wait/skill', 'light') // → 轻攻击演出
     session.tick(1000) // 命中时机(at:1000ms) → 结算(boss 掉 80, 仍存活)
     const snap = session.performanceEnd() // returns → a_my → b_ai → tele（防反 QTE）
     expect(snap.visited).toContain('wait')
@@ -49,8 +60,8 @@ describe('GraphSession (playable view model)', () => {
     const session = new GraphSession(makeNodiaDemo({ bossHp: 700 }))
     session.start()
     const snap = session.jump('wait')
-    // 跳到战斗待机 → 技能交互挂起
+    // 跳到战斗待机 → 技能 overlay 可见
     expect(snap.currentNodeId).toBe('wait')
-    expect(snap.interaction?.component).toBe('battleSkillBar')
+    expect(overlayChild(snap, 'battleSkillBar')?.elementId).toBe('wait/skill')
   })
 })

@@ -9,6 +9,7 @@ import { parentAverageTerm } from './terms/parentAverageTerm.ts'
 import { nonOverlapTerm } from './terms/nonOverlapTerm.ts'
 import { containmentTerm } from './terms/containmentTerm.ts'
 import { compactnessTerm } from './terms/compactnessTerm.ts'
+import { peripheralTerm } from './terms/peripheralTerm.ts'
 
 export interface SolverWeights {
   clearance: number
@@ -19,6 +20,8 @@ export interface SolverWeights {
   /** child circles should stay inside their parent circle */
   containment: number
   compactness: number
+  /** layoutHint.peripheral: push child toward parent rim */
+  peripheral: number
 }
 
 export interface SolverConfig {
@@ -41,6 +44,9 @@ export const DEFAULT_CONFIG: SolverConfig = {
     nonOverlap: 1.2,
     containment: 0.8,
     compactness: 0.02,
+    // Must outrank demoted adjacent(中) residual and compactness so 镇外 nodes
+    // finish at the parent rim (not the pocket between hub buildings).
+    peripheral: 1.4,
   },
   orientationHalfAngleDeg: 30,
   iterations: 800,
@@ -70,6 +76,7 @@ export function buildTerms(config: SolverConfig): Term[] {
     orientationTerm(config.weights.orientation, config.orientationHalfAngleDeg),
     nonOverlapTerm(config.weights.nonOverlap),
     containmentTerm(config.weights.containment),
+    peripheralTerm(config.weights.peripheral),
     compactnessTerm(config.weights.compactness),
   ]
 }

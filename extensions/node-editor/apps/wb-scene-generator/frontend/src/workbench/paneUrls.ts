@@ -5,7 +5,20 @@
 
 export type WorkbenchPane = 'renderer' | 'assetstore'
 
+/** Build a same-origin child-pane URL, forwarding host context (game slug, etc.). */
 export function paneUrl(pane: WorkbenchPane): string {
   const path = typeof location !== 'undefined' ? location.pathname : '/'
-  return `${path}?pane=${pane}`
+  const params = new URLSearchParams()
+  params.set('pane', pane)
+  if (typeof location !== 'undefined') {
+    const src = new URLSearchParams(location.search)
+    // Studio encodes the active ForgeaX game on every plugin iframe; child panes
+    // (renderer / assetstore) need the same slug for game-scoped actions like
+    // mesh3d export.
+    for (const key of ['slug', 'projectId'] as const) {
+      const value = src.get(key)
+      if (value) params.set(key, value)
+    }
+  }
+  return `${path}?${params.toString()}`
 }

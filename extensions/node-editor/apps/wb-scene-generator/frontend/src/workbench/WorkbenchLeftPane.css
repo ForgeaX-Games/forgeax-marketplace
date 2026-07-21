@@ -412,7 +412,40 @@ body[data-pane='left'] #root {
 
 .scene-left-pane .proj-panel__list .proj-card {
   flex: 0 0 auto;
-  min-height: 64px;
+  min-height: 60px;
+}
+
+/* Game scope bar — accent-green toggle matching the sidebar palette. */
+.scene-left-pane .proj-panel__scope {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.scene-left-pane .proj-panel__scope-context-label {
+  color: var(--color-text-secondary, #9aa4b2);
+  opacity: 1;
+}
+
+.scene-left-pane .proj-panel__scope-context-value {
+  color: var(--color-text-primary, #e6e8ee);
+}
+
+.scene-left-pane .proj-panel__scope-switch--on .proj-panel__scope-switch-track {
+  background: rgba(212, 255, 72, 0.22);
+  border-color: rgba(212, 255, 72, 0.5);
+}
+
+.scene-left-pane .proj-panel__scope-switch--on:hover .proj-panel__scope-switch-track {
+  border-color: rgba(212, 255, 72, 0.7);
+}
+
+.scene-left-pane .proj-card__icon-btn:hover:not(:disabled) {
+  color: var(--color-accent, #d4ff48);
+}
+
+.scene-left-pane .proj-card__meta {
+  color: var(--color-text-secondary, #9aa4b2);
+  opacity: 1;
 }
 
 .scene-left-pane__pane-row em,
@@ -562,15 +595,9 @@ body[data-pane='left'] #root {
   display: block;
 }
 
-/* Per-project Save — slots into the card's action column above Rename/Delete,
-   matching the shared .proj-card__action interaction (muted → accent on hover). */
-.scene-left-pane .proj-card__action.scene-left-pane__save-action {
-  font-size: 12px;
-}
-
-.scene-left-pane .proj-card__action.scene-left-pane__save-action:hover {
+/* Per-project Save — icon button in the card toolbar (Save · Rename · Delete). */
+.scene-left-pane .proj-card__icon-btn:hover:not(:disabled) {
   color: var(--color-accent, #d4ff48);
-  background: rgba(212, 255, 72, 0.1);
 }
 
 /* Save fallback modal — overlay inside the pane with the copyable graph JSON.

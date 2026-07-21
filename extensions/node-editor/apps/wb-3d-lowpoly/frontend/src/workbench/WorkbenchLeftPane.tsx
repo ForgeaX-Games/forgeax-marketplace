@@ -13,7 +13,7 @@ import './WorkbenchLeftPane.css'
 // Keep in sync with WorkbenchHost (the center <Editor editorSyncKey> + the embed
 // localStorage key it mirrors via its `storage` listener).
 const EDITOR_SYNC_KEY = 'wb-3d-lowpoly-editor'
-const LS_URDF = 'wb3d:urdfInline'
+const LS_VIEWER3D = 'wb3d:viewer3dInline'
 const geometryPortTypes = [
   { type: 'geometry', desc: '几何', descEn: 'Geometry', color: '#f87171', compatibleWith: ['string'] },
 ]
@@ -40,7 +40,10 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   useEffect(() => {
     const transport = createEditorTransport(client)
     configureEditorTransport(transport)
-    void useProjectStore.getState().bootstrap()
+    // This navigation-only iframe does not own the live canvas. Loading a
+    // pipeline here would leave it with a stale graph snapshot that must never
+    // be persisted over edits made by the center editor.
+    void useProjectStore.getState().fetchProjects()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsub()
@@ -87,7 +90,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
       <header className="lowpoly-left-pane__hero">
         <div className="lowpoly-left-pane__eyebrow">3D Lowpoly Generator</div>
         <h1>Lowpoly Workbench Navigation</h1>
-        <p>Use the center pane for the node canvas and embedded URDF viewer. This side pane summarizes the lowpoly build flow and outputs.</p>
+        <p>Use the center pane for the node canvas and embedded 3D preview. This side pane summarizes the lowpoly build flow and outputs.</p>
       </header>
 
       {error && (
@@ -113,7 +116,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
         <EditorControlsPanel
           syncKey={EDITOR_SYNC_KEY}
           domainPortTypes={geometryPortTypes}
-          windowToggles={<EmbedToggle storageKey={LS_URDF} label="URDF" />}
+          windowToggles={<EmbedToggle storageKey={LS_VIEWER3D} label="3D" />}
         />
       </section>
 
@@ -123,15 +126,15 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
           <li>Start from primitive parts or a lowpoly asset template.</li>
           <li>Shape parts with transform, CSG, profile, and gear operations.</li>
           <li>Assemble links and joints, then validate geometry and inertial data.</li>
-          <li>Preview through URDF and export GLB or production-ready assets.</li>
+          <li>Preview as a static scene, URDF robot, or rigged character, then export GLB assets.</li>
         </ol>
       </section>
 
       <section className="lowpoly-left-pane__section">
         <h2>Asset outputs</h2>
         <div className="lowpoly-left-pane__pane-row">
-          <span>URDF preview</span>
-          <em>Joints, links, motion checks</em>
+          <span>3D preview</span>
+          <em>Static scene, URDF, or character</em>
         </div>
         <div className="lowpoly-left-pane__pane-row">
           <span>GLB / mesh assets</span>
@@ -145,7 +148,7 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
 
       <section className="lowpoly-left-pane__section lowpoly-left-pane__tips">
         <h2>Helpful prompts</h2>
-        <p>Ask the agent to add a URDF preview sink, create a lowpoly asset graph, or check why a joint is not moving.</p>
+        <p>Ask the agent to add a preview sink (scene, URDF, or character), create a lowpoly asset graph, or check why a joint is not moving.</p>
       </section>
     </aside>
   )

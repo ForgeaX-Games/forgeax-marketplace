@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GraphNode, OpSpec, ProjectMeta, WorkspaceState } from '@forgeax/node-runtime'
 import {
   ProjectPanel,
+  SaveIcon,
   configureEditorTransport,
   createEditorTransport,
+  pt,
   useProjectStore,
 } from '@forgeax/node-runtime-react/editor'
 import type { ActivePipelineRunInfo } from '@forgeax/node-runtime-react/editor'
@@ -57,6 +59,8 @@ const AW_SUPPORT_BASE =
 
 interface Props {
   client: HttpApiClient
+  /** Current ForgeaX game slug, forwarded from the host iframe URL (see main.tsx). */
+  slug?: string | null
 }
 
 interface LeftPaneSnapshot {
@@ -66,7 +70,7 @@ interface LeftPaneSnapshot {
   nodes: readonly GraphNode[]
 }
 
-export function WorkbenchLeftPane({ client }: Props): JSX.Element {
+export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
   const [, setSnapshot] = useState<LeftPaneSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activePipelineRuns, setActivePipelineRuns] = useState<ActivePipelineRunInfo[]>([])
@@ -95,10 +99,17 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
   // transport + project store. Wiring it here lets <ProjectPanel> drive
   // switch/create/delete, and subscribeProjectActivation keeps the panel's
   // active highlight in sync with switches made in the center pane / by agents.
+  // This pane is a *satellite*: it only calls viewProject to announce the
+  // viewing target; the center WorkbenchHost (host role) runs the heavy open
+  // cascade (loadPipeline, refreshConnectedOutputs, autoExecuteOnOpen). Calling
+  // bootstrap() here used to duplicate that cascade and fire a second full
+  // pipeline execution on every cold boot.
   useEffect(() => {
     const transport = createEditorTransport(client)
     configureEditorTransport(transport)
-    void useProjectStore.getState().bootstrap()
+    useProjectStore.getState().setActiveGameSlug(slug ?? null)
+    useProjectStore.getState().setProjectSwitchRole('satellite')
+    void useProjectStore.getState().fetchProjects()
     const unsub = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsub()
@@ -106,6 +117,13 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
       configureEditorTransport(null)
     }
   }, [client])
+
+  // The host may re-render this iframe's URL with a different slug (e.g. user
+  // switches game in the studio sidebar) without a full reload in some embed
+  // modes; keep the project panel's scope in sync if that value changes.
+  useEffect(() => {
+    useProjectStore.getState().setActiveGameSlug(slug ?? null)
+  }, [slug])
 
   useEffect(() => {
     let cancelled = false
@@ -406,11 +424,12 @@ export function WorkbenchLeftPane({ client }: Props): JSX.Element {
           renderProjectActions={(p) => (
             <button
               type="button"
-              className="proj-card__action scene-left-pane__save-action"
-              title="Save this project as JSON"
+              className="proj-card__icon-btn scene-left-pane__save-action"
+              title={pt('save')}
+              aria-label={pt('save')}
               onClick={() => void handleSaveProject(p)}
             >
-              Save
+              <SaveIcon />
             </button>
           )}
         />

@@ -1,23 +1,21 @@
 /**
- * 回归：挂载「静态组件方案」后，血条/气力必须能经 overlayMounts 渲染出来。
- *
- * 根因：引擎把 battleHpBar 放进 overlayMounts，但 SkinRegistry 的 HUD 皮肤在 hud 表；
- * renderOverlayMount 若不接 SkinCtx 会静默丢弃 → 试玩看不见挂载的 HUD。
+ * 回归：挂载「静态组件方案」后，血条须经 overlayMounts + OverlayComponent 渲出。
+ * battleHpBar 走 overlay 表；绘制时用 skinCtx resolve bind→value。
  */
 import { describe, expect, it, beforeAll } from 'vitest'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { GraphSession } from '../engine/session'
-import { registerCoreComponents } from '../registry/core-components'
-import { createCoreSkinRegistry } from '../skins/components'
+import { createCoreSkinRegistry, registerCoreSkins } from '../skins/components'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 import { ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
+import { STAGE_FILL_LAYOUT } from '../schema/layout'
 
 beforeAll(() => {
-  registerCoreComponents()
+  registerCoreSkins()
 })
 
-describe('挂载静态方案 · HUD 进试玩', () => {
+describe('挂载静态方案 · 血条进试玩', () => {
   it('enter 后 overlayMounts 含 battleHpBar，且带 skinCtx 时能渲出血条 DOM', () => {
     const overlays = ensureBuiltinSchemes({})
     const base = makeNodiaDemo()
@@ -32,7 +30,10 @@ describe('挂载静态方案 · HUD 进试玩', () => {
                 ...n,
                 data: {
                   ...n.data,
-                  overlayNodes: [{ overlay: SCHEME_STATIC_ID }, ...(n.data.overlayNodes ?? [])],
+                  overlayNodes: [
+                    { overlay: SCHEME_STATIC_ID, layout: { ...STAGE_FILL_LAYOUT } },
+                    ...(n.data.overlayNodes ?? []),
+                  ],
                 },
               }
             : n,
@@ -53,10 +54,10 @@ describe('挂载静态方案 · HUD 进试玩', () => {
     const mount = snap.overlayMounts.find((m) => m.mountId === SCHEME_STATIC_ID)
     expect(mount).toBeTruthy()
 
-    // 无 ctx：HUD 无法渲染（历史 bug 路径）
+    // 无 ctx：仍走 overlay 表，但 bind 解析失败 → 可见「未绑定」提示
     const withoutCtx = renderToStaticMarkup(skins.renderOverlayMount(mount!) as ReactElement)
+    expect(withoutCtx).toContain('ks-hud-missing-bind')
     expect(withoutCtx).not.toContain('ks-hud-hp')
-    expect(withoutCtx).not.toContain('ks-hud-boss')
 
     // 有 ctx：血条 + 气力珠出场
     const withCtx = renderToStaticMarkup(
@@ -64,13 +65,27 @@ describe('挂载静态方案 · HUD 进试玩', () => {
     )
     expect(withCtx).toContain('ks-hud-hp')
     expect(withCtx).toContain('ks-hud-boss')
-    expect(withCtx).toContain('ks-hud-rage') // 气力珠（vars.qi 为 number 即显示）
+    expect(withCtx).toContain('ks-hud-rage')
     expect(withCtx).toContain('我方')
     expect(withCtx).toContain('敌方')
 
-    // 回归：无 layout 的 HUD 挂载盒必须铺满舞台（inset:0），不能塌成 fit-content 左上角 0×0——
-    // 否则血条的角锚定（right/bottom/left:50%）相对 0×0 盒解析会跑到屏幕外/挤到左上角，试玩看不见。
-    expect(withCtx).toContain('inset:0')
+    // 配置 attr 必须传到皮肤：玩家 attack=40，attrMax.attack=40，故血条应满。
+    const attackMount = {
+      ...mount!,
+      children: mount!.children.map((child) =>
+        child.component === 'battleHpBar' && child.inputs.bind === 'ent-player'
+          ? { ...child, inputs: { ...child.inputs, attr: 'attack' } }
+          : child,
+      ),
+    }
+    const withAttackAttr = renderToStaticMarkup(
+      skins.renderOverlayMount(attackMount, undefined, { hud: snap.hud }) as ReactElement,
+    )
+    expect(withAttackAttr).toContain('width:100%')
+
+    // 挂载/子件 STAGE_FILL → 宽高百分比铺满，不能塌成 fit-content
+    expect(withCtx).toContain('width:100%')
+    expect(withCtx).toContain('height:100%')
     expect(withCtx).not.toContain('fit-content')
   })
 })

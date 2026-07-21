@@ -1,5 +1,11 @@
 # PathConnection（道路连接 · RandomWalk 算法）
 
+> ⚠️ **DEPRECATED（本文档保留为历史参考，不再是 agent 的主要接线依据）**
+> `construction-task-builder.ts` 的 pipeline 路由表把 `PathConnectionRandomWalk`（basename `PathConnection`）与 `PathConnectionLink` **两个 templateId 都指向同一份文档** [`PathConnectionLink/README.md`](../PathConnectionLink/README.md)。也就是说，**无论 agent 实例化的是本模板还是 Link 版，实际被自动带出的接线说明文档都是 `PathConnectionLink/README.md`**（端口 schema 完全一致，仅内部连点算子不同）。
+> 请优先阅读 [`PathConnectionLink/README.md`](../PathConnectionLink/README.md)，其中已包含「单步独立：最小可跑示例」章节。本文件以下内容（含"已验证调用示例"）仍然真实有效，可作补充参考，但不再持续更新。
+
+---
+
 > **instantiate 用 basename `PathConnection`**（JSON 内 displayName 为 `PathConnectionRandomWalk`）。
 > Link 版（MST+A*）见 [`PathConnectionLink/README.md`](../PathConnectionLink/README.md) — **端口 schema 相同**，仅内部算法不同。
 > templateId：`group_1781857907971_zblc6`。

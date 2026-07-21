@@ -36,7 +36,16 @@ export type {
 
 export { overlayMountId } from './node-config-schema'
 
-export { layoutValueToCss, layoutToCss, layoutWrapStyle, layoutHasExplicitSize, layoutIsEffectivelyEmpty, mountWrapStyle, childWrapStyle } from './layout'
+export {
+  STAGE_FILL_LAYOUT,
+  layoutValueToCss,
+  layoutToCss,
+  layoutWrapStyle,
+  layoutHasExplicitSize,
+  layoutIsEffectivelyEmpty,
+  mountWrapStyle,
+  childWrapStyle,
+} from './layout'
 
 export {
   expandOverlayMount,
@@ -182,8 +191,6 @@ export type Trigger =
  * Kind 插件职责（presentation 渲染 / interaction 交互）。副作用不在组件层，走 node.data.reactions。
  * 覆盖物见 OverlayChild.component（无落盘 role）。
  */
-export type ElementRole = 'presentation' | 'interaction'
-
 /** 节点端口描述（`outputs()` / `deriveOutputs` 返回）；边经 `sourceHandle`/`targetHandle` 引用其 `id`。 */
 export interface NodeHandle {
   id: string
@@ -300,8 +307,12 @@ export interface EdgeRouting {
   label?: string
 }
 
-/** 当前图节点 type 字面量；新品类在此联合扩展。 */
-export type GameNodeType = 'perf'
+/**
+ * 图节点 type 字面量。合法集合的 **SSOT 是 `NodeKindRegistry`**（`runtime/nodes`），
+ * 故用开放联合：保留 `'perf'` 的补全，同时允许任意已注册类型——加节点 = 注册一个 NodeKind，
+ * 不必回改本行。浅守卫（isGameGraph）只认「非空字符串」，「是否已注册」的深校验走 validate.ts。
+ */
+export type GameNodeType = 'perf' | (string & {})
 
 export type GameHandle = Handle<{ flowId?: string }>
 export type GameNode = Node<GameNodeData, GameNodeType, { flowId?: string }>
@@ -314,13 +325,6 @@ export type GameGraph = Graph<GameNode, GameEdge>
  */
 // （类型 Reaction 由上方 export type 与 node-config 导出）
 
-/** scenario 声明依赖的插件包（运行环境须 `registerPlugin` 同名；缺则 load 失败）。 */
-export interface RequiredPlugin {
-  id: string
-  /** 可选版本；有则与 `registerPlugin(id,{version})` 精确匹配。 */
-  version?: string
-}
-
 /** 顶层容器（scenarios.graph.json 的 scenario 内容形态）。 */
 export interface GameScenario {
   schemaVersion: string
@@ -328,14 +332,11 @@ export interface GameScenario {
   variables?: Record<string, Variable>
   /** Record key === Entity.id（添加时自动生成）。 */
   entities?: Record<string, Entity>
-  statuses?: Record<string, unknown>
   /** overlay 目录（`ui.overlays`）+ 可选主题色。 */
   ui?: GameScenarioUi
   rng?: { seed: number }
   /** 局级 reactions（即时判负/判胜等）；每次状态变化后求值。 */
   reactions?: Reaction[]
-  /** 扩展图依赖的插件包；缺插件或版本不满足 → validateScenario error。 */
-  requiredPlugins?: RequiredPlugin[]
   /** 用户自定义文字预设（内置在 text-style.ts；这里只存用户新建的，按 subtitle/overlay 分组）。 */
   textStylePresets?: { subtitle?: GraphTextStylePreset[]; overlay?: GraphTextStylePreset[] }
   /**
@@ -354,7 +355,8 @@ export function isGameGraph(v: unknown): v is GameGraph {
   return g.nodes.every((n) => {
     if (!n || typeof n !== 'object') return false
     const node = n as { type?: unknown; data?: unknown }
-    if (node.type !== 'perf') return false
+    // 浅守卫只认「type 是非空字符串」；「type 是否为已注册 NodeKind」的语义校验在 validate.ts。
+    if (typeof node.type !== 'string' || !node.type) return false
     return !!node.data && typeof node.data === 'object'
   })
 }

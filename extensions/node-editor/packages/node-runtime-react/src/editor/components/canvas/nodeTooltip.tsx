@@ -6,9 +6,13 @@
 // no longer hard-codes any scene-specific sentinel handling.
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, createContext, useContext } from 'react'
 import ReactDOM from 'react-dom'
-import { usePipelineStore } from '../../stores/index.js'
+import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { isDataTreeEntries } from '../../utils/datatreeShape.js'
 import { getRealNodeIdFromContext } from './groupBoundaryIds.js'
+import {
+  formatTooLargeOutputSummaryText,
+  isTooLargeOutputSummary,
+} from '../../utils/tooLargeOutputSummary.js'
 
 export interface TooltipState {
   x: number
@@ -72,12 +76,15 @@ export function useNodeValueFormatters(): {
   formatPortValueExtra: (value: unknown) => string | undefined
 } {
   const formatters = useContext(ValueFormattersContext)
+  const langMode = useUIStore((s) => s.langMode)
   const ref = useRef(formatters)
   ref.current = formatters
+  const langRef = useRef<'zh' | 'en'>('en')
+  langRef.current = langMode === 'zh' ? 'zh' : 'en'
   return useMemo(
     () => ({
-      formatPortValue: (value: unknown) => formatPortValue(value, ref.current),
-      formatPortValueExtra: (value: unknown) => formatPortValueExtra(value, ref.current),
+      formatPortValue: (value: unknown) => formatPortValue(value, ref.current, langRef.current),
+      formatPortValueExtra: (value: unknown) => formatPortValueExtra(value, ref.current, langRef.current),
     }),
     [],
   )
@@ -174,8 +181,13 @@ function gridDims(v: unknown): string | undefined {
 }
 
 /** Format an arbitrary port value into a readable single-line string. */
-export function formatPortValue(value: unknown, formatters: DomainValueFormatters = EMPTY_FORMATTERS): string {
+export function formatPortValue(
+  value: unknown,
+  formatters: DomainValueFormatters = EMPTY_FORMATTERS,
+  lang: 'zh' | 'en' = 'en',
+): string {
   if (value === undefined || value === null) return '—'
+  if (isTooLargeOutputSummary(value)) return formatTooLargeOutputSummaryText(value, lang)
   const domainText = matchDomainValue(value, formatters)?.text
   if (domainText !== undefined) return domainText
   if (typeof value === 'boolean') return value ? 'true' : 'false'
@@ -202,7 +214,7 @@ export function formatPortValue(value: unknown, formatters: DomainValueFormatter
       const domainListText = formatDomainValueList(allItems, branchSuffix, formatters)
       if (domainListText !== undefined) return domainListText
 
-      if (totalItems === 1) return formatPortValue(allItems[0], formatters)
+      if (totalItems === 1) return formatPortValue(allItems[0], formatters, lang)
       return `${totalItems} items${branchSuffix}`
     }
     return `[array, ${value.length} items]`
@@ -221,7 +233,12 @@ export function formatPortValue(value: unknown, formatters: DomainValueFormatter
 }
 
 /** Compact preview string for array/dict, appended under the summary line. */
-export function formatPortValueExtra(value: unknown, formatters: DomainValueFormatters = EMPTY_FORMATTERS): string | undefined {
+export function formatPortValueExtra(
+  value: unknown,
+  formatters: DomainValueFormatters = EMPTY_FORMATTERS,
+  _lang: 'zh' | 'en' = 'en',
+): string | undefined {
+  if (isTooLargeOutputSummary(value)) return undefined
   const domainMatch = matchDomainValue(value, formatters)
   if (domainMatch?.formatter.formatExtra) return domainMatch.formatter.formatExtra(value)
   if (isDataTreeEntries(value)) {

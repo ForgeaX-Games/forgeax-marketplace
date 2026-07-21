@@ -824,13 +824,29 @@ function emitImplicitLinkForShape(
 
 // ── 子部分编译 ────────────────────────────────────────────────────────────
 
+/**
+ * URDF <material> 只标准支持 <color>/<texture>；metalness/roughness 不是标准 URDF 属性，
+ * 这里作为自定义 `<pbr metalness=".." roughness=".."/>` 子元素输出——纯色路径的补充
+ * （贴图/PBR 的"真值"路径是 g_bake_object 烘的 GLB，那边走 pbrMetallicRoughness）。
+ * 只有本项目前端 viewer（urdf-parser.ts）会读这个扩展，标准 URDF 消费者会忽略未知子元素。
+ */
 function emitMaterial(s: Statement): string[] {
   const rgba = readNumList(s.args.rgba, 4) ?? [0.7, 0.7, 0.7, 1];
-  return [
+  const metalness = readNumber(s.args.metalness);
+  const roughness = readNumber(s.args.roughness);
+  const out = [
     `  <material name="${escapeXml(s.id)}">`,
     `    <color rgba="${rgba.map(fmt).join(' ')}"/>`,
-    `  </material>`,
   ];
+  if (metalness !== undefined || roughness !== undefined) {
+    const attrs = [
+      metalness !== undefined ? `metalness="${fmt(metalness)}"` : null,
+      roughness !== undefined ? `roughness="${fmt(roughness)}"` : null,
+    ].filter((a): a is string => a !== null);
+    out.push(`    <pbr ${attrs.join(' ')}/>`);
+  }
+  out.push(`  </material>`);
+  return out;
 }
 
 function emitPart(

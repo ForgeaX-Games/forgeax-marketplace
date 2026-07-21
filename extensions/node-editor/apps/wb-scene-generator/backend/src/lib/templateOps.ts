@@ -67,6 +67,8 @@ export interface RawGroup {
 export interface ExposedPortInfo {
   portName: string
   portType?: string
+  /** Human-readable semantic label authored on the template (customLabelEn, falling back to customLabel). Absent when the port has no label. */
+  label?: string
 }
 
 export interface BuildTemplateOpsResult {
@@ -202,6 +204,9 @@ export function buildTemplateOps(
     (ports ?? []).map((p) => ({
       portName: p.portName,
       ...(p.portType !== undefined ? { portType: p.portType } : {}),
+      ...(p.customLabelEn ?? p.customLabel
+        ? { label: (p.customLabelEn ?? p.customLabel)! }
+        : {}),
     }))
 
   return {

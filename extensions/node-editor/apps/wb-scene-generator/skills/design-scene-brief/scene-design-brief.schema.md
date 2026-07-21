@@ -39,7 +39,7 @@
 | `scale` | string | 否 | `XL` / `L` / `M` / `S`。 |
 | `parent` | string \| null | 是 | 父节点 `name`；root 为 `null`。 |
 | `adjacent` | string[] | 否 | 同级邻接节点 `name`（双向请两侧都写，闭环成路）。 |
-| `layoutHint` | object | 否 | `{ inParent?: "东/南/中…", relativeTo?: { anchor, bearing, distance? } }`，喂 keypoint 求解。 |
+| `layoutHint` | object | 否 | `{ inParent?: "东/南/中…", peripheral?: boolean, relativeTo?: { anchor, bearing, distance? } }`，喂 keypoint 求解。`peripheral: true` = 子在父内但远离父中心、贴父区边缘（镇外/关外/郊外）。 |
 | `description` | object | 否 | `{ semantic?, location?, art? }`：叙事语义 / 空间位置 / 美术氛围三段。 |
 
 > 方位约定（与 `compose-sino-scene` 一致）：原点 `(0,0)` 左上角，右=东=`+x`，下=南=`+y`。
@@ -50,12 +50,24 @@
 |------|------|--------|------|
 | `gameplay` | object | **游戏逻辑 / 白盒** | 关卡功能意图。`role`（如 `spawn`/`hub`/`combat`/`puzzle`/`gate`/`transition`/`boss`/`safe`/`loot`）；`keyInteractions?`（可交互点，如「桌底暗记」）；`encounter?`（遭遇/战斗节拍）；`gating?`（解锁/卡点条件）。 |
 | `narrative` | object | **叙事** | `beats?`（在此发生的剧情节拍数组）；`reveals?`（此处揭示的信息）；`mood?`（情绪基调）。`description.semantic` 写「是什么」，`narrative` 写「这里发生什么」。 |
-| `dressing` | object | **布景 / 环境美术 / 审美** | `keyProps?`（关键物件，如钟表店的 `["柜台","橱柜","挂钟墙","怀表展柜"]`）；`storytellingDetails?`（环境叙事细节，如「散落的齿轮」）；`density?`（`sparse`/`medium`/`dense`，装饰密度倾向）。 |
+| `dressing` | object | **布景 / 环境美术 / 审美** | `keyProps?`（关键物件，如钟表店的 `["柜台","橱柜","挂钟墙","怀表展柜"]`）；`storytellingDetails?`（环境叙事细节，如「散落的齿轮」）；`density?`（`sparse`/`medium`/`dense`，装饰密度倾向）。**`keyProps`/`storytellingDetails` 只装可数、可独立摆放的物件——禁止填入河流/溪流/湖泊/桥（含小桥/石桥/木桥/栈桥等跨水构筑物）/山谷/台地高差等有走向或成片延展的地形-水体特征**：这类意图请写进下面 `description.location`（如「沿河谷缓坡展开，一条溪流贯穿并有石桥跨越」），下游按地形/水体模板（`RiverSpline`/`RiverLakeGen`/`LakeRegions` 等）处理，而不是当装饰物散布。 |
 | `assetHints` | string[] | 资产 | 该节点关键语义资产名（地砖/物件），下游汇成 `asset-requirements.json` 的线索。 |
 | `expand` | boolean \| object | **递归** | `true` 表示该 POI 需展开其内部为更深子树（如钟表店内部）。可写 `{ reason? }` 说明为何展开。子节点用 `parent` 指向本节点。 |
 | `acceptance` | string[] | **评审** | 该节点的验收要点（供后续 sino-critic 生成 `review.json` 的打分依据）。 |
 
 > 所有 3.2 字段缺省即「设计脑未特别指定」，下游按通用规则处理，**不破坏**现有 keypoint/构图流程。
+
+### 3.3 地形 vs 装饰物：判定准则（`dressing.keyProps` 常见误填，务必先自检）
+
+> 判断一个元素该写进 `description.location`（地形/水体意图）还是 `dressing.keyProps`（装饰物），用一个简单测试：
+> **它有没有「走向/路径」，或者是否成片覆盖一块区域？**
+>
+> - **有走向或成片覆盖 → 地形/水体**：河流、溪流、湖泊、水塘、桥（含小桥/石桥/木桥/栈桥等一切跨水构筑物——桥依附于河流走向，随河而生，属于地形范畴）、山谷、台地/高差、悬崖等。这类意图写进 `description.location`（自然语言描述走向/规模即可，不写坐标），**禁止**出现在 `dressing.keyProps`/`storytellingDetails` 里。
+> - **离散的、可数、可用一个点+尺寸描述 → 才是装饰物**：老树、巨石、灯柱、水井、公告栏、拴马桩等。
+>
+> **反例自检**：如果 `keyProps`/`storytellingDetails` 里某一项的名字含「溪流」「河」「湖」「桥」「水道」「水系」「瀑布」等字样（如误写的「溪流石桥」），几乎一定是分类错误——应改写进 `description.location`。
+>
+> 下游衔接：地形/水体意图最终由构图阶段的专属地形/水体模板（`RiverSpline`/`RiverLakeGen`/`LakeRegions` 等）落地，而不是散布类装饰模板（`NaturalDecorationDistribution`/`LocalPreciseDecoration`/`PlaceOneDecoration`）——一旦误填进 `keyProps`，会被当作可计数装饰物，最终变成随机散布的物体，丢失应有的路径/走向语义。
 
 ---
 
@@ -133,7 +145,7 @@
       "scale": "L",
       "parent": "赤岩区",
       "adjacent": ["赤岩镇"],
-      "layoutHint": { "inParent": "西" },
+      "layoutHint": { "inParent": "西", "peripheral": true },
       "description": { "semantic": "本作后半场景，散布遗迹与非法分子据点。", "art": "冷峻荒凉、枯木、风蚀岩。" },
       "gameplay": { "role": "transition" }
     },
@@ -143,7 +155,7 @@
       "scale": "S",
       "parent": "镇郊荒野",
       "adjacent": [],
-      "layoutHint": { "inParent": "西" },
+      "layoutHint": { "inParent": "西", "peripheral": true },
       "gameplay": { "role": "boss", "encounter": "潜入或强攻二选一" },
       "dressing": { "keyProps": ["了望塔", "栅栏", "篝火"], "density": "medium" },
       "expand": { "reason": "据点内部需细布装备架与非法分子营地装饰" }

@@ -138,8 +138,8 @@ describe('g_metrics quality metrics', () => {
     // 立方体基元居中 → 最低点 z=-0.5（陷入地面）；纯 primitive。
     expect(out.ground_offset as number).toBeCloseTo(-0.5, 6)
     expect(out.primitive_only).toBe(true)
-    // 评分：-overlap(2) -grounding(5) -primitive(10) = 83 (B)。
-    expect(out.score).toBe(83)
+    // 评分：-overlap(1) -grounding(5) -primitive(10) = 84 (B)。
+    expect(out.score).toBe(84)
     expect(out.grade).toBe('B')
     expect(String(out.report)).toContain('[basic]')
     expect(String(out.report)).toContain('overlap:')

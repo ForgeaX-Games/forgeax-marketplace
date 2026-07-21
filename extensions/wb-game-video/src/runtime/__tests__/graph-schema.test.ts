@@ -26,13 +26,28 @@ describe('graph-schema', () => {
     expect(isGameGraph({ nodes: [], edges: {} })).toBe(false)
   })
 
-  it('rejects node without perf type', () => {
+  it('rejects node with missing/empty type (浅守卫只认非空字符串)', () => {
     expect(
       isGameGraph({
-        nodes: [{ id: 'x', type: 'other', position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: 'a' } }],
+        nodes: [{ id: 'x', position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: 'a' } }],
         edges: [],
       }),
     ).toBe(false)
+    expect(
+      isGameGraph({
+        nodes: [{ id: 'x', type: '', position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: 'a' } }],
+        edges: [],
+      }),
+    ).toBe(false)
+  })
+
+  it('accepts 非 perf 的字符串 type（合法集合由 NodeKindRegistry/validate 判定，非浅守卫职责）', () => {
+    expect(
+      isGameGraph({
+        nodes: [{ id: 'x', type: 'skill', position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: 'a' } }],
+        edges: [],
+      }),
+    ).toBe(true)
   })
 
   it('getSubFlow reads subFlow and legacy subFlowRef', () => {

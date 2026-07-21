@@ -300,10 +300,10 @@ export interface GraphCanvasProps {
   onDrill?: (containerId: string) => void
   /** 点击画布空白处（取消选中 → 隐藏节点配置面板）。 */
   onPaneClick?: () => void
-  /** 画布右下角：添加节点（属于蓝图编辑手势，不进顶栏）。 */
-  onAddNode?: () => void
+  /** 画布右下角：添加节点（属于蓝图编辑手势，不进顶栏）。position = 当前视口中心（flow 坐标）。 */
+  onAddNode?: (position: { x: number; y: number }) => void
   /** 画布右下角：添加子蓝图容器（主图用；下钻进 pack 时隐藏）。 */
-  onAddPackNode?: () => void
+  onAddPackNode?: (position: { x: number; y: number }) => void
   /** 节点 hover：在后方插入子蓝图容器（主图用）。 */
   onInsertPackAfter?: (nodeId: string) => void
   /** 画布右下角：自适应布局（dagre 重排 + fitView）。 */
@@ -337,8 +337,15 @@ function GraphCanvasInner({
   onFitLayout,
 }: GraphCanvasProps): JSX.Element {
   ensureCanvasStyle()
-  const { fitView } = useReactFlow()
+  const { fitView, screenToFlowPosition } = useReactFlow()
   const rootRef = useRef<HTMLDivElement | null>(null)
+  /** 当前视口中心（flow 坐标）；空图/平移后添加节点时落在可见区，避免落在原点外看不见。 */
+  const viewportCenter = useCallback((): { x: number; y: number } => {
+    const el = rootRef.current
+    if (!el) return { x: 80, y: 80 }
+    const rect = el.getBoundingClientRect()
+    return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+  }, [screenToFlowPosition])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [clipTip, setClipTip] = useState<string>('')
   const clipboard = useRef<{ nodes: GameNode[]; edges: GameEdge[] } | null>(null)
@@ -643,13 +650,45 @@ function GraphCanvasInner({
           {clipTip}
         </div>
       )}
-      {(onAddNode || onAddPackNode || onFitLayout) && (
-        <div className="gv-canvas-chrome">
-          {onAddNode && <button type="button" onClick={onAddNode} title="添加演出节点">＋ 添加节点</button>}
-          {onAddPackNode && <button type="button" onClick={onAddPackNode} title="添加子蓝图容器（新建空包并引用）">＋ 子蓝图</button>}
-          {onFitLayout && <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选">⤢ 自适应</button>}
-        </div>
-      )}
+      <div className="gv-canvas-chrome">
+        {onAddNode && (
+          <button
+            type="button"
+            onClick={() => {
+              const c = viewportCenter()
+              // 轻微抖动，连续添加时不完全重叠。
+              onAddNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
+            }}
+            title="添加演出节点"
+          >
+            ＋ 添加节点
+          </button>
+        )}
+        {onAddPackNode && (
+          <button
+            type="button"
+            onClick={() => {
+              const c = viewportCenter()
+              onAddPackNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
+            }}
+            title="添加子蓝图容器（新建空包并引用）"
+          >
+            ＋ 子蓝图
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => fitView({ padding: 0.18, duration: 200, maxZoom: 1 })}
+          title="把整张图框进视口正中（不改动节点位置）"
+        >
+          ◎ 居中
+        </button>
+        {onFitLayout && (
+          <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选">
+            ⤢ 自适应
+          </button>
+        )}
+      </div>
     </div>
   )
 }

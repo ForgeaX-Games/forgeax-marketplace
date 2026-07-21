@@ -30,7 +30,7 @@ process.env.FORGEAX_PROJECT_ROOT = root
 // ── PHASE 0 prep: seed the legacy implicit pipeline at <root>/state/graph.json
 // BEFORE the app starts. GraphStore.save writes a hash-valid file; the registry
 // must adopt it as the default project on first init (no file moves).
-const seedRt = createRuntime({ projectRoot: root, pipelineId: 'main', pluginId: '@forgeax-extension/wb-scene-generator' })
+const seedRt = createRuntime({ projectRoot: root, pipelineId: 'main', pluginId: '@forgeax-plugin/wb-scene-generator' })
 const ts = new Date().toISOString()
 seedRt.graph.save({
   schemaVersion: 1,

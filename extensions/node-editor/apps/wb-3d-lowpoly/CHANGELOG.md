@@ -10,8 +10,43 @@
 
 ## Unreleased
 
+### Changed
+
+- **Auto-skin (`g_skin`, `frontend/.../three/auto-skin.ts`) tightened further to
+  reduce animation deformation amplitude.** Why: even with the earlier
+  `falloff=4`/`maxInfluences=2` hardening, the (previously unexposed)
+  `radiusFactor=2.5` relative-distance cutoff still let a vertex's second-nearest
+  bone sneak into its weight set fairly easily, softly blending limb "belly"
+  vertices toward neighboring segments and producing more visible stretch/candy-
+  wrapper deformation than desired. `DEFAULT_RADIUS_FACTOR` 2.5 → 1.6 (tighter
+  cutoff, fewer far bones qualify) and the effective default `falloff` 4 → 5
+  (sharper weight decay among the bones that do qualify) — set both in
+  `auto-skin.ts` and, since `g_to_rig/index.ts` supplies its own fallback when the
+  DSL omits `skin(falloff=...)`, there too (`meta.json` default/description for
+  `g_skin.falloff` updated to match). `radiusFactor` is still not exposed via the
+  DSL — only tunable by editing the `auto-skin.ts` constant.
+
 ### Added
 
+- **Three terminal pipelines, content-routed (static / URDF / character).** Why:
+  static props were previously forced through the URDF terminal (a single-link
+  robot) just to preview/export, which was conceptually wrong and blocked a clean
+  merged-GLB path. The DSL compiler (`dsl-to-graph.ts`) now inspects the graph and
+  routes to one of three terminal chains — auto-inferred by content, with an
+  optional explicit `pipeline` override on `lowpoly:model.apply`
+  (`static` / `mechanical`|`urdf` / `character`):
+  - **Static** (no `joint`, no `skin`/`skeleton`): `g_geometry_qc → [g_bake_object]
+    → g_to_scene → scene_preview`. New batteries `g_to_scene` (Output/Export) emits
+    a `SceneSpec` IR (placed, colored mesh references) and `scene_preview` (terminal)
+    hands it to the viewer. Real-shape parts are merged into a **single
+    multi-material `.glb`** via `g_bake_object`; mesh-ref scenes skip the bake and
+    place library blobs directly. Exports `mode="static"`.
+  - **URDF** (has `joint`): unchanged `g_geometry_qc → g_to_urdf`; articulated `.glb`.
+  - **Character** (has `bone`/`skeleton`/`skin`): `g_skin_qc →
+    g_bake_object → g_to_rig → rig_preview`; skinned `.glb` (`mode="character"`).
+- **Scenes now route through the static pipeline.** Multi-part jointless scenes
+  merge into one multi-material GLB via `g_to_scene`; the old URDF auto-stitch
+  (synthetic fixed joints / floating-link + island QC) is no longer used for scenes.
 - **New CSG battery `g_fillet` (Modify/CSG) — general-purpose edge fillet/chamfer
   on any solid.** Why: replicad's `.fillet()`/`.chamfer()` were only used *inside*
   individual part builders (`brackets`/`controls`/`panels`/`architecture`); there
@@ -198,6 +233,16 @@
 
 ### Changed
 
+- **Frontend viewer renamed from URDF-centric to generic 3D naming (breaking wire
+  contract).** Why: the single viewport now serves all three pipelines, so
+  "URDF viewer" was a misnomer. `surfaces/urdf/` → `surfaces/viewer3d/` (inner
+  `viewer3d/` three.js layer → `viewer3d/three/`); `UrdfViewerSurface` →
+  `Viewer3DSurface`; `useUrdfLiveSync` → `useViewer3DLiveSync`; `useUrdfScene` →
+  `useViewer3DScene`. The pane/runtime contract changed too: `?pane=urdf` →
+  `?pane=viewer3d`, localStorage `wb3d:urdfInline` → `wb3d:viewer3dInline`.
+  Headless scripts (`headless-renderer.mjs`, `north-star-loop.mjs`,
+  `verify-baker-pixels.mjs`) and the `App.tsx` router were updated in lockstep;
+  saved embed-toggle preferences under the old key are dropped (defaults back on).
 - **`g_geometry_qc` FK + AABB math extracted to shared `vendor/.../fk.ts` (de-dup).**
   Why: `g_metrics` needs the same world-frame FK + interpenetration math; keeping it
   inlined in QC would fork into a second drifting copy. `computeWorldTransforms`,
@@ -368,7 +413,7 @@
     same ToolRegistry/QC loop, recasts the modeling philosophy as a *building
     brief*); enumerated the Architecture family in top-level `SKILL.md`, the
     `battery-catalog.md` family table + routing, and a new **Architecture** page
-    in `modeling-guide.md`; registered the skill in `forgeax-extension.json`.
+    in `modeling-guide.md`; registered the skill in `forgeax-plugin.json`.
   - **Tests**: `backend/tests/architecture.test.ts` — real OCCT bakes
     (wall ±opening, slab, stairs, gable/hip/shed roof, window, door leaf),
     `g_wall`/`g_window`/`g_door` DSL emission + validate, `subdivideFootprint`
@@ -468,7 +513,7 @@
   - Companion `agent-lowpoly` persona/manifest (no CHANGELOG in that plugin):
     `persona/zh.md` + `AGENT.md` rewritten to the three-tier spine with intent
     triage and the self-check/self-fix loop (replacing the "screenshot critique,
-    hand it back to the user" anti-pattern); `forgeax-extension.json` description
+    hand it back to the user" anti-pattern); `forgeax-plugin.json` description
     widened from props/mechanical to also cover buildings and scenes/cities.
 - **`primitive_only` QC signal now fires for box-stacks wrapped in parts/joints.**
   The original gate required `no part` **and** `no joint`, so the moment a model
@@ -631,7 +676,7 @@
 - **The canvas top-right "projects" button + modal were removed** in favour of the
   left-pane `<ProjectPanel>` (`frontend/src/workbench/WorkbenchHost.tsx`). *Why:*
   one project-management surface, in the left pane, for both the human and the LLM.
-  - New AI tool **`lowpoly:export-glb`** (`forgeax-extension.json` provides.tools, `exposedToAI`):
+  - New AI tool **`lowpoly:export-glb`** (`forgeax-plugin.json` provides.tools, `exposedToAI`):
     bakes the current pipeline model to an engine-neutral `.glb` (with joint-preview
     animation) under `<projectRoot>/assets/3d/<name>.glb`. Mirrors the screenshot WS
     round-trip — backend `/api/v1/agent/glb/{export,store}` (`backend/src/agent/{routes,

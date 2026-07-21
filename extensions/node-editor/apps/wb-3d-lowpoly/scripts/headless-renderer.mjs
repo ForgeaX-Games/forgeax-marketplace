@@ -9,7 +9,7 @@
  * open (or a self-signed cert blocks their wss in a sub-iframe), the agent's
  * capture always times out.
  *
- * This daemon runs the EXISTING `?pane=urdf` surface (UrdfViewerSurface, which
+ * This daemon runs the EXISTING `?pane=viewer3d` surface (Viewer3DSurface, which
  * mounts useScreenshotCapture) inside a headless Chromium with
  * ignoreHTTPSErrors=true — so it bypasses the self-signed cert and stays
  * connected as an always-on renderer. No change to the render mechanism or any
@@ -22,7 +22,7 @@
  */
 const PORT = process.env.LOWPOLY_FRONTEND_PORT || process.env.VITE_DEV_PORT || '9565';
 const PROTO = (process.env.VITE_DEV_HTTPS_CERT && process.env.VITE_DEV_HTTPS_KEY) ? 'https' : 'http';
-const URL = process.env.LOWPOLY_RENDERER_URL || `${PROTO}://localhost:${PORT}/?pane=urdf`;
+const URL = process.env.LOWPOLY_RENDERER_URL || `${PROTO}://localhost:${PORT}/?pane=viewer3d`;
 
 if (process.env.FORGEAX_LOWPOLY_HEADLESS_RENDERER === '0') {
   console.log('[lowpoly-renderer] disabled via FORGEAX_LOWPOLY_HEADLESS_RENDERER=0');

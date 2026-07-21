@@ -161,6 +161,19 @@ function checkSemanticRefs(
   } else if (stmt.op === 'translate' || stmt.op === 'rotate' || stmt.op === 'scale' || stmt.op === 'mirror' || stmt.op === 'array_linear' || stmt.op === 'array_radial') {
     const shape = stmt.args.shape;
     if (shape?.kind === 'ref') expectProduces(stmt, 'shape', shape.name, 'shape', byId, errors);
+  } else if (stmt.op === 'bone' || stmt.op === 'bone_chain') {
+    const parent = stmt.args.parent;
+    if (parent?.kind === 'ref') expectProduces(stmt, 'parent', parent.name, 'bone', byId, errors);
+    const sourcePart = stmt.args.source_part;
+    if (sourcePart?.kind === 'ref') expectProduces(stmt, 'source_part', sourcePart.name, 'part', byId, errors);
+  } else if (stmt.op === 'skeleton') {
+    const root = stmt.args.root;
+    if (root?.kind === 'ref') expectProduces(stmt, 'root', root.name, 'bone', byId, errors);
+  } else if (stmt.op === 'skin') {
+    const skeleton = stmt.args.skeleton;
+    if (skeleton?.kind === 'ref') expectProduces(stmt, 'skeleton', skeleton.name, 'skeleton', byId, errors);
+    const mesh = stmt.args.mesh;
+    if (mesh?.kind === 'ref') expectProduces(stmt, 'mesh', mesh.name, 'shape', byId, errors);
   }
 }
 
@@ -168,7 +181,7 @@ function expectProduces(
   stmt: Statement,
   argName: string,
   refName: string,
-  produces: 'shape' | 'material' | 'part' | 'joint' | 'sketch',
+  produces: 'shape' | 'material' | 'part' | 'joint' | 'sketch' | 'bone' | 'skeleton' | 'skin',
   byId: ReadonlyMap<string, Statement>,
   errors: GeometryError[],
 ): void {

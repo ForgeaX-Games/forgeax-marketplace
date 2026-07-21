@@ -34,8 +34,16 @@ const HISTORY_FILE = 'baked-scene-history.json'
 const DEFAULT_HISTORY_LIMIT = 50
 /** Skip undo snapshots larger than this (prevents Invalid string length on history file). */
 const MAX_HISTORY_SNAPSHOT_BYTES = 2_000_000
-/** Summary/browse must never parse multi‑MB baked trees (blocks the whole backend). */
-const MAX_SUMMARY_BAKED_BYTES = 8 * 1024 * 1024
+/**
+ * Max size of baked-scene.json we will parse for list/browse/edit.
+ * Was 8MB — large Bake-selected scenes routinely exceed that, which made
+ * summary return `{layers:[], truncated:true}` and full list throw, so the
+ * Editable panel stayed empty after a successful bake. Align with the HTTP
+ * bake bodyLimit (64MB).
+ */
+const MAX_BAKED_LOAD_BYTES = 64 * 1024 * 1024
+/** Soft warn threshold — still load, but log so ops can spot heavy projects. */
+const WARN_BAKED_LOAD_BYTES = 8 * 1024 * 1024
 /** History metadata-only reads skip corrupt/huge files without JSON.parse. */
 const MAX_HISTORY_FILE_BYTES = 4 * 1024 * 1024
 
@@ -576,11 +584,14 @@ export interface BakedLayersSummaryResult {
 /** Layer metadata without voxel cells — for UI browse / project switch. */
 export function listBakedLayersSummaryForProjectDir(projDir: string): BakedLayersSummaryResult {
   const bytes = bakedSceneBytes(projDir)
-  if (bytes > MAX_SUMMARY_BAKED_BYTES) {
+  if (bytes > MAX_BAKED_LOAD_BYTES) {
     console.warn(
-      `[baked] summary skipped: baked-scene.json ${bytes} bytes (limit ${MAX_SUMMARY_BAKED_BYTES}) — UI browse returns empty; run replace bake to rebuild`,
+      `[baked] summary skipped: baked-scene.json ${bytes} bytes (limit ${MAX_BAKED_LOAD_BYTES}) — UI browse returns empty`,
     )
     return { layers: [], truncated: true }
+  }
+  if (bytes > WARN_BAKED_LOAD_BYTES) {
+    console.warn(`[baked] summary loading large baked-scene.json (${bytes} bytes)`)
   }
   return { layers: projectBakedSummary(load(projDir)) }
 }
@@ -602,10 +613,13 @@ export async function listBakedLayersForProject(projectId: string): Promise<Bake
 export async function listBakedLayers(): Promise<BakedLayer[]> {
   const projDir = await getActiveProjectDir()
   const bytes = bakedSceneBytes(projDir)
-  if (bytes > MAX_SUMMARY_BAKED_BYTES) {
+  if (bytes > MAX_BAKED_LOAD_BYTES) {
     throw new Error(
-      `baked-scene.json too large (${bytes} bytes) — clear or replace before loading full cells`,
+      `baked-scene.json too large (${bytes} bytes, limit ${MAX_BAKED_LOAD_BYTES}) — clear or replace before loading full cells`,
     )
+  }
+  if (bytes > WARN_BAKED_LOAD_BYTES) {
+    console.warn(`[baked] full load of large baked-scene.json (${bytes} bytes)`)
   }
   return listBakedLayersForProjectDir(projDir)
 }

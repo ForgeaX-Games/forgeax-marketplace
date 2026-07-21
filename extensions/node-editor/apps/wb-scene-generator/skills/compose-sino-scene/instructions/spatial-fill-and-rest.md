@@ -46,20 +46,23 @@ keypoint `area`（S=64, M=400, L=2025, XL=8100）是**参考**，可调整：
 }
 ```
 
-## 装饰分层（各处都有，分工不同）
+## 装饰选型（按能力，不必硬凑三种）
 
-| 层 | 模板 | 典型位置 |
-|----|------|----------|
-| 商业 | PlaceOne | PathConnection 走廊 / 门旁 |
-| 结构 | LocalPrecise | 建筑前庭 |
-| 植被 | Natural（**多次**） | 各 Rest 段外围 — **每组一种 asset，density≈0.01** |
+| 模板 | 何时用 | 可挂资产 | 典型位置 |
+|------|--------|----------|----------|
+| PlaceOne | 少量、有明确位置和/或底面尺寸 | 需占格贴合的物件 | 走廊 / 门旁 / 地标 |
+| LocalPrecise | 兴趣点旁一簇点缀 | **仅**简单小物件 | 建筑前庭 |
+| Natural（可多次） | 大片 Rest 防空白 | **仅**简单植被/石块 | 各 Rest 段外围 |
+
+- 有宽深 + 落点 → **优先 PlaceOne**；Local/Natural **无**单颗 footprint 口。
+- 装饰很少且全是精准物件 → 可以只用 PlaceOne。
 
 **NaturalDecorationDistribution 纪律**：
 - **一次一种** itemName — 多品种 = 多组 + Rest 链（`out_2` → 下一 `in_1`）
-- **Density ≈ 0.01** — 稀疏多样，禁止高密度铺满
-- checklist 写 **≥3 个** Natural task（不同 asset 或不同 Rest 段），禁止每类只象征性 1 次
+- **Density 分层** — `0.008` 中间参考，**硬上限 ≤0.01**；树稀（~0.004–0.006）/ 灌木中 / 草密（~0.008–0.01）；禁止全层同一值
+- 需要植被层次时 checklist 写多层 Natural（不同 asset **且**不同 density）
 
-同一 Rest 可**多种模板**串联（PlaceOne → Local → Natural₁ → Natural₂ …）。
+同一 Rest 可串联（PlaceOne → Local → Natural₁ → Natural₂ …）。
 
 ## PathConnection POI（checklist 必写 poiDerivation）
 
@@ -70,7 +73,7 @@ keypoint `area`（S=64, M=400, L=2025, XL=8100）是**参考**，可调整：
 ## Hill / Mountain（Rest 串链）
 
 - `MountainContourGenerate.in_0` / `HillContourGenerate.in_0` ← **上一组 Rest**（道路 `out_2` 或前段地形 `out_*` Rest）
-- **禁止**道路 Rest、Mountain、Hill、装饰 **并行**接同一节点 — 必须 checklist 里 **connectFrom 串链**
+- **禁止**道路 Rest、Mountain、Hill、装饰 **并行**接同一节点 — 必须 checklist 里 **connectFrom 串链**。命中并行 fan-out 或局部非法 merge 时，`pipeline.execute` 现在会直接抛错并在 `verification.topologyIssues` 里给出 `suggestedOps`，不用等到看到"某节点无输出"才反推。
 - 推荐：道路 → Mountain（外围）→ Hill（局部）→ 装饰
 
 ## 材质分区（纯资产）

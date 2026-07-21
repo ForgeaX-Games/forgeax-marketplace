@@ -42,7 +42,9 @@ const resolverCmd = [
   '--module esnext --moduleResolution bundler --target es2022',
   '--skipLibCheck --declaration false --noEmitOnError false --verbatimModuleSyntax',
   '--rootDir frontend/src --outDir vendor/dist/renderer-resolve',
+  // spriteResolver (billboard cook) + modelVariants (mesh3d export / preview parity)
   'frontend/src/renderer/server/spriteResolver.ts',
+  'frontend/src/renderer/modes/mesh3d/modelVariants.ts',
 ].join(' ')
 execSync(resolverCmd, { stdio: 'inherit', cwd: appRoot })
 

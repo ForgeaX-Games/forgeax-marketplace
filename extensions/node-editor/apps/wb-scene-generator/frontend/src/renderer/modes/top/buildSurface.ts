@@ -15,7 +15,7 @@
 import type { CellSource } from '../../framework/cellSource'
 import { createSurface, type Surface2D } from '../../framework/canvas2d'
 import type { DrawMode } from '../../types'
-import { colorForLayerIdx, colorForValue } from '../../framework/palette'
+import { colorForValue } from '../../framework/palette'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
 import type { AliasMeta } from '../../framework/asset/matchAssetEntry'
 import { matchAssetEntry } from '../../framework/asset/matchAssetEntry'
@@ -200,13 +200,10 @@ function buildColorSurface(source: CellSource, opts: BuildSurfaceOpts): Surface2
   const img = ctx.createImageData(w, h)
   const buf = img.data
 
-  const isMulti = source.isMultiValue
-  const { layerIdx, selectedSubValue } = opts
+  const { selectedSubValue } = opts
   source.iterCells(({ col, row, value }) => {
     const isSubDimmed = selectedSubValue !== null && value !== selectedSubValue
-    const c = isMulti
-      ? colorForValue(value, { subDimmed: isSubDimmed, alpha: 0.78 })
-      : colorForLayerIdx(layerIdx, { subDimmed: isSubDimmed, alpha: 0.78 })
+    const c = colorForValue(value, { subDimmed: isSubDimmed, alpha: 0.78 })
     const idx = (row * w + col) * 4
     buf[idx]     = c.r
     buf[idx + 1] = c.g

@@ -3,21 +3,26 @@
 > [SKILL.md](../SKILL.md) 的**意图分诊**把「场景 / 城市 / 多物体 + 建筑的空间组合」路由到此。
 > 本文件是 **SCENE 编排**的完整执行步骤——它**包裹** [PART A](part-a-asset.md) /
 > [PART B](part-b-building.md) 的逐件建模，再以本文件的**组装阶段**收尾。
-> 授权参考：DSL 语法 [dsl-quickref.md](../dsl-quickref.md)、op 签名 [op-directory.md](../op-directory.md)；
+> 授权参考：DSL 语法 [dsl-quickref.md](../dsl-quickref.md)、op 签名——组装阶段只需
+> [core](../op-directory/core.md)（`mesh`）+ [assembly-misc](../op-directory/assembly-misc.md)
+> （`part`/`material`），逐件建模阶段的分片由你打开的 A/B execution 文件各自链接；
 > 选型拿不准再查 [battery-catalog.md](../battery-catalog.md)。按需读取，别一次全读。
 
 > **DSL-first（读这条，覆盖下方旧写法）**：逐件建模 + 烘焙用 `lowpoly:model.apply({ source, bake })`
 > （每件 `baked.filename`=`<sha>.obj`，`lowpoly:parts.list` 可查）。**组装阶段只写 DSL**：每实例
 > `mesh(filename="<sha>.obj", bbox_min=..., bbox_max=...)` → `part(origin=位姿, rpy, material=...)`，
-> **不写 joint**（`g_to_urdf` 自动把无 joint 的根缝成一棵树），一次 `model.apply` 收尾。大量同款复用 =
-> **同一 `<sha>.obj` + 多个不同 origin 的 `part`**（别用 `translate`/`array_*` 摆位，会重烘）。完成判定
-> 看回执——`meshQc` 穿模才是硬信号（`mesh` 必须带 `bbox_min/max`）。语法见
-> [dsl-quickref.md](../dsl-quickref.md)，op 签名见 [op-directory.md](../op-directory.md)。
+> **不写 joint**。无 joint 的场景 DSL **走静态路**（终端 `g_geometry_qc → g_to_scene → scene_preview`）：
+> `g_to_scene` 从每个 mesh-ref part 读 filename + 位姿 + 颜色装成 `SceneSpec`，前端逐条加载合并、导出为
+> **单个多材质 `.glb`**（`export-glb mode="static"`）——**不再走 URDF auto-stitch**。一次 `model.apply`
+> 收尾。大量同款复用 = **同一 `<sha>.obj` + 多个不同 origin 的 `part`**（别用 `translate`/`array_*` 摆位，
+> 会重烘）。完成判定看回执——`meshQc` 穿模才是硬信号（`mesh` 必须带 `bbox_min/max`）。语法见
+> [dsl-quickref.md](../dsl-quickref.md)，op 签名见 [core](../op-directory/core.md) /
+> [assembly-misc](../op-directory/assembly-misc.md)。
 
 适用：用户要的不是单个物件，而是**多个各自独立的物体 / 建筑共处一个环境**——一条街、一个村子、
 一座小城、一片柱列 + 道具阵、一整个小院落。SCENE 编排是一个**单 agent 内部循环**：
-**先列场景清单 → 逐个 unique item 走 A/B 建模 + bake → 最后按位姿把它们摆进同一棵 URDF 树并导出
-整场 `.glb`**。
+**先列场景清单 → 逐个 unique item 走 A/B 建模 + bake → 最后按位姿把它们摆进一段无 joint 的 DSL（走
+静态路 `g_to_scene`）、合并导出整场 `.glb`**。
 
 > **这不是「纯组装」**——它前面包着完整的逐件建模（A/B）。真正「不建新几何」的只有**最后的组装
 > 阶段**：那一段只引用现成 `<sha>.obj`、给每个实例摆位姿、补色、QC、导出。要新增 / 修改某个件的
@@ -129,8 +134,8 @@ workspace）**服务。若部署给不同项目起了不同后端实例（不同
 ## 组装阶段限制：OBJ 不带材质 → 颜色是「每 part 一种」（多色物体要分件 bake）
 
 `g_bake_part` 烘的是**纯几何 OBJ**，不带任何材质/颜色（baker 不写 `usemtl`/`vt`）。颜色只在组装阶段
-用 `g_material` / `g_named_color` 加在 **URDF link 的 `<material>`** 上——而 **URDF 一个 visual / 一个
-link 只能挂一种材质**。所以：
+用 `g_material` / `g_named_color` 加在 **引用它的 `g_part`** 上——静态路的 `g_to_scene` 把每个 mesh-ref
+part 的颜色读成该 `SceneSpec` item 的 `rgba`，而 **一个 mesh-ref part 只承载一种颜色**。所以：
 
 > **一个 `<sha>.obj` = 一个 `g_part` = 一种颜色。** 想"先把颜色烤进 mesh 再 bake"是行不通的——bake
 > 一定把材质丢掉。
@@ -151,10 +156,11 @@ g_box/g_cylinder/g_revolve/g_knob…（各 part 的真形状） → g_material(�
 场景项目里：g_mesh(filename=<sha>.glb, bbox) → g_part(origin=物体落位)  ← 这个 g_part 不要再上 material！
 ```
 
-> **关键约束（否则报错 / 串色）：**
-> - **`g_bake_object` 吃的是"真形状"的 part，不是 `g_mesh` 引用。** 不要先用 `g_bake_part` 把各 part
->   烘成 `<sha>.obj` 再喂——那是路线 B 的接法，`g_bake_object` 遇到 `mesh` part 会直接报错（mesh 已是
->   烘好的三角面、无法再细分、也没有颜色源）。路线 A 就是"跳过 OBJ 暂存、整只物体一次烘成带色 GLB"。
+> **关键约束（否则串色）：**
+> - **路线 A 首选用"真形状"的 part 直接烘**（跳过 OBJ 暂存、整只物体一次烘成带色 GLB）。`g_bake_object`
+>   **现在也接受 `g_mesh` 引用的预烘 `<sha>.obj`**（会回读该 blob 的三角面、按 part 位姿合并、颜色取该
+>   part 的 `g_material`，缺省灰）——所以"分件 `g_bake_part` → 引用组装再整组烘"也能出带色 GLB。仍**只支持
+>   `<sha>.obj`**，别把另一个 `g_bake_object` 的 `<sha>.glb` 再喂进来。
 > - **引用 `<sha>.glb` 的 `g_part` 不要再上 `g_material`。** GLB 自带每-part 颜色，viewer 只有在该 link
 >   **没有** material 时才保留内嵌色；一旦上了 link material 就会把整只物体重新刷成那一种颜色。
 > - **只适合静态物体**：`g_bake_object` 把各 part 的位姿烘进顶点、合成一个静态 mesh，**不保留可动关节**。
@@ -171,7 +177,7 @@ g_box/g_cylinder/g_revolve/g_knob…（各 part 的真形状） → g_material(�
   墙体 / 门窗…），**每个颜色区各自 `g_bake_part` 成一个 `<sha>.obj`**（记各自的 bbox）。不要把整只物体
   塞进一个 `g_bake_part`——那只会得到一坨单色几何。
 - **组装时按件上色**：该物体的每个 `<sha>.obj` → `g_mesh` → `g_part`（origin 用件在物体内的相对位姿）
-  → 各配一次 `g_material`。这几个 part 共同组成"这一件物体"，靠 auto-stitch 缝在一起。
+  → 各配一次 `g_material`。这几个 part 各自成为一个 `SceneSpec` item，共同组成"这一件物体"。
 - **实例化照旧成立**：同款多色物体复用时，是**这一组 `<sha>.obj`**整组复用——每份实例按物体基准 origin
   平移即可，单件仍只烘一次。
 - **单色物体才一个 mesh**：确实通体一个颜色的物体（一根原木柱、一块石头），整只烘成一个 `<sha>.obj`
@@ -200,9 +206,13 @@ g_box/g_cylinder/g_revolve/g_knob…（各 part 的真形状） → g_material(�
 **实例化复用是这里的主力**：同款的 N 份**共用同一个 `<sha>.obj`**，只是每行 origin / rpy 不同——
 一栋楼建一次、摆 200 个 `g_part`。**不要**为「摆位」去 transform / 阵列引用 mesh（见下方重烘陷阱）。
 
-地面根：用 `g_box`（薄板当地面）或建筑场景用 PART B 的 `g_floor_slab` 当根 link。**场景模式下其余
-实例不必显式连 joint**——`g_to_urdf` 的 auto-stitch 会把无 joint 的根 part 自动用 fixed joint 缝成
-单一根树（位姿已经在每个 `g_part` 自己的 origin 上了）。
+地面根：用 `g_box`（薄板当地面）或建筑场景用 PART B 的 `g_floor_slab` 当一个普通实例。**场景走静态路，
+实例之间无需任何 joint**——每个 mesh-ref `g_part` 就是 `g_to_scene` 眼里的一个独立 `SceneSpec` item，
+位姿直接取自它自己的 `origin`/`rpy`（不再有"根树"概念）。
+
+地形/瓦砾装饰件（岩石、石堆、碎石）**用 `g_rock`（DSL `rock`/`boulder`）而不是 `g_sphere`**——不同
+`seed` 一次生成多个不重复的不规则外形，无需单独 bake（不是 replicad 实体，可直接当 primitive 摆位）；
+但它是三角网格产物，**不能**参与 `union`/`difference`/`intersection`。
 
 ## 阶段2 · 按 bbox 摆位纪律（摆放正确性的核心）
 
@@ -229,41 +239,40 @@ g_box/g_cylinder/g_revolve/g_knob…（各 part 的真形状） → g_material(�
   进阶（跨项目引用，见上方注脚）：filename 取自源项目的 bake 返回值。
 - **同时记下每个件的 `bbox_min` / `bbox_max` / `size`**（`g_bake_part` 输出）——摆位与填
   `g_mesh.bbox_*` 都要用。
-- `mesh` / `part`（`origin` / `rpy`）/ `material` 的参数名查 [op-directory.md](../op-directory.md)
-  （**绝不凭记忆编**）；要读当前 DSL 用 `lowpoly:model.get`。
+- `mesh` 的参数名查 [core](../op-directory/core.md)；`part`（`origin` / `rpy`）/ `material` 查
+  [assembly-misc](../op-directory/assembly-misc.md)（**绝不凭记忆编**）；要读当前 DSL 用
+  `lowpoly:model.get`。
 
-## 阶段4 · 搭场景图（一段干净 DSL）
+## 阶段4 · 搭场景图（一段干净 DSL，走静态路）
 
 按布局清单**重写一段干净的几何 DSL**。**默认配方：每实例 `g_mesh → g_part(origin=位姿, rpy,
-material)`，不写 `g_joint_fixed`**，靠 auto-stitch 成树：
+material)`，不写 `g_joint_fixed`**。无 joint 的 DSL 自动走**静态路**（`g_geometry_qc → g_to_scene →
+scene_preview`）——`g_to_scene` 把每个 mesh-ref part 装成 `SceneSpec` item：
 
-1. **建场景根**：`g_box`（薄地面板）或 `g_floor_slab` → `g_part`（root link，origin 在原点）。
-2. **每个实例**：
+1. **每个实例**（包括地面板 `g_box` / `g_floor_slab`，也只是一个普通实例，无需当"根"）：
    - `g_mesh(filename=<sha>.obj 或 <sha>.glb, sx/sy/sz=…, bbox_min=…, bbox_max=…)` 引用 mesh
      （viewer 支持 `.obj` / `.glb` / `.gltf`）。**`bbox_min`/`bbox_max` 直接接 `g_bake_part` /
      `g_bake_object` 的同名输出**——填了 mesh 才能解出 AABB、QC overlap 才生效（见阶段2）。
-   - `g_part` 包成 link，**位姿写在这个 `g_part` 自己的 `origin`（xyz）/ `rpy` 上**——填阶段2 按 bbox
-     算出来的坐标（底面落地 `z=-bbox_min.z*sz`、间距、朝向）。它会直接渲染成 link 的
-     `<visual><origin>`。
-   - `g_material` / `g_named_color` 给这个实例配色（引用 `<sha>.obj` 时**必做**，OBJ 无材质）。
-     **例外**：若引用的是 `g_bake_object` 的 `<sha>.glb`（自带多色），**这个 `g_part` 不要上 material**，
-     否则会把整只物体刷成单色。
-   - **不连 `g_joint_fixed`**：导出端 auto-stitch 会把这些无 joint 的根 part 缝成单一根树。
-     （真正有机构联动的子装配——比如一扇会开的门——才在那个子装配内部用 `g_joint_*`；场景层级的
-     纯摆放不用。）
-3. **重复**直到所有实例都建好。同款复用 = **同一 `<sha>.obj` + 多个不同 origin 的 `g_part`**。
-4. **一次 `model.apply({ source })`**：编译器自动追加 QC + URDF 终端，回执把信号定位到 DSL 行号。
-   完成判定看回执的 QC structured signals：
-   - **`aabb_overlap`（warning，硬信号）**：rest pose 下相邻件 AABB 互相穿插——只要 `g_mesh` 填了
-     bbox 就会报出来。有 overlap 就回去**改对应 `g_part` origin / 布局步距**（拉开间距、修落地高度），
-     重跑 QC，直到不再报穿模。**这是场景模式下最该看的信号。**
-   - **`islands` / `floating_links` 可忽略**：场景模式丢了 joint 后，N 个无 joint 的 part 会被
-     `g_geometry_qc` 报成 N 个孤岛——这是**纯噪声**，导出端 auto-stitch 已经把它们缝进同一棵树。
-     别为消掉 islands 去乱加 joint，那只会把场景层级的位姿搬错地方。
-   - Phase 全是 `g_mesh` 引用，`g_to_urdf` 应报 `bakeFallbacks=0`、`report.meshFileCount=0`、
-     `stats.meshProvenance` 全 `native`（不应重新 bake）。
-5. **导出整场**：确认 QC 无穿模/错位（`aabb_overlap` 干净）之后，**用户要成品文件时**才
-   `lowpoly:export-glb`（`name` = 输出文件名，落到项目 `assets/3d/<name>.glb`）。
+   - `g_part` 包成一个 scene item，**位姿写在这个 `g_part` 自己的 `origin`（xyz）/ `rpy` 上**——填阶段2
+     按 bbox 算出来的坐标（底面落地 `z=-bbox_min.z*sz`、间距、朝向）。`g_to_scene` 把它读成该 item 的
+     `origin`/`rpy`/`scale`。
+   - `g_material` / `g_named_color` 给这个实例配色（引用 `<sha>.obj` 时**必做**，OBJ 无材质）——被读成
+     该 item 的 `rgba`。**例外**：若引用的是 `g_bake_object` 的 `<sha>.glb`（自带多色），**这个 `g_part`
+     不要上 material**，否则会覆盖内嵌色。
+   - **不连 `g_joint_fixed`**：静态路每个 mesh-ref part 本就是独立的一件，无需缝根。
+     （真正有机构联动的子装配——比如一扇会开的门——那是 PART A 机械件、走 URDF 路，不属于静态场景。）
+2. **重复**直到所有实例都建好。同款复用 = **同一 `<sha>.obj` + 多个不同 origin 的 `g_part`**。
+3. **一次 `model.apply({ source })`**：编译器自动追加 QC + 静态终端（`g_to_scene`），回执 `mode:"static"`、
+   `scene.items`/`scene.fingerprint`，并把信号定位到 DSL 行号。完成判定看回执的 QC structured signals：
+   - **`aabb_overlap` / `mesh_overlap`（note/warning，不 fail valid）**：rest pose 下 AABB 互穿在低模里
+     很常见（墙角/T 形接头/嵌框/落地贴合）。**默认忽略 `note`；`warning` 视情况审查**（用 `g_metrics`
+     `max_penetration`/`overlap_ratio` 判断是真穿模还是保守误报）。只有明显错位/大体积穿模才回去改
+     `g_part` origin / 布局步距。
+   - **静态路无 `islands` / `floating_links` 判据**：不再有 URDF 根树，每个 mesh-ref part 就是一件，
+     不会被报孤岛，也无需加 joint 缝根。
+4. **导出整场**：确认回执 `ok:true`、无 **error** 级信号（`missing_aabb` 等）、`scene.items` 符合预期之后，
+   **用户要成品文件时**才 `lowpoly:export-glb({ mode: "static" })`（`name` = 输出文件名，落到项目
+   `assets/3d/<name>.glb`；静态路把各 item 合并成单个多材质 GLB）。
 
 组装是一次 `model.apply({ source })`——回执把错误/QC 信号定位到 DSL 行号，读回执即可，不必额外拉图。
 布局不对**只调 `part` 的 origin / rpy / 配色**——别回头改 mesh 内部几何（那要回 PART A/B 重 bake）。
@@ -276,9 +285,9 @@ material)`，不写 `g_joint_fixed`**，靠 auto-stitch 成树：
 
 ## 迭代
 
-**完成判定看 `g_geometry_qc` 的 structured signals**（场景模式只盯 `aabb_overlap`，`islands` 当
-噪声忽略）：对照 brief 用 bbox/size 核对每个实例的摆位、间距、朝向、配色，有没有穿模/悬空。有穿模/
-错位 → 改 `g_part` origin / 布局步距 / 落地高度，重跑 QC，直到不再报 `aabb_overlap`。
+**完成判定看 `g_geometry_qc` 的 structured signals**（静态路：overlap 当信息信号，只有明显穿模才修）：
+对照 brief 用 bbox/size 核对每个实例的摆位、间距、朝向、配色。明显穿模/悬空 → 改 `g_part` origin /
+布局步距 / 落地高度。静态路无 `floating_link`/`islands` 判据（无 URDF 根树）。
 要换某个件的造型 → 回 [PART A](part-a-asset.md) /
 [PART B](part-b-building.md) 重建 +
 重 bake 那一个，filename / bbox 变了再回这里把对应 `g_mesh` 的 `filename` 与

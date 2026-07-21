@@ -11,7 +11,7 @@ displayName:
 This plugin extends `@forgeax/node-runtime` with domain ops and surfaces
 specific to **Scene Generator** workflows. AI agents drive editor actions
 through Studio ToolRegistry (`/api/tools/call`) tools declared in
-`forgeax-extension.json`; nothing in this plugin requires a human-only path.
+`forgeax-plugin.json`; nothing in this plugin requires a human-only path.
 
 ## Workflow shape
 

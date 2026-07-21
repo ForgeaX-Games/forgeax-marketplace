@@ -18,9 +18,11 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     w: number
     h: number
   }
-  export type FaceKeyMode = 'adjacent4' | 'edgeDist2'
+  export type FaceKeyMode = 'adjacent4' | 'adjacent8' | 'edgeDist2' | 'edgeDist4'
   export interface FaceVariant {
-    when: { regionContains: { region: string; offset: [number, number] } }
+    when:
+      | { regionContains: { region: string; offset: [number, number] } }
+      | { stateEquals: { key: string; value: string } }
     map: Record<string, number>
   }
   export interface RandomRule {
@@ -28,6 +30,10 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     keepProbability: number
     variantIdxs?: number[]
     variantWeights?: number[]
+  }
+  export interface FaceBlockVariant {
+    probability: number
+    groups: number[][]
   }
   export interface FaceRule {
     basePieces: number
@@ -37,12 +43,15 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     randomRules?: RandomRule[]
     variantIdxs?: number[]
     variantWeights?: number[]
+    blockVariants?: FaceBlockVariant
   }
   export interface CollectedCell {
     layerIdx: number
     x: number
     y: number
     z: number
+    /** per-cell state (e.g. slopeDir) read by face.variants when.stateEquals */
+    state?: Readonly<Record<string, unknown>>
     [extra: string]: unknown
   }
   export interface VariantPool {
@@ -51,7 +60,7 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
   }
   export interface PickFaceContext {
     face: FaceRule
-    faceTag: 'top' | 'front'
+    faceTag: 'top' | 'front' | 'entry'
     sprites: ReadonlyArray<RuleSprite>
     validVariantIdxs: ReadonlyArray<number>
     validVariantWeights?: ReadonlyArray<number>
@@ -61,6 +70,7 @@ declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js
     regions: Map<string, Set<string>>
   }
   export function pickFaceSpriteIndex(ctx: PickFaceContext): number
+  export function pickFaceSpriteIndexIfMapped(ctx: PickFaceContext): number | null
   export function pickFaceSprite(ctx: PickFaceContext): RuleSprite | null
   export function buildTopFaceKey(has: (dx: number, dy: number) => boolean, keyMode?: FaceKeyMode): string
   export function lookupWithWildcard(map: Record<string, number>, key: string): number | undefined

@@ -39,8 +39,15 @@
 scene → explode → rect_grid → voxel_slice（region）
   → alg_field_mountain_contour（[0,1] 高度场）
   → alg_partition_field_quantize（partition[] + levelGrid）
-  → grid2node + MultiNames(NamePrefix) + TileAssetName(AssetName)
-  → add_child；alg_region_union_all(partition) → subtract → Rest
+  → MultiNames(LayerIndices + Names) → grid2node(grid, name, z)
+  → TileAssetName(AssetName) → add_child
+  → alg_region_union_all(partition) → subtract → Rest
 ```
 
+**体素 z（高差）**：`alg_partition_field_quantize` 给出的是互斥 2D 分区（每层 footprint 不重叠）。必须把 `MultiNames.out_0`（LayerIndices：`0..N-1`）接到轮廓 `grid2node.z`；`grid2node` 按 `[0..z]` 实心柱写体素。只接 `name`/`grid`、不接 `z`/`zRange` 时默认 `zRange=[0]`，各 Contour 节点会叠在同一平面——看起来像「有多层节点却没有高差」。
+
+**区域形状**：高度场只在 `in_0` focus 的 footprint 内生成。若把本模板接在 `AreaPartition` 硬切半区上，分界处会像「矩形里算完再截断」。更合理的接法：整岛 / `DistanceZones.out_2`(Far 内陆) 等**有机边界**区域；`alg_field_mountain_contour` 默认带边缘衰减（`edgeFalloffCells`），从外缘向内平滑抬升。
+
 `in_0` 悬空会静默空跑。算法核心源自 `scene30/mountain/mountain_contour_generate`，已拆为 scenealg 原子电池。
+
+> 已实例化的旧项目组不会自动获得这条边；需重实例化模板，或手动把 MultiNames `out_0` → contour `grid2node.z`。

@@ -6,7 +6,7 @@
 >
 > **怎么用。** 先看 §1 同构骨架（哪些必然存在、放在哪），再看 §2 app↔core 消费缝（每个 app 都这么连内核），
 > 最后看 §3 三个 app 的领域差异表（只有这里不一样）。**只陈述代码现状**，定位方向自行判断。
-> 路径相对本仓根 `packages/marketplace/extensions/node-editor/`。
+> 路径相对本仓根 `packages/marketplace/plugins/node-editor/`。
 
 ---
 
@@ -17,7 +17,7 @@
 
 | 顶层项 | 角色 | 说明（三个 app 一致） |
 |---|---|---|
-| `forgeax-extension.json` | 插件清单 | `id @forgeax-extension/<name>`、`kind workbench` |
+| `forgeax-plugin.json` | 插件清单 | `id @forgeax-plugin/<name>`、`kind workbench` |
 | `package.json` / `tsconfig.json` | 包定义 | 以 `workspace:*` 引内核包 |
 | `backend/` | Fastify 后端进程 | 独立端口、独立 `FORGEAX_PROJECT_ROOT`（见根 [`AGENTS.md`](../AGENTS.md) §4 运行时隔离） |
 | `frontend/` | Vite + React 前端 | 挂内核 `<Editor>` + 本 app 的 surfaces |
@@ -105,7 +105,7 @@
 |---|---|---|---|
 | 领域 | 3D 几何 / 参数化 low-poly | 场景生成 / 素材库 | 2D 场景资产生成 |
 | 后端独有目录 | `services/`（baker） | `baked/` + `library/`（SQLite 素材库） | `ai/` + `assets/` + `baked/` + `library/` |
-| 前端独有 | `surfaces/urdf`（URDF 查看器） | `renderer/`（四模式）+ `panels/` + AssetStore | `renderer/` + `panels/` + 预览/生成图 surface |
+| 前端独有 | `surfaces/viewer3d`（3D 查看器：静态/URDF/角色三管线） | `renderer/`（四模式）+ `panels/` + AssetStore | `renderer/` + `panels/` + 预览/生成图 surface |
 | 顶层独有 | — | `assets/` + `materials/` | `assets/` + `materials/` + `pipelines/` |
 | 电池量级 | 数十级 | 数百级 | 数十级 |
 | 领域 port 类型 | 几何相关 | `scene`（`#fb923c`） | asset2d 相关 |

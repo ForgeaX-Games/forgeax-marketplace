@@ -2,12 +2,15 @@
 
 > templateId：`group_area_partition_district` / basename `AreaPartition`
 > 算法：`alg_region_area_partition`（配额 Voronoi + Lloyd 松弛 + 边界后处理）
+> 端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 何时用
 
 在**父区域**上按 **中心点 + 面积权重** 做**纯划分**，子区铺满父区域、两两不重叠。**不含水域** — 海岛用 `IslandRegions`。
 
 **无 Rest / 剩余区** — 配额划分会分完父区域；模板**不输出** Rest / RestPath。
+
+> 与 `IslandRegions` 的选型对比（块状可分离+带 Rest vs 无缝铺满+无 Rest）见 [IslandRegions.md](IslandRegions.md) 开头「0. 选型」一节。
 
 ## 输入端口
 
@@ -18,7 +21,7 @@
 | `in_2` | number list | 建议 | 面积权重；merge(`item`,`number`) — **禁止 tree** |
 | `in_3` | string tree | 建议 | 子区名，如 `划分子区域1`… |
 | `in_4` | string tree | 建议 | catalog tile 名列表 |
-| `in_5` | number | 可选 | Seed |
+| `in_5` | number | **必接** | Seed ← **`aw_m0_seed.seed`（全局固定非 0）**；禁止悬空/`seed:0` |
 | `in_6` | string item | **默认 organic** | BoundaryStyle |
 | `in_7` | number item | 默认 8 | RelaxIterations |
 | `in_8` | number item | 默认 12 | SmoothIterations |
@@ -41,7 +44,7 @@
 
 | out | 语义 | 去向 | 消费命令（白名单 opId） |
 |-----|------|------|-------------------------|
-| `out_0` | 主产物（父下挂全部分子区） | → `tree_merge` / 单区再施工 | `tree_merge`；单区：`text_panel`+`scene_focus_path`；多区扇出：`scene_focus_children` |
+| `out_0` | 主产物（父下挂全部分子区） | → `appendMergeItem`(`aw_m0_merge`) / 单区再施工 | 直接整体用就 `appendMergeItem`；单区：`text_panel`+`scene_focus_path`；多区扇出：`scene_focus_children` |
 | `out_1` | Zones 子树 | 仅子区 scene 直传 | 同 `out_0` |
 | `out_2` | ZonesPath | 拼 path 参考 | `string_concat` → `scene_focus_path` |
 

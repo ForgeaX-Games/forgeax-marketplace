@@ -32,6 +32,8 @@
 
 ## 内部管线
 
-`scene_passthrough → node_explode → rect_grid → voxel_slice`（取顶层切片做掩码）→ `hill_contour_generate`（多层等高线多值网格）→ `grid_split_by_value` → `grid2node`（按 `AssetName` 命名，挂 `asset_type=tile`）→ `add_child`；同时 `alg_region_subtract`（掩码 − 山包）得到 Rest 子树。最后 `scene_merge_subtrees` 合并并 `scene_focus_path` 分别聚焦，导出五个固定端口。
+`scene_passthrough → node_explode → rect_grid → voxel_slice`（取顶层切片做掩码）→ `hill_contour_generate`（多层等高线多值网格）→ `grid_split_by_value`（`grids` + `values`）→ `grid2node`（`grid`/`name`/`z←values`）→ `add_child`；同时 `alg_region_subtract`（掩码 − 山包）得到 Rest 子树。最后 `scene_merge_subtrees` 合并并 `scene_focus_path` 分别聚焦，导出五个固定端口。
+
+**体素 z**：`grid_split_by_value.values`（等高带键 1..N）必须接到 `grid2node.z`，否则各层节点都落在 `zRange=[0]` 平面上。
 
 `in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。

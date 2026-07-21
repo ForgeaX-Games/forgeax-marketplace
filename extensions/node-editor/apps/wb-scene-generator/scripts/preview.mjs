@@ -70,8 +70,8 @@ if (args.mode === 'free3d') {
 const projectRoot = args.projectRoot || mkdtempSync(join(tmpdir(), 'wb-scene-preview-'))
 process.env.FORGEAX_PROJECT_ROOT = projectRoot
 
-const rt = createRuntime({ projectRoot, pipelineId: 'preview', pluginId: '@forgeax-extension/wb-scene-generator' })
-const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-extension/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
+const rt = createRuntime({ projectRoot, pipelineId: 'preview', pluginId: '@forgeax-plugin/wb-scene-generator' })
+const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-plugin/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
 await loader.scan()
 
 // Execute the persisted graph. A fresh project root has no graph.json; the

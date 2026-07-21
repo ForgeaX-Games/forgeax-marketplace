@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 /**
- * gen-op-directory —— 从 op-registry(SSOT) 自动生成紧凑的 DSL op 目录。
+ * gen-op-directory —— 从 op-registry(SSOT) 自动生成分片的 DSL op 目录。
  *
- * 背景（Workstream B）：skill 里原先手写散文式的 op 说明，既冗长又易与 op-registry.ts
- * 漂移。这里改为从 vendor/dist 的 op-registry 反查，按 `produces` 分组，每个 op 一行
- * `name(param*, param?...)  — desc`（* = 必填，? = 可选），生成到 compose skill 根目录的
- * op-directory.md。agent 只需读这一份就能拿到全部 DSL op 的签名，无需再调 batteries.list。
+ * 背景（Workstream B，2026-07 拆分）：81+ 个 op 混在一份平铺的 op-directory.md 里，
+ * 单次典型建模（如 PART D 单个角色）也要连读全部签名，token 开销随 op 总数单调增长、
+ * 与当次任务实际用到的家族无关。这里把生成结果拆成按家族分片的小文件（见
+ * `skills/compose-lowpoly/op-directory/`），根目录 `op-directory.md` 退化为一份
+ * 薄索引（家族 → 分片文件 + op 计数），各 execution 文件按需只链接自己那几个分片。
+ *
+ * 分片归类是显式维护的名单（SHARDS 常量），不是从 op-registry 的 `produces` 字段推导——
+ * `produces` 只区分 shape/material/part/joint/sketch/misc/bone/skeleton/skin 这类
+ * "语义类别"，同为 `shape` 的 CSG 原语和机械 Parts/Gears 需要按"家族"进一步细分才有
+ * token 意义。新增 op 时记得把它加进下面对应的分片名单——脚本会对不在名单里的已注册
+ * op 打印警告并把它兜底放进 assembly-misc 分片，不会静默漏出。
  *
  * 用法：node scripts/gen-op-directory.mjs   （prebuild / 手动同步时跑）
  */
 
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -19,15 +26,70 @@ const appRoot = join(here, '..')
 
 const { listOpSpecs } = await import(join(appRoot, 'vendor/dist/shared/types/index.js'))
 
-const GROUP_ORDER = ['sketch', 'shape', 'material', 'part', 'joint', 'misc']
-const GROUP_LABEL = {
-  sketch: '2D Profiles (sketch) — must be consumed by extrude/loft/revolve',
-  shape: 'Shapes (solids/meshes)',
-  material: 'Material',
-  part: 'Part (URDF link)',
-  joint: 'Joint (URDF joint)',
-  misc: 'Misc',
-}
+/** 分片定义：id → { title, file, ops[] }。ops 按名单显式列出，顺序不重要（渲染时会按字母排序）。 */
+const SHARDS = [
+  {
+    id: 'core',
+    file: 'core.md',
+    title: '核心几何（Profile + CSG + Transform + 基础 primitive）',
+    summary:
+      '任何非平凡建模（PART A/B/D 都会用到）的地基：2D profile、CSG 布尔/拉伸/放样/扫掠/倒角、变换、以及基础 primitive（含 mesh 引用与 rock 不规则体）。',
+    ops: [
+      // sketch
+      'profile_circle', 'profile_polygon', 'profile_rect', 'profile_rounded_rect', 'profile_regular_polygon',
+      // primitives
+      'box', 'cylinder', 'sphere', 'cone', 'capsule', 'torus', 'dome', 'mesh', 'rock', 'boulder',
+      // csg
+      'extrude', 'extrude_with_holes', 'loft', 'pipe', 'sweep', 'section_loft', 'lathe', 'revolve',
+      'union', 'difference', 'intersection', 'fillet', 'chamfer',
+      // transform
+      'translate', 'rotate', 'scale', 'mirror', 'array_linear', 'array_radial',
+    ],
+  },
+  {
+    id: 'parts-mechanical',
+    file: 'parts-mechanical.md',
+    title: 'Parts + Gears（机械语义件）',
+    summary:
+      '可识别的机械件（把手、铰链、风扇、面板…）与齿轮家族。PART A 常用；PART B 装点装饰件（把手/通风格栅）时按需查；PART D 通常不需要。',
+    ops: [
+      'clevis_bracket', 'pivot_fork', 'trunnion_yoke',
+      'perforated_panel', 'slot_panel', 'vent_grille',
+      'fan_rotor', 'blower_wheel',
+      'knob', 'bezel', 'wheel', 'tire',
+      'barrel_hinge', 'piano_hinge',
+      'spur_gear', 'herringbone_gear', 'crossed_helical_gear', 'hyperbolic_gear',
+      'ring_gear', 'herringbone_ring_gear',
+      'rack_gear', 'herringbone_rack_gear',
+      'planetary_gearset', 'herringbone_planetary_gearset',
+      'bevel_gear', 'bevel_gear_pair',
+      'worm',
+      'crossed_gear_pair', 'hyperbolic_gear_pair',
+    ],
+  },
+  {
+    id: 'architecture',
+    file: 'architecture.md',
+    title: 'Architecture（建筑元素）',
+    summary: '墙/楼板/楼梯/屋顶/窗/门/栏杆/柱等静态建筑构件。PART B 专用，其他 PART 一般不需要。',
+    ops: ['wall', 'floor_slab', 'stairs', 'roof', 'facade_panel', 'window', 'door_frame', 'door_leaf', 'railing', 'column'],
+  },
+  {
+    id: 'rig-character',
+    file: 'rig-character.md',
+    title: 'Rig（角色骨架，bone/bone_chain/skeleton/skin）',
+    summary: '角色/生物软体蒙皮骨架。PART D 专用，其他 PART 不需要。',
+    ops: ['bone', 'bone_chain', 'skeleton', 'skin'],
+  },
+  {
+    id: 'assembly-misc',
+    file: 'assembly-misc.md',
+    title: 'Assembly & Misc（part/joint/material + collision/inertial/animation/texture）',
+    summary:
+      '把 shape 包成可装配 part、URDF joint、材质、简化碰撞体/惯量、动画 clip、贴图。几乎每个 PART 收尾组装都要用到，视为必读的一部分。',
+    ops: ['material', 'part', 'joint', 'collision', 'inertial', 'animation', 'texture'],
+  },
+]
 
 /** 一个 param 渲染成 `name*`（必填）/ `name?`（可选），带类型后缀。 */
 function fmtParam(p) {
@@ -43,32 +105,81 @@ function fmtOp(spec) {
 }
 
 const specs = [...listOpSpecs()].sort((a, b) => a.name.localeCompare(b.name))
-const byGroup = new Map()
-for (const s of specs) {
-  const g = GROUP_ORDER.includes(s.produces) ? s.produces : 'misc'
-  if (!byGroup.has(g)) byGroup.set(g, [])
-  byGroup.get(g).push(s)
+const byName = new Map(specs.map((s) => [s.name, s]))
+
+// 未在任何分片名单里出现的已注册 op：兜底塞进 assembly-misc，并打印警告防止静默漏出。
+const shardOpSets = SHARDS.map((sh) => new Set(sh.ops))
+const claimed = new Set(shardOpSets.flatMap((s) => [...s]))
+const orphans = specs.filter((s) => !claimed.has(s.name)).map((s) => s.name)
+if (orphans.length > 0) {
+  console.warn(
+    `[gen-op-directory] WARNING: ${orphans.length} op(s) not assigned to any shard, ` +
+      `falling back to assembly-misc — add them to SHARDS in scripts/gen-op-directory.mjs: ${orphans.join(', ')}`,
+  )
+  SHARDS[SHARDS.length - 1].ops.push(...orphans)
 }
 
-const lines = []
-lines.push('<!-- AUTO-GENERATED by scripts/gen-op-directory.mjs — DO NOT EDIT BY HAND. -->')
-lines.push('<!-- Regenerate: node scripts/gen-op-directory.mjs -->')
-lines.push('')
-lines.push('# DSL op directory')
-lines.push('')
-lines.push('Every op below is a DSL statement `id = op(args)`. Legend: `*` = required, `?` = optional; after `:` is the accepted arg kind(s). This is the single source of truth for op signatures — you do not need `lowpoly:batteries.list` for authoring.')
-lines.push('')
-for (const g of GROUP_ORDER) {
-  const ops = byGroup.get(g)
-  if (!ops || ops.length === 0) continue
-  lines.push(`## ${GROUP_LABEL[g]}`)
+// 名单里列了但 op-registry 里已不存在的 op：说明名单过期，同样警告（不影响生成，只是提醒清理）。
+for (const sh of SHARDS) {
+  const stale = sh.ops.filter((name) => !byName.has(name))
+  if (stale.length > 0) {
+    console.warn(`[gen-op-directory] WARNING: shard "${sh.id}" lists unknown op(s): ${stale.join(', ')}`)
+  }
+}
+
+const outDir = join(appRoot, 'skills/compose-lowpoly/op-directory')
+mkdirSync(outDir, { recursive: true })
+
+for (const sh of SHARDS) {
+  const ops = sh.ops
+    .filter((name) => byName.has(name))
+    .map((name) => byName.get(name))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const lines = []
+  lines.push('<!-- AUTO-GENERATED by scripts/gen-op-directory.mjs — DO NOT EDIT BY HAND. -->')
+  lines.push('<!-- Regenerate: node scripts/gen-op-directory.mjs -->')
+  lines.push('')
+  lines.push(`# DSL op directory · ${sh.title}`)
+  lines.push('')
+  lines.push(sh.summary)
+  lines.push('')
+  lines.push('Every op below is a DSL statement `id = op(args)`. Legend: `*` = required, `?` = optional; after `:` is the accepted arg kind(s). This is a shard of the full op directory — see [../op-directory.md](../op-directory.md) for the family index.')
   lines.push('')
   for (const s of ops) lines.push(fmtOp(s))
   lines.push('')
+  lines.push(`_${ops.length} ops in this shard._`)
+  lines.push('')
+  writeFileSync(join(outDir, sh.file), lines.join('\n'), 'utf-8')
 }
-lines.push(`_Total: ${specs.length} ops._`)
-lines.push('')
 
-const outPath = join(appRoot, 'skills/compose-lowpoly/op-directory.md')
-writeFileSync(outPath, lines.join('\n'), 'utf-8')
-console.log(`[gen-op-directory] wrote ${specs.length} ops → ${outPath}`)
+// 根索引：家族 → 分片文件 + op 计数，不再平铺全部签名。
+const indexLines = []
+indexLines.push('<!-- AUTO-GENERATED by scripts/gen-op-directory.mjs — DO NOT EDIT BY HAND. -->')
+indexLines.push('<!-- Regenerate: node scripts/gen-op-directory.mjs -->')
+indexLines.push('')
+indexLines.push('# DSL op directory — family index')
+indexLines.push('')
+indexLines.push(
+  'Op signatures are the DSL authoring SSOT (`id = op(args)`), auto-generated from op-registry. ' +
+    'To keep a single task from paying the token cost of *all* families, signatures are **sharded by family** below — ' +
+    'open only the shard(s) your current PART execution file links to, not every shard.',
+)
+indexLines.push('')
+indexLines.push('| Family | Ops | Shard |')
+indexLines.push('|---|---|---|')
+for (const sh of SHARDS) {
+  const count = sh.ops.filter((name) => byName.has(name)).length
+  indexLines.push(`| ${sh.title} | ${count} | [op-directory/${sh.file}](op-directory/${sh.file}) |`)
+}
+indexLines.push('')
+indexLines.push(`_Total: ${specs.length} ops across ${SHARDS.length} shards._`)
+indexLines.push('')
+indexLines.push(
+  '> Each `executions/part-*.md` file links only the shards it needs (e.g. PART D links core + rig-character + assembly-misc, not architecture/parts-mechanical). ' +
+    'If you are unsure which shard an op lives in, `grep` its name across `op-directory/*.md` — every op appears in exactly one shard.',
+)
+indexLines.push('')
+const indexPath = join(appRoot, 'skills/compose-lowpoly/op-directory.md')
+writeFileSync(indexPath, indexLines.join('\n'), 'utf-8')
+
+console.log(`[gen-op-directory] wrote ${specs.length} ops across ${SHARDS.length} shards → skills/compose-lowpoly/op-directory/*.md + index`)

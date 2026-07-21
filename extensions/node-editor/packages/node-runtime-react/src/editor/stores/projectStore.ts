@@ -30,6 +30,7 @@ import { useHistoryStore } from './historyStore.js'
 import {
   cancelDeferredProjectSwitchOutputRefresh,
   clearOutputMetaCache,
+  hasLocalPipelineMutations,
   usePipelineStore,
 } from './pipelineStore.js'
 import { useUIStore } from './uiStore.js'
@@ -48,12 +49,25 @@ function resetPipelineUiForProjectSwitch(): void {
   })
 }
 
-function refreshOutputsAfterProjectSwitch(_agentBusy: boolean): void {
+function refreshOutputsAfterProjectSwitch(_agentBusy: boolean, targetIsExecuting: boolean): void {
   // Always hydrate the viewing project from server-retained outputs. Agents
   // executing on *other* projects must not defer or skip this — that left the
   // preview blank until every unrelated session went idle.
   cancelDeferredProjectSwitchOutputRefresh()
-  void usePipelineStore.getState().refreshConnectedOutputs('project-switch')
+  const refreshed = usePipelineStore.getState().refreshConnectedOutputs('project-switch')
+  if (targetIsExecuting) return
+  // refreshConnectedOutputs only pulls whatever the server already has cached —
+  // it never runs anything. If the project we just switched into has a cold
+  // output cache (new project, cache cleared, or never executed), the preview
+  // then silently stays blank until the user manually hits "clear cache + re-run".
+  // Editor.tsx's initial mount effect already covers this exact case via
+  // `refreshConnectedOutputs('mount').then(() => autoExecuteOnOpen())`, but that
+  // effect only fires once per editor session — it never re-runs on later
+  // switches. Chain the same no-op-when-warm auto-run here so every switch gets
+  // the same guarantee. Skipped when an agent is already executing the *target*
+  // project — its own run will populate outputs via live-sync; auto-running here
+  // would just race/duplicate that work.
+  void refreshed.then(() => usePipelineStore.getState().autoExecuteOnOpen())
 }
 
 function reloadHistoryAfterProjectSwitch(agentBusy: boolean): void {
@@ -81,6 +95,28 @@ function viewingIdFromWorkspace(workspace: WorkspaceState | null | undefined): s
   return workspace.viewingProjectId ?? (workspace as { activeProjectId?: string | null }).activeProjectId ?? null
 }
 
+/**
+ * Coarse phase within `switchProject`'s open cascade, for loading-progress UI
+ * (e.g. the workbench's project-switch status panel). Read-only telemetry —
+ * nothing branches on it. `null` when no switch is in flight.
+ */
+export type SwitchPhase = 'persisting' | 'viewing' | 'hydrating'
+
+/**
+ * How this document participates in project open/switch.
+ *
+ * - `host` (default): owns the full open cascade — viewProject, loadPipeline,
+ *   refreshConnectedOutputs, autoExecuteOnOpen. Used by the center workbench
+ *   document that hosts the Editor canvas.
+ * - `satellite`: a sibling iframe (left project panel) that only tells the
+ *   backend which project is being viewed via `viewProject`; the host document
+ *   picks up the `project:viewing` broadcast and runs the heavy cascade. Without
+ *   this split, two documents each calling `bootstrap()` → `switchProject()` on
+ *   cold boot each trigger a full pipeline execution (observed as two back-to-back
+ *   `[execute-trace]` lines for the same project).
+ */
+export type ProjectSwitchRole = 'host' | 'satellite'
+
 interface ProjectState {
   projects: ProjectMeta[]
   viewingProjectId: string | null
@@ -88,8 +124,28 @@ interface ProjectState {
   recentProjectIds: string[]
   isLoading: boolean
   isSwitching: boolean
+  switchPhase: SwitchPhase | null
   error: string | null
+  /**
+   * Current ForgeaX game slug (from the host iframe URL — see setActiveGameSlug
+   * callers). When set and `showAllProjects` is false, fetchProjects() scopes
+   * the list to this game only. Null in standalone/non-studio contexts, where
+   * the panel always shows every project (no game to scope by).
+   */
+  activeGameSlug: string | null
+  /** "显示全部" toggle — when true, fetchProjects() ignores activeGameSlug and
+   *  lists every project in the workspace. Persisted per-browser so the user's
+   *  choice survives a reload. */
+  showAllProjects: boolean
+  /** See `ProjectSwitchRole` — set once at boot by host vs left-pane surfaces. */
+  projectSwitchRole: ProjectSwitchRole
 
+  /** Set the current game slug (host wiring) and re-fetch if it actually changed. */
+  setActiveGameSlug: (slug: string | null) => void
+  /** Declare whether this document owns the full open cascade or is a satellite. */
+  setProjectSwitchRole: (role: ProjectSwitchRole) => void
+  /** Flip the "show all" toggle and re-fetch. */
+  setShowAllProjects: (show: boolean) => void
   /** Load the project list + workspace, syncing the viewing project type. */
   fetchProjects: () => Promise<void>
   /** fetchProjects then open the viewing project (cold boot). */
@@ -103,12 +159,31 @@ interface ProjectState {
    * Returns an unsubscribe. Wire alongside pipelineStore.subscribeLiveSync at boot.
    */
   subscribeProjectActivation: () => () => void
-  /** Create a project then open it. */
+  /** Create a project then open it. Auto-tags with activeGameSlug unless the
+   *  caller already specified a gameSlug (or there is no active game). */
   createProject: (input: CreateProjectRequest) => Promise<ProjectMeta>
   /** Delete a project; the server keeps the workspace non-empty + returns it. */
   deleteProject: (id: string, assetPolicy?: 'detach' | 'delete') => Promise<void>
   /** Rename a project. */
   renameProject: (id: string, name: string) => Promise<void>
+}
+
+const SHOW_ALL_KEY = 'forgeax.projectPanel.showAllProjects'
+
+function loadShowAllProjects(): boolean {
+  try {
+    return localStorage.getItem(SHOW_ALL_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function persistShowAllProjects(show: boolean): void {
+  try {
+    localStorage.setItem(SHOW_ALL_KEY, String(show))
+  } catch {
+    /* ignore (private mode / SSR) */
+  }
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -118,13 +193,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   recentProjectIds: [],
   isLoading: false,
   isSwitching: false,
+  switchPhase: null,
   error: null,
+  activeGameSlug: null,
+  showAllProjects: loadShowAllProjects(),
+  projectSwitchRole: 'host',
+
+  setProjectSwitchRole: (role: ProjectSwitchRole) => {
+    set({ projectSwitchRole: role })
+  },
+
+  setActiveGameSlug: (slug: string | null) => {
+    if (slug === get().activeGameSlug) return
+    set({ activeGameSlug: slug })
+    void get().fetchProjects()
+  },
+
+  setShowAllProjects: (show: boolean) => {
+    if (show === get().showAllProjects) return
+    persistShowAllProjects(show)
+    set({ showAllProjects: show })
+    void get().fetchProjects()
+  },
 
   fetchProjects: async () => {
     set({ isLoading: true, error: null })
     try {
       const { api } = getEditorTransport()
-      const [projects, workspace] = await Promise.all([api.listProjects(), api.getWorkspace()])
+      const { activeGameSlug, showAllProjects } = get()
+      const listOpts = !showAllProjects && activeGameSlug ? { gameSlug: activeGameSlug } : undefined
+      const [projects, workspace] = await Promise.all([api.listProjects(listOpts), api.getWorkspace()])
       const viewingProjectId = viewingIdFromWorkspace(workspace)
       set({
         projects: [...projects],
@@ -151,11 +249,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   switchProject: async (id: string) => {
     if (get().isSwitching) return
-    // Page refresh: fetchProjects already set viewingProjectId, but the graph /
-    // nodeOutputs cache are empty — still run the full open cascade (viewProject,
-    // loadPipeline, refreshConnectedOutputs). Skip only when this project is
-    // already loaded in memory (user re-clicking the same row in the panel).
-    if (id === get().viewingProjectId && usePipelineStore.getState().currentPipeline) return
+    if (id === get().viewingProjectId) {
+      // Satellite panes never hydrate a pipeline — re-clicking the active row
+      // is a no-op. Host panes skip only when the graph is already in memory.
+      if (get().projectSwitchRole === 'satellite') return
+      if (usePipelineStore.getState().currentPipeline) return
+    }
+
+    // Satellite documents (left project-panel iframe) only announce the viewing
+    // target to the backend. The host document's subscribeProjectActivation()
+    // handler runs the full open cascade when it receives project:viewing.
+    if (get().projectSwitchRole === 'satellite') {
+      set({ isSwitching: true, error: null, switchPhase: 'viewing' })
+      try {
+        const { api } = getEditorTransport()
+        const view = api.viewProject ?? api.activateProject
+        if (!view) throw new Error('[projectStore] transport does not support viewProject')
+        const __tView0 = performance.now()
+        const { project } = await view.call(api, id)
+        const __viewMs = performance.now() - __tView0
+        set({ viewingProjectId: id })
+        useUIStore.getState().setActiveProjectType(project?.manifest?.type ?? null)
+        console.log(
+          `[switch-trace] switchProject satellite id=${id} viewProject(network)=${__viewMs.toFixed(1)}ms`,
+        )
+      } catch (e) {
+        console.error('[projectStore] satellite switchProject failed:', e)
+        set({ error: (e as Error).message })
+      } finally {
+        set({ isSwitching: false, switchPhase: null })
+      }
+      return
+    }
+
+    const __tSwitch0 = performance.now()
     set({ isSwitching: true, error: null })
     try {
       const { api } = getEditorTransport()
@@ -163,29 +290,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const agentBusy = get().executingProjectIds.length > 0
       const leavingIsExecuting =
         leavingId != null && get().executingProjectIds.includes(leavingId)
+      const targetIsExecuting = get().executingProjectIds.includes(id)
 
-      if (!leavingIsExecuting) {
+      // Split-pane navigation runs in a separate iframe with its own store. It
+      // may hold an old pipeline snapshot, so only the iframe that actually
+      // changed its local graph is allowed to flush before switching.
+      let __persistMs = 0
+      if (!leavingIsExecuting && hasLocalPipelineMutations()) {
+        set({ switchPhase: 'persisting' })
+        const __t0 = performance.now()
         try {
           await usePipelineStore.getState().persistSession()
         } catch (e) {
           console.warn('[projectStore] persistSession before switch failed:', e)
         }
+        __persistMs = performance.now() - __t0
       }
 
+      set({ switchPhase: 'viewing' })
       const view = api.viewProject ?? api.activateProject
       if (!view) throw new Error('[projectStore] transport does not support viewProject')
+      const __tView0 = performance.now()
       const { project, pipeline } = await view.call(api, id)
+      const __viewMs = performance.now() - __tView0
 
       set({ viewingProjectId: id })
       resetPipelineUiForProjectSwitch()
 
+      set({ switchPhase: 'hydrating' })
+      const __tHydrate0 = performance.now()
       if (pipeline) {
         usePipelineStore.getState().hydratePipelineFromSnapshot(pipeline)
       } else {
         await usePipelineStore.getState().loadPipeline()
       }
+      const __hydrateMs = performance.now() - __tHydrate0
 
-      refreshOutputsAfterProjectSwitch(agentBusy)
+      refreshOutputsAfterProjectSwitch(agentBusy, targetIsExecuting)
       reloadHistoryAfterProjectSwitch(agentBusy)
 
       useUIStore.getState().setActiveProjectType(project?.manifest?.type ?? null)
@@ -196,11 +337,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           executingProjectIds: ws?.executingProjectIds ?? get().executingProjectIds,
         })
       })
+
+      const __totalMs = performance.now() - __tSwitch0
+      console.log(
+        `[switch-trace] switchProject id=${id} persistSession=${__persistMs.toFixed(1)}ms ` +
+          `viewProject(network)=${__viewMs.toFixed(1)}ms hydrate/loadPipeline=${__hydrateMs.toFixed(1)}ms ` +
+          `TOTAL(blocking UI)=${__totalMs.toFixed(1)}ms`,
+      )
     } catch (e) {
       console.error('[projectStore] switchProject failed:', e)
       set({ error: (e as Error).message })
     } finally {
-      set({ isSwitching: false })
+      set({ isSwitching: false, switchPhase: null })
     }
   },
 
@@ -212,20 +360,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (projectId === get().viewingProjectId) return
       if (get().isSwitching) return
       void (async () => {
-        set({ isSwitching: true, error: null })
+        set({ isSwitching: true, switchPhase: 'viewing', error: null })
         try {
           const agentBusy = get().executingProjectIds.length > 0
+          const targetIsExecuting = get().executingProjectIds.includes(projectId)
           set({ viewingProjectId: projectId })
           resetPipelineUiForProjectSwitch()
+          set({ switchPhase: 'hydrating' })
           await usePipelineStore.getState().loadPipeline()
-          refreshOutputsAfterProjectSwitch(agentBusy)
+          refreshOutputsAfterProjectSwitch(agentBusy, targetIsExecuting)
           reloadHistoryAfterProjectSwitch(agentBusy)
           await get().fetchProjects()
         } catch (e) {
           console.error('[projectStore] project:viewing sync failed:', e)
           set({ error: (e as Error).message })
         } finally {
-          set({ isSwitching: false })
+          set({ isSwitching: false, switchPhase: null })
         }
       })()
     }
@@ -253,7 +403,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             : [...s.executingProjectIds, projectId],
         }))
         refreshExecuting()
-        // aw-support creates projects out-of-band; refresh so the new row appears.
+        // Refresh list for new rows / lock badges only. Do NOT adopt workspace
+        // viewing here via a full fetchProjects→set(viewingProjectId) cycle when
+        // an agent opens a different project — viewing stays whatever the human
+        // last /view'd (AI open no longer mutates viewingProjectId).
         void get().fetchProjects()
       }),
       ws.on('project:list-changed', () => {
@@ -286,7 +439,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   createProject: async (input: CreateProjectRequest) => {
     const { api } = getEditorTransport()
-    const meta = await api.createProject(input)
+    const { activeGameSlug } = get()
+    const withGameSlug: CreateProjectRequest =
+      input.gameSlug !== undefined || !activeGameSlug ? input : { ...input, gameSlug: activeGameSlug }
+    const meta = await api.createProject(withGameSlug)
     set((s) => ({ projects: [...s.projects, meta] }))
     await get().switchProject(meta.id)
     return meta

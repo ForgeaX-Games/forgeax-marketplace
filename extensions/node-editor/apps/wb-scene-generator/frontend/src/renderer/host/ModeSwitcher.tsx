@@ -1,7 +1,7 @@
 import { useRenderStore } from '../store'
 import type { ViewMode, DrawMode } from '../types'
 
-const MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d']
+const MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh']
 const DRAWS: DrawMode[] = ['wire', 'color', 'asset']
 
 export function ModeSwitcher(): JSX.Element {

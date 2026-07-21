@@ -31,6 +31,7 @@
 // 内部 NormalizedRule 是 v2 形态。v1 在 parser 阶段直接包成 v2 的 faces.top。
 
 import { RenderLifecycle } from '../lifecycle'
+import { pluginFetch, pluginUrl } from '../../../api/pluginHttp'
 
 // ── 公共类型 ──────────────────────────────────────────────────────────────
 
@@ -47,15 +48,30 @@ export interface RuleSprite {
     | 'bot-left' | 'bot-center' | 'bot-right'
 }
 
-/** face variant 触发条件:目前只支持"某 region 是否包含某偏移点" */
-export interface FaceVariantWhen {
-  regionContains: {
-    /** 引用 NormalizedRule.regions 里声明的 region 名 */
-    region: string
-    /** 相对当前 voxel 的 xy 偏移,e.g. [0, 1] 表示 (cell.x, cell.y+1) */
-    offset: [number, number]
-  }
-}
+/**
+ * face variant 触发条件(闭合 union,二选一):
+ *   * regionContains —— 某 region 是否包含相对当前 voxel 的某偏移点(空间关系,
+ *     如 outer_wall_36 判内外墙)。
+ *   * stateEquals    —— 当前 cell 的 state[key] 是否等于某值(per-cell 标签,如
+ *     slope_24 按上游地形派发的 slopeDir=back/front/left/right 走不同 map)。
+ */
+export type FaceVariantWhen =
+  | {
+      regionContains: {
+        /** 引用 NormalizedRule.regions 里声明的 region 名 */
+        region: string
+        /** 相对当前 voxel 的 xy 偏移,e.g. [0, 1] 表示 (cell.x, cell.y+1) */
+        offset: [number, number]
+      }
+    }
+  | {
+      stateEquals: {
+        /** cell.state 里的字段名(如 "slopeDir") */
+        key: string
+        /** 与 String(cell.state[key]) 相等比较的值(如 "front") */
+        value: string
+      }
+    }
 
 /** 同一面的备用 map:when 命中就用 variant.map 取代默认 face.map */
 export interface FaceVariant {
@@ -65,14 +81,19 @@ export interface FaceVariant {
 
 /**
  * 邻域 key 构造模式。决定 pickFaceSprite / buildSurface 给本 face 算多长的 key:
- *   * 缺省 / 'adjacent4' —— 4 位 "up,down,left,right",只看 ±1 直接邻居(历史默认,
+ *   * 缺省 / 'adjacent4' —— 4 位 "up,down,left,right",只看 ±1 正交邻居(历史默认,
  *     所有旧 rule 都是这个;up/down 在竖直方向对称)。
+ *   * 'adjacent8'      —— 8 位 "up,down,left,right,ul,ur,dl,dr",正交 4 邻 + 四角对角
+ *     (±1,±1)。map 可区分「仅正交相连」与「对角也占位」的拐角/斜接(如 bridge_25)。
  *   * 'edgeDist2'      —— 6 位 "up,down,left,right,up2,down2",额外探测竖直方向
  *     距离 2 的邻居(up2 = (x,y-2) / down2 = (x,y+2))。让 map 能区分"距某端 1 格"
  *     与"真正中段",从而表达 5 行桥面这类 首尾各两行固定、仅中段重复 的 rule。
  *     水平方向不变(仍只 l/r),因此横向加宽逻辑与 4 邻一致。
+ *   * 'edgeDist4'      —— 8 位 "up,down,left,right,up2,down2,left2,right2",在 edgeDist2
+ *     基础上再探测水平距离 2 的邻居(left2 = (x-2,y) / right2 = (x+2,y)),让 map
+ *     在四个方向都能区分"距端 1 格"与"中段"(适合上下左右都要收边的填充带)。
  */
-export type FaceKeyMode = 'adjacent4' | 'edgeDist2'
+export type FaceKeyMode = 'adjacent4' | 'adjacent8' | 'edgeDist2' | 'edgeDist4'
 
 /** randomRules 单条：可选 per-tileId 变体池与权重，缺省回退 face.variantIdxs / face.variantWeights */
 export interface RandomRule {
@@ -81,6 +102,21 @@ export interface RandomRule {
   variantIdxs?: number[]
   /** 与 variantIdxs（或回退的 face.variantIdxs）等长；缺省则变体等概率 */
   variantWeights?: number[]
+}
+
+/**
+ * "大变体" —— 连续 3×3 实心块整体替换成一张大图(而非 9 格各自 autotile)。
+ * 仅 faces.front(墙体立面)语义有意义:检测以世界坐标网格对齐的 3×3 巨格
+ * (anchor = floor(x/3)*3, floor(z/3)*3)是否 9 格全部同 layer 同 type 占位,
+ * 命中后按 probability 掷骰决定是否用某个 group 整体替换这 9 格的默认逐格 pick——
+ * 一旦命中,9 格必须用同一 group 的 9 个子图(按坐标定死,不按格子各自 roll),
+ * 否则拼不成一张连续大图。
+ */
+export interface FaceBlockVariant {
+  /** 命中一个"完全实心"3×3 块时,用某个候选 group 整体替换的概率 [0,1] */
+  probability: number
+  /** 候选 group 列表,每组恰好 9 个 sprite idx;顺序 = 局部 z(0..2)*3+局部 x(0..2) 行主序 */
+  groups: number[][]
 }
 
 /** 单一 face 的查表 + 变体规则 */
@@ -92,7 +128,9 @@ export interface FaceRule {
   /**
    * 邻域键 → sprite idx。
    *   * top 面 (adjacent4) 键格式 "up,down,left,right",分别 = (x,y-1,z) (x,y+1,z) (x-1,y,z) (x+1,y,z) 同 layer
+   *   * top 面 (adjacent8) 键格式 "up,down,left,right,ul,ur,dl,dr",末四位 = 四角对角 (x±1,y±1,z) 同 layer
    *   * top 面 (edgeDist2) 键格式 "up,down,left,right,up2,down2",末两位 = (x,y-2,z) (x,y+2,z) 同 layer
+   *   * top 面 (edgeDist4) 键格式 "up,down,left,right,up2,down2,left2,right2",末四位 = (x,y∓2,z) (x∓2,y,z) 同 layer
    *   * front 面键格式 "top,bottom,left,right",分别 = (x,y,z+1) (x,y,z-1) (x-1,y,z) (x+1,y,z) 同 layer
    *   * '*' 通配符(lookupWithWildcard 解析)
    */
@@ -104,6 +142,8 @@ export interface FaceRule {
   variants?: FaceVariant[]
   /** 命中某 idx 时按 keepProbability 决定保留还是从变体池选变体;可选 per-entry variantIdxs */
   randomRules?: RandomRule[]
+  /** 连续 3×3 实心块整体换大图(仅 front 有意义);见 FaceBlockVariant 注释 */
+  blockVariants?: FaceBlockVariant
   /**
    * 变体候选 sprite idx 列表(再经透明像素探测过滤后才采样)。
    *   * 缺省 = `sprites[basePieces..length-1]` —— 适合 v1 单 face / 顶面专用场景
@@ -136,6 +176,8 @@ export interface NormalizedRule {
   faces: {
     top?: FaceRule
     front?: FaceRule
+    /** 桥面收口/端头（如 bridge_25）；与 top 同邻域 key，命中时优先于 top 绘制于顶面位 */
+    entry?: FaceRule
   }
   /** 命名 region 声明,face.variants 通过 region 名引用 */
   regions?: Record<string, RegionDecl>
@@ -147,7 +189,7 @@ export type RuleAsset = NormalizedRule
 // ── URL 构造(与 imageCache 同站点,单租户无 slug)──────────────────────
 
 function getRuleUrl(alias: string): string {
-  return `/api/v1/library/serve/${encodeURIComponent(alias)}`
+  return pluginUrl(`/api/v1/library/serve/${encodeURIComponent(alias)}`)
 }
 
 // ── 缓存核心 ─────────────────────────────────────────────────────────────
@@ -190,7 +232,7 @@ export function getOrLoadRule(alias: string): NormalizedRule | null {
     return cached.state === 'ready' ? cached.rule : null
   }
   cache.set(alias, { state: 'loading' })
-  fetch(getRuleUrl(alias))
+  pluginFetch(getRuleUrl(alias))
     .then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       return r.json()
@@ -251,7 +293,8 @@ function parseRule(json: unknown): NormalizedRule | null {
   if (!faces || typeof faces !== 'object') return null
   const top = parseFace(faces.top)
   const front = parseFace(faces.front)
-  if (!top && !front) return null  // 至少要有一个 face 否则这个 rule 不画任何东西
+  const entry = parseFace(faces.entry)
+  if (!top && !front && !entry) return null  // 至少要有一个 face 否则这个 rule 不画任何东西
   const regions = parseRegions(o.regions)
   return {
     schemaVersion: 2,
@@ -262,6 +305,7 @@ function parseRule(json: unknown): NormalizedRule | null {
     faces: {
       ...(top ? { top } : {}),
       ...(front ? { front } : {}),
+      ...(entry ? { entry } : {}),
     },
     ...(regions ? { regions } : {}),
   }
@@ -279,7 +323,8 @@ function parseFace(raw: unknown): FaceRule | null {
     : undefined
   const variantWeights = parseVariantWeights(f.variantWeights, variantIdxs?.length)
   const variants = parseFaceVariants(f.variants)
-  const keyMode = f.keyMode === 'edgeDist2' ? 'edgeDist2' : undefined
+  const keyMode = parseFaceKeyMode(f.keyMode)
+  const blockVariants = parseFaceBlockVariants(f.blockVariants)
   return {
     basePieces: f.basePieces,
     map: f.map as Record<string, number>,
@@ -288,7 +333,27 @@ function parseFace(raw: unknown): FaceRule | null {
     ...(variantIdxs ? { variantIdxs } : {}),
     ...(variantWeights ? { variantWeights } : {}),
     ...(variants ? { variants } : {}),
+    ...(blockVariants ? { blockVariants } : {}),
   }
+}
+
+function parseFaceKeyMode(raw: unknown): FaceKeyMode | undefined {
+  if (raw === 'edgeDist2' || raw === 'edgeDist4' || raw === 'adjacent8') return raw
+  return undefined
+}
+
+function parseFaceBlockVariants(raw: unknown): FaceBlockVariant | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const b = raw as Record<string, unknown>
+  if (typeof b.probability !== 'number' || b.probability < 0 || b.probability > 1) return undefined
+  if (!Array.isArray(b.groups)) return undefined
+  const groups: number[][] = []
+  for (const g of b.groups) {
+    if (!Array.isArray(g) || g.length !== 9) continue
+    if (!g.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)) continue
+    groups.push(g as number[])
+  }
+  return groups.length > 0 ? { probability: b.probability, groups } : undefined
 }
 
 function parseFaceVariants(raw: unknown): FaceVariant[] | undefined {
@@ -309,6 +374,11 @@ function parseFaceVariants(raw: unknown): FaceVariant[] | undefined {
 function parseFaceVariantWhen(raw: unknown): FaceVariantWhen | null {
   if (!raw || typeof raw !== 'object') return null
   const w = raw as Record<string, unknown>
+  const se = w.stateEquals as Record<string, unknown> | undefined
+  if (se && typeof se === 'object') {
+    if (typeof se.key !== 'string' || typeof se.value !== 'string') return null
+    return { stateEquals: { key: se.key, value: se.value } }
+  }
   const rc = w.regionContains as Record<string, unknown> | undefined
   if (!rc || typeof rc !== 'object') return null
   if (typeof rc.region !== 'string') return null

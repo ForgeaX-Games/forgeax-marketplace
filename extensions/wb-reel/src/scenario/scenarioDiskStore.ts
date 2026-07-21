@@ -1,5 +1,6 @@
 import type { PersistedDb } from './scenarioPersist'
 import { gameQuery } from '../shell/gameScope'
+import { pluginFetch } from '../lib/plugin-http'
 
 /**
  * scenarioDiskStore —— 剧本持久化的"磁盘镜像"前端适配层。
@@ -44,7 +45,7 @@ export function probeDiskAvailable(): Promise<boolean> {
       // 不用 setTimeout 做超时：测试环境下 fakeTimers 会让 setTimeout 永不触发，
       // 反而让 fetch 无限挂着被 teardown 强杀产生噪音。dev server 同机本地
       // 毫秒级响应；异常走 catch 静默降级就够。
-      const res = await fetch(ENDPOINT + gameQuery(), {
+      const res = await pluginFetch(ENDPOINT + gameQuery(), {
         method: 'GET',
         cache: 'no-store',
       })
@@ -72,7 +73,7 @@ export function probeDiskAvailable(): Promise<boolean> {
 export async function loadDbFromDisk(): Promise<PersistedDb | null> {
   if (typeof fetch === 'undefined') return null
   try {
-    const res = await fetch(ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return null
     const body = (await res.json()) as { db?: PersistedDb }
     if (!body || typeof body !== 'object' || !body.db) return null
@@ -96,7 +97,7 @@ export async function loadDbFromDisk(): Promise<PersistedDb | null> {
 export async function saveDbToDisk(db: PersistedDb): Promise<boolean> {
   if (typeof fetch === 'undefined') return false
   try {
-    const res = await fetch(ENDPOINT + gameQuery(), {
+    const res = await pluginFetch(ENDPOINT + gameQuery(), {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ db }),

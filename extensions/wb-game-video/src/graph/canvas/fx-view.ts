@@ -2,7 +2,7 @@
  * 渲染派生层：GameGraph（域 SSOT） → react-flow(FX) 渲染视图。
  *
  * spec §2.1.1：SSOT 与渲染视图**分离但同源**。此处只读地把域图投影成 reactflow 能画的形状：
- *  - inputs = 单一 'in'；outputs = 各 kind 的派生 handle（deriveOutputs）∪ 该节点出边用到的路由 handle。
+ *  - inputs = 画布约定的单一入口 'in'（与边上 targetHandle 对齐）；outputs = deriveOutputs ∪ 该节点出边用到的路由 handle。
  *  - position 来自 node.position（域里存了布局）。
  *  - data 只放渲染需要的少量字段（标题/角标）；不把整块 node.data 塞进去。
  * 不回写域图。
@@ -11,7 +11,7 @@ import type { FXEdge, FXGraph, FXNode, Handle } from '../../runtime/schema/react
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
-import { deriveInputs, deriveOutputs } from '../../runtime/registry/component-registry'
+import { deriveOutputs } from '../../runtime/registry/component-registry'
 import { flowHandleDisplay, mergeFlowHandles } from '../flow-handle-labels'
 
 function nodeOutputHandles(
@@ -74,7 +74,7 @@ export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): 
       id: node.id,
       type: 'default',
       position: layout?.[node.id] ?? node.position,
-      inputs: deriveInputs().map((h) => toHandle(h.id, '入口', 'target')),
+      inputs: [toHandle('in', '入口', 'target')],
       outputs: nodeOutputHandles(graph, node, overlays).map((h) => toHandle(h.value, h.label, 'source')),
       data: {
         label: node.data.name,

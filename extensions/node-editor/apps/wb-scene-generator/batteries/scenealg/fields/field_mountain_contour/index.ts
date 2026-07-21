@@ -85,19 +85,32 @@ function warpedFbm(
   return fbm(x + dx * warpStrength, y + dy * warpStrength, seed, octaves);
 }
 
-function samplePeakCenters(count: number, rng: SeededRandom): { x: number; y: number }[] {
-  const margin = 0.15;
+/** Place peaks on valid mask cells (normalized to full grid). Avoids
+ *  sampling in empty bbox corners when region is an irregular island/Far band. */
+function samplePeakCentersOnMask(
+  count: number,
+  rng: SeededRandom,
+  nonZeroIndices: number[],
+  width: number,
+  height: number,
+): { x: number; y: number }[] {
+  if (nonZeroIndices.length === 0) return [{ x: 0.5, y: 0.5 }];
   const minDist = clamp(0.6 / Math.sqrt(count), 0.18, 0.4);
   const placed: { x: number; y: number }[] = [];
+  const toNorm = (idx: number) => {
+    const y = Math.floor(idx / width);
+    const x = idx % width;
+    return {
+      x: width > 1 ? x / (width - 1) : 0.5,
+      y: height > 1 ? y / (height - 1) : 0.5,
+    };
+  };
 
   for (let i = 0; i < count; i++) {
-    let best = { x: 0.5, y: 0.5 };
+    let best = toNorm(nonZeroIndices[Math.floor(rng.next() * nonZeroIndices.length)]!);
     let bestScore = -1;
-    for (let t = 0; t < 300; t++) {
-      const c = {
-        x: lerp(margin, 1 - margin, rng.next()),
-        y: lerp(margin, 1 - margin, rng.next()),
-      };
+    for (let t = 0; t < 400; t++) {
+      const c = toNorm(nonZeroIndices[Math.floor(rng.next() * nonZeroIndices.length)]!);
       let nearest = Infinity;
       for (const p of placed) {
         const d = Math.hypot(c.x - p.x, c.y - p.y);
@@ -115,6 +128,70 @@ function samplePeakCenters(count: number, rng: SeededRandom): { x: number; y: nu
     placed.push(best);
   }
   return placed;
+}
+
+/** Chebyshev-ish BFS distance (in cells) from each valid cell to the region edge
+ *  (invalid neighbor or out of bounds). Edge cells get 0. */
+function distanceToRegionEdge(
+  nonZeroMask: Uint8Array,
+  width: number,
+  height: number,
+): Float64Array {
+  const dist = new Float64Array(width * height);
+  dist.fill(Infinity);
+  const qx: number[] = [];
+  const qy: number[] = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (!nonZeroMask[idx]) continue;
+      let edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+      if (!edge) {
+        if (
+          !nonZeroMask[idx - 1] ||
+          !nonZeroMask[idx + 1] ||
+          !nonZeroMask[idx - width] ||
+          !nonZeroMask[idx + width]
+        ) {
+          edge = true;
+        }
+      }
+      if (edge) {
+        dist[idx] = 0;
+        qx.push(x);
+        qy.push(y);
+      }
+    }
+  }
+
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const;
+  let head = 0;
+  while (head < qx.length) {
+    const x = qx[head]!;
+    const y = qy[head]!;
+    head++;
+    const base = dist[y * width + x]!;
+    for (const [dx, dy] of dirs) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const nidx = ny * width + nx;
+      if (!nonZeroMask[nidx]) continue;
+      const nd = base + 1;
+      if (nd < dist[nidx]!) {
+        dist[nidx] = nd;
+        qx.push(nx);
+        qy.push(ny);
+      }
+    }
+  }
+  return dist;
 }
 
 function gaussianPeak(wx: number, wy: number, cx: number, cy: number, radius: number): number {
@@ -164,15 +241,20 @@ export function fieldMountainContour(input: Record<string, unknown>): Record<str
   const peakRadius =
     typeof input.peakRadius === "number" ? clamp(input.peakRadius, 0.03, 0.5) : 0.14;
   const peakStrength =
-    typeof input.peakStrength === "number" ? clamp(input.peakStrength, 0.1, 2.0) : 1.2;
+    typeof input.peakStrength === "number" ? clamp(input.peakStrength, 0.1, 4.0) : 1.2;
   const noiseScale =
     typeof input.noiseScale === "number" ? clamp(input.noiseScale, 0.5, 8) : 2.5;
   const warpStrength =
     typeof input.warpStrength === "number" ? clamp(input.warpStrength, 0, 3) : 1.2;
   const seed = typeof input.seed === "number" ? input.seed : 0;
+  // Soft rise from the region perimeter (cells). 0 = off. Default ~6 so
+  // Contours feather instead of truncating at a hard mask edge.
+  const edgeFalloffCells =
+    typeof input.edgeFalloffCells === "number"
+      ? Math.max(0, Math.round(input.edgeFalloffCells))
+      : 6;
 
   const rng = new SeededRandom(seed);
-  const peakCenters = samplePeakCenters(peakCount, rng);
   const warpScale = noiseScale * 0.6;
 
   const nonZeroMask = new Uint8Array(width * height);
@@ -192,10 +274,16 @@ export function fieldMountainContour(input: Record<string, unknown>): Record<str
     return { field };
   }
 
+  const peakCenters = samplePeakCentersOnMask(peakCount, rng, nonZeroIndices, width, height);
+  const edgeDist =
+    edgeFalloffCells > 0 ? distanceToRegionEdge(nonZeroMask, width, height) : null;
+
   const raw = new Float64Array(width * height);
   for (let y = 0; y < height; y++) {
     const ny = height > 1 ? y / (height - 1) : 0;
     for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (!nonZeroMask[idx]) continue;
       const nx = width > 1 ? x / (width - 1) : 0;
       const sx = nx * noiseScale;
       const sy = ny * noiseScale;
@@ -213,21 +301,27 @@ export function fieldMountainContour(input: Record<string, unknown>): Record<str
         peakBoost += gaussianPeak(wnx, wny, c.x, c.y, peakRadius);
       }
       peakBoost = Math.tanh(peakBoost * 1.2) * peakStrength;
-      raw[y * width + x] = terrain * 0.4 + peakBoost * 0.6;
+      let h = terrain * 0.4 + peakBoost * 0.6;
+      if (edgeDist) {
+        const d = edgeDist[idx]!;
+        const t = edgeFalloffCells <= 0 ? 1 : fade(d / edgeFalloffCells);
+        h *= t;
+      }
+      raw[idx] = h;
     }
   }
 
   const nonZeroRaw = new Float64Array(nonZeroIndices.length);
   for (let k = 0; k < nonZeroIndices.length; k++) {
-    nonZeroRaw[k] = raw[nonZeroIndices[k]];
+    nonZeroRaw[k] = raw[nonZeroIndices[k]!];
   }
   const remappedNonZero = equalAreaRemap(normalizeFlat(nonZeroRaw));
 
   for (let k = 0; k < nonZeroIndices.length; k++) {
-    const idx = nonZeroIndices[k];
+    const idx = nonZeroIndices[k]!;
     const y = Math.floor(idx / width);
     const x = idx % width;
-    field[y][x] = remappedNonZero[k];
+    field[y][x] = remappedNonZero[k]!;
   }
 
   return { field };

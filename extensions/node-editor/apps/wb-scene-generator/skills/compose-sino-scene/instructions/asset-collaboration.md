@@ -28,13 +28,13 @@
 
 ## 二A、建筑贴图：从 Scene 导出 footprint JSON（`building_footprint_mask`）
 
-> **禁止手拼矩形 mask。** 要给 `PickOneBuilding` / `PickMultiBuildings` 放出的建筑出整栋 billboard 贴图时，Mira 的 `dechouse_gen.in_0`（`json_mask`）**必须**来自 Scene 侧真实占地，而不是按 `AreaWidth×AreaHeight` 猜一个满矩形。
+> **禁止手拼矩形 mask。** 要给 `PickOneBuilding` 放出的建筑出整栋 billboard 贴图时，Mira 的 `dechouse_gen.in_0`（`json_mask`）**必须**来自 Scene 侧真实占地，而不是按 `AreaWidth×AreaHeight` 猜一个满矩形。（`PickMultiBuildings` 暂禁不用，多栋改多次 `PickOneBuilding` 各自导出。）
 
 ### 适用 vs 不适用
 
 | 资产类型 | 导出方式 |
 |---------|---------|
-| **整栋建筑**（`PickOneBuilding` / `PickMultiBuildings` 产物） | ✅ `building_footprint_mask` → `grid_to_json` |
+| **整栋建筑**（`PickOneBuilding` 产物） | ✅ `building_footprint_mask` → `grid_to_json` |
 | 地面/道路 tile、小物件 object | ❌ 不走本链路 |
 
 ### Scene 侧导出（Sino，布局 `execute` 跑通后）
@@ -140,7 +140,7 @@ Sino 在阶段②产出，落在 runDir（`<runDir>/asset-requirements.json`）�
 4. **判 `collision`（仅 object，自行判定）**：能阻挡通行的实体 → `true`；可穿过的纯装饰 → `false` 或省略。
 5. 写出 `asset-requirements.json`（上节格式）到 runDir。**不要自己去 `asset2d:*` 生成**——那是 Mira 的事。
 
-> **放置方式须组合多种模板**（Sino 自行规划）：**地标单点** → `PlaceOneDecoration`；**锚点旁局部簇** → `LocalPreciseDecoration`；**剩余 Rest 背景填充** → `NaturalDecorationDistribution`。**禁止整张场景只用其中一种**。
+> **放置方式按能力选型**（Sino 自行规划）：有明确位置/底面尺寸 → `PlaceOneDecoration`；兴趣点旁简单小物件簇 → `LocalPreciseDecoration`；大片 Rest 简单植被填充 → `NaturalDecorationDistribution`。Local/Natural **只**挂底面简单、结构简单的资产。按需求选用，不必硬凑三种。
 
 ---
 

@@ -26,6 +26,7 @@ import {
 import { migrateBuiltinDemoIdCollision } from './scenarioDemoIdMigration'
 import { captureTrashOnChange } from './scenarioTrash'
 import { gameQuery, getGameSlug, gameKeySuffix } from '../shell/gameScope'
+import { pluginFetch } from '../lib/plugin-http'
 
 /**
  * 一次性"磁盘权威"对账纪元。
@@ -638,13 +639,13 @@ let _forgeQueueProcessing = false
 async function pollForgeQueue(): Promise<void> {
   if (_forgeQueueProcessing) return
   try {
-    const res = await fetch(FORGE_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(FORGE_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: ForgeQueueItem | null }
     if (!body?.item) return
     _forgeQueueProcessing = true
     // Consume the queue item (DELETE)
-    await fetch(FORGE_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(FORGE_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     // Notify listeners (for any React UI that wants to show progress)
     setTimeout(() => {
@@ -674,13 +675,13 @@ let _visualQueueProcessing = false
 async function pollVisualQueue(): Promise<void> {
   if (_visualQueueProcessing) return
   try {
-    const res = await fetch(VISUAL_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(VISUAL_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: VisualQueueItem | null }
     if (!body?.item) return
     _visualQueueProcessing = true
     // Consume the queue item (DELETE)
-    await fetch(VISUAL_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(VISUAL_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     // Auto-trigger the visual pipeline at module level
     setTimeout(() => {
@@ -707,12 +708,12 @@ let _auditionQueueProcessing = false
 async function pollAuditionQueue(): Promise<void> {
   if (_auditionQueueProcessing) return
   try {
-    const res = await fetch(AUDITION_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(AUDITION_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: AuditionQueueItem | null }
     if (!body?.item) return
     _auditionQueueProcessing = true
-    await fetch(AUDITION_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(AUDITION_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     setTimeout(() => {
       void triggerAuditionFromQueue(item).finally(() => { _auditionQueueProcessing = false })
@@ -736,13 +737,13 @@ let _storyboardQueueProcessing = false
 async function pollStoryboardQueue(): Promise<void> {
   if (_storyboardQueueProcessing) return
   try {
-    const res = await fetch(STORYBOARD_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(STORYBOARD_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: StoryboardQueueItem | null }
     if (!body?.item) return
     _storyboardQueueProcessing = true
     // Consume the queue item (DELETE)
-    await fetch(STORYBOARD_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(STORYBOARD_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     setTimeout(() => {
       void triggerStoryboardFromQueue(item).finally(() => { _storyboardQueueProcessing = false })
@@ -765,12 +766,12 @@ let _keyframeQueueProcessing = false
 async function pollKeyframeQueue(): Promise<void> {
   if (_keyframeQueueProcessing) return
   try {
-    const res = await fetch(KEYFRAME_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(KEYFRAME_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: KeyframeQueueItem | null }
     if (!body?.item) return
     _keyframeQueueProcessing = true
-    await fetch(KEYFRAME_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(KEYFRAME_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     setTimeout(() => {
       void triggerKeyframeFromQueue(item).finally(() => { _keyframeQueueProcessing = false })
@@ -793,12 +794,12 @@ let _produceNodeQueueProcessing = false
 async function pollProduceNodeQueue(): Promise<void> {
   if (_produceNodeQueueProcessing) return
   try {
-    const res = await fetch(PRODUCE_NODE_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(PRODUCE_NODE_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { item?: ProduceNodeQueueItem | null }
     if (!body?.item) return
     _produceNodeQueueProcessing = true
-    await fetch(PRODUCE_NODE_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(PRODUCE_NODE_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     const item = body.item
     setTimeout(() => {
       void triggerProduceNodeFromQueue(item).finally(() => { _produceNodeQueueProcessing = false })
@@ -822,14 +823,14 @@ let _videoQueueProcessing = false
 async function pollVideoQueue(): Promise<void> {
   if (_videoQueueProcessing) return
   try {
-    const res = await fetch(VIDEO_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
+    const res = await pluginFetch(VIDEO_QUEUE_ENDPOINT + gameQuery(), { method: 'GET', cache: 'no-store' })
     if (!res.ok) return
     const body = (await res.json()) as { items?: VideoQueueJob[] | null }
     const jobs = Array.isArray(body?.items) ? body!.items : []
     if (jobs.length === 0) return
     _videoQueueProcessing = true
     // Claim the whole batch (DELETE) so it isn't re-dispatched on the next poll.
-    await fetch(VIDEO_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
+    await pluginFetch(VIDEO_QUEUE_ENDPOINT + gameQuery(), { method: 'DELETE' })
     setTimeout(() => {
       void triggerVideoFromQueue(jobs).finally(() => { _videoQueueProcessing = false })
     }, 0)

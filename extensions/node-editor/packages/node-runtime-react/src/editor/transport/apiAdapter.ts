@@ -321,6 +321,43 @@ export class EditorApiAdapter {
   }
 
   /**
+   * Batch value+meta read pass-through. Returns `null` when the underlying
+   * transport doesn't implement it, so callers (pipelineStore's fan-out) can
+   * fall back to the per-port path instead of throwing.
+   */
+  async getNodeOutputsBatch(
+    ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+    opts?: { metaOnly?: boolean },
+  ): Promise<ReadonlyArray<{
+    nodeId: string
+    portId: string
+    value?: unknown
+    blobs?: Record<string, unknown>
+    meta: { executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; type?: string } | null
+    tooLarge?: boolean
+    estimatedBytes?: number
+  }> | null> {
+    const client = this.client as {
+      getNodeOutputsBatch?: (
+        ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+        opts?: { metaOnly?: boolean },
+      ) => Promise<
+        ReadonlyArray<{
+          nodeId: string
+          portId: string
+          value?: unknown
+          blobs?: Record<string, unknown>
+          meta: { executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; type?: string } | null
+          tooLarge?: boolean
+          estimatedBytes?: number
+        }>
+      >
+    }
+    if (!client.getNodeOutputsBatch) return null
+    return client.getNodeOutputsBatch(ports, opts)
+  }
+
+  /**
    * Persist a desired pipeline state: diff against the current kernel snapshot
    * and submit the minimal Op[] through applyBatch. A graph:applied event is
    * announced by the kernel, driving the live-sync refetch.
@@ -729,10 +766,13 @@ export class EditorApiAdapter {
   // clear error when the transport does not front the project routes, so a
   // misconfigured app fails loudly rather than silently single-pipeline.
 
-  /** List projects in the workspace. Returns [] when the transport has no project routes. */
-  async listProjects(): Promise<readonly ProjectMeta[]> {
+  /**
+   * List projects in the workspace. `opts.gameSlug` scopes to that game's
+   * projects only. Returns [] when the transport has no project routes.
+   */
+  async listProjects(opts?: { gameSlug?: string }): Promise<readonly ProjectMeta[]> {
     if (!this.client.listProjects) return []
-    return this.client.listProjects()
+    return this.client.listProjects(opts)
   }
 
   /** Fetch one project's manifest. */
@@ -762,7 +802,7 @@ export class EditorApiAdapter {
   /** Patch a project's metadata. */
   async updateProject(
     id: string,
-    patch: { name?: string; description?: string; thumbnail?: string; type?: string },
+    patch: { name?: string; description?: string; thumbnail?: string; type?: string; gameSlug?: string },
   ): Promise<ProjectMeta> {
     if (!this.client.updateProject) {
       throw new Error('[editor] transport does not support updateProject (no project routes)')

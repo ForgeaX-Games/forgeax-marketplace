@@ -1,7 +1,7 @@
 # 建筑 - PickOneBuilding（单点建筑）
 
 > 权威详情：[../../../../batteries/templates/scene/PickOneBuilding/README.md](../../../../batteries/templates/scene/PickOneBuilding/README.md)
-> templateId：`PickOneBuilding`。与 `PickMultiBuildings`（多点批量）互补。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`PickOneBuilding`。多栋/村庄场景改多次本模板 `out_2`(Rest) 串联（`PickMultiBuildings` 暂禁不开放，见 [pipelines/PickMultiBuildings.md](PickMultiBuildings.md)）。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 管线电池的基本介绍
 
@@ -17,15 +17,16 @@
 | `in_1` | scene | Scene 上游场景 | `AddBaseGrid.out_1`(BaseNode) |
 | `in_5` / `in_6` | number | AreaWidth / AreaHeight 占地宽高(格) | `number_const`；**叙事内构 ≥15×15**；装饰外观 ≥10×10；取 max(catalog footprint, 下限) |
 | `in_0` / `in_4` | string | BuildingName / BuildingAsset | `text_panel` |
-| `in_2` | number | BuildingHeight 高度 | `number_const` |
+| `in_2` | number | BuildingHeight 竖向高度（格） | `number_const`；**叙事内构（将接 BuildingStructures）默认 `3`，且不得超过 `3`**；装饰外观可用 `2`~`3` |
+| `in_14` | number | Seed（hidden 可接） | **必接** ← **`aw_m0_seed.seed`（全局固定非 0）**；禁止悬空/`seed:0`（影响 blocky 轮廓） |
 
-> 其余 `in_*` 为 hidden 高级参数，默认即可。
+> 其余 `in_*` 为 hidden 高级参数，默认即可（**Seed 除外**）。
 
 ## 3. 管线电池的总输出端口
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Building 建筑区域（主产物） | `tree_merge` / `BuildingStructures.in_0` |
+| `out_1` | scene | Building 建筑区域（主产物） | `appendMergeItem` → `aw_m0_merge` / `BuildingStructures.in_0` |
 | `out_3` | string | BuildingPath 路径句柄 | 拼门路径（`string_concat`） |
 | `out_2` | scene | Rest 剩余空地 | 下一组 `in_0` |
 
@@ -35,8 +36,12 @@
   - **叙事内构**（需接 BuildingStructures 的可进入建筑）：**至少 `15×15` 格** — 取 `max(catalog footprint, 15, contract.footprintMin)`
   - **装饰外观**小建筑：至少 `10×10` 格，常规 `10×10`~`16×16`
   - 禁止 `4×4`；避免 ≫`20×20` 除非区域 Rest 足够大
+- **竖向高度（`in_2` BuildingHeight）游戏性铁律**：
+  - **叙事内构**（带内部墙体/房间）：**`BuildingHeight ≤ 3`，默认填 `3`**。墙过高会让室内结构难玩、门窗比例失真；**禁止**抄旧示例的 `4`/`6`/`8`/`10`。
+  - 装饰外观（无 BuildingStructures）：同样优先 `2`~`3`，不要为「气势」拉高。
+  - 勿与 `AreaHeight`（占地纵深 `in_6`）混淆——那是平面尺寸，不是墙高。
 - 占地宽高即该建筑资产的 `footprint` — Phase 0 从 `prefab-footprint-summary.json` / checklist `assets` 读取（禁止 read 全量 catalog）。
-- Phase 0 checklist 须写 `assets.AreaWidth/AreaHeight` 与 `structureParams.bottomDoor: true`（narrative_interior）。
+- Phase 0 checklist 须写 `assets.AreaWidth/AreaHeight` 与 `structureParams.bottomDoor: true`（narrative_interior）；`BuildingHeight` 建议写 `3`。
 
 ## 5. 管线效果描述
 

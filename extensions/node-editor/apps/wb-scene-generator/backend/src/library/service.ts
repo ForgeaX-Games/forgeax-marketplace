@@ -92,13 +92,24 @@ function rowToRecord(row: AssetRow): AssetRecord {
   }
 }
 
-// Legacy autotile type field (0-based bracket index 8) → rule asset alias.
+// Short / legacy / taxonomy tokens in alias field[7] → vendored assets/rules/*.json.
+// Taxonomy junk (瓦片组/未裁剪/正常) must NOT become tileType as-is — getOrLoadRule
+// would 404 and billboard falls back to full-atlas blit (looks like unstitched grass).
 const LEGACY_TILETYPE_TO_RULE_ALIAS: Record<string, string> = {
   tilemap: 'common_16',
   flower_bed: 'flower_bed_11',
   fence: 'fence_7',
   floor: 'floor_1',
   wall: 'wall_outer_16',
+  /** Inner-wall export id; wall_outer_16 already switches to inner sprites via regions. */
+  wa_inner: 'wall_outer_16',
+  wa_outer: 'wall_outer_16',
+  瓦片组: 'common_16',
+  未裁剪: 'common_16',
+  正常: 'common_16',
+  path: 'common_16',
+  street: 'common_16',
+  bridge: 'bridge_horizontal_9',
 }
 
 // Non-tile type-field sentinels (cutout objects). Anything else in the alias
@@ -115,6 +126,13 @@ function extractAliasTypeField(alias: string): string {
   return matches[7].slice(1, -1).trim()
 }
 
+/** Resolve field[7] (or legacy token) to a stitch-rule alias for the renderer. */
+export function resolveTileTypeFromAliasField(typeField: string): string {
+  const raw = typeField.trim()
+  if (!isTileAssetKind(raw)) return ''
+  return LEGACY_TILETYPE_TO_RULE_ALIAS[raw] ?? raw
+}
+
 export function deriveAliasMeta(row: Pick<
   AssetRow,
   'alias' | 'anchor_x' | 'anchor_y' | 'width_px' | 'height_px' | 'geometry_json'
@@ -122,9 +140,7 @@ export function deriveAliasMeta(row: Pick<
   // The alias type field (idx 7) now carries the rule alias directly for tiles
   // ('asset'/'' for cutout objects); the standalone asset_kind column was dropped.
   const typeField = extractAliasTypeField(row.alias)
-  const tileType = isTileAssetKind(typeField)
-    ? (LEGACY_TILETYPE_TO_RULE_ALIAS[typeField] ?? typeField)
-    : ''
+  const tileType = resolveTileTypeFromAliasField(typeField)
   const placement = parsePlacementGeometry(row.geometry_json, row.width_px, row.height_px)
   return {
     alias: row.alias,

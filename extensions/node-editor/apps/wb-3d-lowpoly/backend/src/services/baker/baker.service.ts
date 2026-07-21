@@ -25,6 +25,7 @@
  *   - 并发限流：bake 是 CPU 同步，事件循环阻塞由 V8 自己排队即可。
  */
 
+import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { createRequire } from 'module';
 import { dirname } from 'path';
@@ -33,8 +34,9 @@ import { reachableSubgraphSource, type Arg, type Geometry, type Statement } from
 import { logger } from '../../utils/logger.js';
 import { BakerError } from './errors.js';
 import { getOpBuilder, listBakeableOps } from './ops/index.js';
-import { shapeToObj, meshShape } from './obj_export.js';
+import { shapeToObj, meshShape, parseObjToRawMesh } from './obj_export.js';
 import { groupsToGlb, type ColoredMeshGroup } from './glb_export.js';
+import { meshShapeWithUvs } from './uv-from-faces.js';
 import { bakeSha256 } from './canonical.js';
 import { csgCut, csgFuse, csgIntersect } from './csg_helpers.js';
 import { safeDelete, drawingFromPoints, type ClosedDrawing } from './op_helpers.js';
@@ -232,12 +234,26 @@ export async function bakeGeometryShape(
   return runSerialized(() => bakeGeometryShapeInner(rootId, geometry, library, sha));
 }
 
-/** 一个带色 part：定位形状的 shapeId + 颜色 + 在物体内的相对位姿。 */
+/** 一个 part 引用的贴图：图片字节 + UV repeat/offset/rotation。 */
+export interface ColoredAssemblyPartTexture {
+  imageBytes: Buffer;
+  mime: string;
+  repeatU?: number;
+  repeatV?: number;
+  offsetU?: number;
+  offsetV?: number;
+  rotation?: number;
+}
+
+/** 一个带色 part：定位形状的 shapeId + 颜色 + 在物体内的相对位姿 + 可选 PBR/贴图。 */
 export interface ColoredAssemblyPart {
   shapeId: string;
   rgba: [number, number, number, number];
   origin?: [number, number, number];
   rpy?: [number, number, number];
+  metalness?: number;
+  roughness?: number;
+  texture?: ColoredAssemblyPartTexture;
 }
 
 const COLORED_ASSEMBLY_ALGORITHM_VERSION = 'colored-assembly-glb-v1';
@@ -262,7 +278,13 @@ export async function bakeColoredAssembly(
       const src = reachableSubgraphSource(p.shapeId, geometry);
       const origin = (p.origin ?? [0, 0, 0]).join(',');
       const rpy = (p.rpy ?? [0, 0, 0]).join(',');
-      return `${p.shapeId}@[${origin}]r[${rpy}]c[${p.rgba.join(',')}]::${src}`;
+      const metalRough = `m${p.metalness ?? ''}r${p.roughness ?? ''}`;
+      const tex = p.texture
+        ? `tex[${createHash('sha256').update(p.texture.imageBytes).digest('hex')}]` +
+          `[${p.texture.mime}][${p.texture.repeatU ?? 1},${p.texture.repeatV ?? 1}]` +
+          `[${p.texture.offsetU ?? 0},${p.texture.offsetV ?? 0}][${p.texture.rotation ?? 0}]`
+        : '';
+      return `${p.shapeId}@[${origin}]r[${rpy}]c[${p.rgba.join(',')}]${metalRough}${tex}::${src}`;
     })
     .join('\n~~~\n');
   const sha = bakeSha256('__colored_assembly__', {
@@ -313,12 +335,42 @@ async function bakeColoredAssemblyInner(
     for (const part of parts) {
       const stmt = byId.get(part.shapeId);
       if (!stmt) throw new BakerError(`colored assembly: shape "${part.shapeId}" not found in geometry`);
+
+      // mesh part：引用一个已预烘的 <sha>.obj（分件 bake 的产物）。角色路把这些分件
+      // 一起合并成单张可蒙皮网格时走这里——回读 blob → 解析 → 按 part 位姿变换 → 合并。
+      if (stmt.op === 'mesh') {
+        const { vertices, triangles } = loadMeshPartRawMesh(stmt, library);
+        const positions = transformVertices(vertices, part.origin ?? [0, 0, 0], part.rpy ?? [0, 0, 0]);
+        groups.push({
+          positions,
+          indices: triangles,
+          rgba: part.rgba,
+          ...(part.metalness !== undefined ? { metalness: part.metalness } : {}),
+          ...(part.roughness !== undefined ? { roughness: part.roughness } : {}),
+        });
+        continue;
+      }
+
       const product = buildStatementShape(opCtx, memo, stmt, byId, new Set());
       let rawVerts: number[];
       let rawTris: number[];
+      let uvs: Float32Array | undefined;
       if (isMeshGeometry(product)) {
+        // g_mesh 导入的裸网格没有 OCCT face 元数据，贴图 UV 精确算法用不上（已知限制）。
         rawVerts = product.vertices.flatMap((v) => [v[0], v[1], v[2]]);
         rawTris = product.faces.flatMap((f) => [f[0], f[1], f[2]]);
+      } else if (part.texture) {
+        const r = meshShapeWithUvs(product, opCtx.tessellation, {
+          repeatU: part.texture.repeatU ?? 1,
+          repeatV: part.texture.repeatV ?? 1,
+          offsetU: part.texture.offsetU ?? 0,
+          offsetV: part.texture.offsetV ?? 0,
+          rotation: part.texture.rotation ?? 0,
+        });
+        rawVerts = r.vertices;
+        rawTris = r.triangles;
+        uvs = r.uvs;
+        safeDelete(product);
       } else {
         const m = meshShape(product, opCtx.tessellation);
         rawVerts = m.vertices;
@@ -326,7 +378,16 @@ async function bakeColoredAssemblyInner(
         safeDelete(product);
       }
       const positions = transformVertices(rawVerts, part.origin ?? [0, 0, 0], part.rpy ?? [0, 0, 0]);
-      groups.push({ positions, indices: rawTris, rgba: part.rgba });
+      groups.push({
+        positions,
+        indices: rawTris,
+        rgba: part.rgba,
+        // 只在真正算出 UV 时才带 textureImage：没有 UV 的贴图材质在 GLB 里会退化成
+        // 只采样单点颜色，不如干脆不贴（mesh-backed part 缺 OCCT face 元数据时属此情况）。
+        ...(uvs ? { uvs, textureImage: { bytes: part.texture!.imageBytes, mime: part.texture!.mime } } : {}),
+        ...(part.metalness !== undefined ? { metalness: part.metalness } : {}),
+        ...(part.roughness !== undefined ? { roughness: part.roughness } : {}),
+      });
     }
   } catch (e) {
     disposeMemo(memo);
@@ -382,6 +443,67 @@ async function bakeColoredAssemblyInner(
     `blob=${record.blobId.slice(0, 8)} export=${exportMs}ms write=${writeMs}ms total=${Date.now() - totalT0}ms`,
   );
   return result;
+}
+
+/**
+ * 回读一个 mesh part 引用的预烘 `<sha>.obj` blob，解析成裸网格并应用 mesh.scale。
+ *
+ * 角色路（也可静态多材质物体）把分件 `g_bake_part` 出的 `<sha>.obj` 一起合并成一张网格时用。
+ * 只支持 `.obj`（分件几何烘焙的产物）；`.glb`（g_bake_object 的整组着色产物）不在此路径。
+ */
+function loadMeshPartRawMesh(
+  stmt: Statement,
+  library: BakerLibraryHandle,
+): { vertices: number[]; triangles: number[] } {
+  const filename = readString(stmt.args.filename);
+  if (!filename) {
+    throw new BakerError(`colored assembly: mesh part "${stmt.id}" is missing a filename`);
+  }
+  const dot = filename.lastIndexOf('.');
+  const ext = dot >= 0 ? filename.slice(dot).toLowerCase() : '';
+  const sha = dot >= 0 ? filename.slice(0, dot) : filename;
+  if (ext !== '.obj') {
+    throw new BakerError(
+      `colored assembly: mesh part "${stmt.id}" references "${filename}" — only per-part <sha>.obj ` +
+      `(from g_bake_part) can be merged into one skinnable/multi-material mesh, not "${ext || '(no ext)'}". ` +
+      `Bake each part with g_bake_part (→ <sha>.obj) and reference those.`,
+    );
+  }
+  if (!library.resolveBlobPathBySha) {
+    throw new BakerError('colored assembly: library.resolveBlobPathBySha unavailable; cannot read pre-baked mesh blob');
+  }
+  const path = library.resolveBlobPathBySha(sha);
+  if (!path) {
+    throw new BakerError(
+      `colored assembly: mesh part "${stmt.id}" blob "${filename}" not found in the library ` +
+      `(bake it with g_bake_part in this project first; parts.list shows available meshes)`,
+    );
+  }
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch (e) {
+    throw new BakerError(`colored assembly: failed to read mesh blob "${filename}": ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const parsed = parseObjToRawMesh(text);
+  if (parsed.triangles.length === 0) {
+    throw new BakerError(`colored assembly: mesh part "${stmt.id}" blob "${filename}" parsed to an empty mesh`);
+  }
+  // 可选 scale（[sx,sy,sz] 或单值），在位姿变换之前作用于局部顶点。
+  const scale = readNumList(stmt.args.scale);
+  if (scale && scale.length > 0) {
+    const sx = scale[0];
+    const sy = scale.length >= 2 ? scale[1] : scale[0];
+    const sz = scale.length >= 3 ? scale[2] : scale[0];
+    if (sx !== 1 || sy !== 1 || sz !== 1) {
+      for (let i = 0; i < parsed.vertices.length; i += 3) {
+        parsed.vertices[i] *= sx;
+        parsed.vertices[i + 1] *= sy;
+        parsed.vertices[i + 2] *= sz;
+      }
+    }
+  }
+  return parsed;
 }
 
 /**

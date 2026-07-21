@@ -1,3 +1,5 @@
+import { pluginFetch } from '../../api/pluginHttp'
+
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
 export interface SceneExportCookResult {
@@ -39,7 +41,7 @@ function parseCookResult(body: unknown): SceneExportCookResult {
 export const sceneExportApi = {
   async cook(): Promise<SceneExportCookResult> {
     const url = '/api/v1/scene-export/cook'
-    const response = await fetch(url, {
+    const response = await pluginFetch(url, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({}),

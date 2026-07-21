@@ -19,6 +19,17 @@ calendar dates in the project timezone.
 ## Unreleased
 
 ### Added
+- **新增 `assets/rules/street_41.json`（街道 autotile，填充区域型 · 纯顶面 · top(adjacent8)+entry(edgeDist4)）。** 41 基块分 5 组：A 外收边 0–7、B 内部白线环 8–15、C 内收边 16–23、D 朝外内角+交点 24–28、E 端头三件套 29–40。两面按信息轴互补且 entry 优先：`faces.top`(keyMode=adjacent8)负责几何轮廓——边界(udlr 含 0)→A 组凸角/直边(0–7)与窄路(12/14)，内部(udlr=1111)按 8 位对角空缺数派发 C 内角/内收边(1 空→16/18/21/23、2 邻空→17/19/20/22)、D 朝外内角(3 空→24/25/27/28)/交点(4 空→26)；`faces.entry`(keyMode=edgeDist4, `u,d,l,r,u2,d2,l2,r2`)只装白线环 B——对 `udlr=1111` 且**至少一侧 dist-2 为空**的格按方向派发白线/角(8–15)，**刻意不含 dist-2 全满键**，使深内部与内角回退到 top 的 adjacent8 判定（避免 entry 优先覆盖 16–28）。每基块 4 变体（keepProbability 0.5），sprites 205（base41 + 变体 41×4，A/B/C 块各 8 行、D 块 5 行、E 块 12 行，x 基址 0/64/128/192/256），图集建议 336×240。*为什么：* 用户提供 street_41 示意图（图 2–3 为 basepieces 语义），要求补全该规则、只画顶面（未提供立面 basepiece）、不同标线样式另拆 rule。⚠️ 待验证：(1) E 端头 29–40 sprite 已备但不进 top/entry map——任意宽度下端头 4 邻域键与贯通路边界键不可区分，按既定方案由生成器端头掩码单独喂入 entry 匹配，本 rule 不含 E 键以免污染贯通路；(2) 超宽路(≥5 格)正中 dist-2 皆满，entry 落空回退 top 全满键→14 纯路面填充，无走向区分；(3) 细臂(≤2 格)路口的内角格若某侧 dist-2 恰空，可能被 entry 白线键误抓；(4) 2D top 预览不渲染 entry（与 rail_28 一致），白线仅在 3D billboard / scene-export 可见；(5) sprites 像素坐标依示意图读取，需与实际导出图集比对。
+- **`FaceVariantWhen: stateEquals` —— face.variants 可按 per-cell `state[key]==value` 选 map（标签派发），并打通 cell.state → 选片上下文的消费链。** 原 `FaceVariantWhen` 单一 `regionContains`（空间关系）扩为闭合 union，新增 `stateEquals:{ key, value }`：`pickFaceSprite.ts` variant 匹配读 `ctx.cell.state`，命中即换 variant.map。前后端 parity 同步：`ruleCache.ts`/`tileRules.ts` 的 `parseFaceVariantWhen` 解析两种 when；`CollectedCell` 带 `state`（前端 `paintCell` 本就直传 collected cell，无需改）；后端 `tileRules.ts::faceContext` + `pickTopSpriteIndex`/`pickFrontSpriteIndex` 新增 `state` 入参，`cooker.ts` 发片循环把 `cell.state` 透传进去；`vendorResolver.d.ts` 同步 union + `CollectedCell.state`（并补齐遗漏的 `edgeDist4`）；`build:vendor` 重编 resolver。单测：`scene-export-renderer-parity.test.ts` 新增「slopeDir 标签派发」用例（三孤立格 tag 缺省/front/left → map 0/1/2，导出与 shared resolver 一致）。*为什么：* 坡向（前/后/左/右）无法用邻居/region 干净区分（独立坡带镜像同形、坡环邻域错乱，见调研）；改由上游地形按格派发 `state.slopeDir` 标签、rule 只据标签走对应 map。方向标签的**产出**由未来地形步骤负责，本次只搭后端消费链路。
+- **新增 `assets/rules/slope_24.json`（坡道 autotile，四方向 · 纯 faces.top 平面逻辑 · 标签派发方向）。** 24 基块 = 左坡 0–5 / 右坡 6–11 / 后坡 12–17 / 前坡 18–23，每方向一条 2 格深坡带。方向由 per-cell 标签 `state.slopeDir` 判定（`when.stateEquals`）：默认 map=后坡(back/缺省)，`front`→前坡、`left`→左坡、`right`→右坡；带内用 adjacent4 `(u,d,l,r)` 分「远端下沿/近台面行」与「左端/中段/右端」。**不绘立面、无 `faces.front`** —— 「前坡/后坡」是平面方向字段，与 z 轴 `front` 立面字段是两回事，勿混淆。sprites 120（base24 + 变体 24×4，左组 tile0–11 @ x0–48/y64+、右组 tile12–23 @ x64–112/y64+），每基块 4 变体（keepProbability 0.5）。*为什么：* 用户要求按四方向补全坡道 rule 且走平面逻辑；方向改用地形派发的标签而非高度/region 判定（先前 `regions.high`+`regionContains` 版本已废弃）。⚠️ 待验证：地形侧尚未产出 `state.slopeDir`，当前所有坡格回退默认后坡 map，需未来地形步骤打标签后端到端验收。
+- **`FaceKeyMode: edgeDist4` — top/entry 面 map 在四个方向探测距离 2 的邻居。** `buildTopFaceKey` / `FaceKeyMode` 新增 `edgeDist4`：8 位 key `u,d,l,r,u2,d2,l2,r2`（在 `edgeDist2` 的竖向 ±2 基础上再加水平 `l2=(x-2,y)` / `r2=(x+2,y)`），让 map 能在上下左右四个方向都区分「距端 1 格」与「真正中段」（适合双向都需收边的填充带）。前后端同步：`ruleCache.ts` / `tileRules.ts` 的 `parseFaceKeyMode` 接受该 schema，`tileRules.ts::occToCoords` 邻域种子补 `[-2,0,0]/[2,0,0]` 水平偏移；`build:vendor` 已重编 vendored resolver。单测：`neighborKey.test.ts`（8 元组竖+横 dist-2 探测）、`scene-export-renderer-parity.test.ts`（横向 3 列带用 `edgeDist4` 键区分左端/中段/右端，导出与渲染器逐格一致）。*为什么：* 用户需要一个上下左右 + 上上/下下/左左/右右 的 keymode，`edgeDist2` 只探竖向、`adjacent8` 只探 ±1 对角，都无法表达水平方向的「距端 1 格 vs 中段」。
+- **新增 `assets/rules/rail_28.json`（铁轨 autotile，填充区域型 · top(adjacent8)+entry(edgeDist2)）。** 铁轨为 2 格宽填充带。`faces.top`(keyMode=adjacent8, `u,d,l,r,ul,ur,dl,dr`)负责区域边界：左块 0–19（4 外角 0/4/15/19、4 直边 2/9/10/17、4 内角 6/7/12/13、6 带弯过渡片 1/3/5/8/16/18 与备用角 11/14）；`faces.entry`(keyMode=edgeDist2, `u,d,l,r,u2,d2`)负责端头收边（右块 20–27，2×2×2），entry 命中时优先于 top。sprites 140（base 28 + 变体 28×4），每基块 4 变体（keepProbability 0.5）。*为什么：* 用户提供 rail_28 示意图，要求 adjacent8、并把 entry 端头独立成 edgeDist2 面。⚠️ 待验证：adjacent8 无法区分「直边」与「紧邻弯角的带弯边」，故 1/3/5/8/11/14/16/18 暂未进 top.map；entry 目前只覆盖 4 orthogonal 端头(20/22/24/26)+孤立(21)，2 格高收边的 u2/d2 上下分片与 23/25/27 待确认收边角色后再补。
+- **完成 `bridge_25.json` + 新增 `faces.entry` 面。** `top`：竖向中段扶手(3/4)、横向面域(9/12/15)、L 角柱(17–24，8 组对角精确键)；`entry`：全部收口块(0/1/2/5/6/7 竖向端、8/10/11/13/14/16 横向端)，竖向端用 `u,*,l,r` 通配键与横向 `0,1,l,r` 区分走向。渲染/导出：`pickFaceSpriteIndexIfMapped` + entry 优先于 top；`ruleCache`/`tileRules`/`bindings`/`cooker` 同步解析 entry 变体池。*为什么：* 用户提供 bridge_25 完整示意图（含 17–24 L 角点），要求补全 rule 并新增与 top/front 并列的 entry 字段。
+- **新增 `assets/rules/outer_wall_36.json`（外墙 autotile 规则，内外墙双套立面）。** faces.top(0–17) 与 `path_18` 同结构顶面；faces.front(18–35) = 3×3 立面九宫格 ×2 套（18–26 外墙、27–35 内墙），按 `(t,b,l,r)` 折算 row×col，默认外墙，voxel 的 `(x,y+1)` 落在父 region 内（billboard 视角看到墙内侧）时经 `regionContains` 切到内墙（同 `wall_outer_16` 机制，从 5/3 扩到全 9/9）。每基块 4 变体，sprites 共 180（base36+变体×4）。*为什么：* 用户提供 `outer_wall_36` 示意图（墙顶 0–17 / 外墙 18–26 / 内墙 27–35），要求补全该规则。
+- **`faces.front.blockVariants` —— 连续 3×3 实心墙块整体替换成大图。** `FaceRule` 新增可选 `blockVariants: { probability, groups: number[][] }`（每个 group 恰好 9 个 sprite idx，顺序=局部 z\*3+x 行主序）；新增纯函数 `frontend/src/renderer/framework/asset/blockVariant.ts::pickBlockVariantSpriteIndex`，在 `pickFaceSprite.ts::pickFaceSpriteIndex` 的 front 分支最前面接入——以世界坐标网格对齐（`anchor=floor(x/3)*3,floor(z/3)*3`）判定当前 cell 所在 3×3 巨格是否全实心，实心则按坐标定死的 hash 掷骰决定是否用某个候选 group 整体覆盖这 9 格（命中的 9 格共享同一 group，不再各自逐格 autotile/randomRules）。前后端 parity：`ruleCache.ts`/`tileRules.ts` 的 `parseFace` 同步解析该字段，`vendorResolver.d.ts` 补充 ambient 类型，`tileRules.ts::occToCoords` 的邻域探测偏移扩到 `dx,dz∈[-2,2]`（巨格内任意局部位置都可能是当前 cell）。单测：`blockVariant.test.ts`（纯函数：非实心/概率不中/组内一致性）、`scene-export-renderer-parity.test.ts`（`front.blockVariants` 用例：6×3 实心墙两个巨格，破坏左侧巨格验证局部回退、右侧巨格验证 cook 与渲染器一致）。*为什么：* `inner_wall_27` 需要"识别到连续九宫格墙体时概率替换为预制大图"，现有 map/randomRules/variants 机制只能逐格决策，无法表达"9 格共享同一张大图"。
+- **新增 `assets/rules/inner_wall_27.json`（内墙 autotile 规则，仅内墙无外墙）。** faces.top(0–17) 与 `outer_wall_36`/`path_18` 同结构顶面；faces.front(18–26) 复用 `outer_wall_36` 默认（外墙角色集）的 9 格 3×3 立面结构但语义上作为"唯一一套墙体"（无 `regions`/`variants` 区域切换）；额外声明 `blockVariants`（3 个候选大变体组，probability 0.35）。sprites 布局：base 27（top18+front9，直接复用 `outer_wall_36` 对应位置像素坐标）+ top 变体 72 + front 变体 36 + 3 组大变体 27 = 162。*为什么：* 用户提供 `inner_wall_27` 示意图，要求仅内墙、并支持连续九宫格墙体概率替换为大变体。
+- **新增 `assets/rules/cliff_25.json`（崖壁 autotile 规则）。** 顶面（0–15）直接复用 `common_16` 的 16-tile adjacent4 邻域走位；立面（16–24）仿 `outer_wall_36` 的顶面/立面分离写法，做成 3×3 九宫格，按 `(t,b,l,r)` 邻域折算 row(top/mid/bottom，t=0 恒顶行，t=1 时按 b 分中/底行，可向下重复延伸)×col(left-outer/mid/right-outer，仅一侧有邻块取对应外侧列)；因崖壁天然单向（无内侧），只需一套 9 格，不像 outer_wall 需要内外墙两套 variants。每基块 4 变体（`randomRules`），sprites 布局：顶面基块 4×4 @ (0,0)、立面基块 3×3 @ (64,0)，顶面变体行始于 y=64、立面变体行始于 y=48（各自紧接自身基块行尾），图集建议 ≥128×320。*为什么：* 场景生成器需要一个带垂直面的崖壁地形规则，用户提供了 rule 示意图，要求照 outer_wall_36 顶面/立面分离的方法撰写。
+- **`FaceKeyMode: adjacent8` — top 面 map 探索 8 邻域。** `buildTopFaceKey` / `FaceKeyMode` 新增 `adjacent8`：8 位 key `u,d,l,r,ul,ur,dl,dr`（正交 ±1 + 四角对角）。前后端 `parseFace`（`ruleCache.ts` / `tileRules.ts`）与 `vendorResolver.d.ts` 同步接受该 schema；cooker 邻域种子含对角偏移。`bridge_25` 启用 `keyMode: adjacent8`，map 键改为 8 元组（对角暂 `*` 通配，可后续细化）。单测：`neighborKey.test.ts`、`scene-export-renderer-parity.test.ts`。*为什么：* 转角柱/斜接需区分对角占位，4 邻无法表达。
 - **Asset Store「列表」视图新增可点击排序的表头，字段集与列序对齐 asset_manager 的 `AssetReviewTable`（索引/内外/名称/材质/朝向/题材风格/状态/类型规则/尺寸/静态/滤镜模板/变体/出现场所/几何/时间戳/大小）。** `frontend/src/surfaces/AssetStoreSurface.tsx`：新增 `LIST_COL_ORDER`/`LIST_COL_LABEL`/`LIST_COL_SLOT`（13 项经既有 `aliasName.ts` 的 `SLOT`+`fieldAt` 从 `alias` 拆列，几何取 `geometryJson` 有无、时间戳取 `updatedAt`??`createdAt`、大小复用既有 `formatBytes`），列表行改为按此列集渲染分列文本；表头按钮点击走三态排序（未排序→升序→降序→取消，逻辑对齐 asset_manager `ScenePage.handleSortColumn`）驱动纯前端 `[...assets].sort(compareListAssets(...))`（`assets` 本就是当前 zone 的全量列表，见 `assetStoreStore.ts fetchAssets` 的「整 zone 一次性加载、连续滚动」模型，client-side 排序无需分页协调）。`AssetRecord`（`frontend/src/surfaces/library/libraryApi.ts`）补充 `geometryJson?: string | null`（后端已返回，此前前端类型缺失）。新增 `AssetStoreSurface.css` 表格样式（`.asset-list-*`，CSS Grid + 共享 `--asset-list-cols` 变量对齐表头/行列宽，超宽横向滚动）。仅改列表视图展示与排序，不影响网格视图、批量操作、渲染器绑定等既有交互。*为什么：* 用户要求 Asset Store 顶部资产列表按表头方式组织展示（参照 `asset_manager/apps` 的审阅表格），并支持点击表头依据该字段排序。
 
 - **`variantWeights` — 变体加权采样。** `FaceRule` / `randomRules[]` 可选声明与 `variantIdxs` 等长的 `variantWeights`；`randomRules` 命中且未保留 base 时经 `pickWeightedVariant` 按权重采样（缺省仍等权）。透明像素过滤后 idx/weight 成对剔除；前后端共用 `VariantPool` + `computeValidVariantPoolsByTileId`。*为什么:* common_16 中心 tile 的 4 个变体需不同出现概率（如 4:2:2:2），原先只能等概率随机。
@@ -28,6 +39,8 @@ calendar dates in the project timezone.
 - **资产库对齐 asset_manager 新版 13 字段契约（`@forgeax/asset-2d` SSOT）。** 新增 `backend/src/library/aliasName.ts` + `frontend/src/surfaces/library/aliasName.ts` 统一 `SLOT`/字段语义；`paintAssetBus` 修正名称=PPU 索引（name→f2、size→f8）；taxonomy `scene` 改为 **`index`**（f0 分类路径分层 drill-down）；过滤器/预览面板补齐 13 项（索引/内外/名称/材质/朝向/题材/状态/类型/尺寸/静态/滤镜/变体/出现场所）并透出 `tags`/`createdAt`/`updatedAt`/`hasError`/`isPlaceholder`；材质默认含纸/布/竹且与库内 distinct 值合并；变体改为自由输入以支持任意 ≥0 整数。*为什么：* 新版 `materials/asset-store/library.db` 与 wb-asset-manager 生成器格式打通，消除半迁移状态下的刷绘/匹配/浏览错位。
 
 ### Fixed
+- **`inner_wall_27.json` 的 `sprites` 切割对齐示意图重排。** 基础块（0–26）由「按行横跨 3 组」改为示意图的 3 个 3×3 分组（0–8 墙顶 / 9–17 端点·T字 / 18–26 内墙立面），组 x 基址 0/64/128；变体（27–134）改为「每 tile 4 变体横排、按分组纵向 9 段（y=48+off\*16、组 x 基址同上）」，与 `randomRules.variantIdxs` 严格对齐；`blockVariants` 三组大变体（135–161）移到变体网格右侧 x=192/208/224 列，按 y=48/96/144 分三段各 3×3（局部 z\*3+x 行主序）。sprites 共 162 不变，spot-check 全通过；图集建议同步改为 ≥256×192。*为什么：* 原切割与示意图不符，tileId/大变体 ↔ 图集像素错位。
+- **`outer_wall_36.json` 的 `sprites` 切割对齐示意图重排。** 基础块（0–35）由原「按行横跨 4 组」的错误顺序改为示意图的 4 个 3×3 分组（0–8 墙顶 / 9–17 端点·T字 / 18–26 外墙立面 / 27–35 内墙立面），每组内左→右·上→下、组 x 基址 0/64/128/192；变体（36–179）由原「16 格/行连续读」改为「每 tile 4 变体横排、按分组纵向 9 段（y=48+off\*16、组 x 基址同上）」，与 `randomRules.variantIdxs`（tileId 顺序）严格对齐。sprites 共 180 不变，spot-check 座标全通过。*为什么：* 原切割与示意图不符，导致 tileId ↔ 图集像素错位，取到的立面/端点子图错误。
 - **scene-export 与 baked 层 vendor 类型补全，后端 `tsc -b` 恢复通过、dev 后端可稳定拉起。**
   `backend/src/baked/vendorScene.d.ts` 补 `projectSceneToVoxelLayers` 等投影类型；
   `backend/src/scene-export/routes.ts` 预加载 rule atlas PNG 到同步 cache（`cookBakedScene` 的 `resolveRuleImage` 必须同步）。
@@ -449,7 +462,7 @@ calendar dates in the project timezone.
   records sort first, `private:true`). Binding broadcasts `library:changed` so
   the AssetStore + renderer re-pull. No app-internal store is written. Files:
   `backend/src/library/{gameSandboxStore.ts,routes.ts,privateRoutes.ts,privateStore.ts}`,
-  `backend/src/tool-handlers.ts`, `forgeax-extension.json`,
+  `backend/src/tool-handlers.ts`, `forgeax-plugin.json`,
   `skills/texture-pipeline/SKILL.md`; 2D side mirrored in `wb-2d-scene-asset-generator`.
 
 ### Changed
@@ -493,13 +506,13 @@ calendar dates in the project timezone.
   `scene:library.list` and list the "texture not applied" diagnosis checklist
   (field4 == template `xxxAsset`; right active project; `asset_type=tile` →
   non-cutout pool; `raw` not `staging`). Files: `backend/src/tool-handlers.ts`,
-  `forgeax-extension.json`, `skills/texture-pipeline/SKILL.md`,
+  `forgeax-plugin.json`, `skills/texture-pipeline/SKILL.md`,
   `agent-sino/persona/zh.md`. (`scene:assets.list`'s description now states it
   is filesystem-only.)
 
 ### Removed
 
-- **Dropped the standalone `@forgeax-extension/agent-atlas` supervisor agent;
+- **Dropped the standalone `@forgeax-plugin/agent-atlas` supervisor agent;
   folded the texture-pipeline capability into Sino instead.** Supersedes the
   Phase-3 "supervisor agent" entry below. Why: in testing, Atlas could not
   connect the scene graph correctly — its connection know-how lived only in the
@@ -510,7 +523,7 @@ calendar dates in the project timezone.
   schema, `in_0` wiring, PathConnection POI, `tree_merge` params). Rather than
   duplicate Sino's large skill into Atlas's persona (violating single-source /
   cleanliness), we delete Atlas and give Sino the 2D capability as an opt-in
-  extension. Files removed: `packages/marketplace/extensions/agent-atlas/**`.
+  extension. Files removed: `packages/marketplace/plugins/agent-atlas/**`.
 
 ### Changed
 
@@ -525,7 +538,7 @@ calendar dates in the project timezone.
   template `xxxAsset` from a built-in name to a contract semantic name and add
   generate→publish→verify steps.
 - **Sino agent gains the 2D / texture capability (opt-in).**
-  `agent-sino/forgeax-extension.json`: `tools` now `["scene:*","asset2d:*"]`;
+  `agent-sino/forgeax-plugin.json`: `tools` now `["scene:*","asset2d:*"]`;
   `defaultSkills` adds `texture-pipeline` + `generate-2d-asset`; `produces` adds
   the contract + generated-assets paths; description updated. `persona/zh.md`
   adds a clearly-scoped "扩展能力：现生成贴图（按需触发，默认不用）" section + a
@@ -548,7 +561,7 @@ calendar dates in the project timezone.
 
 - **Texture pipeline — screenshot-vision test toggle
   (`FORGEAX_SCENE_SCREENSHOT_NO_VISION`).** New env flag (declared in
-  `forgeax-extension.json::requestedEnv`, read in `backend/src/tool-handlers.ts`)
+  `forgeax-plugin.json::requestedEnv`, read in `backend/src/tool-handlers.ts`)
   that, when set (`1|true|yes|on`), makes `scene:screenshot.capture/latest`
   return the plain capture metadata (path + size + `visionDisabled:true`)
   **without** the `image_file` content part, so the agent never ingests the
@@ -562,7 +575,7 @@ calendar dates in the project timezone.
 
 - **Texture pipeline Phase 3 — orchestration skill + supervisor agent.** New
   plugin skill `texture-pipeline` (`skills/texture-pipeline/SKILL.md`, registered
-  in `forgeax-extension.json`) is the top-level conductor manual: it pins the naming
+  in `forgeax-plugin.json`) is the top-level conductor manual: it pins the naming
   contract carrier at `<active_game>.dir/texture-pipeline/contract.json` (a
   plugin-internal SSOT in the game workspace, since the two apps'
   `FORGEAX_PROJECT_ROOT`s are isolated), gives the 8-rule autotile alignment
@@ -570,11 +583,11 @@ calendar dates in the project timezone.
   `bridge_vertical_15`/`common_16`/`wall_outer_16`, all ppu=16) tiles must match,
   the object cutout flow, the per-asset publish loop, and the `topBillboard`
   verification loop. Paired with a NEW agent plugin
-  `@forgeax-extension/agent-atlas` (Atlas · map-texture supervisor) that wields BOTH
+  `@forgeax-plugin/agent-atlas` (Atlas · map-texture supervisor) that wields BOTH
   `scene:*` and `asset2d:*` tool sets and discloses three skills on demand
   (`texture-pipeline` + `compose-sino-scene` + `generate-2d-asset`). Files:
-  `skills/texture-pipeline/SKILL.md`, `forgeax-extension.json` (scene skill reg),
-  `ARCHITECTURE.md`; new plugin under `packages/marketplace/extensions/agent-atlas/`.
+  `skills/texture-pipeline/SKILL.md`, `forgeax-plugin.json` (scene skill reg),
+  `ARCHITECTURE.md`; new plugin under `packages/marketplace/plugins/agent-atlas/`.
 - **Texture pipeline Phase 2 — scene-side publish bridge
   (`scene:library.publishExternal`).** New atomic, idempotent endpoint
   `POST /api/v1/library/publish-external` (+ tool + manifest tool/surface) that
@@ -588,7 +601,7 @@ calendar dates in the project timezone.
   is the single write entry-point the supervisor agent uses instead of
   hand-stitching import→repair→field-edit→move. Files: `library/privateStore.ts`
   (`publishExternalAsset` + `PublishExternalInput`), `library/privateRoutes.ts`,
-  `tool-handlers.ts`, `forgeax-extension.json`; covered by
+  `tool-handlers.ts`, `forgeax-plugin.json`; covered by
   `tests/library-publish-external.test.ts`.
 - **Texture pipeline Phase 1 — renderer matching pool now merges private
   assets.** `GET /api/v1/library/aliases-meta` previously returned base-library

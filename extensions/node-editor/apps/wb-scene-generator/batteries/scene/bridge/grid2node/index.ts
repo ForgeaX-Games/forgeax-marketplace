@@ -38,10 +38,24 @@ export function grid2Node(input: Record<string, unknown>): Grid2NodeResult {
   const token = typeof input.token === 'string' && input.token
     ? input.token
     : 'cell';
-  const rawZRange = Array.isArray(input.zRange) ? input.zRange : [input.zRange ?? 0];
-  const zRange: number[] = rawZRange
-    .map((v: unknown) => Number(v))
-    .filter((v: number) => Number.isFinite(v));
+
+  // Elevation tiers (MountainContour): optional `z` = layer index. When set,
+  // fill a solid column [0..z]. Mutually exclusive contour partitions must use
+  // this — leaving zRange at the default [0] puts every tier on the ground plane.
+  // `z` wins over a default/unwired zRange; an explicitly longer zRange (e.g.
+  // PlaceOne building height [0..H]) should leave `z` unwired.
+  const zTopRaw = input.z ?? input.zBase ?? input.zLevel;
+  const zTop = typeof zTopRaw === 'number' ? zTopRaw : Number(zTopRaw);
+  let zRange: number[];
+  if (Number.isFinite(zTop)) {
+    const top = Math.max(0, Math.round(zTop));
+    zRange = Array.from({ length: top + 1 }, (_, i) => i);
+  } else {
+    const rawZRange = Array.isArray(input.zRange) ? input.zRange : [input.zRange ?? 0];
+    zRange = rawZRange
+      .map((v: unknown) => Number(v))
+      .filter((v: number) => Number.isFinite(v));
+  }
   if (zRange.length === 0) {
     return { voxelCount: 0, error: 'zRange must contain at least one finite number' };
   }

@@ -30,7 +30,7 @@ IslandSizes ─────────────────┐              
 | `in_2` | number | list | **IslandSizes** 各岛膨胀半径（与 Points 对应，不足复用末值） | 建议接 | `number_const` / `range_list` → `in_2` |
 | `in_3` | string | item | **IslandName** 岛屿节点名 | 建议接 | `text_panel.output` → `in_3` |
 | `in_4` | string(tree) | tree | **IslandAsset** 岛屿底图资产名（tile） | 可选（推荐） | `text_panel.output` → `in_4` |
-| `in_5` | number | item | **Seed** 随机种子 | 可选 | `number_const` / `seed_control` → `in_5` |
+| `in_5` | number | item | **Seed** 随机种子 | **必接** | **`aw_m0_seed.seed`（全局固定非 0）** → `in_5`；禁止悬空/`seed:0`（0=每次 execute 用 `Date.now()` 重抽） |
 
 > 隐藏高级端口：`in_6`(RadiusVar)、`in_7`(SliceZ)、`in_8`(FillValue)、`in_9`(schema)、`in_10`(token)、`in_11`(zRange)——默认即可，日常不接。
 
@@ -49,7 +49,7 @@ IslandSizes ─────────────────┐              
 - **Points（`in_1`）**：岛屿中心坐标列表，坐标按 base 网格的 `(x→列, y→行)`。落在 base 范围外的点会被忽略。
 - **IslandSizes（`in_2`）**：各岛膨胀半径（格），建议 6~20。与 Points 数量不一致时短则复用末值、长则截断。
 - **IslandAsset（`in_4`）**：岛屿渲染底图图层名（tile），推荐 `island` / `land` / `grassland` 等。
-- **Seed（`in_5`）**：固定种子可复现；0 = 每次不同。
+- **Seed（`in_5`）**：**必须**接全局 `aw_m0_seed.seed`（或等价固定非 0）；`0`/悬空 = 每次不同。Task Viewer 基建已创建 `aw_m0_seed`。
 
 ## 使用示例（applyBatch ops，可照抄）
 
@@ -64,13 +64,16 @@ IslandSizes ─────────────────┐              
 把返回 groupId 替换进 `<G_ISLAND>`，再提交（Scene 接上游 BaseNode、Points 接锚点列表、IslandSizes/Name/Asset/Seed）：
 
 ```jsonc
-// in_0=Scene 接上游 BaseNode；in_1=Points；in_2=IslandSizes；in_3=IslandName；in_4=IslandAsset；in_5=Seed
+// in_0=Scene；in_1=Points；in_2=IslandSizes；in_3=IslandName；in_4=IslandAsset；in_5=Seed（必接全局固定 seed）
 { "type":"connect","edgeId":"e_isl_scene","source":{"nodeId":"<G_BASE>","port":"out_1"},      "target":{"nodeId":"<G_ISLAND>","port":"in_0"} },
 { "type":"connect","edgeId":"e_isl_pts",  "source":{"nodeId":"<pts_merge>","port":"tree"},     "target":{"nodeId":"<G_ISLAND>","port":"in_1"} },
 { "type":"connect","edgeId":"e_isl_size", "source":{"nodeId":"<sizes>","port":"value"},        "target":{"nodeId":"<G_ISLAND>","port":"in_2"} },
 { "type":"connect","edgeId":"e_isl_name", "source":{"nodeId":"<isl_name>","port":"output"},    "target":{"nodeId":"<G_ISLAND>","port":"in_3"} },
-{ "type":"connect","edgeId":"e_isl_asset","source":{"nodeId":"<isl_asset>","port":"output"},   "target":{"nodeId":"<G_ISLAND>","port":"in_4"} }
+{ "type":"connect","edgeId":"e_isl_asset","source":{"nodeId":"<isl_asset>","port":"output"},   "target":{"nodeId":"<G_ISLAND>","port":"in_4"} },
+{ "type":"connect","edgeId":"e_isl_seed", "source":{"nodeId":"aw_m0_seed","port":"seed"},      "target":{"nodeId":"<G_ISLAND>","port":"in_5"} }
 ```
+
+独立 demo 若无基建，可先 `createNode` `seed_control`（`params.seed` 非 0，如 `42`）再接到 `in_5`。
 
 > 多层串联：本组 `out_2`(Rest) → 下一层模板的 Scene 输入（如再叠一层装饰 / 湖泊）。
 

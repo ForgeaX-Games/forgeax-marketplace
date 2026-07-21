@@ -3,7 +3,7 @@
 // `/api` proxy and WebSocket working for child iframes without extra dev-server
 // wiring.
 
-export type WorkbenchPane = 'urdf'
+export type WorkbenchPane = 'viewer3d'
 
 export function paneUrl(pane: WorkbenchPane): string {
   const path = typeof location !== 'undefined' ? location.pathname : '/'

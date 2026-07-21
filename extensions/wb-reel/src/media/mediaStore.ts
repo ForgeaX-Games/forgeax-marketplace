@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { putMedia, deleteMedia, getMedia } from './mediaIdb'
 import { gameQuery } from '../shell/gameScope'
+import { pluginUrl } from '../lib/plugin-http'
 
 /**
  * 媒体仓 —— 上传的视频/图像在此登记。
@@ -387,7 +388,7 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
  *     不要让 IDB 路径覆盖 asset 路径写入的"权威 URL"。
  */
 export function primeMediaEntry(entry: MediaEntry): void {
-  const isAssetUrl = entry.url.startsWith('/__reel__/assets/')
+  const isAssetUrl = entry.url.includes('/__reel__/assets/')
   useMediaStore.setState((s) => {
     const existing = s.entries[entry.id]
     if (existing && !isAssetUrl) return s
@@ -555,7 +556,7 @@ function markPersisted(mediaId: string, assetId: string | null): void {
       // 必须带 ?game=<slug>，与 assetStore.urlOf 一致：后端 handleGetBlob 按
       // 单桶解析，缺 ?game= 会落到全局 .reel-assets 而非本 game 的 reel/assets，
       // 导致刚落盘的媒体在刷新前 404（per-game 试玩链路曾因此闪断）。
-      const newUrl = `/__reel__/assets/${encodeURIComponent(assetId)}${gameQuery()}`
+      const newUrl = pluginUrl(`/__reel__/assets/${encodeURIComponent(assetId)}${gameQuery()}`)
       // blob URL revoke 放在 set 之外也可以，这里就近处理便于读逻辑
       if (e.url.startsWith('blob:')) {
         try {

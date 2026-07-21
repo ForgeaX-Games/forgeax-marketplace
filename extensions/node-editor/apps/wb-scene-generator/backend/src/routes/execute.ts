@@ -1,9 +1,34 @@
 import type { FastifyInstance } from 'fastify'
-import { executeNode, type ExecuteNodeRequest } from '@forgeax/node-runtime'
+import { executeNode, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
 import { getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
 import { syncTrace } from '../debug/syncTrace.js'
+import type { TopologyGraphEdge, TopologyGraphNode } from '../lib/topologyGate.js'
+
+/** Adapt `getPipeline`'s PipelineSnapshot (nodes may be an array or a map) into the edges+nodeById shape `summarizeExecutionResult`'s topology check expects. */
+function currentGraphForTopologyCheck(
+  runtime: Awaited<ReturnType<typeof getRuntimeForProject>>,
+): { edges: readonly TopologyGraphEdge[]; nodeById: Map<string, TopologyGraphNode> } | undefined {
+  const snap = getPipeline(runtime)
+  if (!snap) return undefined
+  const nodeById = new Map<string, TopologyGraphNode>()
+  const rawNodes = snap.nodes
+  if (Array.isArray(rawNodes)) {
+    for (const n of rawNodes) if (n?.id) nodeById.set(n.id, n)
+  } else if (rawNodes && typeof rawNodes === 'object') {
+    for (const [id, n] of Object.entries(rawNodes as Record<string, TopologyGraphNode>)) {
+      nodeById.set(id, { ...n, id: n.id ?? id })
+    }
+  }
+  const rawEdges = snap.edges
+  const edges: TopologyGraphEdge[] = Array.isArray(rawEdges)
+    ? rawEdges
+    : rawEdges && typeof rawEdges === 'object'
+      ? Object.values(rawEdges as Record<string, TopologyGraphEdge>)
+      : []
+  return { edges, nodeById }
+}
 
 interface ProjectParams {
   projectId: string
@@ -26,6 +51,7 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     syncTrace('backend:execute', { projectId, nodeId: (body as { nodeId?: string }).nodeId ?? '(full)', quietErrors: body.quietErrors })
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
+    const __t0 = Date.now()
     const handle = await executeNode(await getRuntimeForProject(projectId), body)
     const result = await handle.done
     syncTrace('backend:execute-done', {
@@ -33,6 +59,22 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
       status: result.status,
       outputNodes: result.outputs ? Object.keys(result.outputs).length : 0,
     })
+    // Unconditional (not gated behind FORGEAX_DEBUG_SYNC, same rationale as
+    // [output-batch-trace]): a cold project's first open runs autoExecuteOnOpen()
+    // — an actual full-graph *compute*, not a fetch — whenever any visible output
+    // is missing from cache. That's real CPU/IO work (re-running every op, including
+    // whatever produces the multi-hundred-MB g_veg_*/n_merge/n_flatten intermediates
+    // documented in wb-scene-generator-project-switch.md §2.10-§2.12) and, unlike
+    // every other step in that doc, had no default timing visibility at all —
+    // `result.durationMs` was computed but only ever returned in the HTTP body,
+    // never printed anywhere.
+    const mem = process.memoryUsage()
+    console.log(
+      `[execute-trace] project=${projectId} nodeId=${(body as { nodeId?: string }).nodeId ?? '(full)'} ` +
+        `status=${result.status} outputNodes=${result.outputs ? Object.keys(result.outputs).length : 0} ` +
+        `runtimeDurationMs=${result.durationMs} routeTotalMs=${Date.now() - __t0} ` +
+        `rss=${(mem.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(mem.heapUsed / 1024 / 1024).toFixed(1)}MB`,
+    )
     return result
   })
 
@@ -40,14 +82,20 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     const { projectId } = req.params
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const handle = await executeNode(await getRuntimeForProject(projectId), parseExecuteBody(req.body))
+    const runtime = await getRuntimeForProject(projectId)
+    const handle = await executeNode(runtime, parseExecuteBody(req.body))
     const full = await handle.done
     // 2026-07-01：可选的上游叙事/契约地点名单——传了就顺带跑一遍 stage3.location_names
     // 硬门控（见 execution-summary.ts / lib/locationNameGate.ts）。不传则完全不变。
     const narrativeLocationNames = (req.body as { narrativeLocationNames?: unknown } | undefined)?.narrativeLocationNames
+    // 2026-07-15：同一次 execute 顺带跑三项拓扑检测（Rest fan-out / 非法局部
+    // merge / manual_points 零默认），见 lib/topologyGate.ts 的模块文档——这三
+    // 项检测原本只活在 aw-support 的续作消息生成里，agent 要等一整轮才知道。
+    // 图本身已经在手（刚 execute 完的这个 runtime），零额外开销地顺带跑一次。
     return summarizeExecutionResult(
       full,
       Array.isArray(narrativeLocationNames) ? narrativeLocationNames.filter((n): n is string => typeof n === 'string') : undefined,
+      currentGraphForTopologyCheck(runtime),
     )
   })
 }

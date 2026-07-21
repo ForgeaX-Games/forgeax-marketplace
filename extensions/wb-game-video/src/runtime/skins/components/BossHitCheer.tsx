@@ -24,7 +24,6 @@ export interface BossHitCheerParams {
  * 由 `skins/components/index.ts` 统一注册进组件表 + 渲染表。
  */
 export const bossHitCheerComponent: ComponentDef<BossHitCheerParams> = {
-  role: 'presentation',
   label: '受击加油横幅',
   // 输入契约（In · SSOT）：编辑器据此渲染配置控件；dmg/remain 通常由 spawn 时 expr 注入。
   inputs: [
@@ -36,7 +35,7 @@ export const bossHitCheerComponent: ComponentDef<BossHitCheerParams> = {
   events: [{ id: 'cheer', label: '加油点击' }],
 }
 
-export function BossHitCheer({ overlay }: OverlayProps): JSX.Element {
+export function BossHitCheer({ overlay, emit }: OverlayProps): JSX.Element {
   const p = overlay.inputs as { dmg?: number; remain?: number; heroName?: string }
   const [cheered, setCheered] = useState(false)
   const dmg = typeof p.dmg === 'number' ? p.dmg : 0
@@ -60,7 +59,10 @@ export function BossHitCheer({ overlay }: OverlayProps): JSX.Element {
       <span
         role="button"
         tabIndex={0}
-        onClick={() => setCheered(true)}
+        onClick={() => {
+          setCheered(true)
+          emit?.('cheer')
+        }}
         style={{ color: '#ffd54a', fontWeight: 800, cursor: 'pointer', textDecoration: 'underline' }}
       >
         加油

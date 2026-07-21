@@ -6,8 +6,8 @@ vi.mock('../workbench/WorkbenchHost.js', () => ({
   WorkbenchHost: () => <div>Center Workbench</div>,
 }))
 
-vi.mock('../surfaces/UrdfViewerSurface.js', () => ({
-  UrdfViewerSurface: () => <div>URDF Viewer Surface</div>,
+vi.mock('../surfaces/Viewer3DSurface.js', () => ({
+  Viewer3DSurface: () => <div>3D Viewer Surface</div>,
 }))
 
 // The left pane now mounts the kernel <ProjectPanel> from the editor barrel,
@@ -29,9 +29,11 @@ describe('App pane routing', () => {
     const html = renderToStaticMarkup(<App pane="left" />)
 
     expect(html).toContain('Lowpoly Workbench Navigation')
-    expect(html).not.toContain('Character')
-    expect(html).not.toContain('character')
+    // Routing intent: the left pane is the nav aside, not the center workbench
+    // host or the 3D viewer surface. (The pane copy legitimately mentions the
+    // "character" preview mode, so don't assert on that substring.)
     expect(html).not.toContain('Center Workbench')
+    expect(html).not.toContain('3D Viewer Surface')
   })
 
   it('keeps pane=center on the main workbench host', () => {

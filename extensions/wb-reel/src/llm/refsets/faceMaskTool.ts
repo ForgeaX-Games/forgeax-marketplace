@@ -28,6 +28,7 @@
 
 import type { BuildSeedanceContentInput } from './seedanceContent'
 import type { VisualStyle } from '../../scenario/types'
+import { pluginFetch } from '../../lib/plugin-http'
 
 /**
  * 是否「写实真人」风格 —— 决定上传给视频模型前要不要走打码。
@@ -99,7 +100,7 @@ export async function applyFaceMask(
   const halfSide = ctx.halfSide ?? 'right'
 
   try {
-    const resp = await fetch(FACE_MASK_ENDPOINT, {
+    const resp = await pluginFetch(FACE_MASK_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ image: dataUrl, mode, halfSide }),
@@ -135,7 +136,7 @@ export async function toDataUrl(src: string): Promise<string> {
   if (!src) return src
   if (src.startsWith('data:')) return src
   try {
-    const resp = await fetch(src)
+    const resp = await pluginFetch(src)
     if (!resp.ok) return src
     const blob = await resp.blob()
     const buf = await blob.arrayBuffer()

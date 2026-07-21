@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { toFXView } from '../canvas/fx-view'
 import { NODIA_DEMO } from '../../editor/demo/demo'
-import { registerCoreComponents } from '../../runtime/registry/core-components'
+import { registerCoreSkins } from '../../runtime/skins/components'
 
-beforeAll(() => registerCoreComponents())
+beforeAll(() => {
+    registerCoreSkins()
+})
 
 const overlays = () => NODIA_DEMO.ui?.overlays
 

@@ -87,6 +87,7 @@ function GraphMain(): JSX.Element {
           tabs={[
             { section: 'entities', label: '实体' },
             { section: 'variables', label: '变量' },
+            { section: 'formulas', label: '公式' },
             { section: 'scene', label: '场景设置' },
             { section: 'rules', label: '局级 reactions' },
           ]}

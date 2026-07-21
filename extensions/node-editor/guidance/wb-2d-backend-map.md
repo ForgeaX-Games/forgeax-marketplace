@@ -3,7 +3,7 @@
 > **这是什么。** 把后端的**数据定义接口 / 数据传输接口 / 传输逻辑**做忠实于代码的归类：
 > 注册总控在哪、有哪些 REST 端点（按 group）、WS 推送哪些事件、数据契约定义在何处、library/asset/agent 各管什么。
 > **不替你判断 bug**——只回答"接口在哪、数据怎么定义、怎么传"。
-> 路径相对本 app 根 `packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/`（`backend/src` 即下文的 `src`）。引用带 `file:line`，以"文件+符号名"为准。
+> 路径相对本 app 根 `packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/`（`backend/src` 即下文的 `src`）。引用带 `file:line`，以"文件+符号名"为准。
 
 ---
 

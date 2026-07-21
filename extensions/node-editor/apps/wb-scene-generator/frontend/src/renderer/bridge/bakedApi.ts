@@ -67,6 +67,7 @@ export interface BakedHistoryStatusDTO {
 }
 
 import { syncTraceEnabled } from '../../debug/syncTrace.js'
+import { pluginFetch } from '../../api/pluginHttp'
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
@@ -78,17 +79,34 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
       bodyPreview: typeof init?.body === 'string' ? init.body.slice(0, 200) : undefined,
     })
   }
-  const r = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) })
-  if (!r.ok) throw new Error(`${url} → ${r.status}`)
+  const r = await pluginFetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) })
+  if (!r.ok) {
+    if (r.status === 413) {
+      throw new Error(`${url} → 413 payload too large (try fewer layers, or restart backend after bodyLimit bump)`)
+    }
+    throw new Error(`${url} → ${r.status}`)
+  }
   return r.json() as Promise<T>
 }
 
 export type BakedLayersMode = 'summary' | 'full'
 
+export interface BakedLayersListResult {
+  layers: BakedLayerDTO[]
+  /** Backend refused to parse an oversized baked-scene.json. */
+  truncated?: boolean
+}
+
 export const bakedApi = {
-  list(mode: BakedLayersMode = 'full'): Promise<BakedLayerDTO[]> {
+  listResult(mode: BakedLayersMode = 'full'): Promise<BakedLayersListResult> {
     const qs = mode === 'summary' ? '?mode=summary' : ''
-    return req<{ layers: BakedLayerDTO[]; truncated?: boolean }>(`/api/v1/baked/layers${qs}`).then((r) => r.layers ?? [])
+    return req<{ layers: BakedLayerDTO[]; truncated?: boolean }>(`/api/v1/baked/layers${qs}`).then((r) => ({
+      layers: r.layers ?? [],
+      truncated: r.truncated === true,
+    }))
+  },
+  list(mode: BakedLayersMode = 'full'): Promise<BakedLayerDTO[]> {
+    return bakedApi.listResult(mode).then((r) => r.layers)
   },
   listSummary(): Promise<BakedLayerDTO[]> {
     return bakedApi.list('summary')
@@ -164,6 +182,8 @@ export const bakedApi = {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ layers }),
+      // Large voxel scenes can take longer than the default 15s client timeout.
+      signal: AbortSignal.timeout(120_000),
     }).then((r) => r.paths)
   },
   patchAttributes(

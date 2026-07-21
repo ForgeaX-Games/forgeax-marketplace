@@ -2,6 +2,7 @@ import { memo, useCallback, useRef, useState } from 'react'
 import type { NodeProps } from 'reactflow'
 import { BatteryNode, usePipelineStore, type Battery } from '@forgeax/node-runtime-react/editor'
 import { readDraggedAsset, encodeDraggedAssetRef, type DraggedAsset } from '../surfaces/library/draggedAssetBus.js'
+import { pluginUrl } from '../api/pluginHttp'
 import './ImageSourceNode.css'
 
 interface ImageSourceNodeData {
@@ -19,15 +20,15 @@ function imageRefToSrc(value: unknown): string {
   if (trimmed.startsWith('data:')) return trimmed
   if (!trimmed.startsWith('{')) {
     // Treat a non-JSON, non-data string as a bare generated-asset alias.
-    return `/api/v1/generated-assets/blob/${encodeURIComponent(trimmed)}`
+    return pluginUrl(`/api/v1/generated-assets/blob/${encodeURIComponent(trimmed)}`)
   }
   try {
     const parsed = JSON.parse(trimmed) as { blobId?: unknown; alias?: unknown }
     if (typeof parsed.blobId === 'string' && parsed.blobId) {
-      return `/api/v1/library/blob/${encodeURIComponent(parsed.blobId)}`
+      return pluginUrl(`/api/v1/library/blob/${encodeURIComponent(parsed.blobId)}`)
     }
     if (typeof parsed.alias === 'string' && parsed.alias) {
-      return `/api/v1/generated-assets/blob/${encodeURIComponent(parsed.alias)}`
+      return pluginUrl(`/api/v1/generated-assets/blob/${encodeURIComponent(parsed.alias)}`)
     }
   } catch {
     return ''

@@ -22,7 +22,7 @@ import { buildTemplateOps, splitTemplate } from '../src/lib/templateOps.js'
 const here = dirname(fileURLToPath(import.meta.url))
 // backend/tests → backend → wb-scene-generator
 const appRoot = resolve(here, '..', '..')
-const LAKE_REGIONS = resolve(appRoot, 'batteries/templates/scene/LakeRegions/LakeRegions.json')
+const LAKE_REGIONS = resolve(appRoot, 'batteries/groups/scene/LakeRegions/LakeRegions.json')
 
 const GROUP_OP_ID = '__group__'
 
@@ -69,6 +69,11 @@ describe('buildTemplateOps / splitTemplate (LakeRegions)', () => {
     // exposed ports surfaced for wiring, stable names
     expect(built.exposedInputs.every((p) => /^in_\d+$/.test(p.portName))).toBe(true)
     expect(built.exposedOutputs.every((p) => /^out_\d+$/.test(p.portName))).toBe(true)
+    // ports authored with a customLabelEn surface it as `label` (agent-facing semantic name)
+    expect(built.exposedInputs.find((p) => p.portName === 'in_1')?.label).toBe('Scene')
+    expect(built.exposedOutputs.find((p) => p.portName === 'out_4')?.label).toBe('Lake')
+    // ports without a customLabelEn/customLabel simply omit `label`
+    expect(built.exposedInputs.find((p) => p.portName === 'in_3')?.label).toBeUndefined()
   })
 
   it('instantiates into an empty graph: adds a __group__ shadow node + group defs (incl. nested)', async () => {

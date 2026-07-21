@@ -1,19 +1,26 @@
 // 💡 跨插件共享调色板
 //
-// 设计目标:同一图层 / 同一值 在不同视角下染同色,视觉连贯。
+// 设计目标:同一图层 / 同一值 在不同视角与 Output 列表色标上染同色。
 //
-// 两种取色路径:
-//   * colorForLayerIdx(idx)  —— 单值图层;按 layerIdx 从 LAYER_BASE_HUES 取色相
-//   * colorForValue(value)   —— 多值图层中某个值;按值黄金角散列(同 render2d / threeScene 旧逻辑)
+// 主路径:
+//   * colorForValue(value) —— 按 value 黄金角散列色相;Output voxel / 多值格子 /
+//     Billboard·Top·Iso·Free3D Color 与侧栏色标共用
 //
-// 选中 / 子值降饱和 通过 ColorOpts 调饱和度 + 亮度,各插件遵循同一约定:
+// 遗留:
+//   * colorForLayerIdx(idx) —— 仅给没有稳定 value 语义的调用方;新代码勿再用于 voxel Output
+//
+// 选中 / 子值降饱和 通过 ColorOpts:
 //   * editorSelected → success 绿(与 store.selectedEditorNodeIds 协议一致)
 //   * selected       → accent 绿(layer 自己被选中)
 //   * subDimmed      → 多值层中未选中的值,降到原色 50% 饱和
 
 const GOLDEN_ANGLE = 137.508
 
-/** 与 editor 主题对齐的基础色相;单值图层按 layerIdx % 12 取一种 */
+/** Forgeax 暗底上的默认可区分饱和/亮度(比旧 70/55、Free3D 85/55 更收一点) */
+const FORGEAX_SAT = 62
+const FORGEAX_LIG = 52
+
+/** @deprecated Prefer colorForValue; kept for any non-value callers. */
 export const LAYER_BASE_HUES = [
   0, 120, 240, 60, 180, 300, 30, 150, 270, 90, 210, 330,
 ] as const
@@ -58,9 +65,14 @@ export function hslToRgb(h: number, s: number, l: number): { r: number; g: numbe
   }
 }
 
+/** value → 色相(与 colorForValue 同源) */
+export function hueForValue(value: number): number {
+  return ((value * GOLDEN_ANGLE) % 360 + 360) % 360
+}
+
 function applyOpts(h: number, opts?: ColorOpts): RGBA {
-  let s = 70
-  let l = 55
+  let s = FORGEAX_SAT
+  let l = FORGEAX_LIG
   if (opts?.editorSelected) {
     // success 绿(与 --color-success #3ECF6B 对齐)
     return { r: 62, g: 207, b: 107, a: Math.round(255 * (opts?.alpha ?? 1)) }
@@ -77,16 +89,20 @@ function applyOpts(h: number, opts?: ColorOpts): RGBA {
   return { r, g, b, a: Math.round(255 * (opts?.alpha ?? 1)) }
 }
 
-/** 单值图层取色:按 layerIdx 从 LAYER_BASE_HUES 取一个色相 */
+/** @deprecated Prefer colorForValue for Output / Color 模式对齐. */
 export function colorForLayerIdx(layerIdx: number, opts?: ColorOpts): RGBA {
   const h = LAYER_BASE_HUES[((layerIdx % LAYER_BASE_HUES.length) + LAYER_BASE_HUES.length) % LAYER_BASE_HUES.length]
   return applyOpts(h, opts)
 }
 
-/** 多值图层中某个值的取色:按值黄金角散列 */
+/** 按 value 黄金角取色 — Preview Color / Output 色标的唯一真相源 */
 export function colorForValue(value: number, opts?: ColorOpts): RGBA {
-  const h = (value * GOLDEN_ANGLE) % 360
-  return applyOpts(h, opts)
+  return applyOpts(hueForValue(value), opts)
+}
+
+/** CSS 用(侧栏色标 / style.backgroundColor) */
+export function colorForValueCss(value: number, opts?: ColorOpts): string {
+  return rgbaToCss(colorForValue(value, opts))
 }
 
 /** 把 RGBA 转成 CSS 字符串(stroke / fill 用) */

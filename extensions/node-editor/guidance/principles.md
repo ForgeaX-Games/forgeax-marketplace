@@ -8,4 +8,4 @@
 
 4、在每次开始之前，阅读node-editor文件夹下的AGENTS.md与CHANGELOG.md；在每次改动完毕之后，维护CHANGELOG.md，但是要注意保持CHANGELOG.md的干净、简洁
 
-5、所有改动的对话集中在/packages/marketplace/extensions/node-editor/apps/wb-scene-generator之中。如果找不到，到node-editor中进行找。我的改动重点在wb-scene-generator这个插件之中。但是需要注意，node-editor/packages/中有一些共享内容，如果你觉得需要共享，修改到这个里面
+5、所有改动的对话集中在/packages/marketplace/plugins/node-editor/apps/wb-scene-generator之中。如果找不到，到node-editor中进行找。我的改动重点在wb-scene-generator这个插件之中。但是需要注意，node-editor/packages/中有一些共享内容，如果你觉得需要共享，修改到这个里面

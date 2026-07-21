@@ -36,7 +36,7 @@ describe('isOptionLocked (方案 B)', () => {
     expect(isOptionLocked(ult, ctx)).toBe(false)
   })
 
-  it('openInteraction 不再依赖 _locked 字段', () => {
+  it('renderOverlay 不再依赖 _locked 字段', () => {
     const ctx: SkinCtx = { hud: hud({ qi: 0 }) }
     expect(isOptionLocked({ ...heavy, _locked: false } as typeof heavy & { _locked: boolean }, ctx)).toBe(true)
   })

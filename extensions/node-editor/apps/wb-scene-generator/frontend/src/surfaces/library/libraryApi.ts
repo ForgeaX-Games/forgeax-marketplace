@@ -1,5 +1,6 @@
 // Thin client for the read-only asset-library HTTP routes the AssetStore pane
 // browses. Backed by /api/v1/library/{zones,list,serve}.
+import { pluginFetch, pluginUrl } from '../../api/pluginHttp'
 
 export interface AssetRecord {
   id: string
@@ -81,13 +82,13 @@ export interface ListQuery {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const r = await fetch(path, { method: 'GET' })
+  const r = await pluginFetch(path, { method: 'GET' })
   if (!r.ok) throw new Error(`${path} → ${r.status}`)
   return (await r.json()) as T
 }
 
 async function sendJson<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const r = await fetch(path, {
+  const r = await pluginFetch(path, {
     method,
     ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
   })
@@ -134,7 +135,7 @@ export const libraryApi = {
   },
   // The blob URL for an alias (image src). Single-tenant, no slug needed.
   serveUrl(alias: string): string {
-    return `/api/v1/library/serve/${encodeURIComponent(alias)}`
+    return pluginUrl(`/api/v1/library/serve/${encodeURIComponent(alias)}`)
   },
 
   // ── Project-private writes (base library.db stays read-only) ──────────────

@@ -11,7 +11,31 @@ export function resolveWorkspaceRoot(): string {
   return process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
 }
 
-const PLUGIN_ID = '@forgeax-extension/wb-scene-generator'
+/**
+ * Shared Studio games tree: `<instance>/.forgeax/games`.
+ *
+ * Workbench plugins run with FORGEAX_PROJECT_ROOT pointed at an isolated
+ * `.forgeax/workbench/<pluginId>/` sandbox. Writing `.forgeax/games/...` under
+ * that sandbox nests a second games tree that Studio's Files panel never shows
+ * (Files reads the host instance root). Prefer the host games root.
+ */
+export function resolveSharedGamesRoot(): string {
+  const explicit = process.env.FORGEAX_GAMES_ROOT?.trim()
+  if (explicit) return resolve(explicit)
+
+  const host = process.env.FORGEAX_HOST_PROJECT_ROOT?.trim()
+  if (host) return resolve(host, '.forgeax', 'games')
+
+  const ws = resolveWorkspaceRoot()
+  const norm = ws.replace(/\\/g, '/')
+  // <instance>/.forgeax/workbench/<pluginId> → <instance>/.forgeax/games
+  if (/(?:^|\/)\.forgeax\/workbench\//.test(norm)) {
+    return resolve(ws, '..', '..', 'games')
+  }
+  return resolve(ws, '.forgeax', 'games')
+}
+
+const PLUGIN_ID = '@forgeax-plugin/wb-scene-generator'
 
 let registry: ProjectRegistry | null = null
 let sharedOps: OpRegistry | null = null
@@ -38,6 +62,19 @@ function broadcastLoaderEvent(event: LoaderEvent): void {
 }
 
 async function buildSharedOps(): Promise<OpRegistry> {
+  // This runs exactly once per backend process lifetime, lazily on whichever
+  // HTTP request first calls getProjectRegistry() — in practice that's
+  // whatever the frontend fires first on initial page load (loadBatteries()
+  // or the first /view). scan() sequentially `await import()`s every
+  // battery's index.ts (300-500+ files across the shared + app batteries
+  // dirs) — under a TS dev loader (tsx/ts-node, no prebuilt dist) each import
+  // pays a real per-file transpile+eval cost, so this can add up to real
+  // seconds. Nothing before this point has any timing, so "opening the very
+  // first project after a backend restart feels slower than switching
+  // between already-open ones later" was previously invisible in any trace
+  // log — the switch-trace/output-batch-trace timers only start once this
+  // promise has already resolved.
+  const __t0 = Date.now()
   const ops = new OpRegistry()
   const watch = batteryWatchEnabled()
   const loader = createBatteryLoader(ops, {
@@ -47,8 +84,13 @@ async function buildSharedOps(): Promise<OpRegistry> {
     watch,
   })
   const res = await loader.scan()
+  const __t1 = Date.now()
   for (const e of res.errors) console.warn(`[battery skip] ${e.dir}: ${e.reason}`)
-  console.log(`[runtime] loaded ${res.added} ops (${res.errors.length} skipped)${watch ? ' [hot-reload on]' : ''}`)
+  const mem = process.memoryUsage()
+  console.log(
+    `[runtime] loaded ${res.added} ops (${res.errors.length} skipped)${watch ? ' [hot-reload on]' : ''} ` +
+      `[cold-start-trace] batteryScan=${__t1 - __t0}ms rss=${(mem.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(mem.heapUsed / 1024 / 1024).toFixed(1)}MB`,
+  )
   if (watch) {
     batteryLoader = loader
     loader.subscribe(broadcastLoaderEvent)
@@ -67,8 +109,10 @@ export function stopBatteryWatch(): void {
 
 export async function getProjectRegistry(): Promise<ProjectRegistry> {
   if (registry) return registry
+  const __t0 = Date.now()
   const workspaceRoot = resolveWorkspaceRoot()
   sharedOps = sharedOps ?? (await buildSharedOps())
+  const __t1 = Date.now()
   const ops = sharedOps
   const reg = new ProjectRegistry({
     workspaceRoot,
@@ -97,8 +141,17 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
         },
       }),
   })
+  const __t2 = Date.now()
   reg.init()
+  const __t3 = Date.now()
   registry = reg
+  // First-ever call in this process only (subsequent calls return the cached
+  // `registry` before reaching this line at all) — this is the true
+  // "opening the first project" cold-start cost, wholly separate from the
+  // per-project-switch costs already covered by [switch-trace].
+  console.log(
+    `[cold-start-trace] getProjectRegistry TOTAL=${__t3 - __t0}ms (buildSharedOps=${__t1 - __t0}ms newProjectRegistry=${__t2 - __t1}ms reg.init=${__t3 - __t2}ms)`,
+  )
   return reg
 }
 

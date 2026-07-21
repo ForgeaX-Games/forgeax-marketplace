@@ -54,9 +54,9 @@ export function buildLayerAssetBindings(
     const imgUrl = getRegisteredAssetUrl(m.primary)
     // 变体候选:per-face 各扫一份(basePieces 不同,变体区段不同)。图未加载完 → 空数组,
     // 等 readiness pulse 重 build 时再扫。
-    const validVariantIdxs = { top: [] as number[], front: [] as number[] }
-    const validVariantWeights = { top: undefined as number[] | undefined, front: undefined as number[] | undefined }
-    const validVariantPoolsByTileId = { top: new Map<number, VariantPool>(), front: new Map<number, VariantPool>() }
+    const validVariantIdxs = { top: [] as number[], front: [] as number[], entry: [] as number[] }
+    const validVariantWeights = { top: undefined as number[] | undefined, front: undefined as number[] | undefined, entry: undefined as number[] | undefined }
+    const validVariantPoolsByTileId = { top: new Map<number, VariantPool>(), front: new Map<number, VariantPool>(), entry: new Map<number, VariantPool>() }
     if (rule && m.tileType) {
       const img = getOrLoadImage(imgUrl)
       if (img) {
@@ -72,6 +72,12 @@ export function buildLayerAssetBindings(
           validVariantIdxs.front = frontPool.idxs
           validVariantWeights.front = frontPool.weights
           validVariantPoolsByTileId.front = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front', rgba)
+        }
+        if (rule.faces.entry?.randomRules?.length) {
+          const entryPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.entry, m.tileType, 'entry', rgba)
+          validVariantIdxs.entry = entryPool.idxs
+          validVariantWeights.entry = entryPool.weights
+          validVariantPoolsByTileId.entry = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.entry, m.tileType, 'entry', rgba)
         }
       }
     }
@@ -114,7 +120,7 @@ function computeValidVariantPoolCached(
   sprites: ReadonlyArray<RuleSprite>,
   face: FaceRule,
   ruleAlias: string,
-  faceTag: 'top' | 'front',
+  faceTag: 'top' | 'front' | 'entry',
   rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
 ): VariantPool {
   const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|pool`
@@ -132,7 +138,7 @@ function computeValidVariantPoolsByTileIdCached(
   sprites: ReadonlyArray<RuleSprite>,
   face: FaceRule,
   ruleAlias: string,
-  faceTag: 'top' | 'front',
+  faceTag: 'top' | 'front' | 'entry',
   rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
 ): Map<number, VariantPool> {
   const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|byTileId`

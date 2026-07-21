@@ -107,6 +107,7 @@ beforeEach(() => {
     executingProjectIds: [],
     recentProjectIds: [],
     isSwitching: false,
+    projectSwitchRole: 'host',
   })
 })
 
@@ -146,6 +147,27 @@ describe('projectStore open cascade', () => {
     refreshSpy.mockRestore()
   })
 
+  it('does not persist a read-only hydrated snapshot before switching', async () => {
+    await useProjectStore.getState().bootstrap()
+    const persistSpy = vi.spyOn(usePipelineStore.getState(), 'persistSession')
+
+    await useProjectStore.getState().switchProject('p2')
+
+    expect(persistSpy).not.toHaveBeenCalled()
+    persistSpy.mockRestore()
+  })
+
+  it('persists local graph mutations before switching', async () => {
+    await useProjectStore.getState().bootstrap()
+    usePipelineStore.getState().updateNode('oneNode', { position: { x: 10, y: 0 } })
+    const persistSpy = vi.spyOn(usePipelineStore.getState(), 'persistSession').mockResolvedValue()
+
+    await useProjectStore.getState().switchProject('p2')
+
+    expect(persistSpy).toHaveBeenCalledOnce()
+    persistSpy.mockRestore()
+  })
+
   it('fetchProjects loads the list + syncs the viewing project type', async () => {
     await useProjectStore.getState().fetchProjects()
     expect(useProjectStore.getState().projects.map((p) => p.id).sort()).toEqual(['p1', 'p2'])
@@ -165,6 +187,20 @@ describe('projectStore open cascade', () => {
     configureEditorTransport(transport)
     await useProjectStore.getState().fetchProjects()
     expect(useProjectStore.getState().viewingProjectId).toBe('p2')
+  })
+
+  it('satellite switchProject only calls viewProject — no pipeline hydration or output refresh', async () => {
+    useProjectStore.getState().setProjectSwitchRole('satellite')
+    await useProjectStore.getState().fetchProjects()
+    const refreshSpy = vi.spyOn(usePipelineStore.getState(), 'refreshConnectedOutputs').mockResolvedValue()
+    const loadSpy = vi.spyOn(usePipelineStore.getState(), 'loadPipeline').mockResolvedValue()
+    await useProjectStore.getState().switchProject('p2')
+    expect(useProjectStore.getState().viewingProjectId).toBe('p2')
+    expect(usePipelineStore.getState().currentPipeline).toBeNull()
+    expect(refreshSpy).not.toHaveBeenCalled()
+    expect(loadSpy).not.toHaveBeenCalled()
+    refreshSpy.mockRestore()
+    loadSpy.mockRestore()
   })
 })
 

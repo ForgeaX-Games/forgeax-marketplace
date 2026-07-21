@@ -16,7 +16,7 @@ type ToolCtx = {
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
 
-const PLUGIN_ID = '@forgeax-extension/wb-3d-lowpoly'
+const PLUGIN_ID = '@forgeax-plugin/wb-3d-lowpoly'
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:9567'
 
 function objectArgs(args: unknown): Record<string, unknown> {

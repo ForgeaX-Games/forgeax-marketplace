@@ -1,11 +1,10 @@
 /**
- * 回归：时间轴预览必须能画挂载方案里的未分类组件（含 HUD 血条）。
- * 分流走渲染表，不依赖 ComponentDef.surface 是否已挂上。
+ * 回归：时间轴预览必须能画挂载方案里的组件（含 battleHpBar）。
+ * 表现层统一走 overlay 表 + skinCtx 绘制时 resolve。
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { registerCoreComponents } from '../../../runtime/registry/core-components'
 import { createCoreSkinRegistry, registerCoreSkins } from '../../../runtime/skins/components'
 import { battleHpBarPreset } from '../../../runtime/skins/components/BattleHpBar'
 import { inkKouPreset } from '../../../runtime/skins/components/InkKouLayer'
@@ -14,8 +13,7 @@ import { renderOverlayChildPreview } from '../overlayChildPreview'
 import type { SkinCtx } from '../../../runtime/skins/rendererRegistry'
 
 beforeAll(() => {
-  registerCoreComponents()
-  registerCoreSkins()
+    registerCoreSkins()
 })
 
 function hudEnt(hp: number, maxHp: number) {
@@ -35,7 +33,7 @@ const ctx: SkinCtx = {
 }
 
 describe('overlayChildPreview · 时间轴预览', () => {
-  it('battleHpBar（HUD）能渲出 DOM，不因 surface 分流丢弃', () => {
+  it('battleHpBar 能渲出 DOM（overlay 表 + ctx resolve）', () => {
     const reg = createCoreSkinRegistry()
     const child = battleHpBarPreset('hp-player', { bind: 'ent-player', label: '我方' })
     const html = renderToStaticMarkup(

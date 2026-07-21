@@ -319,7 +319,8 @@ export default defineConfig(({ mode, command }) => {
   //     `/extensions/wb-reel/` 子路径下；此时 vite 必须用绝对 base 才能让 react-router /
   //     fetch 等绝对路径正确解析。通过 `WB_REEL_PLUGIN_BUILD=1` 切换。
   const pluginBase =
-    process.env.WB_REEL_PLUGIN_BUILD === '1' ? '/extensions/wb-reel/' : './'
+    process.env.VITE_PLUGIN_BASE
+      ?? (process.env.WB_REEL_PLUGIN_BUILD === '1' ? '/extensions/wb-reel/' : './')
 
   return {
     base: pluginBase,
@@ -402,11 +403,14 @@ export default defineConfig(({ mode, command }) => {
         //     HMR_CLIENT_PORT / PORT_REEL_STUDIO，映射到外部暴露的端口。
         // 之前默认硬编码 10052 —— 没起反代时会导致 ws 连不通（浏览器把 HMR
         // 指向一个无人占用的端口）。
-        clientPort: process.env.HMR_CLIENT_PORT
+        clientPort: process.env.VITE_PLUGIN_HMR_CLIENT_PORT
+          ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
+          : process.env.HMR_CLIENT_PORT
           ? Number(process.env.HMR_CLIENT_PORT)
           : process.env.PORT_REEL_STUDIO
           ? Number(process.env.PORT_REEL_STUDIO)
           : undefined,
+        ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
       },
       // 2026-06：本机 Python Flask 视频后端（/api/video、/api/upload、/uploads）
       // 已退役，视频统一走宿主 litellm 网关（/__ce-api__），故移除对应 dev proxy。

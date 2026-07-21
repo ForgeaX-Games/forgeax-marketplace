@@ -8,10 +8,12 @@
  */
 import { zhandouUrl } from '../assets/catalog'
 import type { MediaAsset, StyleAxes } from '../assets/registry-types'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 export function resolveMediaSrc(ref: string | undefined, game?: string): string | undefined {
   if (!ref) return undefined
-  if (/^(https?:|blob:|data:|\/)/.test(ref)) return ref
+  if (/^(https?:|blob:|data:)/.test(ref)) return ref
+  if (ref.startsWith('/')) return pluginUrl(ref)
   // demo 里统一按 zhandou 文件名(basename)引用（战斗/叙事视频同源）；兼容运行时 m- 前缀。
   const bare = ref.startsWith('m-') ? ref.slice(2) : ref
   const local = zhandouUrl(bare)
@@ -45,7 +47,7 @@ export function videoDurationCapReached(
 /** 共享素材层某资产的同源播放 URL（`/__gva__/media/<id>`）。 */
 export function registryMediaUrl(id: string, game?: string): string {
   const q = game ? `?game=${encodeURIComponent(game)}` : ''
-  return `/__gva__/media/${encodeURIComponent(id)}${q}`
+  return pluginUrl(`/__gva__/media/${encodeURIComponent(id)}${q}`)
 }
 
 /**
@@ -87,7 +89,7 @@ export async function listRegistryAssets(game?: string, kind?: 'video' | 'image'
     if (game) params.set('game', game)
     if (kind) params.set('kind', kind)
     const qs = params.toString()
-    const r = await fetch(`/__gva__/assets${qs ? `?${qs}` : ''}`)
+    const r = await pluginFetch(`/__gva__/assets${qs ? `?${qs}` : ''}`)
     if (!r.ok) return []
     const j = (await r.json()) as { assets?: MediaAsset[] }
     return Array.isArray(j.assets) ? j.assets : []
@@ -99,7 +101,7 @@ export async function listRegistryAssets(game?: string, kind?: 'video' | 'image'
 /** 取单条 registry 资产（轮询生成状态用）。 */
 export async function getRegistryAsset(game: string, id: string): Promise<MediaAsset | null> {
   try {
-    const r = await fetch(`/__gva__/asset/${encodeURIComponent(id)}?game=${encodeURIComponent(game)}`)
+    const r = await pluginFetch(`/__gva__/asset/${encodeURIComponent(id)}?game=${encodeURIComponent(game)}`)
     if (!r.ok) return null
     const j = (await r.json()) as { asset?: MediaAsset | null }
     return j.asset ?? null
@@ -131,7 +133,7 @@ export interface GenerateVideoRequest {
 /** 读游戏级风格三轴（manifest.styleAxes）。离线/无端点返回 null。 */
 export async function getGameStyleAxes(game: string): Promise<StyleAxes | null> {
   try {
-    const r = await fetch(`/__gva__/style-axes?game=${encodeURIComponent(game)}`)
+    const r = await pluginFetch(`/__gva__/style-axes?game=${encodeURIComponent(game)}`)
     if (!r.ok) return null
     const j = (await r.json()) as { styleAxes?: StyleAxes | null }
     return j.styleAxes ?? null
@@ -143,7 +145,7 @@ export async function getGameStyleAxes(game: string): Promise<StyleAxes | null> 
 /** 浅合并写游戏级风格三轴，返回合并后结果。 */
 export async function setGameStyleAxes(game: string, axes: StyleAxes): Promise<StyleAxes | null> {
   try {
-    const r = await fetch(`/__gva__/style-axes?game=${encodeURIComponent(game)}`, {
+    const r = await pluginFetch(`/__gva__/style-axes?game=${encodeURIComponent(game)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(axes),
@@ -208,7 +210,7 @@ export async function importSceneRefs(game: string): Promise<{ refs: MediaAsset[
 
 async function postGvaRefs(path: string, game: string): Promise<{ refs: MediaAsset[]; error?: string }> {
   try {
-    const r = await fetch(`${path}?game=${encodeURIComponent(game)}`, { method: 'POST' })
+    const r = await pluginFetch(`${path}?game=${encodeURIComponent(game)}`, { method: 'POST' })
     const j = (await r.json()) as { refs?: MediaAsset[]; error?: string }
     if (!r.ok) return { refs: [], error: j.error || `HTTP ${r.status}` }
     return { refs: Array.isArray(j.refs) ? j.refs : [], error: j.error }
@@ -223,7 +225,7 @@ async function postGva(
   body: unknown,
 ): Promise<{ asset?: MediaAsset; error?: string }> {
   try {
-    const r = await fetch(`${path}?game=${encodeURIComponent(game)}`, {
+    const r = await pluginFetch(`${path}?game=${encodeURIComponent(game)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),

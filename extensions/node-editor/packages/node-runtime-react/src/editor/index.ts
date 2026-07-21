@@ -65,7 +65,7 @@ export type {
   SelectedPortPeerView,
 } from './sync/editorBridge.js'
 // Shared editor chrome used by host apps for Open/Save and project management.
-export { PipelineFileDialog, ProjectsDialog, ProjectPanel, EditorControlsPanel } from './components/chrome/index.js'
+export { PipelineFileDialog, ProjectsDialog, ProjectPanel, EditorControlsPanel, SaveIcon, pt } from './components/chrome/index.js'
 export type { PipelineFileDialogProps, ProjectsDialogProps, ProjectPanelProps, EditorControlsPanelProps, ActivePipelineRunInfo } from './components/chrome/index.js'
 // Composed editor: Toolbar · BatteryBar · Canvas in the legacy layout.
 export { Editor } from './Editor.js'
@@ -74,6 +74,14 @@ export type { EditorProps } from './Editor.js'
 export * from './utils/portTypes.js'
 export * from './utils/batteryLabels.js'
 export * from './utils/datatreeShape.js'
+export {
+  isTooLargeOutputSummary,
+  makeTooLargeOutputSummary,
+  formatTooLargeOutputSummaryText,
+  stripTooLargeSummaries,
+} from './utils/tooLargeOutputSummary.js'
+export type { TooLargeOutputSummary } from './utils/tooLargeOutputSummary.js'
+export { hydrateBlobRefs } from '../api/sceneEnvelope.js'
 // Domain value formatters are supplied per editor instance via the
 // `<Editor domainValueFormatters={...}>` prop (a React Context under the hood),
 // NOT a module-global registry. The former `configureDomainValueFormatters`

@@ -30,6 +30,9 @@ import { getProjectDir, getActiveProjectDir, getRuntimeForProject } from '../run
 import { ensureMutationAccess } from '../routes/projects.js'
 import { syncTrace } from '../debug/syncTrace.js'
 
+/** Fastify default bodyLimit is 1MB — large voxel bake/paint payloads exceed it (HTTP 413). */
+const BAKED_VOXEL_BODY_LIMIT = 64 * 1024 * 1024
+
 // Broadcast + log every mutation so the baked-layer edit flow is traceable in
 // the backend console (these are infrequent, user-driven actions).
 function notifyChanged(msg: string, projectId?: string): void {
@@ -101,7 +104,7 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Whole-layer cell overwrite (z=0 painting), plus optional asset (re)bind.
-  app.patch('/api/v1/baked/layers/cells', async (req, reply) => {
+  app.patch('/api/v1/baked/layers/cells', { bodyLimit: BAKED_VOXEL_BODY_LIMIT }, async (req, reply) => {
     const b = (req.body ?? {}) as { path?: string; cells?: BakedCell[]; asset?: { name: string; type?: string; alias?: string } }
     if (!b.path) return reply.code(400).send({ error: 'path is required' })
     await setBakedCells(b.path, b.cells ?? [], b.asset)
@@ -161,7 +164,7 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Snapshot transient graph layers into the baked tree as editable copies.
-  app.post('/api/v1/baked/bake', async (req) => {
+  app.post('/api/v1/baked/bake', { bodyLimit: BAKED_VOXEL_BODY_LIMIT }, async (req) => {
     const b = (req.body ?? {}) as {
       layers?: Array<{ nodePath?: string; nodeName?: string; cells?: BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>
     }
@@ -170,18 +173,22 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
     return { paths }
   })
 
-  app.post<{ Params: { id: string } }>('/api/v1/projects/:id/baked/bake', async (req, reply) => {
-    const b = (req.body ?? {}) as {
-      layers?: Array<{ nodePath?: string; nodeName?: string; cells?: BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>
-    }
-    try {
-      const paths = await bakeLayersForProject(req.params.id, (b.layers ?? []).map((l) => ({ ...l, cells: l.cells ?? [] })))
-      notifyChanged(`bake ${paths.length} → [${paths.join(', ')}] (project ${req.params.id})`)
-      return { paths }
-    } catch (e) {
-      return reply.code(404).send({ error: (e as Error).message })
-    }
-  })
+  app.post<{ Params: { id: string } }>(
+    '/api/v1/projects/:id/baked/bake',
+    { bodyLimit: BAKED_VOXEL_BODY_LIMIT },
+    async (req, reply) => {
+      const b = (req.body ?? {}) as {
+        layers?: Array<{ nodePath?: string; nodeName?: string; cells?: BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>
+      }
+      try {
+        const paths = await bakeLayersForProject(req.params.id, (b.layers ?? []).map((l) => ({ ...l, cells: l.cells ?? [] })))
+        notifyChanged(`bake ${paths.length} → [${paths.join(', ')}] (project ${req.params.id})`)
+        return { paths }
+      } catch (e) {
+        return reply.code(404).send({ error: (e as Error).message })
+      }
+    },
+  )
 
   // 复盘(2026-07-01 sino bake/export 工具缺口):agent 侧只有 `scene:pipeline.execute`
   // 的**摘要**版本(无 cells),没法像 UI 那样先拿 raw execute 的 cells 再手工拼

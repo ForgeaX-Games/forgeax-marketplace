@@ -1,47 +1,57 @@
 # 自然装饰 - NaturalDecorationDistribution（自然装饰散布）
 
-> 权威详情：[../../../../batteries/templates/scene/NaturalDecorationDistribution/README.md](../../../../batteries/templates/scene/NaturalDecorationDistribution/README.md)
-> templateId：`NaturalDecorationDistribution`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> 权威详情：[../../../../batteries/templates/structures/decorations/NaturalDecorationDistribution/README.md](../../../../batteries/templates/structures/decorations/NaturalDecorationDistribution/README.md)
+> templateId：`NaturalDecorationDistribution`。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 管线电池的基本介绍
 
 管线所属层级：**自然地物 / 装饰层级**
 
-管线效果：在剩余空地上按密度散布自然装饰（树木、石头等）。通常接在 **`LocalPreciseDecoration` / `PlaceOneDecoration` 之后**，用 **`out_2` Rest** 作背景填充，是装饰链的**大面积兜底**。
+管线效果：在剩余空地上按密度散布装饰点。通常接在 PlaceOne / LocalPrecise **之后**，用 `out_2` Rest 作**大面积背景填充**，防空白。
 
-> ### 🌿 须与其他装饰叠加（禁止单独使用）
-> 本模板只做**全区域随机散布**。若整张场景**只用** `NaturalDecorationDistribution`，整图会**单调同质**（一片相同植被）。必须与 **`PlaceOneDecoration`**（地标单点）和 **`LocalPreciseDecoration`**（锚点旁簇/环）**组合**；三者分工见 [SKILL 第二步「装饰叠加」](../../../../SKILL.md)。
->
-> **时序**：须在 **`MountainContourGenerate`（地形高差）之后**再播撒装饰；地形本身应优先于装饰，且避开叙事核心区（建筑/道路/广场）。
+**无单颗 Footprint 口**——只控制 Density（及可选 zHeight）；单颗平面尺寸不可调。
+
+**选型**：
+
+| 模板 | 何时用 | 可挂资产 |
+|------|--------|----------|
+| `PlaceOneDecoration` | 少量地标/人造件、有明确位置和/或底面尺寸 | 雕像、棚亭、叙事指名的那一棵大树等 |
+| `LocalPreciseDecoration` | 兴趣点旁一簇/一环点缀 | **仅**简单小物件 |
+| **`NaturalDecorationDistribution`（本模板）** | 大片 Rest 背景填充；**草/灌木/树/散布石推荐走本模板（非强制）**；Density 分层 | **仅**底面简单、结构简单的植被/石块；**禁止**复杂体量或需精准落点的物件 |
+
+问卷 `count` 对植被类是量级暗示，**不要**按 count 逐个 PlaceOne。大片 Rest 空白或清单含植被时用本模板；装饰很少且全是精准物件时可以不用。按需求选用，不必硬凑三种。
+
+> **时序**：须在高差之后再播撒；避开叙事核心区（建筑/道路/广场）。
 
 ## 2. 管线电池的总输入端口
 
 | 端口名 | 类型 | 说明 | 是否必接 | 怎么喂 |
 |--------|------|------|---------|--------|
-| `in_1` | scene | 上游剩余空地 | **必接** | `PathConnection.out_1` 或上一组 Rest（悬空则整组静默空跑） |
+| `in_1` | scene | 上游剩余空地 | **必接** | 上一组 Rest（悬空则整组静默空跑） |
 | `in_0` | string | NamePrefix 名称前缀 | 可选 | `text_panel` |
-| `in_5` | string | AssetName 装饰资产名 | 建议接 | `text_panel`，如 `行道树` |
+| `in_5` | string | AssetName 装饰资产名 | 建议接 | `text_panel`，如 `行道树`（**简单资产**；**不是 `in_2`**） |
 | `in_2` | number | Density 密度 | 建议接 | `number_const` |
-| `in_3` / `in_4` | number | seed / zHeight | `seed_control.seed` |
+| `in_3` | number | Seed | **必接** | **`aw_m0_seed.seed`（全局固定非 0）**；禁止悬空/`seed:0` |
+| `in_4` | number | zHeight | 可选 | 默认即可 |
 
 ## 3. 管线电池的总输出端口
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Decoration 装饰（主产物） | `tree_merge` |
+| `out_1` | scene | Decoration 装饰（主产物） | `appendMergeItem` → `aw_m0_merge` |
 | `out_2` | scene | Rest 剩余空地 | 下一组 `in_1`（多品种链式） |
 
 ## 4. 推荐参数
 
-- **Density**：**推荐 `0.01` 上下**（稀疏、自然）；**禁止** >0.05 铺满。一组一种装饰，靠 **多次 Rest 链**叠层次，不靠单次高密度。
-- **AssetName 一组一名** — Natural 模板**每次只能散布一种** itemName；多品种 = **多组** `NaturalDecorationDistribution` 串联（`out_2` Rest → 下一组 `in_1`）。
-- 不同 Rest 段（镇郊 / 栈道侧 / 崖边）各跑 1–2 组 Natural，asset 与 density 可微调。
+- **Density（分层，勿固定同一值）**：`0.008` 只是**中间参考**；**硬上限 ≤0.01**（再大易出问题）。建议：树 ~0.004–0.006（稀）· 灌木/散布石 ~0.006–0.008 · 草/地被 ~0.008–0.01（密）。一组一种装饰，靠 **多层 Rest 链 + 不同 density** 叠层次，不靠单次高密度。
+- **AssetName 一组一名** — 每次只能散布一种 itemName；多品种 = **多组**串联（`out_2` Rest → 下一组 `in_1`）。
+- 草→灌木→树（或多种树/石）宜各一组且各自不同 density；不同 Rest 段（镇郊 / 栈道侧 / 崖边）亦可再叠。
 
 ## 5. 管线效果描述
 
-- 在空地撒植被/石头等，是"禁止大面积空白"的**背景填充**手段——接在精准/局部装饰之后，铺剩余 Rest。
-- **不要**作为唯一装饰手段；与 `PlaceOneDecoration`、`LocalPreciseDecoration` **叠加**才够层次。
-- **不要** checklist 里每种装饰只象征性写 1 个 Natural task — 须 **≥3 个** Natural batch（不同 asset 或不同 Rest 段）。
+- 用途是「禁止大面积空白」的背景填充——不是精准地标手段。
+- **不要**用本模板放置有明确尺寸/落点的复杂物件；那些走 PlaceOne。
+- 有植被需求时宜 **多层多品种** Natural（不同 asset），**禁止**只象征性放一种就收工。
 - `in_1` 悬空会静默空跑（execute 仍 completed），务必确认接上上游 Rest。
 
-> **已验证 M6**：projectId `p_mr49zz2e_idczh2` → [`step-m6-naturaldecoration.json`](../../../../../../aw-support/battery-verify/p_mr49zz2e_idczh2/step-m6-naturaldecoration.json)。**asset → `in_5`**，**density 0.012 → `in_2`**（禁止接反）。
+> **已验证 M6**：projectId `p_mr49zz2e_idczh2` → [`step-m6-naturaldecoration.json`](../../../../../../aw-support/battery-verify/p_mr49zz2e_idczh2/step-m6-naturaldecoration.json)。**asset → `in_5`**，**density → `in_2`**（禁止接反；验证链曾用 0.012，**生产编排硬上限 ≤0.01**，按层分化）。

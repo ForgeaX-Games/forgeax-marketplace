@@ -11,10 +11,15 @@ import type { FaceKeyMode } from './ruleCache'
 
 /**
  * 构造 top-face 的邻域查表 key。`has(dx,dy)` 返回该相对偏移处是否有同 layer 同 type cell。
- *   * 'adjacent4'(缺省) → 4 位 "up,down,left,right"(±1 直接邻居,与历史一致)
+ *   * 'adjacent4'(缺省) → 4 位 "up,down,left,right"(±1 正交邻居,与历史一致)
+ *   * 'adjacent8'        → 8 位 "up,down,left,right,ul,ur,dl,dr"(正交 + 四角对角)
  *   * 'edgeDist2'        → 6 位 "up,down,left,right,up2,down2",末两位探测竖直距离 2
  *     的邻居,使 map 能区分"距某端 1 格"与"真正中段"(5 行桥面首尾固定 / 中段重复)。
- * 注:up = (x,y-1)(图像上方);down = (x,y+1)(图像下方)。up2/down2 同理 ±2。
+ *   * 'edgeDist4'        → 8 位 "up,down,left,right,up2,down2,left2,right2",在 edgeDist2
+ *     基础上再探测水平距离 2 的邻居(left2 = (x-2,y) / right2 = (x+2,y)),让 map
+ *     能在四个方向都区分"距端 1 格"与"中段"(适合双向都需收边的填充带)。
+ * 注:up = (x,y-1)(图像上方);down = (x,y+1)(图像下方)。up2/down2 同理 ±2;
+ *     left2/right2 = (x∓2,y)。ul=(-1,-1) / ur=(1,-1) / dl=(-1,1) / dr=(1,1)。
  */
 export function buildTopFaceKey(
   has: (dx: number, dy: number) => boolean,
@@ -25,10 +30,26 @@ export function buildTopFaceKey(
   const d = b(has(0, 1))
   const l = b(has(-1, 0))
   const r = b(has(1, 0))
-  if (keyMode !== 'edgeDist2') return `${u},${d},${l},${r}`
-  const u2 = b(has(0, -2))
-  const d2 = b(has(0, 2))
-  return `${u},${d},${l},${r},${u2},${d2}`
+  if (keyMode === 'edgeDist2') {
+    const u2 = b(has(0, -2))
+    const d2 = b(has(0, 2))
+    return `${u},${d},${l},${r},${u2},${d2}`
+  }
+  if (keyMode === 'edgeDist4') {
+    const u2 = b(has(0, -2))
+    const d2 = b(has(0, 2))
+    const l2 = b(has(-2, 0))
+    const r2 = b(has(2, 0))
+    return `${u},${d},${l},${r},${u2},${d2},${l2},${r2}`
+  }
+  if (keyMode === 'adjacent8') {
+    const ul = b(has(-1, -1))
+    const ur = b(has(1, -1))
+    const dl = b(has(-1, 1))
+    const dr = b(has(1, 1))
+    return `${u},${d},${l},${r},${ul},${ur},${dl},${dr}`
+  }
+  return `${u},${d},${l},${r}`
 }
 
 /**

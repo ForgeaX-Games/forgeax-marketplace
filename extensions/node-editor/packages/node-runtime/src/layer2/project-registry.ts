@@ -103,6 +103,10 @@ export interface ProjectManifest {
   updatedAt: string
   // Relative path to a thumbnail image, if any (app-managed).
   thumbnail?: string
+  // Owning ForgeaX game slug (multi-game workspace tagging). Optional —
+  // projects created before this field existed, or created outside a game
+  // context (e.g. CLI), have no gameSlug and surface under "show all".
+  gameSlug?: string
   storage: ProjectStorageRef
 }
 
@@ -115,6 +119,7 @@ export interface ProjectMeta {
   thumbnail?: string
   createdAt: string
   updatedAt: string
+  gameSlug?: string
 }
 
 // On-disk index (`projects/index.json`).
@@ -145,6 +150,8 @@ export interface CreateProjectInput {
   description?: string
   // Explicit id (tests / migration). Defaults to a generated id.
   id?: string
+  // Owning ForgeaX game slug — tags the project for per-game list filtering.
+  gameSlug?: string
   // Seed the new project's graph from a template graph (kernel reuses importPipelineGraph).
   fromTemplate?: ImportGraphInput
   // Extra import options when `fromTemplate` is given.
@@ -156,6 +163,14 @@ export interface UpdateProjectPatch {
   description?: string
   thumbnail?: string
   type?: string
+  gameSlug?: string
+}
+
+// Optional filter for listProjects(). Omitting `gameSlug` (or passing undefined)
+// returns every project — the "show all" behaviour list callers default to
+// unless they explicitly scope by game.
+export interface ListProjectsOptions {
+  gameSlug?: string
 }
 
 export interface DeleteProjectOptions {
@@ -231,6 +246,7 @@ function metaFromManifest(m: ProjectManifest): ProjectMeta {
     updatedAt: m.updatedAt,
   }
   if (m.thumbnail !== undefined) meta.thumbnail = m.thumbnail
+  if (m.gameSlug !== undefined) meta.gameSlug = m.gameSlug
   return meta
 }
 
@@ -358,8 +374,14 @@ export class ProjectRegistry {
 
   // ── queries ──────────────────────────────────────────────────────────────
 
-  listProjects(): ProjectMeta[] {
-    return this.index.projects.map((p) => ({ ...p }))
+  // Without `opts.gameSlug`, returns every project ("show all"). With it, returns
+  // only projects tagged with that exact gameSlug — projects with no gameSlug
+  // (created before the field existed, or outside a game context) are excluded
+  // from a scoped list, matching "this game's projects only" intent.
+  listProjects(opts?: ListProjectsOptions): ProjectMeta[] {
+    const all = this.index.projects.map((p) => ({ ...p }))
+    if (!opts?.gameSlug) return all
+    return all.filter((p) => p.gameSlug === opts.gameSlug)
   }
 
   getProject(id: string): ProjectRecord | null {
@@ -550,6 +572,7 @@ export class ProjectRegistry {
       description: input.description ?? '',
       createdAt: ts,
       updatedAt: ts,
+      ...(input.gameSlug !== undefined ? { gameSlug: input.gameSlug } : {}),
       storage: {
         graphFile: join(stateRel, 'graph.json'),
         historyFile: join(stateRel, 'history.jsonl'),
@@ -603,6 +626,7 @@ export class ProjectRegistry {
     if (patch.description !== undefined) manifest.description = patch.description
     if (patch.thumbnail !== undefined) manifest.thumbnail = patch.thumbnail
     if (patch.type !== undefined) manifest.type = patch.type
+    if (patch.gameSlug !== undefined) manifest.gameSlug = patch.gameSlug
     manifest.updatedAt = nowIso()
     writeJsonAtomic(this.manifestPath(id), manifest)
     const meta = metaFromManifest(manifest)
@@ -614,6 +638,7 @@ export class ProjectRegistry {
   // Set the UI viewing project: bumps recents and persists workspace. Does NOT
   // acquire or release agent locks.
   viewProject(id: string): Runtime {
+    const __t0 = Date.now()
     if (!readJsonSafe<ProjectManifest>(this.manifestPath(id))) {
       throw new Error(`[project-registry] project not found: ${id}`)
     }
@@ -623,16 +648,21 @@ export class ProjectRegistry {
       ...this.workspace.recentProjectIds.filter((rid) => rid !== id),
     ].slice(0, RECENT_LIMIT)
     this.saveWorkspace()
+    const __t1 = Date.now()
     const rt = this.getRuntimeFor(id)
+    const __t2 = Date.now()
     const graph = rt.graph.load()
+    const __t3 = Date.now()
     const pruned = rt.outputs.pruneByRetention(
       graph ? { protectedNodeIds: collectCachedNodeIds(graph) } : undefined,
     )
-    if (pruned.removed > 0) {
-      process.stderr.write(
-        `[project-registry] pruned ${pruned.removed} output dir(s) (${Math.round(pruned.freedBytes / (1024 * 1024))}MB) on view ${id}\n`,
-      )
-    }
+    const __t4 = Date.now()
+    const mem = process.memoryUsage()
+    process.stderr.write(
+      `[switch-trace] viewProject id=${id} saveWorkspace=${__t1 - __t0}ms getRuntimeFor=${__t2 - __t1}ms ` +
+        `graph.load=${__t3 - __t2}ms pruneByRetention=${__t4 - __t3}ms(removed=${pruned.removed},freedMB=${Math.round(pruned.freedBytes / (1024 * 1024))}) ` +
+        `TOTAL=${__t4 - __t0}ms rss=${(mem.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(mem.heapUsed / 1024 / 1024).toFixed(1)}MB\n`,
+    )
     this.viewing = rt
     return rt
   }
@@ -644,34 +674,19 @@ export class ProjectRegistry {
 
   /**
    * Agent open: acquire exclusive lock and ensure the project's Runtime exists
-   * in the pool. For an AI caller this ALSO makes the project the UI viewing
-   * target (see `viewProject`).
+   * in the pool. Does **not** change the UI viewing project.
    *
-   * Why: every host app has exactly one shared render surface (the embedded
-   * `?pane=urdf`-style viewer / headless renderer) and its screenshot-capture
-   * and glb-export routes key their target project off `getViewingProjectId()`
-   * — never off any agent's lock. Before this, `projects.open` deliberately
-   * left viewing untouched, but no AI-facing tool exists to call `viewProject`
-   * either (it's a human-UI-only route). Net effect: an agent's own
-   * `projects.open` → `screenshot.capture`/`export-glb` calls permanently
-   * 409'd with "project X is not the viewing project" (or silently rendered
-   * some unrelated project) unless a human happened to already be looking at
-   * exactly that project. Folding the view-switch into `openProject` for AI
-   * callers makes the tool-documented "打开/查看的项目" (open/viewed project)
-   * wording actually true, and lets a human watch the agent's project live
-   * (the existing `project:viewing` WS broadcast cross-client sync already
-   * supports this — it just never fired from here). A human's explicit
-   * `viewProject` call still always wins the next time it's invoked; this only
-   * changes what an AI `open` does on its own.
+   * Viewing (`viewProject` / `POST …/view`) is owned by the human Studio
+   * browser. Agent work is scoped by the exclusive lock + `agentProjectId`
+   * on `/workspace`. Mutating `viewingProjectId` here yanked every connected
+   * client onto the agent's project mid-browse — agents and humans must not
+   * share that pointer. Screenshot/export routes resolve the target from the
+   * explicit/locked `projectId`, not from viewing.
    */
   openProject(projectId: string, caller: CallerIdentity): LockResult {
     const lock = this.acquireProjectLock(projectId, caller)
     if (!lock.ok) return lock
-    if (caller.kind === 'ai') {
-      this.viewProject(projectId)
-    } else {
-      this.getRuntimeFor(projectId)
-    }
+    this.getRuntimeFor(projectId)
     return { ok: true }
   }
 

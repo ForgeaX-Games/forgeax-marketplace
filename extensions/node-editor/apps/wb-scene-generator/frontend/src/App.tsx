@@ -11,11 +11,22 @@ import { AssetStoreSurface } from './surfaces/AssetStoreSurface.js'
 //   • assetstore  → the asset library surface (embedded iframe child)
 //   • left        → host sidebar: navigation/status/help, not the main canvas
 //   • center      → the workbench host: kernel Editor + embedded panes on 9555
-export function App({ pane }: { pane?: string }): JSX.Element {
-  const client = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
+export function App({
+  pane,
+  slug,
+  projectId,
+}: {
+  pane?: string
+  slug?: string | null
+  projectId?: string | null
+}): JSX.Element {
+  const client = useMemo(
+    () => new HttpApiClient({ baseUrl: '', pipelineId: 'main', projectId: projectId ?? undefined }),
+    [projectId],
+  )
 
-  if (pane === 'renderer') return <RendererSurface client={client} />
+  if (pane === 'renderer') return <RendererSurface client={client} gameSlug={slug} />
   if (pane === 'assetstore') return <AssetStoreSurface client={client} />
-  if (pane === 'left') return <WorkbenchLeftPane client={client} />
+  if (pane === 'left') return <WorkbenchLeftPane client={client} slug={slug} />
   return <WorkbenchHost />
 }

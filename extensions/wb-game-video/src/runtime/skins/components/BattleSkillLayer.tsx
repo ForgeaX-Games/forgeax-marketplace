@@ -1,17 +1,32 @@
 /**
  * 战斗技能条皮肤（component id: `battleSkillBar`）—— 从旧 player/BattleSkillLayer 迁移。
  *
- * 读 InteractionSnap.inputs.events；门控用 ChoiceOption.condition + 实时 SkinCtx（方案 B）。
+ * 读 OverlaySnap.inputs.events；门控用 ChoiceOption.condition + 实时 SkinCtx（方案 B）。
  * 含 'ult' 的 id 用金色高亮。
  */
 import { useEffect, useState } from 'react'
-import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type OverlayProps } from '../rendererRegistry'
 import { isOptionLocked } from '../optionLock'
-import type { ChoiceParams } from '../../registry/core-components'
+import {
+  CHOICE_INPUTS,
+  validateChoiceEvents,
+  type ChoiceParams,
+} from './Choice'
+import type { ComponentDef } from '../../registry/component-registry'
 import type { OverlayChild } from '../../schema/graph-schema'
-import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import { STAGE_FILL_LAYOUT } from '../../schema/layout'
+import { injectCss, ensureInkFilters, ensureBrushFont, useDefaultEventTimeout } from './skinRuntime'
 
 const SKILL_KEYS = ['X', 'A', 'Y', 'B'] as const
+
+/**
+ * 组件的注册契约（引擎/编辑器识别用）——与渲染实现同文件，经 EXTRA_COMPONENTS 注册。
+ */
+export const battleSkillBarComponent: ComponentDef<ChoiceParams> = {
+  label: '战斗技能条',
+  inputs: CHOICE_INPUTS,
+  validate: validateChoiceEvents,
+}
 
 /** 皮肤默认玩法参数（样式锁选项 / 新建预设 / 锚点共用）。 */
 export const battleSkillBarDefaults: Pick<ChoiceParams, 'events' | 'x' | 'y'> = {
@@ -29,17 +44,19 @@ export function battleSkillBarPreset(id: string): OverlayChild {
   return {
     id,
     component: 'battleSkillBar',
+    layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
     inputs: { ...battleSkillBarDefaults },
   }
 }
 
-export function BattleSkillLayer({ interaction, submit, ctx }: InteractionProps) {
+export function BattleSkillLayer({ overlay, emit, ctx, preview }: OverlayProps) {
   injectCss('battle-skill-layer', SKILL_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  useDefaultEventTimeout(emit, overlay.inputs as Record<string, unknown>, preview)
   const keyOk = usePlayerKeyGate()
-  const inputs = interaction.inputs as unknown as ChoiceParams
+  const inputs = overlay.inputs as unknown as ChoiceParams
   const events = inputs.events ?? []
   const x = typeof inputs.x === 'number' ? inputs.x : battleSkillBarDefaults.x!
   const y = typeof inputs.y === 'number' ? inputs.y : battleSkillBarDefaults.y!
@@ -48,7 +65,7 @@ export function BattleSkillLayer({ interaction, submit, ctx }: InteractionProps)
   function pick(id: string, locked: boolean): void {
     if (picked || locked) return
     setPicked(id)
-    submit(id)
+    emit?.(id)
   }
 
   useEffect(() => {
@@ -93,12 +110,14 @@ export function BattleSkillLayer({ interaction, submit, ctx }: InteractionProps)
   )
 }
 
+// 尺寸用 cqmin/cqh（相对舞台，见 VideoOverlayStage.tsx 的 containerType:'size'）而非 px/rem，
+// 保证技能条在预览小窗和全屏试玩里是同一个相对舞台的比例。
 const SKILL_CSS = `
-.pvb-skills { position: absolute; z-index: 44; display: flex; flex-wrap: wrap; gap: 26px; justify-content: center; align-items: flex-end; min-height: 40px; padding: 8px 16px; transform: translate(-50%, -50%); pointer-events: auto; }
-.pvb-skill { position: relative; display: flex; align-items: center; gap: 9px; cursor: pointer; background: none; border: none; padding: 4px; box-shadow: none; line-height: 1; color: #fbf6ec; transition: transform .14s ease, opacity .14s ease; }
-.pvb-sk-key { position: relative; flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-weight: 800; font-size: 1.18rem; color: #efe7d6; z-index: 1; text-shadow: 0 2px 6px rgba(0,0,0,.85); }
+.pvb-skills { position: absolute; z-index: 44; display: flex; flex-wrap: wrap; gap: 2.4cqmin; justify-content: center; align-items: flex-end; min-height: 4.4cqmin; padding: 8px 16px; transform: translate(-50%, -50%); pointer-events: auto; }
+.pvb-skill { position: relative; display: flex; align-items: center; gap: 1cqmin; cursor: pointer; background: none; border: none; padding: 4px; box-shadow: none; line-height: 1; color: #fbf6ec; transition: transform .14s ease, opacity .14s ease; }
+.pvb-sk-key { position: relative; flex: none; width: 4cqmin; height: 4cqmin; display: flex; align-items: center; justify-content: center; font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-weight: 800; font-size: 2.1cqh; color: #efe7d6; z-index: 1; text-shadow: 0 2px 6px rgba(0,0,0,.85); }
 .pvb-sk-key::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 52% 48% 50% 50% / 50% 52% 48% 50%; background: linear-gradient(180deg, #2b2620, #0c0a08); border: 1.5px solid rgba(239,231,214,.5); box-shadow: 0 2px 6px rgba(0,0,0,.5) inset, 0 2px 7px rgba(0,0,0,.6); filter: url(#inkRough); }
-.pvb-sk-nm { font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-size: 1.05rem; letter-spacing: .06em; text-shadow: 0 2px 5px rgba(0,0,0,.85); }
+.pvb-sk-nm { font-family: 'HYShangWei', 'STKaiti', 'KaiTi', serif; font-size: 1.9cqh; letter-spacing: .06em; text-shadow: 0 2px 5px rgba(0,0,0,.85); }
 .pvb-skill.ult .pvb-sk-key { color: #ffe7a0; }
 .pvb-skill.ult .pvb-sk-key::before { border-color: rgba(255,214,120,.75); box-shadow: 0 2px 6px rgba(0,0,0,.5) inset, 0 0 10px rgba(255,196,80,.35); }
 .pvb-skill.ult .pvb-sk-nm { color: #ffe7a0; }

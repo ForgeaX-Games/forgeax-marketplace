@@ -21,6 +21,7 @@ import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
 import { listVideoAssetInfos, resolveMediaSrc, videoDurationCapReached } from './media'
+import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import { addNode, insertSubFlowPackAfter, makeEmptySubFlowPack, makeSubFlowPackContainer } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
@@ -90,6 +91,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
   const entities = useGraphScenario((s) => s.meta.entities)
   const variables = useGraphScenario((s) => s.meta.variables)
+  const formulas = useGraphScenario((s) => s.meta.formulas)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const doSave = useGraphScenario((s) => s.save)
   const reset = useGraphScenario((s) => s.reset)
@@ -100,6 +102,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const selected = useGraphScenario((s) => s.selectedNodeId)
   const setSelected = useGraphScenario((s) => s.setSelectedNode)
   const [playOpen, setPlayOpen] = useState(false)
+  /** 每次 start / 从此试玩 递增，强制 <video> remount——末节点同 id 再 jump 时否则 key 不变、播完不重开。 */
+  const [playEpoch, setPlayEpoch] = useState(0)
   const [videoOptions, setVideoOptions] = useState<VideoOption[]>([])
 
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
@@ -178,12 +182,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setPackDrill(null)
     setDrillStack([])
   }
-  const addPerfNode = () => {
+  const addPerfNode = (position: { x: number; y: number }) => {
     const id = `n-${Date.now().toString(36)}`
     const node: GameNode = {
       id,
       type: 'perf',
-      position: { x: 40 + Math.random() * 80, y: 40 + Math.random() * 80 },
+      position,
       inputs: [],
       outputs: [],
       data: { name: '新演出节点' },
@@ -191,9 +195,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setCanvasGraph((g) => addNode(g, node))
     setSelected(id)
   }
-  const addPackNode = () => {
+  const addPackNode = (position: { x: number; y: number }) => {
     const pack = makeEmptySubFlowPack({ title: '子蓝图' })
-    const container = makeSubFlowPackContainer(pack, { name: '子蓝图' })
+    const container = makeSubFlowPackContainer(pack, { name: '子蓝图', position })
     setPacks([...packs, pack])
     setGraph((g) => addNode(g, container))
     setSelected(container.id)
@@ -235,30 +239,29 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // overlay 舞台锚视频实际画面矩形（object-fit:contain），与 GraphPlaySurface/GraphPlayer 同源，避免有黑边时叠层错位。
   const videoElRef = useRef<HTMLVideoElement | null>(null)
   const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [snap.clip?.nodeId])
+  // playEpoch：同节点 jump 重播时清闸（clip.nodeId 不变）
+  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId, `${runKey}:${playEpoch}`)
 
   useEffect(() => {
     setSnap(sessionRef.current.start())
+    setPlayEpoch((n) => n + 1)
   }, [session])
 
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
   useEffect(() => {
     // 无视频：durationMs 到点推进（逻辑节拍节点）。
     // 有视频：durationMs 作播放时长上限，改由 <video> onTimeUpdate 处理（见 videoDurationCapReached）。
-    if (snap.interaction || snap.phase === 'ended' || !snap.clip?.durationMs || snap.clip.mediaId) return
-    const t = setTimeout(() => setSnap(sessionRef.current.performanceEnd()), snap.clip.durationMs)
+    if (snap.phase === 'ended' || !snap.clip?.durationMs || snap.clip.mediaId) return
+    const t = setTimeout(() => endPerformance(), snap.clip.durationMs)
     return () => clearTimeout(t)
-  }, [snap.clip?.nodeId, snap.interaction, snap.phase, snap.clip?.durationMs, snap.clip?.mediaId])
+  }, [snap.clip?.nodeId, snap.phase, snap.clip?.durationMs, snap.clip?.mediaId, endPerformance])
 
-  useEffect(() => {
-    // 限时交互 timeoutMs：到点自动 submit(undefined) → 走 defaultEvent / 缺省出口。
-    const inter = snap.interaction
-    if (!inter?.timeoutMs) return
-    const t = setTimeout(() => setSnap(sessionRef.current.submit(undefined)), inter.timeoutMs)
-    return () => clearTimeout(t)
-  }, [snap.interaction?.elementId, snap.interaction?.timeoutMs])
-
-  const submit = (input: unknown) => setSnap(sessionRef.current.submit(input))
-  const jump = useCallback((nodeId: string) => setSnap(sessionRef.current.jump(nodeId)), [])
+  /** 从此试玩：打开试玩浮层 + 强制视频 remount，再 seek 到该节点（末节点同 id 再点也能重播）。 */
+  const jump = useCallback((nodeId: string) => {
+    setPlayOpen(true)
+    setPlayEpoch((n) => n + 1)
+    setSnap(sessionRef.current.jump(nodeId))
+  }, [])
   const traversed = useMemo(() => new Set(snap.traversedEdgeIds), [snap.traversedEdgeIds])
 
   const visibleNodeIds = useMemo(() => {
@@ -417,9 +420,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         {/* 试玩浮层：画布右上角（原独立试玩面板搬来） */}
         {playOpen && (
           <div style={{ position: 'absolute', top: 8, right: 8, width: 320, zIndex: 6, borderRadius: 10, overflow: 'hidden', border: '1px solid #403830', background: 'rgba(27,23,19,0.94)', boxShadow: '0 8px 28px rgba(0,0,0,0.55)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 11, color: '#c9d1e0' }}>
-              <span>试玩 · {snap.phase}</span>
-              <span style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 11, color: '#c9d1e0', gap: 8 }}>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={snap.currentNodeId ? `${snap.phase} · ${nameOf(snap.currentNodeId)}` : snap.phase}>
+                试玩 · {snap.phase}
+                {snap.currentNodeId ? ` · ${snap.clip?.name || nameOf(snap.currentNodeId)}` : ''}
+              </span>
+              <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <button onClick={bumpRun} title="重开" style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>▶ 重开</button>
                 <button onClick={() => setPlayOpen(false)} title="隐藏" style={{ background: 'none', border: 'none', color: '#9aa2b1', cursor: 'pointer', padding: 0 }}>✕</button>
               </span>
@@ -434,7 +440,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             >
               {videoSrc ? (
                 <video
-                  key={snap.clip?.nodeId}
+                  key={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
                   ref={videoElRef}
                   src={videoSrc}
                   autoPlay
@@ -444,14 +450,14 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   onLoadedMetadata={recomputeRect}
                   onEnded={() => {
                     if (snap.clip?.loop) return
-                    setSnap(sessionRef.current.performanceEnd())
+                    endPerformance()
                   }}
                   onTimeUpdate={(e) => {
                     const el = e.currentTarget
                     const nowMs = Math.floor(el.currentTime * 1000)
-                    // 播放时长上限：到点提前收演出（awaitInteraction 下 performanceEnd 为 no-op）。
-                    if (!snap.interaction && videoDurationCapReached(nowMs, snap.clip?.durationMs, el.duration)) {
-                      setSnap(sessionRef.current.performanceEnd())
+                    if (videoDurationCapReached(nowMs, snap.clip?.durationMs, el.duration)) {
+                      el.pause()
+                      endPerformance()
                       return
                     }
                     setSnap(sessionRef.current.tick(nowMs))
@@ -463,7 +469,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   {snap.clip?.name ?? '（无演出）'}
                 </div>
               )}
-              {/* overlay / 交互层锚视频实际画面矩形（VideoOverlayStage）；contentRect 为空时回退整容器（inset:0）。 */}
+              {/* 全部叠层锚视频实际画面矩形（VideoOverlayStage）；contentRect 为空时回退整容器（inset:0）。 */}
               <VideoOverlayStage contentRect={contentRect}>
                 <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
                   {snap.overlayMounts.map((m) => (
@@ -471,19 +477,14 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                       {session.skins.renderOverlayMount(
                         m,
                         (elementId, key) => setSnap(sessionRef.current.emitEvent(elementId, key)),
-                        { hud: snap.hud },
+                        {
+                          hud: snap.hud,
+                          condition: { state: session.runtime.state, visited: session.runtime.state.visited },
+                        },
                       )}
                     </span>
                   ))}
                 </div>
-                {snap.interaction && (
-                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                    {session.skins.renderInteraction(snap.interaction, submit, {
-                      hud: snap.hud,
-                      condition: { state: session.runtime.state, visited: session.runtime.state.visited },
-                    })}
-                  </div>
-                )}
               </VideoOverlayStage>
             </div>
             </PlayerRootContext.Provider>
@@ -516,7 +517,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
 
       {/* 右：节点配置面板 —— 默认隐藏，点画布节点才出现；✕ 或点画布空白处关闭 */}
       {selected && (
-        <div style={{ width: 340, display: 'flex', flexDirection: 'column', borderLeft: '1px solid #2e2924' }}>
+        <div style={{ width: 440, display: 'flex', flexDirection: 'column', borderLeft: '1px solid #2e2924' }}>
           <div style={{ display: 'flex', gap: 4, padding: 6, borderBottom: '1px solid #2e2924', alignItems: 'center' }}>
             <b style={{ fontSize: 12 }}>节点配置</b>
             <button onClick={() => setSelected(null)} title="关闭" style={{ marginLeft: 'auto', color: '#9aa2b1', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
@@ -530,12 +531,20 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               overlays={overlays}
               entities={entities}
               variables={variables}
+              formulas={formulas}
               onChange={setCanvasGraph}
               onPacksChange={setPacks}
+              onEnsureOverlay={(overlay) => {
+                setMeta((m) => {
+                  const cur = m.ui?.overlays ?? {}
+                  if (cur[overlay.id]) return m
+                  return { ...m, ui: { ...m.ui, overlays: { ...cur, [overlay.id]: overlay } } }
+                })
+              }}
               onDropOverlayIfOrphan={(oid) => {
                 // 卸载已同步写入 store；用最新完整 scenario（主图 + 所有 packs）判断是否孤儿再清。
                 const st = useGraphScenario.getState()
-                const scn = st.scn()
+                const scn = st.authoringScenario()
                 const cleaned = dropOverlayIfUnreferenced(scn, oid)
                 if (cleaned !== scn) st.setScenario(cleaned)
               }}

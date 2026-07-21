@@ -51,7 +51,7 @@ description: >-
 
 **连通性**：同级之间用 `adjacent` 写关系（要成环就两两双向写全），它是下游道路连通（PathConnection）的依据。
 
-**方位**：用 `layoutHint`（`inParent` 粗放、`relativeTo{anchor,bearing,distance}` 精确）表达「城镇在中、郊区在西、钟表店在广场东」等意图；坐标真值由下游 keypoint 求解，**这里只给方位意图，不写绝对坐标**。
+**方位**：用 `layoutHint`（`inParent` 粗放、`peripheral` 贴父区边缘、`relativeTo{anchor,bearing,distance}` 精确）表达「城镇在中、郊区在西且贴边、钟表店在广场东」等意图；坐标真值由下游 keypoint 求解，**这里只给方位意图，不写绝对坐标**。镇外/城外/关外/郊外节点应设 `peripheral: true`（勿再与镇中心建筑标 `adjacent`）。
 
 ---
 
@@ -61,7 +61,7 @@ description: >-
 
 1. **游戏逻辑 / 白盒** → `gameplay`：`role`（spawn/hub/combat/puzzle/gate/transition/boss/safe/loot…）、`keyInteractions`、`encounter`、`gating`。先想「玩家在这里**做什么**、怎么进出、被什么卡住」。
 2. **叙事** → `narrative`：`beats`（这里发生的剧情）、`reveals`（揭示的信息）、`mood`。`description.semantic` 答「是什么」，`narrative` 答「发生什么」。
-3. **布景 / 环境美术 / 审美** → `dressing`：`keyProps`（关键物件清单）、`storytellingDetails`（环境叙事细节）、`density`。让空间**讲故事且好看**，避免大片空白或单调铺满。
+3. **布景 / 环境美术 / 审美** → `dressing`：`keyProps`（关键物件清单）、`storytellingDetails`（环境叙事细节）、`density`。让空间**讲故事且好看**，避免大片空白或单调铺满。**`keyProps`/`storytellingDetails` 只放可数、可独立摆放的物件（树、石、灯柱…）；河流/溪流/湖泊/桥（含小桥/石桥/木桥/栈桥）等有走向或成片延展的地形-水体特征，禁止写进这里——改写进 `description.location`（如「沿河谷展开，一条溪流贯穿并有石桥跨越」），交给下游专属地形/水体模板处理，否则会被误当装饰物随机散布掉，详见 [schema §3.3](scene-design-brief.schema.md#33-地形-vs-装饰物判定准则dressingkeyprops-常见误填务必先自检)。**
 4. **审美评审** → `acceptance`：写 1～3 条「怎样算这个节点合格」的验收要点，供后续评审打分。
 
 > 关键 POI 必须至少有 `gameplay.role` + `dressing.keyProps`；纯过渡区可只给 `gameplay.role`。
@@ -101,6 +101,7 @@ description: >-
 - [ ] 自顶向下建好意图树，`type`/`scale`/`parent` 自洽，root `parent=null`
 - [ ] 同级关系用 `adjacent` 写全（需成环则双向闭合）
 - [ ] 方位用 `layoutHint` 表达，**未**写绝对坐标
+- [ ] `dressing.keyProps`/`storytellingDetails` 无河流/溪流/湖泊/桥等地形-水体特征误填（见 schema §3.3）——这类意图已写进对应节点 `description.location`
 - [ ] 关键 POI 至少有 `gameplay.role` + `dressing.keyProps`
 - [ ] 需要内部细布的 POI 已标 `expand` 并补了子 `location`
 - [ ] `scene-design-brief.json` 通过 schema 校验、写入正确路径

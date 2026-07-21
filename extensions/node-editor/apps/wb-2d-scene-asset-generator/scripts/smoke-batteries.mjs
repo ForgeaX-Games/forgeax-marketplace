@@ -9,8 +9,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const root = join(tmpdir(), `wb-scene-exec-${process.pid}`)
-const rt = createRuntime({ projectRoot: root, pipelineId: 'smoke', pluginId: '@forgeax-extension/wb-2d-scene-asset-generator' })
-const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-extension/wb-2d-scene-asset-generator', scanDirs: ['batteries'], layout: 'flexible' })
+const rt = createRuntime({ projectRoot: root, pipelineId: 'smoke', pluginId: '@forgeax-plugin/wb-2d-scene-asset-generator' })
+const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-plugin/wb-2d-scene-asset-generator', scanDirs: ['batteries'], layout: 'flexible' })
 const scan = await loader.scan()
 const isMustRun = (d) =>
   d.startsWith('batteries/scene/') ||

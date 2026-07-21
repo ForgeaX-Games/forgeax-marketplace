@@ -2,6 +2,19 @@ import { useEffect } from 'react'
 import { useRenderStore } from '../store'
 import type { AliasMeta } from '../framework/asset/matchAssetEntry'
 import { clearAllImgCache } from '../framework/asset/imageCache'
+import { pluginFetch } from '../../api/pluginHttp'
+import { beginLoadingTask, endLoadingTask } from './loadingSignals.js'
+import type { HttpApiClient } from '../../api/HttpApiClient'
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+// One project switch fires THREE independent triggers for this hook (both
+// `project:viewing` AND the legacy `project:activated` alias on the `graph`
+// channel, plus the host's `workbench:project-changed` postMessage), and the
+// backend's post-`/view` `reloadGameTexturesBinding()` broadcast adds a 4th
+// (delayed) `library:changed` on the `asset` channel. Debouncing merges
+// whichever of these land within the window into a single refetch instead of
+// one GET + one clearAllImgCache() per source.
+const REFRESH_DEBOUNCE_MS = 300
 
 // Fetch the alias metadata matching pool and push it into the store. The asset
 // drawMode matcher resolves each layer's asset_name against this pool.
@@ -24,8 +37,9 @@ import { clearAllImgCache } from '../framework/asset/imageCache'
 // Mirrors the `/ws` + `workbench:project-changed` wiring in useBakedLayers.
 
 async function refreshAliasMetas(): Promise<void> {
+  beginLoadingTask('aliases')
   try {
-    const res = await fetch('/api/v1/library/aliases-meta')
+    const res = await pluginFetch('/api/v1/library/aliases-meta')
     if (!res.ok) return
     const metas = (await res.json()) as AliasMeta[]
     if (Array.isArray(metas)) {
@@ -36,40 +50,71 @@ async function refreshAliasMetas(): Promise<void> {
     }
   } catch {
     // tolerate failure — leave the current pool intact
+  } finally {
+    endLoadingTask('aliases')
   }
 }
 
-function isProjectViewing(msg: { event?: string; payload?: unknown }): boolean {
-  if (msg.event !== 'runtime' || !msg.payload || typeof msg.payload !== 'object') return false
-  const kind = (msg.payload as { kind?: unknown }).kind
+/** True for the kernel's runtime events that signal a project switch (both the legacy `project:activated` alias and `project:viewing` fire per switch — see refreshAliasMetas' own trigger-dedup note above). */
+function isProjectViewing(kind: string): boolean {
   return kind === 'project:activated' || kind === 'project:viewing'
 }
 
-export function useAliasMetas(): void {
-  useEffect(() => {
+function scheduleAliasMetasRefresh(): void {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
     void refreshAliasMetas()
+  }, REFRESH_DEBOUNCE_MS)
+}
 
-    let ws: WebSocket | null = null
-    if (typeof WebSocket !== 'undefined' && typeof location !== 'undefined') {
-      ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws`)
-      ws.onmessage = (ev) => {
-        let msg: { event?: string; payload?: unknown }
-        try {
-          msg = JSON.parse(ev.data as string)
-        } catch {
-          return
-        }
-        if (msg.event === 'library:changed' || isProjectViewing(msg)) void refreshAliasMetas()
-      }
+// Shares the SAME `/ws` connection `useNodePreviews`/`useBakedLayers` use via
+// `client.subscribe(...)` — a project switch used to open a 3rd independent
+// `new WebSocket(...)` from this hook alone. `library:changed` already rides
+// the kernel's `asset` channel (HttpApiClient forwards it as a synthetic
+// `asset:library-changed` RuntimeEvent); `project:viewing`/`project:activated`
+// ride `graph` (kernel workspace-lifecycle events).
+export function useAliasMetas(client: HttpApiClient): void {
+  useEffect(() => {
+    scheduleAliasMetasRefresh()
+
+    // Dedupe the project-switch trigger sources (WS `graph` event + host
+    // postMessage) by project id, mirroring `useBakedLayers`' own
+    // `handleProjectChanged` — the same `nextProjectId` re-arriving (e.g.
+    // `project:viewing` immediately followed by the legacy `project:activated`
+    // alias, or the WS event racing the postMessage) is a no-op instead of
+    // another scheduled refetch.
+    let activeProjectId: string | null = null
+    const handleProjectChanged = (projectId: string | undefined): void => {
+      const nextProjectId = projectId && projectId.trim() ? projectId : null
+      if (nextProjectId && nextProjectId === activeProjectId) return
+      if (nextProjectId) activeProjectId = nextProjectId
+      scheduleAliasMetasRefresh()
     }
+
+    // Any 'asset' channel event currently means the synthetic
+    // `library:changed` forward (see HttpApiClient.ensureSocket), including
+    // the backend's post-`/view` `reloadGameTexturesBinding()` broadcast —
+    // refetch on the channel (debounced), same trigger AssetStoreSurface's
+    // own `client.subscribe('asset', () => void fetchAssets())` reacts to.
+    const unsubAsset = client.subscribe('asset', () => scheduleAliasMetasRefresh())
+    const unsubGraph = client.subscribe('graph', (e) => {
+      if (isProjectViewing(e.kind)) handleProjectChanged((e as { projectId?: string }).projectId)
+    })
     const onWorkbenchMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: unknown } | null
-      if (data && data.type === 'workbench:project-changed') void refreshAliasMetas()
+      const data = event.data as { type?: unknown; projectId?: unknown } | null
+      if (!data || data.type !== 'workbench:project-changed') return
+      handleProjectChanged(typeof data.projectId === 'string' ? data.projectId : undefined)
     }
     window.addEventListener('message', onWorkbenchMessage)
     return () => {
-      ws?.close()
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      unsubAsset()
+      unsubGraph()
       window.removeEventListener('message', onWorkbenchMessage)
     }
-  }, [])
+  }, [client])
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@forgeax-extension/wb-scene-generator",
+  "name": "@forgeax-plugin/wb-scene-generator",
   "version": "0.1.0",
   "private": true,
   "description": "Scene Generator — ForgeaX node-programming plugin built on @forgeax/node-runtime",

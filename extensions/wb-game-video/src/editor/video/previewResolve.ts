@@ -2,10 +2,11 @@
  * 视频编辑器预览叠层 —— 按当前场景初始态求值，展示与试玩一致的真实文案/效果摘要。
  *
  * 全部为纯函数：入参 GraphEffect / 选项预览项 / QteCue + 一个求值上下文（由 initState 建）。
- * 表达式失败绝不抛错（编辑器随时半成品），回退「无法求值 / ?」。运行时消费见 core-components 各 render。
+ * 表达式失败绝不抛错（编辑器随时半成品），回退「无法求值 / ?」。运行时消费见 FloatText 绘制时 resolve。
  */
-import type { Entity, GraphCondition, GraphEffect, Variable } from '../../runtime/schema/graph-schema'
-import type { FloatTextParams, QteCue } from '../../runtime/registry/core-components'
+import type { Entity, GraphCondition, GraphEffect, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
+import type { FloatTextParams } from '../../runtime/skins/components/FloatText'
+import type { QteCue } from '../../runtime/skins/components/Qte'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import type { MutableState } from '../../runtime/engine/apply-effects'
 import { evaluateCondition } from '../../runtime/engine/condition'
@@ -121,13 +122,18 @@ export function summarizeEffects(
     .join('；')
 }
 
+/** `NumOrExpr` → `tryEvalExpr` 认的源码（常量数字转字面量）；空值给 `''`。 */
+function exprSrc(v: NumOrExpr | string | undefined): string {
+  return v == null ? '' : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : v.expr
+}
+
 /** 飘字预览主文案：有 expr 时按初始态求值替换 `{v}`（signed）；失败回退 `?`。 */
 export function resolveFloatTextPreviewLabel(
   inputs: FloatTextParams,
   ctx: PreviewEvalContext,
 ): string {
   const text = (inputs.text ?? '').trim()
-  const expr = (inputs.expr ?? '').trim()
+  const expr = exprSrc(inputs.expr).trim()
   if (!text && !expr) return ''
   if (!expr) return text
   const v = tryEvalExpr(expr, ctx.evalCtx)
@@ -163,7 +169,7 @@ export function resolveChoicePreviewDetail(
 
 export interface QteOutcomePreview {
   handle: string
-  /** 展示文案（来自 manifest.events / exits.label）；缺省回退 handle。 */
+  /** 展示文案（来自 manifest.events.label）；缺省回退 handle。 */
   label?: string
   effects: GraphEffect[]
   fallsBackToPass?: boolean

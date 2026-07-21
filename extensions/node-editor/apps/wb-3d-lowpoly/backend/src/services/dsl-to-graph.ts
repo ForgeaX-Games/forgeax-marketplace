@@ -65,10 +65,28 @@ export interface CompileResult {
   lineByNodeId: Record<string, number>
   /** 语句节点 id（按 DSL 顺序）。 */
   statementNodeIds: string[]
-  /** 终端 QC / URDF 节点 id。 */
+  /** 终端 QC 节点 id（三路共用 g_geometry_qc；角色路为空，用 skinQcNodeId）。 */
   qcNodeId: string
+  /** 终端 URDF 节点 id（mode='urdf' 时非空）。 */
   urdfNodeId: string
+  /**
+   * 编译走的是哪条终端链：
+   *   - 'static'    —— 纯静态物体 / 场景组装（无 joint、无 skin）→ g_geometry_qc → [g_bake_object] → g_to_scene → scene_preview
+   *   - 'urdf'      —— 机械 / 关节装配（含 joint）→ g_geometry_qc → g_to_urdf
+   *   - 'character' —— 角色 / 生物（含 skin/skeleton）→ g_skin_qc → g_bake_object → g_to_rig → rig_preview
+   */
+  mode: 'static' | 'urdf' | 'character'
+  /** 角色路终端节点 id（mode='character' 时非空）。 */
+  skinQcNodeId: string
+  rigNodeId: string
+  rigPreviewNodeId: string
+  /** 静态路终端节点 id（mode='static' 时非空）。 */
+  sceneNodeId: string
+  scenePreviewNodeId: string
 }
+
+/** 编译期强制指定管线（override，绕过 DSL 内容推断）。'mechanical' 归一化到 'urdf'。 */
+export type PipelineOverride = 'static' | 'mechanical' | 'urdf' | 'character'
 
 // ════════════════════════════════════════════════════════════════════
 // op ↔ 电池 双向字段映射
@@ -145,9 +163,53 @@ const OP_TABLE: Record<string, OpEntry> = {
       { arg: 'bbox_max', kind: 'list', field: 'bbox_max' },
     ],
   },
+  // "boulder" 是 "rock" 的同义 op（同一电池 g_rock）；boulder 条目放前面、rock 放后面——
+  // buildBatteryIndex() 按 OP_TABLE 遍历顺序覆写 g_rock 反查条目，后者胜出，
+  // 确保 graphToDsl 反解统一落回 "rock"（boulder 只在正向编译时可用，不保证反解回 boulder）。
+  boulder: {
+    op: 'boulder',
+    battery: 'g_rock',
+    fields: [
+      { arg: 'radius', kind: 'num', field: 'radius' },
+      { arg: 'irregularity', kind: 'num', field: 'irregularity' },
+      { arg: 'seed', kind: 'num', field: 'seed' },
+      { arg: 'detail', kind: 'num', field: 'detail' },
+      VEC('stretch', ['sx', 'sy', 'sz']),
+    ],
+  },
+  rock: {
+    op: 'rock',
+    battery: 'g_rock',
+    fields: [
+      { arg: 'radius', kind: 'num', field: 'radius' },
+      { arg: 'irregularity', kind: 'num', field: 'irregularity' },
+      { arg: 'seed', kind: 'num', field: 'seed' },
+      { arg: 'detail', kind: 'num', field: 'detail' },
+      VEC('stretch', ['sx', 'sy', 'sz']),
+    ],
+  },
 
   // — Material —
-  material: { op: 'material', battery: 'g_material', fields: [VEC('rgba', ['r', 'g', 'b', 'a'])] },
+  texture: {
+    op: 'texture',
+    battery: 'g_texture',
+    fields: [
+      { arg: 'image', kind: 'str', field: 'image' },
+      VEC('repeat', ['repeat_u', 'repeat_v']),
+      VEC('offset', ['offset_u', 'offset_v']),
+      { arg: 'rotation', kind: 'num', field: 'rotation' },
+    ],
+  },
+  material: {
+    op: 'material',
+    battery: 'g_material',
+    fields: [
+      VEC('rgba', ['r', 'g', 'b', 'a']),
+      { arg: 'texture', kind: 'ref', field: 'texture_id' },
+      { arg: 'metalness', kind: 'num', field: 'metalness' },
+      { arg: 'roughness', kind: 'num', field: 'roughness' },
+    ],
+  },
 
   // — CSG (refs) —
   extrude: {
@@ -327,6 +389,51 @@ const OP_TABLE: Record<string, OpEntry> = {
     ],
   },
   animation: { op: 'animation', battery: 'g_bake_animation' },
+
+  // — Character rig (bone / skeleton / skin) —
+  bone: {
+    op: 'bone',
+    battery: 'g_bone',
+    fields: [
+      { arg: 'parent', kind: 'ref', field: 'parent_id' },
+      { arg: 'source_part', kind: 'ref', field: 'source_part_id' },
+      VEC('origin', ['hx', 'hy', 'hz']),
+      VEC('tail', ['tx', 'ty', 'tz']),
+      // 弯曲铰链轴（模型根帧）：作者在 DSL 写 axis=[…]；缺省前端启发式推。
+      VEC('axis', ['ax', 'ay', 'az']),
+      VEC('rpy', ['rr', 'rp', 'ry']),
+    ],
+  },
+  bone_chain: {
+    op: 'bone_chain',
+    battery: 'g_bone_chain',
+    fields: [
+      { arg: 'parent', kind: 'ref', field: 'parent_id' },
+      { arg: 'source_part', kind: 'ref', field: 'source_part_id' },
+      VEC('origin', ['hx', 'hy', 'hz']),
+      VEC('tail', ['tx', 'ty', 'tz']),
+      { arg: 'count', kind: 'num', field: 'count' },
+      // 弯曲铰链轴（模型根帧），应用到链上每一段。
+      VEC('axis', ['ax', 'ay', 'az']),
+    ],
+  },
+  skeleton: {
+    op: 'skeleton',
+    battery: 'g_skeleton',
+    fields: [{ arg: 'root', kind: 'ref', field: 'root_id' }],
+  },
+  skin: {
+    op: 'skin',
+    battery: 'g_skin',
+    fields: [
+      { arg: 'skeleton', kind: 'ref', field: 'skeleton_id' },
+      { arg: 'mesh', kind: 'ref', field: 'mesh_id' },
+      { arg: 'method', kind: 'str', field: 'method' },
+      { arg: 'resolution', kind: 'num', field: 'resolution' },
+      { arg: 'max_influences', kind: 'num', field: 'max_influences' },
+      { arg: 'falloff', kind: 'num', field: 'falloff' },
+    ],
+  },
 }
 
 /** 无 ref 参数、字段名与 arg 名一致的 op → 走 generic 映射，仅需知道电池 id。 */
@@ -388,6 +495,79 @@ const GENERIC_BATTERY: Record<string, string> = {
 
 const TERMINAL_QC_BATTERY = 'g_geometry_qc'
 const TERMINAL_URDF_BATTERY = 'g_to_urdf'
+
+// — Character（角色路）终端链电池 —
+const TERMINAL_SKIN_QC_BATTERY = 'g_skin_qc'
+const TERMINAL_BAKE_OBJECT_BATTERY = 'g_bake_object'
+const TERMINAL_RIG_BATTERY = 'g_to_rig'
+const TERMINAL_RIG_PREVIEW_BATTERY = 'rig_preview'
+
+// — Static（静态路）终端链电池 —
+const TERMINAL_SCENE_BATTERY = 'g_to_scene'
+const TERMINAL_SCENE_PREVIEW_BATTERY = 'scene_preview'
+
+/** 非语句（编译器自动追加）的终端电池集合——graphToDsl 反解时跳过。 */
+const TERMINAL_BATTERIES: ReadonlySet<string> = new Set([
+  TERMINAL_QC_BATTERY,
+  TERMINAL_URDF_BATTERY,
+  TERMINAL_SKIN_QC_BATTERY,
+  TERMINAL_BAKE_OBJECT_BATTERY,
+  TERMINAL_RIG_BATTERY,
+  TERMINAL_RIG_PREVIEW_BATTERY,
+  TERMINAL_SCENE_BATTERY,
+  TERMINAL_SCENE_PREVIEW_BATTERY,
+])
+
+/** DSL 含 bone / skeleton / skin 算子即判定为"角色路"。 */
+function isCharacterDsl(statements: readonly Statement[]): boolean {
+  return statements.some(
+    (s) => s.op === 'skin' || s.op === 'skeleton' || s.op === 'bone' || s.op === 'bone_chain',
+  )
+}
+
+/** 显式 rig 算子（skin/skeleton/bone/bone_chain）—— 与 joint 并存即判混合模型冲突（机械与角色分文件）。 */
+function hasExplicitRig(statements: readonly Statement[]): boolean {
+  return statements.some(
+    (s) => s.op === 'skin' || s.op === 'skeleton' || s.op === 'bone' || s.op === 'bone_chain',
+  )
+}
+
+/**
+ * 三路管线判定（从 DSL 内容推断，可被 override 强制覆盖）：
+ *   - 含 bone/bone_chain/skeleton/skin → 'character'（角色/生物软体蒙皮）
+ *   - 含 joint              → 'urdf'（机械/关节装配）
+ *   - 两者皆无              → 'static'（纯静态物体 / 场景组装 → 单个 .glb）
+ */
+function resolvePipelineMode(
+  statements: readonly Statement[],
+  override?: PipelineOverride,
+): 'static' | 'urdf' | 'character' {
+  if (override) return override === 'mechanical' ? 'urdf' : override
+  if (isCharacterDsl(statements)) return 'character'
+  if (statements.some((s) => s.op === 'joint')) return 'urdf'
+  return 'static'
+}
+
+/**
+ * 静态路是否需要先 g_bake_object 把真形状 part 合并成单个多材质 GLB。
+ * 判据：存在 part 且**所有** part 都引用真形状（非已 bake 的 mesth）→ 单物体，需烘焙；
+ * 任一 part 引用 `mesh(filename=<sha>.obj)`（场景组装）→ 直接列引用，不烘焙（g_bake_object 会拒绝 mesh ref）。
+ */
+function staticNeedsObjectBake(statements: readonly Statement[]): boolean {
+  const byId = new Map(statements.map((s) => [s.id, s]))
+  const parts = statements.filter((s) => s.op === 'part')
+  if (parts.length === 0) return false
+  let hasRealShape = false
+  for (const p of parts) {
+    const shapeRef = p.args.shape
+    if (!shapeRef || shapeRef.kind !== 'ref') continue
+    const shape = byId.get(shapeRef.name)
+    if (!shape) continue
+    if (shape.op === 'mesh') return false // 任一 mesh-ref part → 场景组装，不烘焙
+    hasRealShape = true
+  }
+  return hasRealShape
+}
 
 /**
  * 齿轮别名 DSL op → 目标电池的 `tooth_profile` 值。
@@ -468,11 +648,15 @@ interface ForwardOut {
   refs: Array<{ port: string; ids: string[] }>
 }
 
-function forwardStatement(stmt: Statement): ForwardOut | { error: string } {
+function forwardStatement(stmt: Statement, character = false): ForwardOut | { error: string } {
   const entry = OP_TABLE[stmt.op]
-  const batteryId = entry
+  let batteryId = entry
     ? (typeof entry.battery === 'function' ? entry.battery(stmt) : entry.battery)
     : GENERIC_BATTERY[stmt.op] ?? null
+
+  // 角色路：`animation` 语句的通道键是骨骼名（非 URDF 关节名），走 g_bake_skin_animation
+  // （对照 bone 校验、不做限位夹取），而不是关节路的 g_bake_animation。
+  if (character && stmt.op === 'animation') batteryId = 'g_bake_skin_animation'
 
   if (!batteryId) {
     return { error: `op "${stmt.op}" has no battery mapping (unknown or unmapped op)` }
@@ -543,8 +727,10 @@ function forwardStatement(stmt: Statement): ForwardOut | { error: string } {
 export interface CompileOptions {
   graphId?: string
   graphName?: string
-  /** 是否追加终端 QC + URDF 节点（默认 true）。 */
+  /** 是否追加终端 QC + 导出节点（默认 true）。 */
   appendTerminals?: boolean
+  /** 强制指定管线（绕过 DSL 内容推断）；'mechanical' 归一化到 'urdf'。 */
+  pipeline?: PipelineOverride
 }
 
 export function compileDslToGraph(source: string, opts: CompileOptions = {}): CompileResult {
@@ -560,10 +746,31 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
   const dupIds = new Set(semErrors.filter((e) => e.kind === 'duplicate-id').map((e) => e.line))
   let blocking = parseErrors.length > 0 || dupIds.size > 0
 
+  // 三路管线判定（可被 opts.pipeline 强制覆盖）。
+  const mode = resolvePipelineMode(statements, opts.pipeline)
+  const character = mode === 'character'
+
+  // 混合模型护栏：同一 DSL 既有角色 skin/skeleton 又有 URDF joint —— 两条终端链互斥，
+  // 走哪条都会丢弃另一半语义。显式报错并提示分文件（后续可再议 hybrid rig）。
+  if (hasExplicitRig(statements)) {
+    const jointStmt = statements.find((s) => s.op === 'joint')
+    if (jointStmt) {
+      errors.push({
+        line: jointStmt.line,
+        message:
+          'mixed model: this DSL has both character skin/skeleton and URDF joint() statements. ' +
+          'These take mutually-exclusive compile paths — split the articulated (URDF) parts and the ' +
+          'skinned character into separate files.',
+        kind: 'bad-arg',
+      })
+      blocking = true
+    }
+  }
+
   // 预解析每条语句的 battery + params，未映射 op → 显式错误（带行号）
   const forwards: Array<{ stmt: Statement; fwd: ForwardOut }> = []
   for (const stmt of statements) {
-    const fwd = forwardStatement(stmt)
+    const fwd = forwardStatement(stmt, character)
     if ('error' in fwd) {
       errors.push({ line: stmt.line, message: fwd.error, kind: 'unmapped-op' })
       blocking = true
@@ -583,6 +790,12 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
       statementNodeIds: [],
       qcNodeId: '',
       urdfNodeId: '',
+      mode,
+      skinQcNodeId: '',
+      rigNodeId: '',
+      rigPreviewNodeId: '',
+      sceneNodeId: '',
+      scenePreviewNodeId: '',
     }
   }
 
@@ -634,25 +847,101 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
   const appendTerminals = opts.appendTerminals !== false
   let qcNodeId = ''
   let urdfNodeId = ''
-  if (appendTerminals) {
+  let skinQcNodeId = ''
+  let rigNodeId = ''
+  let rigPreviewNodeId = ''
+  let sceneNodeId = ''
+  let scenePreviewNodeId = ''
+
+  const linkGeom = (from: string | null, to: string): void => {
+    if (!from) return
+    edges.push({
+      id: `e_geom_${from}_${to}`,
+      source: { nodeId: from, port: 'geometry' },
+      target: { nodeId: to, port: 'geometry' },
+    })
+  }
+
+  if (appendTerminals && mode === 'character') {
+    // 角色路终端链：… → g_skin_qc → g_bake_object（合并可蒙皮网格） → g_to_rig（RigSpec）→ rig_preview
+    skinQcNodeId = freshTerminalId('skin_qc', usedIds)
+    const bakeNodeId = freshTerminalId('rig_bake', usedIds)
+    rigNodeId = freshTerminalId('rig', usedIds)
+    rigPreviewNodeId = freshTerminalId('rig_preview', usedIds)
+    nodes.push({ id: skinQcNodeId, batteryId: TERMINAL_SKIN_QC_BATTERY, name: 'SkinQC', position: { x, y: 0 }, params: {} })
+    nodes.push({ id: bakeNodeId, batteryId: TERMINAL_BAKE_OBJECT_BATTERY, name: 'BakeObject', position: { x: x + 220, y: 0 }, params: {} })
+    nodes.push({ id: rigNodeId, batteryId: TERMINAL_RIG_BATTERY, name: 'Rig', position: { x: x + 440, y: 0 }, params: {} })
+    nodes.push({ id: rigPreviewNodeId, batteryId: TERMINAL_RIG_PREVIEW_BATTERY, name: 'RigPreview', position: { x: x + 660, y: 0 }, params: {} })
+    lineByNodeId[skinQcNodeId] = 0
+    lineByNodeId[bakeNodeId] = 0
+    lineByNodeId[rigNodeId] = 0
+    lineByNodeId[rigPreviewNodeId] = 0
+    linkGeom(prevGeomNode, skinQcNodeId)
+    linkGeom(skinQcNodeId, bakeNodeId)
+    linkGeom(bakeNodeId, rigNodeId)
+    linkGeom(rigNodeId, rigPreviewNodeId)
+    // g_bake_object 产出的合并网格文件名 → g_to_rig 的可蒙皮网格引用
+    edges.push({
+      id: `e_mesh_${bakeNodeId}_${rigNodeId}`,
+      source: { nodeId: bakeNodeId, port: 'filename' },
+      target: { nodeId: rigNodeId, port: 'mesh_filename' },
+    })
+    // g_to_rig 的 rigSpec → rig_preview（供 live-sync 拉取）
+    edges.push({
+      id: `e_rig_${rigNodeId}_${rigPreviewNodeId}`,
+      source: { nodeId: rigNodeId, port: 'rigSpec' },
+      target: { nodeId: rigPreviewNodeId, port: 'rigSpec' },
+    })
+  } else if (appendTerminals && mode === 'static') {
+    // 静态路终端链：… → g_geometry_qc → [g_bake_object] → g_to_scene → scene_preview
+    // 单物体（真形状 part）先 g_bake_object 合并成单个多材质 GLB；场景组装（mesh-ref part）直接列引用。
+    qcNodeId = freshTerminalId('qc', usedIds)
+    sceneNodeId = freshTerminalId('scene', usedIds)
+    scenePreviewNodeId = freshTerminalId('scene_preview', usedIds)
+    const needBake = staticNeedsObjectBake(statements)
+    nodes.push({ id: qcNodeId, batteryId: TERMINAL_QC_BATTERY, name: 'QC', position: { x, y: 0 }, params: {} })
+    lineByNodeId[qcNodeId] = 0
+    linkGeom(prevGeomNode, qcNodeId)
+    let chainTail = qcNodeId
+    let bakeNodeId = ''
+    let colX = x + 220
+    if (needBake) {
+      bakeNodeId = freshTerminalId('scene_bake', usedIds)
+      nodes.push({ id: bakeNodeId, batteryId: TERMINAL_BAKE_OBJECT_BATTERY, name: 'BakeObject', position: { x: colX, y: 0 }, params: {} })
+      lineByNodeId[bakeNodeId] = 0
+      linkGeom(chainTail, bakeNodeId)
+      chainTail = bakeNodeId
+      colX += 220
+    }
+    nodes.push({ id: sceneNodeId, batteryId: TERMINAL_SCENE_BATTERY, name: 'Scene', position: { x: colX, y: 0 }, params: {} })
+    nodes.push({ id: scenePreviewNodeId, batteryId: TERMINAL_SCENE_PREVIEW_BATTERY, name: 'ScenePreview', position: { x: colX + 220, y: 0 }, params: {} })
+    lineByNodeId[sceneNodeId] = 0
+    lineByNodeId[scenePreviewNodeId] = 0
+    linkGeom(chainTail, sceneNodeId)
+    linkGeom(sceneNodeId, scenePreviewNodeId)
+    // g_bake_object 合并 GLB 文件名 → g_to_scene 的单物体网格引用
+    if (bakeNodeId) {
+      edges.push({
+        id: `e_mesh_${bakeNodeId}_${sceneNodeId}`,
+        source: { nodeId: bakeNodeId, port: 'filename' },
+        target: { nodeId: sceneNodeId, port: 'object_filename' },
+      })
+    }
+    // g_to_scene 的 sceneSpec → scene_preview（供 live-sync 拉取）
+    edges.push({
+      id: `e_scene_${sceneNodeId}_${scenePreviewNodeId}`,
+      source: { nodeId: sceneNodeId, port: 'sceneSpec' },
+      target: { nodeId: scenePreviewNodeId, port: 'sceneSpec' },
+    })
+  } else if (appendTerminals) {
     qcNodeId = freshTerminalId('qc', usedIds)
     urdfNodeId = freshTerminalId('urdf', usedIds)
     nodes.push({ id: qcNodeId, batteryId: TERMINAL_QC_BATTERY, name: 'QC', position: { x, y: 0 }, params: {} })
     nodes.push({ id: urdfNodeId, batteryId: TERMINAL_URDF_BATTERY, name: 'URDF', position: { x: x + 220, y: 0 }, params: {} })
     lineByNodeId[qcNodeId] = 0
     lineByNodeId[urdfNodeId] = 0
-    if (prevGeomNode) {
-      edges.push({
-        id: `e_geom_${prevGeomNode}_${qcNodeId}`,
-        source: { nodeId: prevGeomNode, port: 'geometry' },
-        target: { nodeId: qcNodeId, port: 'geometry' },
-      })
-    }
-    edges.push({
-      id: `e_geom_${qcNodeId}_${urdfNodeId}`,
-      source: { nodeId: qcNodeId, port: 'geometry' },
-      target: { nodeId: urdfNodeId, port: 'geometry' },
-    })
+    linkGeom(prevGeomNode, qcNodeId)
+    linkGeom(qcNodeId, urdfNodeId)
   }
 
   const graph: CompiledGraph = {
@@ -660,7 +949,7 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
     name: opts.graphName,
     nodes,
     edges,
-    metadata: { source, compiledBy: 'dsl-to-graph', statementCount: statements.length },
+    metadata: { source, compiledBy: 'dsl-to-graph', statementCount: statements.length, mode },
   }
 
   return {
@@ -671,6 +960,12 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
     statementNodeIds,
     qcNodeId,
     urdfNodeId,
+    mode,
+    skinQcNodeId,
+    rigNodeId,
+    rigPreviewNodeId,
+    sceneNodeId,
+    scenePreviewNodeId,
   }
 }
 
@@ -714,6 +1009,9 @@ function buildBatteryIndex(): Record<string, OpEntry> {
   }
   // g_fillet 既产 fillet 又产 chamfer：反向按 type 参数决定 op（下方特判）
   idx.g_fillet = { op: 'fillet', battery: 'g_fillet', fields: OP_TABLE.fillet.fields }
+  // 角色路的 g_bake_skin_animation 与关节路的 g_bake_animation 都反解为 `animation` 语句
+  // （通道键区分骨骼名 / 关节名，反解无需区分——DSL 层同为 animation）。
+  idx.g_bake_skin_animation = { op: 'animation', battery: 'g_bake_skin_animation' }
   return idx
 }
 
@@ -731,7 +1029,7 @@ export function graphToDsl(
   nodes: readonly GraphNodeLike[],
   edges: readonly CompiledEdge[],
 ): string {
-  const stmtNodes = nodes.filter((n) => n.batteryId !== TERMINAL_QC_BATTERY && n.batteryId !== TERMINAL_URDF_BATTERY && BATTERY_TO_ENTRY[n.batteryId])
+  const stmtNodes = nodes.filter((n) => !TERMINAL_BATTERIES.has(n.batteryId) && BATTERY_TO_ENTRY[n.batteryId])
   const ordered = orderByGeometryChain(stmtNodes, edges)
 
   const statements: Statement[] = []

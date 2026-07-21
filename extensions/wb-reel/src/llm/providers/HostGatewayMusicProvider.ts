@@ -5,6 +5,7 @@ import type {
   MusicGenResult,
   MusicProgressEvent,
 } from './MinimaxMusicProvider'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 /**
  * HostGatewayMusicProvider —— 把 BGM（场景音乐）生成委托给宿主 forgeax-server
@@ -46,7 +47,7 @@ export class HostGatewayMusicProvider implements MusicClient {
   private readonly base: string
 
   constructor(opts: { base?: string } = {}) {
-    this.base = (opts.base ?? '/__ce-api__').replace(/\/$/, '')
+    this.base = (opts.base ?? pluginUrl('/__ce-api__')).replace(/\/$/, '')
   }
 
   getProviderName(): string {
@@ -96,7 +97,7 @@ export class HostGatewayMusicProvider implements MusicClient {
 
       let resp: Response
       try {
-        resp = await fetch(`${this.base}/reel-music`, {
+        resp = await pluginFetch(`${this.base}/reel-music`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({

@@ -44,7 +44,10 @@ export async function registerQueryRoutes(app: FastifyInstance): Promise<void> {
     },
   })
 
-  app.get<{ Params: { projectId: string }; Querystring: { mode?: string; groupId?: string; nodeIds?: string } }>(
+  app.get<{
+    Params: { projectId: string }
+    Querystring: { mode?: string; groupId?: string; nodeIds?: string; nameContains?: string; opIdIn?: string }
+  }>(
     '/api/v1/projects/:projectId/pipeline/summary',
     async (req, reply) => {
       const { projectId } = req.params
@@ -53,9 +56,12 @@ export async function registerQueryRoutes(app: FastifyInstance): Promise<void> {
       const snap = getPipeline(await getRuntimeForProject(projectId))
       if (req.query.mode === 'hash') return pipelineHashOnly(snap)
       const nodeIds = req.query.nodeIds?.split(',').map((s) => s.trim()).filter(Boolean)
+      const opIdIn = req.query.opIdIn?.split(',').map((s) => s.trim()).filter(Boolean)
       return summarizePipeline(snap, {
         ...(req.query.groupId ? { groupId: req.query.groupId } : {}),
         ...(nodeIds?.length ? { nodeIds } : {}),
+        ...(req.query.nameContains ? { nameContains: req.query.nameContains } : {}),
+        ...(opIdIn?.length ? { opIdIn } : {}),
       })
     },
   )

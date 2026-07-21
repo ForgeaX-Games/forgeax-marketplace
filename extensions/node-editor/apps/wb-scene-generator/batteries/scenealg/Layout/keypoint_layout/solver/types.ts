@@ -7,7 +7,7 @@ export interface Vec2 {
   y: number
 }
 
-export type RelationKind = 'clearance' | 'orientation'
+export type RelationKind = 'clearance' | 'orientation' | 'peripheral'
 
 /** One node in the optimization problem (a free 2D variable). */
 export interface SolverNode {
@@ -30,6 +30,7 @@ export interface SolverRelation {
   distance?: number
   /** orientation only: target bearing in radians (math convention, CCW from +x/east) */
   angle?: number
+  /** peripheral: from=parent, to=child — push child toward parent rim */
 }
 
 /** The full problem the optimizer minimizes over. `nodes` index order is the

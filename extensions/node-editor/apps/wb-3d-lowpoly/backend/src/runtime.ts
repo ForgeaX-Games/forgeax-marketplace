@@ -14,7 +14,7 @@ export function resolveWorkspaceRoot(): string {
   return process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
 }
 
-const PLUGIN_ID = '@forgeax-extension/wb-3d-lowpoly'
+const PLUGIN_ID = '@forgeax-plugin/wb-3d-lowpoly'
 
 let registry: ProjectRegistry | null = null
 let sharedOps: OpRegistry | null = null
@@ -116,7 +116,10 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
         createExecutionContext: (base) => {
           const graphAbs = isAbsolute(req.graphFile) ? req.graphFile : join(workspaceRoot, req.graphFile)
           const parts = createPartsRegistry(dirname(graphAbs))
-          return { ...base, services: { ...bakerServices, parts } }
+          // g_texture 的 image 路径约定相对 <projectDir>/assets/textures/ 解析；g_bake_object
+          // 读贴图字节时需要这个基准目录。与下方 layout.assetsDir 用同一套推导，保持两者一致。
+          const assetsDir = join(dirname(dirname(graphAbs)), 'assets')
+          return { ...base, services: { ...bakerServices, parts, assetsDir } }
         },
         layout: {
           graphFile: req.graphFile,

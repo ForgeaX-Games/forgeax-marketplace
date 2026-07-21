@@ -52,6 +52,118 @@ describe('compileDslToGraph: structure', () => {
     expect(byId.get(r.urdfNodeId)!.batteryId).toBe('g_to_urdf')
   })
 
+  it('routes a character DSL (explicit bone/skeleton/skin) to the character terminal chain', () => {
+    // articulated-pig-like: a few parts + hand-authored skeleton → character path.
+    const src = [
+      'body = capsule(radius=0.18, length=0.5)',
+      'p_body = part(shape=body)',
+      'head = sphere(radius=0.16)',
+      'p_head = part(shape=head, origin=[0, 0, 0.42])',
+      'leg = capsule(radius=0.05, length=0.2)',
+      'p_leg = part(shape=leg, origin=[0.1, 0, -0.3])',
+      'b_spine = bone(origin=[0,0,0], tail=[0,0,0.4], source_part=p_body)',
+      'b_head = bone(origin=[0,0,0.42], tail=[0,0,0.6], parent=b_spine, source_part=p_head)',
+      // axis=[0,1,0]：作者显式声明前后摆弯曲轴（编译器拆成 ax/ay/az）
+      'b_leg = bone(origin=[0.1,0,-0.15], tail=[0.1,0,-0.4], axis=[0,1,0], parent=b_spine, source_part=p_leg)',
+      'sk = skeleton(root=b_spine)',
+      'sn = skin(skeleton=sk, method="auto")',
+      'wag = animation(fps=30, keyframes="{\\"b_leg\\":[{\\"t\\":0,\\"q\\":0},{\\"t\\":1,\\"q\\":0.5}]}")',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    expect(r.errors).toEqual([])
+    expect(r.mode).toBe('character')
+    // character terminals present, URDF terminals empty
+    expect(r.skinQcNodeId).toBeTruthy()
+    expect(r.rigNodeId).toBeTruthy()
+    expect(r.rigPreviewNodeId).toBeTruthy()
+    expect(r.qcNodeId).toBe('')
+    expect(r.urdfNodeId).toBe('')
+    const byId = new Map(r.graph!.nodes.map((n) => [n.id, n]))
+    expect(byId.get(r.skinQcNodeId)!.batteryId).toBe('g_skin_qc')
+    expect(byId.get(r.rigNodeId)!.batteryId).toBe('g_to_rig')
+    expect(byId.get(r.rigPreviewNodeId)!.batteryId).toBe('rig_preview')
+    // g_bake_object sits between skin_qc and g_to_rig
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_bake_object')).toBe(true)
+    // animation routed to the skin variant (bone-channel), not g_bake_animation
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_bake_skin_animation')).toBe(true)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_bake_animation')).toBe(false)
+    // g_bake_object.filename → g_to_rig.mesh_filename wired
+    expect(r.graph!.edges.some((e) => e.source.port === 'filename' && e.target.port === 'mesh_filename' && e.target.nodeId === r.rigNodeId)).toBe(true)
+    // g_to_rig.rigSpec → rig_preview.rigSpec wired
+    expect(r.graph!.edges.some((e) => e.source.port === 'rigSpec' && e.target.nodeId === r.rigPreviewNodeId)).toBe(true)
+    // bone(axis=…) 拆到 g_bone 参数 ax/ay/az
+    const legNode = r.graph!.nodes.find((n) => n.batteryId === 'g_bone' && n.params?.ay === 1)
+    expect(legNode).toBeTruthy()
+    expect(legNode!.params).toMatchObject({ ax: 0, ay: 1, az: 0 })
+  })
+
+  it('rejects a mixed model (joint + skin in one file)', () => {
+    const src = [
+      'a = box(size=[1,1,1])',
+      'p_a = part(shape=a)',
+      'b = box(size=[1,1,1])',
+      'p_b = part(shape=b, origin=[1,0,0])',
+      'j = joint(type="fixed", parent=p_a, child=p_b)',
+      'bone_a = bone(origin=[0,0,0])',
+      'sk = skeleton(root=bone_a)',
+      'sn = skin(skeleton=sk)',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(false)
+    expect(r.errors.some((e) => /mixed model/i.test(e.message))).toBe(true)
+  })
+
+  it('routes bone_chain (tail-only DSL, no plain bone) to the character terminal chain and maps to g_bone_chain', () => {
+    const src = [
+      'body = capsule(radius=0.1, length=0.3)',
+      'p_body = part(shape=body)',
+      'tail = capsule(radius=0.03, length=0.5)',
+      'p_tail = part(shape=tail, origin=[0, 0, -0.3])',
+      'b_spine = bone(origin=[0,0,0], tail=[0,0,0.2], source_part=p_body)',
+      'b_tail = bone_chain(origin=[0,0,-0.15], tail=[0,0,-0.65], count=4, axis=[0,1,0], parent=b_spine, source_part=p_tail)',
+      'sk = skeleton(root=b_spine)',
+      'sn = skin(skeleton=sk, method="auto")',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const chainNode = r.graph!.nodes.find((n) => n.batteryId === 'g_bone_chain')
+    expect(chainNode).toBeTruthy()
+    expect(chainNode!.params).toMatchObject({
+      id: 'b_tail',
+      hx: 0, hy: 0, hz: -0.15,
+      tx: 0, ty: 0, tz: -0.65,
+      count: 4,
+      ax: 0, ay: 1, az: 0,
+      parent_id: 'b_spine',
+      source_part_id: 'p_tail',
+    })
+    // character path reached purely via bone_chain (no plain `bone` other than the spine).
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_skeleton')).toBe(true)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'rig_preview')).toBe(true)
+  })
+
+  it('round-trips a character DSL back through graphToDsl (animation stays `animation`)', () => {
+    const src = [
+      'body = capsule(radius=0.18, length=0.5)',
+      'p_body = part(shape=body)',
+      'leg = capsule(radius=0.05, length=0.2)',
+      'p_leg = part(shape=leg, origin=[0.1, 0, -0.3])',
+      'b_spine = bone(origin=[0,0,0], tail=[0,0,0.4], source_part=p_body)',
+      'b_leg = bone(origin=[0.1,0,-0.15], tail=[0.1,0,-0.4], parent=b_spine, source_part=p_leg)',
+      'sk = skeleton(root=b_spine)',
+      'sn = skin(skeleton=sk, method="auto")',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const back = graphToDsl(r.graph!.nodes, r.graph!.edges)
+    // character terminal batteries are skipped on reverse; statement ops survive
+    expect(back).toContain('skeleton(')
+    expect(back).toContain('skin(')
+    expect(back).not.toContain('g_skin_qc')
+    expect(back).not.toContain('rig_preview')
+  })
+
   it('chains geometry edges linearly through statements into QC → URDF', () => {
     const r = compileDslToGraph(CABINET)
     const geomEdges = r.graph!.edges.filter((e) => e.source.port === 'geometry' && e.target.port === 'geometry')
@@ -99,6 +211,71 @@ describe('compileDslToGraph: structure', () => {
     expect(r.lineByNodeId['mat']).toBe(1)
     expect(r.lineByNodeId['hinge']).toBe(9)
     expect(r.lineByNodeId[r.qcNodeId]).toBe(0)
+  })
+})
+
+describe('compileDslToGraph: three-way pipeline routing', () => {
+  it('routes a joint-less real-shape object to the STATIC chain (g_geometry_qc → g_bake_object → g_to_scene → scene_preview)', () => {
+    const src = [
+      'mat = material(rgba=[0.6, 0.4, 0.2, 1])',
+      'body = box(size=[0.3, 0.2, 0.5])',
+      'p_body = part(shape=body, material=mat)',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    expect(r.errors).toEqual([])
+    expect(r.mode).toBe('static')
+    expect(r.sceneNodeId).toBeTruthy()
+    expect(r.scenePreviewNodeId).toBeTruthy()
+    // URDF / character terminals empty
+    expect(r.urdfNodeId).toBe('')
+    expect(r.rigNodeId).toBe('')
+    const byId = new Map(r.graph!.nodes.map((n) => [n.id, n]))
+    expect(byId.get(r.sceneNodeId)!.batteryId).toBe('g_to_scene')
+    expect(byId.get(r.scenePreviewNodeId)!.batteryId).toBe('scene_preview')
+    // reuses g_geometry_qc and bakes real-shape parts into one GLB via g_bake_object
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_geometry_qc')).toBe(true)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_bake_object')).toBe(true)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_to_urdf')).toBe(false)
+    // g_bake_object.filename → g_to_scene.object_filename wired
+    expect(r.graph!.edges.some((e) => e.source.port === 'filename' && e.target.port === 'object_filename' && e.target.nodeId === r.sceneNodeId)).toBe(true)
+    // g_to_scene.sceneSpec → scene_preview.sceneSpec wired
+    expect(r.graph!.edges.some((e) => e.source.port === 'sceneSpec' && e.target.nodeId === r.scenePreviewNodeId)).toBe(true)
+  })
+
+  it('routes a mesh-ref scene assembly to the STATIC chain WITHOUT an object bake', () => {
+    const src = [
+      'm1 = mesh(filename="aaa.obj", bbox_min=[0,0,0], bbox_max=[1,1,1])',
+      'p1 = part(shape=m1, origin=[0, 0, 0])',
+      'm2 = mesh(filename="bbb.obj", bbox_min=[0,0,0], bbox_max=[1,1,1])',
+      'p2 = part(shape=m2, origin=[2, 0, 0])',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    expect(r.errors).toEqual([])
+    expect(r.mode).toBe('static')
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_to_scene')).toBe(true)
+    // scene of already-baked mesh refs must NOT go through g_bake_object (it rejects mesh refs)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_bake_object')).toBe(false)
+    expect(r.graph!.nodes.some((n) => n.batteryId === 'g_to_urdf')).toBe(false)
+  })
+
+  it('routes a jointed assembly to the URDF chain', () => {
+    const r = compileDslToGraph(CABINET)
+    expect(r.mode).toBe('urdf')
+    expect(r.urdfNodeId).toBeTruthy()
+    expect(r.sceneNodeId).toBe('')
+  })
+
+  it('honors an explicit pipeline override (bypasses content inference)', () => {
+    const staticSrc = ['b = box(size=[1, 1, 1])', 'p = part(shape=b)'].join('\n')
+    // default inference → static; forced mechanical → urdf
+    expect(compileDslToGraph(staticSrc).mode).toBe('static')
+    expect(compileDslToGraph(staticSrc, { pipeline: 'mechanical' }).mode).toBe('urdf')
+    expect(compileDslToGraph(staticSrc, { pipeline: 'urdf' }).mode).toBe('urdf')
+    // a jointed DSL defaults to urdf; forced static freezes it
+    expect(compileDslToGraph(CABINET).mode).toBe('urdf')
+    expect(compileDslToGraph(CABINET, { pipeline: 'static' }).mode).toBe('static')
   })
 })
 
@@ -169,6 +346,38 @@ describe('compileDslToGraph: op → battery mapping', () => {
     const back = graphToDsl(r.graph!.nodes, r.graph!.edges)
     expect(back).toContain('herringbone_gear(')
     expect(back).not.toContain('tooth_profile')
+    const reparsed = parseDSL(back)
+    expect(canon(reparsed.statements)).toEqual(canon(parseDSL(src).statements))
+  })
+
+  it('maps rock/boulder to g_rock with radius/irregularity/seed/detail/stretch split into sx/sy/sz', () => {
+    const src = [
+      'r1 = rock(radius=0.3, irregularity=0.4, seed=7, detail=2, stretch=[1.5, 1, 0.6])',
+      'r2 = boulder(radius=0.6)',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const byId = new Map(r.graph!.nodes.map((n) => [n.id, n]))
+    expect(byId.get('r1')!.batteryId).toBe('g_rock')
+    expect(byId.get('r1')!.params).toMatchObject({
+      radius: 0.3, irregularity: 0.4, seed: 7, detail: 2, sx: 1.5, sy: 1, sz: 0.6,
+    })
+    expect(byId.get('r2')!.batteryId).toBe('g_rock')
+    expect(byId.get('r2')!.params).toMatchObject({ radius: 0.6 })
+  })
+
+  it('boulder normalizes to rock on round-trip (documented alias trade-off: not a stable round-trip)', () => {
+    const src = 'r1 = boulder(radius=0.5, seed=3)'
+    const r = compileDslToGraph(src)
+    const back = graphToDsl(r.graph!.nodes, r.graph!.edges)
+    expect(back).toContain('rock(')
+    expect(back).not.toContain('boulder(')
+  })
+
+  it('round-trips a rock statement (op name + args preserved)', () => {
+    const src = 'r1 = rock(radius=0.3, irregularity=0.4, seed=7, detail=2, stretch=[1.5, 1, 0.6])'
+    const r = compileDslToGraph(src)
+    const back = graphToDsl(r.graph!.nodes, r.graph!.edges)
     const reparsed = parseDSL(back)
     expect(canon(reparsed.statements)).toEqual(canon(parseDSL(src).statements))
   })

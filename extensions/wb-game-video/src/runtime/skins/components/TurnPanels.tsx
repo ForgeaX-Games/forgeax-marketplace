@@ -43,14 +43,12 @@ export function PanelB({ emit }: OverlayProps): JSX.Element {
 }
 
 export const panelAComponent: ComponentDef = {
-  role: 'presentation',
   label: 'A 面板（单按钮）',
   inputs: [{ key: 'label', label: '按钮文案', valueType: 'string', default: 'A' }],
   events: [{ id: 'A', label: '按钮A' }],
 }
 
 export const panelBComponent: ComponentDef = {
-  role: 'presentation',
   label: 'B 面板（三按钮）',
   inputs: [],
   events: [

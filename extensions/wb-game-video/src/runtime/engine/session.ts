@@ -2,15 +2,14 @@
  * GraphSession —— 引擎(GraphRuntime) 与 UI 之间的**视图模型控制器**（纯 TS，可 headless 单测）。
  *
  * 职责：驱动引擎、消费其产出的泛型 directive，维护一份「随时可渲染的快照」SessionSnapshot：
- * 当前演出片段 / 活动叠层(表现层) / 当前交互 / HUD 数值 / 结局横幅 / 执行态(供蓝图可视化)。
- * React Player 只需订阅 snapshot 渲染 + 把玩家输入回灌 submit()——UI 与引擎彻底解耦。
+ * 当前演出片段 / 活动叠层 / HUD 数值 / 执行态(供蓝图可视化)。
+ * React Player 只需订阅 snapshot 渲染 + 把玩家事件回灌 emitEvent()——UI 与引擎彻底解耦。
  */
 import type { GameNode, GameScenario, SubFlowPackDef } from '../schema/graph-schema'
 import type { Layout } from '../schema/node-config-schema'
 import { GraphRuntime } from './engine'
-import { createCoreComponentRegistry } from '../registry/core-components'
 import type { ComponentRegistry } from '../registry/component-registry'
-import { createCoreSkinRegistry, installExtraComponents } from '../skins/components'
+import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../skins/components'
 import type { SkinRegistry } from '../skins/rendererRegistry'
 import type { RuntimeDirective } from './directives'
 
@@ -29,8 +28,6 @@ function logLine(d: RuntimeDirective): string | undefined {
   switch (d.type) {
     case 'playClip':
       return `▶ 进入「${d.name}」${d.loop ? ' (Loop)' : ''}`
-    case 'openInteraction':
-      return `❓ 交互 ${d.component}${d.handles.length ? ` · 出口 [${d.handles.join(', ')}]` : ''}`
     case 'renderOverlay':
       return `✦ ${d.component}`
     case 'routeInfo':
@@ -59,10 +56,8 @@ export interface OverlayChildSnap {
   elementId: string
   component: string
   inputs: Record<string, unknown>
-  /** 子组件级排版（相对挂载盒）。 */
+  /** 子组件级排版（相对挂载盒）→ CSS。 */
   childLayout?: Layout
-  /** 组件自定位（内部 %/inset 摆放）：子盒需铺满挂载盒且点击穿透。 */
-  selfPositioned?: boolean
 }
 
 /** 一份 overlay 挂载的运行态视图（挂载盒 + 其内可见子组件）。 */
@@ -71,14 +66,6 @@ export interface OverlayMountSnap {
   /** 挂载级排版（相对视频舞台；节点 overlayNodes[].layout）。 */
   mountLayout?: Layout
   children: OverlayChildSnap[]
-}
-export interface InteractionSnap {
-  elementId: string
-  component: string
-  inputs: Record<string, unknown>
-  handles: string[]
-  /** 限时 ms（>0 时 Player 到时自动 submit(undefined)）。 */
-  timeoutMs?: number
 }
 export interface HudEntitySnap {
   /** 约定便捷字段（= attrs.hp / attrMeta.hp.max）。 */
@@ -100,7 +87,6 @@ export interface SessionSnapshot {
   currentNodeId: string | null
   clip?: ClipSnap
   overlayMounts: OverlayMountSnap[]
-  interaction?: InteractionSnap
   hud: HudSnap
   /** 进入当前节点所走的边 + 命中条件（含实时值）；起始节点为 undefined。 */
   entryReason?: string
@@ -118,8 +104,8 @@ export class GraphSession {
   private pendingEntryReason: string | undefined
 
   constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
-    const components = opts.components ?? createCoreComponentRegistry()
-    if (!opts.components) installExtraComponents(components) // 组件包自带契约（与渲染同文件）注入本局表
+    // 默认 = 核心契约 + 皮肤包契约（同文件 ComponentDef）；调用方自带 components 则假定已装全。
+    const components = opts.components ?? createDefaultComponentRegistry()
     this.skins = opts.skins ?? createCoreSkinRegistry()
     const packs = opts.packs ?? scenario.packs ?? []
     this.runtime = new GraphRuntime(scenario.graph, scenario, components, packs)
@@ -171,13 +157,7 @@ export class GraphSession {
   performanceEnd(): SessionSnapshot {
     return this.apply(this.runtime.onPerformanceEnd())
   }
-  /** 玩家对当前交互提交输入（如技能 key / QTE 结果 / 热点 id）。 */
-  submit(input: unknown): SessionSnapshot {
-    const inter = this.snapshot.interaction
-    if (!inter) return this.snapshot
-    return this.apply(this.runtime.submitInteraction(inter.elementId, input))
-  }
-  /** 展示组件的非阻塞事件（如 HUD 按钮点击）→ 跑其挂载的 event 反应，不打断主交互。 */
+  /** 组件事件（点击 / 判定 / 超时 defaultEvent）→ 跑挂载 reactions，必要时按 handle 找边。 */
   emitEvent(elementId: string, key: string): SessionSnapshot {
     return this.apply(this.runtime.emitComponentEvent(elementId, key))
   }
@@ -196,7 +176,7 @@ export class GraphSession {
           this.pendingEntryReason = `走「${d.via}」→ ${d.target}：${d.reason}`
           break
         case 'playClip':
-          // 新节点开演：换片、清空上一节点的叠层与交互。
+          // 新节点开演：换片、清空上一节点的叠层。
           this.snapshot.clip = {
             nodeId: d.nodeId,
             name: d.name,
@@ -205,7 +185,6 @@ export class GraphSession {
             durationMs: d.durationMs,
           }
           this.snapshot.overlayMounts = []
-          this.snapshot.interaction = undefined
           this.snapshot.entryReason = this.pendingEntryReason
           this.pendingEntryReason = undefined
           break
@@ -223,7 +202,6 @@ export class GraphSession {
             component: d.component,
             inputs: d.inputs,
             childLayout: d.childLayout,
-            selfPositioned: d.selfPositioned,
           }
           const idx = mount.children.findIndex((c) => c.elementId === d.elementId)
           if (idx >= 0) mount.children[idx] = child
@@ -235,15 +213,6 @@ export class GraphSession {
             mount.children = mount.children.filter((c) => c.elementId !== d.elementId)
           }
           this.snapshot.overlayMounts = this.snapshot.overlayMounts.filter((m) => m.children.length > 0)
-          break
-        case 'openInteraction':
-          this.snapshot.interaction = {
-            elementId: d.elementId,
-            component: d.component,
-            inputs: d.inputs,
-            handles: d.handles,
-            timeoutMs: d.timeoutMs,
-          }
           break
         case 'log':
           this.snapshot.log.push(d.message)

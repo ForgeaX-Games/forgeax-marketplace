@@ -10,10 +10,12 @@
 > 端口语义以 `scene:templates.get` / 各 `README.md` 为准。实例化用 `scene:pipeline.instantiateTemplate`，返回**全新运行时 groupId**，连线一律用返回值，不要硬编下表的库 id。
 >
 > ### ⛰️ 高差与连通（选模板前必读）
-> **当前尚无坡道/台阶系统**，高度层之间无法自动衔接。因此：**先**放置关键内容（建筑、结构）并 **`PathConnection` 确认连通**，**再**在剩余区域用 **`MountainContourGenerate`** 添加高差以体现层次；**`MaxElevationLayers` 建议不超过 `2`**（`0`=平地，`1~2`=轻度层次）。高差**避开叙事核心区**（建筑/道路/广场/地标），只加在外围 Rest。**地形完成后**再叠加装饰。典型顺序：分区/分带 → 建筑 → 道路 → 高差（Rest 外围）→ **多种装饰叠加** → 湖。
+> **当前尚无坡道/台阶系统**，高度层之间无法自动衔接。因此：**先**放置关键内容（建筑、结构）并 **`PathConnection` 确认连通**，**再**在剩余区域用 **`MountainContourGenerate`** 添加高差以体现层次；**`MaxElevationLayers` 建议不超过 `2`**（`0`=平地，`1~2`=轻度层次）。高差**避开叙事核心区**（建筑/道路/广场/地标），只加在外围 Rest。**地形完成后**再按选型放装饰。典型顺序：分区/分带 → 建筑 → 道路 → 高差（Rest 外围）→ **装饰（按选型）** → 湖。
 
-> ### 🌿 装饰须多种模板叠加
-> **禁止**整张场景只使用 `NaturalDecorationDistribution`（或只使用精准/局部之一）——须组合 **`PlaceOneDecoration` + `LocalPreciseDecoration` + `NaturalDecorationDistribution`**（至少 2～3 种），否则单调。详见 compose-sino-scene SKILL 第二步「装饰叠加」。
+> ### 🌿 装饰选型（按能力，不必硬凑三种）
+> - **`PlaceOneDecoration`**：少量、有明确位置和/或底面尺寸 → **优先**（唯一可控 footprint）。
+> - **`LocalPreciseDecoration` / `NaturalDecorationDistribution`**：**仅**挂底面简单、结构简单的小物件做簇/背景填充；禁止复杂体量。
+> - 大片 Rest 空白时再叠加 Local → Natural；装饰很少且全是精准物件时可以只用 PlaceOne。详见 compose-sino-scene SKILL「装饰选型」。
 
 > **当前发布版模板** 由 `batteries/groups/scene/` 同步而来；旧版 `ArchitectureRegions` / `ArchitectureStructures` / `FarmlandRegions` / `PointSampleBuilding` / `RandomNaturalDecoration` 已移除。
 
@@ -26,9 +28,9 @@
 | **PickMultiBuildings**<br>多点建筑 | `group_1781857569273_sw86m` | 一次放**多栋**建筑 | `in_6`Scene / `in_5`points / `in_0`Widths / `in_1`Heights / `in_4`Assets | `out_2`Buildings / `out_1`Rest | 建筑层（多栋/村庄） | [README](./PickMultiBuildings/README.md) |
 | **BuildingStructures**<br>建筑结构 | `group_1781831816652_3k380` | 在建筑区域上盖墙/房间（含门） | `in_0`Scene / `in_23`WallAsset / `in_24`Seed | `out_0`Scene / `out_1`Rooms | 建筑层（结构细化） | [README](./BuildingStructures/README.md) |
 | **PathConnection**<br>道路连接 | `group_1781857907971_zblc6` | POI 点集一次连通道路 | `in_3`POI列表 / `in_2`Scene / `in_1`RoadAsset | `out_1`Path / `out_2`Rest | 道路层 | [README](./PathConnection/README.md) |
-| **NaturalDecorationDistribution**<br>自然装饰 | `group_1782117984754_5oqi1` | 在空地撒植被/装饰 | `in_1`Scene / `in_5`AssetName / `in_2`Density / `in_3`seed | `out_1`Decoration / `out_2`Rest | 自然地物层（随机散布） | [README](../structures/decorations/NaturalDecorationDistribution/README.md) |
-| **LocalPreciseDecoration**<br>局部精准装饰 | `group_local_precise_decoration` | 以兴趣点为中心局部播撒小型装饰 | `in_1`Scene / `in_2`Point / `in_19`Count / `in_20`ScatterRadius / `in_5`AssetName | `out_1`Decoration / `out_2`Rest | 自然地物层（局部播撒） | [README](../structures/decorations/LocalPreciseDecoration/README.md) |
-| **PlaceOneDecoration**<br>单点装饰 | `group_1783000010000_p1dec` | 在参考点附近**精准**放单个装饰物 | `in_1`Scene / `in_3`Point / `in_5`FootprintW / `in_6`FootprintH / `in_2`Height / `in_4`Asset | `out_1`Decoration / `out_2`Rest / `out_3`DecorationPath | 自然地物层（精准点位） | [README](./PlaceOneDecoration/README.md) |
+| **PlaceOneDecoration**<br>单点装饰 | `group_1783000010000_p1dec` | 有尺寸/落点的单点精准放置（唯一可控 footprint） | `in_1`Scene / `in_3`Point / `in_5`FootprintW / `in_6`FootprintH / `in_2`Height / `in_4`Asset | `out_1`Decoration / `out_2`Rest / `out_3`DecorationPath | 自然地物层（精准点位） | [README](./PlaceOneDecoration/README.md) |
+| **LocalPreciseDecoration**<br>局部精准装饰 | `group_local_precise_decoration` | 兴趣点旁局部簇；仅简单小物件 | `in_1`Scene / `in_2`Point / `in_19`Count / `in_20`ScatterRadius / `in_5`AssetName | `out_1`Decoration / `out_2`Rest | 自然地物层（局部播撒） | [README](../structures/decorations/LocalPreciseDecoration/README.md) |
+| **NaturalDecorationDistribution**<br>自然装饰 | `group_1782117984754_5oqi1` | Rest 密度填充；仅简单植被/石块 | `in_1`Scene / `in_5`AssetName / `in_2`Density / `in_3`seed | `out_1`Decoration / `out_2`Rest | 自然地物层（背景填充） | [README](../structures/decorations/NaturalDecorationDistribution/README.md) |
 | **LakeRegions**<br>湖泊 | `group_1782133925585_686y2` | 在剩余空地挖湖 | `in_1`Scene / `in_2`Points / `in_14`AssetName / `in_17`seed | `out_4`Lake / `out_0`Rest | 自然地物层 | [README](../structures/interests/LakeRegions/README.md) |
 | **AreaPartition**<br>区域划分 | `group_area_partition_district` | 按 point2d 中心点+面积权重纯划分父区域（无 Rest） | `in_0`Scene / `in_1`Points / `in_2`Areas / `in_3`ZoneNames / `in_4`ZoneAssets | `out_0`Scene / `out_1`Zones / `out_2`ZonesPath | 结构/分区层 | [README](../structures/districts/AreaPartition/README.md) |
 | **MountainContourGenerate**<br>等高线山头 | `group_mountain_contour_generate` | 剩余区域 FBM 高度场 + 整数层截断（**道路连通后**；层数 ≤2） | `in_0`Scene / `in_1`AssetName / `in_3`MaxElevationLayers / `in_2`Seed | `out_2`Mountain / `out_1`Rest | **高差层**（建筑+道路之后，装饰之前） | [README](../structures/topographic/MountainContourGenerate/README.md) |
@@ -44,7 +46,7 @@
 - **结构（可选）**：`Building.out_*` → **`BuildingStructures.in_0`** → `out_0` 供道路 POI / 门路径聚焦。
 - **道路**：**单个** `PathConnection` — 上一组 **Rest** → `in_2`；**POI 须导出 region/footprint 推理并校验**（区域内或贴边）→ `manual_points` → `tree_merge`(item) → `in_3`。**先确认连通。**
 - **地形等高（可选，装饰之前）**：道路后、**叙事核心区之外**的 Rest → **`MountainContourGenerate.in_0`**（`MaxElevationLayers` **≤2**）。**`out_2`(Mountain) → `tree_merge`**；**`out_1`(Rest) → 装饰链**。
-- **装饰 / 湖（须叠加 ≥2 种装饰模板）**：`PlaceOneDecoration` → `LocalPreciseDecoration` → `NaturalDecorationDistribution` → `LakeRegions`（`out_2` 链式 `in_1`）。**禁止**只用一种散布方式。
+- **装饰 / 湖（按选型，不必硬凑三种）**：有尺寸落点 → `PlaceOneDecoration`；简单小物件簇 → `LocalPreciseDecoration`；简单植被填充 → `NaturalDecorationDistribution` → `LakeRegions`（按需）。多组 `out_2` 链式 `in_1`。
 - **汇总**：各组主产物 `out_*` → `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`。
 - **统一种子**：`seed_control.seed` 扇出到各组 Seed 输入。
 

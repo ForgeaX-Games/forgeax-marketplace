@@ -98,32 +98,70 @@ function variantGroupKey(alias: string): string {
  * fuzzy=false 时仅用第 3 字段(index 2 = 物品名称)做精确比;fuzzy=true 时整 alias 字符串参与。
  * 命中后若该 alias ≥12 字段(含变体字段),自动收集所有"前 11 字段相同"的变体。
  */
+/** Prefer aliases whose field[7] looks like a real stitch rule over taxonomy junk. */
+function ruleQuality(alias: string): number {
+  const t = bracketField(alias, 7)
+  if (!t || t === 'asset' || t === '抠图') return 0
+  // Taxonomy leftovers from export folders — never prefer these as primary.
+  if (t === '瓦片组' || t === '未裁剪' || t === '正常') return 1
+  // Vendored rules look like common_16 / wall_outer_16 / wa_inner / floor_1.
+  if (/^[a-z][a-z0-9_]*\d+$/i.test(t) || /^[a-z]+_[a-z0-9_]+$/i.test(t)) return 3
+  if (/^[a-z][a-z0-9_]*$/i.test(t)) return 2
+  return 1
+}
+
+function pickBestAliasByName(
+  name: string,
+  pool: string[],
+  fuzzy: boolean,
+): string | undefined {
+  const stripped = stripZonePrefix(name)
+  const candidates: string[] = []
+
+  if (!fuzzy) {
+    for (const a of pool) {
+      if (bracketField(a, 2) === name) candidates.push(a)
+    }
+    if (candidates.length === 0 && stripped !== name) {
+      for (const a of pool) {
+        if (bracketField(a, 2) === stripped) candidates.push(a)
+      }
+    }
+  } else {
+    // Fuzzy is intentionally narrow: exact alias string, or field[2] exact /
+    // field[2] equals stripped name. Do NOT substring-match short narrative
+    // names into unrelated library items (e.g. "墙" → random 墙壁架子).
+    for (const a of pool) {
+      if (a === name || a === stripped) candidates.push(a)
+    }
+    if (candidates.length === 0) {
+      for (const a of pool) {
+        const n2 = bracketField(a, 2)
+        if (n2 && (n2 === name || n2 === stripped)) candidates.push(a)
+      }
+    }
+    // Only allow field[2] contains when the query is long enough to be specific.
+    if (candidates.length === 0 && name.length >= 4) {
+      for (const a of pool) {
+        const n2 = bracketField(a, 2)
+        if (n2 && (n2.includes(name) || (stripped.length >= 4 && n2.includes(stripped)))) {
+          candidates.push(a)
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) return undefined
+  candidates.sort((a, b) => ruleQuality(b) - ruleQuality(a))
+  return candidates[0]
+}
+
 function findAliasesByName(
   name: string,
   pool: string[],
   fuzzy: boolean,
 ): string[] {
-  const stripped = stripZonePrefix(name)
-  let firstMatch: string | undefined
-
-  if (!fuzzy) {
-    firstMatch = pool.find(a => bracketField(a, 2) === name)
-    if (!firstMatch && stripped !== name) {
-      firstMatch = pool.find(a => bracketField(a, 2) === stripped)
-    }
-  } else {
-    firstMatch = pool.find(a => a === name)
-    if (!firstMatch && stripped !== name) {
-      firstMatch = pool.find(a => a === stripped)
-    }
-    if (!firstMatch) {
-      firstMatch = pool.find(a => a.includes(name) || name.includes(a))
-    }
-    if (!firstMatch && stripped !== name) {
-      firstMatch = pool.find(a => a.includes(stripped) || stripped.includes(a))
-    }
-  }
-
+  const firstMatch = pickBestAliasByName(name, pool, fuzzy)
   if (!firstMatch) return []
 
   // 含变体字段(index 11) → 收集变体组

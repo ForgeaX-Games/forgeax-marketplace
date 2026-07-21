@@ -1,14 +1,14 @@
 // postMessage protocol between the workbench host (the editor pane) and its
-// embedded child surfaces (the URDF viewer iframe). Ported from the scene
+// embedded child surfaces (the 3D viewer iframe). Ported from the scene
 // generator's `workbench:*` contract, trimmed to what the 3d plugin ships: the
 // host → child editor-selection forwarding only (no renderer/assetstore focus
 // or status members).
 
-export type WorkbenchFocus = 'editor' | 'urdf' | null
+export type WorkbenchFocus = 'editor' | 'viewer3d' | null
 
 /**
- * Host → URDF pane: the kernel editor's current node selection, forwarded so the
- * viewer can react to selection. View-only; carries no graph mutation.
+ * Host → 3D viewer pane: the kernel editor's current node selection, forwarded so
+ * the viewer can react to selection. View-only; carries no graph mutation.
  */
 export interface EditorSelectionMessage {
   type: 'workbench:editor-selection'

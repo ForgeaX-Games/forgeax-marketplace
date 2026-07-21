@@ -10,11 +10,23 @@
  * 也不吃点击/键盘。
  */
 import { useEffect, useRef, useState } from 'react'
-import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type OverlayProps } from '../rendererRegistry'
 import type { OverlayChild } from '../../schema/graph-schema'
-import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import type { ComponentDef } from '../../registry/component-registry'
+import { QTE_DEFAULT_EVENTS, QTE_INPUTS, type QteParams } from './Qte'
+import { STAGE_FILL_LAYOUT } from '../../schema/layout'
+import { injectCss, ensureInkFilters, ensureBrushFont, resolveTimeoutMs } from './skinRuntime'
 
-/** 皮肤默认玩法参数（出口 / 样式锁 / 新建预设共用；不进 core-kinds 特判）。 */
+/**
+ * 组件的注册契约（引擎/编辑器识别用）——与渲染实现同文件，经 EXTRA_COMPONENTS 注册。
+ */
+export const battleParryComponent: ComponentDef<QteParams> = {
+  label: '防反 QTE',
+  events: QTE_DEFAULT_EVENTS,
+  inputs: QTE_INPUTS,
+}
+
+/** 皮肤默认玩法参数（出口 / 样式锁 / 新建预设共用）。 */
 export const battleParryDefaults = {
   durationMs: 2600,
   events: [
@@ -30,6 +42,7 @@ export function battleParryPreset(id: string): OverlayChild {
   return {
     id,
     component: 'battleParry',
+    layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
     inputs: { ...battleParryDefaults },
   }
@@ -57,11 +70,31 @@ function exitsOf(inputs: Record<string, unknown>): ExitOpt[] {
   ]
 }
 
+/** 本皮肤唯一一个 cue——挂着「整段窗口」的出现/消失时刻（时间轴左右缘直接落这两个字段）。 */
+function firstCue(params: Record<string, unknown>): { appearAt?: unknown; endAt?: unknown } | undefined {
+  const cues = params.cues
+  return Array.isArray(cues) ? (cues[0] as { appearAt?: unknown; endAt?: unknown } | undefined) : undefined
+}
+
 /** cues[0].appearAt——preview 时把 previewTimeMs（绝对播放头）折成「防反窗自己的 now」。 */
 function firstCueAppearAt(params: Record<string, unknown>): number {
-  const cues = params.cues
-  const first = Array.isArray(cues) ? (cues[0] as { appearAt?: unknown } | undefined) : undefined
+  const first = firstCue(params)
   return typeof first?.appearAt === 'number' ? first.appearAt : 0
+}
+
+/**
+ * 收圈总时长 —— 唯一 SSOT 是本皮肤那个 cue 的 [appearAt, endAt]（时间轴拖左右缘直接改的就是它）。
+ * `inputs.durationMs`/`inputs.timeoutMs`/`inputs.windowMs` 仅在没有 cue 时才顶上，
+ * 避免拖时间轴改了窗口、动画时长却纹丝不动。
+ */
+function resolveDurationMs(inputs: Record<string, unknown>): number {
+  const cue = firstCue(inputs)
+  if (typeof cue?.appearAt === 'number' && typeof cue?.endAt === 'number' && cue.endAt > cue.appearAt) {
+    return cue.endAt - cue.appearAt
+  }
+  return (typeof inputs.durationMs === 'number' ? inputs.durationMs : undefined)
+    ?? resolveTimeoutMs(inputs)
+    ?? 2600
 }
 
 /** 单帧圈位/armed/sweet 计算——rAF 实跑与 preview 静态推导共用，避免两套判定漂移。 */
@@ -87,17 +120,13 @@ function applyKeyFrame(el: HTMLButtonElement, now: number, center: number, appro
   setRing(1)
 }
 
-export function BattleParryLayer({ interaction, submit, preview, previewTimeMs }: InteractionProps) {
+export function BattleParryLayer({ overlay, emit, preview, previewTimeMs }: OverlayProps) {
   injectCss('battle-parry-layer', PARRY_CSS)
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const inputs = interaction.inputs as Record<string, unknown>
-  const durationMs = (typeof inputs.durationMs === 'number' ? inputs.durationMs : undefined)
-    ?? (typeof inputs.timeoutMs === 'number' ? inputs.timeoutMs : undefined)
-    ?? (typeof inputs.windowMs === 'number' ? inputs.windowMs : undefined)
-    ?? interaction.timeoutMs
-    ?? 2600
+  const inputs = overlay.inputs as Record<string, unknown>
+  const durationMs = resolveDurationMs(inputs)
   const options = exitsOf(inputs)
   const missKey = typeof inputs.defaultEvent === 'string' ? inputs.defaultEvent : 'fail'
   const resolvedRef = useRef(false)
@@ -108,7 +137,7 @@ export function BattleParryLayer({ interaction, submit, preview, previewTimeMs }
   function finish(outcome: string): void {
     if (resolvedRef.current) return
     resolvedRef.current = true
-    submit(outcome)
+    emit?.(outcome)
   }
   function hit(index: number): void {
     if (preview || resolvedRef.current) return
@@ -197,15 +226,19 @@ export function BattleParryLayer({ interaction, submit, preview, previewTimeMs }
   )
 }
 
-/** 严格复刻旧 Hud/BattleParry：右侧居中、62px 水墨键、A 左下 / B 右上。 */
+/**
+ * 严格复刻旧 Hud/BattleParry：右侧居中、水墨键、A 左下 / B 右上。尺寸用 cqmin（容器查询单位，
+ * 取舞台宽高中较小一边——见 VideoOverlayStage.tsx 的 containerType:'size'）而非固定 px，
+ * 使键区在预览小窗和全屏试玩里保持同一个相对舞台的比例，不再是两套绝对像素。
+ */
 const PARRY_CSS = `
-.pvb-parry{position:absolute;right:8%;top:48%;transform:translateY(-50%);z-index:46;display:none;flex-direction:column;align-items:center;gap:12px;cursor:pointer;user-select:none;pointer-events:auto}
+.pvb-parry{position:absolute;right:8%;top:48%;transform:translateY(-50%);z-index:46;display:none;flex-direction:column;align-items:center;gap:1.3cqh;cursor:pointer;user-select:none;pointer-events:auto}
 .pvb-parry.show{display:flex}
 .pvb-parry.is-frozen{pointer-events:none!important;cursor:default}
-.pvb-parry-keys{position:relative;width:190px;height:158px}
+.pvb-parry-keys{position:relative;width:18cqmin;height:15cqmin}
 .pvb-parry-keys .pvb-key:nth-child(1){position:absolute;left:0;bottom:0}
 .pvb-parry-keys .pvb-key:nth-child(2){position:absolute;right:0;top:0}
-.pvb-key{position:relative;width:62px;height:62px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.5;transform:scale(.86);transition:opacity .14s,transform .14s,filter .14s;background:none;border:none;padding:0}
+.pvb-key{position:relative;width:7cqmin;height:7cqmin;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.5;transform:scale(.86);transition:opacity .14s,transform .14s,filter .14s;background:none;border:none;padding:0}
 .pvb-key::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:52% 48% 50% 50%/50% 52% 48% 50%;background:linear-gradient(180deg,#2b2620,#0c0a08);border:1.5px solid rgba(239,231,214,.5);box-shadow:0 2px 6px rgba(0,0,0,.5) inset,0 2px 7px rgba(0,0,0,.6);filter:url(#inkRough);transition:border-color .14s,background-color .14s}
 .pvb-key.armed{opacity:1;transform:scale(1)}
 .pvb-key.armed::before{border-color:#ffd9a8;box-shadow:0 0 16px rgba(255,200,120,.5),0 2px 6px rgba(0,0,0,.5) inset}
@@ -222,5 +255,5 @@ const PARRY_CSS = `
 @keyframes pvbKeySpark{0%{transform:scale(.45);opacity:.95}100%{transform:scale(2);opacity:0}}
 .pvb-key.miss{opacity:.4}
 .pvb-key.miss::before{border-color:#ff6a5a;background:linear-gradient(180deg,#3a201d,#16100e)}
-.pvb-key-label{font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:1.45rem;font-weight:800;color:#efe7d6;z-index:2;text-shadow:0 2px 6px rgba(0,0,0,.85);pointer-events:none}
+.pvb-key-label{font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:2.6cqh;font-weight:800;color:#efe7d6;z-index:2;text-shadow:0 2px 6px rgba(0,0,0,.85);pointer-events:none}
 `

@@ -672,6 +672,17 @@
         "nodeId": "group_1781196357312_1adif",
         "port": "in_3"
       }
+    },
+    {
+      "id": "mc-e-z-layer-to-grid2node",
+      "source": {
+        "nodeId": "group_1781196357312_1adif",
+        "port": "out_0"
+      },
+      "target": {
+        "nodeId": "node-1781196357317-p09mn",
+        "port": "z"
+      }
     }
   ],
   "position": {
@@ -819,7 +830,9 @@
             "x": 2763.8003372398834,
             "y": 108.01685495642711
           },
-          "params": {}
+          "params": {
+            "value": 0
+          }
         },
         {
           "id": "node-1781196357313-zx4q3",
@@ -978,7 +991,9 @@
           "access": "list",
           "sourceNodeId": "node-1781196357313-c34js",
           "sourcePortName": "list",
-          "hidden": true
+          "hidden": false,
+          "customLabelEn": "LayerIndices",
+          "order": 0
         },
         {
           "portName": "out_1",

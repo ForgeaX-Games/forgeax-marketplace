@@ -33,6 +33,7 @@ import { HudLayer } from './HudLayer'
 import { useTrackPrefsStore } from '../editor/timeline/trackPrefsStore'
 import { composeStageFx } from '../fx/fxPresets'
 import { isModuleEnabled, effectiveUIScreens } from '../scenario/moduleFlags'
+import { pluginUrl } from '../lib/plugin-http'
 import { nextMinigameToTrigger, pendingMinigamesAtEnd } from './minigameHit'
 import { nextScreenToTrigger, pendingScreensAtEnd } from './screenHit'
 import { nextSearchToTrigger, segmentHotspots, isSegmentComplete } from './searchSegmentHit'
@@ -471,10 +472,11 @@ export function Player() {
         const entry = mediaEntries[mref]
         if (!entry) continue
         // 只预拉走 HTTP 的资产（/__reel__/assets/...）；blob: / data: 已在本地
-        if (!entry.url.startsWith('/__reel__/assets/')) continue
-        if (prefetchedUrlsRef.current.has(entry.url)) continue
-        urls.push(entry.url)
-        prefetchedUrlsRef.current.add(entry.url)
+        if (!entry.url.includes('/__reel__/assets/')) continue
+        const url = pluginUrl(entry.url)
+        if (prefetchedUrlsRef.current.has(url)) continue
+        urls.push(url)
+        prefetchedUrlsRef.current.add(url)
       }
       if (urls.length === 0) return
 
@@ -1469,7 +1471,7 @@ function MultiShotLayer({
       <PlayerVideo
         key={active.id}
         videoRef={videoRef}
-        src={videoUrl}
+        src={pluginUrl(videoUrl)}
         // 仅末镜自然播完时上抛场景结束兜底（与单视频分支同义）；中间镜结束由
         // 主时钟切到下一镜，不触发场景跳转。
         onEnded={isLast ? onLastShotEnded : undefined}
@@ -1481,7 +1483,7 @@ function MultiShotLayer({
       <img
         key={active.id}
         className="ks-player-img"
-        src={imgUrl}
+        src={pluginUrl(imgUrl)}
         alt={scene.title}
         draggable={false}
         onDragStart={(e) => e.preventDefault()}
@@ -1580,11 +1582,11 @@ export function SceneCanvas({
           onLastShotEnded={onVideoEnded}
         />
       ) : scene.media.kind === 'VIDEO' && mediaEntry ? (
-        <PlayerVideo videoRef={videoRef} src={mediaEntry.url} onEnded={onVideoEnded} />
+        <PlayerVideo videoRef={videoRef} src={pluginUrl(mediaEntry.url)} onEnded={onVideoEnded} />
       ) : dataUrl ? (
         <img
           className="ks-player-img"
-          src={dataUrl}
+          src={pluginUrl(dataUrl)}
           alt={scene.title}
           draggable={false}
           onDragStart={(e) => e.preventDefault()}

@@ -121,16 +121,6 @@
       "params": {}
     },
     {
-      "id": "node-1781805836833-4ykoo",
-      "opId": "scene_focus_path",
-      "name": "node-1781751062021-607lg",
-      "position": {
-        "x": 1327.1671723990412,
-        "y": 1700.2056427290936
-      },
-      "params": {}
-    },
-    {
       "id": "node-1781805836833-e7154",
       "opId": "scene_merge_subtrees",
       "name": "node-1781751062022-7fsj9",
@@ -379,31 +369,9 @@
       }
     },
     {
-      "id": "edge-1781805836833-pmd1s",
-      "source": {
-        "nodeId": "node-1781805836833-e7154",
-        "port": "scene"
-      },
-      "target": {
-        "nodeId": "node-1781805836833-4ykoo",
-        "port": "scene"
-      }
-    },
-    {
-      "id": "edge-1781805836833-ep2k6",
-      "source": {
-        "nodeId": "node-1781805836833-f33b0",
-        "port": "childPaths"
-      },
-      "target": {
-        "nodeId": "node-1781805836833-4ykoo",
-        "port": "path"
-      }
-    },
-    {
       "id": "edge-1781805836833-syhkt",
       "source": {
-        "nodeId": "node-1781805836833-4ykoo",
+        "nodeId": "node-1781805836833-e7154",
         "port": "scene"
       },
       "target": {

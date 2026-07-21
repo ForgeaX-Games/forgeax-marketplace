@@ -1,4 +1,5 @@
 import type { ImageClient, ImageRequest, ImageResult, ImageReference } from '../config/types'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 /**
  * HostGatewayImageProvider —— 把生图委托给宿主 forgeax-server 的图像网关
@@ -39,7 +40,7 @@ async function toBase64(src: string): Promise<string> {
     const comma = src.indexOf(',')
     return comma >= 0 ? src.slice(comma + 1) : ''
   }
-  const resp = await fetch(src)
+  const resp = await pluginFetch(src)
   if (!resp.ok) throw new Error(`[REF] fetch ${resp.status} ${resp.statusText}`)
   const blob = await resp.blob()
   const buf = await blob.arrayBuffer()
@@ -52,7 +53,7 @@ async function toBase64(src: string): Promise<string> {
 export class HostGatewayImageProvider implements ImageClient {
   private readonly base: string
 
-  constructor(base = '/__ce-api__') {
+  constructor(base = pluginUrl('/__ce-api__')) {
     this.base = base.replace(/\/$/, '')
   }
 
@@ -83,7 +84,7 @@ export class HostGatewayImageProvider implements ImageClient {
     }
 
     const t0 = performance.now()
-    const resp = await fetch(`${this.base}/reel-image`, {
+    const resp = await pluginFetch(`${this.base}/reel-image`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),

@@ -84,6 +84,107 @@ describe('model.apply e2e', () => {
     }
   })
 
+  it('compiles a joint + animation(keyframes=...) statement end-to-end', async () => {
+    const app = await buildApp()
+    try {
+      const src = [
+        'mat = material(rgba=[0.2, 0.2, 0.2, 1])',
+        'base = box(size=[0.2, 0.2, 0.1])',
+        'p_base = part(shape=base, material=mat)',
+        'top = box(size=[0.1, 0.1, 0.1])',
+        'p_top = part(shape=top, material=mat)',
+        'j = joint(type="revolute", parent=p_base, child=p_top, axis=[0,0,1], lower=-1, upper=1, origin=[0,0,0.1])',
+        'anim = animation(fps=10, keyframes="{\\"j\\":[{\\"t\\":0,\\"q\\":0},{\\"t\\":1,\\"q\\":0.5}]}")',
+      ].join('\n')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, name: 'waving-arm' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.errors).toEqual([])
+      expect(body.ok).toBe(true)
+      expect(body.execution.status).toBe('completed')
+
+      // model.get round-trips the AUTHORED form (sparse `keyframes`, not the
+      // sampled-out full clip) — re-applying it re-derives the same q(t).
+      const got = await app.inject({ method: 'GET', url: '/api/v1/projects/main/model/get' })
+      const source = got.json().source as string
+      const reparsed = parseDSL(source)
+      expect(reparsed.errors).toEqual([])
+      const animStmt = reparsed.statements.find((s) => s.op === 'animation')
+      expect(animStmt).toBeTruthy()
+      expect(animStmt!.args.keyframes?.kind).toBe('string')
+      const kf = JSON.parse((animStmt!.args.keyframes as { kind: 'string'; value: string }).value)
+      expect(kf.j).toEqual([{ t: 0, q: 0 }, { t: 1, q: 0.5 }])
+
+      // Re-applying the round-tripped DSL should compile+execute cleanly too.
+      const reapplied = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source },
+      })
+      expect(reapplied.json().ok).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('routes a joint-less mesh-ref scene through the STATIC pipeline and returns a scene receipt', async () => {
+    const app = await buildApp()
+    try {
+      // Scene assembly = placed mesh refs, no joints → static pipeline (no URDF, no OCCT bake).
+      const src = [
+        'red = material(rgba=[0.8, 0.2, 0.2, 1])',
+        'm1 = mesh(filename="aaa.obj", bbox_min=[0,0,0], bbox_max=[1,1,1])',
+        'p1 = part(shape=m1, material=red, origin=[0, 0, 0])',
+        'm2 = mesh(filename="bbb.obj", bbox_min=[0,0,0], bbox_max=[1,1,1])',
+        'p2 = part(shape=m2, origin=[2, 0, 0])',
+      ].join('\n')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, name: 'street' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.mode).toBe('static')
+      expect(body.errors).toEqual([])
+      expect(body.execution.status).toBe('completed')
+      // static receipt carries geometry QC + a SceneSpec fingerprint, and NO urdf field
+      expect(body.qc).toBeTruthy()
+      expect(typeof body.scene.fingerprint).toBe('string')
+      expect(body.scene.fingerprint.length).toBeGreaterThan(0)
+      expect(body.scene.items).toBe(2)
+      expect(body.urdf).toBeUndefined()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('honors an explicit pipeline override on model.apply', async () => {
+    const app = await buildApp()
+    try {
+      // A joint-less mesh-ref scene forced onto the URDF pipeline.
+      const src = [
+        'm1 = mesh(filename="aaa.obj", bbox_min=[0,0,0], bbox_max=[1,1,1])',
+        'p1 = part(shape=m1, origin=[0, 0, 0])',
+      ].join('\n')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, pipeline: 'mechanical' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.mode).toBe('urdf')
+      expect(body.urdf).toBeTruthy()
+    } finally {
+      await app.close()
+    }
+  })
+
   it('maps an unknown op back to its DSL line without touching the graph', async () => {
     const app = await buildApp()
     try {
@@ -109,6 +210,81 @@ describe('model.apply e2e', () => {
       const res = await app.inject({ method: 'GET', url: '/api/v1/projects/main/parts' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ count: 0, parts: [] })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('merges separately-baked <sha>.obj parts into one skinnable mesh on the CHARACTER path', async () => {
+    const app = await buildApp()
+    try {
+      // Phase 1: bake a body part on its own → reusable <sha>.obj (separate submission).
+      // Use CSG shells (bare primitives are native URDF prims and refuse to bake).
+      const bodyBake = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: {
+          source: [
+            'outerB = box(size=[0.5, 0.3, 0.3])',
+            'cavB = box(size=[0.4, 0.2, 0.2])',
+            'body = difference(base=outerB, tool=cavB)',
+          ].join('\n'),
+          bake: 'body',
+        },
+      })
+      expect(bodyBake.json().mode).toBe('bake')
+      const bodyObj = bodyBake.json().baked.filename as string
+      const bboxMin = bodyBake.json().baked.bbox_min as number[]
+      const bboxMax = bodyBake.json().baked.bbox_max as number[]
+      expect(bodyObj).toMatch(/\.obj$/)
+
+      // Phase 1: bake a leg part separately too.
+      const legBake = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: {
+          source: [
+            'outerL = cylinder(radius=0.06, length=0.25)',
+            'cavL = cylinder(radius=0.04, length=0.26)',
+            'leg = difference(base=outerL, tool=cavL)',
+          ].join('\n'),
+          bake: 'leg',
+        },
+      })
+      const legObj = legBake.json().baked.filename as string
+      const legMin = legBake.json().baked.bbox_min as number[]
+      const legMax = legBake.json().baked.bbox_max as number[]
+
+      // Phase 2: assemble by REFERENCE (mesh refs) + hand-authored skeleton + one skin.
+      // The character terminal g_bake_object must read back both <sha>.obj blobs and
+      // merge them into one skinnable mesh (rig.meshFilename → <sha>.glb).
+      const bb = (v: number[]): string => `[${v.join(', ')}]`
+      const character = [
+        `mbody = mesh(filename="${bodyObj}", bbox_min=${bb(bboxMin)}, bbox_max=${bb(bboxMax)})`,
+        'p_body = part(shape=mbody)',
+        `mleg = mesh(filename="${legObj}", bbox_min=${bb(legMin)}, bbox_max=${bb(legMax)})`,
+        'p_leg = part(shape=mleg, origin=[0.1, 0, -0.3])',
+        'b_spine = bone(origin=[0,0,0], tail=[0.25,0,0], source_part=p_body)',
+        'b_leg = bone(origin=[0.1,0,-0.15], tail=[0.1,0,-0.4], parent=b_spine, source_part=p_leg)',
+        'sk = skeleton(root=b_spine)',
+        'sn = skin(skeleton=sk, method="auto")',
+      ].join('\n')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: character, name: 'critter' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.mode).toBe('character')
+      expect(body.errors).toEqual([])
+      expect(body.execution.status).toBe('completed')
+      expect(body.skinQc.valid).toBe(true)
+      expect(body.rig.error).toBeUndefined()
+      // proof the pre-baked .obj parts were merged into one skinnable mesh:
+      expect(typeof body.rig.meshFilename).toBe('string')
+      expect(body.rig.meshFilename).toMatch(/\.glb$/)
+      expect(body.rig.boneCount).toBe(2)
     } finally {
       await app.close()
     }
@@ -141,6 +317,62 @@ describe('model.apply e2e', () => {
       expect(listed.count).toBe(1)
       expect(listed.parts[0].name).toBe('shell')
       expect(listed.parts[0].filename).toBe(body.baked.filename)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('bake mode bakes a rock primitive (mesh-backed, not an OCCT solid) into a valid OBJ', async () => {
+    const app = await buildApp()
+    try {
+      const src = 'r1 = rock(radius=0.2, irregularity=0.4, seed=3, detail=1, stretch=[1.2, 1, 0.8])'
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, bake: 'r1' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.mode).toBe('bake')
+      expect(body.ok).toBe(true)
+      expect(body.baked.error).toBeUndefined()
+      expect(body.baked.filename).toMatch(/\.obj$/)
+      expect(Array.isArray(body.baked.bbox_min)).toBe(true)
+      expect(Array.isArray(body.baked.bbox_max)).toBe(true)
+
+      // same params (incl. seed) → same content-addressed blob on a second bake (determinism + cache).
+      const res2 = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, bake: 'r1' },
+      })
+      expect(res2.json().baked.sha256).toBe(body.baked.sha256)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects a rock inside a boolean op (mesh-backed shapes cannot participate in CSG)', async () => {
+    const app = await buildApp()
+    try {
+      const src = [
+        'r1 = rock(radius=0.2)',
+        'b1 = box(size=[0.5, 0.5, 0.5])',
+        'd1 = difference(base=b1, tool=r1)',
+      ].join('\n')
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: src, bake: 'd1' },
+      })
+      // route always answers 200; a mesh-backed boolean misuse throws inside node execution,
+      // surfacing as execution.status="error" with the baker's message (QC would also flag
+      // this DSL as an advisory error pre-bake, but this test exercises the baker's own guard).
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.ok).toBe(false)
+      expect(body.execution.status).toBe('error')
+      expect(String(body.execution.error.message)).toMatch(/mesh-backed/i)
     } finally {
       await app.close()
     }

@@ -117,6 +117,9 @@ export interface BakerLibraryHandle {
   ): { alias: string; blobId: string; sizeBytes?: number } | null;
   /** 按 alias 解析磁盘 blob 路径；用于读取 OBJ 计数而不是重新 tessellate。 */
   resolveBlobPath?(alias: string, zone?: string): string | null;
+  /** 按内容 sha256 解析磁盘 blob 路径（mesh(filename="<sha>.obj") 里的 <sha>）；
+   *  角色路把分件预烘的 <sha>.obj 一起合并成可蒙皮网格时用它回读 blob。 */
+  resolveBlobPathBySha?(sha256: string): string | null;
   importFromBuffer(
     buffer: Buffer,
     filename: string,

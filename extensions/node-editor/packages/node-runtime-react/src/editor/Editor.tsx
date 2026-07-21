@@ -121,15 +121,32 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
     Promise.all([
       store.loadBatteries(),
       // Hosted apps (scene-generator WorkbenchHost) run projectStore.bootstrap()
-      // which switchProject → loadPipeline. Avoid racing an early pull before
-      // viewProject sets the client routing id, and skip a duplicate load when
-      // bootstrap already populated the snapshot.
-      (async () => {
-        const projectStore = useProjectStore.getState()
-        if (projectStore.viewingProjectId === null) {
-          await projectStore.fetchProjects()
+      // which switchProject → viewProject → loadPipeline → refreshConnectedOutputs
+      // → autoExecuteOnOpen (see projectStore.ts refreshOutputsAfterProjectSwitch).
+      // Avoid racing an early pull before viewProject sets the client routing id,
+      // skip a duplicate load when bootstrap already populated the snapshot, AND
+      // — critically — report back whether that cascade owns this project so the
+      // `.then()` below does not fire a second, independent
+      // `refreshConnectedOutputs('mount').then(autoExecuteOnOpen)`. Without this,
+      // both chains can race: whichever's `autoExecuteOnOpen()` loses the race
+      // still finds "nothing missing" most of the time, but if the backend event
+      // loop is busy running the FIRST chain's execution, the slower chain's
+      // `viewProject()` call is delayed until after it finishes — and its
+      // subsequent `resetPipelineUiForProjectSwitch()` wipes the just-computed
+      // `nodeOutputs`, making `autoExecuteOnOpen()` see everything as "missing"
+      // again and re-run the (potentially multi-second) pipeline a second time
+      // for no reason. Observed in practice as two back-to-back full executions
+      // on the very first project open — see wb-scene-generator-project-switch.md
+      // §2.13 / P0-8.
+      (async (): Promise<boolean> => {
+        if (useProjectStore.getState().viewingProjectId === null) {
+          await useProjectStore.getState().fetchProjects()
         }
-        if (projectStore.isSwitching) {
+        // Once a project is known, `bootstrap()` is guaranteed to (or already
+        // did) call `switchProject()` for it, which owns the entire open
+        // cascade end-to-end — defer to it instead of duplicating the tail.
+        const ownedByProjectStore = useProjectStore.getState().viewingProjectId !== null
+        if (useProjectStore.getState().isSwitching) {
           await new Promise<void>((resolve) => {
             const unsub = useProjectStore.subscribe((state) => {
               if (!state.isSwitching) {
@@ -142,20 +159,24 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
         if (!usePipelineStore.getState().currentPipeline) {
           await store.loadPipeline()
         }
+        return ownedByProjectStore
       })(),
     ])
-      .then(() => {
+      .then(([, ownedByProjectStore]) => {
         useUIStore.getState().setConnectionStatus('connected')
         // Seed the nodeOutputs cache from the backend's retained last-run values
         // so the wire data-probe / port tooltips show data on first load, not
         // only after a fresh execution. When the cache is cold (first open / after
         // a cache wipe) nothing is hydrated, so auto-run the pipeline once so the
         // canvas — and every group's inner view — is populated without the user
-        // having to nudge an input first.
-        void usePipelineStore
-          .getState()
-          .refreshConnectedOutputs('mount')
-          .then(() => usePipelineStore.getState().autoExecuteOnOpen())
+        // having to nudge an input first. Skipped when a project-store cascade
+        // already owns (or is about to own) this exact sequence — see comment above.
+        if (!ownedByProjectStore) {
+          void usePipelineStore
+            .getState()
+            .refreshConnectedOutputs('mount')
+            .then(() => usePipelineStore.getState().autoExecuteOnOpen())
+        }
         // Rebuild the operation-history panel from this project's persistent log
         // (history.jsonl), so a refresh keeps the recent ops instead of starting
         // empty. Best-effort: a failure just leaves the panel empty.
@@ -168,8 +189,8 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
       })
       .catch(() => useUIStore.getState().setConnectionStatus('disconnected'))
     const unsubscribe = store.subscribeLiveSync()
-    // Re-sync when another client (the left project panel, or an agent tool)
-    // switches the active project, so the canvas follows live.
+    // Re-sync when another client (left project panel / human /view) switches
+    // the viewing project. Agent projects.open does not change viewing.
     const unsubProject = useProjectStore.getState().subscribeProjectActivation()
     return () => {
       unsubscribe()

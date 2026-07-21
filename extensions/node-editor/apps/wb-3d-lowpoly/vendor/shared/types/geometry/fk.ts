@@ -129,6 +129,78 @@ export function transformAabbByMatOrigin(local: LocalAABB, rot: Mat3, origin: Ve
   };
 }
 
+export interface JointMotionEdge {
+  readonly parent: string;
+  /** joint.type !== 'fixed'（该 child 是否随此关节相对 parent 运动）。 */
+  readonly moving: boolean;
+}
+
+/**
+ * 从 joint 语句构建 child → {parent, moving} 边表。与 `computeWorldTransforms`
+ * 同一条"每个 child 只认第一条父 joint"规则，保证与 FK 树一致。
+ */
+export function buildJointMotionEdges(joints: readonly Statement[]): Map<string, JointMotionEdge> {
+  const edge = new Map<string, JointMotionEdge>();
+  for (const j of joints) {
+    const p = j.args.parent;
+    const c = j.args.child;
+    if (!p || p.kind !== 'ref' || !c || c.kind !== 'ref') continue;
+    if (edge.has(c.name)) continue;
+    const typeArg = j.args.type;
+    const moving = typeArg?.kind === 'string' && typeArg.value !== 'fixed';
+    edge.set(c.name, { parent: p.name, moving });
+  }
+  return edge;
+}
+
+function ancestorChain(id: string, edges: ReadonlyMap<string, JointMotionEdge>): string[] {
+  const chain = [id];
+  const seen = new Set([id]);
+  let cur = id;
+  while (edges.has(cur)) {
+    const parent = edges.get(cur)!.parent;
+    if (seen.has(parent)) break; // 环兜底
+    chain.push(parent);
+    seen.add(parent);
+    cur = parent;
+  }
+  return chain;
+}
+
+/**
+ * 两个 part 之间的运动学路径上是否存在非 fixed joint —— 即它们的相对位姿会不会
+ * 随关节运动改变。只有这种情况下 rest-pose AABB 重叠才是**真实碰撞风险**；同一刚性
+ * 子树内（路径上全是 fixed joint）的重叠，即使模型别处存在某个可动关节（如另一扇
+ * 门用了 revolute），依然是静态装配的合理交叠（墙角 T 形接头 / 嵌框 / 门扇落位 / 楼梯
+ * 落井…），不应被牵连升级为致命错误——这正是修复"一装可动关节，全楼交叠全报错"
+ * 的 moving-joint trap 的关键。
+ * 两者不在同一 joint 树（不同 island，压根没有 joint 把二者连起来）时，各自都只能
+ * 沿自己那条链回溯到"没有父 joint"的根，而未连通到任何 joint 的 part 在 FK 里恒定
+ * 取世界原点恒等变换（见 `computeWorldTransforms`）——也就是二者都是绝对静止的，谁都
+ * 不会因为模型别处某个可动关节而移动，因此天然不存在"相对运动"，返回 false。
+ */
+export function partsMoveRelativeToEachOther(
+  a: string,
+  b: string,
+  edges: ReadonlyMap<string, JointMotionEdge>,
+): boolean {
+  if (a === b) return false;
+  const chainA = ancestorChain(a, edges);
+  const chainB = ancestorChain(b, edges);
+  const indexInB = new Map<string, number>();
+  chainB.forEach((id, i) => { if (!indexInB.has(id)) indexInB.set(id, i); });
+  let lcaA = -1;
+  let lcaB = -1;
+  for (let i = 0; i < chainA.length; i++) {
+    const j = indexInB.get(chainA[i]);
+    if (j !== undefined) { lcaA = i; lcaB = j; break; }
+  }
+  if (lcaA === -1) return false; // 不同 island，二者各自绝对静止，不存在相对运动
+  for (let i = 0; i < lcaA; i++) if (edges.get(chainA[i])?.moving) return true;
+  for (let i = 0; i < lcaB; i++) if (edges.get(chainB[i])?.moving) return true;
+  return false;
+}
+
 /** 两 AABB 的最近间距（相交 → 0）。 */
 export function aabbAabbDistance(a: LocalAABB, b: LocalAABB): number {
   const aMin: Vec3 = [a.center[0] - a.halfExtent[0], a.center[1] - a.halfExtent[1], a.center[2] - a.halfExtent[2]];

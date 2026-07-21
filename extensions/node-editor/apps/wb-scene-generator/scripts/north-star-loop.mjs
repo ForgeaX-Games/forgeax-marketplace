@@ -31,8 +31,8 @@ function isPng(path) {
 async function newRuntime() {
   const root = mkdtempSync(join(tmpdir(), 'wb-scene-north-star-'))
   process.env.FORGEAX_PROJECT_ROOT = root
-  const rt = createRuntime({ projectRoot: root, pipelineId: 'north-star', pluginId: '@forgeax-extension/wb-scene-generator' })
-  const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-extension/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
+  const rt = createRuntime({ projectRoot: root, pipelineId: 'north-star', pluginId: '@forgeax-plugin/wb-scene-generator' })
+  const loader = createBatteryLoader(rt.registry, { pluginId: '@forgeax-plugin/wb-scene-generator', scanDirs: ['batteries'], layout: 'flexible' })
   await loader.scan()
   return { rt, root }
 }

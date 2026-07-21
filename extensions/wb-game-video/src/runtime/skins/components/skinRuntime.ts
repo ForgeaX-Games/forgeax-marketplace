@@ -6,8 +6,46 @@
  *   - injectCss(id, css)：幂等注入一份 <style>（同 id HMR 覆盖）。
  *   - ensureInkFilters()：注入水墨毛边 SVG 滤镜 #inkRough / #inkRoughNarr。
  *   - setBrushFontUrl / ensureBrushFont：书法字体 URL 由 **editor** 在 init 注入（runtime 不依赖 assets）。
+ *   - useDefaultEventTimeout：限时组件到点自 emit(defaultEvent)。
  */
+import { useEffect, useRef } from 'react'
+
 const injected = new Map<string, HTMLStyleElement>()
+
+/** 从 inputs 归一超时 ms（timeoutMs / windowMs / durationMs）。 */
+export function resolveTimeoutMs(inputs: Record<string, unknown> | undefined): number | undefined {
+  if (!inputs) return undefined
+  const raw =
+    (typeof inputs.timeoutMs === 'number' ? inputs.timeoutMs : undefined)
+    ?? (typeof inputs.windowMs === 'number' ? inputs.windowMs : undefined)
+    ?? (typeof inputs.durationMs === 'number' ? inputs.durationMs : undefined)
+  return typeof raw === 'number' && raw > 0 ? raw : undefined
+}
+
+/**
+ * 组件挂载后计时，到点 emit(defaultEvent ?? 'fail')；preview 不跑。
+ *
+ * emit 用 ref 持有——试玩面每帧 setSnap 会换新的内联 emit，若进 effect deps
+ * 会把 timeout 清掉重开，限时默认选项（如應/默 8s→默）永远到不了点。
+ */
+export function useDefaultEventTimeout(
+  emit: ((key: string) => void) | undefined,
+  inputs: Record<string, unknown> | undefined,
+  preview?: boolean,
+): void {
+  const timeoutMs = resolveTimeoutMs(inputs)
+  const defaultEvent =
+    typeof inputs?.defaultEvent === 'string' && inputs.defaultEvent
+      ? inputs.defaultEvent
+      : 'fail'
+  const emitRef = useRef(emit)
+  emitRef.current = emit
+  useEffect(() => {
+    if (preview || !emitRef.current || timeoutMs == null) return
+    const t = setTimeout(() => emitRef.current?.(defaultEvent), timeoutMs)
+    return () => clearTimeout(t)
+  }, [timeoutMs, defaultEvent, preview])
+}
 
 export function injectCss(id: string, css: string): void {
   if (typeof document === 'undefined') return

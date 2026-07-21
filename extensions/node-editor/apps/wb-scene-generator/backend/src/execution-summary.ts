@@ -25,6 +25,7 @@
 // 命名对齐仅仅停留在 prompt 文档里的"应该"。
 
 import { checkLocationNameAlignment } from './lib/locationNameGate.js'
+import { buildTopologyIssues, type TopologyGraphEdge, type TopologyGraphNode } from './lib/topologyGate.js'
 
 /** Mirrors layer2/execute-node.ts ExecutionResult (kept local to avoid a dep). */
 export interface ExecutionResult {
@@ -280,8 +281,23 @@ function collectSceneNodeNamesFromSummary(summarizedOutputs: Record<string, Reco
  * `outputs` and reports the result under `verification.locationNameAlignment`
  * (plus a hint line when it fails) — never a silent no-op, and a failing check
  * always carries the structured missing-name list, never a bare boolean.
+ *
+ * `currentGraph` (optional): the live pipeline graph (edges + nodes) the agent
+ * just executed. When supplied, this runs the three topology checks ported
+ * into `lib/topologyGate.ts` (Rest-chain fan-out / illegal local tree_merge /
+ * manual_points zero-default) and reports them under
+ * `verification.topologyIssues` — the same "diagnose in THIS call, not the
+ * next continuation round" upgrade `locationNameAlignment` already got. See
+ * `lib/topologyGate.ts`'s module doc for the real production incidents this
+ * closes the loop on. Always an array (possibly empty), never omitted when
+ * `currentGraph` is supplied — mirrors `locationNameAlignment`'s "never a
+ * silent no-op" contract.
  */
-export function summarizeExecutionResult(full: unknown, expectedLocationNames?: readonly string[]): unknown {
+export function summarizeExecutionResult(
+  full: unknown,
+  expectedLocationNames?: readonly string[],
+  currentGraph?: { edges: readonly TopologyGraphEdge[]; nodeById: Map<string, TopologyGraphNode> },
+): unknown {
   if (!isRecord(full)) return full
   const summarizedOutputs: Record<string, Record<string, unknown>> = {}
   const outputs = isRecord(full.outputs) ? full.outputs : {}
@@ -324,7 +340,12 @@ export function summarizeExecutionResult(full: unknown, expectedLocationNames?: 
         if (portId.includes('out') && ps.itemCount === 0 && ps.branchCount === 0) {
           structuralHints.push(
             `Node ${nodeId} port ${portId} is empty after completed execute — check incoming connect to this group's inputs ` +
-            '(IslandRegions: in_0 scene + in_1 Points via manual_points.point or tree_merge; PickOneBuilding: in_3 Point). NOT whitelist.',
+            '(IslandRegions: in_0 scene + in_1 Points via manual_points.point or tree_merge; PickOneBuilding: in_3 Point). NOT whitelist. ' +
+            'If this is a decoration template (PlaceOneDecoration/LocalPreciseDecoration/NaturalDecorationDistribution), empty output is almost ' +
+            'always in_1(Scene) disconnected, the placement Point falling outside the connected Scene subtree\'s actual cell coverage, or ' +
+            'FootprintWidth/Height too large for the available area — NOT a wrong Scene source node. Before swapping which upstream node feeds ' +
+            'in_1 (e.g. switching to a full-tree out_0/root focus), first diff the placement Point against pipeline.get\'s subtreeCellCount for ' +
+            'the currently-connected Scene source; do not delete+re-instantiate the group as a first response.',
           )
         }
       }
@@ -340,17 +361,28 @@ export function summarizeExecutionResult(full: unknown, expectedLocationNames?: 
   // （{ok, missing:[{name,reason}]}），从不是裸布尔，未命中同时并入上面的
   // `hints` 数组，让 Sino 在同一份摘要里看到全部需要修的问题。
   const hasExpectedNames = Array.isArray(expectedLocationNames) && expectedLocationNames.length > 0
+  // 2026-07-10 复盘：这份候选名单本来就在这一步被收集出来了（比对缺失就是拿它跟
+  // expectedLocationNames 做的），但从未回传给调用方——命名对齐失败时 sino 只知道
+  // "缺了什么"，不知道"图里实际叫什么"，逼得 agent 只能反复调用 raw execute（几十
+  // MB 的全量 ExecutionResult）去人工翻找输出节点的真实名字，卡在这一步来回试错。
+  // 直接把已收集到的实际节点名（去重、排序、限量）随 rejection 一起吐出来，agent
+  // 一次 summary 调用就能看到"预期 vs 实际"的对照，从源头消除这类摸黑重试。
+  const MAX_ACTUAL_NAMES = 200
+  const actualNodeNames = hasExpectedNames ? collectSceneNodeNamesFromSummary(summarizedOutputs) : []
   const locationRejection = hasExpectedNames
-    ? checkLocationNameAlignment(expectedLocationNames!, collectSceneNodeNamesFromSummary(summarizedOutputs))
+    ? checkLocationNameAlignment(expectedLocationNames!, actualNodeNames)
     : null
   if (locationRejection) {
     locationHints.push(
-      `[stage3.location_names] ${locationRejection.reason} 缺失地点：${locationRejection.missing.map((m) => m.name).join('、')}。${locationRejection.fix}`,
+      `[stage3.location_names] ${locationRejection.reason} 缺失地点：${locationRejection.missing.map((m) => m.name).join('、')}。${locationRejection.fix} ` +
+      '实际场景节点名见 verification.locationNameAlignment.actualNodeNames（无需再跑 raw execute 去翻找）。',
     )
   }
 
   const hints = [...structuralHints, ...locationHints]
   const locationNamesOk = !locationRejection?.missing?.length
+
+  const topologyIssues = currentGraph ? buildTopologyIssues(currentGraph.edges, currentGraph.nodeById) : undefined
 
   return {
     executionId: full.executionId,
@@ -362,17 +394,32 @@ export function summarizeExecutionResult(full: unknown, expectedLocationNames?: 
       : {}),
     summarized: true,
     verification: {
+      // topologyIssues 目前是非阻断 warning（不参与 ok 判定）——多步施工的中间态
+      // 触发这几项检测大概率是误报（比如还没接完全部装饰），阻断式判定留给已经
+      // 成熟的 sinoOpGate 白名单校验。ok=false 仍只看 structuralHints/地点名对齐。
       ok: structuralHints.length === 0 && (!hasExpectedNames || locationNamesOk),
       totalSceneCells,
       ...(hasExpectedNames
         ? {
             locationNameAlignment: locationRejection
-              ? { ok: false, missing: locationRejection.missing, fix: locationRejection.fix }
+              ? {
+                  ok: false,
+                  missing: locationRejection.missing,
+                  fix: locationRejection.fix,
+                  // 排序后限量输出，供 agent 直接肉眼/代码比对，不必再暴力刷 raw execute。
+                  actualNodeNames: [...actualNodeNames].sort().slice(0, MAX_ACTUAL_NAMES),
+                  ...(actualNodeNames.length > MAX_ACTUAL_NAMES ? { actualNodeNamesTruncated: true } : {}),
+                }
               : { ok: true, missing: [] },
           }
         : {}),
+      // 永远是数组（currentGraph 缺省时省略字段；给了图就永远是数组，从不是裸
+      // 布尔），空数组 = 无问题。每项自带 suggestedOps（能算的情况下）——见
+      // lib/topologyGate.ts 的 buildTopologyIssues。
+      ...(topologyIssues ? { topologyIssues } : {}),
       ...(hints.length > 0 ? { hints } : {}),
     },
     outputs: summarizedOutputs,
   }
 }
+

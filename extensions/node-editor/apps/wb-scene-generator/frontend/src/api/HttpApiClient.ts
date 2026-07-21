@@ -1,4 +1,4 @@
-import type { ActivateProjectResult, ApiClient, CreateProjectRequest } from '@forgeax/node-runtime-react'
+import { hydrateBlobRefs, type ActivateProjectResult, type ApiClient, type CreateProjectRequest } from '@forgeax/node-runtime-react'
 import type {
   ApplyBatchOptions,
   ApplyBatchResult,
@@ -24,6 +24,7 @@ import type {
 } from '@forgeax/node-runtime'
 
 import { syncTraceEnabled } from '../debug/syncTrace.js'
+import { pluginBasePath } from './pluginHttp'
 
 type Listener = (e: RuntimeEvent) => void
 
@@ -42,6 +43,8 @@ interface GroupTemplateBattery {
 export interface HttpApiClientOptions {
   baseUrl?: string
   pipelineId: string
+  /** Pin an embedded surface to one project without mutating workspace.viewingProjectId. */
+  projectId?: string
 }
 
 /**
@@ -60,13 +63,21 @@ export class HttpApiClient implements ApiClient {
   private viewingProjectId: string | null = null
   private ws: WebSocket | null = null
   private listeners = new Map<RuntimeChannel, Set<Listener>>()
+  // Raw `/ws` broadcasts keyed by their top-level `event` name — for app-level
+  // events (e.g. `baked:changed`) that ride this same socket but aren't part
+  // of the kernel's typed RuntimeEvent/RuntimeChannel taxonomy. Lets callers
+  // (useBakedLayers, useAliasMetas) share THIS socket via `subscribeRaw()`
+  // instead of each opening its own `new WebSocket(...)` — a project switch
+  // was opening 3 independent `/ws` connections from the SAME iframe.
+  private rawListeners = new Map<string, Set<(payload: unknown) => void>>()
   private disposed = false
   private wsReconnectAttempts = 0
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: HttpApiClientOptions) {
     this.pipelineId = opts.pipelineId
-    this.base = opts.baseUrl ?? ''
+    this.base = opts.baseUrl || pluginBasePath()
+    this.viewingProjectId = opts.projectId ?? null
   }
 
   /** Align client-side project routing with the server workspace (read-only). */
@@ -182,10 +193,12 @@ export class HttpApiClient implements ApiClient {
   }
 
   async getNodeOutput(nodeId: string, portId: string): Promise<unknown> {
-    const r = await this.get<{ value: unknown }>(
+    const r = await this.get<{ value: unknown; blobs?: Record<string, unknown> }>(
       `${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}`,
     )
-    return r.value
+    // See wb-scene-generator-scene-tree-storage.md §3 — hydrate a Phase-2
+    // deduped envelope (if present) back to the plain shape every caller expects.
+    return hydrateBlobRefs(r.value, r.blobs)
   }
 
   getNodeOutputMeta(
@@ -193,6 +206,41 @@ export class HttpApiClient implements ApiClient {
     portId: string,
   ): Promise<{ executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; missing?: boolean }> {
     return this.get(`${this.projectPrefix()}/nodes/${encodeURIComponent(nodeId)}/outputs/${encodeURIComponent(portId)}/meta`)
+  }
+
+  /**
+   * Batch value+meta read for many ports in ONE HTTP round trip. See backend
+   * `registerProjectPipelineRoutes` doc comment for the rationale (collapses
+   * the O(ports) sequential GET fan-out that made project-switch slow).
+   */
+  async getNodeOutputsBatch(
+    ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+    opts?: { metaOnly?: boolean },
+  ): Promise<
+    ReadonlyArray<{
+      nodeId: string
+      portId: string
+      value?: unknown
+      blobs?: Record<string, unknown>
+      meta: { executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number } | null
+      tooLarge?: boolean
+    }>
+  > {
+    if (ports.length === 0) return []
+    const r = await this.post<{
+      results: ReadonlyArray<{
+        nodeId: string
+        portId: string
+        value?: unknown
+        blobs?: Record<string, unknown>
+        meta: { executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number } | null
+        tooLarge?: boolean
+      }>
+    }>(`${this.projectPrefix()}/nodes/outputs/batch`, {
+      ports: ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId })),
+      metaOnly: opts?.metaOnly === true,
+    })
+    return r.results
   }
 
   getHistory(_opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]> {
@@ -340,8 +388,14 @@ export class HttpApiClient implements ApiClient {
 
   // ── Multi-project management (thin REST over the kernel ProjectRegistry) ──
 
-  listProjects(): Promise<readonly ProjectMeta[]> {
-    return this.get<readonly ProjectMeta[]>('/api/v1/projects')
+  /**
+   * List projects. `opts.gameSlug` scopes to that game's projects only; omit
+   * to list every project ("show all"). Mirrors the backend's `?gameSlug=`
+   * query filter.
+   */
+  listProjects(opts?: { gameSlug?: string }): Promise<readonly ProjectMeta[]> {
+    const q = opts?.gameSlug ? `?gameSlug=${encodeURIComponent(opts.gameSlug)}` : ''
+    return this.get<readonly ProjectMeta[]>(`/api/v1/projects${q}`)
   }
 
   getProject(id: string): Promise<ProjectRecord | null> {
@@ -358,7 +412,7 @@ export class HttpApiClient implements ApiClient {
 
   updateProject(
     id: string,
-    patch: { name?: string; description?: string; thumbnail?: string; type?: string },
+    patch: { name?: string; description?: string; thumbnail?: string; type?: string; gameSlug?: string },
   ): Promise<ProjectMeta> {
     return this.put<ProjectMeta>(`/api/v1/projects/${encodeURIComponent(id)}`, patch)
   }
@@ -411,6 +465,22 @@ export class HttpApiClient implements ApiClient {
     }
   }
 
+  /**
+   * Subscribe to a raw `/ws` broadcast by its top-level `event` name (e.g.
+   * `baked:changed`) — for app-level events that ride this socket but have no
+   * `{ event: 'runtime', payload: { kind } }` envelope, so they don't fit the
+   * kernel's typed `subscribe(channel, …)`. Shares THIS socket (see
+   * `ensureSocket`) rather than the caller opening its own connection.
+   */
+  subscribeRaw(event: string, listener: (payload: unknown) => void): () => void {
+    if (!this.rawListeners.has(event)) this.rawListeners.set(event, new Set())
+    this.rawListeners.get(event)!.add(listener)
+    this.ensureSocket()
+    return () => {
+      this.rawListeners.get(event)?.delete(listener)
+    }
+  }
+
   private ensureSocket(): void {
     // Defensive: in test/non-browser envs there may be no WebSocket global or
     // no `location`; skip socket creation there. Graph reactivity then requires
@@ -419,7 +489,7 @@ export class HttpApiClient implements ApiClient {
     if (!this.base.startsWith('http') && typeof location === 'undefined') return
     const wsBase = this.base.startsWith('http')
       ? this.base.replace(/^http/, 'ws')
-      : `${location.origin.replace(/^http/, 'ws')}`
+      : `${location.origin.replace(/^http/, 'ws')}${this.base.replace(/\/$/, '')}`
     const sock = new WebSocket(`${wsBase}/ws`)
     this.ws = sock
     sock.onopen = () => {
@@ -429,11 +499,14 @@ export class HttpApiClient implements ApiClient {
     sock.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data as string) as { event: string; payload?: RuntimeEvent }
+        // Raw app-level broadcasts (baked:changed, …) — dispatch first; these
+        // have no runtime envelope so they never match the branches below.
+        this.rawListeners.get(msg.event)?.forEach((l) => l(msg.payload))
         // Library mutations (import / publish / sandbox bind) broadcast this
         // directly — not on the runtime bus. AssetStore + preview hooks subscribe
         // to the `asset` channel, so forward here (mirrors useAliasMetas' raw WS).
         if (msg.event === 'library:changed') {
-          const synthetic = { kind: 'asset:library-changed' } as RuntimeEvent
+          const synthetic = { kind: 'asset:library-changed' } as unknown as RuntimeEvent
           this.listeners.get('asset')?.forEach((l) => l(synthetic))
           return
         }
@@ -454,14 +527,18 @@ export class HttpApiClient implements ApiClient {
       this.ws = null
       // Reconnect on drop so renderer/assetstore live-sync survives a backend
       // restart or WS blip (aligned with wb-3d-lowpoly / wb-2d HttpApiClient).
-      if (this.disposed || this.listeners.size === 0 || this.wsReconnectTimer) return
+      if (this.disposed || this.hasNoListeners() || this.wsReconnectTimer) return
       const delay = Math.min(5000, 500 * 2 ** this.wsReconnectAttempts)
       this.wsReconnectAttempts += 1
       this.wsReconnectTimer = setTimeout(() => {
         this.wsReconnectTimer = null
-        if (!this.disposed && !this.ws && this.listeners.size > 0) this.ensureSocket()
+        if (!this.disposed && !this.ws && !this.hasNoListeners()) this.ensureSocket()
       }, delay)
     }
+  }
+
+  private hasNoListeners(): boolean {
+    return this.listeners.size === 0 && this.rawListeners.size === 0
   }
 
   dispose(): void {
@@ -470,5 +547,6 @@ export class HttpApiClient implements ApiClient {
     this.ws?.close()
     this.ws = null
     this.listeners.clear()
+    this.rawListeners.clear()
   }
 }

@@ -1,4 +1,5 @@
 import type { TtsClient, TtsRequest, TtsResult } from './TTSProvider'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 /**
  * HostGatewayTtsProvider —— 把 TTS（角色音色 / 旁白合成）委托给宿主 forgeax-server
@@ -26,7 +27,7 @@ export class HostGatewayTtsProvider implements TtsClient {
   private readonly model?: string
 
   constructor(opts: { base?: string; model?: string } = {}) {
-    this.base = (opts.base ?? '/__ce-api__').replace(/\/$/, '')
+    this.base = (opts.base ?? pluginUrl('/__ce-api__')).replace(/\/$/, '')
     this.model = opts.model
   }
 
@@ -36,7 +37,7 @@ export class HostGatewayTtsProvider implements TtsClient {
 
   async synth(req: TtsRequest): Promise<TtsResult> {
     const start = Date.now()
-    const resp = await fetch(`${this.base}/reel-tts`, {
+    const resp = await pluginFetch(`${this.base}/reel-tts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

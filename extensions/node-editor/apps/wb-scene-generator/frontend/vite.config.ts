@@ -23,11 +23,16 @@ const kernelAlias = [
 const devPort = Number(process.env.VITE_DEV_PORT ?? 9555)
 const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:9557'
 const wsTarget = apiTarget.replace(/^http/, 'ws')
+const pluginBase = process.env.VITE_PLUGIN_BASE ?? './'
+const pluginHmrClientPort = process.env.VITE_PLUGIN_HMR_CLIENT_PORT
+  ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
+  : undefined
 const cert = process.env.VITE_DEV_HTTPS_CERT
 const key = process.env.VITE_DEV_HTTPS_KEY
 const https = cert && key ? { cert: readFileSync(cert), key: readFileSync(key) } : undefined
 
 export default defineConfig(({ mode }) => ({
+  base: pluginBase,
   plugins: [react()],
   // Dev: opt-in viewport perf markers (see node-runtime-react/canvasPerfReport.ts).
   define:
@@ -48,6 +53,10 @@ export default defineConfig(({ mode }) => ({
     port: devPort,
     host: true,
     ...(https ? { https } : {}),
+    hmr: {
+      clientPort: pluginHmrClientPort,
+      ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
+    },
     proxy: {
       '/api': { target: apiTarget, changeOrigin: true },
       '/ws':  { target: wsTarget, ws: true },

@@ -15,12 +15,12 @@ const geometryValueFormatters = [geometryValueFormatter]
 // `domainPortTypes` prop below — no module-global registration side effect.
 
 // The kernel editor's gear button is hidden (showSettingsButton={false}); its
-// controls — language, open/save, the URDF embed toggle, status, history, data
-// types — are re-surfaced in the LEFT pane (<EditorControlsPanel>). The URDF
+// controls — language, open/save, the 3D viewer embed toggle, status, history,
+// data types — are re-surfaced in the LEFT pane (<EditorControlsPanel>). The
 // embed STATE still lives here because it drives the embedded iframe; the left
-// pane flips it by writing LS_URDF, which we mirror via a `storage` listener
+// pane flips it by writing LS_VIEWER3D, which we mirror via a `storage` listener
 // (same-origin sibling iframe → cross-document).
-const LS_URDF = 'wb3d:urdfInline'
+const LS_VIEWER3D = 'wb3d:viewer3dInline'
 // Must match the center <Editor editorSyncKey> ↔ left <EditorControlsPanel syncKey>.
 const EDITOR_SYNC_KEY = 'wb-3d-lowpoly-editor'
 
@@ -30,8 +30,8 @@ function readBool(key: string, fallback: boolean): boolean {
   return raw === null ? fallback : raw === 'true'
 }
 
-// Workbench host: the kernel Editor sits at the bottom; an embedded URDF 3D
-// viewer iframe (a `?pane=urdf` surface of this same app) sits on top, separated
+// Workbench host: the kernel Editor sits at the bottom; an embedded 3D viewer
+// iframe (a `?pane=viewer3d` surface of this same app) sits on top, separated
 // by a draggable row splitter. The host forwards the kernel editor's node
 // selection to the viewer over the `workbench:editor-selection` postMessage
 // channel. Mirrors the scene generator's WorkbenchHost (renderer pane).
@@ -41,40 +41,40 @@ export function WorkbenchHost(): JSX.Element {
   // (or HMR remount) doesn't leak a live socket + reconnect loop.
   useEffect(() => () => { client.dispose() }, [client])
 
-  const [urdfInline, setUrdfInline] = useState(() => readBool(LS_URDF, true))
+  const [viewer3dInline, setViewer3DInline] = useState(() => readBool(LS_VIEWER3D, true))
   const [workbenchHeight, setWorkbenchHeight] = useState<number | null>(null)
   const [isResizing, setIsResizing] = useState(false)
-  const [urdfReloadKey, setUrdfReloadKey] = useState(0)
+  const [viewerReloadKey, setViewerReloadKey] = useState(0)
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false)
 
   const rootRef = useRef<HTMLDivElement>(null)
-  const urdfIframeRef = useRef<HTMLIFrameElement>(null)
+  const viewerIframeRef = useRef<HTMLIFrameElement>(null)
   // Project switching / create / delete now lives in the left pane's
   // <ProjectPanel>; the center pane only observes the active project id so it
-  // can reload the embedded URDF viewer when the project changes (via the
+  // can reload the embedded 3D viewer when the project changes (via the
   // kernel's project:activated cross-client sync, wired in <Editor>).
   const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
 
-  // Mirror URDF embed flips made in the left pane (which writes LS_URDF).
+  // Mirror viewer embed flips made in the left pane (which writes LS_VIEWER3D).
   // `storage` fires only in OTHER same-origin documents, so this is exactly the
   // left-pane → center-pane channel for the relocated window toggle.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === LS_URDF) setUrdfInline(readBool(LS_URDF, true))
+      if (e.key === LS_VIEWER3D) setViewer3DInline(readBool(LS_VIEWER3D, true))
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  // Forward the kernel editor's node selection to the URDF pane. The kernel
+  // Forward the kernel editor's node selection to the 3D viewer pane. The kernel
   // selection lives in the host's in-process pipeline store (no backend/WS
   // round-trip), so we read it here and push it down the
   // `workbench:editor-selection` postMessage channel. View-only — never mutates
   // the graph. `selectionRef` lets the iframe `onLoad` re-seed selection after
   // the viewer (re)mounts.
   const selectionRef = useRef<string[]>([])
-  const postSelectionToUrdf = useCallback((ids: string[]) => {
-    urdfIframeRef.current?.contentWindow?.postMessage(
+  const postSelectionToViewer = useCallback((ids: string[]) => {
+    viewerIframeRef.current?.contentWindow?.postMessage(
       { type: 'workbench:editor-selection', selectedNodeIds: ids },
       '*',
     )
@@ -82,13 +82,13 @@ export function WorkbenchHost(): JSX.Element {
   useEffect(() => {
     const sync = (ids: string[]) => {
       selectionRef.current = ids
-      postSelectionToUrdf(ids)
+      postSelectionToViewer(ids)
     }
     sync(usePipelineStore.getState().selectedNodeIds)
     return usePipelineStore.subscribe((state, prev) => {
       if (state.selectedNodeIds !== prev.selectedNodeIds) sync(state.selectedNodeIds)
     })
-  }, [postSelectionToUrdf])
+  }, [postSelectionToViewer])
 
   useEffect(() => {
     void useProjectStore.getState().bootstrap()
@@ -103,8 +103,8 @@ export function WorkbenchHost(): JSX.Element {
     }
     if (prevProjectRef.current === viewingProjectId) return
     prevProjectRef.current = viewingProjectId
-    setUrdfReloadKey((k) => k + 1)
-    urdfIframeRef.current?.contentWindow?.postMessage(
+    setViewerReloadKey((k) => k + 1)
+    viewerIframeRef.current?.contentWindow?.postMessage(
       { type: 'workbench:project-changed', projectId: viewingProjectId },
       '*',
     )
@@ -137,7 +137,7 @@ export function WorkbenchHost(): JSX.Element {
       ref={rootRef}
       className={[
         'wb3d-workbench',
-        urdfInline ? 'wb3d-workbench--embedded' : '',
+        viewer3dInline ? 'wb3d-workbench--embedded' : '',
         isResizing ? 'wb3d-workbench--resizing' : '',
         isEditorFullscreen ? 'wb3d-workbench--focus-editor' : '',
       ]
@@ -145,25 +145,25 @@ export function WorkbenchHost(): JSX.Element {
         .join(' ')}
       style={rootStyle}
     >
-      {urdfInline && (
-        <section className="wb3d-workbench__pane" aria-label="URDF Viewer">
+      {viewer3dInline && (
+        <section className="wb3d-workbench__pane" aria-label="3D Viewer">
           <iframe
-            key={`urdf-${urdfReloadKey}`}
-            ref={urdfIframeRef}
-            src={paneUrl('urdf')}
-            title="urdf"
+            key={`viewer3d-${viewerReloadKey}`}
+            ref={viewerIframeRef}
+            src={paneUrl('viewer3d')}
+            title="viewer3d"
             className="wb3d-workbench__iframe"
             allow="clipboard-write"
-            onLoad={() => postSelectionToUrdf(selectionRef.current)}
+            onLoad={() => postSelectionToViewer(selectionRef.current)}
           />
         </section>
       )}
 
-      {urdfInline && (
+      {viewer3dInline && (
         <div
           className="wb3d-workbench__resize"
           onMouseDown={beginRowResize}
-          aria-label="Resize URDF viewer and editor"
+          aria-label="Resize 3D viewer and editor"
         />
       )}
 

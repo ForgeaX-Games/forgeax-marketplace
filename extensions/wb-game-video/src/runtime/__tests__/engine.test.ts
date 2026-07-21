@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerComponent, unregisterComponent } from '../registry/component-registry'
-import { isOpenInteraction, isRenderOverlay } from '../engine/directives'
+import { isRenderOverlay } from '../engine/directives'
 import type { GameGraph, GameNode, GameScenario } from '../schema/graph-schema'
 import { node, scnOf, rid } from './test-fixtures'
 
@@ -9,9 +9,8 @@ const COMPONENT_IDS = ['floatT', 'qteT']
 afterEach(() => COMPONENT_IDS.forEach(unregisterComponent))
 
 function registerCore() {
-  registerComponent('floatT', { role: 'presentation' })
+  registerComponent('floatT', {})
   registerComponent('qteT', {
-    role: 'interaction',
     events: [{ id: 'pass' }, { id: 'good' }, { id: 'fail' }],
   })
 }
@@ -30,6 +29,59 @@ describe('GraphRuntime advance', () => {
     rt.onPerformanceEnd()
     expect(rt.state.currentNodeId).toBe('b')
     expect(rt.state.traversedEdgeIds.has('e')).toBe(true)
+  })
+
+  it('performanceEnd 先冲刷 trigger.at=durationMs（video_end 选项才会挂上）', () => {
+    registerComponent('choice', {
+      events: [{ id: 'ying' }, { id: 'mo' }],
+    })
+    const graph: GameGraph = {
+      nodes: [
+        node('river', {
+          durationMs: 1500,
+          media: { kind: 'VIDEO', ref: 'clip' },
+          overlayNodes: [{ overlay: 'ov-river' }],
+        }),
+        node('next', {}),
+      ],
+      edges: [
+        { id: 'e-ying', source: 'river', target: 'next', sourceHandle: 'ying', targetHandle: 'in' },
+        { id: 'e-mo', source: 'river', target: 'next', sourceHandle: 'mo', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph, {
+      ui: {
+        overlays: {
+          'ov-river': {
+            id: 'ov-river',
+            children: [
+              {
+                id: 'ym',
+                component: 'choice',
+                trigger: { when: 'at', ms: 1500 },
+                inputs: {
+                  events: [
+                    { id: 'ying', label: '應' },
+                    { id: 'mo', label: '默' },
+                  ],
+                  timeoutMs: 8000,
+                  defaultEvent: 'mo',
+                },
+              },
+            ],
+          },
+        },
+      },
+    })
+    const rt = new GraphRuntime(scn.graph, scn)
+    const dirsStart = rt.start()
+    // 进节点时 at=1500 尚未触发
+    expect(dirsStart.filter(isRenderOverlay).some((d) => d.elementId === 'ov-river/ym' || d.elementId === 'ym')).toBe(false)
+    // 模拟视频 onEnded：不经过 tick(1500)，直接 performanceEnd
+    const dirsEnd = rt.onPerformanceEnd()
+    expect(rt.state.currentNodeId).toBe('river') // 仅有 event 边 → 停住等待
+    expect(dirsEnd.filter(isRenderOverlay).some((d) => d.elementId.endsWith('/ym') || d.elementId === 'ym')).toBe(true)
+    unregisterComponent('choice')
   })
 
   it('conditional gateway routes by hp (instant node)', () => {
@@ -73,7 +125,7 @@ describe('GraphRuntime advance', () => {
             { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'q', kind: 'var', varId: 'qi', op: 'add', value: 1 }] }] },
           ],
           timeline: [
-            { id: 'f', role: 'presentation', kind: 'floatT', trigger: { when: 'at', ms: 1000 }, inputs: { text: '+1' } },
+            { id: 'f', kind: 'floatT', trigger: { when: 'at', ms: 1000 }, inputs: { text: '+1' } },
           ],
         }),
       ],
@@ -93,7 +145,7 @@ describe('GraphRuntime advance', () => {
     registerCore()
     const graph: GameGraph = {
       nodes: [
-        node('a', { timeline: [{ id: 'q', role: 'interaction', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }] }),
+        node('a', { timeline: [{ id: 'q', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }] }),
         node('win', { }),
         node('lose', { }),
       ],
@@ -105,9 +157,9 @@ describe('GraphRuntime advance', () => {
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)
     const dirs = rt.start()
-    expect(dirs.some(isOpenInteraction)).toBe(true)
-    expect(rt.state.phase).toBe('awaitInteraction')
-    rt.submitInteraction(rid('a', 'q'), 'pass') // 皮肤自判定后 emit 最终 event id
+    expect(dirs.some((d) => isRenderOverlay(d) && d.component === 'qteT')).toBe(true)
+    expect(rt.state.phase).toBe('playing')
+    rt.emitComponentEvent(rid('a', 'q'), 'pass')
     expect(rt.state.currentNodeId).toBe('win')
   })
 

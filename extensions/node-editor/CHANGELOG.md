@@ -1277,3 +1277,265 @@ calendar dates in the project timezone.
   repointed `apps/wb-scene-generator/scripts/acceptance-loop.mjs` CLI bin to the
   workspace `packages/node-runtime-cli/dist/bin.js`. (`.gitmodules` and the
   `.cursor/rules/kernel-cascade.mdc` cascade rules removed — see app changelogs.)
+
+---
+
+## `wb-scene-generator` project-switch latency + scene-tree storage — batch handoff (2026-07-14 → 2026-07-15)
+
+> Consolidated write-back for a multi-day investigation that landed as a sequence
+> of small commits without a CHANGELOG entry at the time (contract violation on
+> the earlier commits — corrected here, append-only, rather than editing
+> history). Full narrative + empirical measurements for every item below live in
+> `aw-support/docs/DEVLOG.md` (all `2026-07-14`/`2026-07-15` entries) and
+> `aw-support/docs/performance/{wb-scene-generator-project-switch,wb-scene-generator-scene-tree-storage}.md`.
+> Root cause: opening/switching a `wb-scene-generator` project felt slow/blank
+> because of (a) redundant full-graph recomputation, (b) O(N) duplicate storage
+> of near-identical `scene` DataTrees, and (c) synchronous full-`JSON.stringify`
+> calls used only to *measure* whether a port was too large to send.
+
+### Added
+- **`OutputCache` content-addressed blob store (dedup by sha256, not by
+  reference) + recursive Merkle-DAG subtree addressing.**
+  `packages/node-runtime/src/layer1/storage/blob-ref-contract.ts` (new —
+  `OUTPUT_CACHE_BLOB_REF_KEY`/`isOutputCacheBlobRef`/`makeOutputCacheBlobRef`,
+  no fs/crypto deps, shared by kernel + frontend);
+  `packages/node-runtime/src/layer1/storage/output-cache-blob-store.ts` (new —
+  `OutputCacheBlobStore.put/get/has/byteSize/stats/gc`, gzip-on-disk,
+  content-idempotent). `output-cache.ts`: `dedupeTopLevel`'s
+  `externalizeIfLarge()` externalizes any top-level field ≥16KB
+  (`BLOB_MIN_BYTES`) to a blob ref; `isSceneNodeLike()` + `externalizeValue()`
+  additionally recurse *into* `SceneNodeSnapshot.children` post-order (a
+  Merkle DAG — each subtree hashes independently, unchanged subtrees reuse
+  their prior hash across writes) instead of hashing a scene tree as one
+  opaque blob, so incrementally-grown tree snapshots (e.g. an `add_child`
+  merge chain) share their unchanged prefixes on disk. `resolveSharedRefs`/
+  `resolveBlobRef`/new `resolveNestedBlobRefs` resolve nested blob refs
+  recursively with call-scoped `blobMemo` memoization (blob refs may now
+  point to values that themselves contain blob refs — any future code
+  touching blob content directly must go through these recursive-aware
+  entry points, not assume a blob is a leaf). Tests:
+  `packages/node-runtime/src/__tests__/storage.test.ts` (+8: cross-write/
+  cross-port content dedup, envelope round-trip, `gcBlobs` liveness, chained
+  `add_child`-style growth, nested-blob GC reachability, envelope recursive
+  hydrate), `packages/node-runtime/src/layer1/storage/__tests__/output-cache-blob-store.test.ts`
+  (new, 8 cases).
+- **HTTP "wire envelope" (`{ value, blobs }`) so deduped ports can inline
+  instead of being rejected as `tooLarge`.**
+  `packages/editor-host/src/backend/projectPipelineRoutes.ts`:
+  `tryEnvelopeResponse()` cheaply pre-checks via `envelopeByteSize()`, then
+  confirms via real `readWithBlobRefs()` + stringify within the response cap;
+  wired into both the single-port GET and batch POST `tooLarge` branches
+  (batch route additionally shrinks the cap by remaining batch budget), and
+  — per P0-11 (2026-07-15) — tried at a low 1MB threshold
+  (`ENVELOPE_TRY_THRESHOLD_BYTES`) rather than only right before the 128MB
+  rejection edge, since most real dedup wins live well under 128MB and were
+  never reaching the envelope path at all.
+  `packages/node-runtime-react/src/api/sceneEnvelope.ts` (new, in `api/` so
+  both the root and `editor` entry points can share it) — `hydrateBlobRefs`,
+  no-op when `blobs` absent. Exported from `api/index.ts`, `src/index.ts`,
+  `src/editor/index.ts`. `ApiClient.ts`/`apiAdapter.ts` batch-fetch return
+  types gained `blobs?: Record<string, unknown>`; `pipelineStore.ts`'s
+  `fanOutConnectedOutputsBatch` hydrates before `setNodeOutput`.
+  `apps/wb-scene-generator/frontend/src/api/HttpApiClient.ts` passes `blobs`
+  through. Tests: `packages/node-runtime-react/src/api/__tests__/sceneEnvelope.test.ts`
+  (new, 5 cases); `pipelineStore.test.ts` (+1, batch-with-blobs hydrate).
+- **Write-time size-estimate caching — `portByteSize()`/`envelopeByteSize()`
+  are now O(1) reads instead of an O(chunk-count) synchronous directory scan.**
+  `output-cache.ts`: `write()` computes and stores
+  `estimatedExpandedBytes`/`estimatedEnvelopeBytes` in the port's metadata
+  JSON right after sharding; both size-query methods now call
+  `cachedOrScannedByteSize()` (new) which prefers the cached field and only
+  falls back to the original full scan (`scanEnvelopeByteSize()`, renamed
+  from the previous inline logic) when the field is absent (old projects,
+  backward compatible). `types.ts`: `OutputCacheV1` gained the two optional
+  fields. Empirically measured on real 60×60 data: scan time
+  110ms/36ms → 0ms/0ms per call; on a real 200×200 clone (17,830 chunks):
+  three consecutive calls all 0ms (previously would have been the one case
+  that gets *worse*, not better, as a scene grows — this eliminates that).
+  See `aw-support/docs/DEVLOG.md` "2026-07-15 — 场景树内容寻址递归化…" for the
+  full before/after table (honest caveat there too: the recursive dedup
+  itself had mixed/negative results on disk size and 200×200 envelope size
+  for this app's real `add_child` merge-chain data shape — the *caching* is
+  the unconditional win, not the dedup granularity).
+- **`gcBlobs()` rewritten as BFS over transitive blob reachability**, fixing a
+  latent data-loss bug: once blob refs can nest (previous bullet), the old
+  scan-chunk-top-level-fields-only GC would delete a blob that was only
+  reachable *through* another still-live blob. `output-cache.ts`: `gcBlobs()`
+  now loads each newly-discovered live hash's content and scans it for
+  nested blob refs, repeating to a fixed point. Verified on a real 200×200
+  clone: 301/301 blobs correctly judged live (0 false deletes).
+- **`TooLargeOutputSummary` sentinel** — a small `{ __forgeaxTooLargeSummary,
+  nodeId, portId, ... }` object stored in `nodeOutputs` in place of a
+  rejected `tooLarge` port's real value, so probes/tooltips/preview
+  pass-through can recognize and render "(too large, N chunks, ~X MB)"
+  instead of `undefined` or a stale value.
+  `packages/node-runtime-react/src/editor/utils/tooLargeOutputSummary.ts`
+  (new) + `__tests__/tooLargeOutputSummary.test.ts` (new). Consumed by
+  `ProbeEdge.tsx` (skips `formatDataTreeSummary` for a summary sentinel),
+  `nodeTooltip.tsx`'s `formatPortValue`/`formatPortValueExtra` (now
+  zh/en-aware via `useUIStore`'s `langMode`, since the summary text needs a
+  language), and `WorkbenchHost.tsx`'s `stripTooLargeSummaries` before
+  posting preview data into the renderer iframe (a summary sentinel is
+  meaningless to the renderer and would otherwise be forwarded as if it were
+  real scene data). `pipelineStore.helpers.ts` gained
+  `resolveOutputPortType()` to look up a port's declared type for the
+  tooltip/probe formatters.
+- **Project-switch loading-progress panel** (host + renderer-iframe phases
+  merged into one non-blocking checklist overlay), so a slow switch/open no
+  longer looks like a silent hang.
+  `apps/wb-scene-generator/frontend/src/renderer/bridge/loadingSignals.ts`
+  (new, in-iframe progress event bus, `postMessage('workbench:loading-status')`
+  to the host), `workbench/LoadingStatusPanel.{tsx,css}` (new),
+  `workbench/protocol.ts` (`LoadingStatusMessage`), `WorkbenchHost.tsx`
+  (`useLingeringStep`, merges host-observed switch/outputs/execute phases with
+  renderer-reported preview/baked/alias phases), `useNodePreviews.ts`/
+  `useBakedLayers.ts`/`useAliasMetas.ts` (`beginLoadingTask`/`endLoadingTask`
+  at each hook's full-fetch entry point).
+
+### Changed
+- **`autoExecuteOnOpen()` no longer defaults to a full-graph recompute the
+  moment any visible output port is `undefined`.** That happened on nearly
+  every project open (front-end `nodeOutputs` is cleared on every switch
+  regardless of disk-cache validity), accounting for 70-80% of two measured
+  open cycles. `pipelineStore.ts`: now (1) batch-backfills from disk-cached
+  values first (read-only, no compute) to absorb front-end-only staleness,
+  then (2) only for ports still missing, computes the deduped set of root
+  nodes via `getDownstreamIds` and runs `callPipelineExecute({ startNodeId })`
+  per root (kernel's partial-closure execution auto-pulls cold upstream
+  ancestors), falling back to a full `executePipeline()` only once the root
+  count nears the graph size. Verified via headless Playwright: 74 missing
+  ports → 2 root-node partial recomputes, not a 185-node full graph run.
+  New `autoexec-backfill` sync-trace point (`refreshTrace.ts`: `RefreshReason`
+  gained `'autoexec-backfill'`). Tests: `pipelineStore.test.ts` (+2: single
+  missing node only executes that node; disk-cache-valid resolves via
+  backfill with zero `execute` calls).
+- **Sharded-port batch/single-port routes try the dedup envelope at a much
+  lower bar (1MB) instead of only right before the 128MB rejection edge**
+  (P0-11) — see `ENVELOPE_TRY_THRESHOLD_BYTES` above. Verified against a
+  running dev server: one real port's response dropped from ~69MB to
+  ~31.6MB.
+- **Batch output route enforces a cumulative response budget, not just a
+  per-port one.** `projectPipelineRoutes.ts`: new
+  `MAX_BATCH_RESPONSE_BYTES` (128MB); short-circuits when either a single
+  port exceeds the cap *or* the running total would. `[output-batch-trace]`
+  gained a `deferred` counter.
+- **`portByteSize()`/`shardedDataByteSize()` no longer under-report by up to
+  3× for deduped or voxel-coded ports.** Two independent, additive
+  under-estimates existed: (a) a `SharedRef` pointer is a few hundred bytes
+  on disk but expands to the full referenced value on read — the old scan
+  summed *disk* bytes; (b) voxel cells are stored in a packed
+  `{__voxelCells:1,t,d}` encoding smaller than the `{x,y,z,token}[]` shape
+  `read()` actually returns. `voxel-cells-codec.ts` gained
+  `expandedPayloadByteLength()`/`expandedVoxelCellsByteLength()` (computes
+  the true expanded JSON byte count without allocating the expanded
+  objects); `output-cache.ts`'s `shardedDataByteSize()` rewritten to resolve
+  `SharedRef`s via a hash-memo and use the codec function for voxel fields.
+  Verified against real data: one port's estimate corrected from 94.4MB to
+  289.5MB (true 289.55MB, <0.01% error). Tests:
+  `packages/node-runtime/src/__tests__/storage.test.ts` (+2, precision
+  assertions against true expanded byte counts).
+- **Renderer iframe soft-resets on project switch instead of a full
+  destroy-and-remount.** `WorkbenchHost.tsx` now only posts
+  `workbench:project-changed`; `RendererSurface.tsx` handles it via
+  `useRenderStore.getState().reset()`. The previous hard remount
+  (`rendererReloadKey` bump) tore down and reconnected 3 WebSockets +
+  op-catalog/node-meta caches on every switch, which was a meaningful chunk
+  of the perceived "stuck" delay for work `reset()` already covered.
+  `rendererReloadKey`/the iframe `key` prop are left wired as a manual
+  escape hatch; nothing bumps it automatically anymore.
+- **Renderer-side alias/baked-layer subscriptions share one WebSocket instead
+  of opening their own.** `HttpApiClient.ts` gained `subscribeRaw`/
+  `rawListeners` for broadcasts with no `RuntimeEvent` envelope (e.g.
+  `baked:changed`); `useAliasMetas.ts`/`useBakedLayers.ts` now take a shared
+  `client: HttpApiClient` instead of each opening `new WebSocket(...)`.
+  `useAliasMetas.ts` also gained a 300ms-debounced
+  `scheduleAliasMetasRefresh()` collapsing 3-4 previously-independent
+  refresh triggers (mount, `project:viewing`/`project:activated`,
+  host `workbench:project-changed`, `library:changed`) into one fetch per
+  switch. Tests: `useAliasMetas.test.tsx` (new, 5 cases), `useBakedLayers.test.tsx`
+  (updated to drive a real `HttpApiClient` + `FakeWebSocket`).
+- **Output-cache read paths get an in-process cache keyed on file
+  mtime+size** (mirrors `GraphStore`'s existing pattern), invalidated on
+  `write`/`invalidate`/`pruneOrphans`/`pruneByRetention`; batch output route
+  yields the event loop (`setImmediate`) every 8 ports instead of running
+  the whole batch synchronously.
+
+### Fixed
+- **Opening a project for the first time could run the full graph twice.**
+  Two independent, mutually-unaware triggers both called
+  `refreshConnectedOutputs(...).then(autoExecuteOnOpen)` on first
+  open — `WorkbenchHost`'s `bootstrap()`→`switchProject()` cascade, and
+  `Editor.tsx`'s own mount effect. The slower-finishing one's
+  `resetPipelineUiForProjectSwitch()` cleared the outputs the faster one had
+  just computed, so its own "still missing" check fired a second full
+  185-node execute. `Editor.tsx`'s mount effect now checks
+  `viewingProjectId !== null` (project store exists → owns the cascade) and
+  no-ops instead of racing it.
+- **A `tooLarge` port was re-queried on literally every refresh, forever**,
+  because "already cached" was checked via `nodeOutputs[nodeId][port] !==
+  undefined` — but a `tooLarge` port is never given a value, so that check
+  was permanently false regardless of whether the underlying `executedHash`
+  had changed. `pipelineStore.ts` added `_knownTooLargeByPort`
+  (nodeId→portId→`executedHash`) as a parallel "confirmed too large, don't
+  re-ask unless the hash changes" table. Tests: `pipelineStore.test.ts`
+  (+1: repeated refreshes hold the fetch count at 1 until the hash changes).
+- **A sharded port's full value was `JSON.stringify`'d just to measure its
+  byte size before discarding it as `tooLarge`**, synchronously blocking the
+  event loop for up to several seconds per request (measured 1.6-7.5s on
+  real vegetation-group ports) and stalling *unrelated* concurrent requests.
+  `output-cache.ts` added `portByteSize()` (pure `statSync`/`readdirSync`
+  disk-size sum, no read/parse/reassembly); both routes in
+  `projectPipelineRoutes.ts` now short-circuit on this cheap check before
+  ever calling `getNodeOutput()`/`stringify`, with a real-serialize fallback
+  check retained near the size boundary.
+- **Switching into a project with a cold output cache silently left the
+  preview blank** — `refreshConnectedOutputs('project-switch')` only reads
+  already-cached server outputs, never computes; the "cold cache → auto-run
+  once" logic (`autoExecuteOnOpen()`) was wired only to the editor's initial
+  mount, never to the switch path. `projectStore.ts`'s
+  `refreshOutputsAfterProjectSwitch` now chains `autoExecuteOnOpen()` after
+  the refresh (no-op when warm), skipped when the *target* project already
+  has an agent executing it (`targetIsExecuting`, to avoid racing that run's
+  own live-sync).
+- **`OutputCache` no longer multiplies disk usage by the branch count when
+  the same object is legitimately shared by reference across ports/chunks**
+  (e.g. `scene_focus_path`'s `{ tree, focus }` output, 125 branches sharing
+  one `tree` object) — this predates and is a strict subset of the blob-store
+  work above (reference-identity dedup within one `write()` call, no
+  hashing). `output-cache.ts`: `dedupeTopLevel`/`writeChunk` replace a
+  same-reference repeat with a `SharedRef` pointer; `readDataChunks`'s
+  `resolveSharedRefs` restores it. Tests: `storage.test.ts` (+2: 125-branch
+  shared-tree round-trip stays under 2MB on disk vs. ~125MB; two
+  content-equal-but-distinct objects are *not* collapsed).
+
+### Deferred
+- Recursive content-hash dedup showed **limited or negative** disk/wire
+  benefit on this app's real `add_child` merge-chain data (60×60: blob count
+  24→295, disk 766.8KB→1522KB; 200×200: envelope 142.9MB→465.57MB, larger
+  than before) — position-dependent path/version churn defeats subtree
+  reuse, and fine-grained splitting loses whole-payload gzip efficiency. Not
+  pursued further this round; see `wb-scene-generator-scene-tree-storage.md`
+  §8 for the full data and the alternative directions considered (viewport
+  tile-ization, content-addressing independent of position/version).
+- `/execute`'s full-graph HTTP response can still hit V8's `Invalid string
+  length` at 200×200 scale (pre-existing, independent of this batch of
+  work) — needs a response-level byte budget (return execution status only,
+  values fetched separately) rather than a per-port one. Not implemented.
+- **Note on shared-file contamination:** at commit time, several files this
+  entry touches were *also* carrying unrelated in-flight changes from a
+  different, concurrently-edited feature (multi-game project scoping —
+  `activeGameSlug`/`showAllProjects`/`projectSwitchRole`/`gameSlug` on
+  `ProjectMeta`/`listProjects`/`createProject`/`updateProject`):
+  `packages/node-runtime-react/src/editor/stores/projectStore.ts`,
+  `packages/node-runtime/src/layer2/project-registry.ts`,
+  `packages/node-runtime-react/src/api/ApiClient.ts`,
+  `packages/node-runtime-react/src/editor/transport/apiAdapter.ts`,
+  `apps/wb-scene-generator/frontend/src/api/HttpApiClient.ts`. Those
+  fields/branches are **not** part of this entry and are not described
+  above; whoever owns that feature still owes it its own CHANGELOG entry. In
+  `projectStore.ts`/`project-registry.ts` the interleaving is at the
+  statement level within shared functions (`switchProject`, `viewProject`),
+  not separable into independent hunks; in the other three it happens to sit
+  in separate hunks but was left as one commit rather than hand-split, since
+  splitting risked misrepresenting either feature's actual tested state.
+  This commit necessarily includes both features' current on-disk state.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { registerCoreComponents } from '../registry/core-components'
+import { registerCoreSkins } from '../skins/components'
 import { getComponentManifest } from '../registry/component-registry'
 import type { Overlay, Reaction } from '../schema/node-config-schema'
 import {
@@ -11,7 +11,7 @@ import { GraphRuntime } from '../engine/engine'
 import { scnOf, node, rid } from './test-fixtures'
 import type { GameGraph } from '../schema/graph-schema'
 
-registerCoreComponents()
+registerCoreSkins()
 
 describe('overlay events / reactions', () => {
   const overlay: Overlay = {
@@ -112,8 +112,8 @@ describe('overlay events / reactions', () => {
     }]
     const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
-    expect(rt.state.phase).toBe('awaitInteraction')
-    rt.submitInteraction(rid('a', 'q'), 'pass')
+    expect(rt.state.phase).toBe('playing')
+    rt.emitComponentEvent(rid('a', 'q'), 'pass')
     expect(rt.state.currentNodeId).toBe('b')
     expect(rt.state.vars.qi).toBe(3)
   })

@@ -283,7 +283,8 @@ export default defineConfig(() => {
   // 作为 forgeax-studio 插件 build 时，host 把产物挂在 `/extensions/wb-game-video/`
   // 子路径下，需要绝对 base；独立 dev/preview/standalone 用相对 './'。
   const pluginBase =
-    process.env.WB_GAMEVIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './'
+    process.env.VITE_PLUGIN_BASE
+      ?? (process.env.WB_GAMEVIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './')
 
   return {
     base: pluginBase,
@@ -301,11 +302,14 @@ export default defineConfig(() => {
       strictPort: true,
       allowedHosts: true as const,
       hmr: {
-        clientPort: process.env.HMR_CLIENT_PORT
+        clientPort: process.env.VITE_PLUGIN_HMR_CLIENT_PORT
+          ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
+          : process.env.HMR_CLIENT_PORT
           ? Number(process.env.HMR_CLIENT_PORT)
           : process.env.PORT_GAMEVIDEO_STUDIO
           ? Number(process.env.PORT_GAMEVIDEO_STUDIO)
           : undefined,
+        ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
       },
     },
     test: {

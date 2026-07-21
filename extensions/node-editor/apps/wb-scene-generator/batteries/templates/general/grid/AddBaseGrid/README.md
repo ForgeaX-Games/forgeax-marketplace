@@ -241,3 +241,22 @@ curl -s -H 'content-type: application/json' -X POST \
 > 完整 ops 与报告见 `aw-support/battery-verify/p_mr3flg6p_io9iu4/step-m0-addbasegrid.json`。
 
 > ⚠️ **绝不要整体打印 `outputs`**：整图 execute 的 outputs 可能极大（含全 voxel 网格），会刷屏 / 爆上下文。**必须用 jq 投影到具体 `nodeId.portName`**，scene 端口只取 `.[0].items[0].tree.children[].name` 之类摘要。
+
+---
+
+## 单步独立：最小可跑示例（agent 模仿用）
+
+> AddBaseGrid 本身就是**管线起点**，天然「单步独立」——上文「已验证调用示例」（project `p_mr3flg6p_io9iu4`）已是不依赖任何上游模板的最小可跑示例，可直接照抄复用。完整 M0→M8 九步链 + 视觉验收见 [`battery-chain-template-demo/`](../../../../../../../../../aw-support/examples/battery-chain-template-demo/README.md)；agent 模仿总览见同目录 [`agent-imitate.md`](../../../../../../../../../aw-support/examples/battery-chain-template-demo/agent-imitate.md)。
+
+### 端口 → opId → 默认参数（模式化生成依据）
+
+| in_* 端口 | 白名单 opId | 必接 | 默认值/示例 | 备注 |
+|---|---|---|---|---|
+| `in_0` | `empty_scene` | 必接 | `{}` | RootScene 挂接起点 |
+| `in_1` | `text_panel` | 建议 | `"demo_ground"` | BaseName（节点名，**不是** tile） |
+| `in_2` | `number_const` | 建议 | `20` | Width |
+| `in_3` | `number_const` | 建议 | `20` | Height |
+| `in_4` | `text_panel` | 可选（推荐） | `"草地"` | BaseAsset（catalog tile） |
+| `in_8` | `seed_control` | 可选 | `42` | Seed |
+
+用本表默认值即可在任意新项目里独立跑出一个可视化的 20×20 草地底图；其余模板的「单步独立」示例都直接复用本表的 20×20 recipe 作为它们的 Scene 前置（见各自 README「前置：造一个独立 Demo Scene」小节）。

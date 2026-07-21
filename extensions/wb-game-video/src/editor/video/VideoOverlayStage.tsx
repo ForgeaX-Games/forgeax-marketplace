@@ -6,16 +6,13 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { VideoContentRect } from './videoContentRect'
 
 export function videoOverlayStageStyle(contentRect: VideoContentRect | null): CSSProperties {
+  // containerType: 'size' 开容器查询上下文——皮肤里的 cqw/cqh 才能相对这块「舞台」解析，
+  // 与编辑器预览的 `.gc-preview-overlays`（见 catalogCss.ts）保持同一套基准，否则同一份
+  // cqh 配置在预览和全屏试玩里会解析出不同的物理尺寸。
+  const base: CSSProperties = { containerType: 'size', pointerEvents: 'none' }
   return contentRect
-    ? {
-        position: 'absolute',
-        left: contentRect.left,
-        top: contentRect.top,
-        width: contentRect.width,
-        height: contentRect.height,
-        pointerEvents: 'none',
-      }
-    : { position: 'absolute', inset: 0, pointerEvents: 'none' }
+    ? { ...base, position: 'absolute', left: contentRect.left, top: contentRect.top, width: contentRect.width, height: contentRect.height }
+    : { ...base, position: 'absolute', inset: 0 }
 }
 
 export function VideoOverlayStage({

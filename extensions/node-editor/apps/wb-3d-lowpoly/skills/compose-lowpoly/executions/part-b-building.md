@@ -1,15 +1,18 @@
 # PART B · 建筑（Architecture 家族）
 
 > [SKILL.md](../SKILL.md) 路由到此。本文件是 **PART B** 的完整执行步骤。
-> 授权参考只需两份：DSL 语法 [dsl-quickref.md](../dsl-quickref.md)、op 签名
-> [op-directory.md](../op-directory.md)。选型拿不准再查 [battery-catalog.md](../battery-catalog.md)
+> 授权参考只需两份：DSL 语法 [dsl-quickref.md](../dsl-quickref.md)、op 签名——
+> [architecture](../op-directory/architecture.md)（墙/楼板/楼梯/屋顶/窗/门/栏杆/柱）+
+> [core](../op-directory/core.md)（补细节用的 Primitive/CSG）+
+> [assembly-misc](../op-directory/assembly-misc.md)（`part`/`joint`/`material`…），见
+> [op-directory.md](../op-directory.md) 索引。选型拿不准再查 [battery-catalog.md](../battery-catalog.md)
 > 的路由表——按需，别一次全读。
 
 > **DSL-first（唯一流程）**：只写 DSL、用 `lowpoly:model.apply({ source })` 提交。逐条
 > 写 Architecture op（`wall`/`floor_slab`/`stairs`/`roof`/`window`/`door`/`railing`/`column`），各自
 > `part(...)` 包壳后用 `joint(type="fixed",...)`（可开门窗扇用 `type="revolute"`）连到单一根件，靠
 > joint `origin`/`rpy` 摆位，一次 `model.apply` 跑完（编译器自动追加 QC+URDF 终端）。语法见
-> [dsl-quickref.md](../dsl-quickref.md)，op 签名见 [op-directory.md](../op-directory.md)。
+> [dsl-quickref.md](../dsl-quickref.md)，op 签名见 [architecture](../op-directory/architecture.md) 分片。
 > **完成门禁 = 回执干净。**
 
 适用：房屋 / 建筑 / 房间 / 多层壳体 / 室内布局，或栏杆、护栏、柱这类建筑构件——而不是单个
@@ -141,7 +144,7 @@ the terminal if you need `<collision>`.
 | column / pillar | `g_column` | `height` `radius` `shape=round\|square` `base_height` `capital_height` · opt `taper`, `base_style`/`capital_style=plain\|stepped`, `flutes` (round) |
 | assemble the shell | `g_part` + `g_joint_fixed` | wrap each element, place via joint `origin`/`rpy`, all under one root slab |
 
-Confirm exact param names/defaults in [op-directory.md](../op-directory.md) before wiring;
+Confirm exact param names/defaults in [architecture](../op-directory/architecture.md) before wiring;
 the family/routing table is in [battery-catalog.md](../battery-catalog.md).
 
 ## 对齐配方 · Placement recipes（对不上就是这里没做对）
@@ -193,40 +196,43 @@ the family/routing table is in [battery-catalog.md](../battery-catalog.md).
    `[[sx, sy, wellW, wellD]]`（洞的 x/y 用楼梯落点、尺寸略大于梯段投影）。
 3. 楼梯落点 `[sx,sy]` 与楼板井 `[sx,sy]` **必须同坐标**，否则梯上去顶到实心板。
 
-### R5 · 别让结构重叠 & "门为什么还是不行"（可动关节的陷阱）
+### R5 · 别让结构重叠（重叠看情况而定，孤立 part 才是硬伤）
 
-**QC 对重叠的判定是有条件的**（`g_geometry_qc` 第 180–319 行）：
+**QC 对重叠的判定按"这一对 part 是否真的会相对运动"来定，跟模型里有没有*别处*的可动
+关节无关**（`g_geometry_qc` 第④步，`partsMoveRelativeToEachOther`）：
 
-- **全 `g_joint_fixed` 的静态建筑**：兄弟 part 的 AABB 互穿只当**非致命 warning**。
-  因为低模建筑里"合理交叠"很多——墙在墙角/T 形接头按一个墙厚交叠、窗/门框嵌在墙
-  平面里、门扇的 AABB 落在门框 AABB 内、楼梯占着楼板的楼梯井——这些都是 AABB 保守
-  估计的常态，不算缺陷。
-- **一旦模型里出现任意一个可动关节**（`g_joint_revolute`/`prismatic`/…），QC 会把
-  **整个模型**的所有 AABB 互穿**升级为致命 issue**。
+- 兄弟 part 的 AABB 互穿 → **`note`（刚性 fixed 链）或 `warning`（运动链上）**，**均不 fail `valid`**。
+  低模建筑里"合理交叠"很多：墙在墙角/T 形接头按一个墙厚交叠、窗/门框嵌在墙平面里、门扇的
+  AABB 落在门框 AABB 内、楼梯占着楼板的楼梯井……这些都是 AABB 保守估计的常态，**默认不算缺陷**，
+  哪怕模型别处（比如另一扇门）用了 `revolute` 也不会被牵连。
+- 只有当互穿的两个 part 之间路径上有非 fixed joint 时，才升级为 **`warning` 供审查**
+  （比如某扇门的转轴装反了，门扇休止位直接怼进自己的框）——视情况用 `allow_pairs` 白名单或
+  调整摆位，**不要为了消 warning 去摘 joint 或把 part 挪脱离连接**。
 
-**这正是"窗没问题、门还不行"的根因**：窗用 `g_joint_fixed` → 全 fixed → 上面那些
-交叠都是 warning；而门只要做成可开的 `g_joint_revolute`，就给模型引入了一个可动
-关节 → 全楼的墙角交叠、嵌框交叠、楼梯井交叠**全部变致命** → 门（连同整栋楼）过不了 QC。
+所以窗用 fixed、门用 `g_joint_revolute` 是完全独立的两件事：门变成可动关节，只影响
+"门本身这条运动链上的重叠"是否致命，**不会把全楼的墙角交叠、嵌框交叠、楼梯井交叠一
+起判死**。给门加 revolute 不再需要为了让全楼过 QC 而被迫改动别处布局。
 
-处理原则（二选一）：
-
-1. **静态建筑就全用 `g_joint_fixed`（推荐默认）。** 低模房子通常不需要真的会开的门；
-   门框 + 门扇都用 fixed 连上，门扇摆在 `leaf_origin` 关着的位置即可。这样不引入可动
-   关节，全部交叠回到 warning 级。`g_door` 的 `openable` 只是给生成器的提示，不代表
-   一定要用 revolute。
-2. **确实要能开的门/窗**：用 `g_joint_revolute` 之后，必须在 `g_geometry_qc` 上用
-   **`allow_pairs`** 白名单掉那些**合理**交叠对（如 `"door1:wall_s"`、
-   `"door1:door1_leaf"`、相邻墙 `"wall_s:wall_e"`、`"stair1:slab1"`），
-   必要时配 `allow_joints`；这样只剩**真正的**运动碰撞会报错。别用白名单去盖真穿模。
+如果某个可动关节自身的运动链上确实有一处"合理"交叠（例如门扇歇位时故意贴在门框
+内侧），才需要在 `g_geometry_qc` 上用 **`allow_pairs`** 白名单掉那一对（如
+`"door1:door1_leaf"`），必要时配 `allow_joints`。别用白名单去盖真穿模。
 
 **真正要消除的重叠**（这些是真缺陷，白名单不能盖）：共享内墙要**去重**（相邻两房间别
 在公共边各画一道墙）、别把两块 shape 叠在同一处、窗/门要**恰好填满**洞口而不是比洞
 大一圈捅进墙体、楼梯别插进实心楼板（见 R4）。先用 `g_metrics` 读
 `max_penetration`/`overlap_ratio` 判断是真穿模还是 AABB 保守误报。
 
+**孤立 part 才是必须马上修的硬伤**：`islands`（多棵根树，**有 joint 时**）和 `floating_link`
+（无关节路径到根）在 `g_geometry_qc` 里始终是**致命 error**——URDF 只渲染一棵根树，没接进去的
+part 会被静默丢弃。看到 `floating_link`/`islands` 就用 `g_joint_*` 把它接回那棵唯一的根树；**不要
+为了消掉一条 overlap note/warning 就摘掉 joint 或把 part 挪得脱离原本的连接**，那样只是把一个
+"看情况而定"的信息信号换成一个真正的致命错误。
+
 ## References
 
 - [PART A · 资产 / 机械](part-a-asset.md): the shared DSL-first flow + QC loop.
-- [op-directory.md](../op-directory.md) · [dsl-quickref.md](../dsl-quickref.md):
-  op signatures + DSL syntax (the authoring SSOTs).
+- op-directory shards used by PART B: [architecture](../op-directory/architecture.md) ·
+  [core](../op-directory/core.md) · [assembly-misc](../op-directory/assembly-misc.md) ·
+  [dsl-quickref.md](../dsl-quickref.md): op signatures + DSL syntax (the authoring SSOTs);
+  full family index at [op-directory.md](../op-directory.md).
 - [battery-catalog.md](../battery-catalog.md): family list + routing table.

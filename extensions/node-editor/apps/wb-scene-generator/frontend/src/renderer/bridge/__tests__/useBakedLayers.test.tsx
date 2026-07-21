@@ -6,6 +6,7 @@ import { bakedApi } from '../bakedApi'
 import type { BakedLayerDTO } from '../bakedApi'
 import { hasLocalBakedLayerEdits, useRenderStore } from '../../store'
 import { writeEditMode } from '../../../surfaces/library/editToolbarBus'
+import { HttpApiClient } from '../../../api/HttpApiClient'
 
 let mockEditMode = false
 vi.mock('../../../surfaces/library/editToolbarBus', async (importOriginal) => {
@@ -37,6 +38,12 @@ class FakeWebSocket {
   }
 }
 
+// `useBakedLayers` now shares the SAME `/ws` connection `useNodePreviews`/
+// `useAliasMetas` use (via `client.subscribe`/`subscribeRaw`) instead of
+// opening its own socket — so tests drive it through a real `HttpApiClient`
+// wired to `FakeWebSocket`, exactly like `api/__tests__/httpApiClient.test.ts`.
+let client: HttpApiClient
+
 describe('useBakedLayers', () => {
   beforeEach(() => {
     mockEditMode = false
@@ -44,10 +51,12 @@ describe('useBakedLayers', () => {
     FakeWebSocket.last = null
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket)
     vi.mocked(bakedApi.list).mockReset()
+    client = new HttpApiClient({ baseUrl: '', pipelineId: 'main' })
   })
 
   afterEach(() => {
     cleanup()
+    client.dispose()
     vi.unstubAllGlobals()
   })
 
@@ -67,7 +76,7 @@ describe('useBakedLayers', () => {
         },
       ])
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
     expect(bakedApi.list).toHaveBeenLastCalledWith('summary')
     expect(useRenderStore.getState().bakedLayers['baked:/Layer']?.cells).toEqual([])
@@ -96,7 +105,7 @@ describe('useBakedLayers', () => {
         },
       ])
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
 
     FakeWebSocket.last!.onmessage?.({
@@ -135,7 +144,7 @@ describe('useBakedLayers', () => {
         },
       ])
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(useRenderStore.getState().bakedLayers['baked:/Layer']).toBeDefined())
 
     useRenderStore.getState().paintBakedCells('baked:/Layer', [
@@ -172,7 +181,7 @@ describe('useBakedLayers', () => {
         resolveProjectList = resolve
       }))
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(useRenderStore.getState().bakedLayers['baked:/Layer']).toBeDefined())
     useRenderStore.getState().paintBakedCells('baked:/Layer', [
       { x: 9, y: 9, z: 0, token: 'grass' },
@@ -209,7 +218,7 @@ describe('useBakedLayers', () => {
         },
       ])
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
 
     act(() => {
@@ -266,7 +275,7 @@ describe('useBakedLayers', () => {
         },
       ])
 
-    renderHook(() => useBakedLayers())
+    renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(useRenderStore.getState().bakedLayers['baked:/Layer']).toBeDefined())
     useRenderStore.getState().paintBakedCells('baked:/Layer', [
       { x: 9, y: 9, z: 0, token: 'grass' },
@@ -286,16 +295,25 @@ describe('useBakedLayers', () => {
     })
   })
 
-  it('closes the baked websocket subscription on unmount', async () => {
+  it('unsubscribes from the shared client socket on unmount (no longer owns/closes it)', async () => {
+    // The hook now shares `client`'s ONE `/ws` connection (see useBakedLayers.ts)
+    // instead of opening/closing its own — so unmount must drop its listeners
+    // WITHOUT closing the socket (other hooks on the same client may still need
+    // it). Prove listener-removal behaviorally: after unmount, a `baked:changed`
+    // broadcast no longer triggers a refetch.
     vi.mocked(bakedApi.list).mockResolvedValue([])
 
-    const { unmount } = renderHook(() => useBakedLayers())
+    const { unmount } = renderHook(() => useBakedLayers(client))
     await waitFor(() => expect(FakeWebSocket.last).not.toBeNull())
     const ws = FakeWebSocket.last!
+    await waitFor(() => expect(bakedApi.list).toHaveBeenCalledTimes(1))
 
     unmount()
+    expect(ws.closed).toBe(false)
 
-    expect(ws.closed).toBe(true)
+    ws.onmessage?.({ data: JSON.stringify({ event: 'baked:changed', payload: {} }) })
+    await new Promise((r) => setTimeout(r, 420)) // > useBakedLayers' BAKED_CHANGED_DEBOUNCE_MS (400)
+    expect(bakedApi.list).toHaveBeenCalledTimes(1)
   })
 
   // Regression: a STRUCTURAL baked mutation (add/move/remove/bake) right after a
@@ -309,7 +327,7 @@ describe('useBakedLayers', () => {
       vi.mocked(bakedApi.list).mockResolvedValueOnce([
         { nodePath: '/Layer', nodeName: 'Layer', value: 1, assetName: 'grass', assetType: 'tile', version: 1, cells: [] },
       ])
-      renderHook(() => useBakedLayers())
+      renderHook(() => useBakedLayers(client))
       await waitFor(() => expect(useRenderStore.getState().bakedLayers['baked:/Layer']).toBeDefined())
 
       // A paint is in flight (dirty) — exactly the place-object → auto-sub-layer case.
@@ -330,7 +348,7 @@ describe('useBakedLayers', () => {
       vi.mocked(bakedApi.list).mockResolvedValueOnce([
         { nodePath: '/Layer', nodeName: 'Layer', value: 1, assetName: 'grass', assetType: 'tile', version: 1, cells: [] },
       ])
-      renderHook(() => useBakedLayers())
+      renderHook(() => useBakedLayers(client))
       await waitFor(() => expect(useRenderStore.getState().bakedLayers['baked:/Layer']).toBeDefined())
 
       useRenderStore.getState().paintBakedCells('baked:/Layer', [{ x: 0, y: 0, z: 0, token: 'grass' }])

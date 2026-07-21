@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { NodeProps } from 'reactflow'
 import { BatteryNode, usePipelineStore, isDataTreeEntries, type Battery } from '@forgeax/node-runtime-react/editor'
+import { pluginUrl } from '../api/pluginHttp'
 import './ImageBatteryNode.css'
 
 interface ImageBatteryNodeData {
@@ -31,7 +32,7 @@ function imageRefToSrc(value: string): string {
   try {
     const parsed = JSON.parse(trimmed) as { blobId?: unknown }
     if (typeof parsed.blobId === 'string' && parsed.blobId) {
-      return `/api/v1/library/blob/${encodeURIComponent(parsed.blobId)}`
+      return pluginUrl(`/api/v1/library/blob/${encodeURIComponent(parsed.blobId)}`)
     }
   } catch {
     return ''

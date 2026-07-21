@@ -4,13 +4,15 @@
 
 以**兴趣点**为中心，在父区域有效格内的圆形半径内采样多个小型装饰物点位并挂树；算法核心为 scenealg **`alg_points_center_scatter`**（源自 `components/decoration/precise_decoration_scatter`）。
 
-## 与相关模板的分工
+## 与相关模板的分工（选型）
 
-| 模板 | 用途 |
-|---|---|
-| **NaturalDecorationDistribution** | 全区域**随机散布**（密度驱动，无中心点） |
-| **PlaceOneDecoration** | **单个**装饰物，矩形 footprint 精准贴合 |
-| **LocalPreciseDecoration**（本模板） | 以兴趣点为中心的**局部多颗**小型装饰（半径 + 数量 + 算法） |
+| 模板 | 何时用 | 可挂资产 |
+|---|---|---|
+| **PlaceOneDecoration** | 少量、有明确位置和/或底面尺寸 | 需占格贴合的物件（优先） |
+| **LocalPreciseDecoration**（本模板） | 兴趣点旁局部多颗（半径 + 数量 + 算法） | **仅**底面简单、结构简单的小物件 |
+| **NaturalDecorationDistribution** | 全区域密度填充 | 同上——简单植被/石块 |
+
+本模板**无顶层 Footprint 口**。有明显宽深 + 落点 → 改用 PlaceOne。按需求选用，不必硬凑三种。
 
 ## 主要可见端口
 
@@ -23,7 +25,7 @@
 | IN | `in_21` | Algorithm 采样算法：`random` / `cluster` / `ring` / `poisson` / `noise` |
 | IN | `in_0` | NamePrefix 名称前缀 |
 | IN | `in_5` | AssetName 装饰资产名 |
-| IN | `in_3` | Seed 随机种子 |
+| IN | `in_3` | Seed 随机种子（**必接** `aw_m0_seed.seed`，禁止 0/悬空） |
 | OUT | `out_1` | Decoration 装饰（主产物） |
 | OUT | `out_2` | Rest 剩余空地 |
 

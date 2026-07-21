@@ -2,7 +2,7 @@
 
 > **这是什么。** 按 UI 区域**归类**前端的每一块：它是哪个组件、由 kernel 提供还是本 app 自写、靠哪条数据通道（A=REST / B=WS / C=跨 iframe 总线，见 [`wb-2d-wiring-index.md`](./wb-2d-wiring-index.md) §2）连到后端的哪个落点。
 > **不替你判断 bug 在哪**——只告诉你"这块东西的数据从哪来、归谁管"。
-> 路径相对本 app 根 `packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/`。引用带 `file:line`，以"文件+符号名"为准（行号会漂）。
+> 路径相对本 app 根 `packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/`。引用带 `file:line`，以"文件+符号名"为准（行号会漂）。
 
 ---
 
@@ -44,7 +44,7 @@
 
 挂载于 `WorkbenchHost.tsx:336-351`；本 app 只通过 props 做**域扩展**：
 
-```336:351:packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/frontend/src/workbench/WorkbenchHost.tsx
+```336:351:packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/frontend/src/workbench/WorkbenchHost.tsx
       {editorInline && (
         <div className="scene-workbench__editor">
           <Editor

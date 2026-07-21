@@ -5,6 +5,24 @@ import type { Battery, Pipeline, PipelineEdge } from '../types.js'
 
 type DynamicPort = { name: string; type: string; label: string; access?: string }
 
+/** Resolve an output port's logical type from the live graph + battery catalog. */
+export function resolveOutputPortType(
+  pipeline: Pipeline | null,
+  batteries: readonly Battery[],
+  dynamicOutputPorts: Readonly<Record<string, readonly DynamicPort[]>>,
+  nodeId: string,
+  portId: string,
+): string | undefined {
+  if (!pipeline) return undefined
+  const node = pipeline.nodes.find((n) => n.id === nodeId)
+  if (!node) return undefined
+  const dyn = dynamicOutputPorts[nodeId]?.find((p) => p.name === portId)
+  if (dyn?.type) return dyn.type
+  const battery = batteries.find((b) => b.id === node.batteryId)
+  const spec = battery?.outputs.find((p) => p.name === portId)
+  return spec?.type
+}
+
 /** Distinct output ports the editor hydrates for probes / tooltips. */
 export function collectVisibleOutputPorts(
   pipeline: Pipeline,

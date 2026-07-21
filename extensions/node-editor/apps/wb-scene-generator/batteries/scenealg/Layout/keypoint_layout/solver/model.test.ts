@@ -61,6 +61,18 @@ describe('buildModel', () => {
     expect(ori?.angle).toBeCloseTo(0, 10) // E = 0 rad
   })
 
+  it('resolves peripheral relations (parent → child rim bias)', () => {
+    const m = buildModel({
+      hierarchy: {
+        id: 'town',
+        area: 100,
+        children: [{ id: 'cliff', area: 10, children: [] }],
+      },
+      relations: [{ from: 'town', to: 'cliff', kind: 'peripheral' }],
+    })
+    expect(m.relations).toEqual([{ from: 'town', to: 'cliff', kind: 'peripheral' }])
+  })
+
   it('drops relations referencing unknown nodes or bad direction, with warnings', () => {
     const m = buildModel({
       hierarchy: { id: 'a', area: 1, children: [{ id: 'b', area: 1, children: [] }] },

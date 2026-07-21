@@ -8,7 +8,7 @@ import { node, scnOf } from './test-fixtures'
 
 const COMPONENT_IDS = ['floatT']
 beforeEach(() => {
-  registerComponent('floatT', { role: 'presentation' })
+  registerComponent('floatT', {})
 })
 afterEach(() => COMPONENT_IDS.forEach(unregisterComponent))
 

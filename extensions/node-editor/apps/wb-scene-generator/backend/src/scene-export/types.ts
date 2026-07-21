@@ -157,6 +157,18 @@ export interface CookedScene {
   objectAtlasInputs: SceneAtlasInput[]
 }
 
+/**
+ * TSJ collider descriptor (normalized [0,1], origin bottom-left, Y-up — same
+ * convention as `pivot`). Mirrors the reference bundle's `object_atlas.tsj` /
+ * `terrain_atlas.tsj` tile.collider field so the shipped viewer's
+ * `pointInCollider` / `bakeCollisionCells` can bake it without any format
+ * translation.
+ */
+export type SceneTileCollider =
+  | { type: 'none' }
+  | { type: 'rect'; rect: [number, number, number, number] }
+  | { type: 'polygon'; points: Array<[number, number]> }
+
 export interface SceneAtlasInput {
   id: number
   role: 'terrain' | 'object'
@@ -172,4 +184,10 @@ export interface SceneAtlasInput {
    * whole image is packed as one tile (objects / single-image tiles).
    */
   srcRect?: { x: number; y: number; w: number; h: number }
+  /**
+   * Collision shape for this atlas tile, derived from the library asset's
+   * `geometry_json.collision_mask`. Absent → the atlas builder writes
+   * `{ type: 'none' }` (no collider), matching prior behaviour.
+   */
+  collider?: SceneTileCollider
 }

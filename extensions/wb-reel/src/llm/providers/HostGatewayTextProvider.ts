@@ -1,4 +1,5 @@
 import type { StreamEvent, TextClient, TextRequest } from '../config/types'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 /**
  * HostGatewayTextProvider —— 把文本生成委托给宿主 forgeax-server 的 litellm
@@ -37,7 +38,7 @@ export class HostGatewayTextProvider implements TextClient {
   private readonly model: string
 
   constructor(opts: { base?: string; model?: string } = {}) {
-    this.base = (opts.base ?? '/__ce-api__').replace(/\/$/, '')
+    this.base = (opts.base ?? pluginUrl('/__ce-api__')).replace(/\/$/, '')
     this.model = opts.model ?? 'litellm@host-gateway'
   }
 
@@ -49,7 +50,7 @@ export class HostGatewayTextProvider implements TextClient {
   }
 
   async generate(req: TextRequest): Promise<string> {
-    const resp = await fetch(`${this.base}/reel-chat`, {
+    const resp = await pluginFetch(`${this.base}/reel-chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(buildBody(req)),
@@ -74,7 +75,7 @@ export class HostGatewayTextProvider implements TextClient {
     const t0 = Date.now()
     let resp: Response
     try {
-      resp = await fetch(`${this.base}/reel-chat-stream`, {
+      resp = await pluginFetch(`${this.base}/reel-chat-stream`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify(buildBody(req)),

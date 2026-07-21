@@ -22,11 +22,11 @@ import {
 } from '../../../framework/geometry/topBillboard'
 import { getOrLoadImage } from '../../../framework/asset/imageCache'
 import type { RuleSprite } from '../../../framework/asset/ruleCache'
-import { colorForLayerIdx, colorForValue, rgbaToCss } from '../../../framework/palette'
+import { colorForValue, rgbaToCss } from '../../../framework/palette'
 import type { DrawMode } from '../../../types'
 import { TEXTURE_PPU } from '../../../framework/geometry/constants'
 import type { CollectedCell, LayerAssetBinding, ResolvedDrawSink, ResolvedFace } from './types'
-import { pickFaceSprite } from './pickFaceSprite'
+import { pickFaceSprite, pickFaceSpriteIndexIfMapped } from './pickFaceSprite'
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 interface PaintedRect { x: number; y: number; w: number; h: number }
@@ -101,9 +101,12 @@ export function paintCell(
 
   // Selection/editor-selection color boosts are encoded on each collected cell by
   // the mode before the master canvas is built.
-  const baseColor = cell.isMultiValue
-    ? colorForValue(cell.value, { selected: cell.isSelected, editorSelected: cell.isEditorSelected })
-    : colorForLayerIdx(cell.layerIdx, { selected: cell.isSelected, editorSelected: cell.isEditorSelected })
+  // Single-value Output voxels carry layer.value on every cell — same key as the
+  // Output list swatch / Free3D / Top / Iso Color paths.
+  const baseColor = colorForValue(cell.value, {
+    selected: cell.isSelected,
+    editorSelected: cell.isEditorSelected,
+  })
 
   if (drawMode === 'wire') {
     paintWireCell(ctx, top, front, cellSize, baseColor)
@@ -159,16 +162,39 @@ function paintAssetCell(
 ): PaintedRect[] {
   const paintedRects: PaintedRect[] = []
   if (binding.rule) {
-    // face-aware:顶面 / 立面分别 pick + draw,缺哪面就 skip
+    // face-aware:顶面 / 收口(entry) / 立面分别 pick + draw,缺哪面就 skip
     const topFace = binding.rule.faces.top
-    if (topFace) {
+    const entryFace = binding.rule.faces.entry
+    const topCtxBase = {
+      sprites: binding.rule.sprites,
+      cell, coordsByLayerIdx, regions: binding.regions,
+    }
+    let drewTop = false
+    if (entryFace) {
+      const entryIdx = pickFaceSpriteIndexIfMapped({
+        face: entryFace, faceTag: 'entry',
+        validVariantIdxs: binding.validVariantIdxs.entry,
+        validVariantWeights: binding.validVariantWeights.entry,
+        validVariantPoolsByTileId: binding.validVariantPoolsByTileId.entry,
+        ...topCtxBase,
+      })
+      if (entryIdx !== null) {
+        const entrySprite = binding.rule.sprites[entryIdx] ?? binding.rule.sprites[0]
+        if (entrySprite) {
+          paintedRects.push(drawSprite(ctx, img, entrySprite, top.x, top.y, cellSize))
+          emitResolved(capture, cell, 'top', entryIdx,
+            { x: entrySprite.x, y: entrySprite.y, w: entrySprite.w, h: entrySprite.h })
+          drewTop = true
+        }
+      }
+    }
+    if (!drewTop && topFace) {
       const topSprite = pickFaceSprite({
         face: topFace, faceTag: 'top',
-        sprites: binding.rule.sprites,
         validVariantIdxs: binding.validVariantIdxs.top,
         validVariantWeights: binding.validVariantWeights.top,
         validVariantPoolsByTileId: binding.validVariantPoolsByTileId.top,
-        cell, coordsByLayerIdx, regions: binding.regions,
+        ...topCtxBase,
       })
       if (topSprite) {
         paintedRects.push(drawSprite(ctx, img, topSprite, top.x, top.y, cellSize))

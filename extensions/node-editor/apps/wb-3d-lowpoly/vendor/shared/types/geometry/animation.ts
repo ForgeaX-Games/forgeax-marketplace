@@ -26,6 +26,11 @@ export interface JointAnimationClip {
    * （弧度 revolute/continuous | 米 prismatic）。
    */
   channels: Record<string, number[]>;
+  /**
+   * 可选模型根位移，模型根帧（Z-up、+X 向前）中的米制偏移。
+   * 每项相对 skeleton root 的 bind position，长度必须 === frameCount。
+   */
+  rootTranslation?: [number, number, number][];
 }
 
 /** 解析结果：成功给 clip，失败给 error 字符串。 */
@@ -113,14 +118,33 @@ export function parseJointAnimationClip(value: unknown): ParseClipResult {
     channels[joint] = nums;
   }
 
+  let rootTranslation: [number, number, number][] | undefined;
+  if (obj.rootTranslation !== undefined) {
+    if (!Array.isArray(obj.rootTranslation)) {
+      return { clip: null, error: 'rootTranslation must be an array of [x,y,z] vectors' };
+    }
+    rootTranslation = [];
+    for (let i = 0; i < obj.rootTranslation.length; i++) {
+      const value = obj.rootTranslation[i];
+      if (!Array.isArray(value) || value.length !== 3) {
+        return { clip: null, error: `rootTranslation[${i}] must be a [x,y,z] vector` };
+      }
+      const vector = value.map(readFiniteNumber);
+      if (vector.some((component) => component === undefined)) {
+        return { clip: null, error: `rootTranslation[${i}] contains a non-finite value` };
+      }
+      rootTranslation.push([vector[0] as number, vector[1] as number, vector[2] as number]);
+    }
+  }
+
   const name = typeof obj.name === 'string' ? obj.name : '';
   const fps = readFiniteNumber(obj.fps) ?? 30;
   const loop = typeof obj.loop === 'boolean' ? obj.loop : undefined;
 
-  // frameCount 优先取显式字段（frameCount / frames），否则由首个 channel 推断。
+  // frameCount 优先取显式字段（frameCount / frames），否则由首个 channel / 根位移推断。
   const explicitFrames = readFiniteNumber(obj.frameCount) ?? readFiniteNumber(obj.frames);
   const channelLengths = Object.values(channels).map((c) => c.length);
-  const inferredFrames = channelLengths.length > 0 ? channelLengths[0] : 0;
+  const inferredFrames = channelLengths.length > 0 ? channelLengths[0] : (rootTranslation?.length ?? 0);
   const frameCount = explicitFrames !== undefined ? Math.trunc(explicitFrames) : inferredFrames;
 
   return {
@@ -130,6 +154,7 @@ export function parseJointAnimationClip(value: unknown): ParseClipResult {
       frameCount,
       ...(loop !== undefined ? { loop } : {}),
       channels,
+      ...(rootTranslation !== undefined ? { rootTranslation } : {}),
     },
     error: null,
   };
@@ -233,12 +258,23 @@ export function validateClipAgainstJoints(
     (s) => isMovable(s) && !channeledJoints.has(s.id),
   ).length;
 
+  let rootTranslation: [number, number, number][] | undefined;
+  if (clip.rootTranslation !== undefined) {
+    if (clip.rootTranslation.length !== frameCount) {
+      errors.push(
+        `rootTranslation has ${clip.rootTranslation.length} frames, expected ${frameCount}`,
+      );
+    }
+    rootTranslation = clip.rootTranslation.map((v) => [v[0], v[1], v[2]]);
+  }
+
   const outClip: JointAnimationClip = {
     name: clip.name,
     fps,
     frameCount,
     ...(clip.loop !== undefined ? { loop: clip.loop } : {}),
     channels: outChannels,
+    ...(rootTranslation !== undefined ? { rootTranslation } : {}),
   };
 
   const durationSec = Number.isFinite(fps) && fps > 0 && Number.isFinite(frameCount)

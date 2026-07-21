@@ -231,11 +231,12 @@ export function gMetrics(input: Record<string, unknown>): Record<string, unknown
   const overBudget = false;
 
   // ── 综合评分：各质量项按权重扣分 ──
+  // 连接性（islands/floating）重罚；重叠仅信息性轻扣（低模少量交叠是常态）。
   let score = 100;
-  score -= Math.min(40, 15 * floating.length);
-  score -= Math.min(45, 15 * movingJointCollisions);
-  score -= Math.min(30, 10 * Math.max(0, islands - 1));
-  score -= Math.min(15, 2 * overlapPairs);
+  score -= Math.min(50, 20 * floating.length);
+  score -= Math.min(40, 10 * Math.max(0, islands - (joints.length === 0 ? parts.length : 1)));
+  score -= Math.min(15, 5 * movingJointCollisions);
+  score -= Math.min(5, 1 * Math.max(0, overlapPairs - movingJointCollisions));
   score -= Math.min(20, 5 * jointsWithGap);
   if (hasBox && Math.abs(groundOffset) > gapTol) score -= 5;
   if (primitiveOnly) score -= 10;
@@ -245,9 +246,9 @@ export function gMetrics(input: Record<string, unknown>): Record<string, unknown
 
   // ── 各项 pass/warn/fail 明细 ──
   const overlapStatus: Status = overlapPairs === 0 ? 'pass' : 'warn';
-  const collisionStatus: Status = movingJointCollisions > 0 ? 'fail' : 'pass';
+  const collisionStatus: Status = movingJointCollisions > 0 ? 'warn' : 'pass';
   const connectStatus: Status =
-    floating.length > 0 || islands > 1 ? 'fail' : jointsWithGap > 0 ? 'warn' : 'pass';
+    floating.length > 0 || (joints.length > 0 && islands > 1) ? 'fail' : jointsWithGap > 0 ? 'warn' : 'pass';
   const groundingStatus: Status = !hasBox ? 'n/a' : Math.abs(groundOffset) > gapTol ? 'warn' : 'pass';
   const richnessStatus: Status = primitiveOnly ? 'warn' : 'pass';
   const polyStatus: Status = bake ? (overBudget ? 'warn' : 'pass') : 'n/a';
@@ -330,28 +331,14 @@ function countIslands(partIds: readonly string[], joints: readonly Statement[]):
 function findFloatingLinks(parts: readonly Statement[], joints: readonly Statement[]): string[] {
   if (parts.length <= 1 || joints.length === 0) return [];
   const partIds = new Set(parts.map(p => p.id));
-  const children = new Set<string>();
-  const adj = new Map<string, string[]>();
-  for (const id of partIds) adj.set(id, []);
+  const linked = new Set<string>();
   for (const j of joints) {
-    const p = j.args.parent; const c = j.args.child;
-    if (!p || p.kind !== 'ref' || !c || c.kind !== 'ref') continue;
-    if (!partIds.has(p.name) || !partIds.has(c.name)) continue;
-    adj.get(p.name)!.push(c.name);
-    adj.get(c.name)!.push(p.name);
-    children.add(c.name);
+    const p = j.args.parent;
+    const c = j.args.child;
+    if (p?.kind === 'ref' && partIds.has(p.name)) linked.add(p.name);
+    if (c?.kind === 'ref' && partIds.has(c.name)) linked.add(c.name);
   }
-  const rootList = [...partIds].filter(id => !children.has(id));
-  const seen = new Set<string>();
-  const queue = rootList.length > 0 ? [...rootList] : [parts[0].id];
-  for (const r of queue) seen.add(r);
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    for (const nb of adj.get(cur) ?? []) {
-      if (!seen.has(nb)) { seen.add(nb); queue.push(nb); }
-    }
-  }
-  return [...partIds].filter(id => !seen.has(id)).sort();
+  return [...partIds].filter(id => !linked.has(id)).sort();
 }
 
 // ── 工具 ──

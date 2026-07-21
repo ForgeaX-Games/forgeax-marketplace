@@ -17,7 +17,7 @@ export function resolveWorkspaceRoot(): string {
   return process.env.FORGEAX_PROJECT_ROOT ?? resolve(repoRoot, '.forgeax-runtime')
 }
 
-const PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
+const PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
 
 let registry: ProjectRegistry | null = null
 let sharedOps: OpRegistry | null = null

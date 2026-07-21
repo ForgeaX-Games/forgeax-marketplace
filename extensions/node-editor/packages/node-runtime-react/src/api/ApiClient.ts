@@ -71,6 +71,8 @@ export interface CreateProjectRequest {
   type?: string
   name: string
   description?: string
+  /** Owning ForgeaX game slug — tags the project for per-game list filtering. */
+  gameSlug?: string
   /** Server-side template path/id the backend resolves + seeds from. */
   fromTemplate?: string
 }
@@ -163,6 +165,37 @@ export interface ApiClient {
     nodeId: string,
     portId: string,
   ): Promise<{ executedHash: string; valid: boolean; sharded: boolean; missing?: boolean }>
+  /**
+   * Batch value+meta read for many ports in ONE HTTP round trip — replaces N
+   * sequential getNodeOutputMeta+getNodeOutput pairs with a single request
+   * (optionally `metaOnly` to skip value serialization entirely). OPTIONAL:
+   * transports that don't implement it force callers to fall back to the
+   * per-port path.
+   */
+  getNodeOutputsBatch?(
+    ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+    opts?: { metaOnly?: boolean },
+  ): Promise<
+    ReadonlyArray<{
+      nodeId: string
+      portId: string
+      value?: unknown
+      /**
+       * Present when the backend shipped a Phase-2 deduped wire envelope
+       * instead of a `tooLarge` sentinel — see
+       * wb-scene-generator-scene-tree-storage.md §3. `value` still holds the
+       * DataTreeEntry[]-shaped payload, but any item field that repeats
+       * (e.g. a `scene_focus_path` decoration tree shared by many branches)
+       * is replaced by `{ __outputCacheBlobRef: hash }`; `blobs[hash]` holds
+       * the one real copy. Callers must hydrate `value` against `blobs`
+       * before treating it as a normal port value.
+       */
+      blobs?: Record<string, unknown>
+      meta: { executedHash: string; valid: boolean; sharded: boolean; dataChunks?: number; type?: string } | null
+      tooLarge?: boolean
+      estimatedBytes?: number
+    }>
+  >
   getHistory(opts?: HistoryQuery): Promise<readonly HistoryEntryV1[]>
   listOps(): Promise<readonly OpSpec[]>
 
@@ -266,8 +299,13 @@ export interface ApiClient {
   // the open cascade's server step — it sets the UI viewing target so subsequent
   // getPipeline()/applyBatch() observe the viewed project's isolated graph.
 
-  /** List all projects in the workspace. */
-  listProjects?(): Promise<readonly ProjectMeta[]>
+  /**
+   * List projects in the workspace. `opts.gameSlug` scopes to that game's
+   * projects only; omit (or pass `{ gameSlug: undefined }`) to list every
+   * project ("show all"). Transports that don't support scoping ignore opts
+   * and always return everything.
+   */
+  listProjects?(opts?: { gameSlug?: string }): Promise<readonly ProjectMeta[]>
   /** Fetch one project's manifest. Null when not found. */
   getProject?(id: string): Promise<ProjectRecord | null>
   /**
@@ -278,8 +316,8 @@ export interface ApiClient {
   getProjectAssetsSummary?(id: string): Promise<{ producedCount: number }>
   /** Create a project (optionally seeded from a server-side template). */
   createProject?(req: CreateProjectRequest): Promise<ProjectMeta>
-  /** Patch a project's metadata (name / description / thumbnail / type). */
-  updateProject?(id: string, patch: { name?: string; description?: string; thumbnail?: string; type?: string }): Promise<ProjectMeta>
+  /** Patch a project's metadata (name / description / thumbnail / type / gameSlug). */
+  updateProject?(id: string, patch: { name?: string; description?: string; thumbnail?: string; type?: string; gameSlug?: string }): Promise<ProjectMeta>
   /** Delete a project; the server enforces "never empty" and returns the new workspace. */
   deleteProject?(id: string, opts?: { assetPolicy?: AssetDeletePolicy }): Promise<{ ok: true; workspace: WorkspaceState }>
   /** Switch the UI viewing project (the server step of the open cascade). */

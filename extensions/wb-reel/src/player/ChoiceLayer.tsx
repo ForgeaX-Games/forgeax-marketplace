@@ -13,6 +13,7 @@ import {
   type ItemState,
   type VarState,
 } from './conditionEval'
+import { pluginFetch, pluginUrl } from '../lib/plugin-http'
 
 /**
  * ChoiceLayer · 高级感选项层
@@ -158,9 +159,9 @@ function ChoiceCard({ branch, index, picked, locked, lockHint, onPick }: CardPro
     //     （从挂载到发 fetch 不到一帧）
     //
     // 只处理 /__reel__/assets/ URL：blob:/data: 已在本地无需预热
-    if (!artUrl || !artUrl.startsWith('/__reel__/assets/')) return
+    if (!artUrl || !artUrl.includes('/__reel__/assets/')) return
     const controller = new AbortController()
-    void fetch(artUrl, {
+    void pluginFetch(artUrl, {
       cache: 'force-cache',
       signal: controller.signal,
       headers: { Range: 'bytes=0-3145727' },
@@ -219,7 +220,7 @@ function ChoiceCard({ branch, index, picked, locked, lockHint, onPick }: CardPro
         {artUrl ? (
           artKind === 'video' ? (
             <video
-              src={artUrl}
+              src={pluginUrl(artUrl)}
               muted
               preload="metadata"
               playsInline
@@ -230,7 +231,7 @@ function ChoiceCard({ branch, index, picked, locked, lockHint, onPick }: CardPro
               }}
             />
           ) : (
-            <img src={artUrl} alt={targetTitle} draggable={false} />
+            <img src={pluginUrl(artUrl)} alt={targetTitle} draggable={false} />
           )
         ) : (
           // 真没图 —— scene.title 前两字占位，不回退到别 scene 的共享素材

@@ -21,6 +21,7 @@
 
 import { useMediaStore } from '../../media/mediaStore'
 import { useAssetStore } from '../../media/assetStore'
+import { pluginFetch } from '../../lib/plugin-http'
 
 export type ResolvedRef =
   | { kind: 'blob'; blob: Blob; sourceUrl: string }
@@ -69,7 +70,7 @@ export async function resolveRef(
   }
 
   // 3) 本地前端资产
-  if (ref.startsWith('/__reel__/assets/') || ref.startsWith('/uploads/')) {
+  if (ref.includes('/__reel__/assets/') || ref.startsWith('/uploads/')) {
     const blob = await fetchAsBlob(ref)
     return { kind: 'blob', blob, sourceUrl: ref }
   }
@@ -164,7 +165,7 @@ async function resolveViaAssetStoreByMediaId(
 }
 
 async function fetchAsBlob(url: string): Promise<Blob> {
-  const res = await fetch(url)
+  const res = await pluginFetch(url)
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText || ''} · ${url}`)
   }

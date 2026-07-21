@@ -24,7 +24,15 @@ import { getEditorTransport } from '../transport/index.js'
 import { snapshotToPipeline } from '../transport/mappers.js'
 import { makeGroupBoundaryNodeId, makeGroupContextNodeId } from '../components/canvas/groupBoundaryIds.js'
 import { useHistoryStore } from './historyStore.js'
-import { createEmptyPipeline, collectVisibleOutputPorts, getDownstreamIds, listMissingVisibleOutputPorts } from './pipelineStore.helpers.js'
+import {
+  createEmptyPipeline,
+  collectVisibleOutputPorts,
+  getDownstreamIds,
+  listMissingVisibleOutputPorts,
+  resolveOutputPortType,
+} from './pipelineStore.helpers.js'
+import { isTooLargeOutputSummary, makeTooLargeOutputSummary } from '../utils/tooLargeOutputSummary.js'
+import { hydrateBlobRefs } from '../../api/sceneEnvelope.js'
 import { bridgeBatchToHistory } from './pipelineHistoryBridge.js'
 import { formatIdAsLabel } from '../utils/batteryLabels.js'
 import {
@@ -127,6 +135,10 @@ async function runParamExec(get: () => PipelineState, nodeId: string): Promise<v
 // Local graph writes are serialized so an older async persist cannot commit
 // after a newer delete and recreate nodes from its stale desired snapshot.
 let _localMutationSeq = 0
+// Snapshot loads establish a read-only baseline. This is intentionally tracked
+// outside Zustand so each iframe can tell whether *it* edited that snapshot;
+// split-pane navigation clients otherwise risk persisting stale canvas data.
+let _pipelineBaselineMutationSeq = 0
 let _persistQueue: Promise<unknown> = Promise.resolve()
 
 // Debounced best-effort persist for high-frequency layout/UI changes (node
@@ -160,6 +172,20 @@ const OUTPUTS_REFRESH_CONCURRENCY = 3
 /** executedHash per (nodeId, port) — skip full GET when cache entry unchanged. */
 const _outputMetaByPort: Record<string, Record<string, string>> = {}
 
+/**
+ * executedHash per (nodeId, port) that the backend already told us is too
+ * large to inline (tooLarge: true) — e.g. structural merge nodes (n_merge,
+ * n_flatten) that carry a group's full pre-dedup fan-out. Without this, the
+ * "changed?" check below always saw `cached === undefined` for these ports
+ * (a tooLarge response never calls setNodeOutput) and re-classified them as
+ * "changed" on *every* refresh pass forever, re-paying the ~100-300ms
+ * portByteSize scan each time — 17 repeats of the same unchanged 2 ports cost
+ * ~5s in one observed project-switch trace. Once we've seen tooLarge for a
+ * given hash, treat that hash as settled (same as a normal cache hit) until
+ * the node re-executes and the hash actually changes.
+ */
+const _knownTooLargeByPort: Record<string, Record<string, string>> = {}
+
 /** Trailing output refresh after project switch while an agent was busy. */
 let _projectSwitchOutputTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -179,6 +205,7 @@ function carryPreviewEnabledNodes(
 
 export function clearOutputMetaCache(): void {
   for (const k of Object.keys(_outputMetaByPort)) delete _outputMetaByPort[k]
+  for (const k of Object.keys(_knownTooLargeByPort)) delete _knownTooLargeByPort[k]
 }
 
 export function cancelDeferredProjectSwitchOutputRefresh(): void {
@@ -385,6 +412,10 @@ function markPipelineMutation(): void {
   _localMutationSeq += 1
 }
 
+export function hasLocalPipelineMutations(): boolean {
+  return _localMutationSeq !== _pipelineBaselineMutationSeq
+}
+
 /**
  * Cheap equality for a cached output port value. Primitives (slider values,
  * counts) short-circuit via Object.is. Objects/arrays (grid masks, scene trees)
@@ -538,6 +569,40 @@ function enqueueParamWrite(
   return drain()
 }
 
+function applyTooLargeOutputSummary(
+  get: () => PipelineState,
+  nodeId: string,
+  portId: string,
+  meta: {
+    executedHash?: string
+    valid?: boolean
+    sharded?: boolean
+    dataChunks?: number
+    type?: string
+  } | null,
+  estimatedBytes?: number,
+): void {
+  const { currentPipeline, batteries, dynamicOutputPorts } = get()
+  const portType =
+    meta?.type ??
+    resolveOutputPortType(currentPipeline, batteries, dynamicOutputPorts, nodeId, portId)
+  const summary = makeTooLargeOutputSummary({
+    nodeId,
+    portId,
+    portType,
+    sharded: meta?.sharded,
+    dataChunks: meta?.dataChunks,
+    estimatedBytes,
+  })
+  get().setNodeOutput(nodeId, portId, summary)
+  if (meta?.executedHash) {
+    if (!_outputMetaByPort[nodeId]) _outputMetaByPort[nodeId] = {}
+    _outputMetaByPort[nodeId][portId] = meta.executedHash
+    if (!_knownTooLargeByPort[nodeId]) _knownTooLargeByPort[nodeId] = {}
+    _knownTooLargeByPort[nodeId][portId] = meta.executedHash
+  }
+}
+
 function fanOutScopeForReason(_reason: RefreshReason): 'edges' | 'all' {
   // Always hydrate visible output ports — edge-only scope left wire probes on
   // terminal sinks (scene_output) and unconnected batteries showing "no result"
@@ -582,6 +647,8 @@ function scheduleDeferredLargePortHydration(
             if (!_outputMetaByPort[next.nodeId]) _outputMetaByPort[next.nodeId] = {}
             _outputMetaByPort[next.nodeId][next.port] = meta.executedHash
           }
+        } else if (meta?.valid) {
+          applyTooLargeOutputSummary(get, next.nodeId, next.port, meta)
         }
         if (refreshTraceEnabled()) {
           const bytes = estimateValueBytes(value)
@@ -605,10 +672,176 @@ function scheduleDeferredLargePortHydration(
   schedule(tick)
 }
 
+type FanOutStats = {
+  fetched: number
+  skipped: number
+  totalBytes: number
+  topPorts: RefreshPortStat[]
+  abortedForViewport?: boolean
+  deferredLarge?: Array<{ nodeId: string; port: string }>
+}
+
+// Chunk size for the batch-endpoint value pass: bounds how many (potentially
+// large) output payloads the backend assembles + JSON-serializes for ONE HTTP
+// response, mirroring the intent of the old per-port OUTPUTS_REFRESH_CONCURRENCY
+// cap (worst-case concurrent payload memory) now that meta+value round trips are
+// collapsed from N sequential requests into a handful of batched ones.
+const OUTPUTS_BATCH_CHUNK_SIZE = 24
+
+// How many chunk POSTs may be in flight at once. Chunks used to be awaited one
+// at a time, so a project switch on a graph with e.g. 240 changed ports paid
+// 10 full network round trips back-to-back (~10x one chunk's latency) even
+// though the backend had spare capacity. Capped (not unbounded) so worst-case
+// concurrent payload memory stays bounded — same intent as OUTPUTS_BATCH_CHUNK_SIZE,
+// just one dial up from "1 chunk in flight" to "a handful in flight".
+const OUTPUTS_BATCH_CONCURRENCY = 4
+
+/**
+ * Batch fan-out: one POST to learn which of the visible ports actually changed
+ * (`metaOnly`, cheap — no value serialization), then a handful of chunked
+ * batch POSTs to fetch just those values. Replaces the O(ports) sequential
+ * getNodeOutputMeta+getNodeOutput pairs that made a project switch on a graph
+ * with hundreds of ports queue behind the browser's per-origin connection cap.
+ * Returns `null` when the bound transport doesn't implement the batch route,
+ * so the caller falls back to the legacy per-port worker pool.
+ */
+async function fanOutConnectedOutputsBatch(
+  get: () => PipelineState,
+  api: ReturnType<typeof getEditorTransport>['api'],
+  ports: ReadonlyArray<{ nodeId: string; port: string }>,
+  reason: RefreshReason,
+): Promise<FanOutStats | null> {
+  if (typeof api.getNodeOutputsBatch !== 'function') return null
+  const stats: FanOutStats = { fetched: 0, skipped: 0, totalBytes: 0, topPorts: [] }
+  if (ports.length === 0) return stats
+
+  const metaRes = await api.getNodeOutputsBatch(
+    ports.map((p) => ({ nodeId: p.nodeId, portId: p.port })),
+    { metaOnly: true },
+  )
+  if (metaRes === null) return null // transport advertised support but declined — fall back
+
+  const metaByKey = new Map(metaRes.map((r) => [`${r.nodeId}\u0000${r.portId}`, r.meta]))
+  const changed: Array<{ nodeId: string; port: string }> = []
+  for (const p of ports) {
+    const meta = metaByKey.get(`${p.nodeId}\u0000${p.port}`) ?? null
+    const prevHash = _outputMetaByPort[p.nodeId]?.[p.port]
+    const cached = get().nodeOutputs[p.nodeId]?.[p.port]
+    if (meta?.valid && meta.executedHash && prevHash === meta.executedHash && cached !== undefined) {
+      stats.skipped += 1
+      stats.topPorts.push({ nodeId: p.nodeId, port: p.port, bytes: 0, ms: 0, skipped: true })
+      continue
+    }
+    const knownTooLargeHash = _knownTooLargeByPort[p.nodeId]?.[p.port]
+    if (meta?.valid && meta.executedHash && knownTooLargeHash === meta.executedHash) {
+      // Already confirmed tooLarge at this exact executedHash — nothing has
+      // re-executed since, so re-fetching would just re-derive the same verdict.
+      if (!isTooLargeOutputSummary(cached)) {
+        applyTooLargeOutputSummary(get, p.nodeId, p.port, meta)
+      }
+      stats.skipped += 1
+      stats.topPorts.push({ nodeId: p.nodeId, port: p.port, bytes: 0, ms: 0, skipped: true })
+      continue
+    }
+    changed.push(p)
+  }
+
+  if (isViewportMoving()) {
+    deferRefreshUntilViewportEnd(reason)
+    return { ...stats, abortedForViewport: true }
+  }
+
+  const chunks: Array<Array<{ nodeId: string; port: string }>> = []
+  for (let i = 0; i < changed.length; i += OUTPUTS_BATCH_CHUNK_SIZE) {
+    chunks.push(changed.slice(i, i + OUTPUTS_BATCH_CHUNK_SIZE))
+  }
+
+  const deferredLarge: Array<{ nodeId: string; port: string }> = []
+
+  const runChunk = async (chunk: Array<{ nodeId: string; port: string }>): Promise<void> => {
+    const t0 = performance.now()
+    let res: Awaited<ReturnType<typeof api.getNodeOutputsBatch>>
+    try {
+      res = await api.getNodeOutputsBatch(chunk.map((p) => ({ nodeId: p.nodeId, portId: p.port })))
+    } catch (err) {
+      for (const p of chunk) syncTrace('probe:fetch-error', { nodeId: p.nodeId, port: p.port, error: String(err) })
+      return
+    }
+    if (res === null) return
+    const msPerPort = chunk.length > 0 ? (performance.now() - t0) / chunk.length : 0
+    for (const r of res) {
+      if (r.tooLarge) {
+        deferredLarge.push({ nodeId: r.nodeId, port: r.portId })
+        applyTooLargeOutputSummary(get, r.nodeId, r.portId, r.meta, r.estimatedBytes)
+        stats.fetched += 1
+        stats.topPorts.push({ nodeId: r.nodeId, port: r.portId, bytes: 0, ms: msPerPort, skipped: false })
+        continue
+      }
+      // Phase-2 envelope (see wb-scene-generator-scene-tree-storage.md §3): when
+      // `r.blobs` is present, `r.value` has `{ __outputCacheBlobRef }` placeholders
+      // in place of a repeated large field (e.g. a shared decoration tree) —
+      // hydrate back to the normal shape BEFORE it ever reaches nodeOutputs, so
+      // every downstream consumer (probes, tooltips, the renderer iframe) stays
+      // completely unaware the wire format was ever deduped. A no-op when `blobs`
+      // is absent (the common, non-enveloped case).
+      const value = hydrateBlobRefs(r.value, r.blobs)
+      const bytes = estimateValueBytes(value)
+      if (value !== undefined) {
+        get().setNodeOutput(r.nodeId, r.portId, value)
+        if (r.meta?.executedHash) {
+          if (!_outputMetaByPort[r.nodeId]) _outputMetaByPort[r.nodeId] = {}
+          _outputMetaByPort[r.nodeId][r.portId] = r.meta.executedHash
+        }
+      } else {
+        syncTrace('probe:fetch-empty', {
+          nodeId: r.nodeId,
+          port: r.portId,
+          valid: r.meta?.valid,
+          sharded: r.meta?.sharded,
+        })
+      }
+      stats.fetched += 1
+      stats.totalBytes += bytes
+      stats.topPorts.push({ nodeId: r.nodeId, port: r.portId, bytes, ms: msPerPort, skipped: false })
+    }
+  }
+
+  // Bounded worker pool: up to OUTPUTS_BATCH_CONCURRENCY chunk POSTs in flight
+  // at once instead of one-at-a-time, so N chunks cost ~N/concurrency round
+  // trips instead of N. Each worker re-checks isViewportMoving() before
+  // claiming its next chunk so an in-progress drag still stops picking up
+  // new work promptly; already-in-flight chunks are left to finish rather
+  // than aborted mid-request.
+  let cursor = 0
+  let abortedForViewport = false
+  const worker = async (): Promise<void> => {
+    while (cursor < chunks.length) {
+      if (isViewportMoving()) {
+        abortedForViewport = true
+        return
+      }
+      const chunk = chunks[cursor]
+      cursor += 1
+      await runChunk(chunk)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(OUTPUTS_BATCH_CONCURRENCY, chunks.length) }, () => worker()),
+  )
+
+  if (abortedForViewport) {
+    deferRefreshUntilViewportEnd(reason)
+    return { ...stats, abortedForViewport: true, ...(deferredLarge.length ? { deferredLarge } : {}) }
+  }
+  return { ...stats, ...(deferredLarge.length ? { deferredLarge } : {}) }
+}
+
 /**
  * One fan-out pass for refreshConnectedOutputs: collect every distinct visible /
- * wire-feeding output port, then GET its cached value with a bounded number of
- * concurrent requests (so a large graph never opens hundreds of parallel GETs).
+ * wire-feeding output port, then hydrate their cached values. Prefers the
+ * batch endpoint (one metaOnly POST + a handful of chunked value POSTs); falls
+ * back to the legacy per-port worker pool when the bound transport doesn't
+ * implement it (so a large graph never opens hundreds of parallel GETs either way).
  */
 async function fanOutConnectedOutputs(
   get: () => PipelineState,
@@ -625,6 +858,9 @@ async function fanOutConnectedOutputs(
   }
   const { api } = getEditorTransport()
   const ports = collectVisibleOutputPorts(currentPipeline, batteries, dynamicOutputPorts, scope)
+
+  const batchStats = await fanOutConnectedOutputsBatch(get, api, ports, reason)
+  if (batchStats) return batchStats
 
   let cursor = 0
   let abortedForViewport = false
@@ -787,6 +1023,14 @@ interface PipelineState {
    */
   pipelineRevision: number
   pipelineStatus: PipelineStatus
+  /**
+   * True while `refreshConnectedOutputs` has an in-flight fan-out pass (the
+   * O(nodes×ports) output-cache read triggered by mount / project-switch /
+   * graph:applied / exec:completed). Read-only signal for loading-progress UI
+   * (e.g. the workbench's project-switch status panel) — nothing here gates
+   * on it; it is purely additive telemetry.
+   */
+  outputsRefreshBusy: boolean
   selectedNode: PipelineNode | null
   selectedNodeIds: string[]
   /** Backend-driven selection signal; the canvas consumes then clears it. */
@@ -973,6 +1217,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   sessionRestorePending: null,
   pipelineRevision: 0,
   pipelineStatus: 'idle',
+  outputsRefreshBusy: false,
   selectedNode: null,
   selectedNodeIds: [],
   pendingSelectNodeIds: null,
@@ -1073,6 +1318,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       for (const id of nodeIds) {
         delete next[id]
         delete _outputMetaByPort[id]
+        delete _knownTooLargeByPort[id]
       }
       return { nodeOutputs: next }
     }),
@@ -1759,24 +2005,79 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   autoExecuteOnOpen: async () => {
     if (_autoExecInFlight) return _autoExecInFlight
     _autoExecInFlight = (async () => {
-      const { currentPipeline, nodeOutputs, batteries, dynamicOutputPorts, addLog } = get()
+      const { currentPipeline, batteries, addLog } = get()
       if (!currentPipeline || currentPipeline.nodes.length === 0) return
-      const missing = listMissingVisibleOutputPorts(
-        currentPipeline,
-        batteries,
-        dynamicOutputPorts,
-        nodeOutputs,
-      )
+      const recomputeMissing = (): Array<{ nodeId: string; port: string }> =>
+        listMissingVisibleOutputPorts(currentPipeline, batteries, get().dynamicOutputPorts, get().nodeOutputs)
+      let missing = recomputeMissing()
       if (missing.length === 0) return
       syncTrace('autoExecOnOpen:missing', { count: missing.length, ports: missing.slice(0, 8).map((p) => `${p.nodeId}/${p.port}`) })
+
+      // Most "missing" hits here are a CLIENT-side cache gap, not a disk-cache
+      // gap: `nodeOutputs` is wiped on every project switch, and
+      // `dynamicOutputPorts` for group-inner nodes can still be growing while
+      // this check runs (observed in [output-batch-trace]: metaOnly port scans
+      // going from 205 -> 279 ports across the same open). So a port whose disk
+      // cache is perfectly valid can show up as "missing" purely because the
+      // refreshConnectedOutputs() pass that just resolved didn't cover it yet.
+      // One more batched *fetch* (cheap: reads the output cache, never
+      // recomputes anything) resolves that class before we conclude a real
+      // *execute* is needed.
+      const { api } = getEditorTransport()
+      const backfill = await fanOutConnectedOutputsBatch(get, api, missing, 'autoexec-backfill')
+      if (backfill) {
+        missing = recomputeMissing()
+        if (missing.length === 0) {
+          syncTrace('autoExecOnOpen:backfilled', { fetched: backfill.fetched })
+          return
+        }
+      }
+
       const hasRunnable = currentPipeline.nodes.some((n) => {
         if (n.batteryId === '__group__') return true
         const battery = batteries.find((b) => b.id === n.batteryId)
         return battery?.type !== 'ai'
       })
       if (!hasRunnable) return
-      addLog(`Missing ${missing.length} cached output(s) on open — auto-running pipeline`)
-      await get().executePipeline()
+
+      // Scope the real compute to just the nodes still missing a value, not
+      // the whole graph. A node's own missing output already implies its
+      // downstream is stale/missing too (nothing downstream can have a valid
+      // cached value built from an input it never had), so pruning any root
+      // already covered by another root's downstream closure keeps this to
+      // the minimal set of independent re-run entry points.
+      const missingNodeIds = Array.from(new Set(missing.map((p) => p.nodeId)))
+      const roots: string[] = []
+      const covered = new Set<string>()
+      for (const nodeId of missingNodeIds) {
+        if (covered.has(nodeId)) continue
+        roots.push(nodeId)
+        for (const id of getDownstreamIds(nodeId, currentPipeline.edges)) covered.add(id)
+      }
+      if (roots.length === 0) return
+
+      // Once the missing roots already touch most of the graph (true cold
+      // start / a freshly cleared cache), N incremental walks end up
+      // re-deriving almost everything anyway — a single full execute is
+      // simpler and no more expensive.
+      const fullGraphThreshold = Math.max(1, Math.ceil(currentPipeline.nodes.length * 0.6))
+      if (roots.length > fullGraphThreshold) {
+        addLog(`Missing ${missing.length} cached output(s) on open — auto-running full pipeline`)
+        await get().executePipeline()
+        return
+      }
+
+      addLog(
+        `Missing ${missing.length} cached output(s) on open — auto-running ${roots.length} affected subgraph(s)`,
+      )
+      for (const nodeId of roots) {
+        const result = await callPipelineExecute({ startNodeId: nodeId })
+        applyExecutionResultOutputs(get, result)
+        syncTrace('autoExecOnOpen:exec-root', { nodeId, status: result?.status })
+      }
+      // One shared fan-out at the end (instead of one per root) picks up any
+      // remaining sharded/tooLarge ports the inline execute responses omit.
+      await get().refreshConnectedOutputs('exec:completed')
     })().finally(() => {
       _autoExecInFlight = null
     })
@@ -1806,6 +2107,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           pipelineStatus: pipeline.status,
           pipelineRevision: s.pipelineRevision + 1,
         }))
+        _pipelineBaselineMutationSeq = _localMutationSeq
         addLog('Pipeline loaded')
       }
     } catch (error) {
@@ -1824,6 +2126,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       pipelineStatus: full.status,
       pipelineRevision: s.pipelineRevision + 1,
     }))
+    _pipelineBaselineMutationSeq = _localMutationSeq
   },
 
   // ── AI-agent operations ──────────────────────────────────────────────
@@ -2192,9 +2495,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         }
       } while (_outputsRefreshAgain)
     }
+    set({ outputsRefreshBusy: true })
     const run = runOnce().finally(() => {
       _outputsRefreshInFlight = null
       if (reason === 'mount') _mountRefreshInFlight = null
+      set({ outputsRefreshBusy: false })
     })
     _outputsRefreshInFlight = run
     if (reason === 'mount') _mountRefreshInFlight = run

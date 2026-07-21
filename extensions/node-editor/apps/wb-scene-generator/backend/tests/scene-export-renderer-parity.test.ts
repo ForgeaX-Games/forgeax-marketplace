@@ -7,7 +7,7 @@
 // `vendor/dist/renderer-resolve/...` (the SAME emitted module, no parallel
 // backend re-derivation). These tests cook a scene and run that SAME shared
 // resolver over the same neighbourhood, asserting the cook's index equals the
-// shared resolver's — including the `edgeDist2` keyMode (6-tuple key) and the
+// shared resolver's — including the `edgeDist2` / `adjacent8` keyModes and the
 // front-wall face. Importing from the vendored bundle (not a second frontend
 // import) is deliberate: it is the exact module the export path executes, so a
 // match proves "export === shared resolver" by construction.
@@ -128,8 +128,7 @@ describe('cookBakedScene renderer parity', () => {
 
     const rule = loadTileRule('bridge_test')!
     const coords = new Set(cells.map((c) => `${c.x},${c.y},${c.z}`))
-
-    // head=0, middle=1, tail=2 — and identical to the renderer's pickFaceSprite.
+    // After cook's non-negative offset, z=0 strip y=0..2 lands at screen y=0..2.
     const byY = (y: number) => result.terrain.cells['0']!.find((c) => c.y === y)!.graphic_index[0]
     expect(byY(0)).toBe(0)
     expect(byY(1)).toBe(1)
@@ -137,6 +136,186 @@ describe('cookBakedScene renderer parity', () => {
     for (const c of cells) {
       expect(byY(c.y)).toBe(rendererTopIndex(rule, c, coords))
     }
+  })
+
+  it('honours edgeDist4 keyMode (8-tuple key) exactly like the renderer', () => {
+    // A 3-column horizontal strip: a true edgeDist4 rule distinguishes the left
+    // head (no left neighbour), the middle (left & right at dist 1, none at dist
+    // 2), and the right tail (no right neighbour) via the horizontal dist-2 probes
+    // left2/right2 — which edgeDist2 (vertical only) CANNOT tell apart.
+    writeRule('road_test', {
+      schemaVersion: 2,
+      ppu: 16,
+      sprites: [
+        { x: 0, y: 0, w: 16, h: 16 },   // 0 left head
+        { x: 16, y: 0, w: 16, h: 16 },  // 1 middle
+        { x: 32, y: 0, w: 16, h: 16 },  // 2 right tail
+      ],
+      faces: {
+        top: {
+          basePieces: 3,
+          keyMode: 'edgeDist4',
+          map: {
+            '0,0,0,1,0,0,0,1': 0, // left head: left absent; right present at dist 1 & 2
+            '0,0,1,1,0,0,0,0': 1, // middle: left & right at dist 1, neither at dist 2
+            '0,0,1,0,0,0,1,0': 2, // right tail: right absent; left present at dist 1 & 2
+            '*,*,*,*,*,*,*,*': 1,
+          },
+        },
+      },
+    })
+
+    const cells = [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      { x: 2, y: 0, z: 0 },
+    ]
+    const result = cookBakedScene({
+      bundleId: 'b',
+      sceneName: 'S',
+      layers: [baseLayer({
+        nodePath: '/W/Road', nodeName: 'Road',
+        assetName: 'Road', assetAlias: 'road-sheet', assetType: 'tile',
+        cells,
+        attributes: { export_role: 'terrain', template_id: 'road' },
+      })],
+      aliases: [{ alias: 'road-sheet', tileType: 'road_test' }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    const rule = loadTileRule('road_test')!
+    const coords = new Set(cells.map((c) => `${c.x},${c.y},${c.z}`))
+    const byX = (x: number) => result.terrain.cells['0']!.find((c) => c.x === x)!.graphic_index[0]
+    expect(byX(0)).toBe(0)
+    expect(byX(1)).toBe(1)
+    expect(byX(2)).toBe(2)
+    for (const c of cells) {
+      expect(byX(c.x)).toBe(rendererTopIndex(rule, c, coords))
+    }
+  })
+
+  it('routes face.variants by when.stateEquals from per-cell state (slopeDir dispatch)', () => {
+    // slope_24-style dispatch: a per-cell tag (cell.state.slopeDir) selects one of
+    // several parallel maps. The rule needs NO neighbours to differ — the tag alone
+    // routes the map. Isolated cells all share neighbour key "0,0,0,0"; only the tag
+    // changes which map's "0,0,0,0" entry wins.
+    writeRule('slope_test', {
+      schemaVersion: 2,
+      ppu: 16,
+      sprites: [
+        { x: 0, y: 0, w: 16, h: 16 },   // 0 back (default)
+        { x: 16, y: 0, w: 16, h: 16 },  // 1 front
+        { x: 32, y: 0, w: 16, h: 16 },  // 2 left
+      ],
+      faces: {
+        top: {
+          basePieces: 3,
+          map: { '0,0,0,0': 0 },
+          variants: [
+            { when: { stateEquals: { key: 'slopeDir', value: 'front' } }, map: { '0,0,0,0': 1 } },
+            { when: { stateEquals: { key: 'slopeDir', value: 'left' } }, map: { '0,0,0,0': 2 } },
+          ],
+        },
+      },
+    })
+
+    // Three isolated cells (far apart so each has no same-layer neighbour) with
+    // different tags: absent → default(0), 'front' → 1, 'left' → 2.
+    const cells = [
+      { x: 0, y: 0, z: 0 },
+      { x: 10, y: 0, z: 0, state: { slopeDir: 'front' } },
+      { x: 20, y: 0, z: 0, state: { slopeDir: 'left' } },
+    ]
+    const result = cookBakedScene({
+      bundleId: 'b',
+      sceneName: 'S',
+      layers: [baseLayer({
+        nodePath: '/W/Slope', nodeName: 'Slope',
+        assetName: 'Slope', assetAlias: 'slope-sheet', assetType: 'tile',
+        cells,
+        attributes: { export_role: 'terrain', template_id: 'slope' },
+      })],
+      aliases: [{ alias: 'slope-sheet', tileType: 'slope_test' }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    const rule = loadTileRule('slope_test')!
+    const byX = (x: number) => result.terrain.cells['0']!.find((c) => c.x === x)!.graphic_index[0]
+    expect(byX(0)).toBe(0)
+    expect(byX(10)).toBe(1)
+    expect(byX(20)).toBe(2)
+    // Parity: the shared resolver picks the same index when given the cell's state.
+    for (const c of cells) {
+      const cc: CollectedCell = { x: c.x, y: c.y, z: c.z, layerIdx: 0, ...('state' in c ? { state: c.state } : {}) }
+      const idx = pickFaceSpriteIndex({
+        face: rule.faces.top! as unknown as FaceRule,
+        faceTag: 'top',
+        sprites: rule.sprites,
+        validVariantIdxs: [],
+        cell: cc,
+        coordsByLayerIdx: new Map([[0, new Set([`${c.x},${c.y},${c.z}`])]]),
+        regions: new Map(),
+      })
+      expect(byX(c.x)).toBe(idx)
+    }
+  })
+
+  it('honours adjacent8 keyMode (8-tuple key) exactly like the renderer', () => {
+    // Probe (0,1): orthogonal u+r. Without diagonal (1,0) → tip tile 0;
+    // with ur=(1,0) present → elbow tile 1. adjacent4 cannot tell these apart.
+    writeRule('bridge8_test', {
+      schemaVersion: 2,
+      ppu: 16,
+      sprites: [
+        { x: 0, y: 0, w: 16, h: 16 },
+        { x: 16, y: 0, w: 16, h: 16 },
+      ],
+      faces: {
+        top: {
+          basePieces: 2,
+          keyMode: 'adjacent8',
+          map: {
+            '1,0,0,1,0,1,0,0': 1, // u+r + ur
+            '1,0,0,1,0,0,0,0': 0, // u+r, no diagonals
+            '*,*,*,*,*,*,*,*': 0,
+          },
+        },
+      },
+    })
+
+    const probe = { x: 0, y: 1, z: 0 }
+    const cellsTip = [
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+      { x: 1, y: 1, z: 0 },
+    ]
+    const cellsElbow = [...cellsTip, { x: 1, y: 0, z: 0 }]
+    const coordsTip = new Set(cellsTip.map((c) => `${c.x},${c.y},${c.z}`))
+    const coordsElbow = new Set(cellsElbow.map((c) => `${c.x},${c.y},${c.z}`))
+    const rule = loadTileRule('bridge8_test')!
+
+    const cook = (cells: Array<{ x: number; y: number; z: number }>) =>
+      cookBakedScene({
+        bundleId: 'b',
+        sceneName: 'S',
+        layers: [baseLayer({
+          nodePath: '/W/Bridge8', nodeName: 'Bridge8',
+          assetName: 'Bridge8', assetAlias: 'bridge8-sheet', assetType: 'tile',
+          cells,
+          attributes: { export_role: 'terrain', template_id: 'bridge8' },
+        })],
+        aliases: [{ alias: 'bridge8-sheet', tileType: 'bridge8_test' }],
+        generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+      })
+
+    const tipRow = probe.y // z=0 + cook non-neg offset → screen y === source y
+    const tipCell = cook(cellsTip).terrain.cells['0']!.find((e) => e.x === probe.x && e.y === tipRow)!
+    expect(tipCell.graphic_index[0]).toBe(0)
+    expect(tipCell.graphic_index[0]).toBe(rendererTopIndex(rule, probe, coordsTip))
+
+    const elbowCell = cook(cellsElbow).terrain.cells['0']!.find((e) => e.x === probe.x && e.y === tipRow)!
+    expect(elbowCell.graphic_index[0]).toBe(1)
+    expect(elbowCell.graphic_index[0]).toBe(rendererTopIndex(rule, probe, coordsElbow))
   })
 
   it('matches the renderer pickFaceSprite for a 2D adjacency block', () => {
@@ -246,6 +425,70 @@ describe('cookBakedScene renderer parity', () => {
       expect(frontGi).toBe(rendererFrontIndex(rule, c, coords))
     }
   })
+
+  it('honours front.blockVariants (3x3 solid-block big-sprite override) exactly like the renderer', () => {
+    // A 6-wide x 3-tall solid wall = TWO world-grid-aligned 3x3 megacells
+    // (anchors x=0 and x=3). probability:1 makes the override deterministic;
+    // group [1..9] is distinguishable from the fallback sprite (idx 0).
+    writeRule('wall_block_test', {
+      schemaVersion: 2,
+      ppu: 16,
+      sprites: [
+        { x: 0, y: 0, w: 16, h: 16 }, // 0: fallback (non-solid-window front pick)
+        { x: 16, y: 0, w: 16, h: 16 }, { x: 32, y: 0, w: 16, h: 16 }, { x: 48, y: 0, w: 16, h: 16 },
+        { x: 0, y: 16, w: 16, h: 16 }, { x: 16, y: 16, w: 16, h: 16 }, { x: 32, y: 16, w: 16, h: 16 },
+        { x: 0, y: 32, w: 16, h: 16 }, { x: 16, y: 32, w: 16, h: 16 }, { x: 32, y: 32, w: 16, h: 16 },
+      ],
+      faces: {
+        top: { basePieces: 1, map: { '*,*,*,*': 0 } },
+        front: {
+          basePieces: 1,
+          map: { '*,*,*,*': 0 },
+          blockVariants: { probability: 1, groups: [[1, 2, 3, 4, 5, 6, 7, 8, 9]] },
+        },
+      },
+    })
+
+    const y = 5
+    const cells: Array<{ x: number; y: number; z: number }> = []
+    for (let z = 0; z < 3; z++) for (let x = 0; x < 6; x++) cells.push({ x, y, z })
+    // Break the LEFT megacell (anchor x=0) only — its window is no longer fully
+    // solid, so it must fall back to the default map pick (idx 0); the RIGHT
+    // megacell (anchor x=3) stays solid and must get the block-variant sprite.
+    const solidCells = cells.filter((c) => !(c.x === 1 && c.z === 1))
+
+    const rule = loadTileRule('wall_block_test')!
+    const coords = new Set(solidCells.map((c) => `${c.x},${c.y},${c.z}`))
+
+    const result = cookBakedScene({
+      bundleId: 'b', sceneName: 'S',
+      layers: [baseLayer({
+        nodePath: '/W/WallBlock', nodeName: 'WallBlock',
+        assetName: 'WallBlock', assetAlias: 'wallblock-sheet', assetType: 'tile',
+        cells: solidCells, attributes: { export_role: 'terrain', template_id: 'wallblock' },
+      })],
+      aliases: [{ alias: 'wallblock-sheet', tileType: 'wall_block_test' }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    for (const c of solidCells) {
+      const group = result.terrain.cells[String(c.z)]!
+      const frontRow = c.y - c.z
+      const frontCells = group.filter((e) => e.x === c.x && e.y === frontRow)
+      const frontGi = frontCells.flatMap((e) => e.graphic_index).find((gi) => gi !== 0) ?? 0
+      expect(frontGi).toBe(rendererFrontIndex(rule, c, coords))
+    }
+
+    // Left megacell (anchor x=0) not solid → fallback idx 0 for every one of its cells.
+    for (const c of solidCells.filter((c) => c.x < 3)) {
+      expect(rendererFrontIndex(rule, c, coords)).toBe(0)
+    }
+    // Right megacell (anchor x=3) solid → each local (x-3, z) maps to group[z*3+(x-3)].
+    for (const c of solidCells.filter((c) => c.x >= 3)) {
+      const localX = c.x - 3
+      expect(rendererFrontIndex(rule, c, coords)).toBe(1 + (c.z * 3 + localX))
+    }
+  })
 })
 
 // ── Parser parity: backend parseRule accepts every shipped rule + advanced fields ──
@@ -254,26 +497,30 @@ describe('parseRule shipped-rule parity', () => {
 
   it('parses every shipped rule file into a NormalizedRule with advanced fields intact', () => {
     setRulesDir(undefined) // default = apps/wb-scene-generator/assets/rules
-    // bridge_vertical_15: edgeDist2 keyMode must survive parsing.
-    const bridge = loadTileRule('bridge_vertical_15')
+    // bridge_25: adjacent8 keyMode + faces.entry for bridge end caps.
+    const bridge = loadTileRule('bridge_25')
     expect(bridge).not.toBeNull()
-    expect(bridge!.faces.top?.keyMode).toBe('edgeDist2')
-    expect(bridge!.sprites).toHaveLength(15)
+    expect(bridge!.faces.top?.keyMode).toBe('adjacent8')
+    expect(bridge!.faces.entry?.keyMode).toBe('adjacent8')
+    expect(bridge!.sprites).toHaveLength(125)
+    expect(Object.keys(bridge!.faces.top!.map).every((k) => k.split(',').length === 8)).toBe(true)
+    expect(Object.keys(bridge!.faces.entry!.map).every((k) => k.split(',').length === 8)).toBe(true)
+    expect(bridge!.faces.entry?.randomRules?.length).toBe(12)
 
-    // common_16: explicit variantIdxs + randomRules must survive.
+    // common_16: per-tileId randomRules must survive.
     const common = loadTileRule('common_16')
     expect(common).not.toBeNull()
-    expect(common!.faces.top?.variantIdxs).toEqual([16, 17, 18, 19])
-    expect(common!.faces.top?.variantWeights).toEqual([4, 2, 2, 2])
-    expect(common!.faces.top?.randomRules).toEqual([
-      { tileId: 6, keepProbability: 0.6, variantWeights: [4, 2, 2, 2] },
-    ])
+    expect(common!.faces.top?.randomRules?.length).toBeGreaterThan(0)
+    expect(common!.faces.top?.randomRules?.[0]?.variantIdxs?.length).toBe(4)
 
-    // wall_outer_16: regions + front face must survive (v2 multi-face).
-    const wall = loadTileRule('wall_outer_16')
-    expect(wall).not.toBeNull()
-    expect(wall!.regions).toMatchObject({ scope: { source: 'parent' } })
-    expect(wall!.faces.front).toBeTruthy()
+    // inner_wall_27: front.blockVariants (3 candidate groups of 9) must survive.
+    const innerWall = loadTileRule('inner_wall_27')
+    expect(innerWall).not.toBeNull()
+    expect(innerWall!.sprites).toHaveLength(162)
+    const blockVariants = innerWall!.faces.front?.blockVariants
+    expect(blockVariants?.groups).toHaveLength(3)
+    expect(blockVariants?.groups.every((g) => g.length === 9)).toBe(true)
+    expect(blockVariants?.probability).toBeGreaterThan(0)
   })
 })
 

@@ -4,6 +4,9 @@
 import type { CSSProperties } from 'react'
 import type { Layout, LayoutValue } from './node-config-schema'
 
+/** 铺满视频舞台（OverlayNode.layout / 舞台坐标类 OverlayChild.layout）。 */
+export const STAGE_FILL_LAYOUT: Layout = { left: 0, top: 0, width: 1, height: 1 }
+
 /** number → 百分比（含负值）；已是 `%`/`px` 串则原样。 */
 export function layoutValueToCss(v: LayoutValue): string {
   if (typeof v === 'number') return `${v * 100}%`
@@ -81,9 +84,12 @@ export function mountWrapStyle(layout?: Layout): CSSProperties {
 }
 
 /**
- * 子组件级外包盒：相对挂载盒。
- * - 挂载有显式尺寸、子项无 layout → 默认左上角 (0,0)。
+ * 子组件级外包盒：相对挂载盒；`Layout` 字段一一映射为 CSS（left/top/width/height/…）。
+ * - 子项有 layout → 原样转 CSS。
+ * - 挂载有显式尺寸、子项无 layout → 铺满挂载盒（坐标空间 = overlay 盒子，供内部 %/inset 使用）。
  * - 挂载自适应、子项无 layout → 流式排布（单组件时挂载=组件大小）。
+ * 点击：铺满盒（显式宽高或默认铺满）用 `pointer-events:none` 以免挡台下交互；
+ * 仅锚点/自适应的小盒子保持 `auto`（面板按钮等）。
  */
 export function childWrapStyle(childLayout: Layout | undefined, mountHasSize: boolean): CSSProperties {
   const hasChildPos =
@@ -97,10 +103,18 @@ export function childWrapStyle(childLayout: Layout | undefined, mountHasSize: bo
       childLayout.translateX != null ||
       childLayout.translateY != null)
   if (hasChildPos && childLayout) {
-    return { ...layoutToCss(childLayout), pointerEvents: 'auto' }
+    const pe = layoutHasExplicitSize(childLayout) ? 'none' : 'auto'
+    return { ...layoutToCss(childLayout), pointerEvents: pe }
   }
   if (mountHasSize) {
-    return { position: 'absolute', left: 0, top: 0, pointerEvents: 'auto' }
+    return {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
+    }
   }
   return { pointerEvents: 'auto' }
 }

@@ -103,6 +103,24 @@ export type Op =
       target: { nodeId: string; port: string }
     }
   | { type: 'disconnect'; edgeId: string }
+  /**
+   * Alias for `disconnect` (2026-07-10 postmortem): every Sino-facing skill
+   * doc / aw-support orchestration prompt (`session_operation.md`,
+   * `fast-loop.md`, `sino-planning-discipline.ts`, `scene-graph-analysis.ts`,
+   * `continuation.ts`, …) has for a long time instructed the agent to delete
+   * edges via `{ type: "deleteEdge", edgeId }` — but the kernel's `Op` union
+   * and `applyOps` switch only ever recognized `disconnect`. Because the
+   * switch below had no `default` diagnostic, an unrecognized `type` was
+   * silently skipped: the batch still returned `status:'ok'`, the edge
+   * stayed in the graph, and the agent had no signal its delete never
+   * happened — producing exactly the "deleteEdge 返回 ok 但边未实际移除" /
+   * repeated Rest fan-out failures seen in real sessions. Rather than a slow
+   * doc-by-doc rewrite across every prompt/skill file, the kernel now accepts
+   * `deleteEdge` as a first-class alias with identical semantics to
+   * `disconnect`, and unknown op types get a loud diagnostic (see the
+   * `default` branch in `applyOps`) instead of a silent no-op.
+   */
+  | { type: 'deleteEdge'; edgeId: string }
   | { type: 'setMetadata'; key: string; value: unknown }
   | {
       // Delete a composite group as a single battery: remove the shadow node,
@@ -308,6 +326,8 @@ export function summarizeBatchOps(ops: readonly Op[]): string {
           return `connect:${op.edgeId ?? 'auto'}`
         case 'disconnect':
           return `disconnect:${op.edgeId}`
+        case 'deleteEdge':
+          return `deleteEdge:${op.edgeId}`
         case 'createNode':
           return `createNode:${op.nodeId}`
         case 'deleteNode':
@@ -356,6 +376,35 @@ function mintEdgeId(graph: GraphFileV1): string {
     id = `e_${randomUUID().slice(0, 8)}`
   } while (graph.edges[id])
   return id
+}
+
+/**
+ * Agents often confuse `text_panel` with `number_const` and write
+ * `params: { value: "墙体" }` instead of `params: { text: "墙体" }`.
+ * The panel battery / UI / asset scanners all read `params.text`, so a lone
+ * `value` makes WallAsset / AssetName silently empty at execute time.
+ * Normalize at the applyBatch boundary (same class of field-typo defense as
+ * requireIdentifier).
+ */
+export function normalizeTextPanelParams(
+  opId: string | undefined,
+  params: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!params || opId !== 'text_panel') return params
+  const text = params.text
+  const value = params.value
+  const textOk = typeof text === 'string' && text.trim().length > 0
+  const valueOk = typeof value === 'string' && value.trim().length > 0
+  if (textOk || !valueOk) return params
+  return { ...params, text: value }
+}
+
+function mergeNodeParams(
+  opId: string | undefined,
+  existing: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return normalizeTextPanelParams(opId, { ...(existing ?? {}), ...patch }) ?? { ...(existing ?? {}), ...patch }
 }
 
 // 2026-07-01 复盘 (postmortem): Sino 在一次场景搭建 session 里把 createNode 的
@@ -428,7 +477,7 @@ function applyOps(
           id: op.nodeId,
           opId: op.opId,
           position: op.position ?? autoNodePosition(graph),
-          params: op.params ?? {},
+          params: normalizeTextPanelParams(op.opId, op.params ?? {}) ?? {},
           ...(op.name !== undefined ? { name: op.name } : {}),
         }
         break
@@ -441,7 +490,7 @@ function applyOps(
         }
         const node = graph.nodes[op.nodeId]
         if (node) {
-          if (op.params !== undefined) node.params = { ...node.params, ...op.params }
+          if (op.params !== undefined) node.params = mergeNodeParams(node.opId, node.params, op.params)
           if (op.position !== undefined) node.position = op.position
           if (op.name !== undefined) node.name = op.name
           break
@@ -463,7 +512,9 @@ function applyOps(
           diagnostics.push({ opIndex: i, severity: 'error', message: `node ${op.nodeId} does not exist` })
           break
         }
-        if (op.params !== undefined) innerNode.params = { ...innerNode.params, ...op.params }
+        if (op.params !== undefined) {
+          innerNode.params = mergeNodeParams(innerNode.opId, innerNode.params, op.params)
+        }
         if (op.position !== undefined) innerNode.position = op.position
         if (op.name !== undefined) innerNode.name = op.name
         break
@@ -526,8 +577,12 @@ function applyOps(
         graph.edges[edgeId] = { id: edgeId, source: op.source, target: op.target }
         break
       }
-      case 'disconnect': {
-        const idErr = requireIdentifier(rec, 'edgeId', 'disconnect', i)
+      // `deleteEdge` is a first-class alias for `disconnect` — see the Op
+      // union comment (2026-07-10 postmortem) for why the kernel accepts
+      // both spellings instead of only fixing the prompt docs.
+      case 'disconnect':
+      case 'deleteEdge': {
+        const idErr = requireIdentifier(rec, 'edgeId', op.type, i)
         if (idErr) {
           diagnostics.push(idErr)
           break
@@ -561,6 +616,23 @@ function applyOps(
       case 'ungroup': {
         const result = applyUngroup(graph, op, i)
         if (result.error) diagnostics.push(result.error)
+        break
+      }
+      default: {
+        // 2026-07-10 postmortem: this switch used to have NO default branch,
+        // so an op with an unrecognized `type` (e.g. the long-undocumented
+        // kernel/doc mismatch around `deleteEdge` vs `disconnect`) was
+        // silently skipped — no diagnostic, batch still returns
+        // `status:'ok'`, and the caller has zero signal that op never ran.
+        // Any truly unknown type now fails loudly instead of vanishing.
+        const unknownType = (rec.type as string | undefined) ?? '(missing)'
+        diagnostics.push({
+          opIndex: i,
+          severity: 'error',
+          message: `op[${i}] has unrecognized type "${unknownType}" — this op was NOT applied. `
+            + 'Valid types: createNode / updateNode / deleteNode / connect / disconnect (alias deleteEdge) / '
+            + 'setMetadata / createGroup / updateGroup / deleteGroup / ungroup.',
+        })
         break
       }
     }
@@ -1125,7 +1197,8 @@ function collectInvalidationSeeds(
       case 'connect':
         seeds.add(op.target.nodeId)
         break
-      case 'disconnect': {
+      case 'disconnect':
+      case 'deleteEdge': {
         const edge = before.edges[op.edgeId]
         if (edge) seeds.add(edge.target.nodeId)
         break

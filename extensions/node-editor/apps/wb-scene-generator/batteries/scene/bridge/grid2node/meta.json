@@ -57,12 +57,20 @@
       "default": "cell"
     },
     {
+      "name": "z",
+      "type": "number",
+      "access": "item",
+      "label": "高度层索引",
+      "description": "可选。等高线/高度场分层时接层号（0、1、2…）。未显式接 zRange 时，按 [0..z] 实心柱生成体素（避免互斥分区全落在 z=0）。",
+      "description-en": "Optional elevation-tier index (0,1,2…). When zRange is not wired, emits a solid column of voxels at z=0..z — required for mutually exclusive contour partitions."
+    },
+    {
       "name": "zRange",
       "type": "number",
       "access": "list",
       "label": "z 层",
-      "description": "体素 z 坐标列表；每个非零格在列表中每一层各生成一个体素。默认 [0] 表示单层平铺。",
-      "description-en": "List of z values; each non-zero cell emits one voxel per z in this list. Default [0] = single flat layer.",
+      "description": "体素 z 坐标列表；每个非零格在列表中每一层各生成一个体素。默认 [0] 表示单层平铺。若同时接了 z 且本口未接线，则以 z 的 [0..z] 实心柱为准。",
+      "description-en": "List of z values; each non-zero cell emits one voxel per z in this list. Default [0] = single flat layer. Ignored when unset and `z` is provided (fill 0..z).",
       "default": [0]
     }
   ],

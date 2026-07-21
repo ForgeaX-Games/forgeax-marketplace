@@ -471,6 +471,9 @@ importers:
 
   packages/node-runtime-react:
     dependencies:
+      '@forgeax/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@forgeax/node-runtime':
         specifier: workspace:*
         version: link:../node-runtime

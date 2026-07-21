@@ -7,7 +7,7 @@
 
 与 `ZoneNesting`（均匀偏移内缩）不同，本模板用 `zone_nesting_riverbank` 电池在上游剩余空地上侵蚀出**内边界深浅不一、忽宽忽窄的河岸式地块**：噪声高处深切（宽湾），低处浅切（窄岸），形成极不均匀的自然腐蚀边界。剩余空地作为 Rest 继续往下传。
 
-**典型位置：结构/分区层**。通常接在 `PathConnection.out_1`（Non-Path）或上一个结构组的 Rest 之后。
+**典型位置：结构/分区层**。通常接在 `PathConnection*.out_2`（Rest；`out_1` 是 Path 本身）或上一个结构组的 Rest 之后。
 
 内部数据流：`scene → node_explode → rect_grid + voxel_slice`（取占用区 grid）`→ zone_nesting_riverbank`（变深度侵蚀+样条）`→ grid2node → add_child`；Rest = `区域求差(占用区 − 地块)`。
 
@@ -15,7 +15,7 @@
 
 | portName | portType | 语义 | 是否必接 | 怎么喂 |
 |---|---|---|---|---|
-| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection.out_1` 或上一组 Rest → `in_0` |
+| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection*.out_2`（Rest；不是 `out_1`）或上一组 Rest → `in_0` |
 | `in_1` | string | DistrictAsset 地块名（=节点名 + 资产名） | 建议接 | `text_panel.output` → `in_1` |
 | `in_2` | number | Seed 随机种子 | 建议接 | `seed_control.seed` → `in_2` |
 | `in_3` | number | ErosionStrength 平均侵蚀强度（默认 54，>1 按 0~100） | 建议接 | `number_const.value` → `in_3` |

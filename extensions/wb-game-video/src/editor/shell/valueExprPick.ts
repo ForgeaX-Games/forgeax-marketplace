@@ -5,24 +5,31 @@
 import type {
   Entity,
   NumOrExpr,
-  ValuePick,
-  ValueTerm,
   ValueTermOp,
   Variable,
 } from '../../runtime/schema/graph-schema'
+import type { EditorValueTerm as ValueTerm, FormulaHoleBinding, FormulaPick } from '../persist/formula-authoring'
 import {
   findEntity,
+  findFormula,
   listAttrOptions,
   listEntityOptions,
+  listFormulaOptions,
   listVarOptions,
 } from './metaCatalog'
 
-export type { ValuePick, ValueTerm, ValueTermOp }
+export type ValuePick =
+  | { mode: 'const'; const: number }
+  | { mode: 'pick'; terms: ValueTerm[] }
+  | FormulaPick
+export type { ValueTerm, ValueTermOp }
 
 export {
   findEntity,
+  findFormula,
   listAttrOptions,
   listEntityOptions,
+  listFormulaOptions,
   listVarOptions,
 } from './metaCatalog'
 
@@ -54,13 +61,13 @@ function atomRef(t: ValueTerm): string {
   return `entity.${t.refId}.attr.${t.attr || 'hp'}`
 }
 
-/** 统一补齐 op（首项仅 ±），并按 source 清理无关字段。 */
+/** 统一补齐 op，并按 source 清理无关字段。四种运算符对每一项（含首项）都合法——见 `leadTerm`。 */
 export function normalizeTerms(terms: ValueTerm[]): ValueTerm[] {
-  return terms.map((t, i) => {
+  return terms.map((t) => {
     const op = termOp(t)
     const source = t.source === 'const' ? 'const' : t.source === 'var' ? 'var' : 'entity'
     return {
-      op: i === 0 ? (op === '-' ? '-' : '+') : op,
+      op,
       source,
       refId: source === 'const' ? '' : t.refId,
       attr: source === 'entity' ? t.attr : undefined,
@@ -69,13 +76,26 @@ export function normalizeTerms(terms: ValueTerm[]): ValueTerm[] {
   })
 }
 
-/** 把选取式条款编译成引擎 NumOrExpr（左结合加括号；对象形态附带 pick）。 */
-export function compileValuePick(pick: ValuePick): NumOrExpr {
+/**
+ * 首项没有左操作数，×÷ 不表示"跟左边结合"，而是跟 +− 一样的一元变换：
+ * + / × → 原值；− → 取反；÷ → 取倒数（跟 Effect 层「运算」符号按钮的减/除同一套语义）。
+ */
+function leadTerm(op: ValueTermOp, body: string): string {
+  if (op === '-') return `-${body}`
+  if (op === '/') return `1/(${body})`
+  return body
+}
+
+/**
+ * 把选取式条款编译成引擎 NumOrExpr（左结合加括号；对象形态附带 pick）。
+ * 只接常量 / 选取式两态——`formula` 态走 `formulaApply.ts` 的 `compileFormula`（它内部编译留空位
+ * 回填后的条款链时，也是转手调这个函数，只是永远只传 `mode:'pick'`）。
+ */
+export function compileValuePick(pick: Exclude<ValuePick, { mode: 'formula' }>): NumOrExpr {
   if (pick.mode === 'const') return pick.const
   const terms = normalizeTerms(pick.terms).filter(atomComplete)
   if (terms.length === 0) return { expr: '0', pick }
-  let expr = atomRef(terms[0]!)
-  if (termOp(terms[0]!) === '-') expr = `-${expr}`
+  let expr = leadTerm(termOp(terms[0]!), atomRef(terms[0]!))
   for (let i = 1; i < terms.length; i++) {
     const t = terms[i]!
     const op = termOp(t)
@@ -83,6 +103,26 @@ export function compileValuePick(pick: ValuePick): NumOrExpr {
     expr = `(${expr}${op}${body})`
   }
   return { expr, pick: { mode: 'pick', terms } }
+}
+
+/** Effect 层"运算"符号按钮的减/除动作——落盘仍只有 add/mul/set，减=取反后 add，除=取倒数后 mul。 */
+export function negateNumOrExpr(v: NumOrExpr): NumOrExpr {
+  return typeof v === 'number' ? -v : { expr: `-(${v.expr})` }
+}
+export function reciprocalNumOrExpr(v: NumOrExpr): NumOrExpr {
+  return typeof v === 'number' ? (v === 0 ? 0 : 1 / v) : { expr: `1/(${v.expr})` }
+}
+
+/** 给公式条款分配稳定 id（留空位按它寻址绑定；普通选取式条款不需要）。 */
+export function allocTermId(existing: ValueTerm[]): string {
+  const used = new Set(existing.map((t) => t.id).filter(Boolean))
+  let i = existing.length
+  let id = `t${i}`
+  while (used.has(id)) {
+    i += 1
+    id = `t${i}`
+  }
+  return id
 }
 
 export function emptyPickTerm(
@@ -112,6 +152,13 @@ function asValuePick(stored: unknown): ValuePick | undefined {
     const terms = (stored as { terms?: ValueTerm[] }).terms
     if (Array.isArray(terms) && terms.length > 0) {
       return { mode: 'pick', terms: normalizeTerms(terms) }
+    }
+  }
+  if (m === 'formula') {
+    const formulaId = (stored as { formulaId?: unknown }).formulaId
+    const holeBindings = (stored as { holeBindings?: unknown }).holeBindings
+    if (typeof formulaId === 'string' && holeBindings && typeof holeBindings === 'object') {
+      return { mode: 'formula', formulaId, holeBindings: holeBindings as Record<string, FormulaHoleBinding> }
     }
   }
   return undefined

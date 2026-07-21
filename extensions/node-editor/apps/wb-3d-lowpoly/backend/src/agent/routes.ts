@@ -15,7 +15,7 @@ const PROJECT_ROOT = process.env.FORGEAX_PROJECT_ROOT ?? resolve(REPO_ROOT, '.fo
  * Resolve which project an agent screenshot / GLB export belongs to, and the
  * directory its artifact should be written under.
  *
- * Subtlety this guards: the single `?pane=urdf` viewer renders the workspace's
+ * Subtlety this guards: the single `?pane=viewer3d` viewer renders the workspace's
  * VIEWING project. So a capture/export is always a frame of whatever is being
  * viewed — never of some other "open" project. If the caller asks for a project
  * that isn't the viewing one, we reject with a clear instruction instead of
@@ -83,7 +83,7 @@ function persistForAgent(rec: ScreenshotRecord, baseDir: string): AgentScreensho
 }
 
 // WS-coordinated agent routes: screenshot capture + glb export both broadcast a
-// request to live renderer clients (the ?pane=urdf viewer / headless renderer)
+// request to live renderer clients (the ?pane=viewer3d viewer / headless renderer)
 // and await their /store callback.
 export async function registerScreenshotRoutes(app: FastifyInstance): Promise<void> {
   const svc = getScreenshotService()
@@ -147,17 +147,24 @@ export async function registerScreenshotRoutes(app: FastifyInstance): Promise<vo
   // scene to binary glTF (with joint-preview animation) and POSTs it to /store,
   // which writes it under <projectRoot>/assets/3d/<name>.glb and resolves.
   app.post('/api/v1/agent/glb/export', { bodyLimit: 1 * 1024 * 1024 }, async (req, reply) => {
-    const body = (req.body as { name?: string; animated?: boolean; timeout?: number; projectId?: unknown }) ?? {}
+    const body = (req.body as { name?: string; animated?: boolean; mode?: string; timeout?: number; projectId?: unknown }) ?? {}
     const target = await resolveAgentTarget(body.projectId)
     if (!target.ok) return reply.code(target.code).send({ error: target.error })
     // glb bake (render + GLTFExporter parse + base64 + POST) is heavier than a
     // screenshot, so default 30s / cap 60s. (timeout is MILLISECONDS.)
     const timeout = Math.min(body.timeout ?? 30000, 60000)
     const name = safeName(body.name)
+    // `mode` selects the export flavor (animated/static/skinned/character). For
+    // backward compat, `animated` is honored when `mode` is absent: animated!==false
+    // → 'animated', else 'static'. See useGlbExport.ts for the renderer branches.
+    const MODES = ['animated', 'static', 'skinned', 'character']
+    const mode = typeof body.mode === 'string' && MODES.includes(body.mode)
+      ? body.mode
+      : body.animated === false ? 'static' : 'animated'
     // Capture the target now so the renderer's /store callback (which has no
     // project context) writes the .glb under the right project directory.
     const { requestId, promise } = glb.createExport(timeout, { projectId: target.projectId, dir: target.dir })
-    broadcastToClients({ event: 'glb:request', payload: { requestId, name, animated: body.animated !== false } })
+    broadcastToClients({ event: 'glb:request', payload: { requestId, name, animated: body.animated !== false, mode } })
     try {
       return await promise
     } catch (e) {

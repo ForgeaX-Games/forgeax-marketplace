@@ -23,6 +23,8 @@ import {
   addVec,
   mat3Vec3,
   readVec3,
+  buildJointMotionEdges,
+  partsMoveRelativeToEachOther,
   IDENTITY_XFORM,
   type Geometry,
   type LocalAABB,
@@ -109,7 +111,9 @@ export function meshAwareQc(
   }
 
   const signals: MeshQcSignal[] = []
-  const hasMovingJoint = joints.some((j) => (j.args.type?.kind === 'string' ? j.args.type.value : 'fixed') !== 'fixed')
+  // moving-joint trap 修正：重叠严重度按**这一对 part 是否真的会相对运动**判定。
+  // 重叠一律不 fail clean —— 低模少量交叠是常态；孤立 part 才是关节要修的硬伤。
+  const motionEdges = buildJointMotionEdges(joints)
 
   // ── 实体级两两穿模 ──────────────────────────────────────────────────────
   const ids = [...partAabbs.keys()].sort()
@@ -121,20 +125,27 @@ export function meshAwareQc(
       if (!a.meshBacked && !b.meshBacked) continue
       const depth = aabbOverlapDepth(a.aabb, b.aabb)
       if (depth[0] > overlapTol && depth[1] > overlapTol && depth[2] > overlapTol) {
-        // 最小穿透轴 → 沿该轴把后一件推离前一件，给出具体平移量。
+        const movesRelative = partsMoveRelativeToEachOther(ids[i], ids[k], motionEdges)
         const axis = depth[0] <= depth[1] && depth[0] <= depth[2] ? 0 : depth[1] <= depth[2] ? 1 : 2
         const sign = b.aabb.center[axis] >= a.aabb.center[axis] ? 1 : -1
         const delta: [number, number, number] = [0, 0, 0]
         delta[axis] = round(sign * (depth[axis] + overlapTol))
         signals.push({
           code: 'mesh_overlap',
-          severity: hasMovingJoint ? 'error' : 'warning',
+          severity: movesRelative ? 'warning' : 'note',
           ids: [ids[i], ids[k]],
           message:
             `mesh-aware: parts "${ids[i]}" and "${ids[k]}" interpenetrate ` +
             `(min depth=${round(Math.min(...depth))}m on axis ${'XYZ'[axis]}). ` +
-            `to separate, translate "${ids[k]}" by [${delta.join(', ')}] (or move "${ids[i]}" by the negation).`,
-          suggestion: { op: 'translate_part', target: ids[k], delta },
+            (movesRelative
+              ? `they move relative to each other via a non-fixed joint — review if intentional; do NOT detach parts to silence. `
+              : `rigidly linked (fixed joints only) — likely a benign low-poly overlap; check before forcing apart. `) +
+            (movesRelative
+              ? `optional separation: translate "${ids[k]}" by [${delta.join(', ')}].`
+              : `note: AABB-only check, conservative for rotated meshes.`),
+          ...(movesRelative
+            ? { suggestion: { op: 'translate_part' as const, target: ids[k], delta } }
+            : {}),
         })
       }
     }
@@ -158,9 +169,13 @@ export function meshAwareQc(
         round(parentBox.aabb.center[1] - childBox.aabb.center[1]),
         round(parentBox.aabb.center[2] - childBox.aabb.center[2]),
       ]
+      // 这条 joint 自己是不是可动关节才决定"child 被甩离 parent"有多严重——
+      // 跟模型别处有没有别的可动关节无关（同一处 bug，用这条 joint 自己的 type 判定）。
+      const jointType = j.args.type?.kind === 'string' ? j.args.type.value : 'fixed'
+      const isMovingJoint = jointType !== 'fixed'
       signals.push({
         code: 'joint_child_detached',
-        severity: hasMovingJoint ? 'error' : 'note',
+        severity: isMovingJoint ? 'error' : 'note',
         ids: [jStmt.id, p.name, c.name],
         message:
           `mesh-aware: joint "${jStmt.id}" leaves child "${c.name}" ${round(gap)}m off parent "${p.name}". ` +

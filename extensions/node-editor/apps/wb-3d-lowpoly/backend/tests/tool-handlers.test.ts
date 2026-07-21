@@ -29,7 +29,7 @@ describe('ToolRegistry lowpoly handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-extension/wb-3d-lowpoly': { frontendPort: 5001, backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-plugin/wb-3d-lowpoly': { frontendPort: 5001, backendPort: port } } }),
     )
 
     try {
@@ -58,7 +58,7 @@ describe('ToolRegistry lowpoly handlers', () => {
     const port = typeof addr === 'object' && addr ? addr.port : 0
     writeFileSync(
       portsFile,
-      JSON.stringify({ plugins: { '@forgeax-extension/wb-3d-lowpoly': { backendPort: port } } }),
+      JSON.stringify({ plugins: { '@forgeax-plugin/wb-3d-lowpoly': { backendPort: port } } }),
     )
 
     try {

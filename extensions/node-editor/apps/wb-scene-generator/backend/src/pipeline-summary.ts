@@ -32,6 +32,16 @@ export interface PipelineSummary {
     sceneMerge?: string
     sceneOutput?: string
   }
+  /**
+   * Present only when `nameContains`/`opIdIn` was passed (P0-3 grep-style
+   * filter) — `matchCount` is how many nodes matched the filter itself,
+   * BEFORE the one-hop-neighbor expansion that also lands in `nodes`/`edges`.
+   * A caller that gets `matchCount: 0` back knows the search itself found
+   * nothing (rather than silently falling back to the whole graph, or
+   * confusing "0 direct matches, but neighbors of some other filter" with
+   * "no matches at all").
+   */
+  search?: { matchCount: number }
 }
 
 function normalizeNodes(raw: PipelineSnapshot['nodes']): GraphNode[] {
@@ -70,22 +80,45 @@ function nodeTouchesSet(nodeId: string, ids: ReadonlySet<string>, edges: GraphEd
 
 export function summarizePipeline(
   snap: PipelineSnapshot | null,
-  opts?: { nodeIds?: readonly string[]; groupId?: string },
+  opts?: { nodeIds?: readonly string[]; groupId?: string; nameContains?: string; opIdIn?: readonly string[] },
 ): PipelineSummary | null {
   if (!snap) return null
   const allNodes = normalizeNodes(snap.nodes)
   const allEdges = normalizeEdges(snap.edges)
 
-  let focusIds: Set<string> | null = null
-  if (opts?.groupId) {
-    focusIds = new Set([opts.groupId])
-    for (const e of allEdges) {
-      if (e.source.nodeId === opts.groupId) focusIds.add(e.target.nodeId)
-      if (e.target.nodeId === opts.groupId) focusIds.add(e.source.nodeId)
+  // P0-3: grep 式模糊过滤。所有筛选条件（groupId / nodeIds / nameContains /
+  // opIdIn）先各自算出直接命中的节点 id，取并集作为 directIds；再统一做一次
+  // 一跳邻居展开（跟原来 groupId/nodeIds-only 的行为完全一致，只是把命中源
+  // 从"只能是精确 id"扩展成"也可以是名字子串/opId 白名单"）。
+  const directIds = new Set<string>()
+  if (opts?.groupId) directIds.add(opts.groupId)
+  if (opts?.nodeIds?.length) for (const id of opts.nodeIds) directIds.add(id)
+  const hasSearch = Boolean(opts?.nameContains?.trim()) || Boolean(opts?.opIdIn?.length)
+  const searchMatchIds = new Set<string>()
+  if (opts?.nameContains?.trim()) {
+    const needle = opts.nameContains.trim().toLowerCase()
+    for (const n of allNodes) {
+      if (typeof n.name === 'string' && n.name.toLowerCase().includes(needle)) searchMatchIds.add(n.id)
     }
-  } else if (opts?.nodeIds?.length) {
-    focusIds = new Set(opts.nodeIds)
-    for (const id of opts.nodeIds) {
+  }
+  if (opts?.opIdIn?.length) {
+    const opIdSet = new Set(opts.opIdIn)
+    for (const n of allNodes) {
+      if (opIdSet.has(n.opId)) searchMatchIds.add(n.id)
+    }
+  }
+  for (const id of searchMatchIds) directIds.add(id)
+
+  // 任何过滤条件被显式传入时都不应该"查不到就回退成全图"——尤其是
+  // nameContains/opIdIn 查询 0 命中时，返回全图会让 search.matchCount:0 这个
+  // 信号毫无意义（agent 拿到一堆节点，还得自己再判断"这是不是真的命中了"）。
+  // 只有完全没传任何过滤条件时，才是原来的"不过滤 = 全图"语义。
+  const anyFilterGiven = Boolean(opts?.groupId || opts?.nodeIds?.length || hasSearch)
+
+  let focusIds: Set<string> | null = null
+  if (anyFilterGiven) {
+    focusIds = new Set(directIds)
+    for (const id of directIds) {
       for (const e of allEdges) {
         if (e.source.nodeId === id) focusIds.add(e.target.nodeId)
         if (e.target.nodeId === id) focusIds.add(e.source.nodeId)
@@ -121,6 +154,7 @@ export function summarizePipeline(
       target: { nodeId: e.target.nodeId, port: e.target.port },
     })),
     exportChain: detectExportChain(allNodes),
+    ...(hasSearch ? { search: { matchCount: searchMatchIds.size } } : {}),
   }
 }
 

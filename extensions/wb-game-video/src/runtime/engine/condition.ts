@@ -10,7 +10,6 @@ import type { MutableState } from './apply-effects'
 export interface ConditionTarget {
   state: MutableState
   visited: Set<string>
-  statuses?: Record<string, Set<string>>
 }
 
 function cmp(a: number, op: CmpOp, b: number): boolean {

@@ -45,7 +45,7 @@
 5. **命名** — `locationId` / `namePort` = 上游 name 原文；`narrativeLocationNames[]` = `requiredLocationIds`
 6. **资产 footprint** — scatter 用 town-building-scatter；装饰用 **prefab-footprint-summary**（禁止 1×1 默认）
 7. **道路** — `PathConnectionLink` batch 在 **全部 BuildingStructures 之后**；POI：BuildingPath+outer_door
-8. **装饰三层** — PlaceOne → LocalPrecise → Natural×3（density≈0.01）
+8. **装饰三层** — PlaceOne（地标）→ LocalPrecise → Natural 多层多品种（草/灌木/树推荐，非强制；density 分层：0.008 中间参考、≤0.01，树稀/草密）
 
 ---
 

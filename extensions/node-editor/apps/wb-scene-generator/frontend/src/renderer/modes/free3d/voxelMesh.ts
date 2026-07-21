@@ -4,19 +4,14 @@
 //   - cells are Point3D[] (sparse voxels with explicit z height)
 //   - each cell occupies one world-unit cube; X kept, Y flipped to match the
 //     2D top/iso world coordinate system, Z used as vertical height
-//   - golden-angle hue hash off layer.value for stable per-value coloring
+//   - colorForValue(layer.value) — same key/hue as Output swatch + 2D Color modes
 //   - no nameList height derivation / multi-value / asset binding (the
 //     projection has already flattened to a node-level layer)
 
 import * as THREE from 'three'
 import type { RendererVoxelLayer } from '../../types'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
-
-function valueHue(value: number): number { return (value * 137.508) % 360 }
-
-function applyHSL(out: THREE.Color, h: number, s: number, l: number): void {
-  out.setHSL((h % 360) / 360, s / 100, l / 100)
-}
+import { colorForValue } from '../../framework/palette'
 
 export interface VoxelBuildOptions {
   layer: RendererVoxelLayer
@@ -41,7 +36,7 @@ export interface VoxelBuildOptions {
  * Each cube edge = BASE_CELL_SIZE. Returns null when there are no cells.
  */
 export function buildVoxelMesh(opts: VoxelBuildOptions): THREE.InstancedMesh | null {
-  const { layer, maxRows, maxCols, heightScale, isSelected, colorMode, wireframe } = opts
+  const { layer, maxRows, maxCols, heightScale, isSelected, wireframe } = opts
   const cells = layer.cells
   if (!cells || cells.length === 0) return null
 
@@ -64,16 +59,8 @@ export function buildVoxelMesh(opts: VoxelBuildOptions): THREE.InstancedMesh | n
   const halfCols = maxCols / 2
   const halfRows = maxRows / 2
 
-  const hue = valueHue(layer.value)
-  let sat: number, lig: number
-  if (colorMode) {
-    sat = isSelected ? 95 : 85
-    lig = isSelected ? 62 : 55
-  } else {
-    sat = isSelected ? 88 : 72
-    lig = isSelected ? 60 : 50
-  }
-  applyHSL(color, hue, sat, lig)
+  const rgba = colorForValue(layer.value, { selected: isSelected })
+  color.setRGB(rgba.r / 255, rgba.g / 255, rgba.b / 255)
 
   const heightWorld = cell * heightScale
 

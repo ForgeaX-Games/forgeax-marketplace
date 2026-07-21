@@ -7,7 +7,7 @@
 // functions re-exported here — NOT by maintaining parallel copies.
 //
 // Only PURE functions are surfaced (no canvas/DOM/fetch/lifecycle): the autotile
-// neighbour-key construction (incl. `edgeDist2`), wildcard map lookup, and the
+// neighbour-key construction (incl. `adjacent8` / `edgeDist2`), wildcard map lookup, and the
 // face sprite pick (incl. variant region-map selection + randomRules). These are
 // exactly the pieces the exporter previously duplicated in
 // backend/src/scene-export/tileRules.ts.
@@ -19,7 +19,7 @@
 // implementation, zero drift. Keep this barrel free of any browser/DOM import so
 // the vendor compile (and Node consumers) stay clean.
 
-export { pickFaceSprite, pickFaceSpriteIndex, type PickFaceContext } from '../modes/topBillboard/buildVoxelMaster/pickFaceSprite'
+export { pickFaceSprite, pickFaceSpriteIndex, pickFaceSpriteIndexIfMapped, type PickFaceContext } from '../modes/topBillboard/buildVoxelMaster/pickFaceSprite'
 export {
   compareBillboardDrawOrder,
   type BillboardDrawOrderKey,

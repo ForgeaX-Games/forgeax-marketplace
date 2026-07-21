@@ -1,4 +1,4 @@
-// Headless proof of the LIVE-SYNC data path: the URDF viewer's `useUrdfLiveSync`
+// Headless proof of the LIVE-SYNC data path: the 3D viewer's `useViewer3DLiveSync`
 // hook reads `urdf_preview.urdf` (falling back to `g_to_urdf.urdf`). This builds
 // the full preview chain `g_box → g_part → g_to_urdf → urdf_preview` via
 // POST /api/v1/batch, executes it, then asserts

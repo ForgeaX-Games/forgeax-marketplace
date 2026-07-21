@@ -8,6 +8,7 @@
 > Link 权威：[../../../../batteries/templates/structures/path/PathConnectionLink/README.md](../../../../batteries/templates/structures/path/PathConnectionLink/README.md)
 > Link 速查：[PathConnectionLink.md](PathConnectionLink.md)
 > **instantiate 用 basename `PathConnection`**（RandomWalk）；Link 用 `PathConnectionLink`。两者 **in/out 端口一致**。
+> 端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 > **已验证单链 M4**：`VERIFY_FRESH=1 node aw-support/scripts/verify-battery-templates.mjs --step=path` → `aw-support/battery-verify/<projectId>/step-m4-pathconnection.json`。**POI 从 rest cells 推理，禁止抄固定坐标。**
 
@@ -58,7 +59,7 @@
 >
 > | 场景 | 怎么导出 | 怎么推理 POI |
 > |------|---------|-------------|
-> | **仅 PickOneBuilding / PickMulti** | `building_footprint_mask` 或 Point+Footprint | 长边中点**外一格**；门格 value=2 + origin 换算 |
+> | **仅 PickOneBuilding（无结构层）** | `building_footprint_mask` 或 Point+Footprint | 长边中点**外一格**；门格 value=2 + origin 换算 |
 > | **地图边界锚点** | 对 `in_2` 同源 Rest execute 摘要 | footprint **边界行/列**中点，须 region 非 0 |
 > | **地标/装饰旁路口** | PlaceOne Point + footprint | 装饰 footprint **外侧**最近可铺路格 |
 >
@@ -102,7 +103,7 @@
 
 | portName | 语义 | 典型去向 |
 |----------|------|---------|
-| `out_1` | Path 道路 | `tree_merge` |
+| `out_1` | Path 道路 | `appendMergeItem` → `aw_m0_merge` |
 | `out_2` | Rest | 下一组 Scene |
 | `out_3` | PathPath | 可选 |
 

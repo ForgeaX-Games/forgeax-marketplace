@@ -4,6 +4,7 @@
 // same-origin iframes with no parent/child link, so selection rides the shared
 // localStorage + `storage` event bus (the same pattern WorkbenchHost/LeftPane use
 // for the embed toggles). Backed by GET /api/v1/library/rules.
+import { pluginFetch } from '../../api/pluginHttp'
 
 export interface RuleFaceSummary {
   basePieces: number
@@ -31,7 +32,7 @@ const LS_SELECTED_RULE = 'wb-scene-generator.assetstore.selectedRule'
 
 export const rulesApi = {
   list(): Promise<RuleListItem[]> {
-    return fetch('/api/v1/library/rules', { method: 'GET' }).then((r) => {
+    return pluginFetch('/api/v1/library/rules', { method: 'GET' }).then((r) => {
       if (!r.ok) throw new Error(`/api/v1/library/rules → ${r.status}`)
       return r.json() as Promise<RuleListItem[]>
     })

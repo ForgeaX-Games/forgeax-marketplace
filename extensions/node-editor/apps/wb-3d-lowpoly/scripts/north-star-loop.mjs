@@ -8,7 +8,7 @@
 // ║  Two observation channels, mirroring what an agent would actually use:     ║
 // ║    • TEXTUAL (always available): GET <urdf_preview>/outputs/urdf → <robot> ║
 // ║    • PIXEL  (needs chromium):    POST /agent/screenshot/capture, which      ║
-// ║      broadcasts `screenshot:request` over /ws; the open ?pane=urdf page's  ║
+// ║      broadcasts `screenshot:request` over /ws; open ?pane=viewer3d page's  ║
 // ║      `useScreenshotCapture` renders a fresh frame and POSTs the canvas PNG  ║
 // ║      back to /store, resolving the blocked /capture with a REAL pixel PNG.  ║
 // ║                                                                            ║
@@ -153,7 +153,7 @@ log('[north-star] chromium available — running FULL real-pixel loop.')
 // Agent-API capture: broadcasts screenshot:request; the open page answers.
 async function captureViaAgent(label, timeout = 8000) {
   const cap = await postJson('/api/v1/agent/screenshot/capture', { timeout })
-  if (!cap.ok) fail(`/capture(${label}) HTTP ${cap.status}: ${JSON.stringify(cap.json)} — is the ?pane=urdf page connected?`)
+  if (!cap.ok) fail(`/capture(${label}) HTTP ${cap.status}: ${JSON.stringify(cap.json)} — is the ?pane=viewer3d page connected?`)
   const buf = dataUrlToBuffer(cap.json?.dataUrl)
   const { width, height } = pngDims(buf)
   if (width <= 1 || height <= 1) fail(`/capture(${label}) PNG too small: ${width}x${height}`)
@@ -210,7 +210,7 @@ try {
   }
 
   // 1) Open the live viewer; wait for the canvas + WS hook to mount.
-  await page.goto(`${FRONTEND_URL}/?pane=urdf`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${FRONTEND_URL}/?pane=viewer3d`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('canvas', { timeout: 15000 })
   await page.waitForTimeout(800) // let the WS open + first frame paint
   let sig = await canvasSig()

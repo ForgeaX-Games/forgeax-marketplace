@@ -1,6 +1,6 @@
 # Worldmap 电池组
 
-该组电池把 `generate_scene_by_steps/extensions/world_map` 的流程拆成可串联的 Scene Generator TS 电池：
+该组电池把 `generate_scene_by_steps/plugins/world_map` 的流程拆成可串联的 Scene Generator TS 电池：
 
 约束：该目录下每个电池必须自包含，不使用 `_shared` 目录，也不从兄弟电池目录导入工具函数；需要的网格、噪声、绘制、寻路等辅助逻辑应保留在各自电池的 `index.ts` 内。
 

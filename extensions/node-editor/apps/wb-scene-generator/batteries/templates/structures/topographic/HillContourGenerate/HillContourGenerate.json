@@ -581,6 +581,17 @@
         "nodeId": "node-1790000000006-4kbf3",
         "port": "value"
       }
+    },
+    {
+      "id": "hc-e-z-values-to-grid2node",
+      "source": {
+        "nodeId": "node-1790000000006-slehw",
+        "port": "values"
+      },
+      "target": {
+        "nodeId": "node-1790000000006-tkeb1",
+        "port": "z"
+      }
     }
   ],
   "position": {

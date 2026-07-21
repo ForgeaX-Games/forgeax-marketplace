@@ -1,29 +1,46 @@
 /**
  * 應/默 限时抉择皮肤（component id: `inkYingMo`）—— 从旧 player/InkYingMoLayer 迁移。
  *
- * 读 InteractionSnap.inputs.events（水墨字形取 event.label，如「應」「默」）；点击/键盘(A/E=第0项, B/Q=第1项) → submit(id)。
- * 超时默认由引擎按 inputs.timeoutMs/defaultEvent 自动 submit(undefined) 处理，皮肤不再自管计时。
+ * 读 OverlaySnap.inputs.events（水墨字形取 event.label，如「應」「默」）；点击/键盘(A/E=第0项, B/Q=第1项) → emit(id)。
+ * 超时由 useDefaultEventTimeout 到点 emit(defaultEvent)。
  *
  * 预览态：与 inkKou 同一套 --preview-t 负 delay 冻结契约——preview 时加 is-frozen，
  * 入场动画按播放头定帧，且禁键/禁点（不吃提交）。
  */
 import { useEffect, useRef, type CSSProperties } from 'react'
-import { usePlayerKeyGate, type InteractionProps } from '../rendererRegistry'
+import { usePlayerKeyGate, type OverlayProps } from '../rendererRegistry'
 import { isOptionLocked } from '../optionLock'
-import type { ChoiceParams } from '../../registry/core-components'
+import {
+  CHOICE_INPUTS,
+  validateChoiceEvents,
+  type ChoiceParams,
+} from './Choice'
+import type { ComponentDef } from '../../registry/component-registry'
 import type { OverlayChild } from '../../schema/graph-schema'
-import { injectCss, ensureInkFilters, ensureBrushFont, previewFreezeClass, previewTStyle } from './skinRuntime'
+import { STAGE_FILL_LAYOUT } from '../../schema/layout'
+import { injectCss, ensureInkFilters, ensureBrushFont, previewFreezeClass, previewTStyle, useDefaultEventTimeout } from './skinRuntime'
 
-const KEY_LABELS = ['A', 'B'] as const
+const KEY_LABELS = ['E', 'Q'] as const
+
+/**
+ * 组件的注册契约（引擎/编辑器识别用）——与渲染实现同文件，经 EXTRA_COMPONENTS 注册。
+ */
+export const inkYingMoComponent: ComponentDef<ChoiceParams> = {
+  label: '應/默 抉择',
+  inputs: CHOICE_INPUTS,
+  validate: validateChoiceEvents,
+}
 
 /** 皮肤默认玩法参数（样式锁选项 / 新建预设 / 锚点共用）。 */
-export const inkYingMoDefaults: Pick<ChoiceParams, 'events' | 'x' | 'y'> = {
+export const inkYingMoDefaults: Pick<ChoiceParams, 'events' | 'x' | 'y' | 'timeoutMs' | 'defaultEvent'> = {
   events: [
     { id: 'ying', label: '應' },
     { id: 'mo', label: '默' },
   ],
-  x: 0.72,
-  y: 0.78,
+  x: 0.5,
+  y: 0.88,
+  timeoutMs: 8000,
+  defaultEvent: 'mo',
 }
 
 /** OverlayChild 预设（顶栏 component = 皮肤 id）。 */
@@ -31,17 +48,19 @@ export function inkYingMoPreset(id: string): OverlayChild {
   return {
     id,
     component: 'inkYingMo',
+    layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
     inputs: { ...inkYingMoDefaults },
   }
 }
 
-export function InkYingMoLayer({ interaction, submit, ctx, preview, previewTimeMs }: InteractionProps) {
+export function InkYingMoLayer({ overlay, emit, ctx, preview, previewTimeMs }: OverlayProps) {
   injectCss('ink-yingmo-layer', YINGMO_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  useDefaultEventTimeout(emit, overlay.inputs as Record<string, unknown>, preview)
   const keyOk = usePlayerKeyGate()
-  const inputs = interaction.inputs as unknown as ChoiceParams
+  const inputs = overlay.inputs as unknown as ChoiceParams
   const events = (inputs.events ?? []).slice(0, 2)
   const x = typeof inputs.x === 'number' ? inputs.x : inkYingMoDefaults.x!
   const y = typeof inputs.y === 'number' ? inputs.y : inkYingMoDefaults.y!
@@ -50,7 +69,7 @@ export function InkYingMoLayer({ interaction, submit, ctx, preview, previewTimeM
   function pick(id: string, locked: boolean): void {
     if (preview || pickedRef.current || locked) return
     pickedRef.current = true
-    submit(id)
+    emit?.(id)
   }
 
   useEffect(() => {
@@ -109,6 +128,8 @@ export function InkYingMoLayer({ interaction, submit, ctx, preview, previewTimeM
   )
 }
 
+// 尺寸用 cqh/cqw/cqmin（相对舞台，见 VideoOverlayStage.tsx 的 containerType:'size'）取代 vw/rem，
+// 避免预览小窗和全屏试玩里同一份配置呈现出不同的物理大小。
 const YINGMO_CSS = `
 .pvn-opts--yingmo{position:absolute;z-index:6;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%);pointer-events:none;}
 .pvn-opts--yingmo.show{pointer-events:auto;}
@@ -120,7 +141,7 @@ const YINGMO_CSS = `
 .pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-orn{animation-delay:calc(0.28s - var(--preview-t,0ms));}
 .pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-glyph{animation-delay:calc(0.2s - var(--preview-t,0ms));}
 .pvn-opts--yingmo.is-frozen .pvn-yingmo-pair .pvn-opt--ying:nth-child(2) .pvn-kou-hint{animation-delay:calc(0.46s - var(--preview-t,0ms));}
-.pvn-yingmo-pair{display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:clamp(32px,9vw,64px);}
+.pvn-yingmo-pair{display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:clamp(4cqmin,9cqw,9cqmin);}
 .pvn-opts--yingmo .pvn-opt--kou{position:relative;padding:0;border:none;background:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;color:#f8f4ec;}
 .pvn-opts--yingmo .pvn-opt--kou:hover:not(.dis):not(:disabled){transform:translateY(-2px) scale(1.03);}
 .pvn-opts--yingmo .pvn-opt--kou.dis,.pvn-opts--yingmo .pvn-opt--kou:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(.35);}
@@ -131,7 +152,7 @@ const YINGMO_CSS = `
 .pvn-kou-dot{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.88);box-shadow:0 0 6px rgba(255,255,255,.35);}
 .pvn-kou-diamond{width:10px;height:10px;position:relative;transform:rotate(45deg);border:1.5px solid rgba(255,255,255,.9);border-radius:1px;}
 .pvn-kou-diamond::after{content:'';position:absolute;left:50%;top:50%;width:5px;height:5px;transform:translate(-50%,-50%);background:rgba(255,255,255,.92);border-radius:1px;}
-.pvn-kou-glyph{font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:clamp(2rem,5.5vw,3.2rem);font-weight:800;line-height:1;letter-spacing:.08em;color:#f8f4ec;text-shadow:0 0 16px rgba(255,248,235,.28),0 0 2px rgba(255,255,255,.35);animation:pvnYmKouGlyphIn .48s cubic-bezier(.22,.92,.28,1) .12s both;}
+.pvn-kou-glyph{font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:clamp(4cqh,6cqmin,9cqh);font-weight:800;line-height:1;letter-spacing:.08em;color:#f8f4ec;text-shadow:0 0 16px rgba(255,248,235,.28),0 0 2px rgba(255,255,255,.35);animation:pvnYmKouGlyphIn .48s cubic-bezier(.22,.92,.28,1) .12s both;}
 .pvn-opts--yingmo .pvn-opt--kou:hover .pvn-kou-glyph{text-shadow:0 0 22px rgba(255,248,235,.38),0 0 2px rgba(255,255,255,.45);}
 .pvn-kou-hint{display:flex;align-items:center;justify-content:center;margin-top:4px;pointer-events:none;opacity:0;animation:pvnYmKouHintIn .5s ease .38s forwards;}
 .pvn-kou-key{display:flex;align-items:center;justify-content:center;width:1.42em;height:1.42em;font-family:'HYShangWei','STKaiti','KaiTi',serif;font-size:.68rem;font-weight:800;line-height:1;color:rgba(248,244,236,.92);position:relative;filter:url(#inkRoughNarr);}

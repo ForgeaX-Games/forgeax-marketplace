@@ -7,6 +7,7 @@ import {
 } from './VideoProvider'
 import { resolveExplicit } from '../refsets/seedanceResolution'
 import { maskSeedanceContentInput } from '../refsets/faceMaskTool'
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 /**
  * HostGatewayVideoProvider —— 把视频生成委托给宿主 forgeax-server 的 litellm
@@ -48,7 +49,7 @@ async function toDataUrl(src: string): Promise<string | undefined> {
   if (!src) return undefined
   if (src.startsWith('data:')) return src
   try {
-    const resp = await fetch(src)
+    const resp = await pluginFetch(src)
     if (!resp.ok) return undefined
     const blob = await resp.blob()
     const buf = await blob.arrayBuffer()
@@ -76,7 +77,7 @@ export class HostGatewayVideoProvider implements VideoTaskProvider {
   private readonly defaultDuration: number
 
   constructor(opts: { base?: string; durationSec?: number } = {}) {
-    this.base = (opts.base ?? '/__ce-api__').replace(/\/$/, '')
+    this.base = (opts.base ?? pluginUrl('/__ce-api__')).replace(/\/$/, '')
     this.defaultDuration = opts.durationSec ?? 5
   }
 
@@ -151,7 +152,7 @@ export class HostGatewayVideoProvider implements VideoTaskProvider {
     const referenceAudioDataUrl =
       !frames && req.referenceAudioUrl ? await toDataUrl(req.referenceAudioUrl) : undefined
 
-    const resp = await fetch(`${this.base}/generate-video`, {
+    const resp = await pluginFetch(`${this.base}/generate-video`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -223,7 +224,7 @@ export class HostGatewayVideoProvider implements VideoTaskProvider {
       await sleep(interval, opts.signal)
       let resp: Response
       try {
-        resp = await fetch(
+        resp = await pluginFetch(
           `${this.base}/video-status?taskId=${encodeURIComponent(taskId)}`,
           { signal: opts.signal },
         )

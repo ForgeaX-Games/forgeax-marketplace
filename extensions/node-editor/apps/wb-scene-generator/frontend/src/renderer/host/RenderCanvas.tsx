@@ -158,9 +158,9 @@ export function RenderCanvas({
   const selectCellRef = useRef<string | null>(null)
   const selectCycleIndexRef = useRef(0)
 
-  // 2D viewport interaction only applies to the orthographic modes; free3d's
-  // OrbitControls binds to its own canvas (pointer-events:auto) and owns zoom/pan.
-  const is2D = viewMode !== 'free3d'
+  // 2D pan/zoom only for orthographic modes. Self-managed 3D plugins
+  // (free3d, 3DMesh) own OrbitControls on their canvas — keep this list in sync.
+  const is2D = viewMode !== 'free3d' && viewMode !== '3DMesh'
   // Painting is enabled only in billboard + asset mode with a chosen baked layer.
   const editPaintable = is2D && editMode && viewMode === 'topBillboard' && drawMode === 'asset' && !!activeBakedLayerKey
   // SELECT is a read-only query (attribute a click → layer); it needs neither a

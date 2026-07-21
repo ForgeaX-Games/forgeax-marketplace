@@ -49,6 +49,7 @@ import * as fans from './fans.js';
 import * as gears from './gears.js';
 import * as primitives from './primitives.js';
 import * as architecture from './architecture.js';
+import * as rockOps from './rock.js';
 
 const OPS: OpBuilderRegistry = new Map<string, OpBuilder>([
   // ── Extra primitives (URDF-native box/cylinder/sphere are not baked) ──
@@ -56,6 +57,9 @@ const OPS: OpBuilderRegistry = new Map<string, OpBuilder>([
   ['capsule', primitives.capsule],
   ['torus',   primitives.torus],
   ['dome',    primitives.dome],
+  // rock/boulder：icosphere + 确定性位移，直接产出三角网格（非 OCCT 实体）。
+  ['rock',    rockOps.rock as OpBuilder],
+  ['boulder', rockOps.boulder as OpBuilder],
 
   // ── Phase 1: Parts ──
   ['clevis_bracket', brackets.clevisBracket],

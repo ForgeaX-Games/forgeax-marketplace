@@ -14,7 +14,7 @@
 > **回来改对应条目**（连同该 app `ARCHITECTURE.md` 与 `docs/architecture/extension-and-contracts.md`）。
 > 引用带 `file:line`，行号会漂，以「文件 + 符号名」为准。
 >
-> 所有路径相对本 app 根：`packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/`。
+> 所有路径相对本 app 根：`packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/`。
 
 ---
 

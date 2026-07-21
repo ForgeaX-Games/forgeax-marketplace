@@ -1,12 +1,15 @@
 // 💡 单 face 的 autotile sprite 选取
 //
-// 三步:
+// ⓪ front 面 blockVariants(可选)—— 连续 3×3 实心墙块整体换大图,命中即返回,
+//    跳过下面①-③(9 格必须用同一大图,不走逐格 map/randomRules)。
+// 其余三步:
 //   ① 算邻域 key —— 'top' 用 (u,d,l,r) 同 z 平面 4 邻;'front' 用 (t,b,l,r) z 上下 + xy 左右
 //   ② 选 map     —— face.variants 顺序匹配 when.regionContains,首条命中走 variant.map,
 //                    否则走默认 face.map
 //   ③ 查表 + 变体 randomRules —— 命中 randomRules.tileId 时按 cellRng 决定保留 / 换变体
 
 import { buildTopFaceKey, lookupWithWildcard } from '../../../framework/asset/neighborKey'
+import { pickBlockVariantSpriteIndex } from '../../../framework/asset/blockVariant'
 import type { FaceRule, RuleSprite } from '../../../framework/asset/ruleCache'
 import { pickWeightedVariant, type VariantPool } from '../../../framework/asset/variantCandidates'
 import type { CollectedCell } from './types'
@@ -18,7 +21,7 @@ import type { CollectedCell } from './types'
  */
 export interface PickFaceContext {
   face: FaceRule
-  faceTag: 'top' | 'front'
+  faceTag: 'top' | 'front' | 'entry'
   sprites: ReadonlyArray<RuleSprite>
   /** Face-level fallback pool (face.variantIdxs filtered); used when a randomRule has no own pool. */
   validVariantIdxs: ReadonlyArray<number>
@@ -40,7 +43,7 @@ export function pickFaceSprite(ctx: PickFaceContext): RuleSprite | null {
 
 /**
  * The face's resolved sprite INDEX into `ctx.sprites` — the canonical autotile
- * pick (neighbour-key incl. `edgeDist2`, variant region-map selection,
+ * pick (neighbour-key incl. `adjacent8` / `edgeDist2`, variant region-map selection,
  * randomRules variant substitution). `pickFaceSprite` is just this + an array
  * lookup; consumers that need the index itself (e.g. the headless scene
  * exporter, which maps the index to an atlas sub-tile) call this directly so
@@ -48,15 +51,32 @@ export function pickFaceSprite(ctx: PickFaceContext): RuleSprite | null {
  * returns a valid index into `ctx.sprites` (clamped to 0).
  */
 export function pickFaceSpriteIndex(ctx: PickFaceContext): number {
+  return pickFaceSpriteIndexInner(ctx, false) ?? 0
+}
+
+/** Like pickFaceSpriteIndex but returns null when the face map has no match for the neighbour key. */
+export function pickFaceSpriteIndexIfMapped(ctx: PickFaceContext): number | null {
+  return pickFaceSpriteIndexInner(ctx, true)
+}
+
+function pickFaceSpriteIndexInner(ctx: PickFaceContext, requireMapMatch: boolean): number | null {
   const { face, faceTag, sprites, validVariantIdxs, cell, coordsByLayerIdx, regions } = ctx // ctx also carries validVariantWeights / validVariantPoolsByTileId
   const layerSet = coordsByLayerIdx.get(cell.layerIdx)
   const has = (dx: number, dy: number, dz: number): boolean =>
     !!layerSet && layerSet.has(`${cell.x + dx},${cell.y + dy},${cell.z + dz}`)
 
+  // front 面"大变体":连续 3×3 实心墙块整体换大图,优先于逐格 map/randomRules——
+  // 命中就直接返回,不再走下面的 key/map/randomRules 流程(9 格必须用同一大图)。
+  if (faceTag === 'front' && face.blockVariants) {
+    const hasAt = (ax: number, az: number): boolean => has(ax - cell.x, 0, az - cell.z)
+    const blockIdx = pickBlockVariantSpriteIndex(hasAt, cell.x, cell.z, face.blockVariants)
+    if (blockIdx !== null) return blockIdx < 0 || blockIdx >= sprites.length ? 0 : blockIdx
+  }
+
   // ① 邻域 key
   let key: string
-  if (faceTag === 'top') {
-    // top 面:adjacent4 = (u,d,l,r);edgeDist2 额外带 (u2,d2) 竖直距离 2 探测。
+  if (faceTag === 'top' || faceTag === 'entry') {
+    // top / entry 面:adjacent4 = (u,d,l,r);adjacent8 额外带四角对角;edgeDist2 额外带 (u2,d2)。
     key = buildTopFaceKey((dx, dy) => has(dx, dy, 0), face.keyMode)
   } else {
     // front: t/b 走 z 轴,l/r 同 z 平面
@@ -67,13 +87,24 @@ export function pickFaceSpriteIndex(ctx: PickFaceContext): number {
     key = `${t},${b},${l},${r}`
   }
 
-  // ② 选 map:variants 顺序匹配,首条 when.regionContains 命中的 variant.map 取代默认 face.map
-  // when.regionContains:相对当前 voxel 的 xy 偏移 cell 是否在指定 region 集合内。
-  // region 已在 binding 阶段解析为 Set<"x,y">,这里 O(1) 查表。
+  // ② 选 map:variants 顺序匹配,首条 when 命中的 variant.map 取代默认 face.map。
+  //   * regionContains:相对当前 voxel 的 xy 偏移 cell 是否在指定 region 集合内
+  //     (region 已在 binding 阶段解析为 Set<"x,y">,O(1) 查表)。
+  //   * stateEquals:当前 cell 的 state[key] 是否等于某值(per-cell 标签,如上游
+  //     地形派发的 slopeDir);state 随 CollectedCell 透传进来。
   let map: Record<string, number> = face.map
   if (face.variants && face.variants.length > 0) {
     for (const v of face.variants) {
-      const rc = v.when.regionContains
+      const w = v.when
+      if ('stateEquals' in w) {
+        const st = cell.state
+        if (st && String(st[w.stateEquals.key]) === w.stateEquals.value) {
+          map = v.map
+          break
+        }
+        continue
+      }
+      const rc = w.regionContains
       const set = regions.get(rc.region)
       if (!set) continue
       const probeKey = `${cell.x + rc.offset[0]},${cell.y + rc.offset[1]}`
@@ -85,10 +116,14 @@ export function pickFaceSpriteIndex(ctx: PickFaceContext): number {
   }
 
   // ③ 查表 + randomRules 变体替换
-  let idx = lookupWithWildcard(map, key) ?? 0
+  const mapped = lookupWithWildcard(map, key)
+  if (mapped === undefined) {
+    if (requireMapMatch) return null
+  }
+  let idx = mapped ?? 0
   if (face.randomRules && face.randomRules.length > 0) {
     // saltBase 把 face 拉开,避免同一 (x,y) 顶面立面变体撞车
-    const saltBase = faceTag === 'top' ? 0 : 100
+    const saltBase = faceTag === 'top' ? 0 : faceTag === 'entry' ? 200 : 100
     for (const r of face.randomRules) {
       if (idx !== r.tileId) continue
       const tilePool = ctx.validVariantPoolsByTileId?.get(r.tileId)

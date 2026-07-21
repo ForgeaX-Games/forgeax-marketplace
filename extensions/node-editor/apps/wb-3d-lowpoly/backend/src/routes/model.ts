@@ -82,6 +82,9 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
           source: { type: 'string' },
           name: { type: 'string' },
           execute: { type: 'boolean' },
+          // 可选：强制指定管线（绕过 DSL 内容推断）。省略时按内容推断：
+          // 含 skin/skeleton → character；含 joint → mechanical(urdf)；两者皆无 → static。
+          pipeline: { type: 'string', enum: ['static', 'mechanical', 'urdf', 'character'] },
           // string shape-id or boolean; left unconstrained to avoid ajv strict union-type warning.
           bake: {},
         },
@@ -93,7 +96,13 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ status: 'rejected', reason: access.reason, code: access.code, projectId: access.projectId })
 
-    const body = (req.body ?? {}) as { source?: string; name?: string; execute?: boolean; bake?: string | boolean }
+    const body = (req.body ?? {}) as {
+      source?: string
+      name?: string
+      execute?: boolean
+      bake?: string | boolean
+      pipeline?: 'static' | 'mechanical' | 'urdf' | 'character'
+    }
     const source = typeof body.source === 'string' ? body.source : ''
 
     // bake 模式（阶段1 单件烘焙）：bake="shape_id" 或 true（=烘最后一条语句）。
@@ -103,7 +112,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     const baking = bakeTarget !== undefined
 
     // 1) 校验 + 编译成图（未知/未映射 op 在此显式报错并带行号）
-    const compiled = compileDslToGraph(source, { graphName: body.name, appendTerminals: !baking })
+    const compiled = compileDslToGraph(source, { graphName: body.name, appendTerminals: !baking, pipeline: body.pipeline })
     const errors = compiled.errors.map((e) => ({ line: e.line, message: e.message, kind: e.kind }))
 
     // 编译失败（parse / 重复 id / 未映射 op）→ 只回错误，不动图
@@ -198,6 +207,46 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // 角色路（character）：读回 g_skin_qc + g_to_rig 产物，返回角色回执（无 URDF）
+    if (compiled.mode === 'character') {
+      const skinSignalsRaw = readPort(rt, compiled.skinQcNodeId, 'signals')
+      const skinSignals: QcSignalOut[] = Array.isArray(skinSignalsRaw)
+        ? skinSignalsRaw.map((s) => mapSignalLines(s, compiled.lineByNodeId))
+        : []
+      const skinValid = readPort(rt, compiled.skinQcNodeId, 'valid') === true
+      const rigErr = readPort(rt, compiled.rigNodeId, 'error')
+      const rigReport = readPort(rt, compiled.rigNodeId, 'report') as { fingerprint?: unknown } | undefined
+      const rigSpec = readPort(rt, compiled.rigNodeId, 'rigSpec') as
+        | { boneCount?: unknown; meshFilename?: unknown }
+        | undefined
+      const fatal =
+        errors.length > 0 ||
+        execStatus === 'error' ||
+        execStatus === 'timeout' ||
+        !!execError ||
+        skinValid === false ||
+        (typeof rigErr === 'string' && rigErr !== '')
+      return {
+        ok: !fatal,
+        mode: 'character',
+        statements: compiled.statementNodeIds.length,
+        errors,
+        execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
+        skinQc: {
+          valid: skinValid,
+          bones: asNumber(readPort(rt, compiled.skinQcNodeId, 'bones')),
+          skins: asNumber(readPort(rt, compiled.skinQcNodeId, 'skins')),
+          signals: skinSignals,
+        },
+        rig: {
+          fingerprint: rigReport && typeof rigReport.fingerprint === 'string' ? rigReport.fingerprint : undefined,
+          boneCount: rigSpec && typeof rigSpec.boneCount === 'number' ? rigSpec.boneCount : undefined,
+          meshFilename: rigSpec && typeof rigSpec.meshFilename === 'string' ? rigSpec.meshFilename : undefined,
+          ...(typeof rigErr === 'string' && rigErr ? { error: rigErr } : {}),
+        },
+      }
+    }
+
     // 4) QC 信号 → 行号
     const qcSignalsRaw = readPort(rt, compiled.qcNodeId, 'signals')
     const qcSignals: QcSignalOut[] = Array.isArray(qcSignalsRaw)
@@ -218,6 +267,36 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     const meshSignals: QcSignalOut[] = meshQc.signals.map((s) => ({
       ...mapMeshSignalLines(s, compiled.lineByNodeId),
     }))
+
+    // 静态路（static）：读回 g_to_scene 产物，返回静态回执（几何 QC + SceneSpec 指纹，无 URDF）
+    if (compiled.mode === 'static') {
+      const sceneErr = readPort(rt, compiled.sceneNodeId, 'error')
+      const sceneReport = readPort(rt, compiled.sceneNodeId, 'report') as
+        | { fingerprint?: unknown; itemCount?: unknown }
+        | undefined
+      const staticFatal =
+        errors.length > 0 ||
+        execStatus === 'error' ||
+        execStatus === 'timeout' ||
+        !!execError ||
+        qc.valid === false ||
+        !meshQc.clean ||
+        (typeof sceneErr === 'string' && sceneErr !== '')
+      return {
+        ok: !staticFatal,
+        mode: 'static',
+        statements: compiled.statementNodeIds.length,
+        errors,
+        execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
+        qc,
+        meshQc: { clean: meshQc.clean, meshResolved: meshQc.meshResolved, signals: meshSignals },
+        scene: {
+          fingerprint: sceneReport && typeof sceneReport.fingerprint === 'string' ? sceneReport.fingerprint : undefined,
+          items: sceneReport && typeof sceneReport.itemCount === 'number' ? sceneReport.itemCount : undefined,
+          ...(typeof sceneErr === 'string' && sceneErr ? { error: sceneErr } : {}),
+        },
+      }
+    }
 
     // 6) URDF 指纹（用 g_to_urdf 自带的 report.fingerprint；无则回退到 sha256(urdf)）。
     //    g_to_urdf 没有 error 端口——错误经 diagnostics(severity=error) 与节点执行 error 暴露。
@@ -248,6 +327,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       ok: !fatal,
+      mode: 'urdf',
       statements: compiled.statementNodeIds.length,
       errors,
       execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },

@@ -4,7 +4,7 @@
  * 构造已知穿模 / 错位用例，确认：
  *   - 全 mesh 组装也能算实体级世界 AABB 重叠（参数化 QC 拿不到 mesh bbox 的盲区）
  *   - 命中时给出**可执行**修正建议（具体平移量），且移动方向/大小正确
- *   - 运动关节下穿模升级为 error（clean=false），静态下为 warning（clean=true）
+ *   - 运动关节下穿模为 warning（clean 仍为 true）；静态下为 note（clean=true）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -31,21 +31,13 @@ describe('meshAwareQc: interpenetration', () => {
     expect(r.meshResolved).toBe(2)
     const overlap = r.signals.find((s) => s.code === 'mesh_overlap')
     expect(overlap).toBeTruthy()
-    // 无运动关节 → warning，clean 仍为 true（非硬失败）
-    expect(overlap!.severity).toBe('warning')
+    // 无运动关节 → note，clean 仍为 true（非硬失败，无强制分离建议）
+    expect(overlap!.severity).toBe('note')
     expect(r.clean).toBe(true)
-    // 建议沿最小穿透轴 X 把 p2 推离 p1（+X），量约为重叠深度 0.15 + 容差
-    expect(overlap!.suggestion).toBeTruthy()
-    expect(overlap!.suggestion!.op).toBe('translate_part')
-    expect(overlap!.suggestion!.target).toBe('p2')
-    const [dx, dy, dz] = overlap!.suggestion!.delta
-    expect(dx).toBeGreaterThan(0.14)
-    expect(dx).toBeLessThan(0.17)
-    expect(dy).toBe(0)
-    expect(dz).toBe(0)
+    expect(overlap!.suggestion).toBeUndefined()
   })
 
-  it('escalates overlap to a hard error when a moving joint is present', () => {
+  it('reports moving-joint overlap as warning only (clean stays true)', () => {
     const src = [
       'm1 = mesh(filename="a.obj")',
       'p1 = part(shape=m1)',
@@ -56,8 +48,8 @@ describe('meshAwareQc: interpenetration', () => {
     const r = meshAwareQc(src, bakedMap('a.obj', 'b.obj'))
     const overlap = r.signals.find((s) => s.code === 'mesh_overlap')
     expect(overlap).toBeTruthy()
-    expect(overlap!.severity).toBe('error')
-    expect(r.clean).toBe(false)
+    expect(overlap!.severity).toBe('warning')
+    expect(r.clean).toBe(true)
   })
 
   it('stays clean when baked meshes do not overlap', () => {
@@ -87,6 +79,27 @@ describe('meshAwareQc: interpenetration', () => {
     expect(detached!.suggestion!.target).toBe('j')
     // 建议把 child 世界中心朝 parent 拉近 ~ -X
     expect(detached!.suggestion!.delta[0]).toBeLessThan(0)
+  })
+
+  it('keeps a benign fixed-joint mesh overlap a note even when an unrelated moving joint exists elsewhere (moving-joint trap)', () => {
+    const src = [
+      'm1 = mesh(filename="a.obj")',
+      'p1 = part(shape=m1, origin=[0, 0, 0])',
+      'm2 = mesh(filename="b.obj")',
+      // overlaps p1, but only ever linked to it via a fixed joint
+      'p2 = part(shape=m2, origin=[0.05, 0, 0])',
+      'j1 = joint(type="fixed", parent=p1, child=p2)',
+      'm3 = mesh(filename="c.obj")',
+      // stacked just above p1 (0.05m gap, well seated, no overlap) — moved by a revolute
+      // joint that has nothing to do with the p1/p2 overlap pair
+      'p3 = part(shape=m3)',
+      'j2 = joint(type="revolute", parent=p1, child=p3, origin=[0, 0, 0.25], axis=[0, 0, 1])',
+    ].join('\n')
+    const r = meshAwareQc(src, bakedMap('a.obj', 'b.obj', 'c.obj'))
+    const overlap = r.signals.find((s) => s.code === 'mesh_overlap')
+    expect(overlap).toBeTruthy()
+    expect(overlap!.severity).toBe('note')
+    expect(r.clean).toBe(true)
   })
 
   it('produces no mesh-aware signals for a primitive-only assembly (no baked meshes)', () => {

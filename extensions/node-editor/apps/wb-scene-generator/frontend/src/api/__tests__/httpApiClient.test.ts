@@ -95,6 +95,24 @@ describe('HttpApiClient', () => {
     expect(nodes).toHaveLength(1)
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/projects/p1/nodes', expect.anything())
   })
+  it('uses an explicitly embedded project without changing the shared workspace view', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/v1/projects/p_embedded/nodes') {
+        return new Response(JSON.stringify([{ id: 'n1', opId: 'relu', name: 'N1' }]), { status: 200 })
+      }
+      return new Response('null', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const c = new HttpApiClient({
+      baseUrl: '',
+      pipelineId: 'main',
+      projectId: 'p_embedded',
+    })
+
+    await expect(c.listNodes()).resolves.toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/projects/p_embedded/nodes', expect.anything())
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/workspace', expect.anything())
+  })
   it('execute({}) POSTs to the viewing project execute route and returns the parsed ExecutionResult', async () => {
     const result = {
       executionId: 'e1',

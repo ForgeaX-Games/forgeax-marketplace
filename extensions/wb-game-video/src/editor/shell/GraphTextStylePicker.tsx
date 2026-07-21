@@ -14,6 +14,7 @@ import { matchPresetId, resolvePresets, snapshotPresetStyle, type TextStyleGroup
 import { resolveGraphTextCss } from '../text/text-css'
 import { FONT_PRESETS } from '../text/font-presets'
 import { injectStyleOnce } from '../../styles/injectStyle'
+import { ColorPicker } from './ColorPicker'
 
 export function GraphTextStylePicker({
   group,
@@ -84,12 +85,12 @@ export function GraphTextStylePicker({
           <label className="gtsp-field"><span>字号 {(style.fontSize ?? 5).toFixed(1)}</span>
             <input type="range" min={2} max={14} step={0.2} value={style.fontSize ?? 5} onChange={(e) => set({ fontSize: Number(e.target.value) })} />
           </label>
-          <label className="gtsp-field"><span>字色</span>
-            <input type="text" value={style.color ?? ''} placeholder="#ffffff" onChange={(e) => set({ color: e.target.value || undefined })} />
-          </label>
-          <label className="gtsp-field"><span>描边色</span>
-            <input type="text" value={style.WebkitTextStrokeColor ?? ''} placeholder="#000000" onChange={(e) => set({ WebkitTextStrokeColor: e.target.value || undefined })} />
-          </label>
+          <div className="gtsp-field"><span>字色</span>
+            <ColorPicker value={style.color} placeholder="#ffffff" onChange={(color) => set({ color })} />
+          </div>
+          <div className="gtsp-field"><span>描边色</span>
+            <ColorPicker value={style.WebkitTextStrokeColor} placeholder="#000000" onChange={(WebkitTextStrokeColor) => set({ WebkitTextStrokeColor })} />
+          </div>
           <label className="gtsp-field"><span>描边宽 {style.WebkitTextStrokeWidth ?? 0}</span>
             <input type="range" min={0} max={8} step={0.5} value={style.WebkitTextStrokeWidth ?? 0} onChange={(e) => set({ WebkitTextStrokeWidth: Number(e.target.value) })} />
           </label>

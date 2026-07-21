@@ -157,10 +157,10 @@ export interface LayerAssetBinding {
    * 命中后从这里均匀采样。每个 face 单独一份(同一 atlas,但 basePieces 不一样,
    * 变体区段也不同)。空数组 = 该 face 没变体或图未加载完。
    */
-  validVariantIdxs: { top: number[]; front: number[] }
+  validVariantIdxs: { top: number[]; front: number[]; entry: number[] }
   /** 与 validVariantIdxs 等长；face.variantWeights 过滤后 */
-  validVariantWeights: { top?: number[]; front?: number[] }
-  validVariantPoolsByTileId: { top: Map<number, VariantPool>; front: Map<number, VariantPool> }
+  validVariantWeights: { top?: number[]; front?: number[]; entry?: number[] }
+  validVariantPoolsByTileId: { top: Map<number, VariantPool>; front: Map<number, VariantPool>; entry: Map<number, VariantPool> }
   /**
    * rule.regions 解析后的 cell 集合,key 是 region 名,value 是 "x,y" 形式 set。
    *   * source: "parent" → 渲染当下,本 layer 直接父路径下所有 voxel 的 xy 并集

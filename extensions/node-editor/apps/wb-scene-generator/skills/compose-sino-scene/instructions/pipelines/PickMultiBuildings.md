@@ -3,7 +3,7 @@
 > **⚠️ 暂禁（2026-07）**：pure-asset / Sino 构图 **不要使用** 本模板。城镇补充改 **`PickOneBuilding` Rest 串链** — 见 `town-building-scatter.json` 与 [PickOneBuilding.md](./PickOneBuilding.md)。
 
 > 权威详情：[../../../../batteries/templates/scene/PickMultiBuildings/README.md](../../../../batteries/templates/scene/PickMultiBuildings/README.md)
-> templateId：`PickMultiBuildings`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`PickMultiBuildings`。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 管线电池的基本介绍
 
@@ -26,7 +26,7 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_2` | scene | Buildings 建筑区域（主产物） | `tree_merge` / `BuildingStructures.in_0` |
+| `out_2` | scene | Buildings 建筑区域（主产物） | `appendMergeItem` → `aw_m0_merge` / `BuildingStructures.in_0` |
 | `out_0` | array | BuildingsPaths 路径句柄列表 | 拼门路径 |
 | `out_1` | scene | Rest 剩余空地 | 下一组 `in_0` / 下一批建筑 `in_6` |
 

@@ -67,6 +67,17 @@ export interface OutputCacheV1 {
    * many subtree nodes / layers the scene carries.
    */
   dataChunks?: number
+  /**
+   * Cached result of `OutputCache.shardedDataByteSize()`/`envelopeByteSize()` at
+   * the time this port was written — computed once here (when the chunk files
+   * are freshly known and about to be scanned anyway) instead of being
+   * recomputed by an O(chunk count) directory scan on every subsequent
+   * portByteSize()/envelopeByteSize() call from the HTTP layer. Absent on
+   * entries written before this field existed; callers fall back to scanning.
+   */
+  estimatedExpandedBytes?: number
+  /** Cached result of `OutputCache.envelopeByteSize()` — see `estimatedExpandedBytes`. */
+  estimatedEnvelopeBytes?: number
 }
 
 export type StorageError =

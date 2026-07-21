@@ -116,6 +116,38 @@ ${PREVIEW_CLOCK_CSS}
   font-size: 12px;
 }
 .gc-action:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
+/* 迷你动作按钮——常量/选取公式切换、运算符号按钮、"添加一项"等 ValueExprEditor 系小控件共用。
+   .is-on 才是"当前选中/激活"的真正视觉标记（无 .is-on 时是未选中态，不是禁用）。 */
+.gc-mini-action {
+  border: 1px solid var(--gc-line);
+  background: var(--gc-panel2);
+  color: var(--gc-muted);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.gc-mini-action:hover { border-color: var(--gc-accent-line); color: var(--gc-text); }
+.gc-mini-action.is-on {
+  background: var(--gc-accent-soft);
+  border-color: var(--gc-accent-line);
+  color: var(--gc-text);
+  font-weight: 700;
+}
+.gc-mini-action:disabled { opacity: .4; cursor: not-allowed; }
+.gc-mini-danger {
+  border: 1px solid rgba(248,113,113,.4);
+  background: rgba(248,113,113,.08);
+  color: #ff9a9a;
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.gc-mini-danger:hover { background: rgba(248,113,113,.2); border-color: rgba(248,113,113,.75); }
 .gc-video-top {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.85fr);

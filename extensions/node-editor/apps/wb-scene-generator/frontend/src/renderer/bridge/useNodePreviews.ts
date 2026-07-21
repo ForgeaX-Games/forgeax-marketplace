@@ -4,6 +4,7 @@ import { useRenderStore } from '../store'
 import { flattenWire, flattenWireList } from './flattenWire'
 import type { NameListEntry, VoxelLayer } from '../types'
 import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../../debug/syncTrace.js'
+import { beginLoadingTask, endLoadingTask, updateLoadingTask } from './loadingSignals.js'
 
 // Project every executed node's renderable outputs into the render store so the
 // preview updates live as a graph is wired up — matching the legacy behavior.
@@ -108,6 +109,19 @@ export function useNodePreviews(client: HttpApiClient): void {
   useEffect(() => {
     syncTraceHintOnce()
     let cancelled = false
+    // Bumped on every project switch (project:viewing WS event or
+    // workbench:project-changed postMessage). `client.viewingProjectId` is a
+    // single mutable field read fresh by every `projectPrefix()` call, so a
+    // refresh() already in flight for the OLD project can have its LATER
+    // `getNodeOutput` awaits silently redirected to the NEW project mid-loop
+    // once the switch flips that field — painting the new project's data under
+    // the old project's node ids (near-identical demo templates share node-id
+    // schemes, so this doesn't even 404, it just shows the wrong content).
+    // Every refresh() captures the revision at start and re-checks it after
+    // every await; a mismatch means a switch happened underneath it, so it
+    // bails without touching the store (a fresh refresh for the new project is
+    // already scheduled by the same handler that bumped the revision).
+    let projectRevision = 0
     // opId → output port specs, fetched lazily once (the catalog is static for a
     // session). A failed fetch leaves the cache null so a later run can retry.
     let opOutputs: Map<string, PortSpec[]> | null = null
@@ -208,10 +222,21 @@ export function useNodePreviews(client: HttpApiClient): void {
     }
 
     async function refresh(onlyNodeIds?: ReadonlySet<string>): Promise<void> {
+      const revision = projectRevision
+      const __t0 = performance.now()
       syncTrace('preview:refresh-start', { narrowed: onlyNodeIds?.size ?? 'full' })
       await client.ensureViewingProject()
+      const __t1 = performance.now()
+      if (cancelled || revision !== projectRevision) {
+        console.log(`[switch-trace] preview:refresh ABORTED after ensureViewingProject (stale revision) +${(__t1 - __t0).toFixed(1)}ms`)
+        return
+      }
       const [allNodes, specs] = await Promise.all([client.listNodes(), ensureOpOutputs()])
-      if (cancelled) return
+      const __t2 = performance.now()
+      if (cancelled || revision !== projectRevision) {
+        console.log(`[switch-trace] preview:refresh ABORTED after listNodes/ops (stale revision) +${(__t2 - __t1).toFixed(1)}ms`)
+        return
+      }
       // Refresh the node meta cache used by the live push projector.
       nodeMeta.clear()
       for (const n of allNodes) nodeMeta.set(n.id, { opId: n.opId, name: n.name ?? n.id })
@@ -238,12 +263,22 @@ export function useNodePreviews(client: HttpApiClient): void {
           })
         : allNodes
 
+      if (!narrowed) updateLoadingTask('previews', { total: nodes.length })
+
       const desiredGridKeys = new Set<string>()
       const nodeIds = new Set<string>()
       // Editor preview toggles ride the `workbench:preview-change` postMessage,
       // not the backend graph, so consult the client-side override first; only
       // fall back to the backend `previewEnabled` when a node has no override.
       const overrides = useRenderStore.getState().previewOverrides
+
+      // Phase 1 (sync, no network): classify every node and fire the
+      // zero-cost clears immediately; collect the ones that need a network
+      // fetch into task lists.
+      type VoxelTask = { node: typeof nodes[number]; voxelPort: PortSpec; namePort?: PortSpec }
+      type GridTask = { node: typeof nodes[number]; port: PortSpec }
+      const voxelTasks: VoxelTask[] = []
+      const gridTasks: GridTask[] = []
 
       for (const node of nodes) {
         nodeIds.add(node.id)
@@ -255,25 +290,12 @@ export function useNodePreviews(client: HttpApiClient): void {
         // ── voxel layers (scene_output sink): replace this node's voxel bucket ──
         const voxelPort = ports.find((p) => p.type === 'voxel_layers')
         if (voxelPort) {
-          // `voxel_layers` / `name_list` are list-valued ports: the wire is
-          // double-wrapped (`fromItem(T[])` → items:[[…]]), so unwrap to the
-          // leaf elements — flattenWire alone would yield a single array-element
-          // and the renderer would hit `layer.cells is not iterable`.
-          const layers = flattenWireList<VoxelLayer>(await client.getNodeOutput(node.id, voxelPort.name))
-          if (cancelled) return
-          const namePort = ports.find((p) => p.type === 'name_list')
-          const names = namePort
-            ? flattenWireList<NameListEntry>(await client.getNodeOutput(node.id, namePort.name))
-            : []
-          if (cancelled) return
-          if (previewEnabled && layers.length) {
-            setLayers(node.id, node.opId, layers, names)
-          } else if (!previewEnabled) {
+          if (previewEnabled) {
+            const namePort = ports.find((p) => p.type === 'name_list')
+            voxelTasks.push({ node, voxelPort, ...(namePort ? { namePort } : {}) })
+          } else {
             clearLayers(node.id)
           }
-          // preview on + empty payload: keep the last good frame. Param-drag emits
-          // graph:applied (cache invalidated) BEFORE execute finishes, so a refresh
-          // in that window would clearLayers and black out the preview until rerun.
         }
 
         // ── grid previews (any node) ──
@@ -286,22 +308,95 @@ export function useNodePreviews(client: HttpApiClient): void {
           clearPreviewLayers(node.id)
           continue
         }
-        for (const port of gridPorts) {
-          const raw = await client.getNodeOutput(node.id, port.name)
-          if (cancelled) return
-          // Declared grid ports: one flattened item == one dense grid. Wider
-          // (any/array/list) ports: recursively pull grids out of the payload.
-          const isDeclaredGrid = port.type === 'grid'
-          const grids = isDeclaredGrid
-            ? flattenWire<number[][]>(raw).filter(isGrid2D)
-            : collectGrids(raw)
-          if (grids.length === 0) continue
-          grids.forEach((grid, i) => {
-            const portKey = grids.length > 1 ? `${port.name}[${i}]` : port.name
-            setPreviewLayer(node.id, portKey, node.name ?? node.id, grid)
-            desiredGridKeys.add(`${node.id}:${portKey}`)
-          })
+        for (const port of gridPorts) gridTasks.push({ node, port })
+      }
+
+      // Phase 2 (async): previously each node's port(s) were fetched with
+      // sequential `await`s — an O(nodes × ports) chain of network round trips
+      // that is the direct cause of the felt "slow switching" lag on any graph
+      // with more than a handful of nodes. Collapse the WHOLE wave (voxel +
+      // name + grid ports, across every task) into a SINGLE batched HTTP POST
+      // when the transport supports it; fall back to per-port parallel GETs
+      // otherwise (e.g. the unit-test fake client).
+      const __t3 = performance.now()
+      const __voxelFetchCount = voxelTasks.length * 2 // voxel port + optional name port (upper bound)
+      const __gridFetchCount = gridTasks.length
+      const portKey = (nodeId: string, portId: string): string => `${nodeId}\u0000${portId}`
+      let batchValues: Map<string, unknown> | null = null
+      if (typeof client.getNodeOutputsBatch === 'function') {
+        const batchPorts: Array<{ nodeId: string; portId: string }> = []
+        for (const t of voxelTasks) {
+          batchPorts.push({ nodeId: t.node.id, portId: t.voxelPort.name })
+          if (t.namePort) batchPorts.push({ nodeId: t.node.id, portId: t.namePort.name })
         }
+        for (const t of gridTasks) batchPorts.push({ nodeId: t.node.id, portId: t.port.name })
+        if (batchPorts.length > 0) {
+          try {
+            const res = await client.getNodeOutputsBatch(batchPorts)
+            batchValues = new Map(res.map((r) => [portKey(r.nodeId, r.portId), r.value]))
+          } catch {
+            batchValues = null // network hiccup — fall back to the per-port path below
+          }
+        }
+      }
+      const getPortValue = (nodeId: string, portId: string): Promise<unknown> | unknown =>
+        batchValues ? batchValues.get(portKey(nodeId, portId)) : client.getNodeOutput(nodeId, portId)
+      const [voxelResults, gridResults] = await Promise.all([
+        Promise.all(voxelTasks.map(async (t) => {
+          // `voxel_layers` / `name_list` are list-valued ports: the wire is
+          // double-wrapped (`fromItem(T[])` → items:[[…]]), so unwrap to the
+          // leaf elements — flattenWire alone would yield a single array-element
+          // and the renderer would hit `layer.cells is not iterable`.
+          const layers = flattenWireList<VoxelLayer>(await getPortValue(t.node.id, t.voxelPort.name))
+          const names = t.namePort
+            ? flattenWireList<NameListEntry>(await getPortValue(t.node.id, t.namePort.name))
+            : []
+          return { node: t.node, layers, names }
+        })),
+        Promise.all(gridTasks.map(async (t) => {
+          const raw = await getPortValue(t.node.id, t.port.name)
+          return { node: t.node, port: t.port, raw }
+        })),
+      ])
+
+      const __t4 = performance.now()
+      console.log(
+        `[switch-trace] preview:refresh nodes=${allNodes.length} voxelTasks=${voxelTasks.length}(~${__voxelFetchCount}req) gridTasks=${__gridFetchCount}req ` +
+          `ensureViewingProject=${(__t1 - __t0).toFixed(1)}ms listNodes+ops=${(__t2 - __t1).toFixed(1)}ms ` +
+          `classify=${(__t3 - __t2).toFixed(1)}ms fetchWave(parallel)=${(__t4 - __t3).toFixed(1)}ms TOTAL=${(__t4 - __t0).toFixed(1)}ms`,
+      )
+      // Single staleness check AFTER the fetch wave settles — if a project
+      // switch happened while any of these were in flight, `client`'s shared
+      // viewingProjectId (read fresh by every getNodeOutput call) may have
+      // drifted mid-fetch, so the results above could belong to the WRONG
+      // project. Discard them wholesale rather than risk painting mismatched
+      // content; the switch handler that bumped the revision already
+      // scheduled a fresh refresh for the project actually being viewed now.
+      if (cancelled || revision !== projectRevision) {
+        console.log(`[switch-trace] preview:refresh DISCARDED after fetch wave (stale revision) — results thrown away`)
+        return
+      }
+
+      for (const { node, layers, names } of voxelResults) {
+        if (layers.length) setLayers(node.id, node.opId, layers, names)
+        // empty payload: keep the last good frame. Param-drag emits
+        // graph:applied (cache invalidated) BEFORE execute finishes, so
+        // clearing here would black out the preview until rerun.
+      }
+
+      for (const { node, port, raw } of gridResults) {
+        // Declared grid ports: one flattened item == one dense grid. Wider
+        // (any/array/list) ports: recursively pull grids out of the payload.
+        const isDeclaredGrid = port.type === 'grid'
+        const grids = isDeclaredGrid
+          ? flattenWire<number[][]>(raw).filter(isGrid2D)
+          : collectGrids(raw)
+        if (grids.length === 0) continue
+        grids.forEach((grid, i) => {
+          const portKey = grids.length > 1 ? `${port.name}[${i}]` : port.name
+          setPreviewLayer(node.id, portKey, node.name ?? node.id, grid)
+          desiredGridKeys.add(`${node.id}:${portKey}`)
+        })
       }
 
       // GC layers whose source node/port vanished (deleted node, removed list
@@ -337,6 +432,11 @@ export function useNodePreviews(client: HttpApiClient): void {
       inFlight = true
       const scope = pendingNarrow
       pendingNarrow = null
+      // Only surface the loading indicator for FULL refreshes (project switch /
+      // mount / graph:applied) — narrowed slider-drag re-pulls are high-frequency
+      // and would just make the progress panel flicker for no user benefit.
+      const isFullRefresh = scope === null
+      if (isFullRefresh) beginLoadingTask('previews')
       try {
         await refresh(scope ?? undefined)
       } catch (err) {
@@ -348,6 +448,7 @@ export function useNodePreviews(client: HttpApiClient): void {
         }
       } finally {
         inFlight = false
+        if (isFullRefresh) endLoadingTask('previews')
         if (pending && !cancelled) { pending = false; scheduleRefresh() }
       }
     }
@@ -404,6 +505,7 @@ export function useNodePreviews(client: HttpApiClient): void {
       if (e.kind === 'project:viewing' || e.kind === 'project:activated') {
         const projectId = (e as { projectId?: string }).projectId
         if (projectId) {
+          projectRevision += 1
           client.syncViewingProjectId(projectId)
           scheduleRefresh()
         }
@@ -414,6 +516,7 @@ export function useNodePreviews(client: HttpApiClient): void {
       if (!data || data.type !== 'workbench:project-changed') return
       const projectId = typeof data.projectId === 'string' ? data.projectId : null
       if (!projectId) return
+      projectRevision += 1
       client.syncViewingProjectId(projectId)
       scheduleRefresh()
     }

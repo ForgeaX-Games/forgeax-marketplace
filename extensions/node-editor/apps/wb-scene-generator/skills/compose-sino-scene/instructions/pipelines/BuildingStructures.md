@@ -1,7 +1,7 @@
 # 建筑 - BuildingStructures（建筑结构）
 
 > 权威详情：[../../../../batteries/templates/scene/BuildingStructures/README.md](../../../../batteries/templates/scene/BuildingStructures/README.md)
-> templateId：`BuildingStructures`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`BuildingStructures`。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 管线电池的基本介绍
 
@@ -13,22 +13,23 @@
 
 | 端口名 | 类型 | 说明 | 怎么喂 |
 |--------|------|------|--------|
-| `in_0` | scene | Scene 建筑区域 | `PickOneBuilding.out_1` 或 `PickMultiBuildings.out_2`（**接建筑主产物，不接 Rest**） |
+| `in_0` | scene | Scene 建筑区域 | `PickOneBuilding.out_1`（**接建筑主产物，不接 Rest**） |
 | `in_23` | string | WallAsset 墙体资产名 | `text_panel` |
-| `in_24` | number | Seed | `seed_control.seed` |
+| `in_24` | number | Seed | **`aw_m0_seed.seed`（必接，固定非 0）**；禁止悬空/`seed:0` |
 | `in_1` | bool | bottomDoor 门位于建筑下侧 | **narrative_interior 默认 `true`**（checklist `structureParams.bottomDoor`） |
 
 ## 3. 管线电池的总输出端口
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_0` | scene | 含结构与门的建筑场景（主产物） | `tree_merge`；`scene_focus_path` 提门作 POI |
+| `out_0` | scene | 含结构与门的建筑场景（主产物） | `appendMergeItem` → `aw_m0_merge`；`scene_focus_path` 提门作 POI |
 | `out_1` / `out_2` | scene/string | Rooms / RoomsPath | 室内地板层（仅 `min(z)-1` 单层）；一般不接 |
 
 ## 4. 推荐参数
 
-- `in_0` **必须接建筑主产物**（`PickOneBuilding.out_1` / **`PickMultiBuildings.out_2`**），绝不接 Rest。
+- `in_0` **必须接建筑主产物**（`PickOneBuilding.out_1`；`PickMultiBuildings` 暂禁不用），绝不接 Rest。多栋建筑各自内构 = 多次 `PickOneBuilding`+本模板 串联。
 - **`in_1` bottomDoor**：叙事内构建筑 **默认开启** — 门位于建筑**下侧**外墙，供 PathConnection 从南侧连入；checklist 写 `structureParams: { "bottomDoor": true }`，施工时 `text_panel`/`bool_const` 或 exposed 口传 `true`。
+- **墙高来自上游**：本组沿用 `PickOneBuilding.in_2`（BuildingHeight）的 zRange，**不再另设高度**。上游叙事内构须已满足 **BuildingHeight ≤ 3**；若墙体过高，回改 PickOne 的 `in_2`，不要在本组用隐藏口抬高。
 
 ## 5. 管线效果描述
 

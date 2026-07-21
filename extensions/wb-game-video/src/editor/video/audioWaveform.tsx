@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { pluginFetch } from '../../lib/plugin-http'
 
 /**
  * 音频波形：解码音频 → 归一 min/max 峰值桶 → canvas 绘制（像剪辑软件那样的填充波形）。
@@ -27,7 +28,7 @@ function getAudioCtx(): AudioContext | null {
 async function computePeaks(src: string): Promise<WavePeaks | null> {
   const ctx = getAudioCtx()
   if (!ctx) return null
-  const res = await fetch(src)
+  const res = await pluginFetch(src)
   if (!res.ok) return null
   const raw = await res.arrayBuffer()
   const audio = await ctx.decodeAudioData(raw)

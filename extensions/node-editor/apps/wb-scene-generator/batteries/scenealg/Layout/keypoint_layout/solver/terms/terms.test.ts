@@ -4,6 +4,7 @@ import { clearanceTerm } from './clearanceTerm.ts'
 import { nonOverlapTerm } from './nonOverlapTerm.ts'
 import { containmentTerm } from './containmentTerm.ts'
 import { orientationTerm } from './orientationTerm.ts'
+import { peripheralTerm } from './peripheralTerm.ts'
 import { parentAverageTerm } from './parentAverageTerm.ts'
 import { compactnessTerm } from './compactnessTerm.ts'
 
@@ -130,6 +131,36 @@ describe('orientationTerm', () => {
     const pos = [{ x: 0, y: 0 }, { x: 1, y: 3 }] // mostly north → outside an east cone
     expect(energyOnly(orientationTerm(1, 30), model, pos)).toBeGreaterThan(0)
     checkGradient(orientationTerm(0.6, 30), model, pos)
+  })
+})
+
+describe('peripheralTerm', () => {
+  // rP=10, rC=1, margin=max(0.5, 0.8)=0.8 → d*=8.2
+  const model = makeModel(
+    [
+      { id: 'p', radius: 10, childIds: ['c'] },
+      { id: 'c', radius: 1, parentId: 'p' },
+    ],
+    [{ from: 'p', to: 'c', kind: 'peripheral' }],
+  )
+
+  it('is zero when child is already near the parent rim', () => {
+    const pos = [{ x: 0, y: 0 }, { x: 8.2, y: 0 }]
+    expect(energyOnly(peripheralTerm(1), model, pos)).toBeCloseTo(0, 10)
+  })
+
+  it('is positive when child is too close to parent center and gradient matches', () => {
+    const pos = [{ x: 0, y: 0 }, { x: 2, y: 0 }]
+    expect(energyOnly(peripheralTerm(1), model, pos)).toBeGreaterThan(0)
+    checkGradient(peripheralTerm(0.7), model, pos)
+  })
+
+  it('pushes child outward (negative ∂E/∂x_child when child is east of parent but too close)', () => {
+    const pos = [{ x: 0, y: 0 }, { x: 2, y: 0 }]
+    const grad: Vec2[] = pos.map(() => ({ x: 0, y: 0 }))
+    peripheralTerm(1).energyAndGradient(pos, model, grad)
+    // E decreases as child moves further east → ∂E/∂x_c < 0
+    expect(grad[1].x).toBeLessThan(0)
   })
 })
 

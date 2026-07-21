@@ -8,7 +8,7 @@
 >
 > **怎么维护。** 改了 route / WS 事件 / postMessage 类型 / 前端区域结构 / 数据契约，**就回来改对应条目**（连同 `ARCHITECTURE.md`）。引用一律带 `file:line`；行号漂移属正常，以"文件 + 符号名"为准。
 >
-> 所有路径相对本 app 根：`packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/`。
+> 所有路径相对本 app 根：`packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/`。
 
 ---
 
@@ -16,7 +16,7 @@
 
 前端是**单个 Vite app**，靠 URL 的 `?pane=` 把自己拆成一个 host 和三个同源 iframe（`main.tsx:8-9` 读 `?pane`，缺省 `center`）：
 
-```15:22:packages/marketplace/extensions/node-editor/apps/wb-2d-scene-asset-generator/frontend/src/App.tsx
+```15:22:packages/marketplace/plugins/node-editor/apps/wb-2d-scene-asset-generator/frontend/src/App.tsx
 export function App({ pane }: { pane?: string }): JSX.Element {
   const client = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
   if (pane === 'preview' || pane === 'renderer') return <ImagePreviewSurface />

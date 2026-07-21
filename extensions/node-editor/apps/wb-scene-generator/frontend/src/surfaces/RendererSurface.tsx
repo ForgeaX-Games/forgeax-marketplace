@@ -13,8 +13,10 @@ import { useBakedLayers, refreshBakedLayers } from '../renderer/bridge/useBakedL
 import { bakedApi } from '../renderer/bridge/bakedApi.js'
 import { syncTrace } from '../debug/syncTrace.js'
 import { sceneExportApi, type SceneExportCookResult } from '../renderer/bridge/sceneExportApi.js'
+import { mesh3dExportApi, type Mesh3dExportCookResult } from '../renderer/bridge/mesh3dExportApi.js'
 import { defaultPaintTargetName } from '../renderer/framework/paintTarget.js'
 import { buildPathTree, pathParent, type PathTreeNode } from '../renderer/framework/pathTree.js'
+import { colorForValueCss } from '../renderer/framework/palette.js'
 import type { PluginHandle } from '../renderer/framework/plugin.js'
 import type { ViewMode, DrawMode } from '../renderer/types.js'
 import { useWorkbenchChild } from '../workbench/useWorkbenchChild.js'
@@ -39,13 +41,14 @@ import {
 } from './icons.js'
 import './RendererSurface.css'
 
-const VIEW_MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d']
+const VIEW_MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh']
 const DRAW_MODES: DrawMode[] = ['wire', 'color', 'asset']
 const VIEW_LABELS: Record<ViewMode, string> = {
   top: 'Top',
   topBillboard: 'Billboard',
   iso: 'Iso',
   free3d: 'Free 3D',
+  '3DMesh': '3DMesh',
 }
 const DRAW_LABELS: Record<DrawMode, string> = {
   wire: 'Wire',
@@ -81,9 +84,10 @@ function layerRowPadding(depth: number): number {
 
 type SceneExportState =
   | { status: 'idle' }
-  | { status: 'pending' }
-  | { status: 'success'; result: SceneExportCookResult }
-  | { status: 'error'; message: string }
+  | { status: 'pending'; kind: 'sceneZip' | 'mesh3d' }
+  | { status: 'success'; kind: 'sceneZip'; result: SceneExportCookResult }
+  | { status: 'success'; kind: 'mesh3d'; result: Mesh3dExportCookResult }
+  | { status: 'error'; kind: 'sceneZip' | 'mesh3d'; message: string }
 
 // Screenshot result presented in a popover for manual copy. The sandboxed studio
 // iframe blocks both the image-blob clipboard write AND the `<a download>` click,
@@ -95,13 +99,6 @@ type ScreenshotState =
   | { status: 'success'; dataUrl: string; width: number; height: number }
   | { status: 'error'; message: string }
 
-// Golden-angle hue spread per layer value — identical to the legacy
-// LayersSidePanel swatch coloring, so layers keep stable, distinct colors.
-const HUE_GOLDEN_ANGLE = 137.508
-function valueHue(value: number): number {
-  return (value * HUE_GOLDEN_ANGLE) % 360
-}
-
 // Faithful renderer pane. Toolbar order mirrors the legacy Preview chrome:
 //   Preview title · view-mode dropdown · Wire/Color/Asset segment · status pill
 //   … (spacer) … screenshot · layers-panel toggle · reset-view · fullscreen.
@@ -110,11 +107,18 @@ function valueHue(value: number): number {
 // The Layers side panel lists ONLY scene_output voxel layers (matching legacy
 // LayersSidePanel); grid previews still render live on the canvas but are NOT
 // listed here. Scene layers flow in from completed executions via WS.
-export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Element {
+export function RendererSurface({
+  client,
+  gameSlug,
+}: {
+  client: HttpApiClient
+  /** Active ForgeaX game from host iframe `?slug=` — mesh3d export lands here. */
+  gameSlug?: string | null
+}): JSX.Element {
   useNodePreviews(client)
-  useAliasMetas()
+  useAliasMetas(client)
   useRendererCommands()
-  useBakedLayers()
+  useBakedLayers(client)
   const pluginRef = useRef<PluginHandle | null>(null)
   useScreenshotCapture(pluginRef)
   // Drain in-flight paint persists before a structural baked mutation (see
@@ -345,6 +349,26 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
     const handler = (event: MessageEvent) => {
       const data = event.data as { type?: unknown; selectedNodeIds?: unknown; previewDisabledNodeIds?: unknown; outputs?: unknown } | null
       if (!data || typeof data.type !== 'string') return
+      if (data.type === 'workbench:project-changed') {
+        // SOFT project-switch reset: the host no longer hard-remounts this
+        // iframe (see WorkbenchHost's project-changed effect), so this is now
+        // the ONLY place stale cross-project state gets cleared. `reset()`
+        // zeroes exactly the fields a remount used to wipe for free (layers /
+        // previewLayers / bakedLayers / selection / viewMode / drawMode /
+        // editMode …) — useNodePreviews / useBakedLayers / useAliasMetas
+        // independently repopulate their own buckets right after, on the same
+        // `workbench:project-changed` message.
+        useRenderStore.getState().reset()
+        setSelectedOutputKeys(new Set())
+        setSelectedBakedKeys(new Set())
+        setPendingPaintTarget((prev) => {
+          prev?.resolve(null)
+          return null
+        })
+        setSceneExport({ status: 'idle' })
+        setScreenshot({ status: 'idle' })
+        return
+      }
       if (data.type === 'workbench:editor-selection') {
         setSelectedEditorNodeIds(Array.isArray(data.selectedNodeIds) ? (data.selectedNodeIds as string[]) : [])
       } else if (data.type === 'workbench:preview-change') {
@@ -379,15 +403,34 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
     resetViewport2d()
   }
 
+  const exportIsMesh3d = viewMode === '3DMesh'
   const exportSceneZip = async () => {
-    setSceneExport({ status: 'pending' })
+    setSceneExport({ status: 'pending', kind: 'sceneZip' })
     try {
       const result = await sceneExportApi.cook()
-      setSceneExport({ status: 'success', result })
+      setSceneExport({ status: 'success', kind: 'sceneZip', result })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setSceneExport({ status: 'error', message })
+      setSceneExport({ status: 'error', kind: 'sceneZip', message })
     }
+  }
+  const exportMesh3dScene = async () => {
+    setSceneExport({ status: 'pending', kind: 'mesh3d' })
+    try {
+      const activeSlug = gameSlug?.trim()
+      if (!activeSlug) {
+        throw new Error('no active game; open a game in Studio then export again')
+      }
+      const result = await mesh3dExportApi.cook({ gameSlug: activeSlug })
+      setSceneExport({ status: 'success', kind: 'mesh3d', result })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSceneExport({ status: 'error', kind: 'mesh3d', message })
+    }
+  }
+  const runExport = () => {
+    if (exportIsMesh3d) void exportMesh3dScene()
+    else void exportSceneZip()
   }
   const dismissSceneExport = () => setSceneExport({ status: 'idle' })
   const selectExportUrl = (e: React.FocusEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
@@ -749,14 +792,22 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
           <button
             type="button"
             className="renderer-export-btn"
-            aria-label="Export scene.zip"
-            title="Cook current baked scene and export scene.zip"
+            aria-label={exportIsMesh3d ? 'Export 3D scene' : 'Export scene.zip'}
+            title={
+              exportIsMesh3d
+                ? 'Cook baked 3DMesh into .forgeax/games/<slug>/assets/3d/scenes/wb-scene-generator/<sceneId>/'
+                : 'Cook current baked scene and export scene.zip'
+            }
             disabled={sceneExport.status === 'pending'}
-            onClick={() => void exportSceneZip()}
+            onClick={runExport}
           >
-            {sceneExport.status === 'pending' ? 'Exporting...' : 'Export scene.zip'}
+            {sceneExport.status === 'pending'
+              ? 'Exporting...'
+              : exportIsMesh3d
+                ? 'Export 3D scene'
+                : 'Export scene.zip'}
           </button>
-          {sceneExport.status === 'success' && (
+          {sceneExport.status === 'success' && sceneExport.kind === 'sceneZip' && (
             <div className="renderer-export-popover" role="status" aria-live="polite">
               <button
                 type="button"
@@ -773,6 +824,39 @@ export function RendererSurface({ client }: { client: HttpApiClient }): JSX.Elem
                   aria-label="Scene zip download URL"
                   readOnly
                   value={sceneExport.result.downloadUrl}
+                  onFocus={selectExportUrl}
+                  onClick={selectExportUrl}
+                />
+              </label>
+            </div>
+          )}
+          {sceneExport.status === 'success' && sceneExport.kind === 'mesh3d' && (
+            <div className="renderer-export-popover" role="status" aria-live="polite">
+              <button
+                type="button"
+                className="renderer-export-popover__close"
+                aria-label="Close scene export result"
+                onClick={dismissSceneExport}
+              >
+                X
+              </button>
+              <div className="renderer-export-popover__title">3D scene export ready</div>
+              <label className="renderer-export-popover__field">
+                <span>Package path (project-relative):</span>
+                <input
+                  aria-label="3D scene export relative path"
+                  readOnly
+                  value={sceneExport.result.projectRelativeDir}
+                  onFocus={selectExportUrl}
+                  onClick={selectExportUrl}
+                />
+              </label>
+              <label className="renderer-export-popover__field">
+                <span>Absolute scene directory:</span>
+                <input
+                  aria-label="3D scene export absolute path"
+                  readOnly
+                  value={sceneExport.result.sceneDir}
                   onFocus={selectExportUrl}
                   onClick={selectExportUrl}
                 />
@@ -1214,7 +1298,7 @@ function LayerRow({
         ) : (
           <span className="renderer-layer-caret renderer-layer-caret--spacer" aria-hidden />
         )}
-        <span className="renderer-layer-color" style={{ backgroundColor: `hsl(${valueHue(layer.value)}, 65%, 55%)` }} aria-hidden />
+        <span className="renderer-layer-color" style={{ backgroundColor: colorForValueCss(layer.value) }} aria-hidden />
         <span className="renderer-layer-name" title={layer.nodePath || label}>
           {label}
         </span>
@@ -1247,7 +1331,7 @@ function LayerRow({
               <span className="renderer-layer-caret renderer-layer-caret--spacer" aria-hidden />
               <span
                 className="renderer-layer-color renderer-layer-color--sub"
-                style={{ backgroundColor: `hsl(${valueHue(i + 1)}, 60%, 58%)` }}
+                style={{ backgroundColor: colorForValueCss(i + 1, { subDimmed: true }) }}
                 aria-hidden
               />
               <span className="renderer-layer-name" title={token}>
@@ -1486,7 +1570,7 @@ function BakedLayerRow({
       ) : (
         <span className="renderer-layer-caret renderer-layer-caret--spacer" aria-hidden />
       )}
-      <span className="renderer-layer-color" style={{ backgroundColor: `hsl(${valueHue(layer.value)}, 65%, 55%)` }} aria-hidden />
+      <span className="renderer-layer-color" style={{ backgroundColor: colorForValueCss(layer.value) }} aria-hidden />
       {isRenaming ? (
         <input
           ref={inputRef}

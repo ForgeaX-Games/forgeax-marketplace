@@ -22,6 +22,7 @@ import type {
   RuntimeEvent,
   WorkspaceState,
 } from '@forgeax/node-runtime'
+import { pluginBasePath } from './pluginHttp'
 
 type Listener = (e: RuntimeEvent) => void
 
@@ -64,7 +65,7 @@ export class HttpApiClient implements ApiClient {
 
   constructor(opts: HttpApiClientOptions) {
     this.pipelineId = opts.pipelineId
-    this.base = opts.baseUrl ?? ''
+    this.base = opts.baseUrl || pluginBasePath()
   }
 
   syncViewingProjectId(id: string): void {
@@ -396,7 +397,7 @@ export class HttpApiClient implements ApiClient {
     if (!this.base.startsWith('http') && typeof location === 'undefined') return
     const wsBase = this.base.startsWith('http')
       ? this.base.replace(/^http/, 'ws')
-      : `${location.origin.replace(/^http/, 'ws')}`
+      : `${location.origin.replace(/^http/, 'ws')}${this.base.replace(/\/$/, '')}`
     const sock = new WebSocket(`${wsBase}/ws`)
     this.ws = sock
     sock.onopen = () => {

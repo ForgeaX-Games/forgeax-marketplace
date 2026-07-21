@@ -2,7 +2,7 @@ import type { BakedCell, BakedLayer } from '../baked/store.js'
 import type { AliasMeta } from '../library/service.js'
 import { aliasDisplayName, resolveLayerAlias } from './assetMatch.js'
 import { orderBakedLayersForExport } from './layerOrder.js'
-import { computeValidFrontVariantIdxs, computeValidFrontVariantPoolsByTileId, computeValidFrontVariantWeights, computeValidTopVariantIdxs, computeValidTopVariantPoolsByTileId, computeValidTopVariantWeights, loadTileRule, pickFrontSpriteIndex, pickTopSpriteIndex, resolveRuleRegions, type TileRule, type VariantPool } from './tileRules.js'
+import { computeValidEntryVariantIdxs, computeValidEntryVariantPoolsByTileId, computeValidEntryVariantWeights, computeValidFrontVariantIdxs, computeValidFrontVariantPoolsByTileId, computeValidFrontVariantWeights, computeValidTopVariantIdxs, computeValidTopVariantPoolsByTileId, computeValidTopVariantWeights, loadTileRule, pickFrontSpriteIndex, pickTopSpriteIndex, resolveRuleRegions, type TileRule, type VariantPool } from './tileRules.js'
 import {
   compareBillboardDrawOrder,
   buildTopFaceKey,
@@ -14,6 +14,7 @@ import type {
   ObjectTypeConfig,
   PassabilityConfigJson,
   SceneAtlasInput,
+  SceneTileCollider,
   TerrainCellExport,
   TerrainObjectExport,
   TerrainTemplateConfig,
@@ -181,6 +182,31 @@ function collisionMaskFrom(meta: AliasMeta | undefined, blocksMovement: boolean)
   if (Array.isArray(mask)) return mask
   if (mask && typeof mask === 'object') return [mask]
   return blocksMovement ? [{ x: 0, y: 0 }] : []
+}
+
+/**
+ * Convert a library asset's `geometry.collisionMask` (pixel space, TOP-LEFT
+ * origin — see library/service.ts:parseNormalizedPoint) into the reference
+ * bundle's TSJ `collider` convention (normalized [0,1], origin BOTTOM-LEFT,
+ * Y-up — same as `pivot`). Returns `{ type: 'none' }` when the asset has no
+ * mask or its pixel dimensions are unknown (mirrors prior "no collider"
+ * behaviour instead of guessing).
+ */
+function tsjColliderFrom(meta: AliasMeta | undefined): SceneTileCollider {
+  const mask = meta?.geometry?.collisionMask
+  const widthPx = meta?.widthPx
+  const heightPx = meta?.heightPx
+  if (!mask || !widthPx || !heightPx || widthPx <= 0 || heightPx <= 0) return { type: 'none' }
+  const toNormBottomLeft = (px: number, py: number): [number, number] => [px / widthPx, 1 - py / heightPx]
+  if (mask.kind === 'rectangle') {
+    const [x1, yTop] = toNormBottomLeft(mask.x, mask.y)
+    const [x2, yBottom] = toNormBottomLeft(mask.x + mask.width, mask.y + mask.height)
+    return { type: 'rect', rect: [x1, Math.min(yTop, yBottom), x2, Math.max(yTop, yBottom)] }
+  }
+  if (mask.kind === 'polygon' && mask.points.length > 0) {
+    return { type: 'polygon', points: mask.points.map((p) => toNormBottomLeft(p.x, p.y)) }
+  }
+  return { type: 'none' }
 }
 
 /**
@@ -402,10 +428,13 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
   // bindings.validVariantIdxs.{top,front}) — randomRules samples from these.
   const templateTopVariantIdxs = new Map<string, number[]>()
   const templateFrontVariantIdxs = new Map<string, number[]>()
+  const templateEntryVariantIdxs = new Map<string, number[]>()
   const templateTopVariantWeights = new Map<string, number[] | undefined>()
   const templateFrontVariantWeights = new Map<string, number[] | undefined>()
+  const templateEntryVariantWeights = new Map<string, number[] | undefined>()
   const templateTopVariantPoolsByTileId = new Map<string, Map<number, VariantPool>>()
   const templateFrontVariantPoolsByTileId = new Map<string, Map<number, VariantPool>>()
+  const templateEntryVariantPoolsByTileId = new Map<string, Map<number, VariantPool>>()
   const templateTileType = new Map<string, string | undefined>()
   const registerTerrainTemplate = (
     templateId: string,
@@ -457,7 +486,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     templateRule.set(templateId, rule)
     templateTileType.set(templateId, meta?.tileType)
     const ruleImg = (rule && meta?.tileType
-      && ((rule.faces.top?.randomRules?.length ?? 0) > 0 || (rule.faces.front?.randomRules?.length ?? 0) > 0))
+      && ((rule.faces.top?.randomRules?.length ?? 0) > 0 || (rule.faces.front?.randomRules?.length ?? 0) > 0 || (rule.faces.entry?.randomRules?.length ?? 0) > 0))
       ? input.resolveRuleImage?.(resolvedAlias ?? meta.tileType) ?? null
       : null
     if (rule && meta?.tileType) {
@@ -471,17 +500,23 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       const variantKey = resolvedAlias ?? templateId
       templateTopVariantIdxs.set(templateId, computeValidTopVariantIdxs(rule, variantKey, ruleImg))
       templateFrontVariantIdxs.set(templateId, computeValidFrontVariantIdxs(rule, variantKey, ruleImg))
+      templateEntryVariantIdxs.set(templateId, computeValidEntryVariantIdxs(rule, variantKey, ruleImg))
       templateTopVariantWeights.set(templateId, computeValidTopVariantWeights(rule, variantKey, ruleImg))
       templateFrontVariantWeights.set(templateId, computeValidFrontVariantWeights(rule, variantKey, ruleImg))
+      templateEntryVariantWeights.set(templateId, computeValidEntryVariantWeights(rule, variantKey, ruleImg))
       templateTopVariantPoolsByTileId.set(templateId, computeValidTopVariantPoolsByTileId(rule, variantKey, ruleImg))
       templateFrontVariantPoolsByTileId.set(templateId, computeValidFrontVariantPoolsByTileId(rule, variantKey, ruleImg))
+      templateEntryVariantPoolsByTileId.set(templateId, computeValidEntryVariantPoolsByTileId(rule, variantKey, ruleImg))
     } else {
       templateTopVariantIdxs.set(templateId, [])
       templateFrontVariantIdxs.set(templateId, [])
+      templateEntryVariantIdxs.set(templateId, [])
       templateTopVariantWeights.set(templateId, undefined)
       templateFrontVariantWeights.set(templateId, undefined)
+      templateEntryVariantWeights.set(templateId, undefined)
       templateTopVariantPoolsByTileId.set(templateId, new Map())
       templateFrontVariantPoolsByTileId.set(templateId, new Map())
+      templateEntryVariantPoolsByTileId.set(templateId, new Map())
     }
     terrainTemplates[templateId] = terrainConfigFor(layer.attributes, ids)
     return ids
@@ -503,6 +538,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       ...(meta?.heightPx ? { heightPx: meta.heightPx } : {}),
       ...(meta?.anchorX !== undefined ? { anchorX: meta.anchorX } : {}),
       ...(meta?.anchorY !== undefined ? { anchorY: meta.anchorY } : {}),
+      collider: tsjColliderFrom(meta),
     })
     return id
   }
@@ -545,6 +581,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       ...(meta.heightPx ? { heightPx: meta.heightPx } : {}),
       ...(meta.anchorX !== undefined ? { anchorX: meta.anchorX } : {}),
       ...(meta.anchorY !== undefined ? { anchorY: meta.anchorY } : {}),
+      collider: tsjColliderFrom(meta),
     })
     // Object carrier templates are pure sprite holders (no autotile rule): one
     // graphic_id, passable defaults. The viewer resolves template_id → graphic_id
@@ -791,10 +828,13 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     const occ = occByLayerSeq[layerSeq]
     const topVariants = templateTopVariantIdxs.get(templateId) ?? []
     const frontVariants = templateFrontVariantIdxs.get(templateId) ?? []
+    const entryVariants = templateEntryVariantIdxs.get(templateId) ?? []
     const topVariantWeights = templateTopVariantWeights.get(templateId)
     const frontVariantWeights = templateFrontVariantWeights.get(templateId)
+    const entryVariantWeights = templateEntryVariantWeights.get(templateId)
     const topVariantPoolsByTileId = templateTopVariantPoolsByTileId.get(templateId) ?? new Map()
     const frontVariantPoolsByTileId = templateFrontVariantPoolsByTileId.get(templateId) ?? new Map()
+    const entryVariantPoolsByTileId = templateEntryVariantPoolsByTileId.get(templateId) ?? new Map()
     const tags = areaTags(layer.attributes)
     const regions = rule
       ? resolveRuleRegions(rule, selfXyByLayerSeq[layerSeq]!, xyByParentPath.get(parentOfNodePath(layer.nodePath)) ?? new Set())
@@ -803,10 +843,10 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       (dx: number, dy: number, dz: number) => !!occ && occ.has(`${cell.x + dx},${cell.y + dy},${cell.z + dz}`)
     for (const cell of layer.cells) {
       // Top cap at screen row y - z - 1.
-      if (!rule || rule.faces.top) {
+      if (!rule || rule.faces.top || rule.faces.entry) {
         const occCell = has(cell)
-        const topIndex = rule && rule.faces.top && occ
-          ? pickTopSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: topVariants, validVariantWeights: topVariantWeights, validVariantPoolsByTileId: topVariantPoolsByTileId, regions })
+        const topIndex = rule && (rule.faces.top || rule.faces.entry) && occ
+          ? pickTopSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: topVariants, validVariantWeights: topVariantWeights, validVariantPoolsByTileId: topVariantPoolsByTileId, validEntryVariantIdxs: entryVariants, validEntryVariantWeights: entryVariantWeights, validEntryVariantPoolsByTileId: entryVariantPoolsByTileId, regions, state: cell.state })
           : 0
         pushTerrainLayer(terrainCells, cell.x, cell.y - cell.z - 1, cell.z, templateId, topIndex,
           { y: cell.y, z: cell.z, layerIdx: layerSeq, face: 'top' }, tags)
@@ -818,7 +858,7 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
       // Front wall at screen row y - z (only rules that declare a front face).
       if (rule && rule.faces.front && occ) {
         const occCell = has(cell)
-        const frontIndex = pickFrontSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: frontVariants, validVariantWeights: frontVariantWeights, validVariantPoolsByTileId: frontVariantPoolsByTileId, regions })
+        const frontIndex = pickFrontSpriteIndex(rule, cell.x, cell.y, cell.z, occCell, { validVariantIdxs: frontVariants, validVariantWeights: frontVariantWeights, validVariantPoolsByTileId: frontVariantPoolsByTileId, regions, state: cell.state })
         if (frontIndex !== null) {
           pushTerrainLayer(terrainCells, cell.x, cell.y - cell.z, cell.z, templateId, frontIndex,
             { y: cell.y, z: cell.z, layerIdx: layerSeq, face: 'front' }, tags)

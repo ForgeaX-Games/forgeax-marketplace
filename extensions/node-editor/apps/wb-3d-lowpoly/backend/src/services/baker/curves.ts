@@ -229,9 +229,14 @@ function catmullRomPoint(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, t: number, alph
   const t2 = tj(t1, p1, p2, alpha);
   const t3 = tj(t2, p2, p3, alpha);
   const tt = t1 + (t2 - t1) * t;
-  const a1 = lerpPoint(p0, p1, safeRatio(t1 - tt, t1 - t0), safeRatio(tt - t0, t1 - t0));
+  // Open-curve boundary padding duplicates the first/last control point (p0===p1 or
+  // p2===p3), which pins t1-t0 (or t3-t2) at exactly EPS for the *whole* segment. Letting
+  // safeRatio zero out both weights there would pull a1/a3 toward the world origin instead
+  // of the coincident point, producing a spurious loop right at the path's ends. Resolve to
+  // the coincident point directly instead.
+  const a1 = t1 - t0 <= EPS ? p1 : lerpPoint(p0, p1, safeRatio(t1 - tt, t1 - t0), safeRatio(tt - t0, t1 - t0));
   const a2 = lerpPoint(p1, p2, safeRatio(t2 - tt, t2 - t1), safeRatio(tt - t1, t2 - t1));
-  const a3 = lerpPoint(p2, p3, safeRatio(t3 - tt, t3 - t2), safeRatio(tt - t2, t3 - t2));
+  const a3 = t3 - t2 <= EPS ? p2 : lerpPoint(p2, p3, safeRatio(t3 - tt, t3 - t2), safeRatio(tt - t2, t3 - t2));
   const b1 = lerpPoint(a1, a2, safeRatio(t2 - tt, t2 - t0), safeRatio(tt - t0, t2 - t0));
   const b2 = lerpPoint(a2, a3, safeRatio(t3 - tt, t3 - t1), safeRatio(tt - t1, t3 - t1));
   return lerpPoint(b1, b2, safeRatio(t2 - tt, t2 - t1), safeRatio(tt - t1, t2 - t1));

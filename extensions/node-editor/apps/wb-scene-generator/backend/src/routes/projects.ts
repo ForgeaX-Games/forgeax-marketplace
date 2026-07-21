@@ -72,9 +72,13 @@ function broadcastViewing(projectId: string, pipelineId: string, newHash: string
 }
 
 export async function registerProjectRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/v1/projects', async () => {
+  // `?gameSlug=<slug>` scopes the list to that game's projects only; omit (or
+  // pass `?all=1`) to get every project in the workspace ("show all" toggle).
+  app.get<{ Querystring: { gameSlug?: string; all?: string } }>('/api/v1/projects', async (req) => {
     const reg = await getProjectRegistry()
-    return reg.listProjects()
+    const showAll = req.query.all === '1' || req.query.all === 'true'
+    const gameSlug = showAll ? undefined : req.query.gameSlug
+    return reg.listProjects(gameSlug ? { gameSlug } : undefined)
   })
 
   app.get<{ Params: ProjectIdParams }>('/api/v1/projects/:id', async (req, reply) => {
@@ -109,6 +113,7 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
       name?: string
       description?: string
       fromTemplate?: string
+      gameSlug?: string
     }
     if (!body.name || !body.name.trim()) {
       return reply.code(400).send({ reason: 'project name is required' })
@@ -124,6 +129,7 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
         name: body.name,
         ...(body.type ? { type: body.type } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.gameSlug !== undefined ? { gameSlug: body.gameSlug } : {}),
         ...(fromTemplate ? { fromTemplate } : {}),
       })
       broadcastToClients({
@@ -138,7 +144,7 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
 
   app.put<{ Params: ProjectIdParams }>('/api/v1/projects/:id', async (req, reply) => {
     const reg = await getProjectRegistry()
-    const patch = (req.body ?? {}) as { name?: string; description?: string; thumbnail?: string; type?: string }
+    const patch = (req.body ?? {}) as { name?: string; description?: string; thumbnail?: string; type?: string; gameSlug?: string }
     try {
       return reg.updateProject(req.params.id, patch)
     } catch (e) {
@@ -168,11 +174,15 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
   // UI viewing — sets viewingProjectId, does NOT acquire agent locks.
   app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/view', async (req, reply) => {
     const reg = await getProjectRegistry()
+    const __t0 = Date.now()
     try {
       const prevViewing = reg.getViewingProjectId()
       const rt = reg.viewProject(req.params.id)
+      const __t1 = Date.now()
       await rebindWsSubscriptions()
+      const __t2 = Date.now()
       const snap = getPipeline(rt)
+      const __t3 = Date.now()
       // Re-viewing the same project must not broadcast — that clears preview caches.
       if (prevViewing !== req.params.id) {
         broadcastViewing(req.params.id, rt.config.pipelineId, snap?.hash ?? '')
@@ -183,7 +193,15 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
           broadcastToClients({ event: 'library:changed', payload: { source: 'project-view' } })
         })
         .catch(() => undefined)
-      return { project: reg.getProject(req.params.id), pipeline: snap, workspace: reg.getWorkspace() }
+      const result = { project: reg.getProject(req.params.id), pipeline: snap, workspace: reg.getWorkspace() }
+      const __t4 = Date.now()
+      const mem = process.memoryUsage()
+      process.stderr.write(
+        `[switch-trace] POST /view id=${req.params.id} viewProject=${__t1 - __t0}ms rebindWs=${__t2 - __t1}ms ` +
+          `getPipeline=${__t3 - __t2}ms getProject/Workspace=${__t4 - __t3}ms TOTAL=${__t4 - __t0}ms ` +
+          `rss=${(mem.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(mem.heapUsed / 1024 / 1024).toFixed(1)}MB\n`,
+      )
+      return result
     } catch (e) {
       return reply.code(404).send({ reason: (e as Error).message })
     }

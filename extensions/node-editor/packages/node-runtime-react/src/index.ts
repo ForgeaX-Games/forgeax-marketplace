@@ -21,6 +21,11 @@
 
 // API contract ---------------------------------------------------------------
 export type { ApiClient, ActivateProjectResult, CreateProjectRequest, GroupTemplateBattery, PromptDto, TextPresetDto, ViewProjectResult } from './api/index.js'
+// Phase-2 wire-envelope hydration (see wb-scene-generator-scene-tree-storage.md
+// §3) — a pure, React-free helper HttpApiClient implementations call to undo a
+// deduped batch/single-port response before handing the value to callers. Part
+// of the API contract, not the editor runtime, so it lives at this entry too.
+export { hydrateBlobRefs } from './api/index.js'
 
 // Theme bundles + token resolver --------------------------------------------
 export { defaultTheme, legacyTheme, resolveTheme } from './themes/index.js'

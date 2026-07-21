@@ -2,8 +2,8 @@
   "id": "g_geometry_qc",
   "label": "几何 QC（连通/孤岛/AABB）",
   "name-en": "GGeometryQC",
-  "description": "对 Geometry 做静态几何质量检查：① part-joint 连通分量，孤岛 part；② 每个 part 的 shape 是否能解析出 AABB；③ joint origin 距 parent / child AABB 中心是否合理；④ 兄弟 part AABB 两两重叠（rest pose 静态干涉）；⑤ 几何丰富度信号（仅裸 primitive 时提示）；⑥ 悬空件（无关节路径到根）；⑦ 孤立 profile（未被 extrude/loft/revolve/part 消费）；⑧ lathe/revolve 误喂 XY profile；⑨ mesh-backed 布尔误用（pipe/sweep/section_loft 进布尔）。输出结构化 signals 供修复循环读取。只读分析，不改 Geometry。",
-  "description-en": "Static geometry quality checks: (1) connected components from joints; (2) parts whose shape cannot reduce to an AABB; (3) joint origins far from parent/child AABB centers; (4) sibling AABB overlaps in rest pose; (5) primitive-only richness hint; (6) floating links with no joint path to root; (7) orphan profiles not consumed by extrude/loft/revolve/part; (8) lathe/revolve fed an XY-centered profile; (9) mesh-backed boolean misuse (pipe/sweep/section_loft into a boolean). Emits a structured signals array for fix loops. Read-only.",
+  "description": "对 Geometry 做静态几何质量检查：① part-joint 连通分量，孤岛 part（有 joint 时才 fail valid）；② 每个 part 的 shape 是否能解析出 AABB；③ joint origin 距 parent / child AABB 中心是否合理；④ 兄弟 part AABB 两两重叠（rest pose，note/warning 信息信号，不 fail valid）；⑤ 几何丰富度信号（仅裸 primitive 时提示）；⑥ 悬空件（无关节路径到根，fatal error）；⑦ 孤立 profile（未被 extrude/loft/revolve/part 消费）；⑧ lathe/revolve 误喂 XY profile；⑨ mesh-backed 布尔误用（pipe/sweep/section_loft 进布尔）。输出结构化 signals 供修复循环读取。只读分析，不改 Geometry。",
+  "description-en": "Static geometry quality checks: (1) connected components from joints (fatal only when joints exist); (2) parts whose shape cannot reduce to an AABB; (3) joint origins far from parent/child AABB centers; (4) sibling AABB overlaps in rest pose (informational note/warning, never fails valid); (5) primitive-only richness hint; (6) floating links with no joint path to root (fatal); (7) orphan profiles not consumed by extrude/loft/revolve/part; (8) lathe/revolve fed an XY-centered profile; (9) mesh-backed boolean misuse (pipe/sweep/section_loft into a boolean). Emits a structured signals array for fix loops. Read-only.",
   "version": "1.0.0",
   "autoIterate": false,
   "tags": [
@@ -113,8 +113,8 @@
       "name": "overlaps",
       "type": "number",
       "label": "AABB 重叠对数",
-      "description": "rest pose 下相互重叠的兄弟 part 对数",
-      "description-en": "Number of sibling part AABB overlap pairs."
+      "description": "rest pose 下相互重叠的兄弟 part 对数（note/warning 信息信号，不 fail valid）",
+      "description-en": "Number of sibling part AABB overlap pairs (informational note/warning, does not fail valid)."
     },
     {
       "name": "primitive_only",
@@ -127,8 +127,8 @@
       "name": "floating_links",
       "type": "number",
       "label": "悬空件数",
-      "description": "有 joint 时，无关节路径到根树的 part 数（运行时会被 URDF 丢弃）",
-      "description-en": "Parts with no joint path to the root tree (dropped at runtime by URDF)."
+      "description": "有 joint 时，无关节路径到根树的 part 数（fatal error — 运行时会被 URDF 丢弃）",
+      "description-en": "Parts with no joint path to the root tree (fatal error — dropped at runtime by URDF)."
     },
     {
       "name": "orphan_profiles",

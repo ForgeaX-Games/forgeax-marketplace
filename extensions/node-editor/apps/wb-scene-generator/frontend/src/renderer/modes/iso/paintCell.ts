@@ -31,7 +31,7 @@
 //   * 'wire'  —— 三面只 stroke + 半透极浅底色
 
 import { ISO_CELL_W, ISO_CELL_H } from '../../framework/geometry/iso'
-import { colorForLayerIdx, colorForValue, rgbaToCss } from '../../framework/palette'
+import { colorForValue, rgbaToCss } from '../../framework/palette'
 import type { DrawMode } from '../../types'
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -55,9 +55,10 @@ export function paintIsoCell(
   anchor: { x: number; y: number },
   drawMode: DrawMode,
 ): void {
-  const baseColor = cell.isMultiValue
-    ? colorForValue(cell.value, { selected: cell.isSelected, editorSelected: cell.isEditorSelected })
-    : colorForLayerIdx(cell.layerIdx, { selected: cell.isSelected, editorSelected: cell.isEditorSelected })
+  const baseColor = colorForValue(cell.value, {
+    selected: cell.isSelected,
+    editorSelected: cell.isEditorSelected,
+  })
 
   const faces = computeFaces(anchor.x, anchor.y)
   // Stage-2c.2: asset autotile —— 'asset' drawMode 暂统一走 color 分支
@@ -102,7 +103,7 @@ function paintColor(ctx: Ctx, faces: { top: Pts; right: Pts; left: Pts }, base: 
   fillPath(ctx, faces.left,  rgbaToCss(scaleRgb(base, 0.75)))
   fillPath(ctx, faces.right, rgbaToCss(scaleRgb(base, 0.55)))
   fillPath(ctx, faces.top,   rgbaToCss(base))
-  // 选中态:colorForLayerIdx / colorForValue 收到 selected/editorSelected 时已经提亮
+  // 选中态:colorForValue 收到 selected/editorSelected 时已经提亮
   // 了 base,三面颜色对应跟着变;不再额外画轮廓 stroke(iso 视角下 6 条外轮廓边的
   // 信息量小,叠 stroke 反而增噪)。
 }

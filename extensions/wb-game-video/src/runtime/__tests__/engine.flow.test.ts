@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
 import { registerComponent, unregisterComponent } from '../registry/component-registry'
-import { isRenderOverlay, isOpenInteraction } from '../engine/directives'
+import { isRenderOverlay } from '../engine/directives'
 import type { GameGraph, GameNode, GameScenario, Reaction, SubFlowPackDef } from '../schema/graph-schema'
 import { node, scnOf, rid } from './test-fixtures'
 
@@ -10,11 +10,8 @@ const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNode
 // Minimal components: a presentation "float", a choice-like（副作用改由 node.data.reactions 承载）。
 const COMPONENT_IDS = ['floatT', 'choiceX']
 beforeEach(() => {
-  registerComponent('floatT', { role: 'presentation' })
-  registerComponent('choiceX', {
-    role: 'interaction',
-    // 出口由实例 inputs.events 派生（handlesOf）；无需声明 outputs。
-  })
+  registerComponent('floatT', {})
+  registerComponent('choiceX', {})
 })
 afterEach(() => COMPONENT_IDS.forEach(unregisterComponent))
 
@@ -50,7 +47,7 @@ describe('element window (startMs/endMs)', () => {
         node('a', {
           durationMs: 5000,
           timeline: [
-            { id: 'w', role: 'presentation', kind: 'floatT', trigger: { when: 'enter' }, window: { startMs: 2000, endMs: 4000 }, inputs: { text: 'x' } },
+            { id: 'w', kind: 'floatT', trigger: { when: 'enter' }, window: { startMs: 2000, endMs: 4000 }, inputs: { text: 'x' } },
           ],
         }),
       ],
@@ -132,12 +129,12 @@ describe('subflow pack (subFlowPack)', () => {
 
 describe('transition component', () => {
   it('emits a transition overlay on enter (generic renderOverlay)', () => {
-    registerComponent('transition', { role: 'presentation' })
+    registerComponent('transition', {})
     const graph: GameGraph = {
       nodes: [
         node('a', {
           durationMs: 1000,
-          timeline: [{ id: 't', role: 'presentation', kind: 'transition', trigger: { when: 'enter' }, inputs: { durationMs: 500 } }],
+          timeline: [{ id: 't', kind: 'transition', trigger: { when: 'enter' }, inputs: { durationMs: 500 } }],
         }),
       ],
       edges: [],
@@ -151,14 +148,13 @@ describe('transition component', () => {
 })
 
 describe('choice timeout', () => {
-  it('openInteraction carries timeoutMs; submit(undefined) falls back to defaultEvent', () => {
+  it('renderOverlay carries timeoutMs/defaultEvent; empty emit falls back to defaultEvent', () => {
     const graph: GameGraph = {
       nodes: [
         node('a', {
           timeline: [
             {
               id: 'c',
-              role: 'interaction',
               kind: 'choiceX',
               trigger: { when: 'enter' },
               inputs: { events: [{ id: 'a' }, { id: 'b' }], timeoutMs: 3000, defaultEvent: 'b' },
@@ -176,21 +172,22 @@ describe('choice timeout', () => {
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)
     const dirs = rt.start()
-    const open = dirs.find(isOpenInteraction)
-    expect(open?.timeoutMs).toBe(3000)
-    // 模拟到点未选：submit(undefined) → defaultEvent 'b' → lose
-    rt.submitInteraction(rid('a', 'c'), undefined)
+    const overlay = dirs.find((d) => isRenderOverlay(d) && d.elementId === rid('a', 'c'))
+    if (!overlay || !isRenderOverlay(overlay)) throw new Error('expected renderOverlay')
+    expect(overlay.inputs.timeoutMs).toBe(3000)
+    expect(overlay.inputs.defaultEvent).toBe('b')
+    // 模拟到点未选：emit('') → defaultEvent 'b' → lose
+    rt.emitComponentEvent(rid('a', 'c'), '')
     expect(rt.state.currentNodeId).toBe('lose')
   })
 
-  it('openInteraction maps windowMs to timeoutMs when timeoutMs absent', () => {
+  it('renderOverlay passes windowMs when timeoutMs absent', () => {
     const graph: GameGraph = {
       nodes: [
         node('a', {
           timeline: [
             {
               id: 'q',
-              role: 'interaction',
               kind: 'choiceX',
               trigger: { when: 'enter' },
               inputs: { events: [{ id: 'pass' }, { id: 'fail' }], windowMs: 200, defaultEvent: 'fail' },
@@ -207,14 +204,16 @@ describe('choice timeout', () => {
     }
     const scn = scnOf(graph)
     const rt = new GraphRuntime(scn.graph, scn)
-    const open = rt.start().find(isOpenInteraction)
-    expect(open?.timeoutMs).toBe(200)
+    const overlay = rt.start().find((d) => isRenderOverlay(d) && d.elementId === rid('a', 'q'))
+    if (!overlay || !isRenderOverlay(overlay)) throw new Error('expected renderOverlay')
+    expect(overlay.inputs.windowMs).toBe(200)
+    expect(overlay.inputs.defaultEvent).toBe('fail')
   })
 })
 
-describe('submitInteraction · event 结算只读 mount.reactions（选项/通用组件结算修复的运行时证明）', () => {
+describe('emitComponentEvent · event 结算只读 mount.reactions（选项/通用组件结算修复的运行时证明）', () => {
   // 复现「素材属性编辑面板统一化」修复的真实运行时后果：2026-07-16 边路由统一重构曾把
-  // 选项/通用组件结算误写进 node.data.reactions，但 submitInteraction 从头到尾只读
+  // 选项/通用组件结算误写进 node.data.reactions，但 emitComponentEvent 从头到尾只读
   // nodeOverlayMounts(node)[...].reactions（见 engine.ts:467-470），配了但从不生效。
   function seedChoiceNode(reactionsOn: 'mount' | 'legacyNode'): { graph: GameGraph; scn: GameScenario } {
     const graph: GameGraph = {
@@ -222,7 +221,7 @@ describe('submitInteraction · event 结算只读 mount.reactions（选项/通�
         node('a', {
           durationMs: 1000,
           timeline: [
-            { id: 'c', role: 'interaction', kind: 'choiceX', trigger: { when: 'enter' }, params: { events: [{ id: 'hit' }] } },
+            { id: 'c', kind: 'choiceX', trigger: { when: 'enter' }, inputs: { events: [{ id: 'hit' }] } },
           ],
         }),
       ],
@@ -244,19 +243,19 @@ describe('submitInteraction · event 结算只读 mount.reactions（选项/通�
     return { graph: scn.graph, scn }
   }
 
-  it('写在 mount.reactions（新统一写入位置）：submitInteraction 后 effect 真的生效', () => {
+  it('写在 mount.reactions（新统一写入位置）：emitComponentEvent 后 effect 真的生效', () => {
     const { graph, scn } = seedChoiceNode('mount')
     const rt = new GraphRuntime(graph, scn)
     rt.start()
-    rt.submitInteraction(rid('a', 'c'), 'hit')
+    rt.emitComponentEvent(rid('a', 'c'), 'hit')
     expect(rt.state.entities['ent-boss']?.attrs.hp).toBe(600)
   })
 
-  it('写在 node.data.reactions（历史 bug 位置）：submitInteraction 不读它，effect 不生效', () => {
+  it('写在 node.data.reactions（历史 bug 位置）：emitComponentEvent 不读它，effect 不生效', () => {
     const { graph, scn } = seedChoiceNode('legacyNode')
     const rt = new GraphRuntime(graph, scn)
     rt.start()
-    rt.submitInteraction(rid('a', 'c'), 'hit')
+    rt.emitComponentEvent(rid('a', 'c'), 'hit')
     expect(rt.state.entities['ent-boss']?.attrs.hp).toBe(700)
   })
 })

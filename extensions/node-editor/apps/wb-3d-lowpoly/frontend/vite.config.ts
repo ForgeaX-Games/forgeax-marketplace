@@ -26,6 +26,10 @@ const kernelAlias = [
 const devPort = Number(process.env.VITE_DEV_PORT ?? 9565)
 const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:9567'
 const wsTarget = apiTarget.replace(/^http/, 'ws')
+const pluginBase = process.env.VITE_PLUGIN_BASE ?? './'
+const pluginHmrClientPort = process.env.VITE_PLUGIN_HMR_CLIENT_PORT
+  ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
+  : undefined
 
 // When embedded as an iframe inside an HTTPS host (Studio with
 // FORGEAX_INTERFACE_HTTPS=1), this dev server must also serve HTTPS or the
@@ -39,6 +43,7 @@ const httpsOption =
     : undefined
 
 export default defineConfig({
+  base: pluginBase,
   plugins: [react()],
   resolve: {
     alias: kernelAlias,
@@ -52,6 +57,10 @@ export default defineConfig({
     port: devPort,
     host: true,
     ...(httpsOption ? { https: httpsOption } : {}),
+    hmr: {
+      clientPort: pluginHmrClientPort,
+      ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
+    },
     proxy: {
       '/api': { target: apiTarget, changeOrigin: true },
       '/ws':  { target: wsTarget, ws: true },

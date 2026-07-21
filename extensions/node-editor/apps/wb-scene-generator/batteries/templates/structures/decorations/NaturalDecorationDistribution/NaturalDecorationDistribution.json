@@ -90,16 +90,6 @@
       "params": {}
     },
     {
-      "id": "node-1781858738320-0yzku",
-      "opId": "scene_focus_path",
-      "name": "node-1781230373912-4ci9l",
-      "position": {
-        "x": 3337.993206337032,
-        "y": 3515.7347141585333
-      },
-      "params": {}
-    },
-    {
       "id": "node-1781858738320-2pz49",
       "opId": "scene_passthrough",
       "name": "node-1781230373913-tr5t0",
@@ -384,17 +374,6 @@
       }
     },
     {
-      "id": "edge-1781858738320-2vd0o",
-      "source": {
-        "nodeId": "node-1781858738320-8zgfb",
-        "port": "childPaths"
-      },
-      "target": {
-        "nodeId": "node-1781858738320-0yzku",
-        "port": "path"
-      }
-    },
-    {
       "id": "edge-1781858738320-5sqmd",
       "source": {
         "nodeId": "node-1781858738320-8zgfb",
@@ -628,7 +607,7 @@
     {
       "id": "edge-1781858738320-8lywm",
       "source": {
-        "nodeId": "node-1781858738320-0yzku",
+        "nodeId": "node-1781858738320-rrl6m",
         "port": "scene"
       },
       "target": {
@@ -689,17 +668,6 @@
       "target": {
         "nodeId": "node-1781858738320-mu118",
         "port": "seed"
-      }
-    },
-    {
-      "id": "e-node-1781858738320-rrl6m-scene-node-1781858738320-0yzku-scene",
-      "source": {
-        "nodeId": "node-1781858738320-rrl6m",
-        "port": "scene"
-      },
-      "target": {
-        "nodeId": "node-1781858738320-0yzku",
-        "port": "scene"
       }
     },
     {

@@ -78,6 +78,24 @@ export interface RendererCommandMessage {
     | { kind: 'open-all-sublayers'; nodeId?: string }
 }
 
+/**
+ * Renderer pane → host: coarse-grained progress for the data hooks that run
+ * inside the iframe (useNodePreviews / useBakedLayers / useAliasMetas), none
+ * of which the host can otherwise observe. Feeds the workbench's project-
+ * switch loading-status panel — see `renderer/bridge/loadingSignals.ts` for
+ * the producer side. Pure telemetry; the host never acts on it beyond display.
+ */
+export interface LoadingStatusMessage {
+  type: 'workbench:loading-status'
+  tasks: Array<{
+    id: 'previews' | 'baked' | 'aliases'
+    label: string
+    active: boolean
+    done?: number
+    total?: number
+  }>
+}
+
 export type WorkbenchMessage =
   | RequestFocusMessage
   | QueryFocusMessage
@@ -87,6 +105,7 @@ export type WorkbenchMessage =
   | PreviewChangeMessage
   | PreviewDataMessage
   | RendererCommandMessage
+  | LoadingStatusMessage
 
 export function isWorkbenchMessage(data: unknown): data is WorkbenchMessage {
   return (

@@ -11,7 +11,7 @@ displayName:
 This plugin extends `@forgeax/node-runtime` with domain ops and surfaces
 specific to **3D Lowpoly Generator** workflows. AI agents drive editor actions
 through Studio ToolRegistry (`/api/tools/call`) tools declared in
-`forgeax-extension.json`; nothing in this plugin requires a human-only path.
+`forgeax-plugin.json`; nothing in this plugin requires a human-only path.
 
 ## Workflow shape — DSL-first
 
@@ -35,8 +35,10 @@ compiles it to a graph, executes it, bakes, and runs QC in **one** call. You
    "I can't find the mesh I baked".
 
 Syntax and op signatures: see `skills/compose-lowpoly/dsl-quickref.md` (DSL grammar
-cheat-sheet) and `skills/compose-lowpoly/op-directory.md` (auto-generated, complete
-op signatures — the SSOT for authoring; you do not need `batteries.list`).
+cheat-sheet) and `skills/compose-lowpoly/op-directory.md` (auto-generated family
+index — the SSOT for authoring; you do not need `batteries.list`). The index links
+to per-family shards under `skills/compose-lowpoly/op-directory/`; open only the
+shard(s) the current task needs, not every shard.
 
 The completion gate is a clean `model.apply` receipt (no `errors`, `qc.valid`,
 `meshQc.clean`, no URDF errors) — judge the model purely from the receipt.
@@ -104,15 +106,39 @@ stacking primitives:
   `g_joint_mimic` `g_joint_on_surface`. Links + joints into one rooted URDF tree.
 - **Collision** — `g_collision_box` `g_collision_clustered` `g_auto_collision`
   `g_inertial_from_geometry`.
+- **Character rig** (角色路, `batteries/Assemble/Rig/`) —
+  `g_bone` (`bone`), `g_skeleton` (`skeleton`), `g_skin` (`skin`). Soft-body
+  characters/creatures: a free bone tree + smooth skinning instead of rigid URDF joints.
+  **The agent authors the bone tree by hand** (parent chain by anatomy — limbs each parent
+  to a central bone, never leg-to-leg), then adds one `skin(method="auto")`. Any of
+  `bone`/`skeleton`/`skin` switches the compile to the **character path**. Weights are NOT
+  stored in the DSL/backend — solved on the frontend by geodesic voxel binding. Same
+  two-phase build as PART A (per-part bake → reference-assemble), the only difference being
+  the assembly writes bones instead of joints. See **PART D** of the
+  `skills/compose-lowpoly/` skill (`skills/compose-lowpoly/executions/part-d-character.md`).
+
+### Animation
+- **Clip** — `g_bake_animation` (DSL `animation`, joint-path: channel keys = URDF
+  joint names, limit-clamped) and `g_bake_skin_animation` (DSL `animation` on the
+  **character path**: channel keys = bone names, value = bend radians about **each
+  bone's own bend axis** — a stable hinge axis perpendicular to the bone's head→tail
+  direction, so `tail` controls the swing plane; no limit clamp). The compiler routes
+  an `animation` statement to the skin variant automatically when the DSL is a
+  character DSL. Prefer authoring motion as sparse `keyframes`.
 
 ### Output
 - **Bake** — `g_bake_part` `g_bake_object`. `g_bake_part` also returns
   `bbox_min`/`bbox_max`/`size` (baked mesh local AABB + dimensions in meters) for
-  placement and feeding `g_mesh`.
-- **QC** — `g_validate` `g_geometry_qc`.
-- **Export** — `g_to_urdf` (the terminal URDF emitter + OCCT baker; collision
-  defaults to a coarse AABB box proxy for composite/baked meshes), `g_preview`,
-  `urdf_preview`.
+  placement and feeding `g_mesh`. On the character path, `g_bake_object` also merges
+  all parts into the one skinnable mesh consumed by `g_to_rig`.
+- **QC** — `g_validate` `g_geometry_qc` (URDF path), `g_skin_qc` (character path:
+  skeleton/bone/skin topology + bone-length checks).
+- **Export** — `g_to_urdf` (URDF path terminal + OCCT baker) and **`g_to_rig`**
+  (character path terminal: emits a **RigSpec** JSON — skeleton + skinnable-mesh ref
+  + skin params + bone clips, weights excluded). Preview: `g_preview` / `urdf_preview`
+  (URDF) and **`rig_preview`** (character, passthrough RigSpec). GLB export supports
+  `mode: animated|static|skinned|character` (character = skeleton + smooth skinning +
+  bone animation).
 
 > **Gears** consolidated to 6 *batteries* (`g_gear`, `g_ring_gear`, `g_rack_gear`,
 > `g_planetary_gearset`, `g_bevel_gear`, `g_worm`). **When authoring DSL, write the
@@ -123,18 +149,22 @@ stacking primitives:
 > DSL SSOT; do not invent op names from this battery-level list.
 
 The end-user modeling guidance lives in the single `skills/compose-lowpoly/`
-skill — an entry/router (`SKILL.md`) over three flows: **PART A · asset /
+skill — an entry/router (`SKILL.md`) over four flows: **PART A · asset /
 mechanical** (philosophy, family routing, id-port wiring, runnable assembly
 example, QC loop — `executions/part-a-asset.md`); **PART B · building** (the
 architecture-flavoured walls/slabs/stairs/roofs/openings workflow + the building
-brief — `executions/part-b-building.md`); and **PART C · scene assembly** (place
-already-baked meshes into one URDF tree and export the whole scene to .glb —
-`executions/part-c-scene-assembly.md`). The **required** shared references are
-`op-directory.md` (op signatures) + `dsl-quickref.md` (syntax); `battery-catalog.md`
-and `quickstart.md` are consulted on demand, and `modeling-guide.md` /
-`pipeline-schema.md` are legacy `createNode`-format background only. Keep the op
+brief — `executions/part-b-building.md`); **PART C · scene assembly** (place
+already-baked meshes and export the whole scene to .glb —
+`executions/part-c-scene-assembly.md`); and **PART D · character / creature**
+(per-part bake like A, then author the bone tree + `skin(auto)` for soft-body
+skinning — `executions/part-d-character.md`). The **required** shared references are
+`op-directory.md` (op signatures, sharded by family — see the shard index at its
+top) + `dsl-quickref.md` (syntax); `battery-catalog.md` and `quickstart.md` are
+consulted on demand. The old `createNode`-format background docs
+(`modeling-guide.md` / `pipeline-schema.md`) moved out of the agent read path to
+`docs/superpowers/archive/` (human historical reference only). Keep the op
 catalogue in sync with the families under `batteries/<Stage>/<Family>/` when ops
-are added or removed, and regenerate `op-directory.md`
+are added or removed, and regenerate the op-directory shards
 (`node scripts/gen-op-directory.mjs`) so the DSL SSOT stays current.
 
 ## Domain surfaces

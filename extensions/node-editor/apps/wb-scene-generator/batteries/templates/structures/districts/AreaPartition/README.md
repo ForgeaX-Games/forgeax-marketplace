@@ -20,7 +20,7 @@
 | `in_2` | number | **list** | 面积权重 | 建议接 | 与 Points 等长，如 `[3,2,1.5,1]`（相对比例，勿全等） |
 | `in_3` | string | tree | 子区节点名 | 建议接 | 与 Points 等长，如 `["划分子区域1","划分子区域2",…]` |
 | `in_4` | string | tree | 子区 tile 资产 | 建议接 | 与 Points 等长；填 **catalog 真实 tile 名**（示例用占位 `tile_a`） |
-| `in_5` | number | tree | Seed | 建议接 | `seed_control.seed` |
+| `in_5` | number | tree | Seed | **必接** | **`aw_m0_seed.seed`（全局固定非 0）**；禁止悬空/`seed:0` |
 | `in_6` | string | item | BoundaryStyle | **默认 organic** | `organic` / `smooth` / `voronoi` / `rectilinear` |
 | `in_7` | number | item | RelaxIterations | 默认 **8** | Lloyd 松弛，推荐 6–10 |
 | `in_8` | number | item | SmoothIterations | 默认 **12** | organic 边界 CA，推荐 10–14 |
@@ -298,3 +298,81 @@ curl -s -H 'content-type: application/json' -X POST \
 ```
 
 自动化：`node aw-support/scripts/verify-battery-templates.mjs`
+
+---
+
+## 单步独立：最小可跑示例（agent 模仿用）
+
+> 与上文「已验证调用示例」不同：本节**不依赖** M0/M1 具体的父区域/子区命名，用一个全新的独立 20×20 Demo Scene 起步，只验证本模板「点+面积权重→划分」的端口语义。完整 M0→M8 九步链见 [`battery-chain-template-demo/`](../../../../../../../../../aw-support/examples/battery-chain-template-demo/README.md)；agent 模仿总览见 [`agent-imitate.md`](../../../../../../../../../aw-support/examples/battery-chain-template-demo/agent-imitate.md)。
+
+### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
+
+```json
+{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+  "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
+           "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
+```
+
+```jsonc
+{ "type":"createNode","nodeId":"demo_empty","opId":"empty_scene","params":{} },
+{ "type":"createNode","nodeId":"demo_name", "opId":"text_panel","params":{"text":"demo_ground"} },
+{ "type":"createNode","nodeId":"demo_w",    "opId":"number_const","params":{"value":20} },
+{ "type":"createNode","nodeId":"demo_h",    "opId":"number_const","params":{"value":20} },
+{ "type":"createNode","nodeId":"demo_asset","opId":"text_panel","params":{"text":"草地"} },
+{ "type":"connect","edgeId":"e_demo_scene","source":{"nodeId":"demo_empty","port":"scene"}, "target":{"nodeId":"demo_abg","port":"in_0"} },
+{ "type":"connect","edgeId":"e_demo_name", "source":{"nodeId":"demo_name","port":"output"}, "target":{"nodeId":"demo_abg","port":"in_1"} },
+{ "type":"connect","edgeId":"e_demo_w",    "source":{"nodeId":"demo_w","port":"value"},     "target":{"nodeId":"demo_abg","port":"in_2"} },
+{ "type":"connect","edgeId":"e_demo_h",    "source":{"nodeId":"demo_h","port":"value"},     "target":{"nodeId":"demo_abg","port":"in_3"} },
+{ "type":"connect","edgeId":"e_demo_asset","source":{"nodeId":"demo_asset","port":"output"},"target":{"nodeId":"demo_abg","port":"in_4"} }
+```
+
+`demo_abg.out_1`（BaseNode）即为下面 AreaPartition 的 `in_0`。
+
+### 端口 → opId → 默认参数（2 子区最小示例，模式化生成依据）
+
+| in_* 端口 | 白名单 opId | 必接 | 默认值/示例 | 备注 |
+|---|---|---|---|---|
+| `in_0` | 上游 `out_*` | 必接 | `demo_abg.out_1` | 待划分父区域 |
+| `in_1` | `manual_points`×N → `tree_merge`(item,point2d,N) | 必接 | `{6,6}` `{14,14}` | 各子区中心，N 可扩展 |
+| `in_2` | `number_const`×N → `tree_merge`(item,number,N) | 建议 | `2` `1` | 面积权重 |
+| `in_3` | `text_panel`×N → `tree_merge`(item,string,N) | 建议 | `"子区A"` `"子区B"` | 子区节点名 |
+| `in_4` | `text_panel`×N → `tree_merge`(item,string,N) | 建议 | `"草地"` `"草地"` | tile 资产 |
+| `in_5` | `seed_control` / `aw_m0_seed` | **必接** | `42`（非 0） | 生产接全局 `aw_m0_seed` |
+
+### applyBatch 片段（2 子区，可直接照抄）
+
+```json
+{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+  "args":{ "templateId":"AreaPartition", "groupId":"demo_ap", "position":{"x":-400,"y":200},
+           "opts":{"actor":"ai:sino","label":"实例化 AreaPartition"} } }
+```
+
+```jsonc
+{ "type":"createNode","nodeId":"ap_pt_1","opId":"manual_points","params":{"x":6,"y":6} },
+{ "type":"createNode","nodeId":"ap_pt_2","opId":"manual_points","params":{"x":14,"y":14} },
+{ "type":"createNode","nodeId":"ap_pt_merge","opId":"tree_merge","params":{"inferredAccess":"item","inferredType":"point2d","portCount":2} },
+{ "type":"createNode","nodeId":"ap_a_1","opId":"number_const","params":{"value":2} },
+{ "type":"createNode","nodeId":"ap_a_2","opId":"number_const","params":{"value":1} },
+{ "type":"createNode","nodeId":"ap_area_merge","opId":"tree_merge","params":{"inferredAccess":"item","inferredType":"number","portCount":2} },
+{ "type":"createNode","nodeId":"ap_zn_1","opId":"text_panel","params":{"text":"子区A"} },
+{ "type":"createNode","nodeId":"ap_zn_2","opId":"text_panel","params":{"text":"子区B"} },
+{ "type":"createNode","nodeId":"ap_zn_merge","opId":"tree_merge","params":{"inferredAccess":"item","inferredType":"string","portCount":2} },
+{ "type":"createNode","nodeId":"ap_za_1","opId":"text_panel","params":{"text":"草地"} },
+{ "type":"createNode","nodeId":"ap_za_2","opId":"text_panel","params":{"text":"草地"} },
+{ "type":"createNode","nodeId":"ap_za_merge","opId":"tree_merge","params":{"inferredAccess":"item","inferredType":"string","portCount":2} },
+{ "type":"connect","edgeId":"e_ap_scene","source":{"nodeId":"demo_abg","port":"out_1"},"target":{"nodeId":"demo_ap","port":"in_0"} },
+{ "type":"connect","edgeId":"e_ap_pt1","source":{"nodeId":"ap_pt_1","port":"point"},"target":{"nodeId":"ap_pt_merge","port":"item_0"} },
+{ "type":"connect","edgeId":"e_ap_pt2","source":{"nodeId":"ap_pt_2","port":"point"},"target":{"nodeId":"ap_pt_merge","port":"item_1"} },
+{ "type":"connect","edgeId":"e_ap_pts","source":{"nodeId":"ap_pt_merge","port":"tree"},"target":{"nodeId":"demo_ap","port":"in_1"} },
+{ "type":"connect","edgeId":"e_ap_a1","source":{"nodeId":"ap_a_1","port":"value"},"target":{"nodeId":"ap_area_merge","port":"item_0"} },
+{ "type":"connect","edgeId":"e_ap_a2","source":{"nodeId":"ap_a_2","port":"value"},"target":{"nodeId":"ap_area_merge","port":"item_1"} },
+{ "type":"connect","edgeId":"e_ap_areas","source":{"nodeId":"ap_area_merge","port":"tree"},"target":{"nodeId":"demo_ap","port":"in_2"} },
+{ "type":"connect","edgeId":"e_ap_zn1","source":{"nodeId":"ap_zn_1","port":"output"},"target":{"nodeId":"ap_zn_merge","port":"item_0"} },
+{ "type":"connect","edgeId":"e_ap_zn2","source":{"nodeId":"ap_zn_2","port":"output"},"target":{"nodeId":"ap_zn_merge","port":"item_1"} },
+{ "type":"connect","edgeId":"e_ap_zns","source":{"nodeId":"ap_zn_merge","port":"tree"},"target":{"nodeId":"demo_ap","port":"in_3"} },
+{ "type":"connect","edgeId":"e_ap_za1","source":{"nodeId":"ap_za_1","port":"output"},"target":{"nodeId":"ap_za_merge","port":"item_0"} },
+{ "type":"connect","edgeId":"e_ap_za2","source":{"nodeId":"ap_za_2","port":"output"},"target":{"nodeId":"ap_za_merge","port":"item_1"} },
+{ "type":"connect","edgeId":"e_ap_zas","source":{"nodeId":"ap_za_merge","port":"tree"},"target":{"nodeId":"demo_ap","port":"in_4"} }
+```
+
+**验收**：execute 后 `demo_ap.out_0` 的子节点名应含 `子区A`、`子区B`，不含 `rest`。

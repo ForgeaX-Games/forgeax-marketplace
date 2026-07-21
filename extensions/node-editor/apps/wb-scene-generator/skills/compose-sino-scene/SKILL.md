@@ -10,7 +10,7 @@ description: >-
 
 > ### ⬛ 模板组 = 黑盒（比双通道更优先）
 > **`instantiateTemplate` 整组落地** — 组内有 `scene_set_attribute` / `rect_grid` / 任意 op **都正常**，**禁止** `templates.get` 打开组内 JSON 研究实现。
-> **你唯一需要知道的**：返回的 **`exposedInputs` / `exposedOutputs`** → `text_panel` / `manual_points` 接到 exposed 口 → connect → execute。**会用、能用、快用。**
+> **你唯一需要知道的**：返回的 **`exposedInputs` / `exposedOutputs`**（每项 `{ portName, portType, label? }`，`label` 是模板作者标注的语义名，如 `IslandName`/`Rest`——先看它，不要死记 `in_N` 编号） → `text_panel` / `manual_points` 接到 exposed 口 → connect → execute。**会用、能用、快用。**
 
 > ### 🚦 构图双通道（搞混 applyBatch 顶层 = 422，与组内无关）
 > **通道 A** `instantiateTemplate` → 一次落地整组场景模板组（AreaPartition/IslandRegions/建筑/道路/装饰…；**整组落地，组内部实现无需你关心**）  
@@ -75,7 +75,7 @@ description: >-
 > | 南 | 下 | `+y` | | 西北 | 左上 | `-x, -y` |
 > | 北 | 上 | `-y` | | 西南 | 左下 | `-x, +y` |
 >
-> 例：W×H 网格里"东北角" ≈ `(x≈W-1, y≈0)`、"中心偏南" ≈ `(x≈W/2, y>H/2)`。所有 `manual_points` / Point（`PickOneBuilding`/`PickMultiBuildings`/`PlaceOneDecoration`/`PathConnection` POI）一律按此约定。
+> 例：W×H 网格里"东北角" ≈ `(x≈W-1, y≈0)`、"中心偏南" ≈ `(x≈W/2, y>H/2)`。所有 `manual_points` / Point（`PickOneBuilding`/`PlaceOneDecoration`/`PathConnection` POI）一律按此约定。
 
 地图层级体系（从大到小，分层推进）：
 
@@ -85,25 +85,25 @@ description: >-
 | **功能分区（可选，默认分区手段）** | 把父区域按中心点 + 面积**纯划分**成若干命名子区（铺满、无剩余） | `AreaPartition` | 仅 Zones（无 Rest） |
 | **海岛分区（可选，仅海洋/群岛场景）** | 按指定锚点在区域里**造岛**，分出陆地 / 水域 —— **只在需要水域时用** | `IslandRegions` | Island(陆地) + Rest(水域) |
 | **地形分带（可选）** | 在已有区域内部按到边界的距离再分近/远两带（深海/浅海、海岸/内陆） | `DistanceZones` | Near(近) + Far(远) |
-| **建筑层级** | 在基础网格上放置建筑（单栋 / 多栋 / 村庄） | `PickOneBuilding`、`PickMultiBuildings` | Building(s) + Rest |
+| **建筑层级** | 在基础网格上放置建筑（单栋；多栋/村庄用多次 `PickOneBuilding` 串联，`out_2`Rest→下一栋） | `PickOneBuilding` | Building + Rest |
 | **建筑结构（可选）** | 在建筑区域上盖墙/房间，生成 `outer_door` 门；**narrative_interior 默认 bottomDoor=true** | `BuildingStructures` | 含结构与门的建筑场景 |
 
 > **建筑占地铁律**：**叙事内构**（需 BuildingStructures 的可进入建筑）**≥15×15 格**（与 catalog footprint 取较大值）；**装饰外观**小建筑可 ≥10×10。城镇须读 `town-building-scatter.json` 规划补充散布建筑。
 | **道路层级** | 在建筑（门）之间连通道路 | `PathConnectionLink` / `PathConnectionRandomWalk` | Path + Rest |
 | **地形层级** | Rest 上叠加高差/缓丘 | `MountainContourGenerate` / `HillContourGenerate` | 主产物 + Rest（**须 Rest 串链**） |
 | **地形等高（可选）** | 在**剩余区域**上添加整数高度分层以体现层次感（见下方高差约束） | `MountainContourGenerate` | Mountain(多层) + Rest |
-| **自然地物 / 装饰层级** | 在剩余空地**叠加多种**装饰（须组合使用，禁止单一模板） | `NaturalDecorationDistribution` + `LocalPreciseDecoration` + `PlaceOneDecoration` + `LakeRegions` | 装饰 / 湖 + Rest |
+| **自然地物 / 装饰层级** | 按需求选型放置装饰（有尺寸/落点优先 PlaceOne；批量模板只挂简单物件） | `PlaceOneDecoration` + `LocalPreciseDecoration` + `NaturalDecorationDistribution` + `LakeRegions` | 装饰 / 湖 + Rest |
 
-**设计原则：** 必须从大到小、分层级推进。先确定地图主体（`AddBaseGrid`），需要把地图切成**功能区**（城镇/森林/湖区…）用 `AreaPartition`（默认分区手段，无水域）、**只有需要海岛/水域**场景才用 `IslandRegions` 划出陆地与水域、需要把某片区域按到边界距离再分深浅/海岸则用 `DistanceZones`，**先放建筑并连好道路**（见第二步「高差与连通」），再在**不影响叙事区域**的剩余范围用 **`MountainContourGenerate`** 做适度高差（`MaxElevationLayers` **建议 ≤ 2**），**最后**叠加多种装饰（见第二步「装饰叠加」）。每一层只在上一层留下的 **Rest / 剩余空地**（或上一层的陆地主产物）上继续布置，互不覆盖。
+**设计原则：** 必须从大到小、分层级推进。先确定地图主体（`AddBaseGrid`），需要把地图切成**功能区**（城镇/森林/湖区…）用 `AreaPartition`（默认分区手段，无水域）、**只有需要海岛/水域**场景才用 `IslandRegions` 划出陆地与水域、需要把某片区域按到边界距离再分深浅/海岸则用 `DistanceZones`，**先放建筑并连好道路**（见第二步「高差与连通」），再在**不影响叙事区域**的剩余范围用 **`MountainContourGenerate`** 做适度高差（`MaxElevationLayers` **建议 ≤ 2**），**最后**按选型放置装饰（见第二步「装饰选型」）。每一层只在上一层留下的 **Rest / 剩余空地**（或上一层的陆地主产物）上继续布置，互不覆盖。
 
 **优秀场景的标准：**
 1. 层级从大到小条理清晰，不存在反复横跳的工具调用；
 2. 每一层的电池调用数量逐层递增（装饰层最密）；
-3. **装饰须多种方式叠加**（随机散布 + 局部播撒 + 精准单点），避免单一模板铺满；
+3. **装饰按能力选型**：有明确尺寸/落点的用 PlaceOne；Local/Natural 只播简单小物件；大片 Rest 用 Natural 防空白——按需求选用，不必硬凑三种；
 4. **地形高差优先于装饰播撒**，且避开建筑/道路/地标等叙事核心区；
 5. 结构丰富，最终 `scene_output` 产出一张完整可用的场景。
 
-> **特别注意：禁止大面积无装饰的空白区域；也禁止只用一种装饰模板导致整图单调。**
+> **特别注意：禁止大面积无装饰的空白 Rest；禁止把复杂体量物件丢进 Local/Natural 批量播撒。**
 
 ---
 
@@ -116,35 +116,38 @@ description: >-
 > 1. **先**完成关键内容布局（建筑、结构、道路 POI）并 **`PathConnectionLink` 或 `PathConnectionRandomWalk` 确认连通**；
 > 2. **再**在道路/建筑/地标等**叙事核心区之外**的剩余范围上使用 **`MountainContourGenerate`** 添加高差（核心区保持平地）；
 > 3. **`MaxElevationLayers` 建议不超过 `2`**（`0`=平地，`1`=一层抬升，`2`=两层抬升）；除非用户明确要求更强地形，否则不要用更大值；
-> 4. **地形完成之后**再进入装饰播撒（见下方「装饰叠加」）。
+> 4. **地形完成之后**再进入装饰（见下方「装饰选型」）。
 >
-> 典型顺序：`AddBaseGrid` →（可选分区/分带）→ 建筑 →（可选结构）→ **道路连通** → **`MountainContourGenerate`（外围 Rest，≤2 层）** → **多种装饰叠加** → 湖。
+> 典型顺序：`AddBaseGrid` →（可选分区/分带）→ 建筑 →（可选结构）→ **道路连通** → **`MountainContourGenerate`（外围 Rest，≤2 层）** → **装饰（按选型）** → 湖。
 
 > ### 📍 道路 POI（PathConnectionLink / RandomWalk）
 > **`in_3` POI 禁止拍脑袋坐标。** 须从上游 Rest / 建筑体素 **导出并推理**（门 `outer_door`、`building_footprint_mask` 门格=2、建筑外侧邻格、经校验的边界锚点）。每个点必须在**可铺路区域内或区域边缘**；接入前确认 **不在区域外、不在建筑体内、不悬空无效格**。详见 [PathConnection.md](instructions/pipelines/PathConnection.md) §1。
 
-> ### 🌿 地形与装饰叠加（选电池前必读）
+> ### 🌿 地形与装饰选型（选电池前必读）
 >
 > **地形优先于装饰播撒**  
 > `MountainContourGenerate`（及可选的 `IslandRegions` / `DistanceZones`）应在**道路连通之后、任何装饰组之前**完成。高差只加在**不影响叙事区域**的剩余范围——建筑 footprint、道路走廊、广场/地标周边等**叙事核心区保持平地**；丘陵/层次留给外围 Rest、背景带、非剧情空地。
 >
-> **装饰必须多种方式叠加，禁止只用一种**  
-> `NaturalDecorationDistribution`（全区域随机散布）、`LocalPreciseDecoration`（兴趣点局部播撒）、`PlaceOneDecoration`（精准单点地标）**分工不同，须在同一张场景里组合使用**。只跑其中一种会导致整图**单调、缺乏层次**（例如全是同质行道树，或只有零星单点无背景植被）。
+> **装饰按能力选型（不必硬凑三种）**  
+> 三类模板能力不同：PlaceOne **唯一**可控单颗 Footprint；Local/Natural 是点采样播撒，**无**单颗 footprint 口。
 >
-> | 方式 | 模板 | 典型用途 | 在链中的位置 |
-> |------|------|---------|-------------|
-> | 精准地标 | `PlaceOneDecoration` | 入口雕像、主树、标志性物件 | 装饰链**靠前**（先定叙事锚点） |
-> | 局部簇/环 | `LocalPreciseDecoration` | 建筑旁、路口、兴趣点周围点缀 | 地标之后，**围绕 keypoint** |
-> | 背景填充 | `NaturalDecorationDistribution` | 剩余空地防大片空白、背景植被 | 局部播撒之后，**大面积 Rest 上** |
-> | 水体 | `LakeRegions` | 湖/池 | 可与上述穿插，常靠后 |
+> | 方式 | 模板 | 何时用 | 可挂资产 | 链中位置 |
+> |------|------|--------|----------|----------|
+> | 精准单点 | `PlaceOneDecoration` | **少量**、有明确位置和/或底面尺寸 | 地标、雕像、石灯、特定大树等需占格贴合的物件 | 装饰链**靠前** |
+> | 局部簇/环 | `LocalPreciseDecoration` | 兴趣点旁需要一簇点缀 | **仅**底面简单、结构简单的小物件（花草/碎石/小灌木/灯笼等） | PlaceOne 之后 |
+> | 背景填充 | `NaturalDecorationDistribution` | 大片 Rest 防空白 | 同上——简单植被/石块；禁止复杂体量 | 局部之后、大面积 Rest |
+> | 水体 | `LakeRegions` | 湖/池（按需） | — | 常靠后 |
 >
-> 推荐链式：`… → MountainContour(Rest 外围) → PlaceOne(地标) → LocalPrecise(锚点旁) → NaturalDecoration(填充) → Lake …`，每组 `out_2`→下一组 `in_1`，**至少用到 2～3 种装饰模板**。
+> - 有明显 footprint/宽深 + 落点 → **优先 PlaceOne**，勿塞进 Local/Natural。  
+> - 装饰很少且全是精准物件 → **可以只用 PlaceOne**；大片 Rest 空白时再叠加 Local → Natural。  
+> - 推荐链式：`… → MountainContour(Rest 外围) → PlaceOne(s) → LocalPrecise → Natural → Lake …`，每组 `out_2`→下一组 `in_1`。  
+> - **全局固定 Seed**：带 Seed 口的模板须接 `aw_m0_seed.seed`（非 0）；禁止悬空/`seed:0`（否则每次 execute 结果会变）。
 
 > ⚠️ **硬边界（通道 B 顶层 createNode 限制）**：`applyBatch` 顶层只能放**工具电池**（见下表）。**模板组一律走通道 A `instantiateTemplate` 整组落地**——组内部实现是私有的，你既不需要也无法直接摆放。422 = 你在通道 B 顶层放了非白名单电池（多半是想手搭某个模板组的内部）→ 改用 `instantiateTemplate` 落那个模板组，见 [mutation-lanes.md](instructions/mutation-lanes.md)。
 
 ### 管线电池目录（场景模板组）
 
-> 实例化一律用 `scene:pipeline.instantiateTemplate`。**端口以 instantiate 返回的 `exposedInputs` 为准**（Skill 目录表 + 各 README 作参考；**禁止**为查端口先 `templates.get` 读组内 nodes）。总览：[batteries/templates/scene/TEMPLATES_INDEX.md](../../batteries/templates/scene/TEMPLATES_INDEX.md)。
+> 实例化一律用 `scene:pipeline.instantiateTemplate`。**端口序号和语义都以 instantiate 返回的 `exposedInputs`/`exposedOutputs` 为准**——每项自带 `label`（下表里 `in_N`/`out_N` 后面跟的那个词，如 `Scene`/`Rest`/`Island`，就是 `label` 的值；Skill 目录表 + 各 README 作接线配方/数值参考；**禁止**为查端口先 `templates.get` 读组内 nodes）。总览：[batteries/templates/scene/TEMPLATES_INDEX.md](../../batteries/templates/scene/TEMPLATES_INDEX.md)。
 
 | 层级 | 管线电池 | 详细文档（本 skill） | 权威 README | 管线效果 | 必需输入 | 主要输出 |
 |------|---------|--------------------|------------|---------|---------|---------|
@@ -153,18 +156,17 @@ description: >-
 | 海岛分区 | **IslandRegions** | [pipelines/IslandRegions.md](instructions/pipelines/IslandRegions.md) | [README](../../batteries/templates/scene/IslandRegions/README.md) | 指定锚点造岛（每点一岛）+ 水域 —— **仅海洋/群岛场景** | `in_0`Scene / `in_1`Points | `out_1`Island / `out_2`Rest(水域) |
 | 地形分带 | **DistanceZones** | [pipelines/DistanceZones.md](instructions/pipelines/DistanceZones.md) | [README](../../batteries/templates/scene/DistanceZones/README.md) | 按到边界距离把区域分近/远两带（深浅海、海岸内陆） | `in_0`Scene / `in_1`Threshold | `out_1`Near / `out_2`Far |
 | 地形等高 | **MountainContourGenerate** | [pipelines/MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md) | [README](../../batteries/templates/structures/topographic/MountainContourGenerate/README.md) | 剩余区域有机高度分层（**道路连通之后**；`MaxElevationLayers` **≤2**） | `in_0`Scene / `in_3`MaxElevationLayers / `in_1`AssetName | `out_2`Mountain / `out_1`Rest |
-| 建筑 | **PickOneBuilding** | [pipelines/PickOneBuilding.md](instructions/pipelines/PickOneBuilding.md) | [README](../../batteries/templates/scene/PickOneBuilding/README.md) | 指定坐标放一栋建筑 | `in_3`Point / `in_1`Scene | `out_1`Building / `out_2`Rest |
-| 建筑 | **PickMultiBuildings** | [pipelines/PickMultiBuildings.md](instructions/pipelines/PickMultiBuildings.md) | [README](../../batteries/templates/scene/PickMultiBuildings/README.md) | 一次放多栋建筑 | `in_6`Scene / `in_5`points | `out_2`Buildings / `out_1`Rest |
+| 建筑 | **PickOneBuilding** | [pipelines/PickOneBuilding.md](instructions/pipelines/PickOneBuilding.md) | [README](../../batteries/templates/scene/PickOneBuilding/README.md) | 指定坐标放一栋建筑；**多栋/村庄 = 多次本模板 `out_2`Rest 串联**（`PickMultiBuildings` 暂禁不开放，见 [pipelines/PickMultiBuildings.md](instructions/pipelines/PickMultiBuildings.md)） | `in_3`Point / `in_1`Scene | `out_1`Building / `out_2`Rest |
 | 建筑结构 | **BuildingStructures** | [pipelines/BuildingStructures.md](instructions/pipelines/BuildingStructures.md) | [README](../../batteries/templates/scene/BuildingStructures/README.md) | 盖墙/房间（含门） | `in_0`Scene(建筑区域) | `out_0`Scene / `out_1`Rooms |
 | 道路 | **PathConnectionLink** / **PathConnectionRandomWalk** | [PathConnectionLink.md](instructions/pipelines/PathConnectionLink.md) / [PathConnection.md](instructions/pipelines/PathConnection.md) | 连连看 / 自然路网（**旧名 PathConnection 已废弃**） | `in_2`Scene / `in_3`POI | `out_1`Path / `out_2`Rest |
 | 地形 | **MountainContourGenerate** | [pipelines/MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md) | 外围等高线山头 | `in_0`←**Rest** | `out_1`Rest / `out_2`Mountain |
 | 地形 | **HillContourGenerate** | [pipelines/HillContourGenerate.md](instructions/pipelines/HillContourGenerate.md) | 局部小山包 | `in_0`←**Rest** | `out_2`Rest / `out_1`Hill |
-| 自然装饰 | **NaturalDecorationDistribution** | [pipelines/NaturalDecorationDistribution.md](instructions/pipelines/NaturalDecorationDistribution.md) | [README](../../batteries/templates/structures/decorations/NaturalDecorationDistribution/README.md) | 空地**随机散布**植被/装饰（多棵） | `in_1`Scene | `out_1`Decoration / `out_2`Rest |
-| 自然装饰 | **LocalPreciseDecoration** | [pipelines/LocalPreciseDecoration.md](instructions/pipelines/LocalPreciseDecoration.md) | [README](../../batteries/templates/structures/decorations/LocalPreciseDecoration/README.md) | 以兴趣点为中心**局部播撒**小型装饰（多颗） | `in_1`Scene / `in_2`Point | `out_1`Decoration / `out_2`Rest |
-| 自然装饰 | **PlaceOneDecoration** | [pipelines/PlaceOneDecoration.md](instructions/pipelines/PlaceOneDecoration.md) | [README](../../batteries/templates/scene/PlaceOneDecoration/README.md) | 在参考点**精准放置单个**指定装饰物（占地精确矩形贴合） | `in_1`Scene / `in_3`Point | `out_1`Decoration / `out_2`Rest |
-| 自然地物 | **LakeRegions** | [pipelines/LakeRegions.md](instructions/pipelines/LakeRegions.md) | [README](../../batteries/templates/structures/interests/LakeRegions/README.md) | 剩余空地挖湖 | `in_0`Scene | `out_0`Lake / `out_1`Rest |
+| 自然装饰 | **PlaceOneDecoration** | [pipelines/PlaceOneDecoration.md](instructions/pipelines/PlaceOneDecoration.md) | [README](../../batteries/templates/scene/PlaceOneDecoration/README.md) | **有尺寸/落点**的单点精准放置（唯一可控 footprint） | `in_1`Scene / `in_3`Point | `out_1`Decoration / `out_2`Rest |
+| 自然装饰 | **LocalPreciseDecoration** | [pipelines/LocalPreciseDecoration.md](instructions/pipelines/LocalPreciseDecoration.md) | [README](../../batteries/templates/structures/decorations/LocalPreciseDecoration/README.md) | 兴趣点旁局部簇；**仅**简单小物件 | `in_1`Scene / `in_2`Point | `out_1`Decoration / `out_2`Rest |
+| 自然装饰 | **NaturalDecorationDistribution** | [pipelines/NaturalDecorationDistribution.md](instructions/pipelines/NaturalDecorationDistribution.md) | [README](../../batteries/templates/structures/decorations/NaturalDecorationDistribution/README.md) | Rest 密度填充；**仅**简单植被/石块 | `in_1`Scene | `out_1`Decoration / `out_2`Rest |
+| 自然地物 | **LakeRegions** | [pipelines/LakeRegions.md](instructions/pipelines/LakeRegions.md) | [README](../../batteries/groups/scene/LakeRegions/README.md) | 剩余空地挖湖 | `in_1`Scene | `out_4`Lake / `out_0`Rest |
 
-> 各模板组 hidden 参数默认即可。**端口名以 `instantiateTemplate` 返回的 exposedInputs 为准，不要猜、不要 templates.get 预读。**
+> 各模板组 hidden 参数默认即可。**端口名和语义都以 `instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs`（含 `label`）为准，不要猜、不要 templates.get 预读。** 上表的语义标注若与返回的 `label` 不一致，以 `label` 为准（说明模板改过，回头更新本表/对应 `pipelines/*.md`）。
 >
 > **模板 README 必含两节：**「如何用命令调用（输入侧）」与「如何用命令消费输出（输出侧）」——标准见 [`batteries/templates/_DOC_STANDARD.md`](../../batteries/templates/_DOC_STANDARD.md)。范例：`AreaPartition` README。
 
@@ -201,11 +203,11 @@ description: >-
 详细操作手册见 [instructions/session_operation.md](instructions/session_operation.md)（op schema、`instantiateTemplate`、`applyBatch`、连线规则、验证）。
 
 **连线铁律（动手前必读，文档已替你验证过，禁止现场试错重新发现）：**
-1. **`connect` 必带全图唯一 `edgeId`**（字段名是 `edgeId`，不是 `id`；漏了报 `edge undefined already exists`）。
-2. **`applyBatch` 后必 `scene:pipeline.get` 核对** nodes/edges 真进图（防"ok 却空"）。
-3. **`scene:pipeline.execute` 返回 `completed` ≠ 每组都成功**——必接 scene 端口悬空会静默空跑；每加一组逐组验证。
+1. **`connect` 的 `source.port`/`target.port` 优先用语义 `{"label":"XxxName"}`**（`instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs` 里的 label），不用先心算映射成 `in_N`/`out_N`；查不到 label 才退回字符串端口名。字段名是 `nodeId`（不是 `id`）；`edgeId` **可选**（不写会自动生成），写了必须全图唯一，写错字段名（比如写成 `id`）会导致 `edgeId` 变成 `undefined` 并报 `edge undefined already exists`。
+2. **`applyBatch` 后必 `scene:pipeline.get` 核对** nodes/edges 真进图（防"ok 却空"）；忘了 groupId 时用 `nameContains`/`opIdIn` 模糊查，不用拉整图。
+3. **`scene:pipeline.execute` 返回 `completed` ≠ 每组都成功**——必接 scene 端口悬空会静默空跑；每加一组逐组验证；同时看 `verification.topologyIssues`（Rest 链 fan-out / 局部非法 merge 现在会直接 throw 并带 `suggestedOps`，不用等汇总后才发现）。
 4. **`PathConnectionLink` / `PathConnectionRandomWalk`** 的 `in_2`+`in_3` 必接；**禁止**旧 templateId `PathConnection`；POI 须提门（见 PathConnection.md §1）。
-5. **`tree_merge` 必带 params**：scene 汇总 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`；POI 列表 `{"inferredAccess":"item","inferredType":"point2d","portCount":N}`。
+5. **`tree_merge` 建组时必带 params**：scene 汇总 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`；POI 列表 `{"inferredAccess":"item","inferredType":"point2d","portCount":N}`。**建完之后再往里追加一路（比如接第 2/3 个主产物到根 `aw_m0_merge`），用 `appendMergeItem` 复合op**（自动分配 `item_N`、递增 `portCount`），不要手动数当前 `portCount` 再拼 `item_N`。
 6. **`applyBatch` 必带 `opts.actor:"ai:sino"`**——这是白名单硬门的身份标记。
 7. **强制顺序**：`empty_scene → AddBaseGrid`（拿 BaseNode）+ seed + 汇总骨架先跑通（M0 execute）→ 再实例化后续组（**参数已知的相邻组可批量连完再一起 execute；依赖上游 execute 结果的组分步来**，见「可分步批量」）→ 后续组 `in_0` 接 BaseNode/上一组 Rest。
 
@@ -214,12 +216,12 @@ description: >-
 - 功能分区(可选，默认分区手段)：上一组 Rest/BaseNode → `AreaPartition.in_0`；读 checklist `partitionPointsJson`/`partitionAreasJson`；`in_6` 默认 **organic**（勿改 rectilinear）；各区中心 `manual_points` → `tree_merge`(item) → `in_1`。**无水域** — 详见 [AreaPartition.md](instructions/pipelines/AreaPartition.md)。
 - 海岛分区(可选，**仅海洋/群岛场景**)：`AddBaseGrid.out_1` → `IslandRegions.in_0`；多个 `manual_points` → `tree_merge`(item) → `in_1`(各岛锚点)；`in_2` 接各岛 IslandSizes、`in_4` 接岛屿资产名。**`out_1`(Island) 陆地作后续建筑/装饰层的 `in_0`**，`out_2`(Rest) = 水域。
 - 地形分带(可选，深浅海/海岸内陆)：把某区域节点 → `DistanceZones.in_0`；`number_const` → `in_1`(Threshold 带宽格数)；近/远资产名接 `in_4`/`in_6`。**海洋分深浅** `in_2` 留默认(false)：`out_1`=浅海、`out_2`=深海；**岛屿分海岸**用 `toggle`(value=true) → `in_2`：`out_1`=海岸线、`out_2`=内陆。常接在 `IslandRegions` 的 `out_2`(水域，分深浅) 或 `out_1`(岛屿，分海岸) 之后。
-- 地形等高(可选，**道路连通之后、装饰之前**)：在**叙事核心区之外**的 Rest 上接 **`MountainContourGenerate.in_0`**（建筑/道路/广场周边不加高差）；`number_const` → `in_3`(MaxElevationLayers，**建议 `1~2`，不超过 `2`**)；`text_panel` → `in_1`(AssetName)。**`out_2`(Mountain) → `tree_merge`**；**`out_1`(Rest) → 装饰链**。
-- 建筑：`PickOneBuilding`(单栋) / `PickMultiBuildings`(多栋，`out_1`Rest 串联)。
+- 地形等高(可选，**道路连通之后、装饰之前**)：在**叙事核心区之外**的 Rest 上接 **`MountainContourGenerate.in_0`**（建筑/道路/广场周边不加高差）；`number_const` → `in_3`(MaxElevationLayers，**建议 `1~2`，不超过 `2`**)；`text_panel` → `in_1`(AssetName)。**`out_2`(Mountain，即 `{"label":"Mountain"}`) 用 `appendMergeItem` 接入 `aw_m0_merge`**；**`out_1`(Rest) → 装饰链**（该模板 portName 主/Rest 编号交叉，用 label 连线可避开，见 [MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md)）。
+- 建筑：**`PickOneBuilding`**（单栋）；**多栋/村庄暂禁 `PickMultiBuildings`** — 改用多次 `PickOneBuilding`，每次 `out_2`(Rest) → 下一栋 `in_1`(Scene) 串联（见 [PickOneBuilding.md](instructions/pipelines/PickOneBuilding.md) §5）。
 - 结构(可选)：`Building.out_*` → `BuildingStructures.in_0` → `out_0` 供道路 POI 提门。
 - 道路：**单个** `PathConnectionLink`（城镇）或 `PathConnectionRandomWalk`（野路）— Rest → `in_2`；POI 提门 → `in_3`。**确认连通后再 Hill/Mountain（Rest 串链，禁止 fan-out）。**
-- 装饰/湖（**须叠加多种，禁止只用一种**）：高差之后的 Rest → **`PlaceOneDecoration`**(地标单点) → **`LocalPreciseDecoration`**(keypoint 旁局部播撒) → **`NaturalDecorationDistribution`**(剩余空地背景填充) → **`LakeRegions`**（按需）。每组 `out_2`→下一组 `in_1`；**至少 2～3 种装饰模板** + 不同 AssetName，避免整图单调。
-- 汇总：各组主产物 → `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`。
+- 装饰/湖（**按选型规则，不必硬凑三种**）：高差之后的 Rest → **`PlaceOneDecoration`**(有尺寸/落点的物件，可多组串) → **`LocalPreciseDecoration`**(简单小物件簇) → **`NaturalDecorationDistribution`**(简单植被背景填充) → **`LakeRegions`**（按需）。有尺寸落点优先 PlaceOne；Local/Natural **只**挂简单物件。前三个装饰模板 `out_2`(Rest)→下一组 `in_1` 链式；**`LakeRegions` 的 Rest 出口是 `out_0`（不是 `out_2`），Scene 入口仍是 `in_1`**——用 `{"label":"Rest"}`/`{"label":"Scene"}` 连线，别套错编号。
+- 汇总：各组主产物依次用 `appendMergeItem` 接入根 `aw_m0_merge`（可配 `{"label":"..."}` 寻源端口，不用手动算 `item_N`/`portCount`）→ `tree_flatten` → `scene_merge_subtrees` → `scene_output`。POI/名称等列表类中间汇总仍用手写 `tree_merge`（`inferredAccess:"item"`）。
 - 统一种子：`seed_control.seed` 扇出到各组 Seed。
 
 ---

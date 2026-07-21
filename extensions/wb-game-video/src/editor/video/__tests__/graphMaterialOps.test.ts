@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { GameNode, GameScenario } from '../../../runtime/schema/graph-schema'
 import type { OverlayChild } from '../../../runtime/schema/node-config-schema'
-import type { QteCue } from '../../../runtime/registry/core-components'
-import { registerCoreComponents } from '../../../runtime/registry/core-components'
+import type { QteCue } from '../../../runtime/skins/components/Qte'
+import { registerCoreSkins } from '../../../runtime/skins/components'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
 import { nodeOverlayId } from '../../../graph/edit/overlay-edit'
 import {
@@ -36,12 +36,12 @@ import {
   setQteOutcomeTargetGraph,
 } from '../graphMaterialOps'
 import type { MaterialItem } from '../materialTimelineShared'
-import { registerCoreSkins } from '../../../runtime/skins/components'
 
-// `hasCuePointsInput`/`hasOptionEventsInput` 都查 registry 里各组件自己的 inputs，任何用到
-// qteElement/choiceElement 的用例（含本文件顶部几个 describe）都需要先注册核心组件——放在文件级
-// beforeAll，不依赖某个 describe 恰好排在后面的顺序。
-beforeAll(() => registerCoreComponents())
+// `hasCuePointsInput`/`hasOptionEventsInput`（editors）按组件 inputs 结构判定，任何用到
+// qteElement/choiceElement 的用例都需要先注册核心组件——放在文件级 beforeAll。
+beforeAll(() => {
+    registerCoreSkins()
+})
 
 function qteEl(scenario: GameScenario, nodeId: string): OverlayChild | undefined {
   return scenario.ui?.overlays?.[nodeOverlayId(nodeId)]?.children?.find(
@@ -112,9 +112,9 @@ describe('graphMaterialOps · QTE 元素级参数', () => {
 })
 
 describe('graphMaterialOps · QTE 结算候选（样式驱动，见 qteComponent.outputs）', () => {
-  beforeAll(() => registerCoreComponents())
+  beforeAll(() => registerCoreSkins())
 
-  it('默认（无 exits）：泛用 qte 组件不在样式锁定表里，候选仍是 完美/良好/失败 三档', () => {
+  it('默认（无自定义 events）：泛用 qte 组件不在样式锁定表里，候选仍是 完美/良好/失败 三档', () => {
     const { scenario, node: n } = seedQteSkin('qte', { events: undefined })
     const views = listQteOutcomeViews(scenario, n)
     expect(views).toHaveLength(1)
@@ -230,9 +230,11 @@ describe('graphMaterialOps · QTE 新建（默认样式固定为叩击 inkKou，
     const el = qteEl(res.scenario, 'a')
     expect(el).toBeDefined()
     expect(el!.component).toBe('inkKou')
+    expect(el!.layout).toMatchObject({ left: 0, top: 0, width: 1, height: 1 })
+    expect((el!.inputs as { defaultEvent?: string }).defaultEvent).toBe('fail')
   })
 
-  it('时间轴分类看 inputs 是否有多拍点结构，不看字面 component === \'qte\'：新建的 inkKou 仍归为 qte 槽（回归：曾错落进通用 component 槏，拖拽不驱动动画）', () => {
+  it('新建 inkKou 仍归为 qte 时间轴槽（看 cues 结构，不看字面 component === qte）', () => {
     const n = node('a', { durationMs: 8000 })
     const scenario = scnOf({ nodes: [n], edges: [] })
     const nodeRef = scenario.graph.nodes[0]!
@@ -300,7 +302,7 @@ describe('graphMaterialOps · battleParry 时间轴 ↔ 预览时钟对齐', () 
     expect((el.inputs as { cues?: QteCue[] }).cues).toHaveLength(2)
   })
 
-  it('拖时间轴边缘：同步 cue 窗 + windowMs（检视器时长 SSOT）', () => {
+  it('拖时间轴边缘：只改 cue 窗（appearAt/endAt 即时长 SSOT），不再另外维护 windowMs 影子字段', () => {
     const { scenario, node: n, cueId } = seedBattleParryQte(1000, 2600)
     const item: MaterialItem = {
       key: `qte:x:${cueId}`,
@@ -316,7 +318,9 @@ describe('graphMaterialOps · battleParry 时间轴 ↔ 预览时钟对齐', () 
     const cue = ((el.inputs as { cues?: QteCue[] }).cues ?? []).find((c) => c.id === cueId)!
     expect(cue.appearAt).toBe(1500)
     expect(cue.endAt).toBe(3000)
-    expect((el.inputs as { windowMs?: number }).windowMs).toBe(1500)
+    // 旧的 windowMs 影子字段维持原值（不再被拖拽同步）——运行时已改成直接读 cue.appearAt/endAt，
+    // 不会再看这个字段，留着不影响正确性。
+    expect((el.inputs as { windowMs?: number }).windowMs).toBe(2600)
   })
 
   it('qteSkinPreviewInteraction：播放头在 cue 窗外返回 null，窗内返回 snap', () => {
@@ -328,7 +332,7 @@ describe('graphMaterialOps · battleParry 时间轴 ↔ 预览时钟对齐', () 
 })
 
 describe('graphMaterialOps · choice 皮肤时间轴预览', () => {
-  beforeAll(() => registerCoreComponents())
+  beforeAll(() => registerCoreSkins())
 
   it('inkYingMo 顶层组件：播放头窗内可预览、窗外卸掉', () => {
     const n = node('a', { durationMs: 8000 })
@@ -382,6 +386,16 @@ describe('graphMaterialOps · choice 皮肤时间轴预览', () => {
     const res = addMaterialGraph(scenario, scenario.graph.nodes[0]!, 8000, 'option', undefined, 0)
     const n1 = findNode(res.scenario.graph, 'a')!
     expect(choiceSkinPreviewInteractions(res.scenario, n1, 100, 8000)).toHaveLength(0)
+  })
+
+  it('新建选项落盘 STAGE_FILL + defaultEvent=opt0（试玩与超时 emit 对齐）', () => {
+    const n = node('a', { durationMs: 8000 })
+    const scenario = scnOf({ nodes: [n], edges: [] })
+    const res = addMaterialGraph(scenario, scenario.graph.nodes[0]!, 8000, 'option', undefined, 0)
+    const el = choiceElement(res.scenario, findNode(res.scenario.graph, 'a')!)
+    expect(el).toBeDefined()
+    expect(el!.layout).toMatchObject({ left: 0, top: 0, width: 1, height: 1 })
+    expect((el!.inputs as { defaultEvent?: string }).defaultEvent).toBe('opt0')
   })
 
   it('选项预览可拖空间锚点：movable + 写回 inputs.x/y', () => {
@@ -487,8 +501,7 @@ describe('graphMaterialOps · 选项/组件结算统一写 mount.reactions（修
 
 describe('graphMaterialOps · 挂载组件全量上时间轴', () => {
   beforeAll(() => {
-    registerCoreComponents()
-    registerCoreSkins()
+        registerCoreSkins()
   })
 
   it('未分类按挂载实例列槽（同类型两份血条各一格）；添加时克隆 bind/label', () => {
@@ -696,7 +709,7 @@ describe('graphMaterialOps · 挂载组件全量上时间轴', () => {
 })
 
 describe('graphMaterialOps · choice 顶层组件样式锁定选项集合（创建时定组件，创建后不可切皮肤）', () => {
-  beforeAll(() => registerCoreComponents())
+  beforeAll(() => registerCoreSkins())
 
   function seedDefaultOption(): { scenario: GameScenario; node: GameNode } {
     const n = node('a', { durationMs: 8000 })
@@ -815,7 +828,7 @@ function seedFloat(): { scenario: GameScenario; node: GameNode; floatId: string 
   return { scenario, node: scenario.graph.nodes[0]!, floatId }
 }
 
-describe('graphMaterialOps · 飘字 effects/valuePick/expr（结算写回 node.data.reactions，前端表现对齐旧「选取式」）', () => {
+describe('graphMaterialOps · 飘字 effects/expr（结算写回 node.data.reactions，前端表现对齐旧「选取式」）', () => {
   it('新建飘字自带默认到点效果（Boss hp −100）', () => {
     const { scenario, node: n, floatId } = seedFloat()
     const fx = overlayEffects(scenario, n, floatId)
@@ -846,32 +859,27 @@ describe('graphMaterialOps · 飘字 effects/valuePick/expr（结算写回 node.
     expect(curNode.data.reactions).toBeUndefined()
   })
 
-  it('valuePick/expr 往返：勾选自定义显示数值后写回 inputs，取消勾选清空二者', () => {
+  it('expr 往返：勾选自定义显示数值后写回 inputs（NumOrExpr），取消勾选清空', () => {
     const { scenario, node: n, floatId } = seedFloat()
     const withExpr = patchOverlayGraph(
       scenario,
       n,
       floatId,
-      {
-        expr: 'entity.ent-boss.attr.hp',
-        valuePick: { mode: 'pick', terms: [{ op: '-', source: 'entity', refId: 'ent-boss', attr: 'hp' }] },
-      },
+      { expr: { expr: 'entity.ent-boss.attr.hp' } },
       undefined,
     )
     const el = findElement(withExpr, findNode(withExpr.graph, n.id), floatId)!
-    expect(el.inputs?.expr).toBe('entity.ent-boss.attr.hp')
-    expect(el.inputs?.valuePick).toBeDefined()
+    expect(el.inputs?.expr).toEqual({ expr: 'entity.ent-boss.attr.hp' })
 
     const cleared = patchOverlayGraph(
       withExpr,
       findNode(withExpr.graph, n.id)!,
       floatId,
-      { expr: undefined, valuePick: undefined },
+      { expr: undefined },
       undefined,
     )
     const el2 = findElement(cleared, findNode(cleared.graph, n.id), floatId)!
     expect(el2.inputs?.expr).toBeUndefined()
-    expect(el2.inputs?.valuePick).toBeUndefined()
   })
 
   it('content 只改显示文案，不影响结算 effects', () => {

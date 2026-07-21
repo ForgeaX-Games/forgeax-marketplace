@@ -170,6 +170,24 @@ describe('summarizeExecutionResult', () => {
       expect(summary.verification.hints[0]).toContain('望江客栈')
     })
 
+    // 2026-07-10 复盘：命名对齐失败时必须把实际场景节点名一并回传，agent 才能一次
+    // summary 调用比对"预期 vs 实际"，不必再反复调用 raw execute 摸黑翻找输出名。
+    it('surfaces actualNodeNames on failure so the agent never has to fall back to raw execute', () => {
+      const summary = summarizeExecutionResult(fullResult, ['block_ground', '望江客栈']) as Record<string, any>
+      const alignment = summary.verification.locationNameAlignment
+      expect(alignment.ok).toBe(false)
+      expect(alignment.actualNodeNames).toEqual(
+        expect.arrayContaining(['block_ground', 'architecture_0', 'rest']),
+      )
+      expect(alignment.actualNodeNamesTruncated).toBeUndefined()
+      expect(summary.verification.hints[0]).toMatch(/actualNodeNames/)
+    })
+
+    it('does not include actualNodeNames when alignment passes (nothing to look up)', () => {
+      const summary = summarizeExecutionResult(fullResult, ['block_ground', 'architecture_0']) as Record<string, any>
+      expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
+    })
+
     it('fuzzy match tolerates a scene node name that embeds the narrative name as a substring', () => {
       const withSuffix = {
         executionId: 'exec_fuzzy',
@@ -201,6 +219,108 @@ describe('summarizeExecutionResult', () => {
       }
       const summary = summarizeExecutionResult(withSuffix, ['望江客栈']) as Record<string, any>
       expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
+    })
+  })
+
+  // P0-1 (2026-07-15 tool 升级方案): 三项拓扑检测原本只活在 aw-support 的续作
+  // 消息里，现在顺带在 execute 里跑一次，通过可选的第三个参数 currentGraph 接入。
+  describe('topology checks (currentGraph)', () => {
+    it('does nothing when currentGraph is omitted (default-off, no regression)', () => {
+      const summary = summarizeExecutionResult(fullResult) as Record<string, any>
+      expect(summary.verification.topologyIssues).toBeUndefined()
+    })
+
+    it('reports [] (not omitted) when currentGraph is supplied but clean', () => {
+      const nodeById = new Map([
+        ['grid', { id: 'grid', opId: '__group__', name: 'AddBaseGrid', params: {} }],
+        ['island', { id: 'island', opId: '__group__', name: 'IslandRegions', params: {} }],
+      ])
+      const edges = [{ id: 'e1', source: { nodeId: 'grid', port: 'out_1' }, target: { nodeId: 'island', port: 'in_0' } }]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.topologyIssues).toEqual([])
+    })
+
+    it('flags a Rest fan-out from AddBaseGrid.out_1 into two template groups', () => {
+      const nodeById = new Map([
+        ['grid', { id: 'grid', opId: '__group__', name: 'AddBaseGrid', params: {} }],
+        ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
+        ['b', { id: 'b', opId: '__group__', name: 'LakeRegions', params: {} }],
+      ])
+      const edges = [
+        { id: 'e1', source: { nodeId: 'grid', port: 'out_1' }, target: { nodeId: 'a', port: 'in_0' } },
+        { id: 'e2', source: { nodeId: 'grid', port: 'out_1' }, target: { nodeId: 'b', port: 'in_0' } },
+      ]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.topologyIssues).toHaveLength(1)
+      expect(summary.verification.topologyIssues[0].kind).toBe('rest-fan-out')
+      expect(summary.verification.topologyIssues[0].reason).toContain('fan-out')
+      // 非阻断:不参与 ok 判定(见 execution-summary.ts 的注释)。
+      expect(summary.verification.ok).toBe(true)
+    })
+
+    it('flags an illegal local tree_merge and computes suggestedOps from the root merge portCount', () => {
+      const nodeById = new Map([
+        ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
+        ['b', { id: 'b', opId: '__group__', name: 'LakeRegions', params: {} }],
+        ['local_merge', { id: 'local_merge', opId: 'tree_merge', params: { portCount: 2 } }],
+        ['root_merge', { id: 'root_merge', opId: 'tree_merge', params: { portCount: 1 } }],
+        ['flatten', { id: 'flatten', opId: 'tree_flatten', params: {} }],
+      ])
+      const edges = [
+        { id: 'e1', source: { nodeId: 'a', port: 'out_0' }, target: { nodeId: 'local_merge', port: 'item_0' } },
+        { id: 'e2', source: { nodeId: 'b', port: 'out_0' }, target: { nodeId: 'local_merge', port: 'item_1' } },
+        { id: 'e3', source: { nodeId: 'local_merge', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_0' } },
+        { id: 'e4', source: { nodeId: 'root_merge', port: 'out_0' }, target: { nodeId: 'flatten', port: 'in_0' } },
+      ]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.topologyIssues).toHaveLength(1)
+      const issue = summary.verification.topologyIssues[0]
+      expect(issue.kind).toBe('illegal-local-merge')
+      expect(issue.suggestedOps).toEqual([
+        { type: 'deleteNode', nodeId: 'local_merge' },
+        { type: 'updateNode', nodeId: 'root_merge', params: { portCount: 3 } },
+        { type: 'connect', edgeId: 'e_fix_local_merge_0', source: { nodeId: 'a', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_1' } },
+        { type: 'connect', edgeId: 'e_fix_local_merge_1', source: { nodeId: 'b', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_2' } },
+      ])
+    })
+
+    it('flags a wired manual_points node whose x/y are both left at the silent zero default', () => {
+      const nodeById = new Map([
+        ['grid', { id: 'grid', opId: '__group__', name: 'AddBaseGrid', params: {} }],
+        ['pts', { id: 'pts', opId: 'manual_points', params: {} }],
+        ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
+      ])
+      const edges = [{ id: 'e1', source: { nodeId: 'pts', port: 'point' }, target: { nodeId: 'a', port: 'in_1' } }]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      const issue = summary.verification.topologyIssues.find((i: any) => i.kind === 'manual-points-zero-default')
+      expect(issue).toBeDefined()
+      expect(issue.reason).toContain('pts')
+    })
+
+    it('does not flag manual_points when x AND y are both explicitly wired via edges', () => {
+      const nodeById = new Map([
+        ['pts', { id: 'pts', opId: 'manual_points', params: {} }],
+        ['xsrc', { id: 'xsrc', opId: 'number', params: { value: 12 } }],
+        ['ysrc', { id: 'ysrc', opId: 'number', params: { value: 34 } }],
+        ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
+      ])
+      const edges = [
+        { id: 'e1', source: { nodeId: 'xsrc', port: 'out_0' }, target: { nodeId: 'pts', port: 'x' } },
+        { id: 'e2', source: { nodeId: 'ysrc', port: 'out_0' }, target: { nodeId: 'pts', port: 'y' } },
+        { id: 'e3', source: { nodeId: 'pts', port: 'point' }, target: { nodeId: 'a', port: 'in_1' } },
+      ]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.topologyIssues).toEqual([])
+    })
+
+    it('does not flag manual_points when x/y params are explicit non-zero literals', () => {
+      const nodeById = new Map([
+        ['pts', { id: 'pts', opId: 'manual_points', params: { x: 5, y: -3 } }],
+        ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
+      ])
+      const edges = [{ id: 'e1', source: { nodeId: 'pts', port: 'point' }, target: { nodeId: 'a', port: 'in_1' } }]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.topologyIssues).toEqual([])
     })
   })
 })

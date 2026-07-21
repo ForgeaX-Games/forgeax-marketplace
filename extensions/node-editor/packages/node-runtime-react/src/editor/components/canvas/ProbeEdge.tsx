@@ -10,6 +10,7 @@ import { normalizeType, getPortTypeColor, type DomainPortTypes } from '../../uti
 import { getPortAccess, formatDataTreeSummary } from '../../utils/datatreeShape.js'
 import { useNodeValueFormatters } from './nodeTooltip.js'
 import { useViewportMoving } from './ViewportMovingContext.js'
+import { isTooLargeOutputSummary } from '../../utils/tooLargeOutputSummary.js'
 import { RELAY_BATTERY_ID, RELAY_INPUT_PORT, RELAY_OUTPUT_PORT } from './RelayNode.js'
 import type { Battery, BatteryPort, PipelineNode } from '../../types.js'
 import './ProbeEdge.css'
@@ -166,7 +167,7 @@ const ProbeEdgeLabel = memo(function ProbeEdgeLabel({
     }
     const summary = formatPortValue(probeValue)
     const extra = formatPortValueExtra(probeValue)
-    const treeSummary = formatDataTreeSummary(probeValue)
+    const treeSummary = isTooLargeOutputSummary(probeValue) ? undefined : formatDataTreeSummary(probeValue)
     const accessLine = `access ${getPortAccess(portMeta)}`
     const treeInfo = treeSummary ? `${treeSummary} · ${accessLine}` : accessLine
     return { summaryText: summary, extraText: extra, treeInfoText: treeInfo }

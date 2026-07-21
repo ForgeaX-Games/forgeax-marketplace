@@ -15,25 +15,33 @@ import { computeGraphLayout } from '../../graph/edit/graph-layout'
 import { normalizeSubFlowFields } from '../../graph/edit/graph-edit'
 import { validateGraph } from '../../runtime/validate/validate'
 import { ensureBuiltinSchemes } from '../demo/builtin-schemes'
+import { recompileFormulaUsages } from '../shell/formulaApply'
+import type { Formula, EditorScenarioDocument } from './formula-authoring'
+import { toEditorScenarioDocument, toRuntimeScenario } from './formula-authoring'
 
 /** 载入任意 scenario 时保证内置「通用样式」方案存在。 */
-function withBuiltinSchemes(s: GameScenario): GameScenario {
+function withBuiltinSchemes<T extends GameScenario>(s: T): T {
   return {
     ...s,
     ui: { ...s.ui, overlays: ensureBuiltinSchemes(s.ui?.overlays) },
-  }
+  } as T
 }
 
-export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'reactions' | 'textStylePresets' | 'packs'>
+export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'reactions' | 'textStylePresets' | 'packs'> & {
+  /** 编辑器专属公式库；与 entities / variables 同级保存，永不交给 runtime GameScenario。 */
+  formulas?: Record<string, Formula>
+}
 
 /**
  * 只挑「有值」的 meta 字段。草稿/磁盘常只带 graph+ui，entities/variables 为 undefined——
  * 若原样写入 meta，`scn()` 里 `{...demo, ...meta}` 会把 demo 实体抹掉，血条 bind 全空。
  */
-const pickMeta = (s: GameScenario): ScenarioMetaFields => {
+const pickMeta = (s: GameScenario | EditorScenarioDocument): ScenarioMetaFields => {
   const m: ScenarioMetaFields = {}
   if (s.variables !== undefined) m.variables = s.variables
   if (s.entities !== undefined) m.entities = s.entities
+  const formulas = (s as EditorScenarioDocument).formulas
+  if (formulas !== undefined) m.formulas = formulas
   if (s.ui !== undefined) m.ui = s.ui
   if (s.rng !== undefined) m.rng = s.rng
   if (s.reactions !== undefined) m.reactions = s.reactions
@@ -43,14 +51,14 @@ const pickMeta = (s: GameScenario): ScenarioMetaFields => {
 }
 
 /** 载入草稿/版本时：缺实体/变量则回落 demo（不覆盖用户显式清空后的 `{}`）。 */
-function withDemoMetaFallback(s: GameScenario, demo: GameScenario): GameScenario {
+function withDemoMetaFallback<T extends GameScenario>(s: T, demo: GameScenario): T {
   return {
     ...s,
     entities: s.entities ?? demo.entities,
     variables: s.variables ?? demo.variables,
     reactions: s.reactions ?? demo.reactions,
     rng: s.rng ?? demo.rng,
-  }
+  } as T
 }
 
 const EMPTY_GRAPH: GameGraph = { nodes: [], edges: [] }
@@ -69,13 +77,13 @@ export function mergeScenario(base: GameScenario, meta: ScenarioMetaFields, grap
 }
 
 /** 位置全 0（未布局）→ dagre 自动排一版；顺带归一遗留 subFlowRef。 */
-function layoutIfUnset(s: GameScenario): GameScenario {
+function layoutIfUnset<T extends GameScenario>(s: T): T {
   const graph = normalizeSubFlowFields(s.graph)
   const base = graph === s.graph ? s : { ...s, graph }
   const allZero = base.graph.nodes.every((n) => !n.position || (n.position.x === 0 && n.position.y === 0))
-  if (!allZero) return base
+  if (!allZero) return base as T
   const pos = computeGraphLayout(base.graph)
-  return { ...base, graph: { ...base.graph, nodes: base.graph.nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position })) } }
+  return { ...base, graph: { ...base.graph, nodes: base.graph.nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position })) } } as T
 }
 
 interface GraphScenarioStore {
@@ -96,8 +104,12 @@ interface GraphScenarioStore {
   /** 当前选中的节点 id（跨视图共享：蓝图选中 → 视频/界面等据此编辑该节点）。 */
   selectedNodeId: string | null
   setSelectedNode: (id: string | null) => void
-  /** 合并出完整 scenario（保存/试玩用）。 */
+  /** 作者态完整 scenario（编辑操作用，含内嵌 pick）。 */
+  authoringScenario: () => GameScenario
+  /** 去除 editor sidecar 后的执行场景（试玩/校验用）。 */
   scn: () => GameScenario
+  /** 仅供草稿/版本持久化的作者态文档。 */
+  document: () => EditorScenarioDocument
   /** 首次进入某 game 时载入（草稿>最新版本>磁盘原始>demo）；已 boot 同 game 则跳过。 */
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
@@ -150,7 +162,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
   const scheduleDraft = () => {
     set({ isDraft: true })
     clearDraftTimer()
-    draftTimer = setTimeout(() => saveDraft(get().scn(), get().game), 800)
+    draftTimer = setTimeout(() => saveDraft(get().document(), get().game), 800)
   }
   return {
     game: 'game-nodia-fighting',
@@ -168,10 +180,16 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     selectedNodeId: null,
     setSelectedNode: (id) => set({ selectedNodeId: id }),
 
-    scn: () => {
+    authoringScenario: () => {
       const { demo, meta, graph } = get()
       const base = demo ?? ({ schemaVersion: 'wb-game-video.graph.v1', graph: EMPTY_GRAPH } as GameScenario)
       return mergeScenario(base, meta, graph)
+    },
+    scn: () => toRuntimeScenario(get().authoringScenario()),
+    document: () => {
+      const scenario = get().authoringScenario()
+      const formulas = get().meta.formulas
+      return formulas ? { ...scenario, formulas } : scenario
     },
 
     ensureBoot: (game, demo) => {
@@ -196,10 +214,12 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       void loadStore(game).then((s) => {
         // 进入优先级：未保存草稿(localStorage) > 磁盘最新已保存版本 > demo（出厂只读原始）。
         if (s.draft?.graph) {
-          const laid = withBuiltinSchemes(layoutIfUnset(withDemoMetaFallback(s.draft, demo)))
+          const doc = toEditorScenarioDocument(s.draft)!
+          const laid = withBuiltinSchemes(layoutIfUnset(withDemoMetaFallback(doc, demo)))
           set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: true, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null, loadEpoch: st.loadEpoch + 1 }))
         } else if (s.scenario?.graph) {
-          const laid = withBuiltinSchemes(layoutIfUnset(withDemoMetaFallback(s.scenario, demo)))
+          const doc = toEditorScenarioDocument(s.scenario)!
+          const laid = withBuiltinSchemes(layoutIfUnset(withDemoMetaFallback(doc, demo)))
           set((st) => ({ graph: laid.graph, meta: pickMeta(laid), isDraft: false, versions: s.versions, currentVersionId: s.versions[0]?.id ?? null, loadEpoch: st.loadEpoch + 1 }))
         } else {
           // 首次（无草稿、磁盘也没有）→ 用 demo 打底，并把它作为第一个版本落盘。
@@ -215,12 +235,23 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       scheduleDraft()
     },
     setScenario: (s) => {
-      set({ graph: s.graph, meta: pickMeta(s) })
+      // 图编辑只会带回它实际改过的场景字段；与 setMeta 一样浅合并，避免没参与本次
+      // 编辑的作者态（如 formulas）被纯 GameScenario 覆盖掉。显式清空字段走 setMeta。
+      set((st) => ({ graph: s.graph, meta: { ...st.meta, ...pickMeta(s) } }))
       scheduleDraft()
     },
     touchDraft: () => scheduleDraft(),
     setMeta: (m) => {
-      set((st) => ({ meta: typeof m === 'function' ? (m as (x: ScenarioMetaFields) => ScenarioMetaFields)(st.meta) : m }))
+      set((st) => {
+        const nextMeta = typeof m === 'function' ? (m as (x: ScenarioMetaFields) => ScenarioMetaFields)(st.meta) : m
+        // 公式库引用变化（增删改一条公式）→ 回溯重新编译所有 `应用公式` 处的 expr 缓存，
+        // 让蓝图/时间轴里已经选好公式的字段跟着公式定义的最新改动走，且这一步并进同一次 undo 历史。
+        if (nextMeta.formulas !== st.meta.formulas) {
+          const recompiled = recompileFormulaUsages({ graph: st.graph, meta: nextMeta }, nextMeta.formulas, nextMeta.entities ?? st.meta.entities)
+          return { graph: recompiled.graph, meta: recompiled.meta }
+        }
+        return { meta: nextMeta }
+      })
       scheduleDraft()
     },
     addTextStylePreset: (group, preset) => {
@@ -243,6 +274,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     save: () => {
       clearDraftTimer()
       const scn = get().scn()
+      const doc = get().document()
       const errs = validateGraph(scn.graph, {
         entities: Object.keys(scn.entities ?? {}),
         vars: Object.keys(scn.variables ?? {}),
@@ -250,7 +282,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       }).filter((i) => i.level === 'error')
       set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
       // 落盘（.forgeax/games/<slug>/game-video/），完成后用磁盘版本索引回填。
-      void saveScenario(scn, get().game).then((v) => {
+      void saveScenario(doc, get().game).then((v) => {
         if (v.length === 0) {
           // PUT 失败时 persist-client 已保留草稿；回滚 isDraft，别骗用户「已保存」。
           set({ isDraft: true, savedTip: '保存失败 · 草稿仍在本地，请检查 /__graph__ 端点后重试' })
@@ -272,7 +304,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       if (get().isDraft && value !== '__draft__' && typeof confirm === 'function') {
         if (!confirm('当前有未保存的修改，切换版本后会丢失。继续？')) return
       }
-      const apply = (s: GameScenario | null) => {
+      const apply = (s: EditorScenarioDocument | null) => {
         if (!s?.graph) return
         clearDraftTimer()
         const laid = withBuiltinSchemes(layoutIfUnset(s))

@@ -5,7 +5,9 @@ import {
   emptyPickTerm,
   listAttrOptions,
   listEntityOptions,
+  negateNumOrExpr,
   normalizeTerms,
+  reciprocalNumOrExpr,
   resolveValuePick,
 } from '../valueExprPick'
 
@@ -77,16 +79,31 @@ describe('valueExprPick', () => {
     ).toMatchObject({ expr: '(var.qi/2)' })
   })
 
-  it('normalizes: first term to ±, clears cross-source fields', () => {
+  it('normalizes: keeps op as-is (incl. first term ×÷), clears cross-source fields', () => {
     expect(
       normalizeTerms([
         { op: '*', source: 'var', refId: 'qi' },
         { op: '-', source: 'const', refId: 'stray', constValue: 2 },
       ]),
     ).toEqual([
-      { op: '+', source: 'var', refId: 'qi', attr: undefined, constValue: undefined },
+      { op: '*', source: 'var', refId: 'qi', attr: undefined, constValue: undefined },
       { op: '-', source: 'const', refId: '', attr: undefined, constValue: 2 },
     ])
+  })
+
+  it('compiles first-term × as identity, ÷ as reciprocal (no left operand to combine with)', () => {
+    expect(
+      compileValuePick({
+        mode: 'pick',
+        terms: [{ op: '*', source: 'entity', refId: 'ent-player', attr: 'attack' }],
+      }),
+    ).toMatchObject({ expr: 'entity.ent-player.attr.attack' })
+    expect(
+      compileValuePick({
+        mode: 'pick',
+        terms: [{ op: '/', source: 'entity', refId: 'ent-player', attr: 'attack' }],
+      }),
+    ).toMatchObject({ expr: '1/(entity.ent-player.attr.attack)' })
   })
 
   it('compiles const mode', () => {
@@ -121,6 +138,14 @@ describe('valueExprPick', () => {
     const compiled = compileValuePick(source)
     const back = resolveValuePick(compiled, entities, variables)
     expect(back).toEqual(source)
+  })
+
+  it('negateNumOrExpr / reciprocalNumOrExpr: Effect 层减/除按钮的取反/取倒数动作', () => {
+    expect(negateNumOrExpr(10)).toBe(-10)
+    expect(negateNumOrExpr({ expr: 'var.qi' })).toEqual({ expr: '-(var.qi)' })
+    expect(reciprocalNumOrExpr(2)).toBe(0.5)
+    expect(reciprocalNumOrExpr(0)).toBe(0)
+    expect(reciprocalNumOrExpr({ expr: 'var.qi' })).toEqual({ expr: '1/(var.qi)' })
   })
 
   it('emptyPickTerm seeds from catalog', () => {

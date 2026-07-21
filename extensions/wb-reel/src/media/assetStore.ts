@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { gameQuery } from '../shell/gameScope'
+import { pluginFetch, pluginUrl } from '../lib/plugin-http'
 
 /**
  * 资产仓 —— 与 dev server 上的 .reel-assets/ 通信，**所有生成图/视频都落磁盘**。
@@ -188,7 +189,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null })
     try {
-      const res = await fetch(`${ENDPOINT}${gameQuery()}`, { method: 'GET' })
+      const res = await pluginFetch(`${ENDPOINT}${gameQuery()}`, { method: 'GET' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = (await res.json()) as { assets?: AssetRecord[] }
       set({
@@ -207,7 +208,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
 
   saveDataUrl: async ({ kind, dataUrl, meta }) => {
     try {
-      const res = await fetch(`${ENDPOINT}${gameQuery()}`, {
+      const res = await pluginFetch(`${ENDPOINT}${gameQuery()}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind, dataUrl, meta }),
@@ -251,7 +252,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
         signal.addEventListener('abort', onAbort, { once: true })
       }
 
-      xhr.open('POST', `${ENDPOINT}/binary${gameQuery()}`, true)
+      xhr.open('POST', pluginUrl(`${ENDPOINT}/binary${gameQuery()}`), true)
       xhr.setRequestHeader(
         'content-type',
         blob.type || (kind === 'video' ? 'video/mp4' : 'image/png'),
@@ -306,7 +307,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
 
   remove: async (id) => {
     try {
-      const res = await fetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
+      const res = await pluginFetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
         method: 'DELETE',
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -320,7 +321,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
 
   replaceDataUrl: async (id, dataUrl) => {
     try {
-      const res = await fetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
+      const res = await pluginFetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ dataUrl }),
@@ -354,7 +355,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
       const chunk = targetIds.slice(i, i + CHUNK)
       const results = await Promise.all(
         chunk.map((id) =>
-          fetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, { method: 'DELETE' })
+          pluginFetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, { method: 'DELETE' })
             .then((r) => r.ok)
             .catch(() => false),
         ),
@@ -371,7 +372,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
 
   patch: async (id, meta) => {
     try {
-      const res = await fetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
+      const res = await pluginFetch(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ meta }),
@@ -404,7 +405,7 @@ export const useAssetStore = create<AssetStoreState>((set, get) => ({
     return list.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b))
   },
 
-  urlOf: (id) => `${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`,
+  urlOf: (id) => pluginUrl(`${ENDPOINT}/${encodeURIComponent(id)}${gameQuery()}`),
 }))
 
 // 应用启动时拉一次（dev 中间件不在时静默失败）

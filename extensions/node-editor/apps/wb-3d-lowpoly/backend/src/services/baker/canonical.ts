@@ -24,7 +24,11 @@ import { DEFAULT_TESSELLATION } from './types.js';
 // load an old mesh from the library under the same <sha>.obj alias.
 // v3 lowers low-poly segment defaults (profile_circle/torus/dome/fan/sweep) — bump
 // so previously over-tessellated blobs are re-baked.
-const BAKE_CACHE_VERSION = 'baker-v3-lowpoly-defaults';
+// v4 fixes an open-curve Catmull-Rom boundary bug in curves.ts (the duplicated
+// first/last control point made the first/last spline sample collapse toward the
+// world origin instead of the real path endpoint, e.g. `pipe(..., spline="catmull_rom")`)
+// — bump so previously mis-baked pipe/sweep meshes are re-baked.
+const BAKE_CACHE_VERSION = 'baker-v4-catmullrom-boundary-fix';
 
 /**
  * 镶嵌指纹：把全局 tessellation 容差折进 cache key。调整 DEFAULT_TESSELLATION（deflection

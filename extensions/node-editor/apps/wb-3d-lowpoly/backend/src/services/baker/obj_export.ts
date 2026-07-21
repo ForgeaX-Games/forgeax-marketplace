@@ -59,6 +59,55 @@ export function meshShape(shape: BakeableShape, tess: TessellationOptions): RawM
   }
 }
 
+/**
+ * 解析我们自己导出的 ASCII OBJ（只含 `v` / `f` 行，1-based，无 vt/vn）回裸网格。
+ *
+ * 用途：角色路把**分件预烘的 `<sha>.obj`** 一起合并成单张可蒙皮网格时，需要把 blob
+ * 回读成顶点 / 三角面再合并（baker 平时只导出 OBJ、从不回读，这是唯一的回读点）。
+ *
+ * 容错：兼容 `f v`、`f v/vt`、`f v//vn`、`f v/vt/vn`（只取顶点索引）；>3 个顶点的面
+ * 按三角扇拆分；跳过非有限坐标 / 越界索引的面。返回的 triangles 是 0-based flat 数组。
+ */
+export function parseObjToRawMesh(text: string): RawMesh {
+  const vertices: number[] = [];
+  const triangles: number[] = [];
+  const lines = text.split('\n');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.length < 2) continue;
+    if (line[0] === 'v' && (line[1] === ' ' || line[1] === '\t')) {
+      const p = line.slice(1).trim().split(/\s+/);
+      const x = Number(p[0]);
+      const y = Number(p[1]);
+      const z = Number(p[2]);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        vertices.push(x, y, z);
+      } else {
+        vertices.push(0, 0, 0); // 保持索引对齐
+      }
+    } else if (line[0] === 'f' && (line[1] === ' ' || line[1] === '\t')) {
+      const toks = line.slice(1).trim().split(/\s+/);
+      const idx: number[] = [];
+      for (const tok of toks) {
+        const first = tok.split('/')[0];
+        const v = parseInt(first, 10);
+        if (Number.isFinite(v) && v !== 0) idx.push(v);
+      }
+      if (idx.length < 3) continue;
+      const vertexCount = vertices.length / 3;
+      const resolve = (i: number): number => (i > 0 ? i - 1 : vertexCount + i); // 负索引 = 从尾部相对
+      for (let i = 1; i + 1 < idx.length; i++) {
+        const a = resolve(idx[0]);
+        const b = resolve(idx[i]);
+        const c = resolve(idx[i + 1]);
+        if (a < 0 || b < 0 || c < 0 || a >= vertexCount || b >= vertexCount || c >= vertexCount) continue;
+        triangles.push(a, b, c);
+      }
+    }
+  }
+  return { vertices, triangles };
+}
+
 export function shapeToObj(
   shape: BakeableShape | MeshGeometry,
   tess: TessellationOptions,
@@ -158,7 +207,7 @@ function isMeshGeometry(shape: BakeableShape | MeshGeometry): shape is MeshGeome
  *   - 否则 = clamp(relativeDeflection × bbox 对角线, min, max)
  * bbox 用完即 delete，避免 OCCT WASM 堆泄漏。
  */
-function effectiveLinearDeflection(shape: BakeableShape, tess: TessellationOptions): number {
+export function effectiveLinearDeflection(shape: BakeableShape, tess: TessellationOptions): number {
   const rel = tess.relativeDeflection ?? 0;
   if (!(rel > 0)) return tess.linearDeflection;
 

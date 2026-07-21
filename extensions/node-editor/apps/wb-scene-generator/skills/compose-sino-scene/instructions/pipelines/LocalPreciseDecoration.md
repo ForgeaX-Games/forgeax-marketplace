@@ -1,18 +1,27 @@
 # 局部精准装饰 - LocalPreciseDecoration（局部装饰播撒）
 
 > 权威详情：[../../../../batteries/templates/structures/decorations/LocalPreciseDecoration/README.md](../../../../batteries/templates/structures/decorations/LocalPreciseDecoration/README.md)
-> templateId：`group_local_precise_decoration` 或 basename `LocalPreciseDecoration`。端口以 instantiateTemplate 返回的 exposedInputs 为准（勿 templates.get 预读）。
+> templateId：`group_local_precise_decoration` 或 basename `LocalPreciseDecoration`。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 管线电池的基本介绍
 
 管线所属层级：**自然地物 / 装饰层级**
 
-管线效果：以**兴趣点**为中心，在圆形半径内采样多个小型装饰物（花草、碎石、小物件等），适合「建筑旁点缀一圈」「路口周围散落」「锚点附近簇状/环状分布」等**局部**场景。
+管线效果：以**兴趣点**为中心，在圆形半径内采样多个点位并挂资产，适合「建筑旁点缀一圈」「路口周围散落」等**局部簇/环**场景。
 
-> ### 🌿 须与其他装饰叠加（禁止单独使用）
-> 本模板只做**局部播撒**。若整图**只用** `LocalPreciseDecoration` 而无全区域背景植被，会显得**稀疏、缺底色**；若只有本模板而无 `PlaceOneDecoration` 地标，会**缺叙事锚点**。须与 **`NaturalDecorationDistribution`**（Rest 背景填充）和 **`PlaceOneDecoration`**（精准地标）**组合**使用。
->
-> **时序**：接在 **`MountainContourGenerate` 之后**、通常位于 **`PlaceOneDecoration` 之后**、`NaturalDecorationDistribution` **之前**；兴趣点取建筑/keypoint 旁，勿与叙事核心区的高差冲突。
+**无顶层 Footprint 口**——只控制 Count / ScatterRadius / Algorithm；单颗平面尺寸不可调。
+
+**选型**：
+
+| 模板 | 何时用 | 可挂资产 |
+|------|--------|----------|
+| `PlaceOneDecoration` | 少量地标/人造件、有明确位置和/或底面尺寸 | 需占格贴合的物件 |
+| **`LocalPreciseDecoration`（本模板）** | 兴趣点旁一簇/一环点缀 | **仅**底面简单、结构简单的小物件（花草、碎石、小灌木、灯笼等近单格） |
+| `NaturalDecorationDistribution` | 大片 Rest 背景填充；草/灌木/树推荐多层（非强制；Density 分层，≤0.01） | 同上——简单植被/石块 |
+
+有明显宽深 + 落点的地标 → **改用 PlaceOne**，不要用本模板。按需求选用，不必硬凑三种。
+
+> **时序**：接在高差之后、通常位于 PlaceOne 之后、Natural 之前；兴趣点取建筑/keypoint 旁。
 
 ## 2. 管线电池的总输入端口
 
@@ -24,14 +33,14 @@
 | `in_20` | number | ScatterRadius 播撒半径 | 建议接 | `number_const`，默认约 12 格 |
 | `in_21` | string | Algorithm 采样算法 | 可选 | `text_panel`：`random` / `cluster` / `ring` / `poisson` / `noise` |
 | `in_0` | string | NamePrefix | 可选 | `text_panel` |
-| `in_5` | string | AssetName | 建议接 | `text_panel` |
-| `in_3` | number | Seed | 可选 | `seed_control.seed` |
+| `in_5` | string | AssetName | 建议接 | `text_panel`（**简单小物件**） |
+| `in_3` | number | Seed | **必接** | **`aw_m0_seed.seed`（全局固定非 0）**；禁止悬空/`seed:0` |
 
 ## 3. 管线电池的总输出端口
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Decoration 装饰（主产物） | `tree_merge` |
+| `out_1` | scene | Decoration 装饰（主产物） | `appendMergeItem` → `aw_m0_merge` |
 | `out_2` | scene | Rest 剩余空地 | 下一组 `in_1` |
 
 ## 4. 推荐参数
@@ -43,8 +52,8 @@
 
 ## 5. 管线效果描述
 
-- 兴趣点可落在无效格（如水域边缘外），scatter 会 BFS 吸附到最近有效格再采样。
-- 输出契约与 `NaturalDecorationDistribution` 一致：points 列表 → MultiNames → ObjectAssetName → union → subtract。
+- **禁止**挂复杂底面/复杂结构物件（雕像院落、大型机关等）——那些走 PlaceOne。
+- 兴趣点可落在无效格，scatter 会 BFS 吸附到最近有效格再采样。
 - `in_1` 悬空会静默空跑，务必确认接上上游 Rest。
 
 > **已验证 M7**：projectId `p_mr49zz2e_idczh2` → [`step-m7-localprecisedecoration.json`](../../../../../../aw-support/battery-verify/p_mr49zz2e_idczh2/step-m7-localprecisedecoration.json)。Count=8，ScatterRadius=6，Algorithm=`poisson`；无顶层 Footprint 口。

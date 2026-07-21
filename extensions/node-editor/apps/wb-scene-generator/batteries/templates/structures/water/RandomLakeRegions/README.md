@@ -7,7 +7,7 @@
 
 在**剩余空地上挖出湖泊区域**（水体）。它消费一块上游空间，划出若干湖，并把没被湖占用的地作为 Rest 继续往下传。
 
-**典型位置：自然地物层**（建筑/道路之后）。通常接在 `PathConnection.out_1`（Non-Path 非道路区域）或上一个自然组的 Rest 之后。
+**典型位置：自然地物层**（建筑/道路之后）。通常接在 `PathConnection*.out_2`（Rest/非道路区域；`out_1` 是 Path 本身，不是 Rest）或上一个自然组的 Rest 之后。
 
 ## 输入端口（IN）
 
@@ -15,7 +15,7 @@
 
 | portName | portType | 语义 | 是否必接 | 怎么喂（来源电池 → 本端口） | 数据格式（DataTree.items） |
 |---|---|---|---|---|---|
-| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection.out_1`（Non-Path）或上一组 Rest → `in_0` | scene 树 |
+| `in_0` | scene | 上游场景 / 剩余空地 | **必接** | `PathConnection*.out_2`（Rest；不是 `out_1`）或上一组 Rest → `in_0` | scene 树 |
 | `in_1` | number | ExpectedLakes 期望湖泊数 | 建议接 | `number_const.value` → `in_1` | 数值，如 `3` |
 | `in_2` | string | LakeAsset 湖泊资产名 | 建议接 | `text_panel.output` → `in_2` | 字符串，如 `"湖"` |
 | `in_3` | number | Seed 随机种子 | 建议接 | `seed_control.seed` → `in_3` | 数值，如 `42` |
@@ -45,7 +45,7 @@
 
 ## 使用示例（applyBatch ops，可照抄）
 
-前置：链路里已有上游剩余场景（如 `<G_PATH>.out_1`）。先实例化拿回 `<G_LAKE>`：
+前置：链路里已有上游剩余场景（如 `<G_PATH>.out_2`，Rest；不是 `out_1`）。先实例化拿回 `<G_LAKE>`：
 
 ```json
 { "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
@@ -53,13 +53,13 @@
            "opts":{"actor":"ai:sino","label":"实例化 LakeRegions"} } }
 ```
 
-把返回 groupId 替换进 `<G_LAKE>`，提交 applyBatch（这里以接在道路 Non-Path 之后为例；`<UPSTREAM_REST>` 改成实际上游，如 `<G_PATH>.out_1`）：
+把返回 groupId 替换进 `<G_LAKE>`，提交 applyBatch（这里以接在道路 Rest 之后为例；`<UPSTREAM_REST>` 改成实际上游，如 `<G_PATH>.out_2`）：
 
 ```jsonc
 { "type":"createNode","nodeId":"lake_count","opId":"number_const","position":{"x":-900,"y":1400},"params":{"value":3} },     // ExpectedLakes
 { "type":"createNode","nodeId":"lake_name", "opId":"text_panel",  "position":{"x":-900,"y":1520},"params":{"text":"湖"} },   // LakeAsset = 水体图层名
-// in_0=上游剩余 接 PathConnection.out_1；in_1=期望湖数；in_2=湖资产名；in_3=seed
-{ "type":"connect","edgeId":"e_lk_scene","source":{"nodeId":"<G_PATH>","port":"out_1"},     "target":{"nodeId":"<G_LAKE>","port":"in_0"} },
+// in_0=上游剩余 接 PathConnection*.out_2（Rest，不是 out_1=Path）；in_1=期望湖数；in_2=湖资产名；in_3=seed
+{ "type":"connect","edgeId":"e_lk_scene","source":{"nodeId":"<G_PATH>","port":"out_2"},     "target":{"nodeId":"<G_LAKE>","port":"in_0"} },
 { "type":"connect","edgeId":"e_lk_cnt",  "source":{"nodeId":"lake_count","port":"value"},   "target":{"nodeId":"<G_LAKE>","port":"in_1"} },
 { "type":"connect","edgeId":"e_lk_name", "source":{"nodeId":"lake_name","port":"output"},   "target":{"nodeId":"<G_LAKE>","port":"in_2"} },
 { "type":"connect","edgeId":"e_lk_seed", "source":{"nodeId":"seed_main","port":"seed"},     "target":{"nodeId":"<G_LAKE>","port":"in_3"} },
@@ -76,7 +76,7 @@
 forgeax node create-template --group-file $TMPL/LakeRegions/LakeRegions.json --group-id lake --x -500 --y 1400 $G
 forgeax node create --node-id lake_count --op number_const --params '{"value":3}'  --x -900 --y 1400 $G --batteries $BATT
 forgeax node create --node-id lake_name  --op text_panel   --params '{"text":"湖"}' --x -900 --y 1520 $G --batteries $BATT
-forgeax node connect --edge-id e_lk_scene --from path:out_1       --to lake:in_0 $G
+forgeax node connect --edge-id e_lk_scene --from path:out_2       --to lake:in_0 $G
 forgeax node connect --edge-id e_lk_cnt   --from lake_count:value --to lake:in_1 $G
 forgeax node connect --edge-id e_lk_name  --from lake_name:output --to lake:in_2 $G
 forgeax node connect --edge-id e_lk_seed  --from seed_main:seed   --to lake:in_3 $G

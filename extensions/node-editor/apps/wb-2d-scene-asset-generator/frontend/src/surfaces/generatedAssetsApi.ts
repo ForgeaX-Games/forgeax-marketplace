@@ -1,3 +1,5 @@
+import { pluginFetch, pluginUrl } from '../api/pluginHttp'
+
 export interface GeneratedAssetRecord {
   alias: string
   blobId: string
@@ -26,14 +28,14 @@ export function assetDisplayName(asset: GeneratedAssetRecord): string {
 
 export async function listGeneratedAssets(folder?: string): Promise<GeneratedAssetRecord[]> {
   const qs = folder ? `?folder=${encodeURIComponent(folder)}` : ''
-  const res = await fetch(`/api/v1/generated-assets${qs}`)
+  const res = await pluginFetch(`/api/v1/generated-assets${qs}`)
   if (!res.ok) throw new Error(`list generated assets failed: ${res.status}`)
   const json = (await res.json()) as { items?: GeneratedAssetRecord[] }
   return json.items ?? []
 }
 
 export async function listGeneratedFolders(): Promise<Array<{ name: string; count: number }>> {
-  const res = await fetch('/api/v1/generated-assets/folders')
+  const res = await pluginFetch('/api/v1/generated-assets/folders')
   if (!res.ok) throw new Error(`list generated folders failed: ${res.status}`)
   const json = (await res.json()) as { folders?: Array<{ name: string; count: number }> }
   return json.folders ?? []
@@ -42,7 +44,7 @@ export async function listGeneratedFolders(): Promise<Array<{ name: string; coun
 /** Create an (empty) folder column: a new top-level menu or a one-level
  *  sub-menu (`parent/child`). Returns the normalized folder path. */
 export async function createGeneratedFolder(path: string): Promise<string> {
-  const res = await fetch('/api/v1/generated-assets/folders', {
+  const res = await pluginFetch('/api/v1/generated-assets/folders', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path }),
@@ -55,7 +57,7 @@ export async function createGeneratedFolder(path: string): Promise<string> {
 
 /** Delete a folder column and every asset inside it (recursively). */
 export async function deleteGeneratedFolder(path: string): Promise<string[]> {
-  const res = await fetch('/api/v1/generated-assets/folders/delete', {
+  const res = await pluginFetch('/api/v1/generated-assets/folders/delete', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path }),
@@ -66,13 +68,13 @@ export async function deleteGeneratedFolder(path: string): Promise<string[]> {
 }
 
 export async function latestPreviewAsset(): Promise<GeneratedAssetRecord | null> {
-  const res = await fetch('/api/v1/preview/latest')
+  const res = await pluginFetch('/api/v1/preview/latest')
   if (!res.ok) throw new Error(`read latest preview failed: ${res.status}`)
   return (await res.json()) as GeneratedAssetRecord | null
 }
 
 export function generatedAssetUrl(alias: string): string {
-  return `/api/v1/generated-assets/blob/${encodeURIComponent(alias)}`
+  return pluginUrl(`/api/v1/generated-assets/blob/${encodeURIComponent(alias)}`)
 }
 
 export interface ImportUserAssetRequest {
@@ -85,7 +87,7 @@ export interface ImportUserAssetRequest {
 }
 
 export async function importUserAsset(req: ImportUserAssetRequest): Promise<GeneratedAssetRecord> {
-  const res = await fetch('/api/v1/generated-assets/import', {
+  const res = await pluginFetch('/api/v1/generated-assets/import', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(req),
@@ -97,7 +99,7 @@ export async function importUserAsset(req: ImportUserAssetRequest): Promise<Gene
 }
 
 export async function renameGeneratedAsset(alias: string, name: string): Promise<GeneratedAssetRecord> {
-  const res = await fetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}`, {
+  const res = await pluginFetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -109,7 +111,7 @@ export async function renameGeneratedAsset(alias: string, name: string): Promise
 }
 
 export async function deleteGeneratedAsset(alias: string): Promise<void> {
-  const res = await fetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}`, {
+  const res = await pluginFetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}`, {
     method: 'DELETE',
   })
   if (!res.ok) throw new Error(`delete asset failed: ${res.status}`)
@@ -117,7 +119,7 @@ export async function deleteGeneratedAsset(alias: string): Promise<void> {
 
 export async function deleteGeneratedAssets(aliases: string[]): Promise<string[]> {
   if (aliases.length === 0) return []
-  const res = await fetch('/api/v1/generated-assets/delete', {
+  const res = await pluginFetch('/api/v1/generated-assets/delete', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ aliases }),
@@ -130,7 +132,7 @@ export async function deleteGeneratedAssets(aliases: string[]): Promise<string[]
 /** Move assets into another folder (physically relocates the backing files). */
 export async function moveGeneratedAssets(aliases: string[], folder: string): Promise<string[]> {
   if (aliases.length === 0) return []
-  const res = await fetch('/api/v1/generated-assets/move', {
+  const res = await pluginFetch('/api/v1/generated-assets/move', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ aliases, folder }),
@@ -142,7 +144,7 @@ export async function moveGeneratedAssets(aliases: string[], folder: string): Pr
 
 /** Copy a single asset into a folder, creating an independent duplicate (paste). */
 export async function copyAssetToFolder(alias: string, folder: string): Promise<GeneratedAssetRecord> {
-  const res = await fetch('/api/v1/generated-assets/copy-to-folder', {
+  const res = await pluginFetch('/api/v1/generated-assets/copy-to-folder', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ alias, folder }),
@@ -155,7 +157,7 @@ export async function copyAssetToFolder(alias: string, folder: string): Promise<
 
 /** Toggle/set an asset's favorite flag (never copies — flips a boolean on the record). */
 export async function setAssetFavorite(alias: string, favorite: boolean): Promise<GeneratedAssetRecord> {
-  const res = await fetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}/favorite`, {
+  const res = await pluginFetch(`/api/v1/generated-assets/${encodeURIComponent(alias)}/favorite`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ favorite }),
@@ -169,7 +171,7 @@ export async function setAssetFavorite(alias: string, favorite: boolean): Promis
 /** Move assets into a favorite sub-group (group=null/'' ungroups; auto-favorites). */
 export async function moveAssetsToFavoriteGroup(aliases: string[], group: string | null): Promise<string[]> {
   if (aliases.length === 0) return []
-  const res = await fetch('/api/v1/generated-assets/favorite-group', {
+  const res = await pluginFetch('/api/v1/generated-assets/favorite-group', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ aliases, group }),

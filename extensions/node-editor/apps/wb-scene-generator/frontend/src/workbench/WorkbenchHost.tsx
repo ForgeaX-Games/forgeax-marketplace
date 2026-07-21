@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Editor, useProjectStore, usePipelineStore } from '@forgeax/node-runtime-react/editor'
+import { Editor, useProjectStore, usePipelineStore, stripTooLargeSummaries } from '@forgeax/node-runtime-react/editor'
 import { HttpApiClient } from '../api/HttpApiClient.js'
 import { scenePanelTypes } from '../panels/scenePanels.js'
 import { paneUrl } from './paneUrls.js'
@@ -8,6 +8,7 @@ import { isWorkbenchMessage, type WorkbenchFocus } from './protocol.js'
 import { sceneValueFormatter } from './sceneValueFormatter.js'
 import { scenePortTypes } from './scenePortTypes.js'
 import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../debug/syncTrace.js'
+import { LoadingStatusPanel, type LoadingStep } from './LoadingStatusPanel.js'
 import './WorkbenchHost.css'
 
 const sceneValueFormatters = [sceneValueFormatter]
@@ -38,6 +39,49 @@ function readBool(key: string, fallback: boolean): boolean {
   return raw === null ? fallback : raw === 'true'
 }
 
+// Project-switch progress panel step labels for the host-side (editor) phases
+// — the renderer-iframe's own phases (previews/baked/aliases) arrive
+// pre-labeled over `workbench:loading-status` (see loadingSignals.ts).
+function switchPhaseLabel(phase: string | null): string {
+  switch (phase) {
+    case 'persisting':
+      return '保存当前项目'
+    case 'viewing':
+      return '切换项目视图'
+    case 'hydrating':
+      return '载入节点图'
+    default:
+      return '切换项目'
+  }
+}
+
+// Turns a raw boolean signal into 'active' while true, 'done' for a brief
+// linger window after it flips false (so a fast phase still visibly appears
+// as a completed checklist row instead of vanishing instantly), then 'idle'
+// (excluded from the panel) once the linger elapses.
+function useLingeringStep(active: boolean, lingerMs = 1100): 'idle' | 'active' | 'done' {
+  const [state, setState] = useState<'idle' | 'active' | 'done'>(active ? 'active' : 'idle')
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (active) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      setState('active')
+    } else {
+      setState((prev) => (prev === 'active' ? 'done' : prev))
+      timerRef.current = setTimeout(() => setState('idle'), lingerMs)
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [active, lingerMs])
+  return state
+}
+
+type RendererLoadingTask = { id: string; label: string; active: boolean; done?: number; total?: number }
+
 // Legacy-style workbench host: the faithful kernel Editor sits at the bottom; an
 // embedded row of Renderer / AssetStore iframes sits on top, each a `?pane=`
 // surface of this same app. Mirrors the legacy editor App.tsx layout/focus model
@@ -59,9 +103,16 @@ export function WorkbenchHost(): JSX.Element {
   // active project id so it can signal the renderer when the project changes (via
   // the kernel's project:activated cross-client sync, wired in <Editor>).
   const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
-  const executingProjectIds = useProjectStore((s) => s.executingProjectIds)
+  const isSwitchingProject = useProjectStore((s) => s.isSwitching)
+  const switchPhase = useProjectStore((s) => s.switchPhase)
+  const outputsRefreshBusy = usePipelineStore((s) => s.outputsRefreshBusy)
+  const pipelineStatus = usePipelineStore((s) => s.pipelineStatus)
   // Bump to force the preview iframe to clear + reload on a project switch.
   const [rendererReloadKey, setRendererReloadKey] = useState(0)
+  // Project-switch loading-progress panel: host-observed phases (below) plus
+  // whatever the renderer iframe reports over `workbench:loading-status`.
+  const [rendererBooting, setRendererBooting] = useState(false)
+  const [rendererTasks, setRendererTasks] = useState<RendererLoadingTask[]>([])
 
   const rootRef = useRef<HTMLDivElement>(null)
   const rendererIframeRef = useRef<HTMLIFrameElement>(null)
@@ -106,6 +157,8 @@ export function WorkbenchHost(): JSX.Element {
           { type: 'workbench:focus-changed', focus },
           '*',
         )
+      } else if (data.type === 'workbench:loading-status') {
+        setRendererTasks(data.tasks)
       }
     }
     window.addEventListener('message', handler)
@@ -185,10 +238,15 @@ export function WorkbenchHost(): JSX.Element {
   // detour. The trailing exec:completed / graph:applied still own GC + the
   // durable post-drag refresh, so this is a pure latency shortcut, not a new SSOT.
   const postPreviewDataToRenderer = useCallback((outputs: Record<string, Record<string, unknown>>) => {
-    if (Object.keys(outputs).length === 0) return
-    syncTrace('preview:postMessage', { nodes: summarizeNodeOutputs(outputs) })
+    const stripped: Record<string, Record<string, unknown>> = {}
+    for (const [nodeId, bag] of Object.entries(outputs)) {
+      const clean = stripTooLargeSummaries(bag)
+      if (Object.keys(clean).length > 0) stripped[nodeId] = clean
+    }
+    if (Object.keys(stripped).length === 0) return
+    syncTrace('preview:postMessage', { nodes: summarizeNodeOutputs(stripped) })
     rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:preview-data', outputs },
+      { type: 'workbench:preview-data', outputs: stripped },
       '*',
     )
   }, [])
@@ -214,26 +272,71 @@ export function WorkbenchHost(): JSX.Element {
     void useProjectStore.getState().bootstrap()
   }, [])
 
-  // Clear + reload the preview when the viewing project changes (the renderer's
-  // `projectChanged` signal): remount the iframe so its caches/layers reset,
-  // and post a project-changed message for any in-iframe listeners.
+  // Notify the preview iframe when the viewing project changes so it can
+  // SOFT-reset (clear its store + re-run its data hooks for the new project)
+  // via `workbench:project-changed` — see `RendererSurface`'s handler, which
+  // calls `useRenderStore.getState().reset()`. This used to also force a hard
+  // iframe remount (`key` bump) on every switch, destroying the whole document
+  // (3 WebSockets + op-catalog/node-meta caches) just to clear a few React/
+  // zustand fields that `reset()` already covers faithfully (same fields a
+  // remount would implicitly zero via a fresh module load) — removed, since
+  // the perceived "stuck/blank" project-switch delay was largely this teardown
+  // + reconnect, not actual data work. `rendererReloadKey` is left wired (iframe
+  // `key` below) as a manual escape hatch — nothing currently bumps it
+  // automatically.
   const prevProjectRef = useRef<string | null>(null)
   useEffect(() => {
     if (viewingProjectId === null) return
     const prev = prevProjectRef.current
     if (prev === viewingProjectId) return
     prevProjectRef.current = viewingProjectId
-    if (prev !== null) {
-      const agentBusy = executingProjectIds.length > 0
-      if (!agentBusy) {
-        setRendererReloadKey((k) => k + 1)
-      }
-    }
     rendererIframeRef.current?.contentWindow?.postMessage(
       { type: 'workbench:project-changed', projectId: viewingProjectId },
       '*',
     )
-  }, [viewingProjectId, executingProjectIds])
+  }, [viewingProjectId])
+
+  // Project-switch loading-progress panel: merge the host-observed phases
+  // (editor-side persist/view/hydrate + output fan-out) with whatever the
+  // renderer iframe reports (previews/baked/aliases + its own boot window).
+  // Each `useLingeringStep` keeps a fast/instant phase visible as a briefly
+  // "done" checklist row instead of vanishing the moment it completes.
+  const switchState = useLingeringStep(isSwitchingProject)
+  const outputsState = useLingeringStep(outputsRefreshBusy)
+  const bootState = useLingeringStep(rendererBooting)
+  // Covers `autoExecuteOnOpen()` (cold-cache auto-run after a project switch,
+  // see projectStore.ts's refreshOutputsAfterProjectSwitch) as well as manual
+  // Run/"clear cache + re-run" — this can legitimately be the longest step
+  // (actual node computation, not a fetch), so it needs its own visible row
+  // rather than silently running after the "拉取节点输出" step already reads "done".
+  const executingState = useLingeringStep(pipelineStatus === 'running')
+  const loadingSteps = useMemo<LoadingStep[]>(() => {
+    const steps: LoadingStep[] = []
+    if (switchState !== 'idle') {
+      steps.push({ id: 'switch', label: switchPhaseLabel(switchPhase), state: switchState })
+    }
+    if (bootState !== 'idle') {
+      steps.push({ id: 'boot', label: '重新加载渲染器', state: bootState })
+    }
+    if (outputsState !== 'idle') {
+      steps.push({ id: 'outputs', label: '拉取节点输出（编辑器）', state: outputsState })
+    }
+    if (executingState !== 'idle') {
+      steps.push({ id: 'execute', label: '执行节点计算（编辑器）', state: executingState })
+    }
+    const rendererOrder = ['previews', 'baked', 'aliases']
+    for (const id of rendererOrder) {
+      const task = rendererTasks.find((t) => t.id === id)
+      if (!task) continue
+      steps.push({
+        id: task.id,
+        label: task.label,
+        state: task.active ? 'active' : 'done',
+        detail: task.total ? `${task.done ?? task.total}/${task.total}` : undefined,
+      })
+    }
+    return steps
+  }, [switchState, switchPhase, bootState, outputsState, executingState, rendererTasks])
 
   const beginRowResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -333,8 +436,10 @@ export function WorkbenchHost(): JSX.Element {
                       onLoad={() => {
                         postSelectionToRenderer(selectionRef.current)
                         postPreviewToRenderer(previewDisabledRef.current)
+                        setRendererBooting(false)
                       }}
                     />
+                    <LoadingStatusPanel steps={loadingSteps} />
                   </section>
                 )}
                 {!isLast && (

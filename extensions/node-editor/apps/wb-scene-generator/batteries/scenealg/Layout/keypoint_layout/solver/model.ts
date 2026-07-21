@@ -125,6 +125,8 @@ export function buildModel(raw: unknown): ProblemModel {
             return
           }
           relations.push({ from, to, kind: 'orientation', angle })
+        } else if (entry.kind === 'peripheral') {
+          relations.push({ from, to, kind: 'peripheral' })
         } else {
           warnings.push(`relations[${i}] 的 kind="${String(entry.kind)}" 不支持，已忽略`)
         }

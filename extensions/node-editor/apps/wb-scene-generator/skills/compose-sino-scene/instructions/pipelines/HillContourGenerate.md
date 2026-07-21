@@ -2,6 +2,7 @@
 
 > 权威详情：[../../../../batteries/templates/structures/topographic/HillContourGenerate/README.md](../../../../batteries/templates/structures/topographic/HillContourGenerate/README.md)
 > templateId：`HillContourGenerate`（`group_hill_contour_generate`）。
+> 端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 1. 介绍
 
@@ -25,7 +26,7 @@
 
 | portName | 语义 | 典型去向 |
 |----------|------|---------|
-| `out_1` | Hill 主产物 | `tree_merge` |
+| `out_1` | Hill 主产物 | `appendMergeItem` → `aw_m0_merge` |
 | `out_2` | **Rest** | 下一组 `in_0` / 装饰 `in_1` |
 | `out_0` | Scene 完整 | 调试 |
 

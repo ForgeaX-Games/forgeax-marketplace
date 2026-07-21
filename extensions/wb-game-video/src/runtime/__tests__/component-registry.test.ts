@@ -3,7 +3,6 @@ import { registerComponent, getComponent, unregisterComponent, deriveOutputs, ge
 import type { GameNode, Overlay } from '../schema/graph-schema'
 
 const qteDef: ComponentDef = {
-  role: 'interaction',
   events: [{ id: 'pass' }, { id: 'good' }, { id: 'fail' }],
 }
 
@@ -35,11 +34,11 @@ afterEach(() => unregisterComponent('qte'))
 describe('component-registry', () => {
   it('register / get', () => {
     registerComponent('qte', qteDef)
-    expect(getComponent('qte')?.role).toBe('interaction')
+    expect(getComponent('qte')?.events?.map((e) => e.id)).toEqual(['pass', 'good', 'fail'])
     expect(getComponent('nope')).toBeUndefined()
   })
 
-  it('deriveOutputs = default + interaction component outputs (dedup)', () => {
+  it('deriveOutputs = default + component event handles (dedup)', () => {
     registerComponent('qte', qteDef)
     const { node, overlays } = nodeWithComponents(['qte'])
     expect(deriveOutputs(node, overlays).map((h) => h.id)).toEqual(['default', 'pass', 'good', 'fail'])
@@ -52,7 +51,6 @@ describe('component-registry', () => {
 
   it('manifest.inputs: explicit inputs pass through; events included', () => {
     registerComponent('banner', {
-      role: 'presentation',
       label: '横幅',
       inputs: [
         { key: 'heroName', label: '英雄名', valueType: 'string' },
@@ -66,8 +64,8 @@ describe('component-registry', () => {
     unregisterComponent('banner')
   })
 
-  it('interaction 出口 = 声明的 events（皮肤自 emit，引擎无 resolve/outputs）', () => {
-    registerComponent('qteResolve', { role: 'interaction', events: [{ id: 'pass' }, { id: 'fail' }] })
+  it('组件出口 = 声明的 events（皮肤自 emit，引擎无 resolve/outputs）', () => {
+    registerComponent('qteResolve', { events: [{ id: 'pass' }, { id: 'fail' }] })
     expect(getComponentManifest('qteResolve')!.events.map((e) => e.id)).toEqual(['pass', 'fail'])
     unregisterComponent('qteResolve')
   })

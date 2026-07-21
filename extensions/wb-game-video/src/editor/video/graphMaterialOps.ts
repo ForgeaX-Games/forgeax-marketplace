@@ -22,18 +22,28 @@ import type {
   GameScenario,
   GraphEffect,
   GraphTextStyle,
+  Layout,
   NumOrExpr,
   OverlayChild,
   Reaction,
   Trigger,
 } from '../../runtime/schema/graph-schema'
 import type { NodeAction } from '../../runtime/schema/node-config-schema'
-import type { ChoiceOption, FloatTextParams, QteCue } from '../../runtime/registry/core-components'
-import { componentHandles, componentTypeLabel, defaultsForComponent, getComponent, hasCuePointsInput, hasOptionEventsInput, isPositionable } from '../../runtime/registry/component-registry'
+import type { ChoiceOption } from '../../runtime/skins/components/Choice'
+import type { FloatTextParams } from '../../runtime/skins/components/FloatText'
+import type { QteCue } from '../../runtime/skins/components/Qte'
+import { componentHandles, getComponent } from '../../runtime/registry/component-registry'
+import {
+  componentTypeLabel,
+  defaultsForComponent,
+  hasCuePointsInput,
+  hasOptionEventsInput,
+  isPositionable,
+} from '../shell/editors'
 import { INTERACTION_SKINS } from '../../runtime/skins/components'
 import { FILTER_PRESETS, FX_PRESETS } from '../../runtime/fx/video-fx'
 import { initState } from '../../runtime/engine/engine-init'
-import type { InteractionSnap } from '../../runtime/engine/session'
+import type { OverlaySnap } from '../../runtime/engine/session'
 import type { MaterialItem, MaterialKind } from './materialTimelineShared'
 import { clampLayer, clampMs, normalizeLayer } from './materialTimelineShared'
 import {
@@ -66,6 +76,20 @@ import {
 } from '../../graph/edit/overlay-edit'
 import { overlayMountId } from '../../runtime/schema/node-config-schema'
 import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
+import { STAGE_FILL_LAYOUT, layoutIsEffectivelyEmpty } from '../../runtime/schema/layout'
+
+/**
+ * 新建/克隆子件 layout（通用，不按 component id 特判）：
+ * - 有来源 layout（方案克隆 / 面板角落锚点）→ 原样保留
+ * - 否则一律 `STAGE_FILL_LAYOUT`（视频编辑器叠层默认铺满舞台；% 自绘才有正确坐标空间）
+ */
+function layoutForNewChild(fromLayout: Layout | undefined, zIndex: number | undefined): Layout {
+  const base =
+    fromLayout && !layoutIsEffectivelyEmpty(fromLayout)
+      ? { ...fromLayout }
+      : { ...STAGE_FILL_LAYOUT }
+  return { ...base, zIndex: zIndex ?? fromLayout?.zIndex ?? 3 }
+}
 
 // ── overlay children 读取小工具（内容挂载 = 原型 ⊕ 稀疏差量，见 resolveMountChildren） ──
 /** 内容挂载的 children：原型（共享方案）跟随 + 本挂载 overrides/added/removed 差量。 */
@@ -121,20 +145,15 @@ export const OVERLAY_XY = { x: 0.5, y: 0.42 }
 export const OPTION_XY = { x: 0.5, y: 0.72 }
 const QTE_GOOD_WINDOW = 480
 /**
- * QTE 元素级参数键（落 el.inputs，非某个 cue）：完美半窗 / 过关次数 / 满分 / 过关分 /
- * 出口目录（events/defaultEvent，PR #77）+ 旧 exits/defaultKey 兼容 / 皮肤自管时长
+ * QTE 元素级参数键（落 el.inputs，非某个 cue）：完美半窗 / 过关次数 /
+ * 出口目录（events/defaultEvent）/ 皮肤自管时长
  * （windowMs 或 durationMs——注意与 cue 级 `durationMs` hold 时长同名冲突）。
  */
 const QTE_ELEMENT_PARAM_KEYS = new Set([
   'perfectMs',
   'passingHits',
-  'score',
-  'passingScore',
-  'tolerance',
   'events',
   'defaultEvent',
-  'exits',
-  'defaultKey',
   'windowMs',
   'durationMs',
   'timeoutMs',
@@ -202,7 +221,7 @@ function spawnActionOf(spawn: SettlementSpawn, nodeDurMs: number): Extract<NodeA
 
 /**
  * legacy 读兜底 —— 2026-07-16 边路由统一重构曾把选项/组件结算误写进 `node.data.reactions`
- * （运行时 submitInteraction/emitComponentEvent 只读 mount.reactions，这条数据从未被执行过，见
+ * （运行时 emitComponentEvent 只读 mount.reactions，这条数据从未被执行过，见
  * §结算 mount-scoped 改造说明）。现只在 `readMountEventEffects`/`readMountEventSpawn` mount 侧
  * 无命中时回落一次，避免历史配置在升级后静默消失；不再是任何结算的主写入位置。
  */
@@ -300,7 +319,7 @@ function previewCtxFor(scenario: GameScenario): { ctx: PreviewEvalContext; state
 }
 
 // ── 结算（选项分支 / QTE 档位 / 通用组件事件，三者共用同一套读写内核）──────────────
-// 运行时只读 mount.reactions 承接 event 类反应（engine.ts submitInteraction/emitComponentEvent
+// 运行时只读 mount.reactions 承接 event 类反应（engine.ts emitComponentEvent
 // 都只查 nodeOverlayMounts(node)...reactions），落盘统一走 mount 级——跳转=边，改数值/生成组件=
 // mount 的 event reaction。candidate handle 来自各自的 events 目录（选项=inputs.events 的 id、
 // QTE=componentHandles(skin, inputs)、通用组件=manifest.events/inputs.events）。
@@ -319,11 +338,11 @@ export interface OutcomeView {
   spawn?: SettlementSpawn
   /**
    * QTE 默认三档里「良好」未单独配置时，运行时会按「完美」结算 —— UI 提示用。
-   * 仅当候选同时含 pass/good 时才可能为 true（组合按键 exits 模式不适用；选项/通用组件恒为 false）。
+   * 仅当候选同时含 pass/good 时才可能为 true（选项/通用组件恒为 false）。
    */
   fallsBackToPass?: boolean
 }
-/** 向后兼容命名（QTE 结算专用别名，语义与 OutcomeCandidate/OutcomeView 相同）。 */
+/** QTE 结算专用别名（语义与 OutcomeCandidate/OutcomeView 相同）。 */
 export type QteOutcomeCandidate = OutcomeCandidate
 
 /**
@@ -350,7 +369,7 @@ export function componentEventsLocked(component: string | undefined): boolean {
 
 /**
  * 样式锁定出口：白名单组件强制用自己皮肤 defaults.events 覆盖实例上可被写脏的 events。
- * （边路由统一后 SSOT = inputs.events；旧 exits/defaultKey 仅作兼容回退。）
+ * SSOT = inputs.events / inputs.defaultEvent。
  */
 export function applyStyleLockedEventParams(
   inputs: Record<string, unknown>,
@@ -365,9 +384,7 @@ export function applyStyleLockedEventParams(
     ...cleaned,
     events: locked.map((e) => ({ id: e.id, label: e.label, condition: e.condition })),
     defaultEvent:
-      (typeof cleaned.defaultEvent === 'string' && cleaned.defaultEvent) ||
-      (typeof cleaned.defaultKey === 'string' && cleaned.defaultKey) ||
-      'fail',
+      (typeof cleaned.defaultEvent === 'string' && cleaned.defaultEvent) || 'fail',
   }
 }
 
@@ -745,6 +762,9 @@ export function overlayEffects(
   }
   return []
 }
+function exprText(v: NumOrExpr): string {
+  return typeof v === 'number' ? String(v) : v.expr
+}
 /** 预览用飘字 inputs：`expr` 缺省时回落结算效果第一条的值，与「所见即所广播」一致。 */
 function floatPreviewParams(
   scenario: GameScenario,
@@ -752,11 +772,11 @@ function floatPreviewParams(
   el: OverlayChild,
   inputs: FloatTextParams,
 ): FloatTextParams {
-  if (typeof inputs.expr === 'string' && inputs.expr.trim()) return inputs
+  if (inputs.expr != null && inputs.expr.trim() !== '') return inputs
   const first = overlayEffects(scenario, node, el.id).find((e) => e.kind === 'attr' || e.kind === 'var')
   const v = first && (first.kind === 'attr' || first.kind === 'var') ? first.value : undefined
   if (v === undefined) return inputs
-  return { ...inputs, expr: typeof v === 'number' ? String(v) : v.expr }
+  return { ...inputs, expr: exprText(v) }
 }
 /** 删除某飘字的结算 reaction。 */
 function removeSettleReaction(scenario: GameScenario, node: GameNode, floatId: string): GameScenario {
@@ -810,7 +830,7 @@ export function qteSkinPreviewInteraction(
   scenario: GameScenario,
   node: GameNode | undefined,
   playheadMs?: number,
-): InteractionSnap | null {
+): OverlaySnap | null {
   const el = qteElement(scenario, node)
   if (!el) return null
   const component = el.component
@@ -830,8 +850,6 @@ export function qteSkinPreviewInteraction(
     elementId: el.id,
     component,
     inputs: { ...inputs, component, cues },
-    handles: qteOutcomeCandidates(el).map((c) => c.handle),
-    timeoutMs: typeof inputs.timeoutMs === 'number' ? inputs.timeoutMs : undefined,
   }
 }
 
@@ -868,9 +886,9 @@ export function choiceSkinPreviewInteractions(
   node: GameNode | undefined,
   playheadMs?: number,
   maxMs = 60_000,
-): InteractionSnap[] {
+): OverlaySnap[] {
   if (!node) return []
-  const out: InteractionSnap[] = []
+  const out: OverlaySnap[] = []
   for (const el of mountedChildrenOf(scenario, node)) {
     if (!hasOptionEventsInput(el.component)) continue
     const component = el.component
@@ -885,8 +903,6 @@ export function choiceSkinPreviewInteractions(
       elementId: el.id,
       component,
       inputs: { ...locked, component },
-      handles: (Array.isArray(locked.events) ? (locked.events as ChoiceOption[]) : []).map((o) => o.id),
-      timeoutMs: typeof locked.timeoutMs === 'number' ? locked.timeoutMs : undefined,
     })
   }
   return out
@@ -1215,12 +1231,9 @@ export function patchMaterialGraph(
         next.zIndex = zIndex
         return next
       })
-      // battleParry 检视器以 windowMs 为时长 SSOT；拖缘时同步，避免检视器/皮肤与时间轴脱节。
-      const skin = el.component
+      // 时长 SSOT 是 cue 本身的 [appearAt, endAt]（上面已经写好）；哪个皮肤读它、怎么读，是运行时
+      // 的事——这里不认识任何具体组件 id，也不需要另外维护一份 windowMs/durationMs 影子字段。
       const nextParams: Record<string, unknown> = { ...(el.inputs ?? {}), cues }
-      if (skin === 'battleParry' && patch.markerMs == null) {
-        nextParams.windowMs = Math.max(200, end - start)
-      }
       return patchOverlayChild(scenario, node.id, el.id, { inputs: nextParams })
     }
     default:
@@ -1480,8 +1493,14 @@ export function addMaterialGraph(
       component: 'choice',
       trigger: { when: 'enter' },
       window: { startMs: optStart, endMs: optEnd },
-      layout: { zIndex: at ? at.zIndex : 3 },
-      inputs: { presentation: 'list', x: OPTION_XY.x, y: OPTION_XY.y, events: [{ id: 'opt0', label: '选项一' }] },
+      layout: layoutForNewChild(undefined, at ? at.zIndex : 3),
+      inputs: {
+        presentation: 'list',
+        x: OPTION_XY.x,
+        y: OPTION_XY.y,
+        events: [{ id: 'opt0', label: '选项一' }],
+        defaultEvent: 'opt0',
+      },
     }
     const s = addOverlayChild(s0, node.id, el)
     return { scenario: s, selectKey: `option:${id}` }
@@ -1508,7 +1527,7 @@ export function addMaterialGraph(
     component: componentId,
     trigger: { when: 'at', ms: startMs },
     window: { startMs, endMs },
-    layout: { zIndex: at ? at.zIndex : (fromChild?.layout?.zIndex ?? 3) },
+    layout: layoutForNewChild(fromChild?.layout, at ? at.zIndex : undefined),
     inputs: seeded,
   }
   // 方案克隆（template = `mountId/childId`）：落进「那个方案」自己的挂载 added[]，
@@ -1564,11 +1583,15 @@ export function addQteCueGraph(
   const choice = choiceElement(scenario, node)
   const s0 = teardownInteractionScenario(scenario, node, { kind: 'choice', handlePrefixes: choice ? optionsOf(choice).map((o) => o.id) : [], childId: choice?.id })
   const id = newElementId()
-  const seeded = applyStyleLockedEventParams({ qteKind: 'parry', passingHits: 1, cues: [cue] }, 'inkKou')
+  const seeded = applyStyleLockedEventParams(
+    { qteKind: 'parry', passingHits: 1, cues: [cue], defaultEvent: 'fail' },
+    'inkKou',
+  )
   const newEl: OverlayChild = {
     id,
     component: 'inkKou',
     trigger: { when: 'enter' },
+    layout: layoutForNewChild(undefined, 3),
     inputs: seeded,
   }
   let s = addOverlayChild(s0, node.id, newEl)
@@ -1629,7 +1652,7 @@ export function patchSelectedGraph(
       else cuePatch[k] = v
     }
     const cues = cuesOf(el).map((c) => (c.id === item.id ? { ...c, ...cuePatch } : c))
-    // 样式锁出口：写入时强制用皮肤 defaults.exits，丢掉实例上的脏出口
+    // 样式锁出口：写入时强制用皮肤 defaults.events，丢掉实例上的脏出口
     const nextParams = applyStyleLockedEventParams({ ...(el.inputs ?? {}), ...elemPatch, cues }, el.component)
     return patchOverlayChild(scenario, node.id, el.id, { inputs: nextParams })
   }
@@ -1648,10 +1671,27 @@ export function patchSelectedGraph(
 }
 
 /**
+ * 尺寸/位置盒子（`Layout.width/height/...`）——对所有 MaterialItem.kind 通用的同一条写路径，
+ * 不像 `patchSelectedGraph`/`patchOverlayGraph` 按 kind 分流进 inputs：Layout 的语义和落点
+ * （`OverlayChild.layout`）跟组件是什么 kind 完全无关，一套写法即覆盖字幕/飘字/QTE/选项/通用组件。
+ * `patchOverlayChild` 内部 `mergeChild`/`mergePatch` 对 `layout` 是浅合并，不会连带丢掉 zIndex。
+ */
+export function patchSelectedLayoutGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  item: MaterialItem,
+  patch: Partial<Layout>,
+): GameScenario {
+  const el = item.kind === 'qte' ? qteElementOfCue(scenario, node, item.id) : findElement(scenario, node, item.id)
+  if (!el) return scenario
+  return patchOverlayChild(scenario, node.id, el.id, { layout: patch })
+}
+
+/**
  * 飘字（floatText 展示 + 联动结算 reaction）的 inputs 编辑。键：
  *   - content  → inputs.text（显示文案，含 {v} 用数值替换）
  *   - effects  → 结算 reaction 的完整效果列表（`EffectsEditor` 直接产出；空数组＝纯展示，删结算）
- *   - 其余（expr/valuePick/style/x/y…）→ 直接并入 inputs（undefined 删键）
+ *   - 其余（expr/style/x/y…）→ 直接并入 inputs（undefined 删键）；expr 是 NumOrExpr（`number | {expr,pick}`）
  * expr 缺省时 {v} 取 effects 第一条的值（预览侧对齐，见 `activePreviewOverlaysFromNode`）；
  * 写了 expr 则显示与效果解耦。
  */
@@ -1753,6 +1793,9 @@ export function setOptionBranchSpawnGraph(
 
 /**
  * 通用组件的事件结算列表（manifest.events / outputs；跳转·改数值·spawn 与选项/QTE 同内核）。
+ * 挂在共享方案上的样式锁定皮肤（inkYingMo/battleSkillBar 等无静态 events 兜底的组件，见
+ * `componentEventsLocked`）先过一遍 `applyStyleLockedEventParams`——跟 `qteOutcomeCandidates`/
+ * `listOptionBranches` 保持同一套兜底口径，不再因为实例 `inputs.events` 缺失/脏就整块结算区消失。
  */
 export function listComponentEventViews(
   scenario: GameScenario,
@@ -1762,7 +1805,8 @@ export function listComponentEventViews(
   if (!el) return []
   const componentId = el.component
   const plugin = getComponent(componentId)
-  const fromPlugin = plugin ? componentHandles(componentId, paramsOf(el)) : []
+  const inputs = applyStyleLockedEventParams(paramsOf(el), componentId)
+  const fromPlugin = plugin ? componentHandles(componentId, inputs) : []
   const candidates: OutcomeCandidate[] = fromPlugin.map((e) => ({ handle: e.id, label: e.label ?? e.id }))
   if (!candidates.length) return []
   return candidates.map((c) => outcomeView(scenario, node, el.id, c.handle, c.label, candidates))

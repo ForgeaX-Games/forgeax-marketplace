@@ -17,7 +17,7 @@ type ToolCtx = {
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
 
-const PLUGIN_ID = '@forgeax-extension/wb-2d-scene-asset-generator'
+const PLUGIN_ID = '@forgeax-plugin/wb-2d-scene-asset-generator'
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:9567'
 
 function objectArgs(args: unknown): Record<string, unknown> {

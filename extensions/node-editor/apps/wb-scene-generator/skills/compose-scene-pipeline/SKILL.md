@@ -49,7 +49,10 @@ Use these tools:
    `scene:batteries.get`; never guess port names.
 3. Read the current graph using `scene:pipeline.get`.
 4. Apply graph changes with `scene:pipeline.applyBatch`, using
-   `opts.actor = "ai:scene"` and a concise `opts.label`.
+   `opts.actor = "ai:scene"` and a concise `opts.label`. For group ports
+   prefer `connect`'s `{ "port": { "label": "..." } }` form over hand-mapped
+   `in_N`/`out_N`, and use the `appendMergeItem` composite op instead of
+   manually bumping a `tree_merge`'s `portCount` (see `pipeline-schema.md`).
 5. Execute with `scene:pipeline.execute`.
 6. Drive the preview view mode with `scene:renderer.*` and verify results from
    the `scene:pipeline.execute` output summary (no errors, expected layer/asset

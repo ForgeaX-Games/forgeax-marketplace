@@ -42,7 +42,7 @@ try {
     if (/\/api\/v1\/library\/blob\/[0-9a-f]{64}\.obj/.test(u)) objHits.push({ url: u, status: res.status() })
   })
 
-  await page.goto(`${FRONTEND_URL}/?pane=urdf`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${FRONTEND_URL}/?pane=viewer3d`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('canvas', { timeout: 20000 })
 
   // Wait for the live-sync to pull the URDF and the OBJ loader to fetch the mesh.

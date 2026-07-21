@@ -36,7 +36,7 @@ export interface OpSpec {
   /** 参数表 */
   params: readonly ParamSpec[];
   /** 该 op 产出的语义类别——给下游电池筛选/拼接用 */
-  produces: 'shape' | 'material' | 'part' | 'joint' | 'sketch' | 'misc';
+  produces: 'shape' | 'material' | 'part' | 'joint' | 'sketch' | 'misc' | 'bone' | 'skeleton' | 'skin';
 }
 
 export type ProducesKind = OpSpec['produces'];
@@ -131,6 +131,33 @@ const SPECS: OpSpec[] = [
       { name: 'scale',    kinds: ['list'],   desc: '[sx, sy, sz]' },
       { name: 'bbox_min', kinds: ['list'],   desc: '可选未缩放局部 AABB 最小角 [x, y, z]（米）；填上后 mesh 可解 AABB' },
       { name: 'bbox_max', kinds: ['list'],   desc: '可选未缩放局部 AABB 最大角 [x, y, z]（米）' },
+    ],
+  },
+  {
+    name: 'rock',
+    desc: '不规则石头/岩块（三角网格，非 OCCT 实体）：icosphere 细分 + 基于 seed 的确定性顶点位移。' +
+      '用于地形装饰/瓦砾/岩石，不是规则占位方块——形态本身即最终形态，不受"裸 primitive 堆叠"QC 判罚。' +
+      '与 pipe/sweep/section_loft 一样是三角网格产物，不能参与 union/difference/intersection（继承现有系统限制）。' +
+      '同义 op："boulder"。',
+    produces: 'shape',
+    params: [
+      { name: 'radius',       kinds: ['number'], required: true, desc: '基准半径（米）' },
+      { name: 'irregularity', kinds: ['number'], desc: '凹凸幅度占半径的比例，0~1，默认 0.35' },
+      { name: 'seed',         kinds: ['number'], desc: '整数随机种子；同参数重复 apply 形状确定不变（DSL 复算/缓存要求确定性），默认 0' },
+      { name: 'detail',       kinds: ['number'], desc: 'icosphere 细分级别 0~2（越大越多面，越圆润），默认 1' },
+      { name: 'stretch',      kinds: ['list'],   desc: '[sx, sy, sz] 非等比拉伸，做椭圆状/长条状石头；默认 [1,1,1]' },
+    ],
+  },
+  {
+    name: 'boulder',
+    desc: 'rock 的同义 op（更大块的石头场景语义相同），参数与 rock 完全一致。',
+    produces: 'shape',
+    params: [
+      { name: 'radius',       kinds: ['number'], required: true, desc: '基准半径（米）' },
+      { name: 'irregularity', kinds: ['number'], desc: '凹凸幅度占半径的比例，0~1，默认 0.35' },
+      { name: 'seed',         kinds: ['number'], desc: '整数随机种子；同参数重复 apply 形状确定不变，默认 0' },
+      { name: 'detail',       kinds: ['number'], desc: 'icosphere 细分级别 0~2，默认 1' },
+      { name: 'stretch',      kinds: ['list'],   desc: '[sx, sy, sz] 非等比拉伸；默认 [1,1,1]' },
     ],
   },
 
@@ -382,12 +409,25 @@ const SPECS: OpSpec[] = [
 
   // — Material —
   {
+    name: 'texture',
+    desc: '贴图定义：image 路径（相对工程 assets/textures/）+ repeat/offset/rotation',
+    produces: 'misc',
+    params: [
+      { name: 'image',    kinds: ['string'], required: true, desc: '贴图文件路径，相对 assets/textures/' },
+      { name: 'repeat',   kinds: ['list'],   desc: '[repeat_u, repeat_v]，默认 [1,1]' },
+      { name: 'offset',   kinds: ['list'],   desc: '[offset_u, offset_v]，默认 [0,0]' },
+      { name: 'rotation', kinds: ['number'], desc: 'UV 旋转（弧度），默认 0' },
+    ],
+  },
+  {
     name: 'material',
-    desc: 'RGBA 颜色 / 贴图材质',
+    desc: 'RGBA 颜色 / PBR 材质；可选 texture(ref) 贴图（只在 g_bake_object 烘 GLB 时生效）',
     produces: 'material',
     params: [
-      { name: 'rgba',    kinds: ['list'],   desc: '[r, g, b, a]' },
-      { name: 'texture', kinds: ['string'], desc: '贴图文件路径' },
+      { name: 'rgba',      kinds: ['list'],   desc: '[r, g, b, a]' },
+      { name: 'texture',   kinds: ['ref'],    desc: '引用一条 texture 语句' },
+      { name: 'metalness', kinds: ['number'], desc: '金属度 0..1，默认 0.05' },
+      { name: 'roughness', kinds: ['number'], desc: '粗糙度 0..1，默认 0.48' },
     ],
   },
 
@@ -446,17 +486,26 @@ const SPECS: OpSpec[] = [
 
   // — Animation（作者关节轨迹 q(t)；不产出 URDF，由前端 GLB 烘焙链路消费）—
   // 以 URDF 关节名为键的每关节标量轨迹。轴/类型/限位由 URDF 提供，clip 不带几何。
-  // q(t) 存为 JSON 字符串 arg `data`（v1；clip 变大时改内容寻址 blob）。
+  // 三种互斥的 q(t) 来源，按 q_json > keyframes > q_path 取第一个非空的（电池侧实现）：
+  //   - q_json：完整逐帧 clip JSON（{name,fps,frameCount,loop,channels,rootTranslation?}）——人工/脚本预烘好的场景。
+  //   - keyframes：稀疏关键帧 JSON（{ 关节名: [{t,q}, ...] }）——agent 对话描述动作的首选：
+  //     只需给每个关节几个"关键时刻的值"，电池按 fps/duration 采样、关键帧间线性插值
+  //     （或阶梯保持）展开成逐帧数组，不需要手打/生成几百帧的完整数组。
+  //   - q_path：项目相对（或绝对）路径的 q(t) JSON 文件——大体量 / 复用 clip。
   {
     name: 'animation',
-    desc: '关节动画 clip：每关节标量轨迹 q(t)（弧度/米），键=URDF 关节名',
+    desc: '动画 clip：骨骼旋转 q(t) + 可选角色根位移。通道键既可是 URDF 关节名（机械路），也可是骨骼名（角色路，绕轴弧度）。root_motion 是模型根帧（Z-up、+X 向前）中相对根骨 bind position 的米制稀疏位移关键帧。',
     produces: 'misc',
     params: [
       { name: 'name',   kinds: ['string'], desc: 'clip 名（可空）' },
-      { name: 'fps',    kinds: ['number'], required: true, desc: '采样帧率（帧/秒）' },
-      { name: 'frames', kinds: ['number'], required: true, desc: '帧数 F（>= 2）' },
+      { name: 'fps',    kinds: ['number'], desc: '采样帧率（帧/秒），默认 30' },
       { name: 'loop',   kinds: ['bool'],   desc: '是否循环播放' },
-      { name: 'data',   kinds: ['string'], required: true, desc: 'q(t) JSON：{ 关节名: number[] }' },
+      { name: 'q_json', kinds: ['string'], desc: '完整逐帧 q(t) JSON：{name?,fps?,frameCount?,loop?,channels:{骨/关节名:number[]},rootTranslation?:[[x,y,z],...]}' },
+      { name: 'keyframes', kinds: ['string'], desc: '稀疏关键帧 JSON：{ 关节名: [{"t":秒,"q":值}, ...], ... }；按 fps/duration 采样展开（agent 描述动作首选，比手打逐帧数组更省 token 更不容易出错）' },
+      { name: 'root_motion', kinds: ['string'], desc: '角色根位移稀疏关键帧 JSON：[{"t":秒,"x":米,"y":米,"z":米}, ...]；按 fps/duration 和 interpolation 采样到 rootTranslation' },
+      { name: 'duration', kinds: ['number'], desc: 'keyframes 采样时长（秒）；省略 = 自动取所有关键帧里最大的 t' },
+      { name: 'interpolation', kinds: ['string'], desc: 'keyframes 插值方式："linear"（默认）或 "step"（保持前一关键帧值，适合开合/切换类动作）' },
+      { name: 'q_path', kinds: ['string'], desc: '项目相对（或绝对）路径的 q(t) JSON 文件；仅当 q_json 和 keyframes 都为空时读取' },
     ],
   },
 
@@ -479,6 +528,60 @@ const SPECS: OpSpec[] = [
       { name: 'mimic_joint',      kinds: ['ref'],    desc: 'URDF mimic 源 joint' },
       { name: 'mimic_multiplier', kinds: ['number'], desc: 'mimic multiplier，默认 1' },
       { name: 'mimic_offset',     kinds: ['number'], desc: 'mimic offset，默认 0' },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // Character rig（软体角色：自由骨树 + 平滑蒙皮；不走 URDF 关节约束）
+  //   bone/skeleton/skin 三个算子出现即触发"角色路"编译（见 dsl-to-graph）。
+  //   与 joint 的关键区别：bone 是**自由骨骼**（无轴/限位），蒙皮权重连续（非 100% 刚性），
+  //   权重不在 DSL / 后端存储——由前端测地体素绑定按需求解。
+  // ════════════════════════════════════════════════════════════════════
+  {
+    name: 'bone',
+    desc: '骨骼：角色骨架的一根骨。origin=head 位置（模型根/世界帧，米），tail=末端位置（缺省沿父→子方向或 +Z 一小段），axis=弯曲铰链轴（模型根帧；动画绕此轴转——作者显式声明优先，行走腿写 [0,1,0]），parent=父骨（缺省=根骨）。source_part 可选。骨骼为自由变换，不带 URDF 轴/限位。',
+    produces: 'bone',
+    params: [
+      { name: 'parent',      kinds: ['ref'],  desc: '父骨 bone id；缺省=根骨' },
+      { name: 'source_part', kinds: ['ref'],  desc: '可选：该骨对应的 part id（来源/刚性绑定提示）' },
+      { name: 'origin',      kinds: ['list'], required: true, desc: 'head 位置 [x, y, z]（模型根帧，米）' },
+      { name: 'tail',        kinds: ['list'], desc: 'tail 末端位置 [x, y, z]（模型根帧）；缺省自动推导' },
+      { name: 'axis',        kinds: ['list'], desc: '弯曲铰链轴 [x,y,z]（模型根帧）；会动的骨强烈建议写——行走腿 [0,1,0] 前后摆；未写时前端启发式推' },
+      { name: 'rpy',         kinds: ['list'], desc: '可选 [r, p, y] 骨骼朝向（弧度）' },
+    ],
+  },
+  {
+    name: 'bone_chain',
+    desc: '骨骼链：在 origin→tail 之间等分展开成 count 条首尾相接的标准 bone（内部复用 bone 逐段生成，等价于手写 N 行 bone 再逐段挂 parent）。用于一整根连续 part（尾巴/蛇身/长鞭/多节触手）想要多节平滑弯曲，避免手算每段坐标。生成的骨骼 id 形如 <chainId>_0、<chainId>_1……<chainId>_{count-1}（chainId=本语句的 DSL id），可被 animation 的关键帧通道按骨骼名单独驱动；本语句自身的 id（可作为其它 bone/bone_chain 的 parent 引用）指向链的最后一段（tip），适合再挂一个末端 bone（如尾尖装饰）。axis/source_part 应用到链上每一段。',
+    produces: 'bone',
+    params: [
+      { name: 'origin', kinds: ['list'], required: true, desc: '链起点 head 位置 [x, y, z]（模型根帧，米）' },
+      { name: 'tail', kinds: ['list'], required: true, desc: '链终点位置 [x, y, z]（模型根帧，米）' },
+      { name: 'count', kinds: ['number'], required: true, desc: '分几段骨骼（整数 ≥1，如尾巴 4~6 段）' },
+      { name: 'parent', kinds: ['ref'], desc: '链第一段的父骨 bone id；缺省=根骨' },
+      { name: 'axis', kinds: ['list'], desc: '弯曲铰链轴 [x,y,z]（模型根帧）；应用到链上每一段，缺省=前端启发式推' },
+      { name: 'source_part', kinds: ['ref'], desc: '可选：该链对应的 part id；应用到链上每一段' },
+    ],
+  },
+  {
+    name: 'skeleton',
+    desc: '骨架：由 bone 父子链构成的骨树。root=根 bone id（其余骨骼通过 parent 链隐式挂到 root 上）。',
+    produces: 'skeleton',
+    params: [
+      { name: 'root', kinds: ['ref'], required: true, desc: '根 bone id' },
+    ],
+  },
+  {
+    name: 'skin',
+    desc: '蒙皮：把可蒙皮网格绑定到骨架。skeleton=skeleton id；mesh=可蒙皮网格（mesh shape ref，通常来自 g_bake_object 的 <sha>.glb；缺省=对所有 part 合并网格自动蒙皮）；method="auto"（测地体素绑定，默认，平滑软体蒙皮）或 "rigid"（每顶点绑到最近单骨）。权重在前端按需求解、不写进 DSL，也不在后端存储。',
+    produces: 'skin',
+    params: [
+      { name: 'skeleton',       kinds: ['ref'],    required: true, desc: 'skeleton id' },
+      { name: 'mesh',           kinds: ['ref'],    desc: '可蒙皮网格 shape id（如 g_mesh(filename=<sha>.glb)）；缺省=对所有 part 合并网格自动蒙皮' },
+      { name: 'method',         kinds: ['string'], desc: '"auto"（测地体素绑定，默认）或 "rigid"（每顶点最近单骨刚性）' },
+      { name: 'resolution',     kinds: ['number'], desc: '体素分辨率启发值（32/48/64/128），默认 48：实际驱动前端测地求解器的顶点焊接容差（越高越保守），把互不共享顶点的各 part 缝进同一张连通图' },
+      { name: 'max_influences', kinds: ['number'], desc: '每顶点最大骨数（1..4），默认 2（低模更硬；要软可调到 4）' },
+      { name: 'falloff',        kinds: ['number'], desc: '权重随骨距衰减的指数，默认 4（越大越硬；旧默认 2 偏软易扯形变）' },
     ],
   },
 

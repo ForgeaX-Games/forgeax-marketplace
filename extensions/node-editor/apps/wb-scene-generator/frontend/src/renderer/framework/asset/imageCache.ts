@@ -16,12 +16,13 @@
 //   4. RenderLifecycle.projectChanged 自行 hook(整库失效)。shared 层只 emit 事件。
 
 import { RenderLifecycle } from '../lifecycle'
+import { pluginUrl } from '../../../api/pluginHttp'
 
 // ── URL 构造 ─────────────────────────────────────────────────────────────
 
 /** alias → HTTP URL(单租户,无 slug;<img src> 走浏览器原生 fetch) */
 export function getRegisteredAssetUrl(alias: string): string {
-  return `/api/v1/library/serve/${encodeURIComponent(alias)}`
+  return pluginUrl(`/api/v1/library/serve/${encodeURIComponent(alias)}`)
 }
 
 // ── 缓存核心 ─────────────────────────────────────────────────────────────
@@ -49,10 +50,11 @@ export function setServerImageResolver(
 
 /** Reverse getRegisteredAssetUrl(): pull the alias back out of the serve URL. */
 function aliasFromUrl(url: string): string | null {
-  const prefix = '/api/v1/library/serve/'
-  if (!url.startsWith(prefix)) return null
+  const marker = '/api/v1/library/serve/'
+  const idx = url.indexOf(marker)
+  if (idx < 0) return null
   try {
-    return decodeURIComponent(url.slice(prefix.length))
+    return decodeURIComponent(url.slice(idx + marker.length))
   } catch {
     return null
   }

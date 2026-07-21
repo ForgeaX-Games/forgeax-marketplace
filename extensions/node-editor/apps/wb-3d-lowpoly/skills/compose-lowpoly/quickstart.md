@@ -35,9 +35,11 @@ Phase 1 is a bake loop with no per-part gate.
 
 For a **scene** (see [part-c-scene-assembly.md](executions/part-c-scene-assembly.md)):
 per-unique-item `model.apply({bake})` (all in the same project) → reference assembly
-by giving each `part` an `origin` (one `<sha>.obj` reused across N instances). In
-scene mode treat `islands` as noise (auto-stitch joins jointless roots) and keep
-`aabb_overlap` as the hard placement signal.
+by giving each `part` an `origin` (one `<sha>.obj` reused across N instances). A
+jointless scene **auto-routes to the STATIC pipeline** (`g_geometry_qc → g_to_scene`),
+which merges every placed part into **one multi-material `.glb`** — there is **no
+URDF, no auto-stitch, and no `islands`/`floating_link`** in scene mode. Only overlap
+signals apply, and they are informational — fix obvious real clashes, not every AABB touch.
 
 The **`model.apply` receipt is the whole completion gate** — read it after every
 apply:
@@ -45,10 +47,19 @@ apply:
 - `errors` — parse / validate / unmapped-op, each mapped to a DSL line number. Fix
   that line and re-apply.
 - `qc` — `valid`, `islands`, `overlaps`, `missing_aabb`, `floating_links`,
-  `orphan_profiles`, plus structured `signals[]` with line numbers. Loop on any
-  non-empty code.
-- `meshQc` — mesh-aware interpenetration (needs `mesh` `bbox_min/max`); the hard
-  overlap signal, with concrete translation deltas to fix it.
+  `orphan_profiles`, plus structured `signals[]` with a per-signal `severity`
+  (`error`/`warning`/`note`). **Loop until `valid` is true / no `error`-severity
+  signal remains.** **`islands`/`floating_link` are the hard connectivity defects**
+  — a part with no joint path to the root gets silently dropped from the URDF, so
+  wire it in with `g_joint_*`. **`aabb_overlap`/`mesh_overlap` never fail `valid`**
+  — low-poly models often have benign rest-pose AABB touches (wall corners, embedded
+  frames, stair wells). Rigid fixed-joint overlaps emit `note`; moving-joint-chain
+  overlaps emit `warning`. Review case-by-case with `g_metrics max_penetration` /
+  `overlap_ratio`, but **do not detach or reposition parts just to silence overlap**
+  — that trades informational noise for a real `floating_link`/`islands` error.
+- `meshQc` — mesh-aware interpenetration (needs `mesh` `bbox_min/max`); same
+  note/warning split as `aabb_overlap` above. Only `joint_child_detached` on a moving
+  joint fails `clean`.
 - `urdf` — `fingerprint` (compare across iterations to confirm the output changed),
   `bytes`, and any `errors`.
 - Cross-check each part's size/AABB against the Phase-0 manifest to catch

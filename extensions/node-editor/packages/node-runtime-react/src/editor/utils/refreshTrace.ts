@@ -21,6 +21,7 @@ export type RefreshReason =
   | 'mount-deferred'
   | 'project-switch'
   | 'manual'
+  | 'autoexec-backfill'
 
 export interface RefreshPortStat {
   nodeId: string

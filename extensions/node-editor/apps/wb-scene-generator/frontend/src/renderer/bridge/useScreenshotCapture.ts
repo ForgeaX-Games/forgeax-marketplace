@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react'
 import type { PluginHandle } from '../framework/plugin'
 import { useRenderStore } from '../store'
+import { pluginFetch, pluginWsUrl } from '../../api/pluginHttp'
 
 // Whether the render store currently holds ANY renderable scene content. Used to
 // gate screenshot capture so we don't snapshot the empty `#000` canvas during the
@@ -49,7 +50,7 @@ function renderAndSettle(handle: PluginHandle | null): Promise<void> {
 export function useScreenshotCapture(handleRef: RefObject<PluginHandle | null>): void {
   useEffect(() => {
     if (typeof WebSocket === 'undefined' || typeof location === 'undefined') return
-    const url = `${location.origin.replace(/^http/, 'ws')}/ws`
+    const url = pluginWsUrl('/ws')
     let ws: WebSocket | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
     let attempts = 0
@@ -108,7 +109,7 @@ async function captureAndStore(
     if (!blob) return
     const reader = new FileReader()
     reader.onloadend = () => {
-      void fetch('/api/v1/agent/screenshot/store', {
+      void pluginFetch('/api/v1/agent/screenshot/store', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

@@ -28,7 +28,7 @@ GameScenario                         # src/runtime/schema/graph-schema.ts
 > - **只有「演出节点」，每个绑视频**；判断折进出边（handle `cond:N`/`else`/`opt:*`/`pass|good|fail`/`out`，边带 `weight`=加权随机）。跨节点记忆用变量+条件边。
 > - **三层心智**：edges=路由；reactions=副作用；overlays=UI。
 > - **一切声明式、可序列化、无函数**：条件 `GraphCondition`、效果 `GraphEffect`（value 可为 `{expr}`）。
-> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `component` / `params.component`（契约见 `src/runtime/skins/components/CONTRACT.md`）。
+> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `component`；统一 `OverlayProps` + `emit`（见 `rendererRegistry.tsx` / `skinRuntime.ts`）。
 > - 代码级权威：`graph-schema.ts` + `node-config-schema.ts` + `engine.ts` + demo `nodia.graph.json`。
 > - ⚠️ 旧 `Scenario/Scene → scenarioToBlueprint → 蓝图运行时`、以及 `gvid:*` 工具链已**退役删除**，勿再引用。
 

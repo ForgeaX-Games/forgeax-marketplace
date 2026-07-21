@@ -8,7 +8,8 @@
  */
 import type { GameGraph, GameScenario, Overlay, Reaction } from '../schema/graph-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
-import { deriveOutputs, getComponent, hasPlugin } from '../registry/component-registry'
+import { deriveOutputs, getComponent } from '../registry/component-registry'
+import { defaultNodeKindRegistry, resolveNodeType } from '../nodes'
 
 export interface Issue {
   level: 'error' | 'warn'
@@ -103,8 +104,12 @@ function checkInstantCycle(graph: GameGraph, overlays: Record<string, Overlay> |
       .filter((n) => {
         const children = expandNodeOverlays(overlays, n).flatMap((i) => i.children)
         const hasMedia = !!n.data.media?.ref
-        const hasInteraction = children.some((el) => getComponent(el.component)?.role === 'interaction')
-        return !hasMedia && !n.data.durationMs && !hasInteraction
+        const hasEvents = children.some(
+          (el) => (getComponent(el.component)?.events?.length ?? 0) > 0
+            || (Array.isArray((el.inputs as { events?: unknown })?.events)
+              && ((el.inputs as { events: unknown[] }).events.length > 0)),
+        )
+        return !hasMedia && !n.data.durationMs && !hasEvents
       })
       .map((n) => n.id),
   )
@@ -163,7 +168,14 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
   }
 
-  // 2) overlay children component：是否注册 + 参数校验
+  // 2) 节点 type：必须解析到已注册 NodeKind（运行时会静默回退 perf，这里 fail-loud）。
+  for (const n of graph.nodes) {
+    if (!defaultNodeKindRegistry.get(resolveNodeType(n))) {
+      issues.push({ level: 'error', code: 'node.type.unknown', msg: `节点 type '${n.type}' 未注册 NodeKind`, at: n.id })
+    }
+  }
+
+  // 3) overlay children component：是否注册 + 参数校验
   for (const n of graph.nodes) {
     const children = expandNodeOverlays(overlays, n).flatMap((i) => i.children)
     for (const el of children) {
@@ -188,7 +200,7 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
   }
 
-  // 3) 不可达节点（从 nodes[0] BFS）
+  // 4) 不可达节点（从 nodes[0] BFS）
   if (graph.nodes.length > 0) {
     const start = graph.nodes[0]!.id
     const adj = new Map<string, string[]>()
@@ -215,10 +227,10 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
   }
 
-  // 4) 纯瞬时环告警（静态）
+  // 5) 纯瞬时环告警（静态）
   checkInstantCycle(graph, overlays, issues)
 
-  // 5) 引用检查（需 opts 提供已声明的 entity/var/item id）：condition/effect/expr + reactions
+  // 6) 引用检查（需 opts 提供已声明的 entity/var/item id）：condition/effect/expr + reactions
   if (opts) {
     const ctx: RefCtx = {
       entities: new Set(opts.entities ?? []),
@@ -278,7 +290,7 @@ function mutatesAttr(value: unknown, attr: string): boolean {
 }
 
 /**
- * 校验整份 GameScenario：graph 结构 + requiredPlugins + 致死 attr 无出口 warning。
+ * 校验整份 GameScenario：graph 结构 + 致死 attr 无出口 warning。
  * load / 保存前应走这里（fail-loud：error 级禁止静默降级）。
  */
 export function validateScenario(scenario: GameScenario): Issue[] {
@@ -288,18 +300,6 @@ export function validateScenario(scenario: GameScenario): Issue[] {
     reactions: scenario.reactions,
     overlays: scenario.ui?.overlays,
   })
-
-  for (const req of scenario.requiredPlugins ?? []) {
-    if (!hasPlugin(req.id, req.version)) {
-      const ver = req.version ? `@${req.version}` : ''
-      issues.push({
-        level: 'error',
-        code: 'plugin.missing',
-        msg: `required plugin '${req.id}${ver}' is not registered`,
-        at: 'requiredPlugins',
-      })
-    }
-  }
 
   const zeroable = new Set<string>(['hp'])
   for (const ent of Object.values(scenario.entities ?? {})) {

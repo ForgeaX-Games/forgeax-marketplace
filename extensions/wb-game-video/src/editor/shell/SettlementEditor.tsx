@@ -5,6 +5,7 @@
  */
 import type { CSSProperties, JSX, ReactNode } from 'react'
 import type { Entity, GameNode, GraphEffect, Overlay, Variable } from '../../runtime/schema/graph-schema'
+import type { Formula } from '../persist/formula-authoring'
 import type { OutcomeView, SettlementSpawn } from '../video/graphMaterialOps'
 import { flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { EffectsEditor } from './editors'
@@ -21,6 +22,7 @@ export interface SettlementEditorProps {
   nodeDurMs: number
   entities?: Record<string, Entity>
   variables?: Record<string, Variable>
+  formulas?: Record<string, Formula>
   onSetTarget: (key: string, targetId: string) => void
   onSetEffects: (key: string, effects: GraphEffect[]) => void
   onSetSpawn: (key: string, spawn: SettlementSpawn | undefined) => void
@@ -48,6 +50,7 @@ export function SettlementEditor({
   nodeDurMs,
   entities,
   variables,
+  formulas,
   onSetTarget,
   onSetEffects,
   onSetSpawn,
@@ -110,12 +113,16 @@ export function SettlementEditor({
               value={b.effects}
               entities={entities}
               variables={variables}
+              formulas={formulas}
               onChange={(effects) => onSetEffects(b.key, effects)}
             />
             <SettlementSpawnEditor
               value={b.spawn}
               templates={spawnTemplates}
               overlays={overlays}
+              entities={entities}
+              variables={variables}
+              formulas={formulas}
               maxTtlMs={nodeDurMs}
               hasJump={!!b.targetId}
               onChange={(spawn) => onSetSpawn(b.key, spawn)}

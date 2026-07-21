@@ -34,9 +34,10 @@
 
 | 允许 | 禁止 |
 |------|------|
-| `connect` / `disconnect` / `updateNode` | 顶层 `createNode` 非白名单电池 |
+| `connect`（`source`/`target` 的 `port` 可以是字符串 `in_N`/`out_N`，也可以是 `{label:"..."}`） / `disconnect` / `updateNode` | 顶层 `createNode` 非白名单电池 |
 | 顶层 composer 工具电池（见 `scene:composerUtilities.list`） | 顶层手搓模板 / `createGroup` / 任意 `alg_*` / `rect_grid` … |
-| `opts.actor:"ai:sino"`（身份标记） | 用 applyBatch **新建**模板组本体 |
+| `appendMergeItem`（往 `tree_merge` 追加一路，复合展开成 `updateNode`+`connect`，2026-07-15 新增） | 用 applyBatch **新建**模板组本体 |
+| `opts.actor:"ai:sino"`（身份标记） | |
 
 **422 含义：** 你在通道 B 里放了只该走通道 A 的东西 → **改调 `instantiateTemplate`**，不是「等平台加白名单」。
 
@@ -48,7 +49,7 @@
 |------|----------|----------|
 | `applyBatch` **422** + `sino-op-not-allowed` | 通道 B 顶层放了非白名单电池 / 想手搭模板内部 | `instantiateTemplate("<组名>")` |
 | `instantiateTemplate` **ok** + `graphVerified:true` | 通道 A 成功 | 走通道 B **只 connect** |
-| `execute` **completed** 但某组 **out 空 / `{}`** | **in_* 悬空或端口名错**（如 `manual_points.points` 应为 **`point`**） | `pipeline.get` 查边；**不是**白名单 |
+| `execute` **completed** 但某组 **out 空 / `{}`** | **in_* 悬空或端口名错**（如 `manual_points.points` 应为 **`point`**），**也可能是拓扑问题**（Rest fan-out / 局部非法 merge） | 先看这次 `execute` 返回的 `verification.topologyIssues`（2026-07-15 新增，命中会直接抛错并带 `suggestedOps`）；排除拓扑问题后再 `pipeline.get` 查边；**不是**白名单 |
 | `pipeline.get` 的 `id` ≠ 你的 `projectId` | lock drift / 读错项目 | 停；重新 open + 显式 projectId |
 | 向用户问「手动链 vs 等白名单」 | agent 误判 | **禁止**；按上表修 |
 
@@ -61,7 +62,7 @@ instantiateTemplate(模板组)     ← 通道 A（一拍可 instantiate 多组�
 → pipeline.get(确认 groupId)
 → applyBatch(仅 connect + panels) ← 通道 B（一次可连完这一拍的多组 Rest 链）
 → pipeline.get(确认边)
-→ pipeline.execute → 读摘要里的 verification.hints
+→ pipeline.execute → 读摘要里的 verification.hints 与 verification.topologyIssues
 → 下一拍（Rest 链接；依赖上游结果处分步，见 fast-loop.md「可分步批量」）
 ```
 

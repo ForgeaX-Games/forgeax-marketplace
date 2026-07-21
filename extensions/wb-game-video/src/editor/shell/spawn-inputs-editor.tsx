@@ -3,9 +3,10 @@
  * 落盘仍为 Record（字面量 或 {expr}/{ref}）；不碰嵌套 JSON。
  */
 import type { CSSProperties, JSX } from 'react'
-import type { Overlay } from '../../runtime/schema/graph-schema'
+import type { NumOrExpr, Overlay } from '../../runtime/schema/graph-schema'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
+import { ValueInput, type EditorPickerCtx } from './editors'
 
 type BindMode = 'literal' | 'expr' | 'ref'
 
@@ -114,11 +115,13 @@ export function SpawnInputsEditor({
   from,
   inputs,
   overlays,
+  pickers,
   onChange,
 }: {
   from: string
   inputs: Record<string, unknown> | undefined
   overlays?: Record<string, Overlay>
+  pickers?: EditorPickerCtx
   onChange: (next: Record<string, unknown> | undefined) => void
 }): JSX.Element {
   const inputDefs = resolveSpawnInputs(from, overlays)
@@ -156,14 +159,27 @@ export function SpawnInputsEditor({
         <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 4 }}>该组件未声明入参，可手动加键</div>
       ) : null}
       {inputDefs.map((inp) => (
-        <ParamRow
-          key={inp.key}
-          inputKey={inp.key}
-          label={inp.label?.trim() || inp.key}
-          valueType={inp.valueType}
-          value={bag[inp.key]}
-          onChange={(v) => patchKey(inp.key, v)}
-        />
+        inp.component === 'numberExpr' ? (
+          <div key={inp.key} style={rowStyle}>
+            <span style={keyLbl} title={inp.key}>{inp.label?.trim() || inp.key}</span>
+            <ValueInput
+              value={bag[inp.key] as NumOrExpr | undefined}
+              entities={pickers?.entities}
+              variables={pickers?.variables}
+              formulas={pickers?.formulas}
+              onChange={(v) => patchKey(inp.key, v)}
+            />
+          </div>
+        ) : (
+          <ParamRow
+            key={inp.key}
+            inputKey={inp.key}
+            label={inp.label?.trim() || inp.key}
+            valueType={inp.valueType}
+            value={bag[inp.key]}
+            onChange={(v) => patchKey(inp.key, v)}
+          />
+        )
       ))}
       {extras.map((key) => (
         <ParamRow

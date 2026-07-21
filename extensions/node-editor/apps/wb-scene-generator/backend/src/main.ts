@@ -8,8 +8,11 @@ import { registerScreenshotRoutes } from './agent/routes.js'
 import { registerRendererAgentRoutes } from './agent/rendererRoutes.js'
 import { registerLibraryRoutes } from './library/routes.js'
 import { registerPrivateLibraryRoutes } from './library/privateRoutes.js'
+import { registerMaterialsRoutes } from './materials/routes.js'
+import { registerObjectModelRoutes } from './models/routes.js'
 import { registerBakedRoutes } from './baked/routes.js'
 import { registerSceneExportRoutes } from './scene-export/routes.js'
+import { registerMesh3dExportRoutes } from './mesh3d-export/routes.js'
 import { registerProjectRoutes } from './routes/projects.js'
 import { registerGroupTemplateRoutes } from './routes/groupTemplates.js'
 import { registerAssetRoutes } from './routes/assets.js'
@@ -35,8 +38,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerRendererAgentRoutes(app)
   await registerLibraryRoutes(app)
   await registerPrivateLibraryRoutes(app)
+  await registerMaterialsRoutes(app)
+  await registerObjectModelRoutes(app)
   await registerBakedRoutes(app)
   await registerSceneExportRoutes(app)
+  await registerMesh3dExportRoutes(app)
   await registerProjectRoutes(app)
   await registerGroupTemplateRoutes(app)
   await registerAssetRoutes(app)

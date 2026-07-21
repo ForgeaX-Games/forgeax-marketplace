@@ -18,6 +18,7 @@ import {
 import { usePipelineStore } from '../stores/pipelineStore.js'
 import { useHistoryStore } from '../stores/historyStore.js'
 import { createEmptyPipeline } from '../stores/pipelineStore.helpers.js'
+import { isTooLargeOutputSummary } from '../utils/tooLargeOutputSummary.js'
 
 function spec(id: string, name: string, outputs: OpSpec['outputs'] = []): OpSpec {
   return { id, name, inputs: [], outputs, params: [], execute: () => null }
@@ -351,6 +352,127 @@ describe('pipelineStore live-sync backbone', () => {
     ])
   })
 
+  it('refreshConnectedOutputs stops re-fetching a port once the batch route reports it tooLarge at a stable hash', async () => {
+    // Regression test for a real production trace: a structural merge node
+    // (n_merge/tree) that always resolves >100MB always came back `tooLarge`
+    // from the batch value-fetch, but because a tooLarge response never calls
+    // setNodeOutput(), `cached` stayed undefined forever — so the metaOnly
+    // "did this change?" check saw `cached === undefined` and reclassified the
+    // port as "changed" on every single refresh pass, re-paying the whole
+    // tooLarge round trip each time (observed: 17 repeats / ~5s wasted in one
+    // project-switch capture). Once the backend has said tooLarge for a given
+    // executedHash, a later pass with the *same* hash must not re-issue the
+    // value fetch for that port at all.
+    client.__reset({
+      ops: [spec('scene.big', 'Big', [{ name: 'tree', type: 'scene', access: 'item' }])],
+      nodes: [{ id: 'merge', opId: 'scene.big', position: { x: 0, y: 0 }, params: {} }],
+    })
+    await usePipelineStore.getState().loadBatteries()
+    await usePipelineStore.getState().loadPipeline()
+
+    const meta = { executedHash: 'h1', valid: true, sharded: true, dataChunks: 40 }
+    let metaCalls = 0
+    let valueCalls = 0
+    ;(
+      client as unknown as {
+        getNodeOutputsBatch: (
+          ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+          opts?: { metaOnly?: boolean },
+        ) => Promise<
+          ReadonlyArray<{
+            nodeId: string
+            portId: string
+            value?: unknown
+            meta: typeof meta | null
+            tooLarge?: boolean
+          }>
+        >
+      }
+    ).getNodeOutputsBatch = vi.fn(async (ports, opts) => {
+      if (opts?.metaOnly) {
+        metaCalls += 1
+        return ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId, meta }))
+      }
+      valueCalls += 1
+      return ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId, value: null, meta, tooLarge: true }))
+    })
+
+    await usePipelineStore.getState().refreshConnectedOutputs()
+    expect(metaCalls).toBe(1)
+    expect(valueCalls).toBe(1) // first pass: hash is unseen, must ask once
+
+    const summary = usePipelineStore.getState().nodeOutputs.merge?.tree
+    expect(isTooLargeOutputSummary(summary)).toBe(true)
+    if (isTooLargeOutputSummary(summary)) {
+      expect(summary.portType).toBe('scene')
+      expect(summary.dataChunks).toBe(40)
+      expect(summary.sharded).toBe(true)
+    }
+
+    await usePipelineStore.getState().refreshConnectedOutputs()
+    expect(metaCalls).toBe(2)
+    expect(valueCalls).toBe(1) // second pass: same hash already known tooLarge — no re-fetch
+
+    await usePipelineStore.getState().refreshConnectedOutputs()
+    expect(valueCalls).toBe(1) // stays settled across further passes too
+  })
+
+  it('refreshConnectedOutputs hydrates a Phase-2 blob-ref envelope before storing the output', async () => {
+    // See wb-scene-generator-scene-tree-storage.md §3: the backend may ship a
+    // deduped envelope for a sharded port instead of `tooLarge` — `value` still
+    // has the DataTreeEntry[] shape, but a repeated field is replaced by
+    // `{ __outputCacheBlobRef }`, with the one real copy in `blobs`. The store
+    // must hydrate this BEFORE setNodeOutput so nodeOutputs never holds a raw
+    // blob-ref sentinel.
+    client.__reset({
+      ops: [spec('scene.decor', 'Decor', [{ name: 'tree', type: 'scene', access: 'item' }])],
+      nodes: [{ id: 'decor', opId: 'scene.decor', position: { x: 0, y: 0 }, params: {} }],
+    })
+    await usePipelineStore.getState().loadBatteries()
+    await usePipelineStore.getState().loadPipeline()
+
+    const meta = { executedHash: 'h1', valid: true, sharded: true, dataChunks: 2 }
+    const sharedTree = { name: 'root', blob: 'shared' }
+    ;(
+      client as unknown as {
+        getNodeOutputsBatch: (
+          ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+          opts?: { metaOnly?: boolean },
+        ) => Promise<
+          ReadonlyArray<{
+            nodeId: string
+            portId: string
+            value?: unknown
+            blobs?: Record<string, unknown>
+            meta: typeof meta | null
+          }>
+        >
+      }
+    ).getNodeOutputsBatch = vi.fn(async (ports, opts) => {
+      if (opts?.metaOnly) return ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId, meta }))
+      return ports.map((p) => ({
+        nodeId: p.nodeId,
+        portId: p.portId,
+        value: [
+          { path: [0], items: [{ tree: { __outputCacheBlobRef: 'hash1' }, focus: '/a' }] },
+          { path: [1], items: [{ tree: { __outputCacheBlobRef: 'hash1' }, focus: '/b' }] },
+        ],
+        blobs: { hash1: sharedTree },
+        meta,
+      }))
+    })
+
+    await usePipelineStore.getState().refreshConnectedOutputs()
+
+    const got = usePipelineStore.getState().nodeOutputs.decor?.tree as Array<{
+      items: Array<{ tree: unknown; focus: string }>
+    }>
+    expect(got).toEqual([
+      { path: [0], items: [{ tree: sharedTree, focus: '/a' }] },
+      { path: [1], items: [{ tree: sharedTree, focus: '/b' }] },
+    ])
+  })
+
   it('autoExecuteOnOpen runs when some visible outputs are missing (partial cache)', async () => {
     client.__reset({
       ops: [
@@ -406,6 +528,74 @@ describe('pipelineStore live-sync backbone', () => {
 
     await usePipelineStore.getState().autoExecuteOnOpen()
 
+    expect(execSpy).not.toHaveBeenCalled()
+  })
+
+  it('autoExecuteOnOpen scopes execute to the missing node, not the whole graph, when only one node is stale', async () => {
+    // Regression for the "every project open/switch pays a full-graph
+    // recompute" bug: nodeOutputs is wiped on every switch, so a single
+    // never-fetched port used to make autoExecuteOnOpen call executePipeline()
+    // with NO nodeId (a full re-run of every node). It should instead scope
+    // the real compute to just the stale node's downstream closure.
+    client.__reset({
+      ops: [spec('a.one', 'One', [{ name: 'out', type: 'any', access: 'item' }])],
+    })
+    const execSpy = vi.spyOn(client, 'execute')
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [
+          { id: 'a', batteryId: 'a.one', name: 'a', position: { x: 0, y: 0 }, params: {} },
+          { id: 'b', batteryId: 'a.one', name: 'b', position: { x: 200, y: 0 }, params: {} },
+          { id: 'c', batteryId: 'a.one', name: 'c', position: { x: 400, y: 0 }, params: {} },
+        ],
+        edges: [{ id: 'e1', source: { nodeId: 'a', port: 'out' }, target: { nodeId: 'b', port: 'out' } }],
+      },
+      // `a` and `c` are already hydrated; only `b` is missing.
+      nodeOutputs: { a: { out: 'valA' }, c: { out: 'valC' } },
+    })
+    await usePipelineStore.getState().loadBatteries()
+
+    await usePipelineStore.getState().autoExecuteOnOpen()
+
+    expect(execSpy).toHaveBeenCalledTimes(1)
+    expect(execSpy.mock.calls[0][0]).toMatchObject({ nodeId: 'b' })
+  })
+
+  it('autoExecuteOnOpen backfills a missing port from the output cache instead of executing when disk cache is warm', async () => {
+    // Client-side `nodeOutputs` gets wiped on every project switch, but the
+    // disk-backed output cache is often still valid — a plain re-fetch should
+    // resolve that gap before falling back to a real recompute.
+    client.__reset({
+      ops: [spec('a.one', 'One', [{ name: 'out', type: 'any', access: 'item' }])],
+    })
+    const execSpy = vi.spyOn(client, 'execute')
+    ;(
+      client as unknown as {
+        getNodeOutputsBatch: (
+          ports: ReadonlyArray<{ nodeId: string; portId: string }>,
+          opts?: { metaOnly?: boolean },
+        ) => Promise<ReadonlyArray<{ nodeId: string; portId: string; value?: unknown; meta: unknown }>>
+      }
+    ).getNodeOutputsBatch = vi.fn(async (ports, opts) => {
+      const meta = { executedHash: 'h1', valid: true, sharded: false }
+      if (opts?.metaOnly) return ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId, meta }))
+      return ports.map((p) => ({ nodeId: p.nodeId, portId: p.portId, value: 'from-disk-cache', meta }))
+    })
+
+    usePipelineStore.setState({
+      currentPipeline: {
+        ...createEmptyPipeline(),
+        nodes: [{ id: 'a', batteryId: 'a.one', name: 'a', position: { x: 0, y: 0 }, params: {} }],
+      },
+      nodeOutputs: {},
+    })
+    await usePipelineStore.getState().loadBatteries()
+
+    await usePipelineStore.getState().autoExecuteOnOpen()
+
+    expect(usePipelineStore.getState().nodeOutputs.a?.out).toBe('from-disk-cache')
     expect(execSpy).not.toHaveBeenCalled()
   })
 

@@ -73,10 +73,18 @@ function stringifyForPanel(val: unknown): string {
   }
 }
 
+function panelTextFromParams(params: Record<string, unknown> | undefined): string {
+  if (typeof params?.text === 'string' && params.text.trim()) return params.text
+  // Agents sometimes write number_const's `value` key onto text_panel.
+  if (typeof params?.value === 'string') return params.value
+  if (typeof params?.text === 'string') return params.text
+  return ''
+}
+
 function TextPanelNode({ id, data, selected, dragging }: NodeProps<TextPanelNodeData>) {
   const { params } = data
   const [isEditing, setIsEditing] = useState(false)
-  const [localText, setLocalText] = useState(typeof params.text === 'string' ? params.text : '')
+  const [localText, setLocalText] = useState(panelTextFromParams(params))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // Debounce timer that triggers downstream execution from keyboard input.
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -197,6 +205,13 @@ function TextPanelNode({ id, data, selected, dragging }: NodeProps<TextPanelNode
       }
     }
   }, [id])
+
+  // External applyBatch / store updates may heal `value`→`text`; keep UI in sync
+  // when the user is not actively typing.
+  useEffect(() => {
+    if (isEditing) return
+    setLocalText(panelTextFromParams(params))
+  }, [params.text, params.value, isEditing])
 
   // Open the title-input popover (or shake when empty). The actual save happens
   // on confirm, where we have the user-entered title.

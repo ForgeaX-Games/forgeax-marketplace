@@ -15,7 +15,7 @@
 - 盖在视频上的 QTE/血条/选择等 = `src/runtime/skins/components/` 下**自闭环、可替换、带错误边界**的组件，图里只记 `component` id。
 - 应用外壳 `src/GraphApp.tsx`（split-pane：`?pane=left` 侧栏 / `?pane=center` 主区，`graphViewStore` + BroadcastChannel 同步当前 tab）。
 - **AI 工具**（`server/tool-handlers.ts`）：`gvid:get-graph` / `gvid:save-graph` / `gvid:list-videos` —— AI 与人共同读/改同一份 GameGraph。
-- 硬性规则（Schema / Runtime / 持久化 / 皮肤组件）见 **[`AGENTS.md`](./AGENTS.md)**；组件契约见 **[`skins/CONTRACT.md`](./src/runtime/skins/components/CONTRACT.md)**；AI 调用见 **[`SKILL.md`](./SKILL.md)**。
+- 硬性规则（Schema / Runtime / 持久化 / 皮肤组件）见 **[`AGENTS.md`](./AGENTS.md)**；皮肤注册与 props 见 `src/runtime/skins/rendererRegistry.tsx`；AI 调用见 **[`SKILL.md`](./SKILL.md)**。
 
 > ⚠️ **旧 FMV 内容生产整套（剧本/图像/剧情树/Seedance 视频生成/素材库：`scenario/`、`llm/`、`media/`、`editor/`、`player/`、`forge/` 等 + 17 个 `gvid:*` 视频工具）已于 2026-07-09 一刀切物理删除**；更早的旧蓝图引擎（`scenarioToBlueprint` / `blueprint-schema` / `blueprint/runtime` / `BlueprintPlayer`）亦不存在。任何 `Scene→Blueprint 编译`、`蓝图状态机运行时`、`gvid:*-scenario`/`generate-*` 的旧说法均已作废。
 
@@ -35,7 +35,7 @@ npx tsc --noEmit       # 类型检查（当前全绿）
 | 你要 | 看 |
 |---|---|
 | 玩法引擎硬性规则 / 关键目录 / 坑 / Backlog | [`AGENTS.md`](./AGENTS.md) |
-| 皮肤/HUD/QTE 组件契约（props/submit/自闭环/错误隔离） | [`src/runtime/skins/components/CONTRACT.md`](./src/runtime/skins/components/CONTRACT.md) |
+| 皮肤 props / 注册 / 自闭环工具 | [`rendererRegistry.tsx`](./src/runtime/skins/rendererRegistry.tsx) · [`components/index.ts`](./src/runtime/skins/components/index.ts) · [`skinRuntime.ts`](./src/runtime/skins/components/skinRuntime.ts) |
 | AI 工具调用（get/save/list GameGraph） | [`SKILL.md`](./SKILL.md)（trigger `/gamevideo`） |
 | 引擎设计规格 + 分期 + 实施状态 | `<repo>/docs/superpowers/specs/2026-07-06-wb-game-video-blueprint-orchestration-design.md` |
 | 插件声明（surface / tool / port / permissions） | `forgeax-extension.json` |

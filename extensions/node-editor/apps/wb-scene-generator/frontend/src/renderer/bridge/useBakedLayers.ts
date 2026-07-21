@@ -9,6 +9,8 @@ import { deferBakedLayersRefresh, hasLocalBakedLayerEdits, useRenderStore } from
 import { bakedApi, type BakedLayersMode } from './bakedApi'
 import { readEditMode, subscribeEditMode } from '../../surfaces/library/editToolbarBus'
 import { syncTrace, syncTraceHintOnce } from '../../debug/syncTrace.js'
+import { beginLoadingTask, endLoadingTask } from './loadingSignals.js'
+import type { HttpApiClient } from '../../api/HttpApiClient'
 
 let projectRevision = 0
 let viewingProjectId: string | null = null
@@ -33,55 +35,67 @@ export async function refreshBakedLayers(
     deferBakedLayersRefresh()
     return
   }
+  beginLoadingTask('baked')
   try {
-    const layers = await bakedApi.list(mode)
-    if (!Array.isArray(layers)) return
+    const result = await bakedApi.listResult(mode)
     if (revision !== projectRevision) return
-    syncTrace('baked:refresh-done', { layerCount: layers.length, mode })
-    useRenderStore.getState().setBakedLayers(layers, { summary: mode === 'summary' })
+    if (result.truncated && result.layers.length === 0) {
+      // Never wipe Editable with an oversized-file empty response (common right
+      // after Bake selected on large scenes when WS fires baked:changed → summary).
+      syncTrace('baked:refresh-skipped-truncated-empty', { mode })
+      console.warn('[baked] layer refresh skipped: baked-scene.json too large (truncated empty)')
+      return
+    }
+    if (!Array.isArray(result.layers)) return
+    syncTrace('baked:refresh-done', { layerCount: result.layers.length, mode, truncated: result.truncated })
+    useRenderStore.getState().setBakedLayers(result.layers, { summary: mode === 'summary' })
   } catch (e) {
     syncTrace('baked:refresh-error', { error: String(e) })
+    // Full cell load can fail on huge trees; fall back to summary so Editable still lists.
+    if (mode === 'full') {
+      try {
+        const summary = await bakedApi.listResult('summary')
+        if (revision !== projectRevision) return
+        if (summary.truncated && summary.layers.length === 0) {
+          console.warn('[baked] layer refresh failed and summary truncated', e)
+          return
+        }
+        useRenderStore.getState().setBakedLayers(summary.layers, { summary: true })
+        return
+      } catch {
+        // fall through
+      }
+    }
     // Leave the current bucket intact on a transient fetch error.
     console.warn('[baked] layer refresh failed', e)
+  } finally {
+    endLoadingTask('baked')
   }
 }
 
 function refreshBakedLayersForProject(): void {
   projectRevision += 1
+  beginLoadingTask('baked')
   void (async () => {
     const revision = projectRevision
     const mode = readEditMode() ? 'full' : 'summary'
     try {
-      const layers = await bakedApi.list(mode)
-      if (!Array.isArray(layers) || revision !== projectRevision) return
+      const result = await bakedApi.listResult(mode)
+      if (revision !== projectRevision) return
       const store = useRenderStore.getState()
       store.clearBakedLayers()
-      store.setBakedLayers(layers, { summary: mode === 'summary' })
+      if (result.truncated && result.layers.length === 0) {
+        console.warn('[baked] project switch: baked-scene.json too large (truncated empty)')
+        return
+      }
+      if (!Array.isArray(result.layers)) return
+      store.setBakedLayers(result.layers, { summary: mode === 'summary' })
     } catch (e) {
       console.warn('[baked] project switch refresh failed', e)
+    } finally {
+      endLoadingTask('baked')
     }
   })()
-}
-
-function projectIdFromRuntimeMessage(msg: { event?: string; payload?: unknown }): {
-  kind: 'viewing' | null
-  projectId: string | null
-} {
-  if (msg.event !== 'runtime' || !msg.payload || typeof msg.payload !== 'object') {
-    return { kind: null, projectId: null }
-  }
-  const payload = msg.payload as { kind?: unknown; projectId?: unknown }
-  if (payload.kind === 'project:viewing') {
-    return {
-      kind: 'viewing',
-      projectId: typeof payload.projectId === 'string' ? payload.projectId : null,
-    }
-  }
-  // Ignore legacy project:activated alias — backend broadcasts both and would double-fetch.
-  if (payload.kind === 'project:activated') {
-    return { kind: null, projectId: null }
-  }
-  return { kind: null, projectId: null }
 }
 
 /** Ignore baked mutations for projects the preview iframe is not showing. */
@@ -105,7 +119,7 @@ function scheduleBakedChangedRefresh(payload: unknown): void {
 }
 
 /** Load baked layers and keep them synced with backend baked mutations. */
-export function useBakedLayers(): void {
+export function useBakedLayers(client: HttpApiClient): void {
   useEffect(() => {
     syncTraceHintOnce()
     // Defer so preview/asset-store iframes paint before the baked browse fetch.
@@ -118,21 +132,18 @@ export function useBakedLayers(): void {
       activeProjectId = nextProjectId
       refreshBakedLayersForProject()
     }
-    let ws: WebSocket | null = null
-    if (typeof WebSocket !== 'undefined' && typeof location !== 'undefined') {
-      ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws`)
-      ws.onmessage = (ev) => {
-        let msg: { event?: string; payload?: unknown }
-        try {
-          msg = JSON.parse(ev.data as string)
-        } catch {
-          return
-        }
-        if (msg.event === 'baked:changed') scheduleBakedChangedRefresh(msg.payload)
-        const runtime = projectIdFromRuntimeMessage(msg)
-        if (runtime.kind === 'viewing') handleProjectChanged(runtime.projectId ?? undefined)
-      }
-    }
+    // Shares the SAME `/ws` connection `useNodePreviews`/`useAliasMetas` use
+    // via `client` (see HttpApiClient.ensureSocket) instead of opening a 3rd
+    // independent `new WebSocket(...)` from this hook alone. `baked:changed`
+    // has no `{event:'runtime', payload:{kind}}` envelope, so it rides
+    // `subscribeRaw`; `project:viewing` is a typed kernel workspace-lifecycle
+    // event on the `graph` channel. Ignore the legacy `project:activated`
+    // alias — the backend broadcasts BOTH for one switch and reacting to it
+    // too would double-fetch.
+    const unsubBaked = client.subscribeRaw('baked:changed', (payload) => scheduleBakedChangedRefresh(payload))
+    const unsubGraph = client.subscribe('graph', (e) => {
+      if (e.kind === 'project:viewing') handleProjectChanged(e.projectId)
+    })
     const onWorkbenchMessage = (event: MessageEvent) => {
       const data = event.data as { type?: unknown; projectId?: unknown } | null
       if (!data || data.type !== 'workbench:project-changed') return
@@ -146,8 +157,9 @@ export function useBakedLayers(): void {
       clearTimeout(initialTimer)
       unsubEdit()
       if (bakedChangedTimer) clearTimeout(bakedChangedTimer)
-      ws?.close()
+      unsubBaked()
+      unsubGraph()
       window.removeEventListener('message', onWorkbenchMessage)
     }
-  }, [])
+  }, [client])
 }

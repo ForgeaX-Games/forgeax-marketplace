@@ -9,6 +9,12 @@ import type { ReactNode } from 'react'
 import { getEditorTransport } from '../../transport/index.js'
 import { useProjectStore } from '../../stores/projectStore.js'
 import type { ImportTemplate, ProjectMeta } from '@forgeax/node-runtime'
+import {
+  formatProjectTimestamp,
+  formatWhenFull,
+  pt,
+  useProjectLocale,
+} from './projectI18n.js'
 import './ProjectsDialog.css'
 
 export interface ProjectExecutionLock {
@@ -68,10 +74,66 @@ function uniqueProjectName(base: string, existing: readonly ProjectMeta[]): stri
   }
 }
 
+function RenameIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+      />
+    </svg>
+  )
+}
+
+function DeleteIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 6h18M8 6V4h8v2m-1 0v14H9V6"
+      />
+    </svg>
+  )
+}
+
+export function SaveIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"
+      />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M17 21v-8H7v8M7 3v5h8"
+      />
+    </svg>
+  )
+}
+
+export { formatProjectTimestamp } from './projectI18n.js'
+
 export function ProjectCard({
   project,
   isActive,
   isSwitching,
+  showProjectType = true,
   lockLabel,
   executingLock,
   pipelineRun,
@@ -84,6 +146,8 @@ export function ProjectCard({
   project: ProjectMeta
   isActive: boolean
   isSwitching: boolean
+  /** When false, hide the type pill (e.g. all projects share one domain type). */
+  showProjectType?: boolean
   /** @deprecated Prefer executingLock — kept for custom lockLabelOf overrides. */
   lockLabel?: string | null
   /** When set, the project is held by an agent — render an executing badge. */
@@ -92,68 +156,90 @@ export function ProjectCard({
   pipelineRun?: ActivePipelineRunInfo | null
   /** When false, the Delete action is disabled (e.g. the last remaining project). */
   canDelete?: boolean
-  /** Optional extra action(s) injected into the card's action column (e.g. Save). */
+  /** Optional extra action(s) injected into the card toolbar (e.g. Save). */
   extraActions?: ReactNode
   onActivate: () => void
   onRename: (name: string) => void
   onRequestDelete: () => void
 }): JSX.Element {
+  const locale = useProjectLocale()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(project.name)
   const executingLabel =
     lockLabel ?? (executingLock ? formatProjectLockLabel(executingLock, project.name) : null)
   const pipelineLabel = pipelineRun ? formatPipelineRunLabel(pipelineRun) : null
+  const createdLabel = formatProjectTimestamp(project.createdAt, 'created', locale)
+  const editedLabel = formatProjectTimestamp(project.updatedAt, 'edited', locale)
+  const metaParts = [createdLabel, editedLabel].filter(Boolean)
+  const metaTitle = [formatWhenFull(project.createdAt, locale), formatWhenFull(project.updatedAt, locale)]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div className={`proj-card${isActive ? ' proj-card--active' : ''}${executingLock || pipelineRun ? ' proj-card--executing' : ''}`}>
-      <button type="button" className="proj-card__open" disabled={isSwitching} onClick={onActivate}>
-        <span className="proj-card__type">{project.type}</span>
-        {editing ? (
-          <input
-            className="proj-card__name-input"
-            value={name}
-            autoFocus
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => {
-              setEditing(false)
-              if (name.trim() && name !== project.name) onRename(name.trim())
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-            }}
-          />
-        ) : (
-          <span className="proj-card__name">{project.name}</span>
-        )}
-        <span className="proj-card__badges">
-          {isActive && <span className="proj-card__badge proj-card__badge--viewing">Viewing</span>}
-          {pipelineLabel && (
-            <span className="proj-card__badge proj-card__badge--pipeline" title={pipelineLabel}>
-              {pipelineLabel}
+      <div className="proj-card__inner">
+        <button type="button" className="proj-card__open" disabled={isSwitching} onClick={onActivate}>
+          {showProjectType && <span className="proj-card__type">{project.type}</span>}
+          {editing ? (
+            <input
+              className="proj-card__name-input"
+              value={name}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => {
+                setEditing(false)
+                if (name.trim() && name !== project.name) onRename(name.trim())
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              }}
+            />
+          ) : (
+            <span className="proj-card__name">{project.name}</span>
+          )}
+          {metaParts.length > 0 && (
+            <span className="proj-card__meta" title={metaTitle || undefined}>
+              {metaParts.join(' · ')}
             </span>
           )}
-          {executingLabel && (
-            <span className="proj-card__badge proj-card__badge--lock" title={executingLabel}>
-              {executingLabel}
+          {(pipelineLabel || executingLabel) && (
+            <span className="proj-card__badges">
+              {pipelineLabel && (
+                <span className="proj-card__badge proj-card__badge--pipeline" title={pipelineLabel}>
+                  {pipelineLabel}
+                </span>
+              )}
+              {executingLabel && (
+                <span className="proj-card__badge proj-card__badge--lock" title={executingLabel}>
+                  {executingLabel}
+                </span>
+              )}
             </span>
           )}
-        </span>
-      </button>
-      <div className="proj-card__actions">
-        {extraActions}
-        <button type="button" className="proj-card__action" title="Rename" onClick={() => setEditing(true)}>
-          Rename
         </button>
-        <button
-          type="button"
-          className="proj-card__action proj-card__action--danger"
-          title={canDelete ? 'Delete' : 'Cannot delete the last project'}
-          disabled={!canDelete}
-          onClick={onRequestDelete}
-        >
-          Delete
-        </button>
+        <div className="proj-card__toolbar">
+          {extraActions}
+          <button
+            type="button"
+            className="proj-card__icon-btn"
+            title={pt('rename')}
+            aria-label={pt('rename')}
+            onClick={() => setEditing(true)}
+          >
+            <RenameIcon />
+          </button>
+          <button
+            type="button"
+            className="proj-card__icon-btn proj-card__icon-btn--danger"
+            title={canDelete ? pt('delete') : pt('deleteDisabled')}
+            aria-label={canDelete ? pt('delete') : pt('deleteDisabled')}
+            disabled={!canDelete}
+            onClick={onRequestDelete}
+          >
+            <DeleteIcon />
+          </button>
+        </div>
       </div>
     </div>
   )

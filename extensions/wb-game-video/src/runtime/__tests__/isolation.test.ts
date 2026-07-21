@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GraphRuntime } from '../engine/engine'
 import { GraphSession } from '../engine/session'
-import { createCoreComponentRegistry } from '../registry/core-components'
+import { createDefaultComponentRegistry } from '../skins/components'
 import { ComponentRegistry } from '../registry/component-registry'
-import type { GameGraph } from '../schema/graph-schema'
 import { node, scnOf } from './test-fixtures'
 import {
   claimPlayerFocus,
@@ -17,34 +15,18 @@ describe('multi-runtime isolation (B)', () => {
     const b = new GraphSession(scnOf({ nodes: [node('b')], edges: [] }))
     expect(a.runtime.components).not.toBe(b.runtime.components)
     expect(a.skins).not.toBe(b.skins)
-    expect(a.runtime.components.getComponent('qte')?.role).toBe('interaction')
-    expect(b.runtime.components.getComponent('qte')?.role).toBe('interaction')
+    expect(a.runtime.components.getComponent('qte')?.events?.length).toBeGreaterThan(0)
+    expect(b.runtime.components.getComponent('qte')?.events?.length).toBeGreaterThan(0)
   })
 
   it('custom component on one registry is invisible to another registry', () => {
-    const onlyA = createCoreComponentRegistry()
-    onlyA.registerComponent('secretView', {
-      role: 'presentation',
-    })
-    expect(onlyA.getComponent('secretView')?.role).toBe('presentation')
+    const onlyA = createDefaultComponentRegistry()
+    onlyA.registerComponent('secretView', {})
+    expect(onlyA.getComponent('secretView')).toBeDefined()
     expect(new ComponentRegistry().getComponent('secretView')).toBeUndefined()
-    // core components present on A, absent on a bare registry
-    expect(onlyA.getComponent('qte')?.role).toBe('interaction')
+    // 默认组件包在 A，裸表没有
+    expect(onlyA.getComponent('qte')?.events?.length).toBeGreaterThan(0)
     expect(new ComponentRegistry().getComponent('qte')).toBeUndefined()
-  })
-
-  it('requiredPlugins checked against the injected registry, not the global default', () => {
-    const local = new ComponentRegistry()
-    local.registerPlugin('pack-a', { version: '1' })
-    const graph: GameGraph = { nodes: [node('n')], edges: [] }
-    expect(() => {
-      const s = scnOf(graph, { requiredPlugins: [{ id: 'pack-a', version: '1' }] })
-      return new GraphRuntime(s.graph, s, local)
-    }).not.toThrow()
-    expect(() => {
-      const s = scnOf(graph, { requiredPlugins: [{ id: 'pack-a', version: '1' }] })
-      return new GraphRuntime(s.graph, s, new ComponentRegistry())
-    }).toThrow(/pack-a/)
   })
 })
 

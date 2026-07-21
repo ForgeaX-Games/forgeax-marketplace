@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { pluginWsUrl } from '../../api/pluginHttp'
 import { useRenderStore } from '../store'
 import type { ViewMode } from '../types'
 
@@ -47,7 +48,7 @@ export function useRendererCommands(): void {
     // 1) Direct backend socket (server-initiated control events).
     let ws: WebSocket | null = null
     if (typeof WebSocket !== 'undefined' && typeof location !== 'undefined') {
-      ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws`)
+      ws = new WebSocket(pluginWsUrl('/ws'))
       ws.onmessage = (ev) => {
         let msg: { event?: string; payload?: RendererCommand }
         try {

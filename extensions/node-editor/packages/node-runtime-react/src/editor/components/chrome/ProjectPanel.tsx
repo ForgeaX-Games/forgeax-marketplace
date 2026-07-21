@@ -23,11 +23,18 @@ import {
   type ActivePipelineRunInfo,
   type ProjectExecutionLock,
 } from './projectViews.js'
+import { pt, useProjectLocale } from './projectI18n.js'
 import './ProjectPanel.css'
 
 type View = { kind: 'list' } | { kind: 'new' } | { kind: 'delete'; project: ProjectMeta }
 
 type LockMap = Record<string, ProjectExecutionLock>
+
+type StatusRow =
+  | { key: string; kind: 'executing'; projectId: string; name: string; detail?: string }
+  | { key: string; kind: 'pipeline'; name: string; detail: string }
+
+const STATUS_COLLAPSE_THRESHOLD = 2
 
 export interface ProjectPanelProps {
   /** Domain type tag for newly-created projects (e.g. 'lowpoly', 'scene'). */
@@ -48,19 +55,31 @@ export interface ProjectPanelProps {
   renderProjectActions?: (project: ProjectMeta) => ReactNode
 }
 
-function projectSortRank(
+/** Pin agent/pipeline activity to the top; selection does not reorder the list. */
+function projectAttentionRank(
   p: ProjectMeta,
-  viewingProjectId: string | null,
   lockedProjectIds: ReadonlySet<string>,
   pipelineProjectIds: ReadonlySet<string>,
 ): number {
-  const locked = lockedProjectIds.has(p.id)
-  const pipelined = pipelineProjectIds.has(p.id)
-  const viewing = p.id === viewingProjectId
-  if ((locked || pipelined) && !viewing) return 0
-  if (viewing) return 1
-  if (locked || pipelined) return 0
-  return 2
+  return lockedProjectIds.has(p.id) || pipelineProjectIds.has(p.id) ? 0 : 1
+}
+
+export function compareProjectsForList(
+  a: ProjectMeta,
+  b: ProjectMeta,
+  lockedProjectIds: ReadonlySet<string>,
+  pipelineProjectIds: ReadonlySet<string>,
+): number {
+  const ra = projectAttentionRank(a, lockedProjectIds, pipelineProjectIds)
+  const rb = projectAttentionRank(b, lockedProjectIds, pipelineProjectIds)
+  if (ra !== rb) return ra - rb
+  const ua = a.updatedAt ?? a.createdAt ?? ''
+  const ub = b.updatedAt ?? b.createdAt ?? ''
+  if (ua !== ub) return ua < ub ? 1 : -1
+  const ca = a.createdAt ?? ''
+  const cb = b.createdAt ?? ''
+  if (ca !== cb) return ca < cb ? 1 : -1
+  return a.name.localeCompare(b.name)
 }
 
 export function ProjectPanel({
@@ -71,16 +90,21 @@ export function ProjectPanel({
   headerActions,
   renderProjectActions,
 }: ProjectPanelProps): JSX.Element {
+  useProjectLocale()
   const projects = useProjectStore((s) => s.projects)
   const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
   const executingProjectIds = useProjectStore((s) => s.executingProjectIds)
   const isSwitching = useProjectStore((s) => s.isSwitching)
   const switchProject = useProjectStore((s) => s.switchProject)
   const renameProject = useProjectStore((s) => s.renameProject)
+  const activeGameSlug = useProjectStore((s) => s.activeGameSlug)
+  const showAllProjects = useProjectStore((s) => s.showAllProjects)
+  const setShowAllProjects = useProjectStore((s) => s.setShowAllProjects)
 
   const [view, setView] = useState<View>({ kind: 'list' })
   const [lockMap, setLockMap] = useState<LockMap>({})
   const [filter, setFilter] = useState('')
+  const [statusExpanded, setStatusExpanded] = useState(false)
   const fetchProjects = useProjectStore((s) => s.fetchProjects)
 
   // aw-support provisions projects out-of-band; refresh while agents are active so
@@ -198,10 +222,52 @@ export function ProjectPanel({
     [viewingProjectId, switchProject],
   )
 
-  const viewingProject = useMemo(
-    () => projects.find((p) => p.id === viewingProjectId) ?? null,
-    [projects, viewingProjectId],
-  )
+  const statusRows = useMemo((): StatusRow[] => {
+    const rows: StatusRow[] = []
+    const seen = new Set<string>()
+
+    for (const projectId of executingProjectIds) {
+      if (lockMap[projectId] || seen.has(projectId)) continue
+      seen.add(projectId)
+      const meta = projects.find((p) => p.id === projectId)
+      rows.push({
+        key: `exec-${projectId}`,
+        kind: 'executing',
+        projectId,
+        name: meta?.name ?? projectId,
+      })
+    }
+
+    for (const [projectId, lock] of Object.entries(lockMap)) {
+      if (seen.has(projectId)) continue
+      seen.add(projectId)
+      const meta = projects.find((p) => p.id === projectId)
+      rows.push({
+        key: `lock-${projectId}`,
+        kind: 'executing',
+        projectId,
+        name: meta?.name ?? projectId,
+        detail: formatProjectLockLabel(lock, meta?.name ?? projectId),
+      })
+    }
+
+    for (const run of activePipelineRuns) {
+      if (!run.sceneProjectId || lockMap[run.sceneProjectId]) continue
+      const meta = projects.find((p) => p.id === run.sceneProjectId)
+      rows.push({
+        key: `run-${run.runId}`,
+        kind: 'pipeline',
+        name: meta?.name ?? run.sceneName ?? run.sceneProjectId,
+        detail: formatPipelineRunLabel(run),
+      })
+    }
+
+    return rows
+  }, [executingProjectIds, lockMap, projects, activePipelineRuns])
+
+  const statusCollapsible = statusRows.length > STATUS_COLLAPSE_THRESHOLD
+  const visibleStatusRows =
+    statusCollapsible && !statusExpanded ? statusRows.slice(0, STATUS_COLLAPSE_THRESHOLD) : statusRows
 
   const sorted = useMemo(
     () => {
@@ -217,14 +283,12 @@ export function ProjectPanel({
           updatedAt: '',
         }))
       const all = [...orphanExecuting, ...projects]
-      return all.sort((a, b) => {
-        const ra = projectSortRank(a, viewingProjectId, lockedProjectIds, pipelineProjectIds)
-        const rb = projectSortRank(b, viewingProjectId, lockedProjectIds, pipelineProjectIds)
-        return ra - rb || a.name.localeCompare(b.name)
-      })
+      return all.sort((a, b) => compareProjectsForList(a, b, lockedProjectIds, pipelineProjectIds))
     },
-    [projects, viewingProjectId, lockedProjectIds, pipelineProjectIds, executingProjectIds, defaultProjectType],
+    [projects, lockedProjectIds, pipelineProjectIds, executingProjectIds, defaultProjectType],
   )
+
+  const showProjectType = useMemo(() => new Set(projects.map((p) => p.type)).size > 1, [projects])
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -235,7 +299,11 @@ export function ProjectPanel({
   }, [sorted, filter])
 
   const activeCount = lockedProjectIds.size
-  const showStatus = viewingProject || activePipelineRuns.length > 0 || activeCount > 0
+  const showStatus = statusRows.length > 0
+  const countTitle =
+    activeCount > 0
+      ? pt('countActiveTitle', { count: projects.length, active: activeCount })
+      : pt('countTitle', { count: projects.length })
 
   if (view.kind === 'new') {
     return (
@@ -263,99 +331,100 @@ export function ProjectPanel({
   }
 
   return (
-    <section className="proj-panel" aria-label="Projects">
+    <section className="proj-panel" aria-label={pt('title')}>
       <header className="proj-panel__head">
         <h2>
-          Projects
-          <span className="proj-panel__count" title={`${projects.length} total${activeCount ? ` · ${activeCount} active` : ''}`}>
+          {pt('title')}
+          <span className="proj-panel__count" title={countTitle}>
             {projects.length}
-            {activeCount > 0 ? ` · ${activeCount} active` : ''}
+            {activeCount > 0 ? pt('countActive', { active: activeCount }) : ''}
           </span>
         </h2>
         <button type="button" className="proj-btn proj-btn--primary" onClick={() => setView({ kind: 'new' })}>
-          + New
+          {pt('new')}
         </button>
         {headerActions}
       </header>
       <input
         type="search"
         className="proj-panel__filter"
-        placeholder="Filter projects…"
+        placeholder={pt('filterPlaceholder')}
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        aria-label="Filter projects"
+        aria-label={pt('filterAria')}
       />
+      {activeGameSlug && (
+        <div
+          className="proj-panel__scope"
+          title={showAllProjects ? pt('scopeToggleToGame', { game: activeGameSlug }) : pt('scopeToggleToAll')}
+        >
+          <span className="proj-panel__scope-context">
+            <span className="proj-panel__scope-context-label">{pt('scopeLabel')}</span>
+            <span className="proj-panel__scope-context-value">
+              {showAllProjects ? pt('scopeAllGames') : activeGameSlug}
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showAllProjects}
+            aria-label={showAllProjects ? pt('scopeToggleToGame', { game: activeGameSlug }) : pt('scopeToggleToAll')}
+            className={`proj-panel__scope-switch${showAllProjects ? ' proj-panel__scope-switch--on' : ''}`}
+            onClick={() => setShowAllProjects(!showAllProjects)}
+          >
+            <span className="proj-panel__scope-switch-track" aria-hidden="true">
+              <span className="proj-panel__scope-switch-thumb" />
+            </span>
+          </button>
+        </div>
+      )}
       {showStatus && (
         <div className="proj-panel__status" aria-live="polite">
-          {viewingProject && (
-            <div className="proj-panel__status-row">
-              <span className="proj-panel__status-label">Viewing</span>
-              <span className="proj-panel__status-value" title={`${viewingProject.name} (${viewingProject.id})`}>
-                {viewingProject.name}
-              </span>
-            </div>
-          )}
-          {executingProjectIds
-            .filter((projectId) => !lockMap[projectId])
-            .map((projectId) => {
-              const meta = projects.find((p) => p.id === projectId)
-              const isViewing = projectId === viewingProjectId
+          {visibleStatusRows.map((row) => {
+            if (row.kind === 'executing') {
+              const isViewing = row.projectId === viewingProjectId
               return (
-                <div key={`exec-${projectId}`} className="proj-panel__status-row proj-panel__status-row--executing">
-                  <span className="proj-panel__status-label">Executing</span>
+                <div key={row.key} className="proj-panel__status-row proj-panel__status-row--executing">
+                  <span className="proj-panel__status-label">{pt('statusExecuting')}</span>
                   <button
                     type="button"
                     className="proj-panel__status-action"
                     disabled={isViewing || isSwitching}
-                    title={isViewing ? projectId : `${meta?.name ?? projectId} — click to view canvas`}
-                    onClick={() => handleActivate(projectId)}
+                    title={row.detail ?? pt('statusViewCanvas', { name: row.name })}
+                    onClick={() => handleActivate(row.projectId)}
                   >
-                    {meta?.name ?? projectId}
+                    {row.name}
                     {!isViewing && ' →'}
                   </button>
                 </div>
               )
-            })}
-          {Object.entries(lockMap).map(([projectId, lock]) => {
-            const meta = projects.find((p) => p.id === projectId)
-            const label = formatProjectLockLabel(lock, meta?.name ?? projectId)
-            const isViewing = projectId === viewingProjectId
+            }
             return (
-              <div key={`lock-${projectId}`} className="proj-panel__status-row proj-panel__status-row--executing">
-                <span className="proj-panel__status-label">Executing</span>
-                <button
-                  type="button"
-                  className="proj-panel__status-action"
-                  disabled={isViewing || isSwitching}
-                  title={isViewing ? label : `${label} — click to view`}
-                  onClick={() => handleActivate(projectId)}
-                >
-                  {meta?.name ?? projectId}
-                  {!isViewing && ' →'}
-                </button>
+              <div key={row.key} className="proj-panel__status-row proj-panel__status-row--pipeline">
+                <span className="proj-panel__status-label">{pt('statusPipeline')}</span>
+                <span className="proj-panel__status-value" title={row.detail}>
+                  {row.name}
+                </span>
               </div>
             )
           })}
-          {activePipelineRuns
-            .filter((run) => run.sceneProjectId && !lockMap[run.sceneProjectId])
-            .map((run) => {
-              const meta = projects.find((p) => p.id === run.sceneProjectId)
-              const label = formatPipelineRunLabel(run)
-              return (
-                <div key={`run-${run.runId}`} className="proj-panel__status-row proj-panel__status-row--pipeline">
-                  <span className="proj-panel__status-label">Pipeline</span>
-                  <span className="proj-panel__status-value" title={label}>
-                    {meta?.name ?? run.sceneName ?? run.sceneProjectId}
-                  </span>
-                </div>
-              )
-            })}
+          {statusCollapsible && (
+            <button
+              type="button"
+              className="proj-panel__status-toggle"
+              onClick={() => setStatusExpanded((v) => !v)}
+            >
+              {statusExpanded
+                ? pt('statusCollapse')
+                : pt('statusExpand', { count: statusRows.length })}
+            </button>
+          )}
         </div>
       )}
       <div className="proj-panel__list" ref={restoreListScroll} onScroll={(e) => captureListScroll(e.currentTarget)}>
         {filtered.length === 0 && (
           <div className="proj-empty">
-            {sorted.length === 0 ? 'No projects yet - create one.' : 'No projects match filter.'}
+            {sorted.length === 0 ? pt('emptyNone') : pt('emptyFilter')}
           </div>
         )}
         {filtered.map((p) => (
@@ -364,6 +433,7 @@ export function ProjectPanel({
             project={p}
             isActive={p.id === viewingProjectId}
             isSwitching={isSwitching}
+            showProjectType={showProjectType}
             executingLock={resolveSceneLock(p)}
             pipelineRun={resolvePipelineRun(p)}
             lockLabel={resolveLockLabel(p)}

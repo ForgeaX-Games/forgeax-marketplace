@@ -3,6 +3,7 @@
  * 新数据格式：EntitySpec→Entity、VarSpec→Variable（Variable 不再有 number/flag 之分）。
  */
 import type { Entity, Variable } from '../../runtime/schema/graph-schema'
+import type { Formula } from '../persist/formula-authoring'
 
 export function findEntity(
   entities: Record<string, Entity> | undefined,
@@ -50,4 +51,24 @@ export function listVarOptions(
     const name = (v.name ?? '').trim()
     return { id, label: name ? `${name}（${id}）` : id }
   })
+}
+
+/** 公式下拉（应用公式时选具名公式）。 */
+export function listFormulaOptions(
+  formulas: Record<string, Formula> | undefined,
+): Array<{ id: string; label: string }> {
+  return Object.entries(formulas ?? {}).map(([key, f]) => {
+    const id = f.id ?? key
+    const name = (f.name ?? '').trim()
+    return { id, label: name ? `${name}（${id}）` : id }
+  })
+}
+
+export function findFormula(
+  formulas: Record<string, Formula> | undefined,
+  id: string,
+): Formula | undefined {
+  if (!formulas || !id) return undefined
+  if (formulas[id]) return formulas[id]
+  return Object.values(formulas).find((f) => f.id === id)
 }

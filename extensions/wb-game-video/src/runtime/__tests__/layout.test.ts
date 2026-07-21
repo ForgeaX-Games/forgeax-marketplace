@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  STAGE_FILL_LAYOUT,
   childWrapStyle,
   layoutHasExplicitSize,
   layoutIsEffectivelyEmpty,
@@ -49,17 +50,38 @@ describe('layout', () => {
     })
   })
 
-  it('childWrapStyle: default top-left when mount has size', () => {
+  it('childWrapStyle: fill mount when mount has size and child has no layout', () => {
     expect(childWrapStyle(undefined, true)).toEqual({
       position: 'absolute',
       left: 0,
       top: 0,
-      pointerEvents: 'auto',
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
+    })
+  })
+
+  it('childWrapStyle: layout → CSS passthrough', () => {
+    expect(childWrapStyle(STAGE_FILL_LAYOUT, true)).toEqual({
+      position: 'absolute',
+      left: '0%',
+      top: '0%',
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
     })
   })
 
   it('childWrapStyle: flow when mount auto-size', () => {
     expect(childWrapStyle(undefined, false)).toEqual({ pointerEvents: 'auto' })
+  })
+
+  it('childWrapStyle: anchor-only keeps pointer events for panels', () => {
+    expect(childWrapStyle({ left: 0, top: 0 }, true)).toMatchObject({
+      left: '0%',
+      top: '0%',
+      pointerEvents: 'auto',
+    })
   })
 
   it('layoutToCss: vertical center left-aligned', () => {

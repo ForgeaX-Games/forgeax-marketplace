@@ -2,6 +2,7 @@
 
 > 权威详情：[../../../../batteries/templates/structures/path/PathConnectionLink/README.md](../../../../batteries/templates/structures/path/PathConnectionLink/README.md)
 > templateId：`PathConnectionLink`。端口与 **PathConnectionRandomWalk 完全一致**。
+> 端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
 ## 选型
 
@@ -23,7 +24,7 @@
 
 | OUT | 去向 |
 |-----|------|
-| `out_1` | Path → `tree_merge` |
+| `out_1` | Path → `appendMergeItem` → `aw_m0_merge` |
 | `out_2` | **Rest** → 下一组 `in_0`/`in_2`/`in_1`（Mountain/Hill/装饰 **串链**，禁止 fan-out） |
 
 POI 推导、自检清单、merge 写法：**完全同** [PathConnection.md](PathConnection.md)。

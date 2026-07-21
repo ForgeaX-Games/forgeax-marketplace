@@ -37,5 +37,7 @@ export function gridSplitByValue(input: Record<string, unknown>): Record<string,
   const distinctValues = collectDistinctValues(grid);
   const grids = distinctValues.map((value) => extractValueGrid(grid, value));
 
-  return { grids };
+  // Parallel list of the split keys (same order as `grids`) — wire to
+  // grid2node.z for elevation bands (HillContour etc.).
+  return { grids, values: distinctValues };
 }

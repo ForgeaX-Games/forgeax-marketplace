@@ -3,7 +3,8 @@
  * 本版：仅当前节点内演出，ttl 截断到节点时长；跳转换节点会清掉瞬态叠层。
  */
 import type { CSSProperties, JSX } from 'react'
-import type { Overlay } from '../../runtime/schema/graph-schema'
+import type { Entity, Overlay, Variable } from '../../runtime/schema/graph-schema'
+import type { Formula } from '../persist/formula-authoring'
 import { SpawnInputsEditor } from './spawn-inputs-editor'
 
 export interface SettlementSpawnValue {
@@ -27,6 +28,9 @@ export function SettlementSpawnEditor({
   value,
   templates,
   overlays,
+  entities,
+  variables,
+  formulas,
   maxTtlMs,
   hasJump,
   onChange,
@@ -34,6 +38,9 @@ export function SettlementSpawnEditor({
   value: SettlementSpawnValue | undefined
   templates: SpawnTemplateOption[]
   overlays?: Record<string, Overlay>
+  entities?: Record<string, Entity>
+  variables?: Record<string, Variable>
+  formulas?: Record<string, Formula>
   /** 本节点时长上限（ms）；写入时截断，UI 提示用。 */
   maxTtlMs: number
   /** 该结算档已配置跳转边——本版 spawn 不会跨节点。 */
@@ -103,6 +110,7 @@ export function SettlementSpawnEditor({
             from={value.from}
             inputs={value.inputs}
             overlays={overlays}
+            pickers={{ entities, variables, formulas }}
             onChange={(inputs) => onChange({ ...value, inputs })}
           />
           <p style={hint}>仅在当前节点内显示，时长不超过本节点；离场或换节点会卸掉。</p>

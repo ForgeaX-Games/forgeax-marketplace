@@ -5,7 +5,7 @@
 // neighbours + the rule JSON) via `pickFaceSprite` /  `pickFaceSpriteIndex` in
 // `modes/topBillboard/buildVoxelMaster/pickFaceSprite.ts`. The export path now
 // calls THAT SAME function — there is ONE implementation of the autotile pick
-// (neighbour-key incl. `edgeDist2`, wildcard precedence, variant region-map
+// (neighbour-key incl. `adjacent8` / `edgeDist2`, wildcard precedence, variant region-map
 // selection, randomRules substitution), shared by render and export with zero
 // drift. (SELECT is a separate capability — it resolves a clicked cell to its
 // owning LAYER via framework/cellAttribution, not to a sprite — so it does not
@@ -38,6 +38,7 @@ import {
   computeValidVariantPoolsByTileId as computeValidVariantPoolsByTileIdShared,
   type VariantPool,
   pickFaceSpriteIndex,
+  pickFaceSpriteIndexIfMapped,
   type CollectedCell,
   type FaceRule as RendererFaceRule,
   type PickFaceContext,
@@ -51,10 +52,14 @@ export interface RuleSprite {
   h: number
 }
 
-export type FaceKeyMode = 'adjacent4' | 'edgeDist2'
+export type FaceKeyMode = 'adjacent4' | 'adjacent8' | 'edgeDist2' | 'edgeDist4'
+
+export type FaceVariantWhen =
+  | { regionContains: { region: string; offset: [number, number] } }
+  | { stateEquals: { key: string; value: string } }
 
 export interface FaceVariant {
-  when: { regionContains: { region: string; offset: [number, number] } }
+  when: FaceVariantWhen
   map: Record<string, number>
 }
 
@@ -67,6 +72,12 @@ export interface RandomRule {
   variantWeights?: number[]
 }
 
+/** 连续 3×3 实心块整体换大图(仅 front 有意义);见前端 ruleCache.ts 同名类型注释 */
+export interface FaceBlockVariant {
+  probability: number
+  groups: number[][]
+}
+
 export interface FaceRule {
   basePieces: number
   keyMode?: FaceKeyMode
@@ -75,13 +86,14 @@ export interface FaceRule {
   randomRules?: RandomRule[]
   variantIdxs?: number[]
   variantWeights?: number[]
+  blockVariants?: FaceBlockVariant
 }
 
 export interface TileRule {
   schemaVersion: 1 | 2
   ppu: number
   sprites: RuleSprite[]
-  faces: { top?: FaceRule; front?: FaceRule }
+  faces: { top?: FaceRule; front?: FaceRule; entry?: FaceRule }
   regions?: Record<string, { source: 'parent' | 'self' }>
 }
 
@@ -161,7 +173,8 @@ export function parseRule(json: unknown): TileRule | null {
   if (!faces || typeof faces !== 'object') return null
   const top = parseFace(faces.top)
   const front = parseFace(faces.front)
-  if (!top && !front) return null
+  const entry = parseFace(faces.entry)
+  if (!top && !front && !entry) return null
   const regions = parseRegions(o.regions)
   return {
     schemaVersion: 2,
@@ -170,6 +183,7 @@ export function parseRule(json: unknown): TileRule | null {
     faces: {
       ...(top ? { top } : {}),
       ...(front ? { front } : {}),
+      ...(entry ? { entry } : {}),
     },
     ...(regions ? { regions } : {}),
   }
@@ -187,8 +201,9 @@ function parseFace(raw: unknown): FaceRule | null {
     : undefined
   const variantWeights = parseVariantWeights(f.variantWeights, variantIdxs?.length)
   const variants = parseFaceVariants(f.variants)
-  const keyMode = f.keyMode === 'edgeDist2' ? 'edgeDist2' : undefined
+  const keyMode = parseFaceKeyMode(f.keyMode)
   const randomRules = parseRandomRules(f.randomRules, variantIdxs, variantWeights)
+  const blockVariants = parseFaceBlockVariants(f.blockVariants)
   return {
     basePieces: f.basePieces,
     map: f.map as Record<string, number>,
@@ -197,7 +212,27 @@ function parseFace(raw: unknown): FaceRule | null {
     ...(variantIdxs ? { variantIdxs } : {}),
     ...(variantWeights ? { variantWeights } : {}),
     ...(variants ? { variants } : {}),
+    ...(blockVariants ? { blockVariants } : {}),
   }
+}
+
+function parseFaceKeyMode(raw: unknown): FaceKeyMode | undefined {
+  if (raw === 'edgeDist2' || raw === 'edgeDist4' || raw === 'adjacent8') return raw
+  return undefined
+}
+
+function parseFaceBlockVariants(raw: unknown): FaceBlockVariant | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const b = raw as Record<string, unknown>
+  if (typeof b.probability !== 'number' || b.probability < 0 || b.probability > 1) return undefined
+  if (!Array.isArray(b.groups)) return undefined
+  const groups: number[][] = []
+  for (const g of b.groups) {
+    if (!Array.isArray(g) || g.length !== 9) continue
+    if (!g.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)) continue
+    groups.push(g as number[])
+  }
+  return groups.length > 0 ? { probability: b.probability, groups } : undefined
 }
 
 function parseFaceVariants(raw: unknown): FaceVariant[] | undefined {
@@ -218,6 +253,11 @@ function parseFaceVariants(raw: unknown): FaceVariant[] | undefined {
 function parseFaceVariantWhen(raw: unknown): FaceVariant['when'] | null {
   if (!raw || typeof raw !== 'object') return null
   const w = raw as Record<string, unknown>
+  const se = w.stateEquals as Record<string, unknown> | undefined
+  if (se && typeof se === 'object') {
+    if (typeof se.key !== 'string' || typeof se.value !== 'string') return null
+    return { stateEquals: { key: se.key, value: se.value } }
+  }
   const rc = w.regionContains as Record<string, unknown> | undefined
   if (!rc || typeof rc !== 'object') return null
   if (typeof rc.region !== 'string') return null
@@ -306,13 +346,22 @@ function occToCoords(
   occ: (dx: number, dy: number, dz: number) => boolean,
 ): Map<number, Set<string>> {
   const set = new Set<string>()
-  // Offsets the renderer's top (incl. edgeDist2 ±2) + front faces can read.
+  // Offsets the renderer's top (adjacent4 / adjacent8 / edgeDist2 ±2 / edgeDist4 ±2 xy) + front faces can read.
   const offsets: Array<[number, number, number]> = [
     [0, 0, 0],
     [0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0],   // top adjacent4
-    [0, -2, 0], [0, 2, 0],                           // top edgeDist2
+    [-1, -1, 0], [1, -1, 0], [-1, 1, 0], [1, 1, 0], // top adjacent8 diagonals
+    [0, -2, 0], [0, 2, 0],                           // top edgeDist2 (vertical ±2)
+    [-2, 0, 0], [2, 0, 0],                           // top edgeDist4 (horizontal ±2)
     [0, 0, 1], [0, 0, -1],                           // front t/b (z axis)
   ]
+  // front blockVariants 3×3 实心块检测:命中格可以是巨格内任意局部位置(0..2),
+  // 故 anchor 相对当前 cell 最远 ±2;需 dx,dz ∈[-2,2](dy=0,同 y 层)全覆盖。
+  for (let dz = -2; dz <= 2; dz++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      offsets.push([dx, 0, dz])
+    }
+  }
   for (const [dx, dy, dz] of offsets) {
     if (occ(dx, dy, dz)) set.add(`${x + dx},${y + dy},${z + dz}`)
   }
@@ -321,7 +370,7 @@ function occToCoords(
 
 function faceContext(
   face: FaceRule,
-  faceTag: 'top' | 'front',
+  faceTag: 'top' | 'front' | 'entry',
   rule: TileRule,
   x: number,
   y: number,
@@ -331,8 +380,9 @@ function faceContext(
   regions: Map<string, Set<string>> | undefined,
   validVariantWeights?: ReadonlyArray<number>,
   validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>,
+  state?: Readonly<Record<string, unknown>>,
 ): PickFaceContext {
-  const cell: CollectedCell = { layerIdx: 0, x, y, z }
+  const cell: CollectedCell = { layerIdx: 0, x, y, z, ...(state ? { state } : {}) }
   return {
     face: face as unknown as RendererFaceRule,
     faceTag,
@@ -363,13 +413,25 @@ export function pickTopSpriteIndex(
     validVariantIdxs?: ReadonlyArray<number>
     validVariantWeights?: ReadonlyArray<number>
     validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
+    validEntryVariantIdxs?: ReadonlyArray<number>
+    validEntryVariantWeights?: ReadonlyArray<number>
+    validEntryVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
     regions?: Map<string, Set<string>>
+    /** per-cell state (e.g. slopeDir) for face.variants when.stateEquals matching */
+    state?: Readonly<Record<string, unknown>>
   },
 ): number {
+  const entry = rule.faces.entry
+  if (entry && occ) {
+    const entryIdx = pickFaceSpriteIndexIfMapped(
+      faceContext(entry, 'entry', rule, x, y, z, occ, opts?.validEntryVariantIdxs ?? [], opts?.regions, opts?.validEntryVariantWeights, opts?.validEntryVariantPoolsByTileId, opts?.state),
+    )
+    if (entryIdx !== null) return entryIdx
+  }
   const face = rule.faces.top
   if (!face) return 0
   return pickFaceSpriteIndex(
-    faceContext(face, 'top', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId),
+    faceContext(face, 'top', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId, opts?.state),
   )
 }
 
@@ -390,12 +452,14 @@ export function pickFrontSpriteIndex(
     validVariantWeights?: ReadonlyArray<number>
     validVariantPoolsByTileId?: ReadonlyMap<number, VariantPool>
     regions?: Map<string, Set<string>>
+    /** per-cell state (e.g. slopeDir) for face.variants when.stateEquals matching */
+    state?: Readonly<Record<string, unknown>>
   },
 ): number | null {
   const face = rule.faces.front
   if (!face) return null
   return pickFaceSpriteIndex(
-    faceContext(face, 'front', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId),
+    faceContext(face, 'front', rule, x, y, z, occ, opts?.validVariantIdxs ?? [], opts?.regions, opts?.validVariantWeights, opts?.validVariantPoolsByTileId, opts?.state),
   )
 }
 
@@ -427,6 +491,18 @@ export function resolveRuleRegions(
 
 export function computeValidTopVariantIdxs(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] {
   return computeValidFaceVariantPool(rule, rule.faces.top, 'top', sheetKey, img).idxs
+}
+
+export function computeValidEntryVariantIdxs(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] {
+  return computeValidFaceVariantPool(rule, rule.faces.entry, 'entry', sheetKey, img).idxs
+}
+
+export function computeValidEntryVariantWeights(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] | undefined {
+  return computeValidFaceVariantPool(rule, rule.faces.entry, 'entry', sheetKey, img).weights
+}
+
+export function computeValidEntryVariantPoolsByTileId(rule: TileRule, sheetKey: string, img: RgbaImage | null): Map<number, VariantPool> {
+  return computeValidFaceVariantPoolsByTileId(rule, rule.faces.entry, 'entry', sheetKey, img)
 }
 
 export function computeValidFrontVariantIdxs(rule: TileRule, sheetKey: string, img: RgbaImage | null): number[] {
@@ -473,7 +549,7 @@ export function computeValidTopVariantIdxsByTileId(rule: TileRule, sheetKey: str
 function computeValidFaceVariantPool(
   rule: TileRule,
   face: FaceRule | undefined,
-  faceTag: 'top' | 'front',
+  faceTag: 'top' | 'front' | 'entry',
   sheetKey: string,
   img: RgbaImage | null,
 ): VariantPool {
@@ -496,7 +572,7 @@ function computeValidFaceVariantPool(
 function computeValidFaceVariantPoolsByTileId(
   rule: TileRule,
   face: FaceRule | undefined,
-  faceTag: 'top' | 'front',
+  faceTag: 'top' | 'front' | 'entry',
   sheetKey: string,
   img: RgbaImage | null,
 ): Map<number, VariantPool> {

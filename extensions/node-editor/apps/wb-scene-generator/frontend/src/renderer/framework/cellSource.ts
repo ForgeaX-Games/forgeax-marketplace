@@ -53,7 +53,7 @@ export interface CellSource {
 //
 // grid.data 是 [row][col] 稠密数组,值 0 表示空格(不绘制),非 0 视为填充并按值取色。
 // worldOffset 永远 (0,0)(dense 数组从 0 起)。isMultiValue 由非零去重值数量 > 1 决定:
-//   * binary grid(如 max_rectangle 的 0/1)→ 单值 → 按 layerIdx 取色
+//   * binary grid(如 max_rectangle 的 0/1)→ 单值 → 按 cell.value 取色(colorForValue)
 //   * 多值 / 浮点场(如 cellular_noise)→ 多值 → 按 value 取色(热力图)
 export function gridLayerCellSource(layer: GridLayer): CellSource {
   const data = layer.data

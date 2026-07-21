@@ -203,7 +203,8 @@ export interface GameScenarioUi {
  * **OverlayNode** — 演出节点上的一份 overlay **挂载**（`NodeData.overlayNodes[]` 之一）。
  * - `id`：挂载键（多挂载时事件命名空间用）；缺省 = `overlay`
  * - `overlay`：引用哪张可复用 Overlay（原型；本挂载始终跟随其后续编辑，除被 override 的字段外）
- * - `layout`：整块相对视频画面；**无显式宽高时自适应内容**（单组件 overlay = 组件大小）
+ * - `layout`：整块相对视频画面；**无显式宽高时自适应内容**（单组件 overlay = 组件大小）。
+ *   舞台坐标类（floatText / dialogue / transition）挂载时应配 `{ left:0, top:0, width:1, height:1 }`
  * - `reactions`：本挂载 when→do（多为 event；走向经 do 内 advance + 边）
  * - `overrides` / `added` / `removed`：本挂载对 `overlay` 的**稀疏差量**（prototype + override，对齐
  *   Figma 实例覆盖 / Unity Prefab modifications 心智）——未出现在这三者里的组件永远跟随原型；
@@ -305,12 +306,14 @@ export const OVERLAY_DEMO = {
           {
             id: 'playerHp',
             component: 'battleHpBar',
+            layout: { left: 0, top: 0, width: 1, height: 1 },
             trigger: { when: 'enter' },
             inputs: { bind: 'ent-player', label: '少主' },
           },
           {
             id: 'bossHp',
             component: 'battleHpBar',
+            layout: { left: 0, top: 0, width: 1, height: 1 },
             trigger: { when: 'enter' },
             inputs: { bind: 'ent-boss', label: '刀狂' },
           },
@@ -444,6 +447,7 @@ export const OVERLAY_DEMO_INSTANCE: OverlayInstance = {
     {
       id: 'battleHud/playerHp',
       component: 'battleHpBar',
+      layout: { left: 0, top: 0, width: 1, height: 1 },
       trigger: { when: 'enter' },
       inputs: { bind: 'ent-player', label: '少主' },
       source: { mountId: 'battleHud', overlayId: 'battleHud', childId: 'playerHp', nodeId: 'n-boss-slash' },
@@ -451,6 +455,7 @@ export const OVERLAY_DEMO_INSTANCE: OverlayInstance = {
     {
       id: 'battleHud/bossHp',
       component: 'battleHpBar',
+      layout: { left: 0, top: 0, width: 1, height: 1 },
       trigger: { when: 'enter' },
       inputs: { bind: 'ent-boss', label: '刀狂' },
       source: { mountId: 'battleHud', overlayId: 'battleHud', childId: 'bossHp', nodeId: 'n-boss-slash' },

@@ -1,5 +1,5 @@
 export type Point3D = { x: number; y: number; z: number; token?: string; state?: Record<string, unknown> }
-export type ViewMode = 'top' | 'topBillboard' | 'iso' | 'free3d'
+export type ViewMode = 'top' | 'topBillboard' | 'iso' | 'free3d' | '3DMesh'
 export type DrawMode = 'wire' | 'color' | 'asset'
 
 // The scene_output battery's wire output (see shared/types/scene/projection.ts).

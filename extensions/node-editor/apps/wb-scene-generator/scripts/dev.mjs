@@ -35,12 +35,19 @@ const opts = { cwd: root, stdio: 'inherit', shell }
 // WITHOUT a `pnpm -r build`. Only our packages declare `source`; everything
 // else falls through to `import`→dist. Frontend (Vite) uses resolve.alias for
 // the same effect, so the condition is scoped to the backend process only.
+const inheritedNodeOptions = String(process.env.NODE_OPTIONS ?? '')
+  .split(/\s+/)
+  .filter((flag) => flag && !flag.startsWith('--max-old-space-size='))
+  .join(' ')
 const backendEnv = {
   ...process.env,
   NODE_OPTIONS: [
-    process.env.NODE_OPTIONS,
+    inheritedNodeOptions,
     '--conditions=source',
-    '--max-old-space-size=8192',
+    // Large scene projects (many object layers) load 1GB+ of cached node
+    // outputs into the preview batch path; 8GB OOMs on open. Machine has
+    // headroom — keep this high until output-batch streaming is incremental.
+    '--max-old-space-size=24576',
   ]
     .filter(Boolean)
     .join(' '),
