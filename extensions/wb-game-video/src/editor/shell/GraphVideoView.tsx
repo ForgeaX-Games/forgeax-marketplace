@@ -12,7 +12,12 @@ import { useGraphScenario, useGraphHistory, graphUndo, graphRedo, graphHistoryCl
 import { getGameSlug } from '../persist/gameScope'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import {
-  listVideoAssetInfos,
+  VideoAssetLibrary,
+  VideoReplaceUpload,
+  type VideoLibraryEntry,
+} from '../assets/VideoAssetLibrary'
+import { useVideoAssets } from '../assets/useVideoAssets'
+import {
   listRegistryAssets,
   requestGenerateVideo,
   requestGenerateKeyframe,
@@ -22,9 +27,9 @@ import {
   importSceneRefs,
   resolveMediaSrc,
   registryMediaUrl,
-  type VideoAssetInfo,
 } from './media'
-import type { MediaAsset, MediaStatus, StyleAxes } from '../assets/registry-types'
+import type { MediaAsset, StyleAxes } from '../assets/registry-types'
+import { MissingVideoNotice } from './MissingVideoNotice'
 
 // 风格三轴 UI 选项（id 对齐 server/engine/scenario/types.ts 的 VisualStyle/FilmLook/DirectorStyleId；
 // 权威 coerce 在服务端 composeAxes，未知 id 自动回退，故此处仅作便捷选择器）。
@@ -176,6 +181,42 @@ injectStyleOnce(
 .gvv-gen button:disabled { opacity: 0.5; cursor: default; }
 .gvv-gen-hint { font-size: 11px; color: var(--gc-faint); line-height: 1.5; }
 .gvv-gen-hint.is-error { color: #ff8f8f; }
+.val-head-upload, .val-head-refresh { border: 1px solid var(--gc-line-soft); background: var(--gc-panel2); color: var(--gc-text); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+.val-head-upload { position: relative; display: inline-flex; flex: none; min-width: 30px; min-height: 28px; padding: 2px 8px; align-items: center; justify-content: center; overflow: hidden; }
+.val-head-upload > span { pointer-events: none; }
+.val-head-upload-input { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.val-head-upload-input::file-selector-button { width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.val-head-upload[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+.val-head-upload-input:disabled, .val-head-upload-input:disabled::file-selector-button { cursor: default; }
+.val-head-refresh { margin-left: auto; }
+.gvv-replace-upload { position: absolute; top: 10px; right: 10px; z-index: 35; display: inline-flex; align-items: center; justify-content: center; min-width: 80px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--gc-line-soft); border-radius: 7px; background: rgba(20,20,20,.82); color: var(--gc-text); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.gc-frame:hover > .gvv-replace-upload, .gc-frame:focus-within > .gvv-replace-upload { opacity: 1; pointer-events: auto; }
+.gvv-replace-upload > span { pointer-events: none; }
+.gvv-replace-upload-input { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.gvv-replace-upload-input::file-selector-button { width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.gvv-replace-upload[aria-disabled="true"] { cursor: default; opacity: 1; }
+.gvv-replace-upload-input:disabled, .gvv-replace-upload-input:disabled::file-selector-button { cursor: default; }
+.val-head-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--gc-faint); white-space: nowrap; }
+.val-head-status button { border: 1px solid var(--gc-line-soft); background: transparent; color: var(--gc-text); border-radius: 6px; padding: 1px 6px; cursor: pointer; font-size: 11px; }
+.val-head-fail { color: #ff8f8f; }
+.val-error { color: #ff8f8f; font-size: 12px; padding: 6px 10px; }
+.val-empty { color: var(--gc-faint); font-size: 12px; padding: 12px 10px; }
+.val-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.val-row > .gc-row { width: 100%; min-width: 0; }
+.val-row .gc-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.val-row-delete { width: 44px; min-width: 44px; height: 28px; min-height: 28px; margin-right: 8px; padding: 0 6px; border: 1px solid var(--gc-line-soft); background: transparent; color: var(--gc-muted); border-radius: 999px; font-size: 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease, border-color .15s ease; }
+.val-row:hover .val-row-delete { opacity: 1; pointer-events: auto; }
+.val-row:focus-within .val-row-delete { opacity: 1; pointer-events: auto; }
+.val-row.is-on .val-row-delete { opacity: 1; pointer-events: auto; }
+.val-row-delete:hover:not(:disabled), .val-row-delete:focus-visible { color: var(--gc-text); border-color: var(--gc-accent-line); }
+.val-row-delete:disabled { cursor: default; opacity: 0.4; }
+@media (prefers-reduced-motion: reduce) { .val-row-delete { transition: none; } }
+.val-load-more { margin: 8px 10px 12px; border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+.val-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 40; }
+.val-dialog { background: var(--gc-panel2); border: 1px solid var(--gc-line-soft); border-radius: 12px; padding: 16px; max-width: 420px; width: calc(100% - 32px); color: var(--gc-text); }
+.val-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.val-missing-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.72); color: #fff; padding: 16px; text-align: center; z-index: 3; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .gvv-axes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .gvv-axes label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--gc-faint); letter-spacing: .04em; }
 .gvv-axes select { background: var(--gc-panel2); color: var(--gc-text); border: 1px solid var(--gc-line-soft); border-radius: 7px; padding: 5px 6px; font-size: 12px; }
@@ -210,16 +251,7 @@ injectStyleOnce(
 `,
 )
 
-interface VideoEntry {
-  id: string
-  label: string
-  url: string
-  group: string
-  type?: string
-  durMs?: number
-  status?: MediaStatus
-  fromRegistry?: boolean
-}
+interface VideoEntry extends VideoLibraryEntry {}
 
 function refForEntry(entry: VideoEntry): string {
   // demo 统一按 basename 引用；绑定即把节点 media.ref 设为该视频文件名。
@@ -235,7 +267,7 @@ function fmtTime(ms: number): string {
 
 export function GraphVideoView(): JSX.Element {
   const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
-  const [assets, setAssets] = useState<VideoAssetInfo[]>([])
+  const videoController = useVideoAssets(game)
   const [regAssets, setRegAssets] = useState<MediaAsset[]>([])
   const [genBusy, setGenBusy] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
@@ -261,6 +293,7 @@ export function GraphVideoView(): JSX.Element {
   const [timelineMode, setTimelineMode] = useState<'material' | 'audio'>('material')
   // 音频条为本地展示态：换节点/换素材时按素材时长重建（不写回 graph）。
   const [audioItems, setAudioItems] = useState<AudioItem[]>([])
+  const [missingPreviewId, setMissingPreviewId] = useState<string | null>(null)
 
   // 撤销/重做历史深度（驱动按钮 disabled）。
   const canUndo = useGraphHistory((s) => s.pastStates.length > 0)
@@ -268,6 +301,8 @@ export function GraphVideoView(): JSX.Element {
   const loadEpoch = useGraphScenario((s) => s.loadEpoch)
 
   const graph = useGraphScenario((s) => s.graph)
+  const blueprints = useGraphScenario((s) => s.blueprints)
+  const mainBlueprintId = useGraphScenario((s) => s.mainBlueprintId)
   const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
   const setScenario = useGraphScenario((s) => s.setScenario)
   const entities = useGraphScenario((s) => s.meta.entities)
@@ -285,13 +320,12 @@ export function GraphVideoView(): JSX.Element {
     [graph, overlays],
   )
 
-  // 共享素材层轮询（mtime 级 5s）：驱动库缩略图三态 + 生成中占位实时转就绪。
+  // 共享素材层轮询（mtime 级 5s）：驱动生成中占位 + 角色/场景参考图。
   useEffect(() => {
     let alive = true
     const pull = async (): Promise<void> => {
-      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
+      const all = await listRegistryAssets(game)
       if (!alive) return
-      setAssets(vs)
       setRegAssets(all)
     }
     void pull()
@@ -326,31 +360,54 @@ export function GraphVideoView(): JSX.Element {
     setRegAssets(await listRegistryAssets(game))
   }
 
-  const entries = useMemo<VideoEntry[]>(() => {
-    const seen = new Set<string>()
-    const clips: VideoEntry[] = []
-    const narr: VideoEntry[] = []
-    // 内置 bundle 视频（assets/zhandou/*.mp4）：按文件名列出，narr-* 归叙事、其余归战斗。
+  const bundledEntries = useMemo<VideoLibraryEntry[]>(() => {
+    const clips: VideoLibraryEntry[] = []
+    const narr: VideoLibraryEntry[] = []
     for (const [id, url] of Object.entries(ZHANDOU_VIDEOS)) {
-      seen.add(id)
       const isNarr = id.startsWith('narr-')
-        ; (isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗' })
+      ;(isNarr ? narr : clips).push({ id, label: id, url, group: isNarr ? '叙事' : '战斗', bundled: true })
     }
-    // 共享素材层里的自产视频资产（与 bundle 去重）：带三态 status。
-    for (const v of assets) {
-      if (seen.has(v.id)) continue
-      seen.add(v.id)
-      narr.push({
+    return [...clips, ...narr]
+  }, [])
+
+  const supplementalEntries = useMemo<VideoLibraryEntry[]>(() => {
+    return regAssets
+      .filter((a) => a.kind === 'video' && a.productionType === 'video_clip')
+      .map((v) => ({
         id: v.id,
         label: v.label ?? v.id,
         url: v.status === 'ready' ? registryMediaUrl(v.id, game) : '',
         group: '生成',
         status: v.status,
         fromRegistry: true,
+        durMs: v.durationMs,
+      }))
+  }, [regAssets, game])
+
+  const entries = useMemo<VideoEntry[]>(() => {
+    const seen = new Set<string>()
+    const out: VideoEntry[] = []
+    const push = (entry: VideoLibraryEntry): void => {
+      if (seen.has(entry.id)) return
+      seen.add(entry.id)
+      out.push(entry)
+    }
+    for (const entry of bundledEntries) push(entry)
+    for (const item of videoController.items) {
+      push({
+        id: item.id,
+        label: item.label,
+        url: item.url,
+        group: '上传',
+        fromApi: true,
+        durMs: item.durMs,
+        type: item.type,
+        updatedAt: item.updatedAt,
       })
     }
-    return [...clips, ...narr]
-  }, [assets, game])
+    for (const entry of supplementalEntries) push(entry)
+    return out
+  }, [bundledEntries, supplementalEntries, videoController.items])
 
   const boundRef = node?.data.media?.ref
   const boundBare = boundRef?.startsWith('m-') ? boundRef.slice(2) : boundRef
@@ -359,7 +416,9 @@ export function GraphVideoView(): JSX.Element {
   const previewEntry = selectedEntry ?? boundEntry
   const editingBoundClip = Boolean(boundEntry && previewEntry && boundEntry.id === previewEntry.id)
   const timelineEntry = editingBoundClip ? boundEntry : previewEntry
-  const previewSrc = timelineEntry?.url || (timelineEntry ? resolveMediaSrc(timelineEntry.id, game) : undefined)
+  const previewSrc = timelineEntry?.url
+    || (timelineEntry?.fromRegistry ? registryMediaUrl(timelineEntry.id, game) : undefined)
+    || (timelineEntry ? resolveMediaSrc(timelineEntry.id, game) : undefined)
   const maxMs = Math.max(1000, videoDurationMs ?? timelineEntry?.durMs ?? node?.data.durationMs ?? 0)
   const hasEditableVideo = Boolean(node && editingBoundClip && timelineEntry)
   const isTimedQteNode = Boolean(qteElement(scenario, node))
@@ -427,6 +486,10 @@ export function GraphVideoView(): JSX.Element {
       listBodyRef.current?.querySelector(`[data-clip-id="${boundEntry.id}"]`)?.scrollIntoView({ block: 'nearest' })
     })
   }, [selectedSceneId, boundEntry?.id])
+
+  useEffect(() => {
+    setMissingPreviewId(null)
+  }, [timelineEntry?.id, previewSrc, selectedSceneId])
 
   useEffect(() => {
     setVideoDurationMs(null)
@@ -546,9 +609,7 @@ export function GraphVideoView(): JSX.Element {
       }
       const asset = res.asset
       editScenario((g, n) => bindVideoGraph(g, n, asset.id, asset.durationMs ?? maxMs))
-      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
-      setAssets(vs)
-      setRegAssets(all)
+      setRegAssets(await listRegistryAssets(game))
       setSelectedId(asset.id)
     } catch (e) {
       setGenError((e as Error).message)
@@ -576,13 +637,17 @@ export function GraphVideoView(): JSX.Element {
         setGenError(res.error ?? '故事板生成失败')
         return
       }
-      const [vs, all] = await Promise.all([listVideoAssetInfos(game), listRegistryAssets(game)])
-      setAssets(vs)
-      setRegAssets(all)
+      setRegAssets(await listRegistryAssets(game))
     } catch (e) {
       setGenError((e as Error).message)
     } finally {
       setGenBusy(false)
+    }
+  }
+
+  function handleVideoDeleted(id: string): void {
+    if (selectedId === id) {
+      setSelectedId('')
     }
   }
 
@@ -755,32 +820,20 @@ export function GraphVideoView(): JSX.Element {
 
   return (
     <div className="gc-tab gc-tab-video">
-      <aside className="gc-list" aria-label="视频">
-        <div className="gc-list-head">
-          <span className="gc-list-ico" aria-hidden>🎥</span>
-          <span className="gc-list-title">视频素材</span>
-          <span className="gc-list-count">{entries.length}</span>
-        </div>
-        <div className="gc-list-body" ref={listBodyRef}>
-          {entries.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              data-clip-id={it.id}
-              className={`gc-row${it.id === selectedId ? ' is-on' : ''}`}
-              onClick={() => setSelectedId(it.id)}
-            >
-              <span className="gc-row-mark" aria-hidden>{it.id === boundEntry?.id ? '✓' : ''}</span>
-              <span className="gc-row-label">{it.group} · {it.label}</span>
-              {it.status && it.status !== 'ready' ? (
-                <span className={`gvv-row-status is-${it.status}`}>
-                  {it.status === 'generating' ? '生成中…' : it.status === 'failed' ? '失败' : '占位'}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      </aside>
+      <VideoAssetLibrary
+        gameId={game}
+        scenario={scenario}
+        blueprints={blueprints}
+        mainPackId={mainBlueprintId}
+        bundledEntries={bundledEntries}
+        supplementalEntries={supplementalEntries}
+        selectedId={selectedId}
+        boundId={boundBare ?? boundRef}
+        onSelect={setSelectedId}
+        onDeleted={handleVideoDeleted}
+        controller={videoController}
+        listBodyRef={listBodyRef}
+      />
       <section className="gc-preview">
         {timelineEntry ? (
           <div className="gc-stage gc-stage-video">
@@ -840,7 +893,7 @@ export function GraphVideoView(): JSX.Element {
                     {timelineEntry.type ? <em>{timelineEntry.type}</em> : null}
                   </span>
                   <video
-                    key={timelineEntry.id}
+                    key={`${timelineEntry.id}:${timelineEntry.updatedAt ?? ''}`}
                     ref={videoRef}
                     className="gc-video"
                     src={previewSrc}
@@ -850,6 +903,7 @@ export function GraphVideoView(): JSX.Element {
                     playsInline
                     loop={timelineEntry.type === 'loop'}
                     onLoadedMetadata={(e) => {
+                      setMissingPreviewId(null)
                       const dur = e.currentTarget.duration
                       if (Number.isFinite(dur) && dur > 0) {
                         const ms = Math.round(dur * 1000)
@@ -859,6 +913,11 @@ export function GraphVideoView(): JSX.Element {
                         }
                       }
                     }}
+                    onError={() => {
+                      if (timelineEntry) {
+                        setMissingPreviewId(timelineEntry.id)
+                      }
+                    }}
                     onPlay={() => setIsVideoPlaying(true)}
                     onPause={() => setIsVideoPlaying(false)}
                     onVolumeChange={(e) => setIsMuted(e.currentTarget.muted)}
@@ -866,6 +925,16 @@ export function GraphVideoView(): JSX.Element {
                     onSeeked={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
                     onEnded={() => { setIsVideoPlaying(false); setPlayheadMs(maxMs) }}
                   />
+                  <VideoReplaceUpload
+                    entry={previewEntry}
+                    uploading={videoController.uploading}
+                    onReplace={videoController.replaceResource}
+                  />
+                  {missingPreviewId ? (
+                    <div className="val-missing-overlay">
+                      <MissingVideoNotice resourceId={missingPreviewId} />
+                    </div>
+                  ) : null}
                   {videoFx.overlays.length > 0 ? (
                     <div className="gvv-fx-layer" aria-hidden>
                       {videoFx.overlays.map((o) => (

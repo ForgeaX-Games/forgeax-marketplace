@@ -19,7 +19,7 @@ import type {
 } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { flowHandleDisplay } from '../../graph/flow-handle-labels'
-import { buildDefaults, getComponent } from '../../runtime/registry/component-registry'
+import { buildDefaults, getComponent, getComponentManifest } from '../../runtime/registry/component-registry'
 import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
 import { ValueExprEditor } from './ValueExprEditor'
 
@@ -216,6 +216,17 @@ export function isSizable(componentId: string): boolean {
   if (keys.has('x') && keys.has('y')) return false
   if (hasCuePointsInput(componentId) || hasOptionEventsInput(componentId)) return false
   return true
+}
+
+/**
+ * 该组件是否**可交互**（有可触发的出口事件）——从组件契约 derive（manifest.events，
+ * 含从 inputs.events 折出的），不按 component id 硬编码。运行时点击只落在可交互组件的热区上，
+ * 故重叠遮挡风险只在两个可交互组件之间。重叠判定用**真实渲染的可点热区**（见
+ * OverlayCatalogPreview 的 DOM 测量），不用 layout 框——多数交互皮肤是「铺满层里放锚点按钮」，
+ * layout 框反映不出真实热区。
+ */
+export function isInteractive(componentId: string): boolean {
+  return (getComponentManifest(componentId)?.events?.length ?? 0) > 0
 }
 
 // ── 尺寸（width/height 归一化 0~1，相对舞台）——对所有组件通用，对应 `Layout.width/height` ──────

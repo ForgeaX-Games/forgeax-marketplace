@@ -22,6 +22,7 @@ import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
 import { listVideoAssetInfos, resolveMediaSrc, videoDurationCapReached } from './media'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
+import { MissingVideoNotice } from './MissingVideoNotice'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import { addNode } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
@@ -136,20 +137,26 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           id,
           label: id.startsWith('narr-') ? `叙事 · ${id}` : `战斗 · ${id}`,
         }))
-      const registry = await listVideoAssetInfos(game)
-      if (!alive) return
-      const seen = new Set(bundled.map((v) => v.id))
-      const fromReg: VideoOption[] = []
-      for (const a of registry) {
-        if (seen.has(a.id)) continue
-        seen.add(a.id)
-        const name = a.label?.trim()
-        fromReg.push({
-          id: a.id,
-          label: name && name !== a.id ? `素材 · ${name} (${a.id})` : `素材 · ${a.id}`,
-        })
+      try {
+        const registry = await listVideoAssetInfos(game)
+        if (!alive) return
+        const seen = new Set(bundled.map((v) => v.id))
+        const fromReg: VideoOption[] = []
+        for (const a of registry) {
+          if (seen.has(a.id)) continue
+          seen.add(a.id)
+          const name = a.label?.trim()
+          fromReg.push({
+            id: a.id,
+            label: name && name !== a.id ? `素材 · ${name} (${a.id})` : `素材 · ${a.id}`,
+          })
+        }
+        setVideoOptions([...bundled, ...fromReg])
+      } catch {
+        if (alive) {
+          setVideoOptions(bundled)
+        }
       }
-      setVideoOptions([...bundled, ...fromReg])
     })()
     return () => { alive = false }
   }, [game])
@@ -258,6 +265,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   }, [session])
 
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
+  const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMissingVideoId(null)
+  }, [snap.clip?.nodeId, snap.clip?.mediaId, videoSrc])
+
   useEffect(() => {
     // 无视频：durationMs 到点推进（逻辑节拍节点）。
     // 有视频：durationMs 作播放时长上限，改由 <video> onTimeUpdate 处理（见 videoDurationCapReached）。
@@ -435,6 +448,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               style={{ position: 'relative', height: 180, background: '#000', outline: 'none' }}
             >
               {videoSrc ? (
+                <>
                 <video
                   key={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
                   ref={videoElRef}
@@ -443,7 +457,15 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   muted
                   playsInline
                   loop={!!snap.clip?.loop}
-                  onLoadedMetadata={recomputeRect}
+                  onLoadedMetadata={() => {
+                    setMissingVideoId(null)
+                    recomputeRect()
+                  }}
+                  onError={() => {
+                    if (snap.clip?.mediaId) {
+                      setMissingVideoId(snap.clip.mediaId)
+                    }
+                  }}
                   onEnded={() => {
                     if (snap.clip?.loop) return
                     endPerformance()
@@ -460,6 +482,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   }}
                   style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
                 />
+                {missingVideoId ? (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 12, zIndex: 2 }}>
+                    <MissingVideoNotice resourceId={missingVideoId} />
+                  </div>
+                ) : null}
+                </>
               ) : (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.75, fontSize: 12 }}>
                   {snap.clip?.name ?? '（无演出）'}

@@ -132,6 +132,7 @@ ${PREVIEW_CLOCK_CSS}
   font-size: 11px; color: #5fbf7f;
 }
 .gc-row-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gc-row-badge { flex: none; margin-left: auto; }
 /* 每行右侧的行内动作（重命名/设为入口/删除）——平时透明，hover/选中才显。 */
 .gc-row-actions { flex: none; display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .gc-row:hover .gc-row-actions, .gc-row.is-on .gc-row-actions { opacity: 1; }
@@ -144,6 +145,37 @@ ${PREVIEW_CLOCK_CSS}
 }
 .gc-row-act:hover { background: var(--gc-panel3); color: var(--gc-text); }
 .gc-row-act.is-danger:hover { background: rgba(248,113,113,.2); color: #ff9a9a; }
+
+/* ── 左栏树/分组（界面 tab：全局 HUD 组头 → 方案叶子）── */
+.gc-group { display: flex; flex-direction: column; }
+.gc-group-head { display: flex; align-items: center; gap: 4px; }
+.gc-group-toggle {
+  all: unset; box-sizing: border-box; flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 9px; border-radius: 8px; cursor: pointer;
+  font-size: 12.5px; font-weight: 700; color: var(--gc-text);
+  transition: background .12s;
+}
+.gc-group-toggle:hover { background: var(--gc-panel2); }
+.gc-group-caret { flex: none; width: 18px; text-align: center; font-size: 15px; line-height: 1; color: var(--gc-muted); transition: color .12s, transform .12s; }
+.gc-group-toggle:hover .gc-group-caret { color: var(--gc-accent); }
+.gc-group-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.03em; }
+.gc-group-count {
+  flex: none; font-size: 10px; font-variant-numeric: tabular-nums;
+  color: var(--gc-faint); background: rgba(255,255,255,0.05);
+  border-radius: 999px; padding: 1px 7px;
+}
+.gc-group-action { flex: none; display: flex; align-items: center; padding-right: 2px; }
+.gc-group-add {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-size: 11px; line-height: 1; color: var(--gc-muted);
+  padding: 4px 8px; border-radius: 7px; border: 1px solid var(--gc-line-soft);
+  transition: background .12s, color .12s, border-color .12s;
+}
+.gc-group-add:hover { background: var(--gc-accent-soft); color: var(--gc-text); border-color: var(--gc-accent-line); }
+.gc-group-children { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.gc-row.is-leaf { margin-left: 14px; }
+.gc-group-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 10px 6px 24px; }
 
 /* ── 右栏预览 ── */
 .gc-preview {

@@ -1,3 +1,5 @@
+import '@testing-library/jest-dom/vitest'
+
 /**
  * Vitest 全局 setup。
  *

@@ -17,6 +17,7 @@ import { getComponent } from '../../runtime/registry/component-registry'
 import { bootEditorSkins } from '../init'
 import { resolveMediaSrc, videoDurationCapReached } from './media'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
+import { MissingVideoNotice } from './MissingVideoNotice'
 import { VideoOverlayStage } from '../video/VideoOverlayStage'
 import { useVideoContentRect } from '../video/useVideoContentRect'
 import { useGraphScenario } from '../persist/graphScenarioStore'
@@ -117,6 +118,11 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
   const videoSrc = resolveMediaSrc(snap?.clip?.mediaId, game)
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clip?.nodeId, restartKey)
+  const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMissingVideoId(null)
+  }, [snap?.clip?.nodeId, snap?.clip?.mediaId, videoSrc])
 
   useEffect(() => {
     // 无视频：durationMs 到点推进；有视频：durationMs 作播放时长上限，走 <video> onTimeUpdate。
@@ -164,6 +170,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     >
       {/* 演出画面 */}
       {videoSrc ? (
+        <>
         <video
           key={snap?.clip?.nodeId}
           ref={videoElRef}
@@ -172,7 +179,15 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
           muted
           playsInline
           loop={!!snap?.clip?.loop}
-          onLoadedMetadata={recomputeRect}
+          onLoadedMetadata={() => {
+            setMissingVideoId(null)
+            recomputeRect()
+          }}
+          onError={() => {
+            if (snap?.clip?.mediaId) {
+              setMissingVideoId(snap.clip.mediaId)
+            }
+          }}
           onEnded={() => {
             if (snap?.clip?.loop) return
             endPerformance()
@@ -189,6 +204,12 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
           }}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
         />
+        {missingVideoId ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
+            <MissingVideoNotice resourceId={missingVideoId} />
+          </div>
+        ) : null}
+        </>
       ) : (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.6)' }}>
           {snap ? snap.clip?.name ?? '（无演出）' : '加载中…'}

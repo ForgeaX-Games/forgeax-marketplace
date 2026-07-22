@@ -182,7 +182,8 @@
   "requestedEnv": [
     "FORGEAX_SERVER_URL",
     "FORGEAX_SERVER_PORT",
-    "PORT_GAMEVIDEO_STUDIO"
+    "PORT_GAMEVIDEO_STUDIO",
+    "VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS"
   ],
   "experimental": true
 }

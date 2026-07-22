@@ -12,6 +12,7 @@ import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/player
 import { bootEditorSkins } from '../init'
 import { resolveMediaSrc, videoDurationCapReached } from './media'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
+import { MissingVideoNotice } from './MissingVideoNotice'
 import { VideoOverlayStage } from '../video/VideoOverlayStage'
 import { useVideoContentRect } from '../video/useVideoContentRect'
 import { getGameSlug } from '../persist/gameScope'
@@ -30,6 +31,11 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId)
   const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [snap.clip?.nodeId])
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
+  const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMissingVideoId(null)
+  }, [snap.clip?.nodeId, snap.clip?.mediaId, videoSrc])
   const skinCtx: SkinCtx = {
     hud: snap.hud,
     condition: { state: session.runtime.state, visited: session.runtime.state.visited },
@@ -62,6 +68,7 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
         style={{ position: 'relative', width: '100%', height: '100%', background: '#000', color: '#fff', outline: 'none' }}
       >
         {videoSrc ? (
+          <>
           <video
             key={snap.clip?.nodeId}
             ref={videoElRef}
@@ -70,7 +77,15 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
             muted
             playsInline
             loop={!!snap.clip?.loop}
-            onLoadedMetadata={recomputeRect}
+            onLoadedMetadata={() => {
+              setMissingVideoId(null)
+              recomputeRect()
+            }}
+            onError={() => {
+              if (snap.clip?.mediaId) {
+                setMissingVideoId(snap.clip.mediaId)
+              }
+            }}
             onEnded={() => {
               if (snap.clip?.loop) return
               endPerformance()
@@ -87,6 +102,12 @@ export function GraphPlayer({ scenario }: { scenario: GameScenario }): JSX.Eleme
             }}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
           />
+          {missingVideoId ? (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
+              <MissingVideoNotice resourceId={missingVideoId} />
+            </div>
+          ) : null}
+          </>
         ) : (
           <div className="gv-placeholder" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.7 }}>
             {snap.clip?.name ?? '（无演出）'}

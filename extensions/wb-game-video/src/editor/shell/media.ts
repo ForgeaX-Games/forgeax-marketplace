@@ -1,25 +1,39 @@
 /**
- * 媒体解析：把节点演出的 media 引用解析成可播 URL。
- *  - 已是 http/blob/data/绝对路径 URL → 原样用。
- *  - 内置 bundle（assets/zhandou/*.mp4 的 basename）→ 直链。
- *  - 否则视为**共享素材层 registry id** → `/__gva__/media/<id>?game=<slug>`
- *    （见 vite.config.ts gameVideoAssetsPlugin + server/asset-registry）。
- * 返回 undefined = 无演出源（渲染占位）。
+ * Resolves a node media reference to a playable URL.
+ *  - Existing http/blob/data/absolute URLs pass through unchanged.
+ *  - Bundled zhandou basenames resolve first, including legacy `m-` refs.
+ *  - Generated `a-vid-*` resources use the shared `/__gva__/media/:id` endpoint.
+ *  - Remaining stable ids use the Kino content endpoint.
+ * Image and generation registry operations continue to use `/__gva__`.
  */
 import { zhandouUrl } from '../assets/catalog'
+import { createKinoVideoClient, KinoClientError, type KinoVideoClient } from '../assets/kino-api'
 import type { MediaAsset, StyleAxes } from '../assets/registry-types'
 import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
+
+let defaultKinoClient: KinoVideoClient | undefined
+
+function kinoClient(): KinoVideoClient {
+  defaultKinoClient ??= createKinoVideoClient()
+  return defaultKinoClient
+}
+
+/** Stable Kino playback URL for a video resource id. */
+export function kinoVideoContentUrl(resourceId: string, gameId: string): string {
+  return kinoClient().playbackUrl(resourceId, gameId)
+}
 
 export function resolveMediaSrc(ref: string | undefined, game?: string): string | undefined {
   if (!ref) return undefined
   if (/^(https?:|blob:|data:)/.test(ref)) return ref
   if (ref.startsWith('/')) return pluginUrl(ref)
-  // demo 里统一按 zhandou 文件名(basename)引用（战斗/叙事视频同源）；兼容运行时 m- 前缀。
+  // Bundled demo references use the zhandou basename; legacy data may add `m-`.
   const bare = ref.startsWith('m-') ? ref.slice(2) : ref
   const local = zhandouUrl(bare)
   if (local) return local
-  // 其余按共享素材层资产 id 解析。
-  return registryMediaUrl(ref, game)
+  if (!game) return undefined
+  if (ref.startsWith('a-vid-')) return registryMediaUrl(ref, game)
+  return kinoVideoContentUrl(ref, game)
 }
 
 /**
@@ -51,8 +65,8 @@ export function registryMediaUrl(id: string, game?: string): string {
 }
 
 /**
- * 列出该 game 现有的视频资产 id（供演出节点「视频」下拉）。读共享素材层
- * （GET /__gva__/assets?game=<slug>&kind=video）。离线/无端点时返回 []。
+ * Lists Kino video resource ids for the node video picker.
+ * API failures are surfaced to callers instead of appearing as an empty list.
  */
 export async function listVideoAssets(game?: string): Promise<string[]> {
   return (await listVideoAssetInfos(game)).map((a) => a.id)
@@ -68,18 +82,69 @@ export interface VideoAssetInfo {
   sceneNodeId?: string
 }
 
-/** 同上，但带元信息（视频库视图用）。 */
-export async function listVideoAssetInfos(game?: string): Promise<VideoAssetInfo[]> {
-  const assets = await listRegistryAssets(game, 'video')
-  return assets.map((a) => ({
-    id: a.id,
-    bytes: a.bytes,
-    mimeType: a.mime,
-    label: a.label,
-    status: a.status,
-    productionType: a.productionType,
-    sceneNodeId: a.sceneNodeId,
-  }))
+export interface ListVideoAssetInfosOptions {
+  signal?: AbortSignal
+  maxPages?: number
+}
+
+/** Lists all Kino video resources with picker metadata. */
+export async function listVideoAssetInfos(
+  game?: string,
+  options: ListVideoAssetInfosOptions = {},
+): Promise<VideoAssetInfo[]> {
+  if (!game) {
+    return []
+  }
+  const client = kinoClient()
+  const pageSize = 200
+  const maxPages = Math.max(1, options.maxPages ?? 100)
+  const resources = new Map<string, VideoAssetInfo>()
+
+  for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+    if (options.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    const page = await client.list({
+      game_id: game,
+      media_type: 'video',
+      page: pageNumber,
+      page_size: pageSize,
+    }, { signal: options.signal })
+
+    for (const item of page.items) {
+      resources.set(item.resource_id, {
+        id: item.resource_id,
+        bytes: undefined,
+        mimeType: item.source_meta?.mime_type,
+        label: item.name,
+        status: 'ready',
+        productionType: undefined,
+        sceneNodeId: undefined,
+      })
+    }
+
+    if (page.items.length === 0 || resources.size >= page.total) {
+      break
+    }
+  }
+
+  return [...resources.values()]
+}
+
+/** Fetch one Kino video resource; surfaces API errors to callers. */
+export async function getKinoVideoResource(game: string, resourceId: string) {
+  try {
+    return await kinoClient().get(resourceId, game)
+  } catch (error) {
+    if (error instanceof KinoClientError) {
+      throw error
+    }
+    throw new KinoClientError(
+      error instanceof Error ? error.message : 'Failed to load video resource',
+      502,
+      'upstream_unavailable',
+    )
+  }
 }
 
 /** 列共享素材层原始 MediaAsset（AssetBoard / 占位卡用）；离线/无端点返回 []。 */

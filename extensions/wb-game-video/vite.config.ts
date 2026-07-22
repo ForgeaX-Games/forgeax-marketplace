@@ -6,6 +6,11 @@ import { resolve } from 'path'
 import { existsSync, createReadStream, statSync } from 'fs'
 import type { ServerResponse, IncomingMessage } from 'http'
 import { assetsDir, listAssets, getAsset, getStyleAxes, setStyleAxes, resolveAssetFilePath, mimeForPath } from './server/asset-registry'
+import {
+  createVideoUploadProxyHandler,
+  parseAllowedExtraHosts,
+  VIDEO_UPLOAD_PROXY_ROUTE_PREFIX,
+} from './server/video-upload-proxy'
 import { generateKeyframe, generateVideo, type OrchestrateCtx } from './server/generation/orchestrate'
 import { importCharacterRefs, importSceneRefs } from './server/intake'
 import type { MediaKind } from './src/editor/assets/registry-types'
@@ -121,6 +126,20 @@ function graphStorePlugin(): Plugin {
           sendJson(res, 500, { error: String(e) })
         }
       })
+    },
+  }
+}
+
+// ─── Dev-only signed upload reverse proxy (port 15185) ───────────────────
+function videoUploadProxyPlugin(): Plugin {
+  return {
+    name: 'gamevideo-video-upload-proxy',
+    configureServer(server) {
+      const allowedExtraHosts = parseAllowedExtraHosts(process.env.VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS)
+      server.middlewares.use(
+        VIDEO_UPLOAD_PROXY_ROUTE_PREFIX,
+        createVideoUploadProxyHandler({ allowedExtraHosts }),
+      )
     },
   }
 }
@@ -270,7 +289,7 @@ export default defineConfig(() => {
 
   return {
     base: pluginBase,
-    plugins: [react(), graphStorePlugin(), gameVideoAssetsPlugin()],
+    plugins: [react(), videoUploadProxyPlugin(), graphStorePlugin(), gameVideoAssetsPlugin()],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
@@ -283,6 +302,12 @@ export default defineConfig(() => {
       port: process.env.VITE_DEV_PORT ? Number(process.env.VITE_DEV_PORT) : 15185,
       strictPort: true,
       allowedHosts: true as const,
+      proxy: {
+        '/api/v1/kino': {
+          target: `http://127.0.0.1:${process.env.FORGEAX_SERVER_PORT ?? 18900}`,
+          changeOrigin: true,
+        },
+      },
       hmr: {
         clientPort: process.env.VITE_PLUGIN_HMR_CLIENT_PORT
           ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
