@@ -3,11 +3,11 @@
   "title": "gvid:save-graph args",
   "type": "object",
   "additionalProperties": false,
-  "required": ["scenario"],
+  "required": ["project"],
   "properties": {
-    "scenario": {
+    "project": {
       "type": "object",
-      "description": "The full GameScenario to persist (whole-document overwrite). Must contain graph.nodes[] (perf nodes) and graph.edges[] (conditional routing). Structure is validated before write; on validation errors the save is rejected."
+      "description": "Full GraphLibraryDocument to persist (scenario + manifest with main and sub blueprints). Whole-document overwrite into scenarios.graph.json."
     },
     "title": {
       "type": "string",

@@ -14,8 +14,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc -b",
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "prepare": "tsc -b"
+    "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@forgeax/batteries-common": "workspace:*",

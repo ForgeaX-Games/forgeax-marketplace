@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, connect, disconnect, duplicateNodes, insertNodeAfter, insertSubFlowPackAfter, makeEmptySubFlowPack, makeSubFlowPackContainer, normalizeSubFlowFields, reconnect, removeNode, setNodePosition } from '../edit/graph-edit'
+import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setNodePosition } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
-import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
+import { getSubFlow } from '../../runtime/schema/graph-schema'
 
 const n = (id: string): GameNode => ({
   id,
@@ -51,15 +51,37 @@ describe('graph-edit', () => {
     expect(src.edges.length).toBe(0)
   })
 
-  it('makeEmptySubFlowPack + makeSubFlowPackContainer', () => {
+  it('makeEmptySubFlowPack', () => {
     const pack = makeEmptySubFlowPack({ id: 'enemy-turn', title: '敌方回合', version: '1' })
-    expect(pack.schemaVersion).toBe('wb-game-video.pack.v1')
+    expect(pack.version).toBe('1')
     expect(pack.entry).toBe('entry')
     expect(pack.graph.nodes[0]?.data.name).toBe('入口')
-    expect(pack.graph.nodes[0]?.data.durationMs).toBe(100)
-    const c = makeSubFlowPackContainer(pack, { id: 'wrap', name: '敌方回合' })
-    expect(getSubFlowPack(c.data)).toEqual({ id: 'enemy-turn', version: '1' })
-    expect(getSubFlow(c.data)).toBeUndefined()
+    expect(pack.graph.nodes[0]?.data.durationMs).toBeUndefined()
+  })
+
+  it('attachSameGraphSubflow: creates dedicated entry; does not steal existing main-flow node', () => {
+    // a→b 主链：若误把 b 当入口，根视图会把 b 藏进子流程成员。
+    let g = connect(g0(), { source: 'a', sourceHandle: 'default', target: 'b' })
+    g = attachSameGraphSubflow(g, 'a')
+    const entry = getSubFlow(g.nodes.find((x) => x.id === 'a')!.data)
+    expect(entry).toBeTruthy()
+    expect(entry).not.toBe('b')
+    expect(g.nodes.some((x) => x.id === entry)).toBe(true)
+    expect(g.nodes.find((x) => x.id === 'b')).toBeTruthy()
+    // 已有 subFlow 时再切一次：保留入口，只清 pack。
+    const again = attachSameGraphSubflow(
+      {
+        ...g,
+        nodes: g.nodes.map((x) =>
+          x.id === 'a'
+            ? { ...x, data: { ...x.data, subFlowPack: { id: 'p', version: '1' } } }
+            : x,
+        ),
+      },
+      'a',
+    )
+    expect(getSubFlow(again.nodes.find((x) => x.id === 'a')!.data)).toBe(entry)
+    expect((again.nodes.find((x) => x.id === 'a')!.data as { subFlowPack?: unknown }).subFlowPack).toBeUndefined()
   })
 
   it('insertNodeAfter: 插入并改接 out 边', () => {
@@ -67,17 +89,6 @@ describe('graph-edit', () => {
     const { graph: next, nodeId } = insertNodeAfter(g, 'a')
     expect(next.nodes.some((n) => n.id === nodeId)).toBe(true)
     expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId && (e.sourceHandle ?? 'default') === 'default')).toBe(true)
-    expect(next.edges.some((e) => e.source === nodeId && e.target === 'b')).toBe(true)
-    expect(next.edges.some((e) => e.id === 'e-ab')).toBe(false)
-  })
-
-  it('insertSubFlowPackAfter: 后插子蓝图容器并改接 out 边', () => {
-    let g = connect(g0(), { source: 'a', sourceHandle: 'default', target: 'b', id: 'e-ab' })
-    const { graph: next, nodeId, pack } = insertSubFlowPackAfter(g, 'a', { title: '敌方回合' })
-    const container = next.nodes.find((n) => n.id === nodeId)
-    expect(getSubFlowPack(container!.data)).toEqual({ id: pack.id, version: pack.version })
-    expect(pack.title).toBe('敌方回合')
-    expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId)).toBe(true)
     expect(next.edges.some((e) => e.source === nodeId && e.target === 'b')).toBe(true)
     expect(next.edges.some((e) => e.id === 'e-ab')).toBe(false)
   })

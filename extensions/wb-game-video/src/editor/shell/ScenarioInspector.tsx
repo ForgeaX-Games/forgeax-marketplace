@@ -1,17 +1,16 @@
 /**
- * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / rng / reactions。
+ * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / formulas。
  */
 import type { CSSProperties, JSX } from 'react'
-import type { AttrMeta, Entity, GameScenario, Layout, Overlay, Reaction, Variable } from '../../runtime/schema/graph-schema'
+import type { AttrMeta, Entity, GameScenario, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
-import { ConditionEditor, type EditorPickerCtx } from './editors'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
 import { NEW_COMPONENT_PRESETS, sortSchemeIds } from '../demo/builtin-schemes'
 import { TermChainEditor } from './TermChainEditor'
 import { formulaTermsPreview } from './formulaApply'
 
-export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'rng' | 'reactions'> & {
+export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui'> & {
   formulas?: Record<string, Formula>
 }
 
@@ -70,23 +69,15 @@ function UsageBadge({ count }: { count: number }): JSX.Element {
   )
 }
 
-export type ScenarioSection = 'scene' | 'overlays' | 'variables' | 'entities' | 'formulas' | 'rules'
+export type ScenarioSection = 'overlays' | 'variables' | 'entities' | 'formulas'
 
 export function ScenarioInspector({
   value,
-  nodeIds,
-  nodeLabel,
-  edgeOptions,
   section,
   overlayUsage,
   onChange,
 }: {
   value: ScenarioMeta
-  nodeIds: string[]
-  /** 节点下拉展示；缺省用 id。 */
-  nodeLabel?: (id: string) => string
-  /** 全图出边目录（advance.edgeId 选择用）。 */
-  edgeOptions?: Array<{ value: string; label: string }>
   section?: ScenarioSection
   /** overlayId → 被多少节点挂载引用（资源池「已用/未用」角标）。 */
   overlayUsage?: Record<string, number>
@@ -96,9 +87,6 @@ export function ScenarioInspector({
   const variables = value.variables ?? {}
   const entities = value.entities ?? {}
   const formulas = value.formulas ?? {}
-  const reactions = value.reactions ?? []
-  const seed = value.rng?.seed ?? 0
-  const pickers: EditorPickerCtx = { entities, variables, nodeLabel }
   const allOverlays = value.ui?.overlays ?? {}
   // 「通用样式」= 自由方案；排除每节点自动内容 overlay（node:*，那是时间轴的内容容器）。
   // 内置方案（静态/动态组件方案）固定置顶，其余按目录原有顺序跟后，见 sortSchemeIds。
@@ -156,22 +144,9 @@ export function ScenarioInspector({
   const setVariables = (v: Record<string, Variable>) => onChange({ ...value, variables: v })
   const setEntities = (e: Record<string, Entity>) => onChange({ ...value, entities: e })
   const setFormulas = (f: Record<string, Formula>) => onChange({ ...value, formulas: f })
-  const setReactions = (r: Reaction[]) => onChange({ ...value, reactions: r.length ? r : undefined })
-  const patchReaction = (i: number, p: Partial<Reaction>) => setReactions(reactions.map((r, idx) => (idx === i ? { ...r, ...p } : r)))
 
   return (
     <div style={{ padding: 10, overflow: 'auto', fontSize: 12 }}>
-      {show('scene') &&
-        field(
-          '随机种子',
-          <input
-            type="number"
-            value={seed}
-            onChange={(e) => onChange({ ...value, rng: { seed: Number(e.target.value) || 0 } })}
-            style={{ width: 120 }}
-          />,
-        )}
-
       {show('overlays') && (
         <>
           <div style={sectionTitle}>
@@ -345,70 +320,6 @@ export function ScenarioInspector({
         </>
       )}
 
-      {show('rules') && (
-        <>
-          <div style={sectionTitle}>
-            <b>局级 reactions（即时判负/胜）</b>
-            <button
-              onClick={() =>
-                setReactions([
-                  ...reactions,
-                  {
-                    when: { type: 'state', condition: { all: [] } },
-                    do: [{ kind: 'advance', edgeId: edgeOptions?.[0]?.value ?? '' }],
-                  },
-                ])
-              }
-            >
-              + 规则
-            </button>
-          </div>
-          {reactions.map((r, i) => {
-            const cond = r.when.type === 'state' ? r.when.condition : { all: [] }
-            const adv = r.do.find((a) => a.kind === 'advance')
-            return (
-              <div key={i} style={box}>
-                {field(
-                  '沿边跳转',
-                  <select
-                    value={adv && adv.kind === 'advance' ? adv.edgeId : ''}
-                    onChange={(e) =>
-                      patchReaction(i, {
-                        when: { type: 'state', condition: cond },
-                        do: [{ kind: 'advance', edgeId: e.target.value }],
-                      })
-                    }
-                    style={{ flex: 1 }}
-                  >
-                    <option value="">（选出边）</option>
-                    {(edgeOptions ?? []).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>,
-                )}
-                <ConditionEditor
-                  value={cond}
-                  nodeIds={nodeIds}
-                  pickers={pickers}
-                  entities={entities}
-                  variables={variables}
-                  onChange={(when) =>
-                    patchReaction(i, {
-                      when: { type: 'state', condition: when ?? { all: [] } },
-                      do: r.do,
-                    })
-                  }
-                />
-                <button style={{ ...del, marginTop: 4 }} onClick={() => setReactions(reactions.filter((_, idx) => idx !== i))}>
-                  删除规则
-                </button>
-              </div>
-            )
-          })}
-        </>
-      )}
     </div>
   )
 }

@@ -19,6 +19,7 @@ import {
   SelectionMode,
   getSmoothStepPath,
   useReactFlow,
+  useStoreApi,
   type Connection,
   type EdgeChange,
   type EdgeProps,
@@ -90,7 +91,6 @@ interface CanvasNodeViewData {
   isPack?: boolean
   onDrill?: (nodeId: string) => void
   onInsertAfter?: (nodeId: string) => void
-  onInsertPackAfter?: (nodeId: string) => void
   onDuplicate?: (nodeId: string) => void
   onDelete?: (nodeId: string) => void
   [key: string]: unknown
@@ -129,13 +129,6 @@ const Ico = {
       <path d="M5 15V7a2 2 0 0 1 2-2h8" />
     </svg>
   ),
-  pack: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-      <path d="M2 12l10 5 10-5" />
-      <path d="M2 17l10 5 10-5" />
-    </svg>
-  ),
   trash: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12" />
@@ -144,7 +137,7 @@ const Ico = {
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, active, isGroup, isPack, onDrill, onInsertAfter, onInsertPackAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
+  const { fx, active, isGroup, isPack, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
   return (
     <div
@@ -213,21 +206,6 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           >
             {Ico.insert}
           </button>
-          {onInsertPackAfter && (
-            <button
-              type="button"
-              className="nodrag nopan"
-              role="menuitem"
-              aria-label="后插子蓝图"
-              data-tip="在后方插入子蓝图容器并自动接线"
-              onClick={(e) => {
-                e.stopPropagation()
-                onInsertPackAfter(id)
-              }}
-            >
-              {Ico.pack}
-            </button>
-          )}
           <button
             type="button"
             className="nodrag nopan"
@@ -302,12 +280,15 @@ export interface GraphCanvasProps {
   onPaneClick?: () => void
   /** 画布右下角：添加节点（属于蓝图编辑手势，不进顶栏）。position = 当前视口中心（flow 坐标）。 */
   onAddNode?: (position: { x: number; y: number }) => void
-  /** 画布右下角：添加子蓝图容器（主图用；下钻进 pack 时隐藏）。 */
+  /** 画布右下角：引用一张既有蓝图，插入 subFlowPack 引用容器节点。 */
   onAddPackNode?: (position: { x: number; y: number }) => void
-  /** 节点 hover：在后方插入子蓝图容器（主图用）。 */
-  onInsertPackAfter?: (nodeId: string) => void
   /** 画布右下角：自适应布局（dagre 重排 + fitView）。 */
   onFitLayout?: () => void
+  /**
+   * 居中时额外给右侧留白的像素（试玩浮层宽）。必须是稳定原始值——若每帧传新
+   * object 当 padding，会反复 fitView，拖动画布/节点时视口被拽回去。
+   */
+  fitReserveRightPx?: number
 }
 
 export function GraphCanvas(props: GraphCanvasProps): JSX.Element {
@@ -333,12 +314,34 @@ function GraphCanvasInner({
   onPaneClick,
   onAddNode,
   onAddPackNode,
-  onInsertPackAfter,
   onFitLayout,
+  fitReserveRightPx = 0,
 }: GraphCanvasProps): JSX.Element {
   ensureCanvasStyle()
   const { fitView, screenToFlowPosition } = useReactFlow()
+  const store = useStoreApi()
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const fitReserveRightPxRef = useRef(fitReserveRightPx)
+  fitReserveRightPxRef.current = fitReserveRightPx
+  /**
+   * 居中 / 自适应：先用画布 DOM 真实宽高写回 RF store，再 fitView。
+   * 节点配置开合、蓝图库左右分栏后，store 里的 width/height 偶发滞后——偏小会把图画到视口右侧。
+   * padding 读 ref：手动点「居中」/排版时用当前浮层留白；自动 fit 只跟 fitSignal / 下钻走。
+   */
+  const fitGraphInView = useCallback((opts?: { duration?: number }) => {
+    const el = rootRef.current
+    const width = el?.clientWidth ?? 0
+    const height = el?.clientHeight ?? 0
+    if (width > 0 && height > 0) {
+      const cur = store.getState()
+      if (cur.width !== width || cur.height !== height) store.setState({ width, height })
+    }
+    const rightPx = fitReserveRightPxRef.current
+    const padding = rightPx > 0
+      ? { top: 0.18, left: 0.18, bottom: 0.18, right: `${rightPx}px` as const }
+      : 0.18
+    return fitView({ padding, duration: opts?.duration, maxZoom: 1 })
+  }, [fitView, store])
   /** 当前视口中心（flow 坐标）；空图/平移后添加节点时落在可见区，避免落在原点外看不见。 */
   const viewportCenter = useCallback((): { x: number; y: number } => {
     const el = rootRef.current
@@ -467,12 +470,11 @@ function GraphCanvasInner({
             isPack: packIds.has(n.id),
             onDrill,
             onInsertAfter,
-            onInsertPackAfter,
             onDuplicate: onDuplicateNode,
             onDelete: onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, onDrill, onInsertAfter, onInsertPackAfter, onDuplicateNode, onDeleteNode],
+    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>
@@ -505,21 +507,23 @@ function GraphCanvasInner({
     }
   }, [])
 
-  // 仅在下钻切换 / 显式自适应（fitSignal）时 fitView；增删节点、拖位置绝不重框选。
+  // 仅在下钻切换 / 显式自适应（fitSignal）时 fitView。
+  // 「从此试玩」开合浮层只改 fitReserveRightPx——留给手动居中/排版用，绝不因此自动 fit，
+  // 否则视口会被拽走。增删节点、拖位置、试玩 tick 同理不重框。
   // 首帧交给 onInit，避免 mount 时节点尚未度量导致 fit 空跑、图落在视口外。
   useEffect(() => {
     if (skipFitEffectOnce.current) {
       skipFitEffectOnce.current = false
       return
     }
-    const t = window.setTimeout(() => fitView({ padding: 0.18, duration: 200, maxZoom: 1 }), 40)
+    const t = window.setTimeout(() => { void fitGraphInView({ duration: 200 }) }, 40)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSignal, drillFitKey])
 
-  const onInit = useCallback((inst: ReactFlowInstance) => {
-    inst.fitView({ padding: 0.18, maxZoom: 1 })
-  }, [])
+  const onInit = useCallback((_inst: ReactFlowInstance) => {
+    void fitGraphInView()
+  }, [fitGraphInView])
 
   useEffect(() => {
     const el = rootRef.current
@@ -671,14 +675,14 @@ function GraphCanvasInner({
               const c = viewportCenter()
               onAddPackNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
             }}
-            title="添加子蓝图容器（新建空包并引用）"
+            title="引用一张既有蓝图（从蓝图库选一个，插入引用容器节点）"
           >
-            ＋ 子蓝图
+            ＋ 引用蓝图
           </button>
         )}
         <button
           type="button"
-          onClick={() => fitView({ padding: 0.18, duration: 200, maxZoom: 1 })}
+          onClick={() => { void fitGraphInView({ duration: 200 }) }}
           title="把整张图框进视口正中（不改动节点位置）"
         >
           ◎ 居中

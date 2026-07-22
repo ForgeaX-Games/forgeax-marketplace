@@ -16,8 +16,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "prepare": "tsc -b"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@forgeax/node-runtime": "workspace:*",

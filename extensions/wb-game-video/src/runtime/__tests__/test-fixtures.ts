@@ -80,8 +80,7 @@ export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameS
     }
   })
   return {
-    schemaVersion: 't',
-    rng: { seed: 1 },
+    version: 't',
     ...over,
     variables: {
       qi: { id: 'qi', name: '气', initial: 0, min: 0, max: 9 },
