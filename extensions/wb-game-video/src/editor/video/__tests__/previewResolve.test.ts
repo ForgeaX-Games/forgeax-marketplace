@@ -18,7 +18,7 @@ const variables: Record<string, Variable> = {
 }
 
 function scenarioOf() {
-  return { version: 't', variables, entities, graph: { nodes: [], edges: [] } }
+  return { schemaVersion: 't', variables, entities, rng: { seed: 1 }, graph: { nodes: [], edges: [] } }
 }
 
 function ctx(): PreviewEvalContext {

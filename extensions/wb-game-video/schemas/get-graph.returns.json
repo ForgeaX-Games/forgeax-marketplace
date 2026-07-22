@@ -3,12 +3,13 @@
   "title": "gvid:get-graph returns",
   "type": "object",
   "additionalProperties": true,
-  "required": ["project"],
+  "required": ["scenario"],
   "properties": {
-    "project": {
-      "description": "Full GraphLibraryDocument (original scenario shape + manifest.packs including main). null if no disk data.",
+    "scenario": {
+      "description": "The GameScenario (contains graph.nodes/graph.edges). null if neither disk data nor demo is available.",
       "type": ["object", "null"]
     },
+    "source": { "type": "string", "enum": ["disk", "demo"] },
     "gameSlug": { "type": ["string", "null"] }
   }
 }

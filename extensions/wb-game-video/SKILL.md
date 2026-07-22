@@ -14,48 +14,50 @@ trigger: /gamevideo
 
 ## 玩法图数据模型（SSOT）
 
-落盘/传输类型 = **`GraphLibraryDocument`**（原 `GameScenario` + `manifest`）。端点 JSON 字段名仍可叫 `project`。
-
 ```text
-GraphLibraryDocument                 # src/runtime/schema/graph-schema.ts
-├── variables{} entities{}           # 全 game 共享
-├── ui.overlays{}
-├── graph { nodes[], edges[] }       # 运行开跑入口 = 主蓝图镜像
-└── manifest
-     ├── mainPackId                  # 入口标记（只住这里，根上不再镜像）
-     └── packs{ id → BlueprintDoc }  # 含 main + 全部子蓝图（编辑库 SSOT；对齐 subFlowPack）
+GameScenario                         # src/runtime/schema/graph-schema.ts
+├── variables{} entities{}           # 实体 = 开放数值袋 attrs（hp 只是约定 attr，无特权）
+├── ui.overlays{}  rng.seed  reactions?[]  # Overlay 包 / 种子 / 局级 state→goto
+└── graph { nodes[], edges[] }
+     nodes[] 全是「演出节点」(type:'perf')：media + overlayNodes + reactions
+     edges[] 条件/加权出边：判断一律折这里（无独立网关；边不带 effects）
 ```
 
 > [!IMPORTANT]
-> **契约（强制）**：
-> - **开跑**用根 `graph`；执行中遇 `subFlowPack` → 查 `manifest.packs`（无根级 `packs` 数组）。
-> - 改子蓝图：改 `manifest.packs[id].graph`，保存前用规范化保证根 `graph` ↔ main 同步。
-> - **只有「演出节点」**；判断折进出边。三层：edges=路由；节点/挂载 reactions=副作用；overlays=UI。无局级 reactions。
-> - 蓝图库设计 SSOT：`docs/superpowers/specs/2026-07-21-blueprint-library-folder-management.md`。
-> - 代码权威：`graph-schema.ts` + `blueprint-project.ts` + `engine.ts` + demo `nodia.graph.json`。
+> **图 schema 契约（强制）**：
+> - **只有「演出节点」，每个绑视频**；判断折进出边（handle `cond:N`/`else`/`opt:*`/`pass|good|fail`/`out`，边带 `weight`=加权随机）。跨节点记忆用变量+条件边。
+> - **三层心智**：edges=路由；reactions=副作用；overlays=UI。
+> - **一切声明式、可序列化、无函数**：条件 `GraphCondition`、效果 `GraphEffect`（value 可为 `{expr}`）。
+> - 盖在视频上的 QTE/血条/选择等 = `skins/` 下可替换组件，图里只记 `component`；统一 `OverlayProps` + `emit`（见 `rendererRegistry.tsx` / `skinRuntime.ts`）。
+> - 代码级权威：`graph-schema.ts` + `node-config-schema.ts` + `engine.ts` + demo `nodia.graph.json`。
+> - ⚠️ 旧 `Scenario/Scene → scenarioToBlueprint → 蓝图运行时`、以及 `gvid:*` 工具链已**退役删除**，勿再引用。
 
 ## 怎么编辑：AI 工具（graph-native）
 
-AI 与工坊沟通 = **读写整份库文档**（`project`）。核心工具（LLM 侧工具名以 `_` 连接）：
+AI 与工坊沟通的唯一契约 = **直接读/改 GameGraph**。只有三个瘦工具（LLM 侧工具名以 `_` 连接：`gvid_get-graph` 等）：
 
-| tool id            | 用途 | 关键 args |
-|--------------------|------|-----------|
-| `gvid:get-graph`   | 读当前 game 的库文档（无盘 → `{ project: null }`，前端回落 demo） | `gameSlug?` |
-| `gvid:save-graph`  | 整本覆盖写 `scenarios.graph.json` + 版本快照（留10） | `project`(必填), `title?`, `gameSlug?` |
-| `gvid:list-videos` | 列出内置演出视频库可用的 `media.ref` | — |
+| tool id            | 用途                                                                 | 关键 args |
+|--------------------|----------------------------------------------------------------------|-----------|
+| `gvid:get-graph`   | 读当前 game 的 GameGraph（无盘数据回退内置 demo）                     | `gameSlug?` |
+| `gvid:save-graph`  | 整本覆盖写 GameGraph + 压版本快照（留10）；落盘前结构校验，有 error 拒绝 | `scenario`(必填), `title?`, `gameSlug?` |
+| `gvid:list-videos` | 列出内置演出视频库可用的 `media.ref`（basename）                       | — |
 
-**标准编辑闭环**：
+**标准编辑闭环**（如「把 A 节点到 B 的连线改成到 C」「加一本简单视频游戏」）：
 
 ```
-gvid:get-graph({})
-  → 改 project.graph 和/或 project.manifest.packs[*].graph
-gvid:save-graph({ project, title:"..." })
+gvid:get-graph({})                          # 拿现有 nodes/edges
+  → 在返回的 scenario.graph 上改：加/删演出节点、改 edge.target、把判断折进出边 condition/weight…
+gvid:list-videos({})                        # （需要绑视频时）看有哪些片段可用
+gvid:save-graph({ scenario, title:"..." })  # 整本回写；ok:false 时看 errors 修完再存
 ```
 
-**人也能在工坊 UI 改**：左侧「蓝图 / 视频 / 界面 / 规则 / 试玩」。蓝图 tab = 库列表 + 画布。
+`save-graph` 校验：节点 id 唯一、边 `source`/`target` 指向存在的节点。深层 kind 语义走前端 `validate.ts` / 工坊「试玩」页自检。
 
-**持久化**：单文件 `.forgeax/games/<slug>/game-video/scenarios.graph.json`（无 `blueprints/` 文件夹）。
-进入优先级：草稿 > 磁盘最新 > 内置 demo。
+**人也能在工坊 UI 改**：左侧「蓝图 / 视频 / 界面 / 规则 / 试玩」五个 tab（蓝图=可编辑画布，点节点出配置；试玩=新引擎预览）。AI 与人共享同一份 GameGraph。
+
+**持久化**：`save-graph`（AI）与工坊「保存」（人）都落盘到
+`.forgeax/games/<slug>/game-video/scenarios.graph.json`（+ 版本快照留 10）；工坊里的未保存草稿走 localStorage。
+进入优先级：草稿 > 最新已保存版本 > 磁盘原始 > 内置 demo。
 
 ## 校验
 

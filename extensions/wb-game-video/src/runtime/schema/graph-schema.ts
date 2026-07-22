@@ -238,15 +238,15 @@ export interface NodeData {
 }
 
 /**
- * 跨图子蓝图指针（图上只存指针，不存子图节点）。
- * 本体在 `manifest.packs[id]`；engine 开跑用根 `graph`，执行中遇依赖再查表。
+ * 跨图子蓝图包指针（主图只存指针，不存 pack 内节点）。
+ * 完整包本体见 `SubFlowPackDef`（`scenario.packs`）。
  */
 export interface SubFlowPack {
-  /** 蓝图 id（与 BlueprintDoc.id 对齐）。 */
+  /** 包 id（与 SubFlowPackDef.id 对齐）。 */
   id: string
   /** 可选版本钉死；解析时优先 `id@version`，否则回退 `id`。 */
   version?: string
-  /** 覆盖包内默认入口；缺省用蓝图文档 entry。 */
+  /** 覆盖包内默认入口；缺省用 SubFlowPackDef.entry。 */
   entry?: string
 }
 
@@ -285,12 +285,12 @@ export function isSubflowContainerData(d: GameNodeData): boolean {
 }
 
 /**
- * 子蓝图包形态（与 BlueprintDoc 对齐字段；UI/测试注入用）。
- * 落盘权威是 `manifest.packs` 里的 `BlueprintDoc`，不再有根级 scenario.packs 数组。
+ * 可独立编辑/落盘的子蓝图包（跨图 call/return 的被调方）。
+ * 运行时由 GraphRuntime 预加载注入；主 scenario 的 vars/entities/reactions 仍为一局 SSOT。
  */
 export interface SubFlowPackDef {
+  schemaVersion: 'wb-game-video.pack.v1'
   id: string
-  /** 内容版本；`subFlowPack` 指针可钉 `id@version`。 */
   version: string
   title?: string
   /** 包内入口节点 id。 */
@@ -319,19 +319,31 @@ export type GameNode = Node<GameNodeData, GameNodeType, { flowId?: string }>
 export type GameEdge = Edge<EdgeRouting>
 export type GameGraph = Graph<GameNode, GameEdge>
 
-// （类型 Reaction 由上方 export type 与 node-config 导出；挂在节点 / overlay 挂载上，不再有局级 reactions。）
+/**
+ * 局级 reactions（多为 `when.type === 'state'`）：状态变化后求值，
+ * do 含显式 advance 则硬打断跳转。典型：HP≤0 → 胜/负。与挂载/节点共用瘦 Reaction。
+ */
+// （类型 Reaction 由上方 export type 与 node-config 导出）
 
 /** 顶层容器（scenarios.graph.json 的 scenario 内容形态）。 */
 export interface GameScenario {
-  version: string
+  schemaVersion: string
   /** Record key === Variable.id（添加时自动生成）。 */
   variables?: Record<string, Variable>
   /** Record key === Entity.id（添加时自动生成）。 */
   entities?: Record<string, Entity>
   /** overlay 目录（`ui.overlays`）+ 可选主题色。 */
   ui?: GameScenarioUi
+  rng?: { seed: number }
+  /** 局级 reactions（即时判负/判胜等）；每次状态变化后求值。 */
+  reactions?: Reaction[]
   /** 用户自定义文字预设（内置在 text-style.ts；这里只存用户新建的，按 subtitle/overlay 分组）。 */
   textStylePresets?: { subtitle?: GraphTextStylePreset[]; overlay?: GraphTextStylePreset[] }
+  /**
+   * 本局挂载的子蓝图包。容器节点用 `SubFlowPackNodeData.subFlowPack` 存指针；包本体在此。
+   * 缺包而节点引用了 → 运行时 resolve 失败。
+   */
+  packs?: SubFlowPackDef[]
   graph: GameGraph
 }
 
@@ -347,70 +359,4 @@ export function isGameGraph(v: unknown): v is GameGraph {
     if (typeof node.type !== 'string' || !node.type) return false
     return !!node.data && typeof node.data === 'object'
   })
-}
-
-/**
- * 全 game 共享的场景级 meta（不属于任何单张图）。编辑器公式库 formulas 与之同级。
- * `formulas` 的值形状是 `editor/persist/formula-authoring` 的 `Formula`；runtime 层不
- * 声明该具体类型（`runtime ↛ editor`，见 check-module-boundaries.mjs），改为 `unknown`——
- * 消费处（store）用窄类型断言恢复 `Formula`。
- */
-export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'textStylePresets'> & {
-  formulas?: Record<string, unknown>
-}
-
-/** 蓝图文档：一张独立可存取的图（主蓝图或子蓝图），与 `SubFlowPackDef` 同级但语义面向新蓝图库。 */
-export interface BlueprintDoc {
-  id: string
-  title: string
-  /** 子蓝图内容版本（对齐 `SubFlowPackDef.version` / `subFlowPack` 钉死）；主蓝图可缺省。 */
-  version?: string
-  entry: string
-  graph: GameGraph
-  requires?: { vars?: string[]; entities?: string[] }
-}
-
-/**
- * 嵌在 scenario 根上的蓝图库（单文件 SSOT 的增量字段）。
- * `packs` 含主蓝图 + 全部子蓝图完整文档（与 `subFlowPack` 用语对齐）；
- * 根上的 `graph` 与 `packs[mainPackId].graph` 同步（双源，便于编辑库与运行入口共用）。
- */
-export interface BlueprintManifest {
-  version: 'wb-game-video.blueprint-manifest.v1'
-  mainPackId: string
-  packs: Record<string, BlueprintDoc>
-}
-
-/**
- * 完整落盘/编辑文档 = 原 `GameScenario`（graph/variables/entities/…）+ `manifest`。
- * 不再使用独立的 sharedMeta / blueprints/ 文件夹。
- */
-export type GraphLibraryDocument = GameScenario & {
-  formulas?: Record<string, unknown>
-  manifest: BlueprintManifest
-}
-
-/** 运行时守卫：浅校验是否为 `BlueprintDoc`（不深校验 graph 内部节点/边形状）。 */
-export function isBlueprintDoc(v: unknown): v is BlueprintDoc {
-  const d = v as BlueprintDoc | null
-  return !!d && typeof d === 'object' && typeof d.id === 'string' && typeof d.entry === 'string'
-    && !!d.graph && Array.isArray(d.graph.nodes) && Array.isArray(d.graph.edges)
-}
-
-/**
- * 解析一张图的可跑入口。
- * - `preferred` 仍在图里 → 用它（BlueprintDoc.entry / 引用节点上的 entry 覆盖）。
- * - 否则取无入边的根节点（偏左上优先）；再否则首节点。
- * 空图返回 undefined。用于：删掉默认 `entry` 节点后 doc.entry 仍写着 `'entry'` 的陈旧数据。
- */
-export function resolveGraphEntry(graph: GameGraph, preferred?: string): string | undefined {
-  const nodes = graph.nodes
-  if (nodes.length === 0) return undefined
-  if (preferred && nodes.some((n) => n.id === preferred)) return preferred
-  const targets = new Set(graph.edges.map((e) => e.target))
-  const roots = nodes.filter((n) => !targets.has(n.id))
-  const pool = roots.length > 0 ? roots : nodes
-  return [...pool].sort(
-    (a, b) => a.position.x - b.position.x || a.position.y - b.position.y || a.id.localeCompare(b.id),
-  )[0]!.id
 }
