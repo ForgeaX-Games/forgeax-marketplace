@@ -7,7 +7,7 @@
  * - 共享方案：**不再克隆**。改动写成挂载上的稀疏差量（`overrides`/`added`/`removed`），未改组件
  *   继续跟随共享方案（prototype + sparse override，见 `runtime/schema/expand-overlay.ts`）。
  */
-import type { GameScenario, OverlayChild, OverlayNode, GameGraph } from '../../runtime/schema/graph-schema'
+import type { GameScenario, GraphLibraryDocument, OverlayChild, OverlayNode, GameGraph } from '../../runtime/schema/graph-schema'
 import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { overlayMountId } from '../../runtime/schema/node-config-schema'
 import { mergeChild, resolveMountChildren } from '../../runtime/schema/expand-overlay'
@@ -111,12 +111,13 @@ export function forkSchemeForEdit(scenario: GameScenario, nodeId: string): GameS
   return ensureNodeOverlay(scenario, nodeId)
 }
 
-/** 某 overlay 是否被 scenario 中任一图（主图 + 子蓝图包）的节点挂载引用。 */
+/** 某 overlay 是否被 scenario 中任一图（根 graph + manifest.packs）挂载引用。 */
 export function isOverlayReferenced(scenario: GameScenario, overlayId: string): boolean {
   const inGraph = (g: GameGraph): boolean =>
     g.nodes.some((n) => (n.data.overlayNodes ?? []).some((m) => m.overlay === overlayId))
   if (inGraph(scenario.graph)) return true
-  return (scenario.packs ?? []).some((p) => inGraph(p.graph))
+  const bps = (scenario as GraphLibraryDocument).manifest?.packs
+  return !!bps && Object.values(bps).some((d) => inGraph(d.graph))
 }
 
 /** 从目录移除无人引用的节点本地副本（仅 `node:` 前缀，避免误删共享方案）。 */

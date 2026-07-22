@@ -11,7 +11,7 @@
  *   两个 iframe 靠 graphViewStore + BroadcastChannel 同步「当前 tab」。
  */
 import { useEffect, useState } from 'react'
-import { GraphStudio } from './editor/shell/GraphStudio'
+import { BlueprintLibraryView } from './editor/shell/BlueprintLibraryView'
 import { GraphVideoView } from './editor/shell/GraphVideoView'
 import { GraphConfigView } from './editor/shell/GraphConfigView'
 import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
@@ -25,7 +25,7 @@ const NAV: Array<{ id: GraphView; label: string; hint: string }> = [
   { id: 'graph', label: '蓝图', hint: '新引擎蓝图工作室 · 可编辑画布 + 右上试玩浮层（点节点才出配置）' },
   { id: 'video', label: '视频', hint: '内置演出视频库 · 蓝图「视频」下拉的数据源' },
   { id: 'ui', label: '界面', hint: '全局 HUD 配置' },
-  { id: 'rule', label: '规则', hint: '实体 / 变量 / 场景设置 / 反应规则（左侧切换）' },
+  { id: 'rule', label: '规则', hint: '实体 / 变量 / 公式（左侧切换）' },
   { id: 'play', label: '试玩', hint: '新引擎预览 · 跑当前编辑的场景' },
 ]
 
@@ -77,7 +77,7 @@ function GraphMain(): JSX.Element {
   const view = useGraphView((s) => s.view)
   return (
     <main className="ga-main">
-      {view === 'graph' && <GraphStudio scenario={NODIA_DEMO} />}
+      {view === 'graph' && <BlueprintLibraryView />}
       {view === 'video' && <GraphVideoView />}
       {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '全局 HUD' }]} scenario={NODIA_DEMO} />}
       {view === 'rule' && (
@@ -88,8 +88,6 @@ function GraphMain(): JSX.Element {
             { section: 'entities', label: '实体' },
             { section: 'variables', label: '变量' },
             { section: 'formulas', label: '公式' },
-            { section: 'scene', label: '场景设置' },
-            { section: 'rules', label: '局级 reactions' },
           ]}
           scenario={NODIA_DEMO}
         />

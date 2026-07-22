@@ -23,8 +23,6 @@ export interface ValidateOpts {
   entities?: Iterable<string>
   vars?: Iterable<string>
   items?: Iterable<string>
-  /** 局级 reactions（scenario.reactions）——一并校验 when 引用与 advance 边目标。 */
-  reactions?: Reaction[]
   /** scenario.ui.overlays —— 展开 OverlayNode 做 component / handle 校验。 */
   overlays?: Record<string, Overlay>
 }
@@ -246,15 +244,26 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
       }
     }
     const edgeIds = new Set(graph.edges.map((e) => e.id))
-    for (let i = 0; i < (opts.reactions ?? []).length; i++) {
-      const r = opts.reactions![i]!
-      const at = `reactions[${i}]`
-      if (r.when.type === 'state') walkRefs(r.when.condition, ctx, at, issues)
-      if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
-      for (const a of r.do) {
-        if (a.kind === 'effect') walkRefs(a.effects, ctx, at, issues)
-        if (a.kind === 'advance' && !edgeIds.has(a.edgeId)) {
-          issues.push({ level: 'error', code: 'ref.edge.missing', msg: `reaction advance 指向未知边 '${a.edgeId}'`, at })
+    for (const n of graph.nodes) {
+      const packs: Array<{ reactions?: Reaction[]; at: string }> = [
+        { reactions: n.data.reactions, at: `node:${n.id}.reactions` },
+        ...(n.data.overlayNodes ?? []).map((m, mi) => ({
+          reactions: m.reactions,
+          at: `node:${n.id}.overlayNodes[${mi}].reactions`,
+        })),
+      ]
+      for (const pack of packs) {
+        for (let i = 0; i < (pack.reactions ?? []).length; i++) {
+          const r = pack.reactions![i]!
+          const at = `${pack.at}[${i}]`
+          if (r.when.type === 'state') walkRefs(r.when.condition, ctx, at, issues)
+          if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
+          for (const a of r.do) {
+            if (a.kind === 'effect') walkRefs(a.effects, ctx, at, issues)
+            if (a.kind === 'advance' && !edgeIds.has(a.edgeId)) {
+              issues.push({ level: 'error', code: 'ref.edge.missing', msg: `reaction advance 指向未知边 '${a.edgeId}'`, at })
+            }
+          }
         }
       }
     }
@@ -263,15 +272,8 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
   return issues
 }
 
-/** 是否存在「attr 可归零」的致死出口：reactions 或边条件上的 attrRatio ≤ 0。 */
-function hasLethalExit(graph: GameGraph, reactions: Reaction[] | undefined, attr: string): boolean {
-  for (const r of reactions ?? []) {
-    if (r.when.type !== 'state') continue
-    for (const c of r.when.condition.all) {
-      if (c.type === 'attrRatio' && c.attr === attr && (c.op === 'lte' || c.op === 'lt') && c.value <= 0) return true
-      if (c.type === 'attr' && c.attr === attr && (c.op === 'lte' || c.op === 'lt') && c.value <= 0) return true
-    }
-  }
+/** 是否存在「attr 可归零」的致死出口：边条件上的 attrRatio ≤ 0。 */
+function hasLethalExit(graph: GameGraph, attr: string): boolean {
   for (const e of graph.edges) {
     for (const c of e.data?.condition?.all ?? []) {
       if (c.type === 'attrRatio' && c.attr === attr && (c.op === 'lte' || c.op === 'lt') && c.value <= 0) return true
@@ -297,7 +299,6 @@ export function validateScenario(scenario: GameScenario): Issue[] {
   const issues = validateGraph(scenario.graph, {
     entities: Object.keys(scenario.entities ?? {}),
     vars: Object.keys(scenario.variables ?? {}),
-    reactions: scenario.reactions,
     overlays: scenario.ui?.overlays,
   })
 
@@ -309,11 +310,11 @@ export function validateScenario(scenario: GameScenario): Issue[] {
   }
   for (const attr of zeroable) {
     if (!mutatesAttr(scenario.graph, attr)) continue
-    if (!hasLethalExit(scenario.graph, scenario.reactions, attr)) {
+    if (!hasLethalExit(scenario.graph, attr)) {
       issues.push({
         level: 'warn',
         code: 'lethal.no-exit',
-        msg: `mutates attr '${attr}' but no win/lose reactions or attrRatio≤0 edge exit found`,
+        msg: `mutates attr '${attr}' but no attrRatio≤0 edge exit found`,
         at: `attr:${attr}`,
       })
     }

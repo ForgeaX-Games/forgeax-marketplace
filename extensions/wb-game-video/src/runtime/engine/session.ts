@@ -17,7 +17,7 @@ import type { RuntimeDirective } from './directives'
 export interface GraphSessionOptions {
   components?: ComponentRegistry
   skins?: SkinRegistry
-  /** 覆盖 scenario.packs；缺省用 scenario.packs。 */
+  /** 测试注入依赖表。缺省用 `scenario.manifest.packs`。 */
   packs?: readonly SubFlowPackDef[]
 }
 
@@ -107,8 +107,8 @@ export class GraphSession {
     // 默认 = 核心契约 + 皮肤包契约（同文件 ComponentDef）；调用方自带 components 则假定已装全。
     const components = opts.components ?? createDefaultComponentRegistry()
     this.skins = opts.skins ?? createCoreSkinRegistry()
-    const packs = opts.packs ?? scenario.packs ?? []
-    this.runtime = new GraphRuntime(scenario.graph, scenario, components, packs)
+    // 开跑用根 graph；依赖解析在 GraphRuntime 内走 manifest.packs（或 opts.packs 注入）。
+    this.runtime = new GraphRuntime(scenario.graph, scenario, components, opts.packs ?? [])
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
     this.snapshot = this.freshSnapshot()
   }

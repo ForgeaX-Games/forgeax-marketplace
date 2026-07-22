@@ -99,7 +99,6 @@ describe('subflow pack (subFlowPack)', () => {
       edges: [],
     }
     const pack: SubFlowPackDef = {
-      schemaVersion: 'wb-game-video.pack.v1',
       id: 'enemy-turn',
       version: '1',
       entry: 'tele',
@@ -116,6 +115,47 @@ describe('subflow pack (subFlowPack)', () => {
     expect(rt.state.callStack).toEqual([])
   })
 
+  it('resolves subFlowPack from manifest.packs (no root packs array)', () => {
+    const main: GameGraph = {
+      nodes: [
+        node('wrap', { subFlowPack: { id: 'enemy-turn', version: '1' }, durationMs: 100 }),
+        node('after', { }),
+      ],
+      edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    const subGraph: GameGraph = {
+      nodes: [node('tele', { durationMs: 100 })],
+      edges: [],
+    }
+    const scn = {
+      ...scnOf(main),
+      manifest: {
+        version: 'wb-game-video.blueprint-manifest.v1' as const,
+        mainPackId: 'bp-main',
+        packs: {
+          'bp-main': {
+            id: 'bp-main',
+            title: 'main',
+            entry: 'wrap',
+            graph: main,
+          },
+          'enemy-turn': {
+            id: 'enemy-turn',
+            title: 'enemy',
+            version: '1',
+            entry: 'tele',
+            graph: subGraph,
+          },
+        },
+      },
+    }
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    expect(rt.state.currentNodeId).toBe('tele')
+    rt.onPerformanceEnd()
+    expect(rt.state.currentNodeId).toBe('after')
+  })
+
   it('throws when referenced pack is not loaded', () => {
     const main: GameGraph = {
       nodes: [node('wrap', { subFlowPack: { id: 'missing' } })],
@@ -124,6 +164,27 @@ describe('subflow pack (subFlowPack)', () => {
     const scn = scnOf(main)
     const rt = new GraphRuntime(scn.graph, scn)
     expect(() => rt.start()).toThrow(/subFlowPack 'missing' is not loaded/)
+  })
+
+  it('stale pack.entry (node deleted) falls back to graph root instead of throwing', () => {
+    const main: GameGraph = {
+      nodes: [node('wrap', { subFlowPack: { id: 'sub', version: '1' }, durationMs: 100 })],
+      edges: [],
+    }
+    const packGraph: GameGraph = {
+      nodes: [node('n-start', { durationMs: 100 }), node('n-end', { durationMs: 100 })],
+      edges: [{ id: 'e', source: 'n-start', target: 'n-end', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    // 模拟新建蓝图后删掉默认 entry 节点，但 pack.entry 仍写着 'entry'
+    const pack: SubFlowPackDef = {
+      id: 'sub',
+      version: '1',
+      entry: 'entry',
+      graph: packGraph,
+    }
+    const rt = new GraphRuntime(main, scnOf(main), undefined, [pack])
+    rt.start()
+    expect(rt.state.currentNodeId).toBe('n-start')
   })
 })
 
@@ -257,65 +318,5 @@ describe('emitComponentEvent · event 结算只读 mount.reactions（选项/通�
     rt.start()
     rt.emitComponentEvent(rid('a', 'c'), 'hit')
     expect(rt.state.entities['ent-boss']?.attrs.hp).toBe(700)
-  })
-})
-
-describe('graph-level reactive rules (instant defeat/victory)', () => {
-  const bossDead: Reaction = {
-    when: { type: 'state', condition: { all: [{ type: 'attrRatio', entityId: 'ent-boss', attr: 'hp', op: 'lte', value: 0 }] } },
-    do: [{ kind: 'advance', edgeId: 'e-win' }],
-  }
-
-  it('jumps to goto immediately when a rule matches mid-performance (at trigger)', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 5000,
-          // boss hp 50 → -60 kills it (at:500 reaction effect)
-          reactions: [
-            { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -60 }] }] },
-          ],
-        }),
-        node('win', { }),
-      ],
-      edges: [{ id: 'e-win', source: 'a', target: 'win', sourceHandle: 'win', targetHandle: 'in' }],
-    }
-    const scn = scnOf(graph, {
-      reactions: [bossDead],
-      entities: {
-        'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 50 }, attrMeta: { hp: { max: 50, initial: 50 } } },
-      },
-    })
-    const rt = new GraphRuntime(scn.graph, scn)
-    rt.start()
-    expect(rt.state.currentNodeId).toBe('a')
-    rt.tick(600) // at:500 reaction fires → boss dead → instant jump to win
-    expect(rt.state.currentNodeId).toBe('win')
-    expect(rt.state.phase).toBe('ended') // win 无出边 & 栈空 → 本局结束（不强制结局文案）
-  })
-
-  it('does not jump when the rule condition is not met', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 5000,
-          reactions: [
-            { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -10 }] }] },
-          ],
-        }),
-        node('win', { }),
-      ],
-      edges: [{ id: 'e-win', source: 'a', target: 'win', sourceHandle: 'win', targetHandle: 'in' }],
-    }
-    const scn = scnOf(graph, {
-      reactions: [bossDead],
-      entities: {
-        'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { hp: 50 }, attrMeta: { hp: { max: 50, initial: 50 } } },
-      },
-    })
-    const rt = new GraphRuntime(scn.graph, scn)
-    rt.start()
-    rt.tick(600) // boss 50 → 40, still alive
-    expect(rt.state.currentNodeId).toBe('a')
   })
 })

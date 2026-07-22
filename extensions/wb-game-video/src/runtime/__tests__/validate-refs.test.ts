@@ -58,7 +58,7 @@ describe('validateGraph reference checks', () => {
     expect(issues.some((i) => i.code === 'ref.var.missing' && i.msg.includes('missingVar'))).toBe(true)
   })
 
-  it('flags unknown entity in condition and unknown rule advance edge', () => {
+  it('flags unknown entity in condition and unknown reaction advance edge', () => {
     const graph: GameGraph = {
       nodes: [
         {
@@ -67,7 +67,10 @@ describe('validateGraph reference checks', () => {
           position: { x: 0, y: 0 },
           inputs: [],
           outputs: [],
-          data: { name: 'a' },
+          data: {
+            name: 'a',
+            reactions: [{ when: { type: 'enter' }, do: [{ kind: 'advance', edgeId: 'missing-edge' }] }],
+          },
         },
       ],
       edges: [
@@ -83,11 +86,9 @@ describe('validateGraph reference checks', () => {
         },
       ],
     }
-    const issues = validateGraph(graph, {
-      ...optsBase,
-      reactions: [{ when: { type: 'state', condition: { all: [] } }, do: [{ kind: 'advance', edgeId: 'missing-edge' }] }],
-    })
+    const issues = validateGraph(graph, optsBase)
     expect(issues.some((i) => i.code === 'ref.entity.missing')).toBe(true)
     expect(issues.some((i) => i.code === 'ref.edge.missing' && i.msg.includes('missing-edge'))).toBe(true)
   })
 })
+

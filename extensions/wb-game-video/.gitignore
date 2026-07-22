@@ -3,6 +3,13 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# 非 canonical 包管理器的产物 —— 本包 canonical 是 bun（packageManager + bun.lock）
+# 任何人跑 pnpm/npm install 都会写这些文件，但不要 commit，避免 lock 分叉。
+pnpm-lock.yaml
+pnpm-workspace.yaml
+package-lock.json
+.npmrc
+
 # 环境/系统
 .env
 .env.local
