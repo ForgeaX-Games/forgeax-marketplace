@@ -18,6 +18,8 @@ export function CatalogShell<T extends CatalogItem>({
   selectedId,
   onSelect,
   renderPreview,
+  headAction,
+  renderRowActions,
 }: {
   icon: string
   title: string
@@ -25,6 +27,10 @@ export function CatalogShell<T extends CatalogItem>({
   selectedId: string
   onSelect: (id: string) => void
   renderPreview: (item: T | undefined) => ReactNode
+  /** 列表标题栏右侧动作槽（如「＋新建」入口）。 */
+  headAction?: ReactNode
+  /** 每行右侧的行内动作（hover/选中才显）；返回 null 则该行无动作。 */
+  renderRowActions?: (id: string) => ReactNode
 }) {
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   const selected = items.find((i) => i.id === selectedId)
@@ -35,18 +41,31 @@ export function CatalogShell<T extends CatalogItem>({
           <span className="gc-list-ico" aria-hidden>{icon}</span>
           <span className="gc-list-title">{title}</span>
           <span className="gc-list-count">{items.length}</span>
+          {headAction && <span className="gc-list-head-action">{headAction}</span>}
         </div>
         <div className="gc-list-body">
           {items.map((it) => (
-            <button
+            <div
               key={it.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               className={`gc-row${it.id === selectedId ? ' is-on' : ''}`}
               onClick={() => onSelect(it.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect(it.id)
+                }
+              }}
             >
               <span className="gc-row-mark" aria-hidden>✓</span>
               <span className="gc-row-label">{it.label}</span>
-            </button>
+              {renderRowActions && (
+                <span className="gc-row-actions" onClick={(e) => e.stopPropagation()}>
+                  {renderRowActions(it.id)}
+                </span>
+              )}
+            </div>
           ))}
         </div>
       </aside>

@@ -34,8 +34,7 @@
     "clean": "rm -rf dist .tsbuildinfo *.tsbuildinfo",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "prepare": "tsc -b && node scripts/copy-css.mjs"
+    "lint": "eslint src"
   },
   "peerDependencies": {
     "react": "^18.0.0",

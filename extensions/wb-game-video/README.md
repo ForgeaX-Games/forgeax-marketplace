@@ -23,11 +23,16 @@
 
 ## 1 分钟跑起来
 
+> **包管理器：只用 bun**（`packageManager: bun@1.3.13` + `bun.lock`）。不要在本目录跑
+> `pnpm install` / `npm install`——会写出 pnpm/npm lock，且 `bun fx start` 若误用
+> pnpm 启动会直接退出，Studio 里「视频游戏工坊」iframe 连不上 `:15185`。
+
 ```bash
 cd packages/marketplace/extensions/wb-game-video
-npm run dev            # vite dev，端口 15185
-npx vitest run         # 单测（vitest + happy-dom）
-npx tsc --noEmit       # 类型检查（当前全绿）
+bun install
+bun run dev            # vite dev，端口 15185
+bun test               # 或: bunx vitest run
+bunx tsc --noEmit      # 类型检查
 ```
 
 ## 文档索引

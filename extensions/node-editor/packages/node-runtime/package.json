@@ -45,8 +45,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "prepare": "tsc -b"
+    "lint": "eslint src"
   },
   "dependencies": {
     "chokidar": "^4.0.0",

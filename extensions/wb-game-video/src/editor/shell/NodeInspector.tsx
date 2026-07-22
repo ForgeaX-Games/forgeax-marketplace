@@ -20,6 +20,7 @@ import {
   updateNodeData,
   upsertBranchEdge,
   makeEmptySubFlowPack,
+  attachSameGraphSubflow,
   type NodeDataPatch,
 } from '../../graph/edit/graph-edit'
 import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-labels'
@@ -1160,6 +1161,7 @@ export function NodeInspector({
   nodeId,
   videoOptions = [],
   packs = [],
+  isRefAllowed,
   overlays,
   entities,
   variables,
@@ -1175,6 +1177,12 @@ export function NodeInspector({
   videoOptions?: VideoOption[]
   /** 本局子蓝图包（随 scenario 保存）。 */
   packs?: readonly SubFlowPackDef[]
+  /**
+   * 某个既有蓝图 id 能否被当前编辑的蓝图引用（自引用 + 会成环的候选均应返回 false）——
+   * 上层（GraphStudio）有 store 访问权，据此算好再传下来，本组件不深挖 store。
+   * 未传则不做任何过滤（兜底旧行为）。
+   */
+  isRefAllowed?: (packId: string) => boolean
   overlays?: Record<string, Overlay>
   /** 场景实体 / 变量目录（供 effects / condition 下拉、选取式公式与 watch 字段级联下拉）。 */
   entities?: Record<string, Entity>
@@ -1232,6 +1240,8 @@ export function NodeInspector({
     const key = `${p.id}@${p.version}`
     return title && title !== p.id ? `${title} (${key})` : key
   }
+  /** 下拉候选：排除自引用 + 会成环的候选（`isRefAllowed`）；已挂载的当前包永远保留展示，避免选中项丢失。 */
+  const eligiblePacks = packs.filter((p) => p.id === nestPack?.id || !isRefAllowed || isRefAllowed(p.id))
 
   // 响应规则选项（带组件中文名 label）：shown/hidden 的组件 = 本节点各挂载 overlay 的 children；spawn 模板 = 全目录。
   const compLabel = (component: string) => getComponentManifest(component)?.label ?? component
@@ -1312,15 +1322,15 @@ export function NodeInspector({
       return
     }
     if (mode === 'subflow') {
-      const entry = nodeIds.find((id) => id !== node.id)
-      patchData({ subFlow: nestRef ?? entry, subFlowPack: undefined })
+      // 只改嵌套属性；入口用新建专用节点（见 attachSameGraphSubflow），不自动下钻。
+      onChange(attachSameGraphSubflow(graph, node.id))
       return
     }
     if (nestPack) {
       patchData({ subFlow: undefined })
       return
     }
-    const existing = packs[0]
+    const existing = eligiblePacks[0]
     if (existing) {
       patchData({ subFlow: undefined, subFlowPack: { id: existing.id, version: existing.version } })
       return
@@ -1346,7 +1356,7 @@ export function NodeInspector({
         <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           <button
             onClick={() => onJump?.(node.id)}
-            title="调试：从这个节点开始试玩（沿用当前血量/变量等状态，不改图、不设为起点）"
+            title="从此节点试玩；浮层重开回到该节点（不改图、不设为起点）"
           >
             ▶ 从此试玩
           </button>
@@ -1433,13 +1443,17 @@ export function NodeInspector({
                 }
                 const pack = packs.find((p) => `${p.id}@${p.version}` === v || p.id === v)
                 if (!pack) return
+                if (isRefAllowed && pack.id !== nestPack?.id && !isRefAllowed(pack.id)) {
+                  alert(`不能引用「${pack.title ?? pack.id}」：会造成蓝图引用环（自身或间接引用回本蓝图）。`)
+                  return
+                }
                 patchData({ subFlow: undefined, subFlowPack: { id: pack.id, version: pack.version } })
               }}
               style={{ flex: 1 }}
-              title="引用 scenario.packs 中的包；双击容器下钻编辑包内图"
+              title="引用蓝图库中的子蓝图；双击容器跳到该蓝图编辑"
             >
               <option value="">（选包）</option>
-              {packs.map((p) => (
+              {eligiblePacks.map((p) => (
                 <option key={`${p.id}@${p.version}`} value={`${p.id}@${p.version}`}>{packLabel(p)}</option>
               ))}
             </select>

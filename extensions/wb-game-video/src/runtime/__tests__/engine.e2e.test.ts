@@ -43,23 +43,13 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     rt.emitComponentEvent('wait/skill', 'light') // qi+2 → 变招判定(加权) → 轻攻击演出
     expect(rt.state.vars.qi).toBe(2)
 
-    rt.tick(1000) // 轻攻击命中 → 结算致死 → scenario.reactions 安全点 redirect → win
+    rt.tick(1000) // 轻攻击命中 → 结算致死（无局级 reactions；回合容器出边条件判胜）
     expect(rt.state.entities['ent-boss']!.attrs.hp).toBeLessThanOrEqual(0)
+    rt.onPerformanceEnd() // 技能结束弹回 a_my → e-amy-win（boss hp≤0）
     expect(rt.state.currentNodeId).toBe('win')
 
-    rt.onPerformanceEnd() // win 演出结束 → 无出边 & 栈空 → 本局结束（不强制结局文案）
+    rt.onPerformanceEnd() // win 演出结束 → 无出边 & 栈空 → 本局结束
     expect(rt.state.phase).toBe('ended')
-  })
-
-  it('scenario.reactions provide win/lose fallback (advance → 边 target)', () => {
-    const scn = makeNodiaDemo()
-    const edgeTarget = (id: string) => scn.graph.edges.find((e) => e.id === id)?.target
-    const targets = scn.reactions
-      ?.flatMap((r) => r.do)
-      .filter((a): a is { kind: 'advance'; edgeId: string } => a.kind === 'advance')
-      .map((a) => edgeTarget(a.edgeId))
-      .sort()
-    expect(targets).toEqual(['lose', 'win'])
   })
 
   it('turn loop: 我方先手一整回合(我方攻击→敌方回合)存活 → 回到进战待机(enter) (回合循环成立)', () => {

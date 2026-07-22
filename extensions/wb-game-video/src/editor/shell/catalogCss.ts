@@ -48,14 +48,71 @@ ${PREVIEW_CLOCK_CSS}
 }
 .gc-list-ico { font-size: 14px; }
 .gc-list-title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; }
+/* 数字紧跟标题（左侧成组）；标题栏右侧留给 headAction。 */
 .gc-list-count {
-  margin-left: auto;
   font-size: 11px; font-variant-numeric: tabular-nums;
   color: var(--gc-faint);
   background: rgba(255,255,255,0.05);
   border-radius: 999px; padding: 1px 8px;
 }
+/* 标题栏右侧动作槽（如「＋新建」）——推到最右。 */
+.gc-list-head-action { margin-left: auto; display: inline-flex; align-items: center; }
+.gc-list-add {
+  all: unset; box-sizing: border-box;
+  width: 24px; height: 24px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  color: var(--gc-accent);
+  border: 1px solid var(--gc-accent-line);
+  background: var(--gc-accent-soft);
+  transition: background .12s, border-color .12s;
+}
+.gc-list-add:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
+.gc-list-add.is-on { background: rgba(240,136,64,.28); border-color: var(--gc-accent); }
 .gc-list-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+/* 「＋」旁浮层新建：JS 用 fixed 贴按钮右侧（躲过 .gc-list overflow:hidden）。 */
+.gc-list-compose-anchor { display: inline-flex; }
+.gc-list-compose-pop {
+  z-index: 80;
+  display: flex; align-items: center; gap: 6px;
+  width: 240px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--gc-accent-line);
+  background: var(--gc-panel2, #2a241c);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.04);
+}
+.gc-list-compose-pop::before {
+  content: '';
+  position: absolute; top: 50%; left: -5px;
+  width: 8px; height: 8px;
+  transform: translateY(-50%) rotate(45deg);
+  background: var(--gc-panel2, #2a241c);
+  border-left: 1px solid var(--gc-accent-line);
+  border-bottom: 1px solid var(--gc-accent-line);
+}
+.gc-list-compose-pop input {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--gc-line);
+  background: rgba(0,0,0,0.28);
+  color: var(--gc-text);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: inherit; font-size: 12px;
+  outline: none;
+}
+.gc-list-compose-pop input:focus { border-color: var(--gc-accent); box-shadow: 0 0 0 2px rgba(240,136,64,.18); }
+.gc-list-compose-ok {
+  all: unset; box-sizing: border-box;
+  height: 28px; padding: 0 9px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--gc-accent-line);
+  background: var(--gc-accent-soft);
+  color: var(--gc-text);
+  transition: background .12s, border-color .12s;
+}
+.gc-list-compose-ok:hover { background: rgba(240,136,64,.28); border-color: var(--gc-accent); }
 .gc-row {
   all: unset; box-sizing: border-box;
   display: flex; align-items: center; gap: 9px;
@@ -75,6 +132,18 @@ ${PREVIEW_CLOCK_CSS}
   font-size: 11px; color: #5fbf7f;
 }
 .gc-row-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 每行右侧的行内动作（重命名/设为入口/删除）——平时透明，hover/选中才显。 */
+.gc-row-actions { flex: none; display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.gc-row:hover .gc-row-actions, .gc-row.is-on .gc-row-actions { opacity: 1; }
+.gc-row-act {
+  all: unset; box-sizing: border-box;
+  width: 22px; height: 22px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--gc-muted); cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.gc-row-act:hover { background: var(--gc-panel3); color: var(--gc-text); }
+.gc-row-act.is-danger:hover { background: rgba(248,113,113,.2); color: #ff9a9a; }
 
 /* ── 右栏预览 ── */
 .gc-preview {

@@ -304,24 +304,33 @@ describe('overlay sparse override（prototype + override）', () => {
       expect(dropOverlayIfUnreferenced(shared, 'scheme-static')).toBe(shared)
     })
 
-    it('引用判断覆盖子蓝图包：仅被 pack 图引用的副本不误删', () => {
+    it('引用判断覆盖子蓝图：仅被 manifest.packs 图引用的副本不误删', () => {
       const packNode = node('p', { overlayNodes: [{ overlay: nodeOverlayId('p') }] })
-      const s: GameScenario = {
-        schemaVersion: 't',
+      const s = {
+        version: 't',
         graph: { nodes: [], edges: [] },
-        packs: [
-          {
-            schemaVersion: 'wb-game-video.pack.v1',
-            id: 'pk',
-            version: '1',
-            entry: 'p',
-            graph: { nodes: [packNode], edges: [] },
+        manifest: {
+          version: 'wb-game-video.blueprint-manifest.v1' as const,
+          mainPackId: 'bp-main',
+          packs: {
+            'bp-main': {
+              id: 'bp-main',
+              title: 'main',
+              entry: 'x',
+              graph: { nodes: [], edges: [] },
+            },
+            pk: {
+              id: 'pk',
+              title: 'pk',
+              entry: 'p',
+              graph: { nodes: [packNode], edges: [] },
+            },
           },
-        ],
+        },
         ui: { overlays: { [nodeOverlayId('p')]: { id: nodeOverlayId('p'), children: [] } } },
-      }
+      } as GameScenario
       expect(isOverlayReferenced(s, nodeOverlayId('p'))).toBe(true)
-      expect(dropOverlayIfUnreferenced(s, nodeOverlayId('p'))).toBe(s) // 被 pack 引用 → 不删
+      expect(dropOverlayIfUnreferenced(s, nodeOverlayId('p'))).toBe(s)
     })
   })
 })

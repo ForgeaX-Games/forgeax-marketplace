@@ -3,7 +3,7 @@ import type { GameScenario } from '../../../runtime/schema/graph-schema'
 import { toEditorScenarioDocument, toRuntimeScenario } from '../formula-authoring'
 
 const base: GameScenario = {
-  schemaVersion: 'wb-game-video.graph.v1',
+  version: 'wb-game-video.graph.v1',
   graph: { nodes: [], edges: [] },
 }
 

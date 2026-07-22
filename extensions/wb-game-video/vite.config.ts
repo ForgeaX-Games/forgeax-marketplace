@@ -3,12 +3,15 @@ import { defineConfig } from 'vitest/config'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, createReadStream, statSync } from 'fs'
+import { existsSync, createReadStream, statSync } from 'fs'
 import type { ServerResponse, IncomingMessage } from 'http'
 import { assetsDir, listAssets, getAsset, getStyleAxes, setStyleAxes, resolveAssetFilePath, mimeForPath } from './server/asset-registry'
 import { generateKeyframe, generateVideo, type OrchestrateCtx } from './server/generation/orchestrate'
 import { importCharacterRefs, importSceneRefs } from './server/intake'
 import type { MediaKind } from './src/editor/assets/registry-types'
+import { readProject, writeProject, readVersionProject } from './src/editor/persist/blueprint-store-fs'
+import { validateDocument } from './src/editor/persist/blueprint-project'
+import type { GraphLibraryDocument } from './src/runtime/schema/graph-schema'
 
 /**
  * 视频游戏工坊 · dev/build 配置（graph-only）。
@@ -73,11 +76,13 @@ function graphDirForSlug(projectRoot: string | null, slug: string | null): strin
 }
 
 /**
- * 图存储端点（磁盘为已保存版本的权威）：
- *   GET  /__graph__/store?game=slug          → { scenario(最新已保存), versions:[{id,savedAt}] }
- *   PUT  /__graph__/store?game=slug {scenario,id?,title?} → 写 scenarios.graph.json + 版本快照(留10) → { versions }
- *   GET  /__graph__/version?game=slug&id=vid → { scenario }
- * 草稿不落盘（走客户端 localStorage）。无 `.forgeax` 工程根时 GET 空、PUT 400。
+ * 图存储端点（磁盘为已保存版本的权威，读写全委托 `blueprint-store-fs` 共享模块，
+ * 与 `server/tool-handlers.ts` 的 `gvid:*` 工具永不在盘上格式上分叉）：
+ *   GET  /__graph__/store?game=slug          → { project(最新 GraphLibraryDocument | null), versions:[{id,savedAt}] }
+ *   PUT  /__graph__/store?game=slug {project,title?} → 落盘 scenarios.graph.json（含 manifest）+ 版本快照(留10) → { versions }
+ *   GET  /__graph__/version?game=slug&id=vid → { project }
+ * 草稿不落盘（走客户端 localStorage）。无 `.forgeax` 工程根时 GET/PUT 均静默回空（无落点，不视为错误）；
+ * PUT 缺 body.project 才是 400。
  */
 function graphStorePlugin(): Plugin {
   let projectRoot: string | null = null
@@ -94,45 +99,22 @@ function graphStorePlugin(): Plugin {
           const method = (req.method ?? 'GET').toUpperCase()
           const slug = (url.searchParams.get('game') ?? '').trim() || null
           const dir = graphDirForSlug(projectRoot, slug)
-          const readJson = (p: string): unknown => {
-            try {
-              return JSON.parse(readFileSync(p, 'utf-8'))
-            } catch {
-              return null
-            }
-          }
           if (path === '/store' && method === 'GET') {
-            if (!dir) return sendJson(res, 200, { scenario: null, versions: [] })
-            const canonical = resolve(dir, 'scenarios.graph.json')
-            const indexPath = resolve(dir, 'scenarios.graph.versions', 'index.json')
-            const container = readJson(canonical) as { items?: { scenario?: unknown }[] } | null
-            const scenario = container?.items?.[0]?.scenario ?? null
-            return sendJson(res, 200, { scenario, versions: readJson(indexPath) ?? [] })
+            if (!dir) return sendJson(res, 200, { project: null, versions: [] })
+            const { project, versions } = readProject(dir)
+            return sendJson(res, 200, { project, versions })
           }
           if (path === '/store' && method === 'PUT') {
-            if (!dir) return sendJson(res, 400, { error: 'no .forgeax/games root or invalid game slug' })
-            const body = await readGraphReqJson(req)
-            const scenario = body.scenario as { id?: string } | undefined
-            if (!scenario) return sendJson(res, 400, { error: 'no scenario' })
-            if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-            const canonical = resolve(dir, 'scenarios.graph.json')
-            const vDir = resolve(dir, 'scenarios.graph.versions')
-            const indexPath = resolve(vDir, 'index.json')
-            const id = (body.id as string) ?? scenario.id ?? 'graph'
-            const title = (body.title as string) ?? 'graph'
-            writeFileSync(canonical, JSON.stringify({ version: 1, activeId: id, items: [{ id, title, scenario }] }, null, 2))
-            if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true })
-            const vid = `v-${Date.now().toString(36)}`
-            writeFileSync(resolve(vDir, `${vid}.json`), JSON.stringify(scenario))
-            const index = [{ id: vid, savedAt: Date.now() }, ...(((readJson(indexPath) as { id: string; savedAt: number }[]) ?? []))].slice(0, 10)
-            writeFileSync(indexPath, JSON.stringify(index))
-            return sendJson(res, 200, { versions: index })
+            if (!dir) return sendJson(res, 200, { versions: [] })
+            const body = (await readGraphReqJson(req)) as { project?: GraphLibraryDocument; title?: string }
+            if (!body.project) return sendJson(res, 400, { error: 'missing project' })
+            const errors = validateDocument(body.project)
+            if (errors.length) return sendJson(res, 400, { errors })
+            return sendJson(res, 200, { versions: writeProject(dir, body.project, body.title) })
           }
           if (path === '/version' && method === 'GET') {
-            if (!dir) return sendJson(res, 404, { scenario: null })
             const vid = url.searchParams.get('id') ?? ''
-            const scenario = readJson(resolve(dir, 'scenarios.graph.versions', `${vid}.json`))
-            return sendJson(res, scenario ? 200 : 404, { scenario })
+            return sendJson(res, 200, { project: dir ? readVersionProject(dir, vid) : null })
           }
           next()
         } catch (e) {

@@ -97,7 +97,7 @@ export type NodeAction =
  * - exit：离开节点前
  * - complete：节点收尾自动推进（`if` 缺省 = 无条件）
  * - event：组件事件（挂 mount.reactions；do = effect/spawn/advance）
- * - state：仅挂 scenario.reactions（硬打断，do 必含显式 advance）；节点级不求值
+ * - state：历史局级规则相位（已不再消费；需要时再补回）
  * - watch：观察某表达式(`of`)的值变化（`on` change/inc/dec）→ do（effect/spawn/advance）；
  *   在每个写屏障处重采样比对（pull-diff）。局部量 prev/next/delta 供 do 内 `{expr}` 使用。
  * - shown / hidden：某 overlay 组件实例**出现 / 消失**时触发（`of` = childId / mountId/childId / overlayId/childId）。
@@ -278,8 +278,7 @@ export interface OverlayInstance {
  * 扣血在 event reaction 的 effect；走向只靠边（do 省略 advance 时按匹配出边默认推进）。
  */
 export const OVERLAY_DEMO = {
-  schemaVersion: 'wb-game-video.overlay.v1',
-  rng: { seed: 42 },
+  version: 'wb-game-video.overlay.v1',
   variables: {
     lastHit: { id: 'lastHit', initial: 0 },
   },

@@ -57,6 +57,7 @@ describe('watch reaction (数值变化 → spawn)', () => {
           durationMs: 5000,
           reactions: [
             { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -40 }] }] },
+            { when: { type: 'watch', of: 'entity.ent-boss.attr.hp', on: 'dec' }, do: [{ kind: 'spawn', from: 'hitCheer/banner', inputs: { dmg: { expr: 'abs(delta)' }, remain: { expr: 'entity.ent-boss.attr.hp' }, heroName: '空藏' }, ttlMs: 3000 }] },
           ],
         }),
       ],
@@ -64,9 +65,6 @@ describe('watch reaction (数值变化 → spawn)', () => {
     }
     const scn = scnOf(graph, {
       ui: { overlays: { hitCheer: cheer } },
-      reactions: [
-        { when: { type: 'watch', of: 'entity.ent-boss.attr.hp', on: 'dec' }, do: [{ kind: 'spawn', from: 'hitCheer/banner', inputs: { dmg: { expr: 'abs(delta)' }, remain: { expr: 'entity.ent-boss.attr.hp' }, heroName: '空藏' }, ttlMs: 3000 }] },
-      ],
     })
     const rt = new GraphRuntime(scn.graph, scn) // boss hp=700
     rt.start()
