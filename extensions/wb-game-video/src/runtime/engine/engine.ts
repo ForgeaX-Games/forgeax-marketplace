@@ -16,18 +16,16 @@
  *  - jumpToNode：seek 到任意节点（默认保留全局态）。
  */
 import type {
-  BlueprintDoc,
   GameEdge,
   GameGraph,
   GameNode,
   GameScenario,
   GraphCondition,
   GraphEffect,
-  GraphLibraryDocument,
   SubFlowPack,
   SubFlowPackDef,
 } from '../schema/graph-schema'
-import { getSubFlowPack, resolveGraphEntry } from '../schema/graph-schema'
+import { getSubFlowPack } from '../schema/graph-schema'
 import { nodeOverlayChildren, nodeOverlayMounts } from '../schema/expand-overlay'
 import { resolveEventReactions, completeReactions } from '../schema/overlay-events'
 import type { Layout, NodeAction, OverlayInstanceChild, Reaction } from '../schema/node-config-schema'
@@ -75,10 +73,9 @@ export class GraphRuntime {
   private readonly outgoing = new Map<string, GameEdge[]>()
   /** 主图（构造时传入）；jump/start 始终回到这里。 */
   private readonly rootGraph: GameGraph
-  /** 当前正在执行的图（根 graph，或执行中解析到的子蓝图 graph）。 */
+  /** 当前正在执行的图（主图或某个 pack.graph）。 */
   private activeGraph: GameGraph
-  /** 依赖查找表：id / id@version → 子蓝图（来自 manifest.packs，或测试注入的 packs）。 */
-  private readonly packsByKey = new Map<string, { id: string; version?: string; entry: string; graph: GameGraph }>()
+  private readonly packsByKey = new Map<string, SubFlowPackDef>()
   readonly state: RuntimeState
   private queue: RuntimeDirective[] = []
 
@@ -89,7 +86,9 @@ export class GraphRuntime {
   private windowRemoved = new Set<string>() // 已按 window.endMs 移除的元素 id
   private chain = 0 // 同步穿链计数（anti-runaway）
 
-  // watch / lifecycle 的 advance 硬打断：命中即设 redirect，在安全边界消费为一次跳转。
+  // 局级 state reactions（即时判负/判胜）：命中即设 redirect，在安全边界消费为一次跳转。
+  private readonly reactions: Reaction[]
+  private readonly firedStateReactions = new Set<number>()
   private redirect: { goto: string; resetGlobals?: boolean } | null = null
   private inExit = false // 跑 exit 元素期间抑制规则消费，避免退出时自跳环
   private returningTo = new Set<string>() // 正在弹回的容器节点：下一次 enter 跳过 subFlow 下钻、直接续 out
@@ -109,11 +108,6 @@ export class GraphRuntime {
   /** 节点类型注册表：按 GameNode.type 派发 execute/next（perf/subflow/subflowPack 内置）。 */
   private readonly nodeKinds: NodeKindRegistry = createCoreNodeKindRegistry()
 
-  /**
-   * @param graph 开跑入口图（通常 = scenario 根 graph / 主图）。
-   * @param packs 可选测试注入；生产路径依赖从 `scenario.manifest.packs` 按需解析。
-   *              非空时优先于 manifest。
-   */
   constructor(
     graph: GameGraph,
     private readonly scenario: GameScenario,
@@ -123,27 +117,13 @@ export class GraphRuntime {
     this.rootGraph = graph
     this.activeGraph = graph
     this.components = components
-    this.loadDependencyTable(scenario, packs)
+    for (const p of packs) {
+      this.packsByKey.set(packLookupKey(p.id, p.version), p)
+      if (!this.packsByKey.has(p.id)) this.packsByKey.set(p.id, p) // 无版本时也可按 id 命中
+    }
     this.indexGraph(graph)
+    this.reactions = scenario.reactions ?? []
     this.state = { ...initState(scenario), ...control() }
-  }
-
-  /** 执行中发现 subFlowPack 时的查表源：构造注入 packs（单测）> scenario.manifest.packs。 */
-  private loadDependencyTable(scenario: GameScenario, packs: readonly SubFlowPackDef[]): void {
-    const register = (id: string, entry: string, g: GameGraph, version?: string) => {
-      const row = { id, version, entry, graph: g }
-      if (version) this.packsByKey.set(packLookupKey(id, version), row)
-      if (!this.packsByKey.has(id)) this.packsByKey.set(id, row)
-    }
-    if (packs.length > 0) {
-      for (const p of packs) register(p.id, p.entry, p.graph, p.version)
-      return
-    }
-    const blueprints = (scenario as GraphLibraryDocument).manifest?.packs
-    if (!blueprints) return
-    for (const d of Object.values(blueprints) as BlueprintDoc[]) {
-      register(d.id, d.entry, d.graph, d.version)
-    }
   }
 
   private indexGraph(graph: GameGraph): void {
@@ -162,14 +142,17 @@ export class GraphRuntime {
     this.indexGraph(graph)
   }
 
-  private resolvePack(ref: SubFlowPack): { id: string; version?: string; entry: string; graph: GameGraph } {
+  private resolvePack(ref: SubFlowPack): SubFlowPackDef {
     const keyed = ref.version ? this.packsByKey.get(packLookupKey(ref.id, ref.version)) : undefined
     const pack = keyed ?? this.packsByKey.get(ref.id)
     if (!pack) {
       const ver = ref.version ? `@${ref.version}` : ''
       throw new Error(`subFlowPack '${ref.id}${ver}' is not loaded`)
     }
-    // 入口节点校验挪到 resolvePackEntry（可回退到图内根节点）；这里只保证依赖已在表中。
+    const entry = ref.entry ?? pack.entry
+    if (!pack.graph.nodes.some((n) => n.id === entry)) {
+      throw new Error(`subFlowPack '${pack.id}' missing entry node '${entry}'`)
+    }
     return pack
   }
 
@@ -420,10 +403,7 @@ export class GraphRuntime {
     const ref = getSubFlowPack(node.data)
     if (!ref) return undefined
     const pack = this.resolvePack(ref)
-    const entry = resolveGraphEntry(pack.graph, ref.entry ?? pack.entry)
-    if (!entry) {
-      throw new Error(`subFlowPack '${pack.id}' has no nodes`)
-    }
+    const entry = ref.entry ?? pack.entry
     return { entry, graph: pack.graph }
   }
 
@@ -625,7 +605,25 @@ export class GraphRuntime {
     this.inExit = false
   }
 
-  /** 若有待消费的 redirect（watch/lifecycle advance），跑当前节点 exit 后即时跳转。返回是否跳转。 */
+  /** 局级 state reactions：状态变化后求值，首个命中且含显式 advance 的设 redirect（硬打断到边 target）。 */
+  private checkRules(): void {
+    if (this.inExit || this.redirect || this.state.phase === 'ended') return
+    for (let i = 0; i < this.reactions.length; i++) {
+      const r = this.reactions[i]!
+      if (r.when.type !== 'state') continue
+      if (this.firedStateReactions.has(i)) continue
+      if (!evaluateCondition(r.when.condition, this.condTarget())) continue
+      const adv = r.do.find((a): a is Extract<NodeAction, { kind: 'advance' }> => a.kind === 'advance')
+      if (!adv) continue
+      const edge = this.edgeById(adv.edgeId)
+      if (!edge) continue
+      this.firedStateReactions.add(i)
+      this.redirect = { goto: edge.target }
+      return
+    }
+  }
+
+  /** 若有待消费的 redirect（图级规则命中），跑当前节点 exit 后即时跳转。返回是否跳转。 */
   private consumeRedirect(): boolean {
     if (!this.redirect) return false
     const { goto, resetGlobals } = this.redirect
@@ -645,7 +643,8 @@ export class GraphRuntime {
   private applyAndReact(effects: GraphEffect[]): void {
     applyEffects(this.state, effects)
     this.emit({ type: 'stateChanged' })
-    this.checkWatch()
+    this.checkRules()
+    if (!this.redirect) this.checkWatch()
   }
 
   // ── 响应式 watch（pull-diff 于写屏障）────────────────────────────────────────
@@ -670,11 +669,14 @@ export class GraphRuntime {
 
   /**
    * 当前作用域内的 watch 反应，带稳定 key：
-   * 当前节点 + 各挂载 + **调用栈上的子流程容器节点**（容器级 watch 覆盖整段子流程，
+   * scenario 全局 + 当前节点 + 各挂载 + **调用栈上的子流程容器节点**（容器级 watch 覆盖整段子流程，
    * 如「我方回合」容器上的 watch 在其技能子节点执行期间仍生效）。
    */
   private activeWatchReactions(): Array<{ key: string; r: Reaction }> {
     const out: Array<{ key: string; r: Reaction }> = []
+    this.reactions.forEach((r, i) => {
+      if (r.when.type === 'watch') out.push({ key: `s#${i}`, r })
+    })
     const node = this.node(this.state.currentNodeId)
     if (node) {
       ;(node.data.reactions ?? []).forEach((r, i) => {
@@ -902,7 +904,7 @@ export class GraphRuntime {
   private advanceAuto(): void {
     const nodeId = this.state.currentNodeId
     if (!nodeId) return
-    // 收尾副作用（complete reactions）先施加，再由边决定走向；副作用可能触发 watch advance 改道。
+    // 收尾副作用（complete reactions）先施加，再由边决定走向；副作用可能触发局级规则改道。
     const curNode = this.nodes.get(nodeId)
     if (curNode) {
       this.applyCompleteReactionEffects(curNode)

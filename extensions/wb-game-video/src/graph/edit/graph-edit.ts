@@ -6,7 +6,6 @@
  * 未写 advance 时运行时仍可「有边则默认推进」。
  */
 import type { EdgeRouting, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
-import { getSubFlow } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 
 let _seq = 0
@@ -20,36 +19,12 @@ export function newElementId(): string {
   return newId('el')
 }
 
-/**
- * 把节点标成「同图子流程」容器：只改属性，不自动下钻。
- * 尚无 `subFlow` 时新建专用入口节点——禁止误把现有主流程节点当入口
- * （否则根视图会按 BFS 把可达节点藏进子流程成员，看起来像父图被清空）。
- */
-export function attachSameGraphSubflow(graph: GameGraph, containerId: string): GameGraph {
-  const node = graph.nodes.find((n) => n.id === containerId)
-  if (!node) return graph
-  const existing = getSubFlow(node.data)
-  if (existing) {
-    return patchNodeData(graph, containerId, { subFlow: existing, subFlowPack: undefined })
-  }
-  const entryId = newId('sf')
-  const entry: GameNode = {
-    id: entryId,
-    type: 'perf',
-    position: { x: node.position.x + 40, y: node.position.y + 140 },
-    inputs: [],
-    outputs: [],
-    data: { name: '子流程入口' },
-  }
-  const withEntry = addNode(graph, entry)
-  return patchNodeData(withEntry, containerId, { subFlow: entryId, subFlowPack: undefined })
-}
-
 /** 空子蓝图包：单入口叶子（无出边时运行时自动弹回主图容器）。 */
 export function makeEmptySubFlowPack(opts: { id?: string; title?: string; version?: string } = {}): SubFlowPackDef {
   const id = opts.id ?? newId('pack')
   const entry = 'entry'
   return {
+    schemaVersion: 'wb-game-video.pack.v1',
     id,
     version: opts.version ?? '1',
     title: opts.title ?? '子蓝图',
@@ -62,10 +37,28 @@ export function makeEmptySubFlowPack(opts: { id?: string; title?: string; versio
           position: { x: 80, y: 80 },
           inputs: [],
           outputs: [],
-          data: { name: '入口' },
+          data: { name: '入口', durationMs: 100 },
         },
       ],
       edges: [],
+    },
+  }
+}
+
+/** 主图上的子蓝图容器节点（引用 pack，自身不播演出）。 */
+export function makeSubFlowPackContainer(
+  pack: SubFlowPackDef,
+  opts: { id?: string; name?: string; position?: { x: number; y: number } } = {},
+): GameNode {
+  return {
+    id: opts.id ?? newId('n'),
+    type: 'perf',
+    position: opts.position ?? { x: 40 + Math.random() * 80, y: 40 + Math.random() * 80 },
+    inputs: [],
+    outputs: [],
+    data: {
+      name: opts.name ?? pack.title ?? pack.id,
+      subFlowPack: { id: pack.id, version: pack.version },
     },
   }
 }
@@ -106,6 +99,27 @@ export function insertNodeAfter(
     g = connect(g, { source: afterId, sourceHandle: 'default', target: id })
   }
   return { graph: g, nodeId: id }
+}
+
+/** 在指定节点后方插入子蓝图容器并自动接线。 */
+export function insertSubFlowPackAfter(
+  graph: GameGraph,
+  afterId: string,
+  opts: { title?: string; gapX?: number } = {},
+): { graph: GameGraph; nodeId: string; pack: SubFlowPackDef } {
+  const after = graph.nodes.find((n) => n.id === afterId)
+  if (!after) {
+    const pack = makeEmptySubFlowPack({ title: opts.title })
+    return { graph, nodeId: afterId, pack }
+  }
+  const pack = makeEmptySubFlowPack({ title: opts.title ?? '子蓝图' })
+  const gapX = opts.gapX ?? 220
+  const container = makeSubFlowPackContainer(pack, {
+    name: pack.title,
+    position: { x: after.position.x + gapX, y: after.position.y },
+  })
+  const { graph: next, nodeId } = insertNodeAfter(graph, afterId, { node: container, gapX })
+  return { graph: next, nodeId, pack }
 }
 
 export function removeNode(graph: GameGraph, id: string): GameGraph {

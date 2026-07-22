@@ -51,8 +51,8 @@
         "returns": "./schemas/get-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "读取当前 game 的库文档（原 scenario 形状 + manifest.packs，含主蓝图）；无盘数据时返回 { project: null }。改图前先调它拿现有蓝图与 nodes/edges。",
-          "en": "Read the current game's library document (original scenario shape + manifest.packs including main), or { project: null } when there is no disk data. Call before editing to get blueprints and their nodes/edges."
+          "zh": "读取当前 game 的 GameGraph 蓝图（演出节点图 scenarios.graph.json）；无盘数据时回退内置 demo。改图前先调它拿现有 nodes/edges。",
+          "en": "Read the current game's GameGraph blueprint (scenarios.graph.json, a graph of performance nodes); falls back to the built-in demo when no disk data. Call before editing to get existing nodes/edges."
         }
       },
       {
@@ -61,8 +61,8 @@
         "returns": "./schemas/save-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "整本覆盖写当前 game 的库文档到 scenarios.graph.json（原 scenario + manifest，含主/子蓝图），并压一版快照（留10）。成功返回 {ok:true, versions, gameSlug}；缺 project 时返回 {ok:false, errors}。典型：get-graph → 改 manifest.packs[*].graph → save-graph。",
-          "en": "Whole-document overwrite into scenarios.graph.json (original scenario + manifest with main/sub blueprints), plus a version snapshot (keeps 10). Returns {ok:true, versions, gameSlug} on success, or {ok:false, errors} when project is missing. Typical: get-graph → edit manifest.packs[*].graph → save-graph."
+          "zh": "整本覆盖写当前 game 的 GameGraph 蓝图并压一版快照（留10）。落盘前做结构校验（节点 id 唯一、边 source/target 指向存在节点），有 error 则拒绝。典型：get-graph → 改 nodes/edges（加节点、把 A→B 的连线改成 A→C、折条件到出边）→ save-graph。",
+          "en": "Whole-document overwrite of the current game's GameGraph blueprint plus a version snapshot (keeps 10). Structurally validated before write (unique node ids, edges reference existing nodes); rejected on errors. Typical: get-graph → edit nodes/edges (add nodes, relink A→B to A→C, fold conditions onto edges) → save-graph."
         }
       },
       {
@@ -161,7 +161,7 @@
     "frontend": "./dist/index.html",
     "backend": "./server/tool-handlers.ts",
     "standalone": {
-      "start": "bun run dev",
+      "start": "npm run dev",
       "port": 15185,
       "readyProbe": "/",
       "embeddedAlso": false

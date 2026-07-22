@@ -1,16 +1,23 @@
 /**
  * wb-game-video `entry.backend` for ToolRegistry —— **graph-native** 工具层。
  *
- * 新引擎（GameGraph）时代：AI 与工坊沟通契约 = 读写库文档
- * （`scenarios.graph.json` = 原 scenario + `manifest`）。瘦工具走 fs 直读写。
+ * 新引擎（GameGraph）时代：AI 与视频游戏工坊沟通的唯一契约就是**直接读/改
+ * GameGraph**（`.forgeax/games/<slug>/game-video/scenarios.graph.json`）。这里只暴露
+ * 三个瘦工具，全部走 fs 直读写（沙箱内以 ctx.cwd 定位工程根），不再有旧 FMV 的
+ * Seedance 视频生成 / scenario 锻造 / 素材上传那一大套。
  *
- * 盘上格式与 vite `/__graph__` 共用 `blueprint-store-fs`：
- *   scenarios.graph.json（单文件 SSOT）+ scenarios.graph.versions/（留 10 版）
+ *   ToolRegistry → tools["gvid:get-graph"](args, ctx) → 读盘/回退 demo → { scenario }
+ *   ToolRegistry → tools["gvid:save-graph"](args, ctx) → 校验+落盘+版本快照 → { ok, versions }
+ *   ToolRegistry → tools["gvid:list-videos"](args, ctx) → 内置演出视频库 basenames
+ *
+ * 盘上格式与 vite `/__graph__` 端点、前端 persist-client 完全一致：
+ *   scenarios.graph.json = { version:1, activeId, items:[{ id, title, scenario }] }
+ *   scenarios.graph.versions/<vid>.json + index.json（留最近 10 版）
  *
  * 沙箱契约：handlers 只用 ctx.env 取配置、ctx.cwd 定位工程根；绝不读 process.env。
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { assetsDir as resolveAssetsDir, getAsset, listAssets } from './asset-registry'
 import type { AssetFilter } from './asset-registry'
@@ -24,9 +31,6 @@ import {
   type OrchestrateCtx,
 } from './generation/orchestrate'
 import { importCharacterRefs, importSceneRefs } from './intake'
-import { readProject, writeProject } from '../src/editor/persist/blueprint-store-fs'
-import { validateDocument } from '../src/editor/persist/blueprint-project'
-import type { GraphLibraryDocument } from '../src/runtime/schema/graph-schema'
 
 interface ToolCtx {
   caller: { kind: string; id?: string }
@@ -92,6 +96,71 @@ function crossModuleDir(args: { gameSlug?: string }, ctx: ToolCtx, sub: 'charact
   const root = findProjectRoot(ctx)
   if (!slug || !root) return null
   return resolve(root, '.forgeax', 'games', slug, sub)
+}
+
+/** 内置 demo（无盘数据时回退的 SSOT 样例）。 */
+function demoScenario(ctx: ToolCtx): unknown {
+  try {
+    const p = resolve(ctx.cwd ?? process.cwd(), 'src', 'editor', 'demo', 'nodia.graph.json')
+    return JSON.parse(readFileSync(p, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+function readJson(p: string): unknown {
+  try {
+    return JSON.parse(readFileSync(p, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+interface GraphNodeLike { id?: unknown; type?: unknown; data?: unknown }
+interface GraphEdgeLike { id?: unknown; source?: unknown; target?: unknown }
+interface ScenarioLike { graph?: { nodes?: GraphNodeLike[]; edges?: GraphEdgeLike[] } }
+
+/**
+ * 结构机械校验（不做深层 kind 语义，那走前端 validate.ts）：
+ *   - graph.nodes / graph.edges 是数组
+ *   - 每个 node 有 string id
+ *   - 每条 edge 的 source/target 指向存在的 node id
+ * 返回 { errors, warnings }：errors 非空 → 拒绝落盘。
+ */
+function validateScenario(scenario: unknown): { errors: string[]; warnings: string[] } {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const s = scenario as ScenarioLike | null
+  const graph = s?.graph
+  if (!graph || typeof graph !== 'object') {
+    errors.push('scenario.graph 缺失或不是对象')
+    return { errors, warnings }
+  }
+  const nodes = graph.nodes
+  const edges = graph.edges
+  if (!Array.isArray(nodes)) errors.push('graph.nodes 必须是数组')
+  if (!Array.isArray(edges)) errors.push('graph.edges 必须是数组')
+  if (errors.length) return { errors, warnings }
+
+  const ids = new Set<string>()
+  ;(nodes as GraphNodeLike[]).forEach((n, i) => {
+    if (typeof n?.id !== 'string' || !n.id) {
+      errors.push(`节点[${i}] 缺少 string id`)
+      return
+    }
+    if (ids.has(n.id)) errors.push(`节点 id 重复：${n.id}`)
+    ids.add(n.id)
+  })
+  ;(edges as GraphEdgeLike[]).forEach((e, i) => {
+    if (typeof e?.source !== 'string' || typeof e?.target !== 'string') {
+      errors.push(`边[${i}] 缺少 string source/target`)
+      return
+    }
+    if (!ids.has(e.source)) errors.push(`边[${i}] source 指向不存在的节点：${e.source}`)
+    if (!ids.has(e.target)) errors.push(`边[${i}] target 指向不存在的节点：${e.target}`)
+  })
+  if ((nodes as GraphNodeLike[]).length === 0) warnings.push('图为空（0 节点）')
+  return { errors, warnings }
 }
 
 /** 线协议视角枚举（first/third）→ 引擎 IP 内部中文视角串（POV 段靠 "第一人称" 触发）。 */
@@ -164,31 +233,52 @@ interface VideoArgs {
 
 export const tools = {
   /**
-   * 读取当前 game 的库文档（GraphLibraryDocument = scenario + manifest）。
-   * 无盘数据时 project 为 null。args: { gameSlug? }
+   * 读取当前 game 的 GameGraph。无盘数据时回退到内置 demo。
+   * args: { gameSlug? }
    */
   'gvid:get-graph': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
     const slug = pickSlug(args, ctx)
     const dir = graphDir(ctx, slug)
-    const project = dir ? readProject(dir).project : null
-    return { project, gameSlug: slug }
+    const container = dir
+      ? (readJson(resolve(dir, 'scenarios.graph.json')) as { items?: { scenario?: unknown }[] } | null)
+      : null
+    const scenario = container?.items?.[0]?.scenario ?? demoScenario(ctx)
+    return { scenario, source: container ? 'disk' : 'demo', gameSlug: slug }
   },
 
   /**
-   * 覆盖写当前 game 的库文档，并压一版快照（留 10）。
-   * args: { gameSlug?, project, title? }
+   * 覆盖写当前 game 的 GameGraph（整本），并压一版快照（留 10）。
+   * 落盘前做结构校验，errors 非空则拒绝。
+   * args: { gameSlug?, scenario, title? }
    */
   'gvid:save-graph': async (
-    args: { gameSlug?: string; project?: GraphLibraryDocument; title?: string },
+    args: { gameSlug?: string; scenario: unknown; title?: string },
     ctx: ToolCtx,
   ) => {
+    if (!args?.scenario) return { ok: false, errors: ['缺少 scenario'] }
+    const { errors, warnings } = validateScenario(args.scenario)
+    if (errors.length) return { ok: false, errors, warnings }
+
     const slug = pickSlug(args, ctx)
     const dir = graphDir(ctx, slug)
     if (!dir) return { ok: false, errors: ['无 .forgeax 工程根或无效 gameSlug，无法落盘'] }
-    if (!args.project) return { ok: false, errors: ['缺少 project'] }
-    const errors = validateDocument(args.project)
-    if (errors.length) return { ok: false, errors, gameSlug: slug }
-    return { ok: true, versions: writeProject(dir, args.project, args.title), gameSlug: slug }
+
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const canonical = resolve(dir, 'scenarios.graph.json')
+    const vDir = resolve(dir, 'scenarios.graph.versions')
+    const indexPath = resolve(vDir, 'index.json')
+
+    const scenario = args.scenario as { id?: string }
+    const id = scenario.id ?? 'graph'
+    const title = (args.title ?? 'graph').slice(0, 120)
+    writeFileSync(canonical, JSON.stringify({ version: 1, activeId: id, items: [{ id, title, scenario }] }, null, 2))
+    if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true })
+    const vid = `v-${Date.now().toString(36)}`
+    writeFileSync(resolve(vDir, `${vid}.json`), JSON.stringify(scenario))
+    const prev = (readJson(indexPath) as { id: string; savedAt: number }[]) ?? []
+    const index = [{ id: vid, savedAt: Date.now() }, ...prev].slice(0, 10)
+    writeFileSync(indexPath, JSON.stringify(index))
+    return { ok: true, warnings, versions: index, gameSlug: slug }
   },
 
   /**

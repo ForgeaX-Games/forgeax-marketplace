@@ -4,7 +4,7 @@ import { createRng } from '../engine/rng'
 import type { GameScenario } from '../schema/graph-schema'
 
 const scn = (): GameScenario => ({
-  version: 'test',
+  schemaVersion: 'test',
   variables: {
     qi: { id: 'qi', name: '气力', initial: 1, min: 0, max: 5 },
     lotusClue: { id: 'lotusClue', name: '线索', initial: 0 },
@@ -13,6 +13,7 @@ const scn = (): GameScenario => ({
     'ent-player': { id: 'ent-player', kind: 'player', attrs: { speed: 30, hp: 300 }, attrMeta: { hp: { max: 300, initial: 300 } } },
     'ent-boss': { id: 'ent-boss', kind: 'boss', attrs: { attack: 75 }, attrMeta: { hp: { max: 700, initial: 700 } } },
   },
+  rng: { seed: 5 },
   graph: { nodes: [], edges: [] },
 })
 
@@ -32,8 +33,15 @@ describe('initState', () => {
     expect(st.score).toBe(0)
   })
 
-  it('rng always seed 0', () => {
+  it('rng seeded from scenario.rng.seed (reproducible)', () => {
     const st = initState(scn())
+    expect(st.rng!.next()).toBe(createRng(5).next())
+  })
+
+  it('defaults seed 0 when rng absent', () => {
+    const s = scn()
+    delete s.rng
+    const st = initState(s)
     expect(st.rng!.next()).toBe(createRng(0).next())
   })
 })

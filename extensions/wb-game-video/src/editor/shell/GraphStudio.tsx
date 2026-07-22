@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GameGraph, GameScenario, SubFlowPackDef } from '../../runtime/schema/graph-schema'
-import { getSubFlowPack, getSubFlow, resolveGraphEntry } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { NodeInspector, type VideoOption } from './NodeInspector'
@@ -23,11 +23,9 @@ import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
 import { listVideoAssetInfos, resolveMediaSrc, videoDurationCapReached } from './media'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
-import { addNode } from '../../graph/edit/graph-edit'
+import { addNode, insertSubFlowPackAfter, makeEmptySubFlowPack, makeSubFlowPackContainer } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
-import type { Formula } from '../persist/formula-authoring'
-import { docToPack, metaFromDocument, packToDoc } from '../persist/blueprint-project'
-import { wouldCreateCycle } from '../../graph/edit/blueprint-refs'
+import { computeGraphLayout } from '../../graph/edit/graph-layout'
 
 /** 工具条暖色皮肤（对齐旧 gc- 目录风格）。 */
 function ensureToolbarStyle(): void {
@@ -63,6 +61,10 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
   return seen
 }
 
+/** Zustand selector 稳定空引用，避免 `?? []` / `?? {}` 每次新建导致无限重渲染。 */
+const EMPTY_PACKS: readonly SubFlowPackDef[] = []
+const EMPTY_GRAPH: GameGraph = { nodes: [], edges: [] }
+
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
   ensureToolbarStyle()
@@ -85,30 +87,11 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const runKey = useGraphScenario((s) => s.runKey)
   const setGraph = useGraphScenario((s) => s.setGraph)
   const setMeta = useGraphScenario((s) => s.setMeta)
-  // 节点配置「引用蓝图」下拉：由 blueprints 派生为 SubFlowPackDef 列表（不落盘 packs）；
-  // 含 main（子蓝图可引用主蓝图），自引用/成环由 isRefAllowed 过滤。
-  const blueprints = useGraphScenario((s) => s.blueprints)
-  const mainBlueprintId = useGraphScenario((s) => s.mainBlueprintId)
-  const activeBlueprintId = useGraphScenario((s) => s.activeBlueprintId)
-  const selectBlueprint = useGraphScenario((s) => s.selectBlueprint)
-  const importBlueprint = useGraphScenario((s) => s.importBlueprint)
-  const packs = useMemo(
-    () => Object.values(blueprints).map(docToPack),
-    [blueprints],
-  )
-  /** 某蓝图 id 能否被当前活跃蓝图引用：排除自引用 + 会成环的候选。传给 NodeInspector 的
-   * 「子蓝图包」下拉，堵上画布「添加引用」按钮之外唯一还没成环校验的挂包路径。 */
-  const isRefAllowed = useCallback(
-    (packId: string) =>
-      packId !== activeBlueprintId
-      && !wouldCreateCycle(useGraphScenario.getState().authoringProject(), activeBlueprintId, packId),
-    [activeBlueprintId],
-  )
+  const packs = useGraphScenario((s) => s.meta.packs ?? EMPTY_PACKS)
   const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
   const entities = useGraphScenario((s) => s.meta.entities)
   const variables = useGraphScenario((s) => s.meta.variables)
-  // meta.formulas 在 schema 里存为 `Record<string, unknown>`（runtime ↛ editor）；编辑器侧窄化回 Formula。
-  const formulas = useGraphScenario((s) => s.meta.formulas) as Record<string, Formula> | undefined
+  const formulas = useGraphScenario((s) => s.meta.formulas)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const doSave = useGraphScenario((s) => s.save)
   const reset = useGraphScenario((s) => s.reset)
@@ -119,8 +102,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const selected = useGraphScenario((s) => s.selectedNodeId)
   const setSelected = useGraphScenario((s) => s.setSelectedNode)
   const [playOpen, setPlayOpen] = useState(false)
-  /** 「从此试玩」钉住的入口；浮层「重开」始终回到此节点（可随后沿边/事件前进）。 */
-  const [playFromNodeId, setPlayFromNodeId] = useState<string | null>(null)
   /** 每次 start / 从此试玩 递增，强制 <video> remount——末节点同 id 再 jump 时否则 key 不变、播完不重开。 */
   const [playEpoch, setPlayEpoch] = useState(0)
   const [videoOptions, setVideoOptions] = useState<VideoOption[]>([])
@@ -154,26 +135,51 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     return () => { alive = false }
   }, [game])
 
-  // NodeInspector 自己的「新建并挂载子蓝图」小机关（节点属性面板内，与画布「添加引用」按钮
-  // 是两条不同的路：面板走这里只会新建全新子蓝图，天然不成环）。`onPacksChange` 契约是"给出
-  // 完整下一份列表"（历史遗留，实际全部调用点只会追加恰好一个新建的包）；蓝图库改版后 packs
-  // 由 blueprints 派生，这里按 id 差集把新增项各自落成一个子蓝图文档，已存在的 id 不重复导入。
-  // 画布侧「引用已存在蓝图」的成环保护见下方 `addPackRef`（用 `wouldCreateCycle`）。
   const setPacks = useCallback((next: SubFlowPackDef[]) => {
-    const cur = useGraphScenario.getState().blueprints
-    for (const p of next) if (!cur[p.id]) importBlueprint(packToDoc(p))
-  }, [importBlueprint])
+    setMeta((m) => ({ ...m, packs: next }))
+  }, [setMeta])
 
-  // 子流程下钻：drillStack = 当前编辑图上的同图子流程容器栈（subFlow，非 pack 引用）。
+  // 子流程下钻：drillStack = 当前编辑图上的容器栈；packDrill = 已进入的外部子蓝图。
   const [drillStack, setDrillStack] = useState<string[]>([])
+  const [packDrill, setPackDrill] = useState<{ containerId: string; packId: string; version?: string } | null>(null)
 
-  const canvasGraph = graph
-  const setCanvasGraph = setGraph
+  const findPack = useCallback((id: string, version?: string): SubFlowPackDef | undefined => {
+    if (version) {
+      const keyed = packs.find((p) => p.id === id && p.version === version)
+      if (keyed) return keyed
+    }
+    return packs.find((p) => p.id === id)
+  }, [packs])
+
+  const activePack = packDrill ? findPack(packDrill.packId, packDrill.version) : undefined
+  const canvasGraph: GameGraph = activePack?.graph ?? (packDrill ? EMPTY_GRAPH : graph)
+
+  const setPackGraph = useCallback((g: GameGraph | ((prev: GameGraph) => GameGraph)) => {
+    if (!packDrill) return
+    setMeta((m) => {
+      const list = m.packs ?? []
+      return {
+        ...m,
+        packs: list.map((p) => {
+          const match = p.id === packDrill.packId && (!packDrill.version || p.version === packDrill.version)
+          if (!match) return p
+          const next = typeof g === 'function' ? g(p.graph) : g
+          return { ...p, graph: next }
+        }),
+      }
+    })
+  }, [packDrill, setMeta])
+
+  const setCanvasGraph = useCallback((g: GameGraph | ((prev: GameGraph) => GameGraph)) => {
+    if (packDrill) setPackGraph(g)
+    else setGraph(g)
+  }, [packDrill, setPackGraph, setGraph])
 
   const resetToDemo = () => {
     if (!confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) return
     reset()
     setSelected(null)
+    setPackDrill(null)
     setDrillStack([])
   }
   const addPerfNode = (position: { x: number; y: number }) => {
@@ -189,34 +195,31 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setCanvasGraph((g) => addNode(g, node))
     setSelected(id)
   }
-  /** 画布空白处「添加引用」：从蓝图库里挑一个既有蓝图接进来（不新建全新子蓝图），排除自己 +
-   * 会成环的候选（`wouldCreateCycle`）。选中后插入一个 `subFlowPack` 引用容器节点。 */
-  const addPackRef = (position: { x: number; y: number }) => {
-    const proj = useGraphScenario.getState().authoringProject()
-    const candidates = Object.values(blueprints).filter(
-      (d) => d.id !== activeBlueprintId && !wouldCreateCycle(proj, activeBlueprintId, d.id),
-    )
-    if (candidates.length === 0) {
-      alert('没有可引用的蓝图（或都会造成引用环）。先在左侧「＋ 新建蓝图」。')
-      return
-    }
-    const pick = prompt(`引用哪张蓝图？输入编号：\n${candidates.map((d, i) => `${i}: ${d.title}`).join('\n')}`, '0')
-    if (pick == null) return
-    const chosen = candidates[Number(pick)]
-    if (!chosen) return
-    const container: GameNode = {
-      id: `n-${Date.now().toString(36)}`,
-      type: 'perf',
-      position,
-      inputs: [],
-      outputs: [],
-      data: {
-        name: chosen.title,
-        subFlowPack: { id: chosen.id, entry: resolveGraphEntry(chosen.graph, chosen.entry) ?? chosen.entry },
-      },
-    }
+  const addPackNode = (position: { x: number; y: number }) => {
+    const pack = makeEmptySubFlowPack({ title: '子蓝图' })
+    const container = makeSubFlowPackContainer(pack, { name: '子蓝图', position })
+    setPacks([...packs, pack])
     setGraph((g) => addNode(g, container))
     setSelected(container.id)
+    setPackDrill(null)
+    setDrillStack([])
+  }
+  const insertPackAfter = useCallback((nodeId: string) => {
+    const { graph: next, nodeId: created, pack } = insertSubFlowPackAfter(graph, nodeId)
+    if (next === graph) return
+    setPacks([...packs, pack])
+    setGraph(next)
+    setSelected(created)
+  }, [graph, packs, setGraph, setPacks, setSelected])
+  const fitActiveLayout = () => {
+    if (!packDrill) {
+      applyLayout()
+      return
+    }
+    setPackGraph((g) => {
+      const pos = computeGraphLayout(g)
+      return { ...g, nodes: g.nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position })) }
+    })
   }
 
   // 实体键签名：草稿曾缺 entities 被回填后必须重建 session，否则 HUD bind 全空、血条永不出现。
@@ -224,17 +227,11 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     const e = s.meta.entities ?? s.demo?.entities
     return e ? Object.keys(e).sort().join(',') : ''
   })
-  /**
-   * 试玩 session 以**当前选中蓝图**为根（`playScn`），不是永远主蓝图——子蓝图可独立跑，
-   * 「从此试玩」才能 jump 到该图节点。`playNonce`：从此试玩/钉住重开时强制吃最新图。
-   */
-  const [playNonce, setPlayNonce] = useState(0)
-  const pendingJumpRef = useRef<string | null>(null)
   const session = useMemo(
-    () => new GraphSession(useGraphScenario.getState().playScn()),
-    // runKey：工具条整局重开；activeBlueprintId：切库；playNonce：从此试玩吃最新图
+    () => new GraphSession(useGraphScenario.getState().scn()),
+    // runKey：手动重开；entitySig：实体从空→有时自动重建（不跟 graph 编辑走，免打断试玩）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runKey, entitySig, activeBlueprintId, playNonce],
+    [runKey, entitySig],
   )
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -245,15 +242,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // playEpoch：同节点 jump 重播时清闸（clip.nodeId 不变）
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId, `${runKey}:${playEpoch}`)
 
-  // 切到另一张蓝图时清掉「从此试玩」钉住（节点 id 只在原图语义下有效）。
   useEffect(() => {
-    setPlayFromNodeId(null)
-  }, [activeBlueprintId])
-
-  useEffect(() => {
-    const jumpId = pendingJumpRef.current
-    pendingJumpRef.current = null
-    setSnap(jumpId ? sessionRef.current.jump(jumpId) : sessionRef.current.start())
+    setSnap(sessionRef.current.start())
     setPlayEpoch((n) => n + 1)
   }, [session])
 
@@ -266,22 +256,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     return () => clearTimeout(t)
   }, [snap.clip?.nodeId, snap.phase, snap.clip?.durationMs, snap.clip?.mediaId, endPerformance])
 
-  /** 从此试玩：钉住入口 + 打开浮层 + 以当前蓝图最新图重建 session 再 seek。 */
+  /** 从此试玩：打开试玩浮层 + 强制视频 remount，再 seek 到该节点（末节点同 id 再点也能重播）。 */
   const jump = useCallback((nodeId: string) => {
-    setPlayFromNodeId(nodeId)
     setPlayOpen(true)
-    pendingJumpRef.current = nodeId
-    setPlayNonce((n) => n + 1)
+    setPlayEpoch((n) => n + 1)
+    setSnap(sessionRef.current.jump(nodeId))
   }, [])
-  /** 浮层重开：回到钉住的入口节点；无钉住时回退整局 bumpRun。 */
-  const restartPlayFrom = useCallback(() => {
-    if (!playFromNodeId) {
-      bumpRun()
-      return
-    }
-    pendingJumpRef.current = playFromNodeId
-    setPlayNonce((n) => n + 1)
-  }, [playFromNodeId, bumpRun])
   const traversed = useMemo(() => new Set(snap.traversedEdgeIds), [snap.traversedEdgeIds])
 
   const visibleNodeIds = useMemo(() => {
@@ -300,29 +280,43 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     return entry ? subflowMembers(canvasGraph, entry) : new Set(canvasGraph.nodes.map((n) => n.id))
   }, [canvasGraph, drillStack])
 
-  const drillFitKey = useMemo(() => `root:${drillStack.join('/')}`, [drillStack])
+  const drillFitKey = useMemo(
+    () => (packDrill ? `pack:${packDrill.containerId}:${packDrill.packId}` : `root:${drillStack.join('/')}`),
+    [packDrill, drillStack],
+  )
 
-  const nameOf = (id: string) => canvasGraph.nodes.find((n) => n.id === id)?.data.name ?? id
+  const nameOf = (id: string) =>
+    canvasGraph.nodes.find((n) => n.id === id)?.data.name
+    ?? graph.nodes.find((n) => n.id === id)?.data.name
+    ?? id
 
-  /** 双击容器：跨蓝图引用（`subFlowPack`）→ 平级切库选中项（selectBlueprint），不是嵌套下钻；
-   * 同图子流程（`subFlow`，非引用）仍原地下钻压栈。 */
   const onDrill = (id: string) => {
     const n = canvasGraph.nodes.find((x) => x.id === id)
     if (!n) return
     const pack = getSubFlowPack(n.data)
-    if (pack) {
-      selectBlueprint(pack.id)
+    if (!packDrill && pack) {
+      setPackDrill({ containerId: id, packId: pack.id, version: pack.version })
+      setDrillStack([])
+      setSelected(null)
       return
     }
     if (getSubFlow(n.data)) setDrillStack((s) => [...s, id])
   }
 
   const leaveToRoot = () => {
+    setPackDrill(null)
     setDrillStack([])
     setSelected(null)
   }
   const leaveOneLevel = () => {
-    if (drillStack.length > 0) setDrillStack((s) => s.slice(0, -1))
+    if (drillStack.length > 0) {
+      setDrillStack((s) => s.slice(0, -1))
+      return
+    }
+    if (packDrill) {
+      setPackDrill(null)
+      setSelected(packDrill.containerId)
+    }
   }
   const clearCanvasGraph = () => {
     if (canvasGraph.nodes.length === 0 && canvasGraph.edges.length === 0) return
@@ -347,7 +341,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', zIndex: 0, overflow: 'hidden', isolation: 'isolate' }}>
       {/* 左：可编辑画布 + 运行时高亮（点节点=选中编辑；双击子流程容器下钻） */}
       <div className="gv-canvas-host" style={{ flex: 1, minWidth: 0, borderRight: '1px solid #2e2924', position: 'relative', overflow: 'hidden', contain: 'paint' }}>
-        {drillStack.length > 0 && (
+        {(packDrill || drillStack.length > 0) && (
           <div
             style={{
               position: 'absolute', top: 8, left: 8, zIndex: 5, display: 'flex', gap: 6, alignItems: 'center',
@@ -356,6 +350,17 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             }}
           >
             <button onClick={leaveToRoot} style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>根</button>
+            {packDrill && (
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ opacity: 0.5 }}>›</span>
+                <button
+                  onClick={() => { setDrillStack([]); setSelected(null) }}
+                  style={{ background: 'none', border: 'none', color: drillStack.length === 0 ? '#e8eaed' : '#f08840', cursor: 'pointer', padding: 0, fontWeight: drillStack.length === 0 ? 700 : 400 }}
+                >
+                  {nameOf(packDrill.containerId)}·子蓝图
+                </button>
+              </span>
+            )}
             {drillStack.map((id, i) => (
               <span key={id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span style={{ opacity: 0.5 }}>›</span>
@@ -403,14 +408,13 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           visibleNodeIds={visibleNodeIds}
           fitSignal={fitSignal}
           drillFitKey={drillFitKey}
-          // 试玩浮层宽 320 + 边距；传稳定 number，避免每帧新 object 触发反复 fitView。
-          fitReserveRightPx={playOpen ? 340 : 0}
           onJump={setSelected}
           onDrill={onDrill}
           onPaneClick={() => setSelected(null)}
           onAddNode={addPerfNode}
-          onAddPackNode={addPackRef}
-          onFitLayout={applyLayout}
+          onAddPackNode={packDrill ? undefined : addPackNode}
+          onInsertPackAfter={packDrill ? undefined : insertPackAfter}
+          onFitLayout={fitActiveLayout}
         />
 
         {/* 试玩浮层：画布右上角（原独立试玩面板搬来） */}
@@ -422,7 +426,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 {snap.currentNodeId ? ` · ${snap.clip?.name || nameOf(snap.currentNodeId)}` : ''}
               </span>
               <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                <button onClick={restartPlayFrom} title={playFromNodeId ? `重开 · 回到 ${nameOf(playFromNodeId)}` : '重开'} style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>▶ 重开</button>
+                <button onClick={bumpRun} title="重开" style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>▶ 重开</button>
                 <button onClick={() => setPlayOpen(false)} title="隐藏" style={{ background: 'none', border: 'none', color: '#9aa2b1', cursor: 'pointer', padding: 0 }}>✕</button>
               </span>
             </div>
@@ -484,6 +488,29 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               </VideoOverlayStage>
             </div>
             </PlayerRootContext.Provider>
+            <div style={{ padding: 8, borderTop: '1px solid #2e2924', fontSize: 12, background: '#121316' }}>
+              {Object.entries(snap.hud.entities).map(([id, e]) => {
+                const ratio = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 0
+                const col = ratio > 0.5 ? '#22c55e' : ratio > 0.2 ? '#eab308' : '#ef4444'
+                return (
+                  <div key={id} style={{ marginBottom: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, opacity: 0.85 }}>
+                      <span>{id}</span>
+                      <span>{e.hp}/{e.maxHp}</span>
+                    </div>
+                    <div style={{ height: 6, background: '#2a2d33', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ width: `${ratio * 100}%`, height: '100%', background: col, transition: 'width .25s' }} />
+                    </div>
+                  </div>
+                )
+              })}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, opacity: 0.85, fontSize: 11 }}>
+                {Object.entries(snap.hud.vars).map(([k, v]) => (
+                  <span key={k} style={{ padding: '1px 8px', background: '#2a2d33', borderRadius: 8 }}>{k} {v}</span>
+                ))}
+                <span style={{ padding: '1px 8px', background: '#2a2d33', borderRadius: 8 }}>score {snap.hud.score}</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -501,7 +528,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               nodeId={selected}
               videoOptions={videoOptions}
               packs={packs}
-              isRefAllowed={isRefAllowed}
               overlays={overlays}
               entities={entities}
               variables={variables}
@@ -516,11 +542,11 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 })
               }}
               onDropOverlayIfOrphan={(oid) => {
-                // 卸载已同步写入 store；用完整库文档（根 graph + manifest.packs）判孤儿后只改共享 meta。
+                // 卸载已同步写入 store；用最新完整 scenario（主图 + 所有 packs）判断是否孤儿再清。
                 const st = useGraphScenario.getState()
                 const scn = st.authoringScenario()
                 const cleaned = dropOverlayIfUnreferenced(scn, oid)
-                if (cleaned !== scn) st.setMeta(metaFromDocument(cleaned))
+                if (cleaned !== scn) st.setScenario(cleaned)
               }}
               onJump={jump}
             />

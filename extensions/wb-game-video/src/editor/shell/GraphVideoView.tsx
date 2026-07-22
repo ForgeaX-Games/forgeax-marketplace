@@ -272,8 +272,7 @@ export function GraphVideoView(): JSX.Element {
   const setScenario = useGraphScenario((s) => s.setScenario)
   const entities = useGraphScenario((s) => s.meta.entities)
   const variables = useGraphScenario((s) => s.meta.variables)
-  // meta.formulas 在 schema 里存为 `Record<string, unknown>`（runtime ↛ editor）；编辑器侧窄化回 Formula。
-  const formulas = useGraphScenario((s) => s.meta.formulas) as Record<string, Formula> | undefined
+  const formulas = useGraphScenario((s) => s.meta.formulas)
   // 选中节点来自 graph 共享 store（不再依赖旧 scenarioStore）；无选中则落到首个节点。
   const selectedNodeId = useGraphScenario((s) => s.selectedNodeId)
   const selectedSceneId = selectedNodeId ?? graph.nodes[0]?.id ?? ''
@@ -281,7 +280,7 @@ export function GraphVideoView(): JSX.Element {
   const node = findNode(graph, selectedSceneId)
   // 读投影只需 graph + ui.overlays；随两者变化重建，不必拉全量 scenario（省一次深拷贝）。
   const scenario = useMemo<GameScenario>(
-    () => ({ version: 'wb-game-video.graph.v1', graph, ui: { overlays: overlays ?? {} } }),
+    () => ({ schemaVersion: 'wb-game-video.graph.v1', graph, ui: { overlays: overlays ?? {} } }),
     [graph, overlays],
   )
 
@@ -501,10 +500,9 @@ export function GraphVideoView(): JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [isVideoPlaying, maxMs])
 
-  // ── scenario 写入封装：用**当前选中蓝图**的 graph + 共享 meta；overlay children 住在 ui.overlays。
+  // ── scenario 写入封装：始终以最新 scenario re-find 节点（overlay children 住在 ui.overlays）。
   function editScenario(fn: (s: GameScenario, n: GameNode) => GameScenario): void {
-    const st = useGraphScenario.getState()
-    const s: GameScenario = { ...st.authoringScenario(), graph: st.graph }
+    const s = useGraphScenario.getState().authoringScenario()
     const n = findNode(s.graph, selectedSceneId)
     if (!n) return
     setScenario(fn(s, n))
