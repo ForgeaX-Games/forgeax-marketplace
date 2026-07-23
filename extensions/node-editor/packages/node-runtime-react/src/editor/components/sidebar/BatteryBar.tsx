@@ -551,7 +551,13 @@ interface DevNoteTarget {
 }
 
 function BatteryBar() {
-  const { batteries, categories, batteryOrder, saveBatteryOrder } = usePipelineStore()
+  // Selected field-by-field — `usePipelineStore()` with no selector would
+  // re-render this (potentially long) battery palette list on every unrelated
+  // pipeline update (e.g. every streamed nodeOutputs tick while running).
+  const batteries = usePipelineStore((s) => s.batteries)
+  const categories = usePipelineStore((s) => s.categories)
+  const batteryOrder = usePipelineStore((s) => s.batteryOrder)
+  const saveBatteryOrder = usePipelineStore((s) => s.saveBatteryOrder)
   const langMode = useUIStore((s) => s.langMode)
   const batteryStars = useUIStore((s) => s.batteryStars)
   const batteryDevNotes = useUIStore((s) => s.batteryDevNotes)

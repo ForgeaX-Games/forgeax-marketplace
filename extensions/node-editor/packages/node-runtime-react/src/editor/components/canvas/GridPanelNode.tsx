@@ -2,7 +2,8 @@
 // smoothed text in a compact rectangular grid. Ported from the legacy editor
 // (components/canvas/GridPanelNode.tsx).
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Handle, Position, type NodeProps, NodeResizer, useReactFlow } from 'reactflow'
+import { Handle, Position, NodeResizer, useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor, normalizeType } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

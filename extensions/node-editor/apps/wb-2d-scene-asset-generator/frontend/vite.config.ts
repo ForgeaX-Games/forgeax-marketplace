@@ -36,9 +36,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: kernelAlias,
-    // Single React/reactflow/zustand instance across app + kernel source — when
+    // Single React/@xyflow/react/zustand instance across app + kernel source — when
     // the kernel is served from source its hooks must share the app's React.
-    dedupe: ['react', 'react-dom', 'reactflow', 'zustand'],
+    dedupe: ['react', 'react-dom', '@xyflow/react', 'zustand'],
   },
   // Don't pre-bundle the source-aliased kernel; let Vite transform + HMR it live.
   optimizeDeps: { exclude: ['@forgeax/node-runtime-react', '@forgeax/node-runtime'] },

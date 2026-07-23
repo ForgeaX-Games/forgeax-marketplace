@@ -6,7 +6,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { OverlayChild } from '../../runtime/schema/graph-schema'
 import { defaultsForComponent } from './editors'
-import type { SkinCtx, SkinRegistry } from '../../runtime/skins/rendererRegistry'
+import type { SkinCtx, SkinRegistry } from '../../runtime/component-host/rendererRegistry'
 import { childWrapStyle, layoutHasExplicitSize } from '../../runtime/schema/layout'
 import { applyStyleLockedEventParams } from '../video/graphMaterialOps'
 import { localMsForChild } from './previewClock'

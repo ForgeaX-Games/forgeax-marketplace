@@ -37,6 +37,17 @@ export function resolveMediaSrc(ref: string | undefined, game?: string): string 
 }
 
 /**
+ * 优先序解析（D8 目标态，手里已有 MediaAsset 时用）：
+ *   1. `asset.url`（manifest 稳定可播地址）—— 上传能力就绪后成片走这里；
+ *   2. （D9 兜底，暂留）本地 `/__gva__/media/<id>` 流 / zhandou basename。
+ * graph/blueprint 只挂 id；URL 只住 manifest —— 引擎只抛 id，壳层在此 resolve。
+ */
+export function resolveAssetSrc(asset: Pick<MediaAsset, 'id' | 'url'>, game?: string): string | undefined {
+  if (asset.url && /^(https?:|blob:|data:)/.test(asset.url)) return asset.url
+  return resolveMediaSrc(asset.id, game)
+}
+
+/**
  * 演出节点「播放时长」上限判定（SSOT——三处试玩面 GraphPlaySurface / GraphPlayer / GraphStudio 共用）。
  *
  * 规则（对齐 NodeData.durationMs 契约）：作者配的 `capMs` 必须 `>0` 且 `≤ 视频本身长度` 才生效，

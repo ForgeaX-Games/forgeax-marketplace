@@ -27,11 +27,16 @@ interface TitlebarProps {
 }
 
 function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExportScene, canExportSkinned = false, canExportCharacter = false }: TitlebarProps) {
-  const {
-    sourceLabel, render, toggleRenderOption,
-    sectionHeight, setSectionHeight,
-    sidePanelOpen, toggleSidePanel, clearSource,
-  } = useViewerStore()
+  // Selected field-by-field — a bare `useViewerStore()` subscribes to the
+  // whole store and re-renders the titlebar on every unrelated viewer update.
+  const sourceLabel = useViewerStore((s) => s.sourceLabel)
+  const render = useViewerStore((s) => s.render)
+  const toggleRenderOption = useViewerStore((s) => s.toggleRenderOption)
+  const sectionHeight = useViewerStore((s) => s.sectionHeight)
+  const setSectionHeight = useViewerStore((s) => s.setSectionHeight)
+  const sidePanelOpen = useViewerStore((s) => s.sidePanelOpen)
+  const toggleSidePanel = useViewerStore((s) => s.toggleSidePanel)
+  const clearSource = useViewerStore((s) => s.clearSource)
   const t = useViewerI18n()
 
   const [showExportMenu, setShowExportMenu] = useState(false)

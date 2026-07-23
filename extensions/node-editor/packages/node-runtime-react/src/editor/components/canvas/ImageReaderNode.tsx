@@ -8,7 +8,8 @@
 // consumer can point it at its own transport; the encode/preview path reuses the
 // generic imageRef util.
 import { memo, useState, useCallback, useRef, useMemo } from 'react'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore, useHistoryStore } from '../../stores/index.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

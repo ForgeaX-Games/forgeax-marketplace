@@ -10,7 +10,7 @@ export * from './engine/rng'
 export * from './engine/engine-init'
 export * from './registry/component-registry'
 export * from './validate/validate'
-export * from './skins/rendererRegistry'
+export * from './component-host/rendererRegistry'
 export {
   registerCoreSkins,
   createCoreSkinRegistry,
@@ -34,7 +34,7 @@ export {
   validateChoiceEvents,
   QTE_DEFAULT_EVENTS,
   QTE_INPUTS,
-} from './skins/components'
+} from './component-host/components'
 export type {
   ChoiceOption,
   ChoiceParams,
@@ -47,5 +47,5 @@ export type {
   QteCue,
   QteCueShape,
   QteParams,
-} from './skins/components'
+} from './component-host/components'
 export * from './input/playerFocus'

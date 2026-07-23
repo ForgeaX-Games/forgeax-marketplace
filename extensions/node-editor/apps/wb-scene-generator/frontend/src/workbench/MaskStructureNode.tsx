@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { NodeResizer, useReactFlow, type NodeProps } from 'reactflow'
+import { NodeResizer, useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '@forgeax/node-runtime-react/editor'
 import {
   BatteryNode,
   resolveInputPortValue,

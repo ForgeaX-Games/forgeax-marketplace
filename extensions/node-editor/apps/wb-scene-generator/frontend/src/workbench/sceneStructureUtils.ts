@@ -1,6 +1,7 @@
 import { isDataTreeEntries, peelWireValue } from '@forgeax/node-runtime-react/editor'
 import { parseScenePort, type ScenePortValue } from '../../../vendor/shared/types/scene/port.js'
-import type { SceneNodeSnapshot } from '../../../vendor/shared/types/scene/types.js'
+import { childrenOf, getNode, pathOf, type NodeId, type SceneGraph, type SceneNode } from '../../../vendor/shared/types/scene/graph.js'
+import { cellCount } from '../../../vendor/shared/types/scene/volume.js'
 
 export interface SceneNodeStats {
   ownVoxels: number
@@ -8,12 +9,16 @@ export interface SceneNodeStats {
   nodeCount: number
 }
 
-export function collectNodeStats(node: SceneNodeSnapshot): SceneNodeStats {
-  let ownVoxels = node.cells?.length ?? 0
+/**
+ * v3: 节点自身不再携带 cells 数组，用 cellCount(content) 取代 .cells.length；
+ * children 是 name→id 的 map，用 childrenOf(graph, node.id) 取代 node.children 数组遍历。
+ */
+export function collectNodeStats(graph: SceneGraph, node: SceneNode): SceneNodeStats {
+  const ownVoxels = node.content ? cellCount(node.content) : 0
   let subtreeVoxels = ownVoxels
   let nodeCount = 1
-  for (const child of node.children) {
-    const childStats = collectNodeStats(child)
+  for (const child of childrenOf(graph, node.id)) {
+    const childStats = collectNodeStats(graph, child)
     subtreeVoxels += childStats.subtreeVoxels
     nodeCount += childStats.nodeCount
   }
@@ -36,25 +41,28 @@ export function extractScenePortFromWire(raw: unknown): ScenePortValue | null {
   return parseScenePort(peeled)
 }
 
-/** Collect ancestor paths (inclusive) that should stay expanded to reveal `focus`. */
-export function pathsExpandedToFocus(focus: string): Set<string> {
-  const expanded = new Set<string>(['/'])
-  if (focus === '/' || focus === '') return expanded
-
-  const segments = focus.split('/').filter(Boolean)
-  let path = ''
-  for (const segment of segments) {
-    path += `/${segment}`
-    expanded.add(path)
+/** Collect ancestor node ids (inclusive of focus and the graph root) that should stay expanded to reveal `focus`. */
+export function idsExpandedToFocus(graph: SceneGraph, focus: NodeId): Set<NodeId> {
+  const expanded = new Set<NodeId>()
+  let cur: NodeId | null = focus
+  while (cur !== null) {
+    expanded.add(cur)
+    const node = getNode(graph, cur)
+    if (!node) break
+    cur = node.parent
   }
   return expanded
 }
 
-export function formatSceneNodeLabel(node: SceneNodeSnapshot): string {
-  if (node.path === '/' || node.name === '') return '/'
-  return node.name
+export function formatSceneNodeLabel(node: SceneNode): string {
+  return node.name === '' ? '/' : node.name
 }
 
-export function readTreeRoot(port: ScenePortValue): SceneNodeSnapshot {
-  return port.tree
+export function readTreeRoot(port: ScenePortValue): SceneNode | null {
+  return getNode(port.graph, port.focus)
+}
+
+/** Human-readable path for display only (identity/expand-state uses NodeId, never this string). */
+export function focusDisplayPath(port: ScenePortValue): string {
+  return pathOf(port.graph, port.focus) ?? port.focus
 }

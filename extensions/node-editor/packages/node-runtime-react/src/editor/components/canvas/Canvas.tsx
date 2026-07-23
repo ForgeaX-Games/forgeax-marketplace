@@ -13,8 +13,9 @@
 // here via their extracted hooks. The only legacy couplings intentionally left
 // out are APP-LEVEL chrome (the embedded renderer iframe) — a consumer injects
 // those through Editor props, not the generic canvas.
-import { useCallback, useState, useRef, useMemo, useEffect } from 'react'
-import ReactFlow, {
+import { useCallback, useState, useRef, useMemo, useEffect, startTransition } from 'react'
+import {
+  ReactFlow,
   MiniMap,
   Panel,
   applyEdgeChanges,
@@ -22,16 +23,14 @@ import ReactFlow, {
   useEdgesState,
   useViewport,
   SelectionMode,
-  type Node,
-  type Edge,
   type EdgeChange,
   type NodeChange,
   type NodeTypes,
-  type ReactFlowInstance,
   type OnSelectionChangeParams,
-} from 'reactflow'
-import 'reactflow/dist/style.css'
-import type { Connection } from 'reactflow'
+  type Connection,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import type { Node, Edge, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import type { Battery, BatteryPort, PipelineNode } from '../../types.js'
 import { createCanvasNodeTypes, createCanvasEdgeTypes } from './canvasConstants.js'
@@ -89,7 +88,7 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
 
   // Local ReactFlow node / edge state.
   const [nodes, setNodes] = useState<Node[]>([])
-  const [edges, setEdges] = useEdgesState([])
+  const [edges, setEdges] = useEdgesState<Edge>([])
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const activeNodeTypes = useMemo(() => createCanvasNodeTypes(domainNodeTypes, domainPortTypes), [domainNodeTypes, domainPortTypes])
   // Inject domainPortTypes into the probe edge too, so the data-probe type badge
@@ -235,9 +234,10 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
   const {
     snapGuides,
     onNodeDrag: snapOnNodeDrag,
+    onNodeDragStart: snapOnNodeDragStart,
     onNodeDragStop: snapOnNodeDragStop,
     onSelectionDragStop: snapOnSelectionDragStop,
-  } = useCanvasSnap({ nodes, reactFlowInstance, reactFlowWrapper, snapTargetsRef, snapEnabled })
+  } = useCanvasSnap({ reactFlowInstance, reactFlowWrapper, snapTargetsRef, snapEnabled })
 
   // Canvas frames: create from selection + drag-containment + frame context menu.
   const {
@@ -297,40 +297,41 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
   // onSelectionChange is the single source of truth, avoiding races between
   // onNodeClick and onPaneClick.
   const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: OnSelectionChangeParams) => {
-      setSelectedNodeIds(selectedNodes.map((n) => n.id))
+    ({ nodes: selectedNodes }: OnSelectionChangeParams<Node>) => {
+      // Deprioritize sidebar/renderer bridge updates so xyflow can paint the
+      // selection ring and accept the next drag gesture on the same frame.
+      startTransition(() => {
+        setSelectedNodeIds(selectedNodes.map((n) => n.id))
 
-      if (
-        selectedNodes.length === 1 &&
-        selectedNodes[0].type !== 'annotation' &&
-        selectedNodes[0].type !== 'frame'
-      ) {
-        const node = selectedNodes[0]
-        if (node.type === 'group') {
-          // Group nodes carry GroupNodeData (groupId/exposedPorts), not a
-          // catalog battery. Map them to the shadow battery so the side-pane
-          // Node Info resolves the group's exposed ports + wiring.
-          const groupId = (node.data as { groupId?: string }).groupId
-          const groupName = (node.data as { groupName?: string }).groupName
-          setSelectedNode({
-            id: node.id,
-            batteryId: '__group__',
-            name: groupName || node.id,
-            position: node.position,
-            params: { groupId: groupId ?? node.id },
-          })
+        if (
+          selectedNodes.length === 1 &&
+          selectedNodes[0].type !== 'annotation' &&
+          selectedNodes[0].type !== 'frame'
+        ) {
+          const node = selectedNodes[0]
+          if (node.type === 'group') {
+            const groupId = (node.data as { groupId?: string }).groupId
+            const groupName = (node.data as { groupName?: string }).groupName
+            setSelectedNode({
+              id: node.id,
+              batteryId: '__group__',
+              name: groupName || node.id,
+              position: node.position,
+              params: { groupId: groupId ?? node.id },
+            })
+          } else {
+            setSelectedNode({
+              id: node.id,
+              batteryId: node.data.battery?.id || '',
+              name: node.data.battery?.name || node.id,
+              position: node.position,
+              params: node.data.params || {},
+            })
+          }
         } else {
-          setSelectedNode({
-            id: node.id,
-            batteryId: node.data.battery?.id || '',
-            name: node.data.battery?.name || node.id,
-            position: node.position,
-            params: node.data.params || {},
-          })
+          setSelectedNode(null)
         }
-      } else {
-        setSelectedNode(null)
-      }
+      })
     },
     [setSelectedNode, setSelectedNodeIds],
   )
@@ -529,12 +530,13 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
 
   // Capture the member start-positions when a frame drag begins (root level only;
   // frames don't exist inside a group view).
-  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+  const onNodeDragStart = useCallback((_event: MouseEvent | TouchEvent, node: Node) => {
     if (isInGroupView) return
+    snapOnNodeDragStart()
     onFrameDragStart(node)
-  }, [isInGroupView, onFrameDragStart])
+  }, [isInGroupView, snapOnNodeDragStart, onFrameDragStart])
 
-  const onNodeDragStop = useCallback((event: React.MouseEvent, node: Node, draggedNodes: Node[]) => {
+  const onNodeDragStop = useCallback((event: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
     if (isInGroupView) {
       // Persist inner node positions to the group (skip transient context nodes).
       for (const n of draggedNodes) {
@@ -556,7 +558,7 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
     syncFramesToStore(reactFlowInstance?.getNodes() ?? nodes)
   }, [isInGroupView, syncInnerNodePosition, onFrameDragStop, snapOnNodeDragStop, syncFramesToStore, reactFlowInstance, nodes, moveAnnotation])
 
-  const onNodeDrag = useCallback((event: React.MouseEvent, node: Node, draggedNodes: Node[]) => {
+  const onNodeDrag = useCallback((event: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
     if (isInGroupView) return
     // Dragging a frame translates its members instead of snap-aligning.
     if (onFrameDragMove(node)) return
@@ -681,6 +683,7 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
         multiSelectionKeyCode="Shift"
         selectionOnDrag={true}
         panOnDrag={[1, 2]}
+        autoPanOnNodeDrag={false}
         zoomOnScroll={true}
         zoomOnPinch={true}
         minZoom={0.01}

@@ -4,7 +4,7 @@
 // the new-project wizard, and the delete confirmation. Consumers compose these;
 // they own no layout chrome beyond what the cards need.
 
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getEditorTransport } from '../../transport/index.js'
 import { useProjectStore } from '../../stores/projectStore.js'
@@ -13,7 +13,7 @@ import {
   formatProjectTimestamp,
   formatWhenFull,
   pt,
-  useProjectLocale,
+  type Locale,
 } from './projectI18n.js'
 import './ProjectsDialog.css'
 
@@ -129,8 +129,9 @@ export function SaveIcon(): JSX.Element {
 
 export { formatProjectTimestamp } from './projectI18n.js'
 
-export function ProjectCard({
+function ProjectCardInner({
   project,
+  locale,
   isActive,
   isSwitching,
   showProjectType = true,
@@ -139,11 +140,14 @@ export function ProjectCard({
   pipelineRun,
   canDelete = true,
   extraActions,
-  onActivate,
-  onRename,
-  onRequestDelete,
+  onSaveProject,
+  onActivateProject,
+  onRenameProject,
+  onRequestDeleteProject,
 }: {
   project: ProjectMeta
+  /** Pass from the panel root — avoids per-card locale subscriptions. */
+  locale: Locale
   isActive: boolean
   isSwitching: boolean
   /** When false, hide the type pill (e.g. all projects share one domain type). */
@@ -158,27 +162,53 @@ export function ProjectCard({
   canDelete?: boolean
   /** Optional extra action(s) injected into the card toolbar (e.g. Save). */
   extraActions?: ReactNode
-  onActivate: () => void
-  onRename: (name: string) => void
-  onRequestDelete: () => void
+  /** Optional save handler — built-in toolbar icon when set. */
+  onSaveProject?: (project: ProjectMeta) => void
+  onActivateProject: (id: string) => void
+  onRenameProject: (id: string, name: string) => void
+  onRequestDeleteProject: (project: ProjectMeta) => void
 }): JSX.Element {
-  const locale = useProjectLocale()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(project.name)
-  const executingLabel =
-    lockLabel ?? (executingLock ? formatProjectLockLabel(executingLock, project.name) : null)
-  const pipelineLabel = pipelineRun ? formatPipelineRunLabel(pipelineRun) : null
-  const createdLabel = formatProjectTimestamp(project.createdAt, 'created', locale)
-  const editedLabel = formatProjectTimestamp(project.updatedAt, 'edited', locale)
-  const metaParts = [createdLabel, editedLabel].filter(Boolean)
-  const metaTitle = [formatWhenFull(project.createdAt, locale), formatWhenFull(project.updatedAt, locale)]
-    .filter(Boolean)
-    .join(' · ')
+  const executingLabel = useMemo(
+    () => lockLabel ?? (executingLock ? formatProjectLockLabel(executingLock, project.name) : null),
+    [lockLabel, executingLock, project.name],
+  )
+  const pipelineLabel = useMemo(
+    () => (pipelineRun ? formatPipelineRunLabel(pipelineRun) : null),
+    [pipelineRun],
+  )
+  const createdLabel = useMemo(
+    () => formatProjectTimestamp(project.createdAt, 'created', locale),
+    [project.createdAt, locale],
+  )
+  const editedLabel = useMemo(
+    () => formatProjectTimestamp(project.updatedAt, 'edited', locale),
+    [project.updatedAt, locale],
+  )
+  const metaParts = useMemo(
+    () => [createdLabel, editedLabel].filter(Boolean),
+    [createdLabel, editedLabel],
+  )
+  const metaTitle = useMemo(
+    () => [formatWhenFull(project.createdAt, locale), formatWhenFull(project.updatedAt, locale)]
+      .filter(Boolean)
+      .join(' · '),
+    [project.createdAt, project.updatedAt, locale],
+  )
+
+  const handleActivate = useCallback(() => onActivateProject(project.id), [onActivateProject, project.id])
+  const handleRenameCommit = useCallback(() => {
+    setEditing(false)
+    if (name.trim() && name !== project.name) onRenameProject(project.id, name.trim())
+  }, [name, onRenameProject, project.id, project.name])
+  const handleRequestDelete = useCallback(() => onRequestDeleteProject(project), [onRequestDeleteProject, project])
+  const handleSave = useCallback(() => onSaveProject?.(project), [onSaveProject, project])
 
   return (
     <div className={`proj-card${isActive ? ' proj-card--active' : ''}${executingLock || pipelineRun ? ' proj-card--executing' : ''}`}>
       <div className="proj-card__inner">
-        <button type="button" className="proj-card__open" disabled={isSwitching} onClick={onActivate}>
+        <button type="button" className="proj-card__open" disabled={isSwitching} onClick={handleActivate}>
           {showProjectType && <span className="proj-card__type">{project.type}</span>}
           {editing ? (
             <input
@@ -187,10 +217,7 @@ export function ProjectCard({
               autoFocus
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setName(e.target.value)}
-              onBlur={() => {
-                setEditing(false)
-                if (name.trim() && name !== project.name) onRename(name.trim())
-              }}
+              onBlur={handleRenameCommit}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
               }}
@@ -219,6 +246,17 @@ export function ProjectCard({
           )}
         </button>
         <div className="proj-card__toolbar">
+          {onSaveProject && (
+            <button
+              type="button"
+              className="proj-card__icon-btn"
+              title={pt('save')}
+              aria-label={pt('save')}
+              onClick={handleSave}
+            >
+              <SaveIcon />
+            </button>
+          )}
           {extraActions}
           <button
             type="button"
@@ -235,7 +273,7 @@ export function ProjectCard({
             title={canDelete ? pt('delete') : pt('deleteDisabled')}
             aria-label={canDelete ? pt('delete') : pt('deleteDisabled')}
             disabled={!canDelete}
-            onClick={onRequestDelete}
+            onClick={handleRequestDelete}
           >
             <DeleteIcon />
           </button>
@@ -244,6 +282,8 @@ export function ProjectCard({
     </div>
   )
 }
+
+export const ProjectCard = memo(ProjectCardInner)
 
 export function NewProjectWizard({
   defaultProjectType,

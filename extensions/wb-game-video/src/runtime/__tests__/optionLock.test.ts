@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isOptionLocked, conditionTargetFromHud } from '../skins/optionLock'
-import type { SkinCtx } from '../skins/rendererRegistry'
+import { isOptionLocked, conditionTargetFromHud } from '../component-host/optionLock'
+import type { SkinCtx } from '../component-host/rendererRegistry'
 import type { HudSnap } from '../engine/session'
 
 function hud(vars: Record<string, number>): HudSnap {

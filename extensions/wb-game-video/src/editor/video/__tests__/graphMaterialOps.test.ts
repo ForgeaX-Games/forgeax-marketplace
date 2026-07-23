@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { GameNode, GameScenario } from '../../../runtime/schema/graph-schema'
 import type { OverlayChild } from '../../../runtime/schema/node-config-schema'
-import type { QteCue } from '../../../runtime/skins/components/Qte'
-import { registerCoreSkins } from '../../../runtime/skins/components'
+import type { QteCue } from '../../../runtime/component-host/components/Qte'
+import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
 import { nodeOverlayId } from '../../../graph/edit/overlay-edit'
 import {

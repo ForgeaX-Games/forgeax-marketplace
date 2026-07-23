@@ -1,7 +1,8 @@
 // Editor-style relay node: passes input -> output, used to tidy cables.
 // Ported verbatim from the legacy editor (components/canvas/RelayNode.tsx).
 import { memo } from 'react'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { getPortTypeColor, normalizeType, type DomainPortTypes } from '../../utils/portTypes.js'
 import './RelayNode.css'
 

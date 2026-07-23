@@ -5,7 +5,12 @@ const MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh']
 const DRAWS: DrawMode[] = ['wire', 'color', 'asset']
 
 export function ModeSwitcher(): JSX.Element {
-  const { viewMode, drawMode, setViewMode, setDrawMode } = useRenderStore()
+  // Selected individually — `useRenderStore()` with no selector subscribes to
+  // the whole store and re-renders on every unrelated update (see RendererSurface.tsx).
+  const viewMode = useRenderStore((s) => s.viewMode)
+  const drawMode = useRenderStore((s) => s.drawMode)
+  const setViewMode = useRenderStore((s) => s.setViewMode)
+  const setDrawMode = useRenderStore((s) => s.setDrawMode)
   return (
     <div style={{ display: 'flex', gap: 8, padding: 6 }}>
       {MODES.map((m) => (

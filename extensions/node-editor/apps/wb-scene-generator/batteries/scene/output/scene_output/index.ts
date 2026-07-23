@@ -30,6 +30,6 @@ interface SceneOutputResult {
 export function sceneOutput(input: Record<string, unknown>): SceneOutputResult {
   const port = parseScenePort(input.scene);
   if (!port) return { error: 'scene is required and must be a ScenePortValue' };
-  const { layers, names } = projectSceneToVoxelLayers(port.tree, port.focus);
+  const { layers, names } = projectSceneToVoxelLayers(port.graph, port.focus);
   return { layers, names };
 }

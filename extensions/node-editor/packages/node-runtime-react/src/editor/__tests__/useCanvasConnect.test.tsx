@@ -12,8 +12,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
-import { addEdge } from 'reactflow'
-import type { Connection, Edge, Node } from 'reactflow'
+import { addEdge } from '@xyflow/react'
+import type { Connection } from '@xyflow/react'
+import type { Edge, Node } from '../xyflow.js'
 
 import { createMockApiClient } from '../../test/mockApiClient.js'
 import { configureEditorTransport, createEditorTransport } from '../transport/index.js'

@@ -80,6 +80,7 @@ function check(fromDir, forbidden) {
   }
 }
 
+// component-host lives under runtime/ (runtime-level infra) → covered by the runtime rule.
 check('runtime', ['graph', 'editor'])
 check('graph', ['editor'])
 

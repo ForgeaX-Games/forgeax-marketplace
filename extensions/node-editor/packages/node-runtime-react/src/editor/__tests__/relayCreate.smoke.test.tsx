@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render } from '@testing-library/react'
 import { useState } from 'react'
-import type { Node } from 'reactflow'
+import type { Node } from '../xyflow.js'
 
 import {
   RELAY_BATTERY_ID,

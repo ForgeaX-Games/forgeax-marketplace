@@ -29,16 +29,11 @@ export function sceneSetTransform(input: Record<string, unknown>): SetTransformR
     tx = t.x; ty = t.y; tz = t.z;
   }
 
-  let nextTree;
+  let nextGraph;
   try {
-    nextTree = setTransform(
-      sin.tree,
-      sin.focus,
-      { translation: [tx, ty, tz] },
-      sin.tree.version + 1,
-    );
+    nextGraph = setTransform(sin.graph, sin.focus, { translation: [tx, ty, tz] });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-  return { scene: makeScenePort(nextTree, sin.focus) };
+  return { scene: makeScenePort(nextGraph, sin.focus) };
 }

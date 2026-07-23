@@ -18,6 +18,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getActiveProjectDir, getProjectDir } from '../runtime.js'
+// baked-scene.json 是与 SceneGraph 管线完全独立的第二套持久化格式（见本文件顶部
+// 文档注释）——刻意排除在 v3 重构范围外（scene-v3-refactor-spec 总览页）。它仍然
+// 依赖旧 tree.ts 的嵌套树 + path-copying 语义，因此从 tree.ts 的深路径直接导入，
+// 而不是从主 barrel（scene/index.ts 已不再 `export *` tree.ts——那些函数名会和
+// graph.ts 的新原语混淆）。SceneNodeSnapshot / VoxelCell 类型仍来自 types.ts，
+// 继续经主 barrel 导出，两边类型定义保持同一份，不会分叉。
 import {
   emptyTree,
   readNode,
@@ -25,9 +31,8 @@ import {
   splitPath,
   upsertCells,
   upsertSubtree,
-  type SceneNodeSnapshot,
-  type VoxelCell,
-} from '../../../vendor/dist/shared/types/scene/index.js'
+} from '../../../vendor/dist/shared/types/scene/tree.js'
+import type { SceneNodeSnapshot, VoxelCell } from '../../../vendor/dist/shared/types/scene/index.js'
 
 const FILE = 'baked-scene.json'
 const HISTORY_FILE = 'baked-scene-history.json'

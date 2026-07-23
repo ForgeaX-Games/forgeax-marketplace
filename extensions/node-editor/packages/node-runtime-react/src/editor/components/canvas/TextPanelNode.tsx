@@ -4,7 +4,8 @@
 // the package dependency-free; the markup/CSS class is preserved.
 import { memo, useState, useCallback, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Handle, Position, type NodeProps, NodeResizer } from 'reactflow'
+import { Handle, Position, NodeResizer } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore, useHistoryStore } from '../../stores/index.js'
 import { peekEditorTransport } from '../../transport/index.js'
 import { ContextMenuPortal, type ContextMenuState } from './BatteryNode.js'

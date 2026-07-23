@@ -13,7 +13,7 @@
 //     endpoints redirected to the GroupNode's exposed ports.
 // ungroupNode reverses all of the above.
 import { useCallback } from 'react'
-import type { Node, Edge } from 'reactflow'
+import type { Node, Edge } from '../../xyflow.js'
 import { deriveGroupPorts } from '@forgeax/node-runtime/derive-group-ports'
 import { usePipelineStore } from '../../stores/index.js'
 import { useHistoryStore } from '../../stores/index.js'

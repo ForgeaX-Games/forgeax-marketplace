@@ -15,7 +15,7 @@ import {
   battleSkillBarPreset,
   inkKouPreset,
   inkYingMoPreset,
-} from '../../runtime/skins/components'
+} from '../../runtime/component-host/components'
 import { ensureNodiaSchemeOverlays } from './nodia-scheme-overlays'
 
 export const SCHEME_STATIC_ID = 'scheme-static'

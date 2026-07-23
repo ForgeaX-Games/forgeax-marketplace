@@ -19,14 +19,20 @@ import './SettingsInfoPanel.css'
  * so the label language follows this pane's preference.
  */
 function SettingsInfoPanel({ mirror }: { mirror?: EditorStatusView } = {}) {
-  const local = usePipelineStore()
-  const { connectionStatus: localConnection, langMode } = useUIStore()
+  // Selected field-by-field (not `usePipelineStore()`/`useUIStore()` with no
+  // selector) — those subscribe to the whole store and would re-render this
+  // panel on every unrelated update.
+  const localPipelineStatus = usePipelineStore((s) => s.pipelineStatus)
+  const localCurrentPipeline = usePipelineStore((s) => s.currentPipeline)
+  const localSelectedNode = usePipelineStore((s) => s.selectedNode)
+  const localConnection = useUIStore((s) => s.connectionStatus)
+  const langMode = useUIStore((s) => s.langMode)
   const en = langMode === 'en'
 
   const connectionStatus = mirror ? mirror.connectionStatus : localConnection
-  const pipelineStatus = mirror ? mirror.pipelineStatus : local.pipelineStatus
-  const nodeCount = mirror ? mirror.nodeCount : (local.currentPipeline?.nodes.length ?? 0)
-  const edgeCount = mirror ? mirror.edgeCount : (local.currentPipeline?.edges.length ?? 0)
+  const pipelineStatus = mirror ? mirror.pipelineStatus : localPipelineStatus
+  const nodeCount = mirror ? mirror.nodeCount : (localCurrentPipeline?.nodes.length ?? 0)
+  const edgeCount = mirror ? mirror.edgeCount : (localCurrentPipeline?.edges.length ?? 0)
 
   const connectionLabel =
     connectionStatus === 'connected'
@@ -44,8 +50,8 @@ function SettingsInfoPanel({ mirror }: { mirror?: EditorStatusView } = {}) {
           ? (en ? 'Error' : '错误')
           : null
 
-  const selBatteryId = mirror ? mirror.selectedNodeBatteryId : (local.selectedNode?.batteryId ?? null)
-  const selName = mirror ? mirror.selectedNodeName : (local.selectedNode?.name ?? null)
+  const selBatteryId = mirror ? mirror.selectedNodeBatteryId : (localSelectedNode?.batteryId ?? null)
+  const selName = mirror ? mirror.selectedNodeName : (localSelectedNode?.name ?? null)
   // en label resolves from the battery id (the legacy `batteries.find(...)?.id`
   // lookup just returns the same id), so no battery catalog is needed here —
   // which is what lets this render correctly in a mirror-only side pane.

@@ -8,13 +8,20 @@
  */
 
 import {
-  emptyTree,
+  ROOT_ID,
+  addChildren,
+  emptyGraph,
+  ensurePath,
   makeScenePort,
-  readNode,
-  upsertCells,
-  type SceneNodeSnapshot,
+  resolvePath,
+  setBounds,
+  setContent,
+  setSchema,
+  volumeFromCells,
+  type Cell,
+  type NodeId,
+  type SceneGraph,
   type ScenePortValue,
-  type VoxelCell,
 } from '../../../../vendor/dist/shared/types/index.js';
 import {
   computeBounds,
@@ -60,7 +67,7 @@ function parseTokenList(raw: unknown, count: number, defaultToken: string): stri
   });
 }
 
-function attachTokens(cells: ParsedVoxelCell[], tokens: string[], defaultToken: string): VoxelCell[] {
+function attachTokens(cells: ParsedVoxelCell[], tokens: string[], defaultToken: string): Cell[] {
   return cells.map((c, i) => ({
     x: c.x,
     y: c.y,
@@ -69,15 +76,69 @@ function attachTokens(cells: ParsedVoxelCell[], tokens: string[], defaultToken: 
   }));
 }
 
-function upsertNode(
-  tree: SceneNodeSnapshot,
-  path: string,
+/** 在 rootId 下按 relPath（可能是嵌套的 "district/building"）落一个携带内容的节点。relPath 已存在则报错（对照旧 upsertCells 遇到已存在路径直接覆盖——这里保持旧 buildSceneFromNodes 的"重复即报错"行为，不是新引入的限制）。 */
+function upsertContentNode(
+  graph: SceneGraph,
+  rootId: NodeId,
+  relPath: string,
   schema: string,
-  cells: readonly VoxelCell[],
-  version: number,
-): SceneNodeSnapshot {
-  const bounds = computeBounds(cells);
-  return upsertCells(tree, path, { schema, cells, bounds }, version);
+  cells: readonly Cell[],
+): { graph: SceneGraph; id: NodeId } | { error: string } {
+  const segs = relPath.split('/').filter(Boolean);
+  if (resolvePath(graph, rootId, `/${segs.join('/')}`) !== null) {
+    return { error: `duplicate node name "${relPath}"` };
+  }
+  const { graph: g1, id } = ensurePath(graph, rootId, segs);
+  let g = setContent(g1, id, volumeFromCells(cells));
+  g = setSchema(g, id, schema);
+  g = setBounds(g, id, computeBounds(cells));
+  return { graph: g, id };
+}
+
+function buildSceneFromNodes(
+  nodeSpecs: ParsedVoxelNode[],
+  rootName: string,
+  schema: string,
+  defaultToken: string,
+  tokens?: string[],
+): Voxels2SceneResult {
+  if (nodeSpecs.length === 0) {
+    return { voxelCount: 0, nodeCount: 0, error: 'no voxels to write' };
+  }
+
+  let graph: SceneGraph = addChildren(emptyGraph(), ROOT_ID, [{ name: rootName }]).graph;
+  const rootId: NodeId = resolvePath(graph, ROOT_ID, `/${rootName}`)!;
+  let total = 0;
+
+  if (nodeSpecs.length === 1 && nodeSpecs[0]!.name === rootName) {
+    const only = nodeSpecs[0]!;
+    const voxelCells = attachTokens(only.cells, tokens ?? only.cells.map((c) => c.token), defaultToken);
+    total = voxelCells.length;
+    graph = setContent(graph, rootId, volumeFromCells(voxelCells));
+    graph = setSchema(graph, rootId, schema);
+    graph = setBounds(graph, rootId, computeBounds(voxelCells));
+    return {
+      scene: makeScenePort(graph, rootId),
+      voxelCount: total,
+      nodeCount: 1,
+    };
+  }
+
+  for (const spec of nodeSpecs) {
+    const voxelCells = attachTokens(spec.cells, spec.cells.map((c) => c.token), defaultToken);
+    const result = upsertContentNode(graph, rootId, spec.name, schema, voxelCells);
+    if ('error' in result) {
+      return { voxelCount: 0, nodeCount: 0, error: result.error };
+    }
+    graph = result.graph;
+    total += voxelCells.length;
+  }
+
+  return {
+    scene: makeScenePort(graph, rootId),
+    voxelCount: total,
+    nodeCount: nodeSpecs.length,
+  };
 }
 
 function parseNodesInput(raw: unknown, defaultToken: string): ParsedVoxelNode[] {
@@ -107,7 +168,7 @@ function groupCells(
 
   const buckets = new Map<string, ParsedVoxelCell[]>();
   for (let i = 0; i < cells.length; i += 1) {
-    const c = cells[i];
+    const c = cells[i]!;
     const key = groupBy === 'z' ? `z${c.z}` : (tokens[i] ?? c.token ?? 'cell');
     const list = buckets.get(key) ?? [];
     list.push(c);
@@ -117,61 +178,6 @@ function groupCells(
   return [...buckets.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, bucketCells]) => ({ name, cells: bucketCells }));
-}
-
-function buildSceneFromNodes(
-  nodeSpecs: ParsedVoxelNode[],
-  rootName: string,
-  schema: string,
-  defaultToken: string,
-  tokens?: string[],
-): Voxels2SceneResult {
-  if (nodeSpecs.length === 0) {
-    return { voxelCount: 0, nodeCount: 0, error: 'no voxels to write' };
-  }
-
-  let tree = emptyTree();
-  let version = 1;
-  let total = 0;
-
-  if (nodeSpecs.length === 1 && nodeSpecs[0].name === rootName) {
-    const only = nodeSpecs[0];
-    const voxelCells = attachTokens(only.cells, tokens ?? only.cells.map((c) => c.token), defaultToken);
-    total = voxelCells.length;
-    tree = upsertNode(tree, `/${rootName}`, schema, voxelCells, version);
-    return {
-      scene: makeScenePort(tree, `/${rootName}`),
-      voxelCount: total,
-      nodeCount: 1,
-    };
-  }
-
-  for (const spec of nodeSpecs) {
-    // spec.name may be nested ("district/building"); upsertCells auto-creates
-    // any missing intermediate group nodes as empty containers.
-    const childPath = `/${rootName}/${spec.name}`;
-    if (readNode(tree, childPath) !== null) {
-      return { voxelCount: 0, nodeCount: 0, error: `duplicate node name "${spec.name}"` };
-    }
-    const voxelCells = attachTokens(spec.cells, spec.cells.map((c) => c.token), defaultToken);
-    version += 1;
-    try {
-      tree = upsertNode(tree, childPath, schema, voxelCells, version);
-    } catch (err) {
-      return {
-        voxelCount: 0,
-        nodeCount: 0,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-    total += voxelCells.length;
-  }
-
-  return {
-    scene: makeScenePort(tree, `/${rootName}`),
-    voxelCount: total,
-    nodeCount: nodeSpecs.length,
-  };
 }
 
 export function voxels2Scene(input: Record<string, unknown>): Voxels2SceneResult {

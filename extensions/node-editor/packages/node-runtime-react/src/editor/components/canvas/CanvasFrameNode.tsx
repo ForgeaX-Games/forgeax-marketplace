@@ -4,7 +4,8 @@
 // auto-sizes to its label. Imports retargeted onto the editor stores + sibling
 // frame-export util.
 import { memo, useCallback, useEffect, useState } from 'react'
-import { useReactFlow, type NodeProps } from 'reactflow'
+import { useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore } from '../../stores/index.js'
 import { copyFramePngToClipboard, type FrameExportClipboardMode } from './canvasFrameExport.js'
 import type { DomainPortTypes } from '../../utils/portTypes.js'

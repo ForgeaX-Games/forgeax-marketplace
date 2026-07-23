@@ -14,18 +14,11 @@ export function resolveWorkspaceRoot(): string {
 /**
  * Shared Studio games tree: `<instance>/.forgeax/games`.
  *
- * Workbench plugins run with FORGEAX_PROJECT_ROOT pointed at an isolated
- * `.forgeax/workbench/<pluginId>/` sandbox. Writing `.forgeax/games/...` under
- * that sandbox nests a second games tree that Studio's Files panel never shows
- * (Files reads the host instance root). Prefer the host games root.
+ * Workbench plugins get FORGEAX_PROJECT_ROOT = `.forgeax/workbench/<pluginId>/`.
+ * Derive the sibling shared games dir from that layout alone — no host env vars.
+ * Standalone / test (no workbench segment) falls back to `<workspace>/.forgeax/games`.
  */
 export function resolveSharedGamesRoot(): string {
-  const explicit = process.env.FORGEAX_GAMES_ROOT?.trim()
-  if (explicit) return resolve(explicit)
-
-  const host = process.env.FORGEAX_HOST_PROJECT_ROOT?.trim()
-  if (host) return resolve(host, '.forgeax', 'games')
-
   const ws = resolveWorkspaceRoot()
   const norm = ws.replace(/\\/g, '/')
   // <instance>/.forgeax/workbench/<pluginId> → <instance>/.forgeax/games

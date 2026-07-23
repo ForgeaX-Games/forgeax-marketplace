@@ -21,7 +21,7 @@ export interface BossHitCheerParams {
 
 /**
  * 组件的注册契约（引擎/编辑器识别用）——**与渲染实现同文件**，组件即"包"。
- * 由 `skins/components/index.ts` 统一注册进组件表 + 渲染表。
+ * 由 `component-host/components/index.ts` 统一注册进组件表 + 渲染表。
  */
 export const bossHitCheerComponent: ComponentDef<BossHitCheerParams> = {
   label: '受击加油横幅',

@@ -476,6 +476,9 @@ export function useEditorBroadcastHost(
     const bridge = createEditorBridge(key)
 
     let scheduled = false
+    let lastPipelineSig = ''
+    let lastSelectedOutputRef: Record<string, unknown> | undefined
+    let lastUiSig = ''
     const publish = (): void => bridge.publishState(buildSnapshot(formattersRef.current))
     const schedule = (): void => {
       if (scheduled) return
@@ -487,11 +490,37 @@ export function useEditorBroadcastHost(
       if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(run)
       else setTimeout(run, 16)
     }
+    const scheduleIfPipelineChanged = (): void => {
+      const p = usePipelineStore.getState()
+      const selId = p.selectedNode?.id
+      const outputRef = selId ? p.nodeOutputs[selId] : undefined
+      const sig = [
+        p.pipelineRevision,
+        p.pipelineStatus,
+        p.outputsRefreshBusy ? 1 : 0,
+        p.selectedNodeIds.join(','),
+        selId ?? '',
+        p.currentPipeline?.nodes.length ?? 0,
+        p.currentPipeline?.edges.length ?? 0,
+      ].join('|')
+      const outputChanged = outputRef !== lastSelectedOutputRef
+      if (sig === lastPipelineSig && !outputChanged) return
+      lastPipelineSig = sig
+      lastSelectedOutputRef = outputRef
+      schedule()
+    }
+    const scheduleIfUiChanged = (): void => {
+      const ui = useUIStore.getState()
+      const sig = `${ui.connectionStatus}|${ui.langMode}|${ui.showDevNoteCount ? 1 : 0}`
+      if (sig === lastUiSig) return
+      lastUiSig = sig
+      schedule()
+    }
 
     const unsubs = [
       useHistoryStore.subscribe(schedule),
-      usePipelineStore.subscribe(schedule),
-      useUIStore.subscribe(schedule),
+      usePipelineStore.subscribe(scheduleIfPipelineChanged),
+      useUIStore.subscribe(scheduleIfUiChanged),
     ]
     const offCmd = bridge.onCommand((cmd) => {
       if (cmd.type === 'clear-history') useHistoryStore.getState().clearHistory()

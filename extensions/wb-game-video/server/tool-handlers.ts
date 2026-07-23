@@ -1,11 +1,11 @@
 /**
  * wb-game-video `entry.backend` for ToolRegistry —— **graph-native** 工具层。
  *
- * 新引擎（GameGraph）时代：AI 与工坊沟通契约 = 读写库文档
- * （`scenarios.graph.json` = 原 scenario + `manifest`）。瘦工具走 fs 直读写。
+ * 新引擎（GameGraph）时代：AI 与工坊沟通契约 = 读写库文档（GraphLibraryDocument）。
  *
- * 盘上格式与 vite `/__graph__` 共用 `blueprint-store-fs`：
- *   scenarios.graph.json（单文件 SSOT）+ scenarios.graph.versions/（留 10 版）
+ * 盘上格式与 forgeax 宿主 `/api/game-host` 同格式（单写者不分叉），经 `blueprint-store-fs`：
+ *   游戏仓根 `.forgeax/games/<slug>/blueprint.json`（+ project.json）。
+ * 版本 = 游戏仓 git annotated tag（由 game-host 打）。
  *
  * 沙箱契约：handlers 只用 ctx.env 取配置、ctx.cwd 定位工程根；绝不读 process.env。
  */
@@ -69,11 +69,14 @@ function pickSlug(args: { gameSlug?: string }, ctx: ToolCtx): string | null {
   return resolveActiveGameSlug(ctx)
 }
 
-/** GameGraph 落盘目录：仅 `.forgeax/games/<slug>/game-video/`；缺工程根或 slug 则 null。 */
+/**
+ * GameGraph 落盘目录 = 游戏仓根 `.forgeax/games/<slug>/`（写 blueprint.json / project.json，
+ * 与 forgeax 宿主 `/api/game-host` 同格式）；缺工程根或 slug 则 null。
+ */
 function graphDir(ctx: ToolCtx, slug: string | null): string | null {
   const root = findProjectRoot(ctx)
   if (!slug || !root) return null
-  return resolve(root, '.forgeax', 'games', slug, 'game-video')
+  return resolve(root, '.forgeax', 'games', slug)
 }
 
 /** 解析素材层编排上下文（assetsDir 绝对路径 + 网关 env）。无工程根/slug 则 null。 */

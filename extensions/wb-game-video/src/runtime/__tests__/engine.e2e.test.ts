@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../engine/engine'
-import { registerCoreSkins } from '../skins/components'
+import { registerCoreSkins } from '../component-host/components'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 import { validateScenario } from '../validate/validate'
 import type { RenderOverlayDirective } from '../engine/directives'

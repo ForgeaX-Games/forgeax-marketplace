@@ -1,19 +1,22 @@
 /**
  * grid2node — 由 2D grid 构造一个携带体素的独立场景节点，返回单节点 scene。
  *
- * 不接受 scene 输入；输出树形如 emptyTree → upsertCells("/<name>", { schema, cells })，focus 指向 /<name>。
- * 多个 grid2node 输出再经 add_child 挂到父节点下，即可构成完整 scene 树；该节点本身既可当父也可当子。
+ * 不接受 scene 输入；输出 emptyScene() 的根下挂一个 名为 <name> 的子节点，
+ * focus 指向该子节点。多个 grid2node 输出再经 add_child 挂到父节点下，即可
+ * 构成完整 scene 树；该节点本身既可当父也可当子。
  *
  * autoIterate 下，name / grid 的列表会被分别迭代，每轮产出一个独立 ScenePortValue；
  * scene 输出无同名 scene 输入，dispatcher 把每轮 scene 收成 list（rank 1）——可直接喂 add_child.nodes。
  */
 
 import {
-  emptyTree,
+  ROOT_ID,
+  addChildren,
+  emptyScene,
   makeScenePort,
-  upsertCells,
+  volumeFromCells,
+  type Cell,
   type ScenePortValue,
-  type VoxelCell,
 } from '../../../../vendor/dist/shared/types/index.js';
 
 interface Grid2NodeResult {
@@ -60,7 +63,7 @@ export function grid2Node(input: Record<string, unknown>): Grid2NodeResult {
     return { voxelCount: 0, error: 'zRange must contain at least one finite number' };
   }
 
-  const cells: VoxelCell[] = [];
+  const cells: Cell[] = [];
   for (let y = 0; y < grid.length; y++) {
     const row = grid[y];
     if (!Array.isArray(row)) continue;
@@ -78,15 +81,12 @@ export function grid2Node(input: Record<string, unknown>): Grid2NodeResult {
   const height = grid.length;
   const width = Array.isArray(grid[0]) ? (grid[0] as unknown[]).length : 0;
 
-  const path = `/${rawName}`;
-  let nextTree;
-  try {
-    nextTree = upsertCells(emptyTree(), path, { schema, cells, bounds: { width, height } }, 1);
-  } catch (err) {
-    return { voxelCount: 0, error: err instanceof Error ? err.message : String(err) };
-  }
+  const { graph, ids } = addChildren(emptyScene().graph, ROOT_ID, [
+    { name: rawName, schema, bounds: { width, height }, content: volumeFromCells(cells) },
+  ]);
+
   return {
-    scene: makeScenePort(nextTree, path),
+    scene: makeScenePort(graph, ids[0]!),
     voxelCount: cells.length,
   };
 }

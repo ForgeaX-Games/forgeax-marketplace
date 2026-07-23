@@ -8,7 +8,7 @@
 // keep their object identity, only added/changed/removed ones update.
 
 import { describe, expect, it } from 'vitest'
-import type { Node, Edge } from 'reactflow'
+import type { Node, Edge } from '../xyflow.js'
 
 import {
   reconcileCanvasNodes,

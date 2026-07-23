@@ -145,7 +145,7 @@ export class SkinRegistry {
   }
 
   /**
-   * @deprecated 默认渲染器已迁到 `skins/components/*`，由 `createCoreSkinRegistry` /
+   * @deprecated 默认渲染器已迁到 `component-host/components/*`，由 `createCoreSkinRegistry` /
    * `registerCoreSkins` 安装。保留为空操作以免旧调用方炸。
    */
   registerCoreRenderers(): void {}

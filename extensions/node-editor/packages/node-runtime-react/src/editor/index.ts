@@ -34,6 +34,8 @@ export type {
 // Canvas: the ReactFlow shell, BatteryNode, RelayNode, ProbeEdge and the
 // node/edge type registry.
 export * from './components/canvas/index.js'
+// React Flow v12 type shims (v11-style NodeProps<Data> + loose Node.data).
+export type { Node, Edge, NodeProps } from './xyflow.js'
 // Sidebar: battery catalog + inspector + dev-note modal + left sidebar.
 export { BatteryBar, PropertiesPanel, DevNoteModal, LeftSidebar } from './components/sidebar/index.js'
 // Shared primitives: the bottom StatusBar + CustomSelect portal dropdown.

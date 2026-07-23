@@ -13,10 +13,10 @@
 // drawMode 切换 → cacheKey 变 → useLayerSurface rebuild;主 canvas 也重画
 // 单层数据更新 → 仅那一层 build,其他层 surface 不变,主 canvas 重画
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useBakedLayer, useBakedLayerKeys, useGridLayer, useGridLayerKeys, useVoxelLayer, useVoxelLayerKeys } from '../../framework/useLayer'
 import { useLayerSurface } from '../../framework/useLayerSurface'
-import { useViewport2D } from '../../framework/useViewport'
+import type { Viewport2D } from '../../framework/useViewport'
 import { useRenderStore } from '../../store'
 import { gridLayerCellSource, voxelLayerCellSource, type CellSource } from '../../framework/cellSource'
 import type { DrawMode } from '../../types'
@@ -55,7 +55,13 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
   const drawMode = useRenderStore(s => s.drawMode)
   const aliasMetas = useRenderStore(s => s.aliasMetas)
   const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
-  const viewport = useViewport2D()
+  // Viewport (pan/zoom) is intentionally NOT React-subscribed — same fix as
+  // mode-topBillboard (see its index.tsx for the full rationale): subscribing
+  // re-renders this whole plugin (+ every VoxelLayerInstance/GridLayerInstance
+  // child) on every wheel tick, when all that's actually needed is re-blitting
+  // the already-built surfaces at a new transform. Tracked in a ref, driven
+  // imperatively from a store subscription instead.
+  const viewportRef = useRef<Viewport2D>(useRenderStore.getState().viewport2d)
 
   // 子组件写入的 surface 表,plugin 在 compose effect 里读取。
   // 用 ref + 计数 trigger 模式:子组件 surface 变化时调 onSurfaceUpdate,
@@ -145,6 +151,7 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
   }, [sortedSurfaces])
 
   // ── compose effect ──────────────────────────────────────────
+  // viewport read from the ref (NOT the deps array) — see viewportRef above.
   const compose = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -154,13 +161,51 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
       maxRows,
       maxCols,
       cellSize: BASE_CELL_SIZE,
-      offsetX: viewport.offsetX,
-      offsetY: viewport.offsetY,
-      scale: viewport.scale,
+      offsetX: viewportRef.current.offsetX,
+      offsetY: viewportRef.current.offsetY,
+      scale: viewportRef.current.scale,
     })
-  }, [sortedSurfaces, maxRows, maxCols, viewport])
+  }, [sortedSurfaces, maxRows, maxCols])
 
   useEffect(() => { compose() }, [compose])
+
+  // Pan/zoom: imperative re-blit, no React re-render. A wheel gesture bumps
+  // viewport2d on every tick; subscribing via useViewport2D() would re-render
+  // this plugin + every VoxelLayerInstance/GridLayerInstance child on each
+  // tick just to re-run the same drawImage. Instead we subscribe to the store
+  // directly, update the ref synchronously (so hit-testing is never stale),
+  // and coalesce the actual redraw to one per animation frame.
+  const composeRef = useRef(compose)
+  composeRef.current = compose
+
+  const viewportRafRef = useRef<number | null>(null)
+  const scheduleViewportRedraw = useCallback(() => {
+    if (viewportRafRef.current !== null) return
+    const raf = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number
+    viewportRafRef.current = raf(() => {
+      viewportRafRef.current = null
+      composeRef.current()
+    })
+  }, [])
+
+  useEffect(() => {
+    let prev = useRenderStore.getState().viewport2d
+    const unsub = useRenderStore.subscribe((state) => {
+      if (state.viewport2d === prev) return
+      prev = state.viewport2d
+      viewportRef.current = prev
+      scheduleViewportRedraw()
+    })
+    return () => {
+      unsub()
+      if (viewportRafRef.current !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(viewportRafRef.current)
+        viewportRafRef.current = null
+      }
+    }
+  }, [scheduleViewportRedraw])
 
   // 容器 resize 时重画(jsdom 等环境可能无 ResizeObserver,缺失则跳过)
   useEffect(() => {
@@ -174,13 +219,14 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
     return () => ro.disconnect()
   }, [compose])
 
-  // §7.2 / §7.3 反向接口需要拿到最新的视口 + master grid 尺寸,
-  // 但 useImperativeHandle 的 deps 列表敏感会频繁重建 handle。改用
-  // stateRef pattern:每次渲染把最新值写 ref,handle 闭包同步读 ref。
+  // §7.2 / §7.3 反向接口需要拿到最新的 master grid 尺寸,但 useImperativeHandle
+  // 的 deps 列表敏感会频繁重建 handle。改用 stateRef pattern:每次渲染把最新值
+  // 写 ref,handle 闭包同步读 ref。viewport 单独从 viewportRef 读(rAF 节流路径
+  // 同步写入,不依赖 React 渲染),避免 pan/zoom 期间这里读到过期值。
   const stateRef = useRef({
-    viewport, maxRows, maxCols, cellSize: BASE_CELL_SIZE,
+    maxRows, maxCols, cellSize: BASE_CELL_SIZE,
   })
-  stateRef.current = { viewport, maxRows, maxCols, cellSize: BASE_CELL_SIZE }
+  stateRef.current = { maxRows, maxCols, cellSize: BASE_CELL_SIZE }
 
   useImperativeHandle(ref, () => ({
     getFrameCanvas: () => canvasRef.current,
@@ -188,7 +234,8 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
     screenToCell: (cssX, cssY) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const viewport = viewportRef.current
+      const { maxRows, maxCols, cellSize } = stateRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -207,7 +254,8 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
     cellToScreen: (col, row) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const viewport = viewportRef.current
+      const { maxRows, maxCols, cellSize } = stateRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -400,10 +448,18 @@ function useRefForceUpdate(): [number, () => void] {
 
 // ── 自注册 ────────────────────────────────────────────────────────────
 
+// memo: RenderCanvas (host) re-renders on every wheel tick (it subscribes to
+// viewport2d.scale for the on-screen zoom% readout). Without memo, React would
+// re-render this WHOLE plugin subtree (and every VoxelLayerInstance/
+// GridLayerInstance child) on every tick regardless of this component's own
+// viewport handling above — memo bails out early since its props never change
+// (it takes none), so the cascade stops here instead of at the leaf.
+const MemoizedModeTopPlugin = memo(ModeTopPlugin)
+
 registerRenderPlugin({
   name: 'top',
   modes: ['top'],
-  Component: ModeTopPlugin,
+  Component: MemoizedModeTopPlugin,
 })
 
-export default ModeTopPlugin
+export default MemoizedModeTopPlugin

@@ -1,4 +1,4 @@
-import type { Viewport } from 'reactflow'
+import type { Viewport } from '@xyflow/react'
 
 let lastMoveSent = 0
 const MOVE_THROTTLE_MS = 80

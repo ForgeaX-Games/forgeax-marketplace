@@ -3,7 +3,8 @@
 // per-port rename + drag reorder + hide, and entering the inner group view.
 // Ported from the legacy editor (components/canvas/GroupNode.tsx).
 import { memo, useState, useCallback, useRef, useEffect } from 'react'
-import { Handle, Position, type NodeProps, useUpdateNodeInternals } from 'reactflow'
+import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { getPortTypeColor, normalizeType, type DomainPortTypes } from '../../utils/portTypes.js'
 import { usePipelineStore, useHistoryStore, useUIStore } from '../../stores/index.js'
 import type { Battery, NodeGroup, ExposedPort } from '../../types.js'

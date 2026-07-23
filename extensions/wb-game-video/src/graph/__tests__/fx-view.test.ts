@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { toFXView } from '../canvas/fx-view'
 import { NODIA_DEMO } from '../../editor/demo/demo'
-import { registerCoreSkins } from '../../runtime/skins/components'
+import { registerCoreSkins } from '../../runtime/component-host/components'
 
 beforeAll(() => {
     registerCoreSkins()

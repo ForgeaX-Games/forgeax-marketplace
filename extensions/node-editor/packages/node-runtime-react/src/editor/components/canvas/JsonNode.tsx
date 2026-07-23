@@ -2,7 +2,8 @@
 // does not expand the node) + a right-side string output port. Ported from the
 // legacy editor (components/canvas/JsonNode.tsx).
 import { memo, useCallback } from 'react'
-import { Handle, Position, type NodeProps, NodeResizer } from 'reactflow'
+import { Handle, Position, NodeResizer } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'
 import { compactGridArrays } from '../../utils/gridFormat.js'

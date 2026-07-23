@@ -12,9 +12,6 @@
 
 const F2 = 0.5 * (Math.sqrt(3) - 1);
 const G2 = (3 - Math.sqrt(3)) / 6;
-const perm = new Uint8Array(512);
-let noiseReady = false;
-let lastSeed = -1;
 
 function mulberry32(seed: number): () => number {
   return function () {
@@ -26,8 +23,14 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function initNoise(seed: number): void {
-  if (noiseReady && lastSeed === seed) return;
+/**
+ * 每次调用按 seed 派生一份全新的置换表，不复用/不缓存跨调用状态——
+ * 之前版本用模块级 perm/noiseReady/lastSeed 缓存，同进程内并发跑不同 seed
+ * 的两次调用会相互踩踏彼此的置换表（数据竞争），违反节点独立性假设。
+ * 代价是同 seed 重复调用会重算 256 项洗牌，量级上可忽略。
+ */
+function buildPermTable(seed: number): Uint8Array {
+  const perm = new Uint8Array(512);
   const p = new Uint8Array(256);
   const rng = mulberry32(seed);
   for (let i = 0; i < 256; i++) p[i] = i;
@@ -36,8 +39,7 @@ function initNoise(seed: number): void {
     [p[i], p[j]] = [p[j], p[i]];
   }
   for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
-  noiseReady = true;
-  lastSeed = seed;
+  return perm;
 }
 
 function grad2(index: number): [number, number] {
@@ -45,7 +47,7 @@ function grad2(index: number): [number, number] {
   return g[index % 8] as [number, number];
 }
 
-function noise2D(x: number, y: number): number {
+function noise2D(perm: Uint8Array, x: number, y: number): number {
   const s = (x + y) * F2;
   const i = Math.floor(x + s);
   const j = Math.floor(y + s);
@@ -67,15 +69,15 @@ function noise2D(x: number, y: number): number {
 }
 
 /** Voronoi：返回到最近特征点的距离 [0,1]，scale 控制特征点密度 */
-function voronoi(x: number, y: number, scale: number): number {
+function voronoi(perm: Uint8Array, x: number, y: number, scale: number): number {
   const sx = x * scale, sy = y * scale;
   const ix = Math.floor(sx), iy = Math.floor(sy);
   let minDist = 999;
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
       const cx = ix + dx, cy = iy + dy;
-      const px = cx + (noise2D(cx * 12.9898, cy * 78.233) + 1) * 0.5;
-      const py = cy + (noise2D(cx * 93.9898, cy * 67.345) + 1) * 0.5;
+      const px = cx + (noise2D(perm, cx * 12.9898, cy * 78.233) + 1) * 0.5;
+      const py = cy + (noise2D(perm, cx * 93.9898, cy * 67.345) + 1) * 0.5;
       const dist = Math.sqrt((sx - px) ** 2 + (sy - py) ** 2);
       minDist = Math.min(minDist, dist);
     }
@@ -115,7 +117,7 @@ export function cosmosZoneMarker(input: Record<string, unknown>): Record<string,
   const ancientZoneSize   = typeof input.ancientZoneSize   === "number" ? input.ancientZoneSize   : 0.10;
 
   const seed = seedRaw === 0 ? Date.now() : seedRaw;
-  initNoise(seed);
+  const perm = buildPermTable(seed);
 
   const height = grid.length;
   const width = grid[0]?.length ?? 0;
@@ -132,9 +134,9 @@ export function cosmosZoneMarker(input: Record<string, unknown>): Record<string,
 
       // 三种区域各自用独立坐标偏移，保证特征点位置不重叠
       // zoneDensity 只改变 scale（特征点密度），不影响阈值
-      const structureNoise = voronoi(x * baseScale * zoneDensity,       y * baseScale * zoneDensity,       1);
-      const crystalNoise   = voronoi(x * baseScale * zoneDensity + 100, y * baseScale * zoneDensity,       1);
-      const ancientNoise   = voronoi(x * baseScale * zoneDensity + 200, y * baseScale * zoneDensity + 200, 1);
+      const structureNoise = voronoi(perm, x * baseScale * zoneDensity,       y * baseScale * zoneDensity,       1);
+      const crystalNoise   = voronoi(perm, x * baseScale * zoneDensity + 100, y * baseScale * zoneDensity,       1);
+      const ancientNoise   = voronoi(perm, x * baseScale * zoneDensity + 200, y * baseScale * zoneDensity + 200, 1);
 
       if (ancientNoise < ancientZoneSize) {
         ancientGrid[y][x] = 300;

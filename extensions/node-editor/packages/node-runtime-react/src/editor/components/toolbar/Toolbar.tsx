@@ -189,17 +189,23 @@ export interface ToolbarProps {
 }
 
 function Toolbar({ title = 'Node Editor', showRunControl = true, actions, onSave, onOpen, settingsActions, settingsStatusExtra, isFullscreen, onToggleFullscreen, domainPortTypes, showSettingsButton = true }: ToolbarProps) {
-  const { pipelineStatus, executePipeline, stopPipeline, clearCacheAndExecutePipeline } = usePipelineStore()
-  const {
-    probeMode,
-    toggleProbeMode,
-    langMode,
-    toggleLangMode,
-    showDevNoteCount,
-    toggleShowDevNoteCount,
-    batteryFilterMode,
-    setBatteryFilterMode,
-  } = useUIStore()
+  // Selected field-by-field — calling `usePipelineStore()`/`useUIStore()` with
+  // no selector subscribes to the WHOLE store, so this toolbar would re-render
+  // on every unrelated store update (e.g. every streamed nodeOutputs tick while
+  // a pipeline runs). See RendererSurface.tsx in wb-scene-generator for the
+  // same bug's write-up.
+  const pipelineStatus = usePipelineStore((s) => s.pipelineStatus)
+  const executePipeline = usePipelineStore((s) => s.executePipeline)
+  const stopPipeline = usePipelineStore((s) => s.stopPipeline)
+  const clearCacheAndExecutePipeline = usePipelineStore((s) => s.clearCacheAndExecutePipeline)
+  const probeMode = useUIStore((s) => s.probeMode)
+  const toggleProbeMode = useUIStore((s) => s.toggleProbeMode)
+  const langMode = useUIStore((s) => s.langMode)
+  const toggleLangMode = useUIStore((s) => s.toggleLangMode)
+  const showDevNoteCount = useUIStore((s) => s.showDevNoteCount)
+  const toggleShowDevNoteCount = useUIStore((s) => s.toggleShowDevNoteCount)
+  const batteryFilterMode = useUIStore((s) => s.batteryFilterMode)
+  const setBatteryFilterMode = useUIStore((s) => s.setBatteryFilterMode)
 
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
   const settingsMenuRef = useRef<HTMLDivElement>(null)

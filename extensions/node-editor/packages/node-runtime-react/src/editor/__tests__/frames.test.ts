@@ -1,7 +1,7 @@
 // Canvas frame geometry helpers — pure-function tests for the frame bounding-box
 // math ported from the legacy editor. No store / ReactFlow needed.
 import { describe, expect, it } from 'vitest'
-import type { Node } from 'reactflow'
+import type { Node } from '../xyflow.js'
 
 import {
   computeFrameGeometry,
@@ -9,8 +9,15 @@ import {
   getRfNodeSize,
 } from '../components/canvas/useCanvasFrames.js'
 
-function n(id: string, x: number, y: number, extra: Partial<Node> = {}): Node {
-  return { id, position: { x, y }, data: {}, ...extra } as Node
+function n(
+  id: string,
+  x: number,
+  y: number,
+  extra: Partial<Node> & { width?: number; height?: number } = {},
+): Node {
+  const { width, height, ...rest } = extra
+  const measured = width !== undefined || height !== undefined ? { width, height } : undefined
+  return { id, position: { x, y }, data: {}, ...(measured ? { measured } : {}), ...rest } as Node
 }
 
 describe('getRfNodeSize', () => {

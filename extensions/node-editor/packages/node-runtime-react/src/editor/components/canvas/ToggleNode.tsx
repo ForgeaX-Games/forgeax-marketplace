@@ -4,7 +4,8 @@
 // shows the downstream port name (single link = port name, multi = port name xN).
 // Ported from the legacy editor (components/canvas/ToggleNode.tsx).
 import { memo, useState, useCallback, useMemo } from 'react'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore, useHistoryStore } from '../../stores/index.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

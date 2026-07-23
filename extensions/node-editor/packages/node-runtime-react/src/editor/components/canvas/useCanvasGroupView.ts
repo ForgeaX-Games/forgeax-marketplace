@@ -7,7 +7,7 @@
 //   3. Track live inner edits via refs, flushing them back to the store on exit.
 //   4. Provide the breadcrumb navigation data.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Node, Edge, ReactFlowInstance } from 'reactflow'
+import type { Node, Edge, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, setGroupInnerSink } from '../../stores/index.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 import { DEFAULT_BATTERY_WIDTH, DEFAULT_GROUP_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth } from './canvasConstants.js'

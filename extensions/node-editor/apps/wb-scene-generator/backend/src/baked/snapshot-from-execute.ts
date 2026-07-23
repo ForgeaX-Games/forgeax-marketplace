@@ -10,12 +10,19 @@
  *
  * 这里换一个方向：在服务端内部直接跑一次「raw」执行(不经过 HTTP 往返、不进模型
  * 上下文)，复用渲染器/`scene_output` 电池同款的体素投影(`projectSceneToVoxelLayers`,
- * 见 vendor `scene/projection.ts`)把每个 scene 端口的 `{tree, focus}` 展平成
- * `VoxelLayer[]`，再拼成 `bakeLayersForProject` 要的 DFS 顺序 layer 列表——agent
- * 侧只需要调一个高层工具（见 tool-handlers.ts `scene:baked.bakeFromExecute`），
+ * 见 vendor `scene/projection.ts`)把每个 scene 端口的 `ScenePortValue{graph,focus}`
+ * 展平成 `VoxelLayer[]`，再拼成 `bakeLayersForProject` 要的 DFS 顺序 layer 列表——
+ * agent 侧只需要调一个高层工具（见 tool-handlers.ts `scene:baked.bakeFromExecute`），
  * 不需要也不可能自己搬运体素。
+ *
+ * v3 更新：scene 端口值的形状从 `{tree:SceneNodeSnapshot, focus:string}` 换成了
+ * `{graph:SceneGraph, focus:NodeId}`（见 vendor `scene/port.ts`）。这里不再手写
+ * duck-typing 识别 `.tree`/`.children` 数组，直接复用 vendor 自己的 `parseScenePort`
+ * ——它已经处理了"进程内 live SceneGraph 实例"与"跨边界 JSON 唤醒"两种输入形态，
+ * 不需要在这个消费端重新判断一遍。烘焙持久化格式（`store.ts`/`BakedCell`）本身
+ * 不变，只是这一层"execute 输出→bake layer input"的识别逻辑跟着新 execute 输出改。
  */
-import { projectSceneToVoxelLayers, type SceneNodeSnapshot } from '../../../vendor/dist/shared/types/scene/index.js'
+import { parseScenePort, projectSceneToVoxelLayers } from '../../../vendor/dist/shared/types/scene/index.js'
 import type { BakedCell } from './store.js'
 
 /** Mirrors execution-summary.ts's local ExecutionResult (kept minimal + local). */
@@ -37,10 +44,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
-function isSceneNodeSnapshot(v: unknown): v is SceneNodeSnapshot {
-  return isRecord(v) && typeof v.path === 'string' && Array.isArray(v.children)
-}
-
 /**
  * One scene port item → zero-or-more bake layers, in the item's own DFS order
  * (parent before child — `bakeLayersForProject` relies on that ordering to
@@ -49,21 +52,9 @@ function isSceneNodeSnapshot(v: unknown): v is SceneNodeSnapshot {
  * execution-summary.ts's "unexpected shape → safe no-op" convention.
  */
 function layersFromSceneItem(item: unknown): BakeLayerInput[] {
-  let tree: SceneNodeSnapshot | undefined
-  let focus = '/'
-  if (isRecord(item) && isSceneNodeSnapshot(item.tree)) {
-    // Standard ScenePortValue wrapper: { tree: SceneNodeSnapshot, focus?: string }.
-    tree = item.tree
-    if (typeof item.focus === 'string' && item.focus.length > 0) focus = item.focus
-  } else if (isSceneNodeSnapshot(item)) {
-    // Bare snapshot (no wrapper) — treat itself as the focus root. readNode('/')
-    // returns the tree argument unchanged (splitPath('/') === []), regardless of
-    // what this node's own `.path` field says, so focus must stay '/' here.
-    tree = item
-    focus = '/'
-  }
-  if (!tree) return []
-  const { layers, names } = projectSceneToVoxelLayers(tree, focus)
+  const port = parseScenePort(item)
+  if (!port) return []
+  const { layers, names } = projectSceneToVoxelLayers(port.graph, port.focus)
   const nameById = new Map(names.map((n) => [n.id, n]))
   return layers.map((l) => {
     const meta = nameById.get(l.value)

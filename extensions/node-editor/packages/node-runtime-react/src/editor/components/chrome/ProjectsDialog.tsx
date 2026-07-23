@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../../stores/projectStore.js'
 import type { ProjectMeta } from '@forgeax/node-runtime'
 import { ProjectCard, NewProjectWizard, DeleteProjectDialog } from './projectViews.js'
+import { useProjectLocale } from './projectI18n.js'
 import './ProjectsDialog.css'
 
 type View = { kind: 'list' } | { kind: 'new' } | { kind: 'delete'; project: ProjectMeta }
@@ -17,6 +18,7 @@ export function ProjectsDialog({
   defaultProjectType = 'default',
   defaultProjectName = 'My project',
 }: ProjectsDialogProps): JSX.Element {
+  const locale = useProjectLocale()
   const projects = useProjectStore((s) => s.projects)
   const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
   const isSwitching = useProjectStore((s) => s.isSwitching)
@@ -50,6 +52,17 @@ export function ProjectsDialog({
     [viewingProjectId, switchProject, onClose],
   )
 
+  const handleRenameProject = useCallback(
+    (id: string, name: string) => {
+      void renameProject(id, name)
+    },
+    [renameProject],
+  )
+
+  const handleRequestDeleteProject = useCallback((project: ProjectMeta) => {
+    setView({ kind: 'delete', project })
+  }, [])
+
   const sorted = useMemo(() => [...projects].sort((a, b) => a.name.localeCompare(b.name)), [projects])
 
   return (
@@ -80,14 +93,15 @@ export function ProjectsDialog({
                 <ProjectCard
                   key={p.id}
                   project={p}
+                  locale={locale}
                   isActive={p.id === viewingProjectId}
                   isSwitching={isSwitching}
                   // Never let the workspace go empty: the sole remaining
                   // (active) project can't be deleted.
                   canDelete={sorted.length > 1}
-                  onActivate={() => void handleActivate(p.id)}
-                  onRename={(name) => void renameProject(p.id, name)}
-                  onRequestDelete={() => setView({ kind: 'delete', project: p })}
+                  onActivateProject={handleActivate}
+                  onRenameProject={handleRenameProject}
+                  onRequestDeleteProject={handleRequestDeleteProject}
                 />
               ))}
             </div>

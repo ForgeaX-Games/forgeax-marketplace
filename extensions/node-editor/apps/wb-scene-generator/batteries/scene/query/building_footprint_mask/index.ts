@@ -11,9 +11,12 @@
  */
 
 import {
+  childrenOf,
+  getNode,
+  iterCells,
   parseScenePort,
-  readNode,
-  type SceneNodeSnapshot,
+  type SceneGraph,
+  type SceneNode,
 } from '../../../../vendor/dist/shared/types/index.js';
 
 const DEFAULT_DOOR_NAMES = ['outer_door'];
@@ -23,7 +26,8 @@ function cellKey(x: number, y: number): string {
 }
 
 function collectFootprint(
-  node: SceneNodeSnapshot,
+  graph: SceneGraph,
+  node: SceneNode,
   doorNames: Set<string>,
   inDoorBranch: boolean,
   occupancy: Set<string>,
@@ -32,8 +36,8 @@ function collectFootprint(
 ): void {
   const doorBranch = inDoorBranch || doorNames.has(node.name);
 
-  if (node.cells) {
-    for (const c of node.cells) {
+  if (node.content) {
+    for (const c of iterCells(node.content)) {
       if (zFilter !== null && c.z !== zFilter) continue;
       const key = cellKey(c.x, c.y);
       if (doorBranch) doors.add(key);
@@ -41,8 +45,8 @@ function collectFootprint(
     }
   }
 
-  for (const child of node.children) {
-    collectFootprint(child, doorNames, doorBranch, occupancy, doors, zFilter);
+  for (const child of childrenOf(graph, node.id)) {
+    collectFootprint(graph, child, doorNames, doorBranch, occupancy, doors, zFilter);
   }
 }
 
@@ -95,7 +99,7 @@ export function buildingFootprintMask(input: Record<string, unknown>): Record<st
   const port = parseScenePort(input.scene);
   if (!port) return { ...EMPTY, error: 'scene is required and must be a ScenePortValue' };
 
-  const focusNode = readNode(port.tree, port.focus);
+  const focusNode = getNode(port.graph, port.focus);
   if (focusNode === null) return { ...EMPTY, error: `focus path does not exist: "${port.focus}"` };
 
   const zRaw = input.z;
@@ -110,7 +114,7 @@ export function buildingFootprintMask(input: Record<string, unknown>): Record<st
 
   const occupancy = new Set<string>();
   const doors = new Set<string>();
-  collectFootprint(focusNode, doorNames, false, occupancy, doors, zFilter);
+  collectFootprint(port.graph, focusNode, doorNames, false, occupancy, doors, zFilter);
 
   const allKeys = new Set<string>([...occupancy, ...doors]);
   const bbox = bboxFromKeys(allKeys);

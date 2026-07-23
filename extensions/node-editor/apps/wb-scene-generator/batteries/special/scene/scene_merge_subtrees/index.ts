@@ -2,47 +2,51 @@
  * scene_merge_subtrees — 把多个 scene（每个在不同 focus 下展开了子树）合并成一个 master scene。
  *
  * 输入：scenes (access:list) — 一组 ScenePortValue，每个的 focus 子树是该 branch 独立展开的结果
- * 输出：scene (access:item) — 把每个 scene 在自己 focus 路径下的子树深合并进 master，输出 focus 固定为根节点 "/"
+ * 输出：scene (access:item) — 把每个 scene 在自己 focus 位置下的子树深合并进 master，输出 focus 固定为根节点
  *
- * 算法（递归深合并 + 保序 graft，复刻 add_child 的 z-order 语义）：
- *   1) 取第一个 scene 的 tree 作为 master 基底（它至少含有合并点以上的共用结构）
- *   2) 维护一个全局单调递增的 version 计数器（从 master.version + 1 起）
- *   3) 依次处理每个 scene（含 focus="/"）：把 scene.focus 子树 **递归深合并** 进 master 的同名路径：
- *      - master 缺失该 focus 路径时，先落 focus 节点壳（不含 children，保留 schema/transform/...）。
- *      - 逐个子节点按 version 升序还原加入顺序：
- *          · master 对应路径不存在 → 整棵 graftAt（分配全局递增 version 保 z-order）。
- *          · master 对应路径已存在 → **不跳过**，递归下钻继续逐层深合并；
- *            若 source 节点携带 cells/schema/transform/attributes/bounds 而 master 同名节点缺失，
- *            则补全（不覆盖 master 已有内容，避免破坏先到者）。
- *   4) 输出 focus 固定为根节点 "/"
+ * v3 与旧 tree.ts 版本的关键差异（这是让本电池变简单、不是变复杂的那部分）：
+ * 旧模型按 path 寻址，两个 branch 就算共享同一段祖先，也得靠字符串路径比较才知道
+ * "这是同一个位置"。新模型 NodeId = hash(parentId, name) 是纯函数——只要两个 branch
+ * 由同一个 scene_focus_children fanout 产生（共享同一棵 base，只是 focus 不同），
+ * base 部分的每个节点在两个 branch 的 graph 里天然算出同一个 id。合并不再需要
+ * "先落 focus 节点壳、按路径逐层下钻"，直接按 id 做"master 有没有这个 id"的
+ * map-union 即可：
+ *   - master 没有这个 id → 这是某个 branch 新增的内容，整棵搬入（逐节点递归搬，
+ *     不是一次性整块拷贝——这样子树内部任何位置的"同名冲突"也会被同一套逻辑捕获，
+ *     不止是顶层）。搬入时 order 接着 master 里对应 parent 现有子节点的最大值往后
+ *     排（同 add_child 的理由：避免多个新增子节点的 order 撞车）。
+ *   - master 已经有这个 id → 只补 master 缺失的标量字段（content/schema/transform/
+ *     bounds/attributes 逐 key），绝不覆盖已有内容（"同名冲突保留先到者"），
+ *     再递归深合并其子节点（后代仍可能有新增）。
  *
- * 为什么逐子节点 graft 而非整棵 upsertSubtree：projection 按 node.version 升序决定 z-order，
- * upsertSubtree → recloneSubtree 把整棵子树打成同一个 version，兄弟节点 version 全相等 →
- * 排序失去区分度退回 children 字典序，z-order 被打乱。逐个子节点各自递增 version 才能保序。
+ * ensureAnchored 处理的是防御性边界情况：万一某个 branch 的 focus 本身在 master 里
+ * 还没出现（例如 base 之外的位置），沿 source 的 parent 链一路上溯补齐——对照旧
+ * tree.ts 路径寻址下 upsertSubtree 自动补中间段的效果。文档化的正常调用场景下
+ * （focus 都来自同一次 scene_focus_children fanout）这一步基本是 no-op。
  *
- * 为什么要递归深合并（这是修复点）：多个 branch 由 scene_focus_children fanout 而来，
- * 共享同一棵 base，各自只在自己的子树里加内容。收束时它们都带着对方的「旧版同名子节点」。
- * 若按「同名整棵子树保留先到者」去重，后到 branch 在该子树内的新增后代会被整棵丢弃
- * （例：两个 scene 都在 /building 下、一个改 rest 一个改 architecture_*，旧实现会丢掉第二个的修改）。
- * 递归下钻到叶子逐层合并，才能把各 branch 各自的后代修改都保留下来。
+ * 已知局限（继承自旧实现，非本次引入）：多个 branch 处理顺序 = scenes[] 数组顺序，
+ * 决定了"先到者"是谁；不依赖任何全局状态，只依赖调用方传入的数组顺序。
  *
- * 同名叶子冲突（两个 branch 都新建了同名最终节点）：保留先到者，跳过后到者（避免 graftAt 抛错）。
- *
- * 已知局限：按 child.version 升序还原"加入顺序"依赖 version 单调反映加入次序。若 merge 前
- * 改过老子节点属性导致其 version 反超（last-touched），还原顺序会失真。根治需内核提供
- * creationVersion —— 这是既有局限，非本电池引入。
+ * 对 scene_prune_to_focus 裁剪过的输入的处理：裁剪会把本地根的 parent 强改成
+ * null，这条信息真的丢了——ensureAnchored 沿 parent 链往上爬，爬到这样一个
+ * "parent:null 但不是 ROOT_ID"的节点时，唯一能用的只有 focusOrigin（裁剪前
+ * 记录的一串名字，不含任何祖先的 content/attributes/兄弟节点——那些是真的丢了，
+ * 也不该、不能凭空找回来）。用这串名字里除最后一段外的前缀去 ensurePath：
+ * master 里如果已经有同名节点（比如同一次 merge 里另一个没被裁剪的 branch 带来
+ * 的真实数据）就用那个真的；没有就地补一个同名空节点——"空节点占位，输入没给
+ * 的东西一律不脑补"，就是这么简单，不比 add_child/ensurePath 本身复杂。
  */
 
 import {
-  graftAt,
+  ROOT_ID,
+  ensurePath,
+  getNode,
   parseScenePort,
-  readNode,
-  setAttribute,
-  setTransform,
-  upsertCells,
-  upsertSubtree,
+  splitPath,
+  type NodeId,
+  type SceneGraph,
+  type SceneNode,
   type ScenePortValue,
-  type SceneNodeSnapshot,
 } from '../../../../vendor/dist/shared/types/index.js';
 
 interface Result {
@@ -51,97 +55,142 @@ interface Result {
   error?: string;
 }
 
-interface MergeCtx {
-  nextVersion: number;
-}
-
 const DBG = process.env.MERGE_SUBTREES_DEBUG === '1';
 const dbg = (...a: unknown[]) => { if (DBG) console.log('[merge_subtrees]', ...a); };
 
-/** 拼子路径："/" + name 或 parent + "/" + name。 */
-function childPath(parent: string, name: string): string {
-  return parent === '/' ? `/${name}` : `${parent}/${name}`;
+/** emptyGraph() 造的根节点等价物，只在 master 自己也没有真根时用一次（见下）。 */
+const BLANK_ROOT: SceneNode = { id: ROOT_ID, name: '', parent: null, children: new Map(), order: 0 };
+
+/** 把 master 缺失的祖先链条从 id 往上一路补齐到已存在的祖先（或它自己没有 parent）为止。 */
+function ensureAnchored(master: SceneGraph, source: SceneGraph, id: NodeId, focusOrigin: string | undefined): SceneGraph {
+  const src = source.get(id);
+  if (!src) throw new Error(`scene_merge_subtrees: node not found in its own graph: "${id}"`);
+
+  if (src.parent === null) {
+    if (id === ROOT_ID) return master.get(id) ? master : master.set(id, src);
+
+    // 被 scene_prune_to_focus 裁剪过的本地根：真正的 parent 已经不在 source 里了
+    // （不是不知道，是真丢了）。注意不能直接 `if (master.get(id)) return master`
+    // 短路——当 master 本身就是这张被裁剪过的图时（scenes[0] 就是 prunedA），
+    // master.get(id) 恒为真，但它带的 parent 仍然是错的 null，必须继续往下修。
+    // 只有当 master 里已经有一份"parent 不是 null"的真实版本（比如另一个没被
+    // 裁剪的 branch 带来的）时，才说明已经被修好了，可以跳过。
+    const existing = master.get(id);
+    if (existing && existing.parent !== null) return master;
+
+    // 没留 focusOrigin 就没法知道该接哪——维持旧行为，当成浮空根接进来
+    // （不猜测、不报错）。
+    const segs = focusOrigin ? splitPath(focusOrigin) : [];
+    if (segs.length === 0) return existing ? master : master.set(id, src);
+
+    const name = segs[segs.length - 1]!;
+    const g0 = master.get(ROOT_ID) ? master : master.set(ROOT_ID, BLANK_ROOT);
+    const { graph: g1, id: parentId } = ensurePath(g0, ROOT_ID, segs.slice(0, -1));
+    const parent = g1.get(parentId)!;
+    const g2 = parent.children.get(name) === id ? g1 : g1.set(parentId, { ...parent, children: new Map(parent.children).set(name, id) });
+    return g2.set(id, { ...(g2.get(id) ?? src), parent: parentId, name });
+  }
+
+  if (master.get(id)) return master;
+  let m = ensureAnchored(master, source, src.parent, focusOrigin);
+  const parent = m.get(src.parent)!;
+  if (!parent.children.has(src.name)) {
+    const nextChildren = new Map(parent.children);
+    nextChildren.set(src.name, id);
+    m = m.set(src.parent, { ...parent, children: nextChildren });
+  }
+  return m.get(id) ? m : m.set(id, src);
 }
 
-/**
- * 把 source 节点（已存在于 master 的 destPath 处）携带的标量属性补全进 master。
- * 仅在 master 同名节点 *缺失* 该属性时补，绝不覆盖 master 已有内容（保护先到者）。
- * 返回更新后的 master。
- */
-function fillScalarProps(
-  master: SceneNodeSnapshot,
-  destPath: string,
-  source: SceneNodeSnapshot,
-  ctx: MergeCtx,
-): SceneNodeSnapshot {
-  const existing = readNode(master, destPath);
-  if (existing === null) return master; // 调用方保证存在
-  let out = master;
-
-  // cells / schema：master 没 cells 但 source 有 → 补（upsertCells 会保留 children/transform/attributes）。
-  if ((!existing.cells || existing.cells.length === 0) && source.cells && source.cells.length > 0) {
-    out = upsertCells(
-      out,
-      destPath,
-      {
-        schema: source.schema ?? existing.schema ?? '',
-        cells: source.cells,
-        ...(source.bounds !== undefined ? { bounds: source.bounds } : {}),
-      },
-      ctx.nextVersion++,
-    );
-    dbg(`    fill cells@${destPath} (${source.cells.length})`);
+function fillScalarProps(existing: SceneNode, src: SceneNode): { node: SceneNode; changed: boolean } {
+  let merged = existing;
+  let changed = false;
+  if (merged.content === undefined && src.content !== undefined) {
+    merged = { ...merged, content: src.content };
+    changed = true;
   }
-
-  // transform：master 无 transform 而 source 有 → 补。
-  const afterCells = readNode(out, destPath)!;
-  if (afterCells.transform === undefined && source.transform !== undefined) {
-    out = setTransform(out, destPath, source.transform, ctx.nextVersion++);
+  if (merged.schema === undefined && src.schema !== undefined) {
+    merged = { ...merged, schema: src.schema };
+    changed = true;
   }
-
-  // attributes：逐 key 补 master 缺失的键。
-  if (source.attributes) {
-    for (const [k, val] of Object.entries(source.attributes)) {
-      const cur = readNode(out, destPath)!;
-      if (!cur.attributes || !Object.prototype.hasOwnProperty.call(cur.attributes, k)) {
-        out = setAttribute(out, destPath, k, val, ctx.nextVersion++);
+  if (merged.transform === undefined && src.transform !== undefined) {
+    merged = { ...merged, transform: src.transform };
+    changed = true;
+  }
+  if (merged.bounds === undefined && src.bounds !== undefined) {
+    merged = { ...merged, bounds: src.bounds };
+    changed = true;
+  }
+  if (src.attributes) {
+    const nextAttrs: Record<string, unknown> = { ...(merged.attributes ?? {}) };
+    let attrsChanged = false;
+    for (const [k, v] of Object.entries(src.attributes)) {
+      if (!Object.prototype.hasOwnProperty.call(nextAttrs, k)) {
+        nextAttrs[k] = v;
+        attrsChanged = true;
       }
     }
-  }
-
-  return out;
-}
-
-/**
- * 把 source 子树递归深合并进 master 的 destPath 处。destPath 必须已存在于 master。
- * 逐个 source 子节点（按 version 升序还原加入顺序）：
- *   - master 缺该子路径 → 整棵 graftAt（递增 version 保 z-order）
- *   - master 已有该子路径 → 先补全标量属性，再递归下钻深合并其 children
- */
-function deepMergeChildren(
-  master: SceneNodeSnapshot,
-  destPath: string,
-  source: SceneNodeSnapshot,
-  ctx: MergeCtx,
-  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——沿 `source` 树下探,撞到已下
-  // 探过的 source 节点引用直接跳过(不再递归/不再 graft),绝不因潜在结构环挂死。
-  visited: WeakSet<object> = new WeakSet(),
-): SceneNodeSnapshot {
-  if (visited.has(source)) return master;
-  visited.add(source);
-  let out = master;
-  const ordered = [...source.children].sort((a, b) => a.version - b.version);
-  for (const child of ordered) {
-    const childDest = childPath(destPath, child.name);
-    if (readNode(out, childDest) === null) {
-      out = graftAt(out, childDest, child, ctx.nextVersion++);
-      dbg(`    graft ${childDest}`);
-    } else {
-      out = fillScalarProps(out, childDest, child, ctx);
-      out = deepMergeChildren(out, childDest, child, ctx, visited);
+    if (attrsChanged) {
+      merged = { ...merged, attributes: Object.freeze(nextAttrs) };
+      changed = true;
     }
   }
-  return out;
+  return { node: merged, changed };
+}
+
+function nextOrderUnder(graph: SceneGraph, parentId: NodeId): number {
+  const parent = graph.get(parentId);
+  if (!parent) return 0;
+  let maxOrder = -1;
+  for (const cid of parent.children.values()) {
+    const c = graph.get(cid);
+    if (c && c.order > maxOrder) maxOrder = c.order;
+  }
+  return maxOrder + 1;
+}
+
+function mergeNode(
+  master: SceneGraph,
+  source: SceneGraph,
+  id: NodeId,
+  visited: WeakSet<object>,
+): SceneGraph {
+  const src = source.get(id);
+  if (!src || visited.has(src)) return master;
+  visited.add(src);
+
+  let m = master;
+  const existing = m.get(id);
+  if (!existing) {
+    const order = src.parent !== null && m.get(src.parent) ? nextOrderUnder(m, src.parent) : src.order;
+    m = m.set(id, { ...src, order, children: new Map() });
+    if (src.parent !== null) {
+      const parent = m.get(src.parent);
+      if (parent && !parent.children.has(src.name)) {
+        const nextChildren = new Map(parent.children);
+        nextChildren.set(src.name, id);
+        m = m.set(src.parent, { ...parent, children: nextChildren });
+      }
+    }
+    dbg(`  graft new node ${id} (${src.name})`);
+  } else {
+    const { node, changed } = fillScalarProps(existing, src);
+    if (changed) {
+      m = m.set(id, node);
+      dbg(`  fill scalar props @${id}`);
+    }
+  }
+
+  const childIds = [...src.children.values()].sort((a, b) => {
+    const na = source.get(a);
+    const nb = source.get(b);
+    if (!na || !nb) return 0;
+    return na.order - nb.order || (na.id < nb.id ? -1 : na.id > nb.id ? 1 : 0);
+  });
+  for (const childId of childIds) {
+    m = mergeNode(m, source, childId, visited);
+  }
+  return m;
 }
 
 export function sceneMergeSubtrees(input: Record<string, unknown>): Result {
@@ -156,32 +205,22 @@ export function sceneMergeSubtrees(input: Record<string, unknown>): Result {
     scenes.push(port);
   }
 
-  let master = scenes[0]!.tree;
+  let master = scenes[0]!.graph;
   let mergedCount = 0;
-  const ctx: MergeCtx = { nextVersion: master.version + 1 };
 
   dbg(`== invoke == scenes.length=${scenes.length}`);
 
   for (const scene of scenes) {
-    const focusNode: SceneNodeSnapshot | null = readNode(scene.tree, scene.focus);
+    const focusNode = getNode(scene.graph, scene.focus);
     if (focusNode === null) {
-      dbg(`  focus "${scene.focus}" missing in its own tree → skip`);
+      dbg(`  focus "${scene.focus}" missing in its own graph → skip`);
       continue;
     }
-
-    // focus 节点壳落位（仅首次）：保留 focus 自身属性但不带 children；
-    // focus="/" 时根恒存在，跳过落壳。
-    if (scene.focus !== '/' && readNode(master, scene.focus) === null) {
-      const focusShell: SceneNodeSnapshot = { ...focusNode, children: [] };
-      master = upsertSubtree(master, scene.focus, focusShell, ctx.nextVersion++);
-      dbg(`  focus shell placed at "${scene.focus}"`);
-    }
-
-    // 把 focus 子树递归深合并进 master（含 focus="/" 的根级合并）。
-    master = deepMergeChildren(master, scene.focus, focusNode, ctx);
+    master = ensureAnchored(master, scene.graph, scene.focus, scene.focusOrigin);
+    master = mergeNode(master, scene.graph, scene.focus, new WeakSet());
     mergedCount++;
   }
 
   dbg(`== result == mergedCount=${mergedCount}`);
-  return { scene: { tree: master, focus: '/' }, mergedCount };
+  return { scene: { graph: master, focus: ROOT_ID }, mergedCount };
 }

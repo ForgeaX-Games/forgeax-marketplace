@@ -16,8 +16,8 @@
     "@forgeax/node-runtime-react": "workspace:*",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "reactflow": "^11.11.0",
-    "zustand": "^4.5.0"
+    "zustand": "^4.5.0",
+    "@xyflow/react": "^12.11.2"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.0.0",

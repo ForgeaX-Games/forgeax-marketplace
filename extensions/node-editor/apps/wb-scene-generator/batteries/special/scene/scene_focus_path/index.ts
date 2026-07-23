@@ -8,8 +8,10 @@
  */
 
 import {
+  ROOT_ID,
+  makeScenePort,
   parseScenePort,
-  readNode,
+  resolvePath,
   type ScenePortValue,
 } from '../../../../vendor/dist/shared/types/index.js';
 
@@ -26,9 +28,12 @@ export function sceneFocusPath(input: Record<string, unknown>): Result {
   if (!path) return { error: 'path is required and must be a non-empty string' };
   if (!path.startsWith('/')) return { error: `path must start with "/": "${path}"` };
 
-  if (path !== '/' && readNode(port.tree, path) === null) {
+  // 绝对路径始终相对图的真实根解析（ROOT_ID），不是相对当前 focus——与旧
+  // tree.ts 版本一致：readNode(tree, path) 也是从 tree 的物理根出发解析。
+  const targetId = resolvePath(port.graph, ROOT_ID, path);
+  if (targetId === null) {
     return { error: `path does not exist in tree: "${path}"` };
   }
 
-  return { scene: { tree: port.tree, focus: path } };
+  return { scene: makeScenePort(port.graph, targetId) };
 }

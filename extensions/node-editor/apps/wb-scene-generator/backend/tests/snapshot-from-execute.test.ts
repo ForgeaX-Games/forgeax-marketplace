@@ -1,14 +1,42 @@
 import { describe, expect, it } from 'vitest'
 import { buildBakeLayersFromExecutionResult, collectTerminalPorts } from '../src/baked/snapshot-from-execute.js'
+import {
+  addChildren,
+  emptyGraph,
+  makeScenePort,
+  volumeFromCells,
+  ROOT_ID,
+  type Cell,
+  type SceneGraph,
+} from '../../vendor/dist/shared/types/index.js'
 
 // Mirrors execution-summary.test.ts's fixture shape: outputs[nodeId][port] =
-// DataTreeEntry[] whose items are ScenePortValue { tree: SceneNodeSnapshot, focus }.
-function cells(n: number, token = 'wall') {
+// DataTreeEntry[] whose items are ScenePortValue { graph: SceneGraph, focus: NodeId }.
+function cells(n: number, token = 'wall'): Cell[] {
   return Array.from({ length: n }, (_, i) => ({ x: i, y: 0, z: 0, token }))
+}
+
+/** Single top-level child under root, with N cells and optional attributes. */
+function oneChildGraph(name: string, n: number, attributes?: Record<string, unknown>): SceneGraph {
+  const { graph } = addChildren(emptyGraph(), ROOT_ID, [
+    { name, content: n > 0 ? volumeFromCells(cells(n)) : undefined, attributes },
+  ])
+  return graph
 }
 
 describe('buildBakeLayersFromExecutionResult', () => {
   it('projects a scene port item into DFS-ordered bake layers with asset metadata', () => {
+    let g = emptyGraph()
+    const houseAdd = addChildren(g, ROOT_ID, [
+      { name: 'House', content: volumeFromCells(cells(4, 'wall')), attributes: { asset_name: '橡木屋', asset_type: 'object' } },
+    ])
+    g = houseAdd.graph
+    const houseId = houseAdd.ids[0]!
+    const roofAdd = addChildren(g, houseId, [
+      { name: 'Roof', content: volumeFromCells(cells(2, 'roof')), attributes: { asset_name: '屋顶' } },
+    ])
+    g = roofAdd.graph
+
     const full = {
       executionId: 'exec_1',
       status: 'completed' as const,
@@ -18,36 +46,7 @@ describe('buildBakeLayersFromExecutionResult', () => {
           out_0: [
             {
               path: [0],
-              items: [
-                {
-                  focus: '/',
-                  tree: {
-                    name: '',
-                    path: '/',
-                    version: 3,
-                    cells: [],
-                    children: [
-                      {
-                        name: 'House',
-                        path: '/House',
-                        version: 3,
-                        cells: cells(4, 'wall'),
-                        attributes: { asset_name: '橡木屋', asset_type: 'object' },
-                        children: [
-                          {
-                            name: 'Roof',
-                            path: '/House/Roof',
-                            version: 4,
-                            cells: cells(2, 'roof'),
-                            attributes: { asset_name: '屋顶' },
-                            children: [],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                },
-              ],
+              items: [makeScenePort(g, ROOT_ID)],
             },
           ],
           // Non-scene port (plain string) must be skipped, never throw.
@@ -93,9 +92,9 @@ describe('buildBakeLayersFromExecutionResult', () => {
       status: 'completed' as const,
       durationMs: 1,
       outputs: {
-        step1: { scene: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 1, cells: [], children: [{ name: 'A', path: '/A', version: 1, cells: cells(1), children: [] }] } }] }] },
-        step2: { scene: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 1, cells: [], children: [{ name: 'B', path: '/B', version: 1, cells: cells(1), children: [] }] } }] }] },
-        dangling: { scene: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 1, cells: [], children: [{ name: 'C', path: '/C', version: 1, cells: cells(1), children: [] }] } }] }] },
+        step1: { scene: [{ path: [0], items: [makeScenePort(oneChildGraph('A', 1), ROOT_ID)] }] },
+        step2: { scene: [{ path: [0], items: [makeScenePort(oneChildGraph('B', 1), ROOT_ID)] }] },
+        dangling: { scene: [{ path: [0], items: [makeScenePort(oneChildGraph('C', 1), ROOT_ID)] }] },
       },
     }
     // step1.scene -> step2.scene (intermediate composition, must be excluded — this
@@ -129,7 +128,7 @@ describe('buildBakeLayersFromExecutionResult', () => {
       status: 'completed' as const,
       durationMs: 1,
       outputs: {
-        step1: { scene: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 1, cells: [], children: [{ name: 'A', path: '/A', version: 1, cells: cells(1), children: [] }] } }] }] },
+        step1: { scene: [{ path: [0], items: [makeScenePort(oneChildGraph('A', 1), ROOT_ID)] }] },
       },
     }
     const nodes = [{ id: 'step1', opId: 'grid2node' }]
@@ -140,7 +139,12 @@ describe('buildBakeLayersFromExecutionResult', () => {
     expect(layers.map((l) => l.nodePath)).toEqual(['/A'])
   })
 
-  it('supports a bare SceneNodeSnapshot item (no {tree,focus} wrapper), rooted at its own path', () => {
+  // v3 的 parseScenePort 只认 { graph, focus } 形态（见 vendor port.ts）——旧
+  // tree.ts 版本这里额外兜底"裸 SceneNodeSnapshot（无 {tree,focus} 包装）"，但
+  // 实际管线里 scene 产出电池永远通过 makeScenePort 输出包装值，这条兜底路径
+  // 从未在真实调用中触发过。v3 不再假装支持它——不是回归，是跟随 parseScenePort
+  // 的显式契约（同一份 parseScenePort 在其它所有消费端也是这个行为）。
+  it('ignores a bare (non-ScenePortValue) item instead of throwing', () => {
     const full = {
       executionId: 'exec_2',
       status: 'completed' as const,
@@ -151,7 +155,7 @@ describe('buildBakeLayersFromExecutionResult', () => {
             {
               path: [0],
               items: [
-                { name: 'Wall', path: '/Wall', version: 1, cells: cells(1, 'wall'), children: [] },
+                { name: 'Wall', path: '/Wall', cells: cells(1, 'wall') },
               ],
             },
           ],
@@ -159,7 +163,6 @@ describe('buildBakeLayersFromExecutionResult', () => {
       },
     }
     const layers = buildBakeLayersFromExecutionResult(full)
-    expect(layers).toHaveLength(1)
-    expect(layers[0]).toMatchObject({ nodePath: '/Wall', nodeName: 'Wall' })
+    expect(layers).toEqual([])
   })
 })

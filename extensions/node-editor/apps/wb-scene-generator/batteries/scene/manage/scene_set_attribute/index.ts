@@ -26,11 +26,11 @@ export function sceneSetAttribute(input: Record<string, unknown>): Result {
     return { error: 'key must be a non-empty string' };
   }
 
-  let nextTree;
+  let nextGraph;
   try {
-    nextTree = setAttribute(sin.tree, sin.focus, key, input.value, sin.tree.version + 1);
+    nextGraph = setAttribute(sin.graph, sin.focus, key, input.value);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-  return { scene: makeScenePort(nextTree, sin.focus) };
+  return { scene: makeScenePort(nextGraph, sin.focus) };
 }

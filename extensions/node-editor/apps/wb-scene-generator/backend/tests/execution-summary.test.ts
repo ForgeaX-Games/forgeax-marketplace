@@ -1,10 +1,41 @@
 import { describe, expect, it } from 'vitest'
 import { summarizeExecutionResult } from '../src/execution-summary.js'
+import {
+  emptyGraph,
+  ensurePath,
+  makeScenePort,
+  setContent,
+  volumeFromCells,
+  ROOT_ID,
+  type Cell,
+  type NodeId,
+  type ScenePortValue,
+  type SceneGraph,
+} from '../../vendor/dist/shared/types/index.js'
 
-// Build a fake scene tree with a heavy `cells` array so we can assert the summary
+// Build a fake scene graph with a heavy cell list so we can assert the summary
 // strips it down to a count instead of carrying the voxel payload.
-function bigCells(n: number): Array<{ x: number; y: number; z: number; token: string }> {
+function bigCells(n: number): Cell[] {
   return Array.from({ length: n }, (_, i) => ({ x: i, y: 0, z: 0, token: 'wall' }))
+}
+
+function putContent(graph: SceneGraph, rootId: NodeId, relPath: string, cells: readonly Cell[]): { graph: SceneGraph; id: NodeId } {
+  const segs = relPath.split('/').filter(Boolean)
+  const { graph: g1, id } = ensurePath(graph, rootId, segs)
+  return { graph: cells.length > 0 ? setContent(g1, id, volumeFromCells(cells)) : g1, id }
+}
+
+// Mirrors the old fixture's shape:
+//   '' (50 cells) -> block_ground (1600 cells) -> architecture_0 (200 cells), rest (0 cells)
+function makeSceneTreePort(): ScenePortValue {
+  let g = emptyGraph()
+  const root = putContent(g, ROOT_ID, '', bigCells(50))
+  g = root.graph
+  const blockGround = putContent(g, ROOT_ID, 'block_ground', bigCells(1600))
+  g = blockGround.graph
+  g = putContent(g, blockGround.id, 'architecture_0', bigCells(200)).graph
+  g = ensurePath(g, blockGround.id, ['rest']).graph
+  return makeScenePort(g, ROOT_ID)
 }
 
 const fullResult = {
@@ -13,33 +44,11 @@ const fullResult = {
   durationMs: 1234,
   outputs: {
     g_arch: {
-      // scene port: DataTreeEntry[] whose items are ScenePortValue { tree, focus }
+      // scene port: DataTreeEntry[] whose items are ScenePortValue { graph, focus }
       out_0: [
         {
           path: [0],
-          items: [
-            {
-              focus: '/',
-              tree: {
-                name: '',
-                path: '/',
-                version: 3,
-                cells: bigCells(50),
-                children: [
-                  {
-                    name: 'block_ground',
-                    path: '/block_ground',
-                    version: 3,
-                    cells: bigCells(1600),
-                    children: [
-                      { name: 'architecture_0', path: '/block_ground/architecture_0', version: 3, cells: bigCells(200), children: [] },
-                      { name: 'rest', path: '/block_ground/rest', version: 3, children: [] },
-                    ],
-                  },
-                ],
-              },
-            },
-          ],
+          items: [makeSceneTreePort()],
         },
       ],
       // string port: small scalar should pass through
@@ -126,7 +135,7 @@ describe('summarizeExecutionResult', () => {
       durationMs: 10,
       outputs: {
         g: {
-          out_0: [{ path: [0], items: [{ focus: '/', tree: { name: '', path: '/', version: 3, cells: [], children: [] } }] }],
+          out_0: [{ path: [0], items: [makeScenePort(emptyGraph(), ROOT_ID)] }],
         },
       },
     }
@@ -153,7 +162,7 @@ describe('summarizeExecutionResult', () => {
     })
 
     it('passes when every narrative location name is found (possibly as a prefix/suffix) among scene node names', () => {
-      // fullResult's scene tree has names: '', 'block_ground', 'architecture_0', 'rest'.
+      // fullResult's scene graph has names: '', 'block_ground', 'architecture_0', 'rest'.
       const summary = summarizeExecutionResult(fullResult, ['block_ground', 'architecture_0']) as Record<string, any>
       expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
       expect(summary.verification.hints).toBeUndefined()
@@ -189,6 +198,8 @@ describe('summarizeExecutionResult', () => {
     })
 
     it('fuzzy match tolerates a scene node name that embeds the narrative name as a substring', () => {
+      let g = emptyGraph()
+      g = putContent(g, ROOT_ID, '望江客栈_主楼', [{ x: 0, y: 0, z: 0, token: 'wall' }]).graph
       const withSuffix = {
         executionId: 'exec_fuzzy',
         status: 'completed' as const,
@@ -198,20 +209,7 @@ describe('summarizeExecutionResult', () => {
             out_0: [
               {
                 path: [0],
-                items: [
-                  {
-                    focus: '/',
-                    tree: {
-                      name: '',
-                      path: '/',
-                      version: 3,
-                      cells: [],
-                      children: [
-                        { name: '望江客栈_主楼', path: '/望江客栈_主楼', version: 3, cells: [{ x: 0, y: 0, z: 0 }], children: [] },
-                      ],
-                    },
-                  },
-                ],
+                items: [makeScenePort(g, ROOT_ID)],
               },
             ],
           },

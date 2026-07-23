@@ -1,4 +1,4 @@
-import type { NodeTypes } from 'reactflow'
+import type { NodeTypes } from '@xyflow/react'
 import { BatteryNode } from '@forgeax/node-runtime-react/editor'
 import KeypointGraphNode from '../workbench/KeypointGraphNode.js'
 import MaskStructureNode from '../workbench/MaskStructureNode.js'

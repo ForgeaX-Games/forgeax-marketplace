@@ -55,9 +55,13 @@ class LCG {
 // Perlin noise (identical logic to Go source)
 // ─────────────────────────────────────────────────────────────
 
-const perm = new Array<number>(512);
-
-function initPermutation(seed: number): void {
+/**
+ * Build a fresh 512-entry permutation table from `seed`. Returned (not
+ * mutated into module state) so `perlin2D` stays a pure function of its
+ * arguments — no top-level mutable table shared across unrelated calls to
+ * `riverLakeGen` (see the cosmos_zone_marker purity fix this mirrors).
+ */
+function buildPermutation(seed: number): number[] {
   const base = Array.from({ length: 256 }, (_, i) => i);
   let r = BigInt(seed === 0 ? 12345 : seed);
   for (let i = 255; i > 0; i--) {
@@ -65,10 +69,12 @@ function initPermutation(seed: number): void {
     const j = Number(r % BigInt(i + 1));
     [base[i], base[j]] = [base[j], base[i]];
   }
+  const perm = new Array<number>(512);
   for (let i = 0; i < 256; i++) {
     perm[i] = base[i];
     perm[i + 256] = base[i];
   }
+  return perm;
 }
 
 function fade(t: number): number {
@@ -88,7 +94,7 @@ function grad(hash: number, x: number, y: number): number {
   return u + v;
 }
 
-function perlin2D(x: number, y: number): number {
+function perlin2D(perm: readonly number[], x: number, y: number): number {
   const xi = Math.floor(x) & 255;
   const yi = Math.floor(y) & 255;
   const xf = x - Math.floor(x);
@@ -202,7 +208,7 @@ function generateMeanderingPath(
 }
 
 function generateBranchingPath(
-  rng: LCG, startX: number, startY: number, endX: number, endY: number,
+  perm: readonly number[], rng: LCG, startX: number, startY: number, endX: number, endY: number,
   width: number, height: number
 ): Point[] {
   const path: Point[] = [{ x: startX, y: startY }];
@@ -219,8 +225,8 @@ function generateBranchingPath(
 
     const ndx = dx / dist;
     const ndy = dy / dist;
-    const noise = perlin2D(x / 30 + noiseOffset, y / 30 + noiseOffset);
-    const noiseY = perlin2D(x / 30 + noiseOffset + 100, y / 30 + noiseOffset + 100);
+    const noise = perlin2D(perm, x / 30 + noiseOffset, y / 30 + noiseOffset);
+    const noiseY = perlin2D(perm, x / 30 + noiseOffset + 100, y / 30 + noiseOffset + 100);
 
     x = clamp(x + (ndx + noise * 0.6) * 1.5, 0, width - 1);
     y = clamp(y + (ndy + noiseY * 0.6) * 1.5, 0, height - 1);
@@ -336,7 +342,7 @@ function drawBranches(
 }
 
 function generateLake(
-  rng: LCG, minWidth: number, maxWidth: number,
+  perm: readonly number[], rng: LCG, minWidth: number, maxWidth: number,
   waterGrid: number[][], waterMask: boolean[][], ids: WaterIDs,
   width: number, height: number
 ): void {
@@ -366,6 +372,7 @@ function generateLake(
       const dist = Math.sqrt(distX * distX + distY * distY);
       const angle = Math.atan2(dy, dx);
       const noise = perlin2D(
+        perm,
         nx / 10 + noiseOffset + Math.cos(angle),
         ny / 10 + noiseOffset + Math.sin(angle)
       );
@@ -380,7 +387,7 @@ function generateLake(
 }
 
 function applyDepthZones(
-  rng: LCG, waterGrid: number[][], waterMask: boolean[][], ids: WaterIDs,
+  perm: readonly number[], rng: LCG, waterGrid: number[][], waterMask: boolean[][], ids: WaterIDs,
   width: number, height: number
 ): void {
   // Initialize distance map
@@ -436,7 +443,7 @@ function applyDepthZones(
     for (let x = 0; x < width; x++) {
       if (!waterMask[y][x]) continue;
       const dist = distMap[y][x];
-      const noise = perlin2D(x / 8 + noiseOffset, y / 8 + noiseOffset) * 0.8;
+      const noise = perlin2D(perm, x / 8 + noiseOffset, y / 8 + noiseOffset) * 0.8;
       const adjusted = dist + noise;
 
       if (adjusted < 0.5) waterGrid[y][x] = ids.shore;
@@ -564,7 +571,7 @@ export function riverLakeGen(input: Record<string, unknown>): Record<string, unk
   const width = grid[0].length;
 
   const rng = new LCG(seed);
-  initPermutation(seed);
+  const perm = buildPermutation(seed);
 
   // Copy input grid
   const waterGrid: number[][] = grid.map((row) => [...row]);
@@ -603,7 +610,7 @@ export function riverLakeGen(input: Record<string, unknown>): Record<string, unk
         path = generateMeanderingPath(rng, sx, sy, ex, ey, width, height);
         break;
       case "branching":
-        path = generateBranchingPath(rng, sx, sy, ex, ey, width, height);
+        path = generateBranchingPath(perm, rng, sx, sy, ex, ey, width, height);
         drawBranches(rng, path, minWidth, maxWidth, waterGrid, waterMask, ids, width, height);
         break;
       case "random":
@@ -617,11 +624,11 @@ export function riverLakeGen(input: Record<string, unknown>): Record<string, unk
 
   // Generate lakes
   for (let i = 0; i < lakeCount; i++) {
-    generateLake(rng, minWidth, maxWidth, waterGrid, waterMask, ids, width, height);
+    generateLake(perm, rng, minWidth, maxWidth, waterGrid, waterMask, ids, width, height);
   }
 
   // Apply depth zones
-  applyDepthZones(rng, waterGrid, waterMask, ids, width, height);
+  applyDepthZones(perm, rng, waterGrid, waterMask, ids, width, height);
 
   // Place water items
   if (waterItems.length > 0) {

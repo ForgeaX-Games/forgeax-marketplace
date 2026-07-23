@@ -1,59 +1,56 @@
 /**
- * 蓝图库 node 侧序列化（Vite + tool-handlers 共用）。
- * 单文件 SSOT = `scenarios.graph.json`（原 scenario 形状 + `manifest`，含 main 与全部子蓝图）。
- * 不再读写 `blueprints/` 文件夹。
+ * 蓝图库 node 侧序列化（AI tool-handlers 用）。
+ *
+ * 新布局（对齐 game-host / game-package SPEC，2026-07-22）：
+ *   游戏仓根 `.forgeax/games/<slug>/`
+ *     ├── blueprint.json   —— 玩法 SSOT（裸 GraphLibraryDocument）
+ *     └── project.json     —— 项目元信息
+ *
+ * 与 forgeax 宿主 `/api/game-host` 写盘**同格式**（AI 与 UI 单写者不分叉）：
+ *   UI 走 HTTP PUT package；AI（gvid:*）经本模块直写同样的 blueprint.json / project.json。
+ * 版本 = 游戏仓 git annotated tag（由 game-host 打），不再有 `scenarios.graph.versions/`。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 import { normalizeDocument } from './blueprint-project'
 
+/** 保留类型以兼容既有 import；版本走 git tag，本模块不再产 keep-10 条目。 */
 export interface VersionEntry { id: string; savedAt: number }
-const VERSION_LIMIT = 10
-const SAFE_ID_RE = /^[A-Za-z0-9._-]+$/
-const CANON_ITEM_ID = 'nodia-graph'
 
-function assertSafeId(id: string, kind: string): void {
-  if (!SAFE_ID_RE.test(id)) {
-    throw new Error(`[blueprint-store-fs] illegal ${kind} id（仅允许 [A-Za-z0-9._-]，拒绝路径穿越）：${JSON.stringify(id)}`)
-  }
-}
-
-function tryReadJson<T>(p: string): { value: T | null; existed: boolean; parseError: boolean } {
-  if (!existsSync(p)) return { value: null, existed: false, parseError: false }
-  try {
-    return { value: JSON.parse(readFileSync(p, 'utf-8')) as T, existed: true, parseError: false }
-  } catch {
-    return { value: null, existed: true, parseError: true }
-  }
-}
+const BLUEPRINT_FILE = 'blueprint.json'
+const PROJECT_FILE = 'project.json'
 
 function readJson<T>(p: string): T | null {
-  return tryReadJson<T>(p).value
-}
-
-type CanonFile = {
-  version: number
-  activeId: string
-  items: { id: string; title: string; scenario: GraphLibraryDocument }[]
-}
-
-/** 读权威文档：scenarios.graph.json 的 items[0].scenario（含 manifest）。 */
-export function readDocument(dir: string): { document: GraphLibraryDocument | null; versions: VersionEntry[] } {
-  const versions = readJson<VersionEntry[]>(resolve(dir, 'scenarios.graph.versions', 'index.json')) ?? []
-  const canonPath = resolve(dir, 'scenarios.graph.json')
-  const canonRead = tryReadJson<CanonFile>(canonPath)
-  if (canonRead.parseError) {
-    console.warn(`[blueprint-store-fs] scenarios.graph.json 解析失败：${canonPath}`)
-    return { document: null, versions }
-  }
-  const raw = canonRead.value?.items?.[0]?.scenario
-  if (!raw) return { document: null, versions }
+  if (!existsSync(p)) return null
   try {
-    return { document: normalizeDocument(raw), versions }
+    return JSON.parse(readFileSync(p, 'utf-8')) as T
+  } catch {
+    return null
+  }
+}
+
+/** 最小 project.json（首次写入且盘上无时补齐）。 */
+function defaultProject(dir: string): Record<string, unknown> {
+  const id = dir.split(/[/\\]/).filter(Boolean).pop() ?? 'game'
+  return {
+    id,
+    title: id,
+    platform: 'wb-game-video',
+    platformVersion: '1',
+    entry: { blueprint: 'blueprint.json', components: 'dist/components' },
+  }
+}
+
+/** 读权威文档：游戏仓根 `blueprint.json`（裸 GraphLibraryDocument）。 */
+export function readDocument(dir: string): { document: GraphLibraryDocument | null; versions: VersionEntry[] } {
+  const raw = readJson<GraphLibraryDocument>(resolve(dir, BLUEPRINT_FILE))
+  if (!raw) return { document: null, versions: [] }
+  try {
+    return { document: normalizeDocument(raw), versions: [] }
   } catch (e) {
-    console.warn(`[blueprint-store-fs] scenario 规范化失败：`, e)
-    return { document: null, versions }
+    console.warn(`[blueprint-store-fs] blueprint.json 规范化失败：`, e)
+    return { document: null, versions: [] }
   }
 }
 
@@ -63,51 +60,19 @@ export function readProject(dir: string): { project: GraphLibraryDocument | null
   return { project: document, versions }
 }
 
-let _vseq = 0
-
-export function writeDocument(dir: string, document: GraphLibraryDocument, title = 'graph'): VersionEntry[] {
+/** 覆盖写游戏仓根 `blueprint.json`（+ 首次补 `project.json`）。 */
+export function writeDocument(dir: string, document: GraphLibraryDocument, _title = 'graph'): VersionEntry[] {
   const normalized = normalizeDocument(document)
-  for (const id of Object.keys(normalized.manifest.packs)) assertSafeId(id, 'blueprint')
-
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  const canon: CanonFile = {
-    version: 1,
-    activeId: CANON_ITEM_ID,
-    items: [{ id: CANON_ITEM_ID, title, scenario: normalized }],
+  writeFileSync(resolve(dir, BLUEPRINT_FILE), JSON.stringify(normalized, null, 2))
+  const projectPath = resolve(dir, PROJECT_FILE)
+  if (!existsSync(projectPath)) {
+    writeFileSync(projectPath, JSON.stringify(defaultProject(dir), null, 2))
   }
-  writeFileSync(resolve(dir, 'scenarios.graph.json'), JSON.stringify(canon, null, 2))
-
-  const vDir = resolve(dir, 'scenarios.graph.versions')
-  if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true })
-  const vid = `v-${Date.now().toString(36)}-${(_vseq++).toString(36)}`
-  assertSafeId(vid, 'version')
-  writeFileSync(resolve(vDir, `${vid}.json`), JSON.stringify(normalized))
-  const indexPath = resolve(vDir, 'index.json')
-  const prev = readJson<VersionEntry[]>(indexPath) ?? []
-  const index = [{ id: vid, savedAt: Date.now() }, ...prev].slice(0, VERSION_LIMIT)
-  writeFileSync(indexPath, JSON.stringify(index))
-  const live = new Set(index.map((v) => `${v.id}.json`))
-  for (const f of readdirSync(vDir)) {
-    if (f !== 'index.json' && f.endsWith('.json') && !live.has(f)) {
-      try { rmSync(resolve(vDir, f)) } catch { /* best-effort */ }
-    }
-  }
-  return index
+  return []
 }
 
 /** @deprecated 用 writeDocument */
 export function writeProject(dir: string, project: GraphLibraryDocument, title = 'graph'): VersionEntry[] {
   return writeDocument(dir, project, title)
-}
-
-export function readVersionDocument(dir: string, id: string): GraphLibraryDocument | null {
-  assertSafeId(id, 'version')
-  const raw = readJson<GraphLibraryDocument>(resolve(dir, 'scenarios.graph.versions', `${id}.json`))
-  if (!raw) return null
-  try { return normalizeDocument(raw) } catch { return null }
-}
-
-/** @deprecated 用 readVersionDocument */
-export function readVersionProject(dir: string, id: string): GraphLibraryDocument | null {
-  return readVersionDocument(dir, id)
 }

@@ -9,7 +9,8 @@
 // injects `domainPortTypes` into the colour-bearing renderers so domain types
 // (scene / geometry) keep their colours without a global side effect.
 import { createElement, memo, type ComponentType } from 'react'
-import type { NodeTypes, EdgeTypes, NodeProps, EdgeProps } from 'reactflow'
+import type { NodeTypes, EdgeTypes, EdgeProps } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import type { Battery, ExposedPort } from '../../types.js'
 import type { DomainPortTypes } from '../../utils/portTypes.js'
 import BatteryNode from './BatteryNode.js'

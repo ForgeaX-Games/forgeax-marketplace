@@ -10,8 +10,8 @@
 // consumer can point them at its own transport.
 import { memo, useState, useCallback, useRef, useEffect } from 'react'
 import ReactDOM from 'react-dom'
-import { Handle, Position } from 'reactflow'
-import type { NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor, normalizeType } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

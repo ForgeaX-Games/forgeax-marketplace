@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { HttpApiClient } from '../api/HttpApiClient.js'
 import { libraryApi, type AssetRecord, type FacetItem, type FacetScheme } from './library/libraryApi.js'
 import { SLOT, fieldAt } from './library/aliasName.js'
@@ -222,6 +223,11 @@ function scrollToPage(
 }
 
 export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.Element {
+  // `useShallow` + one selector (not a bare `useAssetStoreStore()`) — a bare
+  // call subscribes to the WHOLE store and re-renders this asset grid/list on
+  // every unrelated store update. `useShallow` shallow-compares the selected
+  // object so this still only re-renders when one of these specific fields
+  // actually changes.
   const {
     zones,
     activeZone,
@@ -261,7 +267,48 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
     toggleSelectId,
     clearSelection,
     fetchAssets,
-  } = useAssetStoreStore()
+  } = useAssetStoreStore(
+    useShallow((s) => ({
+      zones: s.zones,
+      activeZone: s.activeZone,
+      viewMode: s.viewMode,
+      assets: s.assets,
+      total: s.total,
+      page: s.page,
+      pageSize: s.pageSize,
+      pendingScrollToPage: s.pendingScrollToPage,
+      loading: s.loading,
+      selected: s.selected,
+      rules: s.rules,
+      selectedRule: s.selectedRule,
+      taxonomy: s.taxonomy,
+      folderPath: s.folderPath,
+      folders: s.folders,
+      loadingFolders: s.loadingFolders,
+      folderView: s.folderView,
+      batchMode: s.batchMode,
+      selectedIds: s.selectedIds,
+      init: s.init,
+      setZone: s.setZone,
+      setViewMode: s.setViewMode,
+      setTaxonomy: s.setTaxonomy,
+      openFolder: s.openFolder,
+      goToCrumb: s.goToCrumb,
+      setPageSize: s.setPageSize,
+      setPageFromScroll: s.setPageFromScroll,
+      goToPage: s.goToPage,
+      clearPendingScroll: s.clearPendingScroll,
+      setSelected: s.setSelected,
+      setSelectedRule: s.setSelectedRule,
+      revealAlias: s.revealAlias,
+      setSearch: s.setSearch,
+      setFieldFilters: s.setFieldFilters,
+      setBatchMode: s.setBatchMode,
+      toggleSelectId: s.toggleSelectId,
+      clearSelection: s.clearSelection,
+      fetchAssets: s.fetchAssets,
+    })),
+  )
   const isRules = activeZone === RULES_ZONE
   // Folder view is decided by the store (loadView/fetchFolders): true = folder
   // cards, false = the asset list. `index`'s dynamic depth needs this runtime

@@ -3,15 +3,18 @@
  * 多局试玩各自用 GraphSession 内的隔离表，不依赖本函数。
  */
 import brushFontUrl from './assets/fonts/HYShangWei.woff2?url'
-import { setBrushFontUrl } from '../runtime/skins/components/skinRuntime'
-import { registerCoreSkins } from '../runtime/skins/components'
+import { setBrushFontUrl } from '../runtime/component-host/components/skinRuntime'
+import { registerBuiltins } from '../runtime/component-host'
 
 let booted = false
 
-/** 幂等：字体 URL + 默认组件包（契约+渲染）注册。Studio / Player / PlaySurface 入口调用。 */
+/**
+ * 幂等：字体 URL + 平台内建组件集注册（经 component-host）。Studio / Player / PlaySurface 入口调用。
+ * 游戏专属组件由 store.ensureBoot 经 `component-host.loadGameComponents(slug)` 按 game 加载。
+ */
 export function bootEditorSkins(): void {
   if (booted) return
   booted = true
   setBrushFontUrl(brushFontUrl)
-  registerCoreSkins()
+  registerBuiltins()
 }

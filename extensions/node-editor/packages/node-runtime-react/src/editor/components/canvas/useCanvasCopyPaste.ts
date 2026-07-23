@@ -2,7 +2,7 @@
 // full params, GroupNodes, and internal edges). Ported from the legacy editor
 // (components/canvas/useCanvasCopyPaste.ts).
 import { useEffect, useRef } from 'react'
-import type { Node, Edge } from 'reactflow'
+import type { Node, Edge } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import type { CanvasFrame, NodeGroup, PipelineEdge } from '../../types.js'
 import { buildGroupNodeData } from './GroupNode.js'

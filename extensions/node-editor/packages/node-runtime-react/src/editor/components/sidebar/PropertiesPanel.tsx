@@ -67,8 +67,8 @@ function Code({ size = 16, className }: IconProps) {
 type TabType = 'nodeInfo' | 'logs' | 'compile'
 
 function PropertiesPanel() {
-  // 从 UI 状态中拿到关闭侧边栏的方法
-  const { toggleSidebar } = useUIStore()
+  // 从 UI 状态中拿到关闭侧边栏的方法（精确 selector，理由同下方 pipelineStore）
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   // 精确 selector：只在各自字段变化时重渲染，滑条拖动不触发节点未选中时的重渲染
   const selectedNode = usePipelineStore(s => s.selectedNode)
   const logs         = usePipelineStore(s => s.logs)

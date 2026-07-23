@@ -29,9 +29,9 @@ import type {
   Trigger,
 } from '../../runtime/schema/graph-schema'
 import type { NodeAction } from '../../runtime/schema/node-config-schema'
-import type { ChoiceOption } from '../../runtime/skins/components/Choice'
-import type { FloatTextParams } from '../../runtime/skins/components/FloatText'
-import type { QteCue } from '../../runtime/skins/components/Qte'
+import type { ChoiceOption } from '../../runtime/component-host/components/Choice'
+import type { FloatTextParams } from '../../runtime/component-host/components/FloatText'
+import type { QteCue } from '../../runtime/component-host/components/Qte'
 import { componentHandles, getComponent } from '../../runtime/registry/component-registry'
 import {
   componentTypeLabel,
@@ -40,7 +40,7 @@ import {
   hasOptionEventsInput,
   isPositionable,
 } from '../shell/editors'
-import { INTERACTION_SKINS } from '../../runtime/skins/components'
+import { INTERACTION_SKINS } from '../../runtime/component-host/components'
 import { FILTER_PRESETS, FX_PRESETS } from '../../runtime/fx/video-fx'
 import { initState } from '../../runtime/engine/engine-init'
 import type { OverlaySnap } from '../../runtime/engine/session'
@@ -348,7 +348,7 @@ export type QteOutcomeCandidate = OutcomeCandidate
 /**
  * 有完整专属皮肤实现的组件（真实交互动画 + 自己的固定出口目录）——不是靠某个分类字段
  * （"QTE"/"choice"）圈出来的一族，而是直接从 `INTERACTION_SKINS`（唯一登记点，见
- * `runtime/skins/components/index.ts`）派生：新皮肤在那边注册一行，这里自动识别，不必再手工
+ * `runtime/component-host/components/index.ts`）派生：新皮肤在那边注册一行，这里自动识别，不必再手工
  * 同步维护第二份组件 id 名单。
  * - 编辑器能直接渲染它们的真实皮肤做时间轴预览（而不是通用兜底展示）；
  * - 它们的出口目录（`events[]` + `defaultEvent`，见 `ChoiceParams`/`QteParams` 共用契约）不让

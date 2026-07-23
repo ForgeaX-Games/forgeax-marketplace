@@ -7,14 +7,14 @@
 // 模拟立体感。详见 framework/geometry/topBillboard.ts。
 //
 // 本 slice 只投影 voxel 层(SceneOutput);legacy 的 GridLayer 稠密 2D 路径在
-// scene-generator 里没有数据源,整段 drop。选中态本 slice 恒 false(选中高亮
-// deferred)。asset autotile sprites:drawMode='asset' 时按 store.aliasMetas 匹配
+// scene-generator 里没有数据源,整段 drop。editor 选中高亮 deferred 到 overlay
+// canvas(见 drawOverlay),不写入 master bake,避免点击电池触发全量 rebuild。
 // alias → rule + atlas,per-face pickFaceSprite 贴图(Stage-2c.2)。
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBakedLayer, useBakedLayerKeys, useVoxelLayer, useVoxelLayerKeys } from '../../framework/useLayer'
 import { useLayerSurface } from '../../framework/useLayerSurface'
-import { useViewport2D } from '../../framework/useViewport'
+import type { Viewport2D } from '../../framework/useViewport'
 import { useRenderStore, consumeLastPaintDelta } from '../../store'
 import { voxelLayerCellSource, type CellSource } from '../../framework/cellSource'
 import { mergeRenderableVoxelLayerKeys, orderBakedKeysForRender } from '../../framework/layerKeys'
@@ -223,6 +223,24 @@ function contentSignature(inputs: ReadonlyArray<VoxelLayerInput>): string {
   return parts.join('|')
 }
 
+/** Grid extent covering a master's real bbox (≥1 so an empty canvas still has a
+ *  stable grid anchor). Deliberately a plain function, not a memo: it must be
+ *  recomputed fresh from whatever master a caller ACTUALLY has in hand (often
+ *  `masterRef.current` read well after the render that captured a stale
+ *  snapshot — see the `compose`/`drawOverlay` comments below) — a couple of
+ *  integer ops, cheaper than the memo bookkeeping needed to "cache" it. */
+function deriveGridExtent(master: VoxelMaster | null): { maxRows: number; maxCols: number } {
+  let r = 0, c = 0
+  if (master) {
+    const { bbox } = master
+    const vXmax = bbox.worldOffsetX + bbox.cols
+    const vYmax = bbox.worldOffsetY + bbox.rows
+    if (vXmax > c) c = vXmax
+    if (vYmax > r) r = vYmax
+  }
+  return { maxRows: r || 1, maxCols: c || 1 }
+}
+
 /** Structural key: everything that requires a FULL master rebuild EXCEPT raw
  *  per-cell content (which the additive diff handles). Includes a rebuildEpoch
  *  the component bumps when a content change isn't append-safe.
@@ -256,7 +274,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const drawMode = useRenderStore(s => s.drawMode)
   const aliasMetas = useRenderStore(s => s.aliasMetas)
-  const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
+  // Editor selection is NOT React-subscribed here — subscribing would re-render
+  // this heavy plugin and rebuildVoxelMaster on every click (~700ms–2s). The
+  // highlight is drawn imperatively in drawOverlay (same pattern as voxelSelection).
   const activeBakedLayerKey = useRenderStore(s => s.activeBakedLayerKey)
   const showGrid = useRenderStore(s => s.showGrid)
   // Edit-mode overlay inputs (brush ghost + box-select rubber-band).
@@ -272,7 +292,17 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     setPaintAsset(readPaintAsset())
     return subscribePaintAsset(setPaintAsset)
   }, [])
-  const viewport = useViewport2D()
+  // Viewport (pan/zoom) is intentionally NOT React-subscribed (no useViewport2D()
+  // here). A wheel gesture bumps viewport2d on every tick; subscribing would
+  // re-render this WHOLE heavy plugin per tick — every hook/memo re-evaluated
+  // (even though none actually depend on viewport, the memoized ones only skip
+  // their body, they still cost a dep-array comparison) plus React reconciling
+  // every VoxelLayerSubscriber/BakedLayerSubscriber child — pure overhead when
+  // all that's actually needed is "re-blit the already-baked master at a new
+  // transform". Instead we track it in a ref and drive compose()/the overlay
+  // directly from a store subscription (same imperative pattern already used
+  // below for editHoverCell/editBox/voxelSelection).
+  const viewportRef = useRef<Viewport2D>(useRenderStore.getState().viewport2d)
 
   // voxel 层数据表(整组送进 buildVoxelMaster)
   const voxelLayersRef = useRef<Map<string, VoxelLayerEntry>>(new Map())
@@ -317,7 +347,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
         source: entry.source,
         layerIdx: arr.length,
         isSelected: key === activeBakedLayerKey,
-        isEditorSelected: selectedEditorNodeIds.includes(entry.layer.nodeId),
+        // Editor selection highlight is deferred to drawOverlay — baking it into
+        // the master would bump structuralKey and trigger a full rebuild per click.
+        isEditorSelected: false,
         assetName: entry.assetName,
         assetAlias: entry.assetAlias,
         assetType: entry.assetType,
@@ -327,7 +359,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     renderSegRef.current.push(['voxelInputs', performance.now() - _t])
     return arr
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voxelKeys, bakedKeys, activeBakedLayerKey, selectedEditorNodeIds, tickRef.current])
+  }, [voxelKeys, bakedKeys, activeBakedLayerKey, tickRef.current])
 
   // asset drawMode:订阅 image / rule readiness 脉冲 —— 异步资产加载完后 bumpTick
   // 触发 re-render,cacheKey 因 url@tick / rule@tick 变化而变,useLayerSurface 只重
@@ -467,50 +499,48 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
   }, [structuralKey])
 
 
-  // master grid bbox:涵盖 voxel 真实占据的世界坐标。
-  //
-  // Derived from `masterRef.current` (the ONE authoritative master), NOT the
-  // React-state `voxelMaster`. An additive paint advances masterRef in place
-  // WITHOUT bumping structuralKey (so useLayerSurface doesn't rebuild), leaving
-  // the state `voxelMaster` stale. A viewport pan/zoom then re-renders and
-  // re-composes the WHOLE frame; if the grid extent (and the master compose reads)
-  // came from the stale state master, the just-painted stroke would be repainted
-  // away (the "paint vanishes on pan" bug). A ref read can't go through useMemo
-  // (ref mutations don't retrigger it), so we derive it inline each render — it's
-  // a couple of integer ops, no memo needed.
+  // master grid bbox:涵盖 voxel 真实占据的世界坐标。Render-scope snapshot, used by
+  // things that only ever run WITHIN a render pass that just computed it fresh
+  // (composeDirty's non-grow branch, drawOverlay's memoized deps, the imperative
+  // handle's bookkeeping struct). `compose` itself does NOT use this — see below.
   const liveMaster = masterRef.current
-  const { maxRows, maxCols } = (() => {
-    let r = 0, c = 0
-    if (liveMaster) {
-      const { bbox } = liveMaster
-      const vXmax = bbox.worldOffsetX + bbox.cols
-      const vYmax = bbox.worldOffsetY + bbox.rows
-      if (vXmax > c) c = vXmax
-      if (vYmax > r) r = vYmax
-    }
-    return { maxRows: r || 1, maxCols: c || 1 }
-  })()
+  const { maxRows, maxCols } = deriveGridExtent(liveMaster)
 
-  // compose — full-frame repaint (viewport/grid/resize). Reads `liveMaster`
-  // (= masterRef.current), the ONE authoritative master, so a viewport pan/zoom
-  // re-composes the LATEST pixels (incl. in-place incremental appends that never
-  // touched the React-state `voxelMaster`). This is still a single drawImage of
-  // the cached master — viewport changes only re-send the frame, never rebuild
-  // the surface (the bake contract holds).
+  // compose — full-frame repaint (viewport/grid/resize). Reads `masterRef.current`
+  // and re-derives the grid extent FRESH on every call (not the render-scope
+  // `liveMaster`/`maxRows`/`maxCols` above) — deliberately, because this can now
+  // be invoked LONG after the render that closed over it: a pan/zoom no longer
+  // re-renders this plugin (see "Pan/zoom: imperative compose" below), so if an
+  // incremental paint grew masterRef in between (which mutates the ref WITHOUT
+  // ever triggering a new render — no structuralKey bump, no setState), a stale
+  // render-scope closure would repaint the just-painted stroke away (the
+  // original "paint vanishes on pan" bug, now reachable via ANY viewport change,
+  // not just the render that happened to follow one). Reading the ref + a couple
+  // of integer ops at call time costs nothing and is correct by construction —
+  // no dependency on "was there a render recently" at all.
   const compose = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    const master = masterRef.current
+    const { maxRows: mr, maxCols: mc } = deriveGridExtent(master)
     composeFrame({
       canvas,
-      voxelMaster: liveMaster,
-      maxRows, maxCols,
+      voxelMaster: master,
+      maxRows: mr, maxCols: mc,
       cellSize: BASE_CELL_SIZE,
-      offsetX: viewport.offsetX,
-      offsetY: viewport.offsetY,
-      scale: viewport.scale,
+      offsetX: viewportRef.current.offsetX,
+      offsetY: viewportRef.current.offsetY,
+      scale: viewportRef.current.scale,
       showGrid,
     })
-  }, [liveMaster, maxRows, maxCols, viewport, showGrid])
+    // Everything read above is a ref/getter, not a render-scope value — compose's
+    // identity therefore only changes on `showGrid`, never on content OR
+    // viewport. The "full-repaint on structural/content change" effect below is
+    // keyed on `compose`'s identity purely to re-run on a showGrid toggle /
+    // mount / resize; content changes are what actually PAINT (via composeDirty
+    // in the incremental-append effect) — this callback just needs to always be
+    // safe to call, any time, imperatively.
+  }, [showGrid])
 
   // Incremental visible update: blit ONLY the master sub-rect a paint changed,
   // instead of re-drawing (and downscaling) the whole master. Falls back to a
@@ -532,16 +562,20 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       maxRows: forceFull ? aMaxRows : maxRows,
       maxCols: forceFull ? aMaxCols : maxCols,
       cellSize: BASE_CELL_SIZE,
-      offsetX: viewport.offsetX,
-      offsetY: viewport.offsetY,
-      scale: viewport.scale,
+      offsetX: viewportRef.current.offsetX,
+      offsetY: viewportRef.current.offsetY,
+      scale: viewportRef.current.scale,
       showGrid,
     }
     const ok = !forceFull && dirty ? composeDirtyRect(args, dirty) : false
     if (!ok) composeFrame(args)
     logComposeMs(appended.canvas.width, appended.canvas.height, ok, performance.now() - t0)
-  }, [maxRows, maxCols, viewport, showGrid])
+  }, [maxRows, maxCols, showGrid])
 
+  // `compose`'s own identity only tracks `showGrid` now (it reads masterRef.current
+  // fresh internally — see its definition above), so `liveMaster` is listed here
+  // explicitly to keep firing this effect exactly when it used to: mount, a full
+  // rebuild (new master adopted by the sync block above), resize/showGrid toggle.
   useEffect(() => {
     compose()
     // If a full rebuild was scheduled by the append effect, the timeline was left
@@ -553,7 +587,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       markPaintDrawn('full-rebuild')
       endStageTimeline('visible (full-rebuild)')
     }
-  }, [compose])
+  }, [compose, liveMaster])
 
   // ── Incremental additive bake ─────────────────────────────────────────────
   // Runs after every content-changing render. If the master is incremental-safe
@@ -706,19 +740,24 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     ctx.scale(dpr, dpr)
     const cx = Math.round(cssW / 2)
     const cy = Math.round(cssH / 2)
-    ctx.translate(cx + Math.round(viewport.offsetX), cy + Math.round(viewport.offsetY))
-    ctx.scale(viewport.scale, viewport.scale)
+    ctx.translate(cx + Math.round(viewportRef.current.offsetX), cy + Math.round(viewportRef.current.offsetY))
+    ctx.scale(viewportRef.current.scale, viewportRef.current.scale)
     ctx.translate(-cx, -cy)
     ctx.imageSmoothingEnabled = false
     const cellSize = BASE_CELL_SIZE
-    const { originX, originY } = topMasterOrigin(cssW, cssH, maxCols, maxRows, cellSize)
-    const lw = 1 / viewport.scale
+    // Fresh from masterRef.current (not the render-scope maxRows/maxCols dep
+    // below) for the same reason `compose` is: a pan/zoom no longer re-renders
+    // this plugin, so a render-scope snapshot could be stale relative to an
+    // incremental grow that happened without a render in between.
+    const { maxRows: liveMaxRows, maxCols: liveMaxCols } = deriveGridExtent(masterRef.current)
+    const { originX, originY } = topMasterOrigin(cssW, cssH, liveMaxCols, liveMaxRows, cellSize)
+    const lw = 1 / viewportRef.current.scale
 
     // SELECT-tool scene highlight: outline + tint the resolved voxel(s), top cap
     // AND front wall, so the picked object lights up cell-for-cell exactly where
     // the painter drew it. Drawn regardless of edit mode (selecting is a query,
     // not a paint), and read imperatively from the store like editHoverCell.
-    const { voxelSelection } = useRenderStore.getState()
+    const { voxelSelection, selectedEditorNodeIds } = useRenderStore.getState()
     if (voxelSelection && voxelSelection.voxels.length > 0) {
       ctx.save()
       ctx.lineWidth = 2 * lw
@@ -736,6 +775,28 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
         ctx.strokeRect(tx, ty, cellSize, cellSize)
         ctx.strokeRect(fx, fy, cellSize, cellSize)
       }
+      ctx.restore()
+    }
+
+    // Editor selection (kernel node picker): dashed bbox per matching voxel layer.
+    // Deferred from master bake so clicking a battery does not rebuildVoxelMaster.
+    if (selectedEditorNodeIds.length > 0) {
+      const selectedSet = new Set(selectedEditorNodeIds)
+      ctx.save()
+      ctx.strokeStyle = 'rgba(62, 207, 107, 0.85)' // success green — mode-top parity
+      ctx.lineWidth = 1.8 / viewportRef.current.scale
+      ctx.setLineDash([6 / viewportRef.current.scale, 4 / viewportRef.current.scale])
+      for (const entry of voxelLayersRef.current.values()) {
+        if (!entry.layer.visible || !selectedSet.has(entry.layer.nodeId)) continue
+        const { source } = entry
+        const off = 1 / viewportRef.current.scale
+        const x = originX + source.worldOffsetX * cellSize - off
+        const y = originY + source.worldOffsetY * cellSize - off
+        const w = source.cols * cellSize + 2 * off
+        const h = source.rows * cellSize + 2 * off
+        ctx.strokeRect(x, y, w, h)
+      }
+      ctx.setLineDash([])
       ctx.restore()
     }
 
@@ -901,7 +962,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       ctx.restore()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, paintAsset, aliasMetas, viewport, maxRows, maxCols, occupancyCache])
+  }, [editMode, paintAsset, aliasMetas, occupancyCache])
 
   // rAF-coalesced overlay scheduler. Hover/box changes (per-move) and render-input
   // changes (viewport, paintAsset, occupancy) all funnel through one pending frame
@@ -932,15 +993,18 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     let prevHover = useRenderStore.getState().editHoverCell
     let prevBox = useRenderStore.getState().editBox
     let prevSelection = useRenderStore.getState().voxelSelection
+    let prevEditorSel = useRenderStore.getState().selectedEditorNodeIds
     const unsub = useRenderStore.subscribe((state) => {
       if (
         state.editHoverCell !== prevHover ||
         state.editBox !== prevBox ||
-        state.voxelSelection !== prevSelection
+        state.voxelSelection !== prevSelection ||
+        state.selectedEditorNodeIds !== prevEditorSel
       ) {
         prevHover = state.editHoverCell
         prevBox = state.editBox
         prevSelection = state.voxelSelection
+        prevEditorSel = state.selectedEditorNodeIds
         scheduleOverlay()
       }
     })
@@ -953,9 +1017,54 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     }
   }, [scheduleOverlay])
 
+  // ── Pan/zoom: imperative compose, no React re-render ──────────────────────
+  // Mirrors compose so the rAF callback below always re-blits with the LATEST
+  // liveMaster/maxRows/maxCols/showGrid without re-subscribing the store
+  // listener every time one of those (rare, real-content) deps changes.
+  const composeRef = useRef(compose)
+  composeRef.current = compose
+
+  const viewportRafRef = useRef<number | null>(null)
+  const scheduleViewportRedraw = useCallback(() => {
+    if (viewportRafRef.current !== null) return
+    const raf = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number
+    viewportRafRef.current = raf(() => {
+      viewportRafRef.current = null
+      composeRef.current()
+      scheduleOverlay() // ghost/box/selection share the same viewport transform
+    })
+  }, [scheduleOverlay])
+
+  // Store subscription (not a React hook subscription): a wheel/pan burst can
+  // fire many `setViewport2d`/`panViewport2d` calls per animation frame — this
+  // updates the ref SYNCHRONOUSLY every time (so hit-testing below is never
+  // stale) but coalesces the actual redraw to one per rAF via the scheduler
+  // above, instead of one full React render + drawImage per tick.
+  useEffect(() => {
+    let prev = useRenderStore.getState().viewport2d
+    const unsub = useRenderStore.subscribe((state) => {
+      if (state.viewport2d === prev) return
+      prev = state.viewport2d
+      viewportRef.current = prev
+      scheduleViewportRedraw()
+    })
+    return () => {
+      unsub()
+      if (viewportRafRef.current !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(viewportRafRef.current)
+        viewportRafRef.current = null
+      }
+    }
+  }, [scheduleViewportRedraw])
+
   // ── §7.2 / §7.3 反向接口(同 mode-top 模式) ────────────────────────────
-  const stateRef = useRef({ viewport, maxRows, maxCols, cellSize: BASE_CELL_SIZE })
-  stateRef.current = { viewport, maxRows, maxCols, cellSize: BASE_CELL_SIZE }
+  // No render-scope snapshot (no more `stateRef`) — every handle method below
+  // reads viewportRef.current + deriveGridExtent(masterRef.current) fresh, at
+  // CALL time, for the same reason `compose` does (see its comment above): a
+  // click/hover right after a pan or an incremental grow, with no React render
+  // in between, must never hit-test against a stale viewport/extent snapshot.
   // Mirror the live occupancy index for the imperative SELECT hit-test (read at
   // click time via getState-style access, never re-subscribing React).
   const occupancyRef = useRef<ColumnOccupancy>(occupancyCache)
@@ -966,7 +1075,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     screenToCell: (cssX, cssY) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const cellSize = BASE_CELL_SIZE
+      const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
+      const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -987,7 +1098,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     voxelStackAtScreen: (cssX, cssY) => {
       const canvas = canvasRef.current
       if (!canvas) return []
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const cellSize = BASE_CELL_SIZE
+      const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
+      const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -1004,7 +1117,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     cellToScreen: (col, row) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const cellSize = BASE_CELL_SIZE
+      const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
+      const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -1025,7 +1140,9 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     screenToEditCell: (cssX, cssY, z) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const { viewport, maxRows, maxCols, cellSize } = stateRef.current
+      const cellSize = BASE_CELL_SIZE
+      const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
+      const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
       const rect = sizeSource.getBoundingClientRect()
       const cssW = Math.round(rect.width)
@@ -1139,10 +1256,18 @@ function BakedLayerSubscriber({ layerKey, layerIdx, onLayerUpdate }: VoxelLayerS
 
 // ── 自注册 ────────────────────────────────────────────────────────────
 
+// memo: RenderCanvas (host) re-renders on every wheel tick (it subscribes to
+// viewport2d.scale for the on-screen zoom% readout). Without memo, React would
+// re-render this WHOLE plugin subtree (and every VoxelLayerSubscriber/
+// BakedLayerSubscriber child) on every tick regardless of this component's own
+// viewport handling above — memo bails out early since its props never change
+// (it takes none), so the cascade stops here instead of at the leaf.
+const MemoizedModeTopBillboardPlugin = memo(ModeTopBillboardPlugin)
+
 registerRenderPlugin({
   name: 'billboard',
   modes: ['topBillboard'],
-  Component: ModeTopBillboardPlugin,
+  Component: MemoizedModeTopBillboardPlugin,
 })
 
-export default ModeTopBillboardPlugin
+export default MemoizedModeTopBillboardPlugin

@@ -10,8 +10,10 @@
  */
 
 import {
+  childrenOf,
+  getNode,
+  makeScenePort,
   parseScenePort,
-  readNode,
   type ScenePortValue,
 } from '../../../../vendor/dist/shared/types/index.js';
 
@@ -25,14 +27,13 @@ export function sceneFocusChildren(input: Record<string, unknown>): Result {
   const port = parseScenePort(input.scene);
   if (!port) return { error: 'scene is required and must be a ScenePortValue' };
 
-  const node = readNode(port.tree, port.focus);
+  const node = getNode(port.graph, port.focus);
   if (node === null) return { error: `focus path does not exist: "${port.focus}"` };
 
-  const prefix = port.focus === '/' ? '' : port.focus;
-  const scenes: ScenePortValue[] = node.children.map((c) => ({
-    tree: port.tree,
-    focus: `${prefix}/${c.name}`,
-  }));
+  // graph 引用不变，只是 focus 换到不同的子节点 id——不可变持久化 map 下这是
+  // O(1) 的引用赋值，不是拷贝（对照旧 tree.ts 版本的注释：这条性质在新模型下
+  // 依然成立，只是"共享的是谁"从嵌套快照换成了持久化 map 实例）。
+  const scenes: ScenePortValue[] = childrenOf(port.graph, port.focus).map((c) => makeScenePort(port.graph, c.id));
 
   return { scenes, childCount: scenes.length };
 }

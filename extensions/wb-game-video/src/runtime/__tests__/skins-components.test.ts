@@ -1,14 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { floatTextComponent, resolveFloatTextDisplay } from '../skins/components/FloatText'
-import { registerCoreSkins } from '../skins/components'
+import { floatTextComponent, resolveFloatTextDisplay } from '../component-host/components/FloatText'
+import { registerCoreSkins } from '../component-host/components'
 import { componentHandles } from '../registry/component-registry'
-import type { SkinCtx } from '../skins/rendererRegistry'
+import type { SkinCtx } from '../component-host/rendererRegistry'
 
 beforeAll(() => {
   registerCoreSkins()
 })
 
-describe('skins/components 契约', () => {
+describe('component-host/components 契约', () => {
   it('floatText: validate requires text or expr', () => {
     expect(floatTextComponent.validate!({ text: '+30' })).toEqual([])
     expect(floatTextComponent.validate!({ text: '' })).toHaveLength(1)

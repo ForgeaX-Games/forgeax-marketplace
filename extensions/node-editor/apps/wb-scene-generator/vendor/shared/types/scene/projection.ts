@@ -1,21 +1,26 @@
 /**
- * Scene → Voxel 图层投影：把不可变 scene 子树展平为渲染器消费的体素图层列表。
+ * Scene → Voxel 图层投影：把持久化 scene graph 的 focus 子树展平为渲染器消费的
+ * 体素图层列表。
  *
- * 与 ./tree.ts 的关系：tree 提供数据形状与读路径（readNode），projection 在其上做一次 DFS。
- * 该函数纯函数、无副作用，结果可被 SceneOutput 电池直接 emit。
+ * 这是重构范围里唯一必须改、但改完之后能把改动面彻底隔离住的文件（见重构规格
+ * 「消费端迁移清单」页「核心结论」）：输出的 VoxelLayer[] / NameListEntry[] 形状
+ * 字节级不变（cells 依然是纯 Point3D[]，在这里用 iterCells 就地物化），所以整条
+ * 渲染栈、useNodePreviews、导出 cook、viewer.js 都不需要感知 children 从数组变
+ * map、cells 从数组变 Volume 这两件事。
  *
- * v1 简化：
+ * v1 简化（沿用旧实现的既有约定，不在本轮变动）：
  *   - 不累积 transform（multi-SceneOutput 共享同一坐标原点，自然叠加）
  *   - 体素仅保留 (x,y,z)，丢弃 token / state（渲染层只用坐标和图层 value 上色）
- *   - 节点级 layer：每个 cells.length > 0 的节点产出一条 layer，value 为 1-based 序号
+ *   - 节点级 layer：每个 cellCount(content) > 0 的节点产出一条 layer，value 为 1-based 序号
  */
 
 import type { Point3D } from '../point3d.js';
-import type { SceneNodeSnapshot } from './types.js';
-import { readNode } from './tree.js';
+import type { NodeId, SceneGraph, SceneNode } from './graph.js';
+import { childrenOf, getNode, pathOf } from './graph.js';
+import { cellCount, iterCells } from './volume.js';
 
 export interface VoxelLayer {
-  /** 来自 scene-tree 节点 path（绝对路径） */
+  /** 来自 scene graph 节点的人类可读路径（绝对路径，由 NodeId 现算，不再是节点自带字段）。 */
   nodePath: string;
   /** basename（用于面板显示与 nameList fallback） */
   nodeName: string;
@@ -25,7 +30,7 @@ export interface VoxelLayer {
   schema?: string;
   cells: Point3D[];
   /**
-   * 多值（multi-value-per-layer）子层：当本节点的 cells 携带 >1 种不同 token 时，
+   * 多值（multi-value-per-layer）子层：当本节点的体素携带 >1 种不同 token 时，
    * 列出按首次出现顺序的去重 token 列表；单一 token 的节点不产出该字段（单值层）。
    * 渲染器据此把该层渲为可折叠父层 + 每 token 一个子层（带子层可见性 Eye）。
    */
@@ -58,16 +63,20 @@ function getStringAttr(
 }
 
 function collect(
-  node: SceneNodeSnapshot,
+  graph: SceneGraph,
+  node: SceneNode,
+  path: string,
   out: VoxelOutputBundle,
-  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——tree.ts 的不可变 API 理论上
-  // 不会产生结构环,但这里不依赖那份保证。撞到已下探过的节点引用直接跳过(而不是
-  // 继续递归),把潜在死循环/栈溢出降级成"该重复子树不重复展平",绝不挂死 backend。
-  visited: WeakSet<object> = new WeakSet(),
+  // 复盘(2026-07-01 循环引用死循环事故):纵深防御——graph.ts 的操作原语理论上不会
+  // 产生结构环(每个 id 的血统由 hash(parentId,name) 派生,天然是 DAG),但这里不
+  // 依赖那份保证。撞到已下探过的 id 直接跳过,把潜在死循环/栈溢出降级成"该重复
+  // 子树不重复展平",绝不挂死 backend。
+  visited: Set<NodeId> = new Set(),
 ): void {
-  if (visited.has(node)) return;
-  visited.add(node);
-  if (node.cells && node.cells.length > 0) {
+  if (visited.has(node.id)) return;
+  visited.add(node.id);
+
+  if (node.content && cellCount(node.content) > 0) {
     const value = out.layers.length + 1;
     const nodeName = node.name === '' ? '/' : node.name;
     // Split cells by their voxel `token` so a node carrying multiple distinct
@@ -77,7 +86,7 @@ function collect(
     const cells: Point3D[] = [];
     const cellsByToken: Record<string, Point3D[]> = {};
     const tokens: string[] = [];
-    for (const c of node.cells) {
+    for (const c of iterCells(node.content)) {
       const p: Point3D = { x: c.x, y: c.y, z: c.z };
       cells.push(p);
       const tok = c.token ?? '';
@@ -90,7 +99,7 @@ function collect(
       bucket.push(p);
     }
     const layer: VoxelLayer = {
-      nodePath: node.path,
+      nodePath: path,
       nodeName,
       value,
       schema: node.schema,
@@ -111,21 +120,16 @@ function collect(
       type: getStringAttr(node.attributes, 'asset_type') ?? node.schema,
     });
   }
-  // 渲染器对同一 voxel 坐标走「DFS 后入覆盖」的 dedup 规则:在 layers 数组里靠后的
-  // 节点 wins。
-  //
-  // tree.ts 的 children 是 name 字典序存的(graftAt 走 insertChildSorted),按数组
-  // 原序 DFS 会让兄弟节点的渲染优先级跟随字母,而不是用户的「加入顺序」直觉。
-  // 这里按 node.version ASC 排序后再递归:低版本(早 touch)先,高版本(晚 touch)
-  // 后 → 渲染器看到「后加入的子节点」在 bundle.layers 末尾 → dedup 时胜出。
-  //
-  // 注意:version 是「任意子孙变化时单调递增」的语义,严格说是 last-touched 而不是
-  // first-added。绝大多数使用流(add child → 立即 set asset_name)二者一致;只有
-  // 「先 add 后回头改老节点的属性」会让老节点的 version 反超新节点。这种边缘 case
-  // 可接受,需要更严格时再加 creationVersion 字段(现在不做,YAGNI)。
-  const sorted = [...node.children].sort((a, b) => a.version - b.version);
-  for (const child of sorted) {
-    collect(child, out, visited);
+
+  // 旧实现按 node.version ASC 排序还原"加入顺序"（version 语义模糊：既是修订号
+  // 又被顺手挪用当 z-order，是 v2 的已知局限）。新模型用 childrenOf 按
+  // (order, id) 排序——order 是「本次 addChildren 调用内的局部序号」，只在
+  // 同一次调用内比较才有意义；跨调用/跨分支的 order 冲突用 id 兜底，
+  // 全程无任何全局状态参与（见节点独立性审计结论）。
+  const path_ = path; // path of current node, used to build child paths below
+  for (const child of childrenOf(graph, node.id)) {
+    const childPath = path_ === '/' ? `/${child.name}` : `${path_}/${child.name}`;
+    collect(graph, child, childPath, out, visited);
   }
 }
 
@@ -133,15 +137,13 @@ function collect(
  * 从 focus 子树展平出 voxel layers + 对齐的 nameList。
  *
  * focus 不存在：返回空 bundle（不抛错）。
- * focus 存在但子树无任何 cells：返回空 bundle。
+ * focus 存在但子树无任何体素：返回空 bundle。
  */
-export function projectSceneToVoxelLayers(
-  tree: SceneNodeSnapshot,
-  focus: string,
-): VoxelOutputBundle {
+export function projectSceneToVoxelLayers(graph: SceneGraph, focus: NodeId): VoxelOutputBundle {
   const out: VoxelOutputBundle = { layers: [], names: [] };
-  const root = readNode(tree, focus);
+  const root = getNode(graph, focus);
   if (!root) return out;
-  collect(root, out);
+  const rootPath = pathOf(graph, focus) ?? '/';
+  collect(graph, root, rootPath, out);
   return out;
 }

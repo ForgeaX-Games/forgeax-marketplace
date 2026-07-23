@@ -5,7 +5,7 @@
 // retargeted onto the editor stores.
 //
 import { useCallback, useRef } from 'react'
-import type { Node, ReactFlowInstance } from 'reactflow'
+import type { Node, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { createEmptyPipeline } from '../../stores/pipelineStore.helpers.js'
 import type { Battery, PipelineNode } from '../../types.js'

@@ -20,6 +20,7 @@
     "build:vendor": "node scripts/build-vendor.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:batteries": "node scripts/smoke-batteries.mjs",
+    "lint:battery-purity": "node scripts/lint-battery-purity.mjs",
     "smoke:bridge": "tsx scripts/smoke-bridge.mjs",
     "smoke:render": "tsx scripts/smoke-render.mjs",
     "smoke:assets": "tsx scripts/smoke-assets.mjs",

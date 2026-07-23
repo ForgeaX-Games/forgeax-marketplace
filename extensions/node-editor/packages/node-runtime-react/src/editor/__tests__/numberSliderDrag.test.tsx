@@ -8,7 +8,7 @@
 //       pointerup (so the kernel/persisted SSOT ends on the released value).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from '@testing-library/react'
-import { ReactFlowProvider } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
 
 import NumberSliderNode from '../components/canvas/NumberSliderNode.js'
 import { usePipelineStore } from '../stores/pipelineStore.js'

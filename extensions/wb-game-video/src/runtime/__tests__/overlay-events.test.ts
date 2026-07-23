@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { registerCoreSkins } from '../skins/components'
+import { registerCoreSkins } from '../component-host/components'
 import { getComponentManifest } from '../registry/component-registry'
 import type { Overlay, Reaction } from '../schema/node-config-schema'
 import {

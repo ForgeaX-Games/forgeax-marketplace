@@ -24,7 +24,7 @@ export function sceneGetAttribute(input: Record<string, unknown>): Result {
   const key = input.key;
   if (typeof key !== 'string' || key.length === 0) return MISS;
 
-  const r = getAttribute(sin.tree, sin.focus, key);
+  const r = getAttribute(sin.graph, sin.focus, key);
   if (!r.exists) return MISS;
   return { value: r.value, exists: true };
 }

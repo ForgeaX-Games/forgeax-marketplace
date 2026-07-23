@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
-import { ReactFlowProvider } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
 import { usePipelineStore, type Battery } from '@forgeax/node-runtime-react/editor'
 import ImageSourceNode from '../ImageSourceNode'
 
@@ -56,11 +56,14 @@ function renderNode(): HTMLElement {
         id="src"
         type="image_source"
         selected={false}
+        selectable
+        deletable
+        draggable
         dragging={false}
         zIndex={0}
         isConnectable
-        xPos={0}
-        yPos={0}
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
         data={{ battery: sourceBattery, params: {} }}
       />
     </ReactFlowProvider>,

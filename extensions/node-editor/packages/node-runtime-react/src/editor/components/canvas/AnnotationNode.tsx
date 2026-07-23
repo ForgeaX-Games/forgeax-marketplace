@@ -2,7 +2,8 @@
 // to select and drag, double-click to edit, blur to save. Ported from the legacy
 // editor (components/canvas/AnnotationNode.tsx).
 import { memo, useState, useCallback, useRef, useEffect } from 'react'
-import { type NodeProps, NodeResizer, useReactFlow } from 'reactflow'
+import { NodeResizer, useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore } from '../../stores/index.js'
 import './AnnotationNode.css'
 

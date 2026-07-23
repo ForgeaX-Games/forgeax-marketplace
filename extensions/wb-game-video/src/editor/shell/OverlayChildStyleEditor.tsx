@@ -4,7 +4,7 @@
  */
 import type { CSSProperties, JSX } from 'react'
 import type { GraphTextStyle, Layout, OverlayChild } from '../../runtime/schema/graph-schema'
-import { HP_BAR_COMPONENTS } from '../../runtime/skins/components'
+import { hpBarComponents } from '../../runtime/component-host'
 import { GraphTextStylePicker } from './GraphTextStylePicker'
 import { isSizable, SizeEditor } from './editors'
 
@@ -59,15 +59,16 @@ export function OverlayChildStyleEditor({
   const kind = child.component
   const title = COMPONENT_LABEL[kind] ?? kind
 
-  if (HP_BAR_COMPONENTS.some((s) => s.id === kind) || kind === 'battleHpBar') {
-    const skin = HP_BAR_COMPONENTS.some((s) => s.id === child.component) ? child.component : ''
+  const hpBars = hpBarComponents()
+  if (hpBars.some((s) => s.id === kind) || kind === 'battleHpBar') {
+    const skin = hpBars.some((s) => s.id === child.component) ? child.component : ''
     return (
       <div style={{ marginTop: 6 }}>
         <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{child.id} · 血条</div>
         {field(
           '血条组件',
           <select value={skin} onChange={(e) => onPatchComponent(e.target.value)} style={{ flex: 1 }}>
-            {HP_BAR_COMPONENTS.map((s) => (
+            {hpBars.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}
               </option>

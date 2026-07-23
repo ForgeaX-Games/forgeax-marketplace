@@ -19,7 +19,16 @@ const cmd = [
   '--module nodenext --moduleResolution nodenext --target es2022',
   '--skipLibCheck --declaration false --noEmitOnError false',
   '--rootDir vendor/shared/types --outDir vendor/dist/shared/types',
+  // index.ts = the v3 barrel (graph/volume/port/summary/projection). tree.ts is a
+  // second, deliberately NOT-barrel-exported entry point — the old nested-tree
+  // implementation is kept alive solely for backend/src/baked/store.ts's
+  // independent baked-scene.json persistence format (out of v3 refactor scope,
+  // see scene-v3-refactor-spec canvas's "范围之外" callout). Listing it as its
+  // own tsc entry (rather than `export *`-ing it from index.ts) is what makes
+  // `vendor/dist/.../tree.js` exist for that one deep import, without exposing
+  // its old readNode/upsertCells/etc. names next to graph.ts's new primitives.
   'vendor/shared/types/index.ts',
+  'vendor/shared/types/scene/tree.ts',
 ].join(' ')
 
 execSync(cmd, { stdio: 'inherit', cwd: appRoot })

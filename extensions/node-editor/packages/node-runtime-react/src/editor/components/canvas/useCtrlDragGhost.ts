@@ -14,7 +14,7 @@
 // returns screen coords (= Flow size × zoom). The ghost keeps the node's original CSS
 // size and applies scale(zoom) + translate, so zoom ≠ 1 doesn't distort it.
 import { useEffect, useRef } from 'react'
-import type { Edge, Node, ReactFlowInstance } from 'reactflow'
+import type { Edge, Node, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { buildGroupNodeData } from './GroupNode.js'
 import { remapGroupIds, resolveEdgeColorFromStore } from './groupViewUtils.js'

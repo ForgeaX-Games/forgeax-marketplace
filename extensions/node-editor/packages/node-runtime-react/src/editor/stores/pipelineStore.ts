@@ -16,7 +16,7 @@
 // stage, so the data path here is fully exercised on its own.
 
 import { create } from 'zustand'
-import type { Node, Edge } from 'reactflow'
+import type { Node, Edge } from '../xyflow.js'
 
 import type { ExecutionResult, PipelineSnapshot } from '@forgeax/node-runtime'
 

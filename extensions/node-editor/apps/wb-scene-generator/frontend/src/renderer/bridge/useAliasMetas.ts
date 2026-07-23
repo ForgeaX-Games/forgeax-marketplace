@@ -2,9 +2,9 @@ import { useEffect } from 'react'
 import { useRenderStore } from '../store'
 import type { AliasMeta } from '../framework/asset/matchAssetEntry'
 import { clearAllImgCache } from '../framework/asset/imageCache'
-import { pluginFetch } from '../../api/pluginHttp'
 import { beginLoadingTask, endLoadingTask } from './loadingSignals.js'
 import type { HttpApiClient } from '../../api/HttpApiClient'
+import { pluginFetch } from '../../api/pluginHttp'
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 // One project switch fires THREE independent triggers for this hook (both

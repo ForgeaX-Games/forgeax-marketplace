@@ -6,7 +6,8 @@
 // written straight to the group (so the outer instance auto-derives `unsaved*`).
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from 'reactflow'
+import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { getPortTypeColor, normalizeType, resolveCanonicalTypeMeta, type DomainPortTypes } from '../../utils/portTypes.js'
 import type { ExposedPort } from '../../types.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'

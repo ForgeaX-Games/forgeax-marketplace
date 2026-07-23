@@ -31,7 +31,6 @@ interface VoxelLayerEntry {
 const ModeIsoPlugin = forwardRef<PluginHandle, object>(function ModeIsoPlugin(_, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawMode = useRenderStore(s => s.drawMode)
-  const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
   const viewport = useViewport2D()
 
   // voxel 层数据表(整组送进 buildIsoSurface)
@@ -66,12 +65,13 @@ const ModeIsoPlugin = forwardRef<PluginHandle, object>(function ModeIsoPlugin(_,
         source: entry.source,
         layerIdx: entry.layerIdx,
         isSelected: false,
-        isEditorSelected: selectedEditorNodeIds.includes(entry.layer.nodeId),
+        // Editor selection deferred (would rebuild iso master on every click).
+        isEditorSelected: false,
       })
     }
     return arr
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderableVoxelKeys, selectedEditorNodeIds, tickRef.current])
+  }, [renderableVoxelKeys, tickRef.current])
 
   const cacheKey = useMemo(
     () => makeIsoSurfaceCacheKey(inputs, drawMode),

@@ -43,7 +43,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const isDraft = useGraphScenario((s) => s.isDraft)
   const savedTip = useGraphScenario((s) => s.savedTip)
   const setMeta = useGraphScenario((s) => s.setMeta)
-  const doSave = useGraphScenario((s) => s.save)
+  const doCommit = useGraphScenario((s) => s.commit) // 保存 = 打版本
   const reset = useGraphScenario((s) => s.reset)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
 
@@ -163,7 +163,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--work, #0e0c09)' }}>
       <div style={{ padding: 8, borderBottom: '1px solid var(--line-soft, #2e2924)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', color: 'var(--txt, #f6f1e9)' }}>
-        <button onClick={() => doSave()}>💾 保存</button>
+        <button onClick={() => void doCommit()} title="保存当前内容并打一个新版本（vN）">💾 保存</button>
         <VersionPicker />
         <button onClick={() => { if (confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) reset() }}>↺ 重置</button>
         <span style={{ opacity: 0.6, fontSize: 11 }}>{savedTip}{isDraft ? ' · ⚠ 未保存草稿' : ''}</span>

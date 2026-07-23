@@ -3,7 +3,7 @@
 // appends a frame RF node. The bounding-box math itself is covered in frames.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, renderHook, act } from '@testing-library/react'
-import type { Node } from 'reactflow'
+import type { Node } from '../xyflow.js'
 
 import { createMockApiClient } from '../../test/mockApiClient.js'
 import { configureEditorTransport, createEditorTransport, type EditorTransport } from '../transport/index.js'
@@ -92,7 +92,7 @@ afterEach(() => {
 })
 
 const rfNode = (id: string, x: number, y: number): Node =>
-  ({ id, type: 'battery', position: { x, y }, width: 180, height: 90, data: {} }) as Node
+  ({ id, type: 'battery', position: { x, y }, measured: { width: 180, height: 90 }, data: {} }) as Node
 
 describe('canvas frames', () => {
   it('renders a seeded frame through CanvasFrameNode', () => {

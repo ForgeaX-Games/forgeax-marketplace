@@ -14,24 +14,22 @@ import {
 import { generateKeyframe, generateVideo, type OrchestrateCtx } from './server/generation/orchestrate'
 import { importCharacterRefs, importSceneRefs } from './server/intake'
 import type { MediaKind } from './src/editor/assets/registry-types'
-import { readProject, writeProject, readVersionProject } from './src/editor/persist/blueprint-store-fs'
-import { validateDocument } from './src/editor/persist/blueprint-project'
-import type { GraphLibraryDocument } from './src/runtime/schema/graph-schema'
 
 /**
- * 视频游戏工坊 · dev/build 配置（graph-only）。
+ * 视频游戏工坊 · dev/build 配置。
  *
- * 只保留新引擎 GameGraph 需要的东西：
  *   - React 插件
- *   - `/__graph__` 存储端点（把「主动保存的版本」落盘到
- *     `.forgeax/games/<slug>/game-video/scenarios.graph.json` + 版本快照，草稿走
- *     客户端 localStorage 不落盘）
+ *   - `/__gva__` 素材层读端点（D9 本地媒体兜底 + 生成编排；上传稳定 URL 就绪后删）
  *
- * 旧 FMV 那套（LLM/图像/视频/TTS/音乐 的 key 注入与反代、`/__reel__/*` 素材/剧本/
- * 生成队列中间件、reel-minigames）已随 FMV 一并删除。
+ * 蓝图/项目/版本的**落盘与打版本已上收到 forgeax 宿主 `/api/game-host`**
+ * （见 docs/superpowers/specs/2026-07-22-game-host-api-design.md）；扩展不再自建
+ * `/__graph__` 写盘端点。dev 下 `/api/*` 经下方 server.proxy 转发到 forgeax server。
  */
 
-const GAME_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
+/** forgeax server 源（game-host `/api/*` 落点）；默认 :18900，可用 env 覆盖。 */
+const FORGEAX_SERVER =
+  process.env.FORGEAX_SERVER_URL ??
+  `http://localhost:${process.env.FORGEAX_SERVER_PORT ?? process.env.PORT_SERVER ?? 18900}`
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status
@@ -56,9 +54,6 @@ function findProjectRootWithForgeax(start: string): string | null {
   return null
 }
 
-// ─── 新 graph 模型持久化端点 ────────────────────────────────────────────────
-const GRAPH_ROUTE_PREFIX = '/__graph__'
-
 function readGraphReqJson(req: { on: (ev: string, cb: (arg?: unknown) => void) => void }): Promise<Record<string, unknown>> {
   return new Promise((res, rej) => {
     let d = ''
@@ -72,62 +67,6 @@ function readGraphReqJson(req: { on: (ev: string, cb: (arg?: unknown) => void) =
     })
     req.on('error', rej)
   })
-}
-
-/** 仅 `.forgeax/games/<slug>/game-video/`；缺工程根或 slug 则 null。 */
-function graphDirForSlug(projectRoot: string | null, slug: string | null): string | null {
-  if (!projectRoot || !slug || !GAME_SLUG_RE.test(slug)) return null
-  return resolve(projectRoot, '.forgeax', 'games', slug, 'game-video')
-}
-
-/**
- * 图存储端点（磁盘为已保存版本的权威，读写全委托 `blueprint-store-fs` 共享模块，
- * 与 `server/tool-handlers.ts` 的 `gvid:*` 工具永不在盘上格式上分叉）：
- *   GET  /__graph__/store?game=slug          → { project(最新 GraphLibraryDocument | null), versions:[{id,savedAt}] }
- *   PUT  /__graph__/store?game=slug {project,title?} → 落盘 scenarios.graph.json（含 manifest）+ 版本快照(留10) → { versions }
- *   GET  /__graph__/version?game=slug&id=vid → { project }
- * 草稿不落盘（走客户端 localStorage）。无 `.forgeax` 工程根时 GET/PUT 均静默回空（无落点，不视为错误）；
- * PUT 缺 body.project 才是 400。
- */
-function graphStorePlugin(): Plugin {
-  let projectRoot: string | null = null
-  return {
-    name: 'gamevideo-graph-store',
-    configResolved(config) {
-      projectRoot = findProjectRootWithForgeax(config.root)
-    },
-    configureServer(server) {
-      server.middlewares.use(GRAPH_ROUTE_PREFIX, async (req, res, next) => {
-        try {
-          const url = new URL(req.url ?? '/', 'http://localhost')
-          const path = url.pathname.replace(/\/+$/, '') || '/'
-          const method = (req.method ?? 'GET').toUpperCase()
-          const slug = (url.searchParams.get('game') ?? '').trim() || null
-          const dir = graphDirForSlug(projectRoot, slug)
-          if (path === '/store' && method === 'GET') {
-            if (!dir) return sendJson(res, 200, { project: null, versions: [] })
-            const { project, versions } = readProject(dir)
-            return sendJson(res, 200, { project, versions })
-          }
-          if (path === '/store' && method === 'PUT') {
-            if (!dir) return sendJson(res, 200, { versions: [] })
-            const body = (await readGraphReqJson(req)) as { project?: GraphLibraryDocument; title?: string }
-            if (!body.project) return sendJson(res, 400, { error: 'missing project' })
-            const errors = validateDocument(body.project)
-            if (errors.length) return sendJson(res, 400, { errors })
-            return sendJson(res, 200, { versions: writeProject(dir, body.project, body.title) })
-          }
-          if (path === '/version' && method === 'GET') {
-            const vid = url.searchParams.get('id') ?? ''
-            return sendJson(res, 200, { project: dir ? readVersionProject(dir, vid) : null })
-          }
-          next()
-        } catch (e) {
-          sendJson(res, 500, { error: String(e) })
-        }
-      })
-    },
-  }
 }
 
 // ─── Dev-only signed upload reverse proxy (port 15185) ───────────────────
@@ -280,16 +219,70 @@ function gameVideoAssetsPlugin(): Plugin {
   }
 }
 
+// ─── 游戏专属组件「源码免构建」dev 端点 ──────────────────────────────────────
+const GAME_COMPONENTS_PREFIX = '/@game-components'
+
+/**
+ * dev 下把游戏仓 `components/index.tsx` **源码**经 vite 现场编译成浏览器 ESM 返回，
+ * 供运行时 `component-host.loadGameComponents` 动态 import——**无需 `bun build` 产 dist**。
+ *   GET /@game-components/<slug>/index.js → transform(.forgeax/games/<slug>/components/index.tsx)
+ * 无源码 / 无工程根 → 404（loader 回落构建产物或平台内建集）。仅 serve 生效。
+ */
+function gameComponentsDevPlugin(): Plugin {
+  let projectRoot: string | null = null
+  return {
+    name: 'gamevideo-game-components-dev',
+    apply: 'serve',
+    configResolved(config) {
+      projectRoot = findProjectRootWithForgeax(config.root)
+    },
+    configureServer(server) {
+      server.middlewares.use(GAME_COMPONENTS_PREFIX, async (req, res, next) => {
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost')
+          const slug = /^\/([a-z0-9][a-z0-9-]{1,40})(?:\/|$)/.exec(url.pathname)?.[1] ?? null
+          if (!projectRoot || !slug) return next()
+          const dir = resolve(projectRoot, '.forgeax', 'games', slug, 'components')
+          const tsx = resolve(dir, 'index.tsx')
+          const ts = resolve(dir, 'index.ts')
+          const abs = existsSync(tsx) ? tsx : existsSync(ts) ? ts : null
+          res.setHeader('content-type', 'text/javascript; charset=utf-8')
+          res.setHeader('cache-control', 'no-store')
+          if (!abs) {
+            res.statusCode = 404
+            return res.end('// no game components source')
+          }
+          const result = await server.transformRequest('/@fs/' + abs)
+          if (!result) {
+            res.statusCode = 404
+            return res.end('// transform failed')
+          }
+          res.statusCode = 200
+          return res.end(result.code)
+        } catch (e) {
+          res.statusCode = 500
+          res.setHeader('content-type', 'text/javascript; charset=utf-8')
+          return res.end('// ' + String(e))
+        }
+      })
+    },
+  }
+}
+
+// 注：组件快照（平台 component-host/components → 游戏仓 components/）不是 per-save 数据，
+// 属 seed/构建步骤，走 CLI `scripts/sync-components-to-game.mjs`，不在 vite / 保存链里做。
+// 存储/打版本一律走 game-host 服务（/api/game-host）。
+
 export default defineConfig(() => {
   // 作为 forgeax-studio 插件 build 时，host 把产物挂在 `/extensions/wb-game-video/`
   // 子路径下，需要绝对 base；独立 dev/preview/standalone 用相对 './'。
   const pluginBase =
     process.env.VITE_PLUGIN_BASE
-      ?? (process.env.WB_GAMEVIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './')
+    ?? (process.env.WB_GAMEVIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './')
 
   return {
     base: pluginBase,
-    plugins: [react(), videoUploadProxyPlugin(), graphStorePlugin(), gameVideoAssetsPlugin()],
+    plugins: [react(), videoUploadProxyPlugin(), gameVideoAssetsPlugin(), gameComponentsDevPlugin()],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
@@ -302,21 +295,28 @@ export default defineConfig(() => {
       port: process.env.VITE_DEV_PORT ? Number(process.env.VITE_DEV_PORT) : 15185,
       strictPort: true,
       allowedHosts: true as const,
-      proxy: {
-        '/api/v1/kino': {
-          target: `http://127.0.0.1:${process.env.FORGEAX_SERVER_PORT ?? 18900}`,
-          changeOrigin: true,
-        },
-      },
+      // 允许 /@fs 读到 forgeax 仓根（游戏仓 .forgeax/games/<slug>/components 源码在扩展目录之外）——
+      // gameComponentsDevPlugin 免构建现场编译游戏组件源码需要。
+      fs: { allow: [resolve(__dirname, '..', '..', '..', '..')] },
       hmr: {
         clientPort: process.env.VITE_PLUGIN_HMR_CLIENT_PORT
           ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
           : process.env.HMR_CLIENT_PORT
-          ? Number(process.env.HMR_CLIENT_PORT)
-          : process.env.PORT_GAMEVIDEO_STUDIO
-          ? Number(process.env.PORT_GAMEVIDEO_STUDIO)
-          : undefined,
+            ? Number(process.env.HMR_CLIENT_PORT)
+            : process.env.PORT_GAMEVIDEO_STUDIO
+              ? Number(process.env.PORT_GAMEVIDEO_STUDIO)
+              : undefined,
         ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
+      },
+      // 落盘/打版本上收到宿主后，扩展 dev iframe 的 `/api/*`（含 game-host）转发到
+      // forgeax server；prod 由 server 同源静态托管，无需代理。
+      proxy: {
+        // kino 走独立 127.0.0.1 落点（更具体的前缀排在通配 /api 之前）。
+        '/api/v1/kino': {
+          target: `http://127.0.0.1:${process.env.FORGEAX_SERVER_PORT ?? 18900}`,
+          changeOrigin: true,
+        },
+        '/api': { target: FORGEAX_SERVER, changeOrigin: true },
       },
     },
     test: {

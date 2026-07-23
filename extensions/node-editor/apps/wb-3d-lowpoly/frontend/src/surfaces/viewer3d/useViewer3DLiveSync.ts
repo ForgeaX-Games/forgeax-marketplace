@@ -132,7 +132,7 @@ export function useViewer3DLiveSync(client: ApiClient, projectKey?: string | nul
       lastRig = key
       lastScene = null
       useViewerStore.getState().setRig(rig, {
-        baseUrl: pluginUrl('/api/v1/library/blob'),
+        baseUrl: '/api/v1/library/blob',
         sourceLabel: rig.meshFilename,
       })
       return true
@@ -156,7 +156,7 @@ export function useViewer3DLiveSync(client: ApiClient, projectKey?: string | nul
       lastRig = null
       lastScene = key
       useViewerStore.getState().setScene(scene, {
-        baseUrl: pluginUrl('/api/v1/library/blob'),
+        baseUrl: '/api/v1/library/blob',
         sourceLabel: `scene · ${scene.itemCount} item${scene.itemCount === 1 ? '' : 's'}`,
       })
       return true

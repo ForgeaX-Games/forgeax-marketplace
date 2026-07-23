@@ -4,7 +4,8 @@
 // right output port; matches the ImageReaderNode style. Ported from the legacy
 // editor (components/canvas/ImagePreviewNode.tsx).
 import { memo, useCallback } from 'react'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

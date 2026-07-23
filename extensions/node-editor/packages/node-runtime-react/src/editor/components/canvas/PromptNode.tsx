@@ -9,7 +9,8 @@
 // (the saved prompt's English content), modelled on the TextPanel save modal.
 import { memo, useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor, normalizeType, type DomainPortTypes } from '../../utils/portTypes.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'

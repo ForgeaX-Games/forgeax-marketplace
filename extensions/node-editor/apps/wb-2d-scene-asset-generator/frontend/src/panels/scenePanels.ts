@@ -1,4 +1,4 @@
-import type { NodeTypes } from 'reactflow'
+import type { NodeTypes } from '@xyflow/react'
 import { BatteryNode } from '@forgeax/node-runtime-react/editor'
 import ImageBatteryNode from '../workbench/ImageBatteryNode.js'
 import ImagePreviewNode from '../workbench/ImagePreviewNode.js'

@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
 import type { GraphNode, OpSpec, ProjectMeta, WorkspaceState } from '@forgeax/node-runtime'
 import {
   ProjectPanel,
-  SaveIcon,
   configureEditorTransport,
   createEditorTransport,
-  pt,
   useProjectStore,
 } from '@forgeax/node-runtime-react/editor'
 import type { ActivePipelineRunInfo } from '@forgeax/node-runtime-react/editor'
@@ -242,121 +240,6 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
     }
   }, [])
 
-  // Resizable projects section.
-  const [projectsHeight, setProjectsHeight] = useState<number>(250)
-  const projectsSectionRef = useRef<HTMLElement>(null)
-
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = projectsSectionRef.current?.offsetHeight ?? projectsHeight
-
-    const onMove = (mv: MouseEvent): void => {
-      const delta = mv.clientY - startY
-      setProjectsHeight(Math.max(60, startHeight + delta))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [projectsHeight])
-
-  // ── Open / Save: local import & export of the canvas graph JSON ──
-  // The studio wraps each plugin pane in a sandboxed iframe WITHOUT
-  // `allow-downloads`, so a programmatic file download is silently blocked here
-  // (and sandboxed popups can't escape it either). Save therefore builds the
-  // kernel-graph-v1 text (same shape the backend /pipeline/export route writes,
-  // so it is re-importable) and shows it in a copyable modal; the user saves it
-  // as a .json file themselves. Open uploads a JSON, creates a NEW project named
-  // after the file, opens it, and imports the graph into it (mode:'replace') —
-  // the backend broadcasts graph:applied over /ws, so the canvas + preview
-  // refresh live without clobbering the project that was open before.
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [saveModal, setSaveModal] = useState<{ name: string; json: string } | null>(null)
-
-  // Build + surface the copyable JSON for a single project. When the project is
-  // not the active one, activate it first so client.getPipeline() reads ITS
-  // graph (the backend exposes only the active runtime's pipeline).
-  const handleSaveProject = useCallback(
-    async (project: ProjectMeta) => {
-      try {
-        if (useProjectStore.getState().viewingProjectId !== project.id) {
-          await useProjectStore.getState().switchProject(project.id)
-        }
-        const [snap, groups] = await Promise.all([client.getPipeline(), client.listGroups()])
-        if (!snap || Object.keys(snap.nodes ?? {}).length === 0) {
-          setError('Canvas is empty — nothing to save.')
-          return
-        }
-        const base = project.name?.trim() || new Date().toISOString().slice(0, 19).replace('T', '_')
-        const safeName = base.replace(/[\\/:*?"<>|]/g, '_')
-        const file = {
-          format: 'kernel-graph-v1' as const,
-          name: safeName,
-          graph: {
-            id: snap.id,
-            nodes: snap.nodes,
-            edges: snap.edges,
-            ...(groups.length ? { groups: Object.fromEntries(groups.map((g) => [g.id, g])) } : {}),
-            ...(snap.metadata ? { metadata: snap.metadata } : {}),
-          },
-        }
-        setSaveModal({ name: `${safeName}.json`, json: JSON.stringify(file, null, 2) })
-        setError(null)
-      } catch (err) {
-        setError((err as Error).message)
-      }
-    },
-    [client],
-  )
-
-  const handleOpen = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
-  const onFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const input = e.currentTarget
-      const file = input.files?.[0]
-      input.value = '' // allow re-selecting the same file
-      if (!file) return
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(await file.text())
-      } catch (err) {
-        setError(`Invalid JSON: ${(err as Error).message}`)
-        return
-      }
-      // A saved file wraps the graph as { format, graph }; tolerate a raw graph too.
-      const wrapper = parsed as { format?: string; graph?: unknown; name?: string }
-      const hasWrapper = !!wrapper && typeof wrapper === 'object' && 'graph' in wrapper
-      const graph = hasWrapper ? wrapper.graph : parsed
-      const format = hasWrapper ? wrapper.format : undefined
-      if (graph == null) {
-        setError('No graph found in file.')
-        return
-      }
-      // Name the new project after the file: prefer the wrapper's saved `name`,
-      // else the upload's filename sans extension.
-      const rawName =
-        (hasWrapper && typeof wrapper.name === 'string' && wrapper.name.trim()) ||
-        file.name.replace(/\.[^.]+$/, '').trim() ||
-        'Imported scene'
-      try {
-        // createProject opens (switches to) the new empty project; then we import
-        // the uploaded graph into it so the project that was open is untouched.
-        await useProjectStore.getState().createProject({ type: 'scene', name: rawName })
-        await client.importPipelineInline({ format, graph, options: { mode: 'replace', executeAfter: 'full' } })
-        setError(null)
-      } catch (err) {
-        setError(`Import failed: ${(err as Error).message}`)
-      }
-    },
-    [client],
-  )
-
   return (
     <aside className="scene-left-pane" aria-label="Scene Workbench Navigation">
       <header className="scene-left-pane__hero">
@@ -379,68 +262,7 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
         <EmbedToggle storageKey={LS_EDITOR} label="Scene Gen" />
       </div>
 
-      {/* Hidden uploader backing the Projects-header "Open" button. Open imports
-          a JSON as a brand-new project (named after the file) — see onFileChange. */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: 'none' }}
-        onChange={onFileChange}
-      />
-
-      <section
-        ref={projectsSectionRef}
-        className="scene-left-pane__section scene-left-pane__section--projects"
-        style={{ height: projectsHeight, overflow: 'hidden', flexShrink: 0 }}
-      >
-        {/* Open lives next to the "+ New" glyph; each card carries its own Save.
-            Both surface the canvas as re-importable kernel-graph-v1 JSON (the
-            iframe sandbox blocks a real download — see handleSaveProject). */}
-        <ProjectPanel
-          defaultProjectType="scene"
-          defaultProjectName="My scene"
-          activePipelineRuns={activePipelineRuns}
-          headerActions={
-            <button
-              type="button"
-              className="scene-left-pane__open-btn"
-              title="Open a scene JSON as a new project"
-              aria-label="Open a scene JSON as a new project"
-              onClick={handleOpen}
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v2H3V7Zm0 4h18l-2 7a2 2 0 0 1-2 1.5H5A2 2 0 0 1 3 18l0-7Z"
-                />
-              </svg>
-            </button>
-          }
-          renderProjectActions={(p) => (
-            <button
-              type="button"
-              className="proj-card__icon-btn scene-left-pane__save-action"
-              title={pt('save')}
-              aria-label={pt('save')}
-              onClick={() => void handleSaveProject(p)}
-            >
-              <SaveIcon />
-            </button>
-          )}
-        />
-      </section>
-      <div
-        className="scene-left-pane__projects-resize"
-        onMouseDown={handleResizeMouseDown}
-        aria-label="Drag to resize projects panel"
-        role="separator"
-        aria-orientation="horizontal"
-      />
+      <WorkbenchProjectsSection client={client} activePipelineRuns={activePipelineRuns} />
 
       {/* Group switcher: picks which interface's controls/info fill the lower
           half below. Pure left-pane view state — does not touch the panels. */}
@@ -490,10 +312,168 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
         </section>
       )}
 
-      {/* Save fallback: the plugin pane's iframe sandbox has no `allow-downloads`,
-          so we surface the graph JSON for the user to copy + save manually. The
-          chrome matches the project wizard/delete dialogs (accent-green primary,
-          muted secondary) so Open/Save feel native to the rest of the pane. */}
+    </aside>
+  )
+}
+
+/** Isolated from preview/selection bus updates so ProjectCard rows aren't re-formatted on every canvas interaction. */
+const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
+  client,
+  activePipelineRuns,
+}: {
+  client: HttpApiClient
+  activePipelineRuns: ActivePipelineRunInfo[]
+}): JSX.Element {
+  const [projectsHeight, setProjectsHeight] = useState<number>(250)
+  const projectsSectionRef = useRef<HTMLElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [saveModal, setSaveModal] = useState<{ name: string; json: string } | null>(null)
+  const [projectError, setProjectError] = useState<string | null>(null)
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = projectsSectionRef.current?.offsetHeight ?? projectsHeight
+
+    const onMove = (mv: MouseEvent): void => {
+      const delta = mv.clientY - startY
+      setProjectsHeight(Math.max(60, startHeight + delta))
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [projectsHeight])
+
+  const handleSaveProject = useCallback(
+    async (project: ProjectMeta) => {
+      try {
+        if (useProjectStore.getState().viewingProjectId !== project.id) {
+          await useProjectStore.getState().switchProject(project.id)
+        }
+        const [snap, groups] = await Promise.all([client.getPipeline(), client.listGroups()])
+        if (!snap || Object.keys(snap.nodes ?? {}).length === 0) {
+          setProjectError('Canvas is empty — nothing to save.')
+          return
+        }
+        const base = project.name?.trim() || new Date().toISOString().slice(0, 19).replace('T', '_')
+        const safeName = base.replace(/[\\/:*?"<>|]/g, '_')
+        const file = {
+          format: 'kernel-graph-v1' as const,
+          name: safeName,
+          graph: {
+            id: snap.id,
+            nodes: snap.nodes,
+            edges: snap.edges,
+            ...(groups.length ? { groups: Object.fromEntries(groups.map((g) => [g.id, g])) } : {}),
+            ...(snap.metadata ? { metadata: snap.metadata } : {}),
+          },
+        }
+        setSaveModal({ name: `${safeName}.json`, json: JSON.stringify(file, null, 2) })
+        setProjectError(null)
+      } catch (err) {
+        setProjectError((err as Error).message)
+      }
+    },
+    [client],
+  )
+
+  const handleOpen = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const onFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget
+      const file = input.files?.[0]
+      input.value = ''
+      if (!file) return
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(await file.text())
+      } catch (err) {
+        setProjectError(`Invalid JSON: ${(err as Error).message}`)
+        return
+      }
+      const wrapper = parsed as { format?: string; graph?: unknown; name?: string }
+      const hasWrapper = !!wrapper && typeof wrapper === 'object' && 'graph' in wrapper
+      const graph = hasWrapper ? wrapper.graph : parsed
+      const format = hasWrapper ? wrapper.format : undefined
+      if (graph == null) {
+        setProjectError('No graph found in file.')
+        return
+      }
+      const rawName =
+        (hasWrapper && typeof wrapper.name === 'string' && wrapper.name.trim()) ||
+        file.name.replace(/\.[^.]+$/, '').trim() ||
+        'Imported scene'
+      try {
+        await useProjectStore.getState().createProject({ type: 'scene', name: rawName })
+        await client.importPipelineInline({ format, graph, options: { mode: 'replace', executeAfter: 'full' } })
+        setProjectError(null)
+      } catch (err) {
+        setProjectError(`Import failed: ${(err as Error).message}`)
+      }
+    },
+    [client],
+  )
+
+  return (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: 'none' }}
+        onChange={onFileChange}
+      />
+      {projectError && (
+        <section className="scene-left-pane__notice">
+          <strong>Project action failed</strong>
+          <span>{projectError}</span>
+        </section>
+      )}
+      <section
+        ref={projectsSectionRef}
+        className="scene-left-pane__section scene-left-pane__section--projects"
+        style={{ height: projectsHeight, overflow: 'hidden', flexShrink: 0 }}
+      >
+        <ProjectPanel
+          defaultProjectType="scene"
+          defaultProjectName="My scene"
+          activePipelineRuns={activePipelineRuns}
+          onSaveProject={handleSaveProject}
+          headerActions={
+            <button
+              type="button"
+              className="scene-left-pane__open-btn"
+              title="Open a scene JSON as a new project"
+              aria-label="Open a scene JSON as a new project"
+              onClick={handleOpen}
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v2H3V7Zm0 4h18l-2 7a2 2 0 0 1-2 1.5H5A2 2 0 0 1 3 18l0-7Z"
+                />
+              </svg>
+            </button>
+          }
+        />
+      </section>
+      <div
+        className="scene-left-pane__projects-resize"
+        onMouseDown={handleResizeMouseDown}
+        aria-label="Drag to resize projects panel"
+        role="separator"
+        aria-orientation="horizontal"
+      />
       {saveModal && (
         <div className="scene-left-pane__save" role="dialog" aria-label="Save canvas JSON">
           <header className="proj-modal__head scene-left-pane__save-head">
@@ -525,9 +505,9 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
           </footer>
         </div>
       )}
-    </aside>
+    </>
   )
-}
+})
 
 // Detail view for the rule selected in the AssetStore pane — the "rule 规则信息"
 // surfaced under the left pane's AssetStore group. Renders from the cross-pane

@@ -9,8 +9,8 @@ import type { GameNode, GameScenario, SubFlowPackDef } from '../schema/graph-sch
 import type { Layout } from '../schema/node-config-schema'
 import { GraphRuntime } from './engine'
 import type { ComponentRegistry } from '../registry/component-registry'
-import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../skins/components'
-import type { SkinRegistry } from '../skins/rendererRegistry'
+import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../component-host/components'
+import type { SkinRegistry } from '../component-host/rendererRegistry'
 import type { RuntimeDirective } from './directives'
 
 /** GraphSession 构造选项：可注入隔离注册表；缺省每局新建核心组件/Skin 表。 */

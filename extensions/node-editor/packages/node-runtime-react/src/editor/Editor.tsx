@@ -12,8 +12,8 @@
 // canvas updates. That is the North-Star "watch the AI work".
 import { useEffect, useLayoutEffect } from 'react'
 import type { ReactNode } from 'react'
-import { ReactFlowProvider } from 'reactflow'
-import type { NodeTypes } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
+import type { NodeTypes } from '@xyflow/react'
 import type { ApiClient } from '../api/ApiClient.js'
 import type { DomainPortTypes } from './utils/portTypes.js'
 import type { ExternalDropHandler } from './components/canvas/useCanvasDrop.js'

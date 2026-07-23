@@ -7,8 +7,9 @@
 // group_output boundary nodes resolve from their `ports` list, so cross-group
 // wires type-check + colour by the real inner tier instead of a flat `any`.
 import { useCallback, useState } from 'react'
-import { addEdge } from 'reactflow'
-import type { Connection, Node, Edge } from 'reactflow'
+import { addEdge } from '@xyflow/react'
+import type { Connection } from '@xyflow/react'
+import type { Node, Edge } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import type { BatteryAccess, BatteryPort, ExposedPort } from '../../types.js'
 import { getPortTypeColor, isTypeCompatible, normalizeType, type DomainPortTypes } from '../../utils/portTypes.js'
@@ -105,7 +106,7 @@ export function useCanvasConnect({ nodes, setEdges, setNodes, domainPortTypes }:
 
   /** Type-compatibility validation: same type / any / matrix allows, else reject. */
   const isValidConnection = useCallback(
-    (connection: Connection) => {
+    (connection: Connection | Edge) => {
       if (connection.source === connection.target) return false
 
       const sourceNode = nodes.find((n) => n.id === connection.source)
@@ -279,7 +280,7 @@ export function useCanvasConnect({ nodes, setEdges, setNodes, domainPortTypes }:
   /** Connect start: colour the preview line + pulse type-compatible handles. */
   const onConnectStart = useCallback(
     (
-      _e: React.MouseEvent | React.TouchEvent,
+      _e: MouseEvent | TouchEvent,
       { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: string | null },
     ) => {
       let sourceType: string | null = null

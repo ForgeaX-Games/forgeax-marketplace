@@ -6,7 +6,8 @@
 // Ported from the legacy editor (components/canvas/NumberSliderNode.tsx).
 import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore, useHistoryStore } from '../../stores/index.js'
 import { getPortTypeColor } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

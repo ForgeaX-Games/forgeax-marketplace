@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { readNode } from '../../vendor/dist/shared/types/index.js';
+import {
+  cellCount,
+  childrenOf,
+  getNode,
+  resolvePath,
+  ROOT_ID,
+  type SceneGraph,
+} from '../../vendor/dist/shared/types/index.js';
 import { json2Voxels } from '../../batteries/scene/bridge/json2voxels/index.js';
 import { voxels2Scene } from '../../batteries/scene/bridge/voxels2scene/index.js';
 import { buildVoxelCityDocument } from '../../examples/voxel-city.build.js';
+
+function findNode(graph: SceneGraph, path: string) {
+  const id = resolvePath(graph, ROOT_ID, path);
+  return id === null ? null : getNode(graph, id);
+}
 
 const SEED = 42;
 
@@ -100,23 +112,25 @@ describe('voxel city (terrain + districts + landmarks)', () => {
     expect(built.error).toBeUndefined();
     expect(built.voxelCount).toBe(doc.meta.voxelCount);
 
-    const city = readNode(built.scene!.tree, '/VoxelCity');
+    const graph = built.scene!.graph;
+    const city = findNode(graph, '/VoxelCity');
     expect(city).not.toBeNull();
-    const groups = city!.children.map((c) => c.name);
+    const groups = childrenOf(graph, city!.id).map((c) => c.name);
     expect(groups).toContain('terrain');
 
-    const terrain = readNode(built.scene!.tree, '/VoxelCity/terrain');
-    expect(terrain!.children.map((c) => c.name)).toContain('land');
-    expect(terrain!.children.map((c) => c.name)).toContain('road');
+    const terrain = findNode(graph, '/VoxelCity/terrain');
+    const terrainChildNames = childrenOf(graph, terrain!.id).map((c) => c.name);
+    expect(terrainChildNames).toContain('land');
+    expect(terrainChildNames).toContain('road');
 
     // at least three of the four districts / landmarks materialise
     const featureGroups = groups.filter((g) => g !== 'terrain');
     expect(featureGroups.length).toBeGreaterThanOrEqual(3);
 
     // a building leaf carries voxels
-    const firstFeature = readNode(built.scene!.tree, `/VoxelCity/${featureGroups[0]}`);
-    const child = firstFeature!.children[0];
-    const leaf = readNode(built.scene!.tree, `/VoxelCity/${featureGroups[0]}/${child.name}`);
-    expect(leaf?.cells?.length ?? 0).toBeGreaterThan(0);
+    const firstFeature = findNode(graph, `/VoxelCity/${featureGroups[0]}`);
+    const child = childrenOf(graph, firstFeature!.id)[0];
+    const leaf = findNode(graph, `/VoxelCity/${featureGroups[0]}/${child.name}`);
+    expect(leaf?.content ? cellCount(leaf.content) : 0).toBeGreaterThan(0);
   });
 });

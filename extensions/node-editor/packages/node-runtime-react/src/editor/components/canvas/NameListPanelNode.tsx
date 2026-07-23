@@ -2,7 +2,8 @@
 // its own line and auto-widens to fit. Ported from the legacy editor
 // (components/canvas/NameListPanelNode.tsx).
 import { memo, useCallback, useEffect, useRef } from 'react'
-import { Handle, Position, type NodeProps, NodeResizer, useReactFlow } from 'reactflow'
+import { Handle, Position, NodeResizer, useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import { usePipelineStore, useUIStore } from '../../stores/index.js'
 import { getPortTypeColor, normalizeType } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

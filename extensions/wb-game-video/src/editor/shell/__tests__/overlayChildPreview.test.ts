@@ -5,12 +5,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { createCoreSkinRegistry, registerCoreSkins } from '../../../runtime/skins/components'
-import { battleHpBarPreset } from '../../../runtime/skins/components/BattleHpBar'
-import { inkKouPreset } from '../../../runtime/skins/components/InkKouLayer'
-import { inkYingMoPreset } from '../../../runtime/skins/components/InkYingMoLayer'
+import { createCoreSkinRegistry, registerCoreSkins } from '../../../runtime/component-host/components'
+import { battleHpBarPreset } from '../../../runtime/component-host/components/BattleHpBar'
+import { inkKouPreset } from '../../../runtime/component-host/components/InkKouLayer'
+import { inkYingMoPreset } from '../../../runtime/component-host/components/InkYingMoLayer'
 import { renderOverlayChildPreview } from '../overlayChildPreview'
-import type { SkinCtx } from '../../../runtime/skins/rendererRegistry'
+import type { SkinCtx } from '../../../runtime/component-host/rendererRegistry'
 
 beforeAll(() => {
     registerCoreSkins()

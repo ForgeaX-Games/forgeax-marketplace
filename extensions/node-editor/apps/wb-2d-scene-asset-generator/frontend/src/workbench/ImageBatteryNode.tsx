@@ -1,6 +1,11 @@
 import { memo } from 'react'
-import type { NodeProps } from 'reactflow'
-import { BatteryNode, usePipelineStore, isDataTreeEntries, type Battery } from '@forgeax/node-runtime-react/editor'
+import {
+  BatteryNode,
+  usePipelineStore,
+  isDataTreeEntries,
+  type Battery,
+  type NodeProps,
+} from '@forgeax/node-runtime-react/editor'
 import { pluginUrl } from '../api/pluginHttp'
 import './ImageBatteryNode.css'
 

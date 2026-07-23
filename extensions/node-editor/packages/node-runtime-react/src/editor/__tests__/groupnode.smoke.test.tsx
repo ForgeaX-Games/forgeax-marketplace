@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { ReactFlowProvider } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
 
 import { usePipelineStore } from '../stores/pipelineStore.js'
 // Import canvasConstants before GroupNode — the real-world order (Canvas pulls in

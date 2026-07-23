@@ -5,8 +5,8 @@
  * 表达式失败绝不抛错（编辑器随时半成品），回退「无法求值 / ?」。运行时消费见 FloatText 绘制时 resolve。
  */
 import type { Entity, GraphCondition, GraphEffect, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
-import type { FloatTextParams } from '../../runtime/skins/components/FloatText'
-import type { QteCue } from '../../runtime/skins/components/Qte'
+import type { FloatTextParams } from '../../runtime/component-host/components/FloatText'
+import type { QteCue } from '../../runtime/component-host/components/Qte'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import type { MutableState } from '../../runtime/engine/apply-effects'
 import { evaluateCondition } from '../../runtime/engine/condition'

@@ -125,7 +125,18 @@ export function RendererSurface({
   // structuralBakedRefresh). Published by RenderCanvas via paintPersistsRef.
   const paintPersistsRef = useRef<(() => Promise<void>) | null>(null)
 
-  const { viewMode, drawMode, setViewMode, setDrawMode, resetViewport2d } = useRenderStore()
+  // Each field selected individually (not `useRenderStore()` with no selector!) —
+  // an unselected call subscribes to the WHOLE store, so it re-renders on every
+  // single store update including every wheel-zoom tick's setViewport2d/
+  // panViewport2d. That re-render cascades into every unmemoized child below
+  // (LayerTreeRows/BakedLayerTreeRows/LayerRow/BakedLayerRow etc.), which is
+  // where the real cost was hiding — the layer list panel has nothing to do
+  // with viewport, but was re-rendering top-to-bottom on every zoom tick.
+  const viewMode = useRenderStore((s) => s.viewMode)
+  const drawMode = useRenderStore((s) => s.drawMode)
+  const setViewMode = useRenderStore((s) => s.setViewMode)
+  const setDrawMode = useRenderStore((s) => s.setDrawMode)
+  const resetViewport2d = useRenderStore((s) => s.resetViewport2d)
   const setSelectedEditorNodeIds = useRenderStore((s) => s.setSelectedEditorNodeIds)
   // Voxel (scene_output) layers — the read-only "Output" section of the panel.
   const layerKeys = useVoxelLayerKeys()

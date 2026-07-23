@@ -8,8 +8,15 @@ import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import './StatusBar.css'
 
 function StatusBar() {
-  const { currentPipeline, pipelineStatus, selectedNode, batteries } = usePipelineStore()
-  const { connectionStatus, langMode } = useUIStore()
+  // Selected field-by-field — a bare `usePipelineStore()`/`useUIStore()` call
+  // subscribes to the whole store and re-renders this bar on every unrelated
+  // update (e.g. every streamed nodeOutputs tick while a pipeline runs).
+  const currentPipeline = usePipelineStore((s) => s.currentPipeline)
+  const pipelineStatus = usePipelineStore((s) => s.pipelineStatus)
+  const selectedNode = usePipelineStore((s) => s.selectedNode)
+  const batteries = usePipelineStore((s) => s.batteries)
+  const connectionStatus = useUIStore((s) => s.connectionStatus)
+  const langMode = useUIStore((s) => s.langMode)
   const en = langMode === 'en'
 
   const nodeCount = currentPipeline?.nodes.length || 0

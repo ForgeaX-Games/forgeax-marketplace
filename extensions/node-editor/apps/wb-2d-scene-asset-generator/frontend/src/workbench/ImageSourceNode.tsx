@@ -1,6 +1,5 @@
 import { memo, useCallback, useRef, useState } from 'react'
-import type { NodeProps } from 'reactflow'
-import { BatteryNode, usePipelineStore, type Battery } from '@forgeax/node-runtime-react/editor'
+import { BatteryNode, usePipelineStore, type Battery, type NodeProps } from '@forgeax/node-runtime-react/editor'
 import { readDraggedAsset, encodeDraggedAssetRef, type DraggedAsset } from '../surfaces/library/draggedAssetBus.js'
 import { pluginUrl } from '../api/pluginHttp'
 import './ImageSourceNode.css'

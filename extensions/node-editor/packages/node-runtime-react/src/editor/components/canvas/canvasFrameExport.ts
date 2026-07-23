@@ -1,7 +1,7 @@
 // Frame-to-SVG/PNG clipboard export for canvas frames. Ported verbatim from the
 // legacy editor (components/canvas/canvasFrameExport.ts) with imports retargeted
 // onto the editor types + sibling utils. Uses only DOM + clipboard APIs.
-import type { Edge, Node } from 'reactflow'
+import type { Edge, Node } from '../../xyflow.js'
 import type { Battery, BatteryPort, CanvasFrame, NodeGroup, Pipeline, PipelineNode } from '../../types.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 
@@ -187,8 +187,8 @@ function getRfNodeSize(node: Node): { width: number; height: number } {
   const domSize = getDomNodeSize(node.id)
   if (domSize) return domSize
   return {
-    width: node.width ?? numericStyleValue(node.style?.width) ?? FALLBACK_NODE_WIDTH,
-    height: node.height ?? numericStyleValue(node.style?.height) ?? FALLBACK_NODE_HEIGHT,
+    width: node.measured?.width ?? numericStyleValue(node.style?.width) ?? FALLBACK_NODE_WIDTH,
+    height: node.measured?.height ?? numericStyleValue(node.style?.height) ?? FALLBACK_NODE_HEIGHT,
   }
 }
 

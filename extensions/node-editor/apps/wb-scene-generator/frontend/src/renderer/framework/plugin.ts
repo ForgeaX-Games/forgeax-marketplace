@@ -39,7 +39,7 @@
 //   * 自己监听 WS / 自己处理 executionId
 //   * 自己 LRU / 自己 invalidate cache
 
-import type { ForwardRefExoticComponent, RefAttributes } from 'react'
+import type { ForwardRefExoticComponent, MemoExoticComponent, RefAttributes } from 'react'
 import type { ViewMode } from '../types'
 import type { BillboardVoxelHit } from './geometry/topBillboard'
 
@@ -87,10 +87,19 @@ export interface RenderPlugin {
   /** 该插件接管的 viewMode 列表。同一 ViewMode 不能被多个 plugin 同时 register。 */
   modes: ViewMode[]
   /**
-   * 插件的 React 实现(forwardRef)。框架在 viewMode 切到 modes 之一时挂载此组件,
-   * 并通过 ref 拿到 PluginHandle(供 host 调 §7.2 / §7.3 反向接口)。
+   * 插件的 React 实现(forwardRef,通常再套一层 React.memo —— host 侧
+   * RenderCanvas 会因为自身订阅 viewport2d.scale 等状态而频繁重渲染,插件不
+   * memo 的话会被拖着一起重渲染整棵子树)。框架在 viewMode 切到 modes 之一时
+   * 挂载此组件,并通过 ref 拿到 PluginHandle(供 host 调 §7.2 / §7.3 反向接口)。
+   *
+   * 显式列出 memo 变体(而不是用 `ComponentType<RefAttributes<PluginHandle>>`
+   * 泛化两者):`ComponentType` 展开成 `FunctionComponent`,其 `propTypes`
+   * 字段会把 legacy string ref 的兼容性问题带进来,导致纯 forwardRef(无 memo)
+   * 插件反而报类型错误。
    */
-  Component: ForwardRefExoticComponent<RefAttributes<PluginHandle>>
+  Component:
+    | ForwardRefExoticComponent<RefAttributes<PluginHandle>>
+    | MemoExoticComponent<ForwardRefExoticComponent<RefAttributes<PluginHandle>>>
   /** 调试 / 错误信息显示用。 */
   name: string
 }

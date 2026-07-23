@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GraphSession } from '../engine/session'
-import { createDefaultComponentRegistry } from '../skins/components'
+import { createDefaultComponentRegistry } from '../component-host/components'
 import { ComponentRegistry } from '../registry/component-registry'
 import { node, scnOf } from './test-fixtures'
 import {

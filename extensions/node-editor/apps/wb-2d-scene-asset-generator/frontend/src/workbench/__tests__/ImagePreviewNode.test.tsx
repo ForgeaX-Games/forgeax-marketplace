@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import { ReactFlowProvider } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
 import { usePipelineStore, type Battery } from '@forgeax/node-runtime-react/editor'
 import ImagePreviewNode from '../ImagePreviewNode'
 
@@ -61,11 +61,14 @@ function renderNode(): HTMLElement {
         id="prev"
         type="image_preview"
         selected={false}
+        selectable
+        deletable
+        draggable
         dragging={false}
         zIndex={0}
         isConnectable
-        xPos={0}
-        yPos={0}
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
         data={{ battery: previewBattery, params: {} }}
       />
     </ReactFlowProvider>,

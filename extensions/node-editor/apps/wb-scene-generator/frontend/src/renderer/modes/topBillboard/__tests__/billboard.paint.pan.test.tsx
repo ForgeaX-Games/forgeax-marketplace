@@ -76,6 +76,26 @@ function makeStubSurface(width: number, height: number): Surface2D {
   } as unknown as Surface2D
 }
 
+// Pan/zoom no longer recomposes synchronously off a React render — it's driven
+// by an imperative store subscription that coalesces to one redraw per rAF (see
+// index.tsx's "Pan/zoom: imperative compose" block). Tests must install a
+// controllable rAF queue and flush it explicitly, exactly like RenderCanvas's
+// own installRafQueue() helper.
+function installRafQueue(): () => void {
+  const callbacks: FrameRequestCallback[] = []
+  vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+    callbacks.push(cb)
+    return callbacks.length
+  }))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  return () => {
+    const pending = callbacks.splice(0)
+    for (const cb of pending) cb(performance.now())
+  }
+}
+
+let flushRaf: () => void
+
 beforeEach(() => {
   useRenderStore.getState().reset()
   buildSpy.mockClear()
@@ -88,6 +108,7 @@ beforeEach(() => {
     const name = m?.[4]?.slice(1, -1) ?? alias
     return { alias: name, width: 16, height: 16, naturalWidth: 16, naturalHeight: 16 }
   })
+  flushRaf = installRafQueue()
 })
 
 afterEach(() => {
@@ -96,6 +117,7 @@ afterEach(() => {
     createSurface: (w: number, h: number) => ({ width: w, height: h, getContext: () => null } as unknown as Surface2D),
     devicePixelRatio: () => 1,
   })
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
@@ -143,6 +165,7 @@ describe('paint-then-pan: viewport change re-composes the LATEST master (paint m
     await act(async () => {
       useRenderStore.getState().panViewport2d(13, -7)
       await Promise.resolve()
+      flushRaf()
     })
 
     // The pan must NOT rebuild the surface (viewport only re-sends the frame).
@@ -177,6 +200,7 @@ describe('paint-then-pan: viewport change re-composes the LATEST master (paint m
     await act(async () => {
       useRenderStore.getState().panViewport2d(5, 5)
       await Promise.resolve()
+      flushRaf()
     })
 
     // The pan recomposed using a master whose bbox spans the just-painted cell

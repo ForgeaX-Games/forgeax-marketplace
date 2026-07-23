@@ -2,7 +2,7 @@
 // ReactFlow viewport transform, RAF-throttled to one paint per frame. Extracted
 // verbatim from the legacy Canvas.tsx grid logic.
 import { useCallback, useEffect, useRef } from 'react'
-import type { Viewport } from 'reactflow'
+import type { Viewport } from '@xyflow/react'
 
 export function useCanvasGrid(containerRef: React.RefObject<HTMLElement>) {
   const pendingViewportRef = useRef<Viewport | null>(null)

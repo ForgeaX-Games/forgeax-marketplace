@@ -8,7 +8,7 @@
 //   3 — right edge ↔ right edge within threshold → snap
 // All three axes are computed; the closest one wins. No Y alignment.
 import { useCallback, useRef, useState } from 'react'
-import type { Node, ReactFlowInstance } from 'reactflow'
+import type { Node, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { DEFAULT_BATTERY_WIDTH } from './canvasConstants.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
@@ -23,7 +23,6 @@ export interface SnapGuide {
 }
 
 interface UseCanvasSnapParams {
-  nodes: Node[]
   reactFlowInstance: ReactFlowInstance | null
   reactFlowWrapper: React.RefObject<HTMLDivElement>
   /** Snap targets used by onNodesChange, written by onNodeDrag. */
@@ -33,7 +32,6 @@ interface UseCanvasSnapParams {
 }
 
 export function useCanvasSnap({
-  nodes,
   reactFlowInstance,
   reactFlowWrapper,
   snapTargetsRef,
@@ -44,15 +42,26 @@ export function useCanvasSnap({
 
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([])
   const prevSnapKey = useRef('')
+  const containerRectRef = useRef<DOMRect | null>(null)
 
-  // Node width: prefer ReactFlow's measured width (node.width), else the default.
-  const getNodeWidth = (node: Node): number => node.width ?? DEFAULT_BATTERY_WIDTH
+  const cacheContainerRect = useCallback((): void => {
+    if (reactFlowWrapper.current) {
+      containerRectRef.current = reactFlowWrapper.current.getBoundingClientRect()
+    }
+  }, [reactFlowWrapper])
+
+  const onNodeDragStart = useCallback((): void => {
+    cacheContainerRect()
+  }, [cacheContainerRect])
+
+  // Node width: prefer ReactFlow's measured width (node.measured.width), else the default.
+  const getNodeWidth = (node: Node): number => node.measured?.width ?? DEFAULT_BATTERY_WIDTH
 
   // While dragging: compute the three X-axis alignment candidates, write
   // snapTargetsRef, update the guides. onNodesChange runs in the same frame and
   // reads the ref to apply the correction. Single-node drags only.
   const onNodeDrag = useCallback(
-    (_e: React.MouseEvent, _node: Node, draggedNodes: Node[]) => {
+    (_e: MouseEvent | TouchEvent, _node: Node, draggedNodes: Node[]) => {
       if (!snapEnabled || !reactFlowInstance || !reactFlowWrapper.current || draggedNodes.length !== 1) {
         if (prevSnapKey.current !== '') {
           prevSnapKey.current = ''
@@ -65,8 +74,10 @@ export function useCanvasSnap({
       const draggedNode = draggedNodes[0]
       const zoom = reactFlowInstance.getViewport().zoom
       const thresholdFlow = SNAP_PX / zoom
-      const containerRect = reactFlowWrapper.current.getBoundingClientRect()
-      const otherNodes = nodes.filter((n) => n.id !== draggedNode.id)
+      const containerRect = containerRectRef.current ?? reactFlowWrapper.current.getBoundingClientRect()
+      if (!containerRectRef.current) containerRectRef.current = containerRect
+      const allNodes = reactFlowInstance.getNodes()
+      const otherNodes = allNodes.filter((n) => n.id !== draggedNode.id)
 
       const dWidth = getNodeWidth(draggedNode)
       const dragLeft   = draggedNode.position.x
@@ -109,7 +120,7 @@ export function useCanvasSnap({
         setSnapGuides(guides)
       }
     },
-    [snapEnabled, nodes, reactFlowInstance, reactFlowWrapper, snapTargetsRef],
+    [snapEnabled, reactFlowInstance, reactFlowWrapper, snapTargetsRef],
   )
 
   // Shared drag-stop logic: snapshot + updateNode + history + clear guides +
@@ -173,7 +184,7 @@ export function useCanvasSnap({
   )
 
   const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, _node: Node, draggedNodes: Node[]) => {
+    (_event: MouseEvent | TouchEvent, _node: Node, draggedNodes: Node[]) => {
       commitDragStop(draggedNodes)
     },
     [commitDragStop],
@@ -186,5 +197,5 @@ export function useCanvasSnap({
     [commitDragStop],
   )
 
-  return { snapGuides, onNodeDrag, onNodeDragStop, onSelectionDragStop }
+  return { snapGuides, onNodeDrag, onNodeDragStart, onNodeDragStop, onSelectionDragStop }
 }

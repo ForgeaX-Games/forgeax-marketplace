@@ -1,7 +1,13 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src",
+    // 不再固定 rootDir="src"：sceneStructureUtils.ts / SceneStructureNode.tsx /
+    // sceneValueFormatter.ts 直接从源码引用 vendor/shared/types/scene/*.ts
+    // （bundler 解析，同 vite 实际打包路径，见这几个文件顶部 import），物理上
+    // 在 src 之外。真正的构建走 `vite build`（不受 tsc rootDir/outDir 影响），
+    // 这里的 tsc 只用于 `pnpm typecheck`（--noEmit）——去掉 rootDir 让 tsc 按
+    // 实际引用自动推导公共根，而不是对着一份从不会被 tsc 实际生成的 outDir
+    // 结构报错。
     "outDir": "dist",
     "module": "ESNext",
     "moduleResolution": "Bundler",

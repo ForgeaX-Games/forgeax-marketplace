@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import type { GameScenario } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
-import { PlayerRootContext, type SkinCtx } from '../../runtime/skins/rendererRegistry'
+import { PlayerRootContext, type SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { getComponent } from '../../runtime/registry/component-registry'
 import { bootEditorSkins } from '../init'

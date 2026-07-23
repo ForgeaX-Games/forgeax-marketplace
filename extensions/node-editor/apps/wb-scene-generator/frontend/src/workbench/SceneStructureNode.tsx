@@ -1,17 +1,19 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { NodeResizer, useReactFlow, type NodeProps } from 'reactflow'
+import { NodeResizer, useReactFlow } from '@xyflow/react'
+import type { NodeProps } from '@forgeax/node-runtime-react/editor'
 import {
   BatteryNode,
   resolveInputPortValue,
   usePipelineStore,
   type Battery,
 } from '@forgeax/node-runtime-react/editor'
-import type { SceneNodeSnapshot } from '../../../vendor/shared/types/scene/types.js'
+import { childrenOf, type NodeId, type SceneGraph, type SceneNode } from '../../../vendor/shared/types/scene/graph.js'
 import {
   collectNodeStats,
   extractScenePortFromWire,
+  focusDisplayPath,
   formatSceneNodeLabel,
-  pathsExpandedToFocus,
+  idsExpandedToFocus,
   readTreeRoot,
   type SceneNodeStats,
 } from './sceneStructureUtils.js'
@@ -42,26 +44,29 @@ function TreeCaret({ collapsed }: { collapsed: boolean }): JSX.Element {
 }
 
 function SceneTreeRow({
+  graph,
   node,
   depth,
   isLast,
   guides,
-  focusPath,
+  focusId,
   collapsed,
   onToggle,
 }: {
-  node: SceneNodeSnapshot
+  graph: SceneGraph
+  node: SceneNode
   depth: number
   isLast: boolean
   guides: boolean[]
-  focusPath: string
-  collapsed: ReadonlySet<string>
-  onToggle: (path: string) => void
+  focusId: NodeId
+  collapsed: ReadonlySet<NodeId>
+  onToggle: (id: NodeId) => void
 }): JSX.Element {
-  const stats = useMemo(() => collectNodeStats(node), [node])
-  const hasChildren = node.children.length > 0
-  const isCollapsed = collapsed.has(node.path)
-  const isFocus = node.path === focusPath
+  const stats = useMemo(() => collectNodeStats(graph, node), [graph, node])
+  const kids = useMemo(() => childrenOf(graph, node.id), [graph, node])
+  const hasChildren = kids.length > 0
+  const isCollapsed = collapsed.has(node.id)
+  const isFocus = node.id === focusId
 
   return (
     <>
@@ -69,7 +74,7 @@ function SceneTreeRow({
         <div className="scene-structure-tree__guides" aria-hidden="true">
           {guides.map((continues, index) => (
             <span
-              key={`${node.path}-guide-${index}`}
+              key={`${node.id}-guide-${index}`}
               className={`scene-structure-tree__guide${continues ? ' scene-structure-tree__guide--v' : ''}`}
             />
           ))}
@@ -84,14 +89,14 @@ function SceneTreeRow({
             type="button"
             className="scene-structure-tree__caret nodrag"
             aria-expanded={!isCollapsed}
-            onClick={() => onToggle(node.path)}
+            onClick={() => onToggle(node.id)}
           >
             <TreeCaret collapsed={isCollapsed} />
           </button>
         ) : (
           <span className="scene-structure-tree__caret scene-structure-tree__caret--spacer" aria-hidden />
         )}
-        <span className="scene-structure-tree__name" title={node.path}>
+        <span className="scene-structure-tree__name" title={node.id}>
           {formatSceneNodeLabel(node)}
         </span>
         {node.schema ? <span className="scene-structure-tree__schema">{node.schema}</span> : null}
@@ -101,14 +106,15 @@ function SceneTreeRow({
       </li>
       {hasChildren &&
         !isCollapsed &&
-        node.children.map((child, index) => (
+        kids.map((child, index) => (
           <SceneTreeRow
-            key={child.path}
+            key={child.id}
+            graph={graph}
             node={child}
             depth={depth + 1}
-            isLast={index === node.children.length - 1}
+            isLast={index === kids.length - 1}
             guides={[...guides, !isLast]}
-            focusPath={focusPath}
+            focusId={focusId}
             collapsed={collapsed}
             onToggle={onToggle}
           />
@@ -118,36 +124,41 @@ function SceneTreeRow({
 }
 
 function SceneStructurePanel({
+  graph,
+  focusId,
   focusPath,
   root,
   rootStats,
 }: {
+  graph: SceneGraph
+  focusId: NodeId
   focusPath: string
-  root: SceneNodeSnapshot
+  root: SceneNode
   rootStats: SceneNodeStats
 }): JSX.Element {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  const [collapsed, setCollapsed] = useState<Set<NodeId>>(() => new Set())
 
   useEffect(() => {
-    const expanded = pathsExpandedToFocus(focusPath)
+    const expanded = idsExpandedToFocus(graph, focusId)
     setCollapsed(() => {
-      const next = new Set<string>()
-      const walk = (node: SceneNodeSnapshot): void => {
-        if (node.children.length > 0 && !expanded.has(node.path)) {
-          next.add(node.path)
+      const next = new Set<NodeId>()
+      const walk = (node: SceneNode): void => {
+        const kids = childrenOf(graph, node.id)
+        if (kids.length > 0 && !expanded.has(node.id)) {
+          next.add(node.id)
         }
-        for (const child of node.children) walk(child)
+        for (const child of kids) walk(child)
       }
       walk(root)
       return next
     })
-  }, [focusPath, root])
+  }, [graph, focusId, root])
 
-  const onToggle = useCallback((path: string) => {
+  const onToggle = useCallback((id: NodeId) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }, [])
@@ -164,11 +175,12 @@ function SceneStructurePanel({
       </div>
       <ul className="scene-structure-tree" role="tree">
         <SceneTreeRow
+          graph={graph}
           node={root}
           depth={0}
           isLast
           guides={[]}
-          focusPath={focusPath}
+          focusId={focusId}
           collapsed={collapsed}
           onToggle={onToggle}
         />
@@ -211,7 +223,7 @@ function SceneStructureNode(props: NodeProps<SceneStructureNodeData>): JSX.Eleme
   }, [id, nodeOutputs, edges])
 
   const root = scenePort ? readTreeRoot(scenePort) : null
-  const rootStats = root ? collectNodeStats(root) : null
+  const rootStats = root && scenePort ? collectNodeStats(scenePort.graph, root) : null
   const placeholder = !scenePort ? '连接 scene 端口以查看结构' : null
 
   return (
@@ -233,8 +245,14 @@ function SceneStructureNode(props: NodeProps<SceneStructureNodeData>): JSX.Eleme
         <div className="scene-structure-panel scene-structure-panel--empty nodrag">
           <span className="scene-structure-panel__placeholder">{placeholder}</span>
         </div>
-      ) : root && rootStats ? (
-        <SceneStructurePanel focusPath={scenePort!.focus} root={root} rootStats={rootStats} />
+      ) : root && rootStats && scenePort ? (
+        <SceneStructurePanel
+          graph={scenePort.graph}
+          focusId={scenePort.focus}
+          focusPath={focusDisplayPath(scenePort)}
+          root={root}
+          rootStats={rootStats}
+        />
       ) : null}
     </div>
   )

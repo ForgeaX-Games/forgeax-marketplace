@@ -4,7 +4,7 @@
 // Ported verbatim from the legacy editor (components/canvas/ProbeEdge.tsx),
 // retargeted onto the editor stores + utils.
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
-import { type EdgeProps, getBezierPath, EdgeLabelRenderer, BaseEdge } from 'reactflow'
+import { type EdgeProps, getBezierPath, EdgeLabelRenderer, BaseEdge } from '@xyflow/react'
 import { useUIStore, usePipelineStore } from '../../stores/index.js'
 import { normalizeType, getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 import { getPortAccess, formatDataTreeSummary } from '../../utils/datatreeShape.js'

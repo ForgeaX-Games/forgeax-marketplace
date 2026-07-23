@@ -13,7 +13,7 @@ import type {
   BlueprintDoc, GameGraph, GameScenario, GraphLibraryDocument, GraphTextStylePreset, ScenarioMetaFields,
 } from '../../runtime/schema/graph-schema'
 import type { TextStyleGroup } from '../text/text-style'
-import { loadStore, saveProject, saveDraft, clearDraft, loadVersion, loadDraft, type VersionEntry } from './persist-client'
+import { loadStore, saveProject, saveDraft, clearDraft, loadDraft, commitVersion, currentVersion, type VersionEntry } from './persist-client'
 import { computeGraphLayout } from '../../graph/edit/graph-layout'
 import { normalizeSubFlowFields } from '../../graph/edit/graph-edit'
 import { validateGraph } from '../../runtime/validate/validate'
@@ -27,6 +27,7 @@ import {
 } from './blueprint-project'
 import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
 import { blueprintsReferencing, findReferenceCycle } from '../../graph/edit/blueprint-refs'
+import { loadGameComponents } from '../../runtime/component-host'
 
 /** 载入 demo / 文档时保证内置「通用样式」方案存在——用于 reset()/首次落座。 */
 function withBuiltinSchemes<T extends GameScenario>(s: T): T {
@@ -118,6 +119,8 @@ interface GraphScenarioStore {
   versions: VersionEntry[]
   /** 当前基于的已保存版本 id（草稿态时仍指其基版本，供下拉高亮"当前"）。 */
   currentVersionId: string | null
+  /** 游戏仓当前最新版本 tag（game-host git，如 `v3`）；无仓/无版本为 null。 */
+  currentTag: string | null
   isDraft: boolean
   booted: boolean
   /** 每次「载入内容」（boot / 切版本 / 重置）自增；宿主据此清空撤销历史，避免撤销穿越版本。 */
@@ -166,6 +169,8 @@ interface GraphScenarioStore {
   /** 改写指定蓝图的图（不要求它是当前选中）——供画布下钻编辑子蓝图包用。 */
   updateBlueprintGraph: (id: string, g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   save: () => number
+  /** 保存并对游戏仓打新版本（annotated tag vN）；返回新 tag 或 null。 */
+  commit: (message?: string) => Promise<string | null>
   pick: (value: string) => void
   reset: () => void
   applyLayout: () => void
@@ -207,6 +212,33 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     clearDraftTimer()
     draftTimer = setTimeout(() => saveDraft(get().authoringProject(), get().game), 800)
   }
+  // 保存核心（save 与 commit 共用）：环检测 → 校验 → PUT blueprint。返回 PUT 的 promise，
+  // 让 commit() 能 await 到落盘完成再打版本（避免 blueprint 未落盘就 git commit 的竞态）。
+  const runSave = (): { blocked: boolean; errs: number; done: Promise<boolean> } => {
+    const cycle = findReferenceCycle(get().authoringProject())
+    if (cycle) {
+      set({ savedTip: `保存被拦截 · 蓝图引用成环：${cycle.join(' → ')}` })
+      return { blocked: true, errs: -1, done: Promise.resolve(false) }
+    }
+    clearDraftTimer()
+    const scn = get().scn()
+    const errs = validateGraph(scn.graph, {
+      entities: Object.keys(scn.entities ?? {}),
+      vars: Object.keys(scn.variables ?? {}),
+    }).filter((i) => i.level === 'error')
+    set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
+    const done = saveProject(get().authoringProject(), get().game).then((res) => {
+      if (!res.ok) {
+        set({ isDraft: true, savedTip: '保存失败 · 草稿仍在本地，请检查 game-host 端点后重试' })
+        return false
+      }
+      set({ savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}` })
+      return true
+    })
+    // eslint-disable-next-line no-console
+    if (errs.length) console.warn('[graph validate] 保存时发现校验错误：', errs)
+    return { blocked: false, errs: errs.length, done }
+  }
   return {
     game: 'game-nodia-fighting',
     demo: null,
@@ -217,6 +249,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     meta: {},
     versions: [],
     currentVersionId: null,
+    currentTag: null,
     isDraft: false,
     booted: false,
     loadEpoch: 0,
@@ -292,9 +325,12 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
             currentVersionId: null,
             loadEpoch: cur.loadEpoch + 1,
           }))
-          void saveProject(seed, game).then((vs) => set({ versions: vs, currentVersionId: vs[0]?.id ?? null }))
+          void saveProject(seed, game)
         }
       })
+      void currentVersion(game).then((cv) => set({ currentTag: cv.tag }))
+      // 尽力加载该游戏仓专属组件（dist/components）；未构建/离线则静默用平台内建集。
+      void loadGameComponents(game)
     },
 
     setGraph: (g) => {
@@ -433,37 +469,10 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       if (changed) scheduleDraft()
     },
 
+    // 引用环是阻塞级错误：一旦落盘运行时会无限下钻栈溢出，必须写盘前挡住（在 runSave 内）。
     save: () => {
-      // 引用环是阻塞级错误（不同于下面 validateGraph 的非阻塞校验警示）：一旦落盘，运行时会
-      // 无限下钻直到栈溢出，且没有回头路——必须在写盘前挡住，不留「已保存但坏了」的状态。
-      const cycle = findReferenceCycle(get().authoringProject())
-      if (cycle) {
-        set({ savedTip: `保存被拦截 · 蓝图引用成环：${cycle.join(' → ')}` })
-        return -1
-      }
-      clearDraftTimer()
-      const scn = get().scn()
-      const errs = validateGraph(scn.graph, {
-        entities: Object.keys(scn.entities ?? {}),
-        vars: Object.keys(scn.variables ?? {}),
-      }).filter((i) => i.level === 'error')
-      set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
-      // 落盘（.forgeax/games/<slug>/game-video/），完成后用磁盘版本索引回填。
-      void saveProject(get().authoringProject(), get().game).then((v) => {
-        if (v.length === 0) {
-          // PUT 失败时 persist-client 已保留草稿；回滚 isDraft，别骗用户「已保存」。
-          set({ isDraft: true, savedTip: '保存失败 · 草稿仍在本地，请检查 /__graph__ 端点后重试' })
-          return
-        }
-        set({
-          versions: v,
-          currentVersionId: v[0]?.id ?? null,
-          savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}`,
-        })
-      })
-      // eslint-disable-next-line no-console
-      if (errs.length) console.warn('[graph validate] 保存时发现校验错误：', errs)
-      return errs.length
+      const r = runSave()
+      return r.blocked ? -1 : r.errs
     },
 
     pick: (value) => {
@@ -488,8 +497,24 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
           ...(value !== '__draft__' ? { currentVersionId: value } : {}),
         }))
       }
+      // game-host 下产品不做版本回退（版本=git tag，入口只用最新）：仅支持回到未保存草稿。
       if (value === '__draft__') apply(loadDraft(get().game))
-      else void loadVersion(value, get().game).then(apply)
+    },
+
+    // 打一个新版本：先保存当前包（await 落盘完成），再对游戏仓打 annotated tag vN（git add -A 会把
+    // 已 seed 的 components/ 一并纳入版本）。产品只用最新，不回退。
+    commit: async (message?: string) => {
+      const r = runSave()
+      if (r.blocked) return null
+      const ok = await r.done // 等 blueprint 真落盘，避免 git 提交漏掉最新内容
+      if (!ok) {
+        set({ savedTip: '打版本中止 · 保存失败' })
+        return null
+      }
+      const cv = await commitVersion(get().game, message)
+      if (cv?.tag) set({ currentTag: cv.tag, savedTip: `已打版本 ${cv.tag}` })
+      else set({ savedTip: '打版本失败 · 请检查 game-host 端点' })
+      return cv?.tag ?? null
     },
 
     // 重置：用内置 demo 替换当前内容（含全部子蓝图），清掉未保存草稿。要固化再点保存。

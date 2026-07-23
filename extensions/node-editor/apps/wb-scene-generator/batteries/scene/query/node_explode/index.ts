@@ -5,16 +5,23 @@
  * 节点自身体素列表（voxels:Point3D[], tokens:string[]）+
  * 直接子节点的绝对路径列表（childPaths:string[]）。
  *
- * 节点扁平化后任意节点都可既有 cells 又有 children，因此 voxels/childPaths 同时存在并不互斥。
+ * 节点扁平化后任意节点都可既有 content 又有 children，因此 voxels/childPaths 同时存在并不互斥。
  *
  * 纯只读，不输出 scene。
+ *
+ * version：v3 去掉了"修订号"字段（见 graph.ts 顶部注释——子树是否变化直接靠引用
+ * 相等判断，不需要专门字段）。这里保留 version 输出端口的形状（下游/UI 可能还在
+ * 读这个字段名），但恒为 0——不编造一个新的、语义不对齐的替代值。
  */
 
 import {
+  childrenOf,
+  getNode,
+  iterCells,
   makePoint2D,
   makePoint3D,
   parseScenePort,
-  readNode,
+  pathOf,
 } from '../../../../vendor/dist/shared/types/index.js';
 
 const EMPTY = {
@@ -35,10 +42,10 @@ export function nodeExplode(input: Record<string, unknown>): Record<string, unkn
   const sin = parseScenePort(input.scene);
   if (!sin) return EMPTY;
 
-  const node = readNode(sin.tree, sin.focus);
+  const node = getNode(sin.graph, sin.focus);
   if (node === null) return EMPTY;
 
-  const cells = node.cells ?? [];
+  const cells = node.content ? [...iterCells(node.content)] : [];
   const voxels = cells.map(c => makePoint3D(c.x, c.y, c.z));
   const tokens = cells.map(c => c.token);
 
@@ -52,13 +59,14 @@ export function nodeExplode(input: Record<string, unknown>): Record<string, unkn
     points2D.push(makePoint2D(c.x, c.y));
   }
 
-  const prefix = sin.focus === '/' ? '' : sin.focus;
-  const childPaths = node.children.map(c => `${prefix}/${c.name}`);
+  const kids = childrenOf(sin.graph, node.id);
+  const selfPath = pathOf(sin.graph, node.id) ?? '/';
+  const childPaths = kids.map(c => selfPath === '/' ? `/${c.name}` : `${selfPath}/${c.name}`);
 
   return {
     exists: true,
     schema: node.schema ?? '',
-    version: node.version,
+    version: 0,
     voxelCount: cells.length,
     childCount: childPaths.length,
     width: node.bounds?.width ?? 0,

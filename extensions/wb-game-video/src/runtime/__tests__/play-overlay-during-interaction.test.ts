@@ -9,7 +9,7 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { GraphSession } from '../engine/session'
 import { ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
-import { registerCoreSkins } from '../skins/components'
+import { registerCoreSkins } from '../component-host/components'
 import { node, scnOf } from './test-fixtures'
 
 beforeAll(() => {

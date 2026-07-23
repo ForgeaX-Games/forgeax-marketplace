@@ -2,9 +2,10 @@
 //
 // The REST route /api/v1/execute (routes/execute.ts) intentionally returns the
 // FULL ExecutionResult — every node/port carries its DataTreeEntry[] wire value,
-// and a scene port's items embed the entire SceneNodeSnapshot tree with all voxel
-// `cells`. For a real graph that is ~28MB (single port up to ~1.7MB). UI and other
-// REST callers may depend on the full payload, so the route stays as-is.
+// and a scene port's items embed the entire SceneGraph (ScenePortValue{graph,focus})
+// with all voxel content. For a real graph that is ~28MB (single port up to
+// ~1.7MB). UI and other REST callers may depend on the full payload, so the
+// route stays as-is.
 //
 // But the agent tool `scene:pipeline.execute` must NOT pour that into the model's
 // context. This module projects the full result into a KB-scale summary that keeps
@@ -26,6 +27,15 @@
 
 import { checkLocationNameAlignment } from './lib/locationNameGate.js'
 import { buildTopologyIssues, type TopologyGraphEdge, type TopologyGraphNode } from './lib/topologyGate.js'
+import {
+  cellCount,
+  childrenOf,
+  getNode,
+  parseScenePort,
+  pathOf,
+  type SceneGraph,
+  type SceneNode,
+} from '../../vendor/dist/shared/types/scene/index.js'
 
 /** Mirrors layer2/execute-node.ts ExecutionResult (kept local to avoid a dep). */
 export interface ExecutionResult {
@@ -73,23 +83,23 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
-/** Count cells across a SceneNodeSnapshot subtree (self + all descendants). Defensive. */
 /**
- * 复盘(2026-07-01 循环引用死循环事故):这里原来是无环防护的裸递归——若树里出现
- * 结构性循环引用(baked-scene.json 观测到的 ~9.7 亿次迭代死循环),会直接栈溢出
- * 或长时间挂死整个执行摘要计算,拖垮 backend。vendor 的不可变 tree API 理论上不
- * 会产生结构环,但这里作为纵深防御层不依赖那份保证——`visited` 记录已下探过的
- * 节点引用,再次撞到同一引用直接短路返回 0(而不是继续下探),把"死循环"降级成
- * "该子树按 0 计,摘要偏小但绝不挂死"。
+ * Count cells across a graph subtree (self + all descendants), starting at
+ * `node`. Defensive.
+ *
+ * 复盘(2026-07-01 循环引用死循环事故):旧 SceneNodeSnapshot 版本这里是无环防护
+ * 的裸递归——若树里出现结构性循环引用(baked-scene.json 观测到的 ~9.7 亿次迭代
+ * 死循环),会直接栈溢出或长时间挂死整个执行摘要计算,拖垮 backend。v3 的
+ * SceneGraph 是 ID-addressed 持久化 map，每个 NodeId 在构造时就固定了唯一
+ * parent（见 graph.ts），结构上不可能再产生环——但这里仍保留 `visited` 纵深
+ * 防御层，不依赖"新模型不会环"这份保证本身：再次撞到同一节点直接短路返回 0，
+ * 把"万一有环"降级成"该子树按 0 计，摘要偏小但绝不挂死"。
  */
-function countSubtreeCells(node: unknown, visited: WeakSet<object> = new WeakSet()): number {
-  if (!isRecord(node)) return 0
+function countSubtreeCells(graph: SceneGraph, node: SceneNode, visited: WeakSet<object> = new WeakSet()): number {
   if (visited.has(node)) return 0
   visited.add(node)
-  let n = Array.isArray(node.cells) ? node.cells.length : 0
-  if (Array.isArray(node.children)) {
-    for (const child of node.children) n += countSubtreeCells(child, visited)
-  }
+  let n = node.content ? cellCount(node.content) : 0
+  for (const child of childrenOf(graph, node.id)) n += countSubtreeCells(graph, child, visited)
   return n
 }
 
@@ -99,49 +109,41 @@ function countSubtreeCells(node: unknown, visited: WeakSet<object> = new WeakSet
  * asset/group names sino verifies against (e.g. "architecture_0", "rest", "石路").
  * Stops once `out` reaches MAX_DESCENDANT_NAMES so a huge tree stays KB-scale.
  */
-function collectDescendantNames(root: unknown): string[] {
-  if (!isRecord(root) || !Array.isArray(root.children)) return []
+function collectDescendantNames(graph: SceneGraph, root: SceneNode): string[] {
   const seen = new Set<string>()
   // 复盘(2026-07-01):原实现只靠 `seen.size < MAX_DESCENDANT_NAMES` 兜底——如果环上
   // 的节点全同名(seen.size 卡在 1 不再增长)或环很大,queue 会被同一批节点反复
   // push 到无界增长,MAX_DESCENDANT_NAMES 根本拦不住,照样 OOM/挂死。额外用
-  // `visitedRefs` 记对象引用去重,任何节点只下探一次,双重兜底。
+  // `visitedRefs` 记对象引用去重,任何节点只下探一次,双重兜底（v3 结构上不会环，
+  // 但同一份深防御原则延续下来，见 countSubtreeCells 同款注释）。
   const visitedRefs = new WeakSet<object>()
-  const queue: unknown[] = [...root.children]
+  const queue: SceneNode[] = [...childrenOf(graph, root.id)]
   while (queue.length > 0 && seen.size < MAX_DESCENDANT_NAMES) {
     const node = queue.shift()
-    if (!isRecord(node)) continue
+    if (!node) continue
     if (visitedRefs.has(node)) continue
     visitedRefs.add(node)
-    if (typeof node.name === 'string' && node.name.length > 0) seen.add(node.name)
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) queue.push(child)
-    }
+    if (node.name.length > 0) seen.add(node.name)
+    for (const child of childrenOf(graph, node.id)) queue.push(child)
   }
   return [...seen]
 }
 
-/** Summarize a SceneNodeSnapshot (the `tree` of a scene port value). Never throws. */
-function summarizeSceneNode(node: unknown): SceneNodeSummary {
-  if (!isRecord(node)) {
-    return { cellCount: 0, subtreeCellCount: 0, childCount: 0 }
-  }
-  const cells = Array.isArray(node.cells) ? node.cells : []
-  const children = Array.isArray(node.children) ? node.children : []
-  const childNames = children
-    .map((c) => (isRecord(c) && typeof c.name === 'string' ? c.name : undefined))
-    .filter((name): name is string => name !== undefined)
-    .slice(0, MAX_CHILD_NAMES)
+/** Summarize a SceneNode within its graph (the focus of a scene port value). Never throws. */
+function summarizeSceneNode(graph: SceneGraph, node: SceneNode): SceneNodeSummary {
+  const children = childrenOf(graph, node.id)
+  const childNames = children.map((c) => c.name).slice(0, MAX_CHILD_NAMES)
   const summary: SceneNodeSummary = {
-    cellCount: cells.length,
-    subtreeCellCount: countSubtreeCells(node),
+    cellCount: node.content ? cellCount(node.content) : 0,
+    subtreeCellCount: countSubtreeCells(graph, node),
     childCount: children.length,
   }
-  if (typeof node.name === 'string') summary.name = node.name
-  if (typeof node.path === 'string') summary.path = node.path
-  if (typeof node.schema === 'string') summary.schema = node.schema
+  if (node.name) summary.name = node.name
+  const path = pathOf(graph, node.id)
+  if (path) summary.path = path
+  if (node.schema) summary.schema = node.schema
   if (childNames.length > 0) summary.childNames = childNames
-  const descendantNames = collectDescendantNames(node)
+  const descendantNames = collectDescendantNames(graph, node)
   if (descendantNames.length > 0) summary.descendantNames = descendantNames
   return summary
 }
@@ -149,17 +151,23 @@ function summarizeSceneNode(node: unknown): SceneNodeSummary {
 /**
  * Summarize a single item inside a DataTreeEntry.items array. An item is the
  * actual wire payload for one branch element:
- *   - scene port  → ScenePortValue `{ tree: SceneNodeSnapshot, focus }`
+ *   - scene port  → ScenePortValue `{ graph: SceneGraph, focus: NodeId }`
  *   - string/number/boolean → the scalar (small → kept as-is)
  *   - grid        → nested arrays (huge → replaced by a shape note)
  *   - other arrays/objects → shape note with a length/size
  */
 function summarizeItem(item: unknown): unknown {
-  // Scene port value: { tree, focus }
-  if (isRecord(item) && isRecord(item.tree)) {
+  // Scene port value: { graph, focus } — parseScenePort accepts both the live
+  // in-process SceneGraph (this module always runs on the raw in-process
+  // ExecutionResult, never a JSON round-trip) and, defensively, a wire-revived
+  // one, so this one call replaces the old hand-written `.tree`/`.children`
+  // duck-typing entirely.
+  const port = parseScenePort(item)
+  if (port) {
+    const node = getNode(port.graph, port.focus)
     return {
-      focus: typeof item.focus === 'string' ? item.focus : undefined,
-      tree: summarizeSceneNode(item.tree),
+      focus: port.focus,
+      tree: node ? summarizeSceneNode(port.graph, node) : { cellCount: 0, subtreeCellCount: 0, childCount: 0 },
     }
   }
   // Long strings (image data URIs, base64, big text) → shape note, never inlined.
@@ -172,12 +180,8 @@ function summarizeItem(item: unknown): unknown {
   if (Array.isArray(item)) {
     return { kind: 'array', length: item.length }
   }
-  // A bare SceneNodeSnapshot (no port wrapper) — summarize it directly.
-  if (isRecord(item) && (typeof item.path === 'string' || Array.isArray(item.children) || Array.isArray(item.cells))) {
-    return { tree: summarizeSceneNode(item) }
-  }
   // Unknown object: report its keys so sino sees structure without payload.
-  return { kind: 'object', keys: Object.keys(item).slice(0, 32) }
+  return { kind: 'object', keys: Object.keys(item as object).slice(0, 32) }
 }
 
 /** A summarized port: branch/item counts + per-item lightweight summaries. */
@@ -210,10 +214,10 @@ function summarizePort(value: unknown): unknown {
     itemCount += items.length
     for (const item of items) {
       // Tally cells regardless of whether we inline this item's summary.
-      if (isRecord(item) && isRecord(item.tree)) {
-        totalCellCount += countSubtreeCells(item.tree)
-      } else if (isRecord(item) && (Array.isArray(item.children) || Array.isArray(item.cells))) {
-        totalCellCount += countSubtreeCells(item)
+      const port = parseScenePort(item)
+      if (port) {
+        const node = getNode(port.graph, port.focus)
+        if (node) totalCellCount += countSubtreeCells(port.graph, node)
       }
       if (summaries.length < MAX_INLINE_ITEMS) {
         const path = isRecord(entry) && Array.isArray(entry.path) ? entry.path : undefined

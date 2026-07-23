@@ -1,64 +1,40 @@
 import type { DomainValueFormatter } from '@forgeax/node-runtime-react/editor'
-
-interface SceneNodeLike {
-  path: string
-  version: number
-  schema?: string
-  cells?: readonly unknown[]
-  children?: readonly SceneNodeLike[]
-}
-
-interface ScenePortValueLike {
-  tree: SceneNodeLike
-  focus: string
-}
+import { parseScenePort } from '../../../vendor/shared/types/scene/port.js'
+import { childrenOf, getNode, type NodeId, type SceneGraph, type SceneNode } from '../../../vendor/shared/types/scene/graph.js'
+import { cellCount } from '../../../vendor/shared/types/scene/volume.js'
 
 interface SceneStats {
   totalNodes: number
   voxelCount: number
 }
 
-function parseScenePortValue(value: unknown): ScenePortValueLike | null {
-  if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<ScenePortValueLike>
-  if (typeof candidate.focus !== 'string') return null
-  const tree = candidate.tree
-  if (!tree || typeof tree !== 'object') return null
-  if (typeof tree.path !== 'string' || typeof tree.version !== 'number') return null
-  return { tree, focus: candidate.focus }
-}
-
-function readNode(root: SceneNodeLike, focus: string): SceneNodeLike | null {
-  if (root.path === focus) return root
-  for (const child of root.children ?? []) {
-    const found = readNode(child, focus)
-    if (found) return found
-  }
-  return null
-}
-
-function collectStats(node: SceneNodeLike, stats: SceneStats): void {
+function collectStats(graph: SceneGraph, node: SceneNode, stats: SceneStats): void {
   stats.totalNodes += 1
-  stats.voxelCount += node.cells?.length ?? 0
-  for (const child of node.children ?? []) collectStats(child, stats)
+  stats.voxelCount += node.content ? cellCount(node.content) : 0
+  for (const child of childrenOf(graph, node.id)) collectStats(graph, child, stats)
 }
 
 function summarizeScene(value: unknown): {
   summary: string
   extra?: string
 } | null {
-  const port = parseScenePortValue(value)
+  // parseScenePort 双模兼容：既接受进程内的活 SceneGraph 实例，也接受这个面板
+  // 实际收到的形态——经 HTTP/JSON 一次往返后的 wire 对象（graph 是 plain
+  // { [id]: node } map），见 vendor port.ts 顶部注释。这里不再需要自己判断
+  // "是不是 wire 格式"。
+  const port = parseScenePort(value)
   if (!port) return null
-  const node = readNode(port.tree, port.focus)
-  if (!node) return { summary: `scene focus="${port.focus}" (missing)` }
+  const node = getNode(port.graph, port.focus)
+  if (!node) return { summary: `scene focus="${port.focus as NodeId}" (missing)` }
 
   const stats: SceneStats = { totalNodes: 0, voxelCount: 0 }
-  collectStats(node, stats)
-  const childCount = node.children?.length ?? 0
+  collectStats(port.graph, node, stats)
+  const childCount = childrenOf(port.graph, node.id).length
+  const ownCount = node.content ? cellCount(node.content) : 0
   const schemaPart = node.schema ? ` schema="${node.schema}"` : ''
   return {
-    summary: `scene focus="${port.focus}"${schemaPart} voxels=${stats.voxelCount} children=${childCount} nodes=${stats.totalNodes}`,
-    extra: `v=${node.version} own=${node.cells?.length ?? 0}`,
+    summary: `scene focus="${node.name || '/'}"${schemaPart} voxels=${stats.voxelCount} children=${childCount} nodes=${stats.totalNodes}`,
+    extra: `own=${ownCount}`,
   }
 }
 

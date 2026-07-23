@@ -273,6 +273,14 @@ export interface GraphCanvasProps {
   fitSignal?: number
   /** 下钻层级签名变化时 fitView（与增删节点无关，避免画布漂移）。 */
   drillFitKey?: string
+  /**
+   * 选中节点 id 变化时把该节点平移到画布「未被面板盖住的可见区」中心（不缩放）。
+   * 与 fitSignal 互斥：fitSignal 框全图，revealNodeId 仅平移视口让节点可见。
+   * 空串/同值不触发；关闭面板（null）也不触发（不抢用户手动平移）。
+   */
+  revealNodeId?: string | null
+  /** 面板占画布右侧的宽度比例（0~1）；revealNodeId 据此算可见区中心偏移。默认 0（不偏移）。 */
+  revealPanelRatio?: number
   onJump?: (nodeId: string) => void
   /** 双击子流程容器节点（有 subFlow）时下钻。 */
   onDrill?: (containerId: string) => void
@@ -309,6 +317,8 @@ function GraphCanvasInner({
   visibleNodeIds,
   fitSignal,
   drillFitKey,
+  revealNodeId,
+  revealPanelRatio,
   onJump,
   onDrill,
   onPaneClick,
@@ -318,7 +328,7 @@ function GraphCanvasInner({
   fitReserveRightPx = 0,
 }: GraphCanvasProps): JSX.Element {
   ensureCanvasStyle()
-  const { fitView, screenToFlowPosition } = useReactFlow()
+  const { fitView, screenToFlowPosition, setViewport, getViewport, getNodes } = useReactFlow()
   const store = useStoreApi()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const fitReserveRightPxRef = useRef(fitReserveRightPx)
@@ -524,6 +534,34 @@ function GraphCanvasInner({
   const onInit = useCallback((_inst: ReactFlowInstance) => {
     void fitGraphInView()
   }, [fitGraphInView])
+
+  /**
+   * 选中节点变化时，把视口平移让该节点落在画布「未被面板盖住的左侧可见区」中心（不缩放）。
+   * 与 fitSignal 互不干扰：fitSignal 框全图、revealNodeId 仅平移；关闭面板（null）不抢用户手动平移。
+   */
+  useEffect(() => {
+    if (!revealNodeId) return
+    const node = getNodes().find((n) => n.id === revealNodeId)
+    if (!node) return
+    const el = rootRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    const ratio = typeof revealPanelRatio === 'number' && revealPanelRatio > 0 ? Math.min(0.85, revealPanelRatio) : 0
+    // 节点中心（flow 坐标）：未度量时退回 position（左上角）。
+    const cx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
+    const cy = node.position.y + (node.measured?.height ?? node.height ?? 60) / 2
+    const vp = getViewport()
+    const zoom = vp.zoom || 1
+    // 左侧可见区中心（screen 坐标，相对画布容器）：画布宽 × (1 - ratio) / 2。
+    const targetScreenX = rect.width * (1 - ratio) / 2
+    const targetScreenY = rect.height / 2
+    // viewport.x = screenX - flowX * zoom
+    const nextX = targetScreenX - cx * zoom
+    const nextY = targetScreenY - cy * zoom
+    void setViewport({ x: nextX, y: nextY, zoom }, { duration: 220 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealNodeId, revealPanelRatio])
 
   useEffect(() => {
     const el = rootRef.current

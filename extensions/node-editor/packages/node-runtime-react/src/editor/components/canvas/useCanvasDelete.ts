@@ -2,8 +2,9 @@
 // (onEdgesChange remove branch). Ported verbatim from the legacy editor
 // (components/canvas/useCanvasDelete.ts), retargeted onto the editor stores.
 import { useCallback } from 'react'
-import { applyEdgeChanges } from 'reactflow'
-import type { Node, Edge, EdgeChange } from 'reactflow'
+import { applyEdgeChanges } from '@xyflow/react'
+import type { EdgeChange } from '@xyflow/react'
+import type { Node, Edge } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 

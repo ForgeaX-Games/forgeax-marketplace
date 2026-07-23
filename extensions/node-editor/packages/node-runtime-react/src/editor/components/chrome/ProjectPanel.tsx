@@ -30,6 +30,18 @@ type View = { kind: 'list' } | { kind: 'new' } | { kind: 'delete'; project: Proj
 
 type LockMap = Record<string, ProjectExecutionLock>
 
+function lockMapsEqual(a: LockMap, b: LockMap): boolean {
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  for (const k of aKeys) {
+    const va = a[k]
+    const vb = b[k]
+    if (!vb || va.agentId !== vb.agentId || va.sessionId !== vb.sessionId || va.acquiredAt !== vb.acquiredAt) return false
+  }
+  return true
+}
+
 type StatusRow =
   | { key: string; kind: 'executing'; projectId: string; name: string; detail?: string }
   | { key: string; kind: 'pipeline'; name: string; detail: string }
@@ -53,6 +65,8 @@ export interface ProjectPanelProps {
   headerActions?: ReactNode
   /** Optional per-project action(s) injected into each card's action column. */
   renderProjectActions?: (project: ProjectMeta) => ReactNode
+  /** Optional save handler — rendered as a built-in toolbar icon (stable for memo). */
+  onSaveProject?: (project: ProjectMeta) => void
 }
 
 /** Pin agent/pipeline activity to the top; selection does not reorder the list. */
@@ -89,8 +103,9 @@ export function ProjectPanel({
   activePipelineRuns = [],
   headerActions,
   renderProjectActions,
+  onSaveProject,
 }: ProjectPanelProps): JSX.Element {
-  useProjectLocale()
+  const locale = useProjectLocale()
   const projects = useProjectStore((s) => s.projects)
   const viewingProjectId = useProjectStore((s) => s.viewingProjectId)
   const executingProjectIds = useProjectStore((s) => s.executingProjectIds)
@@ -144,19 +159,19 @@ export function ProjectPanel({
             acquiredAt: entry.acquiredAt,
           }
         }
-        setLockMap(next)
+        setLockMap((prev) => (lockMapsEqual(prev, next) ? prev : next))
         return
       } catch {
         /* fall through to per-project fetch */
       }
     }
     if (!api.getProjectLock) {
-      setLockMap({})
+      setLockMap((prev) => (Object.keys(prev).length === 0 ? prev : {}))
       return
     }
     const ids = new Set([...executingProjectIds, ...Object.keys(pipelineByProject)])
     if (ids.size === 0) {
-      setLockMap({})
+      setLockMap((prev) => (Object.keys(prev).length === 0 ? prev : {}))
       return
     }
     const entries = await Promise.all(
@@ -170,7 +185,8 @@ export function ProjectPanel({
         }
       }),
     )
-    setLockMap(Object.fromEntries(entries.filter(Boolean) as Array<[string, ProjectExecutionLock]>))
+    const next = Object.fromEntries(entries.filter(Boolean) as Array<[string, ProjectExecutionLock]>)
+    setLockMap((prev) => (lockMapsEqual(prev, next) ? prev : next))
   }, [executingProjectIds, pipelineByProject])
 
   useEffect(() => {
@@ -221,6 +237,17 @@ export function ProjectPanel({
     },
     [viewingProjectId, switchProject],
   )
+
+  const handleRenameProject = useCallback(
+    (id: string, name: string) => {
+      void renameProject(id, name)
+    },
+    [renameProject],
+  )
+
+  const handleRequestDeleteProject = useCallback((project: ProjectMeta) => {
+    setView({ kind: 'delete', project })
+  }, [])
 
   const statusRows = useMemo((): StatusRow[] => {
     const rows: StatusRow[] = []
@@ -431,6 +458,7 @@ export function ProjectPanel({
           <ProjectCard
             key={p.id}
             project={p}
+            locale={locale}
             isActive={p.id === viewingProjectId}
             isSwitching={isSwitching}
             showProjectType={showProjectType}
@@ -438,10 +466,11 @@ export function ProjectPanel({
             pipelineRun={resolvePipelineRun(p)}
             lockLabel={resolveLockLabel(p)}
             canDelete={p.id !== viewingProjectId}
-            extraActions={renderProjectActions?.(p)}
-            onActivate={() => handleActivate(p.id)}
-            onRename={(name) => void renameProject(p.id, name)}
-            onRequestDelete={() => setView({ kind: 'delete', project: p })}
+            onSaveProject={onSaveProject}
+            extraActions={onSaveProject ? undefined : renderProjectActions?.(p)}
+            onActivateProject={handleActivate}
+            onRenameProject={handleRenameProject}
+            onRequestDeleteProject={handleRequestDeleteProject}
           />
         ))}
       </div>

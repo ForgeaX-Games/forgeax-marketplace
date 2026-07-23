@@ -7,7 +7,7 @@
 // with it; dragging a member individually re-grows/shrinks the frame box. Both
 // the frame geometry and member positions persist through the pipeline store.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Node, Edge, ReactFlowInstance } from 'reactflow'
+import type { Node, Edge, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import type { Battery, CanvasFrame } from '../../types.js'
 import { DEFAULT_BATTERY_WIDTH } from './canvasConstants.js'
@@ -31,14 +31,14 @@ const FRAME_NESTED_EXTRA_PAD = 4
 // default. A frame can't fall back to a battery height so 90 is the node guess.
 export function getRfNodeSize(node: Node): { width: number; height: number } {
   const width =
-    typeof node.width === 'number'
-      ? node.width
+    typeof node.measured?.width === 'number'
+      ? node.measured.width
       : typeof node.style?.width === 'number'
         ? node.style.width
         : DEFAULT_BATTERY_WIDTH
   const height =
-    typeof node.height === 'number'
-      ? node.height
+    typeof node.measured?.height === 'number'
+      ? node.measured.height
       : typeof node.style?.height === 'number'
         ? node.style.height
         : 90

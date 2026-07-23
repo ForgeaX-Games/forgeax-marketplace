@@ -5,8 +5,8 @@
  */
 import { describe, expect, it, beforeAll } from 'vitest'
 import { makeNodiaDemo } from '../../editor/demo/demo'
-import { registerCoreSkins } from '../skins/components'
-import { inkYingMoDefaults } from '../skins/components/InkYingMoLayer'
+import { registerCoreSkins } from '../component-host/components'
+import { inkYingMoDefaults } from '../component-host/components/InkYingMoLayer'
 
 beforeAll(() => {
   registerCoreSkins()

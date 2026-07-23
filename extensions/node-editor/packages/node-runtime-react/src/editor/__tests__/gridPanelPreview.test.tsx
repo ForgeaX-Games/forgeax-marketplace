@@ -16,7 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { useRef } from 'react'
-import { ReactFlowProvider } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
 
 import GridPanelNode from '../components/canvas/GridPanelNode.js'
 import { usePipelineStore } from '../stores/pipelineStore.js'

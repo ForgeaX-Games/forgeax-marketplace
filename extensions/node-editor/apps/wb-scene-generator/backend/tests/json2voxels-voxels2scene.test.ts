@@ -1,8 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
+  cellCount,
+  childrenOf,
+  getNode,
   projectSceneToVoxelLayers,
-  readNode,
+  resolvePath,
+  ROOT_ID,
+  type SceneGraph,
 } from '../../vendor/dist/shared/types/index.js';
+
+function findNode(graph: SceneGraph, path: string) {
+  const id = resolvePath(graph, ROOT_ID, path);
+  return id === null ? null : getNode(graph, id);
+}
 import { json2Voxels } from '../../batteries/scene/bridge/json2voxels/index.js';
 import { voxels2Scene } from '../../batteries/scene/bridge/voxels2scene/index.js';
 import {
@@ -50,13 +60,15 @@ describe('json2voxels + voxels2scene', () => {
     expect(built.nodeCount).toBe(16);
     expect(built.voxelCount).toBe(parsed.voxelCount);
 
-    const root = readNode(built.scene!.tree, '/CityBlock');
+    const graph = built.scene!.graph;
+    const root = findNode(graph, '/CityBlock');
     expect(root).not.toBeNull();
-    expect(root!.children.map((c) => c.name)).toContain('L1_structure');
-    expect(root!.children.map((c) => c.name)).toContain('L3_mech_plant');
+    const childNames = childrenOf(graph, root!.id).map((c) => c.name);
+    expect(childNames).toContain('L1_structure');
+    expect(childNames).toContain('L3_mech_plant');
 
-    const stair = readNode(built.scene!.tree, '/CityBlock/L1_stair_core');
-    expect(stair?.cells?.length ?? 0).toBeGreaterThan(0);
+    const stair = findNode(graph, '/CityBlock/L1_stair_core');
+    expect(stair?.content ? cellCount(stair.content) : 0).toBeGreaterThan(0);
   });
 
   it('groupBy=z splits flat voxels into z layers', () => {
@@ -73,8 +85,9 @@ describe('json2voxels + voxels2scene', () => {
     });
     expect(built.error).toBeUndefined();
     expect(built.nodeCount).toBe(2);
-    const root = readNode(built.scene!.tree, '/Tower');
-    expect(root!.children.map((c) => c.name).sort()).toEqual(['z0', 'z1']);
+    const graph = built.scene!.graph;
+    const root = findNode(graph, '/Tower');
+    expect(childrenOf(graph, root!.id).map((c) => c.name).sort()).toEqual(['z0', 'z1']);
   });
 
   it('projects to full 4m-per-storey z range', () => {
@@ -84,7 +97,8 @@ describe('json2voxels + voxels2scene', () => {
       root: parsed.root,
       schema: parsed.schema,
     });
-    const { layers } = projectSceneToVoxelLayers(built.scene!.tree, '/CityBlock');
+    const cityBlockId = resolvePath(built.scene!.graph, ROOT_ID, '/CityBlock')!;
+    const { layers } = projectSceneToVoxelLayers(built.scene!.graph, cityBlockId);
     const zLevels = new Set(layers.flatMap((l) => l.cells.map((c) => c.z)));
     for (const z of [0, 1, 2, 3, 4, 7, 8, 11, 12, 14]) {
       expect(zLevels.has(z)).toBe(true);

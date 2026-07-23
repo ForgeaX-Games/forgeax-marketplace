@@ -6,7 +6,7 @@
 //
 // Battery / relay / group / frame / annotation nodes all rebuild faithfully here.
 import { useCallback, useEffect, useRef } from 'react'
-import type { Node, Edge, ReactFlowInstance } from 'reactflow'
+import type { Node, Edge, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore } from '../../stores/index.js'
 import type { Battery, BatteryPort } from '../../types.js'
 import {

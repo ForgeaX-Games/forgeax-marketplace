@@ -2,7 +2,7 @@
 //   edge double-click inserts a typed relay into the wire;
 //   relay node double-click removes it and restores the direct edge when possible.
 import { useCallback } from 'react'
-import type { Edge, Node, ReactFlowInstance } from 'reactflow'
+import type { Edge, Node, ReactFlowInstance } from '../../xyflow.js'
 import { useHistoryStore, usePipelineStore } from '../../stores/index.js'
 import type { BatteryPort } from '../../types.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'

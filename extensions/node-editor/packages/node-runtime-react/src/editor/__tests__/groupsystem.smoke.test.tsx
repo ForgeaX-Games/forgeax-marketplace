@@ -6,7 +6,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
-import { ReactFlowProvider, type Edge, type Node } from 'reactflow'
+import { ReactFlowProvider } from '@xyflow/react'
+import type { Edge, Node } from '../xyflow.js'
 
 import { createMockApiClient } from '../../test/mockApiClient.js'
 import { configureEditorTransport, createEditorTransport, type EditorTransport } from '../transport/index.js'

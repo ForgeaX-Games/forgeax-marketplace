@@ -12,7 +12,8 @@
 // preview-disabled / preview-off-indicator behaviour is identical to legacy.
 import { memo, useState, useCallback, useEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
-import { Handle, Position, type NodeProps } from 'reactflow'
+import { Handle, Position } from '@xyflow/react'
+import type { NodeProps } from '../../xyflow.js'
 import type { Battery, BatteryPort } from '../../types.js'
 import { getPortTypeColor, normalizeType, type DomainPortTypes } from '../../utils/portTypes.js'
 import { formatIdAsLabel, getBatteryTagLine, getBatteryTypeColor } from '../../utils/batteryLabels.js'

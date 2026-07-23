@@ -1,39 +1,51 @@
 import { describe, it, expect } from 'vitest'
 
 import {
-  emptyTree,
+  emptyGraph,
+  ensurePath,
   makeScenePort,
-  upsertCells,
+  setBounds,
+  setContent,
+  setSchema,
+  volumeFromCells,
+  ROOT_ID,
+  type Cell,
+  type NodeId,
+  type SceneGraph,
 } from '../../vendor/dist/shared/types/index.js'
 
 import { buildingFootprintMask } from '../../batteries/scene/query/building_footprint_mask/index.js'
 
+/** 在 rootId 下按 relPath 落一个携带内容的节点（对照 voxels2scene 的 upsertContentNode）。 */
+function upsertContentNode(
+  graph: SceneGraph,
+  rootId: NodeId,
+  relPath: string,
+  schema: string,
+  cells: readonly Cell[],
+  bounds?: { width: number; height: number },
+): { graph: SceneGraph; id: NodeId } {
+  const segs = relPath.split('/').filter(Boolean)
+  const { graph: g1, id } = ensurePath(graph, rootId, segs)
+  let g = setContent(g1, id, volumeFromCells(cells))
+  g = setSchema(g, id, schema)
+  if (bounds) g = setBounds(g, id, bounds)
+  return { graph: g, id }
+}
+
 function makeBuildingScene(): ReturnType<typeof makeScenePort> {
-  let root = emptyTree()
-  root = upsertCells(
-    root,
-    '/bldg',
-    {
-      schema: 'building',
-      cells: [
-        { x: 1, y: 1, z: 0, token: 'wall' },
-        { x: 2, y: 1, z: 0, token: 'wall' },
-        { x: 3, y: 1, z: 0, token: 'wall' },
-      ],
-      bounds: { width: 20, height: 20 },
-    },
-    1,
-  )
-  root = upsertCells(
-    root,
-    '/bldg/outer_door',
-    {
-      schema: 'door',
-      cells: [{ x: 2, y: 0, z: 0, token: 'door' }],
-    },
-    2,
-  )
-  return makeScenePort(root, '/bldg')
+  let g = emptyGraph()
+  const bldg = upsertContentNode(g, ROOT_ID, 'bldg', 'building', [
+    { x: 1, y: 1, z: 0, token: 'wall' },
+    { x: 2, y: 1, z: 0, token: 'wall' },
+    { x: 3, y: 1, z: 0, token: 'wall' },
+  ], { width: 20, height: 20 })
+  g = bldg.graph
+  const door = upsertContentNode(g, bldg.id, 'outer_door', 'door', [
+    { x: 2, y: 0, z: 0, token: 'door' },
+  ])
+  g = door.graph
+  return makeScenePort(g, bldg.id)
 }
 
 describe('building_footprint_mask', () => {
@@ -63,20 +75,12 @@ describe('building_footprint_mask', () => {
   })
 
   it('filters by z when provided', () => {
-    let root = emptyTree()
-    root = upsertCells(
-      root,
-      '/bldg',
-      {
-        schema: 'building',
-        cells: [
-          { x: 0, y: 0, z: 0, token: 'floor' },
-          { x: 1, y: 0, z: 1, token: 'wall' },
-        ],
-      },
-      1,
-    )
-    const scene = makeScenePort(root, '/bldg')
+    const g0 = emptyGraph()
+    const { graph, id } = upsertContentNode(g0, ROOT_ID, 'bldg', 'building', [
+      { x: 0, y: 0, z: 0, token: 'floor' },
+      { x: 1, y: 0, z: 1, token: 'wall' },
+    ])
+    const scene = makeScenePort(graph, id)
 
     const allZ = buildingFootprintMask({ scene })
     expect(allZ.grid).toEqual([[1, 1]])
@@ -89,8 +93,8 @@ describe('building_footprint_mask', () => {
   })
 
   it('returns empty when focus subtree has no voxels', () => {
-    const root = emptyTree()
-    const scene = makeScenePort(root, '/')
+    const graph = emptyGraph()
+    const scene = makeScenePort(graph, ROOT_ID)
     const out = buildingFootprintMask({ scene })
     expect(out.exists).toBe(false)
     expect(out.grid).toEqual([])
@@ -99,16 +103,14 @@ describe('building_footprint_mask', () => {
   })
 
   it('supports custom door child names', () => {
-    let root = emptyTree()
-    root = upsertCells(root, '/bldg', {
-      schema: 'building',
-      cells: [{ x: 0, y: 0, z: 0, token: 'wall' }],
-    }, 1)
-    root = upsertCells(root, '/bldg/entry', {
-      schema: 'door',
-      cells: [{ x: 1, y: 0, z: 0, token: 'door' }],
-    }, 2)
-    const scene = makeScenePort(root, '/bldg')
+    const g0 = emptyGraph()
+    const bldg = upsertContentNode(g0, ROOT_ID, 'bldg', 'building', [
+      { x: 0, y: 0, z: 0, token: 'wall' },
+    ])
+    const entry = upsertContentNode(bldg.graph, bldg.id, 'entry', 'door', [
+      { x: 1, y: 0, z: 0, token: 'door' },
+    ])
+    const scene = makeScenePort(entry.graph, bldg.id)
     const out = buildingFootprintMask({ scene, doorNames: 'entry' })
     expect(out.grid).toEqual([
       [1, 2],
