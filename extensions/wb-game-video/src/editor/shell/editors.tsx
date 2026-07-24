@@ -229,6 +229,20 @@ export function isInteractive(componentId: string): boolean {
   return (getComponentManifest(componentId)?.events?.length ?? 0) > 0
 }
 
+/**
+ * 画布定位模式（从组件**现有** inputs 推导，不加 manifest 字段）：
+ * 组件已暴露 `x`/`y` 输入槽（字幕/选项/飘字等，本就是位置控件）→ 位置存 `inputs.x/y`；
+ * 否则 → `layout.left/top`。满屏组件无需特判：其内容铺满画面，拖拽被「不溢出」钳制天然锁死。
+ */
+export type PositionMode = { kind: 'inputs'; xKey: string; yKey: string } | { kind: 'layout' }
+export function positionModeOf(componentId: string): PositionMode {
+  const inputs = getComponentManifest(componentId)?.inputs ?? []
+  if (inputs.some((i) => i.key === 'x') && inputs.some((i) => i.key === 'y')) {
+    return { kind: 'inputs', xKey: 'x', yKey: 'y' }
+  }
+  return { kind: 'layout' }
+}
+
 // ── 尺寸（width/height 归一化 0~1，相对舞台）——对所有组件通用，对应 `Layout.width/height` ──────
 // 与 PositionEditor 同一套「slider + 百分比读数」范式；未开启时 = undefined（沿用皮肤自身尺寸/
 // fit-content），开启后写入 Layout.width/height——预览与全屏试玩共用同一份 childWrapStyle 换算

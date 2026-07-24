@@ -12,16 +12,17 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
-import type { Entity, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
+import type { Entity, Layout, Overlay, OverlayChild, Variable } from '../../runtime/schema/graph-schema'
 import { bootEditorSkins } from '../init'
 import { createCoreSkinRegistry } from '../../runtime/component-host/components'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { renderOverlayChildPreview } from './overlayChildPreview'
-import { isInteractive } from './editors'
+import { isInteractive, positionModeOf, type PositionMode } from './editors'
 import { OVERLAY_PRESET_MIME } from './ComponentLibrary'
 
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n))
+const clampTo = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), Math.max(lo, hi))
 const num = (v: unknown, d: number): number => (typeof v === 'number' ? v : d)
 
 /** 未显式配尺寸的组件，操作框默认展示大小（也是首次缩放的起点）。 */
@@ -44,6 +45,13 @@ type NBox = { left: number; top: number; w: number; h: number }
 const ARROW_DELTA: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
 }
+
+/**
+ * 尺寸缩放手柄开关：暂关。操作框现由实测内容 bbox 驱动、组件 w/h 不再用户可调
+ * （运行时多数皮肤对 w/h 惰性）。手柄相关代码（HANDLES / beginResize / .ocp-edge / .ocp-resize CSS）
+ * 全部保留——将来做「可编辑事件热区边框」时复用同一套。
+ */
+const SHOW_RESIZE_HANDLES = false
 
 const PREVIEW_CSS = `
 .ocp-root { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -166,6 +174,8 @@ export interface OverlayCatalogPreviewProps {
   onAddChild?: (presetId: string, layout: Partial<Layout>) => void
   /** 画布上拖动/缩放：写回 child.layout（归一 0~1）。 */
   onPatchChildLayout?: (childId: string, patch: Partial<Layout>) => void
+  /** 画布上拖动锚点定位型组件：写回 child.inputs（如 x/y，是该组件的位置控件）。 */
+  onPatchChildInputs?: (childId: string, inputs: Record<string, unknown>) => void
   /** 交互热区重叠冲突集变化时回调（DOM 实测得出）——供上层做参数列表标红 / banner。 */
   onWarnChange?: (ids: Set<string>) => void
 }
@@ -178,6 +188,7 @@ export function OverlayCatalogPreview({
   onSelectChild,
   onAddChild,
   onPatchChildLayout,
+  onPatchChildInputs,
   onWarnChange,
 }: OverlayCatalogPreviewProps): JSX.Element {
   injectStyleOnce('overlay-catalog-preview', PREVIEW_CSS)
@@ -203,8 +214,11 @@ export function OverlayCatalogPreview({
   const hotSigRef = useRef('')
   /** stage 当前像素尺寸——选中态显示 x,y · w×h 像素读数用。 */
   const [stagePx, setStagePx] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+  /** 每个 child 真实渲染内容的最小包围盒（归一 stage 坐标，DOM 实测）——操作框贴合内容用。 */
+  const [contentBoxes, setContentBoxes] = useState<Record<string, NBox>>({})
+  const contentSigRef = useRef('')
 
-  const interactive = !!(onAddChild || onPatchChildLayout)
+  const interactive = !!(onAddChild || onPatchChildLayout || onPatchChildInputs)
 
   // 跟踪 stage 像素尺寸（缩放/换比例时更新），供选中框显示真实像素读数。
   useLayoutEffect(() => {
@@ -269,6 +283,56 @@ export function OverlayCatalogPreview({
     }
   }, [overlay.children, timeMs, interactive, onWarnChange])
 
+  // 每个 child 的最小内容包围盒（DOM 实测，归一 stage 坐标）——操作框据此贴合真实内容，而非满屏 / 默认框。
+  // 量 wrap 内**叶子元素**（真实内容）**并入交互热区元素**（button/role=button/cursor:pointer），
+  // 取非零尺寸的 union，保证框完整覆盖内容 + 可点热区；无可测则回退整层（= 满屏，对真·满屏皮肤正确）。
+  // 复用热区那段的 stage 归一 + 签名 diff 范式。图片等异步内容用捕获阶段 load 监听 + rAF 重量。
+  useLayoutEffect(() => {
+    if (!interactive) return
+    const stage = stageRef.current
+    if (!stage) return
+    let raf = 0
+    const measure = (): void => {
+      const sr = stage.getBoundingClientRect()
+      const W = sr.width
+      const H = sr.height
+      if (!W || !H) return
+      const next: Record<string, NBox> = {}
+      for (const child of overlay.children) {
+        const wrap = previewRefs.current[child.id]
+        if (!wrap) continue
+        let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity
+        for (const el of wrap.querySelectorAll<HTMLElement>('*')) {
+          const rc = el.getBoundingClientRect()
+          if (!rc.width || !rc.height) continue
+          // 排除铺满整屏的透明/背景层（previewRefs / STAGE_FILL wrapper / 全屏皮肤底）——只并入真实内容框。
+          if (rc.width >= W * 0.98 && rc.height >= H * 0.98) continue
+          if (rc.left < l) l = rc.left
+          if (rc.top < t) t = rc.top
+          if (rc.right > r) r = rc.right
+          if (rc.bottom > b) b = rc.bottom
+        }
+        if (!(r > l && b > t)) {
+          const rc = wrap.getBoundingClientRect() // 无可测内容（真·全屏皮肤）→ 回退整层
+          l = rc.left; t = rc.top; r = rc.right; b = rc.bottom
+        }
+        next[child.id] = { left: (l - sr.left) / W, top: (t - sr.top) / H, w: (r - l) / W, h: (b - t) / H }
+      }
+      const sig = Object.entries(next)
+        .map(([id, x]) => `${id}:${x.left.toFixed(3)},${x.top.toFixed(3)},${x.w.toFixed(3)},${x.h.toFixed(3)}`)
+        .join('|')
+      if (sig !== contentSigRef.current) {
+        contentSigRef.current = sig
+        setContentBoxes(next)
+      }
+    }
+    measure()
+    // load 不冒泡 → 捕获阶段监听；rAF 合并连发的图片 load。
+    const onLoad = (): void => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure) }
+    stage.addEventListener('load', onLoad, true)
+    return () => { cancelAnimationFrame(raf); stage.removeEventListener('load', onLoad, true) }
+  }, [overlay.children, timeMs, interactive, stagePx.w, stagePx.h])
+
   /** stage 当前像素尺寸（拖拽时 px 位移 → 归一）。 */
   const stageSize = (): { w: number; h: number } => {
     const r = stageRef.current?.getBoundingClientRect()
@@ -281,10 +345,38 @@ export function OverlayCatalogPreview({
     return { left: clamp01((clientX - r.left) / r.width), top: clamp01((clientY - r.top) / r.height) }
   }
 
-  // 选中组件后方向键微调位置（left/top）：步长按像素换算成归一，Shift=粗调（10px）否则 1px。
-  // 输入框/下拉/可编辑区内、以及焦点在左侧方案列表（.gc-list）内一律让位。删除仍由 OverlaySchemeEditor 处理。
+  /** 读组件当前归一位置（拖拽/微调增量基准）——写它自己的位置字段（inputs.x/y 或 layout.left/top）。
+   *  inputs 模式未设值时用实测内容中心 seed，首拖不跳。 */
+  const readPosBase = (child: OverlayChild): { mode: PositionMode; x: number; y: number } => {
+    const mode = positionModeOf(child.component)
+    if (mode.kind === 'inputs') {
+      const cb = contentBoxes[child.id]
+      return {
+        mode,
+        x: num(child.inputs?.[mode.xKey], cb ? cb.left + cb.w / 2 : 0.5),
+        y: num(child.inputs?.[mode.yKey], cb ? cb.top + cb.h / 2 : 0.5),
+      }
+    }
+    return { mode, x: num(child.layout?.left, 0), y: num(child.layout?.top, 0) }
+  }
+  /** 写回组件自己的位置字段（inputs.x/y 是它暴露的位置控件；否则 layout.left/top）。 */
+  const writePos = (childId: string, mode: PositionMode, x: number, y: number): void => {
+    if (mode.kind === 'inputs') onPatchChildInputs?.(childId, { [mode.xKey]: x, [mode.yKey]: y })
+    else onPatchChildLayout?.(childId, { left: x, top: y })
+  }
+  /** 不许组件溢出画布：按内容 bbox 把「拟施加的位移增量」钳到内容仍落在 [0,1] 内，返回允许的增量。 */
+  const clampMoveDelta = (cb: NBox | undefined, dx: number, dy: number): { dx: number; dy: number } => {
+    if (!cb) return { dx, dy }
+    return {
+      dx: clampTo(cb.left + dx, 0, 1 - cb.w) - cb.left,
+      dy: clampTo(cb.top + dy, 0, 1 - cb.h) - cb.top,
+    }
+  }
+
+  // 选中组件后方向键微调位置：步长按像素换算成归一，Shift=粗调（10px）否则 1px。写回组件自己的位置字段
+  // （inputs.x/y 或 layout.left/top）；位移经 clampMoveDelta 钳到内容不溢出画布。输入框/.gc-list 内让位。
   useEffect(() => {
-    if (!interactive || !onPatchChildLayout || !selectedChildId) return
+    if (!interactive || !selectedChildId) return
     const onKey = (e: KeyboardEvent): void => {
       const d = ARROW_DELTA[e.key]
       if (!d) return
@@ -298,14 +390,13 @@ export function OverlayCatalogPreview({
       if (!w || !h) return
       e.preventDefault()
       const px = e.shiftKey ? 10 : 1
-      onPatchChildLayout(selectedChildId, {
-        left: clamp01(num(child.layout?.left, 0) + (d[0] * px) / w),
-        top: clamp01(num(child.layout?.top, 0) + (d[1] * px) / h),
-      })
+      const base = readPosBase(child)
+      const mv = clampMoveDelta(contentBoxes[child.id], (d[0] * px) / w, (d[1] * px) / h)
+      writePos(child.id, base.mode, base.x + mv.dx, base.y + mv.dy)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [interactive, onPatchChildLayout, selectedChildId, overlay.children])
+  }, [interactive, onPatchChildLayout, onPatchChildInputs, selectedChildId, overlay.children])
 
   /** 事件点是否落在某 child 操作框内（用其真实屏幕 rect）。 */
   const rectContains = (childId: string, x: number, y: number): boolean => {
@@ -368,13 +459,15 @@ export function OverlayCatalogPreview({
     const target = selIdx >= 0 ? stack[selIdx] : stack[0]
     if (!target) return
     onSelectChild?.(target.id)
-    if (!onPatchChildLayout) return
+    // 拖动写回组件自己的位置字段（inputs.x/y 或 layout.left/top）；位移按起始内容 bbox 钳制不溢出画布。
+    const base = readPosBase(target)
+    const startCb = contentBoxes[target.id]
     const { w, h } = stageSize()
     if (!w || !h) return
     const startX = e.clientX
     const startY = e.clientY
-    const startL = num(target.layout?.left, 0)
-    const startT = num(target.layout?.top, 0)
+    const startL = base.x
+    const startT = base.y
     const el = e.currentTarget as HTMLElement
     try { el.setPointerCapture(e.pointerId) } catch { /* 无活动指针(合成事件/边缘态):捕获可选,监听照常绑 */ }
     let moved = false
@@ -386,10 +479,8 @@ export function OverlayCatalogPreview({
         el.classList.remove('is-grab')
         el.classList.add('is-grabbing') // 拖动中 → 抓紧
       }
-      onPatchChildLayout(target.id, {
-        left: clamp01(startL + (ev.clientX - startX) / w),
-        top: clamp01(startT + (ev.clientY - startY) / h),
-      })
+      const mv = clampMoveDelta(startCb, (ev.clientX - startX) / w, (ev.clientY - startY) / h)
+      writePos(target.id, base.mode, startL + mv.dx, startT + mv.dy)
     }
     const up = () => {
       try { el.releasePointerCapture(e.pointerId) } catch { /* already released */ }
@@ -498,10 +589,12 @@ export function OverlayCatalogPreview({
         {interactive &&
           overlay.children.map((child) => {
             const L = child.layout
-            const pl = num(L?.left, 0)
-            const pt = num(L?.top, 0)
-            const boxW = typeof L?.width === 'number' ? L.width : DEFAULT_BOX_W
-            const boxH = typeof L?.height === 'number' ? L.height : DEFAULT_BOX_H
+            const cb = contentBoxes[child.id]
+            // 操作框贴合实测内容(位置+尺寸跟随内容渲染处);未测出时(首帧)回退 layout/默认框,避免闪空。
+            const pl = cb ? cb.left : num(L?.left, 0)
+            const pt = cb ? cb.top : num(L?.top, 0)
+            const boxW = cb ? cb.w : typeof L?.width === 'number' ? L.width : DEFAULT_BOX_W
+            const boxH = cb ? cb.h : typeof L?.height === 'number' ? L.height : DEFAULT_BOX_H
             const selected = child.id === selectedChildId
             const warn = warnIds.has(child.id)
             return (
@@ -518,18 +611,20 @@ export function OverlayCatalogPreview({
                     <span className="ocp-dim">
                       {Math.round(pl * stagePx.w)},{Math.round(pt * stagePx.h)} · {Math.round(boxW * stagePx.w)}×{Math.round(boxH * stagePx.h)}
                     </span>
-                    {HANDLES.map((hd) => {
-                      // 角（同时改水平+垂直）= 小方块；边（单轴）= 整条高亮边条。
-                      const corner = hd.h != null && hd.v != null
-                      return (
-                        <span
-                          key={hd.k}
-                          className={`${corner ? 'ocp-resize' : 'ocp-edge'} ${hd.k}`}
-                          onPointerDown={(e) => beginResize(e, child.id, L, hd.h, hd.v)}
-                          title="拖动改尺寸"
-                        />
-                      )
-                    })}
+                    {/* 尺寸手柄暂隐藏：操作框现由实测内容驱动、w/h 不再用户可调（见 SHOW_RESIZE_HANDLES）。 */}
+                    {SHOW_RESIZE_HANDLES &&
+                      HANDLES.map((hd) => {
+                        // 角（同时改水平+垂直）= 小方块；边（单轴）= 整条高亮边条。
+                        const corner = hd.h != null && hd.v != null
+                        return (
+                          <span
+                            key={hd.k}
+                            className={`${corner ? 'ocp-resize' : 'ocp-edge'} ${hd.k}`}
+                            onPointerDown={(e) => beginResize(e, child.id, L, hd.h, hd.v)}
+                            title="拖动改尺寸"
+                          />
+                        )
+                      })}
                   </>
                 )}
               </div>

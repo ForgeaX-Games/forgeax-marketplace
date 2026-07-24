@@ -192,7 +192,7 @@ export function VideoAssetLibrary({
   const entries = useMemo(() => {
     const seen = new Set<string>()
     const out: VideoLibraryEntry[] = []
-    for (const entry of [...bundledEntries, ...apiEntries, ...supplementalEntries]) {
+    for (const entry of [...apiEntries, ...bundledEntries, ...supplementalEntries]) {
       if (seen.has(entry.id)) {
         continue
       }
@@ -229,6 +229,18 @@ export function VideoAssetLibrary({
     } finally {
       setDeleteBusy(false)
     }
+  }
+
+  const renameEntry = async (entry: VideoLibraryEntry) => {
+    if (!entry.fromApi || actionsBusy) {
+      return
+    }
+    const name = window.prompt('重命名视频素材', entry.label)
+    const nextName = name?.trim()
+    if (!nextName || nextName === entry.label) {
+      return
+    }
+    await controller.renameResource(entry.id, nextName)
   }
 
   const deleteMessage = useMemo(() => {
@@ -334,6 +346,7 @@ export function VideoAssetLibrary({
                 className={`gc-row${isSelected ? ' is-on' : ''}`}
                 aria-label={`${entry.group} · ${entry.label}`}
                 onClick={() => onSelect(entry.id)}
+                onDoubleClick={() => void renameEntry(entry)}
               >
                 <span className="gc-row-mark" aria-hidden>{isBound ? '✓' : ''}</span>
                 <span className="gc-row-label">{entry.group} · {entry.label}</span>

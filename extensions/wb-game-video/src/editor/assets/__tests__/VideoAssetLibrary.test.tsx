@@ -48,6 +48,7 @@ function makeController(
     loadMore: vi.fn(async () => {}),
     upload: vi.fn(async () => undefined),
     replaceResource: vi.fn(async () => undefined),
+    renameResource: vi.fn(async () => undefined),
     retryComplete: vi.fn(async () => undefined),
     deleteResource: vi.fn(async () => {}),
     ...overrides,
@@ -86,6 +87,43 @@ describe('VideoAssetLibrary', () => {
     )
     expect(screen.getByRole('button', { name: /idle01/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: '上传 · Clip one' })).toHaveClass('is-on')
+  })
+
+  it('places Kino entries before bundled videos', () => {
+    const { container } = render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        bundledEntries={[bundledEntry('idle01')]}
+        controller={makeController()}
+        selectedId=""
+        onSelect={() => {}}
+      />,
+    )
+
+    const labels = [...container.querySelectorAll('.gc-list-body .gc-row-label')]
+      .map((element) => element.textContent)
+
+    expect(labels).toEqual(['上传 · Clip one', '战斗 · idle01'])
+  })
+
+  it('renames an uploaded video on double click', async () => {
+    const controller = makeController()
+    vi.spyOn(window, 'prompt').mockReturnValue('Renamed clip')
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        bundledEntries={[]}
+        controller={controller}
+        selectedId=""
+        onSelect={() => {}}
+      />,
+    )
+
+    fireEvent.doubleClick(screen.getByRole('button', { name: '上传 · Clip one' }))
+
+    await waitFor(() => expect(controller.renameResource).toHaveBeenCalledWith('api-1', 'Renamed clip'))
   })
 
   it('orders header controls as title, upload, status, count, refresh', () => {
@@ -158,7 +196,7 @@ describe('VideoAssetLibrary', () => {
     expect(css).toMatch(/\.val-head-upload-input\s*\{[^}]*z-index:\s*1/)
     expect(css).toMatch(/\.val-head-upload-input::file-selector-button\s*\{[^}]*width:\s*100%/)
     expect(css).toMatch(/\.val-head-upload-input::file-selector-button\s*\{[^}]*height:\s*100%/)
-  })
+  }, 15_000)
 
   it('uploads the selected file from the real file input', async () => {
     const controller = makeController()

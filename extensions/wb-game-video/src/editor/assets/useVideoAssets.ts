@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createKinoVideoClient,
   KinoClientError,
+  MAX_KINO_RESOURCE_PAGE_SIZE,
   type KinoResourceDTO,
   type KinoVideoClient,
 } from './kino-api'
@@ -12,6 +13,7 @@ import {
   VideoUploadError,
   type PreparedVideoUpload,
 } from './video-upload'
+import { useKinoVideoCache, useKinoVideoResources } from './kinoVideoCacheStore'
 
 export const DEFAULT_VIDEO_PAGE_SIZE = 20
 
@@ -42,6 +44,7 @@ export interface VideoAssetsController {
   loadMore: () => Promise<void>
   upload: (file: File) => Promise<KinoResourceDTO | undefined>
   replaceResource: (resourceId: string, file: File) => Promise<KinoResourceDTO | undefined>
+  renameResource: (resourceId: string, name: string) => Promise<KinoResourceDTO | undefined>
   retryComplete: () => Promise<KinoResourceDTO | undefined>
   deleteResource: (resourceId: string) => Promise<void>
 }
@@ -96,17 +99,20 @@ export function useVideoAssets(
   gameId: string,
   options: UseVideoAssetsOptions = {},
 ): VideoAssetsController {
-  const pageSize = options.pageSize ?? DEFAULT_VIDEO_PAGE_SIZE
+  const pageSize = Math.min(options.pageSize ?? DEFAULT_VIDEO_PAGE_SIZE, MAX_KINO_RESOURCE_PAGE_SIZE)
   const initialPage = options.initialPage ?? 1
   const client = useMemo(
     () => options.client ?? createKinoVideoClient(),
     [options.client],
   )
+  const cacheUpsert = useKinoVideoCache((s) => s.upsert)
+  const cacheRemove = useKinoVideoCache((s) => s.remove)
+  const kinoResources = useKinoVideoResources(gameId, !options.client)
 
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [items, setItems] = useState<VideoAssetListItem[]>([])
-  const [total, setTotal] = useState(0)
+  const [localLoading, setLocalLoading] = useState(true)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [localItems, setLocalItems] = useState<VideoAssetListItem[]>([])
+  const [localTotal, setLocalTotal] = useState(0)
   const [page, setPage] = useState(initialPage)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -132,8 +138,8 @@ export function useVideoAssets(
   const fetchPage = useCallback(
     async (targetPage: number, mode: 'replace' | 'append') => {
       const generation = ++listGeneration.current
-      setLoading(true)
-      setError(null)
+      setLocalLoading(true)
+      setLocalError(null)
       try {
         const result = await client.list({
           game_id: gameId,
@@ -145,21 +151,21 @@ export function useVideoAssets(
           return
         }
         const mapped = result.items.map((dto) => toListItem(dto, client))
-        setItems((prev) => (
+        setLocalItems((prev) => (
           mode === 'append'
             ? mergeUniqueItems(prev, mapped)
             : mergeUniqueItems([], mapped)
         ))
-        setTotal(result.total)
+        setLocalTotal(result.total)
         setPage(result.page)
       } catch (err) {
         if (!mountedRef.current || generation !== listGeneration.current) {
           return
         }
-        setError(safeErrorMessage(err))
+        setLocalError(safeErrorMessage(err))
       } finally {
         if (mountedRef.current && generation === listGeneration.current) {
-          setLoading(false)
+          setLocalLoading(false)
         }
       }
     },
@@ -167,26 +173,59 @@ export function useVideoAssets(
   )
 
   const refresh = useCallback(async () => {
-    await fetchPage(1, 'replace')
-  }, [fetchPage])
+    if (options.client) {
+      await fetchPage(1, 'replace')
+      return
+    }
+    await kinoResources.refresh()
+  }, [fetchPage, kinoResources, options.client])
 
   const loadPage = useCallback(
     async (targetPage: number) => {
-      await fetchPage(targetPage, 'replace')
+      if (options.client) {
+        await fetchPage(targetPage, 'replace')
+        return
+      }
+      setPage(targetPage)
     },
-    [fetchPage],
+    [fetchPage, options.client],
   )
+
+  const items = options.client
+    ? localItems
+    : kinoResources.items
+      .slice(0, page * pageSize)
+      .map((dto) => toListItem(dto, client))
+  const total = options.client ? localTotal : kinoResources.total
+  const loading = options.client ? localLoading : kinoResources.loading
+  const error = options.client ? localError : localError ?? kinoResources.error
 
   const loadMore = useCallback(async () => {
     if (items.length >= total) {
       return
     }
-    await fetchPage(page + 1, 'append')
-  }, [fetchPage, items.length, page, total])
+    if (options.client) {
+      await fetchPage(page + 1, 'append')
+      return
+    }
+    await loadPage(page + 1)
+  }, [fetchPage, items.length, loadPage, options.client, page, total])
 
   useEffect(() => {
+    if (!options.client) return
     void fetchPage(initialPage, 'replace')
-  }, [fetchPage, gameId, initialPage])
+  }, [fetchPage, gameId, initialPage, options.client])
+
+  const upsertCacheResource = useCallback(
+    (resource: KinoResourceDTO, replacementResourceId?: string) => {
+      if (options.client) return
+      cacheUpsert(
+        gameId,
+        replacementResourceId ? { ...resource, resource_id: replacementResourceId } : resource,
+      )
+    },
+    [cacheUpsert, gameId, options.client],
+  )
 
   const runUpload = useCallback(
     async (
@@ -224,9 +263,10 @@ export function useVideoAssets(
             { ...resource, resource_id: replacementResourceId },
             client,
           )
-          setItems((currentItems) => currentItems.map((item) =>
+          setLocalItems((currentItems) => currentItems.map((item) =>
             item.id === replacementResourceId ? replacement : item))
         }
+        upsertCacheResource(resource, replacementResourceId)
         await refresh()
         return resource
       } catch (err) {
@@ -245,7 +285,7 @@ export function useVideoAssets(
         }
       }
     },
-    [client, gameId, refresh],
+    [client, gameId, refresh, upsertCacheResource],
   )
 
   const upload = useCallback(
@@ -259,6 +299,55 @@ export function useVideoAssets(
       file: File,
     ): Promise<KinoResourceDTO | undefined> => runUpload(file, resourceId),
     [runUpload],
+  )
+
+  const renameResource = useCallback(
+    async (resourceId: string, name: string): Promise<KinoResourceDTO | undefined> => {
+      const nextName = name.trim()
+      if (!nextName) {
+        return undefined
+      }
+      const generation = ++crudGeneration.current
+      setMutating(true)
+      setLocalError(null)
+      try {
+        const current = await client.get(resourceId, gameId, {
+          signal: abortRef.current?.signal,
+        })
+        const resource = await client.update(resourceId, {
+          resource_id: resourceId,
+          game_id: gameId,
+          media_type: 'video',
+          url: current.url,
+          name: nextName,
+          type: current.type,
+          remark: current.remark,
+          source: current.source,
+          source_meta: current.source_meta,
+        }, {
+          signal: abortRef.current?.signal,
+        })
+        if (!mountedRef.current || generation !== crudGeneration.current) {
+          return undefined
+        }
+        const renamed = toListItem(resource, client)
+        setLocalItems((currentItems) => currentItems.map((item) =>
+          item.id === resourceId ? renamed : item))
+        upsertCacheResource(resource)
+        return resource
+      } catch (err) {
+        if (!mountedRef.current || generation !== crudGeneration.current) {
+          return undefined
+        }
+        setLocalError(safeErrorMessage(err))
+        return undefined
+      } finally {
+        if (mountedRef.current && generation === crudGeneration.current) {
+          setMutating(false)
+        }
+      }
+    },
+    [client, gameId, refresh, upsertCacheResource],
   )
 
   const retryComplete = useCallback(async (): Promise<KinoResourceDTO | undefined> => {
@@ -289,9 +378,10 @@ export function useVideoAssets(
           { ...resource, resource_id: replacementId },
           client,
         )
-        setItems((currentItems) => currentItems.map((item) =>
+        setLocalItems((currentItems) => currentItems.map((item) =>
           item.id === replacementId ? replacement : item))
       }
+      upsertCacheResource(resource, retryPrepared.replacementResourceId)
       setRetryPrepared(null)
       await refresh()
       return resource
@@ -310,13 +400,13 @@ export function useVideoAssets(
         setUploadProgress(null)
       }
     }
-  }, [client, refresh, retryPrepared])
+  }, [client, gameId, refresh, retryPrepared, upsertCacheResource])
 
   const deleteResource = useCallback(
     async (resourceId: string) => {
       const generation = ++crudGeneration.current
       setMutating(true)
-      setError(null)
+      setLocalError(null)
       try {
         await client.delete(resourceId, gameId, {
           signal: abortRef.current?.signal,
@@ -324,15 +414,18 @@ export function useVideoAssets(
         if (!mountedRef.current || generation !== crudGeneration.current) {
           return
         }
-        setItems((currentItems) =>
+        setLocalItems((currentItems) =>
           currentItems.filter((item) => item.id !== resourceId))
-        setTotal((currentTotal) => Math.max(0, currentTotal - 1))
-        void refresh()
+        setLocalTotal((currentTotal) => Math.max(0, currentTotal - 1))
+        if (!options.client) {
+          cacheRemove(gameId, resourceId)
+        }
+        await refresh()
       } catch (err) {
         if (!mountedRef.current || generation !== crudGeneration.current) {
           return
         }
-        setError(safeErrorMessage(err))
+        setLocalError(safeErrorMessage(err))
         throw err
       } finally {
         if (mountedRef.current && generation === crudGeneration.current) {
@@ -340,7 +433,7 @@ export function useVideoAssets(
         }
       }
     },
-    [client, gameId, refresh],
+    [cacheRemove, client, gameId, options.client, refresh],
   )
 
   const hasMore = items.length < total
@@ -363,6 +456,7 @@ export function useVideoAssets(
     loadMore,
     upload,
     replaceResource,
+    renameResource,
     retryComplete,
     deleteResource,
   }

@@ -5,7 +5,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { ComponentDef } from '../../registry/component-registry'
 import type { GraphTextStyle } from '../../schema/graph-schema'
 import type { OverlayProps } from '../rendererRegistry'
-import { anchorStyle, hasAnchor } from './defaultUi'
+import { anchorStyle } from './defaultUi'
 
 export interface DialogueParams {
   speaker?: string
@@ -43,9 +43,9 @@ export const dialogueComponent: ComponentDef<DialogueParams> = {
 
 export function DialogueOverlay({ overlay }: OverlayProps): ReactNode {
   const p = overlay.inputs as { speaker?: string; text?: string; color?: string; x?: number; y?: number }
-  const boxPos = hasAnchor(p.x, p.y)
-    ? anchorStyle(p.x as number, p.y as number)
-    : ({ position: 'absolute', left: '8%', right: '8%', bottom: '10%' } as CSSProperties)
+  // 单一渲染模式：始终居中锚点定位（缺省底部居中），minWidth 防空文本塌陷、maxWidth 限幅。
+  // 尺寸稳定 → 画布拖拽/钳制一致（不再有「首拖塌陷 / 首拖窄」）。
+  const boxPos = anchorStyle(p.x ?? 0.5, p.y ?? 0.9, { minWidth: '40%' })
   return (
     <div className="gv-dialogue" style={{ ...boxPos, ...dialogueBoxStyle }}>
       {p.speaker && (

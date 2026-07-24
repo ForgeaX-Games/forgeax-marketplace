@@ -134,6 +134,7 @@ export function OverlaySchemeEditor({
                 }
           }
           onPatchChildLayout={(childId, patch) => onPatchChild(childId, { layout: patch })}
+          onPatchChildInputs={(childId, inputs) => onPatchChild(childId, { inputs })}
           onWarnChange={setWarnIds}
         />
 

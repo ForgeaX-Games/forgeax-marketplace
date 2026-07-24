@@ -7,7 +7,12 @@
  * Image and generation registry operations continue to use `/__gva__`.
  */
 import { zhandouUrl } from '../assets/catalog'
-import { createKinoVideoClient, KinoClientError, type KinoVideoClient } from '../assets/kino-api'
+import {
+  createKinoVideoClient,
+  KinoClientError,
+  MAX_KINO_RESOURCE_PAGE_SIZE,
+  type KinoVideoClient,
+} from '../assets/kino-api'
 import type { MediaAsset, StyleAxes } from '../assets/registry-types'
 import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
@@ -76,6 +81,7 @@ export interface ListVideoAssetInfosOptions {
   maxPages?: number
 }
 
+/** Kino service contract: `/resources` accepts at most 100 items per page. */
 /** Lists all Kino video resources with picker metadata. */
 export async function listVideoAssetInfos(
   game?: string,
@@ -85,7 +91,7 @@ export async function listVideoAssetInfos(
     return []
   }
   const client = kinoClient()
-  const pageSize = 200
+  const pageSize = MAX_KINO_RESOURCE_PAGE_SIZE
   const maxPages = Math.max(1, options.maxPages ?? 100)
   const resources = new Map<string, VideoAssetInfo>()
 

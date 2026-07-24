@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useVideoAssets } from '../useVideoAssets'
-import type { KinoResourceDTO, KinoVideoClient } from '../kino-api'
+import { MAX_KINO_RESOURCE_PAGE_SIZE, type KinoResourceDTO, type KinoVideoClient } from '../kino-api'
+import { useKinoVideoCache } from '../kinoVideoCacheStore'
 
 const uploadState = vi.hoisted(() => ({
   impl: undefined as undefined | ((options: {
@@ -12,6 +13,19 @@ const uploadState = vi.hoisted(() => ({
     onProgress?: (value: number) => void
   }) => Promise<KinoResourceDTO>),
 }))
+const defaultKinoList = vi.hoisted(() => vi.fn())
+
+vi.mock('../kino-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../kino-api')>()
+  return {
+    ...actual,
+    createKinoVideoClient: () => ({
+      list: defaultKinoList,
+      playbackUrl: (id: string, gameId: string) =>
+        `/api/v1/kino/resources/${id}/content?game_id=${encodeURIComponent(gameId)}`,
+    }),
+  }
+})
 
 vi.mock('../video-upload', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../video-upload')>()
@@ -63,6 +77,26 @@ function makeClient(overrides: Partial<KinoVideoClient> = {}): KinoVideoClient {
 }
 
 describe('useVideoAssets', () => {
+  beforeEach(() => {
+    defaultKinoList.mockReset()
+    useKinoVideoCache.setState({ byGame: {} })
+  })
+
+  it('uses the shared cache as the sole production list source', async () => {
+    defaultKinoList.mockResolvedValue({
+      items: [makeResource()],
+      total: 1,
+      page: 1,
+      page_size: 100,
+    })
+
+    const { result } = renderHook(() => useVideoAssets('shared-project'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.items.map((item) => item.id)).toEqual(['res-1'])
+    expect(defaultKinoList).toHaveBeenCalledTimes(1)
+  })
+
   it('adds updated_at as a playback URL revision', async () => {
     const client = makeClient()
     const { result } = renderHook(() => useVideoAssets('demo', { client }))
@@ -71,6 +105,66 @@ describe('useVideoAssets', () => {
     expect(result.current.items[0]?.url).toBe(
       '/api/v1/kino/resources/res-1/content?game_id=demo&v=2',
     )
+  })
+
+  it('caps a sidebar page size at the Kino service limit', async () => {
+    const client = makeClient()
+    const { result } = renderHook(() => useVideoAssets('demo', {
+      client,
+      pageSize: MAX_KINO_RESOURCE_PAGE_SIZE + 1,
+    }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(client.list).toHaveBeenCalledWith(
+      expect.objectContaining({ page_size: MAX_KINO_RESOURCE_PAGE_SIZE }),
+      expect.anything(),
+    )
+  })
+
+  it('preserves the Kino response order', async () => {
+    const client = makeClient({
+      list: vi.fn(async () => ({
+        items: [
+          makeResource({ resource_id: 'local-import', source: 'local-import' }),
+          makeResource({ resource_id: 'uploaded', source: 'upload' }),
+        ],
+        total: 2,
+        page: 1,
+        page_size: 20,
+      })),
+    })
+    const { result } = renderHook(() => useVideoAssets('demo', { client }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.items.map((item) => item.id)).toEqual(['local-import', 'uploaded'])
+  })
+
+  it('renames a resource through the Kino update endpoint', async () => {
+    const original = makeResource()
+    const renamed = makeResource({ name: 'Renamed clip', updated_at: 3 })
+    const client = makeClient({
+      get: vi.fn(async () => original),
+      update: vi.fn(async () => renamed),
+    })
+    const { result } = renderHook(() => useVideoAssets('demo', { client }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      await result.current.renameResource('res-1', ' Renamed clip ')
+    })
+
+    expect(client.update).toHaveBeenCalledWith(
+      'res-1',
+      expect.objectContaining({
+        resource_id: 'res-1',
+        game_id: 'demo',
+        media_type: 'video',
+        name: 'Renamed clip',
+      }),
+      expect.anything(),
+    )
+    expect(result.current.items[0]).toMatchObject({ id: 'res-1', label: 'Renamed clip', updatedAt: 3 })
   })
 
   it('replaces the same item without changing total', async () => {

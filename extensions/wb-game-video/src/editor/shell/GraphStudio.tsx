@@ -21,8 +21,9 @@ import { GameStage } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
-import { listVideoAssetInfos, resolveMediaSrc } from './media'
-import { useClipPerformanceEnd } from '../../runtime/play'
+import { resolveMediaSrc } from './media'
+import { useKinoVideoResources } from '../assets/kinoVideoCacheStore'
+import { useClipPerformanceEnd, videoDurationCapReached, MissingVideoNotice } from '../../runtime/play'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import { addNode } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
@@ -146,41 +147,33 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   /** 每次 start / 从此试玩 递增，强制 <video> remount——末节点同 id 再 jump 时否则 key 不变、播完不重开。 */
   const [playEpoch, setPlayEpoch] = useState(0)
   const [videoOptions, setVideoOptions] = useState<VideoOption[]>([])
+  const [videoOptionsError, setVideoOptionsError] = useState<string | null>(null)
+  const kinoResources = useKinoVideoResources(game)
 
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
-  // 视频下拉 = 视频 tab 同源：内置 zhandou 包 + 共享素材层 registry。
   useEffect(() => {
-    let alive = true
-    void (async () => {
-      const bundled: VideoOption[] = Object.keys(ZHANDOU_VIDEOS)
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => ({
-          id,
-          label: id.startsWith('narr-') ? `叙事 · ${id}` : `战斗 · ${id}`,
-        }))
-      try {
-        const registry = await listVideoAssetInfos(game)
-        if (!alive) return
-        const seen = new Set(bundled.map((v) => v.id))
-        const fromReg: VideoOption[] = []
-        for (const a of registry) {
-          if (seen.has(a.id)) continue
-          seen.add(a.id)
-          const name = a.label?.trim()
-          fromReg.push({
-            id: a.id,
-            label: name && name !== a.id ? `素材 · ${name} (${a.id})` : `素材 · ${a.id}`,
-          })
-        }
-        setVideoOptions([...bundled, ...fromReg])
-      } catch {
-        if (alive) {
-          setVideoOptions(bundled)
-        }
-      }
-    })()
-    return () => { alive = false }
-  }, [game])
+    const bundled: VideoOption[] = Object.keys(ZHANDOU_VIDEOS)
+      .sort((a, b) => a.localeCompare(b))
+      .map((id) => ({
+        id,
+        label: id.startsWith('narr-') ? `叙事 · ${id}` : `战斗 · ${id}`,
+      }))
+    const seen = new Set<string>()
+    const kino: VideoOption[] = []
+    for (const resource of kinoResources.items) {
+      if (seen.has(resource.resource_id)) continue
+      seen.add(resource.resource_id)
+      const name = resource.name?.trim()
+      kino.push({
+        id: resource.resource_id,
+        label: name && name !== resource.resource_id
+          ? `素材 · ${name} (${resource.resource_id})`
+          : `素材 · ${resource.resource_id}`,
+      })
+    }
+    setVideoOptions([...kino, ...bundled.filter((v) => !seen.has(v.id))])
+    setVideoOptionsError(kinoResources.error)
+  }, [kinoResources.error, kinoResources.items])
 
   // NodeInspector 自己的「新建并挂载子蓝图」小机关（节点属性面板内，与画布「添加引用」按钮
   // 是两条不同的路：面板走这里只会新建全新子蓝图，天然不成环）。`onPacksChange` 契约是"给出
@@ -445,6 +438,11 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         <button type="button" onClick={() => setPlayOpen((v) => !v)} title="显示/隐藏试玩浮层">{playOpen ? '▣ 隐藏试玩' : '▷ 显示试玩'}</button>
         <button type="button" onClick={clearCanvasGraph} title="清空当前画布的所有节点和连线">🗑 清空</button>
         <span style={{ opacity: 0.6, fontSize: 11 }}>{savedTip || `phase: ${snap.phase}`}</span>
+        {videoOptionsError ? (
+          <span role="alert" style={{ color: '#ff8f8f', fontSize: 11 }}>
+            Kino 视频素材加载失败：{videoOptionsError}（仅显示内置视频）
+          </span>
+        ) : null}
       </div>
 
       {/* 主体：画布命中区必须裁在本层内（WebKit 上 RF transform 层会把 hit-test 渗到工具条） */}
@@ -499,11 +497,16 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           </div>
         )}
         <GraphCanvas
+          // 切蓝图 remount：清掉画布本地 selectedIds（store 已清 selectedNodeId，本地不跟会残留旧 id）。
+          // 节点剪贴板在 GraphCanvas 模块级，不跟 remount 走，故主↔子蓝图可粘贴。
+          key={activeBlueprintId}
           graph={canvasGraph}
           onChange={setCanvasGraph}
           overlays={overlays}
-          activeNodeId={snap.currentNodeId}
-          traversedEdgeIds={traversed}
+          // 试玩游标与编辑选中共用橙色描边；未开浮层时勿把 session 当前节点画成「选中」——
+          // 新建子蓝图后 session.start() 停在「入口」，否则入口会像永远选不掉。
+          activeNodeId={playOpen ? snap.currentNodeId : null}
+          traversedEdgeIds={playOpen ? traversed : undefined}
           visibleNodeIds={visibleNodeIds}
           fitSignal={fitSignal}
           drillFitKey={drillFitKey}

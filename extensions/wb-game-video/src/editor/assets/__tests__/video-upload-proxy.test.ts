@@ -425,6 +425,18 @@ describe('resolveUploadTransportUrl', () => {
     )
   })
 
+  it('uses the dynamically assigned Vite dev port', () => {
+    vi.stubEnv('VITE_DEV_PORT', '15187')
+    try {
+      const origin = 'http://localhost:15187'
+      expect(resolveUploadTransportUrl(CUSTOM_STORAGE_SIGNED, { origin })).toBe(
+        `${origin}/__video-upload-proxy?url=${encodeURIComponent(CUSTOM_STORAGE_SIGNED)}`,
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('keeps same-origin, EA local, and non-15185 URLs unchanged', () => {
     const devOrigin = 'http://localhost:15185'
     const sameOrigin = `${devOrigin}/api/v1/kino/uploads/token`

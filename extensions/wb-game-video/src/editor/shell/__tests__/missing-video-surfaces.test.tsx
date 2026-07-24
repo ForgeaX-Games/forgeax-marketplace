@@ -5,6 +5,14 @@ import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { GraphPlaySurface } from '../GraphPlaySurface'
 import { GraphStudio } from '../GraphStudio'
 
+const useKinoVideoResources = vi.hoisted(() => vi.fn())
+
+vi.mock('../../assets/kinoVideoCacheStore', () => {
+  return {
+    useKinoVideoResources,
+  }
+})
+
 const SCENARIO: GameScenario = {
   version: 'wb-game-video.graph.v1',
   graph: {
@@ -51,6 +59,15 @@ describe('missing video notices across play surfaces', () => {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })))
+    useKinoVideoResources.mockReset()
+    useKinoVideoResources.mockReturnValue({
+      items: [],
+      total: 0,
+      loading: false,
+      error: null,
+      generation: 0,
+      refresh: vi.fn(),
+    })
     seedGraphStore()
   })
 
@@ -75,5 +92,22 @@ describe('missing video notices across play surfaces', () => {
     expect(video).toBeTruthy()
     fireEvent.error(video!)
     expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
+  })
+
+  it('GraphStudio exposes a Kino list failure while retaining bundled options', async () => {
+    useKinoVideoResources.mockReturnValue({
+      items: [],
+      total: 0,
+      loading: false,
+      error: 'invalid_page_size',
+      generation: 1,
+      refresh: vi.fn(),
+    })
+
+    render(<GraphStudio scenario={SCENARIO} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Kino 视频素材加载失败：invalid_page_size（仅显示内置视频）',
+    )
   })
 })

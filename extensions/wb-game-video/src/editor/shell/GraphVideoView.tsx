@@ -254,6 +254,9 @@ injectStyleOnce(
 
 interface VideoEntry extends VideoLibraryEntry {}
 
+// 时间轴编辑暂时从视频 Tab 隐藏；保留组件和数据链路，待迁入蓝图节点后再启用。
+const SHOW_TIMELINE = false
+
 function refForEntry(entry: VideoEntry): string {
   // demo 统一按 basename 引用；绑定即把节点 media.ref 设为该视频文件名。
   return entry.id
@@ -279,8 +282,9 @@ export function GraphVideoView(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [selectedId, setSelectedId] = useState<string>('')
   const [contentRect, setContentRect] = useState<VideoContentRect | null>(null)
-  // 右列：库（添加控件）/ 提示词（重新生成）/ 检视器（素材属性）。
-  const [topPanel, setTopPanel] = useState<'library' | 'prompt' | 'inspector'>('library')
+  // 右列：生成页 / 检视器；速创与导演暂共用同一生成页。
+  const [topPanel, setTopPanel] = useState<'library' | 'prompt' | 'inspector'>('prompt')
+  const [generationTab, setGenerationTab] = useState<'quick' | 'director'>('quick')
   // 「添加控件」二级栏：'default' = 六个默认样式快建卡片；其它 = 某个已挂载方案的 mountId
   // （该方案目录里的组件，拖入即克隆一份保留绑定等输入）。
   const [addTab, setAddTab] = useState<string>('default')
@@ -393,7 +397,6 @@ export function GraphVideoView(): JSX.Element {
       seen.add(entry.id)
       out.push(entry)
     }
-    for (const entry of bundledEntries) push(entry)
     for (const item of videoController.items) {
       push({
         id: item.id,
@@ -406,6 +409,7 @@ export function GraphVideoView(): JSX.Element {
         updatedAt: item.updatedAt,
       })
     }
+    for (const entry of bundledEntries) push(entry)
     for (const entry of supplementalEntries) push(entry)
     return out
   }, [bundledEntries, supplementalEntries, videoController.items])
@@ -498,8 +502,8 @@ export function GraphVideoView(): JSX.Element {
     setContentRect(null)
   }, [timelineEntry?.id, selectedSceneId, editingBoundClip])
 
-  // 换节点 → 清选中 + 右列回到「添加控件」默认视图 + 时间轴回「组件」模式。
-  useEffect(() => { setSelectedMaterialKey(null); setTopPanel('library'); setTimelineMode('material') }, [selectedSceneId])
+  // 换节点 → 清选中 + 回到提示词面板；遗留「添加控件」页不再作为默认入口。
+  useEffect(() => { setSelectedMaterialKey(null); setTopPanel('prompt'); setTimelineMode('material') }, [selectedSceneId])
 
   // 载入新内容（boot / 切版本 / 重置）后清空撤销历史，避免撤销穿越到别的版本/空图。
   useEffect(() => { graphHistoryClear() }, [loadEpoch])
@@ -673,7 +677,7 @@ export function GraphVideoView(): JSX.Element {
     editScenario((s, n) => deleteMaterialGraph(s, n, item))
     if (selectedMaterialKey === item.key) {
       setSelectedMaterialKey(null)
-      setTopPanel('library')
+      setTopPanel('prompt')
     }
   }
 
@@ -716,7 +720,7 @@ export function GraphVideoView(): JSX.Element {
       if (cueItem && !confirmMaterialDelete(scenario, node, cueItem)) return
       editScenario((s, n) => removeQteCueGraph(s, n, cueId))
       setSelectedMaterialKey(null)
-      setTopPanel('library')
+      setTopPanel('prompt')
       return
     }
     editScenario((s, n) => removeQteCueGraph(s, n, cueId))
@@ -857,22 +861,28 @@ export function GraphVideoView(): JSX.Element {
                   <button type="button" disabled={!canRedo} onClick={graphRedo} title="重做 (Ctrl+Shift+Z)" aria-label="重做">↷</button>
                 </div>
                 {editingBoundClip ? (
-                  <div className="gvv-toolseg" role="group" aria-label="右栏内容切换">
+                  <div className="gvv-toolseg" role="group" aria-label="视频生成方式">
                     <button
                       type="button"
-                      className={topPanel === 'library' ? 'is-on' : ''}
-                      aria-pressed={topPanel === 'library'}
-                      onClick={() => setTopPanel('library')}
+                      className={generationTab === 'quick' ? 'is-on' : ''}
+                      aria-pressed={generationTab === 'quick'}
+                      onClick={() => {
+                        setGenerationTab('quick')
+                        setTopPanel('prompt')
+                      }}
                     >
-                      添加控件
+                      速创
                     </button>
                     <button
                       type="button"
-                      className={topPanel === 'prompt' ? 'is-on' : ''}
-                      aria-pressed={topPanel === 'prompt'}
-                      onClick={() => setTopPanel('prompt')}
+                      className={generationTab === 'director' ? 'is-on' : ''}
+                      aria-pressed={generationTab === 'director'}
+                      onClick={() => {
+                        setGenerationTab('director')
+                        setTopPanel('prompt')
+                      }}
                     >
-                      重新生成
+                      导演
                     </button>
                   </div>
                 ) : (
@@ -1162,7 +1172,7 @@ export function GraphVideoView(): JSX.Element {
                 </label>
               )}
             </div>
-            {editingBoundClip ? (
+            {SHOW_TIMELINE && editingBoundClip ? (
               <MaterialTimeline
                 materials={materials}
                 maxMs={maxMs}
@@ -1181,9 +1191,9 @@ export function GraphVideoView(): JSX.Element {
                 onDeleteMaterial={deleteMaterial}
                 onDropTemplate={addMaterialAt}
               />
-            ) : (
+            ) : SHOW_TIMELINE ? (
               <div className="gc-readonly-note">这是素材预览。绑定到当前节点后可编辑时间轴控件。</div>
-            )}
+            ) : null}
           </div>
         ) : (
           <EmptyPreview text="选择一个视频素材以预览" />

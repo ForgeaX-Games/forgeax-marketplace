@@ -36,7 +36,7 @@ const FORBIDDEN_UPLOAD_HEADERS = new Set([
   'via',
 ])
 const MAX_UPLOAD_ERROR_BODY_LENGTH = 512
-const VIDEO_UPLOAD_DEV_PROXY_PORT = '15185'
+const DEFAULT_VIDEO_UPLOAD_DEV_PROXY_PORT = '15185'
 const VIDEO_UPLOAD_PROXY_PATH = '/__video-upload-proxy'
 const inFlightUploads = new Set<string>()
 
@@ -54,6 +54,10 @@ function devProxyPortFromOrigin(origin: string): string | null {
   } catch {
     return null
   }
+}
+
+function configuredDevProxyPort(): string {
+  return import.meta.env.VITE_DEV_PORT || DEFAULT_VIDEO_UPLOAD_DEV_PROXY_PORT
 }
 
 function isCrossOriginHttpUrl(instructionUrl: string, origin: string): boolean {
@@ -90,13 +94,16 @@ function isLocalEaUploadUrl(instructionUrl: string): boolean {
   }
 }
 
-/** Rewrite cross-origin signed upload URLs to the dev-server proxy on port 15185. */
+/** Rewrite cross-origin signed upload URLs through the active Vite dev server. */
 export function resolveUploadTransportUrl(
   instructionUrl: string,
   location: UploadTransportLocation = globalThis.location,
 ): string {
   const origin = location.origin
-  if (devProxyPortFromOrigin(origin) !== VIDEO_UPLOAD_DEV_PROXY_PORT) {
+  if (
+    !import.meta.env.DEV
+    || devProxyPortFromOrigin(origin) !== configuredDevProxyPort()
+  ) {
     return instructionUrl
   }
   if (isLocalEaUploadUrl(instructionUrl)) {

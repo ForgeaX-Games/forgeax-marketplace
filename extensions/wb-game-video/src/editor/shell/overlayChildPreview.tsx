@@ -5,9 +5,9 @@
  */
 import type { CSSProperties, ReactNode } from 'react'
 import type { OverlayChild } from '../../runtime/schema/graph-schema'
-import { defaultsForComponent } from './editors'
+import { defaultsForComponent, positionModeOf } from './editors'
 import type { SkinCtx, SkinRegistry } from '../../runtime/component-host/rendererRegistry'
-import { childWrapStyle, layoutHasExplicitSize } from '../../runtime/schema/layout'
+import { childWrapStyle } from '../../runtime/schema/layout'
 import { applyStyleLockedEventParams } from '../video/graphMaterialOps'
 import { localMsForChild } from './previewClock'
 
@@ -39,8 +39,11 @@ export function renderOverlayChildPreview(
     ctx,
   )
   if (!body) return null
-  const wrapStyle: CSSProperties = layoutHasExplicitSize(child.layout)
-    ? { ...childWrapStyle(child.layout, true), pointerEvents: 'none' }
-    : STAGE_FILL_WRAP
+  // 定位模式决定外包盒（与画布拖拽写的字段一致）：
+  //  · inputs 型（字幕/选项等自锚定皮肤）→ 满屏透明层，皮肤靠 inputs.x/y 自定位。
+  //  · layout 型（横幅/面板等流式组件）→ 按 child.layout.left/top 定位，故拖 layout 能移动它。
+  const wrapStyle: CSSProperties = positionModeOf(child.component).kind === 'inputs'
+    ? STAGE_FILL_WRAP
+    : { ...childWrapStyle(child.layout, false), pointerEvents: 'none' }
   return <div style={wrapStyle}>{body}</div>
 }

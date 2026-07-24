@@ -156,6 +156,9 @@ export interface CreateKinoVideoClientOptions {
 const DEFAULT_BASE_URL = '/api/v1/kino'
 const MAX_ERROR_MESSAGE_LENGTH = 512
 
+/** Kino `/resources` 服务端分页协议的单页上限。 */
+export const MAX_KINO_RESOURCE_PAGE_SIZE = 100
+
 function normalizeBaseUrl(raw: string | undefined): string {
   const trimmed = (raw ?? DEFAULT_BASE_URL).trim()
   if (trimmed.length === 0) {
