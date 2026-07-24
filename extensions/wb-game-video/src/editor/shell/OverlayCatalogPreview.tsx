@@ -4,11 +4,13 @@
  *
  * 两态（同一组件）：
  *  - **只读**：不传交互回调时 = 纯预览（规则/别处复用）。
- *  - **可交互**（界面 tab）：stage 作组件库拖拽落点；每个 child 叠一个「操作框」——
- *    拖动改 `layout.left/top`、右下角手柄改 `layout.width/height`（均归一 0~1，写回 schema）。
- *    操作框 = 我们正在编辑的 **layout 盒**本身（不测量组件实际绘制内容），所见即所改。
+ *  - **可交互**（界面 tab）：stage 作组件库拖拽落点；每个 child 叠一个「操作框」（layout 盒）。
+ *    **拖动改位置**（layout.left/top）、**方向键微调位置**（选中态 ←↑↓→，Shift 粗调）、
+ *    **四角+四边改尺寸**（layout.width/height；边=整条边线可拖，角=对角双轴）
+ *    ——对**所有** overlay 开放，
+ *    不按组件类型门控（isSizable 只服务视频 tab）。均归一 0~1，写回 schema。
  */
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { Entity, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
 import { bootEditorSkins } from '../init'
@@ -16,22 +18,35 @@ import { createCoreSkinRegistry } from '../../runtime/component-host/components'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { renderOverlayChildPreview } from './overlayChildPreview'
-import { isSizable, isInteractive } from './editors'
+import { isInteractive } from './editors'
 import { OVERLAY_PRESET_MIME } from './ComponentLibrary'
-
-/** 未显式配尺寸的可缩放组件，操作框默认展示大小（也是首次缩放的起点）。 */
-const DEFAULT_BOX_W = 0.25
-const DEFAULT_BOX_H = 0.15
-
-/** 四角缩放把手位置。 */
-type Corner = 'nw' | 'ne' | 'sw' | 'se'
-const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se']
 
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n))
 const num = (v: unknown, d: number): number => (typeof v === 'number' ? v : d)
 
+/** 未显式配尺寸的组件，操作框默认展示大小（也是首次缩放的起点）。 */
+const DEFAULT_BOX_W = 0.25
+const DEFAULT_BOX_H = 0.15
+
+/** 8 个缩放把手：4 角 + 4 边。h/v = 该把手拖动时影响的水平/垂直边（缺省=该轴不动）。 */
+type HDir = 'w' | 'e'
+type VDir = 'n' | 's'
+const HANDLES: Array<{ k: string; h?: HDir; v?: VDir }> = [
+  { k: 'nw', h: 'w', v: 'n' }, { k: 'n', v: 'n' }, { k: 'ne', h: 'e', v: 'n' },
+  { k: 'w', h: 'w' }, { k: 'e', h: 'e' },
+  { k: 'sw', h: 'w', v: 's' }, { k: 's', v: 's' }, { k: 'se', h: 'e', v: 's' },
+]
+
+/** 归一 stage 矩形。 */
+type NBox = { left: number; top: number; w: number; h: number }
+
+/** 方向键 → 位移方向（单位向量，y 向下为正）；选中组件时按此微调 left/top。 */
+const ARROW_DELTA: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+}
+
 const PREVIEW_CSS = `
-.ocp-root { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.ocp-root { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ocp-stage {
   position: relative;
   width: 100%;
@@ -65,6 +80,11 @@ const PREVIEW_CSS = `
 }
 .ocp-hit.is-selected { border: 1px solid var(--gc-accent, #c8955a); box-shadow: 0 0 0 1px rgba(200,149,90,.4); }
 .ocp-hit.is-warn { border: 1px solid #ff6b6b; box-shadow: 0 0 0 1px rgba(255,107,107,.5); }
+.ocp-hit-tag {
+  position: absolute; left: 0; top: -15px; white-space: nowrap;
+  font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 3px;
+  background: rgba(0,0,0,.6); color: #f6f1e9; pointer-events: none;
+}
 /* 按钮真实事件热区可视化：青色虚线，冲突时标红。纯展示，不挡点。 */
 .ocp-hot { position: absolute; pointer-events: none; border: 1px dashed rgba(90,200,220,.75); border-radius: 3px; background: rgba(90,200,220,.10); }
 .ocp-hot.is-warn { border-color: #ff6b6b; background: rgba(255,107,107,.16); }
@@ -83,13 +103,9 @@ const PREVIEW_CSS = `
   background: none; color: var(--gc-txt, #f6f1e9); cursor: pointer;
 }
 .ocp-menu button:hover { background: var(--gc-item-hover, rgba(255,255,255,.08)); }
-.ocp-hit-tag {
-  position: absolute; left: 0; top: -15px; white-space: nowrap;
-  font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 3px;
-  background: rgba(0,0,0,.6); color: #f6f1e9; pointer-events: none;
-}
+/* 四角把手：小方块，拖动双轴缩放。 */
 .ocp-resize {
-  position: absolute; width: 12px; height: 12px;
+  position: absolute; width: 12px; height: 12px; z-index: 2;
   border-radius: 2px; background: var(--gc-accent, #c8955a);
   border: 1px solid #fff; touch-action: none; pointer-events: auto;
 }
@@ -97,6 +113,26 @@ const PREVIEW_CSS = `
 .ocp-resize.ne { right: -5px; top: -5px; cursor: nesw-resize; }
 .ocp-resize.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
 .ocp-resize.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+/* 四边把手：覆盖整条边线的高亮长条（两端让出角把手），沿边任意处可拖；hover 加粗发光。 */
+.ocp-edge {
+  position: absolute; z-index: 1; touch-action: none; pointer-events: auto;
+  background: rgba(200,149,90,.35); border-radius: 3px;
+  transition: background .1s ease, box-shadow .1s ease;
+}
+.ocp-edge:hover { background: rgba(200,149,90,.85); box-shadow: 0 0 7px rgba(200,149,90,.75); }
+.ocp-edge.n, .ocp-edge.s { left: 9px; right: 9px; height: 5px; cursor: ns-resize; }
+.ocp-edge.w, .ocp-edge.e { top: 9px; bottom: 9px; width: 5px; cursor: ew-resize; }
+.ocp-edge.n { top: -3px; }
+.ocp-edge.s { bottom: -3px; }
+.ocp-edge.w { left: -3px; }
+.ocp-edge.e { right: -3px; }
+/* 选中态：框**内侧**右下角显示 x,y · w×h 像素读数。 */
+.ocp-dim {
+  position: absolute; right: 2px; bottom: 2px; white-space: nowrap;
+  font-size: 9px; line-height: 1; padding: 2px 5px; border-radius: 3px;
+  background: var(--gc-accent, #c8955a); color: #1a1510; pointer-events: none;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}
 `
 
 function mockHudCtx(entities: Record<string, Entity> | undefined, variables: Record<string, Variable> | undefined): SkinCtx {
@@ -155,7 +191,7 @@ export function OverlayCatalogPreview({
   const stageRef = useRef<HTMLDivElement>(null)
   /** 每个 child 操作框的 DOM——stage 按其屏幕 rect 做几何命中判定（不依赖 z 序/事件目标）。 */
   const childRefs = useRef<Record<string, HTMLElement | null>>({})
-  /** 每个 child 预览渲染层的 DOM——用于实测其真实可点热区做重叠告警。 */
+  /** 每个 child 预览渲染层的 DOM——实测可点热区做重叠告警。 */
   const previewRefs = useRef<Record<string, HTMLElement | null>>({})
   /** 拖动进行中——悬停 cursor 逻辑在拖动时让位给「抓紧」。 */
   const draggingRef = useRef(false)
@@ -163,66 +199,68 @@ export function OverlayCatalogPreview({
   const [warnIds, setWarnIds] = useState<Set<string>>(() => new Set())
   const warnSigRef = useRef('')
   /** 各按钮真实事件热区（归一 stage 坐标）——画布叠加可视化。 */
-  const [hotAreas, setHotAreas] = useState<Array<{ left: number; top: number; w: number; h: number; warn: boolean }>>([])
+  const [hotAreas, setHotAreas] = useState<Array<NBox & { warn: boolean }>>([])
   const hotSigRef = useRef('')
+  /** stage 当前像素尺寸——选中态显示 x,y · w×h 像素读数用。 */
+  const [stagePx, setStagePx] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
   const interactive = !!(onAddChild || onPatchChildLayout)
 
-  // 重叠告警：量每个**可交互** child 真实渲染的**逐个**可点热区（pointer-events 在预览被外层
-  // 置 none，故以「交互 affordance」为代理：<button> / role=button / cursor 为 pointer|not-allowed，
-  // 并只取最外层目标去掉内层 span）。两个 child 只要**各自任一按钮热区**真相交，运行时同一点击
-  // 就会互相遮挡 → 告警。按逐按钮判、不用整组件 union 外包框，避免「框沾边但按钮没碰」的误报。
-  // 仅新增一个测量 pass，不参与拖拽/循环/缩放路径。
+  // 跟踪 stage 像素尺寸（缩放/换比例时更新），供选中框显示真实像素读数。
+  useLayoutEffect(() => {
+    const stage = stageRef.current
+    if (!stage || typeof ResizeObserver === 'undefined') return
+    const update = () => { const r = stage.getBoundingClientRect(); setStagePx({ w: r.width, h: r.height }) }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(stage)
+    return () => ro.disconnect()
+  }, [])
+
+  // 重叠告警 + 事件热区可视化：量每个**可交互** child 的逐个按钮热区，两两相交则告警。
   useLayoutEffect(() => {
     if (!interactive) return
     const stage = stageRef.current
     if (!stage) return
+    const sr = stage.getBoundingClientRect()
+    const W = sr.width
+    const H = sr.height
+    if (!W || !H) return
     type Box = { l: number; t: number; r: number; b: number }
-    const hotAreas = (wrap: HTMLElement): Box[] => {
-      const cand = Array.from(wrap.querySelectorAll<HTMLElement>('*')).filter((el) => {
-        const cs = getComputedStyle(el)
-        return el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || cs.cursor === 'pointer' || cs.cursor === 'not-allowed'
-      })
-      // 只保留最外层可点目标（按钮内的 span 等被包含者剔除），每个 = 一块事件热区。
-      const outer = cand.filter((el) => !cand.some((o) => o !== el && o.contains(el)))
-      return outer
-        .map((el) => el.getBoundingClientRect())
-        .filter((r) => r.width && r.height)
-        .map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom }))
-    }
-    const perChild: Array<{ id: string; boxes: Box[] }> = []
+    const affById: Record<string, Box[]> = {}
     for (const child of overlay.children) {
       if (!isInteractive(child.component)) continue
       const wrap = previewRefs.current[child.id]
       if (!wrap) continue
-      const boxes = hotAreas(wrap)
-      if (boxes.length) perChild.push({ id: child.id, boxes })
+      const cand = Array.from(wrap.querySelectorAll<HTMLElement>('*')).filter((el) => {
+        const cs = getComputedStyle(el)
+        return el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || cs.cursor === 'pointer' || cs.cursor === 'not-allowed'
+      })
+      const outer = cand.filter((el) => !cand.some((o) => o !== el && o.contains(el)))
+      const rects = outer
+        .map((el) => el.getBoundingClientRect())
+        .filter((rc) => rc.width && rc.height)
+        .map((rc) => ({ l: rc.left, t: rc.top, r: rc.right, b: rc.bottom }))
+      if (rects.length) affById[child.id] = rects
     }
-    const intersects = (a: Box, b: Box) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b
+    const intersects = (a: Box, bx: Box) => a.l < bx.r && bx.l < a.r && a.t < bx.b && bx.t < a.b
+    const ids = Object.keys(affById)
     const hit = new Set<string>()
-    for (let i = 0; i < perChild.length; i++) {
-      for (let j = i + 1; j < perChild.length; j++) {
-        const A = perChild[i]!
-        const B = perChild[j]!
-        if (A.boxes.some((a) => B.boxes.some((b) => intersects(a, b)))) { hit.add(A.id); hit.add(B.id) }
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const A = affById[ids[i]!]!
+        const B = affById[ids[j]!]!
+        if (A.some((a) => B.some((bx) => intersects(a, bx)))) { hit.add(ids[i]!); hit.add(ids[j]!) }
       }
     }
     const sig = [...hit].sort().join(',')
-    if (sig !== warnSigRef.current) { // 内容未变才更新，避免 setState → 重渲染 → 再测的死循环
+    if (sig !== warnSigRef.current) {
       warnSigRef.current = sig
       setWarnIds(hit)
       onWarnChange?.(hit)
     }
-    // 事件热区可视化：把每块按钮热区换算成归一 stage 坐标，冲突组件的热区标红。
-    const sr = stage.getBoundingClientRect()
-    const areas = perChild.flatMap(({ id, boxes }) =>
-      boxes.map((bx) => ({
-        left: (bx.l - sr.left) / sr.width,
-        top: (bx.t - sr.top) / sr.height,
-        w: (bx.r - bx.l) / sr.width,
-        h: (bx.b - bx.t) / sr.height,
-        warn: hit.has(id),
-      })),
+    const areas = ids.flatMap((id) =>
+      affById[id]!.map((bx) => ({ left: (bx.l - sr.left) / W, top: (bx.t - sr.top) / H, w: (bx.r - bx.l) / W, h: (bx.b - bx.t) / H, warn: hit.has(id) })),
     )
     const hotSig = areas.map((a) => `${a.left.toFixed(3)},${a.top.toFixed(3)},${a.w.toFixed(3)},${a.h.toFixed(3)},${a.warn ? 1 : 0}`).join('|')
     if (hotSig !== hotSigRef.current) {
@@ -243,7 +281,33 @@ export function OverlayCatalogPreview({
     return { left: clamp01((clientX - r.left) / r.width), top: clamp01((clientY - r.top) / r.height) }
   }
 
-  /** 事件点是否落在某 child 操作框内（用其真实屏幕 rect，含 pill 尺寸）。 */
+  // 选中组件后方向键微调位置（left/top）：步长按像素换算成归一，Shift=粗调（10px）否则 1px。
+  // 输入框/下拉/可编辑区内、以及焦点在左侧方案列表（.gc-list）内一律让位。删除仍由 OverlaySchemeEditor 处理。
+  useEffect(() => {
+    if (!interactive || !onPatchChildLayout || !selectedChildId) return
+    const onKey = (e: KeyboardEvent): void => {
+      const d = ARROW_DELTA[e.key]
+      if (!d) return
+      const t = e.target as HTMLElement | null
+      const tag = t?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return
+      if (t?.closest?.('.gc-list')) return
+      const child = overlay.children.find((c) => c.id === selectedChildId)
+      if (!child) return
+      const { w, h } = stageSize()
+      if (!w || !h) return
+      e.preventDefault()
+      const px = e.shiftKey ? 10 : 1
+      onPatchChildLayout(selectedChildId, {
+        left: clamp01(num(child.layout?.left, 0) + (d[0] * px) / w),
+        top: clamp01(num(child.layout?.top, 0) + (d[1] * px) / h),
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [interactive, onPatchChildLayout, selectedChildId, overlay.children])
+
+  /** 事件点是否落在某 child 操作框内（用其真实屏幕 rect）。 */
   const rectContains = (childId: string, x: number, y: number): boolean => {
     const r = childRefs.current[childId]?.getBoundingClientRect()
     return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
@@ -287,10 +351,9 @@ export function OverlayCatalogPreview({
   }
 
   /**
-   * stage 按下：几何命中栈（顶层在前）。未选中框 pointer-events:none，故 stage 总能收到按下。
-   * 模型 = 点击选中 / 拖动移动：
-   *  - 拖动移动**当前选中**（若它在命中栈内），否则移动栈顶；
-   *  - 纯点击（无位移）在重叠处**循环**到下一层，供逐层选中。
+   * stage 按下：几何命中栈（顶层在前）。操作框 pointer-events:none，故 stage 总能收到按下。
+   * 模型 = 点击选中 / 拖动移动：拖动移动**当前选中**（在栈内）否则栈顶，改 left/top；
+   * 纯点击（无位移）在重叠处**循环**到下一层，供逐层选中。
    */
   const onStagePointerDown = (e: ReactPointerEvent) => {
     if (!interactive) return
@@ -313,7 +376,7 @@ export function OverlayCatalogPreview({
     const startL = num(target.layout?.left, 0)
     const startT = num(target.layout?.top, 0)
     const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
+    try { el.setPointerCapture(e.pointerId) } catch { /* 无活动指针(合成事件/边缘态):捕获可选,监听照常绑 */ }
     let moved = false
     const move = (ev: PointerEvent) => {
       if (!moved && Math.abs(ev.clientX - startX) < 2 && Math.abs(ev.clientY - startY) < 2) return
@@ -344,14 +407,14 @@ export function OverlayCatalogPreview({
     el.addEventListener('pointerup', up)
   }
 
-  /** 四角缩放：对角固定，拖动角改 width/height（左/上侧角同时改 left/top）。归一 0~1。 */
-  const beginResize = (e: ReactPointerEvent, childId: string, layout: Layout | undefined, corner: Corner) => {
+  /** 缩放：拖角(双轴)或拖边(单轴)。h='w'/'e' 动左/右边、v='n'/'s' 动上/下边；对角/对边固定。 */
+  const beginResize = (e: ReactPointerEvent, childId: string, layout: Layout | undefined, h?: HDir, v?: VDir) => {
     if (!onPatchChildLayout) return
     e.stopPropagation()
     e.preventDefault()
     onSelectChild?.(childId)
-    const { w, h } = stageSize()
-    if (!w || !h) return
+    const { w, h: stageH } = stageSize()
+    if (!w || !stageH) return
     const startX = e.clientX
     const startY = e.clientY
     const startL = num(layout?.left, 0)
@@ -360,19 +423,17 @@ export function OverlayCatalogPreview({
     const startH = num(layout?.height, DEFAULT_BOX_H)
     const right = startL + startW
     const bottom = startT + startH
-    const west = corner === 'nw' || corner === 'sw' // 拖左边 → 动 left/width（右边固定）
-    const north = corner === 'nw' || corner === 'ne' // 拖上边 → 动 top/height（下边固定）
     const MIN = 0.02
     const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
+    try { el.setPointerCapture(e.pointerId) } catch { /* 无活动指针(合成事件/边缘态):捕获可选,监听照常绑 */ }
     const move = (ev: PointerEvent) => {
       const dnx = (ev.clientX - startX) / w
-      const dny = (ev.clientY - startY) / h
+      const dny = (ev.clientY - startY) / stageH
       let L = startL, T = startT, W = startW, H = startH
-      if (west) { L = Math.min(Math.max(0, startL + dnx), right - MIN); W = right - L }
-      else { W = Math.max(MIN, Math.min(startW + dnx, 1 - startL)) }
-      if (north) { T = Math.min(Math.max(0, startT + dny), bottom - MIN); H = bottom - T }
-      else { H = Math.max(MIN, Math.min(startH + dny, 1 - startT)) }
+      if (h === 'w') { L = Math.min(Math.max(0, startL + dnx), right - MIN); W = right - L }
+      else if (h === 'e') { W = Math.max(MIN, Math.min(startW + dnx, 1 - startL)) }
+      if (v === 'n') { T = Math.min(Math.max(0, startT + dny), bottom - MIN); H = bottom - T }
+      else if (v === 's') { H = Math.max(MIN, Math.min(startH + dny, 1 - startT)) }
       onPatchChildLayout(childId, { left: L, top: T, width: W, height: H })
     }
     const up = () => {
@@ -439,38 +500,38 @@ export function OverlayCatalogPreview({
             const L = child.layout
             const pl = num(L?.left, 0)
             const pt = num(L?.top, 0)
-            const sizable = isSizable(child.component)
+            const boxW = typeof L?.width === 'number' ? L.width : DEFAULT_BOX_W
+            const boxH = typeof L?.height === 'number' ? L.height : DEFAULT_BOX_H
             const selected = child.id === selectedChildId
-            const warn = !!warnIds?.has(child.id)
-            // 有显式宽高、或（选中且可缩放）→ 画成盒；否则画成小把手 pill。
-            const boxW = typeof L?.width === 'number' ? L.width : selected && sizable ? DEFAULT_BOX_W : undefined
-            const boxH = typeof L?.height === 'number' ? L.height : selected && sizable ? DEFAULT_BOX_H : undefined
-            const asBox = boxW != null && boxH != null
+            const warn = warnIds.has(child.id)
             return (
               <div
                 key={child.id}
                 ref={(el) => { childRefs.current[child.id] = el }}
                 className={`ocp-hit${selected ? ' is-selected' : ''}${warn ? ' is-warn' : ''}`}
-                style={{
-                  left: `${pl * 100}%`,
-                  top: `${pt * 100}%`,
-                  ...(asBox
-                    ? { width: `${boxW * 100}%`, height: `${boxH * 100}%` }
-                    : { padding: '3px 7px', minWidth: 14 }),
-                }}
+                style={{ left: `${pl * 100}%`, top: `${pt * 100}%`, width: `${boxW * 100}%`, height: `${boxH * 100}%` }}
               >
-                {!asBox && <span style={{ fontSize: 9, opacity: 0.8, pointerEvents: 'none' }}>{child.component}</span>}
-                {asBox && <span className="ocp-hit-tag">{child.component}</span>}
+                <span className="ocp-hit-tag">{child.component}</span>
                 {warn && <span className="ocp-warn-tag" title="与另一交互组件热区重叠，运行时点击会互相遮挡">⚠ 重叠</span>}
-                {selected && sizable &&
-                  CORNERS.map((c) => (
-                    <span
-                      key={c}
-                      className={`ocp-resize ${c}`}
-                      onPointerDown={(e) => beginResize(e, child.id, L, c)}
-                      title="拖动改尺寸"
-                    />
-                  ))}
+                {selected && (
+                  <>
+                    <span className="ocp-dim">
+                      {Math.round(pl * stagePx.w)},{Math.round(pt * stagePx.h)} · {Math.round(boxW * stagePx.w)}×{Math.round(boxH * stagePx.h)}
+                    </span>
+                    {HANDLES.map((hd) => {
+                      // 角（同时改水平+垂直）= 小方块；边（单轴）= 整条高亮边条。
+                      const corner = hd.h != null && hd.v != null
+                      return (
+                        <span
+                          key={hd.k}
+                          className={`${corner ? 'ocp-resize' : 'ocp-edge'} ${hd.k}`}
+                          onPointerDown={(e) => beginResize(e, child.id, L, hd.h, hd.v)}
+                          title="拖动改尺寸"
+                        />
+                      )
+                    })}
+                  </>
+                )}
               </div>
             )
           })}
@@ -481,11 +542,14 @@ export function OverlayCatalogPreview({
           <button type="button" onPointerDown={(e) => { e.stopPropagation(); reorder(menu.childId, 'back'); setMenu(null) }}>⬇ 置底</button>
         </div>
       )}
-      <label className="ocp-scrub">
-        <span>预览时刻</span>
-        <input type="range" min={0} max={3000} step={50} value={timeMs} onChange={(e) => setTimeMs(Number(e.target.value))} />
-        <span>{(timeMs / 1000).toFixed(2)}s</span>
-      </label>
+      {/* 预览时刻拖条：仅只读预览态显示（规则 tab 等）；界面 tab 可交互态不显，画布固定 t=400ms 渲染。 */}
+      {!interactive && (
+        <label className="ocp-scrub">
+          <span>预览时刻</span>
+          <input type="range" min={0} max={3000} step={50} value={timeMs} onChange={(e) => setTimeMs(Number(e.target.value))} />
+          <span>{(timeMs / 1000).toFixed(2)}s</span>
+        </label>
+      )}
     </div>
   )
 }

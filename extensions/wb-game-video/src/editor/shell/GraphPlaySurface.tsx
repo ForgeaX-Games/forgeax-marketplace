@@ -15,11 +15,8 @@ import { PlayerRootContext, type SkinCtx } from '../../runtime/component-host/re
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { getComponent } from '../../runtime/registry/component-registry'
 import { bootEditorSkins } from '../init'
-import { resolveMediaSrc, videoDurationCapReached } from './media'
-import { useClipPerformanceEnd } from './useClipPerformanceEnd'
-import { MissingVideoNotice } from './MissingVideoNotice'
-import { VideoOverlayStage } from '../video/VideoOverlayStage'
-import { useVideoContentRect } from '../video/useVideoContentRect'
+import { resolveMediaSrc } from './media'
+import { GameStage, useClipPerformanceEnd } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 
@@ -100,9 +97,6 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     return () => releasePlayerFocus(el)
   }, [])
 
-  const videoElRef = useRef<HTMLVideoElement | null>(null)
-  const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [snap?.clip?.nodeId])
-
   // 实体从空被回填后要重建 session（否则 HUD bind 不到 ent-*）。
   const entitySig = useGraphScenario((s) => {
     const e = s.meta.entities ?? s.demo?.entities
@@ -118,11 +112,6 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
   const videoSrc = resolveMediaSrc(snap?.clip?.mediaId, game)
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clip?.nodeId, restartKey)
-  const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
-
-  useEffect(() => {
-    setMissingVideoId(null)
-  }, [snap?.clip?.nodeId, snap?.clip?.mediaId, videoSrc])
 
   useEffect(() => {
     // 无视频：durationMs 到点推进；有视频：durationMs 作播放时长上限，走 <video> onTimeUpdate。
@@ -168,70 +157,18 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       onFocus={() => claimPlayerFocus(rootRef.current)}
       style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden', outline: 'none' }}
     >
-      {/* 演出画面 */}
-      {videoSrc ? (
-        <>
-        <video
-          key={snap?.clip?.nodeId}
-          ref={videoElRef}
-          src={videoSrc}
-          autoPlay
-          muted
-          playsInline
-          loop={!!snap?.clip?.loop}
-          onLoadedMetadata={() => {
-            setMissingVideoId(null)
-            recomputeRect()
-          }}
-          onError={() => {
-            if (snap?.clip?.mediaId) {
-              setMissingVideoId(snap.clip.mediaId)
-            }
-          }}
-          onEnded={() => {
-            if (snap?.clip?.loop) return
-            endPerformance()
-          }}
-          onTimeUpdate={(e) => {
-            const el = e.currentTarget
-            const nowMs = Math.floor(el.currentTime * 1000)
-            if (videoDurationCapReached(nowMs, snap?.clip?.durationMs, el.duration)) {
-              el.pause()
-              endPerformance()
-              return
-            }
-            setSnap(sessionRef.current!.tick(nowMs))
-          }}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
-        />
-        {missingVideoId ? (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
-            <MissingVideoNotice resourceId={missingVideoId} />
-          </div>
-        ) : null}
-        </>
-      ) : (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.6)' }}>
-          {snap ? snap.clip?.name ?? '（无演出）' : '加载中…'}
-        </div>
-      )}
-
-      {/* 游戏 overlay 舞台：锚定视频实际显示矩形（object-fit:contain 后带黑边的那块）。
-          HUD / QTE / 交互 / 结局横幅都相对这块定位，视频缩放/换比例时跟着视频走。 */}
-      <VideoOverlayStage contentRect={contentRect}>
-      {/* 全部叠层（含 QTE/选项/血条）：传 skinCtx；事件经 emitEvent。 */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-        {(snap?.overlayMounts ?? []).map((m) => (
-          <span key={m.mountId} style={{ display: 'contents' }}>
-            {skins?.renderOverlayMount(
-              m,
-              (elementId, key) => { const s = sessionRef.current; if (s) setSnap(s.emitEvent(elementId, key)) },
-              skinCtx,
-            )}
-          </span>
-        ))}
-      </div>
-      </VideoOverlayStage>
+      {/* 演出画面 + 叠层：共享 runtime/play 的 GameStage（视频舞台锚定内容矩形，HUD/QTE/交互随视频走）。 */}
+      <GameStage
+        videoSrc={videoSrc}
+        clip={snap?.clip}
+        overlayMounts={snap?.overlayMounts ?? []}
+        skins={skins ?? undefined}
+        skinCtx={skinCtx}
+        onEmit={(elementId, key) => { const s = sessionRef.current; if (s) setSnap(s.emitEvent(elementId, key)) }}
+        onTick={(nowMs) => { const s = sessionRef.current; if (s) setSnap(s.tick(nowMs)) }}
+        onPerformanceEnd={endPerformance}
+        placeholder={snap ? (snap.clip?.name ?? '（无演出）') : '加载中…'}
+      />
 
       {/* 控制条：右上角悬浮 */}
       <div style={{ position: 'absolute', top: 10, right: 12, display: 'flex', gap: 6, alignItems: 'center', padding: 4, borderRadius: 10, background: 'rgba(27,23,19,0.7)' }}>
@@ -244,7 +181,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       {/* 蓝图浮层：可拖拽 + 可缩放，复用 GraphCanvas */}
       {showBlueprint && (
         <DraggablePanel title="蓝图状态机 · 点节点跳转执行" initial={{ x: 40, y: 56, w: 540, h: 420 }} onClose={() => setShowBlueprint(false)}>
-          <GraphCanvas graph={graph} onChange={() => {}} overlays={overlays} activeNodeId={snap?.currentNodeId} traversedEdgeIds={traversed} onJump={doJump} />
+          <GraphCanvas graph={graph} onChange={() => {}} overlays={overlays} activeNodeId={snap?.currentNodeId} traversedEdgeIds={traversed} onJump={doJump} readOnly />
         </DraggablePanel>
       )}
 

@@ -261,8 +261,7 @@ export const NODIA_NODE_SCHEME_N_DOOR: Overlay = {
     {
       "id": "kou",
       "trigger": {
-        "when": "at",
-        "ms": 9000
+        "when": "enter"
       },
       "inputs": {
         "glyph": "叩",

@@ -202,3 +202,8 @@ export function createCoreSkinRegistry(): SkinRegistry {
   installCoreSkins(reg)
   return reg
 }
+
+/** 可用组件清单（id + 展示名）——供界面 tab 组件库渲染所有可拖组件。 */
+export const availableComponents: Array<{ id: string; label: string }> = EXTRA_COMPONENTS.map(
+  ([id, def]) => ({ id, label: def.label ?? id }),
+)

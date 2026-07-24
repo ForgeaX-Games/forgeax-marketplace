@@ -728,6 +728,8 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-mclip.is-fx::before { background: #ff8ac4; }
 .mtl-root .gc-mclip.is-component { border-color: rgba(180,190,210,.55); color: #e2e8f0; }
 .mtl-root .gc-mclip.is-component::before { background: #94a3b8; }
+.mtl-root .gc-mclip.is-mount { border-color: rgba(240,136,64,.6); color: #ffe6d2; background: rgba(240,136,64,.14); }
+.mtl-root .gc-mclip.is-mount::before { background: var(--gc-accent); }
 .mtl-root .gc-mhandle {
   position: absolute;
   top: 0; bottom: 0;

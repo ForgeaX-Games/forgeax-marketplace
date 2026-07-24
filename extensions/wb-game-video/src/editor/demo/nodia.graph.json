@@ -371,8 +371,7 @@
           {
             "id": "kou",
             "trigger": {
-              "when": "at",
-              "ms": 9000
+              "when": "enter"
             },
             "inputs": {
               "glyph": "叩",

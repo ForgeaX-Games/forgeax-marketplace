@@ -10,8 +10,9 @@
 /**
  * 时间轴材料种类 —— 主要用于「添加控件」图标槽与条带配色。
  * 未落入默认六槽的挂载组件一律用 `component`（默认图标），时间轴仍会显示。
+ * `mount` = 挂载级条目（蓝图节点配置面板专用，一份挂载一条；不出现在视频 tab 的 child 级时间轴）。
  */
-export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx' | 'component'
+export type MaterialKind = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx' | 'component' | 'mount'
 
 /** 时间轴上的一段材料（由 scene 派生，见 CatalogTabs.collectMaterials）。 */
 export interface MaterialItem {
@@ -145,6 +146,8 @@ export function materialLabel(kind: MaterialKind): string {
       return '特效'
     case 'component':
       return '组件'
+    case 'mount':
+      return '覆盖物'
   }
 }
 
@@ -169,7 +172,8 @@ export function canDeleteMaterial(kind: MaterialKind): boolean {
     kind === 'option' ||
     kind === 'filter' ||
     kind === 'fx' ||
-    kind === 'component'
+    kind === 'component' ||
+    kind === 'mount'
   )
 }
 
@@ -189,5 +193,7 @@ export function materialClass(kind: MaterialKind): string {
       return 'is-fx'
     case 'component':
       return 'is-component'
+    case 'mount':
+      return 'is-mount'
   }
 }

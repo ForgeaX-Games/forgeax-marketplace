@@ -146,7 +146,7 @@ ${PREVIEW_CLOCK_CSS}
 .gc-row-act:hover { background: var(--gc-panel3); color: var(--gc-text); }
 .gc-row-act.is-danger:hover { background: rgba(248,113,113,.2); color: #ff9a9a; }
 
-/* ── 左栏树/分组（界面 tab：全局 HUD 组头 → 方案叶子）── */
+/* ── 左栏树/分组（界面 tab：自定义覆盖物组头 → 方案叶子）── */
 .gc-group { display: flex; flex-direction: column; }
 .gc-group-head { display: flex; align-items: center; gap: 4px; }
 .gc-group-toggle {

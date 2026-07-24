@@ -24,6 +24,7 @@ import type {
   GraphTextStyle,
   Layout,
   NumOrExpr,
+  Overlay,
   OverlayChild,
   Reaction,
   Trigger,
@@ -64,6 +65,7 @@ import {
 import {
   addOverlayChild,
   addOverlayChildToMount,
+  dropOverlayIfUnreferenced,
   ensureNodeOverlay,
   findMountOwningChild,
   forkSchemeForEdit,
@@ -122,6 +124,9 @@ function teardownInteractionScenario(
 export type PreviewTarget =
   | { kind: 'element'; elementId: string }
   | { kind: 'qteCue'; elementId: string; cueId: string }
+  /** 拖拽移动整个挂载盒（overlay 相对位置）。mount.layout 以「满舞台盒 + left/top 偏移」落盘：
+      点元素（飘字等）自身是相对舞台的 inputs.x/y 锚点，挂载盒在其上叠加偏移，拖动即改偏移。 */
+  | { kind: 'mount'; mountId: string; elementId: string }
   | { kind: 'readonly' }
 
 export interface PreviewOverlay {
@@ -1019,6 +1024,149 @@ export function resetMaterialOverrideGraph(scenario: GameScenario, node: GameNod
   return resetOverride(scenario, node.id, elId)
 }
 
+// ── 读投影：node → 挂载级 MaterialItem[]（蓝图节点配置面板时间轴用） ──────────────
+/**
+ * 单个子件在视频上的**可见窗口**（与运行时/预览皮肤一致的时序 SSOT）：
+ * - 有 cue 的交互（QTE 等）：取 cues 的 [min appearAt, max endAt]——这才是画面上实际显隐的窗口，
+ *   不受子件 `trigger.ms`（引擎挂载时机，可能是历史残留）影响；
+ * - 否则：`window` 优先，回落 `timedStart`（trigger）→ maxMs。
+ * 滤镜/特效无位置语义，返回 null（不参与挂载条跨度）。
+ */
+function childVisibleSpan(el: OverlayChild, maxMs: number): { start: number; end: number } | null {
+  if (el.component === 'filter' || el.component === 'fx') return null
+  if (hasCuePointsInput(el.component)) {
+    const cues = cuesOf(el)
+    if (cues.length) {
+      const start = Math.min(...cues.map((c) => c.appearAt ?? 0))
+      const end = Math.max(
+        ...cues.map((c) => c.endAt ?? Math.max((c.targetAt ?? (c.appearAt ?? 0)) + 300, (c.appearAt ?? 0) + (c.durationMs ?? 500))),
+      )
+      return { start, end }
+    }
+  }
+  const start = el.window?.startMs ?? timedStart(el)
+  const end = el.window?.endMs ?? maxMs
+  return { start, end }
+}
+
+/**
+ * 每份挂载（overlayNodes[i]）投影成一条时间轴 item（kind 'mount'）——蓝图节点配置面板专用。
+ * - 跨度 = 该挂载全部子件**可见窗口**（`childVisibleSpan`，cue 优先）的 [min, max]，与预览/运行时
+ *   实际显隐一致；无位置语义子件（滤镜/特效）不计；全空 → [0, maxMs] 占位（挂载必然可见）。
+ * - label = 覆盖物 title；id/key = 挂载 id（overlayMountId），供 shift/remove/focus 路由。
+ * - zIndex = 挂载序号（每份挂载独占一行）。
+ * 与视频 tab 的 child 级 `collectMaterialsFromNode` 并存、互不影响。
+ */
+export function collectMountItemsFromNode(scenario: GameScenario, node: GameNode | undefined, maxMs: number): MaterialItem[] {
+  if (!node) return []
+  const mounts = node.data.overlayNodes ?? []
+  if (!mounts.length) return []
+  return mounts.map((mount, i) => {
+    const mid = overlayMountId(mount)
+    const children = resolveMountChildren(scenario.ui?.overlays, mount)
+    let start: number | undefined
+    let end: number | undefined
+    for (const el of children) {
+      const sp = childVisibleSpan(el, maxMs)
+      if (!sp) continue
+      start = start == null ? sp.start : Math.min(start, sp.start)
+      end = end == null ? sp.end : Math.max(end, sp.end)
+    }
+    const title = scenario.ui?.overlays?.[mount.overlay]?.title?.trim()
+    return {
+      key: `mount:${mid}`,
+      id: mid,
+      kind: 'mount' as MaterialKind,
+      label: title || mid,
+      startMs: start ?? 0,
+      endMs: end ?? maxMs,
+      zIndex: i,
+      componentId: children.length > 1 ? `${children.length} 组件` : undefined,
+    }
+  })
+}
+
+// ── 写映射：挂载级编辑（挂载 / 移除 / 整体平移） ──────────────────────────────────
+/**
+ * 挂载一张覆盖物到节点（「添加控件」入口）：目录缺失且给了 preset 时先写入固化原型，
+ * 再 push 一份挂载（已挂载则原样返回）。等价 NodeInspector「＋挂载」的 onEnsureOverlay + push。
+ */
+export function mountOverlayGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  overlayId: string,
+  preset?: Overlay,
+): GameScenario {
+  const mounts = node.data.overlayNodes ?? []
+  if (mounts.some((m) => overlayMountId(m) === overlayId || m.overlay === overlayId)) return scenario
+  let ui = scenario.ui
+  if (!ui?.overlays?.[overlayId] && preset) {
+    ui = { ...ui, overlays: { ...(ui?.overlays ?? {}), [overlayId]: structuredClone(preset) } }
+  }
+  const next = [...mounts, { overlay: overlayId }]
+  return { ...scenario, ui, graph: updateNodeData(scenario.graph, node.id, { overlayNodes: next }) }
+}
+
+/**
+ * 移除一份挂载（时间轴删除挂载条 / 「添加控件」已挂列表的 ✕）：从 overlayNodes 去掉该挂载，
+ * 并清理只被它引用的 node:* 孤儿副本（共享方案不删）。
+ */
+export function removeMountGraph(scenario: GameScenario, node: GameNode, mountId: string): GameScenario {
+  const mounts = node.data.overlayNodes ?? []
+  const mount = mounts.find((m) => overlayMountId(m) === mountId)
+  if (!mount) return scenario
+  const next = mounts.filter((m) => overlayMountId(m) !== mountId)
+  let s: GameScenario = {
+    ...scenario,
+    graph: updateNodeData(scenario.graph, node.id, { overlayNodes: next.length ? next : undefined }),
+  }
+  if (mount.overlay.startsWith('node:')) s = dropOverlayIfUnreferenced(s, mount.overlay)
+  return s
+}
+
+/**
+ * 拖动挂载级时间轴条：把该挂载全部子件整体平移 delta（= 新起点 − 当前**可见窗口**起点，cue 优先）。
+ * 写回按子件真实时序字段落盘——cue 交互移 cues（appearAt/targetAt/endAt），其余移 window + trigger——
+ * 保证移动后画面显隐与时间轴条一致（不写 trigger 残留导致预览/运行时错位）。
+ */
+export function shiftMountWindowGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  maxMs: number,
+  mountId: string,
+  patch: { startMs?: number; endMs?: number },
+): GameScenario {
+  const mount = (node.data.overlayNodes ?? []).find((m) => overlayMountId(m) === mountId)
+  if (!mount) return scenario
+  const children = resolveMountChildren(scenario.ui?.overlays, mount)
+  let curStart: number | undefined
+  for (const el of children) {
+    const sp = childVisibleSpan(el, maxMs)
+    if (sp) curStart = curStart == null ? sp.start : Math.min(curStart, sp.start)
+  }
+  if (curStart == null) return scenario
+  const delta = Math.round((patch.startMs ?? curStart) - curStart)
+  if (delta === 0) return scenario
+  const shift = (v: number): number => Math.max(0, Math.min(maxMs, v + delta))
+  let s = scenario
+  for (const el of children) {
+    if (hasCuePointsInput(el.component) && cuesOf(el).length) {
+      const cues = cuesOf(el).map((c) => ({
+        ...c,
+        appearAt: shift(c.appearAt ?? 0),
+        targetAt: c.targetAt != null ? shift(c.targetAt) : c.targetAt,
+        endAt: c.endAt != null ? shift(c.endAt) : c.endAt,
+      }))
+      s = patchOverlayChild(s, node.id, el.id, { inputs: { ...el.inputs, cues } })
+    } else if (el.component !== 'filter' && el.component !== 'fx') {
+      const start = shift(el.window?.startMs ?? timedStart(el))
+      const end = shift(el.window?.endMs ?? maxMs)
+      s = patchOverlayChild(s, node.id, el.id, { window: { startMs: start, endMs: end }, trigger: { when: 'at', ms: start } })
+    }
+  }
+  return s
+}
+
 // ── 读投影：预览叠层 ──────────────────────────────────────────────────────────
 export function activePreviewOverlaysFromNode(
   scenario: GameScenario,
@@ -1116,22 +1264,51 @@ export function activePreviewOverlaysFromNode(
       // 滤镜/特效走 videoFx 旁路，不进可拖叠层
       continue
     } else {
-      // 通用组件手柄（含方案来源的字幕/QTE/选项等）：整组上预览手柄，可拖 params.x/y——
-      // 但能不能拖由组件自己的 inputs 是否声明了 x/y 决定（见 isPositionable），这里不按 kind/surface 硬编码枚举，
-      // 免得每来一个新组件（如以后的 hud2/hud3）都要回来改一遍这条分支。
+      // 通用组件手柄（含方案来源的字幕/QTE/选项等）。
+      // 方案来源的 cue 型交互（如 inkKou QTE）：按 cue 出可拖手柄，与皮肤同源（cue x/y、cue 时窗、
+      // target=qteCue 拖拽写回 cue.x/y）——修掉「方案 QTE 落中心、取 trigger.ms、不可拖」的错位。
+      // materialKey 仍用 `component:${el.id}` 与 child 级时间轴一致，选中态对得上。
+      const cues = hasCuePointsInput(el.component) ? cuesOf(el) : []
+      if (cues.length > 0) {
+        for (const c of cues) {
+          const s = c.appearAt ?? 0
+          const end = c.endAt ?? s + QTE_GOOD_WINDOW
+          if (ms < s || ms > end) continue
+          out.push({
+            id: `component-cue:${el.id}:${c.id}`,
+            materialKey: `component:${el.id}`,
+            kind: 'component',
+            label: componentLabelOf(el, kind),
+            x: c.x ?? 0.5,
+            y: c.y ?? 0.55,
+            zIndex: normalizeLayer(c.zIndex ?? el.layout?.zIndex, 3),
+            movable: true,
+            target: { kind: 'qteCue', elementId: el.id, cueId: c.id },
+          })
+        }
+        continue
+      }
+      // 无 cue 的通用组件（点元素：飘字/血条等）：拖拽移动**整个挂载盒**（overlay 相对位置 = mount.layout
+      // 偏移），而非内部组件 x/y。手柄锚点 = 组件基准 x/y + 挂载盒偏移（与贴纸渲染位置一致，见 NodePreviewStage）。
       const start = el.window?.startMs ?? timedStart(el)
       const end = el.window?.endMs ?? maxMs
       if (ms < start || ms > end) continue
+      const ownMount = findMountOwningChild(scenario, node, el.id)
+      const mid = ownMount ? overlayMountId(ownMount) : ''
+      const offX = typeof ownMount?.layout?.left === 'number' ? ownMount.layout.left : 0
+      const offY = typeof ownMount?.layout?.top === 'number' ? ownMount.layout.top : 0
+      const baseX = typeof inputs.x === 'number' ? inputs.x : 0.5
+      const baseY = typeof inputs.y === 'number' ? inputs.y : 0.5
       out.push({
         id: `component:${el.id}`,
         materialKey: `component:${el.id}`,
         kind: 'component',
         label: componentLabelOf(el, kind),
-        x: typeof inputs.x === 'number' ? inputs.x : 0.5,
-        y: typeof inputs.y === 'number' ? inputs.y : 0.5,
+        x: baseX + offX,
+        y: baseY + offY,
         zIndex: normalizeLayer(el.layout?.zIndex, 3),
         movable: isPositionable(el.component),
-        target: { kind: 'element', elementId: el.id },
+        target: { kind: 'mount', mountId: mid, elementId: el.id },
       })
     }
   }
@@ -1186,6 +1363,9 @@ export function patchMaterialGraph(
   const end = clampMs(patch.endMs ?? item.endMs, start + 100, maxMs)
   const zIndex = patch.zIndex == null ? item.zIndex : clampLayer(patch.zIndex)
   switch (item.kind) {
+    case 'mount':
+      // 挂载级条：整体平移全部子件（zIndex/track 对挂载无意义，忽略）。
+      return shiftMountWindowGraph(scenario, node, maxMs, item.id, { startMs: patch.startMs, endMs: patch.endMs })
     case 'subtitle':
     case 'overlay':
     case 'filter':
@@ -1260,6 +1440,18 @@ export function patchOverlayPositionGraph(
     const cues = cuesOf(el).map((c) => (c.id === target.cueId ? { ...c, x, y } : c))
     return patchOverlayChild(scenario, node.id, el.id, { inputs: { ...el.inputs, cues } })
   }
+  if (target.kind === 'mount') {
+    const mount = (node.data.overlayNodes ?? []).find((m) => overlayMountId(m) === target.mountId)
+    const el = findElement(scenario, node, target.elementId)
+    if (!mount || !el) return scenario
+    // 偏移模型：飘字等点元素的基准锚点是自身 inputs.x/y（相对舞台）；拖拽目标点 P 换算成
+    // 挂载盒偏移 = P − 基准锚点，落 mount.layout.left/top（满舞台盒，盒位置即偏移量），保留其它字段。
+    const baseX = typeof el.inputs?.x === 'number' ? (el.inputs.x as number) : 0.5
+    const baseY = typeof el.inputs?.y === 'number' ? (el.inputs.y as number) : 0.5
+    return patchOverlayMount(scenario, node.id, target.mountId, {
+      layout: { ...mount.layout, left: x - baseX, top: y - baseY, width: 1, height: 1 },
+    })
+  }
   return scenario
 }
 
@@ -1280,6 +1472,8 @@ export function confirmMaterialDelete(scenario: GameScenario, node: GameNode, it
 }
 export function deleteMaterialGraph(scenario: GameScenario, node: GameNode, item: MaterialItem): GameScenario {
   switch (item.kind) {
+    case 'mount':
+      return removeMountGraph(scenario, node, item.id)
     case 'subtitle':
     case 'filter':
     case 'fx':

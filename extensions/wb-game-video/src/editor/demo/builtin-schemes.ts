@@ -10,13 +10,19 @@
  */
 import type { Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
 import {
+  availableComponents,
   battleHpBarPreset,
   battleParryPreset,
   battleSkillBarPreset,
   inkKouPreset,
   inkYingMoPreset,
+  registerCoreSkins,
 } from '../../runtime/component-host/components'
+import { buildDefaults, getComponent } from '../../runtime/registry/component-registry'
 import { ensureNodiaSchemeOverlays } from './nodia-scheme-overlays'
+
+/** 基础覆盖物 方案 id 前缀：`base:<组件id>`，每份仅含该单组件、锁定不可增删。 */
+export const BASE_HUD_PREFIX = 'base:'
 
 export const SCHEME_STATIC_ID = 'scheme-static'
 export const SCHEME_DYNAMIC_ID = 'scheme-dynamic'
@@ -116,5 +122,33 @@ export function ensureBuiltinSchemes(
     if (!next[s.id]) next[s.id] = structuredClone(s)
   }
   // 再补 nodia 抽出的界面方案（battleHud / hitCheer / hpPanel / readouts）。
-  return ensureNodiaSchemeOverlays(next)
+  return ensureBaseHudSchemes(ensureNodiaSchemeOverlays(next))
+}
+
+/** 基础覆盖物 单组件方案的 child：有精选 preset 用 preset，其余组件用 component + inputs 默认值。 */
+function makeBaseHudChild(componentId: string): OverlayChild {
+  const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === componentId)
+  if (preset) return preset.make(`${componentId}-0`)
+  return {
+    id: `${componentId}-0`,
+    component: componentId,
+    trigger: { when: 'enter' },
+    inputs: buildDefaults(getComponent(componentId)?.inputs),
+  }
+}
+
+/**
+ * 保证「基础覆盖物」方案存在：组件库每个可用组件各一份 `base:<id>` 单组件方案（缺失才补）。
+ * 这些方案锁定为单组件（编辑器侧不允许增删组件），仅可编辑其 layout。
+ */
+export function ensureBaseHudSchemes(
+  overlays: Record<string, Overlay>,
+): Record<string, Overlay> {
+  registerCoreSkins() // 保证 getComponent 可用（inputs 默认值 / 幂等）
+  const next = { ...overlays }
+  for (const c of availableComponents) {
+    const id = `${BASE_HUD_PREFIX}${c.id}`
+    if (!next[id]) next[id] = { id, title: c.label, children: [makeBaseHudChild(c.id)] }
+  }
+  return next
 }

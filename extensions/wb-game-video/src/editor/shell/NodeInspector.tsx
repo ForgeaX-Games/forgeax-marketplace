@@ -27,14 +27,7 @@ import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-lab
 import { ConditionEditor, EffectsEditor, createDefaultEffect, type EditorPickerCtx } from './editors'
 import { SpawnInputsEditor } from './spawn-inputs-editor'
 import { ComponentFormFields, summarizeComponentInputs } from './component-form-fields'
-import { BUILTIN_SCHEMES } from '../demo/builtin-schemes'
-import { NODIA_SCHEME_OVERLAYS } from '../demo/nodia-scheme-overlays'
-
-/** 「＋ 挂载 / 默认样式」候选：画廊内置 + nodia 界面方案（有序去重）。 */
-const PRESET_SCHEME_OVERLAYS: readonly Overlay[] = [...BUILTIN_SCHEMES, ...NODIA_SCHEME_OVERLAYS]
-const PRESET_SCHEME_BY_ID: Readonly<Record<string, Overlay>> = Object.fromEntries(
-  PRESET_SCHEME_OVERLAYS.map((o) => [o.id, o]),
-)
+import { PRESET_SCHEME_OVERLAYS, PRESET_SCHEME_BY_ID } from './schemeOverlays'
 
 function row(label: string, node: ReactNode): JSX.Element {
   return (
@@ -110,15 +103,21 @@ function HoverCard({
   header,
   children,
   nested,
+  accent,
 }: {
   header: ReactNode
   children: ReactNode
   /** 子模块（如覆盖物下的事件）：略缩进；悬停青绿边，底色与父级同。 */
   nested?: boolean
+  /** 聚焦态：橙色描边 + 微高亮底（预览台选中该挂载时）。 */
+  accent?: boolean
 }): JSX.Element {
   ensureHoverCardStyle()
   return (
-    <div className={nested ? `${HOVER_CARD_CLASS} ${HOVER_CARD_NESTED}` : HOVER_CARD_CLASS}>
+    <div
+      className={nested ? `${HOVER_CARD_CLASS} ${HOVER_CARD_NESTED}` : HOVER_CARD_CLASS}
+      style={accent ? { outline: '1px solid #f08840', outlineOffset: 1, background: 'rgba(240,136,64,.08)' } : undefined}
+    >
       <div
         style={{
           display: 'flex',
@@ -1166,6 +1165,8 @@ export function NodeInspector({
   entities,
   variables,
   formulas,
+  focusedMountId,
+  onFocusMount,
   onChange,
   onPacksChange,
   onEnsureOverlay,
@@ -1189,6 +1190,13 @@ export function NodeInspector({
   variables?: Record<string, Variable>
   /** 公式库（「规则 → 公式」维护）；供 effects/numberExpr 数值字段开出「应用公式」模式。 */
   formulas?: Record<string, Formula>
+  /**
+   * 预览台当前聚焦的挂载 id（覆盖物）。非空时右侧只展开该挂载的配置卡片，其余折叠为标题行；
+   * 空 = 平铺展开全部挂载（默认）。
+   */
+  focusedMountId?: string | null
+  /** 点击某挂载卡片标题时上抛（与预览台双向联动）；再次点同一张 = 取消聚焦（回到全展开）。 */
+  onFocusMount?: (mountId: string | null) => void
   onChange: (g: GameGraph) => void
   onPacksChange?: (packs: SubFlowPackDef[]) => void
   /**
@@ -1541,11 +1549,20 @@ export function NodeInspector({
             )
             const mountTitle = overlays?.[mount.overlay]?.title?.trim() || PRESET_SCHEME_BY_ID[mount.overlay]?.title?.trim()
             const titleText = mountTitle && mountTitle !== mid ? `${mountTitle} (${mid})` : mid
+            // 聚焦联动：有聚焦时只展开该挂载，其余折叠为标题行；无聚焦 = 全展开（默认）。
+            const focused = focusedMountId === mid
+            const expanded = !focusedMountId || focused
             return (
               <HoverCard
                 key={`${mid}-${i}`}
+                accent={focused}
                 header={(
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, cursor: onFocusMount ? 'pointer' : undefined }}
+                    onClick={onFocusMount ? () => onFocusMount(focused ? null : mid) : undefined}
+                    title={onFocusMount ? (focused ? '点击取消聚焦（展开全部覆盖物）' : '点击聚焦此覆盖物（在预览区高亮联动）') : undefined}
+                  >
+                    <span style={{ fontSize: 11, opacity: 0.5, flexShrink: 0 }}>{expanded ? '▾' : '▸'}</span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{titleText}</span>
                       <div style={{ fontSize: 10, opacity: 0.55, marginTop: 2 }}>
@@ -1556,7 +1573,8 @@ export function NodeInspector({
                     <button
                       type="button"
                       style={{ color: '#ff6b6b', fontSize: 11, flexShrink: 0 }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         const addedCount = mount.added?.length ?? 0
                         // 「添加控件」二级栏拖入的组件落在这份挂载的 added[] 里；移除挂载连带删除它们，先提示。
                         if (addedCount > 0 && typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -1566,6 +1584,7 @@ export function NodeInspector({
                         const removed = mount.overlay
                         const next = (d.overlayNodes ?? []).filter((_, j) => j !== i)
                         patchData({ overlayNodes: next.length ? next : undefined })
+                        if (focused) onFocusMount?.(null)
                         // 卸载节点专属副本（node:*）→ 交上层用完整 scenario 判断并清理孤儿。
                         if (removed.startsWith('node:')) onDropOverlayIfOrphan?.(removed)
                       }}
@@ -1575,6 +1594,8 @@ export function NodeInspector({
                   </div>
                 )}
               >
+                {expanded ? (
+                  <>
                 <MountLayoutEditor layout={mount.layout} onChange={(layout) => setMountLayout(i, layout)} />
                 {mountChildren.length ? (
                   <div style={{ marginBottom: 4 }}>
@@ -1641,6 +1662,8 @@ export function NodeInspector({
                   }}
                   onRouteTo={(ev, targetId) => onChange(routeMountEventToNode(graph, node.id, i, ev, targetId))}
                 />
+                  </>
+                ) : null}
               </HoverCard>
             )
           })

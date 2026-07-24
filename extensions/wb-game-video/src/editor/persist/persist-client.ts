@@ -34,6 +34,13 @@ export interface CurrentVersion {
   dirty: boolean
 }
 
+/** 游戏仓 git 版本条目（tag = vN）。 */
+export interface GameVersion {
+  tag: string
+  createdAt: number
+  message: string
+}
+
 const BASE = '/api/game-host/games'
 const seg = (game?: string) => encodeURIComponent(game ?? 'default')
 const draftKey = (game?: string) => `gamevideo:graph:${game ?? 'default'}:draft`
@@ -123,6 +130,31 @@ export async function currentVersion(game?: string): Promise<CurrentVersion> {
     /* best-effort */
   }
   return { tag: null, commitHash: null, dirty: false }
+}
+
+/** 列出该游戏所有版本（vN，最新在前）。无宿主/无仓 → []。 */
+export async function listVersions(game?: string): Promise<GameVersion[]> {
+  try {
+    const r = await pluginFetch(`${BASE}/${seg(game)}/versions`)
+    if (r.ok) return (((await r.json()) as { versions?: GameVersion[] }).versions) ?? []
+  } catch {
+    /* best-effort */
+  }
+  return []
+}
+
+/**
+ * 读某个版本 tag 的 blueprint（只读 `git show`，不 checkout、不改历史）。
+ * 用于「载入旧版到编辑器」——载入后由用户再保存成新版本。
+ */
+export async function loadVersionProject(game: string | undefined, tag: string): Promise<GraphLibraryDocument | null> {
+  try {
+    const r = await pluginFetch(`${BASE}/${seg(game)}/versions/${encodeURIComponent(tag)}/package`)
+    if (r.ok) return (((await r.json()) as { blueprint?: GraphLibraryDocument | null }).blueprint) ?? null
+  } catch {
+    /* best-effort */
+  }
+  return null
 }
 
 export function saveDraft(project: GraphLibraryDocument, game?: string): void {

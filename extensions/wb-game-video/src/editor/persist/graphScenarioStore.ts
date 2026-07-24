@@ -13,7 +13,7 @@ import type {
   BlueprintDoc, GameGraph, GameScenario, GraphLibraryDocument, GraphTextStylePreset, ScenarioMetaFields,
 } from '../../runtime/schema/graph-schema'
 import type { TextStyleGroup } from '../text/text-style'
-import { loadStore, saveProject, saveDraft, clearDraft, loadDraft, commitVersion, currentVersion, type VersionEntry } from './persist-client'
+import { loadStore, saveProject, saveDraft, clearDraft, loadDraft, commitVersion, currentVersion, listVersions, loadVersionProject, type VersionEntry, type GameVersion } from './persist-client'
 import { computeGraphLayout } from '../../graph/edit/graph-layout'
 import { normalizeSubFlowFields } from '../../graph/edit/graph-edit'
 import { validateGraph } from '../../runtime/validate/validate'
@@ -121,6 +121,8 @@ interface GraphScenarioStore {
   currentVersionId: string | null
   /** 游戏仓当前最新版本 tag（game-host git，如 `v3`）；无仓/无版本为 null。 */
   currentTag: string | null
+  /** 该游戏所有 git 版本（vN，最新在前）；供版本下拉。 */
+  gameVersions: GameVersion[]
   isDraft: boolean
   booted: boolean
   /** 每次「载入内容」（boot / 切版本 / 重置）自增；宿主据此清空撤销历史，避免撤销穿越版本。 */
@@ -171,6 +173,11 @@ interface GraphScenarioStore {
   save: () => number
   /** 保存并对游戏仓打新版本（annotated tag vN）；返回新 tag 或 null。 */
   commit: (message?: string) => Promise<string | null>
+  /** 刷新版本列表（游戏仓 git tags）。 */
+  refreshVersions: () => Promise<void>
+  /** 载入某个历史版本到编辑器（非破坏式：只把该版内容放进当前工作数据、标记草稿；
+   *  不改 git 历史、不 checkout；用户保存时才新增一版）。 */
+  loadVersion: (tag: string) => Promise<void>
   pick: (value: string) => void
   reset: () => void
   applyLayout: () => void
@@ -250,6 +257,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     versions: [],
     currentVersionId: null,
     currentTag: null,
+    gameVersions: [],
     isDraft: false,
     booted: false,
     loadEpoch: 0,
@@ -329,6 +337,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         }
       })
       void currentVersion(game).then((cv) => set({ currentTag: cv.tag }))
+      void listVersions(game).then((vs) => set({ gameVersions: vs }))
       // 尽力加载该游戏仓专属组件（dist/components）；未构建/离线则静默用平台内建集。
       void loadGameComponents(game)
     },
@@ -512,9 +521,43 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         return null
       }
       const cv = await commitVersion(get().game, message)
-      if (cv?.tag) set({ currentTag: cv.tag, savedTip: `已打版本 ${cv.tag}` })
-      else set({ savedTip: '打版本失败 · 请检查 game-host 端点' })
+      if (cv?.tag) {
+        set({ currentTag: cv.tag, savedTip: `已打版本 ${cv.tag}` })
+        void listVersions(get().game).then((vs) => set({ gameVersions: vs }))
+      } else set({ savedTip: '打版本失败 · 请检查 game-host 端点' })
       return cv?.tag ?? null
+    },
+
+    refreshVersions: async () => {
+      set({ gameVersions: await listVersions(get().game) })
+    },
+
+    // 非破坏式载入某历史版本：读该 tag 的 blueprint 放进当前编辑数据、标记草稿；
+    // 不 checkout、不改 git 历史。用户保存(=打版本)时才在最新之上新增一版。
+    loadVersion: async (tag: string) => {
+      if (get().isDraft && typeof confirm === 'function') {
+        if (!confirm(`载入版本 ${tag} 会覆盖当前未保存的修改，继续？`)) return
+      }
+      const doc = await loadVersionProject(get().game, tag)
+      if (!isLibraryDocument(doc)) {
+        set({ savedTip: `载入 ${tag} 失败` })
+        return
+      }
+      clearDraftTimer()
+      const demo = get().demo
+      const norm = demo ? normalizeLoadedDocument(doc, demo) : normalizeDocument(doc)
+      const mainId = norm.manifest.mainPackId
+      set((st) => ({
+        blueprints: norm.manifest.packs,
+        mainBlueprintId: mainId,
+        activeBlueprintId: mainId,
+        meta: metaFromDocument(norm),
+        graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
+        isDraft: true, // 载入旧版=未保存草稿；保存后成为新版本
+        loadEpoch: st.loadEpoch + 1,
+        fitSignal: st.fitSignal + 1,
+        savedTip: `已载入版本 ${tag}（未保存 · 保存后将成为新版本）`,
+      }))
     },
 
     // 重置：用内置 demo 替换当前内容（含全部子蓝图），清掉未保存草稿。要固化再点保存。

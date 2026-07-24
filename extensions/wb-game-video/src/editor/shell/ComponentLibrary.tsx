@@ -1,17 +1,18 @@
 /**
  * ComponentLibrary —— 界面 tab 画布右侧「组件库」。
- * 把 NEW_COMPONENT_PRESETS 渲染成可拖拽 chip；拖到画布（OverlayCatalogPreview 的 stage）落地为一个 child。
- * 纯展示：不持有方案数据，落地逻辑在 stage 的 onDrop 里（读 dataTransfer 的 preset id）。
+ * 列出**全部可用组件**（runtime component-host 的 availableComponents = 每个组件的 id + 展示名），
+ * 渲染成可拖拽 chip；拖到画布（OverlayCatalogPreview 的 stage）落地为一个 child。
+ * 纯展示：不持有方案数据，落地逻辑在 stage 的 onDrop 里（读 dataTransfer 的组件 id）。
  */
 import type { JSX } from 'react'
-import { NEW_COMPONENT_PRESETS } from '../demo/builtin-schemes'
+import { availableComponents } from '../../runtime/component-host/components'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
-/** 拖拽 MIME：库 chip → 画布落地时用它取 preset id。 */
+/** 拖拽 MIME：库 chip → 画布落地时用它取组件 id。 */
 export const OVERLAY_PRESET_MIME = 'application/x-overlay-preset'
 
 const LIB_CSS = `
-.ocl-root { display: flex; flex-direction: column; gap: 6px; min-width: 150px; width: 168px; }
+.ocl-root { display: flex; flex-direction: column; gap: 6px; min-width: 150px; width: 168px; overflow-y: auto; }
 .ocl-title { font-size: 11px; font-weight: 600; opacity: .7; margin-bottom: 2px; }
 .ocl-hint { font-size: 10px; opacity: .45; margin-bottom: 4px; line-height: 1.4; }
 .ocl-chip {
@@ -32,22 +33,22 @@ export function ComponentLibrary(): JSX.Element {
   injectStyleOnce('overlay-component-library', LIB_CSS)
   return (
     <div className="ocl-root">
-      <div className="ocl-title">组件库</div>
-      <div className="ocl-hint">拖到左侧画布落地；再拖动改位置、拖右下角改尺寸。</div>
-      {NEW_COMPONENT_PRESETS.map((p) => (
+      <div className="ocl-title">组件库（{availableComponents.length}）</div>
+      <div className="ocl-hint">拖到左侧画布落地；再拖动改位置 / 拖角改尺寸。</div>
+      {availableComponents.map((c) => (
         <div
-          key={p.id}
+          key={c.id}
           className="ocl-chip"
           draggable
           onDragStart={(e) => {
-            e.dataTransfer.setData(OVERLAY_PRESET_MIME, p.id)
-            e.dataTransfer.setData('text/plain', p.label)
+            e.dataTransfer.setData(OVERLAY_PRESET_MIME, c.id)
+            e.dataTransfer.setData('text/plain', c.label)
             e.dataTransfer.effectAllowed = 'copy'
           }}
-          title={`拖到画布添加：${p.label}`}
+          title={`拖到画布添加：${c.label}（${c.id}）`}
         >
           <span className="ocl-chip-dot" />
-          {p.label}
+          {c.label}
         </div>
       ))}
     </div>

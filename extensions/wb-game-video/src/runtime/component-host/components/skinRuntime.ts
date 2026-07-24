@@ -5,10 +5,13 @@
  * 提供：
  *   - injectCss(id, css)：幂等注入一份 <style>（同 id HMR 覆盖）。
  *   - ensureInkFilters()：注入水墨毛边 SVG 滤镜 #inkRough / #inkRoughNarr。
- *   - setBrushFontUrl / ensureBrushFont：书法字体 URL 由 **editor** 在 init 注入（runtime 不依赖 assets）。
+ *   - ensureBrushFont：书法字体 HYShangWei —— 字体**自带在 component-host 层**（与用它的皮肤组件同层），
+ *     组件自调 `ensureBrushFont()` 即可，不再由 editor 全局注入，也不跨层依赖 assets。
  *   - useDefaultEventTimeout：限时组件到点自 emit(defaultEvent)。
  */
 import { useEffect, useRef } from 'react'
+// 字体与皮肤组件同层自带（component-host/assets）；随 runtime 一起发，不依赖 editor 注入。
+import brushFontUrl from '../assets/fonts/HYShangWei.woff2?url'
 
 const injected = new Map<string, HTMLStyleElement>()
 
@@ -79,19 +82,12 @@ export function ensureInkFilters(): void {
   document.body.appendChild(host)
 }
 
-/** editor 在 boot 时注入（如 `import url from '../assets/fonts/….woff2?url'`）。 */
-let brushFontUrl: string | undefined
-
-export function setBrushFontUrl(url: string): void {
-  brushFontUrl = url
-}
-
 /**
- * 注入水墨手书字体 HYShangWei（@font-face，幂等）。
- * 未 `setBrushFontUrl` 时跳过——CSS font-family 回落 STKaiti/KaiTi。
+ * 注入水墨手书字体 HYShangWei（@font-face，幂等）。字体文件与本工具同层自带
+ * （`component-host/assets/fonts`），需要它的皮肤组件自调本函数即可——不依赖 editor、不跨层。
+ * 若字体加载失败，CSS font-family 会回落到 STKaiti/KaiTi。
  */
 export function ensureBrushFont(): void {
-  if (!brushFontUrl) return
   injectCss(
     'skin-brush-font',
     `@font-face{font-family:'HYShangWei';src:url('${brushFontUrl}') format('woff2');font-weight:normal;font-style:normal;font-display:swap;}`,

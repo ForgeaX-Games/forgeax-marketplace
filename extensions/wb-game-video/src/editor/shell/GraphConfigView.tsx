@@ -3,20 +3,22 @@
  * 左栏列表 + 右栏预览）。与蓝图共用 graphScenario store；顶部工具条：保存 / 版本 / 重置。
  *
  * 两种形态（同一套 CatalogShell 壳）：
- *  - **界面**（overlays）：左栏为**树**——「全局 HUD」组头（带「＋方案」）→ 各方案叶子；
+ *  - **界面**（overlays）：左栏为**树**——「自定义覆盖物」组头（带「＋方案」）→ 各方案叶子；
  *    点叶子右栏只渲染**那一个方案**（OverlaySchemeEditor）。方案增删改在本组件持有并写回
  *    scenario.ui.overlays。
  *  - **规则**（实体/变量/公式）：左栏多行扁平切换，右栏渲染 ScenarioInspector。
  */
 import { useEffect, useMemo, useState } from 'react'
-import type { GameScenario, Layout, Overlay } from '../../runtime/schema/graph-schema'
+import type { GameScenario, Layout, Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
 import { CatalogShell, type CatalogItem } from './CatalogShell'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
 import { OverlaySchemeEditor, UsageBadge } from './OverlaySchemeEditor'
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
-import { NEW_COMPONENT_PRESETS, sortSchemeIds } from '../demo/builtin-schemes'
+import { NEW_COMPONENT_PRESETS, sortSchemeIds, BASE_HUD_PREFIX } from '../demo/builtin-schemes'
+import { availableComponents } from '../../runtime/component-host/components'
+import { defaultsForComponent } from './editors'
 import type { Formula } from '../persist/formula-authoring'
 
 export interface ConfigTab {
@@ -78,14 +80,22 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // ── 界面（overlays）形态：树 + 单方案编辑 ──
   const overlaysMode = tabs.length === 1 && tabs[0]?.section === 'overlays'
   const allOverlays = meta.ui?.overlays ?? {}
-  // 「通用样式」= 自由方案；排除每节点自动内容 overlay（node:*，那是时间轴的内容容器）。
+  // 「自定义覆盖物」= 用户自由方案；排除 node:*（时间轴内容容器）与 base:*（基础覆盖物单组件方案）。
   const schemeIds = useMemo(
-    () => sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:'))),
+    () => sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX))),
+    [allOverlays],
+  )
+  // 「基础覆盖物」= 每组件一份 base:<id> 单组件方案；按组件库顺序排列，仅取实际存在的。
+  const baseIds = useMemo(
+    () => availableComponents.map((c) => `${BASE_HUD_PREFIX}${c.id}`).filter((id) => allOverlays[id]),
     [allOverlays],
   )
   const [selectedOverlayId, setSelectedOverlayId] = useState('')
-  // 选中项自愈：不在当前方案集里（删除/首次）就落到第一个。
-  const selOverlay = schemeIds.includes(selectedOverlayId) ? selectedOverlayId : (schemeIds[0] ?? '')
+  // 选中项自愈：不在当前方案集（全局 + 基础）里（删除/首次）就落到第一个全局方案。
+  const selectable = [...schemeIds, ...baseIds]
+  const selOverlay = selectable.includes(selectedOverlayId) ? selectedOverlayId : (schemeIds[0] ?? baseIds[0] ?? '')
+  // 基础覆盖物方案锁定：单组件，不允许增删组件（仅可编辑 layout）。
+  const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
   const setOverlays = (overlays: Record<string, Overlay>) => setMeta({ ...meta, ui: { ...meta.ui, overlays } })
   const addScheme = () => {
@@ -102,13 +112,16 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     const { [oid]: _drop, ...rest } = allOverlays
     setOverlays(rest)
   }
-  const addSchemeChild = (oid: string, presetId: string, layout?: Partial<Layout>): string | undefined => {
+  const addSchemeChild = (oid: string, componentId: string, layout?: Partial<Layout>): string | undefined => {
     const ov = allOverlays[oid]
-    const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === presetId)
-    if (!ov || !preset) return undefined
-    const childId = `${presetId}-${Object.keys(ov.children).length}-${Date.now().toString(36)}`
-    const made = preset.make(childId)
-    // 画布落点：把归一 left/top（及可能的尺寸）并进 preset 自带 layout。
+    if (!ov) return undefined
+    const childId = `${componentId}-${Object.keys(ov.children).length}-${Date.now().toString(36)}`
+    // 有精选 preset 用它（带更合适的默认 inputs/layout）；其余组件走通用 make（component + inputs 默认值）。
+    const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === componentId)
+    const made: OverlayChild = preset
+      ? preset.make(childId)
+      : { id: childId, component: componentId, trigger: { when: 'enter' }, inputs: defaultsForComponent(componentId) }
+    // 画布落点：把归一 left/top（及可能的尺寸）并进自带 layout。
     const child = layout ? { ...made, layout: { ...made.layout, ...layout } } : made
     setOverlays({ ...allOverlays, [oid]: { ...ov, children: [...ov.children, child] } })
     return childId
@@ -146,7 +159,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const overlayTree: CatalogItem[] = [
     {
       id: '__overlays_group__',
-      label: tabs[0]?.label ?? '全局 HUD',
+      label: tabs[0]?.label ?? '自定义覆盖物',
       action: (
         <button type="button" className="gc-group-add" title="新建界面方案" onClick={addScheme}>
           ＋ 方案
@@ -155,6 +168,15 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
       children: schemeIds.map((id) => ({
         id,
         label: allOverlays[id]?.title || id,
+        badge: <UsageBadge count={overlayUsage[id] ?? 0} />,
+      })),
+    },
+    {
+      id: '__base_hud_group__',
+      label: '基础覆盖物',
+      children: baseIds.map((id) => ({
+        id,
+        label: allOverlays[id]?.title || id.slice(BASE_HUD_PREFIX.length),
         badge: <UsageBadge count={overlayUsage[id] ?? 0} />,
       })),
     },
@@ -192,6 +214,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   entities={meta.entities ?? {}}
                   variables={meta.variables ?? {}}
                   usageCount={overlayUsage[selOverlay] ?? 0}
+                  locked={selLocked}
                   onRename={(t) => renameScheme(selOverlay, t)}
                   onRemove={() => removeScheme(selOverlay)}
                   onAddChild={(p, layout) => addSchemeChild(selOverlay, p, layout)}

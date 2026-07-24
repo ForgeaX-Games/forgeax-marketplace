@@ -17,14 +17,12 @@ import { VersionPicker } from './VersionPicker'
 import { PlayerRootContext } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
-import { VideoOverlayStage } from '../video/VideoOverlayStage'
-import { useVideoContentRect } from '../video/useVideoContentRect'
+import { GameStage } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
-import { listVideoAssetInfos, resolveMediaSrc, videoDurationCapReached } from './media'
-import { useClipPerformanceEnd } from './useClipPerformanceEnd'
-import { MissingVideoNotice } from './MissingVideoNotice'
+import { listVideoAssetInfos, resolveMediaSrc } from './media'
+import { useClipPerformanceEnd } from '../../runtime/play'
 import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import { addNode } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
@@ -130,6 +128,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // 选中节点走共享 store（视频/界面等其它视图据此编辑同一节点）。
   const selected = useGraphScenario((s) => s.selectedNodeId)
   const setSelected = useGraphScenario((s) => s.setSelectedNode)
+  // 节点配置面板：预览台选中的挂载覆盖物 id（联动右侧表单聚焦该卡片）；换节点自动清空。
+  const [focusedMountId, setFocusedMountId] = useState<string | null>(null)
+  useEffect(() => { setFocusedMountId(null) }, [selected])
   // 节点配置面板：左侧预览区宽度（px，可拖调，localStorage 记忆）。
   const [previewW, setPreviewW] = useState<number>(() => {
     if (typeof window === 'undefined') return 500
@@ -271,10 +272,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  const effectivePreviewW = Math.max(
-    PREVIEW_W_MIN,
-    Math.min(previewW, Math.max(PREVIEW_W_MIN, (panelW || 960) - FORM_W_MIN)),
-  )
   /** 面板宽度 ÷ 画布容器宽度（0~1），传给 GraphCanvas 让选中节点平移到左侧可见区中心。 */
   const [canvasW, setCanvasW] = useState(0)
   const panelRatio = canvasW > 0 ? Math.min(0.8, panelW / canvasW) : 0
@@ -348,9 +345,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const sessionRef = useRef(session)
   sessionRef.current = session
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
-  // overlay 舞台锚视频实际画面矩形（object-fit:contain），与 GraphPlaySurface/GraphPlayer 同源，避免有黑边时叠层错位。
-  const videoElRef = useRef<HTMLVideoElement | null>(null)
-  const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [snap.clip?.nodeId])
   // playEpoch：同节点 jump 重播时清闸（clip.nodeId 不变）
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId, `${runKey}:${playEpoch}`)
 
@@ -367,11 +361,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   }, [session])
 
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
-  const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
-
-  useEffect(() => {
-    setMissingVideoId(null)
-  }, [snap.clip?.nodeId, snap.clip?.mediaId, videoSrc])
 
   useEffect(() => {
     // 无视频：durationMs 到点推进（逻辑节拍节点）。
@@ -551,69 +540,21 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               onFocus={() => claimPlayerFocus(playRootRef.current)}
               style={{ position: 'relative', height: 180, background: '#000', outline: 'none' }}
             >
-              {videoSrc ? (
-                <>
-                <video
-                  key={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
-                  ref={videoElRef}
-                  src={videoSrc}
-                  autoPlay
-                  muted
-                  playsInline
-                  loop={!!snap.clip?.loop}
-                  onLoadedMetadata={() => {
-                    setMissingVideoId(null)
-                    recomputeRect()
-                  }}
-                  onError={() => {
-                    if (snap.clip?.mediaId) {
-                      setMissingVideoId(snap.clip.mediaId)
-                    }
-                  }}
-                  onEnded={() => {
-                    if (snap.clip?.loop) return
-                    endPerformance()
-                  }}
-                  onTimeUpdate={(e) => {
-                    const el = e.currentTarget
-                    const nowMs = Math.floor(el.currentTime * 1000)
-                    if (videoDurationCapReached(nowMs, snap.clip?.durationMs, el.duration)) {
-                      el.pause()
-                      endPerformance()
-                      return
-                    }
-                    setSnap(sessionRef.current.tick(nowMs))
-                  }}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
-                />
-                {missingVideoId ? (
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 12, zIndex: 2 }}>
-                    <MissingVideoNotice resourceId={missingVideoId} />
-                  </div>
-                ) : null}
-                </>
-              ) : (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.75, fontSize: 12 }}>
-                  {snap.clip?.name ?? '（无演出）'}
-                </div>
-              )}
-              {/* 全部叠层锚视频实际画面矩形（VideoOverlayStage）；contentRect 为空时回退整容器（inset:0）。 */}
-              <VideoOverlayStage contentRect={contentRect}>
-                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                  {snap.overlayMounts.map((m) => (
-                    <span key={m.mountId} style={{ display: 'contents' }}>
-                      {session.skins.renderOverlayMount(
-                        m,
-                        (elementId, key) => setSnap(sessionRef.current.emitEvent(elementId, key)),
-                        {
-                          hud: snap.hud,
-                          condition: { state: session.runtime.state, visited: session.runtime.state.visited },
-                        },
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </VideoOverlayStage>
+              {/* 演出 + 叠层：共享 runtime/play 的 GameStage。videoKey 带 playEpoch → 同节点再 jump 强制 remount。 */}
+              <GameStage
+                videoSrc={videoSrc}
+                videoKey={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
+                clip={snap.clip}
+                overlayMounts={snap.overlayMounts}
+                skins={session.skins}
+                skinCtx={{
+                  hud: snap.hud,
+                  condition: { state: session.runtime.state, visited: session.runtime.state.visited },
+                }}
+                onEmit={(elementId, key) => setSnap(sessionRef.current.emitEvent(elementId, key))}
+                onTick={(nowMs) => setSnap(sessionRef.current.tick(nowMs))}
+                onPerformanceEnd={endPerformance}
+              />
             </div>
             </PlayerRootContext.Provider>
           </div>
@@ -625,20 +566,32 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       {selected && (
         <div
           ref={panelRef}
-          style={{ width: 'clamp(960px, 66vw, 1380px)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid #2e2924' }}
+          style={{
+            // 宽度上限 = 主区 80%：graph iframe 被调小时面板跟着收缩，给画布留至少 20% 可视区。
+            width: 'clamp(960px, 66vw, 1380px)',
+            maxWidth: '80%',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            borderLeft: '1px solid #2e2924',
+          }}
         >
-          <div style={{ display: 'flex', gap: 4, padding: 6, borderBottom: '1px solid #2e2924', alignItems: 'center' }}>
+          {/* header（含 ✕ 关闭）独立在内容滚动区之外：面板多窄、内部怎么横滚都始终呈现。 */}
+          <div style={{ display: 'flex', gap: 4, padding: 6, borderBottom: '1px solid #2e2924', alignItems: 'center', flexShrink: 0 }}>
             <b style={{ fontSize: 12 }}>节点配置{selectedNode ? ` · ${selectedNode.data.name || selectedNode.id}` : ''}</b>
             <button onClick={() => setSelected(null)} title="关闭" style={{ marginLeft: 'auto', color: '#9aa2b1', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
-          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          {/* 内容区：预览 + 表单各有最小宽度（340 / 400）；面板被 80% 上限压到更窄时横向滚动兜底。 */}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', overflowX: 'auto' }}>
             {selectedNode ? (
               <>
                 <div
                   style={{
-                    width: effectivePreviewW,
+                    // 预览列固定 = 用户拖拽设定的 previewW，flexShrink:0 永不压缩。
+                    // 面板被 80% 上限压窄时靠外层 overflowX 横向滚动，内部两列各自保持原宽。
+                    width: previewW,
                     flexShrink: 0,
-                    minWidth: 0,
+                    minWidth: PREVIEW_W_MIN,
                     display: 'flex',
                     flexDirection: 'column',
                     overflow: 'hidden',
@@ -648,8 +601,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                     scenario={previewScenario}
                     node={selectedNode}
                     game={game}
-                    entities={entities ?? scenario.entities}
+                    focusedMountId={focusedMountId}
                     onEditScenario={editPreviewScenario}
+                    onFocusMount={setFocusedMountId}
                   />
                 </div>
                 <div
@@ -659,7 +613,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 />
               </>
             ) : null}
-            <div style={{ flex: 1, minWidth: FORM_W_MIN, overflow: 'auto' }}>
+            {/* flex-basis 固定 400（非 auto）：否则窄面板下 basis 取内容 max-content，
+                长下拉文案会把表单撑到 ~880px，中等宽度也出现不必要的横向滚动。 */}
+            <div style={{ flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, overflow: 'auto' }}>
               <NodeInspector
                 graph={canvasGraph}
                 nodeId={selected}
@@ -670,6 +626,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 entities={entities}
                 variables={variables}
                 formulas={formulas}
+                focusedMountId={focusedMountId}
+                onFocusMount={setFocusedMountId}
                 onChange={setCanvasGraph}
                 onPacksChange={setPacks}
                 onEnsureOverlay={(overlay) => {

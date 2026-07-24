@@ -29,7 +29,7 @@ import {
   registryMediaUrl,
 } from './media'
 import type { MediaAsset, StyleAxes } from '../assets/registry-types'
-import { MissingVideoNotice } from './MissingVideoNotice'
+import { MissingVideoNotice } from '../../runtime/play/MissingVideoNotice'
 
 // 风格三轴 UI 选项（id 对齐 server/engine/scenario/types.ts 的 VisualStyle/FilmLook/DirectorStyleId；
 // 权威 coerce 在服务端 composeAxes，未知 id 自动回退，故此处仅作便捷选择器）。
@@ -57,7 +57,7 @@ import {
   materialClass,
   materialLabel,
 } from '../video/materialTimelineShared'
-import { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from '../video/videoContentRect'
+import { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from '../../runtime/play/videoContentRect'
 import { DEFAULT_STYLE_SLOTS, ICON_COMPONENT, type DefaultStyleSlot } from './defaultStyleSlots'
 import { fxNeedsColor, resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { resolveGraphTextCss } from '../text/text-css'

@@ -3,7 +3,8 @@
  *
  * SSOT = 传入的 GameGraph；画布用 `toFXView` 派生渲染（含 handle 派生），编辑手势经 `graph-edit`
  * 纯函数写回 graph（受控模式，避免 RF 内部状态与 SSOT 分叉）。
- *  - 连边 onConnect → connect()；删边/删点 onEdgesChange/onNodesChange('remove')；拖拽 → setNodePosition()。
+ *  - 连边 onConnect → connect()；删边/删点 onEdgesChange/onNodesChange('remove') / 边 hover 删除钮；拖拽 → setNodePosition()。
+ *  - 删边走 disconnect：清 graph.edges，并 unbind 指向该边的 advance（空 event reaction 一并删）。
  *  - 运行时可视化：传 activeNodeId / traversedEdgeIds → 高亮当前执行节点 + 点亮已走边；点节点回调 onJump。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,6 +14,7 @@ import {
   Background,
   BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   Position,
@@ -47,21 +49,27 @@ function ensureCanvasStyle(): void {
     .react-flow__attribution{display:none}
     /* 节点内可溢出（右侧 hover 菜单）；外层 gv-canvas-host 用 contain:paint 裁命中区，防止渗到工具条 */
     .react-flow__node{overflow:visible!important}
+    /* 展开 ⋮ 菜单时把整个 RF 节点抬到最上，避免「添加节点」等 tip 被右侧节点盖住 */
+    .react-flow__node:has(.gv-bp-node-more:hover),.react-flow__node:has(.gv-bp-node-more:focus-within){z-index:1000!important}
     .react-flow,.react-flow__renderer{overflow:hidden!important}
     .gv-canvas-chrome{position:absolute;right:12px;bottom:12px;z-index:5;display:flex;gap:6px;pointer-events:none}
     .gv-canvas-chrome button{pointer-events:auto;background:#252019;border:1px solid #403830;color:#f6f1e9;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45)}
     .gv-canvas-chrome button:hover{background:#2f2923;border-color:#f08840}
     .gv-bp-node{position:relative}
-    /* 悬浮菜单：贴在节点右侧（左缘贴节点右缘），仅 hover 显示 */
-    .gv-bp-node-actions{position:absolute;top:0;left:100%;z-index:8;padding-left:6px;opacity:0;pointer-events:none;transform:translateX(-4px);transition:opacity .12s,transform .12s}
-    .gv-bp-node:hover .gv-bp-node-actions{opacity:1;pointer-events:auto;transform:translateX(0)}
+    /* 标题行右侧 ⋮：与文案同排垂直居中，无底色；hover ⋮ 才展开后插/复制/删除 */
+    .gv-bp-node-more{position:relative;flex:none;z-index:20;display:flex;align-items:center}
+    .gv-bp-more-btn{display:flex;align-items:center;justify-content:center;width:18px;height:18px;margin:0;padding:0;border:none;border-radius:4px;background:transparent;color:#9aa2b1;cursor:pointer;line-height:0}
+    .gv-bp-more-btn:hover,.gv-bp-node-more:hover .gv-bp-more-btn{background:transparent;color:#e8eaed}
+    .gv-bp-more-btn svg{width:14px;height:14px}
+    .gv-bp-node-actions{position:absolute;top:0;left:100%;z-index:30;padding-left:4px;opacity:0;pointer-events:none;transform:translateX(-4px);transition:opacity .12s,transform .12s}
+    .gv-bp-node-more:hover .gv-bp-node-actions,.gv-bp-node-more:focus-within .gv-bp-node-actions{opacity:1;pointer-events:auto;transform:translateX(0)}
     .gv-bp-menu{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border-radius:10px;background:rgba(27,23,19,.96);border:1px solid #4a4036;box-shadow:0 8px 24px rgba(0,0,0,.55),0 0 0 1px rgba(240,136,64,.12);overflow:visible}
     .gv-bp-menu button{position:relative;display:flex;align-items:center;justify-content:center;width:32px;height:32px;margin:0;background:transparent;border:none;border-radius:7px;color:#e8eaed;padding:0;cursor:pointer;line-height:0;overflow:visible}
     .gv-bp-menu button:hover{background:rgba(240,136,64,.16);color:#fff}
     .gv-bp-menu button.danger{color:#f0a8a8}
     .gv-bp-menu button.danger:hover{background:rgba(239,68,68,.18);color:#ffb4b4}
     .gv-bp-menu button svg{width:16px;height:16px;opacity:.92}
-    .gv-bp-menu button[data-tip]::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(20,18,16,.96);border:1px solid #4a4036;color:#e8eaed;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:30}
+    .gv-bp-menu button[data-tip]::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(20,18,16,.96);border:1px solid #4a4036;color:#e8eaed;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:40}
     .gv-bp-menu button[data-tip]:hover::after{opacity:1}
     .gv-bp-menu .sep{width:20px;height:1px;margin:2px 0;background:#3a342c}
     .gv-sel-bar{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(27,23,19,.94);border:1px solid #403830;color:#f6f1e9;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.45);white-space:nowrap}
@@ -69,6 +77,13 @@ function ensureCanvasStyle(): void {
     .gv-sel-bar button:hover{border-color:#f08840}
     .gv-sel-bar button.danger:hover{border-color:#ef4444;color:#ffb4b4}
     .gv-sel-bar .hint{opacity:.55;font-size:11px}
+    /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
+    .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
+    .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #5a4038;border-radius:999px;background:rgba(27,23,19,.96);color:#f0a8a8;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
+    .gv-edge-delete button:hover{background:rgba(239,68,68,.22);border-color:#ef4444;color:#ffb4b4}
+    .gv-edge-delete button svg{width:12px;height:12px}
+    .gv-edge-delete button[data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(20,18,16,.96);border:1px solid #4a4036;color:#e8eaed;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:40}
+    .gv-edge-delete button[data-tip]:hover::after{opacity:1}
   `
 }
 import type { GameEdge, GameGraph, GameNode } from '../../runtime/schema/graph-schema'
@@ -134,11 +149,24 @@ const Ico = {
       <path d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12" />
     </svg>
   ),
+  minus: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" aria-hidden>
+      <path d="M5 12h14" />
+    </svg>
+  ),
+  more: (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  ),
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
   const { fx, active, isGroup, isPack, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
+  const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
   return (
     <div
       className={`gv-bp-node${selected ? ' is-selected' : ''}`}
@@ -168,12 +196,69 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
       {fx.inputs.map((h) => (
         <Handle key={h.id} id={h.id} type="target" position={Position.Left} style={{ width: 9, height: 9, background: '#9ca3af', border: 'none' }} />
       ))}
-      {/* 标题条（按玩法/结局着色） */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: `${accent}22`, borderBottom: `1px solid ${accent}55`, borderRadius: '8px 8px 0 0' }}>
+      {/* 标题条（按玩法/结局着色）；⋮ 与文案同排垂直居中 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 6px 6px 10px', background: `${accent}22`, borderBottom: `1px solid ${accent}55`, borderRadius: '8px 8px 0 0' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, flexShrink: 0 }} />
         <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
         {fx.data.badge && (
           <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
+        )}
+        {canEdit && (
+          <div className="gv-bp-node-more" style={{ marginLeft: fx.data.badge ? 0 : 'auto' }}>
+            <button
+              type="button"
+              className="gv-bp-more-btn nodrag nopan"
+              aria-label="节点操作"
+              title="节点操作"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {Ico.more}
+            </button>
+            <div className="gv-bp-node-actions">
+              <div className="gv-bp-menu" role="menu">
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  role="menuitem"
+                  aria-label="后插"
+                  data-tip="添加节点"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onInsertAfter?.(id)
+                  }}
+                >
+                  {Ico.insert}
+                </button>
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  role="menuitem"
+                  aria-label="复制"
+                  data-tip={`复制此节点（${MOD_HINT}D）`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDuplicate?.(id)
+                  }}
+                >
+                  {Ico.copy}
+                </button>
+                <div className="sep" aria-hidden />
+                <button
+                  type="button"
+                  className="nodrag nopan danger"
+                  role="menuitem"
+                  aria-label="删除"
+                  data-tip="删除此节点"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete?.(id)
+                  }}
+                >
+                  {Ico.trash}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
       {/* 出口引脚 */}
@@ -190,72 +275,102 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )
         })}
       </div>
-      {/* 悬浮菜单：节点右侧整块 dropdown，仅图标；悬停项显示 title 说明 */}
-      <div className="gv-bp-node-actions">
-        <div className="gv-bp-menu" role="menu">
-          <button
-            type="button"
-            className="nodrag nopan"
-            role="menuitem"
-            aria-label="后插"
-            data-tip="在后方插入节点并自动接线"
-            onClick={(e) => {
-              e.stopPropagation()
-              onInsertAfter?.(id)
-            }}
-          >
-            {Ico.insert}
-          </button>
-          <button
-            type="button"
-            className="nodrag nopan"
-            role="menuitem"
-            aria-label="复制"
-            data-tip={`复制此节点（${MOD_HINT}D）`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onDuplicate?.(id)
-            }}
-          >
-            {Ico.copy}
-          </button>
-          <div className="sep" aria-hidden />
-          <button
-            type="button"
-            className="nodrag nopan danger"
-            role="menuitem"
-            aria-label="删除"
-            data-tip="删除此节点"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete?.(id)
-            }}
-          >
-            {Ico.trash}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
 
 const nodeTypes = { perf: PerfNode }
 
+type FlowEdgeData = {
+  onDelete?: (edgeId: string) => void
+  [key: string]: unknown
+}
+
 /**
  * 流程边：正向用 smoothstep（正交折线）；**回环/回退边**（目标在源左侧，LR 布局里即"往回连"）
  * 走一条向下绕行的贝塞尔，避免直线盖在中间节点上（对齐旧蓝图 loopback lane 的意图）。
+ * 可编辑时 hover 中点出「删除边」——走 disconnect（清 edges + 指向该边的 advance）。
  */
-function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style }: EdgeProps): JSX.Element {
+function FlowEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps): JSX.Element {
+  const [hovered, setHovered] = useState(false)
+  const hideTimer = useRef<number | null>(null)
+  const onDelete = (data as FlowEdgeData | undefined)?.onDelete
+  const showDelete = () => {
+    if (hideTimer.current != null) {
+      window.clearTimeout(hideTimer.current)
+      hideTimer.current = null
+    }
+    setHovered(true)
+  }
+  const hideDelete = () => {
+    // 边 path 与 EdgeLabelRenderer 按钮不在同一 DOM 树，留一点间隙避免闪灭。
+    hideTimer.current = window.setTimeout(() => setHovered(false), 140)
+  }
+  useEffect(() => () => {
+    if (hideTimer.current != null) window.clearTimeout(hideTimer.current)
+  }, [])
   const backward = targetX < sourceX - 24
   let path: string
+  let labelX: number
+  let labelY: number
   if (backward) {
     // 从源右侧出发，向下绕到行下方，再回到目标左侧 —— 明显低于节点行，不遮挡。
     const dip = Math.max(sourceY, targetY) + 120
     path = `M ${sourceX},${sourceY} C ${sourceX + 80},${dip} ${targetX - 80},${dip} ${targetX},${targetY}`
+    // 三次贝塞尔 t=0.5 近似中点，把删除钮落在绕行弧上。
+    labelX = 0.125 * sourceX + 0.375 * (sourceX + 80) + 0.375 * (targetX - 80) + 0.125 * targetX
+    labelY = 0.125 * sourceY + 0.75 * dip + 0.125 * targetY
   } else {
-    ;[path] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12 })
+    ;[path, labelX, labelY] = getSmoothStepPath({
+      sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12,
+    })
   }
-  return <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ ...style, stroke: backward ? (style?.stroke ?? '#8a6d3b') : style?.stroke }} />
+  return (
+    <>
+      <g onMouseEnter={showDelete} onMouseLeave={hideDelete}>
+        <BaseEdge
+          id={id}
+          path={path}
+          markerEnd={markerEnd}
+          interactionWidth={24}
+          style={{ ...style, stroke: backward ? (style?.stroke ?? '#8a6d3b') : style?.stroke }}
+        />
+      </g>
+      {onDelete && hovered && (
+        <EdgeLabelRenderer>
+          <div
+            className="gv-edge-delete nodrag nopan"
+            style={{ left: labelX, top: labelY }}
+            onMouseEnter={showDelete}
+            onMouseLeave={hideDelete}
+          >
+            <button
+              type="button"
+              data-tip="删除边"
+              aria-label="删除边"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(id)
+              }}
+            >
+              {Ico.minus}
+            </button>
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  )
 }
 
 const edgeTypes = { flow: FlowEdge }
@@ -267,6 +382,11 @@ export interface GraphCanvasProps {
   overlays?: Record<string, Overlay>
   activeNodeId?: string | null
   traversedEdgeIds?: Set<string>
+  /**
+   * 只读模式（试玩蓝图浮层）：不出节点 hover 编辑菜单（后插/复制/删除），禁用拖拽/连线/删除键/
+   * 复制粘贴快捷键。仍可点节点 jump、下钻子流程、居中查看。
+   */
+  readOnly?: boolean
   /** 只渲染这些节点（子流程下钻视图）；undefined = 全部。编辑仍作用于完整 graph。 */
   visibleNodeIds?: Set<string>
   /** 变化时重新 fitView（自适应布局 / 重置 demo 后由 store bump）。 */
@@ -314,6 +434,7 @@ function GraphCanvasInner({
   overlays,
   activeNodeId,
   traversedEdgeIds,
+  readOnly = false,
   visibleNodeIds,
   fitSignal,
   drillFitKey,
@@ -421,6 +542,14 @@ function GraphCanvasInner({
     [graph, onChange, onPaneClick],
   )
 
+  /** hover 删边 / Delete 键删边同源：disconnect 清 edges + 指向该边的 advance。 */
+  const onDeleteEdge = useCallback(
+    (edgeId: string) => {
+      onChange(disconnect(graph, edgeId))
+    },
+    [graph, onChange],
+  )
+
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return
     if (typeof confirm === 'function' && !confirm(`删除选中的 ${selectedIds.length} 个节点及其相关连线？`)) return
@@ -479,12 +608,12 @@ function GraphCanvasInner({
             isGroup: containerIds.has(n.id),
             isPack: packIds.has(n.id),
             onDrill,
-            onInsertAfter,
-            onDuplicate: onDuplicateNode,
-            onDelete: onDeleteNode,
+            onInsertAfter: readOnly ? undefined : onInsertAfter,
+            onDuplicate: readOnly ? undefined : onDuplicateNode,
+            onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>
@@ -501,8 +630,11 @@ function GraphCanvasInner({
           markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: traversedEdgeIds?.has(e.id) ? '#f5a623' : '#6b7280' },
           animated: traversedEdgeIds?.has(e.id) ?? false,
           style: traversedEdgeIds?.has(e.id) ? { stroke: '#f5a623', strokeWidth: 2 } : { stroke: '#6b7280' },
+          data: {
+            onDelete: readOnly ? undefined : onDeleteEdge,
+          } as FlowEdgeData,
         })),
-    [fx, traversedEdgeIds, visibleNodeIds],
+    [fx, traversedEdgeIds, visibleNodeIds, readOnly, onDeleteEdge],
   )
 
   // 跟踪 Shift，供 onNodesChange 判断是否该忽略 RF 的点选变更。
@@ -565,7 +697,7 @@ function GraphCanvasInner({
 
   useEffect(() => {
     const el = rootRef.current
-    if (!el) return
+    if (!el || readOnly) return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
@@ -587,7 +719,7 @@ function GraphCanvasInner({
     }
     el.addEventListener('keydown', onKey)
     return () => el.removeEventListener('keydown', onKey)
-  }, [selectedIds, applyDuplicate, copySelectedToClipboard, pasteClipboard])
+  }, [readOnly, selectedIds, applyDuplicate, copySelectedToClipboard, pasteClipboard])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -669,16 +801,20 @@ function GraphCanvasInner({
         }}
         onSelectionStart={() => { boxSelecting.current = true }}
         onSelectionEnd={() => { boxSelecting.current = false }}
-        selectionKeyCode="Shift"
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        edgesFocusable={!readOnly}
+        edgesReconnectable={false}
+        selectionKeyCode={readOnly ? null : 'Shift'}
         multiSelectionKeyCode={null}
         selectionMode={SelectionMode.Partial}
-        deleteKeyCode={['Delete', 'Backspace']}
+        deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
         proOptions={{ hideAttribution: true }}
       >
         <Background />
         <Controls position="bottom-left" />
       </ReactFlow>
-      {selectedIds.length > 1 && (
+      {!readOnly && selectedIds.length > 1 && (
         <div className="gv-sel-bar">
           <span>已选 {selectedIds.length} 个节点</span>
           <button type="button" onClick={() => applyDuplicate(selectedIds)} title={`${MOD_HINT}D`}>复制</button>

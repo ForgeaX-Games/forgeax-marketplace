@@ -7,20 +7,22 @@
  *   - 皮肤层：`previewSkinChildrenInWindow` + `renderOverlayChildPreview` + PreviewClock
  *     （暂停冻结 CSS 动画）；滤镜/特效走 `resolveVideoFxForNode` 旁路；
  *   - 叠层手柄：`activePreviewOverlaysFromNode`，可拖即写回 `patchOverlayPositionGraph`（x/y）；
- *   - 时间轴：`MaterialTimeline` 全交互（拖动/改边/换轨/删除/落点新增），写回
- *     `patchMaterialGraph` / `deleteMaterialGraph` / `addMaterialGraph`；
- *   - 「添加控件」条：六个默认样式槽（DEFAULT_STYLE_SLOTS），点击落在播放头、可拖入时间轴落点。
+ *   - 时间轴：`MaterialTimeline` 全交互，但**投影到挂载级**（`collectMountItemsFromNode`：
+ *     一份挂载 = 一条），拖动整体平移挂载内子件、删除移除整份挂载，写回
+ *     `patchMaterialGraph`（mount 分支 → shiftMountWindowGraph）/`deleteMaterialGraph`；
+ *   - 「添加控件」条 = **覆盖物挂载入口**：前 5 个未挂载的预设覆盖物点击直接挂载，
+ *     第 6 个「更多」展开完整列表（等价 NodeInspector 的「＋挂载」）。
  *
- * 与视频 tab 的两点刻意差异：
- *   1. 切换视频/挂载/组件参数的联动**不在这里写**——右侧 NodeInspector 表单走既有
- *      `patchData → onChange → store` 数据流，本组件只是多一个订阅者，天然实时；
- *   2. 不自动回写 `durationMs`（视频 tab 会在 metadata 就绪后 bindVideoGraph 回写真实长度）——
- *      蓝图面板只是「看」节点，不因为点击选中就脏草稿；`durationMs` 截断只影响本地播放头与
- *      时间轴上限（对齐 `videoDurationCapReached` 契约：>0 且 ≤ 视频长度才生效）。
+ * 选中联动：点预览叠层 / 时间轴挂载条 → 上抛 `onFocusMount(mountId)`，右侧 NodeInspector
+ * 据此只聚焦展开该覆盖物的配置卡片（其余折叠）。
+ *
+ * 与视频 tab 的刻意差异：切视频/挂载/组件参数的联动**不在这里写**——右侧表单走既有
+ * `patchData → onChange → store` 数据流，本组件只多一个订阅者，天然实时；也不自动回写
+ * `durationMs`（只影响本地播放头与时间轴上限，对齐 `videoDurationCapReached` 契约）。
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Entity, GameNode, GameScenario } from '../../runtime/schema/graph-schema'
+import type { GameNode, GameScenario } from '../../runtime/schema/graph-schema'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { initState } from '../../runtime/engine/engine-init'
 import { bootEditorSkins } from '../init'
@@ -30,24 +32,25 @@ import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
 import { PreviewClockProvider, previewClockLayerClassName } from './previewClock'
-import { resolveMediaSrc, videoDurationCapReached } from './media'
+import { resolveMediaSrc } from './media'
+import { videoDurationCapReached } from '../../runtime/play/videoTiming'
 import { resolveGraphTextCss } from '../text/text-css'
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
 import { materialClass, materialLabel, type MaterialItem } from '../video/materialTimelineShared'
-import { pointerToVideoNorm } from '../video/videoContentRect'
-import { useVideoContentRect } from '../video/useVideoContentRect'
-import { DEFAULT_STYLE_SLOTS, type DefaultStyleSlot } from './defaultStyleSlots'
+import { pointerToVideoNorm } from '../../runtime/play/videoContentRect'
+import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
+import { PRESET_SCHEME_OVERLAYS, PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
+import { overlayMountId } from '../../runtime/schema/node-config-schema'
+import { findMountOwningChild } from '../../graph/edit/overlay-edit'
 import {
   activePreviewOverlaysFromNode,
-  addMaterialGraph,
-  collectMaterialsFromNode,
-  confirmMaterialDelete,
+  collectMountItemsFromNode,
   deleteMaterialGraph,
+  mountOverlayGraph,
   patchMaterialGraph,
   patchOverlayPositionGraph,
   previewSkinChildrenInWindow,
-  qteElement,
-  type MaterialTemplate,
+  shiftMountWindowGraph,
   type PreviewOverlay,
 } from '../video/graphMaterialOps'
 
@@ -93,17 +96,31 @@ const NPS_CSS = `
 .nps-controls .nps-mute { margin-left: auto; }
 .nps-fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
 .nps-fx-layer > div { position: absolute; inset: 0; }
-.nps-addbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: none; }
+.nps-addbar { position: relative; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: none; }
 .nps-addbar-label { font-size: 10px; letter-spacing: .08em; color: var(--gc-faint); margin-right: 2px; }
 .nps-addbar button {
   display: inline-flex; align-items: center; gap: 4px;
   border: 1px solid var(--gc-line-soft); background: var(--gc-panel2); color: var(--gc-text);
   border-radius: 7px; padding: 3px 8px; font-size: 11px; cursor: pointer;
 }
-.nps-addbar button svg { width: 13px; height: 13px; }
 .nps-addbar button:hover:not(:disabled) { border-color: var(--gc-accent); background: var(--gc-accent-soft); }
 .nps-addbar button:disabled { opacity: .38; cursor: default; }
+.nps-addbar .nps-add-chip::before { content: "＋"; opacity: .7; }
+.nps-addbar-empty { font-size: 10px; color: var(--gc-faint); opacity: .8; }
+.nps-more-pop {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
+  min-width: 200px; max-width: 280px; max-height: 260px; overflow-y: auto;
+  background: var(--gc-panel); border: 1px solid var(--gc-line); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
+}
+.nps-more-pop button { justify-content: flex-start; width: 100%; border-color: transparent; background: transparent; }
+.nps-more-pop button:hover { background: var(--gc-accent-soft); border-color: var(--gc-accent-line); }
+.nps-more-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 8px; }
 .nps-root .mtl-root { flex: none; }
+/* 有真实皮肤的挂载物：手柄只做透明热区（不渲染默认 ring/label），选中在贴纸外围画矩形虚线框
+   示意该 overlay 的区域，真实贴纸由皮肤层呈现——「挂载物长啥样就是啥样」。 */
+.nps-root .gc-preview-overlay.is-skinned.is-selected { outline: 1.5px dashed rgba(240,136,64,.95); outline-offset: 4px; border-radius: 6px; box-shadow: 0 0 12px rgba(240,136,64,.3); }
+.nps-root .gc-preview-overlay.is-skinned:hover:not(.is-selected) { outline: 1px dashed rgba(240,136,64,.45); outline-offset: 4px; border-radius: 6px; }
 `
 
 function fmtTime(ms: number): string {
@@ -117,18 +134,21 @@ export function NodePreviewStage({
   scenario,
   node,
   game,
-  entities,
+  focusedMountId,
   onEditScenario,
+  onFocusMount,
 }: {
   /** 读投影场景：canvasGraph（主图或下钻包图）+ ui.overlays + entities/variables。 */
   scenario: GameScenario
   /** 当前选中节点（canvasGraph 内；随编辑实时换引用）。 */
   node: GameNode
   game: string
-  /** 「添加控件」给新组件填初始绑定用（同视频 tab addMaterialGraph 的 entities 入参）。 */
-  entities?: Record<string, Entity>
+  /** 右侧表单当前聚焦的挂载 id（预览据此高亮对应叠层/时间轴条）。 */
+  focusedMountId?: string | null
   /** 写回通道：主图走 setScenario，子蓝图下钻由上层分流到包图（见 GraphStudio）。 */
   onEditScenario: (fn: (s: GameScenario, n: GameNode) => GameScenario) => void
+  /** 选中某挂载覆盖物时上抛（右侧表单据此聚焦该卡片；传 null = 清空聚焦）。 */
+  onFocusMount?: (mountId: string | null) => void
 }): JSX.Element {
   bootEditorSkins()
   injectStyleOnce('graph-catalog', CATALOG_CSS)
@@ -142,13 +162,19 @@ export function NodePreviewStage({
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   // 拖拽 id 用 ref 不用 state：pointerdown 后同帧的 pointermove 不能等 React 重渲染，否则首段位移被丢。
   const overlayDragIdRef = useRef<string | null>(null)
-  const [selectedMaterialKey, setSelectedMaterialKey] = useState<string | null>(null)
+  const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
   const mediaRef = node.data.media?.ref ?? ''
   const playMode = node.data.mediaPlayMode ?? 'once'
   const previewSrc = resolveMediaSrc(mediaRef || undefined, game)
   const { contentRect, recomputeRect } = useVideoContentRect(videoRef, [mediaRef, node.id])
+
+  // 当前聚焦挂载（受控于右侧表单 / 本组件选中）。
+  const selectedMountId = focusedMountId ?? null
+  function focusMount(id: string | null): void {
+    onFocusMount?.(id)
+  }
 
   // 播放时长上限（cap）：对齐 videoDurationCapReached 契约——>0 且 ≤ 视频本身长度才生效。
   const capMs = (() => {
@@ -160,8 +186,8 @@ export function NodePreviewStage({
   const maxMs = Math.max(1000, capMs ?? videoDurationMs ?? 0)
 
   const overlays = scenario.ui?.overlays
-  const materials = useMemo(() => collectMaterialsFromNode(scenario, node, maxMs), [scenario, node, maxMs])
-  const isTimedQteNode = Boolean(qteElement(scenario, node))
+  // 时间轴投影到挂载级：一份挂载 = 一条（跨度 = 挂载内全部子件的 [min,max]）。
+  const materials = useMemo(() => collectMountItemsFromNode(scenario, node, maxMs), [scenario, node, maxMs])
   const previewSkinChildren = useMemo(
     () => previewSkinChildrenInWindow(scenario, node, playheadMs, maxMs),
     [scenario, node, playheadMs, maxMs],
@@ -198,12 +224,33 @@ export function NodePreviewStage({
   const skinnedPreviewIds = useMemo(() => new Set(previewSkinChildren.map((c) => c.id)), [previewSkinChildren])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
 
+  // 「添加控件」= 覆盖物挂载入口：已挂载的排除，前 5 直接列出，其余进「更多」。
+  const mountedOverlayIds = useMemo(
+    () => new Set((node.data.overlayNodes ?? []).map((m) => m.overlay)),
+    [node.data.overlayNodes],
+  )
+  const mountCandidates = useMemo(
+    () => PRESET_SCHEME_OVERLAYS.filter((o) => !mountedOverlayIds.has(o.id)),
+    [mountedOverlayIds],
+  )
+  const primaryCandidates = mountCandidates.slice(0, 5)
+  const moreCandidates = mountCandidates.slice(5)
+
+  /** 某预览叠层归属哪份挂载（elementId → owning mount）。 */
+  function mountIdOfOverlay(o: PreviewOverlay): string | null {
+    const elId =
+      o.target.kind === 'element' || o.target.kind === 'qteCue' || o.target.kind === 'mount' ? o.target.elementId : ''
+    if (!elId) return null
+    const m = findMountOwningChild(scenario, node, elId)
+    return m ? overlayMountId(m) : null
+  }
+
   // 换节点/换视频：清播放态与选中（视频因 key 变化 remount 自动重播）。
   useEffect(() => {
     setPlayheadMs(0)
     setVideoDurationMs(null)
     setLoadError(false)
-    setSelectedMaterialKey(null)
+    setMoreOpen(false)
     overlayDragIdRef.current = null
   }, [node.id, mediaRef])
 
@@ -258,23 +305,30 @@ export function NodePreviewStage({
   }
 
   // ── 写回（全部走 graphMaterialOps 既有映射，无新协议字段） ─────────────────
+  /** 时间轴挂载条整体平移（patchMaterialGraph 的 mount 分支）。 */
   function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number }): void {
     onEditScenario((s, n) => patchMaterialGraph(s, n, maxMs, item, patch))
   }
+  /** 时间轴删除挂载条 = 移除整份挂载；挂载上有「添加」进来的子件时二次确认（连带删除）。 */
   function deleteMaterial(item: MaterialItem): void {
-    if (!confirmMaterialDelete(scenario, node, item)) return
+    const mount = (node.data.overlayNodes ?? []).find((m) => overlayMountId(m) === item.id)
+    const addedCount = mount?.added?.length ?? 0
+    if (addedCount > 0 && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (!window.confirm(`将同时删除 ${addedCount} 个添加到此覆盖物的组件，是否确认移除挂载「${item.label}」？`)) return
+    }
     onEditScenario((s, n) => deleteMaterialGraph(s, n, item))
-    if (selectedMaterialKey === item.key) setSelectedMaterialKey(null)
+    if (selectedMountId === item.id) focusMount(null)
   }
-  function addMaterial(template: MaterialTemplate): void {
-    const res = addMaterialGraph(scenario, node, maxMs, template, entities, playheadMs)
-    onEditScenario(() => res.scenario)
-    if (res.selectKey) setSelectedMaterialKey(res.selectKey)
-  }
-  function addMaterialAt(template: string, atMs: number, zIndex: number): void {
-    const res = addMaterialGraph(scenario, node, maxMs, template, entities, playheadMs, { ms: atMs, zIndex })
-    onEditScenario(() => res.scenario)
-    if (res.selectKey) setSelectedMaterialKey(res.selectKey)
+  /** 「添加控件」点击 / 拖入：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
+  function mountOverlay(overlayId: string, atMs?: number): void {
+    onEditScenario((s, n) => {
+      const s1 = mountOverlayGraph(s, n, overlayId, PRESET_SCHEME_BY_ID[overlayId])
+      if (atMs == null) return s1
+      const n1 = s1.graph.nodes.find((x) => x.id === n.id) ?? n
+      return shiftMountWindowGraph(s1, n1, maxMs, overlayId, { startMs: atMs })
+    })
+    focusMount(overlayId)
+    setMoreOpen(false)
   }
 
   // ── 预览叠层拖拽定位（写回 inputs.x/y 或 cue.x/y） ─────────────────────────
@@ -289,7 +343,7 @@ export function NodePreviewStage({
   function onOverlayPointerDown(e: React.PointerEvent<HTMLDivElement>, o: PreviewOverlay): void {
     e.preventDefault()
     e.stopPropagation()
-    setSelectedMaterialKey(o.materialKey)
+    focusMount(mountIdOfOverlay(o))
     if (!o.movable) return
     e.currentTarget.setPointerCapture(e.pointerId)
     overlayDragIdRef.current = o.id
@@ -303,18 +357,6 @@ export function NodePreviewStage({
   }
   function onOverlayPointerUp(): void {
     overlayDragIdRef.current = null
-  }
-
-  // 「添加控件」六槽禁用判断（对齐视频 tab：未绑视频全禁；QTE 节点禁选项）。
-  const hasBoundVideo = Boolean(mediaRef && previewSrc)
-  const addDisabled = !hasBoundVideo ? '当前节点未绑定视频素材' : undefined
-  const slotDisabledReason: Record<DefaultStyleSlot['id'], string | undefined> = {
-    subtitle: addDisabled,
-    overlay: addDisabled,
-    qte: addDisabled,
-    option: addDisabled ?? (isTimedQteNode ? 'QTE 节点请编辑「QTE 窗口」轨，不添加选项' : undefined),
-    filter: addDisabled,
-    fx: addDisabled,
   }
 
   const previewContentStyle: CSSProperties | undefined = contentRect
@@ -369,22 +411,33 @@ export function NodePreviewStage({
             {previewSkinChildren.length > 0 ? (
               <PreviewClockProvider value={previewClockValue}>
                 <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
-                  {previewSkinChildren.map((child) => (
-                    // 尺寸/位置盒子已在 renderOverlayChildPreview 内部按 childWrapStyle 换算好，不再套 inset:0。
-                    <Fragment key={child.id}>
-                      {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs)}
-                    </Fragment>
-                  ))}
+                  {previewSkinChildren.map((child) => {
+                    // 挂载盒偏移：点元素自身是相对舞台的 inputs.x/y 锚点，挂载盒（mount.layout）在其上叠加
+                    // 偏移，贴纸随盒移动——与手柄位置（基准+偏移）及拖拽写回保持一致。
+                    const m = findMountOwningChild(scenario, node, child.id)
+                    const dx = typeof m?.layout?.left === 'number' ? m.layout.left : 0
+                    const dy = typeof m?.layout?.top === 'number' ? m.layout.top : 0
+                    return (
+                      <div
+                        key={child.id}
+                        style={{
+                          position: 'absolute', inset: 0, pointerEvents: 'none',
+                          transform: dx || dy ? `translate(${dx * 100}%, ${dy * 100}%)` : undefined,
+                        }}
+                      >
+                        {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs)}
+                      </div>
+                    )
+                  })}
                 </div>
               </PreviewClockProvider>
             ) : null}
             {previewOverlays.map((o) => {
-              const selected = selectedMaterialKey === o.materialKey
-              const elId = o.target.kind === 'element'
+              const ownMount = mountIdOfOverlay(o)
+              const selected = !!ownMount && ownMount === selectedMountId
+              const elId = o.target.kind === 'element' || o.target.kind === 'qteCue' || o.target.kind === 'mount'
                 ? o.target.elementId
-                : o.target.kind === 'qteCue'
-                  ? o.target.elementId
-                  : ''
+                : ''
               const skinned = !!elId && skinnedPreviewIds.has(elId)
               return (
                 <div
@@ -399,14 +452,20 @@ export function NodePreviewStage({
                   onPointerUp={onOverlayPointerUp}
                   onLostPointerCapture={onOverlayPointerUp}
                 >
-                  {o.kind === 'qte' || (skinned && o.movable) ? <span className="gc-preview-ring" /> : null}
-                  <span
-                    className="gc-preview-label"
-                    style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveGraphTextCss(o.style) : undefined}
-                  >
-                    {o.label}
-                  </span>
-                  {o.detail ? <span className="gc-preview-detail">{o.detail}</span> : null}
+                  {/* 有真实皮肤：手柄只做透明热区（不渲染默认 ring/label），真实贴纸由皮肤层呈现——
+                      「挂载物长啥样就是啥样」，选中靠 is-skinned 描边提示可拖。 */}
+                  {skinned ? null : (
+                    <>
+                      {o.kind === 'qte' || o.movable ? <span className="gc-preview-ring" /> : null}
+                      <span
+                        className="gc-preview-label"
+                        style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveGraphTextCss(o.style) : undefined}
+                      >
+                        {o.label}
+                      </span>
+                      {o.detail ? <span className="gc-preview-detail">{o.detail}</span> : null}
+                    </>
+                  )}
                 </div>
               )
             })}
@@ -424,45 +483,77 @@ export function NodePreviewStage({
         </button>
       </div>
 
+      {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 */}
       <div className="nps-addbar">
         <span className="nps-addbar-label">添加控件</span>
-        {DEFAULT_STYLE_SLOTS.map((slot) => {
-          const reason = slotDisabledReason[slot.id]
-          return (
-            <button
-              key={slot.id}
-              type="button"
-              disabled={Boolean(reason)}
-              title={reason ?? `${slot.desc}（点击加到播放头，或按住拖入时间轴落点）`}
-              draggable={!reason}
-              onClick={reason ? undefined : () => addMaterial(slot.id)}
-              onDragStart={reason ? undefined : (e) => {
-                e.dataTransfer.setData(MATERIAL_DND_MIME, slot.id)
-                e.dataTransfer.effectAllowed = 'copy'
-              }}
-            >
-              {slot.icon}
-              {slot.title}
-            </button>
-          )
-        })}
+        {primaryCandidates.length === 0 && moreCandidates.length === 0 ? (
+          <span className="nps-addbar-empty">已挂载全部预设覆盖物</span>
+        ) : null}
+        {primaryCandidates.map((ov) => (
+          <button
+            key={ov.id}
+            type="button"
+            className="nps-add-chip"
+            title={`挂载覆盖物「${overlayDisplayLabel(ov.id, overlays)}」到当前节点（点击直接挂载，或拖入时间轴落点）`}
+            draggable
+            onClick={() => mountOverlay(ov.id)}
+            onDragStart={(e) => {
+              e.dataTransfer.setData(MATERIAL_DND_MIME, ov.id)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+          >
+            {ov.title?.trim() || ov.id}
+          </button>
+        ))}
+        {moreCandidates.length > 0 ? (
+          <button
+            type="button"
+            className="nps-add-chip"
+            title="展开完整覆盖物列表"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            更多 ▾
+          </button>
+        ) : null}
+        {moreOpen ? (
+          <div className="nps-more-pop" onPointerLeave={() => setMoreOpen(false)}>
+            {moreCandidates.length === 0 ? (
+              <div className="nps-more-empty">没有更多可挂载的覆盖物</div>
+            ) : (
+              moreCandidates.map((ov) => (
+                <button key={ov.id} type="button" onClick={() => mountOverlay(ov.id)}>
+                  {overlayDisplayLabel(ov.id, overlays)}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
       </div>
 
       <MaterialTimeline
         materials={materials}
         maxMs={maxMs}
         playheadMs={playheadMs}
-        selectedMaterialKey={selectedMaterialKey}
-        isTimedQteNode={isTimedQteNode}
+        selectedMaterialKey={selectedMountId ? `mount:${selectedMountId}` : null}
         context="video"
         editable
-        emptyHint="该节点暂无时间轴控件——用上方「添加控件」加入字幕 / QTE / 选项等"
+        emptyHint="该节点暂无挂载覆盖物——用上方「添加控件」挂载一张覆盖物"
         onSeek={seekTo}
         onScrubStart={pauseForScrub}
-        onSelectMaterial={setSelectedMaterialKey}
+        onSelectMaterial={(key) => {
+          const mid = key.startsWith('mount:') ? key.slice('mount:'.length) : null
+          focusMount(mid)
+          const it = materials.find((m) => m.key === key)
+          if (it) {
+            // 选中即定格到该覆盖物可见窗的**中段**并暂停：贴纸的入场动画此时已播完、完整呈现，
+            // 便于看清 + 选中 + 拖拽；seek 到起点（0 帧）会停在动画 from{opacity:0} 看不到贴纸。
+            seekTo(it.startMs + (it.endMs - it.startMs) / 2)
+            pauseForScrub()
+          }
+        }}
         onPatchMaterial={patchMaterial}
         onDeleteMaterial={deleteMaterial}
-        onDropTemplate={addMaterialAt}
+        onDropTemplate={(template, atMs) => mountOverlay(template, atMs)}
       />
     </div>
   )

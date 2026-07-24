@@ -3,7 +3,7 @@
  * 闸门算法见 `clipPerformanceEndGate.ts`。
  */
 import { useCallback, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import type { GraphSession, SessionSnapshot } from '../../runtime/engine/session'
+import type { GraphSession, SessionSnapshot } from '../engine/session'
 import { ClipPerformanceEndGate } from './clipPerformanceEndGate'
 
 export function useClipPerformanceEnd(

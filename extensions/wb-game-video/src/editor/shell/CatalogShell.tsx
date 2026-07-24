@@ -5,10 +5,10 @@
  * 两种列表形态（同一套 gc-* 皮）：
  *  - **扁平**：item 无 `children` → 一行可选（规则 tab：实体/变量/…）。
  *  - **分组/树**：item 带 `children` → 渲成可折叠组头 + 缩进叶子行，选中永远落在叶子
- *    （界面 tab：全局 HUD 组头 → 各方案叶子）。组头可挂 `action`（如「+方案」）。
+ *    （界面 tab：自定义覆盖物组头 → 各方案叶子）。组头可挂 `action`（如「+方案」）。
  * `selectedId` / `renderPreview(selected)` 都以「扁平化后的叶子」为准，两形态一致。
  */
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { CATALOG_CSS } from './catalogCss'
 
@@ -45,8 +45,9 @@ function Leaf({
     <div
       role="button"
       tabIndex={0}
+      data-leaf-id={item.id}
       className={`gc-row${indented ? ' is-leaf' : ''}${item.id === selectedId ? ' is-on' : ''}`}
-      onClick={() => onSelect(item.id)}
+      onClick={(e) => { e.currentTarget.focus(); onSelect(item.id) }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -133,6 +134,28 @@ export function CatalogShell({
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   const leaves = leavesOf(items)
   const selected = leaves.find((i) => i.id === selectedId)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // 列表内 ↑/↓ 按扁平叶子顺序切换选中（循环），并把焦点移到新行——好让连续方向键继续走列表、
+  // 而非画布（OverlaySchemeEditor 的画布组件切换靠 `.gc-list` 焦点判定让位）。事件源不在某行上则不拦。
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    const t = e.target as HTMLElement
+    // 行内输入框/下拉/可编辑区（如重命名框）内放行给原生光标移动，不劫持为切换。
+    if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return
+    if (!t.closest('.gc-row')) return
+    if (leaves.length === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const step = e.key === 'ArrowDown' ? 1 : -1
+    const cur = leaves.findIndex((l) => l.id === selectedId)
+    const next = cur < 0 ? (step === 1 ? 0 : leaves.length - 1) : (cur + step + leaves.length) % leaves.length
+    const nextId = leaves[next]!.id
+    onSelect(nextId)
+    // 目标行已在 DOM 里（只是未选中），可同步聚焦；is-on 类由重渲染补上。
+    bodyRef.current?.querySelector<HTMLElement>(`[data-leaf-id="${nextId}"]`)?.focus()
+  }
+
   return (
     <div className="gc-tab">
       <aside className="gc-list" aria-label={title}>
@@ -142,7 +165,7 @@ export function CatalogShell({
           <span className="gc-list-count">{leaves.length}</span>
           {headAction && <span className="gc-list-head-action">{headAction}</span>}
         </div>
-        <div className="gc-list-body">
+        <div className="gc-list-body" ref={bodyRef} onKeyDown={onListKeyDown}>
           {items.map((it) =>
             it.children ? (
               <Group key={it.id} group={it} selectedId={selectedId} onSelect={onSelect} renderRowActions={renderRowActions} />
