@@ -3,7 +3,7 @@
   "id": "@forgeax-extension/wb-game-video",
   "version": "0.1.0",
   "kind": "workbench",
-  "displayName": { "zh": "视频游戏工坊", "en": "Video Game Studio" },
+  "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
   "description": {
     "zh": "视频游戏（玩法优先）蓝图编辑器与运行时 · 演出节点图 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点，新引擎 GameGraph 为唯一 SSOT",
     "en": "Video-game (gameplay-on-video) blueprint editor & runtime — a graph of performance nodes with boss battles, HP bars, QTE, timed/pause choices, clickable hotspots. The GameGraph engine is the single source of truth."

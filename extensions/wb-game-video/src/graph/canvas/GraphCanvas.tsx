@@ -46,6 +46,15 @@ function ensureCanvasStyle(): void {
     .react-flow__controls-button{background:#20242c;border-bottom:1px solid #33373f;width:26px;height:26px}
     .react-flow__controls-button:hover{background:#2b3038}
     .react-flow__controls-button svg{fill:#c9d1e0;max-width:14px;max-height:14px}
+    /* 蓝图地图：整图底板+节点+连线；与 Controls 同行靠右 */
+    .gv-graph-minimap.react-flow__panel.bottom.left{left:52px;border-radius:8px;overflow:hidden;border:1px solid #403830;box-shadow:0 2px 12px rgba(0,0,0,.55);background:#12151c;cursor:grab}
+    .gv-graph-minimap:active{cursor:grabbing}
+    .gv-graph-minimap-svg{display:block;width:100%;height:100%;touch-action:none}
+    .gv-graph-minimap-board{fill:#1a2030;stroke:#2a3344;stroke-width:1}
+    .gv-graph-minimap-edge{stroke:rgba(148,163,184,.45);stroke-linecap:round}
+    .gv-graph-minimap-node{stroke:rgba(11,13,16,.7);opacity:.95}
+    .gv-graph-minimap-mask{fill:rgba(6,8,12,.48);stroke:none}
+    .gv-graph-minimap-viewport{stroke:#f08840}
     .react-flow__attribution{display:none}
     /* 节点内可溢出（右侧 hover 菜单）；外层 gv-canvas-host 用 contain:paint 裁命中区，防止渗到工具条 */
     .react-flow__node{overflow:visible!important}
@@ -91,6 +100,7 @@ import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { getSubFlowPack, isSubflowContainerData } from '../../runtime/schema/graph-schema'
 import type { FXNode } from '../../runtime/schema/react-flow-schema'
 import { toFXView } from './fx-view'
+import { GraphMiniMap } from './GraphMiniMap'
 import { connect, disconnect, duplicateNodes, insertNodeAfter, removeNode, setNodePosition } from '../edit/graph-edit'
 
 const MOD_HINT = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
@@ -124,6 +134,14 @@ const BADGE_COLOR: Record<string, string> = {
   pack: '#3b82f6',
   subflow: '#eab308',
 }
+
+/** MiniMap 节点填色：读 RF node.data.fx.data.badge → BADGE_COLOR。 */
+export function minimapNodeColor(node: { data: unknown }): string {
+  const badge = (node.data as { fx?: { data?: { badge?: string } } } | null | undefined)?.fx?.data?.badge
+  if (typeof badge === 'string' && BADGE_COLOR[badge]) return BADGE_COLOR[badge]!
+  return '#4b5563'
+}
+
 const HANDLE_COLOR: Record<string, string> = {
   default: '#6b7280',
   pass: '#22c55e',
@@ -677,28 +695,41 @@ function GraphCanvasInner({
   /**
    * 选中节点变化时，把视口平移让该节点落在画布「未被面板盖住的左侧可见区」中心（不缩放）。
    * 与 fitSignal 互不干扰：fitSignal 框全图、revealNodeId 仅平移；关闭面板（null）不抢用户手动平移。
+   * 切图后 RF 节点偶发尚未就绪 → 短延迟重试一次。
    */
   useEffect(() => {
     if (!revealNodeId) return
-    const node = getNodes().find((n) => n.id === revealNodeId)
-    if (!node) return
-    const el = rootRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return
-    const ratio = typeof revealPanelRatio === 'number' && revealPanelRatio > 0 ? Math.min(0.85, revealPanelRatio) : 0
-    // 节点中心（flow 坐标）：未度量时退回 position（左上角）。
-    const cx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
-    const cy = node.position.y + (node.measured?.height ?? node.height ?? 60) / 2
-    const vp = getViewport()
-    const zoom = vp.zoom || 1
-    // 左侧可见区中心（screen 坐标，相对画布容器）：画布宽 × (1 - ratio) / 2。
-    const targetScreenX = rect.width * (1 - ratio) / 2
-    const targetScreenY = rect.height / 2
-    // viewport.x = screenX - flowX * zoom
-    const nextX = targetScreenX - cx * zoom
-    const nextY = targetScreenY - cy * zoom
-    void setViewport({ x: nextX, y: nextY, zoom }, { duration: 220 })
+    let cancelled = false
+    const reveal = (attempt: number) => {
+      if (cancelled) return
+      const node = getNodes().find((n) => n.id === revealNodeId)
+      if (!node) {
+        if (attempt < 1) window.setTimeout(() => reveal(attempt + 1), 40)
+        return
+      }
+      const el = rootRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+      const ratio = typeof revealPanelRatio === 'number' && revealPanelRatio > 0 ? Math.min(0.85, revealPanelRatio) : 0
+      // 节点中心（flow 坐标）：未度量时退回 position（左上角）。
+      const cx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
+      const cy = node.position.y + (node.measured?.height ?? node.height ?? 60) / 2
+      const vp = getViewport()
+      const zoom = vp.zoom || 1
+      // 左侧可见区中心（screen 坐标，相对画布容器）：画布宽 × (1 - ratio) / 2。
+      const targetScreenX = rect.width * (1 - ratio) / 2
+      const targetScreenY = rect.height / 2
+      // viewport.x = screenX - flowX * zoom
+      const nextX = targetScreenX - cx * zoom
+      const nextY = targetScreenY - cy * zoom
+      void setViewport({ x: nextX, y: nextY, zoom }, { duration: 220 })
+    }
+    const t = window.setTimeout(() => reveal(0), 0)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealNodeId, revealPanelRatio])
 
@@ -841,6 +872,7 @@ function GraphCanvasInner({
       >
         <Background />
         <Controls position="bottom-left" />
+        <GraphMiniMap nodeColor={minimapNodeColor} />
       </ReactFlow>
       {!readOnly && selectedIds.length > 1 && (
         <div className="gv-sel-bar">

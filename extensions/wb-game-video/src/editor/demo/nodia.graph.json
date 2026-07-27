@@ -117,58 +117,6 @@
           }
         ]
       },
-      "hitCheer": {
-        "id": "hitCheer",
-        "title": "受击加油横幅（右上角，点击追加英雄名）",
-        "children": [
-          {
-            "id": "banner",
-            "component": "bossHitCheer",
-            "layout": {
-              "right": 0,
-              "top": 0
-            },
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "heroName": {
-                "ref": "entity.ent-player.name"
-              }
-            }
-          }
-        ]
-      },
-      "hpPanel": {
-        "id": "hpPanel",
-        "title": "回合按钮面板（A / B1 / B2）",
-        "children": [
-          {
-            "id": "panelA",
-            "component": "panelA",
-            "layout": {
-              "left": 0,
-              "top": 0
-            },
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {}
-          },
-          {
-            "id": "panelB",
-            "component": "panelB",
-            "layout": {
-              "right": 0,
-              "top": 0
-            },
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {}
-          }
-        ]
-      },
       "readouts": {
         "id": "readouts",
         "title": "血量读数（spawn 模板）",
@@ -234,28 +182,6 @@
               "top": 0,
               "width": 1,
               "height": 1
-            }
-          }
-        ]
-      },
-      "breathe": {
-        "id": "breathe",
-        "title": "调息（方案B：非阻塞改气力）",
-        "children": [
-          {
-            "id": "breathe",
-            "component": "panelA",
-            "layout": {
-              "left": "4%",
-              "bottom": "22%",
-              "width": "120px",
-              "height": "40px"
-            },
-            "trigger": {
-              "when": "enter"
-            },
-            "inputs": {
-              "label": "调息 +2气"
             }
           }
         ]
@@ -1636,112 +1562,7 @@
         "data": {
           "name": "我方回合",
           "durationMs": 0,
-          "subFlow": "wait",
-          "reactions": [
-            {
-              "when": {
-                "type": "watch",
-                "of": "entity.ent-boss.attr.hp",
-                "on": "dec"
-              },
-              "do": [
-                {
-                  "kind": "spawn",
-                  "from": "hitCheer/banner",
-                  "inputs": {
-                    "dmg": {
-                      "expr": "abs(delta)"
-                    },
-                    "remain": {
-                      "expr": "entity.ent-boss.attr.hp"
-                    },
-                    "heroName": {
-                      "ref": "entity.ent-player.name"
-                    }
-                  },
-                  "ttlMs": 3000
-                }
-              ]
-            }
-          ],
-          "overlayNodes": [
-            {
-              "overlay": "hpPanel",
-              "layout": {
-                "left": 0,
-                "top": 0,
-                "width": 1,
-                "height": 1
-              },
-              "reactions": [
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "A"
-                  },
-                  "do": [
-                    {
-                      "kind": "spawn",
-                      "from": "readouts/bossHp",
-                      "inputs": {
-                        "text": "{v}",
-                        "expr": "entity.ent-boss.attr.hp"
-                      },
-                      "ttlMs": 1500
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B1"
-                  },
-                  "do": [
-                    {
-                      "kind": "spawn",
-                      "from": "readouts/heroHp",
-                      "inputs": {
-                        "text": "{v}",
-                        "expr": "entity.ent-player.attr.hp"
-                      },
-                      "ttlMs": 1500
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B2"
-                  },
-                  "do": [
-                    {
-                      "kind": "effect",
-                      "effects": [
-                        {
-                          "kind": "var",
-                          "varId": "qi",
-                          "op": "add",
-                          "value": 2
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B3"
-                  },
-                  "do": [
-                    {
-                      "kind": "advance",
-                      "edgeId": "e-adv-a_my-n_drink-0"
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
+          "subFlow": "wait"
         }
       },
       {
@@ -1756,85 +1577,7 @@
         "data": {
           "name": "敌方回合",
           "durationMs": 0,
-          "subFlow": "tele",
-          "overlayNodes": [
-            {
-              "overlay": "hpPanel",
-              "layout": {
-                "left": 0,
-                "top": 0,
-                "width": 1,
-                "height": 1
-              },
-              "reactions": [
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "A"
-                  },
-                  "do": [
-                    {
-                      "kind": "spawn",
-                      "from": "readouts/bossHp",
-                      "inputs": {
-                        "text": "{v}",
-                        "expr": "entity.ent-boss.attr.hp"
-                      },
-                      "ttlMs": 1500
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B1"
-                  },
-                  "do": [
-                    {
-                      "kind": "spawn",
-                      "from": "readouts/heroHp",
-                      "inputs": {
-                        "text": "{v}",
-                        "expr": "entity.ent-player.attr.hp"
-                      },
-                      "ttlMs": 1500
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B2"
-                  },
-                  "do": [
-                    {
-                      "kind": "effect",
-                      "effects": [
-                        {
-                          "kind": "var",
-                          "varId": "qi",
-                          "op": "add",
-                          "value": 2
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "when": {
-                    "type": "event",
-                    "id": "B3"
-                  },
-                  "do": [
-                    {
-                      "kind": "advance",
-                      "edgeId": "e-adv-b_ai-n_drink-1"
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
+          "subFlow": "tele"
         }
       },
       {
@@ -3087,20 +2830,6 @@
         "target": "a_my",
         "sourceHandle": "default",
         "targetHandle": "in"
-      },
-      {
-        "id": "e-adv-a_my-n_drink-0",
-        "source": "a_my",
-        "target": "n_drink",
-        "sourceHandle": "B3",
-        "targetHandle": "in"
-      },
-      {
-        "id": "e-adv-b_ai-n_drink-1",
-        "source": "b_ai",
-        "target": "n_drink",
-        "sourceHandle": "B3",
-        "targetHandle": "in"
       }
     ]
   },
@@ -3850,112 +3579,7 @@
               "data": {
                 "name": "我方回合",
                 "durationMs": 0,
-                "subFlow": "wait",
-                "reactions": [
-                  {
-                    "when": {
-                      "type": "watch",
-                      "of": "entity.ent-boss.attr.hp",
-                      "on": "dec"
-                    },
-                    "do": [
-                      {
-                        "kind": "spawn",
-                        "from": "hitCheer/banner",
-                        "inputs": {
-                          "dmg": {
-                            "expr": "abs(delta)"
-                          },
-                          "remain": {
-                            "expr": "entity.ent-boss.attr.hp"
-                          },
-                          "heroName": {
-                            "ref": "entity.ent-player.name"
-                          }
-                        },
-                        "ttlMs": 3000
-                      }
-                    ]
-                  }
-                ],
-                "overlayNodes": [
-                  {
-                    "overlay": "hpPanel",
-                    "layout": {
-                      "left": 0,
-                      "top": 0,
-                      "width": 1,
-                      "height": 1
-                    },
-                    "reactions": [
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "A"
-                        },
-                        "do": [
-                          {
-                            "kind": "spawn",
-                            "from": "readouts/bossHp",
-                            "inputs": {
-                              "text": "{v}",
-                              "expr": "entity.ent-boss.attr.hp"
-                            },
-                            "ttlMs": 1500
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B1"
-                        },
-                        "do": [
-                          {
-                            "kind": "spawn",
-                            "from": "readouts/heroHp",
-                            "inputs": {
-                              "text": "{v}",
-                              "expr": "entity.ent-player.attr.hp"
-                            },
-                            "ttlMs": 1500
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B2"
-                        },
-                        "do": [
-                          {
-                            "kind": "effect",
-                            "effects": [
-                              {
-                                "kind": "var",
-                                "varId": "qi",
-                                "op": "add",
-                                "value": 2
-                              }
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B3"
-                        },
-                        "do": [
-                          {
-                            "kind": "advance",
-                            "edgeId": "e-adv-a_my-n_drink-0"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
+                "subFlow": "wait"
               }
             },
             {
@@ -3970,85 +3594,7 @@
               "data": {
                 "name": "敌方回合",
                 "durationMs": 0,
-                "subFlow": "tele",
-                "overlayNodes": [
-                  {
-                    "overlay": "hpPanel",
-                    "layout": {
-                      "left": 0,
-                      "top": 0,
-                      "width": 1,
-                      "height": 1
-                    },
-                    "reactions": [
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "A"
-                        },
-                        "do": [
-                          {
-                            "kind": "spawn",
-                            "from": "readouts/bossHp",
-                            "inputs": {
-                              "text": "{v}",
-                              "expr": "entity.ent-boss.attr.hp"
-                            },
-                            "ttlMs": 1500
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B1"
-                        },
-                        "do": [
-                          {
-                            "kind": "spawn",
-                            "from": "readouts/heroHp",
-                            "inputs": {
-                              "text": "{v}",
-                              "expr": "entity.ent-player.attr.hp"
-                            },
-                            "ttlMs": 1500
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B2"
-                        },
-                        "do": [
-                          {
-                            "kind": "effect",
-                            "effects": [
-                              {
-                                "kind": "var",
-                                "varId": "qi",
-                                "op": "add",
-                                "value": 2
-                              }
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "when": {
-                          "type": "event",
-                          "id": "B3"
-                        },
-                        "do": [
-                          {
-                            "kind": "advance",
-                            "edgeId": "e-adv-b_ai-n_drink-1"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
+                "subFlow": "tele"
               }
             },
             {
@@ -5300,20 +4846,6 @@
               "source": "b_ai",
               "target": "a_my",
               "sourceHandle": "default",
-              "targetHandle": "in"
-            },
-            {
-              "id": "e-adv-a_my-n_drink-0",
-              "source": "a_my",
-              "target": "n_drink",
-              "sourceHandle": "B3",
-              "targetHandle": "in"
-            },
-            {
-              "id": "e-adv-b_ai-n_drink-1",
-              "source": "b_ai",
-              "target": "n_drink",
-              "sourceHandle": "B3",
               "targetHandle": "in"
             }
           ]

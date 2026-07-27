@@ -324,7 +324,7 @@ export default defineConfig(() => {
       globals: true,
       // happy-dom 20.9.0 的 localStorage 在 vitest 下方法取不到 → setup 里补内存版兜底
       setupFiles: ['./src/test/setup.ts'],
-      include: ['src/**/__tests__/**/*.test.{ts,tsx}'],
+      include: ['src/**/__tests__/**/*.test.{ts,tsx}', 'server/**/*.test.ts'],
     },
     build: {
       outDir: 'dist',

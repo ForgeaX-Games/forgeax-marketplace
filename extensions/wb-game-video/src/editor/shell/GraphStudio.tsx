@@ -30,6 +30,7 @@ import type { GameNode } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { docToPack, metaFromDocument, packToDoc } from '../persist/blueprint-project'
 import { wouldCreateCycle } from '../../graph/edit/blueprint-refs'
+import { useRevealOnScopeChange } from './useRevealOnScopeChange'
 
 /** 工具条暖色皮肤（对齐旧 gc- 目录风格）。 */
 function ensureToolbarStyle(): void {
@@ -330,7 +331,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [playNonce, setPlayNonce] = useState(0)
   const pendingJumpRef = useRef<string | null>(null)
   const session = useMemo(
-    () => new GraphSession(useGraphScenario.getState().playScn()),
+    () => {
+      const st = useGraphScenario.getState()
+      return new GraphSession(st.playScn(), { rootBlueprintId: st.activeBlueprintId })
+    },
     // runKey：工具条整局重开；activeBlueprintId：切库；playNonce：从此试玩吃最新图
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [runKey, entitySig, activeBlueprintId, playNonce],
@@ -338,6 +342,17 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const sessionRef = useRef(session)
   sessionRef.current = session
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
+  const playGraph =
+    playOpen && snap.activeBlueprintId
+      ? (blueprints[snap.activeBlueprintId]?.graph ?? canvasGraph)
+      : canvasGraph
+  // 试玩落进被引用的子蓝图时，画布改为只读执行视图；同图试玩仍保持原本的编辑/下钻体验。
+  const showingForeignPlayGraph = playOpen && playGraph !== canvasGraph
+  // 进/出子蓝图时把视口挪到当前播放节点；同图推进不抢手动平移。未试玩时仍用编辑选中 reveal。
+  const playRevealNodeId = useRevealOnScopeChange(
+    playOpen ? snap.activeBlueprintId : null,
+    playOpen ? snap.currentNodeId : null,
+  )
   // playEpoch：同节点 jump 重播时清闸（clip.nodeId 不变）
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId, `${runKey}:${playEpoch}`)
 
@@ -399,7 +414,15 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
 
   const drillFitKey = useMemo(() => `root:${drillStack.join('/')}`, [drillStack])
 
+  // 下钻导航和「重开」锚点属于正在编辑的蓝图；试玩状态行才解析执行图节点。
   const nameOf = (id: string) => canvasGraph.nodes.find((n) => n.id === id)?.data.name ?? id
+  const playNameOf = (id: string) => playGraph.nodes.find((n) => n.id === id)?.data.name ?? id
+  const playVisibleNodeIds = useMemo(() => {
+    if (!playOpen || showingForeignPlayGraph || !snap.currentNodeId || visibleNodeIds.has(snap.currentNodeId)) {
+      return showingForeignPlayGraph ? undefined : visibleNodeIds
+    }
+    return new Set(visibleNodeIds).add(snap.currentNodeId)
+  }, [playOpen, showingForeignPlayGraph, snap.currentNodeId, visibleNodeIds])
 
   /** 双击容器：跨蓝图引用（`subFlowPack`）→ 平级切库选中项（selectBlueprint），不是嵌套下钻；
    * 同图子流程（`subFlow`，非引用）仍原地下钻压栈。 */
@@ -500,35 +523,46 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           // 切蓝图 remount：清掉画布本地 selectedIds（store 已清 selectedNodeId，本地不跟会残留旧 id）。
           // 节点剪贴板在 GraphCanvas 模块级，不跟 remount 走，故主↔子蓝图可粘贴。
           key={activeBlueprintId}
-          graph={canvasGraph}
+          graph={playGraph}
           onChange={setCanvasGraph}
           overlays={overlays}
           // 试玩游标与编辑选中共用橙色描边；未开浮层时勿把 session 当前节点画成「选中」——
           // 新建子蓝图后 session.start() 停在「入口」，否则入口会像永远选不掉。
           activeNodeId={playOpen ? snap.currentNodeId : null}
           traversedEdgeIds={playOpen ? traversed : undefined}
-          visibleNodeIds={visibleNodeIds}
+          readOnly={showingForeignPlayGraph}
+          visibleNodeIds={playVisibleNodeIds}
           fitSignal={fitSignal}
           drillFitKey={drillFitKey}
           // 试玩浮层宽 320 + 边距；传稳定 number，避免每帧新 object 触发反复 fitView。
           fitReserveRightPx={playOpen ? 340 : 0}
-          revealNodeId={selected}
+          revealNodeId={playRevealNodeId ?? selected}
           revealPanelRatio={panelRatio}
-          onJump={setSelected}
-          onDrill={onDrill}
+          onJump={(nodeId) => {
+            if (!showingForeignPlayGraph) {
+              setSelected(nodeId)
+              return
+            }
+            setSnap(sessionRef.current.jump(nodeId, {
+              blueprintId: snap.activeBlueprintId,
+              graph: playGraph,
+            }))
+            setPlayEpoch((n) => n + 1)
+          }}
+          onDrill={showingForeignPlayGraph ? undefined : onDrill}
           onPaneClick={() => setSelected(null)}
-          onAddNode={addPerfNode}
-          onAddPackNode={addPackRef}
-          onFitLayout={applyLayout}
+          onAddNode={showingForeignPlayGraph ? undefined : addPerfNode}
+          onAddPackNode={showingForeignPlayGraph ? undefined : addPackRef}
+          onFitLayout={showingForeignPlayGraph ? undefined : applyLayout}
         />
 
         {/* 试玩浮层：画布右上角（原独立试玩面板搬来） */}
         {playOpen && (
           <div style={{ position: 'absolute', top: 8, right: 8, width: 320, zIndex: 6, borderRadius: 10, overflow: 'hidden', border: '1px solid #403830', background: 'rgba(27,23,19,0.94)', boxShadow: '0 8px 28px rgba(0,0,0,0.55)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 11, color: '#c9d1e0', gap: 8 }}>
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={snap.currentNodeId ? `${snap.phase} · ${nameOf(snap.currentNodeId)}` : snap.phase}>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={snap.currentNodeId ? `${snap.phase} · ${playNameOf(snap.currentNodeId)}` : snap.phase}>
                 试玩 · {snap.phase}
-                {snap.currentNodeId ? ` · ${snap.clip?.name || nameOf(snap.currentNodeId)}` : ''}
+                {snap.currentNodeId ? ` · ${snap.clip?.name || playNameOf(snap.currentNodeId)}` : ''}
               </span>
               <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <button onClick={restartPlayFrom} title={playFromNodeId ? `重开 · 回到 ${nameOf(playFromNodeId)}` : '重开'} style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>▶ 重开</button>

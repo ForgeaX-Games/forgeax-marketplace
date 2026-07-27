@@ -8,7 +8,7 @@
  * 数据来自共享 graphScenario store（与蓝图/视频/界面/规则同源）。
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import type { GameScenario } from '../../runtime/schema/graph-schema'
+import type { GameScenario, GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { PlayerRootContext, type SkinCtx } from '../../runtime/component-host/rendererRegistry'
@@ -19,6 +19,9 @@ import { resolveMediaSrc } from './media'
 import { GameStage, useClipPerformanceEnd } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
+import { useRevealOnScopeChange } from './useRevealOnScopeChange'
+import { getSubFlowPack } from '../../runtime/schema/graph-schema'
+import { blueprintBreadcrumbs, deepestCallerOnBlueprint } from './call-stack-view'
 
 function autoEmitTarget(snap: SessionSnapshot): { elementId: string; key: string } | null {
   // 自动演示：找首个可 emit 的挂载组件，抛其首个非 default 事件。
@@ -37,7 +40,7 @@ function autoEmitTarget(snap: SessionSnapshot): { elementId: string; key: string
 
 // ── 可拖拽 + 可缩放浮层（对齐旧 BlueprintPlayer DraggablePanel）──────────────────
 type Gesture = { type: 'move'; ox: number; oy: number } | { type: 'resize'; sx: number; sy: number; sw: number; sh: number }
-function DraggablePanel({ title, initial, onClose, children }: { title: string; initial: { x: number; y: number; w: number; h: number }; onClose: () => void; children: ReactNode }): JSX.Element {
+function DraggablePanel({ title, initial, onClose, children }: { title: ReactNode; initial: { x: number; y: number; w: number; h: number }; onClose: () => void; children: ReactNode }): JSX.Element {
   const [box, setBox] = useState(initial)
   const g = useRef<Gesture | null>(null)
   useEffect(() => {
@@ -58,7 +61,7 @@ function DraggablePanel({ title, initial, onClose, children }: { title: string; 
         onPointerDown={(e) => { g.current = { type: 'move', ox: e.clientX - box.x, oy: e.clientY - box.y } }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 10px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 12, color: '#c9d1e0', cursor: 'move', userSelect: 'none', flex: 'none' }}
       >
-        <span>{title}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#9aa2b1', cursor: 'pointer' }}>✕</button>
       </div>
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>{children}</div>
@@ -77,6 +80,8 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const graph = useGraphScenario((s) => s.graph)
+  const blueprints = useGraphScenario((s) => s.blueprints)
+  const mainBlueprintId = useGraphScenario((s) => s.mainBlueprintId)
   const overlays = useGraphScenario((s) => s.meta.ui?.overlays)
   const ready = graph.nodes.length > 0
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
@@ -85,7 +90,10 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   const [auto, setAuto] = useState(false)
   const [showBlueprint, setShowBlueprint] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
+  const [viewMode, setViewMode] = useState<'follow' | 'pinned'>('follow')
+  const [pinnedBlueprintId, setPinnedBlueprintId] = useState<string>()
   const sessionRef = useRef<GraphSession | null>(null)
+  const rootBlueprintIdRef = useRef(mainBlueprintId)
   const [snap, setSnap] = useState<SessionSnapshot | null>(null)
   const [skins, setSkins] = useState<GraphSession['skins'] | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -104,7 +112,11 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   })
   useEffect(() => {
     if (!ready) return
-    const s = new GraphSession(useGraphScenario.getState().scn())
+    const st = useGraphScenario.getState()
+    const scn = st.scn()
+    const rootBlueprintId = (scn as GraphLibraryDocument).manifest?.mainPackId ?? st.mainBlueprintId
+    rootBlueprintIdRef.current = rootBlueprintId
+    const s = new GraphSession(scn, { rootBlueprintId })
     sessionRef.current = s
     setSkins(s.skins)
     setSnap(s.start())
@@ -128,9 +140,65 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     return () => clearTimeout(t)
   }, [auto, snap?.currentNodeId, snap?.overlayMounts])
 
-  const doJump = (nodeId: string) => setSnap(sessionRef.current!.jump(nodeId))
+  const rootBlueprintId = rootBlueprintIdRef.current || mainBlueprintId
+  const displayBlueprintId =
+    viewMode === 'pinned' && pinnedBlueprintId
+      ? pinnedBlueprintId
+      : (snap?.activeBlueprintId ?? rootBlueprintId)
+  const displayGraph =
+    blueprints[displayBlueprintId]?.graph
+    ?? blueprints[rootBlueprintId]?.graph
+    ?? graph
+  const activeNodeId = !snap
+    ? null
+    : displayBlueprintId === snap.activeBlueprintId
+      ? snap.currentNodeId
+      : deepestCallerOnBlueprint(snap.callStack, displayBlueprintId, snap.activeBlueprintId)
+  const crumbs = snap
+    ? blueprintBreadcrumbs(
+      rootBlueprintId,
+      blueprints[rootBlueprintId]?.title ?? rootBlueprintId,
+      snap.callStack,
+      snap.activeBlueprintId,
+      blueprints[snap.activeBlueprintId]?.title ?? snap.activeBlueprintId,
+    )
+    : []
+  const jumpFromBlueprint = (nodeId: string) => {
+    const packNode = displayGraph.nodes.find((node) => node.id === nodeId)
+    const packRef = packNode ? getSubFlowPack(packNode.data) : undefined
+    if (
+      viewMode === 'pinned'
+      && displayBlueprintId !== snap?.activeBlueprintId
+      && packRef
+      && snap?.callStack.some((frame) => frame.callerNodeId === nodeId)
+    ) {
+      setViewMode('follow')
+      setPinnedBlueprintId(undefined)
+      return
+    }
+    setSnap(sessionRef.current!.jump(nodeId, {
+      blueprintId: displayBlueprintId,
+      graph: displayGraph,
+    }))
+    setViewMode('follow')
+    setPinnedBlueprintId(undefined)
+  }
   const traversed = useMemo(() => new Set(snap?.traversedEdgeIds ?? []), [snap?.traversedEdgeIds])
-  const currentNode = useMemo(() => graph.nodes.find((n) => n.id === snap?.currentNodeId), [graph, snap?.currentNodeId])
+  // 打开蓝图浮层 / 进出自蓝图（含面包屑回看）时平移到高亮节点；同图内推进不抢视口。
+  const revealNodeId = useRevealOnScopeChange(
+    showBlueprint ? `${viewMode}:${displayBlueprintId}` : null,
+    activeNodeId,
+  )
+  const executingGraph =
+    (snap?.activeBlueprintId
+      ? blueprints[snap.activeBlueprintId]?.graph
+      : undefined)
+    ?? blueprints[rootBlueprintId]?.graph
+    ?? graph
+  const currentNode = useMemo(
+    () => executingGraph.nodes.find((n) => n.id === snap?.currentNodeId),
+    [executingGraph, snap?.currentNodeId],
+  )
   const rt = sessionRef.current?.runtime
   const skinCtx: SkinCtx | undefined = snap && rt
     ? {
@@ -180,8 +248,62 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
 
       {/* 蓝图浮层：可拖拽 + 可缩放，复用 GraphCanvas */}
       {showBlueprint && (
-        <DraggablePanel title="蓝图状态机 · 点节点跳转执行" initial={{ x: 40, y: 56, w: 540, h: 420 }} onClose={() => setShowBlueprint(false)}>
-          <GraphCanvas graph={graph} onChange={() => {}} overlays={overlays} activeNodeId={snap?.currentNodeId} traversedEdgeIds={traversed} onJump={doJump} readOnly />
+        <DraggablePanel
+          title={(
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span>蓝图状态机 · {viewMode === 'follow' ? '跟随执行' : '回看'}</span>
+              {crumbs.length > 0 && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0, overflow: 'hidden' }}>
+                  {crumbs.map((crumb, index) => (
+                    <span key={crumb.blueprintId} style={{ display: 'contents' }}>
+                      {index > 0 && <span style={{ color: '#697386' }}>›</span>}
+                      <button
+                        title={`查看${crumb.title}`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() => {
+                          if (crumb.blueprintId === snap?.activeBlueprintId) {
+                            setViewMode('follow')
+                            setPinnedBlueprintId(undefined)
+                          } else {
+                            setViewMode('pinned')
+                            setPinnedBlueprintId(crumb.blueprintId)
+                          }
+                        }}
+                        style={{ padding: 0, border: 'none', background: 'none', color: crumb.blueprintId === displayBlueprintId ? '#f5bd75' : '#aeb8c8', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
+                      >
+                        {crumb.title}
+                      </button>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {viewMode === 'pinned' && (
+                <button
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    setViewMode('follow')
+                    setPinnedBlueprintId(undefined)
+                  }}
+                  style={{ marginLeft: 'auto', padding: '2px 6px', borderRadius: 4, border: '1px solid #66513b', background: '#2f2923', color: '#f5bd75', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
+                >
+                  跟随执行
+                </button>
+              )}
+            </div>
+          )}
+          initial={{ x: 40, y: 56, w: 540, h: 420 }}
+          onClose={() => setShowBlueprint(false)}
+        >
+          <GraphCanvas
+            graph={displayGraph}
+            onChange={() => {}}
+            overlays={overlays}
+            activeNodeId={activeNodeId}
+            traversedEdgeIds={displayBlueprintId === snap?.activeBlueprintId ? traversed : undefined}
+            revealNodeId={revealNodeId}
+            onJump={jumpFromBlueprint}
+            readOnly
+          />
         </DraggablePanel>
       )}
 

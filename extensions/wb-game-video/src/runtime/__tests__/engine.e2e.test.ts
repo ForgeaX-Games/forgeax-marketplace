@@ -3,13 +3,11 @@ import { GraphRuntime } from '../engine/engine'
 import { registerCoreSkins } from '../component-host/components'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 import { validateScenario } from '../validate/validate'
-import type { RenderOverlayDirective } from '../engine/directives'
-import { isRenderOverlay } from '../engine/directives'
 import { getSubFlow } from '../schema/graph-schema'
 
 const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
-// registerCoreSkins 一并注册组件包自带 Component（panelA/panelB/bossHitCheer），供校验/派发识别。
+// registerCoreSkins 一并注册组件包自带 Component，供校验/派发识别。
 beforeAll(() => { registerCoreSkins() })
 
 describe('nodia graph e2e (runs on GraphRuntime)', () => {
@@ -79,24 +77,6 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(rt.state.visited.has('b_ai')).toBe(true)
     expect(rt.state.currentNodeId).toBe('enter') // 回到进战待机 = 一整回合走完、回合循环成立
     expect(rt.state.callStack).toEqual([])
-  })
-
-  it('我方回合技能命中 boss 掉血 → 弹 bossHitCheer 加油横幅（demo 容器 watch 生效）', () => {
-    const scn = makeNodiaDemo({ bossHp: 700 })
-    const rt = new GraphRuntime(scn.graph, scn)
-    rt.start()
-    rt.jumpToNode('enter')
-    rt.onPerformanceEnd() // enter → a_my(subflow) → wait
-    expect(rt.state.currentNodeId).toBe('wait')
-
-    rt.emitComponentEvent('wait/skill', 'light') // → 轻攻击演出（a_my 在调用栈）
-    expect(callers(rt)).toEqual(['a_my'])
-
-    const dirs = rt.tick(1000) // 命中扣 boss 血 → a_my 容器 watch → spawn 横幅
-    const spawn = dirs.find((d): d is RenderOverlayDirective => isRenderOverlay(d) && d.component === 'bossHitCheer')
-    expect(spawn).toBeTruthy()
-    expect(spawn!.inputs.dmg as number).toBeGreaterThan(0)
-    expect(spawn!.inputs.heroName).toBe('空藏')
   })
 
   it('initiative: slower player yields enemy-first (直接进敌方回合 tele)', () => {

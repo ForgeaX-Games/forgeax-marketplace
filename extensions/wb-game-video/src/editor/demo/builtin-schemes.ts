@@ -121,7 +121,7 @@ export function ensureBuiltinSchemes(
   for (const s of BUILTIN_SCHEMES) {
     if (!next[s.id]) next[s.id] = structuredClone(s)
   }
-  // 再补 nodia 抽出的界面方案（battleHud / hitCheer / hpPanel / readouts）。
+  // 再补 nodia 抽出的界面方案（battleHud / readouts / …）。
   return ensureBaseHudSchemes(ensureNodiaSchemeOverlays(next))
 }
 

@@ -2,7 +2,7 @@
  * registry-types —— 游戏级共享素材层的**类型 SSOT**（浏览器安全，零依赖 · 无 node:fs）。
  *
  * 素材层数据落在 `.forgeax/games/<slug>/assets/`：
- *   - `manifest.json` = { version, assets: MediaAsset[] }（唯一写方 = wb-game-video）
+ *   - `manifest.json` = { version:2, assets: AssetRecord[] }（游戏级共享资产清单）
  *   - `media/<id>.<ext>` = wb-game-video **自产**的图/视频二进制
  *
  * 前端（media.ts / GraphVideoView）与后端（server/asset-registry.ts + generation）都
@@ -68,6 +68,13 @@ export interface MediaAsset {
   meta?: Record<string, unknown>
 }
 
+/** 其它资产域拥有的记录。registry 必须原样保留，但不会把它们暴露为 MediaAsset。 */
+export interface ForeignAssetRecord {
+  id: string
+  kind: string
+  [key: string]: unknown
+}
+
 /**
  * 风格三轴（wb-reel）—— 游戏级默认，node 可覆盖。
  * 字段是各轴的 id 字符串（保持 registry-types 零依赖，不引 engine 的 VisualStyle/FilmLook/DirectorStyleId union）；
@@ -84,10 +91,11 @@ export interface StyleAxes {
 
 /** manifest.json 顶层容器。 */
 export interface AssetManifest {
-  version: 1
-  assets: MediaAsset[]
+  version: 2
+  assets: Array<MediaAsset | ForeignAssetRecord>
   /** 游戏级风格三轴默认（可选）；缺省=各轴不加。 */
   styleAxes?: StyleAxes
+  [key: string]: unknown
 }
 
 /** 前端渲染友好的轻量视图（列表/卡片用）。 */

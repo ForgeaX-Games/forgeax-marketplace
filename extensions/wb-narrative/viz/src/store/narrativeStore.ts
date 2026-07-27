@@ -12,6 +12,14 @@ import { sendToHost } from "../lib/bridge";
 import type { EntryStatus, DraftState } from "../utils/stepDisplay";
 import { computePhase, type NarrativePhase } from "./phase";
 import { t as tGlobal, tStepLabel } from "../i18n";
+import {
+  computeAnchoredPipelines,
+  instantiateComposerNode,
+  type ComposerCatalogItem,
+  type ComposerNodeData,
+  type ComposerEdgeData,
+  type AnchoredPipeline,
+} from "../composer/composerCatalog";
 
 export { computePhase };
 export type { NarrativePhase };
@@ -127,6 +135,12 @@ interface NarrativeState {
   pendingFork: boolean;
   /** 分叉待决的改动类型：input（改原料，「确认」提交，全量重跑）/ routing（改路由，「开始生成」提交，复用预处理）。 */
   pendingForkKind: ForkKind;
+
+  // ---- 无限画布编排（composer 切片） ----
+  /** 编排态自由拖拽的节点（与只读管线节点解耦，仅在"未生成"态可编辑）。 */
+  composerNodes: ComposerNodeData[];
+  /** 编排态自由连线（活连接）。 */
+  composerEdges: ComposerEdgeData[];
 
   // ---- Local drafts (bound to activeEntry) ----
   editDrafts: Record<string, EditDraft>;
@@ -261,8 +275,26 @@ interface NarrativeState {
   snapshot: () => string;
   restore: (json: string) => boolean;
 
+  // ---- Actions: composer（无限画布编排） ----
+  /** 拖入一个角色节点，返回新节点 id。 */
+  addComposerNode: (item: ComposerCatalogItem, position: { x: number; y: number }) => string;
+  /** 更新节点位置（拖动持久化）。 */
+  moveComposerNode: (id: string, position: { x: number; y: number }) => void;
+  /** 新建一条活连接（去重、禁自环）。 */
+  connectComposer: (source: string, target: string) => void;
+  /** 删除节点及其相连边。 */
+  removeComposerNode: (id: string) => void;
+  /** 删除单条边。 */
+  removeComposerEdge: (id: string) => void;
+  /** 打补丁式更新节点级配置。 */
+  setComposerNodeConfig: (id: string, patch: Record<string, unknown>) => void;
+  /** 清空编排画布。 */
+  clearComposer: () => void;
+
   // ---- Derived helpers ----
   hasDrafts: () => boolean;
+  /** 以输入节点为锚点拆分出的可提交管线（孤立节点忽略）。 */
+  getAnchoredPipelines: () => AnchoredPipeline[];
 }
 
 const STORAGE_KEY = "narrative-viz-snapshot";
@@ -519,6 +551,10 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   ipDnaGenerating: false,
   pendingFork: false,
   pendingForkKind: null,
+
+  // ---- Composer（无限画布编排） ----
+  composerNodes: [],
+  composerEdges: [],
 
   // ---- Drafts ----
   editDrafts: {},
@@ -1187,6 +1223,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       routingConfigured: false,
       ipDnaGenerating: false,
       pendingFork: false,
+      composerNodes: [],
+      composerEdges: [],
       editDrafts: {},
       focusedStepId: null,
       focusedChildNodeId: null,
@@ -1259,9 +1297,54 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     }
   },
 
+  // ---- Actions: composer（无限画布编排） ----
+  addComposerNode: (item, position) => {
+    const id = `composer_${item.id}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const node = instantiateComposerNode(item, position, id);
+    set((state) => ({ composerNodes: [...state.composerNodes, node] }));
+    return id;
+  },
+
+  moveComposerNode: (id, position) =>
+    set((state) => ({
+      composerNodes: state.composerNodes.map((n) => (n.id === id ? { ...n, position } : n)),
+    })),
+
+  connectComposer: (source, target) =>
+    set((state) => {
+      if (source === target) return {};
+      const exists = state.composerEdges.some((e) => e.source === source && e.target === target);
+      if (exists) return {};
+      const edge: ComposerEdgeData = { id: `ce_${source}__${target}`, source, target };
+      return { composerEdges: [...state.composerEdges, edge] };
+    }),
+
+  removeComposerNode: (id) =>
+    set((state) => ({
+      composerNodes: state.composerNodes.filter((n) => n.id !== id),
+      composerEdges: state.composerEdges.filter((e) => e.source !== id && e.target !== id),
+    })),
+
+  removeComposerEdge: (id) =>
+    set((state) => ({ composerEdges: state.composerEdges.filter((e) => e.id !== id) })),
+
+  setComposerNodeConfig: (id, patch) =>
+    set((state) => ({
+      composerNodes: state.composerNodes.map((n) =>
+        n.id === id ? { ...n, config: { ...n.config, ...patch } } : n,
+      ),
+    })),
+
+  clearComposer: () => set({ composerNodes: [], composerEdges: [] }),
+
   hasDrafts: () => {
     const drafts = get().editDrafts;
     return Object.values(drafts).some((d) => d.saved);
+  },
+
+  getAnchoredPipelines: () => {
+    const s = get();
+    return computeAnchoredPipelines(s.composerNodes, s.composerEdges);
   },
 }));
 
@@ -1317,6 +1400,8 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "previewOrder",
   "previewIsAuto",
   "runMode",
+  "composerNodes",
+  "composerEdges",
   "tier",
   "mode",
   "autoDetect",

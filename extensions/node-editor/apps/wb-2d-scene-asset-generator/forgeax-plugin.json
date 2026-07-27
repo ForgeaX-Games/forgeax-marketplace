@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "2D 场景资产生成器",
+    "zh": "2D场景资产",
     "en": "2D Scene Asset Generator"
   },
   "description": {

@@ -52,6 +52,7 @@ export type GraphPhase = 'idle' | 'playing' | 'ended'
 export interface CallFrame {
   callerNodeId: string
   returnGraph: GameGraph
+  returnBlueprintId: string
 }
 
 export interface RuntimeState extends MutableState {
@@ -77,6 +78,8 @@ export class GraphRuntime {
   private readonly rootGraph: GameGraph
   /** 当前正在执行的图（根 graph，或执行中解析到的子蓝图 graph）。 */
   private activeGraph: GameGraph
+  private activeBlueprintId: string
+  private readonly rootBlueprintId: string
   /** 依赖查找表：id / id@version → 子蓝图（来自 manifest.packs，或测试注入的 packs）。 */
   private readonly packsByKey = new Map<string, { id: string; version?: string; entry: string; graph: GameGraph }>()
   readonly state: RuntimeState
@@ -119,13 +122,23 @@ export class GraphRuntime {
     private readonly scenario: GameScenario,
     components: ComponentRegistry = defaultComponentRegistry,
     packs: readonly SubFlowPackDef[] = [],
+    rootBlueprintId?: string,
   ) {
     this.rootGraph = graph
     this.activeGraph = graph
+    this.rootBlueprintId =
+      rootBlueprintId
+      ?? (scenario as { manifest?: { mainPackId?: string } }).manifest?.mainPackId
+      ?? '__root__'
+    this.activeBlueprintId = this.rootBlueprintId
     this.components = components
     this.loadDependencyTable(scenario, packs)
     this.indexGraph(graph)
     this.state = { ...initState(scenario), ...control() }
+  }
+
+  getActiveBlueprintId(): string {
+    return this.activeBlueprintId
   }
 
   /** 执行中发现 subFlowPack 时的查表源：构造注入 packs（单测）> scenario.manifest.packs。 */
@@ -174,7 +187,11 @@ export class GraphRuntime {
   }
 
   private pushCall(callerNodeId: string): void {
-    this.state.callStack.push({ callerNodeId, returnGraph: this.activeGraph })
+    this.state.callStack.push({
+      callerNodeId,
+      returnGraph: this.activeGraph,
+      returnBlueprintId: this.activeBlueprintId,
+    })
   }
 
   private getComponent(componentId: string) {
@@ -272,6 +289,7 @@ export class GraphRuntime {
 
   // ── 控制入口 ────────────────────────────────────────────────────────────────
   start(): RuntimeDirective[] {
+    this.activeBlueprintId = this.rootBlueprintId
     this.switchGraph(this.rootGraph)
     const entry = this.rootGraph.nodes[0]
     if (!entry) {
@@ -285,9 +303,24 @@ export class GraphRuntime {
   }
 
   /** seek 到任意节点从头跑（调试/可视化点击）。默认保留全局态，resetGlobals 干净复现。 */
-  jumpToNode(id: string, opts: { resetGlobals?: boolean } = {}): RuntimeDirective[] {
+  jumpToNode(
+    id: string,
+    opts: { resetGlobals?: boolean; graph?: GameGraph; blueprintId?: string } = {},
+  ): RuntimeDirective[] {
     if (opts.resetGlobals) this.resetGlobalsState()
-    this.switchGraph(this.rootGraph)
+    if (opts.blueprintId) {
+      const pack = this.packsByKey.get(opts.blueprintId)
+      const g = opts.graph ?? pack?.graph
+      if (!g) throw new Error(`jump blueprint '${opts.blueprintId}' not loaded`)
+      this.switchGraph(g)
+      this.activeBlueprintId = opts.blueprintId
+    } else if (opts.graph) {
+      this.switchGraph(opts.graph)
+      this.activeBlueprintId = opts.graph === this.rootGraph ? this.rootBlueprintId : this.activeBlueprintId
+    } else {
+      this.switchGraph(this.rootGraph)
+      this.activeBlueprintId = this.rootBlueprintId
+    }
     this.state.callStack = []
     this.chain = 0
     this.returningTo = new Set()
@@ -342,7 +375,11 @@ export class GraphRuntime {
     switch (intent.kind) {
       case 'descend':
         this.pushCall(node.id)
-        if (intent.graph) this.switchGraph(intent.graph)
+        if (intent.graph) {
+          const packId = getSubFlowPack(node.data)?.id
+          if (packId) this.activeBlueprintId = packId
+          this.switchGraph(intent.graph)
+        }
         this.enterNode(intent.entry)
         return
       case 'advance':
@@ -638,6 +675,7 @@ export class GraphRuntime {
     this.state.callStack = []
     this.returningTo.clear()
     this.switchGraph(this.rootGraph)
+    this.activeBlueprintId = this.rootBlueprintId
     this.enterNode(goto)
     return true
   }
@@ -919,6 +957,7 @@ export class GraphRuntime {
         if (node) this.runExit(node)
         this.returningTo.add(frame.callerNodeId) // 弹回容器时跳过 subFlow 再下钻
         this.switchGraph(frame.returnGraph)
+        this.activeBlueprintId = frame.returnBlueprintId
         this.enterNode(frame.callerNodeId)
         return
       }

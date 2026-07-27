@@ -38,6 +38,23 @@ const MAIN_DOC: BlueprintDoc = {
   entry: 'intro',
   graph: SCENARIO.graph,
 }
+const PACK_ID = 'bp-pack'
+const PACK_DOC: BlueprintDoc = {
+  id: PACK_ID,
+  title: 'Pack',
+  entry: 'pack-intro',
+  graph: {
+    nodes: [{
+      id: 'pack-intro',
+      type: 'perf',
+      position: { x: 0, y: 0 },
+      inputs: [],
+      outputs: [],
+      data: { name: 'Pack intro', media: { kind: 'video', ref: 'missing-stable-id' } },
+    }],
+    edges: [],
+  },
+}
 
 function seedGraphStore(): void {
   useGraphScenario.setState({
@@ -109,5 +126,28 @@ describe('missing video notices across play surfaces', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Kino 视频素材加载失败：invalid_page_size（仅显示内置视频）',
     )
+  })
+
+  it('returns to follow mode when the active breadcrumb is clicked', () => {
+    const entryNode = {
+      ...SCENARIO.graph.nodes[0]!,
+      data: { name: 'Enter pack', subFlowPack: { id: PACK_ID } },
+    }
+    const mainDoc: BlueprintDoc = {
+      ...MAIN_DOC,
+      graph: { nodes: [entryNode], edges: [] },
+    }
+    useGraphScenario.setState({
+      blueprints: { [MAIN_ID]: mainDoc, [PACK_ID]: PACK_DOC },
+      graph: mainDoc.graph,
+    })
+
+    render(<GraphPlaySurface scenario={{ ...SCENARIO, graph: mainDoc.graph }} />)
+    fireEvent.click(screen.getByRole('button', { name: '蓝图' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Main' }))
+    expect(screen.getByText('蓝图状态机 · 回看')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pack' }))
+    expect(screen.getByText('蓝图状态机 · 跟随执行')).toBeTruthy()
   })
 })

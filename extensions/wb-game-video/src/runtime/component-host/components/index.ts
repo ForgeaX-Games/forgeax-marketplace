@@ -3,7 +3,7 @@
  *
  * 默认表现/交互：floatText / dialogue / transition / choice / skill / qte / hotspot / filter / fx
  * 专属皮肤：battleParry / inkKou / inkYingMo / battleSkillBar
- * overlay：battleHpBar / bossHitCheer / panelA / panelB
+ * overlay：battleHpBar
  *
  * 加新组件 = 同文件导出契约+渲染，并在 EXTRA_COMPONENTS + installCoreSkins 各挂一行。
  */
@@ -32,8 +32,6 @@ import {
   battleSkillBarPreset,
 } from './BattleSkillLayer'
 import { BattleHpBar, battleHpBarComponent, battleHpBarPreset } from './BattleHpBar'
-import { BossHitCheer, bossHitCheerComponent } from './BossHitCheer'
-import { PanelA, PanelB, panelAComponent, panelBComponent } from './TurnPanels'
 import { FloatTextOverlay, floatTextComponent } from './FloatText'
 import { DialogueOverlay, dialogueComponent } from './Dialogue'
 import { TransitionOverlay, transitionComponent } from './Transition'
@@ -96,9 +94,6 @@ export const EXTRA_COMPONENTS: Array<[string, ComponentDef]> = [
   ['inkYingMo', inkYingMoComponent as unknown as ComponentDef],
   ['battleSkillBar', battleSkillBarComponent as unknown as ComponentDef],
   ['battleHpBar', battleHpBarComponent as unknown as ComponentDef],
-  ['bossHitCheer', bossHitCheerComponent as unknown as ComponentDef],
-  ['panelA', panelAComponent],
-  ['panelB', panelBComponent],
 ]
 
 /** 把组件包注入某个隔离 ComponentRegistry（多局 Session 用）。 */
@@ -166,9 +161,6 @@ function installCoreSkins(reg: SkinRegistry): void {
   reg.registerOverlayRenderer('inkYingMo', InkYingMoLayer)
   reg.registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
   reg.registerOverlayRenderer('battleHpBar', BattleHpBar)
-  reg.registerOverlayRenderer('bossHitCheer', BossHitCheer)
-  reg.registerOverlayRenderer('panelA', PanelA)
-  reg.registerOverlayRenderer('panelB', PanelB)
 }
 
 let _registered = false
@@ -191,9 +183,6 @@ export function registerCoreSkins(): void {
   registerOverlayRenderer('inkYingMo', InkYingMoLayer)
   registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
   registerOverlayRenderer('battleHpBar', BattleHpBar)
-  registerOverlayRenderer('bossHitCheer', BossHitCheer)
-  registerOverlayRenderer('panelA', PanelA)
-  registerOverlayRenderer('panelB', PanelB)
 }
 
 /** 新建一份已装全部默认渲染器的隔离表（多局 Session 各持一份）。 */

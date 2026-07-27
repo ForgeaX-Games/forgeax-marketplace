@@ -79,3 +79,55 @@ export function onHostMessage(handler: (event: InboundEvent) => void): () => voi
 export function notifyReady(): void {
   sendToHost({ type: "narrative:ready" });
 }
+
+/**
+ * 叙事角色拖入右侧平台对话（Composer）时用的载荷。
+ */
+export interface ComposerRoleInsert {
+  /** 角色显示名（对话里以 "@<name>" 开头）。 */
+  name: string;
+  /** 五大类之一：input/routing/expert/assistant/engineer。 */
+  category: string;
+  /** 目录 item id（溯源）。 */
+  catalogId: string;
+  /** 专家预制管线模板（若有）。 */
+  pipelineTemplate?: string;
+  /** 默认叙事层级（若有）。 */
+  tier?: string | null;
+  routeGroup?: string;
+  /** 工程师对应的生成环节 step id（若有）。 */
+  stepId?: string;
+  /** 助手对应的叙事策略 mode（若有）。 */
+  modeId?: string;
+}
+
+/**
+ * 把叙事角色组织为一段"@角色 + 结构化上下文"文本。宿主平台 agent（kotone）读到后
+ * 能据此选择对应的 narrative:* 工具（start-pipeline / regenerate-step / ip-dna-* 等）规划执行。
+ */
+function formatRoleText(role: ComposerRoleInsert): string {
+  const attrs: string[] = [`category=${role.category}`];
+  if (role.pipelineTemplate) attrs.push(`pipeline=${role.pipelineTemplate}`);
+  if (role.tier) attrs.push(`tier=${role.tier}`);
+  if (role.routeGroup) attrs.push(`routeGroup=${role.routeGroup}`);
+  if (role.stepId) attrs.push(`step=${role.stepId}`);
+  if (role.modeId) attrs.push(`strategy=${role.modeId}`);
+  return `@${role.name} [叙事角色: ${attrs.join(" ")}，请据此选择对应的 narrative:* 工具规划并执行]`;
+}
+
+/**
+ * 把一个叙事角色发送到宿主 Chat 的 composer。
+ *
+ * 复用宿主 PluginIframeHost **既有的** `FORGEAX_COMPOSER_INSERT` + `text` 通用文本通道
+ * （上游即已存在），因此**不需要改动宿主 interface 仓库**——整功能内聚在叙事仓库内，
+ * 适配"只维护叙事仓库、其它子模块用上游"的工作流，`fx update` reset interface 也不受影响。
+ *
+ * 跨 iframe 原生拖拽无法直达宿主，故用 postMessage 兜底：拖拽释放 / 点击"@"均走此函数。
+ */
+export function sendRoleToComposer(role: ComposerRoleInsert): void {
+  if (!isEmbedded) return;
+  window.parent.postMessage(
+    { type: "FORGEAX_COMPOSER_INSERT", text: formatRoleText(role) },
+    "*",
+  );
+}

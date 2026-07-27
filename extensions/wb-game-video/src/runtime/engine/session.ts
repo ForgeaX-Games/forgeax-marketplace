@@ -5,7 +5,7 @@
  * 当前演出片段 / 活动叠层 / HUD 数值 / 执行态(供蓝图可视化)。
  * React Player 只需订阅 snapshot 渲染 + 把玩家事件回灌 emitEvent()——UI 与引擎彻底解耦。
  */
-import type { GameNode, GameScenario, SubFlowPackDef } from '../schema/graph-schema'
+import type { GameGraph, GameNode, GameScenario, GraphLibraryDocument, SubFlowPackDef } from '../schema/graph-schema'
 import type { Layout } from '../schema/node-config-schema'
 import { GraphRuntime } from './engine'
 import type { ComponentRegistry } from '../registry/component-registry'
@@ -19,6 +19,8 @@ export interface GraphSessionOptions {
   skins?: SkinRegistry
   /** 测试注入依赖表。缺省用 `scenario.manifest.packs`。 */
   packs?: readonly SubFlowPackDef[]
+  /** 试玩根蓝图 id；缺省 `manifest.mainPackId` 或 `__root__`。 */
+  rootBlueprintId?: string
 }
 
 const MAX_LOGS = 60
@@ -82,6 +84,11 @@ export interface HudSnap {
   flags: Record<string, number>
   score: number
 }
+export interface CallStackFrameSnap {
+  blueprintId: string
+  callerNodeId: string
+  title?: string
+}
 export interface SessionSnapshot {
   phase: string
   currentNodeId: string | null
@@ -93,6 +100,8 @@ export interface SessionSnapshot {
   visited: string[]
   traversedEdgeIds: string[]
   log: string[]
+  activeBlueprintId: string
+  callStack: CallStackFrameSnap[]
 }
 
 export class GraphSession {
@@ -101,14 +110,26 @@ export class GraphSession {
   readonly skins: SkinRegistry
   snapshot: SessionSnapshot
   private readonly nodesById: Map<string, GameNode>
+  private readonly blueprintTitles: Map<string, string>
   private pendingEntryReason: string | undefined
 
   constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
     // 默认 = 核心契约 + 皮肤包契约（同文件 ComponentDef）；调用方自带 components 则假定已装全。
     const components = opts.components ?? createDefaultComponentRegistry()
     this.skins = opts.skins ?? createCoreSkinRegistry()
+    const rootId =
+      opts.rootBlueprintId
+      ?? (scenario as GraphLibraryDocument).manifest?.mainPackId
+      ?? '__root__'
+    this.blueprintTitles = new Map()
+    const manifestPacks = (scenario as GraphLibraryDocument).manifest?.packs
+    if (manifestPacks) {
+      for (const [id, pack] of Object.entries(manifestPacks)) {
+        if (pack.title) this.blueprintTitles.set(id, pack.title)
+      }
+    }
     // 开跑用根 graph；依赖解析在 GraphRuntime 内走 manifest.packs（或 opts.packs 注入）。
-    this.runtime = new GraphRuntime(scenario.graph, scenario, components, opts.packs ?? [])
+    this.runtime = new GraphRuntime(scenario.graph, scenario, components, opts.packs ?? [], rootId)
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
     this.snapshot = this.freshSnapshot()
   }
@@ -122,7 +143,17 @@ export class GraphSession {
       visited: [],
       traversedEdgeIds: [],
       log: [],
+      activeBlueprintId: this.runtime.getActiveBlueprintId(),
+      callStack: this.projectCallStack(),
     }
+  }
+
+  private projectCallStack(): CallStackFrameSnap[] {
+    return this.runtime.state.callStack.map((f) => ({
+      blueprintId: f.returnBlueprintId,
+      callerNodeId: f.callerNodeId,
+      title: this.blueprintTitles.get(f.returnBlueprintId),
+    }))
   }
 
   private readHud(): HudSnap {
@@ -162,7 +193,10 @@ export class GraphSession {
     return this.apply(this.runtime.emitComponentEvent(elementId, key))
   }
   /** 点击运行时蓝图节点 → 跳转执行。 */
-  jump(nodeId: string, opts?: { resetGlobals?: boolean }): SessionSnapshot {
+  jump(
+    nodeId: string,
+    opts?: { resetGlobals?: boolean; graph?: GameGraph; blueprintId?: string },
+  ): SessionSnapshot {
     return this.apply(this.runtime.jumpToNode(nodeId, opts))
   }
 
@@ -231,6 +265,8 @@ export class GraphSession {
     this.snapshot.hud = this.readHud()
     this.snapshot.visited = [...s.visited]
     this.snapshot.traversedEdgeIds = [...s.traversedEdgeIds]
+    this.snapshot.activeBlueprintId = this.runtime.getActiveBlueprintId()
+    this.snapshot.callStack = this.projectCallStack()
     // 返回**新的对象引用**——GraphSession 内部快照是原地累积的，若直接返回同一引用，
     // React 的 setState 会因 Object.is 相等而跳过重渲染（引擎推进了、界面却不更新）。
     return this.cloned()
@@ -247,6 +283,7 @@ export class GraphSession {
       })),
       visited: [...s.visited],
       traversedEdgeIds: [...s.traversedEdgeIds],
+      callStack: [...s.callStack],
       log: [...s.log],
       hud: { ...s.hud, entities: { ...s.hud.entities }, vars: { ...s.hud.vars }, flags: { ...s.hud.flags } },
     }

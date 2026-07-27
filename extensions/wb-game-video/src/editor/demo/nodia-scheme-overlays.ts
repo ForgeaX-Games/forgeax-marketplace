@@ -32,41 +32,6 @@ export const NODIA_SCHEME_BATTLE_HUD: Overlay = {
   ],
 }
 
-export const NODIA_SCHEME_HIT_CHEER: Overlay = {
-  id: 'hitCheer',
-  title: '受击加油横幅（右上角，点击追加英雄名）',
-  children: [
-    {
-      id: 'banner',
-      component: 'bossHitCheer',
-      layout: { right: 0, top: 0 },
-      trigger: { when: 'enter' },
-      inputs: { heroName: { ref: 'entity.ent-player.name' } },
-    },
-  ],
-}
-
-export const NODIA_SCHEME_HP_PANEL: Overlay = {
-  id: 'hpPanel',
-  title: '回合按钮面板（A / B1 / B2）',
-  children: [
-    {
-      id: 'panelA',
-      component: 'panelA',
-      layout: { left: 0, top: 0 },
-      trigger: { when: 'enter' },
-      inputs: {},
-    },
-    {
-      id: 'panelB',
-      component: 'panelB',
-      layout: { right: 0, top: 0 },
-      trigger: { when: 'enter' },
-      inputs: {},
-    },
-  ],
-}
-
 export const NODIA_SCHEME_READOUTS: Overlay = {
   id: 'readouts',
   title: '血量读数（spawn 模板）',
@@ -113,30 +78,6 @@ export const NODIA_NODE_SCHEME_BLOCK: Overlay = {
         "height": 1
       },
       "component": "floatText"
-    }
-  ]
-} as Overlay
-
-/** 源自 nodia `node:breathe` → 界面方案 `breathe`。 */
-export const NODIA_NODE_SCHEME_BREATHE: Overlay = {
-  "id": "breathe",
-  "title": "调息（方案B：非阻塞改气力）",
-  "children": [
-    {
-      "id": "breathe",
-      "component": "panelA",
-      "layout": {
-        "left": "4%",
-        "bottom": "22%",
-        "width": "120px",
-        "height": "40px"
-      },
-      "trigger": {
-        "when": "enter"
-      },
-      "inputs": {
-        "label": "调息 +2气"
-      }
     }
   ]
 } as Overlay
@@ -770,18 +711,15 @@ export const NODIA_NODE_SCHEME_ZHONG: Overlay = {
   ]
 } as Overlay
 
-/** nodia 原界面方案（4）。 */
+/** nodia 原界面方案（2）。 */
 export const NODIA_FREE_SCHEME_OVERLAYS: readonly Overlay[] = [
   NODIA_SCHEME_BATTLE_HUD,
-  NODIA_SCHEME_HIT_CHEER,
-  NODIA_SCHEME_HP_PANEL,
   NODIA_SCHEME_READOUTS,
 ]
 
-/** nodia `node:*` 升格后的界面方案（21）。 */
+/** nodia `node:*` 升格后的界面方案（20）。 */
 export const NODIA_NODE_SCHEME_OVERLAYS: readonly Overlay[] = [
   NODIA_NODE_SCHEME_BLOCK,
-  NODIA_NODE_SCHEME_BREATHE,
   NODIA_NODE_SCHEME_DODGEP,
   NODIA_NODE_SCHEME_ENTER,
   NODIA_NODE_SCHEME_FUZHU,

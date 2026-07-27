@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "3D 低多边形生成器",
+    "zh": "3D低多边形",
     "en": "3D Lowpoly Generator"
   },
   "description": {

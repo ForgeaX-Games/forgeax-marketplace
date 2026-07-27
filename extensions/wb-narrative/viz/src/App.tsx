@@ -7,6 +7,7 @@ import { StepDetailPanel } from "./components/panels/StepDetailPanel";
 import { RegeneratePanel } from "./components/panels/RegeneratePanel";
 import { TierModeSelector } from "./components/controls/TierModeSelector";
 import { PipelineStatusBar } from "./components/panels/PipelineStatusBar";
+import { ComposerView } from "./components/composer/ComposerView";
 import { useNarrativeStore, useNarrativePhase } from "./store/narrativeStore";
 import type { TierId, ModeId } from "./types";
 import { useAutoAttach } from "./hooks/useAutoAttach";
@@ -68,6 +69,9 @@ export function App() {
   // 不再因 useAutoAttach 误设 runningRunId 而闪成 GENERATING）。
   const phase = useNarrativePhase();
   const displayStatus = phase === "generating" ? "running" : phase === "done" ? "completed" : activeEntryStatus;
+  // 无限画布编排态：仅在"未生成"（idle，无条目/未运行/无预处理）时把节点视图切成可编辑编排画布。
+  // 一旦进入 input/routed/generating/done 则回到只读管线视图，避免与实时预览冲突。
+  const composerMode = phase === "idle";
 
   // 自动挂载 agent（Kotone）在后台起的 run：让中间预览直播 + 左栏选择器回填，无需 host 转发。
   useAutoAttach();
@@ -325,6 +329,8 @@ export function App() {
               <RegeneratePanel />
               {viewMode === "text" ? (
                 <TextViewPanel />
+              ) : composerMode ? (
+                <ComposerView />
               ) : (
                 <div className="graph-layout">
                   <div className="graph-canvas-area">

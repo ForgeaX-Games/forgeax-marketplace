@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "场景生成器",
+    "zh": "场景生成",
     "en": "Scene Generator"
   },
   "description": {

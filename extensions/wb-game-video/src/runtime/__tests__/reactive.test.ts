@@ -46,10 +46,10 @@ describe('watch reaction (数值变化 → spawn)', () => {
     expect(later.some((d) => d.type === 'removeOverlay' && d.elementId === spawn!.elementId)).toBe(true)
   })
 
-  it('spawns bossHitCheer with dmg=abs(delta) and remain=entity read (demo shape)', () => {
+  it('spawns overlay with dmg=abs(delta) and remain=entity read', () => {
     const cheer: Overlay = {
       id: 'hitCheer',
-      children: [{ id: 'banner', component: 'bossHitCheer', trigger: { when: 'enter' }, inputs: { heroName: '空藏' } }],
+      children: [{ id: 'banner', component: 'floatT', trigger: { when: 'enter' }, inputs: { heroName: '空藏' } }],
     }
     const graph: GameGraph = {
       nodes: [
@@ -71,7 +71,7 @@ describe('watch reaction (数值变化 → spawn)', () => {
     const dirs = rt.tick(600) // hp 700→660, dec
     const spawn = dirs.find((d): d is RenderOverlayDirective => isRenderOverlay(d) && d.elementId.startsWith('spawn:'))
     expect(spawn).toBeTruthy()
-    expect(spawn!.component).toBe('bossHitCheer')
+    expect(spawn!.component).toBe('floatT')
     expect(spawn!.inputs.dmg).toBe(40)
     expect(spawn!.inputs.remain).toBe(660)
     expect(spawn!.inputs.heroName).toBe('空藏')
@@ -80,7 +80,7 @@ describe('watch reaction (数值变化 → spawn)', () => {
   it('heroName resolves dynamically from entity name via { ref } (rename-safe, not hardcoded)', () => {
     const cheer: Overlay = {
       id: 'hitCheer',
-      children: [{ id: 'banner', component: 'bossHitCheer', trigger: { when: 'enter' }, inputs: {} }],
+      children: [{ id: 'banner', component: 'floatT', trigger: { when: 'enter' }, inputs: {} }],
     }
     const graph: GameGraph = {
       nodes: [
@@ -130,7 +130,7 @@ describe('container watch spans subflow (我方回合 场景)', () => {
   it('fires a watch declared on the subflow container while a child node deals damage', () => {
     const cheer: Overlay = {
       id: 'hitCheer',
-      children: [{ id: 'banner', component: 'bossHitCheer', trigger: { when: 'enter' }, inputs: {} }],
+      children: [{ id: 'banner', component: 'floatT', trigger: { when: 'enter' }, inputs: {} }],
     }
     const graph: GameGraph = {
       nodes: [
@@ -159,7 +159,7 @@ describe('container watch spans subflow (我方回合 场景)', () => {
     const dirs = rt.tick(600) // atk 扣 boss 30 → 容器 watch 生效 → spawn
     const spawn = dirs.find((d): d is RenderOverlayDirective => isRenderOverlay(d) && d.elementId.startsWith('spawn:'))
     expect(spawn).toBeTruthy()
-    expect(spawn!.component).toBe('bossHitCheer')
+    expect(spawn!.component).toBe('floatT')
     expect(spawn!.inputs.dmg).toBe(30)
   })
 })

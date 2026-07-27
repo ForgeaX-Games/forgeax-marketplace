@@ -1,8 +1,8 @@
 /**
- * asset-registry —— 游戏级共享素材层的**服务端 CRUD**（node:fs · 唯一写方）。
+ * asset-registry —— 游戏级共享素材层中 wb-game-video 资产域的**服务端 CRUD**（node:fs）。
  *
  * 磁盘布局（`.forgeax/games/<slug>/assets/`，与 game-video/ 平级、独立于任何插件）：
- *   - `manifest.json`       = { version:1, assets: MediaAsset[] }
+ *   - `manifest.json`       = { version:2, assets: AssetRecord[] }
  *   - `media/<id>.<ext>`    = wb-game-video 自产的图/视频二进制
  *
  * 被两处共享（SSOT）：
@@ -10,9 +10,10 @@
  *   - `vite.config.ts` 的 `/__gva__` 端点（读 + 流式回文件）
  *
  * 跨模块产物（人设图/场景图）**只读**：不落进本 registry 的 media/，仅以 externalPath
- * 指回对方目录（见 server/intake/*）。本 registry 永远只有 wb-game-video 一个写方。
+ * 指回对方目录（见 server/intake/*）。本 registry 只写带 productionType 的记录，并
+ * 原样保留视频服务等其它资产域拥有的记录。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync, renameSync } from 'node:fs'
 import { resolve, extname } from 'node:path'
 import type { AssetManifest, MediaAsset, MediaKind, MediaProductionType, StyleAxes } from '../src/editor/assets/registry-types'
 
@@ -44,22 +45,59 @@ function mediaDir(dir: string): string {
   return resolve(dir, 'media')
 }
 
-/** 读 manifest；无盘/损坏时回退空表。 */
-export function readManifest(dir: string): AssetManifest {
-  try {
-    const parsed = JSON.parse(readFileSync(manifestPath(dir), 'utf-8')) as Partial<AssetManifest>
-    if (parsed && Array.isArray(parsed.assets)) {
-      return { version: 1, assets: parsed.assets, ...(parsed.styleAxes ? { styleAxes: parsed.styleAxes } : {}) }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isMediaAsset(value: unknown): value is MediaAsset {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    (value.kind === 'image' || value.kind === 'video') &&
+    typeof value.productionType === 'string'
+  )
+}
+
+function validateAssetRecords(assets: unknown[]): void {
+  const ids = new Set<string>()
+  for (const asset of assets) {
+    if (!isRecord(asset)) throw new Error('Invalid shared asset manifest record')
+    if (
+      typeof asset.id !== 'string' ||
+      asset.id.length === 0 ||
+      typeof asset.kind !== 'string' ||
+      asset.kind.length === 0 ||
+      ids.has(asset.id)
+    ) {
+      throw new Error('Invalid or duplicate shared asset id')
     }
-  } catch {
-    /* fallthrough */
+    ids.add(asset.id)
   }
-  return { version: 1, assets: [] }
+}
+
+/** 读共享 manifest；其它资产域的记录原样保留，损坏时 fail loud。 */
+export function readManifest(dir: string): AssetManifest {
+  const path = manifestPath(dir)
+  if (!existsSync(path)) return { version: 2, assets: [] }
+  let parsed: Partial<AssetManifest>
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AssetManifest>
+  } catch (error) {
+    throw new Error(`Invalid shared asset manifest JSON: ${path}`, { cause: error })
+  }
+  if (parsed.version !== 2 || !Array.isArray(parsed.assets)) {
+    throw new Error(`Unsupported shared asset manifest: ${path}`)
+  }
+  validateAssetRecords(parsed.assets)
+  return { ...parsed, version: 2, assets: parsed.assets } as AssetManifest
 }
 
 function writeManifest(dir: string, manifest: AssetManifest): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(manifestPath(dir), JSON.stringify(manifest, null, 2))
+  const target = manifestPath(dir)
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(temp, `${JSON.stringify({ ...manifest, version: 2 }, null, 2)}\n`)
+  renameSync(temp, target)
 }
 
 export interface AssetFilter {
@@ -70,7 +108,7 @@ export interface AssetFilter {
 
 /** 列资产（可选过滤）。 */
 export function listAssets(dir: string, filter?: AssetFilter): MediaAsset[] {
-  let out = readManifest(dir).assets
+  let out = readManifest(dir).assets.filter(isMediaAsset)
   if (filter?.kind) out = out.filter((a) => a.kind === filter.kind)
   if (filter?.productionType) out = out.filter((a) => a.productionType === filter.productionType)
   if (filter?.sceneNodeId) out = out.filter((a) => a.sceneNodeId === filter.sceneNodeId)
@@ -78,13 +116,16 @@ export function listAssets(dir: string, filter?: AssetFilter): MediaAsset[] {
 }
 
 export function getAsset(dir: string, id: string): MediaAsset | null {
-  return readManifest(dir).assets.find((a) => a.id === id) ?? null
+  return readManifest(dir).assets.find((a): a is MediaAsset => isMediaAsset(a) && a.id === id) ?? null
 }
 
 /** upsert 一条资产（按 id 覆盖或追加），返回落盘后的资产。 */
 export function upsertAsset(dir: string, asset: MediaAsset): MediaAsset {
   const m = readManifest(dir)
   const idx = m.assets.findIndex((a) => a.id === asset.id)
+  if (idx >= 0 && !isMediaAsset(m.assets[idx])) {
+    throw new Error(`Asset id is owned by another asset domain: ${asset.id}`)
+  }
   const now = Date.now()
   const next: MediaAsset = { ...asset, updatedAt: now, createdAt: asset.createdAt || now }
   if (idx >= 0) m.assets[idx] = next
@@ -96,7 +137,7 @@ export function upsertAsset(dir: string, asset: MediaAsset): MediaAsset {
 /** patch 一条资产（浅合并）；不存在返回 null。 */
 export function updateAsset(dir: string, id: string, patch: Partial<MediaAsset>): MediaAsset | null {
   const m = readManifest(dir)
-  const idx = m.assets.findIndex((a) => a.id === id)
+  const idx = m.assets.findIndex((a) => isMediaAsset(a) && a.id === id)
   if (idx < 0) return null
   const merged: MediaAsset = { ...m.assets[idx], ...patch, id, updatedAt: Date.now() } as MediaAsset
   m.assets[idx] = merged
@@ -106,7 +147,7 @@ export function updateAsset(dir: string, id: string, patch: Partial<MediaAsset>)
 
 export function deleteAsset(dir: string, id: string): boolean {
   const m = readManifest(dir)
-  const next = m.assets.filter((a) => a.id !== id)
+  const next = m.assets.filter((a) => !isMediaAsset(a) || a.id !== id)
   if (next.length === m.assets.length) return false
   writeManifest(dir, { ...m, assets: next })
   return true
