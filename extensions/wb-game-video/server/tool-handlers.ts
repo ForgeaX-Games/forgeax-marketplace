@@ -83,8 +83,8 @@ function graphDir(ctx: ToolCtx, slug: string | null): string | null {
 function orchestrateCtx(args: { gameSlug?: string }, ctx: ToolCtx): OrchestrateCtx | null {
   const slug = pickSlug(args, ctx)
   const dir = resolveAssetsDir(findProjectRoot(ctx), slug)
-  if (!dir) return null
-  return { dir, env: ctx.env }
+  if (!dir || !slug) return null
+  return { dir, gameId: slug, env: ctx.env }
 }
 
 const NO_REGISTRY_ERR = '无 .forgeax 工程根或无效 gameSlug，无法访问素材层'

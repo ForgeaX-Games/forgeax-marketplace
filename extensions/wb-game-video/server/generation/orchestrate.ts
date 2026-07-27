@@ -55,6 +55,10 @@ import {
 export interface OrchestrateCtx extends GatewayCtx {
   /** `.forgeax/games/<slug>/assets` 绝对路径。 */
   dir: string
+  /** content API 所需的游戏 slug。 */
+  gameId: string
+  /** 测试可注入；默认使用全局 fetch。 */
+  fetchImpl?: typeof fetch
 }
 
 const EXT_BY_MIME: Record<string, string> = {
@@ -181,7 +185,7 @@ export async function generateKeyframe(octx: OrchestrateCtx, input: KeyframeInpu
   try {
     // P3：三轴——artMedia+filmLook 组合成 uiStylePrompt（caller 显式传入优先）。
     const axes = resolveAxes(octx, input.styleAxes)
-    const refB64 = resolveRefBase64(octx, input.refAssetIds)
+    const refB64 = await resolveRefBase64(octx, input.refAssetIds)
     // 内层关键帧 prompt 始终构建：keyframe 模式直接用它出图；grid 模式把它当 originalPrompt 喂外层故事板 wrapper。
     const keyframePrompt = buildShotImagePrompt({
       ...input,
@@ -251,22 +255,50 @@ function assertRefsPresent(input: VideoGenInput): void {
 }
 
 /** 把一批 registry ref id 解析成视频参考图槽（reference_image），逐张转 data URL。 */
-function resolveVideoRoleImages(octx: OrchestrateCtx, input: VideoGenInput): { roles: VideoRoleImage[]; bindings: VideoRefBinding[] } {
+function kinoContentUrl(octx: OrchestrateCtx, assetId: string): string {
+  const port = octx.env?.FORGEAX_SERVER_PORT?.trim() || '18900'
+  return `http://127.0.0.1:${port}/api/v1/kino/resources/${encodeURIComponent(assetId)}/content?game_id=${encodeURIComponent(octx.gameId)}`
+}
+
+export async function resolveAssetImagePayload(
+  octx: OrchestrateCtx,
+  asset: MediaAsset,
+): Promise<{ base64: string; dataUrl: string }> {
+  const path = resolveAssetFilePath(octx.dir, asset)
+  if (path) {
+    return { base64: fileToBase64(path), dataUrl: fileToDataUrl(path) }
+  }
+  if (!asset.provider) {
+    throw new Error(`参考图 ${asset.id} 没有可读取的文件或 provider`)
+  }
+  const response = await (octx.fetchImpl ?? fetch)(kinoContentUrl(octx, asset.id))
+  if (!response.ok) {
+    throw new Error(`参考图 ${asset.id} 读取失败（HTTP ${response.status}）`)
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.byteLength === 0) {
+    throw new Error(`参考图 ${asset.id} 内容为空`)
+  }
+  const mime = response.headers.get('content-type')?.split(';', 1)[0] || asset.mime || 'image/png'
+  const base64 = bytes.toString('base64')
+  return { base64, dataUrl: `data:${mime};base64,${base64}` }
+}
+
+async function resolveVideoRoleImages(octx: OrchestrateCtx, input: VideoGenInput): Promise<{ roles: VideoRoleImage[]; bindings: VideoRefBinding[] }> {
   const roles: VideoRoleImage[] = []
   const bindings: VideoRefBinding[] = []
   let idx = 1
-  const push = (assetId: string, role: VideoRoleImage['role'], semantic: string): void => {
+  const push = async (assetId: string, role: VideoRoleImage['role'], semantic: string): Promise<void> => {
     const asset = getAsset(octx.dir, assetId)
-    if (!asset) return
-    const p = resolveAssetFilePath(octx.dir, asset)
-    if (!p) return
-    roles.push({ role, url: fileToDataUrl(p) })
+    if (!asset) throw new Error(`参考图不存在：${assetId}`)
+    const payload = await resolveAssetImagePayload(octx, asset)
+    roles.push({ role, url: payload.dataUrl })
     bindings.push({ index: idx, role: semantic, label: asset.label })
     idx++
   }
-  if (input.continuityFirstFrameId) push(input.continuityFirstFrameId, 'first_frame', '续接首帧')
-  for (const cid of input.characterRefIds.filter(Boolean)) push(cid, 'reference_image', '角色')
-  for (const sid of input.sceneRefIds.filter(Boolean)) push(sid, 'reference_image', '场景')
+  if (input.continuityFirstFrameId) await push(input.continuityFirstFrameId, 'first_frame', '续接首帧')
+  for (const cid of input.characterRefIds.filter(Boolean)) await push(cid, 'reference_image', '角色')
+  for (const sid of input.sceneRefIds.filter(Boolean)) await push(sid, 'reference_image', '场景')
   return { roles, bindings }
 }
 
@@ -293,7 +325,7 @@ export async function generateVideo(
   try {
     // P3：三轴——video 侧折 artMedia/filmLook 到 artStyle/styleKeywords（caller 显式优先）。
     const axes = resolveAxes(octx, input.styleAxes)
-    const { roles, bindings } = resolveVideoRoleImages(octx, input)
+    const { roles, bindings } = await resolveVideoRoleImages(octx, input)
     const prompt = buildSeedanceVideoPrompt({
       seedancePrompt: input.seedancePrompt,
       storyText: input.storyText,
@@ -384,13 +416,12 @@ export async function generateNodeVideo(
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-function resolveRefBase64(octx: OrchestrateCtx, ids: string[] | undefined): string[] {
+async function resolveRefBase64(octx: OrchestrateCtx, ids: string[] | undefined): Promise<string[]> {
   const out: string[] = []
   for (const aid of ids ?? []) {
     const asset = getAsset(octx.dir, aid)
-    if (!asset) continue
-    const p = resolveAssetFilePath(octx.dir, asset)
-    if (p) out.push(fileToBase64(p))
+    if (!asset) throw new Error(`参考图不存在：${aid}`)
+    out.push((await resolveAssetImagePayload(octx, asset)).base64)
   }
   return out
 }

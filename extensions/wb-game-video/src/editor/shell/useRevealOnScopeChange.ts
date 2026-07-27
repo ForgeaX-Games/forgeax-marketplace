@@ -29,7 +29,7 @@ export function useRevealOnScopeChange(
     lastScope.current = scopeKey
     // 先清空再设：跨图节点 id 撞名时也能再次触发 GraphCanvas 的 reveal effect。
     setRevealId(null)
-    const setT = window.setTimeout(() => setRevealId(nodeIdRef.current), SET_DELAY_MS)
+    const setT = window.setTimeout(() => setRevealId(nodeIdRef.current ?? null), SET_DELAY_MS)
     const clearT = window.setTimeout(() => setRevealId(null), SET_DELAY_MS + CLEAR_AFTER_MS)
     return () => {
       clearTimeout(setT)

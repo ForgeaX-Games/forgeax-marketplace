@@ -18,11 +18,26 @@ const providerVideo = {
   provider: { kind: 'cos', ref: 'videos/provider-video.mp4' },
 }
 
+const providerImage = {
+  id: 'provider-image',
+  kind: 'image',
+  name: 'hero.png',
+  productionType: 'character_ref',
+  sourceModule: 'wb-game-video',
+  status: 'ready',
+  mimeType: 'image/png',
+  bytes: 10,
+  createdAt: 1,
+  updatedAt: 1,
+  provider: { kind: 'local', ref: 'blobs/provider-image.png' },
+  meta: {},
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gva-asset-registry-'))
   writeFileSync(
     join(dir, 'manifest.json'),
-    JSON.stringify({ version: 2, assets: [providerVideo] }),
+    JSON.stringify({ version: 2, assets: [providerVideo, providerImage] }),
   )
 })
 
@@ -47,7 +62,13 @@ describe('shared asset manifest coexistence', () => {
     expect(raw.version).toBe(2)
     expect(raw.styleAxes).toEqual({ artMedia: 'ink' })
     expect(raw.assets).toContainEqual(providerVideo)
-    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['generated-image'])
+    expect(raw.assets).toContainEqual(providerImage)
+    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['provider-image', 'generated-image'])
+    expect(listAssets(dir)[0]).toMatchObject({
+      label: 'hero.png',
+      mime: 'image/png',
+      meta: { upload: true },
+    })
   })
 
   test('registry cannot overwrite or delete an id owned by another asset domain', () => {
@@ -62,6 +83,17 @@ describe('shared asset manifest coexistence', () => {
       }),
     ).toThrow('owned by another asset domain')
     expect(deleteAsset(dir, 'provider-video')).toBe(false)
+    expect(() =>
+      upsertAsset(dir, {
+        id: 'provider-image',
+        kind: 'image',
+        productionType: 'character_ref',
+        status: 'ready',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    ).toThrow('owned by another asset domain')
+    expect(deleteAsset(dir, 'provider-image')).toBe(false)
   })
 
   test('registry fails loudly instead of replacing a malformed shared manifest', () => {

@@ -4,7 +4,7 @@
  *  - Bundled zhandou basenames resolve first, including legacy `m-` refs.
  *  - Generated `a-vid-*` resources use the shared `/__gva__/media/:id` endpoint.
  *  - Remaining stable ids use the Kino content endpoint.
- * Image and generation registry operations continue to use `/__gva__`.
+ * Uploaded images use the shared resource API; generated registry assets remain on `/__gva__`.
  */
 import { zhandouUrl } from '../assets/catalog'
 import {

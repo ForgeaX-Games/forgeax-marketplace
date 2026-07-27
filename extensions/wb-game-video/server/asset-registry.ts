@@ -14,7 +14,7 @@
  * 原样保留视频服务等其它资产域拥有的记录。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, statSync, renameSync } from 'node:fs'
-import { resolve, extname } from 'node:path'
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { AssetManifest, MediaAsset, MediaKind, MediaProductionType, StyleAxes } from '../src/editor/assets/registry-types'
 
 const GAME_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
@@ -56,6 +56,22 @@ function isMediaAsset(value: unknown): value is MediaAsset {
     (value.kind === 'image' || value.kind === 'video') &&
     typeof value.productionType === 'string'
   )
+}
+
+function isProviderBacked(value: unknown): boolean {
+  return isRecord(value) && isRecord(value.provider)
+}
+
+function normalizeMediaAsset(value: unknown): MediaAsset | null {
+  if (!isMediaAsset(value)) return null
+  const source = value as MediaAsset & { name?: unknown; mimeType?: unknown }
+  const providerBacked = isProviderBacked(source)
+  return {
+    ...source,
+    label: source.label ?? (typeof source.name === 'string' ? source.name : undefined),
+    mime: source.mime ?? (typeof source.mimeType === 'string' ? source.mimeType : undefined),
+    meta: providerBacked ? { ...(source.meta ?? {}), upload: true } : source.meta,
+  }
 }
 
 function validateAssetRecords(assets: unknown[]): void {
@@ -108,7 +124,9 @@ export interface AssetFilter {
 
 /** 列资产（可选过滤）。 */
 export function listAssets(dir: string, filter?: AssetFilter): MediaAsset[] {
-  let out = readManifest(dir).assets.filter(isMediaAsset)
+  let out = readManifest(dir).assets
+    .map(normalizeMediaAsset)
+    .filter((asset): asset is MediaAsset => asset !== null)
   if (filter?.kind) out = out.filter((a) => a.kind === filter.kind)
   if (filter?.productionType) out = out.filter((a) => a.productionType === filter.productionType)
   if (filter?.sceneNodeId) out = out.filter((a) => a.sceneNodeId === filter.sceneNodeId)
@@ -116,14 +134,15 @@ export function listAssets(dir: string, filter?: AssetFilter): MediaAsset[] {
 }
 
 export function getAsset(dir: string, id: string): MediaAsset | null {
-  return readManifest(dir).assets.find((a): a is MediaAsset => isMediaAsset(a) && a.id === id) ?? null
+  const asset = readManifest(dir).assets.find((a) => isRecord(a) && a.id === id)
+  return normalizeMediaAsset(asset)
 }
 
 /** upsert 一条资产（按 id 覆盖或追加），返回落盘后的资产。 */
 export function upsertAsset(dir: string, asset: MediaAsset): MediaAsset {
   const m = readManifest(dir)
   const idx = m.assets.findIndex((a) => a.id === asset.id)
-  if (idx >= 0 && !isMediaAsset(m.assets[idx])) {
+  if (idx >= 0 && (!isMediaAsset(m.assets[idx]) || isProviderBacked(m.assets[idx]))) {
     throw new Error(`Asset id is owned by another asset domain: ${asset.id}`)
   }
   const now = Date.now()
@@ -137,7 +156,7 @@ export function upsertAsset(dir: string, asset: MediaAsset): MediaAsset {
 /** patch 一条资产（浅合并）；不存在返回 null。 */
 export function updateAsset(dir: string, id: string, patch: Partial<MediaAsset>): MediaAsset | null {
   const m = readManifest(dir)
-  const idx = m.assets.findIndex((a) => isMediaAsset(a) && a.id === id)
+  const idx = m.assets.findIndex((a) => isMediaAsset(a) && !isProviderBacked(a) && a.id === id)
   if (idx < 0) return null
   const merged: MediaAsset = { ...m.assets[idx], ...patch, id, updatedAt: Date.now() } as MediaAsset
   m.assets[idx] = merged
@@ -147,7 +166,7 @@ export function updateAsset(dir: string, id: string, patch: Partial<MediaAsset>)
 
 export function deleteAsset(dir: string, id: string): boolean {
   const m = readManifest(dir)
-  const next = m.assets.filter((a) => !isMediaAsset(a) || a.id !== id)
+  const next = m.assets.filter((a) => !isMediaAsset(a) || isProviderBacked(a) || a.id !== id)
   if (next.length === m.assets.length) return false
   writeManifest(dir, { ...m, assets: next })
   return true
@@ -181,8 +200,18 @@ export function writeMediaFile(dir: string, id: string, ext: string, bytes: Uint
 
 /** 解析一条资产的绝对磁盘文件路径（自产 file 优先，其次跨模块 externalPath）。 */
 export function resolveAssetFilePath(dir: string, asset: MediaAsset): string | null {
-  if (asset.file) return resolve(dir, asset.file)
-  if (asset.externalPath) return asset.externalPath
+  if (asset.file) {
+    const mediaRoot = resolve(dir, 'media')
+    const candidate = resolve(dir, asset.file)
+    const rel = relative(mediaRoot, candidate)
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? candidate : null
+  }
+  if (asset.externalPath && isAbsolute(asset.externalPath)) {
+    const gameRoot = resolve(dir, '..')
+    const candidate = resolve(asset.externalPath)
+    const rel = relative(gameRoot, candidate)
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? candidate : null
+  }
   return null
 }
 

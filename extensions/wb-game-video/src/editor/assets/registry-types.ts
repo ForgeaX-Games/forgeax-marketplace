@@ -30,6 +30,12 @@ export type MediaProductionType =
 /** 生成生命周期。placeholder = 已占位未生成；generating = 生成中；ready = 就绪；failed = 失败。 */
 export type MediaStatus = 'placeholder' | 'generating' | 'ready' | 'failed'
 
+export interface MediaProviderMapping {
+  kind: 'local' | 's3' | 'cos' | 'kino'
+  ref: string
+  upstreamResourceId?: string
+}
+
 export interface MediaAsset {
   id: string
   kind: MediaKind
@@ -52,6 +58,8 @@ export interface MediaAsset {
   url?: string
   /** 跨模块只读产物：对方文件的绝对磁盘路径（**不复制**进本 registry 的 media/）。 */
   externalPath?: string
+  /** 共享上传服务管理的存储映射；读取内容必须走服务端 content API。 */
+  provider?: MediaProviderMapping
   /** 归属的演出节点 id（GameGraph node.id）；跨模块 ref 可空。 */
   sceneNodeId?: string
   /** 产出来源：'wb-game-video' | 'wb-character' | '<scene-module>' 等。 */

@@ -139,7 +139,7 @@ function gameVideoAssetsPlugin(): Plugin {
           //   POST /__gva__/generate-keyframe  body: KeyframeInput
           if (path === '/generate-video' && method === 'POST') {
             if (!dir) return sendJson(res, 400, { asset: null, error: 'no assets dir / invalid slug' })
-            const octx: OrchestrateCtx = { dir, env: process.env }
+            const octx: OrchestrateCtx = { dir, gameId: slug!, env: process.env }
             readGraphReqJson(req)
               .then((body) => generateVideo(octx, body as unknown as Parameters<typeof generateVideo>[1]))
               .then((asset) => sendJson(res, 200, { asset }))
@@ -148,7 +148,7 @@ function gameVideoAssetsPlugin(): Plugin {
           }
           if (path === '/generate-keyframe' && method === 'POST') {
             if (!dir) return sendJson(res, 400, { asset: null, error: 'no assets dir / invalid slug' })
-            const octx: OrchestrateCtx = { dir, env: process.env }
+            const octx: OrchestrateCtx = { dir, gameId: slug!, env: process.env }
             readGraphReqJson(req)
               .then((body) => generateKeyframe(octx, body as unknown as Parameters<typeof generateKeyframe>[1]))
               .then((asset) => sendJson(res, 200, { asset }))

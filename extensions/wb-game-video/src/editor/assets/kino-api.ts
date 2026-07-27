@@ -72,7 +72,7 @@ export interface DirectUploadResponse {
 export interface PrepareUploadInput {
   game_id: string
   file_name?: string
-  mime_type: 'video/mp4'
+  mime_type: 'video/mp4' | 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
   bytes: number
   extension?: string
   client_resource_id?: string
@@ -115,7 +115,7 @@ export interface BatchCreateKinoResourcesResult {
 
 export interface ListKinoResourcesQuery {
   game_id: string
-  media_type?: 'video'
+  media_type?: KinoMediaType
   page?: number
   page_size?: number
   type?: KinoResourceType
