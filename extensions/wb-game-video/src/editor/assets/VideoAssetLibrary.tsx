@@ -187,6 +187,10 @@ function mapApiItem(item: VideoAssetListItem, group: string): VideoLibraryEntry 
   }
 }
 
+function displayLabel(entry: VideoLibraryEntry): string {
+  return entry.fromApi ? entry.label : `${entry.group} · ${entry.label}`
+}
+
 export interface VideoReplaceUploadProps {
   entry?: VideoLibraryEntry
   uploading: boolean
@@ -232,7 +236,7 @@ export interface VideoAssetLibraryProps {
   /** Blueprint library used when resolving delete-reference warnings across packs. */
   blueprints?: Record<string, BlueprintDoc>
   mainPackId?: string
-  bundledEntries: VideoLibraryEntry[]
+  bundledEntries?: VideoLibraryEntry[]
   supplementalEntries?: VideoLibraryEntry[]
   selectedId: string
   boundId?: string
@@ -254,7 +258,7 @@ export function VideoAssetLibrary({
   scenario,
   blueprints,
   mainPackId,
-  bundledEntries,
+  bundledEntries = [],
   supplementalEntries = [],
   selectedId,
   boundId,
@@ -502,13 +506,14 @@ export function VideoAssetLibrary({
         {entries.map((entry) => {
           const isSelected = entry.id === selectedId
           const isBound = entry.id === boundId
+          const label = displayLabel(entry)
           return (
             <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}`}>
               <button
                 type="button"
                 data-clip-id={entry.id}
                 className={`gc-row${isSelected ? ' is-on' : ''}`}
-                aria-label={`${entry.group} · ${entry.label}`}
+                aria-label={label}
                 onClick={() => onSelect(entry.id)}
                 onDoubleClick={(event) => {
                   if (entry.fromApi && !actionsBusy) {
@@ -517,7 +522,7 @@ export function VideoAssetLibrary({
                 }}
               >
                 <span className="gc-row-mark" aria-hidden>{isBound ? '✓' : ''}</span>
-                <span className="gc-row-label">{entry.group} · {entry.label}</span>
+                <span className="gc-row-label">{label}</span>
                 {entry.status && entry.status !== 'ready' ? (
                   <span className={`gvv-row-status is-${entry.status}`}>
                     {entry.status === 'generating'

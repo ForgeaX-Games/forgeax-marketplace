@@ -58,7 +58,6 @@ import {
 import {
   disconnect,
   newElementId,
-  teardownInteraction,
   updateNodeData,
   upsertBranchEdge,
 } from '../../graph/edit/graph-edit'
@@ -110,14 +109,56 @@ function mountedChildrenOf(scenario: GameScenario, node: GameNode | undefined): 
   }
   return out.length ? out : childrenOf(scenario, node)
 }
-/** 拆掉一整段交互：先摘掉承载它的 overlay child，再删占用的出边（`teardownInteraction` 只管边）。 */
+/**
+ * 拆掉一整段交互：先按 child 事件级联清边+结算，再摘组件；最后按需把 default 续连到原先第一条交互边的目标。
+ * （续连目标必须在清边前读出——`cascadeClearChildrenEvents` 会先 disconnect。）
+ */
 function teardownInteractionScenario(
   scenario: GameScenario,
   node: GameNode,
   opts: { kind: string; handlePrefixes: string[]; continueHandle?: string; childId?: string },
 ): GameScenario {
-  const s = opts.childId ? removeOverlayChild(scenario, node.id, opts.childId) : scenario
-  return { ...s, graph: teardownInteraction(s.graph, node.id, opts) }
+  const el = opts.childId ? findElement(scenario, node, opts.childId) : undefined
+  const handles = opts.handlePrefixes.length
+    ? opts.handlePrefixes
+    : el
+      ? eventHandlesOfChild(el)
+      : []
+  const isHandle = (h: string | undefined): boolean =>
+    !!h && handles.some((p) => h === p || h.startsWith(p))
+  const outEdges = scenario.graph.edges.filter((e) => e.source === node.id)
+  const contEdge =
+    (opts.continueHandle ? outEdges.find((e) => e.sourceHandle === opts.continueHandle) : undefined) ??
+    outEdges.find((e) => isHandle(e.sourceHandle))
+  const continueTarget = contEdge?.target
+
+  let s = el ? cascadeClearChildrenEvents(scenario, node, [el]) : scenario
+  if (!el && handles.length) {
+    for (const e of outEdges.filter((edge) => isHandle(edge.sourceHandle))) {
+      s = { ...s, graph: disconnect(s.graph, e.id) }
+    }
+  }
+  if (opts.childId) s = removeOverlayChild(s, node.id, opts.childId)
+
+  if (
+    continueTarget &&
+    !s.graph.edges.some(
+      (e) =>
+        e.source === node.id &&
+        (e.sourceHandle ?? 'default') === 'default' &&
+        e.target === continueTarget,
+    )
+  ) {
+    s = {
+      ...s,
+      graph: upsertBranchEdge(s.graph, {
+        source: node.id,
+        sourceHandle: 'default',
+        target: continueTarget,
+      }),
+    }
+  }
+  return s
 }
 
 // ── 预览叠层 ─────────────────────────────────────────────────────────────────
@@ -1108,17 +1149,67 @@ export function mountOverlayGraph(
 }
 
 /**
- * 移除一份挂载（时间轴删除挂载条 / 「添加控件」已挂列表的 ✕）：从 overlayNodes 去掉该挂载，
+ * 某 overlay child 会占用的出边 sourceHandle / event id 集合（选项 events、QTE outcomes、通用组件 events）。
+ * 删除组件或整份挂载时用它级联清边与结算。
+ */
+function eventHandlesOfChild(el: OverlayChild): string[] {
+  if (hasOptionEventsInput(el.component)) return optionsOf(el).map((o) => o.id)
+  if (hasCuePointsInput(el.component)) return qteOutcomeCandidates(el).map((c) => c.handle)
+  const plugin = getComponent(el.component)
+  if (!plugin) return []
+  const inputs = applyStyleLockedEventParams(paramsOf(el), el.component)
+  return componentHandles(el.component, inputs).map((h) => h.id)
+}
+
+/**
+ * 清掉这些 children 占用的跳转边 + 挂载/legacy 结算（effect/spawn/advance）。
+ * 不删除 children 本身——调用方再 `removeOverlayChild` / 卸挂载。
+ */
+function cascadeClearChildrenEvents(
+  scenario: GameScenario,
+  node: GameNode,
+  children: OverlayChild[],
+): GameScenario {
+  let s = scenario
+  for (const el of children) {
+    for (const handle of eventHandlesOfChild(el)) {
+      const edges = s.graph.edges.filter(
+        (e) => e.source === node.id && (e.sourceHandle ?? 'default') === handle,
+      )
+      for (const edge of edges) s = { ...s, graph: disconnect(s.graph, edge.id) }
+      const n = s.graph.nodes.find((x) => x.id === node.id) ?? node
+      s = removeMountEventReaction(s, n, el.id, handle)
+      s = clearLegacyNodeEvent(s, s.graph.nodes.find((x) => x.id === node.id) ?? n, handle)
+    }
+  }
+  return s
+}
+
+/** 删一个会发事件的 overlay child：先级联清边/结算，再摘组件。 */
+function removeOverlayChildCascading(scenario: GameScenario, node: GameNode, childId: string): GameScenario {
+  const el = findElement(scenario, node, childId)
+  const s0 = el ? cascadeClearChildrenEvents(scenario, node, [el]) : scenario
+  return removeOverlayChild(s0, node.id, childId)
+}
+
+/**
+ * 移除一份挂载（时间轴删除挂载条 / 「添加控件」已挂列表的 ✕ / 节点配置「覆盖物 › 移除」）：
+ * 先级联清掉该挂载下组件占用的跳转边与结算，再从 overlayNodes 去掉该挂载，
  * 并清理只被它引用的 node:* 孤儿副本（共享方案不删）。
  */
 export function removeMountGraph(scenario: GameScenario, node: GameNode, mountId: string): GameScenario {
   const mounts = node.data.overlayNodes ?? []
-  const mount = mounts.find((m) => overlayMountId(m) === mountId)
+  const mount = mounts.find((m) => overlayMountId(m) === mountId || m.overlay === mountId)
   if (!mount) return scenario
-  const next = mounts.filter((m) => overlayMountId(m) !== mountId)
-  let s: GameScenario = {
-    ...scenario,
-    graph: updateNodeData(scenario.graph, node.id, { overlayNodes: next.length ? next : undefined }),
+  const children = resolveMountChildren(scenario.ui?.overlays, mount)
+  let s = cascadeClearChildrenEvents(scenario, node, children)
+  const cur = s.graph.nodes.find((x) => x.id === node.id) ?? node
+  const next = (cur.data.overlayNodes ?? []).filter(
+    (m) => overlayMountId(m) !== overlayMountId(mount) && m.overlay !== mount.overlay,
+  )
+  s = {
+    ...s,
+    graph: updateNodeData(s.graph, node.id, { overlayNodes: next.length ? next : undefined }),
   }
   if (mount.overlay.startsWith('node:')) s = dropOverlayIfUnreferenced(s, mount.overlay)
   return s
@@ -1477,8 +1568,10 @@ export function deleteMaterialGraph(scenario: GameScenario, node: GameNode, item
     case 'subtitle':
     case 'filter':
     case 'fx':
-    case 'component':
       return removeOverlayChild(scenario, node.id, item.id)
+    case 'component':
+      // 方案来源的應默/技能条/叩击等归为 component：删组件时必须级联清跳转边与结算。
+      return removeOverlayChildCascading(scenario, node, item.id)
     case 'overlay': {
       const s1 = removeOverlayChild(scenario, node.id, item.id)
       const s1Node = findNode(s1.graph, node.id) ?? node

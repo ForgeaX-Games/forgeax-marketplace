@@ -39,6 +39,13 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId)
   const videoSrc = resolveAsset(snap.clip?.mediaId, game)
+  const preloadVideos = useMemo(
+    () => session.preloadClips().map((candidate) => ({
+      videoSrc: resolveAsset(candidate.mediaId, game),
+      clip: candidate,
+    })),
+    [session, snap.currentNodeId, game, resolveAsset],
+  )
 
   useEffect(() => {
     const el = rootRef.current
@@ -72,6 +79,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
         <GameStage
           videoSrc={videoSrc}
           clip={snap.clip}
+          preloadVideos={preloadVideos}
           overlayMounts={snap.overlayMounts}
           skins={session.skins}
           skinCtx={skinCtx}

@@ -73,8 +73,10 @@ ${PREVIEW_CLOCK_CSS}
 /* 「＋」旁浮层新建：JS 用 fixed 贴按钮右侧（躲过 .gc-list overflow:hidden）。 */
 .gc-list-compose-anchor { display: inline-flex; }
 .gc-list-compose-pop {
+  position: relative;
   z-index: 80;
   display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
   width: 240px;
   padding: 6px;
   border-radius: 10px;
@@ -113,6 +115,33 @@ ${PREVIEW_CLOCK_CSS}
   transition: background .12s, border-color .12s;
 }
 .gc-list-compose-ok:hover { background: rgba(240,136,64,.28); border-color: var(--gc-accent); }
+.gc-list-compose-error {
+  flex: 1 1 100%;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(80, 20, 20, .92);
+  border: 1px solid rgba(248,113,113,.45);
+  color: #ff9a9a;
+  font-size: 11px;
+  line-height: 1.35;
+}
+/* 确认对话框（与视频库 val-dialog* 同款，蓝图 tab 不依赖视频 tab 注入）。 */
+.val-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 40; }
+.val-dialog { background: var(--gc-panel2); border: 1px solid var(--gc-line-soft); border-radius: 12px; padding: 16px; max-width: 420px; width: calc(100% - 32px); color: var(--gc-text); }
+.val-dialog > h2 { margin: 0 0 8px; font-size: 15px; }
+.val-dialog > p { margin: 0; color: var(--gc-muted); font-size: 13px; line-height: 1.45; }
+.val-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.val-dialog-actions button {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  height: 30px; padding: 0 12px; border-radius: 7px;
+  border: 1px solid var(--gc-line); color: var(--gc-text); font-size: 12px;
+  background: rgba(255,255,255,.04);
+}
+.val-dialog-actions button:last-child {
+  border-color: rgba(248,113,113,.45);
+  background: rgba(248,113,113,.16);
+  color: #ff9a9a;
+}
 .gc-row {
   all: unset; box-sizing: border-box;
   display: flex; align-items: center; gap: 9px;

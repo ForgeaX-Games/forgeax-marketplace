@@ -21,10 +21,10 @@ import { GameStage } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
+import { removeMountGraph } from '../video/graphMaterialOps'
 import { resolveMediaSrc } from './media'
 import { useKinoVideoResources } from '../assets/kinoVideoCacheStore'
 import { useClipPerformanceEnd, videoDurationCapReached, MissingVideoNotice } from '../../runtime/play'
-import { ZHANDOU_VIDEOS } from '../assets/catalog'
 import { addNode } from '../../graph/edit/graph-edit'
 import type { GameNode } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
@@ -153,26 +153,17 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
 
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
   useEffect(() => {
-    const bundled: VideoOption[] = Object.keys(ZHANDOU_VIDEOS)
-      .sort((a, b) => a.localeCompare(b))
-      .map((id) => ({
-        id,
-        label: id.startsWith('narr-') ? `叙事 · ${id}` : `战斗 · ${id}`,
-      }))
     const seen = new Set<string>()
     const kino: VideoOption[] = []
     for (const resource of kinoResources.items) {
       if (seen.has(resource.resource_id)) continue
       seen.add(resource.resource_id)
-      const name = resource.name?.trim()
       kino.push({
         id: resource.resource_id,
-        label: name && name !== resource.resource_id
-          ? `素材 · ${name} (${resource.resource_id})`
-          : `素材 · ${resource.resource_id}`,
+        label: resource.name?.trim() || resource.resource_id,
       })
     }
-    setVideoOptions([...kino, ...bundled.filter((v) => !seen.has(v.id))])
+    setVideoOptions(kino)
     setVideoOptionsError(kinoResources.error)
   }, [kinoResources.error, kinoResources.items])
 
@@ -369,6 +360,14 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   }, [session])
 
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
+  const preloadVideos = useMemo(
+    () => session.preloadClips().map((candidate) => ({
+      videoSrc: resolveMediaSrc(candidate.mediaId, game),
+      clip: candidate,
+      videoKey: `${candidate.nodeId}-${playEpoch}`,
+    })),
+    [session, snap.currentNodeId, game, playEpoch],
+  )
 
   useEffect(() => {
     // 无视频：durationMs 到点推进（逻辑节拍节点）。
@@ -463,7 +462,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         <span style={{ opacity: 0.6, fontSize: 11 }}>{savedTip || `phase: ${snap.phase}`}</span>
         {videoOptionsError ? (
           <span role="alert" style={{ color: '#ff8f8f', fontSize: 11 }}>
-            Kino 视频素材加载失败：{videoOptionsError}（仅显示内置视频）
+            Kino 视频素材加载失败：{videoOptionsError}
           </span>
         ) : null}
       </div>
@@ -582,6 +581,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 videoSrc={videoSrc}
                 videoKey={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
                 clip={snap.clip}
+                preloadVideos={preloadVideos}
                 overlayMounts={snap.overlayMounts}
                 skins={session.skins}
                 skinCtx={{
@@ -680,6 +680,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   const scn = st.authoringScenario()
                   const cleaned = dropOverlayIfUnreferenced(scn, oid)
                   if (cleaned !== scn) st.setMeta(metaFromDocument(cleaned))
+                }}
+                onRemoveMount={(mountId) => {
+                  editPreviewScenario((s, n) => removeMountGraph(s, n, mountId))
                 }}
                 onJump={jump}
               />

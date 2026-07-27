@@ -1171,6 +1171,7 @@ export function NodeInspector({
   onPacksChange,
   onEnsureOverlay,
   onDropOverlayIfOrphan,
+  onRemoveMount,
   onJump,
 }: {
   graph: GameGraph
@@ -1209,6 +1210,11 @@ export function NodeInspector({
    * 无引用则清理孤儿副本。本组件只看得到 canvasGraph，无法自行判断跨图引用，故上抛。
    */
   onDropOverlayIfOrphan?: (overlayId: string) => void
+  /**
+   * 移除覆盖物挂载（优先走 scenario 级 `removeMountGraph`，级联清掉组件跳转边与结算）。
+   * 未传则回落为只改 `overlayNodes`（旧行为，边会残留）。
+   */
+  onRemoveMount?: (mountId: string) => void
   onJump?: (id: string) => void
 }): JSX.Element {
   const node = graph.nodes.find((n) => n.id === nodeId)
@@ -1230,12 +1236,9 @@ export function NodeInspector({
   // 「默认样式 / ＋ 挂载」只列固化界面方案（画廊 + nodia），不混入草稿残留 ov-* 等。
   const schemeOverlayIds = PRESET_SCHEME_OVERLAYS.map((o) => o.id)
   const mediaRef = d.media?.ref ?? ''
-  // 当前引用若不在资产清单里也要能显示（避免选中项丢失）。
-  const videoChoices: VideoOption[] = (() => {
-    if (!mediaRef) return videoOptions
-    if (videoOptions.some((v) => v.id === mediaRef)) return videoOptions
-    return [{ id: mediaRef, label: mediaRef }, ...videoOptions]
-  })()
+  const selectedVideoValue = mediaRef && !videoOptions.some((option) => option.id === mediaRef)
+    ? '__unavailable__'
+    : mediaRef
 
   const nestRef = getSubFlow(d)
   const nestPack = getSubFlowPack(d)
@@ -1382,14 +1385,17 @@ export function NodeInspector({
       {row('名称', <input value={d.name} onChange={(e) => patchData({ name: e.target.value })} style={{ flex: 1 }} />)}
       {row('视频', (
         <select
-          value={mediaRef}
+          value={selectedVideoValue}
           onChange={(e) => patchData({ media: e.target.value ? { kind: 'VIDEO', ref: e.target.value } : undefined })}
           style={{ flex: 1 }}
-          title="选择该演出节点播放的视频（内置战斗/叙事包 + 共享素材层，对齐视频 tab）"
+          title="选择该演出节点播放的视频（与视频素材库一致，仅显示 Kino 接口资源）"
         >
+          {selectedVideoValue === '__unavailable__' ? (
+            <option value="__unavailable__" disabled>（当前视频不在素材库）</option>
+          ) : null}
           <option value="">（无演出）</option>
-          {videoChoices.map((v) => (
-            <option key={v.id} value={v.id}>{v.label}</option>
+          {videoOptions.map((option) => (
+            <option key={option.id} value={option.id}>{option.label}</option>
           ))}
         </select>
       ))}
@@ -1582,11 +1588,16 @@ export function NodeInspector({
                           if (!ok) return
                         }
                         const removed = mount.overlay
-                        const next = (d.overlayNodes ?? []).filter((_, j) => j !== i)
-                        patchData({ overlayNodes: next.length ? next : undefined })
+                        if (onRemoveMount) {
+                          // scenario 级卸挂载：级联清掉應默等组件占用的跳转边与结算（含 node:* 孤儿清理）。
+                          onRemoveMount(mid)
+                        } else {
+                          const next = (d.overlayNodes ?? []).filter((_, j) => j !== i)
+                          patchData({ overlayNodes: next.length ? next : undefined })
+                          // 卸载节点专属副本（node:*）→ 交上层用完整 scenario 判断并清理孤儿。
+                          if (removed.startsWith('node:')) onDropOverlayIfOrphan?.(removed)
+                        }
                         if (focused) onFocusMount?.(null)
-                        // 卸载节点专属副本（node:*）→ 交上层用完整 scenario 判断并清理孤儿。
-                        if (removed.startsWith('node:')) onDropOverlayIfOrphan?.(removed)
                       }}
                     >
                       移除

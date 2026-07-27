@@ -200,6 +200,17 @@ export class GraphSession {
     return this.apply(this.runtime.jumpToNode(nodeId, opts))
   }
 
+  /** 当前节点之后可能播放的视频，供 UI 在切换前建立并保留媒体元素。 */
+  preloadClips(limit = 4): ClipSnap[] {
+    return this.runtime.getPreloadNodes(limit).map((node) => ({
+      nodeId: node.id,
+      name: node.data.name,
+      mediaId: node.data.media?.ref,
+      loop: node.data.mediaPlayMode === 'loop',
+      durationMs: node.data.durationMs,
+    }))
+  }
+
   private apply(dirs: RuntimeDirective[]): SessionSnapshot {
     for (const d of dirs) {
       const line = logLine(d)

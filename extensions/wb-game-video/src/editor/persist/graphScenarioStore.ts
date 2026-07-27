@@ -25,9 +25,14 @@ import {
   documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, metaFromDocument,
   normalizeDocument, playDocument,
 } from './blueprint-project'
+import { isBlueprintTitleTaken } from './blueprint-title'
 import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
 import { blueprintsReferencing, findReferenceCycle } from '../../graph/edit/blueprint-refs'
 import { loadGameComponents } from '../../runtime/component-host'
+
+export type BlueprintTitleActionOk = { ok: true; id?: string }
+export type BlueprintTitleActionErr = { ok: false; reason: 'duplicate_title' | 'not_found' }
+export type BlueprintTitleActionResult = BlueprintTitleActionOk | BlueprintTitleActionErr
 
 /** 载入 demo / 文档时保证内置「通用样式」方案存在——用于 reset()/首次落座。 */
 function withBuiltinSchemes<T extends GameScenario>(s: T): T {
@@ -156,10 +161,10 @@ interface GraphScenarioStore {
   addTextStylePreset: (group: TextStyleGroup, preset: GraphTextStylePreset) => void
   /** 删除一个用户自定义文字预设。 */
   removeTextStylePreset: (group: TextStyleGroup, presetId: string) => void
-  /** 新建一个空子蓝图并选中它，返回新 id。 */
-  createBlueprint: (title?: string) => string
-  /** 重命名一个蓝图（主/子皆可）。 */
-  renameBlueprint: (id: string, title: string) => void
+  /** 新建一个空子蓝图并选中它；标题冲突时不改状态。 */
+  createBlueprint: (title?: string) => BlueprintTitleActionResult
+  /** 重命名一个蓝图（主/子皆可）；标题冲突时不改状态。 */
+  renameBlueprint: (id: string, title: string) => BlueprintTitleActionResult
   /** 删除一个子蓝图；主蓝图或仍被引用中的蓝图会被拦截。 */
   deleteBlueprint: (id: string) => { ok: boolean; blockedBy?: string[] }
   /** 切换当前编辑/选中的蓝图（库 UI 用）。 */
@@ -175,8 +180,8 @@ interface GraphScenarioStore {
   commit: (message?: string) => Promise<string | null>
   /** 刷新版本列表（游戏仓 git tags）。 */
   refreshVersions: () => Promise<void>
-  /** 载入某个历史版本到编辑器（非破坏式：只把该版内容放进当前工作数据、标记草稿；
-   *  不改 git 历史、不 checkout；用户保存时才新增一版）。 */
+  /** 载入某个历史版本到编辑器（非破坏式：只把该版内容放进当前工作数据；
+   *  内容异于当前干净基线时才标草稿；不改 git 历史、不 checkout；用户保存时才新增一版）。 */
   loadVersion: (tag: string) => Promise<void>
   pick: (value: string) => void
   reset: () => void
@@ -186,6 +191,22 @@ interface GraphScenarioStore {
 
 let draftTimer: ReturnType<typeof setTimeout> | null = null
 const clearDraftTimer = () => { if (draftTimer) { clearTimeout(draftTimer); draftTimer = null } }
+
+/**
+ * 上次「干净」落盘/载入内容的指纹。`isDraft` 只表示「当前编辑内容 ≠ 这份干净基线」，
+ * 而不是「曾经点过编辑」——保存成功后无改动不得再提示「未保存草稿」。
+ */
+let cleanFingerprint: string | null = null
+
+/** 稳定序列化整份库文档，供草稿脏检查。 */
+export function projectFingerprint(doc: GraphLibraryDocument): string {
+  return JSON.stringify(doc)
+}
+
+/** 测试钩子：重置干净基线（避免用例间串扰）。 */
+export function resetCleanFingerprintForTests(): void {
+  cleanFingerprint = null
+}
 
 // ── 撤销/重做（zundo）─────────────────────────────────────────────────────────
 /** 仅这两片进历史：蓝图库 + 场景级 meta（选中/草稿标记/版本索引/graph 缓存字段等瞬态不追踪）。 */
@@ -213,16 +234,23 @@ const HISTORY_OPTIONS: ZundoOptions<GraphScenarioStore, TrackedState> = {
 }
 
 export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get) => {
-  // 仅由真实编辑（setGraph/setMeta/蓝图库增删改）调用 → 标记未保存草稿 + 防抖写 localStorage 草稿。
+  // 按内容相对干净基线判定草稿：有实质差异才标脏 + 防抖写 localStorage；内容回到基线则清提示与草稿。
   const scheduleDraft = () => {
-    set({ isDraft: true })
+    const fp = projectFingerprint(get().authoringProject())
+    const dirty = cleanFingerprint === null || fp !== cleanFingerprint
+    set({ isDraft: dirty })
     clearDraftTimer()
+    if (!dirty) {
+      clearDraft(get().game)
+      return
+    }
     draftTimer = setTimeout(() => saveDraft(get().authoringProject(), get().game), 800)
   }
   // 保存核心（save 与 commit 共用）：环检测 → 校验 → PUT blueprint。返回 PUT 的 promise，
   // 让 commit() 能 await 到落盘完成再打版本（避免 blueprint 未落盘就 git commit 的竞态）。
   const runSave = (): { blocked: boolean; errs: number; done: Promise<boolean> } => {
-    const cycle = findReferenceCycle(get().authoringProject())
+    const project = get().authoringProject()
+    const cycle = findReferenceCycle(project)
     if (cycle) {
       set({ savedTip: `保存被拦截 · 蓝图引用成环：${cycle.join(' → ')}` })
       return { blocked: true, errs: -1, done: Promise.resolve(false) }
@@ -233,13 +261,25 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       entities: Object.keys(scn.entities ?? {}),
       vars: Object.keys(scn.variables ?? {}),
     }).filter((i) => i.level === 'error')
+    const savedFp = projectFingerprint(project)
     set({ isDraft: false, savedTip: errs.length ? `保存中 · ⚠ ${errs.length} 处校验错误` : '保存中…' })
-    const done = saveProject(get().authoringProject(), get().game).then((res) => {
+    const done = saveProject(project, get().game).then((res) => {
       if (!res.ok) {
-        set({ isDraft: true, savedTip: '保存失败 · 草稿仍在本地，请检查 game-host 端点后重试' })
+        scheduleDraft()
+        set({ savedTip: '保存失败 · 草稿仍在本地，请检查 game-host 端点后重试' })
         return false
       }
-      set({ savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}` })
+      // 以本次成功落盘的内容为新基线；若保存途中又有编辑，按新内容重新判脏。
+      cleanFingerprint = savedFp
+      const nowDirty = projectFingerprint(get().authoringProject()) !== savedFp
+      set({
+        isDraft: nowDirty,
+        savedTip: errs.length ? `已保存 · ⚠ ${errs.length} 处校验错误` : `已保存 ${new Date().toLocaleTimeString()}`,
+      })
+      if (nowDirty) {
+        clearDraftTimer()
+        draftTimer = setTimeout(() => saveDraft(get().authoringProject(), get().game), 800)
+      }
       return true
     })
     // eslint-disable-next-line no-console
@@ -297,9 +337,10 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         else if (!st.demo) set({ demo })
         return
       }
+      cleanFingerprint = null
       set({ game, demo, booted: true })
       void loadStore(game).then((s) => {
-        const applyDoc = (doc: GraphLibraryDocument, isDraftFlag: boolean) => {
+        const applyDoc = (doc: GraphLibraryDocument) => {
           const norm = normalizeLoadedDocument(doc, demo)
           const mainId = norm.manifest.mainPackId
           set((cur) => ({
@@ -308,17 +349,23 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
             activeBlueprintId: mainId,
             meta: metaFromDocument(norm),
             graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-            isDraft: isDraftFlag,
             versions: s.versions,
             currentVersionId: s.versions[0]?.id ?? null,
             loadEpoch: cur.loadEpoch + 1,
           }))
         }
         // 进入优先级：未保存草稿 > 磁盘最新文档 > demo。
+        // 干净基线始终取磁盘最新（若有）；草稿是否脏 = 内容是否异于该基线。
+        if (isLibraryDocument(s.project)) {
+          cleanFingerprint = projectFingerprint(normalizeLoadedDocument(s.project, demo))
+        }
         if (isLibraryDocument(s.draft)) {
-          applyDoc(s.draft, true)
+          applyDoc(s.draft)
+          scheduleDraft()
         } else if (isLibraryDocument(s.project)) {
-          applyDoc(s.project, false)
+          applyDoc(s.project)
+          cleanFingerprint = projectFingerprint(get().authoringProject())
+          set({ isDraft: false })
         } else {
           const seed = seedDocumentFromDemo(demo)
           const mainId = seed.manifest.mainPackId
@@ -333,7 +380,9 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
             currentVersionId: null,
             loadEpoch: cur.loadEpoch + 1,
           }))
-          void saveProject(seed, game)
+          void saveProject(seed, game).then((res) => {
+            if (res.ok) cleanFingerprint = projectFingerprint(get().authoringProject())
+          })
         }
       })
       void currentVersion(game).then((cv) => set({ currentTag: cv.tag }))
@@ -410,26 +459,34 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     },
 
     createBlueprint: (title) => {
-      const doc = emptyBlueprintDoc({ title })
-      set((st) => ({
-        blueprints: { ...st.blueprints, [doc.id]: doc },
+      const st = get()
+      const resolved = (title ?? '新蓝图').trim() || '新蓝图'
+      if (isBlueprintTitleTaken(st.blueprints, resolved)) {
+        return { ok: false, reason: 'duplicate_title' }
+      }
+      const doc = emptyBlueprintDoc({ title: resolved })
+      set((s) => ({
+        blueprints: { ...s.blueprints, [doc.id]: doc },
         activeBlueprintId: doc.id,
         graph: doc.graph,
         selectedNodeId: null,
         // 新建后框选进视口（子蓝图节点少，不 fit 会停在上一张大图的平移/缩放上）。
-        fitSignal: st.fitSignal + 1,
+        fitSignal: s.fitSignal + 1,
       }))
       scheduleDraft()
-      return doc.id
+      return { ok: true, id: doc.id }
     },
     renameBlueprint: (id, title) => {
-      let changed = false
-      set((st) => {
-        if (!st.blueprints[id]) return {}
-        changed = true
-        return { blueprints: { ...st.blueprints, [id]: { ...st.blueprints[id]!, title } } }
-      })
-      if (changed) scheduleDraft()
+      const st = get()
+      if (!st.blueprints[id]) return { ok: false, reason: 'not_found' }
+      const nextTitle = title.trim()
+      if (!nextTitle) return { ok: false, reason: 'not_found' }
+      if (isBlueprintTitleTaken(st.blueprints, nextTitle, id)) {
+        return { ok: false, reason: 'duplicate_title' }
+      }
+      set({ blueprints: { ...st.blueprints, [id]: { ...st.blueprints[id]!, title: nextTitle } } })
+      scheduleDraft()
+      return { ok: true }
     },
     selectBlueprint: (id) => set((st) => {
       if (id === st.activeBlueprintId) return { selectedNodeId: null }
@@ -501,10 +558,10 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
           activeBlueprintId: mainId,
           meta: metaFromDocument(norm),
           graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-          isDraft: value === '__draft__',
           loadEpoch: st.loadEpoch + 1,
           ...(value !== '__draft__' ? { currentVersionId: value } : {}),
         }))
+        scheduleDraft()
       }
       // game-host 下产品不做版本回退（版本=git tag，入口只用最新）：仅支持回到未保存草稿。
       if (value === '__draft__') apply(loadDraft(get().game))
@@ -532,8 +589,8 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       set({ gameVersions: await listVersions(get().game) })
     },
 
-    // 非破坏式载入某历史版本：读该 tag 的 blueprint 放进当前编辑数据、标记草稿；
-    // 不 checkout、不改 git 历史。用户保存(=打版本)时才在最新之上新增一版。
+    // 非破坏式载入某历史版本：读该 tag 的 blueprint 放进当前编辑数据；
+    // 不 checkout、不改 git 历史。内容若已等于当前干净基线（如刚保存的最新版）则不标草稿。
     loadVersion: async (tag: string) => {
       if (get().isDraft && typeof confirm === 'function') {
         if (!confirm(`载入版本 ${tag} 会覆盖当前未保存的修改，继续？`)) return
@@ -553,34 +610,37 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         activeBlueprintId: mainId,
         meta: metaFromDocument(norm),
         graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-        isDraft: true, // 载入旧版=未保存草稿；保存后成为新版本
         loadEpoch: st.loadEpoch + 1,
         fitSignal: st.fitSignal + 1,
-        savedTip: `已载入版本 ${tag}（未保存 · 保存后将成为新版本）`,
       }))
+      scheduleDraft()
+      set({
+        savedTip: get().isDraft
+          ? `已载入版本 ${tag}（未保存 · 保存后将成为新版本）`
+          : `已载入版本 ${tag}`,
+      })
     },
 
-    // 重置：用内置 demo 替换当前内容（含全部子蓝图），清掉未保存草稿。要固化再点保存。
+    // 重置：用内置 demo 替换当前内容（含全部子蓝图）。若与当前版本不同则标未保存草稿。
     reset: () => {
       const demo = get().demo
       if (!demo) return
       const seed = seedDocumentFromDemo(demo)
       const mainId = seed.manifest.mainPackId
       clearDraftTimer()
-      clearDraft(get().game)
       set((st) => ({
         blueprints: seed.manifest.packs,
         mainBlueprintId: mainId,
         activeBlueprintId: mainId,
         meta: metaFromDocument(seed),
         graph: seed.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-        isDraft: false,
         currentVersionId: null,
         savedTip: '已重置为 demo',
         fitSignal: st.fitSignal + 1,
         runKey: st.runKey + 1,
         loadEpoch: st.loadEpoch + 1,
       }))
+      scheduleDraft()
     },
 
     applyLayout: () => {

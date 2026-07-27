@@ -7,9 +7,10 @@
  *   - 视频地址由调用方算好传入(`videoSrc`)——宿主专属的 mediaId→url 解析留在调用方(注入)。
  *   - 会话推进/事件回灌经回调(onTick / onPerformanceEnd / onEmit)交给调用方的 GraphSession。
  *
- * 自持:videoElRef、内容矩形(useVideoContentRect)、缺片状态(随 clip 变更自动复位)。
+ * 自持:video 预取池、内容矩形(useVideoContentRect)、缺片状态(随 clip 变更自动复位)。
+ * 后继视频在当前演出期间建立 DOM 并加载；换片时复用同一元素，首帧提交合成器后才接管画面。
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ClipSnap, OverlayMountSnap } from '../engine/session'
 import type { SkinCtx, SkinRegistry } from '../component-host/rendererRegistry'
 import { MissingVideoNotice } from './MissingVideoNotice'
@@ -31,56 +32,294 @@ export interface GameStageProps {
   onPerformanceEnd: () => void
   /** 无视频时的占位内容(如「（无演出）」/「加载中…」)。 */
   placeholder?: ReactNode
-  /** <video> 的 key 覆盖(默认 clip.nodeId);需要「同节点再 jump 强制 remount」时传入带 epoch 的 key。 */
+  /** 播放标识覆盖(默认 clip.nodeId);需要「同节点再 jump 强制重播」时传入带 epoch 的 key。 */
   videoKey?: string
+  /** 当前节点的后继候选；提前加载并保留 DOM，实际切换时不再设置 src。 */
+  preloadVideos?: PreloadVideo[]
+}
+
+export interface PreloadVideo {
+  videoSrc: string | undefined
+  clip: ClipSnap
+  videoKey?: string
+}
+
+interface BufferedPlayback {
+  key: string
+  src: string
+  mediaId: string | undefined
+  loop: boolean
+  durationMs: number | undefined
+}
+
+interface VideoSlot {
+  id: string
+  playback: BufferedPlayback
+}
+
+interface VideoBufferState {
+  frontId: string | null
+  slots: VideoSlot[]
+}
+
+const EMPTY_PRELOADS: PreloadVideo[] = []
+const MAX_PRELOADS = 4
+
+function playbackKey(videoSrc: string | undefined, clip: ClipSnap | undefined, videoKey: string | undefined): string | null {
+  if (!videoSrc) return null
+  return [
+    videoKey ?? clip?.nodeId ?? 'clip',
+    clip?.mediaId ?? '',
+    clip?.loop ? 'loop' : 'once',
+    clip?.durationMs ?? '',
+    videoSrc,
+  ].join('\u0000')
 }
 
 export function GameStage({
   videoSrc, clip, overlayMounts, skins, skinCtx, onEmit, onTick, onPerformanceEnd, placeholder, videoKey,
+  preloadVideos = EMPTY_PRELOADS,
 }: GameStageProps): JSX.Element {
-  const videoElRef = useRef<HTMLVideoElement | null>(null)
-  const { contentRect, recomputeRect } = useVideoContentRect(videoElRef, [clip?.nodeId])
+  const desired = useMemo<BufferedPlayback | null>(
+    () => {
+      const key = playbackKey(videoSrc, clip, videoKey)
+      return videoSrc && key
+        ? {
+            key,
+            src: videoSrc,
+            mediaId: clip?.mediaId,
+            loop: !!clip?.loop,
+            durationMs: clip?.durationMs,
+          }
+        : null
+    },
+    [videoSrc, videoKey, clip?.nodeId, clip?.mediaId, clip?.loop, clip?.durationMs],
+  )
+  const desiredKey = desired?.key ?? null
+  const preloads = useMemo(
+    () => preloadVideos.slice(0, MAX_PRELOADS).flatMap(({ videoSrc: src, clip: candidate, videoKey: keyOverride }) => {
+      const key = playbackKey(src, candidate, keyOverride)
+      return src && key
+        ? [{
+            key,
+            src,
+            mediaId: candidate.mediaId,
+            loop: candidate.loop,
+            durationMs: candidate.durationMs,
+          }]
+        : []
+    }),
+    [preloadVideos],
+  )
+  const [buffer, setBuffer] = useState<VideoBufferState>(() => ({
+    frontId: desired ? 'video-0' : null,
+    slots: desired ? [{ id: 'video-0', playback: desired }] : [],
+  }))
+  const nextSlotIdRef = useRef(1)
+  const slotElements = useRef<Record<string, HTMLVideoElement | null>>({})
+  const loadedSlotsRef = useRef<Set<string>>(new Set())
+  const pendingPresentationRef = useRef<string | null>(null)
+  const activeVideoRef = useRef<HTMLVideoElement | null>(null)
+  const frontSlotRef = useRef<string | null>(buffer.frontId)
+  const desiredKeyRef = useRef<string | null>(desiredKey)
+  frontSlotRef.current = buffer.frontId
+  desiredKeyRef.current = desiredKey
+  const activeSlot = buffer.slots.find((slot) => slot.id === buffer.frontId)
+  const activePlayback = activeSlot?.playback
+  const { contentRect, recomputeRect } = useVideoContentRect(activeVideoRef, [activePlayback?.key])
   const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
 
   useEffect(() => {
     setMissingVideoId(null)
   }, [clip?.nodeId, clip?.mediaId, videoSrc])
 
+  useEffect(() => {
+    pendingPresentationRef.current = null
+    if (!desired) {
+      for (const element of Object.values(slotElements.current)) element?.pause()
+      activeVideoRef.current = null
+      loadedSlotsRef.current.clear()
+      setBuffer((current) => current.slots.length > 0 ? { frontId: null, slots: [] } : current)
+      return
+    }
+
+    setBuffer((current) => {
+      let slots = [...current.slots]
+      let desiredSlot = slots.find((slot) => slot.playback.key === desired.key)
+      if (!desiredSlot) {
+        desiredSlot = slots.find(
+          (slot) => slot.id !== current.frontId && slot.playback.src === desired.src,
+        )
+        if (desiredSlot) {
+          slots = slots.map((slot) => slot.id === desiredSlot?.id ? { ...slot, playback: desired } : slot)
+        } else {
+          desiredSlot = { id: `video-${nextSlotIdRef.current++}`, playback: desired }
+          slots.push(desiredSlot)
+        }
+      }
+
+      for (const preload of preloads) {
+        if (preload.key === desired.key) continue
+        const reusable = slots.some(
+          (slot) => slot.playback.key === preload.key
+            || (slot.id !== current.frontId && slot.playback.src === preload.src),
+        )
+        if (!reusable) {
+          slots.push({ id: `video-${nextSlotIdRef.current++}`, playback: preload })
+        }
+      }
+
+      const keep = (slot: VideoSlot) =>
+        slot.id === current.frontId
+        || slot.id === desiredSlot?.id
+        || preloads.some((preload) => preload.key === slot.playback.key || preload.src === slot.playback.src)
+      slots = slots.filter(keep).slice(0, MAX_PRELOADS + 2)
+      return { ...current, slots }
+    })
+  }, [desired, preloads])
+
+  useEffect(() => {
+    const target = buffer.slots.find((slot) => slot.playback.key === desiredKey)
+    if (!target) return
+    const element = slotElements.current[target.id]
+    if (!element) return
+    if (target.id === buffer.frontId) {
+      activeVideoRef.current = element
+      recomputeRect()
+      startPlaying(element)
+      return
+    }
+    if (loadedSlotsRef.current.has(target.id) || element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      presentWhenFrameReady(target, element)
+    }
+  }, [buffer, desiredKey, recomputeRect])
+
+  const isCurrentPlayback = (slotId: string, key: string): boolean =>
+    frontSlotRef.current === slotId && desiredKeyRef.current === key
+
+  function startPlaying(element: HTMLVideoElement): void {
+    if (!element.paused) return
+    const playing = element.play()
+    void playing?.catch((error: unknown) => {
+      if ((error as { name?: string })?.name !== 'AbortError') {
+        console.warn('[wb-game-video] failed to start buffered video', error)
+      }
+    })
+  }
+
+  function presentWhenFrameReady(slot: VideoSlot, element: HTMLVideoElement): void {
+    if (desiredKeyRef.current !== slot.playback.key) return
+    const presentationKey = `${slot.id}\u0000${slot.playback.key}`
+    if (pendingPresentationRef.current === presentationKey) return
+    pendingPresentationRef.current = presentationKey
+    if (element.currentTime !== 0) element.currentTime = 0
+    startPlaying(element)
+
+    const activate = () => {
+      if (
+        desiredKeyRef.current !== slot.playback.key
+        || pendingPresentationRef.current !== presentationKey
+      ) return
+      const previousFront = frontSlotRef.current
+      if (previousFront && previousFront !== slot.id) slotElements.current[previousFront]?.pause()
+      activeVideoRef.current = element
+      frontSlotRef.current = slot.id
+      pendingPresentationRef.current = null
+      setMissingVideoId(null)
+      setBuffer((current) => (
+        current.slots.some((candidate) => candidate.id === slot.id && candidate.playback.key === slot.playback.key)
+          ? { ...current, frontId: slot.id }
+          : current
+      ))
+      recomputeRect()
+    }
+
+    if (element.requestVideoFrameCallback) {
+      element.requestVideoFrameCallback(() => activate())
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(activate))
+    }
+  }
+
+  const handleLoadedData = (slot: VideoSlot, element: HTMLVideoElement): void => {
+    loadedSlotsRef.current.add(slot.id)
+    setMissingVideoId(null)
+    if (desiredKeyRef.current === slot.playback.key) {
+      if (frontSlotRef.current === slot.id) {
+        activeVideoRef.current = element
+        recomputeRect()
+      } else {
+        presentWhenFrameReady(slot, element)
+      }
+    }
+  }
+
   return (
     <>
       {videoSrc ? (
         <>
-          <video
-            key={videoKey ?? clip?.nodeId}
-            ref={videoElRef}
-            src={videoSrc}
-            autoPlay
-            muted
-            playsInline
-            loop={!!clip?.loop}
-            onLoadedMetadata={() => {
-              setMissingVideoId(null)
-              recomputeRect()
-            }}
-            onError={() => {
-              if (clip?.mediaId) setMissingVideoId(clip.mediaId)
-            }}
-            onEnded={() => {
-              if (clip?.loop) return
-              onPerformanceEnd()
-            }}
-            onTimeUpdate={(e) => {
-              const el = e.currentTarget
-              const nowMs = Math.floor(el.currentTime * 1000)
-              if (videoDurationCapReached(nowMs, clip?.durationMs, el.duration)) {
-                el.pause()
-                onPerformanceEnd()
-                return
-              }
-              onTick(nowMs)
-            }}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
-          />
+          {buffer.slots.map((slot) => {
+            const { playback } = slot
+            const isFront = buffer.frontId === slot.id
+            return (
+              <video
+                key={slot.id}
+                ref={(element) => {
+                  slotElements.current[slot.id] = element
+                  if (!element) {
+                    delete slotElements.current[slot.id]
+                    loadedSlotsRef.current.delete(slot.id)
+                  }
+                }}
+                data-video-slot={slot.id}
+                data-playback-key={playback.key}
+                src={playback.src}
+                autoPlay={isFront}
+                muted
+                playsInline
+                preload="auto"
+                loop={playback.loop}
+                onLoadedMetadata={(event) => {
+                  if (desiredKeyRef.current !== playback.key) return
+                  setMissingVideoId(null)
+                  if (isCurrentPlayback(slot.id, playback.key)) {
+                    activeVideoRef.current = event.currentTarget
+                    recomputeRect()
+                  }
+                }}
+                onLoadedData={(event) => handleLoadedData(slot, event.currentTarget)}
+                onError={() => {
+                  if (desiredKeyRef.current === playback.key && playback.mediaId) {
+                    setMissingVideoId(playback.mediaId)
+                  }
+                }}
+                onEnded={() => {
+                  if (!isCurrentPlayback(slot.id, playback.key) || playback.loop) return
+                  onPerformanceEnd()
+                }}
+                onTimeUpdate={(event) => {
+                  if (!isCurrentPlayback(slot.id, playback.key)) return
+                  const element = event.currentTarget
+                  const nowMs = Math.floor(element.currentTime * 1000)
+                  if (videoDurationCapReached(nowMs, playback.durationMs, element.duration)) {
+                    element.pause()
+                    onPerformanceEnd()
+                    return
+                  }
+                  onTick(nowMs)
+                }}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  opacity: isFront ? 1 : 0,
+                  pointerEvents: 'none',
+                }}
+              />
+            )
+          })}
           {missingVideoId ? (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
               <MissingVideoNotice resourceId={missingVideoId} />

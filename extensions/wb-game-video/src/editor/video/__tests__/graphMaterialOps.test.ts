@@ -11,6 +11,7 @@ import {
   addQteCueGraph,
   choiceElement,
   collectMaterialsFromNode,
+  deleteMaterialGraph,
   findElement,
   findNode,
   listAvailableQteOutcomes,
@@ -28,9 +29,11 @@ import {
   previewSkinChildrenInWindow,
   qteSkinPreviewInteraction,
   clampSettlementSpawnTtlMs,
+  removeMountGraph,
   removeOptionBranchGraph,
   setOptionBranchEffectsGraph,
   setOptionBranchSpawnGraph,
+  setOptionTargetGraph,
   setQteOutcomeEffectsGraph,
   setQteOutcomeSpawnGraph,
   setQteOutcomeTargetGraph,
@@ -815,6 +818,144 @@ describe('graphMaterialOps · choice 顶层组件样式锁定选项集合（创�
     expect(el.component).toBe('inkYingMo')
     const branches = listOptionBranches(res.scenario, afterNode)
     expect(branches.map((b) => b.label)).toEqual(['應', '默'])
+  })
+})
+
+describe('graphMaterialOps · 删除覆盖物/组件时级联清掉跳转边与结算', () => {
+  beforeAll(() => registerCoreSkins())
+
+  function seedYingMoWithJumps(): {
+    scenario: GameScenario
+    node: GameNode
+    elId: string
+    mountId: string
+  } {
+    const n = node('a', { durationMs: 8000 })
+    const b = node('b', { durationMs: 1000 })
+    const c = node('c', { durationMs: 1000 })
+    const scenario = scnOf(
+      { nodes: [n, b, c], edges: [] },
+      {
+        ui: {
+          overlays: {
+            'scheme-yingmo': {
+              id: 'scheme-yingmo',
+              title: '應默方案',
+              children: [
+                {
+                  id: 'choice-proto',
+                  component: 'inkYingMo',
+                  trigger: { when: 'enter' },
+                  inputs: {
+                    events: [
+                      { id: 'ying', label: '應' },
+                      { id: 'mo', label: '默' },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    )
+    // 节点直接挂载方案（覆盖物）：應默是方案基底组件，与「节点配置 › 覆盖物事件 › 移除」同形。
+    const withMount: GameScenario = {
+      ...scenario,
+      graph: {
+        ...scenario.graph,
+        nodes: scenario.graph.nodes.map((nd) =>
+          nd.id === 'a'
+            ? { ...nd, data: { ...nd.data, overlayNodes: [{ overlay: 'scheme-yingmo' }] } }
+            : nd,
+        ),
+      },
+    }
+    const nodeA = findNode(withMount.graph, 'a')!
+    let s = setOptionTargetGraph(withMount, nodeA, 'ying', 'b')
+    s = setOptionTargetGraph(s, findNode(s.graph, 'a')!, 'mo', 'c')
+    const after = findNode(s.graph, 'a')!
+    const el = choiceElement(s, after)!
+    expect(s.graph.edges.map((e) => [e.sourceHandle, e.target])).toEqual([
+      ['ying', 'b'],
+      ['mo', 'c'],
+    ])
+    return {
+      scenario: s,
+      node: after,
+      elId: el.id,
+      mountId: after.data.overlayNodes![0]!.overlay,
+    }
+  }
+
+  it('removeMountGraph：卸掉挂有應默的覆盖物时，應/默两条跳转边一并删除', () => {
+    const { scenario, node: n, mountId } = seedYingMoWithJumps()
+    const next = removeMountGraph(scenario, n, mountId)
+    expect(next.graph.edges.filter((e) => e.source === 'a')).toEqual([])
+    expect(findNode(next.graph, 'a')!.data.overlayNodes).toBeUndefined()
+  })
+
+  it('deleteMaterialGraph(component)：删掉方案来源的應默组件时，應/默两条跳转边与结算一并删除', () => {
+    // 方案克隆到挂载 added[] → materialKind = component（与时间轴/预览删除同形）
+    const n = node('a', { durationMs: 8000 })
+    const b = node('b', { durationMs: 1000 })
+    const c = node('c', { durationMs: 1000 })
+    const base = scnOf(
+      { nodes: [n, b, c], edges: [] },
+      {
+        ui: {
+          overlays: {
+            'scheme-choice': {
+              id: 'scheme-choice',
+              children: [
+                {
+                  id: 'choice-proto',
+                  component: 'inkYingMo',
+                  trigger: { when: 'enter' },
+                  inputs: {
+                    events: [
+                      { id: 'ying', label: '應' },
+                      { id: 'mo', label: '默' },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    )
+    const withMount: GameScenario = {
+      ...base,
+      graph: {
+        ...base.graph,
+        nodes: base.graph.nodes.map((nd) =>
+          nd.id === 'a' ? { ...nd, data: { ...nd.data, overlayNodes: [{ overlay: 'scheme-choice' }] } } : nd,
+        ),
+      },
+    }
+    const res = addMaterialGraph(withMount, findNode(withMount.graph, 'a')!, 8000, 'scheme-choice/choice-proto', undefined, 0)
+    let s = res.scenario
+    const nodeA = findNode(s.graph, 'a')!
+    const el = choiceElement(s, nodeA)!
+    s = setOptionTargetGraph(s, nodeA, 'ying', 'b')
+    s = setOptionTargetGraph(s, findNode(s.graph, 'a')!, 'mo', 'c')
+    s = setOptionBranchEffectsGraph(s, findNode(s.graph, 'a')!, 'ying', [
+      { kind: 'attr', entityId: 'ent-player', attr: 'hp', op: 'add', value: 1 },
+    ])
+    expect(s.graph.edges.filter((e) => e.source === 'a')).toHaveLength(2)
+
+    const item = collectMaterialsFromNode(s, findNode(s.graph, 'a')!, 8000).find((m) => m.id === el.id)!
+    expect(item.kind).toBe('component')
+    const next = deleteMaterialGraph(s, findNode(s.graph, 'a')!, item)
+    expect(next.graph.edges.filter((e) => e.source === 'a')).toEqual([])
+    expect(findElement(next, findNode(next.graph, 'a')!, el.id)).toBeUndefined()
+    // 挂载仍在，但應/默 event reaction 应已清掉
+    const mount = findNode(next.graph, 'a')!.data.overlayNodes?.[0]
+    const leftover = (mount?.reactions ?? []).filter(
+      (r) => r.when.type === 'event' && (r.when.id === 'ying' || r.when.id === 'mo'),
+    )
+    expect(leftover).toEqual([])
   })
 })
 

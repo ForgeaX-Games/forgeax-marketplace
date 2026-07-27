@@ -123,6 +123,13 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   }, [restartKey, ready, entitySig])
 
   const videoSrc = resolveMediaSrc(snap?.clip?.mediaId, game)
+  const preloadVideos = useMemo(
+    () => sessionRef.current?.preloadClips().map((candidate) => ({
+      videoSrc: resolveMediaSrc(candidate.mediaId, game),
+      clip: candidate,
+    })) ?? [],
+    [snap?.currentNodeId, game, restartKey, entitySig],
+  )
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clip?.nodeId, restartKey)
 
   useEffect(() => {
@@ -229,6 +236,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       <GameStage
         videoSrc={videoSrc}
         clip={snap?.clip}
+        preloadVideos={preloadVideos}
         overlayMounts={snap?.overlayMounts ?? []}
         skins={skins ?? undefined}
         skinCtx={skinCtx}

@@ -111,7 +111,7 @@ describe('missing video notices across play surfaces', () => {
     expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
   })
 
-  it('GraphStudio exposes a Kino list failure while retaining bundled options', async () => {
+  it('GraphStudio exposes a Kino list failure without falling back to bundled options', async () => {
     useKinoVideoResources.mockReturnValue({
       items: [],
       total: 0,
@@ -124,8 +124,46 @@ describe('missing video notices across play surfaces', () => {
     render(<GraphStudio scenario={SCENARIO} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Kino 视频素材加载失败：invalid_page_size（仅显示内置视频）',
+      'Kino 视频素材加载失败：invalid_page_size',
     )
+  })
+
+  it('GraphStudio video selector contains only Kino resources without prefixes', () => {
+    useKinoVideoResources.mockReturnValue({
+      items: [{
+        resource_id: 'kino-clip',
+        game_id: 'game-nodia-fighting',
+        media_type: 'video',
+        name: 'clip.mp4',
+        type: 'UPLOAD',
+        url: '/api/v1/kino/resources/kino-clip/content',
+        source: 'upload',
+        source_meta: {},
+        created_at: 1,
+        updated_at: 1,
+      }],
+      total: 1,
+      loading: false,
+      error: null,
+      generation: 1,
+      refresh: vi.fn(),
+    })
+    useGraphScenario.setState({ selectedNodeId: 'intro' })
+
+    const { container } = render(<GraphStudio scenario={SCENARIO} />)
+    const selector = container.querySelector<HTMLSelectElement>(
+      'select[title*="与视频素材库一致"]',
+    )
+
+    expect(selector).toBeTruthy()
+    expect([...selector!.options].map((option) => [option.value, option.text]))
+      .toEqual([
+        ['__unavailable__', '（当前视频不在素材库）'],
+        ['', '（无演出）'],
+        ['kino-clip', 'clip.mp4'],
+      ])
+    expect(selector!.textContent).not.toContain('missing-stable-id')
+    expect(selector!.textContent).not.toContain('上传 ·')
   })
 
   it('returns to follow mode when the active breadcrumb is clicked', () => {

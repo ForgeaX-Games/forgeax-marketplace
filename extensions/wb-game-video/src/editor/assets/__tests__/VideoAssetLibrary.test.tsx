@@ -102,7 +102,7 @@ describe('VideoAssetLibrary', () => {
       />,
     )
     expect(screen.getByRole('button', { name: /idle01/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '上传 · Clip one' })).toHaveClass('is-on')
+    expect(screen.getByRole('button', { name: 'Clip one' })).toHaveClass('is-on')
   })
 
   it('places Kino entries before bundled videos', () => {
@@ -120,7 +120,7 @@ describe('VideoAssetLibrary', () => {
     const labels = [...container.querySelectorAll('.gc-list-body .gc-row-label')]
       .map((element) => element.textContent)
 
-    expect(labels).toEqual(['上传 · Clip one', '战斗 · idle01'])
+    expect(labels).toEqual(['Clip one', '战斗 · idle01'])
   })
 
   it('reacts to host locale changes', () => {
@@ -372,7 +372,7 @@ describe('VideoAssetLibrary', () => {
     )
     const renameButton = screen.getByRole('button', { name: '重命名 Clip one' })
     const deleteButton = screen.getByRole('button', { name: '删除 Clip one' })
-    const assetButton = screen.getByRole('button', { name: '上传 · Clip one' })
+    const assetButton = screen.getByRole('button', { name: 'Clip one' })
     const row = deleteButton.closest('.val-row')
 
     expect(row).toHaveClass('is-on')

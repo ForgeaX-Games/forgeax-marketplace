@@ -141,6 +141,34 @@ export class GraphRuntime {
     return this.activeBlueprintId
   }
 
+  /**
+   * 当前节点之后可能播放的媒体节点（只读预取提示，不执行条件、不消耗 rng）。
+   * 无媒体的逻辑节点会继续向后穿透；数量有界，避免分支图一次拉取过多视频。
+   */
+  getPreloadNodes(limit = 4): GameNode[] {
+    const currentId = this.state.currentNodeId
+    if (!currentId || limit <= 0) return []
+
+    const queue = (this.outgoing.get(currentId) ?? []).map((edge) => edge.target)
+    const visited = new Set<string>([currentId])
+    const candidates: GameNode[] = []
+
+    while (queue.length > 0 && candidates.length < limit) {
+      const nodeId = queue.shift() as string
+      if (visited.has(nodeId)) continue
+      visited.add(nodeId)
+
+      const node = this.nodes.get(nodeId)
+      if (!node) continue
+      if (node.data.media?.ref) {
+        candidates.push(node)
+        continue
+      }
+      for (const edge of this.outgoing.get(nodeId) ?? []) queue.push(edge.target)
+    }
+    return candidates
+  }
+
   /** 执行中发现 subFlowPack 时的查表源：构造注入 packs（单测）> scenario.manifest.packs。 */
   private loadDependencyTable(scenario: GameScenario, packs: readonly SubFlowPackDef[]): void {
     const register = (id: string, entry: string, g: GameGraph, version?: string) => {

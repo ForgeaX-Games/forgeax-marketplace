@@ -4,14 +4,21 @@
  * 子蓝图被其它蓝图引用时删除会被拦截（见 store `deleteBlueprint`）。
  *
  * 新建不用系统弹窗：点标题栏「＋」→ 按钮旁浮出输入（fixed，躲过列表 overflow），
- * Enter 确认 / Esc·点外 取消。
+ * Enter 确认 / Esc·点外 取消。标题冲突时保留浮层并提示。
+ * 无依赖删除走内联 ConfirmDialog；有依赖 / 主蓝图仍 alert 拦截。
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
+  type CSSProperties, type KeyboardEvent,
+} from 'react'
 import type { BlueprintDoc } from '../../runtime/schema/graph-schema'
+import { blueprintsReferencing } from '../../graph/edit/blueprint-refs'
 import { CatalogShell } from './CatalogShell'
 import { GraphStudio } from './GraphStudio'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { NODIA_DEMO } from '../demo/demo'
+
+const DUPLICATE_TITLE_MSG = '已存在同名蓝图'
 
 /**
  * 蓝图库左列表的纯派生：主蓝图置顶（带「· 入口」标签），其余子蓝图按标题排序。
@@ -31,6 +38,72 @@ export function blueprintListItems(
   return items
 }
 
+function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+  restoreFocus,
+}: {
+  title: string
+  message: string
+  confirmLabel: string
+  onConfirm: () => void
+  onCancel: () => void
+  restoreFocus: HTMLElement | null
+}): JSX.Element {
+  const titleId = useId()
+  const descriptionId = useId()
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+  const confirmRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    cancelRef.current?.focus()
+    return () => {
+      restoreFocus?.focus()
+    }
+  }, [restoreFocus])
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onCancel()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const active = document.activeElement
+    if (event.shiftKey && active === cancelRef.current) {
+      event.preventDefault()
+      confirmRef.current?.focus()
+    } else if (!event.shiftKey && active === confirmRef.current) {
+      event.preventDefault()
+      cancelRef.current?.focus()
+    }
+  }
+
+  return (
+    <div className="val-dialog-backdrop" role="presentation" onClick={onCancel}>
+      <div
+        className="val-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onKeyDown={onKeyDown}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id={titleId}>{title}</h2>
+        <p id={descriptionId} style={{ whiteSpace: 'pre-wrap' }}>{message}</p>
+        <div className="val-dialog-actions">
+          <button ref={cancelRef} type="button" onClick={onCancel}>取消</button>
+          <button ref={confirmRef} type="button" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function BlueprintLibraryView(): JSX.Element {
   const blueprints = useGraphScenario((s) => s.blueprints)
   const activeId = useGraphScenario((s) => s.activeBlueprintId)
@@ -40,22 +113,38 @@ export function BlueprintLibraryView(): JSX.Element {
   const rename = useGraphScenario((s) => s.renameBlueprint)
   const del = useGraphScenario((s) => s.deleteBlueprint)
   const setMain = useGraphScenario((s) => s.setMainBlueprint)
+  const authoringProject = useGraphScenario((s) => s.authoringProject)
 
   const items = useMemo(() => blueprintListItems(blueprints, mainId), [blueprints, mainId])
 
   /** 浮层新建：null = 收起；字符串 = 正在输入的名称。 */
   const [draftName, setDraftName] = useState<string | null>(null)
+  const [composeError, setComposeError] = useState<string | null>(null)
   const composing = draftName !== null
   const composeRootRef = useRef<HTMLDivElement | null>(null)
   const composeInputRef = useRef<HTMLInputElement | null>(null)
   const [popStyle, setPopStyle] = useState<CSSProperties | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const deleteTriggerRef = useRef<HTMLElement | null>(null)
 
-  const openCompose = () => setDraftName('新蓝图')
-  const cancelCompose = () => setDraftName(null)
+  const openCompose = () => {
+    setComposeError(null)
+    setDraftName('新蓝图')
+  }
+  const cancelCompose = () => {
+    setDraftName(null)
+    setComposeError(null)
+  }
   const confirmCompose = () => {
     const t = draftName?.trim()
     if (!t) { cancelCompose(); return }
-    create(t)
+    const r = create(t)
+    if (!r.ok) {
+      setComposeError(DUPLICATE_TITLE_MSG)
+      composeInputRef.current?.focus()
+      composeInputRef.current?.select()
+      return
+    }
     cancelCompose()
   }
 
@@ -96,10 +185,29 @@ export function BlueprintLibraryView(): JSX.Element {
 
   const handleRename = (id: string) => {
     const t = prompt('重命名', blueprints[id]?.title)
-    if (t) rename(id, t)
+    if (!t?.trim()) return
+    const r = rename(id, t)
+    if (!r.ok && r.reason === 'duplicate_title') alert(DUPLICATE_TITLE_MSG)
   }
-  const handleDelete = (id: string) => {
-    const r = del(id)
+
+  const handleDelete = (id: string, trigger: HTMLElement | null) => {
+    if (id === mainId) {
+      alert('主蓝图不可删')
+      return
+    }
+    const refs = blueprintsReferencing(authoringProject(), id)
+    if (refs.length) {
+      alert(`被引用，无法删除：${refs.join(', ')}`)
+      return
+    }
+    deleteTriggerRef.current = trigger
+    setPendingDeleteId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDeleteId) return
+    const r = del(pendingDeleteId)
+    setPendingDeleteId(null)
     if (!r.ok) {
       alert(
         r.blockedBy?.includes('__main__')
@@ -108,6 +216,8 @@ export function BlueprintLibraryView(): JSX.Element {
       )
     }
   }
+
+  const pendingTitle = pendingDeleteId ? (blueprints[pendingDeleteId]?.title ?? pendingDeleteId) : ''
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
@@ -141,13 +251,20 @@ export function BlueprintLibraryView(): JSX.Element {
                   value={draftName ?? ''}
                   placeholder="蓝图名称"
                   aria-label="新蓝图名称"
-                  onChange={(e) => setDraftName(e.target.value)}
+                  aria-invalid={!!composeError}
+                  onChange={(e) => {
+                    setDraftName(e.target.value)
+                    if (composeError) setComposeError(null)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') { e.preventDefault(); confirmCompose() }
                     else if (e.key === 'Escape') { e.preventDefault(); cancelCompose() }
                   }}
                 />
                 <button type="button" className="gc-list-compose-ok" onClick={confirmCompose}>添加</button>
+                {composeError && (
+                  <div className="gc-list-compose-error" role="alert">{composeError}</div>
+                )}
               </div>
             )}
           </div>
@@ -159,7 +276,14 @@ export function BlueprintLibraryView(): JSX.Element {
             <>
               <button type="button" className="gc-row-act" title="重命名" onClick={() => handleRename(id)}>✎</button>
               <button type="button" className="gc-row-act" title="设为入口" onClick={() => setMain(id)}>⌂</button>
-              <button type="button" className="gc-row-act is-danger" title="删除" onClick={() => handleDelete(id)}>🗑</button>
+              <button
+                type="button"
+                className="gc-row-act is-danger"
+                title="删除"
+                onClick={(e) => handleDelete(id, e.currentTarget)}
+              >
+                🗑
+              </button>
             </>
           )
         }
@@ -169,6 +293,16 @@ export function BlueprintLibraryView(): JSX.Element {
           </div>
         )}
       />
+      {pendingDeleteId && (
+        <ConfirmDialog
+          title="删除蓝图"
+          message={`确定删除「${pendingTitle}」？此操作不可撤销。`}
+          confirmLabel="确认删除"
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDeleteId(null)}
+          restoreFocus={deleteTriggerRef.current}
+        />
+      )}
     </div>
   )
 }

@@ -14,8 +14,32 @@ beforeAll(() => {
 })
 
 const YINGMO_NODES = ['n_river', 'n_land', 'n_tea', 'n_nodrink', 'n_follow', 'n_nofollow'] as const
+const DAZHAO_RESOURCE_ID = 'fa6da536-df0b-4f4f-aede-d77e8b053950'
+
+function collectMediaRefs(value: unknown, refs: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) collectMediaRefs(item, refs)
+    return refs
+  }
+  if (!value || typeof value !== 'object') return refs
+  const record = value as Record<string, unknown>
+  const media = record.media
+  if (media && typeof media === 'object') {
+    const ref = (media as Record<string, unknown>).ref
+    if (typeof ref === 'string') refs.push(ref)
+  }
+  for (const child of Object.values(record)) collectMediaRefs(child, refs)
+  return refs
+}
 
 describe('nodia narrative demo contract', () => {
+  it('重置模板使用 Kino/COS resource id，不回退本地视频 basename', () => {
+    const refs = collectMediaRefs(makeNodiaDemo())
+    expect(refs).toContain(DAZHAO_RESOURCE_ID)
+    expect(refs).not.toContain('dazhao')
+    expect(refs.filter((ref) => ref.includes('narr-')).every((ref) => ref.startsWith('m-narr-'))).toBe(true)
+  })
+
   it('應/默 锚点为下方中央 (0.5, 0.88)，键位 E/Q；片尾前 3s 弹出', () => {
     expect(inkYingMoDefaults.x).toBe(0.5)
     expect(inkYingMoDefaults.y).toBe(0.88)

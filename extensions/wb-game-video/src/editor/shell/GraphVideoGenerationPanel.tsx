@@ -7,8 +7,6 @@ import {
 } from '../assets/image-assets'
 import type { MediaAsset, StyleAxes } from '../assets/registry-types'
 
-// 风格三轴 UI 选项（id 对齐 server/engine/scenario/types.ts 的 VisualStyle/FilmLook/DirectorStyleId；
-// 权威 coerce 在服务端 composeAxes，未知 id 自动回退，故此处仅作便捷选择器）。
 const ART_MEDIA_OPTIONS: Array<[string, string]> = [
   ['', '（默认）'], ['photoreal', '写实'], ['anime', '日系动画'], ['cartoon', '卡通'],
   ['pixelart', '像素'], ['watercolor', '水彩'], ['ink', '水墨'], ['render3d2d', '3D转2D'],
@@ -134,6 +132,27 @@ export function GraphVideoGenerationPanel({
             </select>
           </label>
         </div>
+        <div className="gvv-gen">
+          <div className="gvv-gen-row">
+            <button
+              type="button"
+              disabled={!enabled || generationBusy}
+              onClick={() => void onGenerateVideo()}
+            >
+              {generationBusy ? '生成中…' : '▶ 生成视频'}
+            </button>
+            <button
+              type="button"
+              className="gvv-gen-alt"
+              disabled={!enabled || generationBusy}
+              title="生成 6 面板黑白 previs 故事板（分镜图分支，落素材层）"
+              onClick={() => void onGenerateStoryboard()}
+            >
+              ▦ 分镜故事板
+            </button>
+          </div>
+          {generationError ? <span className="gvv-gen-hint is-error">{generationError}</span> : null}
+        </div>
       </label>
       <section className="gvv-reference-panel" aria-label="图片参考">
         <span>图片参考</span>
@@ -191,31 +210,9 @@ export function GraphVideoGenerationPanel({
             </div>
           ))}
         </div>
-        <div className="gvv-gen">
-          <div className="gvv-gen-row">
-            <button
-              type="button"
-              disabled={!enabled || generationBusy}
-              onClick={() => void onGenerateVideo()}
-            >
-              {generationBusy ? '生成中…' : '▶ 生成视频'}
-            </button>
-            <button
-              type="button"
-              className="gvv-gen-alt"
-              disabled={!enabled || generationBusy}
-              title="生成 6 面板黑白 previs 故事板（分镜图分支，落素材层，不改当前绑定）"
-              onClick={() => void onGenerateStoryboard()}
-            >
-              ▦ 分镜故事板
-            </button>
-          </div>
-          <span className={`gvv-gen-hint${generationError ? ' is-error' : ''}`}>
-            {generationError
-              ? generationError
-              : `参考图：角色 ${characterRefs.length} · 场景 ${sceneRefs.length}（视频生成必传各 ≥1；缺则先「导入」）`}
-          </span>
-        </div>
+        <span className="gvv-gen-hint">
+          参考图：角色 {characterRefs.length} · 场景 {sceneRefs.length}（视频生成必传各 ≥1；缺则先「导入」）
+        </span>
       </section>
     </div>
   )
