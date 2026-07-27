@@ -12,11 +12,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { GameScenario, Layout, Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
 import { CatalogShell, type CatalogItem } from './CatalogShell'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
-import { OverlaySchemeEditor, UsageBadge } from './OverlaySchemeEditor'
+import { OverlaySchemeEditor, UsageBadge, DuplicateBadge } from './OverlaySchemeEditor'
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { NEW_COMPONENT_PRESETS, sortSchemeIds, BASE_HUD_PREFIX } from '../demo/builtin-schemes'
+import { findDuplicateOverlays } from './overlay-dedup'
 import { availableComponents } from '../../runtime/component-host/components'
 import { defaultsForComponent } from './editors'
 import type { Formula } from '../persist/formula-authoring'
@@ -80,6 +81,9 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // ── 界面（overlays）形态：树 + 单方案编辑 ──
   const overlaysMode = tabs.length === 1 && tabs[0]?.section === 'overlays'
   const allOverlays = meta.ui?.overlays ?? {}
+  // 内容重复标记：三类方案（自定义 / 内置 / 基础 base:*）在同一目录里互查，overlayId → 同内容的其它 id[]。
+  // 只提示不处理（§8 人为最终权威）；纯派生，不落盘（§2 Derive）。
+  const dupMap = useMemo(() => findDuplicateOverlays(allOverlays), [allOverlays])
   // 「自定义覆盖物」= 用户自由方案；排除 node:*（时间轴内容容器）与 base:*（基础覆盖物单组件方案）。
   const schemeIds = useMemo(
     () => sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX))),
@@ -112,7 +116,11 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     const { [oid]: _drop, ...rest } = allOverlays
     setOverlays(rest)
   }
-  const addSchemeChild = (oid: string, componentId: string, layout?: Partial<Layout>): string | undefined => {
+  const addSchemeChild = (
+    oid: string,
+    componentId: string,
+    place?: { inputs?: Record<string, unknown>; layout?: Partial<Layout> },
+  ): string | undefined => {
     const ov = allOverlays[oid]
     if (!ov) return undefined
     const childId = `${componentId}-${Object.keys(ov.children).length}-${Date.now().toString(36)}`
@@ -121,8 +129,15 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     const made: OverlayChild = preset
       ? preset.make(childId)
       : { id: childId, component: componentId, trigger: { when: 'enter' }, inputs: defaultsForComponent(componentId) }
-    // 画布落点：把归一 left/top（及可能的尺寸）并进自带 layout。
-    const child = layout ? { ...made, layout: { ...made.layout, ...layout } } : made
+    // 画布落点已按组件定位模式分好（inputs.x/y 或 layout.left/top）：各自浅合并进 preset 产物，
+    // inputs 模式会覆盖 preset 自带的 x/y（如 floatText 的 0.5/0.4）为鼠标落点。
+    const child: OverlayChild = place
+      ? {
+          ...made,
+          inputs: place.inputs ? { ...made.inputs, ...place.inputs } : made.inputs,
+          layout: place.layout ? { ...made.layout, ...place.layout } : made.layout,
+        }
+      : made
     setOverlays({ ...allOverlays, [oid]: { ...ov, children: [...ov.children, child] } })
     return childId
   }
@@ -168,7 +183,12 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
       children: schemeIds.map((id) => ({
         id,
         label: allOverlays[id]?.title || id,
-        badge: <UsageBadge count={overlayUsage[id] ?? 0} />,
+        badge: (
+          <>
+            <DuplicateBadge others={dupMap.get(id) ?? []} compact />
+            <UsageBadge count={overlayUsage[id] ?? 0} compact />
+          </>
+        ),
       })),
     },
     {
@@ -177,7 +197,12 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
       children: baseIds.map((id) => ({
         id,
         label: allOverlays[id]?.title || id.slice(BASE_HUD_PREFIX.length),
-        badge: <UsageBadge count={overlayUsage[id] ?? 0} />,
+        badge: (
+          <>
+            <DuplicateBadge others={dupMap.get(id) ?? []} compact />
+            <UsageBadge count={overlayUsage[id] ?? 0} compact />
+          </>
+        ),
       })),
     },
   ]
@@ -215,9 +240,10 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   variables={meta.variables ?? {}}
                   usageCount={overlayUsage[selOverlay] ?? 0}
                   locked={selLocked}
+                  duplicateOf={dupMap.get(selOverlay) ?? []}
                   onRename={(t) => renameScheme(selOverlay, t)}
                   onRemove={() => removeScheme(selOverlay)}
-                  onAddChild={(p, layout) => addSchemeChild(selOverlay, p, layout)}
+                  onAddChild={(p, place) => addSchemeChild(selOverlay, p, place)}
                   onRemoveChild={(c) => removeSchemeChild(selOverlay, c)}
                   onPatchChild={(c, patch) => patchOverlayChild(selOverlay, c, patch)}
                 />

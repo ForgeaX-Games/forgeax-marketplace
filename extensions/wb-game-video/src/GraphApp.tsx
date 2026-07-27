@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import { BlueprintLibraryView } from './editor/shell/BlueprintLibraryView'
 import { GraphVideoView } from './editor/shell/GraphVideoView'
+import { GraphAssetView } from './editor/shell/GraphAssetView'
 import { GraphConfigView } from './editor/shell/GraphConfigView'
 import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
 import { useGraphScenario } from './editor/persist/graphScenarioStore'
@@ -24,6 +25,7 @@ import { injectStyleOnce } from './styles/injectStyle'
 const NAV: Array<{ id: GraphView; label: string; hint: string }> = [
   { id: 'graph', label: '蓝图', hint: '新引擎蓝图工作室 · 可编辑画布 + 右上试玩浮层（点节点才出配置）' },
   { id: 'video', label: '视频', hint: '内置演出视频库 · 蓝图「视频」下拉的数据源' },
+  { id: 'assets', label: '资产', hint: '图片与 BGM 资产库 · API 接入后统一管理上传资产' },
   { id: 'ui', label: '界面', hint: '覆盖物配置' },
   { id: 'rule', label: '规则', hint: '实体 / 变量 / 公式（左侧切换）' },
   { id: 'play', label: '试玩', hint: '新引擎预览 · 跑当前编辑的场景' },
@@ -79,6 +81,7 @@ function GraphMain(): JSX.Element {
     <main className="ga-main">
       {view === 'graph' && <BlueprintLibraryView />}
       {view === 'video' && <GraphVideoView />}
+      {view === 'assets' && <GraphAssetView />}
       {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义覆盖物' }]} scenario={NODIA_DEMO} />}
       {view === 'rule' && (
         <GraphConfigView

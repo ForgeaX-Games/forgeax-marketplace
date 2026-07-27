@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { setLocale } from '../../../i18n'
 import { useVideoAssets } from '../useVideoAssets'
 import { MAX_KINO_RESOURCE_PAGE_SIZE, type KinoResourceDTO, type KinoVideoClient } from '../kino-api'
 import { useKinoVideoCache } from '../kinoVideoCacheStore'
@@ -80,6 +81,7 @@ describe('useVideoAssets', () => {
   beforeEach(() => {
     defaultKinoList.mockReset()
     useKinoVideoCache.setState({ byGame: {} })
+    setLocale('zh')
   })
 
   it('uses the shared cache as the sole production list source', async () => {
@@ -140,31 +142,46 @@ describe('useVideoAssets', () => {
     expect(result.current.items.map((item) => item.id)).toEqual(['local-import', 'uploaded'])
   })
 
-  it('renames a resource through the Kino update endpoint', async () => {
-    const original = makeResource()
-    const renamed = makeResource({ name: 'Renamed clip', updated_at: 3 })
-    const client = makeClient({
-      get: vi.fn(async () => original),
-      update: vi.fn(async () => renamed),
-    })
+  it('renames an item while preserving its stable resource id and metadata', async () => {
+    const update = vi.fn(async (_id, input) => makeResource({
+      ...input,
+      name: input.name,
+      updated_at: 30,
+    }))
+    const client = makeClient({ update })
     const { result } = renderHook(() => useVideoAssets('demo', { client }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     await act(async () => {
-      await result.current.renameResource('res-1', ' Renamed clip ')
+      await result.current.renameResource('res-1', '  New name  ')
     })
 
-    expect(client.update).toHaveBeenCalledWith(
-      'res-1',
-      expect.objectContaining({
-        resource_id: 'res-1',
-        game_id: 'demo',
-        media_type: 'video',
-        name: 'Renamed clip',
-      }),
-      expect.anything(),
-    )
-    expect(result.current.items[0]).toMatchObject({ id: 'res-1', label: 'Renamed clip', updatedAt: 3 })
+    expect(client.get).toHaveBeenCalledWith('res-1', 'demo', expect.any(Object))
+    expect(update).toHaveBeenCalledWith('res-1', expect.objectContaining({
+      resource_id: 'res-1',
+      game_id: 'demo',
+      media_type: 'video',
+      name: 'New name',
+      type: 'UPLOAD',
+      remark: 'note',
+      source: 'upload',
+      source_meta: { duration_ms: 5000, mime_type: 'video/mp4' },
+    }), expect.any(Object))
+    expect(result.current.items[0]).toMatchObject({
+      id: 'res-1',
+      label: 'New name',
+      updatedAt: 30,
+    })
+  })
+
+  it('rejects an empty rename without calling the api', async () => {
+    const client = makeClient()
+    const { result } = renderHook(() => useVideoAssets('demo', { client }))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await expect(result.current.renameResource('res-1', '   ')).rejects.toThrow('视频名称不能为空')
+    expect(client.get).not.toHaveBeenCalled()
+    expect(client.update).not.toHaveBeenCalled()
   })
 
   it('replaces the same item without changing total', async () => {

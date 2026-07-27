@@ -437,13 +437,25 @@ describe('resolveUploadTransportUrl', () => {
     }
   })
 
-  it('keeps same-origin, EA local, and non-15185 URLs unchanged', () => {
+  it('keeps same-origin URLs and rewrites Local-provider Kino uploads through the ordinary API proxy', () => {
     const devOrigin = 'http://localhost:15185'
     const sameOrigin = `${devOrigin}/api/v1/kino/uploads/token`
     expect(resolveUploadTransportUrl(sameOrigin, { origin: devOrigin })).toBe(sameOrigin)
 
-    const eaUrl = 'http://127.0.0.1:18900/api/v1/kino/uploads/token'
-    expect(resolveUploadTransportUrl(eaUrl, { origin: devOrigin })).toBe(eaUrl)
+    const eaUrl = 'http://127.0.0.1:18900/api/v1/kino/uploads/token?game_id=demo'
+    expect(resolveUploadTransportUrl(eaUrl, { origin: devOrigin })).toBe(
+      `${devOrigin}/api/v1/kino/uploads/token?game_id=demo`,
+    )
+
+    const studioUrl = 'http://localhost:18920/api/v1/kino/uploads/token?game_id=demo'
+    expect(resolveUploadTransportUrl(studioUrl, { origin: devOrigin })).toBe(
+      `${devOrigin}/api/v1/kino/uploads/token?game_id=demo`,
+    )
+
+    const boundHostUrl = 'http://0.0.0.0:15185/api/v1/kino/uploads/token?game_id=demo'
+    expect(resolveUploadTransportUrl(boundHostUrl, { origin: devOrigin })).toBe(
+      `${devOrigin}/api/v1/kino/uploads/token?game_id=demo`,
+    )
 
     const studioOrigin = 'http://localhost:18920'
     expect(resolveUploadTransportUrl(CUSTOM_STORAGE_SIGNED, { origin: studioOrigin })).toBe(

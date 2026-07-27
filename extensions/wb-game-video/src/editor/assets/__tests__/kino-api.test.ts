@@ -109,6 +109,28 @@ describe('createKinoVideoClient', () => {
     expect(prepared.upload_token).toBe('token')
   })
 
+  it('accepts audio resource and upload MIME types', async () => {
+    const fetchImpl = makeFetch((input, init) => {
+      if (init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toMatchObject({ mime_type: 'audio/ogg' })
+        return new Response(JSON.stringify(envelope({
+          upload: { method: 'PUT', url: 'https://storage.example/upload', headers: {}, expires_at: '2099-01-01' },
+          object_url: 'https://storage.example/object',
+          upload_token: 'token',
+        })), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      expect(String(input)).toBe('/api/v1/kino/resources?game_id=demo&media_type=audio&page=1&page_size=20')
+      return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 1, page_size: 20 })), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    const client = createKinoVideoClient({ fetch: fetchImpl })
+
+    await client.prepareUpload({ game_id: 'demo', file_name: 'theme.ogg', mime_type: 'audio/ogg', bytes: FIXTURE_BYTES })
+    await client.list({ game_id: 'demo', media_type: 'audio', page: 1, page_size: 20 })
+  })
+
   it('serializes replacement fields when preparing an upload', async () => {
     const fetchImpl = makeFetch((_input, init) => {
       expect(JSON.parse(String(init?.body))).toEqual({

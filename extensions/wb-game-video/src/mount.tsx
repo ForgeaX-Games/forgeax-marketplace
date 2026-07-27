@@ -14,6 +14,7 @@
  */
 import { createRoot, type Root } from 'react-dom/client'
 import { GraphApp } from './GraphApp'
+import { initLocaleSync } from './i18n'
 import './styles/global.css'
 
 export interface GameVideoMountHandle {
@@ -24,6 +25,7 @@ export function mount(rootEl: HTMLElement): GameVideoMountHandle {
   if (!rootEl) {
     throw new Error('[gamevideo] mount() requires a non-null host element')
   }
+  initLocaleSync()
   rootEl.classList.add('ks-app-host')
   const reactRoot: Root = createRoot(rootEl)
   reactRoot.render(<GraphApp />)

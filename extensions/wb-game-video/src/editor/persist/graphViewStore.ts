@@ -7,8 +7,8 @@
  */
 import { create } from 'zustand'
 
-export type GraphView = 'graph' | 'video' | 'ui' | 'rule' | 'play'
-const VIEWS: readonly GraphView[] = ['graph', 'video', 'ui', 'rule', 'play']
+export type GraphView = 'graph' | 'video' | 'assets' | 'ui' | 'rule' | 'play'
+const VIEWS: readonly GraphView[] = ['graph', 'video', 'assets', 'ui', 'rule', 'play']
 
 const LS_KEY = 'gamevideo:graph:view'
 const CHANNEL = 'gamevideo:graph:view-sync'

@@ -14,6 +14,7 @@ import {
   type PreparedVideoUpload,
 } from './video-upload'
 import { useKinoVideoCache, useKinoVideoResources } from './kinoVideoCacheStore'
+import { t } from '../../i18n'
 
 export const DEFAULT_VIDEO_PAGE_SIZE = 20
 
@@ -62,7 +63,7 @@ function safeErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message
   }
-  return 'Unexpected error'
+  return t('videoAssets.unexpectedError')
 }
 
 export function appendVideoRevision(url: string, updatedAt: number): string {
@@ -305,7 +306,7 @@ export function useVideoAssets(
     async (resourceId: string, name: string): Promise<KinoResourceDTO | undefined> => {
       const nextName = name.trim()
       if (!nextName) {
-        return undefined
+        throw new Error(t('videoAssets.emptyName'))
       }
       const generation = ++crudGeneration.current
       setMutating(true)
@@ -340,7 +341,7 @@ export function useVideoAssets(
           return undefined
         }
         setLocalError(safeErrorMessage(err))
-        return undefined
+        throw err
       } finally {
         if (mountedRef.current && generation === crudGeneration.current) {
           setMutating(false)

@@ -2,6 +2,7 @@ import type {
   CreateKinoResourceInput,
   DirectUploadInstruction,
   DirectUploadResponse,
+  KinoMediaType,
   KinoResourceDTO,
   KinoVideoClient,
 } from './kino-api'
@@ -9,6 +10,49 @@ import { KinoClientError } from './kino-api'
 
 export const MAX_VIDEO_UPLOAD_BYTES = 104_857_600
 export const VIDEO_UPLOAD_MIME = 'video/mp4' as const
+export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
+export const MAX_AUDIO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_BYTES
+
+export type BrowserUploadMediaType = Extract<KinoMediaType, 'video' | 'image' | 'audio'>
+
+interface BrowserUploadPolicy {
+  mimeTypes: readonly string[]
+  maxBytes: number
+  extensions: Readonly<Record<string, readonly string[]>>
+}
+
+/**
+ * Browser-side mirror of the provider upload contract. All provider-backed
+ * media uploaders must validate through this table before preparing an upload.
+ */
+export const BROWSER_UPLOAD_POLICIES: Readonly<Record<BrowserUploadMediaType, BrowserUploadPolicy>> = {
+  video: {
+    mimeTypes: [VIDEO_UPLOAD_MIME],
+    maxBytes: MAX_VIDEO_UPLOAD_BYTES,
+    extensions: { [VIDEO_UPLOAD_MIME]: ['mp4'] },
+  },
+  image: {
+    mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+    maxBytes: MAX_IMAGE_UPLOAD_BYTES,
+    extensions: {
+      'image/png': ['png'],
+      'image/jpeg': ['jpg', 'jpeg'],
+      'image/webp': ['webp'],
+      'image/gif': ['gif'],
+    },
+  },
+  audio: {
+    mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac'],
+    maxBytes: MAX_AUDIO_UPLOAD_BYTES,
+    extensions: {
+      'audio/mpeg': ['mp3'],
+      'audio/wav': ['wav'],
+      'audio/ogg': ['ogg'],
+      'audio/mp4': ['m4a'],
+      'audio/aac': ['aac'],
+    },
+  },
+}
 
 const FORBIDDEN_UPLOAD_HEADERS = new Set([
   'accept-charset',
@@ -72,25 +116,17 @@ function isCrossOriginHttpUrl(instructionUrl: string, origin: string): boolean {
   }
 }
 
-function localEaPortFromUrl(url: URL): string {
-  if (url.port) {
-    return url.port
-  }
-  return url.protocol === 'https:' ? '443' : '80'
-}
-
-/** Keep direct uploads to the local ForgeaX API dev server on the vite proxy path. */
-function isLocalEaUploadUrl(instructionUrl: string): boolean {
+/** A server-issued Kino upload must stay on the ordinary `/api` proxy, never the COS/S3 proxy. */
+function kinoUploadUrl(instructionUrl: string): URL | null {
   try {
     const target = new URL(instructionUrl)
     if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      return false
+      return null
     }
-    const host = target.hostname.toLowerCase()
-    const port = localEaPortFromUrl(target)
-    return (host === '127.0.0.1' || host === 'localhost') && port === '18900'
+    const kinoUploadPath = /^\/api\/v1\/kino\/uploads\/[^/]+$/.test(target.pathname)
+    return kinoUploadPath && target.searchParams.has('game_id') ? target : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -106,8 +142,12 @@ export function resolveUploadTransportUrl(
   ) {
     return instructionUrl
   }
-  if (isLocalEaUploadUrl(instructionUrl)) {
-    return instructionUrl
+  const kinoUpload = kinoUploadUrl(instructionUrl)
+  if (kinoUpload) {
+    if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
+      return instructionUrl
+    }
+    return new URL(`${kinoUpload.pathname}${kinoUpload.search}`, origin).toString()
   }
   if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
     return instructionUrl
@@ -182,6 +222,75 @@ export class VideoUploadError extends Error {
   }
 }
 
+function fileExtension(fileName: string): string | undefined {
+  const match = /\.([A-Za-z0-9]+)$/.exec(fileName.trim())
+  return match?.[1]?.toLowerCase()
+}
+
+export function assertMediaUploadFile(mediaType: BrowserUploadMediaType, file: File): void {
+  const policy = BROWSER_UPLOAD_POLICIES[mediaType]
+  const extension = fileExtension(file.name)
+  if (!file.name.trim()) {
+    throw new VideoUploadError('Invalid upload file name', 'invalid_file_name')
+  }
+  if (!policy.mimeTypes.includes(file.type)) {
+    throw new VideoUploadError('Invalid upload mime type', 'invalid_media_type')
+  }
+  if (!extension || !policy.extensions[file.type]?.includes(extension)) {
+    throw new VideoUploadError('Invalid upload file name', 'invalid_file_name')
+  }
+  if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > policy.maxBytes) {
+    throw new VideoUploadError('Invalid upload size', 'invalid_upload_size')
+  }
+}
+
+export interface UploadProviderResourceOptions {
+  client: KinoVideoClient
+  transport?: UploadTransport
+  gameId: string
+  mediaType: BrowserUploadMediaType
+  file: File
+  name?: string
+  type?: CreateKinoResourceInput['type']
+  source?: string
+  sourceMeta?: CreateKinoResourceInput['source_meta']
+  onProgress?: (percent: number) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Standard prepare → PUT → create pipeline for non-replacement resources.
+ * The browser calls the `/api/v1/kino` route, while the server selects the
+ * active Local, S3, COS, or Kino provider.
+ * Video replacement and retry behavior builds on the lower-level primitives below.
+ */
+export async function uploadProviderResource(options: UploadProviderResourceOptions): Promise<KinoResourceDTO> {
+  assertMediaUploadFile(options.mediaType, options.file)
+  assertNotAborted(options.signal)
+  const requestOptions = options.signal ? { signal: options.signal } : undefined
+  const response = await options.client.prepareUpload({
+    game_id: options.gameId,
+    file_name: options.file.name,
+    mime_type: options.file.type as Parameters<KinoVideoClient['prepareUpload']>[0]['mime_type'],
+    bytes: options.file.size,
+    extension: fileExtension(options.file.name),
+  }, requestOptions)
+  const transport = options.transport ?? createDefaultXhrUploadTransport()
+  await transport.put(options.file, response.upload, options.onProgress, options.signal)
+  return options.client.create({
+    game_id: options.gameId,
+    media_type: options.mediaType,
+    url: response.object_url,
+    name: options.name ?? options.file.name,
+    type: options.type ?? 'UPLOAD',
+    source: options.source ?? 'upload',
+    source_meta: {
+      ...(options.sourceMeta ?? {}),
+      mime_type: options.file.type,
+    },
+  }, requestOptions)
+}
+
 export interface UploadVideoResourceOptions {
   client: KinoVideoClient
   transport?: UploadTransport
@@ -226,16 +335,7 @@ function createProgressReporter(onProgress?: (percent: number) => void) {
 }
 
 function assertMp4File(file: File): void {
-  const name = file.name.trim()
-  if (name.length === 0 || !name.toLowerCase().endsWith('.mp4')) {
-    throw new VideoUploadError('Invalid upload file name', 'invalid_file_name')
-  }
-  if (file.type !== VIDEO_UPLOAD_MIME) {
-    throw new VideoUploadError('Invalid upload mime type', 'invalid_media_type')
-  }
-  if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_VIDEO_UPLOAD_BYTES) {
-    throw new VideoUploadError('Invalid upload size', 'invalid_upload_size')
-  }
+  assertMediaUploadFile('video', file)
 }
 
 function fileIdentity(file: File): VideoFileIdentity {

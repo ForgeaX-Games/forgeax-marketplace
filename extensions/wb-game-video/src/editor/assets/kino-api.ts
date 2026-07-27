@@ -10,7 +10,7 @@ export interface KinoEnvelope<T> {
   error_code?: string
 }
 
-export type KinoMediaType = 'image' | 'video'
+export type KinoMediaType = 'image' | 'video' | 'audio'
 
 export type KinoResourceType =
   | 'KEYFRAME'
@@ -72,7 +72,17 @@ export interface DirectUploadResponse {
 export interface PrepareUploadInput {
   game_id: string
   file_name?: string
-  mime_type: 'video/mp4' | 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  mime_type:
+    | 'video/mp4'
+    | 'image/png'
+    | 'image/jpeg'
+    | 'image/webp'
+    | 'image/gif'
+    | 'audio/mpeg'
+    | 'audio/wav'
+    | 'audio/ogg'
+    | 'audio/mp4'
+    | 'audio/aac'
   bytes: number
   extension?: string
   client_resource_id?: string

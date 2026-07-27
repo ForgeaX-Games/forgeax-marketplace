@@ -23,9 +23,16 @@ const rowDelBtn: CSSProperties = {
   padding: '0 4px',
 }
 
-/** 引用角标：被 N 个节点挂载引用；0 = 未被引用（灰）。 */
-export function UsageBadge({ count }: { count: number }): JSX.Element {
+/**
+ * 引用角标：被 N 个节点挂载引用；0 = 未被引用（灰）。
+ * - `compact`（左栏窄列表用）：仅在被引用时渲一个 `⇢N` 迷你 pill；未引用时不占位（空 pill 只是噪音，
+ *   还挤占标题宽度）。完整语义仍在 title 里。
+ * - 非 compact（方案编辑头部，横向空间充足）：显示完整「被 N 个节点引用 / 未被引用」文案。
+ */
+export function UsageBadge({ count, compact = false }: { count: number; compact?: boolean }): JSX.Element | null {
   const used = count > 0
+  if (compact && !used) return null
+  const title = used ? `被 ${count} 个节点的 overlayNodes 引用` : '资源池里的闲置界面包（可保留）'
   return (
     <span
       style={{
@@ -37,9 +44,40 @@ export function UsageBadge({ count }: { count: number }): JSX.Element {
         color: used ? '#7fdda6' : '#8a8a8a',
         border: `1px solid ${used ? 'rgba(80,180,120,0.4)' : 'rgba(255,255,255,0.12)'}`,
       }}
-      title={used ? `被 ${count} 个节点的 overlayNodes 引用` : '资源池里的闲置界面包（可保留）'}
+      title={title}
     >
-      {used ? `被 ${count} 个节点引用` : '未被引用'}
+      {compact ? `⇢${count}` : used ? `被 ${count} 个节点引用` : '未被引用'}
+    </span>
+  )
+}
+
+/**
+ * 内容重复角标：本方案与另外 N 份界面方案**内容等价**（component + 位置 + 参数一致，见
+ * overlay-dedup.ts）。只提示、不自动处理——作者自行决定删哪份。`others` 为空则不渲染。
+ * `compact`（左栏窄列表用）：仅一个 `⧉` 图标；完整重复对象列表仍在 title 里。
+ */
+export function DuplicateBadge({
+  others,
+  compact = false,
+}: {
+  others: readonly string[]
+  compact?: boolean
+}): JSX.Element | null {
+  if (others.length === 0) return null
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        padding: compact ? '1px 5px' : '1px 6px',
+        borderRadius: 8,
+        whiteSpace: 'nowrap',
+        background: 'rgba(200,149,90,0.16)',
+        color: '#e0a35f',
+        border: '1px solid rgba(200,149,90,0.45)',
+      }}
+      title={`内容与 ${others.join('、')} 重复`}
+    >
+      {compact ? '⧉' : '⧉ 重复'}
     </span>
   )
 }
@@ -52,10 +90,15 @@ export interface OverlaySchemeEditorProps {
   usageCount: number
   /** 锁定态（基础覆盖物单组件方案）：只可编辑 layout，不允许增删组件、不显组件库/删除。 */
   locked?: boolean
+  /** 与本方案内容重复的其它方案 id（component+位置+参数等价，见 overlay-dedup.ts）；空 = 无重复。 */
+  duplicateOf?: readonly string[]
   onRename: (title: string) => void
   onRemove: () => void
-  /** 组件库拖到画布落地：presetId + 归一落点；返回新 child id（用于选中）。 */
-  onAddChild: (presetId: string, layout?: Partial<Layout>) => string | undefined | void
+  /** 组件库拖到画布落地：presetId（可选带初始 place）；返回新 child id（用于选中 + 拖入吸附）。 */
+  onAddChild: (
+    presetId: string,
+    place?: { inputs?: Record<string, unknown>; layout?: Partial<Layout> },
+  ) => string | undefined | void
   onRemoveChild: (childId: string) => void
   onPatchChild: (
     childId: string,
@@ -70,6 +113,7 @@ export function OverlaySchemeEditor({
   variables,
   usageCount,
   locked = false,
+  duplicateOf = [],
   onRename,
   onRemove,
   onAddChild,
@@ -112,12 +156,29 @@ export function OverlaySchemeEditor({
             style={{ flex: 1, fontWeight: 600 }}
           />
           <UsageBadge count={usageCount} />
+          <DuplicateBadge others={duplicateOf} />
           {!locked && <button style={del} onClick={onRemove}>删除</button>}
         </div>
         <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 8 }}>
           {overlayId}
           {locked && <span style={{ marginLeft: 8, color: '#c8955a' }}>· 基础组件方案（单组件，不可增删）</span>}
         </div>
+        {duplicateOf.length > 0 && (
+          <div
+            style={{
+              margin: '0 0 8px',
+              padding: '6px 8px',
+              borderRadius: 6,
+              fontSize: 11,
+              lineHeight: 1.5,
+              background: 'rgba(200,149,90,0.12)',
+              border: '1px solid rgba(200,149,90,0.4)',
+              color: '#e0a35f',
+            }}
+          >
+            ⧉ 本方案与 {duplicateOf.join('、')} 内容重复（组件 + 位置 + 参数一致），可考虑删除其一。
+          </div>
+        )}
 
         <OverlayCatalogPreview
           overlay={overlay}
@@ -128,9 +189,10 @@ export function OverlaySchemeEditor({
           onAddChild={
             locked
               ? undefined
-              : (presetId, layout) => {
-                  const id = onAddChild(presetId, layout)
+              : (presetId, place) => {
+                  const id = onAddChild(presetId, place)
                   if (typeof id === 'string') setSelectedChildId(id)
+                  return id
                 }
           }
           onPatchChildLayout={(childId, patch) => onPatchChild(childId, { layout: patch })}

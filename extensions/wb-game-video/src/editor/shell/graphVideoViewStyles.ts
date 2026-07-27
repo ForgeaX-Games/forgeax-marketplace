@@ -57,19 +57,23 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-head-fail { color: #ff8f8f; }
 .val-error { color: #ff8f8f; font-size: 12px; padding: 6px 10px; }
 .val-empty { color: var(--gc-faint); font-size: 12px; padding: 12px 10px; }
-.val-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.val-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; }
 .val-row > .gc-row { width: 100%; min-width: 0; }
 .val-row .gc-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.val-row-delete { width: 44px; min-width: 44px; height: 28px; min-height: 28px; margin-right: 8px; padding: 0 6px; border: 1px solid var(--gc-line-soft); background: transparent; color: var(--gc-muted); border-radius: 999px; font-size: 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease, border-color .15s ease; }
-.val-row:hover .val-row-delete { opacity: 1; pointer-events: auto; }
-.val-row:focus-within .val-row-delete { opacity: 1; pointer-events: auto; }
-.val-row.is-on .val-row-delete { opacity: 1; pointer-events: auto; }
-.val-row-delete:hover:not(:disabled), .val-row-delete:focus-visible { color: var(--gc-text); border-color: var(--gc-accent-line); }
-.val-row-delete:disabled { cursor: default; opacity: 0.4; }
-@media (prefers-reduced-motion: reduce) { .val-row-delete { transition: none; } }
+.val-row-action { min-width: 44px; height: 28px; min-height: 28px; padding: 0 6px; border: 1px solid var(--gc-line-soft); background: transparent; color: var(--gc-muted); border-radius: 999px; font-size: 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease, border-color .15s ease; }
+.val-row-delete { margin-right: 8px; }
+.val-row:hover .val-row-action { opacity: 1; pointer-events: auto; }
+.val-row:focus-within .val-row-action { opacity: 1; pointer-events: auto; }
+.val-row.is-on .val-row-action { opacity: 1; pointer-events: auto; }
+.val-row-action:hover:not(:disabled), .val-row-action:focus-visible { color: var(--gc-text); border-color: var(--gc-accent-line); }
+.val-row-action:disabled { cursor: default; opacity: 0.4; }
+@media (prefers-reduced-motion: reduce) { .val-row-action { transition: none; } }
 .val-load-more { margin: 8px 10px 12px; border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
 .val-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 40; }
 .val-dialog { background: var(--gc-panel2); border: 1px solid var(--gc-line-soft); border-radius: 12px; padding: 16px; max-width: 420px; width: calc(100% - 32px); color: var(--gc-text); }
+.val-dialog > label { display: block; margin: 10px 0 4px; color: var(--gc-faint); font-size: 12px; }
+.val-dialog > input { box-sizing: border-box; width: 100%; border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text); border-radius: 7px; padding: 8px 10px; font: inherit; }
+.val-dialog-error { margin-top: 6px; color: #ff8f8f; font-size: 12px; }
 .val-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .val-missing-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.72); color: #fff; padding: 16px; text-align: center; z-index: 3; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }

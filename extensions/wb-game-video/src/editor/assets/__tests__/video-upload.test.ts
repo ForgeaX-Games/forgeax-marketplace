@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import * as videoUpload from '../video-upload'
 import {
+  assertMediaUploadFile,
   completePreparedVideoUpload,
   createDefaultXhrUploadTransport,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_VIDEO_UPLOAD_BYTES,
   uploadVideoResource,
   VideoUploadError,
@@ -90,6 +92,25 @@ describe('uploadVideoResource validation', () => {
     await expect(
       uploadVideoResource({ client, transport, gameId: 'demo', file: huge }),
     ).rejects.toMatchObject({ code: 'invalid_upload_size' })
+  })
+})
+
+describe('shared browser media upload policy', () => {
+  it('uses the server image cap and requires m4a for audio/mp4', () => {
+    const oversizedImage = new File(['x'], 'cover.png', { type: 'image/png' })
+    Object.defineProperty(oversizedImage, 'size', { value: MAX_IMAGE_UPLOAD_BYTES + 1 })
+
+    expect(() => assertMediaUploadFile('image', oversizedImage)).toThrow(
+      expect.objectContaining({ code: 'invalid_upload_size' }),
+    )
+    expect(() => assertMediaUploadFile(
+      'audio',
+      new File(['x'], 'theme.mp4', { type: 'audio/mp4' }),
+    )).toThrow(expect.objectContaining({ code: 'invalid_file_name' }))
+    expect(() => assertMediaUploadFile(
+      'audio',
+      new File(['x'], 'theme.m4a', { type: 'audio/mp4' }),
+    )).not.toThrow()
   })
 })
 

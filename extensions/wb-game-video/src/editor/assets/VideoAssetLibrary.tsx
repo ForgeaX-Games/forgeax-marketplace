@@ -1,7 +1,6 @@
 import {
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -9,6 +8,7 @@ import {
   type Ref,
 } from 'react'
 import type { BlueprintDoc, GameScenario } from '../../runtime/schema/graph-schema'
+import { tf, useT } from '../../i18n'
 import type { MediaStatus } from './registry-types'
 import { findVideoReferences } from './video-references'
 import type { VideoAssetsController, VideoAssetListItem } from './useVideoAssets'
@@ -46,6 +46,7 @@ function ConfirmDialog({
   busy: boolean
   restoreFocus: HTMLElement | null
 }): JSX.Element {
+  const t = useT()
   const titleId = useId()
   const descriptionId = useId()
   const cancelRef = useRef<HTMLButtonElement | null>(null)
@@ -90,9 +91,9 @@ function ConfirmDialog({
         <h2 id={titleId}>{title}</h2>
         <p id={descriptionId} style={{ whiteSpace: 'pre-wrap' }}>{message}</p>
         <div className="val-dialog-actions">
-          <button ref={cancelRef} type="button" onClick={onCancel} disabled={busy}>取消</button>
+          <button ref={cancelRef} type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
           <button ref={confirmRef} type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? '处理中…' : confirmLabel}
+            {busy ? t('common.processing') : confirmLabel}
           </button>
         </div>
       </div>
@@ -100,12 +101,85 @@ function ConfirmDialog({
   )
 }
 
-function mapApiItem(item: VideoAssetListItem): VideoLibraryEntry {
+function RenameDialog({
+  entry,
+  onConfirm,
+  onCancel,
+  busy,
+  error,
+  restoreFocus,
+}: {
+  entry: VideoLibraryEntry
+  onConfirm: (name: string) => void
+  onCancel: () => void
+  busy: boolean
+  error: string | null
+  restoreFocus: HTMLElement | null
+}): JSX.Element {
+  const t = useT()
+  const titleId = useId()
+  const inputId = useId()
+  const [name, setName] = useState(entry.label)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const nextName = name.trim()
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+    return () => {
+      restoreFocus?.focus()
+    }
+  }, [restoreFocus])
+
+  return (
+    <div className="val-dialog-backdrop" role="presentation">
+      <form
+        className="val-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (nextName && nextName !== entry.label && !busy) {
+            onConfirm(nextName)
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !busy) {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+      >
+        <h2 id={titleId}>{t('videoAssets.renameTitle')}</h2>
+        <label htmlFor={inputId}>{t('videoAssets.name')}</label>
+        <input
+          ref={inputRef}
+          id={inputId}
+          value={name}
+          disabled={busy}
+          aria-invalid={!nextName}
+          onChange={(event) => setName(event.target.value)}
+        />
+        {!nextName ? <div className="val-dialog-error">{t('videoAssets.emptyName')}</div> : null}
+        {error ? <div className="val-dialog-error" role="alert">{error}</div> : null}
+        <div className="val-dialog-actions">
+          <button type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
+          <button type="submit" disabled={!nextName || nextName === entry.label || busy}>
+            {busy ? t('common.processing') : t('common.save')}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function mapApiItem(item: VideoAssetListItem, group: string): VideoLibraryEntry {
   return {
     id: item.id,
     label: item.label,
     url: item.url,
-    group: '上传',
+    group,
     fromApi: true,
     durMs: item.durMs,
     type: item.type,
@@ -124,6 +198,7 @@ export function VideoReplaceUpload({
   uploading,
   onReplace,
 }: VideoReplaceUploadProps): JSX.Element | null {
+  const t = useT()
   if (!entry?.fromApi) {
     return null
   }
@@ -138,12 +213,12 @@ export function VideoReplaceUpload({
 
   return (
     <label className="gvv-replace-upload" aria-disabled={uploading}>
-      <span aria-hidden>{uploading ? '上传中…' : '重新上传'}</span>
+      <span aria-hidden>{uploading ? t('videoAssets.replacing') : t('videoAssets.replace')}</span>
       <input
         className="gvv-replace-upload-input"
         type="file"
         accept="video/mp4"
-        aria-label={`重新上传 ${entry.label}`}
+        aria-label={tf('videoAssets.replaceAria', { name: entry.label })}
         disabled={uploading}
         onChange={onFileChange}
       />
@@ -167,6 +242,13 @@ export interface VideoAssetLibraryProps {
   listBodyRef?: Ref<HTMLDivElement>
 }
 
+interface BatchUploadState {
+  current: number
+  total: number
+  fileName: string
+  status: 'uploading' | 'failed'
+}
+
 export function VideoAssetLibrary({
   gameId,
   scenario,
@@ -181,15 +263,27 @@ export function VideoAssetLibrary({
   controller,
   listBodyRef,
 }: VideoAssetLibraryProps): JSX.Element {
+  const t = useT()
+  const uploadGroup = t('videoAssets.group.upload')
+  const [pendingRename, setPendingRename] = useState<VideoLibraryEntry | null>(null)
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<VideoLibraryEntry | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [operationError, setOperationError] = useState<string | null>(null)
+  const [batchUpload, setBatchUpload] = useState<BatchUploadState | null>(null)
+  const renameTriggerRef = useRef<HTMLElement | null>(null)
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
-  const actionsBusy = controller.uploading || controller.mutating || deleteBusy
+  const batchUploading = batchUpload?.status === 'uploading'
+  const actionsBusy = controller.uploading
+    || controller.mutating
+    || renameBusy
+    || deleteBusy
+    || batchUploading
 
-  const apiEntries = useMemo(() => controller.items.map(mapApiItem), [controller.items])
+  const apiEntries = controller.items.map((item) => mapApiItem(item, uploadGroup))
 
-  const entries = useMemo(() => {
+  const entries = (() => {
     const seen = new Set<string>()
     const out: VideoLibraryEntry[] = []
     for (const entry of [...apiEntries, ...bundledEntries, ...supplementalEntries]) {
@@ -200,9 +294,34 @@ export function VideoAssetLibrary({
       out.push(entry)
     }
     return out
-  }, [apiEntries, bundledEntries, supplementalEntries])
+  })()
 
-  const showUploadStatus = controller.uploadProgress != null || controller.uploadError != null
+  const showUploadStatus = batchUpload != null
+    || controller.uploadProgress != null
+    || controller.uploadError != null
+
+  const openRenameDialog = (entry: VideoLibraryEntry, trigger: HTMLElement) => {
+    setOperationError(null)
+    setRenameError(null)
+    renameTriggerRef.current = trigger
+    setPendingRename(entry)
+  }
+
+  const confirmRename = async (name: string) => {
+    if (!pendingRename?.fromApi) {
+      return
+    }
+    setRenameBusy(true)
+    setRenameError(null)
+    try {
+      await controller.renameResource(pendingRename.id, name)
+      setPendingRename(null)
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : t('videoAssets.renameFailed'))
+    } finally {
+      setRenameBusy(false)
+    }
+  }
 
   const openDeleteDialog = (entry: VideoLibraryEntry, trigger: HTMLElement) => {
     setOperationError(null)
@@ -225,53 +344,84 @@ export function VideoAssetLibrary({
       onDeleted?.(id)
       setPendingDelete(null)
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : '删除失败')
+      setOperationError(error instanceof Error ? error.message : t('videoAssets.deleteFailed'))
     } finally {
       setDeleteBusy(false)
     }
   }
 
-  const renameEntry = async (entry: VideoLibraryEntry) => {
-    if (!entry.fromApi || actionsBusy) {
-      return
-    }
-    const name = window.prompt('重命名视频素材', entry.label)
-    const nextName = name?.trim()
-    if (!nextName || nextName === entry.label) {
-      return
-    }
-    await controller.renameResource(entry.id, nextName)
-  }
-
-  const deleteMessage = useMemo(() => {
+  const deleteMessage = (() => {
     if (!pendingDelete) {
       return ''
     }
     const refs = findVideoReferences(scenario, pendingDelete.id, { blueprints, mainPackId })
     if (refs.length === 0) {
-      return `确定删除「${pendingDelete.label}」？此操作不可撤销。`
+      return tf('videoAssets.deleteUnused', { name: pendingDelete.label })
     }
     const lines = refs.map((r) => `${r.graphLabel} · ${r.nodeName} (${r.nodeId})`)
-    return `「${pendingDelete.label}」仍被以下节点引用：\n${lines.join('\n')}\n删除后图内绑定不会自动清除，但素材将无法播放。确定删除？`
-  }, [pendingDelete, scenario, blueprints, mainPackId])
+    return tf('videoAssets.deleteReferenced', {
+      name: pendingDelete.label,
+      references: lines.join('\n'),
+    })
+  })()
 
   const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!file) {
+    if (files.length === 0) {
       return
     }
-    const created = await controller.upload(file)
-    if (created) {
+
+    setOperationError(null)
+    setBatchUpload(null)
+    for (const [index, file] of files.entries()) {
+      if (files.length > 1) {
+        setBatchUpload({
+          current: index + 1,
+          total: files.length,
+          fileName: file.name,
+          status: 'uploading',
+        })
+      }
+      const created = await controller.upload(file)
+      if (!created) {
+        if (files.length > 1) {
+          setBatchUpload({
+            current: index + 1,
+            total: files.length,
+            fileName: file.name,
+            status: 'failed',
+          })
+          setOperationError(
+            tf('videoAssets.batchFailed', {
+              name: file.name,
+              completed: index,
+              total: files.length,
+            }),
+          )
+        }
+        return
+      }
       onSelect(created.resource_id)
     }
+    setBatchUpload(null)
+  }
+
+  const retryComplete = async () => {
+    const created = await controller.retryComplete()
+    if (!created) {
+      return
+    }
+    onSelect(created.resource_id)
+    setBatchUpload(null)
+    setOperationError(null)
   }
 
   return (
-    <aside className="gc-list val-library" aria-label="视频素材库">
+    <aside className="gc-list val-library" aria-label={t('videoAssets.libraryAria')}>
       <div className="gc-list-head">
         <span className="gc-list-ico" aria-hidden>🎥</span>
-        <span className="gc-list-title">视频素材</span>
+        <span className="gc-list-title">{t('videoAssets.title')}</span>
         <label
           className="val-head-upload"
           aria-disabled={actionsBusy}
@@ -281,27 +431,41 @@ export function VideoAssetLibrary({
             className="val-head-upload-input"
             type="file"
             accept="video/mp4"
-            aria-label="上传视频"
+            multiple
+            aria-label={t('videoAssets.upload')}
             disabled={actionsBusy}
             onChange={(e) => void onFileChange(e)}
           />
         </label>
         {showUploadStatus ? (
           <div className="val-head-status" role="status" aria-live="polite">
+            {batchUpload ? (
+              <span
+                className="val-head-batch"
+                title={batchUpload.fileName}
+              >
+                {tf('videoAssets.batchProgress', {
+                  current: batchUpload.current,
+                  total: batchUpload.total,
+                })}
+              </span>
+            ) : null}
             {controller.uploadProgress != null ? (
-              <span className="val-head-progress">上传 {controller.uploadProgress}%</span>
+              <span className="val-head-progress">
+                {tf('videoAssets.uploadProgress', { progress: controller.uploadProgress })}
+              </span>
             ) : null}
             {controller.uploadError ? (
               <>
-                <span className="val-head-fail">完成失败</span>
+                <span className="val-head-fail">{t('videoAssets.completeFailed')}</span>
                 {controller.canRetryComplete ? (
                   <button
                     type="button"
-                    aria-label="重试完成上传"
+                    aria-label={t('videoAssets.retryComplete')}
                     disabled={actionsBusy}
-                    onClick={() => void controller.retryComplete()}
+                    onClick={() => void retryComplete()}
                   >
-                    重试
+                    {t('videoAssets.retry')}
                   </button>
                 ) : null}
               </>
@@ -312,7 +476,7 @@ export function VideoAssetLibrary({
         <button
           type="button"
           className="val-head-refresh"
-          aria-label="刷新视频库"
+          aria-label={t('videoAssets.refresh')}
           onClick={() => void controller.refresh()}
           disabled={controller.loading || actionsBusy}
         >
@@ -328,11 +492,11 @@ export function VideoAssetLibrary({
 
       <div className="gc-list-body" ref={listBodyRef}>
         {controller.loading && entries.length === 0 ? (
-          <div className="val-empty" role="status">加载视频素材…</div>
+          <div className="val-empty" role="status">{t('videoAssets.loading')}</div>
         ) : null}
 
         {!controller.loading && entries.length === 0 ? (
-          <div className="val-empty">暂无视频素材。可上传 MP4 或使用内置 bundle。</div>
+          <div className="val-empty">{t('videoAssets.empty')}</div>
         ) : null}
 
         {entries.map((entry) => {
@@ -346,29 +510,51 @@ export function VideoAssetLibrary({
                 className={`gc-row${isSelected ? ' is-on' : ''}`}
                 aria-label={`${entry.group} · ${entry.label}`}
                 onClick={() => onSelect(entry.id)}
-                onDoubleClick={() => void renameEntry(entry)}
+                onDoubleClick={(event) => {
+                  if (entry.fromApi && !actionsBusy) {
+                    openRenameDialog(entry, event.currentTarget)
+                  }
+                }}
               >
                 <span className="gc-row-mark" aria-hidden>{isBound ? '✓' : ''}</span>
                 <span className="gc-row-label">{entry.group} · {entry.label}</span>
                 {entry.status && entry.status !== 'ready' ? (
                   <span className={`gvv-row-status is-${entry.status}`}>
-                    {entry.status === 'generating' ? '生成中…' : entry.status === 'failed' ? '失败' : '占位'}
+                    {entry.status === 'generating'
+                      ? t('videoAssets.status.generating')
+                      : entry.status === 'failed'
+                        ? t('videoAssets.status.failed')
+                        : t('videoAssets.status.placeholder')}
                   </span>
                 ) : null}
               </button>
               {entry.fromApi ? (
-                <button
-                  type="button"
-                  className="val-row-delete"
-                  aria-label={`删除 ${entry.label}`}
-                  disabled={actionsBusy}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    openDeleteDialog(entry, event.currentTarget)
-                  }}
-                >
-                  删除
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="val-row-action val-row-rename"
+                    aria-label={tf('videoAssets.renameAria', { name: entry.label })}
+                    disabled={actionsBusy}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openRenameDialog(entry, event.currentTarget)
+                    }}
+                  >
+                    {t('videoAssets.rename')}
+                  </button>
+                  <button
+                    type="button"
+                    className="val-row-action val-row-delete"
+                    aria-label={tf('videoAssets.deleteAria', { name: entry.label })}
+                    disabled={actionsBusy}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openDeleteDialog(entry, event.currentTarget)
+                    }}
+                  >
+                    {t('videoAssets.delete')}
+                  </button>
+                </>
               ) : null}
             </div>
           )
@@ -379,23 +565,34 @@ export function VideoAssetLibrary({
         <button
           type="button"
           className="val-load-more"
-          aria-label="加载更多视频"
+          aria-label={t('videoAssets.loadMore')}
           disabled={controller.loading}
           onClick={() => void controller.loadMore()}
         >
-          {controller.loading ? '加载中…' : '加载更多'}
+          {controller.loading ? t('videoAssets.loadingMore') : t('videoAssets.loadMore')}
         </button>
       ) : null}
 
       {pendingDelete ? (
         <ConfirmDialog
-          title="删除视频素材"
+          title={t('videoAssets.deleteTitle')}
           message={deleteMessage}
-          confirmLabel="确认删除"
+          confirmLabel={t('videoAssets.confirmDelete')}
           onConfirm={() => void confirmDelete()}
           onCancel={() => setPendingDelete(null)}
           busy={deleteBusy}
           restoreFocus={deleteTriggerRef.current}
+        />
+      ) : null}
+
+      {pendingRename ? (
+        <RenameDialog
+          entry={pendingRename}
+          onConfirm={(name) => void confirmRename(name)}
+          onCancel={() => setPendingRename(null)}
+          busy={renameBusy}
+          error={renameError}
+          restoreFocus={renameTriggerRef.current}
         />
       ) : null}
     </aside>

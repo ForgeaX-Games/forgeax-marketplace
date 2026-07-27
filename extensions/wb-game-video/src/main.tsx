@@ -7,7 +7,10 @@ import { GraphApp } from './GraphApp'
 import { GraphPlayer } from './editor/shell/GraphPlayer'
 import { GraphStudio } from './editor/shell/GraphStudio'
 import { NODIA_DEMO } from './editor/demo/demo'
+import { initLocaleSync } from './i18n'
 import './styles/global.css'
+
+initLocaleSync()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element #root not found')

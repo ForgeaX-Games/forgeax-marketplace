@@ -7,6 +7,7 @@ import { describe, expect, it, beforeAll } from 'vitest'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 import { registerCoreSkins } from '../component-host/components'
 import { inkYingMoDefaults } from '../component-host/components/InkYingMoLayer'
+import { nodeOverlayChildren } from '../schema/expand-overlay'
 
 beforeAll(() => {
   registerCoreSkins()
@@ -20,8 +21,12 @@ describe('nodia narrative demo contract', () => {
     expect(inkYingMoDefaults.y).toBe(0.88)
     const scn = makeNodiaDemo()
     for (const id of YINGMO_NODES) {
-      const child = scn.ui?.overlays?.[id]?.children?.[0]
-      const dur = scn.graph.nodes.find((n) => n.id === id)?.data.durationMs
+      const node = scn.graph.nodes.find((n) => n.id === id)
+      // 6 节点已归一到共享 base:inkYingMo 方案；各自的「片尾前 3s」时机（dur-3000）落在挂载的
+      // overrides 里，故读**展开后**的挂载 child（经 resolveMountChildren 套用 override），而不是
+      // scn.ui.overlays[id]（该 per-node 方案已不复存在）。
+      const child = nodeOverlayChildren(scn, node)[0]
+      const dur = node?.data.durationMs
       expect(typeof dur, id).toBe('number')
       expect(child?.component, id).toBe('inkYingMo')
       expect(child?.inputs?.x, id).toBe(0.5)

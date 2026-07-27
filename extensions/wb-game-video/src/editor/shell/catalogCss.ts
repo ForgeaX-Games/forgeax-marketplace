@@ -132,7 +132,7 @@ ${PREVIEW_CLOCK_CSS}
   font-size: 11px; color: #5fbf7f;
 }
 .gc-row-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gc-row-badge { flex: none; margin-left: auto; }
+.gc-row-badge { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 /* 每行右侧的行内动作（重命名/设为入口/删除）——平时透明，hover/选中才显。 */
 .gc-row-actions { flex: none; display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .gc-row:hover .gc-row-actions, .gc-row.is-on .gc-row-actions { opacity: 1; }
@@ -174,7 +174,9 @@ ${PREVIEW_CLOCK_CSS}
 }
 .gc-group-add:hover { background: var(--gc-accent-soft); color: var(--gc-text); border-color: var(--gc-accent-line); }
 .gc-group-children { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
-.gc-row.is-leaf { margin-left: 14px; }
+/* 叶子（方案行）：缩进收窄 + 内部 mark/gap 压紧，把宽度让给标题（左栏仅 248px）。 */
+.gc-row.is-leaf { margin-left: 6px; gap: 6px; padding-left: 8px; padding-right: 8px; }
+.gc-row.is-leaf .gc-row-mark { width: 11px; }
 .gc-group-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 10px 6px 24px; }
 
 /* ── 右栏预览 ── */

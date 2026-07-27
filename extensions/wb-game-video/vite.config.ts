@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vitest/config'
-import type { Plugin } from 'vite'
+import { loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { existsSync, createReadStream, statSync } from 'fs'
@@ -70,11 +70,10 @@ function readGraphReqJson(req: { on: (ev: string, cb: (arg?: unknown) => void) =
 }
 
 // ─── Dev-only signed upload reverse proxy (port 15185) ───────────────────
-function videoUploadProxyPlugin(): Plugin {
+function videoUploadProxyPlugin(allowedExtraHosts: readonly string[]): Plugin {
   return {
     name: 'gamevideo-video-upload-proxy',
     configureServer(server) {
-      const allowedExtraHosts = parseAllowedExtraHosts(process.env.VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS)
       server.middlewares.use(
         VIDEO_UPLOAD_PROXY_ROUTE_PREFIX,
         createVideoUploadProxyHandler({ allowedExtraHosts }),
@@ -273,7 +272,9 @@ function gameComponentsDevPlugin(): Plugin {
 // 属 seed/构建步骤，走 CLI `scripts/sync-components-to-game.mjs`，不在 vite / 保存链里做。
 // 存储/打版本一律走 game-host 服务（/api/game-host）。
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const allowedVideoUploadHosts = parseAllowedExtraHosts(env.VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS)
   // 作为 forgeax-studio 插件 build 时，host 把产物挂在 `/extensions/wb-game-video/`
   // 子路径下，需要绝对 base；独立 dev/preview/standalone 用相对 './'。
   const pluginBase =
@@ -282,7 +283,7 @@ export default defineConfig(() => {
 
   return {
     base: pluginBase,
-    plugins: [react(), videoUploadProxyPlugin(), gameVideoAssetsPlugin(), gameComponentsDevPlugin()],
+    plugins: [react(), videoUploadProxyPlugin(allowedVideoUploadHosts), gameVideoAssetsPlugin(), gameComponentsDevPlugin()],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

@@ -44,6 +44,6 @@ export function renderOverlayChildPreview(
   //  · layout 型（横幅/面板等流式组件）→ 按 child.layout.left/top 定位，故拖 layout 能移动它。
   const wrapStyle: CSSProperties = positionModeOf(child.component).kind === 'inputs'
     ? STAGE_FILL_WRAP
-    : { ...childWrapStyle(child.layout, false), pointerEvents: 'none' }
+    : { ...childWrapStyle(child.layout ?? { left: 0, top: 0 }, false), pointerEvents: 'none' }
   return <div style={wrapStyle}>{body}</div>
 }
