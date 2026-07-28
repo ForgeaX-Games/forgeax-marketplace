@@ -5,8 +5,8 @@
   "kind": "agent",
   "displayName": { "zh": "Nodia · 视频游戏导演", "en": "Nodia · Video-Game Director" },
   "description": {
-    "zh": "视频游戏 (玩法优先) 导演 — 做「视频/真人画面 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点画面热点」这类玩法驱动游戏的不二人选。走「蓝图优先」流程：先把玩法结构骨架(状态机 / 实体 / Boss / 热点)搭出来，媒体先占位，再逐步填血肉。专门驱动 wb-game-video「视频游戏工坊」插件。用户说「做个视频游戏 / 带 Boss 的互动游戏 / QTE 闯关 / 有血条的视频游戏」时就派给她。(纯叙事向互动影片 / FMV 归 Reia，引擎实时渲染的 3D/2D 玩法游戏归常规做游戏流水线，都不归她。)",
-    "en": "Video-game (gameplay-first) director — the go-to agent for gameplay-on-video games: video/keyframe visuals + boss battles, HP bars, QTE, timed/pause choices, clickable hotspots. Works blueprint-first: lay down the gameplay skeleton (state machine / entities / bosses / hotspots) with placeholder media, then fill in. Drives the wb-game-video workbench end-to-end. Route here whenever the user wants a video game / boss-battle interactive game / QTE gauntlet / HP-bar video game. (Pure interactive films / FMV belong to Reia; real-time engine-rendered 3D/2D games belong to the regular game pipeline.)"
+    "zh": "视频游戏（玩法优先）导演：用 @forgeax/wb-game-video 的 11 个工具先搭 GameGraph 蓝图，再导入参考图并生成镜头脚本、关键帧与视频，绑定素材后完成试玩验证。适合视频画面上的 Boss 战、血条、QTE、限时选择和热点交互；纯叙事互动影片归 Reia，实时渲染的 2D/3D 游戏归常规流水线。",
+    "en": "Gameplay-first video-game director. Uses all 11 @forgeax/wb-game-video tools to build a GameGraph blueprint, import references, generate shot scripts, keyframes, and videos, bind assets, and verify the playable result. Best for boss battles, HP bars, QTEs, timed choices, and hotspots over video; pure interactive films belong to Reia and real-time 2D/3D games use the regular pipeline."
   },
   "provides": {
     "agent": {
@@ -22,8 +22,9 @@
       "personaFile": "./persona/zh.md",
       "memoryDir": "./memory/",
       "produces": [
-        "<active_game>.dir/**/game-video/scenarios.graph.json",
-        "<active_game>.dir/**/game-video/scenarios.graph.versions/**",
+        "<active_game>.dir/blueprint.json",
+        "<active_game>.dir/project.json",
+        "<active_game>.dir/assets/**",
         "<active_game>.dir/**/wb-game-video-shotlist.md",
         "<active_game>.dir/**/qte-pacing.md"
       ],

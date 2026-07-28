@@ -3,13 +3,17 @@
 // layout (blueprint.json + project.json at the game repo root), so the save
 // loop round-trips REAL content on first load rather than falling back to demo.
 //
-// Run with bun from the extension dir:  bun scripts/seed-nodia-blueprint.mjs
+// Run with bun from this independent repo:
+//   bun scripts/seed-nodia-blueprint.mjs /absolute/path/to/game-nodia-fighting
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Resolve the repo root (extension is packages/marketplace/extensions/wb-game-video).
-const repoRoot = resolve(import.meta.dirname, '..', '..', '..', '..', '..')
-const gameRoot = resolve(repoRoot, 'packages', 'games', 'game-nodia-fighting')
+const gameRootArg = process.argv[2]
+if (!gameRootArg) {
+  console.error('usage: bun scripts/seed-nodia-blueprint.mjs /absolute/path/to/game-root')
+  process.exit(2)
+}
+const gameRoot = resolve(gameRootArg)
 const oldCanon = resolve(gameRoot, 'game-video', 'scenarios.graph.json')
 
 const { normalizeDocument } = await import('../src/editor/persist/blueprint-project.ts')

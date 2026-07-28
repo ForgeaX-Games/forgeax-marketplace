@@ -8,14 +8,14 @@
  *
  * 与 forgeax 宿主 `/api/game-host` 写盘**同格式**（AI 与 UI 单写者不分叉）：
  *   UI 走 HTTP PUT package；AI（wb-game-video:*）经本模块直写同样的 blueprint.json / project.json。
- * 版本 = 游戏仓 git annotated tag（由 game-host 打），不再有 `scenarios.graph.versions/`。
+ * 版本 = 游戏仓 git annotated tag（由 game-host 打）；本模块只保存当前文档。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 import { normalizeDocument } from './blueprint-project'
 
-/** 保留类型以兼容既有 import；版本走 git tag，本模块不再产 keep-10 条目。 */
+/** 保留类型以兼容既有 import；版本走 git tag，本模块返回空列表。 */
 export interface VersionEntry { id: string; savedAt: number }
 
 const BLUEPRINT_FILE = 'blueprint.json'

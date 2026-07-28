@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "@forgeax/wb-game-video",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "kind": "workbench",
   "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
   "description": {
@@ -32,8 +32,8 @@
         "center": { "minHeight": 600, "scrollable": false }
       },
       "matchProduces": [
-        "**/game-video/**",
-        "**/scenarios.graph.json"
+        "**/blueprint.json",
+        "**/assets/manifest.json"
       ],
       "preferredAgent": "@forgeax-extension/agent-nodia"
     },
@@ -61,8 +61,8 @@
         "returns": "./schemas/save-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "整本覆盖写当前 game 的库文档到 scenarios.graph.json（原 scenario + manifest，含主/子蓝图），并压一版快照（留10）。成功返回 {ok:true, versions, gameSlug}；缺 project 时返回 {ok:false, errors}。典型：get-graph → 改 manifest.packs[*].graph → save-graph。",
-          "en": "Whole-document overwrite into scenarios.graph.json (original scenario + manifest with main/sub blueprints), plus a version snapshot (keeps 10). Returns {ok:true, versions, gameSlug} on success, or {ok:false, errors} when project is missing. Typical: get-graph → edit manifest.packs[*].graph → save-graph."
+          "zh": "整本覆盖写当前 game 的 GraphLibraryDocument 到 blueprint.json；首次写入时补 project.json。title 当前忽略，成功固定返回 {ok:true, versions:[], gameSlug}；缺 project 时返回 {ok:false, errors}。",
+          "en": "Overwrite the current game's GraphLibraryDocument in blueprint.json and create project.json on the first write. title is currently ignored. Success returns {ok:true, versions:[], gameSlug}; a missing project returns {ok:false, errors}."
         }
       },
       {
@@ -168,22 +168,21 @@
     }
   },
   "permissions": [
-    "fs:read:.forgeax/games/{slug}/game-video/**",
-    "fs:write:.forgeax/games/{slug}/game-video/**",
-    "fs:read:.forgeax/games/{slug}/assets/**",
-    "fs:write:.forgeax/games/{slug}/assets/**",
-    "fs:read:.forgeax/games/{slug}/characters/**",
-    "fs:read:.forgeax/games/{slug}/textures/**",
+    "fs:read:{gameRoot}/blueprint.json",
+    "fs:write:{gameRoot}/blueprint.json",
+    "fs:read:{gameRoot}/project.json",
+    "fs:write:{gameRoot}/project.json",
+    "fs:read:{gameRoot}/assets/**",
+    "fs:write:{gameRoot}/assets/**",
+    "fs:read:{gameRoot}/characters/**",
+    "fs:read:{gameRoot}/textures/**",
     "model:text:reasoning",
     "model:image:still",
-    "model:video:kinetic",
-    "emit:wb-game-video.*"
+    "model:video:kinetic"
   ],
   "requestedEnv": [
     "FORGEAX_SERVER_URL",
-    "FORGEAX_SERVER_PORT",
-    "PORT_WB_GAME_VIDEO_STUDIO",
-    "VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS"
+    "FORGEAX_SERVER_PORT"
   ],
   "experimental": true
 }

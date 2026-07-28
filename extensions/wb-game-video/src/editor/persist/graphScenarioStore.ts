@@ -2,9 +2,9 @@
  * 新引擎（graph）场景的**共享状态 store** —— 让「蓝图·新 / 实体 / 变量 / 规则 / 场景 / 试玩·新」
  * 这些并行视图共用**同一份 graph + 场景级 meta + 持久化**。
  *
- * 持久化模型（v6，单文件库）：SSOT = 原 scenario 形状 + `manifest`（含 main 与全部子蓝图）。
- * 落盘只写 `scenarios.graph.json`（+ 版本快照）；无 `sharedMeta` / `blueprints/` 文件夹。
- * 进入优先级：草稿 > 磁盘最新 > 空库（零节点）。「重置」才回内置 demo。
+ * 持久化模型：SSOT = `blueprint.json` 中原 scenario 形状 + `manifest`
+ * （含 main 与全部子蓝图）。进入优先级：草稿 > 磁盘最新 > 空库（零节点）。
+ * 「重置」才回内置 demo。
  */
 import { create, useStore } from 'zustand'
 import { temporal } from 'zundo'

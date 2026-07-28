@@ -55,6 +55,7 @@ src/**/*.d.ts
 # (__RS_*__). Not tsc-emitted — must be tracked so `tsc -p tsconfig.build.json`
 # resolves them on a fresh clone.
 !src/rs-defines.d.ts
+!src/assets.d.ts
 
 # 测试 / IDE
 coverage/

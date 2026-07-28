@@ -4,7 +4,7 @@
  */
 
 // 字体与皮肤组件同层自带（component-host/assets）；随 runtime 一起发，不依赖 editor 注入。
-import brushFontUrl from '../assets/fonts/HYShangWei.woff2?url'
+import brushFontUrl from '../assets/fonts/HYShangWei.woff2'
 
 const injected = new Map<string, HTMLStyleElement>()
 
@@ -48,4 +48,3 @@ export function ensureBrushFont(): void {
     `@font-face{font-family:'HYShangWei';src:url('${brushFontUrl}') format('woff2');font-weight:normal;font-style:normal;font-display:swap;}`,
   )
 }
-

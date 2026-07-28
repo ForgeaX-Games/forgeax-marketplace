@@ -14,7 +14,7 @@
 import { pluginFetch } from '../../lib/plugin-http'
 import type { GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 
-/** 保留类型以兼容既有 import；game-host 版本载体是 git tag，不再是 keep-10 条目。 */
+/** 保留类型以兼容既有 import；game-host 版本载体是 git tag。 */
 export interface VersionEntry {
   id: string
   savedAt: number
@@ -24,7 +24,7 @@ export interface GraphStore {
   project: GraphLibraryDocument | null
   /** localStorage 未保存草稿。 */
   draft: GraphLibraryDocument | null
-  /** 版本条目（game-host 下恒为空——版本走 git tag，UI 不再列 keep-10）。 */
+  /** 兼容字段；game-host 下恒为空，版本查询走独立的 git-tag API。 */
   versions: VersionEntry[]
 }
 

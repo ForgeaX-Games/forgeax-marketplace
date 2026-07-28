@@ -10,11 +10,9 @@
     "warnings": { "type": "array", "items": { "type": "string" } },
     "versions": {
       "type": "array",
-      "description": "Latest version index (most recent first, up to 10).",
-      "items": {
-        "type": "object",
-        "properties": { "id": { "type": "string" }, "savedAt": { "type": "number" } }
-      }
+      "description": "Reserved compatibility field. Successful saves currently return an empty array.",
+      "maxItems": 0,
+      "items": false
     },
     "gameSlug": { "type": ["string", "null"] }
   }

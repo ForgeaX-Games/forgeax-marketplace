@@ -1,13 +1,26 @@
 # Nodia · 累积 lessons
 
-这文件是 Nodia 自己在每个 phase 收尾时手写的「下次别再犯」。AI 只 append 不重写。
+这文件记录已验证、下次必须继续遵守的事实。新增经验只追加，不用旧印象覆盖 schema。
 
-## 2026-07-09 · 引擎切换到 GameGraph（重大重写）
-- 旧 FMV 那套（forge-script / save-scenario / generate-video / generate-storyboard / generate-keyframes / produce-node / import-from-narrative、Seedance 视频生成、`/__reel__/*` 队列、`.gamevideo-scenarios/scenario.json`、`scenarioToBlueprint`/`blueprint-schema.ts`）**已整体删除，不复存在**。别再引用任何已删除的 scenario / generate 工具或 Scene/Scenario(scenes dict) 结构。
-- 新引擎唯一契约 = **GameGraph**（演出节点 + 条件出边），只有三个工具：
-  - `wb-game-video:get-graph` — 读当前 game 的 GameGraph（无盘回退 demo）。改图前必调。
-  - `wb-game-video:save-graph` — 整本回写 + 版本快照（留10）；落盘前结构校验（节点 id 唯一、边 source/target 存在），`ok:false` 看 `errors`。
-  - `wb-game-video:list-videos` — 列内置演出视频库 basename；**本引擎不生成新视频**，只从库里绑。
-- 标准闭环：get-graph → 在 `scenario.graph` 上改 nodes/edges → （需要绑视频时）list-videos → save-graph。微改如「A→B 改成 A→C」= 改那条 edge 的 `target`。
-- schema 硬约束：只有 `type:'perf'` 演出节点、每个绑视频；出手/血量/胜负等判断一律折进 `edge.data.condition`/`weight`；无独立网关节点；跨节点记忆用变量+条件边。代码权威 `wb-game-video/src/blueprint/graph/graph-schema.ts` + `engine.ts` + `demo/nodia.graph.json`。
-- 落盘位置：`.forgeax/games/<slug>/game-video/scenarios.graph.json`（+ `scenarios.graph.versions/`），按当前激活 game 隔离。
+## 2026-07-29 · 以 `@forgeax/wb-game-video` 当前契约为准
+
+- `wb-game-video:get-graph`：无盘时返回 `{ project: null }`。
+- `wb-game-video:save-graph`：传 `project`、`title?`、`gameSlug?`；成功返回 `{ ok: true, versions: [], gameSlug }`。
+- `wb-game-video:list-videos`：返回可绑定 `media.ref` 的 `videos`。
+- `wb-game-video:generate-shot-script`：传 `nodeName`、`storyText`，返回 `shots`。
+- `wb-game-video:generate-keyframe`：传 `sceneNodeId`、`nodeName`、`beat`，返回 `asset`。
+- `wb-game-video:generate-video`：传 `sceneNodeId`、`nodeName`、`characterRefIds`、`sceneRefIds`；`durationSeconds` 遵循 schema，当前最大 60 秒，返回 `asset`。
+- `wb-game-video:generate-node-video`：传 `sceneNodeId`、`nodeName`、`characterRefIds`、`sceneRefIds`，返回 `assets[]`。
+- `wb-game-video:list-assets`：按 `kind`、`productionType`、`sceneNodeId` 过滤，返回 `assets`。
+- `wb-game-video:get-asset`：传 `id`，返回 `asset`。
+- `wb-game-video:import-character-refs`：扫描 `characters`，返回 `refs`。
+- `wb-game-video:import-scene-refs`：扫描 `textures`，返回 `refs`。
+- 标准闭环是 get → 修改 `project.manifest.packs[*].graph` → 导入/生成媒体 →
+  绑定 `asset.id` → save → playtest。
+- `CORE_NODE_KINDS = perf / subflow / subflowPack`；`GraphCondition = { all: GraphClause[] }`。edge 只承载 condition/weight；效果通过 `node.data.reactions[].do` 中的 `{ kind: 'effect', effects: [...] }` 动作执行。
+- UI 的真实路径是 `project.ui.overlays` 与 `node.data.overlayNodes`。没有可走
+  edge 且调用栈为空时自然结束。
+- 根文档是 `.forgeax/games/<slug>/blueprint.json` 与同级 `project.json`，
+  素材在 `assets/`。代码权威路径是 `src/runtime/schema/graph-schema.ts`、
+  `src/runtime/nodes/index.ts`、`src/runtime/engine/engine.ts` 和
+  `src/editor/demo/nodia.graph.json`。

@@ -1,5 +1,5 @@
 /**
- * 域 graph schema —— 新引擎/蓝图的**持久化 SSOT 形态**（存 scenarios.graph.json）。
+ * 域 graph schema —— 新引擎/蓝图的**持久化 SSOT 形态**（存 blueprint.json）。
  *
  * 在 `./react-flow-schema.ts` 的泛型骨架（Node/Handle/Edge/Graph）之上落定本引擎的数据契约。
  * 视频覆盖物见 `./node-config-schema.ts`：
@@ -399,7 +399,7 @@ export type GameGraph = Graph<GameNode, GameEdge>
 
 // （类型 Reaction 由上方 export type 与 node-config 导出；挂在节点 / overlay 挂载上，不再有局级 reactions。）
 
-/** 顶层容器（scenarios.graph.json 的 scenario 内容形态）。 */
+/** 顶层容器（blueprint.json 的文档内容形态）。 */
 export interface GameScenario {
   version: string
   /** Record key === Variable.id（添加时自动生成）。 */

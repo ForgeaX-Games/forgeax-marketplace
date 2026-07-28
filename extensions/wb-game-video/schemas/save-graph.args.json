@@ -7,16 +7,16 @@
   "properties": {
     "project": {
       "type": "object",
-      "description": "Full GraphLibraryDocument to persist (scenario + manifest with main and sub blueprints). Whole-document overwrite into scenarios.graph.json."
+      "description": "Full GraphLibraryDocument to persist (scenario + manifest with main and sub blueprints). Whole-document overwrite into blueprint.json."
     },
     "title": {
       "type": "string",
-      "description": "Human-readable title for this saved version (<=120 chars)."
+      "description": "Reserved human-readable label. Accepted for compatibility but currently ignored."
     },
     "gameSlug": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
-      "description": "Target game slug. Omit to use the currently active game."
+      "pattern": "^(?!\\.{1,2}$)[^/\\\\]+$",
+      "description": "Optional explicit game id; when present it must exactly equal the host-bound game. Unicode and single-character ids are supported."
     }
   }
 }

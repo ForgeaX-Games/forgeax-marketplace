@@ -477,7 +477,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         )}
         {isDraft && (
           <div
-            title="当前显示的是未保存草稿（scenarios.graph.draft.json），尚未写入权威 scenarios.graph.json。点右侧「💾 保存」提交。"
+            title="当前显示的是 localStorage 未保存草稿，尚未写入权威 blueprint.json。点右侧「💾 保存」提交。"
             style={{
               position: 'absolute',
               top: 8,

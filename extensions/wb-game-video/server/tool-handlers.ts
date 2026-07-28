@@ -7,12 +7,16 @@
  *   游戏仓根 `.forgeax/games/<slug>/blueprint.json`（+ project.json）。
  * 版本 = 游戏仓 git annotated tag（由 game-host 打）。
  *
- * 沙箱契约：handlers 只用 ctx.env 取配置、ctx.cwd 定位工程根；绝不读 process.env。
+ * 两种宿主上下文按需归一成 boundGameId/gameRoot/extensionRoot：
+ *   Arrival: gameId + cwd(gameRoot) + extensionDir
+ *   ForgeaX: game + projectRoot + cwd(extensionRoot)
+ * list-videos 只需要 extensionRoot；游戏相关工具才要求游戏绑定。
+ * 不读取 active-game，不从进程 cwd 猜测用户数据根。
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { assetsDir as resolveAssetsDir, getAsset, listAssets } from './asset-registry'
+import { getAsset, listAssets } from './asset-registry'
 import type { AssetFilter } from './asset-registry'
 import type { MediaKind, MediaProductionType, StyleAxes } from '../src/editor/assets/registry-types'
 import {
@@ -33,68 +37,90 @@ interface ToolCtx {
   toolId: string
   env?: Record<string, string | undefined>
   cwd?: string
+  extensionDir?: string
+  gameId?: string
+  projectRoot?: string
+  game?: string
 }
 
-const GAME_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
+interface BoundHostContext {
+  boundGameId: string
+  gameRoot: string
+  extensionRoot: string
+}
 
-/** 从 ctx.cwd（插件目录）向上找出含 `.forgeax/` 的工程根。找不到返回 null。 */
-function findProjectRoot(ctx: ToolCtx): string | null {
-  let dir = ctx.cwd ?? process.cwd()
-  for (let i = 0; i < 8; i++) {
-    if (existsSync(resolve(dir, '.forgeax'))) return dir
-    const parent = resolve(dir, '..')
-    if (parent === dir) break
-    dir = parent
-  }
+/** Unicode 和单字符均合法；只拒绝空、路径分隔符以及 `.` / `..`。 */
+function isSafeGameId(value: unknown): value is string {
+  return (
+    typeof value === 'string'
+    && value.length > 0
+    && value !== '.'
+    && value !== '..'
+    && !value.includes('/')
+    && !value.includes('\\')
+  )
+}
+
+/** 扩展自带资源不属于某个游戏，允许在尚未绑定 game 的会话中读取。 */
+function resolveExtensionRoot(ctx: ToolCtx): string | null {
+  if (ctx.extensionDir) return resolve(ctx.extensionDir)
+  if (ctx.cwd) return resolve(ctx.cwd)
   return null
 }
 
-/** 读当前激活 game 的 slug（`.forgeax/active-game.json`）。无则 null（全局库）。 */
-function resolveActiveGameSlug(ctx: ToolCtx): string | null {
-  const root = findProjectRoot(ctx)
-  if (!root) return null
-  try {
-    const parsed = JSON.parse(readFileSync(resolve(root, '.forgeax', 'active-game.json'), 'utf-8')) as { slug?: unknown }
-    const slug = typeof parsed.slug === 'string' ? parsed.slug : null
-    return slug && GAME_SLUG_RE.test(slug) ? slug : null
-  } catch {
-    return null
+/** 显式适配 Arrival 与 ForgeaX 两种宿主形态，不做全局 active-game fallback。 */
+function bindHostContext(ctx: ToolCtx): BoundHostContext | null {
+  if (ctx.gameId !== undefined) {
+    const extensionRoot = resolveExtensionRoot(ctx)
+    if (!isSafeGameId(ctx.gameId) || !ctx.cwd || !extensionRoot) return null
+    return {
+      boundGameId: ctx.gameId,
+      gameRoot: resolve(ctx.cwd),
+      extensionRoot,
+    }
+  }
+  const extensionRoot = resolveExtensionRoot(ctx)
+  if (!isSafeGameId(ctx.game) || !ctx.projectRoot || !extensionRoot) return null
+  return {
+    boundGameId: ctx.game,
+    gameRoot: resolve(ctx.projectRoot, '.forgeax', 'games', ctx.game),
+    extensionRoot,
   }
 }
 
-/** 取有效 slug：显式 args.gameSlug 优先，否则读 active-game。 */
-function pickSlug(args: { gameSlug?: string }, ctx: ToolCtx): string | null {
-  const explicit = (args.gameSlug ?? '').trim()
-  if (explicit) return GAME_SLUG_RE.test(explicit) ? explicit : null
-  return resolveActiveGameSlug(ctx)
+/** 显式 gameSlug 若存在，必须与宿主绑定 id 逐字相等。 */
+function pickSlug(args: { gameSlug?: string }, bound: BoundHostContext | null): string | null {
+  if (!bound) return null
+  if (args.gameSlug !== undefined && args.gameSlug !== bound.boundGameId) return null
+  return bound.boundGameId
 }
 
 /**
- * GameGraph 落盘目录 = 游戏仓根 `.forgeax/games/<slug>/`（写 blueprint.json / project.json，
- * 与 forgeax 宿主 `/api/game-host` 同格式）；缺工程根或 slug 则 null。
+ * 取宿主已绑定的目标游戏根（写 blueprint.json / project.json）。
  */
 function graphDir(ctx: ToolCtx, slug: string | null): string | null {
-  const root = findProjectRoot(ctx)
-  if (!slug || !root) return null
-  return resolve(root, '.forgeax', 'games', slug)
+  const bound = bindHostContext(ctx)
+  if (!slug || !bound || slug !== bound.boundGameId) return null
+  return bound.gameRoot
 }
 
 /** 解析素材层编排上下文（assetsDir 绝对路径 + 网关 env）。无工程根/slug 则 null。 */
 function orchestrateCtx(args: { gameSlug?: string }, ctx: ToolCtx): OrchestrateCtx | null {
-  const slug = pickSlug(args, ctx)
-  const dir = resolveAssetsDir(findProjectRoot(ctx), slug)
-  if (!dir || !slug) return null
+  const bound = bindHostContext(ctx)
+  const slug = pickSlug(args, bound)
+  if (!slug || !bound) return null
+  const dir = resolve(bound.gameRoot, 'assets')
   return { dir, gameId: slug, env: ctx.env }
 }
 
-const NO_REGISTRY_ERR = '无 .forgeax 工程根或无效 gameSlug，无法访问素材层'
+const NO_REGISTRY_ERR = '宿主未绑定有效游戏目录或 gameSlug 与当前游戏不一致，无法访问素材层'
 
 /** 跨模块只读产物目录（characters / textures），与素材层平级。缺工程根/slug 返回 null。 */
 function crossModuleDir(args: { gameSlug?: string }, ctx: ToolCtx, sub: 'characters' | 'textures'): string | null {
-  const slug = pickSlug(args, ctx)
-  const root = findProjectRoot(ctx)
-  if (!slug || !root) return null
-  return resolve(root, '.forgeax', 'games', slug, sub)
+  const bound = bindHostContext(ctx)
+  const slug = pickSlug(args, bound)
+  if (!slug || !bound) return null
+  return resolve(bound.gameRoot, sub)
 }
 
 /** 线协议视角枚举（first/third）→ 引擎 IP 内部中文视角串（POV 段靠 "第一人称" 触发）。 */
@@ -171,23 +197,23 @@ export const tools = {
    * 无盘数据时 project 为 null。args: { gameSlug? }
    */
   'wb-game-video:get-graph': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
-    const slug = pickSlug(args, ctx)
+    const slug = pickSlug(args, bindHostContext(ctx))
     const dir = graphDir(ctx, slug)
     const project = dir ? readProject(dir).project : null
     return { project, gameSlug: slug }
   },
 
   /**
-   * 覆盖写当前 game 的库文档，并压一版快照（留 10）。
-   * args: { gameSlug?, project, title? }
+   * 覆盖写当前 game 的 blueprint.json；title 为保留参数，当前忽略。
+   * args: { gameSlug?, project, title? }；成功 versions 固定为空数组。
    */
   'wb-game-video:save-graph': async (
     args: { gameSlug?: string; project?: GraphLibraryDocument; title?: string },
     ctx: ToolCtx,
   ) => {
-    const slug = pickSlug(args, ctx)
+    const slug = pickSlug(args, bindHostContext(ctx))
     const dir = graphDir(ctx, slug)
-    if (!dir) return { ok: false, errors: ['无 .forgeax 工程根或无效 gameSlug，无法落盘'] }
+    if (!dir) return { ok: false, errors: ['宿主未绑定有效游戏目录或 gameSlug 与当前游戏不一致，无法落盘'] }
     if (!args.project) return { ok: false, errors: ['缺少 project'] }
     const errors = validateDocument(args.project)
     if (errors.length) return { ok: false, errors, gameSlug: slug }
@@ -200,7 +226,9 @@ export const tools = {
    */
   'wb-game-video:list-videos': async (_args: Record<string, never>, ctx: ToolCtx) => {
     try {
-      const dir = resolve(ctx.cwd ?? process.cwd(), 'src', 'editor', 'assets', 'zhandou')
+      const extensionRoot = resolveExtensionRoot(ctx)
+      if (!extensionRoot) throw new Error('宿主未提供扩展目录')
+      const dir = resolve(extensionRoot, 'src', 'editor', 'assets', 'zhandou')
       const videos = readdirSync(dir)
         .filter((f) => f.toLowerCase().endsWith('.mp4'))
         .map((f) => f.replace(/\.mp4$/i, ''))

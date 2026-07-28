@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["nodeName", "storyText"],
   "properties": {
-    "gameSlug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$", "description": "Target game slug. Omit to use the active game." },
+    "gameSlug": { "type": "string", "pattern": "^(?!\\.{1,2}$)[^/\\\\]+$", "description": "Optional explicit game id; when present it must exactly equal the host-bound game. Unicode and single-character ids are supported." },
     "sceneNodeId": { "type": "string", "description": "Owning GameGraph node id (one node = one shot)." },
     "nodeName": { "type": "string", "description": "Stable node name used to refer to the subject." },
     "storyText": { "type": "string", "description": "The node's story/performance intent text." },

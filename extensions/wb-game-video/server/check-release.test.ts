@@ -2,6 +2,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -46,7 +47,7 @@ function createFixture(name: string, options: FixtureOptions = {}): string {
   } else {
     writeJson(resolve(root, 'package.json'), {
       name: options.packageName ?? '@forgeax/wb-game-video',
-      version: '0.1.2',
+      version: '0.1.3',
       peerDependencies: {
         '@forgeax/extension-platform': options.platformVersion ?? '0.0.2',
       },
@@ -60,7 +61,7 @@ function createFixture(name: string, options: FixtureOptions = {}): string {
   } else {
     writeJson(resolve(root, 'forgeax-extension.json'), {
       id: '@forgeax/wb-game-video',
-      version: options.manifestVersion ?? '0.1.2',
+      version: options.manifestVersion ?? '0.1.3',
       entry: {
         frontend: './dist/index.html',
         backend: './dist/server/tool-handlers.js',
@@ -179,7 +180,7 @@ describe('validateRelease', () => {
     })
 
     expect(await validateRelease(badVersionRoot)).toContainEqual(
-      expect.stringContaining('v0.1.2'),
+      expect.stringContaining('v0.1.3'),
     )
   })
 
@@ -211,6 +212,106 @@ describe('validateRelease', () => {
     expect(await validateRelease(oldIdentityRoot)).toContainEqual(
       expect.stringContaining('dist/assets/stale.js'),
     )
+  })
+
+  it.each([
+    `${['game', 'video'].join('')}.html`,
+    `${['wb', 'video', 'game'].join('-')}.html`,
+    `${['reel', 'studio'].join('-')}.html`,
+    `${['gv', 'id'].join('')}.html`,
+    `${['@forgeax-extension', 'wb-game-video'].join('/')}/index.html`,
+  ])('rejects legacy active identity in relative path %s', async (legacyPath) => {
+    const activePath = `src/runtime/sdk/standalone/${legacyPath}`
+    const oldIdentityRoot = createFixture(`old-path-${legacyPath.replaceAll('/', '-')}`, {
+      oldIdentityFiles: {
+        [activePath]: '<!doctype html>\n',
+      },
+    })
+
+    expect(await validateRelease(oldIdentityRoot)).toContainEqual(
+      expect.stringContaining(activePath),
+    )
+  })
+
+  it('checks legacy names on binary, unknown, extensionless, directory, and symlink entries', async () => {
+    const fixtureRoot = createFixture('all-entry-kinds')
+    const compactOldName = ['game', 'video'].join('')
+    const paths = [
+      `src/runtime/${compactOldName}.bin`,
+      `src/runtime/${compactOldName}.unknown-extension`,
+      `src/runtime/${compactOldName}`,
+      `src/runtime/${compactOldName}-directory`,
+      `src/runtime/${compactOldName}-symlink`,
+    ]
+    mkdirSync(resolve(fixtureRoot, 'src/runtime'), { recursive: true })
+    writeFileSync(resolve(fixtureRoot, paths[0]!), Buffer.from([0, 255, 1, 254]))
+    writeFileSync(resolve(fixtureRoot, paths[1]!), 'not a known text extension\n')
+    writeFileSync(resolve(fixtureRoot, paths[2]!), 'extensionless\n')
+    mkdirSync(resolve(fixtureRoot, paths[3]!))
+    symlinkSync(resolve(fixtureRoot, '..', 'outside-package'), resolve(fixtureRoot, paths[4]!))
+
+    const errors = await validateRelease(fixtureRoot)
+    for (const path of paths) {
+      expect(errors).toContainEqual(expect.stringContaining(path))
+    }
+  })
+
+  it.each([
+    [[`Game`, `Video.BIN`].join('')],
+    [[`game`, `video.asset`].join('_')],
+    [[`game`, `-`, `video.asset`].join('_')],
+    [[`GAME`, `VIDEO`].join('-')],
+    [[`WB`, `VIDEO`, `GAME.bin`].join('_')],
+    [[`ReEl`, `StUdIo`].join('_')],
+    [[`G`, `VID-link`].join('_')],
+  ])('normalizes case and separator variants in active path %s', async (legacyName) => {
+    const activePath = `src/runtime/${legacyName}`
+    const oldIdentityRoot = createFixture(`normalized-${legacyName}`, {
+      oldIdentityFiles: { [activePath]: 'active\n' },
+    })
+
+    expect(await validateRelease(oldIdentityRoot)).toContainEqual(
+      expect.stringContaining(activePath),
+    )
+  })
+
+  it('allows legacy path names only below the root historical docs directory', async () => {
+    const oldName = ['game', 'video'].join('')
+    const historicalRoot = createFixture('root-docs-path-exemption', {
+      oldIdentityFiles: {
+        [`docs/${oldName}.bin`]: 'historical\n',
+      },
+    })
+    const nestedDocsRoot = createFixture('nested-docs-not-exempt', {
+      oldIdentityFiles: {
+        [`src/runtime/docs/${oldName}.bin`]: 'active\n',
+      },
+    })
+
+    expect(await validateRelease(historicalRoot)).toEqual([])
+    expect(await validateRelease(nestedDocsRoot)).toContainEqual(
+      expect.stringContaining(`src/runtime/docs/${oldName}.bin`),
+    )
+  })
+
+  it('accepts the unified identity in active relative path names', async () => {
+    const unifiedIdentityRoot = createFixture('unified-path-identity', {
+      oldIdentityFiles: {
+        'src/runtime/sdk/standalone/wb-game-video.html': '<!doctype html>\n',
+      },
+    })
+
+    expect(await validateRelease(unifiedIdentityRoot)).toEqual([])
+  })
+
+  it('scans a unified symlink name without following its outside target', async () => {
+    const fixtureRoot = createFixture('unified-outside-symlink')
+    symlinkSync(
+      resolve(fixtureRoot, '..', 'outside-package'),
+      resolve(fixtureRoot, 'src/wb-game-video-link'),
+    )
+
+    expect(await validateRelease(fixtureRoot)).toEqual([])
   })
 
   it('rejects a dotted legacy browser-key namespace', async () => {

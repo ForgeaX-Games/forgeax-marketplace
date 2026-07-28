@@ -1,49 +1,54 @@
-# wb-game-video · 视频游戏工坊
+# @forgeax/wb-game-video
 
-> 玩法优先的视频游戏编辑器 + 运行时：把「演出(视频) + 血条/QTE/选择 + 分支判断」拼成一张
-> 声明式图（`GameScenario`），纯 TS 状态机确定性回放。
+玩法优先的视频游戏蓝图编辑器与运行时。它把视频演出、血条、QTE、限时选择和热点交互组合成可序列化的 `GraphLibraryDocument`，由纯 TypeScript 状态机确定性执行。
 
----
+## 当前契约
 
-## 架构（先读 [`AGENTS.md`](./AGENTS.md)）
+- 图文档权威文件是项目根下 `.forgeax/games/<slug>/blueprint.json`；首次保存同时补齐 `project.json`。
+- 未保存草稿留在浏览器 localStorage。空项目启动为空库；内置 Nodia demo 只在用户显式选择“重置”时载入。
+- `wb-game-video:save-graph` 覆盖保存整份文档，`title` 当前忽略，成功返回 `{ ok: true, versions: [], gameSlug }`。
+- 运行时组件位于 [`src/runtime/component-host`](./src/runtime/component-host)，图中只保存组件 id 与可序列化输入。
+- 扩展同时提供 11 个 AI 工具：图读写、内置视频列表、镜头脚本/关键帧/视频生成、素材查询和角色/场景引用导入。完整调用契约见 [`SKILL.md`](./SKILL.md)。
 
-**只有 graph 引擎一套**（`src/runtime/ / src/graph/ / src/editor/`）—— 蓝图编辑 / 试玩 / 视频 / 界面 / 规则。
+## 本地开发
 
-- 一张 `GameScenario` 图：**只有「演出节点」（每个绑视频）**，判断（出手/血量/胜负/变招…）折进**条件/加权出边**，无独立网关节点。
-- **SSOT = 插件内只读 `src/runtime/ / src/graph/ / src/editor/demo/nodia.graph.json`**；主动保存的版本落盘到 `.forgeax/games/<slug>/game-video/scenarios.graph.json`（+ 版本快照），未保存草稿走 localStorage，「重置」回 demo。
-- 引擎纯 TS、零 DOM、种子 RNG；一切逻辑声明式可序列化、无函数入库。
-- 盖在视频上的 QTE/血条/选择等 = `src/runtime/skins/components/` 下**自闭环、可替换、带错误边界**的组件，图里只记 `component` id。
-- 应用外壳 `src/GraphApp.tsx`（split-pane：`?pane=left` 侧栏 / `?pane=center` 主区，`graphViewStore` + BroadcastChannel 同步当前 tab）。
-- **AI 工具**（`server/tool-handlers.ts`）：`wb-game-video:get-graph` / `wb-game-video:save-graph` / `wb-game-video:list-videos` —— AI 与人共同读/改同一份 GameGraph。
-- 硬性规则（Schema / Runtime / 持久化 / 皮肤组件）见 **[`AGENTS.md`](./AGENTS.md)**；皮肤注册与 props 见 `src/runtime/skins/rendererRegistry.tsx`；AI 调用见 **[`SKILL.md`](./SKILL.md)**。
-
-> ⚠️ 旧 FMV 内容生产整套（剧本、图像、剧情树、Seedance 视频生成和素材库）已于 2026-07-09 一刀切物理删除；更早的旧蓝图引擎（`scenarioToBlueprint` / `blueprint-schema` / `blueprint/runtime` / `BlueprintPlayer`）亦不存在。任何 `Scene→Blueprint` 编译和旧蓝图状态机运行时的说法均已作废。
-
----
-
-## 1 分钟跑起来
-
-> **包管理器：只用 bun**（`packageManager: bun@1.3.13` + `bun.lock`）。不要在本目录跑
-> `pnpm install` / `npm install`——会写出 pnpm/npm lock，且 `bun fx start` 若误用
-> pnpm 启动会直接退出，Studio 里「视频游戏工坊」iframe 连不上 `:15185`。
+本仓是独立仓库，使用 Bun：
 
 ```bash
-cd packages/marketplace/extensions/wb-game-video
+git clone https://github.com/ForgeaX-Games/forgeax-wb-game-video.git
+cd forgeax-wb-game-video
 bun install
-bun run dev            # vite dev，端口 15185
-bun test               # 或: bunx vitest run
-bunx tsc --noEmit      # 类型检查
+bun run dev
+bun run test
+bun run lint
+bun run build
 ```
 
-## 文档索引
+`@forgeax/extension-platform` 的 peer 与开发依赖都精确固定为 `0.0.2`。后端显式适配两种宿主上下文：
 
-| 你要 | 看 |
+- Arrival：`gameId` + `cwd`（当前游戏根）+ `extensionDir`。
+- ForgeaX：`game` + `projectRoot` + `cwd`（扩展安装根）；游戏根派生为
+  `projectRoot/.forgeax/games/<game>`。
+
+两种形态会按需归一为 `boundGameId`、`gameRoot` 和 `extensionRoot`。`list-videos` 只读取
+扩展自带资源，因此仅要求 `extensionRoot`，无需绑定游戏；图读写、生成和共享素材等游戏相关
+工具要求 `boundGameId + gameRoot`。后端不会读取 `.forgeax/active-game.json`，也不会从
+进程当前目录猜游戏。可选 `gameSlug` 必须与宿主绑定 id 逐字一致；中文和单字符 id 合法，
+空值、`.`、`..` 及含 `/` 或 `\` 的值非法。
+
+## 代码导航
+
+| 关注点 | 位置 |
 |---|---|
-| 玩法引擎硬性规则 / 关键目录 / 坑 / Backlog | [`AGENTS.md`](./AGENTS.md) |
-| 皮肤 props / 注册 / 自闭环工具 | [`rendererRegistry.tsx`](./src/runtime/skins/rendererRegistry.tsx) · [`components/index.ts`](./src/runtime/skins/components/index.ts) · [`skinRuntime.ts`](./src/runtime/skins/components/skinRuntime.ts) |
-| AI 工具调用（get/save/list GameGraph） | [`SKILL.md`](./SKILL.md)（trigger `/wb-game-video`） |
-| 引擎设计规格 + 分期 + 实施状态 | `<repo>/docs/superpowers/specs/2026-07-06-wb-game-video-blueprint-orchestration-design.md` |
-| 插件声明（surface / tool / port / permissions） | `forgeax-extension.json` |
+| 图 schema 与校验 | [`src/runtime/schema/graph-schema.ts`](./src/runtime/schema/graph-schema.ts) · [`src/runtime/validate/validate.ts`](./src/runtime/validate/validate.ts) |
+| 状态机与 session | [`src/runtime/engine`](./src/runtime/engine) |
+| 覆盖组件与渲染注册 | [`src/runtime/component-host`](./src/runtime/component-host) |
+| 蓝图画布 | [`src/graph`](./src/graph) |
+| 编辑器、持久化和 demo | [`src/editor`](./src/editor) |
+| AI 工具后端 | [`server/tool-handlers.ts`](./server/tool-handlers.ts) |
+| 扩展声明 | [`forgeax-extension.json`](./forgeax-extension.json) |
+
+历史设计记录位于 [`docs/superpowers`](./docs/superpowers)；代码、manifest、schema 与本页是当前发布契约。
 
 ## License
 

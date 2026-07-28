@@ -6,7 +6,7 @@ import { gameMediaPlugin } from './game-media-middleware'
 const configDir = dirname(fileURLToPath(import.meta.url))
 const extensionRoot = resolve(configDir, '..', '..', '..', '..')
 const standaloneRoot = resolve(configDir, '..', 'standalone')
-const upstreamStandaloneEntry = `${['game', 'video'].join('')}.html`
+const standaloneEntry = 'wb-game-video.html'
 const forgeaxServer = process.env.FORGEAX_SERVER_URL
   ?? `http://localhost:${process.env.FORGEAX_SERVER_PORT ?? process.env.PORT_SERVER ?? 18900}`
 
@@ -46,7 +46,7 @@ export default {
     sourcemap: process.env.RS_NO_SOURCEMAP === '1' ? false : true,
     rollupOptions: {
       input: {
-        'wb-game-video': resolve(standaloneRoot, upstreamStandaloneEntry),
+        'wb-game-video': resolve(standaloneRoot, standaloneEntry),
       },
     },
   },

@@ -7,7 +7,7 @@
  *   宿主给同一表面挂两个 iframe，URL 分别带 `?pane=left` / `?pane=center`。
  *   - pane=left   → 只渲染侧栏（五个 tab），是 sidebar iframe 的全部内容。
  *   - pane=center → 只渲染当前 tab 对应的主区内容（不含侧栏）。
- *   - 无 pane     → 独立运行（npm run dev / 直接打开 dist），侧栏 + 主区都渲染。
+ *   - 无 pane     → 独立运行（bun run dev / 直接打开 dist），侧栏 + 主区都渲染。
  *   两个 iframe 靠 graphViewStore + BroadcastChannel 同步「当前 tab」。
  */
 import { useEffect, useState } from 'react'

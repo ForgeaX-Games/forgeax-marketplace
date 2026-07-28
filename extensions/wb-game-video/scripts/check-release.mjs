@@ -35,7 +35,6 @@ const TEXT_FILENAMES = new Set([
 ])
 const SCAN_EXCLUDED_DIRS = new Set([
   '.git',
-  'docs',
   'node_modules',
 ])
 const SCAN_EXCLUDED_FILES = new Set([
@@ -58,6 +57,14 @@ const OLD_ACTIVE_IDENTITIES = [
   new RegExp(`\\b(?:${oldEnvironmentNames.join('|')})\\b`),
   new RegExp(`emit:${compactLegacyName}`),
   new RegExp(`/${compactLegacyName}\\b`),
+]
+const OLD_ACTIVE_PATH_ROOTS = [
+  compactLegacyName,
+  ['game', 'video'].join('-'),
+  ['wb', 'video', 'game'].join('-'),
+  compactLegacyReelName,
+  oldToolNamespaces[0],
+  ['g', 'vid'].join('-'),
 ]
 const GENERATED_MIGRATION_PREFIX_LIST = new RegExp(
   `\\[\\s*(["'])${compactLegacyReelName}\\1\\s*,\\s*(["'])${compactLegacyName}\\2\\s*,\\s*(["'])${oldToolNamespaces[0]}\\3\\s*\\]`,
@@ -125,6 +132,33 @@ function identityScanSource(packagePath, source) {
   )
 }
 
+function normalizePathComponent(component) {
+  return component.toLowerCase().replaceAll(/[_-]+/g, '-')
+}
+
+function oldIdentityPathMatch(packagePath) {
+  const components = packagePath.split('/').map(normalizePathComponent)
+  for (const [index, component] of components.entries()) {
+    for (const oldRoot of OLD_ACTIVE_PATH_ROOTS) {
+      if (
+        component === oldRoot ||
+        component.startsWith(`${oldRoot}.`) ||
+        component.startsWith(`${oldRoot}-`)
+      ) {
+        return components.slice(0, index + 1).join('/')
+      }
+    }
+
+    if (
+      component === '@forgeax-extension' &&
+      components[index + 1] === 'wb-game-video'
+    ) {
+      return components.slice(0, index + 2).join('/')
+    }
+  }
+  return null
+}
+
 async function findOldActiveIdentities(root, errors) {
   const pending = ['']
   while (pending.length > 0) {
@@ -132,8 +166,27 @@ async function findOldActiveIdentities(root, errors) {
     const entries = await readdir(resolve(root, directory), { withFileTypes: true })
     for (const entry of entries) {
       const packagePath = directory ? `${directory}/${entry.name}` : entry.name
+      const isRootHistoricalDocs = (
+        directory === '' &&
+        entry.isDirectory() &&
+        entry.name === 'docs'
+      )
+      const isExcludedDirectory = (
+        entry.isDirectory() &&
+        (isRootHistoricalDocs || SCAN_EXCLUDED_DIRS.has(entry.name))
+      )
+
+      if (isExcludedDirectory) continue
+
+      const oldPathMatch = oldIdentityPathMatch(packagePath)
+      if (oldPathMatch) {
+        errors.push(
+          `old active identity ${JSON.stringify(oldPathMatch)} in relative path ${packagePath}`,
+        )
+      }
+
       if (entry.isDirectory()) {
-        if (!SCAN_EXCLUDED_DIRS.has(entry.name)) pending.push(packagePath)
+        pending.push(packagePath)
         continue
       }
       if (
