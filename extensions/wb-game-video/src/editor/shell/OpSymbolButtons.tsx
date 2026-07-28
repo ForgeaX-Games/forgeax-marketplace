@@ -60,6 +60,23 @@ const EFFECT_OP_SYMBOLS: { key: string; symbol: string; title: string }[] = [
   { key: 'set', symbol: '=', title: '设为' },
 ]
 
+/**
+ * 从落盘 {op, value} 反推「用户当前选的显示运算符」——因为 −/÷ 落盘成 add/mul，直接按 op 高亮会
+ * 让 + / × 误亮、−/÷ 永不亮。规则对齐本组件按钮的产物（negate→ -(…)/负数、reciprocal→ 1/(…)）：
+ *  set → '='；mul 且 value 形如 1/(…) → 'div' 否则 'mul'；add 且 value 形如 -(…)/负数 → 'sub' 否则 'add'。
+ */
+function displayOpKey(op: NumericEffectOp, value: NumOrExpr | undefined): string {
+  if (op === 'set') return 'set'
+  if (op === 'mul') {
+    if (typeof value === 'object' && value && /^1\/\(/.test(value.expr)) return 'div'
+    return 'mul'
+  }
+  // add
+  if (typeof value === 'number') return value < 0 ? 'sub' : 'add'
+  if (typeof value === 'object' && value && /^-\(/.test(value.expr)) return 'sub'
+  return 'add'
+}
+
 export function EffectOpButtons({
   op,
   value,
@@ -69,6 +86,7 @@ export function EffectOpButtons({
   value: NumOrExpr | undefined
   onChange: (next: { op: NumericEffectOp; value?: NumOrExpr }) => void
 }): JSX.Element {
+  const shownKey = displayOpKey(op, value)
   return (
     <OpSymbolButtons
       ariaLabel="运算"
@@ -76,7 +94,7 @@ export function EffectOpButtons({
         key: o.key,
         symbol: o.symbol,
         title: o.title,
-        active: o.key === op,
+        active: o.key === shownKey,
       }))}
       onPick={(key) => {
         if (key === 'sub') onChange({ op: 'add', value: negateNumOrExpr(value ?? 0) })

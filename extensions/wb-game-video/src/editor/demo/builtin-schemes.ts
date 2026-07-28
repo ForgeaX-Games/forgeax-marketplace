@@ -75,6 +75,34 @@ export function sortSchemeIds(ids: string[]): string[] {
   return [...builtin, ...rest]
 }
 
+/**
+ * 界面 tab「自定义覆盖物」组 = 用户自由方案：排除 `node:*`（时间轴内容容器）与
+ * `base:*`（基础覆盖物单组件方案），再走 `sortSchemeIds` 把内置方案置顶。
+ */
+export function listCustomSchemeIds(overlays: Record<string, Overlay> | undefined): string[] {
+  return sortSchemeIds(
+    Object.keys(overlays ?? {}).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX)),
+  )
+}
+
+/**
+ * 界面 tab「基础覆盖物」组 = 组件库每组件一份 `base:<id>` 单组件方案；
+ * 按组件库顺序排列，仅取目录里实际存在的。
+ */
+export function listBaseHudIds(overlays: Record<string, Overlay> | undefined): string[] {
+  const all = overlays ?? {}
+  return availableComponents.map((c) => `${BASE_HUD_PREFIX}${c.id}`).filter((id) => all[id])
+}
+
+/**
+ * 界面 tab 两个分组（自定义覆盖物 + 基础覆盖物）打平后的有序 overlay id 列表。
+ * 蓝图侧所有「挑一张 overlay」的选择器（NodeInspector 的 ＋挂载 / 默认样式、
+ * NodePreviewStage 的「添加控件」栏）共用此列表，保证与界面 tab 完全一致、不漂移。
+ */
+export function listSchemeAndBaseOverlayIds(overlays: Record<string, Overlay> | undefined): string[] {
+  return [...listCustomSchemeIds(overlays), ...listBaseHudIds(overlays)]
+}
+
 /** 「+ 组件」菜单：每项 = 一个组件预设模板（顶栏 component = 该组件的顶层 id）。 */
 export const NEW_COMPONENT_PRESETS: Array<{
   id: string

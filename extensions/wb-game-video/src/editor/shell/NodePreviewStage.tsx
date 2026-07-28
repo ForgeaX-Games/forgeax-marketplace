@@ -39,7 +39,8 @@ import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
 import { materialClass, materialLabel, type MaterialItem } from '../video/materialTimelineShared'
 import { pointerToVideoNorm } from '../../runtime/play/videoContentRect'
 import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
-import { PRESET_SCHEME_OVERLAYS, PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
+import { PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
+import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
 import { overlayMountId } from '../../runtime/schema/node-config-schema'
 import { findMountOwningChild } from '../../graph/edit/overlay-edit'
 import {
@@ -224,17 +225,18 @@ export function NodePreviewStage({
   const skinnedPreviewIds = useMemo(() => new Set(previewSkinChildren.map((c) => c.id)), [previewSkinChildren])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
 
-  // 「添加控件」= 覆盖物挂载入口：已挂载的排除，前 5 直接列出，其余进「更多」。
+  // 「添加控件」= 覆盖物挂载入口：候选与界面 tab 同一份（自定义覆盖物 + 基础覆盖物，打平；
+  // 见 builtin-schemes），已挂载的排除，前 5 直接列出，其余进「更多」。
   const mountedOverlayIds = useMemo(
     () => new Set((node.data.overlayNodes ?? []).map((m) => m.overlay)),
     [node.data.overlayNodes],
   )
-  const mountCandidates = useMemo(
-    () => PRESET_SCHEME_OVERLAYS.filter((o) => !mountedOverlayIds.has(o.id)),
-    [mountedOverlayIds],
+  const mountCandidateIds = useMemo(
+    () => listSchemeAndBaseOverlayIds(overlays).filter((id) => !mountedOverlayIds.has(id)),
+    [overlays, mountedOverlayIds],
   )
-  const primaryCandidates = mountCandidates.slice(0, 5)
-  const moreCandidates = mountCandidates.slice(5)
+  const primaryCandidateIds = mountCandidateIds.slice(0, 5)
+  const moreCandidateIds = mountCandidateIds.slice(5)
 
   /** 某预览叠层归属哪份挂载（elementId → owning mount）。 */
   function mountIdOfOverlay(o: PreviewOverlay): string | null {
@@ -486,26 +488,26 @@ export function NodePreviewStage({
       {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 */}
       <div className="nps-addbar">
         <span className="nps-addbar-label">添加控件</span>
-        {primaryCandidates.length === 0 && moreCandidates.length === 0 ? (
-          <span className="nps-addbar-empty">已挂载全部预设覆盖物</span>
+        {primaryCandidateIds.length === 0 && moreCandidateIds.length === 0 ? (
+          <span className="nps-addbar-empty">已挂载全部覆盖物</span>
         ) : null}
-        {primaryCandidates.map((ov) => (
+        {primaryCandidateIds.map((id) => (
           <button
-            key={ov.id}
+            key={id}
             type="button"
             className="nps-add-chip"
-            title={`挂载覆盖物「${overlayDisplayLabel(ov.id, overlays)}」到当前节点（点击直接挂载，或拖入时间轴落点）`}
+            title={`挂载覆盖物「${overlayDisplayLabel(id, overlays)}」到当前节点（点击直接挂载，或拖入时间轴落点）`}
             draggable
-            onClick={() => mountOverlay(ov.id)}
+            onClick={() => mountOverlay(id)}
             onDragStart={(e) => {
-              e.dataTransfer.setData(MATERIAL_DND_MIME, ov.id)
+              e.dataTransfer.setData(MATERIAL_DND_MIME, id)
               e.dataTransfer.effectAllowed = 'copy'
             }}
           >
-            {ov.title?.trim() || ov.id}
+            {overlays?.[id]?.title?.trim() || id}
           </button>
         ))}
-        {moreCandidates.length > 0 ? (
+        {moreCandidateIds.length > 0 ? (
           <button
             type="button"
             className="nps-add-chip"
@@ -517,12 +519,12 @@ export function NodePreviewStage({
         ) : null}
         {moreOpen ? (
           <div className="nps-more-pop" onPointerLeave={() => setMoreOpen(false)}>
-            {moreCandidates.length === 0 ? (
+            {moreCandidateIds.length === 0 ? (
               <div className="nps-more-empty">没有更多可挂载的覆盖物</div>
             ) : (
-              moreCandidates.map((ov) => (
-                <button key={ov.id} type="button" onClick={() => mountOverlay(ov.id)}>
-                  {overlayDisplayLabel(ov.id, overlays)}
+              moreCandidateIds.map((id) => (
+                <button key={id} type="button" onClick={() => mountOverlay(id)}>
+                  {overlayDisplayLabel(id, overlays)}
                 </button>
               ))
             )}

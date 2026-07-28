@@ -1,12 +1,17 @@
 /**
- * 应用公式 —— ValueExprEditor 第三模式的填空 UI：选一个具名公式，给它的每个留空位（未知实体）
- * 选具体实体，实时编译回 NumOrExpr。复用 EntitySelect / AttrSelect（跟 Effect/条件编辑器同源）。
+ * 应用公式 —— ValueExprEditor 第三模式的填空 UI：选一个具名公式，给它的每个留空位按类型填值
+ * （实体属性：选实体+属性；数值：输入常数；变量：选变量），实时编译回 NumOrExpr。
  */
 import type { CSSProperties, JSX } from 'react'
+import { useMemo } from 'react'
 import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula, FormulaHoleBinding } from '../persist/formula-authoring'
+import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
+import { createRng } from '../../runtime/engine/rng'
 import { AttrSelect, EntitySelect } from './editors'
-import { compileFormula, formulaHoles, formulaTermsPreview, missingFormulaHoles } from './formulaApply'
+import { LooseNumberInput } from './TermChainEditor'
+import { VariablePicker } from './scenario-pickers'
+import { compileFormula, formulaHoles, formulaPreview, missingFormulaHoles } from './formulaApply'
 import { findEntity, findFormula, listAttrOptions, listFormulaOptions } from './valueExprPick'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
@@ -14,13 +19,22 @@ const row: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', flex
 const hint: CSSProperties = { fontSize: 11, opacity: 0.65, lineHeight: 1.4 }
 const holeLbl: CSSProperties = { fontSize: 11, opacity: 0.8, minWidth: 120 }
 
-/** 给定留空位当前绑定，算出实际会用到的属性 id（约定名有效则用它，否则落该实体第一个属性）——供 AttrSelect 显示当前生效值。 */
-function effectiveAttr(binding: FormulaHoleBinding | undefined, suggestedAttr: string | undefined, entities: Record<string, Entity> | undefined): string {
-  if (!binding?.entityId) return ''
+/** entityAttr 空位实际生效的属性 id（binding.attr 有效则用，否则约定名，否则实体第一个属性）。 */
+function effectiveAttr(binding: FormulaHoleBinding | undefined, suggestAttr: string | undefined, entities: Record<string, Entity> | undefined): string {
+  if (!binding || binding.kind !== 'entityAttr' || !binding.entityId) return ''
   const attrs = listAttrOptions(findEntity(entities, binding.entityId))
   if (binding.attr && attrs.some((a) => a.id === binding.attr)) return binding.attr
-  if (suggestedAttr && attrs.some((a) => a.id === suggestedAttr)) return suggestedAttr
+  if (suggestAttr && attrs.some((a) => a.id === suggestAttr)) return suggestAttr
   return attrs[0]?.id ?? ''
+}
+
+/** 样例求值上下文：实体 attrs 原样、变量取 initial、rng 固定种子——供「≈ 样例值」试算（与 FormulaTextEditor 同一套语义）。 */
+function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string, Variable>): EvalCtx {
+  const ents: EvalCtx['entities'] = {}
+  for (const [id, e] of Object.entries(entities ?? {})) ents[id] = { attrs: e.attrs ?? {} }
+  const vars: Record<string, number> = {}
+  for (const [id, v] of Object.entries(variables ?? {})) vars[id] = v.initial ?? 0
+  return { entities: ents, vars, flags: {}, score: 0, rng: createRng(1) }
 }
 
 export function FormulaApplyEditor({
@@ -49,17 +63,16 @@ export function FormulaApplyEditor({
     onChange(compileFormula(next, {}, entities))
   }
 
-  function patchHole(termId: string, patch: Partial<FormulaHoleBinding>): void {
+  function setHole(holeId: string, binding: FormulaHoleBinding): void {
     if (!formula) return
-    const nextBindings: Record<string, FormulaHoleBinding> = {
-      ...holeBindings,
-      [termId]: { ...holeBindings[termId], ...patch } as FormulaHoleBinding,
-    }
-    onChange(compileFormula(formula, nextBindings, entities))
+    onChange(compileFormula(formula, { ...holeBindings, [holeId]: binding }, entities))
   }
 
   const compiled = formula ? compileFormula(formula, holeBindings, entities) : undefined
   const compiledLabel = compiled == null ? '' : typeof compiled === 'number' ? String(compiled) : compiled.expr
+  // 填满全部留空位后，拿样例实体/变量值实时算出结果（≈ 值），替代与顶部「公式：」重复的编译串展示。
+  const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
+  const sampleValue = compiledLabel && missingHoles.length === 0 ? tryEvalExpr(compiledLabel, ctx) : null
 
   return (
     <div style={box}>
@@ -75,39 +88,59 @@ export function FormulaApplyEditor({
         <p style={hint}>该公式已被删除，数值维持上次编译结果；请另选一个公式。</p>
       ) : (
         <>
-          <p style={hint}>条款：{formulaTermsPreview(formula.terms, entities, variables)}</p>
+          <p style={hint}>公式：{formulaPreview(formula, holeBindings)}</p>
           {holes.length === 0 ? (
             <p style={hint}>该公式没有留空位，直接应用即可。</p>
           ) : (
             holes.map((h) => {
-              const binding = holeBindings[h.termId]
-              const entityId = binding?.entityId ?? ''
+              const binding = holeBindings[h.holeId]
               return (
-                <div key={h.termId} style={{ ...row, border: '1px solid var(--gc-accent-line, #2a2a2a)', borderRadius: 6, padding: 6 }}>
-                  <span style={holeLbl}>
-                    留空位{h.suggestedAttr ? `（约定属性：${h.suggestedAttr}）` : ''}
-                  </span>
-                  <EntitySelect
-                    value={entityId}
-                    entities={entities}
-                    onChange={(id) => patchHole(h.termId, { entityId: id, attr: undefined })}
-                  />
-                  <AttrSelect
-                    entityId={entityId}
-                    value={effectiveAttr(binding, h.suggestedAttr, entities)}
-                    entities={entities}
-                    onChange={(attr) => patchHole(h.termId, { attr })}
-                  />
+                <div key={h.holeId} style={{ ...row, border: '1px solid var(--gc-accent-line, #2a2a2a)', borderRadius: 6, padding: 6 }}>
+                  <span style={holeLbl}>{h.label ?? '留空位'}{h.kind === 'entityAttr' && h.suggestAttr ? `（约定：${h.suggestAttr}）` : ''}</span>
+                  {h.kind === 'entityAttr' && (
+                    <>
+                      <EntitySelect
+                        value={binding?.kind === 'entityAttr' ? binding.entityId : ''}
+                        entities={entities}
+                        onChange={(id) => setHole(h.holeId, { kind: 'entityAttr', entityId: id, attr: undefined })}
+                      />
+                      <AttrSelect
+                        entityId={binding?.kind === 'entityAttr' ? binding.entityId : ''}
+                        value={effectiveAttr(binding, h.suggestAttr, entities)}
+                        entities={entities}
+                        onChange={(attr) => setHole(h.holeId, { kind: 'entityAttr', entityId: binding?.kind === 'entityAttr' ? binding.entityId : '', attr })}
+                      />
+                    </>
+                  )}
+                  {h.kind === 'number' && (
+                    <LooseNumberInput
+                      value={binding?.kind === 'number' ? binding.value : 0}
+                      onChange={(value) => setHole(h.holeId, { kind: 'number', value })}
+                      aria-label={h.label ?? '数值'}
+                      style={{ width: 120 }}
+                    />
+                  )}
+                  {h.kind === 'var' && (
+                    <VariablePicker
+                      value={binding?.kind === 'var' ? binding.varId : ''}
+                      variables={variables}
+                      allowEmpty
+                      onChange={(varId) => setHole(h.holeId, { kind: 'var', varId })}
+                    />
+                  )}
                 </div>
               )
             })
           )}
           {missingHoles.length > 0 ? (
             <p role="alert" style={{ ...hint, color: '#ffb86c', fontWeight: 600 }}>
-              还缺 {missingHoles.length} 个实体绑定。当前只会按已填条款计算；补全后再用于结算。
+              还缺 {missingHoles.length} 个留空位未填。补全后才会用于结算。
             </p>
-          ) : null}
-          <p style={hint}>预览：{compiledLabel || '（未完成填空）'}。</p>
+          ) : sampleValue != null ? (
+            <p style={hint}>≈ {sampleValue}<span style={{ opacity: 0.6 }}>（按样例实体/变量值试算）</span></p>
+          ) : (
+            <p style={hint}>已填满，结算时按当前实体/变量值求值。</p>
+          )}
         </>
       )}
     </div>

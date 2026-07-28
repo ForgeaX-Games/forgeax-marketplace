@@ -379,6 +379,7 @@ describe('VideoAssetLibrary', () => {
     expect(assetButton.parentElement).toBe(row)
     expect(deleteButton.parentElement).toBe(row)
     expect([...row!.children]).toEqual([assetButton, renameButton, deleteButton])
+    expect(assetButton.querySelector('.gc-row-mark')).toBeNull()
 
     fireEvent.click(deleteButton)
     expect(onSelect).not.toHaveBeenCalled()
@@ -442,21 +443,22 @@ describe('VideoAssetLibrary', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Rename failed')
   })
 
-  it('keeps row actions inline, compact, and discoverable for pointer and keyboard users', async () => {
+  it('keeps row actions out of the label layout until pointer or keyboard interaction', async () => {
     await import('../../shell/GraphVideoView')
     const css = document.querySelector<HTMLStyleElement>(
       'style[data-reel-style="graph-video-view"]',
     )?.textContent ?? ''
 
-    expect(css).toMatch(/\.val-row\s*\{[^}]*display:\s*grid/)
-    expect(css).toMatch(/\.val-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+auto/)
+    expect(css).toMatch(/\.val-row\s*\{[^}]*position:\s*relative/)
     expect(css).toMatch(/\.val-row\s*>\s*\.gc-row\s*\{[^}]*min-width:\s*0/)
     expect(css).toMatch(/\.val-row\s+\.gc-row-label\s*\{[^}]*text-overflow:\s*ellipsis/)
-    expect(css).toMatch(/\.val-row-action\s*\{[^}]*min-width:\s*44px/)
+    expect(css).toMatch(/\.val-row-action\s*\{[^}]*position:\s*absolute/)
     expect(css).toMatch(/\.val-row-action\s*\{[^}]*min-height:\s*28px/)
+    expect(css).toMatch(/\.val-row:hover\s*>\s*\.gc-row[^}]*padding-right:\s*112px/)
     expect(css).toMatch(/\.val-row:hover\s+\.val-row-action[^}]*opacity:\s*1/)
-    expect(css).toMatch(/\.val-row:focus-within\s+\.val-row-action[^}]*opacity:\s*1/)
-    expect(css).toMatch(/\.val-row\.is-on\s+\.val-row-action[^}]*opacity:\s*1/)
+    expect(css).toMatch(/\.val-row:has\(>\s*\.val-row-action:focus-visible\)\s+\.val-row-action[^}]*opacity:\s*1/)
+    expect(css).not.toMatch(/\.val-row:focus-within/)
+    expect(css).not.toMatch(/\.val-row\.is-on\s+\.val-row-action/)
   })
 
   it('delete with references shows graph and node names in confirm dialog', async () => {

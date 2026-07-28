@@ -1,120 +1,116 @@
 /**
- * 公式（Formula）编译 / 回填 —— 把「公式定义 + 留空位绑定」编译成具体 NumOrExpr，并在公式库
+ * 公式（Formula）编译 / 回填 —— 把「公式定义（AST）+ 留空位绑定」编译成具体 NumOrExpr，并在公式库
  * 变化时批量回溯刷新所有已应用处的 expr 缓存。
  *
- * 设计：公式定义 + 每处应用的 holeBindings 是 SSOT；写进字段的 `expr` 字符串是**派生缓存**，
- * 由 `compileFormula`/`recompileFormulaUsages` 这两个纯函数算出来。`runtime/engine/expr.ts`
- * 全程不知道"公式"这个概念，只读普通表达式字符串——回溯刷新完全是编辑器侧的一次性数据变换。
+ * 设计：公式定义（`Formula.ast`）+ 每处应用的 holeBindings 是 SSOT；写进字段的 `expr` 字符串是
+ * **派生缓存**，由 `compileFormula`/`recompileFormulaUsages` 这两个纯函数算出来（内部走
+ * `serializeFormula` → 运行时 `serializeExpr`，序列化只此一套）。`runtime/engine/expr.ts` 全程
+ * 不知道"公式"这个概念，只读普通表达式字符串——回溯刷新完全是编辑器侧的一次性数据变换。
  */
-import type {
-  Entity,
-  NumOrExpr,
-  ValueTermOp,
-  Variable,
-} from '../../runtime/schema/graph-schema'
-import type { EditorValueTerm, Formula, FormulaHoleBinding, FormulaPick } from '../persist/formula-authoring'
-import {
-  VALUE_TERM_OP_LABEL,
-  compileValuePick,
-  findEntity,
-  listAttrOptions,
-  listVarOptions,
-} from './valueExprPick'
+import type { Entity, NumOrExpr } from '../../runtime/schema/graph-schema'
+import type { Formula, FormulaAstNode, FormulaHoleBinding, FormulaHoleKind, FormulaPick } from '../persist/formula-authoring'
+import { normalizeHoleBinding, previewFormula, serializeFormula } from '../persist/formula-authoring'
+import { findEntity, listAttrOptions } from './metaCatalog'
 
 export interface FormulaHole {
-  /** 稳定寻址键，对应 holeBindings 的 key（= 该条款的 ValueTerm.id，缺失时按下标兜底）。 */
-  termId: string
-  index: number
-  /** 作者预置的约定属性名（留空表示应用时直接取所选实体的第一个属性）。 */
-  suggestedAttr?: string
+  /** 稳定寻址键 = 该 hole 节点的 holeId，对应 holeBindings 的 key。 */
+  holeId: string
+  kind: FormulaHoleKind
+  label?: string
+  /** entityAttr 空位作者预置的约定属性名（应用时缺省取所选实体该属性 / 第一个属性）。 */
+  suggestAttr?: string
 }
 
-function termKey(t: EditorValueTerm, index: number): string {
-  return t.id ?? `t${index}`
-}
-
-/** 未知实体留空位 —— 本期唯一支持的公式留空类型：`source==='entity' && refId===''`。 */
-function isHoleTerm(t: EditorValueTerm): boolean {
-  return t.source === 'entity' && !t.refId
-}
-
-/** 扫描公式条款，列出全部留空位（应用公式时据此渲染填空控件）。 */
+/** 深度遍历 AST 收集全部留空位（应用公式时据此渲染填空控件）。 */
 export function formulaHoles(formula: Formula): FormulaHole[] {
-  return formula.terms
-    .map((t, index) => ({ t, index }))
-    .filter(({ t }) => isHoleTerm(t))
-    .map(({ t, index }) => ({ termId: termKey(t, index), index, suggestedAttr: t.attr }))
+  const out: FormulaHole[] = []
+  const seen = new Set<string>()
+  const walk = (n: FormulaAstNode): void => {
+    switch (n.t) {
+      case 'hole':
+        if (!seen.has(n.holeId)) {
+          seen.add(n.holeId)
+          out.push({ holeId: n.holeId, kind: n.kind, label: n.label, suggestAttr: n.suggestAttr })
+        }
+        break
+      case 'unary':
+        walk(n.x)
+        break
+      case 'bin':
+        walk(n.a)
+        walk(n.b)
+        break
+      case 'call':
+        n.args.forEach(walk)
+        break
+      default:
+        break
+    }
+  }
+  walk(formula.ast)
+  return out
 }
 
-/** 尚未绑定实体的留空位；调用方据此阻止把半成品误当完整公式。 */
+/** 判定一个绑定是否已「填够」（够 serializeFormula 产出具体值）。 */
+function holeBound(hole: FormulaHole, binding: FormulaHoleBinding | undefined): boolean {
+  if (!binding) return false
+  if (binding.kind === 'number') return true
+  if (binding.kind === 'var') return !!binding.varId
+  return !!binding.entityId && (!!binding.attr || !!hole.suggestAttr)
+}
+
+/** 尚未填全的留空位；调用方据此阻止把半成品误当完整公式。 */
 export function missingFormulaHoles(
   formula: Formula,
   holeBindings: Record<string, FormulaHoleBinding>,
 ): FormulaHole[] {
-  return formulaHoles(formula).filter((hole) => !holeBindings[hole.termId]?.entityId)
+  return formulaHoles(formula).filter((hole) => !holeBound(hole, normalizeHoleBinding(holeBindings[hole.holeId])))
 }
 
-/** 把 holeBindings 套回对应留空位，产出具体（或仍不完整）的条款链。 */
-function resolveFormulaTerms(
+/** 只读预览文案（公式定义列表 / 应用公式时的只读展示共用）：未填空位标 ❓。 */
+export function formulaPreview(
   formula: Formula,
-  holeBindings: Record<string, FormulaHoleBinding>,
-  entities: Record<string, Entity> | undefined,
-): EditorValueTerm[] {
-  return formula.terms.map((t, index) => {
-    if (!isHoleTerm(t)) return t
-    const binding = holeBindings[termKey(t, index)]
-    if (!binding?.entityId) return t // 仍未填 -> 保持不完整，compileValuePick 的 atomComplete 会把它滤掉
-    const ent = findEntity(entities, binding.entityId)
-    const attrs = listAttrOptions(ent)
-    const attr = binding.attr && attrs.some((a) => a.id === binding.attr)
-      ? binding.attr
-      : (t.attr && attrs.some((a) => a.id === t.attr) ? t.attr : attrs[0]?.id)
-    return { ...t, refId: binding.entityId, attr }
-  })
-}
-
-function termOpOf(t: EditorValueTerm): ValueTermOp {
-  return t.op === '+' || t.op === '-' || t.op === '*' || t.op === '/' ? t.op : '+'
-}
-
-/** 条款只读预览文案（公式定义列表 / 应用公式时的只读展示共用）：留空位标「❓待填实体」。 */
-export function formulaTermLabel(
-  t: EditorValueTerm,
-  entities: Record<string, Entity> | undefined,
-  variables: Record<string, Variable> | undefined,
+  holeBindings: Record<string, FormulaHoleBinding> = {},
 ): string {
-  const opLabel = VALUE_TERM_OP_LABEL[termOpOf(t)]
-  if (t.source === 'const') return `${opLabel} ${t.constValue ?? 0}`
-  if (t.source === 'var') {
-    const v = listVarOptions(variables).find((o) => o.id === t.refId)
-    return `${opLabel} ${v?.label ?? t.refId ?? '变量'}`
+  return previewFormula(formula.ast, holeBindings)
+}
+
+/**
+ * 归一 holeBindings：把旧形状 / 松散值转成 typed，并为 entityAttr 空位补默认属性
+ * （binding.attr → suggestAttr → 实体首个属性）。
+ */
+function resolveBindings(
+  formula: Formula,
+  holeBindings: Record<string, unknown>,
+  entities: Record<string, Entity> | undefined,
+): Record<string, FormulaHoleBinding> {
+  const holes = formulaHoles(formula)
+  const out: Record<string, FormulaHoleBinding> = {}
+  for (const hole of holes) {
+    const b = normalizeHoleBinding(holeBindings[hole.holeId])
+    if (!b) continue
+    if (b.kind === 'entityAttr') {
+      const attr = b.attr
+        || hole.suggestAttr
+        || listAttrOptions(findEntity(entities, b.entityId))[0]?.id
+      out[hole.holeId] = { kind: 'entityAttr', entityId: b.entityId, attr }
+    } else {
+      out[hole.holeId] = b
+    }
   }
-  if (isHoleTerm(t)) return `${opLabel} ❓待填实体${t.attr ? `·约定属性「${t.attr}」` : ''}`
-  const ent = findEntity(entities, t.refId)
-  const entLabel = ent?.name?.trim() || ent?.id || t.refId
-  const attrLabel = ent ? listAttrOptions(ent).find((a) => a.id === t.attr)?.label ?? t.attr : t.attr
-  return `${opLabel} ${entLabel}·${attrLabel ?? ''}`
-}
-
-export function formulaTermsPreview(
-  terms: EditorValueTerm[],
-  entities: Record<string, Entity> | undefined,
-  variables: Record<string, Variable> | undefined,
-): string {
-  if (terms.length === 0) return '（空）'
-  return terms.map((t) => formulaTermLabel(t, entities, variables)).join(' ')
+  return out
 }
 
 /** 编译一次「应用公式」：具体 NumOrExpr + 编辑器专属的 formula pick sidecar。 */
 export function compileFormula(
   formula: Formula,
-  holeBindings: Record<string, FormulaHoleBinding>,
+  holeBindings: Record<string, unknown>,
   entities: Record<string, Entity> | undefined,
 ): NumOrExpr {
-  const terms = resolveFormulaTerms(formula, holeBindings, entities)
-  const compiled = compileValuePick({ mode: 'pick', terms })
-  const expr = typeof compiled === 'number' ? String(compiled) : compiled.expr
-  return { expr, pick: { mode: 'formula', formulaId: formula.id, holeBindings } as unknown as FormulaPick } as unknown as NumOrExpr
+  const resolved = resolveBindings(formula, holeBindings, entities)
+  const expr = serializeFormula(formula.ast, resolved) ?? '0'
+  const pick: FormulaPick = { mode: 'formula', formulaId: formula.id, holeBindings: resolved }
+  return { expr, pick } as unknown as NumOrExpr
 }
 
 interface FormulaPickNode {

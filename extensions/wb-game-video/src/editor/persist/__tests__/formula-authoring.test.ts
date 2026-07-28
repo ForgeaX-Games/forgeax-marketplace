@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
-import { toEditorScenarioDocument, toRuntimeScenario } from '../formula-authoring'
+import { parseFormulaText, previewFormula, toEditorScenarioDocument, toRuntimeScenario } from '../formula-authoring'
 
 const base: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -65,5 +65,68 @@ describe('formula authoring document', () => {
     expect('formulas' in runtime).toBe(false)
     const value = (runtime.graph.nodes[0]?.data.reactions?.[0]?.do[0] as { effects?: Array<{ value?: unknown }> }).effects?.[0]?.value
     expect(value).toEqual({ expr: '1' })
+  })
+})
+
+describe('formula text ↔ AST round-trip (parseFormulaText / previewFormula)', () => {
+  // 归一：解析成 AST 再预览回串，应与直接解析的语义一致（round-trip 收敛）。
+  const roundtrip = (src: string) => previewFormula(parseFormulaText(src))
+
+  it('纯表达式（无 hole）round-trip 收敛', () => {
+    expect(roundtrip('1 + 2 * 3')).toBe(previewFormula(parseFormulaText('1 + 2 * 3')))
+    expect(roundtrip('floor(entity.player.attr.hp / 2)')).toContain('entity.player.attr.hp')
+    expect(roundtrip('var.gold + score')).toContain('var.gold')
+    expect(roundtrip('var.gold + score')).toContain('score')
+  })
+
+  it('单个 ?参数 解析成 hole，预览回 ?参数', () => {
+    const ast = parseFormulaText('floor(?系数 * entity.enemy.attr.attack)')
+    // 收集到一个 hole
+    const holes: string[] = []
+    const walk = (n: ReturnType<typeof parseFormulaText>): void => {
+      if (n.t === 'hole') holes.push(n.holeId)
+      else if (n.t === 'unary') walk(n.x)
+      else if (n.t === 'bin') { walk(n.a); walk(n.b) }
+      else if (n.t === 'call') n.args.forEach(walk)
+    }
+    walk(ast)
+    expect(holes).toEqual(['系数'])
+    expect(previewFormula(ast)).toContain('?系数')
+  })
+
+  it('同名 ?参数 多次出现 = 同一 holeId', () => {
+    const ast = parseFormulaText('?倍率 * ?倍率')
+    const ids: string[] = []
+    const walk = (n: ReturnType<typeof parseFormulaText>): void => {
+      if (n.t === 'hole') ids.push(n.holeId)
+      else if (n.t === 'bin') { walk(n.a); walk(n.b) }
+    }
+    walk(ast)
+    expect(ids).toEqual(['倍率', '倍率'])
+  })
+
+  it('hole round-trip：?参数 → AST → 预览 → 再解析，holeId 稳定', () => {
+    const once = parseFormulaText('?攻击 - ?防御')
+    const preview = previewFormula(once)
+    expect(preview).toContain('?攻击')
+    expect(preview).toContain('?防御')
+    // 预览串能被再次解析回 hole（写=看=可回解）
+    const twice = parseFormulaText(preview)
+    expect(previewFormula(twice)).toBe(preview)
+  })
+
+  it('多种引用 + 函数嵌套', () => {
+    const ast = parseFormulaText('max(entity.a.attr.atk, var.buff) + min(score, 10)')
+    const preview = previewFormula(ast)
+    expect(preview).toContain('entity.a.attr.atk')
+    expect(preview).toContain('var.buff')
+    expect(preview).toContain('score')
+    expect(preview).toMatch(/max\(/)
+    expect(preview).toMatch(/min\(/)
+  })
+
+  it('解析失败抛错（供 UI 捕获提示）', () => {
+    expect(() => parseFormulaText('1 + + 2')).toThrow()
+    expect(() => parseFormulaText('floor(')).toThrow()
   })
 })

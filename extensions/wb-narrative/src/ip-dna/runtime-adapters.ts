@@ -35,6 +35,7 @@ export interface IpDnaRuntimeAdapters {
 
 /** 解析环境（env + FFMPEG_PATH + ASR_ENDPOINT + PDFTOPPM_PATH）。CLI/服务传 process.env 即可。 */
 export type RuntimeAdapterEnv = ResolveEmbedderEnv & {
+  [key: string]: string | undefined;
   FFMPEG_PATH?: string;
   ASR_ENDPOINT?: string;
   PDFTOPPM_PATH?: string;

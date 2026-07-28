@@ -7,8 +7,7 @@ import type { Formula } from '../persist/formula-authoring'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
 import { NEW_COMPONENT_PRESETS, sortSchemeIds } from '../demo/builtin-schemes'
-import { TermChainEditor } from './TermChainEditor'
-import { formulaTermsPreview } from './formulaApply'
+import { FormulaTextEditor } from './FormulaTextEditor'
 
 export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui'> & {
   formulas?: Record<string, Formula>
@@ -293,7 +292,7 @@ export function ScenarioInspector({
             <button
               onClick={() => {
                 const id = allocId('formula-', formulas)
-                setFormulas({ ...formulas, [id]: { id, name: id, terms: [] } })
+                setFormulas({ ...formulas, [id]: { id, name: id, ast: { t: 'num', id: 'n0', v: 0 } } })
               }}
             >
               + 公式
@@ -430,17 +429,13 @@ function FormulaRow({
           style={{ flex: 1 }}
         />,
       )}
-      <div style={{ margin: '6px 0 2px', fontSize: 11, opacity: 0.7 }}>条款（❓= 留空实体，应用公式时再填）</div>
-      <TermChainEditor
-        terms={formula.terms}
+      <div style={{ margin: '6px 0 2px', fontSize: 11, opacity: 0.7 }}>公式（留空位 = 应用时再填的参数/实体）</div>
+      <FormulaTextEditor
+        ast={formula.ast}
         entities={entities}
         variables={variables}
-        allowHoleEntity
-        onChange={(terms) => onChange({ ...formula, id: formulaKey, terms })}
+        onChange={(ast) => onChange({ ...formula, id: formulaKey, ast })}
       />
-      <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6, wordBreak: 'break-word' }}>
-        预览：{formulaTermsPreview(formula.terms, entities, variables)}
-      </div>
       <button style={{ ...del, marginTop: 6 }} onClick={onDelete}>
         删除公式
       </button>

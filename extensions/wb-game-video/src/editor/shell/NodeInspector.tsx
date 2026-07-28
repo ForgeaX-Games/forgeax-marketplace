@@ -28,7 +28,8 @@ import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-lab
 import { ConditionEditor, EffectsEditor, createDefaultEffect, type EditorPickerCtx } from './editors'
 import { SpawnInputsEditor } from './spawn-inputs-editor'
 import { ComponentFormFields, summarizeComponentInputs } from './component-form-fields'
-import { PRESET_SCHEME_OVERLAYS, PRESET_SCHEME_BY_ID } from './schemeOverlays'
+import { PRESET_SCHEME_BY_ID } from './schemeOverlays'
+import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
 
 /**
  * 「音乐动作」下拉的 hover 说明 —— 面板上不再铺开这些解释（只留表单本身），所以三条动作的
@@ -1253,8 +1254,9 @@ export function NodeInspector({
     if (!title || title === id) return id
     return `${title} (${id})`
   }
-  // 「＋ 挂载」只列固化界面方案（画廊 + nodia），不混入草稿残留 ov-* 等。
-  const schemeOverlayIds = PRESET_SCHEME_OVERLAYS.map((o) => o.id)
+  // 「默认样式 / ＋ 挂载」与界面 tab 保持同一份列表：自定义覆盖物 + 基础覆盖物（打平），
+  // 直接从 live overlays 派生（见 builtin-schemes），不再用固化的 PRESET_SCHEME_OVERLAYS。
+  const schemeOverlayIds = listSchemeAndBaseOverlayIds(overlays)
   const mediaRef = d.media?.ref ?? ''
   const selectedVideoValue = mediaRef && !videoOptions.some((option) => option.id === mediaRef)
     ? '__unavailable__'

@@ -124,6 +124,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   // 保存 = 打版本：一次性存 blueprint + 组件（服务端钩子）+ git tag vN。
   const doCommit = useGraphScenario((s) => s.commit)
+  const reset = useGraphScenario((s) => s.reset)
   const applyLayout = useGraphScenario((s) => s.applyLayout)
   const bumpRun = useGraphScenario((s) => s.bumpRun)
 
@@ -420,10 +421,18 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0e0c09', color: '#f6f1e9', isolation: 'isolate' }}>
-      {/* 顶部工具条：历史版本 → 保存 → 草稿提示，不含画布编辑手势 */}
+      {/* 顶部工具条：历史版本 → 保存 → 重置 → 草稿提示，不含画布编辑手势 */}
       <div className="gv-graph-toolbar" style={{ padding: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <VersionPicker />
         <button type="button" onClick={() => void doCommit()} title="保存当前内容并打一个新版本（vN）">💾 保存</button>
+        <button
+          type="button"
+          style={{ display: 'none' }}
+          onClick={() => { if (confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) reset() }}
+          title="重置为内置 demo（丢弃当前未保存编辑）"
+        >
+          ↺ 重置
+        </button>
         {isDraft ? (
           <span
             style={{ opacity: 0.85, fontSize: 12, color: '#ffc53d' }}

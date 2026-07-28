@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
+  ControlButton,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -10,17 +11,21 @@ import ReactFlow, {
   addEdge,
   type Node,
   type Edge,
+  type NodeTypes,
   type Connection,
   type NodeChange,
   type EdgeChange,
 } from "reactflow";
+import { RefreshCw } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
+import { useT } from "../../i18n";
 import {
   COMPOSER_DND_MIME,
   computeAnchoredPipelines,
   findCatalogItem,
   type ComposerNodeCategory,
 } from "../../composer/composerCatalog";
+import { ComposerFlowNode } from "./ComposerFlowNode";
 
 const CATEGORY_COLOR: Record<ComposerNodeCategory, string> = {
   input: "rgba(120,200,255,0.9)",
@@ -30,6 +35,8 @@ const CATEGORY_COLOR: Record<ComposerNodeCategory, string> = {
   engineer: "rgba(255,235,120,0.9)",
 };
 
+const nodeTypes: NodeTypes = { composerFlow: ComposerFlowNode };
+
 interface ComposerCanvasProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -38,9 +45,13 @@ interface ComposerCanvasProps {
 /**
  * 无限画布编排的可编辑 ReactFlow。数据源为 store 的 composer 切片；支持拖入(onDrop)、
  * 活连线(onConnect)、拖动持久化(onNodesChange)、删除(onNodesDelete/onEdgesDelete)。
+ *
+ * 节点参照管线状态形态：横向左入右出、前后连接。节点位置不会被自动重排——玩家可自由拖动，
+ * 仅当点击左下角「标准化布局」按钮时才按分层算法重排（relayoutComposer）。
  * 孤立节点（无输入节点可达）置灰提示。
  */
 export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
+  const t = useT();
   const composerNodes = useNarrativeStore((s) => s.composerNodes);
   const composerEdges = useNarrativeStore((s) => s.composerEdges);
   const addComposerNode = useNarrativeStore((s) => s.addComposerNode);
@@ -48,7 +59,9 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
   const connectComposer = useNarrativeStore((s) => s.connectComposer);
   const removeComposerNode = useNarrativeStore((s) => s.removeComposerNode);
   const removeComposerEdge = useNarrativeStore((s) => s.removeComposerEdge);
-  const { project } = useReactFlow();
+  const relayoutComposer = useNarrativeStore((s) => s.relayoutComposer);
+  const { project, fitView } = useReactFlow();
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const isolatedIds = useMemo(() => {
     const anchored = computeAnchoredPipelines(composerNodes, composerEdges);
@@ -59,27 +72,17 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
 
   const rfNodes: Node[] = useMemo(
     () =>
-      composerNodes.map((n) => {
-        const isolated = isolatedIds.has(n.id) && n.category !== "input";
-        const color = CATEGORY_COLOR[n.category];
-        return {
-          id: n.id,
-          position: n.position,
-          data: { label: `${n.icon}  ${n.label}` },
-          selected: n.id === selectedId,
-          style: {
-            background: "rgba(6,14,10,0.92)",
-            border: `1px solid ${n.id === selectedId ? color : "rgba(77,255,160,0.35)"}`,
-            borderRadius: 8,
-            color: isolated ? "rgba(200,220,210,0.4)" : "rgba(220,255,235,0.95)",
-            fontSize: 12,
-            padding: "8px 12px",
-            width: 190,
-            opacity: isolated ? 0.5 : 1,
-            boxShadow: n.id === selectedId ? `0 0 0 2px ${color}` : undefined,
-          },
-        } satisfies Node;
-      }),
+      composerNodes.map((n) => ({
+        id: n.id,
+        type: "composerFlow",
+        position: n.position,
+        selected: n.id === selectedId,
+        // 关闭 ReactFlow 默认拖拽：节点内部用「长按」自定义拖拽，「点击」用于展开/收起。
+        draggable: false,
+        data: {
+          isolated: isolatedIds.has(n.id) && n.category !== "input",
+        },
+      })),
     [composerNodes, isolatedIds, selectedId],
   );
 
@@ -89,6 +92,7 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
         id: e.id,
         source: e.source,
         target: e.target,
+        type: "smoothstep",
         animated: true,
         style: { stroke: "rgba(77,255,160,0.5)" },
       })),
@@ -121,7 +125,7 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!conn.source || !conn.target) return;
-      setEdges((eds) => addEdge({ ...conn, animated: true }, eds));
+      setEdges((eds) => addEdge({ ...conn, type: "smoothstep", animated: true }, eds));
       connectComposer(conn.source, conn.target);
     },
     [connectComposer, setEdges],
@@ -155,7 +159,12 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
       if (!catalogId) return;
       const item = findCatalogItem(catalogId);
       if (!item) return;
-      const position = project({ x: e.clientX, y: e.clientY });
+      // project() 需要「相对画布」坐标：减去画布容器在页面中的偏移，节点才会落在松手处。
+      const bounds = wrapperRef.current?.getBoundingClientRect();
+      const position = project({
+        x: e.clientX - (bounds?.left ?? 0),
+        y: e.clientY - (bounds?.top ?? 0),
+      });
       const id = addComposerNode(item, position);
       onSelect(id);
     },
@@ -169,11 +178,18 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
 
   const onPaneClick = useCallback(() => { onSelect(null); }, [onSelect]);
 
+  const handleRelayout = useCallback(() => {
+    relayoutComposer();
+    // 重排后自适应视图，与管线状态一致。
+    window.setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 60);
+  }, [relayoutComposer, fitView]);
+
   return (
-    <div style={{ width: "100%", height: "100%" }} onDrop={onDrop} onDragOver={onDragOver}>
+    <div ref={wrapperRef} style={{ width: "100%", height: "100%" }} onDrop={onDrop} onDragOver={onDragOver}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -188,7 +204,11 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="rgba(77,255,160,0.05)" />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} className="composer-controls">
+          <ControlButton onClick={handleRelayout} title={t("composer.relayout")} aria-label={t("composer.relayout")}>
+            <RefreshCw size={12} aria-hidden />
+          </ControlButton>
+        </Controls>
         <MiniMap
           nodeColor={(n) => {
             const node = composerNodes.find((c) => c.id === n.id);

@@ -16,9 +16,8 @@ import { OverlaySchemeEditor, UsageBadge, DuplicateBadge } from './OverlayScheme
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
-import { NEW_COMPONENT_PRESETS, sortSchemeIds, BASE_HUD_PREFIX } from '../demo/builtin-schemes'
+import { NEW_COMPONENT_PRESETS, BASE_HUD_PREFIX, listCustomSchemeIds, listBaseHudIds } from '../demo/builtin-schemes'
 import { findDuplicateOverlays } from './overlay-dedup'
-import { availableComponents } from '../../runtime/component-host/components'
 import { defaultsForComponent } from './editors'
 import type { Formula } from '../persist/formula-authoring'
 
@@ -84,16 +83,9 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 内容重复标记：三类方案（自定义 / 内置 / 基础 base:*）在同一目录里互查，overlayId → 同内容的其它 id[]。
   // 只提示不处理（§8 人为最终权威）；纯派生，不落盘（§2 Derive）。
   const dupMap = useMemo(() => findDuplicateOverlays(allOverlays), [allOverlays])
-  // 「自定义覆盖物」= 用户自由方案；排除 node:*（时间轴内容容器）与 base:*（基础覆盖物单组件方案）。
-  const schemeIds = useMemo(
-    () => sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX))),
-    [allOverlays],
-  )
-  // 「基础覆盖物」= 每组件一份 base:<id> 单组件方案；按组件库顺序排列，仅取实际存在的。
-  const baseIds = useMemo(
-    () => availableComponents.map((c) => `${BASE_HUD_PREFIX}${c.id}`).filter((id) => allOverlays[id]),
-    [allOverlays],
-  )
+  // 「自定义覆盖物」/「基础覆盖物」两组与蓝图侧选择器共用同一份派生（见 builtin-schemes），不各持一份漂移。
+  const schemeIds = useMemo(() => listCustomSchemeIds(allOverlays), [allOverlays])
+  const baseIds = useMemo(() => listBaseHudIds(allOverlays), [allOverlays])
   const [selectedOverlayId, setSelectedOverlayId] = useState('')
   // 选中项自愈：不在当前方案集（全局 + 基础）里（删除/首次）就落到第一个全局方案。
   const selectable = [...schemeIds, ...baseIds]

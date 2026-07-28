@@ -33,6 +33,33 @@
       "initial": 1,
       "min": 0,
       "max": 1
+    },
+    "combo": {
+      "id": "combo",
+      "name": "连击段数",
+      "initial": 0,
+      "min": 0,
+      "max": 4
+    },
+    "critRate": {
+      "id": "critRate",
+      "name": "暴击率",
+      "initial": 0.1,
+      "min": 0,
+      "max": 1
+    },
+    "myTurn": {
+      "id": "myTurn",
+      "name": "我方回合数",
+      "initial": 0,
+      "min": 0
+    },
+    "healCd": {
+      "id": "healCd",
+      "name": "恢复冷却",
+      "initial": 0,
+      "min": 0,
+      "max": 3
     }
   },
   "entities": {
@@ -44,7 +71,8 @@
         "attack": 80,
         "defense": 40,
         "speed": 30,
-        "hp": 300
+        "hp": 300,
+        "hpMax": 300
       },
       "attrMeta": {
         "hp": {
@@ -63,7 +91,8 @@
         "attack": 75,
         "defense": 50,
         "speed": 25,
-        "hp": 700
+        "hp": 700,
+        "hpMax": 700
       },
       "attrMeta": {
         "hp": {
@@ -72,6 +101,399 @@
           "initial": 700,
           "label": "生命"
         }
+      }
+    }
+  },
+  "formulas": {
+    "fx-dmg": {
+      "id": "fx-dmg",
+      "name": "伤害公式",
+      "description": "⌊系数 × 攻击力 × 100 ÷ (100+防御力) × 浮动 × 暴击⌋",
+      "ast": {
+        "t": "unary",
+        "id": "f23",
+        "op": "-",
+        "x": {
+          "t": "call",
+          "id": "f22",
+          "name": "floor",
+          "args": [
+            {
+              "t": "bin",
+              "id": "f21",
+              "op": "*",
+              "a": {
+                "t": "bin",
+                "id": "f20",
+                "op": "*",
+                "a": {
+                  "t": "bin",
+                  "id": "f19",
+                  "op": "/",
+                  "a": {
+                    "t": "bin",
+                    "id": "f15",
+                    "op": "*",
+                    "a": {
+                      "t": "bin",
+                      "id": "f13",
+                      "op": "*",
+                      "a": {
+                        "t": "hole",
+                        "id": "f11",
+                        "holeId": "h_mult",
+                        "kind": "number",
+                        "label": "系数"
+                      },
+                      "b": {
+                        "t": "hole",
+                        "id": "f12",
+                        "holeId": "h_atk",
+                        "kind": "entityAttr",
+                        "label": "攻击方攻击力",
+                        "suggestAttr": "attack"
+                      }
+                    },
+                    "b": {
+                      "t": "num",
+                      "id": "f14",
+                      "v": 100
+                    }
+                  },
+                  "b": {
+                    "t": "bin",
+                    "id": "f18",
+                    "op": "+",
+                    "a": {
+                      "t": "num",
+                      "id": "f16",
+                      "v": 100
+                    },
+                    "b": {
+                      "t": "hole",
+                      "id": "f17",
+                      "holeId": "h_def",
+                      "kind": "entityAttr",
+                      "label": "防御方防御力",
+                      "suggestAttr": "defense"
+                    }
+                  }
+                },
+                "b": {
+                  "t": "bin",
+                  "id": "f4",
+                  "op": "+",
+                  "a": {
+                    "t": "num",
+                    "id": "f0",
+                    "v": 0.85
+                  },
+                  "b": {
+                    "t": "bin",
+                    "id": "f3",
+                    "op": "*",
+                    "a": {
+                      "t": "call",
+                      "id": "f1",
+                      "name": "rand",
+                      "args": []
+                    },
+                    "b": {
+                      "t": "num",
+                      "id": "f2",
+                      "v": 0.3
+                    }
+                  }
+                }
+              },
+              "b": {
+                "t": "bin",
+                "id": "f10",
+                "op": "+",
+                "a": {
+                  "t": "num",
+                  "id": "f5",
+                  "v": 1
+                },
+                "b": {
+                  "t": "bin",
+                  "id": "f9",
+                  "op": "*",
+                  "a": {
+                    "t": "call",
+                    "id": "f7",
+                    "name": "chance",
+                    "args": [
+                      {
+                        "t": "hole",
+                        "id": "f6",
+                        "holeId": "h_crit",
+                        "kind": "number",
+                        "label": "暴击率"
+                      }
+                    ]
+                  },
+                  "b": {
+                    "t": "num",
+                    "id": "f8",
+                    "v": 0.5
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "fx-dmg-combo": {
+      "id": "fx-dmg-combo",
+      "name": "连击分段伤害",
+      "description": "⌊攻击力 × 100 ÷ (100+防御力) × 连击分段系数 × 浮动⌋（系数随 combo 段变化）",
+      "ast": {
+        "t": "unary",
+        "id": "f62",
+        "op": "-",
+        "x": {
+          "t": "call",
+          "id": "f61",
+          "name": "floor",
+          "args": [
+            {
+              "t": "bin",
+              "id": "f60",
+              "op": "*",
+              "a": {
+                "t": "bin",
+                "id": "f53",
+                "op": "/",
+                "a": {
+                  "t": "bin",
+                  "id": "f49",
+                  "op": "*",
+                  "a": {
+                    "t": "hole",
+                    "id": "f47",
+                    "holeId": "hc_atk",
+                    "kind": "entityAttr",
+                    "label": "攻击方攻击力",
+                    "suggestAttr": "attack"
+                  },
+                  "b": {
+                    "t": "num",
+                    "id": "f48",
+                    "v": 100
+                  }
+                },
+                "b": {
+                  "t": "bin",
+                  "id": "f52",
+                  "op": "+",
+                  "a": {
+                    "t": "num",
+                    "id": "f50",
+                    "v": 100
+                  },
+                  "b": {
+                    "t": "hole",
+                    "id": "f51",
+                    "holeId": "hc_def",
+                    "kind": "entityAttr",
+                    "label": "防御方防御力",
+                    "suggestAttr": "defense"
+                  }
+                }
+              },
+              "b": {
+                "t": "bin",
+                "id": "f59",
+                "op": "*",
+                "a": {
+                  "t": "bin",
+                  "id": "f46",
+                  "op": "+",
+                  "a": {
+                    "t": "bin",
+                    "id": "f40",
+                    "op": "+",
+                    "a": {
+                      "t": "bin",
+                      "id": "f34",
+                      "op": "+",
+                      "a": {
+                        "t": "bin",
+                        "id": "f28",
+                        "op": "*",
+                        "a": {
+                          "t": "num",
+                          "id": "f24",
+                          "v": 0.25
+                        },
+                        "b": {
+                          "t": "bin",
+                          "id": "f27",
+                          "op": "==",
+                          "a": {
+                            "t": "ref",
+                            "id": "f25",
+                            "ref": {
+                              "kind": "var",
+                              "varId": "combo"
+                            }
+                          },
+                          "b": {
+                            "t": "num",
+                            "id": "f26",
+                            "v": 1
+                          }
+                        }
+                      },
+                      "b": {
+                        "t": "bin",
+                        "id": "f33",
+                        "op": "*",
+                        "a": {
+                          "t": "num",
+                          "id": "f29",
+                          "v": 0.3
+                        },
+                        "b": {
+                          "t": "bin",
+                          "id": "f32",
+                          "op": "==",
+                          "a": {
+                            "t": "ref",
+                            "id": "f30",
+                            "ref": {
+                              "kind": "var",
+                              "varId": "combo"
+                            }
+                          },
+                          "b": {
+                            "t": "num",
+                            "id": "f31",
+                            "v": 2
+                          }
+                        }
+                      }
+                    },
+                    "b": {
+                      "t": "bin",
+                      "id": "f39",
+                      "op": "*",
+                      "a": {
+                        "t": "num",
+                        "id": "f35",
+                        "v": 0.35
+                      },
+                      "b": {
+                        "t": "bin",
+                        "id": "f38",
+                        "op": "==",
+                        "a": {
+                          "t": "ref",
+                          "id": "f36",
+                          "ref": {
+                            "kind": "var",
+                            "varId": "combo"
+                          }
+                        },
+                        "b": {
+                          "t": "num",
+                          "id": "f37",
+                          "v": 3
+                        }
+                      }
+                    }
+                  },
+                  "b": {
+                    "t": "bin",
+                    "id": "f45",
+                    "op": "*",
+                    "a": {
+                      "t": "num",
+                      "id": "f41",
+                      "v": 0.4
+                    },
+                    "b": {
+                      "t": "bin",
+                      "id": "f44",
+                      "op": "==",
+                      "a": {
+                        "t": "ref",
+                        "id": "f42",
+                        "ref": {
+                          "kind": "var",
+                          "varId": "combo"
+                        }
+                      },
+                      "b": {
+                        "t": "num",
+                        "id": "f43",
+                        "v": 4
+                      }
+                    }
+                  }
+                },
+                "b": {
+                  "t": "bin",
+                  "id": "f58",
+                  "op": "+",
+                  "a": {
+                    "t": "num",
+                    "id": "f54",
+                    "v": 0.85
+                  },
+                  "b": {
+                    "t": "bin",
+                    "id": "f57",
+                    "op": "*",
+                    "a": {
+                      "t": "call",
+                      "id": "f55",
+                      "name": "rand",
+                      "args": []
+                    },
+                    "b": {
+                      "t": "num",
+                      "id": "f56",
+                      "v": 0.3
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "fx-heal": {
+      "id": "fx-heal",
+      "name": "恢复公式",
+      "description": "⌊生命上限 × 12%⌋",
+      "ast": {
+        "t": "call",
+        "id": "f66",
+        "name": "floor",
+        "args": [
+          {
+            "t": "bin",
+            "id": "f65",
+            "op": "*",
+            "a": {
+              "t": "hole",
+              "id": "f63",
+              "holeId": "hh_max",
+              "kind": "entityAttr",
+              "label": "生命上限",
+              "suggestAttr": "hpMax"
+            },
+            "b": {
+              "t": "num",
+              "id": "f64",
+              "v": 0.12
+            }
+          }
+        ]
       }
     }
   },
@@ -1325,8 +1747,39 @@
                       "attr": "hp",
                       "op": "add",
                       "value": {
-                        "expr": "-(entity.ent-player.attr.attack)"
+                        "expr": "-floor(1 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0) * 0.5))",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-dmg",
+                          "holeBindings": {
+                            "h_mult": {
+                              "kind": "number",
+                              "value": 1.0
+                            },
+                            "h_atk": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "attack"
+                            },
+                            "h_def": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-boss",
+                              "attr": "defense"
+                            },
+                            "h_crit": {
+                              "kind": "number",
+                              "value": 0
+                            }
+                          }
+                        }
                       }
+                    },
+                    {
+                      "id": "pu-combo",
+                      "kind": "var",
+                      "varId": "combo",
+                      "op": "set",
+                      "value": 1
                     }
                   ]
                 }
@@ -1455,8 +1908,31 @@
                       "attr": "hp",
                       "op": "add",
                       "value": {
-                        "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
+                        "expr": "-floor(entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * ((0.25 * (var.combo == 1) + 0.3 * (var.combo == 2) + 0.35 * (var.combo == 3) + 0.4 * (var.combo == 4)) * (0.85 + rand() * 0.3)))",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-dmg-combo",
+                          "holeBindings": {
+                            "hc_atk": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "attack"
+                            },
+                            "hc_def": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-boss",
+                              "attr": "defense"
+                            }
+                          }
+                        }
                       }
+                    },
+                    {
+                      "id": "pu2-combo",
+                      "kind": "var",
+                      "varId": "combo",
+                      "op": "add",
+                      "value": 1
                     }
                   ]
                 }
@@ -1585,8 +2061,45 @@
                       "attr": "hp",
                       "op": "add",
                       "value": {
-                        "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
+                        "expr": "-floor(1.8 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0.05) * 0.5) * chance(0.95))",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-dmg",
+                          "holeBindings": {
+                            "h_mult": {
+                              "kind": "number",
+                              "value": 1.8
+                            },
+                            "h_atk": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "attack"
+                            },
+                            "h_def": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-boss",
+                              "attr": "defense"
+                            },
+                            "h_crit": {
+                              "kind": "number",
+                              "value": 0.05
+                            }
+                          }
+                        }
                       }
+                    },
+                    {
+                      "id": "zhong-crit",
+                      "kind": "var",
+                      "varId": "critRate",
+                      "op": "add",
+                      "value": 0.05
+                    },
+                    {
+                      "id": "zhong-break",
+                      "kind": "flag",
+                      "flagId": "boss-broken",
+                      "value": true
                     }
                   ]
                 }
@@ -1715,8 +2228,37 @@
                       "attr": "hp",
                       "op": "add",
                       "value": {
-                        "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
+                        "expr": "-floor(entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * ((0.25 * (var.combo == 1) + 0.3 * (var.combo == 2) + 0.35 * (var.combo == 3) + 0.4 * (var.combo == 4)) * (0.85 + rand() * 0.3)))",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-dmg-combo",
+                          "holeBindings": {
+                            "hc_atk": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "attack"
+                            },
+                            "hc_def": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-boss",
+                              "attr": "defense"
+                            }
+                          }
+                        }
                       }
+                    },
+                    {
+                      "id": "z2-crit",
+                      "kind": "var",
+                      "varId": "critRate",
+                      "op": "add",
+                      "value": 0.05
+                    },
+                    {
+                      "id": "z2-break",
+                      "kind": "flag",
+                      "flagId": "boss-broken",
+                      "value": true
                     }
                   ]
                 }
@@ -1843,7 +2385,20 @@
                       "entityId": "ent-player",
                       "attr": "hp",
                       "op": "add",
-                      "value": 30
+                      "value": {
+                        "expr": "floor(entity.ent-player.attr.hpMax * 0.12)",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-heal",
+                          "holeBindings": {
+                            "hh_max": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "hpMax"
+                            }
+                          }
+                        }
+                      }
                     },
                     {
                       "id": "fuzhu-qi",
@@ -1851,6 +2406,13 @@
                       "varId": "qi",
                       "op": "add",
                       "value": 2
+                    },
+                    {
+                      "id": "fuzhu-cd",
+                      "kind": "var",
+                      "varId": "healCd",
+                      "op": "set",
+                      "value": 3
                     }
                   ]
                 }
@@ -1979,7 +2541,31 @@
                       "attr": "hp",
                       "op": "add",
                       "value": {
-                        "expr": "-(entity.ent-player.attr.attack * 3)"
+                        "expr": "-floor(3 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0.05) * 0.5))",
+                        "pick": {
+                          "mode": "formula",
+                          "formulaId": "fx-dmg",
+                          "holeBindings": {
+                            "h_mult": {
+                              "kind": "number",
+                              "value": 3.0
+                            },
+                            "h_atk": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-player",
+                              "attr": "attack"
+                            },
+                            "h_def": {
+                              "kind": "entityAttr",
+                              "entityId": "ent-boss",
+                              "attr": "defense"
+                            },
+                            "h_crit": {
+                              "kind": "number",
+                              "value": 0.05
+                            }
+                          }
+                        }
                       }
                     }
                   ]
@@ -4364,8 +4950,39 @@
                             "attr": "hp",
                             "op": "add",
                             "value": {
-                              "expr": "-(entity.ent-player.attr.attack)"
+                              "expr": "-floor(1 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0) * 0.5))",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-dmg",
+                                "holeBindings": {
+                                  "h_mult": {
+                                    "kind": "number",
+                                    "value": 1.0
+                                  },
+                                  "h_atk": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "attack"
+                                  },
+                                  "h_def": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-boss",
+                                    "attr": "defense"
+                                  },
+                                  "h_crit": {
+                                    "kind": "number",
+                                    "value": 0
+                                  }
+                                }
+                              }
                             }
+                          },
+                          {
+                            "id": "pu-combo",
+                            "kind": "var",
+                            "varId": "combo",
+                            "op": "set",
+                            "value": 1
                           }
                         ]
                       }
@@ -4494,8 +5111,31 @@
                             "attr": "hp",
                             "op": "add",
                             "value": {
-                              "expr": "-(entity.ent-player.attr.attack * 13 / 10)"
+                              "expr": "-floor(entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * ((0.25 * (var.combo == 1) + 0.3 * (var.combo == 2) + 0.35 * (var.combo == 3) + 0.4 * (var.combo == 4)) * (0.85 + rand() * 0.3)))",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-dmg-combo",
+                                "holeBindings": {
+                                  "hc_atk": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "attack"
+                                  },
+                                  "hc_def": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-boss",
+                                    "attr": "defense"
+                                  }
+                                }
+                              }
                             }
+                          },
+                          {
+                            "id": "pu2-combo",
+                            "kind": "var",
+                            "varId": "combo",
+                            "op": "add",
+                            "value": 1
                           }
                         ]
                       }
@@ -4624,8 +5264,45 @@
                             "attr": "hp",
                             "op": "add",
                             "value": {
-                              "expr": "-(entity.ent-player.attr.attack * 18 / 10)"
+                              "expr": "-floor(1.8 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0.05) * 0.5) * chance(0.95))",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-dmg",
+                                "holeBindings": {
+                                  "h_mult": {
+                                    "kind": "number",
+                                    "value": 1.8
+                                  },
+                                  "h_atk": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "attack"
+                                  },
+                                  "h_def": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-boss",
+                                    "attr": "defense"
+                                  },
+                                  "h_crit": {
+                                    "kind": "number",
+                                    "value": 0.05
+                                  }
+                                }
+                              }
                             }
+                          },
+                          {
+                            "id": "zhong-crit",
+                            "kind": "var",
+                            "varId": "critRate",
+                            "op": "add",
+                            "value": 0.05
+                          },
+                          {
+                            "id": "zhong-break",
+                            "kind": "flag",
+                            "flagId": "boss-broken",
+                            "value": true
                           }
                         ]
                       }
@@ -4754,8 +5431,37 @@
                             "attr": "hp",
                             "op": "add",
                             "value": {
-                              "expr": "-(entity.ent-player.attr.attack * 24 / 10)"
+                              "expr": "-floor(entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * ((0.25 * (var.combo == 1) + 0.3 * (var.combo == 2) + 0.35 * (var.combo == 3) + 0.4 * (var.combo == 4)) * (0.85 + rand() * 0.3)))",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-dmg-combo",
+                                "holeBindings": {
+                                  "hc_atk": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "attack"
+                                  },
+                                  "hc_def": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-boss",
+                                    "attr": "defense"
+                                  }
+                                }
+                              }
                             }
+                          },
+                          {
+                            "id": "z2-crit",
+                            "kind": "var",
+                            "varId": "critRate",
+                            "op": "add",
+                            "value": 0.05
+                          },
+                          {
+                            "id": "z2-break",
+                            "kind": "flag",
+                            "flagId": "boss-broken",
+                            "value": true
                           }
                         ]
                       }
@@ -4882,7 +5588,20 @@
                             "entityId": "ent-player",
                             "attr": "hp",
                             "op": "add",
-                            "value": 30
+                            "value": {
+                              "expr": "floor(entity.ent-player.attr.hpMax * 0.12)",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-heal",
+                                "holeBindings": {
+                                  "hh_max": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "hpMax"
+                                  }
+                                }
+                              }
+                            }
                           },
                           {
                             "id": "fuzhu-qi",
@@ -4890,6 +5609,13 @@
                             "varId": "qi",
                             "op": "add",
                             "value": 2
+                          },
+                          {
+                            "id": "fuzhu-cd",
+                            "kind": "var",
+                            "varId": "healCd",
+                            "op": "set",
+                            "value": 3
                           }
                         ]
                       }
@@ -5018,7 +5744,31 @@
                             "attr": "hp",
                             "op": "add",
                             "value": {
-                              "expr": "-(entity.ent-player.attr.attack * 3)"
+                              "expr": "-floor(3 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.85 + rand() * 0.3) * (1 + chance(0.05) * 0.5))",
+                              "pick": {
+                                "mode": "formula",
+                                "formulaId": "fx-dmg",
+                                "holeBindings": {
+                                  "h_mult": {
+                                    "kind": "number",
+                                    "value": 3.0
+                                  },
+                                  "h_atk": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-player",
+                                    "attr": "attack"
+                                  },
+                                  "h_def": {
+                                    "kind": "entityAttr",
+                                    "entityId": "ent-boss",
+                                    "attr": "defense"
+                                  },
+                                  "h_crit": {
+                                    "kind": "number",
+                                    "value": 0.05
+                                  }
+                                }
+                              }
                             }
                           }
                         ]

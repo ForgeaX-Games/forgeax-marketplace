@@ -26,7 +26,9 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
   })
 
   it('quick win: light skill kills a low-hp boss → flow ends (no forced banner)', () => {
-    const scn = makeNodiaDemo({ bossHp: 60 })
+    // fx-dmg 公式（防御减免 + rand()*0.3 随机浮动，参见 nodia.graph.json）保证轻攻击伤害
+    // 下限 ≈45（80 攻 / 50 防），30 留足安全余量确保任意随机数下都能一击必杀。
+    const scn = makeNodiaDemo({ bossHp: 30 })
     const rt = new GraphRuntime(scn.graph, scn)
 
     rt.start() // 起点 = 叙事 n_open

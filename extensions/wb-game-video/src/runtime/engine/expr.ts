@@ -38,7 +38,7 @@ export interface EvalCtx {
 }
 
 // ── AST ──────────────────────────────────────────────────────────────────────
-type Node =
+export type Node =
   | { t: 'num'; v: number }
   | { t: 'ref'; path: string[] } // e.g. ['var','qi'] / ['entity','ent-boss','attr','defense'] / ['score']
   | { t: 'unary'; op: '-' | '!'; x: Node }
@@ -201,6 +201,65 @@ class Parser {
 
 export function parseExpr(src: string): Node {
   return new Parser(tokenize(src)).parse()
+}
+
+// ── Serializer (AST → 源码，parseExpr 的逆) ─────────────────────────────────────
+/**
+ * 把 AST 序列化回 expr 源码字符串，**最小括号化**——只在优先级/结合性要求时加括号。
+ * 与 parseExpr 构成 round-trip：`parse(serialize(n))` 结构等价于 `n`（对 parser 能产出的树），
+ * `serialize(parse(s))` 是 s 的规范形（幂等：再 parse+serialize 不变）。
+ */
+const BIN_PREC: Record<string, number> = {
+  '||': 1,
+  '&&': 2,
+  '>': 3,
+  '>=': 3,
+  '<': 3,
+  '<=': 3,
+  '==': 3,
+  '!=': 3,
+  '+': 4,
+  '-': 4,
+  '*': 5,
+  '/': 5,
+  '%': 5,
+}
+const UNARY_PREC = 6
+const PRIMARY_PREC = 100
+
+function nodePrec(n: Node): number {
+  if (n.t === 'bin') return BIN_PREC[n.op] ?? 0
+  if (n.t === 'unary') return UNARY_PREC
+  return PRIMARY_PREC // num / ref / call —— 原子，永不加括号
+}
+
+function serNode(n: Node): string {
+  switch (n.t) {
+    case 'num':
+      return String(n.v)
+    case 'ref':
+      return n.path.join('.')
+    case 'call':
+      return `${n.name}(${n.args.map((a) => serNode(a)).join(', ')})`
+    case 'unary': {
+      const inner = serNode(n.x)
+      // 一元优先级高于所有二元；操作数是二元时必须括起（如 -(a + b)）。
+      return `${n.op}${nodePrec(n.x) < UNARY_PREC ? `(${inner})` : inner}`
+    }
+    case 'bin': {
+      const p = BIN_PREC[n.op] ?? 0
+      const a = serNode(n.a)
+      const b = serNode(n.b)
+      // 左结合：左子优先级更低才括；右子优先级 ≤ 本级就括（a - (b - c) ≠ a - b - c）。
+      const left = nodePrec(n.a) < p ? `(${a})` : a
+      const right = nodePrec(n.b) <= p ? `(${b})` : b
+      return `${left} ${n.op} ${right}`
+    }
+  }
+}
+
+export function serializeExpr(node: Node): string {
+  return serNode(node)
 }
 
 // ── Evaluator ─────────────────────────────────────────────────────────────────

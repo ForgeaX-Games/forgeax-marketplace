@@ -290,6 +290,8 @@ interface NarrativeState {
   setComposerNodeConfig: (id: string, patch: Record<string, unknown>) => void;
   /** 清空编排画布。 */
   clearComposer: () => void;
+  /** 按分层（左→右）布局算法重排全部节点位置（仅手动触发，不自动刷新）。 */
+  relayoutComposer: () => void;
 
   // ---- Derived helpers ----
   hasDrafts: () => boolean;
@@ -1336,6 +1338,60 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     })),
 
   clearComposer: () => set({ composerNodes: [], composerEdges: [] }),
+
+  relayoutComposer: () =>
+    set((state) => {
+      const nodes = state.composerNodes;
+      if (nodes.length === 0) return {};
+      const edges = state.composerEdges;
+      // 与管线状态一致的左→右分层布局：沿边取最长路径作为层号，同层纵向堆叠。
+      const NODE_W = 180;
+      const NODE_H = 48;
+      const H_GAP = 72;
+      const V_GAP = 28;
+      const INIT_X = 48;
+      const INIT_Y = 48;
+
+      const adj = new Map<string, string[]>();
+      const indeg = new Map<string, number>(nodes.map((n) => [n.id, 0]));
+      for (const e of edges) {
+        if (!indeg.has(e.source) || !indeg.has(e.target)) continue;
+        adj.set(e.source, [...(adj.get(e.source) ?? []), e.target]);
+        indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+      }
+      const layer = new Map<string, number>();
+      const deg = new Map(indeg);
+      const queue = nodes.filter((n) => (deg.get(n.id) ?? 0) === 0).map((n) => n.id);
+      for (const id of queue) layer.set(id, 0);
+      const q = [...queue];
+      while (q.length > 0) {
+        const cur = q.shift()!;
+        const cl = layer.get(cur) ?? 0;
+        for (const nx of adj.get(cur) ?? []) {
+          layer.set(nx, Math.max(layer.get(nx) ?? 0, cl + 1));
+          const d = (deg.get(nx) ?? 0) - 1;
+          deg.set(nx, d);
+          if (d === 0) q.push(nx);
+        }
+      }
+      // 环内/未定层节点兜底归到第 0 层。
+      for (const n of nodes) if (!layer.has(n.id)) layer.set(n.id, 0);
+
+      const perLayer = new Map<number, number>();
+      const composerNodes = nodes.map((n) => {
+        const l = layer.get(n.id) ?? 0;
+        const row = perLayer.get(l) ?? 0;
+        perLayer.set(l, row + 1);
+        return {
+          ...n,
+          position: {
+            x: INIT_X + l * (NODE_W + H_GAP),
+            y: INIT_Y + row * (NODE_H + V_GAP),
+          },
+        };
+      });
+      return { composerNodes };
+    }),
 
   hasDrafts: () => {
     const drafts = get().editDrafts;

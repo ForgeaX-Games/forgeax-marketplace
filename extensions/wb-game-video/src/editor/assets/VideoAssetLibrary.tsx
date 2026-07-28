@@ -521,7 +521,7 @@ export function VideoAssetLibrary({
                   }
                 }}
               >
-                <span className="gc-row-mark" aria-hidden>{isBound ? '✓' : ''}</span>
+                {isBound ? <span className="gc-row-mark" aria-hidden>✓</span> : null}
                 <span className="gc-row-label">{label}</span>
                 {entry.status && entry.status !== 'ready' ? (
                   <span className={`gvv-row-status is-${entry.status}`}>

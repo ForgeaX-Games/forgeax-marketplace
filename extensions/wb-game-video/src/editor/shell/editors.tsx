@@ -5,7 +5,7 @@
  * 控件底：main 的 metaCatalog + ValueExprEditor。
  * 兼容：`EditorPickerCtx` / `pickers`（含 nodeLabel）与直接传 `entities`/`variables`。
  */
-import type { CSSProperties, JSX } from 'react'
+import { useRef, useState, type CSSProperties, type JSX } from 'react'
 import type {
   CmpOp,
   Entity,
@@ -81,6 +81,14 @@ const rowStyle: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center',
 const lbl: CSSProperties = { width: 52, opacity: 0.7, flexShrink: 0, fontSize: 11 }
 const del: CSSProperties = { color: '#ff6b6b', marginLeft: 'auto' }
 const hint: CSSProperties = { fontSize: 11, opacity: 0.55, marginBottom: 4 }
+
+/** NumOrExpr 值相等判断：数字比值、表达式比串——用于判「运算符变换是否真的改了值」，没改则不入撤回栈。 */
+function numOrExprEqual(a: NumOrExpr | undefined, b: NumOrExpr | undefined): boolean {
+  if (a === b) return true
+  if (typeof a === 'number' && typeof b === 'number') return a === b
+  if (typeof a === 'object' && a && typeof b === 'object' && b) return a.expr === b.expr
+  return false
+}
 
 function field(label: string, node: JSX.Element): JSX.Element {
   // 用 div 而非 label：子树常含 button，包在 label 里会点到文字也触发按钮（如「乘」误删）。
@@ -470,15 +478,35 @@ function EffectRow({
   formulas,
   onChange,
   onDelete,
+  canUndoOp,
+  onOpSnapshot,
+  onUndoOp,
 }: {
   eff: GraphEffect
   onChange: (e: GraphEffect) => void
   onDelete: () => void
+  /** 本行运算符撤回：canUndoOp = 有快照可撤；onOpSnapshot = 变换前存快照；onUndoOp = 执行撤回。 */
+  canUndoOp?: boolean
+  onOpSnapshot?: (snap: { op: NumericEffectOp; value: NumOrExpr }) => void
+  onUndoOp?: () => void
 } & MetaCatalogProps): JSX.Element {
   const entityOpts = listEntityOptions(entities)
   const numVars = listVarOptions(variables, { numbersOnly: true })
   const flagVars = listVarOptions(variables, { flagsOnly: true })
   const summary = summarizeEffect(eff, entities, variables)
+
+  // 运算符按钮（+ − × ÷ =）会把 value 就地变换（减=取反、除=取倒数），表达式/公式型会越叠越深且不可逆。
+  // 撤回快照由 EffectsEditor 按行持有（onOpSnapshot/canUndoOp/onUndoOp），EffectRow 不自存 state
+  // ——本行 onChange 会让父层重建整棵 effects，行内 useState 会被重置，故快照必须提升到不重挂的父层。
+  // 仅当变换「真的改变了 op 或 value」才入栈+回写：重复点已激活的 +/×/=（值不变）→ no-op，不产生可撤回项。
+  const handleOpChange = (next: { op: NumericEffectOp; value?: NumOrExpr }): void => {
+    if (eff.kind !== 'attr' && eff.kind !== 'var') return
+    const nextOp = next.op
+    const nextValue = 'value' in next && next.value !== undefined ? next.value : eff.value
+    if (nextOp === eff.op && numOrExprEqual(nextValue, eff.value)) return // 值/运算符都没变 → 不撤回、不回写
+    onOpSnapshot?.({ op: eff.op, value: eff.value })
+    onChange({ ...eff, op: nextOp, value: nextValue })
+  }
 
   return (
     <div style={box}>
@@ -486,7 +514,24 @@ function EffectRow({
         <span style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0 }} title={summary}>
           {summary}
         </span>
-        <button type="button" style={del} onClick={onDelete} title={`删除：${summary}`}>删除</button>
+        {(eff.kind === 'attr' || eff.kind === 'var') && canUndoOp && (
+          <button
+            type="button"
+            style={{ marginLeft: 'auto', cursor: 'pointer' }}
+            onClick={onUndoOp}
+            title="撤回上一步运算（+ − × ÷ =）对值的变换"
+          >
+            撤回
+          </button>
+        )}
+        <button
+          type="button"
+          style={(eff.kind === 'attr' || eff.kind === 'var') && canUndoOp ? { ...del, marginLeft: 4 } : del}
+          onClick={onDelete}
+          title={`删除：${summary}`}
+        >
+          删除
+        </button>
       </div>
       {field('类型', (
         <select
@@ -527,7 +572,7 @@ function EffectRow({
               variables={variables}
               formulas={formulas}
               onChange={(v) => onChange({ ...eff, value: v })}
-              effectOp={{ op: eff.op, onOpChange: (next) => onChange({ ...eff, ...next }) }}
+              effectOp={{ op: eff.op, onOpChange: handleOpChange }}
             />
           ))}
         </>
@@ -550,7 +595,7 @@ function EffectRow({
               variables={variables}
               formulas={formulas}
               onChange={(v) => onChange({ ...eff, value: v })}
-              effectOp={{ op: eff.op, onOpChange: (next) => onChange({ ...eff, ...next }) }}
+              effectOp={{ op: eff.op, onOpChange: handleOpChange }}
             />
           ))}
         </>
@@ -604,6 +649,11 @@ export function EffectsEditor({
 } & MetaCatalogProps): JSX.Element {
   const cat = resolveCatalog({ entities, variables, formulas, pickers })
   const list = value ?? []
+  // 每行的运算符撤回栈（按行 index 存于父层——EffectsEditor 不会因单行 onChange 重挂，故栈稳定）。
+  // 每次运算符变换（+ − × ÷ =）前把变换前的 {op, value} 压栈；撤回弹一步（连点 N 次可撤 N 次），
+  // 栈空 → 撤回键置灰。切节点/重开抽屉时本组件重挂，栈天然重置（以「本次打开」为分界）。
+  const opStacks = useRef<Map<number, { op: NumericEffectOp; value: NumOrExpr }[]>>(new Map())
+  const [, bumpUndo] = useState(0)
   return (
     <div>
       {list.map((eff, i) => (
@@ -614,7 +664,25 @@ export function EffectsEditor({
           variables={cat.variables}
           formulas={cat.formulas}
           onChange={(next) => onChange(list.map((e, idx) => (idx === i ? next : e)))}
-          onDelete={() => onChange(list.filter((_, idx) => idx !== i))}
+          onDelete={() => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }}
+          canUndoOp={(opStacks.current.get(i)?.length ?? 0) > 0}
+          onOpSnapshot={(snap) => {
+            const stack = opStacks.current.get(i) ?? []
+            stack.push(snap)
+            opStacks.current.set(i, stack)
+            bumpUndo((n) => n + 1)
+          }}
+          onUndoOp={() => {
+            const stack = opStacks.current.get(i)
+            const snap = stack?.pop()
+            if (!snap) return
+            const cur = list[i]
+            if (cur && (cur.kind === 'attr' || cur.kind === 'var')) {
+              const reverted: GraphEffect = { ...cur, op: snap.op, value: snap.value }
+              onChange(list.map((e, idx) => (idx === i ? reverted : e)))
+            }
+            bumpUndo((n) => n + 1)
+          }}
         />
       ))}
       <button style={{ marginTop: 4 }} onClick={() => onChange([...list, defaultEffect('attr', cat.entities, cat.variables)])}>+ 效果</button>

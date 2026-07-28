@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evalExpr, parseExpr, collectRefs } from '../engine/expr'
+import { evalExpr, parseExpr, serializeExpr, collectRefs } from '../engine/expr'
 import { createRng } from '../engine/rng'
 
 const ctx = () => ({
@@ -58,5 +58,59 @@ describe('evalExpr', () => {
     expect(refs.vars).toContain('qi')
     expect(refs.entities).toContain('ent-boss')
     expect(refs.usesScore).toBe(true)
+  })
+})
+
+describe('serializeExpr (AST → 源码, parseExpr 的逆)', () => {
+  // 覆盖：函数调用 / 嵌套除法 / 一元 / 优先级 / 比较+逻辑 / 伤害公式全串。
+  const CASES = [
+    '1',
+    '-5',
+    'var.qi + 1',
+    '2 + 3 * 4',
+    '(2 + 3) * 4',
+    '100 / (100 + entity.ent-boss.attr.defense)',
+    'entity.ent-player.attr.attack * 2 - entity.ent-boss.attr.defense',
+    'a - (b - c)',
+    'a - b - c',
+    '-(var.qi + 10)',
+    '!(var.qi >= 3)',
+    'var.qi >= 3 && flag.lotusClue == 1',
+    'floor(1.8 * entity.ent-player.attr.attack)',
+    'chance(entity.ent-player.attr.critChance + 0.05)',
+    '0.9 + rand() * 0.2',
+    'min(max(var.qi, 0), 10)',
+    // 验收样本：伤害公式全串（RATIO=1.8 / CRITBONUS=0.05 / HIT=0.95 已代入）
+    'floor(1.8 * entity.ent-player.attr.attack * 100 / (100 + entity.ent-boss.attr.defense) * (0.9 + rand() * 0.2) * (1 + chance(entity.ent-player.attr.critChance + 0.05) * (entity.ent-player.attr.critMult - 1))) * chance(0.95)',
+  ]
+
+  it('round-trip idempotent: serialize(parse(s)) 再 parse+serialize 不变', () => {
+    for (const s of CASES) {
+      const once = serializeExpr(parseExpr(s))
+      const twice = serializeExpr(parseExpr(once))
+      expect(twice).toBe(once)
+    }
+  })
+
+  it('round-trip 保值：eval(serialize(parse(s))) === eval(s)（抽象符号两边同样抛错）', () => {
+    const evalOr = (src: string): number | 'throw' => {
+      try {
+        return evalExpr(src, ctx())
+      } catch {
+        return 'throw'
+      }
+    }
+    for (const s of CASES) {
+      const canon = serializeExpr(parseExpr(s))
+      expect(evalOr(canon)).toBe(evalOr(s))
+    }
+  })
+
+  it('最小括号化：只在必要处加括号', () => {
+    expect(serializeExpr(parseExpr('2 + 3 * 4'))).toBe('2 + 3 * 4')
+    expect(serializeExpr(parseExpr('(2 + 3) * 4'))).toBe('(2 + 3) * 4')
+    expect(serializeExpr(parseExpr('((a - b) - c)'))).toBe('a - b - c')
+    expect(serializeExpr(parseExpr('a - (b - c)'))).toBe('a - (b - c)')
+    expect(serializeExpr(parseExpr('100 / (100 + var.qi)'))).toBe('100 / (100 + var.qi)')
   })
 })

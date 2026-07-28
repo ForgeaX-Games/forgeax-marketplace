@@ -51,40 +51,79 @@ export interface ComposerCategoryDef {
   items: ComposerCatalogItem[];
 }
 
-/** 五大类调色板目录。顺序即调色板从左到右的展示顺序。 */
+/**
+ * 五大类调色板目录。顺序即调色板从左到右的展示顺序。
+ *
+ * 与左侧栏对齐（feature list §1/§2）：
+ *  - input   拆为三个入口：直接输入 / 标签选择 / 文件上传（对应 §1 三入口，节点内完全复刻其编辑面板）。
+ *  - routing 拆为两个入口：叙事全量 / 叙事单品（对应 §2 routeGroup=planning/narrative）。
+ *  - expert  §2.1.2 四类品类叙事专家（JRPG / ORPG(含GTA) / 影游 / 其他），各预制一条管线。
+ *  - assistant §2.2.1 十一类"故事结构"叙事策略助手（可插拔 prompt，前端编排用）。
+ *  - engineer  §2.2.2 叙事单品工程师团队（2.2.2.0–2.2.2.12）。
+ */
 export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
   {
     category: "input",
     labelKey: "composer.cat.input",
-    label: "输入",
-    icon: "◉",
+    label: "输入需求",
+    icon: "⤓",
     items: [
       {
-        id: "input.default",
+        id: "input.text",
         category: "input",
-        labelKey: "composer.item.input",
-        label: "输入",
-        icon: "◉",
-        defaultConfig: { userInput: "" },
+        labelKey: "composer.item.input.text",
+        label: "直接输入",
+        icon: "✎",
+        defaultConfig: { inputTab: "text", userInput: "" },
+      },
+      {
+        id: "input.tags",
+        category: "input",
+        labelKey: "composer.item.input.tags",
+        label: "标签选择",
+        icon: "⌗",
+        defaultConfig: { inputTab: "tags", tagSelections: {}, tagCustomTexts: {} },
+      },
+      {
+        id: "input.file",
+        category: "input",
+        labelKey: "composer.item.input.file",
+        label: "文件上传",
+        icon: "⇪",
+        defaultConfig: { inputTab: "file", uploadedFileNames: [] },
       },
     ],
   },
   {
     category: "routing",
     labelKey: "composer.cat.routing",
-    label: "路由",
-    icon: "⤳",
+    label: "叙事路由",
+    icon: "⎇",
     items: [
       {
-        id: "routing.default",
+        id: "routing.planning",
         category: "routing",
-        labelKey: "composer.item.routing",
-        label: "路由",
-        icon: "⤳",
+        labelKey: "composer.item.routing.planning",
+        label: "叙事全量",
+        icon: "▤",
+        routeGroup: "planning",
         defaultConfig: {
           routeGroup: "planning",
           tier: null,
           genreCode: null,
+          complexity: undefined,
+        },
+      },
+      {
+        id: "routing.narrative",
+        category: "routing",
+        labelKey: "composer.item.routing.narrative",
+        label: "叙事单品",
+        icon: "◈",
+        routeGroup: "narrative",
+        defaultConfig: {
+          routeGroup: "narrative",
+          mode: "narrative_auto",
           complexity: undefined,
         },
       },
@@ -100,7 +139,7 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         id: "expert.jrpg",
         category: "expert",
         labelKey: "composer.item.expert.jrpg",
-        label: "JRPG 叙事策划专家",
+        label: "JRPG 品类叙事专家",
         icon: "◆",
         pipelineTemplate: "tpl-rpg",
         tier: "tier1",
@@ -110,7 +149,7 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         id: "expert.orpg",
         category: "expert",
         labelKey: "composer.item.expert.orpg",
-        label: "ORPG 叙事策划专家",
+        label: "ORPG 品类叙事专家",
         icon: "◆",
         pipelineTemplate: "tpl-open-world",
         tier: "tier1",
@@ -120,7 +159,7 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         id: "expert.film_game",
         category: "expert",
         labelKey: "composer.item.expert.film_game",
-        label: "互动影游叙事策划专家",
+        label: "影游品类叙事专家",
         icon: "◆",
         pipelineTemplate: "tpl-vn-v2",
         tier: "tier1",
@@ -130,7 +169,7 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         id: "expert.other",
         category: "expert",
         labelKey: "composer.item.expert.other",
-        label: "其他品类叙事策划专家",
+        label: "其他品类叙事专家",
         icon: "◆",
         pipelineTemplate: "tpl-rpg",
         tier: "tier1",
@@ -144,17 +183,17 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
     label: "叙事策略助手",
     icon: "❖",
     items: [
-      { id: "assistant.worldview", category: "assistant", labelKey: "composer.item.assistant.worldview", label: "世界观策略助手", icon: "❖", modeId: "worldview" },
-      { id: "assistant.character", category: "assistant", labelKey: "composer.item.assistant.character", label: "角色策略助手", icon: "❖", modeId: "character" },
-      { id: "assistant.story_framework", category: "assistant", labelKey: "composer.item.assistant.story_framework", label: "故事框架策略助手", icon: "❖", modeId: "story_framework" },
-      { id: "assistant.story_outline", category: "assistant", labelKey: "composer.item.assistant.story_outline", label: "故事大纲策略助手", icon: "❖", modeId: "story_outline" },
-      { id: "assistant.detailed_outline", category: "assistant", labelKey: "composer.item.assistant.detailed_outline", label: "故事细纲策略助手", icon: "❖", modeId: "detailed_outline" },
-      { id: "assistant.branch", category: "assistant", labelKey: "composer.item.assistant.branch", label: "分支叙事策略助手", icon: "❖", modeId: "vn_full" },
-      { id: "assistant.fragmented", category: "assistant", labelKey: "composer.item.assistant.fragmented", label: "碎片叙事策略助手", icon: "❖", modeId: "fragmented" },
-      { id: "assistant.emergent", category: "assistant", labelKey: "composer.item.assistant.emergent", label: "涌现叙事策略助手", icon: "❖", modeId: "emergent" },
-      { id: "assistant.card_narrative", category: "assistant", labelKey: "composer.item.assistant.card_narrative", label: "卡牌叙事策略助手", icon: "❖", modeId: "card_narrative" },
-      { id: "assistant.open_world", category: "assistant", labelKey: "composer.item.assistant.open_world", label: "开放世界叙事策略助手", icon: "❖", modeId: "open_world_narrative" },
-      { id: "assistant.vn", category: "assistant", labelKey: "composer.item.assistant.vn", label: "影游叙事策略助手", icon: "❖", modeId: "vn_full" },
+      { id: "assistant.linear", category: "assistant", labelKey: "composer.item.assistant.linear", label: "线性结构叙事助手", icon: "❖" },
+      { id: "assistant.fishbone", category: "assistant", labelKey: "composer.item.assistant.fishbone", label: "鱼骨结构叙事助手", icon: "❖" },
+      { id: "assistant.tree", category: "assistant", labelKey: "composer.item.assistant.tree", label: "树状结构叙事助手", icon: "❖" },
+      { id: "assistant.multiline", category: "assistant", labelKey: "composer.item.assistant.multiline", label: "多线交织叙事助手", icon: "❖" },
+      { id: "assistant.network", category: "assistant", labelKey: "composer.item.assistant.network", label: "网状结构叙事助手", icon: "❖" },
+      { id: "assistant.loop", category: "assistant", labelKey: "composer.item.assistant.loop", label: "循环结构叙事助手", icon: "❖" },
+      { id: "assistant.fragmented", category: "assistant", labelKey: "composer.item.assistant.fragmented", label: "碎片化叙事助手", icon: "❖" },
+      { id: "assistant.emergent", category: "assistant", labelKey: "composer.item.assistant.emergent", label: "涌现性叙事助手", icon: "❖" },
+      { id: "assistant.nested", category: "assistant", labelKey: "composer.item.assistant.nested", label: "嵌套结构叙事助手", icon: "❖" },
+      { id: "assistant.stream", category: "assistant", labelKey: "composer.item.assistant.stream", label: "意识流叙事助手", icon: "❖" },
+      { id: "assistant.hybrid", category: "assistant", labelKey: "composer.item.assistant.hybrid", label: "混合结构叙事助手", icon: "❖" },
     ],
   },
   {
@@ -163,18 +202,18 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
     label: "叙事单品工程师",
     icon: "▣",
     items: [
-      { id: "engineer.preference_summary", category: "engineer", labelKey: "composer.item.engineer.preference_summary", label: "偏好总结工程师", icon: "▣", stepId: "preference_summary" },
-      { id: "engineer.initial_plan", category: "engineer", labelKey: "composer.item.engineer.initial_plan", label: "初步方案工程师", icon: "▣", stepId: "initial_plan" },
-      { id: "engineer.worldview", category: "engineer", labelKey: "composer.item.engineer.worldview", label: "世界观工程师", icon: "▣", stepId: "worldview" },
-      { id: "engineer.character_enrichment", category: "engineer", labelKey: "composer.item.engineer.character_enrichment", label: "角色档案工程师", icon: "▣", stepId: "character_enrichment" },
-      { id: "engineer.item_database", category: "engineer", labelKey: "composer.item.engineer.item_database", label: "道具清单工程师", icon: "▣", stepId: "item_database" },
-      { id: "engineer.story_framework", category: "engineer", labelKey: "composer.item.engineer.story_framework", label: "故事框架工程师", icon: "▣", stepId: "story_framework" },
-      { id: "engineer.outline_batch", category: "engineer", labelKey: "composer.item.engineer.outline_batch", label: "故事大纲工程师", icon: "▣", stepId: "outline_batch" },
-      { id: "engineer.detailed_outline", category: "engineer", labelKey: "composer.item.engineer.detailed_outline", label: "故事细纲工程师", icon: "▣", stepId: "detailed_outline" },
-      { id: "engineer.plot_generation", category: "engineer", labelKey: "composer.item.engineer.plot_generation", label: "情节生成工程师", icon: "▣", stepId: "plot_generation" },
-      { id: "engineer.script_generation", category: "engineer", labelKey: "composer.item.engineer.script_generation", label: "剧本生成工程师", icon: "▣", stepId: "script_generation" },
-      { id: "engineer.quest_generation", category: "engineer", labelKey: "composer.item.engineer.quest_generation", label: "任务生成工程师", icon: "▣", stepId: "quest_generation" },
-      { id: "engineer.scene_generation", category: "engineer", labelKey: "composer.item.engineer.scene_generation", label: "场景生成工程师", icon: "▣", stepId: "scene_generation" },
+      { id: "engineer.encyclopedia", category: "engineer", labelKey: "composer.item.engineer.encyclopedia", label: "百科娘", icon: "▣" },
+      { id: "engineer.req_list", category: "engineer", labelKey: "composer.item.engineer.req_list", label: "需求清单工程师", icon: "▣", stepId: "preference_summary" },
+      { id: "engineer.design_doc", category: "engineer", labelKey: "composer.item.engineer.design_doc", label: "策划文档工程师", icon: "▣", stepId: "initial_plan" },
+      { id: "engineer.worldview", category: "engineer", labelKey: "composer.item.engineer.worldview", label: "世界观设定工程师", icon: "▣", stepId: "worldview" },
+      { id: "engineer.character", category: "engineer", labelKey: "composer.item.engineer.character", label: "角色档案工程师", icon: "▣", stepId: "character_enrichment" },
+      { id: "engineer.item", category: "engineer", labelKey: "composer.item.engineer.item", label: "道具清单工程师", icon: "▣", stepId: "item_database" },
+      { id: "engineer.scene_list", category: "engineer", labelKey: "composer.item.engineer.scene_list", label: "场景列表工程师", icon: "▣", stepId: "scene_generation" },
+      { id: "engineer.outline", category: "engineer", labelKey: "composer.item.engineer.outline", label: "故事大纲工程师", icon: "▣", stepId: "outline_batch" },
+      { id: "engineer.structure", category: "engineer", labelKey: "composer.item.engineer.structure", label: "故事结构工程师", icon: "▣", stepId: "detailed_outline" },
+      { id: "engineer.plot", category: "engineer", labelKey: "composer.item.engineer.plot", label: "故事情节工程师", icon: "▣", stepId: "plot_generation" },
+      { id: "engineer.quest", category: "engineer", labelKey: "composer.item.engineer.quest", label: "任务工程师", icon: "▣", stepId: "quest_generation" },
+      { id: "engineer.storyboard", category: "engineer", labelKey: "composer.item.engineer.storyboard", label: "分镜工程师", icon: "▣", stepId: "script_generation" },
       { id: "engineer.narrative_card", category: "engineer", labelKey: "composer.item.engineer.narrative_card", label: "叙事卡工程师", icon: "▣", stepId: "narrative_card" },
     ],
   },
@@ -219,6 +258,13 @@ export interface ComposerEdgeData {
   source: string;
   target: string;
 }
+
+/**
+ * 文件锚点 IP 生成触发器注册表（非持久，运行期存活）：
+ * 文件上传节点内的 IpStageFlow 上报 { canGenerate, generate }，
+ * 顶部「开始编排生成」据此触发（生成入口统一在顶部，不在节点内）。
+ */
+export const composerIpGenerators = new Map<string, { canGenerate: boolean; generate: () => void }>();
 
 /** 以输入节点为锚点拆分出的一条可提交管线。 */
 export interface AnchoredPipeline {

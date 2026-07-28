@@ -36,7 +36,7 @@ import type {
 } from "../types/narrative-ip-dna.js";
 import { archiveAndBuildManifest, type IncomingFile, inferMediaType, modalityOf } from "./phase0-foundation.js";
 import { transcribeMediaFiles, type VideoFrameSampler, type VideoTranscriber } from "./phase1-multimodal.js";
-import { expandArchives, expandPdfs, compressMediaToDir, isArchive, type ArchiveExtractor, type MediaCompressor, type PdfPageSplitter } from "./phase0-compress.js";
+import { decodeGb18030, expandArchives, expandPdfs, compressMediaToDir, isArchive, type ArchiveExtractor, type MediaCompressor, type PdfPageSplitter } from "./phase0-compress.js";
 import {
   buildLightHierarchy,
   buildHierarchyFromSegments,
@@ -888,7 +888,7 @@ function safeToText(buf: Buffer): string {
     const replacements = (utf8.match(/\uFFFD/g) ?? []).length;
     if (replacements > 0 && replacements > utf8.length * 0.002) {
       try {
-        const gbk = new TextDecoder("gb18030").decode(buf);
+        const gbk = decodeGb18030(buf);
         if (!looksBinary(gbk)) return gbk;
       } catch {
         /* gb18030 解码失败 → 沿用 utf-8 结果 */

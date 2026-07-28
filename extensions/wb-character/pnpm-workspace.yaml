@@ -4,6 +4,8 @@
 # `pnpm install` runs the builds instead of refusing.
 # NB: pnpm 11.5's field is `allowBuilds` (name: true), NOT onlyBuiltDependencies
 # — and the value must be the boolean `true`, not placeholder text.
+packages:
+  - .
 allowBuilds:
   esbuild: true
   sharp: true

@@ -54,11 +54,11 @@ const BINARY_EXTS = [
   "zip", "tar", "gz", "tgz",
 ];
 const ALL_UPLOAD_EXTS = [...TEXT_EXTS, ...DOCX_EXTS, ...BINARY_EXTS];
-const UPLOAD_ACCEPT = ALL_UPLOAD_EXTS.map((e) => `.${e}`).join(",");
+export const UPLOAD_ACCEPT = ALL_UPLOAD_EXTS.map((e) => `.${e}`).join(",");
 
 type UploadKind = "text" | "docx" | "binary";
 
-interface UploadedItem {
+export interface UploadedItem {
   name: string;
   size: number;
   mime?: string;
@@ -88,7 +88,7 @@ function uploadKindOf(ext: string): UploadKind | null {
 }
 
 /** 读取单个文件为中性 UploadedItem（文本 utf8 / docx base64-docx / 二进制 base64）。 */
-async function readUploadedItem(file: File): Promise<UploadedItem | null> {
+export async function readUploadedItem(file: File): Promise<UploadedItem | null> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const kind = uploadKindOf(ext);
   if (!kind) return null;
@@ -204,7 +204,7 @@ const OPEN_WORLD_STEPS = [...ITEM_BASE, "region_design", "emergent_event", "ques
 // narrative_auto 的步骤完全由后端 buildAutoSteps 按品类动态决定，前端没有合理的预览
 // 序，应该返回 null（而非 [] —— 后者会让 PipelineStatus 误以为"预览=空管线"，
 // 导致 X/Y 数字消失 + 显示占位文案而非"等待开始生成"）。
-const NARRATIVE_ROUTES: { id: ModeId; hasComplexity: boolean; steps: string[] | null }[] = [
+export const NARRATIVE_ROUTES: { id: ModeId; hasComplexity: boolean; steps: string[] | null }[] = [
   { id: "narrative_auto",   hasComplexity: true,  steps: null },
   { id: "initial_outline",  hasComplexity: false, steps: OUTLINE_BASE },
   { id: "worldview",        hasComplexity: false, steps: WV_BASE },
@@ -313,7 +313,7 @@ function computeRouteScore(routeId: string, needs: Record<string, number> | null
  *  PLANNING TIER OPTIONS — A1-4: 选择 Tier 后展开二级品类面板
  * ═══════════════════════════════════════════════════════════════════ */
 // 排列顺序：自动 / T4 / T3 / T2 / T1 — 由轻到重，符合用户阅读习惯
-const TIER_ITEMS: { id: TierId | "auto" }[] = [
+export const TIER_ITEMS: { id: TierId | "auto" }[] = [
   { id: "auto" },
   { id: "tier4" },
   { id: "tier3" },
@@ -367,11 +367,11 @@ const TIER_MODE_STEPS: Record<TierId, string[]> = {
 };
 
 // Phase 3.5: tier4 也可自由选复杂度（默认 1，但允许手动改）。auto 路由不走品类 → 隐藏。
-const TIER_HAS_COMPLEXITY: Record<string, boolean> = {
+export const TIER_HAS_COMPLEXITY: Record<string, boolean> = {
   auto: false, tier1: true, tier2: true, tier3: true, tier4: true,
 };
 
-const COMPLEXITY_LEVELS = [
+export const COMPLEXITY_LEVELS = [
   { level: 1 },
   { level: 2 },
   { level: 3 },
@@ -399,7 +399,7 @@ interface TagDimension {
   allowCustom?: boolean;
 }
 
-const TAG_DIMENSIONS: TagDimension[] = [
+export const TAG_DIMENSIONS: TagDimension[] = [
   { key: "theme", nameKey: "tagDim.theme", options: ["成长", "救赎", "复仇", "爱情", "友情", "牺牲", "自由", "权力", "命运", "探索"] },
   { key: "genre", nameKey: "tagDim.genre", options: ["奇幻", "科幻", "武侠", "悬疑", "恐怖", "历史", "都市", "末日", "仙侠", "军事"] },
   { key: "tone", nameKey: "tagDim.tone", options: ["热血", "黑暗", "温暖", "幽默", "史诗", "治愈", "压抑", "荒诞", "浪漫", "硬核"] },
@@ -2232,18 +2232,18 @@ export function TierModeSelector() {
             </div>
 
             {/* §条目持久化：ROUTING「确认保存」——把 INPUT+ROUTING 参数落盘到 output/<key>/_entry.json。
-                亮/灰随脏态：有未保存改动亮、已落盘灰；不点也会在「开始生成」时自动落盘（兜底）。
-                仅在"已确认输入、未生成"的条目上出现。 */}
-            {inputConfirmed && activeEntryKey && !activeEntryStatus && (
+                常显（与 1 INPUT 一致，右下角常驻）：仅在"已确认输入、有未保存改动、未生成"时可点，
+                否则置灰；不点也会在「开始生成」时自动落盘（兜底）。 */}
+            {(
               <div className="ip-stage-card__foot">
                 <button
                   type="button"
                   className="btn-generate btn-generate--compact ip-stage-btn"
                   onClick={handleSaveEntry}
-                  disabled={!entryDirty}
+                  disabled={!entryDirty || !activeEntryKey || !!activeEntryStatus}
                   title={entryDirty ? t("tms.saveEntry.dirtyTitle") : t("tms.saveEntry.savedTitle")}
                 >
-                  {entryDirty ? t("tms.confirm") : t("tms.confirmDone")}
+                  {activeEntryKey && !entryDirty && !activeEntryStatus ? t("tms.confirmDone") : t("tms.confirm")}
                 </button>
               </div>
             )}

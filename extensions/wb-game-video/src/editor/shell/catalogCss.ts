@@ -965,4 +965,63 @@ ${PREVIEW_CLOCK_CSS}
 }
 .gc-empty-glyph { font-size: 38px; color: rgba(255,255,255,0.25); }
 .gc-empty-text { font-size: 13px; color: rgba(255,255,255,0.5); }
+
+/* ── 公式文本编辑器（Grafana 式：文本主输入 + 只读高亮预览 + 插入工具条）─────────── */
+.gc-fx { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gc-fx-input {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; line-height: 1.5;
+  border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text);
+  border-radius: 7px; padding: 8px 10px; resize: vertical;
+}
+.gc-fx-input:focus { border-color: var(--gc-accent); outline: none; box-shadow: 0 0 0 2px rgba(240,136,64,.18); }
+.gc-fx-input.is-err { border-color: var(--gc-danger, #e0795f); }
+/* 结构摘要行：引用/参数概览 + ≈值（不复述公式串） */
+.gc-fx-summary {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  min-height: 20px; font-size: 11.5px; color: var(--gc-muted);
+}
+.gc-fx-summary-item {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--gc-line-soft, var(--gc-line)); background: rgba(255,255,255,.03);
+}
+.gc-fx-summary-item--hole { color: var(--gc-accent); border-color: var(--gc-accent-line); }
+.gc-fx-summary-item--muted { color: var(--gc-faint); }
+.gc-fx-summary-item--err { color: var(--gc-danger, #e0795f); border-color: var(--gc-danger, #e0795f); }
+.gc-fx-eq { margin-left: auto; color: var(--gc-muted); font-size: 12px; }
+/* 试算面板：给 ?参数 填样例值、实时算出结果 */
+.gc-fx-trial { border: 1px solid var(--gc-line-soft, var(--gc-line)); border-radius: 7px; background: rgba(255,255,255,.02); }
+.gc-fx-trial-head {
+  cursor: pointer; user-select: none; list-style: none;
+  padding: 6px 10px; font-size: 11.5px; color: var(--gc-muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.gc-fx-trial-head::before { content: '▸'; font-size: 10px; opacity: .7; }
+.gc-fx-trial[open] .gc-fx-trial-head::before { content: '▾'; }
+.gc-fx-trial-eq { margin-left: auto; color: var(--gc-accent); font-weight: 600; }
+.gc-fx-trial-body { padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.gc-fx-trial-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.gc-fx-trial-label { flex: 1; color: var(--gc-muted); }
+.gc-fx-trial-input {
+  width: 90px; box-sizing: border-box;
+  border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text);
+  border-radius: 6px; padding: 4px 6px; font-size: 12px; text-align: right;
+}
+.gc-fx-err { color: var(--gc-danger, #e0795f); font-size: 11px; line-height: 1.4; }
+.gc-fx-hint { color: var(--gc-faint); font-size: 11px; line-height: 1.4; }
+/* 插入工具条 */
+.gc-fx-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.gc-fx-tools > label { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--gc-faint); }
+.gc-fx-chip {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
+  border: 1px solid var(--gc-line); color: var(--gc-muted); background: rgba(0,0,0,.2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.gc-fx-chip:hover { border-color: var(--gc-accent-line); color: var(--gc-text); }
+.gc-fx-tools select {
+  border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text);
+  border-radius: 6px; padding: 3px 6px; font-size: 11.5px;
+}
 `

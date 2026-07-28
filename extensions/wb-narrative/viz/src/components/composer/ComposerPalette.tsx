@@ -58,7 +58,6 @@ export function ComposerPalette() {
                 title={label}
               >
                 <span className="composer-palette__item-icon">{item.icon}</span>
-                <span className="composer-palette__item-label">{label}</span>
                 <button
                   type="button"
                   className="composer-palette__at"
@@ -77,6 +76,7 @@ export function ComposerPalette() {
                 >
                   <AtSign size={12} aria-hidden />
                 </button>
+                <span className="composer-palette__item-label">{label}</span>
               </div>
             );
           })}

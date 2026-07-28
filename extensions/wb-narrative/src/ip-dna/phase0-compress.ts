@@ -58,6 +58,13 @@ function ext(fileName: string): string {
   return path.extname(fileName).toLowerCase();
 }
 
+const LabelledTextDecoder = TextDecoder as unknown as new (label?: string) => TextDecoder;
+
+/** Node's runtime accepts WHATWG encoding labels that its narrow type omits. */
+export function decodeGb18030(bytes: Buffer): string {
+  return new LabelledTextDecoder("gb18030").decode(bytes);
+}
+
 /**
  * 解码压缩包内成员文件名(中文兼容)。
  * Windows/GBK 打包的 zip/tar 常以 CP936(GBK) 字节存名且不置 UTF-8 标志,
@@ -70,7 +77,7 @@ export function decodeArchiveName(bytes: Buffer, utf8Flag: boolean): string {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     try {
-      return new TextDecoder("gb18030").decode(bytes);
+      return decodeGb18030(bytes);
     } catch {
       return bytes.toString("utf-8");
     }
