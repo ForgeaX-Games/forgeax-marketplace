@@ -161,12 +161,11 @@ export function VersionPicker(): JSX.Element {
     <div className="gv-version-picker" ref={rootRef}>
       <select
         ref={selectRef}
-        value=""
+        value={currentTag ?? ''}
         title="载入某个历史版本到编辑器（不改历史；保存后新增一版）"
         onFocus={() => void refreshVersions()}
         onChange={(e) => {
           const tag = e.target.value
-          e.target.value = ''
           if (tag) requestLoad(tag)
         }}
       >

@@ -608,6 +608,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         activeBlueprintId: mainId,
         meta: metaFromDocument(norm),
         graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
+        currentTag: tag,
         loadEpoch: st.loadEpoch + 1,
         fitSignal: st.fitSignal + 1,
       }))

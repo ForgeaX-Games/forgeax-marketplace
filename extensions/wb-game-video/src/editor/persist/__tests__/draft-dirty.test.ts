@@ -116,6 +116,7 @@ describe('content-based isDraft', () => {
 
     await useGraphScenario.getState().loadVersion('v9')
     expect(useGraphScenario.getState().isDraft).toBe(false)
+    expect(useGraphScenario.getState().currentTag).toBe('v9')
     expect(useGraphScenario.getState().savedTip).toMatch(/已载入版本 v9$/)
   })
 
@@ -128,6 +129,7 @@ describe('content-based isDraft', () => {
 
     await useGraphScenario.getState().loadVersion('v1')
     expect(useGraphScenario.getState().isDraft).toBe(true)
+    expect(useGraphScenario.getState().currentTag).toBe('v1')
     expect(useGraphScenario.getState().savedTip).toMatch(/未保存/)
   })
 
