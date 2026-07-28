@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gen:import-character-refs args",
+  "title": "wb-game-video:import-character-refs args",
   "type": "object",
   "additionalProperties": false,
   "properties": {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gen:generate-shot-script returns",
+  "title": "wb-game-video:generate-shot-script returns",
   "type": "object",
   "additionalProperties": true,
   "required": ["shots"],

@@ -16,28 +16,28 @@
 
 - **GameGraph schema 契约（强制）**：产出的必须是一份合法 `GameScenario`——**只有「演出节点」，每个绑视频**；出手/血量/胜负/变招等**判断一律折进出边**（edge 的 `condition`/`weight`/handle），无独立网关节点。可运行玩法一律 typed 字段、声明式、可序列化、无函数。完整规则见 `persona/zh.md` §GameGraph schema 契约，代码权威在 `wb-game-video/src/blueprint/graph/graph-schema.ts` + `engine.ts` + demo `demo/nodia.graph.json`。
 - **先骨架后血肉**：先排演出节点顺序 + 条件出边（少量节点的草图），再填台词/HUD/皮肤与视频绑定。
-- **视频用内置库**：媒体来自内置演出视频库（`gvid:list-videos` 查可用 `media.ref`），本引擎**不生成新视频**；缺片段就先占位、别留空节点。
+- **视频用内置库**：媒体来自内置演出视频库（`wb-game-video:list-videos` 查可用 `media.ref`），本引擎**不生成新视频**；缺片段就先占位、别留空节点。
 - **QTE 是节奏药不是惩罚**；分支不爆炸（单节点 ≤4 选项，总 endings 3-7）。
 - 接手后主动提示用户**打开左侧「视频游戏工坊」(wb-game-video)** 看蓝图、试玩。
 
 ## 工具 / 产出
 
 - 工具（graph-native，仅三个）：
-  - `gvid:get-graph` — 读当前 game 的 GameGraph（改图前先拿现有 nodes/edges）。
-  - `gvid:save-graph` — 整本回写 GameGraph + 压版本快照；落盘前结构校验，`ok:false` 看 `errors` 修完再存。
-  - `gvid:list-videos` — 列内置演出视频库可绑的 `media.ref`。
+  - `wb-game-video:get-graph` — 读当前 game 的 GameGraph（改图前先拿现有 nodes/edges）。
+  - `wb-game-video:save-graph` — 整本回写 GameGraph + 压版本快照；落盘前结构校验，`ok:false` 看 `errors` 修完再存。
+  - `wb-game-video:list-videos` — 列内置演出视频库可绑的 `media.ref`。
   - （可选）`narrative:*` — 需要先draft 故事时可调 wb-narrative 管线，但**转成 GameGraph 由你手工完成**（无自动 import 工具）。
-- 产出：`.forgeax/games/<slug>/game-video/scenarios.graph.json`（+ `scenarios.graph.versions/`）、可选 `gamevideo-shotlist.md` 镜头表、`qte-pacing.md` 节奏表——均被 wb-game-video 工作台的 `matchProduces` 识别并展示。
+- 产出：`.forgeax/games/<slug>/game-video/scenarios.graph.json`（+ `scenarios.graph.versions/`）、可选 `wb-game-video-shotlist.md` 镜头表、`qte-pacing.md` 节奏表——均被 wb-game-video 工作台的 `matchProduces` 识别并展示。
 
 ## 标准编辑闭环（don't just chat — edit the graph）
 
 **铁律：把玩法落成 GameGraph 并 `save-graph`，而不是只在对话里描述。** 否则作者在工坊什么都看不到。
 
 ```
-gvid:get-graph({})                          # 拿现有 nodes/edges（新游戏则基于返回的 demo 起改）
+wb-game-video:get-graph({})                 # 拿现有 nodes/edges（新游戏则基于返回的 demo 起改）
   → 在 scenario.graph 上编辑：加/删演出节点、改 edge.target、把判断折进出边 condition/weight
-gvid:list-videos({})                        # 需要绑视频时看有哪些片段
-gvid:save-graph({ scenario, title:"..." })  # 整本回写；ok:false 时按 errors 修
+wb-game-video:list-videos({})               # 需要绑视频时看有哪些片段
+wb-game-video:save-graph({ scenario, title:"..." }) # 整本回写；ok:false 时按 errors 修
 ```
 
 - 典型微改：「把 A 节点到 B 的连线改成到 C」= get-graph → 找到 `source:A` 的那条 edge、把 `target` 从 B 改成 C → save-graph。

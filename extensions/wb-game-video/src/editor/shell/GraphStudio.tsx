@@ -71,7 +71,7 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
 }
 
 /** 节点面板预览区宽度：拖拽持久化键与几何约束（表单区至少 FORM_W_MIN，面板过窄时预览让位）。 */
-const PREVIEW_W_KEY = 'gvid.nodePanel.previewW'
+const PREVIEW_W_KEY = 'wb-game-video.nodePanel.previewW'
 const PREVIEW_W_MIN = 340
 const FORM_W_MIN = 400
 
@@ -328,7 +328,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   useEffect(() => {
     const jumpId = pendingJumpRef.current
     pendingJumpRef.current = null
-    setSnap(jumpId ? sessionRef.current.jump(jumpId) : sessionRef.current.start())
+    setSnap(jumpId ? sessionRef.current.jump(jumpId, { resetGlobals: true }) : sessionRef.current.start())
     setPlayEpoch((n) => n + 1)
     setBgmRunKey((n) => n + 1)
   }, [session])

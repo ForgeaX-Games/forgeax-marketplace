@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gvid:get-graph returns",
+  "title": "wb-game-video:get-graph returns",
   "type": "object",
   "additionalProperties": true,
   "required": ["project"],

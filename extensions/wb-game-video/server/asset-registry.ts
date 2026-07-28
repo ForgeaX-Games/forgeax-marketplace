@@ -6,7 +6,7 @@
  *   - `media/<id>.<ext>`    = wb-game-video 自产的图/视频二进制
  *
  * 被两处共享（SSOT）：
- *   - `server/tool-handlers.ts` 的 gen:* 工具 + `server/generation/*` 编排（写）
+ *   - `server/tool-handlers.ts` 的 wb-game-video:* 工具 + `server/generation/*` 编排（写）
  *   - `vite.config.ts` 的 `/__gva__` 端点（读 + 流式回文件）
  *
  * 跨模块产物（人设图/场景图）**只读**：不落进本 registry 的 media/，仅以 externalPath

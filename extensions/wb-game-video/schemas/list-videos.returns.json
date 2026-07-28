@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gvid:list-videos returns",
+  "title": "wb-game-video:list-videos returns",
   "type": "object",
   "additionalProperties": true,
   "required": ["videos"],

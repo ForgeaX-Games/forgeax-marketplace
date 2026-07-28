@@ -27,6 +27,24 @@ export function emptyBlueprintDoc(opts: { id?: string; title?: string } = {}): B
   }
 }
 
+/**
+ * 无草稿 / 无磁盘时的空库：仅主蓝图、零节点。不灌内置 demo。
+ * entities/variables 显式 `{}`，避免加载链把 undefined 回落成 demo meta。
+ */
+export function emptyLibraryDocument(meta: ScenarioMetaFields = {}): GraphLibraryDocument {
+  const main: BlueprintDoc = {
+    id: MAIN_ID,
+    title: '主蓝图',
+    entry: 'entry',
+    graph: { nodes: [], edges: [] },
+  }
+  return documentFromBlueprints(
+    { [MAIN_ID]: main },
+    MAIN_ID,
+    { entities: {}, variables: {}, ...meta },
+  )
+}
+
 /** 从 scenario 根摘出共享 meta（不含 graph / manifest）。 */
 export function metaFromDocument(scn: EditorScenarioDocument | GraphLibraryDocument): ScenarioMetaFields {
   const m: ScenarioMetaFields = {}

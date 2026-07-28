@@ -1,15 +1,15 @@
 ---
 name: wb-game-video:author-guide
 description: 视频游戏 (玩法优先) 蓝图编辑器 AI 调用指南 — GameGraph 演出节点图 / 判断折进出边 / 皮肤组件
-trigger: /gamevideo
+trigger: /wb-game-video
 ---
 
 # 视频游戏工坊 · AI Skill
 
-`@forgeax-extension/wb-game-video` = **玩法优先的视频游戏**蓝图编辑器 + 运行时。
+`@forgeax/wb-game-video` = **玩法优先的视频游戏**蓝图编辑器 + 运行时。
 
 **唯一引擎 = graph 引擎**（`src/runtime/ / src/graph/ / src/editor/`）：一张 `GameScenario` 图，纯 TS 状态机直接跑。
-旧 FMV 内容生产那套（`gvid:*` 工具、剧本/生图/生视频/素材库、`/__reel__` 端点）已**整体删除**，不再存在。
+旧 FMV 内容生产那套（旧工具、剧本/生图/生视频/素材库和旧端点）已**整体删除**，不再存在。
 **硬性规则见 `AGENTS.md`。**
 
 ## 玩法图数据模型（SSOT）
@@ -40,16 +40,16 @@ AI 与工坊沟通 = **读写整份库文档**（`project`）。核心工具（L
 
 | tool id            | 用途 | 关键 args |
 |--------------------|------|-----------|
-| `gvid:get-graph`   | 读当前 game 的库文档（无盘 → `{ project: null }`，前端回落 demo） | `gameSlug?` |
-| `gvid:save-graph`  | 整本覆盖写 `scenarios.graph.json` + 版本快照（留10） | `project`(必填), `title?`, `gameSlug?` |
-| `gvid:list-videos` | 列出内置演出视频库可用的 `media.ref` | — |
+| `wb-game-video:get-graph`   | 读当前 game 的库文档（无盘 → `{ project: null }`，前端回落 demo） | `gameSlug?` |
+| `wb-game-video:save-graph`  | 整本覆盖写 `scenarios.graph.json` + 版本快照（留10） | `project`(必填), `title?`, `gameSlug?` |
+| `wb-game-video:list-videos` | 列出内置演出视频库可用的 `media.ref` | — |
 
 **标准编辑闭环**：
 
 ```
-gvid:get-graph({})
+wb-game-video:get-graph({})
   → 改 project.graph 和/或 project.manifest.packs[*].graph
-gvid:save-graph({ project, title:"..." })
+wb-game-video:save-graph({ project, title:"..." })
 ```
 
 **人也能在工坊 UI 改**：左侧「蓝图 / 视频 / 界面 / 规则 / 试玩」。蓝图 tab = 库列表 + 画布。

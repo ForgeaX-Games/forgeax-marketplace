@@ -1,4 +1,4 @@
-# Reel-Studio Prompt Skills
+# wb-game-video Prompt Skills
 
 本目录是**喂给 LLM（Claude Opus 4.6）的"元提示词"**集合。每个 skill 是一个**规范目录**
 （对齐 Anthropic / Cursor Agent Skill 结构），核心指令写在 `SKILL.md`：

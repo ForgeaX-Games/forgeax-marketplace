@@ -4,7 +4,7 @@
  *
  * 持久化模型（v6，单文件库）：SSOT = 原 scenario 形状 + `manifest`（含 main 与全部子蓝图）。
  * 落盘只写 `scenarios.graph.json`（+ 版本快照）；无 `sharedMeta` / `blueprints/` 文件夹。
- * 进入优先级：草稿 > 磁盘最新 > 内置 demo。
+ * 进入优先级：草稿 > 磁盘最新 > 空库（零节点）。「重置」才回内置 demo。
  */
 import { create, useStore } from 'zustand'
 import { temporal } from 'zundo'
@@ -22,8 +22,8 @@ import { recompileFormulaUsages } from '../shell/formulaApply'
 import type { Formula } from './formula-authoring'
 import { toEditorScenarioDocument, toRuntimeScenario } from './formula-authoring'
 import {
-  documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, metaFromDocument,
-  normalizeDocument, playDocument,
+  documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, emptyLibraryDocument,
+  metaFromDocument, normalizeDocument, playDocument,
 } from './blueprint-project'
 import { isBlueprintTitleTaken } from './blueprint-title'
 import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
@@ -149,7 +149,7 @@ interface GraphScenarioStore {
    * 落盘不要用这个。
    */
   playScn: (rootBlueprintId?: string) => GameScenario
-  /** 首次进入某 game 时载入（草稿>磁盘最新>demo）；已 boot 同 game 则跳过。 */
+  /** 首次进入某 game 时载入（草稿>磁盘最新>空库）；已 boot 同 game 则跳过。demo 仅供「重置」。 */
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
@@ -354,7 +354,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
             loadEpoch: cur.loadEpoch + 1,
           }))
         }
-        // 进入优先级：未保存草稿 > 磁盘最新文档 > demo。
+        // 进入优先级：未保存草稿 > 磁盘最新文档 > 空库（不灌 demo）。
         // 干净基线始终取磁盘最新（若有）；草稿是否脏 = 内容是否异于该基线。
         if (isLibraryDocument(s.project)) {
           cleanFingerprint = projectFingerprint(normalizeLoadedDocument(s.project, demo))
@@ -367,7 +367,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
           cleanFingerprint = projectFingerprint(get().authoringProject())
           set({ isDraft: false })
         } else {
-          const seed = seedDocumentFromDemo(demo)
+          const seed = emptyLibraryDocument(withBuiltinSchemesMeta({}))
           const mainId = seed.manifest.mainPackId
           set((cur) => ({
             blueprints: seed.manifest.packs,

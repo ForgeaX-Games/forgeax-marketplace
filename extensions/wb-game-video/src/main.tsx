@@ -1,4 +1,4 @@
-// 必须最先求值：把历史 reel-studio* localStorage 键迁移到 gamevideo* 命名空间，
+// 必须最先求值：把历史 localStorage 键迁移到 wb-game-video 命名空间，
 // 早于任何 store 在模块求值期的 hydrate。详见该模块头注。
 import './bootMigrateLegacyKeys'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
@@ -76,7 +76,7 @@ class TopErrorBoundary extends Component<
   private handleClearAll = (): void => {
     if (!confirm('清除本地缓存并重新加载？（已保存版本仍在 .forgeax/games/<slug>/game-video/）')) return
     try {
-      localStorage.removeItem('gamevideo:scenarios:v1')
+      localStorage.removeItem('wb-game-video:scenarios:v1')
     } catch { /* best-effort */ }
     location.reload()
   }

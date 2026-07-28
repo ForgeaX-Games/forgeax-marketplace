@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  playDocument, documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, validateDocument, docToPack, MAIN_ID,
-  metaFromDocument,
+  playDocument, documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, emptyLibraryDocument,
+  validateDocument, docToPack, MAIN_ID, metaFromDocument,
 } from '../blueprint-project'
 import type { EditorScenarioDocument } from '../formula-authoring'
 import type { BlueprintDoc, GraphLibraryDocument } from '../../../runtime/schema/graph-schema'
@@ -95,6 +95,15 @@ describe('blueprint-project document shape', () => {
     const d = emptyBlueprintDoc({ title: 'New' })
     expect(d.graph.nodes).toHaveLength(1)
     expect(d.entry).toBe(d.graph.nodes[0]!.id)
+  })
+  it('emptyLibraryDocument is a main pack with zero nodes', () => {
+    const doc = emptyLibraryDocument()
+    expect(doc.manifest.mainPackId).toBe(MAIN_ID)
+    expect(doc.manifest.packs[MAIN_ID]!.graph.nodes).toEqual([])
+    expect(doc.manifest.packs[MAIN_ID]!.graph.edges).toEqual([])
+    expect(doc.graph.nodes).toEqual([])
+    expect(doc.entities).toEqual({})
+    expect(doc.variables).toEqual({})
   })
 })
 

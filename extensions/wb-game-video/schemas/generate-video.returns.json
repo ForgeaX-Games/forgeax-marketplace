@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gen:generate-video returns",
+  "title": "wb-game-video:generate-video returns",
   "type": "object",
   "additionalProperties": true,
   "properties": {

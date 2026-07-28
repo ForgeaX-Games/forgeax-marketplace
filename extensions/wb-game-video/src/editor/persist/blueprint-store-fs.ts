@@ -7,7 +7,7 @@
  *     └── project.json     —— 项目元信息
  *
  * 与 forgeax 宿主 `/api/game-host` 写盘**同格式**（AI 与 UI 单写者不分叉）：
- *   UI 走 HTTP PUT package；AI（gvid:*）经本模块直写同样的 blueprint.json / project.json。
+ *   UI 走 HTTP PUT package；AI（wb-game-video:*）经本模块直写同样的 blueprint.json / project.json。
  * 版本 = 游戏仓 git annotated tag（由 game-host 打），不再有 `scenarios.graph.versions/`。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

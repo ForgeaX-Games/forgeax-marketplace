@@ -7,7 +7,7 @@
  *
  * 典型用法：
  * ```ts
- * import { mount } from '@forgeax-extension/wb-game-video'
+ * import { mount } from '@forgeax/wb-game-video'
  * const handle = mount(document.getElementById('host')!)
  * handle.unmount()
  * ```
@@ -23,7 +23,7 @@ export interface GameVideoMountHandle {
 
 export function mount(rootEl: HTMLElement): GameVideoMountHandle {
   if (!rootEl) {
-    throw new Error('[gamevideo] mount() requires a non-null host element')
+    throw new Error('[wb-game-video] mount() requires a non-null host element')
   }
   initLocaleSync()
   rootEl.classList.add('ks-app-host')

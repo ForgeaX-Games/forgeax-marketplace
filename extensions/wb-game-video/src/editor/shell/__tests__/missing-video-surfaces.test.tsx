@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameScenario } from '../../../runtime/schema/graph-schema'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
@@ -110,14 +110,21 @@ describe('missing video notices across play surfaces', () => {
     expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
   })
 
-  it('GraphStudio reports the current stable id without advancing', () => {
+  it('GraphStudio reports the current stable id without advancing', async () => {
+    useGraphScenario.setState({ selectedNodeId: 'intro' })
     const { container } = render(<GraphStudio scenario={SCENARIO} />)
-    const openPlayer = screen.getByRole('button', { name: /试玩/ })
+    const openPlayer = screen.getByRole('button', { name: '▶ 从此试玩' })
     fireEvent.click(openPlayer)
-    const video = container.querySelector('video')
+    let video: HTMLVideoElement | null = null
+    await waitFor(() => {
+      const playVideos = container.querySelectorAll<HTMLVideoElement>('video[data-video-slot]')
+      expect(playVideos).toHaveLength(2)
+      video = playVideos.item(playVideos.length - 1)
+      expect(video).toBeTruthy()
+    })
     expect(video).toBeTruthy()
     fireEvent.error(video!)
-    expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
+    expect(await screen.findByRole('status')).toHaveTextContent('missing-stable-id')
   })
 
   it('GraphStudio exposes a Kino list failure without falling back to bundled options', async () => {

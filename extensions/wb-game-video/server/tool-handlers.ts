@@ -110,7 +110,7 @@ function mapChars(cs?: { name: string; desc?: string }[]): { name: string; appea
   return cs.map((c) => (c.desc ? { name: c.name, appearance: c.desc } : { name: c.name }))
 }
 
-/** gen:generate-shot-script 线协议入参（对齐 schemas/generate-shot-script.args.json）。 */
+/** wb-game-video:generate-shot-script 线协议入参（对齐 schemas/generate-shot-script.args.json）。 */
 interface ShotScriptArgs {
   gameSlug?: string
   sceneNodeId?: string
@@ -128,7 +128,7 @@ interface ShotScriptArgs {
   styleAxes?: StyleAxes
 }
 
-/** gen:generate-keyframe 线协议入参（对齐 schemas/generate-keyframe.args.json）。 */
+/** wb-game-video:generate-keyframe 线协议入参（对齐 schemas/generate-keyframe.args.json）。 */
 interface KeyframeArgs {
   gameSlug?: string
   sceneNodeId?: string
@@ -145,7 +145,7 @@ interface KeyframeArgs {
   grid?: KeyframeInput['grid']
 }
 
-/** gen:generate-video / gen:generate-node-video 线协议入参（对齐两份 schema）。 */
+/** wb-game-video:generate-video / wb-game-video:generate-node-video 线协议入参（对齐两份 schema）。 */
 interface VideoArgs {
   gameSlug?: string
   sceneNodeId?: string
@@ -170,7 +170,7 @@ export const tools = {
    * 读取当前 game 的库文档（GraphLibraryDocument = scenario + manifest）。
    * 无盘数据时 project 为 null。args: { gameSlug? }
    */
-  'gvid:get-graph': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
+  'wb-game-video:get-graph': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
     const slug = pickSlug(args, ctx)
     const dir = graphDir(ctx, slug)
     const project = dir ? readProject(dir).project : null
@@ -181,7 +181,7 @@ export const tools = {
    * 覆盖写当前 game 的库文档，并压一版快照（留 10）。
    * args: { gameSlug?, project, title? }
    */
-  'gvid:save-graph': async (
+  'wb-game-video:save-graph': async (
     args: { gameSlug?: string; project?: GraphLibraryDocument; title?: string },
     ctx: ToolCtx,
   ) => {
@@ -198,7 +198,7 @@ export const tools = {
    * 列出内置演出视频库（`src/editor/assets/zhandou/*.mp4` 的 basename，去扩展名）——
    * 供 AI 编排时知道有哪些 media.ref 可绑。
    */
-  'gvid:list-videos': async (_args: Record<string, never>, ctx: ToolCtx) => {
+  'wb-game-video:list-videos': async (_args: Record<string, never>, ctx: ToolCtx) => {
     try {
       const dir = resolve(ctx.cwd ?? process.cwd(), 'src', 'editor', 'assets', 'zhandou')
       const videos = readdirSync(dir)
@@ -215,7 +215,7 @@ export const tools = {
    * Step 1 · 生成一节点的 Seedance V2 镜头脚本（纯 prompt→text，不落 registry）。
    * args: ShotScriptInput 薄输入（见 schemas/generate-shot-script.args.json）。
    */
-  'gen:generate-shot-script': async (args: ShotScriptArgs, ctx: ToolCtx) => {
+  'wb-game-video:generate-shot-script': async (args: ShotScriptArgs, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     if (!octx) return { shots: [], error: NO_REGISTRY_ERR }
     if (!args.nodeName || !args.storyText) return { shots: [], error: '缺 nodeName / storyText' }
@@ -244,7 +244,7 @@ export const tools = {
    * Step 2 · 生成一张分镜图/关键帧，落 registry（shot_image）。
    * args: KeyframeInput 薄输入（见 schemas/generate-keyframe.args.json）。
    */
-  'gen:generate-keyframe': async (args: KeyframeArgs, ctx: ToolCtx) => {
+  'wb-game-video:generate-keyframe': async (args: KeyframeArgs, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     if (!octx) return { asset: null, error: NO_REGISTRY_ERR }
     if (!args.sceneNodeId || !args.nodeName || !args.beat) return { asset: null, error: '缺 sceneNodeId / nodeName / beat' }
@@ -273,7 +273,7 @@ export const tools = {
    * Step 3 · 生成一段视频，落 registry（video_clip）。必传 character/scene 参考图，缺则可读错。
    * args: VideoGenInput 薄输入（见 schemas/generate-video.args.json）。返回 asset.id 供绑 node.data.media.ref。
    */
-  'gen:generate-video': async (args: VideoArgs, ctx: ToolCtx) => {
+  'wb-game-video:generate-video': async (args: VideoArgs, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     if (!octx) return { asset: null, error: NO_REGISTRY_ERR }
     if (!args.sceneNodeId || !args.nodeName) return { asset: null, error: '缺 sceneNodeId / nodeName' }
@@ -304,9 +304,9 @@ export const tools = {
   /**
    * Step 3b · 为一节点生成成片，时长 > 15s 自动按 15s 拆段续接（P5 超长检测 + 显式 extend）。
    * 必传 character/scene 参考图。返回 assets[]（按段序），单段时长度为 1。
-   * args: 同 gen:generate-video（durationSeconds 可 > 15）。
+   * args: 同 wb-game-video:generate-video（durationSeconds 可 > 15）。
    */
-  'gen:generate-node-video': async (args: VideoArgs, ctx: ToolCtx) => {
+  'wb-game-video:generate-node-video': async (args: VideoArgs, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     if (!octx) return { assets: [], error: NO_REGISTRY_ERR }
     if (!args.sceneNodeId || !args.nodeName) return { assets: [], error: '缺 sceneNodeId / nodeName' }
@@ -334,7 +334,7 @@ export const tools = {
   },
 
   /** 列素材层资产（可按 kind / productionType / sceneNodeId 过滤）。 */
-  'gen:list-assets': async (
+  'wb-game-video:list-assets': async (
     args: { gameSlug?: string; kind?: MediaKind; productionType?: MediaProductionType; sceneNodeId?: string },
     ctx: ToolCtx,
   ) => {
@@ -348,7 +348,7 @@ export const tools = {
   },
 
   /** 取单条素材资产。 */
-  'gen:get-asset': async (args: { gameSlug?: string; id?: string }, ctx: ToolCtx) => {
+  'wb-game-video:get-asset': async (args: { gameSlug?: string; id?: string }, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     if (!octx) return { asset: null, error: NO_REGISTRY_ERR }
     if (!args.id) return { asset: null, error: '缺 id' }
@@ -360,7 +360,7 @@ export const tools = {
    * 登记成本 registry 的只读 character_ref（externalPath 指回对方文件，不复制、不改对方）。
    * 生成视频前先调它把角色参考图备齐。
    */
-  'gen:import-character-refs': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
+  'wb-game-video:import-character-refs': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     const charactersDir = crossModuleDir(args, ctx, 'characters')
     if (!octx || !charactersDir) return { refs: [], error: NO_REGISTRY_ERR }
@@ -375,7 +375,7 @@ export const tools = {
    * 跨模块只读拿料：扫场景模块发布到 `textures/index.json` 的贴图/场景图，登记成本 registry
    * 的只读 scene_ref（externalPath 指回对方文件）。生成视频前先调它把场景参考图备齐。
    */
-  'gen:import-scene-refs': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
+  'wb-game-video:import-scene-refs': async (args: { gameSlug?: string }, ctx: ToolCtx) => {
     const octx = orchestrateCtx(args, ctx)
     const texturesDir = crossModuleDir(args, ctx, 'textures')
     if (!octx || !texturesDir) return { refs: [], error: NO_REGISTRY_ERR }

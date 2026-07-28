@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "@forgeax-extension/wb-game-video",
-  "version": "0.1.0",
+  "id": "@forgeax/wb-game-video",
+  "version": "0.1.2",
   "kind": "workbench",
   "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
   "description": {
@@ -21,7 +21,7 @@
   ],
   "provides": {
     "workbench": {
-      "id": "gamevideo",
+      "id": "wb-game-video",
       "lens": "by-category",
       "icon": "🎮",
       "position": 161,
@@ -41,12 +41,12 @@
       {
         "id": "wb-game-video:author-guide",
         "entry": "./SKILL.md",
-        "trigger": "/gamevideo"
+        "trigger": "/wb-game-video"
       }
     ],
     "tools": [
       {
-        "id": "gvid:get-graph",
+        "id": "wb-game-video:get-graph",
         "args": "./schemas/get-graph.args.json",
         "returns": "./schemas/get-graph.returns.json",
         "exposedToAI": true,
@@ -56,7 +56,7 @@
         }
       },
       {
-        "id": "gvid:save-graph",
+        "id": "wb-game-video:save-graph",
         "args": "./schemas/save-graph.args.json",
         "returns": "./schemas/save-graph.returns.json",
         "exposedToAI": true,
@@ -66,7 +66,7 @@
         }
       },
       {
-        "id": "gvid:list-videos",
+        "id": "wb-game-video:list-videos",
         "args": "./schemas/list-videos.args.json",
         "returns": "./schemas/list-videos.returns.json",
         "exposedToAI": true,
@@ -76,7 +76,7 @@
         }
       },
       {
-        "id": "gen:generate-shot-script",
+        "id": "wb-game-video:generate-shot-script",
         "args": "./schemas/generate-shot-script.args.json",
         "returns": "./schemas/generate-shot-script.returns.json",
         "exposedToAI": true,
@@ -86,7 +86,7 @@
         }
       },
       {
-        "id": "gen:generate-keyframe",
+        "id": "wb-game-video:generate-keyframe",
         "args": "./schemas/generate-keyframe.args.json",
         "returns": "./schemas/generate-keyframe.returns.json",
         "exposedToAI": true,
@@ -96,17 +96,17 @@
         }
       },
       {
-        "id": "gen:generate-video",
+        "id": "wb-game-video:generate-video",
         "args": "./schemas/generate-video.args.json",
         "returns": "./schemas/generate-video.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "第3步·为一节点生成一段视频（≤15s 单段），落共享素材层（video_clip）。必传 characterRefIds+sceneRefIds（缺则报错，绝不静默降级）。可传 styleAxes 覆盖三轴、extend+transitionHint 做显式续接。把返回 asset.id 绑到 node.data.media.ref。超长节点用 gen:generate-node-video。",
-          "en": "Step 3: generate one video segment (<=15s) for a node into the shared registry (video_clip). REQUIRES characterRefIds + sceneRefIds (hard error if missing). Optional styleAxes (3-axis override) and extend+transitionHint (explicit continuation). Bind the returned asset.id to node.data.media.ref. For long nodes use gen:generate-node-video."
+          "zh": "第3步·为一节点生成一段视频（≤15s 单段），落共享素材层（video_clip）。必传 characterRefIds+sceneRefIds（缺则报错，绝不静默降级）。可传 styleAxes 覆盖三轴、extend+transitionHint 做显式续接。把返回 asset.id 绑到 node.data.media.ref。超长节点用 wb-game-video:generate-node-video。",
+          "en": "Step 3: generate one video segment (<=15s) for a node into the shared registry (video_clip). REQUIRES characterRefIds + sceneRefIds (hard error if missing). Optional styleAxes (3-axis override) and extend+transitionHint (explicit continuation). Bind the returned asset.id to node.data.media.ref. For long nodes use wb-game-video:generate-node-video."
         }
       },
       {
-        "id": "gen:generate-node-video",
+        "id": "wb-game-video:generate-node-video",
         "args": "./schemas/generate-node-video.args.json",
         "returns": "./schemas/generate-node-video.returns.json",
         "exposedToAI": true,
@@ -116,7 +116,7 @@
         }
       },
       {
-        "id": "gen:list-assets",
+        "id": "wb-game-video:list-assets",
         "args": "./schemas/list-assets.args.json",
         "returns": "./schemas/list-assets.returns.json",
         "exposedToAI": true,
@@ -126,7 +126,7 @@
         }
       },
       {
-        "id": "gen:get-asset",
+        "id": "wb-game-video:get-asset",
         "args": "./schemas/get-asset.args.json",
         "returns": "./schemas/get-asset.returns.json",
         "exposedToAI": true,
@@ -136,7 +136,7 @@
         }
       },
       {
-        "id": "gen:import-character-refs",
+        "id": "wb-game-video:import-character-refs",
         "args": "./schemas/import-character-refs.args.json",
         "returns": "./schemas/import-refs.returns.json",
         "exposedToAI": true,
@@ -146,7 +146,7 @@
         }
       },
       {
-        "id": "gen:import-scene-refs",
+        "id": "wb-game-video:import-scene-refs",
         "args": "./schemas/import-scene-refs.args.json",
         "returns": "./schemas/import-refs.returns.json",
         "exposedToAI": true,
@@ -159,7 +159,7 @@
   },
   "entry": {
     "frontend": "./dist/index.html",
-    "backend": "./server/tool-handlers.ts",
+    "backend": "./dist/server/tool-handlers.js",
     "standalone": {
       "start": "bun run dev",
       "port": 15185,
@@ -177,12 +177,12 @@
     "model:text:reasoning",
     "model:image:still",
     "model:video:kinetic",
-    "emit:gamevideo.*"
+    "emit:wb-game-video.*"
   ],
   "requestedEnv": [
     "FORGEAX_SERVER_URL",
     "FORGEAX_SERVER_PORT",
-    "PORT_GAMEVIDEO_STUDIO",
+    "PORT_WB_GAME_VIDEO_STUDIO",
     "VIDEO_UPLOAD_PROXY_ALLOWED_HOSTS"
   ],
   "experimental": true

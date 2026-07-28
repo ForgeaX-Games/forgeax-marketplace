@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gvid:save-graph args",
+  "title": "wb-game-video:save-graph args",
   "type": "object",
   "additionalProperties": false,
   "required": ["project"],

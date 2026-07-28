@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gvid:get-graph args",
+  "title": "wb-game-video:get-graph args",
   "type": "object",
   "additionalProperties": false,
   "properties": {

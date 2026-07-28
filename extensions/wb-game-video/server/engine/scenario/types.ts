@@ -1,5 +1,5 @@
 /**
- * Reel-Studio 剧情数据模型
+ * wb-game-video 剧情数据模型
  *
  * 设计原则：
  *   1. **作者向**：编辑器先写 Scenario，运行时按 graph 走，不存在 LLM 实时改剧本

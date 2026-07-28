@@ -3,7 +3,7 @@
  * 根 meta + graph + manifest.packs，含主蓝图）。
  * 自定义覆盖物目录默认留空；画廊/Nodia 方案仍保留为可手动挂载的预设。
  *
- * 运行时/编辑进入优先级：localStorage 草稿/版本 > 本 demo。重置 = 回到本 demo。
+ * 运行时/编辑进入优先级：localStorage 草稿 > 磁盘最新 > 空库。本 demo 仅供「重置」。
  * game 目录下的 `scenarios.graph.json` 由运行时自动落盘，不在此管理。
  */
 import type { GraphLibraryDocument } from '../../runtime/schema/graph-schema'

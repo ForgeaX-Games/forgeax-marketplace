@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gvid:list-videos args",
+  "title": "wb-game-video:list-videos args",
   "type": "object",
   "additionalProperties": false,
   "properties": {}

@@ -72,7 +72,7 @@ function readGraphReqJson(req: { on: (ev: string, cb: (arg?: unknown) => void) =
 // ─── Dev-only signed upload reverse proxy (port 15185) ───────────────────
 function videoUploadProxyPlugin(allowedExtraHosts: readonly string[]): Plugin {
   return {
-    name: 'gamevideo-video-upload-proxy',
+    name: 'wb-game-video-video-upload-proxy',
     configureServer(server) {
       server.middlewares.use(
         VIDEO_UPLOAD_PROXY_ROUTE_PREFIX,
@@ -86,7 +86,7 @@ function videoUploadProxyPlugin(allowedExtraHosts: readonly string[]): Plugin {
 const GVA_ROUTE_PREFIX = '/__gva__'
 
 /**
- * 素材层读端点（磁盘权威 = `.forgeax/games/<slug>/assets/`，写方=服务端 gen:* 工具）：
+ * 素材层读端点（磁盘权威 = `.forgeax/games/<slug>/assets/`，写方=服务端 wb-game-video:* 工具）：
  *   GET /__gva__/assets?game=slug[&kind=video|image|audio] → { assets: MediaAsset[] }
  *   GET /__gva__/media/<id>?game=slug                      → 流式回二进制（支持 Range，便于视频拖播 / 床轨解码）
  * 无 `.forgeax/games` 工程根或无 slug 时 assets 返回空、media 404。
@@ -94,7 +94,7 @@ const GVA_ROUTE_PREFIX = '/__gva__'
 function gameVideoAssetsPlugin(): Plugin {
   let projectRoot: string | null = null
   return {
-    name: 'gamevideo-shared-assets',
+    name: 'wb-game-video-shared-assets',
     configResolved(config) {
       projectRoot = findProjectRootWithForgeax(config.root)
     },
@@ -230,7 +230,7 @@ const GAME_COMPONENTS_PREFIX = '/@game-components'
 function gameComponentsDevPlugin(): Plugin {
   let projectRoot: string | null = null
   return {
-    name: 'gamevideo-game-components-dev',
+    name: 'wb-game-video-game-components-dev',
     apply: 'serve',
     configResolved(config) {
       projectRoot = findProjectRootWithForgeax(config.root)
@@ -279,7 +279,7 @@ export default defineConfig(({ mode }) => {
   // 子路径下，需要绝对 base；独立 dev/preview/standalone 用相对 './'。
   const pluginBase =
     process.env.VITE_PLUGIN_BASE
-    ?? (process.env.WB_GAMEVIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './')
+    ?? (process.env.WB_GAME_VIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './')
 
   return {
     base: pluginBase,
@@ -304,8 +304,8 @@ export default defineConfig(({ mode }) => {
           ? Number(process.env.VITE_PLUGIN_HMR_CLIENT_PORT)
           : process.env.HMR_CLIENT_PORT
             ? Number(process.env.HMR_CLIENT_PORT)
-            : process.env.PORT_GAMEVIDEO_STUDIO
-              ? Number(process.env.PORT_GAMEVIDEO_STUDIO)
+            : process.env.PORT_WB_GAME_VIDEO_STUDIO
+              ? Number(process.env.PORT_WB_GAME_VIDEO_STUDIO)
               : undefined,
         ...(process.env.VITE_PLUGIN_HMR_PATH ? { path: process.env.VITE_PLUGIN_HMR_PATH } : {}),
       },

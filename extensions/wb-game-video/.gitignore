@@ -1,6 +1,5 @@
 # 依赖 / 产物
 node_modules/
-dist/
 *.tsbuildinfo
 
 # 非 canonical 包管理器的产物 —— 本包 canonical 是 bun（packageManager + bun.lock）

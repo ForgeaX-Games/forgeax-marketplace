@@ -14,12 +14,12 @@ function eventIds(child: { inputs: Record<string, unknown> } | undefined): strin
 
 describe('GraphSession (playable view model)', () => {
   it('drives nodia to a rendered interaction, then wins', () => {
-    const session = new GraphSession(makeNodiaDemo({ bossHp: 60 }))
+    const session = new GraphSession(makeNodiaDemo({ bossHp: 50 }))
 
     session.start() // 起点 = 叙事 n_open
     let snap = session.jump('enter') // seek 到战斗入口
     expect(snap.clip?.nodeId).toBe('enter')
-    expect(snap.hud.entities['ent-boss']!.hp).toBe(60)
+    expect(snap.hud.entities['ent-boss']!.hp).toBe(50)
 
     snap = session.performanceEnd() // enter → a_my(subflow) → wait（技能交互）
     const skill = overlayChild(snap, 'battleSkillBar')
@@ -27,8 +27,10 @@ describe('GraphSession (playable view model)', () => {
     expect(eventIds(skill)).toEqual(['light', 'heavy', 'medit', 'ult'])
 
     snap = session.emitEvent('wait/skill', 'light') // → 变招判定 → 轻攻击演出
-    snap = session.tick(1000) // 命中 → 结算致死 → rules redirect → win
+    snap = session.tick(1000) // 命中 → 结算致死（轻攻击演出仍在播放）
     expect(snap.hud.entities['ent-boss']!.hp).toBeLessThanOrEqual(0)
+
+    snap = session.performanceEnd() // 轻攻击演出结束 → rules redirect → win
     expect(snap.currentNodeId).toBe('win')
 
     snap = session.performanceEnd() // win 演出结束 → 无出边 & 栈空 → 本局结束

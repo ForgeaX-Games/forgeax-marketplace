@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gen:get-asset returns",
+  "title": "wb-game-video:get-asset returns",
   "type": "object",
   "additionalProperties": true,
   "properties": {

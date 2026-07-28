@@ -10,8 +10,8 @@ import { create } from 'zustand'
 export type GraphView = 'graph' | 'video' | 'assets' | 'ui' | 'rule' | 'play'
 const VIEWS: readonly GraphView[] = ['graph', 'video', 'assets', 'ui', 'rule', 'play']
 
-const LS_KEY = 'gamevideo:graph:view'
-const CHANNEL = 'gamevideo:graph:view-sync'
+const LS_KEY = 'wb-game-video:graph:view'
+const CHANNEL = 'wb-game-video:graph:view-sync'
 
 function readInitial(): GraphView {
   try {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gen:generate-video args",
+  "title": "wb-game-video:generate-video args",
   "type": "object",
   "additionalProperties": false,
   "required": ["sceneNodeId", "nodeName", "characterRefIds", "sceneRefIds"],

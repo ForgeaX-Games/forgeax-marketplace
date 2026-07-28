@@ -43,7 +43,7 @@ export interface GameVersion {
 
 const BASE = '/api/game-host/games'
 const seg = (game?: string) => encodeURIComponent(game ?? 'default')
-const draftKey = (game?: string) => `gamevideo:graph:${game ?? 'default'}:draft`
+const draftKey = (game?: string) => `wb-game-video:graph:${game ?? 'default'}:draft`
 
 function readLocal<T>(key: string): T | null {
   try {
