@@ -19,7 +19,6 @@ import {
   registerCoreSkins,
 } from '../../runtime/component-host/components'
 import { buildDefaults, getComponent } from '../../runtime/registry/component-registry'
-import { ensureNodiaSchemeOverlays } from './nodia-scheme-overlays'
 
 /** 基础覆盖物 方案 id 前缀：`base:<组件id>`，每份仅含该单组件、锁定不可增删。 */
 export const BASE_HUD_PREFIX = 'base:'
@@ -113,16 +112,16 @@ export const NEW_COMPONENT_PRESETS: Array<{
   { id: 'battleSkillBar', label: '选项 · 技能条', make: battleSkillBarPreset },
 ]
 
-/** 保证内置方案存在于 overlays 目录（缺失才补，不覆盖用户已改内容）。 */
+/**
+ * 保证基础覆盖物存在于 overlays 目录。
+ *
+ * `BUILTIN_SCHEMES` 与 Nodia 方案仍作为可手动挂载的预设目录存在，但不自动写入项目数据。
+ * 自定义覆盖物只有作者明确创建或挂载后才进入 `ui.overlays`。
+ */
 export function ensureBuiltinSchemes(
   overlays: Record<string, Overlay> | undefined,
 ): Record<string, Overlay> {
-  const next = { ...(overlays ?? {}) }
-  for (const s of BUILTIN_SCHEMES) {
-    if (!next[s.id]) next[s.id] = structuredClone(s)
-  }
-  // 再补 nodia 抽出的界面方案（battleHud / readouts / …）。
-  return ensureBaseHudSchemes(ensureNodiaSchemeOverlays(next))
+  return ensureBaseHudSchemes({ ...(overlays ?? {}) })
 }
 
 /** 基础覆盖物 单组件方案的 child：有精选 preset 用 preset，其余组件用 component + inputs 默认值。 */

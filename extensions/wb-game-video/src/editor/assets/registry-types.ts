@@ -10,8 +10,12 @@
  * **只读引用**，文件仍在对方目录、不复制进本 registry（externalPath 指回原路径）。
  */
 
-/** 资产的存储类别（对齐 NodeMedia.kind 的大类）。 */
-export type MediaKind = 'image' | 'video'
+/**
+ * 资产的存储类别（对齐 NodeMedia.kind 的大类）。
+ * `audio` = 床轨/音效（BGM SPEC 决策 A：音频并进本 manifest，与 video/image 同 resolve；
+ * **不**以 wb-bgm 的 `audio/manifest.json` 为 play 路径 SSOT）。
+ */
+export type MediaKind = 'image' | 'video' | 'audio'
 
 /**
  * 资产用途（决定它在生成管线里的角色）——判断"这条资产是什么"永远看 productionType：

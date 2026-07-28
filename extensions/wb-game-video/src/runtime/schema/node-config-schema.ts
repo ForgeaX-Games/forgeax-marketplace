@@ -410,7 +410,7 @@ export const OVERLAY_DEMO = {
         target: 'n-counter',
         sourceHandle: 'A',
         targetHandle: 'in',
-        data: { label: '防反成功' } satisfies EdgeRouting,
+        data: {} satisfies EdgeRouting,
       },
       {
         id: 'e-B',
@@ -418,7 +418,7 @@ export const OVERLAY_DEMO = {
         target: 'n-dodge',
         sourceHandle: 'B',
         targetHandle: 'in',
-        data: { label: '闪避' } satisfies EdgeRouting,
+        data: {} satisfies EdgeRouting,
       },
       {
         id: 'e-miss',
@@ -426,7 +426,7 @@ export const OVERLAY_DEMO = {
         target: 'n-hurt',
         sourceHandle: 'miss',
         targetHandle: 'in',
-        data: { label: '被砍中' } satisfies EdgeRouting,
+        data: {} satisfies EdgeRouting,
       },
     ] as GameEdge[],
   } as GameGraph,

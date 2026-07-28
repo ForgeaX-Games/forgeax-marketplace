@@ -68,7 +68,8 @@ describe('nodia narrative demo contract', () => {
 
   it('叩门：随节点进入挂载（cue 0–6.1s 驱动显隐），锚点 (0.58, 0.39)', () => {
     const scn = makeNodiaDemo()
-    const child = scn.ui?.overlays?.n_door?.children?.[0]
+    const node = scn.graph.nodes.find((n) => n.id === 'n_door')
+    const child = nodeOverlayChildren(scn, node)[0]
     expect(child?.component).toBe('inkKou')
     // trigger 对齐到 cue 起点：随节点进入挂载，可见窗完全由 cues 决定（appearAt 0 → endAt 6100），
     // 预览与运行时同源，不再有 trigger.ms=9000 残留导致的 9s 错位。

@@ -24,6 +24,15 @@ describe('NODIA_DEMO_PROJECT', () => {
     expect(NODIA_DEMO_PROJECT.entities).toBeTruthy()
     expect(NODIA_DEMO_PROJECT.graph).toEqual(NODIA_DEMO_PROJECT.manifest.packs[MAIN_ID]!.graph)
   })
+  it('starts with an empty custom overlay catalog and base-backed mounts', () => {
+    const overlays = NODIA_DEMO_PROJECT.ui?.overlays ?? {}
+    expect(Object.keys(overlays).filter((id) => !id.startsWith('base:') && !id.startsWith('node:'))).toEqual([])
+    for (const node of NODIA_DEMO_PROJECT.graph.nodes) {
+      expect((node.data.overlayNodes ?? []).every((mount) =>
+        mount.overlay.startsWith('base:') || mount.overlay.startsWith('node:'),
+      )).toBe(true)
+    }
+  })
   it('turn containers have lethal edge exits (replaces old scenario.reactions)', () => {
     const outs = (id: string) => NODIA_DEMO_PROJECT.graph.edges.filter((e) => e.source === id)
     expect(outs('a_my').some((e) => e.id === 'e-amy-win')).toBe(true)

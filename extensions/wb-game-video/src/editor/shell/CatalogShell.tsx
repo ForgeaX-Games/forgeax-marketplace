@@ -134,6 +134,7 @@ export function CatalogShell({
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   const leaves = leavesOf(items)
   const selected = leaves.find((i) => i.id === selectedId)
+  const hasGroups = items.some((item) => item.children != null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // 列表内 ↑/↓ 按扁平叶子顺序切换选中（循环），并把焦点移到新行——好让连续方向键继续走列表、
@@ -165,7 +166,7 @@ export function CatalogShell({
           <span className="gc-list-count">{leaves.length}</span>
           {headAction && <span className="gc-list-head-action">{headAction}</span>}
         </div>
-        <div className="gc-list-body" ref={bodyRef} onKeyDown={onListKeyDown}>
+        <div className={`gc-list-body${hasGroups ? ' has-groups' : ''}`} ref={bodyRef} onKeyDown={onListKeyDown}>
           {items.map((it) =>
             it.children ? (
               <Group key={it.id} group={it} selectedId={selectedId} onSelect={onSelect} renderRowActions={renderRowActions} />

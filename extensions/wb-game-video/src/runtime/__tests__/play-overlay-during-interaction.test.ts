@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, beforeAll } from 'vitest'
 import { GraphSession } from '../engine/session'
-import { ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
+import { BUILTIN_SCHEMES, ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
 import { registerCoreSkins } from '../component-host/components'
 import { node, scnOf } from './test-fixtures'
 
@@ -18,7 +18,9 @@ beforeAll(() => {
 
 describe('试玩 · 交互挂起时仍见方案 HUD 与时间窗飘字', () => {
   it('enter：交互在前、静态方案在后 → 血条仍进 overlayMounts', () => {
-    const overlays = ensureBuiltinSchemes({})
+    const overlays = ensureBuiltinSchemes(Object.fromEntries(
+      BUILTIN_SCHEMES.map((scheme) => [scheme.id, structuredClone(scheme)]),
+    ))
     const n = node('a', {
       durationMs: 8000,
       media: { kind: 'VIDEO', ref: 'clip' },

@@ -3,21 +3,23 @@
  *
  * 左：可编辑蓝图画布（GraphCanvas），实时高亮当前执行节点 + 点亮已走边，点节点可 jump。
  * 右：试玩面板（演出/HUD/交互/结局），与画布共享**同一个 GraphSession**，所以执行到哪、画布就亮哪。
- * 编辑图后点「重开」用最新图重建 session。
+ * 编辑图后可从节点「从此试玩」打开浮层；浮层内「重开」用最新图重建 session。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { GameGraph, GameScenario, SubFlowPackDef } from '../../runtime/schema/graph-schema'
-import { getSubFlowPack, getSubFlow, resolveGraphEntry } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { NodeInspector, type VideoOption } from './NodeInspector'
+import { useAudioAssets } from '../assets/audioAssetCacheStore'
+import { audioAssetOptions } from './bgm-authoring'
 import { NodePreviewStage } from './NodePreviewStage'
 import { VersionPicker } from './VersionPicker'
 import { PlayerRootContext } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
 import { bootEditorSkins } from '../init'
-import { GameStage } from '../../runtime/play'
+import { BgmPlayer, GameStage } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
@@ -91,7 +93,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // 共享场景 store（蓝图/实体/变量/规则/场景/试玩 并行视图共用同一份 graph+meta+持久化）。
   const graph = useGraphScenario((s) => s.graph)
   const isDraft = useGraphScenario((s) => s.isDraft)
-  const savedTip = useGraphScenario((s) => s.savedTip)
   const fitSignal = useGraphScenario((s) => s.fitSignal)
   const runKey = useGraphScenario((s) => s.runKey)
   const setGraph = useGraphScenario((s) => s.setGraph)
@@ -123,7 +124,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   // 保存 = 打版本：一次性存 blueprint + 组件（服务端钩子）+ git tag vN。
   const doCommit = useGraphScenario((s) => s.commit)
-  const reset = useGraphScenario((s) => s.reset)
   const applyLayout = useGraphScenario((s) => s.applyLayout)
   const bumpRun = useGraphScenario((s) => s.bumpRun)
 
@@ -147,9 +147,18 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [playFromNodeId, setPlayFromNodeId] = useState<string | null>(null)
   /** 每次 start / 从此试玩 递增，强制 <video> remount——末节点同 id 再 jump 时否则 key 不变、播完不重开。 */
   const [playEpoch, setPlayEpoch] = useState(0)
+  /**
+   * 只随 session 重建递增，用来重挂 `BgmPlayer`。新会话的 `bgm` 快照从 `null` 起，而「还没发过
+   * 指令」不是停播令（见 SessionSnapshot.bgm）——不重挂就会把上一局的曲子拖进新局。
+   * 刻意**不**复用 `playEpoch`：那个还会在画布 jump 时递增，跟着重挂会让床轨每次点节点都从头起播。
+   */
+  const [bgmRunKey, setBgmRunKey] = useState(0)
   const [videoOptions, setVideoOptions] = useState<VideoOption[]>([])
   const [videoOptionsError, setVideoOptionsError] = useState<string | null>(null)
   const kinoResources = useKinoVideoResources(game)
+  // 节点面板「音乐」下拉候选（与「视频」同款）：Kino media_type=audio，展示形状在壳层拼。
+  const audio = useAudioAssets(game)
+  const audioOptions = useMemo(() => audioAssetOptions(audio.items), [audio.items])
 
   useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
   useEffect(() => {
@@ -167,11 +176,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setVideoOptionsError(kinoResources.error)
   }, [kinoResources.error, kinoResources.items])
 
-  // NodeInspector 自己的「新建并挂载子蓝图」小机关（节点属性面板内，与画布「添加引用」按钮
-  // 是两条不同的路：面板走这里只会新建全新子蓝图，天然不成环）。`onPacksChange` 契约是"给出
-  // 完整下一份列表"（历史遗留，实际全部调用点只会追加恰好一个新建的包）；蓝图库改版后 packs
-  // 由 blueprints 派生，这里按 id 差集把新增项各自落成一个子蓝图文档，已存在的 id 不重复导入。
-  // 画布侧「引用已存在蓝图」的成环保护见下方 `addPackRef`（用 `wouldCreateCycle`）。
+  // NodeInspector「新建并挂载子蓝图」：`onPacksChange` 契约是"给出完整下一份列表"（历史遗留，
+  // 实际全部调用点只会追加恰好一个新建的包）；蓝图库改版后 packs 由 blueprints 派生，这里按 id
+  // 差集把新增项各自落成一个子蓝图文档，已存在的 id 不重复导入。
   const setPacks = useCallback((next: SubFlowPackDef[]) => {
     const cur = useGraphScenario.getState().blueprints
     for (const p of next) if (!cur[p.id]) importBlueprint(packToDoc(p))
@@ -261,12 +268,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [canvasW, setCanvasW] = useState(0)
   const panelRatio = canvasW > 0 ? Math.min(0.8, panelW / canvasW) : 0
 
-  const resetToDemo = () => {
-    if (!confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) return
-    reset()
-    setSelected(null)
-    setDrillStack([])
-  }
   const addPerfNode = (position: { x: number; y: number }) => {
     const id = `n-${Date.now().toString(36)}`
     const node: GameNode = {
@@ -279,35 +280,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     }
     setCanvasGraph((g) => addNode(g, node))
     setSelected(id)
-  }
-  /** 画布空白处「添加引用」：从蓝图库里挑一个既有蓝图接进来（不新建全新子蓝图），排除自己 +
-   * 会成环的候选（`wouldCreateCycle`）。选中后插入一个 `subFlowPack` 引用容器节点。 */
-  const addPackRef = (position: { x: number; y: number }) => {
-    const proj = useGraphScenario.getState().authoringProject()
-    const candidates = Object.values(blueprints).filter(
-      (d) => d.id !== activeBlueprintId && !wouldCreateCycle(proj, activeBlueprintId, d.id),
-    )
-    if (candidates.length === 0) {
-      alert('没有可引用的蓝图（或都会造成引用环）。先在左侧「＋ 新建蓝图」。')
-      return
-    }
-    const pick = prompt(`引用哪张蓝图？输入编号：\n${candidates.map((d, i) => `${i}: ${d.title}`).join('\n')}`, '0')
-    if (pick == null) return
-    const chosen = candidates[Number(pick)]
-    if (!chosen) return
-    const container: GameNode = {
-      id: `n-${Date.now().toString(36)}`,
-      type: 'perf',
-      position,
-      inputs: [],
-      outputs: [],
-      data: {
-        name: chosen.title,
-        subFlowPack: { id: chosen.id, entry: resolveGraphEntry(chosen.graph, chosen.entry) ?? chosen.entry },
-      },
-    }
-    setGraph((g) => addNode(g, container))
-    setSelected(container.id)
   }
 
   // 实体键签名：草稿曾缺 entities 被回填后必须重建 session，否则 HUD bind 全空、血条永不出现。
@@ -357,6 +329,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     pendingJumpRef.current = null
     setSnap(jumpId ? sessionRef.current.jump(jumpId) : sessionRef.current.start())
     setPlayEpoch((n) => n + 1)
+    setBgmRunKey((n) => n + 1)
   }, [session])
 
   const videoSrc = resolveMediaSrc(snap.clip?.mediaId, game)
@@ -368,6 +341,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     })),
     [session, snap.currentNodeId, game, playEpoch],
   )
+  /** 床轨解析器（引擎只抛资产 id，URL 归壳层）；稳定引用，避免每帧让 BgmPlayer 重跑 effect。 */
+  const resolveBgm = useCallback((id: string | undefined) => resolveMediaSrc(id, game), [game])
 
   useEffect(() => {
     // 无视频：durationMs 到点推进（逻辑节拍节点）。
@@ -443,23 +418,20 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const leaveOneLevel = () => {
     if (drillStack.length > 0) setDrillStack((s) => s.slice(0, -1))
   }
-  const clearCanvasGraph = () => {
-    if (canvasGraph.nodes.length === 0 && canvasGraph.edges.length === 0) return
-    if (!confirm('清空当前画布的所有节点和连线？（其它数据如实体/变量/界面方案不受影响）')) return
-    setCanvasGraph({ nodes: [], edges: [] })
-    setSelected(null)
-  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0e0c09', color: '#f6f1e9', isolation: 'isolate' }}>
-      {/* 顶部工具条：场景级动作（保存/版本/试玩），不含画布编辑手势 */}
+      {/* 顶部工具条：历史版本 → 保存 → 草稿提示，不含画布编辑手势 */}
       <div className="gv-graph-toolbar" style={{ padding: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => void doCommit()} title="保存当前内容并打一个新版本（vN）">💾 保存</button>
         <VersionPicker />
-        <button type="button" onClick={bumpRun}>▶ 重开</button>
-        <button type="button" onClick={resetToDemo} title="恢复为内置 demo 数据（丢弃当前未保存编辑）">↺ 重置</button>
-        <button type="button" onClick={() => setPlayOpen((v) => !v)} title="显示/隐藏试玩浮层">{playOpen ? '▣ 隐藏试玩' : '▷ 显示试玩'}</button>
-        <button type="button" onClick={clearCanvasGraph} title="清空当前画布的所有节点和连线">🗑 清空</button>
-        <span style={{ opacity: 0.6, fontSize: 11 }}>{savedTip || `phase: ${snap.phase}`}</span>
+        <button type="button" onClick={() => void doCommit()} title="保存当前内容并打一个新版本（vN）">💾 保存</button>
+        {isDraft ? (
+          <span
+            style={{ opacity: 0.85, fontSize: 12, color: '#ffc53d' }}
+            title="当前显示的是未保存草稿，尚未写入权威版本。点「💾 保存」提交。"
+          >
+            ⚠ 未保存草稿
+          </span>
+        ) : null}
         {videoOptionsError ? (
           <span role="alert" style={{ color: '#ff8f8f', fontSize: 11 }}>
             Kino 视频素材加载失败：{videoOptionsError}
@@ -551,7 +523,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           onDrill={showingForeignPlayGraph ? undefined : onDrill}
           onPaneClick={() => setSelected(null)}
           onAddNode={showingForeignPlayGraph ? undefined : addPerfNode}
-          onAddPackNode={showingForeignPlayGraph ? undefined : addPackRef}
           onFitLayout={showingForeignPlayGraph ? undefined : applyLayout}
         />
 
@@ -576,6 +547,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               onFocus={() => claimPlayerFocus(playRootRef.current)}
               style={{ position: 'relative', height: 180, background: '#000', outline: 'none' }}
             >
+              {/* 床轨：独立音频通道（视频恒 muted）。挂在浮层里 → 关掉试玩即随卸载停播；
+                  key 随 session 重建换 → 重开不把上一局的曲子拖进新局（同 GraphPlaySurface）。 */}
+              <BgmPlayer key={bgmRunKey} bgm={snap.bgm} resolveAsset={resolveBgm} />
+
               {/* 演出 + 叠层：共享 runtime/play 的 GameStage。videoKey 带 playEpoch → 同节点再 jump 强制 remount。 */}
               <GameStage
                 videoSrc={videoSrc}
@@ -657,6 +632,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 graph={canvasGraph}
                 nodeId={selected}
                 videoOptions={videoOptions}
+                audioOptions={audioOptions}
                 packs={packs}
                 isRefAllowed={isRefAllowed}
                 overlays={overlays}

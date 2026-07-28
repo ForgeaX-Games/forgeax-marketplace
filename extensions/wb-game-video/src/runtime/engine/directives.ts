@@ -6,6 +6,7 @@
  */
 
 import type { Layout } from '../schema/node-config-schema'
+import type { BgmPlaybackCommand } from './bgm-stack'
 
 /** 播放某节点的演出（视频/占位 + loop）。 */
 export interface PlayClipDirective {
@@ -64,6 +65,16 @@ export interface LogDirective {
   message: string
 }
 
+/**
+ * 床轨该怎么响 —— BGM 作用域栈每变一次发一条（引擎在生命周期检查点上产出，壳层拿去驱动音频元素）。
+ *
+ * 载荷**就是** `BgmPlaybackCommand` 加个 tag，不另抄一份字段：语义（`fadeOutMs` 说的是**离场**
+ * 那条、`ref`/`volume`/`fadeInMs`/`loop` 说的是**将响**那条、`ref: null` = 停播、`restart: false`
+ * = 同曲续播别动播放头）全钉在 `bgm-stack.ts` 那份注释上。抄成独立 interface 则两边可以各自
+ * 加减字段而编译器不吭声——交叉类型让「栈产出什么」与「传输什么」只能同生共死。
+ */
+export type BgmDirective = { type: 'bgm' } & BgmPlaybackCommand
+
 export type RuntimeDirective =
   | PlayClipDirective
   | RenderOverlayDirective
@@ -72,10 +83,14 @@ export type RuntimeDirective =
   | StateChangedDirective
   | RouteInfoDirective
   | LogDirective
+  | BgmDirective
 
 export function isRenderOverlay(d: RuntimeDirective): d is RenderOverlayDirective {
   return d.type === 'renderOverlay'
 }
 export function isPlayClip(d: RuntimeDirective): d is PlayClipDirective {
   return d.type === 'playClip'
+}
+export function isBgm(d: RuntimeDirective): d is BgmDirective {
+  return d.type === 'bgm'
 }

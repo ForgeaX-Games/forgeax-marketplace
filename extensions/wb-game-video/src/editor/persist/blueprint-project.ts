@@ -34,6 +34,7 @@ export function metaFromDocument(scn: EditorScenarioDocument | GraphLibraryDocum
   if (scn.entities !== undefined) m.entities = scn.entities
   if (scn.ui !== undefined) m.ui = scn.ui
   if (scn.textStylePresets !== undefined) m.textStylePresets = scn.textStylePresets
+  if (scn.bgm !== undefined) m.bgm = scn.bgm
   const formulas = (scn as EditorScenarioDocument).formulas
   if (formulas !== undefined) m.formulas = formulas
   return m

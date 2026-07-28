@@ -432,8 +432,6 @@ export interface GraphCanvasProps {
   onPaneClick?: () => void
   /** 画布右下角：添加节点（属于蓝图编辑手势，不进顶栏）。position = 当前视口中心（flow 坐标）。 */
   onAddNode?: (position: { x: number; y: number }) => void
-  /** 画布右下角：引用一张既有蓝图，插入 subFlowPack 引用容器节点。 */
-  onAddPackNode?: (position: { x: number; y: number }) => void
   /** 画布右下角：自适应布局（dagre 重排 + fitView）。 */
   onFitLayout?: () => void
   /**
@@ -468,7 +466,6 @@ function GraphCanvasInner({
   onDrill,
   onPaneClick,
   onAddNode,
-  onAddPackNode,
   onFitLayout,
   fitReserveRightPx = 0,
 }: GraphCanvasProps): JSX.Element {
@@ -900,18 +897,6 @@ function GraphCanvasInner({
             title="添加演出节点"
           >
             ＋ 添加节点
-          </button>
-        )}
-        {onAddPackNode && (
-          <button
-            type="button"
-            onClick={() => {
-              const c = viewportCenter()
-              onAddPackNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
-            }}
-            title="引用一张既有蓝图（从蓝图库选一个，插入引用容器节点）"
-          >
-            ＋ 引用蓝图
           </button>
         )}
         <button

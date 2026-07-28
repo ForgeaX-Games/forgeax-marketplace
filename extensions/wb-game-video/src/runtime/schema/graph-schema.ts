@@ -205,6 +205,70 @@ export interface NodeMedia {
   meta?: Record<string, unknown>
 }
 
+/** 音频资产引用：只挂 `assets/manifest` 里的 id，永不落 URL（壳层 resolve，引擎只传 id）。 */
+export type AudioRef = string
+
+/**
+ * 文档默认床轨（挂 `GameScenario` 根，与 `variables` / `entities` 同级）。
+ * 会话 `start` 时以 owner `'__doc__'` 压入 BGM 栈，通常不在中途 pop。
+ * 缺省 = 静音起局，直到走进首个带 `bgm` 的作用域。
+ *
+ * 不要拿入口节点的 `data.bgm` 充当「整局默认」：它确实会一直播（D5），但它是**作用域层**——
+ * `jump` 会把它退掉、清局会按 `scenario.bgm` 重 derive，之后整局就再没有床轨了。整局默认只有
+ * 写在这里才是地板（`stop` 也弹不掉，D13）。
+ */
+export interface DocumentBgm {
+  ref: AudioRef
+  /** 0..1，默认 1。 */
+  volume?: number
+  fadeInMs?: number
+  /**
+   * 文档床**离场**时的淡出时长（ms，默认 0 = 硬切）。
+   *
+   * 淡出恒取自离场那一帧（`BgmStack.resume`），所以「叙事床 → 战斗床」这条最常听到的转场
+   * 只有写在这里才淡得出去；缺了它，进战斗时正响的叙事床会 0ms 掉到静音，再由战斗床按自己的
+   * `fadeInMs` 淡入 —— 听感是一次明显的空档。
+   */
+  fadeOutMs?: number
+  /** 默认 true。 */
+  loop?: boolean
+}
+
+/**
+ * 节点作用域 BGM（owner 视角，不是「触发类型」）。
+ *
+ * **配了就一直播**：进入该节点（容器则 `descend` 时）起播，跨多少节点都不停；
+ * **走边离开该节点不结束**。结束只有两个来源，别无其他：
+ *   - 后面某个节点配 `mode: 'stop'` → 结束当前这层，回到上一层还没结束的那首；
+ *   - `jump` / 清局 → 引擎整体退栈（`unwindBgmToDocBed`）。
+ *
+ * 容器（`subFlow` / `subFlowPack`）**不是**作用域：容器上的 `bgm` 与普通节点同一规则，弹回外层
+ * 不结束它。想要「出了这个子流程就结束」只能在包的每个出口终端上写 `mode: 'stop'`；被硬打断
+ * 弹出容器（没走终端）时这首会漏到调用方继续播。反过来也成立——**配 BGM 不得要求作者改蓝图
+ * 结构**（D11）：一段平铺节点共用一首曲子只需在头一个节点上配一次，不必包进容器。
+ *
+ * 内层节点不配 `bgm` 即继承当前栈顶（一律不动栈）。
+ */
+export interface NodeBgm {
+  /** `mode: 'stop'` 时可省（那一条不引入新曲子）；其余情况必填。 */
+  ref?: AudioRef
+  /**
+   * - `push`（默认）：起播并**记住**当前正响的那首，一直播到有人结束它。
+   * - `replace`：换曲但**不**记住上一首（栈深不变）——「这首之后不需要回去」。
+   * - `stop`：结束当前这层，回到上一层还没结束的那首。文档床是地板，弹不掉（D13）。
+   */
+  mode?: 'push' | 'replace' | 'stop'
+  /** 0..1，默认 1。 */
+  volume?: number
+  fadeInMs?: number
+  fadeOutMs?: number
+  /**
+   * 同 ref 再次成为栈顶时是否从头播。
+   * 默认 false = 续播（回合循环友好）。
+   */
+  restart?: boolean
+}
+
 /**
  * 图节点 `data` **基类**（普通演出节点）。
  *
@@ -220,7 +284,8 @@ export interface NodeData {
   media?: NodeMedia
   mediaPlayMode?: 'once' | 'loop'
   /**
-   * 可选播放时长上限（ms，作者可配）。
+   * 可选播放时长上限（ms）。Inspector 不再暴露编辑；字段仍由 bindVideo、既有图数据、
+   * 以及程序化写入保留，runtime 继续消费。
    * - 无视频节点：作停留节拍 / 时间轴标尺。
    * - 有视频节点：`>0` 且 `≤ 视频本身长度` 时，到点提前收演出；未填 / `≤0` / 超过视频长度
    *   → 视为无效、丢弃，以视频本身长度为准（不截断，交给 onEnded）。
@@ -229,11 +294,10 @@ export interface NodeData {
   /** 本节点上的 overlay 挂载列表；纯过场可省略。 */
   overlayNodes?: OverlayNode[]
   /**
-   * 默认样式方案：目录里一张 overlay 的 id。不挂载、不进 `overlayNodes`、不出现在时间轴/预览里——
-   * 纯粹是"新增字幕/飘字/滤镜/特效时套用什么默认参数"的查表源。同类型（`component` 相同）在该方案里
-   * 有多个 child 时取第一个当默认，其余可在素材检视器「方案样式」下拉里切换。
+   * 本节点作为 owner 的作用域 BGM；缺省 = 不动 BGM 栈（继承上层）。
+   * `SubFlow*NodeData` 由基类自动继承本字段，容器与普通节点同一套寿命规则，见 `NodeBgm`。
    */
-  styleScheme?: string
+  bgm?: NodeBgm
   reactions?: Reaction[]
 }
 
@@ -280,6 +344,21 @@ export function getSubFlowPack(d: GameNodeData): SubFlowPack | undefined {
   return p && typeof p === 'object' && typeof p.id === 'string' ? p : undefined
 }
 
+/**
+ * 读节点作用域 BGM；**没有可用意图**的形状一律丢弃（非对象、只有 fade / mode 参数没曲子等）。
+ *
+ * 「可用意图」= 有可播的 `ref`（非空字符串）**或** `mode === 'stop'`（结束当前层，本就不带曲子）。
+ * 不能只看 `ref`：那会把 `win.data.bgm = { mode: 'stop' }` 静默吃掉——作者配了「结束音乐」却
+ * 一直听到战斗曲，且全程无报错。落盘的非法形状由 `validate.ts` fail-loud（读原始值），这里只
+ * 保证引擎拿到的每一份 `bgm` 都真的有事可做。
+ */
+export function getNodeBgm(d: GameNodeData): NodeBgm | undefined {
+  const b = (d as NodeData).bgm
+  if (!b || typeof b !== 'object') return undefined
+  if (b.mode === 'stop') return b
+  return typeof b.ref === 'string' && b.ref.length > 0 ? b : undefined
+}
+
 export function isSubflowContainerData(d: GameNodeData): boolean {
   return getSubFlow(d) != null || getSubFlowPack(d) != null
 }
@@ -300,11 +379,10 @@ export interface SubFlowPackDef {
   requires?: { vars?: string[]; entities?: string[] }
 }
 
-/** 边路由数据（edge.data）——仅条件 / 权重 / 标签；副作用走 reactions / option.effects。 */
+/** 边路由数据（edge.data）——仅条件 / 权重；副作用走 reactions / option.effects。 */
 export interface EdgeRouting {
   condition?: GraphCondition
   weight?: number
-  label?: string
 }
 
 /**
@@ -332,6 +410,8 @@ export interface GameScenario {
   ui?: GameScenarioUi
   /** 用户自定义文字预设（内置在 text-style.ts；这里只存用户新建的，按 subtitle/overlay 分组）。 */
   textStylePresets?: { subtitle?: GraphTextStylePreset[]; overlay?: GraphTextStylePreset[] }
+  /** 文档默认床轨；缺省 = 静音起局。与 `NodeData.bgm` 一起构成 BGM 配置的唯一两处 SSOT。 */
+  bgm?: DocumentBgm
   graph: GameGraph
 }
 
@@ -355,7 +435,7 @@ export function isGameGraph(v: unknown): v is GameGraph {
  * 声明该具体类型（`runtime ↛ editor`，见 check-module-boundaries.mjs），改为 `unknown`——
  * 消费处（store）用窄类型断言恢复 `Formula`。
  */
-export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'textStylePresets'> & {
+export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'textStylePresets' | 'bgm'> & {
   formulas?: Record<string, unknown>
 }
 

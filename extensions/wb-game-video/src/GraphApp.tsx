@@ -21,6 +21,7 @@ import { useGraphView, installGraphViewSync, type GraphView } from './editor/per
 import { NODIA_DEMO } from './editor/demo/demo'
 import { getGameSlug } from './editor/persist/gameScope'
 import { injectStyleOnce } from './styles/injectStyle'
+import { GameBootstrap } from './editor/bootstrap/GameBootstrap'
 
 const NAV: Array<{ id: GraphView; label: string; hint: string }> = [
   { id: 'graph', label: '蓝图', hint: '新引擎蓝图工作室 · 可编辑画布 + 右上试玩浮层（点节点才出配置）' },
@@ -105,10 +106,6 @@ export function GraphApp(): JSX.Element {
   const [pane] = useState(readPane)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
 
-  useEffect(() => {
-    ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)
-  }, [ensureBoot])
-
   // split-pane 嵌入态才开跨 iframe 同步桥；独立运行零开销。
   useEffect(() => {
     if (pane === null) return
@@ -119,12 +116,12 @@ export function GraphApp(): JSX.Element {
     return <div className="ga-root is-pane-left"><GraphSidebar /></div>
   }
   if (pane === 'center') {
-    return <div className="ga-root is-pane-center"><GraphMain /></div>
+    return <div className="ga-root is-pane-center"><GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap></div>
   }
   return (
     <div className="ga-root">
       <GraphSidebar />
-      <GraphMain />
+      <GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap>
     </div>
   )
 }
@@ -181,4 +178,9 @@ const CSS = `
 }
 
 .ga-main { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.ga-bootstrap { flex: 1; display: grid; place-content: center; gap: 12px; padding: 32px; color: var(--color-text-primary, #f6f1e9); text-align: center; }
+.ga-bootstrap h1, .ga-bootstrap p { margin: 0; }
+.ga-bootstrap-actions { display: flex; justify-content: center; gap: 12px; margin-top: 8px; }
+.ga-bootstrap button { padding: 8px 16px; border: 1px solid var(--color-border-default, #2e2924); border-radius: 6px; background: var(--color-background-elevated, #161310); color: inherit; cursor: pointer; }
+.ga-bootstrap button:first-child { background: var(--color-brand-primary, #f08840); color: #17120d; border-color: transparent; }
 `

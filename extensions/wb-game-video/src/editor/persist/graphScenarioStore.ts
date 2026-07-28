@@ -34,7 +34,7 @@ export type BlueprintTitleActionOk = { ok: true; id?: string }
 export type BlueprintTitleActionErr = { ok: false; reason: 'duplicate_title' | 'not_found' }
 export type BlueprintTitleActionResult = BlueprintTitleActionOk | BlueprintTitleActionErr
 
-/** 载入 demo / 文档时保证内置「通用样式」方案存在——用于 reset()/首次落座。 */
+/** 载入 demo / 文档时保证基础覆盖物存在——用于 reset()/首次落座。 */
 function withBuiltinSchemes<T extends GameScenario>(s: T): T {
   return {
     ...s,
@@ -63,7 +63,7 @@ function resolveActiveDoc(state: Pick<GraphScenarioStore, 'blueprints' | 'active
   return state.blueprints[state.activeBlueprintId]
 }
 
-/** ui.overlays 缺失内置方案则补（作用于共享 meta，不覆盖已有）。 */
+/** ui.overlays 缺失基础覆盖物则补（作用于共享 meta，不覆盖已有）。 */
 function withBuiltinSchemesMeta(m: ScenarioMetaFields): ScenarioMetaFields {
   return { ...m, ui: { ...m.ui, overlays: ensureBuiltinSchemes(m.ui?.overlays) } }
 }
@@ -591,10 +591,8 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
 
     // 非破坏式载入某历史版本：读该 tag 的 blueprint 放进当前编辑数据；
     // 不 checkout、不改 git 历史。内容若已等于当前干净基线（如刚保存的最新版）则不标草稿。
+    // 覆盖未保存草稿的二次确认由 VersionPicker 的 popConfirm 负责，此处不再弹原生 confirm。
     loadVersion: async (tag: string) => {
-      if (get().isDraft && typeof confirm === 'function') {
-        if (!confirm(`载入版本 ${tag} 会覆盖当前未保存的修改，继续？`)) return
-      }
       const doc = await loadVersionProject(get().game, tag)
       if (!isLibraryDocument(doc)) {
         set({ savedTip: `载入 ${tag} 失败` })

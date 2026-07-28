@@ -17,6 +17,16 @@ describe('game video i18n', () => {
     expect(tf('videoAssets.renameAria', { name: '序章' })).toBe('重命名 序章')
   })
 
+  it('translates the video game bootstrap guide', () => {
+    expect(t('bootstrap.guide.title')).toBe('Create a video game')
+    expect(t('bootstrap.guide.yes')).toBe('Yes, create video game')
+
+    setLocale('zh')
+
+    expect(t('bootstrap.guide.title')).toBe('创建视频游戏')
+    expect(t('bootstrap.guide.yes')).toBe('是，创建视频游戏')
+  })
+
   it('reacts to the host locale message', () => {
     initLocaleSync()
     window.dispatchEvent(new MessageEvent('message', {

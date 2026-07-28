@@ -1,7 +1,7 @@
 /**
- * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / formulas。
+ * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / formulas / 默认 BGM。
  */
-import type { CSSProperties, JSX } from 'react'
+import { useState, type CSSProperties, type JSX } from 'react'
 import type { AttrMeta, Entity, GameScenario, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'

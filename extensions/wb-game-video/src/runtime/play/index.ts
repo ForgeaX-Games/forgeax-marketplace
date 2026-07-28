@@ -5,6 +5,7 @@
  */
 export { GamePlayer, type GamePlayerProps, type ResolveAsset } from './GamePlayer'
 export { GameStage, type GameStageProps } from './GameStage'
+export { BgmPlayer, type BgmPlayerProps } from './BgmPlayer'
 export { videoDurationCapReached } from './videoTiming'
 export { VideoOverlayStage } from './VideoOverlayStage'
 export { useVideoContentRect } from './useVideoContentRect'

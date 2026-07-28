@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { GraphSession } from '../engine/session'
 import { createCoreSkinRegistry, registerCoreSkins } from '../component-host/components'
 import { makeNodiaDemo } from '../../editor/demo/demo'
-import { ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
+import { BUILTIN_SCHEMES, ensureBuiltinSchemes, SCHEME_STATIC_ID } from '../../editor/demo/builtin-schemes'
 import { STAGE_FILL_LAYOUT } from '../schema/layout'
 
 beforeAll(() => {
@@ -17,7 +17,9 @@ beforeAll(() => {
 
 describe('挂载静态方案 · 血条进试玩', () => {
   it('enter 后 overlayMounts 含 battleHpBar，且带 skinCtx 时能渲出血条 DOM', () => {
-    const overlays = ensureBuiltinSchemes({})
+    const overlays = ensureBuiltinSchemes(Object.fromEntries(
+      BUILTIN_SCHEMES.map((scheme) => [scheme.id, structuredClone(scheme)]),
+    ))
     const base = makeNodiaDemo()
     const scn = {
       ...base,

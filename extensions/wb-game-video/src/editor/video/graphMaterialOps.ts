@@ -1588,18 +1588,6 @@ export function deleteMaterialGraph(scenario: GameScenario, node: GameNode, item
   }
 }
 
-/**
- * 本节点「默认样式方案」（`node.data.styleScheme`）里，与 `component` 精确同名的 child 全集。
- * 方案本身不挂载、不进 `overlayNodes`——纯查表源；新增素材取 [0] 当默认，其余供检视器切换。
- * 只服务字幕/飘字/滤镜/特效（这几个位置的默认样式允许多套预设切换）；QTE/选项的默认样式
- * 已锁定固定组件，不走这里。
- */
-export function styleVariantsFor(scenario: GameScenario, node: GameNode, component: string): OverlayChild[] {
-  const schemeId = node.data.styleScheme
-  if (!schemeId) return []
-  return scenario.ui?.overlays?.[schemeId]?.children.filter((c) => c.component === component) ?? []
-}
-
 // ── 写映射：新增材料 ──────────────────────────────────────────────────────────
 /** 默认六槽 template；其它值为原始 component id（添加未分类组件）。 */
 export type MaterialTemplate = 'subtitle' | 'overlay' | 'qte' | 'option' | 'filter' | 'fx' | string
@@ -1719,27 +1707,25 @@ export function addMaterialGraph(
   const endMs = clampMs(startMs + dur, startMs + 100, maxMs)
   if (template === 'subtitle') {
     const id = newElementId()
-    const style = styleVariantsFor(scenario, node, 'dialogue')[0]?.inputs
     const el: OverlayChild = {
       id,
       component: 'dialogue',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: { zIndex: at ? at.zIndex : 0 },
-      inputs: { text: '新字幕', ...style },
+      inputs: { text: '新字幕' },
     }
     return { scenario: addOverlayChild(scenario, node.id, el), selectKey: `subtitle:${id}` }
   }
   if (template === 'overlay') {
     const id = newElementId()
-    const style = styleVariantsFor(scenario, node, 'floatText')[0]?.inputs
     const float: OverlayChild = {
       id,
       component: 'floatText',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: { zIndex: at ? at.zIndex : 1 },
-      inputs: { text: '-100', x: OVERLAY_XY.x, y: 0.45, ...style },
+      inputs: { text: '-100', x: OVERLAY_XY.x, y: 0.45 },
     }
     const s1 = addOverlayChild(scenario, node.id, float)
     const s1Node = findNode(s1.graph, node.id) ?? node
@@ -1749,14 +1735,13 @@ export function addMaterialGraph(
   }
   if (template === 'filter' || template === 'fx') {
     const id = newElementId()
-    const style = styleVariantsFor(scenario, node, template)[0]?.inputs
     const el: OverlayChild = {
       id,
       component: template,
       trigger: { when: 'at', ms: startMs },
       window: { startMs, endMs },
       layout: { zIndex: at ? at.zIndex : template === 'filter' ? 4 : 5 },
-      inputs: { ...(template === 'filter' ? { filter: 'warm', intensity: 1 } : { fx: 'flash', intensity: 1 }), ...style },
+      inputs: template === 'filter' ? { filter: 'warm', intensity: 1 } : { fx: 'flash', intensity: 1 },
     }
     return { scenario: addOverlayChild(scenario, node.id, el), selectKey: `${template}:${id}` }
   }

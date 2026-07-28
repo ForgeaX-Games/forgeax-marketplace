@@ -27,12 +27,13 @@ import type {
   SubFlowPack,
   SubFlowPackDef,
 } from '../schema/graph-schema'
-import { getSubFlowPack, resolveGraphEntry } from '../schema/graph-schema'
+import { getNodeBgm, getSubFlowPack, isSubflowContainerData, resolveGraphEntry } from '../schema/graph-schema'
 import { nodeOverlayChildren, nodeOverlayMounts } from '../schema/expand-overlay'
 import { resolveEventReactions, completeReactions } from '../schema/overlay-events'
 import type { Layout, NodeAction, OverlayInstanceChild, Reaction } from '../schema/node-config-schema'
 import { overlayMountId } from '../schema/node-config-schema'
 import { applyEffects, type MutableState } from './apply-effects'
+import { BgmStack, DOC_BGM_OWNER, type BgmApplyInput, type BgmOwner, type BgmPlaybackCommand } from './bgm-stack'
 import { initState } from './engine-init'
 import { defaultComponentRegistry, type ComponentRegistry } from '../registry/component-registry'
 import type { RuntimeDirective, RenderOverlayDirective } from './directives'
@@ -84,6 +85,8 @@ export class GraphRuntime {
   private readonly packsByKey = new Map<string, { id: string; version?: string; entry: string; graph: GameGraph }>()
   readonly state: RuntimeState
   private queue: RuntimeDirective[] = []
+  /** 床轨作用域栈（会话级）：配了就一直播，结束时机见 §4.3；引擎只在生命周期检查点上动它。 */
+  private readonly bgm = new BgmStack()
 
   // 每节点重置的运行游标
   private fired = new Set<string>() // 已触发的 enter/at 元素 id
@@ -285,6 +288,7 @@ export class GraphRuntime {
       const edge = this.selectHandleEdge(srcId, outcome)
       if (edge) {
         if (srcId !== node.id) {
+          // 从容器出边走事件：整个调用栈被清掉，但**不动 BGM 栈**（清栈不是作者说的「结束」）。
           this.state.callStack = []
           this.returningTo.clear()
         }
@@ -315,6 +319,106 @@ export class GraphRuntime {
     return id ? this.nodes.get(id) : undefined
   }
 
+  // ── 床轨作用域（BGM）──────────────────────────────────────────────────────────
+  // v2：**配了就一直播**（D5）。调度层只在两个检查点动栈：descend（容器 `data.bgm`）与
+  // beginPerform（普通节点 `data.bgm`），两者都归 `applyNodeBgm`。**离开节点、弹 `callStack`
+  // 帧、局内清空 `callStack` 一律不动 BGM 栈**——`runExit` 与弹帧路径一个字都不发。栈是否真的
+  // 变了由 BgmStack 判定，没变就没有 command、也就没有指令。
+  /** 栈没变（`null`）就不发指令。 */
+  private emitBgmCommand(cmd: BgmPlaybackCommand | null): void {
+    if (cmd) this.emit({ type: 'bgm', ...cmd })
+  }
+
+  /**
+   * 床轨层的 owner。**必须带蓝图前缀**：`switchGraph → indexGraph` 每次按蓝图重建 `this.nodes`，
+   * 故 nodeId 只在本蓝图内唯一。可复用包里叫 `combat` / `enter` / `end` 的通名节点跟主图 caller
+   * 同名是常态（本平台由 agent 铸 id）；裸 nodeId 作 owner 时，包内那个同名节点起播会被下面的
+   * 「回同一节点不叠层」判成「自己那层已在栈顶」→ 就地 replace 掉主图容器的层，出包后再 `stop`
+   * 就回不到那首了（层没了）。全程无报错，纯听感缺陷。
+   */
+  private bgmOwner(nodeId: string): BgmOwner {
+    return `${this.activeBlueprintId}::${nodeId}`
+  }
+
+  /**
+   * 节点上的 `bgm` 生效点（§4.2 `applyNodeBgm`）：无 `data.bgm` = 空操作。
+   *
+   * - `mode: 'stop'` → `stack.stop()`：结束当前这层，回到上一层还没结束的（写它的节点通常压根
+   *   没开过层，故与 owner 无关）。
+   * - 其余 → `stack.apply()` 开一层，从此一直响，直到别处 `mode: 'stop'` 或 `jump`/清局结束它。
+   *   容器与普通节点同一条规则：`callStack` 深度与这一层的寿命无关。
+   */
+  private applyNodeBgm(node: GameNode): void {
+    const bgm = getNodeBgm(node.data)
+    if (!bgm) return
+    if (bgm.mode === 'stop') return this.emitBgmCommand(this.bgm.stop())
+    // owner 由引擎算、不从落盘数据展开：混进 `bgm.owner` 也盖不掉算出来的那个。
+    const owner = this.bgmOwner(node.id)
+    const input: BgmApplyInput = {
+      owner,
+      // 非 stop 分支必有非空 ref —— `getNodeBgm` 的守卫已保证（`bgm-schema.test.ts` 钉住）。
+      ref: bgm.ref as string,
+      mode: bgm.mode,
+      volume: bgm.volume,
+      fadeInMs: bgm.fadeInMs,
+      fadeOutMs: bgm.fadeOutMs,
+      restart: bgm.restart,
+    }
+    const top = this.bgm.top()
+    if (top?.owner !== owner) return this.emitBgmCommand(this.bgm.apply(input))
+    // 自己那层已在栈顶 = 回合循环又走进来了（§6.1 的战斗床就配在循环入口）。**绝不加深栈**：
+    // 每轮压一层的话栈无界增长，之后一次 `stop` 只能退回上一轮的同一首（听起来「没反应」）。
+    // 曲子没变且没要求重开 → 一条指令都不发（壳层别碰播放头）。
+    if (top.ref === input.ref && !bgm.restart) return
+    // 要么作者显式 `restart`（每轮从头播），要么这层的曲子被别人 replace 走了（该换回自己那首）：
+    // 就地换栈顶，`replace` 保留本层的 owner——这一层仍归**第一次**开它的那个作用域，于是下一轮
+    // 走进来时守卫照样认得出「自己那层已在栈顶」。
+    this.emitBgmCommand(this.bgm.apply({ ...input, mode: 'replace' }))
+  }
+
+  /**
+   * **作者跳转 / 清局**（`jumpToNode`，SPEC §4.2 生命周期表）：导航被整体重置，栈上那些作用域层
+   * （容器层与节点层）再没有上下文可言，故就地退到栈底文档床。
+   *
+   * **不含局内清 `callStack` 的那三条路径**（容器 handle 出边 / 显式 advance 走容器边 / 规则硬
+   * 打断）——那些只清 `callStack`，一个字都不发：层不绑 `callStack`（D5 / D11），被剧情弹出容器
+   * 不是作者说的「结束」。
+   *
+   * 一次转场只发**最终**该响的那条：中间层的 resume 指令对壳层没有意义（会白起一段又立刻换）。
+   * 但淡出要取**第一次**离场那帧的——正在响的是栈顶那条，作者写在它 `fadeOutMs` 上的值才是
+   * 这次转场听得到的那个淡出；沿用最后一条命令的话，报出去的是最深那层（早就没在响）的时长。
+   *
+   * `rederiveDocBed` = 与 `resetGlobalsState` 同步的「清局」：状态回 `initState(scenario)`，
+   * 床轨同理按 `scenario.bgm` 重压（从头起播）；默认 jump 保留全局态，故文档床原样留着继续响。
+   */
+  private unwindBgmToDocBed(rederiveDocBed = false): void {
+    let cmd: BgmPlaybackCommand | null = null
+    // 正在响的那条的淡出时长（第一次 stop / clear 给的）；后续层的值都不该被听到。
+    let soundingFadeOutMs: number | undefined
+    if (rederiveDocBed) {
+      const stopped = this.bgm.top() ? this.bgm.clear() : null
+      soundingFadeOutMs = stopped?.fadeOutMs
+      cmd = this.applyDocBgm() ?? stopped
+    } else {
+      // `stop()` 逐层退且**永不弹文档床**（D13），所以这个循环恰好停在栈底那层文档床上。
+      for (;;) {
+        const popped = this.bgm.stop()
+        if (!popped) break
+        soundingFadeOutMs ??= popped.fadeOutMs
+        cmd = popped
+      }
+    }
+    if (cmd && soundingFadeOutMs !== undefined) cmd = { ...cmd, fadeOutMs: soundingFadeOutMs }
+    this.emitBgmCommand(cmd)
+  }
+
+  /** 压入文档默认床轨；`scenario.bgm` 缺省 = 静音起局（返回 null，不发指令）。 */
+  private applyDocBgm(): BgmPlaybackCommand | null {
+    const doc = this.scenario.bgm
+    if (!doc?.ref) return null
+    return this.bgm.apply({ ...doc, owner: DOC_BGM_OWNER })
+  }
+
   // ── 控制入口 ────────────────────────────────────────────────────────────────
   start(): RuntimeDirective[] {
     this.activeBlueprintId = this.rootBlueprintId
@@ -326,6 +430,8 @@ export class GraphRuntime {
     }
     this.chain = 0
     this.returningTo = new Set()
+    // 文档床先压：入口节点/容器自己的层要叠在它上面。
+    this.unwindBgmToDocBed(true)
     this.enterNode(entry.id)
     return this.drain()
   }
@@ -352,6 +458,8 @@ export class GraphRuntime {
     this.state.callStack = []
     this.chain = 0
     this.returningTo = new Set()
+    // 清栈 = 弃掉所有容器作用域（以及当前节点自己的层）；resetGlobals 连文档床一起重 derive。
+    this.unwindBgmToDocBed(opts.resetGlobals === true)
     this.enterNode(id)
     return this.drain()
   }
@@ -403,6 +511,9 @@ export class GraphRuntime {
     switch (intent.kind) {
       case 'descend':
         this.pushCall(node.id)
+        // 容器的 `data.bgm` 在**下钻**这一刻生效（普通节点那条走 beginPerform，容器不进那条）。
+        // returning 再 enter 容器时 NodeKind 返回 advance 而非 descend，故不会二次 apply（§4.4）。
+        this.applyNodeBgm(node)
         if (intent.graph) {
           const packId = getSubFlowPack(node.data)?.id
           if (packId) this.activeBlueprintId = packId
@@ -463,6 +574,9 @@ export class GraphRuntime {
       durationMs: node.data.durationMs,
     })
     this.setPhase('playing')
+    // 普通节点的 `data.bgm` 只走这条演出入场路径（容器 returning 走 beginResume，不会到这里）；
+    // 容器排除在外是因为它那句归 descend 管，否则一次进入会 apply 两遍。
+    if (!isSubflowContainerData(node.data)) this.applyNodeBgm(node)
   }
 
   /** 容器弹回：不重播演出、不跑 enter 元素，只重置 fired/pending + 相位置 playing，随后沿 out 续走。 */
@@ -595,6 +709,7 @@ export class GraphRuntime {
         const edge = this.edgeById(a.edgeId)
         if (edge && this.eventRoutingNodeIds(el).includes(edge.source)) {
           if (edge.source !== this.state.currentNodeId) {
+            // 同上：显式 advance 走的是容器的边，调用栈清空、BGM 栈原样。
             this.state.callStack = []
             this.returningTo.clear()
           }
@@ -688,6 +803,8 @@ export class GraphRuntime {
       }
     }
     this.inExit = false
+    // 床轨在这里**什么都不做**（D5）：v2 里「离开节点」不再是结束信号，配了就一直播。
+    // 结束只有两个来源：别处 `mode: 'stop'`（applyNodeBgm）、`jump`/清局（unwindBgmToDocBed）。
   }
 
   /** 若有待消费的 redirect（watch/lifecycle advance），跑当前节点 exit 后即时跳转。返回是否跳转。 */
@@ -696,6 +813,12 @@ export class GraphRuntime {
     const { goto, resetGlobals } = this.redirect
     this.redirect = null
     const cur = this.node(this.state.currentNodeId)
+    // 硬打断会清掉整个调用栈（见下），但那是局内路径 → BGM 栈原样，等某处 `mode: 'stop'`。
+    // `resetGlobals` 这一路**目前没有任何调用方**：`this.redirect` 只在一处赋值，且只写
+    // `{ goto: edge.target }`（见下面的 `fireLifecycle` advance 分支）。留着这两个分支纯粹是
+    // 为了与紧邻的 `if (resetGlobals) this.resetGlobalsState()` 成对——真有人开始写这个字段时，
+    // 「状态回 initState」与「床轨按 scenario.bgm 重 derive」必须同时发生，少一个就是半清局。
+    if (resetGlobals) this.unwindBgmToDocBed(true)
     if (cur) this.runExit(cur)
     this.setPhase('playing')
     if (resetGlobals) this.resetGlobalsState()
@@ -983,6 +1106,7 @@ export class GraphRuntime {
       if (this.state.callStack.length > 0) {
         const frame = this.state.callStack.pop() as CallFrame
         if (node) this.runExit(node)
+        // 弹帧对 BGM **什么都不做**（§4.2 末行）：层不绑 `callStack`，照 D5 一直播。
         this.returningTo.add(frame.callerNodeId) // 弹回容器时跳过 subFlow 再下钻
         this.switchGraph(frame.returnGraph)
         this.activeBlueprintId = frame.returnBlueprintId

@@ -1,7 +1,7 @@
 /**
  * nodia demo —— 出厂数据在 `demo/nodia.graph.json`（完整 `GraphLibraryDocument`：
  * 根 meta + graph + manifest.packs，含主蓝图）。
- * 方案 id/内容与 `nodia-scheme-overlays.ts` 对齐；`ensureBuiltinSchemes` 仅补缺失（含画廊方案）。
+ * 自定义覆盖物目录默认留空；画廊/Nodia 方案仍保留为可手动挂载的预设。
  *
  * 运行时/编辑进入优先级：localStorage 草稿/版本 > 本 demo。重置 = 回到本 demo。
  * game 目录下的 `scenarios.graph.json` 由运行时自动落盘，不在此管理。
@@ -11,7 +11,7 @@ import demoJson from './nodia.graph.json'
 import { ensureBuiltinSchemes } from './builtin-schemes'
 import { normalizeDocument } from '../persist/blueprint-project'
 
-/** 图 JSON + 固化界面方案（缺失才补）；规范化保证根 graph ↔ manifest.packs[main]。 */
+/** 图 JSON + 基础覆盖物；规范化保证根 graph ↔ manifest.packs[main]。 */
 function withDemoSchemes(doc: GraphLibraryDocument): GraphLibraryDocument {
   return normalizeDocument({
     ...doc,

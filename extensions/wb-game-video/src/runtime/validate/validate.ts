@@ -25,6 +25,11 @@ export interface ValidateOpts {
   items?: Iterable<string>
   /** scenario.ui.overlays —— 展开 OverlayNode 做 component / handle 校验。 */
   overlays?: Record<string, Overlay>
+  /**
+   * `assets/manifest` 里 `kind: 'audio'` 的资产 id 表，用于校验 bgm.ref 能否解析。
+   * 缺省 = 调用方没有资产表 → 只能给 warn（见 checkBgm）。
+   */
+  audioAssets?: Iterable<string>
 }
 
 /** 保留字 handle（default = 默认推进）由 edge 声明、非某 component 产出，始终合法。 */
@@ -134,6 +139,211 @@ function checkInstantCycle(graph: GameGraph, overlays: Record<string, Overlay> |
   for (const id of instant) if ((color.get(id) ?? WHITE) === WHITE) dfs(id)
   if (found) {
     issues.push({ level: 'warn', code: 'cycle.instant', msg: '存在纯瞬时环（全无演出/交互 + 无条件边），运行时可能触发 anti-runaway 中断' })
+  }
+}
+
+const BGM_MODES = new Set(['push', 'replace', 'stop'])
+
+/**
+ * BGM 配置落在哪儿 —— 两处的 schema 不同（`NodeBgm` vs `DocumentBgm`），同一个键换个位置就是死键：
+ * 只有节点有 `mode` / `restart`（作用域语义），只有文档床有 `loop`。
+ */
+type BgmPosition = 'node' | 'doc'
+
+/** 节点作用域独有的键 → 落到文档床上一律不生效（见 checkBgm 的 `bgm.key.ignored`）。 */
+const NODE_ONLY_BGM_KEYS = ['mode', 'restart'] as const
+/** 文档床独有的键：`engine.applyNodeBgm` 逐字段构造 apply 入参、不展开落盘对象 → 节点恒 loop。 */
+const DOC_ONLY_BGM_KEYS = ['loop'] as const
+
+/**
+ * 校验一处 BGM 配置（`doc.bgm` 或 `node.data.bgm`，SPEC §3.3）。
+ *
+ * 读**原始值**而不是 `getNodeBgm`：runtime 对非法形状（非对象 / ref 空串）静默丢弃 →
+ * 作者只会听到「没响」，正是这里要 fail-loud 的场景。
+ * `volume` 直接写 `HTMLAudioElement`、fade 直接进定时器，两者都不在下游 clamp。
+ *
+ * v2 的新语义（`mode: 'stop'` 免 ref）**只在节点级成立**，所以本函数收 `position`：文档床没有
+ * `mode`，`engine.applyDocBgm` 只看 `doc.ref`，于是 `scenario.bgm = { mode: 'stop' }` 落地是
+ * 「静音起局」而不是作者以为的「结束音乐」——豁免跟着带到文档级，这条就静默通过了。
+ */
+function checkBgm(
+  raw: unknown,
+  at: string,
+  audio: Set<string> | undefined,
+  issues: Issue[],
+  position: BgmPosition,
+): void {
+  if (raw == null) return
+  const b = (typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
+
+  // 「结束当前音乐」那一条不引入曲子 → 免 ref，且**给了也忽略**（§3.3 首行）：runtime 的 stop 分支
+  // 压根不读 ref，连「能不能解析」都是伪问题。面板切到 stop 时会把 ref 收掉（见 patchNodeBgm）。
+  const isStop = position === 'node' && b.mode === 'stop'
+  const ref = b.ref
+  if (!isStop && (typeof ref !== 'string' || ref.trim().length === 0)) {
+    issues.push({
+      level: 'error',
+      code: 'bgm.ref.empty',
+      msg: position === 'node'
+        ? "bgm.ref 必须是非空字符串（只有 mode: 'stop' 那一条可以不带；否则 runtime 静默丢弃该 bgm 配置）"
+        : 'bgm.ref 必须是非空字符串（否则 runtime 静默丢弃该 bgm 配置）',
+      at,
+    })
+  }
+  if (b.volume !== undefined && (typeof b.volume !== 'number' || !Number.isFinite(b.volume) || b.volume < 0 || b.volume > 1)) {
+    issues.push({ level: 'error', code: 'bgm.volume.range', msg: `bgm.volume '${String(b.volume)}' 越界（须是 [0, 1] 内的数字）`, at })
+  }
+  for (const key of ['fadeInMs', 'fadeOutMs'] as const) {
+    const v = b[key]
+    if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v) || v < 0)) {
+      issues.push({ level: 'error', code: 'bgm.fade.negative', msg: `bgm.${key} '${String(v)}' 非法（须是 ≥ 0 的数字）`, at })
+    }
+  }
+  // mode / restart 的**值**只在节点级判：文档床上它们是死键，由下面那条 warn 一次说完，
+  // 否则同一个键既被说「这里没用」又被说「值不对」，作者不知道该改哪个。
+  if (position === 'node') {
+    if (b.mode !== undefined && !BGM_MODES.has(b.mode as string)) {
+      issues.push({ level: 'error', code: 'bgm.mode.unknown', msg: `bgm.mode '${String(b.mode)}' 非法（只能是 push | replace | stop）`, at })
+    }
+    // `normalizeFrame` 对 `restart` 只做 `?? false`：`'false'` / `1` 这类值一路 truthy 进帧，
+    // 作者写的字面意思与跑出来的行为相反，且全程无报错 → 只能 fail-loud。
+    if (b.restart !== undefined && typeof b.restart !== 'boolean') {
+      issues.push({ level: 'error', code: 'bgm.flag.type', msg: `bgm.restart '${String(b.restart)}' 非法（只能是 true / false）`, at })
+    }
+    // `stop` 分支压根不读 ref（SPEC §3.3「给了也忽略」），留着它作者会以为
+    // 这条 stop 之后播的是这首。面板不会写出这种形状（`patchNodeBgm` 把 stop 折叠成独占一条）。
+    if (isStop && b.ref !== undefined) {
+      issues.push({
+        level: 'warn',
+        code: 'bgm.ref.ignored',
+        msg: "bgm.ref 在 mode: 'stop' 上不生效（那一条只结束当前层，不引入曲子）",
+        at,
+      })
+    }
+  }
+  // 放错位置的键：不会跑坏（runtime 压根不转发），但作者以为配了个这里不存在的功能 → 点名说清。
+  const misplaced = (position === 'node' ? DOC_ONLY_BGM_KEYS : NODE_ONLY_BGM_KEYS).filter((k) => b[k] !== undefined)
+  if (misplaced.length > 0) {
+    issues.push({
+      level: 'warn',
+      code: 'bgm.key.ignored',
+      msg: position === 'node'
+        ? `bgm.${misplaced.join(' / ')} 是文档床（scenario.bgm）独有字段，节点上不生效`
+        : `bgm.${misplaced.join(' / ')} 是节点作用域独有字段，文档床上不生效`,
+      at,
+    })
+  }
+  // ref 解析：与 media / 道具引用同级只给 warn —— 目前还没有把 audio 写进 assets/manifest 的链路，
+  // error 会红掉每张合法图。日后 audio 资产落盘后再升级。
+  if (!isStop && typeof ref === 'string' && ref.trim().length > 0) {
+    if (!audio) {
+      issues.push({ level: 'warn', code: 'bgm.ref.unresolved', msg: `bgm.ref '${ref}' 无 audio 资产表可校验（壳层能否 resolve 未知）`, at })
+    } else if (!audio.has(ref)) {
+      issues.push({ level: 'warn', code: 'bgm.ref.unresolved', msg: `bgm.ref '${ref}' 未在 assets/manifest 的 audio 资产里找到`, at })
+    }
+  }
+}
+
+/**
+ * 强连通分量（Tarjan）。判「谁和谁在同一个环区」用：分量内任意两点互相到得了，
+ * 单点分量只有带自环时才算环。悬空 target 会被当成一个到不了任何地方的点（悬空边另有 error）。
+ */
+function stronglyConnectedComponents(graph: GameGraph): string[][] {
+  const adj = new Map<string, string[]>()
+  for (const e of graph.edges) {
+    const list = adj.get(e.source) ?? []
+    list.push(e.target)
+    adj.set(e.source, list)
+  }
+  const index = new Map<string, number>()
+  const low = new Map<string, number>()
+  const onStack = new Set<string>()
+  const stack: string[] = []
+  const out: string[][] = []
+  let counter = 0
+  const connect = (u: string): void => {
+    index.set(u, counter)
+    low.set(u, counter)
+    counter += 1
+    stack.push(u)
+    onStack.add(u)
+    for (const v of adj.get(u) ?? []) {
+      if (!index.has(v)) {
+        connect(v)
+        low.set(u, Math.min(low.get(u)!, low.get(v)!))
+      } else if (onStack.has(v)) {
+        low.set(u, Math.min(low.get(u)!, index.get(v)!))
+      }
+    }
+    if (low.get(u) !== index.get(u)) return
+    const comp: string[] = []
+    for (;;) {
+      const w = stack.pop()!
+      onStack.delete(w)
+      comp.push(w)
+      if (w === u) break
+    }
+    out.push(comp)
+  }
+  for (const n of graph.nodes) if (!index.has(n.id)) connect(n.id)
+  return out
+}
+
+/**
+ * 环内叠层告警：一个环区里有 **≥2 个各自起播**（`push`，含缺省）的 bgm 节点，且环内没有任何
+ * `mode: 'stop'` —— 每转一圈栈就多叠几层，作者听到的症状是
+ * 「『结束当前音乐』没反应」（那条 stop 只退回上一圈的同一首）。
+ *
+ * 运行时**刻意不合并**这些层：层是作者明写的「记住上一首」（D8），替他合并等于作废他的配置。
+ * 所以这条规则是产品侧的补偿——静态期能看出来的事，不该留给耳朵去查。
+ *
+ * 判据的取舍（都是为了不误报、宁可漏报）：
+ * - 只数 `push`：`replace` 换栈顶不加深栈（引擎的 owner 守卫也保证同一节点回环不叠层），
+ *   把它算进来会红掉「同场切 BOSS 曲」这种正确写法。
+ * - 环区 = 强连通分量：分量内两个 push 节点**未必**落在同一个具体环上（例如 8 字形共用一个
+ *   枢纽节点的两个环，各自只有一个 push 节点）→ 这种情况会**误报**一条 warn。
+ * - **收层的 `stop` 在被调用的包里时同样误报**，而且这条落在推荐路径上：`enter`(push) →
+ *   `combat`(容器，自己也 push) → `enter` 这种环，只要 `combat` 指向的包在自己的出口终端上写了
+ *   `mode: 'stop'`（SPEC §6.2 现在把这条当作包自洽的正统写法），运行时每圈都收得干净、栈深恒定，
+ *   但 `hasEnd` 只看**正在校验的这张图**上的节点，看不见包里那句 stop → 照样报一条 warn。
+ *   与下一条是同一个信息缺口的两面：validator 手上只有一张孤立 graph，没有 `manifest.packs`。
+ * - 只看单张图：跨蓝图的环（容器反复下钻同一个包）看不见 → **漏报**。
+ *   最坏的一种是「包漏播 + 环里另有一个 pusher」：每圈叠两层且无上限，这里静默
+ *   （包内的 pusher 在另一张图里，主图容器节点自身没配 `bgm` → 环里只数得出 1 个 pusher）。
+ *   见 SPEC §9 风险表与 `engine.bgm.test.ts` 的「漏播在循环里会逐圈叠加」。
+ * - 环内任一节点有 `stop` 就闭嘴：`stop` 是**唯一**能在局内结束一层的手段，它不保证收得干净
+ *   （那条 stop 可能被条件边绕过），但这条规则的目的是提醒「你可能没写结束」，作者写了就不该再吵。
+ *   反过来，环里只靠「出了这个子流程」来收层的图**收不住**（弹帧不动 BGM 栈）→ 照报不误。
+ */
+function checkBgmStackingCycle(graph: GameGraph, issues: Issue[]): void {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const order = new Map(graph.nodes.map((n, i) => [n.id, i]))
+  const selfLooped = new Set(graph.edges.filter((e) => e.source === e.target).map((e) => e.source))
+  for (const comp of stronglyConnectedComponents(graph)) {
+    if (comp.length < 2 && !selfLooped.has(comp[0]!)) continue
+    const pushers: string[] = []
+    let hasEnd = false
+    for (const id of comp) {
+      const raw = (byId.get(id)?.data as { bgm?: unknown } | undefined)?.bgm
+      if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const b = raw as Record<string, unknown>
+      if (b.mode === 'stop') {
+        hasEnd = true
+        continue
+      }
+      if ((b.mode === undefined || b.mode === 'push') && typeof b.ref === 'string' && b.ref.trim().length > 0) {
+        pushers.push(id)
+      }
+    }
+    if (hasEnd || pushers.length < 2) continue
+    pushers.sort((a, z) => (order.get(a) ?? 0) - (order.get(z) ?? 0))
+    issues.push({
+      level: 'warn',
+      code: 'bgm.cycle.stacking',
+      msg: `环里有多个节点各自起播 bgm（${pushers.join(' / ')}）且环内没有 mode: 'stop'：`
+        + '每转一圈都会多叠一层，之后的「结束当前音乐」只会退回上一圈那一首（听起来像没反应）',
+      at: pushers[0],
+    })
   }
 }
 
@@ -269,6 +479,13 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
     }
   }
 
+  // 7) 节点作用域 BGM 配置（SPEC §3.3）；容器节点（subFlow / subFlowPack）走同一条路。
+  const audio = opts?.audioAssets ? new Set(opts.audioAssets) : undefined
+  for (const n of graph.nodes) {
+    checkBgm((n.data as { bgm?: unknown }).bgm, `node:${n.id}.bgm`, audio, issues, 'node')
+  }
+  checkBgmStackingCycle(graph, issues)
+
   return issues
 }
 
@@ -292,15 +509,21 @@ function mutatesAttr(value: unknown, attr: string): boolean {
 }
 
 /**
- * 校验整份 GameScenario：graph 结构 + 致死 attr 无出口 warning。
+ * 校验整份 GameScenario：graph 结构 + 致死 attr 无出口 warning + 文档默认床轨。
  * load / 保存前应走这里（fail-loud：error 级禁止静默降级）。
+ *
+ * @param opts 可选资产表：有 audio 资产 id 时才能判定 `bgm.ref` 是否可解析。
  */
-export function validateScenario(scenario: GameScenario): Issue[] {
+export function validateScenario(scenario: GameScenario, opts?: Pick<ValidateOpts, 'audioAssets'>): Issue[] {
   const issues = validateGraph(scenario.graph, {
     entities: Object.keys(scenario.entities ?? {}),
     vars: Object.keys(scenario.variables ?? {}),
     overlays: scenario.ui?.overlays,
+    audioAssets: opts?.audioAssets,
   })
+
+  // 文档默认床轨（`doc.bgm`）—— 与节点级同规则；节点级在 validateGraph 里。
+  checkBgm(scenario.bgm, 'doc.bgm', opts?.audioAssets ? new Set(opts.audioAssets) : undefined, issues, 'doc')
 
   const zeroable = new Set<string>(['hp'])
   for (const ent of Object.values(scenario.entities ?? {})) {

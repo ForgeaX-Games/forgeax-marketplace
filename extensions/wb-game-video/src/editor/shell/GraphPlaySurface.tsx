@@ -7,7 +7,7 @@
  * 实时高亮当前节点/已走边，点节点=jump 执行，只读（不改图、不出节点配置）。
  * 数据来自共享 graphScenario store（与蓝图/视频/界面/规则同源）。
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { GameScenario, GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
@@ -16,7 +16,7 @@ import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/player
 import { getComponent } from '../../runtime/registry/component-registry'
 import { bootEditorSkins } from '../init'
 import { resolveMediaSrc } from './media'
-import { GameStage, useClipPerformanceEnd } from '../../runtime/play'
+import { BgmPlayer, GameStage, useClipPerformanceEnd } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
 import { useRevealOnScopeChange } from './useRevealOnScopeChange'
@@ -130,6 +130,8 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     })) ?? [],
     [snap?.currentNodeId, game, restartKey, entitySig],
   )
+  /** 床轨解析器（引擎只抛资产 id，URL 归壳层）；稳定引用，避免每帧让 BgmPlayer 重跑 effect。 */
+  const resolveBgm = useCallback((id: string | undefined) => resolveMediaSrc(id, game), [game])
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clip?.nodeId, restartKey)
 
   useEffect(() => {
@@ -232,6 +234,10 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       onFocus={() => claimPlayerFocus(rootRef.current)}
       style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden', outline: 'none' }}
     >
+      {/* 床轨：独立音频通道（视频恒 muted）。按 restartKey 重挂 —— 新会话的 `bgm` 快照从 null 起，
+          「还没发过指令」不是停播令，若不重挂，重开会把上一局的曲子拖进新局。 */}
+      <BgmPlayer key={restartKey} bgm={snap?.bgm ?? null} resolveAsset={resolveBgm} />
+
       {/* 演出画面 + 叠层：共享 runtime/play 的 GameStage（视频舞台锚定内容矩形，HUD/QTE/交互随视频走）。 */}
       <GameStage
         videoSrc={videoSrc}

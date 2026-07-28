@@ -9,7 +9,7 @@
  *
  * 渲染帧交给共享的 <GameStage>;这里只管会话生命周期 + 根容器/焦点/占位。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GameScenario } from '../schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../engine/session'
 import { PlayerRootContext, type SkinCtx } from '../component-host/rendererRegistry'
@@ -17,6 +17,7 @@ import { registerBuiltins } from '../component-host'
 import { claimPlayerFocus, releasePlayerFocus } from '../input/playerFocus'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { GameStage } from './GameStage'
+import { BgmPlayer } from './BgmPlayer'
 
 /** 媒体解析注入契约:节点媒体 id → 可播 url(宿主实现)。 */
 export type ResolveAsset = (mediaId: string | undefined, game: string) => string | undefined
@@ -46,6 +47,8 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
     })),
     [session, snap.currentNodeId, game, resolveAsset],
   )
+  // 床轨与视频共用同一个宿主解析器（audio id 走同一 assets/manifest 路径）；BgmPlayer 只吃单参签名。
+  const resolveBgm = useCallback((id: string | undefined) => resolveAsset(id, game), [resolveAsset, game])
 
   useEffect(() => {
     const el = rootRef.current
@@ -76,6 +79,8 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
         onFocus={() => claimPlayerFocus(rootRef.current)}
         style={{ position: 'relative', width: '100%', height: '100%', background: '#000', color: '#fff', outline: 'none' }}
       >
+        {/* 床轨：独立音频通道，与 <video muted> 无关；无 UI。 */}
+        <BgmPlayer bgm={snap.bgm} resolveAsset={resolveBgm} />
         <GameStage
           videoSrc={videoSrc}
           clip={snap.clip}

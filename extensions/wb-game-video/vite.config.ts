@@ -87,8 +87,8 @@ const GVA_ROUTE_PREFIX = '/__gva__'
 
 /**
  * 素材层读端点（磁盘权威 = `.forgeax/games/<slug>/assets/`，写方=服务端 gen:* 工具）：
- *   GET /__gva__/assets?game=slug[&kind=video|image]   → { assets: MediaAsset[] }
- *   GET /__gva__/media/<id>?game=slug                   → 流式回二进制（支持 Range，便于视频拖播）
+ *   GET /__gva__/assets?game=slug[&kind=video|image|audio] → { assets: MediaAsset[] }
+ *   GET /__gva__/media/<id>?game=slug                      → 流式回二进制（支持 Range，便于视频拖播 / 床轨解码）
  * 无 `.forgeax/games` 工程根或无 slug 时 assets 返回空、media 404。
  */
 function gameVideoAssetsPlugin(): Plugin {
@@ -110,7 +110,7 @@ function gameVideoAssetsPlugin(): Plugin {
           if (path === '/assets' && method === 'GET') {
             if (!dir) return sendJson(res, 200, { assets: [] })
             const kindParam = url.searchParams.get('kind')
-            const kind = kindParam === 'video' || kindParam === 'image' ? (kindParam as MediaKind) : undefined
+            const kind = kindParam === 'video' || kindParam === 'image' || kindParam === 'audio' ? (kindParam as MediaKind) : undefined
             return sendJson(res, 200, { assets: listAssets(dir, kind ? { kind } : undefined) })
           }
 

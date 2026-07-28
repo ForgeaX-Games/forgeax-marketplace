@@ -3,13 +3,13 @@
  * GraphStudio 编辑当前选中蓝图。主蓝图（游戏入口）置顶且不可重命名/删除/设为入口；
  * 子蓝图被其它蓝图引用时删除会被拦截（见 store `deleteBlueprint`）。
  *
- * 新建不用系统弹窗：点标题栏「＋」→ 按钮旁浮出输入（fixed，躲过列表 overflow），
+ * 新建 / 重命名不用系统弹窗：点「＋」或 ✎ → 按钮旁浮出输入（fixed，躲过列表 overflow），
  * Enter 确认 / Esc·点外 取消。标题冲突时保留浮层并提示。
- * 无依赖删除走内联 ConfirmDialog；有依赖 / 主蓝图仍 alert 拦截。
+ * 无依赖删除走按钮旁 popConfirm；有依赖 / 主蓝图仍 alert 拦截。
  */
 import {
-  useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
-  type CSSProperties, type KeyboardEvent,
+  useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type CSSProperties,
 } from 'react'
 import type { BlueprintDoc } from '../../runtime/schema/graph-schema'
 import { blueprintsReferencing } from '../../graph/edit/blueprint-refs'
@@ -38,70 +38,16 @@ export function blueprintListItems(
   return items
 }
 
-function ConfirmDialog({
-  title,
-  message,
-  confirmLabel,
-  onConfirm,
-  onCancel,
-  restoreFocus,
-}: {
-  title: string
-  message: string
-  confirmLabel: string
-  onConfirm: () => void
-  onCancel: () => void
-  restoreFocus: HTMLElement | null
-}): JSX.Element {
-  const titleId = useId()
-  const descriptionId = useId()
-  const cancelRef = useRef<HTMLButtonElement | null>(null)
-  const confirmRef = useRef<HTMLButtonElement | null>(null)
-
-  useEffect(() => {
-    cancelRef.current?.focus()
-    return () => {
-      restoreFocus?.focus()
-    }
-  }, [restoreFocus])
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      onCancel()
-      return
-    }
-    if (event.key !== 'Tab') return
-    const active = document.activeElement
-    if (event.shiftKey && active === cancelRef.current) {
-      event.preventDefault()
-      confirmRef.current?.focus()
-    } else if (!event.shiftKey && active === confirmRef.current) {
-      event.preventDefault()
-      cancelRef.current?.focus()
-    }
+/** fixed 贴触发按钮右侧（躲过 .gc-list overflow:hidden）。 */
+function placeBeside(trigger: HTMLElement | null): CSSProperties | null {
+  if (!trigger) return null
+  const r = trigger.getBoundingClientRect()
+  return {
+    position: 'fixed',
+    top: r.top + r.height / 2,
+    left: r.right + 8,
+    transform: 'translateY(-50%)',
   }
-
-  return (
-    <div className="val-dialog-backdrop" role="presentation" onClick={onCancel}>
-      <div
-        className="val-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        onKeyDown={onKeyDown}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id={titleId}>{title}</h2>
-        <p id={descriptionId} style={{ whiteSpace: 'pre-wrap' }}>{message}</p>
-        <div className="val-dialog-actions">
-          <button ref={cancelRef} type="button" onClick={onCancel}>取消</button>
-          <button ref={confirmRef} type="button" onClick={onConfirm}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 export function BlueprintLibraryView(): JSX.Element {
@@ -123,17 +69,42 @@ export function BlueprintLibraryView(): JSX.Element {
   const composing = draftName !== null
   const composeRootRef = useRef<HTMLDivElement | null>(null)
   const composeInputRef = useRef<HTMLInputElement | null>(null)
-  const [popStyle, setPopStyle] = useState<CSSProperties | null>(null)
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-  const deleteTriggerRef = useRef<HTMLElement | null>(null)
+  const composeTriggerRef = useRef<HTMLElement | null>(null)
+  const [composePopStyle, setComposePopStyle] = useState<CSSProperties | null>(null)
 
-  const openCompose = () => {
-    setComposeError(null)
-    setDraftName('新蓝图')
-  }
+  /** 行内重命名浮层。 */
+  const [renameId, setRenameId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const renameRootRef = useRef<HTMLDivElement | null>(null)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
+  const renameTriggerRef = useRef<HTMLElement | null>(null)
+  const [renamePopStyle, setRenamePopStyle] = useState<CSSProperties | null>(null)
+
+  /** 行内删除 popConfirm。 */
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const deleteRootRef = useRef<HTMLDivElement | null>(null)
+  const deleteTriggerRef = useRef<HTMLElement | null>(null)
+  const [deletePopStyle, setDeletePopStyle] = useState<CSSProperties | null>(null)
+
   const cancelCompose = () => {
     setDraftName(null)
     setComposeError(null)
+  }
+  const cancelRename = () => {
+    setRenameId(null)
+    setRenameDraft('')
+    setRenameError(null)
+  }
+  const cancelDelete = () => {
+    setPendingDeleteId(null)
+  }
+
+  const openCompose = () => {
+    cancelRename()
+    cancelDelete()
+    setComposeError(null)
+    setDraftName('新蓝图')
   }
   const confirmCompose = () => {
     const t = draftName?.trim()
@@ -148,30 +119,98 @@ export function BlueprintLibraryView(): JSX.Element {
     cancelCompose()
   }
 
-  // 贴「＋」右侧定位（fixed，避免 .gc-list overflow:hidden 裁切）。
+  const openRename = (id: string, trigger: HTMLElement) => {
+    cancelCompose()
+    cancelDelete()
+    renameTriggerRef.current = trigger
+    setRenameError(null)
+    setRenameId(id)
+    setRenameDraft(blueprints[id]?.title ?? '')
+  }
+  const confirmRename = () => {
+    if (!renameId) return
+    const t = renameDraft.trim()
+    if (!t) { cancelRename(); return }
+    const r = rename(renameId, t)
+    if (!r.ok && r.reason === 'duplicate_title') {
+      setRenameError(DUPLICATE_TITLE_MSG)
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+      return
+    }
+    cancelRename()
+  }
+
+  const openDelete = (id: string, trigger: HTMLElement) => {
+    if (id === mainId) {
+      alert('主蓝图不可删')
+      return
+    }
+    const refs = blueprintsReferencing(authoringProject(), id)
+    if (refs.length) {
+      alert(`被引用，无法删除：${refs.join(', ')}`)
+      return
+    }
+    cancelCompose()
+    cancelRename()
+    deleteTriggerRef.current = trigger
+    setPendingDeleteId(id)
+  }
+  const confirmDelete = () => {
+    if (!pendingDeleteId) return
+    const r = del(pendingDeleteId)
+    cancelDelete()
+    if (!r.ok) {
+      alert(
+        r.blockedBy?.includes('__main__')
+          ? '主蓝图不可删'
+          : `被引用，无法删除：${r.blockedBy?.join(', ')}`,
+      )
+    }
+  }
+
+  // 贴触发钮右侧定位（fixed）。
   useLayoutEffect(() => {
-    if (!composing) { setPopStyle(null); return }
+    if (!composing) { setComposePopStyle(null); return }
     const place = () => {
-      const btn = composeRootRef.current?.querySelector('.gc-list-add')
+      const btn = composeTriggerRef.current
+        ?? composeRootRef.current?.querySelector('.gc-list-add')
       if (!(btn instanceof HTMLElement)) return
-      const r = btn.getBoundingClientRect()
-      setPopStyle({
-        position: 'fixed',
-        top: r.top + r.height / 2,
-        left: r.right + 8,
-        transform: 'translateY(-50%)',
-      })
+      composeTriggerRef.current = btn
+      setComposePopStyle(placeBeside(btn))
     }
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
   }, [composing])
 
+  useLayoutEffect(() => {
+    if (!renameId) { setRenamePopStyle(null); return }
+    const place = () => setRenamePopStyle(placeBeside(renameTriggerRef.current))
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [renameId])
+
+  useLayoutEffect(() => {
+    if (!pendingDeleteId) { setDeletePopStyle(null); return }
+    const place = () => setDeletePopStyle(placeBeside(deleteTriggerRef.current))
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [pendingDeleteId])
+
   useEffect(() => {
     if (!composing) return
     composeInputRef.current?.focus()
     composeInputRef.current?.select()
   }, [composing])
+
+  useEffect(() => {
+    if (!renameId) return
+    renameInputRef.current?.focus()
+    renameInputRef.current?.select()
+  }, [renameId])
 
   useEffect(() => {
     if (!composing) return
@@ -183,39 +222,35 @@ export function BlueprintLibraryView(): JSX.Element {
     return () => document.removeEventListener('pointerdown', onPointer)
   }, [composing])
 
-  const handleRename = (id: string) => {
-    const t = prompt('重命名', blueprints[id]?.title)
-    if (!t?.trim()) return
-    const r = rename(id, t)
-    if (!r.ok && r.reason === 'duplicate_title') alert(DUPLICATE_TITLE_MSG)
-  }
-
-  const handleDelete = (id: string, trigger: HTMLElement | null) => {
-    if (id === mainId) {
-      alert('主蓝图不可删')
-      return
+  useEffect(() => {
+    if (!renameId) return
+    const onPointer = (e: PointerEvent) => {
+      const root = renameRootRef.current
+      if (root && !root.contains(e.target as Node)) cancelRename()
     }
-    const refs = blueprintsReferencing(authoringProject(), id)
-    if (refs.length) {
-      alert(`被引用，无法删除：${refs.join(', ')}`)
-      return
-    }
-    deleteTriggerRef.current = trigger
-    setPendingDeleteId(id)
-  }
+    document.addEventListener('pointerdown', onPointer)
+    return () => document.removeEventListener('pointerdown', onPointer)
+  }, [renameId])
 
-  const confirmDelete = () => {
+  useEffect(() => {
     if (!pendingDeleteId) return
-    const r = del(pendingDeleteId)
-    setPendingDeleteId(null)
-    if (!r.ok) {
-      alert(
-        r.blockedBy?.includes('__main__')
-          ? '主蓝图不可删'
-          : `被引用，无法删除：${r.blockedBy?.join(', ')}`,
-      )
+    const onPointer = (e: PointerEvent) => {
+      const root = deleteRootRef.current
+      if (root && !root.contains(e.target as Node)) cancelDelete()
     }
-  }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        cancelDelete()
+      }
+    }
+    document.addEventListener('pointerdown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pendingDeleteId])
 
   const pendingTitle = pendingDeleteId ? (blueprints[pendingDeleteId]?.title ?? pendingDeleteId) : ''
 
@@ -239,12 +274,12 @@ export function BlueprintLibraryView(): JSX.Element {
             >
               ＋
             </button>
-            {composing && popStyle && (
+            {composing && composePopStyle && (
               <div
                 className="gc-list-compose-pop"
                 role="dialog"
                 aria-label="新建蓝图"
-                style={popStyle}
+                style={composePopStyle}
               >
                 <input
                   ref={composeInputRef}
@@ -274,16 +309,87 @@ export function BlueprintLibraryView(): JSX.Element {
         renderRowActions={(id) =>
           id === mainId ? null : (
             <>
-              <button type="button" className="gc-row-act" title="重命名" onClick={() => handleRename(id)}>✎</button>
-              <button type="button" className="gc-row-act" title="设为入口" onClick={() => setMain(id)}>⌂</button>
-              <button
-                type="button"
-                className="gc-row-act is-danger"
-                title="删除"
-                onClick={(e) => handleDelete(id, e.currentTarget)}
+              <div
+                className="gc-row-act-anchor"
+                ref={renameId === id ? renameRootRef : undefined}
               >
-                🗑
-              </button>
+                <button
+                  type="button"
+                  className={`gc-row-act${renameId === id ? ' is-on' : ''}`}
+                  title="重命名"
+                  aria-expanded={renameId === id}
+                  aria-haspopup="dialog"
+                  onClick={(e) => {
+                    if (renameId === id) cancelRename()
+                    else openRename(id, e.currentTarget)
+                  }}
+                >
+                  ✎
+                </button>
+                {renameId === id && renamePopStyle && (
+                  <div
+                    className="gc-list-compose-pop"
+                    role="dialog"
+                    aria-label="重命名蓝图"
+                    style={renamePopStyle}
+                  >
+                    <input
+                      ref={renameInputRef}
+                      value={renameDraft}
+                      placeholder="蓝图名称"
+                      aria-label="蓝图名称"
+                      aria-invalid={!!renameError}
+                      onChange={(e) => {
+                        setRenameDraft(e.target.value)
+                        if (renameError) setRenameError(null)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); confirmRename() }
+                        else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+                      }}
+                    />
+                    <button type="button" className="gc-list-compose-ok" onClick={confirmRename}>确定</button>
+                    {renameError && (
+                      <div className="gc-list-compose-error" role="alert">{renameError}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button type="button" className="gc-row-act" title="设为入口" onClick={() => setMain(id)}>⌂</button>
+              <div
+                className="gc-row-act-anchor"
+                ref={pendingDeleteId === id ? deleteRootRef : undefined}
+              >
+                <button
+                  type="button"
+                  className={`gc-row-act is-danger${pendingDeleteId === id ? ' is-on' : ''}`}
+                  title="删除"
+                  aria-expanded={pendingDeleteId === id}
+                  aria-haspopup="dialog"
+                  onClick={(e) => {
+                    if (pendingDeleteId === id) cancelDelete()
+                    else openDelete(id, e.currentTarget)
+                  }}
+                >
+                  🗑
+                </button>
+                {pendingDeleteId === id && deletePopStyle && (
+                  <div
+                    className="gc-list-compose-pop gc-list-confirm-pop"
+                    role="dialog"
+                    aria-label="删除蓝图"
+                    style={deletePopStyle}
+                  >
+                    <div className="gc-list-confirm-msg">
+                      确定删除「{pendingTitle}」？此操作不可撤销。
+                    </div>
+                    <div className="gc-list-confirm-actions">
+                      <button type="button" onClick={cancelDelete}>取消</button>
+                      <button type="button" className="is-danger" onClick={confirmDelete}>确认删除</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )
         }
@@ -293,16 +399,6 @@ export function BlueprintLibraryView(): JSX.Element {
           </div>
         )}
       />
-      {pendingDeleteId && (
-        <ConfirmDialog
-          title="删除蓝图"
-          message={`确定删除「${pendingTitle}」？此操作不可撤销。`}
-          confirmLabel="确认删除"
-          onConfirm={confirmDelete}
-          onCancel={() => setPendingDeleteId(null)}
-          restoreFocus={deleteTriggerRef.current}
-        />
-      )}
     </div>
   )
 }

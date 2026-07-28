@@ -12,6 +12,7 @@ import type { ComponentRegistry } from '../registry/component-registry'
 import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../component-host/components'
 import type { SkinRegistry } from '../component-host/rendererRegistry'
 import type { RuntimeDirective } from './directives'
+import type { BgmPlaybackCommand } from './bgm-stack'
 
 /** GraphSession 构造选项：可注入隔离注册表；缺省每局新建核心组件/Skin 表。 */
 export interface GraphSessionOptions {
@@ -34,6 +35,12 @@ function logLine(d: RuntimeDirective): string | undefined {
       return `✦ ${d.component}`
     case 'routeInfo':
       return `↳ 走「${d.via}」→ ${d.target}：${d.reason}`
+    // 床轨的失败样子是「没声」/「点了结束没反应」，光看节点流水看不出所以然；这一行是唯一的线索。
+    // `restart: false` = 同一首接着播（战斗多回合靠它不断曲），值得和「重头起播」分开显示。
+    case 'bgm':
+      return d.ref === null
+        ? '♪ 停播'
+        : `♪ ${d.restart ? '起播' : '续播'} ${d.ref}`
     case 'log':
       return d.message
     default:
@@ -89,10 +96,33 @@ export interface CallStackFrameSnap {
   callerNodeId: string
   title?: string
 }
+/**
+ * 快照里的床轨指令 = `BgmPlaybackCommand` + **指令序号**。
+ *
+ * `seq` 存在的唯一理由：`bgm` 是**事件**（「现在换成这样播」），快照是**状态**，而同一条事件
+ * 可以逐字段相同——`restart: true` 的回合循环每轮都发一条一模一样的重开指令。壳层要分辨
+ * 「引擎又发了一条」与「同一条快照又渲染了一遍」，引用不行（快照过 `postMessage`
+ * 序列化后每次都是新对象），字段也不行（上面那条），只有序号行。
+ */
+export interface BgmSnapshot extends BgmPlaybackCommand {
+  seq: number
+}
+
 export interface SessionSnapshot {
   phase: string
   currentNodeId: string | null
   clip?: ClipSnap
+  /**
+   * 床轨此刻该怎么响（= 最近一条 `bgm` 指令的载荷，去掉 type tag、加上 `seq`）。**会话级**：
+   * 与 `hud` 同寿，不随 `playClip` / overlay 清理，直到下一条 `bgm` 指令为止。
+   *
+   * - `null` = 本局还没发过任何 `bgm` 指令（静音起局，见 SPEC §3.1 缺省）。壳层什么也别做——
+   *   别拿它当停播令去建音频元素。
+   * - 非 `null` 且 `ref === null` = **显式停播**（栈清空 / 弹回静音）：只有 `fadeOutMs` 有意义，
+   *   把正响的那条淡出。这条与上面那条 `null` 的区别就是「淡出谁」有没有人交代。
+   * - 非 `null` 且有 `ref` = 该 ref 正在（或应当）响；`restart: false` 表示同曲续播，别动播放头。
+   */
+  bgm: BgmSnapshot | null
   overlayMounts: OverlayMountSnap[]
   hud: HudSnap
   /** 进入当前节点所走的边 + 命中条件（含实时值）；起始节点为 undefined。 */
@@ -112,6 +142,8 @@ export class GraphSession {
   private readonly nodesById: Map<string, GameNode>
   private readonly blueprintTitles: Map<string, string>
   private pendingEntryReason: string | undefined
+  /** 已发出的 `bgm` 指令条数；本局单调递增，作快照里那条指令的身份（见 BgmSnapshot）。 */
+  private bgmSeq = 0
 
   constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
     // 默认 = 核心契约 + 皮肤包契约（同文件 ComponentDef）；调用方自带 components 则假定已装全。
@@ -138,6 +170,7 @@ export class GraphSession {
     return {
       phase: this.runtime.state.phase,
       currentNodeId: this.runtime.state.currentNodeId,
+      bgm: null,
       overlayMounts: [],
       hud: this.readHud(),
       visited: [],
@@ -259,6 +292,14 @@ export class GraphSession {
           }
           this.snapshot.overlayMounts = this.snapshot.overlayMounts.filter((m) => m.children.length > 0)
           break
+        case 'bgm': {
+          // 会话级：这里**只**换床轨，不碰 clip / overlayMounts；反之 playClip 也不许清它。
+          // `seq` 每条 +1：字段相同的两条重开指令得让壳层看出是两次（见 BgmSnapshot）。
+          const { type: _type, ...cmd } = d
+          this.bgmSeq += 1
+          this.snapshot.bgm = { ...cmd, seq: this.bgmSeq }
+          break
+        }
         case 'log':
           this.snapshot.log.push(d.message)
           break

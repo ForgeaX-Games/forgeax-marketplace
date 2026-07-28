@@ -87,7 +87,7 @@ export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): 
       target: e.target,
       sourceHandle: `source:${e.sourceHandle ?? 'default'}`,
       targetHandle: 'target:in',
-      label: e.data?.label ?? flowHandleDisplay(e.sourceHandle ?? 'default'),
+      label: flowHandleDisplay(e.sourceHandle ?? 'default'),
     })),
   }
 }

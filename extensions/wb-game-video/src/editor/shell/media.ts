@@ -2,9 +2,11 @@
  * Resolves a node media reference to a playable URL.
  *  - Existing http/blob/data/absolute URLs pass through unchanged.
  *  - Bundled zhandou basenames resolve first, including legacy `m-` refs.
- *  - Generated `a-vid-*` resources use the shared `/__gva__/media/:id` endpoint.
- *  - Remaining stable ids use the Kino content endpoint.
- * Uploaded images use the shared resource API; generated registry assets remain on `/__gva__`.
+ *  - Shared-registry ids (`a-<tag>-*`, see makeAssetId) use `/__gva__/media/:id` — **any kind**,
+ *    audio included (BGM SPEC 决策 A: 床轨与 video/image 同 resolve, 引擎只抛 id).
+ *  - Remaining stable ids use the Kino content endpoint (video-only service).
+ * Uploaded images use the shared resource API; image and generation registry operations
+ * continue to use `/__gva__`.
  */
 import { zhandouUrl } from '../assets/catalog'
 import {
@@ -13,7 +15,8 @@ import {
   MAX_KINO_RESOURCE_PAGE_SIZE,
   type KinoVideoClient,
 } from '../assets/kino-api'
-import type { MediaAsset, StyleAxes } from '../assets/registry-types'
+import { fetchRegistryAssets } from '../assets/registry-assets'
+import type { MediaAsset, MediaKind, StyleAxes } from '../assets/registry-types'
 import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 let defaultKinoClient: KinoVideoClient | undefined
@@ -28,6 +31,13 @@ export function kinoVideoContentUrl(resourceId: string, gameId: string): string 
   return kinoClient().playbackUrl(resourceId, gameId)
 }
 
+/**
+ * 共享素材层自产资产 id 的形状（`makeAssetId` = `a-<tag>-<t>-<r>`）。按**形状**而非 kind 分流：
+ * 解析器手里只有一个 id（引擎不传 kind），而 registry 里的 video / image / audio 播放地址同构
+ * （`/__gva__/media/<id>`）——所以别按 kind 过滤，否则床轨 id 会掉进只认视频的 Kino 端点。
+ */
+const REGISTRY_ASSET_ID = /^a-[a-z]+-/
+
 export function resolveMediaSrc(ref: string | undefined, game?: string): string | undefined {
   if (!ref) return undefined
   if (/^(https?:|blob:|data:)/.test(ref)) return ref
@@ -37,7 +47,7 @@ export function resolveMediaSrc(ref: string | undefined, game?: string): string 
   const local = zhandouUrl(bare)
   if (local) return local
   if (!game) return undefined
-  if (ref.startsWith('a-vid-')) return registryMediaUrl(ref, game)
+  if (REGISTRY_ASSET_ID.test(ref)) return registryMediaUrl(ref, game)
   return kinoVideoContentUrl(ref, game)
 }
 
@@ -142,17 +152,14 @@ export async function getKinoVideoResource(game: string, resourceId: string) {
   }
 }
 
-/** 列共享素材层原始 MediaAsset（AssetBoard / 占位卡用）；离线/无端点返回 []。 */
-export async function listRegistryAssets(game?: string, kind?: 'video' | 'image'): Promise<MediaAsset[]> {
+/**
+ * 列共享素材层原始 MediaAsset（`GraphVideoView` 的素材列表 / 占位卡用）；离线/无端点返回 []。
+ * 需要把失败**报出来**的候选查询（如 BGM）用 `fetchRegistryAssets`，别在这里加 error 出参：
+ * 这些调用点全都是「有就画、没有就空着」，多一条错误状态只会长出一堆用不上的分支。
+ */
+export async function listRegistryAssets(game?: string, kind?: MediaKind): Promise<MediaAsset[]> {
   try {
-    const params = new URLSearchParams()
-    if (game) params.set('game', game)
-    if (kind) params.set('kind', kind)
-    const qs = params.toString()
-    const r = await pluginFetch(`/__gva__/assets${qs ? `?${qs}` : ''}`)
-    if (!r.ok) return []
-    const j = (await r.json()) as { assets?: MediaAsset[] }
-    return Array.isArray(j.assets) ? j.assets : []
+    return await fetchRegistryAssets(game, kind)
   } catch {
     return []
   }
