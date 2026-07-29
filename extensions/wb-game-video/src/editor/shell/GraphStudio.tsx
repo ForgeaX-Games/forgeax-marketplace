@@ -74,6 +74,11 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
 const PREVIEW_W_KEY = 'wb-game-video.nodePanel.previewW'
 const PREVIEW_W_MIN = 340
 const FORM_W_MIN = 400
+/**
+ * 预览区展开/收起：**默认收起**（配置面板占地方，多数时候只改表单）。状态是全局一份而非按节点存——
+ * 换节点沿用上次的选择。持久化到 localStorage，跨会话保持。
+ */
+const PREVIEW_OPEN_KEY = 'wb-game-video.nodePanel.previewOpen'
 
 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
@@ -140,6 +145,17 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     const v = Number(window.localStorage.getItem(PREVIEW_W_KEY))
     return Number.isFinite(v) && v >= PREVIEW_W_MIN ? v : 500
   })
+  // 预览区是否展开：缺省（无键）= 收起；换节点不重置，沿用上次选择。
+  const [previewOpen, setPreviewOpen] = useState<boolean>(
+    () => typeof window !== 'undefined' && window.localStorage.getItem(PREVIEW_OPEN_KEY) === '1',
+  )
+  const togglePreview = useCallback(() => {
+    setPreviewOpen((open) => {
+      const next = !open
+      if (typeof window !== 'undefined') window.localStorage.setItem(PREVIEW_OPEN_KEY, next ? '1' : '0')
+      return next
+    })
+  }, [])
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [panelW, setPanelW] = useState(0)
   const canvasHostRef = useRef<HTMLDivElement | null>(null)
@@ -589,7 +605,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           ref={panelRef}
           style={{
             // 宽度上限 = 主区 80%：graph iframe 被调小时面板跟着收缩，给画布留至少 20% 可视区。
-            width: 'clamp(960px, 66vw, 1380px)',
+            // 预览收起时只留表单宽度——否则表单会被拉到 960px，面板照旧占地方，收起就白收了。
+            width: previewOpen ? 'clamp(960px, 66vw, 1380px)' : `clamp(${FORM_W_MIN}px, 30vw, 560px)`,
             maxWidth: '80%',
             flexShrink: 0,
             display: 'flex',
@@ -604,7 +621,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           </div>
           {/* 内容区：预览 + 表单各有最小宽度（340 / 400）；面板被 80% 上限压到更窄时横向滚动兜底。 */}
           <div style={{ flex: 1, minHeight: 0, display: 'flex', overflowX: 'auto' }}>
-            {selectedNode ? (
+            {selectedNode && previewOpen ? (
               <>
                 <div
                   style={{
@@ -650,6 +667,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 formulas={formulas}
                 focusedMountId={focusedMountId}
                 onFocusMount={setFocusedMountId}
+                previewOpen={previewOpen}
+                onTogglePreview={togglePreview}
                 onChange={setCanvasGraph}
                 onPacksChange={setPacks}
                 onEnsureOverlay={(overlay) => {

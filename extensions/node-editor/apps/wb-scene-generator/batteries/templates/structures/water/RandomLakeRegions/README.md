@@ -28,7 +28,7 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_0` | scene | 湖泊产物（主产物） | → `tree_merge.item_N`（汇总） |
+| `out_0` | scene | Scene 整树汇总口（含湖泊） | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` |
 | `out_1` | scene | **Rest** 剩余空地 | → 下一组 `in_0`（链式 Rest） |
 | `out_2` | scene | **Lake** 湖泊 | 一般不接（out_0 已是主产物） |
 | `out_3` | string | LakePath（路径句柄） | 一般不接 |

@@ -55,6 +55,7 @@ const CSS = `
 .alp-image { width: min(100%, 640px); max-height: 58dvh; object-fit: contain; border: 1px solid var(--color-border-subtle); border-radius: 8px; background: var(--color-background-canvas); }
 .alp-audio { width: min(100%, 640px); }
 .alp-preview-icon,.alp-empty { display: grid; min-height: 160px; width: min(100%, 640px); place-items: center; border: 1px dashed var(--color-border-default); border-radius: 8px; color: var(--color-text-tertiary); }
+.alp-font-preview { color: var(--color-text-primary); font-family: var(--font-sans); font-size: 64px; }
 .alp-meta { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .alp-meta > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 8px; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-background-elevated); }
 .alp-meta span { color: var(--color-text-tertiary); font-size: 10px; }

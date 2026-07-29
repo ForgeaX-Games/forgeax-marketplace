@@ -28,7 +28,18 @@ describe('buildBakeLayersFromExecutionResult', () => {
   it('projects a scene port item into DFS-ordered bake layers with asset metadata', () => {
     let g = emptyGraph()
     const houseAdd = addChildren(g, ROOT_ID, [
-      { name: 'House', content: volumeFromCells(cells(4, 'wall')), attributes: { asset_name: '橡木屋', asset_type: 'object' } },
+      {
+        name: 'House',
+        content: volumeFromCells([
+          { x: 0, y: 0, z: 0, token: 'wall', state: { instanceId: 'house-1', role: 'anchor' } },
+          ...cells(3, 'wall').map((cell, i) => ({ ...cell, x: i + 1 })),
+        ]),
+        attributes: {
+          asset_name: '橡木屋',
+          asset_alias: '[武侠][建筑][橡木屋][][][][asset][16]',
+          asset_type: 'object',
+        },
+      },
     ])
     g = houseAdd.graph
     const houseId = houseAdd.ids[0]!
@@ -62,13 +73,14 @@ describe('buildBakeLayersFromExecutionResult', () => {
       nodePath: '/House',
       nodeName: 'House',
       assetName: '橡木屋',
+      assetAlias: '[武侠][建筑][橡木屋][][][][asset][16]',
       assetType: 'object',
     })
     expect(layers[0]!.cells).toEqual([
-      { x: 0, y: 0, z: 0 },
-      { x: 1, y: 0, z: 0 },
-      { x: 2, y: 0, z: 0 },
-      { x: 3, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0, token: 'wall', state: { instanceId: 'house-1', role: 'anchor' } },
+      { x: 1, y: 0, z: 0, token: 'wall' },
+      { x: 2, y: 0, z: 0, token: 'wall' },
+      { x: 3, y: 0, z: 0, token: 'wall' },
     ])
     expect(layers[1]).toMatchObject({ nodePath: '/House/Roof', nodeName: 'Roof', assetName: '屋顶' })
   })

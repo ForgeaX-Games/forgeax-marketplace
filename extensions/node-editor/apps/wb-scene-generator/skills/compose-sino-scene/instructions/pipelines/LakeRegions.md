@@ -27,9 +27,9 @@
 
 | 端口名 | 类型 | label | 说明 | 典型去向 |
 |--------|------|-------|------|---------|
-| `out_4` | scene | `Lake` | 湖泊产物（**主产物，不是 `out_0`**） | 用 `appendMergeItem`（或 `{"label":"Lake"}`）接入 `aw_m0_merge`，不要手动算 `item_N`/`portCount` |
-| `out_0` | scene | `Rest` | 剩余区域（**不是 `out_1`**——旧文档端口号错位） | 下一组 `in_1`(Scene)（链式） |
-| `out_3` | scene | `Scene` | 整棵合并后场景树 | 调试 / 汇总根 |
+| `out_4` | scene | `Lake` | 湖泊产物（**主产物**） | 调试 / 领域引用 |
+| `out_0` | scene | `Rest` | 剩余区域 | 下一组 `in_1`(Scene)（链式） |
+| `out_3` | scene | `Scene` | 整棵合并后场景树 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_3" }`） |
 | `out_5` | string | `LakePath` | 湖泊路径句柄 | 一般不接 |
 | `out_6` | string | `RestPath` | Rest 路径句柄 | 一般不接 |
 | `out_1`/`out_2` | grid/number | 无 label（`hidden: true`） | 内部散点/计数中间值 | 不接 |
@@ -41,5 +41,5 @@
 ## 5. 管线效果描述
 
 - 在剩余空地挖湖，产水体图层（名 = `AssetName`(`in_14`) 文本，如 `水面`），数量随 `Points`(`in_2`) 锚点数（推断）。
-- `out_0`(Rest) 继续给后续农田/植被链式使用；`out_4`(Lake) 才是主产物，用 `appendMergeItem` 接入 `aw_m0_merge`。
+- `out_0`(Rest) 继续给后续农田/植被链式使用并记录为 `restAnchor`；`out_4`(Lake) 是领域细化口；只有 `out_3`(Scene) 可用 `appendMergeItem` 接入 `aw_m0_merge`。
 - 与 `IslandRegions` 的区别：LakeRegions 是在空地上**挖水**（产水体主产物 + 陆地 Rest）；IslandRegions 是在区域里**造陆**（产岛屿陆地主产物 + 水域 Rest）。

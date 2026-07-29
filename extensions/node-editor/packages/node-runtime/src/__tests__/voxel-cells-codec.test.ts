@@ -60,6 +60,32 @@ describe('voxel-cells-codec', () => {
     expect(expandPayload(compressed)).toEqual(scene)
   })
 
+  it('calls .toJSON() instead of walking a class instance\'s private fields', () => {
+    class MockPersistentMap {
+      // Private-looking internal fields that must NEVER leak into the output —
+      // only the flattened toJSON() shape should be serialized.
+      private root = { fake: 'trie-internals' }
+      private size = 1
+      toJSON(): Record<string, { name: string; cells: typeof sampleCells }> {
+        return { id1: { name: 'Layer', cells: sampleCells } }
+      }
+    }
+    const scene = { graph: new MockPersistentMap(), focus: 'id1' }
+    const compressed = compressPayload(scene) as {
+      graph: Record<string, { name: string; cells: VoxelCellsCompactV1 }>
+      focus: string
+    }
+    expect(compressed.graph).not.toHaveProperty('root')
+    expect(compressed.graph).not.toHaveProperty('size')
+    expect(compressed.graph.id1?.name).toBe('Layer')
+    // The `cells` field nested inside the toJSON() output must still get compressed.
+    expect(compressed.graph.id1?.cells.__voxelCells).toBe(1)
+    expect(expandPayload(compressed)).toEqual({
+      graph: { id1: { name: 'Layer', cells: sampleCells } },
+      focus: 'id1',
+    })
+  })
+
   it('shrinks serialized size versus verbose {x,y,z,token} objects', () => {
     const cells = Array.from({ length: 5000 }, (_, i) => ({
       x: i % 100,

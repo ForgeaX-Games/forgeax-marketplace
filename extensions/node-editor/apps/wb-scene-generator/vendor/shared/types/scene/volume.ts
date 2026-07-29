@@ -250,7 +250,9 @@ export function volumeFromCells(cells: Iterable<Cell>): Volume {
   if (uniformToken !== null && allNoState && list.length === capacity) {
     return uniformVolume(bbox, uniformToken);
   }
-  if (list.length / capacity >= DENSE_FILL_THRESHOLD) {
+  // Dense volumes encode token ids only; state-bearing cells must stay sparse or
+  // instance/anchor metadata is silently lost during scene projection.
+  if (allNoState && list.length / capacity >= DENSE_FILL_THRESHOLD) {
     return denseVolumeFromCells(bbox, list);
   }
   return sparseVolumeFromCells(list);

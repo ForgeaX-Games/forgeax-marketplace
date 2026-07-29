@@ -315,15 +315,6 @@ function objectFootprintAnchorGrid(cells: readonly BakedCell[]): { x: number; y:
   }
 }
 
-/** BuildingStructures interior floors: many same-z cells on one layer with no instanceId. */
-function isMultiCellFlatFloor(cells: readonly BakedCell[]): boolean {
-  if (cells.length <= 1) return false
-  const z0 = cells[0]!.z
-  if (!cells.every((c) => c.z === z0)) return false
-  const positions = new Set(cells.map((c) => `${c.x},${c.y}`))
-  return positions.size === cells.length
-}
-
 function buildManifest(bundleId: string, generatedAt: Date): CookedScene['manifest'] {
   return {
     schemaVersion: '3.0',
@@ -543,55 +534,6 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     return id
   }
 
-  // ── Object → terrain-stack tile encoding ─────────────────────────────────
-  // The shipped viewer paints the per-cell terrain stack in ELEVATION-ASCENDING
-  // order (drawCellList per cellsByGroup[elev], elev ASC), then ALL `objects[]`
-  // strictly last. So an object emitted through `objects[]` can NEVER be occluded
-  // by terrain — it always paints on top (the ambulance "floating over the walls"
-  // defect). To make the UNMODIFIED viewer reproduce the renderer's terrain↔object
-  // occlusion (e.g. the ambulance seated in a wall pocket, IMAGE 2), we emit the
-  // object's billboard sprite INTO the terrain stack as a whole-sheet terrain tile
-  // at the object's elevation: a wall voxel at a HIGHER elevation then paints in a
-  // later group and overdraws the object exactly like it overdraws lower terrain.
-  //
-  // Geometry parity: drawTerrainTile and drawObjectSprite use the IDENTICAL anchor
-  // math (anchorX=(x+0.5)*16, imgX=anchorX − pivot.x*w, imgY=anchorY −
-  // (1−pivot.y)*h); they differ ONLY by drawObjectSprite's PPU scale = 16/ppu.
-  // For ppu===16 objects (ambulance/buildings/most decorations) scale===1, so a
-  // terrain tile renders pixel-identically to the object sprite — the placement
-  // fix (verbatim anchor pivot) is preserved. ppu!==16 objects (e.g. pickup PPU=32)
-  // would need pre-scaling the atlas bitmap, which the terrain pipeline can't do,
-  // so those stay in `objects[]` (small ground items where terrain occlusion is
-  // not the visible concern).
-  const objectTerrainTemplateId = new Map<string, string>()
-  const registerObjectTerrainTemplate = (typeName: string, meta: AliasMeta | undefined): string | null => {
-    if (!meta?.alias) return null
-    const ppu = meta.ppu ?? 16
-    if (ppu !== 16) return null
-    const cached = objectTerrainTemplateId.get(typeName)
-    if (cached) return cached
-    const templateId = `obj__${slug(typeName)}`
-    const id = nextTerrainTileId++
-    terrainAtlasInputs.push({
-      id,
-      role: 'terrain',
-      name: templateId,
-      alias: meta.alias,
-      ...(meta.widthPx ? { widthPx: meta.widthPx } : {}),
-      ...(meta.heightPx ? { heightPx: meta.heightPx } : {}),
-      ...(meta.anchorX !== undefined ? { anchorX: meta.anchorX } : {}),
-      ...(meta.anchorY !== undefined ? { anchorY: meta.anchorY } : {}),
-      collider: tsjColliderFrom(meta),
-    })
-    // Object carrier templates are pure sprite holders (no autotile rule): one
-    // graphic_id, passable defaults. The viewer resolves template_id → graphic_id
-    // → terrain-atlas rect via drawTerrainTile regardless of terrain semantics.
-    terrainTemplates[templateId] = terrainConfigFor({}, [id])
-    objectTerrainTemplateId.set(typeName, templateId)
-    return templateId
-  }
-
-
   // registered from an aliasless layer can be upgraded by a later aliased+ruled
   // layer of the same name BEFORE any cell's graphic_index is computed (cells
   // must autotile against the template's final rule, not whichever layer came
@@ -631,6 +573,13 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     if (role === 'terrain') {
       const meta = resolved
       const rule = meta?.tileType ? loadTileRule(meta.tileType) : null
+      // The Billboard Asset preview treats a tile whose declared rule cannot be
+      // loaded as an asset-mode miss. Do not substitute a whole-sheet sprite:
+      // that legacy fallback creates terrain art the preview never paints.
+      if (meta?.tileType && !rule) {
+        warnings.push(`Skipped terrain layer "${layer.nodePath}": tile rule "${meta.tileType}" is missing or invalid.`)
+        continue
+      }
       // 💡 Sheet-aware template id. Two baked layers can share a display name (e.g.
       // both "土地") yet resolve to DIFFERENT sheets (different atlas art + a
       // different transparent-variant set). The viewer keys terrain art purely by
@@ -681,13 +630,6 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     // export-reordered iteration order. The painter sort's layerIdx tiebreak must
     // use THIS index so the emitted object stack matches the renderer's.
     const rendererLayerIdx = rendererLayerIdxByPath.get(layer.nodePath) ?? 0
-    // If this object type can ride the terrain stack (ppu===16, resolvable sprite),
-    // register its carrier template once. A non-null id routes every instance below
-    // into the elevation-ordered terrain stack (so higher walls occlude it); a null
-    // id keeps the legacy `objects[]` path (always-on-top, e.g. ppu!==16 pickups).
-    const objTerrainTemplateId = registerObjectTerrainTemplate(typeName, resolved)
-    const objTags = areaTags(layer.attributes)
-
     const grouped = new Map<string, BakedCell[]>()
     const ungrouped: BakedCell[] = []
     // Preserve the renderer's intra-layer collection order: cells are collected in
@@ -706,49 +648,15 @@ export function cookBakedScene(input: CookBakedSceneInput): CookedScene {
     // export layer = one billboard sprite. Cells without instanceId belong to the
     // same layer-scoped instance — NOT one sprite per voxel.
     if (ungrouped.length > 0) {
-      if (objTerrainTemplateId && isMultiCellFlatFloor(ungrouped)) {
-        for (let i = 0; i < ungrouped.length; i++) {
-          const cell = ungrouped[i]!
-          const place = objectFootprintAnchorGrid([cell])
-          pushTerrainLayer(
-            terrainCells,
-            place.x,
-            place.y,
-            place.z,
-            objTerrainTemplateId,
-            0,
-            { y: cell.y, z: cell.z, layerIdx: rendererLayerIdx, face: 'object' },
-            objTags,
-          )
-        }
-      } else {
-        const layerInstanceId = `layer:${layer.nodePath}`
-        grouped.set(layerInstanceId, ungrouped)
-        groupFirstSeq.set(layerInstanceId, 0)
-      }
+      const layerInstanceId = `layer:${layer.nodePath}`
+      grouped.set(layerInstanceId, ungrouped)
+      groupFirstSeq.set(layerInstanceId, 0)
     }
 
     for (const [instanceId, groupCells] of grouped) {
       const place = objectFootprintAnchorGrid(groupCells)
       const footprintDepthY = Math.max(...groupCells.map((c) => c.y))
       const topZ = Math.max(...groupCells.map((c) => c.z))
-      if (objTerrainTemplateId) {
-        // Emit the object sprite INTO the terrain stack at its footprint elevation
-        // so the viewer's elevation-ascending terrain paint lets higher walls
-        // occlude it. Placement matches objectFootprintAnchorPoint + drawTerrainTile
-        // anchor math (center of footprint, front-bottom row).
-        pushTerrainLayer(
-          terrainCells,
-          place.x,
-          place.y,
-          place.z,
-          objTerrainTemplateId,
-          0,
-          { y: footprintDepthY, z: topZ, layerIdx: rendererLayerIdx, face: 'object' },
-          objTags,
-        )
-        continue
-      }
       objects.push({
         instanceId,
         typeId: typeName,

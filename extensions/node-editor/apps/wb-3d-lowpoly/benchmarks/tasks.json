@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "simple-static-object",
+      "class": "static-object",
+      "prompt": "创建一个 0.8m × 0.45m × 0.5m 的低多边形工具箱：圆角箱体、凹入提手、前侧两个搭扣；静态 GLB。",
+      "expected": {
+        "uniqueParts": [3, 8],
+        "instances": [3, 8],
+        "requiredFamilies": ["profile-or-csg", "parts-or-semantic"],
+        "pipeline": "static"
+      }
+    },
+    {
+      "id": "mechanical-assembly-10",
+      "class": "mechanical-assembly",
+      "prompt": "创建一个 10 件桌面机械夹爪：底座、转台、双臂、两夹指、丝杆、旋钮和两连接件；至少两个可动关节并给出合理限位。",
+      "expected": {
+        "uniqueParts": [8, 12],
+        "instances": [8, 12],
+        "requiredFamilies": ["parts-mechanical", "csg", "placement"],
+        "pipeline": "mechanical"
+      }
+    },
+    {
+      "id": "static-scene-24",
+      "class": "static-scene",
+      "prompt": "创建一个 24 实例的低多边形街角：2 栋店屋、6 盏路灯、8 个路桩、4 棵树、4 个长椅；复用 unique mesh，按真实 bbox 落地且不穿插。",
+      "expected": {
+        "uniqueParts": [5, 10],
+        "instances": [20, 30],
+        "requiredFamilies": ["architecture", "placement", "instancing"],
+        "pipeline": "static"
+      }
+    }
+  ]
+}

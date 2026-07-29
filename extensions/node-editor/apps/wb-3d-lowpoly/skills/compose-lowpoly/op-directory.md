@@ -11,8 +11,8 @@ Op signatures are the DSL authoring SSOT (`id = op(args)`), auto-generated from 
 | Parts + Gears（机械语义件） | 29 | [op-directory/parts-mechanical.md](op-directory/parts-mechanical.md) |
 | Architecture（建筑元素） | 10 | [op-directory/architecture.md](op-directory/architecture.md) |
 | Rig（角色骨架，bone/bone_chain/skeleton/skin） | 4 | [op-directory/rig-character.md](op-directory/rig-character.md) |
-| Assembly & Misc（part/joint/material + collision/inertial/animation/texture） | 7 | [op-directory/assembly-misc.md](op-directory/assembly-misc.md) |
+| Assembly & Placement（part/joint/material + bbox-driven placement） | 10 | [op-directory/assembly-misc.md](op-directory/assembly-misc.md) |
 
-_Total: 84 ops across 5 shards._
+_Total: 87 ops across 5 shards._
 
 > Each `executions/part-*.md` file links only the shards it needs (e.g. PART D links core + rig-character + assembly-misc, not architecture/parts-mechanical). If you are unsure which shard an op lives in, `grep` its name across `op-directory/*.md` — every op appears in exactly one shard.

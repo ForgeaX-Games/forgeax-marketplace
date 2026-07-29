@@ -26,7 +26,12 @@
 // 命名对齐仅仅停留在 prompt 文档里的"应该"。
 
 import { checkLocationNameAlignment } from './lib/locationNameGate.js'
-import { buildTopologyIssues, type TopologyGraphEdge, type TopologyGraphNode } from './lib/topologyGate.js'
+import {
+  buildTopologyIssues,
+  normalizeEdgePort,
+  type TopologyGraphEdge,
+  type TopologyGraphNode,
+} from './lib/topologyGate.js'
 import {
   cellCount,
   childrenOf,
@@ -36,6 +41,22 @@ import {
   type SceneGraph,
   type SceneNode,
 } from '../../vendor/dist/shared/types/scene/index.js'
+
+/** True if the node has at least one incident edge (not a scratch orphan). */
+function nodeHasAnyEdge(nodeId: string, edges: readonly TopologyGraphEdge[]): boolean {
+  return edges.some(
+    (e) => e.source?.nodeId === nodeId || e.target?.nodeId === nodeId,
+  )
+}
+
+/** True if this node's output is directly wired into a tree_merge item_* port. */
+function nodeFeedsMergeItem(nodeId: string, edges: readonly TopologyGraphEdge[]): boolean {
+  return edges.some((e) => {
+    if (e.source?.nodeId !== nodeId) return false
+    const port = normalizeEdgePort(e.target?.port)
+    return typeof port === 'string' && port.startsWith('item_')
+  })
+}
 
 /** Mirrors layer2/execute-node.ts ExecutionResult (kept local to avoid a dep). */
 export interface ExecutionResult {
@@ -287,9 +308,9 @@ function collectSceneNodeNamesFromSummary(summarizedOutputs: Record<string, Reco
  * always carries the structured missing-name list, never a bare boolean.
  *
  * `currentGraph` (optional): the live pipeline graph (edges + nodes) the agent
- * just executed. When supplied, this runs the three topology checks ported
- * into `lib/topologyGate.ts` (Rest-chain fan-out / illegal local tree_merge /
- * manual_points zero-default) and reports them under
+ * just executed. When supplied, this runs the topology checks in
+ * `lib/topologyGate.ts` (Rest-chain fan-out / illegal local tree_merge /
+ * domain-port direct merge / manual_points zero-default) and reports them under
  * `verification.topologyIssues` — the same "diagnose in THIS call, not the
  * next continuation round" upgrade `locationNameAlignment` already got. See
  * `lib/topologyGate.ts`'s module doc for the real production incidents this
@@ -323,6 +344,31 @@ export function summarizeExecutionResult(
 
   const status = full.status
   const structuralHints: string[] = []
+  /** Non-blocking notes (do NOT flip verification.ok). Concurrent construction
+   *  leaves orphan/_explore scratch groups and other agents' WIP on the same
+   *  project; those must not make an unrelated task's execute look failed. */
+  const advisoryHints: string[] = []
+  const graphEdges = currentGraph?.edges
+
+  const pushEmptyHint = (nodeId: string, message: string): void => {
+    // No graph context → keep legacy blocking behavior.
+    if (!graphEdges) {
+      structuralHints.push(message)
+      return
+    }
+    // Completely unwired groups (_explore_only, abandoned instantiate) — ignore.
+    if (!nodeHasAnyEdge(nodeId, graphEdges)) return
+    // Wired but not yet on the merge/export path = someone else's WIP or a
+    // later phase's chain. Advise only; do not fail this execute.
+    if (!nodeFeedsMergeItem(nodeId, graphEdges)) {
+      advisoryHints.push(
+        `[advisory·not-on-merge] ${message} — 若这不是本任务创建/接入 merge 的节点，忽略即可，禁止 deleteNode 删掉别人的组。`,
+      )
+      return
+    }
+    structuralHints.push(message)
+  }
+
   if (status === 'completed' && totalSceneCells === 0) {
     structuralHints.push(
       'execute completed but totalCellCount=0 across all ports. This is NOT template whitelist blocking. ' +
@@ -333,7 +379,8 @@ export function summarizeExecutionResult(
     for (const [nodeId, ports] of Object.entries(summarizedOutputs)) {
       const portEntries = Object.entries(ports)
       if (portEntries.length === 0) {
-        structuralHints.push(
+        pushEmptyHint(
+          nodeId,
           `Node ${nodeId} has no output ports in execute summary — likely required inputs (in_*) disconnected. ` +
           'NOT whitelist blocking. Run pipeline.get and verify edges (e.g. IslandRegions.in_1 ← manual_points.point, NOT "points").',
         )
@@ -341,8 +388,10 @@ export function summarizeExecutionResult(
       }
       for (const [portId, summary] of portEntries) {
         const ps = summary as PortSummary
-        if (portId.includes('out') && ps.itemCount === 0 && ps.branchCount === 0) {
-          structuralHints.push(
+        // Empty out = no items (branchCount may still be 1 with items:[]).
+        if (portId.includes('out') && ps.itemCount === 0) {
+          pushEmptyHint(
+            nodeId,
             `Node ${nodeId} port ${portId} is empty after completed execute — check incoming connect to this group's inputs ` +
             '(IslandRegions: in_0 scene + in_1 Points via manual_points.point or tree_merge; PickOneBuilding: in_3 Point). NOT whitelist. ' +
             'If this is a decoration template (PlaceOneDecoration/LocalPreciseDecoration/NaturalDecorationDistribution), empty output is almost ' +
@@ -383,8 +432,12 @@ export function summarizeExecutionResult(
     )
   }
 
-  const hints = [...structuralHints, ...locationHints]
+  const hints = [...structuralHints, ...locationHints, ...advisoryHints]
   const locationNamesOk = !locationRejection?.missing?.length
+  const hasStructuralFailure = structuralHints.length > 0
+  const hasLocationFailure = Boolean(locationRejection?.missing?.length)
+  const primaryFailure: 'structural' | 'location-names' | undefined =
+    hasStructuralFailure ? 'structural' : hasLocationFailure ? 'location-names' : undefined
 
   const topologyIssues = currentGraph ? buildTopologyIssues(currentGraph.edges, currentGraph.nodeById) : undefined
 
@@ -398,11 +451,11 @@ export function summarizeExecutionResult(
       : {}),
     summarized: true,
     verification: {
-      // topologyIssues 目前是非阻断 warning（不参与 ok 判定）——多步施工的中间态
-      // 触发这几项检测大概率是误报（比如还没接完全部装饰），阻断式判定留给已经
-      // 成熟的 sinoOpGate 白名单校验。ok=false 仍只看 structuralHints/地点名对齐。
+      // topologyIssues / advisoryHints 不参与 ok 判定。ok=false 只看「接入 merge
+      // 的组空输出」与地点名对齐——孤立 _explore_* 或他阶段 WIP 不得拖垮本任务。
       ok: structuralHints.length === 0 && (!hasExpectedNames || locationNamesOk),
       totalSceneCells,
+      ...(primaryFailure ? { primaryFailure } : {}),
       ...(hasExpectedNames
         ? {
             locationNameAlignment: locationRejection

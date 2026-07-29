@@ -19,6 +19,12 @@ calendar dates in the project timezone.
 ## Unreleased
 
 ### Fixed
+- **Standalone installs no longer depend on pnpm's workspace protocol.**
+  `package.json` now resolves `@forgeax/node-runtime` through the repository-local
+  `file:../../packages/node-runtime` path, so Studio's direct `bun install` can
+  install this plugin. Regression: `scripts/standalone-plugin-dependencies.test.mjs`.
+  *为什么：* Studio installs a plugin directly rather than through pnpm's
+  workspace resolver.
 - **Vite dev 默认端口改回 9575→9577（此前误抄 3d-lowpoly 的 9565/9567）。**
   `frontend/vite.config.ts`：`VITE_DEV_PORT` 默认 9575、`VITE_API_TARGET` 默认 `http://localhost:9577`。
   *为什么：* 脱离 `bun fx start` 单独 `pnpm dev` 时会与 lowpoly 抢端口或代理到错误后端，iframe 空白。

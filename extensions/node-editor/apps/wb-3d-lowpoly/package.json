@@ -14,6 +14,8 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "test:serve": "node --test scripts/serve-dist.test.mjs",
+    "test:benchmark": "node --test scripts/benchmark-telemetry.test.mjs",
+    "benchmark:telemetry": "node scripts/benchmark-telemetry.mjs",
     "hygiene": "node ../../scripts/hygiene-check.mjs",
     "smoke:screenshot": "node scripts/smoke-screenshot-plumbing.mjs",
     "north-star": "node scripts/north-star-loop.mjs",
@@ -22,7 +24,7 @@
     "serve": "node scripts/serve-dist.mjs"
   },
   "dependencies": {
-    "@forgeax/node-runtime": "workspace:*"
+    "@forgeax/node-runtime": "file:../../packages/node-runtime"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

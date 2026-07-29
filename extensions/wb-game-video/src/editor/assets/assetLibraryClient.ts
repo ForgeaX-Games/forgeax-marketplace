@@ -12,7 +12,7 @@ import {
   type UploadTransport,
 } from './video-upload'
 
-export type ManagedAssetKind = 'image' | 'audio'
+export type ManagedAssetKind = 'image' | 'audio' | 'font'
 
 export interface ManagedAsset {
   id: string
@@ -119,8 +119,10 @@ export function createKinoAssetLibraryClient(
         if (error.code === 'invalid_media_type') {
           const supported = kind === 'image'
             ? 'PNG、JPEG、WebP 或 GIF 图片'
-            : 'MP3、WAV、OGG、M4A 或 AAC 音频'
-          throw new AssetLibraryUploadError(`不支持的${kind === 'image' ? '图片' : '音频'}格式；仅支持${supported}`)
+            : kind === 'audio'
+              ? 'MP3、WAV、OGG、M4A 或 AAC 音频'
+              : 'WOFF2、WOFF、TTF 或 OTF 字体'
+          throw new AssetLibraryUploadError(`不支持的${kind === 'font' ? '字体' : kind === 'image' ? '图片' : '音频'}格式；仅支持${supported}`)
         }
         if (error.code === 'invalid_file_name') {
           throw new AssetLibraryUploadError(
@@ -151,8 +153,8 @@ export function createKinoAssetLibraryClient(
         source: resource.source,
         source_meta: resource.source_meta,
       }, requestOptions)
-      if (updated.media_type !== 'image' && updated.media_type !== 'audio') {
-        throw new AssetLibraryUploadError('只能重命名图片或音频资产')
+      if (updated.media_type !== 'image' && updated.media_type !== 'audio' && updated.media_type !== 'font') {
+        throw new AssetLibraryUploadError('只能重命名图片、音频或字体资产')
       }
       return toManagedAsset(updated, updated.media_type, client)
     },
@@ -176,7 +178,7 @@ export interface AssetLibraryController {
   remove(id: string): Promise<void>
 }
 
-const UNAVAILABLE_MESSAGE = '图片与 BGM 资源 API 尚未启用'
+const UNAVAILABLE_MESSAGE = '图片、BGM 与字体资源 API 尚未启用'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : '资产操作失败'
@@ -206,6 +208,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
       const results = await Promise.all([
         client.list(gameId, 'image', { signal: abort.signal }),
         client.list(gameId, 'audio', { signal: abort.signal }),
+        client.list(gameId, 'font', { signal: abort.signal }),
       ])
       if (!abort.signal.aborted) setItems(results.flat())
     } catch (cause) {

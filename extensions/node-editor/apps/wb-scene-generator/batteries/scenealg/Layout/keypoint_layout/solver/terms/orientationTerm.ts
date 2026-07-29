@@ -3,7 +3,7 @@
 // cone half-angle h: if c ≥ cos h the relation is satisfied (E = 0); otherwise
 // E = ½ (cos h − c)². Angle is not pinned exactly, so it does not fight clearance.
 
-import type { Term, Vec2, ProblemModel } from '../types.ts'
+import type { Term, Vec2, ProblemModel, SolverState } from '../types.ts'
 
 const EPS = 1e-9
 
@@ -11,8 +11,9 @@ export function orientationTerm(weight: number, halfAngleDeg: number): Term {
   const cosH = Math.cos((halfAngleDeg * Math.PI) / 180)
   return {
     name: 'orientation',
-    energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number {
+    energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number {
       if (weight <= 0) return 0
+      const { positions: pos } = state
       let energy = 0
       for (const rel of model.relations) {
         if (rel.kind !== 'orientation' || rel.angle === undefined) continue

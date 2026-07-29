@@ -10,6 +10,7 @@ import { nonOverlapTerm } from './terms/nonOverlapTerm.ts'
 import { containmentTerm } from './terms/containmentTerm.ts'
 import { compactnessTerm } from './terms/compactnessTerm.ts'
 import { peripheralTerm } from './terms/peripheralTerm.ts'
+import { sizePriorTerm } from './terms/sizePriorTerm.ts'
 
 export interface SolverWeights {
   clearance: number
@@ -22,6 +23,12 @@ export interface SolverWeights {
   compactness: number
   /** layoutHint.peripheral: push child toward parent rim */
   peripheral: number
+  /** Keep resizable container radii near their input reference. */
+  sizePrior: number
+  /** Strongly resist shrinking a container below its semantic input reference. */
+  undersize: number
+  /** Optional linear-area regularizer; disabled because sizePrior bounds growth. */
+  areaCost: number
 }
 
 export interface SolverConfig {
@@ -42,14 +49,17 @@ export const DEFAULT_CONFIG: SolverConfig = {
     orientation: 0.6,
     parentAverage: 0.5,
     nonOverlap: 1.2,
-    containment: 0.8,
+    containment: 4,
     compactness: 0.02,
     // Must outrank demoted adjacent(中) residual and compactness so 镇外 nodes
     // finish at the parent rim (not the pocket between hub buildings).
-    peripheral: 1.4,
+    peripheral: 20,
+    sizePrior: 20,
+    undersize: 20,
+    areaCost: 0,
   },
   orientationHalfAngleDeg: 30,
-  iterations: 800,
+  iterations: 1200,
   learningRate: 0.02,
   adam: { beta1: 0.9, beta2: 0.999, epsilon: 1e-8 },
 }
@@ -77,6 +87,7 @@ export function buildTerms(config: SolverConfig): Term[] {
     nonOverlapTerm(config.weights.nonOverlap),
     containmentTerm(config.weights.containment),
     peripheralTerm(config.weights.peripheral),
+    sizePriorTerm(config.weights.sizePrior, config.weights.undersize, config.weights.areaCost),
     compactnessTerm(config.weights.compactness),
   ]
 }

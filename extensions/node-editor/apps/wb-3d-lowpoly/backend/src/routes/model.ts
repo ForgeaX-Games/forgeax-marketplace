@@ -3,6 +3,8 @@
  *
  *   POST /api/v1/projects/:projectId/model/apply   —— 校验 + 编译成图 + 导入 + 执行 + QC，
  *        返回**紧凑回执**：错误/QC 信号定位到 DSL 行号、mesh-aware 穿模硬信号、URDF 指纹。
+ *   POST /api/v1/projects/:projectId/model/bake-batch —— 多个独立 part DSL 串行 bake，允许部分失败。
+ *   POST /api/v1/projects/:projectId/model/patch   —— sourceHash 乐观锁 + 1-based 行级增量修改。
  *   GET  /api/v1/projects/:projectId/model/get      —— 从当前图反解出等价 DSL（round-trip）。
  *
  * 设计：图执行的产物（QC / URDF）来自真实 pipeline 执行（复用 importPipelineGraph +
@@ -12,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { createHash } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { executeNode, getNodeOutput, getPipeline, importPipelineGraph, type Runtime } from '@forgeax/node-runtime'
 import { getProjectRegistry, getRuntimeForProject, getProjectDir } from '../runtime.js'
@@ -33,6 +36,54 @@ interface QcSignalOut {
   line?: number
   lines?: number[]
   ids?: string[]
+}
+
+const QC_INLINE_LIMIT = 12
+const BATCH_ITEM_LIMIT = 16
+
+function hashText(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function compactSignals<T extends QcSignalOut>(signals: readonly T[]): {
+  signals: T[]
+  total: number
+  omittedCount: number
+  byCode: Record<string, number>
+  bySeverity: Record<string, number>
+} {
+  const byCode: Record<string, number> = {}
+  const bySeverity: Record<string, number> = {}
+  for (const signal of signals) {
+    byCode[signal.code] = (byCode[signal.code] ?? 0) + 1
+    bySeverity[signal.severity] = (bySeverity[signal.severity] ?? 0) + 1
+  }
+  const rank: Record<string, number> = { error: 0, warning: 1, note: 2 }
+  const sorted = signals.slice().sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3))
+  return {
+    signals: sorted.slice(0, QC_INLINE_LIMIT),
+    total: signals.length,
+    omittedCount: Math.max(0, signals.length - QC_INLINE_LIMIT),
+    byCode,
+    bySeverity,
+  }
+}
+
+async function persistQcReport(projectId: string, report: unknown): Promise<{ path?: string; hash: string }> {
+  const json = JSON.stringify(report)
+  const hash = hashText(json)
+  const dir = await getProjectDir(projectId)
+  if (!dir) return { hash }
+  const rel = join('state', 'qc-reports', `${hash.slice(0, 20)}.json`)
+  const absolute = join(dir, rel)
+  try {
+    await mkdir(join(dir, 'state', 'qc-reports'), { recursive: true })
+    await writeFile(absolute, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+    return { path: rel, hash }
+  } catch {
+    // Advice persistence is diagnostic-only and must never change model success.
+    return { hash }
+  }
 }
 
 /** 把 DataTreeEntry[]（toJSON 形态：[{path, items:[value]}]）解出首个 item 值。 */
@@ -87,6 +138,8 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
           pipeline: { type: 'string', enum: ['static', 'mechanical', 'urdf', 'character'] },
           // string shape-id or boolean; left unconstrained to avoid ajv strict union-type warning.
           bake: {},
+          expectedDims: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+          features: { type: 'array', maxItems: 12, items: { type: 'string' } },
         },
         additionalProperties: true,
       },
@@ -101,9 +154,12 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       name?: string
       execute?: boolean
       bake?: string | boolean
+      expectedDims?: number[]
+      features?: string[]
       pipeline?: 'static' | 'mechanical' | 'urdf' | 'character'
     }
     const source = typeof body.source === 'string' ? body.source : ''
+    const sourceHash = hashText(source)
 
     // bake 模式（阶段1 单件烘焙）：bake="shape_id" 或 true（=烘最后一条语句）。
     // 追加 g_bake_part 终端而非 QC/URDF，返回 <sha>.obj + bbox，并自动登记到 parts.json。
@@ -117,7 +173,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
 
     // 编译失败（parse / 重复 id / 未映射 op）→ 只回错误，不动图
     if (!compiled.graph) {
-      return { ok: false, phase: 'compile', statements: compiled.statementNodeIds.length, errors }
+      return { ok: false, phase: 'compile', sourceHash, statements: compiled.statementNodeIds.length, errors }
     }
 
     // bake 模式：把 g_bake_part 挂到几何链末端
@@ -153,6 +209,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       return {
         ok: false,
         phase: 'import',
+        sourceHash,
         statements: compiled.statementNodeIds.length,
         errors,
         import: { reason: importRes.reason, diagnostics: importRes.diagnostics },
@@ -183,6 +240,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
         execError = { message: e instanceof Error ? e.message : String(e) }
       }
     }
+    const metrics = readMetricsSummary(rt, compiled.metricsNodeId)
 
     // bake 模式：读回 g_bake_part 产物（filename/sha/bbox），返回紧凑烘焙回执
     if (baking) {
@@ -192,6 +250,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       return {
         ok: !bakeFatal,
         mode: 'bake',
+        sourceHash,
         statements: compiled.statementNodeIds.length,
         errors,
         execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
@@ -201,8 +260,19 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
           bbox_min: readPort(rt, bakeNodeId, 'bbox_min'),
           bbox_max: readPort(rt, bakeNodeId, 'bbox_max'),
           dims: readPort(rt, bakeNodeId, 'size'),
+          vertexCount: asNumber(readPort(rt, bakeNodeId, 'vertexCount')),
+          triangleCount: asNumber(readPort(rt, bakeNodeId, 'triangleCount')),
           note: strOrUndef(readPort(rt, bakeNodeId, 'note')),
           ...(typeof bakeErr === 'string' && bakeErr ? { error: bakeErr } : {}),
+        },
+        advice: {
+          nonBlocking: true,
+          statementCount: compiled.statementNodeIds.length,
+          dims: readPort(rt, bakeNodeId, 'size'),
+          triangleCount: asNumber(readPort(rt, bakeNodeId, 'triangleCount')),
+          dimensionDelta: dimensionDelta(readPort(rt, bakeNodeId, 'size'), body.expectedDims),
+          features: Array.isArray(body.features) ? body.features.slice(0, 12) : undefined,
+          note: 'Compare dimensions and salient features with the brief; advice does not change ok.',
         },
       }
     }
@@ -213,6 +283,8 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       const skinSignals: QcSignalOut[] = Array.isArray(skinSignalsRaw)
         ? skinSignalsRaw.map((s) => mapSignalLines(s, compiled.lineByNodeId))
         : []
+      const skinBundle = compactSignals(skinSignals)
+      const skinReport = await persistQcReport(projectId, { mode: 'character', sourceHash, signals: skinSignals, metrics })
       const skinValid = readPort(rt, compiled.skinQcNodeId, 'valid') === true
       const rigErr = readPort(rt, compiled.rigNodeId, 'error')
       const rigReport = readPort(rt, compiled.rigNodeId, 'report') as { fingerprint?: unknown } | undefined
@@ -229,6 +301,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       return {
         ok: !fatal,
         mode: 'character',
+        sourceHash,
         statements: compiled.statementNodeIds.length,
         errors,
         execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
@@ -236,8 +309,10 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
           valid: skinValid,
           bones: asNumber(readPort(rt, compiled.skinQcNodeId, 'bones')),
           skins: asNumber(readPort(rt, compiled.skinQcNodeId, 'skins')),
-          signals: skinSignals,
+          ...skinBundle,
+          report: skinReport,
         },
+        metrics,
         rig: {
           fingerprint: rigReport && typeof rigReport.fingerprint === 'string' ? rigReport.fingerprint : undefined,
           boneCount: rigSpec && typeof rigSpec.boneCount === 'number' ? rigSpec.boneCount : undefined,
@@ -252,6 +327,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     const qcSignals: QcSignalOut[] = Array.isArray(qcSignalsRaw)
       ? qcSignalsRaw.map((s) => mapSignalLines(s, compiled.lineByNodeId))
       : []
+    const qcBundle = compactSignals(qcSignals)
     const qc = {
       valid: readPort(rt, compiled.qcNodeId, 'valid') === true,
       islands: asNumber(readPort(rt, compiled.qcNodeId, 'islands')),
@@ -259,7 +335,7 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       overlaps: asNumber(readPort(rt, compiled.qcNodeId, 'overlaps')),
       floating_links: asNumber(readPort(rt, compiled.qcNodeId, 'floating_links')),
       orphan_profiles: asNumber(readPort(rt, compiled.qcNodeId, 'orphan_profiles')),
-      signals: qcSignals,
+      ...qcBundle,
     }
 
     // 5) mesh-aware QC（用 parts.json 真实 bbox）+ 可执行修正建议
@@ -267,6 +343,13 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     const meshSignals: QcSignalOut[] = meshQc.signals.map((s) => ({
       ...mapMeshSignalLines(s, compiled.lineByNodeId),
     }))
+    const meshBundle = compactSignals(meshSignals)
+    const report = await persistQcReport(projectId, {
+      sourceHash,
+      qc: { ...qc, signals: qcSignals },
+      meshQc: { ...meshQc, signals: meshSignals },
+      metrics,
+    })
 
     // 静态路（static）：读回 g_to_scene 产物，返回静态回执（几何 QC + SceneSpec 指纹，无 URDF）
     if (compiled.mode === 'static') {
@@ -285,11 +368,20 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       return {
         ok: !staticFatal,
         mode: 'static',
+        sourceHash,
         statements: compiled.statementNodeIds.length,
         errors,
         execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
         qc,
-        meshQc: { clean: meshQc.clean, meshResolved: meshQc.meshResolved, signals: meshSignals },
+        meshQc: {
+          clean: meshQc.clean,
+          meshResolved: meshQc.meshResolved,
+          pairCount: meshQc.pairCount,
+          omittedCountAtSource: meshQc.omittedCount,
+          ...meshBundle,
+        },
+        metrics,
+        qualityReport: report,
         scene: {
           fingerprint: sceneReport && typeof sceneReport.fingerprint === 'string' ? sceneReport.fingerprint : undefined,
           items: sceneReport && typeof sceneReport.itemCount === 'number' ? sceneReport.itemCount : undefined,
@@ -301,7 +393,9 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     // 6) URDF 指纹（用 g_to_urdf 自带的 report.fingerprint；无则回退到 sha256(urdf)）。
     //    g_to_urdf 没有 error 端口——错误经 diagnostics(severity=error) 与节点执行 error 暴露。
     const urdfStr = readPort(rt, compiled.urdfNodeId, 'urdf')
-    const urdfReport = readPort(rt, compiled.urdfNodeId, 'report') as { fingerprint?: unknown } | undefined
+    const urdfReport = readPort(rt, compiled.urdfNodeId, 'report') as
+      | { fingerprint?: unknown; bakeFallbacks?: unknown; meshProvenance?: unknown }
+      | undefined
     const urdfDiags = readPort(rt, compiled.urdfNodeId, 'diagnostics')
     const urdfErrs = Array.isArray(urdfDiags)
       ? urdfDiags.filter((d) => d && typeof d === 'object' && (d as { severity?: unknown }).severity === 'error')
@@ -311,6 +405,9 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
       fingerprint:
         fpFromReport ?? (typeof urdfStr === 'string' ? createHash('sha256').update(urdfStr).digest('hex').slice(0, 16) : undefined),
       bytes: typeof urdfStr === 'string' ? urdfStr.length : undefined,
+      bakeFallbacks: asNumber(urdfReport?.bakeFallbacks) ?? 0,
+      meshProvenance: compactProvenance(urdfReport?.meshProvenance),
+      degraded: (asNumber(urdfReport?.bakeFallbacks) ?? 0) > 0,
       ...(urdfErrs.length
         ? { errors: urdfErrs.map((d) => String((d as { message?: unknown }).message ?? 'urdf error')) }
         : {}),
@@ -328,13 +425,163 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     return {
       ok: !fatal,
       mode: 'urdf',
+      sourceHash,
       statements: compiled.statementNodeIds.length,
       errors,
       execution: { status: execStatus, durationMs, ...(execError ? { error: execError } : {}) },
       qc,
-      meshQc: { clean: meshQc.clean, meshResolved: meshQc.meshResolved, signals: meshSignals },
+      meshQc: {
+        clean: meshQc.clean,
+        meshResolved: meshQc.meshResolved,
+        pairCount: meshQc.pairCount,
+        omittedCountAtSource: meshQc.omittedCount,
+        ...meshBundle,
+      },
+      metrics,
+      qualityReport: report,
       urdf,
     }
+  })
+
+  app.post<{ Params: ProjectParams }>(`${prefix}/bake-batch`, {
+    bodyLimit: EXECUTE_BODY_LIMIT,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['items'],
+        properties: {
+          items: { type: 'array', minItems: 1, maxItems: BATCH_ITEM_LIMIT },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
+    const { projectId } = req.params
+    const body = (req.body ?? {}) as {
+      items?: Array<{
+        name?: unknown
+        source?: unknown
+        target?: unknown
+        expectedDims?: unknown
+        features?: unknown
+      }>
+    }
+    const items = Array.isArray(body.items) ? body.items.slice(0, BATCH_ITEM_LIMIT) : []
+    const results: unknown[] = []
+    let succeeded = 0
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index]
+      const name = typeof item.name === 'string' ? item.name : `part-${index + 1}`
+      if (typeof item.source !== 'string' || !item.source.trim()) {
+        results.push({ index, name, ok: false, phase: 'validate', error: 'source must be a non-empty string' })
+        continue
+      }
+      const injected = await app.inject({
+        method: 'POST',
+        url: `/api/v1/projects/${encodeURIComponent(projectId)}/model/apply`,
+        headers: callerHeaders(req.headers),
+        payload: {
+          source: item.source,
+          name,
+          bake: typeof item.target === 'string' && item.target ? item.target : true,
+        },
+      })
+      const result = injected.json() as Record<string, unknown>
+      if (result.ok === true) succeeded++
+      const baked = result.baked as { dims?: unknown } | undefined
+      results.push({
+        index,
+        name,
+        ...result,
+        ...(Array.isArray(item.expectedDims)
+          ? { expectedDims: item.expectedDims, dimensionDelta: dimensionDelta(baked?.dims, item.expectedDims) }
+          : {}),
+        ...(Array.isArray(item.features) ? { features: item.features.slice(0, 12) } : {}),
+      })
+    }
+    return reply.send({
+      ok: succeeded === items.length,
+      partial: succeeded > 0 && succeeded < items.length,
+      count: items.length,
+      succeeded,
+      failed: items.length - succeeded,
+      results,
+    })
+  })
+
+  app.post<{ Params: ProjectParams }>(`${prefix}/patch`, {
+    bodyLimit: EXECUTE_BODY_LIMIT,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['baseHash', 'patches'],
+        properties: {
+          baseHash: { type: 'string' },
+          patches: { type: 'array', minItems: 1, maxItems: 64 },
+          name: { type: 'string' },
+          execute: { type: 'boolean' },
+          pipeline: { type: 'string', enum: ['static', 'mechanical', 'urdf', 'character'] },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
+    const { projectId } = req.params
+    const access = await ensureMutationAccess(req, projectId)
+    if (!access.ok) return reply.code(403).send({ status: 'rejected', reason: access.reason, code: access.code, projectId: access.projectId })
+    const body = (req.body ?? {}) as {
+      baseHash?: unknown
+      patches?: Array<{ line?: unknown; content?: unknown }>
+      name?: unknown
+      execute?: unknown
+      pipeline?: unknown
+    }
+    const rt = await getRuntimeForProject(projectId)
+    const snap = getPipeline(rt)
+    const currentSource = snap ? graphToDsl(snapshotNodes(snap), snapshotEdges(snap)) : ''
+    const currentHash = hashText(currentSource)
+    if (body.baseHash !== currentHash) {
+      return reply.code(409).send({
+        ok: false,
+        code: 'source-hash-conflict',
+        expectedHash: currentHash,
+        receivedHash: body.baseHash,
+        action: 'Call lowpoly:model.get and rebase the patch.',
+      })
+    }
+    const lines = currentSource ? currentSource.split(/\r?\n/u) : []
+    const replacements = new Map<number, string | null>()
+    for (const patch of Array.isArray(body.patches) ? body.patches : []) {
+      const line = Number(patch.line)
+      if (!Number.isInteger(line) || line < 1 || line > lines.length + 1 || replacements.has(line)) {
+        return reply.code(400).send({ ok: false, code: 'invalid-patch-line', line: patch.line })
+      }
+      if (patch.content !== null && typeof patch.content !== 'string') {
+        return reply.code(400).send({ ok: false, code: 'invalid-patch-content', line })
+      }
+      replacements.set(line, patch.content as string | null)
+    }
+    const nextLines: string[] = []
+    for (let line = 1; line <= lines.length; line++) {
+      if (!replacements.has(line)) nextLines.push(lines[line - 1])
+      else if (replacements.get(line) !== null) nextLines.push(replacements.get(line)!)
+    }
+    if (replacements.has(lines.length + 1) && replacements.get(lines.length + 1) !== null) {
+      nextLines.push(replacements.get(lines.length + 1)!)
+    }
+    const source = nextLines.join('\n')
+    const injected = await app.inject({
+      method: 'POST',
+      url: `/api/v1/projects/${encodeURIComponent(projectId)}/model/apply`,
+      headers: callerHeaders(req.headers),
+      payload: {
+        source,
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(typeof body.execute === 'boolean' ? { execute: body.execute } : {}),
+        ...(typeof body.pipeline === 'string' ? { pipeline: body.pipeline } : {}),
+      },
+    })
+    return reply.code(injected.statusCode).send(injected.json())
   })
 
   // 烘焙清单：廉价查询本项目已 bake 的 mesh（name → sha + bbox + dims）。
@@ -353,12 +600,12 @@ export async function registerModelRoutes(app: FastifyInstance): Promise<void> {
     if (!reg.getProject(projectId)) return reply.code(404).send({ reason: `project not found: ${projectId}` })
     const rt = await getRuntimeForProject(projectId)
     const snap = getPipeline(rt)
-    if (!snap) return { source: '', statements: 0 }
+    if (!snap) return { source: '', sourceHash: hashText(''), statements: 0 }
 
     const nodes = snapshotNodes(snap)
     const edges = snapshotEdges(snap)
     const source = graphToDsl(nodes, edges)
-    return { source, statements: nodes.filter((n) => !n.id.startsWith('__')).length }
+    return { source, sourceHash: hashText(source), statements: nodes.filter((n) => !n.id.startsWith('__')).length }
   })
 }
 
@@ -388,7 +635,33 @@ function mapMeshSignalLines(s: MeshQcSignal, lineByNodeId: Record<string, number
   }
 }
 
-async function runMeshQc(projectId: string, source: string): Promise<{ clean: boolean; meshResolved: number; signals: MeshQcSignal[] }> {
+function readMetricsSummary(rt: Runtime, nodeId: string): Record<string, unknown> {
+  if (!nodeId) return {}
+  return {
+    score: asNumber(readPort(rt, nodeId, 'score')),
+    grade: strOrUndef(readPort(rt, nodeId, 'grade')),
+    maxPenetration: asNumber(readPort(rt, nodeId, 'max_penetration')),
+    overlapRatio: asNumber(readPort(rt, nodeId, 'overlap_ratio')),
+    primitiveOnly: readPort(rt, nodeId, 'primitive_only') === true,
+    primitiveRatio: asNumber(readPort(rt, nodeId, 'primitive_ratio')),
+    triangleCount: asNumber(readPort(rt, nodeId, 'tri_count')),
+    vertexCount: asNumber(readPort(rt, nodeId, 'vertex_count')),
+    nonBlocking: true,
+  }
+}
+
+function compactProvenance(raw: unknown): { total: number; items: unknown[]; omittedCount: number } {
+  const items = Array.isArray(raw) ? raw : []
+  return { total: items.length, items: items.slice(0, 8), omittedCount: Math.max(0, items.length - 8) }
+}
+
+async function runMeshQc(projectId: string, source: string): Promise<{
+  clean: boolean
+  meshResolved: number
+  pairCount: number
+  omittedCount: number
+  signals: MeshQcSignal[]
+}> {
   try {
     const dir = await getProjectDir(projectId)
     const baked = dir ? readPartsList(join(dir, 'state')) : []
@@ -396,10 +669,33 @@ async function runMeshQc(projectId: string, source: string): Promise<{ clean: bo
     for (const p of baked) {
       if (p.filename) byFile.set(p.filename, { filename: p.filename, bbox_min: p.bbox_min, bbox_max: p.bbox_max })
     }
-    return meshAwareQc(source, byFile)
+    return meshAwareQc(source, byFile, { maxSignals: 100 })
   } catch {
-    return { clean: true, meshResolved: 0, signals: [] }
+    return { clean: true, meshResolved: 0, pairCount: 0, omittedCount: 0, signals: [] }
   }
+}
+
+function callerHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const key of [
+    'x-forgeax-caller-kind',
+    'x-forgeax-caller-agent-id',
+    'x-forgeax-caller-session-id',
+  ]) {
+    const value = headers[key]
+    if (typeof value === 'string') out[key] = value
+  }
+  return out
+}
+
+function dimensionDelta(actualRaw: unknown, expectedRaw: unknown): number[] | undefined {
+  if (!Array.isArray(actualRaw) || !Array.isArray(expectedRaw) || actualRaw.length !== 3 || expectedRaw.length !== 3) {
+    return undefined
+  }
+  const actual = actualRaw.map(Number)
+  const expected = expectedRaw.map(Number)
+  if (![...actual, ...expected].every(Number.isFinite)) return undefined
+  return actual.map((value, i) => Math.round((value - expected[i]) * 1e6) / 1e6)
 }
 
 // ── snapshot → CompiledNode/Edge 适配（model.get 反解用）────────────────────

@@ -33,6 +33,7 @@
     { "name": "ground_offset", "type": "number", "label": "着地偏移 (m)", "description": "整体最小 Z（≈0 贴地；<0 陷入；>0 悬空）", "description-en": "Overall min Z (≈0 grounded; <0 sunk; >0 floating)." },
     { "name": "dof", "type": "number", "label": "自由度", "description": "可动关节自由度总和（revolute/prismatic=1、planar=2、floating=6）", "description-en": "Total DOF of moving joints." },
     { "name": "primitive_only", "type": "bool", "label": "仅裸 primitive", "description": "模型是否全为裸 primitive（无任何富几何）", "description-en": "Whether the model is entirely bare primitives." },
+    { "name": "primitive_ratio", "type": "number", "label": "裸 primitive 占比", "description": "shape 语句中裸 primitive 的比例（0–1）", "description-en": "Ratio of bare primitives among shape statements (0–1)." },
     { "name": "tri_count", "type": "number", "label": "三角面数", "description": "烘焙后三角面数（需 bake；静态电池暂为 0）", "description-en": "Baked triangle count (needs baker; 0 in static battery)." },
     { "name": "vertex_count", "type": "number", "label": "顶点数", "description": "烘焙后顶点数（需 bake；静态电池暂为 0）", "description-en": "Baked vertex count (needs baker; 0 in static battery)." },
     { "name": "over_budget", "type": "bool", "label": "超预算", "description": "tri_count 是否超过 tri_budget", "description-en": "Whether tri_count exceeds tri_budget." }

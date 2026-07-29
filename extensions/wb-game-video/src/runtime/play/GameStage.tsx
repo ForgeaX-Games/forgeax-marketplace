@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ClipSnap, OverlayMountSnap } from '../engine/session'
 import type { SkinCtx, SkinRegistry } from '../component-host/rendererRegistry'
 import { MissingVideoNotice } from './MissingVideoNotice'
+import { refreshPlaybackUrl } from './refreshPlaybackUrl'
 import { VideoOverlayStage } from './VideoOverlayStage'
 import { useVideoContentRect } from './useVideoContentRect'
 import { videoDurationCapReached } from './videoTiming'
@@ -119,6 +120,9 @@ export function GameStage({
   const slotElements = useRef<Record<string, HTMLVideoElement | null>>({})
   const loadedSlotsRef = useRef<Set<string>>(new Set())
   const pendingPresentationRef = useRef<string | null>(null)
+  const refreshRevisionRef = useRef(0)
+  const refreshingPlaybackKeysRef = useRef<Set<string>>(new Set())
+  const retryResumeTimeRef = useRef<Map<string, number>>(new Map())
   const activeVideoRef = useRef<HTMLVideoElement | null>(null)
   const frontSlotRef = useRef<string | null>(buffer.frontId)
   const desiredKeyRef = useRef<string | null>(desiredKey)
@@ -243,6 +247,7 @@ export function GameStage({
 
   const handleLoadedData = (slot: VideoSlot, element: HTMLVideoElement): void => {
     loadedSlotsRef.current.add(slot.id)
+    refreshingPlaybackKeysRef.current.delete(slot.playback.key)
     setMissingVideoId(null)
     if (desiredKeyRef.current === slot.playback.key) {
       if (frontSlotRef.current === slot.id) {
@@ -252,6 +257,30 @@ export function GameStage({
         presentWhenFrameReady(slot, element)
       }
     }
+  }
+
+  const handleVideoError = (slot: VideoSlot, element: HTMLVideoElement): void => {
+    const { playback } = slot
+    if (desiredKeyRef.current !== playback.key || !playback.mediaId) return
+
+    if (!refreshingPlaybackKeysRef.current.has(playback.key)) {
+      const refreshedSrc = refreshPlaybackUrl(playback.src, ++refreshRevisionRef.current)
+      if (refreshedSrc) {
+        refreshingPlaybackKeysRef.current.add(playback.key)
+        retryResumeTimeRef.current.set(slot.id, element.currentTime)
+        loadedSlotsRef.current.delete(slot.id)
+        setMissingVideoId(null)
+        setBuffer((current) => ({
+          ...current,
+          slots: current.slots.map((candidate) => candidate.id === slot.id
+            ? { ...candidate, playback: { ...candidate.playback, src: refreshedSrc } }
+            : candidate),
+        }))
+        return
+      }
+    }
+
+    setMissingVideoId(playback.mediaId)
   }
 
   return (
@@ -281,6 +310,11 @@ export function GameStage({
                 loop={playback.loop}
                 onLoadedMetadata={(event) => {
                   if (desiredKeyRef.current !== playback.key) return
+                  const resumeAt = retryResumeTimeRef.current.get(slot.id)
+                  if (resumeAt !== undefined) {
+                    retryResumeTimeRef.current.delete(slot.id)
+                    if (Number.isFinite(resumeAt) && resumeAt > 0) event.currentTarget.currentTime = resumeAt
+                  }
                   setMissingVideoId(null)
                   if (isCurrentPlayback(slot.id, playback.key)) {
                     activeVideoRef.current = event.currentTarget
@@ -288,11 +322,7 @@ export function GameStage({
                   }
                 }}
                 onLoadedData={(event) => handleLoadedData(slot, event.currentTarget)}
-                onError={() => {
-                  if (desiredKeyRef.current === playback.key && playback.mediaId) {
-                    setMissingVideoId(playback.mediaId)
-                  }
-                }}
+                onError={(event) => handleVideoError(slot, event.currentTarget)}
                 onEnded={() => {
                   if (!isCurrentPlayback(slot.id, playback.key) || playback.loop) return
                   onPerformanceEnd()

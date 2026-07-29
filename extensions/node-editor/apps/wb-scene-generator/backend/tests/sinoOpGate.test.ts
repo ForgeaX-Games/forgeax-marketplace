@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  checkPlaceOneSeedOnPointMiswire,
   checkSinoOpAllowlist,
   filterComposerUtilityOps,
   isSinoBatch,
@@ -86,6 +87,49 @@ describe('checkSinoOpAllowlist', () => {
       { type: 'deleteEdge', edgeId: 'e' },
     ]
     expect(checkSinoOpAllowlist(ops)).toBeNull()
+  })
+})
+
+describe('checkPlaceOneSeedOnPointMiswire', () => {
+  it('rejects aw_m0_seed → PlaceOneDecoration.in_3 (Point port)', () => {
+    const ops = [
+      {
+        type: 'connect',
+        edgeId: 'e_bad',
+        source: { nodeId: 'aw_m0_seed', port: 'seed' },
+        target: { nodeId: 'p1d_house_1', port: 'in_3' },
+      },
+    ]
+    const nodes = {
+      p1d_house_1: {
+        id: 'p1d_house_1',
+        opId: '__group__',
+        name: 'p1d_house_1',
+        params: { __groupSourceBatteryName: 'PlaceOneDecoration' },
+      },
+    }
+    const r = checkPlaceOneSeedOnPointMiswire(ops, nodes)
+    expect(r?.reason).toMatch(/placeone-seed-miswire/)
+    expect(r?.fix).toMatch(/manual_points\.point/)
+  })
+
+  it('allows seed → NaturalDecorationDistribution.in_3', () => {
+    const ops = [
+      {
+        type: 'connect',
+        edgeId: 'e_ok',
+        source: { nodeId: 'aw_m0_seed', port: 'seed' },
+        target: { nodeId: 'ndd_1', port: 'in_3' },
+      },
+    ]
+    const nodes = {
+      ndd_1: {
+        id: 'ndd_1',
+        opId: '__group__',
+        params: { __groupSourceBatteryName: 'NaturalDecorationDistribution' },
+      },
+    }
+    expect(checkPlaceOneSeedOnPointMiswire(ops, nodes)).toBeNull()
   })
 })
 

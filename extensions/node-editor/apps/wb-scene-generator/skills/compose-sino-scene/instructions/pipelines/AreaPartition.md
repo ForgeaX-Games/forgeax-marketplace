@@ -44,8 +44,8 @@
 
 | out | 语义 | 去向 | 消费命令（白名单 opId） |
 |-----|------|------|-------------------------|
-| `out_0` | 主产物（父下挂全部分子区） | → `appendMergeItem`(`aw_m0_merge`) / 单区再施工 | 直接整体用就 `appendMergeItem`；单区：`text_panel`+`scene_focus_path`；多区扇出：`scene_focus_children` |
-| `out_1` | Zones 子树 | 仅子区 scene 直传 | 同 `out_0` |
+| `out_0` | Scene 汇总口（父下挂全部分子区） | → `appendMergeItem`(`aw_m0_merge`) | 只作整体汇总 |
+| `out_1` | Zones 子树 | 仅子区 scene 直传 | 单区：`text_panel`+`scene_focus_path`；多区扇出：`scene_focus_children`；禁止接 merge |
 | `out_2` | ZonesPath | 拼 path 参考 | `string_concat` → `scene_focus_path` |
 
 > 完整输入/输出命令示例见 [AreaPartition README](../../batteries/templates/structures/districts/AreaPartition/README.md) §如何用命令调用 / §如何用命令消费输出。

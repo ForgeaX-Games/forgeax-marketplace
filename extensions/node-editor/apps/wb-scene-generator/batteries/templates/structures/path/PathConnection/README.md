@@ -55,9 +55,9 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_1` | scene | **Path** 道路（主产物） | `tree_merge` |
+| `out_1` | scene | **Path** 道路领域产物 | 后续道路细化，禁止接 merge |
 | `out_2` | scene | **Rest** 非道路剩余 | 下一组 Scene（`out_2` 为多分支 DataTree，下游须 `scene_focus_path` 再接入） |
-| `out_0` | scene | Scene 中间态 | 调试 |
+| `out_0` | scene | **Scene** 整树汇总口 | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` |
 | `out_3` / `out_4` | string | PathPath / RestPath | 可选 |
 
 ## 推荐参数与设置考虑要素

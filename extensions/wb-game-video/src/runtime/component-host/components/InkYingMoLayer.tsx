@@ -50,6 +50,8 @@ export function inkYingMoPreset(id: string): OverlayChild {
     component: 'inkYingMo',
     layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window；不写 endMs = 持续到节点结束（抉择等玩家操作或 timeoutMs 收尾）。
+    window: { startMs: 0 },
     inputs: { ...inkYingMoDefaults },
   }
 }

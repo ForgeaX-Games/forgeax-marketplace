@@ -10,12 +10,12 @@ description: >-
 
 > aw-support 已在任务书里给齐坐标、子节点清单与模板候选。**直接用，不要重新规划。**
 
-## ⚠️ 单轮 turn 预算很紧，别浪费在读大文件/反复核对上
+## 效率：少空转、续作接着干
 
-单次任务通常在 **16 个 turn** 左右的预算内完成（运行时硬限制，超了会被强制打断，任务不算完成）。一个容器展开任务常有 3~6 个模板要接，平均下来每个模板只有 2~3 个 turn 的余量。省 turn 的关键：
-- 端口语义**先看 `instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs` 里每个端口自带的 `label`**（如 `IslandName`/`Rest`/`Scene`）——这是模板作者标注的语义名，多数情况下不需要再翻文档。只有 `label` 缺失、或需要接线配方/防呆点/数值参考时，才查「模板端口文档速查」的 `pipelines/*.md`（30~120 行）。**不要**读原始 battery JSON、**不要** glob/grep `batteries/` 目录、**不要**对同一个 groupId 反复 `pipeline.get`（一次 `summarized` 通常够用，改完再查一次 `raw` 核对即可，不要查三次）。
+`sino-constructor` 单轮预算约 **500 turn**（够做完多数容器任务）。仍不要浪费在读大文件/反复核对上：
+- 端口语义**先看 `instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs` 里每个端口自带的 `label`**（如 `IslandName`/`Rest`/`Scene`）——这是模板作者标注的语义名，多数情况下不需要再翻文档。只有 `label` 缺失、或需要接线配方/防呆点/数值参考时，才查「模板端口文档速查」的 `pipelines/*.md`（30~120 行）。**不要**读原始 battery JSON、**不要** glob/grep `batteries/` 目录、**不要**对同一个 groupId 反复 `pipeline.get`（一次 `summarized` 通常够用，改完再查一次即可）。
 - 能合并进同一次 `applyBatch`/`instantiateTemplate` 调用的操作尽量合并，减少往返。
-- 如果你收到的消息标题带**「· 续作（同 session 接着干）」**，说明上一段大概率是被 max_turns 打断的——**不是新任务**：先 `pipeline.get` 看已经建好了什么，接着做，不要重新 open 项目、不要重新读任务书、不要重复 `instantiateTemplate` 已存在的模板组。
+- 消息标题带**「· 续作（同 session 接着干）」** = **同一条会话接着上一段工具进度做**，不是新任务：一次轻量 `pipeline.get` 只核对断点 → 接着接线/execute/写报告。禁止重新 open、禁止重读完整任务书、禁止重新选型/重规划、禁止重复 `instantiateTemplate` 已存在的组。
 
 ## ⚠️ 起点锚点 —— 全程最重要的一条纪律
 
@@ -36,12 +36,13 @@ description: >-
 | **B** | `scene:pipeline.applyBatch` | **仅** connect + 工具电池（text_panel、number_const、tree_merge、manual_points…）——**不含 empty_scene** |
 
 - **禁止** `scene:templates.get` 预读组内 JSON — 端口序号**和语义**都以 `instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs` 为准：每一项形如 `{ portName: "in_3", portType: "string", label: "IslandName" }`，`label` 就是这个口的语义名，模板作者标注、不是猜的。
+- **禁止挖组内**：`instantiateTemplate` 之后**不要**为接线去查组内 `scene_focus_path` / `manual_points` / 核心算子的节点 id——那些是模板私有实现，summarized/raw/`opIdIn`/`graph.json` grep 都找不到或不该找。接线**只连组壳暴露口**（`{ label:"Point"|"Scene"|"Rest"|… }`）。需要 Point/名字/宽高时，在**组外** `createNode` `manual_points`/`text_panel`/`number_const`，再 `connect` 到该组对应 `in_*`。
 - **端口语义（哪个 in_N 是什么参数）严禁自己读原始 battery JSON 反推**——不准 `read_file`/`glob`/`grep` 任何 `batteries/**` 路径下的 `.json`/`README.md`。这些文件又大又容易读错（历史上已经因为这样把 `IslandRegions.out_2`(Rest) 当成主产物接错过——现在这种情况 `out_2` 的 `label` 会直接显示 `"Rest"`，`out_1` 显示 `"Island"`，一眼能分清）。**语义的一手来源是返回值里的 `label`**；如果某个口没有 `label`（模板作者没标，多是内部/高级口）、或你需要接线配方、防呆点、数值参考，才查下面「模板端口文档速查」链接的 `pipelines/*.md`——每份只有 30~120 行，已给出验证过的端口映射、可照抄的 applyBatch 片段、防呆点，直接照着抄。
 - **禁止** 在 applyBatch 顶层 createNode 模板组内的算子（`alg_*`/`rect_grid` 等）。
 
 ### ⚡ 2026-07-15 新增：`connect` 直接按 `label` 寻址，不用自己心算 in_N/out_N
 
-拿到 `label` 之后**不需要再对照回 `portName` 才拼 `connect`**——`applyBatch` 的 `connect` op 的 `source.port`/`target.port` 现在可以直接写 `{ "label": "Island" }`，后端会去查这个节点当前的 `exposedInputs`/`exposedOutputs`，自动解出真正的 `in_N`/`out_N`。两种写法都合法，`label` 写法更不容易因为记错编号接错线：
+拿到 `label` 之后**不需要再对照回 `portName` 才拼 `connect`**——`applyBatch` 的 `connect` op 的 `source.port`/`target.port` 可以直接写 `{ "label": "Island" }`，aw-support 自动施工任务书会给出 `{ "label": "Island", "portName": "out_1" }` 联合引用（必须一致，否则 applyBatch 拒绝）。后端会去查该节点当前的 `exposedInputs`/`exposedOutputs`，自动解出真正的 `in_N`/`out_N`：
 
 ```json
 { "type": "connect", "edgeId": "e_island_to_scene", "source": { "nodeId": "g_island", "port": { "label": "Island" } }, "target": { "nodeId": "g_next", "port": { "label": "Scene" } } }
@@ -90,12 +91,12 @@ instantiateTemplate(A) → applyBatch 连线(B) → pipeline.get 核对 → exec
 
 ## Rest 串链纪律 —— 一个任务里有多个模板时怎么接
 
-**核心原则：「上游空间」在任务内部按 Rest 链**串行**穿过每一个模板；每个模板自己「新增的内容」各自**独立**接入 `aw_m0_merge`（不要建局部 `tree_merge` 把几个模板的产物先汇总再整体接一次）。**
+**核心原则：「上游空间」在任务内部按 Rest 链**串行**穿过每一个模板；每个模板只有 **Scene 汇总口**可独立接入 `aw_m0_merge`（不要拿领域产物口或 Rest 口接 merge，也不要建局部 `tree_merge`）。**
 
 - 第 1 个模板组吃掉任务书给的 `sceneAnchor`；它产出「内容」（Island/Building/Path/Decoration…主产物）+「Rest」（剩余可用空间）。
-- 第 2 个模板组的 Scene 输入接**第 1 个的 `out_2` Rest**（须 `scene_focus_path` 聚焦的模板，先聚焦再接——看该模板的 `pipelines/*.md` 是否要求），产出自己的「内容」+ 新的 Rest。
+- 第 2 个模板组的 Scene 输入**直接**接第 1 个组壳的 **`{ label:"Rest" }` 出口**（通常 `out_2`）→ 本组 `{ label:"Scene" }`（PickOne/PlaceOne 多为 `in_1`）。**不要**在中间再插一层组外/组内 `scene_focus_path`——Rest 口已经是可消费的 Scene 子树。
 - 以此类推——**同一个 Rest 只能被下一个模板消费一次**，不能同时接给两个平行模板（fan-out 禁止），也不能回头再接给前面已经用过的 Rest。
-- 每个模板产出的「内容」（不是 Rest）**各自单独**做一次「接入 aw_m0_merge」（见下节）——一个模板一个 `appendMergeItem` op，不用自己数 `portCount`/拼 `item_N`。**不要**为了省事把 N 个模板的内容先 `tree_merge` 到一个局部节点，再整体接一次到 `aw_m0_merge`——直接对每个内容各自写一个 `appendMergeItem` 更简单也更不容易错。
+- 每个模板的 **Scene 汇总口**（`{ label:"Scene", portName:"out_N" }`）各自做一次 `appendMergeItem`（见下节）。Island/Building/Path/Decoration/Rooms/Zones 等领域口用于细化，Rest 口用于串链，二者都禁止接 merge。
 - `BuildingStructures.in_0` 只接 Building（`PickOneBuilding.out_1`），**不接 Rest**——它是建筑内构，不参与外部 Rest 链。
 - 本任务做完，若还有子节点需要**后续任务**接续施工（任务书 `requiredChildAnchors` 列出的 id），必须在施工报告里给出它们各自的产出锚点（见下文「收尾必做」），下一个任务会直接拿这个锚点续接——**不会**重新扫描全图猜测。
 
@@ -124,7 +125,9 @@ NaturalDecoration#2.out_1 ─┘
 
 **真正的技术原因**：`tree_merge` 是"全部 item 都必须有值才产出"的语义。上面 5 组里有 2 组（两个 `NaturalDecorationDistribution`）由于是从同一个 pristine 底图各自平行算的、彼此没有真实的 Rest 依赖关系，其中一路的 `out_1` 端口在 execute 摘要里根本不存在——只要 `merge_output` 的某个 `item_N` 拿到的是 undefined，**整个 `merge_output` 就完全没有输出**，进而连累 `aw_m0_merge`、`tree_flatten` 全部显示"无输出"。而 `tree_merge` 自己的 `inferredAccess`/`inferredType`/`portCount` 参数其实一直是对的——**改这几个参数改不出错，因为错的不是参数，是拓扑**。
 
-**正确接法**（见下面完整 worked example）：5 个模板要串成一条 Rest 链，只有第 1 个模板吃 `sceneAnchor`，后面每个模板都吃**前一个模板的 Rest**；5 份内容各自单独写一个 `appendMergeItem` 接入 `aw_m0_merge`（不用手动数 `portCount`/拼 `item_N`），**不建 `merge_output` 这种局部汇总节点**。
+**正确接法**（见下面完整 worked example）：多个模板串成一条 Rest 链，只有第 1 个模板吃 `sceneAnchor`，后面每个模板都吃**前一个模板的 Rest**；每组只把自己的 **Scene 汇总口**用 `appendMergeItem` 接入 `aw_m0_merge`，**不把领域口接 merge，也不建 `merge_output` 这种局部汇总节点**。
+
+**装饰阶段尤其别纠结深度**：装饰组多时按顺序一路串下去即可——能接就接，某组 Rest 空了或放不下就**跳过剩余装饰收工**；禁止为「链太深 / Rest 耗尽」反复 redesign。合理铺满优先于完美拓扑推演。
 
 > aw-support 的「检查并下一步」会跑这两项拓扑核验（同一上游端口 fan-out 给 ≥2 个模板 / 局部 tree_merge 汇总 ≥2 份模板内容），错了会在 `verification.reasons` 里直接点出具体节点 id。**2026-07-15 起同样的两项检查已经提前搬进了 `pipeline.execute` 本身**——不用等到 aw-support 下一轮续作消息才发现，本次 `execute` 调用报错时就会在 `verification.topologyIssues` 里给出（且大多数情况下 execute 会直接抛错中断，逼你先处理这个再往下走），`illegal-local-merge` 那一类甚至自带算好的 `suggestedOps`（`deleteNode` + `updateNode(portCount)` + 每份内容各自的 `connect`），**原样作为下一次 `applyBatch` 的 `ops` 提交即可，不用自己重新推导 item 编号**。**如果看到这类报错，直接照着改（或直接抄 `suggestedOps`），不要再去猜 `tree_merge` 参数**。
 
@@ -157,33 +160,37 @@ NaturalDecoration#2.out_1 ─┘
 
 ```
 sceneAnchor(aw_m0_abg.out_1)
-  → IslandRegions.in_0                              [第 1 组：吃 sceneAnchor]
-      IslandRegions.out_1(Island) ──→ appendMergeItem(aw_m0_merge)（本组内容独立接入，自动分配 item_N）
-      IslandRegions.out_2(Rest)   ──┐
-                                     ▼
-  → scene_focus_path(Rest) → PlaceOneDecoration#1.in_1  [第 2 组：吃第 1 组 Rest]
-      PlaceOneDecoration#1.out_1(Decoration) ──→ appendMergeItem(aw_m0_merge)（各自独立接入）
-      PlaceOneDecoration#1.out_2(Rest) ──┐
-                                          ▼
-  → scene_focus_path(Rest) → PlaceOneDecoration#2.in_1  [第 3 组：吃第 2 组 Rest]
-      PlaceOneDecoration#2.out_1(Decoration) ──→ appendMergeItem(aw_m0_merge)
-      PlaceOneDecoration#2.out_2(Rest) ──┐
-                                          ▼
-  → scene_focus_path(Rest) → LocalPreciseDecoration.in_1 [第 4 组：吃第 3 组 Rest]
-      LocalPreciseDecoration.out_1(Decoration) ──→ appendMergeItem(aw_m0_merge)
-      LocalPreciseDecoration.out_2(Rest) → 本任务用不到了，不接（留空即可，不算悬空错误）
+  → IslandRegions.in_0 / {label:"Scene"}            [第 1 组：吃 sceneAnchor]
+      IslandRegions.out_0 {label:"Scene"} ──→ appendMergeItem(aw_m0_merge)
+      IslandRegions.out_2 {label:"Rest"}  ──┐
+                                            ▼
+  → PlaceOneDecoration#1.in_1 {label:"Scene"}       [第 2 组：直接吃上一组 Rest 口]
+      #1.out_0 {label:"Scene"} ──→ appendMergeItem
+      #1.out_2 {label:"Rest"}  ──┐
+                                 ▼
+  → PlaceOneDecoration#2.in_1 {label:"Scene"}
+      #2.out_0 {label:"Scene"} ──→ appendMergeItem
+      #2.out_2 {label:"Rest"}  ──┐
+                                 ▼
+  → LocalPreciseDecoration.in_1 {label:"Scene"}
+      .out_0 {label:"Scene"} ──→ appendMergeItem
+      .out_2 {label:"Rest"} → 用不到可不接
+
+多栋 PickOneBuilding 同理（组外自建 manual_points/text_panel/number_const → 各组 in_*）：
+  sceneAnchor → pob_A.in_1(Scene);  pob_A.out_2(Rest) → pob_B.in_1;  pob_B.out_2 → pob_C.in_1
+  每栋 out_0(Scene) → appendMergeItem；禁止打开 pob_* 组内找 scene_focus_path。
 ```
 
 对应 4 个 `appendMergeItem` op（可以和各自的 `instantiateTemplate`/`connect` 混在同一批 `applyBatch` 里，也可以最后统一补一批）：
 
 ```json
-{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Island" } } }
-{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_DECO1>",   "port": { "label": "Decoration" } } }
-{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_DECO2>",   "port": { "label": "Decoration" } } }
-{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_LOCAL>",   "port": { "label": "Decoration" } } }
+{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Scene", "portName": "out_0" } } }
+{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_DECO1>",   "port": { "label": "Scene", "portName": "out_0" } } }
+{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_DECO2>",   "port": { "label": "Scene", "portName": "out_0" } } }
+{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_LOCAL>",   "port": { "label": "Scene", "portName": "out_0" } } }
 ```
 
-四组模板 = 四次「instantiateTemplate → 接上一组 Rest → 内容各自 `appendMergeItem` 接入 aw_m0_merge」，**没有局部 `ch_merge`，没有 `empty_scene`，不用自己算 `item_N`/`portCount`**。这是本 skill 覆盖率最高的场景，遇到"1 结构 + 多装饰"直接照抄这个顺序。
+四组模板 = 四次「instantiateTemplate → 接上一组 Rest → 本组 Scene 汇总口 `appendMergeItem` 接入 aw_m0_merge」，**没有领域口直连 merge，没有局部 `ch_merge`，没有 `empty_scene`**。这是本 skill 覆盖率最高的场景，遇到"1 结构 + 多装饰"直接照抄这个顺序。
 
 ## tree_merge params 契约
 
@@ -194,7 +201,7 @@ sceneAnchor(aw_m0_abg.out_1)
 { "inferredAccess": "item", "inferredType": "point2d", "portCount": N }
 ```
 
-## 接入根节点 aw_m0_merge（每个任务收尾必做，每个模板的「内容」各接一次）
+## 接入根节点 aw_m0_merge（每个任务收尾必做，只接 Scene 汇总口）
 
 基建已由 aw-support 搭好：`AddBaseGrid` → `tree_merge(aw_m0_merge)` → flatten → merge → output。**这是最终产物汇总口，不是你的 Scene 输入口**——你的 Scene 输入永远是任务书给的 `sceneAnchor`。
 
@@ -203,10 +210,10 @@ sceneAnchor(aw_m0_abg.out_1)
 `applyBatch` 现在有一个复合 op `appendMergeItem`，一次调用就顶原来手动的「查 portCount → updateNode+1 → connect」三步，而且**同一批 `ops` 里连续写几个也会正确地依次递增**，不会重复用同一个 `item_N`：
 
 ```json
-{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "g_island", "port": { "label": "Island" } } }
+{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "g_island", "port": { "label": "Scene", "portName": "out_0" } } }
 ```
 
-**本任务用了几个模板、产出几份「内容」（Island/Building/Path/Decoration…，不含 Rest），就写几个这样的 op**——可以放进同一个 `applyBatch` 调用（`ops` 数组里按顺序放好 N 个 `appendMergeItem`），不用攒到最后也不用自己算 `item_N` 编号。`source.port` 同样可以用 `{ "label": ... }`。
+**本任务每实例化一个需要汇总的模板，就为它的 Scene 汇总口写一个这样的 op**。`source.port` 必须是 `{ label:"Scene", portName:"out_N" }`，**不是** Island/Building/Rest/Decoration 等领域口。可以放进同一个 `applyBatch` 调用，不用自己算 `item_N` 编号。
 
 **禁止**覆盖已有 `item_*` 连接；**禁止**为了少调用几次而把多份内容先局部 `tree_merge` 再整体接一次——`appendMergeItem` 已经比那样更省事，没有理由还去搭局部 merge（见下面「Rest 串链纪律」的真实翻车案例）。
 
@@ -224,7 +231,7 @@ sceneAnchor(aw_m0_abg.out_1)
 某个 `tree_merge`/`tree_flatten`/`scene_merge_subtrees` 节点在 execute 摘要里完全没有输出时，**按下面顺序排查，第 1、2 步命中率最高，且都不需要动任何参数**：
 
 1. **查 fan-out**：这个节点的上游（或更上游的某个 Scene 端口）是不是被**同时**接给了 ≥2 个模板组的 Scene 输入？——2026-07-15 起 `execute` 会自动跑这项检查并在 `verification.topologyIssues`（`kind: "rest-fan-out"`）里直接点名，不用再自己去 `pipeline.get({ raw: true })` 数出边条数；命中就得改成 Rest 串链（见上面「Rest 串链纪律」）。
-2. **查局部 merge**：是不是自己建了一个非 `aw_m0_merge` 的 `tree_merge`，塞进了 ≥2 个模板的内容？——同样已经自动检查（`verification.topologyIssues` 里 `kind: "illegal-local-merge"`，自带 `suggestedOps` 可以直接抄）；命中就删掉那个局部节点，改成每份内容各自独立 `appendMergeItem` 到 `aw_m0_merge`。
+2. **查局部 merge / 领域口直连 merge**：是不是自己建了一个非 `aw_m0_merge` 的 `tree_merge`，或把 Island/Building/Rest/Decoration 等领域口接进了 merge？命中就删掉非法局部节点，并把各模板的 **Scene 汇总口**分别 `appendMergeItem` 到 `aw_m0_merge`。
 3. 前两项都没问题，才排查`portCount`是否和实际接入的 `item_*` 条数一致、有没有 `item_N` 悬空未接。
 4. 最后才考虑 `inferredAccess`/`inferredType` 是否写对——这两个参数出错的概率最低，**不要一上来就改它们再重跑，那样只是在瞎猜**。
 
@@ -247,9 +254,10 @@ sceneAnchor(aw_m0_abg.out_1)
 }
 ```
 
-- `childAnchors` 必须覆盖任务书 `requiredChildAnchors` 列出的**每一个**子节点 id——通常是 IslandRegions 划出的某个具体子岛（配合 `scene_focus_path` 定位）、或 PickOneBuilding 分组的 `out_1`。
+- `childAnchors` 必须覆盖任务书 `requiredChildAnchors` 列出的**每一个**子节点 id——通常是 IslandRegions 的 Island/Rest 暴露口，或 PickOneBuilding 分组的 `out_1`（Building）——都写**组壳** nodeId+port，不要写组内节点。
 - 若某个子节点没能顺利产出，仍要给出条目并在 `note` 里写明原因，不要整体漏掉字段——漏字段会导致后续任务无法解析连接点而被阻塞。
 - `usedAnchor` 用于审计，应与任务书给的 `sceneAnchor` 一致。
+- **报告里的 anchor `port` 一律写物理端口字符串**（如 `"out_1"`）。`{ "label":"Island", "portName":"out_1" }` 只用于 `applyBatch` 接线，禁止写进 `usedAnchor` / `childAnchors` / `restAnchor`，否则核验会把它判为不匹配。
 
 ### ⚠️ `note`/`说明`字段里禁止写裸英文双引号——会把整份 JSON 写坏
 
@@ -300,6 +308,8 @@ execute 时传任务书给的 `narrativeLocationNames`，确认 `verification.lo
 ## 工具电池白名单
 
 `text_panel`, `number_const`, `toggle`, `seed_control`, `string_concat`, `scene_focus_path`, `scene_focus_children`, `node_explode`, `building_footprint_mask`, `manual_points`, `tree_merge`, `tree_flatten`, `scene_merge_subtrees`, `scene_output`
+
+> **`scene_focus_path` / `scene_focus_children` 白名单 ≠ 默认要用。** Rest→Scene 串链、给 PickOne/PlaceOne 喂 Point/名字/宽高时**不要**建它们。仅任务明确要求按路径提门/提命名子区时，在**组外**创建并接到下游暴露口。
 
 **明确禁止**：`empty_scene`、`AddBaseGrid`（根节点基建已就绪，全场景只有一份）。
 

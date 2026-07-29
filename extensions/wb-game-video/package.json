@@ -32,7 +32,7 @@
     "qte"
   ],
   "scripts": {
-    "dev": "bun run --parallel dev:frontend dev:backend",
+    "dev": "bun scripts/dev.ts",
     "dev:frontend": "vite --host",
     "dev:backend": "tsup --watch",
     "build": "bun run build:frontend && bun run build:backend && bun run build:standalone && bun run check:release",

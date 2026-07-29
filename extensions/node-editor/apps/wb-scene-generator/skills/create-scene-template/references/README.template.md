@@ -11,7 +11,8 @@
 | IN | `in_1` | Scene | 上游 Rest / BaseNode |
 | IN | `in_3` | Point | 放置坐标 |
 | IN | `in_4` | {{AssetLabel}} | 资产名（object/tile） |
-| OUT | `out_1` | {{MainProduct}} | 主产物 scene |
+| OUT | `out_0` | Scene | 整树汇总口 |
+| OUT | `out_1` | {{MainProduct}} | 领域主产物 scene |
 | OUT | `out_2` | Rest | 剩余空地 → 下一组 Scene |
 | OUT | `out_3` | {{MainProduct}}Path | 路径句柄 |
 
@@ -21,7 +22,8 @@
 
 - 上游：**{{PrevTemplate}}.out_2 (Rest)** → 本组 `in_1` (Scene)
 - 下游：本组 **out_2 (Rest)** → {{NextTemplate}}.in_1
-- 汇总：本组 **out_1 (主产物)** → `tree_merge.item_N`
+- 汇总：本组 **out_0 (Scene)** → 根 merge；必须使用 `{ label:"Scene", portName:"out_0" }`
+- 细化：本组 **out_1 ({{MainProduct}})** → 下游领域模板，禁止接 merge
 
 ## 静默空跑
 

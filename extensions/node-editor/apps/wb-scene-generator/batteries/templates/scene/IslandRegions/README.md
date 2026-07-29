@@ -38,9 +38,9 @@ IslandSizes ─────────────────┐              
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_1` | scene | **Island**（岛屿陆地节点，focus 已聚焦） | `tree_merge` 汇总 / 在岛上继续布置（其 `in_0`） |
-| `out_2` | scene | **Rest**（剩余区域 = mask − 岛屿，含水面与未占空地） | → 下一层模板 `in_0`/Scene 串联 |
-| `out_0` | scene | **Scene**（整棵合并后场景树） | 调试 / 汇总根 |
+| `out_1` | scene | **Island**（岛屿陆地节点，focus 已聚焦） | 在岛上继续布置（领域细化），禁止接 merge |
+| `out_2` | scene | **Rest**（剩余区域 = mask − 岛屿，含水面与未占空地） | → 下一层模板 `in_0`/Scene 串联，记录 `restAnchor` |
+| `out_0` | scene | **Scene**（整棵合并后场景树） | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` 汇总根 |
 | `out_3` | string | **IslandPath**（岛屿节点路径句柄） | 下游 `string_concat` 等 |
 | `out_4` | string | **RestPath**（剩余区域路径句柄） | 下游 |
 

@@ -445,6 +445,47 @@ const SPECS: OpSpec[] = [
     ],
   },
 
+  // — Placement（使用当前 Geometry 中 part/shape 的真实可解 AABB 计算位姿）—
+  {
+    name: 'align_centers',
+    desc: '按指定轴把 child 的 AABB 中心对齐到 parent，并把结果写回 child part origin',
+    produces: 'misc',
+    params: [
+      { name: 'parent', kinds: ['ref'], required: true, desc: 'parent part 或 shape' },
+      { name: 'child', kinds: ['ref'], required: true, desc: 'child part 或 shape' },
+      { name: 'axes', kinds: ['string'], desc: '参与对齐的轴，例如 xyz / xy / z' },
+    ],
+  },
+  {
+    name: 'place_on_face',
+    desc: '把 child 贴到 parent 的轴对齐外表面，并写回 child part origin',
+    produces: 'misc',
+    params: [
+      { name: 'parent', kinds: ['ref'], required: true },
+      { name: 'child', kinds: ['ref'], required: true },
+      { name: 'face', kinds: ['string'], required: true, desc: '+x/-x/+y/-y/+z/-z' },
+      { name: 'face_u', kinds: ['number'], desc: '面内 U 偏移' },
+      { name: 'face_v', kinds: ['number'], desc: '面内 V 偏移' },
+      { name: 'proud', kinds: ['number'], desc: '沿法线突出量；负值表示嵌入' },
+    ],
+  },
+  {
+    name: 'place_on_surface',
+    desc: '按 parent 实际表面法线放置并定向 child；复杂形状回退 AABB',
+    produces: 'misc',
+    params: [
+      { name: 'parent', kinds: ['ref'], required: true },
+      { name: 'child', kinds: ['ref'], required: true },
+      { name: 'mode', kinds: ['string'], desc: 'direction 或 point' },
+      { name: 'direction', kinds: ['list'], desc: '方向查询 [x,y,z]' },
+      { name: 'point', kinds: ['list'], desc: '点查询 [x,y,z]' },
+      { name: 'child_axis', kinds: ['string'], desc: 'child 对准表面法线的局部轴，默认 +z' },
+      { name: 'clearance', kinds: ['number'], desc: '离表间隙' },
+      { name: 'spin', kinds: ['number'], desc: '绕表面法线旋转弧度' },
+      { name: 'up_hint', kinds: ['list'], desc: '稳定姿态的参考上方向 [x,y,z]' },
+    ],
+  },
+
   // — Inertial（附着到 part 的物理参数；URDF 编译时会塞进 <link>/<inertial>）—
   {
     name: 'inertial',

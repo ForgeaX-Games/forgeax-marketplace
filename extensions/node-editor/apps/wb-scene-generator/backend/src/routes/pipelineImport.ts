@@ -168,6 +168,25 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
     return response
   })
 
+  // Inline export for orchestrators (aw-support construction snapshots): same
+  // shape as the on-disk export file, without writing into templates/.
+  app.get<{ Params: ProjectParams }>(`${prefix}/snapshot`, async (req, reply) => {
+    const rt = await getRuntimeForProject(req.params.projectId)
+    const snap = getPipeline(rt)
+    if (!snap) return reply.code(404).send({ reason: 'no pipeline to export' })
+    const groups = listGroups(rt)
+    return {
+      format: 'kernel-graph-v1' as const,
+      graph: {
+        id: snap.id,
+        nodes: snap.nodes,
+        edges: snap.edges,
+        ...(groups.length ? { groups: Object.fromEntries(groups.map((g) => [g.id, g])) } : {}),
+        ...(snap.metadata ? { metadata: snap.metadata } : {}),
+      },
+    }
+  })
+
   // Export the current graph to a template file (kernel-graph-v1). The faithful
   // kernel-batch equivalent of the legacy savePipelineAs route.
   app.post<{ Params: ProjectParams }>(`${prefix}/export`, async (req, reply) => {

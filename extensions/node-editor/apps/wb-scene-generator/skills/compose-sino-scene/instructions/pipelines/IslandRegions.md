@@ -39,28 +39,18 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Island 岛屿陆地（主产物，focus 已聚焦岛屿节点） | 后续建筑/装饰层 `in_0`（在岛上继续布置）/ 用 `appendMergeItem`（或 `{"label":"Island"}`）接入 `aw_m0_merge` |
-| `out_2` | scene | Rest 剩余区域（= 区域 − 岛屿，含水域与未占空地） | 下一组 `in_0`（链式）/ 作水域汇总 |
-| `out_0` | scene | Scene 整棵合并后场景树 | 调试 / 汇总根 |
+| `out_1` | scene | Island 岛屿陆地（主产物，focus 已聚焦岛屿节点） | 后续建筑/装饰层 `in_0`（在岛上继续布置，用 `{ label:"Island", portName:"out_1" }` 细化） |
+| `out_2` | scene | Rest 剩余区域（= 区域 − 岛屿，含水域与未占空地） | 下一组 `in_0`（链式）/ 施工报告 `restAnchor` |
+| `out_0` | scene | Scene 整棵合并后场景树 | `{ label:"Scene", portName:"out_0" }` → `appendMergeItem` 汇总根 |
 | `out_3` / `out_4` | string | IslandPath / RestPath 路径句柄 | 一般不接 |
 
-### ⚠️ `out_2`(Rest) 不接线 = 这块区域被永久丢弃，不是"暂时没用到"
+### ⚠️ 三类输出严格分工
 
-真实生产案例（`大昭九州` 根节点任务，`.forgeax/games/scene-fa20e6d5-qrh7et`）：这一步只把 `out_1`(Island，岛屿主产物) 接进了汇总 `tree_merge`，`out_2`(Rest，岛外水域/空地) 完全没接线：
+- `out_0`(Scene) 是**唯一汇总口**：用 `appendMergeItem` 接入 `aw_m0_merge`。
+- `out_1`(Island) 是**领域细化口**：用于岛上后续建筑/装饰，并在施工报告中写入对应子节点的 `childAnchors`/`producedAnchors`。
+- `out_2`(Rest) 是**剩余空间口**：用于同任务下一模板或后续阶段的 Rest 串链，并写入施工报告 `restAnchor`。
 
-```
-ir_region.out_1 → aw_m0_merge.item_1   ✅ 已接（岛屿主产物）
-ir_region.out_2 → （悬空，未接任何下游）  ⚠️ 从未被 scene_merge_subtrees 合入最终树
-```
-
-后果：最终导出的场景树里**只有**岛屿本身，岛外区域完全不存在——不是"图里看不见但数据还在"，是这条 Rest 分支从未被 merge 进最终输出，以后也没有现成锚点可以再回来接它（除非重新走一遍这条计算链）。
-
-> 上面 `ir_region.out_1 → aw_m0_merge.item_1` 是当时真实产生的连线记录（手动 `portCount`/`item_N` 时代留下的），现在做同样的事应写 `appendMergeItem`（`{ "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "ir_region", "port": { "label": "Island" } } }`），效果一致但不用自己数 `item_N`。
-
-**判断要不要接 `out_2`**：
-- 这片区域之外**未来还可能**要继续布置内容（另一个岛、码头、渔村、别的叙事地点）→ 本轮就要把 `out_2` 也用 `appendMergeItem` 接进 `aw_m0_merge`（哪怕先不分配下游子任务），并在施工报告 `childAnchors`/`producedAnchors` 里给它记一个锚点，供下一个任务续接。
-- 这片区域之外**确定**不再需要任何内容（比如整张场景只需要这一座岛）→ 可以不接，`out_2` 悬空即为预期设计，不算漏做。
-- 任务书没明确要求时，**默认按"可能还要用"处理**——多写一个 `appendMergeItem` 的成本远低于以后发现漏了、需要重新计算整条链路的成本。
+`out_1` 与 `out_2` 都不能接根 merge。即使暂时没有下游，也应通过施工报告保留真实 `{ nodeId, port:"out_2", portLabel:"Rest" }`，而不是为了“保留”把 Rest 汇总。
 
 ## 4. 参数范围组合套餐
 
@@ -83,7 +73,9 @@ ir_region.out_2 → （悬空，未接任何下游）  ⚠️ 从未被 scene_me
 | IslandSizes（`in_2`） | `35`（任务书算出的 `radiusMeters` 四舍五入——**不是**照抄上面「小岛6~9/大岛12~18」的示例区间） |
 | IslandName（`in_3`） | `京畿南境驿道` |
 | 上游 Scene（`in_0`） | `AddBaseGrid.out_1`(BaseNode) |
-| `out_1` 去向 | 用 `appendMergeItem` 接入 `aw_m0_merge`（历史记录里是手动接的 `item_1`，现在优先用 `appendMergeItem`） |
+| Scene 汇总 | `out_0`，用 `{ label:"Scene", portName:"out_0" }` 执行 `appendMergeItem` |
+| 子节点锚点 | `out_1`(Island)，写入「京畿南境驿道」的 `childAnchors`/`producedAnchors` |
+| 后续阶段锚点 | `out_2`(Rest)，写入 `restAnchor` |
 
 ```jsonc
 // 先 instantiateTemplate({ templateId:"IslandRegions", groupId:"<G_ISLAND>" })，再一次 applyBatch：
@@ -103,12 +95,12 @@ ir_region.out_2 → （悬空，未接任何下游）  ⚠️ 从未被 scene_me
     { "type": "connect", "edgeId": "e_ir_size", "source": { "nodeId": "ir_size", "port": "value" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_2" } },
     { "type": "connect", "edgeId": "e_ir_name", "source": { "nodeId": "ir_name", "port": "output" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_3" } },
     { "type": "connect", "edgeId": "e_ir_asset", "source": { "nodeId": "ir_asset", "port": "output" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_4" } },
-    { "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Island" } } }
+    { "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Scene", "portName": "out_0" } } }
   ]
 }
 ```
 
-**验收**：`execute` 后 `<G_ISLAND>.out_1` 子树含以 `京畿南境驿道` 命名、`草地` tile 的陆地节点；`aw_m0_merge` 里出现这份内容。
+**验收**：`execute` 后 `<G_ISLAND>.out_1` 子树含以 `京畿南境驿道` 命名、`草地` tile 的陆地节点；`aw_m0_merge` 的新增来源是 `<G_ISLAND>.out_0`(Scene)。
 
 ### 5.2 嵌套子岛 —— 真实生产案例（同场景续作，`京畿南境驿道` → `清水镇`，非模拟）
 
@@ -171,12 +163,12 @@ Points 3 个、IslandSizes 混搭大小、IslandName 单值（**所有岛共用�
     { "type": "connect", "edgeId": "e_ir_sizes", "source": { "nodeId": "ir_sz_merge", "port": "tree" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_2" } },
     { "type": "connect", "edgeId": "e_ir_name", "source": { "nodeId": "ir_name", "port": "output" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_3" } },
     { "type": "connect", "edgeId": "e_ir_asset", "source": { "nodeId": "ir_asset", "port": "output" }, "target": { "nodeId": "<G_ISLAND>", "port": "in_4" } },
-    { "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Island" } } }
+    { "type": "appendMergeItem", "mergeNodeId": "aw_m0_merge", "source": { "nodeId": "<G_ISLAND>", "port": { "label": "Scene", "portName": "out_0" } } }
   ]
 }
 ```
 
-**验收**：`execute` 后 `<G_ISLAND>.out_1` 子树下应出现 3 块地形（同属一个 `群岛` 父节点），彼此之间可以有水域间隔（不要求接壤）；若下游还要继续布置岛外内容，记得按 §3 的 `out_2` 规则把 Rest 接进 `aw_m0_merge` 或下一组。
+**验收**：`execute` 后 `<G_ISLAND>.out_1` 子树下应出现 3 块地形（同属一个 `群岛` 父节点），彼此之间可以有水域间隔（不要求接壤）；若下游还要继续布置岛外内容，按 §3 将 `out_2`(Rest) 串给下一组并写入 `restAnchor`。
 
 > ⚠️ 本节 5.3 为按端口契约手工构造的示例（尚未留痕在 `aw-support/battery-verify/`），坐标仅为示意；真实任务请用任务书给出的 `gridPosition`/`radiusMeters`。如需补一份机器验证记录，可跑 `node aw-support/scripts/verify-battery-templates.mjs --step=island`（若脚本尚无 island step，需先补一个）。**5.1/5.2 均为真实生产记录，优先参考。**
 

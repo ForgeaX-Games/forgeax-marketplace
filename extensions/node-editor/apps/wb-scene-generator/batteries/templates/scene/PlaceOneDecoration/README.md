@@ -43,7 +43,8 @@ manual_points → in_3(Point)
 number_const → in_5/in_6/in_2(尺寸)
 type_string → in_0/in_4(名称/资产)
 
-PlaceOneDecoration.out_1(Decoration) → tree_merge
+PlaceOneDecoration.out_0(Scene)      → appendMergeItem(root merge)
+PlaceOneDecoration.out_1(Decoration) → 领域细化（禁止接 merge）
 PlaceOneDecoration.out_2(Rest)       → 下一层 in_1 或 LakeRegions
 ```
 
@@ -72,7 +73,7 @@ PlaceOneDecoration.out_2(Rest)       → 下一层 in_1 或 LakeRegions
 
 | 本端口 | 语义 | 怎么喂 |
 |--------|------|--------|
-| `in_1` | Scene（可放置 Rest） | **`PickOneBuilding.out_2` → `scene_focus_path`（path=`/父区域/划分子区域1/rest`）→ `in_1`**。禁止直连 `PathConnection.out_2`（多分支 DataTree 会空跑）。Path 与 PlaceOne 共用同一 Pick Rest 源 + 聚焦路径。 |
+| `in_1` | Scene（可放置 Rest） | **默认**：上一组暴露口 `{ label:"Rest" }`（如 `PickOneBuilding.out_2` / `PathConnectionLink.out_2` / 上一 `PlaceOne.out_2`）**直接**接到本口 `{ label:"Scene" }`——组壳对组壳，**不要**挖组内、也不要无故中间插 `scene_focus_path`。仅当必须按**命名路径**取某个子树（非 Rest 口本身）时，才在组外用 `scene_focus_path`。旧版多分支 `PathConnection.out_2` 勿裸连；施工管线用 `PathConnectionLink`/`RandomWalk` 的 Rest。 |
 | `in_3` | Point | `manual_points` → point；须在有效 Rest 格内（可用 `node_explode.2dPoints` 选点） |
 | `in_5` / `in_6` | **FootprintWidth × FootprintHeight** | `number_const` — **底面矩形占地格数**（`alg_point2rect` 贴合用） |
 | `in_2` | **DecorationHeight** | `number_const` — **竖向包围盒高度**（写入 grid2node zRange），**与底面 footprint 分离** |
@@ -124,7 +125,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 
 ### Preview 汇总（必做）
 
-装饰链完成后，须把 **`LocalPreciseDecoration.out_1`（或最后一组主产物）→ `m0_merge` → `scene_output`**，否则 Preview 仍只有 M1 的四区草地。见 [`step-m8-exportpreview.json`](../../../../../../aw-support/battery-verify/p_mr4b9s3j_dycp8k/step-m8-exportpreview.json)。
+装饰链完成后，须把每个模板的 **`out_0`(Scene) 汇总口**分别用 `appendMergeItem` 接入 `m0_merge`；`out_1`(Decoration) 只作领域细化，禁止接 merge。否则 Preview 仍只有 M1 的四区草地。
 
 ---
 

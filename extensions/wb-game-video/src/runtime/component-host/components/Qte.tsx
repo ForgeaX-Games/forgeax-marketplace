@@ -60,7 +60,13 @@ export const QTE_DEFAULT_EVENTS: ComponentEvent[] = [
   { id: 'good', label: '良好' },
   { id: 'fail', label: '失败' },
 ]
-/** qte 系共享 inputs（`qte`/`inkKou`/`battleParry` 契约复用）。 */
+/**
+ * qte 系共享 inputs（`qte`/`inkKou`/`battleParry` 契约复用）。
+ *
+ * 与 `CHOICE_INPUTS` 同一处置：`defaultEvent`（超时出口 / 失手档位）不声明为可编辑项——走向
+ * 一律交蓝图出边，作者不在组件参数里另配。字段仍在 `QteParams` 与落盘数据里由各皮肤 preset
+ * 写入，运行时（`useDefaultEventTimeout` / inkKou 档位归一 / battleParry missKey）照旧消费。
+ */
 export const QTE_INPUTS: ComponentInput[] = [
   { key: 'qteKind', label: 'QTE型', valueType: 'string', default: 'parry', options: [{ value: 'parry', label: '完美防反' }, { value: 'timing', label: '打点' }, { value: 'mash', label: '连打' }, { value: 'sequence', label: '连招' }, { value: 'sweep', label: '划动' }] },
   { key: 'passingHits', label: '过关次', valueType: 'number', default: 1 },
@@ -68,7 +74,6 @@ export const QTE_INPUTS: ComponentInput[] = [
   { key: 'windowMs', label: '窗口ms', valueType: 'number' },
   { key: 'durationMs', label: '收圈时长ms', valueType: 'number' },
   { key: 'timeoutMs', label: '限时ms', valueType: 'number' },
-  { key: 'defaultEvent', label: '超时出口', valueType: 'string' },
   { key: 'glyph', label: '字形（inkKou）', valueType: 'string' },
   { key: 'events', label: '出口', valueType: 'string', component: 'events' },
   { key: 'cues', label: '拍点', valueType: 'string', component: 'qteCues', default: [] },

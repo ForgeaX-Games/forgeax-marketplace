@@ -14,16 +14,19 @@ import {
   parseQuadList,
   validateStatements,
   localAabbFromShape,
+  type Arg,
   type Geometry,
   type Statement,
 } from '../../vendor/dist/shared/types/index.js'
 import { gMetrics } from '../../batteries/Output/QC/g_metrics/index.ts'
-import { gWall, parseOpenings } from '../../batteries/Generate/Architecture/g_wall/index.ts'
+import { gWall } from '../../batteries/Generate/Architecture/g_wall/index.ts'
 import { gFloorSlab } from '../../batteries/Generate/Architecture/g_floor_slab/index.ts'
 import { gRoof } from '../../batteries/Generate/Architecture/g_roof/index.ts'
 import { gStairs } from '../../batteries/Generate/Architecture/g_stairs/index.ts'
 import { gColumn } from '../../batteries/Generate/Architecture/g_column/index.ts'
 import { gDoor } from '../../batteries/Generate/Architecture/g_door/index.ts'
+import { gDoorFrame } from '../../batteries/Generate/Architecture/g_door_frame/index.ts'
+import { gDoorLeaf } from '../../batteries/Generate/Architecture/g_door_leaf/index.ts'
 import { gWindow } from '../../batteries/Generate/Architecture/g_window/index.ts'
 import { gRailing } from '../../batteries/Generate/Architecture/g_railing/index.ts'
 import { gFacadePanel } from '../../batteries/Generate/Architecture/g_facade_panel/index.ts'
@@ -58,6 +61,8 @@ describe('common batteries', () => {
       category: 'common/datatree',
       type: 'common',
     }))
+    expect(r.json()).toContainEqual(expect.objectContaining({ id: 'g_door_frame' }))
+    expect(r.json()).toContainEqual(expect.objectContaining({ id: 'g_door_leaf' }))
   })
 
   it('creates and executes a common range_list battery through the API', async () => {
@@ -206,9 +211,18 @@ describe('parseQuadList shared parser', () => {
 
   it('g_wall.parseOpenings and g_floor_slab reuse the shared parser (same shape)', () => {
     // 两个电池共用 parseQuadList，只是错误文案不同；成功路径逐字节等价。
-    expect(parseOpenings('[[1,0.9,0,2.1]]')).toEqual([[1, 0.9, 0, 2.1]])
     const wall = gWall({ length: 4, height: 2.8, thickness: 0.2, openings: '[[1,0.9,0,2.1]]', id: 'w1' })
     expect(wall.error).toBeUndefined()
+    const wallOpening = (wall.geometry as Geometry).statements[0].args.openings
+    expect(wallOpening).toEqual({
+      kind: 'list',
+      items: [{ kind: 'list', items: [
+        { kind: 'number', value: 1 },
+        { kind: 'number', value: 0.9 },
+        { kind: 'number', value: 0 },
+        { kind: 'number', value: 2.1 },
+      ] }],
+    })
     const slab = gFloorSlab({ width: 6, depth: 4, thickness: 0.2, holes: '[[0,0,1.2,1.2]]', id: 's1' })
     expect(slab.error).toBeUndefined()
     // 坏行经由同一 parser 报错（文案各自定制）。
@@ -248,6 +262,18 @@ describe('architecture battery enhancements', () => {
   it('g_wall rejects a plinth taller than the wall', () => {
     const out = gWall({ length: 4, height: 2.8, thickness: 0.2, plinth_height: 3 })
     expect(String(out.error)).toContain('plinth_height')
+  })
+
+  it('g_wall preserves baker auto defaults when window-band zero means auto', () => {
+    const out = gWall({
+      length: 6, height: 3, thickness: 0.2,
+      window_band: true, band_sill: 0, band_head: 0, band_margin: 0, id: 'wauto',
+    })
+    const stmt = lastOf(out.geometry as Geometry)
+    expect(argOf(stmt, 'window_band')).toEqual({ kind: 'bool', value: true })
+    expect(argOf(stmt, 'band_sill')).toBeUndefined()
+    expect(argOf(stmt, 'band_head')).toBeUndefined()
+    expect(argOf(stmt, 'band_margin')).toBeUndefined()
   })
 
   it('g_roof splits eave/verge overhang and validates', () => {
@@ -310,6 +336,39 @@ describe('architecture battery enhancements', () => {
     const leaf = geom.statements.find(s => s.op === 'door_leaf')!
     expect(argOf(leaf, 'panel_rows')).toEqual({ kind: 'number', value: 3 })
     expect(argOf(leaf, 'panel_cols')).toEqual({ kind: 'number', value: 2 })
+    // Central clear width = w - 3*frame - 2*sidelight = 0.76; two leaves share
+    // it with a 0.01 center gap.
+    const leafSize = argOf(leaf, 'size')
+    expect(leafSize?.kind).toBe('list')
+    expect((leafSize as Extract<Arg, { kind: 'list' }>).items[0]).toEqual({
+      kind: 'number', value: expect.closeTo(0.375, 8),
+    })
+    const origins = JSON.parse(String(out.leaf_origins)) as number[][]
+    expect(origins[0][0]).toBeCloseTo(-0.38, 8)
+    expect(origins[1][0]).toBeCloseTo(0.38, 8)
+  })
+
+  it('dedicated door batteries emit exactly the requested DSL component', () => {
+    const frameOut = gDoorFrame({
+      width: 1.4, height: 2.3, depth: 0.28, frame: 0.09,
+      transom: 0.3, sidelight: 0.2, id: 'frame_only',
+    })
+    expect(frameOut.error).toBeUndefined()
+    const frameGeom = frameOut.geometry as Geometry
+    expect(frameGeom.statements).toHaveLength(1)
+    expect(frameGeom.statements[0].op).toBe('door_frame')
+    expect(argOf(frameGeom.statements[0], 'size')).toEqual(numList([1.4, 2.3]))
+
+    const leafOut = gDoorLeaf({
+      width: 1.1, height: 2.15, thickness: 0.05,
+      hinge: 'left', style: 'panel', panel_rows: 3, panel_cols: 2, id: 'leaf_only',
+    })
+    expect(leafOut.error).toBeUndefined()
+    const leafGeom = leafOut.geometry as Geometry
+    expect(leafGeom.statements).toHaveLength(1)
+    expect(leafGeom.statements[0].op).toBe('door_leaf')
+    expect(argOf(leafGeom.statements[0], 'size')).toEqual(numList([1.1, 2.15]))
+    expect(validateStatements([...frameGeom.statements, ...leafGeom.statements]).ok).toBe(true)
   })
 
   it('g_window emits pane_width / sill / arch_top and rejects an impossible arch', () => {
@@ -349,6 +408,14 @@ describe('architecture battery enhancements', () => {
     const aabbBeam = localAabbFromShape(stmt)!
     expect(aabbBeam.halfExtent[2]).toBeGreaterThan(aabbPlain.halfExtent[2])
     expect(aabbBeam.center[2]).toBeLessThan(aabbPlain.center[2])
+  })
+
+  it('g_floor_slab rejects holes that extend outside the slab', () => {
+    const out = gFloorSlab({
+      width: 6, depth: 4, thickness: 0.2,
+      holes: '[[2.8,0,1,1]]',
+    })
+    expect(String(out.error)).toContain('exceeds slab')
   })
 
   it('g_facade_panel emits groove direction / spacing / board style and validates', () => {

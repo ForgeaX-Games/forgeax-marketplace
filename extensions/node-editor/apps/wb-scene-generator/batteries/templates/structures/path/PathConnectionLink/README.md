@@ -32,9 +32,9 @@
 
 | portName | 语义 | 典型去向 |
 |---|---|---|
-| `out_1` | **Path** 道路（主产物） | → `tree_merge` 汇总 |
+| `out_1` | **Path** 道路领域产物 | 后续道路细化，禁止接 merge |
 | `out_2` | **Rest** 非道路/剩余区域 | → 下一组 `in_2`（链式给湖/田/植被） |
-| `out_0` | 附加场景输出 | 一般不接 |
+| `out_0` | **Scene** 整树汇总口 | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` |
 | `out_3`/`out_4` | PathPath / RestPath 路径句柄 | 一般不接 |
 
 ## 与 RandomWalk 版互换

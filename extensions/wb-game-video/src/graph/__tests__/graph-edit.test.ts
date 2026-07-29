@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setNodePosition } from '../edit/graph-edit'
+import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setNodePosition, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubFlow } from '../../runtime/schema/graph-schema'
 
@@ -49,6 +49,17 @@ describe('graph-edit', () => {
     const src = g0()
     connect(src, { source: 'a', sourceHandle: 'default', target: 'b' })
     expect(src.edges.length).toBe(0)
+  })
+
+  it('updateEventRouteTiming keeps event edges and node settlement in sync', () => {
+    let graph = connect(g0(), { source: 'a', sourceHandle: 'pass', target: 'b', id: 'e-pass' })
+    graph = updateEventRouteTiming(graph, 'a', 'pass', 'onSettlement', { type: 'at', ms: 1200 })
+    expect(graph.edges[0]?.data?.transition).toBe('onSettlement')
+    expect(graph.nodes[0]?.data.routingSettlement).toEqual({ type: 'at', ms: 1200 })
+
+    graph = updateEventRouteTiming(graph, 'a', 'pass', 'immediate')
+    expect(graph.edges[0]?.data?.transition).toBeUndefined()
+    expect(graph.nodes[0]?.data.routingSettlement).toBeUndefined()
   })
 
   it('makeEmptySubFlowPack', () => {

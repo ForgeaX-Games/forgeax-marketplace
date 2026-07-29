@@ -97,6 +97,20 @@ function isComplexInput(inp: ComponentInput): boolean {
   )
 }
 
+/** 出口事件清单类输入（分组时归「事件」组，其余 inputs 归「参数」组）。 */
+function isEventInput(inp: ComponentInput): boolean {
+  return inp.component === 'events' || inp.component === 'hotspotEvents'
+}
+
+/** 组内小标题：比 NodeInspector 的 sectionLabel 再低一级（更小更淡），标示 details 内部的分组。 */
+function groupLabel(text: string): JSX.Element {
+  return (
+    <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.5, letterSpacing: 0.4, margin: '0 0 3px' }}>
+      {text}
+    </div>
+  )
+}
+
 function summarizeComplex(inp: ComponentInput, val: unknown): string {
   if (Array.isArray(val)) {
     if (inp.component === 'events' || inp.component === 'hotspotEvents') {
@@ -113,6 +127,35 @@ function summarizeComplex(inp: ComponentInput, val: unknown): string {
   }
   if (inp.component) return `在「视频」轨配置`
   return '已配置'
+}
+
+/**
+ * 复合输入（events / effects）在 compact 密度下的折叠壳。
+ *
+ * 右侧那个 `▾` 是必需的：`listStyle:'none'` 去掉了浏览器原生折叠三角，不补图标就看不出这一行
+ * 可以点开去配（与 NodeInspector 的「组件」/「位置」折叠条同一套图标约定：右对齐、低透明度）。
+ */
+function complexDisclosure(key: string, head: string, hint: string, body: JSX.Element): JSX.Element {
+  return (
+    <details key={key} style={{ marginBottom: 4, fontSize: 11, width: '100%' }}>
+      <summary
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 4,
+          cursor: 'pointer',
+          opacity: 0.85,
+          listStyle: 'none',
+        }}
+        title={`${hint} · 点击展开编辑`}
+      >
+        <span>{head}</span>
+        <span style={{ opacity: 0.4, marginLeft: 'auto' }}>▾</span>
+      </summary>
+      <div style={{ marginTop: 4 }}>{body}</div>
+    </details>
+  )
 }
 
 function renderInput(
@@ -148,17 +191,7 @@ function renderInput(
         </div>
       )
     }
-    return (
-      <details key={inp.key} style={{ marginBottom: 4, fontSize: 11, width: '100%' }}>
-        <summary
-          style={{ cursor: 'pointer', opacity: 0.85, listStyle: 'none' }}
-          title={hint}
-        >
-          {label} · {summarizeComplex(inp, val)}
-        </summary>
-        <div style={{ marginTop: 4 }}>{body}</div>
-      </details>
-    )
+    return complexDisclosure(inp.key, `${label} · ${summarizeComplex(inp, val)}`, hint, body)
   }
   if (inp.component === 'effects') {
     const body = (
@@ -176,14 +209,7 @@ function renderInput(
         </div>
       )
     }
-    return (
-      <details key={inp.key} style={{ marginBottom: 4, fontSize: 11, width: '100%' }}>
-        <summary style={{ cursor: 'pointer', opacity: 0.85, listStyle: 'none' }} title={hint}>
-          {label} · {summarizeComplex(inp, val)}
-        </summary>
-        <div style={{ marginTop: 4 }}>{body}</div>
-      </details>
-    )
+    return complexDisclosure(inp.key, `${label} · ${summarizeComplex(inp, val)}`, hint, body)
   }
   if (inp.component === 'color') {
     return (
@@ -368,18 +394,38 @@ export function ComponentFormFields({
     return <div style={{ fontSize: 11, opacity: 0.5 }}>该组件无可配 inputs（component={componentId}）</div>
   }
   const onPatch = (key: string, value: unknown) => onChange(patchValue(values, key, value))
-  const scalars = inputs.filter((i) => !isComplexInput(i))
-  const complexes = inputs.filter((i) => isComplexInput(i))
+  /**
+   * 分两组呈现（平铺混排时看不出层次）：
+   *  - **参数**：标量 + 需专属编辑器的结构化参数（拍点 / 文字样式…）——都是「这个组件长什么样、怎么判定」
+   *  - **事件**：`events` / `hotspotEvents` 出口清单——即蓝图出边要接的那些 id，语义与参数不同层
+   * 只有一组时不加组标题与分隔线，保持原样（如字幕/血条只有参数、热点只有事件）。
+   */
+  const params = inputs.filter((i) => !isEventInput(i))
+  const events = inputs.filter(isEventInput)
+  const paramScalars = params.filter((i) => !isComplexInput(i))
+  const paramComplexes = params.filter(isComplexInput)
+  const grouped = params.length > 0 && events.length > 0
   return (
     <div>
-      {compact ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'center' }}>
-          {scalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, true))}
+      {params.length > 0 ? (
+        <div style={grouped ? { marginBottom: 6 } : undefined}>
+          {grouped ? groupLabel('参数配置') : null}
+          {compact ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'center' }}>
+              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, true))}
+            </div>
+          ) : (
+            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, false))
+          )}
+          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact))}
         </div>
-      ) : (
-        scalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, false))
-      )}
-      {complexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact))}
+      ) : null}
+      {events.length > 0 ? (
+        <div style={grouped ? { borderTop: '1px solid #2f2f2f', paddingTop: 5 } : undefined}>
+          {grouped ? groupLabel('事件配置') : null}
+          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact))}
+        </div>
+      ) : null}
     </div>
   )
 }

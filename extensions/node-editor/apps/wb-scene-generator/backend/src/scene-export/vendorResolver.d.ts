@@ -12,6 +12,38 @@
  * `RuleSprite` exactly (kept in lockstep by the renderer-parity test).
  */
 declare module '*/vendor/dist/renderer-resolve/renderer/server/spriteResolver.js' {
+  export interface AssetMatchAliasMeta {
+    alias: string
+    tileType?: string
+    anchorX?: number
+    anchorY?: number
+    widthPx?: number
+    heightPx?: number
+    ppu?: number
+    objectHeightPx?: number
+    geometry?: unknown
+  }
+  export interface AssetEntry {
+    assetName: string
+    assetAlias?: string
+    assetType?: string
+  }
+  export interface AssetMatch {
+    primary: string
+    variants: string[]
+    tileType?: string
+    anchor?: { x: number; y: number }
+    ppu?: number
+    widthPx?: number
+    heightPx?: number
+    objectHeightPx?: number
+    geometry?: unknown
+  }
+  export function matchAssetEntry(
+    entry: AssetEntry,
+    aliases: ReadonlyArray<AssetMatchAliasMeta>,
+    fuzzy: boolean,
+  ): AssetMatch | null
   export interface RuleSprite {
     x: number
     y: number

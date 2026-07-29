@@ -320,7 +320,8 @@
       "access": "tree",
       "sourceNodeId": "zn_out_main",
       "sourcePortName": "scene",
-      "order": 0
+      "order": 0,
+      "customLabelEn": "Scene"
     },
     {
       "portName": "out_1",

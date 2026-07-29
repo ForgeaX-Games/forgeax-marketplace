@@ -47,13 +47,39 @@ interface ProjectParams {
   projectId: string
 }
 
+/**
+ * Claim exclusive write access for mutations. Soft `projects.open` is shared
+ * (analysis); writers claim here. AI callers block/wait so they don't burn
+ * turns polling open.
+ */
 export async function ensureProjectMutationAccess(
   deps: Pick<ProjectPipelineRouteDeps, 'getProjectRegistry' | 'extractCaller'>,
   req: FastifyRequest,
   projectId: string,
+  opts?: { waitMs?: number; pollMs?: number },
 ): Promise<{ ok: true; projectId: string } | { ok: false; reason: string; code: string; projectId: string }> {
   const reg = await deps.getProjectRegistry()
-  const result = reg.checkMutationAccess(projectId, deps.extractCaller(req))
+  const caller = deps.extractCaller(req)
+  const rawWait = opts?.waitMs ?? (caller.kind === 'ai' ? 600_000 : 0)
+  const rawPoll = opts?.pollMs ?? 2_000
+  const waitMs = Number.isFinite(rawWait) ? Math.max(0, Math.min(rawWait, 30 * 60_000)) : 0
+  const pollMs = Number.isFinite(rawPoll) ? Math.max(50, Math.min(rawPoll, 30_000)) : 2_000
+  const deadline = Date.now() + waitMs
+
+  let claimed = reg.claimWriteAccess(projectId, caller)
+  while (!claimed.ok && claimed.queued && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    claimed = reg.claimWriteAccess(projectId, caller)
+  }
+  if (!claimed.ok) {
+    const reason =
+      claimed.queued && waitMs > 0
+        ? `${claimed.reason} (blocked ${waitMs}ms without write lock — retry the mutation once)`
+        : claimed.reason
+    return { ok: false, reason, code: claimed.code, projectId }
+  }
+
+  const result = reg.checkMutationAccess(projectId, caller)
   if (result.ok) return { ok: true, projectId }
   return { ok: false, reason: result.reason, code: result.code, projectId }
 }

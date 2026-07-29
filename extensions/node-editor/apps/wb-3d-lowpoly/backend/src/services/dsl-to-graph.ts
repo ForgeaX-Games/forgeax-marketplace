@@ -67,6 +67,8 @@ export interface CompileResult {
   statementNodeIds: string[]
   /** 终端 QC 节点 id（三路共用 g_geometry_qc；角色路为空，用 skinQcNodeId）。 */
   qcNodeId: string
+  /** 非阻断量化建议节点（三路共用 g_metrics）。 */
+  metricsNodeId: string
   /** 终端 URDF 节点 id（mode='urdf' 时非空）。 */
   urdfNodeId: string
   /**
@@ -98,6 +100,7 @@ type FieldSpec =
   | { arg: string; kind: 'ref'; field: string } // ref ↔ 字符串 + 连边
   | { arg: string; kind: 'refList'; field: string } // list<ref> ↔ 字符串数组 + 连边
   | { arg: string; kind: 'list'; field: string } // list 原样透传为数组
+  | { arg: string; kind: 'json'; field: string } // 嵌套 list ↔ JSON 字符串端口
 
 interface OpEntry {
   /** DSL op 名（graph→DSL 反向重建用）。 */
@@ -161,6 +164,113 @@ const OP_TABLE: Record<string, OpEntry> = {
       VEC('scale', ['sx', 'sy', 'sz']),
       { arg: 'bbox_min', kind: 'list', field: 'bbox_min' },
       { arg: 'bbox_max', kind: 'list', field: 'bbox_max' },
+    ],
+  },
+
+  // — Architecture —
+  // Architecture DSL uses compact vector fields (`size`, `footprint`,
+  // `panel_size`), while the editor batteries expose separate scalar ports.
+  // Keep the adapters explicit: generic name-to-name forwarding silently made
+  // slabs, roofs, panels and windows fall back to their editor defaults.
+  wall: {
+    op: 'wall',
+    battery: 'g_wall',
+    fields: [
+      { arg: 'length', kind: 'num', field: 'length' },
+      { arg: 'height', kind: 'num', field: 'height' },
+      { arg: 'thickness', kind: 'num', field: 'thickness' },
+      { arg: 'openings', kind: 'json', field: 'openings' },
+      { arg: 'plinth_height', kind: 'num', field: 'plinth_height' },
+      { arg: 'plinth_projection', kind: 'num', field: 'plinth_projection' },
+      { arg: 'window_band', kind: 'bool', field: 'window_band' },
+      { arg: 'band_sill', kind: 'num', field: 'band_sill' },
+      { arg: 'band_head', kind: 'num', field: 'band_head' },
+      { arg: 'band_margin', kind: 'num', field: 'band_margin' },
+      { arg: 'pane_width', kind: 'num', field: 'pane_width' },
+      { arg: 'mullion', kind: 'num', field: 'mullion' },
+    ],
+  },
+  floor_slab: {
+    op: 'floor_slab',
+    battery: 'g_floor_slab',
+    fields: [
+      VEC('size', ['width', 'depth']),
+      { arg: 'thickness', kind: 'num', field: 'thickness' },
+      { arg: 'holes', kind: 'json', field: 'holes' },
+      { arg: 'beam_depth', kind: 'num', field: 'beam_depth' },
+      { arg: 'beam_width', kind: 'num', field: 'beam_width' },
+      { arg: 'edge_chamfer', kind: 'num', field: 'edge_chamfer' },
+    ],
+  },
+  roof: {
+    op: 'roof',
+    battery: 'g_roof',
+    fields: [
+      VEC('footprint', ['width', 'depth']),
+      { arg: 'type', kind: 'str', field: 'type' },
+      { arg: 'height', kind: 'num', field: 'height' },
+      { arg: 'thickness', kind: 'num', field: 'thickness' },
+      { arg: 'overhang', kind: 'num', field: 'overhang' },
+      { arg: 'eave_overhang', kind: 'num', field: 'eave_overhang' },
+      { arg: 'verge_overhang', kind: 'num', field: 'verge_overhang' },
+      { arg: 'parapet_height', kind: 'num', field: 'parapet_height' },
+      { arg: 'parapet_thickness', kind: 'num', field: 'parapet_thickness' },
+      { arg: 'coping_width', kind: 'num', field: 'coping_width' },
+    ],
+  },
+  facade_panel: {
+    op: 'facade_panel',
+    battery: 'g_facade_panel',
+    fields: [
+      VEC('panel_size', ['panel_w', 'panel_h']),
+      { arg: 'thickness', kind: 'num', field: 'thickness' },
+      { arg: 'orientation', kind: 'str', field: 'orientation' },
+      { arg: 'groove_count', kind: 'num', field: 'groove_count' },
+      { arg: 'groove_depth', kind: 'num', field: 'groove_depth' },
+      { arg: 'groove_width', kind: 'num', field: 'groove_width' },
+      { arg: 'groove_direction', kind: 'str', field: 'groove_direction' },
+      { arg: 'groove_spacing', kind: 'num', field: 'groove_spacing' },
+      { arg: 'board_style', kind: 'str', field: 'board_style' },
+    ],
+  },
+  window: {
+    op: 'window',
+    battery: 'g_window',
+    fields: [
+      VEC('size', ['width', 'height']),
+      { arg: 'depth', kind: 'num', field: 'depth' },
+      { arg: 'frame', kind: 'num', field: 'frame' },
+      { arg: 'mullion', kind: 'num', field: 'mullion' },
+      { arg: 'glass', kind: 'num', field: 'glass' },
+      { arg: 'type', kind: 'str', field: 'type' },
+      { arg: 'rows', kind: 'num', field: 'rows' },
+      { arg: 'cols', kind: 'num', field: 'cols' },
+      { arg: 'pane_width', kind: 'num', field: 'pane_width' },
+      { arg: 'sill', kind: 'num', field: 'sill' },
+      { arg: 'arch_top', kind: 'bool', field: 'arch_top' },
+    ],
+  },
+  door_frame: {
+    op: 'door_frame',
+    battery: 'g_door_frame',
+    fields: [
+      VEC('size', ['width', 'height']),
+      { arg: 'depth', kind: 'num', field: 'depth' },
+      { arg: 'frame', kind: 'num', field: 'frame' },
+      { arg: 'transom', kind: 'num', field: 'transom' },
+      { arg: 'sidelight', kind: 'num', field: 'sidelight' },
+    ],
+  },
+  door_leaf: {
+    op: 'door_leaf',
+    battery: 'g_door_leaf',
+    fields: [
+      VEC('size', ['width', 'height']),
+      { arg: 'thickness', kind: 'num', field: 'thickness' },
+      { arg: 'hinge', kind: 'str', field: 'hinge' },
+      { arg: 'style', kind: 'str', field: 'style' },
+      { arg: 'panel_rows', kind: 'num', field: 'panel_rows' },
+      { arg: 'panel_cols', kind: 'num', field: 'panel_cols' },
     ],
   },
   // "boulder" 是 "rock" 的同义 op（同一电池 g_rock）；boulder 条目放前面、rock 放后面——
@@ -363,6 +473,42 @@ const OP_TABLE: Record<string, OpEntry> = {
       { arg: 'mass', kind: 'num', field: 'mass' },
     ],
   },
+  align_centers: {
+    op: 'align_centers',
+    battery: 'g_align_centers',
+    fields: [
+      { arg: 'parent', kind: 'ref', field: 'parent_id' },
+      { arg: 'child', kind: 'ref', field: 'child_id' },
+      { arg: 'axes', kind: 'str', field: 'axes' },
+    ],
+  },
+  place_on_face: {
+    op: 'place_on_face',
+    battery: 'g_place_on_face',
+    fields: [
+      { arg: 'parent', kind: 'ref', field: 'parent_id' },
+      { arg: 'child', kind: 'ref', field: 'child_id' },
+      { arg: 'face', kind: 'str', field: 'face' },
+      { arg: 'face_u', kind: 'num', field: 'face_u' },
+      { arg: 'face_v', kind: 'num', field: 'face_v' },
+      { arg: 'proud', kind: 'num', field: 'proud' },
+    ],
+  },
+  place_on_surface: {
+    op: 'place_on_surface',
+    battery: 'g_place_on_surface',
+    fields: [
+      { arg: 'parent', kind: 'ref', field: 'parent_id' },
+      { arg: 'child', kind: 'ref', field: 'child_id' },
+      { arg: 'mode', kind: 'str', field: 'mode' },
+      VEC('direction', ['dx', 'dy', 'dz']),
+      VEC('point', ['px', 'py', 'pz']),
+      { arg: 'child_axis', kind: 'str', field: 'child_axis' },
+      { arg: 'clearance', kind: 'num', field: 'clearance' },
+      { arg: 'spin', kind: 'num', field: 'spin' },
+      VEC('up_hint', ['upx', 'upy', 'upz']),
+    ],
+  },
 
   // — Joint (type-dispatched) —
   joint: { op: 'joint', battery: resolveJointBattery, fields: JOINT_FIELDS },
@@ -481,19 +627,13 @@ const GENERIC_BATTERY: Record<string, string> = {
   bevel_gear: 'g_bevel_gear',
   worm: 'g_worm',
   // Architecture
-  wall: 'g_wall',
-  floor_slab: 'g_floor_slab',
   stairs: 'g_stairs',
-  roof: 'g_roof',
-  facade_panel: 'g_facade_panel',
-  window: 'g_window',
-  door_frame: 'g_door',
-  door_leaf: 'g_door',
   railing: 'g_railing',
   column: 'g_column',
 }
 
 const TERMINAL_QC_BATTERY = 'g_geometry_qc'
+const TERMINAL_METRICS_BATTERY = 'g_metrics'
 const TERMINAL_URDF_BATTERY = 'g_to_urdf'
 
 // — Character（角色路）终端链电池 —
@@ -695,6 +835,9 @@ function forwardStatement(stmt: Statement, character = false): ForwardOut | { er
       case 'list':
         params[spec.field] = argToJs(arg)
         break
+      case 'json':
+        params[spec.field] = JSON.stringify(argToJs(arg))
+        break
       case 'ref':
         if (arg.kind === 'ref') {
           params[spec.field] = arg.name
@@ -789,6 +932,7 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
       lineByNodeId: {},
       statementNodeIds: [],
       qcNodeId: '',
+      metricsNodeId: '',
       urdfNodeId: '',
       mode,
       skinQcNodeId: '',
@@ -846,6 +990,7 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
 
   const appendTerminals = opts.appendTerminals !== false
   let qcNodeId = ''
+  let metricsNodeId = ''
   let urdfNodeId = ''
   let skinQcNodeId = ''
   let rigNodeId = ''
@@ -860,6 +1005,22 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
       source: { nodeId: from, port: 'geometry' },
       target: { nodeId: to, port: 'geometry' },
     })
+  }
+
+  // Metrics is deliberately a parallel, read-only terminal. Its score and
+  // suggestions never participate in ok/valid, so richer feedback cannot turn
+  // an otherwise successful model into a hard failure.
+  if (appendTerminals) {
+    metricsNodeId = freshTerminalId('metrics', usedIds)
+    nodes.push({
+      id: metricsNodeId,
+      batteryId: TERMINAL_METRICS_BATTERY,
+      name: 'Metrics',
+      position: { x, y: 180 },
+      params: {},
+    })
+    lineByNodeId[metricsNodeId] = 0
+    linkGeom(prevGeomNode, metricsNodeId)
   }
 
   if (appendTerminals && mode === 'character') {
@@ -959,6 +1120,7 @@ export function compileDslToGraph(source: string, opts: CompileOptions = {}): Co
     lineByNodeId,
     statementNodeIds,
     qcNodeId,
+    metricsNodeId,
     urdfNodeId,
     mode,
     skinQcNodeId,
@@ -1103,6 +1265,17 @@ function paramsToArgs(entry: OpEntry, batteryId: string, params: Record<string, 
         if (Array.isArray(v)) {
           const a = jsToArg(v)
           if (a) args[spec.arg] = a
+        }
+        break
+      }
+      case 'json': {
+        const v = params[spec.field]
+        if (typeof v !== 'string' || v === '') break
+        try {
+          const a = jsToArg(JSON.parse(v))
+          if (a) args[spec.arg] = a
+        } catch {
+          // Keep graphToDsl total for manually edited legacy graphs.
         }
         break
       }

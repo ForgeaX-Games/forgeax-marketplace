@@ -115,9 +115,24 @@ export function compressVoxelCells(
   return out
 }
 
-/** Deep-walk a cache payload and compress every voxel cell array. */
+/**
+ * Deep-walk a cache payload and compress every voxel cell array.
+ *
+ * Respects `.toJSON()` when a value defines one — matching the standard
+ * `JSON.stringify` contract — before falling back to the generic
+ * `Object.entries` walk. Without this, a class instance whose real JSON
+ * shape only exists behind `.toJSON()` (e.g. `PersistentStringMap`, whose
+ * wire form is `{ [key]: value }` but whose own enumerable fields are private
+ * trie internals like `root`/`size`) gets its private fields serialized
+ * instead of its intended shape — a silent "this looks empty" corruption
+ * that only surfaces once the value round-trips through disk.
+ */
 export function compressPayload(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value
+  const toJSON = (value as { toJSON?: unknown }).toJSON
+  if (typeof toJSON === 'function') {
+    return compressPayload((toJSON as () => unknown).call(value))
+  }
   if (Array.isArray(value)) return value.map((el) => compressPayload(el))
   const obj = value as Record<string, unknown>
   const out: Record<string, unknown> = {}

@@ -37,6 +37,7 @@ const STATIC_SCHEME: Overlay = {
       id: 'line',
       component: 'dialogue',
       trigger: { when: 'enter' },
+      window: { startMs: 0 },
       inputs: { speaker: '角色', text: '这是一句字幕示例。' },
     },
   ],
@@ -55,6 +56,7 @@ const DYNAMIC_SCHEME: Overlay = {
       id: 'float',
       component: 'floatText',
       trigger: { when: 'enter' },
+      window: { startMs: 0 },
       inputs: { text: '+30', x: 0.5, y: 0.4, color: '#5fbf7f' },
     },
   ],
@@ -121,6 +123,7 @@ export const NEW_COMPONENT_PRESETS: Array<{
       id,
       component: 'dialogue',
       trigger: { when: 'enter' },
+      window: { startMs: 0 },
       inputs: { text: '字幕示例' },
     }),
   },
@@ -131,6 +134,7 @@ export const NEW_COMPONENT_PRESETS: Array<{
       id,
       component: 'floatText',
       trigger: { when: 'enter' },
+      window: { startMs: 0 },
       inputs: { text: '+30', x: 0.5, y: 0.4, color: '#5fbf7f' },
     }),
   },
@@ -160,6 +164,8 @@ function makeBaseHudChild(componentId: string): OverlayChild {
     id: `${componentId}-0`,
     component: componentId,
     trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window（运行时 el.window 存在即忽略 trigger）；不写 endMs = 到节点结束。
+    window: { startMs: 0 },
     inputs: buildDefaults(getComponent(componentId)?.inputs),
   }
 }

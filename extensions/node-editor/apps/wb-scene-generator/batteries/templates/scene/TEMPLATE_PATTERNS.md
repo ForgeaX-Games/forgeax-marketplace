@@ -152,9 +152,9 @@ full_scene (或 union 后的区域)
 
 | 输出语义 | 含义 | 下游接法 |
 |---------|------|---------|
-| **主产物** out（Building/Path/Lake/Decoration…） | 本层新铺的内容 | `tree_merge.item_N` |
+| **主产物/领域** out（Building/Path/Lake/Decoration…） | 本层新铺的内容 | 后续领域细化，禁止接 merge |
 | **Rest** out | 未被本层占用的空地 | 下一模板 `in_1` Scene |
-| **Scene** out（整树） | 有时暴露完整树或中间态 | 调试 / 特殊链 |
+| **Scene** out（整树） | 汇总视图 | 根汇总；必须显式标注 `customLabelEn:"Scene"` |
 | **Path / RestPath** out | `scene_focus_path` + `type_string` 生成的 **string 路径句柄** | 下游 `string_concat` 拼 `/outer_door` 等 |
 
 **固定操作**：
@@ -273,7 +273,7 @@ type_string.value    ← 运行时 path 字符串（如 /architecture_0/...）
 | 主产物 scene | alg → grid2node(主名) → add_child → AssetName 嵌套 → passthrough |
 | Rest scene | alg → subtract 剩余 → grid2node("rest") → passthrough |
 | *Path string | scene_focus_path(对应 scene) → type_string.value |
-| 整图汇总（组外） | 各组主产物 → `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output` |
+| 整图汇总（组外） | 各组 `Scene` 汇总口 → 根 `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output` |
 
 ---
 

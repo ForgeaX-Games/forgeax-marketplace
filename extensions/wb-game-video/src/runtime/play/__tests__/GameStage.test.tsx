@@ -173,4 +173,40 @@ describe('GameStage buffered playback', () => {
     submitFrame(replay)
     expect(replay).toHaveStyle({ opacity: '1' })
   })
+
+  it('renews an expired gateway URL before showing a missing-video notice', () => {
+    const source = '/__gva__/media/m-narr-open?game=0728-04'
+    const { container } = render(
+      <GameStage {...props({ videoSrc: source, clip: clip('intro', 'm-narr-open') })} />,
+    )
+    const video = videoFor(container, source)
+    video.currentTime = 12
+
+    fireEvent.error(video)
+
+    const refreshed = videoFor(
+      container,
+      '/__gva__/media/m-narr-open?game=0728-04&__gva_refresh=1',
+    )
+    expect(container).not.toHaveTextContent('无法播放视频资源')
+
+    fireEvent.loadedMetadata(refreshed)
+    expect(refreshed.currentTime).toBe(12)
+    fireEvent.error(refreshed)
+
+    expect(container).toHaveTextContent('无法播放视频资源')
+    expect(container).toHaveTextContent('m-narr-open')
+  })
+
+  it('does not mutate a direct provider URL when playback fails', () => {
+    const source = 'https://cdn.example.test/video.mp4?signature=stable'
+    const { container } = render(
+      <GameStage {...props({ videoSrc: source, clip: clip('intro', 'm-narr-open') })} />,
+    )
+
+    fireEvent.error(videoFor(container, source))
+
+    expect(container).toHaveTextContent('无法播放视频资源')
+    expect(videoFor(container, source)).toBeInTheDocument()
+  })
 })

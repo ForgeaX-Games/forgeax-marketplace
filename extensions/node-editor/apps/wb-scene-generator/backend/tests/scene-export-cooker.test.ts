@@ -18,6 +18,30 @@ function baseLayer(partial: Partial<BakedLayer> & Pick<BakedLayer, 'nodePath' | 
 }
 
 describe('cookBakedScene', () => {
+  it('skips terrain art for a resolved tile whose rule is missing', () => {
+    const result = cookBakedScene({
+      bundleId: 'missing-rule',
+      sceneName: 'Missing rule',
+      layers: [
+        baseLayer({
+          nodePath: '/World/UnknownTile',
+          nodeName: 'UnknownTile',
+          assetName: 'UnknownTile',
+          assetAlias: 'unknown-tile-alias',
+          assetType: 'tile',
+          cells: [{ x: 0, y: 0, z: 0 }],
+          attributes: { export_role: 'terrain' },
+        }),
+      ],
+      aliases: [{ alias: 'unknown-tile-alias', tileType: '__missing_rule__', widthPx: 16, heightPx: 16 }],
+      generatedAt: new Date('2026-06-04T06:00:00.000Z'),
+    })
+
+    expect(result.terrain.cells).toEqual({})
+    expect(result.terrainAtlasInputs).toEqual([])
+    expect(result.warnings).toContain('Skipped terrain layer "/World/UnknownTile": tile rule "__missing_rule__" is missing or invalid.')
+  })
+
   it('projects terrain cells into reference terrain and config payloads', () => {
     const result = cookBakedScene({
       bundleId: 'demo-bundle',
@@ -183,13 +207,12 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    expect(result.terrain.objects).toEqual([])
-    const oakCells = Object.values(result.terrain.cells).flat()
-      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
-    expect(oakCells).toHaveLength(1)
     // Footprint-centered placement (paintCell.objectFootprintAnchorPoint parity):
     // centerX=(3+4+1)/2=4 → grid x=3.5; maxY=5, minZ=0 → grid y=5.
-    expect(oakCells[0]).toMatchObject({ x: 3.5, y: 5, height: 0 })
+    expect(result.terrain.objects).toEqual([
+      expect.objectContaining({ instanceId: 'tree-1', typeId: 'oak', x: 3.5, y: 5, height: 0 }),
+    ])
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
   })
 
   it('places siheyuan 18×18 at footprint center (renderer paintCell parity)', () => {
@@ -218,11 +241,11 @@ describe('cookBakedScene', () => {
       aliases: [{ alias: 'siheyuan-alias', anchorX: 0.5, anchorY: 0.007, widthPx: 288, heightPx: 96, ppu: 16 }],
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
-    const objCells = Object.values(result.terrain.cells).flat()
-      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
-    expect(objCells).toHaveLength(1)
     // paintCell.test: objectFootprintAnchorPoint → { x: 30, y: 37.5 } → grid {29.5, 37}
-    expect(objCells[0]).toMatchObject({ x: 29.5, y: 37, height: 1 })
+    expect(result.terrain.objects).toEqual([
+      expect.objectContaining({ typeId: 'siheyuan', x: 29.5, y: 37, height: 1 }),
+    ])
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
   })
 
   it('chooses front-bottom footprint row for vertical extent (renderer parity)', () => {
@@ -248,12 +271,11 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    expect(result.terrain.objects).toEqual([])
-    const hutCells = Object.values(result.terrain.cells).flat()
-      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
-    expect(hutCells).toHaveLength(1)
     // centerX=4.5 → x=4; maxY=7, minZ=0 → y=7
-    expect(hutCells[0]).toMatchObject({ x: 4, y: 7, height: 0 })
+    expect(result.terrain.objects).toEqual([
+      expect.objectContaining({ instanceId: 'hut-1', typeId: 'hut', x: 4, y: 7, height: 0 }),
+    ])
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
   })
 
   it('emits one object instance per baked layer when cells have no instanceId (renderer parity)', () => {
@@ -284,7 +306,7 @@ describe('cookBakedScene', () => {
     })
   })
 
-  it('emits one terrain-stack tile for a multi-voxel object layer without instanceId', () => {
+  it('emits a multi-voxel object layer without instanceId once through objects[]', () => {
     const footprint = [
       { x: 21, y: 21, z: 1 }, { x: 22, y: 21, z: 1 }, { x: 21, y: 22, z: 1 }, { x: 22, y: 22, z: 1 },
     ]
@@ -306,14 +328,17 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    expect(result.terrain.objects).toEqual([])
-    const objCells = Object.values(result.terrain.cells).flat()
-      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
-    expect(objCells).toHaveLength(1)
-    expect(objCells[0]).toMatchObject({ x: 21.5, y: 21, height: 1 })
+    expect(result.terrain.objects).toEqual([
+      expect.objectContaining({ instanceId: 'layer:/ground/四合院', typeId: 'siheyuan', x: 21.5, y: 21, height: 1 }),
+    ])
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
+    expect(result.terrainAtlasInputs).toEqual([])
+    expect(result.objectAtlasInputs).toEqual([
+      expect.objectContaining({ role: 'object', alias: 'siheyuan-alias' }),
+    ])
   })
 
-  it('emits one terrain-stack tile per cell for same-z multi-cell interior floors', () => {
+  it('emits a same-z multi-cell object layer once through objects[]', () => {
     const floorCells: BakedCell[] = []
     for (let x = 35; x <= 44; x++) {
       for (let y = 25; y <= 30; y++) {
@@ -338,18 +363,12 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    const objCells = Object.values(result.terrain.cells).flat()
-      .filter((c) => c.template_id.some((t) => t.startsWith('obj__')))
-    expect(objCells.length).toBe(floorCells.length)
+    expect(result.terrain.objects).toHaveLength(1)
+    expect(result.terrain.objects[0]).toMatchObject({ typeId: '地板02', x: 39.5, y: 29, height: 1 })
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
   })
 
-  // The shipped viewer paints the per-cell terrain stack ELEVATION-ASCENDING then
-  // all objects[] strictly last, so objects[] can never be occluded by terrain.
-  // To let higher walls occlude an object (the ambulance-in-pocket, IMAGE 2), a
-  // resolvable ppu=16 object is emitted as a whole-sheet TERRAIN tile on its anchor
-  // cell at its footprint elevation: a wall voxel at a higher elevation paints in a
-  // later group and overdraws it — pure cook data, no viewer change.
-  it('emits a resolvable object into the terrain stack at its elevation so higher terrain occludes it', () => {
+  it('keeps a resolvable object out of terrain templates and cells', () => {
     const result = cookBakedScene({
       bundleId: 'occ',
       sceneName: 'Occlusion',
@@ -378,25 +397,14 @@ describe('cookBakedScene', () => {
       generatedAt: new Date('2026-06-04T06:00:00.000Z'),
     })
 
-    // Object rode the terrain stack — NOT objects[].
-    expect(result.terrain.objects).toEqual([])
-    // A carrier template was registered + atlas tile emitted into the TERRAIN atlas.
-    const objTemplateId = Object.keys(result.terrainConfig.templates).find((t) => t.startsWith('obj__'))
-    expect(objTemplateId).toBeDefined()
-    expect(result.terrainAtlasInputs.some((i) => i.role === 'terrain' && i.alias === 'amb-alias')).toBe(true)
-
-    // The object slice landed in the terrain stack at the object's elevation (z=1),
-    // on its anchor cell (anchor (5,5,1) → screenRow 5-1=4, height group 1).
-    const cellsByElev = result.terrain.cells
-    const objCell = (cellsByElev['1'] ?? []).find((c) => c.template_id.includes(objTemplateId!))
-    expect(objCell).toBeDefined()
-    expect(objCell).toMatchObject({ height: 1 })
-
-    // Occlusion: a higher wall voxel exists at elevation 2 (a later paint group),
-    // so the unmodified viewer's elevation-ascending paint draws it OVER the object.
-    const hasHigherTerrain = Object.entries(cellsByElev)
-      .some(([elev, cells]) => Number(elev) > 1 && cells.some((c) => c.template_id.some((t) => !t.startsWith('obj__'))))
-    expect(hasHigherTerrain).toBe(true)
+    expect(result.terrain.objects).toEqual([
+      expect.objectContaining({ instanceId: 'amb-1', typeId: 'ambulance', x: 5.5, y: 4, height: 1 }),
+    ])
+    expect(Object.keys(result.terrainConfig.templates).some((t) => t.startsWith('obj__'))).toBe(false)
+    expect(result.terrainAtlasInputs.some((i) => i.alias === 'amb-alias')).toBe(false)
+    expect(result.objectAtlasInputs).toEqual([
+      expect.objectContaining({ role: 'object', alias: 'amb-alias' }),
+    ])
   })
 
   // ── Object↔object occlusion (draw order) ──────────────────────────────────
@@ -891,13 +899,13 @@ describe('cookBakedScene content resolution', () => {
 // always differs per layer, and `assetName` can be blank/inconsistent even
 // when two layers resolve to the IDENTICAL library asset (same alias) — so
 // two instances of the same asset could fragment into different object
-// types / obj__ terrain templates while still sharing one atlas graphic id.
+// types while still sharing one object-atlas graphic id.
 // Fix: prefer the RESOLVED alias's own display name (the field `findByName`
 // itself matches assetName against) before falling back to assetName/nodeName.
 describe('cookBakedScene same-asset identity (alias-first type binding)', () => {
   const treeAlias = '[武侠]_[自然]_[大树]_[]_[无]_[写实]_[正常]_[asset]_[16]_[静态]_[]_[0].png'
 
-  it('merges two object layers that resolve to the same alias into ONE object type + ONE obj__ template, even when assetName is blank and nodeName differs', () => {
+  it('merges two object layers that resolve to the same alias into one object type and object-atlas entry, even when assetName is blank and nodeName differs', () => {
     const result = cookBakedScene({
       bundleId: 'demo-bundle',
       sceneName: 'Demo Scene',
@@ -927,11 +935,9 @@ describe('cookBakedScene same-asset identity (alias-first type binding)', () => 
 
     // One object type, named after the resolved alias's display name (field 2: "大树").
     expect(Object.keys(result.objectTypeConfig.types)).toEqual(['大树'])
-    // One obj__ terrain template — not two.
-    const objTemplates = Object.keys(result.terrainConfig.templates).filter((k) => k.startsWith('obj__'))
-    expect(objTemplates).toEqual(['obj__大树'])
-    const objCells = Object.values(result.terrain.cells).flat().filter((c) => c.template_id.includes('obj__大树'))
-    expect(objCells).toHaveLength(2)
+    expect(result.objectAtlasInputs).toHaveLength(1)
+    expect(result.terrain.objects).toHaveLength(2)
+    expect(Object.values(result.terrain.cells).flat()).toEqual([])
   })
 
   it('still honours an explicit object_type_id override even for the same underlying asset (authored contract wins)', () => {

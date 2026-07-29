@@ -47,11 +47,11 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_0` | scene | **Path** 道路（主产物） | → `tree_merge.item_N`（汇总） |
-| `out_1` | scene | **Non-Path** 非道路/剩余区域 | → 下一组 `in_0`（链式 Rest，给湖/田/植被） |
-| `out_2` | scene | 附加场景输出 | 一般不接 |
+| `out_0` | scene | **Scene** 整树汇总口 | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` 汇总根 |
+| `out_1` | scene | **Path** 道路领域产物 | 后续道路细化，禁止接 merge |
+| `out_2` | scene | **Rest** 非道路/剩余区域 | → 下一组 Scene 输入（链式 Rest，给湖/田/植被） |
 | `out_3` | string | PathPath（道路路径句柄） | 一般不接 |
-| `out_4` | string | Non-PathPath（非路路径句柄） | 一般不接 |
+| `out_4` | string | RestPath（剩余区域路径句柄） | 一般不接 |
 
 ## 推荐参数与设置考虑要素
 

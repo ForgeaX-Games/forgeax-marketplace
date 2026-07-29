@@ -14,8 +14,8 @@
  *   - 节点级 layer：每个 cellCount(content) > 0 的节点产出一条 layer，value 为 1-based 序号
  */
 
-import type { Point3D } from '../point3d.js';
 import type { NodeId, SceneGraph, SceneNode } from './graph.js';
+import type { VoxelCell } from './types.js';
 import { childrenOf, getNode, pathOf } from './graph.js';
 import { cellCount, iterCells } from './volume.js';
 
@@ -28,7 +28,7 @@ export interface VoxelLayer {
   value: number;
   /** 节点 schema（可选，用作 type fallback） */
   schema?: string;
-  cells: Point3D[];
+  cells: VoxelCell[];
   /**
    * 多值（multi-value-per-layer）子层：当本节点的体素携带 >1 种不同 token 时，
    * 列出按首次出现顺序的去重 token 列表；单一 token 的节点不产出该字段（单值层）。
@@ -39,12 +39,13 @@ export interface VoxelLayer {
    * 每个 token 的体素桶（与 tokens 对齐），仅多值层产出。渲染器用它在隐藏某子层时
    * 重算父层的可见 cells（cells 始终是全集，cellsByToken 提供按 token 的拆分）。
    */
-  cellsByToken?: Record<string, Point3D[]>;
+  cellsByToken?: Record<string, VoxelCell[]>;
 }
 
 export interface NameListEntry {
   id: number;
   name: string;
+  alias?: string;
   type?: string;
 }
 
@@ -83,11 +84,17 @@ function collect(
     // tokens becomes a multi-value layer (one sub-layer per token). `cells`
     // stays the full set (back-compat); tokens/cellsByToken are added only when
     // there is genuinely more than one token (>1 ⇒ multi-value-per-layer).
-    const cells: Point3D[] = [];
-    const cellsByToken: Record<string, Point3D[]> = {};
+    const cells: VoxelCell[] = [];
+    const cellsByToken: Record<string, VoxelCell[]> = {};
     const tokens: string[] = [];
     for (const c of iterCells(node.content)) {
-      const p: Point3D = { x: c.x, y: c.y, z: c.z };
+      const p: VoxelCell = {
+        x: c.x,
+        y: c.y,
+        z: c.z,
+        token: c.token ?? '',
+        ...(c.state ? { state: c.state } : {}),
+      };
       cells.push(p);
       const tok = c.token ?? '';
       let bucket = cellsByToken[tok];
@@ -117,6 +124,7 @@ function collect(
     out.names.push({
       id: value,
       name: getStringAttr(node.attributes, 'asset_name') ?? '',
+      alias: getStringAttr(node.attributes, 'asset_alias'),
       type: getStringAttr(node.attributes, 'asset_type') ?? node.schema,
     });
   }

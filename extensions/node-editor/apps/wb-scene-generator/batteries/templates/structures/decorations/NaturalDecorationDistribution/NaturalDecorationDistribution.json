@@ -910,7 +910,8 @@
       "portType": "number",
       "access": "tree",
       "sourceNodeId": "node-1781858738320-tkxlv",
-      "sourcePortName": "seed"
+      "sourcePortName": "seed",
+      "customLabelEn": "Seed"
     }
   ],
   "exposedOutputs": [

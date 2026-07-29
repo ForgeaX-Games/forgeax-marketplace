@@ -23,12 +23,6 @@ calendar dates in the project timezone.
 ## Unreleased
 
 ### Fixed
-- **画布性能上报开关按 Vite 的字符串环境变量契约读取。**
-  `packages/node-runtime-react/src/editor/utils/canvasPerfReport.ts:6` 不再把
-  `VITE_CANVAS_PERF_DEBUG` 与布尔值比较，修复严格 TypeScript 构建中的
-  `TS2367`；`pnpm --filter @forgeax/node-runtime-react build` 覆盖该路径。
-  *为什么：* Vite 在客户端注入的环境变量是字符串，额外的布尔分支既不可达，也会让公开镜像安装在构建内核包时失败。
-
 - **电池栏拖入画布不再卡死（重复 onDrop + 巨型拖拽载荷 + 节点 id 碰撞 + Edge 拖拽幽灵图快照）。**
   `Canvas.tsx` 外层 `.canvas` 与内层 `<ReactFlow>` 均注册了 `onDrop`，同一原生 drop 事件会触发两次 `placeBattery`：两次 `node-${Date.now()}` 在同一毫秒内碰撞 → ReactFlow 节点表出现重复 id → 主线程卡死、刷新后仍异常。
   `useCanvasDrop.ts` 以 `timeStamp+clientX+clientY` 去重；新节点 id 改用 `mintCanvasNodeId()`（与 copy/paste、ctrl-drag 一致的随机后缀）。

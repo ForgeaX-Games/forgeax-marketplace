@@ -49,7 +49,7 @@ projects.open → pipeline.get(确认 aw_kp_* 可选)
 - 第一组汇总用 `AddBaseGrid.out_2`(RootScene) 接 `tree_merge`，不是 `out_1`
 - `tree_merge` **建组时**必带 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`，N = 这一步已接入的主产物数（通常 M0 阶段就是 1）
 - **M0 完成 = execute `status: completed` + 摘要里底图格数（如 24×24=576）**
-- **M1+ 每加一个模板的主产物时**，不要再手动 `updateNode(portCount)`+`connect` 两步，改用 `appendMergeItem`（见 [session_operation.md](session_operation.md) 「op schema 速查」），一个 op 顶两步，同一批里连写多个也会正确依次递增
+- **M1+ 每加一个模板时**，只把该模板的 **Scene 汇总口**交给 `appendMergeItem`（见 [session_operation.md](session_operation.md)）；领域口用于细化、Rest 用于串链，二者禁止接 merge
 
 ---
 
@@ -114,17 +114,16 @@ instantiateTemplate(组A) + instantiateTemplate(组B) + …
 
 ## 常见出口速查
 
-| 模板组 | 主产物（→ `appendMergeItem` 到 `aw_m0_merge` / 结构） | Rest（→ 下一组 Scene in） |
-|--------|------------------------------|---------------------------|
-| AddBaseGrid | `out_2` RootScene（M0 首次建 `tree_merge` 用）或 `out_1` BaseNode（仅首接） | — |
-| **AreaPartition** | `out_0` Scene（全部分子区） | `out_1` Zones（无 Rest） |
-| IslandRegions | `out_1` Island | `out_2` Rest(水域) |
-| PickOneBuilding | `out_1` Building → BuildingStructures | `out_2` Rest |
-| **PickOneBuilding（补充）** | `out_1` Building → BuildingStructures（叙事内构） | `out_2` Rest → 下一栋 PickOne / 装饰 |
-| PathConnectionLink / RW | `out_1` Path | `out_2` Rest → 下一组（**禁止**同 Rest fan-out 到 Mountain+装饰） |
-| MountainContourGenerate | `out_2` Mountain（该模板主/Rest 编号交叉，优先用 `{"label":"Mountain"}`） | `out_1` Rest |
-| HillContourGenerate | `out_1` Hill | `out_2` Rest |
-| NaturalDecorationDistribution 等 | `out_1` Decoration | `out_2` Rest |
+| 模板组 | Scene 汇总口（唯一可 merge） | 领域细化口 | Rest（→ 下一组 Scene in） |
+|--------|------------------------------|------------|---------------------------|
+| AddBaseGrid | `out_2` RootScene（M0 首次建 `tree_merge` 用） | `out_1` BaseNode（仅首接） | — |
+| **AreaPartition** | `out_0` Scene | `out_1` Zones | — |
+| IslandRegions | `out_0` Scene | `out_1` Island | `out_2` Rest(水域) |
+| PickOneBuilding | `out_0` Scene | `out_1` Building → BuildingStructures | `out_2` Rest |
+| PathConnectionLink / RW | `out_0` Scene | `out_1` Path | `out_2` Rest → 下一组（**禁止** fan-out） |
+| MountainContourGenerate | `out_0` Scene | `out_2` Mountain | `out_1` Rest |
+| HillContourGenerate | `out_0` Scene | `out_1` Hill | `out_2` Rest |
+| NaturalDecorationDistribution 等 | `out_0` Scene | `out_1` Decoration | `out_2` Rest |
 
 > 上表所有「禁止 fan-out」的地方，`pipeline.execute` 现在会自动检测同一上游 Rest/Scene 端口并行接给 ≥2 个组、以及非根节点的局部 `tree_merge` 汇总 ≥2 份内容，命中会在 `verification.topologyIssues` 里直接抛错并给出 `suggestedOps`——不用等到自己顺着报错排查半天才发现，也不用靠这张表死记硬背。
 

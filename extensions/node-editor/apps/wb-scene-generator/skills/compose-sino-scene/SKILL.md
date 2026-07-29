@@ -207,21 +207,21 @@ description: >-
 2. **`applyBatch` 后必 `scene:pipeline.get` 核对** nodes/edges 真进图（防"ok 却空"）；忘了 groupId 时用 `nameContains`/`opIdIn` 模糊查，不用拉整图。
 3. **`scene:pipeline.execute` 返回 `completed` ≠ 每组都成功**——必接 scene 端口悬空会静默空跑；每加一组逐组验证；同时看 `verification.topologyIssues`（Rest 链 fan-out / 局部非法 merge 现在会直接 throw 并带 `suggestedOps`，不用等汇总后才发现）。
 4. **`PathConnectionLink` / `PathConnectionRandomWalk`** 的 `in_2`+`in_3` 必接；**禁止**旧 templateId `PathConnection`；POI 须提门（见 PathConnection.md §1）。
-5. **`tree_merge` 建组时必带 params**：scene 汇总 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`；POI 列表 `{"inferredAccess":"item","inferredType":"point2d","portCount":N}`。**建完之后再往里追加一路（比如接第 2/3 个主产物到根 `aw_m0_merge`），用 `appendMergeItem` 复合op**（自动分配 `item_N`、递增 `portCount`），不要手动数当前 `portCount` 再拼 `item_N`。
+5. **`tree_merge` 建组时必带 params**：scene 汇总 `{"inferredAccess":"tree","inferredType":"scene","portCount":N}`；POI 列表 `{"inferredAccess":"item","inferredType":"point2d","portCount":N}`。根 `aw_m0_merge` 追加一路时，只能把模板的 **Scene 汇总口**交给 `appendMergeItem`（自动分配 `item_N`、递增 `portCount`）；领域口与 Rest 口禁止汇总。
 6. **`applyBatch` 必带 `opts.actor:"ai:sino"`**——这是白名单硬门的身份标记。
 7. **强制顺序**：`empty_scene → AddBaseGrid`（拿 BaseNode）+ seed + 汇总骨架先跑通（M0 execute）→ 再实例化后续组（**参数已知的相邻组可批量连完再一起 execute；依赖上游 execute 结果的组分步来**，见「可分步批量」）→ 后续组 `in_0` 接 BaseNode/上一组 Rest。
 
 **链式串联范式（速记）：**
 - 起手：`empty_scene` → `AddBaseGrid` → `out_1`(BaseNode) 作后续 `in_0` 起点。
 - 功能分区(可选，默认分区手段)：上一组 Rest/BaseNode → `AreaPartition.in_0`；读 checklist `partitionPointsJson`/`partitionAreasJson`；`in_6` 默认 **organic**（勿改 rectilinear）；各区中心 `manual_points` → `tree_merge`(item) → `in_1`。**无水域** — 详见 [AreaPartition.md](instructions/pipelines/AreaPartition.md)。
-- 海岛分区(可选，**仅海洋/群岛场景**)：`AddBaseGrid.out_1` → `IslandRegions.in_0`；多个 `manual_points` → `tree_merge`(item) → `in_1`(各岛锚点)；`in_2` 接各岛 IslandSizes、`in_4` 接岛屿资产名。**`out_1`(Island) 陆地作后续建筑/装饰层的 `in_0`**，`out_2`(Rest) = 水域。
+- 海岛分区(可选，**仅海洋/群岛场景**)：`AddBaseGrid.out_1` → `IslandRegions.in_0`；多个 `manual_points` → `tree_merge`(item) → `in_1`(各岛锚点)；`in_2` 接各岛 IslandSizes、`in_4` 接岛屿资产名。**`out_0`(Scene) → `appendMergeItem` 汇总**；**`out_1`(Island) 作后续建筑/装饰层 Scene 输入**（领域细化）；`out_2`(Rest) = 水域/Rest 串链。
 - 地形分带(可选，深浅海/海岸内陆)：把某区域节点 → `DistanceZones.in_0`；`number_const` → `in_1`(Threshold 带宽格数)；近/远资产名接 `in_4`/`in_6`。**海洋分深浅** `in_2` 留默认(false)：`out_1`=浅海、`out_2`=深海；**岛屿分海岸**用 `toggle`(value=true) → `in_2`：`out_1`=海岸线、`out_2`=内陆。常接在 `IslandRegions` 的 `out_2`(水域，分深浅) 或 `out_1`(岛屿，分海岸) 之后。
-- 地形等高(可选，**道路连通之后、装饰之前**)：在**叙事核心区之外**的 Rest 上接 **`MountainContourGenerate.in_0`**（建筑/道路/广场周边不加高差）；`number_const` → `in_3`(MaxElevationLayers，**建议 `1~2`，不超过 `2`**)；`text_panel` → `in_1`(AssetName)。**`out_2`(Mountain，即 `{"label":"Mountain"}`) 用 `appendMergeItem` 接入 `aw_m0_merge`**；**`out_1`(Rest) → 装饰链**（该模板 portName 主/Rest 编号交叉，用 label 连线可避开，见 [MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md)）。
+- 地形等高(可选，**道路连通之后、装饰之前**)：在**叙事核心区之外**的 Rest 上接 **`MountainContourGenerate.in_0`**；**`out_0`(Scene) → `appendMergeItem` 汇总**；**`out_1`(Rest) → 装饰链**；`out_2` 是 Mountain 领域口（见 [MountainContourGenerate.md](instructions/pipelines/MountainContourGenerate.md)）。
 - 建筑：**`PickOneBuilding`**（单栋）；**多栋/村庄暂禁 `PickMultiBuildings`** — 改用多次 `PickOneBuilding`，每次 `out_2`(Rest) → 下一栋 `in_1`(Scene) 串联（见 [PickOneBuilding.md](instructions/pipelines/PickOneBuilding.md) §5）。
 - 结构(可选)：`Building.out_*` → `BuildingStructures.in_0` → `out_0` 供道路 POI 提门。
 - 道路：**单个** `PathConnectionLink`（城镇）或 `PathConnectionRandomWalk`（野路）— Rest → `in_2`；POI 提门 → `in_3`。**确认连通后再 Hill/Mountain（Rest 串链，禁止 fan-out）。**
 - 装饰/湖（**按选型规则，不必硬凑三种**）：高差之后的 Rest → **`PlaceOneDecoration`**(有尺寸/落点的物件，可多组串) → **`LocalPreciseDecoration`**(简单小物件簇) → **`NaturalDecorationDistribution`**(简单植被背景填充) → **`LakeRegions`**（按需）。有尺寸落点优先 PlaceOne；Local/Natural **只**挂简单物件。前三个装饰模板 `out_2`(Rest)→下一组 `in_1` 链式；**`LakeRegions` 的 Rest 出口是 `out_0`（不是 `out_2`），Scene 入口仍是 `in_1`**——用 `{"label":"Rest"}`/`{"label":"Scene"}` 连线，别套错编号。
-- 汇总：各组主产物依次用 `appendMergeItem` 接入根 `aw_m0_merge`（可配 `{"label":"..."}` 寻源端口，不用手动算 `item_N`/`portCount`）→ `tree_flatten` → `scene_merge_subtrees` → `scene_output`。POI/名称等列表类中间汇总仍用手写 `tree_merge`（`inferredAccess:"item"`）。
+- 汇总：各组 **`Scene` 汇总口**依次用 `appendMergeItem`（`{ label:"Scene", portName:"out_N" }`）接入根 `aw_m0_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`。POI/名称等列表类中间汇总仍用手写 `tree_merge`（`inferredAccess:"item"`）。
 - 统一种子：`seed_control.seed` 扇出到各组 Seed。
 
 ---

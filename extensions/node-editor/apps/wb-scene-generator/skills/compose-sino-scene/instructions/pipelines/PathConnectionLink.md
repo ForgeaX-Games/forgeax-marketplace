@@ -24,7 +24,8 @@
 
 | OUT | 去向 |
 |-----|------|
-| `out_1` | Path → `appendMergeItem` → `aw_m0_merge` |
+| `out_1` | Path | 调试 / 领域引用 |
+| `out_0` | Scene | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`） |
 | `out_2` | **Rest** → 下一组 `in_0`/`in_2`/`in_1`（Mountain/Hill/装饰 **串链**，禁止 fan-out） |
 
 POI 推导、自检清单、merge 写法：**完全同** [PathConnection.md](PathConnection.md)。

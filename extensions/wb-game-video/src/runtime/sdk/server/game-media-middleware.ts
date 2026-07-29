@@ -104,6 +104,7 @@ function createHandler(gameHostOrigin: string): Middleware {
       const location = assetPlaybackLocation(asset, gameId)
       res.statusCode = 307
       res.setHeader('location', location)
+      res.setHeader('cache-control', 'no-store')
       res.end()
     } catch (error) {
       sendJson(res, 502, { error: error instanceof Error ? error.message : 'failed to resolve asset' })

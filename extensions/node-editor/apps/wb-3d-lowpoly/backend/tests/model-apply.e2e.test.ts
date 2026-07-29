@@ -46,6 +46,77 @@ function canon(statements: readonly Statement[]): Record<string, { op: string; a
 }
 
 describe('model.apply e2e', () => {
+  it('returns source hashes, non-blocking metrics, and compact QC metadata', async () => {
+    const app = await buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/apply',
+        payload: { source: ASSEMBLY },
+      })
+      const body = res.json()
+      expect(body.ok).toBe(true)
+      expect(body.sourceHash).toMatch(/^[a-f0-9]{64}$/)
+      expect(body.metrics.nonBlocking).toBe(true)
+      expect(typeof body.metrics.score).toBe('number')
+      expect(typeof body.metrics.primitiveRatio).toBe('number')
+      expect(body.qc.total).toBeGreaterThanOrEqual(0)
+      expect(body.qc.omittedCount).toBeGreaterThanOrEqual(0)
+      expect(body.qualityReport.hash).toMatch(/^[a-f0-9]{64}$/)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects stale patches and applies a matching source-hash patch', async () => {
+    const app = await buildApp()
+    try {
+      await app.inject({ method: 'POST', url: '/api/v1/projects/main/model/apply', payload: { source: ASSEMBLY } })
+      const got = (await app.inject({ method: 'GET', url: '/api/v1/projects/main/model/get' })).json()
+      const stale = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/patch',
+        payload: { baseHash: 'stale', patches: [{ line: 2, content: 'base = box(size=[0.3, 0.2, 0.1])' }] },
+      })
+      expect(stale.statusCode).toBe(409)
+      expect(stale.json().code).toBe('source-hash-conflict')
+
+      const patched = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/patch',
+        payload: { baseHash: got.sourceHash, patches: [{ line: 2, content: 'base = box(size=[0.3, 0.2, 0.1])' }] },
+      })
+      expect(patched.statusCode).toBe(200)
+      expect(patched.json().ok).toBe(true)
+      expect(patched.json().sourceHash).not.toBe(got.sourceHash)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('bakeBatch reports partial failures without discarding item receipts', async () => {
+    const app = await buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/main/model/bake-batch',
+        payload: {
+          items: [
+            { name: 'valid', source: 'b = box(size=[1,1,1])', target: 'b', expectedDims: [1, 1, 1] },
+            { name: 'invalid', source: 'x = unknown_shape(foo=1)', target: 'x' },
+          ],
+        },
+      })
+      const body = res.json()
+      expect(body.count).toBe(2)
+      expect(body.failed).toBeGreaterThanOrEqual(1)
+      expect(body.results).toHaveLength(2)
+      expect(body.results[1]).toMatchObject({ name: 'invalid', ok: false })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('compiles + executes a primitive assembly and returns a compact receipt', async () => {
     const app = await buildApp()
     try {
@@ -317,6 +388,48 @@ describe('model.apply e2e', () => {
       expect(listed.count).toBe(1)
       expect(listed.parts[0].name).toBe('shell')
       expect(listed.parts[0].filename).toBe(body.baked.filename)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('bakes Architecture DSL at authored slab/window/door dimensions', async () => {
+    const app = await buildApp()
+    try {
+      const bake = async (source: string, id: string) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/v1/projects/main/model/apply',
+          payload: { source, bake: id },
+        })
+        expect(res.statusCode).toBe(200)
+        const body = res.json()
+        expect(body.ok, JSON.stringify(body)).toBe(true)
+        return body.baked as { bbox_min: number[]; bbox_max: number[] }
+      }
+      const dims = (b: { bbox_min: number[]; bbox_max: number[] }) =>
+        b.bbox_max.map((v, i) => v - b.bbox_min[i])
+
+      expect(dims(await bake(
+        'wall1 = wall(length=9, height=3, thickness=0.28, openings=[[1,1.8,0.9,2]])',
+        'wall1',
+      ))).toEqual([
+        expect.closeTo(9, 5), expect.closeTo(0.28, 5), expect.closeTo(3, 5),
+      ])
+      expect(dims(await bake('slab = floor_slab(size=[9,7], thickness=0.35)', 'slab'))).toEqual([
+        expect.closeTo(9, 5), expect.closeTo(7, 5), expect.closeTo(0.35, 5),
+      ])
+      expect(dims(await bake('win = window(size=[1.8,1.1], depth=0.28, frame=0.07)', 'win'))).toEqual([
+        expect.closeTo(1.8, 5), expect.closeTo(0.28, 5), expect.closeTo(1.1, 5),
+      ])
+      expect(dims(await bake('frame1 = door_frame(size=[1.4,2.3], depth=0.28, frame=0.09)', 'frame1'))).toEqual([
+        expect.closeTo(1.4, 5), expect.closeTo(0.28, 5), expect.closeTo(2.3, 5),
+      ])
+      const leaf = await bake('leaf1 = door_leaf(size=[1.1,2.15], thickness=0.05, hinge="left")', 'leaf1')
+      expect(dims(leaf)).toEqual([
+        expect.closeTo(1.1, 5), expect.closeTo(0.05, 5), expect.closeTo(2.15, 5),
+      ])
+      expect(leaf.bbox_min[0]).toBeCloseTo(0, 5)
     } finally {
       await app.close()
     }

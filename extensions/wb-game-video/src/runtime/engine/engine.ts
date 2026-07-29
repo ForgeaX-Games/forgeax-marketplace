@@ -108,6 +108,10 @@ export class GraphRuntime {
   // spawn 出的瞬态叠层：到 removeAtMs（本节点 elapsedMs）即发 removeOverlay。
   private pendingSpawns: Array<{ elementId: string; nodeId: string; removeAtMs: number }> = []
   private spawnSeq = 0
+  /** 当前节点已选中、等待统一结算点提交的事件边。 */
+  private pendingRoute: { settleNodeId: string; edgeId: string } | null = null
+  /** 固定时间结算只执行一次；到点后才发生的延迟选择按立即跳转处理。 */
+  private routingSettled = false
 
   /** 本局组件 / Plugin 表（多局隔离；缺省用模块默认表以兼容旧单测）。 */
   readonly components: ComponentRegistry
@@ -287,12 +291,7 @@ export class GraphRuntime {
     for (const srcId of this.eventRoutingNodeIds(el)) {
       const edge = this.selectHandleEdge(srcId, outcome)
       if (edge) {
-        if (srcId !== node.id) {
-          // 从容器出边走事件：整个调用栈被清掉，但**不动 BGM 栈**（清栈不是作者说的「结束」）。
-          this.state.callStack = []
-          this.returningTo.clear()
-        }
-        this.traverse(edge)
+        this.requestEventRoute(edge)
         break
       }
     }
@@ -495,6 +494,9 @@ export class GraphRuntime {
       this.setPhase('ended')
       return
     }
+    // 待提交路由只属于离开前的演出节点，任何新入场都不得继承。
+    this.pendingRoute = null
+    this.routingSettled = false
     // 调度层公共入场：认领当前节点、清弹回标记、置时钟原点。节点态重置 / 换片 / 相位、跑元素 / 交互
     // 全由 kind.execute 经 ctx.beginPerform / beginResume 表达（descend 下钻不重置、不重播）。
     const returning = this.returningTo.delete(id)
@@ -574,6 +576,10 @@ export class GraphRuntime {
       durationMs: node.data.durationMs,
     })
     this.setPhase('playing')
+    // window 是显隐唯一 SSOT（有 window 就跳过 trigger，见 nodes/perf.ts 与 flushTimeline）：
+    // 这里立刻按 elapsed=0 冲一遍窗口，让 `startMs<=0` 的子件与 `trigger:enter` 同帧出现，
+    // 而不是等宿主第一次 tick 才冒出来（headless / 首帧前就该可见）。
+    this.tickWindows(node, 0)
     // 普通节点的 `data.bgm` 只走这条演出入场路径（容器 returning 走 beginResume，不会到这里）；
     // 容器排除在外是因为它那句归 descend 管，否则一次进入会 apply 两遍。
     if (!isSubflowContainerData(node.data)) this.applyNodeBgm(node)
@@ -632,7 +638,18 @@ export class GraphRuntime {
 
     this.tickWindows(node, elapsedMs)
     this.reapSpawns(elapsedMs)
-    this.consumeRedirect()
+    if (this.consumeRedirect()) return
+
+    const settlement = node.data.routingSettlement
+    if (
+      !this.routingSettled &&
+      settlement?.type === 'at' &&
+      Number.isFinite(settlement.ms) &&
+      elapsedMs >= settlement.ms
+    ) {
+      this.routingSettled = true
+      this.advanceAuto()
+    }
   }
 
   /** window 时段：到 startMs 显示、到 endMs 移除（表现层叠层的可见时段，如漂字/计时器只显示某段）。 */
@@ -670,8 +687,13 @@ export class GraphRuntime {
     const dur = typeof node.data.durationMs === 'number' ? node.data.durationMs : undefined
     const endMs = Math.max(this.state.elapsedMs, dur ?? this.state.elapsedMs)
     this.flushTimeline(endMs)
+    // 固定时间结算可能已在 flushTimeline 内换了节点；旧媒体的结束回调不得再推进新节点。
+    if (this.state.currentNodeId !== node.id) return this.drain()
     if (this.state.phase !== 'playing') return this.drain()
     if (this.consumeRedirect()) return this.drain()
+    // 固定时间已结算但没有可走边时保持等待；片尾不得重复跑 complete。
+    if (this.routingSettled) return this.drain()
+    this.routingSettled = true
     // 时间驱动唤醒（媒体播完/时长到点）→ 交由 NodeKind.next 决定走向（缺省 advance）。
     const kind = this.nodeKinds.resolve(node)
     const intent: NextIntent = kind?.next ? kind.next(this.nodeCtx(node, false)) : { kind: 'advance' }
@@ -708,13 +730,7 @@ export class GraphRuntime {
       } else if (a.kind === 'advance') {
         const edge = this.edgeById(a.edgeId)
         if (edge && this.eventRoutingNodeIds(el).includes(edge.source)) {
-          if (edge.source !== this.state.currentNodeId) {
-            // 同上：显式 advance 走的是容器的边，调用栈清空、BGM 栈原样。
-            this.state.callStack = []
-            this.returningTo.clear()
-          }
-          this.traverse(edge)
-          return true
+          return this.requestEventRoute(edge)
         }
       }
       if (this.redirect) return false
@@ -1097,6 +1113,15 @@ export class GraphRuntime {
       this.applyCompleteReactionEffects(curNode)
       if (this.consumeRedirect()) return
     }
+    const pending = this.pendingRoute?.settleNodeId === nodeId ? this.pendingRoute : null
+    this.pendingRoute = null
+    if (pending) {
+      const pendingEdge = this.edgeById(pending.edgeId)
+      if (pendingEdge) {
+        this.traverseEventEdge(pendingEdge)
+        return
+      }
+    }
     const edge = this.selectAutoEdge(nodeId)
     if (!edge) {
       // 声明式等待：仅有 event 出边、无 default → 停在本节点等组件 emit（不结束本局）。
@@ -1133,10 +1158,32 @@ export class GraphRuntime {
     this.enterNode(edge.target)
   }
 
+  /** 事件边：立即跳转，或锁定首个选择等待节点统一结算。 */
+  private requestEventRoute(edge: GameEdge): boolean {
+    if (edge.data?.transition !== 'onSettlement' || this.routingSettled) {
+      this.traverseEventEdge(edge)
+      return true
+    }
+    if (!this.pendingRoute && this.state.currentNodeId) {
+      this.pendingRoute = { settleNodeId: this.state.currentNodeId, edgeId: edge.id }
+    }
+    return false
+  }
+
+  /** 保留容器挂载事件从容器边离开时清调用栈的既有语义。 */
+  private traverseEventEdge(edge: GameEdge): void {
+    if (edge.source !== this.state.currentNodeId) {
+      this.state.callStack = []
+      this.returningTo.clear()
+    }
+    this.traverse(edge)
+  }
+
   private finishEnd(_nodeId: string): void {
     // 无出边且调用栈空 → 本局结束。引擎只负责把相位切到 ended，不强制任何结局文案；
     // 胜负/结局表现完全交给节点 overlay 与图规则（reactions），配了什么才演什么。
     this.setPhase('ended')
+    this.pendingRoute = null
   }
 }
 

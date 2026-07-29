@@ -2,7 +2,7 @@
 // it only knows the Term interface (energy + accumulated gradient). Operates in
 // whatever units the model is given (solve.ts normalizes first).
 
-import type { ProblemModel, Term, Vec2, SolveResult } from './types.ts'
+import type { ProblemModel, SolverState, Term, Vec2, SolveResult } from './types.ts'
 
 export interface OptimizeOptions {
   iterations: number
@@ -57,13 +57,19 @@ export function optimize(model: ProblemModel, terms: Term[], options: OptimizeOp
 
   const seed = options.seed || hashSeed(model.nodes.map((nd) => nd.id))
   const pos = initPositions(model, seed)
+  const logRadii = model.nodes.map((node) => Math.log(Math.max(node.radius, 1e-9)))
+  const radii = model.nodes.map((node) => node.radius)
 
-  // Adam moment buffers, one per coordinate (x and y interleaved per node).
+  // Adam moment buffers for x/y coordinates and container log-radii.
   const mX = new Float64Array(n)
   const mY = new Float64Array(n)
   const vX = new Float64Array(n)
   const vY = new Float64Array(n)
+  const mR = new Float64Array(n)
+  const vR = new Float64Array(n)
   const grad: Vec2[] = Array.from({ length: n }, () => ({ x: 0, y: 0 }))
+  const logRadiusGradients = new Float64Array(n)
+  const state: SolverState = { positions: pos, radii, logRadiusGradients }
 
   const { beta1, beta2, epsilon } = options.adam
   const lr = options.learningRate
@@ -75,11 +81,12 @@ export function optimize(model: ProblemModel, terms: Term[], options: OptimizeOp
     for (let i = 0; i < n; i += 1) {
       grad[i].x = 0
       grad[i].y = 0
+      logRadiusGradients[i] = 0
     }
     energy = 0
     perTerm = {}
     for (const term of terms) {
-      const e = term.energyAndGradient(pos, model, grad)
+      const e = term.energyAndGradient(state, model, grad)
       perTerm[term.name] = (perTerm[term.name] ?? 0) + e
       energy += e
     }
@@ -95,8 +102,14 @@ export function optimize(model: ProblemModel, terms: Term[], options: OptimizeOp
       mY[i] = beta1 * mY[i] + (1 - beta1) * grad[i].y
       vY[i] = beta2 * vY[i] + (1 - beta2) * grad[i].y * grad[i].y
       pos[i].y -= (lr * (mY[i] / bc1)) / (Math.sqrt(vY[i] / bc2) + epsilon)
+      if (model.nodes[i].isContainer) {
+        mR[i] = beta1 * mR[i] + (1 - beta1) * logRadiusGradients[i]
+        vR[i] = beta2 * vR[i] + (1 - beta2) * logRadiusGradients[i] * logRadiusGradients[i]
+        logRadii[i] -= (lr * (mR[i] / bc1)) / (Math.sqrt(vR[i] / bc2) + epsilon)
+        radii[i] = Math.exp(logRadii[i])
+      }
     }
   }
 
-  return { positions: pos, energy, perTerm, iterations: options.iterations }
+  return { positions: pos, radii, energy, perTerm, iterations: options.iterations }
 }

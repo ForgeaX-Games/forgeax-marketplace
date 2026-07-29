@@ -3,6 +3,10 @@
 > 权威详情：[../../../../batteries/templates/scene/PickOneBuilding/README.md](../../../../batteries/templates/scene/PickOneBuilding/README.md)
 > templateId：`PickOneBuilding`。多栋/村庄场景改多次本模板 `out_2`(Rest) 串联（`PickMultiBuildings` 暂禁不开放，见 [pipelines/PickMultiBuildings.md](PickMultiBuildings.md)）。端口序号和语义（`label`）以 instantiateTemplate 返回的 exposedInputs/exposedOutputs 为准（勿 templates.get 预读）；本文档在 `label` 缺失或需要接线配方/数值参考时作补充。
 
+## 0. 接线（组壳黑盒）
+
+`instantiateTemplate` 后**只连暴露口**。组外建 `manual_points`/`text_panel`/`number_const` → `Point`/`BuildingName`/`BuildingAsset`/`AreaWidth`/`AreaHeight`/`BuildingHeight`/`Seed`；多栋 `Rest`→下一栋 `Scene`。**禁止**查组内 `scene_focus_path`/`manual_points` id。
+
 ## 1. 管线电池的基本介绍
 
 管线所属层级：**建筑层级（单栋）**
@@ -26,9 +30,10 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Building 建筑区域（主产物） | `appendMergeItem` → `aw_m0_merge` / `BuildingStructures.in_0` |
+| `out_1` | scene | Building 建筑区域（主产物） | `BuildingStructures.in_0`（细化，**禁止**直连 merge） |
+| `out_0` | scene | Scene 整树汇总口 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`） |
 | `out_3` | string | BuildingPath 路径句柄 | 拼门路径（`string_concat`） |
-| `out_2` | scene | Rest 剩余空地 | 下一组 `in_0` |
+| `out_2` | scene | Rest 剩余空地 | 下一栋/下一组 Scene 口（多为 `in_1`，用 `{ label:"Scene" }`）；**直接组壳对组壳，勿经组内 `scene_focus_path`** |
 
 ## 4. 推荐参数
 

@@ -284,6 +284,10 @@ export interface NodeData {
   media?: NodeMedia
   mediaPlayMode?: 'once' | 'loop'
   /**
+   * 延迟事件边的统一结算点。缺省在演出结束时结算；`at` 到点时提前收尾并离开节点。
+   */
+  routingSettlement?: RoutingSettlement
+  /**
    * 可选播放时长上限（ms）。Inspector 不再暴露编辑；字段仍由 bindVideo、既有图数据、
    * 以及程序化写入保留，runtime 继续消费。
    * - 无视频节点：作停留节拍 / 时间轴标尺。
@@ -379,10 +383,19 @@ export interface SubFlowPackDef {
   requires?: { vars?: string[]; entities?: string[] }
 }
 
-/** 边路由数据（edge.data）——仅条件 / 权重；副作用走 reactions / option.effects。 */
+/** 延迟事件边共用节点的统一结算点。 */
+export type RoutingSettlement =
+  | { type: 'complete' }
+  | { type: 'at'; ms: number }
+
+/** 事件边的跳转方式；缺省 `immediate` 保持旧图行为。 */
+export type EdgeTransition = 'immediate' | 'onSettlement'
+
+/** 边路由数据（edge.data）——条件 / 权重 / 跳转方式；副作用走 reactions / option.effects。 */
 export interface EdgeRouting {
   condition?: GraphCondition
   weight?: number
+  transition?: EdgeTransition
 }
 
 /**

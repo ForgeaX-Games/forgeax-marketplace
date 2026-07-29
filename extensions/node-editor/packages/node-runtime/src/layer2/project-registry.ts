@@ -53,11 +53,36 @@ export interface CallerIdentity {
 }
 
 // Current holder of a project's exclusive lock (process-lifetime only).
+// `leaseExpiresAt` (epoch ms) makes the lock self-healing: renewed on every
+// successful mutation (and explicit heartbeat) via `touchLock`, and swept by
+// `sweepExpiredLock` before any lock read/write. A crashed or abandoned agent
+// therefore never wedges a project shut for longer than one lease window —
+// see the queue design in `openProject`.
 export interface ProjectLockInfo {
   agentId: string
   kind: CallerIdentity['kind']
   acquiredAt: string
+  leaseExpiresAt: number
   sessionId?: string
+}
+
+// A waiting-in-line AI agent (not yet holding the lock). `lastSeenAtMs` is
+// bumped every time the agent polls `openProject` again — an entry nobody
+// has touched in `queueEntryIdleMs` is dropped so an abandoned queue slot can
+// never block everyone behind it.
+export interface ProjectQueueEntry {
+  agentId: string
+  kind: CallerIdentity['kind']
+  enqueuedAt: string
+  lastSeenAtMs: number
+  sessionId?: string
+}
+
+// Public view of one agent's position in a project's wait queue.
+export interface ProjectQueueStatus {
+  agentId: string
+  position: number
+  aheadOf: string[]
 }
 
 // Machine-readable lock-denial codes. `mutation-denied-not-open` is the ONLY
@@ -75,11 +100,23 @@ export type LockDeniedCode =
   | 'mutation-denied-no-project'
   | 'mutation-denied-not-open'
   | 'mutation-denied-locked-by-other'
+  | 'force-unlock-denied'
 
 // Result of a lock op — discriminated so callers can surface `reason` verbatim.
 // The failure variant carries a machine-readable `code` for programmatic
 // recovery (the human-readable `reason` stays for logs / direct surfacing).
 export type LockResult = { ok: true } | { ok: false; reason: string; code: LockDeniedCode }
+
+// Result of `claimWriteAccess` (exclusive write lock). `openProject` is a
+// shared attach and always returns `{ ok:true, queued:false }` for an
+// existing project — multiple agents may open the same project for analysis.
+// Write exclusivity is enforced only when mutating via `claimWriteAccess` /
+// `ensureMutationAccess`. `queued: true` means the caller joined the FIFO
+// write wait line (not an error).
+export type OpenOrQueueResult =
+  | { ok: true; queued: false }
+  | { ok: false; queued: true; code: 'project-queued'; position: number; aheadOf: string[]; reason: string }
+  | { ok: false; queued?: false; code: LockDeniedCode; reason: string }
 
 // Per-project storage paths, stored relative to the workspace root for portability.
 export interface ProjectStorageRef {
@@ -135,6 +172,8 @@ export interface WorkspaceState {
   lastOpenedAt: string
   /** Populated at read time from the in-memory lock table (not persisted). */
   executingProjectIds?: string[]
+  /** Populated at read time from the in-memory wait queues (not persisted). */
+  queuedProjectIds?: string[]
 }
 
 // A full project record (manifest only; the graph is fetched via the Runtime).
@@ -207,9 +246,19 @@ export interface ProjectRegistryOptions {
   legacyStateDir?: string
   // Optional asset cleanup hook on delete (app owns its asset library).
   onDeleteProjectAssets?: (projectId: string, policy: AssetDeletePolicy) => void | Promise<void>
+  // How long an AI lock survives without renewal before it auto-expires and
+  // is handed to the next queued agent (ms). Renewed on every successful
+  // mutation and by the explicit heartbeat call. Default 10 minutes.
+  lockLeaseMs?: number
+  // How long a queued (not-yet-holding) write waiter may go without polling
+  // `claimWriteAccess` again before its wait-queue slot is dropped (ms).
+  // Default 15 minutes.
+  queueEntryIdleMs?: number
 }
 
 const RECENT_LIMIT = 10
+const DEFAULT_LOCK_LEASE_MS = 10 * 60_000
+const DEFAULT_QUEUE_ENTRY_IDLE_MS = 15 * 60_000
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -234,6 +283,25 @@ function writeJsonAtomic(path: string, value: unknown): void {
   const tmp = `${path}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`
   writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf-8')
   renameSync(tmp, path)
+}
+
+// Identity of an exclusive-lock/queue *holder*, distinct from `agentId` alone.
+// Two concurrent callers can legitimately share the same ForgeaX agent
+// *role* name (e.g. every construction-queue item dispatches to the fixed
+// role `sino-constructor`) while being completely independent actors — the
+// only thing that actually distinguishes them is `sessionId`. Keying the
+// lock/queue tables on `agentId` alone would let two such concurrent
+// sessions silently alias each other: the second one's `acquireProjectLock`
+// would see "I already hold this project" (true only in the sense that
+// *some* sino-constructor session does) and be allowed to mutate right
+// alongside the first, defeating the whole point of the lock. Falling back
+// to `agentId` alone when `sessionId` is absent keeps every existing
+// (session-less) caller's behavior byte-for-byte unchanged — this is a
+// strict refinement, not a behavior change, for anyone who never passes a
+// sessionId. The NUL separator can't appear in either field, so this is
+// injective for any real agentId/sessionId pair.
+function holderKey(agentId: string | undefined, sessionId: string | undefined): string {
+  return `${agentId ?? ''}\u0000${sessionId ?? ''}`
 }
 
 function metaFromManifest(m: ProjectManifest): ProjectMeta {
@@ -280,6 +348,15 @@ export class ProjectRegistry {
   private readonly locks = new Map<string, ProjectLockInfo>()
   private readonly agentLock = new Map<string, string>()
 
+  // Shared session attach (soft open): many agents may open the same project
+  // for analysis. Distinct from exclusive write locks above.
+  private readonly agentSessions = new Map<string, string>()
+
+  // ── FIFO write wait queue, one per project (AI callers only) ─────────────
+  private readonly queues = new Map<string, ProjectQueueEntry[]>()
+  private readonly lockLeaseMs: number
+  private readonly queueEntryIdleMs: number
+
   constructor(opts: ProjectRegistryOptions) {
     this.root = opts.workspaceRoot
     this.factory = opts.createRuntime
@@ -288,6 +365,8 @@ export class ProjectRegistry {
     this.defaultId = opts.defaultProjectId ?? 'main'
     this.legacyStateDir = opts.legacyStateDir ?? 'state'
     this.onDeleteAssets = opts.onDeleteProjectAssets
+    this.lockLeaseMs = opts.lockLeaseMs ?? DEFAULT_LOCK_LEASE_MS
+    this.queueEntryIdleMs = opts.queueEntryIdleMs ?? DEFAULT_QUEUE_ENTRY_IDLE_MS
   }
 
   // ── paths ────────────────────────────────────────────────────────────────
@@ -395,6 +474,7 @@ export class ProjectRegistry {
       ...this.workspace,
       recentProjectIds: [...this.workspace.recentProjectIds],
       executingProjectIds: this.listLockedProjectIds(),
+      queuedProjectIds: [...this.queues.keys()].filter((id) => (this.queues.get(id)?.length ?? 0) > 0),
     }
   }
 
@@ -404,6 +484,7 @@ export class ProjectRegistry {
 
   /** All project ids currently held by an AI agent lock. */
   listLockedProjectIds(): string[] {
+    for (const projectId of [...this.locks.keys()]) this.sweepExpiredLock(projectId)
     return [...this.locks.keys()]
   }
 
@@ -418,15 +499,17 @@ export class ProjectRegistry {
     if (!this.index.projects.some((p) => p.id === projectId)) {
       return { ok: false, code: 'project-not-found', reason: `project-not-found: ${projectId}` }
     }
+    this.sweepExpiredLock(projectId)
+    const key = holderKey(caller.agentId, caller.sessionId)
     const existing = this.locks.get(projectId)
-    if (existing && existing.agentId !== caller.agentId) {
+    if (existing && holderKey(existing.agentId, existing.sessionId) !== key) {
       return {
         ok: false,
         code: 'project-locked-by-other',
         reason: `project-locked-by-other: project ${projectId} is held by agent ${existing.agentId}`,
       }
     }
-    const held = this.agentLock.get(caller.agentId)
+    const held = this.agentLock.get(key)
     if (held && held !== projectId) {
       return {
         ok: false,
@@ -438,18 +521,20 @@ export class ProjectRegistry {
       agentId: caller.agentId,
       kind: caller.kind,
       acquiredAt: nowIso(),
+      leaseExpiresAt: Date.now() + this.lockLeaseMs,
       ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
     })
-    this.agentLock.set(caller.agentId, projectId)
+    this.agentLock.set(key, projectId)
     return { ok: true }
   }
 
   // Release an AI agent's lock. Idempotent; rejects a wrong-agent release.
+  // Immediately hands the freed project to the next queued agent, if any.
   releaseProjectLock(projectId: string, caller: CallerIdentity): LockResult {
     if (caller.kind !== 'ai') return { ok: true }
     const lock = this.locks.get(projectId)
     if (!lock) return { ok: true }
-    if (lock.agentId !== caller.agentId) {
+    if (holderKey(lock.agentId, lock.sessionId) !== holderKey(caller.agentId, caller.sessionId)) {
       return {
         ok: false,
         code: 'lock-not-owned',
@@ -457,7 +542,162 @@ export class ProjectRegistry {
       }
     }
     this.locks.delete(projectId)
-    this.agentLock.delete(lock.agentId)
+    this.agentLock.delete(holderKey(lock.agentId, lock.sessionId))
+    this.promoteQueueHead(projectId)
+    return { ok: true }
+  }
+
+  // Renew an AI agent's lock lease without touching the graph — call this on
+  // every successful mutation (see `checkMutationAccess`) and expose it as an
+  // explicit heartbeat tool for agents mid-way through a long non-mutating
+  // stretch (e.g. reasoning between tool calls). Silently a no-op if the
+  // caller does not currently hold `projectId` (nothing to renew).
+  private touchLock(projectId: string, caller: CallerIdentity): void {
+    const lock = this.locks.get(projectId)
+    if (lock && holderKey(lock.agentId, lock.sessionId) === holderKey(caller.agentId, caller.sessionId)) {
+      lock.leaseExpiresAt = Date.now() + this.lockLeaseMs
+    }
+  }
+
+  // Public heartbeat: explicit lease renewal an agent can call between
+  // mutations to hold onto a project during a long thinking/reading stretch,
+  // without that idle time eventually expiring its lock out from under it.
+  renewLock(projectId: string, caller: CallerIdentity): LockResult {
+    if (caller.kind !== 'ai') return { ok: true }
+    if (!caller.agentId) {
+      return { ok: false, code: 'lock-requires-agent-id', reason: 'lock-requires-agent-id: caller.kind is ai but agentId is missing' }
+    }
+    this.sweepExpiredLock(projectId)
+    const lock = this.locks.get(projectId)
+    if (!lock || holderKey(lock.agentId, lock.sessionId) !== holderKey(caller.agentId, caller.sessionId)) {
+      return {
+        ok: false,
+        code: 'mutation-denied-not-open',
+        reason: `mutation-denied: project ${projectId} is not open by agent ${caller.agentId} (nothing to renew)`,
+      }
+    }
+    lock.leaseExpiresAt = Date.now() + this.lockLeaseMs
+    return { ok: true }
+  }
+
+  // Drop an AI lock whose lease has lapsed — the normal signature of a
+  // crashed/abandoned agent that never called `close`. Immediately hands the
+  // now-free project to the queue head, if any, so "unlocked with a
+  // non-empty queue" is never an observable state between calls (this
+  // process is single-threaded/synchronous, so the check-then-promote pair
+  // below can't race with another request).
+  private sweepExpiredLock(projectId: string): void {
+    const lock = this.locks.get(projectId)
+    if (!lock || lock.leaseExpiresAt > Date.now()) return
+    this.locks.delete(projectId)
+    this.agentLock.delete(holderKey(lock.agentId, lock.sessionId))
+    this.promoteQueueHead(projectId)
+  }
+
+  // Drop queue entries nobody has polled `openProject` for in a while — an
+  // abandoned wait-queue slot must not block every agent behind it forever.
+  private sweepStaleQueue(projectId: string): void {
+    const queue = this.queues.get(projectId)
+    if (!queue || queue.length === 0) return
+    const cutoff = Date.now() - this.queueEntryIdleMs
+    const fresh = queue.filter((e) => e.lastSeenAtMs >= cutoff)
+    if (fresh.length === queue.length) return
+    if (fresh.length > 0) this.queues.set(projectId, fresh)
+    else this.queues.delete(projectId)
+  }
+
+  // Idempotently add/refresh `caller` at the back of `projectId`'s wait
+  // queue (re-polling does not move an already-queued agent further back)
+  // and return its 1-based position + the agentIds ahead of it.
+  private joinQueue(projectId: string, caller: CallerIdentity): ProjectQueueStatus {
+    const agentId = caller.agentId!
+    const key = holderKey(agentId, caller.sessionId)
+    let queue = this.queues.get(projectId)
+    if (!queue) {
+      queue = []
+      this.queues.set(projectId, queue)
+    }
+    const idx = queue.findIndex((e) => holderKey(e.agentId, e.sessionId) === key)
+    if (idx >= 0) {
+      queue[idx]!.lastSeenAtMs = Date.now()
+    } else {
+      queue.push({
+        agentId,
+        kind: caller.kind,
+        enqueuedAt: nowIso(),
+        lastSeenAtMs: Date.now(),
+        ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
+      })
+    }
+    const finalIdx = queue.findIndex((e) => holderKey(e.agentId, e.sessionId) === key)
+    return { agentId, position: finalIdx + 1, aheadOf: queue.slice(0, finalIdx).map((e) => e.agentId) }
+  }
+
+  // Voluntarily leave a project's wait queue (e.g. the agent decided to work
+  // on something else). Idempotent; a no-op if not queued.
+  leaveQueue(projectId: string, caller: CallerIdentity): LockResult {
+    if (caller.kind !== 'ai' || !caller.agentId) return { ok: true }
+    const key = holderKey(caller.agentId, caller.sessionId)
+    const queue = this.queues.get(projectId)
+    if (queue) {
+      const next = queue.filter((e) => holderKey(e.agentId, e.sessionId) !== key)
+      if (next.length > 0) this.queues.set(projectId, next)
+      else this.queues.delete(projectId)
+    }
+    return { ok: true }
+  }
+
+  // Current wait-queue snapshot for a project, in FIFO order (position 1 is
+  // next in line). Sweeps expired lock/stale entries first for accuracy.
+  getProjectQueue(projectId: string): ProjectQueueStatus[] {
+    this.sweepExpiredLock(projectId)
+    this.sweepStaleQueue(projectId)
+    const queue = this.queues.get(projectId) ?? []
+    return queue.map((e, i) => ({ agentId: e.agentId, position: i + 1, aheadOf: queue.slice(0, i).map((x) => x.agentId) }))
+  }
+
+  // Grant a just-freed project straight to its queue head, skipping (and
+  // dropping) any head entry whose agent already holds a *different*
+  // project — an agent may only hold one project's lock at a time, so a
+  // stale double-booked queue slot must not wedge the line. Called right
+  // after a lock is released or its lease expires.
+  private promoteQueueHead(projectId: string): void {
+    if (this.locks.has(projectId)) return
+    const queue = this.queues.get(projectId)
+    if (!queue || queue.length === 0) return
+    while (queue.length > 0) {
+      const head = queue.shift()!
+      const headKey = holderKey(head.agentId, head.sessionId)
+      const heldElsewhere = this.agentLock.get(headKey)
+      if (heldElsewhere && heldElsewhere !== projectId) continue // stale slot — drop and try next
+      this.locks.set(projectId, {
+        agentId: head.agentId,
+        kind: head.kind,
+        acquiredAt: nowIso(),
+        leaseExpiresAt: Date.now() + this.lockLeaseMs,
+        ...(head.sessionId ? { sessionId: head.sessionId } : {}),
+      })
+      this.agentLock.set(headKey, projectId)
+      break
+    }
+    if (queue.length === 0) this.queues.delete(projectId)
+  }
+
+  // Emergency escape hatch: fully resets a project's lock + wait queue.
+  // Human/workbench callers ONLY — never callable by an AI caller — because
+  // it is the last-resort manual override for the (expected-never) case
+  // where the automatic lease-expiry self-healing somehow fails to recover a
+  // stuck project. Not part of the normal AI open/queue/close flow.
+  forceUnlockProject(projectId: string, caller: CallerIdentity): LockResult {
+    if (caller.kind === 'ai') {
+      return { ok: false, code: 'force-unlock-denied', reason: 'force-unlock-denied: not available to AI callers' }
+    }
+    const lock = this.locks.get(projectId)
+    if (lock) {
+      this.locks.delete(projectId)
+      this.agentLock.delete(holderKey(lock.agentId, lock.sessionId))
+    }
+    this.queues.delete(projectId)
     return { ok: true }
   }
 
@@ -482,6 +722,7 @@ export class ProjectRegistry {
     if (!projectId) {
       return { ok: false, code: 'mutation-denied-no-project', reason: 'mutation-denied: project id is required' }
     }
+    this.sweepExpiredLock(projectId)
     const lock = this.locks.get(projectId)
     if (!lock) {
       // RECOVERABLE: no agent holds this (existing, active) project. The normal
@@ -494,24 +735,32 @@ export class ProjectRegistry {
         reason: `mutation-denied: project ${projectId} is not open by any agent`,
       }
     }
-    if (!caller.agentId || lock.agentId !== caller.agentId) {
+    if (!caller.agentId || holderKey(lock.agentId, lock.sessionId) !== holderKey(caller.agentId, caller.sessionId)) {
       return {
         ok: false,
         code: 'mutation-denied-locked-by-other',
         reason: `mutation-denied: project ${projectId} is locked by agent ${lock.agentId}`,
       }
     }
+    // Successful mutation under the lock: renew the lease so a genuinely
+    // active agent (still calling applyBatch/execute regularly) never gets
+    // timed out mid-task by the idle-lease sweep.
+    this.touchLock(projectId, caller)
     return { ok: true }
   }
 
   // Current lock holder for a project (or null). For UI badges / diagnostics.
+  // Sweeps an expired lease first so a stale/crashed agent never shows as
+  // "still holding" the project.
   getProjectLock(projectId: string): ProjectLockInfo | null {
+    this.sweepExpiredLock(projectId)
     const lock = this.locks.get(projectId)
     return lock ? { ...lock } : null
   }
 
   /** All active agent locks — for workspace diagnostics / project panel. */
   listAllProjectLocks(): Array<{ projectId: string } & ProjectLockInfo> {
+    for (const projectId of [...this.locks.keys()]) this.sweepExpiredLock(projectId)
     return [...this.locks.entries()].map(([projectId, lock]) => ({ projectId, ...lock }))
   }
 
@@ -672,21 +921,108 @@ export class ProjectRegistry {
     return this.viewProject(id)
   }
 
+  /** Soft-open project id for this AI caller, if any. */
+  getAgentOpenProjectId(caller: CallerIdentity): string | null {
+    if (caller.kind !== 'ai' || !caller.agentId) return null
+    return this.agentSessions.get(holderKey(caller.agentId, caller.sessionId)) ?? null
+  }
+
   /**
-   * Agent open: acquire exclusive lock and ensure the project's Runtime exists
-   * in the pool. Does **not** change the UI viewing project.
+   * Agent open = **shared session attach** for analysis. Ensures the Runtime
+   * exists; does **not** take the exclusive write lock and does **not** join
+   * the write wait queue. Multiple AI agents may open the same project at
+   * once and call read tools (`pipeline.get`, …). Write exclusivity is
+   * enforced later by {@link claimWriteAccess} / mutation routes.
    *
-   * Viewing (`viewProject` / `POST …/view`) is owned by the human Studio
-   * browser. Agent work is scoped by the exclusive lock + `agentProjectId`
-   * on `/workspace`. Mutating `viewingProjectId` here yanked every connected
-   * client onto the agent's project mid-browse — agents and humans must not
-   * share that pointer. Screenshot/export routes resolve the target from the
-   * explicit/locked `projectId`, not from viewing.
+   * Does **not** change the UI viewing project.
    */
-  openProject(projectId: string, caller: CallerIdentity): LockResult {
-    const lock = this.acquireProjectLock(projectId, caller)
-    if (!lock.ok) return lock
+  openProject(projectId: string, caller: CallerIdentity): OpenOrQueueResult {
+    if (!this.index.projects.some((p) => p.id === projectId)) {
+      return { ok: false, code: 'project-not-found', reason: `project-not-found: ${projectId}` }
+    }
+    if (caller.kind !== 'ai') {
+      this.getRuntimeFor(projectId)
+      return { ok: true, queued: false }
+    }
+    if (!caller.agentId) {
+      return { ok: false, code: 'lock-requires-agent-id', reason: 'lock-requires-agent-id: caller.kind is ai but agentId is missing' }
+    }
+    const key = holderKey(caller.agentId, caller.sessionId)
+    const existingSession = this.agentSessions.get(key)
+    if (existingSession && existingSession !== projectId) {
+      return {
+        ok: false,
+        code: 'agent-holds-another',
+        reason:
+          `agent-holds-another: agent ${caller.agentId} already has project ${existingSession} open; ` +
+          'close it first before opening another',
+      }
+    }
+    // Soft attach only — never exclusive-lock here.
+    this.agentSessions.set(key, projectId)
     this.getRuntimeFor(projectId)
+    return { ok: true, queued: false }
+  }
+
+  /**
+   * Claim exclusive **write** access (single-writer). If another agent holds
+   * the write lock, join the FIFO wait queue (`queued: true`) instead of
+   * hard-failing. Soft-opens the project first when needed. Used by mutation
+   * routes (applyBatch/execute/…) — not by `openProject`.
+   */
+  claimWriteAccess(projectId: string, caller: CallerIdentity): OpenOrQueueResult {
+    if (caller.kind !== 'ai') {
+      const lock = this.acquireProjectLock(projectId, caller)
+      if (!lock.ok) return lock
+      this.getRuntimeFor(projectId)
+      return { ok: true, queued: false }
+    }
+
+    // Ensure shared session before taking the write lock.
+    const opened = this.openProject(projectId, caller)
+    if (!opened.ok) return opened
+
+    this.sweepExpiredLock(projectId)
+    this.sweepStaleQueue(projectId)
+
+    const lock = this.acquireProjectLock(projectId, caller)
+    if (lock.ok) {
+      this.leaveQueue(projectId, caller)
+      this.getRuntimeFor(projectId)
+      return { ok: true, queued: false }
+    }
+    if (lock.code !== 'project-locked-by-other') return lock
+
+    const { position, aheadOf } = this.joinQueue(projectId, caller)
+    return {
+      ok: false,
+      queued: true,
+      code: 'project-queued',
+      position,
+      aheadOf,
+      reason:
+        `project-queued: project ${projectId} write lock is held by another agent; you are #${position} in line` +
+        (aheadOf.length > 0 ? ` behind [${aheadOf.join(', ')}]` : '') +
+        '. Analysis/read tools are fine while waiting; mutation tools block/wait for the write lock. ' +
+        'Do NOT spam scene:projects.open — open is shared and already succeeded.',
+    }
+  }
+
+  /**
+   * Detach soft session + release write lock if this caller holds it.
+   * Safe when another agent holds the write lock (only clears this caller's
+   * session / queue slot).
+   */
+  detachProject(projectId: string, caller: CallerIdentity): LockResult {
+    this.leaveQueue(projectId, caller)
+    if (caller.kind === 'ai' && caller.agentId) {
+      const key = holderKey(caller.agentId, caller.sessionId)
+      const lock = this.locks.get(projectId)
+      if (lock && holderKey(lock.agentId, lock.sessionId) === key) {
+        this.releaseProjectLock(projectId, caller)
+      }
+      if (this.agentSessions.get(key) === projectId) this.agentSessions.delete(key)
+    }
     return { ok: true }
   }
 
@@ -702,7 +1038,7 @@ export class ProjectRegistry {
     const lock = this.locks.get(id)
     if (lock) {
       this.locks.delete(id)
-      this.agentLock.delete(lock.agentId)
+      this.agentLock.delete(holderKey(lock.agentId, lock.sessionId))
     }
 
     // Drop the runtime and remove every storage artefact this project owns.

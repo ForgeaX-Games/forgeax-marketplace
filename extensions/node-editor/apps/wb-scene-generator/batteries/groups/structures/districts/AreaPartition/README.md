@@ -53,8 +53,8 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_0` | scene | **主产物**（父节点下挂全部分子区） | → `tree_merge.item_N`（Preview） |
-| `out_1` | scene | **Zones**（仅子区子树） | 对单个子区再施工时选用 |
+| `out_0` | scene | **Scene**（父节点下挂全部分子区） | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` 汇总根 |
+| `out_1` | scene | **Zones**（仅子区子树） | 对单个子区再施工时选用，禁止接 merge |
 | `out_2` | string | ZonesPath | 聚焦路径，一般不接 |
 
 > **已删除（勿引用）**：旧版 `out_1`(Rest)、`out_4`(RestPath) — 纯划分无剩余区。

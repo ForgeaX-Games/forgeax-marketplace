@@ -40,7 +40,8 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Decoration 装饰（主产物） | `appendMergeItem` → `aw_m0_merge` |
+| `out_1` | scene | Decoration 装饰（主产物） | 调试 / 领域引用 |
+| `out_0` | scene | Scene 整树汇总口 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`） |
 | `out_2` | scene | Rest 剩余空地 | 下一组 `in_1` |
 
 ## 4. 推荐参数

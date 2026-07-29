@@ -69,3 +69,5 @@ server.log
 
 # 本地 dev server 多端口运行日志
 server-*.log
+
+dist/standalone/

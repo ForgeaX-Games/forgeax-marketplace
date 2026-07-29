@@ -53,8 +53,8 @@
 
 | portName | customLabelEn | 类型 | 说明 | 典型去向 |
 |----------|---------------|------|------|---------|
-| `out_0` | Scene | scene | 完整场景（输入 + 山地形子树） | 调试 / 汇总根 |
-| `out_2` | Mountain | scene | **主产物**：各高度层子树（focus 已聚焦） | `tree_merge` 汇总 |
+| `out_0` | Scene | scene | 完整场景（输入 + 山地形子树） | `{ label:"Scene", portName:"out_0" }` → `appendMergeItem` 汇总根 |
+| `out_2` | Mountain | scene | **领域产物**：各高度层子树（focus 已聚焦） | 后续山地区域细化 |
 | `out_1` | Rest | scene | 剩余（掩码 − 全部高度层覆盖；全覆盖时可能为空） | 下一组 `in_0` 链式 |
 | `out_3` | MountainPath | string | 主产物路径句柄 | 一般不接 |
 | `out_4` | RestPath | string | Rest 路径句柄 | 一般不接 |
@@ -73,7 +73,7 @@
 - 在父区域 footprint 内生成**互斥高度层**子节点，每层独立命名（`NamePrefix`+序号），**共用同一 `AssetName` tile**（由 Mira 提供贴图）。
 - **无坡道**：高差只应加在已连通的关键内容之外的剩余区域；`MaxElevationLayers` **建议 ≤ 2**。
 - 高度场/分层算法均为模板组私有实现，随 `instantiateTemplate` 间接使用——顶层无需也不可摆放。
-- 典型串联：建筑 → 道路 → **`PathConnection*.out_2`(Rest) → `MountainContourGenerate.in_0`** → `out_1`(Rest) → Hill 或装饰；`out_2`(Mountain，即 `{"label":"Mountain"}`）→ 用 `appendMergeItem` 接入根 `aw_m0_merge`（不要手动算 `item_N`/`portCount`）。
+- 典型串联：建筑 → 道路 → **`PathConnection*.out_2`(Rest) → `MountainContourGenerate.in_0`** → `out_1`(Rest) → Hill 或装饰；`out_2`(Mountain) 只作领域细化；汇总必须使用 `out_0`(Scene)。
 
 ## 6. instantiateTemplate 示例
 

@@ -18,6 +18,8 @@
 适用：房屋 / 建筑 / 房间 / 多层壳体 / 室内布局，或栏杆、护栏、柱这类建筑构件——而不是单个
 机械件（机械件走 [PART A](part-a-asset.md)）。
 
+需求特征先路由：开口墙→`wall`，楼板/洞口→`floor_slab`，坡/女儿墙屋面→`roof`，台阶/平台→`stairs`，门窗/栏杆/柱用同名 Architecture op；仅补充无法由 semantic 参数表达的局部细节才用 Profile/CSG。构件贴楼板、墙面或柱面时优先 Placement DSL。manifest 只保留轮廓、关键比例、开口/层高等显著特征与 datum；同一问题最多修 3 次。
+
 ---
 
 Architecture-flavoured sibling of [PART A](part-a-asset.md): **same DSL-first flow

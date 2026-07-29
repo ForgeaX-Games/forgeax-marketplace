@@ -12,10 +12,18 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function walk(node: Record<string, unknown>, byId: Map<string, Vec2>): void {
+interface SolvedNode {
+  position: Vec2
+  area?: number
+}
+
+function walk(node: Record<string, unknown>, byId: Map<string, SolvedNode>): void {
   const id = typeof node.id === 'string' ? node.id.trim() : ''
-  const pos = id ? byId.get(id) : undefined
-  if (pos) node.position = { x: round4(pos.x), y: round4(pos.y) }
+  const solved = id ? byId.get(id) : undefined
+  if (solved) {
+    node.position = { x: round4(solved.position.x), y: round4(solved.position.y) }
+    if (solved.area !== undefined) node.area = round4(solved.area)
+  }
   const children = node.children
   if (Array.isArray(children)) {
     for (const child of children) {
@@ -35,10 +43,15 @@ export function attachPositions(raw: unknown, model: ProblemModel, result: Solve
   const root = coerceKeypointObject(raw)
   if (!root) return raw
 
-  const byId = new Map<string, Vec2>()
+  const byId = new Map<string, SolvedNode>()
   model.nodes.forEach((node, i) => {
     const p = result.positions[i]
-    if (p) byId.set(node.id, p)
+    if (p) {
+      byId.set(node.id, {
+        position: p,
+        ...(node.isContainer ? { area: Math.PI * result.radii[i] ** 2 } : {}),
+      })
+    }
   })
 
   const clone = deepClone(root)

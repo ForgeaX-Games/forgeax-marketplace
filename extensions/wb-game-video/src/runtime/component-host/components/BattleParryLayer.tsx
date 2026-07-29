@@ -44,6 +44,8 @@ export function battleParryPreset(id: string): OverlayChild {
     component: 'battleParry',
     layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window（运行时 el.window 存在即忽略 trigger）；收圈时长即默认可见窗。
+    window: { startMs: 0, endMs: battleParryDefaults.durationMs },
     inputs: { ...battleParryDefaults },
   }
 }

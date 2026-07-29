@@ -13,6 +13,7 @@ function controller(overrides: Partial<AssetLibraryController> = {}): AssetLibra
     items: [
       { id: 'image-1', kind: 'image', name: '封面', mime: 'image/png' },
       { id: 'bgm-1', kind: 'audio', name: '主题曲', mime: 'audio/mpeg' },
+      { id: 'title.woff2', kind: 'font', name: '标题字体', mime: 'font/woff2', source: 'local' },
     ],
     refresh: vi.fn(async () => {}),
     upload: vi.fn(async () => undefined),
@@ -27,6 +28,7 @@ describe('AssetLibraryPanel', () => {
     render(<AssetLibraryPanel controller={controller()} />)
     expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('图片')
     expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('音频')
+    expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('字体')
     expect(screen.getByLabelText('图片资源列表')).toHaveTextContent('封面')
     expect(screen.getByLabelText('上传图片')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp,.gif')
     expect(screen.queryByRole('dialog', { name: '资产预览' })).toBeNull()
@@ -34,6 +36,10 @@ describe('AssetLibraryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /音频 1/ }))
     expect(screen.getByLabelText('BGM资源列表')).toHaveTextContent('主题曲')
     expect(screen.getByLabelText('上传 BGM')).toHaveAttribute('accept', '.mp3,.wav,.ogg,.m4a,.aac')
+
+    fireEvent.click(screen.getByRole('button', { name: /字体 1/ }))
+    expect(screen.getByLabelText('字体资产列表')).toHaveTextContent('标题字体')
+    expect(screen.getByLabelText('上传字体')).toHaveAttribute('accept', '.woff2,.woff,.ttf,.otf')
   })
 
   it('opens asset details in a dialog from its list thumbnail', () => {

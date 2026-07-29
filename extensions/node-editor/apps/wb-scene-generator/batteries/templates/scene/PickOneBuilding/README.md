@@ -41,7 +41,7 @@
 
 | 本端口 | 白名单上游 | 怎么喂 |
 |--------|-----------|--------|
-| `in_1` | 上游 `out_*` + `scene_focus_path` | `AreaPartition.out_0` + path `/父区域/划分子区域1` → focus.scene → `in_1` |
+| `in_1` | 上游 Scene / Rest 暴露口 | **默认**上一组 `{ label:"Rest" }` 或任务 `sceneAnchor` **直接**接本口（组壳对组壳）。仅当必须按**命名路径**取某一子区（非 Rest 口）时，才在组外用 `scene_focus_path`。禁止挖本组内部找 focus/manual_points。 |
 | `in_0` | `text_panel` | **BuildingName**（叙事名，如 `望江客栈`）— **不是** `in_2` |
 | `in_4` | `text_panel` | BuildingAsset（catalog object/tile 名） |
 | `in_3` | `manual_points` | Point `{x,y}`，子区内偏南示例 `{28,24}` |

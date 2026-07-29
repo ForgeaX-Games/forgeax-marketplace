@@ -30,7 +30,7 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_0` | scene | 主产物（含地块的整棵 scene） | → `tree_merge.item_N`（汇总） |
+| `out_0` | scene | Scene 整树汇总口（含地块） | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` |
 | `out_1` | scene | **Rest** 剩余空地 | → 下一组 `in_0`（链式 Rest） |
 | `out_2` | scene | **District** 地块本体 | 一般不接（out_0 已是主产物） |
 | `out_3` | string | DistrictPath（路径句柄） | 一般不接 |

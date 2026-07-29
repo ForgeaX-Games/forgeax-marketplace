@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { executeNode, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
+import { executeNode, getGroup, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
 import { getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
@@ -15,10 +15,16 @@ function currentGraphForTopologyCheck(
   const nodeById = new Map<string, TopologyGraphNode>()
   const rawNodes = snap.nodes
   if (Array.isArray(rawNodes)) {
-    for (const n of rawNodes) if (n?.id) nodeById.set(n.id, n)
+    for (const n of rawNodes) {
+      if (!n?.id) continue
+      const group = n.opId === '__group__' ? getGroup(runtime, n.id) : null
+      nodeById.set(n.id, { ...n, ...(group ? { exposedOutputs: group.exposedOutputs } : {}) })
+    }
   } else if (rawNodes && typeof rawNodes === 'object') {
     for (const [id, n] of Object.entries(rawNodes as Record<string, TopologyGraphNode>)) {
-      nodeById.set(id, { ...n, id: n.id ?? id })
+      const nodeId = n.id ?? id
+      const group = n.opId === '__group__' ? getGroup(runtime, nodeId) : null
+      nodeById.set(id, { ...n, id: nodeId, ...(group ? { exposedOutputs: group.exposedOutputs } : {}) })
     }
   }
   const rawEdges = snap.edges
@@ -88,9 +94,9 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     // 2026-07-01：可选的上游叙事/契约地点名单——传了就顺带跑一遍 stage3.location_names
     // 硬门控（见 execution-summary.ts / lib/locationNameGate.ts）。不传则完全不变。
     const narrativeLocationNames = (req.body as { narrativeLocationNames?: unknown } | undefined)?.narrativeLocationNames
-    // 2026-07-15：同一次 execute 顺带跑三项拓扑检测（Rest fan-out / 非法局部
-    // merge / manual_points 零默认），见 lib/topologyGate.ts 的模块文档——这三
-    // 项检测原本只活在 aw-support 的续作消息生成里，agent 要等一整轮才知道。
+    // 2026-07-15：同一次 execute 顺带跑拓扑检测（Rest fan-out / 非法局部
+    // merge / 领域口直连根 merge / manual_points 零默认），见
+    // lib/topologyGate.ts 的模块文档。
     // 图本身已经在手（刚 execute 完的这个 runtime），零额外开销地顺带跑一次。
     return summarizeExecutionResult(
       full,

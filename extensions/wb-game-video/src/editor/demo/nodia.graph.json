@@ -613,6 +613,10 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0,
+                    "endMs": 6100
                   }
                 }
               ]
@@ -666,6 +670,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -729,6 +736,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 12069
+                  },
+                  "window": {
+                    "startMs": 12069
                   }
                 }
               }
@@ -811,6 +821,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 13200
+                  },
+                  "window": {
+                    "startMs": 13200
                   }
                 }
               }
@@ -912,6 +925,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 12093
+                  },
+                  "window": {
+                    "startMs": 12093
                   }
                 }
               }
@@ -1022,6 +1038,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 12093
+                  },
+                  "window": {
+                    "startMs": 12093
                   }
                 }
               }
@@ -1085,6 +1104,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 12093
+                  },
+                  "window": {
+                    "startMs": 12093
                   }
                 }
               }
@@ -1186,6 +1208,9 @@
                   "trigger": {
                     "when": "at",
                     "ms": 12093
+                  },
+                  "window": {
+                    "startMs": 12093
                   }
                 }
               }
@@ -1298,6 +1323,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -1315,6 +1343,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -1449,6 +1480,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -1466,6 +1500,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -1620,6 +1657,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -1672,6 +1712,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -1689,6 +1732,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -1725,6 +1771,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 1000
                   }
                 }
               ]
@@ -1833,6 +1882,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -1850,6 +1902,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -1886,6 +1941,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 600
                   }
                 }
               ]
@@ -1986,6 +2044,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2003,6 +2064,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2039,6 +2103,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 1700
                   }
                 }
               ]
@@ -2153,6 +2220,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2170,6 +2240,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2206,6 +2279,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 2500
                   }
                 }
               ]
@@ -2312,6 +2388,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2329,6 +2408,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2364,6 +2446,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 2000
                   }
                 }
               ]
@@ -2466,6 +2551,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2483,6 +2571,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2519,6 +2610,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 7000
                   }
                 }
               ]
@@ -2620,6 +2714,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2637,6 +2734,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2754,6 +2854,10 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0,
+                    "endMs": 2600
                   }
                 }
               ]
@@ -2806,6 +2910,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2823,6 +2930,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2859,6 +2969,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 1800
                   }
                 }
               ]
@@ -2936,6 +3049,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -2953,6 +3069,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -2989,6 +3108,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 2000
                   }
                 }
               ]
@@ -3066,6 +3188,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -3083,6 +3208,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -3119,6 +3247,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 10
                   }
                 }
               ]
@@ -3196,6 +3327,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -3213,6 +3347,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -3265,6 +3402,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 },
                 {
@@ -3282,6 +3422,9 @@
                     "top": 0,
                     "width": 1,
                     "height": 1
+                  },
+                  "window": {
+                    "startMs": 0
                   }
                 }
               ]
@@ -3816,6 +3959,10 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0,
+                          "endMs": 6100
                         }
                       }
                     ]
@@ -3869,6 +4016,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -3932,6 +4082,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 12069
+                        },
+                        "window": {
+                          "startMs": 12069
                         }
                       }
                     }
@@ -4014,6 +4167,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 13200
+                        },
+                        "window": {
+                          "startMs": 13200
                         }
                       }
                     }
@@ -4115,6 +4271,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 12093
+                        },
+                        "window": {
+                          "startMs": 12093
                         }
                       }
                     }
@@ -4225,6 +4384,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 12093
+                        },
+                        "window": {
+                          "startMs": 12093
                         }
                       }
                     }
@@ -4288,6 +4450,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 12093
+                        },
+                        "window": {
+                          "startMs": 12093
                         }
                       }
                     }
@@ -4389,6 +4554,9 @@
                         "trigger": {
                           "when": "at",
                           "ms": 12093
+                        },
+                        "window": {
+                          "startMs": 12093
                         }
                       }
                     }
@@ -4501,6 +4669,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -4518,6 +4689,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -4652,6 +4826,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -4669,6 +4846,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -4823,6 +5003,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -4875,6 +5058,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -4892,6 +5078,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -4928,6 +5117,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 1000
                         }
                       }
                     ]
@@ -5036,6 +5228,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5053,6 +5248,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5089,6 +5287,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 600
                         }
                       }
                     ]
@@ -5189,6 +5390,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5206,6 +5410,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5242,6 +5449,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 1700
                         }
                       }
                     ]
@@ -5356,6 +5566,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5373,6 +5586,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5409,6 +5625,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 2500
                         }
                       }
                     ]
@@ -5515,6 +5734,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5532,6 +5754,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5567,6 +5792,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 2000
                         }
                       }
                     ]
@@ -5669,6 +5897,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5686,6 +5917,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5722,6 +5956,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 7000
                         }
                       }
                     ]
@@ -5823,6 +6060,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -5840,6 +6080,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -5957,6 +6200,10 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0,
+                          "endMs": 2600
                         }
                       }
                     ]
@@ -6009,6 +6256,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -6026,6 +6276,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -6062,6 +6315,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 1800
                         }
                       }
                     ]
@@ -6139,6 +6395,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -6156,6 +6415,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -6192,6 +6454,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 2000
                         }
                       }
                     ]
@@ -6269,6 +6534,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -6286,6 +6554,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -6322,6 +6593,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 10
                         }
                       }
                     ]
@@ -6399,6 +6673,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -6416,6 +6693,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]
@@ -6468,6 +6748,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       },
                       {
@@ -6485,6 +6768,9 @@
                           "top": 0,
                           "width": 1,
                           "height": 1
+                        },
+                        "window": {
+                          "startMs": 0
                         }
                       }
                     ]

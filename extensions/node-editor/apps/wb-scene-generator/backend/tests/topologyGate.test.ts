@@ -117,4 +117,93 @@ describe('buildTopologyIssues', () => {
   it('always returns an array, never throws on an empty graph', () => {
     expect(buildTopologyIssues([], new Map())).toEqual([])
   })
+
+  /**
+   * Production: agent wired `{ label, portName }` semantic refs into edges;
+   * topologyGate then called `tgtPort.startsWith` and execute 500'd
+   * (`tgtPort.startsWith is not a function`). Normalize before string ops.
+   */
+  it('does not throw when edge ports are semantic {label,portName} objects', () => {
+    const nodeById = new Map<string, TopologyGraphNode>([
+      ['grid', group('AddBaseGrid')],
+      ['a', {
+        ...group('IslandRegions'),
+        exposedOutputs: [
+          { portName: 'out_0', customLabelEn: 'Scene' },
+          { portName: 'out_1', customLabelEn: 'Island' },
+          { portName: 'out_2', customLabelEn: 'Rest' },
+        ],
+      }],
+      ['b', {
+        ...group('LakeRegions'),
+        exposedOutputs: [
+          { portName: 'out_0', customLabelEn: 'Scene' },
+          { portName: 'out_4', customLabelEn: 'Lake' },
+        ],
+      }],
+      ['local', { opId: 'tree_merge', params: { portCount: 2 } }],
+      ['root', { opId: 'tree_merge', params: { portCount: 1 } }],
+      ['flatten', { opId: 'tree_flatten', params: {} }],
+    ])
+    const edges = [
+      {
+        id: 'e0',
+        source: { nodeId: 'grid', port: { label: 'BaseNode', portName: 'out_1' } },
+        target: { nodeId: 'a', port: { label: 'Scene', portName: 'in_0' } },
+      },
+      {
+        id: 'e1',
+        source: { nodeId: 'a', port: { label: 'Scene', portName: 'out_0' } },
+        target: { nodeId: 'local', port: { label: 'item_0', portName: 'item_0' } },
+      },
+      {
+        id: 'e2',
+        source: { nodeId: 'b', port: { label: 'Scene', portName: 'out_0' } },
+        target: { nodeId: 'local', port: { label: 'item_1', portName: 'item_1' } },
+      },
+      {
+        id: 'e3',
+        source: { nodeId: 'local', port: { label: 'tree', portName: 'out_0' } },
+        target: { nodeId: 'root', port: { label: 'item_0', portName: 'item_0' } },
+      },
+      {
+        id: 'e4',
+        source: { nodeId: 'root', port: { label: 'tree', portName: 'out_0' } },
+        target: { nodeId: 'flatten', port: { label: 'tree', portName: 'in_0' } },
+      },
+    ] as unknown as TopologyGraphEdge[]
+
+    expect(() => buildTopologyIssues(edges, nodeById)).not.toThrow()
+    const issues = buildTopologyIssues(edges, nodeById)
+    expect(issues.some((i) => i.kind === 'illegal-local-merge')).toBe(true)
+  })
+
+  it('still detects domain-merge when root item ports arrive as objects', () => {
+    const nodeById = new Map<string, TopologyGraphNode>([
+      ['island', {
+        ...group('IslandRegions'),
+        exposedOutputs: [
+          { portName: 'out_0', customLabelEn: 'Scene' },
+          { portName: 'out_1', customLabelEn: 'Island' },
+        ],
+      }],
+      ['root', { opId: 'tree_merge', params: { portCount: 1 } }],
+      ['flatten', { opId: 'tree_flatten', params: {} }],
+    ])
+    const edges = [
+      {
+        id: 'e1',
+        source: { nodeId: 'island', port: { label: 'Island', portName: 'out_1' } },
+        target: { nodeId: 'root', port: { label: 'item_0', portName: 'item_0' } },
+      },
+      {
+        id: 'e2',
+        source: { nodeId: 'root', port: { label: 'tree', portName: 'out_0' } },
+        target: { nodeId: 'flatten', port: { label: 'tree', portName: 'in_0' } },
+      },
+    ] as unknown as TopologyGraphEdge[]
+
+    const issues = buildTopologyIssues(edges, nodeById)
+    expect(issues.some((i) => i.kind === 'domain-merge-violation')).toBe(true)
+  })
 })

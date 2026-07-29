@@ -505,6 +505,18 @@ export const tools: Record<string, ToolHandler> = {
     const projectId = await resolveProjectId(ctx, objectArgs(args))
     return request(ctx, 'GET', projectPath(projectId, '/model/get'))
   },
+  'lowpoly:model.bakeBatch': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const { projectId: _omit, ...batchBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/model/bake-batch'), batchBody)
+  },
+  'lowpoly:model.patch': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const { projectId: _omit, ...patchBody } = body
+    return request(ctx, 'POST', projectPath(projectId, '/model/patch'), patchBody)
+  },
   // 烘焙清单：廉价查询本项目已 bake 的 mesh（name → sha + bbox + dims），
   // 直接解决"找不到已 bake 的 mesh"。
   'lowpoly:parts.list': async (args, ctx) => {

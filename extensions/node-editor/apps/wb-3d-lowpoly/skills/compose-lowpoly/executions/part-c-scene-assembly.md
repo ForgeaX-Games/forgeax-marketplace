@@ -35,6 +35,13 @@
 > `g_geometry_qc` 才能对 mesh 解出 AABB、真正跑 overlap 检测——这是验收摆放的硬信号（见下方
 > 「按 bbox 摆位纪律」）。
 
+## 摆位选择
+
+- 规则阵列/自由空间布局可直接给 part origin；相对某物体的 datum 应优先使用 Placement DSL。
+- 中心同轴/同平面 → `align_centers`；贴轴对齐外表面 → `place_on_face`；沿圆柱/球/复杂表面法线贴附 → `place_on_surface`。
+- Placement 读取当前 Geometry 中可解的真实 bbox 并写回 child pose；mesh 必须带 bake 回执的 `bbox_min/max`。
+- 同一摆位问题最多修 3 次；无 sourceHash/fingerprint 变化时停止，保留当前最佳布局。
+
 ---
 
 ## 阶段-2 · 场景 brief（动手前先想清）

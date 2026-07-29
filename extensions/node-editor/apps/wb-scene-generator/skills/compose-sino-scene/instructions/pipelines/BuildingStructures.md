@@ -22,7 +22,7 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_0` | scene | 含结构与门的建筑场景（主产物） | `appendMergeItem` → `aw_m0_merge`；`scene_focus_path` 提门作 POI |
+| `out_0` | scene | Scene 含结构与门的建筑场景（汇总口） | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`）；`scene_focus_path` 提门作 POI |
 | `out_1` / `out_2` | scene/string | Rooms / RoomsPath | 室内地板层（仅 `min(z)-1` 单层）；一般不接 |
 
 ## 4. 推荐参数

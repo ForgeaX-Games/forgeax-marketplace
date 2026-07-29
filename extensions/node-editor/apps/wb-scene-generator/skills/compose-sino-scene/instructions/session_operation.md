@@ -74,7 +74,7 @@
 往 `tree_merge`（尤其汇总链的根节点）追加一路内容，用 `appendMergeItem` 一次搞定「查 portCount → updateNode+1 → connect」三步，同一批里连续写多个会正确依次递增 `item_N`：
 
 ```jsonc
-{ "type":"appendMergeItem", "mergeNodeId":"m0_merge", "source":{"nodeId":"g1","port":{"label":"Island"}} }
+{ "type":"appendMergeItem", "mergeNodeId":"m0_merge", "source":{"nodeId":"g1","port":{"label":"Scene","portName":"out_0"}} }
 ```
 
 > ⚠️ 提交大 JSON（含 `ops`）务必**先写临时文件再 `curl --data @file`**，别把整段塞命令行——shell 转义会把 `nodeId`、数字吃坏（实测把 `nodeId` 转成 `0`）。
@@ -88,7 +88,7 @@
 3. **禁止**：两个组都把 Scene 输入接到 **同一** `AddBaseGrid.out_1` —— 会在全图重复布置、区域重叠。
 4. **Island 子区**：子 `IslandRegions.in_0` ← 父 **`Island.out_1`**，不是全图 BaseNode。
 5. **BuildingStructures**：`in_0` ← `Pick*.out_1`(Building)，**不接 Rest**。
-6. **主产物 vs Rest**：主产物 → `appendMergeItem` 接入汇总根 `tree_merge`（不用手动算 `item_N`/`portCount`）；Rest → 下一组输入。详见 [fast-loop.md](fast-loop.md)。
+6. **Scene / 领域 / Rest 分工**：只有 `{ label:"Scene", portName:"out_N" }` 汇总口可用 `appendMergeItem` 接入根 `tree_merge`；领域口用于细化；Rest → 下一组输入并记录为 `restAnchor`。详见 [fast-loop.md](fast-loop.md)。
 
 ---
 

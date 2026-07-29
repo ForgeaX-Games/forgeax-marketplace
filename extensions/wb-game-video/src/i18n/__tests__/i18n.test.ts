@@ -18,13 +18,13 @@ describe('game video i18n', () => {
   })
 
   it('translates the video game bootstrap guide', () => {
-    expect(t('bootstrap.guide.title')).toBe('Create a video game')
-    expect(t('bootstrap.guide.yes')).toBe('Yes, create video game')
+    expect(t('bootstrap.guide.title')).toBe('Create a video game from template')
+    expect(t('bootstrap.guide.yes')).toBe('Create from template')
 
     setLocale('zh')
 
-    expect(t('bootstrap.guide.title')).toBe('创建视频游戏')
-    expect(t('bootstrap.guide.yes')).toBe('是，创建视频游戏')
+    expect(t('bootstrap.guide.title')).toBe('从模板新建视频游戏')
+    expect(t('bootstrap.guide.yes')).toBe('从模板新建')
   })
 
   it('reacts to the host locale message', () => {

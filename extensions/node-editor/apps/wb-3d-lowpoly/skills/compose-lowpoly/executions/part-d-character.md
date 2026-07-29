@@ -26,6 +26,8 @@
 > 不是 `joint`。别因为需求出现「走 / 跑 / 动」就退回 PART A 连关节。
 > **铁律**：同一 DSL 别混 `joint` 和 `skin` / `skeleton`（两条终端链互斥，报「混合模型」错）。
 
+需求特征先路由：身体主轮廓用 profile/revolve/loft/capsule 起形，再用 CSG 做口鼻、眼窝、甲壳或服装层次；对称肢体独立 bake/实例化。组装 datum 可用 `align_centers`/`place_on_face` 先定位 part，再按解剖写 bone。manifest 只保留每件轮廓、关键比例、显著细节、datum、对应骨与弯曲轴；同一缺陷最多 3 次，metrics 建议未清零不阻塞最好结果交付。
+
 ---
 
 ## Workflow — 逐件建模 → bake → 组装骨架 → 蒙皮 → K 帧 → 导出

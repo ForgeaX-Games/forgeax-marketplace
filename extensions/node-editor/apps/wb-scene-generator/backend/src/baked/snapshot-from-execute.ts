@@ -61,9 +61,16 @@ function layersFromSceneItem(item: unknown): BakeLayerInput[] {
     return {
       nodePath: l.nodePath,
       nodeName: l.nodeName,
-      cells: l.cells.map((c) => ({ x: c.x, y: c.y, z: c.z })),
+      cells: l.cells.map((c) => ({
+        x: c.x,
+        y: c.y,
+        z: c.z,
+        token: c.token,
+        ...(c.state ? { state: c.state } : {}),
+      })),
       ...(l.schema ? { schema: l.schema } : {}),
       ...(meta?.name ? { assetName: meta.name } : {}),
+      ...(meta?.alias ? { assetAlias: meta.alias } : {}),
       ...(meta?.type ? { assetType: meta.type } : {}),
     }
   })

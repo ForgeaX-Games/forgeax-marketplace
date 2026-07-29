@@ -114,4 +114,16 @@ describe('meshAwareQc: interpenetration', () => {
     expect(r.signals).toEqual([])
     expect(r.clean).toBe(true)
   })
+
+  it('caps inline signals while retaining pair and omitted counts', () => {
+    const src = Array.from({ length: 4 }, (_, i) => [
+      `m${i} = mesh(filename="${i}.obj")`,
+      `p${i} = part(shape=m${i})`,
+    ].join('\n')).join('\n')
+    const r = meshAwareQc(src, bakedMap('0.obj', '1.obj', '2.obj', '3.obj'), { maxSignals: 2 })
+    expect(r.pairCount).toBe(6)
+    expect(r.signals).toHaveLength(2)
+    expect(r.omittedCount).toBe(4)
+    expect(r.clean).toBe(true)
+  })
 })

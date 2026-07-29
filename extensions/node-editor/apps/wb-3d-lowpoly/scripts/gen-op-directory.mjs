@@ -18,13 +18,13 @@
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const appRoot = join(here, '..')
 
-const { listOpSpecs } = await import(join(appRoot, 'vendor/dist/shared/types/index.js'))
+const { listOpSpecs } = await import(pathToFileURL(join(appRoot, 'vendor/dist/shared/types/index.js')).href)
 
 /** 分片定义：id → { title, file, ops[] }。ops 按名单显式列出，顺序不重要（渲染时会按字母排序）。 */
 const SHARDS = [
@@ -84,10 +84,13 @@ const SHARDS = [
   {
     id: 'assembly-misc',
     file: 'assembly-misc.md',
-    title: 'Assembly & Misc（part/joint/material + collision/inertial/animation/texture）',
+    title: 'Assembly & Placement（part/joint/material + bbox-driven placement）',
     summary:
-      '把 shape 包成可装配 part、URDF joint、材质、简化碰撞体/惯量、动画 clip、贴图。几乎每个 PART 收尾组装都要用到，视为必读的一部分。',
-    ops: ['material', 'part', 'joint', 'collision', 'inertial', 'animation', 'texture'],
+      '把 shape 包成 part、用真实可解 AABB 对齐/贴面、添加 joint/材质/碰撞体/惯量/动画/贴图。几乎每个 PART 收尾组装都要用到。',
+    ops: [
+      'material', 'part', 'align_centers', 'place_on_face', 'place_on_surface',
+      'joint', 'collision', 'inertial', 'animation', 'texture',
+    ],
   },
 ]
 

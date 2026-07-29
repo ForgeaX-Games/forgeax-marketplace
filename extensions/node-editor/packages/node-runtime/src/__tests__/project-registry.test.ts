@@ -65,7 +65,10 @@ function makeFactory(opIds: string[] = ['demo.a', 'demo.b']): {
   return { registry, factory }
 }
 
-function makeRegistry(opIds?: string[]): ProjectRegistry {
+function makeRegistry(
+  opIds?: string[],
+  extra?: Partial<{ lockLeaseMs: number; queueEntryIdleMs: number }>,
+): ProjectRegistry {
   const { factory } = makeFactory(opIds)
   return new ProjectRegistry({
     workspaceRoot: root,
@@ -73,7 +76,12 @@ function makeRegistry(opIds?: string[]): ProjectRegistry {
     defaultType: 'scene',
     defaultProjectName: 'Default Scene',
     defaultProjectId: 'main',
+    ...extra,
   })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 describe('ProjectRegistry — backfill', () => {
@@ -316,13 +324,13 @@ describe('ProjectRegistry — exclusive per-agent lock', () => {
     expect((noActive as { code: string }).code).toBe('mutation-denied-no-project')
   })
 
-  it('agents can mutate locked projects while UI views a different project', async () => {
+  it('agents can mutate write-locked projects while UI views a different project', async () => {
     const reg = makeRegistry()
     reg.init()
     const a = await reg.createProject({ name: 'A' })
     const b = await reg.createProject({ name: 'B' })
-    reg.openProject(a.id, ai('A'))
-    reg.openProject(b.id, ai('B'))
+    expect(reg.claimWriteAccess(a.id, ai('A'))).toEqual({ ok: true, queued: false })
+    expect(reg.claimWriteAccess(b.id, ai('B'))).toEqual({ ok: true, queued: false })
     reg.viewProject(a.id)
     expect(reg.checkMutationAccess(a.id, ai('A'))).toEqual({ ok: true })
     expect(reg.checkMutationAccess(b.id, ai('B'))).toEqual({ ok: true })
@@ -343,6 +351,258 @@ describe('ProjectRegistry — exclusive per-agent lock', () => {
     expect(reg.getProjectLock(a.id)).toBeNull()
     // The agent is free to open a different project now.
     expect(reg.acquireProjectLock(b.id, ai('A'))).toEqual({ ok: true })
+  })
+})
+
+describe('ProjectRegistry — holder identity distinguishes concurrent sessions sharing one agentId', () => {
+  // Real callers: every construction-queue item in aw-support dispatches to
+  // the SAME fixed ForgeaX agent role name (e.g. 'sino-constructor') even
+  // when several items run as independent concurrent sessions — only
+  // `sessionId` actually distinguishes them. These tests pin down that the
+  // lock/queue tables key on (agentId, sessionId) together, not agentId
+  // alone, so two such concurrent sessions never alias each other's lock.
+  const aiSession = (agentId: string, sessionId: string) => ({ kind: 'ai' as const, agentId, sessionId })
+
+  it('two sessions sharing one agentId can each hold a different project at once', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const a = await reg.createProject({ name: 'A' })
+    const b = await reg.createProject({ name: 'B' })
+    expect(reg.acquireProjectLock(a.id, aiSession('sino-constructor', 'sess-1'))).toEqual({ ok: true })
+    // Same agentId, different sessionId — must NOT hit "agent-holds-another".
+    expect(reg.acquireProjectLock(b.id, aiSession('sino-constructor', 'sess-2'))).toEqual({ ok: true })
+    expect(reg.getProjectLock(a.id)?.sessionId).toBe('sess-1')
+    expect(reg.getProjectLock(b.id)?.sessionId).toBe('sess-2')
+  })
+
+  it('a same-agentId different-session caller cannot mutate or release a project it does not hold', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.acquireProjectLock(p.id, aiSession('sino-constructor', 'sess-1'))
+    const otherSession = aiSession('sino-constructor', 'sess-2')
+    expect(reg.checkMutationAccess(p.id, otherSession)).toMatchObject({
+      ok: false,
+      code: 'mutation-denied-locked-by-other',
+    })
+    const released = reg.releaseProjectLock(p.id, otherSession)
+    expect(released).toMatchObject({ ok: false, code: 'lock-not-owned' })
+    // The true holder is unaffected and can still mutate + release normally.
+    expect(reg.checkMutationAccess(p.id, aiSession('sino-constructor', 'sess-1'))).toEqual({ ok: true })
+    expect(reg.releaseProjectLock(p.id, aiSession('sino-constructor', 'sess-1'))).toEqual({ ok: true })
+  })
+
+  it('two sessions sharing one agentId can both soft-open; write claims queue independently', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.acquireProjectLock(p.id, aiSession('sino-constructor', 'sess-holder'))
+    expect(reg.openProject(p.id, aiSession('sino-constructor', 'sess-1'))).toEqual({ ok: true, queued: false })
+    expect(reg.openProject(p.id, aiSession('sino-constructor', 'sess-2'))).toEqual({ ok: true, queued: false })
+    const first = reg.claimWriteAccess(p.id, aiSession('sino-constructor', 'sess-1'))
+    const second = reg.claimWriteAccess(p.id, aiSession('sino-constructor', 'sess-2'))
+    expect(first).toMatchObject({ queued: true, position: 1 })
+    expect(second).toMatchObject({ queued: true, position: 2 })
+    reg.releaseProjectLock(p.id, aiSession('sino-constructor', 'sess-holder'))
+    expect(reg.getProjectLock(p.id)?.sessionId).toBe('sess-1')
+    expect(reg.checkMutationAccess(p.id, aiSession('sino-constructor', 'sess-2')).ok).toBe(false)
+  })
+
+  it('a caller without sessionId still degrades to plain agentId identity (unchanged legacy behavior)', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    const ai = (agentId: string) => ({ kind: 'ai' as const, agentId })
+    expect(reg.acquireProjectLock(p.id, ai('A'))).toEqual({ ok: true })
+    // Re-acquiring with the same session-less agentId is still idempotent.
+    expect(reg.acquireProjectLock(p.id, ai('A'))).toEqual({ ok: true })
+    // A different agentId is still rejected exactly as before.
+    const blocked = reg.acquireProjectLock(p.id, ai('B'))
+    expect(blocked).toMatchObject({ ok: false, code: 'project-locked-by-other' })
+  })
+})
+
+describe('ProjectRegistry — lock lease + FIFO wait queue', () => {
+  const ai = (agentId: string) => ({ kind: 'ai' as const, agentId })
+
+  it('openProject is shared — many agents attach without queuing', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    expect(reg.openProject(p.id, ai('A'))).toEqual({ ok: true, queued: false })
+    expect(reg.openProject(p.id, ai('B'))).toEqual({ ok: true, queued: false })
+    expect(reg.openProject(p.id, ai('C'))).toEqual({ ok: true, queued: false })
+    expect(reg.getProjectQueue(p.id)).toEqual([])
+    expect(reg.getProjectLock(p.id)).toBeNull()
+  })
+
+  it('claimWriteAccess enqueues writers on a busy project, reporting FIFO position', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    expect(reg.claimWriteAccess(p.id, ai('A'))).toEqual({ ok: true, queued: false })
+
+    const claimB = reg.claimWriteAccess(p.id, ai('B'))
+    expect(claimB).toMatchObject({ ok: false, queued: true, code: 'project-queued', position: 1, aheadOf: [] })
+
+    const claimC = reg.claimWriteAccess(p.id, ai('C'))
+    expect(claimC).toMatchObject({ ok: false, queued: true, code: 'project-queued', position: 2, aheadOf: ['B'] })
+
+    // Re-polling is idempotent: same position, not pushed to the back.
+    expect(reg.claimWriteAccess(p.id, ai('B'))).toMatchObject({ position: 1, aheadOf: [] })
+    expect(reg.getProjectQueue(p.id)).toEqual([
+      { agentId: 'B', position: 1, aheadOf: [] },
+      { agentId: 'C', position: 2, aheadOf: ['B'] },
+    ])
+  })
+
+  it('non-queueable conflicts (unknown project, agent already holding another) still hard-fail', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const a = await reg.createProject({ name: 'A' })
+    const b = await reg.createProject({ name: 'B' })
+    expect(reg.openProject('no-such-project', ai('A'))).toEqual({
+      ok: false,
+      code: 'project-not-found',
+      reason: 'project-not-found: no-such-project',
+    })
+    reg.openProject(a.id, ai('A'))
+    const blocked = reg.openProject(b.id, ai('A'))
+    expect(blocked.ok).toBe(false)
+    expect((blocked as { queued?: boolean }).queued).toBeFalsy()
+    expect((blocked as { code: string }).code).toBe('agent-holds-another')
+  })
+
+  it('humans always bypass the write queue, even while an AI holds the lock', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+    expect(reg.openProject(p.id, { kind: 'user' })).toEqual({ ok: true, queued: false })
+    expect(reg.claimWriteAccess(p.id, { kind: 'user' })).toEqual({ ok: true, queued: false })
+    expect(reg.getProjectQueue(p.id)).toEqual([])
+  })
+
+  it('releasing the write lock hands it straight to the queue head', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+    reg.claimWriteAccess(p.id, ai('B'))
+    reg.claimWriteAccess(p.id, ai('C'))
+
+    expect(reg.releaseProjectLock(p.id, ai('A'))).toEqual({ ok: true })
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('B')
+    expect(reg.getProjectQueue(p.id)).toEqual([{ agentId: 'C', position: 1, aheadOf: [] }])
+
+    // B did not have to call anything to claim it — but its own next claim is
+    // an idempotent no-op confirming it already holds the write lock.
+    expect(reg.claimWriteAccess(p.id, ai('B'))).toEqual({ ok: true, queued: false })
+
+    expect(reg.releaseProjectLock(p.id, ai('B'))).toEqual({ ok: true })
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('C')
+    expect(reg.getProjectQueue(p.id)).toEqual([])
+  })
+
+  it('an expired write lease is swept and handed to the queue head — a crashed agent cannot wedge a project shut', async () => {
+    const reg = makeRegistry(undefined, { lockLeaseMs: 20 })
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A')) // never closes — simulates a crash
+    reg.claimWriteAccess(p.id, ai('B')) // queues behind A
+
+    await sleep(40)
+    // Nobody touched the lock: the next lock-table read must self-heal.
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('B')
+    expect(reg.checkMutationAccess(p.id, ai('B'))).toEqual({ ok: true })
+    expect(reg.checkMutationAccess(p.id, ai('A')).ok).toBe(false)
+  })
+
+  it('checkMutationAccess renews the lease so an actively-mutating agent is never timed out', async () => {
+    const reg = makeRegistry(undefined, { lockLeaseMs: 40 })
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+
+    // Two mutation "heartbeats" spaced under the lease window, spanning more
+    // than one full lease window in total — must never expire in between.
+    await sleep(25)
+    expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
+    await sleep(25)
+    expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+  })
+
+  it('renewLock (explicit heartbeat) keeps an idle-but-alive agent from expiring', async () => {
+    const reg = makeRegistry(undefined, { lockLeaseMs: 30 })
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+
+    await sleep(20)
+    expect(reg.renewLock(p.id, ai('A'))).toEqual({ ok: true })
+    await sleep(20)
+    // 40ms have elapsed since claim, but the heartbeat at 20ms reset the
+    // 30ms window, so the lock must still be A's.
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+  })
+
+  it('renewLock rejects an agent that does not hold the project', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    const res = reg.renewLock(p.id, ai('nobody'))
+    expect(res.ok).toBe(false)
+    expect((res as { code: string }).code).toBe('mutation-denied-not-open')
+  })
+
+  it('a stale (idle) write-queue entry is dropped and never blocks the agent behind it', async () => {
+    const reg = makeRegistry(undefined, { queueEntryIdleMs: 20 })
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+    reg.claimWriteAccess(p.id, ai('B')) // queues, then goes silent (never polls again)
+    await sleep(30)
+    reg.claimWriteAccess(p.id, ai('C')) // polls after B's slot has gone stale
+
+    expect(reg.getProjectQueue(p.id).map((e) => e.agentId)).toEqual(['C'])
+    reg.releaseProjectLock(p.id, ai('A'))
+    // C, not the abandoned B, gets the write lock.
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('C')
+  })
+
+  it('leaveQueue removes an agent from the write wait line without side effects on others', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+    reg.claimWriteAccess(p.id, ai('B'))
+    reg.claimWriteAccess(p.id, ai('C'))
+    expect(reg.leaveQueue(p.id, ai('B'))).toEqual({ ok: true })
+    expect(reg.getProjectQueue(p.id)).toEqual([{ agentId: 'C', position: 1, aheadOf: [] }])
+    // Idempotent — leaving twice, or leaving while never queued, is a no-op.
+    expect(reg.leaveQueue(p.id, ai('B'))).toEqual({ ok: true })
+  })
+
+  it('forceUnlockProject is denied for AI callers and fully resets lock+queue for humans', async () => {
+    const reg = makeRegistry()
+    reg.init()
+    const p = await reg.createProject({ name: 'P' })
+    reg.claimWriteAccess(p.id, ai('A'))
+    reg.claimWriteAccess(p.id, ai('B'))
+
+    const deniedForAi = reg.forceUnlockProject(p.id, ai('A'))
+    expect(deniedForAi.ok).toBe(false)
+    expect((deniedForAi as { code: string }).code).toBe('force-unlock-denied')
+    expect(reg.getProjectLock(p.id)?.agentId).toBe('A') // unchanged
+
+    expect(reg.forceUnlockProject(p.id, { kind: 'workbench' })).toEqual({ ok: true })
+    expect(reg.getProjectLock(p.id)).toBeNull()
+    expect(reg.getProjectQueue(p.id)).toEqual([])
+
+    // The project is fully writable again — by anyone, including the
+    // previously-queued B, with no leftover queue entries surfacing.
+    expect(reg.claimWriteAccess(p.id, ai('B'))).toEqual({ ok: true, queued: false })
   })
 })
 

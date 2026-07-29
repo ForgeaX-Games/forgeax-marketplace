@@ -12,8 +12,9 @@ export const MAX_VIDEO_UPLOAD_BYTES = 104_857_600
 export const VIDEO_UPLOAD_MIME = 'video/mp4' as const
 export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 export const MAX_AUDIO_UPLOAD_BYTES = MAX_VIDEO_UPLOAD_BYTES
+export const MAX_FONT_UPLOAD_BYTES = 20 * 1024 * 1024
 
-export type BrowserUploadMediaType = Extract<KinoMediaType, 'video' | 'image' | 'audio'>
+export type BrowserUploadMediaType = Extract<KinoMediaType, 'video' | 'image' | 'audio' | 'font'>
 
 interface BrowserUploadPolicy {
   mimeTypes: readonly string[]
@@ -50,6 +51,16 @@ export const BROWSER_UPLOAD_POLICIES: Readonly<Record<BrowserUploadMediaType, Br
       'audio/ogg': ['ogg'],
       'audio/mp4': ['m4a'],
       'audio/aac': ['aac'],
+    },
+  },
+  font: {
+    mimeTypes: ['font/woff2', 'font/woff', 'font/ttf', 'font/otf'],
+    maxBytes: MAX_FONT_UPLOAD_BYTES,
+    extensions: {
+      'font/woff2': ['woff2'],
+      'font/woff': ['woff'],
+      'font/ttf': ['ttf'],
+      'font/otf': ['otf'],
     },
   },
 }

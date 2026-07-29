@@ -33,7 +33,7 @@ importers:
   apps/wb-2d-scene-asset-generator:
     dependencies:
       '@forgeax/node-runtime':
-        specifier: workspace:*
+        specifier: file:../../packages/node-runtime
         version: link:../../packages/node-runtime
     devDependencies:
       '@types/node':
@@ -144,7 +144,7 @@ importers:
   apps/wb-3d-lowpoly:
     dependencies:
       '@forgeax/node-runtime':
-        specifier: workspace:*
+        specifier: file:../../packages/node-runtime
         version: link:../../packages/node-runtime
     devDependencies:
       '@types/node':
@@ -261,7 +261,7 @@ importers:
   apps/wb-scene-generator:
     dependencies:
       '@forgeax/node-runtime':
-        specifier: workspace:*
+        specifier: file:../../packages/node-runtime
         version: link:../../packages/node-runtime
       jszip:
         specifier: ^3.10.1

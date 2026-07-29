@@ -41,6 +41,6 @@
     "tsx": "^4.0.0"
   },
   "dependencies": {
-    "@forgeax/node-runtime": "workspace:*"
+    "@forgeax/node-runtime": "file:../../packages/node-runtime"
   }
 }

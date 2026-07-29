@@ -1067,24 +1067,19 @@ export function resetMaterialOverrideGraph(scenario: GameScenario, node: GameNod
 
 // ── 读投影：node → 挂载级 MaterialItem[]（蓝图节点配置面板时间轴用） ──────────────
 /**
- * 单个子件在视频上的**可见窗口**（与运行时/预览皮肤一致的时序 SSOT）：
- * - 有 cue 的交互（QTE 等）：取 cues 的 [min appearAt, max endAt]——这才是画面上实际显隐的窗口，
- *   不受子件 `trigger.ms`（引擎挂载时机，可能是历史残留）影响；
- * - 否则：`window` 优先，回落 `timedStart`（trigger）→ maxMs。
+ * 单个子件在视频上的**可见窗口** —— 唯一时序 SSOT = `window.startMs/endMs`，全组件一视同仁。
+ *
+ * 与运行时同源：引擎两处挂载通道都在 `el.window` 存在时跳过 `trigger`
+ * （`nodes/perf.ts` 的 enter 通道、`engine.ts#flushTimeline` 的 at 通道），`window` 到点显示、
+ * 到点移除（`engine.ts#tickWindows`）。所以编辑器**不再**从 `inputs.cues` 反推显隐窗：
+ * 拍点 `appearAt/targetAt/endAt` 只表达拍点之间的相对时序（皮肤内部时钟从挂载那刻起算、
+ * 按 `appearAt - min(appearAt)` 归一，见 InkKouLayer），绝对值不决定它出现在视频何处。
+ *
+ * `window` 缺失时才回落 `timedStart`（trigger）→ maxMs——仅兜底未落 window 的瞬态 spawn。
  * 滤镜/特效无位置语义，返回 null（不参与挂载条跨度）。
  */
 function childVisibleSpan(el: OverlayChild, maxMs: number): { start: number; end: number } | null {
   if (el.component === 'filter' || el.component === 'fx') return null
-  if (hasCuePointsInput(el.component)) {
-    const cues = cuesOf(el)
-    if (cues.length) {
-      const start = Math.min(...cues.map((c) => c.appearAt ?? 0))
-      const end = Math.max(
-        ...cues.map((c) => c.endAt ?? Math.max((c.targetAt ?? (c.appearAt ?? 0)) + 300, (c.appearAt ?? 0) + (c.durationMs ?? 500))),
-      )
-      return { start, end }
-    }
-  }
   const start = el.window?.startMs ?? timedStart(el)
   const end = el.window?.endMs ?? maxMs
   return { start, end }
@@ -1216,9 +1211,11 @@ export function removeMountGraph(scenario: GameScenario, node: GameNode, mountId
 }
 
 /**
- * 拖动挂载级时间轴条：把该挂载全部子件整体平移 delta（= 新起点 − 当前**可见窗口**起点，cue 优先）。
- * 写回按子件真实时序字段落盘——cue 交互移 cues（appearAt/targetAt/endAt），其余移 window + trigger——
- * 保证移动后画面显隐与时间轴条一致（不写 trigger 残留导致预览/运行时错位）。
+ * 拖动挂载级时间轴条：把该挂载全部子件整体平移 delta（= 新起点 − 当前可见窗口起点）。
+ *
+ * 写回**只落 `window.startMs/endMs`**（唯一时序 SSOT，全组件同一条路）。不再平移
+ * `inputs.cues`——拍点绝对值不决定显隐（皮肤时钟从挂载起算），过去移 cues 在运行时其实是空操作，
+ * 只改了编辑器自己的投影，正是编辑器与运行时错位的来源。
  */
 export function shiftMountWindowGraph(
   scenario: GameScenario,
@@ -1241,21 +1238,66 @@ export function shiftMountWindowGraph(
   const shift = (v: number): number => Math.max(0, Math.min(maxMs, v + delta))
   let s = scenario
   for (const el of children) {
-    if (hasCuePointsInput(el.component) && cuesOf(el).length) {
-      const cues = cuesOf(el).map((c) => ({
-        ...c,
-        appearAt: shift(c.appearAt ?? 0),
-        targetAt: c.targetAt != null ? shift(c.targetAt) : c.targetAt,
-        endAt: c.endAt != null ? shift(c.endAt) : c.endAt,
-      }))
-      s = patchOverlayChild(s, node.id, el.id, { inputs: { ...el.inputs, cues } })
-    } else if (el.component !== 'filter' && el.component !== 'fx') {
-      const start = shift(el.window?.startMs ?? timedStart(el))
-      const end = shift(el.window?.endMs ?? maxMs)
-      s = patchOverlayChild(s, node.id, el.id, { window: { startMs: start, endMs: end }, trigger: { when: 'at', ms: start } })
-    }
+    const sp = childVisibleSpan(el, maxMs)
+    if (!sp) continue // filter/fx 无时序语义
+    s = patchOverlayChild(s, node.id, el.id, {
+      window: { startMs: shift(sp.start), endMs: shift(sp.end) },
+    })
   }
   return s
+}
+
+/** 挂载条最短跨度（ms），与子件级 `patchMaterialGraph` 的下限一致——避免拖成 0 长度后再也抓不住。 */
+const MOUNT_MIN_SPAN_MS = 100
+
+/**
+ * 拖挂载条**边缘**（拉伸，区别于整体平移）：只改定义该边界的子件的 `window`，保住挂载内部错峰。
+ * - 拖左缘 → 跨度起点最早的子件改 `startMs`（其余子件不动）；
+ * - 拖右缘 → 跨度终点最晚的子件改 `endMs`。
+ * 单子件挂载（`base:*` 全是）即"直接改这一个子件的 window"，与直觉一致。
+ * 两端都夹 `MOUNT_MIN_SPAN_MS`，短条也永远留得住可抓的宽度。
+ */
+export function resizeMountWindowGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  maxMs: number,
+  mountId: string,
+  patch: { startMs?: number; endMs?: number },
+): GameScenario {
+  const mount = (node.data.overlayNodes ?? []).find((m) => overlayMountId(m) === mountId)
+  if (!mount) return scenario
+  const spans: Array<{ el: OverlayChild; start: number; end: number }> = []
+  for (const el of resolveMountChildren(scenario.ui?.overlays, mount)) {
+    const sp = childVisibleSpan(el, maxMs)
+    if (sp) spans.push({ el, start: sp.start, end: sp.end })
+  }
+  if (!spans.length) return scenario
+  const curStart = Math.min(...spans.map((x) => x.start))
+  const curEnd = Math.max(...spans.map((x) => x.end))
+
+  // 两个边缘模式都会把「另一端」原值一并带回来，故以「哪端与当前不同」判定拖的是哪条边。
+  if (patch.startMs != null && patch.startMs !== curStart) {
+    // 最短跨度只拦「拖到更短」，不能拦「拉长」：本就短于下限的旧数据（如 1000→1001）
+    // 若直接夹到 curEnd-100 会变成负数→0，左缘一拖就跳回起点。故上限兜到当前起点。
+    const next = clampMs(patch.startMs, 0, Math.max(curEnd - MOUNT_MIN_SPAN_MS, Math.min(curStart, curEnd)))
+    let s = scenario
+    for (const x of spans) {
+      if (x.start !== curStart) continue
+      s = patchOverlayChild(s, node.id, x.el.id, { window: { startMs: next, endMs: x.end } })
+    }
+    return s
+  }
+  if (patch.endMs != null && patch.endMs !== curEnd) {
+    // 同上（对称）：右缘的下限不得高过当前终点，否则短条一碰就被顶长。
+    const next = clampMs(patch.endMs, Math.min(curStart + MOUNT_MIN_SPAN_MS, Math.max(curEnd, curStart)), maxMs)
+    let s = scenario
+    for (const x of spans) {
+      if (x.end !== curEnd) continue
+      s = patchOverlayChild(s, node.id, x.el.id, { window: { startMs: x.start, endMs: next } })
+    }
+    return s
+  }
+  return scenario
 }
 
 // ── 读投影：预览叠层 ──────────────────────────────────────────────────────────
@@ -1407,8 +1449,8 @@ export function activePreviewOverlaysFromNode(
 }
 
 /**
- * 当前播放头落在 window 内、应画到预览皮肤层的挂载 children（不含 filter/fx）。
- * 含未分类组件；与 `activePreviewOverlaysFromNode` 手柄配套。
+ * 当前播放头落在 `window` 内、应画到预览皮肤层的挂载 children（不含 filter/fx）。
+ * 判定与时间轴条、运行时同走 `childVisibleSpan`（唯一时序 SSOT），三处不可能再对不上。
  */
 export function previewSkinChildrenInWindow(
   scenario: GameScenario,
@@ -1420,23 +1462,9 @@ export function previewSkinChildrenInWindow(
   const out: OverlayChild[] = []
   // 与运行时一致：扫全部挂载（内容轨 + 常驻 HUD 方案），不能只看 primary。
   for (const el of mountedChildrenOf(scenario, node)) {
-    if (el.component === 'filter' || el.component === 'fx') continue
-    const cues = hasCuePointsInput(el.component) ? cuesOf(el) : null
-    if (cues && cues.length > 0) {
-      const inCue = cues.some((c) => {
-        const s = c.appearAt ?? 0
-        const end = c.endAt ?? s + QTE_GOOD_WINDOW
-        return ms >= s && ms <= end
-      })
-      if (inCue) out.push(el)
-      continue
-    }
-    // 拍点型组件还没落任何拍点（刚挂载/克隆到时间轴、尚未点出第一个按键点）：
-    // 兜底按通用 window 全程可见，而不是直接判定"不在任一拍点窗内"就永远隐藏——
-    // 否则挂完方案却啥也看不到，会被误当成渲染坏了（真实原因只是还没打拍点）。
-    const start = el.window?.startMs ?? timedStart(el)
-    const end = el.window?.endMs ?? maxMs
-    if (ms < start || ms > end) continue
+    const sp = childVisibleSpan(el, maxMs)
+    if (!sp) continue
+    if (ms < sp.start || ms > sp.end) continue
     out.push(el)
   }
   return out
@@ -1455,8 +1483,11 @@ export function patchMaterialGraph(
   const zIndex = patch.zIndex == null ? item.zIndex : clampLayer(patch.zIndex)
   switch (item.kind) {
     case 'mount':
-      // 挂载级条：整体平移全部子件（zIndex/track 对挂载无意义，忽略）。
-      return shiftMountWindowGraph(scenario, node, maxMs, item.id, { startMs: patch.startMs, endMs: patch.endMs })
+      // 挂载级条：只有 move 会带 zIndex（见 MaterialTimeline#onPointerMove）——据此区分
+      // 「整体平移」与「拖边缘拉伸」。之前一律走平移，导致短条拖左缘只是整条前移、跨度永远拉不长。
+      return patch.zIndex != null
+        ? shiftMountWindowGraph(scenario, node, maxMs, item.id, { startMs: patch.startMs })
+        : resizeMountWindowGraph(scenario, node, maxMs, item.id, patch)
     case 'subtitle':
     case 'overlay':
     case 'filter':
@@ -1863,6 +1894,8 @@ export function addQteCueGraph(
     id,
     component: 'inkKou',
     trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window：按首个拍点的可见区间落窗，作者随后可在时间轴上拖改。
+    window: { startMs: cue.appearAt ?? 0, endMs: cue.endAt ?? end },
     layout: layoutForNewChild(undefined, 3),
     inputs: seeded,
   }

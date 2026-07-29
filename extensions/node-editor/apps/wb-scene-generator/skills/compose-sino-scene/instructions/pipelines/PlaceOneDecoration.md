@@ -15,9 +15,9 @@
 |------|--------|----------|
 | **`PlaceOneDecoration`（本模板）** | **少量**、有**明确位置**和/或**底面尺寸**的物件（三类里唯一可控 footprint） | 地标、雕像、石灯、叙事指名的那一棵大树、需占格贴合的人造件 |
 | `LocalPreciseDecoration` | 兴趣点旁一簇/一环点缀 | **仅**底面简单、结构简单的小物件 |
-| `NaturalDecorationDistribution` | 大片 Rest 背景填充；草/灌木/树**推荐**（非强制；多层多品种；Density 分层，0.008 中间参考、≤0.01） | 简单植被/石块 |
+| `NaturalDecorationDistribution` | 大片 Rest 背景填充；草/灌木/树**推荐**（非强制；多层多品种；Density=目标量级×丰富度系数÷Rest有效格数，仅限制在概率范围 0–1） | 简单植被/石块 |
 
-按需求选用，**不必硬凑三种**。装饰很少且全是精准物件时，可以只用本模板。植被类勿按问卷 count 逐个钉本模板。多组时 Rest 串链：PlaceOne(s) → Local → Natural(s)；禁止并联 fan-out。
+按需求选用，**不必硬凑三种**。装饰很少且全是精准物件时，可以只用本模板。植被类勿按问卷 count 逐个钉本模板。多组时 Rest 串链：PlaceOne(s) → Local → Natural(s)；禁止并联 fan-out。能接就接，连不下就跳过——禁止为「链太深」反复 redesign。
 
 > **时序**：地形高差（`MountainContourGenerate`，避开叙事核心区）→ 本模板（精准物件）→（按需）LocalPrecise → Natural → 湖。
 
@@ -25,22 +25,24 @@
 
 | 端口名 | 类型 | 说明 | 是否必接 | 怎么喂 |
 |--------|------|------|---------|--------|
-| `in_1` | scene | 上游可放置区域 | **必接** | 上一组 `Rest`（悬空则整组静默空跑） |
+| `in_1` | scene | 上游可放置区域 | **必接** | 上一组暴露 `{ label:"Rest" }` **直接**接本口（组壳对组壳；勿挖组内、勿无故插 `scene_focus_path`）。悬空则整组静默空跑 |
 | `in_3` | point | Point 参考放置位置 | **必接** | `manual_points.point`（x,y→point） |
 | `in_5` / `in_6` | number | FootprintWidth / FootprintHeight 底面占地（格） | **必接** | `number_const` — **从 `prefab-footprint-summary.json` 或 checklist assets 读占格；禁止默认 1×1** |
 | `in_2` | number | DecorationHeight 竖向高度（格） | 建议接 | `number_const`（按 `heightRatio` 换算的高度感） |
 | `in_0` / `in_4` | string | DecorationName / DecorationAsset 名称/资产名 | 建议接 | `text_panel`（**写语义资产名**，名称与资产一致，如 `雕像`） |
 
+> **本模板没有 Seed 口。** 不要把 `LocalPrecise`/`Natural` 的「Seed=`in_3`」抄到 PlaceOne——这里的 `in_3` 是 Point。接 `aw_m0_seed` 会挤掉落点。
+>
 > 其余 `in_*` 为 `[hidden]` 高级参数，默认即可。
 
 ## 3. 管线电池的总输出端口
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Decoration 装饰物（主产物） | `appendMergeItem` → `aw_m0_merge` |
+| `out_1` | scene | Decoration 装饰物（主产物） | 调试 / 领域引用 |
 | `out_2` | scene | Rest 扣除该装饰物后的剩余区域 | 下一实例 `in_1`（多个精准装饰物链式） |
 | `out_3` / `out_4` | scene | DecorationPath / RestPath 路径句柄 | 需要时用 |
-| `out_0` | scene | Scene 整树中间态 | 一般不用 |
+| `out_0` | scene | Scene 整树汇总口 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`） |
 
 ## 4. 推荐参数
 

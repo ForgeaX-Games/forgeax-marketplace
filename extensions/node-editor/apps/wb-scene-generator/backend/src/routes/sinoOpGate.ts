@@ -118,6 +118,80 @@ export function checkSinoOpAllowlist(ops: readonly unknown[]): SinoGateRejection
   return null
 }
 
+type GraphNodeLike = {
+  id?: string
+  name?: string
+  opId?: string
+  params?: { __groupSourceBatteryName?: string }
+}
+
+function isPlaceOneDecorationNode(node: GraphNodeLike | undefined): boolean {
+  if (!node) return false
+  const bat =
+    (typeof node.params?.__groupSourceBatteryName === 'string' && node.params.__groupSourceBatteryName.trim())
+    || (typeof node.name === 'string' && node.name.trim())
+    || ''
+  return bat === 'PlaceOneDecoration'
+}
+
+function portRefName(port: unknown): string | undefined {
+  if (typeof port === 'string' && port) return port
+  if (port && typeof port === 'object') {
+    const p = port as { portName?: unknown; label?: unknown }
+    if (typeof p.portName === 'string' && p.portName) return p.portName
+  }
+  return undefined
+}
+
+/**
+ * Real session failure (清水镇 P5): agent wired `aw_m0_seed.seed` → PlaceOne.`in_3`.
+ * PlaceOne has NO Seed port — `in_3` is Point (point2d). That replace/overwrites
+ * `manual_points.point` and execute reports empty group outputs. Reject at gate.
+ */
+export function checkPlaceOneSeedOnPointMiswire(
+  ops: readonly unknown[],
+  nodes: Record<string, GraphNodeLike> | readonly GraphNodeLike[] | null | undefined,
+): SinoGateRejection | null {
+  if (!Array.isArray(ops) || !nodes) return null
+  const byId = new Map<string, GraphNodeLike>()
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      if (n?.id) byId.set(n.id, n)
+    }
+  } else {
+    for (const [id, n] of Object.entries(nodes)) {
+      byId.set(id, { ...n, id: n.id ?? id })
+    }
+  }
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = asRecord(ops[i])
+    if (!op || op.type !== 'connect') continue
+    const source = asRecord(op.source)
+    const target = asRecord(op.target)
+    if (!source || !target) continue
+    const srcId = typeof source.nodeId === 'string' ? source.nodeId : ''
+    const srcPort = portRefName(source.port)
+    const tgtId = typeof target.nodeId === 'string' ? target.nodeId : ''
+    const tgtPort = portRefName(target.port)
+    const fromSeed = srcId === 'aw_m0_seed' || srcPort === 'seed'
+    if (!fromSeed || tgtPort !== 'in_3' || !tgtId) continue
+    if (!isPlaceOneDecorationNode(byId.get(tgtId))) continue
+    return {
+      opIndex: i,
+      opId: 'connect',
+      reason:
+        `placeone-seed-miswire: cannot connect seed → PlaceOneDecoration "${tgtId}".in_3 — ` +
+        'in_3 is Point (point2d), PlaceOne has no Seed port.',
+      fix:
+        'Wire `manual_points.point` → `{ label:"Point", portName:"in_3" }`. ' +
+        'Do NOT attach `aw_m0_seed` to PlaceOne. Seed is only for LocalPreciseDecoration / ' +
+        'NaturalDecorationDistribution (their in_3) and other templates that expose a Seed label.',
+    }
+  }
+  return null
+}
+
 /** Project full runtime op catalog down to Sino-visible composer utilities. */
 export function filterComposerUtilityOps(
   ops: readonly Record<string, unknown>[],

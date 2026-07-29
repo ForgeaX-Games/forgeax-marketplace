@@ -5,7 +5,7 @@
  * 连/删边会同步 event reactions 里的 `advance.edgeId`（显式走向）；
  * 未写 advance 时运行时仍可「有边则默认推进」。
  */
-import type { EdgeRouting, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
+import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
 import { getSubFlow } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 
@@ -438,6 +438,31 @@ export function updateEdgeData(graph: GameGraph, edgeId: string, data: EdgeRouti
     ...graph,
     edges: graph.edges.map((e) => (e.id === edgeId ? { ...e, data: { ...e.data, ...data } } : e)),
   }
+}
+
+/** 同一事件 handle 的边共享跳转方式；延迟边共用节点唯一结算点。 */
+export function updateEventRouteTiming(
+  graph: GameGraph,
+  nodeId: string,
+  handle: string,
+  transition: EdgeTransition,
+  settlement?: RoutingSettlement,
+): GameGraph {
+  const edges = graph.edges.map((edge) => {
+    if (edge.source !== nodeId || (edge.sourceHandle ?? 'default') !== handle) return edge
+    const data = { ...edge.data }
+    if (transition === 'immediate') delete data.transition
+    else data.transition = transition
+    return { ...edge, data: Object.keys(data).length ? data : undefined }
+  })
+  const next = { ...graph, edges }
+  if (transition === 'onSettlement') {
+    return updateNodeData(next, nodeId, { routingSettlement: settlement ?? { type: 'complete' } })
+  }
+  const stillDeferred = edges.some(
+    (edge) => edge.source === nodeId && edge.data?.transition === 'onSettlement',
+  )
+  return stillDeferred ? next : updateNodeData(next, nodeId, { routingSettlement: undefined })
 }
 
 /**

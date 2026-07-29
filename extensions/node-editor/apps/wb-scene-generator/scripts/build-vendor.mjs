@@ -17,7 +17,7 @@ const tsc = 'pnpm exec tsc'
 const cmd = [
   tsc,
   '--module nodenext --moduleResolution nodenext --target es2022',
-  '--skipLibCheck --declaration false --noEmitOnError false',
+  '--skipLibCheck --declaration true --noEmitOnError false',
   '--rootDir vendor/shared/types --outDir vendor/dist/shared/types',
   // index.ts = the v3 barrel (graph/volume/port/summary/projection). tree.ts is a
   // second, deliberately NOT-barrel-exported entry point — the old nested-tree

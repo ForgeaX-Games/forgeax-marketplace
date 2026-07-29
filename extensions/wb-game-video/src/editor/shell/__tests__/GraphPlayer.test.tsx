@@ -22,11 +22,13 @@ const SCENARIO: GameScenario = {
 }
 
 describe('GraphPlayer missing video handling', () => {
-  it('shows the stable id after playback error and clears it on loadedmetadata', () => {
+  it('retries once before showing the stable id and clears it on loadedmetadata', () => {
     const { container } = render(<GraphPlayer scenario={SCENARIO} />)
     const video = container.querySelector('video')
     expect(video).toBeTruthy()
 
+    fireEvent.error(video!)
+    expect(screen.queryByRole('status')).toBeNull()
     fireEvent.error(video!)
     expect(screen.getByRole('status')).toHaveTextContent('stable-video-id')
 

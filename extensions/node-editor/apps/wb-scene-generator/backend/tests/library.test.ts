@@ -41,6 +41,31 @@ describe('library routes', () => {
     expect(r.json().name).toBe('common_16')
     await app.close()
   })
+  // Restored from git history (commit 6c419ebb deleted the whole pre-refactor rule
+  // set on 2026-07-15) under a simple_ prefix so legacy 64×80-atlas assets (old
+  // common_16 / wall_outer_16 shape: 16 base + one shared 4-variant row) still
+  // have a loadable rule distinct from the redesigned common_16 / outer_wall_36.
+  it('GET /api/v1/library/serve/simple_common_16 returns the restored legacy rule JSON', async () => {
+    const app = await buildApp()
+    const r = await app.inject({ method: 'GET', url: '/api/v1/library/serve/simple_common_16' })
+    expect(r.statusCode).toBe(200)
+    expect(r.headers['content-type']).toContain('application/json')
+    const body = r.json()
+    expect(body.name).toBe('simple_common_16')
+    expect(body.sprites).toHaveLength(20)
+    await app.close()
+  })
+  it('GET /api/v1/library/serve/simple_wall_outer_16 returns the restored legacy rule JSON', async () => {
+    const app = await buildApp()
+    const r = await app.inject({ method: 'GET', url: '/api/v1/library/serve/simple_wall_outer_16' })
+    expect(r.statusCode).toBe(200)
+    expect(r.headers['content-type']).toContain('application/json')
+    const body = r.json()
+    expect(body.name).toBe('simple_wall_outer_16')
+    expect(body.sprites).toHaveLength(20)
+    expect(body.faces.front.basePieces).toBe(16)
+    await app.close()
+  })
   it('GET /api/v1/library/serve/<real-image-alias> streams the blob', async () => {
     const aliases = getLibraryService().listAliases('raw')
     if (aliases.length === 0) return

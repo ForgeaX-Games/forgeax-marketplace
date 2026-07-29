@@ -3,13 +3,14 @@
 // Small weight → keeps the layout from drifting/spreading, without collapsing it
 // (clearance + non-overlap resist).
 
-import type { Term, Vec2, ProblemModel } from '../types.ts'
+import type { Term, Vec2, ProblemModel, SolverState } from '../types.ts'
 
 export function compactnessTerm(weight: number): Term {
   return {
     name: 'compactness',
-    energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number {
+    energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number {
       if (weight <= 0) return 0
+      const { positions: pos } = state
       const n = model.nodes.length
       if (n === 0) return 0
       let gx = 0

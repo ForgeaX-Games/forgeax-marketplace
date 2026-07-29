@@ -10,7 +10,7 @@ export interface KinoEnvelope<T> {
   error_code?: string
 }
 
-export type KinoMediaType = 'image' | 'video' | 'audio'
+export type KinoMediaType = 'image' | 'video' | 'audio' | 'font'
 
 export type KinoResourceType =
   | 'KEYFRAME'
@@ -83,6 +83,10 @@ export interface PrepareUploadInput {
     | 'audio/ogg'
     | 'audio/mp4'
     | 'audio/aac'
+    | 'font/woff2'
+    | 'font/woff'
+    | 'font/ttf'
+    | 'font/otf'
   bytes: number
   extension?: string
   client_resource_id?: string

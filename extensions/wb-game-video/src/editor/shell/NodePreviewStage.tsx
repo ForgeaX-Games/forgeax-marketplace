@@ -20,7 +20,7 @@
  * `patchData → onChange → store` 数据流，本组件只多一个订阅者，天然实时；也不自动回写
  * `durationMs`（只影响本地播放头与时间轴上限，对齐 `videoDurationCapReached` 契约）。
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { GameNode, GameScenario } from '../../runtime/schema/graph-schema'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
@@ -34,7 +34,6 @@ import { renderOverlayChildPreview } from './overlayChildPreview'
 import { PreviewClockProvider, previewClockLayerClassName } from './previewClock'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
-import { resolveGraphTextCss } from '../text/text-css'
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
 import { materialClass, materialLabel, type MaterialItem } from '../video/materialTimelineShared'
 import { pointerToVideoNorm } from '../../runtime/play/videoContentRect'
@@ -131,6 +130,28 @@ function fmtTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+/**
+ * 判定"这一层只是铺满画面的定位层、不是看得见的东西"的阈值（占画面宽高比例）。
+ * 超过就继续下钻找真正的可见元素；调大 = 更容易把大块皮肤当可见实体收下。
+ */
+const STAGE_LAYER_RATIO = 0.9
+
+/** 皮肤中某个可见元素的实测盒：中心归一化到画面矩形，尺寸取像素（热区照抄）。 */
+interface SkinBox {
+  cx: number
+  cy: number
+  w: number
+  h: number
+}
+
+/** 实测盒的比较指纹（像素取整、归一化留 3 位）——避免浮点抖动导致的无谓 re-render。 */
+function skinBoxesKey(boxes: Record<string, SkinBox[]>): string {
+  return Object.keys(boxes)
+    .sort()
+    .map((k) => `${k}:${boxes[k]!.map((b) => `${b.cx.toFixed(3)},${b.cy.toFixed(3)},${Math.round(b.w)},${Math.round(b.h)}`).join(';')}`)
+    .join('|')
+}
+
 export function NodePreviewStage({
   scenario,
   node,
@@ -157,12 +178,19 @@ export function NodePreviewStage({
 
   const frameRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // 皮肤层与其定位基准（`.gc-content-anchor` = object-fit:contain 后的真实画面矩形）：
+  // 热区尺寸靠量这两者的相对关系得出，见下方 useLayoutEffect。
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const skinLayerRef = useRef<HTMLDivElement | null>(null)
+  const [skinBoxes, setSkinBoxes] = useState<Record<string, SkinBox[]>>({})
   const [playheadMs, setPlayheadMs] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(true)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   // 拖拽 id 用 ref 不用 state：pointerdown 后同帧的 pointermove 不能等 React 重渲染，否则首段位移被丢。
   const overlayDragIdRef = useRef<string | null>(null)
+  /** 拖拽时"抓点 → 锚点"的固定偏移（同上，避免抓到皮肤边缘时锚点跳到指针下）。 */
+  const overlayDragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 })
   const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
@@ -222,8 +250,49 @@ export function NodePreviewStage({
       condition: { state: st, visited: new Set<string>() },
     }
   }, [scenario])
-  const skinnedPreviewIds = useMemo(() => new Set(previewSkinChildren.map((c) => c.id)), [previewSkinChildren])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
+
+  // ── 热区贴合皮肤实测盒 ────────────────────────────────────────────────────────
+  // 可拖的那块**就是渲染出来的皮肤本身**：手柄不再是独立造型（ring+label 占位芯片已删），
+  // 而是量出皮肤真正可见元素的盒子后盖在它上面的透明热区（默认全透明，hover/选中才描边，
+  // 见 catalogCss 的 `.is-skinned`）。皮肤没渲染出东西 → 预览里当它不存在，不画任何替代物。
+  useLayoutEffect(() => {
+    // 播放中不量：播放头每帧都变，量一次就是一次强制回流；拖拽只发生在暂停时，沿用上次结果即可。
+    if (isVideoPlaying) return
+    const layer = skinLayerRef.current
+    const host = anchorRef.current?.getBoundingClientRect()
+    if (!layer || !host || host.width <= 0 || host.height <= 0) {
+      setSkinBoxes((prev) => (Object.keys(prev).length ? {} : prev))
+      return
+    }
+    const next: Record<string, SkinBox[]> = {}
+    for (const wrap of Array.from(layer.children)) {
+      const childId = (wrap as HTMLElement).dataset.gvSkin
+      if (!childId) continue
+      const boxes: SkinBox[] = []
+      // 皮肤最外层通常是铺满整台的定位层（inputs 型皮肤靠自身 x/y 摆位，见 overlayChildPreview
+      // 的 STAGE_FILL_WRAP），它不是"看得见的东西"。所以逐层下钻，直到遇见明显小于整台的元素才
+      // 当作可抓实体收下；多拍点皮肤（如 inkKou 多 cue）自然会量出多个盒。
+      const visit = (el: Element): void => {
+        const r = el.getBoundingClientRect()
+        if (r.width <= 1 || r.height <= 1) return
+        if (r.width >= host.width * STAGE_LAYER_RATIO && r.height >= host.height * STAGE_LAYER_RATIO) {
+          for (const c of Array.from(el.children)) visit(c)
+          return
+        }
+        boxes.push({
+          cx: (r.left + r.width / 2 - host.left) / host.width,
+          cy: (r.top + r.height / 2 - host.top) / host.height,
+          w: r.width,
+          h: r.height,
+        })
+      }
+      for (const c of Array.from((wrap as HTMLElement).children)) visit(c)
+      if (boxes.length) next[childId] = boxes
+    }
+    // 只在实测值真变了才 set：量出来的是浮点像素，不比较会自激成每帧一次 re-render。
+    setSkinBoxes((prev) => (skinBoxesKey(prev) === skinBoxesKey(next) ? prev : next))
+  }, [previewSkinChildren, playheadMs, contentRect, isVideoPlaying])
 
   // 「添加控件」= 覆盖物挂载入口：候选与界面 tab 同一份（自定义覆盖物 + 基础覆盖物，打平；
   // 见 builtin-schemes），已挂载的排除，前 5 直接列出，其余进「更多」。
@@ -237,6 +306,22 @@ export function NodePreviewStage({
   )
   const primaryCandidateIds = mountCandidateIds.slice(0, 5)
   const moreCandidateIds = mountCandidateIds.slice(5)
+
+  /** 手柄该盖在哪个实测盒上：同一子件量出多个盒（多拍点皮肤）时取离该手柄锚点最近的那个。 */
+  function fitBoxFor(elId: string, x: number, y: number): SkinBox | null {
+    const boxes = elId ? skinBoxes[elId] : undefined
+    if (!boxes?.length) return null
+    let best = boxes[0]!
+    let bestD = Number.POSITIVE_INFINITY
+    for (const b of boxes) {
+      const d = (b.cx - x) ** 2 + (b.cy - y) ** 2
+      if (d < bestD) {
+        bestD = d
+        best = b
+      }
+    }
+    return best
+  }
 
   /** 某预览叠层归属哪份挂载（elementId → owning mount）。 */
   function mountIdOfOverlay(o: PreviewOverlay): string | null {
@@ -349,16 +434,21 @@ export function NodePreviewStage({
     if (!o.movable) return
     e.currentTarget.setPointerCapture(e.pointerId)
     overlayDragIdRef.current = o.id
+    // 记下"抓点相对锚点"的偏移，move 时原样带上：热区现在贴合整块皮肤，可抓面积可能很大
+    // （血条这种横条尤甚），若仍按下即把锚点吸到指针，抓边缘会让它整块跳一下。
     const pos = positionFromFrame(e)
-    if (pos) moveOverlay(o, pos.x, pos.y)
+    overlayDragOffsetRef.current = pos ? { dx: o.x - pos.x, dy: o.y - pos.y } : { dx: 0, dy: 0 }
   }
   function onOverlayPointerMove(e: React.PointerEvent<HTMLDivElement>, o: PreviewOverlay): void {
     if (overlayDragIdRef.current !== o.id) return
     const pos = positionFromFrame(e)
-    if (pos) moveOverlay(o, pos.x, pos.y)
+    if (!pos) return
+    const { dx, dy } = overlayDragOffsetRef.current
+    moveOverlay(o, pos.x + dx, pos.y + dy)
   }
   function onOverlayPointerUp(): void {
     overlayDragIdRef.current = null
+    overlayDragOffsetRef.current = { dx: 0, dy: 0 }
   }
 
   const previewContentStyle: CSSProperties | undefined = contentRect
@@ -408,11 +498,11 @@ export function NodePreviewStage({
             ))}
           </div>
         ) : null}
-        <div className="gc-content-anchor" style={previewContentStyle}>
+        <div className="gc-content-anchor" style={previewContentStyle} ref={anchorRef}>
           <div className="gc-preview-overlays">
             {previewSkinChildren.length > 0 ? (
               <PreviewClockProvider value={previewClockValue}>
-                <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
+                <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden ref={skinLayerRef}>
                   {previewSkinChildren.map((child) => {
                     // 挂载盒偏移：点元素自身是相对舞台的 inputs.x/y 锚点，挂载盒（mount.layout）在其上叠加
                     // 偏移，贴纸随盒移动——与手柄位置（基准+偏移）及拖拽写回保持一致。
@@ -422,6 +512,7 @@ export function NodePreviewStage({
                     return (
                       <div
                         key={child.id}
+                        data-gv-skin={child.id}
                         style={{
                           position: 'absolute', inset: 0, pointerEvents: 'none',
                           transform: dx || dy ? `translate(${dx * 100}%, ${dy * 100}%)` : undefined,
@@ -440,34 +531,35 @@ export function NodePreviewStage({
               const elId = o.target.kind === 'element' || o.target.kind === 'qteCue' || o.target.kind === 'mount'
                 ? o.target.elementId
                 : ''
-              const skinned = !!elId && skinnedPreviewIds.has(elId)
+              const fit = fitBoxFor(elId, o.x, o.y)
+              // 皮肤没量到可见盒（渲染不出东西 / 尚未量完）→ 预览里当它不存在。不再退化成
+              // ring+label 占位芯片：能拖的必须就是看得见的那块皮肤本身。
+              if (!fit) return null
               return (
                 <div
                   key={o.id}
                   role="button"
                   tabIndex={0}
                   aria-label={`${materialLabel(o.kind)}：${o.label}${o.movable ? '，可拖动' : ''}`}
-                  className={`gc-preview-overlay ${materialClass(o.kind)}${selected ? ' is-selected' : ''}${o.movable ? ' is-movable' : ''}${skinned ? ' is-skinned' : ''}`}
-                  style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, zIndex: skinned ? 30 : 20 + o.zIndex }}
+                  className={`gc-preview-overlay ${materialClass(o.kind)}${selected ? ' is-selected' : ''}${o.movable ? ' is-movable' : ''} is-skinned`}
+                  // 位置/尺寸全抄实测盒（inline 覆盖 .is-skinned 的 56px 兜底与基类 max-width）：
+                  // 热区严丝合缝盖住皮肤，点它就是点这个覆盖物实例。
+                  style={{
+                    left: `${fit.cx * 100}%`,
+                    top: `${fit.cy * 100}%`,
+                    width: `${fit.w}px`,
+                    height: `${fit.h}px`,
+                    maxWidth: 'none',
+                    zIndex: 30,
+                  }}
                   onPointerDown={(e) => onOverlayPointerDown(e, o)}
                   onPointerMove={(e) => onOverlayPointerMove(e, o)}
                   onPointerUp={onOverlayPointerUp}
                   onLostPointerCapture={onOverlayPointerUp}
                 >
-                  {/* 有真实皮肤：手柄只做透明热区（不渲染默认 ring/label），真实贴纸由皮肤层呈现——
-                      「挂载物长啥样就是啥样」，选中靠 is-skinned 描边提示可拖。 */}
-                  {skinned ? null : (
-                    <>
-                      {o.kind === 'qte' || o.movable ? <span className="gc-preview-ring" /> : null}
-                      <span
-                        className="gc-preview-label"
-                        style={(o.kind === 'subtitle' || o.kind === 'overlay') && o.style ? resolveGraphTextCss(o.style) : undefined}
-                      >
-                        {o.label}
-                      </span>
-                      {o.detail ? <span className="gc-preview-detail">{o.detail}</span> : null}
-                    </>
-                  )}
+                  {/* 空热区，刻意不放任何子节点：唯一的视觉是 NPS_CSS `.is-skinned` 在 hover / 选中时
+                      描的那圈 outline（catalogCss 的 ring/label 是视频 tab 的造型，叠上来就是双重边框
+                      + 多余标签）。名字只留在 aria-label 里给读屏与自动化用。 */}
                 </div>
               )
             })}

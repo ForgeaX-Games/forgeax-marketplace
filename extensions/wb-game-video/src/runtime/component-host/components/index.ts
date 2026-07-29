@@ -40,6 +40,7 @@ import { QteButtons, qteComponent } from './Qte'
 import { HotspotButtons, hotspotComponent } from './Hotspot'
 import { FilterOverlay, filterComponent } from './Filter'
 import { FxOverlay, fxComponent } from './FxEffect'
+import newComponents from './new'
 
 export {
   battleHpBarComponent,
@@ -99,6 +100,7 @@ export const EXTRA_COMPONENTS: Array<[string, ComponentDef]> = [
 /** 把组件包注入某个隔离 ComponentRegistry（多局 Session 用）。 */
 export function installExtraComponents(reg: ComponentRegistry): void {
   for (const [id, c] of EXTRA_COMPONENTS) reg.registerComponent(id, c)
+  for (const { manifest } of newComponents) reg.registerComponent(manifest.id, manifest)
 }
 
 /** 完整组件契约隔离表（GraphSession 默认用）。 */
@@ -146,6 +148,17 @@ export const HP_BAR_COMPONENTS: Array<{ id: string; label: string }> = [
   { id: 'battleHpBar', label: '水墨血条' },
 ]
 
+/** 仅运行时：注册 `new/` 的契约 + 渲染器。 */
+function installNewRuntimeComponents(
+  registerDef: (id: string, def: ComponentDef) => void = registerComponent,
+  registerRenderer: typeof registerOverlayRenderer = registerOverlayRenderer,
+): void {
+  for (const { component, manifest } of newComponents) {
+    registerDef(manifest.id, manifest)
+    registerRenderer(manifest.id, component)
+  }
+}
+
 function installCoreSkins(reg: SkinRegistry): void {
   reg.registerOverlayRenderer('choice', ChoiceButtons)
   reg.registerOverlayRenderer('skill', ChoiceButtons)
@@ -161,6 +174,9 @@ function installCoreSkins(reg: SkinRegistry): void {
   reg.registerOverlayRenderer('inkYingMo', InkYingMoLayer)
   reg.registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
   reg.registerOverlayRenderer('battleHpBar', BattleHpBar)
+  for (const { component, manifest } of newComponents) {
+    reg.registerOverlayRenderer(manifest.id, component)
+  }
 }
 
 let _registered = false
@@ -183,6 +199,7 @@ export function registerCoreSkins(): void {
   registerOverlayRenderer('inkYingMo', InkYingMoLayer)
   registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
   registerOverlayRenderer('battleHpBar', BattleHpBar)
+  installNewRuntimeComponents()
 }
 
 /** 新建一份已装全部默认渲染器的隔离表（多局 Session 各持一份）。 */

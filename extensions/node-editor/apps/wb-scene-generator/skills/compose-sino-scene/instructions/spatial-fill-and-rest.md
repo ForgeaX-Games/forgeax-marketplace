@@ -59,7 +59,7 @@ keypoint `area`（S=64, M=400, L=2025, XL=8100）是**参考**，可调整：
 
 **NaturalDecorationDistribution 纪律**：
 - **一次一种** itemName — 多品种 = 多组 + Rest 链（`out_2` → 下一 `in_1`）
-- **Density 分层** — `0.008` 中间参考，**硬上限 ≤0.01**；树稀（~0.004–0.006）/ 灌木中 / 草密（~0.008–0.01）；禁止全层同一值
+- **Density 面积化** — 优先按 `目标量级 × 丰富度系数 ÷ Rest有效格数`，稀疏/正常/丰富系数为 1.0/1.5/2.0–2.5，结果仅限制在概率范围 0–1；面积未知才用树 0.01–0.04 / 灌木石块 0.02–0.06 / 草 0.04–0.12；禁止全层同一值
 - 需要植被层次时 checklist 写多层 Natural（不同 asset **且**不同 density）
 
 同一 Rest 可串联（PlaceOne → Local → Natural₁ → Natural₂ …）。

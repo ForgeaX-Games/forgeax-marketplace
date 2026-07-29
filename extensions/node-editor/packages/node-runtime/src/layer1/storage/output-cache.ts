@@ -130,6 +130,13 @@ function isDataTreeEntry(v: unknown): v is { path: number[]; items: unknown[] } 
  * to decide whether a big field is worth recursing into for per-subtree content
  * addressing (see `externalizeValue`) — a false negative just falls back to the
  * original flat "hash the whole value" behaviour, never a correctness risk.
+ *
+ * NOTE: this shape is the pre-v3 `SceneNodeSnapshot` (nested tree + string `path`).
+ * The current `ScenePortValue` v3 shape (`SceneGraph`/`SceneNode`, id-addressed via
+ * `children: Record<name, NodeId>`, no `path`/`version`) never matches here, so v3
+ * scene graphs always fall back to whole-value hashing instead of per-subtree
+ * dedup. That's a known perf-only gap (not a correctness bug — see docstring
+ * above) left for a follow-up; not in scope for the v3 schema sync fix.
  */
 function isSceneNodeLike(
   v: unknown,

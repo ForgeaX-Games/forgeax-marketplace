@@ -63,7 +63,7 @@ curl -s …/execute -d '{}' | jq '.outputs.<G>.out_0[0].items[0].tree.children[]
 | 模式 | 何时用 | 命令链（白名单 opId） |
 |------|--------|------------------------|
 | **直传** | 整棵产物给下一模板 | `<G>.out_N` → `connect` → `<Next>.in_0` |
-| **汇总** | 多组主产物合并 Preview | 各组 `out_*` → `tree_merge`(tree,scene) → `tree_flatten` → `scene_merge_subtrees` → `scene_output` |
+| **汇总** | 多组 Scene 视图合并 Preview | 各组 `{ label:"Scene", portName:"out_N" }` → 根 `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`；领域口/Rest 禁止接 merge |
 | **路径索引单个子节点** | 只要某一个子区/子建筑 | `text_panel`(绝对 path) 或 `string_concat` → `scene_focus_path`(scene+path) → 下一组 `in_0` |
 | **扇出全部子节点** | 对每个子区并行施工 | `scene_focus_children`(scene) → `tree_merge`(item,scene) 或逐 branch 接线 |
 | **读属性** | 读 focus 节点 metadata | `scene_get_attribute`（**仅人类/Workbench**；Sino 未开放则文档标注） |

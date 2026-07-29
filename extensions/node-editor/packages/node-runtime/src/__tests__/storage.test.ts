@@ -803,6 +803,52 @@ describe('OutputCache', () => {
     expect(cache.read('scene', 'out')?.data).toEqual(data)
   })
 
+  // Guards the v3 `ScenePortValue` regression: `graph` is a class instance
+  // (e.g. `PersistentStringMap`) whose real wire shape is a flat `{id: node}`
+  // map, produced only via `.toJSON()` — its own enumerable fields are private
+  // trie internals (`root`/`size`). Before compressPayload() respected
+  // `.toJSON()`, this got flattened to `{root, size}` on disk, silently
+  // corrupting every v3 scene port the moment it round-tripped through cache.
+  it('round-trips a class-instance graph field (.toJSON()-backed) without leaking its private shape', () => {
+    class MockPersistentMap {
+      private root = { fakeTrieNode: true }
+      private size = 1
+      toJSON(): Record<string, unknown> {
+        return {
+          id1: {
+            id: 'id1',
+            name: 'Root',
+            children: {},
+            content: { kind: 'dense' as const, bbox: [0, 0, 0, 1, 0, 1], dict: ['wall'], data: [1, 1] },
+          },
+        }
+      }
+    }
+    const cache = new OutputCache(join(scratchDir, 'outputs'))
+    cache.write('scene_v3', 'out', {
+      valid: true,
+      executedAt: '2026-01-01T00:00:00Z',
+      executedHash: 'abc',
+      type: 'scene',
+      data: { graph: new MockPersistentMap(), focus: 'id1' },
+    })
+    const onDisk = JSON.parse(readFileSync(cache.jsonPath('scene_v3', 'out'), 'utf-8')) as {
+      data: { graph: Record<string, unknown> }
+    }
+    expect(onDisk.data.graph).not.toHaveProperty('root')
+    expect(onDisk.data.graph).not.toHaveProperty('size')
+    expect(onDisk.data.graph.id1).toMatchObject({ id: 'id1', name: 'Root' })
+
+    const got = cache.read('scene_v3', 'out')?.data as { graph: Record<string, unknown>; focus: string }
+    expect(got.focus).toBe('id1')
+    expect(got.graph.id1).toEqual({
+      id: 'id1',
+      name: 'Root',
+      children: {},
+      content: { kind: 'dense', bbox: [0, 0, 0, 1, 0, 1], dict: ['wall'], data: [1, 1] },
+    })
+  })
+
   it('clears a stale shard dir when a later write is small (no resurrection)', () => {
     const cache = new OutputCache(join(scratchDir, 'outputs'))
     const big = 'z'.repeat(1024 * 1024)

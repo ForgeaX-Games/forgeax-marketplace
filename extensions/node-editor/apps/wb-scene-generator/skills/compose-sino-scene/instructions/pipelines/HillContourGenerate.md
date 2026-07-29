@@ -26,9 +26,9 @@
 
 | portName | 语义 | 典型去向 |
 |----------|------|---------|
-| `out_1` | Hill 主产物 | `appendMergeItem` → `aw_m0_merge` |
+| `out_1` | Hill 主产物 | 调试 / 领域引用 |
+| `out_0` | Scene 整树汇总口 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_0" }`） |
 | `out_2` | **Rest** | 下一组 `in_0` / 装饰 `in_1` |
-| `out_0` | Scene 完整 | 调试 |
 
 ## 4. 时序
 

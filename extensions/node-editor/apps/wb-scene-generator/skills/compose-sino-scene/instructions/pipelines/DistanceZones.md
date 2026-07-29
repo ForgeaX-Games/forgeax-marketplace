@@ -35,9 +35,9 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_1` | scene | Near 近处区域（浅海 / 海岸线，focus 已聚焦该子节点） | 在近带上继续铺贴图 / 撒装饰 / 最终内容用 `appendMergeItem` 汇总到 `aw_m0_merge` |
-| `out_2` | scene | Far 远处区域（深海 / 内陆） | 在远带上继续布置 / 最终内容同样用 `appendMergeItem` 汇总 |
-| `out_0` | scene | Scene 整棵合并后场景树 | 调试 / 汇总根 |
+| `out_1` | scene | Near 近处区域（浅海 / 海岸线，focus 已聚焦该子节点） | 在近带上继续铺贴图 / 撒装饰（领域细化） |
+| `out_2` | scene | Far 远处区域（深海 / 内陆） | 在远带上继续布置（领域细化） |
+| `out_0` | scene | Scene 整棵合并后场景树 | `{ label:"Scene", portName:"out_0" }` → `appendMergeItem` 汇总根 |
 | `out_3` / `out_4` | string | NearPath / FarPath 路径句柄 | 一般不接 |
 
 ## 4. 参数范围组合套餐

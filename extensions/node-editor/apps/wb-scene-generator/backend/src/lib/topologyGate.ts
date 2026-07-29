@@ -1,8 +1,8 @@
 // Server-side, synchronous topology diagnostics for the Sino/sino-constructor
 // scene graph construction loop.
 //
-// These three checks (Rest-chain fan-out, illegal local tree_merge, silent
-// manual_points zero-default) were originally written client-side in
+// The original three checks (Rest-chain fan-out, illegal local tree_merge,
+// silent manual_points zero-default) were written client-side in
 // aw-support (`src/orchestration/scene-graph-analysis.ts`) and only ever ran
 // when aw-support built the NEXT continuation message — i.e. an agent that
 // tripped one of these anti-patterns would not find out until an entire
@@ -29,12 +29,29 @@ export interface TopologyGraphNode {
   opId?: string
   name?: string
   params?: Record<string, unknown>
+  exposedOutputs?: Array<{ portName?: string; customLabel?: string; customLabelEn?: string }>
 }
+
+export type TopologyEdgePort = string | { label?: string; portName?: string }
 
 export interface TopologyGraphEdge {
   id?: string
-  source?: { nodeId?: string; port?: string }
-  target?: { nodeId?: string; port?: string }
+  source?: { nodeId?: string; port?: TopologyEdgePort }
+  target?: { nodeId?: string; port?: TopologyEdgePort }
+}
+
+/**
+ * Coerce edge port refs to a physical port string before string ops.
+ * Agents sometimes persist `{ label, portName }` joint refs onto edges;
+ * calling `.startsWith` on those objects 500'd execute (production).
+ */
+export function normalizeEdgePort(port: unknown): string | undefined {
+  if (typeof port === 'string' && port.length > 0) return port
+  if (port && typeof port === 'object') {
+    const portName = (port as { portName?: unknown }).portName
+    if (typeof portName === 'string' && portName.length > 0) return portName
+  }
+  return undefined
 }
 
 export function batteryName(node: TopologyGraphNode): string | undefined {
@@ -109,9 +126,9 @@ export function analyzeRestChainTopology(
   const baseNodeSceneConsumers: RestChainConsumer[] = []
   for (const edge of edges) {
     const srcId = edge.source?.nodeId
-    const srcPort = edge.source?.port
+    const srcPort = normalizeEdgePort(edge.source?.port)
     const tgtId = edge.target?.nodeId
-    const tgtPort = edge.target?.port
+    const tgtPort = normalizeEdgePort(edge.target?.port)
     if (srcId !== addBaseGridNodeId || srcPort !== 'out_1' || !tgtId || !tgtPort) continue
 
     const target = nodeById.get(tgtId)
@@ -142,9 +159,9 @@ export function analyzeRestChainTopology(
   const restFanOut = new Map<string, RestChainConsumer[]>()
   for (const edge of edges) {
     const srcId = edge.source?.nodeId
-    const srcPort = edge.source?.port
+    const srcPort = normalizeEdgePort(edge.source?.port)
     const tgtId = edge.target?.nodeId
-    const tgtPort = edge.target?.port
+    const tgtPort = normalizeEdgePort(edge.target?.port)
     if (!srcId || !srcPort || !tgtId || !tgtPort) continue
     if (srcId === addBaseGridNodeId && srcPort === 'out_1') continue
 
@@ -252,9 +269,9 @@ export function detectIllegalLocalMerge(
 
   for (const edge of edges) {
     const tgtId = edge.target?.nodeId
-    const tgtPort = edge.target?.port
+    const tgtPort = normalizeEdgePort(edge.target?.port)
     const srcId = edge.source?.nodeId
-    const srcPort = edge.source?.port
+    const srcPort = normalizeEdgePort(edge.source?.port)
     if (!tgtId || !tgtPort || !srcId || !srcPort) continue
     if (rootMergeNodeId && tgtId === rootMergeNodeId) continue
     if (!tgtPort.startsWith('item_')) continue
@@ -280,11 +297,10 @@ export function detectIllegalLocalMerge(
 
 /**
  * Format a local-merge violation with a ready-to-paste `applyBatch` ops
- * array. Unlike the Rest fan-out case, this fix is fully mechanical — every
- * source's existing content port is already a real edge in the graph, and
- * the new `item_N` slots are computed directly from the root merge's current
- * `portCount` — so there is no ambiguous "which port is Rest" guess involved,
- * and handing the agent real, executable ops is safe.
+ * array. Never replay the source ports found on the illegal merge: they are
+ * commonly Island/Path/Decoration domain ports. `appendMergeItem` resolves
+ * each group's semantic Scene output at apply time, so the repair cannot
+ * silently reconnect the same invalid domain ports to the root merge.
  */
 export function formatLocalMergeViolation(
   v: LocalMergeViolation,
@@ -294,25 +310,22 @@ export function formatLocalMergeViolation(
   const list = v.sources.map((s) => `${s.batteryName ?? s.nodeId}.${s.port}`).join('、')
   const reason =
     `节点 \`${v.mergeNodeId}\` 是一个非法的局部 tree_merge，汇总了 ${v.itemCount} 个模板的内容（${list}）后再整体接一次——` +
-    '这违反「每个模板内容各自独立接入根 merge」的纪律：只要其中一路的输出端口在 execute 时不存在，整个局部 merge 就完全没有输出，' +
+    '这违反「领域口不得接 merge；每个模板只能用 Scene 汇总口接入根 merge」的纪律：只要其中一路的输出端口在 execute 时不存在，整个局部 merge 就完全没有输出，' +
     '并连累根 merge/flatten 也显示无输出，看起来像是完全不相关的节点出了问题。'
   const fix =
-    `修复：删掉节点 \`${v.mergeNodeId}\`，把这 ${v.itemCount} 份内容各自单独 connect 到 \`${rootMergeNodeId}\`.item_N（每份一个 item，` +
-    'portCount 相应增加）。下面 suggestedOps 已经算好具体的 item 编号，可以原样作为一次 applyBatch 调用的 ops 提交，不需要自己重新设计端口号。'
+    `修复：删掉节点 \`${v.mergeNodeId}\`，再对这 ${v.itemCount} 个模板分别执行 appendMergeItem，` +
+    'source.port 只写语义 label=Scene，由工具解析真实物理口并自动分配 item_N。'
 
   const rootNode = nodeById.get(rootMergeNodeId)
   const currentPortCount = typeof rootNode?.params?.portCount === 'number' ? rootNode.params.portCount : undefined
   if (currentPortCount === undefined) return { reason, fix }
 
-  const newPortCount = currentPortCount + v.sources.length
   const suggestedOps: unknown[] = [
     { type: 'deleteNode', nodeId: v.mergeNodeId },
-    { type: 'updateNode', nodeId: rootMergeNodeId, params: { portCount: newPortCount } },
-    ...v.sources.map((s, i) => ({
-      type: 'connect',
-      edgeId: `e_fix_${v.mergeNodeId}_${i}`,
-      source: { nodeId: s.nodeId, port: s.port },
-      target: { nodeId: rootMergeNodeId, port: `item_${currentPortCount + i}` },
+    ...v.sources.map((s) => ({
+      type: 'appendMergeItem',
+      mergeNodeId: rootMergeNodeId,
+      source: { nodeId: s.nodeId, port: { label: 'Scene' } },
     })),
   ]
   return { reason, fix, suggestedOps }
@@ -347,8 +360,9 @@ export function detectManualPointsZeroDefaults(
   const incomingByTargetPort = new Map<string, TopologyGraphEdge>()
   for (const edge of edges) {
     if (edge.source?.nodeId) wiredSourceIds.add(edge.source.nodeId)
-    if (edge.target?.nodeId && edge.target.port) {
-      incomingByTargetPort.set(`${edge.target.nodeId}:${edge.target.port}`, edge)
+    const tgtPort = normalizeEdgePort(edge.target?.port)
+    if (edge.target?.nodeId && tgtPort) {
+      incomingByTargetPort.set(`${edge.target.nodeId}:${tgtPort}`, edge)
     }
   }
 
@@ -372,11 +386,60 @@ export function detectManualPointsZeroDefaults(
 
 /** One structured, agent-actionable topology issue surfaced in `verification.topologyIssues`. */
 export interface TopologyIssue {
-  kind: 'rest-fan-out' | 'illegal-local-merge' | 'manual-points-zero-default'
+  kind: 'rest-fan-out' | 'illegal-local-merge' | 'domain-merge-violation' | 'manual-points-zero-default'
   reason: string
   fix: string
   /** Ready-to-paste `applyBatch` ops, when the fix is fully mechanical (see per-kind docs above). */
   suggestedOps?: unknown[]
+}
+
+function exposedOutputLabel(output: NonNullable<TopologyGraphNode['exposedOutputs']>[number]): string | undefined {
+  return output.customLabelEn ?? output.customLabel
+}
+
+function domainMergeIssues(
+  edges: readonly TopologyGraphEdge[],
+  nodeById: Map<string, TopologyGraphNode>,
+  rootMergeNodeId: string,
+): TopologyIssue[] {
+  const issues: TopologyIssue[] = []
+  for (const edge of edges) {
+    const tgtPort = normalizeEdgePort(edge.target?.port)
+    if (edge.target?.nodeId !== rootMergeNodeId || !tgtPort?.startsWith('item_')) continue
+    const sourceNodeId = edge.source?.nodeId
+    const sourcePort = normalizeEdgePort(edge.source?.port)
+    if (!sourceNodeId || !sourcePort) continue
+    const sourceNode = nodeById.get(sourceNodeId)
+    if (sourceNode?.opId !== '__group__') continue
+    const outputs = sourceNode.exposedOutputs ?? []
+    const selected = outputs.find((output) => output.portName === sourcePort)
+    const selectedLabel = selected ? exposedOutputLabel(selected) : undefined
+    if (!selectedLabel || selectedLabel === 'Scene' || selectedLabel === 'RootScene') continue
+    const sceneOutput = outputs.find((output) => exposedOutputLabel(output) === 'Scene')
+    if (!sceneOutput?.portName) continue
+    const reason =
+      `节点 \`${sourceNodeId}\` 的领域口 \`${sourcePort}\`(${selectedLabel}) 直接接入根 merge \`${rootMergeNodeId}\`。` +
+      `根 merge 只接受 Scene 汇总口；${selectedLabel} 仅用于细化/串链。`
+    const fix =
+      `把这条边改为 \`${sourceNodeId}.${sceneOutput.portName}\`(Scene) → ` +
+      `\`${rootMergeNodeId}.${tgtPort}\`。`
+    const suggestedOps = edge.id
+      ? [
+          { type: 'disconnect', edgeId: edge.id },
+          {
+            type: 'connect',
+            edgeId: `e_fix_domain_${sourceNodeId}_${tgtPort}`,
+            source: {
+              nodeId: sourceNodeId,
+              port: { label: 'Scene', portName: sceneOutput.portName },
+            },
+            target: { nodeId: rootMergeNodeId, port: tgtPort },
+          },
+        ]
+      : undefined
+    issues.push({ kind: 'domain-merge-violation', reason, fix, ...(suggestedOps ? { suggestedOps } : {}) })
+  }
+  return issues
 }
 
 /**
@@ -406,7 +469,7 @@ function findRootMergeNodeId(edges: readonly TopologyGraphEdge[], nodeById: Map<
 }
 
 /**
- * Run all three topology checks against a live (in-memory) graph and format
+ * Run all topology checks against a live (in-memory) graph and format
  * them into `TopologyIssue[]` for `verification.topologyIssues`. Always
  * returns an array (empty = no issues, never a bare boolean) — same
  * philosophy as `locationNameAlignment`. Returns `[]` without error when the
@@ -432,6 +495,7 @@ export function buildTopologyIssues(
   // chain exists), skip rather than report a violation with no fix target.
   const rootMergeNodeId = findRootMergeNodeId(edges, nodeById)
   if (rootMergeNodeId) {
+    issues.push(...domainMergeIssues(edges, nodeById, rootMergeNodeId))
     for (const v of detectIllegalLocalMerge(edges, nodeById, rootMergeNodeId)) {
       const { reason, fix, suggestedOps } = formatLocalMergeViolation(v, nodeById, rootMergeNodeId)
       issues.push({ kind: 'illegal-local-merge', reason, fix, ...(suggestedOps ? { suggestedOps } : {}) })

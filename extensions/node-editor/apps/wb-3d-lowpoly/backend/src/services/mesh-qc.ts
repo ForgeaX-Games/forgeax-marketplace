@@ -54,6 +54,10 @@ export interface MeshQcResult {
   signals: MeshQcSignal[]
   /** 用到了真实 bbox 的 part 数（可观测：值 > 0 才说明 mesh-aware 生效）。 */
   meshResolved: number
+  /** 实际评估的 mesh-backed part pair 数。 */
+  pairCount: number
+  /** 超过 maxSignals 后未内联的信号数。 */
+  omittedCount: number
 }
 
 /** parts.json 里一条已烘 mesh 的最小信息（按 filename 匹配 mesh 语句）。 */
@@ -79,10 +83,11 @@ const round = (n: number): number => Math.round(n * 1e5) / 1e5
 export function meshAwareQc(
   source: string,
   bakedByFile: ReadonlyMap<string, BakedPart>,
-  opts: { overlapTol?: number; jointTol?: number } = {},
+  opts: { overlapTol?: number; jointTol?: number; maxSignals?: number } = {},
 ): MeshQcResult {
   const overlapTol = opts.overlapTol ?? 0.001
   const jointTol = opts.jointTol ?? 0.05
+  const maxSignals = Math.max(1, Math.floor(opts.maxSignals ?? 100))
   const geom: Geometry = geometryFromSource(source)
 
   // 注入 baked bbox：给缺 bbox_min/max 的 mesh 语句补上真实包围盒。
@@ -111,6 +116,7 @@ export function meshAwareQc(
   }
 
   const signals: MeshQcSignal[] = []
+  let pairCount = 0
   // moving-joint trap 修正：重叠严重度按**这一对 part 是否真的会相对运动**判定。
   // 重叠一律不 fail clean —— 低模少量交叠是常态；孤立 part 才是关节要修的硬伤。
   const motionEdges = buildJointMotionEdges(joints)
@@ -123,6 +129,7 @@ export function meshAwareQc(
       const b = partAabbs.get(ids[k])!
       // 只在至少一方是真实 mesh 时才算 "mesh-aware"（纯参数化重叠 g_geometry_qc 已覆盖）
       if (!a.meshBacked && !b.meshBacked) continue
+      pairCount++
       const depth = aabbOverlapDepth(a.aabb, b.aabb)
       if (depth[0] > overlapTol && depth[1] > overlapTol && depth[2] > overlapTol) {
         const movesRelative = partsMoveRelativeToEachOther(ids[i], ids[k], motionEdges)
@@ -186,7 +193,8 @@ export function meshAwareQc(
   }
 
   const clean = !signals.some((s) => s.severity === 'error')
-  return { clean, signals, meshResolved }
+  const omittedCount = Math.max(0, signals.length - maxSignals)
+  return { clean, signals: signals.slice(0, maxSignals), meshResolved, pairCount, omittedCount }
 }
 
 /** 若 mesh 语句缺 bbox_min/max，用 baked bbox 补一份（返回新的 Statement）。 */

@@ -4,13 +4,14 @@ import type { OverlayChild } from '../../../runtime/schema/node-config-schema'
 import type { QteCue } from '../../../runtime/component-host/components/Qte'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
-import { nodeOverlayId } from '../../../graph/edit/overlay-edit'
+import { nodeOverlayId, patchOverlayChild } from '../../../graph/edit/overlay-edit'
 import {
   activePreviewOverlaysFromNode,
   addMaterialGraph,
   addQteCueGraph,
   choiceElement,
   collectMaterialsFromNode,
+  collectMountItemsFromNode,
   deleteMaterialGraph,
   findElement,
   findNode,
@@ -505,6 +506,72 @@ describe('graphMaterialOps · 选项/组件结算统一写 mount.reactions（修
 describe('graphMaterialOps · 挂载组件全量上时间轴', () => {
   beforeAll(() => {
         registerCoreSkins()
+  })
+
+  it('挂载条：拖边缘=拉伸 window（短条也能拉长），带 zIndex 才是整体平移', () => {
+    const n = node('a', { durationMs: 8000 })
+    const base = scnOf(
+      { nodes: [n], edges: [] },
+      {
+        ui: {
+          overlays: {
+            'ov-short': {
+              id: 'ov-short',
+              children: [
+                {
+                  id: 'kou',
+                  component: 'inkKou',
+                  trigger: { when: 'enter' },
+                  // 极短窗（1ms）：修复前拖左缘只会整条前移，跨度永远拉不长。
+                  window: { startMs: 1000, endMs: 1001 },
+                  inputs: { glyph: '叩', cues: [{ id: 'c0', appearAt: 0, targetAt: 200, endAt: 400 }] },
+                },
+              ],
+            },
+          },
+        },
+      },
+    )
+    const withMount: GameScenario = {
+      ...base,
+      graph: {
+        ...base.graph,
+        nodes: base.graph.nodes.map((nd) =>
+          nd.id === 'a' ? { ...nd, data: { ...nd.data, overlayNodes: [{ overlay: 'ov-short' }] } } : nd,
+        ),
+      },
+    }
+    const nodeA = findNode(withMount.graph, 'a')!
+    const bar = collectMountItemsFromNode(withMount, nodeA, 8000)[0]!
+    expect([bar.kind, bar.startMs, bar.endMs]).toEqual(['mount', 1000, 1001])
+
+    // 拖左缘（无 zIndex）：起点前移、终点不动 → 跨度被拉长。
+    const resized = patchMaterialGraph(withMount, nodeA, 8000, bar, { startMs: 400, endMs: 1001 })
+    const afterResize = collectMountItemsFromNode(resized, findNode(resized.graph, 'a')!, 8000)[0]!
+    expect([afterResize.startMs, afterResize.endMs]).toEqual([400, 1001])
+
+    // 拖右缘：终点后移、起点不动。
+    const grown = patchMaterialGraph(resized, findNode(resized.graph, 'a')!, 8000, afterResize, { startMs: 400, endMs: 5000 })
+    const afterGrow = collectMountItemsFromNode(grown, findNode(grown.graph, 'a')!, 8000)[0]!
+    expect([afterGrow.startMs, afterGrow.endMs]).toEqual([400, 5000])
+
+    // 带 zIndex = 整体平移：跨度守恒。
+    const moved = patchMaterialGraph(grown, findNode(grown.graph, 'a')!, 8000, afterGrow, { startMs: 1400, endMs: 6000, zIndex: 0 })
+    const afterMove = collectMountItemsFromNode(moved, findNode(moved.graph, 'a')!, 8000)[0]!
+    expect([afterMove.startMs, afterMove.endMs]).toEqual([1400, 6000])
+
+    // 拉到反向/过短：夹在 MOUNT_MIN_SPAN_MS(100) 上，不会塌成 0 长度而再也抓不住。
+    const squashed = patchMaterialGraph(moved, findNode(moved.graph, 'a')!, 8000, afterMove, { startMs: 9999, endMs: 6000 })
+    const afterSquash = collectMountItemsFromNode(squashed, findNode(squashed.graph, 'a')!, 8000)[0]!
+    expect(afterSquash.endMs - afterSquash.startMs).toBeGreaterThanOrEqual(100)
+
+    // 已短于下限的旧数据（10→11）左缘仍要能一格一格拉长，不能被最短跨度夹回 0。
+    const tiny = patchOverlayChild(withMount, 'a', 'kou', { window: { startMs: 10, endMs: 11 } })
+    const tinyNode = findNode(tiny.graph, 'a')!
+    const tinyBar = collectMountItemsFromNode(tiny, tinyNode, 8000)[0]!
+    const stretched = patchMaterialGraph(tiny, tinyNode, 8000, tinyBar, { startMs: 9, endMs: 11 })
+    const afterStretch = collectMountItemsFromNode(stretched, findNode(stretched.graph, 'a')!, 8000)[0]!
+    expect([afterStretch.startMs, afterStretch.endMs]).toEqual([9, 11])
   })
 
   it('未分类按挂载实例列槽（同类型两份血条各一格）；添加时克隆 bind/label', () => {

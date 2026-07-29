@@ -10,7 +10,47 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Op-directory generation now imports its registry through a file URL.**
+  `scripts/gen-op-directory.mjs` converts the generated registry path with
+  `pathToFileURL(...).href`; regression:
+  `scripts/gen-op-directory-import.test.mjs`. *为什么：* Node 24 validates
+  dynamic-import specifiers strictly on Windows and rejects a raw filesystem
+  path.
+- **Standalone installs no longer depend on pnpm's workspace protocol.**
+  `package.json` now resolves `@forgeax/node-runtime` through the repository-local
+  `file:../../packages/node-runtime` path, so Studio's direct `bun install` can
+  install this plugin. Regression: `scripts/standalone-plugin-dependencies.test.mjs`.
+  *为什么：* Studio installs a plugin directly rather than through pnpm's
+  workspace resolver.
+- **Architecture DSL compilation now preserves authored dimensions and component
+  identity.** `floor_slab.size`, `roof.footprint`, `facade_panel.panel_size`, and
+  `window.size` are explicitly adapted to their batteries' scalar ports instead
+  of silently falling back to editor defaults. `door_frame` and `door_leaf` now
+  execute through dedicated one-component batteries rather than both expanding
+  through the composite `g_door`, preventing duplicate/mis-sized door geometry
+  and restoring exact graph-to-DSL round trips. Nested wall openings and slab
+  holes are serialized through their JSON-string ports, and parser helpers are
+  no longer exported as candidate battery entrypoints, so runtime loading cannot
+  accidentally execute a parser instead of the geometry generator.
+- **Architecture edge cases now fail or size deterministically.** Floor holes
+  are rejected when they extend beyond the slab in both the battery and OCCT
+  baker; sidelight doors compute the central leaf opening from the actual jamb
+  and divider geometry; and `g_wall` no longer emits zero-valued window-band
+  overrides when the UI contract says zero means “auto”.
+
 ### Changed
+
+- **The AI authoring surface is now DSL-only and bounded.** Legacy
+  `batteries.*`/`pipeline.*` tools are hidden from AI, persona/skill routing is
+  shorter, QC returns top-K aggregates with a persisted full report, and old
+  `model.apply` history can be compacted without losing the latest DSL. Why:
+  fixed prompt duplication and unbounded tool/history growth caused avoidable
+  context overflow.
+- **Quality guidance is richer but remains non-blocking.** `model.apply` exposes
+  metrics, primitive ratio, dimensions, compact bake provenance and degraded
+  status without changing existing `ok`/`valid` semantics.
 
 - **Auto-skin (`g_skin`, `frontend/.../three/auto-skin.ts`) tightened further to
   reduce animation deformation amplitude.** Why: even with the earlier
@@ -27,6 +67,14 @@
   DSL — only tunable by editing the `auto-skin.ts` constant.
 
 ### Added
+
+- **`model.bakeBatch`, source-hash `model.patch`, and Placement DSL support.**
+  Independent part batches reduce LLM round trips, hash conflicts protect human
+  edits, and `align_centers`/`place_on_face`/`place_on_surface` use computed
+  geometry bounds instead of hand-calculated origins.
+- **Three fixed lowpoly benchmark tasks and telemetry reporting** split system,
+  tool schema, history, tool arguments and tool results into character/token
+  estimates with call counts and duration.
 
 - **Three terminal pipelines, content-routed (static / URDF / character).** Why:
   static props were previously forced through the URDF terminal (a single-link
@@ -321,6 +369,12 @@
 
 ### Fixed
 
+- **`compose-lowpoly` now tells agents the real runtime wire names and forbids UI/shell/HTTP fallbacks.**
+  Why: the skill documented ToolRegistry ids such as `lowpoly:model.apply`, while the model-facing tool is
+  sanitized to `lowpoly_model_apply`; agents treated the spelling difference as a missing API, opened the
+  workbench, searched ports and backend source, and exhausted their turn/context budget before modeling.
+  The skill now makes the mapping explicit and requires a loud tool-assembly error instead of bypassing the
+  official tools.
 - **Roof ridge orientation unified along the footprint's longer edge (`baker/ops/architecture.ts`).**
   Why: `gable`/`gambrel`/`shed` drew their cross-section in XZ and extruded along **Y**
   (ridge along Y), while `hip` put its ridge rectangle along **X** — so the same

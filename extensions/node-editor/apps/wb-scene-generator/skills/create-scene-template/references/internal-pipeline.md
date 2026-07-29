@@ -78,12 +78,12 @@ in_3 Prefix(string) + in_1 Count(number) → range_list → out_1 Names(string l
 | 主产物 scene | alg → grid2node(主名) → add_child → AssetName → passthrough |
 | Rest scene | subtract 剩余 → grid2node("rest") → passthrough |
 | *Path string | scene_focus_path(对应 scene) → type_string.value |
-| 组外汇总 | 各组主产物 → tree_merge → tree_flatten → scene_merge_subtrees → scene_output |
+| 组外汇总 | 各组 Scene 汇总口 → 根 tree_merge → tree_flatten → scene_merge_subtrees → scene_output |
 
 ## 链式串联约定
 
 - **Rest → 下一组 Scene IN**：PickMulti `out_1`→下一 `in_6`；装饰 `out_2`→下一 `in_1`
-- **主产物 → tree_merge.item_N**：最终汇总图层
+- **Scene 汇总口 → 根 merge**：最终汇总；主产物领域口与 Rest 禁止接 merge
 - **Path 句柄 → string_concat**：拼 `/outer_door` 等；**禁止**用 BaseName 猜 path
 
 ## 静默空跑（必写进 README）

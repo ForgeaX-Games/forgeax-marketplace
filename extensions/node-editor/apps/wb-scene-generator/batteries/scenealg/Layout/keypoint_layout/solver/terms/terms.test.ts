@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { ProblemModel, SolverNode, SolverRelation, Term, Vec2 } from '../types.ts'
+import type { ProblemModel, SolverNode, SolverRelation, SolverState, Term, Vec2 } from '../types.ts'
 import { clearanceTerm } from './clearanceTerm.ts'
 import { nonOverlapTerm } from './nonOverlapTerm.ts'
 import { containmentTerm } from './containmentTerm.ts'
@@ -14,6 +14,7 @@ function makeModel(nodes: Partial<SolverNode>[], relations: SolverRelation[] = [
     name: n.name ?? n.id ?? `n${i}`,
     area: n.area ?? 1,
     radius: n.radius ?? 1,
+    isContainer: n.isContainer ?? (n.childIds?.length ?? 0) > 0,
     parentId: n.parentId ?? null,
     childIds: n.childIds ?? [],
   }))
@@ -22,15 +23,23 @@ function makeModel(nodes: Partial<SolverNode>[], relations: SolverRelation[] = [
   return { nodes: full, index, relations, warnings: [] }
 }
 
+function makeState(model: ProblemModel, pos: Vec2[]): SolverState {
+  return {
+    positions: pos,
+    radii: model.nodes.map((node) => node.radius),
+    logRadiusGradients: new Float64Array(pos.length),
+  }
+}
+
 function energyOnly(term: Term, model: ProblemModel, pos: Vec2[]): number {
   const scratch: Vec2[] = pos.map(() => ({ x: 0, y: 0 }))
-  return term.energyAndGradient(pos, model, scratch)
+  return term.energyAndGradient(makeState(model, pos), model, scratch)
 }
 
 // Compare analytic gradient (accumulated by the term) with central finite diffs.
 function checkGradient(term: Term, model: ProblemModel, pos: Vec2[]): void {
   const analytic: Vec2[] = pos.map(() => ({ x: 0, y: 0 }))
-  term.energyAndGradient(pos, model, analytic)
+  term.energyAndGradient(makeState(model, pos), model, analytic)
 
   const h = 1e-6
   for (let i = 0; i < pos.length; i += 1) {
@@ -158,7 +167,7 @@ describe('peripheralTerm', () => {
   it('pushes child outward (negative ∂E/∂x_child when child is east of parent but too close)', () => {
     const pos = [{ x: 0, y: 0 }, { x: 2, y: 0 }]
     const grad: Vec2[] = pos.map(() => ({ x: 0, y: 0 }))
-    peripheralTerm(1).energyAndGradient(pos, model, grad)
+    peripheralTerm(1).energyAndGradient(makeState(model, pos), model, grad)
     // E decreases as child moves further east → ∂E/∂x_c < 0
     expect(grad[1].x).toBeLessThan(0)
   })

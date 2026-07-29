@@ -53,6 +53,8 @@ export function battleHpBarPreset(
     component: 'battleHpBar',
     layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window；HUD 常驻，不写 endMs = 持续到节点结束。
+    window: { startMs: 0 },
     inputs: { bind: opts.bind, label: opts.label },
   }
 }

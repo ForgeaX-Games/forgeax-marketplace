@@ -125,6 +125,7 @@ async function request(ctx: ToolCtx, method: string, path: string, body?: unknow
   if (res.status === 403 && ctx.caller.kind === 'ai' && ctx.caller.agentId) {
     const p = (payload ?? {}) as { code?: unknown; projectId?: unknown }
     if (p.code === 'mutation-denied-not-open' && typeof p.projectId === 'string' && p.projectId) {
+      // Soft re-attach; write lock is reclaimed by the mutation route itself.
       const reopen = await sceneRawFetch(
         ctx,
         'POST',
@@ -196,39 +197,33 @@ type WorkspaceSnapshot = {
   executingProjectIds?: string[]
 }
 
-type ProjectLockSnapshot = {
-  lock?: { agentId?: string } | null
+type MineSnapshot = {
+  openProjectId?: string | null
 }
 
-/** Explicit `projectId` in args, else agent-held lock, else UI viewing project (non-AI only). */
+/** Explicit `projectId` in args, else soft-open session / write lock, else UI viewing (non-AI). */
 async function resolveProjectId(ctx: ToolCtx, args: Record<string, unknown>): Promise<string> {
   const explicit = args.projectId
   if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
 
-  const ws = (await request(ctx, 'GET', '/api/v1/workspace')) as WorkspaceSnapshot
-  const executing = ws.executingProjectIds ?? []
-
   if (ctx.caller.kind === 'ai') {
-    if (ctx.caller.agentId) {
-      for (const pid of executing) {
-        const lockInfo = (await request(
-          ctx,
-          'GET',
-          `/api/v1/projects/${encodeURIComponent(pid)}/lock`,
-        )) as ProjectLockSnapshot
-        if (lockInfo?.lock?.agentId === ctx.caller.agentId) return pid
-      }
+    const mine = (await request(ctx, 'GET', '/api/v1/workspace/mine')) as MineSnapshot
+    if (typeof mine.openProjectId === 'string' && mine.openProjectId.trim()) {
+      return mine.openProjectId.trim()
     }
+    const ws = (await request(ctx, 'GET', '/api/v1/workspace')) as WorkspaceSnapshot
+    const executing = ws.executingProjectIds ?? []
     if (executing.length === 1) return executing[0]!
     throw new Error(
-      'missing projectId: AI must pass projectId on every pipeline tool call. ' +
-      'scene:projects.open does NOT switch the UI viewing project — omitting projectId reads the wrong graph. ' +
+      'missing projectId: AI must pass projectId on every pipeline tool call, ' +
+      'or scene:projects.open first (shared attach — does not wait for write lock). ' +
       (executing.length > 0
-        ? `Held locks: [${executing.join(', ')}] — pass the one you opened.`
-        : 'Call scene:projects.open first, then pass that id as projectId.'),
+        ? `Write locks currently held: [${executing.join(', ')}].`
+        : 'No soft-open session found.'),
     )
   }
 
+  const ws = (await request(ctx, 'GET', '/api/v1/workspace')) as WorkspaceSnapshot
   const viewing = ws.viewingProjectId
   if (typeof viewing === 'string' && viewing.trim()) return viewing.trim()
 
@@ -252,7 +247,9 @@ function projectPath(projectId: string, suffix: string): string {
 // target.port 除了字符串外，还能写 `{ label: "IslandName" }`，由这层负责查
 // 该节点的 exposedInputs/exposedOutputs 解出真实 portName 再转发给后端——
 // 后端 /batch 收到的永远是解析好的字符串 port，不用改动核心 apply-batch。
-type PortLabelRef = { label: string }
+// `{ label, portName? }` — portName is an optional constraint: when present it must
+// match the port resolved from label, catching the classic out_0/out_1 swap.
+type PortLabelRef = { label: string; portName?: string }
 
 function isPortLabelRef(port: unknown): port is PortLabelRef {
   return Boolean(port) && typeof port === 'object' && typeof (port as { label?: unknown }).label === 'string'
@@ -269,7 +266,33 @@ interface NodeGroupLike {
   exposedOutputs?: ExposedPortLike[]
 }
 
-/** Resolve one connect endpoint's `{ label }` into a real portName by querying that node's group definition. Returns `null` (no-op) when `port` isn't a label ref. */
+function exposedPortLabel(p: ExposedPortLike): string {
+  return p.customLabelEn ?? p.customLabel ?? p.portName
+}
+
+function findExposedPortByLabel(candidates: ExposedPortLike[] | undefined, label: string): ExposedPortLike[] {
+  return (candidates ?? []).filter((p) => p.customLabelEn === label || p.customLabel === label)
+}
+
+function findSceneOutputPort(group: NodeGroupLike): ExposedPortLike | undefined {
+  return (group.exposedOutputs ?? []).find((p) => p.customLabelEn === 'Scene' || p.customLabel === 'Scene')
+}
+
+async function loadNodeGroup(
+  ctx: ToolCtx,
+  projectId: string,
+  groupCache: Map<string, NodeGroupLike | null>,
+  nodeId: string,
+): Promise<NodeGroupLike | null> {
+  let group = groupCache.get(nodeId)
+  if (group === undefined) {
+    group = (await request(ctx, 'GET', projectPath(projectId, `/groups/${encodeURIComponent(nodeId)}`))) as NodeGroupLike | null
+    groupCache.set(nodeId, group)
+  }
+  return group
+}
+
+/** Resolve one connect endpoint's `{ label, portName? }` into a real portName. Returns `null` when `port` isn't a label ref. */
 async function resolveConnectEndpointLabel(
   ctx: ToolCtx,
   projectId: string,
@@ -282,12 +305,10 @@ async function resolveConnectEndpointLabel(
   if (!e || typeof e.nodeId !== 'string' || !isPortLabelRef(e.port)) return null
   const nodeId = e.nodeId
   const label = e.port.label
+  const expectedPortName =
+    typeof e.port.portName === 'string' && e.port.portName.trim() ? e.port.portName.trim() : undefined
 
-  let group = groupCache.get(nodeId)
-  if (group === undefined) {
-    group = (await request(ctx, 'GET', projectPath(projectId, `/groups/${encodeURIComponent(nodeId)}`))) as NodeGroupLike | null
-    groupCache.set(nodeId, group)
-  }
+  const group = await loadNodeGroup(ctx, projectId, groupCache, nodeId)
   if (!group) {
     throw new Error(
       `applyBatch ops[${opIndex}].${direction}: cannot resolve port label "${label}" — node "${nodeId}" is not a __group__ ` +
@@ -296,11 +317,9 @@ async function resolveConnectEndpointLabel(
     )
   }
   const candidates = direction === 'target' ? group.exposedInputs : group.exposedOutputs
-  const matches = (candidates ?? []).filter((p) => p.customLabelEn === label || p.customLabel === label)
+  const matches = findExposedPortByLabel(candidates, label)
   if (matches.length === 0) {
-    const available = (candidates ?? [])
-      .map((p) => p.customLabelEn ?? p.customLabel ?? p.portName)
-      .filter((l): l is string => Boolean(l))
+    const available = (candidates ?? []).map(exposedPortLabel).filter((l): l is string => Boolean(l))
     throw new Error(
       `applyBatch ops[${opIndex}].${direction}: label "${label}" not found on node "${nodeId}"'s exposed${direction === 'target' ? 'Inputs' : 'Outputs'}. ` +
       `Available labels: [${available.join(', ')}]. Re-check instantiateTemplate's return value for this group, or pass the raw in_N/out_N port name.`,
@@ -312,7 +331,63 @@ async function resolveConnectEndpointLabel(
       `(${matches.map((m) => m.portName).join(', ')}) — ambiguous, pass the raw port name instead.`,
     )
   }
-  return { nodeId, port: matches[0]!.portName }
+  const resolvedPortName = matches[0]!.portName
+  if (expectedPortName && expectedPortName !== resolvedPortName) {
+    const available = (candidates ?? [])
+      .map((p) => `${exposedPortLabel(p)}→${p.portName}`)
+      .filter((l): l is string => Boolean(l))
+    throw new Error(
+      `applyBatch ops[${opIndex}].${direction}: port label "${label}" on node "${nodeId}" resolves to "${resolvedPortName}", ` +
+      `but portName "${expectedPortName}" was specified — they must match. ` +
+      `Available ports: [${available.join(', ')}].`,
+    )
+  }
+  return { nodeId, port: resolvedPortName }
+}
+
+async function validateAppendMergeItemSceneSourceForAi(
+  ctx: ToolCtx,
+  projectId: string,
+  groupCache: Map<string, NodeGroupLike | null>,
+  opIndex: number,
+  source: { nodeId: string; port: unknown },
+): Promise<void> {
+  if (ctx.caller.kind !== 'ai') return
+
+  const group = await loadNodeGroup(ctx, projectId, groupCache, source.nodeId)
+  if (!group) return
+
+  const scenePort = findSceneOutputPort(group)
+  if (!scenePort) return
+
+  let resolvedPortName: string | undefined
+  if (typeof source.port === 'string') {
+    resolvedPortName = source.port
+  } else if (isPortLabelRef(source.port)) {
+    const matches = findExposedPortByLabel(group.exposedOutputs, source.port.label)
+    if (matches.length === 1) resolvedPortName = matches[0]!.portName
+    else if (source.port.label !== 'Scene') {
+      const available = (group.exposedOutputs ?? [])
+        .map((p) => `${exposedPortLabel(p)}→${p.portName}`)
+        .filter((l): l is string => Boolean(l))
+      throw new Error(
+        `applyBatch ops[${opIndex}] appendMergeItem: source must use the Scene output for merge aggregation, not a domain port. ` +
+        `Node "${source.nodeId}" exposes Scene at ${scenePort.portName}; you selected label "${source.port.label}". ` +
+        `Use source.port={ label: "Scene", portName: "${scenePort.portName}" }. Available ports: [${available.join(', ')}].`,
+      )
+    }
+  }
+
+  if (!resolvedPortName || resolvedPortName === scenePort.portName) return
+
+  const available = (group.exposedOutputs ?? [])
+    .map((p) => `${exposedPortLabel(p)}→${p.portName}`)
+    .filter((l): l is string => Boolean(l))
+  throw new Error(
+    `applyBatch ops[${opIndex}] appendMergeItem: source must use the Scene output for merge aggregation, not a domain port. ` +
+    `Node "${source.nodeId}" exposes Scene at ${scenePort.portName}; you selected ${resolvedPortName}. ` +
+    `Use source.port={ label: "Scene", portName: "${scenePort.portName}" }. Available ports: [${available.join(', ')}].`,
+  )
 }
 
 async function resolvePortLabelsInOps(ctx: ToolCtx, projectId: string, ops: unknown[]): Promise<unknown[]> {
@@ -378,8 +453,10 @@ async function expandAppendMergeItemOps(ctx: ToolCtx, projectId: string, ops: un
     return ops
   }
   const portCountByMergeNode = new Map<string, number>()
+  const groupCache = new Map<string, NodeGroupLike | null>()
   const out: unknown[] = []
-  for (const rawOp of ops) {
+  for (let i = 0; i < ops.length; i++) {
+    const rawOp = ops[i]
     const op = rawOp as Record<string, unknown> | undefined
     if (!op || op.type !== 'appendMergeItem') {
       out.push(rawOp)
@@ -390,10 +467,14 @@ async function expandAppendMergeItemOps(ctx: ToolCtx, projectId: string, ops: un
     const hasSourcePort = typeof source?.port === 'string' || isPortLabelRef(source?.port)
     if (!mergeNodeId || !source || typeof source.nodeId !== 'string' || !hasSourcePort) {
       throw new Error(
-        'appendMergeItem op requires { mergeNodeId: string, source: { nodeId: string, port: string | { label } } } — got: ' +
+        'appendMergeItem op requires { mergeNodeId: string, source: { nodeId: string, port: string | { label, portName? } } } — got: ' +
         JSON.stringify(rawOp),
       )
     }
+    await validateAppendMergeItemSceneSourceForAi(ctx, projectId, groupCache, i, {
+      nodeId: source.nodeId,
+      port: source.port,
+    })
     let currentCount = portCountByMergeNode.get(mergeNodeId)
     if (currentCount === undefined) currentCount = await loadMergePortCount(ctx, projectId, mergeNodeId)
     const newCount = currentCount + 1
@@ -414,17 +495,151 @@ async function expandAppendMergeItemOps(ctx: ToolCtx, projectId: string, ops: un
   return out
 }
 
+export type ExecuteSummaryVerification = {
+  ok?: boolean
+  hints?: string[]
+  primaryFailure?: 'structural' | 'location-names'
+  locationNameAlignment?: {
+    ok?: boolean
+    missing?: Array<{ name: string }>
+    fix?: string
+    actualNodeNames?: string[]
+    actualNodeNamesTruncated?: boolean
+  }
+  topologyIssues?: Array<{
+    kind: 'rest-fan-out' | 'illegal-local-merge' | 'manual-points-zero-default'
+    reason: string
+    fix: string
+    suggestedOps?: unknown[]
+  }>
+}
+
+/** Build the Error message for AI execute when verification failed. Structural issues take priority over naming. */
+export function formatExecuteVerificationFailure(summary: {
+  status?: string
+  verification?: ExecuteSummaryVerification
+}): string | null {
+  if (summary.status !== 'completed' || summary.verification?.ok !== false) return null
+
+  const hints = summary.verification.hints ?? []
+  const loc = summary.verification.locationNameAlignment
+  const structuralHints = hints.filter((h) => !h.startsWith('[stage3.location_names]'))
+  const hasStructural = structuralHints.length > 0 || summary.verification.primaryFailure === 'structural'
+  const hasLocation = loc?.ok === false
+
+  if (hasStructural) {
+    const locationSection = hasLocation
+      ? `\n\n[secondary: locationNameAlignment] missing narrative names: ${(loc!.missing ?? []).map((m) => m.name).join('、')}. ` +
+        `${loc!.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}` +
+        (loc!.actualNodeNames?.length
+          ? ` 当前场景实际节点名（共 ${loc!.actualNodeNames.length}${loc!.actualNodeNamesTruncated ? '+' : ''} 个）：${loc!.actualNodeNames.join('、')}`
+          : '')
+      : ''
+    return (
+      `[primaryFailure: structural] pipeline.execute verification failed — empty/disconnected group outputs (fix wiring before checking names). ` +
+      `Fix wiring via pipeline.get(groupId) + applyBatch, then re-execute. ` +
+      (structuralHints[0] ?? 'See verification.hints') +
+      locationSection
+    )
+  }
+
+  if (hasLocation) {
+    const missing = (loc!.missing ?? []).map((m) => m.name).join('、')
+    const actualList = loc!.actualNodeNames ?? []
+    const actualNote = actualList.length > 0
+      ? ` 当前场景实际节点名（共 ${actualList.length}${loc!.actualNodeNamesTruncated ? '+' : ''} 个，无需再跑 raw execute 翻找）：${actualList.join('、')}`
+      : ''
+    return (
+      `[primaryFailure: location-names] pipeline.execute locationNameAlignment failed — missing narrative names: ${missing}. ` +
+      `${loc!.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}${actualNote}`
+    )
+  }
+
+  return (
+    `[primaryFailure: structural] pipeline.execute verification failed (empty/disconnected group outputs). ` +
+    `Fix wiring via pipeline.get(groupId) + applyBatch, then re-execute. ` +
+    (hints[0] ?? 'See verification.hints')
+  )
+}
+
+export function summarizeProjectOpen(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return payload
+  const source = payload as Record<string, unknown>
+  const project = source.project && typeof source.project === 'object' ? source.project as Record<string, unknown> : {}
+  const pipeline = source.pipeline && typeof source.pipeline === 'object' ? source.pipeline as Record<string, unknown> : {}
+  const count = (value: unknown): number => Array.isArray(value)
+    ? value.length
+    : value && typeof value === 'object'
+      ? Object.keys(value).length
+      : 0
+  return {
+    project: {
+      id: project.id,
+      ...(project.name !== undefined ? { name: project.name } : {}),
+      ...(project.type !== undefined ? { type: project.type } : {}),
+    },
+    pipeline: {
+      id: pipeline.id,
+      hash: pipeline.hash,
+      nodeCount: count(pipeline.nodes),
+      edgeCount: count(pipeline.edges),
+    },
+    ...(source.openMode !== undefined ? { openMode: source.openMode } : {}),
+    ...(source.writeLockedBy !== undefined ? { writeLockedBy: source.writeLockedBy } : {}),
+  }
+}
+
+function executionVerificationResponse(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return payload
+  const summary = payload as Record<string, unknown>
+  return {
+    executionId: summary.executionId,
+    status: summary.status,
+    durationMs: summary.durationMs,
+    ...(summary.error !== undefined ? { error: summary.error } : {}),
+    ...(summary.execFailures !== undefined ? { execFailures: summary.execFailures } : {}),
+    summarized: true,
+    verificationOnly: true,
+    ...(summary.verification !== undefined ? { verification: summary.verification } : {}),
+  }
+}
+
 export const tools: Record<string, ToolHandler> = {
   'scene:projects.list': async (_args, ctx) => request(ctx, 'GET', '/api/v1/projects'),
   'scene:projects.create': async (args, ctx) => request(ctx, 'POST', '/api/v1/projects', objectArgs(args)),
+  // Shared session attach for analysis — multiple agents may open the same
+  // project concurrently and call read tools. Exclusive write lock is claimed
+  // later by applyBatch/execute/instantiateTemplate (those block/wait).
   'scene:projects.open': async (args, ctx) => {
     const body = objectArgs(args)
     const id = stringArg(body, 'id')
-    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/open`, {})
+    const opened = await request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/open`, {})
+    return ctx.caller.kind === 'ai' ? summarizeProjectOpen(opened) : opened
   },
   'scene:projects.close': async (args, ctx) => {
     const id = stringArg(objectArgs(args), 'id')
     return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/close`, {})
+  },
+  // Explicit lease renewal for a project you already hold — call this if
+  // you expect a long non-mutating stretch (reading/reasoning) between
+  // pipeline mutation calls so idle time alone never expires your lock.
+  // Every successful applyBatch/execute/etc. already renews it automatically;
+  // this is only needed for long gaps with no mutation in between.
+  'scene:projects.heartbeat': async (args, ctx) => {
+    const id = stringArg(objectArgs(args), 'id')
+    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/heartbeat`, {})
+  },
+  // Check your (or anyone's) position in a project's wait queue without
+  // side effects — unlike `projects.open`, this never joins the queue.
+  'scene:projects.queue.status': async (args, ctx) => {
+    const id = stringArg(objectArgs(args), 'id')
+    return request(ctx, 'GET', `/api/v1/projects/${encodeURIComponent(id)}/queue`)
+  },
+  // Voluntarily give up your place in a project's wait queue (e.g. you
+  // decided to work on a different project instead). Idempotent.
+  'scene:projects.queue.leave': async (args, ctx) => {
+    const id = stringArg(objectArgs(args), 'id')
+    return request(ctx, 'POST', `/api/v1/projects/${encodeURIComponent(id)}/queue/leave`, {})
   },
   'scene:projects.remove': async (args, ctx) => {
     const body = objectArgs(args)
@@ -524,7 +739,13 @@ export const tools: Record<string, ToolHandler> = {
       return request(ctx, 'GET', projectPath(projectId, '/pipeline'))
     }
     const q = new URLSearchParams()
-    if (body.mode === 'hash') q.set('mode', 'hash')
+    const hasSelector = Boolean(
+      (typeof body.groupId === 'string' && body.groupId.trim())
+      || (Array.isArray(body.nodeIds) && body.nodeIds.length > 0)
+      || (typeof body.nameContains === 'string' && body.nameContains.trim())
+      || (Array.isArray(body.opIdIn) && body.opIdIn.length > 0),
+    )
+    if (body.mode === 'hash' || (ctx.caller.kind === 'ai' && !hasSelector)) q.set('mode', 'hash')
     if (typeof body.groupId === 'string' && body.groupId.trim()) q.set('groupId', body.groupId.trim())
     if (Array.isArray(body.nodeIds)) {
       const ids = body.nodeIds.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
@@ -632,38 +853,19 @@ export const tools: Record<string, ToolHandler> = {
           .map((i, idx) => `[${idx + 1}] ${i.reason}\n${i.fix}${i.suggestedOps ? `\nsuggestedOps: ${JSON.stringify(i.suggestedOps)}` : ''}`)
           .join('\n\n')
         throw new Error(
-          `pipeline.execute detected ${blockingTopologyIssues.length} topology violation(s) that are NEVER a legitimate mid-construction state ` +
+          `[primaryFailure: topology] pipeline.execute detected ${blockingTopologyIssues.length} topology violation(s) that are NEVER a legitimate mid-construction state ` +
           '(Rest fan-out / illegal local tree_merge) — fix these before doing anything else, do not adjust tree_merge params first:\n\n' +
           detail,
         )
       }
-      if (summary.status === 'completed' && summary.verification?.ok === false) {
-        const hints = summary.verification.hints ?? []
-        const loc = summary.verification.locationNameAlignment
-        if (loc?.ok === false) {
-          const missing = (loc.missing ?? []).map((m) => m.name).join('、')
-          // 2026-07-10 复盘：这条抛出的 Error message 才是 agent 实际看到的报错文本
-          // （summary.verification 里的结构化字段不一定会被上层完整回显）。之前只报
-          // "缺了什么"，agent 只能反复调用 raw execute 去人工翻找场景里实际的节点名，
-          // 卡在这一步来回试错。把 actualNodeNames 直接拼进错误文本，一次报错就给
-          // 全部信息（预期 vs 实际），彻底不需要再摸黑重试。
-          const actualList = loc.actualNodeNames ?? []
-          const actualNote = actualList.length > 0
-            ? ` 当前场景实际节点名（共 ${actualList.length}${loc.actualNodeNamesTruncated ? '+' : ''} 个，无需再跑 raw execute 翻找）：${actualList.join('、')}`
-            : ''
-          throw new Error(
-            `pipeline.execute locationNameAlignment failed — missing narrative names: ${missing}. ` +
-            `${loc.fix ?? 'Wire Name/BuildingName ports from checklist namePort, then re-execute.'}${actualNote}`,
-          )
-        }
-        throw new Error(
-          `pipeline.execute verification failed (empty/disconnected group outputs). ` +
-          `Fix wiring via pipeline.get(groupId) + applyBatch, then re-execute. ` +
-          (hints[0] ?? 'See verification.hints'),
-        )
+      const verificationError = formatExecuteVerificationFailure(summary)
+      if (verificationError) {
+        throw new Error(verificationError)
       }
     }
-    return payload
+    return !raw && ctx.caller.kind === 'ai' && body.mode !== 'summary'
+      ? executionVerificationResponse(payload)
+      : payload
   },
   'scene:pipeline.import': async (args, ctx) => {
     const body = objectArgs(args)

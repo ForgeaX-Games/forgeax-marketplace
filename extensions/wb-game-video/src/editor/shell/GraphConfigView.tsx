@@ -120,7 +120,8 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === componentId)
     const made: OverlayChild = preset
       ? preset.make(childId)
-      : { id: childId, component: componentId, trigger: { when: 'enter' }, inputs: defaultsForComponent(componentId) }
+      // window 是显隐唯一 SSOT（运行时 el.window 存在即忽略 trigger）；不写 endMs = 到节点结束。
+      : { id: childId, component: componentId, trigger: { when: 'enter' }, window: { startMs: 0 }, inputs: defaultsForComponent(componentId) }
     // 画布落点已按组件定位模式分好（inputs.x/y 或 layout.left/top）：各自浅合并进 preset 产物，
     // inputs 模式会覆盖 preset 自带的 x/y（如 floatText 的 0.5/0.4）为鼠标落点。
     const child: OverlayChild = place

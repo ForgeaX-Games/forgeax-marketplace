@@ -34,13 +34,19 @@ export const inkKouDefaults = {
   cues: [{ id: 'k0', x: 0.5, y: 0.45, appearAt: 0, targetAt: 400, endAt: 1000 }],
 }
 
-/** OverlayChild 预设（顶栏 component = 皮肤 id）。 */
+/**
+ * OverlayChild 预设（顶栏 component = 皮肤 id）。
+ * `window` 是显隐时序的唯一 SSOT（运行时 `el.window` 存在即忽略 trigger），故预设显式带上：
+ * 默认拍点 `endAt` 决定收尾，作者随后可在时间轴上拖改这两个值。
+ */
 export function inkKouPreset(id: string): OverlayChild {
+  const cueEnd = Math.max(...inkKouDefaults.cues.map((c) => c.endAt))
   return {
     id,
     component: 'inkKou',
     layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
+    window: { startMs: 0, endMs: cueEnd },
     inputs: { ...inkKouDefaults },
   }
 }

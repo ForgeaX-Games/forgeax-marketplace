@@ -27,6 +27,12 @@ export {
 } from '../modes/topBillboard/buildVoxelMaster/billboardDrawOrder'
 export { buildTopFaceKey, lookupWithWildcard } from '../framework/asset/neighborKey'
 export {
+  matchAssetEntry,
+  type AliasMeta as AssetMatchAliasMeta,
+  type AssetEntry,
+  type AssetMatch,
+} from '../framework/asset/matchAssetEntry'
+export {
   computeValidVariantIdxs,
   computeValidVariantPool,
   computeValidVariantIdxsByTileId,

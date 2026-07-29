@@ -26,7 +26,8 @@
 
 | 端口名 | 类型 | 说明 | 典型去向 |
 |--------|------|------|---------|
-| `out_2` | scene | Buildings 建筑区域（主产物） | `appendMergeItem` → `aw_m0_merge` / `BuildingStructures.in_0` |
+| `out_2` | scene | Buildings 建筑区域（主产物） | `BuildingStructures.in_0`（细化） |
+| `out_3` | scene | Scene 整树汇总口 | `appendMergeItem` → `aw_m0_merge`（`{ label:"Scene", portName:"out_3" }`） |
 | `out_0` | array | BuildingsPaths 路径句柄列表 | 拼门路径 |
 | `out_1` | scene | Rest 剩余空地 | 下一组 `in_0` / 下一批建筑 `in_6` |
 

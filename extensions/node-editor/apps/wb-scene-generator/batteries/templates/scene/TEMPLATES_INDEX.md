@@ -45,9 +45,9 @@
 - **建筑**：`PickOneBuilding`（单栋）或 `PickMultiBuildings`（多栋）；多栋用 **`out_1`(Rest) → 下一组 `in_6`(Scene)** 串联。
 - **结构（可选）**：`Building.out_*` → **`BuildingStructures.in_0`** → `out_0` 供道路 POI / 门路径聚焦。
 - **道路**：**单个** `PathConnection` — 上一组 **Rest** → `in_2`；**POI 须导出 region/footprint 推理并校验**（区域内或贴边）→ `manual_points` → `tree_merge`(item) → `in_3`。**先确认连通。**
-- **地形等高（可选，装饰之前）**：道路后、**叙事核心区之外**的 Rest → **`MountainContourGenerate.in_0`**（`MaxElevationLayers` **≤2**）。**`out_2`(Mountain) → `tree_merge`**；**`out_1`(Rest) → 装饰链**。
+- **地形等高（可选，装饰之前）**：道路后、**叙事核心区之外**的 Rest → **`MountainContourGenerate.in_0`**（`MaxElevationLayers` **≤2**）。`out_2`(Mountain) 用于领域细化；`out_1`(Rest) → 装饰链；`out_0`(Scene) 才可汇总。
 - **装饰 / 湖（按选型，不必硬凑三种）**：有尺寸落点 → `PlaceOneDecoration`；简单小物件簇 → `LocalPreciseDecoration`；简单植被填充 → `NaturalDecorationDistribution` → `LakeRegions`（按需）。多组 `out_2` 链式 `in_1`。
-- **汇总**：各组主产物 `out_*` → `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`。
+- **汇总**：各组 `Scene` 汇总口 → 根 `tree_merge` → `tree_flatten` → `scene_merge_subtrees` → `scene_output`；领域口与 Rest 禁止接 merge。
 - **统一种子**：`seed_control.seed` 扇出到各组 Seed 输入。
 
 ## 三通路等价 + CLI 命令 + 读回端口内容

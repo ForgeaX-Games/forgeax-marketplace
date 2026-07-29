@@ -26,6 +26,15 @@ import {
 export const MATERIAL_DND_MIME = 'application/x-fx-material'
 
 /**
+ * 材料条渲染最小宽度（px）。= 左手柄 8 + 中间可拖区 ≥6 + 右手柄 8。
+ * 极短窗口（几十 ms）按真实比例只有几 px 宽时，两个手柄会叠在一起、起点抓不到，
+ * 所以宽度取真实跨度与本下限的较大者——牺牲一点比例真实性，换回可操作性。
+ */
+const CLIP_MIN_PX = 22
+/** 窄于此宽度就不渲染条内文字（文字会压住两侧手柄的可点区；标签仍在 title 里）。 */
+const CLIP_LABEL_MIN_PX = 56
+
+/**
  * 视频 tab 与剧情树抽屉共享的「材料时间轴」——
  *   · zIndex 堆叠的材料条（字幕 / 结算 / QTE / 选项 / QTE 窗口）
  *   · Ctrl/⌘ 锚点缩放 + Shift 横滚 + 普通滚轮纵向滚动
@@ -417,7 +426,9 @@ export function MaterialTimeline({
               })
             : materials.map((m) => {
                 const left = m.startMs * pxPerMs
-                const width = Math.max(6, (m.endMs - m.startMs) * pxPerMs)
+                // 下限必须容得下「左手柄 + 中间可拖区 + 右手柄」，否则两个 8px 手柄在窄条上完全重叠，
+                // 只有 DOM 靠后的右手柄能被抓到 → 起点永远调不了（CLIP_MIN_PX 见常量注释）。
+                const width = Math.max(CLIP_MIN_PX, (m.endMs - m.startMs) * pxPerMs)
                 const selected = selectedMaterialKey === m.key
                 return (
                   <Fragment key={m.key}>
@@ -430,7 +441,12 @@ export function MaterialTimeline({
                       {editable ? (
                         <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
                       ) : null}
-                      <span>{materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}</span>
+                      {/* 窄条上不渲染文字：否则会盖住两侧手柄的点击区（文案仍在 title 里可悬停看）。 */}
+                      {width >= CLIP_LABEL_MIN_PX ? (
+                        <span className="gc-mclip-label">
+                          {materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}
+                        </span>
+                      ) : null}
                       {editable && selected && onDeleteMaterial && canDeleteMaterial(m.kind) ? (
                         <button
                           type="button"
@@ -730,15 +746,26 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-mclip.is-component::before { background: #94a3b8; }
 .mtl-root .gc-mclip.is-mount { border-color: rgba(240,136,64,.6); color: #ffe6d2; background: rgba(240,136,64,.14); }
 .mtl-root .gc-mclip.is-mount::before { background: var(--gc-accent); }
+/* 条内文字自持裁剪（父层 padding 收窄时省略号，而不是溢出压住手柄）。 */
+.mtl-root .gc-mclip-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+/* 手柄必须压在文字之上（z-index）才保证窄条上也能抓到；hover 提亮给出可拖提示。 */
 .mtl-root .gc-mhandle {
   position: absolute;
   top: 0; bottom: 0;
   width: 8px;
   border: 0;
   padding: 0;
+  z-index: 4;
   background: rgba(255,255,255,0.32);
   cursor: ew-resize;
 }
+.mtl-root .gc-mhandle:hover { background: rgba(255,255,255,0.62); }
 .mtl-root .gc-mhandle.is-left { left: 0; border-radius: 8px 0 0 8px; }
 .mtl-root .gc-mhandle.is-right { right: 0; border-radius: 0 8px 8px 0; }
 .mtl-root .gc-mdelete {

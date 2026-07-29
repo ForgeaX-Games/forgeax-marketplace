@@ -2,13 +2,14 @@
 // of its children. m = Σ(areaᵢ·pᵢ)/Σareaᵢ ; E = ½ |p_parent − m|². If all child
 // areas are zero, falls back to an equal-weight mean.
 
-import type { Term, Vec2, ProblemModel } from '../types.ts'
+import type { Term, Vec2, ProblemModel, SolverState } from '../types.ts'
 
 export function parentAverageTerm(weight: number): Term {
   return {
     name: 'parentAverage',
-    energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number {
+    energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number {
       if (weight <= 0) return 0
+      const { positions: pos } = state
       let energy = 0
       for (let p = 0; p < model.nodes.length; p += 1) {
         const parent = model.nodes[p]

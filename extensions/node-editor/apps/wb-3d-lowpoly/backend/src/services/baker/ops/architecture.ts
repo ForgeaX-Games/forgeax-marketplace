@@ -166,6 +166,12 @@ export const floorSlab: OpBuilder = (ctx, args) => {
   const eps = Math.max(thickness, 0.02);
   for (const [hx, hy, hw, hd] of holes) {
     if (hw <= 0 || hd <= 0) throw new BakerError('floor_slab: hole w and d must be positive');
+    if (Math.abs(hx) + hw / 2 > w / 2 + 1e-9 ||
+        Math.abs(hy) + hd / 2 > d / 2 + 1e-9) {
+      throw new BakerError(
+        `floor_slab: hole centered at [${hx}, ${hy}] with size [${hw}, ${hd}] exceeds slab [${w}, ${d}]`,
+      );
+    }
     const cut = boxFloor(ctx, hw, hd, thickness + 2 * eps).translate(hx, hy, -eps) as BakeableShape;
     shape = csgCut(shape, cut);
   }

@@ -374,12 +374,30 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
         }
       }
     }
+    const transition = (e.data as { transition?: unknown } | undefined)?.transition
+    if (transition !== undefined && transition !== 'immediate' && transition !== 'onSettlement') {
+      issues.push({ level: 'error', code: 'edge.transition.invalid', msg: `edge ${e.id} transition 非法`, at: e.id })
+    }
+    if ((e.sourceHandle ?? 'default') === 'default' && transition === 'onSettlement') {
+      issues.push({ level: 'error', code: 'edge.transition.default', msg: `默认边 ${e.id} 不应配置延迟结算`, at: e.id })
+    }
   }
 
   // 2) 节点 type：必须解析到已注册 NodeKind（运行时会静默回退 perf，这里 fail-loud）。
   for (const n of graph.nodes) {
     if (!defaultNodeKindRegistry.get(resolveNodeType(n))) {
       issues.push({ level: 'error', code: 'node.type.unknown', msg: `节点 type '${n.type}' 未注册 NodeKind`, at: n.id })
+    }
+    const settlement = (n.data as { routingSettlement?: unknown }).routingSettlement
+    if (settlement !== undefined) {
+      const value = settlement as { type?: unknown; ms?: unknown }
+      const valid = value && typeof value === 'object' && (
+        value.type === 'complete' ||
+        (value.type === 'at' && typeof value.ms === 'number' && Number.isFinite(value.ms) && value.ms >= 0)
+      )
+      if (!valid) {
+        issues.push({ level: 'error', code: 'node.routingSettlement.invalid', msg: '节点路由结算点非法', at: n.id })
+      }
     }
   }
 

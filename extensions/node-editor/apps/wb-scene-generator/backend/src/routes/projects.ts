@@ -31,12 +31,41 @@ export function extractCaller(req: FastifyRequest): CallerIdentity {
   }
 }
 
+/**
+ * Gate mutations behind exclusive write access. Soft `projects.open` is shared
+ * (many agents may analyze); this is where we claim/wait for the write lock.
+ * AI callers block up to `waitMs` (default 10min) so they do not burn LLM turns
+ * polling — humans fail fast when another agent holds the write lock.
+ */
 export async function ensureMutationAccess(
   req: FastifyRequest,
   projectId: string,
+  opts?: { waitMs?: number; pollMs?: number },
 ): Promise<{ ok: true; projectId: string } | { ok: false; reason: string; code: string; projectId: string }> {
   const reg = await getProjectRegistry()
-  const result = reg.checkMutationAccess(projectId, extractCaller(req))
+  const caller = extractCaller(req)
+  const rawWait = opts?.waitMs ?? (caller.kind === 'ai' ? 600_000 : 0)
+  const rawPoll = opts?.pollMs ?? 2_000
+  const waitMs = Number.isFinite(rawWait) ? Math.max(0, Math.min(rawWait, 30 * 60_000)) : 0
+  const pollMs = Number.isFinite(rawPoll) ? Math.max(50, Math.min(rawPoll, 30_000)) : 2_000
+  const deadline = Date.now() + waitMs
+
+  let claimed = reg.claimWriteAccess(projectId, caller)
+  while (!claimed.ok && claimed.queued && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    claimed = reg.claimWriteAccess(projectId, caller)
+  }
+
+  if (!claimed.ok) {
+    const reason =
+      claimed.queued && waitMs > 0
+        ? `${claimed.reason} (blocked ${waitMs}ms without write lock — retry the mutation once)`
+        : claimed.reason
+    return { ok: false, reason, code: claimed.code, projectId }
+  }
+
+  // claimWriteAccess already acquired; renew + confirm.
+  const result = reg.checkMutationAccess(projectId, caller)
   if (result.ok) return { ok: true, projectId }
   return { ok: false, reason: result.reason, code: result.code, projectId }
 }
@@ -207,47 +236,120 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     }
   })
 
-  // Agent open — acquire exclusive lock without changing UI viewing project.
+  // Agent open — shared session attach for analysis (NOT exclusive write lock).
+  // Multiple AI agents may open the same project and read concurrently.
+  // Write exclusivity is claimed later by mutation routes via ensureMutationAccess.
   app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/open', async (req, reply) => {
     const reg = await getProjectRegistry()
-    const open = reg.openProject(req.params.id, extractCaller(req))
-    if (!open.ok) return reply.code(409).send({ reason: open.reason, code: open.code })
+    const caller = extractCaller(req)
+    const open = reg.openProject(req.params.id, caller)
+    if (!open.ok) {
+      return reply.code(409).send({ reason: open.reason, code: open.code })
+    }
     const rt = reg.getRuntimeFor(req.params.id)
     await rebindWsSubscriptions()
-    const caller = extractCaller(req)
-    if (caller.kind === 'ai' && caller.agentId) {
-      broadcastToClients({
-        event: 'runtime',
-        payload: {
-          kind: 'project:executing',
-          projectId: req.params.id,
-          pipelineId: rt.config.pipelineId,
-          agentId: caller.agentId,
-          ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
-        },
-      })
-    }
+    // Soft open is not "executing" — only write-lock holders are.
     const snap = getPipeline(rt)
-    return { project: reg.getProject(req.params.id), pipeline: snap, workspace: reg.getWorkspace() }
+    return {
+      project: reg.getProject(req.params.id),
+      pipeline: snap,
+      workspace: reg.getWorkspace(),
+      openMode: 'shared',
+      writeLockedBy: reg.getProjectLock(req.params.id)?.agentId ?? null,
+    }
+  })
+
+  // Explicit lease renewal — call between mutations during a long
+  // non-writing stretch (reading/reasoning) so idle time alone never expires
+  // an otherwise-active agent's lock out from under it.
+  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/heartbeat', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    const res = reg.renewLock(req.params.id, extractCaller(req))
+    if (!res.ok) return reply.code(409).send({ reason: res.reason, code: res.code })
+    return { ok: true, lock: reg.getProjectLock(req.params.id) }
+  })
+
+  // Current wait-queue snapshot for a project (FIFO, position 1 = next in line).
+  app.get<{ Params: ProjectIdParams }>('/api/v1/projects/:id/queue', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    if (!reg.getProject(req.params.id)) {
+      return reply.code(404).send({ reason: `project not found: ${req.params.id}` })
+    }
+    return { queue: reg.getProjectQueue(req.params.id) }
+  })
+
+  // Voluntarily leave a project's wait queue (e.g. the agent switched to a
+  // different project while waiting). Idempotent; a no-op if not queued.
+  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/queue/leave', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    const res = reg.leaveQueue(req.params.id, extractCaller(req))
+    if (!res.ok) return reply.code(409).send({ reason: res.reason, code: res.code })
+    return { ok: true, queue: reg.getProjectQueue(req.params.id) }
   })
 
   app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/close', async (req, reply) => {
     const reg = await getProjectRegistry()
     const caller = extractCaller(req)
     const held = reg.getProjectLock(req.params.id)
-    const res = reg.releaseProjectLock(req.params.id, caller)
+    const heldByCaller =
+      !!held &&
+      caller.kind === 'ai' &&
+      held.agentId === caller.agentId &&
+      (held.sessionId ?? undefined) === (caller.sessionId ?? undefined)
+    // Soft detach: always clears this caller's session; releases write lock
+    // only if this caller holds it (other agents may keep writing).
+    const res = reg.detachProject(req.params.id, caller)
     if (!res.ok) return reply.code(409).send({ reason: res.reason })
     await rebindWsSubscriptions()
-    if (held) {
+    const handedTo = reg.getProjectLock(req.params.id)
+    if (heldByCaller && handedTo && handedTo.agentId !== held?.agentId) {
       broadcastToClients({
         event: 'runtime',
         payload: {
-          kind: 'project:idle',
+          kind: 'project:executing',
           projectId: req.params.id,
-          agentId: held.agentId,
+          agentId: handedTo.agentId,
+          ...(handedTo.sessionId ? { sessionId: handedTo.sessionId } : {}),
         },
       })
+    } else if (heldByCaller && held && !handedTo) {
+      broadcastToClients({
+        event: 'runtime',
+        payload: { kind: 'project:idle', projectId: req.params.id, agentId: held.agentId },
+      })
     }
+    return { ok: true, workspace: reg.getWorkspace() }
+  })
+
+  // Soft-open session for the calling AI agent (projectId they attached to).
+  app.get('/api/v1/workspace/mine', async (req) => {
+    const reg = await getProjectRegistry()
+    const caller = extractCaller(req)
+    const openProjectId = reg.getAgentOpenProjectId(caller)
+    const writeLock = openProjectId ? reg.getProjectLock(openProjectId) : null
+    return {
+      openProjectId,
+      holdsWriteLock:
+        !!writeLock &&
+        caller.kind === 'ai' &&
+        writeLock.agentId === caller.agentId &&
+        (writeLock.sessionId ?? undefined) === (caller.sessionId ?? undefined),
+    }
+  })
+
+  // Human/workbench-only emergency reset: clears a project's lock + wait
+  // queue outright. Last-resort manual override for the (expected-never)
+  // case where automatic lease-expiry self-healing somehow doesn't recover a
+  // stuck project — never callable by an AI caller.
+  app.post<{ Params: ProjectIdParams }>('/api/v1/projects/:id/force-unlock', async (req, reply) => {
+    const reg = await getProjectRegistry()
+    const res = reg.forceUnlockProject(req.params.id, extractCaller(req))
+    if (!res.ok) return reply.code(403).send({ reason: res.reason, code: res.code })
+    await rebindWsSubscriptions()
+    broadcastToClients({
+      event: 'runtime',
+      payload: { kind: 'project:idle', projectId: req.params.id, agentId: null },
+    })
     return { ok: true, workspace: reg.getWorkspace() }
   })
 

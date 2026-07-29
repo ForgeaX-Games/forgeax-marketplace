@@ -30,9 +30,9 @@
 
 | portName | 类型 | label | 说明 | 典型去向 |
 |---|---|---|---|---|
-| `out_4` | scene | `Lake` | 湖泊产物（**主产物，不是 `out_0`**） | → 用 `appendMergeItem`（或 `{"port":{"label":"Lake"}}`）接入 `aw_m0_merge`，不要手动算 `item_N`/`portCount`，也不要局部汇总 |
+| `out_4` | scene | `Lake` | 湖泊领域产物 | 后续湖区细化，禁止接 merge |
 | `out_0` | scene | `Rest` | 剩余空地（**不是 `out_1`**） | → 下一组 `in_1`(Scene)（链式 Rest） |
-| `out_3` | scene | `Scene` | 整棵合并后场景树 | 调试 / 汇总根 |
+| `out_3` | scene | `Scene` | 整棵合并后场景树 | `{ "label":"Scene", "portName":"out_3" }` → `appendMergeItem` 汇总根 |
 | `out_5` | string | `LakePath` | 湖泊路径句柄 | 一般不接 |
 | `out_6` | string | `RestPath` | Rest 路径句柄 | 一般不接 |
 | `out_1`/`out_2` | grid/number | 无 label（`hidden:true`） | 内部散点/计数中间值 | 不接 |
@@ -69,7 +69,7 @@
 { "type":"connect","edgeId":"e_lk_prefix", "source":{"nodeId":"lake_prefix","port":"output"},     "target":{"nodeId":"<G_LAKE>","port":"in_0"} },
 { "type":"connect","edgeId":"e_lk_asset",  "source":{"nodeId":"lake_asset","port":"output"},      "target":{"nodeId":"<G_LAKE>","port":"in_14"} },
 { "type":"connect","edgeId":"e_lk_seed",   "source":{"nodeId":"seed_main","port":"seed"},         "target":{"nodeId":"<G_LAKE>","port":"in_17"} },
-{ "type":"appendMergeItem","mergeNodeId":"merge_all","source":{"nodeId":"<G_LAKE>","port":"out_4"} }  // 接入 aw_m0_merge；自动分配 item_N、递增 portCount，不用手动算
+{ "type":"appendMergeItem","mergeNodeId":"merge_all","source":{"nodeId":"<G_LAKE>","port":{"label":"Scene","portName":"out_3"}} }  // 只接 Scene 汇总口
 ```
 
 > 后续农田/植被的链式起点用 `<G_LAKE>.out_0`（Rest，**不是 `out_1`**）接到下一组 `in_1`(Scene)。

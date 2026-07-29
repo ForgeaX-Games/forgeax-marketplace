@@ -21,7 +21,14 @@ import {
  * 解析 holes 输入为 number[4][]。
  * 复用共享的 parseQuadList（与 g_wall 的 openings 同一实现），仅传入本电池的错误文案。
  */
-export function parseHoles(value: unknown): number[][] | { error: string } {
+function parseHoles(value: unknown): number[][] | { error: string } {
+  // The runtime may preserve a list-valued port as its parameter envelope
+  // (`{ ..., holes: [...] }`) instead of handing the nested list through
+  // directly. Unwrap that representation defensively; direct/UI calls still
+  // pass either JSON text or the array itself.
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && 'holes' in value) {
+    value = (value as { holes?: unknown }).holes;
+  }
   return parseQuadList(value, {
     json: 'holes must be valid JSON, e.g. [[1,1,1.2,2.8]]',
     notArray: 'holes must be an array of [x, y, w, d]',
@@ -41,6 +48,19 @@ export function gFloorSlab(input: Record<string, unknown>): Record<string, unkno
 
   const holes = parseHoles(input.holes);
   if (!Array.isArray(holes)) return { geometry: incoming, id: '', error: holes.error };
+  for (const [x, y, holeWidth, holeDepth] of holes) {
+    if (holeWidth <= 0 || holeDepth <= 0) {
+      return { geometry: incoming, id: '', error: 'floor_slab: hole width and depth must be positive' };
+    }
+    if (Math.abs(x) + holeWidth / 2 > width / 2 + 1e-9 ||
+        Math.abs(y) + holeDepth / 2 > depth / 2 + 1e-9) {
+      return {
+        geometry: incoming,
+        id: '',
+        error: `floor_slab: hole centered at [${x}, ${y}] with size [${holeWidth}, ${holeDepth}] exceeds slab [${width}, ${depth}]`,
+      };
+    }
+  }
 
   const args: Record<string, Arg> = {
     size: numList([width, depth]),

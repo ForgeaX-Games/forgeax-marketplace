@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "场景生成",
+    "zh": "场景生成器",
     "en": "Scene Generator"
   },
   "description": {
@@ -89,12 +89,14 @@
         "args": {
           "type": "object",
           "required": ["id"],
-          "properties": { "id": { "type": "string" } },
+          "properties": {
+            "id": { "type": "string" }
+          },
           "additionalProperties": false
         },
         "returns": { "type": "object" },
         "exposedToAI": true,
-        "description": { "zh": "打开/激活指定 Scene Generator 项目（获得独占锁；一个 agent 同一时刻只能持有一个项目）", "en": "Open/activate a Scene Generator project (acquires an exclusive lock; one agent holds at most one project at a time)" }
+        "description": { "zh": "打开指定 Scene Generator 项目（共享会话，用于分析）。多个 agent 可同时 open 同一项目并调用 pipeline.get 等只读工具；open 不会因别人在写而排队。独占写锁只在 applyBatch/execute/instantiateTemplate 时获取（那些调用会阻塞等待）。一个 agent 同一时刻只能 soft-open 一个项目。", "en": "Soft-open a Scene Generator project for shared analysis. Many agents may open the same project and use read tools concurrently — open does not wait on writers. Exclusive write lock is claimed only by mutation tools (those block/wait). One agent soft-opens at most one project at a time." }
       },
       {
         "id": "scene:projects.close",
@@ -106,7 +108,43 @@
         },
         "returns": { "type": "object" },
         "exposedToAI": true,
-        "description": { "zh": "关闭/释放对指定 Scene Generator 项目的独占锁；释放后才能打开另一个项目", "en": "Close/release the exclusive lock on a Scene Generator project; required before opening another" }
+        "description": { "zh": "关闭/释放对指定 Scene Generator 项目的独占锁；释放后才能打开另一个项目。释放后锁会立刻移交给排队队列里的下一个 agent（如果有的话）。", "en": "Close/release the exclusive lock on a Scene Generator project; required before opening another. On release the lock is handed immediately to the next agent in that project's wait queue, if any." }
+      },
+      {
+        "id": "scene:projects.heartbeat",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "续期你在指定项目上持有的独占锁租约。每次成功的 applyBatch/execute 等写入调用都会自动续期——只有在写入调用之间会有很长一段不写入的等待/推理时，才需要手动调用本工具，防止锁因超时被判定为『已放弃』而移交给排队中的下一个 agent。", "en": "Renew the lease on your exclusive lock for a project. Every successful applyBatch/execute (etc.) call already renews it automatically — call this explicitly only when you expect a long non-mutating stretch between writes, so idle time alone never causes your lock to be treated as abandoned and handed to the next queued agent." }
+      },
+      {
+        "id": "scene:projects.queue.status",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "查询指定项目当前的排队情况（FIFO，position=1 表示下一个轮到）。只读，不会把你加入队列——加入队列要调用 scene:projects.open。", "en": "Inspect a project's current FIFO wait queue (position 1 = next in line). Read-only — does NOT join the queue; call scene:projects.open to do that." }
+      },
+      {
+        "id": "scene:projects.queue.leave",
+        "args": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "主动退出指定项目的排队队列（例如你决定改去处理别的项目）。幂等；未排队时调用无副作用。", "en": "Voluntarily leave a project's wait queue (e.g. you decided to work on a different project instead). Idempotent; a no-op if you weren't queued." }
       },
       {
         "id": "scene:projects.remove",
@@ -224,7 +262,7 @@
           }
         },
         "exposedToAI": true,
-        "description": { "zh": "一步把模板组实例化进当前活动项目的图：自动重映射内部 node/edge/group id（同一模板可重复实例化不冲突），落地为一个 __group__ 顶层组节点（含嵌套子组），并返回新组的 groupId 与稳定 in_N/out_N 端口清单（含语义 label）供接线。优先用它替代手工 createNode+connect+createGroup 展开。", "en": "Instantiate a template group into the active project's graph in one call: inner node/edge/group ids are remapped (same template can be instantiated repeatedly without collision), materialised as one __group__ top-level node (incl. nested sub-groups), returning the new groupId and stable in_N/out_N exposed ports (with semantic labels) for wiring. Prefer this over manual createNode+connect+createGroup expansion." }
+        "description": { "zh": "一步把模板组实例化进当前活动项目的图：自动重映射内部 id，落地为一个 __group__ 顶层组节点，并返回 groupId + exposedInputs/exposedOutputs（含语义 label）供接线。**黑盒**：接线只连组壳暴露口；禁止再查组内 scene_focus_path/manual_points/核心算子。Point/名字/宽高在组外 createNode 再 connect 到暴露 in_*。", "en": "Instantiate a template group: remaps inner ids, returns groupId + exposedInputs/exposedOutputs (with labels) for wiring. Black box — wire only exposed ports; do not inspect inner scene_focus_path/manual_points. Create param batteries outside the group and connect to exposed in_*." }
       },
       {
         "id": "scene:pipeline.get",
@@ -233,17 +271,17 @@
           "properties": {
             "projectId": { "type": "string", "description": "目标 scene 项目 id；省略时使用 agent 已 open 的项目或 UI 当前 viewing 项目 / target scene project id; when omitted uses the agent's open project or the UI viewing project" },
             "raw": { "type": "boolean", "description": "true=返回完整 graph（含 params，体积大，仅 debug）；默认 false=轻量摘要 / true=full graph with params (large, debug only); default false=summary" },
-            "mode": { "type": "string", "enum": ["hash"], "description": "hash=仅 hash+节点/边计数，applyBatch 后快速核对 / hash only — counts + hash after applyBatch" },
+            "mode": { "type": "string", "enum": ["hash", "summary"], "description": "AI 默认 hash=仅 hash+节点/边计数；传 groupId/nodeIds/nameContains/opIdIn 时返回局部拓扑。summary=非筛选全图摘要，仅排障时使用 / AI defaults to hash; selectors return local topology. summary is full graph summary for diagnosis only." },
             "groupId": { "type": "string", "description": "只返回该组及其邻接边（instantiate 后核对用）/ scope to group neighborhood after instantiate" },
             "nodeIds": { "type": "array", "items": { "type": "string" }, "description": "只返回这些 node 及其邻接边 / scope to listed nodes and their edges" },
-            "nameContains": { "type": "string", "description": "2026-07-15 新增：grep 式模糊过滤——按节点 name 子串（大小写不敏感）匹配，命中节点 + 其邻接边一起返回，返回值多一个 search:{matchCount} 告诉你到底命中了几个（0 命中时 nodes 是空数组，不会静默回退成全图）。图很大、只记得一个大概名字（比如叙事里的地点名）时用它，不用先 pipeline.get() 全图肉眼翻找。可以和 groupId/nodeIds 同时传，取并集。 / 2026-07-15: grep-style fuzzy filter — case-insensitive substring match on node name; matched nodes + their adjacent edges are returned, plus search:{matchCount} telling you exactly how many matched (0 matches → nodes is [], never a silent full-graph fallback). Use this instead of pulling the whole graph to eyeball a name. Can combine with groupId/nodeIds (union)." },
+            "nameContains": { "type": "string", "description": "grep 式模糊过滤：按节点 name **或 id** 子串（大小写不敏感）匹配。instantiate 的组常共用电池名（如 PlaceOneDecoration），应用 id 前缀查（如 p1d_）。命中节点+邻接边，附 search.matchCount（0 命中时 nodes=[]，不回退全图）。可与 groupId/nodeIds 并集。 / Fuzzy filter on node name OR id (case-insensitive). Instantiated groups often share a battery name — search by groupId prefix (e.g. p1d_). Returns matches + adjacent edges and search.matchCount (0 → empty, never full-graph fallback)." },
             "opIdIn": { "type": "array", "items": { "type": "string" }, "description": "2026-07-15 新增：按 opId 精确匹配任意一个（如 [\"tree_merge\"] 找所有 tree_merge 节点），行为同 nameContains（命中+邻接边，附带 search.matchCount）。 / 2026-07-15: exact match against any of the given opIds (e.g. [\"tree_merge\"] finds every tree_merge node); same behavior as nameContains (matches + adjacent edges, plus search.matchCount)." }
           },
           "additionalProperties": false
         },
         "returns": { "type": ["object", "null"] },
         "exposedToAI": true,
-        "description": { "zh": "读取 scene pipeline：默认轻量摘要（id/opId/name + 边，无 params）；mode=hash 仅 hash；raw:true 才返回全图。instantiate 后用 groupId 按需核对；不确定具体 nodeId 时用 nameContains/opIdIn 做 grep 式模糊查找，不用每次都读全图。", "en": "Read scene pipeline: default lightweight summary (id/opId/name + edges, no params); mode=hash for hash only; raw:true for full graph. After instantiate, pass groupId to verify locally; when you don't know the exact nodeId, use nameContains/opIdIn for a grep-style fuzzy lookup instead of reading the whole graph every time." }
+        "description": { "zh": "AI 未传筛选条件时只返回 hash/计数状态；检查接线必须传 groupId、nodeIds、nameContains 或 opIdIn，取得局部拓扑。nameContains/opIdIn 用于找**组壳/组外电池**（如 p1d_、aw_m0_merge），不是模板组内部节点。", "en": "Unscoped AI reads return only hash/count status. Use groupId, nodeIds, nameContains, or opIdIn for local topology." }
       },
       {
         "id": "scene:pipeline.applyBatch",
@@ -254,7 +292,7 @@
             "projectId": { "type": "string", "description": "目标 scene 项目 id；AI 须先 scene:projects.open；省略时回退 agent lock / viewing 项目 / target project id; AI must scene:projects.open first; when omitted falls back to agent lock or viewing project" },
             "ops": {
               "type": "array",
-              "description": "支持的 op type：createNode / updateNode / deleteNode / connect / disconnect（删边；`deleteEdge` 是完全等价的别名，两个名字都可以用）/ setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem（见下）。节点标识符字段名严格区分，不是别名，写错字段名会被当场拒绝（不会静默造出僵尸节点）：createNode/updateNode/deleteNode 用 `nodeId`（不是 `id`）；connect 的两端是 `source:{nodeId,port}` / `target:{nodeId,port}`（同样是 `nodeId`，不是 `id`），可选 `edgeId`（不是 `id`）；disconnect/deleteEdge 用 `edgeId`（不是 `id`）；createGroup/updateGroup/deleteGroup/ungroup 用 `groupId`（不是 `id`）。例：{\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}；删边例：{\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}。任何不在上述 type 列表里的值都会被显式拒绝（带 opIndex 的校验错误），不会被静默跳过——不要因为某个 op type 没试过就假设它不存在或改用变通方案（如给同一端口接双输入、删组重建），先看这份类型列表。2026-07-01 复盘：此前用错字段名会被静默忽略/静默造出 id 为 undefined 的僵尸节点，现在会返回带 opIndex 的显式校验错误。\n\n2026-07-15 新增两项能力：\n(1) connect 的 source.port / target.port 除了字符串 `in_N`/`out_N` 外，还可以写 `{\"label\":\"IslandName\"}` —— 用 instantiateTemplate 返回的 exposedInputs/exposedOutputs 里那个语义 label（如 \"Scene\"/\"Rest\"/\"Island\"），由后端查该组当前的 exposedInputs/exposedOutputs 解出真实 portName 再真正连线。优先用 label，不用在 in_N/out_N 和语义名之间自己心算映射；label 找不到或匹配到多个端口会显式报错并列出该组全部可用 label，不会静默连错。例：{\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}。\n(2) appendMergeItem：往一个 tree_merge（典型是根节点 aw_m0_merge）追加一路内容，不用自己先读 portCount、算 item_N、再分两步 updateNode+connect——一次 op 搞定：{\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":\"out_0\"}}（source.port 同样可以用 {\"label\":...}）。同一批 ops 里连续写多个 appendMergeItem（哪怕都指向同一个 mergeNodeId）会正确地依次递增 item 号，不会重复用同一个槎位。mergeNodeId 必须已经存在且 opId 是 tree_merge，否则显式报错。 / Supported op types: createNode / updateNode / deleteNode / connect / disconnect (delete an edge; `deleteEdge` is a fully equivalent alias, both spellings work) / setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem (see below). Node/edge/group identifier field names are STRICT, not aliases — using the wrong one is now rejected outright (never silently produces a zombie node). createNode/updateNode/deleteNode use `nodeId` (not `id`); connect's endpoints are `source:{nodeId,port}` / `target:{nodeId,port}` (also `nodeId`, not `id`), with an optional `edgeId` (not `id`); disconnect/deleteEdge use `edgeId` (not `id`); createGroup/updateGroup/deleteGroup/ungroup use `groupId` (not `id`). Example: {\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}; delete-edge example: {\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}. Any type not in this list is rejected explicitly (opIndex-addressed validation error), never silently skipped — do not assume an op type doesn't exist just because you haven't tried it, or fall back to workarounds (dual-input on one port, delete+re-instantiate groups) before checking this type list. 2026-07-01 postmortem: using the wrong field name used to be silently ignored / silently created an undefined-id zombie node — it now returns an explicit, opIndex-addressed validation error instead.\n\nTwo new capabilities added 2026-07-15:\n(1) connect's source.port/target.port can now be `{\"label\":\"IslandName\"}` instead of a raw `in_N`/`out_N` string — the semantic label from instantiateTemplate's exposedInputs/exposedOutputs (e.g. \"Scene\"/\"Rest\"/\"Island\"); the backend resolves it against that group's CURRENT exposedInputs/exposedOutputs into the real portName before wiring. Prefer label addressing over mentally mapping in_N/out_N yourself; an unknown or ambiguous label is rejected explicitly with the full list of that group's available labels, never silently mis-wired. Example: {\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}.\n(2) appendMergeItem: append one more content source into a tree_merge (typically the root aw_m0_merge) without first reading its portCount, computing the next item_N, and issuing updateNode+connect yourself — one op does it all: {\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":\"out_0\"}} (source.port also accepts {\"label\":...}). Multiple appendMergeItem ops in the same batch (even targeting the same mergeNodeId) correctly increment sequentially, never reusing an item slot. mergeNodeId must already exist and be opId tree_merge, or it's rejected explicitly."
+              "description": "支持的 op type：createNode / updateNode / deleteNode / connect / disconnect（删边；`deleteEdge` 是完全等价的别名，两个名字都可以用）/ setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem（见下）。节点标识符字段名严格区分，不是别名，写错字段名会被当场拒绝（不会静默造出僵尸节点）：createNode/updateNode/deleteNode 用 `nodeId`（不是 `id`）；connect 的两端是 `source:{nodeId,port}` / `target:{nodeId,port}`（同样是 `nodeId`，不是 `id`），可选 `edgeId`（不是 `id`）；disconnect/deleteEdge 用 `edgeId`（不是 `id`）；createGroup/updateGroup/deleteGroup/ungroup 用 `groupId`（不是 `id`）。例：{\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}；删边例：{\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}。任何不在上述 type 列表里的值都会被显式拒绝（带 opIndex 的校验错误），不会被静默跳过——不要因为某个 op type 没试过就假设它不存在或改用变通方案（如给同一端口接双输入、删组重建），先看这份类型列表。2026-07-01 复盘：此前用错字段名会被静默忽略/静默造出 id 为 undefined 的僵尸节点，现在会返回带 opIndex 的显式校验错误。\n\n2026-07-15 新增两项能力：\n(1) connect 的 source.port / target.port 除了字符串 `in_N`/`out_N` 外，还可以写 `{\"label\":\"IslandName\"}` 或带约束的 `{\"label\":\"Island\",\"portName\":\"out_1\"}` —— 用 instantiateTemplate 返回的 exposedInputs/exposedOutputs 里那个语义 label（如 \"Scene\"/\"Rest\"/\"Island\"），由后端查该组当前的 exposedInputs/exposedOutputs 解出真实 portName 再真正连线；当同时提供 portName 时，必须与 label 解析结果一致，否则整批拒绝（防 out_0/out_1 接反）。优先用 label+portName 联合引用，不用在 in_N/out_N 和语义名之间自己心算映射；label 找不到或匹配到多个端口会显式报错并列出该组全部可用 label，不会静默连错。例：{\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\",\"portName\":\"out_1\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}。\n(2) appendMergeItem：往一个 tree_merge（典型是根节点 aw_m0_merge）追加一路内容，不用自己先读 portCount、算 item_N、再分两步 updateNode+connect——一次 op 搞定：{\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Scene\",\"portName\":\"out_0\"}}}`（source.port 同样可以用 label/portName 联合引用）。AI 自动施工时，若模板暴露 Scene 输出，appendMergeItem 必须使用 Scene 口汇总，不能用 Island/Rest 等领域口直接 merge；人工/旧调用仍兼容。同一批 ops 里连续写多个 appendMergeItem（哪怕都指向同一个 mergeNodeId）会正确地依次递增 item 号，不会重复用同一个槎位。mergeNodeId 必须已经存在且 opId 是 tree_merge，否则显式报错。 / Supported op types: createNode / updateNode / deleteNode / connect / disconnect (delete an edge; `deleteEdge` is a fully equivalent alias, both spellings work) / setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem (see below). Node/edge/group identifier field names are STRICT, not aliases — using the wrong one is now rejected outright (never silently produces a zombie node). createNode/updateNode/deleteNode use `nodeId` (not `id`); connect's endpoints are `source:{nodeId,port}` / `target:{nodeId,port}` (also `nodeId`, not `id`), with an optional `edgeId` (not `id`); disconnect/deleteEdge use `edgeId` (not `id`); createGroup/updateGroup/deleteGroup/ungroup use `groupId` (not `id`). Example: {\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}; delete-edge example: {\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}. Any type not in this list is rejected explicitly (opIndex-addressed validation error), never silently skipped — do not assume an op type doesn't exist just because you haven't tried it, or fall back to workarounds (dual-input on one port, delete+re-instantiate groups) before checking this type list. 2026-07-01 postmortem: using the wrong field name used to be silently ignored / silently created an undefined-id zombie node — it now returns an explicit, opIndex-addressed validation error instead.\n\nTwo new capabilities added 2026-07-15:\n(1) connect's source.port/target.port can now be `{\"label\":\"IslandName\"}` or a constrained `{\"label\":\"Island\",\"portName\":\"out_1\"}` instead of a raw `in_N`/`out_N` string — the semantic label from instantiateTemplate's exposedInputs/exposedOutputs (e.g. \"Scene\"/\"Rest\"/\"Island\"); the backend resolves it against that group's CURRENT exposedInputs/exposedOutputs into the real portName before wiring. When portName is also provided it MUST match the label resolution or the whole batch is rejected (prevents out_0/out_1 swaps). Prefer label+portName joint refs over mentally mapping in_N/out_N yourself; an unknown or ambiguous label is rejected explicitly with the full list of that group's available labels, never silently mis-wired. Example: {\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\",\"portName\":\"out_1\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}.\n(2) appendMergeItem: append one more content source into a tree_merge (typically the root aw_m0_merge) without first reading its portCount, computing the next item_N, and issuing updateNode+connect yourself — one op does it all: {\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Scene\",\"portName\":\"out_0\"}}} (source.port also accepts label/portName joint refs). For AI auto-construction, when a template exposes a Scene output, appendMergeItem MUST use the Scene port for aggregation — domain ports like Island/Rest must not feed merge directly; human/legacy callers remain compatible. Multiple appendMergeItem ops in the same batch (even targeting the same mergeNodeId) correctly increment sequentially, never reusing an item slot. mergeNodeId must already exist and be opId tree_merge, or it's rejected explicitly."
             },
             "opts": { "type": "object" }
           },
@@ -273,8 +311,9 @@
             "nodeId": { "type": "string" },
             "raw": {
               "type": "boolean",
-              "description": "默认 false：只返回轻量摘要（status + 各节点端口的 children 名/cell 数等），可放心整图 execute 看摘要验证每组是否产出。仅在极少数需要原始全量 voxel cells 时传 true（体积巨大，会撑爆上下文）。"
+              "description": "默认 false：AI 只返回验证结果；raw:true 返回全量 voxel cells，仅供调试。"
             },
+            "mode": { "type": "string", "enum": ["summary"], "description": "AI 默认只返回 verification；summary 返回已有的详细轻量执行摘要，仅在验证失败后用于诊断。" },
             "narrativeLocationNames": {
               "type": "array",
               "items": { "type": "string" },
@@ -285,7 +324,7 @@
         },
         "returns": { "type": "object" },
         "exposedToAI": true,
-        "description": { "zh": "执行当前 scene pipeline 或指定节点；默认返回轻量摘要（status + 各端口 children 名/cell 数），raw:true 才返回全量；传 narrativeLocationNames 可顺带核对场景节点名与上游叙事地点名是否对齐（stage3.location_names 硬门控）。2026-07-15 新增：非 raw 模式下每次都会顺带跑三项拓扑检测（Rest/Scene 并行 fan-out、非法局部 tree_merge、manual_points 静默 (0,0) 默认），结果在 verification.topologyIssues 里——前两类（fan-out/局部 merge）从来没有合法的施工中间态，一旦出现会直接抛错并附带可执行的 suggestedOps（能算的情况下），不用等到下一轮才发现接错了；第三类只是提示，不阻断。不要看到 status:completed 就以为万事大吉，topologyIssues 非空也要处理。", "en": "Execute the active scene pipeline or a single node; returns a lightweight summary by default (status + per-port child names / cell counts), pass raw:true for the full result; pass narrativeLocationNames to additionally gate scene node names against the upstream narrative location names (stage3.location_names). 2026-07-15: non-raw mode now also runs three topology checks every call (Rest/Scene parallel fan-out, illegal local tree_merge, manual_points silent (0,0) default), surfaced under verification.topologyIssues — the first two (fan-out / local merge) are NEVER a legitimate mid-construction state, so hitting either throws immediately with ready-to-use suggestedOps when computable, instead of only finding out a round later; the third is advisory only, non-blocking. Do not treat status:completed as 'done' without also checking topologyIssues." }
+        "description": { "zh": "AI 默认返回 executionId、状态、时长和 verification；验证失败后才传 mode:\"summary\" 获取端口级诊断。传 narrativeLocationNames 可核对场景节点名与上游叙事地点名。", "en": "AI defaults to execution ID, status, duration, and verification. Request mode:\"summary\" only after a verification failure for port-level diagnostics." }
       },
       {
         "id": "scene:pipeline.import",

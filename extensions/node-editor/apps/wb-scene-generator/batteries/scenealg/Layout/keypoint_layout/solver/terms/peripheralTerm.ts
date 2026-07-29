@@ -5,11 +5,13 @@
 // One-sided: when d < d*, E = ½ w (d* − d)² and push the child outward along
 // the parent→child ray (or a deterministic angle if coincident with parent).
 
-import type { Term, Vec2, ProblemModel } from '../types.ts'
+import type { Term, Vec2, ProblemModel, SolverState } from '../types.ts'
 
 const EPS = 1e-9
 /** Keep a small inset so containment still has room (fraction of parent radius). */
 const MARGIN_FRAC = 0.08
+/** A peripheral child center must sit visibly outside the parent's central zone. */
+export const MIN_PERIPHERAL_CENTER_FRACTION = 0.55
 
 function hashAngle(id: string): number {
   let h = 2166136261
@@ -24,19 +26,36 @@ function hashAngle(id: string): number {
 export function peripheralTerm(weight: number): Term {
   return {
     name: 'peripheral',
-    energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number {
+    energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number {
       if (weight <= 0) return 0
+      const { positions: pos, radii, logRadiusGradients } = state
       let energy = 0
       for (const rel of model.relations) {
         if (rel.kind !== 'peripheral') continue
         const pi = model.index.get(rel.from)
         const ci = model.index.get(rel.to)
         if (pi === undefined || ci === undefined) continue
-        const rP = model.nodes[pi].radius
-        const rC = model.nodes[ci].radius
-        const margin = Math.max(0.5, rP * MARGIN_FRAC)
-        const dTarget = Math.max(0, rP - rC - margin)
-        if (dTarget <= EPS) continue
+        const rP = radii[pi]
+        const rC = radii[ci]
+        const margin = rP * MARGIN_FRAC
+        const rimTarget = Math.max(0, rP - rC - margin)
+        const centerTarget = rP * MIN_PERIPHERAL_CENTER_FRACTION
+        const dTarget = Math.max(rimTarget, centerTarget)
+
+        // A rim target alone rewards shrinking the parent, because the target
+        // shrinks with it. Require enough radial capacity for a visibly
+        // peripheral center before optimizing its location.
+        const capacity = rP * (1 - MIN_PERIPHERAL_CENTER_FRACTION) - rC - margin
+        if (capacity < 0) {
+          const capacitySlack = -capacity
+          energy += 0.5 * weight * capacitySlack * capacitySlack
+          if (model.nodes[pi].isContainer) {
+            logRadiusGradients[pi] -= weight
+              * capacitySlack
+              * (1 - MIN_PERIPHERAL_CENTER_FRACTION - MARGIN_FRAC)
+              * rP
+          }
+        }
 
         let dx = pos[ci].x - pos[pi].x
         let dy = pos[ci].y - pos[pi].y
@@ -64,6 +83,13 @@ export function peripheralTerm(weight: number): Term {
         grad[ci].y += g * uy
         grad[pi].x -= g * ux
         grad[pi].y -= g * uy
+        if (model.nodes[pi].isContainer) {
+          const targetRadiusDerivative = rimTarget >= centerTarget
+            ? 1 - MARGIN_FRAC
+            : MIN_PERIPHERAL_CENTER_FRACTION
+          logRadiusGradients[pi] += weight * slack * targetRadiusDerivative * rP
+        }
+        if (model.nodes[ci].isContainer) logRadiusGradients[ci] -= weight * slack * rC
       }
       return energy
     },

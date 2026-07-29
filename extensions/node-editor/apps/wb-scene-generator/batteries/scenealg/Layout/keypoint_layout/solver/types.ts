@@ -17,6 +17,8 @@ export interface SolverNode {
   area: number
   /** circle radius derived from area: sqrt(area / π), meters */
   radius: number
+  /** Containers may resize during solve; leaf node radii stay fixed. */
+  isContainer: boolean
   parentId: string | null
   childIds: string[]
 }
@@ -42,6 +44,14 @@ export interface ProblemModel {
   warnings: string[]
 }
 
+/** Mutable continuous solver state passed to every energy term. */
+export interface SolverState {
+  positions: Vec2[]
+  radii: number[]
+  /** Gradient with respect to each node's log-radius. Leaves always remain zero. */
+  logRadiusGradients: Float64Array
+}
+
 /**
  * A single energy term. It owns its own weight (folded in by the factory) so the
  * optimizer can simply sum every term's energy and gradient. `energyAndGradient`
@@ -50,12 +60,14 @@ export interface ProblemModel {
  */
 export interface Term {
   name: string
-  energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number
+  energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number
 }
 
 export interface SolveResult {
   /** final positions, one per `model.nodes` entry, meters */
   positions: Vec2[]
+  /** final circle radii, one per `model.nodes` entry, meters */
+  radii: number[]
   /** total weighted energy at the final step */
   energy: number
   /** weighted energy contributed by each term at the final step */

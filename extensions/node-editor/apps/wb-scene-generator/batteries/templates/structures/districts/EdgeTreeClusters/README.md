@@ -30,7 +30,7 @@
 
 | portName | 类型 | 语义 | 典型去向 |
 |---|---|---|---|
-| `out_0` | scene | 主产物（原区域 + 边缘绿簇 + Rest） | → `tree_merge.item_N` |
+| `out_0` | scene | Scene 整树汇总口（原区域 + 边缘绿簇 + Rest） | `{ "label":"Scene", "portName":"out_0" }` → `appendMergeItem` |
 | `out_1` | scene | **Rest** 区域内未被绿簇占用的剩余部分 | → 下一组 `in_0`（链式 Rest） |
 | `out_2` | scene | **Clusters** 绿簇本体图层 | 一般不接 |
 | `out_3` | string | ClustersPath（路径句柄） | 一般不接 |

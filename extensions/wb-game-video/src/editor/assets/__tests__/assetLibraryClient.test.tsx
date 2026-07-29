@@ -12,9 +12,11 @@ import type { UploadTransport } from '../video-upload'
 
 function client(): AssetLibraryClient {
   return {
-    list: vi.fn(async (_game, kind): Promise<ManagedAsset[]> => kind === 'image'
-      ? [{ id: 'image-1', kind: 'image', name: '封面', mime: 'image/png' }]
-      : [{ id: 'bgm-1', kind: 'audio', name: '主题曲', mime: 'audio/mpeg' }]),
+    list: vi.fn(async (_game, kind): Promise<ManagedAsset[]> => {
+      if (kind === 'image') return [{ id: 'image-1', kind, name: '封面', mime: 'image/png' }]
+      if (kind === 'audio') return [{ id: 'bgm-1', kind, name: '主题曲', mime: 'audio/mpeg' }]
+      return [{ id: 'title.woff2', kind, name: '标题字体', mime: 'font/woff2', source: 'local' }]
+    }),
     upload: vi.fn(async (_game, kind, file): Promise<ManagedAsset> => ({ id: `${kind}-new`, kind, name: file.name })),
     rename: vi.fn(async (_game, id, name): Promise<ManagedAsset> => ({ id, kind: id.startsWith('bgm') ? 'audio' : 'image', name })),
     remove: vi.fn(async () => {}),
@@ -34,10 +36,11 @@ describe('useAssetLibrary', () => {
     const api = client()
     const { result } = renderHook(() => useAssetLibrary('demo', api))
 
-    await waitFor(() => expect(result.current.items).toHaveLength(2))
+    await waitFor(() => expect(result.current.items).toHaveLength(3))
     expect(api.list).toHaveBeenCalledWith('demo', 'image', expect.anything())
     expect(api.list).toHaveBeenCalledWith('demo', 'audio', expect.anything())
-    expect(result.current.items.map((item) => item.kind)).toEqual(['image', 'audio'])
+    expect(api.list).toHaveBeenCalledWith('demo', 'font', expect.anything())
+    expect(result.current.items.map((item) => item.kind)).toEqual(['image', 'audio', 'font'])
   })
 
   it('updates local state after uploading, renaming, and deleting', async () => {

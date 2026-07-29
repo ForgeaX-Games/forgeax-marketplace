@@ -197,6 +197,25 @@ describe('summarizeExecutionResult', () => {
       expect(summary.verification.locationNameAlignment).toEqual({ ok: true, missing: [] })
     })
 
+    it('prefers structural failure over location-name failure when both are present', () => {
+      const emptyPickOne = {
+        executionId: 'exec_dual_fail',
+        status: 'completed' as const,
+        durationMs: 10,
+        outputs: {
+          pob: {
+            out_0: [{ path: [0], items: [makeScenePort(emptyGraph(), ROOT_ID)] }],
+            out_1: [{ path: [0], items: [makeScenePort(emptyGraph(), ROOT_ID)] }],
+          },
+        },
+      }
+      const summary = summarizeExecutionResult(emptyPickOne, ['望江客栈', '市集', '清水镇']) as Record<string, any>
+      expect(summary.verification.ok).toBe(false)
+      expect(summary.verification.primaryFailure).toBe('structural')
+      expect(summary.verification.locationNameAlignment.ok).toBe(false)
+      expect(summary.verification.locationNameAlignment.missing).toHaveLength(3)
+    })
+
     it('fuzzy match tolerates a scene node name that embeds the narrative name as a substring', () => {
       let g = emptyGraph()
       g = putContent(g, ROOT_ID, '望江客栈_主楼', [{ x: 0, y: 0, z: 0, token: 'wall' }]).graph
@@ -256,7 +275,7 @@ describe('summarizeExecutionResult', () => {
       expect(summary.verification.ok).toBe(true)
     })
 
-    it('flags an illegal local tree_merge and computes suggestedOps from the root merge portCount', () => {
+    it('repairs an illegal local merge through semantic Scene ports instead of replaying domain ports', () => {
       const nodeById = new Map([
         ['a', { id: 'a', opId: '__group__', name: 'IslandRegions', params: {} }],
         ['b', { id: 'b', opId: '__group__', name: 'LakeRegions', params: {} }],
@@ -265,8 +284,8 @@ describe('summarizeExecutionResult', () => {
         ['flatten', { id: 'flatten', opId: 'tree_flatten', params: {} }],
       ])
       const edges = [
-        { id: 'e1', source: { nodeId: 'a', port: 'out_0' }, target: { nodeId: 'local_merge', port: 'item_0' } },
-        { id: 'e2', source: { nodeId: 'b', port: 'out_0' }, target: { nodeId: 'local_merge', port: 'item_1' } },
+        { id: 'e1', source: { nodeId: 'a', port: 'out_1' }, target: { nodeId: 'local_merge', port: 'item_0' } },
+        { id: 'e2', source: { nodeId: 'b', port: 'out_4' }, target: { nodeId: 'local_merge', port: 'item_1' } },
         { id: 'e3', source: { nodeId: 'local_merge', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_0' } },
         { id: 'e4', source: { nodeId: 'root_merge', port: 'out_0' }, target: { nodeId: 'flatten', port: 'in_0' } },
       ]
@@ -276,10 +295,36 @@ describe('summarizeExecutionResult', () => {
       expect(issue.kind).toBe('illegal-local-merge')
       expect(issue.suggestedOps).toEqual([
         { type: 'deleteNode', nodeId: 'local_merge' },
-        { type: 'updateNode', nodeId: 'root_merge', params: { portCount: 3 } },
-        { type: 'connect', edgeId: 'e_fix_local_merge_0', source: { nodeId: 'a', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_1' } },
-        { type: 'connect', edgeId: 'e_fix_local_merge_1', source: { nodeId: 'b', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_2' } },
+        { type: 'appendMergeItem', mergeNodeId: 'root_merge', source: { nodeId: 'a', port: { label: 'Scene' } } },
+        { type: 'appendMergeItem', mergeNodeId: 'root_merge', source: { nodeId: 'b', port: { label: 'Scene' } } },
       ])
+    })
+
+    it('flags a domain output connected directly to the root merge', () => {
+      const nodeById = new Map([
+        ['island', {
+          id: 'island',
+          opId: '__group__',
+          name: 'IslandRegions',
+          params: {},
+          exposedOutputs: [
+            { portName: 'out_0', customLabelEn: 'Scene' },
+            { portName: 'out_1', customLabelEn: 'Island' },
+            { portName: 'out_2', customLabelEn: 'Rest' },
+          ],
+        }],
+        ['root_merge', { id: 'root_merge', opId: 'tree_merge', params: { portCount: 1 } }],
+        ['flatten', { id: 'flatten', opId: 'tree_flatten', params: {} }],
+      ])
+      const edges = [
+        { id: 'e1', source: { nodeId: 'island', port: 'out_1' }, target: { nodeId: 'root_merge', port: 'item_0' } },
+        { id: 'e2', source: { nodeId: 'root_merge', port: 'tree' }, target: { nodeId: 'flatten', port: 'tree' } },
+      ]
+      const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
+      const issue = summary.verification.topologyIssues.find((item: any) => item.kind === 'domain-merge-violation')
+      expect(issue).toBeDefined()
+      expect(issue.reason).toContain('Island')
+      expect(issue.fix).toContain('out_0')
     })
 
     it('flags a wired manual_points node whose x/y are both left at the silent zero default', () => {
@@ -319,6 +364,58 @@ describe('summarizeExecutionResult', () => {
       const edges = [{ id: 'e1', source: { nodeId: 'pts', port: 'point' }, target: { nodeId: 'a', port: 'in_1' } }]
       const summary = summarizeExecutionResult(fullResult, undefined, { edges, nodeById }) as Record<string, any>
       expect(summary.verification.topologyIssues).toEqual([])
+    })
+  })
+
+  describe('orphan / off-merge empty groups must not fail concurrent tasks', () => {
+    it('ignores completely unwired explore orphans (no edges) for verification.ok', () => {
+      const result = {
+        ...fullResult,
+        outputs: {
+          ...fullResult.outputs,
+          _explore_only: {}, // no ports — classic abandoned instantiate
+        },
+      }
+      const nodeById = new Map([
+        ['_explore_only', { id: '_explore_only', opId: '__group__', name: 'PlaceOneDecoration', params: {} }],
+        ['g_arch', { id: 'g_arch', opId: '__group__', name: 'IslandRegions', params: {} }],
+        ['root_merge', { id: 'root_merge', opId: 'tree_merge', params: { portCount: 1 } }],
+      ])
+      const edges = [
+        { id: 'e1', source: { nodeId: 'g_arch', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_0' } },
+      ]
+      const summary = summarizeExecutionResult(result, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.ok).toBe(true)
+      expect(summary.verification.primaryFailure).toBeUndefined()
+      expect(JSON.stringify(summary.verification.hints ?? [])).not.toContain('_explore_only')
+    })
+
+    it('treats empty decoration WIP not yet on merge as advisory only', () => {
+      // Real incomplete groups often land as {} (no ports) in the execute summary —
+      // same shape as "_explore_only has no output ports", but WITH Rest edges.
+      const result = {
+        ...fullResult,
+        outputs: {
+          ...fullResult.outputs,
+          p1d_gate: {},
+        },
+      }
+      const nodeById = new Map([
+        ['p1d_gate', { id: 'p1d_gate', opId: '__group__', name: 'PlaceOneDecoration', params: {} }],
+        ['island', { id: 'island', opId: '__group__', name: 'IslandRegions', params: {} }],
+        ['g_arch', { id: 'g_arch', opId: '__group__', name: 'IslandRegions', params: {} }],
+        ['root_merge', { id: 'root_merge', opId: 'tree_merge', params: { portCount: 1 } }],
+      ])
+      // Decoration Rest-chained but NOT appendMergeItem'd yet — other phase / WIP.
+      const edges = [
+        { id: 'e_rest', source: { nodeId: 'island', port: 'out_2' }, target: { nodeId: 'p1d_gate', port: 'in_1' } },
+        { id: 'e_merge', source: { nodeId: 'g_arch', port: 'out_0' }, target: { nodeId: 'root_merge', port: 'item_0' } },
+      ]
+      const summary = summarizeExecutionResult(result, undefined, { edges, nodeById }) as Record<string, any>
+      expect(summary.verification.ok).toBe(true)
+      expect(summary.verification.primaryFailure).toBeUndefined()
+      expect(JSON.stringify(summary.verification.hints ?? [])).toContain('advisory')
+      expect(JSON.stringify(summary.verification.hints ?? [])).toContain('禁止 deleteNode')
     })
   })
 })

@@ -72,11 +72,19 @@ export function buildModel(raw: unknown): ProblemModel {
       const name = typeof node.name === 'string' && node.name.trim() ? node.name : id
       const area = coerceArea(node.area)
       index.set(id, nodes.length)
-      nodes.push({ id, name, area, radius: radiusFromArea(area), parentId, childIds: [] })
+      const children = node.children
+      nodes.push({
+        id,
+        name,
+        area,
+        radius: radiusFromArea(area),
+        isContainer: Array.isArray(children) && children.some(isObject),
+        parentId,
+        childIds: [],
+      })
       childLists.set(id, [])
       if (parentId !== null) childLists.get(parentId)?.push(id)
 
-      const children = node.children
       if (Array.isArray(children)) {
         for (const child of children) {
           if (isObject(child)) stack.push({ node: child, parentId: id })

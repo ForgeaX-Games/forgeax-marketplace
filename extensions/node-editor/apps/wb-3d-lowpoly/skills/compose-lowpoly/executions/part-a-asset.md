@@ -20,6 +20,12 @@
 **强制两阶段工作流**。建筑走 [PART B](part-b-building.md)；把已 bake 的件摆成场景走
 [PART C](part-c-scene-assembly.md)。
 
+## 需求特征 → op（先选再写）
+
+- 规则轮廓、孔腔、倒角 → Profile/CSG；齿、铰链、把手、风扇、面板 → Parts/Gears。
+- 装配 datum 可由 bbox 表达时，优先 `align_centers`、`place_on_face`、`place_on_surface`，再写 joint；不要反复手算 origin。
+- manifest 每件只保留 `name/shape/dims/features/datum/ops`。同一缺陷最多 3 次 patch；sourceHash/fingerprint 不变即停止。
+
 ---
 
 ## Workflow spine — model each part → bake → assemble

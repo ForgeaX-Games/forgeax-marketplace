@@ -98,7 +98,13 @@ export function summarizePipeline(
   if (opts?.nameContains?.trim()) {
     const needle = opts.nameContains.trim().toLowerCase()
     for (const n of allNodes) {
-      if (typeof n.name === 'string' && n.name.toLowerCase().includes(needle)) searchMatchIds.add(n.id)
+      // Match name OR id — instantiateTemplate groups often share a battery
+      // name (e.g. PlaceOneDecoration) while the agent remembers the groupId
+      // prefix it chose (p1d_gate). Searching only `name` returned matchCount:0
+      // and agents concluded the nodes were gone.
+      const nameHit = typeof n.name === 'string' && n.name.toLowerCase().includes(needle)
+      const idHit = typeof n.id === 'string' && n.id.toLowerCase().includes(needle)
+      if (nameHit || idHit) searchMatchIds.add(n.id)
     }
   }
   if (opts?.opIdIn?.length) {

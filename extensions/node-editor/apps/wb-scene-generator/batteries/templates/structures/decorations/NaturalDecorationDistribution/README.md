@@ -4,7 +4,7 @@
 
 在剩余空地上按密度散布自然装饰。接上一组的 Rest/Non-Path 场景。
 
-**选型**：本模板做大片 Rest **背景填充**，**仅**挂底面简单、结构简单的植被/石块等。有明确位置和/或底面尺寸的物件 → **改用 `PlaceOneDecoration`**（唯一可控 footprint）。`LocalPreciseDecoration` 负责兴趣点旁简单小物件簇。按需求选用，不必硬凑三种；本模板**无**单颗 footprint 口。
+**选型**：本模板做大片 Rest **背景填充**，**仅**挂底面简单、结构简单的植被/石块等。例如山石散布用「小假山」1×1；「假山」4×1 等大体积资产 → **改用 `PlaceOneDecoration`**（唯一可控 footprint）。`LocalPreciseDecoration` 负责兴趣点旁简单小物件簇。按需求选用，不必硬凑三种；本模板**无**单颗 footprint 口。
 
 ## 主要可见端口
 
@@ -34,7 +34,7 @@
 | `in_1` | Scene Rest | **`PlaceOneDecoration.out_2` → `scene_focus_path`（path=`/父区域/划分子区域1/rest/rest`）→ `in_1`** |
 | `in_0` | NamePrefix | `text_panel`，如 `自然` → 子节点名 `自然0`、`自然1`… |
 | **`in_5`** | **AssetName** | `text_panel`，如 `树` — **不是 `in_2`** |
-| **`in_2`** | **Density** | **分层**：`0.008` 中间参考；**硬上限 ≤0.01**；树 ~0.004–0.006 · 灌木/石 ~0.006–0.008 · 草 ~0.008–0.01。验证链曾用 0.012（历史，生产勿超 0.01） |
+| **`in_2`** | **Density** | 优先按 `目标量级 × 丰富度系数 ÷ Rest有效格数`；系数：稀疏 1.0、正常 1.5、丰富 2.0–2.5；计算结果直接使用，**仅限制在概率范围 0–1，禁止截断到 0.01**。面积未知时兜底：树 0.01–0.04 · 灌木/石 0.02–0.06 · 草 0.04–0.12。验证链曾用 0.012 |
 | `in_3` | Seed | **`aw_m0_seed.seed`（必接，固定非 0）** |
 
 每组**一种** asset + **各自 density**；草/灌木/树等**推荐**多层多品种（多实例 + Rest 串联），勿只象征性放一种或全层同一密度。
@@ -106,7 +106,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 | `in_1` | 上游 `out_*` | 必接 | `demo_abg.out_1` | 剩余空地场景 |
 | `in_0` | `text_panel` | 建议 | `"自然"` | NamePrefix |
 | `in_5` | `text_panel` | 建议 | `"树"` | AssetName（**不是 `in_2`**） |
-| `in_2` | `number_const` | 建议 | `0.008`（中间参考；按资产类型分层，≤0.01） | Density |
+| `in_2` | `number_const` | 建议 | `0.03`（面积未知时的树木参考；已知面积时按公式计算） | Density |
 | `in_3` | `seed_control` / `aw_m0_seed` | **必接** | `42`（非 0） | 生产接全局 `aw_m0_seed` |
 
 ### applyBatch 片段（可直接照抄）
@@ -120,7 +120,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ```jsonc
 { "type":"createNode","nodeId":"nd_prefix", "opId":"text_panel","params":{"text":"自然"} },
 { "type":"createNode","nodeId":"nd_asset",  "opId":"text_panel","params":{"text":"树"} },
-{ "type":"createNode","nodeId":"nd_density","opId":"number_const","params":{"value":0.008} },
+{ "type":"createNode","nodeId":"nd_density","opId":"number_const","params":{"value":0.03} },
 { "type":"createNode","nodeId":"nd_seed",   "opId":"seed_control","params":{"seed":42} },
 { "type":"connect","edgeId":"e_nd_rest",   "source":{"nodeId":"demo_abg","port":"out_1"},"target":{"nodeId":"demo_nd","port":"in_1"} },
 { "type":"connect","edgeId":"e_nd_prefix", "source":{"nodeId":"nd_prefix","port":"output"},"target":{"nodeId":"demo_nd","port":"in_0"} },

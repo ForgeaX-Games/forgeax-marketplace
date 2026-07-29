@@ -43,13 +43,32 @@ describe('compileDslToGraph: structure', () => {
     expect(r.graph).not.toBeNull()
     // 9 语句节点
     expect(r.statementNodeIds).toHaveLength(9)
-    // + QC + URDF
-    expect(r.graph!.nodes).toHaveLength(11)
+    // + QC + metrics + URDF
+    expect(r.graph!.nodes).toHaveLength(12)
     expect(r.qcNodeId).toBeTruthy()
+    expect(r.metricsNodeId).toBeTruthy()
     expect(r.urdfNodeId).toBeTruthy()
     const byId = new Map(r.graph!.nodes.map((n) => [n.id, n]))
     expect(byId.get(r.qcNodeId)!.batteryId).toBe('g_geometry_qc')
+    expect(byId.get(r.metricsNodeId)!.batteryId).toBe('g_metrics')
     expect(byId.get(r.urdfNodeId)!.batteryId).toBe('g_to_urdf')
+  })
+
+  it('compiles bbox-driven Placement ops through the DSL path', () => {
+    const src = [
+      'base = box(size=[2,2,1])',
+      'p_base = part(shape=base)',
+      'lamp = cylinder(radius=0.1, length=0.5)',
+      'p_lamp = part(shape=lamp)',
+      'placed = place_on_face(parent=p_base, child=p_lamp, face="+z", face_u=0.2, proud=0.01)',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const node = r.graph!.nodes.find((candidate) => candidate.id === 'placed')
+    expect(node).toMatchObject({
+      batteryId: 'g_place_on_face',
+      params: { parent_id: 'p_base', child_id: 'p_lamp', face: '+z', face_u: 0.2, proud: 0.01 },
+    })
   })
 
   it('routes a character DSL (explicit bone/skeleton/skin) to the character terminal chain', () => {
@@ -167,8 +186,8 @@ describe('compileDslToGraph: structure', () => {
   it('chains geometry edges linearly through statements into QC → URDF', () => {
     const r = compileDslToGraph(CABINET)
     const geomEdges = r.graph!.edges.filter((e) => e.source.port === 'geometry' && e.target.port === 'geometry')
-    // 8 语句间 + 末语句→QC + QC→URDF = 10
-    expect(geomEdges).toHaveLength(10)
+    // 8 语句间 + 末语句→QC + QC→URDF + 末语句→并行 metrics = 11
+    expect(geomEdges).toHaveLength(11)
     // 首节点无 incoming geometry
     const firstId = r.statementNodeIds[0]
     expect(geomEdges.some((e) => e.target.nodeId === firstId)).toBe(false)
@@ -310,6 +329,63 @@ describe('compileDslToGraph: op → battery mapping', () => {
     expect(byId.get('f')!.params!.type).toBe('round')
     expect(byId.get('c')!.batteryId).toBe('g_fillet')
     expect(byId.get('c')!.params!.type).toBe('chamfer')
+  })
+
+  it('adapts Architecture vector args to battery scalar ports without defaulting', () => {
+    const src = [
+      'wall1 = wall(length=9, height=3, thickness=0.28, openings=[[1,1.8,0.9,2]])',
+      'slab = floor_slab(size=[9,7], thickness=0.35, holes=[[1,2,1.2,2.4]])',
+      'roof1 = roof(footprint=[9.5,7.5], type="hip", height=2.2)',
+      'panel = facade_panel(panel_size=[3.2,2.6], thickness=0.04)',
+      'win = window(size=[1.8,1.1], depth=0.28, frame=0.07)',
+      'frame1 = door_frame(size=[1.4,2.3], depth=0.28, frame=0.09)',
+      'leaf1 = door_leaf(size=[1.1,2.15], thickness=0.05, hinge="left")',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const byId = new Map(r.graph!.nodes.map((n) => [n.id, n]))
+    expect(byId.get('wall1')).toMatchObject({
+      batteryId: 'g_wall',
+      params: { length: 9, height: 3, thickness: 0.28, openings: '[[1,1.8,0.9,2]]' },
+    })
+    expect(byId.get('slab')).toMatchObject({
+      batteryId: 'g_floor_slab',
+      params: { width: 9, depth: 7, thickness: 0.35, holes: '[[1,2,1.2,2.4]]' },
+    })
+    expect(byId.get('roof1')).toMatchObject({
+      batteryId: 'g_roof',
+      params: { width: 9.5, depth: 7.5, type: 'hip', height: 2.2 },
+    })
+    expect(byId.get('panel')).toMatchObject({
+      batteryId: 'g_facade_panel',
+      params: { panel_w: 3.2, panel_h: 2.6, thickness: 0.04 },
+    })
+    expect(byId.get('win')).toMatchObject({
+      batteryId: 'g_window',
+      params: { width: 1.8, height: 1.1, depth: 0.28, frame: 0.07 },
+    })
+    expect(byId.get('frame1')).toMatchObject({
+      batteryId: 'g_door_frame',
+      params: { width: 1.4, height: 2.3, depth: 0.28, frame: 0.09 },
+    })
+    expect(byId.get('leaf1')).toMatchObject({
+      batteryId: 'g_door_leaf',
+      params: { width: 1.1, height: 2.15, thickness: 0.05, hinge: 'left' },
+    })
+  })
+
+  it('round-trips Architecture vector args through their scalar-port adapters', () => {
+    const src = [
+      'wall1 = wall(length=9, height=3, thickness=0.28, openings=[[1,1.8,0.9,2]])',
+      'slab = floor_slab(size=[9,7], thickness=0.35, holes=[[1,2,1.2,2.4]])',
+      'win = window(size=[1.8,1.1], depth=0.28)',
+      'frame1 = door_frame(size=[1.4,2.3], depth=0.28)',
+      'leaf1 = door_leaf(size=[1.1,2.15], thickness=0.05, hinge="right")',
+    ].join('\n')
+    const r = compileDslToGraph(src)
+    expect(r.ok).toBe(true)
+    const reparsed = parseDSL(graphToDsl(r.graph!.nodes, r.graph!.edges))
+    expect(canon(reparsed.statements)).toEqual(canon(parseDSL(src).statements))
   })
 
   it('maps gear variants to their shared batteries', () => {

@@ -107,6 +107,8 @@ describe('missing video notices across play surfaces', () => {
     const video = container.querySelector('video')
     expect(video).toBeTruthy()
     fireEvent.error(video!)
+    expect(screen.queryByRole('status')).toBeNull()
+    fireEvent.error(video!)
     expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
   })
 
@@ -123,6 +125,8 @@ describe('missing video notices across play surfaces', () => {
       expect(video).toBeTruthy()
     })
     expect(video).toBeTruthy()
+    fireEvent.error(video!)
+    expect(screen.queryByRole('status')).toBeNull()
     fireEvent.error(video!)
     expect(await screen.findByRole('status')).toHaveTextContent('missing-stable-id')
   })

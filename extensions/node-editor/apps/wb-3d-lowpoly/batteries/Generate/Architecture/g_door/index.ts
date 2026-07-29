@@ -69,7 +69,9 @@ export function gDoor(input: Record<string, unknown>): Record<string, unknown> {
   if (!isValidId(frameId)) return { geometry: incoming, id: '', error: `invalid id "${frameId}"` };
 
   const gap = 0.01;
-  const clearW = hasSidelight ? w - 4 * frame - 2 * sidelight : w - 2 * frame;
+  // With sidelights the central leaf opening is bounded by the two divider
+  // bars: outer jambs (2×frame) plus two half-divider contributions (1×frame).
+  const clearW = hasSidelight ? w - 3 * frame - 2 * sidelight : w - 2 * frame;
   if (clearW <= 0.1) {
     return { geometry: incoming, id: '', error: 'door: opening too narrow after sidelights' };
   }

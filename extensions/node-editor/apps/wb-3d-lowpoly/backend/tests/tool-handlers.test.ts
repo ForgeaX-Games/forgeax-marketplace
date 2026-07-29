@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -22,6 +22,21 @@ afterEach(() => {
 })
 
 describe('ToolRegistry lowpoly handlers', () => {
+  it('keeps legacy pipeline/battery tools out of the AI manifest', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../../forgeax-plugin.json', import.meta.url), 'utf8'))
+    const entries = manifest.provides.tools as Array<{ id: string; exposedToAI: boolean }>
+    const legacy = entries.filter((entry) => /lowpoly:(?:batteries|pipeline)\./u.test(entry.id))
+    expect(legacy.length).toBeGreaterThan(0)
+    expect(legacy.every((entry) => entry.exposedToAI === false)).toBe(true)
+    expect(entries.find((entry) => entry.id === 'lowpoly:model.bakeBatch')?.exposedToAI).toBe(true)
+    expect(entries.find((entry) => entry.id === 'lowpoly:model.patch')?.exposedToAI).toBe(true)
+  })
+
+  it('registers the batch and source-hash patch handlers', () => {
+    expect(tools['lowpoly:model.bakeBatch']).toBeTypeOf('function')
+    expect(tools['lowpoly:model.patch']).toBeTypeOf('function')
+  })
+
   it('uses the Studio plugin dev backendPort override when proxying tool calls', async () => {
     const app = await buildApp()
     await app.listen({ host: '127.0.0.1', port: 0 })

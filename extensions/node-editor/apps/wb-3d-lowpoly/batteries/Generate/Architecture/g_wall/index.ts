@@ -23,7 +23,12 @@ import {
  * 解析 openings 输入（JSON 字符串或已是数组）为 number[4][]。
  * 复用共享的 parseQuadList（与 g_floor_slab 的 holes 同一实现），仅传入本电池的错误文案。
  */
-export function parseOpenings(value: unknown): number[][] | { error: string } {
+function parseOpenings(value: unknown): number[][] | { error: string } {
+  // List-valued ports can arrive from the runtime wrapped in their node
+  // parameter envelope. Accept both that form and the direct JSON/array forms.
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && 'openings' in value) {
+    value = (value as { openings?: unknown }).openings;
+  }
   return parseQuadList(value, {
     json: 'openings must be valid JSON, e.g. [[1,0.9,0,2.1]]',
     notArray: 'openings must be an array of [x, width, sill, head]',
@@ -56,11 +61,12 @@ export function gWall(input: Record<string, unknown>): Record<string, unknown> {
   if (input.window_band === true || String(input.window_band ?? '').toLowerCase() === 'true') {
     args.window_band = bool(true);
     const bandSill = Number(input.band_sill ?? NaN);
-    if (Number.isFinite(bandSill) && bandSill >= 0) args.band_sill = num(bandSill);
+    // UI/meta use 0 as "auto"; omit it so the baker can apply height-relative defaults.
+    if (Number.isFinite(bandSill) && bandSill > 0) args.band_sill = num(bandSill);
     const bandHead = Number(input.band_head ?? NaN);
     if (Number.isFinite(bandHead) && bandHead > 0) args.band_head = num(bandHead);
     const bandMargin = Number(input.band_margin ?? NaN);
-    if (Number.isFinite(bandMargin) && bandMargin >= 0) args.band_margin = num(bandMargin);
+    if (Number.isFinite(bandMargin) && bandMargin > 0) args.band_margin = num(bandMargin);
     const paneWidth = Number(input.pane_width ?? 0);
     if (Number.isFinite(paneWidth) && paneWidth > 0) {
       args.pane_width = num(paneWidth);

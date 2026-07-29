@@ -65,6 +65,15 @@ describe('pipeline-summary', () => {
       expect(s.edges).toEqual([])
     })
 
+    /** Production: agent searched nameContains=p1d_ for PlaceOne groups whose
+     *  battery name is PlaceOneDecoration but id is p1d_gate — matchCount 0
+     *  made it think the groups vanished and burn turns on raw full-graph. */
+    it('nameContains also matches node id substrings (instantiate groupIds)', () => {
+      const s = summarizePipeline(snap, { nameContains: 'n1' })!
+      expect(s.search?.matchCount).toBeGreaterThanOrEqual(1)
+      expect(s.nodes.some((n) => n.id === 'n1')).toBe(true)
+    })
+
     it('unions with groupId/nodeIds when combined', () => {
       const s = summarizePipeline(snap, { groupId: 'o1', nameContains: '望江' })!
       // o1's neighborhood (g1) ∪ n1's neighborhood (g1) — g1 links both, so this

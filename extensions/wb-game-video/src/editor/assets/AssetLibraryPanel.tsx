@@ -3,6 +3,15 @@ import type { AssetLibraryController, ManagedAsset, ManagedAssetKind } from './a
 
 const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif'
 const AUDIO_ACCEPT = '.mp3,.wav,.ogg,.m4a,.aac'
+const FONT_ACCEPT = '.woff2,.woff,.ttf,.otf'
+
+function kindLabel(kind: ManagedAssetKind): string {
+  return kind === 'image' ? '图片' : kind === 'audio' ? '音频' : '字体'
+}
+
+function workspaceLabel(kind: ManagedAssetKind): string {
+  return kind === 'audio' ? 'BGM 资产' : `${kindLabel(kind)}资产`
+}
 
 function formatBytes(value: number | undefined): string {
   if (value == null) return '大小未知'
@@ -21,8 +30,8 @@ function AssetUploadTile({
   disabled: boolean
   onUpload: (kind: ManagedAssetKind, file: File) => void
 }): JSX.Element {
-  const accept = kind === 'image' ? IMAGE_ACCEPT : AUDIO_ACCEPT
-  const label = kind === 'image' ? '上传图片' : '上传 BGM'
+  const accept = kind === 'image' ? IMAGE_ACCEPT : kind === 'audio' ? AUDIO_ACCEPT : FONT_ACCEPT
+  const label = kind === 'image' ? '上传图片' : kind === 'audio' ? '上传 BGM' : '上传字体'
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -38,7 +47,8 @@ function AssetUploadTile({
 }
 
 function preview(asset: ManagedAsset | undefined): JSX.Element {
-  if (!asset) return <div className="alp-empty">选择一个图片或 BGM 查看详情。</div>
+  if (!asset) return <div className="alp-empty">选择一个图片、BGM 或字体查看详情。</div>
+  const fontFamily = `asset-font-${asset.id.replace(/[^A-Za-z0-9_-]/g, '-')}`
   return (
     <div className="alp-stage">
       {asset.kind === 'image' && asset.url ? (
@@ -46,11 +56,17 @@ function preview(asset: ManagedAsset | undefined): JSX.Element {
       ) : asset.kind === 'audio' && asset.url ? (
         <audio className="alp-audio" controls src={asset.url}>浏览器不支持音频预览。</audio>
       ) : (
-        <div className="alp-preview-icon" aria-hidden>{asset.kind === 'image' ? '图片' : 'BGM'}</div>
+        <div className={`alp-preview-icon${asset.kind === 'font' ? ' alp-font-preview' : ''}`} aria-hidden>
+          {asset.kind === 'font'
+            ? asset.url
+              ? <><style>{`@font-face{font-family:${fontFamily};src:url("${asset.url}")}`}</style><span style={{ fontFamily }}>Aa</span></>
+              : 'Aa'
+            : asset.kind === 'image' ? '图片' : 'BGM'}
+        </div>
       )}
       <h2>{asset.name}</h2>
       <div className="alp-meta">
-        <div><span>类型</span><strong>{asset.mime ?? (asset.kind === 'image' ? '图片' : '音频')}</strong></div>
+        <div><span>类型</span><strong>{asset.mime ?? kindLabel(asset.kind)}</strong></div>
         <div><span>大小</span><strong>{formatBytes(asset.bytes)}</strong></div>
         <div><span>来源</span><strong>{asset.source ?? '上传资产'}</strong></div>
       </div>
@@ -79,7 +95,11 @@ export function AssetLibraryPanel({
     () => controller.items.filter((item) => item.kind === 'audio'),
     [controller.items],
   )
-  const activeItems = activeKind === 'image' ? imageItems : audioItems
+  const fontItems = useMemo(
+    () => controller.items.filter((item) => item.kind === 'font'),
+    [controller.items],
+  )
+  const activeItems = activeKind === 'image' ? imageItems : activeKind === 'audio' ? audioItems : fontItems
   const selected = activeItems.find((asset) => asset.id === selectedId)
   const previewAsset = activeItems.find((asset) => asset.id === previewId)
   const actionsDisabled = !controller.available || controller.mutating || controller.uploading != null
@@ -133,27 +153,35 @@ export function AssetLibraryPanel({
           >
             音频 <span>{audioItems.length}</span>
           </button>
+          <button
+            type="button"
+            className={activeKind === 'font' ? 'is-active' : ''}
+            aria-current={activeKind === 'font' ? 'page' : undefined}
+            onClick={() => setActiveKind('font')}
+          >
+            字体 <span>{fontItems.length}</span>
+          </button>
         </nav>
-        <section className="alp-workspace" aria-label={activeKind === 'image' ? '图片资产' : 'BGM 资产'}>
+        <section className="alp-workspace" aria-label={workspaceLabel(activeKind)}>
           <header className="alp-workspace-head">
             <div>
-              <h2>{activeKind === 'image' ? '图片资产' : 'BGM 资产'}</h2>
+              <h2>{workspaceLabel(activeKind)}</h2>
               <span>{activeItems.length} 项</span>
             </div>
           </header>
-          {!controller.available ? <div className="alp-unavailable" role="status">图片与 BGM 资源 API 尚未启用。</div> : null}
+          {!controller.available ? <div className="alp-unavailable" role="status">图片、BGM 与字体资源 API 尚未启用。</div> : null}
           {controller.error ? <div className="alp-error" role="alert">{controller.error}</div> : null}
-          <div className="alp-list alp-list--grid" aria-label={`${activeKind === 'image' ? '图片' : 'BGM'}资源列表`}>
+          <div className="alp-list alp-list--grid" aria-label={`${workspaceLabel(activeKind)}列表`}>
             <AssetUploadTile kind={activeKind} busy={controller.uploading === activeKind} disabled={actionsDisabled} onUpload={(kind, file) => void controller.upload(kind, file)} />
             {activeItems.map((asset) => (
                 <article className={`alp-row${asset.id === selectedId ? ' is-selected' : ''}`} key={asset.id}>
                   <button type="button" className="alp-row-select" onClick={() => { select(asset.id); setPreviewId(asset.id) }} aria-label={`查看 ${asset.name}`}>
                     <span className="alp-thumbnail" aria-hidden>
-                      {asset.kind === 'image' && asset.url ? <img src={asset.url} alt="" /> : <span>{asset.kind === 'image' ? '图片' : 'BGM'}</span>}
+                      {asset.kind === 'image' && asset.url ? <img src={asset.url} alt="" /> : <span>{asset.kind === 'font' ? 'Aa' : asset.kind === 'image' ? '图片' : 'BGM'}</span>}
                     </span>
                     <span className="alp-row-copy">
                       <span>{asset.name}</span>
-                      <small>{asset.mime ?? (asset.kind === 'image' ? '图片' : '音频')}</small>
+                      <small>{asset.mime ?? kindLabel(asset.kind)}</small>
                     </span>
                   </button>
                   <span className="alp-row-actions">

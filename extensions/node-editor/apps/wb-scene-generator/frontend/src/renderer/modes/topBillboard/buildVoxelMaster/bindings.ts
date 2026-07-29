@@ -62,22 +62,22 @@ export function buildLayerAssetBindings(
       if (img) {
         const rgba = readImageRgba(img)
         if (rule.faces.top?.randomRules?.length) {
-          const topPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.top, m.tileType, 'top', rgba)
+          const topPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.top, m.primary, m.tileType, 'top', rgba)
           validVariantIdxs.top = topPool.idxs
           validVariantWeights.top = topPool.weights
-          validVariantPoolsByTileId.top = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.top, m.tileType, 'top', rgba)
+          validVariantPoolsByTileId.top = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.top, m.primary, m.tileType, 'top', rgba)
         }
         if (rule.faces.front?.randomRules?.length) {
-          const frontPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front', rgba)
+          const frontPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.front, m.primary, m.tileType, 'front', rgba)
           validVariantIdxs.front = frontPool.idxs
           validVariantWeights.front = frontPool.weights
-          validVariantPoolsByTileId.front = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.front, m.tileType, 'front', rgba)
+          validVariantPoolsByTileId.front = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.front, m.primary, m.tileType, 'front', rgba)
         }
         if (rule.faces.entry?.randomRules?.length) {
-          const entryPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.entry, m.tileType, 'entry', rgba)
+          const entryPool = computeValidVariantPoolCached(img, imgUrl, rule.sprites, rule.faces.entry, m.primary, m.tileType, 'entry', rgba)
           validVariantIdxs.entry = entryPool.idxs
           validVariantWeights.entry = entryPool.weights
-          validVariantPoolsByTileId.entry = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.entry, m.tileType, 'entry', rgba)
+          validVariantPoolsByTileId.entry = computeValidVariantPoolsByTileIdCached(img, imgUrl, rule.sprites, rule.faces.entry, m.primary, m.tileType, 'entry', rgba)
         }
       }
     }
@@ -119,11 +119,12 @@ function computeValidVariantPoolCached(
   imgUrl: string,
   sprites: ReadonlyArray<RuleSprite>,
   face: FaceRule,
+  sheetIdentity: string,
   ruleAlias: string,
   faceTag: 'top' | 'front' | 'entry',
   rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
 ): VariantPool {
-  const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|pool`
+  const cacheKey = `${sheetIdentity}|${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|pool`
   const cached = visibleVariantPoolCache.get(cacheKey)
   if (cached) return cached
   const sheet = rgba ?? readImageRgba(img)
@@ -137,11 +138,12 @@ function computeValidVariantPoolsByTileIdCached(
   imgUrl: string,
   sprites: ReadonlyArray<RuleSprite>,
   face: FaceRule,
+  sheetIdentity: string,
   ruleAlias: string,
   faceTag: 'top' | 'front' | 'entry',
   rgba?: { width: number; height: number; data: Uint8ClampedArray } | null,
 ): Map<number, VariantPool> {
-  const cacheKey = `${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|byTileId`
+  const cacheKey = `${sheetIdentity}|${imgUrl}@${getLoadTick(imgUrl)}|${ruleAlias}@${getRuleLoadTick(ruleAlias)}|${faceTag}|byTileId`
   const cached = visibleVariantPoolsByTileIdCache.get(cacheKey)
   if (cached) return cached
   const sheet = rgba ?? readImageRgba(img)

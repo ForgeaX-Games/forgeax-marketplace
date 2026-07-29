@@ -4,7 +4,7 @@
 // to at most tangency. Nested regions are intentionally excluded — a parent is
 // meant to contain its children (see containmentTerm). O(n²); n is small.
 
-import type { Term, Vec2, ProblemModel } from '../types.ts'
+import type { Term, Vec2, ProblemModel, SolverState } from '../types.ts'
 import { ancestorSets, isNested } from '../model.ts'
 
 const EPS = 1e-9
@@ -12,8 +12,9 @@ const EPS = 1e-9
 export function nonOverlapTerm(weight: number): Term {
   return {
     name: 'nonOverlap',
-    energyAndGradient(pos: Vec2[], model: ProblemModel, grad: Vec2[]): number {
+    energyAndGradient(state: SolverState, model: ProblemModel, grad: Vec2[]): number {
       if (weight <= 0) return 0
+      const { positions: pos, radii, logRadiusGradients } = state
       const n = model.nodes.length
       const anc = ancestorSets(model)
       let energy = 0
@@ -23,7 +24,7 @@ export function nonOverlapTerm(weight: number): Term {
           const dx = pos[b].x - pos[a].x
           const dy = pos[b].y - pos[a].y
           const d = Math.hypot(dx, dy) || EPS
-          const overlap = model.nodes[a].radius + model.nodes[b].radius - d
+          const overlap = radii[a] + radii[b] - d
           if (overlap <= 0) continue
           energy += 0.5 * weight * overlap * overlap
           // E(d) = ½w(r_a+r_b-d)² ; E'(d) = -w·overlap
@@ -33,6 +34,8 @@ export function nonOverlapTerm(weight: number): Term {
           grad[a].y += g * dy
           grad[b].x -= g * dx
           grad[b].y -= g * dy
+          if (model.nodes[a].isContainer) logRadiusGradients[a] += weight * overlap * radii[a]
+          if (model.nodes[b].isContainer) logRadiusGradients[b] += weight * overlap * radii[b]
         }
       }
       return energy

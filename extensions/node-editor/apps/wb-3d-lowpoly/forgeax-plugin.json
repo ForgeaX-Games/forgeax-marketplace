@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "kind": "workbench",
   "displayName": {
-    "zh": "3D低多边形",
+    "zh": "3D 低多边形生成器",
     "en": "3D Lowpoly Generator"
   },
   "description": {
@@ -115,7 +115,7 @@
         "id": "lowpoly:batteries.list",
         "args": { "type": "object", "additionalProperties": false },
         "returns": { "type": "array" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "列出已注册 lowpoly 电池/ops", "en": "List registered lowpoly batteries/ops" }
       },
       {
@@ -127,7 +127,7 @@
           "additionalProperties": false
         },
         "returns": { "type": "object" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "读取单个 lowpoly 电池/op 定义", "en": "Get one lowpoly battery/op definition" }
       },
       {
@@ -140,7 +140,7 @@
           "additionalProperties": false
         },
         "returns": { "type": ["object", "null"] },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "读取 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Read a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project" }
       },
       {
@@ -156,7 +156,7 @@
           "additionalProperties": false
         },
         "returns": { "type": "object" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "批量修改 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Apply a batch of lowpoly pipeline graph edits. projectId is optional; defaults to the currently open/viewed project" }
       },
       {
@@ -171,7 +171,7 @@
           "additionalProperties": false
         },
         "returns": { "type": "object" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "执行 lowpoly pipeline 或指定节点。projectId 可选，省略时默认当前打开/查看的项目", "en": "Execute a lowpoly pipeline or a single node. projectId is optional; defaults to the currently open/viewed project" }
       },
       {
@@ -185,6 +185,8 @@
             "execute": { "type": "boolean", "description": "是否执行图并跑 QC + 导出（默认 true）" },
             "pipeline": { "type": "string", "enum": ["static", "mechanical", "character"], "description": "可选：强制指定管线（绕过 DSL 内容推断）。省略时按内容推断：含 skin/skeleton → character（角色骨架蒙皮）；含 joint → mechanical（URDF 关节）；两者皆无 → static（纯静态物体/场景 → 单个 .glb）。" },
             "bake": { "type": ["string", "boolean"], "description": "阶段1 单件烘焙：填要烘焙的 shape id（或 true=烘最后一条语句），追加 g_bake_part 终端而非终端链，返回 <sha>.obj + bbox 并登记到 parts.json；供阶段2 用 mesh(filename=...) 引用。" },
+            "expectedDims": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "可选 brief 目标尺寸 [x,y,z]；仅生成非阻断尺寸偏差建议。" },
+            "features": { "type": "array", "items": { "type": "string" }, "maxItems": 12, "description": "可选显著特征清单；原样回显供非阻断复核。" },
             "projectId": { "type": "string" }
           },
           "additionalProperties": false
@@ -203,6 +205,67 @@
         "returns": { "type": "object" },
         "exposedToAI": true,
         "description": { "zh": "读回当前模型的 Geometry DSL 源（从图反解，人在编辑器改过图也能读到等价 DSL）。projectId 可选。", "en": "Read back the current model's Geometry DSL source (reconstructed from the graph, so human edits in the editor are reflected). projectId optional." }
+      },
+      {
+        "id": "lowpoly:model.bakeBatch",
+        "args": {
+          "type": "object",
+          "required": ["items"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "required": ["name", "source"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "source": { "type": "string" },
+                  "target": { "type": "string" },
+                  "expectedDims": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+                  "features": { "type": "array", "items": { "type": "string" }, "maxItems": 12 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "projectId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "批量、逐件独立编译并烘焙最多 16 个 Geometry DSL 零件；部分失败不回滚已成功零件，返回每件紧凑回执。", "en": "Compile and bake up to 16 independent Geometry DSL parts. Partial failures do not roll back successful parts; returns compact per-item receipts." }
+      },
+      {
+        "id": "lowpoly:model.patch",
+        "args": {
+          "type": "object",
+          "required": ["baseHash", "patches"],
+          "properties": {
+            "baseHash": { "type": "string" },
+            "patches": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": ["line"],
+                "properties": {
+                  "line": { "type": "number" },
+                  "content": { "type": ["string", "null"] }
+                },
+                "additionalProperties": false
+              }
+            },
+            "name": { "type": "string" },
+            "execute": { "type": "boolean" },
+            "pipeline": { "type": "string", "enum": ["static", "mechanical", "character"] },
+            "projectId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": { "zh": "按 1-based 行号增量修改当前 Geometry DSL；baseHash 不匹配时拒绝并要求 model.get，避免覆盖并发编辑。", "en": "Patch current Geometry DSL by 1-based line number. Rejects stale baseHash values so concurrent edits are not overwritten." }
       },
       {
         "id": "lowpoly:parts.list",
@@ -229,7 +292,7 @@
           "additionalProperties": false
         },
         "returns": { "type": "object" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "导入/替换 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Import or replace a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project" }
       },
       {
@@ -244,7 +307,7 @@
           "additionalProperties": false
         },
         "returns": { "type": "object" },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": { "zh": "导出当前 pipeline 模板。projectId 可选，省略时默认当前打开/查看的项目", "en": "Export the current pipeline template. projectId is optional; defaults to the currently open/viewed project" }
       },
       {
@@ -346,11 +409,11 @@
       {
         "id": "wb-3d-lowpoly.pipeline",
         "actions": [
-          { "id": "get", "exposedToAI": true },
-          { "id": "applyBatch", "exposedToAI": true },
-          { "id": "execute", "exposedToAI": true },
-          { "id": "import", "exposedToAI": true },
-          { "id": "export", "exposedToAI": true }
+          { "id": "get", "exposedToAI": false },
+          { "id": "applyBatch", "exposedToAI": false },
+          { "id": "execute", "exposedToAI": false },
+          { "id": "import", "exposedToAI": false },
+          { "id": "export", "exposedToAI": false }
         ]
       },
       {

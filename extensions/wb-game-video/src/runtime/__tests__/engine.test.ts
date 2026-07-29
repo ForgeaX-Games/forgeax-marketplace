@@ -163,6 +163,109 @@ describe('GraphRuntime advance', () => {
     expect(rt.state.currentNodeId).toBe('win')
   })
 
+  it('onSettlement event waits for performance end and overrides the default edge', () => {
+    registerCore()
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          durationMs: 1000,
+          timeline: [{ id: 'q', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }],
+        }),
+        node('picked', {}),
+        node('fallback', {}),
+      ],
+      edges: [
+        { id: 'e-picked', source: 'a', target: 'picked', sourceHandle: 'pass', targetHandle: 'in', data: { transition: 'onSettlement' } },
+        { id: 'e-default', source: 'a', target: 'fallback', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph)
+    scn.graph.nodes[0]!.data.overlayNodes![0]!.reactions = [{
+      when: { type: 'event', id: 'pass' },
+      do: [{ kind: 'effect', effects: [{ kind: 'var', varId: 'qi', op: 'add', value: 2 }] }],
+    }]
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    rt.emitComponentEvent(rid('a', 'q'), 'pass')
+    expect(rt.state.currentNodeId).toBe('a')
+    expect(rt.state.vars.qi).toBe(2)
+    expect(rt.state.traversedEdgeIds.has('e-picked')).toBe(false)
+
+    rt.onPerformanceEnd()
+    expect(rt.state.currentNodeId).toBe('picked')
+    expect(rt.state.traversedEdgeIds.has('e-default')).toBe(false)
+  })
+
+  it('at settlement commits the selected edge when the node clock reaches the configured time', () => {
+    registerCore()
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          durationMs: 2000,
+          routingSettlement: { type: 'at', ms: 500 },
+          timeline: [{ id: 'q', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }],
+        }),
+        node('picked', {}),
+        node('fallback', {}),
+      ],
+      edges: [
+        { id: 'e-picked', source: 'a', target: 'picked', sourceHandle: 'pass', targetHandle: 'in', data: { transition: 'onSettlement' } },
+        { id: 'e-default', source: 'a', target: 'fallback', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    rt.emitComponentEvent(rid('a', 'q'), 'pass')
+    rt.tick(499)
+    expect(rt.state.currentNodeId).toBe('a')
+    rt.tick(500)
+    expect(rt.state.currentNodeId).toBe('picked')
+  })
+
+  it('at settlement takes the default edge when no event was selected', () => {
+    registerCore()
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          durationMs: 2000,
+          routingSettlement: { type: 'at', ms: 500 },
+          timeline: [{ id: 'q', kind: 'qteT', trigger: { when: 'enter' }, inputs: {} }],
+        }),
+        node('picked', {}),
+        node('fallback', {}),
+      ],
+      edges: [
+        { id: 'e-picked', source: 'a', target: 'picked', sourceHandle: 'pass', targetHandle: 'in', data: { transition: 'onSettlement' } },
+        { id: 'e-default', source: 'a', target: 'fallback', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    rt.tick(500)
+    expect(rt.state.currentNodeId).toBe('fallback')
+  })
+
+  it('performance end crossing an at settlement does not advance the entered target again', () => {
+    const graph: GameGraph = {
+      nodes: [
+        node('a', { durationMs: 2000, routingSettlement: { type: 'at', ms: 500 } }),
+        node('fallback', { durationMs: 1000 }),
+        node('after', { durationMs: 1000 }),
+      ],
+      edges: [
+        { id: 'e-default', source: 'a', target: 'fallback', sourceHandle: 'default', targetHandle: 'in' },
+        { id: 'e-after', source: 'fallback', target: 'after', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    const scn = scnOf(graph)
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    rt.onPerformanceEnd()
+    expect(rt.state.currentNodeId).toBe('fallback')
+  })
+
   it('jumpToNode seeks preserving globals by default', () => {
     registerCore()
     const graph: GameGraph = {
