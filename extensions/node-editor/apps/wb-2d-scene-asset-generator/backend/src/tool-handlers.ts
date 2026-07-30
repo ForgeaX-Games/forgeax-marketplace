@@ -13,6 +13,7 @@ type ToolCtx = {
   toolId: string
   env: Record<string, string | undefined>
   cwd: string
+  projectRoot?: string
 }
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
@@ -412,7 +413,7 @@ export const tools: Record<string, ToolHandler> = {
     const a = objectArgs(args)
     const alias = stringArg(a, 'alias')
     const gameSlug = stringArg(a, 'gameSlug')
-    const root = typeof a.projectRoot === 'string' && a.projectRoot.trim() ? a.projectRoot.trim() : ctx.cwd
+    const root = publishProjectRoot(a, ctx)
     const base = isAbsolute(root) ? root : resolve(ctx.cwd, root)
     const targetDir = resolve(base, '.forgeax', 'games', gameSlug, 'textures')
     return request(ctx, 'POST', '/api/v1/publish-to-game', {
@@ -435,3 +436,12 @@ export const tools: Record<string, ToolHandler> = {
 }
 
 export default tools
+
+export function publishProjectRoot(
+  args: Record<string, unknown>,
+  ctx: Pick<ToolCtx, 'cwd' | 'projectRoot'>,
+): string {
+  return ctx.projectRoot?.trim()
+    || (typeof args.projectRoot === 'string' ? args.projectRoot.trim() : '')
+    || ctx.cwd
+}

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/main.js'
-import { tools } from '../src/tool-handlers.js'
+import { publishProjectRoot, tools } from '../src/tool-handlers.js'
 
 let root: string
 let portsFile: string
@@ -27,6 +27,20 @@ function ctx(toolId: string, agentId?: string) {
 }
 
 describe('ToolRegistry asset2d handlers', () => {
+  it('publishes cross-workbench assets under the Studio project root', () => {
+    expect(publishProjectRoot({}, {
+      cwd: '/marketplace/extensions/wb-2d-scene-asset-generator',
+      projectRoot: '/studio/project',
+    })).toBe('/studio/project')
+    expect(publishProjectRoot({ projectRoot: '/untrusted/project' }, {
+      cwd: '/extension',
+      projectRoot: '/studio/project',
+    })).toBe('/studio/project')
+    expect(publishProjectRoot({ projectRoot: '/legacy/project' }, {
+      cwd: '/extension',
+    })).toBe('/legacy/project')
+  })
+
   it('uses the Studio plugin dev backendPort override when proxying tool calls', async () => {
     const app = await buildApp()
     await app.listen({ host: '127.0.0.1', port: 0 })
@@ -122,6 +136,7 @@ describe('ToolRegistry asset2d handlers', () => {
       // must surface exactly one image Run button addressing its inner node id.
       await tools['asset2d:pipeline.applyBatch'](
         {
+          projectId: 'main',
           ops: [
             { type: 'createNode', nodeId: 'prompt', opId: 'text_panel', position: { x: 0, y: 0 }, params: {} },
             { type: 'createNode', nodeId: 'gen', opId: 'image_gen', position: { x: 200, y: 0 }, params: {} },
@@ -133,7 +148,7 @@ describe('ToolRegistry asset2d handlers', () => {
         ctx('asset2d:pipeline.applyBatch', agentId),
       )
 
-      const list = (await tools['asset2d:groups.list']({}, ctx('asset2d:groups.list'))) as Array<{
+      const list = (await tools['asset2d:groups.list']({ projectId: 'main' }, ctx('asset2d:groups.list'))) as Array<{
         id: string
         runButtons: Array<{ nodeId: string; opId: string; kind: string }>
       }>
@@ -145,7 +160,10 @@ describe('ToolRegistry asset2d handlers', () => {
       expect(typeof imgRun!.nodeId).toBe('string')
       expect(imgRun!.nodeId.length).toBeGreaterThan(0)
 
-      const got = (await tools['asset2d:groups.get']({ id: g.id }, ctx('asset2d:groups.get'))) as {
+      const got = (await tools['asset2d:groups.get'](
+        { projectId: 'main', id: g.id },
+        ctx('asset2d:groups.get'),
+      )) as {
         id: string
         runButtons: Array<{ opId: string }>
         exposedInputs: unknown
