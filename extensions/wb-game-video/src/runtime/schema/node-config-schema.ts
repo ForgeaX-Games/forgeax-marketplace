@@ -90,6 +90,18 @@ export type NodeAction =
   | { kind: 'advance'; edgeId: string }
   | { kind: 'spawn'; from: string; inputs?: Record<string, unknown>; layout?: Layout; ttlMs?: number }
 
+/** Overlay 目录事件动作：目录是可复用表现/副作用模板，不得携带节点专属走向。 */
+export type OverlayReactionAction = Exclude<NodeAction, { kind: 'advance' }>
+
+/**
+ * Overlay 目录专用 reaction。稳定 key 恒为 `${childId}:${eventId}`；
+ * 只允许组件 event → effect/spawn，节点挂载可再按顺序追加通用 NodeAction（含 advance）。
+ */
+export interface OverlayReaction {
+  when: { type: 'event'; id: string }
+  do: OverlayReactionAction[]
+}
+
 /**
  * 触发面（闭合）——节点生命周期 + 事件 + 数据/状态 + 组件生命周期。effect 一律挂 reactions。
  * - enter：进入节点（演出开始）
@@ -120,6 +132,19 @@ export type ReactionTrigger =
 export interface Reaction {
   when: ReactionTrigger
   do: NodeAction[]
+}
+
+/**
+ * 「生命周期效果」子集 —— 相位由**节点演出进程**决定（进入 / 播到某刻 / 离开前 / 收尾），
+ * 区别于由外部信号驱动的 event / watch / shown / hidden。
+ *
+ * 编辑器把这一子集作为一个整体呈现（时机统一表达为「播到 ms」），并按**子集内序号**定位某一条
+ * ——不能用 `reactions` 的绝对下标：检视器回写时会把子集排到数组前面（`[...life, ...rest]`），
+ * 绝对下标会随之漂移。作者态与时间轴标记共用这个序号，才能双向对得上。
+ */
+export function isLifecycleReaction(r: Reaction): boolean {
+  const t = r.when.type
+  return t === 'enter' || t === 'at' || t === 'exit' || t === 'complete'
 }
 
 /** Overlay 聚合后的事件（编辑器下拉项）。 */
@@ -188,6 +213,8 @@ export interface Overlay {
   id: string
   title?: string
   children: OverlayChild[]
+  /** 目录继承动作；严格使用 `childId:eventId`，运行时仅在组件 emit 路径消费。 */
+  reactions?: OverlayReaction[]
 }
 
 /** scenario.ui：overlay 目录。 */
@@ -235,6 +262,18 @@ export interface OverlayNode {
 /** 挂载键：显式 id 优先，否则 overlay 目录 id。 */
 export function overlayMountId(mount: OverlayNode): string {
   return mount.id ?? mount.overlay
+}
+
+/**
+ * 新建一份 overlay 挂载。同模板首份沿用 overlay id；重复挂载追加稳定序号，确保运行态 child id、
+ * React key、时间轴与事件命名空间都按实例隔离。
+ */
+export function createOverlayMount(mounts: readonly OverlayNode[], overlayId: string): OverlayNode {
+  const used = new Set(mounts.map(overlayMountId))
+  if (!used.has(overlayId)) return { overlay: overlayId }
+  let ordinal = 2
+  while (used.has(`${overlayId}__${ordinal}`)) ordinal += 1
+  return { id: `${overlayId}__${ordinal}`, overlay: overlayId }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -318,7 +357,7 @@ export const OVERLAY_DEMO = {
           },
           {
             id: 'parry',
-            component: 'battleParry',
+            component: 'BattleParry',
             layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 },
             trigger: { when: 'at', ms: 1200 },
             inputs: {
@@ -461,7 +500,7 @@ export const OVERLAY_DEMO_INSTANCE: OverlayInstance = {
     },
     {
       id: 'battleHud/parry',
-      component: 'battleParry',
+      component: 'BattleParry',
       trigger: { when: 'at', ms: 1200 },
       layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 },
       inputs: {

@@ -1,11 +1,11 @@
 /**
- * 叩击（component id: `inkKou`）—— 组件只发出「叩」事件。
+ * 叩击（component id: `InkKou`）—— 组件只发出「叩」事件。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与交互。
  */
 import { useRef } from 'react'
 import type { OverlayProps } from '../../rendererRegistry'
 import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
-import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import { injectCss, ensureInkFilters, ensureBrushFont, previewTStyle } from './skinRuntime'
 
 export const InkKouManifest: ComponentManifest = {
   id: 'InkKou',
@@ -14,7 +14,7 @@ export const InkKouManifest: ComponentManifest = {
   inputs: [],
 }
 
-export function InkKou({ emit, preview }: OverlayProps) {
+export function InkKou({ emit, preview, previewTimeMs }: OverlayProps) {
   injectCss('ink-kou-layer', KOU_CSS)
   ensureInkFilters()
   ensureBrushFont()
@@ -27,8 +27,12 @@ export function InkKou({ emit, preview }: OverlayProps) {
   }
 
   return (
-    <div className={`pvn-opts pvn-opts--kou show${preview ? ' is-frozen' : ''}`} aria-label="叩击">
-      <button type="button" className="pvn-opt pvn-opt--kou" aria-label="叩" disabled={preview} onClick={knock}>
+    <div
+      className={`pvn-opts pvn-opts--kou show${preview ? ' is-frozen' : ''}`}
+      style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
+      aria-label="叩击"
+    >
+      <button type="button" className="pvn-opt pvn-opt--kou" aria-label="叩" data-overlay-fit-target disabled={preview} onClick={knock}>
         <span className="pvn-kou-orn" aria-hidden="true">
           <i className="pvn-kou-dot" />
           <i className="pvn-kou-diamond" />
@@ -46,7 +50,7 @@ export function InkKou({ emit, preview }: OverlayProps) {
 // 「叩」字号用 cqh/cqmin（相对舞台，见 VideoOverlayStage.tsx 的 containerType:'size'）取代 vw，
 // vw 相对浏览器视口，预览小窗和全屏试玩里同一份配置会呈现出完全不同的物理大小。
 const KOU_CSS = `
-.pvn-opts--kou{position:relative;inline-size:100%;block-size:100%;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+.pvn-opts--kou{position:relative;inline-size:100%;block-size:100%;min-inline-size:72px;min-block-size:112px;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none;}
 .pvn-opts--kou.show{pointer-events:auto;}
 .pvn-opts--kou.is-frozen{pointer-events:none!important;}
 .pvn-opts--kou.is-frozen .pvn-kou-orn,.pvn-opts--kou.is-frozen .pvn-kou-glyph,.pvn-opts--kou.is-frozen .pvn-kou-hint,.pvn-opts--kou.is-frozen .pvn-kou-space{animation-play-state:paused;}

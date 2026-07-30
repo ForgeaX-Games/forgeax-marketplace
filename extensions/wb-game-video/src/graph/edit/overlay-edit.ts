@@ -237,18 +237,14 @@ export function removeOverlayChild(scenario: GameScenario, nodeId: string, child
   return { ...scn, graph: setNodeOverlayNodes(scn.graph, nodeId, mounts) }
 }
 
-export function patchOverlayChild(
-  scenario: GameScenario,
+function patchOverlayChildAtMountIndex(
+  scn: GameScenario,
   nodeId: string,
+  mounts: OverlayNode[],
+  idx: number,
   childId: string,
   patch: Partial<OverlayChild>,
 ): GameScenario {
-  const scn = ensureNodeOverlay(scenario, nodeId)
-  const node = scn.graph.nodes.find((n) => n.id === nodeId)
-  if (!node) return scn
-  const mounts = [...(node.data.overlayNodes ?? [])]
-  const idx = mountIndexOwningChild(scn.ui?.overlays, node, childId)
-  if (idx < 0) return scn
   const mount = mounts[idx]!
 
   if (mount.overlay.startsWith('node:')) {
@@ -277,6 +273,44 @@ export function patchOverlayChild(
     overrides: { ...mount.overrides, [childId]: mergePatch(mount.overrides?.[childId], patch) },
   }
   return { ...scn, graph: setNodeOverlayNodes(scn.graph, nodeId, mounts) }
+}
+
+export function patchOverlayChild(
+  scenario: GameScenario,
+  nodeId: string,
+  childId: string,
+  patch: Partial<OverlayChild>,
+): GameScenario {
+  const scn = ensureNodeOverlay(scenario, nodeId)
+  const node = scn.graph.nodes.find((n) => n.id === nodeId)
+  if (!node) return scn
+  const mounts = [...(node.data.overlayNodes ?? [])]
+  const idx = mountIndexOwningChild(scn.ui?.overlays, node, childId)
+  if (idx < 0) return scn
+  return patchOverlayChildAtMountIndex(scn, nodeId, mounts, idx, childId, patch)
+}
+
+/**
+ * 同 `patchOverlayChild`，但按显式 `mountId` 定位实例。
+ * 同一 overlay 可重复挂载，而这些实例会共享 catalog child id；挂载级时间轴写回必须走这里，
+ * 否则仅凭 child id 会始终命中第一份实例。
+ */
+export function patchOverlayChildInMount(
+  scenario: GameScenario,
+  nodeId: string,
+  mountId: string,
+  childId: string,
+  patch: Partial<OverlayChild>,
+): GameScenario {
+  const scn = ensureNodeOverlay(scenario, nodeId)
+  const node = scn.graph.nodes.find((n) => n.id === nodeId)
+  if (!node) return scn
+  const mounts = [...(node.data.overlayNodes ?? [])]
+  const idx = mounts.findIndex((m) => overlayMountId(m) === mountId)
+  if (idx < 0) return scn
+  const mount = mounts[idx]!
+  if (!resolveMountChildren(scn.ui?.overlays, mount).some((c) => c.id === childId)) return scn
+  return patchOverlayChildAtMountIndex(scn, nodeId, mounts, idx, childId, patch)
 }
 
 export function patchOverlayChildParams(

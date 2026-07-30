@@ -164,6 +164,7 @@ export function SpawnInputsEditor({
             <span style={keyLbl} title={inp.key}>{inp.label?.trim() || inp.key}</span>
             <ValueInput
               value={bag[inp.key] as NumOrExpr | undefined}
+              defaultValue={typeof inp.default === 'number' ? inp.default : undefined}
               entities={pickers?.entities}
               variables={pickers?.variables}
               formulas={pickers?.formulas}

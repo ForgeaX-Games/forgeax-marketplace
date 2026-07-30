@@ -5,13 +5,20 @@
  * 再回这里选它、填空。
  */
 import type { CSSProperties } from 'react'
-import type { Entity, NumericEffectOp, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
+import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { EffectOpButtons } from './OpSymbolButtons'
 import { LooseNumberInput } from './TermChainEditor'
 import { FormulaApplyEditor } from './FormulaApplyEditor'
 import { compileFormula } from './formulaApply'
-import { compileValuePick, findFormula, listFormulaOptions, resolveValuePick, type ValuePick } from './valueExprPick'
+import {
+  compileValuePick,
+  findFormula,
+  listFormulaOptions,
+  resolveValuePick,
+  type EffectDisplayOp,
+  type ValuePick,
+} from './valueExprPick'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
 const row: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }
@@ -36,7 +43,7 @@ export function ValueExprEditor({
   onChange: (next: NumOrExpr) => void
   hintText?: string
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/应用公式同一行）。 */
-  effectOp?: { op: NumericEffectOp; onOpChange: (next: { op: NumericEffectOp; value?: NumOrExpr }) => void }
+  effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
 }): JSX.Element {
   const pick = resolveValuePick(value, entities, variables, storedPick)
   const formulaOpts = listFormulaOptions(formulas)
@@ -62,7 +69,7 @@ export function ValueExprEditor({
   return (
     <div style={box}>
       <div style={row} role="group" aria-label="数值来源">
-        {effectOp && <EffectOpButtons op={effectOp.op} value={value} onChange={effectOp.onOpChange} />}
+        {effectOp && <EffectOpButtons op={effectOp.op} onChange={effectOp.onOpChange} />}
         <button type="button" className={pick.mode === 'const' ? 'gc-mini-action is-on' : 'gc-mini-action'} onClick={() => setMode('const')}>
           常量
         </button>

@@ -36,6 +36,8 @@ interface AudioAssetCacheStore {
   byGame: Record<string, AudioAssetCacheEntry | undefined>
   refresh: (gameId: string, client?: KinoVideoClient) => Promise<void>
   ensure: (gameId: string, client?: KinoVideoClient) => Promise<void>
+  upsert: (gameId: string, item: KinoResourceDTO) => void
+  remove: (gameId: string, resourceId: string) => void
 }
 
 const EMPTY: AudioAssetCacheEntry = {
@@ -98,8 +100,39 @@ export const useAudioAssetCache = create<AudioAssetCacheStore>((set, get) => ({
   },
 
   async ensure(gameId, client) {
-    if (get().byGame[gameId]) return
+    // upsert 可以在首次拉取前创建一个局部缓存桶；只有 generation > 0
+    // 才表示该 game 已发起过完整 hydration（也兼作并发 ensure 去重）。
+    if ((get().byGame[gameId]?.generation ?? 0) > 0) return
     await get().refresh(gameId, client)
+  },
+
+  upsert(gameId, item) {
+    set((state) => {
+      const cache = state.byGame[gameId] ?? EMPTY
+      const existing = cache.items.findIndex((entry) => entry.resource_id === item.resource_id)
+      const items = existing < 0
+        ? [item, ...cache.items]
+        : cache.items.map((entry, index) => index === existing ? item : entry)
+      return {
+        byGame: {
+          ...state.byGame,
+          [gameId]: { ...cache, items, total: existing < 0 ? cache.total + 1 : cache.total },
+        },
+      }
+    })
+  },
+
+  remove(gameId, resourceId) {
+    set((state) => {
+      const cache = state.byGame[gameId] ?? EMPTY
+      const items = cache.items.filter((item) => item.resource_id !== resourceId)
+      return {
+        byGame: {
+          ...state.byGame,
+          [gameId]: { ...cache, items, total: Math.max(0, cache.total - (items.length < cache.items.length ? 1 : 0)) },
+        },
+      }
+    })
   },
 }))
 

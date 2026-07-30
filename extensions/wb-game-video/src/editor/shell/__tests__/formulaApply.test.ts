@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { Entity } from '../../../runtime/schema/graph-schema'
+import type { Entity, Variable } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
-import { compileFormula, formulaHoles, formulaPreview, missingFormulaHoles, recompileFormulaUsages } from '../formulaApply'
+import {
+  compileFormula,
+  formulaHoles,
+  formulaPreview,
+  missingFormulaHoles,
+  missingFormulaVariables,
+  recompileFormulaUsages,
+} from '../formulaApply'
 
 const entities: Record<string, Entity> = {
   'ent-player': {
@@ -46,6 +53,27 @@ describe('formulaApply', () => {
 
   it('formulaPreview 把未填空位标成 ?名字', () => {
     expect(formulaPreview(damageFormula)).toContain('?')
+  })
+
+  it('missingFormulaVariables 同时检查公式直接引用和变量空位绑定', () => {
+    const formula: Formula = {
+      id: 'formula-vars',
+      ast: {
+        t: 'bin',
+        id: 'b0',
+        op: '+',
+        a: { t: 'ref', id: 'r0', ref: { kind: 'var', varId: 'rage' } },
+        b: { t: 'hole', id: 'h0', holeId: 'bonus', kind: 'var', label: '加成' },
+      },
+    }
+    const variables: Record<string, Variable> = {
+      rage: { id: 'rage', name: '怒气', initial: 0 },
+    }
+    expect(missingFormulaVariables(
+      formula,
+      { bonus: { kind: 'var', varId: 'combo' } },
+      variables,
+    )).toEqual(['combo'])
   })
 
   it('compileFormula 用 holeBindings 套回留空位，编译出具体 expr（并归一 attr）', () => {

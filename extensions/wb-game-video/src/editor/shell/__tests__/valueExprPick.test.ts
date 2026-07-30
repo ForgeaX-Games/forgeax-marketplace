@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Entity, Variable } from '../../../runtime/schema/graph-schema'
+import type { Entity, NumOrExpr, Variable } from '../../../runtime/schema/graph-schema'
 import {
   compileValuePick,
+  decodeEffectOperation,
   emptyPickTerm,
+  encodeEffectOperation,
   listAttrOptions,
   listEntityOptions,
-  negateNumOrExpr,
   normalizeTerms,
-  reciprocalNumOrExpr,
   resolveValuePick,
 } from '../valueExprPick'
 
@@ -140,12 +140,28 @@ describe('valueExprPick', () => {
     expect(back).toEqual(source)
   })
 
-  it('negateNumOrExpr / reciprocalNumOrExpr: Effect 层减/除按钮的取反/取倒数动作', () => {
-    expect(negateNumOrExpr(10)).toBe(-10)
-    expect(negateNumOrExpr({ expr: 'var.qi' })).toEqual({ expr: '-(var.qi)' })
-    expect(reciprocalNumOrExpr(2)).toBe(0.5)
-    expect(reciprocalNumOrExpr(0)).toBe(0)
-    expect(reciprocalNumOrExpr({ expr: 'var.qi' })).toEqual({ expr: '1/(var.qi)' })
+  it('Effect 层减/除使用可逆包装，切换运算时保留原始操作数', () => {
+    expect(encodeEffectOperation('sub', 10)).toEqual({ op: 'add', value: { expr: '-(10)' } })
+    expect(decodeEffectOperation('add', { expr: '-(10)' })).toEqual({ op: 'sub', value: 10 })
+    expect(encodeEffectOperation('div', 2)).toEqual({ op: 'mul', value: { expr: '1/(2)' } })
+    expect(decodeEffectOperation('mul', { expr: '1/(2)' })).toEqual({ op: 'div', value: 2 })
+    expect(decodeEffectOperation('add', -10)).toEqual({ op: 'sub', value: 10 })
+  })
+
+  it('Effect 层减/除包装保留公式 pick，编辑公式后仍能维持当前运算', () => {
+    const formulaValue = {
+      expr: 'var.qi',
+      pick: { mode: 'formula' as const, formulaId: 'f1', holeBindings: {} },
+    }
+    const encoded = encodeEffectOperation('div', formulaValue as unknown as NumOrExpr)
+    expect(encoded).toEqual({
+      op: 'mul',
+      value: {
+        expr: '1/(var.qi)',
+        pick: formulaValue.pick,
+      },
+    })
+    expect(decodeEffectOperation(encoded.op, encoded.value)).toEqual({ op: 'div', value: formulaValue })
   })
 
   it('emptyPickTerm seeds from catalog', () => {

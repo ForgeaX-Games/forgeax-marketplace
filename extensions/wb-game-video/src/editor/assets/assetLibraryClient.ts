@@ -11,6 +11,7 @@ import {
   VideoUploadError,
   type UploadTransport,
 } from './video-upload'
+import { useAudioAssetCache } from './audioAssetCacheStore'
 
 export type ManagedAssetKind = 'image' | 'audio' | 'font'
 
@@ -184,6 +185,24 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : '资产操作失败'
 }
 
+function audioCacheResource(gameId: string, asset: ManagedAsset): KinoResourceDTO {
+  const updatedAt = asset.updatedAt ?? Date.now()
+  return {
+    resource_id: asset.id,
+    game_id: gameId,
+    media_type: 'audio',
+    name: asset.name,
+    url: asset.url ?? '',
+    source: asset.source,
+    source_meta: {
+      mime_type: asset.mime,
+      ...(asset.bytes == null ? {} : { extra: { bytes: asset.bytes } }),
+    },
+    created_at: updatedAt,
+    updated_at: updatedAt,
+  }
+}
+
 export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): AssetLibraryController {
   const [items, setItems] = useState<ManagedAsset[]>([])
   const [loading, setLoading] = useState(Boolean(client))
@@ -233,6 +252,9 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     try {
       const asset = await client.upload(gameId, kind, file)
       setItems((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
+      if (asset.kind === 'audio') {
+        useAudioAssetCache.getState().upsert(gameId, audioCacheResource(gameId, asset))
+      }
       return asset
     } catch (cause) {
       setError(message(cause))
@@ -254,6 +276,9 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     try {
       const asset = await client.rename(gameId, id, nextName)
       setItems((current) => current.map((item) => item.id === id ? asset : item))
+      if (asset.kind === 'audio') {
+        useAudioAssetCache.getState().upsert(gameId, audioCacheResource(gameId, asset))
+      }
       return asset
     } catch (cause) {
       setError(message(cause))
@@ -271,15 +296,19 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     setMutating(true)
     setError(null)
     try {
+      const removed = items.find((item) => item.id === id)
       await client.remove(gameId, id)
       setItems((current) => current.filter((item) => item.id !== id))
+      if (removed?.kind === 'audio') {
+        useAudioAssetCache.getState().remove(gameId, id)
+      }
     } catch (cause) {
       setError(message(cause))
       throw cause
     } finally {
       setMutating(false)
     }
-  }, [client, gameId])
+  }, [client, gameId, items])
 
   return { available: Boolean(client), loading, error, uploading, mutating, items, refresh, upload, rename, remove }
 }

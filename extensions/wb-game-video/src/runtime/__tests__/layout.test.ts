@@ -7,6 +7,7 @@ import {
   layoutValueToCss,
   layoutToCss,
   mountWrapStyle,
+  resolveMountLayoutForChildren,
 } from '../schema/layout'
 
 describe('layout', () => {
@@ -27,6 +28,25 @@ describe('layout', () => {
   it('layoutHasExplicitSize', () => {
     expect(layoutHasExplicitSize({ width: 1 })).toBe(true)
     expect(layoutHasExplicitSize({ left: 0, top: 0 })).toBe(false)
+  })
+
+  it('fills missing mount dimensions when a child uses the full parent stage', () => {
+    expect(resolveMountLayoutForChildren(
+      { left: 0.2, top: 0.1 },
+      [{ left: -0.15, top: -0.02, width: 1, height: 1 }],
+    )).toEqual({
+      left: 0.2,
+      top: 0.1,
+      width: 1,
+      height: 1,
+    })
+  })
+
+  it('keeps auto-sized mounts for non-stage children', () => {
+    expect(resolveMountLayoutForChildren(
+      { left: 0.2, top: 0.1 },
+      [{ left: 0, top: 0 }],
+    )).toEqual({ left: 0.2, top: 0.1 })
   })
 
   it('mountWrapStyle: auto-size when no layout', () => {

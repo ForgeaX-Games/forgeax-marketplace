@@ -6,6 +6,7 @@ import { resolveSnapGridMs, snapMs } from './timelineMath'
 import {
   type AudioItem,
   type MaterialItem,
+  type TimelinePointMarker,
   TIMELINE_LAYER_STEP,
   TIMELINE_LAYER_TOP,
   TIMELINE_MIN_TRACKS,
@@ -77,7 +78,21 @@ export interface MaterialTimelineProps {
   audioItems?: AudioItem[]
   /** 音频模式下拖动音轨条的回写（移动 / 换轨）。 */
   onPatchAudio?: (item: AudioItem, patch: { startMs?: number; endMs?: number; zIndex?: number }) => void
+  /**
+   * 节点级时刻点（结算点 / 生命周期效果的施加时刻）——见 `TimelinePointMarker`。
+   * 空数组或省略 = 不画。刻意不走 MaterialItem/`markerMs`：这些时刻不属于任何材料。
+   */
+  pointMarkers?: TimelinePointMarker[]
+  /** 拖时刻标记的回写（按 marker.id 路由到各自的落盘字段）。 */
+  onPointMarkerChange?: (id: string, ms: number) => void
+  /** 当前选中的时刻标记 id（与右侧表单双向联动：这里点亮，那边高亮对应配置块）。 */
+  selectedPointMarkerId?: string | null
+  /** 点中时刻标记时上抛（按下即选，不必等拖动结束）。 */
+  onSelectPointMarker?: (id: string) => void
 }
+
+/** 时刻标记的拖拽 sentinel 前缀（与 `__seek__` 同一手法：借指针管线，不占材料 key）。 */
+const POINT_DRAG_PREFIX = '__point:'
 
 interface DragState {
   key: string
@@ -106,6 +121,10 @@ export function MaterialTimeline({
   onModeChange,
   audioItems,
   onPatchAudio,
+  pointMarkers,
+  onPointMarkerChange,
+  selectedPointMarkerId,
+  onSelectPointMarker,
 }: MaterialTimelineProps) {
   injectStyleOnce('material-timeline', MATERIAL_TIMELINE_CSS)
   const activeMode: 'material' | 'audio' = mode ?? 'material'
@@ -122,7 +141,16 @@ export function MaterialTimeline({
 
   // 无限轨：可见轨数由数据里最大 zIndex 派生，并永远多留一条空轨用于「拖到新轨=新增一轨」。
   const dataMaxLayer = activeList.reduce((mx, it) => Math.max(mx, it.zIndex), 0)
-  const trackCount = Math.max(TIMELINE_MIN_TRACKS, dataMaxLayer + 2)
+  // 生命周期效果独占一轨（排在材料轨之后）：它是"这一刻执行什么"，与覆盖物不同维度，
+  // 挤在刻度带里既看不清也和结算标记打架。仍在它之后留一条空投放轨（拖到新轨=新增一轨）。
+  const settlementMarkers = (pointMarkers ?? []).filter((m) => m.kind === 'settlement')
+  const lifecycleMarkers = (pointMarkers ?? []).filter((m) => m.kind === 'lifecycle')
+  const lifecycleTrack = dataMaxLayer + 1
+  const trackCount = Math.max(
+    TIMELINE_MIN_TRACKS,
+    dataMaxLayer + 2,
+    lifecycleMarkers.length ? lifecycleTrack + 2 : 0,
+  )
   // 缩放：画布宽 = 视口宽 × zoom（zoom=1 恰好铺满，无横向滚动）。
   const canvasPx = Math.max(1, (viewportW || 1) * zoom)
   const pxPerMs = canvasPx / maxMs
@@ -214,6 +242,15 @@ export function MaterialTimeline({
     if (!drag) return
     if (drag.key === '__seek__') {
       seekFromPointer(e)
+      return
+    }
+    if (drag.key.startsWith(POINT_DRAG_PREFIX)) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      if (rect.width <= 0) return
+      const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
+      const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
+      const id = drag.key.slice(POINT_DRAG_PREFIX.length)
+      onPointMarkerChange?.(id, clampMs(snapMs(drag.startMs + deltaMs, grid), 0, maxMs))
       return
     }
     const rect = e.currentTarget.getBoundingClientRect()
@@ -332,7 +369,7 @@ export function MaterialTimeline({
         {activeMode === 'audio' ? (
           <span className="gc-materialbar-hint">音频轨（仅显示 / 可拖动）· 第 1 轨为素材自带声道</span>
         ) : null}
-        <span className="gc-zoombar">
+        <span className="gc-zoombar" style={{ display: 'none' }}>
           <input
             type="range"
             min={ZOOM_MIN}
@@ -394,6 +431,73 @@ export function MaterialTimeline({
             />
           ))}
           <div className="gc-playhead" style={{ left: `${playheadMs * pxPerMs}px` }} aria-hidden />
+          {settlementMarkers.map((mk) => {
+            const dragKey = `${POINT_DRAG_PREFIX}${mk.id}`
+            return (
+              <div
+                key={mk.id}
+                className={`gc-point-mark is-settlement${drag?.key === dragKey ? ' is-dragging' : ''}`}
+                style={{ left: `${mk.ms * pxPerMs}px` }}
+                title={`${mk.label} · ${fmtDur(mk.ms)}（可拖）`}
+              >
+                {/* 结算是整节点的"到此刻收尾"，故用贯穿竖线；只有菱形头可抓，竖线可点会挡住材料条命中。 */}
+                <span
+                  className="gc-point-head"
+                  role="slider"
+                  tabIndex={0}
+                  aria-label={mk.label}
+                  aria-valuenow={mk.ms}
+                  aria-valuemin={0}
+                  aria-valuemax={maxMs}
+                  onPointerDown={(e) => {
+                    if (!editable || !onPointMarkerChange) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    timelineRef.current?.setPointerCapture(e.pointerId)
+                    setDrag({ key: dragKey, mode: 'move', pointerX: e.clientX, startMs: mk.ms, endMs: mk.ms, zIndex: 0 })
+                  }}
+                />
+              </div>
+            )
+          })}
+          {lifecycleMarkers.length ? (
+            <div className="gc-life-lane" style={{ top: `${layerTop(lifecycleTrack)}px`, width: `${canvasPx}px` }} aria-hidden>
+              <span className="gc-life-lane-tag">效果</span>
+            </div>
+          ) : null}
+          {lifecycleMarkers.map((mk) => {
+            const dragKey = `${POINT_DRAG_PREFIX}${mk.id}`
+            return (
+              // 贯穿竖线 + 效果轨上的菱形是一体的：包裹层零宽、按 ms 定位，竖线让"这一刻"能跟
+              // 上方覆盖物条对齐着读，菱形则落在自己那一轨上被抓。
+              <div
+                key={mk.id}
+                className={`gc-point-mark is-lifecycle${drag?.key === dragKey ? ' is-dragging' : ''}${selectedPointMarkerId === mk.id ? ' is-selected' : ''}`}
+                style={{ left: `${mk.ms * pxPerMs}px` }}
+              >
+                <span
+                  className="gc-life-head"
+                  style={{ top: `${layerTop(lifecycleTrack) + 16}px` }}
+                  role="slider"
+                  tabIndex={0}
+                  aria-label={mk.label}
+                  aria-valuenow={mk.ms}
+                  aria-valuemin={0}
+                  aria-valuemax={maxMs}
+                  title={`${mk.label} · ${fmtDur(mk.ms)}（可拖）`}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    // 按下即选（与材料条一致）：只想让右侧高亮时不必真的拖动。
+                    onSelectPointMarker?.(mk.id)
+                    if (!editable || !onPointMarkerChange) return
+                    timelineRef.current?.setPointerCapture(e.pointerId)
+                    setDrag({ key: dragKey, mode: 'move', pointerX: e.clientX, startMs: mk.ms, endMs: mk.ms, zIndex: 0 })
+                  }}
+                />
+              </div>
+            )
+          })}
           {dropHint ? (
             <div
               className="gc-mdrop"
@@ -598,6 +702,82 @@ const MATERIAL_TIMELINE_CSS = `
   background: var(--gc-accent);
   box-shadow: 0 0 8px rgba(240,136,64,.85);
 }
+/* 节点级时刻标记：竖虚线 + 可拖菱形。与橙色播放头刻意区分——播放头是"现在播到哪"，
+   这些是"这一刻会发生一件事"。结算=蓝紫，生命周期效果=青绿；两种菱形错开高度，
+   同一 ms 上重合时也还能各自抓到。 */
+.mtl-root .gc-point-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  z-index: 7;
+  pointer-events: none;
+  border-left: 1px dashed currentColor;
+}
+.mtl-root .gc-point-mark.is-settlement { color: rgba(147,163,247,.85); }
+/* 效果竖线比结算淡一档：一个节点可能有好几条效果，同样浓度会把时间轴划得很花。 */
+.mtl-root .gc-point-mark.is-lifecycle { color: rgba(90,212,192,.5); }
+.mtl-root .gc-point-head {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 11px;
+  height: 11px;
+  transform: translateX(-50%) rotate(45deg);
+  background: currentColor;
+  border: 1px solid #1b1713;
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.mtl-root .gc-point-head:hover,
+.mtl-root .gc-point-mark.is-dragging .gc-point-head {
+  filter: brightness(1.35);
+  box-shadow: 0 0 12px currentColor;
+}
+.mtl-root .gc-point-mark.is-dragging { border-left-style: solid; }
+
+/* 生命周期效果轨：独占材料轨之后的一行，只放时刻菱形（没有"一段"的概念，故无条体）。 */
+.mtl-root .gc-life-lane {
+  position: absolute;
+  left: 0;
+  height: 32px;
+  border: 1px dashed rgba(90,212,192,.28);
+  border-radius: 8px;
+  background: rgba(90,212,192,.05);
+  pointer-events: none;
+  z-index: 1;
+}
+.mtl-root .gc-life-lane-tag {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: rgba(90,212,192,.75);
+  letter-spacing: .04em;
+}
+.mtl-root .gc-life-head {
+  position: absolute;
+  left: 0;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: #5ad4c0;
+  border: 1px solid #123;
+  box-shadow: 0 0 8px rgba(90,212,192,.55);
+  cursor: ew-resize;
+  pointer-events: auto;
+  z-index: 6;
+}
+.mtl-root .gc-life-head:hover,
+.mtl-root .gc-point-mark.is-dragging .gc-life-head,
+.mtl-root .gc-point-mark.is-selected .gc-life-head {
+  background: #8ff0e0;
+  box-shadow: 0 0 14px rgba(90,212,192,.95);
+}
+/* 选中：菱形加白边 + 竖线转实线，和右侧被高亮的配置块对上。 */
+.mtl-root .gc-point-mark.is-selected .gc-life-head { border-color: #f6f1e9; }
+.mtl-root .gc-point-mark.is-selected { border-left-style: solid; color: rgba(90,212,192,.9); }
 .mtl-root .gc-mdrop {
   position: absolute;
   width: 3px;

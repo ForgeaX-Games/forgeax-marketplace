@@ -92,6 +92,7 @@ export class SkinRegistry {
     mount: OverlayMountSnap,
     emit?: (elementId: string, key: string) => void,
     ctx?: SkinCtx,
+    preview?: { timeMs?: number },
   ): ReactNode {
     const mountHasSize = layoutHasExplicitSize(mount.mountLayout)
     const wrapStyle: CSSProperties = mountWrapStyle(mount.mountLayout)
@@ -113,6 +114,8 @@ export class SkinRegistry {
                   overlay={snap}
                   emit={(key) => emit?.(child.elementId, key)}
                   ctx={ctx}
+                  preview={!!preview}
+                  previewTimeMs={preview?.timeMs}
                 />
               </SkinErrorBoundary>
             </div>
@@ -160,8 +163,9 @@ export function renderOverlayMount(
   mount: OverlayMountSnap,
   emit?: (elementId: string, key: string) => void,
   ctx?: SkinCtx,
+  preview?: { timeMs?: number },
 ): ReactNode {
-  return defaultSkinRegistry.renderOverlayMount(mount, emit, ctx)
+  return defaultSkinRegistry.renderOverlayMount(mount, emit, ctx, preview)
 }
 export function renderOverlay(
   overlay: OverlaySnap,

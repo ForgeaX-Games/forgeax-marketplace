@@ -9,16 +9,8 @@
  * 幂等：boot 只在缺失时补，用户可自由改内部 children；删掉整份下次 boot 会补回。
  */
 import type { Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
-import {
-  availableComponents,
-  battleHpBarPreset,
-  battleParryPreset,
-  battleSkillBarPreset,
-  inkKouPreset,
-  inkYingMoPreset,
-  registerCoreSkins,
-} from '../../runtime/component-host/components'
-import { buildDefaults, getComponent } from '../../runtime/registry/component-registry'
+import newComponents from '../../runtime/component-host/components/new'
+import { STAGE_FILL_LAYOUT } from '../../runtime/schema/layout'
 
 /** 基础覆盖物 方案 id 前缀：`base:<组件id>`，每份仅含该单组件、锁定不可增删。 */
 export const BASE_HUD_PREFIX = 'base:'
@@ -26,20 +18,28 @@ export const BASE_HUD_PREFIX = 'base:'
 export const SCHEME_STATIC_ID = 'scheme-static'
 export const SCHEME_DYNAMIC_ID = 'scheme-dynamic'
 
+/** 新规格组件均从外层 Layout 取得舞台盒，不再从 inputs 猜位置或尺寸。 */
+function makeNewComponentPreset(component: string, id: string): OverlayChild {
+  return {
+    id,
+    component,
+    layout: { ...STAGE_FILL_LAYOUT },
+    trigger: { when: 'enter' },
+    // 显隐唯一 SSOT = window；不写 endMs 表示持续到节点结束。
+    window: { startMs: 0 },
+    // 组件默认值只由 manifest / renderer 解释；作者未填写时保持空 bag，让参数面板显示 placeholder。
+    inputs: {},
+  }
+}
+
 /** 静态组件方案：常驻展示（HUD 血条 / 字幕）。 */
 const STATIC_SCHEME: Overlay = {
   id: SCHEME_STATIC_ID,
   title: '静态组件方案',
   children: [
-    battleHpBarPreset('hp-player', { bind: 'ent-player', label: '我方' }),
-    battleHpBarPreset('hp-boss', { bind: 'ent-boss', label: '敌方' }),
-    {
-      id: 'line',
-      component: 'dialogue',
-      trigger: { when: 'enter' },
-      window: { startMs: 0 },
-      inputs: { speaker: '角色', text: '这是一句字幕示例。' },
-    },
+    makeNewComponentPreset('BattlePlayerHpBar', 'hp-player'),
+    makeNewComponentPreset('BattleEnemyHpBar', 'hp-boss'),
+    makeNewComponentPreset('Dialogue', 'line'),
   ],
 }
 
@@ -48,17 +48,12 @@ const DYNAMIC_SCHEME: Overlay = {
   id: SCHEME_DYNAMIC_ID,
   title: '动态组件方案',
   children: [
-    inkKouPreset('qte-kou'),
-    battleParryPreset('qte-parry'),
-    inkYingMoPreset('choice-yingmo'),
-    battleSkillBarPreset('choice-skills'),
-    {
-      id: 'float',
-      component: 'floatText',
-      trigger: { when: 'enter' },
-      window: { startMs: 0 },
-      inputs: { text: '+30', x: 0.5, y: 0.4, color: '#5fbf7f' },
-    },
+    makeNewComponentPreset('InkKou', 'qte-kou'),
+    makeNewComponentPreset('BattleParry', 'qte-parry'),
+    makeNewComponentPreset('InkYingMo', 'choice-yingmo'),
+    makeNewComponentPreset('BattleSkill', 'choice-skills'),
+    makeNewComponentPreset('DamageFloatText', 'damage-float'),
+    makeNewComponentPreset('GainFloatText', 'gain-float'),
   ],
 }
 
@@ -93,7 +88,7 @@ export function listCustomSchemeIds(overlays: Record<string, Overlay> | undefine
  */
 export function listBaseHudIds(overlays: Record<string, Overlay> | undefined): string[] {
   const all = overlays ?? {}
-  return availableComponents.map((c) => `${BASE_HUD_PREFIX}${c.id}`).filter((id) => all[id])
+  return newComponents.map(({ manifest }) => `${BASE_HUD_PREFIX}${manifest.id}`).filter((id) => all[id])
 }
 
 /**
@@ -112,36 +107,18 @@ export const NEW_COMPONENT_PRESETS: Array<{
   make: (childId: string) => OverlayChild
 }> = [
   {
-    id: 'battleHpBar',
-    label: 'HUD · 水墨血条',
-    make: (id) => battleHpBarPreset(id, { bind: 'ent-player', label: '角色' }),
-  },
-  {
-    id: 'dialogue',
+    id: 'Dialogue',
     label: '字幕',
-    make: (id) => ({
-      id,
-      component: 'dialogue',
-      trigger: { when: 'enter' },
-      window: { startMs: 0 },
-      inputs: { text: '字幕示例' },
-    }),
+    make: (id) => makeNewComponentPreset('Dialogue', id),
   },
-  {
-    id: 'floatText',
-    label: '飘字',
-    make: (id) => ({
-      id,
-      component: 'floatText',
-      trigger: { when: 'enter' },
-      window: { startMs: 0 },
-      inputs: { text: '+30', x: 0.5, y: 0.4, color: '#5fbf7f' },
-    }),
-  },
-  { id: 'inkKou', label: 'QTE · 叩击', make: inkKouPreset },
-  { id: 'battleParry', label: 'QTE · 防反', make: battleParryPreset },
-  { id: 'inkYingMo', label: '选项 · 應默', make: inkYingMoPreset },
-  { id: 'battleSkillBar', label: '选项 · 技能条', make: battleSkillBarPreset },
+  { id: 'InkKou', label: 'QTE · 叩击', make: (id) => makeNewComponentPreset('InkKou', id) },
+  { id: 'BattleParry', label: 'QTE · 防反', make: (id) => makeNewComponentPreset('BattleParry', id) },
+  { id: 'InkYingMo', label: '选项 · 應默', make: (id) => makeNewComponentPreset('InkYingMo', id) },
+  { id: 'BattleSkill', label: '选项 · 技能条', make: (id) => makeNewComponentPreset('BattleSkill', id) },
+  { id: 'DamageFloatText', label: '飘字 · 伤害', make: (id) => makeNewComponentPreset('DamageFloatText', id) },
+  { id: 'GainFloatText', label: '飘字 · 增益', make: (id) => makeNewComponentPreset('GainFloatText', id) },
+  { id: 'BattlePlayerHpBar', label: 'HUD · 我方血条', make: (id) => makeNewComponentPreset('BattlePlayerHpBar', id) },
+  { id: 'BattleEnemyHpBar', label: 'HUD · 敌方血条', make: (id) => makeNewComponentPreset('BattleEnemyHpBar', id) },
 ]
 
 /**
@@ -156,32 +133,38 @@ export function ensureBuiltinSchemes(
   return ensureBaseHudSchemes({ ...(overlays ?? {}) })
 }
 
-/** 基础覆盖物 单组件方案的 child：有精选 preset 用 preset，其余组件用 component + inputs 默认值。 */
+/** 基础覆盖物 单组件方案的 child：默认参数不落盘，由组件 manifest 作为 placeholder 展示。 */
 function makeBaseHudChild(componentId: string): OverlayChild {
   const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === componentId)
   if (preset) return preset.make(`${componentId}-0`)
   return {
     id: `${componentId}-0`,
     component: componentId,
+    layout: { ...STAGE_FILL_LAYOUT },
     trigger: { when: 'enter' },
-    // 显隐唯一 SSOT = window（运行时 el.window 存在即忽略 trigger）；不写 endMs = 到节点结束。
     window: { startMs: 0 },
-    inputs: buildDefaults(getComponent(componentId)?.inputs),
+    inputs: {},
   }
 }
 
 /**
  * 保证「基础覆盖物」方案存在：组件库每个可用组件各一份 `base:<id>` 单组件方案（缺失才补）。
- * 这些方案锁定为单组件（编辑器侧不允许增删组件），仅可编辑其 layout。
+ * 这些方案锁定为单组件（编辑器侧不允许增删组件），可编辑 inputs/layout。
  */
 export function ensureBaseHudSchemes(
   overlays: Record<string, Overlay>,
 ): Record<string, Overlay> {
-  registerCoreSkins() // 保证 getComponent 可用（inputs 默认值 / 幂等）
   const next = { ...overlays }
-  for (const c of availableComponents) {
-    const id = `${BASE_HUD_PREFIX}${c.id}`
-    if (!next[id]) next[id] = { id, title: c.label, children: [makeBaseHudChild(c.id)] }
+  for (const { manifest } of newComponents) {
+    const componentId = manifest.id
+    const id = `${BASE_HUD_PREFIX}${componentId}`
+    if (!next[id]) {
+      next[id] = {
+        id,
+        title: manifest.label ?? componentId,
+        children: [makeBaseHudChild(componentId)],
+      }
+    }
   }
   return next
 }

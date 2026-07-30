@@ -50,6 +50,23 @@ export interface AudioItem {
   builtin?: boolean
 }
 
+/**
+ * 时间轴上的一个**节点级时刻点**（不是材料）——「这一刻会发生一件事」。
+ *
+ * 与 `MaterialItem.markerMs` 的分工：那个是某段材料**内部**的判定锚点（QTE 计分点），跟着材料
+ * 走；这里的是节点自己的时刻（延迟事件边的结算点、生命周期效果的施加时刻），不属于任何材料，
+ * 因而不需要 zIndex / 轨道 / 选中态。混进材料流会被迫伪造这些属性。
+ */
+export interface TimelinePointMarker {
+  /** 稳定 id：拖拽回写时用它定位（如 `settlement` / `life:3`）。 */
+  id: string
+  ms: number
+  /** 决定配色与提示语气；样式见 MaterialTimeline 的 `.gc-point-mark` 系列。 */
+  kind: 'settlement' | 'lifecycle'
+  /** 悬浮提示里的一句话（含时刻由组件自己拼）。 */
+  label: string
+}
+
 export const TIMELINE_RULER_H = 24
 export const TIMELINE_LAYER_TOP = 34
 export const TIMELINE_LAYER_STEP = 34

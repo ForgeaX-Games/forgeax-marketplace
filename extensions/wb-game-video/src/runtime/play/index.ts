@@ -8,6 +8,12 @@ export { GameStage, type GameStageProps } from './GameStage'
 export { BgmPlayer, type BgmPlayerProps } from './BgmPlayer'
 export { videoDurationCapReached } from './videoTiming'
 export { VideoOverlayStage } from './VideoOverlayStage'
+export {
+  ScaledOverlayContent,
+  computeScaledOverlayGeometry,
+  OVERLAY_LOGICAL_WIDTH,
+  type ScaledOverlayGeometry,
+} from './ScaledOverlayContent'
 export { useVideoContentRect } from './useVideoContentRect'
 export { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from './videoContentRect'
 export { MissingVideoNotice } from './MissingVideoNotice'

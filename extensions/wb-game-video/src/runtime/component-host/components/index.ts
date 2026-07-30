@@ -1,125 +1,53 @@
 /**
- * 组件包 registry 入口 —— 组件包 = ComponentDef + Renderer（同文件），经本入口注册。
+ * 平台内建组件注册入口。
  *
- * 默认表现/交互：floatText / dialogue / transition / choice / skill / qte / hotspot / filter / fx
- * 专属皮肤：battleParry / inkKou / inkYingMo / battleSkillBar
- * overlay：battleHpBar
- *
- * 加新组件 = 同文件导出契约+渲染，并在 EXTRA_COMPONENTS + installCoreSkins 各挂一行。
+ * 组件定义、展示名与渲染器的唯一清单是 `new/` 的 default export。
+ * 旧组件源码不再从本入口导出或注册，已有旧 component id 运行时按未知组件处理。
  */
 import {
   registerOverlayRenderer,
   SkinRegistry,
 } from '../rendererRegistry'
 import { ComponentRegistry, registerComponent, type ComponentDef } from '../../registry/component-registry'
-import {
-  BattleParryLayer,
-  battleParryComponent,
-  battleParryDefaults,
-  battleParryPreset,
-} from './BattleParryLayer'
-import { InkKouLayer, inkKouComponent, inkKouDefaults, inkKouPreset } from './InkKouLayer'
-import {
-  InkYingMoLayer,
-  inkYingMoComponent,
-  inkYingMoDefaults,
-  inkYingMoPreset,
-} from './InkYingMoLayer'
-import {
-  BattleSkillLayer,
-  battleSkillBarComponent,
-  battleSkillBarDefaults,
-  battleSkillBarPreset,
-} from './BattleSkillLayer'
-import { BattleHpBar, battleHpBarComponent, battleHpBarPreset } from './BattleHpBar'
-import { FloatTextOverlay, floatTextComponent } from './FloatText'
-import { DialogueOverlay, dialogueComponent } from './Dialogue'
-import { TransitionOverlay, transitionComponent } from './Transition'
-import { ChoiceButtons, choiceComponent, skillComponent } from './Choice'
-import { QteButtons, qteComponent } from './Qte'
-import { HotspotButtons, hotspotComponent } from './Hotspot'
-import { FilterOverlay, filterComponent } from './Filter'
-import { FxOverlay, fxComponent } from './FxEffect'
 import newComponents from './new'
+import { BattleEnemyHpBarManifest } from './new/BattleEnemyHpBar'
+import { BattleParryManifest } from './new/BattleParry'
+import { BattlePlayerHpBarManifest } from './new/BattlePlayerHpBar'
+import { BattleSkillManifest } from './new/BattleSkill'
+import { DamageFloatTextManifest } from './new/DamageFloatText'
+import { DialogueManifest } from './new/Dialogue'
+import { GainFloatTextManifest } from './new/GainFloatText'
+import { InkKouManifest } from './new/InkKou'
+import { InkYingMoManifest } from './new/InkYingMo'
 
 export {
-  battleHpBarComponent,
-  battleHpBarPreset,
-  battleParryComponent,
-  battleParryDefaults,
-  battleParryPreset,
-  battleSkillBarComponent,
-  battleSkillBarDefaults,
-  battleSkillBarPreset,
-  inkKouComponent,
-  inkKouDefaults,
-  inkKouPreset,
-  inkYingMoComponent,
-  inkYingMoDefaults,
-  inkYingMoPreset,
-  floatTextComponent,
-  dialogueComponent,
-  transitionComponent,
-  choiceComponent,
-  skillComponent,
-  qteComponent,
-  hotspotComponent,
-  filterComponent,
-  fxComponent,
+  BattleEnemyHpBarManifest,
+  BattleParryManifest,
+  BattlePlayerHpBarManifest,
+  BattleSkillManifest,
+  DamageFloatTextManifest,
+  DialogueManifest,
+  GainFloatTextManifest,
+  InkKouManifest,
+  InkYingMoManifest,
 }
-export { CHOICE_INPUTS, validateChoiceEvents } from './Choice'
-export type { ChoiceOption, ChoiceParams, ChoicePresentation } from './Choice'
-export type { FloatTextParams } from './FloatText'
-export type { DialogueParams } from './Dialogue'
-export type { TransitionParams } from './Transition'
-export type { HotspotSpot, HotspotParams } from './Hotspot'
-export { QTE_DEFAULT_EVENTS, QTE_INPUTS } from './Qte'
-export type { QteCue, QteCueShape, QteParams } from './Qte'
+export { default as newComponents } from './new'
 
-/**
- * 全部可挂载组件契约（与渲染同文件导出）。
- * `installExtraComponents` → 每局 ComponentRegistry；`registerCoreSkins` → 默认表。
- */
-export const EXTRA_COMPONENTS: Array<[string, ComponentDef]> = [
-  ['floatText', floatTextComponent as unknown as ComponentDef],
-  ['dialogue', dialogueComponent as unknown as ComponentDef],
-  ['transition', transitionComponent as unknown as ComponentDef],
-  ['choice', choiceComponent as unknown as ComponentDef],
-  ['skill', skillComponent as unknown as ComponentDef],
-  ['qte', qteComponent as unknown as ComponentDef],
-  ['hotspot', hotspotComponent as unknown as ComponentDef],
-  ['filter', filterComponent as unknown as ComponentDef],
-  ['fx', fxComponent as unknown as ComponentDef],
-  ['inkKou', inkKouComponent as unknown as ComponentDef],
-  ['battleParry', battleParryComponent as unknown as ComponentDef],
-  ['inkYingMo', inkYingMoComponent as unknown as ComponentDef],
-  ['battleSkillBar', battleSkillBarComponent as unknown as ComponentDef],
-  ['battleHpBar', battleHpBarComponent as unknown as ComponentDef],
-]
-
-/** 把组件包注入某个隔离 ComponentRegistry（多局 Session 用）。 */
-export function installExtraComponents(reg: ComponentRegistry): void {
-  for (const [id, c] of EXTRA_COMPONENTS) reg.registerComponent(id, c)
-  for (const { manifest } of newComponents) reg.registerComponent(manifest.id, manifest)
+/** 把全部新规格组件注入隔离注册表。 */
+export function installNewComponents(reg: ComponentRegistry): void {
+  for (const { manifest } of newComponents) reg.registerComponent(manifest.id, manifest as ComponentDef)
 }
 
-/** 完整组件契约隔离表（GraphSession 默认用）。 */
+/** GraphSession 默认使用的完整组件契约表。 */
 export function createDefaultComponentRegistry(): ComponentRegistry {
   const reg = new ComponentRegistry()
-  installExtraComponents(reg)
+  installNewComponents(reg)
   return reg
 }
 
-/**
- * 皮肤定位类型：
- *  - 'point'：位置由作者锚点（params.x/y 或 cue）决定（可拖，创作=皮肤=试玩三处一致）。
- *  - 'fixed'：整段自定位（如防反收圈），不跟预览手柄走。
- */
 export type SkinPositioning = 'point' | 'fixed'
 
-/**
- * 可选交互皮肤（供编辑器下拉/定位查询用，也是「这个组件是否有完整专属皮肤」的唯一登记点）。
- */
+/** 有固定交互表现与出口集合的组件。 */
 export const INTERACTION_SKINS: Array<{
   id: string
   label: string
@@ -127,89 +55,47 @@ export const INTERACTION_SKINS: Array<{
   defaultAnchor?: { x: number; y: number }
   defaultEvents: Array<{ id: string; label?: string; condition?: unknown }>
 }> = [
-  { id: 'battleParry', label: '防反 QTE（A/B 收圈）', positioning: 'fixed', defaultEvents: battleParryDefaults.events },
-  { id: 'inkKou', label: '叩击 QTE（单点）', positioning: 'point', defaultAnchor: { x: 0.58, y: 0.39 }, defaultEvents: inkKouDefaults.events },
-  { id: 'inkYingMo', label: '應/默 抉择', positioning: 'point', defaultAnchor: { x: 0.5, y: 0.88 }, defaultEvents: inkYingMoDefaults.events },
-  { id: 'battleSkillBar', label: '战斗技能条', positioning: 'point', defaultAnchor: { x: 0.5, y: 0.88 }, defaultEvents: battleSkillBarDefaults.events },
+  { id: BattleParryManifest.id, label: BattleParryManifest.label ?? BattleParryManifest.id, positioning: 'fixed', defaultEvents: BattleParryManifest.events },
+  { id: InkKouManifest.id, label: InkKouManifest.label ?? InkKouManifest.id, positioning: 'fixed', defaultEvents: InkKouManifest.events },
+  { id: InkYingMoManifest.id, label: InkYingMoManifest.label ?? InkYingMoManifest.id, positioning: 'fixed', defaultEvents: InkYingMoManifest.events },
+  { id: BattleSkillManifest.id, label: BattleSkillManifest.label ?? BattleSkillManifest.id, positioning: 'fixed', defaultEvents: BattleSkillManifest.events },
 ]
 
-/** 皮肤定位类型查询；未知/未选皮肤（默认按钮条）按 'fixed'（底部居中）处理。 */
 export function skinPositioning(id: string | undefined): SkinPositioning {
-  return INTERACTION_SKINS.find((s) => s.id === id)?.positioning ?? 'fixed'
+  return INTERACTION_SKINS.find((skin) => skin.id === id)?.positioning ?? 'fixed'
 }
 
-/** point 皮肤的默认锚点（新建拍点初始位置）；无则 undefined（走通用兜底 0.5/0.55）。 */
 export function skinDefaultAnchor(id: string | undefined): { x: number; y: number } | undefined {
-  return INTERACTION_SKINS.find((s) => s.id === id)?.defaultAnchor
+  return INTERACTION_SKINS.find((skin) => skin.id === id)?.defaultAnchor
 }
 
-/** 血条类 overlay 组件（供编辑器下拉）。 */
+/** 血条类新规格组件（供编辑器下拉）。 */
 export const HP_BAR_COMPONENTS: Array<{ id: string; label: string }> = [
-  { id: 'battleHpBar', label: '水墨血条' },
+  { id: BattlePlayerHpBarManifest.id, label: BattlePlayerHpBarManifest.label ?? BattlePlayerHpBarManifest.id },
+  { id: BattleEnemyHpBarManifest.id, label: BattleEnemyHpBarManifest.label ?? BattleEnemyHpBarManifest.id },
 ]
-
-/** 仅运行时：注册 `new/` 的契约 + 渲染器。 */
-function installNewRuntimeComponents(
-  registerDef: (id: string, def: ComponentDef) => void = registerComponent,
-  registerRenderer: typeof registerOverlayRenderer = registerOverlayRenderer,
-): void {
-  for (const { component, manifest } of newComponents) {
-    registerDef(manifest.id, manifest)
-    registerRenderer(manifest.id, component)
-  }
-}
 
 function installCoreSkins(reg: SkinRegistry): void {
-  reg.registerOverlayRenderer('choice', ChoiceButtons)
-  reg.registerOverlayRenderer('skill', ChoiceButtons)
-  reg.registerOverlayRenderer('qte', QteButtons)
-  reg.registerOverlayRenderer('hotspot', HotspotButtons)
-  reg.registerOverlayRenderer('floatText', FloatTextOverlay)
-  reg.registerOverlayRenderer('transition', TransitionOverlay)
-  reg.registerOverlayRenderer('dialogue', DialogueOverlay)
-  reg.registerOverlayRenderer('filter', FilterOverlay)
-  reg.registerOverlayRenderer('fx', FxOverlay)
-  reg.registerOverlayRenderer('battleParry', BattleParryLayer)
-  reg.registerOverlayRenderer('inkKou', InkKouLayer)
-  reg.registerOverlayRenderer('inkYingMo', InkYingMoLayer)
-  reg.registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
-  reg.registerOverlayRenderer('battleHpBar', BattleHpBar)
   for (const { component, manifest } of newComponents) {
     reg.registerOverlayRenderer(manifest.id, component)
   }
 }
 
-let _registered = false
-/** 注册到默认表（编辑器幂等）：渲染器 + 组件包契约。 */
+let registered = false
+
+/** 注册到默认组件与渲染表（编辑器幂等）。 */
 export function registerCoreSkins(): void {
-  if (_registered) return
-  _registered = true
-  for (const [id, c] of EXTRA_COMPONENTS) registerComponent(id, c)
-  registerOverlayRenderer('choice', ChoiceButtons)
-  registerOverlayRenderer('skill', ChoiceButtons)
-  registerOverlayRenderer('qte', QteButtons)
-  registerOverlayRenderer('hotspot', HotspotButtons)
-  registerOverlayRenderer('floatText', FloatTextOverlay)
-  registerOverlayRenderer('transition', TransitionOverlay)
-  registerOverlayRenderer('dialogue', DialogueOverlay)
-  registerOverlayRenderer('filter', FilterOverlay)
-  registerOverlayRenderer('fx', FxOverlay)
-  registerOverlayRenderer('battleParry', BattleParryLayer)
-  registerOverlayRenderer('inkKou', InkKouLayer)
-  registerOverlayRenderer('inkYingMo', InkYingMoLayer)
-  registerOverlayRenderer('battleSkillBar', BattleSkillLayer)
-  registerOverlayRenderer('battleHpBar', BattleHpBar)
-  installNewRuntimeComponents()
+  if (registered) return
+  registered = true
+  for (const { component, manifest } of newComponents) {
+    registerComponent(manifest.id, manifest as ComponentDef)
+    registerOverlayRenderer(manifest.id, component)
+  }
 }
 
-/** 新建一份已装全部默认渲染器的隔离表（多局 Session 各持一份）。 */
+/** 新建一份只安装新规格渲染器的隔离表。 */
 export function createCoreSkinRegistry(): SkinRegistry {
   const reg = new SkinRegistry()
   installCoreSkins(reg)
   return reg
 }
-
-/** 可用组件清单（id + 展示名）——供界面 tab 组件库渲染所有可拖组件。 */
-export const availableComponents: Array<{ id: string; label: string }> = EXTRA_COMPONENTS.map(
-  ([id, def]) => ({ id, label: def.label ?? id }),
-)

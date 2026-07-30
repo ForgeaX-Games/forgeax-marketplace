@@ -2,6 +2,7 @@
  * 皮肤自带运行时（component-host/ 内部工具箱）—— 让每个皮肤组件**自闭环**：只依赖 React + 本工具，
  * 不 import 游戏引擎其它代码。样式/SVG 滤镜都由皮肤自己注入，方便用户把组件整包拷走/替换。
  */
+import type { CSSProperties } from 'react'
 
 // 字体与皮肤组件同层自带；随 runtime 一起发，不依赖 editor 注入。
 import brushFontUrl from './HYShangWei.woff2'
@@ -47,4 +48,9 @@ export function ensureBrushFont(): void {
     'skin-brush-font',
     `@font-face{font-family:'HYShangWei';src:url('${brushFontUrl}') format('woff2');font-weight:normal;font-style:normal;font-display:swap;}`,
   )
+}
+
+/** 预览态 CSS 动画负 delay 使用的本地时间。 */
+export function previewTStyle(localMs: number): CSSProperties {
+  return { ['--preview-t']: `${Math.max(0, localMs)}ms` } as CSSProperties
 }

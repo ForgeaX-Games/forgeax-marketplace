@@ -11,7 +11,7 @@
  * `children`。挂载侧仅 `overlay` + `layout` + `reactions`，不补丁子组件。
  *
  * 旧 → 新 kind 映射：
- *   字幕 dialogue[]     → kind 'dialogue'   （MaterialItem 'subtitle'）
+ *   字幕 dialogue[]     → kind 'Dialogue'   （MaterialItem 'subtitle'）
  *   飘字 overlays[]      → kind 'floatText'  （'overlay'）+ 结算联动 = 节点 reaction（effect.id `${floatId}-settle`）
  *   QTE  qte.cues[]      → kind 'qte'（inputs.cues[]）→ 每 cue 一个 'qte' 项（整段 QTE 跨度由 cues 派生，不再单列 'qte_window' 轨）
  *   选项 choice+branches → kind 'choice'（inputs.events[]）+ 分支跳转 = 出边 `<id>`；效果 = 节点 event reaction
@@ -70,14 +70,19 @@ import {
   forkSchemeForEdit,
   overriddenChildIds,
   patchOverlayChild,
+  patchOverlayChildInMount,
   patchOverlayMount,
   primaryOverlayMount,
   removeOverlayChild,
   resetOverride,
 } from '../../graph/edit/overlay-edit'
-import { overlayMountId } from '../../runtime/schema/node-config-schema'
+import { createOverlayMount, overlayMountId } from '../../runtime/schema/node-config-schema'
 import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
-import { STAGE_FILL_LAYOUT, layoutIsEffectivelyEmpty } from '../../runtime/schema/layout'
+import {
+  STAGE_FILL_LAYOUT,
+  layoutIsEffectivelyEmpty,
+  resolveMountLayoutForChildren,
+} from '../../runtime/schema/layout'
 
 /**
  * 新建/克隆子件 layout（通用，不按 component id 特判）：
@@ -426,11 +431,12 @@ export function applyStyleLockedEventParams(
   if (!RICH_SKIN_COMPONENTS.has(id)) return cleaned
   const locked = RICH_SKIN_DEFAULT_EVENTS[id]
   if (!Array.isArray(locked) || locked.length === 0) return cleaned
+  const eventIds = new Set(locked.map((event) => event.id))
+  const requestedDefault = typeof cleaned.defaultEvent === 'string' ? cleaned.defaultEvent : ''
   return {
     ...cleaned,
     events: locked.map((e) => ({ id: e.id, label: e.label, condition: e.condition })),
-    defaultEvent:
-      (typeof cleaned.defaultEvent === 'string' && cleaned.defaultEvent) || 'fail',
+    defaultEvent: eventIds.has(requestedDefault) ? requestedDefault : locked[0]!.id,
   }
 }
 
@@ -981,8 +987,8 @@ export function isSchemeOriginElement(scenario: GameScenario, node: GameNode | u
  */
 function materialKindForChild(scenario: GameScenario, node: GameNode | undefined, el: OverlayChild): MaterialKind {
   if (isSchemeOriginElement(scenario, node, el.id)) return 'component'
-  if (el.component === 'dialogue') return 'subtitle'
-  if (el.component === 'floatText') return 'overlay'
+  if (el.component === 'Dialogue') return 'subtitle'
+  if (el.component === 'DamageFloatText' || el.component === 'GainFloatText') return 'overlay'
   if (hasOptionEventsInput(el.component)) return 'option'
   if (hasCuePointsInput(el.component)) return 'qte'
   if (el.component === 'filter') return 'filter'
@@ -1113,7 +1119,7 @@ export function collectMountItemsFromNode(scenario: GameScenario, node: GameNode
       key: `mount:${mid}`,
       id: mid,
       kind: 'mount' as MaterialKind,
-      label: title || mid,
+      label: title ? (mid === mount.overlay ? title : `${title} · ${mid}`) : mid,
       startMs: start ?? 0,
       endMs: end ?? maxMs,
       zIndex: i,
@@ -1134,12 +1140,17 @@ export function mountOverlayGraph(
   preset?: Overlay,
 ): GameScenario {
   const mounts = node.data.overlayNodes ?? []
-  if (mounts.some((m) => overlayMountId(m) === overlayId || m.overlay === overlayId)) return scenario
   let ui = scenario.ui
   if (!ui?.overlays?.[overlayId] && preset) {
     ui = { ...ui, overlays: { ...(ui?.overlays ?? {}), [overlayId]: structuredClone(preset) } }
   }
-  const next = [...mounts, { overlay: overlayId }]
+  const definition = ui?.overlays?.[overlayId]
+  const layout = resolveMountLayoutForChildren(
+    undefined,
+    definition?.children.map((child) => child.layout) ?? [],
+  )
+  const created = createOverlayMount(mounts, overlayId)
+  const next = [...mounts, { ...created, ...(layout ? { layout } : {}) }]
   return { ...scenario, ui, graph: updateNodeData(scenario.graph, node.id, { overlayNodes: next }) }
 }
 
@@ -1194,14 +1205,14 @@ function removeOverlayChildCascading(scenario: GameScenario, node: GameNode, chi
  */
 export function removeMountGraph(scenario: GameScenario, node: GameNode, mountId: string): GameScenario {
   const mounts = node.data.overlayNodes ?? []
-  const mount = mounts.find((m) => overlayMountId(m) === mountId || m.overlay === mountId)
+  const mount = mounts.find((m) => overlayMountId(m) === mountId)
   if (!mount) return scenario
   const children = resolveMountChildren(scenario.ui?.overlays, mount)
   let s = cascadeClearChildrenEvents(scenario, node, children)
   const cur = s.graph.nodes.find((x) => x.id === node.id) ?? node
-  const next = (cur.data.overlayNodes ?? []).filter(
-    (m) => overlayMountId(m) !== overlayMountId(mount) && m.overlay !== mount.overlay,
-  )
+  const curMounts = cur.data.overlayNodes ?? []
+  const removeIndex = curMounts.findIndex((m) => overlayMountId(m) === mountId)
+  const next = curMounts.filter((_, index) => index !== removeIndex)
   s = {
     ...s,
     graph: updateNodeData(s.graph, node.id, { overlayNodes: next.length ? next : undefined }),
@@ -1240,7 +1251,7 @@ export function shiftMountWindowGraph(
   for (const el of children) {
     const sp = childVisibleSpan(el, maxMs)
     if (!sp) continue // filter/fx 无时序语义
-    s = patchOverlayChild(s, node.id, el.id, {
+    s = patchOverlayChildInMount(s, node.id, mountId, el.id, {
       window: { startMs: shift(sp.start), endMs: shift(sp.end) },
     })
   }
@@ -1283,7 +1294,7 @@ export function resizeMountWindowGraph(
     let s = scenario
     for (const x of spans) {
       if (x.start !== curStart) continue
-      s = patchOverlayChild(s, node.id, x.el.id, { window: { startMs: next, endMs: x.end } })
+      s = patchOverlayChildInMount(s, node.id, mountId, x.el.id, { window: { startMs: next, endMs: x.end } })
     }
     return s
   }
@@ -1293,7 +1304,7 @@ export function resizeMountWindowGraph(
     let s = scenario
     for (const x of spans) {
       if (x.end !== curEnd) continue
-      s = patchOverlayChild(s, node.id, x.el.id, { window: { startMs: x.start, endMs: next } })
+      s = patchOverlayChildInMount(s, node.id, mountId, x.el.id, { window: { startMs: x.start, endMs: next } })
     }
     return s
   }
@@ -1340,17 +1351,19 @@ export function activePreviewOverlaysFromNode(
       if (ms < start || ms > end) continue
       const label = resolveFloatTextPreviewLabel(floatPreviewParams(scenario, node, el, inputs as FloatTextParams), previewCtx)
       if (!label) continue
+      const mount = findMountOwningChild(scenario, node, el.id)
+      const mountId = mount ? overlayMountId(mount) : ''
       out.push({
         id: `overlay:${el.id}`,
         materialKey: `overlay:${el.id}`,
         kind: 'overlay',
         label,
-        x: (inputs.x as number) ?? OVERLAY_XY.x,
-        y: (inputs.y as number) ?? OVERLAY_XY.y,
+        x: 0.5 + (typeof mount?.layout?.left === 'number' ? mount.layout.left : 0),
+        y: 0.5 + (typeof mount?.layout?.top === 'number' ? mount.layout.top : 0),
         zIndex: normalizeLayer(el.layout?.zIndex, 1),
         movable: true,
         style: inputs.style as GraphTextStyle | undefined,
-        target: { kind: 'element', elementId: el.id },
+        target: { kind: 'mount', mountId, elementId: el.id },
       })
     } else if (kind === 'qte') {
       if (qteOutcomeDetail === undefined) {
@@ -1377,6 +1390,8 @@ export function activePreviewOverlaysFromNode(
       const start = el.window?.startMs ?? 0
       const end = el.window?.endMs ?? maxMs
       if (ms < start || ms > end) continue
+      const mount = findMountOwningChild(scenario, node, el.id)
+      const mountId = mount ? overlayMountId(mount) : ''
       out.push({
         id: `option:list:${el.id}`,
         materialKey: `option:${el.id}`,
@@ -1387,11 +1402,11 @@ export function activePreviewOverlaysFromNode(
           previewCtx,
           previewState,
         ) || undefined,
-        x: typeof inputs.x === 'number' ? inputs.x : OPTION_XY.x,
-        y: typeof inputs.y === 'number' ? inputs.y : OPTION_XY.y,
+        x: 0.5 + (typeof mount?.layout?.left === 'number' ? mount.layout.left : 0),
+        y: 0.5 + (typeof mount?.layout?.top === 'number' ? mount.layout.top : 0),
         zIndex: normalizeLayer(el.layout?.zIndex, 3),
         movable: true,
-        target: { kind: 'element', elementId: el.id },
+        target: { kind: 'mount', mountId, elementId: el.id },
       })
     } else if (kind === 'filter' || kind === 'fx') {
       // 滤镜/特效走 videoFx 旁路，不进可拖叠层
@@ -1577,6 +1592,52 @@ export function patchOverlayPositionGraph(
   return scenario
 }
 
+/** 新规格画布：移动/调层整份挂载，内部 child 相对排版保持不变。 */
+export function patchOverlayMountLayoutGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  mountId: string,
+  patch: Partial<Layout>,
+): GameScenario {
+  const mount = (node.data.overlayNodes ?? []).find((item) => overlayMountId(item) === mountId)
+  if (!mount) return scenario
+  const children = resolveMountChildren(scenario.ui?.overlays, mount)
+  const layout = resolveMountLayoutForChildren(
+    { ...mount.layout, ...patch },
+    children.map((child) => child.layout),
+  )
+  return patchOverlayMount(scenario, node.id, mountId, {
+    layout,
+  })
+}
+
+/** 预览画布层级调整：沿用元素 layout.zIndex / cue.zIndex，不增加并行字段。 */
+export function patchOverlayZIndexGraph(
+  scenario: GameScenario,
+  node: GameNode,
+  target: PreviewTarget,
+  zIndex: number,
+): GameScenario {
+  const nextZ = clampLayer(zIndex)
+  if (target.kind === 'element' || target.kind === 'mount') {
+    const el = findElement(scenario, node, target.elementId)
+    if (!el) return scenario
+    return patchOverlayChild(scenario, node.id, el.id, {
+      layout: { ...el.layout, zIndex: nextZ },
+    })
+  }
+  if (target.kind === 'qteCue') {
+    const el = findElement(scenario, node, target.elementId)
+    if (!el) return scenario
+    const cues = cuesOf(el).map((cue) =>
+      cue.id === target.cueId ? { ...cue, zIndex: nextZ } : cue)
+    return patchOverlayChild(scenario, node.id, el.id, {
+      inputs: { ...el.inputs, cues },
+    })
+  }
+  return scenario
+}
+
 // ── 写映射：删除 + 二次确认 ────────────────────────────────────────────────────
 function isWholeInteractionDelete(scenario: GameScenario, node: GameNode, item: MaterialItem): boolean {
   if (item.kind === 'option') return true
@@ -1670,7 +1731,10 @@ export function listSchemeMountTabs(scenario: GameScenario, node: GameNode | und
     if (seenMount.has(mountId)) continue
     seenMount.add(mountId)
     const overlay = scenario.ui?.overlays?.[mount.overlay]
-    const title = overlay?.title?.trim() || mountId
+    const overlayTitle = overlay?.title?.trim()
+    const title = overlayTitle
+      ? (mountId === mount.overlay ? overlayTitle : `${overlayTitle} · ${mountId}`)
+      : mountId
     const components: ExtraAddableComponent[] = []
     for (const el of overlay?.children ?? []) {
       const componentId = el.component
@@ -1740,7 +1804,7 @@ export function addMaterialGraph(
     const id = newElementId()
     const el: OverlayChild = {
       id,
-      component: 'dialogue',
+      component: 'Dialogue',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: { zIndex: at ? at.zIndex : 0 },
@@ -1752,11 +1816,11 @@ export function addMaterialGraph(
     const id = newElementId()
     const float: OverlayChild = {
       id,
-      component: 'floatText',
+      component: 'DamageFloatText',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
-      layout: { zIndex: at ? at.zIndex : 1 },
-      inputs: { text: '-100', x: OVERLAY_XY.x, y: 0.45 },
+      layout: layoutForNewChild(undefined, at ? at.zIndex : 1),
+      inputs: { text: '-100' },
     }
     const s1 = addOverlayChild(scenario, node.id, float)
     const s1Node = findNode(s1.graph, node.id) ?? node
@@ -1790,20 +1854,15 @@ export function addMaterialGraph(
     const id = newElementId()
     const optStart = at ? startMs : 0
     const optEnd = at ? endMs : dur
-    // 默认样式的选项固定为无皮肤清单（可自由增删选项）——不再有多皮肤可选。
+    // 默认选项固定使用新规格「應/默」组件。
+    const inputs = applyStyleLockedEventParams({}, 'InkYingMo')
     const el: OverlayChild = {
       id,
-      component: 'choice',
+      component: 'InkYingMo',
       trigger: { when: 'enter' },
       window: { startMs: optStart, endMs: optEnd },
       layout: layoutForNewChild(undefined, at ? at.zIndex : 3),
-      inputs: {
-        presentation: 'list',
-        x: OPTION_XY.x,
-        y: OPTION_XY.y,
-        events: [{ id: 'opt0', label: '选项一' }],
-        defaultEvent: 'opt0',
-      },
+      inputs,
     }
     const s = addOverlayChild(s0, node.id, el)
     return { scenario: s, selectKey: `option:${id}` }
@@ -1888,11 +1947,11 @@ export function addQteCueGraph(
   const id = newElementId()
   const seeded = applyStyleLockedEventParams(
     { qteKind: 'parry', passingHits: 1, cues: [cue], defaultEvent: 'fail' },
-    'inkKou',
+    'InkKou',
   )
   const newEl: OverlayChild = {
     id,
-    component: 'inkKou',
+    component: 'InkKou',
     trigger: { when: 'enter' },
     // 显隐唯一 SSOT = window：按首个拍点的可见区间落窗，作者随后可在时间轴上拖改。
     window: { startMs: cue.appearAt ?? 0, endMs: cue.endAt ?? end },

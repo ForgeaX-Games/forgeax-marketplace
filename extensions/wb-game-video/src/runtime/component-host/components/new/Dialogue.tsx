@@ -1,5 +1,5 @@
 /**
- * 字幕/对白（component id: `dialogue`）—— 显示一名角色说出的台词。
+ * 字幕/对白（component id: `Dialogue`）—— 显示一名角色说出的台词。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责固定的对白视觉。
  */
 import type { ReactNode } from 'react'
@@ -12,7 +12,7 @@ export const DialogueManifest: ComponentManifest = {
   label: '字幕/对白',
   inputs: [
     { key: 'speaker', label: '说话人', valueType: 'string' },
-    { key: 'text', label: '台词', valueType: 'string' },
+    { key: 'text', label: '台词', valueType: 'string', default: '……' },
   ],
   events: [],
 }
@@ -24,7 +24,7 @@ export function Dialogue({ overlay }: OverlayProps): ReactNode {
 
   return (
     <div className="gv-dialogue">
-      <div className="gv-dialogue-box">
+      <div className="gv-dialogue-box" data-overlay-fit-target>
         {speaker && <div className="gv-dialogue-speaker">{speaker}</div>}
         <div className="gv-dialogue-text">{text}</div>
       </div>

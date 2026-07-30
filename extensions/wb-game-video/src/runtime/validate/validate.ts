@@ -8,6 +8,7 @@
  */
 import type { GameGraph, GameScenario, Overlay, Reaction } from '../schema/graph-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
+import { eventsFromParams, overlayReactionKey } from '../schema/overlay-events'
 import { deriveOutputs, getComponent } from '../registry/component-registry'
 import { defaultNodeKindRegistry, resolveNodeType } from '../nodes'
 
@@ -39,6 +40,76 @@ function isRoutingHandle(h: string): boolean {
 
 const EFFECT_KINDS = new Set(['attr', 'var', 'flag', 'item'])
 const CLAUSE_TYPES = new Set(['var', 'flag', 'visited', 'attr', 'attrRatio', 'attrCompare', 'score', 'hasItem'])
+
+/** Overlay 目录 reactions 是比挂载 Reaction 更窄的持久化契约，逐字段 fail-loud。 */
+function checkOverlayReactions(
+  overlay: Overlay,
+  overlays: Record<string, Overlay>,
+  issues: Issue[],
+): void {
+  const raw = (overlay as { reactions?: unknown }).reactions
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    issues.push({ level: 'error', code: 'overlay.reactions.type', msg: 'overlay.reactions 必须是数组', at: `overlay:${overlay.id}.reactions` })
+    return
+  }
+  const allowed = new Set<string>()
+  for (const child of overlay.children) {
+    const declared = eventsFromParams(child.inputs)
+    const events = declared.length ? declared : (getComponent(child.component)?.events ?? [])
+    for (const event of events) allowed.add(overlayReactionKey(child.id, event.id))
+  }
+  const seen = new Set<string>()
+  raw.forEach((value, index) => {
+    const at = `overlay:${overlay.id}.reactions[${index}]`
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      issues.push({ level: 'error', code: 'overlay.reaction.type', msg: '目录 reaction 必须是对象', at })
+      return
+    }
+    const reaction = value as Record<string, unknown>
+    const when = reaction.when
+    if (!when || typeof when !== 'object' || Array.isArray(when)
+      || (when as Record<string, unknown>).type !== 'event'
+      || typeof (when as Record<string, unknown>).id !== 'string') {
+      issues.push({ level: 'error', code: 'overlay.reaction.trigger', msg: '目录 reaction 只允许 { type: event, id: childId:eventId }', at })
+      return
+    }
+    const id = (when as { id: string }).id
+    if (!allowed.has(id)) {
+      issues.push({ level: 'error', code: 'overlay.reaction.event.missing', msg: `目录 reaction key '${id}' 必须精确匹配 childId:eventId`, at })
+    }
+    if (seen.has(id)) {
+      issues.push({ level: 'error', code: 'overlay.reaction.duplicate', msg: `目录 reaction key '${id}' 重复`, at })
+    }
+    seen.add(id)
+    if (!Array.isArray(reaction.do)) {
+      issues.push({ level: 'error', code: 'overlay.reaction.actions.type', msg: '目录 reaction.do 必须是数组', at })
+      return
+    }
+    reaction.do.forEach((action, actionIndex) => {
+      const actionAt = `${at}.do[${actionIndex}]`
+      if (!action || typeof action !== 'object' || Array.isArray(action)) {
+        issues.push({ level: 'error', code: 'overlay.reaction.action.type', msg: '目录动作必须是对象', at: actionAt })
+        return
+      }
+      const a = action as Record<string, unknown>
+      if (a.kind !== 'effect' && a.kind !== 'spawn') {
+        issues.push({ level: 'error', code: 'overlay.reaction.action.kind', msg: `目录动作只允许 effect/spawn，不允许 '${String(a.kind)}'`, at: actionAt })
+      } else if (a.kind === 'effect' && !Array.isArray(a.effects)) {
+        issues.push({ level: 'error', code: 'overlay.reaction.effect.type', msg: 'effect.effects 必须是数组', at: actionAt })
+      } else if (a.kind === 'spawn' && (typeof a.from !== 'string' || a.from.length === 0)) {
+        issues.push({ level: 'error', code: 'overlay.reaction.spawn.from', msg: 'spawn.from 必须是非空 overlayId/childId', at: actionAt })
+      } else if (a.kind === 'spawn') {
+        const slash = (a.from as string).indexOf('/')
+        const overlayId = slash > 0 ? (a.from as string).slice(0, slash) : ''
+        const childId = slash > 0 ? (a.from as string).slice(slash + 1) : ''
+        if (!overlayId || !childId || !overlays[overlayId]?.children.some((child) => child.id === childId)) {
+          issues.push({ level: 'error', code: 'overlay.reaction.spawn.missing', msg: `spawn.from '${String(a.from)}' 未命中目录组件模板`, at: actionAt })
+        }
+      }
+    })
+  })
+}
 
 interface RefCtx {
   entities: Set<string>
@@ -425,6 +496,7 @@ export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
       }
     }
   }
+  for (const overlay of Object.values(overlays ?? {})) checkOverlayReactions(overlay, overlays ?? {}, issues)
 
   // 4) 不可达节点（从 nodes[0] BFS）
   if (graph.nodes.length > 0) {

@@ -5,8 +5,7 @@
  */
 import { describe, expect, it, beforeAll } from 'vitest'
 import { makeNodiaDemo } from '../../editor/demo/demo'
-import { registerCoreSkins } from '../component-host/components'
-import { inkYingMoDefaults } from '../component-host/components/InkYingMoLayer'
+import { InkYingMoManifest, registerCoreSkins } from '../component-host/components'
 import { nodeOverlayChildren } from '../schema/expand-overlay'
 
 beforeAll(() => {
@@ -40,29 +39,21 @@ describe('nodia narrative demo contract', () => {
     expect(refs.filter((ref) => ref.includes('narr-')).every((ref) => ref.startsWith('m-narr-'))).toBe(true)
   })
 
-  it('應/默 锚点为下方中央 (0.5, 0.88)，键位 E/Q；片尾前 3s 弹出', () => {
-    expect(inkYingMoDefaults.x).toBe(0.5)
-    expect(inkYingMoDefaults.y).toBe(0.88)
+  it('新规格 應/默 使用静态事件契约与 layout；片尾前 3s 弹出', () => {
+    expect(InkYingMoManifest.events.map((event) => event.id)).toEqual(['ying', 'mo'])
     const scn = makeNodiaDemo()
     for (const id of YINGMO_NODES) {
       const node = scn.graph.nodes.find((n) => n.id === id)
-      // 6 节点已归一到共享 base:inkYingMo 方案；各自的「片尾前 3s」时机（dur-3000）落在挂载的
+      // 6 节点已归一到共享 base:InkYingMo 方案；各自的「片尾前 3s」时机（dur-3000）落在挂载的
       // overrides 里，故读**展开后**的挂载 child（经 resolveMountChildren 套用 override），而不是
       // scn.ui.overlays[id]（该 per-node 方案已不复存在）。
       const child = nodeOverlayChildren(scn, node)[0]
       const dur = node?.data.durationMs
       expect(typeof dur, id).toBe('number')
-      expect(child?.component, id).toBe('inkYingMo')
-      expect(child?.inputs?.x, id).toBe(0.5)
-      expect(child?.inputs?.y, id).toBe(0.88)
+      expect(child?.component, id).toBe('InkYingMo')
+      expect(child?.layout, id).toMatchObject({ left: 0, top: 0, width: 1, height: 1 })
       // 对齐 story-scenes：windowStartMs = dur - 3000（不是 video_end 才挂）
       expect(child?.trigger, id).toEqual({ when: 'at', ms: (dur as number) - 3000 })
-      expect(child?.inputs?.timeoutMs, id).toBe(8000)
-      expect(child?.inputs?.defaultEvent, id).toBe('mo')
-      expect((child?.inputs?.events as { id: string; label?: string }[] | undefined)?.map((e) => e.label), id).toEqual([
-        '應',
-        '默',
-      ])
     }
   })
 
@@ -70,7 +61,7 @@ describe('nodia narrative demo contract', () => {
     const scn = makeNodiaDemo()
     const node = scn.graph.nodes.find((n) => n.id === 'n_door')
     const child = nodeOverlayChildren(scn, node)[0]
-    expect(child?.component).toBe('inkKou')
+    expect(child?.component).toBe('InkKou')
     // trigger 对齐到 cue 起点：随节点进入挂载，可见窗完全由 cues 决定（appearAt 0 → endAt 6100），
     // 预览与运行时同源，不再有 trigger.ms=9000 残留导致的 9s 错位。
     expect(child?.trigger).toEqual({ when: 'enter' })

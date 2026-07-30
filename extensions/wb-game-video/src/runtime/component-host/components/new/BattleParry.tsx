@@ -1,5 +1,5 @@
 /**
- * 防反抉择（component id: `battleParry`）—— 组件只发出「防反」或「闪避」事件。
+ * 防反抉择（component id: `BattleParry`）—— 组件只发出「防反」或「闪避」事件。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与点击交互。
  */
 import { useEffect, useRef, useState } from 'react'

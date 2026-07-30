@@ -4,6 +4,7 @@
  */
 import type {
   Entity,
+  NumericEffectOp,
   NumOrExpr,
   ValueTermOp,
   Variable,
@@ -105,12 +106,55 @@ export function compileValuePick(pick: Exclude<ValuePick, { mode: 'formula' }>):
   return { expr, pick: { mode: 'pick', terms } }
 }
 
-/** Effect 层"运算"符号按钮的减/除动作——落盘仍只有 add/mul/set，减=取反后 add，除=取倒数后 mul。 */
-export function negateNumOrExpr(v: NumOrExpr): NumOrExpr {
-  return typeof v === 'number' ? -v : { expr: `-(${v.expr})` }
+export type EffectDisplayOp = NumericEffectOp | 'sub' | 'div'
+
+export interface EffectOperationView {
+  op: EffectDisplayOp
+  /** 编辑器展示的原始操作数；减/除的负号与倒数包装已剥离。 */
+  value: NumOrExpr
 }
-export function reciprocalNumOrExpr(v: NumOrExpr): NumOrExpr {
-  return typeof v === 'number' ? (v === 0 ? 0 : 1 / v) : { expr: `1/(${v.expr})` }
+
+function wrapExpr(value: NumOrExpr, prefix: '-(' | '1/('): NumOrExpr {
+  const expr = typeof value === 'number' ? String(value) : value.expr
+  return typeof value === 'number'
+    ? { expr: `${prefix}${expr})` }
+    : { ...value, expr: `${prefix}${expr})` }
+}
+
+function unwrapExpr(value: NumOrExpr, prefix: '-(' | '1/('): NumOrExpr | undefined {
+  if (typeof value !== 'object' || !value.expr.startsWith(prefix) || !value.expr.endsWith(')')) return undefined
+  const expr = value.expr.slice(prefix.length, -1)
+  if (!value.pick && /^-?(?:\d+\.?\d*|\.\d+)$/.test(expr)) {
+    const number = Number(expr)
+    if (Number.isFinite(number)) return number
+  }
+  return { ...value, expr }
+}
+
+/**
+ * 把发布态 `add/mul/set + value` 还原成编辑器的 `+ − × ÷ = + 原始操作数`。
+ * 历史 `add + 负数` 也按减法展示；新写入的减/除统一使用可逆表达式包装，避免 ÷2 被折成 ×0.5 后丢失意图。
+ */
+export function decodeEffectOperation(op: NumericEffectOp, value: NumOrExpr): EffectOperationView {
+  if (op === 'set') return { op: 'set', value }
+  if (op === 'add') {
+    const unwrapped = unwrapExpr(value, '-(')
+    if (unwrapped) return { op: 'sub', value: unwrapped }
+    if (typeof value === 'number' && (value < 0 || Object.is(value, -0))) return { op: 'sub', value: -value }
+    return { op: 'add', value }
+  }
+  const unwrapped = unwrapExpr(value, '1/(')
+  return unwrapped ? { op: 'div', value: unwrapped } : { op: 'mul', value }
+}
+
+/** 编辑器运算符落回发布契约；不扩展 NumericEffectOp schema。 */
+export function encodeEffectOperation(
+  op: EffectDisplayOp,
+  value: NumOrExpr,
+): { op: NumericEffectOp; value: NumOrExpr } {
+  if (op === 'sub') return { op: 'add', value: wrapExpr(value, '-(') }
+  if (op === 'div') return { op: 'mul', value: wrapExpr(value, '1/(') }
+  return { op, value }
 }
 
 /** 给公式条款分配稳定 id（留空位按它寻址绑定；普通选取式条款不需要）。 */

@@ -8,6 +8,7 @@
 import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
 import { getSubFlow } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
+import { isLifecycleReaction } from '../../runtime/schema/node-config-schema'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -463,6 +464,44 @@ export function updateEventRouteTiming(
     (edge) => edge.source === nodeId && edge.data?.transition === 'onSettlement',
   )
   return stillDeferred ? next : updateNodeData(next, nodeId, { routingSettlement: undefined })
+}
+
+/**
+ * 只挪结算时刻的 ms（拖时间轴上的结算标记）——不碰出边的跳转方式。
+ *
+ * 与 `updateEventRouteTiming` 的分工：那条负责「这条事件边是立即跳还是等结算」并按需建/删
+ * 结算点；这条只在**已经是固定时刻结算**的节点上平移那个时刻。故非 `at` 结算一律 no-op：
+ * 拖一个不存在的标记不该顺手把「演出结束时结算」偷偷改成固定时刻。
+ */
+export function setRoutingSettlementMs(graph: GameGraph, nodeId: string, ms: number): GameGraph {
+  const node = graph.nodes.find((n) => n.id === nodeId)
+  if (node?.data.routingSettlement?.type !== 'at') return graph
+  const next = Math.max(0, Math.round(ms))
+  if (next === node.data.routingSettlement.ms) return graph
+  return updateNodeData(graph, nodeId, { routingSettlement: { type: 'at', ms: next } })
+}
+
+/**
+ * 只挪某条生命周期效果的施加时刻（拖时间轴上的青绿菱形）——那一条的 `when` 落成 `at(ms)`。
+ *
+ * `lifecycleIndex` 是**生命周期子集内的序号**（见 `isLifecycleReaction` 的注释：绝对下标会随
+ * 检视器回写漂移）。非生命周期相位不在子集里，压根定位不到，也就不会被误改。
+ * 历史 `exit`/`complete` 落成 `at` 是这一刻的显式选择（与检视器改那一行同义），故允许——
+ * 语义差异已在检视器角标上说明。
+ */
+export function setLifecycleReactionMs(graph: GameGraph, nodeId: string, lifecycleIndex: number, ms: number): GameGraph {
+  const node = graph.nodes.find((n) => n.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!reactions) return graph
+  let seen = -1
+  const absolute = reactions.findIndex((r) => isLifecycleReaction(r) && ++seen === lifecycleIndex)
+  const target = reactions[absolute]
+  if (!target) return graph
+  const next = Math.max(0, Math.round(ms))
+  if (target.when.type === 'at' && target.when.ms === next) return graph
+  return updateNodeData(graph, nodeId, {
+    reactions: reactions.map((r, i) => (i === absolute ? { ...r, when: { type: 'at' as const, ms: next } } : r)),
+  })
 }
 
 /**

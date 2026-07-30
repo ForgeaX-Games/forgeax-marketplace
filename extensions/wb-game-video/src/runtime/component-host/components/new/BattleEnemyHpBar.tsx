@@ -7,9 +7,9 @@ export const BattleEnemyHpBarManifest: ComponentManifest = {
   id: 'BattleEnemyHpBar',
   label: '敌方水墨血条',
   inputs: [
-    { key: 'current', label: '当前血量', valueType: 'number' },
-    { key: 'max', label: '血量上限', valueType: 'number' },
-    { key: 'label', label: '显示名', valueType: 'string' },
+    { key: 'current', label: '当前血量', valueType: 'number', default: 50 },
+    { key: 'max', label: '血量上限', valueType: 'number', default: 90 },
+    { key: 'label', label: '显示名', valueType: 'string', default: '敌方' },
   ],
   events: [],
 }
@@ -22,10 +22,10 @@ export function BattleEnemyHpBar({ overlay }: OverlayProps): ReactNode {
   const current = typeof inputs.current === 'number' ? inputs.current : 50
   const max = typeof inputs.max === 'number' ? inputs.max : 90
 
-  const label = typeof inputs.label === 'string' && inputs.label ? inputs.label : '角色'
+  const label = typeof inputs.label === 'string' && inputs.label ? inputs.label : '敌方'
 
   return (
-    <div className="ks-hud-boss ks-hud-foe-unit">
+    <div className="ks-hud-boss ks-hud-foe-unit" data-overlay-fit-target>
       <div className="ks-hud-boss-name">{label}</div>
       <div className="ks-hud-boss-bar">
         <span className="ks-hud-boss-ghost" style={{ width: hpBarPercent(current, max) }} />

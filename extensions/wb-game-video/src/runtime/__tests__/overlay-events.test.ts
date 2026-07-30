@@ -5,6 +5,8 @@ import type { Overlay, Reaction } from '../schema/node-config-schema'
 import {
   aggregateOverlayEvents,
   aggregateNodeOverlayEvents,
+  overlayReactionKey,
+  resolveOverlayReaction,
   resolveEventReactionDo,
 } from '../schema/overlay-events'
 import { GraphRuntime } from '../engine/engine'
@@ -20,7 +22,7 @@ describe('overlay events / reactions', () => {
       { id: 'hp', component: 'battleHpBar', inputs: { bind: 'ent-player' } },
       {
         id: 'parry',
-        component: 'battleParry',
+        component: 'BattleParry',
         inputs: {
           events: [
             { id: 'A', label: '防反' },
@@ -35,7 +37,7 @@ describe('overlay events / reactions', () => {
   it('aggregates events from inputs.events when single emitter', () => {
     const refs = aggregateOverlayEvents(overlay, getComponentManifest)
     expect(refs.map((r) => r.eventId)).toEqual(['A', 'B', 'miss'])
-    expect(refs[0]?.componentId).toBe('battleParry')
+    expect(refs[0]?.componentId).toBe('BattleParry')
   })
 
   it('namespaces when multiple emitters', () => {
@@ -64,6 +66,55 @@ describe('overlay events / reactions', () => {
     const ns: Reaction[] = [{ when: { type: 'event', id: 'parry:A' }, do: actions }]
     expect(resolveEventReactionDo(bare, 'A')?.[0]).toEqual(actions[0])
     expect(resolveEventReactionDo(ns, 'A', 'parry')?.[0]).toEqual(actions[0])
+  })
+
+  it('catalog reactions use the stable childId:eventId key', () => {
+    const reactions = [{
+      when: { type: 'event' as const, id: 'parry:A' },
+      do: [{ kind: 'effect' as const, effects: [] }],
+    }]
+    expect(overlayReactionKey('parry', 'A')).toBe('parry:A')
+    expect(resolveOverlayReaction(reactions, 'parry', 'A')).toBe(reactions[0])
+    expect(resolveOverlayReaction(reactions, 'other', 'A')).toBeUndefined()
+  })
+
+  it('runs catalog actions before mount additions, then routes by event edge', () => {
+    const graph: GameGraph = {
+      nodes: [
+        node('a', {
+          overlayNodes: [{
+            overlay: 'ov-a',
+            reactions: [{
+              when: { type: 'event', id: 'pass' },
+              do: [{ kind: 'effect', effects: [{ kind: 'var', varId: 'qi', op: 'mul', value: 3 }] }],
+            }],
+          }],
+        }),
+        node('b'),
+      ],
+      edges: [{ id: 'e-pass', source: 'a', target: 'b', sourceHandle: 'pass', targetHandle: 'in' }],
+    }
+    const scn = scnOf(graph, {
+      variables: { qi: { id: 'qi', initial: 1 } },
+      ui: {
+        overlays: {
+          'ov-a': {
+            id: 'ov-a',
+            children: [{ id: 'q', component: 'qte', trigger: { when: 'enter' }, inputs: {} }],
+            reactions: [{
+              when: { type: 'event', id: 'q:pass' },
+              do: [{ kind: 'effect', effects: [{ kind: 'var', varId: 'qi', op: 'set', value: 2 }] }],
+            }],
+          },
+        },
+      },
+    })
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    expect(rt.state.vars.qi).toBe(1)
+    rt.emitComponentEvent(rid('a', 'q'), 'pass')
+    expect(rt.state.vars.qi).toBe(6)
+    expect(rt.state.currentNodeId).toBe('b')
   })
 
   it('event reaction applies effects; edge (by handle) decides routing', () => {

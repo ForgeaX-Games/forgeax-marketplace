@@ -4,6 +4,7 @@
  */
 import type { CSSProperties, ReactNode } from 'react'
 import type { VideoContentRect } from './videoContentRect'
+import { ScaledOverlayContent } from './ScaledOverlayContent'
 
 export function videoOverlayStageStyle(contentRect: VideoContentRect | null): CSSProperties {
   // containerType: 'size' 开容器查询上下文——皮肤里的 cqw/cqh 才能相对这块「舞台」解析，
@@ -26,7 +27,7 @@ export function VideoOverlayStage({
 }): JSX.Element {
   return (
     <div className={className} style={videoOverlayStageStyle(contentRect)}>
-      {children}
+      <ScaledOverlayContent>{children}</ScaledOverlayContent>
     </div>
   )
 }

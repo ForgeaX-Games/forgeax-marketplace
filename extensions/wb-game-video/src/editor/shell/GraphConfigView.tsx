@@ -18,7 +18,6 @@ import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenario
 import { getGameSlug } from '../persist/gameScope'
 import { NEW_COMPONENT_PRESETS, BASE_HUD_PREFIX, listCustomSchemeIds, listBaseHudIds } from '../demo/builtin-schemes'
 import { findDuplicateOverlays } from './overlay-dedup'
-import { defaultsForComponent } from './editors'
 import type { Formula } from '../persist/formula-authoring'
 
 export interface ConfigTab {
@@ -90,7 +89,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 选中项自愈：不在当前方案集（全局 + 基础）里（删除/首次）就落到第一个全局方案。
   const selectable = [...schemeIds, ...baseIds]
   const selOverlay = selectable.includes(selectedOverlayId) ? selectedOverlayId : (schemeIds[0] ?? baseIds[0] ?? '')
-  // 基础覆盖物方案锁定：单组件，不允许增删组件（仅可编辑 layout）。
+  // 基础覆盖物方案只锁结构：单组件不可增删；inputs/layout 可编辑。
   const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
   const setOverlays = (overlays: Record<string, Overlay>) => setMeta({ ...meta, ui: { ...meta.ui, overlays } })
@@ -104,6 +103,30 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     if (!ov) return
     setOverlays({ ...allOverlays, [oid]: { ...ov, title } })
   }
+  const moveSchemeChildren = (
+    oid: string,
+    moveDelta: { x: number; y: number },
+  ) => {
+    const ov = allOverlays[oid]
+    if (!ov) return
+    if (moveDelta.x === 0 && moveDelta.y === 0) return
+    setOverlays({
+      ...allOverlays,
+      [oid]: {
+        ...ov,
+        children: ov.children.map((child) => ({
+          ...child,
+          layout: {
+            ...child.layout,
+            left: (typeof child.layout?.left === 'number' ? child.layout.left : 0) + moveDelta.x,
+            top: (typeof child.layout?.top === 'number' ? child.layout.top : 0) + moveDelta.y,
+            right: undefined,
+            bottom: undefined,
+          },
+        })),
+      },
+    })
+  }
   const removeScheme = (oid: string) => {
     const { [oid]: _drop, ...rest } = allOverlays
     setOverlays(rest)
@@ -116,14 +139,18 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     const ov = allOverlays[oid]
     if (!ov) return undefined
     const childId = `${componentId}-${Object.keys(ov.children).length}-${Date.now().toString(36)}`
-    // 有精选 preset 用它（带更合适的默认 inputs/layout）；其余组件走通用 make（component + inputs 默认值）。
+    // 默认参数不写进 inputs；两个参数面板统一从 manifest.default 读取 placeholder。
     const preset = NEW_COMPONENT_PRESETS.find((p) => p.id === componentId)
     const made: OverlayChild = preset
       ? preset.make(childId)
-      // window 是显隐唯一 SSOT（运行时 el.window 存在即忽略 trigger）；不写 endMs = 到节点结束。
-      : { id: childId, component: componentId, trigger: { when: 'enter' }, window: { startMs: 0 }, inputs: defaultsForComponent(componentId) }
-    // 画布落点已按组件定位模式分好（inputs.x/y 或 layout.left/top）：各自浅合并进 preset 产物，
-    // inputs 模式会覆盖 preset 自带的 x/y（如 floatText 的 0.5/0.4）为鼠标落点。
+      : {
+          id: childId,
+          component: componentId,
+          trigger: { when: 'enter' },
+          window: { startMs: 0 },
+          inputs: {},
+        }
+    // 新规格画布落点只写 layout；inputs 仅合并组件业务参数。
     const child: OverlayChild = place
       ? {
           ...made,
@@ -137,7 +164,15 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const removeSchemeChild = (oid: string, childId: string) => {
     const ov = allOverlays[oid]
     if (!ov) return
-    setOverlays({ ...allOverlays, [oid]: { ...ov, children: ov.children.filter((c) => c.id !== childId) } })
+    const reactions = ov.reactions?.filter((reaction) => !reaction.when.id.startsWith(`${childId}:`))
+    setOverlays({
+      ...allOverlays,
+      [oid]: {
+        ...ov,
+        children: ov.children.filter((c) => c.id !== childId),
+        reactions: reactions?.length ? reactions : undefined,
+      },
+    })
   }
   const patchOverlayChild = (
     oid: string,
@@ -156,7 +191,8 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
             : {
                 ...c,
                 ...(patch.component != null ? { component: patch.component } : {}),
-                inputs: patch.inputs ? { ...c.inputs, ...patch.inputs } : c.inputs,
+                // 参数表传入的是下一份完整 inputs；不可浅合并，否则被删除的 key 会被旧值补回来。
+                inputs: patch.inputs ?? c.inputs,
                 layout: patch.layout ? { ...c.layout, ...patch.layout } : c.layout,
               },
         ),
@@ -232,8 +268,10 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                 <OverlaySchemeEditor
                   overlayId={selOverlay}
                   overlay={ov}
+                  overlays={allOverlays}
                   entities={meta.entities ?? {}}
                   variables={meta.variables ?? {}}
+                  formulas={meta.formulas as Record<string, Formula> | undefined}
                   usageCount={overlayUsage[selOverlay] ?? 0}
                   locked={selLocked}
                   duplicateOf={dupMap.get(selOverlay) ?? []}
@@ -242,6 +280,9 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   onAddChild={(p, place) => addSchemeChild(selOverlay, p, place)}
                   onRemoveChild={(c) => removeSchemeChild(selOverlay, c)}
                   onPatchChild={(c, patch) => patchOverlayChild(selOverlay, c, patch)}
+                  onMoveCanvas={(moveDelta) => moveSchemeChildren(selOverlay, moveDelta)}
+                  onReactionsChange={(reactions) =>
+                    setOverlays({ ...allOverlays, [selOverlay]: { ...ov, reactions } })}
                 />
               )
             }}

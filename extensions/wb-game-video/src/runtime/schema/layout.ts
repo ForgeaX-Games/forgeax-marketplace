@@ -24,6 +24,40 @@ export function layoutHasExplicitSize(layout: Layout | undefined): boolean {
   )
 }
 
+function layoutHasExplicitWidth(layout: Layout | undefined): boolean {
+  return !!layout && (layout.width != null || (layout.left != null && layout.right != null))
+}
+
+function layoutHasExplicitHeight(layout: Layout | undefined): boolean {
+  return !!layout && (layout.height != null || (layout.top != null && layout.bottom != null))
+}
+
+/** child 使用完整父舞台坐标；父 mount 必须有确定宽高，不能落入 fit-content。 */
+export function layoutUsesFullParentStage(layout: Layout | undefined): boolean {
+  return layout?.width === 1 && layout.height === 1
+}
+
+/**
+ * 含满舞台 child 时，为缺失的 mount 维度补齐 100%。
+ * 保留显式宽高与锚点，兼容真正需要自适应内容的非舞台组件。
+ */
+export function resolveMountLayoutForChildren(
+  mountLayout: Layout | undefined,
+  childLayouts: readonly (Layout | undefined)[],
+): Layout | undefined {
+  if (!childLayouts.some(layoutUsesFullParentStage)) return mountLayout
+  const next: Layout = { ...mountLayout }
+  if (!layoutHasExplicitWidth(next)) {
+    next.width = 1
+    if (next.left == null && next.right == null) next.left = 0
+  }
+  if (!layoutHasExplicitHeight(next)) {
+    next.height = 1
+    if (next.top == null && next.bottom == null) next.top = 0
+  }
+  return next
+}
+
 /** layout 是否实质为空（{} 或全 undefined）。 */
 export function layoutIsEffectivelyEmpty(layout: Layout | undefined): boolean {
   if (!layout) return true
@@ -103,7 +137,8 @@ export function childWrapStyle(childLayout: Layout | undefined, mountHasSize: bo
       childLayout.translateX != null ||
       childLayout.translateY != null)
   if (hasChildPos && childLayout) {
-    const pe = layoutHasExplicitSize(childLayout) ? 'none' : 'auto'
+    const hasSize = layoutHasExplicitSize(childLayout)
+    const pe = hasSize ? 'none' : 'auto'
     return { ...layoutToCss(childLayout), pointerEvents: pe }
   }
   if (mountHasSize) {

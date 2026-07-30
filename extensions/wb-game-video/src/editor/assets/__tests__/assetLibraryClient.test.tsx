@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AssetLibraryUploadError,
   createKinoAssetLibraryClient,
@@ -9,6 +9,7 @@ import {
 } from '../assetLibraryClient'
 import type { KinoResourceDTO, KinoVideoClient } from '../kino-api'
 import type { UploadTransport } from '../video-upload'
+import { useAudioAssetCache } from '../audioAssetCacheStore'
 
 function client(): AssetLibraryClient {
   return {
@@ -18,12 +19,20 @@ function client(): AssetLibraryClient {
       return [{ id: 'title.woff2', kind, name: '标题字体', mime: 'font/woff2', source: 'local' }]
     }),
     upload: vi.fn(async (_game, kind, file): Promise<ManagedAsset> => ({ id: `${kind}-new`, kind, name: file.name })),
-    rename: vi.fn(async (_game, id, name): Promise<ManagedAsset> => ({ id, kind: id.startsWith('bgm') ? 'audio' : 'image', name })),
+    rename: vi.fn(async (_game, id, name): Promise<ManagedAsset> => ({
+      id,
+      kind: id.startsWith('bgm') || id.startsWith('audio') ? 'audio' : 'image',
+      name,
+    })),
     remove: vi.fn(async () => {}),
   }
 }
 
 describe('useAssetLibrary', () => {
+  beforeEach(() => {
+    useAudioAssetCache.setState({ byGame: {} })
+  })
+
   it('reports the missing API rather than pretending the manifest is empty', async () => {
     const { result } = renderHook(() => useAssetLibrary('demo'))
 
@@ -32,7 +41,7 @@ describe('useAssetLibrary', () => {
     expect(result.current.error).toMatch(/尚未启用/)
   })
 
-  it('loads both asset groups from an injected client', async () => {
+  it('loads all asset groups from an injected client', async () => {
     const api = client()
     const { result } = renderHook(() => useAssetLibrary('demo', api))
 
@@ -46,7 +55,7 @@ describe('useAssetLibrary', () => {
   it('updates local state after uploading, renaming, and deleting', async () => {
     const api = client()
     const { result } = renderHook(() => useAssetLibrary('demo', api))
-    await waitFor(() => expect(result.current.items).toHaveLength(2))
+    await waitFor(() => expect(result.current.items).toHaveLength(3))
 
     await act(async () => {
       await result.current.upload('image', new File(['x'], 'new.png', { type: 'image/png' }))
@@ -58,6 +67,30 @@ describe('useAssetLibrary', () => {
     expect(api.rename).toHaveBeenCalledWith('demo', 'image-new', '新封面')
     expect(api.remove).toHaveBeenCalledWith('demo', 'image-new')
     expect(result.current.items.find((item) => item.id === 'image-new')).toBeUndefined()
+  })
+
+  it('syncs audio mutations into the BGM shared cache', async () => {
+    const api = client()
+    const { result } = renderHook(() => useAssetLibrary('demo', api))
+    await waitFor(() => expect(result.current.items).toHaveLength(3))
+
+    await act(async () => {
+      await result.current.upload('audio', new File(['music'], 'battle.mp3', { type: 'audio/mpeg' }))
+    })
+    expect(useAudioAssetCache.getState().byGame.demo?.items.map((item) => item.resource_id))
+      .toContain('audio-new')
+
+    await act(async () => {
+      await result.current.rename('audio-new', '新战斗曲')
+    })
+    expect(useAudioAssetCache.getState().byGame.demo?.items.find((item) => item.resource_id === 'audio-new')?.name)
+      .toBe('新战斗曲')
+
+    await act(async () => {
+      await result.current.remove('audio-new')
+    })
+    expect(useAudioAssetCache.getState().byGame.demo?.items.some((item) => item.resource_id === 'audio-new'))
+      .toBe(false)
   })
 })
 

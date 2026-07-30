@@ -97,6 +97,33 @@ describe('audioAssetCacheStore', () => {
     second.unmount()
   })
 
+  it('上传、重命名和删除可以立即回灌共享缓存', () => {
+    const cache = useAudioAssetCache.getState()
+    cache.upsert('project-a', resource('aud-new', '新上传'))
+    expect(useAudioAssetCache.getState().byGame['project-a']?.items.map((item) => item.name))
+      .toEqual(['新上传'])
+
+    cache.upsert('project-a', resource('aud-new', '新名称'))
+    expect(useAudioAssetCache.getState().byGame['project-a']?.items.map((item) => item.name))
+      .toEqual(['新名称'])
+
+    cache.remove('project-a', 'aud-new')
+    expect(useAudioAssetCache.getState().byGame['project-a']?.items).toEqual([])
+  })
+
+  it('首次拉取前的 upsert 不会让 ensure 把局部缓存误当完整列表', async () => {
+    useAudioAssetCache.getState().upsert('project-a', resource('aud-new', '新上传'))
+    list.mockResolvedValue(page([
+      resource('aud-new', '新上传'),
+      resource('aud-existing', '已有音乐'),
+    ]))
+
+    const hook = renderHook(() => useAudioAssets('project-a'))
+    await waitFor(() => expect(hook.result.current.items).toHaveLength(2))
+    expect(list).toHaveBeenCalledTimes(1)
+    hook.unmount()
+  })
+
   it('refresh 成功后清掉上一次的 error（重试能把面板从失败态救回来）', async () => {
     list.mockRejectedValueOnce(new Error('HTTP 500'))
     const hook = renderHook(() => useAudioAssets('project-a'))

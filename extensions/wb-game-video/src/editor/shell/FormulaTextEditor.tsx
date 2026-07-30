@@ -22,13 +22,13 @@ import { AttrPicker, EntityPicker, VariablePicker } from './scenario-pickers'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
 
-/** 样例求值上下文：实体 attrs 原样、变量取 initial、rng 固定种子——供 ≈ 值预览。 */
+/** 样例求值上下文：实体 attrs 原样、变量取 initial；每次试算另建 seed 0 RNG。 */
 function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string, Variable>): EvalCtx {
   const ents: EvalCtx['entities'] = {}
   for (const [id, e] of Object.entries(entities ?? {})) ents[id] = { attrs: e.attrs ?? {} }
   const vars: Record<string, number> = {}
   for (const [id, v] of Object.entries(variables ?? {})) vars[id] = v.initial ?? 0
-  return { entities: ents, vars, flags: {}, score: 0, rng: createRng(1) }
+  return { entities: ents, vars, flags: {}, score: 0 }
 }
 
 // expr.ts eval 支持的函数名（插入用）。
@@ -105,7 +105,7 @@ export function FormulaTextEditor({
   const holes = useMemo<FormulaHole[]>(() => (liveAst ? formulaHoles({ id: '', ast: liveAst }) : []), [liveAst])
   const refs = useMemo(() => (liveAst ? collectRefs(liveAst) : null), [liveAst])
   const hasHole = holes.length > 0
-  const sampleValue = !error && !hasHole ? tryEvalExpr(text, ctx) : null
+  const sampleValue = !error && !hasHole ? tryEvalExpr(text, { ...ctx, rng: createRng(0) }) : null
 
   /** 校验并（成功时）回写 AST。 */
   function commit(next: string): void {
@@ -275,7 +275,7 @@ function TrialPanel({
   const bindings: Record<string, FormulaHoleBinding> = {}
   for (const h of holes) bindings[h.holeId] = { kind: 'number', value: sample(h) }
   const expr = serializeFormula(ast, bindings)
-  const result = expr != null ? tryEvalExpr(expr, ctx) : null
+  const result = expr != null ? tryEvalExpr(expr, { ...ctx, rng: createRng(0) }) : null
 
   return (
     <details className="gc-fx-trial">

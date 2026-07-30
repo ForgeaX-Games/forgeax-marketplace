@@ -7,7 +7,7 @@
  * `serializeFormula` → 运行时 `serializeExpr`，序列化只此一套）。`runtime/engine/expr.ts` 全程
  * 不知道"公式"这个概念，只读普通表达式字符串——回溯刷新完全是编辑器侧的一次性数据变换。
  */
-import type { Entity, NumOrExpr } from '../../runtime/schema/graph-schema'
+import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula, FormulaAstNode, FormulaHoleBinding, FormulaHoleKind, FormulaPick } from '../persist/formula-authoring'
 import { normalizeHoleBinding, previewFormula, serializeFormula } from '../persist/formula-authoring'
 import { findEntity, listAttrOptions } from './metaCatalog'
@@ -65,6 +65,46 @@ export function missingFormulaHoles(
   holeBindings: Record<string, FormulaHoleBinding>,
 ): FormulaHole[] {
   return formulaHoles(formula).filter((hole) => !holeBound(hole, normalizeHoleBinding(holeBindings[hole.holeId])))
+}
+
+/** 公式内直接引用和变量空位绑定中，当前变量目录尚未声明的 id。 */
+export function missingFormulaVariables(
+  formula: Formula,
+  holeBindings: Record<string, FormulaHoleBinding>,
+  variables: Record<string, Variable> | undefined,
+): string[] {
+  const referenced = new Set<string>()
+  const walk = (node: FormulaAstNode): void => {
+    switch (node.t) {
+      case 'ref':
+        if (node.ref.kind === 'var' && node.ref.varId) referenced.add(node.ref.varId)
+        break
+      case 'unary':
+        walk(node.x)
+        break
+      case 'bin':
+        walk(node.a)
+        walk(node.b)
+        break
+      case 'call':
+        node.args.forEach(walk)
+        break
+      default:
+        break
+    }
+  }
+  walk(formula.ast)
+  for (const hole of formulaHoles(formula)) {
+    if (hole.kind !== 'var') continue
+    const binding = normalizeHoleBinding(holeBindings[hole.holeId])
+    if (binding?.kind === 'var' && binding.varId) referenced.add(binding.varId)
+  }
+  const declared = new Set<string>()
+  for (const [key, variable] of Object.entries(variables ?? {})) {
+    declared.add(key)
+    if (variable.id) declared.add(variable.id)
+  }
+  return [...referenced].filter((id) => !declared.has(id))
 }
 
 /** 只读预览文案（公式定义列表 / 应用公式时的只读展示共用）：未填空位标 ❓。 */

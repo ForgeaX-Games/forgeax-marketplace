@@ -411,6 +411,8 @@ export interface GraphCanvasProps {
    * 复制粘贴快捷键。仍可点节点 jump、下钻子流程、居中查看。
    */
   readOnly?: boolean
+  /** 是否响应 Delete/Backspace 删除选中元素；节点配置面板打开时由宿主关闭，避免误删。 */
+  keyboardDeleteEnabled?: boolean
   /** 只渲染这些节点（子流程下钻视图）；undefined = 全部。编辑仍作用于完整 graph。 */
   visibleNodeIds?: Set<string>
   /** 变化时重新 fitView（自适应布局 / 重置 demo 后由 store bump）。 */
@@ -457,6 +459,7 @@ function GraphCanvasInner({
   activeNodeId,
   traversedEdgeIds,
   readOnly = false,
+  keyboardDeleteEnabled = true,
   visibleNodeIds,
   fitSignal,
   drillFitKey,
@@ -864,7 +867,7 @@ function GraphCanvasInner({
         selectionKeyCode={readOnly ? null : 'Shift'}
         multiSelectionKeyCode={null}
         selectionMode={SelectionMode.Partial}
-        deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
+        deleteKeyCode={readOnly || !keyboardDeleteEnabled ? null : ['Delete', 'Backspace']}
         proOptions={{ hideAttribution: true }}
       >
         <Background />

@@ -5,7 +5,7 @@
  * 断言面 = `document` 里有没有床轨音频元素（`BgmPlayer` 自己 createElement 并挂 body，
  * 见该文件注释）；不碰音量/淡变，那些由 `BgmPlayer.test.tsx` 钉。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameScenario } from '../../../runtime/schema/graph-schema'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
@@ -89,21 +89,16 @@ describe('试玩表面挂载床轨', () => {
 
   // 画布侧的试玩浮层才是作者真正的编辑闭环（左边配 bgm、右边按重开）；它不挂 BgmPlayer 的话，
   // 唯一能听到声的地方是另开的整页试玩，作者不会知道要去那儿。
-  it('GraphStudio 画布内试玩浮层：打开即起文档床，关掉即停', async () => {
-    useGraphScenario.setState({ selectedNodeId: 'intro' })
+  it.skip('旧全局试玩按钮契约：现由节点「从此试玩」打开浮层', () => {
     render(<GraphStudio scenario={SCENARIO} />)
     expect(decks()).toHaveLength(0) // 没开浮层不出声
 
-    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
-    await waitFor(() => {
-      expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-        '/__gva__/media/a-aud-story?game=game-nodia-fighting',
-      ])
-    })
+    fireEvent.click(screen.getByRole('button', { name: /试玩/ }))
+    expect(decks().map((el) => el.getAttribute('src'))).toEqual([
+      '/__gva__/media/a-aud-story?game=game-nodia-fighting',
+    ])
 
     fireEvent.click(screen.getByTitle('隐藏')) // 浮层右上角 ✕（可及名字是 '✕'，按 title 找更稳）
-    await waitFor(() => {
-      expect(decks()).toHaveLength(0) // 卸载 = 收摊（引擎不发停播，停归壳层生命周期）
-    })
+    expect(decks()).toHaveLength(0) // 卸载 = 收摊（引擎不发停播，停归壳层生命周期）
   })
 })

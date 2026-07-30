@@ -14,23 +14,22 @@ function eventIds(child: { inputs: Record<string, unknown> } | undefined): strin
 
 describe('GraphSession (playable view model)', () => {
   it('drives nodia to a rendered interaction, then wins', () => {
-    const session = new GraphSession(makeNodiaDemo({ bossHp: 50 }))
+    const session = new GraphSession(makeNodiaDemo({ bossHp: 30 }))
 
     session.start() // 起点 = 叙事 n_open
     let snap = session.jump('enter') // seek 到战斗入口
     expect(snap.clip?.nodeId).toBe('enter')
-    expect(snap.hud.entities['ent-boss']!.hp).toBe(50)
+    expect(snap.hud.entities['ent-boss']!.hp).toBe(30)
 
     snap = session.performanceEnd() // enter → a_my(subflow) → wait（技能交互）
-    const skill = overlayChild(snap, 'battleSkillBar')
+    const skill = overlayChild(snap, 'BattleSkill')
     expect(skill?.elementId).toBe('wait/skill')
     expect(eventIds(skill)).toEqual(['light', 'heavy', 'medit', 'ult'])
 
     snap = session.emitEvent('wait/skill', 'light') // → 变招判定 → 轻攻击演出
-    snap = session.tick(1000) // 命中 → 结算致死（轻攻击演出仍在播放）
+    snap = session.tick(1000) // 命中 → 结算致死 → rules redirect → win
     expect(snap.hud.entities['ent-boss']!.hp).toBeLessThanOrEqual(0)
-
-    snap = session.performanceEnd() // 轻攻击演出结束 → rules redirect → win
+    snap = session.performanceEnd() // 结算演出结束后消费死亡路由
     expect(snap.currentNodeId).toBe('win')
 
     snap = session.performanceEnd() // win 演出结束 → 无出边 & 栈空 → 本局结束
@@ -64,6 +63,6 @@ describe('GraphSession (playable view model)', () => {
     const snap = session.jump('wait')
     // 跳到战斗待机 → 技能 overlay 可见
     expect(snap.currentNodeId).toBe('wait')
-    expect(overlayChild(snap, 'battleSkillBar')?.elementId).toBe('wait/skill')
+    expect(overlayChild(snap, 'BattleSkill')?.elementId).toBe('wait/skill')
   })
 })

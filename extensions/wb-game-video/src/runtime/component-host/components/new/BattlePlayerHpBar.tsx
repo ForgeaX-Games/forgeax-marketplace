@@ -7,11 +7,11 @@ export const BattlePlayerHpBarManifest: ComponentManifest = {
   id: 'BattlePlayerHpBar',
   label: '我方水墨血条',
   inputs: [
-    { key: 'current', label: '当前血量', valueType: 'number' },
-    { key: 'max', label: '血量上限', valueType: 'number' },
-    { key: 'label', label: '显示名', valueType: 'string' },
-    { key: 'qi', label: '当前气力', valueType: 'number' },
-    { key: 'qiMax', label: '气力上限', valueType: 'number' },
+    { key: 'current', label: '当前血量', valueType: 'number', default: 50 },
+    { key: 'max', label: '血量上限', valueType: 'number', default: 90 },
+    { key: 'label', label: '显示名', valueType: 'string', default: '我方' },
+    { key: 'qi', label: '当前气力', valueType: 'number', default: 3 },
+    { key: 'qiMax', label: '气力上限', valueType: 'number', default: 5 },
   ],
   events: [],
 }
@@ -23,7 +23,7 @@ export function BattlePlayerHpBar({ overlay }: OverlayProps): ReactNode {
   const inputs = overlay.inputs
   const current = typeof inputs.current === 'number' ? inputs.current : 50
   const max = typeof inputs.max === 'number' ? inputs.max : 90
-  const label = typeof inputs.label === 'string' && inputs.label ? inputs.label : '角色'
+  const label = typeof inputs.label === 'string' && inputs.label ? inputs.label : '我方'
   const low = current / max <= 0.3
   const qi = typeof inputs.qi === 'number' ? inputs.qi : 3
   const qiMax = typeof inputs.qiMax === 'number' && inputs.qiMax > 0 ? inputs.qiMax : 5
@@ -31,7 +31,7 @@ export function BattlePlayerHpBar({ overlay }: OverlayProps): ReactNode {
 
   return (
     <div className="ks-hud-bottom">
-      <div className={`ks-hud-hp ks-hud-me-unit${low ? ' is-low' : ''}`}>
+      <div className={`ks-hud-hp ks-hud-me-unit${low ? ' is-low' : ''}`} data-overlay-fit-target>
         <div className="ks-hud-hp-name">{label}</div>
         <div className="ks-hud-hp-bar">
           <span className="ks-hud-hp-ghost" style={{ width: hpBarPercent(current, max) }} />

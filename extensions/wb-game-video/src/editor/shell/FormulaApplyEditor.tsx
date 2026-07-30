@@ -11,7 +11,13 @@ import { createRng } from '../../runtime/engine/rng'
 import { AttrSelect, EntitySelect } from './editors'
 import { LooseNumberInput } from './TermChainEditor'
 import { VariablePicker } from './scenario-pickers'
-import { compileFormula, formulaHoles, formulaPreview, missingFormulaHoles } from './formulaApply'
+import {
+  compileFormula,
+  formulaHoles,
+  formulaPreview,
+  missingFormulaHoles,
+  missingFormulaVariables,
+} from './formulaApply'
 import { findEntity, findFormula, listAttrOptions, listFormulaOptions } from './valueExprPick'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
@@ -28,13 +34,13 @@ function effectiveAttr(binding: FormulaHoleBinding | undefined, suggestAttr: str
   return attrs[0]?.id ?? ''
 }
 
-/** 样例求值上下文：实体 attrs 原样、变量取 initial、rng 固定种子——供「≈ 样例值」试算（与 FormulaTextEditor 同一套语义）。 */
+/** 样例求值上下文：实体 attrs 原样、变量取 initial；每次试算另建 seed 0 RNG。 */
 function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string, Variable>): EvalCtx {
   const ents: EvalCtx['entities'] = {}
   for (const [id, e] of Object.entries(entities ?? {})) ents[id] = { attrs: e.attrs ?? {} }
   const vars: Record<string, number> = {}
   for (const [id, v] of Object.entries(variables ?? {})) vars[id] = v.initial ?? 0
-  return { entities: ents, vars, flags: {}, score: 0, rng: createRng(1) }
+  return { entities: ents, vars, flags: {}, score: 0 }
 }
 
 export function FormulaApplyEditor({
@@ -56,6 +62,9 @@ export function FormulaApplyEditor({
   const formula = findFormula(formulas, formulaId)
   const holes = formula ? formulaHoles(formula) : []
   const missingHoles = formula ? missingFormulaHoles(formula, holeBindings) : []
+  const missingVariables = formula ? missingFormulaVariables(formula, holeBindings, variables) : []
+  const needsVariableBinding = holes.some((hole) => hole.kind === 'var')
+  const hasDeclaredVariables = Object.keys(variables ?? {}).length > 0
 
   function pickFormula(nextId: string): void {
     const next = findFormula(formulas, nextId)
@@ -72,7 +81,9 @@ export function FormulaApplyEditor({
   const compiledLabel = compiled == null ? '' : typeof compiled === 'number' ? String(compiled) : compiled.expr
   // 填满全部留空位后，拿样例实体/变量值实时算出结果（≈ 值），替代与顶部「公式：」重复的编译串展示。
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
-  const sampleValue = compiledLabel && missingHoles.length === 0 ? tryEvalExpr(compiledLabel, ctx) : null
+  const sampleValue = compiledLabel && missingHoles.length === 0
+    ? tryEvalExpr(compiledLabel, { ...ctx, rng: createRng(0) })
+    : null
 
   return (
     <div style={box}>
@@ -89,6 +100,15 @@ export function FormulaApplyEditor({
       ) : (
         <>
           <p style={hint}>公式：{formulaPreview(formula, holeBindings)}</p>
+          {missingVariables.length > 0 ? (
+            <p role="alert" style={{ ...hint, color: '#ffb86c' }}>
+              公式引用的变量「{missingVariables.join('、')}」尚未创建，请先到「规则 → 变量」创建变量。
+            </p>
+          ) : needsVariableBinding && !hasDeclaredVariables ? (
+            <p role="alert" style={{ ...hint, color: '#ffb86c' }}>
+              该公式需要变量，请先到「规则 → 变量」创建变量。
+            </p>
+          ) : null}
           {holes.length === 0 ? (
             <p style={hint}>该公式没有留空位，直接应用即可。</p>
           ) : (

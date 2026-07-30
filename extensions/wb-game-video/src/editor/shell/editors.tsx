@@ -22,6 +22,11 @@ import { flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { buildDefaults, getComponent, getComponentManifest } from '../../runtime/registry/component-registry'
 import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
 import { ValueExprEditor } from './ValueExprEditor'
+import {
+  decodeEffectOperation,
+  encodeEffectOperation,
+  type EffectDisplayOp,
+} from './valueExprPick'
 
 /** 交互事件目录项（共享壳 = ComponentEvent；kind 扩展字段按 variant 编辑）。 */
 export interface ComponentEventLike {
@@ -192,11 +197,15 @@ export function defaultsForComponent(componentId: string): Record<string, unknow
   return buildDefaults(getComponent(componentId)?.inputs)
 }
 
+const CUE_COMPONENT_IDS = new Set(['InkKou', 'BattleParry'])
+const OPTION_COMPONENT_IDS = new Set(['InkYingMo', 'BattleSkill'])
+
 /**
  * 编辑器：组件 inputs 是否声明了多拍点结构（`component: 'qteCues'`）。
  * 有 ⇒ 时间轴走拍点交互；组件侧只需在 inputs 里声明该项，不必另加分类标签。
  */
 export function hasCuePointsInput(componentId: string): boolean {
+  if (CUE_COMPONENT_IDS.has(componentId)) return true
   const inputs = getComponent(componentId)?.inputs
   return !!inputs?.some((i) => i.component === 'qteCues')
 }
@@ -207,6 +216,7 @@ export function hasCuePointsInput(componentId: string): boolean {
  */
 export function hasOptionEventsInput(componentId: string): boolean {
   if (hasCuePointsInput(componentId)) return false
+  if (OPTION_COMPONENT_IDS.has(componentId)) return true
   const inputs = getComponent(componentId)?.inputs
   return !!inputs?.some((i) => i.component === 'events')
 }
@@ -318,6 +328,7 @@ export function SizeEditor({
 // ── NumOrExpr（常量 / 选取公式）───────────────────────────────────────────────
 export function ValueInput({
   value,
+  defaultValue,
   onChange,
   entities,
   variables,
@@ -325,13 +336,14 @@ export function ValueInput({
   effectOp,
 }: {
   value: NumOrExpr | undefined
+  defaultValue?: number
   onChange: (v: NumOrExpr) => void
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/选取公式同一行）。 */
-  effectOp?: { op: NumericEffectOp; onOpChange: (next: { op: NumericEffectOp; value?: NumOrExpr }) => void }
+  effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
 } & MetaCatalogProps): JSX.Element {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <ValueExprEditor value={value} entities={entities} variables={variables} formulas={formulas} onChange={onChange} effectOp={effectOp} />
+      <ValueExprEditor value={value ?? defaultValue} entities={entities} variables={variables} formulas={formulas} onChange={onChange} effectOp={effectOp} />
     </div>
   )
 }
@@ -494,18 +506,21 @@ function EffectRow({
   const numVars = listVarOptions(variables, { numbersOnly: true })
   const flagVars = listVarOptions(variables, { flagsOnly: true })
   const summary = summarizeEffect(eff, entities, variables)
+  const operation = eff.kind === 'attr' || eff.kind === 'var'
+    ? decodeEffectOperation(eff.op, eff.value)
+    : undefined
 
-  // 运算符按钮（+ − × ÷ =）会把 value 就地变换（减=取反、除=取倒数），表达式/公式型会越叠越深且不可逆。
-  // 撤回快照由 EffectsEditor 按行持有（onOpSnapshot/canUndoOp/onUndoOp），EffectRow 不自存 state
-  // ——本行 onChange 会让父层重建整棵 effects，行内 useState 会被重置，故快照必须提升到不重挂的父层。
-  // 仅当变换「真的改变了 op 或 value」才入栈+回写：重复点已激活的 +/×/=（值不变）→ no-op，不产生可撤回项。
-  const handleOpChange = (next: { op: NumericEffectOp; value?: NumOrExpr }): void => {
-    if (eff.kind !== 'attr' && eff.kind !== 'var') return
-    const nextOp = next.op
-    const nextValue = 'value' in next && next.value !== undefined ? next.value : eff.value
-    if (nextOp === eff.op && numOrExprEqual(nextValue, eff.value)) return // 值/运算符都没变 → 不撤回、不回写
+  const handleOpChange = (nextDisplayOp: EffectDisplayOp): void => {
+    if ((eff.kind !== 'attr' && eff.kind !== 'var') || !operation) return
+    const next = encodeEffectOperation(nextDisplayOp, operation.value)
+    if (next.op === eff.op && numOrExprEqual(next.value, eff.value)) return
     onOpSnapshot?.({ op: eff.op, value: eff.value })
-    onChange({ ...eff, op: nextOp, value: nextValue })
+    onChange({ ...eff, ...next })
+  }
+
+  const handleValueChange = (value: NumOrExpr): void => {
+    if ((eff.kind !== 'attr' && eff.kind !== 'var') || !operation) return
+    onChange({ ...eff, ...encodeEffectOperation(operation.op, value) })
   }
 
   return (
@@ -567,12 +582,12 @@ function EffectRow({
           ))}
           {field('值', (
             <ValueInput
-              value={eff.value}
+              value={operation?.value ?? eff.value}
               entities={entities}
               variables={variables}
               formulas={formulas}
-              onChange={(v) => onChange({ ...eff, value: v })}
-              effectOp={{ op: eff.op, onOpChange: handleOpChange }}
+              onChange={handleValueChange}
+              effectOp={{ op: operation?.op ?? eff.op, onOpChange: handleOpChange }}
             />
           ))}
         </>
@@ -590,12 +605,12 @@ function EffectRow({
           ))}
           {field('值', (
             <ValueInput
-              value={eff.value}
+              value={operation?.value ?? eff.value}
               entities={entities}
               variables={variables}
               formulas={formulas}
-              onChange={(v) => onChange({ ...eff, value: v })}
-              effectOp={{ op: eff.op, onOpChange: handleOpChange }}
+              onChange={handleValueChange}
+              effectOp={{ op: operation?.op ?? eff.op, onOpChange: handleOpChange }}
             />
           ))}
         </>

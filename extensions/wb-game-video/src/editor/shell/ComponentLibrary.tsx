@@ -1,11 +1,11 @@
 /**
  * ComponentLibrary —— 界面 tab 画布右侧「组件库」。
- * 列出**全部可用组件**（runtime component-host 的 availableComponents = 每个组件的 id + 展示名），
+ * 直接读取 components/new 的唯一注册清单，
  * 渲染成可拖拽 chip；拖到画布（OverlayCatalogPreview 的 stage）落地为一个 child。
  * 纯展示：不持有方案数据，落地逻辑在 stage 的 onDrop 里（读 dataTransfer 的组件 id）。
  */
 import type { JSX } from 'react'
-import { availableComponents } from '../../runtime/component-host/components'
+import newComponents from '../../runtime/component-host/components/new'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
 /** 拖拽 MIME：库 chip → 画布落地时用它取组件 id。 */
@@ -33,24 +33,28 @@ export function ComponentLibrary(): JSX.Element {
   injectStyleOnce('overlay-component-library', LIB_CSS)
   return (
     <div className="ocl-root">
-      <div className="ocl-title">组件库（{availableComponents.length}）</div>
-      <div className="ocl-hint">拖到左侧画布落地；再拖动改位置 / 拖角改尺寸。</div>
-      {availableComponents.map((c) => (
-        <div
-          key={c.id}
-          className="ocl-chip"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(OVERLAY_PRESET_MIME, c.id)
-            e.dataTransfer.setData('text/plain', c.label)
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title={`拖到画布添加：${c.label}（${c.id}）`}
-        >
-          <span className="ocl-chip-dot" />
-          {c.label}
-        </div>
-      ))}
+      <div className="ocl-title">组件库（{newComponents.length}）</div>
+      <div className="ocl-hint">拖到左侧画布落地；再拖动调整组件位置。</div>
+      {newComponents.map(({ manifest }) => {
+        const id = manifest.id
+        const label = manifest.label ?? id
+        return (
+          <div
+            key={id}
+            className="ocl-chip"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(OVERLAY_PRESET_MIME, id)
+              e.dataTransfer.setData('text/plain', label)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            title={`拖到画布添加：${label}（${id}）`}
+          >
+            <span className="ocl-chip-dot" />
+            {label}
+          </div>
+        )
+      })}
     </div>
   )
 }

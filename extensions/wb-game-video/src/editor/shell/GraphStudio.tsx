@@ -70,14 +70,11 @@ function subflowMembers(graph: GameGraph, entryId: string): Set<string> {
   return seen
 }
 
-/** 节点面板预览区宽度：拖拽持久化键与几何约束（表单区至少 FORM_W_MIN，面板过窄时预览让位）。 */
+/** 节点面板分栏：默认预览占 60%，拖拽后记住像素宽度；表单保持可操作的最小宽度。 */
 const PREVIEW_W_KEY = 'wb-game-video.nodePanel.previewW'
 const PREVIEW_W_MIN = 340
-const FORM_W_MIN = 400
-/**
- * 预览区展开/收起：**默认收起**（配置面板占地方，多数时候只改表单）。状态是全局一份而非按节点存——
- * 换节点沿用上次的选择。持久化到 localStorage，跨会话保持。
- */
+const FORM_W_MIN = 280
+const SPLITTER_W = 5
 const PREVIEW_OPEN_KEY = 'wb-game-video.nodePanel.previewOpen'
 
 
@@ -138,17 +135,32 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const setSelected = useGraphScenario((s) => s.setSelectedNode)
   // 节点配置面板：预览台选中的挂载覆盖物 id（联动右侧表单聚焦该卡片）；换节点自动清空。
   const [focusedMountId, setFocusedMountId] = useState<string | null>(null)
-  useEffect(() => { setFocusedMountId(null) }, [selected])
+  // 节点配置面板：时间轴上选中的生命周期效果（子集序号，见 isLifecycleReaction 注释）。
+  const [focusedLifecycleIndex, setFocusedLifecycleIndex] = useState<number | null>(null)
+  useEffect(() => { setFocusedMountId(null); setFocusedLifecycleIndex(null) }, [selected])
+  // 面板里同一时刻只该有一个聚焦对象：选覆盖物就松开效果，反之亦然。
+  const focusMount = useCallback((id: string | null) => {
+    setFocusedMountId(id)
+    if (id != null) setFocusedLifecycleIndex(null)
+  }, [])
+  const focusLifecycle = useCallback((index: number | null) => {
+    setFocusedLifecycleIndex(index)
+    if (index != null) setFocusedMountId(null)
+  }, [])
   // 节点配置面板：左侧预览区宽度（px，可拖调，localStorage 记忆）。
-  const [previewW, setPreviewW] = useState<number>(() => {
-    if (typeof window === 'undefined') return 500
+  const [previewW, setPreviewW] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
     const v = Number(window.localStorage.getItem(PREVIEW_W_KEY))
-    return Number.isFinite(v) && v >= PREVIEW_W_MIN ? v : 500
+    return Number.isFinite(v) && v >= PREVIEW_W_MIN ? v : null
   })
-  // 预览区是否展开：缺省（无键）= 收起；换节点不重置，沿用上次选择。
-  const [previewOpen, setPreviewOpen] = useState<boolean>(
+  // 已有节点间切换沿用上次状态并跨会话记忆；只有新建节点时强制收起（见 addPerfNode）。
+  const [previewOpen, setPreviewOpen] = useState(
     () => typeof window !== 'undefined' && window.localStorage.getItem(PREVIEW_OPEN_KEY) === '1',
   )
+  const setPreviewOpenPersisted = useCallback((open: boolean) => {
+    setPreviewOpen(open)
+    if (typeof window !== 'undefined') window.localStorage.setItem(PREVIEW_OPEN_KEY, open ? '1' : '0')
+  }, [])
   const togglePreview = useCallback(() => {
     setPreviewOpen((open) => {
       const next = !open
@@ -243,8 +255,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       e.preventDefault()
       const el = e.currentTarget
       const startX = e.clientX
-      const startW = previewW
-      const maxW = Math.max(PREVIEW_W_MIN, (panelRef.current?.clientWidth ?? 960) - FORM_W_MIN)
+      const previewColumn = el.previousElementSibling as HTMLElement | null
+      const startW = previewColumn?.getBoundingClientRect().width ?? previewW ?? PREVIEW_W_MIN
+      const maxW = Math.max(PREVIEW_W_MIN, (panelRef.current?.clientWidth ?? 960) - FORM_W_MIN - SPLITTER_W)
       el.classList.add('is-drag')
       el.setPointerCapture(e.pointerId)
       const onMove = (ev: PointerEvent): void => {
@@ -256,7 +269,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         el.removeEventListener('pointermove', onMove)
         el.removeEventListener('pointerup', onUp)
         setPreviewW((w) => {
-          if (typeof window !== 'undefined') window.localStorage.setItem(PREVIEW_W_KEY, String(w))
+          if (typeof window !== 'undefined' && w != null) window.localStorage.setItem(PREVIEW_W_KEY, String(w))
           return w
         })
       }
@@ -296,6 +309,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       data: { name: '新演出节点' },
     }
     setCanvasGraph((g) => addNode(g, node))
+    // 新节点还没有预览内容，首次配置时只展示表单；后续手动展开会重新成为全局偏好。
+    setPreviewOpenPersisted(false)
     setSelected(id)
   }
 
@@ -527,6 +542,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           activeNodeId={playOpen ? snap.currentNodeId : null}
           traversedEdgeIds={playOpen ? traversed : undefined}
           readOnly={showingForeignPlayGraph}
+          // 配置面板打开时禁用 Delete/Backspace，避免作者改表单时误删当前节点；关闭后恢复。
+          keyboardDeleteEnabled={!selected}
           visibleNodeIds={playVisibleNodeIds}
           fitSignal={fitSignal}
           drillFitKey={drillFitKey}
@@ -604,10 +621,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         <div
           ref={panelRef}
           style={{
-            // 宽度上限 = 主区 80%：graph iframe 被调小时面板跟着收缩，给画布留至少 20% 可视区。
+            // 展开预览时让节点面板最多占主区 90%，给 3:2 分栏足够空间；收起时仍给画布留至少 20%。
             // 预览收起时只留表单宽度——否则表单会被拉到 960px，面板照旧占地方，收起就白收了。
-            width: previewOpen ? 'clamp(960px, 66vw, 1380px)' : `clamp(${FORM_W_MIN}px, 30vw, 560px)`,
-            maxWidth: '80%',
+            width: previewOpen ? 'clamp(960px, 66vw, 1380px)' : `clamp(${FORM_W_MIN}px, 28vw, 500px)`,
+            maxWidth: previewOpen ? '90%' : '80%',
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -619,16 +636,25 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             <b style={{ fontSize: 12 }}>节点配置{selectedNode ? ` · ${selectedNode.data.name || selectedNode.id}` : ''}</b>
             <button onClick={() => setSelected(null)} title="关闭" style={{ marginLeft: 'auto', color: '#9aa2b1', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
-          {/* 内容区：预览 + 表单各有最小宽度（340 / 400）；面板被 80% 上限压到更窄时横向滚动兜底。 */}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', overflowX: 'auto' }}>
+          {/* 展开态默认 3:2；拖拽后首列改用用户设定宽度。窄面板仍保证预览略宽于表单。 */}
+          <div
+            data-testid="node-panel-columns"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: previewOpen ? 'grid' : 'flex',
+              gridTemplateColumns: previewOpen
+                ? `${previewW == null ? `minmax(${PREVIEW_W_MIN}px, 3fr)` : `${previewW}px`} ${SPLITTER_W}px minmax(${FORM_W_MIN}px, 2fr)`
+                : undefined,
+              overflowX: 'auto',
+            }}
+          >
             {selectedNode && previewOpen ? (
               <>
                 <div
+                  data-testid="node-preview-column"
                   style={{
-                    // 预览列固定 = 用户拖拽设定的 previewW，flexShrink:0 永不压缩。
-                    // 面板被 80% 上限压窄时靠外层 overflowX 横向滚动，内部两列各自保持原宽。
-                    width: previewW,
-                    flexShrink: 0,
+                    // 列宽由外层 grid 管：默认 3:2，拖拽后首列固定为 previewW。
                     minWidth: PREVIEW_W_MIN,
                     display: 'flex',
                     flexDirection: 'column',
@@ -640,8 +666,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                     node={selectedNode}
                     game={game}
                     focusedMountId={focusedMountId}
+                    focusedLifecycleIndex={focusedLifecycleIndex}
                     onEditScenario={editPreviewScenario}
-                    onFocusMount={setFocusedMountId}
+                    onFocusMount={focusMount}
+                    onFocusLifecycle={focusLifecycle}
                   />
                 </div>
                 <div
@@ -651,9 +679,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 />
               </>
             ) : null}
-            {/* flex-basis 固定 400（非 auto）：否则窄面板下 basis 取内容 max-content，
+            {/* 收起态由面板的 28vw 给出舒适宽度；展开态表单下限 280px，把空间优先留给预览。
                 长下拉文案会把表单撑到 ~880px，中等宽度也出现不必要的横向滚动。 */}
-            <div style={{ flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, overflow: 'auto' }}>
+            <div data-testid="node-inspector-column" style={{ flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, overflow: 'auto' }}>
               <NodeInspector
                 graph={canvasGraph}
                 nodeId={selected}
@@ -666,7 +694,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 variables={variables}
                 formulas={formulas}
                 focusedMountId={focusedMountId}
-                onFocusMount={setFocusedMountId}
+                focusedLifecycleIndex={focusedLifecycleIndex}
+                onFocusMount={focusMount}
+                onFocusLifecycle={focusLifecycle}
                 previewOpen={previewOpen}
                 onTogglePreview={togglePreview}
                 onChange={setCanvasGraph}

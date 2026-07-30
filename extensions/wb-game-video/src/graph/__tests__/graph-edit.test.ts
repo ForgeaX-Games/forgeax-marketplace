@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setNodePosition, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubFlow } from '../../runtime/schema/graph-schema'
 
@@ -60,6 +60,54 @@ describe('graph-edit', () => {
     graph = updateEventRouteTiming(graph, 'a', 'pass', 'immediate')
     expect(graph.edges[0]?.data?.transition).toBeUndefined()
     expect(graph.nodes[0]?.data.routingSettlement).toBeUndefined()
+  })
+
+  it('setRoutingSettlementMs：只平移已存在的固定时刻结算，非 at 一律不动', () => {
+    let graph = connect(g0(), { source: 'a', sourceHandle: 'pass', target: 'b', id: 'e-pass' })
+
+    // 还没有结算点 / 结算=演出结束 时拖标记都不该"顺手"造出一个固定时刻。
+    expect(setRoutingSettlementMs(graph, 'a', 800)).toBe(graph)
+    graph = updateEventRouteTiming(graph, 'a', 'pass', 'onSettlement', { type: 'complete' })
+    expect(setRoutingSettlementMs(graph, 'a', 800)).toBe(graph)
+
+    graph = updateEventRouteTiming(graph, 'a', 'pass', 'onSettlement', { type: 'at', ms: 1200 })
+    const moved = setRoutingSettlementMs(graph, 'a', 640.7)
+    expect(moved.nodes[0]?.data.routingSettlement).toEqual({ type: 'at', ms: 641 }) // 取整
+    expect(setRoutingSettlementMs(moved, 'a', -50).nodes[0]?.data.routingSettlement).toEqual({ type: 'at', ms: 0 }) // 夹 0
+    expect(setRoutingSettlementMs(moved, 'a', 641)).toBe(moved) // 同值 = 原样返回，不制造新对象
+    // 出边跳转方式不受影响。
+    expect(moved.edges[0]?.data?.transition).toBe('onSettlement')
+  })
+
+  it('setLifecycleReactionMs：拖生命周期菱形落成 at(ms)，非生命周期相位不动', () => {
+    const withReactions: GameGraph = {
+      nodes: [{
+        ...n('a'),
+        data: {
+          name: 'a',
+          durationMs: 3000,
+          reactions: [
+            { when: { type: 'at', ms: 0 }, do: [] },
+            { when: { type: 'complete' }, do: [] },
+            { when: { type: 'watch', of: 'ent-boss.hp', on: 'dec' }, do: [] },
+          ],
+        },
+      }, n('b')],
+      edges: [],
+    }
+
+    const moved = setLifecycleReactionMs(withReactions, 'a', 0, 1250.6)
+    expect(moved.nodes[0]?.data.reactions?.[0]?.when).toEqual({ type: 'at', ms: 1251 }) // 取整
+    expect(setLifecycleReactionMs(moved, 'a', 0, 1251)).toBe(moved) // 同值不产生新对象
+    expect(setLifecycleReactionMs(moved, 'a', 0, -5).nodes[0]?.data.reactions?.[0]?.when).toEqual({ type: 'at', ms: 0 })
+
+    // 历史 complete 落成 at（与检视器改那一行同义）。
+    expect(setLifecycleReactionMs(withReactions, 'a', 1, 2000).nodes[0]?.data.reactions?.[1]?.when)
+      .toEqual({ type: 'at', ms: 2000 })
+    // watch 没有「时刻」这个维度，拖不到也不该被误改。
+    expect(setLifecycleReactionMs(withReactions, 'a', 2, 500)).toBe(withReactions)
+    // 越界下标 no-op。
+    expect(setLifecycleReactionMs(withReactions, 'a', 9, 500)).toBe(withReactions)
   })
 
   it('makeEmptySubFlowPack', () => {

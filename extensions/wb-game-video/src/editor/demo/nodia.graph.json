@@ -539,7 +539,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkKou",
+              "overlay": "base:InkKou",
               "reactions": [
                 {
                   "when": {
@@ -574,7 +574,7 @@
               },
               "id": "n_door",
               "removed": [
-                "inkKou-0"
+                "InkKou-0"
               ],
               "added": [
                 {
@@ -607,7 +607,7 @@
                     "timeoutMs": 6100,
                     "defaultEvent": "fail"
                   },
-                  "component": "inkKou",
+                  "component": "InkKou",
                   "layout": {
                     "left": 0,
                     "top": 0,
@@ -642,7 +642,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:dialogue",
+              "overlay": "base:Dialogue",
               "layout": {
                 "left": 0,
                 "top": 0,
@@ -651,7 +651,7 @@
               },
               "id": "n_soul",
               "removed": [
-                "dialogue-0"
+                "Dialogue-0"
               ],
               "added": [
                 {
@@ -664,7 +664,7 @@
                     "text": "……你也是来渡河的吗？",
                     "color": "#ffd54a"
                   },
-                  "component": "dialogue",
+                  "component": "Dialogue",
                   "layout": {
                     "left": 0,
                     "top": 0,
@@ -698,7 +698,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -732,7 +732,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 12069
@@ -783,7 +783,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -817,7 +817,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 13200
@@ -887,7 +887,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -921,7 +921,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 12093
@@ -954,7 +954,8 @@
           "reactions": [
             {
               "when": {
-                "type": "enter"
+                "type": "at",
+                "ms": 0
               },
               "do": [
                 {
@@ -1000,7 +1001,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -1034,7 +1035,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 12093
@@ -1066,7 +1067,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -1100,7 +1101,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 12093
@@ -1170,7 +1171,7 @@
           },
           "overlayNodes": [
             {
-              "overlay": "base:inkYingMo",
+              "overlay": "base:InkYingMo",
               "reactions": [
                 {
                   "when": {
@@ -1204,7 +1205,7 @@
                 "height": 1
               },
               "overrides": {
-                "inkYingMo-0": {
+                "InkYingMo-0": {
                   "trigger": {
                     "when": "at",
                     "ms": 12093
@@ -1256,7 +1257,8 @@
           "reactions": [
             {
               "when": {
-                "type": "enter"
+                "type": "at",
+                "ms": 0
               },
               "do": [
                 {
@@ -1508,7 +1510,7 @@
               ]
             },
             {
-              "overlay": "base:battleSkillBar",
+              "overlay": "base:BattleSkill",
               "reactions": [
                 {
                   "when": {
@@ -1595,7 +1597,7 @@
               },
               "id": "wait",
               "removed": [
-                "battleSkillBar-0"
+                "BattleSkill-0"
               ],
               "added": [
                 {
@@ -1651,7 +1653,7 @@
                     "x": 0.5,
                     "y": 0.88
                   },
-                  "component": "battleSkillBar",
+                  "component": "BattleSkill",
                   "layout": {
                     "left": 0,
                     "top": 0,
@@ -1803,7 +1805,7 @@
                           "holeBindings": {
                             "h_mult": {
                               "kind": "number",
-                              "value": 1.0
+                              "value": 1
                             },
                             "h_atk": {
                               "kind": "entityAttr",
@@ -2642,7 +2644,7 @@
                           "holeBindings": {
                             "h_mult": {
                               "kind": "number",
-                              "value": 3.0
+                              "value": 3
                             },
                             "h_atk": {
                               "kind": "entityAttr",
@@ -2742,7 +2744,7 @@
               ]
             },
             {
-              "overlay": "base:battleParry",
+              "overlay": "base:BattleParry",
               "reactions": [
                 {
                   "when": {
@@ -2813,7 +2815,7 @@
               },
               "id": "tele",
               "removed": [
-                "battleParry-0"
+                "BattleParry-0"
               ],
               "added": [
                 {
@@ -2848,7 +2850,7 @@
                       }
                     ]
                   },
-                  "component": "battleParry",
+                  "component": "BattleParry",
                   "layout": {
                     "left": 0,
                     "top": 0,
@@ -3885,7 +3887,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkKou",
+                    "overlay": "base:InkKou",
                     "reactions": [
                       {
                         "when": {
@@ -3920,7 +3922,7 @@
                     },
                     "id": "n_door",
                     "removed": [
-                      "inkKou-0"
+                      "InkKou-0"
                     ],
                     "added": [
                       {
@@ -3953,7 +3955,7 @@
                           "timeoutMs": 6100,
                           "defaultEvent": "fail"
                         },
-                        "component": "inkKou",
+                        "component": "InkKou",
                         "layout": {
                           "left": 0,
                           "top": 0,
@@ -3988,7 +3990,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:dialogue",
+                    "overlay": "base:Dialogue",
                     "layout": {
                       "left": 0,
                       "top": 0,
@@ -3997,7 +3999,7 @@
                     },
                     "id": "n_soul",
                     "removed": [
-                      "dialogue-0"
+                      "Dialogue-0"
                     ],
                     "added": [
                       {
@@ -4010,7 +4012,7 @@
                           "text": "……你也是来渡河的吗？",
                           "color": "#ffd54a"
                         },
-                        "component": "dialogue",
+                        "component": "Dialogue",
                         "layout": {
                           "left": 0,
                           "top": 0,
@@ -4044,7 +4046,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4078,7 +4080,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 12069
@@ -4129,7 +4131,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4163,7 +4165,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 13200
@@ -4233,7 +4235,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4267,7 +4269,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 12093
@@ -4300,7 +4302,8 @@
                 "reactions": [
                   {
                     "when": {
-                      "type": "enter"
+                      "type": "at",
+                      "ms": 0
                     },
                     "do": [
                       {
@@ -4346,7 +4349,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4380,7 +4383,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 12093
@@ -4412,7 +4415,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4446,7 +4449,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 12093
@@ -4516,7 +4519,7 @@
                 },
                 "overlayNodes": [
                   {
-                    "overlay": "base:inkYingMo",
+                    "overlay": "base:InkYingMo",
                     "reactions": [
                       {
                         "when": {
@@ -4550,7 +4553,7 @@
                       "height": 1
                     },
                     "overrides": {
-                      "inkYingMo-0": {
+                      "InkYingMo-0": {
                         "trigger": {
                           "when": "at",
                           "ms": 12093
@@ -4602,7 +4605,8 @@
                 "reactions": [
                   {
                     "when": {
-                      "type": "enter"
+                      "type": "at",
+                      "ms": 0
                     },
                     "do": [
                       {
@@ -4854,7 +4858,7 @@
                     ]
                   },
                   {
-                    "overlay": "base:battleSkillBar",
+                    "overlay": "base:BattleSkill",
                     "reactions": [
                       {
                         "when": {
@@ -4941,7 +4945,7 @@
                     },
                     "id": "wait",
                     "removed": [
-                      "battleSkillBar-0"
+                      "BattleSkill-0"
                     ],
                     "added": [
                       {
@@ -4997,7 +5001,7 @@
                           "x": 0.5,
                           "y": 0.88
                         },
-                        "component": "battleSkillBar",
+                        "component": "BattleSkill",
                         "layout": {
                           "left": 0,
                           "top": 0,
@@ -5149,7 +5153,7 @@
                                 "holeBindings": {
                                   "h_mult": {
                                     "kind": "number",
-                                    "value": 1.0
+                                    "value": 1
                                   },
                                   "h_atk": {
                                     "kind": "entityAttr",
@@ -5988,7 +5992,7 @@
                                 "holeBindings": {
                                   "h_mult": {
                                     "kind": "number",
-                                    "value": 3.0
+                                    "value": 3
                                   },
                                   "h_atk": {
                                     "kind": "entityAttr",
@@ -6088,7 +6092,7 @@
                     ]
                   },
                   {
-                    "overlay": "base:battleParry",
+                    "overlay": "base:BattleParry",
                     "reactions": [
                       {
                         "when": {
@@ -6159,7 +6163,7 @@
                     },
                     "id": "tele",
                     "removed": [
-                      "battleParry-0"
+                      "BattleParry-0"
                     ],
                     "added": [
                       {
@@ -6194,7 +6198,7 @@
                             }
                           ]
                         },
-                        "component": "battleParry",
+                        "component": "BattleParry",
                         "layout": {
                           "left": 0,
                           "top": 0,

@@ -48,6 +48,36 @@ describe('validateGraph', () => {
     expect(issues[0]!.code).toBe('edge.target.missing')
   })
 
+  it('strictly rejects non-stable catalog event keys and advance actions', () => {
+    const a = perf('a', ['qte'])
+    const overlay = Object.values(a.overlays)[0]!
+    overlay.children[0]!.inputs = { events: [{ id: 'pass' }] }
+    ;(overlay as unknown as { reactions: unknown }).reactions = [
+      {
+        when: { type: 'event', id: 'pass' },
+        do: [{ kind: 'advance', edgeId: 'e1' }],
+      },
+    ]
+    const issues = validateGraph({ nodes: [a.node], edges: [] }, { overlays: a.overlays })
+    expect(issues.map((issue) => issue.code)).toContain('overlay.reaction.event.missing')
+    expect(issues.map((issue) => issue.code)).toContain('overlay.reaction.action.kind')
+  })
+
+  it('accepts strict childId:eventId catalog effect/spawn actions', () => {
+    const a = perf('a', ['qte'])
+    const overlay = Object.values(a.overlays)[0]!
+    overlay.children[0]!.inputs = { events: [{ id: 'pass' }] }
+    overlay.reactions = [{
+      when: { type: 'event', id: 'a-e0:pass' },
+      do: [
+        { kind: 'effect', effects: [] },
+        { kind: 'spawn', from: 'ov-a/a-e0' },
+      ],
+    }]
+    const issues = validateGraph({ nodes: [a.node], edges: [] }, { overlays: a.overlays })
+    expect(issues.filter((issue) => issue.code.startsWith('overlay.reaction'))).toEqual([])
+  })
+
   it('rejects invalid routing settlement data', () => {
     const a = perf('a')
     const b = perf('b')

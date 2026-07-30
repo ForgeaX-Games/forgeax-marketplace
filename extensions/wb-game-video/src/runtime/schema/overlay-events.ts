@@ -6,7 +6,7 @@
  * - 单挂载 + 多交互 → `childId:A`
  * - 多挂载 → `mountId:childId:A`（该挂载仅一交互时可 `mountId:A`）
  */
-import type { Overlay } from './graph-schema'
+import type { Overlay, OverlayReaction } from './graph-schema'
 import type {
   ComponentEvent,
   ComponentManifest,
@@ -18,6 +18,21 @@ import type {
 import { overlayMountId } from './node-config-schema'
 
 export type ManifestResolver = (componentId: string) => ComponentManifest | undefined
+
+/** Overlay 目录 reaction 的唯一稳定 key；不随挂载数或同类交互组件数量变化。 */
+export function overlayReactionKey(childId: string, eventId: string): string {
+  return `${childId}:${eventId}`
+}
+
+/** 目录继承动作只按稳定 key 精确匹配，不接受挂载层的历史别名。 */
+export function resolveOverlayReaction(
+  reactions: OverlayReaction[] | undefined,
+  childId: string,
+  eventId: string,
+): OverlayReaction | undefined {
+  const key = overlayReactionKey(childId, eventId)
+  return reactions?.find((reaction) => reaction.when.id === key)
+}
 
 /** 从 `inputs.events` 折成事件表（交互目录 SSOT；组件未在 inputs 声明时回退 manifest.events）。 */
 export function eventsFromParams(inputs: Record<string, unknown> | undefined): ComponentEvent[] {
@@ -105,10 +120,11 @@ function eventReactionsFor(reactions: Reaction[] | undefined, eventId: string): 
   return (reactions ?? []).filter((r) => r.when.type === 'event' && r.when.id === eventId)
 }
 
-/** 候选 event key（优先级）：精确 → child:outcome → mount:outcome → mount:child:outcome。 */
+/** 新规格稳定 key 优先；尾部别名仅供读取尚未被编辑器重写的既有工程。 */
 function eventKeys(outcome: string, childId?: string, mountId?: string): string[] {
-  const keys = [outcome]
-  if (childId) keys.push(`${childId}:${outcome}`)
+  const keys: string[] = []
+  if (childId) keys.push(overlayReactionKey(childId, outcome))
+  keys.push(outcome)
   if (mountId) {
     keys.push(`${mountId}:${outcome}`)
     if (childId) keys.push(`${mountId}:${childId}:${outcome}`)
@@ -117,7 +133,7 @@ function eventKeys(outcome: string, childId?: string, mountId?: string): string[
 }
 
 /**
- * 解析 event 类 reaction 候选：命中优先级最高、且存在匹配的那个 key 的**全部**候选（供加权选择）。
+ * 解析 event 类 reaction 候选：稳定 childId:eventId 优先，返回首个命中 key 的全部候选。
  */
 export function resolveEventReactions(
   reactions: Reaction[] | undefined,
@@ -134,7 +150,7 @@ export function resolveEventReactions(
 }
 
 /**
- * 解析 event 类 reaction：精确 → child:outcome → mount:outcome → mount:child:outcome。
+ * 解析 event 类 reaction：稳定 childId:eventId 优先。
  * 返回首个候选的 do（不加权；加权请用 resolveEventReactions）。
  */
 export function resolveEventReactionDo(

@@ -12,7 +12,7 @@ const row: CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', marg
 const lbl: CSSProperties = { width: 72, opacity: 0.7, flexShrink: 0, fontSize: 11 }
 
 const COMPONENT_LABEL: Record<string, string> = {
-  dialogue: '字幕',
+  Dialogue: '字幕',
   floatText: '飘字',
   qte: 'QTE',
   choice: '选项',
@@ -80,7 +80,7 @@ export function OverlayChildStyleEditor({
     )
   }
 
-  if (kind === 'dialogue') {
+  if (kind === 'Dialogue') {
     return (
       <div style={{ marginTop: 6 }}>
         <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{child.id} · {title}</div>

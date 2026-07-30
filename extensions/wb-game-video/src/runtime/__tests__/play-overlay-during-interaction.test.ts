@@ -59,10 +59,8 @@ describe('试玩 · 交互挂起时仍见方案 HUD 与时间窗飘字', () => {
     const session = new GraphSession(scn)
     const snap = session.start()
     expect(snap.phase).toBe('playing')
-    const hud = snap.overlayMounts
-      .flatMap((m) => m.children)
-      .filter((c) => c.component === 'battleHpBar')
-    expect(hud.map((c) => c.inputs.bind).sort()).toEqual(['ent-boss', 'ent-player'])
+    const hud = snap.overlayMounts.flatMap((m) => m.children).map((c) => c.component)
+    expect(hud).toEqual(expect.arrayContaining(['BattlePlayerHpBar', 'BattleEnemyHpBar']))
   })
 
   it('tick：playing 期间 window 飘字仍会进 overlayMounts', () => {

@@ -1,5 +1,5 @@
 /**
- * 战斗技能条（component id: `battleSkillBar`）—— 固定展示轻攻击、重攻击、冥想、灭世。
+ * 战斗技能条（component id: `BattleSkill`）—— 固定展示轻攻击、重攻击、冥想、灭世。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与点击交互。
  */
 import { useRef, useState } from 'react'

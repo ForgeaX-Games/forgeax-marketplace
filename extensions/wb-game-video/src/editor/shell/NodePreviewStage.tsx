@@ -6,7 +6,7 @@
  *   - 视频舞台：`gc-frame` / `computeVideoContentRect` 锚定 object-fit:contain 实际画面；
  *   - 皮肤层：`previewSkinChildrenInWindow` + `renderOverlayChildPreview` + PreviewClock
  *     （暂停冻结 CSS 动画）；滤镜/特效走 `resolveVideoFxForNode` 旁路；
- *   - 叠层手柄：`activePreviewOverlaysFromNode`，可拖即写回 `patchOverlayPositionGraph`（x/y）；
+ *   - 叠层操作框：节点视频画布只允许移动整份 overlay，写回挂载 `layout.left/top`；
  *   - 时间轴：`MaterialTimeline` 全交互，但**投影到挂载级**（`collectMountItemsFromNode`：
  *     一份挂载 = 一条），拖动整体平移挂载内子件、删除移除整份挂载，写回
  *     `patchMaterialGraph`（mount 分支 → shiftMountWindowGraph）/`deleteMaterialGraph`；
@@ -20,9 +20,9 @@
  * `patchData → onChange → store` 数据流，本组件只多一个订阅者，天然实时；也不自动回写
  * `durationMs`（只影响本地播放头与时间轴上限，对齐 `videoDurationCapReached` 契约）。
  */
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { GameNode, GameScenario } from '../../runtime/schema/graph-schema'
+import type { GameNode, GameScenario, Layout } from '../../runtime/schema/graph-schema'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { initState } from '../../runtime/engine/engine-init'
 import { bootEditorSkins } from '../init'
@@ -34,24 +34,31 @@ import { renderOverlayChildPreview } from './overlayChildPreview'
 import { PreviewClockProvider, previewClockLayerClassName } from './previewClock'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
+import { ScaledOverlayContent } from '../../runtime/play/ScaledOverlayContent'
+import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
-import { materialClass, materialLabel, type MaterialItem } from '../video/materialTimelineShared'
-import { pointerToVideoNorm } from '../../runtime/play/videoContentRect'
+import { type MaterialItem, type TimelinePointMarker } from '../video/materialTimelineShared'
 import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
 import { PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
-import { overlayMountId } from '../../runtime/schema/node-config-schema'
+import { isLifecycleReaction, overlayMountId, type NodeAction } from '../../runtime/schema/node-config-schema'
+import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
 import { findMountOwningChild } from '../../graph/edit/overlay-edit'
+import { setLifecycleReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
+import { overlayFitTargets } from './overlay-fit-targets'
 import {
-  activePreviewOverlaysFromNode,
+  OverlayCanvasInteraction,
+  type CanvasBox,
+  type CanvasInteractionItem,
+} from './OverlayCanvasInteraction'
+import {
   collectMountItemsFromNode,
   deleteMaterialGraph,
   mountOverlayGraph,
   patchMaterialGraph,
-  patchOverlayPositionGraph,
+  patchOverlayMountLayoutGraph,
   previewSkinChildrenInWindow,
   shiftMountWindowGraph,
-  type PreviewOverlay,
 } from '../video/graphMaterialOps'
 
 /**
@@ -117,11 +124,21 @@ const NPS_CSS = `
 .nps-more-pop button:hover { background: var(--gc-accent-soft); border-color: var(--gc-accent-line); }
 .nps-more-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 8px; }
 .nps-root .mtl-root { flex: none; }
-/* 有真实皮肤的挂载物：手柄只做透明热区（不渲染默认 ring/label），选中在贴纸外围画矩形虚线框
-   示意该 overlay 的区域，真实贴纸由皮肤层呈现——「挂载物长啥样就是啥样」。 */
-.nps-root .gc-preview-overlay.is-skinned.is-selected { outline: 1.5px dashed rgba(240,136,64,.95); outline-offset: 4px; border-radius: 6px; box-shadow: 0 0 12px rgba(240,136,64,.3); }
-.nps-root .gc-preview-overlay.is-skinned:hover:not(.is-selected) { outline: 1px dashed rgba(240,136,64,.45); outline-offset: 4px; border-radius: 6px; }
 `
+
+const DEFAULT_MOUNT_W = 0.25
+const DEFAULT_MOUNT_H = 0.15
+
+function isFullStageMountLayout(layout: Layout | undefined): boolean {
+  return (
+    layout?.width === 1
+    && layout.height === 1
+    && layout.right == null
+    && layout.bottom == null
+    && layout.translateX == null
+    && layout.translateY == null
+  )
+}
 
 function fmtTime(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000))
@@ -130,26 +147,18 @@ function fmtTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-/**
- * 判定"这一层只是铺满画面的定位层、不是看得见的东西"的阈值（占画面宽高比例）。
- * 超过就继续下钻找真正的可见元素；调大 = 更容易把大块皮肤当可见实体收下。
- */
-const STAGE_LAYER_RATIO = 0.9
-
-/** 皮肤中某个可见元素的实测盒：中心归一化到画面矩形，尺寸取像素（热区照抄）。 */
-interface SkinBox {
-  cx: number
-  cy: number
-  w: number
-  h: number
-}
-
-/** 实测盒的比较指纹（像素取整、归一化留 3 位）——避免浮点抖动导致的无谓 re-render。 */
-function skinBoxesKey(boxes: Record<string, SkinBox[]>): string {
-  return Object.keys(boxes)
-    .sort()
-    .map((k) => `${k}:${boxes[k]!.map((b) => `${b.cx.toFixed(3)},${b.cy.toFixed(3)},${Math.round(b.w)},${Math.round(b.h)}`).join(';')}`)
-    .join('|')
+function effectsBrief(actions: NodeAction[]): string {
+  const effects = actions.flatMap((action) => (action.kind === 'effect' ? action.effects : []))
+  const spawns = actions.filter((action) => action.kind === 'spawn').length
+  const parts = effects.slice(0, 2).map((effect) => {
+    if (effect.kind === 'attr') return `${effect.entityId}.${effect.attr} ${effect.op} ${String(effect.value)}`
+    if (effect.kind === 'var') return `${effect.varId} ${effect.op} ${String(effect.value)}`
+    if (effect.kind === 'flag') return `${effect.varId} = ${effect.value}`
+    return `${effect.itemId} ${effect.op === 'give' ? '+' : '-'}${effect.count}`
+  })
+  if (effects.length > 2) parts.push(`等 ${effects.length} 项`)
+  if (spawns > 0) parts.push(`刷出 ${spawns} 个瞬态组件`)
+  return parts.length ? parts.join(' · ') : '未配置效果'
 }
 
 export function NodePreviewStage({
@@ -157,8 +166,10 @@ export function NodePreviewStage({
   node,
   game,
   focusedMountId,
+  focusedLifecycleIndex,
   onEditScenario,
   onFocusMount,
+  onFocusLifecycle,
 }: {
   /** 读投影场景：canvasGraph（主图或下钻包图）+ ui.overlays + entities/variables。 */
   scenario: GameScenario
@@ -167,32 +178,31 @@ export function NodePreviewStage({
   game: string
   /** 右侧表单当前聚焦的挂载 id（预览据此高亮对应叠层/时间轴条）。 */
   focusedMountId?: string | null
+  /** 右侧表单当前聚焦的结算（生命周期子集序号）；时间轴据此高亮对应菱形。 */
+  focusedLifecycleIndex?: number | null
   /** 写回通道：主图走 setScenario，子蓝图下钻由上层分流到包图（见 GraphStudio）。 */
   onEditScenario: (fn: (s: GameScenario, n: GameNode) => GameScenario) => void
   /** 选中某挂载覆盖物时上抛（右侧表单据此聚焦该卡片；传 null = 清空聚焦）。 */
   onFocusMount?: (mountId: string | null) => void
+  /** 点中某结算菱形时上抛，让右侧对应配置块高亮。 */
+  onFocusLifecycle?: (lifecycleIndex: number | null) => void
 }): JSX.Element {
   bootEditorSkins()
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   injectStyleOnce('node-preview-stage', NPS_CSS)
 
-  const frameRef = useRef<HTMLDivElement | null>(null)
+  const contentAnchorRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  // 皮肤层与其定位基准（`.gc-content-anchor` = object-fit:contain 后的真实画面矩形）：
-  // 热区尺寸靠量这两者的相对关系得出，见下方 useLayoutEffect。
-  const anchorRef = useRef<HTMLDivElement | null>(null)
-  const skinLayerRef = useRef<HTMLDivElement | null>(null)
-  const [skinBoxes, setSkinBoxes] = useState<Record<string, SkinBox[]>>({})
   const [playheadMs, setPlayheadMs] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(true)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
-  // 拖拽 id 用 ref 不用 state：pointerdown 后同帧的 pointermove 不能等 React 重渲染，否则首段位移被丢。
-  const overlayDragIdRef = useRef<string | null>(null)
-  /** 拖拽时"抓点 → 锚点"的固定偏移（同上，避免抓到皮肤边缘时锚点跳到指针下）。 */
-  const overlayDragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 })
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const mountPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [mountContentBoxes, setMountContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
+  const mountBoxSigRef = useRef('')
 
   const mediaRef = node.data.media?.ref ?? ''
   const playMode = node.data.mediaPlayMode ?? 'once'
@@ -221,10 +231,28 @@ export function NodePreviewStage({
     () => previewSkinChildrenInWindow(scenario, node, playheadMs, maxMs),
     [scenario, node, playheadMs, maxMs],
   )
-  const previewOverlays = useMemo(
-    () => activePreviewOverlaysFromNode(scenario, node, playheadMs, maxMs),
-    [scenario, node, playheadMs, maxMs],
-  )
+  const previewMountGroups = useMemo(() => {
+    const groups = new Map<string, {
+      mount: NonNullable<GameNode['data']['overlayNodes']>[number]
+      children: typeof previewSkinChildren
+    }>()
+    for (const child of previewSkinChildren) {
+      const mount = findMountOwningChild(scenario, node, child.id)
+      if (!mount) continue
+      const mountId = overlayMountId(mount)
+      const group = groups.get(mountId)
+      if (group) group.children.push(child)
+      else groups.set(mountId, { mount, children: [child] })
+    }
+    return [...groups.entries()].map(([mountId, value]) => ({
+      mountId,
+      ...value,
+      layout: resolveMountLayoutForChildren(
+        value.mount.layout,
+        resolveMountChildren(overlays, value.mount).map((child) => child.layout),
+      ) ?? {},
+    }))
+  }, [overlays, previewSkinChildren, scenario, node])
   const videoFx = useMemo(
     () => resolveVideoFxForNode(node, overlays, playheadMs, maxMs),
     [node, overlays, playheadMs, maxMs],
@@ -252,48 +280,6 @@ export function NodePreviewStage({
   }, [scenario])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
 
-  // ── 热区贴合皮肤实测盒 ────────────────────────────────────────────────────────
-  // 可拖的那块**就是渲染出来的皮肤本身**：手柄不再是独立造型（ring+label 占位芯片已删），
-  // 而是量出皮肤真正可见元素的盒子后盖在它上面的透明热区（默认全透明，hover/选中才描边，
-  // 见 catalogCss 的 `.is-skinned`）。皮肤没渲染出东西 → 预览里当它不存在，不画任何替代物。
-  useLayoutEffect(() => {
-    // 播放中不量：播放头每帧都变，量一次就是一次强制回流；拖拽只发生在暂停时，沿用上次结果即可。
-    if (isVideoPlaying) return
-    const layer = skinLayerRef.current
-    const host = anchorRef.current?.getBoundingClientRect()
-    if (!layer || !host || host.width <= 0 || host.height <= 0) {
-      setSkinBoxes((prev) => (Object.keys(prev).length ? {} : prev))
-      return
-    }
-    const next: Record<string, SkinBox[]> = {}
-    for (const wrap of Array.from(layer.children)) {
-      const childId = (wrap as HTMLElement).dataset.gvSkin
-      if (!childId) continue
-      const boxes: SkinBox[] = []
-      // 皮肤最外层通常是铺满整台的定位层（inputs 型皮肤靠自身 x/y 摆位，见 overlayChildPreview
-      // 的 STAGE_FILL_WRAP），它不是"看得见的东西"。所以逐层下钻，直到遇见明显小于整台的元素才
-      // 当作可抓实体收下；多拍点皮肤（如 inkKou 多 cue）自然会量出多个盒。
-      const visit = (el: Element): void => {
-        const r = el.getBoundingClientRect()
-        if (r.width <= 1 || r.height <= 1) return
-        if (r.width >= host.width * STAGE_LAYER_RATIO && r.height >= host.height * STAGE_LAYER_RATIO) {
-          for (const c of Array.from(el.children)) visit(c)
-          return
-        }
-        boxes.push({
-          cx: (r.left + r.width / 2 - host.left) / host.width,
-          cy: (r.top + r.height / 2 - host.top) / host.height,
-          w: r.width,
-          h: r.height,
-        })
-      }
-      for (const c of Array.from((wrap as HTMLElement).children)) visit(c)
-      if (boxes.length) next[childId] = boxes
-    }
-    // 只在实测值真变了才 set：量出来的是浮点像素，不比较会自激成每帧一次 re-render。
-    setSkinBoxes((prev) => (skinBoxesKey(prev) === skinBoxesKey(next) ? prev : next))
-  }, [previewSkinChildren, playheadMs, contentRect, isVideoPlaying])
-
   // 「添加控件」= 覆盖物挂载入口：候选与界面 tab 同一份（自定义覆盖物 + 基础覆盖物，打平；
   // 见 builtin-schemes），已挂载的排除，前 5 直接列出，其余进「更多」。
   const mountedOverlayIds = useMemo(
@@ -307,30 +293,9 @@ export function NodePreviewStage({
   const primaryCandidateIds = mountCandidateIds.slice(0, 5)
   const moreCandidateIds = mountCandidateIds.slice(5)
 
-  /** 手柄该盖在哪个实测盒上：同一子件量出多个盒（多拍点皮肤）时取离该手柄锚点最近的那个。 */
-  function fitBoxFor(elId: string, x: number, y: number): SkinBox | null {
-    const boxes = elId ? skinBoxes[elId] : undefined
-    if (!boxes?.length) return null
-    let best = boxes[0]!
-    let bestD = Number.POSITIVE_INFINITY
-    for (const b of boxes) {
-      const d = (b.cx - x) ** 2 + (b.cy - y) ** 2
-      if (d < bestD) {
-        bestD = d
-        best = b
-      }
-    }
-    return best
-  }
-
-  /** 某预览叠层归属哪份挂载（elementId → owning mount）。 */
-  function mountIdOfOverlay(o: PreviewOverlay): string | null {
-    const elId =
-      o.target.kind === 'element' || o.target.kind === 'qteCue' || o.target.kind === 'mount' ? o.target.elementId : ''
-    if (!elId) return null
-    const m = findMountOwningChild(scenario, node, elId)
-    return m ? overlayMountId(m) : null
-  }
+  useEffect(() => {
+    setSelectedOverlayId(selectedMountId)
+  }, [selectedMountId])
 
   // 换节点/换视频：清播放态与选中（视频因 key 变化 remount 自动重播）。
   useEffect(() => {
@@ -338,7 +303,7 @@ export function NodePreviewStage({
     setVideoDurationMs(null)
     setLoadError(false)
     setMoreOpen(false)
-    overlayDragIdRef.current = null
+    setSelectedOverlayId(focusedMountId ?? null)
   }, [node.id, mediaRef])
 
   // 播放期间 rAF 每帧推进播放头（平滑）；到 cap 提前收演出（once 语义，loop 不截断）。
@@ -406,6 +371,42 @@ export function NodePreviewStage({
     onEditScenario((s, n) => deleteMaterialGraph(s, n, item))
     if (selectedMountId === item.id) focusMount(null)
   }
+
+  const pointMarkers = useMemo((): TimelinePointMarker[] => {
+    const out: TimelinePointMarker[] = []
+    const settlement = node.data.routingSettlement
+    if (settlement?.type === 'at') {
+      out.push({ id: 'settlement', ms: settlement.ms, kind: 'settlement', label: '结算时刻 · 延迟事件边在此刻提交并离开节点' })
+    }
+    ;(node.data.reactions ?? []).filter(isLifecycleReaction).forEach((reaction, lifecycleIndex) => {
+      const ms = reaction.when.type === 'at' ? reaction.when.ms : reaction.when.type === 'enter' ? 0 : null
+      if (ms == null) return
+      out.push({ id: `life:${lifecycleIndex}`, ms, kind: 'lifecycle', label: `结算 · ${effectsBrief(reaction.do)}` })
+    })
+    return out
+  }, [node.data.routingSettlement, node.data.reactions])
+
+  const lifecycleIndexOf = (id: string): number | null => {
+    if (!id.startsWith('life:')) return null
+    const index = Number(id.slice('life:'.length))
+    return Number.isInteger(index) ? index : null
+  }
+
+  const movePointMarker = (id: string, ms: number): void => {
+    if (id === 'settlement') {
+      onEditScenario((scenarioToEdit, nodeToEdit) => ({
+        ...scenarioToEdit,
+        graph: setRoutingSettlementMs(scenarioToEdit.graph, nodeToEdit.id, ms),
+      }))
+      return
+    }
+    const lifecycleIndex = lifecycleIndexOf(id)
+    if (lifecycleIndex == null) return
+    onEditScenario((scenarioToEdit, nodeToEdit) => ({
+      ...scenarioToEdit,
+      graph: setLifecycleReactionMs(scenarioToEdit.graph, nodeToEdit.id, lifecycleIndex, ms),
+    }))
+  }
   /** 「添加控件」点击 / 拖入：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
   function mountOverlay(overlayId: string, atMs?: number): void {
     onEditScenario((s, n) => {
@@ -418,38 +419,107 @@ export function NodePreviewStage({
     setMoreOpen(false)
   }
 
-  // ── 预览叠层拖拽定位（写回 inputs.x/y 或 cue.x/y） ─────────────────────────
-  function positionFromFrame(e: React.PointerEvent): { x: number; y: number } | null {
-    const frame = frameRef.current
-    if (!frame) return null
-    return pointerToVideoNorm(e.clientX, e.clientY, frame, videoRef.current)
+  // ── 预览叠层画布（共享 OverlayCanvasInteraction）──────────────────────────
+  function patchMountPosition(mountId: string, position: { x: number; y: number }): void {
+    onEditScenario((s, n) => patchOverlayMountLayoutGraph(s, n, mountId, {
+      left: position.x,
+      top: position.y,
+      right: undefined,
+      bottom: undefined,
+    }))
   }
-  function moveOverlay(o: PreviewOverlay, x: number, y: number): void {
-    onEditScenario((s, n) => patchOverlayPositionGraph(s, n, o.target, x, y))
+  function reorderMount(mountId: string, direction: 'front' | 'back'): void {
+    const zValues = previewMountGroups.map(({ mount }) =>
+      typeof mount.layout?.zIndex === 'number' ? mount.layout.zIndex : 0)
+    const zIndex = direction === 'front'
+      ? Math.max(0, ...zValues) + 1
+      : Math.min(0, ...zValues) - 1
+    onEditScenario((s, n) => patchOverlayMountLayoutGraph(s, n, mountId, { zIndex }))
   }
-  function onOverlayPointerDown(e: React.PointerEvent<HTMLDivElement>, o: PreviewOverlay): void {
-    e.preventDefault()
-    e.stopPropagation()
-    focusMount(mountIdOfOverlay(o))
-    if (!o.movable) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    overlayDragIdRef.current = o.id
-    // 记下"抓点相对锚点"的偏移，move 时原样带上：热区现在贴合整块皮肤，可抓面积可能很大
-    // （血条这种横条尤甚），若仍按下即把锚点吸到指针，抓边缘会让它整块跳一下。
-    const pos = positionFromFrame(e)
-    overlayDragOffsetRef.current = pos ? { dx: o.x - pos.x, dy: o.y - pos.y } : { dx: 0, dy: 0 }
-  }
-  function onOverlayPointerMove(e: React.PointerEvent<HTMLDivElement>, o: PreviewOverlay): void {
-    if (overlayDragIdRef.current !== o.id) return
-    const pos = positionFromFrame(e)
-    if (!pos) return
-    const { dx, dy } = overlayDragOffsetRef.current
-    moveOverlay(o, pos.x + dx, pos.y + dy)
-  }
-  function onOverlayPointerUp(): void {
-    overlayDragIdRef.current = null
-    overlayDragOffsetRef.current = { dx: 0, dy: 0 }
-  }
+
+  useLayoutEffect(() => {
+    const stage = contentAnchorRef.current
+    if (!stage) return
+    const stageRect = stage.getBoundingClientRect()
+    if (!stageRect.width || !stageRect.height) return
+    const next: Record<string, { left: number; top: number; width: number; height: number }> = {}
+    for (const { mountId } of previewMountGroups) {
+      const wrap = mountPreviewRefs.current[mountId]
+      if (!wrap) continue
+      let left = Infinity
+      let top = Infinity
+      let right = -Infinity
+      let bottom = -Infinity
+      for (const element of overlayFitTargets(wrap)) {
+        const rect = element.getBoundingClientRect()
+        if (!rect.width || !rect.height) continue
+        left = Math.min(left, rect.left)
+        top = Math.min(top, rect.top)
+        right = Math.max(right, rect.right)
+        bottom = Math.max(bottom, rect.bottom)
+      }
+      if (!(right > left && bottom > top)) {
+        const fallback = wrap.getBoundingClientRect()
+        left = fallback.left
+        top = fallback.top
+        right = fallback.right
+        bottom = fallback.bottom
+      }
+      next[mountId] = {
+        left: (left - stageRect.left) / stageRect.width,
+        top: (top - stageRect.top) / stageRect.height,
+        width: (right - left) / stageRect.width,
+        height: (bottom - top) / stageRect.height,
+      }
+    }
+    const sig = Object.entries(next)
+      .map(([id, box]) => `${id}:${box.left.toFixed(3)},${box.top.toFixed(3)},${box.width.toFixed(3)},${box.height.toFixed(3)}`)
+      .join('|')
+    if (sig !== mountBoxSigRef.current) {
+      mountBoxSigRef.current = sig
+      setMountContentBoxes(next)
+    }
+  }, [previewMountGroups, playheadMs, contentRect])
+
+  const interactionItems = useMemo<CanvasInteractionItem[]>(() =>
+    previewMountGroups.map(({ mountId, mount, children, layout }) => {
+      const content = mountContentBoxes[mountId]
+      const explicitBox: CanvasBox | null =
+        !isFullStageMountLayout(layout)
+        && typeof layout?.left === 'number'
+        && typeof layout.top === 'number'
+        && typeof layout.width === 'number'
+        && typeof layout.height === 'number'
+        && layout.translateX == null
+        && layout.translateY == null
+          ? {
+              left: layout.left,
+              top: layout.top,
+              width: layout.width,
+              height: layout.height,
+            }
+          : null
+      const box: CanvasBox = explicitBox ?? {
+        left: content?.left ?? 0,
+        top: content?.top ?? 0,
+        width: content?.width ?? DEFAULT_MOUNT_W,
+        height: content?.height ?? DEFAULT_MOUNT_H,
+      }
+      return {
+        id: mountId,
+        label: overlays?.[mount.overlay]?.title?.trim() || mountId,
+        position: {
+          x: typeof layout?.left === 'number' ? layout.left : 0,
+          y: typeof layout?.top === 'number' ? layout.top : 0,
+        },
+        frame: { kind: 'box', ...box },
+        zIndex: typeof mount.layout?.zIndex === 'number'
+          ? mount.layout.zIndex
+          : Math.max(0, ...children.map((child) => typeof child.layout?.zIndex === 'number' ? child.layout.zIndex : 0)),
+        movable: true,
+        resizable: false,
+      }
+    }), [mountContentBoxes, overlays, previewMountGroups])
 
   const previewContentStyle: CSSProperties | undefined = contentRect
     ? { left: `${contentRect.left}px`, top: `${contentRect.top}px`, width: `${contentRect.width}px`, height: `${contentRect.height}px` }
@@ -457,7 +527,7 @@ export function NodePreviewStage({
 
   return (
     <div className="nps-root">
-      <div ref={frameRef} className="gc-frame nps-frame" data-type="video">
+      <div className="gc-frame nps-frame" data-type="video">
         <span className="gc-badge">
           {mediaRef || '未绑定视频'}
           {playMode === 'loop' ? <em>循环</em> : null}
@@ -498,71 +568,46 @@ export function NodePreviewStage({
             ))}
           </div>
         ) : null}
-        <div className="gc-content-anchor" style={previewContentStyle} ref={anchorRef}>
+        <div ref={contentAnchorRef} className="gc-content-anchor" style={previewContentStyle}>
           <div className="gc-preview-overlays">
-            {previewSkinChildren.length > 0 ? (
-              <PreviewClockProvider value={previewClockValue}>
-                <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden ref={skinLayerRef}>
-                  {previewSkinChildren.map((child) => {
-                    // 挂载盒偏移：点元素自身是相对舞台的 inputs.x/y 锚点，挂载盒（mount.layout）在其上叠加
-                    // 偏移，贴纸随盒移动——与手柄位置（基准+偏移）及拖拽写回保持一致。
-                    const m = findMountOwningChild(scenario, node, child.id)
-                    const dx = typeof m?.layout?.left === 'number' ? m.layout.left : 0
-                    const dy = typeof m?.layout?.top === 'number' ? m.layout.top : 0
-                    return (
+            <ScaledOverlayContent>
+              {previewSkinChildren.length > 0 ? (
+                <PreviewClockProvider value={previewClockValue}>
+                  <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
+                    {previewMountGroups.map(({ mountId, children, layout }) => (
                       <div
-                        key={child.id}
-                        data-gv-skin={child.id}
-                        style={{
-                          position: 'absolute', inset: 0, pointerEvents: 'none',
-                          transform: dx || dy ? `translate(${dx * 100}%, ${dy * 100}%)` : undefined,
-                        }}
+                        key={mountId}
+                        ref={(element) => { mountPreviewRefs.current[mountId] = element }}
+                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
                       >
-                        {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs)}
+                        {children.map((child) => (
+                          <span key={child.id} style={{ display: 'contents' }}>
+                            {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs, layout)}
+                          </span>
+                        ))}
                       </div>
-                    )
-                  })}
-                </div>
-              </PreviewClockProvider>
-            ) : null}
-            {previewOverlays.map((o) => {
-              const ownMount = mountIdOfOverlay(o)
-              const selected = !!ownMount && ownMount === selectedMountId
-              const elId = o.target.kind === 'element' || o.target.kind === 'qteCue' || o.target.kind === 'mount'
-                ? o.target.elementId
-                : ''
-              const fit = fitBoxFor(elId, o.x, o.y)
-              // 皮肤没量到可见盒（渲染不出东西 / 尚未量完）→ 预览里当它不存在。不再退化成
-              // ring+label 占位芯片：能拖的必须就是看得见的那块皮肤本身。
-              if (!fit) return null
-              return (
-                <div
-                  key={o.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${materialLabel(o.kind)}：${o.label}${o.movable ? '，可拖动' : ''}`}
-                  className={`gc-preview-overlay ${materialClass(o.kind)}${selected ? ' is-selected' : ''}${o.movable ? ' is-movable' : ''} is-skinned`}
-                  // 位置/尺寸全抄实测盒（inline 覆盖 .is-skinned 的 56px 兜底与基类 max-width）：
-                  // 热区严丝合缝盖住皮肤，点它就是点这个覆盖物实例。
-                  style={{
-                    left: `${fit.cx * 100}%`,
-                    top: `${fit.cy * 100}%`,
-                    width: `${fit.w}px`,
-                    height: `${fit.h}px`,
-                    maxWidth: 'none',
-                    zIndex: 30,
-                  }}
-                  onPointerDown={(e) => onOverlayPointerDown(e, o)}
-                  onPointerMove={(e) => onOverlayPointerMove(e, o)}
-                  onPointerUp={onOverlayPointerUp}
-                  onLostPointerCapture={onOverlayPointerUp}
-                >
-                  {/* 空热区，刻意不放任何子节点：唯一的视觉是 NPS_CSS `.is-skinned` 在 hover / 选中时
-                      描的那圈 outline（catalogCss 的 ring/label 是视频 tab 的造型，叠上来就是双重边框
-                      + 多余标签）。名字只留在 aria-label 里给读屏与自动化用。 */}
-                </div>
-              )
-            })}
+                    ))}
+                  </div>
+                </PreviewClockProvider>
+              ) : null}
+            </ScaledOverlayContent>
+            <OverlayCanvasInteraction
+              stageRef={contentAnchorRef}
+              items={interactionItems}
+              selectedId={selectedOverlayId}
+              frameVisibility="active"
+              ariaLabel="节点视频覆盖物画布"
+              onSelect={(id) => {
+                setSelectedOverlayId(id)
+                focusMount(id)
+              }}
+              onMove={(id, position) => {
+                patchMountPosition(id, position)
+              }}
+              onReorder={(id, direction) => {
+                reorderMount(id, direction)
+              }}
+            />
           </div>
         </div>
       </div>
@@ -629,6 +674,8 @@ export function NodePreviewStage({
         maxMs={maxMs}
         playheadMs={playheadMs}
         selectedMaterialKey={selectedMountId ? `mount:${selectedMountId}` : null}
+        pointMarkers={pointMarkers}
+        selectedPointMarkerId={focusedLifecycleIndex != null ? `life:${focusedLifecycleIndex}` : null}
         context="video"
         editable
         emptyHint="该节点暂无挂载覆盖物——用上方「添加控件」挂载一张覆盖物"
@@ -646,6 +693,11 @@ export function NodePreviewStage({
           }
         }}
         onPatchMaterial={patchMaterial}
+        onPointMarkerChange={movePointMarker}
+        onSelectPointMarker={(id) => {
+          const lifecycleIndex = lifecycleIndexOf(id)
+          if (lifecycleIndex != null) onFocusLifecycle?.(lifecycleIndex)
+        }}
         onDeleteMaterial={deleteMaterial}
         onDropTemplate={(template, atMs) => mountOverlay(template, atMs)}
       />

@@ -29,7 +29,7 @@ import type {
 } from '../schema/graph-schema'
 import { getNodeBgm, getSubFlowPack, isSubflowContainerData, resolveGraphEntry } from '../schema/graph-schema'
 import { nodeOverlayChildren, nodeOverlayMounts } from '../schema/expand-overlay'
-import { resolveEventReactions, completeReactions } from '../schema/overlay-events'
+import { resolveEventReactions, resolveOverlayReaction, completeReactions } from '../schema/overlay-events'
 import type { Layout, NodeAction, OverlayInstanceChild, Reaction } from '../schema/node-config-schema'
 import { overlayMountId } from '../schema/node-config-schema'
 import { applyEffects, type MutableState } from './apply-effects'
@@ -277,8 +277,16 @@ export class GraphRuntime {
 
     const mountReactions = this.mountReactionsFor(el)
     const evReactions = resolveEventReactions(mountReactions, outcome, el.source.childId, el.source.mountId)
+    const catalogReaction = resolveOverlayReaction(
+      this.scenario.ui?.overlays?.[el.source.overlayId]?.reactions,
+      el.source.childId,
+      outcome,
+    )
     let advanced = false
+    // 目录动作先执行，挂载动作随后追加；目录专用类型排除了 advance，因此走向始终属于节点挂载/边。
+    if (catalogReaction) this.runEventActions(catalogReaction.do, el)
     for (const r of evReactions) {
+      if (this.redirect) break
       if (this.runEventActions(r.do, el)) {
         advanced = true
         break
