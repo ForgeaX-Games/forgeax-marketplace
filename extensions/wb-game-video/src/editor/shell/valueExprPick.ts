@@ -28,12 +28,16 @@ export type ValueExprInput = NumOrExpr | string
 export type { ValueTerm, ValueTermOp }
 
 export {
+  attrDisplayName,
+  entityDisplayName,
   findEntity,
   findFormula,
+  formulaDisplayName,
   listAttrOptions,
   listEntityOptions,
   listFormulaOptions,
   listVarOptions,
+  variableDisplayName,
 } from './metaCatalog'
 
 export const VALUE_TERM_OPS: ValueTermOp[] = ['+', '-', '*', '/']

@@ -266,6 +266,7 @@ export function OverlayCanvasInteraction({
   const draggingRef = useRef(false)
   const spacePressedRef = useRef(false)
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
+  const hoveredMovable = hoveredId ? itemMap.get(hoveredId)?.movable === true : false
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -490,7 +491,7 @@ export function OverlayCanvasInteraction({
   return (
     <>
       <div
-        className={`oci-layer${hoveredId || spacePressed ? ' is-over-item' : ''}${draggingId ? ' is-dragging' : ''}${resizingId ? ' is-resizing' : ''}`}
+        className={`oci-layer${hoveredMovable || spacePressed ? ' is-over-item' : ''}${draggingId ? ' is-dragging' : ''}${resizingId ? ' is-resizing' : ''}`}
         role="application"
         aria-label={ariaLabel}
         tabIndex={0}

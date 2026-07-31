@@ -66,6 +66,21 @@ function runToEnd(rt: GraphRuntime, maxSteps = 60): RuntimeDirective[] {
 
 const packOf = (id: string, entry: string, graph: GameGraph): SubFlowPackDef => ({ id, version: '1', entry, graph })
 
+function runtimeWithRootEntry(
+  scenario: GameScenario,
+  entry: string,
+  dependencies: readonly SubFlowPackDef[],
+): GraphRuntime {
+  const rootId = '__test-root__'
+  return new GraphRuntime(
+    scenario.graph,
+    scenario,
+    undefined,
+    [packOf(rootId, entry, scenario.graph), ...dependencies],
+    rootId,
+  )
+}
+
 describe('文档默认床轨（scenario.bgm）', () => {
   const solo = (): GameGraph => ({ nodes: [node('n1', { durationMs: 100 })], edges: [] })
 
@@ -473,7 +488,7 @@ describe('接受的后果（最坏形态）：漏播在循环里会逐圈叠加�
 
   it('每圈 +2 层（环里的 pusher 一层、包里的 pusher 一层），一路涨到出环', () => {
     const scn = withStory(main(), roundVars)
-    const rt = new GraphRuntime(scn.graph, scn, undefined, [leakyPack()])
+    const rt = runtimeWithRootEntry(scn, 'enter', [leakyPack()])
     const depths: number[] = []
     // 每次走进 `enter` 记一次栈深；起局那次也算（start 进入蓝图 entry）。
     rt.start()
@@ -507,7 +522,7 @@ describe('接受的后果（最坏形态）：漏播在循环里会逐圈叠加�
       edges: [edge('e-pe', 'p_enter', 'p_end')],
     })
     const scn = withStory(main(), roundVars)
-    const rt = new GraphRuntime(scn.graph, scn, undefined, [tightPack])
+    const rt = runtimeWithRootEntry(scn, 'enter', [tightPack])
     const depths: number[] = []
     rt.start()
     depths.push(bgmDepth(rt))

@@ -218,6 +218,34 @@ describe('NodeInspector overlay events', () => {
 })
 
 describe('OverlaySchemeEditor selected child', () => {
+  it('requires confirmation before deleting a custom interface scheme', () => {
+    const onRemove = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(
+      <OverlaySchemeEditor
+        overlayId="custom-hud"
+        overlay={{ id: 'custom-hud', title: '战斗界面', children: [] }}
+        entities={{}}
+        variables={{}}
+        usageCount={2}
+        onRename={vi.fn()}
+        onRemove={onRemove}
+        onAddChild={vi.fn()}
+        onRemoveChild={vi.fn()}
+        onPatchChild={vi.fn()}
+        onReactionsChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirm).toHaveBeenCalledWith('确定删除自定义界面方案「战斗界面」？当前仍被 2 个节点引用，删除后这些挂载将无法解析界面。')
+    expect(onRemove).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(onRemove).toHaveBeenCalledTimes(1)
+  })
+
   it('defaults overlapping components to the visually topmost child', async () => {
     const { container } = render(
       <OverlaySchemeEditor
@@ -247,7 +275,7 @@ describe('OverlaySchemeEditor selected child', () => {
     expect(container.querySelector('[data-canvas-item="subtitle-a"]')?.classList.contains('is-selected')).toBe(false)
   })
 
-  it('keeps the design canvas fixed at 80% and clips content to it', async () => {
+  it('uses an 80% editor viewport backed by full-stage logical coordinates', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.hasAttribute('data-overlay-fit-target')) {
         return {
@@ -300,10 +328,17 @@ describe('OverlaySchemeEditor selected child', () => {
 
     await waitFor(() => expect(screen.getByLabelText('覆盖物画布 宽%')).toHaveValue(80))
     expect(screen.getByLabelText('覆盖物画布 高%')).toHaveValue(80)
+    expect(document.querySelector('[data-overlay-bounds-readout]')).toHaveStyle({
+      display: 'grid',
+      alignItems: 'center',
+    })
     expect(screen.queryByRole('button', { name: /调整dialogue大小/ })).toBeNull()
     expect(document.querySelectorAll('[data-overflow-child]')).toHaveLength(0)
     expect((document.querySelector('[data-overlay-content-clip]') as HTMLElement).style.clipPath).toContain('inset(')
     expect(document.querySelector('[data-overlay-design-canvas]')).toHaveStyle({
+      left: '10%', top: '10%', width: '80%', height: '80%',
+    })
+    expect(document.querySelector('[data-overlay-coordinate-stage]')).toHaveStyle({
       left: '10%', top: '10%', width: '80%', height: '80%',
     })
     expect(screen.queryByRole('button', { name: /调整覆盖物画布大小/ })).toBeNull()
@@ -365,7 +400,12 @@ describe('OverlaySchemeEditor selected child', () => {
       />,
     )
     const currentField = screen.getByText('当前血量').parentElement!
-    expect(screen.getByText(/不能增删组件或调整组件大小/)).toBeTruthy()
+    expect(screen.getByText(/不能增删或拖动组件/)).toBeTruthy()
+    expect(document.querySelector('[data-overlay-design-canvas]')).toBeNull()
+    expect(document.querySelector('[data-overlay-centered-child="hp"]')).toBeTruthy()
+    expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
+    expect(document.querySelector('[data-canvas-item="hp"]')).toHaveClass('is-selected')
+    expect(screen.queryByText('虚拟画布尺寸')).toBeNull()
     expect(screen.queryByRole('button', { name: /调整BattlePlayerHpBar大小/ })).toBeNull()
     expect(currentField.style.gridTemplateColumns).toBe('4em minmax(0, 1fr)')
     expect(currentField.style.columnGap).toBe('8px')
@@ -409,13 +449,12 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={vi.fn()}
       />,
     )
-
     expect(container.querySelector('.ks-hud-boss-name')?.textContent).toBe('空藏')
   })
 
   it('keeps base structure locked while allowing catalog event actions', () => {
     const onReactionsChange = vi.fn()
-    render(
+    const { container } = render(
       <OverlaySchemeEditor
         overlayId="base:InkYingMo"
         overlay={{ id: 'base:InkYingMo', children: [{ id: 'choice', component: 'InkYingMo', inputs: {} }] }}
@@ -431,6 +470,12 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={onReactionsChange}
       />,
     )
+    expect(container.querySelector('[data-overlay-design-canvas]')).toBeNull()
+    expect(container.querySelector('[data-overlay-centered-child="choice"]')).toBeTruthy()
+    expect(screen.queryByText('虚拟画布尺寸')).toBeNull()
+    expect(screen.queryByLabelText('界面方案画布')).toBeNull()
+    expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
+    expect(container.querySelector('[data-canvas-item="choice"]')).toHaveClass('is-selected')
     expect((screen.getByTestId('overlay-event-editor') as HTMLFieldSetElement).disabled).toBe(false)
     expect(screen.getByText('choice:ying')).toBeTruthy()
     const effectButtons = screen.getAllByRole('button', { name: '＋ 效果' })

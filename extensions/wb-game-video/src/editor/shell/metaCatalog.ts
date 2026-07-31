@@ -14,6 +14,24 @@ export function findEntity(
   return Object.values(entities).find((e) => e.id === id)
 }
 
+export function entityDisplayName(entity: Entity | undefined, fallbackId: string): string {
+  const name = entity?.name?.trim()
+  const kind = entity?.kind?.trim()
+  return name || kind || fallbackId
+}
+
+export function attrDisplayName(entity: Entity | undefined, attrId: string): string {
+  return entity?.attrMeta?.[attrId]?.label?.trim() || attrId
+}
+
+export function variableDisplayName(variable: Variable | undefined, fallbackId: string): string {
+  return variable?.name?.trim() || fallbackId
+}
+
+export function formulaDisplayName(formula: Formula | undefined, fallbackId: string): string {
+  return formula?.name?.trim() || fallbackId
+}
+
 export function listEntityOptions(
   entities: Record<string, Entity> | undefined,
 ): Array<{ id: string; label: string }> {

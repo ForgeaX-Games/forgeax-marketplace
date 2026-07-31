@@ -26,6 +26,7 @@ import type {
   NumOrExpr,
   Overlay,
   OverlayChild,
+  OverlayInstanceChild,
   Reaction,
   Trigger,
 } from '../../runtime/schema/graph-schema'
@@ -77,7 +78,7 @@ import {
   resetOverride,
 } from '../../graph/edit/overlay-edit'
 import { createOverlayMount, overlayMountId } from '../../runtime/schema/node-config-schema'
-import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
+import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
 import {
   STAGE_FILL_LAYOUT,
   layoutIsEffectivelyEmpty,
@@ -1472,11 +1473,11 @@ export function previewSkinChildrenInWindow(
   node: GameNode | undefined,
   ms: number,
   maxMs: number,
-): OverlayChild[] {
+): OverlayInstanceChild[] {
   if (!node) return []
-  const out: OverlayChild[] = []
-  // 与运行时一致：扫全部挂载（内容轨 + 常驻 HUD 方案），不能只看 primary。
-  for (const el of mountedChildrenOf(scenario, node)) {
+  const out: OverlayInstanceChild[] = []
+  // 保留运行态实例来源，重复挂载同一 overlay 时 child id 和 mount 布局仍按实例隔离。
+  for (const el of expandNodeChildren(scenario, node)) {
     const sp = childVisibleSpan(el, maxMs)
     if (!sp) continue
     if (ms < sp.start || ms > sp.end) continue

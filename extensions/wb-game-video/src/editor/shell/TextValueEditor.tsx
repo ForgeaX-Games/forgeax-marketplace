@@ -1,6 +1,14 @@
 import type { CSSProperties } from 'react'
 import type { Entity, Variable } from '../../runtime/schema/graph-schema'
-import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
+import {
+  attrDisplayName,
+  entityDisplayName,
+  findEntity,
+  listAttrOptions,
+  listEntityOptions,
+  listVarOptions,
+  variableDisplayName,
+} from './metaCatalog'
 
 export type TextOrRef = string | { ref: string }
 
@@ -23,21 +31,26 @@ export function TextValueEditor({
   variables: Record<string, Variable> | undefined
   onChange: (next: TextOrRef) => void
 }): JSX.Element {
-  const entityNameChoices = listEntityOptions(entities).map((entity) => ({
-    key: entityNameKey(entity.id),
-    label: `${entity.label} / 名称`,
-    ref: `entity.${entity.id}.name`,
-  }))
-  const entityAttrChoices = listEntityOptions(entities).flatMap((entity) =>
-    listAttrOptions(findEntity(entities, entity.id)).map((attr) => ({
+  const entityNameChoices = listEntityOptions(entities).map((entity) => {
+    const source = findEntity(entities, entity.id)
+    return {
+      key: entityNameKey(entity.id),
+      label: entityDisplayName(source, entity.id),
+      ref: `entity.${entity.id}.name`,
+    }
+  })
+  const entityAttrChoices = listEntityOptions(entities).flatMap((entity) => {
+    const source = findEntity(entities, entity.id)
+    const entityName = entityDisplayName(source, entity.id)
+    return listAttrOptions(source).map((attr) => ({
       key: `entity-attr:${encodeURIComponent(entity.id)}:${encodeURIComponent(attr.id)}`,
-      label: `${entity.label} / ${attr.label}`,
+      label: `${entityName}的${attrDisplayName(source, attr.id)}`,
       ref: `entity.${entity.id}.attr.${attr.id}`,
-    })),
-  )
+    }))
+  })
   const variableChoices = listVarOptions(variables).map((variable) => ({
     key: `var:${encodeURIComponent(variable.id)}`,
-    label: variable.label,
+    label: variableDisplayName(variables?.[variable.id], variable.id),
     ref: `var.${variable.id}`,
   }))
   const stateChoices = [...entityNameChoices, ...entityAttrChoices, ...variableChoices]

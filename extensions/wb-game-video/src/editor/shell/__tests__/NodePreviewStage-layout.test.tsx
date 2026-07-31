@@ -14,6 +14,49 @@ afterEach(() => {
 })
 
 describe('NodePreviewStage overlay layout', () => {
+  it('renders repeated mounts of the same overlay as separate instances', async () => {
+    const current = node('n1', {
+      overlayNodes: [
+        { overlay: 'float', layout: { left: 0, top: 0, width: 1, height: 1 } },
+        { id: 'float__2', overlay: 'float', layout: { left: 0.2, top: 0.1, width: 1, height: 1 } },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                trigger: { when: 'enter' },
+                inputs: { value: 10 },
+              }],
+            },
+          },
+        },
+      },
+    )
+
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        onEditScenario={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-preview-mount-id]')).toHaveLength(2)
+    })
+    expect(container.querySelector('[data-preview-mount-id="float"]')).not.toBeNull()
+    expect(container.querySelector('[data-preview-mount-id="float__2"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-overlay-fit-target]')).toHaveLength(2)
+  })
+
   it('never falls back to a ring and label when the real interface skin is not visible', () => {
     const current = node('n1', {
       overlayNodes: [{ overlay: 'qte-overlay' }],
@@ -51,6 +94,9 @@ describe('NodePreviewStage overlay layout', () => {
 
     expect(container.querySelector('.gc-preview-ring')).toBeNull()
     expect(container.querySelector('.gc-preview-label')).toBeNull()
+    expect(container.querySelector('[data-node-preview-overlay-scale="none"]')).not.toBeNull()
+    expect(container.querySelector('[data-overlay-scale-root]')).toBeNull()
+    expect(container.querySelector('[data-overlay-logical-stage]')).toBeNull()
   })
 
   it('moves a mounted overlay without writing or changing width/height', async () => {

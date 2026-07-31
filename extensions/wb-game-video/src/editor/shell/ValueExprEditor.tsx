@@ -12,9 +12,12 @@ import { LooseNumberInput } from './TermChainEditor'
 import { FormulaApplyEditor } from './FormulaApplyEditor'
 import { compileFormula } from './formulaApply'
 import {
+  attrDisplayName,
   compileValuePick,
+  entityDisplayName,
   findEntity,
   findFormula,
+  formulaDisplayName,
   listAttrOptions,
   listEntityOptions,
   listFormulaOptions,
@@ -23,6 +26,7 @@ import {
   type EffectDisplayOp,
   type ValueExprInput,
   type ValuePick,
+  variableDisplayName,
 } from './valueExprPick'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
@@ -72,25 +76,27 @@ export function ValueExprEditor({
     && pick.terms.length === 1
     && (directTerm?.source === 'entity' || directTerm?.source === 'var')
     && (directTerm.op === undefined || directTerm.op === '+' || directTerm.op === '*')
-  const entityChoices: ContentChoice[] = listEntityOptions(entities).flatMap((entity) =>
-    listAttrOptions(findEntity(entities, entity.id)).map((attr) => ({
+  const entityChoices: ContentChoice[] = listEntityOptions(entities).flatMap((entity) => {
+    const source = findEntity(entities, entity.id)
+    const entityName = entityDisplayName(source, entity.id)
+    return listAttrOptions(source).map((attr) => ({
       key: choiceKey('entity', entity.id, attr.id),
       kind: 'entity' as const,
-      label: `${entity.label} / ${attr.label}`,
+      label: `${entityName}的${attrDisplayName(source, attr.id)}`,
       entityId: entity.id,
       attr: attr.id,
-    })),
-  )
+    }))
+  })
   const variableChoices: ContentChoice[] = listVarOptions(variables).map((variable) => ({
     key: choiceKey('var', variable.id),
     kind: 'var',
-    label: variable.label,
+    label: variableDisplayName(variables?.[variable.id], variable.id),
     varId: variable.id,
   }))
   const formulaChoices: ContentChoice[] = formulaOpts.map((formula) => ({
     key: choiceKey('formula', formula.id),
     kind: 'formula',
-    label: formula.label,
+    label: formulaDisplayName(findFormula(formulas, formula.id), formula.id),
     formulaId: formula.id,
   }))
   const choices: ContentChoice[] = [
