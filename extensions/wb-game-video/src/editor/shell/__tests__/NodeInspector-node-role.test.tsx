@@ -38,20 +38,7 @@ describe('NodeInspector · 蓝图节点角色约束', () => {
     expect(screen.queryByText('入口覆盖')).toBeNull()
   })
 
-  it('子蓝图入口标识节点不开放演出、界面、结算和响应规则配置', () => {
-    render(
-      <NodeInspector
-        graph={graphWith({ name: '入口' })}
-        nodeId="node"
-        isBlueprintEntry
-        onChange={vi.fn()}
-      />,
-    )
-
-    expectPerformanceFieldsHidden()
-  })
-
-  it('普通演出节点仍可配置上述字段', () => {
+  it('入口和普通演出节点都可配置演出、界面、结算和响应规则', () => {
     render(<NodeInspector graph={graphWith({ name: '演出' })} nodeId="node" onChange={vi.fn()} />)
 
     expect(screen.getByText('视频', { selector: 'label > span:first-child' })).toBeTruthy()
@@ -59,6 +46,7 @@ describe('NodeInspector · 蓝图节点角色约束', () => {
     expect(screen.getByText('界面', { selector: 'b' })).toBeTruthy()
     expect(screen.getByText('结算', { selector: 'b' })).toBeTruthy()
     expect(screen.getByText('响应规则', { selector: 'b' })).toBeTruthy()
+    expect(screen.getByText('嵌套', { selector: 'label > span:first-child' })).toBeTruthy()
   })
 
   it('子蓝图包没有候选时显示“无”，有候选时只显示实际蓝图', () => {

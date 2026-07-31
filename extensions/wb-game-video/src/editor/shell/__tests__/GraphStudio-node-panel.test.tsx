@@ -49,6 +49,7 @@ describe('GraphStudio 节点配置分栏', () => {
         headers: { 'content-type': 'application/json' },
       })))
     vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal('alert', vi.fn())
     useKinoVideoResources.mockReturnValue({
       items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
     })
@@ -121,6 +122,7 @@ describe('GraphStudio 节点配置分栏', () => {
     await waitFor(() => {
       expect(useGraphScenario.getState().graph.nodes.some((node) => node.id === 'intro')).toBe(false)
     })
+    expect(useGraphScenario.getState().blueprints[MAIN_ID]!.entry).toBe('second')
   })
 
   it('下钻子流程后添加节点只写入当前子图', async () => {
@@ -187,7 +189,7 @@ describe('GraphStudio 节点配置分栏', () => {
     await waitFor(() => expect(screen.getByText(/试玩 · playing/)).toHaveTextContent('子流程试玩节点'))
   })
 
-  it('子蓝图入口标识节点不展示演出配置和可编辑预览', () => {
+  it('子蓝图入口作为第一个业务节点展示完整演出配置和入口标识', () => {
     const childGraph = {
       nodes: [{
         id: 'child-entry',
@@ -210,13 +212,18 @@ describe('GraphStudio 节点配置分栏', () => {
 
     render(<GraphStudio scenario={SCENARIO} />)
 
-    expect(screen.queryByRole('button', { name: '展开预览区' })).toBeNull()
+    expect(screen.getByRole('button', { name: '展开预览区' })).toBeTruthy()
     expect(screen.queryByTestId('node-preview-column')).toBeNull()
-    expect(screen.queryByText('视频', { selector: 'label > span:first-child' })).toBeNull()
-    expect(screen.queryByText('播放', { selector: 'label > span:first-child' })).toBeNull()
-    expect(screen.queryByText('界面', { selector: 'b' })).toBeNull()
-    expect(screen.queryByText('结算', { selector: 'b' })).toBeNull()
-    expect(screen.queryByText('响应规则', { selector: 'b' })).toBeNull()
+    expect(screen.getByText('视频', { selector: 'label > span:first-child' })).toBeTruthy()
+    expect(screen.getByText('播放', { selector: 'label > span:first-child' })).toBeTruthy()
+    expect(screen.getByText('界面', { selector: 'b' })).toBeTruthy()
+    expect(screen.getByText('结算', { selector: 'b' })).toBeTruthy()
+    expect(screen.getByText('响应规则', { selector: 'b' })).toBeTruthy()
+    expect(screen.getByLabelText('入口节点')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '🗑 删除节点' }))
+    expect(useGraphScenario.getState().blueprints[child.id]!.graph.nodes).toHaveLength(1)
+    expect(alert).toHaveBeenCalledWith('入口是当前图唯一的业务节点，不能删除。')
   })
 
   it('下钻子流程后新增节点和删除边只修改子蓝图', async () => {

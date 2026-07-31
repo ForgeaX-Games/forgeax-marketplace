@@ -114,7 +114,7 @@ describe('graph-edit', () => {
     const pack = makeEmptySubFlowPack({ id: 'enemy-turn', title: '敌方回合', version: '1' })
     expect(pack.version).toBe('1')
     expect(pack.entry).toBe('entry')
-    expect(pack.graph.nodes[0]?.data.name).toBe('入口')
+    expect(pack.graph.nodes[0]?.data.name).toBe('新演出节点')
     expect(pack.graph.nodes[0]?.data.durationMs).toBeUndefined()
   })
 
@@ -125,6 +125,7 @@ describe('graph-edit', () => {
     expect(process?.entry).toBeTruthy()
     expect(process?.entry).not.toBe('b')
     expect(process?.graph.nodes.some((x) => x.id === process.entry)).toBe(true)
+    expect(process?.graph.nodes[0]?.data.name).toBe('新演出节点')
     expect(g.nodes.some((x) => x.id === process?.entry)).toBe(false)
     expect(g.nodes.find((x) => x.id === 'b')).toBeTruthy()
     const again = attachSubProcess(

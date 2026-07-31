@@ -29,4 +29,14 @@ describe('GraphCanvas output handles', () => {
     expect(container.querySelector('.react-flow__node.selectable')).toBeNull()
     expect(container.querySelector('.react-flow__edge.selectable')).toBeNull()
   })
+
+  it('marks the current graph entry node', () => {
+    const { getByLabelText, queryAllByLabelText } = render(
+      <GraphCanvas graph={graph} entryNodeId="a" onChange={() => {}} />,
+    )
+
+    expect(getByLabelText('入口节点')).toHaveAttribute('title', '入口节点')
+    expect(getByLabelText('入口节点')).toHaveStyle({ background: '#55b98a' })
+    expect(queryAllByLabelText('入口节点')).toHaveLength(1)
+  })
 })

@@ -23,7 +23,7 @@ export function emptyBlueprintDoc(opts: { id?: string; title?: string } = {}): B
   const entry = 'entry'
   return {
     id, title: opts.title ?? '新蓝图', entry,
-    graph: { nodes: [{ id: entry, type: 'perf', position: { x: 80, y: 80 }, inputs: [], outputs: [], data: { name: '入口' } }], edges: [] },
+    graph: { nodes: [{ id: entry, type: 'perf', position: { x: 80, y: 80 }, inputs: [], outputs: [], data: { name: '新演出节点' } }], edges: [] },
   }
 }
 

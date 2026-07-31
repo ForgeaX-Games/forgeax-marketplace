@@ -95,6 +95,7 @@ describe('blueprint-project document shape', () => {
     const d = emptyBlueprintDoc({ title: 'New' })
     expect(d.graph.nodes).toHaveLength(1)
     expect(d.entry).toBe(d.graph.nodes[0]!.id)
+    expect(d.graph.nodes[0]!.data.name).toBe('新演出节点')
   })
   it('emptyLibraryDocument is a main pack with zero nodes', () => {
     const doc = emptyLibraryDocument()

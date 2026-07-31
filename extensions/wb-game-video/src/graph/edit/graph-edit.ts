@@ -38,7 +38,7 @@ export function attachSubProcess(graph: GameGraph, containerId: string): GameGra
     position: { x: node.position.x + 40, y: node.position.y + 140 },
     inputs: [],
     outputs: [],
-    data: { name: '子流程入口' },
+    data: { name: '新演出节点' },
   }
   return patchNodeData(graph, containerId, {
     subProcess: { entry: entryId, graph: { nodes: [entry], edges: [] } },
@@ -63,7 +63,7 @@ export function makeEmptySubFlowPack(opts: { id?: string; title?: string; versio
           position: { x: 80, y: 80 },
           inputs: [],
           outputs: [],
-          data: { name: '入口' },
+          data: { name: '新演出节点' },
         },
       ],
       edges: [],

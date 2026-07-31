@@ -128,6 +128,8 @@ interface CanvasNodeViewData {
   isGroup?: boolean
   /** 子蓝图容器（与同图子流程区分徽标文案）。 */
   isPack?: boolean
+  /** 当前图的入口业务节点。 */
+  isEntry?: boolean
   onDrill?: (nodeId: string) => void
   onInsertAfter?: (nodeId: string) => void
   onDuplicate?: (nodeId: string) => void
@@ -196,7 +198,7 @@ const Ico = {
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, active, isGroup, isPack, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
+  const { fx, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
   const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
   return (
@@ -230,7 +232,11 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
       ))}
       {/* 标题条（按玩法/结局着色）；⋮ 与文案同排垂直居中 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 6px 6px 10px', background: `${accent}22`, borderBottom: `1px solid ${accent}55`, borderRadius: '8px 8px 0 0' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, flexShrink: 0 }} />
+        <span
+          aria-label={isEntry ? '入口节点' : undefined}
+          title={isEntry ? '入口节点' : undefined}
+          style={{ width: 8, height: 8, borderRadius: '50%', background: isEntry ? '#55b98a' : accent, flexShrink: 0 }}
+        />
         <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
         {fx.data.badge && (
           <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
@@ -416,6 +422,8 @@ const edgeTypes = { flow: FlowEdge }
 export interface GraphCanvasProps {
   graph: GameGraph
   onChange: (next: GameGraph) => void
+  /** 当前作用域入口节点；只影响画布标识，不改变运行时。 */
+  entryNodeId?: string
   /** ui.overlays —— 派生节点出口引脚中文标签（与节点配置「何时走」一致）。 */
   overlays?: Record<string, Overlay>
   activeNodeId?: string | null
@@ -469,6 +477,7 @@ export function GraphCanvas(props: GraphCanvasProps): JSX.Element {
 function GraphCanvasInner({
   graph,
   onChange,
+  entryNodeId,
   overlays,
   activeNodeId,
   traversedEdgeIds,
@@ -644,6 +653,7 @@ function GraphCanvasInner({
           data: {
             fx: n,
             active: n.id === activeNodeId,
+            isEntry: n.id === entryNodeId,
             isGroup: containerIds.has(n.id),
             isPack: packIds.has(n.id),
             onDrill,
@@ -652,7 +662,7 @@ function GraphCanvasInner({
             onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>

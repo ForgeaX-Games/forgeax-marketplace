@@ -34,7 +34,9 @@ import type { Formula } from '../persist/formula-authoring'
 import { docToPack, metaFromDocument, packToDoc } from '../persist/blueprint-project'
 import { wouldCreateCycle } from '../../graph/edit/blueprint-refs'
 import { useRevealOnScopeChange } from './useRevealOnScopeChange'
-import { graphPathLabels, resolveGraphAtPath, updateGraphAtPath, validGraphPath } from '../../graph/edit/graph-scope'
+import {
+  graphPathLabels, resolveGraphAtPath, resolveGraphEntryAtPath, updateGraphAtPath, validGraphPath,
+} from '../../graph/edit/graph-scope'
 import { computeGraphLayout } from '../../graph/edit/graph-layout'
 
 interface PlayAnchor {
@@ -212,11 +214,25 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [layoutEpoch, setLayoutEpoch] = useState(0)
 
   const canvasGraph = useMemo(() => resolveGraphAtPath(graph, drillStack) ?? graph, [graph, drillStack])
+  const canvasEntryId = useMemo(
+    () => resolveGraphEntryAtPath(graph, blueprints[activeBlueprintId]?.entry, drillStack),
+    [graph, blueprints, activeBlueprintId, drillStack],
+  )
   const setCanvasGraph = useCallback(
     (update: GameGraph | ((current: GameGraph) => GameGraph)) => {
-      setGraph((root) => updateGraphAtPath(root, drillStack, update))
+      setGraph((root) => {
+        const current = resolveGraphAtPath(root, drillStack)
+        if (!current) return root
+        const next = typeof update === 'function' ? update(current) : update
+        const entry = resolveGraphEntryAtPath(root, blueprints[activeBlueprintId]?.entry, drillStack)
+        if (entry && current.nodes.some((node) => node.id === entry) && next.nodes.length === 0) {
+          alert('入口是当前图唯一的业务节点，不能删除。')
+          return root
+        }
+        return updateGraphAtPath(root, drillStack, next)
+      })
     },
-    [setGraph, drillStack],
+    [setGraph, drillStack, blueprints, activeBlueprintId],
   )
   const applyCanvasLayout = useCallback(() => {
     setCanvasGraph((current) => {
@@ -246,12 +262,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     () => canvasGraph.nodes.find((n) => n.id === selected) ?? null,
     [canvasGraph, selected],
   )
-  const selectedIsBlueprintEntry = !!selectedNode
-    && drillStack.length === 0
-    && activeBlueprintId !== mainBlueprintId
-    && blueprints[activeBlueprintId]?.entry === selectedNode.id
   const selectedCanConfigurePerformance = !!selectedNode
-    && !selectedIsBlueprintEntry
     && !getSubProcess(selectedNode.data)
     && !getSubFlowPack(selectedNode.data)
   const effectivePreviewOpen = previewOpen && selectedCanConfigurePerformance
@@ -570,6 +581,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           key={`${activeBlueprintId}:${drillStack.join('/')}`}
           graph={playGraph}
           onChange={setCanvasGraph}
+          entryNodeId={showingForeignPlayGraph ? undefined : canvasEntryId}
           overlays={overlays}
           // 试玩游标与编辑选中共用橙色描边；未开浮层时勿把 session 当前节点画成「选中」——
           // 新建子蓝图后 session.start() 停在「入口」，否则入口会像永远选不掉。
@@ -759,7 +771,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 onFocusLifecycle={focusLifecycle}
                 previewOpen={effectivePreviewOpen}
                 onTogglePreview={selectedCanConfigurePerformance ? togglePreview : undefined}
-                isBlueprintEntry={selectedIsBlueprintEntry}
                 onChange={setCanvasGraph}
                 onPacksChange={setPacks}
                 onEnsureOverlay={(overlay) => {

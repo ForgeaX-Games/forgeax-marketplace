@@ -932,7 +932,6 @@ export function NodeInspector({
   onFocusLifecycle,
   previewOpen,
   onTogglePreview,
-  isBlueprintEntry = false,
   onChange,
   onPacksChange,
   onEnsureOverlay,
@@ -974,8 +973,6 @@ export function NodeInspector({
   previewOpen?: boolean
   /** 传了才渲染头部弧形把手：切换宿主左侧预览区的展开/收起。 */
   onTogglePreview?: () => void
-  /** 当前节点是否为非主蓝图的入口标识节点；此类节点只承担蓝图入口语义。 */
-  isBlueprintEntry?: boolean
   onChange: (g: GameGraph) => void
   onPacksChange?: (packs: SubFlowPackDef[]) => void
   /**
@@ -1036,8 +1033,8 @@ export function NodeInspector({
   const nestProcess = getSubProcess(d)
   const nestPack = getSubFlowPack(d)
   const nestMode: 'none' | 'process' | 'pack' = nestPack ? 'pack' : nestProcess ? 'process' : 'none'
-  /** 容器与子蓝图入口都不是演出节点，不开放演出、界面或规则配置。 */
-  const canConfigurePerformance = nestMode === 'none' && !isBlueprintEntry
+  /** 只有容器不是演出节点；入口仍是可完整配置的第一个业务节点。 */
+  const canConfigurePerformance = nestMode === 'none'
   // 作用域 BGM：读原始值（不过 getNodeBgm），与面板下拉一致。
   const bgm = d.bgm
   // 手写/AI 生成的非法 mode 在下拉里显示成 push（validate 会把它判 error），别让 select 变成

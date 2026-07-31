@@ -27,6 +27,7 @@ import {
 import { isBlueprintTitleTaken } from './blueprint-title'
 import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
 import { blueprintsReferencing, findReferenceCycle } from '../../graph/edit/blueprint-refs'
+import { resolveEntryAfterGraphChange } from '../../graph/edit/graph-scope'
 import { loadGameComponents } from '../../runtime/component-host'
 
 export type BlueprintTitleActionOk = { ok: true; id?: string }
@@ -395,8 +396,8 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         if (!doc) return {}
         changed = true
         const next = typeof g === 'function' ? (g as (x: GameGraph) => GameGraph)(doc.graph) : g
-        // 删掉旧入口节点后把 doc.entry 钉到仍可跑的根节点，避免引用此蓝图时 runtime 炸。
-        const entry = resolveGraphEntry(next, doc.entry) ?? doc.entry
+        // 删除入口时沿旧图出边自动迁移到首个仍存活的后续节点。
+        const entry = resolveEntryAfterGraphChange(doc.graph, next, doc.entry)
         return {
           blueprints: { ...st.blueprints, [st.activeBlueprintId]: { ...doc, graph: next, entry } },
           graph: next,
@@ -411,9 +412,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       set((st) => {
         const activeId = st.activeBlueprintId
         const doc = st.blueprints[activeId]
-        const entry = doc
-          ? (resolveGraphEntry(s.graph, doc.entry) ?? doc.entry)
-          : undefined
+        const entry = doc ? resolveEntryAfterGraphChange(doc.graph, s.graph, doc.entry) : undefined
         const blueprints = doc
           ? { ...st.blueprints, [activeId]: { ...doc, graph: s.graph, entry: entry! } }
           : st.blueprints
