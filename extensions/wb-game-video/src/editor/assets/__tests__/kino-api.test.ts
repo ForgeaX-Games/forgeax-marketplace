@@ -22,7 +22,7 @@ function makeFetch(
 describe('createKinoVideoClient', () => {
   it('normalizes baseUrl without trailing slash', async () => {
     const fetchImpl = makeFetch((input, init) => {
-      expect(String(input)).toBe('/api/v1/kino/resources?game_id=demo&media_type=video&page=1&page_size=20')
+      expect(String(input)).toBe('/api/v1/kino/resources?media_type=video&page=1&page_size=20')
       expect(init?.credentials).toBe('include')
       expect(init?.headers).toMatchObject({ 'Content-Type': 'application/json' })
       return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 1, page_size: 20 })), {
@@ -31,14 +31,14 @@ describe('createKinoVideoClient', () => {
       })
     })
     const client = createKinoVideoClient({ fetch: fetchImpl, baseUrl: '/api/v1/kino/' })
-    await client.list({ game_id: 'demo', page: 1, page_size: 20 })
+    await client.list({ page: 1, page_size: 20 })
     expect(fetchImpl).toHaveBeenCalledOnce()
   })
 
   it('list encodes query params including optional type', async () => {
     const fetchImpl = makeFetch((input) => {
       expect(String(input)).toBe(
-        '/api/v1/kino/resources?game_id=game%2Fslug&media_type=video&page=2&page_size=10&type=UPLOAD',
+        'media/resources?media_type=video&page=2&page_size=10&type=UPLOAD',
       )
       return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 2, page_size: 10 })), {
         status: 200,
@@ -47,7 +47,6 @@ describe('createKinoVideoClient', () => {
     })
     const client = createKinoVideoClient({ fetch: fetchImpl })
     await client.list({
-      game_id: 'game/slug',
       media_type: 'video',
       page: 2,
       page_size: 10,
@@ -68,15 +67,14 @@ describe('createKinoVideoClient', () => {
     })
     const client = createKinoVideoClient({ fetch: fetchImpl })
 
-    await client.list({ game_id: 'demo' }, { signal: controller.signal })
+    await client.list({}, { signal: controller.signal })
   })
 
-  it('prepareUpload posts game_id, file_name, mime_type, bytes, optional extension', async () => {
+  it('prepareUpload posts media metadata without a caller-selected game id', async () => {
     const fetchImpl = makeFetch((input, init) => {
-      expect(String(input)).toBe('/api/v1/kino/image-assets/upload')
+      expect(String(input)).toBe('media/image-assets/upload')
       expect(init?.method).toBe('POST')
       expect(JSON.parse(String(init?.body))).toEqual({
-        game_id: 'demo',
         file_name: 'clip.mp4',
         mime_type: 'video/mp4',
         bytes: FIXTURE_BYTES,
@@ -100,13 +98,47 @@ describe('createKinoVideoClient', () => {
     })
     const client = createKinoVideoClient({ fetch: fetchImpl })
     const prepared = await client.prepareUpload({
-      game_id: 'demo',
       file_name: 'clip.mp4',
       mime_type: 'video/mp4',
       bytes: FIXTURE_BYTES,
       extension: 'mp4',
     })
     expect(prepared.upload_token).toBe('token')
+  })
+
+  it('binds a relative host upload instruction to the handshake URL', async () => {
+    const fetchImpl = makeFetch(() =>
+      new Response(JSON.stringify(envelope({
+        upload: {
+          method: 'PUT',
+          url: 'media/uploads/0123456789abcdef0123456789abcdef',
+          headers: { 'content-type': 'image/png' },
+          expires_at: '2099-01-01T00:00:00.000Z',
+          chunk_size: 512 * 1024,
+          chunk_count: 3,
+        },
+        object_url: 'workbench-upload:0123456789abcdef0123456789abcdef',
+        upload_token: '0123456789abcdef0123456789abcdef',
+      })), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const client = createKinoVideoClient({
+      fetch: fetchImpl,
+      url: (path) => `https://host.test/extension/runtime/${path.replace(/^\/+/, '')}`,
+    })
+
+    const prepared = await client.prepareUpload({
+      file_name: 'large.png',
+      mime_type: 'image/png',
+      bytes: 1024 * 1024 + 1,
+    })
+
+    expect(prepared.upload.url).toBe(
+      'https://host.test/extension/runtime/media/uploads/0123456789abcdef0123456789abcdef',
+    )
+    expect(prepared.upload).toMatchObject({ chunk_size: 512 * 1024, chunk_count: 3 })
   })
 
   it('accepts audio resource and upload MIME types', async () => {
@@ -119,7 +151,7 @@ describe('createKinoVideoClient', () => {
           upload_token: 'token',
         })), { status: 200, headers: { 'content-type': 'application/json' } })
       }
-      expect(String(input)).toBe('/api/v1/kino/resources?game_id=demo&media_type=audio&page=1&page_size=20')
+      expect(String(input)).toBe('media/resources?media_type=audio&page=1&page_size=20')
       return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 1, page_size: 20 })), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -127,14 +159,13 @@ describe('createKinoVideoClient', () => {
     })
     const client = createKinoVideoClient({ fetch: fetchImpl })
 
-    await client.prepareUpload({ game_id: 'demo', file_name: 'theme.ogg', mime_type: 'audio/ogg', bytes: FIXTURE_BYTES })
-    await client.list({ game_id: 'demo', media_type: 'audio', page: 1, page_size: 20 })
+    await client.prepareUpload({ file_name: 'theme.ogg', mime_type: 'audio/ogg', bytes: FIXTURE_BYTES })
+    await client.list({ media_type: 'audio', page: 1, page_size: 20 })
   })
 
   it('serializes replacement fields when preparing an upload', async () => {
     const fetchImpl = makeFetch((_input, init) => {
       expect(JSON.parse(String(init?.body))).toEqual({
-        game_id: 'demo',
         file_name: 'replacement.mp4',
         mime_type: 'video/mp4',
         bytes: FIXTURE_BYTES,
@@ -158,7 +189,6 @@ describe('createKinoVideoClient', () => {
     const client = createKinoVideoClient({ fetch: fetchImpl })
 
     await client.prepareUpload({
-      game_id: 'demo',
       file_name: 'replacement.mp4',
       mime_type: 'video/mp4',
       bytes: FIXTURE_BYTES,
@@ -167,7 +197,7 @@ describe('createKinoVideoClient', () => {
     })
   })
 
-  it('get/update/delete/playbackUrl append encoded game_id', async () => {
+  it('get/update/delete/playbackUrl stay on handshake-bound resource paths', async () => {
     const calls: string[] = []
     const fetchImpl = makeFetch((input, init) => {
       calls.push(String(input))
@@ -179,7 +209,6 @@ describe('createKinoVideoClient', () => {
       }
       const dto: KinoResourceDTO = {
         resource_id: 'res-1',
-        game_id: 'demo',
         media_type: 'video',
         url: 'http://127.0.0.1/content',
         created_at: 1,
@@ -190,22 +219,34 @@ describe('createKinoVideoClient', () => {
         headers: { 'content-type': 'application/json' },
       })
     })
-    const client = createKinoVideoClient({ fetch: fetchImpl })
-    await client.get('res/1', 'demo slug')
+    const client = createKinoVideoClient({
+      fetch: fetchImpl,
+      url: (path) => `https://host.test/extension/runtime${path}`,
+    })
+    await client.get('res/1')
     await client.update('res/1', {
-      game_id: 'demo slug',
       resource_id: 'res/1',
       media_type: 'video',
       url: 'http://127.0.0.1/content',
       name: 'renamed.mp4',
     })
-    await client.delete('res/1', 'demo slug')
-    expect(client.playbackUrl('res/1', 'demo slug')).toBe(
-      '/api/v1/kino/resources/res%2F1/content?game_id=demo%20slug',
+    await client.delete('res/1')
+    expect(client.playbackUrl('res/1')).toBe(
+      'https://host.test/extension/runtime/media/resources/res%2F1/content',
     )
-    expect(calls[0]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
-    expect(calls[1]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
-    expect(calls[2]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
+    expect(calls[0]).toBe('media/resources/res%2F1')
+    expect(calls[1]).toBe('media/resources/res%2F1')
+    expect(calls[2]).toBe('media/resources/res%2F1')
+  })
+
+  it('accepts the router DELETE 204 contract without parsing JSON', async () => {
+    const fetchImpl = makeFetch((_input, init) => {
+      expect(init?.method).toBe('DELETE')
+      return new Response(null, { status: 204 })
+    })
+    const client = createKinoVideoClient({ fetch: fetchImpl })
+
+    await expect(client.delete('res-1')).resolves.toBeUndefined()
   })
 
   it('create and batch post JSON bodies', async () => {
@@ -214,7 +255,6 @@ describe('createKinoVideoClient', () => {
       const body = JSON.parse(String(init?.body))
       if (String(input).endsWith('/batch')) {
         expect(body).toEqual({
-          game_id: 'demo',
           resources: [{ media_type: 'video', url: 'http://x', name: 'a.mp4' }],
         })
         return new Response(
@@ -227,7 +267,6 @@ describe('createKinoVideoClient', () => {
         JSON.stringify(
           envelope({
             resource_id: 'new',
-            game_id: 'demo',
             media_type: 'video',
             url: 'http://object',
             created_at: 1,
@@ -239,15 +278,48 @@ describe('createKinoVideoClient', () => {
     })
     const client = createKinoVideoClient({ fetch: fetchImpl })
     await client.create({
-      game_id: 'demo',
       media_type: 'video',
       url: 'http://object',
       name: 'clip.mp4',
     })
     await client.batch({
-      game_id: 'demo',
       resources: [{ media_type: 'video', url: 'http://x', name: 'a.mp4' }],
     })
+  })
+
+  it('drops legacy game_id fields at the host request boundary', async () => {
+    const bodies: unknown[] = []
+    const fetchImpl = makeFetch((_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify(envelope({
+        resource_id: 'new',
+        media_type: 'video',
+        url: 'http://object',
+        created_at: 1,
+        updated_at: 2,
+      })), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    const client = createKinoVideoClient({ fetch: fetchImpl })
+
+    await client.create({
+      game_id: 'query-game',
+      media_type: 'video',
+      url: 'http://object',
+    } as never)
+    await client.update('new', {
+      game_id: 'query-game',
+      resource_id: 'new',
+      media_type: 'video',
+      url: 'http://object',
+    } as never)
+
+    expect(bodies).toEqual([
+      { media_type: 'video', url: 'http://object' },
+      { resource_id: 'new', media_type: 'video', url: 'http://object' },
+    ])
   })
 
   it('throws typed KinoClientError on HTTP and business failures without leaking body', async () => {
@@ -258,13 +330,13 @@ describe('createKinoVideoClient', () => {
       }),
     )
     const client = createKinoVideoClient({ fetch: fetchImpl })
-    await expect(client.list({ game_id: 'demo' })).rejects.toMatchObject({
+    await expect(client.list({})).rejects.toMatchObject({
       name: 'KinoClientError',
       status: 400,
       errorCode: 'invalid_upload_size',
       message: 'Invalid upload size',
     })
-    await expect(client.list({ game_id: 'demo' })).rejects.not.toSatisfy((error: Error) =>
+    await expect(client.list({})).rejects.not.toSatisfy((error: Error) =>
       error.message.includes('secret'),
     )
   })
@@ -283,7 +355,7 @@ describe('createKinoVideoClient', () => {
     )
     const client = createKinoVideoClient({ fetch: fetchImpl })
 
-    await expect(client.list({ game_id: 'demo' })).rejects.toSatisfy(
+    await expect(client.list({})).rejects.toSatisfy(
       (error: KinoClientError) =>
         error.message.length === 512 &&
         error.status === 500 &&
@@ -300,7 +372,7 @@ describe('createKinoVideoClient', () => {
         }),
       ),
     })
-    await expect(unauthorized.list({ game_id: 'demo' })).rejects.toMatchObject({
+    await expect(unauthorized.list({})).rejects.toMatchObject({
       status: 401,
       errorCode: 'unauthorized',
     })
@@ -308,7 +380,7 @@ describe('createKinoVideoClient', () => {
     const empty = createKinoVideoClient({
       fetch: makeFetch(() => new Response('', { status: 200 })),
     })
-    await expect(empty.list({ game_id: 'demo' })).rejects.toMatchObject({
+    await expect(empty.list({})).rejects.toMatchObject({
       status: 502,
       errorCode: 'upstream_unavailable',
     })
@@ -316,7 +388,7 @@ describe('createKinoVideoClient', () => {
     const malformed = createKinoVideoClient({
       fetch: makeFetch(() => new Response('not-json', { status: 200 })),
     })
-    await expect(malformed.list({ game_id: 'demo' })).rejects.toMatchObject({
+    await expect(malformed.list({})).rejects.toMatchObject({
       status: 502,
       errorCode: 'upstream_unavailable',
     })
@@ -324,7 +396,7 @@ describe('createKinoVideoClient', () => {
     const network = createKinoVideoClient({
       fetch: vi.fn(() => Promise.reject(new Error('offline'))) as typeof fetch,
     })
-    await expect(network.list({ game_id: 'demo' })).rejects.toMatchObject({
+    await expect(network.list({})).rejects.toMatchObject({
       status: 502,
       errorCode: 'network_error',
     })

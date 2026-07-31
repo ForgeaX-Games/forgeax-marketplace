@@ -8,7 +8,6 @@
  *   继续跟随共享方案（prototype + sparse override，见 `runtime/schema/expand-overlay.ts`）。
  */
 import type { GameScenario, GraphLibraryDocument, OverlayChild, OverlayNode, GameGraph } from '../../runtime/schema/graph-schema'
-import { getSubProcess } from '../../runtime/schema/graph-schema'
 import type { Overlay } from '../../runtime/schema/node-config-schema'
 import { overlayMountId } from '../../runtime/schema/node-config-schema'
 import { mergeChild, resolveMountChildren } from '../../runtime/schema/expand-overlay'
@@ -112,30 +111,13 @@ export function forkSchemeForEdit(scenario: GameScenario, nodeId: string): GameS
   return ensureNodeOverlay(scenario, nodeId)
 }
 
-/** 汇总多张蓝图中每个 overlay 的挂载引用次数。 */
-export function countOverlayReferences(graphs: Iterable<GameGraph>): Record<string, number> {
-  const counts: Record<string, number> = {}
-  for (const graph of graphs) {
-    for (const node of graph.nodes) {
-      for (const mount of node.data.overlayNodes ?? []) {
-        counts[mount.overlay] = (counts[mount.overlay] ?? 0) + 1
-      }
-    }
-  }
-  return counts
-}
-
-/** 某 overlay 是否被 scenario 中任一图挂载引用；库文档以 manifest.packs 为 SSOT，避免重复扫描主图镜像。 */
+/** 某 overlay 是否被 scenario 中任一图（根 graph + manifest.packs）挂载引用。 */
 export function isOverlayReferenced(scenario: GameScenario, overlayId: string): boolean {
   const inGraph = (g: GameGraph): boolean =>
-    g.nodes.some((n) =>
-      (n.data.overlayNodes ?? []).some((m) => m.overlay === overlayId)
-      || (getSubProcess(n.data) ? inGraph(getSubProcess(n.data)!.graph) : false),
-    )
+    g.nodes.some((n) => (n.data.overlayNodes ?? []).some((m) => m.overlay === overlayId))
   if (inGraph(scenario.graph)) return true
   const bps = (scenario as GraphLibraryDocument).manifest?.packs
-  const graphs = bps ? Object.values(bps).map((doc) => doc.graph) : [scenario.graph]
-  return (countOverlayReferences(graphs)[overlayId] ?? 0) > 0
+  return !!bps && Object.values(bps).some((d) => inGraph(d.graph))
 }
 
 /** 从目录移除无人引用的节点本地副本（仅 `node:` 前缀，避免误删共享方案）。 */

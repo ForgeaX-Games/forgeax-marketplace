@@ -18,33 +18,6 @@ const dmgOverlay: Overlay = {
 }
 
 describe('watch reaction (数值变化 → spawn)', () => {
-  it('routes advance to an edge in the active nested subProcess graph', () => {
-    const graph: GameGraph = {
-      nodes: [node('turn', { subProcess: { entry: 'atk', graph: {
-        nodes: [
-          node('atk', {
-            durationMs: 5000,
-            reactions: [
-              { when: { type: 'at', ms: 100 }, do: [{ kind: 'effect', effects: [{ id: 'q', kind: 'var', varId: 'qi', op: 'add', value: 1 }] }] },
-              { when: { type: 'watch', of: 'var.qi', on: 'inc' }, do: [{ kind: 'advance', edgeId: 'e-inner' }] },
-            ],
-          }),
-          node('done', { durationMs: 100 }),
-        ],
-        edges: [{ id: 'e-inner', source: 'atk', target: 'done', sourceHandle: 'default', targetHandle: 'in' }],
-      } } })],
-      edges: [],
-    }
-    const scn = scnOf(graph)
-    const rt = new GraphRuntime(scn.graph, scn)
-    rt.start()
-    rt.tick(100)
-
-    expect(rt.state.currentNodeId).toBe('done')
-    expect(rt.getActiveGraphPath()).toEqual(['turn'])
-    expect(rt.state.callStack.map((frame) => frame.callerNodeId)).toEqual(['turn'])
-  })
-
   it('spawns a transient float with abs(delta) when watched hp decreases', () => {
     const graph: GameGraph = {
       nodes: [
@@ -163,17 +136,15 @@ describe('container watch spans subflow (我方回合 场景)', () => {
       nodes: [
         // 容器（我方回合）：下钻到技能节点 atk；容器上挂 watch。
         node('turn', {
-          subProcess: {
-            entry: 'atk',
-            graph: { nodes: [node('atk', {
-              durationMs: 5000,
-              reactions: [
-                { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -30 }] }] },
-              ],
-            })], edges: [] },
-          },
+          subFlow: 'atk',
           reactions: [
             { when: { type: 'watch', of: 'entity.ent-boss.attr.hp', on: 'dec' }, do: [{ kind: 'spawn', from: 'hitCheer/banner', inputs: { dmg: { expr: 'abs(delta)' } }, ttlMs: 3000 }] },
+          ],
+        }),
+        node('atk', {
+          durationMs: 5000,
+          reactions: [
+            { when: { type: 'at', ms: 500 }, do: [{ kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -30 }] }] },
           ],
         }),
         node('done', {}),
@@ -209,7 +180,7 @@ describe('non-blocking component events (回合按钮面板)', () => {
     const graph: GameGraph = {
       nodes: [
         node('turn', {
-          subProcess: { entry: 'atk', graph: { nodes: [node('atk', { durationMs: 5000 })], edges: [] } },
+          subFlow: 'atk',
           overlayNodes: [{
             overlay: 'hpPanel',
             reactions: [
@@ -218,6 +189,7 @@ describe('non-blocking component events (回合按钮面板)', () => {
             ],
           }],
         }),
+        node('atk', { durationMs: 5000 }),
       ],
       edges: [],
     }
@@ -249,9 +221,10 @@ describe('non-blocking component events (回合按钮面板)', () => {
     const graph: GameGraph = {
       nodes: [
         node('turn', {
-          subProcess: { entry: 'atk', graph: { nodes: [node('atk', { durationMs: 5000 })], edges: [] } },
+          subFlow: 'atk',
           overlayNodes: [{ overlay: 'hpPanel', reactions: [{ when: { type: 'event', id: 'B3' }, do: [{ kind: 'advance', edgeId: 'e-drink' }] }] }],
         }),
+        node('atk', { durationMs: 5000 }),
         node('drink', {}),
       ],
       edges: [{ id: 'e-drink', source: 'turn', target: 'drink', sourceHandle: 'B3', targetHandle: 'in' }],

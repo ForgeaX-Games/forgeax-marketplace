@@ -29,7 +29,6 @@ function apiEntry(id: string, label = id): VideoLibraryEntry {
 function uploadedResource(id: string): KinoResourceDTO {
   return {
     resource_id: id,
-    game_id: 'demo',
     media_type: 'video',
     url: `http://object/${id}`,
     name: id,
@@ -66,9 +65,8 @@ function makeController(
     renameResource: vi.fn(async () => undefined),
     retryComplete: vi.fn(async () => undefined),
     deleteResource: vi.fn(async () => {}),
-    deleteResources: vi.fn(async () => ({ completed: 0 })),
     ...overrides,
-  } as VideoAssetsController
+  }
 }
 
 describe('VideoAssetLibrary', () => {

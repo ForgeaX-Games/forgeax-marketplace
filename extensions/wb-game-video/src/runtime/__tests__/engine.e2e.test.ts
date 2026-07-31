@@ -3,7 +3,7 @@ import { GraphRuntime } from '../engine/engine'
 import { registerCoreSkins } from '../component-host/components'
 import { makeNodiaDemo } from '../../editor/demo/demo'
 import { validateScenario } from '../validate/validate'
-import { getSubProcess } from '../schema/graph-schema'
+import { getSubFlow } from '../schema/graph-schema'
 
 const callers = (rt: GraphRuntime) => rt.state.callStack.map((f) => f.callerNodeId)
 
@@ -21,8 +21,8 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     const scn = makeNodiaDemo()
     const aMy = scn.graph.nodes.find((n) => n.id === 'a_my')
     const bAi = scn.graph.nodes.find((n) => n.id === 'b_ai')
-    expect(getSubProcess(aMy!.data)?.entry).toBe('wait')
-    expect(getSubProcess(bAi!.data)?.entry).toBe('tele')
+    expect(getSubFlow(aMy!.data)).toBe('wait')
+    expect(getSubFlow(bAi!.data)).toBe('tele')
   })
 
   it('quick win: light skill kills a low-hp boss → flow ends (no forced banner)', () => {
@@ -32,7 +32,10 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     const rt = new GraphRuntime(scn.graph, scn)
 
     rt.start() // 起点 = 叙事 n_open
-    rt.jumpToNode('a_my') // 跳过叙事，seek 到我方回合容器（保留初始全局态）
+    rt.jumpToNode('enter') // 跳过叙事，seek 到战斗入口（保留初始全局态）
+    expect(rt.state.currentNodeId).toBe('enter')
+
+    rt.onPerformanceEnd() // enter → a_my(subflow) → wait(等技能)，mineFirst=1
     expect(rt.state.currentNodeId).toBe('wait')
     expect(callers(rt)).toEqual(['a_my'])
     expect(rt.state.phase).toBe('playing')
@@ -49,12 +52,13 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(rt.state.phase).toBe('ended')
   })
 
-  it('turn loop: 我方攻击→敌方回合后回到我方待机（回合循环成立）', () => {
+  it('turn loop: 我方先手一整回合(我方攻击→敌方回合)存活 → 回到进战待机(enter) (回合循环成立)', () => {
     const scn = makeNodiaDemo({ bossHp: 700 })
     const rt = new GraphRuntime(scn.graph, scn)
 
     rt.start()
-    rt.jumpToNode('a_my') // → wait
+    rt.jumpToNode('enter')
+    rt.onPerformanceEnd() // → a_my → wait，mineFirst=1
     expect(rt.state.currentNodeId).toBe('wait')
     expect(callers(rt)).toEqual(['a_my'])
 
@@ -66,22 +70,27 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(callers(rt)).toEqual(['b_ai'])
     expect(rt.state.phase).toBe('playing')
 
-    rt.emitComponentEvent('tele/parry', 'parry') // → 受击防反演出 block
+    rt.emitComponentEvent('tele/parry', 'pass') // → 受击防反演出 block
     expect(rt.state.currentNodeId).toBe('block')
 
-    rt.onPerformanceEnd() // returns → b_ai → a_my → wait
+    rt.onPerformanceEnd() // returns → b_ai 回合结束判定(双方存活+我方先手) → enter
     expect(rt.state.visited.has('block')).toBe(true)
     expect(rt.state.visited.has('a_my')).toBe(true)
     expect(rt.state.visited.has('b_ai')).toBe(true)
-    expect(rt.state.currentNodeId).toBe('wait')
-    expect(callers(rt)).toEqual(['a_my'])
+    expect(rt.state.currentNodeId).toBe('enter') // 回到进战待机 = 一整回合走完、回合循环成立
+    expect(rt.state.callStack).toEqual([])
   })
 
-  it('can seek directly into the enemy turn container', () => {
+  it('initiative: slower player yields enemy-first (直接进敌方回合 tele)', () => {
     const scn = makeNodiaDemo({ bossHp: 700 })
+    scn.entities!['ent-player'] = {
+      ...(scn.entities!['ent-player'] as object),
+      attrs: { attack: 80, defense: 40, speed: 10, hp: 300 },
+    } as never
     const rt = new GraphRuntime(scn.graph, scn)
     rt.start()
-    rt.jumpToNode('b_ai')
+    rt.jumpToNode('enter')
+    rt.onPerformanceEnd() // enter → b_ai(subflow) → tele，mineFirst=0
     expect(rt.state.currentNodeId).toBe('tele')
     expect(callers(rt)).toEqual(['b_ai'])
   })

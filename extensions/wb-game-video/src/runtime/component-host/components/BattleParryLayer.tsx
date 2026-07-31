@@ -16,7 +16,6 @@ import type { ComponentDef } from '../../registry/component-registry'
 import { QTE_DEFAULT_EVENTS, QTE_INPUTS, type QteParams } from './Qte'
 import { STAGE_FILL_LAYOUT } from '../../schema/layout'
 import { injectCss, ensureInkFilters, ensureBrushFont, resolveTimeoutMs } from './skinRuntime'
-import { usePlaybackClock, usePlaybackTimeout } from '../../playback-clock'
 
 /**
  * 组件的注册契约（引擎/编辑器识别用）——与渲染实现同文件，经 EXTRA_COMPONENTS 注册。
@@ -128,18 +127,13 @@ export function BattleParryLayer({ overlay, emit, preview, previewTimeMs }: Over
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const clock = usePlaybackClock()
-  const pausedRef = useRef(clock.paused)
-  pausedRef.current = clock.paused
   const inputs = overlay.inputs as Record<string, unknown>
   const durationMs = resolveDurationMs(inputs)
   const options = exitsOf(inputs)
   const missKey = typeof inputs.defaultEvent === 'string' ? inputs.defaultEvent : 'fail'
   const resolvedRef = useRef(false)
-  const startRef = useRef<number | null>(null)
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [settled, setSettled] = useState<{ kind: 'hit'; index: number } | { kind: 'miss' } | null>(null)
-  const [pendingOutcome, setPendingOutcome] = useState<string | null>(null)
   const previewNow = preview ? Math.max(0, (previewTimeMs ?? 0) - firstCueAppearAt(inputs)) : 0
 
   function finish(outcome: string): void {
@@ -148,11 +142,10 @@ export function BattleParryLayer({ overlay, emit, preview, previewTimeMs }: Over
     emit?.(outcome)
   }
   function hit(index: number): void {
-    if (preview || clock.paused || resolvedRef.current) return
+    if (preview || resolvedRef.current) return
     setSettled({ kind: 'hit', index })
-    setPendingOutcome(options[index]?.key ?? missKey)
+    window.setTimeout(() => finish(options[index]?.key ?? missKey), 180)
   }
-  usePlaybackTimeout(() => pendingOutcome && finish(pendingOutcome), pendingOutcome ? 180 : undefined, !!preview)
 
   // 预览态：不启 rAF/超时——每次播放头/参数变化按 previewNow 静态定帧，供 scrub 精确对齐。
   useEffect(() => {
@@ -173,26 +166,25 @@ export function BattleParryLayer({ overlay, emit, preview, previewTimeMs }: Over
     const approach = Math.min(750, D * 0.24)
     const tol = Math.min(240, D * 0.13)
     const centers = options.map((_, i) => (i === 0 ? D * 0.32 : D * 0.72))
-    if (startRef.current == null) startRef.current = clock.now()
-    const start = startRef.current
+    const start = performance.now()
     let raf = 0
     function loop(): void {
       if (resolvedRef.current) return
-      const now = clock.now() - start
+      const now = performance.now() - start
       btnRefs.current.forEach((el, i) => {
         if (!el) return
         applyKeyFrame(el, now, centers[i] ?? D * 0.5, approach, tol)
       })
       if (now >= D + 200) {
         setSettled({ kind: 'miss' })
-        setPendingOutcome(missKey)
+        window.setTimeout(() => finish(missKey), 180)
         return
       }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
     function onKeyDown(e: KeyboardEvent): void {
-      if (pausedRef.current || !keyOk()) return
+      if (!keyOk()) return
       const index = options.findIndex((o) => o.glyph.toLowerCase() === e.key.toLowerCase())
       if (index < 0) return
       e.preventDefault()

@@ -14,7 +14,6 @@ import {
   type PreparedVideoUpload,
 } from './video-upload'
 import { useKinoVideoCache, useKinoVideoResources } from './kinoVideoCacheStore'
-import { deleteSequentially } from './batch-delete'
 import { t } from '../../i18n'
 
 export const DEFAULT_VIDEO_PAGE_SIZE = 20
@@ -49,7 +48,6 @@ export interface VideoAssetsController {
   renameResource: (resourceId: string, name: string) => Promise<KinoResourceDTO | undefined>
   retryComplete: () => Promise<KinoResourceDTO | undefined>
   deleteResource: (resourceId: string) => Promise<void>
-  deleteResources: (resourceIds: readonly string[]) => Promise<{ completed: number, failedId?: string }>
 }
 
 export interface UseVideoAssetsOptions {
@@ -78,7 +76,7 @@ function toListItem(dto: KinoResourceDTO, client: KinoVideoClient): VideoAssetLi
     id: dto.resource_id,
     label: dto.name?.trim() || dto.resource_id,
     url: appendVideoRevision(
-      client.playbackUrl(dto.resource_id, dto.game_id),
+      client.playbackUrl(dto.resource_id),
       dto.updated_at,
     ),
     durMs: dto.source_meta?.duration_ms,
@@ -145,7 +143,6 @@ export function useVideoAssets(
       setLocalError(null)
       try {
         const result = await client.list({
-          game_id: gameId,
           media_type: 'video',
           page: targetPage,
           page_size: pageSize,
@@ -243,7 +240,6 @@ export function useVideoAssets(
       try {
         const sharedOptions = {
           client,
-          gameId,
           file,
           onProgress: (value: number) => {
             if (mountedRef.current && generation === uploadGeneration.current) {
@@ -314,12 +310,11 @@ export function useVideoAssets(
       setMutating(true)
       setLocalError(null)
       try {
-        const current = await client.get(resourceId, gameId, {
+        const current = await client.get(resourceId, {
           signal: abortRef.current?.signal,
         })
         const resource = await client.update(resourceId, {
           resource_id: resourceId,
-          game_id: gameId,
           media_type: 'video',
           url: current.url,
           name: nextName,
@@ -411,7 +406,7 @@ export function useVideoAssets(
       setMutating(true)
       setLocalError(null)
       try {
-        await client.delete(resourceId, gameId, {
+        await client.delete(resourceId, {
           signal: abortRef.current?.signal,
         })
         if (!mountedRef.current || generation !== crudGeneration.current) {
@@ -439,28 +434,6 @@ export function useVideoAssets(
     [cacheRemove, client, gameId, options.client, refresh],
   )
 
-  const deleteResources = useCallback(
-    async (resourceIds: readonly string[]) => {
-      if (resourceIds.length === 0) return { completed: 0 }
-      const generation = ++crudGeneration.current
-      setMutating(true)
-      setLocalError(null)
-      const result = await deleteSequentially(resourceIds, async (resourceId) => {
-        await client.delete(resourceId, gameId, { signal: abortRef.current?.signal })
-        if (!options.client) cacheRemove(gameId, resourceId)
-      })
-      if (mountedRef.current && generation === crudGeneration.current) {
-        if (result.error) setLocalError(safeErrorMessage(result.error))
-        setLocalItems((current) => current.filter((item) => !resourceIds.slice(0, result.completed).includes(item.id)))
-        setLocalTotal((current) => Math.max(0, current - result.completed))
-        setMutating(false)
-        await refresh()
-      }
-      return { completed: result.completed, failedId: result.failedId }
-    },
-    [cacheRemove, client, gameId, options.client, refresh],
-  )
-
   const hasMore = items.length < total
 
   return {
@@ -484,6 +457,5 @@ export function useVideoAssets(
     renameResource,
     retryComplete,
     deleteResource,
-    deleteResources,
   }
 }

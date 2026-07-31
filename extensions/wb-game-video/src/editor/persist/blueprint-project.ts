@@ -6,7 +6,7 @@
 import type {
   BlueprintDoc, BlueprintManifest, GameGraph, GraphLibraryDocument, ScenarioMetaFields, SubFlowPackDef,
 } from '../../runtime/schema/graph-schema'
-import { getSubFlowPack, getSubProcess, resolveGraphEntry } from '../../runtime/schema/graph-schema'
+import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
 import type { EditorScenarioDocument } from './formula-authoring'
 import { findReferenceCycle } from '../../graph/edit/blueprint-refs'
 
@@ -23,7 +23,7 @@ export function emptyBlueprintDoc(opts: { id?: string; title?: string } = {}): B
   const entry = 'entry'
   return {
     id, title: opts.title ?? '新蓝图', entry,
-    graph: { nodes: [{ id: entry, type: 'perf', position: { x: 80, y: 80 }, inputs: [], outputs: [], data: { name: '新演出节点' } }], edges: [] },
+    graph: { nodes: [{ id: entry, type: 'perf', position: { x: 80, y: 80 }, inputs: [], outputs: [], data: { name: '入口' } }], edges: [] },
   }
 }
 
@@ -148,39 +148,15 @@ export function validateDocument(doc: GraphLibraryDocument): string[] {
   const blueprints = normalized.manifest.packs
   const mainId = normalized.manifest.mainPackId
   for (const [bpId, bp] of Object.entries(blueprints)) {
-    const seenNodes = new Set<string>()
-    const seenEdges = new Set<string>()
-    const validateScope = (graph: GameGraph, path: string): void => {
-      const localNodes = new Set(graph.nodes.map((node) => node.id))
-      for (const n of graph.nodes) {
-        if (seenNodes.has(n.id)) errors.push(`蓝图「${bp.title}」(${bpId}) 内节点 id 重复：'${n.id}' (${path})`)
-        seenNodes.add(n.id)
-        const raw = n.data as unknown as Record<string, unknown>
-        if ('subFlow' in raw || 'subFlowRef' in raw) {
-          errors.push(`蓝图「${bp.title}」(${bpId}) 节点 '${n.id}' 使用了已移除的 subFlow/subFlowRef`)
-        }
-        const process = getSubProcess(n.data)
-        if (process && getSubFlowPack(n.data)) {
-          errors.push(`蓝图「${bp.title}」(${bpId}) 节点 '${n.id}' 的 subProcess 与 subFlowPack 不能同时存在`)
-        }
-        if ('subProcess' in raw && !process) {
-          errors.push(`蓝图「${bp.title}」(${bpId}) 节点 '${n.id}' 的 subProcess 结构无效`)
-          continue
-        }
-        if (!process) continue
-        if (!process.graph.nodes.some((child) => child.id === process.entry)) {
-          errors.push(`蓝图「${bp.title}」(${bpId}) 节点 '${n.id}' 的 subProcess entry '${process.entry}' 不在直属子图中`)
-        }
-        validateScope(process.graph, `${path}/${n.id}`)
-      }
-      for (const e of graph.edges) {
-        if (seenEdges.has(e.id)) errors.push(`蓝图「${bp.title}」(${bpId}) 内边 id 重复：'${e.id}' (${path})`)
-        seenEdges.add(e.id)
-        if (!localNodes.has(e.source)) errors.push(`蓝图「${bp.title}」(${bpId}) 边 '${e.id}' source 指向本层不存在的节点 '${e.source}'`)
-        if (!localNodes.has(e.target)) errors.push(`蓝图「${bp.title}」(${bpId}) 边 '${e.id}' target 指向本层不存在的节点 '${e.target}'`)
-      }
+    const seen = new Set<string>()
+    for (const n of bp.graph.nodes) {
+      if (seen.has(n.id)) errors.push(`蓝图「${bp.title}」(${bpId}) 内节点 id 重复：'${n.id}'`)
+      seen.add(n.id)
     }
-    validateScope(bp.graph, 'root')
+    for (const e of bp.graph.edges) {
+      if (!seen.has(e.source)) errors.push(`蓝图「${bp.title}」(${bpId}) 边 '${e.id}' source 指向不存在的节点 '${e.source}'`)
+      if (!seen.has(e.target)) errors.push(`蓝图「${bp.title}」(${bpId}) 边 '${e.id}' target 指向不存在的节点 '${e.target}'`)
+    }
     if (bp.graph.nodes.length > 0 && !bp.graph.nodes.some((n) => n.id === bp.entry)) {
       const fallback = resolveGraphEntry(bp.graph) ?? '∅'
       errors.push(`蓝图「${bp.title}」(${bpId}) entry '${bp.entry}' 不在图中（将回退到 ${fallback}）`)

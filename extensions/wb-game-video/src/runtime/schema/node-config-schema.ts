@@ -134,19 +134,17 @@ export interface Reaction {
   do: NodeAction[]
 }
 
-/** 节点演出相位驱动的结算子集；运行时仍需要与信号驱动的结算区分处理。 */
+/**
+ * 「生命周期效果」子集 —— 相位由**节点演出进程**决定（进入 / 播到某刻 / 离开前 / 收尾），
+ * 区别于由外部信号驱动的 event / watch / shown / hidden。
+ *
+ * 编辑器把这一子集作为一个整体呈现（时机统一表达为「播到 ms」），并按**子集内序号**定位某一条
+ * ——不能用 `reactions` 的绝对下标：检视器回写时会把子集排到数组前面（`[...life, ...rest]`），
+ * 绝对下标会随之漂移。作者态与时间轴标记共用这个序号，才能双向对得上。
+ */
 export function isLifecycleReaction(r: Reaction): boolean {
   const t = r.when.type
   return t === 'enter' || t === 'at' || t === 'exit' || t === 'complete'
-}
-
-/**
- * 作者界面统一呈现的「结算」：定时相位 + 数值/界面条件触发；event/state 仍由各自入口管理。
- * 编辑器和时间轴以这个子集内的序号双向定位，不能使用会随数组重排漂移的绝对下标。
- */
-export function isSettlementReaction(r: Reaction): boolean {
-  const t = r.when.type
-  return isLifecycleReaction(r) || t === 'watch' || t === 'shown' || t === 'hidden'
 }
 
 /** Overlay 聚合后的事件（编辑器下拉项）。 */
@@ -359,7 +357,7 @@ export const OVERLAY_DEMO = {
           },
           {
             id: 'parry',
-            component: 'BattleParry',
+            component: 'battleParry',
             layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 },
             trigger: { when: 'at', ms: 1200 },
             inputs: {
@@ -502,7 +500,7 @@ export const OVERLAY_DEMO_INSTANCE: OverlayInstance = {
     },
     {
       id: 'battleHud/parry',
-      component: 'BattleParry',
+      component: 'battleParry',
       trigger: { when: 'at', ms: 1200 },
       layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 },
       inputs: {

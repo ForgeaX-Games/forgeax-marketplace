@@ -1,101 +1,150 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { setLocale } from '../../../i18n'
 import { GameBootstrap } from '../GameBootstrap'
 
-const fetchMock = vi.fn()
-vi.stubGlobal('fetch', fetchMock)
+const client = {
+  ready: vi.fn(),
+  gamePackage: {
+    status: vi.fn(),
+    initialize: vi.fn(),
+  },
+}
+
+vi.mock('../../../lib/workbench-host', () => ({
+  getWorkbenchHost: () => client,
+}))
 
 beforeEach(() => {
-  fetchMock.mockReset()
+  client.ready.mockReset()
+  client.ready.mockResolvedValue({ gameId: 'accepted-game' })
+  client.gamePackage.status.mockReset()
+  client.gamePackage.initialize.mockReset()
   setLocale('en')
+  window.history.replaceState({}, '', '/')
 })
 
 test('renders the guide in the active locale', async () => {
   setLocale('zh')
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
-  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+  render(<GameBootstrap onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
   expect(await screen.findByRole('heading', { name: '从模板新建视频游戏' })).toBeTruthy()
   expect(screen.getByRole('button', { name: '从模板新建' })).toBeTruthy()
   expect(screen.getByRole('button', { name: '否，稍后再说' })).toBeTruthy()
 })
 
 test('shows guide without initializing an uninitialized package', async () => {
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
   const boot = vi.fn()
-  render(<GameBootstrap slug="demo" onBoot={boot}><div>workspace</div></GameBootstrap>)
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
   expect(await screen.findByRole('heading', { name: 'Create a video game from template' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Create from template' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'No, maybe later' })).toBeTruthy()
   expect(boot).not.toHaveBeenCalled()
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.initialize).not.toHaveBeenCalled()
 })
 
 test('initializes once on yes and then mounts workspace', async () => {
-  fetchMock
-    .mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ state: 'initialized', missing: [], initialized: true }), { status: 200 }))
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+  client.gamePackage.initialize.mockResolvedValueOnce({ state: 'initialized', missing: [], initialized: true })
   const boot = vi.fn()
-  render(<GameBootstrap slug="demo" onBoot={boot}><div>workspace</div></GameBootstrap>)
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
   await screen.findByRole('button', { name: 'Create from template' })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create from template' })) })
   await waitFor(() => expect(boot).toHaveBeenCalledTimes(1))
   expect(screen.getByText('workspace')).toBeTruthy()
-  expect(fetchMock).toHaveBeenCalledTimes(2)
-  expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('POST')
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.initialize).toHaveBeenCalledTimes(1)
 })
 
 test('closes the guide on no without writing, then retries a failed initialize', async () => {
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
   const boot = vi.fn()
-  const first = render(<GameBootstrap slug="demo" onBoot={boot}><div>workspace</div></GameBootstrap>)
+  const first = render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
   await screen.findByRole('button', { name: 'No, maybe later' })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'No, maybe later' })) })
   expect(screen.queryByRole('heading', { name: 'Create a video game from template' })).toBeNull()
   expect(boot).not.toHaveBeenCalled()
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
 
   first.unmount()
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
-  render(<GameBootstrap slug="demo" onBoot={boot}><div>workspace</div></GameBootstrap>)
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
   await screen.findByRole('button', { name: 'Create from template' })
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'error', error: { target: 'package', hint: 'temporary', retryable: true } }), { status: 500 }))
+  client.gamePackage.initialize.mockRejectedValueOnce(new Error('temporary'))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create from template' })) })
   expect(await screen.findByText('Initialization failed')).toBeTruthy()
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'initialized', missing: [], initialized: true }), { status: 200 }))
+  client.gamePackage.initialize.mockResolvedValueOnce({ state: 'initialized', missing: [], initialized: true })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })) })
   await waitFor(() => expect(boot).toHaveBeenCalledTimes(1))
   expect(screen.getByText('workspace')).toBeTruthy()
-  expect(fetchMock).toHaveBeenCalledTimes(4)
-  expect(fetchMock.mock.calls[3]?.[0]).toContain('/api/game-host/games/demo/package/initialize')
-  expect(fetchMock.mock.calls[3]?.[1]?.method).toBe('POST')
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(2)
+  expect(client.gamePackage.initialize).toHaveBeenCalledTimes(2)
 })
 
 test('renders inconsistent packages as an explicit non-retryable error', async () => {
-  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ state: 'inconsistent', missing: ['blueprint.json'] }), { status: 200 }))
-  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'inconsistent', missing: ['blueprint.json'] })
+  render(<GameBootstrap onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
   expect(await screen.findByText('Video game files are inconsistent')).toBeTruthy()
   expect(screen.getByRole('alert')).toHaveTextContent('blueprint.json')
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
 })
 
-test('reports an empty initialize response with its HTTP status', async () => {
-  fetchMock
-    .mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
-    .mockResolvedValueOnce(new Response(null, { status: 404 }))
-  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
-  await screen.findByRole('button', { name: 'Create from template' })
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create from template' })) })
+test('surfaces an initialized package load failure and does not mount the workspace', async () => {
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'initialized' })
+  const boot = vi.fn().mockRejectedValueOnce(new Error('temporary package read failure'))
+
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
+
   expect(await screen.findByText('Initialization failed')).toBeTruthy()
-  expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404 · empty response')
+  expect(screen.getByRole('alert')).toHaveTextContent('temporary package read failure')
+  expect(screen.queryByText('workspace')).toBeNull()
 })
 
-test('reports an HTML status fallback instead of exposing a JSON syntax error', async () => {
-  fetchMock.mockResolvedValueOnce(new Response('<!doctype html><title>Vite</title>', {
-    status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8' },
-  }))
-  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
-  expect(await screen.findByText('Initialization failed')).toBeTruthy()
-  expect(screen.getByRole('alert')).toHaveTextContent('HTTP 200 · expected JSON, received text/html')
+test('does not repeat status or use a stale onBoot callback after a parent rerender', async () => {
+  let resolveStatus: ((value: { state: 'initialized' }) => void) | undefined
+  client.gamePackage.status.mockReturnValueOnce(new Promise((resolve) => { resolveStatus = resolve }))
+  const firstBoot = vi.fn()
+  const latestBoot = vi.fn()
+  const view = render(<GameBootstrap onBoot={firstBoot}><div>workspace</div></GameBootstrap>)
+
+  view.rerender(<GameBootstrap onBoot={latestBoot}><div>workspace</div></GameBootstrap>)
+  resolveStatus?.({ state: 'initialized' })
+
+  await waitFor(() => expect(latestBoot).toHaveBeenCalledTimes(1))
+  expect(firstBoot).not.toHaveBeenCalled()
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
+})
+
+test.each(['猫', 'a'])('boots the exact handshake game id %s and ignores query selectors', async (gameId) => {
+  window.history.replaceState({}, '', '/?slug=query-game&game=other-game')
+  client.ready.mockResolvedValueOnce({ gameId })
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'initialized' })
+  const boot = vi.fn()
+
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  await waitFor(() => expect(boot).toHaveBeenCalledWith(gameId))
+  expect(client.ready).toHaveBeenCalledTimes(1)
+  expect(client.ready.mock.invocationCallOrder[0]).toBeLessThan(
+    client.gamePackage.status.mock.invocationCallOrder[0]!,
+  )
+})
+
+test('boots after StrictMode replays the mount effect', async () => {
+  client.ready.mockResolvedValue({ gameId: '猫' })
+  client.gamePackage.status.mockResolvedValue({ state: 'initialized' })
+  const boot = vi.fn()
+
+  render(
+    <StrictMode>
+      <GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>
+    </StrictMode>,
+  )
+
+  await waitFor(() => expect(boot).toHaveBeenCalledWith('猫'))
+  expect(boot).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('workspace')).toBeTruthy()
 })

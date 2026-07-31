@@ -5,12 +5,12 @@
  * - 引擎是**调度层**（callStack/redirect/phase/走边/switchGraph/checkRules/tick(at·window)…）；
  * - NodeKind 是**节点层**：只描述「进入即执行(execute)」和「被时间驱动唤醒后怎么走(next)」，返回 `NextIntent`；
  * - 节点**不碰** callStack/phase/redirect/边，只返回意图，由引擎执行；
- * - 判别符 = `GameNode.type`，回退 `perf`（当前 subProcess/subFlowPack 由 data 字段派生）。
+ * - 判别符 = `GameNode.type`，回退 `perf`（当前 subflow/subflowPack 由 data 字段派生，见 `resolveNodeType`）。
  * 新增节点类型 = 在本目录加一个文件实现 NodeKind + 在 index 的 CORE_NODE_KINDS 注册即可；
  *   `GameNodeType` 是开放联合、合法集合以本注册表为 SSOT，无需回改 schema（validate.ts 据注册表查未知 type）。
  */
 import type { GameGraph, GameNode } from '../schema/graph-schema'
-import { getSubFlowPack, getSubProcess } from '../schema/graph-schema'
+import { getSubFlow, getSubFlowPack } from '../schema/graph-schema'
 import type { OverlayInstanceChild } from '../schema/node-config-schema'
 import type { MutableState } from '../engine/apply-effects'
 import type { RuntimeDirective } from '../engine/directives'
@@ -62,11 +62,11 @@ export interface NodeKind {
 }
 
 /**
- * 节点类型判别：subFlowPack / subProcess 由 data 字段派生优先；否则用 `node.type`。
+ * 节点类型判别（路径 A）：subFlowPack / subFlow 由 data 字段派生优先；否则用 `node.type`，回退 `perf`。
  */
 export function resolveNodeType(node: GameNode): string {
   if (getSubFlowPack(node.data)) return 'subflowPack'
-  if (getSubProcess(node.data)) return 'subProcess'
+  if (getSubFlow(node.data)) return 'subflow'
   return node.type ?? 'perf'
 }
 

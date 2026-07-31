@@ -1,15 +1,50 @@
+import { evalExpr, type EvalCtx } from '../../../engine/expr'
+import { createRng } from '../../../engine/rng'
 import type { NumOrExpr } from '../../../schema/graph-schema'
 import type { SkinCtx } from '../../rendererRegistry'
-import { resolveNumericValue } from '../numericValue'
-
-export { resolveNumericValue as resolveNumericFloatValue } from '../numericValue'
 
 export interface NumericFloatTextInputs {
-  value?: NumOrExpr | string
+  value?: NumOrExpr
   /** 兼容旧版字符串参数；新编辑器只写 value。 */
   text?: string
-  /** 整段飘字动画的总时长，单位 ms。 */
-  durationMs?: number
+}
+
+function evalCtxFromSkin(ctx: SkinCtx | undefined): EvalCtx {
+  const state = ctx?.condition?.state
+  if (state) {
+    const rngState = state.rng?.getState()
+    return {
+      vars: state.vars,
+      entities: state.entities,
+      flags: state.flags,
+      score: state.score,
+      // React 渲染必须是纯读取；克隆当前位置，禁止 rand()/chance() 推进运行态 RNG。
+      rng: rngState ? createRng(rngState.seed, rngState.step) : createRng(0),
+    }
+  }
+  const hud = ctx?.hud
+  return {
+    vars: hud?.vars,
+    entities: hud
+      ? Object.fromEntries(Object.entries(hud.entities).map(([id, entity]) => [id, { attrs: entity.attrs }]))
+      : undefined,
+    flags: hud?.flags,
+    score: hud?.score,
+    rng: createRng(0),
+  }
+}
+
+export function resolveNumericFloatValue(value: unknown, ctx: SkinCtx | undefined): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (!value || typeof value !== 'object') return undefined
+  const expr = (value as { expr?: unknown }).expr
+  if (typeof expr !== 'string' || !expr.trim()) return undefined
+  try {
+    const result = evalExpr(expr, evalCtxFromSkin(ctx))
+    return Number.isFinite(result) ? result : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function signed(value: number): string {
@@ -22,12 +57,7 @@ export function resolveNumericFloatText(
   ctx: SkinCtx | undefined,
   fallback: string,
 ): string {
-  const value = resolveNumericValue(inputs.value, ctx)
+  const value = resolveNumericFloatValue(inputs.value, ctx)
   if (value != null) return signed(value)
   return typeof inputs.text === 'string' && inputs.text ? inputs.text : fallback
-}
-
-/** 非法时长不应让 CSS 动画失效；缺省保持各飘字皮肤原来的 1.1 秒节奏。 */
-export function resolveNumericFloatDurationMs(value: unknown, fallback = 1100): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }

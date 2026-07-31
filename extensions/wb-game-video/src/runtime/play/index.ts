@@ -5,7 +5,6 @@
  */
 export { GamePlayer, type GamePlayerProps, type ResolveAsset } from './GamePlayer'
 export { GameStage, type GameStageProps } from './GameStage'
-export { VideoAudioToggle, type VideoAudioToggleProps } from './VideoAudioToggle'
 export { BgmPlayer, type BgmPlayerProps } from './BgmPlayer'
 export { videoDurationCapReached } from './videoTiming'
 export { VideoOverlayStage } from './VideoOverlayStage'
@@ -19,10 +18,3 @@ export { useVideoContentRect } from './useVideoContentRect'
 export { computeVideoContentRect, pointerToVideoNorm, type VideoContentRect } from './videoContentRect'
 export { MissingVideoNotice } from './MissingVideoNotice'
 export { useClipPerformanceEnd } from './useClipPerformanceEnd'
-export {
-  PlaybackClockProvider,
-  usePlaybackClock,
-  usePlaybackTimeout,
-  useControlledPlaybackTimeout,
-  type PlaybackControl,
-} from '../playback-clock'

@@ -1,14 +1,13 @@
 /**
- * 战斗技能条（component id: `BattleSkill`）—— 固定展示轻攻击、重攻击、冥想、灭世。
+ * 战斗技能条（component id: `battleSkillBar`）—— 固定展示轻攻击、重攻击、冥想、灭世。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与点击交互。
  */
 import { useRef, useState } from 'react'
 import type { OverlayProps } from '../../rendererRegistry'
-import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
+import type { ComponentDef } from '../../../registry/component-registry'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
-export const BattleSkillManifest: ComponentManifest = {
-  id: 'BattleSkill',
+export const battleSkillBarComponent: ComponentDef = {
   label: '战斗技能条',
   events: [
     { id: 'light', label: '轻攻击' },
@@ -19,7 +18,7 @@ export const BattleSkillManifest: ComponentManifest = {
   inputs: [],
 }
 
-export function BattleSkill({ emit, preview }: OverlayProps) {
+export function BattleSkillLayer({ emit, preview }: OverlayProps) {
   injectCss('battle-skill-layer', SKILL_CSS)
   ensureInkFilters()
   ensureBrushFont()

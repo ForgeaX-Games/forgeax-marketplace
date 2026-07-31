@@ -246,7 +246,7 @@ export interface DocumentBgm {
  *   - 后面某个节点配 `mode: 'stop'` → 结束当前这层，回到上一层还没结束的那首；
  *   - `jump` / 清局 → 引擎整体退栈（`unwindBgmToDocBed`）。
  *
- * 容器（`subProcess` / `subFlowPack`）**不是**作用域：容器上的 `bgm` 与普通节点同一规则，弹回外层
+ * 容器（`subFlow` / `subFlowPack`）**不是**作用域：容器上的 `bgm` 与普通节点同一规则，弹回外层
  * 不结束它。想要「出了这个子流程就结束」只能在包的每个出口终端上写 `mode: 'stop'`；被硬打断
  * 弹出容器（没走终端）时这首会漏到调用方继续播。反过来也成立——**配 BGM 不得要求作者改蓝图
  * 结构**（D11）：一段平铺节点共用一首曲子只需在头一个节点上配一次，不必包进容器。
@@ -277,9 +277,9 @@ export interface NodeBgm {
  * 图节点 `data` **基类**（普通演出节点）。
  *
  * 子流程 / 子蓝图容器用特化类型：
- *   - `SubProcessNodeData` — 节点私有的内嵌子图
+ *   - `SubFlowNodeData` — 同图下钻
  *   - `SubFlowPackNodeData` — 跨图 pack 引用
- * `GameNode.data` = `GameNodeData` 联合；读写嵌套字段用 `getSubProcess` / `getSubFlowPack`。
+ * `GameNode.data` = `GameNodeData` 联合；读写嵌套字段用 `getSubFlow` / `getSubFlowPack`。
  *
  * 覆盖物一律经 `overlayNodes` 引用并展开；视频上只能挂 Overlay，不能直挂裸组件。
  */
@@ -323,19 +323,11 @@ export interface SubFlowPack {
 }
 
 /**
- * 内嵌子流程本体。`entry` 只允许指向直属 `graph.nodes`；父子图之间不得直接连边。
+ * 同图子流程容器：首次进入压栈并跳到 `subFlow`；
+ * 子流程叶子无自动出边时弹回，容器不重播、沿 `out` 续走。回环用显式边。
  */
-export interface SubProcess {
-  entry: string
-  graph: GameGraph
-}
-
-/**
- * 节点私有的内嵌子流程容器：首次进入压栈并切到 `subProcess.graph`；
- * 子图叶子无自动出边时弹回，容器不重播、沿父图出边续走。
- */
-export interface SubProcessNodeData extends NodeData {
-  subProcess: SubProcess
+export interface SubFlowNodeData extends NodeData {
+  subFlow: string
 }
 
 /**
@@ -346,16 +338,13 @@ export interface SubFlowPackNodeData extends NodeData {
 }
 
 /** 图上节点 data 联合（基类 ∪ 子流程特化）。 */
-export type GameNodeData = NodeData | SubProcessNodeData | SubFlowPackNodeData
+export type GameNodeData = NodeData | SubFlowNodeData | SubFlowPackNodeData
 
-export function getSubProcess(d: GameNodeData): SubProcess | undefined {
-  const process = (d as SubProcessNodeData).subProcess
-  return process
-    && typeof process === 'object'
-    && typeof process.entry === 'string'
-    && isGameGraph(process.graph)
-    ? process
-    : undefined
+export function getSubFlow(d: GameNodeData): string | undefined {
+  const rec = d as SubFlowNodeData & { subFlowRef?: string }
+  // subFlow 为现行字段；subFlowRef 为更名兼容（旧草稿/落盘）。
+  const v = rec.subFlow ?? rec.subFlowRef
+  return typeof v === 'string' && v.length > 0 ? v : undefined
 }
 
 export function getSubFlowPack(d: GameNodeData): SubFlowPack | undefined {
@@ -379,7 +368,7 @@ export function getNodeBgm(d: GameNodeData): NodeBgm | undefined {
 }
 
 export function isSubflowContainerData(d: GameNodeData): boolean {
-  return getSubProcess(d) != null || getSubFlowPack(d) != null
+  return getSubFlow(d) != null || getSubFlowPack(d) != null
 }
 
 /**

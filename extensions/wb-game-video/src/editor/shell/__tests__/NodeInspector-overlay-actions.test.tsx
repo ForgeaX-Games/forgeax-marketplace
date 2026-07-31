@@ -8,7 +8,7 @@ import { NodeInspector } from '../NodeInspector'
 afterEach(cleanup)
 
 describe('NodeInspector · 界面事件动作入口', () => {
-  it('事件响应保留沿边推进入口，并把走边选择收进目标节点路由', () => {
+  it('事件响应只提供新增效果和沿边推进，不重复提供生成组件', () => {
     const overlay = structuredClone(PRESET_SCHEME_BY_ID.n_door!)
     const data: GameNodeData = {
       name: '慈悲狱门口',
@@ -30,7 +30,6 @@ describe('NodeInspector · 界面事件动作入口', () => {
 
     expect(screen.getAllByRole('button', { name: '＋ 效果' })).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: '＋ 沿边推进' })).toHaveLength(2)
-    expect(screen.queryByText('走边')).toBeNull()
     expect(screen.queryByRole('button', { name: '＋ 生成组件' })).toBeNull()
     expect(screen.getByText('界面')).toBeTruthy()
     expect(screen.queryByText('覆盖物事件')).toBeNull()

@@ -45,7 +45,6 @@ function toMediaAsset(resource: KinoResourceDTO, referenceType: ImageReferenceTy
 }
 
 export async function uploadReferenceImage(
-  game: string,
   file: File,
   referenceType: ImageReferenceType,
   onProgress?: (percent: number) => void,
@@ -54,7 +53,6 @@ export async function uploadReferenceImage(
   try {
     const client = kinoClient()
     const prepared = await client.prepareUpload({
-      game_id: game,
       file_name: file.name,
       mime_type: file.type as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
       bytes: file.size,
@@ -65,7 +63,6 @@ export async function uploadReferenceImage(
       (percent) => onProgress?.(Math.min(99, percent)),
     )
     const resource = await client.create({
-      game_id: game,
       media_type: 'image',
       url: prepared.object_url,
       name: file.name.replace(/\.[^.]+$/, ''),
@@ -82,15 +79,15 @@ export async function uploadReferenceImage(
   }
 }
 
-export async function deleteReferenceImage(game: string, assetId: string): Promise<void> {
+export async function deleteReferenceImage(assetId: string): Promise<void> {
   try {
-    await kinoClient().delete(assetId, game)
+    await kinoClient().delete(assetId)
   } catch (error) {
     throw new ImageUploadError(error instanceof Error ? error.message : '图片删除失败')
   }
 }
 
-export function gvaImageUrl(assetId: string, game: string, updatedAt?: number): string {
-  const url = kinoClient().playbackUrl(assetId, game)
-  return updatedAt === undefined ? url : `${url}&v=${encodeURIComponent(String(updatedAt))}`
+export function gvaImageUrl(assetId: string, updatedAt?: number): string {
+  const url = kinoClient().playbackUrl(assetId)
+  return updatedAt === undefined ? url : `${url}?v=${encodeURIComponent(String(updatedAt))}`
 }

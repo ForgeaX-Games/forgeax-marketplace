@@ -9,7 +9,6 @@ import { expandNodeChildren, resolveMountChildren } from '../schema/expand-overl
 import { node, scnOf } from './test-fixtures'
 import {
   addOverlayChild,
-  countOverlayReferences,
   dropOverlayIfUnreferenced,
   ensureNodeOverlay,
   forkSchemeForEdit,
@@ -28,7 +27,7 @@ const SCHEME: Overlay = {
   id: 'scheme-static',
   title: '静态组件方案',
   children: [
-    { id: 'line', component: 'Dialogue', trigger: { when: 'enter' }, inputs: { text: 'orig' } },
+    { id: 'line', component: 'dialogue', trigger: { when: 'enter' }, inputs: { text: 'orig' } },
     { id: 'hp', component: 'battleHpBar', trigger: { when: 'enter' }, inputs: { bind: 'ent-player' } },
   ],
 }
@@ -66,7 +65,7 @@ describe('overlay sparse override（prototype + override）', () => {
 
     it('added：追加到末尾，不影响原型 children', () => {
       const overlays = { 'scheme-static': SCHEME }
-      const extra = { id: 'c1', component: 'Dialogue', inputs: { text: 'new' } }
+      const extra = { id: 'c1', component: 'dialogue', inputs: { text: 'new' } }
       const resolved = resolveMountChildren(overlays, { overlay: 'scheme-static', added: [extra] })
       expect(resolved.map((c) => c.id)).toEqual(['line', 'hp', 'c1'])
     })
@@ -150,7 +149,7 @@ describe('overlay sparse override（prototype + override）', () => {
     })
 
     it('addOverlayChild：共享方案节点新增组件 → 落 mount.added，不写回共享方案', () => {
-      const out = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: { text: 'hi' } })
+      const out = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: { text: 'hi' } })
       const mount = mountsOf(out, 'a')[0]!
       expect(mount.added?.map((c) => c.id)).toEqual(['c1'])
       expect(out.ui!.overlays!['scheme-static']!.children).toHaveLength(2) // 共享方案不变
@@ -167,7 +166,7 @@ describe('overlay sparse override（prototype + override）', () => {
     })
 
     it('removeOverlayChild：删本地新增(added)组件 → 直接从 added 摘除，不留 tombstone', () => {
-      let s = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: {} })
+      let s = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: {} })
       s = removeOverlayChild(s, 'a', 'c1')
       const mount = mountsOf(s, 'a')[0]!
       expect(mount.added ?? []).toHaveLength(0)
@@ -175,7 +174,7 @@ describe('overlay sparse override（prototype + override）', () => {
     })
 
     it('patchOverlayChild 命中 added 组件时改 added 本身，而不是写 overrides', () => {
-      let s = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: { text: 'v0' } })
+      let s = addOverlayChild(seedShared(), 'a', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: { text: 'v0' } })
       s = patchOverlayChild(s, 'a', 'c1', { inputs: { text: 'v1' } })
       const mount = mountsOf(s, 'a')[0]!
       expect(textOf(mount.added?.find((c) => c.id === 'c1'))).toBe('v1')
@@ -212,7 +211,7 @@ describe('overlay sparse override（prototype + override）', () => {
 
     it('relinkScheme：整体回连，清空 overrides/added/removed，内容完全跟随方案', () => {
       let s = patchOverlayChild(seedShared(), 'a', 'line', { inputs: { text: 'A改' } })
-      s = addOverlayChild(s, 'a', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: {} })
+      s = addOverlayChild(s, 'a', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: {} })
       s = removeOverlayChild(s, 'a', 'hp')
       s = relinkScheme(s, 'a')
       const mount = mountsOf(s, 'a')[0]!
@@ -224,7 +223,7 @@ describe('overlay sparse override（prototype + override）', () => {
 
     it('overriddenChildIds：统计已覆盖 / 新增 / 屏蔽的 childId', () => {
       let s = patchOverlayChild(seedShared(), 'a', 'line', { inputs: { text: 'A改' } })
-      s = addOverlayChild(s, 'a', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: {} })
+      s = addOverlayChild(s, 'a', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: {} })
       s = removeOverlayChild(s, 'a', 'hp')
       const { overridden, added, removed } = overriddenChildIds(mountsOf(s, 'a')[0])
       expect(overridden).toEqual(['line'])
@@ -237,7 +236,7 @@ describe('overlay sparse override（prototype + override）', () => {
     it('空节点新增素材：建 node:<id> 并直写其 children（不产生 overrides/added/removed）', () => {
       const e = node('e')
       const s = scnOf({ nodes: [e], edges: [] })
-      const out = addOverlayChild(s, 'e', { id: 'c1', component: 'Dialogue', trigger: { when: 'enter' }, inputs: { text: 'hi' } })
+      const out = addOverlayChild(s, 'e', { id: 'c1', component: 'dialogue', trigger: { when: 'enter' }, inputs: { text: 'hi' } })
       expect(out.ui!.overlays![nodeOverlayId('e')]!.children).toHaveLength(1)
       const mount = mountsOf(out, 'e')[0]!
       expect(mount.overlay).toBe(nodeOverlayId('e'))
@@ -284,26 +283,6 @@ describe('overlay sparse override（prototype + override）', () => {
   })
 
   describe('孤儿清理（isOverlayReferenced / dropOverlayIfUnreferenced，不受 override 模型影响）', () => {
-    it('引用计数覆盖主蓝图与全部子蓝图', () => {
-      const main = {
-        nodes: [node('main-a', { overlayNodes: [{ overlay: 'base:DamageFloatText' }] })],
-        edges: [],
-      }
-      const childA = {
-        nodes: [node('child-a', { overlayNodes: [{ overlay: 'base:DamageFloatText' }, { overlay: 'base:GainFloatText' }] })],
-        edges: [],
-      }
-      const childB = {
-        nodes: [node('child-b', { overlayNodes: [{ overlay: 'base:DamageFloatText' }] })],
-        edges: [],
-      }
-
-      expect(countOverlayReferences([main, childA, childB])).toEqual({
-        'base:DamageFloatText': 3,
-        'base:GainFloatText': 1,
-      })
-    })
-
     it('卸载后清孤儿，仍被引用则保留，且不碰共享方案', () => {
       const e = node('e')
       const seed = scnOf({ nodes: [e], edges: [] })

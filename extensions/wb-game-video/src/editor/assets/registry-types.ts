@@ -51,13 +51,13 @@ export interface MediaAsset {
   prompt?: string
   /**
    * 自产资产：相对 `assets/` 根的磁盘路径（如 `media/a-xxx.mp4`）。就绪后必有。
-   * 播放 URL 由前端 resolveMediaSrc → `/__gva__/media/<id>` 派生，不直接暴露磁盘路径。
+   * 播放 URL 由前端 resolveMediaSrc → 宿主扩展媒体路由派生，不直接暴露磁盘路径。
    */
   file?: string
   /**
    * 稳定可播放访问地址（D8 目标态）：一旦上传能力就绪，成片以稳定 `url` 登记，
    * 播放优先用它（`resolveMediaSrc` 见 media.ts 优先序）；在此之前为空，回落 D9 兜底
-   * （zhandou basename / 本地 `/__gva__/media/<id>` 流）。graph/blueprint 只挂 id，URL 只住 manifest。
+   * （zhandou basename / 本地扩展媒体流）。graph/blueprint 只挂 id，URL 只住 manifest。
    */
   url?: string
   /** 跨模块只读产物：对方文件的绝对磁盘路径（**不复制**进本 registry 的 media/）。 */

@@ -4,12 +4,23 @@ import {
   realpath,
   stat,
 } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { extname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const PACKAGE_NAME = '@forgeax/wb-game-video'
 const PLATFORM_PACKAGE = '@forgeax/extension-platform'
 const PLATFORM_VERSION = '0.0.2'
+const WORKBENCH_HOST_PACKAGE = '@forgeax/workbench-host'
+const WORKBENCH_HOST_VERSION = '0.1.0'
+const REVIEWED_WORKBENCH_HOST_COMMIT = '15a573679ad058e4d04fadea2f5c90abb29d2245'
+const WORKBENCH_HOST_ARCHIVE = 'vendor/forgeax-workbench-host-0.1.0.tgz'
+const WORKBENCH_HOST_PROVENANCE = 'vendor/forgeax-workbench-host-0.1.0.provenance.json'
+const HOST_BACKEND_ENTRY = './dist/server/host.js'
+const REQUIRED_PACKAGE_EXPORTS = {
+  '.': './dist/index.js',
+  './host': HOST_BACKEND_ENTRY,
+}
 const TEXT_EXTENSIONS = new Set([
   '.css',
   '.env',
@@ -214,18 +225,118 @@ async function findOldActiveIdentities(root, errors) {
   }
 }
 
+function hasLocalAbsolutePath(value) {
+  if (typeof value === 'string') {
+    return (
+      value.startsWith('/')
+      || /^file:\/(?!\.?\/vendor\/)/.test(value)
+      || /\/(?:Users|private|var\/folders)\//.test(value)
+      || /^[A-Za-z]:[\\/]/.test(value)
+    )
+  }
+  if (Array.isArray(value)) return value.some(hasLocalAbsolutePath)
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(hasLocalAbsolutePath)
+  }
+  return false
+}
+
+async function validateNoLocalAbsolutePaths(packageRoot, pkg, errors) {
+  if (hasLocalAbsolutePath(pkg)) {
+    errors.push('package.json contains a local absolute path')
+  }
+
+  try {
+    const lockSource = await readFile(resolve(packageRoot, 'bun.lock'), 'utf8')
+    if (hasLocalAbsolutePath(lockSource)) {
+      errors.push('bun.lock contains a local absolute path')
+    }
+  } catch {
+    errors.push('bun.lock is not readable')
+  }
+}
+
+async function validateHostVendorProvenance(packageRoot, errors) {
+  const provenance = await readJson(
+    resolve(packageRoot, WORKBENCH_HOST_PROVENANCE),
+    WORKBENCH_HOST_PROVENANCE,
+    errors,
+  )
+  if (!provenance) return
+
+  const expectedFields = {
+    schemaVersion: 1,
+    package: WORKBENCH_HOST_PACKAGE,
+    version: WORKBENCH_HOST_VERSION,
+    sourceCommit: REVIEWED_WORKBENCH_HOST_COMMIT,
+    archive: WORKBENCH_HOST_ARCHIVE,
+  }
+  for (const [field, expected] of Object.entries(expectedFields)) {
+    if (provenance[field] !== expected) {
+      errors.push(
+        `${WORKBENCH_HOST_PROVENANCE}.${field} must be ${JSON.stringify(expected)}; received ${JSON.stringify(provenance[field])}`,
+      )
+    }
+  }
+
+  let archive
+  try {
+    archive = await readFile(resolve(packageRoot, WORKBENCH_HOST_ARCHIVE))
+  } catch {
+    errors.push(`${WORKBENCH_HOST_ARCHIVE} is not readable`)
+    return
+  }
+  const sha256 = createHash('sha256').update(archive).digest('hex')
+  const sha512 = createHash('sha512').update(archive).digest('hex')
+  const integrity = `sha512-${createHash('sha512').update(archive).digest('base64')}`
+  for (const [field, expected] of Object.entries({ sha256, sha512, integrity })) {
+    if (provenance[field] !== expected) {
+      errors.push(
+        `${WORKBENCH_HOST_PROVENANCE}.${field} does not match ${WORKBENCH_HOST_ARCHIVE}`,
+      )
+    }
+  }
+
+  try {
+    const lockSource = await readFile(resolve(packageRoot, 'bun.lock'), 'utf8')
+    if (!lockSource.includes(integrity)) {
+      errors.push(`bun.lock does not contain ${WORKBENCH_HOST_ARCHIVE} integrity`)
+    }
+  } catch {
+    errors.push('bun.lock is not readable')
+  }
+}
+
 function validatePackage(pkg, errors) {
   if (pkg.name !== PACKAGE_NAME) {
     errors.push(`package name must be ${PACKAGE_NAME}; received ${JSON.stringify(pkg.name)}`)
   }
 
-  for (const dependencyKind of ['peerDependencies', 'devDependencies']) {
-    const actual = pkg[dependencyKind]?.[PLATFORM_PACKAGE]
-    if (actual !== PLATFORM_VERSION) {
+  for (const [dependencyPackage, dependencyVersion] of [
+    [PLATFORM_PACKAGE, PLATFORM_VERSION],
+    [WORKBENCH_HOST_PACKAGE, WORKBENCH_HOST_VERSION],
+  ]) {
+    for (const dependencyKind of ['peerDependencies', 'devDependencies']) {
+      const actual = pkg[dependencyKind]?.[dependencyPackage]
+      if (actual !== dependencyVersion) {
+        errors.push(
+          `${dependencyKind}.${dependencyPackage} must be exactly ${dependencyVersion}; received ${JSON.stringify(actual)}`,
+        )
+      }
+    }
+  }
+
+  for (const [exportName, expectedPath] of Object.entries(REQUIRED_PACKAGE_EXPORTS)) {
+    const actual = pkg.exports?.[exportName]
+    if (actual !== expectedPath) {
       errors.push(
-        `${dependencyKind}.${PLATFORM_PACKAGE} must be exactly ${PLATFORM_VERSION}; received ${JSON.stringify(actual)}`,
+        `exports[${JSON.stringify(exportName)}] must be exactly ${expectedPath}; received ${JSON.stringify(actual)}`,
       )
     }
+  }
+
+  if (!Array.isArray(pkg.files) || !pkg.files.includes('dist') || pkg.files.includes('vendor')) {
+    errors.push('package files must include dist and exclude vendor')
   }
 }
 
@@ -234,6 +345,10 @@ async function validateManifest(packageRoot, manifest, errors) {
     errors.push(
       `manifest ID must be ${PACKAGE_NAME}; received ${JSON.stringify(manifest.id)}`,
     )
+  }
+
+  if (manifest.entry?.backend !== HOST_BACKEND_ENTRY) {
+    errors.push(`entry.backend must be exactly ${HOST_BACKEND_ENTRY}; received ${JSON.stringify(manifest.entry?.backend)}`)
   }
 
   const backendPath = await checkPackagePath(
@@ -282,14 +397,17 @@ async function validateManifest(packageRoot, manifest, errors) {
   if (backendPath) {
     try {
       const backend = await import(/* @vite-ignore */ pathToFileURL(backendPath).href)
-      const handlerKeys = Object.keys(backend.default ?? {})
       const manifestToolIds = tools.map((tool) => tool?.id)
+      if (backend.host === undefined) {
+        errors.push('compiled backend must export named host')
+      }
+      const handlerKeys = Object.keys(backend.tools ?? {})
       if (
         handlerKeys.length !== manifestToolIds.length ||
         handlerKeys.some((key, index) => key !== manifestToolIds[index])
       ) {
         errors.push(
-          `compiled backend handler keys ${JSON.stringify(handlerKeys)} must equal manifest tool IDs in order ${JSON.stringify(manifestToolIds)}`,
+          `compiled backend named tools keys ${JSON.stringify(handlerKeys)} must equal manifest tool IDs in order ${JSON.stringify(manifestToolIds)}`,
         )
       }
     } catch (error) {
@@ -308,7 +426,11 @@ export async function validateRelease(root) {
     errors,
   )
 
-  if (pkg) validatePackage(pkg, errors)
+  if (pkg) {
+    validatePackage(pkg, errors)
+    await validateNoLocalAbsolutePaths(packageRoot, pkg, errors)
+  }
+  await validateHostVendorProvenance(packageRoot, errors)
   if (manifest) await validateManifest(packageRoot, manifest, errors)
   if (pkg && manifest) {
     const expectedTag = `v${pkg.version}`

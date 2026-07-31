@@ -70,22 +70,6 @@ describe('GameStage buffered playback', () => {
     expect(next).toHaveStyle({ opacity: '1' })
   })
 
-  it('pauses and resumes the active video while applying playback rate', () => {
-    const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause')
-    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
-    const { container, rerender } = render(<GameStage {...props({ paused: true, playbackRate: 2 })} />)
-    const video = videoFor(container, '/a.mp4')
-    fireEvent.loadedData(video)
-
-    expect(video.playbackRate).toBe(2)
-    expect(pause).toHaveBeenCalled()
-    const playsWhilePaused = play.mock.calls.length
-
-    rerender(<GameStage {...props({ paused: false, playbackRate: 0.5 })} />)
-    expect(video.playbackRate).toBe(0.5)
-    expect(play.mock.calls.length).toBeGreaterThan(playsWhilePaused)
-  })
-
   it('reuses a preloaded video element instead of assigning its src during the switch', () => {
     const nextClip = clip('b')
     const { container, rerender } = render(
@@ -119,49 +103,6 @@ describe('GameStage buffered playback', () => {
     expect(promoted).toHaveStyle({ opacity: '1' })
   })
 
-  it('only enables audio on the visible video slot', () => {
-    const nextClip = clip('b')
-    const { container, rerender } = render(
-      <GameStage
-        {...props({
-          videoAudioEnabled: true,
-          preloadVideos: [{ videoSrc: '/b.mp4', clip: nextClip }],
-        })}
-      />,
-    )
-    const first = videoFor(container, '/a.mp4')
-    const preloaded = videoFor(container, '/b.mp4')
-
-    expect(first.muted).toBe(false)
-    expect(preloaded.muted).toBe(true)
-
-    fireEvent.loadedData(first)
-    fireEvent.loadedData(preloaded)
-    rerender(
-      <GameStage
-        {...props({
-          videoSrc: '/b.mp4',
-          clip: nextClip,
-          videoAudioEnabled: true,
-        })}
-      />,
-    )
-    fireEvent.loadedData(preloaded)
-    submitFrame(preloaded)
-
-    expect(first.muted).toBe(true)
-    expect(preloaded.muted).toBe(false)
-  })
-
-  it('keeps the foreground video muted until audio is explicitly enabled', () => {
-    const { container, rerender } = render(<GameStage {...props()} />)
-    const video = videoFor(container, '/a.mp4')
-
-    expect(video.muted).toBe(true)
-    rerender(<GameStage {...props({ videoAudioEnabled: true })} />)
-    expect(video.muted).toBe(false)
-  })
-
   it('ignores media events from the retained old video', () => {
     const onTick = vi.fn()
     const onPerformanceEnd = vi.fn()
@@ -192,23 +133,6 @@ describe('GameStage buffered playback', () => {
     submitFrame(next)
     fireEvent.ended(next)
     expect(onPerformanceEnd).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps looping video independent from the node duration cap', () => {
-    const onTick = vi.fn()
-    const onPerformanceEnd = vi.fn()
-    const loopingClip = { ...clip('a'), loop: true, durationMs: 500 }
-    const { container } = render(
-      <GameStage {...props({ clip: loopingClip, onTick, onPerformanceEnd })} />,
-    )
-    const video = videoFor(container, '/a.mp4')
-    Object.defineProperty(video, 'duration', { configurable: true, value: 1000 / 1000 })
-    video.currentTime = 0.6
-
-    fireEvent.timeUpdate(video)
-
-    expect(onTick).toHaveBeenCalledWith(600)
-    expect(onPerformanceEnd).not.toHaveBeenCalled()
   })
 
   it('does not activate a stale background load after a newer switch', () => {
@@ -251,7 +175,7 @@ describe('GameStage buffered playback', () => {
   })
 
   it('renews an expired gateway URL before showing a missing-video notice', () => {
-    const source = '/__gva__/media/m-narr-open?game=0728-04'
+    const source = '/__workbench__/v1/extension/rt-local/media/assets/m-narr-open?gameId=0728-04'
     const { container } = render(
       <GameStage {...props({ videoSrc: source, clip: clip('intro', 'm-narr-open') })} />,
     )
@@ -262,7 +186,7 @@ describe('GameStage buffered playback', () => {
 
     const refreshed = videoFor(
       container,
-      '/__gva__/media/m-narr-open?game=0728-04&__gva_refresh=1',
+      '/__workbench__/v1/extension/rt-local/media/assets/m-narr-open?gameId=0728-04&__gva_refresh=1',
     )
     expect(container).not.toHaveTextContent('无法播放视频资源')
 

@@ -5,7 +5,7 @@
  * 纯展示：不持有方案数据，落地逻辑在 stage 的 onDrop 里（读 dataTransfer 的组件 id）。
  */
 import type { JSX } from 'react'
-import newComponents from '../../runtime/component-host/components/new'
+import { NEW_COMPONENTS } from '../../runtime/component-host/components/new'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
 /** 拖拽 MIME：库 chip → 画布落地时用它取组件 id。 */
@@ -33,11 +33,10 @@ export function ComponentLibrary(): JSX.Element {
   injectStyleOnce('overlay-component-library', LIB_CSS)
   return (
     <div className="ocl-root">
-      <div className="ocl-title">组件库（{newComponents.length}）</div>
+      <div className="ocl-title">组件库（{NEW_COMPONENTS.length}）</div>
       <div className="ocl-hint">拖到左侧画布落地；再拖动调整组件位置。</div>
-      {newComponents.map(({ manifest }) => {
-        const id = manifest.id
-        const label = manifest.label ?? id
+      {NEW_COMPONENTS.map(({ id, definition }) => {
+        const label = definition.label ?? id
         return (
           <div
             key={id}

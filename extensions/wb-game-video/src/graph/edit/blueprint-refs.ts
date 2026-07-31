@@ -1,6 +1,6 @@
 /** 跨蓝图引用图谱：收集 subFlowPack 引用、找引用者、加边前的成环检测。 */
 import type { BlueprintDoc, GameGraph, GraphLibraryDocument } from '../../runtime/schema/graph-schema'
-import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack } from '../../runtime/schema/graph-schema'
 
 export type BlueprintMap = Record<string, BlueprintDoc>
 
@@ -9,8 +9,6 @@ export function collectPackRefs(graph: GameGraph): Set<string> {
   for (const n of graph.nodes) {
     const p = getSubFlowPack(n.data)
     if (p) out.add(p.id)
-    const process = getSubProcess(n.data)
-    if (process) for (const ref of collectPackRefs(process.graph)) out.add(ref)
   }
   return out
 }

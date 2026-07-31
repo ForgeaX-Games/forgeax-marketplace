@@ -16,7 +16,6 @@ vi.mock('../kino-api', async (importOriginal) => {
 function resource(id: string): KinoResourceDTO {
   return {
     resource_id: id,
-    game_id: 'demo',
     media_type: 'video',
     url: `http://object/${id}`,
     created_at: 1,
@@ -53,6 +52,9 @@ describe('kinoVideoCacheStore', () => {
     expect(useKinoVideoCache.getState().byGame['project-a']?.items.map((item) => item.resource_id))
       .toEqual(['one', 'two'])
     expect(useKinoVideoCache.getState().byGame['project-b']).toBeUndefined()
+    for (const [query] of list.mock.calls) {
+      expect(query).not.toHaveProperty('game_id')
+    }
   })
 
   it('updates a cached resource immediately', () => {

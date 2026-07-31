@@ -9,7 +9,7 @@
  * 幂等：boot 只在缺失时补，用户可自由改内部 children；删掉整份下次 boot 会补回。
  */
 import type { Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
-import newComponents from '../../runtime/component-host/components/new'
+import { NEW_COMPONENTS } from '../../runtime/component-host/components/new'
 import { STAGE_FILL_LAYOUT } from '../../runtime/schema/layout'
 
 /** 基础覆盖物 方案 id 前缀：`base:<组件id>`，每份仅含该单组件、锁定不可增删。 */
@@ -37,9 +37,9 @@ const STATIC_SCHEME: Overlay = {
   id: SCHEME_STATIC_ID,
   title: '静态组件方案',
   children: [
-    makeNewComponentPreset('BattlePlayerHpBar', 'hp-player'),
-    makeNewComponentPreset('BattleEnemyHpBar', 'hp-boss'),
-    makeNewComponentPreset('Dialogue', 'line'),
+    makeNewComponentPreset('battlePlayerHpBar', 'hp-player'),
+    makeNewComponentPreset('battleEnemyHpBar', 'hp-boss'),
+    makeNewComponentPreset('dialogue', 'line'),
   ],
 }
 
@@ -48,14 +48,12 @@ const DYNAMIC_SCHEME: Overlay = {
   id: SCHEME_DYNAMIC_ID,
   title: '动态组件方案',
   children: [
-    makeNewComponentPreset('InkKou', 'qte-kou'),
-    makeNewComponentPreset('BattleParry', 'qte-parry'),
-    makeNewComponentPreset('InkYingMo', 'choice-yingmo'),
-    makeNewComponentPreset('BattleSkill', 'choice-skills'),
-    makeNewComponentPreset('TextOption', 'text-option'),
-    makeNewComponentPreset('StatusNotice', 'status-notice'),
-    makeNewComponentPreset('DamageFloatText', 'damage-float'),
-    makeNewComponentPreset('GainFloatText', 'gain-float'),
+    makeNewComponentPreset('inkKou', 'qte-kou'),
+    makeNewComponentPreset('battleParry', 'qte-parry'),
+    makeNewComponentPreset('inkYingMo', 'choice-yingmo'),
+    makeNewComponentPreset('battleSkillBar', 'choice-skills'),
+    makeNewComponentPreset('damageFloatText', 'damage-float'),
+    makeNewComponentPreset('gainFloatText', 'gain-float'),
   ],
 }
 
@@ -85,24 +83,12 @@ export function listCustomSchemeIds(overlays: Record<string, Overlay> | undefine
 }
 
 /**
- * 界面 tab 的「自定义覆盖物」列表：沿用通用排序，但让 overlays 中最先写入的自定义方案置顶。
- * 新建方案会 prepend 到 overlays，因此它在后续重渲染和重新载入后仍保持列表第一项。
- */
-export function listInterfaceCustomSchemeIds(overlays: Record<string, Overlay> | undefined): string[] {
-  const all = overlays ?? {}
-  const ids = listCustomSchemeIds(all)
-  const firstStoredId = Object.keys(all).find((id) => ids.includes(id))
-  if (!firstStoredId) return ids
-  return [firstStoredId, ...ids.filter((id) => id !== firstStoredId)]
-}
-
-/**
  * 界面 tab「基础覆盖物」组 = 组件库每组件一份 `base:<id>` 单组件方案；
  * 按组件库顺序排列，仅取目录里实际存在的。
  */
 export function listBaseHudIds(overlays: Record<string, Overlay> | undefined): string[] {
   const all = overlays ?? {}
-  return newComponents.map(({ manifest }) => `${BASE_HUD_PREFIX}${manifest.id}`).filter((id) => all[id])
+  return NEW_COMPONENTS.map(({ id }) => `${BASE_HUD_PREFIX}${id}`).filter((id) => all[id])
 }
 
 /**
@@ -121,20 +107,18 @@ export const NEW_COMPONENT_PRESETS: Array<{
   make: (childId: string) => OverlayChild
 }> = [
   {
-    id: 'Dialogue',
+    id: 'dialogue',
     label: '字幕',
-    make: (id) => makeNewComponentPreset('Dialogue', id),
+    make: (id) => makeNewComponentPreset('dialogue', id),
   },
-  { id: 'InkKou', label: 'QTE · 叩击', make: (id) => makeNewComponentPreset('InkKou', id) },
-  { id: 'BattleParry', label: 'QTE · 防反', make: (id) => makeNewComponentPreset('BattleParry', id) },
-  { id: 'InkYingMo', label: '选项 · 應默', make: (id) => makeNewComponentPreset('InkYingMo', id) },
-  { id: 'BattleSkill', label: '选项 · 技能条', make: (id) => makeNewComponentPreset('BattleSkill', id) },
-  { id: 'TextOption', label: '交互 · 文字', make: (id) => makeNewComponentPreset('TextOption', id) },
-  { id: 'StatusNotice', label: '提示 · 状态', make: (id) => makeNewComponentPreset('StatusNotice', id) },
-  { id: 'DamageFloatText', label: '飘字 · 伤害', make: (id) => makeNewComponentPreset('DamageFloatText', id) },
-  { id: 'GainFloatText', label: '飘字 · 增益', make: (id) => makeNewComponentPreset('GainFloatText', id) },
-  { id: 'BattlePlayerHpBar', label: 'HUD · 我方血条', make: (id) => makeNewComponentPreset('BattlePlayerHpBar', id) },
-  { id: 'BattleEnemyHpBar', label: 'HUD · 敌方血条', make: (id) => makeNewComponentPreset('BattleEnemyHpBar', id) },
+  { id: 'inkKou', label: 'QTE · 叩击', make: (id) => makeNewComponentPreset('inkKou', id) },
+  { id: 'battleParry', label: 'QTE · 防反', make: (id) => makeNewComponentPreset('battleParry', id) },
+  { id: 'inkYingMo', label: '选项 · 應默', make: (id) => makeNewComponentPreset('inkYingMo', id) },
+  { id: 'battleSkillBar', label: '选项 · 技能条', make: (id) => makeNewComponentPreset('battleSkillBar', id) },
+  { id: 'damageFloatText', label: '飘字 · 伤害', make: (id) => makeNewComponentPreset('damageFloatText', id) },
+  { id: 'gainFloatText', label: '飘字 · 增益', make: (id) => makeNewComponentPreset('gainFloatText', id) },
+  { id: 'battlePlayerHpBar', label: 'HUD · 我方血条', make: (id) => makeNewComponentPreset('battlePlayerHpBar', id) },
+  { id: 'battleEnemyHpBar', label: 'HUD · 敌方血条', make: (id) => makeNewComponentPreset('battleEnemyHpBar', id) },
 ]
 
 /**
@@ -171,13 +155,12 @@ export function ensureBaseHudSchemes(
   overlays: Record<string, Overlay>,
 ): Record<string, Overlay> {
   const next = { ...overlays }
-  for (const { manifest } of newComponents) {
-    const componentId = manifest.id
+  for (const { id: componentId, definition } of NEW_COMPONENTS) {
     const id = `${BASE_HUD_PREFIX}${componentId}`
     if (!next[id]) {
       next[id] = {
         id,
-        title: manifest.label ?? componentId,
+        title: definition.label ?? componentId,
         children: [makeBaseHudChild(componentId)],
       }
     }

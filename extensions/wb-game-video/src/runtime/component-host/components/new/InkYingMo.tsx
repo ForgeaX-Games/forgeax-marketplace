@@ -1,20 +1,19 @@
 /**
- * 應/默抉择（component id: `InkYingMo`）—— 组件只发出「應」或「默」事件。
+ * 應/默抉择（component id: `inkYingMo`）—— 组件只发出「應」或「默」事件。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与点击交互。
  */
 import { useRef } from 'react'
 import type { OverlayProps } from '../../rendererRegistry'
-import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
+import type { ComponentDef } from '../../../registry/component-registry'
 import { injectCss, ensureInkFilters, ensureBrushFont, previewTStyle } from './skinRuntime'
 
-export const InkYingMoManifest: ComponentManifest = {
-  id: 'InkYingMo',
+export const inkYingMoComponent: ComponentDef = {
   label: '應/默 抉择',
   events: [{ id: 'ying', label: '應' }, { id: 'mo', label: '默' }],
   inputs: [],
 }
 
-export function InkYingMo({ emit, preview, previewTimeMs, previewPlaying }: OverlayProps) {
+export function InkYingMoLayer({ emit, preview, previewTimeMs }: OverlayProps) {
   injectCss('ink-yingmo-layer', YINGMO_CSS)
   ensureInkFilters()
   ensureBrushFont()
@@ -26,11 +25,10 @@ export function InkYingMo({ emit, preview, previewTimeMs, previewPlaying }: Over
     emit?.(id)
   }
 
-  const frozen = preview && !previewPlaying
   return (
     <div
-      className={`pvn-opts pvn-opts--yingmo show${frozen ? ' is-frozen' : ''}`}
-      style={frozen ? previewTStyle(previewTimeMs ?? 0) : undefined}
+      className={`pvn-opts pvn-opts--yingmo show${preview ? ' is-frozen' : ''}`}
+      style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
       aria-label="应默抉择"
     >
       <div className="pvn-yingmo-pair" data-overlay-fit-target>

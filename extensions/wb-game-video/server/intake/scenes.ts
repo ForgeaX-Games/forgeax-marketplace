@@ -11,7 +11,13 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { mimeForPath, upsertAsset } from '../asset-registry'
+import type { WorkbenchExtensionContext } from '@forgeax/workbench-host/node'
+import {
+  createHostAssetRegistry,
+  mimeForPath,
+  upsertAsset,
+  type HostAssetRegistry,
+} from '../asset-registry'
 import type { MediaAsset } from '../../src/editor/assets/registry-types'
 
 interface TextureDescriptor {
@@ -44,7 +50,7 @@ export function importSceneRefs(opts: { assetsDir: string; texturesDir: string }
   }
   const out: MediaAsset[] = []
   for (const desc of list) {
-    if (!desc.file) continue
+    if (typeof desc.file !== 'string' || !desc.file) continue
     const externalPath = resolve(texturesDir, desc.file)
     if (!existsSync(externalPath)) continue
     out.push(
@@ -64,4 +70,74 @@ export function importSceneRefs(opts: { assetsDir: string; texturesDir: string }
     )
   }
   return out
+}
+
+function boundedTexturePath(value: string): string {
+  const normalized = value.replace(/\\/g, '/')
+  if (
+    normalized.length === 0
+    || normalized.startsWith('/')
+    || /^[A-Za-z]:\//.test(normalized)
+    || normalized.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    throw new TypeError('Texture file must be a bounded relative path')
+  }
+  return `textures/${normalized}`
+}
+
+function hostSceneId(desc: TextureDescriptor): string | null {
+  const key = desc.sha256 ?? desc.file
+  if (!key) return null
+  const safe = key.replace(/[^a-z0-9]/gi, '').slice(0, 24)
+  return safe ? `a-sceneref-${safe}` : null
+}
+
+/**
+ * Imports published scene textures through bounded game files and normalizes
+ * their bytes into host media ids. No source file path is persisted or exposed.
+ */
+export async function importSceneRefsFromHost(
+  context: WorkbenchExtensionContext,
+  registry: HostAssetRegistry = createHostAssetRegistry(context),
+): Promise<MediaAsset[]> {
+  const bytes = await context.files.read('textures/index.json')
+  if (!bytes) return []
+  let list: TextureDescriptor[]
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    list = Array.isArray(parsed) ? parsed as TextureDescriptor[] : []
+  } catch {
+    return []
+  }
+  const refs: MediaAsset[] = []
+  for (const desc of list) {
+    if (!desc.file) continue
+    const id = hostSceneId(desc)
+    if (!id) continue
+    try {
+      const relativePath = boundedTexturePath(desc.file)
+      refs.push(await registry.importGameFile({
+        registryId: id,
+        relativePath,
+        filename: `scene-${id.slice('a-sceneref-'.length)}.${mimeForPath(desc.file).split('/')[1] ?? 'png'}`,
+        contentType: desc.mimeType || mimeForPath(desc.file),
+        productionType: 'scene_ref',
+        label: desc.assetName || desc.assetType || 'scene',
+        sourceModule: 'wb-2d-scene-asset-generator',
+        meta: { assetType: desc.assetType, sha256: desc.sha256 },
+      }))
+    } catch (error) {
+      if (
+        error instanceof Error
+        && (
+          error instanceof TypeError
+          || error.message.startsWith('Reference media was not found:')
+        )
+      ) {
+        continue
+      }
+      throw error
+    }
+  }
+  return refs
 }

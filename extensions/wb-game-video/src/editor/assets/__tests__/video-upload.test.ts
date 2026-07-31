@@ -23,7 +23,7 @@ function preparedResponse(): DirectUploadResponse {
   return {
     upload: {
       method: 'PUT',
-      url: 'http://127.0.0.1:18900/api/v1/kino/uploads/token?game_id=demo',
+      url: 'http://127.0.0.1:18900/api/v1/kino/uploads/token',
       headers: { 'content-type': 'video/mp4', 'x-cos-forbid-overwrite': 'true' },
       expires_at: '2099-01-01T00:00:00.000Z',
     },
@@ -35,10 +35,9 @@ function preparedResponse(): DirectUploadResponse {
 function createdResource(): KinoResourceDTO {
   return {
     resource_id: 'res-new',
-    game_id: 'demo',
     media_type: 'video',
     name: 'clip.mp4',
-    url: 'http://127.0.0.1:18900/api/v1/kino/resources/res-new/content?game_id=demo',
+    url: 'http://127.0.0.1:18900/api/v1/kino/resources/res-new/content',
     created_at: 10,
     updated_at: 20,
   }
@@ -55,7 +54,6 @@ describe('uploadVideoResource validation', () => {
       uploadVideoResource({
         client,
         transport,
-        gameId: 'demo',
         file: makeMp4File('clip.mov'),
       }),
     ).rejects.toMatchObject({ code: 'invalid_file_name' })
@@ -64,7 +62,6 @@ describe('uploadVideoResource validation', () => {
       uploadVideoResource({
         client,
         transport,
-        gameId: 'demo',
         file: makeMp4File('clip.mp4', 'video/webm'),
       }),
     ).rejects.toMatchObject({ code: 'invalid_media_type' })
@@ -73,7 +70,6 @@ describe('uploadVideoResource validation', () => {
       uploadVideoResource({
         client,
         transport,
-        gameId: 'demo',
         file: makeMp4File('clip.mp4', ''),
       }),
     ).rejects.toMatchObject({ code: 'invalid_media_type' })
@@ -82,7 +78,6 @@ describe('uploadVideoResource validation', () => {
       uploadVideoResource({
         client,
         transport,
-        gameId: 'demo',
         file: new File([], 'clip.mp4', { type: 'video/mp4' }),
       }),
     ).rejects.toMatchObject({ code: 'invalid_upload_size' })
@@ -90,7 +85,7 @@ describe('uploadVideoResource validation', () => {
     const huge = new File([new Uint8Array(1)], 'clip.mp4', { type: 'video/mp4' })
     Object.defineProperty(huge, 'size', { value: MAX_VIDEO_UPLOAD_BYTES + 1 })
     await expect(
-      uploadVideoResource({ client, transport, gameId: 'demo', file: huge }),
+      uploadVideoResource({ client, transport, file: huge }),
     ).rejects.toMatchObject({ code: 'invalid_upload_size' })
   })
 })
@@ -154,7 +149,6 @@ describe('uploadVideoResource flow', () => {
     const resource = await uploadVideoResource({
       client: createKinoVideoClient({ fetch: fetchImpl }),
       transport,
-      gameId: 'demo',
       file: makeMp4File(),
       durationMs: 1200,
       onProgress: (value) => progress.push(value),
@@ -173,7 +167,6 @@ describe('uploadVideoResource flow', () => {
         replaceVideoResource?: (options: {
           client: import('../kino-api').KinoVideoClient
           transport: UploadTransport
-          gameId: string
           resourceId: string
           file: File
         }) => Promise<KinoResourceDTO>
@@ -198,13 +191,11 @@ describe('uploadVideoResource flow', () => {
     const resource = await replaceVideoResource({
       client,
       transport,
-      gameId: 'demo',
       resourceId: 'res-existing',
       file: makeMp4File('replacement.mp4'),
     })
 
     expect(prepareUpload).toHaveBeenCalledWith({
-      game_id: 'demo',
       file_name: 'replacement.mp4',
       mime_type: 'video/mp4',
       bytes: FIXTURE.byteLength,
@@ -213,7 +204,6 @@ describe('uploadVideoResource flow', () => {
     }, { signal: undefined })
     expect(transport.put).toHaveBeenCalledOnce()
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      game_id: 'demo',
       media_type: 'video',
       url: preparedResponse().object_url,
     }), { signal: undefined })
@@ -232,7 +222,6 @@ describe('uploadVideoResource flow', () => {
       videoUpload.replaceVideoResource({
         client,
         transport: { put: vi.fn(async () => {}) },
-        gameId: 'demo',
         resourceId: 'res-existing',
         file: makeMp4File('replacement.mp4'),
       }),
@@ -267,7 +256,6 @@ describe('uploadVideoResource flow', () => {
       uploadVideoResource({
         client: createKinoVideoClient({ fetch: fetchImpl }),
         transport,
-        gameId: 'demo',
         file: makeMp4File(),
       }),
     ).rejects.toMatchObject({ code: 'upload_failed' })
@@ -314,7 +302,6 @@ describe('uploadVideoResource flow', () => {
       await uploadVideoResource({
         client,
         transport: { put: transportPut },
-        gameId: 'demo',
         file: makeMp4File(),
         durationMs: 900,
       })
@@ -339,7 +326,6 @@ describe('uploadVideoResource flow', () => {
 
   it('rejects complete when the prepared upload was not transferred', async () => {
     const prepared: PreparedVideoUpload = {
-      gameId: 'demo',
       fileIdentity: {
         name: 'clip.mp4',
         size: FIXTURE.byteLength,
@@ -386,7 +372,6 @@ describe('uploadVideoResource flow', () => {
     const options = {
       client: createKinoVideoClient({ fetch: fetchImpl }),
       transport,
-      gameId: 'demo',
       file: makeMp4File(),
     }
 
@@ -565,7 +550,6 @@ describe('default XHR transport header safety', () => {
     await expect(
       uploadVideoResource({
         client,
-        gameId: 'unique-error-message',
         file: makeMp4File(),
         transport: { put: vi.fn(async () => { throw new Error('y'.repeat(700)) }) },
       }),
@@ -585,5 +569,68 @@ describe('default XHR transport header safety', () => {
     expect(progress).toEqual([expect.any(Number), expect.any(Number)])
     expect(progress[0]!).toBeLessThanOrEqual(progress[1]!)
     expect(progress[1]!).toBeLessThanOrEqual(100)
+  })
+
+  it('splits a file larger than 1 MiB into bounded sequential extension requests', async () => {
+    const chunkSize = 512 * 1024
+    const bytes = new Uint8Array(1024 * 1024 + 7)
+    const file = new File([bytes], 'large.mp4', { type: 'video/mp4' })
+    const transport = createDefaultXhrUploadTransport()
+    const upload = transport.put(file, {
+      method: 'PUT',
+      url: 'https://host.test/extensions/wb-game-video/media/uploads/0123456789abcdef0123456789abcdef',
+      headers: { 'content-type': 'video/mp4' },
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chunk_size: chunkSize,
+      chunk_count: 3,
+    })
+
+    for (let index = 0; index < 3; index += 1) {
+      await vi.waitFor(() => expect(xhrInstances).toHaveLength(index + 1))
+      const xhr = xhrInstances[index]!
+      const sent = xhr.send.mock.calls[0]?.[0] as Blob
+      expect(sent).toBeInstanceOf(Blob)
+      expect(sent.size).toBeLessThan(1024 * 1024)
+      expect(xhr.open).toHaveBeenCalledWith(
+        'PUT',
+        expect.stringContaining(`chunk_index=${index}`),
+        true,
+      )
+      expect(xhr.open).toHaveBeenCalledWith(
+        'PUT',
+        expect.stringContaining('chunk_count=3'),
+        true,
+      )
+      xhr.upload.onprogress?.({
+        lengthComputable: true,
+        loaded: sent.size,
+        total: sent.size,
+      } as ProgressEvent)
+      xhr.onload?.()
+    }
+
+    await upload
+    expect(xhrInstances.map((xhr) => (xhr.send.mock.calls[0]?.[0] as Blob).size)).toEqual([
+      chunkSize,
+      chunkSize,
+      7,
+    ])
+  })
+
+  it('accepts a safe root-relative handshake upload endpoint', async () => {
+    const file = makeMp4File()
+    const upload = createDefaultXhrUploadTransport().put(file, {
+      ...preparedResponse().upload,
+      url: '/extension/runtime/media/uploads/0123456789abcdef0123456789abcdef',
+    })
+    const xhr = xhrInstances[0]!
+
+    expect(xhr.open).toHaveBeenCalledWith(
+      'PUT',
+      '/extension/runtime/media/uploads/0123456789abcdef0123456789abcdef',
+      true,
+    )
+    xhr.onload?.()
+    await upload
   })
 })

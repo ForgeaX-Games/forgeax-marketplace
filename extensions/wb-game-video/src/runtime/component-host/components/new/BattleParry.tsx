@@ -1,20 +1,19 @@
 /**
- * 防反抉择（component id: `BattleParry`）—— 组件只发出「防反」或「闪避」事件。
+ * 防反抉择（component id: `battleParry`）—— 组件只发出「防反」或「闪避」事件。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与点击交互。
  */
 import { useEffect, useRef, useState } from 'react'
 import type { OverlayProps } from '../../rendererRegistry'
-import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
+import type { ComponentDef } from '../../../registry/component-registry'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
 
-export const BattleParryManifest: ComponentManifest = {
-  id: 'BattleParry',
+export const battleParryComponent: ComponentDef = {
   label: '防反抉择',
   events: [{ id: 'parry', label: '防反' }, { id: 'dodge', label: '闪避' }, { id: 'fail', label: '受击' }],
   inputs: [],
 }
 
-export function BattleParry({ emit, preview }: OverlayProps) {
+export function BattleParryLayer({ emit, preview }: OverlayProps) {
   injectCss('battle-parry-layer', PARRY_CSS)
   ensureInkFilters()
   ensureBrushFont()

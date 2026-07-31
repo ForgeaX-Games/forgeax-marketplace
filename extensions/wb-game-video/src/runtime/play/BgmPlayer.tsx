@@ -3,7 +3,7 @@
  *
  * 分工（SPEC §4.1）：引擎只抛资产 id + 播放意图，URL 与音频元素归壳层；解析器由调用方
  * 注入（同 `GamePlayer` 给视频注入 `resolveAsset` 的路子），故本文件不 import editor/宿主。
- * 与视频原声开关无关：床轨是**独立通道**，不搭视频音轨。
+ * 与 `<video muted>` 无关：床轨是**独立通道**，不搭视频音轨（视频恒静音，见 GameStage）。
  *
  * 无 UI（返回 `null`）：音频元素由本件自己 `createElement` 并挂到 `document.body`——
  * 挂上去而非游离，是为了 devtools 能看见「有几条轨在响」，测试也能直接查 DOM；
@@ -28,8 +28,6 @@ export interface BgmPlayerProps {
   bgm: BgmSnapshot | null
   /** 资产 id → 可播 url（宿主注入）。引擎只给 id，URL 只住 manifest。 */
   resolveAsset: (id: string | undefined) => string | undefined
-  paused?: boolean
-  playbackRate?: number
 }
 
 /**
@@ -129,21 +127,12 @@ function tryPlay(deck: Deck, blockedWarned: { current: boolean }): void {
   })
 }
 
-export function BgmPlayer({ bgm, resolveAsset, paused = false, playbackRate = 1 }: BgmPlayerProps): null {
+export function BgmPlayer({ bgm, resolveAsset }: BgmPlayerProps): null {
   const soundingRef = useRef<Deck | null>(null)
   const retiringRef = useRef<Deck[]>([])
   /** 已施加的那条指令；同一条重复到达（父组件重渲染 / 解析器换引用 / 快照被序列化）不得二次施加。 */
   const appliedRef = useRef<BgmSnapshot | null>(null)
   const blockedWarned = useRef(false)
-
-  useEffect(() => {
-    for (const deck of [soundingRef.current, ...retiringRef.current]) {
-      if (!deck) continue
-      deck.el.playbackRate = playbackRate
-      if (paused) deck.el.pause()
-      else tryPlay(deck, blockedWarned)
-    }
-  }, [paused, playbackRate])
 
   // 卸载 = 收摊。引擎在 `phase === 'ended'` **刻意不发**停播（SPEC D6：win 节点仍带着床轨），
   // 所以「停」这件事只由壳层生命周期负责：试玩面关掉 / 重开时别把声音漏到下一局。
@@ -159,7 +148,7 @@ export function BgmPlayer({ bgm, resolveAsset, paused = false, playbackRate = 1 
   useEffect(() => {
     const retry = (): void => {
       const deck = soundingRef.current
-      if (!paused && deck && deck.el.paused) tryPlay(deck, blockedWarned)
+      if (deck && deck.el.paused) tryPlay(deck, blockedWarned)
     }
     window.addEventListener('pointerdown', retry)
     window.addEventListener('keydown', retry)
@@ -167,7 +156,7 @@ export function BgmPlayer({ bgm, resolveAsset, paused = false, playbackRate = 1 
       window.removeEventListener('pointerdown', retry)
       window.removeEventListener('keydown', retry)
     }
-  }, [paused])
+  }, [])
 
   useEffect(() => {
     // `null` = 还没发过指令：连元素都别建（别拿它当停播令）。
@@ -226,11 +215,10 @@ export function BgmPlayer({ bgm, resolveAsset, paused = false, playbackRate = 1 
     for (const stale of retiringRef.current) if (stale.ref === bgm.ref) dispose(stale)
     retiringRef.current = retiringRef.current.filter((d) => d.ref !== bgm.ref)
     const deck = newDeck(bgm.ref, url, bgm.loop, bgm.fadeInMs > 0 ? 0 : bgm.volume)
-    deck.el.playbackRate = playbackRate
     soundingRef.current = deck
-    if (!paused) tryPlay(deck, blockedWarned)
+    tryPlay(deck, blockedWarned)
     if (bgm.fadeInMs > 0) ramp(deck, bgm.volume, bgm.fadeInMs)
-  }, [bgm, resolveAsset, paused, playbackRate])
+  }, [bgm, resolveAsset])
 
   return null
 }

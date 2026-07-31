@@ -2,6 +2,8 @@ import type {
   CreateKinoResourceInput,
   DirectUploadInstruction,
   DirectUploadResponse,
+  ExternalKinoResourceDTO,
+  ExternalKinoVideoClient,
   KinoMediaType,
   KinoResourceDTO,
   KinoVideoClient,
@@ -127,8 +129,8 @@ function isCrossOriginHttpUrl(instructionUrl: string, origin: string): boolean {
   }
 }
 
-/** A server-issued Kino upload must stay on the ordinary `/api` proxy, never the COS/S3 proxy. */
-function kinoUploadUrl(instructionUrl: string): URL | null {
+/** A legacy external Kino upload stays on the ordinary `/api` proxy, never the COS/S3 proxy. */
+function legacyExternalKinoUploadUrl(instructionUrl: string): URL | null {
   try {
     const target = new URL(instructionUrl)
     if (target.protocol !== 'http:' && target.protocol !== 'https:') {
@@ -153,12 +155,12 @@ export function resolveUploadTransportUrl(
   ) {
     return instructionUrl
   }
-  const kinoUpload = kinoUploadUrl(instructionUrl)
-  if (kinoUpload) {
+  const legacyKinoUpload = legacyExternalKinoUploadUrl(instructionUrl)
+  if (legacyKinoUpload) {
     if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
       return instructionUrl
     }
-    return new URL(`${kinoUpload.pathname}${kinoUpload.search}`, origin).toString()
+    return new URL(`${legacyKinoUpload.pathname}${legacyKinoUpload.search}`, origin).toString()
   }
   if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
     return instructionUrl
@@ -194,7 +196,6 @@ export interface PreparedVideoCreateInput {
 }
 
 export interface PreparedVideoUpload {
-  gameId: string
   replacementResourceId?: string
   fileIdentity: VideoFileIdentity
   response: DirectUploadResponse
@@ -255,8 +256,8 @@ export function assertMediaUploadFile(mediaType: BrowserUploadMediaType, file: F
   }
 }
 
-export interface UploadProviderResourceOptions {
-  client: KinoVideoClient
+export interface UploadExternalKinoResourceOptions {
+  client: ExternalKinoVideoClient
   transport?: UploadTransport
   gameId: string
   mediaType: BrowserUploadMediaType
@@ -270,19 +271,19 @@ export interface UploadProviderResourceOptions {
 }
 
 /**
- * Standard prepare → PUT → create pipeline for non-replacement resources.
- * The browser calls the `/api/v1/kino` route, while the server selects the
- * active Local, S3, COS, or Kino provider.
- * Video replacement and retry behavior builds on the lower-level primitives below.
+ * Explicit legacy-provider prepare → PUT → create pipeline.
+ * Workbench-hosted media uses the handshake-bound `KinoVideoClient` path below.
  */
-export async function uploadProviderResource(options: UploadProviderResourceOptions): Promise<KinoResourceDTO> {
+export async function uploadExternalKinoResource(
+  options: UploadExternalKinoResourceOptions,
+): Promise<ExternalKinoResourceDTO> {
   assertMediaUploadFile(options.mediaType, options.file)
   assertNotAborted(options.signal)
   const requestOptions = options.signal ? { signal: options.signal } : undefined
   const response = await options.client.prepareUpload({
     game_id: options.gameId,
     file_name: options.file.name,
-    mime_type: options.file.type as Parameters<KinoVideoClient['prepareUpload']>[0]['mime_type'],
+    mime_type: options.file.type as Parameters<ExternalKinoVideoClient['prepareUpload']>[0]['mime_type'],
     bytes: options.file.size,
     extension: fileExtension(options.file.name),
   }, requestOptions)
@@ -305,7 +306,6 @@ export async function uploadProviderResource(options: UploadProviderResourceOpti
 export interface UploadVideoResourceOptions {
   client: KinoVideoClient
   transport?: UploadTransport
-  gameId: string
   file: File
   durationMs?: number
   type?: CreateKinoResourceInput['type']
@@ -358,13 +358,12 @@ function fileIdentity(file: File): VideoFileIdentity {
   }
 }
 
-function uploadKey(gameId: string, file: File, resourceId?: string): string {
+function uploadKey(file: File, resourceId?: string): string {
   if (resourceId) {
-    return JSON.stringify([gameId, 'replace', resourceId])
+    return JSON.stringify(['replace', resourceId])
   }
   const identity = fileIdentity(file)
   return JSON.stringify([
-    gameId,
     resourceId,
     identity.name,
     identity.size,
@@ -417,19 +416,40 @@ function validateUploadInstruction(
   if ((instruction as { method?: unknown }).method !== 'PUT') {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
-  let url: URL
+  const safeRelative = (
+    instruction.url.startsWith('/')
+    && !instruction.url.startsWith('//')
+    && !/[\\\r\n\0]/.test(instruction.url)
+  )
+  let safeAbsolute = false
   try {
-    url = new URL(instruction.url)
+    const url = new URL(instruction.url)
+    safeAbsolute = url.protocol === 'http:' || url.protocol === 'https:'
   } catch {
-    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+    // A handshake endpoint may intentionally be root-relative.
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+  if (!safeRelative && !safeAbsolute) {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
   if (
     !instruction.headers ||
     typeof instruction.headers !== 'object' ||
     Array.isArray(instruction.headers)
+  ) {
+    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+  }
+  const hasChunkSize = instruction.chunk_size !== undefined
+  const hasChunkCount = instruction.chunk_count !== undefined
+  if (
+    hasChunkSize !== hasChunkCount
+    || (hasChunkSize && (
+      !Number.isSafeInteger(instruction.chunk_size)
+      || instruction.chunk_size! <= 0
+      || instruction.chunk_size! >= 1024 * 1024
+      || !Number.isSafeInteger(instruction.chunk_count)
+      || instruction.chunk_count! <= 0
+      || instruction.chunk_count! > 200
+    ))
   ) {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
@@ -442,8 +462,17 @@ export function createDefaultXhrUploadTransport(): UploadTransport {
       const headers = validateUploadInstruction(instruction)
       assertNotAborted(signal)
       const report = createProgressReporter(onProgress)
+      const chunkSize = instruction.chunk_size ?? file.size
+      const chunkCount = instruction.chunk_count ?? 1
+      if (chunkCount !== Math.ceil(file.size / chunkSize)) {
+        throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+      }
 
-      await new Promise<void>((resolve, reject) => {
+      const uploadChunk = (
+        body: Blob,
+        chunkIndex: number,
+        uploadedBefore: number,
+      ) => new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         let settled = false
         const cleanup = () => {
@@ -476,11 +505,12 @@ export function createDefaultXhrUploadTransport(): UploadTransport {
         }
 
         xhr.upload.onprogress = (event) => {
-          const total = event.lengthComputable && event.total > 0 ? event.total : file.size
+          const total = event.lengthComputable && event.total > 0 ? event.total : body.size
           if (total <= 0) {
             return
           }
-          report((event.loaded / total) * 99)
+          const loaded = Math.min(body.size, (event.loaded / total) * body.size)
+          report(((uploadedBefore + loaded) / file.size) * 99)
         }
 
         xhr.onload = () => {
@@ -505,12 +535,24 @@ export function createDefaultXhrUploadTransport(): UploadTransport {
         }
 
         try {
-          const transportUrl = resolveUploadTransportUrl(instruction.url)
+          const relativeUrl = instruction.url.startsWith('/')
+          const chunkUrl = new URL(
+            instruction.url,
+            relativeUrl ? globalThis.location.origin : undefined,
+          )
+          if (instruction.chunk_size !== undefined) {
+            chunkUrl.searchParams.set('chunk_index', String(chunkIndex))
+            chunkUrl.searchParams.set('chunk_count', String(chunkCount))
+          }
+          const serializedChunkUrl = relativeUrl
+            ? `${chunkUrl.pathname}${chunkUrl.search}${chunkUrl.hash}`
+            : chunkUrl.toString()
+          const transportUrl = resolveUploadTransportUrl(serializedChunkUrl)
           xhr.open(instruction.method, transportUrl, true)
           for (const [key, value] of Object.entries(headers)) {
             xhr.setRequestHeader(key, value)
           }
-          xhr.send(file)
+          xhr.send(body)
         } catch (error) {
           fail(
             new VideoUploadError(
@@ -520,20 +562,29 @@ export function createDefaultXhrUploadTransport(): UploadTransport {
           )
         }
       })
+
+      for (let index = 0; index < chunkCount; index += 1) {
+        const start = index * chunkSize
+        const body = instruction.chunk_size === undefined
+          ? file
+          : file.slice(start, Math.min(file.size, start + chunkSize), file.type)
+        await uploadChunk(body, index, start)
+        if (instruction.chunk_size !== undefined) {
+          report((Math.min(file.size, start + body.size) / file.size) * 99)
+        }
+      }
     },
   }
 }
 
 async function prepareVideoUpload(
   client: KinoVideoClient,
-  gameId: string,
   file: File,
   createInput: PreparedVideoCreateInput,
   replacementResourceId?: string,
   signal?: AbortSignal,
 ): Promise<PreparedVideoUpload> {
   const response = await client.prepareUpload({
-    game_id: gameId,
     file_name: file.name,
     mime_type: VIDEO_UPLOAD_MIME,
     bytes: file.size,
@@ -546,7 +597,6 @@ async function prepareVideoUpload(
   }, { signal })
 
   return {
-    gameId,
     replacementResourceId,
     fileIdentity: fileIdentity(file),
     response,
@@ -571,7 +621,6 @@ async function transferPreparedVideoUpload(
 
 function buildCreatePayload(prepared: PreparedVideoUpload): CreateKinoResourceInput {
   return {
-    game_id: prepared.gameId,
     media_type: 'video',
     url: prepared.objectUrl,
     name: prepared.createInput.name,
@@ -638,7 +687,6 @@ async function runVideoResourceUpload(
 
   const prepared = await prepareVideoUpload(
     options.client,
-    options.gameId,
     options.file,
     createInput,
     replacementResourceId,
@@ -689,7 +737,7 @@ async function runLockedVideoResourceUpload(
 ): Promise<KinoResourceDTO> {
   assertMp4File(options.file)
   assertNotAborted(options.signal)
-  const key = uploadKey(options.gameId, options.file, replacementResourceId)
+  const key = uploadKey(options.file, replacementResourceId)
   if (inFlightUploads.has(key)) {
     throw new VideoUploadError('Upload already in progress', 'upload_in_progress')
   }

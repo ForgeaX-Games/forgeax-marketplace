@@ -1,16 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getSubProcess } from '../../../runtime/schema/graph-schema'
 import type { BlueprintDoc, GameScenario } from '../../../runtime/schema/graph-schema'
-import { disconnect } from '../../../graph/edit/graph-edit'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { GraphStudio } from '../GraphStudio'
 
 const useKinoVideoResources = vi.hoisted(() => vi.fn())
-const useProjectAssets = vi.hoisted(() => vi.fn())
+const useAudioAssets = vi.hoisted(() => vi.fn())
 
 vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
-vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
+vi.mock('../../assets/audioAssetCacheStore', () => ({ useAudioAssets }))
 
 const SCENARIO: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -40,38 +38,6 @@ const SCENARIO: GameScenario = {
 const MAIN_ID = 'bp-main'
 const MAIN_DOC: BlueprintDoc = { id: MAIN_ID, title: 'Main', entry: 'intro', graph: SCENARIO.graph }
 
-const FOCUS_SCENARIO: GameScenario = {
-  version: 'wb-game-video.graph.v1',
-  graph: {
-    nodes: [{
-      id: 'intro',
-      type: 'perf',
-      position: { x: 0, y: 0 },
-      inputs: [],
-      outputs: [],
-      data: {
-        name: 'Intro',
-        durationMs: 3_000,
-        overlayNodes: [{ id: 'mount-hud', overlay: 'hud' }],
-        reactions: [{
-          when: { type: 'at', ms: 1_000 },
-          do: [{ kind: 'effect', effects: [{ kind: 'attr', entityId: 'ent-player', attr: 'hp', op: 'add', value: -20 }] }],
-        }],
-      },
-    }],
-    edges: [],
-  },
-  ui: {
-    overlays: {
-      hud: {
-        id: 'hud',
-        title: 'HUD',
-        children: [{ id: 'damage', component: 'DamageFloatText', window: { startMs: 500, endMs: 2_500 }, trigger: { when: 'enter' }, inputs: { value: 20 } }],
-      },
-    },
-  },
-}
-
 describe('GraphStudio 节点配置分栏', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -81,12 +47,11 @@ describe('GraphStudio 节点配置分栏', () => {
         headers: { 'content-type': 'application/json' },
       })))
     vi.stubGlobal('confirm', vi.fn(() => true))
-    vi.stubGlobal('alert', vi.fn())
     useKinoVideoResources.mockReturnValue({
       items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
     })
-    useProjectAssets.mockReturnValue({
-      items: [], loading: false, error: null, generation: 0,
+    useAudioAssets.mockReturnValue({
+      items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
     })
     useGraphScenario.setState({
       game: 'game-nodia-fighting',
@@ -154,186 +119,5 @@ describe('GraphStudio 节点配置分栏', () => {
     await waitFor(() => {
       expect(useGraphScenario.getState().graph.nodes.some((node) => node.id === 'intro')).toBe(false)
     })
-    expect(useGraphScenario.getState().blueprints[MAIN_ID]!.entry).toBe('second')
-  })
-
-  it('点击预览工作区的其他区域会清空选中态，当前对象自身与配置块除外', async () => {
-    window.localStorage.setItem('wb-game-video.nodePanel.previewOpen', '1')
-    useGraphScenario.setState({
-      demo: FOCUS_SCENARIO,
-      blueprints: { [MAIN_ID]: { ...MAIN_DOC, graph: FOCUS_SCENARIO.graph } },
-      graph: FOCUS_SCENARIO.graph,
-      meta: { ui: FOCUS_SCENARIO.ui },
-      selectedNodeId: 'intro',
-    })
-    const { container } = render(<GraphStudio scenario={FOCUS_SCENARIO} />)
-
-    const clip = await waitFor(() => container.querySelector<HTMLElement>('.gc-mclip.is-mount')!)
-    fireEvent.pointerDown(clip, { pointerId: 1, clientX: 10, clientY: 10 })
-    await waitFor(() => expect(clip).toHaveClass('is-selected'))
-
-    const mountCard = container.querySelector<HTMLElement>('[data-focus-anchor="mount:mount-hud"]')!
-    expect(mountCard.style.outline).not.toBe('')
-    fireEvent.pointerDown(mountCard)
-    expect(clip).toHaveClass('is-selected')
-
-    const play = screen.getByRole('button', { name: '播放' })
-    fireEvent.pointerDown(play)
-    fireEvent.click(play)
-    await waitFor(() => {
-      expect(clip).not.toHaveClass('is-selected')
-      expect(mountCard.style.outline).toBe('')
-    })
-
-    const settlement = screen.getByRole('slider', { name: /结算 · ent-player\.hp add -20/ })
-    fireEvent.pointerDown(settlement, { pointerId: 2, clientX: 20, clientY: 20 })
-    await waitFor(() => expect(settlement.closest('.gc-point-mark')).toHaveClass('is-selected'))
-    fireEvent.pointerDown(container.querySelector('.gc-mtimeline-canvas')!, { pointerId: 3, clientX: 200, clientY: 200 })
-    await waitFor(() => expect(settlement.closest('.gc-point-mark')).not.toHaveClass('is-selected'))
-  })
-
-  it('下钻子流程后添加节点只写入当前子图', async () => {
-    const childEntry = {
-      id: 'child-entry', type: 'perf' as const, position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: '子流程入口' },
-    }
-    const rootGraph = {
-      nodes: [{
-        id: 'process', type: 'perf' as const, position: { x: 0, y: 0 }, inputs: [], outputs: [],
-        data: { name: '回合', subProcess: { entry: childEntry.id, graph: { nodes: [childEntry], edges: [] } } },
-      }],
-      edges: [],
-    }
-    const rootScenario: GameScenario = { version: 'wb-game-video.graph.v1', graph: rootGraph }
-    useGraphScenario.setState({
-      demo: rootScenario,
-      blueprints: { [MAIN_ID]: { id: MAIN_ID, title: 'Main', entry: 'process', graph: rootGraph } },
-      activeBlueprintId: MAIN_ID,
-      graph: rootGraph,
-      selectedNodeId: null,
-    })
-
-    render(<GraphStudio scenario={rootScenario} />)
-    fireEvent.click(screen.getByTitle('双击或点此下钻子流程'))
-    await waitFor(() => expect(screen.getByTestId('rf__node-child-entry')).toBeTruthy())
-
-    fireEvent.click(screen.getByRole('button', { name: '＋ 添加节点' }))
-    await waitFor(() => {
-      const savedRoot = useGraphScenario.getState().graph
-      expect(savedRoot.nodes.map((node) => node.id)).toEqual(['process'])
-      expect(getSubProcess(savedRoot.nodes[0]!.data)!.graph.nodes).toHaveLength(2)
-    })
-  })
-
-  it('下钻子流程后可以从当前子图节点试玩并重开', async () => {
-    const childEntry = {
-      id: 'child-play', type: 'perf' as const, position: { x: 0, y: 0 }, inputs: [], outputs: [],
-      data: { name: '子流程试玩节点', durationMs: 5000 },
-    }
-    const rootGraph = {
-      nodes: [{
-        id: 'process-play', type: 'perf' as const, position: { x: 0, y: 0 }, inputs: [], outputs: [],
-        data: { name: '试玩回合', subProcess: { entry: childEntry.id, graph: { nodes: [childEntry], edges: [] } } },
-      }],
-      edges: [],
-    }
-    const rootScenario: GameScenario = { version: 'wb-game-video.graph.v1', graph: rootGraph }
-    useGraphScenario.setState({
-      demo: rootScenario,
-      blueprints: { [MAIN_ID]: { id: MAIN_ID, title: 'Main', entry: 'process-play', graph: rootGraph } },
-      activeBlueprintId: MAIN_ID,
-      graph: rootGraph,
-      selectedNodeId: null,
-    })
-
-    render(<GraphStudio scenario={rootScenario} />)
-    fireEvent.click(screen.getByTitle('双击或点此下钻子流程'))
-    await waitFor(() => expect(screen.getByTestId('rf__node-child-play')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('rf__node-child-play'))
-    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
-
-    await waitFor(() => expect(screen.getByText(/试玩 · playing/)).toHaveTextContent('子流程试玩节点'))
-    fireEvent.click(screen.getByTitle('重开 · 回到 child-play'))
-    await waitFor(() => expect(screen.getByText(/试玩 · playing/)).toHaveTextContent('子流程试玩节点'))
-  })
-
-  it('子蓝图入口作为第一个业务节点展示完整演出配置和入口标识', () => {
-    const childGraph = {
-      nodes: [{
-        id: 'child-entry',
-        type: 'perf' as const,
-        position: { x: 0, y: 0 },
-        inputs: [],
-        outputs: [],
-        data: { name: '子蓝图入口' },
-      }],
-      edges: [],
-    }
-    const child: BlueprintDoc = { id: 'bp-child', title: 'Child', entry: 'child-entry', graph: childGraph }
-    useGraphScenario.setState({
-      blueprints: { [MAIN_ID]: MAIN_DOC, [child.id]: child },
-      mainBlueprintId: MAIN_ID,
-      activeBlueprintId: child.id,
-      graph: childGraph,
-      selectedNodeId: 'child-entry',
-    })
-
-    render(<GraphStudio scenario={SCENARIO} />)
-
-    expect(screen.getByRole('button', { name: '展开预览区' })).toBeTruthy()
-    expect(screen.queryByTestId('node-preview-column')).toBeNull()
-    expect(screen.getByText('视频', { selector: 'label > span:first-child' })).toBeTruthy()
-    expect(screen.getByText('播放', { selector: 'label > span:first-child' })).toBeTruthy()
-    expect(screen.getByText('界面', { selector: 'b' })).toBeTruthy()
-    expect(screen.getByText('结算', { selector: 'b' })).toBeTruthy()
-    expect(screen.queryByText('响应规则', { selector: 'b' })).toBeNull()
-    expect(screen.getByLabelText('入口节点')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: '🗑 删除节点' }))
-    expect(useGraphScenario.getState().blueprints[child.id]!.graph.nodes).toHaveLength(1)
-    expect(alert).toHaveBeenCalledWith('入口是当前图唯一的业务节点，不能删除。')
-  })
-
-  it('下钻子流程后新增节点和删除边只修改子蓝图', async () => {
-    const childGraph = {
-      nodes: [
-        { id: 'child-entry', type: 'perf' as const, position: { x: 0, y: 0 }, inputs: [], outputs: [], data: { name: '入口' } },
-        { id: 'child-after', type: 'perf' as const, position: { x: 240, y: 0 }, inputs: [], outputs: [], data: { name: '后续' } },
-      ],
-      edges: [{ id: 'child-edge', source: 'child-entry', target: 'child-after', sourceHandle: 'default', targetHandle: 'in' }],
-    }
-    const child: BlueprintDoc = { id: 'bp-child', title: 'Child', entry: 'child-entry', graph: childGraph }
-    const mainGraph = {
-      nodes: [{
-        id: 'container',
-        type: 'perf' as const,
-        position: { x: 0, y: 0 },
-        inputs: [],
-        outputs: [],
-        data: { name: '子流程', subFlowPack: { id: child.id } },
-      }],
-      edges: [],
-    }
-    const main: BlueprintDoc = { id: MAIN_ID, title: 'Main', entry: 'container', graph: mainGraph }
-    useGraphScenario.setState({
-      blueprints: { [main.id]: main, [child.id]: child },
-      mainBlueprintId: main.id,
-      activeBlueprintId: main.id,
-      graph: mainGraph,
-      selectedNodeId: null,
-    })
-
-    render(<GraphStudio scenario={{ ...SCENARIO, graph: mainGraph }} />)
-    fireEvent.doubleClick(screen.getByTestId('rf__node-container'))
-    await waitFor(() => expect(useGraphScenario.getState().activeBlueprintId).toBe(child.id))
-
-    fireEvent.click(screen.getByRole('button', { name: '＋ 添加节点' }))
-    await waitFor(() => expect(useGraphScenario.getState().blueprints[child.id]!.graph.nodes).toHaveLength(3))
-    expect(useGraphScenario.getState().blueprints[main.id]!.graph).toEqual(mainGraph)
-
-    act(() => useGraphScenario.getState().setGraph((graph) => disconnect(graph, 'child-edge')))
-    const state = useGraphScenario.getState()
-    expect(state.blueprints[child.id]!.graph.edges).toHaveLength(0)
-    expect(state.blueprints[child.id]!.graph.nodes).toHaveLength(3)
-    expect(state.blueprints[main.id]!.graph).toEqual(mainGraph)
   })
 })

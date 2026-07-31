@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ensureBaseHudSchemes,
-  listInterfaceCustomSchemeIds,
-  NEW_COMPONENT_PRESETS,
-  SCHEME_DYNAMIC_ID,
-  SCHEME_STATIC_ID,
-} from '../builtin-schemes'
-import newComponents from '../../../runtime/component-host/components/new'
+import { ensureBaseHudSchemes, NEW_COMPONENT_PRESETS } from '../builtin-schemes'
 import { STAGE_FILL_LAYOUT } from '../../../runtime/schema/layout'
-import type { Overlay } from '../../../runtime/schema/graph-schema'
 
-const NEW_COMPONENT_IDS = newComponents.map(({ manifest }) => manifest.id)
+const NEW_COMPONENT_IDS = [
+  'dialogue',
+  'inkKou',
+  'inkYingMo',
+  'battleParry',
+  'battleSkillBar',
+  'damageFloatText',
+  'gainFloatText',
+  'battlePlayerHpBar',
+  'battleEnemyHpBar',
+] as const
 
 describe('new component presets', () => {
   it('provides an explicit stage layout for every new component', () => {
@@ -27,27 +29,5 @@ describe('new component presets', () => {
     expect(Object.keys(overlays)).toEqual(NEW_COMPONENT_IDS.map((id) => `base:${id}`))
     expect(overlays['base:floatText']).toBeUndefined()
     expect(overlays['base:battleHpBar']).toBeUndefined()
-  })
-})
-
-describe('interface custom scheme order', () => {
-  it('keeps a prepended new scheme ahead of built-in and existing schemes', () => {
-    const overlay = (id: string): Overlay => ({ id, title: id, children: [] })
-    const existing = {
-      [SCHEME_STATIC_ID]: overlay(SCHEME_STATIC_ID),
-      [SCHEME_DYNAMIC_ID]: overlay(SCHEME_DYNAMIC_ID),
-      'scheme-old': overlay('scheme-old'),
-    }
-    const overlays = {
-      'scheme-new': overlay('scheme-new'),
-      ...existing,
-    }
-
-    expect(listInterfaceCustomSchemeIds(overlays)).toEqual([
-      'scheme-new',
-      SCHEME_STATIC_ID,
-      SCHEME_DYNAMIC_ID,
-      'scheme-old',
-    ])
   })
 })

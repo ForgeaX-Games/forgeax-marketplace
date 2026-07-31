@@ -2,6 +2,7 @@
  * Browser-safe Kino video resource API client.
  * Standalone DTOs — must not import server/private packages.
  */
+import { getWorkbenchHost } from '../../lib/workbench-host'
 
 export interface KinoEnvelope<T> {
   code: number
@@ -37,7 +38,6 @@ export interface KinoResourceSourceMeta {
 
 export interface KinoResourceDTO {
   resource_id: string
-  game_id: string
   media_type: KinoMediaType
   name?: string
   type?: KinoResourceType
@@ -61,6 +61,8 @@ export interface DirectUploadInstruction {
   url: string
   headers: Record<string, string>
   expires_at: string
+  chunk_size?: number
+  chunk_count?: number
 }
 
 export interface DirectUploadResponse {
@@ -70,7 +72,6 @@ export interface DirectUploadResponse {
 }
 
 export interface PrepareUploadInput {
-  game_id: string
   file_name?: string
   mime_type:
     | 'video/mp4'
@@ -94,7 +95,6 @@ export interface PrepareUploadInput {
 }
 
 export interface CreateKinoResourceInput {
-  game_id: string
   media_type: KinoMediaType
   url: string
   name?: string
@@ -106,7 +106,6 @@ export interface CreateKinoResourceInput {
 
 export interface UpdateKinoResourceInput {
   resource_id: string
-  game_id: string
   media_type: KinoMediaType
   url: string
   name?: string
@@ -117,8 +116,7 @@ export interface UpdateKinoResourceInput {
 }
 
 export interface BatchCreateKinoResourcesInput {
-  game_id: string
-  resources: Array<Omit<CreateKinoResourceInput, 'game_id'>>
+  resources: CreateKinoResourceInput[]
 }
 
 export interface BatchCreateKinoResourcesResult {
@@ -128,7 +126,6 @@ export interface BatchCreateKinoResourcesResult {
 }
 
 export interface ListKinoResourcesQuery {
-  game_id: string
   media_type?: KinoMediaType
   page?: number
   page_size?: number
@@ -154,10 +151,38 @@ export interface KinoRequestOptions {
 export interface KinoVideoClient {
   prepareUpload(input: PrepareUploadInput, options?: KinoRequestOptions): Promise<DirectUploadResponse>
   list(query: ListKinoResourcesQuery, options?: KinoRequestOptions): Promise<KinoResourcePage>
-  get(resourceId: string, gameId: string, options?: KinoRequestOptions): Promise<KinoResourceDTO>
+  get(resourceId: string, options?: KinoRequestOptions): Promise<KinoResourceDTO>
   create(input: CreateKinoResourceInput, options?: KinoRequestOptions): Promise<KinoResourceDTO>
   batch(input: BatchCreateKinoResourcesInput, options?: KinoRequestOptions): Promise<BatchCreateKinoResourcesResult>
   update(resourceId: string, input: UpdateKinoResourceInput, options?: KinoRequestOptions): Promise<KinoResourceDTO>
+  delete(resourceId: string, options?: KinoRequestOptions): Promise<void>
+  playbackUrl(resourceId: string): string
+}
+
+/** Legacy provider DTOs are isolated from the handshake-bound Workbench client. */
+export interface ExternalKinoResourceDTO extends KinoResourceDTO {
+  game_id: string
+}
+
+export interface ExternalKinoVideoClient {
+  prepareUpload(input: PrepareUploadInput & { game_id: string }, options?: KinoRequestOptions): Promise<DirectUploadResponse>
+  list(query: ListKinoResourcesQuery & { game_id: string }, options?: KinoRequestOptions): Promise<{
+    items: ExternalKinoResourceDTO[]
+    total: number
+    page: number
+    page_size: number
+  }>
+  get(resourceId: string, gameId: string, options?: KinoRequestOptions): Promise<ExternalKinoResourceDTO>
+  create(input: CreateKinoResourceInput & { game_id: string }, options?: KinoRequestOptions): Promise<ExternalKinoResourceDTO>
+  batch(
+    input: BatchCreateKinoResourcesInput & { game_id: string },
+    options?: KinoRequestOptions,
+  ): Promise<BatchCreateKinoResourcesResult>
+  update(
+    resourceId: string,
+    input: UpdateKinoResourceInput & { game_id: string },
+    options?: KinoRequestOptions,
+  ): Promise<ExternalKinoResourceDTO>
   delete(resourceId: string, gameId: string, options?: KinoRequestOptions): Promise<void>
   playbackUrl(resourceId: string, gameId: string): string
 }
@@ -165,18 +190,18 @@ export interface KinoVideoClient {
 export interface CreateKinoVideoClientOptions {
   fetch?: typeof fetch
   baseUrl?: string
+  url?: (path: string) => string
 }
 
-const DEFAULT_BASE_URL = '/api/v1/kino'
 const MAX_ERROR_MESSAGE_LENGTH = 512
 
 /** Kino `/resources` 服务端分页协议的单页上限。 */
 export const MAX_KINO_RESOURCE_PAGE_SIZE = 100
 
 function normalizeBaseUrl(raw: string | undefined): string {
-  const trimmed = (raw ?? DEFAULT_BASE_URL).trim()
+  const trimmed = (raw ?? 'media').trim()
   if (trimmed.length === 0) {
-    return DEFAULT_BASE_URL
+    return 'media'
   }
   return trimmed.replace(/\/+$/, '')
 }
@@ -204,12 +229,12 @@ function appendQuery(
 }
 
 async function readJsonPayload(response: Response): Promise<unknown> {
-  const text = await response.text()
-  if (!text.trim()) {
-    throw new KinoClientError('Upstream returned an empty response', 502, 'upstream_unavailable')
+  const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json' && !mediaType?.endsWith('+json')) {
+    throw new KinoClientError('Upstream returned a non-JSON response', 502, 'upstream_unavailable')
   }
   try {
-    return JSON.parse(text) as unknown
+    return await response.json() as unknown
   } catch {
     throw new KinoClientError('Upstream returned malformed JSON', 502, 'upstream_unavailable')
   }
@@ -287,26 +312,75 @@ async function requestJson<T>(
   return parseEnvelope<T>(response, payload)
 }
 
-function resourcePath(resourceId: string, gameId: string, suffix = ''): string {
-  return appendQuery(
-    `/resources/${encodeURIComponent(resourceId)}${suffix}`,
-    { game_id: gameId },
-  )
+async function requestNoContent(
+  fetchImpl: typeof fetch,
+  baseUrl: string,
+  path: string,
+  options?: Pick<RequestInit, 'method' | 'signal'>,
+): Promise<void> {
+  let response: Response
+  try {
+    response = await fetchImpl(`${baseUrl}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    })
+  } catch {
+    throw new KinoClientError('Network request failed', 502, 'network_error')
+  }
+  if (response.status === 204) return
+  const payload = await readJsonPayload(response)
+  parseEnvelope<unknown>(response, payload)
+}
+
+function resolveUploadInstruction(
+  response: DirectUploadResponse,
+  resolveUrl: (path: string) => string,
+): DirectUploadResponse {
+  if (/^https?:\/\//i.test(response.upload.url)) return response
+  return {
+    ...response,
+    upload: {
+      ...response.upload,
+      url: resolveUrl(response.upload.url),
+    },
+  }
+}
+
+function resourcePath(resourceId: string, suffix = ''): string {
+  return `/resources/${encodeURIComponent(resourceId)}${suffix}`
+}
+
+function playbackUrl(
+  resourceId: string,
+  resolveUrl: (path: string) => string,
+): string {
+  return resolveUrl(`/media/resources/${encodeURIComponent(resourceId)}/content`)
+}
+
+function withoutLegacyGameId<T extends object>(value: T): Omit<T, 'game_id'> {
+  const { game_id: _legacyGameId, ...bound } = value as T & { game_id?: unknown }
+  return bound
 }
 
 export function createKinoVideoClient(
   options: CreateKinoVideoClientOptions = {},
 ): KinoVideoClient {
-  const fetchImpl = options.fetch ?? fetch.bind(globalThis)
+  const fetchImpl = options.fetch ?? ((input, init) => getWorkbenchHost().extension.fetch(String(input), init))
   const baseUrl = normalizeBaseUrl(options.baseUrl)
+  const resolveUrl = options.url
+    ?? (options.fetch
+      ? (path: string) => new URL(path, 'https://workbench-client.invalid').toString()
+      : (path: string) => getWorkbenchHost().extension.url(path))
 
   return {
     async prepareUpload(input, options) {
-      return requestJson<DirectUploadResponse>(fetchImpl, baseUrl, '/image-assets/upload', {
+      const response = await requestJson<DirectUploadResponse>(fetchImpl, baseUrl, '/image-assets/upload', {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(withoutLegacyGameId(input)),
         signal: options?.signal,
       })
+      return resolveUploadInstruction(response, resolveUrl)
     },
 
     async list(query, options) {
@@ -314,7 +388,6 @@ export function createKinoVideoClient(
         fetchImpl,
         baseUrl,
         appendQuery('/resources', {
-          game_id: query.game_id,
           media_type: query.media_type ?? 'video',
           page: query.page,
           page_size: query.page_size,
@@ -324,11 +397,11 @@ export function createKinoVideoClient(
       )
     },
 
-    async get(resourceId, gameId, options) {
+    async get(resourceId, options) {
       return requestJson<KinoResourceDTO>(
         fetchImpl,
         baseUrl,
-        resourcePath(resourceId, gameId),
+        resourcePath(resourceId),
         { signal: options?.signal },
       )
     },
@@ -336,7 +409,7 @@ export function createKinoVideoClient(
     async create(input, options) {
       return requestJson<KinoResourceDTO>(fetchImpl, baseUrl, '/resources', {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(withoutLegacyGameId(input)),
         signal: options?.signal,
       })
     },
@@ -344,7 +417,10 @@ export function createKinoVideoClient(
     async batch(input, options) {
       return requestJson<BatchCreateKinoResourcesResult>(fetchImpl, baseUrl, '/resources/batch', {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          ...withoutLegacyGameId(input),
+          resources: input.resources.map(withoutLegacyGameId),
+        }),
         signal: options?.signal,
       })
     },
@@ -353,24 +429,24 @@ export function createKinoVideoClient(
       return requestJson<KinoResourceDTO>(
         fetchImpl,
         baseUrl,
-        resourcePath(resourceId, input.game_id),
+        resourcePath(resourceId),
         {
           method: 'PUT',
-          body: JSON.stringify(input),
+          body: JSON.stringify(withoutLegacyGameId(input)),
           signal: options?.signal,
         },
       )
     },
 
-    async delete(resourceId, gameId, options) {
-      await requestJson<null>(fetchImpl, baseUrl, resourcePath(resourceId, gameId), {
+    async delete(resourceId, options) {
+      await requestNoContent(fetchImpl, baseUrl, resourcePath(resourceId), {
         method: 'DELETE',
         signal: options?.signal,
       })
     },
 
-    playbackUrl(resourceId, gameId) {
-      return `${baseUrl}${resourcePath(resourceId, gameId, '/content')}`
+    playbackUrl(resourceId) {
+      return playbackUrl(resourceId, resolveUrl)
     },
   }
 }

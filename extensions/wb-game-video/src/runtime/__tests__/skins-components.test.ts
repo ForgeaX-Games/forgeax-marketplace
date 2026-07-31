@@ -8,10 +8,10 @@ beforeAll(() => {
 
 describe('new component contracts', () => {
   it('inkYingMo exposes its static choice events', () => {
-    expect(componentHandles('InkYingMo', {}).map((handle) => handle.id)).toEqual(['ying', 'mo'])
+    expect(componentHandles('inkYingMo', {}).map((handle) => handle.id)).toEqual(['ying', 'mo'])
   })
 
   it('battleParry exposes its static outcome events', () => {
-    expect(componentHandles('BattleParry', {}).map((handle) => handle.id)).toEqual(['parry', 'dodge', 'fail'])
+    expect(componentHandles('battleParry', {}).map((handle) => handle.id)).toEqual(['parry', 'dodge', 'fail'])
   })
 })

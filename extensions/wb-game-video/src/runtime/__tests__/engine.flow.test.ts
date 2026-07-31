@@ -40,55 +40,6 @@ describe('exit reaction', () => {
   })
 })
 
-describe('timed settlement advance', () => {
-  it('follows the configured edge when an at settlement reaches its timestamp', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 5000,
-          reactions: [{ when: { type: 'at', ms: 1200 }, do: [{ kind: 'advance', edgeId: 'e-next' }] }],
-        }),
-        node('b', { durationMs: 5000 }),
-      ],
-      edges: [{ id: 'e-next', source: 'a', target: 'b', sourceHandle: 'default', targetHandle: 'in' }],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph))
-    rt.start()
-
-    rt.tick(1199)
-    expect(rt.state.currentNodeId).toBe('a')
-    rt.tick(1200)
-    expect(rt.state.currentNodeId).toBe('b')
-  })
-})
-
-describe('looping video clock isolation', () => {
-  it('finishes node calculations once when media currentTime wraps', () => {
-    const graph: GameGraph = {
-      nodes: [node('a', {
-        durationMs: 1000,
-        mediaPlayMode: 'loop',
-        reactions: [{
-          when: { type: 'at', ms: 950 },
-          do: [{ kind: 'effect', effects: [{ kind: 'var', varId: 'mark', op: 'add', value: 1 }] }],
-        }],
-      })],
-      edges: [],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph, { variables: { mark: { id: 'mark', initial: 0 } } }))
-    rt.start()
-
-    rt.tick(900)
-    expect(rt.state.vars.mark).toBe(0)
-    rt.tick(20) // video loop: currentTime returned to the first frame
-    expect(rt.state.elapsedMs).toBe(1000)
-    expect(rt.state.vars.mark).toBe(1)
-    rt.tick(500)
-    expect(rt.state.elapsedMs).toBe(1000)
-    expect(rt.state.vars.mark).toBe(1)
-  })
-})
-
 describe('element window (startMs/endMs)', () => {
   it('shows presentation at startMs and removes at endMs', () => {
     const graph: GameGraph = {
@@ -111,17 +62,12 @@ describe('element window (startMs/endMs)', () => {
   })
 })
 
-describe('subProcess', () => {
+describe('subflow (subFlow)', () => {
   it('descends into subflow on enter and returns to continue container out', () => {
     const graph: GameGraph = {
       nodes: [
-        node('wrap', {
-          subProcess: {
-            entry: 'sub',
-            graph: { nodes: [node('sub', { durationMs: 100 })], edges: [] },
-          },
-          durationMs: 100,
-        }),
+        node('wrap', { subFlow: 'sub', durationMs: 100 }),
+        node('sub', { durationMs: 100 }),
         node('after', { }),
       ],
       edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'default', targetHandle: 'in' }],
@@ -239,29 +185,6 @@ describe('subflow pack (subFlowPack)', () => {
     const rt = new GraphRuntime(main, scnOf(main), undefined, [pack])
     rt.start()
     expect(rt.state.currentNodeId).toBe('n-start')
-  })
-
-  it('start follows BlueprintDoc.entry even when that node is not nodes[0]', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('later', { durationMs: 100 }),
-        node('root', { durationMs: 100 }),
-      ],
-      edges: [{ id: 'e', source: 'root', target: 'later', sourceHandle: 'default', targetHandle: 'in' }],
-    }
-    const scn: GameScenario = {
-      ...scnOf(graph),
-      manifest: {
-        version: 'wb-game-video.blueprint-manifest.v1',
-        mainPackId: 'bp-main',
-        packs: {
-          'bp-main': { id: 'bp-main', title: '主蓝图', entry: 'root', graph },
-        },
-      },
-    } as GameScenario
-    const rt = new GraphRuntime(scn.graph, scn, undefined, [], 'bp-main')
-    rt.start()
-    expect(rt.state.currentNodeId).toBe('root')
   })
 })
 

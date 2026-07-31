@@ -3,31 +3,29 @@ import {
   createCoreSkinRegistry,
   createDefaultComponentRegistry,
 } from '../component-host/components'
-import newComponents from '../component-host/components/new'
+import { NEW_COMPONENTS } from '../component-host/components/new'
 
 const NEW_COMPONENT_IDS = [
-  'BattleEnemyHpBar',
-  'BattlePlayerHpBar',
-  'BattleSkill',
-  'BattleParry',
-  'Dialogue',
-  'DamageFloatText',
-  'GainFloatText',
-  'InkYingMo',
-  'InkKou',
-  'StatusNotice',
-  'TextOption',
+  'dialogue',
+  'inkKou',
+  'inkYingMo',
+  'battleParry',
+  'battleSkillBar',
+  'damageFloatText',
+  'gainFloatText',
+  'battlePlayerHpBar',
+  'battleEnemyHpBar',
 ] as const
 
 describe('components/new registration', () => {
-  it('registers all component definitions and renderers in isolated registries', () => {
+  it('registers all nine definitions and renderers in isolated registries', () => {
     const components = createDefaultComponentRegistry()
     const skins = createCoreSkinRegistry()
 
-    expect(newComponents.map(({ manifest }) => manifest.id)).toEqual(NEW_COMPONENT_IDS)
-    for (const { manifest } of newComponents) {
-      expect(components.getComponent(manifest.id)).toBe(manifest)
-      expect(skins.hasOverlayRenderer(manifest.id)).toBe(true)
+    expect(NEW_COMPONENTS.map(({ id }) => id)).toEqual(NEW_COMPONENT_IDS)
+    for (const { id, definition } of NEW_COMPONENTS) {
+      expect(components.getComponent(id)).toBe(definition)
+      expect(skins.hasOverlayRenderer(id)).toBe(true)
     }
   })
 

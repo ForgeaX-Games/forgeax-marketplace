@@ -7,7 +7,6 @@
  * 是否存在、reactions 中 advance 是否指向真实边；并对**纯瞬时环**（全为无演出/无交互节点 + 无条件边）给告警。
  */
 import type { GameGraph, GameScenario, Overlay, Reaction } from '../schema/graph-schema'
-import { getSubFlowPack, getSubProcess } from '../schema/graph-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
 import { eventsFromParams, overlayReactionKey } from '../schema/overlay-events'
 import { deriveOutputs, getComponent } from '../registry/component-registry'
@@ -419,33 +418,10 @@ function checkBgmStackingCycle(graph: GameGraph, issues: Issue[]): void {
   }
 }
 
-interface GraphValidationState {
-  nodeIds: Set<string>
-  edgeIds: Set<string>
-}
-
-function validateGraphScope(
-  graph: GameGraph,
-  opts: ValidateOpts | undefined,
-  entry: string | undefined,
-  state: GraphValidationState,
-): Issue[] {
+export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
   const issues: Issue[] = []
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const overlays = opts?.overlays
-
-  for (const node of graph.nodes) {
-    if (state.nodeIds.has(node.id)) {
-      issues.push({ level: 'error', code: 'node.id.duplicate', msg: `节点 id '${node.id}' 在嵌套图中重复`, at: node.id })
-    }
-    state.nodeIds.add(node.id)
-  }
-  for (const edge of graph.edges) {
-    if (state.edgeIds.has(edge.id)) {
-      issues.push({ level: 'error', code: 'edge.id.duplicate', msg: `边 id '${edge.id}' 在嵌套图中重复`, at: edge.id })
-    }
-    state.edgeIds.add(edge.id)
-  }
 
   // 1) 边：悬空 source/target + sourceHandle 是否在派生 outputs 内
   for (const e of graph.edges) {
@@ -522,9 +498,9 @@ function validateGraphScope(
   }
   for (const overlay of Object.values(overlays ?? {})) checkOverlayReactions(overlay, overlays ?? {}, issues)
 
-  // 4) 不可达节点（蓝图根缺省从 nodes[0]；内嵌子流程从显式 entry）
+  // 4) 不可达节点（从 nodes[0] BFS）
   if (graph.nodes.length > 0) {
-    const start = entry ?? graph.nodes[0]!.id
+    const start = graph.nodes[0]!.id
     const adj = new Map<string, string[]>()
     for (const e of graph.edges) {
       const list = adj.get(e.source) ?? []
@@ -560,10 +536,7 @@ function validateGraphScope(
       items: new Set(opts.items ?? []),
       nodeIds: new Set(graph.nodes.map((n) => n.id)),
     }
-    for (const n of graph.nodes) {
-      const { subProcess: _subProcess, ...ownData } = n.data as unknown as Record<string, unknown>
-      walkRefs(ownData, ctx, n.id, issues)
-    }
+    for (const n of graph.nodes) walkRefs(n.data, ctx, n.id, issues)
     for (const e of graph.edges) walkRefs(e.data, ctx, e.id, issues)
     if (overlays) {
       for (const [oid, ov] of Object.entries(overlays)) {
@@ -596,52 +569,14 @@ function validateGraphScope(
     }
   }
 
-  // 7) 节点作用域 BGM 配置（容器与普通节点走同一条路）。
+  // 7) 节点作用域 BGM 配置（SPEC §3.3）；容器节点（subFlow / subFlowPack）走同一条路。
   const audio = opts?.audioAssets ? new Set(opts.audioAssets) : undefined
   for (const n of graph.nodes) {
     checkBgm((n.data as { bgm?: unknown }).bgm, `node:${n.id}.bgm`, audio, issues, 'node')
   }
   checkBgmStackingCycle(graph, issues)
 
-  // 8) 私有内嵌子流程：字段互斥、入口直属、逐层递归校验。
-  for (const node of graph.nodes) {
-    const raw = node.data as unknown as Record<string, unknown>
-    if ('subFlow' in raw || 'subFlowRef' in raw) {
-      issues.push({ level: 'error', code: 'subProcess.legacy', msg: '旧 subFlow/subFlowRef 已不受支持，请使用 subProcess', at: node.id })
-    }
-    const process = getSubProcess(node.data)
-    if ('subProcess' in raw && !process) {
-      issues.push({
-        level: 'error',
-        code: 'subProcess.invalid',
-        msg: 'subProcess 必须包含字符串 entry 和合法的 graph',
-        at: node.id,
-      })
-    }
-    if (process && getSubFlowPack(node.data)) {
-      issues.push({ level: 'error', code: 'subProcess.conflict', msg: 'subProcess 与 subFlowPack 不能同时存在', at: node.id })
-    }
-    if (!process) continue
-    if (!process.graph.nodes.some((child) => child.id === process.entry)) {
-      issues.push({
-        level: 'error',
-        code: 'subProcess.entry.missing',
-        msg: `subProcess entry '${process.entry}' 不在直属子图中`,
-        at: node.id,
-      })
-    }
-    const nested = validateGraphScope(process.graph, opts, process.entry, state)
-    issues.push(...nested.map((issue) => ({
-      ...issue,
-      at: `${node.id}/subProcess${issue.at ? `/${issue.at}` : ''}`,
-    })))
-  }
-
   return issues
-}
-
-export function validateGraph(graph: GameGraph, opts?: ValidateOpts): Issue[] {
-  return validateGraphScope(graph, opts, undefined, { nodeIds: new Set(), edgeIds: new Set() })
 }
 
 /** 是否存在「attr 可归零」的致死出口：边条件上的 attrRatio ≤ 0。 */

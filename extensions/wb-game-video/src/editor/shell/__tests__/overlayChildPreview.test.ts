@@ -54,7 +54,7 @@ describe('overlayChildPreview · 时间轴预览', () => {
     const reg = createCoreSkinRegistry()
     const child: OverlayChild = {
       id: 'hp-player',
-      component: 'BattlePlayerHpBar',
+      component: 'battlePlayerHpBar',
       inputs: { current: 72, max: 100, label: '我方', qi: 3, qiMax: 5 },
     }
     const html = renderToStaticMarkup(
@@ -70,7 +70,7 @@ describe('overlayChildPreview · 时间轴预览', () => {
     const reg = createCoreSkinRegistry()
     const child: OverlayChild = {
       id: 'hp-boss',
-      component: 'BattleEnemyHpBar',
+      component: 'battleEnemyHpBar',
       inputs: { current: 58, max: 100, label: '敌方' },
     }
     const html = renderToStaticMarkup(
@@ -82,28 +82,14 @@ describe('overlayChildPreview · 时间轴预览', () => {
     expectFitTargetOn(html, 'ks-hud-boss ks-hud-foe-unit')
   })
 
-  it('伤害与增益飘字暂停时冻结在对应局部动画帧', () => {
+  it('伤害与增益飘字预览使用稳定 fit target 且不播放位移动画', () => {
     const reg = createCoreSkinRegistry()
-    for (const component of ['DamageFloatText', 'GainFloatText']) {
+    for (const component of ['damageFloatText', 'gainFloatText']) {
       const child: OverlayChild = { id: component, component, inputs: {} }
       const html = renderToStaticMarkup(
         renderOverlayChildPreview(child, reg, ctx, 400) as ReactElement,
       )
-      expect(html).toContain('is-preview-frozen')
-      expect(html).toContain('--preview-t:400ms')
-      expect(html).toContain('data-overlay-fit-target')
-    }
-  })
-
-  it('伤害与增益飘字播放时执行与试玩相同的动画', () => {
-    const reg = createCoreSkinRegistry()
-    for (const component of ['DamageFloatText', 'GainFloatText']) {
-      const child: OverlayChild = { id: component, component, inputs: {} }
-      const html = renderToStaticMarkup(
-        renderOverlayChildPreview(child, reg, ctx, 400, undefined, true) as ReactElement,
-      )
-      expect(html).not.toContain('is-preview-frozen')
-      expect(html).not.toContain('--preview-t')
+      expect(html).toContain('is-preview')
       expect(html).toContain('data-overlay-fit-target')
     }
   })
@@ -112,7 +98,7 @@ describe('overlayChildPreview · 时间轴预览', () => {
 describe('overlayChildPreview · 泛用预览时钟（preview/previewTimeMs 透传）', () => {
   it('新规格 inkYingMo 预览冻结交互且按钮禁用', () => {
     const reg = createCoreSkinRegistry()
-    const child: OverlayChild = { id: 'c1', component: 'InkYingMo', inputs: {}, window: { startMs: 1000 } }
+    const child: OverlayChild = { id: 'c1', component: 'inkYingMo', inputs: {}, window: { startMs: 1000 } }
     // 播放头 1300ms、child 于 1000ms 进场 → localMs = 300ms。
     const html = renderToStaticMarkup(
       renderOverlayChildPreview(child, reg, ctx, 1300) as ReactElement,
@@ -124,23 +110,12 @@ describe('overlayChildPreview · 泛用预览时钟（preview/previewTimeMs 透�
 
   it('新规格 inkKou 预览冻结交互', () => {
     const reg = createCoreSkinRegistry()
-    const child: OverlayChild = { id: 'c2', component: 'InkKou', inputs: {} }
+    const child: OverlayChild = { id: 'c2', component: 'inkKou', inputs: {} }
     const html = renderToStaticMarkup(
       renderOverlayChildPreview(child, reg, ctx, 400) as ReactElement,
     )
     expect(html).toContain('is-frozen')
     expect(html).toContain('--preview-t:400ms')
-    expect(html).toContain('disabled=""')
-  })
-
-  it('新规格 inkKou 播放预览时保留交互保护但不冻结动画', () => {
-    const reg = createCoreSkinRegistry()
-    const child: OverlayChild = { id: 'c3', component: 'InkKou', inputs: {} }
-    const html = renderToStaticMarkup(
-      renderOverlayChildPreview(child, reg, ctx, 400, undefined, true) as ReactElement,
-    )
-    expect(html).not.toContain('is-frozen')
-    expect(html).not.toContain('--preview-t')
     expect(html).toContain('disabled=""')
   })
 })

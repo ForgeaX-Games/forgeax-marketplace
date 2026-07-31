@@ -4,7 +4,7 @@ import {
   patchNodeBgm,
 } from '../bgm-authoring'
 import { patchNodeData } from '../../../graph/edit/graph-edit'
-import type { ManagedAsset } from '../../assets/assetLibraryClient'
+import type { KinoResourceDTO } from '../../assets/kino-api'
 import type { GameGraph } from '../../../runtime/schema/graph-schema'
 
 describe('patchNodeBgm', () => {
@@ -62,7 +62,7 @@ describe('patchNodeBgm', () => {
     expect(patchNodeBgm(undefined, { restart: true })).toBeUndefined()
   })
 
-  it('保留面板写入的 volume 与手写 blueprint.json 里的 fade', () => {
+  it('保留手写 blueprint.json 里的 volume / fade（面板不出这些控件，也不该抹掉）', () => {
     const kept = patchNodeBgm({ ref: 'a', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 }, { mode: 'replace' })
     expect(kept).toEqual({ ref: 'a', mode: 'replace', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 })
   })
@@ -103,10 +103,13 @@ describe('节点面板的写回路径（patchNodeData + patchNodeBgm）', () => 
 })
 
 describe('audio picker fallbacks', () => {
-  const resource = (id: string, name?: string): ManagedAsset => ({
-    id,
-    kind: 'audio',
-    name: name ?? id,
+  const resource = (id: string, name?: string): KinoResourceDTO => ({
+    resource_id: id,
+    media_type: 'audio',
+    name,
+    url: `/api/v1/kino/resources/${id}/content`,
+    created_at: 0,
+    updated_at: 0,
   })
 
   it('名字优先，缺名字用 id；重复 id 去重', () => {

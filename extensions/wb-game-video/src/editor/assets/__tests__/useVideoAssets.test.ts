@@ -22,8 +22,7 @@ vi.mock('../kino-api', async (importOriginal) => {
     ...actual,
     createKinoVideoClient: () => ({
       list: defaultKinoList,
-      playbackUrl: (id: string, gameId: string) =>
-        `/api/v1/kino/resources/${id}/content?game_id=${encodeURIComponent(gameId)}`,
+      playbackUrl: (id: string) => `/media/resources/${id}/content`,
     }),
   }
 })
@@ -48,7 +47,6 @@ vi.mock('../video-upload', async (importOriginal) => {
 function makeResource(overrides: Partial<KinoResourceDTO> = {}): KinoResourceDTO {
   return {
     resource_id: 'res-1',
-    game_id: 'demo',
     media_type: 'video',
     url: 'http://object/res-1',
     name: 'Old name',
@@ -72,7 +70,7 @@ function makeClient(overrides: Partial<KinoVideoClient> = {}): KinoVideoClient {
     batch: vi.fn(),
     update: vi.fn(async () => resource),
     delete: vi.fn(async () => {}),
-    playbackUrl: (id, gameId) => `/api/v1/kino/resources/${id}/content?game_id=${encodeURIComponent(gameId)}`,
+    playbackUrl: (id) => `/media/resources/${id}/content`,
     ...overrides,
   }
 }
@@ -105,7 +103,7 @@ describe('useVideoAssets', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.items[0]?.url).toBe(
-      '/api/v1/kino/resources/res-1/content?game_id=demo&v=2',
+      '/media/resources/res-1/content?v=2',
     )
   })
 
@@ -156,10 +154,9 @@ describe('useVideoAssets', () => {
       await result.current.renameResource('res-1', '  New name  ')
     })
 
-    expect(client.get).toHaveBeenCalledWith('res-1', 'demo', expect.any(Object))
+    expect(client.get).toHaveBeenCalledWith('res-1', expect.any(Object))
     expect(update).toHaveBeenCalledWith('res-1', expect.objectContaining({
       resource_id: 'res-1',
-      game_id: 'demo',
       media_type: 'video',
       name: 'New name',
       type: 'UPLOAD',
@@ -220,7 +217,7 @@ describe('useVideoAssets', () => {
       id: 'res-1',
       label: 'Replacement',
       updatedAt: 30,
-      url: '/api/v1/kino/resources/res-1/content?game_id=demo&v=30',
+      url: '/media/resources/res-1/content?v=30',
     })
     uploadState.replaceImpl = undefined
   })

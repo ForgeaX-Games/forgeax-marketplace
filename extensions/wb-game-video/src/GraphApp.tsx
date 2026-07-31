@@ -19,7 +19,6 @@ import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
 import { useGraphScenario } from './editor/persist/graphScenarioStore'
 import { useGraphView, installGraphViewSync, type GraphView } from './editor/persist/graphViewStore'
 import { NODIA_DEMO } from './editor/demo/demo'
-import { getGameSlug } from './editor/persist/gameScope'
 import { injectStyleOnce } from './styles/injectStyle'
 import { GameBootstrap } from './editor/bootstrap/GameBootstrap'
 
@@ -83,7 +82,7 @@ function GraphMain(): JSX.Element {
       {view === 'graph' && <BlueprintLibraryView />}
       {view === 'video' && <GraphVideoView />}
       {view === 'assets' && <GraphAssetView />}
-      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义界面' }]} scenario={NODIA_DEMO} />}
+      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义覆盖物' }]} scenario={NODIA_DEMO} />}
       {view === 'rule' && (
         <GraphConfigView
           title="规则"
@@ -116,12 +115,12 @@ export function GraphApp(): JSX.Element {
     return <div className="ga-root is-pane-left"><GraphSidebar /></div>
   }
   if (pane === 'center') {
-    return <div className="ga-root is-pane-center"><GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap></div>
+    return <div className="ga-root is-pane-center"><GameBootstrap onBoot={(gameId) => ensureBoot(gameId, NODIA_DEMO)}><GraphMain /></GameBootstrap></div>
   }
   return (
     <div className="ga-root">
       <GraphSidebar />
-      <GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap>
+      <GameBootstrap onBoot={(gameId) => ensureBoot(gameId, NODIA_DEMO)}><GraphMain /></GameBootstrap>
     </div>
   )
 }

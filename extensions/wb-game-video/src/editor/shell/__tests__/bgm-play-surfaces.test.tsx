@@ -13,12 +13,19 @@ import { GraphPlaySurface } from '../GraphPlaySurface'
 import { GraphStudio } from '../GraphStudio'
 
 const useKinoVideoResources = vi.hoisted(() => vi.fn())
-const useProjectAssets = vi.hoisted(() => vi.fn())
+const useAudioAssets = vi.hoisted(() => vi.fn())
 
 vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
 // 本件只问「有没有出声」；素材查询（视频/音频）都是别处的事，异步 hydration 留在这儿只会
 // 变成 act(...) 警告。
-vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
+vi.mock('../../assets/audioAssetCacheStore', () => ({ useAudioAssets }))
+vi.mock('../../../lib/workbench-host', () => ({
+  getWorkbenchHost: () => ({
+    extension: {
+      url: (path: string) => `https://host.test/extension/runtime/${path.replace(/^\/+/, '')}`,
+    },
+  }),
+}))
 
 const BED = 'a-aud-story'
 
@@ -68,9 +75,9 @@ describe('试玩表面挂载床轨', () => {
     useKinoVideoResources.mockReturnValue({
       items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
     })
-    useProjectAssets.mockReset()
-    useProjectAssets.mockReturnValue({
-      items: [], loading: false, error: null, generation: 0,
+    useAudioAssets.mockReset()
+    useAudioAssets.mockReturnValue({
+      items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
     })
     seedGraphStore()
   })
@@ -83,7 +90,7 @@ describe('试玩表面挂载床轨', () => {
   it('GraphPlaySurface：整表面即试玩，进场就起文档床', () => {
     render(<GraphPlaySurface scenario={SCENARIO} />)
     expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-      '/__gva__/media/a-aud-story?game=game-nodia-fighting',
+      'https://host.test/extension/runtime/media/assets/a-aud-story',
     ])
   })
 

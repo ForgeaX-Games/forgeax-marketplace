@@ -19,6 +19,7 @@ import { isInteractive } from './editors'
 import { OVERLAY_PRESET_MIME } from './ComponentLibrary'
 import { overlayFitTargets } from './overlay-fit-targets'
 import {
+  clampCanvasDelta,
   OverlayCanvasInteraction,
   type CanvasBox,
   type CanvasInteractionItem,
@@ -30,96 +31,107 @@ const num = (v: unknown, d: number): number => (typeof v === 'number' ? v : d)
 /** 内容尚未完成 DOM 测量时的临时命中盒。 */
 const DEFAULT_BOX_W = 0.25
 const DEFAULT_BOX_H = 0.15
-const SNAP_INSET_PX = 18
 
 /** 归一 stage 矩形。 */
 type NBox = { left: number; top: number; w: number; h: number }
 
+const OVERLAY_CANVAS_ITEM_ID = '__overlay-canvas__'
+
 /** 仅供界面 tab 使用的编辑器设计框，不属于发布 schema。 */
 export const DEFAULT_OVERLAY_DESIGN_CANVAS: CanvasBox = {
-  left: 0.1,
-  top: 0.1,
-  width: 0.8,
-  height: 0.8,
+  left: 0.25,
+  top: 0.25,
+  width: 0.5,
+  height: 0.5,
 }
 const FULL_STAGE_CANVAS: CanvasBox = { left: 0, top: 0, width: 1, height: 1 }
 
-export type OverlaySnapKind = 'vertical-center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-
-export interface OverlayPlacement {
-  left: number
-  top: number
-  snap: OverlaySnapKind | null
+export interface OverlayContentBounds {
+  ready: boolean
+  box?: CanvasBox
 }
 
-function clampAxis(value: number, min: number, max: number): number {
-  return max < min ? min : Math.min(max, Math.max(min, value))
+export interface OverlayOverflowRegion extends CanvasBox {
+  childId: string
 }
 
-/** 把组件内容盒完整钳在固定设计画布内，并在靠近中线/四角时吸附。 */
-export function placeOverlayBox(
-  canvas: CanvasBox,
-  box: Pick<CanvasBox, 'width' | 'height'>,
-  desired: { left: number; top: number },
-  threshold: { x: number; y: number },
-  inset: { x: number; y: number } = { x: 0, y: 0 },
-): OverlayPlacement {
-  const minLeft = canvas.left
-  const minTop = canvas.top
-  const maxLeft = canvas.left + canvas.width - box.width
-  const maxTop = canvas.top + canvas.height - box.height
-  let left = clampAxis(desired.left, minLeft, maxLeft)
-  let top = clampAxis(desired.top, minTop, maxTop)
+/** 当前 overlay 全部 child 内容盒的最小 union；缺任一 child 测量结果时标记为未就绪。 */
+export function unionOverlayContentBounds(
+  childIds: readonly string[],
+  boxes: Readonly<Record<string, NBox>>,
+): OverlayContentBounds {
+  if (childIds.length === 0) return { ready: true }
+  const measured = childIds.map((id) => boxes[id]).filter((box): box is NBox => !!box)
+  if (measured.length < childIds.length) return { ready: false }
 
-  const insetLeft = clampAxis(minLeft + inset.x, minLeft, maxLeft)
-  const insetTop = clampAxis(minTop + inset.y, minTop, maxTop)
-  const insetRight = clampAxis(maxLeft - inset.x, minLeft, maxLeft)
-  const insetBottom = clampAxis(maxTop - inset.y, minTop, maxTop)
-  const corners: Array<{ kind: Exclude<OverlaySnapKind, 'vertical-center'>; left: number; top: number }> = [
-    { kind: 'top-left', left: insetLeft, top: insetTop },
-    { kind: 'top-right', left: insetRight, top: insetTop },
-    { kind: 'bottom-left', left: insetLeft, top: insetBottom },
-    { kind: 'bottom-right', left: insetRight, top: insetBottom },
-  ]
-  const thresholdX = Math.max(threshold.x, Number.EPSILON)
-  const thresholdY = Math.max(threshold.y, Number.EPSILON)
-  const corner = corners
-    .filter((candidate) => Math.abs(left - candidate.left) <= threshold.x && Math.abs(top - candidate.top) <= threshold.y)
-    .sort((a, b) => (
-      Math.hypot((left - a.left) / thresholdX, (top - a.top) / thresholdY)
-      - Math.hypot((left - b.left) / thresholdX, (top - b.top) / thresholdY)
-    ))[0]
-  if (corner) return { left: corner.left, top: corner.top, snap: corner.kind }
-
-  const centeredLeft = canvas.left + (canvas.width - box.width) / 2
-  const centeredTop = canvas.top + (canvas.height - box.height) / 2
-  if (Math.abs(left - centeredLeft) <= threshold.x && Math.abs(top - centeredTop) <= threshold.y) {
-    left = centeredLeft
-    top = centeredTop
-    return { left, top, snap: 'vertical-center' }
-  }
-  return { left, top, snap: null }
-}
-
-/** 已识别吸附类型后，用组件的真实尺寸求最终落点。 */
-export function positionForOverlaySnap(
-  canvas: CanvasBox,
-  box: Pick<CanvasBox, 'width' | 'height'>,
-  snap: OverlaySnapKind,
-  inset: { x: number; y: number } = { x: 0, y: 0 },
-): { left: number; top: number } {
-  const left = canvas.left + inset.x
-  const top = canvas.top + inset.y
-  const right = canvas.left + canvas.width - box.width - inset.x
-  const bottom = canvas.top + canvas.height - box.height - inset.y
-  if (snap === 'top-left') return { left, top }
-  if (snap === 'top-right') return { left: right, top }
-  if (snap === 'bottom-left') return { left, top: bottom }
-  if (snap === 'bottom-right') return { left: right, top: bottom }
+  const left = clamp01(Math.min(...measured.map((box) => box.left)))
+  const top = clamp01(Math.min(...measured.map((box) => box.top)))
+  const right = clamp01(Math.max(...measured.map((box) => box.left + box.w)))
+  const bottom = clamp01(Math.max(...measured.map((box) => box.top + box.h)))
+  const round = (value: number): number => Math.round(value * 10_000) / 10_000
   return {
-    left: canvas.left + (canvas.width - box.width) / 2,
-    top: canvas.top + (canvas.height - box.height) / 2,
+    ready: true,
+    box: {
+      left: round(left),
+      top: round(top),
+      width: round(Math.max(0, right - left)),
+      height: round(Math.max(0, bottom - top)),
+    },
   }
+}
+
+/** 设计画布只向外扩展以容纳内容，不因内容移动/缩小而自动收缩。 */
+export function expandOverlayDesignCanvas(canvas: CanvasBox, content: CanvasBox | undefined): CanvasBox {
+  if (!content) return { ...canvas }
+  const left = Math.min(canvas.left, content.left)
+  const top = Math.min(canvas.top, content.top)
+  const right = Math.max(canvas.left + canvas.width, content.left + content.width)
+  const bottom = Math.max(canvas.top + canvas.height, content.top + content.height)
+  const round = (value: number): number => Math.round(value * 10_000) / 10_000
+  return {
+    left: round(left),
+    top: round(top),
+    width: round(right - left),
+    height: round(bottom - top),
+  }
+}
+
+/** 返回每个 child 落在设计画布外、但仍位于 16:9 舞台内的可见区域。 */
+export function overlayOverflowRegions(
+  canvas: CanvasBox,
+  boxes: Readonly<Record<string, NBox>>,
+): OverlayOverflowRegion[] {
+  const canvasRight = canvas.left + canvas.width
+  const canvasBottom = canvas.top + canvas.height
+  const regions: OverlayOverflowRegion[] = []
+  const round = (value: number): number => Math.round(value * 10_000) / 10_000
+  const add = (childId: string, left: number, top: number, right: number, bottom: number): void => {
+    const clippedLeft = clamp01(left)
+    const clippedTop = clamp01(top)
+    const clippedRight = clamp01(right)
+    const clippedBottom = clamp01(bottom)
+    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return
+    regions.push({
+      childId,
+      left: round(clippedLeft),
+      top: round(clippedTop),
+      width: round(clippedRight - clippedLeft),
+      height: round(clippedBottom - clippedTop),
+    })
+  }
+  for (const [childId, box] of Object.entries(boxes)) {
+    const right = box.left + box.w
+    const bottom = box.top + box.h
+    if (box.top < canvas.top) add(childId, box.left, box.top, right, Math.min(bottom, canvas.top))
+    if (bottom > canvasBottom) add(childId, box.left, Math.max(box.top, canvasBottom), right, bottom)
+    const middleTop = Math.max(box.top, canvas.top)
+    const middleBottom = Math.min(bottom, canvasBottom)
+    if (middleBottom > middleTop) {
+      if (box.left < canvas.left) add(childId, box.left, middleTop, Math.min(right, canvas.left), middleBottom)
+      if (right > canvasRight) add(childId, Math.max(box.left, canvasRight), middleTop, right, middleBottom)
+    }
+  }
+  return regions
 }
 
 function percentValue(value: number): string {
@@ -153,45 +165,6 @@ function OverlayBoundsReadout({ box }: { box: CanvasBox }): JSX.Element {
   )
 }
 
-function OverlaySnapGuides({
-  kind,
-  canvas,
-  inset,
-}: {
-  kind: OverlaySnapKind
-  canvas: CanvasBox
-  inset: { x: number; y: number }
-}): JSX.Element {
-  const right = canvas.left + canvas.width
-  const bottom = canvas.top + canvas.height
-  const x = kind === 'top-right' || kind === 'bottom-right'
-    ? right - inset.x
-    : kind === 'vertical-center'
-      ? canvas.left + canvas.width / 2
-      : canvas.left + inset.x
-  const y = kind === 'bottom-left' || kind === 'bottom-right'
-    ? bottom - inset.y
-    : kind === 'vertical-center'
-      ? canvas.top + canvas.height / 2
-      : canvas.top + inset.y
-  return (
-    <div
-      className="ocp-snap-guides"
-      data-snap-guide={kind}
-      aria-hidden
-    >
-      <span
-        className="ocp-snap-guide is-vertical"
-        style={{ left: `${x * 100}%`, top: `${canvas.top * 100}%`, height: `${canvas.height * 100}%` }}
-      />
-      <span
-        className="ocp-snap-guide is-horizontal"
-        style={{ left: `${canvas.left * 100}%`, top: `${y * 100}%`, width: `${canvas.width * 100}%` }}
-      />
-    </div>
-  )
-}
-
 const PREVIEW_CSS = `
 .ocp-root { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ocp-stage {
@@ -211,8 +184,7 @@ const PREVIEW_CSS = `
   position: absolute; left: 8px; top: 6px;
   font-size: 10px; letter-spacing: .06em; opacity: .45; pointer-events: none; z-index: 999;
 }
-.ocp-design-canvas {
-  position:absolute; z-index:48; box-sizing:border-box; pointer-events:none;
+.ocp-stage [data-canvas-item="${OVERLAY_CANVAS_ITEM_ID}"] {
   border: 1px dashed rgba(190,196,204,.72);
   border-radius: 2px;
   background:
@@ -222,15 +194,22 @@ const PREVIEW_CSS = `
       rgba(190,196,204,.08) 6px,
       rgba(190,196,204,.03) 6px,
       rgba(190,196,204,.03) 12px
-  );
+    );
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
 }
-.ocp-snap-guides { position:absolute; inset:0; z-index:60; pointer-events:none; }
-.ocp-snap-guide {
-  position:absolute; display:block; box-sizing:border-box; opacity:.62;
+.ocp-stage [data-canvas-item="${OVERLAY_CANVAS_ITEM_ID}"].is-selected {
+  border-style: dashed;
+  border-color: rgba(220,225,232,.92);
+  box-shadow: 0 0 0 1px rgba(200,206,214,.18), inset 0 0 0 1px rgba(255,255,255,.04);
 }
-.ocp-snap-guide.is-vertical { width:0; border-left:1px dashed rgba(112,190,184,.72); }
-.ocp-snap-guide.is-horizontal { height:0; border-top:1px dashed rgba(112,190,184,.72); }
+.ocp-overflow-region {
+  position: absolute;
+  z-index: 49;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 1px dashed rgba(255,82,82,.96);
+  background: rgba(255,82,82,.025);
+}
 .ocp-empty {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 11px; opacity: .45; pointer-events: none;
@@ -261,23 +240,19 @@ const PREVIEW_CSS = `
 
 function mockHudCtx(entities: Record<string, Entity> | undefined, variables: Record<string, Variable> | undefined): SkinCtx {
   const ents: SkinCtx['hud']['entities'] = {}
-  const pack = (
-    attrs: Record<string, number>,
-    attrMeta?: Record<string, { max?: number; initial?: number }>,
-    name?: string,
-  ) => {
+  const pack = (attrs: Record<string, number>, attrMeta?: Record<string, { max?: number; initial?: number }>) => {
     const attrMax: Record<string, number> = {}
     for (const [k, v] of Object.entries(attrs)) attrMax[k] = attrMeta?.[k]?.max ?? v
-    return { name, hp: attrs.hp ?? 0, maxHp: attrMeta?.hp?.max ?? attrs.hp ?? 0, attrs: { ...attrs }, attrMax }
+    return { hp: attrs.hp ?? 0, maxHp: attrMeta?.hp?.max ?? attrs.hp ?? 0, attrs: { ...attrs }, attrMax }
   }
   for (const [id, e] of Object.entries(entities ?? {})) {
     const hp = e.attrs?.hp ?? e.attrMeta?.hp?.initial ?? 100
     const attrs = { ...(e.attrs ?? {}), hp }
-    ents[id] = pack(attrs, e.attrMeta, e.name?.trim() || id)
+    ents[id] = pack(attrs, e.attrMeta)
   }
   // 保底给两个常见战斗实体样例血量，好让血条皮肤在无实体数据时也有内容。
-  if (!ents['ent-player']) ents['ent-player'] = pack({ hp: 72 }, { hp: { max: 100 } }, 'ent-player')
-  if (!ents['ent-boss']) ents['ent-boss'] = pack({ hp: 58 }, { hp: { max: 100 } }, 'ent-boss')
+  if (!ents['ent-player']) ents['ent-player'] = pack({ hp: 72 }, { hp: { max: 100 } })
+  if (!ents['ent-boss']) ents['ent-boss'] = pack({ hp: 58 }, { hp: { max: 100 } })
   const vars: Record<string, number> = { qi: 3 }
   for (const [id, v] of Object.entries(variables ?? {})) vars[id] = v.initial ?? 0
   return { hud: { entities: ents, vars, flags: {}, score: 1200 } }
@@ -297,6 +272,10 @@ export interface OverlayCatalogPreviewProps {
   ) => string | undefined | void
   /** 画布上拖动：写回 child.layout 的位置字段（归一 0~1），不改组件宽高。 */
   onPatchChildLayout?: (childId: string, patch: Partial<Layout>) => void
+  /** 编辑器本地设计画布；不写入 Overlay，也不进入运行时。 */
+  designCanvas?: CanvasBox
+  /** moveDelta 存在时表示整体移动，调用方需同步平移 children。 */
+  onDesignCanvasChange?: (box: CanvasBox, moveDelta?: { x: number; y: number }) => void
   /** 交互热区重叠冲突集变化时回调（DOM 实测得出）——供上层做参数列表标红 / banner。 */
   onWarnChange?: (ids: Set<string>) => void
 }
@@ -309,6 +288,8 @@ export function OverlayCatalogPreview({
   onSelectChild,
   onAddChild,
   onPatchChildLayout,
+  designCanvas = DEFAULT_OVERLAY_DESIGN_CANVAS,
+  onDesignCanvasChange,
   onWarnChange,
 }: OverlayCatalogPreviewProps): JSX.Element {
   injectStyleOnce('overlay-catalog-preview', PREVIEW_CSS)
@@ -317,8 +298,8 @@ export function OverlayCatalogPreview({
   const ctx = useMemo(() => mockHudCtx(entities, variables), [entities, variables])
   const [timeMs, setTimeMs] = useState(400)
   const [dropping, setDropping] = useState(false)
-  const [snapGuide, setSnapGuide] = useState<OverlaySnapKind | null>(null)
-  const interactionActiveRef = useRef(false)
+  const [overlayCanvasSelected, setOverlayCanvasSelected] = useState(false)
+  const previousSelectedChildRef = useRef(selectedChildId)
   const stageRef = useRef<HTMLDivElement>(null)
   /** 每个 child 预览渲染层的 DOM——实测可点热区做重叠告警。 */
   const previewRefs = useRef<Record<string, HTMLElement | null>>({})
@@ -337,17 +318,12 @@ export function OverlayCatalogPreview({
   }>(() => ({ overlayId: overlay.id, boxes: {} }))
   const contentBoxes = contentBoxState.overlayId === overlay.id ? contentBoxState.boxes : {}
   const contentSigRef = useRef('')
+  const pendingAutoExpandRef = useRef(false)
   /** 组件库拖入后待「吸附到落点」的 child：等它渲染 + 实测出内容盒，再把内容中心平移到鼠标点。 */
-  const pendingSnapRef = useRef<{ childId: string; left: number; top: number; snap: OverlaySnapKind | null } | null>(null)
+  const pendingSnapRef = useRef<{ childId: string; left: number; top: number } | null>(null)
 
-  useEffect(() => {
-    setDropping(false)
-    setSnapGuide(null)
-    pendingSnapRef.current = null
-  }, [overlay.id])
-
-  const interactive = !!(onAddChild || onPatchChildLayout)
-  const overlayCanvasRect = DEFAULT_OVERLAY_DESIGN_CANVAS
+  const interactive = !!(onAddChild || onPatchChildLayout || onDesignCanvasChange)
+  const overlayCanvasRect = designCanvas
   const contentClipRect = interactive ? overlayCanvasRect : FULL_STAGE_CANVAS
   const clipStyle = useMemo<CSSProperties>(() => ({
     position: 'absolute',
@@ -468,32 +444,44 @@ export function OverlayCatalogPreview({
     return () => { cancelAnimationFrame(raf); stage.removeEventListener('load', onLoad, true) }
   }, [overlay.children, timeMs, interactive, stagePx.w, stagePx.h])
 
+  const overlayBounds = useMemo(
+    () => unionOverlayContentBounds(overlay.children.map((child) => child.id), contentBoxes),
+    [contentBoxes, overlay.children],
+  )
+  const overflowRegions = useMemo(
+    () => overlayOverflowRegions(overlayCanvasRect, contentBoxes),
+    [contentBoxes, overlayCanvasRect],
+  )
+
+  // 仅组件拖入/移动允许把设计画布向外扩展；手动缩放、参数变化和内容动画不会触发回弹。
+  useEffect(() => {
+    if (!pendingAutoExpandRef.current || !overlayBounds.ready || !onDesignCanvasChange) return
+    pendingAutoExpandRef.current = false
+    const next = expandOverlayDesignCanvas(overlayCanvasRect, overlayBounds.box)
+    if (
+      next.left === overlayCanvasRect.left
+      && next.top === overlayCanvasRect.top
+      && next.width === overlayCanvasRect.width
+      && next.height === overlayCanvasRect.height
+    ) return
+    onDesignCanvasChange(next)
+  }, [onDesignCanvasChange, overlayBounds, overlayCanvasRect])
+
+  useEffect(() => {
+    setOverlayCanvasSelected(false)
+  }, [overlay.id])
+
+  useEffect(() => {
+    if (previousSelectedChildRef.current !== selectedChildId) setOverlayCanvasSelected(false)
+    previousSelectedChildRef.current = selectedChildId
+  }, [selectedChildId])
+
   /** 事件点 → 归一舞台坐标。 */
   const normPoint = (clientX: number, clientY: number): { left: number; top: number } => {
     const r = stageRef.current?.getBoundingClientRect()
     if (!r || !r.width || !r.height) return { left: 0, top: 0 }
     return { left: clamp01((clientX - r.left) / r.width), top: clamp01((clientY - r.top) / r.height) }
   }
-
-  const snapThreshold = (): { x: number; y: number } => ({
-    x: stagePx.w > 0 ? 12 / stagePx.w : 0.02,
-    y: stagePx.h > 0 ? 12 / stagePx.h : 0.035,
-  })
-
-  const snapInset = (): { x: number; y: number } => ({
-    x: stagePx.w > 0 ? SNAP_INSET_PX / stagePx.w : 0.025,
-    y: stagePx.h > 0 ? SNAP_INSET_PX / stagePx.h : 0.045,
-  })
-
-  /** 组件库拖拽尚无真实尺寸，用指针自身探测靠近的中线/角点。 */
-  const snapAtPointer = (point: { left: number; top: number }): OverlaySnapKind | null =>
-    placeOverlayBox(
-      overlayCanvasRect,
-      { width: 0, height: 0 },
-      point,
-      snapThreshold(),
-      snapInset(),
-    ).snap
 
   /** 操作框始终贴真实可见内容；组件自身 width/height 不再作为界面 tab 的编辑盒。 */
   const interactionBox = (child: Overlay['children'][number]): CanvasBox => {
@@ -510,6 +498,7 @@ export function OverlayCatalogPreview({
   const moveChild = (childId: string, from: CanvasBox, nextLeft: number, nextTop: number): void => {
     const child = overlay.children.find((candidate) => candidate.id === childId)
     if (!child) return
+    pendingAutoExpandRef.current = true
     onPatchChildLayout?.(childId, {
       left: num(child.layout?.left, 0) + nextLeft - from.left,
       top: num(child.layout?.top, 0) + nextTop - from.top,
@@ -534,10 +523,8 @@ export function OverlayCatalogPreview({
     // 严格跟随鼠标：不猜落点字段（cue.x/y、CSS 边角锚定、满屏盒各不相同），先按预设默认加组件，
     // 待其渲染 + 实测出内容盒后，把可见内容框的中心平移到落点。
     const p = normPoint(e.clientX, e.clientY)
-    const snap = snapAtPointer(p)
     const id = onAddChild(presetId)
-    if (typeof id === 'string') pendingSnapRef.current = { childId: id, left: p.left, top: p.top, snap }
-    else setSnapGuide(null)
+    if (typeof id === 'string') pendingSnapRef.current = { childId: id, left: p.left, top: p.top }
   }
 
   // 拖入吸附：新 child 渲染并实测出内容盒后，只平移到落点，不改变组件宽高。
@@ -548,35 +535,24 @@ export function OverlayCatalogPreview({
     const cb = contentBoxes[pend.childId]
     if (!child || !cb) return // 尚未渲染/实测完 → 等下一次 contentBoxes 更新
     pendingSnapRef.current = null
-    const desired = pend.snap
-      ? positionForOverlaySnap(
-          overlayCanvasRect,
-          { width: cb.w, height: cb.h },
-          pend.snap,
-          snapInset(),
-        )
-      : {
-          left: pend.left - cb.w / 2,
-          top: pend.top - cb.h / 2,
-        }
-    const placed = placeOverlayBox(
-      overlayCanvasRect,
-      { width: cb.w, height: cb.h },
-      desired,
-      { x: 0, y: 0 },
-      snapInset(),
+    // 内容中心当前落在 (cb.left+w/2, cb.top+h/2)；要它落到 (pend.left, pend.top) → 施加对应位移。
+    const wantDx = pend.left - (cb.left + cb.w / 2)
+    const wantDy = pend.top - (cb.top + cb.h / 2)
+    const delta = clampCanvasDelta(
+      { left: cb.left, top: cb.top, width: cb.w, height: cb.h },
+      wantDx,
+      wantDy,
     )
     moveChild(
       child.id,
       { left: cb.left, top: cb.top, width: cb.w, height: cb.h },
-      placed.left,
-      placed.top,
+      cb.left + delta.x,
+      cb.top + delta.y,
     )
-    setSnapGuide(null)
   }, [contentBoxes, overlay.children])
 
   const interactionItems = useMemo<CanvasInteractionItem[]>(() => {
-    return overlay.children.map((child) => {
+    const children: CanvasInteractionItem[] = overlay.children.map((child) => {
       const box = interactionBox(child)
       return {
         id: child.id,
@@ -589,7 +565,20 @@ export function OverlayCatalogPreview({
         warn: warnIds.has(child.id),
       }
     })
-  }, [contentBoxes, overlay.children, warnIds])
+    return [
+      {
+        id: OVERLAY_CANVAS_ITEM_ID,
+        label: '覆盖物画布',
+        position: { x: overlayCanvasRect.left, y: overlayCanvasRect.top },
+        frame: { kind: 'box' as const, ...overlayCanvasRect },
+        zIndex: -50,
+        movable: true,
+        resizable: true,
+        yieldToHigherItems: true,
+      },
+      ...children,
+    ]
+  }, [contentBoxes, overlay.children, overlayCanvasRect.height, overlayCanvasRect.left, overlayCanvasRect.top, overlayCanvasRect.width, warnIds])
 
   return (
     <div className="ocp-root">
@@ -602,31 +591,12 @@ export function OverlayCatalogPreview({
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'copy'
                 if (!dropping) setDropping(true)
-                setSnapGuide(snapAtPointer(normPoint(e.clientX, e.clientY)))
               }
             : undefined
         }
-        onDragLeave={onAddChild
-          ? (e) => {
-              const next = e.relatedTarget as Node | null
-              if (next && e.currentTarget.contains(next)) return
-              setDropping(false)
-              setSnapGuide(null)
-            }
-          : undefined}
+        onDragLeave={onAddChild ? () => setDropping(false) : undefined}
         onDrop={onAddChild ? onDrop : undefined}
       >
-        <div
-          className="ocp-design-canvas"
-          data-overlay-design-canvas
-          style={{
-            left: `${overlayCanvasRect.left * 100}%`,
-            top: `${overlayCanvasRect.top * 100}%`,
-            width: `${overlayCanvasRect.width * 100}%`,
-            height: `${overlayCanvasRect.height * 100}%`,
-          }}
-          aria-hidden
-        />
         <div data-overlay-content-clip style={clipStyle}>
           {overlay.children.length === 0 ? (
             <div className="ocp-empty">{interactive ? '从右侧组件库拖组件到这里' : '此方案暂无组件'}</div>
@@ -654,37 +624,65 @@ export function OverlayCatalogPreview({
             />
           ))}
         </div>
-        {snapGuide ? <OverlaySnapGuides kind={snapGuide} canvas={overlayCanvasRect} inset={snapInset()} /> : null}
+        {interactive && overflowRegions.map((region, index) => (
+          <div
+            key={`${region.childId}:${index}`}
+            className="ocp-overflow-region"
+            data-overflow-child={region.childId}
+            aria-hidden
+            style={{
+              left: `${region.left * 100}%`,
+              top: `${region.top * 100}%`,
+              width: `${region.width * 100}%`,
+              height: `${region.height * 100}%`,
+            }}
+          />
+        ))}
         {interactive &&
           <OverlayCanvasInteraction
             stageRef={stageRef}
             items={interactionItems}
-            selectedId={selectedChildId || null}
+            selectedId={overlayCanvasSelected ? OVERLAY_CANVAS_ITEM_ID : (selectedChildId || null)}
             onSelect={(id) => {
+              if (id === OVERLAY_CANVAS_ITEM_ID) {
+                setOverlayCanvasSelected(true)
+                return
+              }
+              setOverlayCanvasSelected(false)
               onSelectChild?.(id ?? '')
             }}
             onMove={(id, position) => {
+              if (id === OVERLAY_CANVAS_ITEM_ID) {
+                onDesignCanvasChange?.({
+                  left: position.x,
+                  top: position.y,
+                  width: overlayCanvasRect.width,
+                  height: overlayCanvasRect.height,
+                }, {
+                  x: position.x - overlayCanvasRect.left,
+                  y: position.y - overlayCanvasRect.top,
+                })
+                return
+              }
               const item = interactionItems.find((candidate) => candidate.id === id)
               if (!item || item.frame.kind !== 'box') return
-              const placed = placeOverlayBox(
-                overlayCanvasRect,
-                { width: item.frame.width, height: item.frame.height },
-                { left: position.x, top: position.y },
-                interactionActiveRef.current ? snapThreshold() : { x: 0, y: 0 },
-                snapInset(),
-              )
-              setSnapGuide(interactionActiveRef.current ? placed.snap : null)
-              moveChild(id, item.frame, placed.left, placed.top)
+              moveChild(id, item.frame, position.x, position.y)
             }}
-            onInteractionChange={(active) => {
-              interactionActiveRef.current = active
-              if (!active) setSnapGuide(null)
-            }}
+            onResize={onDesignCanvasChange
+              ? (id, box) => {
+                  if (id !== OVERLAY_CANVAS_ITEM_ID) return
+                  onDesignCanvasChange(box)
+                }
+              : undefined}
             onReorder={onPatchChildLayout
-              ? (id, direction) => reorder(id, direction)
+              ? (id, direction) => {
+                  if (id !== OVERLAY_CANVAS_ITEM_ID) reorder(id, direction)
+                }
               : undefined}
             ariaLabel="界面方案画布"
+            spaceDragId={OVERLAY_CANVAS_ITEM_ID}
             renderFrame={(item, state) => (
+              item.id === OVERLAY_CANVAS_ITEM_ID ? null :
               <>
                 <span className="ocp-hit-tag">{item.label}</span>
                 {item.warn ? (

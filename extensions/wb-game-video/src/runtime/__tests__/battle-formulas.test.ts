@@ -3,7 +3,6 @@ import demo from '../../editor/demo/nodia.graph.json'
 import { evalExpr } from '../engine/expr'
 import { createRng } from '../engine/rng'
 import type { EvalCtx } from '../engine/expr'
-import { getSubProcess } from '../schema/graph-schema'
 
 /**
  * 战斗公式回归：nodia demo 的 6 个技能节点伤害/回血 expr 严格按技能表求值。
@@ -23,10 +22,8 @@ function ctx(seed: number, combo = 2): EvalCtx {
   }
 }
 
-const playerTurn = getSubProcess((demo as any).graph.nodes.find((n: any) => n.id === 'a_my')?.data)!.graph
-
 function dmgExpr(nodeId: string): string {
-  const node = playerTurn.nodes.find((n) => n.id === nodeId)! as any
+  const node = (demo as any).graph.nodes.find((n: any) => n.id === nodeId)
   const val = node.data.reactions[0].do[0].effects[0].value
   return val.expr as string
 }
@@ -55,7 +52,7 @@ describe('nodia 战斗公式（严格按表）', () => {
   })
 
   it('回血 fuzhu = ⌊生命上限300 × 12%⌋ = 36（确定值，无随机）', () => {
-    const node = playerTurn.nodes.find((n) => n.id === 'fuzhu')! as any
+    const node = (demo as any).graph.nodes.find((n: any) => n.id === 'fuzhu')
     const healExpr = node.data.reactions[0].do[0].effects[0].value.expr
     expect(evalExpr(healExpr, ctx(1))).toBe(36)
   })

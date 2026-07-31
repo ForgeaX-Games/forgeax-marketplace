@@ -8,7 +8,7 @@
  * 不落盘 —— 让「没配」与「配了默认值」在磁盘上同形，旧图不会因为点开一次面板就长出一堆等价字段。
  */
 import type { NodeBgm } from '../../runtime/schema/graph-schema'
-import type { ManagedAsset } from '../assets/assetLibraryClient'
+import type { KinoResourceDTO } from '../assets/kino-api'
 
 /** BGM 资产下拉候选：`id` 落盘（永不落 URL），`label` 仅展示。 */
 export interface AudioOption {
@@ -34,7 +34,7 @@ function cleanMs(v: unknown): number | undefined {
 
 /**
  * 节点作用域 BGM 的补丁 —— `undefined` 返回值即「把 `data.bgm` 键删掉」（`patchNodeData` 语义）。
- * 面板出 ref / mode / volume / restart，手写落盘的 fade 原样保留。
+ * 面板出 ref / mode / restart，手写落盘的 volume / fade 原样保留。
  *
  * 两条形状规则，缺一条作者就写不出 v2 的配置或者会落下撒谎的残留：
  *
@@ -64,13 +64,14 @@ export function patchNodeBgm(current: NodeBgm | undefined, patch: Partial<NodeBg
 }
 
 /**
- * 通用音频资产 → BGM 候选（与「视频」字段拼 `VideoOption` 同款：去重、名字优先）。
+ * Kino 音频资源 → BGM 候选（与「视频」字段拼 `VideoOption` 同款：去重、名字优先）。
+ * 数据源是 Kino `media_type: 'audio'`（资产库上传的那批），不是本地素材清单路由。
  */
-export function audioAssetOptions(resources: readonly ManagedAsset[]): AudioOption[] {
+export function audioAssetOptions(resources: readonly KinoResourceDTO[]): AudioOption[] {
   const seen = new Set<string>()
   const out: AudioOption[] = []
   for (const resource of resources) {
-    const id = resource.id
+    const id = resource.resource_id
     if (!id || seen.has(id)) continue
     seen.add(id)
     const name = resource.name?.trim()

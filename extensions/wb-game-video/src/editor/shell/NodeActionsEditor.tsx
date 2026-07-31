@@ -25,7 +25,6 @@ export function NodeActionsEditor({
   pickers,
   allowAdvance = true,
   allowSpawn = true,
-  renderAdvance,
   onChange,
 }: {
   actions: NodeAction[]
@@ -35,7 +34,6 @@ export function NodeActionsEditor({
   pickers?: EditorPickerCtx
   allowAdvance?: boolean
   allowSpawn?: boolean
-  renderAdvance?: (action: Extract<NodeAction, { kind: 'advance' }>, index: number) => ReactNode
   onChange: (next: NodeAction[]) => void
 }): JSX.Element {
   const patchAt = (i: number, action: NodeAction) =>
@@ -67,8 +65,7 @@ export function NodeActionsEditor({
               <SpawnInputsEditor from={action.from} inputs={action.inputs} overlays={overlays} pickers={pickers} onChange={(inputs) => patchAt(i, { ...action, inputs })} />
             </>
           ) : null}
-          {action.kind === 'advance' && renderAdvance ? renderAdvance(action, i) : null}
-          {action.kind === 'advance' && !renderAdvance ? field('走边', (
+          {action.kind === 'advance' ? field('走边', (
             <select value={action.edgeId} onChange={(e) => patchAt(i, { kind: 'advance', edgeId: e.target.value })} style={{ flex: 1, minWidth: 0 }}>
               <option value="">（选出边）</option>
               {edgeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -81,9 +78,7 @@ export function NodeActionsEditor({
         {allowSpawn ? (
           <button type="button" onClick={() => onChange([...actions, { kind: 'spawn', from: spawnOptions[0]?.value ?? '' }])}>＋ 生成组件</button>
         ) : null}
-        {allowAdvance && !actions.some((action) => action.kind === 'advance') ? (
-          <button type="button" onClick={() => onChange([...actions, { kind: 'advance', edgeId: edgeOptions[0]?.value ?? '' }])}>＋ 沿边推进</button>
-        ) : null}
+        {allowAdvance ? <button type="button" onClick={() => onChange([...actions, { kind: 'advance', edgeId: edgeOptions[0]?.value ?? '' }])}>＋ 沿边推进</button> : null}
       </div>
     </div>
   )

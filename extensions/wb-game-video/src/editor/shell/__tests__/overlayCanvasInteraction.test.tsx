@@ -32,7 +32,6 @@ function Harness({
   onMove = vi.fn(),
   onResize,
   onReorder,
-  onInteractionChange,
 }: {
   items?: CanvasInteractionItem[]
   selectedId?: string | null
@@ -40,7 +39,6 @@ function Harness({
   onMove?: (id: string, position: { x: number; y: number }) => void
   onResize?: (id: string, box: CanvasBox) => void
   onReorder?: (id: string, direction: 'front' | 'back') => void
-  onInteractionChange?: (active: boolean) => void
 }): JSX.Element {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const bindStage = (element: HTMLDivElement | null): void => {
@@ -68,7 +66,6 @@ function Harness({
         onMove={onMove}
         onResize={onResize}
         onReorder={onReorder}
-        onInteractionChange={onInteractionChange}
         ariaLabel="测试画布"
       />
     </div>
@@ -209,18 +206,6 @@ describe('OverlayCanvasInteraction events', () => {
 
     expect(onSelect).toHaveBeenCalledWith('item')
     expect(onMove).toHaveBeenLastCalledWith('item', { x: 0.4, y: 0.4 })
-  })
-
-  it('reports the active interval of a layout drag', () => {
-    const onInteractionChange = vi.fn()
-    render(<Harness onInteractionChange={onInteractionChange} />)
-    const layer = screen.getByRole('application', { name: '测试画布' })
-
-    fireEvent.pointerDown(layer, { button: 0, pointerId: 2, clientX: 50, clientY: 25 })
-    fireEvent.pointerMove(layer, { pointerId: 2, clientX: 90, clientY: 45 })
-    fireEvent.pointerUp(layer, { pointerId: 2, clientX: 90, clientY: 45 })
-
-    expect(onInteractionChange.mock.calls).toEqual([[true], [false]])
   })
 
   it('nudges the selected item by one screen pixel', () => {

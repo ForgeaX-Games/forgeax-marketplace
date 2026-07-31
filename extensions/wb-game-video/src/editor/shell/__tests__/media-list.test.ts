@@ -8,8 +8,7 @@ vi.mock('../../assets/kino-api', async (importOriginal) => {
     ...actual,
     createKinoVideoClient: () => ({
       list,
-      playbackUrl: (id: string, gameId: string) =>
-        `/api/v1/kino/resources/${id}/content?game_id=${gameId}`,
+      playbackUrl: (id: string) => `/media/resources/${id}/content`,
     }),
   }
 })
@@ -20,7 +19,6 @@ import { listVideoAssetInfos } from '../media'
 function resource(id: string) {
   return {
     resource_id: id,
-    game_id: 'demo',
     media_type: 'video' as const,
     url: `http://object/${id}`,
     name: id,
@@ -54,6 +52,7 @@ describe('listVideoAssetInfos', () => {
     expect(assets.map((asset) => asset.id)).toEqual(['res-1', 'res-2', 'res-3'])
     expect(list).toHaveBeenCalledTimes(2)
     expect(list.mock.calls[1]?.[0]).toMatchObject({ page: 2 })
+    for (const [query] of list.mock.calls) expect(query).not.toHaveProperty('game_id')
   })
 
   it('uses a page size accepted by the Kino service', async () => {

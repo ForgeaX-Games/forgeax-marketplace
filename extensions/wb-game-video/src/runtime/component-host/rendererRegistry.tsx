@@ -28,8 +28,6 @@ export interface OverlayProps {
   /** 编辑器预览。 */
   preview?: boolean
   previewTimeMs?: number
-  /** 编辑器预览是否正在播放；false 时按 previewTimeMs 定格。 */
-  previewPlaying?: boolean
 }
 export type OverlayComponent = ComponentType<OverlayProps>
 
@@ -94,7 +92,7 @@ export class SkinRegistry {
     mount: OverlayMountSnap,
     emit?: (elementId: string, key: string) => void,
     ctx?: SkinCtx,
-    preview?: { timeMs?: number; playing?: boolean },
+    preview?: { timeMs?: number },
   ): ReactNode {
     const mountHasSize = layoutHasExplicitSize(mount.mountLayout)
     const wrapStyle: CSSProperties = mountWrapStyle(mount.mountLayout)
@@ -118,7 +116,6 @@ export class SkinRegistry {
                   ctx={ctx}
                   preview={!!preview}
                   previewTimeMs={preview?.timeMs}
-                  previewPlaying={preview?.playing ?? false}
                 />
               </SkinErrorBoundary>
             </div>
@@ -132,7 +129,7 @@ export class SkinRegistry {
   renderOverlay(
     overlay: OverlaySnap,
     emit?: (key: string) => void,
-    preview?: { timeMs?: number; playing?: boolean },
+    preview?: { timeMs?: number },
     ctx?: SkinCtx,
   ): ReactNode {
     const C = this.overlay.get(overlay.component)
@@ -145,7 +142,6 @@ export class SkinRegistry {
           ctx={ctx}
           preview={!!preview}
           previewTimeMs={preview?.timeMs}
-          previewPlaying={preview?.playing ?? false}
         />
       </SkinErrorBoundary>
     )
@@ -167,14 +163,14 @@ export function renderOverlayMount(
   mount: OverlayMountSnap,
   emit?: (elementId: string, key: string) => void,
   ctx?: SkinCtx,
-  preview?: { timeMs?: number; playing?: boolean },
+  preview?: { timeMs?: number },
 ): ReactNode {
   return defaultSkinRegistry.renderOverlayMount(mount, emit, ctx, preview)
 }
 export function renderOverlay(
   overlay: OverlaySnap,
   emit?: (key: string) => void,
-  preview?: { timeMs?: number; playing?: boolean },
+  preview?: { timeMs?: number },
   ctx?: SkinCtx,
 ): ReactNode {
   return defaultSkinRegistry.renderOverlay(overlay, emit, preview, ctx)

@@ -1,20 +1,19 @@
 /**
- * 叩击（component id: `InkKou`）—— 组件只发出「叩」事件。
+ * 叩击（component id: `inkKou`）—— 组件只发出「叩」事件。
  * 位置与显示时段由外部 Overlay 编排；组件内部只负责显示与交互。
  */
 import { useRef } from 'react'
 import type { OverlayProps } from '../../rendererRegistry'
-import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
+import type { ComponentDef } from '../../../registry/component-registry'
 import { injectCss, ensureInkFilters, ensureBrushFont, previewTStyle } from './skinRuntime'
 
-export const InkKouManifest: ComponentManifest = {
-  id: 'InkKou',
+export const inkKouComponent: ComponentDef = {
   label: '叩击',
   events: [{ id: 'kou', label: '叩' }],
   inputs: [],
 }
 
-export function InkKou({ emit, preview, previewTimeMs, previewPlaying }: OverlayProps) {
+export function InkKouLayer({ emit, preview, previewTimeMs }: OverlayProps) {
   injectCss('ink-kou-layer', KOU_CSS)
   ensureInkFilters()
   ensureBrushFont()
@@ -26,11 +25,10 @@ export function InkKou({ emit, preview, previewTimeMs, previewPlaying }: Overlay
     emit?.('kou')
   }
 
-  const frozen = preview && !previewPlaying
   return (
     <div
-      className={`pvn-opts pvn-opts--kou show${frozen ? ' is-frozen' : ''}`}
-      style={frozen ? previewTStyle(previewTimeMs ?? 0) : undefined}
+      className={`pvn-opts pvn-opts--kou show${preview ? ' is-frozen' : ''}`}
+      style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
       aria-label="叩击"
     >
       <button type="button" className="pvn-opt pvn-opt--kou" aria-label="叩" data-overlay-fit-target disabled={preview} onClick={knock}>

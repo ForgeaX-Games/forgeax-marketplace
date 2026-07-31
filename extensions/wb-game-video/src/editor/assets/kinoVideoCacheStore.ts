@@ -64,7 +64,6 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
       let total = 0
       for (let page = 1; page <= 100; page += 1) {
         const result = await kino.list({
-          game_id: gameId,
           media_type: 'video',
           page,
           page_size: MAX_KINO_RESOURCE_PAGE_SIZE,

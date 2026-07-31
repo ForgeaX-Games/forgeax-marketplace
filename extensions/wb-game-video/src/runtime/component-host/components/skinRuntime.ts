@@ -10,7 +10,6 @@
  *   - useDefaultEventTimeout：限时组件到点自 emit(defaultEvent)。
  */
 import { useEffect, useRef } from 'react'
-import { usePlaybackTimeout } from '../../playback-clock'
 // 字体与皮肤组件同层自带（component-host/assets）；随 runtime 一起发，不依赖 editor 注入。
 import brushFontUrl from './assets/fonts/HYShangWei.woff2'
 
@@ -44,11 +43,11 @@ export function useDefaultEventTimeout(
       : 'fail'
   const emitRef = useRef(emit)
   emitRef.current = emit
-  usePlaybackTimeout(
-    () => emitRef.current?.(defaultEvent),
-    timeoutMs,
-    !!preview || !emitRef.current,
-  )
+  useEffect(() => {
+    if (preview || !emitRef.current || timeoutMs == null) return
+    const t = setTimeout(() => emitRef.current?.(defaultEvent), timeoutMs)
+    return () => clearTimeout(t)
+  }, [timeoutMs, defaultEvent, preview])
 }
 
 export function injectCss(id: string, css: string): void {

@@ -12,7 +12,6 @@ import type { ComponentDef } from '../../registry/component-registry'
 import { QTE_DEFAULT_EVENTS, QTE_INPUTS, type QteParams } from './Qte'
 import { STAGE_FILL_LAYOUT } from '../../schema/layout'
 import { injectCss, ensureInkFilters, ensureBrushFont, previewFreezeClass, previewTStyle, resolveTimeoutMs, useDefaultEventTimeout } from './skinRuntime'
-import { usePlaybackClock } from '../../playback-clock'
 
 /**
  * 组件的注册契约（引擎/编辑器识别用）——与渲染实现同文件，经 EXTRA_COMPONENTS 注册。
@@ -78,9 +77,6 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
   ensureInkFilters()
   ensureBrushFont()
   const keyOk = usePlayerKeyGate()
-  const clock = usePlaybackClock()
-  const pausedRef = useRef(clock.paused)
-  pausedRef.current = clock.paused
   const p = overlay.inputs as {
     glyph?: string
     anchorX?: number
@@ -131,7 +127,7 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
     const skinEnd = Math.max(...items.map((c) => c.end))
     return timeoutCap ? Math.min(skinEnd, Math.max(200, timeoutCap)) : skinEnd
   }, [items, timeoutCap])
-  const startRef = useRef<number | null>(null)
+  const startRef = useRef(0)
   const hitRef = useRef<Map<string, HitTier>>(new Map())
   const resolvedRef = useRef(false)
   const [nowMs, setNowMs] = useState(0)
@@ -175,10 +171,10 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
     if (preview) return
     resolvedRef.current = false
     hitRef.current = new Map()
-    if (startRef.current == null) startRef.current = clock.now()
+    startRef.current = performance.now()
     let raf = 0
     const tick = (): void => {
-      const t = clock.now() - (startRef.current ?? clock.now())
+      const t = performance.now() - startRef.current
       setNowMs(t)
       if (t >= maxEnd && !resolvedRef.current) {
         resolveOutcome(hitRef.current)
@@ -192,7 +188,7 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
   }, [maxEnd, preview])
 
   function hitCue(key: string, tAbs: number): void {
-    if (preview || pausedRef.current || resolvedRef.current) return
+    if (preview || resolvedRef.current) return
     const c = items.find((x) => x.key === key)
     if (!c || hitRef.current.has(key)) return
     const tier = classifyHit(tAbs, c)
@@ -205,10 +201,10 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
   useEffect(() => {
     if (preview) return
     function onKeyDown(e: KeyboardEvent): void {
-      if (pausedRef.current || !keyOk()) return
+      if (!keyOk()) return
       if (e.key !== ' ' && e.key !== 'Enter') return
       e.preventDefault()
-      const tRel = clock.now() - (startRef.current ?? clock.now())
+      const tRel = performance.now() - startRef.current
       const tAbs = baseAbs + tRel
       const c = items.find((x) => {
         if (hitRef.current.has(x.key)) return false
@@ -242,7 +238,7 @@ export function InkKouLayer({ overlay, emit, preview, previewTimeMs }: OverlayPr
             className="pvn-opt pvn-opt--kou"
             style={anchorStyle as CSSProperties}
             aria-label={passHint}
-            onClick={() => hitCue(c.key, preview ? t : baseAbs + (clock.now() - (startRef.current ?? clock.now())))}
+            onClick={() => hitCue(c.key, preview ? t : baseAbs + (performance.now() - startRef.current))}
           >
             <span className="pvn-kou-orn" aria-hidden="true">
               <i className="pvn-kou-dot" />

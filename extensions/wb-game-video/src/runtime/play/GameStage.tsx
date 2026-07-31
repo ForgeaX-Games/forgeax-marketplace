@@ -37,11 +37,6 @@ export interface GameStageProps {
   videoKey?: string
   /** 当前节点的后继候选；提前加载并保留 DOM，实际切换时不再设置 src。 */
   preloadVideos?: PreloadVideo[]
-  /** 播放壳控制；不传时保持历史行为（播放中、1 倍速）。 */
-  paused?: boolean
-  playbackRate?: number
-  /** 是否播放当前前台视频自带的音轨；预加载和退场视频始终静音。 */
-  videoAudioEnabled?: boolean
 }
 
 export interface PreloadVideo {
@@ -84,7 +79,7 @@ function playbackKey(videoSrc: string | undefined, clip: ClipSnap | undefined, v
 
 export function GameStage({
   videoSrc, clip, overlayMounts, skins, skinCtx, onEmit, onTick, onPerformanceEnd, placeholder, videoKey,
-  preloadVideos = EMPTY_PRELOADS, paused = false, playbackRate = 1, videoAudioEnabled = false,
+  preloadVideos = EMPTY_PRELOADS,
 }: GameStageProps): JSX.Element {
   const desired = useMemo<BufferedPlayback | null>(
     () => {
@@ -137,15 +132,6 @@ export function GameStage({
   const activePlayback = activeSlot?.playback
   const { contentRect, recomputeRect } = useVideoContentRect(activeVideoRef, [activePlayback?.key])
   const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
-
-  useEffect(() => {
-    for (const element of Object.values(slotElements.current)) {
-      if (!element) continue
-      element.playbackRate = playbackRate
-      if (paused) element.pause()
-      else if (element === activeVideoRef.current) startPlaying(element)
-    }
-  }, [paused, playbackRate])
 
   useEffect(() => {
     setMissingVideoId(null)
@@ -216,7 +202,6 @@ export function GameStage({
     frontSlotRef.current === slotId && desiredKeyRef.current === key
 
   function startPlaying(element: HTMLVideoElement): void {
-    if (paused) return
     if (!element.paused) return
     const playing = element.play()
     void playing?.catch((error: unknown) => {
@@ -319,7 +304,7 @@ export function GameStage({
                 data-playback-key={playback.key}
                 src={playback.src}
                 autoPlay={isFront}
-                muted={!videoAudioEnabled || !isFront}
+                muted
                 playsInline
                 preload="auto"
                 loop={playback.loop}
@@ -346,7 +331,7 @@ export function GameStage({
                   if (!isCurrentPlayback(slot.id, playback.key)) return
                   const element = event.currentTarget
                   const nowMs = Math.floor(element.currentTime * 1000)
-                  if (!playback.loop && videoDurationCapReached(nowMs, playback.durationMs, element.duration)) {
+                  if (videoDurationCapReached(nowMs, playback.durationMs, element.duration)) {
                     element.pause()
                     onPerformanceEnd()
                     return
@@ -378,8 +363,7 @@ export function GameStage({
       )}
 
       <VideoOverlayStage contentRect={contentRect}>
-        <style>{'.gv-playback-layer.is-paused,.gv-playback-layer.is-paused *,.gv-playback-layer.is-paused *::before,.gv-playback-layer.is-paused *::after{animation-play-state:paused!important}'}</style>
-        <div className={`gv-playback-layer${paused ? ' is-paused' : ''}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           {overlayMounts.map((m) => (
             <span key={m.mountId} style={{ display: 'contents' }}>
               {skins?.renderOverlayMount(m, onEmit, skinCtx)}
