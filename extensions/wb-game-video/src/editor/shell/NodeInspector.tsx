@@ -982,9 +982,8 @@ export function NodeInspector({
   onRemoveMount?: (mountId: string) => void
   onJump?: (id: string) => void
 }): JSX.Element {
-  // 「音乐动作」在还没选曲子时也得选得动：`patchNodeBgm` 对「没有 ref 且不是 stop」的配置一律
-  // 删键（不留 `{ ref: '' }` 这种 validate 判 error、runtime 静默丢弃的残留），所以空态下
-  // push / replace 落不了盘，下拉会自己弹回「起播」。落不了盘的那一步先记在这儿，等作者选了
+  // 「音乐动作」在还没选曲子时也得选得动：没有 ref 的 push / replace 落不了盘（volume-only
+  // 配置只表达音量，不携带播放动作），所以空态下下拉会自己弹回「起播」。落不了盘的那一步先记在这儿，等作者选了
   // 曲子再随 ref 一起写进去。换节点 = 换一份草稿。
   const [draftBgmMode, setDraftBgmMode] = useState<'push' | 'replace'>('push')
   const [draftBgmModeNode, setDraftBgmModeNode] = useState(nodeId)
@@ -1029,7 +1028,7 @@ export function NodeInspector({
   // 「什么都没选」的空框。还没有配置时读本地草稿——见组件顶部 `draftBgmMode`。
   const bgmMode: 'push' | 'replace' | 'stop' = bgm?.mode === 'replace' || bgm?.mode === 'stop'
     ? bgm.mode
-    : bgm ? 'push' : draftBgmMode
+    : bgm?.ref ? 'push' : draftBgmMode
   const packKey = nestPack
     ? (nestPack.version ? `${nestPack.id}@${nestPack.version}` : nestPack.id)
     : ''
@@ -1604,7 +1603,31 @@ export function NodeInspector({
                 ))}
               </select>
             ))}
-            {bgm ? (
+            {row('音量', (
+              <span style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', minWidth: 0 }}>
+                <input
+                  type="checkbox"
+                  aria-label="设置 BGM 音量"
+                  checked={bgm?.volume !== undefined}
+                  onChange={(e) => patchData({ bgm: patchNodeBgm(bgm, { volume: e.target.checked ? 1 : undefined }) })}
+                />
+                <input
+                  type="range"
+                  aria-label="BGM 音量"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={bgm?.volume ?? 1}
+                  disabled={bgm?.volume === undefined}
+                  onChange={(e) => patchData({ bgm: patchNodeBgm(bgm, { volume: Number(e.target.value) }) })}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <span style={{ width: 48, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {bgm?.volume === undefined ? '未设置' : `${Math.round(bgm.volume * 100)}%`}
+                </span>
+              </span>
+            ))}
+            {bgm?.ref ? (
               <>
                 {row('重进时', (
                   <span

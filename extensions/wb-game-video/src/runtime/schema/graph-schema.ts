@@ -251,10 +251,11 @@ export interface DocumentBgm {
  * 弹出容器（没走终端）时这首会漏到调用方继续播。反过来也成立——**配 BGM 不得要求作者改蓝图
  * 结构**（D11）：一段平铺节点共用一首曲子只需在头一个节点上配一次，不必包进容器。
  *
- * 内层节点不配 `bgm` 即继承当前栈顶（一律不动栈）。
+ * 内层节点不配 `bgm` 即继承当前栈顶（一律不动栈）。只配 `volume` 时不换曲、不新建作用域层，
+ * 仅调整当前栈顶的音量；当前没有 BGM 时无操作。
  */
 export interface NodeBgm {
-  /** `mode: 'stop'` 时可省（那一条不引入新曲子）；其余情况必填。 */
+  /** `mode: 'stop'` 或仅调整当前 BGM 音量时可省；其余情况必填。 */
   ref?: AudioRef
   /**
    * - `push`（默认）：起播并**记住**当前正响的那首，一直播到有人结束它。
@@ -262,7 +263,7 @@ export interface NodeBgm {
    * - `stop`：结束当前这层，回到上一层还没结束的那首。文档床是地板，弹不掉（D13）。
    */
   mode?: 'push' | 'replace' | 'stop'
-  /** 0..1，默认 1。 */
+  /** 0..1；随曲目起播时默认 1，未配曲目时表示仅调整当前 BGM 音量。 */
   volume?: number
   fadeInMs?: number
   fadeOutMs?: number
@@ -355,7 +356,8 @@ export function getSubFlowPack(d: GameNodeData): SubFlowPack | undefined {
 /**
  * 读节点作用域 BGM；**没有可用意图**的形状一律丢弃（非对象、只有 fade / mode 参数没曲子等）。
  *
- * 「可用意图」= 有可播的 `ref`（非空字符串）**或** `mode === 'stop'`（结束当前层，本就不带曲子）。
+ * 「可用意图」= 有可播的 `ref`（非空字符串）、`mode === 'stop'`（结束当前层，本就不带曲子），
+ * **或**没有 ref 但有合法 `volume`（只调整当前栈顶音量）。
  * 不能只看 `ref`：那会把 `win.data.bgm = { mode: 'stop' }` 静默吃掉——作者配了「结束音乐」却
  * 一直听到战斗曲，且全程无报错。落盘的非法形状由 `validate.ts` fail-loud（读原始值），这里只
  * 保证引擎拿到的每一份 `bgm` 都真的有事可做。
@@ -364,7 +366,14 @@ export function getNodeBgm(d: GameNodeData): NodeBgm | undefined {
   const b = (d as NodeData).bgm
   if (!b || typeof b !== 'object') return undefined
   if (b.mode === 'stop') return b
-  return typeof b.ref === 'string' && b.ref.length > 0 ? b : undefined
+  if (typeof b.ref === 'string' && b.ref.length > 0) return b
+  return b.ref === undefined
+    && typeof b.volume === 'number'
+    && Number.isFinite(b.volume)
+    && b.volume >= 0
+    && b.volume <= 1
+    ? b
+    : undefined
 }
 
 export function isSubflowContainerData(d: GameNodeData): boolean {

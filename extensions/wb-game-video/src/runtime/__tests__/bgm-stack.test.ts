@@ -155,6 +155,33 @@ describe('BgmStack.apply — replace', () => {
   })
 })
 
+describe('BgmStack.setVolume', () => {
+  it('只改当前栈顶音量，不换曲、不重开、不加深栈', () => {
+    const s = new BgmStack()
+    s.apply({ owner: DOC, ref: 'bgm-story', volume: 0.8, fadeInMs: 500 })
+    const cmd = s.setVolume(0.35)
+
+    expect(s.frames()).toHaveLength(1)
+    expect(s.top()).toMatchObject({ owner: DOC, ref: 'bgm-story', volume: 0.35, fadeInMs: 500 })
+    expect(cmd).toEqual({ ref: 'bgm-story', volume: 0.35, fadeInMs: 0, fadeOutMs: 0, loop: true, restart: false })
+  })
+
+  it('栈空或音量相同均为无操作', () => {
+    const s = new BgmStack()
+    expect(s.setVolume(0.4)).toBeNull()
+    s.apply({ owner: DOC, ref: 'bgm-story', volume: 0.4 })
+    expect(s.setVolume(0.4)).toBeNull()
+  })
+
+  it('上层结束后恢复到下层调整过的音量', () => {
+    const s = new BgmStack()
+    s.apply({ owner: DOC, ref: 'bgm-story' })
+    s.setVolume(0.45)
+    s.apply({ owner: 'combat', ref: 'bgm-battle' })
+    expect(s.stop()).toMatchObject({ ref: 'bgm-story', volume: 0.45 })
+  })
+})
+
 describe('BgmStack — 续播（同 ref 不重开）', () => {
   it('同 ref 再 push：restart false → 命令 restart === false', () => {
     const s = new BgmStack()

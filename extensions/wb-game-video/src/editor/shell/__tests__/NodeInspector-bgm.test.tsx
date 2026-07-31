@@ -18,6 +18,8 @@ const audioSelect = () => screen.getByTitle(/与资产库音频一致/) as HTMLS
 /** 勾选框按可及名字取（行容器是 `<label>`，名字含行内文字）。 */
 const checkbox = (name: RegExp) => screen.getByRole('checkbox', { name })
 const queryCheckbox = (name: RegExp) => screen.queryByRole('checkbox', { name })
+const volumeSlider = () => screen.getByRole('slider', { name: /音量/ }) as HTMLInputElement
+const volumeToggle = () => screen.getByRole('checkbox', { name: '设置 BGM 音量' }) as HTMLInputElement
 
 const LIB: AudioOption[] = [
   { id: 'a-aud-battle', label: '战斗床 (a-aud-battle)' },
@@ -85,6 +87,38 @@ describe('NodeInspector · 作用域 BGM', () => {
     cleanup()
     renderPanel(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle' } }))
     expect(checkbox(/从头重播/)).toBeTruthy()
+  })
+
+  it('音量默认未设置；开启后按 0..1 写回', () => {
+    const data = renderControlled(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle' } }))
+    expect(volumeSlider().value).toBe('1')
+    expect(volumeSlider().disabled).toBe(true)
+    expect(screen.getByText('未设置')).toBeTruthy()
+
+    fireEvent.click(volumeToggle())
+    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 1 })
+    expect(volumeSlider().disabled).toBe(false)
+    fireEvent.change(volumeSlider(), { target: { value: '0.35' } })
+    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0.35 })
+  })
+
+  it('未选曲目也可单独设置音量；关闭后回到未设置状态', () => {
+    const data = renderControlled(graphWith({ name: 'A' }))
+    expect(volumeSlider().disabled).toBe(true)
+    fireEvent.click(volumeToggle())
+    expect(data().bgm).toEqual({ volume: 1 })
+
+    cleanup()
+    const data2 = renderControlled(graphWith({ name: 'A', bgm: { volume: 0.35 } }))
+    expect(volumeSlider().disabled).toBe(false)
+    expect(screen.getByText('35%')).toBeTruthy()
+    fireEvent.click(volumeToggle())
+    expect('bgm' in data2()).toBe(false)
+  })
+
+  it('结束当前音乐时不显示音量配置', () => {
+    renderPanel(graphWith({ name: 'A', bgm: { mode: 'stop' } }))
+    expect(screen.queryByRole('slider', { name: /音量/ })).toBeNull()
   })
 
   it('空态选「结束当前音乐」→ 落 { mode: "stop" }（不需要 ref）', () => {

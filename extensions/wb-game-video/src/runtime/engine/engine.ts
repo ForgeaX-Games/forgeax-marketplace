@@ -352,6 +352,7 @@ export class GraphRuntime {
    *
    * - `mode: 'stop'` → `stack.stop()`：结束当前这层，回到上一层还没结束的（写它的节点通常压根
    *   没开过层，故与 owner 无关）。
+   * - 只有 `volume` → `stack.setVolume()`：不换曲、不新建层；当前没有 BGM 时无操作。
    * - 其余 → `stack.apply()` 开一层，从此一直响，直到别处 `mode: 'stop'` 或 `jump`/清局结束它。
    *   容器与普通节点同一条规则：`callStack` 深度与这一层的寿命无关。
    */
@@ -359,11 +360,15 @@ export class GraphRuntime {
     const bgm = getNodeBgm(node.data)
     if (!bgm) return
     if (bgm.mode === 'stop') return this.emitBgmCommand(this.bgm.stop())
+    if (!bgm.ref) {
+      if (bgm.volume !== undefined) this.emitBgmCommand(this.bgm.setVolume(bgm.volume))
+      return
+    }
     // owner 由引擎算、不从落盘数据展开：混进 `bgm.owner` 也盖不掉算出来的那个。
     const owner = this.bgmOwner(node.id)
     const input: BgmApplyInput = {
       owner,
-      // 非 stop 分支必有非空 ref —— `getNodeBgm` 的守卫已保证（`bgm-schema.test.ts` 钉住）。
+      // stop / volume-only 已在上面分流，余下分支必有非空 ref。
       ref: bgm.ref as string,
       mode: bgm.mode,
       volume: bgm.volume,
@@ -375,8 +380,9 @@ export class GraphRuntime {
     if (top?.owner !== owner) return this.emitBgmCommand(this.bgm.apply(input))
     // 自己那层已在栈顶 = 回合循环又走进来了（§6.1 的战斗床就配在循环入口）。**绝不加深栈**：
     // 每轮压一层的话栈无界增长，之后一次 `stop` 只能退回上一轮的同一首（听起来「没反应」）。
-    // 曲子没变且没要求重开 → 一条指令都不发（壳层别碰播放头）。
-    if (top.ref === input.ref && !bgm.restart) return
+    // 曲子和目标音量都没变、且没要求重开 → 一条指令都不发（壳层别碰播放头）。volume-only
+    // 节点可能改过本层音量；回到 owner 时即使 ref 相同，也要恢复 owner 自己配置的音量。
+    if (top.ref === input.ref && top.volume === (input.volume ?? 1) && !bgm.restart) return
     // 要么作者显式 `restart`（每轮从头播），要么这层的曲子被别人 replace 走了（该换回自己那首）：
     // 就地换栈顶，`replace` 保留本层的 owner——这一层仍归**第一次**开它的那个作用域，于是下一轮
     // 走进来时守卫照样认得出「自己那层已在栈顶」。

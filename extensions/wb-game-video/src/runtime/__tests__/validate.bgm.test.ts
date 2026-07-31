@@ -63,6 +63,15 @@ describe('bgm 校验（SPEC §3.3）· 节点级', () => {
     }
   })
 
+  it('volume-only 不带 ref 合法，表示调整当前曲目音量', () => {
+    expect(validateGraph(graphWithBgm({ volume: 0.4 }), { audioAssets: ['a-aud-battle'] })).toEqual([])
+  })
+
+  it('非法 volume-only 只报音量范围错误，不强迫补曲目', () => {
+    const issues = validateGraph(graphWithBgm({ volume: 2 }), { audioAssets: ['a-aud-battle'] })
+    expect(errors(issues).map((i) => i.code)).toEqual(['bgm.volume.range'])
+  })
+
   it('fadeInMs / fadeOutMs 为负 → error', () => {
     const issues = validateGraph(
       graphWithBgm({ ref: 'a-aud-battle', fadeInMs: -1, fadeOutMs: -5 }),

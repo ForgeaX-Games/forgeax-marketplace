@@ -40,6 +40,10 @@ describe('getNodeBgm', () => {
     expect(getNodeBgm({ name: 'l2', bgm: { mode: 'stop', fadeOutMs: 600 } })?.mode).toBe('stop')
   })
 
+  it('volume-only 不带 ref 也是合法配置，用于调整当前曲目音量', () => {
+    expect(getNodeBgm({ name: 'quiet', bgm: { volume: 0.35 } })).toEqual({ volume: 0.35 })
+  })
+
   it('防御性丢弃非法形状（非对象 / ref 非 string / ref 空串且不是 stop）', () => {
     const bad = (bgm: unknown): GameNodeData => ({ name: 'x', bgm } as unknown as GameNodeData)
     expect(getNodeBgm(bad(null))).toBeUndefined()
@@ -47,6 +51,9 @@ describe('getNodeBgm', () => {
     expect(getNodeBgm(bad({}))).toBeUndefined()
     expect(getNodeBgm(bad({ ref: '' }))).toBeUndefined()
     expect(getNodeBgm(bad({ ref: 42 }))).toBeUndefined()
+    expect(getNodeBgm(bad({ volume: -0.1 }))).toBeUndefined()
+    expect(getNodeBgm(bad({ volume: 1.1 }))).toBeUndefined()
+    expect(getNodeBgm(bad({ volume: Number.NaN }))).toBeUndefined()
     // 只填了 mode / fade 等参数却没曲子、也不是 stop → 无从起播，丢弃
     expect(getNodeBgm(bad({ mode: 'push' }))).toBeUndefined()
     expect(getNodeBgm(bad({ mode: 'replace', fadeInMs: 800 }))).toBeUndefined()
@@ -66,12 +73,14 @@ describe('bgm schema 形状', () => {
     expect(withBgm.bgm?.ref).toBe('bgm-story')
   })
 
-  it('NodeBgm.mode 三态 push / replace / stop；ref 只在 stop 时可省', () => {
+  it('NodeBgm.mode 三态 push / replace / stop；ref 在 stop 或 volume-only 时可省', () => {
     const push: NodeBgm = { ref: 'a', mode: 'push' }
     const replace: NodeBgm = { ref: 'b', mode: 'replace', volume: 1, fadeInMs: 0, fadeOutMs: 0, restart: true }
     const stop: NodeBgm = { mode: 'stop', fadeOutMs: 600 }
     const bare: NodeBgm = { ref: 'd' }
+    const volumeOnly: NodeBgm = { volume: 0.4 }
     expect([push.mode, replace.mode, stop.mode, bare.mode]).toEqual(['push', 'replace', 'stop', undefined])
     expect(stop.ref).toBeUndefined()
+    expect(volumeOnly.ref).toBeUndefined()
   })
 })

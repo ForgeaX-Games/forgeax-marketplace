@@ -134,6 +134,47 @@ describe('§9-1 节点层默认粘住（v2 与初版的核心差别）', () => {
     expect(ended.bgm?.ref).toBe(BATTLE)
   })
 
+  it('volume-only 节点调整当前曲目音量，不换曲、不重开、不增加栈深', () => {
+    const g: GameGraph = {
+      nodes: [
+        node('a', { durationMs: 100, bgm: { ref: BATTLE, volume: 0.8 } }),
+        node('b', { durationMs: 100, bgm: { volume: 0.35 } }),
+        node('c', { durationMs: 100 }),
+      ],
+      edges: [edge('e-ab', 'a', 'b'), edge('e-bc', 'b', 'c')],
+    }
+    const scn = withStory(g)
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    const toB = rt.onPerformanceEnd()
+    expect(lastBgm(toB)).toMatchObject({ ref: BATTLE, volume: 0.35, restart: false })
+    expect(bgmDepth(rt)).toBe(2)
+    expect(refs(rt.onPerformanceEnd())).toEqual([])
+  })
+
+  it('volume-only 调低后回到曲目 owner，恢复 owner 配置的音量', () => {
+    const g: GameGraph = {
+      nodes: [
+        node('a', { durationMs: 100, bgm: { ref: BATTLE, volume: 0.8 } }),
+        node('b', { durationMs: 100, bgm: { volume: 0.35 } }),
+      ],
+      edges: [edge('e-ab', 'a', 'b'), edge('e-ba', 'b', 'a')],
+    }
+    const scn = withStory(g)
+    const rt = new GraphRuntime(scn.graph, scn)
+    expect(lastBgm(rt.start())).toMatchObject({ ref: BATTLE, volume: 0.8 })
+    expect(lastBgm(rt.onPerformanceEnd())).toMatchObject({ ref: BATTLE, volume: 0.35, restart: false })
+    expect(lastBgm(rt.onPerformanceEnd())).toMatchObject({ ref: BATTLE, volume: 0.8, restart: false })
+    expect(bgmDepth(rt)).toBe(2)
+  })
+
+  it('volume-only 节点在静音状态下无操作', () => {
+    const scn = scnOf({ nodes: [node('quiet', { durationMs: 100, bgm: { volume: 0.35 } })], edges: [] })
+    const rt = new GraphRuntime(scn.graph, scn)
+    expect(refs(rt.start())).toEqual([])
+    expect(bgmDepth(rt)).toBe(0)
+  })
+
   it('无 bgm 的节点进出全程沉默（栈没变就不发指令）', () => {
     const g: GameGraph = {
       nodes: [node('n1', { durationMs: 100 }), node('n2', { durationMs: 100 })],

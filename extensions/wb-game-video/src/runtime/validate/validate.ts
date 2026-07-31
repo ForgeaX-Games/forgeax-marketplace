@@ -233,7 +233,7 @@ const DOC_ONLY_BGM_KEYS = ['loop'] as const
  * 作者只会听到「没响」，正是这里要 fail-loud 的场景。
  * `volume` 直接写 `HTMLAudioElement`、fade 直接进定时器，两者都不在下游 clamp。
  *
- * v2 的新语义（`mode: 'stop'` 免 ref）**只在节点级成立**，所以本函数收 `position`：文档床没有
+ * 节点级的 `mode: 'stop'` 与 volume-only 配置免 ref，所以本函数收 `position`：文档床没有
  * `mode`，`engine.applyDocBgm` 只看 `doc.ref`，于是 `scenario.bgm = { mode: 'stop' }` 落地是
  * 「静音起局」而不是作者以为的「结束音乐」——豁免跟着带到文档级，这条就静默通过了。
  */
@@ -251,12 +251,13 @@ function checkBgm(
   // 压根不读 ref，连「能不能解析」都是伪问题。面板切到 stop 时会把 ref 收掉（见 patchNodeBgm）。
   const isStop = position === 'node' && b.mode === 'stop'
   const ref = b.ref
-  if (!isStop && (typeof ref !== 'string' || ref.trim().length === 0)) {
+  const isVolumeOnly = position === 'node' && ref === undefined && b.volume !== undefined
+  if (!isStop && !isVolumeOnly && (typeof ref !== 'string' || ref.trim().length === 0)) {
     issues.push({
       level: 'error',
       code: 'bgm.ref.empty',
       msg: position === 'node'
-        ? "bgm.ref 必须是非空字符串（只有 mode: 'stop' 那一条可以不带；否则 runtime 静默丢弃该 bgm 配置）"
+        ? "bgm.ref 必须是非空字符串（只有 mode: 'stop' 或仅配置 volume 时可以不带；否则 runtime 静默丢弃该 bgm 配置）"
         : 'bgm.ref 必须是非空字符串（否则 runtime 静默丢弃该 bgm 配置）',
       at,
     })

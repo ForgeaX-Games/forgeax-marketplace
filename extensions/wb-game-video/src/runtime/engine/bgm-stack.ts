@@ -131,6 +131,25 @@ export class BgmStack {
   }
 
   /**
+   * 不换曲、不新建层，只调整当前栈顶音量。栈空或音量未变化时没有播放指令。
+   * 更新后的音量写回栈帧，因此被上层曲目盖住再恢复时仍保持该值。
+   */
+  setVolume(volume: number): BgmPlaybackCommand | null {
+    const sounding = this.top()
+    if (!sounding || sounding.volume === volume) return null
+    const frame = Object.freeze({ ...sounding, volume })
+    this.stack[this.stack.length - 1] = frame
+    return {
+      ref: frame.ref,
+      volume: frame.volume,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+      loop: frame.loop,
+      restart: false,
+    }
+  }
+
+  /**
    * 作者在某节点写了 `mode: 'stop'`：结束**当前这层**，回到上一层还没结束的那首。
    * 与 owner 无关——`stop` 是就近显式表达，写它的节点通常压根没开过层（§6.1 的 `win`/`lose`）。
    *

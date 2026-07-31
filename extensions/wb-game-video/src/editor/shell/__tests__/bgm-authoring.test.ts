@@ -62,7 +62,16 @@ describe('patchNodeBgm', () => {
     expect(patchNodeBgm(undefined, { restart: true })).toBeUndefined()
   })
 
-  it('保留手写 blueprint.json 里的 volume / fade（面板不出这些控件，也不该抹掉）', () => {
+  it('没有曲子时可单独写入或清除 volume', () => {
+    expect(patchNodeBgm(undefined, { volume: 0.35 })).toEqual({ volume: 0.35 })
+    expect(patchNodeBgm({ volume: 0.35 }, { volume: undefined })).toBeUndefined()
+  })
+
+  it('清空曲目时保留显式 volume，继续调整继承曲目', () => {
+    expect(patchNodeBgm({ ref: 'a', volume: 0.4 }, { ref: '' })).toEqual({ volume: 0.4 })
+  })
+
+  it('保留面板写入的 volume 与手写 blueprint.json 里的 fade', () => {
     const kept = patchNodeBgm({ ref: 'a', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 }, { mode: 'replace' })
     expect(kept).toEqual({ ref: 'a', mode: 'replace', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 })
   })
@@ -89,7 +98,7 @@ describe('节点面板的写回路径（patchNodeData + patchNodeBgm）', () => 
     edges: [],
   })
 
-  it('清空音乐 → data 上不再有 bgm 键（不是留一个 { ref: "" }）', () => {
+  it('没有显式音量时清空音乐 → data 上不再有 bgm 键', () => {
     const g = patchNodeData(graphWith({ ref: 'bgm-battle', restart: true }), 'n1', {
       bgm: patchNodeBgm({ ref: 'bgm-battle', restart: true }, { ref: '' }),
     })
