@@ -28,6 +28,23 @@ function initializeUrl(slug: string): string {
   return `/api/game-host/games/${encodeURIComponent(slug)}/package/initialize`
 }
 
+type PackageResponse = PackageStatus & { error?: PackageError }
+
+function errorHint(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
+async function readPackageResponse(response: Response): Promise<PackageResponse> {
+  const text = await response.text()
+  if (!text.trim()) throw new Error(`HTTP ${response.status} · empty response`)
+  try {
+    return JSON.parse(text) as PackageResponse
+  } catch {
+    const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'unknown content type'
+    throw new Error(`HTTP ${response.status} · expected JSON, received ${contentType}`)
+  }
+}
+
 export function GameBootstrap({ slug, onBoot, children }: GameBootstrapProps): JSX.Element | null {
   const t = useT()
   const [state, setState] = useState<BootstrapState>({ kind: 'loading' })
@@ -41,13 +58,13 @@ export function GameBootstrap({ slug, onBoot, children }: GameBootstrapProps): J
     setState({ kind: 'loading' })
     try {
       const response = await pluginFetch(statusUrl(slug))
-      const body = (await response.json()) as PackageStatus & { error?: PackageError }
+      const body = await readPackageResponse(response)
       if (body.state === 'initialized') bootExisting()
       else if (body.state === 'inconsistent') setState({ kind: 'inconsistent', missing: body.missing ?? [] })
       else if (body.state === 'uninitialized') setState({ kind: 'guide' })
       else setState({ kind: 'error', error: body.error ?? { target: 'package', hint: `HTTP ${response.status}`, retryable: true } })
     } catch (cause) {
-      setState({ kind: 'error', error: { target: 'package status', hint: String(cause), retryable: true } })
+      setState({ kind: 'error', error: { target: 'package status', hint: errorHint(cause), retryable: true } })
     }
   }, [bootExisting, slug])
 
@@ -57,12 +74,12 @@ export function GameBootstrap({ slug, onBoot, children }: GameBootstrapProps): J
     setState({ kind: 'loading' })
     try {
       const response = await pluginFetch(initializeUrl(slug), { method: 'POST' })
-      const body = (await response.json()) as PackageStatus & { error?: PackageError }
+      const body = await readPackageResponse(response)
       if (body.state === 'initialized') bootExisting()
       else if (body.state === 'inconsistent') setState({ kind: 'inconsistent', missing: body.missing ?? [] })
       else setState({ kind: 'error', error: body.error ?? { target: 'package', hint: `HTTP ${response.status}`, retryable: true } })
     } catch (cause) {
-      setState({ kind: 'error', error: { target: 'package', hint: String(cause), retryable: true } })
+      setState({ kind: 'error', error: { target: 'package', hint: errorHint(cause), retryable: true } })
     }
   }
 

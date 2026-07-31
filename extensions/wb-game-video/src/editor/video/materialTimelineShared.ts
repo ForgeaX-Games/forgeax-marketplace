@@ -62,8 +62,16 @@ export interface TimelinePointMarker {
   id: string
   ms: number
   /** 决定配色与提示语气；样式见 MaterialTimeline 的 `.gc-point-mark` 系列。 */
-  kind: 'settlement' | 'lifecycle'
+  kind: 'settlement' | 'lifecycle' | 'derived'
   /** 悬浮提示里的一句话（含时刻由组件自己拼）。 */
+  label: string
+  /** 缺省可拖；派生自界面窗口的空心菱形不可直接改时间。 */
+  draggable?: boolean
+}
+
+/** 无固定时间坐标的结算条件；在时间轴上以贯穿节点时长的条件条表达。 */
+export interface TimelineConditionMarker {
+  id: string
   label: string
 }
 

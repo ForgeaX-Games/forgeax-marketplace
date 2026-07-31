@@ -10,7 +10,7 @@ import {
   GainFloatText,
   GainFloatTextManifest,
 } from '../GainFloatText'
-import { resolveNumericFloatValue } from '../numericFloatText'
+import { resolveNumericFloatDurationMs, resolveNumericFloatValue } from '../numericFloatText'
 
 afterEach(cleanup)
 
@@ -34,13 +34,15 @@ describe('numeric float text components', () => {
   it('declare a shared constant-or-formula value input', () => {
     expect(DamageFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: -25 },
-      { key: 'color', label: '字色', valueType: 'string', component: 'color' },
-      { key: 'fontSize', label: '字号', valueType: 'number' },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ff5a5a' },
+      { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
+      { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
     ])
     expect(GainFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: 50 },
-      { key: 'color', label: '字色', valueType: 'string', component: 'color' },
-      { key: 'fontSize', label: '字号', valueType: 'number' },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ffd54a' },
+      { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
+      { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
     ])
   })
 
@@ -101,6 +103,17 @@ describe('numeric float text components', () => {
       />,
     )
     expect(screen.getByText('+50')).toHaveStyle({ color: '#123456', '--gv-text-font-size': '4cqh' })
+  })
+
+  it('scales the entire float animation from its total duration input', () => {
+    render(
+      <DamageFloatText
+        overlay={{ elementId: 'slow-damage', component: 'DamageFloatText', inputs: { value: -25, durationMs: 2400 } }}
+      />,
+    )
+    expect(screen.getByText('-25').parentElement).toHaveStyle({ '--gv-animation-duration': '2400ms' })
+    expect(resolveNumericFloatDurationMs(undefined)).toBe(1100)
+    expect(resolveNumericFloatDurationMs(0)).toBe(1100)
   })
 
   it('keeps legacy text values readable when value is absent', () => {

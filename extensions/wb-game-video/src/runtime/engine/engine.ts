@@ -466,8 +466,11 @@ export class GraphRuntime {
     this.activeBlueprintId = this.rootBlueprintId
     this.activeGraphPath = []
     this.switchGraph(this.rootGraph)
-    const entry = this.rootGraph.nodes[0]
-    if (!entry) {
+    // 跟 BlueprintDoc.entry，不是 nodes[] 创建顺序——作者把节点接到入口前时 entry 会前移，
+    // 但数组首位仍可能是旧节点。
+    const preferred = this.packsByKey.get(this.rootBlueprintId)?.entry
+    const entryId = resolveGraphEntry(this.rootGraph, preferred)
+    if (!entryId) {
       this.setPhase('ended')
       return this.drain()
     }
@@ -475,7 +478,7 @@ export class GraphRuntime {
     this.returningTo = new Set()
     // 文档床先压：入口节点/容器自己的层要叠在它上面。
     this.unwindBgmToDocBed(true)
-    this.enterNode(entry.id)
+    this.enterNode(entryId)
     return this.drain()
   }
 
@@ -676,20 +679,27 @@ export class GraphRuntime {
    * 不 drain——供 tick 与 onPerformanceEnd 共用（片尾也必须先冲刷 at，再决定是否 advance）。
    */
   private flushTimeline(elapsedMs: number): void {
-    this.state.elapsedMs = elapsedMs
     const node = this.node(this.state.currentNodeId)
+    const previousMs = this.state.elapsedMs
+    const loopWrapped = node?.data.mediaPlayMode === 'loop' && elapsedMs + 50 < previousMs
+    // 媒体 loop 会把 currentTime 拉回 0；节点逻辑时钟只能前进。回绕时补齐作者声明的节点末端，
+    // 确保片尾结算/界面消失执行一次，随后视频可以继续独立循环。
+    const timelineMs = loopWrapped
+      ? Math.max(previousMs, node?.data.durationMs ?? previousMs)
+      : Math.max(previousMs, elapsedMs)
+    this.state.elapsedMs = timelineMs
     if (!node || this.state.phase !== 'playing') return
 
     for (const el of this.childrenOf(node)) {
-      if (el.trigger.when === 'at' && !el.window && el.trigger.ms <= elapsedMs && !this.fired.has(el.id)) {
+      if (el.trigger.when === 'at' && !el.window && el.trigger.ms <= timelineMs && !this.fired.has(el.id)) {
         this.runElement(el)
         if (this.redirect) break
       }
     }
-    if (!this.redirect) this.applyAtReactionEffects(node, elapsedMs)
+    if (!this.redirect) this.applyAtReactionEffects(node, timelineMs)
 
-    this.tickWindows(node, elapsedMs)
-    this.reapSpawns(elapsedMs)
+    this.tickWindows(node, timelineMs)
+    this.reapSpawns(timelineMs)
     if (this.consumeRedirect()) return
 
     const settlement = node.data.routingSettlement
@@ -697,7 +707,7 @@ export class GraphRuntime {
       !this.routingSettled &&
       settlement?.type === 'at' &&
       Number.isFinite(settlement.ms) &&
-      elapsedMs >= settlement.ms
+      timelineMs >= settlement.ms
     ) {
       this.routingSettled = true
       this.advanceAuto()
@@ -753,10 +763,16 @@ export class GraphRuntime {
     return this.drain()
   }
 
-  /** 施加 reaction.do 中的 effect（生命周期相位：enter/at/exit/complete，只改状态、不换节点）。 */
-  private runEffectActions(actions: NodeAction[]): void {
+  /** 结算动作：按序施加 effect，或沿当前结算节点的真实出边推进。 */
+  private runSettlementActions(node: GameNode, actions: NodeAction[]): void {
+    const scope = this.activeScope()
     for (const a of actions) {
       if (a.kind === 'effect' && a.effects.length) this.applyAndReact(a.effects)
+      else if (a.kind === 'advance' && !this.redirect && !this.inExit) {
+        const route = this.scopedEdgeInScope(a.edgeId, scope)
+        if (route?.edge.source === node.id) this.redirect = { route }
+      }
+      if (this.redirect) return
     }
   }
 
@@ -794,7 +810,7 @@ export class GraphRuntime {
   /** 施加节点某生命周期相位（enter/exit）reactions 的副作用。 */
   private applyPhaseReactionEffects(node: GameNode, phase: 'enter' | 'exit'): void {
     for (const r of node.data.reactions ?? []) {
-      if (r.when.type === phase) this.runEffectActions(r.do)
+      if (r.when.type === phase) this.runSettlementActions(node, r.do)
       if (this.redirect) return
     }
   }
@@ -806,7 +822,7 @@ export class GraphRuntime {
       const r = reactions[i]!
       if (r.when.type !== 'at' || this.firedAtReactions.has(i) || r.when.ms > elapsedMs) continue
       this.firedAtReactions.add(i)
-      this.runEffectActions(r.do)
+      this.runSettlementActions(node, r.do)
       if (this.redirect) return
     }
   }
@@ -822,7 +838,7 @@ export class GraphRuntime {
     const chosen =
       completes.find((r) => r.when.type === 'complete' && r.when.if && evaluateCondition(r.when.if, target)) ??
       completes.find((r) => r.when.type === 'complete' && !r.when.if)
-    if (chosen) this.runEffectActions(chosen.do)
+    if (chosen) this.runSettlementActions(node, chosen.do)
   }
 
   private mountLayoutFor(el: OverlayInstanceChild): Layout | undefined {

@@ -43,6 +43,34 @@ export function localMsForChild(child: Pick<OverlayChild, 'window'>, playheadMs:
   return Math.max(0, playheadMs - (child.window?.startMs ?? 0))
 }
 
+export interface PreviewMediaClock {
+  /** 视频元素本轮的 currentTime。 */
+  mediaMs: number
+  /** 结算、界面窗口和组件动画共用的节点时间。 */
+  playheadMs: number
+}
+
+/**
+ * 视频循环只回绕媒体画面，节点时间首轮走完后停在末端。
+ * 主动拖动不走这里，而是由宿主同时重置 mediaMs/playheadMs，因此仍可回看任意帧。
+ */
+export function advancePreviewMediaClock(
+  previous: PreviewMediaClock | null,
+  mediaMs: number,
+  maxMs: number,
+  looping: boolean,
+): PreviewMediaClock {
+  const currentMediaMs = Math.max(0, Math.min(maxMs, Math.round(mediaMs)))
+  if (!looping || !previous) return { mediaMs: currentMediaMs, playheadMs: currentMediaMs }
+
+  const wrapToleranceMs = Math.max(1, Math.min(250, Math.round(maxMs * 0.1)))
+  const wrapped = currentMediaMs + wrapToleranceMs < previous.mediaMs
+  return {
+    mediaMs: currentMediaMs,
+    playheadMs: wrapped ? maxMs : Math.max(previous.playheadMs, currentMediaMs),
+  }
+}
+
 /** 随预览皮肤层一次性注入：暂停时冻结子树内全部 CSS animation（新组件默认免接）。 */
 export const PREVIEW_CLOCK_CSS = `
 .gc-preview-clock.is-paused,

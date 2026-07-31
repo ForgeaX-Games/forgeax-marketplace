@@ -12,6 +12,7 @@ import {
   type UploadTransport,
 } from './video-upload'
 import { useProjectAssetCache } from './projectAssetCacheStore'
+import { deleteSequentially } from './batch-delete'
 
 export type ManagedAssetKind = 'image' | 'audio' | 'font'
 
@@ -177,6 +178,7 @@ export interface AssetLibraryController {
   upload(kind: ManagedAssetKind, file: File): Promise<ManagedAsset | undefined>
   rename(id: string, name: string): Promise<ManagedAsset | undefined>
   remove(id: string): Promise<void>
+  removeMany(ids: readonly string[], onProgress?: (current: number, total: number) => void): Promise<{ completed: number, failedId?: string }>
 }
 
 const UNAVAILABLE_MESSAGE = '图片、BGM 与字体资源 API 尚未启用'
@@ -275,5 +277,21 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     }
   }, [client, gameId, removeCached])
 
-  return { available: Boolean(client), loading, error, uploading, mutating, items, refresh, upload, rename, remove }
+  const removeMany = useCallback(async (ids: readonly string[], onProgress?: (current: number, total: number) => void) => {
+    if (!client || ids.length === 0) return { completed: 0 }
+    setMutating(true)
+    setMutationError(null)
+    const result = await deleteSequentially(ids, async (id) => {
+      const current = useProjectAssetCache.getState().byGame[gameId]
+      const asset = kinds.flatMap((kind) => current?.[kind]?.items ?? []).find((item) => item.id === id)
+      if (!asset) return
+      await client.remove(gameId, id)
+      removeCached(gameId, asset.kind, id)
+    }, ({ current, total }) => onProgress?.(current, total))
+    setMutating(false)
+    if (result.error) setMutationError(result.error instanceof Error ? result.error.message : '资产操作失败')
+    return { completed: result.completed, failedId: result.failedId }
+  }, [client, gameId, removeCached])
+
+  return { available: Boolean(client), loading, error, uploading, mutating, items, refresh, upload, rename, remove, removeMany }
 }

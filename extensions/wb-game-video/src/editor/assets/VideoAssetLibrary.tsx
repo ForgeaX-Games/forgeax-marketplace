@@ -276,6 +276,9 @@ export function VideoAssetLibrary({
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [operationError, setOperationError] = useState<string | null>(null)
   const [batchUpload, setBatchUpload] = useState<BatchUploadState | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [batchSelection, setBatchSelection] = useState<Set<string>>(() => new Set())
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
   const renameTriggerRef = useRef<HTMLElement | null>(null)
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
   const batchUploading = batchUpload?.status === 'uploading'
@@ -352,6 +355,26 @@ export function VideoAssetLibrary({
     } finally {
       setDeleteBusy(false)
     }
+  }
+  const toggleBatchSelection = (id: string) => {
+    setBatchSelection((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const confirmBatchDelete = async () => {
+    const ids = entries.filter((entry) => entry.fromApi && batchSelection.has(entry.id)).map((entry) => entry.id)
+    if (ids.length === 0) return
+    setDeleteBusy(true)
+    setOperationError(null)
+    const result = await controller.deleteResources(ids)
+    if (result.failedId) setOperationError(`批量删除在“${result.failedId}”失败，已完成 ${result.completed}/${ids.length} 项。`)
+    else ids.forEach((id) => onDeleted?.(id))
+    setBatchSelection(new Set())
+    setDeleteBusy(false)
+    setPendingBatchDelete(false)
   }
 
   const deleteMessage = (() => {
@@ -441,6 +464,7 @@ export function VideoAssetLibrary({
             onChange={(e) => void onFileChange(e)}
           />
         </label>
+        <button type="button" className={`val-head-select${selectionMode ? ' is-on' : ''}`} aria-label={selectionMode ? '退出多选' : '多选视频'} disabled={actionsBusy} onClick={() => { setSelectionMode((current) => !current); setBatchSelection(new Set()) }}>☑</button>
         {showUploadStatus ? (
           <div className="val-head-status" role="status" aria-live="polite">
             {batchUpload ? (
@@ -487,6 +511,7 @@ export function VideoAssetLibrary({
           ↻
         </button>
       </div>
+      {selectionMode ? <div className="val-batch-bar"><span>已选 {batchSelection.size} 项</span><button type="button" disabled={batchSelection.size === 0 || actionsBusy} onClick={() => setPendingBatchDelete(true)}>删除选中</button><button type="button" disabled={actionsBusy} onClick={() => { setSelectionMode(false); setBatchSelection(new Set()) }}>完成</button></div> : null}
 
       {controller.error || operationError ? (
         <div className="val-error" role="alert">
@@ -508,7 +533,7 @@ export function VideoAssetLibrary({
           const isBound = entry.id === boundId
           const label = displayLabel(entry)
           return (
-            <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}`}>
+            <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}`}>
               <button
                 type="button"
                 data-clip-id={entry.id}
@@ -533,7 +558,7 @@ export function VideoAssetLibrary({
                   </span>
                 ) : null}
               </button>
-              {entry.fromApi ? (
+              {entry.fromApi && !selectionMode ? (
                 <>
                   <button
                     type="button"
@@ -561,6 +586,7 @@ export function VideoAssetLibrary({
                   </button>
                 </>
               ) : null}
+              {selectionMode && entry.fromApi ? <label className="val-row-select"><input type="checkbox" checked={batchSelection.has(entry.id)} disabled={actionsBusy} onChange={() => toggleBatchSelection(entry.id)} aria-label={`选择 ${entry.label}`} /></label> : null}
             </div>
           )
         })}
@@ -589,6 +615,7 @@ export function VideoAssetLibrary({
           restoreFocus={deleteTriggerRef.current}
         />
       ) : null}
+      {pendingBatchDelete ? <ConfirmDialog title="批量删除视频" message={`确定删除选中的 ${batchSelection.size} 个视频？此操作不可撤销。`} confirmLabel="确认删除" onConfirm={() => void confirmBatchDelete()} onCancel={() => setPendingBatchDelete(false)} busy={deleteBusy} restoreFocus={deleteTriggerRef.current} /> : null}
 
       {pendingRename ? (
         <RenameDialog

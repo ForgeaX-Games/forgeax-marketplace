@@ -73,6 +73,14 @@ export function resolveTextAppearance(
   } as CSSProperties
 }
 
+/** 统一动画总时长与冻结预览时间轴的 CSS 变量契约。 */
+export function animationTimingStyle(durationMs: number, previewTimeMs?: number): CSSProperties {
+  return {
+    ['--gv-animation-duration']: `${durationMs}ms`,
+    ...(previewTimeMs == null ? {} : previewTStyle(previewTimeMs)),
+  } as CSSProperties
+}
+
 /** 预览态 CSS 动画负 delay 使用的本地时间。 */
 export function previewTStyle(localMs: number): CSSProperties {
   return { ['--preview-t']: `${Math.max(0, localMs)}ms` } as CSSProperties

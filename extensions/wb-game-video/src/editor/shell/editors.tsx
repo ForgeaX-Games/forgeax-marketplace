@@ -405,18 +405,25 @@ export function AttrSelect({
   entityId,
   value,
   entities,
+  fallbackValues,
   onChange,
 }: {
   entityId: string
   value: string
   entities: Record<string, Entity> | undefined
+  fallbackValues?: readonly string[]
   onChange: (attr: string) => void
 }): JSX.Element {
   const attrs = listAttrOptions(findEntity(entities, entityId))
+  const known = new Set(attrs.map((attr) => attr.id))
+  const fallbacks = (fallbackValues ?? [])
+    .filter((id, index, all) => id && !known.has(id) && all.indexOf(id) === index)
+    .map((id) => ({ id, label: `${id}（未在对象中声明）` }))
+  const options = [...attrs, ...fallbacks]
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={{ flex: 1 }}>
-      <option value="" disabled={attrs.length > 0}>选择属性…</option>
-      {attrs.map((a) => (
+      <option value="" disabled={options.length > 0}>选择属性…</option>
+      {options.map((a) => (
         <option key={a.id} value={a.id}>{a.label}</option>
       ))}
     </select>

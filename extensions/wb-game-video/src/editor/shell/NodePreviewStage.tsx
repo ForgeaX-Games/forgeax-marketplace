@@ -30,21 +30,22 @@ import { createCoreSkinRegistry } from '../../runtime/component-host/components'
 import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
-import { PreviewClockProvider, previewClockLayerClassName } from './previewClock'
+import { advancePreviewMediaClock, PreviewClockProvider, previewClockLayerClassName, type PreviewMediaClock } from './previewClock'
 import { projectNodePreviewState } from './nodePreviewState'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
 import { ScaledOverlayContent } from '../../runtime/play/ScaledOverlayContent'
 import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
-import { type MaterialItem, type TimelinePointMarker } from '../video/materialTimelineShared'
+import { type MaterialItem, type TimelineConditionMarker, type TimelinePointMarker } from '../video/materialTimelineShared'
 import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
 import { PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
-import { isLifecycleReaction, overlayMountId, type NodeAction } from '../../runtime/schema/node-config-schema'
-import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
+import { isSettlementReaction, overlayMountId, type NodeAction, type OverlayInstanceChild } from '../../runtime/schema/node-config-schema'
+import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
 import { findMountOwningChild } from '../../graph/edit/overlay-edit'
-import { setLifecycleReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
+import { setSettlementReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
+import { elementStartMs } from '../../graph/canvas/timeline-geometry'
 import { overlayFitTargets } from './overlay-fit-targets'
 import {
   OverlayCanvasInteraction,
@@ -158,7 +159,16 @@ function effectsBrief(actions: NodeAction[]): string {
   })
   if (effects.length > 2) parts.push(`等 ${effects.length} 项`)
   if (spawns > 0) parts.push(`刷出 ${spawns} 个瞬态组件`)
-  return parts.length ? parts.join(' · ') : '未配置效果'
+  if (actions.some((action) => action.kind === 'advance')) parts.push('沿边推进')
+  return parts.length ? parts.join(' · ') : '未配置动作'
+}
+
+function matchesReactionTarget(of: string, child: OverlayInstanceChild): boolean {
+  const source = child.source
+  return of === source.childId
+    || of === child.id
+    || of === `${source.mountId}/${source.childId}`
+    || of === `${source.overlayId}/${source.childId}`
 }
 
 export function NodePreviewStage({
@@ -193,6 +203,7 @@ export function NodePreviewStage({
 
   const contentAnchorRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const mediaClockRef = useRef<PreviewMediaClock | null>(null)
   const [playheadMs, setPlayheadMs] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(true)
@@ -317,6 +328,7 @@ export function NodePreviewStage({
 
   // 换节点/换视频：清播放态与选中（视频因 key 变化 remount 自动重播）。
   useEffect(() => {
+    mediaClockRef.current = null
     setPlayheadMs(0)
     setVideoDurationMs(null)
     setLoadError(false)
@@ -338,7 +350,9 @@ export function NodePreviewStage({
           setPlayheadMs(capMs ?? maxMs)
           return
         }
-        setPlayheadMs(Math.max(0, Math.min(maxMs, nowMs)))
+        const nextClock = advancePreviewMediaClock(mediaClockRef.current, nowMs, maxMs, playMode === 'loop')
+        mediaClockRef.current = nextClock
+        setPlayheadMs(nextClock.playheadMs)
       }
       raf = requestAnimationFrame(tick)
     }
@@ -348,6 +362,7 @@ export function NodePreviewStage({
 
   function seekTo(ms: number): void {
     const target = Math.max(0, Math.min(maxMs, Math.round(ms)))
+    mediaClockRef.current = { mediaMs: target, playheadMs: target }
     const v = videoRef.current
     if (v) { try { v.currentTime = target / 1000 } catch { /* metadata 未就绪 */ } }
     setPlayheadMs(target)
@@ -362,7 +377,7 @@ export function NodePreviewStage({
     if (!v) return
     if (v.paused) {
       // 已播到末尾再点播放 = 从头重播。
-      if (playheadMs >= maxMs - 40) seekTo(0)
+      if (playMode !== 'loop' && playheadMs >= maxMs - 40) seekTo(0)
       void v.play().catch(() => { /* autoplay 限制 */ })
     } else {
       v.pause()
@@ -391,19 +406,52 @@ export function NodePreviewStage({
     if (selectedMountId === item.id) focusMount(null)
   }
 
-  const pointMarkers = useMemo((): TimelinePointMarker[] => {
-    const out: TimelinePointMarker[] = []
+  const settlementTimeline = useMemo((): {
+    pointMarkers: TimelinePointMarker[]
+    conditionMarkers: TimelineConditionMarker[]
+  } => {
+    const pointMarkers: TimelinePointMarker[] = []
+    const conditionMarkers: TimelineConditionMarker[] = []
     const settlement = node.data.routingSettlement
     if (settlement?.type === 'at') {
-      out.push({ id: 'settlement', ms: settlement.ms, kind: 'settlement', label: '结算时刻 · 延迟事件边在此刻提交并离开节点' })
+      pointMarkers.push({ id: 'settlement', ms: settlement.ms, kind: 'settlement', label: '结算时刻 · 延迟事件边在此刻提交并离开节点' })
     }
-    ;(node.data.reactions ?? []).filter(isLifecycleReaction).forEach((reaction, lifecycleIndex) => {
-      const ms = reaction.when.type === 'at' ? reaction.when.ms : reaction.when.type === 'enter' ? 0 : null
-      if (ms == null) return
-      out.push({ id: `life:${lifecycleIndex}`, ms, kind: 'lifecycle', label: `结算 · ${effectsBrief(reaction.do)}` })
+    const children = expandNodeChildren(scenario, node)
+    ;(node.data.reactions ?? []).filter(isSettlementReaction).forEach((reaction, settlementIndex) => {
+      const id = `life:${settlementIndex}`
+      const actionLabel = effectsBrief(reaction.do)
+      if (reaction.when.type === 'at' || reaction.when.type === 'enter') {
+        pointMarkers.push({
+          id,
+          ms: reaction.when.type === 'at' ? reaction.when.ms : 0,
+          kind: 'lifecycle',
+          label: `结算 · ${actionLabel}`,
+        })
+        return
+      }
+      if (reaction.when.type === 'watch') {
+        const direction = reaction.when.on === 'inc' ? '增加' : reaction.when.on === 'dec' ? '减少' : '变化'
+        conditionMarkers.push({ id, label: `${reaction.when.of || '未选数值'} ${direction} → ${actionLabel}` })
+        return
+      }
+      if (reaction.when.type === 'shown' || reaction.when.type === 'hidden') {
+        const when = reaction.when
+        const child = children.find((candidate) => matchesReactionTarget(when.of, candidate))
+        const ms = when.type === 'shown'
+          ? (child ? elementStartMs(child) : null)
+          : child?.window?.endMs ?? null
+        const phase = when.type === 'shown' ? '出现' : '消失'
+        const label = `${when.of || '未选界面'} ${phase} → ${actionLabel}`
+        if (ms != null) {
+          pointMarkers.push({ id, ms, kind: 'derived', draggable: false, label })
+        } else {
+          conditionMarkers.push({ id, label })
+        }
+      }
     })
-    return out
-  }, [node.data.routingSettlement, node.data.reactions])
+    return { pointMarkers, conditionMarkers }
+  }, [node, overlays, scenario])
+  const { pointMarkers, conditionMarkers } = settlementTimeline
 
   const lifecycleIndexOf = (id: string): number | null => {
     if (!id.startsWith('life:')) return null
@@ -423,7 +471,7 @@ export function NodePreviewStage({
     if (lifecycleIndex == null) return
     onEditScenario((scenarioToEdit, nodeToEdit) => ({
       ...scenarioToEdit,
-      graph: setLifecycleReactionMs(scenarioToEdit.graph, nodeToEdit.id, lifecycleIndex, ms),
+      graph: setSettlementReactionMs(scenarioToEdit.graph, nodeToEdit.id, lifecycleIndex, ms),
     }))
   }
   /** 「添加控件」点击 / 拖入：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
@@ -570,8 +618,18 @@ export function NodePreviewStage({
             onPlay={() => setIsVideoPlaying(true)}
             onPause={() => setIsVideoPlaying(false)}
             onVolumeChange={(e) => setIsMuted(e.currentTarget.muted)}
-            onSeeked={(e) => setPlayheadMs(Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000))))}
-            onEnded={() => { setIsVideoPlaying(false); setPlayheadMs(maxMs) }}
+            onSeeked={(e) => {
+              // 自定义时间轴 seekTo 已同步重置语义时钟；播放中的原生 loop seek 不得让结算倒带。
+              if (!e.currentTarget.paused) return
+              const target = Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000)))
+              mediaClockRef.current = { mediaMs: target, playheadMs: target }
+              setPlayheadMs(target)
+            }}
+            onEnded={() => {
+              mediaClockRef.current = { mediaMs: maxMs, playheadMs: maxMs }
+              setIsVideoPlaying(false)
+              setPlayheadMs(maxMs)
+            }}
             onError={() => { setLoadError(true); setIsVideoPlaying(false) }}
           />
         ) : (
@@ -699,6 +757,7 @@ export function NodePreviewStage({
         playheadMs={playheadMs}
         selectedMaterialKey={selectedMountId ? `mount:${selectedMountId}` : null}
         pointMarkers={pointMarkers}
+        conditionMarkers={conditionMarkers}
         selectedPointMarkerId={focusedLifecycleIndex != null ? `life:${focusedLifecycleIndex}` : null}
         context="video"
         editable

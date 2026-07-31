@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { GameGraph } from '../../../runtime/schema/graph-schema'
-import { GraphCanvas } from '../GraphCanvas'
+import { canvasNodeDetails, GraphCanvas } from '../GraphCanvas'
 
 const graph: GameGraph = {
   nodes: [
@@ -38,5 +38,52 @@ describe('GraphCanvas output handles', () => {
     expect(getByLabelText('入口节点')).toHaveAttribute('title', '入口节点')
     expect(getByLabelText('入口节点')).toHaveStyle({ background: '#55b98a' })
     expect(queryAllByLabelText('入口节点')).toHaveLength(1)
+  })
+
+  it('shows the selected video and interface names on a node', () => {
+    const detailedGraph: GameGraph = {
+      nodes: [{
+        ...graph.nodes[0]!,
+        data: {
+          name: '起点',
+          media: { kind: 'video', ref: 'video-1' },
+          overlayNodes: [{ overlay: 'main-ui' }, { overlay: 'dialogue-ui' }],
+        },
+      }],
+      edges: [],
+    }
+    const { getByText, getByTestId } = render(
+      <GraphCanvas
+        graph={detailedGraph}
+        onChange={() => {}}
+        videoOptions={[{ id: 'video-1', label: '叙事·第1章·上岸' }]}
+        overlays={{
+          'main-ui': { id: 'main-ui', title: '主界面', children: [] },
+          'dialogue-ui': { id: 'dialogue-ui', title: '对话', children: [] },
+        }}
+      />,
+    )
+
+    expect(getByText('演出')).toBeTruthy()
+    expect(getByText('叙事·第1章·上岸')).toBeTruthy()
+    expect(getByText('界面')).toBeTruthy()
+    expect(getByText('主界面')).toBeTruthy()
+    expect(getByText('对话')).toBeTruthy()
+    expect(
+      getByTestId('node-edge-info').compareDocumentPosition(getByTestId('node-content-info'))
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('falls back to persisted ids when referenced catalogs are unavailable', () => {
+    const node: GameGraph['nodes'][number] = {
+      ...graph.nodes[0]!,
+      data: { name: '起点', media: { kind: 'video', ref: 'missing-video' }, overlayNodes: [{ overlay: 'missing-ui' }] },
+    }
+
+    expect(canvasNodeDetails(node)).toEqual({
+      performance: 'missing-video',
+      interfaces: ['missing-ui'],
+    })
   })
 })

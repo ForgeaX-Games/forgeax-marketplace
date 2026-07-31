@@ -346,7 +346,7 @@ export function GameStage({
                   if (!isCurrentPlayback(slot.id, playback.key)) return
                   const element = event.currentTarget
                   const nowMs = Math.floor(element.currentTime * 1000)
-                  if (videoDurationCapReached(nowMs, playback.durationMs, element.duration)) {
+                  if (!playback.loop && videoDurationCapReached(nowMs, playback.durationMs, element.duration)) {
                     element.pause()
                     onPerformanceEnd()
                     return

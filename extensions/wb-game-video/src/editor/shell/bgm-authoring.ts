@@ -34,7 +34,7 @@ function cleanMs(v: unknown): number | undefined {
 
 /**
  * 节点作用域 BGM 的补丁 —— `undefined` 返回值即「把 `data.bgm` 键删掉」（`patchNodeData` 语义）。
- * 面板出 ref / mode / restart，手写落盘的 volume / fade 原样保留。
+ * 面板出 ref / mode / volume / restart，手写落盘的 fade 原样保留。
  *
  * 两条形状规则，缺一条作者就写不出 v2 的配置或者会落下撒谎的残留：
  *

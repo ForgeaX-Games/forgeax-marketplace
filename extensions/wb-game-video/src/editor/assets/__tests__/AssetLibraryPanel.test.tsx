@@ -19,8 +19,9 @@ function controller(overrides: Partial<AssetLibraryController> = {}): AssetLibra
     upload: vi.fn(async () => undefined),
     rename: vi.fn(async () => undefined),
     remove: vi.fn(async () => {}),
+    removeMany: vi.fn(async () => ({ completed: 0 })),
     ...overrides,
-  }
+  } as AssetLibraryController
 }
 
 describe('AssetLibraryPanel', () => {

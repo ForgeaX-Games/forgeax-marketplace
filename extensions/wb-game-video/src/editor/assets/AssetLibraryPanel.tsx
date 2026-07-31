@@ -95,6 +95,10 @@ export function AssetLibraryPanel({
   const [pendingDelete, setPendingDelete] = useState<ManagedAsset | null>(null)
   const [batchUpload, setBatchUpload] = useState<BatchUploadState | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState<{ current: number, total: number } | null>(null)
 
   const imageItems = useMemo(
     () => controller.items.filter((item) => item.kind === 'image'),
@@ -111,7 +115,7 @@ export function AssetLibraryPanel({
   const activeItems = activeKind === 'image' ? imageItems : activeKind === 'audio' ? audioItems : fontItems
   const selected = activeItems.find((asset) => asset.id === selectedId)
   const previewAsset = activeItems.find((asset) => asset.id === previewId)
-  const actionsDisabled = !controller.available || controller.mutating || controller.uploading != null || batchUpload?.status === 'uploading'
+  const actionsDisabled = !controller.available || controller.mutating || controller.uploading != null || batchUpload?.status === 'uploading' || batchDeleting != null
 
   useEffect(() => {
     setSelectedId((current) => (
@@ -140,6 +144,29 @@ export function AssetLibraryPanel({
     await controller.remove(pendingDelete.id)
     if (selectedId === pendingDelete.id) setSelectedId('')
     setPendingDelete(null)
+  }
+  const toggleBatchSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const confirmBatchDelete = async () => {
+    const ids = activeItems.filter((asset) => selectedIds.has(asset.id)).map((asset) => asset.id)
+    if (ids.length === 0) return
+    setBatchError(null)
+    setBatchDeleting({ current: 1, total: ids.length })
+    const result = await controller.removeMany(ids, (current, total) => setBatchDeleting({ current, total }))
+    setBatchDeleting(null)
+    setPendingBatchDelete(false)
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      ids.slice(0, result.completed).forEach((id) => next.delete(id))
+      return next
+    })
+    if (result.failedId) setBatchError(`批量删除在“${result.failedId}”失败，已完成 ${result.completed}/${ids.length} 项。`)
   }
   const uploadFiles = async (kind: ManagedAssetKind, files: File[]) => {
     setBatchError(null)
@@ -195,14 +222,18 @@ export function AssetLibraryPanel({
               <h2>{workspaceLabel(activeKind)}</h2>
               <span>{activeItems.length} 项</span>
             </div>
+            <button type="button" className={selectionMode ? 'is-on' : ''} disabled={actionsDisabled} onClick={() => { setSelectionMode((current) => !current); setSelectedIds(new Set()) }}>{selectionMode ? '完成' : '多选'}</button>
           </header>
           {!controller.available ? <div className="alp-unavailable" role="status">图片、BGM 与字体资源 API 尚未启用。</div> : null}
           {controller.error || batchError ? <div className="alp-error" role="alert">{batchError ?? controller.error}</div> : null}
           {batchUpload ? <div className="alp-loading" role="status" title={batchUpload.fileName}>批量 {batchUpload.current}/{batchUpload.total}</div> : null}
+          {batchDeleting ? <div className="alp-loading" role="status">删除 {batchDeleting.current}/{batchDeleting.total}</div> : null}
+          {selectionMode ? <div className="alp-loading alp-batch-bar"><span>已选 {selectedIds.size} 项</span><button type="button" disabled={selectedIds.size === 0 || actionsDisabled} onClick={() => setPendingBatchDelete(true)}>删除选中</button></div> : null}
           <div className="alp-list alp-list--grid" aria-label={`${workspaceLabel(activeKind)}列表`}>
             <AssetUploadTile kind={activeKind} busy={controller.uploading === activeKind || batchUpload?.status === 'uploading'} disabled={actionsDisabled} onUpload={(kind, files) => void uploadFiles(kind, files)} />
             {activeItems.map((asset) => (
-                <article className={`alp-row${asset.id === selectedId ? ' is-selected' : ''}`} key={asset.id}>
+                <article className={`alp-row${asset.id === selectedId ? ' is-selected' : ''}${selectionMode ? ' is-selecting' : ''}`} key={asset.id}>
+                  {selectionMode ? <label className="alp-row-check"><input type="checkbox" checked={selectedIds.has(asset.id)} disabled={actionsDisabled} onChange={() => toggleBatchSelection(asset.id)} aria-label={`选择 ${asset.name}`} /></label> : null}
                   <button type="button" className="alp-row-select" onClick={() => { select(asset.id); setPreviewId(asset.id) }} aria-label={`查看 ${asset.name}`}>
                     <span className="alp-thumbnail" aria-hidden>
                       {asset.kind === 'image' && asset.url ? <img src={asset.url} alt="" /> : <span>{asset.kind === 'font' ? 'Aa' : asset.kind === 'image' ? '图片' : 'BGM'}</span>}
@@ -244,6 +275,14 @@ export function AssetLibraryPanel({
           <div className="alp-dialog" role="dialog" aria-modal="true" aria-label="删除资产">
             <p>确定删除“{pendingDelete.name}”？此操作不可撤销。</p>
             <div><button type="button" onClick={() => { setPendingDelete(null); deleteRef.current = null }}>取消</button><button type="button" onClick={() => void confirmDelete()} disabled={controller.mutating}>确认删除</button></div>
+          </div>
+        </div>
+      ) : null}
+      {pendingBatchDelete ? (
+        <div className="alp-dialog-backdrop" role="presentation">
+          <div className="alp-dialog" role="dialog" aria-modal="true" aria-label="批量删除资产">
+            <p>确定删除选中的 {selectedIds.size} 项资产？此操作不可撤销。</p>
+            <div><button type="button" onClick={() => setPendingBatchDelete(false)} disabled={batchDeleting != null}>取消</button><button type="button" onClick={() => void confirmBatchDelete()} disabled={batchDeleting != null}>确认删除</button></div>
           </div>
         </div>
       ) : null}

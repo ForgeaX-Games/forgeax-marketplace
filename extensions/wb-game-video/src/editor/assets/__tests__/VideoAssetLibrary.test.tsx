@@ -66,8 +66,9 @@ function makeController(
     renameResource: vi.fn(async () => undefined),
     retryComplete: vi.fn(async () => undefined),
     deleteResource: vi.fn(async () => {}),
+    deleteResources: vi.fn(async () => ({ completed: 0 })),
     ...overrides,
-  }
+  } as VideoAssetsController
 }
 
 describe('VideoAssetLibrary', () => {

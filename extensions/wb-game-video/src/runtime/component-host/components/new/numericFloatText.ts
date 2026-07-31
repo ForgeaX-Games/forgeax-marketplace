@@ -8,6 +8,8 @@ export interface NumericFloatTextInputs {
   value?: NumOrExpr | string
   /** 兼容旧版字符串参数；新编辑器只写 value。 */
   text?: string
+  /** 整段飘字动画的总时长，单位 ms。 */
+  durationMs?: number
 }
 
 function signed(value: number): string {
@@ -23,4 +25,9 @@ export function resolveNumericFloatText(
   const value = resolveNumericValue(inputs.value, ctx)
   if (value != null) return signed(value)
   return typeof inputs.text === 'string' && inputs.text ? inputs.text : fallback
+}
+
+/** 非法时长不应让 CSS 动画失效；缺省保持各飘字皮肤原来的 1.1 秒节奏。 */
+export function resolveNumericFloatDurationMs(value: unknown, fallback = 1100): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }

@@ -5,19 +5,33 @@ import { getSubProcess } from '../../runtime/schema/graph-schema'
 export type GraphScopePath = readonly string[]
 
 /**
- * Keep an entry stable across graph edits. When the entry node was deleted, walk the
- * old graph's outgoing edges breadth-first and choose the first surviving successor.
- * Disconnected edits fall back to the first remaining node; an empty graph keeps the
- * previous id because the published contracts require `entry` to remain a string.
+ * Normalize blueprint entry after a graph edit.
+ * - Entry deleted → walk the old graph's outgoing edges BFS (prefer `default` handle)
+ *   and pick the first surviving successor; else the first remaining node. Empty graph
+ *   keeps the previous id (`entry` must stay a string in published contracts).
+ * - Entry still present → walk incoming edges upstream until a node with no predecessors.
+ *   Multiple predecessors: prefer leftmost / topmost / id (same order as `resolveGraphEntry`).
+ *   If the walk hits a cycle, keep the original entry unchanged.
  */
 export function resolveEntryAfterGraphChange(
   before: GameGraph,
   after: GameGraph,
   entry: string,
 ): string {
+  if (after.nodes.length === 0) return entry
   const remaining = new Set(after.nodes.map((node) => node.id))
-  if (remaining.has(entry) || after.nodes.length === 0) return entry
+  const candidate = remaining.has(entry)
+    ? entry
+    : resolveEntrySuccessor(before, remaining, entry) ?? after.nodes[0]!.id
+  return walkEntryUpstream(after, candidate)
+}
 
+/** BFS along `before` out-edges from a deleted entry; prefer `default` handle. */
+function resolveEntrySuccessor(
+  before: GameGraph,
+  remaining: ReadonlySet<string>,
+  entry: string,
+): string | undefined {
   const queued = new Set<string>([entry])
   const queue = [entry]
   while (queue.length > 0) {
@@ -35,7 +49,31 @@ export function resolveEntryAfterGraphChange(
       queue.push(edge.target)
     }
   }
-  return after.nodes[0]!.id
+  return undefined
+}
+
+/** Walk in-edges from `entry` to a root; cycles fall back to `entry`. */
+function walkEntryUpstream(graph: GameGraph, entry: string): string {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]))
+  const visited = new Set<string>()
+  let current = entry
+  while (!visited.has(current)) {
+    visited.add(current)
+    const predecessors = graph.edges
+      .filter((edge) => edge.target === current)
+      .map((edge) => byId.get(edge.source))
+      .filter((node): node is NonNullable<typeof node> => !!node)
+    if (predecessors.length === 0) return current
+    predecessors.sort((a, b) => (
+      a.position.x - b.position.x
+      || a.position.y - b.position.y
+      || a.id.localeCompare(b.id)
+    ))
+    const next = predecessors[0]!.id
+    if (visited.has(next)) return entry
+    current = next
+  }
+  return entry
 }
 
 export function resolveGraphAtPath(root: GameGraph, path: GraphScopePath): GameGraph | undefined {

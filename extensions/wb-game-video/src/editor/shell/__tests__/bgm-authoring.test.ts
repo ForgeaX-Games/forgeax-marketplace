@@ -62,7 +62,7 @@ describe('patchNodeBgm', () => {
     expect(patchNodeBgm(undefined, { restart: true })).toBeUndefined()
   })
 
-  it('保留手写 blueprint.json 里的 volume / fade（面板不出这些控件，也不该抹掉）', () => {
+  it('保留面板写入的 volume 与手写 blueprint.json 里的 fade', () => {
     const kept = patchNodeBgm({ ref: 'a', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 }, { mode: 'replace' })
     expect(kept).toEqual({ ref: 'a', mode: 'replace', volume: 0.4, fadeInMs: 800, fadeOutMs: 600 })
   })

@@ -132,16 +132,35 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [focusedMountId, setFocusedMountId] = useState<string | null>(null)
   // 节点配置面板：时间轴上选中的生命周期效果（子集序号，见 isLifecycleReaction 注释）。
   const [focusedLifecycleIndex, setFocusedLifecycleIndex] = useState<number | null>(null)
+  // 独立于选中值：重复点击同一个时间轴条目也要再次把右侧锚点滚进可视区。
+  const [focusAnchorRevision, setFocusAnchorRevision] = useState(0)
   useEffect(() => { setFocusedMountId(null); setFocusedLifecycleIndex(null) }, [selected])
   // 面板里同一时刻只该有一个聚焦对象：选覆盖物就松开效果，反之亦然。
   const focusMount = useCallback((id: string | null) => {
     setFocusedMountId(id)
-    if (id != null) setFocusedLifecycleIndex(null)
+    if (id != null) {
+      setFocusedLifecycleIndex(null)
+      setFocusAnchorRevision((revision) => revision + 1)
+    }
   }, [])
   const focusLifecycle = useCallback((index: number | null) => {
     setFocusedLifecycleIndex(index)
-    if (index != null) setFocusedMountId(null)
+    if (index != null) {
+      setFocusedMountId(null)
+      setFocusAnchorRevision((revision) => revision + 1)
+    }
   }, [])
+  const clearPreviewFocusFromPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (focusedMountId == null && focusedLifecycleIndex == null) return
+    const target = event.target instanceof Element ? event.target : null
+    const mountAnchor = target?.closest('[data-focus-anchor]')
+    if (focusedMountId != null && mountAnchor?.getAttribute('data-focus-anchor') === `mount:${focusedMountId}`) return
+    const settlementAnchor = target?.closest('[data-settlement-index]')
+    if (focusedLifecycleIndex != null && settlementAnchor?.getAttribute('data-settlement-index') === String(focusedLifecycleIndex)) return
+    if (target?.closest('.gc-mclip.is-selected, .gc-point-mark.is-selected, .gc-condition-band.is-selected')) return
+    setFocusedMountId(null)
+    setFocusedLifecycleIndex(null)
+  }, [focusedLifecycleIndex, focusedMountId])
   // 节点配置面板：左侧预览区宽度（px，可拖调，localStorage 记忆）。
   const [previewW, setPreviewW] = useState<number | null>(() => {
     if (typeof window === 'undefined') return null
@@ -398,8 +417,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     playOpen ? `${snap.activeBlueprintId}:${snap.activeGraphPath.join('/')}` : null,
     playOpen ? snap.currentNodeId : null,
   )
-  // playEpoch：同节点 jump 重播时清闸（clip.nodeId 不变）
-  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId, `${runKey}:${playEpoch}`)
+  // clipSeq 区分每次实际开演；playEpoch 继续覆盖 jump / session 重建。
+  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clipSeq, `${runKey}:${playEpoch}`)
 
   // 切到另一张蓝图时清掉「从此试玩」钉住（节点 id 只在原图语义下有效）。
   useEffect(() => {
@@ -440,7 +459,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     snap.clip?.durationMs,
     { paused: playPaused, rate: playbackRate },
     snap.phase === 'ended' || !!snap.clip?.mediaId,
-    `${runKey}:${playEpoch}:${snap.clip?.nodeId ?? ''}`,
+    `${runKey}:${playEpoch}:${snap.clipSeq}`,
   )
 
   /** 从此试玩：钉住入口 + 打开浮层 + 以当前蓝图最新图重建 session 再 seek。 */
@@ -496,7 +515,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     }
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0e0c09', color: '#f6f1e9', isolation: 'isolate' }}>
+    <div
+      onPointerDownCapture={clearPreviewFocusFromPointer}
+      style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0e0c09', color: '#f6f1e9', isolation: 'isolate' }}
+    >
       {/* 顶部工具条：历史版本 → 保存 → 重置 → 草稿提示，不含画布编辑手势 */}
       <div className="gv-graph-toolbar" style={{ padding: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <VersionPicker />
@@ -583,6 +605,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           onChange={setCanvasGraph}
           entryNodeId={showingForeignPlayGraph ? undefined : canvasEntryId}
           overlays={overlays}
+          videoOptions={videoOptions}
           // 试玩游标与编辑选中共用橙色描边；未开浮层时勿把 session 当前节点画成「选中」——
           // 新建子蓝图后 session.start() 停在「入口」，否则入口会像永远选不掉。
           activeNodeId={playOpen ? snap.currentNodeId : null}
@@ -661,10 +684,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   key 随 session 重建换 → 重开不把上一局的曲子拖进新局（同 GraphPlaySurface）。 */}
               <BgmPlayer key={bgmRunKey} bgm={snap.bgm} resolveAsset={resolveBgm} paused={playPaused} playbackRate={playbackRate} />
 
-              {/* 演出 + 叠层：共享 runtime/play 的 GameStage。videoKey 带 playEpoch → 同节点再 jump 强制 remount。 */}
+              {/* 演出 + 叠层：clipSeq 区分同名/重入节点，playEpoch 区分 jump 和 session 重建。 */}
               <GameStage
                 videoSrc={videoSrc}
-                videoKey={`${snap.clip?.nodeId ?? 'clip'}-${playEpoch}`}
+                videoKey={`${snap.clipSeq}-${playEpoch}`}
                 clip={snap.clip}
                 preloadVideos={preloadVideos}
                 overlayMounts={snap.overlayMounts}
@@ -767,6 +790,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 formulas={formulas}
                 focusedMountId={focusedMountId}
                 focusedLifecycleIndex={focusedLifecycleIndex}
+                focusAnchorRevision={focusAnchorRevision}
                 onFocusMount={focusMount}
                 onFocusLifecycle={focusLifecycle}
                 previewOpen={effectivePreviewOpen}

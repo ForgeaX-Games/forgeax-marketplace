@@ -434,7 +434,7 @@ describe('接受的后果（最坏形态）：漏播在循环里会逐圈叠加�
     const scn = withStory(main(), roundVars)
     const rt = new GraphRuntime(scn.graph, scn, undefined, [leakyPack()])
     const depths: number[] = []
-    // 每次走进 `enter` 记一次栈深；起局那次也算（start 直接进入 nodes[0]）。
+    // 每次走进 `enter` 记一次栈深；起局那次也算（start 进入蓝图 entry）。
     rt.start()
     depths.push(bgmDepth(rt))
     for (let i = 0; i < 40 && rt.state.phase === 'playing'; i++) {

@@ -9,14 +9,14 @@ import { ClipPerformanceEndGate } from './clipPerformanceEndGate'
 export function useClipPerformanceEnd(
   sessionRef: RefObject<GraphSession | null>,
   setSnap: Dispatch<SetStateAction<SessionSnapshot | null>> | Dispatch<SetStateAction<SessionSnapshot>>,
-  clipNodeId: string | undefined,
-  /** session 重建（重开）时清闸，避免同 nodeId 二次开演被误拦。 */
-  resetKey?: number | string,
+  clipSeq: number,
+  /** session 重建（重开）时清闸；新 session 的序号会从头开始。 */
+  resetKey?: unknown,
 ): () => void {
   const gateRef = useRef(new ClipPerformanceEndGate())
   useEffect(() => {
     gateRef.current.reset()
-  }, [clipNodeId, resetKey])
+  }, [clipSeq, resetKey])
 
   return useCallback(() => {
     const session = sessionRef.current

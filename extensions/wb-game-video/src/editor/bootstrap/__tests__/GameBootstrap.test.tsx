@@ -78,3 +78,24 @@ test('renders inconsistent packages as an explicit non-retryable error', async (
   expect(screen.getByRole('alert')).toHaveTextContent('blueprint.json')
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
 })
+
+test('reports an empty initialize response with its HTTP status', async () => {
+  fetchMock
+    .mockResolvedValueOnce(new Response(JSON.stringify({ state: 'uninitialized', missing: [] }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(null, { status: 404 }))
+  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+  await screen.findByRole('button', { name: 'Create from template' })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Create from template' })) })
+  expect(await screen.findByText('Initialization failed')).toBeTruthy()
+  expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404 · empty response')
+})
+
+test('reports an HTML status fallback instead of exposing a JSON syntax error', async () => {
+  fetchMock.mockResolvedValueOnce(new Response('<!doctype html><title>Vite</title>', {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  }))
+  render(<GameBootstrap slug="demo" onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+  expect(await screen.findByText('Initialization failed')).toBeTruthy()
+  expect(screen.getByRole('alert')).toHaveTextContent('HTTP 200 · expected JSON, received text/html')
+})

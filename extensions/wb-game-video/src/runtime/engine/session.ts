@@ -118,6 +118,11 @@ export interface SessionSnapshot {
   currentNodeId: string | null
   clip?: ClipSnap
   /**
+   * 本会话内 `playClip` 的单调递增序号。节点 id 只在各自图内唯一，且循环会再次进入同一节点；
+   * 播放壳用这个序号区分每一次实际开演。
+   */
+  clipSeq: number
+  /**
    * 床轨此刻该怎么响（= 最近一条 `bgm` 指令的载荷，去掉 type tag、加上 `seq`）。**会话级**：
    * 与 `hud` 同寿，不随 `playClip` / overlay 清理，直到下一条 `bgm` 指令为止。
    *
@@ -149,6 +154,8 @@ export class GraphSession {
   private readonly blueprintTitles: Map<string, string>
   private readonly entityNames: Record<string, string>
   private pendingEntryReason: string | undefined
+  /** 已发出的 `playClip` 指令条数；本局单调递增，作为每次演出的唯一身份。 */
+  private clipSeq = 0
   /** 已发出的 `bgm` 指令条数；本局单调递增，作快照里那条指令的身份（见 BgmSnapshot）。 */
   private bgmSeq = 0
 
@@ -180,6 +187,7 @@ export class GraphSession {
     return {
       phase: this.runtime.state.phase,
       currentNodeId: this.runtime.state.currentNodeId,
+      clipSeq: 0,
       bgm: null,
       overlayMounts: [],
       hud: this.readHud(),
@@ -272,6 +280,8 @@ export class GraphSession {
           break
         case 'playClip':
           // 新节点开演：换片、清空上一节点的叠层。
+          this.clipSeq += 1
+          this.snapshot.clipSeq = this.clipSeq
           this.snapshot.clip = {
             nodeId: d.nodeId,
             name: d.name,

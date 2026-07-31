@@ -36,7 +36,7 @@ function field(label: string, node: JSX.Element): JSX.Element {
   )
 }
 
-/** 自动分配与 Record key 对齐的 id（添加时用；用户不可手填）。 */
+/** 自动分配与 Record key 对齐的 id（添加时用）。 */
 function allocId(prefix: string, existing: Record<string, unknown>): string {
   let i = Object.keys(existing).length
   let id = `${prefix}${i}`
@@ -45,6 +45,56 @@ function allocId(prefix: string, existing: Record<string, unknown>): string {
     id = `${prefix}${i}`
   }
   return id
+}
+
+const ATTR_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/
+
+function AttributeIdInput({
+  id,
+  onCommit,
+}: {
+  id: string
+  onCommit: (nextId: string) => string | undefined
+}): JSX.Element {
+  const [draft, setDraft] = useState('')
+  const commit = (input: HTMLInputElement): void => {
+    const nextId = draft.trim()
+    if (!nextId) return
+    const error = onCommit(nextId)
+    if (error) {
+      input.setCustomValidity(error)
+      input.reportValidity()
+      return
+    }
+    input.setCustomValidity('')
+  }
+
+  return (
+    <input
+      value={draft}
+      placeholder={id}
+      aria-label={`属性「${id}」的 id`}
+      pattern="[A-Za-z_][A-Za-z0-9_-]*"
+      style={{ width: 84 }}
+      title="属性 id：用于 entity.<实体id>.attr.<属性id> 引用；修改已有 id 可能需要同步检查公式和绑定"
+      onChange={(e) => {
+        e.currentTarget.setCustomValidity('')
+        setDraft(e.currentTarget.value)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          commit(e.currentTarget)
+        }
+        if (e.key === 'Escape') {
+          setDraft('')
+          e.currentTarget.setCustomValidity('')
+          e.currentTarget.blur()
+        }
+      }}
+      onBlur={(e) => commit(e.currentTarget)}
+    />
+  )
 }
 
 
@@ -384,8 +434,30 @@ function EntityRow({
 }): JSX.Element {
   const attrs = ent.attrs ?? {}
   const attrMeta = ent.attrMeta ?? {}
+  const [editableAttrIds, setEditableAttrIds] = useState<Set<string>>(() => new Set())
   const setAttrs = (a: Record<string, number>) => onChange({ ...ent, id: entKey, attrs: a })
   const setAttrMeta = (m: Record<string, AttrMeta>) => onChange({ ...ent, id: entKey, attrMeta: m })
+  const renameAttr = (currentId: string, nextId: string): string | undefined => {
+    const id = nextId.trim()
+    if (!id) return '属性 id 不能为空'
+    if (!ATTR_ID_PATTERN.test(id)) return '属性 id 需以字母或下划线开头，仅可包含字母、数字、下划线和短横线'
+    if (id !== currentId && Object.hasOwn(attrs, id)) return `属性 id「${id}」已存在`
+    if (id === currentId) return undefined
+
+    const nextAttrs = Object.fromEntries(
+      Object.entries(attrs).map(([key, value]) => [key === currentId ? id : key, value]),
+    )
+    const nextMeta = Object.fromEntries(
+      Object.entries(attrMeta).map(([key, value]) => [key === currentId ? id : key, value]),
+    )
+    onChange({
+      ...ent,
+      id: entKey,
+      attrs: nextAttrs,
+      attrMeta: Object.keys(nextMeta).length ? nextMeta : undefined,
+    })
+    return undefined
+  }
   const removeAttr = (ak: string) => {
     const { [ak]: _a, ...restAttrs } = attrs
     const { [ak]: _m, ...restMeta } = attrMeta
@@ -409,6 +481,7 @@ function EntityRow({
           style={{ fontSize: 11 }}
           onClick={() => {
             const id = allocId('attr', attrs)
+            setEditableAttrIds((current) => new Set(current).add(id))
             setAttrs({ ...attrs, [id]: 0 })
           }}
         >
@@ -417,7 +490,30 @@ function EntityRow({
       </div>
       {Object.entries(attrs).map(([ak, av]) => (
         <div key={ak} style={rowStyle}>
-          <input value={ak} readOnly style={{ width: 64, opacity: 0.7 }} title="属性 id：添加后固定，改「显示名」即可" />
+          {editableAttrIds.has(ak) ? (
+            <AttributeIdInput
+              id={ak}
+              onCommit={(nextId) => {
+                const error = renameAttr(ak, nextId)
+                if (!error) {
+                  setEditableAttrIds((current) => {
+                    const next = new Set(current)
+                    next.delete(ak)
+                    return next
+                  })
+                }
+                return error
+              }}
+            />
+          ) : (
+            <input
+              value={ak}
+              readOnly
+              aria-label={`属性「${ak}」的 id`}
+              style={{ width: 84, opacity: 0.7 }}
+              title="属性 id：创建并命名后固定，避免破坏公式和绑定引用"
+            />
+          )}
           <input
             value={attrMeta[ak]?.label ?? ''}
             placeholder="显示名"

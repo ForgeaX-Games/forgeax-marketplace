@@ -194,6 +194,23 @@ describe('GameStage buffered playback', () => {
     expect(onPerformanceEnd).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps looping video independent from the node duration cap', () => {
+    const onTick = vi.fn()
+    const onPerformanceEnd = vi.fn()
+    const loopingClip = { ...clip('a'), loop: true, durationMs: 500 }
+    const { container } = render(
+      <GameStage {...props({ clip: loopingClip, onTick, onPerformanceEnd })} />,
+    )
+    const video = videoFor(container, '/a.mp4')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 1000 / 1000 })
+    video.currentTime = 0.6
+
+    fireEvent.timeUpdate(video)
+
+    expect(onTick).toHaveBeenCalledWith(600)
+    expect(onPerformanceEnd).not.toHaveBeenCalled()
+  })
+
   it('does not activate a stale background load after a newer switch', () => {
     const { container, rerender } = render(<GameStage {...props()} />)
     const first = videoFor(container, '/a.mp4')

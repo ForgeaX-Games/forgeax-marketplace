@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { registerComponent, unregisterComponent } from '../../../runtime/registry/component-registry'
-import type { GameGraph, OverlayEventRef } from '../../../runtime/schema/graph-schema'
+import type { Entity, GameGraph, OverlayEventRef } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
 import { ComponentEventsEditor } from '../ComponentEventsEditor'
 import { ComponentFormFields } from '../component-form-fields'
@@ -613,6 +613,116 @@ describe('ComponentFormFields defaults', () => {
     expect(latest.max).toBeUndefined()
     expect(screen.getByText('绑定对象')).toBeTruthy()
     expect(onChange).toHaveBeenCalledTimes(2)
+  })
+
+  it('lists configured properties and repairs the property when the bound object changes', () => {
+    const onChange = vi.fn()
+    let latest: Record<string, unknown> = {}
+    function Harness(): JSX.Element {
+      const [values, setValues] = useState<Record<string, unknown>>({})
+      latest = values
+      return (
+        <ComponentFormFields
+          componentId="BattlePlayerHpBar"
+          values={values}
+          pickers={{
+            entities: {
+              'ent-player': {
+                id: 'ent-player',
+                name: '默认角色',
+                attrs: { hp: 80 },
+              },
+              hero: {
+                id: 'hero',
+                name: '自定义角色',
+                attrs: { rage: 12 },
+                attrMeta: { stamina: { label: '耐力', initial: 20 } },
+              },
+              boss: {
+                id: 'boss',
+                name: '首领',
+                attrs: { hp: 200 },
+              },
+            },
+          }}
+          onChange={(next) => {
+            latest = next
+            setValues(next)
+            onChange(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    const entity = screen.getByRole('combobox', { name: '绑定对象' })
+    const attr = screen.getByRole('combobox', { name: '绑定属性' })
+    expect(entity).toHaveValue('ent-player')
+    expect(attr).toHaveValue('hp')
+
+    fireEvent.change(entity, { target: { value: 'hero' } })
+    expect(latest).toEqual({ bind: 'hero', attr: 'rage' })
+    expect(attr).toHaveValue('rage')
+    expect(within(attr).getByRole('option', { name: 'rage' })).toBeTruthy()
+    expect(within(attr).getByRole('option', { name: '耐力（stamina）' })).toBeTruthy()
+
+    fireEvent.change(attr, { target: { value: 'stamina' } })
+    expect(latest).toEqual({ bind: 'hero', attr: 'stamina' })
+
+    fireEvent.change(entity, { target: { value: 'boss' } })
+    expect(latest).toEqual({ bind: 'boss' })
+    expect(attr).toHaveValue('hp')
+    expect(onChange).toHaveBeenCalledTimes(3)
+  })
+
+  it('shows the new hp bar default property when the entity catalog has no attributes', () => {
+    render(
+      <ComponentFormFields
+        componentId="BattlePlayerHpBar"
+        values={{}}
+        pickers={{ entities: {} }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const attr = screen.getByRole('combobox', { name: '绑定属性' })
+    expect(attr).toHaveValue('hp')
+    expect(within(attr).getByRole('option', { name: 'hp（未在对象中声明）' })).toBeTruthy()
+  })
+
+  it('removes the undeclared marker when hp is added to the bound object', () => {
+    function Harness(): JSX.Element {
+      const [entities, setEntities] = useState<Record<string, Entity>>({
+        'ent-player': { id: 'ent-player', name: '主角', attrs: {} },
+      })
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => setEntities({
+              'ent-player': { ...entities['ent-player']!, attrs: { hp: 100 } },
+            })}
+          >
+            添加 hp
+          </button>
+          <ComponentFormFields
+            componentId="BattlePlayerHpBar"
+            values={{}}
+            pickers={{ entities }}
+            onChange={vi.fn()}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+
+    const attr = screen.getByRole('combobox', { name: '绑定属性' })
+    expect(within(attr).getByRole('option', { name: 'hp（未在对象中声明）' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 hp' }))
+
+    expect(within(attr).getByRole('option', { name: 'hp' })).toBeTruthy()
+    expect(within(attr).queryByRole('option', { name: 'hp（未在对象中声明）' })).toBeNull()
   })
 
   it('uses the dynamic text picker for subtitle speaker and text', () => {

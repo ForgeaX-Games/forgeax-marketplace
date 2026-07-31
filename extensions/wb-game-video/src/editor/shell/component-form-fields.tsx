@@ -18,7 +18,7 @@ import { hasOptionEventsInput } from './editors'
 import { AttrSelect, EffectsEditor, EntitySelect, EventsEditor, TextValueInput, ValueInput, type ComponentEventLike, type EditorPickerCtx } from './editors'
 import type { TextOrRef } from './TextValueEditor'
 import { ColorPicker } from './ColorPicker'
-import { compileValuePick, findEntity } from './valueExprPick'
+import { compileValuePick, findEntity, listAttrOptions } from './valueExprPick'
 
 /**
  * events 编辑器的 variant 由触发的输入标记本身决定，不查组件 id 也不查任何跨组件分类表：
@@ -113,6 +113,36 @@ function boundEntityId(inputs: ComponentInput[], values: Record<string, unknown>
   const v = entityInput ? values[entityInput.key] : undefined
   if (typeof v === 'string') return v
   return typeof entityInput?.default === 'string' ? entityInput.default : ''
+}
+
+/**
+ * 切换实体时同步修正依赖它的属性字段。
+ *
+ * 旧属性若在新实体上仍存在则保留；否则优先使用 manifest 默认属性，再回落到新实体首个属性。
+ * 默认属性继续保持稀疏存储，只有非默认选择才写入 inputs。
+ */
+function patchEntityBinding(
+  inputs: ComponentInput[],
+  values: Record<string, unknown>,
+  entityKey: string,
+  entityId: string,
+  entities: Record<string, Entity> | undefined,
+): Record<string, unknown> {
+  let next = patchValue(values, entityKey, entityId || undefined)
+  const attrs = listAttrOptions(findEntity(entities, entityId))
+  const attrIds = new Set(attrs.map((attr) => attr.id))
+
+  for (const attrInput of inputs.filter((input) => input.component === 'attr')) {
+    const storedValue = values[attrInput.key]
+    const stored = typeof storedValue === 'string' ? storedValue : ''
+    const fallback = typeof attrInput.default === 'string' ? attrInput.default : ''
+    const current = stored || fallback
+    if (current && attrIds.has(current)) continue
+
+    const selected = fallback && attrIds.has(fallback) ? fallback : (attrs[0]?.id ?? '')
+    next = patchValue(next, attrInput.key, selected === fallback ? undefined : selected)
+  }
+  return next
 }
 
 type HpValueMode = 'bound' | 'custom'
@@ -244,6 +274,7 @@ function renderInput(
   inputs: ComponentInput[],
   values: Record<string, unknown>,
   onPatch: (key: string, value: unknown) => void,
+  onValuesChange: (next: Record<string, unknown>) => void,
   pickers: EditorPickerCtx | undefined,
   compact: boolean,
   labelWidth?: CSSProperties['width'],
@@ -354,20 +385,28 @@ function renderInput(
           <EntitySelect
             value={typeof val === 'string' ? val : (typeof inp.default === 'string' ? inp.default : '')}
             entities={pickers?.entities}
-            onChange={(id) => onPatch(inp.key, id || undefined)}
+            onChange={(id) => {
+              if (isHpBarComponent(componentId)) {
+                onValuesChange(patchEntityBinding(inputs, values, inp.key, id, pickers?.entities))
+                return
+              }
+              onPatch(inp.key, id || undefined)
+            }}
           />,
         )}
       </span>
     )
   }
   if (inp.component === 'attr') {
+    const attrValue = typeof val === 'string' ? val : (typeof inp.default === 'string' ? inp.default : '')
     return (
       <span key={inp.key}>
         {wrap(
           <AttrSelect
             entityId={boundEntityId(inputs, values)}
-            value={typeof val === 'string' ? val : (typeof inp.default === 'string' ? inp.default : '')}
+            value={attrValue}
             entities={pickers?.entities}
+            fallbackValues={isHpBarComponent(componentId) ? [attrValue] : undefined}
             onChange={(attr) => onPatch(inp.key, attr || undefined)}
           />,
         )}
@@ -594,18 +633,18 @@ export function ComponentFormFields({
           {grouped ? groupLabel('参数配置') : null}
           {compact ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'center' }}>
-              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, true, labelWidth))}
+              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, true, labelWidth))}
             </div>
           ) : (
-            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, false, labelWidth))
+            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, false, labelWidth))
           )}
-          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact, labelWidth))}
+          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth))}
         </div>
       ) : null}
       {events.length > 0 ? (
         <div style={grouped ? { borderTop: '1px solid #2f2f2f', paddingTop: 5 } : undefined}>
           {grouped ? groupLabel('事件配置') : null}
-          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact, labelWidth))}
+          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth))}
         </div>
       ) : null}
     </div>

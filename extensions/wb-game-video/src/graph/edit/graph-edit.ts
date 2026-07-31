@@ -8,7 +8,7 @@
 import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef, SubProcess } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
-import { isLifecycleReaction } from '../../runtime/schema/node-config-schema'
+import { isLifecycleReaction, isSettlementReaction } from '../../runtime/schema/node-config-schema'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -533,6 +533,22 @@ export function setLifecycleReactionMs(graph: GameGraph, nodeId: string, lifecyc
   const absolute = reactions.findIndex((r) => isLifecycleReaction(r) && ++seen === lifecycleIndex)
   const target = reactions[absolute]
   if (!target) return graph
+  const next = Math.max(0, Math.round(ms))
+  if (target.when.type === 'at' && target.when.ms === next) return graph
+  return updateNodeData(graph, nodeId, {
+    reactions: reactions.map((r, i) => (i === absolute ? { ...r, when: { type: 'at' as const, ms: next } } : r)),
+  })
+}
+
+/** 统一结算子集内按序号移动定时结算；条件结算没有时间坐标，定位到它时保持 no-op。 */
+export function setSettlementReactionMs(graph: GameGraph, nodeId: string, settlementIndex: number, ms: number): GameGraph {
+  const node = graph.nodes.find((n) => n.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!reactions) return graph
+  let seen = -1
+  const absolute = reactions.findIndex((r) => isSettlementReaction(r) && ++seen === settlementIndex)
+  const target = reactions[absolute]
+  if (!target || !isLifecycleReaction(target)) return graph
   const next = Math.max(0, Math.round(ms))
   if (target.when.type === 'at' && target.when.ms === next) return graph
   return updateNodeData(graph, nodeId, {

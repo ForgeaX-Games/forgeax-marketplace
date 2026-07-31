@@ -123,6 +123,7 @@ let graphClipboard: { nodes: GameNode[]; edges: GameEdge[] } | null = null
 
 interface CanvasNodeViewData {
   fx: FXNode
+  details: CanvasNodeDetails
   active?: boolean
   /** 子流程/子蓝图容器（subProcess 或 subFlowPack）→ 显示可下钻徽标。 */
   isGroup?: boolean
@@ -135,6 +136,33 @@ interface CanvasNodeViewData {
   onDuplicate?: (nodeId: string) => void
   onDelete?: (nodeId: string) => void
   [key: string]: unknown
+}
+
+export interface CanvasNodeDetails {
+  performance?: string
+  interfaces: string[]
+}
+
+interface CanvasVideoOption {
+  id: string
+  label: string
+}
+
+/** 画布摘要只投影既有引用；名称随素材库/界面目录实时更新，不重复写入节点契约。 */
+export function canvasNodeDetails(
+  node: GameNode,
+  overlays?: Record<string, Overlay>,
+  videoOptions: readonly CanvasVideoOption[] = [],
+): CanvasNodeDetails {
+  const mediaRef = node.data.media?.ref?.trim()
+  const performance = mediaRef
+    ? videoOptions.find((option) => option.id === mediaRef)?.label.trim() || mediaRef
+    : undefined
+  const interfaces = (node.data.overlayNodes ?? []).map((mount) => {
+    const title = overlays?.[mount.overlay]?.title?.trim()
+    return title || mount.overlay
+  })
+  return { performance, interfaces }
 }
 
 const BADGE_COLOR: Record<string, string> = {
@@ -198,7 +226,7 @@ const Ico = {
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
+  const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
   const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
   return (
@@ -300,7 +328,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
         )}
       </div>
       {/* 出口引脚 */}
-      <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
+      <div data-testid="node-edge-info" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
         {fx.outputs.map((h) => {
           const fid = h.data?.flowId ?? h.id
           const display = h.data?.displayLabel ?? h.label ?? fid
@@ -319,6 +347,30 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )
         })}
       </div>
+      {(details.performance || details.interfaces.length > 0) && (
+        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '7px 10px', borderTop: '1px solid #2b2f37' }}>
+          {details.performance && (
+            <>
+              <span style={{ color: '#8f98a8' }}>演出</span>
+              <span title={details.performance} style={{ minWidth: 0, color: '#d9dde5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                {details.performance}
+              </span>
+            </>
+          )}
+          {details.interfaces.length > 0 && (
+            <>
+              <span style={{ color: '#8f98a8' }}>界面</span>
+              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                {details.interfaces.map((label, index) => (
+                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -426,6 +478,8 @@ export interface GraphCanvasProps {
   entryNodeId?: string
   /** ui.overlays —— 派生节点出口引脚中文标签（与节点配置「何时走」一致）。 */
   overlays?: Record<string, Overlay>
+  /** 视频素材候选；仅用于把 node.data.media.ref 投影为节点卡片展示名。 */
+  videoOptions?: readonly CanvasVideoOption[]
   activeNodeId?: string | null
   traversedEdgeIds?: Set<string>
   /**
@@ -479,6 +533,7 @@ function GraphCanvasInner({
   onChange,
   entryNodeId,
   overlays,
+  videoOptions = [],
   activeNodeId,
   traversedEdgeIds,
   readOnly = false,
@@ -652,6 +707,7 @@ function GraphCanvasInner({
           selected: selectedIds.includes(n.id),
           data: {
             fx: n,
+            details: canvasNodeDetails(graph.nodes.find((node) => node.id === n.id)!, overlays, videoOptions),
             active: n.id === activeNodeId,
             isEntry: n.id === entryNodeId,
             isGroup: containerIds.has(n.id),
@@ -662,7 +718,7 @@ function GraphCanvasInner({
             onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, graph.nodes, overlays, videoOptions, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>

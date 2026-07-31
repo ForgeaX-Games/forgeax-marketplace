@@ -15,10 +15,12 @@ const NEW_COMPONENT_IDS = [
   'GainFloatText',
   'InkYingMo',
   'InkKou',
+  'StatusNotice',
+  'TextOption',
 ] as const
 
 describe('components/new registration', () => {
-  it('registers all nine definitions and renderers in isolated registries', () => {
+  it('registers all component definitions and renderers in isolated registries', () => {
     const components = createDefaultComponentRegistry()
     const skins = createCoreSkinRegistry()
 

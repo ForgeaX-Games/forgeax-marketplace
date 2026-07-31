@@ -58,6 +58,13 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .gvv-gen-hint { font-size: 11px; color: var(--gc-faint); line-height: 1.5; }
 .gvv-gen-hint.is-error { color: #ff8f8f; }
 .val-head-upload, .val-head-refresh { border: 1px solid var(--gc-line-soft); background: var(--gc-panel2); color: var(--gc-text); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+.val-library .gc-list-head { flex-wrap: nowrap; }
+.val-library .gc-list-title { flex: 0 0 auto; white-space: nowrap; }
+.val-head-select { flex: none; width: 28px; height: 28px; padding: 0; border: 1px solid var(--gc-line-soft); border-radius: 6px; color: var(--gc-muted); background: var(--gc-panel2); cursor: pointer; }
+.val-head-select.is-on { color: #1a1206; border-color: var(--gc-accent); background: var(--gc-accent); }
+.val-batch-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--gc-line-soft); color: var(--gc-faint); font-size: 11px; }
+.val-batch-bar button { border: 1px solid var(--gc-line-soft); border-radius: 6px; padding: 3px 7px; background: var(--gc-panel2); color: var(--gc-text); font-size: 11px; cursor: pointer; }
+.val-batch-bar button:last-child { margin-left: auto; }
 .val-head-upload { position: relative; display: inline-flex; flex: none; min-width: 30px; min-height: 28px; padding: 2px 8px; align-items: center; justify-content: center; overflow: hidden; }
 .val-head-upload > span { pointer-events: none; }
 .val-head-upload-input { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
@@ -79,6 +86,9 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-empty { color: var(--gc-faint); font-size: 12px; padding: 12px 10px; }
 .val-row { position: relative; }
 .val-row > .gc-row { width: 100%; min-width: 0; }
+.val-row.is-selecting > .gc-row { padding-right: 36px; }
+.val-row-select { position: absolute !important; top: 50%; right: 10px; z-index: 2; display: grid !important; width: 18px; height: 18px; margin: 0 !important; padding: 0 !important; place-items: center; line-height: 1; transform: translateY(-50%); }
+.val-row-select input { margin: 0; accent-color: var(--gc-accent); }
 .val-row .gc-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .val-row-action { position: absolute; top: 50%; transform: translateY(-50%); min-width: 44px; height: 28px; min-height: 28px; padding: 0 6px; border: 1px solid var(--gc-line-soft); background: var(--gc-panel); color: var(--gc-muted); border-radius: 999px; font-size: 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease, border-color .15s ease; }
 .val-row-rename { right: 58px; }

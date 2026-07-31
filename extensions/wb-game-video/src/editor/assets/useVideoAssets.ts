@@ -14,6 +14,7 @@ import {
   type PreparedVideoUpload,
 } from './video-upload'
 import { useKinoVideoCache, useKinoVideoResources } from './kinoVideoCacheStore'
+import { deleteSequentially } from './batch-delete'
 import { t } from '../../i18n'
 
 export const DEFAULT_VIDEO_PAGE_SIZE = 20
@@ -48,6 +49,7 @@ export interface VideoAssetsController {
   renameResource: (resourceId: string, name: string) => Promise<KinoResourceDTO | undefined>
   retryComplete: () => Promise<KinoResourceDTO | undefined>
   deleteResource: (resourceId: string) => Promise<void>
+  deleteResources: (resourceIds: readonly string[]) => Promise<{ completed: number, failedId?: string }>
 }
 
 export interface UseVideoAssetsOptions {
@@ -437,6 +439,28 @@ export function useVideoAssets(
     [cacheRemove, client, gameId, options.client, refresh],
   )
 
+  const deleteResources = useCallback(
+    async (resourceIds: readonly string[]) => {
+      if (resourceIds.length === 0) return { completed: 0 }
+      const generation = ++crudGeneration.current
+      setMutating(true)
+      setLocalError(null)
+      const result = await deleteSequentially(resourceIds, async (resourceId) => {
+        await client.delete(resourceId, gameId, { signal: abortRef.current?.signal })
+        if (!options.client) cacheRemove(gameId, resourceId)
+      })
+      if (mountedRef.current && generation === crudGeneration.current) {
+        if (result.error) setLocalError(safeErrorMessage(result.error))
+        setLocalItems((current) => current.filter((item) => !resourceIds.slice(0, result.completed).includes(item.id)))
+        setLocalTotal((current) => Math.max(0, current - result.completed))
+        setMutating(false)
+        await refresh()
+      }
+      return { completed: result.completed, failedId: result.failedId }
+    },
+    [cacheRemove, client, gameId, options.client, refresh],
+  )
+
   const hasMore = items.length < total
 
   return {
@@ -460,5 +484,6 @@ export function useVideoAssets(
     renameResource,
     retryComplete,
     deleteResource,
+    deleteResources,
   }
 }

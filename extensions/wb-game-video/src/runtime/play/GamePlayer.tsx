@@ -40,7 +40,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
   const [rootEl, setRootEl] = useState<HTMLElement | null>(null)
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
   const [videoAudioEnabled, setVideoAudioEnabled] = useState(false)
-  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId)
+  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clipSeq, session)
   const videoSrc = resolveAsset(snap.clip?.mediaId, game)
   const preloadVideos = useMemo(
     () => session.preloadClips().map((candidate) => ({
@@ -64,7 +64,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
     if (snap.phase === 'ended' || !snap.clip?.durationMs || snap.clip.mediaId) return
     const t = setTimeout(() => endPerformance(), snap.clip.durationMs)
     return () => clearTimeout(t)
-  }, [snap.clip?.nodeId, snap.phase, snap.clip?.durationMs, snap.clip?.mediaId, endPerformance])
+  }, [snap.clipSeq, snap.phase, snap.clip?.durationMs, snap.clip?.mediaId, endPerformance])
 
   const skinCtx: SkinCtx = {
     hud: snap.hud,
@@ -85,6 +85,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
         <BgmPlayer bgm={snap.bgm} resolveAsset={resolveBgm} />
         <GameStage
           videoSrc={videoSrc}
+          videoKey={`clip-${snap.clipSeq}`}
           clip={snap.clip}
           preloadVideos={preloadVideos}
           overlayMounts={snap.overlayMounts}

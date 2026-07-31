@@ -13,12 +13,13 @@ const processGraph = (id: string) => getSubProcess(NODIA_DEMO.graph.nodes.find((
 
 describe('toFXView', () => {
   it('derives handles: narrative handoff has a default output; wait has skill event outputs', () => {
-    const fx = toFXView(NODIA_DEMO.graph, overlays())
-    const handoff = fx.nodes.find((n) => n.id === 'n_nolotus')!
+    const rootFx = toFXView(NODIA_DEMO.graph, overlays())
+    const handoff = rootFx.nodes.find((n) => n.id === 'n_nolotus')!
     const outIds = handoff.outputs.map((h) => h.data?.flowId)
     expect(outIds).toContain('default')
 
-    const wait = fx.nodes.find((n) => n.id === 'wait')!
+    const attackFx = toFXView(processGraph('a_my'), overlays())
+    const wait = attackFx.nodes.find((n) => n.id === 'wait')!
     const wOut = wait.outputs.map((h) => h.data?.flowId)
     expect(wOut).toContain('light')
     expect(wOut).toContain('heavy')
@@ -39,7 +40,7 @@ describe('toFXView', () => {
     const light = wait.outputs.find((h) => h.data?.flowId === 'light')!
     expect(light.label).toBe('轻攻击')
     expect(light.data?.displayLabel).toBe('轻攻击')
-    const handoff = fx.nodes.find((n) => n.id === 'n_nolotus')!
+    const handoff = toFXView(NODIA_DEMO.graph, overlays()).nodes.find((n) => n.id === 'n_nolotus')!
     const def = handoff.outputs.find((h) => h.data?.flowId === 'default')!
     expect(def.label).toBe('默认推进')
   })

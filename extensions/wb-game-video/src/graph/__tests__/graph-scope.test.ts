@@ -70,6 +70,64 @@ describe('nested graph scope', () => {
     expect(resolveEntryAfterGraphChange(branched, after, 'entry')).toBe('default-target')
   })
 
+  it('promotes entry upstream when a predecessor is connected', () => {
+    const before: GameGraph = {
+      nodes: [node('a'), node('b')],
+      edges: [],
+    }
+    const after: GameGraph = {
+      nodes: before.nodes,
+      edges: [{ id: 'ba', source: 'b', target: 'a', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    expect(resolveEntryAfterGraphChange(before, after, 'a')).toBe('b')
+  })
+
+  it('walks a predecessor chain to the root', () => {
+    const after: GameGraph = {
+      nodes: [node('a'), node('b'), node('c')],
+      edges: [
+        { id: 'ba', source: 'b', target: 'a', sourceHandle: 'default', targetHandle: 'in' },
+        { id: 'cb', source: 'c', target: 'b', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    expect(resolveEntryAfterGraphChange(after, after, 'a')).toBe('c')
+  })
+
+  it('keeps the original entry when upstream walk hits a cycle', () => {
+    const after: GameGraph = {
+      nodes: [node('a'), node('b')],
+      edges: [
+        { id: 'ba', source: 'b', target: 'a', sourceHandle: 'default', targetHandle: 'in' },
+        { id: 'ab', source: 'a', target: 'b', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    expect(resolveEntryAfterGraphChange(after, after, 'a')).toBe('a')
+  })
+
+  it('picks the leftmost predecessor when the entry has multiple in-edges', () => {
+    const after: GameGraph = {
+      nodes: [
+        { ...node('a'), position: { x: 200, y: 0 } },
+        { ...node('b'), position: { x: 100, y: 0 } },
+        { ...node('c'), position: { x: 0, y: 0 } },
+      ],
+      edges: [
+        { id: 'ba', source: 'b', target: 'a', sourceHandle: 'default', targetHandle: 'in' },
+        { id: 'ca', source: 'c', target: 'a', sourceHandle: 'default', targetHandle: 'in' },
+      ],
+    }
+    expect(resolveEntryAfterGraphChange(after, after, 'a')).toBe('c')
+  })
+
+  it('does not move entry back when a predecessor edge is removed', () => {
+    const before: GameGraph = {
+      nodes: [node('a'), node('b')],
+      edges: [{ id: 'ba', source: 'b', target: 'a', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    const after: GameGraph = { nodes: before.nodes, edges: [] }
+    expect(resolveEntryAfterGraphChange(before, after, 'b')).toBe('b')
+  })
+
   it('updates and resolves a nested subProcess entry when its entry node is deleted', () => {
     const next = updateGraphAtPath(root, ['combat', 'turn'], (graph) => ({
       nodes: graph.nodes.filter((item) => item.id !== 'entry'),

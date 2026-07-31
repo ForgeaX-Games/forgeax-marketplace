@@ -140,14 +140,14 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
   )
   /** 床轨解析器（引擎只抛资产 id，URL 归壳层）；稳定引用，避免每帧让 BgmPlayer 重跑 effect。 */
   const resolveBgm = useCallback((id: string | undefined) => resolveMediaSrc(id, game), [game])
-  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clip?.nodeId, restartKey)
+  const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap?.clipSeq ?? 0, restartKey)
 
   useControlledPlaybackTimeout(
     endPerformance,
     snap?.clip?.durationMs,
     { paused, rate: playbackRate },
     !snap || snap.phase === 'ended' || !!snap.clip?.mediaId,
-    `${restartKey}:${snap?.clip?.nodeId ?? ''}`,
+    `${restartKey}:${snap?.clipSeq ?? 0}`,
   )
 
   useEffect(() => {
@@ -279,6 +279,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       {/* 演出画面 + 叠层：共享 runtime/play 的 GameStage（视频舞台锚定内容矩形，HUD/QTE/交互随视频走）。 */}
       <GameStage
         videoSrc={videoSrc}
+        videoKey={`${restartKey}:${snap?.clipSeq ?? 0}`}
         clip={snap?.clip}
         preloadVideos={preloadVideos}
         overlayMounts={snap?.overlayMounts ?? []}

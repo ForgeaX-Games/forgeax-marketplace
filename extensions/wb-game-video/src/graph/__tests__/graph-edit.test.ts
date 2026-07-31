@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementReactionMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 
@@ -108,6 +108,26 @@ describe('graph-edit', () => {
     expect(setLifecycleReactionMs(withReactions, 'a', 2, 500)).toBe(withReactions)
     // 越界下标 no-op。
     expect(setLifecycleReactionMs(withReactions, 'a', 9, 500)).toBe(withReactions)
+  })
+
+  it('setSettlementReactionMs：统一结算序号包含条件项，但只有定时项可拖', () => {
+    const graph: GameGraph = {
+      nodes: [{
+        ...n('a'),
+        data: {
+          name: 'a',
+          reactions: [
+            { when: { type: 'watch', of: 'entity.ent-player.attr.hp', on: 'dec' }, do: [] },
+            { when: { type: 'at', ms: 500 }, do: [] },
+          ],
+        },
+      }],
+      edges: [],
+    }
+
+    expect(setSettlementReactionMs(graph, 'a', 0, 900)).toBe(graph)
+    expect(setSettlementReactionMs(graph, 'a', 1, 900).nodes[0]?.data.reactions?.[1]?.when)
+      .toEqual({ type: 'at', ms: 900 })
   })
 
   it('makeEmptySubFlowPack', () => {
