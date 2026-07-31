@@ -86,6 +86,14 @@ function ensureCanvasStyle(): void {
     .gv-sel-bar button:hover{border-color:#f08840}
     .gv-sel-bar button.danger:hover{border-color:#ef4444;color:#ffb4b4}
     .gv-sel-bar .hint{opacity:.55;font-size:11px}
+    /* 可连线出口：保持布局尺寸不变，轻微放大并外扩约 4px 提示可拖拽。 */
+    .gv-flow-handle{transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;transform-origin:center;isolation:isolate}
+    .gv-flow-handle.is-interactive{cursor:crosshair}
+    .gv-flow-handle.is-interactive:hover,.gv-flow-handle.is-interactive:focus-visible{transform:scale(1.18)!important;filter:brightness(1.18);box-shadow:0 0 0 4px color-mix(in srgb,currentColor 24%,transparent);z-index:5}
+    /* 试玩只读画布不选择节点/边：图面统一用平移手掌，边不参与命中，避免 pointer/grab 闪动。 */
+    .gv-readonly-flow .react-flow__pane,.gv-readonly-flow .react-flow__node{cursor:grab}
+    .gv-readonly-flow .react-flow__edge{pointer-events:none;cursor:grab}
+    .gv-readonly-flow .react-flow__pane.dragging{cursor:grabbing}
     /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
     .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
     .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #5a4038;border-radius:999px;background:rgba(27,23,19,.96);color:#f0a8a8;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
@@ -115,16 +123,46 @@ let graphClipboard: { nodes: GameNode[]; edges: GameEdge[] } | null = null
 
 interface CanvasNodeViewData {
   fx: FXNode
+  details: CanvasNodeDetails
   active?: boolean
-  /** 子流程/子蓝图容器（subFlow 或 subFlowPack）→ 显示可下钻徽标。 */
+  /** 子流程/子蓝图容器（subProcess 或 subFlowPack）→ 显示可下钻徽标。 */
   isGroup?: boolean
   /** 子蓝图容器（与同图子流程区分徽标文案）。 */
   isPack?: boolean
+  /** 当前图的入口业务节点。 */
+  isEntry?: boolean
   onDrill?: (nodeId: string) => void
   onInsertAfter?: (nodeId: string) => void
   onDuplicate?: (nodeId: string) => void
   onDelete?: (nodeId: string) => void
   [key: string]: unknown
+}
+
+export interface CanvasNodeDetails {
+  performance?: string
+  interfaces: string[]
+}
+
+interface CanvasVideoOption {
+  id: string
+  label: string
+}
+
+/** 画布摘要只投影既有引用；名称随素材库/界面目录实时更新，不重复写入节点契约。 */
+export function canvasNodeDetails(
+  node: GameNode,
+  overlays?: Record<string, Overlay>,
+  videoOptions: readonly CanvasVideoOption[] = [],
+): CanvasNodeDetails {
+  const mediaRef = node.data.media?.ref?.trim()
+  const performance = mediaRef
+    ? videoOptions.find((option) => option.id === mediaRef)?.label.trim() || mediaRef
+    : undefined
+  const interfaces = (node.data.overlayNodes ?? []).map((mount) => {
+    const title = overlays?.[mount.overlay]?.title?.trim()
+    return title || mount.overlay
+  })
+  return { performance, interfaces }
 }
 
 const BADGE_COLOR: Record<string, string> = {
@@ -188,7 +226,7 @@ const Ico = {
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, active, isGroup, isPack, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
+  const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
   const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
   return (
@@ -222,7 +260,11 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
       ))}
       {/* 标题条（按玩法/结局着色）；⋮ 与文案同排垂直居中 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 6px 6px 10px', background: `${accent}22`, borderBottom: `1px solid ${accent}55`, borderRadius: '8px 8px 0 0' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, flexShrink: 0 }} />
+        <span
+          aria-label={isEntry ? '入口节点' : undefined}
+          title={isEntry ? '入口节点' : undefined}
+          style={{ width: 8, height: 8, borderRadius: '50%', background: isEntry ? '#55b98a' : accent, flexShrink: 0 }}
+        />
         <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
         {fx.data.badge && (
           <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
@@ -286,7 +328,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
         )}
       </div>
       {/* 出口引脚 */}
-      <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
+      <div data-testid="node-edge-info" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
         {fx.outputs.map((h) => {
           const fid = h.data?.flowId ?? h.id
           const display = h.data?.displayLabel ?? h.label ?? fid
@@ -294,11 +336,41 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           return (
             <div key={h.id} style={{ position: 'relative', fontSize: 10, color: c, display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8 }}>
               <span title={fid}>{display}</span>
-              <Handle id={h.id} type="source" position={Position.Right} style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, background: c, border: 'none' }} />
+              <Handle
+                id={h.id}
+                type="source"
+                position={Position.Right}
+                className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
+                style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, color: c, background: c, border: 'none', pointerEvents: canEdit ? undefined : 'none' }}
+              />
             </div>
           )
         })}
       </div>
+      {(details.performance || details.interfaces.length > 0) && (
+        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '7px 10px', borderTop: '1px solid #2b2f37' }}>
+          {details.performance && (
+            <>
+              <span style={{ color: '#8f98a8' }}>演出</span>
+              <span title={details.performance} style={{ minWidth: 0, color: '#d9dde5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                {details.performance}
+              </span>
+            </>
+          )}
+          {details.interfaces.length > 0 && (
+            <>
+              <span style={{ color: '#8f98a8' }}>界面</span>
+              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                {details.interfaces.map((label, index) => (
+                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -402,8 +474,12 @@ const edgeTypes = { flow: FlowEdge }
 export interface GraphCanvasProps {
   graph: GameGraph
   onChange: (next: GameGraph) => void
+  /** 当前作用域入口节点；只影响画布标识，不改变运行时。 */
+  entryNodeId?: string
   /** ui.overlays —— 派生节点出口引脚中文标签（与节点配置「何时走」一致）。 */
   overlays?: Record<string, Overlay>
+  /** 视频素材候选；仅用于把 node.data.media.ref 投影为节点卡片展示名。 */
+  videoOptions?: readonly CanvasVideoOption[]
   activeNodeId?: string | null
   traversedEdgeIds?: Set<string>
   /**
@@ -428,7 +504,7 @@ export interface GraphCanvasProps {
   /** 面板占画布右侧的宽度比例（0~1）；revealNodeId 据此算可见区中心偏移。默认 0（不偏移）。 */
   revealPanelRatio?: number
   onJump?: (nodeId: string) => void
-  /** 双击子流程容器节点（有 subFlow）时下钻。 */
+  /** 双击内嵌子流程容器节点（有 subProcess）时下钻。 */
   onDrill?: (containerId: string) => void
   /** 点击画布空白处（取消选中 → 隐藏节点配置面板）。 */
   onPaneClick?: () => void
@@ -455,7 +531,9 @@ export function GraphCanvas(props: GraphCanvasProps): JSX.Element {
 function GraphCanvasInner({
   graph,
   onChange,
+  entryNodeId,
   overlays,
+  videoOptions = [],
   activeNodeId,
   traversedEdgeIds,
   readOnly = false,
@@ -629,7 +707,9 @@ function GraphCanvasInner({
           selected: selectedIds.includes(n.id),
           data: {
             fx: n,
+            details: canvasNodeDetails(graph.nodes.find((node) => node.id === n.id)!, overlays, videoOptions),
             active: n.id === activeNodeId,
+            isEntry: n.id === entryNodeId,
             isGroup: containerIds.has(n.id),
             isPack: packIds.has(n.id),
             onDrill,
@@ -638,7 +718,7 @@ function GraphCanvasInner({
             onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, activeNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, graph.nodes, overlays, videoOptions, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>
@@ -834,6 +914,7 @@ function GraphCanvasInner({
       onMouseDown={() => rootRef.current?.focus()}
     >
       <ReactFlow
+        className={readOnly ? 'gv-readonly-flow' : undefined}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
@@ -862,6 +943,7 @@ function GraphCanvasInner({
         }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
+        elementsSelectable={!readOnly}
         edgesFocusable={!readOnly}
         edgesReconnectable={false}
         selectionKeyCode={readOnly ? null : 'Shift'}

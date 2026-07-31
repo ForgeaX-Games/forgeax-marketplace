@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSameGraphSubflow, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, normalizeSubFlowFields, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementReactionMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
-import { getSubFlow } from '../../runtime/schema/graph-schema'
+import { getSubProcess } from '../../runtime/schema/graph-schema'
 
 const n = (id: string): GameNode => ({
   id,
@@ -110,25 +110,45 @@ describe('graph-edit', () => {
     expect(setLifecycleReactionMs(withReactions, 'a', 9, 500)).toBe(withReactions)
   })
 
+  it('setSettlementReactionMs：统一结算序号包含条件项，但只有定时项可拖', () => {
+    const graph: GameGraph = {
+      nodes: [{
+        ...n('a'),
+        data: {
+          name: 'a',
+          reactions: [
+            { when: { type: 'watch', of: 'entity.ent-player.attr.hp', on: 'dec' }, do: [] },
+            { when: { type: 'at', ms: 500 }, do: [] },
+          ],
+        },
+      }],
+      edges: [],
+    }
+
+    expect(setSettlementReactionMs(graph, 'a', 0, 900)).toBe(graph)
+    expect(setSettlementReactionMs(graph, 'a', 1, 900).nodes[0]?.data.reactions?.[1]?.when)
+      .toEqual({ type: 'at', ms: 900 })
+  })
+
   it('makeEmptySubFlowPack', () => {
     const pack = makeEmptySubFlowPack({ id: 'enemy-turn', title: '敌方回合', version: '1' })
     expect(pack.version).toBe('1')
     expect(pack.entry).toBe('entry')
-    expect(pack.graph.nodes[0]?.data.name).toBe('入口')
+    expect(pack.graph.nodes[0]?.data.name).toBe('新演出节点')
     expect(pack.graph.nodes[0]?.data.durationMs).toBeUndefined()
   })
 
-  it('attachSameGraphSubflow: creates dedicated entry; does not steal existing main-flow node', () => {
-    // a→b 主链：若误把 b 当入口，根视图会把 b 藏进子流程成员。
+  it('attachSubProcess: creates its entry inside the private child graph', () => {
     let g = connect(g0(), { source: 'a', sourceHandle: 'default', target: 'b' })
-    g = attachSameGraphSubflow(g, 'a')
-    const entry = getSubFlow(g.nodes.find((x) => x.id === 'a')!.data)
-    expect(entry).toBeTruthy()
-    expect(entry).not.toBe('b')
-    expect(g.nodes.some((x) => x.id === entry)).toBe(true)
+    g = attachSubProcess(g, 'a')
+    const process = getSubProcess(g.nodes.find((x) => x.id === 'a')!.data)
+    expect(process?.entry).toBeTruthy()
+    expect(process?.entry).not.toBe('b')
+    expect(process?.graph.nodes.some((x) => x.id === process.entry)).toBe(true)
+    expect(process?.graph.nodes[0]?.data.name).toBe('新演出节点')
+    expect(g.nodes.some((x) => x.id === process?.entry)).toBe(false)
     expect(g.nodes.find((x) => x.id === 'b')).toBeTruthy()
-    // 已有 subFlow 时再切一次：保留入口，只清 pack。
-    const again = attachSameGraphSubflow(
+    const again = attachSubProcess(
       {
         ...g,
         nodes: g.nodes.map((x) =>
@@ -139,7 +159,7 @@ describe('graph-edit', () => {
       },
       'a',
     )
-    expect(getSubFlow(again.nodes.find((x) => x.id === 'a')!.data)).toBe(entry)
+    expect(getSubProcess(again.nodes.find((x) => x.id === 'a')!.data)?.entry).toBe(process?.entry)
     expect((again.nodes.find((x) => x.id === 'a')!.data as { subFlowPack?: unknown }).subFlowPack).toBeUndefined()
   })
 
@@ -161,18 +181,28 @@ describe('graph-edit', () => {
     expect(next.nodes.find((n) => n.id === nodeIds[0])!.data.name).toContain('副本')
   })
 
-  it('normalizeSubFlowFields: subFlowRef → subFlow', () => {
-    const g: GameGraph = {
-      nodes: [{
-        ...n('a_my'),
-        data: { name: '我方回合', subFlowRef: 'wait' } as GameNode['data'],
-      }],
+  it('duplicateNodes: 子流程容器递归重铸内部节点、边和引用 id', () => {
+    const child: GameGraph = {
+      nodes: [
+        { ...n('inner-a'), data: { name: 'a', reactions: [{ when: { type: 'complete' }, do: [{ kind: 'advance', edgeId: 'inner-edge' }] }] } },
+        n('inner-b'),
+      ],
+      edges: [{ id: 'inner-edge', source: 'inner-a', target: 'inner-b', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    const source: GameGraph = {
+      nodes: [{ ...n('container'), data: { name: '容器', subProcess: { entry: 'inner-a', graph: child } } }],
       edges: [],
     }
-    const next = normalizeSubFlowFields(g)
-    expect(getSubFlow(next.nodes[0]!.data)).toBe('wait')
-    expect((next.nodes[0]!.data as { subFlowRef?: string }).subFlowRef).toBeUndefined()
-    expect((next.nodes[0]!.data as { subFlow?: string }).subFlow).toBe('wait')
+    const { graph: next, nodeIds } = duplicateNodes(source, ['container'])
+    const copy = getSubProcess(next.nodes.find((node) => node.id === nodeIds[0])!.data)!
+    const copiedEdge = copy.graph.edges[0]!
+
+    expect(copy.entry).not.toBe('inner-a')
+    expect(copy.graph.nodes.map((node) => node.id)).not.toContain('inner-a')
+    expect(copiedEdge.id).not.toBe('inner-edge')
+    expect(copiedEdge.source).toBe(copy.entry)
+    const advance = copy.graph.nodes[0]!.data.reactions![0]!.do[0]
+    expect(advance).toEqual({ kind: 'advance', edgeId: copiedEdge.id })
   })
 
   it('connect: 回填同名 event reaction 的 advance.edgeId', () => {

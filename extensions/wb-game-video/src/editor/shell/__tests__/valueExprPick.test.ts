@@ -127,6 +127,29 @@ describe('valueExprPick', () => {
     if (pick.mode === 'pick') expect(pick.terms[0]?.attr).toBe('attack')
   })
 
+  it('infers simple entity and variable references without writing a sidecar', () => {
+    expect(resolveValuePick({ expr: 'entity.ent-player.attr.attack' }, entities, variables)).toEqual({
+      mode: 'pick',
+      terms: [{ op: '+', source: 'entity', refId: 'ent-player', attr: 'attack' }],
+    })
+    expect(resolveValuePick('var.qi', entities, variables)).toEqual({
+      mode: 'pick',
+      terms: [{ op: '+', source: 'var', refId: 'qi' }],
+    })
+  })
+
+  it('keeps complex expressions without a sidecar in the read-only compatibility state', () => {
+    expect(resolveValuePick(
+      { expr: 'entity.ent-player.attr.attack * 2' },
+      entities,
+      variables,
+    )).toEqual({ mode: 'pick', terms: [] })
+    expect(resolveValuePick('max(var.qi, 1)', entities, variables)).toEqual({
+      mode: 'pick',
+      terms: [],
+    })
+  })
+
   it('round-trips compile → resolve via embedded pick', () => {
     const source = {
       mode: 'pick' as const,

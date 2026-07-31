@@ -5,6 +5,7 @@ import {
   type AssetLibraryClient,
   useAssetLibrary,
 } from '../assets/assetLibraryClient'
+import { getGameSlug } from '../persist/gameScope'
 
 const CSS = `
 .alp-root { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
@@ -75,7 +76,10 @@ const CSS = `
 
 export function GraphAssetView({ client }: { client?: AssetLibraryClient }): JSX.Element {
   injectStyleOnce('graph-asset-view', CSS)
-  const controller = useAssetLibrary(client ?? kinoAssetLibraryClient)
+  const controller = useAssetLibrary(
+    getGameSlug() ?? 'game-nodia-fighting',
+    client ?? kinoAssetLibraryClient,
+  )
   return <AssetLibraryPanel controller={controller} />
 }
 

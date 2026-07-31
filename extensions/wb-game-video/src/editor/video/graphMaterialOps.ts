@@ -11,7 +11,7 @@
  * `children`。挂载侧仅 `overlay` + `layout` + `reactions`，不补丁子组件。
  *
  * 旧 → 新 kind 映射：
- *   字幕 dialogue[]     → kind 'dialogue'   （MaterialItem 'subtitle'）
+ *   字幕 dialogue[]     → kind 'Dialogue'   （MaterialItem 'subtitle'）
  *   飘字 overlays[]      → kind 'floatText'  （'overlay'）+ 结算联动 = 节点 reaction（effect.id `${floatId}-settle`）
  *   QTE  qte.cues[]      → kind 'qte'（inputs.cues[]）→ 每 cue 一个 'qte' 项（整段 QTE 跨度由 cues 派生，不再单列 'qte_window' 轨）
  *   选项 choice+branches → kind 'choice'（inputs.events[]）+ 分支跳转 = 出边 `<id>`；效果 = 节点 event reaction
@@ -987,8 +987,8 @@ export function isSchemeOriginElement(scenario: GameScenario, node: GameNode | u
  */
 function materialKindForChild(scenario: GameScenario, node: GameNode | undefined, el: OverlayChild): MaterialKind {
   if (isSchemeOriginElement(scenario, node, el.id)) return 'component'
-  if (el.component === 'dialogue') return 'subtitle'
-  if (el.component === 'damageFloatText' || el.component === 'gainFloatText') return 'overlay'
+  if (el.component === 'Dialogue') return 'subtitle'
+  if (el.component === 'DamageFloatText' || el.component === 'GainFloatText') return 'overlay'
   if (hasOptionEventsInput(el.component)) return 'option'
   if (hasCuePointsInput(el.component)) return 'qte'
   if (el.component === 'filter') return 'filter'
@@ -1804,7 +1804,7 @@ export function addMaterialGraph(
     const id = newElementId()
     const el: OverlayChild = {
       id,
-      component: 'dialogue',
+      component: 'Dialogue',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: { zIndex: at ? at.zIndex : 0 },
@@ -1816,7 +1816,7 @@ export function addMaterialGraph(
     const id = newElementId()
     const float: OverlayChild = {
       id,
-      component: 'damageFloatText',
+      component: 'DamageFloatText',
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: layoutForNewChild(undefined, at ? at.zIndex : 1),
@@ -1855,10 +1855,10 @@ export function addMaterialGraph(
     const optStart = at ? startMs : 0
     const optEnd = at ? endMs : dur
     // 默认选项固定使用新规格「應/默」组件。
-    const inputs = applyStyleLockedEventParams({}, 'inkYingMo')
+    const inputs = applyStyleLockedEventParams({}, 'InkYingMo')
     const el: OverlayChild = {
       id,
-      component: 'inkYingMo',
+      component: 'InkYingMo',
       trigger: { when: 'enter' },
       window: { startMs: optStart, endMs: optEnd },
       layout: layoutForNewChild(undefined, at ? at.zIndex : 3),
@@ -1947,11 +1947,11 @@ export function addQteCueGraph(
   const id = newElementId()
   const seeded = applyStyleLockedEventParams(
     { qteKind: 'parry', passingHits: 1, cues: [cue], defaultEvent: 'fail' },
-    'inkKou',
+    'InkKou',
   )
   const newEl: OverlayChild = {
     id,
-    component: 'inkKou',
+    component: 'InkKou',
     trigger: { when: 'enter' },
     // 显隐唯一 SSOT = window：按首个拍点的可见区间落窗，作者随后可在时间轴上拖改。
     window: { startMs: cue.appearAt ?? 0, endMs: cue.endAt ?? end },

@@ -1,4 +1,5 @@
 import type { BlueprintDoc, GameGraph, GameScenario } from '../../runtime/schema/graph-schema'
+import { getSubProcess } from '../../runtime/schema/graph-schema'
 
 /** A node binding to a video resource id inside a graph scope. */
 export interface VideoReference {
@@ -8,6 +9,7 @@ export interface VideoReference {
   graphLabel: string
   nodeId: string
   nodeName: string
+  graphPath?: string[]
 }
 
 export interface FindVideoReferencesOptions {
@@ -28,23 +30,35 @@ function scanGraph(
   resourceId: string,
   seen: Set<string>,
   out: VideoReference[],
+  path: string[] = [],
 ): void {
   for (const node of graph.nodes) {
     const ref = node.data.media?.ref
-    if (ref !== resourceId) {
-      continue
+    if (ref === resourceId) {
+      const key = refKey(graphId, node.id)
+      if (!seen.has(key)) {
+        seen.add(key)
+        out.push({
+          graphId,
+          graphLabel,
+          nodeId: node.id,
+          nodeName: node.data.name || node.id,
+          ...(path.length > 0 ? { graphPath: [...path] } : {}),
+        })
+      }
     }
-    const key = refKey(graphId, node.id)
-    if (seen.has(key)) {
-      continue
+    const process = getSubProcess(node.data)
+    if (process) {
+      scanGraph(
+        process.graph,
+        graphId,
+        `${graphLabel} / ${node.data.name || node.id}`,
+        resourceId,
+        seen,
+        out,
+        [...path, node.id],
+      )
     }
-    seen.add(key)
-    out.push({
-      graphId,
-      graphLabel,
-      nodeId: node.id,
-      nodeName: node.data.name || node.id,
-    })
   }
 }
 

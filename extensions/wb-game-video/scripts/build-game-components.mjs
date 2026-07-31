@@ -2,7 +2,7 @@
 //
 // Per-game components (game repo `components/index.tsx`) are bundled to an ESM
 // artifact that the runtime `component-host` loads via
-// the host-owned game component endpoint.
+// `GET /api/game-host/games/<slug>/components/index.js`.
 //
 // Contract (see src/component-host/index.ts): the artifact exports
 //   export function register(host) { … }

@@ -10,7 +10,7 @@
 import type { FXEdge, FXGraph, FXNode, Handle } from '../../runtime/schema/react-flow-schema'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import type { Overlay } from '../../runtime/schema/node-config-schema'
-import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
 import { deriveOutputs } from '../../runtime/registry/component-registry'
 import { flowHandleDisplay, mergeFlowHandles } from '../flow-handle-labels'
 
@@ -94,7 +94,7 @@ export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): 
 
 function badgeOf(node: GameNode): string {
   if (getSubFlowPack(node.data)) return 'pack'
-  if (getSubFlow(node.data)) return 'subflow'
+  if (getSubProcess(node.data)) return 'subflow'
   if (node.data.overlayNodes?.length) return 'overlay'
   return ''
 }

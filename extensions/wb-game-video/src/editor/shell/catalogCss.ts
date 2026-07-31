@@ -966,16 +966,46 @@ ${PREVIEW_CLOCK_CSS}
 .gc-empty-glyph { font-size: 38px; color: rgba(255,255,255,0.25); }
 .gc-empty-text { font-size: 13px; color: rgba(255,255,255,0.5); }
 
-/* ── 公式文本编辑器（Grafana 式：文本主输入 + 只读高亮预览 + 插入工具条）─────────── */
+/* ── 公式文本编辑器（Grafana 式：文本主输入 + hole 高亮 + 插入工具条）─────────── */
 .gc-fx { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-.gc-fx-input {
-  width: 100%; box-sizing: border-box;
+.gc-fx-example {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 10px; border: 1px solid var(--gc-line-soft, var(--gc-line));
+  border-radius: 7px; background: rgba(255,255,255,.025);
+}
+.gc-fx-example-formula { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; color: var(--gc-faint); font-size: 11px; }
+.gc-fx-example-formula code { color: var(--gc-text); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.6; }
+.gc-fx-example p { margin: 0; color: var(--gc-muted); font-size: 11px; line-height: 1.5; }
+.gc-fx-example p b { color: var(--gc-text); font-weight: 600; }
+.gc-fx-example p code { font-family: var(--font-mono, ui-monospace, monospace); color: var(--gc-text); }
+.gc-fx-editor {
+  position: relative; width: 100%; min-width: 0;
+  border-radius: 7px; background: rgba(0,0,0,.28);
+}
+.gc-fx-highlight, .gc-fx-input {
+  width: 100%; min-width: 0; box-sizing: border-box; margin: 0;
   font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; line-height: 1.5;
-  border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text);
-  border-radius: 7px; padding: 8px 10px; resize: vertical;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  border-radius: 7px; padding: 8px 10px;
+}
+.gc-fx-highlight {
+  position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  border: 1px solid transparent; color: var(--gc-text);
+}
+.gc-fx-input {
+  position: relative; z-index: 1; display: block; min-height: 58px; resize: vertical;
+  border: 1px solid var(--gc-line); background: transparent;
+  color: transparent; caret-color: var(--gc-text); -webkit-text-fill-color: transparent;
 }
 .gc-fx-input:focus { border-color: var(--gc-accent); outline: none; box-shadow: 0 0 0 2px rgba(240,136,64,.18); }
 .gc-fx-input.is-err { border-color: var(--gc-danger, #e0795f); }
+.gc-fx-input::selection { background: rgba(240,136,64,.34); -webkit-text-fill-color: transparent; }
+.gc-fx-hole-tag {
+  color: var(--gc-accent); background: var(--gc-accent-soft);
+  border-radius: 3px; box-shadow: inset 0 0 0 1px var(--gc-accent-line);
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.gc-fx-example .gc-fx-hole-tag { padding: 1px 3px; }
 /* 结构摘要行：引用/参数概览 + ≈值（不复述公式串） */
 .gc-fx-summary {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;

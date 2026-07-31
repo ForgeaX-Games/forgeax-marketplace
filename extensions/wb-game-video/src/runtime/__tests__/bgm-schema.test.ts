@@ -6,7 +6,7 @@ import {
   type GameScenario,
   type NodeBgm,
   type NodeData,
-  type SubFlowNodeData,
+  type SubProcessNodeData,
   type SubFlowPackNodeData,
 } from '../schema/graph-schema'
 
@@ -20,8 +20,12 @@ describe('getNodeBgm', () => {
     expect(getNodeBgm(d)?.ref).toBe('bgm-battle')
   })
 
-  it('reads bgm off subFlow / subFlowPack 容器（NodeData 基类字段，容器自动继承）', () => {
-    const sub: SubFlowNodeData = { name: 'wait', subFlow: 'wait', bgm: { ref: 'bgm-wait' } }
+  it('reads bgm off subProcess / subFlowPack 容器（NodeData 基类字段，容器自动继承）', () => {
+    const sub: SubProcessNodeData = {
+      name: 'wait',
+      subProcess: { entry: 'wait', graph: { nodes: [], edges: [] } },
+      bgm: { ref: 'bgm-wait' },
+    }
     const pack: SubFlowPackNodeData = {
       name: 'combat',
       subFlowPack: { id: 'bp-combat', entry: 'enter' },

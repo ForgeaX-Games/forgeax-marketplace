@@ -15,8 +15,8 @@ describe('multi-runtime isolation (B)', () => {
     const b = new GraphSession(scnOf({ nodes: [node('b')], edges: [] }))
     expect(a.runtime.components).not.toBe(b.runtime.components)
     expect(a.skins).not.toBe(b.skins)
-    expect(a.runtime.components.getComponent('inkKou')?.events?.length).toBeGreaterThan(0)
-    expect(b.runtime.components.getComponent('inkKou')?.events?.length).toBeGreaterThan(0)
+    expect(a.runtime.components.getComponent('InkKou')?.events?.length).toBeGreaterThan(0)
+    expect(b.runtime.components.getComponent('InkKou')?.events?.length).toBeGreaterThan(0)
   })
 
   it('custom component on one registry is invisible to another registry', () => {
@@ -25,8 +25,8 @@ describe('multi-runtime isolation (B)', () => {
     expect(onlyA.getComponent('secretView')).toBeDefined()
     expect(new ComponentRegistry().getComponent('secretView')).toBeUndefined()
     // 默认组件包在 A，裸表没有
-    expect(onlyA.getComponent('inkKou')?.events?.length).toBeGreaterThan(0)
-    expect(new ComponentRegistry().getComponent('inkKou')).toBeUndefined()
+    expect(onlyA.getComponent('InkKou')?.events?.length).toBeGreaterThan(0)
+    expect(new ComponentRegistry().getComponent('InkKou')).toBeUndefined()
   })
 })
 

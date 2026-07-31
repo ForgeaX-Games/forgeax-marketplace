@@ -10,6 +10,42 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .gvv-controls button { flex: none; width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text); border-radius: 7px; cursor: pointer; font-size: 13px; line-height: 1; }
 .gvv-controls button:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
 .gvv-time { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gvv-timeline {
+  --gvv-progress: 0%;
+  min-width: 72px;
+  flex: 1;
+  height: 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+.gvv-timeline::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: inherit;
+  background: linear-gradient(to right, var(--gc-accent) 0 var(--gvv-progress), var(--gc-line-soft) var(--gvv-progress) 100%);
+}
+.gvv-timeline::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  appearance: none;
+  border: 2px solid var(--gc-panel2);
+  border-radius: 50%;
+  background: var(--gc-accent);
+}
+.gvv-controls .gvv-loop,
+.gvv-controls .gvv-mute { position: relative; }
+.gvv-controls .gvv-loop:not(.is-on)::after {
+  content: "";
+  position: absolute;
+  width: 1px;
+  height: 17px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+.gvv-controls .gvv-loop.is-on,
+.gvv-controls .gvv-mute.is-on { background: var(--gc-accent); border-color: var(--gc-accent); color: #1a1206; }
 .gvv-controls .gvv-mute { margin-left: auto; }
 .gvv-row-status { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; line-height: 1.6; white-space: nowrap; }
 .gvv-row-status.is-generating { background: rgba(240,136,64,.22); color: var(--gc-accent); }
@@ -22,6 +58,13 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .gvv-gen-hint { font-size: 11px; color: var(--gc-faint); line-height: 1.5; }
 .gvv-gen-hint.is-error { color: #ff8f8f; }
 .val-head-upload, .val-head-refresh { border: 1px solid var(--gc-line-soft); background: var(--gc-panel2); color: var(--gc-text); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+.val-library .gc-list-head { flex-wrap: nowrap; }
+.val-library .gc-list-title { flex: 0 0 auto; white-space: nowrap; }
+.val-head-select { flex: none; width: 28px; height: 28px; padding: 0; border: 1px solid var(--gc-line-soft); border-radius: 6px; color: var(--gc-muted); background: var(--gc-panel2); cursor: pointer; }
+.val-head-select.is-on { color: #1a1206; border-color: var(--gc-accent); background: var(--gc-accent); }
+.val-batch-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--gc-line-soft); color: var(--gc-faint); font-size: 11px; }
+.val-batch-bar button { border: 1px solid var(--gc-line-soft); border-radius: 6px; padding: 3px 7px; background: var(--gc-panel2); color: var(--gc-text); font-size: 11px; cursor: pointer; }
+.val-batch-bar button:last-child { margin-left: auto; }
 .val-head-upload { position: relative; display: inline-flex; flex: none; min-width: 30px; min-height: 28px; padding: 2px 8px; align-items: center; justify-content: center; overflow: hidden; }
 .val-head-upload > span { pointer-events: none; }
 .val-head-upload-input { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
@@ -43,6 +86,9 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-empty { color: var(--gc-faint); font-size: 12px; padding: 12px 10px; }
 .val-row { position: relative; }
 .val-row > .gc-row { width: 100%; min-width: 0; }
+.val-row.is-selecting > .gc-row { padding-right: 36px; }
+.val-row-select { position: absolute !important; top: 50%; right: 10px; z-index: 2; display: grid !important; width: 18px; height: 18px; margin: 0 !important; padding: 0 !important; place-items: center; line-height: 1; transform: translateY(-50%); }
+.val-row-select input { margin: 0; accent-color: var(--gc-accent); }
 .val-row .gc-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .val-row-action { position: absolute; top: 50%; transform: translateY(-50%); min-width: 44px; height: 28px; min-height: 28px; padding: 0 6px; border: 1px solid var(--gc-line-soft); background: var(--gc-panel); color: var(--gc-muted); border-radius: 999px; font-size: 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease, border-color .15s ease; }
 .val-row-rename { right: 58px; }
@@ -139,5 +185,15 @@ export const GRAPH_VIDEO_VIEW_CSS = `
     height: 100%;
     min-height: 180px;
   }
+}
+
+/* 视频 Tab 仅保留预览时，预览列占满原本的生成配置区域。 */
+.gc-stage-video .gc-video-top { grid-template-columns: minmax(0, 1fr); }
+.gc-stage-video .gvv-video-col { height: 100%; }
+.gc-stage-video .gvv-video-col .gc-frame {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
 }
 `

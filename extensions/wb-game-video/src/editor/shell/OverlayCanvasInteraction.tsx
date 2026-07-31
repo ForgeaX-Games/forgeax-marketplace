@@ -235,6 +235,7 @@ export function OverlayCanvasInteraction({
   onMove,
   onResize,
   onReorder,
+  onInteractionChange,
   renderFrame,
   frameVisibility = 'always',
   ariaLabel = '覆盖物画布',
@@ -247,6 +248,8 @@ export function OverlayCanvasInteraction({
   onMove: (id: string, position: CanvasPoint) => void
   onResize?: (id: string, box: CanvasBox) => void
   onReorder?: (id: string, direction: 'front' | 'back') => void
+  /** 拖动或缩放开始/结束；预览宿主可据此暂停并冻结当前动画帧。 */
+  onInteractionChange?: (active: boolean) => void
   renderFrame?: (item: CanvasInteractionItem, state: CanvasItemState) => ReactNode
   frameVisibility?: 'always' | 'active'
   ariaLabel?: string
@@ -390,6 +393,7 @@ export function OverlayCanvasInteraction({
         moved = true
         draggingRef.current = true
         setDraggingId(item.id)
+        onInteractionChange?.(true)
       }
       const delta = constrainCanvasMove(
         item,
@@ -409,6 +413,7 @@ export function OverlayCanvasInteraction({
       element.removeEventListener('pointercancel', up)
       draggingRef.current = false
       setDraggingId(null)
+      if (moved) onInteractionChange?.(false)
       if (!moved && selectedIndex >= 0 && stack.length > 1) {
         onSelect(stack[(selectedIndex + 1) % stack.length]!.id)
       }
@@ -455,6 +460,7 @@ export function OverlayCanvasInteraction({
     const minHeight = Math.max(0.02, 16 / geometry.rect.height, item.minHeight ?? 0)
     draggingRef.current = true
     setResizingId(item.id)
+    onInteractionChange?.(true)
     try { element.setPointerCapture(event.pointerId) } catch { /* optional */ }
 
     const move = (next: globalThis.PointerEvent): void => {
@@ -474,6 +480,7 @@ export function OverlayCanvasInteraction({
       element.removeEventListener('pointercancel', up)
       draggingRef.current = false
       setResizingId(null)
+      onInteractionChange?.(false)
     }
     element.addEventListener('pointermove', move)
     element.addEventListener('pointerup', up)

@@ -29,7 +29,6 @@ key/
 # 剧本/历史磁盘镜像（dev server 持久化目录，per-machine）
 # 默认不入库；想跨设备同步可放在 iCloud 等同步目录下
 .reel-scenarios/
-.workbench-dev/
 
 # per-game 剧本磁盘镜像（dev server 运行时按游戏 slug 落盘的本地数据，per-machine）
 # 与 .reel-scenarios 同性质：纯运行时内容，不是源码，不入库。

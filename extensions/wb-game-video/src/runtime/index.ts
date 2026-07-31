@@ -12,19 +12,21 @@ export * from './registry/component-registry'
 export * from './validate/validate'
 export * from './component-host/rendererRegistry'
 export {
-  NEW_COMPONENTS,
+  newComponents,
   registerCoreSkins,
   createCoreSkinRegistry,
   createDefaultComponentRegistry,
   installNewComponents,
-  dialogueComponent,
-  inkKouComponent,
-  battleParryComponent,
-  inkYingMoComponent,
-  battleSkillBarComponent,
-  damageFloatTextComponent,
-  gainFloatTextComponent,
-  battlePlayerHpBarComponent,
-  battleEnemyHpBarComponent,
+  DialogueManifest,
+  InkKouManifest,
+  BattleParryManifest,
+  InkYingMoManifest,
+  BattleSkillManifest,
+  DamageFloatTextManifest,
+  GainFloatTextManifest,
+  StatusNoticeManifest,
+  TextOptionManifest,
+  BattlePlayerHpBarManifest,
+  BattleEnemyHpBarManifest,
 } from './component-host/components'
 export * from './input/playerFocus'

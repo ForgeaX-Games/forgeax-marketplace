@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "@forgeax/wb-game-video",
-  "version": "0.2.0",
+  "version": "0.1.5",
   "kind": "workbench",
   "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
   "description": {
@@ -51,8 +51,8 @@
         "returns": "./schemas/get-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "读取宿主绑定游戏的库文档（原 scenario 形状 + manifest.packs，含主蓝图）；无盘数据时返回 { project: null }。游戏身份由宿主上下文提供。改图前先调它拿现有蓝图与 nodes/edges。",
-          "en": "Read the host-bound game's library document (original scenario shape + manifest.packs including main), or { project: null } when there is no disk data. Game identity comes from the host context. Call before editing to get blueprints and their nodes/edges."
+          "zh": "读取当前 game 的库文档（原 scenario 形状 + manifest.packs，含主蓝图）；无盘数据时返回 { project: null }。改图前先调它拿现有蓝图与 nodes/edges。",
+          "en": "Read the current game's library document (original scenario shape + manifest.packs including main), or { project: null } when there is no disk data. Call before editing to get blueprints and their nodes/edges."
         }
       },
       {
@@ -61,8 +61,8 @@
         "returns": "./schemas/save-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "整本覆盖写宿主绑定游戏的 GraphLibraryDocument 到 blueprint.json；首次写入时补 project.json。游戏身份不由工具参数选择。title 当前忽略，成功固定返回 {ok:true, versions:[], gameSlug}；缺 project 时返回 {ok:false, errors}。",
-          "en": "Overwrite the host-bound game's GraphLibraryDocument in blueprint.json and create project.json on the first write. Tool arguments cannot select game identity. title is currently ignored. Success returns {ok:true, versions:[], gameSlug}; a missing project returns {ok:false, errors}."
+          "zh": "整本覆盖写当前 game 的 GraphLibraryDocument 到 blueprint.json；首次写入时补 project.json。title 当前忽略，成功固定返回 {ok:true, versions:[], gameSlug}；缺 project 时返回 {ok:false, errors}。",
+          "en": "Overwrite the current game's GraphLibraryDocument in blueprint.json and create project.json on the first write. title is currently ignored. Success returns {ok:true, versions:[], gameSlug}; a missing project returns {ok:false, errors}."
         }
       },
       {
@@ -141,8 +141,8 @@
         "returns": "./schemas/import-refs.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "跨模块只读拿料·读取 wb-character 已产出的角色立绘，通过宿主 media capability 持久化副本并登记成 character_ref；不改角色源目录。生成视频前先备齐角色参考图。",
-          "en": "Cross-module read-only intake: read wb-character portraits, persist copies through the host media capability, and register them as character_ref without modifying the source directory. Call before video generation to stock character references."
+          "zh": "跨模块只读拿料·把 wb-character 已产出的角色立绘登记成 character_ref（externalPath 指回对方文件，不复制、不改对方目录）。生成视频前先备齐角色参考图。",
+          "en": "Cross-module read-only intake: register wb-character's existing portraits as character_ref (externalPath points back to source files; no copy, no writes to their dir). Call before video generation to stock character references."
         }
       },
       {
@@ -151,15 +151,15 @@
         "returns": "./schemas/import-refs.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "跨模块只读拿料·读取场景模块发布到 textures/ 的贴图，通过宿主 media capability 持久化副本并登记成 scene_ref；不改场景源目录。生成视频前先备齐场景参考图。",
-          "en": "Cross-module read-only intake: read scene textures from textures/, persist copies through the host media capability, and register them as scene_ref without modifying the source directory. Call before video generation to stock scene references."
+          "zh": "跨模块只读拿料·把场景模块发布到 textures/ 的贴图/场景图登记成 scene_ref（externalPath 指回对方文件）。生成视频前先备齐场景参考图。",
+          "en": "Cross-module read-only intake: register scene-module textures published to textures/ as scene_ref (externalPath points back to source files). Call before video generation to stock scene references."
         }
       }
     ]
   },
   "entry": {
     "frontend": "./dist/index.html",
-    "backend": "./dist/server/host.js",
+    "backend": "./dist/server/tool-handlers.js",
     "standalone": {
       "start": "bun run dev",
       "port": 15185,
@@ -180,6 +180,9 @@
     "model:image:still",
     "model:video:kinetic"
   ],
-  "requestedEnv": [],
+  "requestedEnv": [
+    "FORGEAX_SERVER_URL",
+    "FORGEAX_SERVER_PORT"
+  ],
   "experimental": true
 }

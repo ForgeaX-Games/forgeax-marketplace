@@ -60,7 +60,7 @@ const VERSION_PICKER_CSS = `
 .gv-version-confirm-actions button.is-danger:hover { background: rgba(248,113,113,.28); }
 `
 
-function SupportedVersionPicker(): JSX.Element {
+export function VersionPicker(): JSX.Element {
   injectStyleOnce('gv-version-picker', VERSION_PICKER_CSS)
   const isDraft = useGraphScenario((s) => s.isDraft)
   const currentTag = useGraphScenario((s) => s.currentTag)
@@ -174,16 +174,11 @@ function SupportedVersionPicker(): JSX.Element {
           <option key={v.tag} value={v.tag}>
             {v.tag}
             {v.tag === currentTag ? '（当前）' : ''}
-            {v.createdAt ? ` · ${new Date(v.createdAt).toLocaleString()}` : ''}
+            {v.createdAt ? ` · ${new Date(v.createdAt * 1000).toLocaleString()}` : ''}
           </option>
         ))}
       </select>
       {typeof document !== 'undefined' && pop ? createPortal(pop, document.body) : null}
     </div>
   )
-}
-
-export function VersionPicker(): JSX.Element | null {
-  const supported = useGraphScenario((s) => s.versioningSupported)
-  return supported ? <SupportedVersionPicker /> : null
 }

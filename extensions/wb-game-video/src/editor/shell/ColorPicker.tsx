@@ -9,7 +9,8 @@
  * `GraphTextStyle.color` / `inputs.color`（`component: 'color'`）的存值格式完全兼容——
  * 换这个控件不改变任何落盘数据形状。
  */
-import { useEffect, useRef, useState, type JSX, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
 interface Rgba { r: number; g: number; b: number; a: number }
@@ -109,8 +110,8 @@ injectStyleOnce('color-picker', `
   background-color: #999;
 }
 .gc-cp-panel {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: var(--z-top, 9999);
-  width: 200px; padding: 10px; border-radius: var(--radius-md, 8px);
+  z-index: var(--z-top, 9999); box-sizing: border-box;
+  width: 220px; padding: 10px; border-radius: var(--radius-md, 8px);
   background: var(--color-background-floating, #333); border: 1px solid var(--color-border-default, #404040);
   box-shadow: var(--ks-shadow-lift, 0 8px 24px rgba(0,0,0,.5));
   display: flex; flex-direction: column; gap: 8px;
@@ -170,9 +171,12 @@ export function ColorPicker({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const svRef = useRef<HTMLDivElement>(null)
   const hueRef = useRef<HTMLDivElement>(null)
   const alphaRef = useRef<HTMLDivElement>(null)
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null)
 
   const seed = parseColor(value) ?? { r: 255, g: 255, b: 255, a: 1 }
   const [hsv, setHsv] = useState<Hsv>(() => rgbToHsv(seed))
@@ -194,7 +198,8 @@ export function ColorPicker({
   useEffect(() => {
     if (!open) return
     const onDocDown = (e: MouseEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false)
@@ -204,6 +209,37 @@ export function ColorPicker({
     return () => {
       document.removeEventListener('mousedown', onDocDown)
       document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelStyle(null)
+      return
+    }
+    const place = () => {
+      const trigger = triggerRef.current
+      if (!trigger || typeof window === 'undefined') return
+      const rect = trigger.getBoundingClientRect()
+      const panel = panelRef.current
+      const width = panel?.offsetWidth || 220
+      const height = panel?.offsetHeight || 250
+      const gap = 4
+      const spaceBelow = window.innerHeight - rect.bottom
+      const above = spaceBelow < height + gap && rect.top > spaceBelow
+      setPanelStyle({
+        position: 'fixed',
+        top: above ? Math.max(8, rect.top - height - gap) : Math.min(rect.bottom + gap, window.innerHeight - height - 8),
+        left: Math.min(Math.max(8, rect.left), window.innerWidth - width - 8),
+      })
+    }
+    place()
+    requestAnimationFrame(place)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
     }
   }, [open])
 
@@ -243,14 +279,12 @@ export function ColorPicker({
     onChange(next)
   }
 
-  return (
-    <div ref={rootRef} style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0 }}>
-      <button type="button" className="gc-cp-trigger" onClick={() => setOpen((v) => !v)}>
-        <span className="gc-cp-swatch" style={{ backgroundColor: value?.trim() ? currentColor : undefined }} />
-        <span>{value?.trim() || placeholder}</span>
-      </button>
-      {open && (
-        <div className="gc-cp-panel">
+  const panel = open ? (
+    <div
+      ref={panelRef}
+      className="gc-cp-panel"
+      style={panelStyle ?? { position: 'fixed', top: 8, left: 8, visibility: 'hidden' }}
+    >
           <div
             ref={svRef}
             className="gc-cp-sv"
@@ -298,8 +332,16 @@ export function ColorPicker({
               <button key={p} type="button" className="gc-cp-preset" style={{ background: p }} title={p} onClick={() => commitHex(p)} />
             ))}
           </div>
-        </div>
-      )}
+    </div>
+  ) : null
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0 }}>
+      <button ref={triggerRef} type="button" className="gc-cp-trigger" onClick={() => setOpen((v) => !v)}>
+        <span className="gc-cp-swatch" style={{ backgroundColor: value?.trim() ? currentColor : undefined }} />
+        <span>{value?.trim() || placeholder}</span>
+      </button>
+      {typeof document !== 'undefined' && panel ? createPortal(panel, document.body) : null}
     </div>
   )
 }

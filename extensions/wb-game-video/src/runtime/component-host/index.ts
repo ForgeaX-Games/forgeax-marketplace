@@ -9,7 +9,7 @@
  *   · **游戏专属组件** 住各游戏仓 `components/` → 构建产物 `dist/components/index.js`，
  *     运行时经 `loadGameComponents(slug)` 动态加载并注册（失败静默回落内建集）。
  *
- * 游戏组件包契约：宿主提供的组件模块导出 `register(host)`，用宿主注入的
+ * 游戏组件包契约：`dist/components/index.js` 导出 `register(host)`，用宿主注入的
  * `ComponentHostApi`（含共享 React / 注册函数）挂组件与渲染器——游戏产物不自带 React
  * 副本，也不重复实现注册表。
  */
@@ -105,26 +105,40 @@ function pickRegister(mod: GameComponentModule): ((host: ComponentHostApi) => vo
 }
 
 /**
- * 加载并注册宿主注入的游戏组件模块。运行时不派生主机路由；调用方必须
- * 提供握手绑定后的模块 URL。拿不到 / 无 `register` 时静默回落内建集。
+ * 加载并注册某游戏仓的专属组件。**免构建优先**：
+ *   1. dev —— 直接吃游戏仓 `components/index.tsx` **源码**，经扩展 vite 现场编译
+ *      （`/@game-components/<slug>/index.js`，见 vite.config `gameComponentsDevPlugin`）；
+ *   2. 构建产物（可选）—— `GET /api/game-host/games/:slug/components/index.js`（`dist/components`）；
+ * 都拿不到 / 无 `register` → 静默 false，运行时继续用内建集（fail-soft）。
+ * `base` 用于非同源场景显式指定源（dev 一般同源，留空即可）。
  */
-export async function loadGameComponents(gameId: string | undefined, moduleUrl?: string): Promise<boolean> {
-  if (!gameId || !moduleUrl || loadedGames.has(gameId)) return false
-  loadedGames.add(gameId)
-  try {
-    const module = (await import(/* @vite-ignore */ moduleUrl)) as GameComponentModule
-    const register = pickRegister(module)
-    if (!register) return false
-    register(hostApi())
-    return true
-  } catch {
-    loadedGames.delete(gameId)
-    return false
+export async function loadGameComponents(slug: string | undefined, base = ''): Promise<boolean> {
+  if (!slug || loadedGames.has(slug)) return false
+  loadedGames.add(slug)
+  const s = encodeURIComponent(slug)
+  const isDev = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV)
+  const candidates = [
+    ...(isDev ? [`${base}/@game-components/${s}/index.js`] : []),
+    `${base}/api/game-host/games/${s}/components/index.js`,
+  ]
+  for (const url of candidates) {
+    try {
+      const mod = (await import(/* @vite-ignore */ url)) as GameComponentModule
+      const reg = pickRegister(mod)
+      if (reg) {
+        reg(hostApi())
+        return true
+      }
+    } catch {
+      /* 未构建 / 无源码 / 加载失败 → 试下一个 */
+    }
   }
+  loadedGames.delete(slug)
+  return false
 }
 
 /** Boot：先内建集（必成），再尽力加载游戏专属组件（可失败）。 */
-export async function bootComponents(slug?: string, moduleUrl?: string): Promise<void> {
+export async function bootComponents(slug?: string): Promise<void> {
   registerBuiltins()
-  await loadGameComponents(slug, moduleUrl)
+  await loadGameComponents(slug)
 }

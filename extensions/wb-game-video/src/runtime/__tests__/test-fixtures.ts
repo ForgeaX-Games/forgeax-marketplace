@@ -3,6 +3,7 @@
  * timeline 项可写旧字段 `kind`（映射为 component）；`role` 忽略。
  */
 import type { GameGraph, GameNode, GameScenario, Overlay, OverlayChild } from '../schema/graph-schema'
+import { getSubProcess } from '../schema/graph-schema'
 
 type LegacyEl = Partial<OverlayChild> & {
   id: string
@@ -39,12 +40,18 @@ export function rid(nodeId: string, childId: string): string {
 
 export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameScenario {
   const overlays: Record<string, Overlay> = { ...(over.ui?.overlays ?? {}) }
-  const nodes: GameNode[] = graph.nodes.map((raw) => {
+  const normalizeGraph = (source: GameGraph): GameGraph => ({
+    ...source,
+    nodes: source.nodes.map((raw) => {
     const stash = (raw as { __timeline?: LegacyEl[] }).__timeline
     const dataRec = raw.data as GameNode['data'] & { timeline?: LegacyEl[] }
+    const process = getSubProcess(dataRec)
+    const nestedData = process
+      ? { ...dataRec, subProcess: { ...process, graph: normalizeGraph(process.graph) } }
+      : dataRec
     const tl = stash ?? dataRec.timeline
     if (!tl?.length) {
-      const { timeline: _d, hud: _h, ...data } = dataRec as GameNode['data'] & {
+      const { timeline: _d, hud: _h, ...data } = nestedData as GameNode['data'] & {
         timeline?: unknown
         hud?: unknown
       }
@@ -70,7 +77,7 @@ export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameS
         } satisfies OverlayChild
       }),
     }
-    const { timeline: _d, hud: _h, ...data } = dataRec as GameNode['data'] & {
+    const { timeline: _d, hud: _h, ...data } = nestedData as GameNode['data'] & {
       timeline?: unknown
       hud?: unknown
     }
@@ -78,7 +85,9 @@ export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameS
       ...raw,
       data: { ...data, overlayNodes: [{ overlay: oid }] },
     }
+    }),
   })
+  const normalizedGraph = normalizeGraph(graph)
   return {
     version: 't',
     ...over,
@@ -92,6 +101,6 @@ export function scnOf(graph: GameGraph, over: Partial<GameScenario> = {}): GameS
       ...(over.entities ?? {}),
     },
     ui: { ...(over.ui ?? {}), overlays: { ...overlays, ...(over.ui?.overlays ?? {}) } },
-    graph: { nodes, edges: graph.edges },
+    graph: normalizedGraph,
   }
 }

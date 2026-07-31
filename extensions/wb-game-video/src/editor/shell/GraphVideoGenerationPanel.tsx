@@ -76,7 +76,7 @@ export function GraphVideoGenerationPanel({
     setImageUploadError(null)
     setImageUpload({ kind, progress: 0 })
     try {
-      await uploadReferenceImage(file, kind, (progress) => {
+      await uploadReferenceImage(game, file, kind, (progress) => {
         setImageUpload((current) => current?.kind === kind ? { kind, progress } : current)
       })
       await onAssetsChanged()
@@ -93,7 +93,7 @@ export function GraphVideoGenerationPanel({
     setImageUploadError(null)
     setDeletingImageId(asset.id)
     try {
-      await deleteReferenceImage(asset.id)
+      await deleteReferenceImage(game, asset.id)
       onAssetDeleted(asset.id)
     } catch (error) {
       setImageUploadError(error instanceof Error ? error.message : '图片删除失败')
@@ -192,7 +192,7 @@ export function GraphVideoGenerationPanel({
           {[...characterRefs, ...sceneRefs].filter((asset) => asset.status === 'ready').map((asset) => (
             <div key={asset.id} className="gvv-reference-thumb">
               <img
-                src={gvaImageUrl(asset.id, asset.updatedAt)}
+                src={gvaImageUrl(asset.id, game, asset.updatedAt)}
                 alt={asset.label ?? asset.id}
                 title={`${asset.productionType === 'character_ref' ? '角色' : '场景'} · ${asset.label ?? asset.id}`}
               />

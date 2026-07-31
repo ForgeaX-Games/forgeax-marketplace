@@ -7,8 +7,6 @@ import { GraphApp } from './GraphApp'
 import { GraphPlayer } from './editor/shell/GraphPlayer'
 import { GraphStudio } from './editor/shell/GraphStudio'
 import { NODIA_DEMO } from './editor/demo/demo'
-import { GameBootstrap } from './editor/bootstrap/GameBootstrap'
-import { useGraphScenario } from './editor/persist/graphScenarioStore'
 import { initLocaleSync } from './i18n'
 import './styles/global.css'
 
@@ -76,7 +74,7 @@ class TopErrorBoundary extends Component<
   }
 
   private handleClearAll = (): void => {
-    if (!confirm('清除本地缓存并重新加载？（已保存版本仍由 Workbench 宿主管理）')) return
+    if (!confirm('清除本地缓存并重新加载？（已保存版本仍在 .forgeax/games/<slug>/game-video/）')) return
     try {
       localStorage.removeItem('wb-game-video:scenarios:v1')
     } catch { /* best-effort */ }
@@ -208,15 +206,13 @@ const _surface = new URLSearchParams(location.search).get('surface')
 if (_surface === 'graphstudio' || _surface === 'graphplay') {
   createRoot(root).render(
     <TopErrorBoundary>
-      <GameBootstrap onBoot={(gameId) => useGraphScenario.getState().ensureBoot(gameId, NODIA_DEMO)}>
-        <div style={{ position: 'fixed', inset: 0 }}>
-          {_surface === 'graphplay' ? (
-            <GraphPlayer scenario={NODIA_DEMO} />
-          ) : (
-            <GraphStudio scenario={NODIA_DEMO} />
-          )}
-        </div>
-      </GameBootstrap>
+      <div style={{ position: 'fixed', inset: 0 }}>
+        {_surface === 'graphplay' ? (
+          <GraphPlayer scenario={NODIA_DEMO} />
+        ) : (
+          <GraphStudio scenario={NODIA_DEMO} />
+        )}
+      </div>
     </TopErrorBoundary>,
   )
 } else {

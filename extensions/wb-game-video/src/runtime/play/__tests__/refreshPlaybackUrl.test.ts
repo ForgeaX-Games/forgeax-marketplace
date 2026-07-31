@@ -3,23 +3,11 @@ import { refreshPlaybackUrl } from '../refreshPlaybackUrl'
 
 describe('refreshPlaybackUrl', () => {
   it('refreshes stable runtime media gateways', () => {
-    expect(refreshPlaybackUrl('/__workbench__/v1/extension/rt-local/media/assets/clip?gameId=demo', 2)).toBe(
-      '/__workbench__/v1/extension/rt-local/media/assets/clip?gameId=demo&__gva_refresh=2',
+    expect(refreshPlaybackUrl('/__gva__/media/clip?game=demo', 2)).toBe(
+      '/__gva__/media/clip?game=demo&__gva_refresh=2',
     )
     expect(refreshPlaybackUrl('/api/v1/kino/resources/clip/content?game_id=demo', 3)).toBe(
       '/api/v1/kino/resources/clip/content?game_id=demo&__gva_refresh=3',
-    )
-    expect(refreshPlaybackUrl(
-      'https://host.test/extension/runtime/media/resources/clip/content',
-      4,
-    )).toBe(
-      'https://host.test/extension/runtime/media/resources/clip/content?__gva_refresh=4',
-    )
-    expect(refreshPlaybackUrl(
-      'https://host.test/extension/runtime/media/assets/generated',
-      5,
-    )).toBe(
-      'https://host.test/extension/runtime/media/assets/generated?__gva_refresh=5',
     )
   })
 

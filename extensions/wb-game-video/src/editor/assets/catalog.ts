@@ -18,9 +18,6 @@ for (const [path, url] of Object.entries(zhandouModules)) {
   if (id) ZHANDOU_VIDEOS[id] = url as unknown as string
 }
 
-/** Stable logical ids shared by the bundled source catalog and Nodia seed manifest. */
-export const ZHANDOU_VIDEO_IDS = Object.keys(ZHANDOU_VIDEOS).sort()
-
 /** 按 basename 取本地视频直链；非本地(不在 zhandou/)返回 undefined。 */
 export function zhandouUrl(id: string | undefined): string | undefined {
   return id ? ZHANDOU_VIDEOS[id] : undefined

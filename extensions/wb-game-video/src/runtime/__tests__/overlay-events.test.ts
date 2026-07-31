@@ -22,7 +22,7 @@ describe('overlay events / reactions', () => {
       { id: 'hp', component: 'battleHpBar', inputs: { bind: 'ent-player' } },
       {
         id: 'parry',
-        component: 'battleParry',
+        component: 'BattleParry',
         inputs: {
           events: [
             { id: 'A', label: '防反' },
@@ -37,7 +37,7 @@ describe('overlay events / reactions', () => {
   it('aggregates events from inputs.events when single emitter', () => {
     const refs = aggregateOverlayEvents(overlay, getComponentManifest)
     expect(refs.map((r) => r.eventId)).toEqual(['A', 'B', 'miss'])
-    expect(refs[0]?.componentId).toBe('battleParry')
+    expect(refs[0]?.componentId).toBe('BattleParry')
   })
 
   it('namespaces when multiple emitters', () => {

@@ -1,5 +1,5 @@
 /**
- * 节点面板「音乐（作用域 BGM）」的读写。
+ * 节点面板「BGM」的读写。
  * 关键不变量：清空音乐 = `data.bgm` 整个键消失（留 `{ ref: '' }` 会被 validate 判 error、
  * 被 runtime 静默丢弃，作者只会听到「没响」）。
  * 控件与「视频」同款：`<select>` +「（空）」+ 库外 id 禁用展示。
@@ -11,9 +11,9 @@ import type { GameGraph, GameNodeData } from '../../../runtime/schema/graph-sche
 import { NodeInspector } from '../NodeInspector'
 import type { AudioOption } from '../bgm-authoring'
 
-/** 「音乐动作」下拉（面板里 select 很多，按它自己的 tooltip 定位）。 */
+/** 「播放动作」下拉（面板里 select 很多，按它自己的 tooltip 定位）。 */
 const modeSelect = () => screen.getByTitle(/起播并记住/) as HTMLSelectElement
-/** 「音乐」资产下拉（与视频字段同款）。 */
+/** 「BGM曲目」资产下拉（与视频字段同款）。 */
 const audioSelect = () => screen.getByTitle(/与资产库音频一致/) as HTMLSelectElement
 /** 勾选框按可及名字取（行容器是 `<label>`，名字含行内文字）。 */
 const checkbox = (name: RegExp) => screen.getByRole('checkbox', { name })
@@ -70,9 +70,18 @@ function lastData(onChange: ReturnType<typeof vi.fn>): Record<string, unknown> {
 afterEach(cleanup)
 
 describe('NodeInspector · 作用域 BGM', () => {
-  // 「音乐动作」在空态也得在：`{ mode: 'stop' }` 是一条**没有 ref** 的配置，若把下拉藏到「填了
+  it('显示统一后的 BGM 配置术语', () => {
+    renderPanel(graphWith({ name: 'A' }))
+    expect(screen.getByText('BGM')).toBeTruthy()
+    expect(screen.getByText('播放动作')).toBeTruthy()
+    expect(screen.getByText('BGM曲目')).toBeTruthy()
+    expect(screen.queryByText('音乐（作用域 BGM）')).toBeNull()
+    expect(screen.queryByText('音乐动作')).toBeNull()
+  })
+
+  // 「播放动作」在空态也得在：`{ mode: 'stop' }` 是一条**没有 ref** 的配置，若把下拉藏到「填了
   // ref 之后」，作者永远选不到「结束当前音乐」——v2 最常用的那条写法（win/lose）就写不出来。
-  it('没配 bgm 时仍出「音乐动作」下拉，但不出重进选项', () => {
+  it('没配 bgm 时仍出「播放动作」下拉，但不出重进选项', () => {
     renderPanel(graphWith({ name: 'A' }))
     expect(audioSelect().value).toBe('')
     expect(modeSelect().value).toBe('push')
@@ -199,7 +208,7 @@ describe('NodeInspector · 作用域 BGM', () => {
   })
 
   // 2026-07-27 起面板上不再铺开解释性文案（产品决策：只留表单），三条动作的语义全压在
-  // 「音乐动作」下拉的 tooltip 里。下面几条钉的是**说法本身**没随着搬家而失真——尤其
+  // 「播放动作」下拉的 tooltip 里。下面几条钉的是**说法本身**没随着搬家而失真——尤其
   // v2 的核心反转（D5）：离开节点不再是结束信号。旧说法（「走边离开立刻恢复上一首」）是最
   // 误导的一种错——作者照它写，配了 BGM 的曲子会一路跟到结局，而他以为自己不用管。
   it('动作说明讲「一直播」，不承诺「离开就恢复」', () => {

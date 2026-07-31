@@ -2,12 +2,8 @@ import { cp } from 'node:fs/promises'
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: {
-    index: 'src/mount.tsx',
-    'server/host': 'server/host.ts',
-  },
-  outDir: 'dist',
-  dts: true,
+  entry: ['server/tool-handlers.ts'],
+  outDir: 'dist/server',
   format: ['esm'],
   platform: 'node',
   target: 'node20',

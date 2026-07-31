@@ -50,6 +50,7 @@ export function FormulaApplyEditor({
   entities,
   variables,
   onChange,
+  showFormulaPicker = true,
 }: {
   formulaId: string
   holeBindings: Record<string, FormulaHoleBinding>
@@ -57,6 +58,7 @@ export function FormulaApplyEditor({
   entities: Record<string, Entity> | undefined
   variables: Record<string, Variable> | undefined
   onChange: (next: NumOrExpr) => void
+  showFormulaPicker?: boolean
 }): JSX.Element {
   const options = listFormulaOptions(formulas)
   const formula = findFormula(formulas, formulaId)
@@ -87,14 +89,16 @@ export function FormulaApplyEditor({
 
   return (
     <div style={box}>
-      <div style={row} role="group" aria-label="选择公式">
-        <select value={formulaId} onChange={(e) => pickFormula(e.target.value)} aria-label="公式" style={{ flex: 1, minWidth: 140 }}>
-          <option value="" disabled>选择公式…</option>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>{o.label}</option>
-          ))}
-        </select>
-      </div>
+      {showFormulaPicker ? (
+        <div style={row} role="group" aria-label="选择公式">
+          <select value={formulaId} onChange={(e) => pickFormula(e.target.value)} aria-label="公式" style={{ flex: 1, minWidth: 140 }}>
+            <option value="" disabled>选择公式…</option>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {!formula ? (
         <p style={hint}>该公式已被删除，数值维持上次编译结果；请另选一个公式。</p>
       ) : (

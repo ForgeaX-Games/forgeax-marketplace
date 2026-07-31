@@ -6,7 +6,7 @@ import { GraphPlaySurface } from '../GraphPlaySurface'
 import { GraphStudio } from '../GraphStudio'
 
 const useKinoVideoResources = vi.hoisted(() => vi.fn())
-const useAudioAssets = vi.hoisted(() => vi.fn())
+const useProjectAssets = vi.hoisted(() => vi.fn())
 
 vi.mock('../../assets/kinoVideoCacheStore', () => {
   return {
@@ -16,14 +16,7 @@ vi.mock('../../assets/kinoVideoCacheStore', () => {
 
 // 音频资产查询与本件无关（它的失败面由 missing-audio-surfaces.test.tsx 钉）；不 mock 的话它的
 // 异步 hydration 会在本文件里落成一串 act(...) 警告，失败时还会多出一条 alert。
-vi.mock('../../assets/audioAssetCacheStore', () => ({ useAudioAssets }))
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => ({
-    extension: {
-      url: (path: string) => `https://host.test/extension/runtime/${path.replace(/^\/+/, '')}`,
-    },
-  }),
-}))
+vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
 
 const SCENARIO: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -97,9 +90,9 @@ describe('missing video notices across play surfaces', () => {
       generation: 0,
       refresh: vi.fn(),
     })
-    useAudioAssets.mockReset()
-    useAudioAssets.mockReturnValue({
-      items: [], total: 0, loading: false, error: null, generation: 0, refresh: vi.fn(),
+    useProjectAssets.mockReset()
+    useProjectAssets.mockReturnValue({
+      items: [], loading: false, error: null, generation: 0,
     })
     seedGraphStore()
   })
@@ -117,6 +110,19 @@ describe('missing video notices across play surfaces', () => {
     expect(screen.queryByRole('status')).toBeNull()
     fireEvent.error(video!)
     expect(screen.getByRole('status')).toHaveTextContent('missing-stable-id')
+  })
+
+  it('GraphPlaySurface exposes pause and playback-rate controls', () => {
+    const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause')
+    const { container } = render(<GraphPlaySurface scenario={SCENARIO} />)
+    const video = container.querySelector('video') as HTMLVideoElement
+
+    fireEvent.change(screen.getByRole('combobox', { name: '试玩倍速' }), { target: { value: '2' } })
+    expect(video.playbackRate).toBe(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停试玩' }))
+    expect(pause).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '继续试玩' })).toBeInTheDocument()
   })
 
   it('GraphStudio reports the current stable id without advancing', async () => {
@@ -214,5 +220,59 @@ describe('missing video notices across play surfaces', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pack' }))
     expect(screen.getByText('蓝图状态机 · 跟随执行')).toBeTruthy()
+  })
+
+  it('isolates same-graph subflow members while following and drilling', () => {
+    const subflowGraph: GameScenario['graph'] = {
+      nodes: [
+        {
+          id: 'turn', type: 'perf', position: { x: 0, y: 0 }, inputs: [], outputs: [],
+          data: {
+            name: '我方回合',
+            subProcess: {
+              entry: 'skill',
+              graph: {
+                nodes: [{
+                  id: 'skill', type: 'perf', position: { x: 0, y: 120 }, inputs: [], outputs: [],
+                  data: { name: '选择技能', media: { kind: 'video', ref: 'missing-stable-id' } },
+                }],
+                edges: [],
+              },
+            },
+          },
+        },
+        {
+          id: 'end', type: 'perf', position: { x: 200, y: 0 }, inputs: [], outputs: [],
+          data: { name: '战斗结束' },
+        },
+      ],
+      edges: [{ id: 'turn-end', source: 'turn', target: 'end', sourceHandle: 'default', targetHandle: 'in' }],
+    }
+    const mainDoc: BlueprintDoc = { ...MAIN_DOC, entry: 'turn', graph: subflowGraph }
+    useGraphScenario.setState({
+      blueprints: { [MAIN_ID]: mainDoc },
+      graph: subflowGraph,
+    })
+
+    const { container } = render(<GraphPlaySurface scenario={{ ...SCENARIO, graph: subflowGraph }} />)
+    fireEvent.click(screen.getByRole('button', { name: '蓝图' }))
+
+    const canvasNodeLabels = () => [...container.querySelectorAll('.gv-bp-node')]
+      .map((node) => node.textContent ?? '')
+
+    expect(canvasNodeLabels().some((label) => label.includes('选择技能'))).toBe(true)
+    expect(canvasNodeLabels().some((label) => label.includes('我方回合'))).toBe(false)
+    expect(screen.getByRole('button', { name: '总览' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '总览' }))
+    expect(canvasNodeLabels().some((label) => label.includes('我方回合'))).toBe(true)
+    expect(canvasNodeLabels().some((label) => label.includes('选择技能'))).toBe(false)
+    expect(screen.getByText('蓝图状态机 · 回看')).toBeTruthy()
+
+    const drillButton = container.querySelector<HTMLButtonElement>('.gv-bp-node button[title*="下钻子流程"]')
+    expect(drillButton).toBeTruthy()
+    fireEvent.click(drillButton!)
+    expect(canvasNodeLabels().some((label) => label.includes('选择技能'))).toBe(true)
+    expect(canvasNodeLabels().some((label) => label.includes('我方回合'))).toBe(false)
   })
 })

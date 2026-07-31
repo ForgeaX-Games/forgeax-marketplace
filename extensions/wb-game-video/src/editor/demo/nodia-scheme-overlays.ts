@@ -229,7 +229,7 @@ export const NODIA_NODE_SCHEME_N_DOOR: Overlay = {
         "timeoutMs": 6100,
         "defaultEvent": "fail"
       },
-      "component": "inkKou",
+      "component": "InkKou",
       "layout": { ...STAGE_FILL_LAYOUT }
     }
   ]
@@ -256,7 +256,7 @@ export const NODIA_NODE_SCHEME_N_SOUL: Overlay = {
         "width": 1,
         "height": 1
       },
-      "component": "dialogue"
+      "component": "Dialogue"
     }
   ]
 } as Overlay
@@ -356,7 +356,7 @@ export const NODIA_NODE_SCHEME_TELE: Overlay = {
           }
         ]
       },
-      "component": "battleParry",
+      "component": "BattleParry",
       "layout": { ...STAGE_FILL_LAYOUT }
     }
   ]
@@ -449,7 +449,7 @@ export const NODIA_NODE_SCHEME_WAIT: Overlay = {
         "x": 0.5,
         "y": 0.88
       },
-      "component": "battleSkillBar",
+      "component": "BattleSkill",
       "layout": { ...STAGE_FILL_LAYOUT }
     }
   ]

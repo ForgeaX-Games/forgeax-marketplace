@@ -8,7 +8,7 @@
  * 不落盘 —— 让「没配」与「配了默认值」在磁盘上同形，旧图不会因为点开一次面板就长出一堆等价字段。
  */
 import type { NodeBgm } from '../../runtime/schema/graph-schema'
-import type { KinoResourceDTO } from '../assets/kino-api'
+import type { ManagedAsset } from '../assets/assetLibraryClient'
 
 /** BGM 资产下拉候选：`id` 落盘（永不落 URL），`label` 仅展示。 */
 export interface AudioOption {
@@ -64,14 +64,13 @@ export function patchNodeBgm(current: NodeBgm | undefined, patch: Partial<NodeBg
 }
 
 /**
- * Kino 音频资源 → BGM 候选（与「视频」字段拼 `VideoOption` 同款：去重、名字优先）。
- * 数据源是 Kino `media_type: 'audio'`（资产库上传的那批），不是本地素材清单路由。
+ * 通用音频资产 → BGM 候选（与「视频」字段拼 `VideoOption` 同款：去重、名字优先）。
  */
-export function audioAssetOptions(resources: readonly KinoResourceDTO[]): AudioOption[] {
+export function audioAssetOptions(resources: readonly ManagedAsset[]): AudioOption[] {
   const seen = new Set<string>()
   const out: AudioOption[] = []
   for (const resource of resources) {
-    const id = resource.resource_id
+    const id = resource.id
     if (!id || seen.has(id)) continue
     seen.add(id)
     const name = resource.name?.trim()

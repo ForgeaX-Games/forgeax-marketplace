@@ -46,10 +46,11 @@ describe('挂载静态方案 · 血条进试玩', () => {
     const session = new GraphSession(scn)
     const snap = session.start()
     expect(snap.currentNodeId).toBe('n_open')
+    expect(snap.hud.entities['ent-player']?.name).toBe(base.entities?.['ent-player']?.name)
 
     const hudChildren = snap.overlayMounts.flatMap((m) => m.children)
     expect(hudChildren.map((c) => c.component)).toEqual(
-      expect.arrayContaining(['battlePlayerHpBar', 'battleEnemyHpBar']),
+      expect.arrayContaining(['BattlePlayerHpBar', 'BattleEnemyHpBar']),
     )
 
     const skins = createCoreSkinRegistry()

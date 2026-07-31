@@ -9,6 +9,7 @@ import type {
   ValueTermOp,
   Variable,
 } from '../../runtime/schema/graph-schema'
+import { parseExpr } from '../../runtime/engine/expr'
 import type { EditorValueTerm as ValueTerm, FormulaHoleBinding, FormulaPick } from '../persist/formula-authoring'
 import {
   findEntity,
@@ -23,6 +24,7 @@ export type ValuePick =
   | { mode: 'const'; const: number }
   | { mode: 'pick'; terms: ValueTerm[] }
   | FormulaPick
+export type ValueExprInput = NumOrExpr | string
 export type { ValueTerm, ValueTermOp }
 
 export {
@@ -208,9 +210,31 @@ function asValuePick(stored: unknown): ValuePick | undefined {
   return undefined
 }
 
-/** 从 NumOrExpr / 独立 sidecar 恢复选取态（优先 sidecar → value.pick → 常量 / 空行）。 */
+function directBindingFromExpr(expr: string): Extract<ValuePick, { mode: 'pick' }> | undefined {
+  try {
+    const node = parseExpr(expr.trim())
+    if (node.t !== 'ref') return undefined
+    if (node.path.length === 4 && node.path[0] === 'entity' && node.path[2] === 'attr') {
+      return {
+        mode: 'pick',
+        terms: [{ op: '+', source: 'entity', refId: node.path[1]!, attr: node.path[3]! }],
+      }
+    }
+    if (node.path.length === 2 && node.path[0] === 'var') {
+      return {
+        mode: 'pick',
+        terms: [{ op: '+', source: 'var', refId: node.path[1]! }],
+      }
+    }
+  } catch {
+    // Half-authored or unsupported historical expressions remain read-only below.
+  }
+  return undefined
+}
+
+/** 从数值 / 表达式 / 独立 sidecar 恢复编辑态（优先 sidecar → value.pick → 简单引用反推）。 */
 export function resolveValuePick(
-  value: NumOrExpr | undefined,
+  value: ValueExprInput | undefined,
   entities: Record<string, Entity> | undefined,
   variables: Record<string, Variable> | undefined,
   storedPick?: unknown,
@@ -223,5 +247,16 @@ export function resolveValuePick(
   }
   // 常量保留正负号（结算扣血写 -10 等）；旧 Math.abs 会在回填时把负数抹成正数，输入框无法留下负号。
   if (typeof value === 'number') return { mode: 'const', const: value }
-  return { mode: 'pick', terms: [emptyPickTerm(entities, variables)] }
+  const expr = typeof value === 'string'
+    ? value
+    : value && typeof value === 'object'
+      ? value.expr
+      : undefined
+  if (typeof expr === 'string') {
+    const binding = directBindingFromExpr(expr)
+    if (binding) return binding
+    // 无 sidecar 的复杂历史表达式不可安全还原；空 terms 表示只读兼容态。
+    return { mode: 'pick', terms: [] }
+  }
+  return { mode: 'const', const: 0 }
 }

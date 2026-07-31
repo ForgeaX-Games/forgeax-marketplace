@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createRng } from '../../../../engine/rng'
 import type { SkinCtx } from '../../../rendererRegistry'
 import {
-  DamageFloatTextOverlay,
-  damageFloatTextComponent,
+  DamageFloatText,
+  DamageFloatTextManifest,
 } from '../DamageFloatText'
 import {
-  GainFloatTextOverlay,
-  gainFloatTextComponent,
+  GainFloatText,
+  GainFloatTextManifest,
 } from '../GainFloatText'
-import { resolveNumericFloatValue } from '../numericFloatText'
+import { resolveNumericFloatDurationMs, resolveNumericFloatValue } from '../numericFloatText'
 
 afterEach(cleanup)
 
@@ -32,38 +32,52 @@ const ctx: SkinCtx = {
 
 describe('numeric float text components', () => {
   it('declare a shared constant-or-formula value input', () => {
-    expect(damageFloatTextComponent.inputs).toEqual([
+    expect(DamageFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: -25 },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ff5a5a' },
+      { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
+      { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
     ])
-    expect(gainFloatTextComponent.inputs).toEqual([
+    expect(GainFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: 50 },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ffd54a' },
+      { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
+      { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
     ])
   })
 
   it('render fixed numbers and evaluate formula values from SkinCtx', () => {
     render(
       <>
-        <DamageFloatTextOverlay
-          overlay={{ elementId: 'fixed-damage', component: 'damageFloatText', inputs: { value: -25 } }}
+        <DamageFloatText
+          overlay={{ elementId: 'fixed-damage', component: 'DamageFloatText', inputs: { value: -25 } }}
           ctx={ctx}
         />
-        <GainFloatTextOverlay
-          overlay={{ elementId: 'fixed-gain', component: 'gainFloatText', inputs: { value: 50 } }}
+        <GainFloatText
+          overlay={{ elementId: 'fixed-gain', component: 'GainFloatText', inputs: { value: 50 } }}
           ctx={ctx}
         />
-        <DamageFloatTextOverlay
+        <DamageFloatText
           overlay={{
             elementId: 'formula-damage',
-            component: 'damageFloatText',
+            component: 'DamageFloatText',
             inputs: { value: { expr: '-(entity.hero.attr.attack + var.bonus)' } },
           }}
           ctx={ctx}
         />
-        <GainFloatTextOverlay
+        <GainFloatText
           overlay={{
             elementId: 'formula-gain',
-            component: 'gainFloatText',
+            component: 'GainFloatText',
             inputs: { value: { expr: 'entity.hero.attr.attack / 2' } },
+          }}
+          ctx={ctx}
+        />
+        <GainFloatText
+          overlay={{
+            elementId: 'legacy-string-expression',
+            component: 'GainFloatText',
+            inputs: { value: 'entity.hero.attr.attack + var.bonus + 1' },
           }}
           ctx={ctx}
         />
@@ -74,12 +88,38 @@ describe('numeric float text components', () => {
     expect(screen.getByText('+50')).toBeTruthy()
     expect(screen.getByText('-23')).toBeTruthy()
     expect(screen.getByText('+10')).toBeTruthy()
+    expect(screen.getByText('+24')).toBeTruthy()
+  })
+
+  it('uses each skin default appearance and accepts its optional text overrides', () => {
+    const { rerender } = render(
+      <DamageFloatText overlay={{ elementId: 'damage', component: 'DamageFloatText', inputs: { value: -25 } }} />,
+    )
+    expect(screen.getByText('-25')).toHaveStyle({ color: '#ff5a5a', '--gv-text-font-size': '3.5cqh' })
+
+    rerender(
+      <GainFloatText
+        overlay={{ elementId: 'gain', component: 'GainFloatText', inputs: { value: 50, color: '#123456', fontSize: 4 } }}
+      />,
+    )
+    expect(screen.getByText('+50')).toHaveStyle({ color: '#123456', '--gv-text-font-size': '4cqh' })
+  })
+
+  it('scales the entire float animation from its total duration input', () => {
+    render(
+      <DamageFloatText
+        overlay={{ elementId: 'slow-damage', component: 'DamageFloatText', inputs: { value: -25, durationMs: 2400 } }}
+      />,
+    )
+    expect(screen.getByText('-25').parentElement).toHaveStyle({ '--gv-animation-duration': '2400ms' })
+    expect(resolveNumericFloatDurationMs(undefined)).toBe(1100)
+    expect(resolveNumericFloatDurationMs(0)).toBe(1100)
   })
 
   it('keeps legacy text values readable when value is absent', () => {
     render(
-      <DamageFloatTextOverlay
-        overlay={{ elementId: 'legacy', component: 'damageFloatText', inputs: { text: '-9' } }}
+      <DamageFloatText
+        overlay={{ elementId: 'legacy', component: 'DamageFloatText', inputs: { text: '-9' } }}
         ctx={ctx}
       />,
     )
