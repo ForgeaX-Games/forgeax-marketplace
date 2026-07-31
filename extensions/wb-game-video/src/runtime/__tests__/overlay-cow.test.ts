@@ -9,6 +9,7 @@ import { expandNodeChildren, resolveMountChildren } from '../schema/expand-overl
 import { node, scnOf } from './test-fixtures'
 import {
   addOverlayChild,
+  countOverlayReferences,
   dropOverlayIfUnreferenced,
   ensureNodeOverlay,
   forkSchemeForEdit,
@@ -283,6 +284,26 @@ describe('overlay sparse override（prototype + override）', () => {
   })
 
   describe('孤儿清理（isOverlayReferenced / dropOverlayIfUnreferenced，不受 override 模型影响）', () => {
+    it('引用计数覆盖主蓝图与全部子蓝图', () => {
+      const main = {
+        nodes: [node('main-a', { overlayNodes: [{ overlay: 'base:DamageFloatText' }] })],
+        edges: [],
+      }
+      const childA = {
+        nodes: [node('child-a', { overlayNodes: [{ overlay: 'base:DamageFloatText' }, { overlay: 'base:GainFloatText' }] })],
+        edges: [],
+      }
+      const childB = {
+        nodes: [node('child-b', { overlayNodes: [{ overlay: 'base:DamageFloatText' }] })],
+        edges: [],
+      }
+
+      expect(countOverlayReferences([main, childA, childB])).toEqual({
+        'base:DamageFloatText': 3,
+        'base:GainFloatText': 1,
+      })
+    })
+
     it('卸载后清孤儿，仍被引用则保留，且不碰共享方案', () => {
       const e = node('e')
       const seed = scnOf({ nodes: [e], edges: [] })

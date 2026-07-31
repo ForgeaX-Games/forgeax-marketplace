@@ -50,6 +50,29 @@ export function ensureBrushFont(): void {
   )
 }
 
+/**
+ * new 组件共享的文字外观输入。字段必须保持可选：皮肤定义身份默认值，
+ * 组件只在自己的 manifest 中选择性暴露可由作者覆盖的字段。
+ *
+ * `fontSize` 的单位是画面高度百分比，渲染为 cqh；因此在不同画布尺寸下仍保持比例。
+ */
+export interface TextAppearanceInputs {
+  color?: string
+  fontSize?: number
+}
+
+/** 将可选作者覆盖合并进组件自己的文字默认值。 */
+export function resolveTextAppearance(
+  inputs: TextAppearanceInputs,
+  defaults: Required<TextAppearanceInputs>,
+): CSSProperties {
+  return {
+    color: inputs.color ?? defaults.color,
+    // happy-dom 尚不解析 cqh；通过 CSS custom property 保持测试环境与浏览器表现一致。
+    ['--gv-text-font-size']: `${inputs.fontSize ?? defaults.fontSize}cqh`,
+  } as CSSProperties
+}
+
 /** 预览态 CSS 动画负 delay 使用的本地时间。 */
 export function previewTStyle(localMs: number): CSSProperties {
   return { ['--preview-t']: `${Math.max(0, localMs)}ms` } as CSSProperties

@@ -70,6 +70,22 @@ describe('GameStage buffered playback', () => {
     expect(next).toHaveStyle({ opacity: '1' })
   })
 
+  it('pauses and resumes the active video while applying playback rate', () => {
+    const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause')
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
+    const { container, rerender } = render(<GameStage {...props({ paused: true, playbackRate: 2 })} />)
+    const video = videoFor(container, '/a.mp4')
+    fireEvent.loadedData(video)
+
+    expect(video.playbackRate).toBe(2)
+    expect(pause).toHaveBeenCalled()
+    const playsWhilePaused = play.mock.calls.length
+
+    rerender(<GameStage {...props({ paused: false, playbackRate: 0.5 })} />)
+    expect(video.playbackRate).toBe(0.5)
+    expect(play.mock.calls.length).toBeGreaterThan(playsWhilePaused)
+  })
+
   it('reuses a preloaded video element instead of assigning its src during the switch', () => {
     const nextClip = clip('b')
     const { container, rerender } = render(
@@ -101,6 +117,49 @@ describe('GameStage buffered playback', () => {
     fireEvent.loadedData(promoted)
     submitFrame(promoted)
     expect(promoted).toHaveStyle({ opacity: '1' })
+  })
+
+  it('only enables audio on the visible video slot', () => {
+    const nextClip = clip('b')
+    const { container, rerender } = render(
+      <GameStage
+        {...props({
+          videoAudioEnabled: true,
+          preloadVideos: [{ videoSrc: '/b.mp4', clip: nextClip }],
+        })}
+      />,
+    )
+    const first = videoFor(container, '/a.mp4')
+    const preloaded = videoFor(container, '/b.mp4')
+
+    expect(first.muted).toBe(false)
+    expect(preloaded.muted).toBe(true)
+
+    fireEvent.loadedData(first)
+    fireEvent.loadedData(preloaded)
+    rerender(
+      <GameStage
+        {...props({
+          videoSrc: '/b.mp4',
+          clip: nextClip,
+          videoAudioEnabled: true,
+        })}
+      />,
+    )
+    fireEvent.loadedData(preloaded)
+    submitFrame(preloaded)
+
+    expect(first.muted).toBe(true)
+    expect(preloaded.muted).toBe(false)
+  })
+
+  it('keeps the foreground video muted until audio is explicitly enabled', () => {
+    const { container, rerender } = render(<GameStage {...props()} />)
+    const video = videoFor(container, '/a.mp4')
+
+    expect(video.muted).toBe(true)
+    rerender(<GameStage {...props({ videoAudioEnabled: true })} />)
+    expect(video.muted).toBe(false)
   })
 
   it('ignores media events from the retained old video', () => {

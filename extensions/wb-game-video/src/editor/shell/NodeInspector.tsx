@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Entity, GameGraph, GraphCondition, Overlay, RoutingSettlement, SubFlowPackDef, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
-import { getSubFlowPack, getSubFlow } from '../../runtime/schema/graph-schema'
+import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
 import { patchNodeBgm, type AudioOption } from './bgm-authoring'
 import type { NodeAction, OverlayReaction, Reaction, OverlayEventRef } from '../../runtime/schema/node-config-schema'
 import { createOverlayMount, overlayMountId } from '../../runtime/schema/node-config-schema'
@@ -22,7 +22,7 @@ import {
   updateNodeData,
   upsertBranchEdge,
   makeEmptySubFlowPack,
-  attachSameGraphSubflow,
+  attachSubProcess,
   type NodeDataPatch,
 } from '../../graph/edit/graph-edit'
 import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-labels'
@@ -482,17 +482,23 @@ function OverlayReactionsEditor({
             ? routingSettlement?.type === 'at' ? 'at' : 'complete'
             : 'immediate'
           const hint = routeHints?.[event.localEventId] ?? routeHints?.[event.eventId]
+          const sourceNode = graph.nodes.find((candidate) => candidate.id === nodeId)
+          const sourceLabel = sourceNode ? `${sourceNode.data.name || sourceNode.id} (${sourceNode.id})` : nodeId
           return (
             <div style={{ marginTop: 6 }}>
-              {sectionLabel('走向')}
-              {row('目标节点', multiPool ? (
-                <span style={{ fontSize: 11, color: '#ce9178' }}>多目标边池（{pool.length}）· 请在「出边」调整 {hint ?? ''}</span>
-              ) : (
-                <select value={currentTarget} onChange={(e) => onRouteTo(event, e.target.value)} style={{ flex: 1 }}>
-                  <option value="">（无 · 只做副作用）</option>
-                  {nodeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 4, fontSize: 12 }}>
+                <span style={{ opacity: 0.7, flexShrink: 0 }}>从</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceLabel}>{sourceLabel}</span>
+                <span style={{ opacity: 0.7, flexShrink: 0 }}>到</span>
+                {multiPool ? (
+                  <span style={{ fontSize: 11, color: '#ce9178', minWidth: 0 }}>多目标边池（{pool.length}）· 请在「出边」调整 {hint ?? ''}</span>
+                ) : (
+                  <select aria-label="目标节点" value={currentTarget} onChange={(e) => onRouteTo(event, e.target.value)} style={{ flex: 1, minWidth: 0 }}>
+                    <option value="">（无 · 只做副作用）</option>
+                    {nodeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                )}
+              </div>
               {routeEdge ? row('跳转时机', (
                 <select
                   value={timing}
@@ -888,10 +894,14 @@ function EdgeRouteEditor({
       {row('权重', (
         <input
           type="number"
-          value={edge.data?.weight ?? 0}
-          onChange={(ev) => onPatchData({ weight: Number(ev.target.value) || undefined })}
+          value={edge.data?.weight ?? ''}
+          onChange={(ev) => {
+            const value = ev.target.value
+            onPatchData({ weight: value === '' ? undefined : Number(value) })
+          }}
           style={{ flex: 1 }}
-          title="多条无条件默认推进边时按权重随机；0=未设"
+          placeholder="未设"
+          title="多条无条件默认推进边时按权重随机；留空表示未设"
         />
       ))}
       <button type="button" style={{ color: '#ff6b6b', marginTop: 4 }} onClick={onDelete}>🗑 删除边</button>
@@ -922,6 +932,7 @@ export function NodeInspector({
   onFocusLifecycle,
   previewOpen,
   onTogglePreview,
+  isBlueprintEntry = false,
   onChange,
   onPacksChange,
   onEnsureOverlay,
@@ -963,6 +974,8 @@ export function NodeInspector({
   previewOpen?: boolean
   /** 传了才渲染头部弧形把手：切换宿主左侧预览区的展开/收起。 */
   onTogglePreview?: () => void
+  /** 当前节点是否为非主蓝图的入口标识节点；此类节点只承担蓝图入口语义。 */
+  isBlueprintEntry?: boolean
   onChange: (g: GameGraph) => void
   onPacksChange?: (packs: SubFlowPackDef[]) => void
   /**
@@ -1020,9 +1033,11 @@ export function NodeInspector({
     ? '__unavailable__'
     : bgmRef
 
-  const nestRef = getSubFlow(d)
+  const nestProcess = getSubProcess(d)
   const nestPack = getSubFlowPack(d)
-  const nestMode: 'none' | 'subflow' | 'pack' = nestPack ? 'pack' : nestRef ? 'subflow' : 'none'
+  const nestMode: 'none' | 'process' | 'pack' = nestPack ? 'pack' : nestProcess ? 'process' : 'none'
+  /** 容器与子蓝图入口都不是演出节点，不开放演出、界面或规则配置。 */
+  const canConfigurePerformance = nestMode === 'none' && !isBlueprintEntry
   // 作用域 BGM：读原始值（不过 getNodeBgm），与面板下拉一致。
   const bgm = d.bgm
   // 手写/AI 生成的非法 mode 在下拉里显示成 push（validate 会把它判 error），别让 select 变成
@@ -1107,38 +1122,38 @@ export function NodeInspector({
   const targetNodeOptions: OptItem[] = nodeIds
     .filter((id) => id !== node.id)
     .map((id) => ({ value: id, label: nodeLabel(id) }))
-  const setNestMode = (mode: 'none' | 'subflow' | 'pack') => {
+  const setNestMode = (mode: 'none' | 'process' | 'pack') => {
     if (mode === 'none') {
-      patchData({ subFlow: undefined, subFlowPack: undefined })
+      if (nestProcess && typeof confirm === 'function' && !confirm('取消内嵌子流程会删除其中的全部节点和连线，继续吗？')) return
+      patchData({ subProcess: undefined, subFlowPack: undefined })
       return
     }
-    if (mode === 'subflow') {
-      // 只改嵌套属性；入口用新建专用节点（见 attachSameGraphSubflow），不自动下钻。
-      onChange(attachSameGraphSubflow(graph, node.id))
+    if (mode === 'process') {
+      onChange(attachSubProcess(graph, node.id))
       return
     }
     if (nestPack) {
-      patchData({ subFlow: undefined })
+      patchData({ subProcess: undefined })
       return
     }
     const existing = eligiblePacks[0]
     if (existing) {
-      patchData({ subFlow: undefined, subFlowPack: { id: existing.id, version: existing.version } })
+      patchData({ subProcess: undefined, subFlowPack: { id: existing.id, version: existing.version } })
       return
     }
     if (!onPacksChange) {
-      patchData({ subFlow: undefined, subFlowPack: { id: 'pack', version: '1' } })
+      patchData({ subProcess: undefined, subFlowPack: { id: 'pack', version: '1' } })
       return
     }
     const pack = makeEmptySubFlowPack({ title: `${d.name || node.id}·子蓝图` })
     onPacksChange([...packs, pack])
-    patchData({ subFlow: undefined, subFlowPack: { id: pack.id, version: pack.version } })
+    patchData({ subProcess: undefined, subFlowPack: { id: pack.id, version: pack.version } })
   }
   const createAndAttachPack = () => {
     if (!onPacksChange) return
     const pack = makeEmptySubFlowPack({ title: `${d.name || node.id}·子蓝图` })
     onPacksChange([...packs, pack])
-    patchData({ subFlow: undefined, subFlowPack: { id: pack.id, version: pack.version } })
+    patchData({ subProcess: undefined, subFlowPack: { id: pack.id, version: pack.version } })
   }
   return (
     // 根上刻意不设 overflow：一旦它成为滚动容器，下方吸顶头部条就只相对它定位——而它高度随内容、
@@ -1213,7 +1228,7 @@ export function NodeInspector({
       </div>
 
       {row('名称', <input value={d.name} onChange={(e) => patchData({ name: e.target.value })} style={{ flex: 1 }} />)}
-      {row('视频', (
+      {canConfigurePerformance && row('视频', (
         <select
           value={selectedVideoValue}
           onChange={(e) => patchData({ media: e.target.value ? { kind: 'VIDEO', ref: e.target.value } : undefined })}
@@ -1229,7 +1244,7 @@ export function NodeInspector({
           ))}
         </select>
       ))}
-      {row('播放', (
+      {canConfigurePerformance && row('播放', (
         <select value={d.mediaPlayMode ?? 'once'} onChange={(e) => patchData({ mediaPlayMode: e.target.value as 'once' | 'loop' })}>
           <option value="once">播放一次</option>
           <option value="loop">循环</option>
@@ -1238,18 +1253,18 @@ export function NodeInspector({
       {row('嵌套', (
         <select
           value={nestMode}
-          onChange={(e) => setNestMode(e.target.value as 'none' | 'subflow' | 'pack')}
+          onChange={(e) => setNestMode(e.target.value as 'none' | 'process' | 'pack')}
           style={{ flex: 1 }}
-          title="无 / 同图子流程 / 外部子蓝图（互斥）"
+          title="无 / 私有内嵌子流程 / 外部子蓝图（互斥）"
         >
           <option value="none">无</option>
-          <option value="subflow">同图子流程</option>
+          <option value="process">内嵌子流程</option>
           <option value="pack">子蓝图</option>
         </select>
       ))}
-      {nestMode === 'subflow' && row('子流程入口', (
-        <span style={{ flex: 1, opacity: 0.85 }} title="由同图子流程自动创建/绑定，不可手改">
-          {nestRef ? nodeLabel(nestRef) : '（未绑定）'}
+      {nestMode === 'process' && row('子流程入口', (
+        <span style={{ flex: 1, opacity: 0.85 }} title="入口属于容器私有子图，不可跨层连接">
+          {nestProcess?.entry ?? '（未绑定）'}
         </span>
       ))}
       {nestMode === 'pack' && (
@@ -1269,12 +1284,12 @@ export function NodeInspector({
                   alert(`不能引用「${pack.title ?? pack.id}」：会造成蓝图引用环（自身或间接引用回本蓝图）。`)
                   return
                 }
-                patchData({ subFlow: undefined, subFlowPack: { id: pack.id, version: pack.version } })
+                patchData({ subProcess: undefined, subFlowPack: { id: pack.id, version: pack.version } })
               }}
               style={{ flex: 1 }}
               title="引用蓝图库中的子蓝图；双击容器跳到该蓝图编辑"
             >
-              <option value="">（选包）</option>
+              {eligiblePacks.length === 0 ? <option value="">无</option> : null}
               {eligiblePacks.map((p) => (
                 <option key={`${p.id}@${p.version}`} value={`${p.id}@${p.version}`}>{packLabel(p)}</option>
               ))}
@@ -1285,23 +1300,11 @@ export function NodeInspector({
               ＋ 新建子蓝图
             </button>
           ))}
-          {nestPack && row('入口覆盖', (
-            <input
-              value={nestPack.entry ?? ''}
-              onChange={(e) => patchData({
-                subFlowPack: {
-                  ...nestPack,
-                  entry: e.target.value.trim() || undefined,
-                },
-              })}
-              placeholder="默认用包内 entry"
-              style={{ flex: 1 }}
-              title="可选：覆盖包默认入口节点 id"
-            />
-          ))}
         </>
       )}
 
+      {canConfigurePerformance ? (
+        <>
       {/* 覆盖物挂载 + reactions（每挂载一份） */}
       <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 6 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
@@ -1523,6 +1526,8 @@ export function NodeInspector({
           onChange={(reactions) => patchData({ reactions })}
         />
       </div>
+        </>
+      ) : null}
 
       {/* 出边：先连目标；条件可选；交互出口仅选项/QTE 等需要时再改 */}
       <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 6 }}>

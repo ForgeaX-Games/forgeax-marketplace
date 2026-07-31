@@ -234,8 +234,10 @@ describe('§9-3a 包内起播：内层帧与包帧弹出全程沉默（音乐跟
       {
         nodes: [
           node('p_enter', { durationMs: 100, bgm: { ref: BATTLE, fadeInMs: 800, fadeOutMs: 600 } }),
-          node('p_skill', { subFlow: 'p_hit' }),
-          node('p_hit', { durationMs: 100 }),
+          node('p_skill', { subProcess: { entry: 'p_hit', graph: {
+            nodes: [node('p_hit', { durationMs: 100 })],
+            edges: [],
+          } } }),
           node('p_end', {}),
         ],
         edges: [edge('e-pe', 'p_enter', 'p_skill'), edge('e-ps', 'p_skill', 'p_end')],
@@ -265,8 +267,10 @@ describe('§9-3a 包内起播：内层帧与包帧弹出全程沉默（音乐跟
     const p = packOf('bp-combat', 'p_enter', {
       nodes: [
         node('p_enter', { durationMs: 100, bgm: { ref: BATTLE, fadeOutMs: 600 } }),
-        node('p_skill', { subFlow: 'p_hit' }),
-        node('p_hit', { durationMs: 100 }),
+        node('p_skill', { subProcess: { entry: 'p_hit', graph: {
+          nodes: [node('p_hit', { durationMs: 100 })],
+          edges: [],
+        } } }),
         node('p_tail', { durationMs: 100 }),
       ],
       edges: [edge('e-pe', 'p_enter', 'p_skill'), edge('e-ps', 'p_skill', 'p_tail')],
@@ -288,19 +292,29 @@ describe('§9-3b 容器节点本身配 bgm：与普通节点同一套寿命（�
   const g = (): GameGraph => ({
     nodes: [
       node('n1', { durationMs: 100 }),
-      node('combat', { subFlow: 'enter', bgm: { ref: BATTLE, fadeOutMs: 600 } }),
-      node('enter', { durationMs: 100 }),
-      node('skill', { subFlow: 'hit', reactions: [countUp('round')] }),
-      node('hit', { durationMs: 100 }),
-      node('t_end', {}),
+      node('combat', {
+        bgm: { ref: BATTLE, fadeOutMs: 600 },
+        subProcess: { entry: 'enter', graph: {
+          nodes: [
+            node('enter', { durationMs: 100 }),
+            node('skill', {
+              reactions: [countUp('round')],
+              subProcess: { entry: 'hit', graph: { nodes: [node('hit', { durationMs: 100 })], edges: [] } },
+            }),
+            node('t_end', {}),
+          ],
+          edges: [
+            edge('e-es', 'enter', 'skill'),
+            edge('e-end', 'skill', 't_end', varGte('round', 2)),
+            edge('e-loop', 'skill', 'enter'),
+          ],
+        } },
+      }),
       node('after', { durationMs: 100 }),
     ],
     edges: [
       edge('e-n1', 'n1', 'combat'),
       edge('e-out', 'combat', 'after'),
-      edge('e-es', 'enter', 'skill'),
-      edge('e-end', 'skill', 't_end', varGte('round', 2)),
-      edge('e-loop', 'skill', 'enter'),
     ],
   })
 
@@ -722,11 +736,13 @@ describe('局内清 callStack：BGM 栈原样，层继续响', () => {
   const handleEdgeGraph = (bgm: NodeBgm): GameGraph => ({
     nodes: [
       node('n1', { durationMs: 100 }),
-      node('combat', { subFlow: 'enter', bgm }),
-      node('enter', {
-        durationMs: 1000,
-        timeline: [{ id: 'c', kind: 'choiceX', trigger: { when: 'enter' }, inputs: { events: [{ id: 'win' }] } }],
-      }),
+      node('combat', { bgm, subProcess: { entry: 'enter', graph: {
+        nodes: [node('enter', {
+          durationMs: 1000,
+          timeline: [{ id: 'c', kind: 'choiceX', trigger: { when: 'enter' }, inputs: { events: [{ id: 'win' }] } }],
+        })],
+        edges: [],
+      } } }),
       node('win', { durationMs: 100 }),
     ],
     edges: [
@@ -760,11 +776,10 @@ describe('局内清 callStack：BGM 栈原样，层继续响', () => {
     const g: GameGraph = {
       nodes: [
         node('combat', {
-          subFlow: 'atk',
           bgm: { ref: BATTLE, fadeOutMs: 600 },
+          subProcess: { entry: 'atk', graph: { nodes: [node('atk', { durationMs: 5000 })], edges: [] } },
           overlayNodes: [{ overlay: 'hpPanel', reactions: [{ when: { type: 'event', id: 'B3' }, do: [{ kind: 'advance', edgeId: 'e-out' }] }] }],
         }),
-        node('atk', { durationMs: 5000 }),
         node('after', { durationMs: 100 }),
       ],
       edges: [{ id: 'e-out', source: 'combat', target: 'after', sourceHandle: 'B3', targetHandle: 'in' } as GameGraph['edges'][number]],
@@ -783,17 +798,21 @@ describe('局内清 callStack：BGM 栈原样，层继续响', () => {
   /** 规则硬打断（watch advance）飞出容器：同样是局内路径，不是作者跳转。 */
   const interruptGraph = (bgm: NodeBgm): GameGraph => ({
     nodes: [
-      node('combat', { subFlow: 'inner', bgm }),
-      node('inner', {
-        durationMs: 5000,
-        reactions: [
-          {
-            when: { type: 'enter' },
-            do: [{ kind: 'effect', effects: [{ id: 's', kind: 'var', varId: 'flag', op: 'set', value: 1 }] }],
-          },
-          { when: { type: 'watch', of: 'var.flag', on: 'change' }, do: [{ kind: 'advance', edgeId: 'e-win' }] },
-        ],
-      }),
+      node('combat', {
+        bgm,
+        reactions: [{ when: { type: 'watch', of: 'var.flag', on: 'change' }, do: [{ kind: 'advance', edgeId: 'e-win' }] }],
+        subProcess: { entry: 'inner', graph: {
+        nodes: [node('inner', {
+          durationMs: 5000,
+          reactions: [
+            {
+              when: { type: 'enter' },
+              do: [{ kind: 'effect', effects: [{ id: 's', kind: 'var', varId: 'flag', op: 'set', value: 1 }] }],
+            },
+          ],
+        })],
+        edges: [],
+      } } }),
       node('win', { durationMs: 100 }),
     ],
     edges: [{ id: 'e-win', source: 'combat', target: 'win', sourceHandle: 'default', targetHandle: 'in' } as GameGraph['edges'][number]],

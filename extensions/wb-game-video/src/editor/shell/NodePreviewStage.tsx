@@ -24,7 +24,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { GameNode, GameScenario, Layout } from '../../runtime/schema/graph-schema'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
-import { initState } from '../../runtime/engine/engine-init'
 import { bootEditorSkins } from '../init'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { createCoreSkinRegistry } from '../../runtime/component-host/components'
@@ -32,6 +31,7 @@ import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
 import { PreviewClockProvider, previewClockLayerClassName } from './previewClock'
+import { projectNodePreviewState } from './nodePreviewState'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
 import { ScaledOverlayContent } from '../../runtime/play/ScaledOverlayContent'
@@ -260,24 +260,42 @@ export function NodePreviewStage({
   // 与视频 tab / 界面 tab 同源：完整皮肤表，不依赖 default 单例是否被 HMR 冲掉。
   const previewSkinReg = useMemo(() => createCoreSkinRegistry(), [])
   const previewSkinCtx = useMemo((): SkinCtx => {
-    const st = initState(scenario)
-    const toHudEnt = (attrs: Record<string, number>, attrMeta?: Record<string, { max?: number }>) => {
+    const st = projectNodePreviewState(scenario, node, playheadMs, maxMs)
+    const toHudEnt = (
+      attrs: Record<string, number>,
+      attrMeta?: Record<string, { max?: number; initial?: number }>,
+      name?: string,
+    ) => {
       const attrMax: Record<string, number> = {}
-      for (const [k, v] of Object.entries(attrs)) attrMax[k] = attrMeta?.[k]?.max ?? v
-      return { hp: attrs.hp ?? 0, maxHp: attrMeta?.hp?.max ?? attrs.hp ?? 0, attrs: { ...attrs }, attrMax }
+      const initialAttrs: Record<string, number> = {}
+      for (const [k, v] of Object.entries(attrs)) {
+        attrMax[k] = attrMeta?.[k]?.max ?? v
+        initialAttrs[k] = attrMeta?.[k]?.initial ?? attrMeta?.[k]?.max ?? v
+      }
+      return {
+        name,
+        hp: attrs.hp ?? 0,
+        maxHp: attrMeta?.hp?.max ?? attrs.hp ?? 0,
+        attrs: { ...attrs },
+        attrMax,
+        initialAttrs,
+      }
     }
     const hudEntities: SkinCtx['hud']['entities'] = Object.fromEntries(
-      Object.entries(st.entities).map(([id, e]) => [id, toHudEnt(e.attrs, e.attrMeta)]),
+      Object.entries(st.entities).map(([id, e]) => [
+        id,
+        toHudEnt(e.attrs, e.attrMeta, scenario.entities?.[id]?.name?.trim() || id),
+      ]),
     )
     // 与目录预览一致：缺实体时给常见战斗 id 兜底，避免血条 bind 后渲成 null。
-    if (!hudEntities['ent-player']) hudEntities['ent-player'] = toHudEnt({ hp: 72 }, { hp: { max: 100 } })
-    if (!hudEntities['ent-boss']) hudEntities['ent-boss'] = toHudEnt({ hp: 58 }, { hp: { max: 100 } })
+    if (!hudEntities['ent-player']) hudEntities['ent-player'] = toHudEnt({ hp: 72 }, { hp: { max: 100 } }, 'ent-player')
+    if (!hudEntities['ent-boss']) hudEntities['ent-boss'] = toHudEnt({ hp: 58 }, { hp: { max: 100 } }, 'ent-boss')
     return {
       hud: { entities: hudEntities, vars: { qi: 3, ...st.vars }, score: st.score, flags: st.flags },
       // 编辑器预览：用初始态做门控求值（无 visited）
       condition: { state: st, visited: new Set<string>() },
     }
-  }, [scenario])
+  }, [scenario, node, playheadMs, maxMs])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
 
   // 「添加控件」= 覆盖物挂载入口：候选与界面 tab 同一份（自定义覆盖物 + 基础覆盖物，打平；
@@ -337,6 +355,7 @@ export function NodePreviewStage({
   function pauseForScrub(): void {
     const v = videoRef.current
     if (v && !v.paused) { try { v.pause() } catch { /* ignore */ } }
+    setIsVideoPlaying(false)
   }
   function togglePlay(): void {
     const v = videoRef.current
@@ -582,7 +601,7 @@ export function NodePreviewStage({
                       >
                         {children.map((child) => (
                           <span key={child.id} style={{ display: 'contents' }}>
-                            {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs, layout)}
+                            {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs, layout, isVideoPlaying)}
                           </span>
                         ))}
                       </div>
@@ -602,9 +621,14 @@ export function NodePreviewStage({
                 focusMount(id)
               }}
               onMove={(id, position) => {
+                pauseForScrub()
                 patchMountPosition(id, position)
               }}
+              onInteractionChange={(active) => {
+                if (active) pauseForScrub()
+              }}
               onReorder={(id, direction) => {
+                pauseForScrub()
                 reorderMount(id, direction)
               }}
             />
@@ -622,8 +646,8 @@ export function NodePreviewStage({
         </button>
       </div>
 
-      {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 */}
-      <div className="nps-addbar">
+      {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 先暂时隐藏 */}
+      <div className="nps-addbar" style={{ display: 'none' }}>
         <span className="nps-addbar-label">添加控件</span>
         {primaryCandidateIds.length === 0 && moreCandidateIds.length === 0 ? (
           <span className="nps-addbar-empty">已挂载全部覆盖物</span>
@@ -686,8 +710,7 @@ export function NodePreviewStage({
           focusMount(mid)
           const it = materials.find((m) => m.key === key)
           if (it) {
-            // 选中即定格到该覆盖物可见窗的**中段**并暂停：贴纸的入场动画此时已播完、完整呈现，
-            // 便于看清 + 选中 + 拖拽；seek 到起点（0 帧）会停在动画 from{opacity:0} 看不到贴纸。
+            // 选中即定格到该覆盖物可见窗的中段并暂停；动画按该局部时刻精确定帧。
             seekTo(it.startMs + (it.endMs - it.startMs) / 2)
             pauseForScrub()
           }

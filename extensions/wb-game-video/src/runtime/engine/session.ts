@@ -77,6 +77,8 @@ export interface OverlayMountSnap {
   children: OverlayChildSnap[]
 }
 export interface HudEntitySnap {
+  /** 实体显示名，供挂载态组件做字符串绑定。 */
+  name?: string
   /** 约定便捷字段（= attrs.hp / attrMeta.hp.max）。 */
   hp: number
   maxHp: number
@@ -84,6 +86,8 @@ export interface HudEntitySnap {
   attrs: Record<string, number>
   /** attr → max（来自 attrMeta.max；无则回退当前值）。 */
   attrMax: Record<string, number>
+  /** attr → 本局初始值；覆盖物用它把运行时变化量投影到作者配置的显示基线。 */
+  initialAttrs?: Record<string, number>
 }
 export interface HudSnap {
   entities: Record<string, HudEntitySnap>
@@ -94,6 +98,7 @@ export interface HudSnap {
 export interface CallStackFrameSnap {
   blueprintId: string
   callerNodeId: string
+  graphPath: string[]
   title?: string
 }
 /**
@@ -131,6 +136,7 @@ export interface SessionSnapshot {
   traversedEdgeIds: string[]
   log: string[]
   activeBlueprintId: string
+  activeGraphPath: string[]
   callStack: CallStackFrameSnap[]
 }
 
@@ -141,6 +147,7 @@ export class GraphSession {
   snapshot: SessionSnapshot
   private readonly nodesById: Map<string, GameNode>
   private readonly blueprintTitles: Map<string, string>
+  private readonly entityNames: Record<string, string>
   private pendingEntryReason: string | undefined
   /** 已发出的 `bgm` 指令条数；本局单调递增，作快照里那条指令的身份（见 BgmSnapshot）。 */
   private bgmSeq = 0
@@ -163,6 +170,9 @@ export class GraphSession {
     // 开跑用根 graph；依赖解析在 GraphRuntime 内走 manifest.packs（或 opts.packs 注入）。
     this.runtime = new GraphRuntime(scenario.graph, scenario, components, opts.packs ?? [], rootId)
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
+    this.entityNames = Object.fromEntries(
+      Object.entries(scenario.entities ?? {}).map(([id, entity]) => [id, entity.name?.trim() || id]),
+    )
     this.snapshot = this.freshSnapshot()
   }
 
@@ -177,6 +187,7 @@ export class GraphSession {
       traversedEdgeIds: [],
       log: [],
       activeBlueprintId: this.runtime.getActiveBlueprintId(),
+      activeGraphPath: this.runtime.getActiveGraphPath(),
       callStack: this.projectCallStack(),
     }
   }
@@ -185,6 +196,7 @@ export class GraphSession {
     return this.runtime.state.callStack.map((f) => ({
       blueprintId: f.returnBlueprintId,
       callerNodeId: f.callerNodeId,
+      graphPath: [...f.returnGraphPath],
       title: this.blueprintTitles.get(f.returnBlueprintId),
     }))
   }
@@ -195,17 +207,22 @@ export class GraphSession {
     for (const [id, e] of Object.entries(s.entities)) {
       const attrs = { ...e.attrs }
       const attrMax: Record<string, number> = {}
+      const initialAttrs: Record<string, number> = {}
       for (const [k, v] of Object.entries(attrs)) {
         attrMax[k] = e.attrMeta?.[k]?.max ?? v
+        initialAttrs[k] = e.attrMeta?.[k]?.initial ?? e.attrMeta?.[k]?.max ?? v
       }
       for (const [k, m] of Object.entries(e.attrMeta ?? {})) {
         if (attrMax[k] === undefined && m.max !== undefined) attrMax[k] = m.max
+        if (initialAttrs[k] === undefined && m.initial !== undefined) initialAttrs[k] = m.initial
       }
       entities[id] = {
+        name: this.entityNames[id] ?? id,
         hp: attrs.hp ?? 0,
         maxHp: e.attrMeta?.hp?.max ?? attrs.hp ?? 0,
         attrs,
         attrMax,
+        initialAttrs,
       }
     }
     return { entities, vars: { ...s.vars }, flags: { ...s.flags }, score: s.score }
@@ -228,7 +245,7 @@ export class GraphSession {
   /** 点击运行时蓝图节点 → 跳转执行。 */
   jump(
     nodeId: string,
-    opts?: { resetGlobals?: boolean; graph?: GameGraph; blueprintId?: string },
+    opts?: { resetGlobals?: boolean; graph?: GameGraph; blueprintId?: string; graphPath?: string[] },
   ): SessionSnapshot {
     return this.apply(this.runtime.jumpToNode(nodeId, opts))
   }
@@ -318,6 +335,7 @@ export class GraphSession {
     this.snapshot.visited = [...s.visited]
     this.snapshot.traversedEdgeIds = [...s.traversedEdgeIds]
     this.snapshot.activeBlueprintId = this.runtime.getActiveBlueprintId()
+    this.snapshot.activeGraphPath = this.runtime.getActiveGraphPath()
     this.snapshot.callStack = this.projectCallStack()
     // 返回**新的对象引用**——GraphSession 内部快照是原地累积的，若直接返回同一引用，
     // React 的 setState 会因 Object.is 相等而跳过重渲染（引擎推进了、界面却不更新）。
@@ -335,7 +353,8 @@ export class GraphSession {
       })),
       visited: [...s.visited],
       traversedEdgeIds: [...s.traversedEdgeIds],
-      callStack: [...s.callStack],
+      callStack: s.callStack.map((frame) => ({ ...frame, graphPath: [...frame.graphPath] })),
+      activeGraphPath: [...s.activeGraphPath],
       log: [...s.log],
       hud: { ...s.hud, entities: { ...s.hud.entities }, vars: { ...s.hud.vars }, flags: { ...s.hud.flags } },
     }

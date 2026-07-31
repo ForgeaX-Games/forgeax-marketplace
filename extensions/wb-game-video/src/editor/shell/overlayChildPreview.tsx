@@ -20,12 +20,13 @@ export function renderOverlayChildPreview(
   ctx: SkinCtx,
   timeMs: number,
   mountLayout: Layout | undefined = STAGE_FILL_LAYOUT,
+  playing = false,
 ): ReactNode {
   const inputs = applyStyleLockedEventParams(
     { ...defaultsForComponent(child.component), ...(child.inputs ?? {}) },
     child.component,
   )
-  const preview = { timeMs: localMsForChild(child, timeMs) }
+  const preview = { timeMs: localMsForChild(child, timeMs), playing }
 
   return reg.renderOverlayMount(
     {

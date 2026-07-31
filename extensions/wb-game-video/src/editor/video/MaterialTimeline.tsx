@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { AudioWaveform } from './audioWaveform'
@@ -34,6 +34,16 @@ export const MATERIAL_DND_MIME = 'application/x-fx-material'
 const CLIP_MIN_PX = 22
 /** 窄于此宽度就不渲染条内文字（文字会压住两侧手柄的可点区；标签仍在 title 里）。 */
 const CLIP_LABEL_MIN_PX = 56
+/** 旋转后的菱形半宽约 9px；仅偏移两端的头部，时刻竖线仍精确落在 0/max。 */
+const POINT_EDGE_OFFSET_PX = 9
+/** 为横向滚动条预留空间，避免它挤占第 6 轨后误触发纵向滚动条。 */
+const TIMELINE_SCROLLBAR_RESERVE_PX = 18
+
+function pointHeadOffsetPx(ms: number, maxMs: number): number {
+  if (ms <= 0) return POINT_EDGE_OFFSET_PX
+  if (ms >= maxMs) return -POINT_EDGE_OFFSET_PX
+  return 0
+}
 
 /**
  * 视频 tab 与剧情树抽屉共享的「材料时间轴」——
@@ -155,6 +165,10 @@ export function MaterialTimeline({
   const canvasPx = Math.max(1, (viewportW || 1) * zoom)
   const pxPerMs = canvasPx / maxMs
   const canvasHeight = TIMELINE_LAYER_TOP + trackCount * TIMELINE_LAYER_STEP + 8
+  const viewportHeight = TIMELINE_LAYER_TOP
+    + TIMELINE_MIN_TRACKS * TIMELINE_LAYER_STEP
+    + 8
+    + TIMELINE_SCROLLBAR_RESERVE_PX
   const ruleTicks = useMemo(() => buildMaterialTicks(maxMs, pxPerMs), [maxMs, pxPerMs])
 
   // 视口宽度 → canvasPx 基准。ResizeObserver 跟随布局变化。
@@ -338,7 +352,10 @@ export function MaterialTimeline({
   }
 
   return (
-    <div className="mtl-root">
+    <div
+      className="mtl-root"
+      style={{ '--gc-timeline-h': `${viewportHeight}px` } as CSSProperties}
+    >
       <div className="gc-materialbar">
         <span className="gc-materialbar-meta">时间轴 · {fmtDur(maxMs)}</span>
         {onModeChange ? (
@@ -443,6 +460,7 @@ export function MaterialTimeline({
                 {/* 结算是整节点的"到此刻收尾"，故用贯穿竖线；只有菱形头可抓，竖线可点会挡住材料条命中。 */}
                 <span
                   className="gc-point-head"
+                  style={{ left: `${pointHeadOffsetPx(mk.ms, maxMs)}px` }}
                   role="slider"
                   tabIndex={0}
                   aria-label={mk.label}
@@ -462,7 +480,7 @@ export function MaterialTimeline({
           })}
           {lifecycleMarkers.length ? (
             <div className="gc-life-lane" style={{ top: `${layerTop(lifecycleTrack)}px`, width: `${canvasPx}px` }} aria-hidden>
-              <span className="gc-life-lane-tag">效果</span>
+              <span className="gc-life-lane-tag">结算</span>
             </div>
           ) : null}
           {lifecycleMarkers.map((mk) => {
@@ -477,7 +495,10 @@ export function MaterialTimeline({
               >
                 <span
                   className="gc-life-head"
-                  style={{ top: `${layerTop(lifecycleTrack) + 16}px` }}
+                  style={{
+                    left: `${pointHeadOffsetPx(mk.ms, maxMs)}px`,
+                    top: `${layerTop(lifecycleTrack) + 16}px`,
+                  }}
                   role="slider"
                   tabIndex={0}
                   aria-label={mk.label}
@@ -749,12 +770,14 @@ const MATERIAL_TIMELINE_CSS = `
 }
 .mtl-root .gc-life-lane-tag {
   position: absolute;
-  left: 6px;
+  left: 50%;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
   font-size: 10px;
-  color: rgba(90,212,192,.75);
+  color: rgba(90,212,192,.58);
   letter-spacing: .04em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .mtl-root .gc-life-head {
   position: absolute;

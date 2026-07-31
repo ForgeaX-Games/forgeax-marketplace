@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { registerComponent, unregisterComponent } from '../../../runtime/registry/component-registry'
-import type { GameGraph, Overlay, OverlayEventRef } from '../../../runtime/schema/graph-schema'
+import type { GameGraph, OverlayEventRef } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
 import { ComponentEventsEditor } from '../ComponentEventsEditor'
 import { ComponentFormFields } from '../component-form-fields'
@@ -45,7 +45,7 @@ describe('ComponentEventsEditor', () => {
     ])
   })
 
-  it('mount mode shows inherited catalog actions and edits additions separately', () => {
+  it('mount mode edits additions without showing catalog or mount action labels', () => {
     render(
       <ComponentEventsEditor
         mode="mount"
@@ -58,9 +58,36 @@ describe('ComponentEventsEditor', () => {
         onMountActionsChange={vi.fn()}
       />,
     )
-    expect(screen.getByText('目录继承动作：效果')).toBeTruthy()
-    expect(screen.getByText('挂载追加动作')).toBeTruthy()
+    expect(screen.queryByText(/目录继承动作/)).toBeNull()
+    expect(screen.queryByText(/挂载追加动作/)).toBeNull()
     expect(screen.getByRole('button', { name: /沿边推进/ })).toBeTruthy()
+  })
+
+  it('renders one advance action with custom route controls and preserves it when side effects change', () => {
+    const onMountActionsChange = vi.fn()
+    render(
+      <ComponentEventsEditor
+        mode="mount"
+        events={[event]}
+        mountReactions={[{
+          when: { type: 'event', id: 'pass' },
+          do: [{ kind: 'advance', edgeId: 'edge-1' }],
+        }]}
+        spawnOptions={[]}
+        renderRoute={() => <div>从事件节点到目标节点</div>}
+        onMountActionsChange={onMountActionsChange}
+      />,
+    )
+
+    expect(screen.getByText('沿边推进')).toBeTruthy()
+    expect(screen.getByText('从事件节点到目标节点')).toBeTruthy()
+    expect(screen.queryByText('走边')).toBeNull()
+    expect(screen.queryByRole('button', { name: /沿边推进/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '＋ 效果' }))
+    expect(onMountActionsChange).toHaveBeenCalledWith(event, [
+      { kind: 'advance', edgeId: 'edge-1' },
+      expect.objectContaining({ kind: 'effect' }),
+    ])
   })
 
   it('enables applying formulas inside catalog event effects when the formula library is provided', () => {
@@ -86,7 +113,8 @@ describe('ComponentEventsEditor', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: '应用公式' })).not.toBeDisabled()
+    const content = screen.getByRole('combobox', { name: '数值内容' })
+    expect(content.querySelector('option[value="formula:formula-damage"]')).toBeTruthy()
   })
 })
 
@@ -219,7 +247,7 @@ describe('OverlaySchemeEditor selected child', () => {
     expect(container.querySelector('[data-canvas-item="subtitle-a"]')?.classList.contains('is-selected')).toBe(false)
   })
 
-  it('moves the design canvas with its children and keeps a manually shrunken canvas clipped', async () => {
+  it('keeps the design canvas fixed at 80% and clips content to it', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.hasAttribute('data-overlay-fit-target')) {
         return {
@@ -246,102 +274,39 @@ describe('OverlaySchemeEditor selected child', () => {
         toJSON: () => ({}),
       }
     })
-    let latest: Overlay | undefined
-    function Harness(): JSX.Element {
-      const [overlay, setOverlay] = useState<Overlay>({
-        id: 'double-subtitle',
-        children: [
-          {
+    render(
+      <OverlaySchemeEditor
+        overlayId="double-subtitle"
+        overlay={{
+          id: 'double-subtitle',
+          children: [{
             id: 'subtitle-a',
             component: 'Dialogue',
             inputs: { text: 'A' },
             layout: { left: 0, top: 0, width: 1, height: 1 },
-          },
-          {
-            id: 'subtitle-b',
-            component: 'Dialogue',
-            inputs: { text: 'B' },
-            layout: { left: 0, top: 0, width: 1, height: 1 },
-          },
-        ],
-      })
-      latest = overlay
-      return (
-        <>
-          <OverlaySchemeEditor
-            overlayId={overlay.id}
-            overlay={overlay}
-            entities={{}}
-            variables={{}}
-            usageCount={0}
-            onRename={vi.fn()}
-            onRemove={vi.fn()}
-            onAddChild={vi.fn()}
-            onRemoveChild={vi.fn()}
-            onPatchChild={(childId, patch) => {
-              setOverlay((current) => ({
-                ...current,
-                children: current.children.map((child) =>
-                  child.id === childId
-                    ? {
-                        ...child,
-                        ...(patch.inputs ? { inputs: patch.inputs } : {}),
-                        ...(patch.layout ? { layout: { ...child.layout, ...patch.layout } } : {}),
-                      }
-                    : child),
-              }))
-            }}
-            onMoveCanvas={(moveDelta) => setOverlay((current) => ({
-              ...current,
-              children: current.children.map((child) => ({
-                ...child,
-                layout: {
-                  ...child.layout,
-                  left: (typeof child.layout?.left === 'number' ? child.layout.left : 0) + moveDelta.x,
-                  top: (typeof child.layout?.top === 'number' ? child.layout.top : 0) + moveDelta.y,
-                  right: undefined,
-                  bottom: undefined,
-                },
-              })),
-            }))}
-            onReactionsChange={vi.fn()}
-          />
-        </>
-      )
-    }
-    render(<Harness />)
+          }],
+        }}
+        entities={{}}
+        variables={{}}
+        usageCount={0}
+        onRename={vi.fn()}
+        onRemove={vi.fn()}
+        onAddChild={vi.fn()}
+        onRemoveChild={vi.fn()}
+        onPatchChild={vi.fn()}
+        onReactionsChange={vi.fn()}
+      />,
+    )
 
-    await waitFor(() => expect(screen.getByLabelText('覆盖物画布 宽%')).toHaveValue(50))
-    expect(screen.getByLabelText('覆盖物画布 高%')).toHaveValue(50)
+    await waitFor(() => expect(screen.getByLabelText('覆盖物画布 宽%')).toHaveValue(80))
+    expect(screen.getByLabelText('覆盖物画布 高%')).toHaveValue(80)
     expect(screen.queryByRole('button', { name: /调整dialogue大小/ })).toBeNull()
-    expect(document.querySelectorAll('[data-overflow-child]')).not.toHaveLength(0)
+    expect(document.querySelectorAll('[data-overflow-child]')).toHaveLength(0)
     expect((document.querySelector('[data-overlay-content-clip]') as HTMLElement).style.clipPath).toContain('inset(')
-
-    const canvas = screen.getByRole('application', { name: '界面方案画布' })
-    expect(fireEvent.keyDown(window, { key: ' ', code: 'Space' })).toBe(false)
-    fireEvent.pointerDown(canvas, { button: 0, pointerId: 2, clientX: 60, clientY: 30 })
-    fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 80, clientY: 40 })
-    fireEvent.pointerUp(canvas, { pointerId: 2, clientX: 80, clientY: 40 })
-    fireEvent.keyUp(window, { key: ' ', code: 'Space' })
-
-    await waitFor(() => {
-      expect((document.querySelector('[data-canvas-item="__overlay-canvas__"]') as HTMLElement).style.left).toBe('35%')
+    expect(document.querySelector('[data-overlay-design-canvas]')).toHaveStyle({
+      left: '10%', top: '10%', width: '80%', height: '80%',
     })
-    expect(latest?.children[0]?.layout?.left).toBeCloseTo(0.1)
-    expect(latest?.children[0]?.layout?.top).toBeCloseTo(0.1)
-    expect(latest?.children[1]?.layout?.left).toBeCloseTo(0.1)
-    expect(latest?.children[1]?.layout?.top).toBeCloseTo(0.1)
-    expect(screen.getAllByRole('button', { name: /调整覆盖物画布大小/ })).toHaveLength(8)
-
-    const resize = screen.getByRole('button', { name: '调整覆盖物画布大小：右下' })
-    fireEvent.pointerDown(resize, { pointerId: 3, clientX: 170, clientY: 85 })
-    fireEvent.pointerMove(resize, { pointerId: 3, clientX: 130, clientY: 65 })
-    fireEvent.pointerUp(resize, { pointerId: 3, clientX: 130, clientY: 65 })
-
-    await waitFor(() => expect(screen.getByLabelText('覆盖物画布 宽%')).toHaveValue(30))
-    expect(screen.getByLabelText('覆盖物画布 高%')).toHaveValue(30)
-    expect(Object.prototype.hasOwnProperty.call(latest, 'layout')).toBe(false)
-    expect(document.querySelectorAll('[data-overflow-child]')).not.toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /调整覆盖物画布大小/ })).toBeNull()
   })
 
   it('defaults to the first child and immediately shows parameters and events below the canvas', () => {
@@ -399,7 +364,17 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={vi.fn()}
       />,
     )
-    const current = screen.getByText('当前血量').closest('label')!.querySelector('input') as HTMLInputElement
+    const currentField = screen.getByText('当前血量').parentElement!
+    expect(screen.getByText(/不能增删组件或调整组件大小/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /调整BattlePlayerHpBar大小/ })).toBeNull()
+    expect(currentField.style.gridTemplateColumns).toBe('4em minmax(0, 1fr)')
+    expect(currentField.style.columnGap).toBe('8px')
+    expect(currentField.style.fontSize).toBe('11px')
+    const modeRow = screen.getByRole('radiogroup', { name: '血量方式' }).parentElement!
+    expect(modeRow.style.gridTemplateColumns).toBe('4em minmax(0, 1fr)')
+    expect(screen.getByRole('radio', { name: '分别设置' })).toHaveAttribute('aria-checked', 'true')
+    const current = currentField
+      .querySelector('input[aria-label="常量数值"]') as HTMLInputElement
     expect(current.disabled).toBe(false)
     fireEvent.change(current, { target: { value: '60' } })
     expect(onPatchChild).toHaveBeenCalledWith('hp', {
@@ -407,7 +382,39 @@ describe('OverlaySchemeEditor selected child', () => {
     })
   })
 
-  it('keeps catalog event actions disabled for locked base schemes', () => {
+  it('renders entity name references from rule metadata in the interface canvas', () => {
+    const { container } = render(
+      <OverlaySchemeEditor
+        overlayId="base:BattleEnemyHpBar"
+        overlay={{
+          id: 'base:BattleEnemyHpBar',
+          children: [{
+            id: 'hp',
+            component: 'BattleEnemyHpBar',
+            inputs: { label: { ref: 'entity.ent-player.name' } },
+          }],
+        }}
+        entities={{
+          'ent-player': { id: 'ent-player', name: '空藏', attrs: { hp: 80 } },
+          'ent-boss': { id: 'ent-boss', name: '小怪', attrs: { hp: 100 } },
+        }}
+        variables={{}}
+        usageCount={0}
+        locked
+        onRename={vi.fn()}
+        onRemove={vi.fn()}
+        onAddChild={vi.fn()}
+        onRemoveChild={vi.fn()}
+        onPatchChild={vi.fn()}
+        onReactionsChange={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.ks-hud-boss-name')?.textContent).toBe('空藏')
+  })
+
+  it('keeps base structure locked while allowing catalog event actions', () => {
+    const onReactionsChange = vi.fn()
     render(
       <OverlaySchemeEditor
         overlayId="base:InkYingMo"
@@ -421,11 +428,17 @@ describe('OverlaySchemeEditor selected child', () => {
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
-        onReactionsChange={vi.fn()}
+        onReactionsChange={onReactionsChange}
       />,
     )
-    expect((screen.getByTestId('overlay-event-editor') as HTMLFieldSetElement).disabled).toBe(true)
+    expect((screen.getByTestId('overlay-event-editor') as HTMLFieldSetElement).disabled).toBe(false)
     expect(screen.getByText('choice:ying')).toBeTruthy()
+    const effectButtons = screen.getAllByRole('button', { name: '＋ 效果' })
+    const spawnButtons = screen.getAllByRole('button', { name: '＋ 生成组件' })
+    expect(effectButtons[0]).not.toBeDisabled()
+    expect(spawnButtons[0]).not.toBeDisabled()
+    fireEvent.click(effectButtons[0]!)
+    expect(onReactionsChange).toHaveBeenCalled()
   })
 
   it('does not render an event section for a component without exported events', () => {
@@ -501,9 +514,9 @@ describe('ComponentFormFields defaults', () => {
     )
 
     expect(screen.getByRole('textbox', { name: '常量数值' })).toHaveValue('-25')
-    const applyFormula = screen.getByRole('button', { name: '应用公式' })
-    expect(applyFormula).not.toBeDisabled()
-    fireEvent.click(applyFormula)
+    fireEvent.change(screen.getByRole('combobox', { name: '数值内容' }), {
+      target: { value: `formula:${formula.id}` },
+    })
     expect(onChange).toHaveBeenCalledWith({
       value: {
         expr: '-12',
@@ -513,6 +526,118 @@ describe('ComponentFormFields defaults', () => {
           holeBindings: {},
         },
       },
+    })
+  })
+
+  it('shows inferred state content without rewriting the stored expression', () => {
+    const onChange = vi.fn()
+    render(
+      <ComponentFormFields
+        componentId="DamageFloatText"
+        values={{ value: { expr: 'entity.hero.attr.hp' } }}
+        pickers={{
+          entities: {
+            hero: { id: 'hero', name: '主角', attrs: { hp: 80, attack: 12 } },
+          },
+          variables: {
+            qi: { id: 'qi', name: '气力', initial: 2 },
+          },
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: '数值内容' })).toHaveValue('entity:hero:hp')
+    expect(screen.getByText(/常量：10 · 状态：entity\.hero\.attr\.hp \/ var\.qi/)).toBeTruthy()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('switches hp bars between bound and custom value modes', () => {
+    const onChange = vi.fn()
+    let latest: Record<string, unknown> = {}
+    function Harness(): JSX.Element {
+      const [values, setValues] = useState<Record<string, unknown>>({})
+      latest = values
+      return (
+        <ComponentFormFields
+          componentId="BattlePlayerHpBar"
+          values={values}
+          pickers={{
+            entities: {
+              'ent-player': {
+                id: 'ent-player',
+                name: '空藏',
+                attrs: { hp: 80, hpMax: 100 },
+              },
+            },
+          }}
+          onChange={(next) => {
+            setValues(next)
+            onChange(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    expect(screen.getByRole('radio', { name: '绑定属性' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('绑定对象')).toBeTruthy()
+    expect(screen.queryByText('当前血量')).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: '分别设置' }))
+
+    const currentField = screen.getByText('当前血量').parentElement!
+    const maxField = screen.getByText('最大血量').parentElement!
+    const qiField = screen.getByText('当前气力').parentElement!
+    const qiMaxField = screen.getByText('气力上限').parentElement!
+    const labelField = screen.getByText('显示名').parentElement!
+    const current = within(currentField).getByRole('combobox', { name: '数值内容' })
+    expect(currentField.style.display).toBe('grid')
+    expect(currentField.style.gridTemplateColumns).toBe('max-content minmax(0, 1fr)')
+    expect(currentField.style.flexBasis).toBe('100%')
+    expect(maxField.style.flexBasis).toBe('100%')
+    expect(qiField.style.flexBasis).toBe('100%')
+    expect(qiMaxField.style.flexBasis).toBe('100%')
+    expect(labelField.style.flexBasis).toBe('100%')
+    expect(labelField.compareDocumentPosition(currentField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText('绑定对象')).toBeNull()
+    expect(current).toHaveValue('entity:ent-player:hp')
+    expect(within(maxField).getByRole('combobox', { name: '数值内容' })).toHaveValue('entity:ent-player:hpMax')
+    expect(within(qiField).getByRole('combobox', { name: '数值内容' })).toHaveValue('empty')
+    expect(within(qiMaxField).getByRole('combobox', { name: '数值内容' })).toHaveValue('const')
+    expect(within(labelField).getByRole('combobox', { name: '文本内容' })).toHaveValue('literal')
+    expect(latest.current).toBeTruthy()
+    expect(latest.max).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('radio', { name: '绑定属性' }))
+    expect(latest.current).toBeUndefined()
+    expect(latest.max).toBeUndefined()
+    expect(screen.getByText('绑定对象')).toBeTruthy()
+    expect(onChange).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the dynamic text picker for subtitle speaker and text', () => {
+    const onChange = vi.fn()
+    render(
+      <ComponentFormFields
+        componentId="Dialogue"
+        values={{}}
+        pickers={{
+          entities: {
+            hero: { id: 'hero', name: '空藏', attrs: { hp: 80 } },
+          },
+          variables: {
+            qi: { id: 'qi', name: '气力', initial: 3 },
+          },
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    const pickers = screen.getAllByRole('combobox', { name: '文本内容' })
+    expect(pickers).toHaveLength(2)
+    fireEvent.change(pickers[0]!, { target: { value: 'entity-name:hero' } })
+    expect(onChange).toHaveBeenCalledWith({
+      speaker: { ref: 'entity.hero.name' },
     })
   })
 })

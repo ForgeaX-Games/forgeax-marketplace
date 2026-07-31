@@ -8,24 +8,29 @@ import type {
 } from '../../runtime/schema/graph-schema'
 import {
   overlayReactionKey,
-  resolveEventReactionDo,
   resolveOverlayReaction,
 } from '../../runtime/schema/overlay-events'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import { NodeActionsEditor, type ActionOption } from './NodeActionsEditor'
 import type { EditorPickerCtx } from './editors'
 
-function actionSummary(actions: readonly NodeAction[]): string {
-  if (!actions.length) return '无'
-  return actions.map((action) =>
-    action.kind === 'effect' ? '效果' : action.kind === 'spawn' ? '生成' : '推进').join(' · ')
-}
-
 function labelOf(event: OverlayEventRef): string {
   const component = getComponentManifest(event.componentId)?.label?.trim()
   const local = event.label?.trim()
   const title = [component, local].filter(Boolean).join(' · ')
   return title ? `${title} (${event.localEventId})` : event.localEventId
+}
+
+function mountEventActions(reactions: Reaction[] | undefined, event: OverlayEventRef): NodeAction[] {
+  const keys = new Set([
+    event.localEventId,
+    event.eventId,
+    `${event.childId}:${event.localEventId}`,
+    `${event.mountId}:${event.localEventId}`,
+    `${event.mountId}:${event.childId}:${event.localEventId}`,
+  ])
+  return (reactions ?? []).flatMap((reaction) =>
+    reaction.when.type === 'event' && keys.has(reaction.when.id) ? reaction.do : [])
 }
 
 export function ComponentEventsEditor({
@@ -74,26 +79,15 @@ export function ComponentEventsEditor({
       {events.map((event) => {
         const key = overlayReactionKey(event.childId, event.localEventId)
         const inherited = resolveOverlayReaction(catalogReactions, event.childId, event.localEventId)?.do ?? []
-        const appended = resolveEventReactionDo(
-          mountReactions,
-          event.localEventId,
-          event.childId,
-          event.mountId,
-        ) ?? []
+        const appended = mountEventActions(mountReactions, event)
         const edited = mode === 'catalog' ? inherited : appended
         return (
           <section key={key} data-event-key={key} style={{ border: '1px solid #2c2c2c', borderRadius: 6, padding: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{labelOf(event)}</div>
             <div style={{ fontSize: 10, opacity: 0.55, margin: '2px 0 6px', fontFamily: 'ui-monospace, monospace' }}>{key}</div>
-            {mode === 'mount' ? (
-              <>
-                <div style={{ fontSize: 11, opacity: 0.7 }}>目录继承动作：{actionSummary(inherited)}</div>
-                {renderRoute?.(event)}
-                <div style={{ fontSize: 11, opacity: 0.7, margin: '8px 0 4px' }}>挂载追加动作</div>
-              </>
-            ) : (
+            {mode === 'catalog' ? (
               <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>目录动作（所有挂载继承）</div>
-            )}
+            ) : null}
             <NodeActionsEditor
               actions={edited as NodeAction[]}
               edgeOptions={edgeOptions}
@@ -102,6 +96,7 @@ export function ComponentEventsEditor({
               pickers={pickers}
               allowAdvance={mode === 'mount'}
               allowSpawn={allowSpawn}
+              renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
               onChange={(actions) => mode === 'catalog'
                 ? writeCatalog(event, actions)
                 : onMountActionsChange?.(event, actions)}

@@ -57,6 +57,20 @@ describe('host tool context contract', () => {
     )).toEqual(project)
   })
 
+  it('rejects save-graph data that combines subProcess and subFlowPack', async () => {
+    const cwd = gameRoot()
+    const project = makeNodiaDemo()
+    const main = project.manifest.packs[project.manifest.mainPackId]!
+    const container = main.graph.nodes.find((node) => node.id === 'a_my')!
+    container.data = { ...container.data, subFlowPack: { id: 'reusable' } }
+
+    const result = await tools['wb-game-video:save-graph']({ project }, arrivalCtx(cwd))
+
+    expect(result.ok).toBe(false)
+    expect(result.errors?.some((error) => error.includes('subProcess 与 subFlowPack 不能同时存在'))).toBe(true)
+    expect(existsSync(resolve(cwd, 'blueprint.json'))).toBe(false)
+  })
+
   it('resolves packaged videos from ctx.extensionDir rather than the project cwd', async () => {
     const cwd = gameRoot()
 

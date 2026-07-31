@@ -139,11 +139,11 @@ export interface GameHandle {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 图上节点 data 联合（基类 ∪ 子流程特化）。 */
-export type GameNodeData = NodeData | SubFlowNodeData | SubFlowPackNodeData
+export type GameNodeData = NodeData | SubProcessNodeData | SubFlowPackNodeData
 
 /**
  * 图节点 `data` **基类**（普通演出节点）。子流程/子蓝图容器用特化类型
- * `SubFlowNodeData` / `SubFlowPackNodeData`。覆盖物一律经 `overlayNodes` 引用并展开；
+ * `SubProcessNodeData` / `SubFlowPackNodeData`。覆盖物一律经 `overlayNodes` 引用并展开；
  * 视频上只能挂 Overlay，不能直挂裸组件。
  */
 export interface NodeData {
@@ -163,9 +163,13 @@ export interface NodeData {
   /** 节点级生命周期/响应规则。见 §5。 */
   reactions?: Reaction[]
 }
-/** 同图子流程容器：首次进入压栈并跳到 `subFlow`；子流程叶子无自动出边时弹回。 */
-export interface SubFlowNodeData extends NodeData {
-  subFlow: string
+/** 节点私有的内嵌子流程；entry 只允许指向直属 graph.nodes。 */
+export interface SubProcess {
+  entry: string
+  graph: GameGraph
+}
+export interface SubProcessNodeData extends NodeData {
+  subProcess: SubProcess
 }
 /** 跨图子蓝图容器：进入后加载 pack，从 entry 跑；包内叶子无出边时弹回主图。 */
 export interface SubFlowPackNodeData extends NodeData {

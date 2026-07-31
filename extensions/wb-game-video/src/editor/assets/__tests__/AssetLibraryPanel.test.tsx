@@ -31,6 +31,7 @@ describe('AssetLibraryPanel', () => {
     expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('字体')
     expect(screen.getByLabelText('图片资产列表')).toHaveTextContent('封面')
     expect(screen.getByLabelText('上传图片')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp,.gif')
+    expect(screen.getByLabelText('上传图片')).toHaveAttribute('multiple')
     expect(screen.queryByRole('dialog', { name: '资产预览' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /音频 1/ }))
@@ -40,6 +41,23 @@ describe('AssetLibraryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /字体 1/ }))
     expect(screen.getByLabelText('字体资产列表')).toHaveTextContent('标题字体')
     expect(screen.getByLabelText('上传字体')).toHaveAttribute('accept', '.woff2,.woff,.ttf,.otf')
+  })
+
+  it('uploads multiple files sequentially and stops after a failure', async () => {
+    const upload = vi.fn()
+      .mockResolvedValueOnce({ id: 'image-2', kind: 'image', name: 'first' })
+      .mockResolvedValueOnce(undefined)
+    render(<AssetLibraryPanel controller={controller({ upload })} />)
+    const input = screen.getByLabelText('上传图片')
+    const first = new File(['first'], 'first.png', { type: 'image/png' })
+    const second = new File(['second'], 'second.png', { type: 'image/png' })
+
+    fireEvent.change(input, { target: { files: [first, second] } })
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
+    expect(upload).toHaveBeenNthCalledWith(1, 'image', first)
+    expect(upload).toHaveBeenNthCalledWith(2, 'image', second)
+    expect(screen.getByRole('alert')).toHaveTextContent('已完成 1/2 个文件')
   })
 
   it('opens asset details in a dialog from its list thumbnail', () => {

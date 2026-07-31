@@ -11,7 +11,7 @@
  * 与旧 FormulaAstEditor 的可编辑节点嵌套树不同——文本 ↔ AST 双向经 formula-authoring 的
  * parseFormulaText / previewFormula，runtime expr.ts 不认 hole，故 hole 语法只活在编辑器层。
  */
-import { useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
+import { Fragment, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { Entity, Variable } from '../../runtime/schema/graph-schema'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import { createRng } from '../../runtime/engine/rng'
@@ -21,6 +21,8 @@ import { formulaHoles, type FormulaHole } from './formulaApply'
 import { AttrPicker, EntityPicker, VariablePicker } from './scenario-pickers'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
+const FORMULA_EXAMPLE = 'max(?攻击力 * ?技能倍率 - ?防御力, 0)'
+const HOLE_TOKEN_RE = /\?[\p{L}_][\p{L}\p{N}_]*/gu
 
 /** 样例求值上下文：实体 attrs 原样、变量取 initial；每次试算另建 seed 0 RNG。 */
 function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string, Variable>): EvalCtx {
@@ -72,6 +74,28 @@ function varName(id: string, variables?: Record<string, Variable>): string {
   return variables?.[id]?.name || id
 }
 
+/** 把 `?名字` 统一渲染成 hole tag；输入高亮层和示例公式共用同一份样式。 */
+function FormulaSyntax({ text }: { text: string }): JSX.Element {
+  const parts: JSX.Element[] = []
+  let cursor = 0
+  for (const match of text.matchAll(HOLE_TOKEN_RE)) {
+    const index = match.index
+    if (index > cursor) {
+      parts.push(<Fragment key={`text-${cursor}`}>{text.slice(cursor, index)}</Fragment>)
+    }
+    parts.push(
+      <span className="gc-fx-hole-tag" key={`hole-${index}`}>
+        {match[0]}
+      </span>,
+    )
+    cursor = index + match[0].length
+  }
+  if (cursor < text.length) {
+    parts.push(<Fragment key={`text-${cursor}`}>{text.slice(cursor)}</Fragment>)
+  }
+  return <>{parts}</>
+}
+
 export function FormulaTextEditor({
   ast,
   entities,
@@ -87,6 +111,7 @@ export function FormulaTextEditor({
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+  const highlightRef = useRef<HTMLPreElement | null>(null)
 
   const text = draft ?? canonical
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
@@ -158,22 +183,40 @@ export function FormulaTextEditor({
 
   return (
     <div className="gc-fx" style={box}>
-      <textarea
-        ref={taRef}
-        className={error ? 'gc-fx-input is-err' : 'gc-fx-input'}
-        aria-label="公式表达式"
-        rows={2}
-        value={text}
-        onChange={(e) => {
-          const next = e.target.value
-          setDraft(next)
-          revalidate(next)
-        }}
-        onBlur={() => commit(draft ?? canonical)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(draft ?? canonical) }
-        }}
-      />
+      <section className="gc-fx-example" aria-label="公式示例">
+        <div className="gc-fx-example-formula">
+          <span>示例</span>
+          <code><FormulaSyntax text={FORMULA_EXAMPLE} /></code>
+        </div>
+        <p><b>目标：</b>计算一个不会低于 0 的最终伤害值。</p>
+        <p><b>原理：</b>攻击力乘以技能倍率，再减去防御力；最外层 <code>max(..., 0)</code> 用来避免出现负伤害。每个同色 <code>?参数</code> 都是应用公式时再绑定的 hole。</p>
+      </section>
+
+      <div className="gc-fx-editor">
+        <pre ref={highlightRef} className="gc-fx-highlight" aria-hidden="true"><FormulaSyntax text={text} />{text.endsWith('\n') ? '\n' : null}</pre>
+        <textarea
+          ref={taRef}
+          className={error ? 'gc-fx-input is-err' : 'gc-fx-input'}
+          aria-label="公式表达式"
+          spellCheck={false}
+          rows={2}
+          value={text}
+          onChange={(e) => {
+            const next = e.target.value
+            setDraft(next)
+            revalidate(next)
+          }}
+          onScroll={(e) => {
+            if (!highlightRef.current) return
+            highlightRef.current.scrollTop = e.currentTarget.scrollTop
+            highlightRef.current.scrollLeft = e.currentTarget.scrollLeft
+          }}
+          onBlur={() => commit(draft ?? canonical)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(draft ?? canonical) }
+          }}
+        />
+      </div>
 
       {/* 结构摘要行（不复述公式串；给引用/参数/样例值的概览） */}
       <div className="gc-fx-summary" aria-label="公式结构摘要">

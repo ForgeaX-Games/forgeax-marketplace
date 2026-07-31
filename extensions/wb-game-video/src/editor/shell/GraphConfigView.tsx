@@ -3,7 +3,7 @@
  * 左栏列表 + 右栏预览）。与蓝图共用 graphScenario store；顶部工具条：保存 / 版本 / 重置。
  *
  * 两种形态（同一套 CatalogShell 壳）：
- *  - **界面**（overlays）：左栏为**树**——「自定义覆盖物」组头（带「＋方案」）→ 各方案叶子；
+ *  - **界面**（overlays）：左栏为**树**——「自定义界面」组头（带「＋方案」）→ 各方案叶子；
  *    点叶子右栏只渲染**那一个方案**（OverlaySchemeEditor）。方案增删改在本组件持有并写回
  *    scenario.ui.overlays。
  *  - **规则**（实体/变量/公式）：左栏多行扁平切换，右栏渲染 ScenarioInspector。
@@ -16,9 +16,15 @@ import { OverlaySchemeEditor, UsageBadge, DuplicateBadge } from './OverlayScheme
 import { VersionPicker } from './VersionPicker'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
 import { getGameSlug } from '../persist/gameScope'
-import { NEW_COMPONENT_PRESETS, BASE_HUD_PREFIX, listCustomSchemeIds, listBaseHudIds } from '../demo/builtin-schemes'
+import {
+  NEW_COMPONENT_PRESETS,
+  BASE_HUD_PREFIX,
+  listInterfaceCustomSchemeIds,
+  listBaseHudIds,
+} from '../demo/builtin-schemes'
 import { findDuplicateOverlays } from './overlay-dedup'
 import type { Formula } from '../persist/formula-authoring'
+import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 
 export interface ConfigTab {
   section: ScenarioSection
@@ -40,7 +46,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 宿主 iframe 传 `?slug=`（见 gameScope.ts）；勿只读 `?game=`，否则会落到默认 demo 命名空间。
   const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const meta = useGraphScenario((s) => s.meta)
-  const graph = useGraphScenario((s) => s.graph)
+  const blueprints = useGraphScenario((s) => s.blueprints)
   const isDraft = useGraphScenario((s) => s.isDraft)
   const savedTip = useGraphScenario((s) => s.savedTip)
   const setMeta = useGraphScenario((s) => s.setMeta)
@@ -66,15 +72,10 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   }, [])
   const [active, setActive] = useState<ScenarioSection>(tabs[0]?.section ?? 'entities')
   // overlay 资源池「已用/未用」：统计每个 overlay 被多少节点挂载引用。
-  const overlayUsage = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const n of graph.nodes) {
-      for (const mount of n.data.overlayNodes ?? []) {
-        m[mount.overlay] = (m[mount.overlay] ?? 0) + 1
-      }
-    }
-    return m
-  }, [graph.nodes])
+  const overlayUsage = useMemo(
+    () => countOverlayReferences(Object.values(blueprints).map((doc) => doc.graph)),
+    [blueprints],
+  )
 
   // ── 界面（overlays）形态：树 + 单方案编辑 ──
   const overlaysMode = tabs.length === 1 && tabs[0]?.section === 'overlays'
@@ -82,8 +83,8 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 内容重复标记：三类方案（自定义 / 内置 / 基础 base:*）在同一目录里互查，overlayId → 同内容的其它 id[]。
   // 只提示不处理（§8 人为最终权威）；纯派生，不落盘（§2 Derive）。
   const dupMap = useMemo(() => findDuplicateOverlays(allOverlays), [allOverlays])
-  // 「自定义覆盖物」/「基础覆盖物」两组与蓝图侧选择器共用同一份派生（见 builtin-schemes），不各持一份漂移。
-  const schemeIds = useMemo(() => listCustomSchemeIds(allOverlays), [allOverlays])
+  // 界面 tab 保持新建方案置顶；其它方案选择器继续沿用通用排序。
+  const schemeIds = useMemo(() => listInterfaceCustomSchemeIds(allOverlays), [allOverlays])
   const baseIds = useMemo(() => listBaseHudIds(allOverlays), [allOverlays])
   const [selectedOverlayId, setSelectedOverlayId] = useState('')
   // 选中项自愈：不在当前方案集（全局 + 基础）里（删除/首次）就落到第一个全局方案。
@@ -95,37 +96,13 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const setOverlays = (overlays: Record<string, Overlay>) => setMeta({ ...meta, ui: { ...meta.ui, overlays } })
   const addScheme = () => {
     const id = allocId('scheme-', allOverlays)
-    setOverlays({ ...allOverlays, [id]: { id, title: '新方案', children: [] } })
+    setOverlays({ [id]: { id, title: '新方案', children: [] }, ...allOverlays })
     setSelectedOverlayId(id)
   }
   const renameScheme = (oid: string, title: string) => {
     const ov = allOverlays[oid]
     if (!ov) return
     setOverlays({ ...allOverlays, [oid]: { ...ov, title } })
-  }
-  const moveSchemeChildren = (
-    oid: string,
-    moveDelta: { x: number; y: number },
-  ) => {
-    const ov = allOverlays[oid]
-    if (!ov) return
-    if (moveDelta.x === 0 && moveDelta.y === 0) return
-    setOverlays({
-      ...allOverlays,
-      [oid]: {
-        ...ov,
-        children: ov.children.map((child) => ({
-          ...child,
-          layout: {
-            ...child.layout,
-            left: (typeof child.layout?.left === 'number' ? child.layout.left : 0) + moveDelta.x,
-            top: (typeof child.layout?.top === 'number' ? child.layout.top : 0) + moveDelta.y,
-            right: undefined,
-            bottom: undefined,
-          },
-        })),
-      },
-    })
   }
   const removeScheme = (oid: string) => {
     const { [oid]: _drop, ...rest } = allOverlays
@@ -203,7 +180,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const overlayTree: CatalogItem[] = [
     {
       id: '__overlays_group__',
-      label: tabs[0]?.label ?? '自定义覆盖物',
+      label: tabs[0]?.label ?? '自定义界面',
       action: (
         <button type="button" className="gc-group-add" title="新建界面方案" onClick={addScheme}>
           ＋ 方案
@@ -222,7 +199,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     },
     {
       id: '__base_hud_group__',
-      label: '基础覆盖物',
+      label: '基础界面',
       children: baseIds.map((id) => ({
         id,
         label: allOverlays[id]?.title || id.slice(BASE_HUD_PREFIX.length),
@@ -280,7 +257,6 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   onAddChild={(p, place) => addSchemeChild(selOverlay, p, place)}
                   onRemoveChild={(c) => removeSchemeChild(selOverlay, c)}
                   onPatchChild={(c, patch) => patchOverlayChild(selOverlay, c, patch)}
-                  onMoveCanvas={(moveDelta) => moveSchemeChildren(selOverlay, moveDelta)}
                   onReactionsChange={(reactions) =>
                     setOverlays({ ...allOverlays, [selOverlay]: { ...ov, reactions } })}
                 />

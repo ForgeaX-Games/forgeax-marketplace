@@ -86,6 +86,14 @@ function ensureCanvasStyle(): void {
     .gv-sel-bar button:hover{border-color:#f08840}
     .gv-sel-bar button.danger:hover{border-color:#ef4444;color:#ffb4b4}
     .gv-sel-bar .hint{opacity:.55;font-size:11px}
+    /* 可连线出口：保持布局尺寸不变，轻微放大并外扩约 4px 提示可拖拽。 */
+    .gv-flow-handle{transition:transform .14s ease,box-shadow .14s ease,filter .14s ease;transform-origin:center;isolation:isolate}
+    .gv-flow-handle.is-interactive{cursor:crosshair}
+    .gv-flow-handle.is-interactive:hover,.gv-flow-handle.is-interactive:focus-visible{transform:scale(1.18)!important;filter:brightness(1.18);box-shadow:0 0 0 4px color-mix(in srgb,currentColor 24%,transparent);z-index:5}
+    /* 试玩只读画布不选择节点/边：图面统一用平移手掌，边不参与命中，避免 pointer/grab 闪动。 */
+    .gv-readonly-flow .react-flow__pane,.gv-readonly-flow .react-flow__node{cursor:grab}
+    .gv-readonly-flow .react-flow__edge{pointer-events:none;cursor:grab}
+    .gv-readonly-flow .react-flow__pane.dragging{cursor:grabbing}
     /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
     .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
     .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #5a4038;border-radius:999px;background:rgba(27,23,19,.96);color:#f0a8a8;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
@@ -116,7 +124,7 @@ let graphClipboard: { nodes: GameNode[]; edges: GameEdge[] } | null = null
 interface CanvasNodeViewData {
   fx: FXNode
   active?: boolean
-  /** 子流程/子蓝图容器（subFlow 或 subFlowPack）→ 显示可下钻徽标。 */
+  /** 子流程/子蓝图容器（subProcess 或 subFlowPack）→ 显示可下钻徽标。 */
   isGroup?: boolean
   /** 子蓝图容器（与同图子流程区分徽标文案）。 */
   isPack?: boolean
@@ -294,7 +302,13 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           return (
             <div key={h.id} style={{ position: 'relative', fontSize: 10, color: c, display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8 }}>
               <span title={fid}>{display}</span>
-              <Handle id={h.id} type="source" position={Position.Right} style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, background: c, border: 'none' }} />
+              <Handle
+                id={h.id}
+                type="source"
+                position={Position.Right}
+                className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
+                style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, color: c, background: c, border: 'none', pointerEvents: canEdit ? undefined : 'none' }}
+              />
             </div>
           )
         })}
@@ -428,7 +442,7 @@ export interface GraphCanvasProps {
   /** 面板占画布右侧的宽度比例（0~1）；revealNodeId 据此算可见区中心偏移。默认 0（不偏移）。 */
   revealPanelRatio?: number
   onJump?: (nodeId: string) => void
-  /** 双击子流程容器节点（有 subFlow）时下钻。 */
+  /** 双击内嵌子流程容器节点（有 subProcess）时下钻。 */
   onDrill?: (containerId: string) => void
   /** 点击画布空白处（取消选中 → 隐藏节点配置面板）。 */
   onPaneClick?: () => void
@@ -834,6 +848,7 @@ function GraphCanvasInner({
       onMouseDown={() => rootRef.current?.focus()}
     >
       <ReactFlow
+        className={readOnly ? 'gv-readonly-flow' : undefined}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
@@ -862,6 +877,7 @@ function GraphCanvasInner({
         }}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
+        elementsSelectable={!readOnly}
         edgesFocusable={!readOnly}
         edgesReconnectable={false}
         selectionKeyCode={readOnly ? null : 'Shift'}

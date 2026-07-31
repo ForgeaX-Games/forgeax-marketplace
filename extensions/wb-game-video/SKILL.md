@@ -37,6 +37,14 @@ wb-game-video:get-graph({})
 通常省略 `gameSlug` 并使用宿主绑定游戏；若显式传入，它必须与宿主绑定 id 逐字一致。
 中文和单字符 id 均受支持，路径分隔符及 `.` / `..` 不合法。
 
+## 子流程契约
+
+- 私有内嵌子流程写在容器节点的 `data.subProcess`：`{ entry: string, graph: { nodes, edges } }`。
+- `entry` 必须指向该容器直属子图中的节点；子图边只能连接同一层的节点，禁止跨父子边界连线。
+- 同一蓝图及其全部内嵌层中的节点 id、边 id 分别保持唯一。
+- 可复用、可独立编辑的子蓝图使用 `data.subFlowPack` 引用 `manifest.packs`，不要把它内联进 `subProcess`。
+- 不写旧 `subFlow` / `subFlowRef` 字段；保存校验会拒绝它们。
+
 ## 视频生产闭环
 
 ```text

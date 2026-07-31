@@ -18,6 +18,7 @@ import { claimPlayerFocus, releasePlayerFocus } from '../input/playerFocus'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { GameStage } from './GameStage'
 import { BgmPlayer } from './BgmPlayer'
+import { VideoAudioToggle } from './VideoAudioToggle'
 
 /** 媒体解析注入契约:节点媒体 id → 可播 url(宿主实现)。 */
 export type ResolveAsset = (mediaId: string | undefined, game: string) => string | undefined
@@ -38,6 +39,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [rootEl, setRootEl] = useState<HTMLElement | null>(null)
   const [snap, setSnap] = useState<SessionSnapshot>(() => session.start())
+  const [videoAudioEnabled, setVideoAudioEnabled] = useState(false)
   const endPerformance = useClipPerformanceEnd(sessionRef, setSnap, snap.clip?.nodeId)
   const videoSrc = resolveAsset(snap.clip?.mediaId, game)
   const preloadVideos = useMemo(
@@ -79,7 +81,7 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
         onFocus={() => claimPlayerFocus(rootRef.current)}
         style={{ position: 'relative', width: '100%', height: '100%', background: '#000', color: '#fff', outline: 'none' }}
       >
-        {/* 床轨：独立音频通道，与 <video muted> 无关；无 UI。 */}
+        {/* 床轨：独立音频通道，与视频原声开关无关；无 UI。 */}
         <BgmPlayer bgm={snap.bgm} resolveAsset={resolveBgm} />
         <GameStage
           videoSrc={videoSrc}
@@ -91,7 +93,14 @@ export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): J
           onEmit={(elementId, key) => setSnap(sessionRef.current.emitEvent(elementId, key))}
           onTick={(nowMs) => setSnap(sessionRef.current.tick(nowMs))}
           onPerformanceEnd={endPerformance}
+          videoAudioEnabled={videoAudioEnabled}
         />
+        <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
+          <VideoAudioToggle
+            enabled={videoAudioEnabled}
+            onToggle={() => setVideoAudioEnabled((enabled) => !enabled)}
+          />
+        </div>
       </div>
     </PlayerRootContext.Provider>
   )

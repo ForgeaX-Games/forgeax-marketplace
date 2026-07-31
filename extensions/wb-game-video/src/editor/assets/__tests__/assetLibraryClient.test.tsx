@@ -9,7 +9,7 @@ import {
 } from '../assetLibraryClient'
 import type { KinoResourceDTO, KinoVideoClient } from '../kino-api'
 import type { UploadTransport } from '../video-upload'
-import { useAudioAssetCache } from '../audioAssetCacheStore'
+import { useProjectAssetCache } from '../projectAssetCacheStore'
 
 function client(): AssetLibraryClient {
   return {
@@ -30,7 +30,7 @@ function client(): AssetLibraryClient {
 
 describe('useAssetLibrary', () => {
   beforeEach(() => {
-    useAudioAssetCache.setState({ byGame: {} })
+    useProjectAssetCache.setState({ byGame: {} })
   })
 
   it('reports the missing API rather than pretending the manifest is empty', async () => {
@@ -46,9 +46,9 @@ describe('useAssetLibrary', () => {
     const { result } = renderHook(() => useAssetLibrary('demo', api))
 
     await waitFor(() => expect(result.current.items).toHaveLength(3))
-    expect(api.list).toHaveBeenCalledWith('demo', 'image', expect.anything())
-    expect(api.list).toHaveBeenCalledWith('demo', 'audio', expect.anything())
-    expect(api.list).toHaveBeenCalledWith('demo', 'font', expect.anything())
+    expect(api.list).toHaveBeenCalledWith('demo', 'image')
+    expect(api.list).toHaveBeenCalledWith('demo', 'audio')
+    expect(api.list).toHaveBeenCalledWith('demo', 'font')
     expect(result.current.items.map((item) => item.kind)).toEqual(['image', 'audio', 'font'])
   })
 
@@ -69,7 +69,7 @@ describe('useAssetLibrary', () => {
     expect(result.current.items.find((item) => item.id === 'image-new')).toBeUndefined()
   })
 
-  it('syncs audio mutations into the BGM shared cache', async () => {
+  it('syncs mutations into the shared project asset cache', async () => {
     const api = client()
     const { result } = renderHook(() => useAssetLibrary('demo', api))
     await waitFor(() => expect(result.current.items).toHaveLength(3))
@@ -77,19 +77,19 @@ describe('useAssetLibrary', () => {
     await act(async () => {
       await result.current.upload('audio', new File(['music'], 'battle.mp3', { type: 'audio/mpeg' }))
     })
-    expect(useAudioAssetCache.getState().byGame.demo?.items.map((item) => item.resource_id))
+    expect(useProjectAssetCache.getState().byGame.demo?.audio?.items.map((item) => item.id))
       .toContain('audio-new')
 
     await act(async () => {
       await result.current.rename('audio-new', '新战斗曲')
     })
-    expect(useAudioAssetCache.getState().byGame.demo?.items.find((item) => item.resource_id === 'audio-new')?.name)
+    expect(useProjectAssetCache.getState().byGame.demo?.audio?.items.find((item) => item.id === 'audio-new')?.name)
       .toBe('新战斗曲')
 
     await act(async () => {
       await result.current.remove('audio-new')
     })
-    expect(useAudioAssetCache.getState().byGame.demo?.items.some((item) => item.resource_id === 'audio-new'))
+    expect(useProjectAssetCache.getState().byGame.demo?.audio?.items.some((item) => item.id === 'audio-new'))
       .toBe(false)
   })
 })

@@ -140,6 +140,32 @@ describe('validateDocument', () => {
     p.manifest.packs['bp-main'] = bp('bp-main', [node('n1')], [edge('e1', 'n1', 'does-not-exist')])
     expect(validateDocument(p).length).toBeGreaterThan(0)
   })
+  it('validates nested subProcess entry and edge boundaries', () => {
+    const p = validDoc()
+    const child = bp('child', [node('inner')], [edge('cross', 'inner', 'n2')]).graph
+    p.manifest.packs['bp-main'] = bp('bp-main', [
+      node('n1', { subProcess: { entry: 'missing', graph: child } }),
+      node('n2'),
+    ])
+    const errors = validateDocument(p)
+    expect(errors.some((error) => error.includes("entry 'missing'"))).toBe(true)
+    expect(errors.some((error) => error.includes("target 指向本层不存在的节点 'n2'"))).toBe(true)
+  })
+  it('rejects duplicate ids across nested scopes in one blueprint', () => {
+    const p = validDoc()
+    const child = bp('child', [node('n2')]).graph
+    p.manifest.packs['bp-main'] = bp('bp-main', [node('n1', { subProcess: { entry: 'n2', graph: child } }), node('n2')])
+    expect(validateDocument(p).some((error) => error.includes("节点 id 重复：'n2'"))).toBe(true)
+  })
+  it('rejects a node containing both subProcess and subFlowPack', () => {
+    const p = validDoc()
+    const child = bp('child', [node('inner')]).graph
+    p.manifest.packs['bp-main'] = bp('bp-main', [node('n1', {
+      subProcess: { entry: 'inner', graph: child },
+      subFlowPack: { id: 'reusable' },
+    })])
+    expect(validateDocument(p).some((error) => error.includes('subProcess 与 subFlowPack 不能同时存在'))).toBe(true)
+  })
   it('manifest.mainPackId missing → error', () => {
     const p = validDoc()
     p.manifest = { ...p.manifest, mainPackId: 'missing' }

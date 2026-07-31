@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   MAX_KINO_RESOURCE_PAGE_SIZE,
   createKinoVideoClient,
@@ -11,7 +11,7 @@ import {
   VideoUploadError,
   type UploadTransport,
 } from './video-upload'
-import { useAudioAssetCache } from './audioAssetCacheStore'
+import { useProjectAssetCache } from './projectAssetCacheStore'
 
 export type ManagedAssetKind = 'image' | 'audio' | 'font'
 
@@ -181,134 +181,99 @@ export interface AssetLibraryController {
 
 const UNAVAILABLE_MESSAGE = '图片、BGM 与字体资源 API 尚未启用'
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : '资产操作失败'
-}
-
-function audioCacheResource(gameId: string, asset: ManagedAsset): KinoResourceDTO {
-  const updatedAt = asset.updatedAt ?? Date.now()
-  return {
-    resource_id: asset.id,
-    game_id: gameId,
-    media_type: 'audio',
-    name: asset.name,
-    url: asset.url ?? '',
-    source: asset.source,
-    source_meta: {
-      mime_type: asset.mime,
-      ...(asset.bytes == null ? {} : { extra: { bytes: asset.bytes } }),
-    },
-    created_at: updatedAt,
-    updated_at: updatedAt,
-  }
+function kindLabel(kind: ManagedAssetKind): string {
+  return kind === 'image' ? '图片' : kind === 'audio' ? '音频' : '字体'
 }
 
 export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): AssetLibraryController {
-  const [items, setItems] = useState<ManagedAsset[]>([])
-  const [loading, setLoading] = useState(Boolean(client))
-  const [error, setError] = useState<string | null>(client ? null : UNAVAILABLE_MESSAGE)
+  const cache = useProjectAssetCache((state) => state.byGame[gameId])
+  const refreshCached = useProjectAssetCache((state) => state.refresh)
+  const upsertCached = useProjectAssetCache((state) => state.upsert)
+  const removeCached = useProjectAssetCache((state) => state.remove)
+  const kinds: ManagedAssetKind[] = ['image', 'audio', 'font']
+  const items = kinds.flatMap((kind) => cache?.[kind]?.items ?? [])
+  const loading = kinds.some((kind) => cache?.[kind]?.loading)
+  const errors = kinds.flatMap((kind) => {
+    const error = cache?.[kind]?.error
+    return error ? [`${kindLabel(kind)}：${error}`] : []
+  })
+  const [mutationError, setMutationError] = useState<string | null>(null)
   const [uploading, setUploading] = useState<ManagedAssetKind | null>(null)
   const [mutating, setMutating] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
+  const error = !client
+    ? UNAVAILABLE_MESSAGE
+    : mutationError ?? (errors.length > 0 ? `部分资产加载失败；保留已缓存内容。${errors.join('；')}` : null)
 
   const refresh = useCallback(async () => {
     if (!client) {
-      setItems([])
-      setLoading(false)
-      setError(UNAVAILABLE_MESSAGE)
       return
     }
-    abortRef.current?.abort()
-    const abort = new AbortController()
-    abortRef.current = abort
-    setLoading(true)
-    setError(null)
-    try {
-      const results = await Promise.all([
-        client.list(gameId, 'image', { signal: abort.signal }),
-        client.list(gameId, 'audio', { signal: abort.signal }),
-        client.list(gameId, 'font', { signal: abort.signal }),
-      ])
-      if (!abort.signal.aborted) setItems(results.flat())
-    } catch (cause) {
-      if (!abort.signal.aborted) setError(message(cause))
-    } finally {
-      if (!abort.signal.aborted) setLoading(false)
-    }
-  }, [client, gameId])
+    await Promise.all(kinds.map((kind) => refreshCached(gameId, kind, client)))
+  }, [client, gameId, refreshCached])
 
   useEffect(() => {
     void refresh()
-    return () => abortRef.current?.abort()
   }, [refresh])
 
   const upload = useCallback(async (kind: ManagedAssetKind, file: File) => {
     if (!client) {
-      setError(UNAVAILABLE_MESSAGE)
       return undefined
     }
     setUploading(kind)
-    setError(null)
+    setMutationError(null)
     try {
       const asset = await client.upload(gameId, kind, file)
-      setItems((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
-      if (asset.kind === 'audio') {
-        useAudioAssetCache.getState().upsert(gameId, audioCacheResource(gameId, asset))
-      }
+      upsertCached(gameId, asset)
       return asset
     } catch (cause) {
-      setError(message(cause))
+      setMutationError(cause instanceof Error ? cause.message : '资产操作失败')
       return undefined
     } finally {
       setUploading(null)
     }
-  }, [client, gameId])
+  }, [client, gameId, upsertCached])
 
   const rename = useCallback(async (id: string, name: string) => {
     if (!client) {
-      setError(UNAVAILABLE_MESSAGE)
       return undefined
     }
     const nextName = name.trim()
     if (!nextName) return undefined
     setMutating(true)
-    setError(null)
+    setMutationError(null)
     try {
       const asset = await client.rename(gameId, id, nextName)
-      setItems((current) => current.map((item) => item.id === id ? asset : item))
-      if (asset.kind === 'audio') {
-        useAudioAssetCache.getState().upsert(gameId, audioCacheResource(gameId, asset))
-      }
+      upsertCached(gameId, asset)
       return asset
     } catch (cause) {
-      setError(message(cause))
+      setMutationError(cause instanceof Error ? cause.message : '资产操作失败')
       return undefined
     } finally {
       setMutating(false)
     }
-  }, [client, gameId])
+  }, [client, gameId, upsertCached])
 
   const remove = useCallback(async (id: string) => {
     if (!client) {
-      setError(UNAVAILABLE_MESSAGE)
       return
     }
+    const current = useProjectAssetCache.getState().byGame[gameId]
+    const asset = kinds
+      .flatMap((kind) => current?.[kind]?.items ?? [])
+      .find((item) => item.id === id)
+    if (!asset) return
     setMutating(true)
-    setError(null)
+    setMutationError(null)
     try {
-      const removed = items.find((item) => item.id === id)
       await client.remove(gameId, id)
-      setItems((current) => current.filter((item) => item.id !== id))
-      if (removed?.kind === 'audio') {
-        useAudioAssetCache.getState().remove(gameId, id)
-      }
+      removeCached(gameId, asset.kind, id)
     } catch (cause) {
-      setError(message(cause))
+      setMutationError(cause instanceof Error ? cause.message : '资产操作失败')
       throw cause
     } finally {
       setMutating(false)
     }
-  }, [client, gameId, items])
+  }, [client, gameId, removeCached])
 
   return { available: Boolean(client), loading, error, uploading, mutating, items, refresh, upload, rename, remove }
 }

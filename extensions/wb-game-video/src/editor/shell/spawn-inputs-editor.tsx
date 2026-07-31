@@ -6,7 +6,8 @@ import type { CSSProperties, JSX } from 'react'
 import type { NumOrExpr, Overlay } from '../../runtime/schema/graph-schema'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
-import { ValueInput, type EditorPickerCtx } from './editors'
+import { TextValueInput, ValueInput, type EditorPickerCtx } from './editors'
+import type { TextOrRef } from './TextValueEditor'
 
 type BindMode = 'literal' | 'expr' | 'ref'
 
@@ -162,14 +163,25 @@ export function SpawnInputsEditor({
         inp.component === 'numberExpr' ? (
           <div key={inp.key} style={rowStyle}>
             <span style={keyLbl} title={inp.key}>{inp.label?.trim() || inp.key}</span>
-            <ValueInput
-              value={bag[inp.key] as NumOrExpr | undefined}
-              defaultValue={typeof inp.default === 'number' ? inp.default : undefined}
-              entities={pickers?.entities}
-              variables={pickers?.variables}
-              formulas={pickers?.formulas}
-              onChange={(v) => patchKey(inp.key, v)}
-            />
+            {inp.valueType === 'string' ? (
+              <TextValueInput
+                value={(bag[inp.key] ?? inp.default) as TextOrRef | undefined}
+                entities={pickers?.entities}
+                variables={pickers?.variables}
+                onChange={(v) => patchKey(inp.key, v)}
+              />
+            ) : (
+              <ValueInput
+                value={bag[inp.key] as NumOrExpr | string | undefined}
+                defaultValue={typeof inp.default === 'number' ? inp.default : undefined}
+                entities={pickers?.entities}
+                variables={pickers?.variables}
+                formulas={pickers?.formulas}
+                onChange={(v) => patchKey(inp.key, v)}
+                onClear={inp.default === undefined ? () => patchKey(inp.key, undefined) : undefined}
+                emptyLabel="不传入（使用模板默认）"
+              />
+            )}
           </div>
         ) : (
           <ParamRow

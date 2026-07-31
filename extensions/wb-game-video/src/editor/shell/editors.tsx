@@ -22,6 +22,7 @@ import { flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { buildDefaults, getComponent, getComponentManifest } from '../../runtime/registry/component-registry'
 import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
 import { ValueExprEditor } from './ValueExprEditor'
+import { TextValueEditor, type TextOrRef } from './TextValueEditor'
 import {
   decodeEffectOperation,
   encodeEffectOperation,
@@ -325,7 +326,7 @@ export function SizeEditor({
   )
 }
 
-// ── NumOrExpr（常量 / 选取公式）───────────────────────────────────────────────
+// ── NumOrExpr（常量 / 状态绑定 / 具名公式）────────────────────────────────────
 export function ValueInput({
   value,
   defaultValue,
@@ -334,16 +335,47 @@ export function ValueInput({
   variables,
   formulas,
   effectOp,
+  onClear,
+  emptyLabel,
 }: {
-  value: NumOrExpr | undefined
+  value: NumOrExpr | string | undefined
   defaultValue?: number
   onChange: (v: NumOrExpr) => void
+  onClear?: () => void
+  emptyLabel?: string
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/选取公式同一行）。 */
   effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
 } & MetaCatalogProps): JSX.Element {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <ValueExprEditor value={value ?? defaultValue} entities={entities} variables={variables} formulas={formulas} onChange={onChange} effectOp={effectOp} />
+      <ValueExprEditor
+        value={value ?? defaultValue}
+        entities={entities}
+        variables={variables}
+        formulas={formulas}
+        onChange={onChange}
+        onClear={onClear}
+        emptyLabel={emptyLabel}
+        effectOp={effectOp}
+      />
+    </div>
+  )
+}
+
+export function TextValueInput({
+  value,
+  onChange,
+  entities,
+  variables,
+}: {
+  value: TextOrRef | undefined
+  onChange: (v: TextOrRef) => void
+  entities: Record<string, Entity> | undefined
+  variables: Record<string, Variable> | undefined
+}): JSX.Element {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <TextValueEditor value={value} entities={entities} variables={variables} onChange={onChange} />
     </div>
   )
 }

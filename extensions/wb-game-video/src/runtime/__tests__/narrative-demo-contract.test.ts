@@ -57,19 +57,14 @@ describe('nodia narrative demo contract', () => {
     }
   })
 
-  it('叩门：随节点进入挂载（cue 0–6.1s 驱动显隐），锚点 (0.58, 0.39)', () => {
+  it('叩门：随节点进入挂载，由 window 0–6.1s 驱动显隐', () => {
     const scn = makeNodiaDemo()
     const node = scn.graph.nodes.find((n) => n.id === 'n_door')
     const child = nodeOverlayChildren(scn, node)[0]
     expect(child?.component).toBe('InkKou')
-    // trigger 对齐到 cue 起点：随节点进入挂载，可见窗完全由 cues 决定（appearAt 0 → endAt 6100），
-    // 预览与运行时同源，不再有 trigger.ms=9000 残留导致的 9s 错位。
     expect(child?.trigger).toEqual({ when: 'enter' })
-    const cue = (child?.inputs?.cues as { x?: number; y?: number; appearAt?: number; endAt?: number }[] | undefined)?.[0]
-    expect(cue?.x).toBe(0.58)
-    expect(cue?.y).toBe(0.39)
-    expect(cue?.appearAt).toBe(0)
-    expect(cue?.endAt).toBe(6100)
+    expect(child?.inputs).toEqual({})
+    expect(child?.window).toEqual({ startMs: 0, endMs: 6100 })
   })
 
   it('拓扑：上岸 應→灯笼 / 默→孟婆；渡河 應→小孩 / 默→上岸', () => {
@@ -81,12 +76,14 @@ describe('nodia narrative demo contract', () => {
       new Set([
         ['ying', 'n_mask'],
         ['mo', 'n_mengpo'],
+        ['default', 'n_mengpo'],
       ]),
     )
     expect(new Set(of('n_river'))).toEqual(
       new Set([
         ['ying', 'n_child'],
         ['mo', 'n_land'],
+        ['default', 'n_land'],
       ]),
     )
   })

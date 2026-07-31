@@ -72,8 +72,8 @@ export const TIMELINE_LAYER_TOP = 34
 export const TIMELINE_LAYER_STEP = 34
 // 存储硬上限（防脏数据爆表）；可见轨数是「无限」的，由数据 + 一条空投放轨动态派生。
 export const TIMELINE_MAX_LAYER = 15
-// 空节点默认展示的轨数（0..MIN-1）。
-export const TIMELINE_MIN_TRACKS = 5
+// 默认可见轨数（0..MIN-1）；更多轨道由固定高度视口纵向滚动查看。
+export const TIMELINE_MIN_TRACKS = 6
 export const ZOOM_MIN = 1
 export const ZOOM_MAX = 20
 

@@ -83,6 +83,18 @@ export function listCustomSchemeIds(overlays: Record<string, Overlay> | undefine
 }
 
 /**
+ * 界面 tab 的「自定义覆盖物」列表：沿用通用排序，但让 overlays 中最先写入的自定义方案置顶。
+ * 新建方案会 prepend 到 overlays，因此它在后续重渲染和重新载入后仍保持列表第一项。
+ */
+export function listInterfaceCustomSchemeIds(overlays: Record<string, Overlay> | undefined): string[] {
+  const all = overlays ?? {}
+  const ids = listCustomSchemeIds(all)
+  const firstStoredId = Object.keys(all).find((id) => ids.includes(id))
+  if (!firstStoredId) return ids
+  return [firstStoredId, ...ids.filter((id) => id !== firstStoredId)]
+}
+
+/**
  * 界面 tab「基础覆盖物」组 = 组件库每组件一份 `base:<id>` 单组件方案；
  * 按组件库顺序排列，仅取目录里实际存在的。
  */

@@ -14,7 +14,7 @@ export const InkYingMoManifest: ComponentManifest = {
   inputs: [],
 }
 
-export function InkYingMo({ emit, preview, previewTimeMs }: OverlayProps) {
+export function InkYingMo({ emit, preview, previewTimeMs, previewPlaying }: OverlayProps) {
   injectCss('ink-yingmo-layer', YINGMO_CSS)
   ensureInkFilters()
   ensureBrushFont()
@@ -26,10 +26,11 @@ export function InkYingMo({ emit, preview, previewTimeMs }: OverlayProps) {
     emit?.(id)
   }
 
+  const frozen = preview && !previewPlaying
   return (
     <div
-      className={`pvn-opts pvn-opts--yingmo show${preview ? ' is-frozen' : ''}`}
-      style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
+      className={`pvn-opts pvn-opts--yingmo show${frozen ? ' is-frozen' : ''}`}
+      style={frozen ? previewTStyle(previewTimeMs ?? 0) : undefined}
       aria-label="应默抉择"
     >
       <div className="pvn-yingmo-pair" data-overlay-fit-target>

@@ -49,6 +49,18 @@ describe('BgmPlayer', () => {
     expect(el.paused).toBe(false)
   })
 
+  it('暂停和倍速同步到当前床轨', () => {
+    const same = cmd()
+    const { rerender } = render(<BgmPlayer bgm={same} resolveAsset={resolve} paused playbackRate={2} />)
+    const el = active()
+    expect(el.paused).toBe(true)
+    expect(el.playbackRate).toBe(2)
+
+    rerender(<BgmPlayer bgm={same} resolveAsset={resolve} paused={false} playbackRate={0.5} />)
+    expect(el.paused).toBe(false)
+    expect(el.playbackRate).toBe(0.5)
+  })
+
   it('ref 变了就换轨：active 轨的 src 指向新曲', () => {
     const { rerender } = render(<BgmPlayer bgm={cmd()} resolveAsset={resolve} />)
     rerender(<BgmPlayer bgm={cmd({ ref: 'bgm-battle' })} resolveAsset={resolve} />)

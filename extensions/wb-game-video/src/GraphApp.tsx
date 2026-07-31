@@ -83,7 +83,7 @@ function GraphMain(): JSX.Element {
       {view === 'graph' && <BlueprintLibraryView />}
       {view === 'video' && <GraphVideoView />}
       {view === 'assets' && <GraphAssetView />}
-      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义覆盖物' }]} scenario={NODIA_DEMO} />}
+      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义界面' }]} scenario={NODIA_DEMO} />}
       {view === 'rule' && (
         <GraphConfigView
           title="规则"

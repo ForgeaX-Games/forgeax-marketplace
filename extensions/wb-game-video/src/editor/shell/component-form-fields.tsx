@@ -12,11 +12,13 @@
  */
 import type { CSSProperties, JSX } from 'react'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
-import type { NumOrExpr } from '../../runtime/schema/graph-schema'
+import type { Entity, NumOrExpr } from '../../runtime/schema/graph-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import { hasOptionEventsInput } from './editors'
-import { AttrSelect, EffectsEditor, EntitySelect, EventsEditor, ValueInput, type ComponentEventLike, type EditorPickerCtx } from './editors'
+import { AttrSelect, EffectsEditor, EntitySelect, EventsEditor, TextValueInput, ValueInput, type ComponentEventLike, type EditorPickerCtx } from './editors'
+import type { TextOrRef } from './TextValueEditor'
 import { ColorPicker } from './ColorPicker'
+import { compileValuePick, findEntity } from './valueExprPick'
 
 /**
  * events 编辑器的 variant 由触发的输入标记本身决定，不查组件 id 也不查任何跨组件分类表：
@@ -55,13 +57,33 @@ function field(label: string, node: JSX.Element, title?: string): JSX.Element {
   )
 }
 
-function compactField(label: string, node: JSX.Element, title: string): JSX.Element {
+function compactField(
+  label: string,
+  node: JSX.Element,
+  title: string,
+  labelWidth?: CSSProperties['width'],
+): JSX.Element {
   return (
     <label
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, marginBottom: 2 }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: labelWidth ? 8 : 3,
+        fontSize: 11,
+        marginBottom: 2,
+      }}
       title={title}
     >
-      <span style={{ opacity: 0.55, flexShrink: 0, maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{
+        width: labelWidth,
+        flexBasis: labelWidth,
+        opacity: 0.55,
+        flexShrink: 0,
+        maxWidth: labelWidth ?? 64,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
         {label}
       </span>
       {node}
@@ -89,7 +111,60 @@ function patchValue(
 function boundEntityId(inputs: ComponentInput[], values: Record<string, unknown>): string {
   const entityInput = inputs.find((i) => i.component === 'entity')
   const v = entityInput ? values[entityInput.key] : undefined
-  return typeof v === 'string' ? v : ''
+  if (typeof v === 'string') return v
+  return typeof entityInput?.default === 'string' ? entityInput.default : ''
+}
+
+type HpValueMode = 'bound' | 'custom'
+
+function isHpBarComponent(componentId: string): boolean {
+  return componentId === 'BattlePlayerHpBar' || componentId === 'BattleEnemyHpBar'
+}
+
+function hpBinding(
+  inputs: ComponentInput[],
+  values: Record<string, unknown>,
+): { entityId: string; attr: string } {
+  const bindInput = inputs.find((input) => input.key === 'bind')
+  const attrInput = inputs.find((input) => input.key === 'attr')
+  return {
+    entityId: typeof values.bind === 'string'
+      ? values.bind
+      : typeof bindInput?.default === 'string'
+        ? bindInput.default
+        : '',
+    attr: typeof values.attr === 'string'
+      ? values.attr
+      : typeof attrInput?.default === 'string'
+        ? attrInput.default
+        : 'hp',
+  }
+}
+
+function initialHpCustomValues(
+  inputs: ComponentInput[],
+  values: Record<string, unknown>,
+  entities: Record<string, Entity> | undefined,
+): { current: NumOrExpr; max: NumOrExpr } {
+  const { entityId, attr } = hpBinding(inputs, values)
+  const current = compileValuePick({
+    mode: 'pick',
+    terms: [{ op: '+', source: 'entity', refId: entityId, attr }],
+  })
+  const entity = findEntity(entities, entityId)
+  const maxAttr = `${attr}Max`
+  if (entity && (entity.attrs?.[maxAttr] !== undefined || entity.attrMeta?.[maxAttr] !== undefined)) {
+    return {
+      current,
+      max: compileValuePick({
+        mode: 'pick',
+        terms: [{ op: '+', source: 'entity', refId: entityId, attr: maxAttr }],
+      }),
+    }
+  }
+  const declaredMax = entity?.attrMeta?.[attr]?.max
+  if (typeof declaredMax === 'number') return { current, max: declaredMax }
+  return { current, max: entity?.attrs?.[attr] ?? 0 }
 }
 
 function isComplexInput(inp: ComponentInput): boolean {
@@ -171,12 +246,13 @@ function renderInput(
   onPatch: (key: string, value: unknown) => void,
   pickers: EditorPickerCtx | undefined,
   compact: boolean,
+  labelWidth?: CSSProperties['width'],
 ): JSX.Element | null {
   const val = values[inp.key]
   const label = inp.label ?? inp.key
   const hint = fieldHint(inp)
   const wrap = (node: JSX.Element): JSX.Element =>
-    compact ? compactField(label, node, hint) : field(label, node, hint)
+    compact ? compactField(label, node, hint, labelWidth) : field(label, node, hint)
 
   // 有 component 优先用它渲染（复合编辑器）；events / effects 直接出结构化子编辑器，textStyle / qteCues 暂交「视频」轨。
   if (inp.component === 'events' || inp.component === 'hotspotEvents') {
@@ -230,17 +306,44 @@ function renderInput(
     )
   }
   if (inp.component === 'numberExpr') {
+    const optional = inp.default === undefined
     return (
-      <div key={inp.key} style={{ marginBottom: 6 }}>
-        <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>{label}</div>
-        <ValueInput
-          value={val as NumOrExpr | undefined}
-          defaultValue={typeof inp.default === 'number' ? inp.default : undefined}
-          entities={pickers?.entities}
-          variables={pickers?.variables}
-          formulas={pickers?.formulas}
-          onChange={(next) => onPatch(inp.key, next)}
-        />
+      <div
+        key={inp.key}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `${labelWidth ?? 'max-content'} minmax(0, 1fr)`,
+          columnGap: 8,
+          alignItems: 'start',
+          width: '100%',
+          minWidth: 0,
+          flexBasis: '100%',
+          flexGrow: 0,
+          flexShrink: 0,
+          marginBottom: 6,
+          fontSize: 11,
+        }}
+      >
+        <span style={{ opacity: 0.55, flexShrink: 0, fontSize: 11, paddingTop: 5 }}>{label}</span>
+        {inp.valueType === 'string' ? (
+          <TextValueInput
+            value={(val ?? inp.default) as TextOrRef | undefined}
+            entities={pickers?.entities}
+            variables={pickers?.variables}
+            onChange={(next) => onPatch(inp.key, next)}
+          />
+        ) : (
+          <ValueInput
+            value={val as NumOrExpr | string | undefined}
+            defaultValue={typeof inp.default === 'number' ? inp.default : undefined}
+            entities={pickers?.entities}
+            variables={pickers?.variables}
+            formulas={pickers?.formulas}
+            onChange={(next) => onPatch(inp.key, next)}
+            onClear={optional ? () => onPatch(inp.key, undefined) : undefined}
+            emptyLabel={label.includes('覆盖') ? '使用组件实时值' : '未设置（使用组件默认）'}
+          />
+        )}
       </div>
     )
   }
@@ -249,7 +352,7 @@ function renderInput(
       <span key={inp.key}>
         {wrap(
           <EntitySelect
-            value={typeof val === 'string' ? val : ''}
+            value={typeof val === 'string' ? val : (typeof inp.default === 'string' ? inp.default : '')}
             entities={pickers?.entities}
             onChange={(id) => onPatch(inp.key, id || undefined)}
           />,
@@ -263,7 +366,7 @@ function renderInput(
         {wrap(
           <AttrSelect
             entityId={boundEntityId(inputs, values)}
-            value={typeof val === 'string' ? val : ''}
+            value={typeof val === 'string' ? val : (typeof inp.default === 'string' ? inp.default : '')}
             entities={pickers?.entities}
             onChange={(attr) => onPatch(inp.key, attr || undefined)}
           />,
@@ -396,6 +499,7 @@ export function ComponentFormFields({
   pickers,
   excludeKeys,
   density = 'default',
+  labelWidth,
 }: {
   componentId: string
   values: Record<string, unknown>
@@ -408,14 +512,35 @@ export function ComponentFormFields({
   excludeKeys?: string[]
   /** compact：节点检视器等窄栏——标量并排、复合项折叠。 */
   density?: 'default' | 'compact'
+  /** compact 模式的标签列宽；界面 Tab 传 `4em`，其它调用保持自适应。 */
+  labelWidth?: CSSProperties['width']
 }): JSX.Element | null {
   const compact = density === 'compact'
   const allInputs = getComponentManifest(componentId)?.inputs ?? []
-  const inputs = excludeKeys?.length ? allInputs.filter((inp) => !excludeKeys.includes(inp.key)) : allInputs
+  const availableInputs = excludeKeys?.length ? allInputs.filter((inp) => !excludeKeys.includes(inp.key)) : allInputs
+  const hpBar = isHpBarComponent(componentId)
+  const hpMode: HpValueMode = values.current !== undefined || values.max !== undefined ? 'custom' : 'bound'
+  const inputs = hpBar
+    ? availableInputs.filter((input) => hpMode === 'bound'
+      ? input.key !== 'current' && input.key !== 'max'
+      : input.key !== 'bind' && input.key !== 'attr')
+    : availableInputs
   if (!inputs.length) {
     return <div style={{ fontSize: 11, opacity: 0.5 }}>该组件无可配 inputs（component={componentId}）</div>
   }
   const onPatch = (key: string, value: unknown) => onChange(patchValue(values, key, value))
+  const setHpMode = (mode: HpValueMode): void => {
+    if (!hpBar || mode === hpMode) return
+    if (mode === 'bound') {
+      const { current: _current, max: _max, ...rest } = values
+      onChange(rest)
+      return
+    }
+    onChange({
+      ...values,
+      ...initialHpCustomValues(availableInputs, values, pickers?.entities),
+    })
+  }
   /**
    * 分两组呈现（平铺混排时看不出层次）：
    *  - **参数**：标量 + 需专属编辑器的结构化参数（拍点 / 文字样式…）——都是「这个组件长什么样、怎么判定」
@@ -429,23 +554,58 @@ export function ComponentFormFields({
   const grouped = params.length > 0 && events.length > 0
   return (
     <div>
+      {hpBar ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${labelWidth ?? 'max-content'} minmax(0, 1fr)`,
+            columnGap: 8,
+            alignItems: 'center',
+            width: '100%',
+            marginBottom: 6,
+            fontSize: 11,
+          }}
+        >
+          <span style={{ opacity: 0.55 }}>血量方式</span>
+          <div role="radiogroup" aria-label="血量方式" style={{ display: 'flex', gap: 4 }}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={hpMode === 'bound'}
+              className={hpMode === 'bound' ? 'gc-mini-action is-on' : 'gc-mini-action'}
+              onClick={() => setHpMode('bound')}
+            >
+              绑定属性
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={hpMode === 'custom'}
+              className={hpMode === 'custom' ? 'gc-mini-action is-on' : 'gc-mini-action'}
+              onClick={() => setHpMode('custom')}
+            >
+              分别设置
+            </button>
+          </div>
+        </div>
+      ) : null}
       {params.length > 0 ? (
         <div style={grouped ? { marginBottom: 6 } : undefined}>
           {grouped ? groupLabel('参数配置') : null}
           {compact ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'center' }}>
-              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, true))}
+              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, true, labelWidth))}
             </div>
           ) : (
-            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, false))
+            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, false, labelWidth))
           )}
-          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact))}
+          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact, labelWidth))}
         </div>
       ) : null}
       {events.length > 0 ? (
         <div style={grouped ? { borderTop: '1px solid #2f2f2f', paddingTop: 5 } : undefined}>
           {grouped ? groupLabel('事件配置') : null}
-          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact))}
+          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, pickers, compact, labelWidth))}
         </div>
       ) : null}
     </div>

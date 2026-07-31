@@ -82,14 +82,28 @@ describe('overlayChildPreview · 时间轴预览', () => {
     expectFitTargetOn(html, 'ks-hud-boss ks-hud-foe-unit')
   })
 
-  it('伤害与增益飘字预览使用稳定 fit target 且不播放位移动画', () => {
+  it('伤害与增益飘字暂停时冻结在对应局部动画帧', () => {
     const reg = createCoreSkinRegistry()
     for (const component of ['DamageFloatText', 'GainFloatText']) {
       const child: OverlayChild = { id: component, component, inputs: {} }
       const html = renderToStaticMarkup(
         renderOverlayChildPreview(child, reg, ctx, 400) as ReactElement,
       )
-      expect(html).toContain('is-preview')
+      expect(html).toContain('is-preview-frozen')
+      expect(html).toContain('--preview-t:400ms')
+      expect(html).toContain('data-overlay-fit-target')
+    }
+  })
+
+  it('伤害与增益飘字播放时执行与试玩相同的动画', () => {
+    const reg = createCoreSkinRegistry()
+    for (const component of ['DamageFloatText', 'GainFloatText']) {
+      const child: OverlayChild = { id: component, component, inputs: {} }
+      const html = renderToStaticMarkup(
+        renderOverlayChildPreview(child, reg, ctx, 400, undefined, true) as ReactElement,
+      )
+      expect(html).not.toContain('is-preview-frozen')
+      expect(html).not.toContain('--preview-t')
       expect(html).toContain('data-overlay-fit-target')
     }
   })
@@ -116,6 +130,17 @@ describe('overlayChildPreview · 泛用预览时钟（preview/previewTimeMs 透�
     )
     expect(html).toContain('is-frozen')
     expect(html).toContain('--preview-t:400ms')
+    expect(html).toContain('disabled=""')
+  })
+
+  it('新规格 inkKou 播放预览时保留交互保护但不冻结动画', () => {
+    const reg = createCoreSkinRegistry()
+    const child: OverlayChild = { id: 'c3', component: 'InkKou', inputs: {} }
+    const html = renderToStaticMarkup(
+      renderOverlayChildPreview(child, reg, ctx, 400, undefined, true) as ReactElement,
+    )
+    expect(html).not.toContain('is-frozen')
+    expect(html).not.toContain('--preview-t')
     expect(html).toContain('disabled=""')
   })
 })

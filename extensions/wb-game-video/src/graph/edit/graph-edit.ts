@@ -5,8 +5,8 @@
  * 连/删边会同步 event reactions 里的 `advance.edgeId`（显式走向）；
  * 未写 advance 时运行时仍可「有边则默认推进」。
  */
-import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef } from '../../runtime/schema/graph-schema'
-import { getSubFlow } from '../../runtime/schema/graph-schema'
+import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef, SubProcess } from '../../runtime/schema/graph-schema'
+import { getSubProcess } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 import { isLifecycleReaction } from '../../runtime/schema/node-config-schema'
 
@@ -22,16 +22,14 @@ export function newElementId(): string {
 }
 
 /**
- * 把节点标成「同图子流程」容器：只改属性，不自动下钻。
- * 尚无 `subFlow` 时新建专用入口节点——禁止误把现有主流程节点当入口
- * （否则根视图会按 BFS 把可达节点藏进子流程成员，看起来像父图被清空）。
+ * 把节点标成私有内嵌子流程容器。入口节点只创建在内嵌图中，绝不追加到父图。
  */
-export function attachSameGraphSubflow(graph: GameGraph, containerId: string): GameGraph {
+export function attachSubProcess(graph: GameGraph, containerId: string): GameGraph {
   const node = graph.nodes.find((n) => n.id === containerId)
   if (!node) return graph
-  const existing = getSubFlow(node.data)
+  const existing = getSubProcess(node.data)
   if (existing) {
-    return patchNodeData(graph, containerId, { subFlow: existing, subFlowPack: undefined })
+    return patchNodeData(graph, containerId, { subProcess: existing, subFlowPack: undefined })
   }
   const entryId = newId('sf')
   const entry: GameNode = {
@@ -42,8 +40,10 @@ export function attachSameGraphSubflow(graph: GameGraph, containerId: string): G
     outputs: [],
     data: { name: '子流程入口' },
   }
-  const withEntry = addNode(graph, entry)
-  return patchNodeData(withEntry, containerId, { subFlow: entryId, subFlowPack: undefined })
+  return patchNodeData(graph, containerId, {
+    subProcess: { entry: entryId, graph: { nodes: [entry], edges: [] } },
+    subFlowPack: undefined,
+  })
 }
 
 /** 空子蓝图包：单入口叶子（无出边时运行时自动弹回主图容器）。 */
@@ -122,6 +122,8 @@ export function removeNode(graph: GameGraph, id: string): GameGraph {
 /** 深拷贝节点 data（overlayNodes 引用同一 overlay 目录项；child id 在目录侧）。 */
 function cloneNodePayload(src: GameNode, nodeId: string, offset: { x: number; y: number }): GameNode {
   const data = structuredClone(src.data)
+  const process = getSubProcess(src.data)
+  if (process) (data as GameNode['data'] & { subProcess: SubProcess }).subProcess = cloneSubProcess(process)
   const name = data.name?.trim() ?? ''
   if (name && !name.endsWith(' 副本')) data.name = `${name} 副本`
   return {
@@ -130,6 +132,55 @@ function cloneNodePayload(src: GameNode, nodeId: string, offset: { x: number; y:
     position: { x: src.position.x + offset.x, y: src.position.y + offset.y },
     data,
   }
+}
+
+/** 复制私有子图时递归重铸 id，避免副本与原树在同一蓝图命名空间中冲突。 */
+function cloneSubProcess(process: SubProcess): SubProcess {
+  const nodeIds = new Map<string, string>()
+  const edgeIds = new Map<string, string>()
+  const collect = (graph: GameGraph): void => {
+    for (const node of graph.nodes) {
+      nodeIds.set(node.id, newId('n'))
+      const nested = getSubProcess(node.data)
+      if (nested) collect(nested.graph)
+    }
+    for (const edge of graph.edges) edgeIds.set(edge.id, newId('edge'))
+  }
+  collect(process.graph)
+
+  const rewriteRefs = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(rewriteRefs)
+    if (!value || typeof value !== 'object') return value
+    const out: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (key === 'nodeId' && typeof item === 'string') out[key] = nodeIds.get(item) ?? item
+      else if (key === 'edgeId' && typeof item === 'string') out[key] = edgeIds.get(item) ?? item
+      else out[key] = rewriteRefs(item)
+    }
+    return out
+  }
+
+  const cloneGraph = (source: GameGraph): GameGraph => ({
+    ...source,
+    nodes: source.nodes.map((node) => {
+      const data = rewriteRefs(structuredClone(node.data)) as GameNode['data']
+      const nested = getSubProcess(node.data)
+      if (nested) (data as GameNode['data'] & { subProcess: SubProcess }).subProcess = {
+        entry: nodeIds.get(nested.entry) ?? nested.entry,
+        graph: cloneGraph(nested.graph),
+      }
+      return { ...node, id: nodeIds.get(node.id)!, data }
+    }),
+    edges: source.edges.map((edge) => ({
+      ...edge,
+      id: edgeIds.get(edge.id)!,
+      source: nodeIds.get(edge.source) ?? edge.source,
+      target: nodeIds.get(edge.target) ?? edge.target,
+      data: rewriteRefs(structuredClone(edge.data)) as GameEdge['data'],
+    })),
+  })
+
+  return { entry: nodeIds.get(process.entry) ?? process.entry, graph: cloneGraph(process.graph) }
 }
 
 /**
@@ -179,23 +230,10 @@ export function setNodePosition(graph: GameGraph, id: string, position: { x: num
   }
 }
 
-/** 节点 data 补丁：`undefined` 表示删除该键（用于清掉 subFlow*）。 */
+/** 节点 data 补丁：`undefined` 表示删除该键（用于清掉子流程容器字段）。 */
 export type NodeDataPatch = Partial<NodeData> & {
-  subFlow?: string | undefined
+  subProcess?: SubProcess | undefined
   subFlowPack?: SubFlowPack | undefined
-}
-
-/** 把遗留 `subFlowRef` 归一成 `subFlow`（旧草稿/落盘兼容）。 */
-export function normalizeSubFlowFields(graph: GameGraph): GameGraph {
-  let changed = false
-  const nodes = graph.nodes.map((n) => {
-    const d = n.data as NodeData & { subFlow?: string; subFlowRef?: string }
-    if (typeof d.subFlowRef !== 'string' || !d.subFlowRef) return n
-    changed = true
-    const { subFlowRef, ...rest } = d
-    return { ...n, data: { ...rest, subFlow: d.subFlow ?? subFlowRef } as GameNode['data'] }
-  })
-  return changed ? { ...graph, nodes } : graph
 }
 
 export function patchNodeData(graph: GameGraph, nodeId: string, patch: NodeDataPatch): GameGraph {
@@ -208,8 +246,6 @@ export function patchNodeData(graph: GameGraph, nodeId: string, patch: NodeDataP
         if (v === undefined) delete next[k]
         else next[k] = v
       }
-      // 写 subFlow 时清掉遗留 subFlowRef，避免双字段分叉。
-      if ('subFlow' in patch) delete next.subFlowRef
       return { ...n, data: next as unknown as GameNode['data'] }
     }),
   }

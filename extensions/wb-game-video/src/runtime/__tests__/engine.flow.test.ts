@@ -62,12 +62,17 @@ describe('element window (startMs/endMs)', () => {
   })
 })
 
-describe('subflow (subFlow)', () => {
+describe('subProcess', () => {
   it('descends into subflow on enter and returns to continue container out', () => {
     const graph: GameGraph = {
       nodes: [
-        node('wrap', { subFlow: 'sub', durationMs: 100 }),
-        node('sub', { durationMs: 100 }),
+        node('wrap', {
+          subProcess: {
+            entry: 'sub',
+            graph: { nodes: [node('sub', { durationMs: 100 })], edges: [] },
+          },
+          durationMs: 100,
+        }),
         node('after', { }),
       ],
       edges: [{ id: 'e', source: 'wrap', target: 'after', sourceHandle: 'default', targetHandle: 'in' }],

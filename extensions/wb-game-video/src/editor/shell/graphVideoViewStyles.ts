@@ -10,6 +10,42 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .gvv-controls button { flex: none; width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text); border-radius: 7px; cursor: pointer; font-size: 13px; line-height: 1; }
 .gvv-controls button:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
 .gvv-time { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gvv-timeline {
+  --gvv-progress: 0%;
+  min-width: 72px;
+  flex: 1;
+  height: 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+.gvv-timeline::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: inherit;
+  background: linear-gradient(to right, var(--gc-accent) 0 var(--gvv-progress), var(--gc-line-soft) var(--gvv-progress) 100%);
+}
+.gvv-timeline::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  appearance: none;
+  border: 2px solid var(--gc-panel2);
+  border-radius: 50%;
+  background: var(--gc-accent);
+}
+.gvv-controls .gvv-loop,
+.gvv-controls .gvv-mute { position: relative; }
+.gvv-controls .gvv-loop:not(.is-on)::after {
+  content: "";
+  position: absolute;
+  width: 1px;
+  height: 17px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+.gvv-controls .gvv-loop.is-on,
+.gvv-controls .gvv-mute.is-on { background: var(--gc-accent); border-color: var(--gc-accent); color: #1a1206; }
 .gvv-controls .gvv-mute { margin-left: auto; }
 .gvv-row-status { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; line-height: 1.6; white-space: nowrap; }
 .gvv-row-status.is-generating { background: rgba(240,136,64,.22); color: var(--gc-accent); }
@@ -139,5 +175,15 @@ export const GRAPH_VIDEO_VIEW_CSS = `
     height: 100%;
     min-height: 180px;
   }
+}
+
+/* 视频 Tab 仅保留预览时，预览列占满原本的生成配置区域。 */
+.gc-stage-video .gc-video-top { grid-template-columns: minmax(0, 1fr); }
+.gc-stage-video .gvv-video-col { height: 100%; }
+.gc-stage-video .gvv-video-col .gc-frame {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
 }
 `

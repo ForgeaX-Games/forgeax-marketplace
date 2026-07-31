@@ -4,7 +4,7 @@ import {
   patchNodeBgm,
 } from '../bgm-authoring'
 import { patchNodeData } from '../../../graph/edit/graph-edit'
-import type { KinoResourceDTO } from '../../assets/kino-api'
+import type { ManagedAsset } from '../../assets/assetLibraryClient'
 import type { GameGraph } from '../../../runtime/schema/graph-schema'
 
 describe('patchNodeBgm', () => {
@@ -103,14 +103,10 @@ describe('节点面板的写回路径（patchNodeData + patchNodeBgm）', () => 
 })
 
 describe('audio picker fallbacks', () => {
-  const resource = (id: string, name?: string): KinoResourceDTO => ({
-    resource_id: id,
-    game_id: 'demo',
-    media_type: 'audio',
-    name,
-    url: `/api/v1/kino/resources/${id}/content`,
-    created_at: 0,
-    updated_at: 0,
+  const resource = (id: string, name?: string): ManagedAsset => ({
+    id,
+    kind: 'audio',
+    name: name ?? id,
   })
 
   it('名字优先，缺名字用 id；重复 id 去重', () => {

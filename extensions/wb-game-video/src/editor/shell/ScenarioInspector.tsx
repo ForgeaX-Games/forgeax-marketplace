@@ -25,6 +25,7 @@ const sectionTitle: CSSProperties = {
   borderTop: '1px solid #333',
   paddingTop: 6,
 }
+const variableGridColumns = 'minmax(0, 0.9fr) minmax(0, 1.5fr) minmax(3.5rem, 0.55fr) 2rem'
 
 function field(label: string, node: JSX.Element): JSX.Element {
   return (
@@ -223,34 +224,81 @@ export function ScenarioInspector({
               + 变量
             </button>
           </div>
+          {Object.keys(variables).length > 0 ? (
+            <div
+              aria-hidden
+              style={{
+                display: 'grid',
+                gridTemplateColumns: variableGridColumns,
+                gap: 8,
+                padding: '0 10px',
+                margin: '8px 0 2px',
+                color: 'var(--gc-faint, #8c8377)',
+                fontSize: 10,
+                letterSpacing: '0.08em',
+              }}
+            >
+              <span>ID</span>
+              <span>名称</span>
+              <span>初值</span>
+              <span />
+            </div>
+          ) : null}
           {Object.entries(variables).map(([key, v]) => (
-            <div key={key} style={box}>
-              {field('id', <input value={v.id} readOnly style={{ flex: 1, opacity: 0.7 }} />)}
-              {field(
-                '名称',
-                <input
-                  value={v.name ?? ''}
-                  onChange={(e) => setVariables({ ...variables, [key]: { ...v, id: key, name: e.target.value } })}
-                  style={{ flex: 1 }}
-                />,
-              )}
-              {field(
-                '初值',
-                <input
-                  type="number"
-                  value={v.initial ?? 0}
-                  onChange={(e) => setVariables({ ...variables, [key]: { ...v, id: key, initial: Number(e.target.value) || 0 } })}
-                  style={{ width: 90 }}
-                />,
-              )}
+            <div
+              key={key}
+              style={{
+                ...box,
+                display: 'grid',
+                gridTemplateColumns: variableGridColumns,
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 8px',
+                background: 'rgba(255,255,255,0.025)',
+              }}
+            >
+              <code
+                title={`变量 ID：${v.id}`}
+                style={{
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--gc-faint, #8c8377)',
+                  background: 'rgba(0,0,0,0.2)',
+                  border: '1px solid rgba(255,255,255,0.09)',
+                  borderRadius: 5,
+                  padding: '4px 6px',
+                  fontSize: 11,
+                }}
+              >
+                {v.id}
+              </code>
+              <input
+                value={v.name ?? ''}
+                placeholder="变量名称"
+                aria-label={`${v.id} 的名称`}
+                onChange={(e) => setVariables({ ...variables, [key]: { ...v, id: key, name: e.target.value } })}
+                style={{ width: '100%', minWidth: 0 }}
+              />
+              <input
+                type="number"
+                value={v.initial ?? 0}
+                aria-label={`${v.id} 的初值`}
+                title="初值"
+                onChange={(e) => setVariables({ ...variables, [key]: { ...v, id: key, initial: Number(e.target.value) || 0 } })}
+                style={{ width: '100%', minWidth: 0 }}
+              />
               <button
-                style={del}
+                style={{ ...del, marginLeft: 0, padding: 0, width: '2rem', height: '2rem' }}
                 onClick={() => {
                   const { [key]: _d, ...rest } = variables
                   setVariables(rest)
                 }}
+                title={`删除变量「${v.name || v.id}」`}
+                aria-label={`删除变量「${v.name || v.id}」`}
               >
-                删除
+                ×
               </button>
             </div>
           ))}

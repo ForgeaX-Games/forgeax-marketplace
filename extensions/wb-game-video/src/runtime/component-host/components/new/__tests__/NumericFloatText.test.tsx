@@ -34,9 +34,13 @@ describe('numeric float text components', () => {
   it('declare a shared constant-or-formula value input', () => {
     expect(DamageFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: -25 },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color' },
+      { key: 'fontSize', label: '字号', valueType: 'number' },
     ])
     expect(GainFloatTextManifest.inputs).toEqual([
       { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: 50 },
+      { key: 'color', label: '字色', valueType: 'string', component: 'color' },
+      { key: 'fontSize', label: '字号', valueType: 'number' },
     ])
   })
 
@@ -67,6 +71,14 @@ describe('numeric float text components', () => {
           }}
           ctx={ctx}
         />
+        <GainFloatText
+          overlay={{
+            elementId: 'legacy-string-expression',
+            component: 'GainFloatText',
+            inputs: { value: 'entity.hero.attr.attack + var.bonus + 1' },
+          }}
+          ctx={ctx}
+        />
       </>,
     )
 
@@ -74,6 +86,21 @@ describe('numeric float text components', () => {
     expect(screen.getByText('+50')).toBeTruthy()
     expect(screen.getByText('-23')).toBeTruthy()
     expect(screen.getByText('+10')).toBeTruthy()
+    expect(screen.getByText('+24')).toBeTruthy()
+  })
+
+  it('uses each skin default appearance and accepts its optional text overrides', () => {
+    const { rerender } = render(
+      <DamageFloatText overlay={{ elementId: 'damage', component: 'DamageFloatText', inputs: { value: -25 } }} />,
+    )
+    expect(screen.getByText('-25')).toHaveStyle({ color: '#ff5a5a', '--gv-text-font-size': '3.5cqh' })
+
+    rerender(
+      <GainFloatText
+        overlay={{ elementId: 'gain', component: 'GainFloatText', inputs: { value: 50, color: '#123456', fontSize: 4 } }}
+      />,
+    )
+    expect(screen.getByText('+50')).toHaveStyle({ color: '#123456', '--gv-text-font-size': '4cqh' })
   })
 
   it('keeps legacy text values readable when value is absent', () => {

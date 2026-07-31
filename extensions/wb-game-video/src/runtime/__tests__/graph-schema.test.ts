@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getSubFlow, isGameGraph, type GameGraph, type GameNode } from '../schema/graph-schema'
+import { getSubProcess, isGameGraph, type GameGraph, type GameNode } from '../schema/graph-schema'
 
 const minimal: GameGraph = {
   nodes: [
@@ -50,10 +50,9 @@ describe('graph-schema', () => {
     ).toBe(true)
   })
 
-  it('getSubFlow reads subFlow and legacy subFlowRef', () => {
-    expect(getSubFlow({ name: 'a', subFlow: 'wait' } as GameNode['data'])).toBe('wait')
-    expect(getSubFlow({ name: 'a', subFlowRef: 'tele' } as GameNode['data'])).toBe('tele')
-    expect(getSubFlow({ name: 'a', subFlow: 'wait', subFlowRef: 'tele' } as GameNode['data'])).toBe('wait')
-    expect(getSubFlow({ name: 'a' } as GameNode['data'])).toBeUndefined()
+  it('getSubProcess reads an embedded graph', () => {
+    const process = { entry: 'n1', graph: minimal }
+    expect(getSubProcess({ name: 'a', subProcess: process })).toBe(process)
+    expect(getSubProcess({ name: 'a' } as GameNode['data'])).toBeUndefined()
   })
 })

@@ -14,7 +14,7 @@ export const InkKouManifest: ComponentManifest = {
   inputs: [],
 }
 
-export function InkKou({ emit, preview, previewTimeMs }: OverlayProps) {
+export function InkKou({ emit, preview, previewTimeMs, previewPlaying }: OverlayProps) {
   injectCss('ink-kou-layer', KOU_CSS)
   ensureInkFilters()
   ensureBrushFont()
@@ -26,10 +26,11 @@ export function InkKou({ emit, preview, previewTimeMs }: OverlayProps) {
     emit?.('kou')
   }
 
+  const frozen = preview && !previewPlaying
   return (
     <div
-      className={`pvn-opts pvn-opts--kou show${preview ? ' is-frozen' : ''}`}
-      style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
+      className={`pvn-opts pvn-opts--kou show${frozen ? ' is-frozen' : ''}`}
+      style={frozen ? previewTStyle(previewTimeMs ?? 0) : undefined}
       aria-label="叩击"
     >
       <button type="button" className="pvn-opt pvn-opt--kou" aria-label="叩" data-overlay-fit-target disabled={preview} onClick={knock}>
