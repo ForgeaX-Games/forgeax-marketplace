@@ -61,7 +61,11 @@ export function resolveComponentInputs(
     const raw = Object.prototype.hasOwnProperty.call(rawInputs, 'parameter')
       ? rawInputs.parameter
       : parameterDef.default
-    const reference = parameterDef.component === 'numberExpr' && parameterDef.valueType === 'string'
+    const reference = parameterDef.component === 'numberExpr'
+      && parameterDef.valueType === 'string'
+      && raw
+      && typeof raw === 'object'
+      && typeof (raw as { ref?: unknown }).ref === 'string'
       ? resolveTextValue(raw, ctx)
       : undefined
     resolved.parameter = resolveTextParameter(reference ?? raw, ctx, fallback)

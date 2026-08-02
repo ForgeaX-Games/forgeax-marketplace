@@ -29,6 +29,13 @@ const formulas: Record<string, Formula> = {
   },
 }
 
+function chooseCascade(trigger: HTMLElement, ...labels: string[]): void {
+  fireEvent.click(trigger)
+  for (const label of labels) {
+    fireEvent.click(screen.getByRole('menuitem', { name: label }))
+  }
+}
+
 describe('numberExpr dropdown labels', () => {
   it('labels manually entered text as a constant', () => {
     render(
@@ -42,6 +49,9 @@ describe('numberExpr dropdown labels', () => {
 
     const picker = screen.getByRole('combobox', { name: '文本内容' })
     expect(picker).toHaveTextContent('常量')
+    expect(picker.parentElement).not.toHaveClass('is-narrow-safe')
+    expect(picker.parentElement?.parentElement).toHaveStyle({ flexWrap: 'nowrap' })
+    expect(screen.getByRole('textbox', { name: '固定文本' })).toHaveStyle({ minWidth: '120px' })
     fireEvent.click(picker)
     expect(screen.getByRole('menuitem', { name: '常量' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: '固定文本（手动输入）' })).toBeNull()
@@ -69,6 +79,364 @@ describe('numberExpr dropdown labels', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: '生命值' }))
     expect(onChange).toHaveBeenCalledWith({ ref: 'entity.hero.attr.hp' })
+  })
+
+  it('limits entity-name fields to constants and entity names', () => {
+    render(
+      <TextValueEditor
+        value={{ ref: 'entity.hero.name' }}
+        entities={entities}
+        variables={variables}
+        formulas={formulas}
+        entityNameOnly
+        createVariable={{ onCreate: vi.fn() }}
+        createFormula={{ onCreate: vi.fn() }}
+        onChange={() => undefined}
+      />,
+    )
+
+    const picker = screen.getByRole('combobox', { name: '文本内容' })
+    fireEvent.click(picker)
+    expect(screen.getByRole('menuitem', { name: '实体' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '常量' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '变量' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '公式' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('menuitem', { name: '名称' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '生命值' })).toBeNull()
+  })
+
+  it('creates and selects a variable from a numeric cascader', () => {
+    const onCreate = vi.fn()
+    const onChange = vi.fn()
+    render(
+      <ValueExprEditor
+        value={0}
+        entities={{}}
+        variables={{}}
+        formulas={{}}
+        createVariable={{ onCreate }}
+        onChange={onChange}
+      />,
+    )
+
+    const picker = screen.getByRole('combobox', { name: '数值内容' })
+    fireEvent.click(picker)
+    fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
+    expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量 ID' }), {
+      target: { value: 'combo' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量显示名' }), {
+      target: { value: '连击' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '3' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(onCreate).toHaveBeenCalledWith({
+      variableId: 'combo',
+      name: '连击',
+      initialValue: 3,
+    })
+    expect(onChange).toHaveBeenCalledWith({
+      expr: 'var.combo',
+      pick: {
+        mode: 'pick',
+        terms: [{ op: '+', source: 'var', refId: 'combo' }],
+      },
+    })
+  })
+
+  it('keeps variable creation visible without blocking existing variable selection', () => {
+    const onChange = vi.fn()
+    render(
+      <ValueExprEditor
+        value={0}
+        entities={{}}
+        variables={variables}
+        formulas={{}}
+        createVariable={{ onCreate: vi.fn() }}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
+
+    expect(screen.getByRole('menuitem', { name: '怒气' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新变量 ID' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '怒气' }))
+    expect(onChange).toHaveBeenCalledWith({
+      expr: 'var.rage',
+      pick: {
+        mode: 'pick',
+        terms: [{ op: '+', source: 'var', refId: 'rage' }],
+      },
+    })
+  })
+
+  it('keeps entity and attribute creation visible beside existing numeric choices', () => {
+    const onChange = vi.fn()
+    render(
+      <ValueExprEditor
+        value={0}
+        entities={entities}
+        variables={{}}
+        formulas={{}}
+        createEntity={{
+          template: { entityId: 'enemy', name: '敌方' },
+          onCreate: vi.fn(),
+        }}
+        createAttribute={{
+          template: {
+            attrId: 'hp',
+            initialValue: 100,
+            meta: { label: '生命值', initial: 100 },
+          },
+          onCreate: vi.fn(),
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
+
+    expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '生命值' }))
+    expect(onChange).toHaveBeenCalledWith({
+      expr: 'entity.hero.attr.hp',
+      pick: {
+        mode: 'pick',
+        terms: [{ op: '+', source: 'entity', refId: 'hero', attr: 'hp' }],
+      },
+    })
+  })
+
+  it('uses generic entity and attribute drafts when creation templates are absent', () => {
+    const { unmount } = render(
+      <ValueExprEditor
+        value={0}
+        entities={entities}
+        variables={{}}
+        formulas={{}}
+        createEntity={{ onCreate: vi.fn() }}
+        createAttribute={{ onCreate: vi.fn() }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('entity1')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
+    expect(screen.getByRole('textbox', { name: '主角的新属性初始值' })).toHaveValue('0')
+
+    unmount()
+    render(
+      <TextValueEditor
+        value=""
+        entities={entities}
+        variables={{}}
+        formulas={{}}
+        createEntity={{ onCreate: vi.fn() }}
+        createAttribute={{ onCreate: vi.fn() }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '文本内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('entity1')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
+    expect(screen.getByRole('textbox', { name: '主角的新属性初始值' })).toHaveValue('0')
+  })
+
+  it('creates and selects a formula from a numeric cascader', () => {
+    const onCreate = vi.fn()
+    const onChange = vi.fn()
+    render(
+      <ValueExprEditor
+        value={0}
+        entities={{}}
+        variables={{}}
+        formulas={{}}
+        createFormula={{ onCreate }}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '公式' }))
+    expect(screen.getByRole('textbox', { name: '新公式内容' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式 ID' }), {
+      target: { value: 'damage-new' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式显示名' }), {
+      target: { value: '新伤害' },
+    })
+    const confirm = screen.getByRole('menuitem', { name: '确认创建并选择' })
+    expect(screen.getByRole('textbox', { name: '新公式内容' })).toHaveAttribute('aria-invalid', 'true')
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: '10 +' },
+    })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: '１０　＋ ５' },
+    })
+    expect(confirm).toBeEnabled()
+    fireEvent.click(confirm)
+
+    expect(onCreate).toHaveBeenCalledWith({
+      formulaId: 'damage-new',
+      name: '新伤害',
+      ast: {
+        t: 'bin',
+        id: 'n0',
+        op: '+',
+        a: { t: 'num', id: 'n1', v: 10 },
+        b: { t: 'num', id: 'n2', v: 5 },
+      },
+    })
+    expect(onChange).toHaveBeenCalledWith({
+      expr: '10 + 5',
+      pick: {
+        mode: 'formula',
+        formulaId: 'damage-new',
+        holeBindings: {},
+      },
+    })
+  })
+
+  it('creates and selects variables and formulas from dynamic text cascaders', () => {
+    const onCreateVariable = vi.fn()
+    const onCreateFormula = vi.fn()
+    const onChange = vi.fn()
+    const { unmount } = render(
+      <TextValueEditor
+        value=""
+        entities={{}}
+        variables={{}}
+        formulas={{}}
+        createVariable={{ onCreate: onCreateVariable }}
+        onChange={onChange}
+      />,
+    )
+
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '变量',
+    )
+    expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    expect(onCreateVariable).toHaveBeenCalledWith({
+      variableId: 'var0',
+      name: 'var0',
+      initialValue: 0,
+    })
+    expect(onChange).toHaveBeenCalledWith({ ref: 'var.var0' })
+
+    unmount()
+    onChange.mockClear()
+    render(
+      <TextValueEditor
+        value=""
+        entities={{}}
+        variables={{}}
+        formulas={{}}
+        createFormula={{ onCreate: onCreateFormula }}
+        onChange={onChange}
+      />,
+    )
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '公式',
+      '配置「formula-0」公式',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: '7' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    expect(onCreateFormula).toHaveBeenCalledWith({
+      formulaId: 'formula-0',
+      name: 'formula-0',
+      ast: { t: 'num', id: 'n0', v: 7 },
+    })
+    expect(onChange).toHaveBeenCalledWith({
+      expr: '7',
+      pick: {
+        mode: 'formula',
+        formulaId: 'formula-0',
+        holeBindings: {},
+      },
+    })
+  })
+
+  it('keeps entity and attribute creation visible beside existing dynamic text choices', () => {
+    const onCreateAttribute = vi.fn()
+    const onChange = vi.fn()
+    render(
+      <TextValueEditor
+        value=""
+        entities={entities}
+        variables={{}}
+        formulas={{}}
+        createEntity={{
+          template: { entityId: 'enemy', name: '敌方' },
+          onCreate: vi.fn(),
+        }}
+        createAttribute={{
+          template: {
+            attrId: 'hp',
+            initialValue: 100,
+            meta: { label: '生命值', initial: 100 },
+          },
+          onCreate: onCreateAttribute,
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '文本内容' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
+
+    expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    expect(onCreateAttribute).toHaveBeenCalledWith({
+      entityId: 'hero',
+      attrId: 'hp2',
+      initialValue: 100,
+      meta: { label: '生命值', initial: 100 },
+    })
+    expect(onChange).toHaveBeenCalledWith({ ref: 'entity.hero.attr.hp2' })
   })
 
   it('shows the field note as a placeholder when a text reference is unavailable', () => {

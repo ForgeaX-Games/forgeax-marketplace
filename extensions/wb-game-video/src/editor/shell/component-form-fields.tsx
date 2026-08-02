@@ -14,12 +14,18 @@ import { useState, type CSSProperties, type JSX } from 'react'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import type { Entity, NumOrExpr } from '../../runtime/schema/graph-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
+import newComponents from '../../runtime/component-host/components/new'
 import { hasOptionEventsInput } from './editors'
 import { AttrSelect, EffectsEditor, EntitySelect, EventsEditor, TextValueInput, ValueInput, type ComponentEventLike, type EditorPickerCtx } from './editors'
 import type { TextOrRef } from './TextValueEditor'
 import { ColorPicker } from './ColorPicker'
 import { entityDisplayName, findEntity, listAttrOptions } from './valueExprPick'
-import type { EntityAttributeCreateRequest, EntityCreateRequest } from './metaCatalog'
+import type {
+  EntityAttributeCreateRequest,
+  EntityCreateRequest,
+  FormulaCreateRequest,
+  VariableCreateRequest,
+} from './metaCatalog'
 
 /**
  * events 编辑器的 variant 由触发的输入标记本身决定，不查组件 id 也不查任何跨组件分类表：
@@ -35,6 +41,7 @@ const rowStyle: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center',
 const lbl: CSSProperties = { width: 72, opacity: 0.7, flexShrink: 0, fontSize: 11 }
 const DEFAULT_COMPACT_LABEL_WIDTH = '7em'
 const COMPACT_CONTROL_WIDTH = 320
+const NEW_COMPONENT_IDS = new Set(newComponents.map(({ manifest }) => manifest.id))
 const DEFAULT_HP_ATTRIBUTE: EntityAttributeCreateRequest = {
   entityId: '',
   attrId: 'hp',
@@ -44,6 +51,8 @@ const DEFAULT_HP_ATTRIBUTE: EntityAttributeCreateRequest = {
 
 export type EntityAttributeCreateHandler = (request: EntityAttributeCreateRequest) => void
 export type EntityCreateHandler = (request: EntityCreateRequest) => void
+export type VariableCreateHandler = (request: VariableCreateRequest) => void
+export type FormulaCreateHandler = (request: FormulaCreateRequest) => void
 
 function MissingAttributeCreateControl({
   entity,
@@ -421,6 +430,8 @@ function renderInput(
   labelWidth?: CSSProperties['width'],
   onCreateEntityAttribute?: EntityAttributeCreateHandler,
   onCreateEntity?: EntityCreateHandler,
+  onCreateVariable?: VariableCreateHandler,
+  onCreateFormula?: FormulaCreateHandler,
 ): JSX.Element | null {
   const val = values[inp.key]
   const label = inp.label ?? inp.key
@@ -481,6 +492,8 @@ function renderInput(
   }
   if (inp.component === 'numberExpr') {
     const optional = inp.required !== true && inp.default === undefined
+    const isNewComponent = NEW_COMPONENT_IDS.has(componentId)
+    const stackControls = compact && isNewComponent
     const preferredEntities = preferredEntityIds(componentId, pickers?.entities)
     const semantic = attributeSemantic(componentId, inp.key)
     const semanticAttrIds = semantic ? SEMANTIC_FALLBACK_IDS[semantic] : undefined
@@ -511,7 +524,10 @@ function renderInput(
             variables={pickers?.variables}
             formulas={pickers?.formulas}
             preferredEntityIds={preferredEntities}
-            entityNameOnly={isHpBarComponent(componentId) && inp.key === 'label'}
+            entityNameOnly={
+              (isHpBarComponent(componentId) && inp.key === 'label')
+              || (componentId === 'Dialogue' && inp.key === 'speaker')
+            }
             createAttribute={onCreateEntityAttribute
               ? {
                 ...(createTemplate ? { template: createTemplate } : {}),
@@ -524,6 +540,13 @@ function renderInput(
                 onCreate: onCreateEntity,
               }
               : undefined}
+            createVariable={isNewComponent && onCreateVariable
+              ? { onCreate: onCreateVariable }
+              : undefined}
+            createFormula={isNewComponent && onCreateFormula
+              ? { onCreate: onCreateFormula }
+              : undefined}
+            stackControls={stackControls}
             onChange={(next) => onPatch(inp.key, next)}
           />
         ) : (
@@ -550,6 +573,13 @@ function renderInput(
                 onCreate: onCreateEntity,
               }
               : undefined}
+            createVariable={isNewComponent && onCreateVariable
+              ? { onCreate: onCreateVariable }
+              : undefined}
+            createFormula={isNewComponent && onCreateFormula
+              ? { onCreate: onCreateFormula }
+              : undefined}
+            stackControls={stackControls}
             onChange={(next) => onPatch(inp.key, next)}
             emptyWhenUndefined={optional}
           />
@@ -781,6 +811,8 @@ export function ComponentFormFields({
   labelWidth,
   onCreateEntityAttribute,
   onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
 }: {
   componentId: string
   values: Record<string, unknown>
@@ -799,6 +831,10 @@ export function ComponentFormFields({
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   /** 新血条没有可选实体时，经二次确认后由场景持有者补建。 */
   onCreateEntity?: EntityCreateHandler
+  /** 新组件动态值缺少变量时，经级联确认后补建到场景变量目录。 */
+  onCreateVariable?: VariableCreateHandler
+  /** 新组件动态值缺少公式时，经级联确认后补建到场景公式目录。 */
+  onCreateFormula?: FormulaCreateHandler
 }): JSX.Element | null {
   const compact = density === 'compact'
   const allInputs = getComponentManifest(componentId)?.inputs ?? []
@@ -825,18 +861,18 @@ export function ComponentFormFields({
           {grouped ? groupLabel('参数配置') : null}
           {compact ? (
             <div style={{ display: 'grid', gap: 2, alignItems: 'center', width: '100%', minWidth: 0 }}>
-              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, true, labelWidth, onCreateEntityAttribute, onCreateEntity))}
+              {paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, true, labelWidth, onCreateEntityAttribute, onCreateEntity, onCreateVariable, onCreateFormula))}
             </div>
           ) : (
-            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, false, labelWidth, onCreateEntityAttribute, onCreateEntity))
+            paramScalars.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, false, labelWidth, onCreateEntityAttribute, onCreateEntity, onCreateVariable, onCreateFormula))
           )}
-          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth, onCreateEntityAttribute, onCreateEntity))}
+          {paramComplexes.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth, onCreateEntityAttribute, onCreateEntity, onCreateVariable, onCreateFormula))}
         </div>
       ) : null}
       {events.length > 0 ? (
         <div style={grouped ? { borderTop: '1px solid #2f2f2f', paddingTop: 5 } : undefined}>
           {grouped ? groupLabel('事件配置') : null}
-          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth, onCreateEntityAttribute, onCreateEntity))}
+          {events.map((inp) => renderInput(componentId, inp, inputs, values, onPatch, onChange, pickers, compact, labelWidth, onCreateEntityAttribute, onCreateEntity, onCreateVariable, onCreateFormula))}
         </div>
       ) : null}
     </div>

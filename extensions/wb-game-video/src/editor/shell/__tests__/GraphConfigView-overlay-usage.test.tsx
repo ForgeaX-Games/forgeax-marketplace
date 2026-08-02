@@ -183,6 +183,52 @@ describe('GraphConfigView overlay usage', () => {
       initial: 100,
     })
 
+    chooseCascade(
+      within(screen.getByText('血量').parentElement!)
+        .getByRole('combobox', { name: '数值内容' }),
+      '变量',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量显示名' }), {
+      target: { value: '战斗计数' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(useGraphScenario.getState().meta.variables?.var0).toEqual({
+      id: 'var0',
+      name: '战斗计数',
+      initial: 0,
+    })
+    expect(useGraphScenario.getState().meta.ui?.overlays?.hud?.children[0]?.inputs?.current).toMatchObject({
+      expr: 'var.var0',
+    })
+
+    chooseCascade(
+      within(screen.getByText('血量').parentElement!)
+        .getByRole('combobox', { name: '数值内容' }),
+      '公式',
+      '配置「formula-0」公式',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式显示名' }), {
+      target: { value: '界面计算' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: 'var.var0 + 1' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(useGraphScenario.getState().meta.formulas?.['formula-0']).toMatchObject({
+      id: 'formula-0',
+      name: '界面计算',
+      ast: { t: 'bin', id: 'n0', op: '+' },
+    })
+    expect(useGraphScenario.getState().meta.ui?.overlays?.hud?.children[0]?.inputs?.current).toMatchObject({
+      expr: 'var.var0 + 1',
+      pick: { mode: 'formula', formulaId: 'formula-0', holeBindings: {} },
+    })
+
     cleanup()
     render(
       <GraphConfigView

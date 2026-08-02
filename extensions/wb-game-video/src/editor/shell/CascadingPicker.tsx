@@ -15,6 +15,8 @@ export interface CascadingPickerOption {
   value?: string
   children?: CascadingPickerOption[]
   disabled?: boolean
+  /** 父级展开时自动继续展开此分支；同级最多设置一个。 */
+  defaultOpen?: boolean
   presentation?: 'detail' | 'confirm'
   editor?: {
     value: string
@@ -24,6 +26,8 @@ export interface CascadingPickerOption {
     placeholder?: string
     pattern?: string
     invalid?: boolean
+    multiline?: boolean
+    error?: string
   }
 }
 
@@ -37,6 +41,7 @@ const CASCADING_PICKER_CSS = `
   background: var(--color-background-base, #191919);
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
+.gc-cascade-root.is-narrow-safe .gc-cascade-trigger { min-width: 0; }
 .gc-cascade-trigger:hover, .gc-cascade-trigger[aria-expanded="true"] {
   border-color: var(--color-brand-primary, #d4ff48);
 }
@@ -88,14 +93,16 @@ const CASCADING_PICKER_CSS = `
   color: inherit; font-size: 11px;
 }
 .gc-cascade-editor-label { opacity: .72; }
-.gc-cascade-editor input {
+.gc-cascade-editor input, .gc-cascade-editor textarea {
   box-sizing: border-box; width: 100%; min-width: 0; height: 28px; padding: 4px 7px;
   border: 1px solid var(--color-border-default, #505050);
   border-radius: var(--radius-sm, 4px);
   background: var(--color-background-base, #191919); color: inherit; font: inherit;
 }
-.gc-cascade-editor input:focus { outline: none; border-color: var(--color-brand-primary, #d4ff48); }
-.gc-cascade-editor input[aria-invalid="true"] { border-color: var(--color-status-danger, #ef6a6a); }
+.gc-cascade-editor textarea { height: 68px; min-height: 68px; resize: vertical; line-height: 1.4; }
+.gc-cascade-editor input:focus, .gc-cascade-editor textarea:focus { outline: none; border-color: var(--color-brand-primary, #d4ff48); }
+.gc-cascade-editor input[aria-invalid="true"], .gc-cascade-editor textarea[aria-invalid="true"] { border-color: var(--color-status-danger, #ef6a6a); }
+.gc-cascade-editor-error { color: var(--color-status-danger, #ef6a6a); line-height: 1.35; overflow-wrap: anywhere; }
 `
 
 function findOptionPath(
@@ -134,6 +141,25 @@ function menuColumns(
   return columns
 }
 
+function withDefaultOpenPath(
+  options: readonly CascadingPickerOption[],
+  path: readonly string[],
+): string[] {
+  const nextPath = [...path]
+  let current = options
+  for (const key of nextPath) {
+    const active = optionForKey(current, key)
+    if (!active?.children?.length) return nextPath
+    current = active.children
+  }
+  for (;;) {
+    const next = current.find((option) => option.defaultOpen && option.children?.length)
+    if (!next?.children?.length) return nextPath
+    nextPath.push(next.key)
+    current = next.children
+  }
+}
+
 export function CascadingPicker({
   ariaLabel,
   value,
@@ -141,6 +167,7 @@ export function CascadingPicker({
   placeholder,
   options,
   onSelect,
+  narrowSafe = false,
 }: {
   ariaLabel: string
   value: string
@@ -148,6 +175,7 @@ export function CascadingPicker({
   placeholder?: string
   options: readonly CascadingPickerOption[]
   onSelect: (value: string) => void
+  narrowSafe?: boolean
 }): JSX.Element {
   injectStyleOnce('gc-cascading-picker', CASCADING_PICKER_CSS)
   const [open, setOpen] = useState(false)
@@ -160,14 +188,20 @@ export function CascadingPicker({
   const columns = menuColumns(options, activePath)
 
   function openPicker(): void {
-    setActivePath((findOptionPath(options, value) ?? []).slice(0, -1))
+    setActivePath(withDefaultOpenPath(
+      options,
+      (findOptionPath(options, value) ?? []).slice(0, -1),
+    ))
     setOpen(true)
   }
 
   function choose(option: CascadingPickerOption, depth: number): void {
     if (option.disabled) return
     if (option.children?.length) {
-      setActivePath((current) => [...current.slice(0, depth), option.key])
+      setActivePath((current) => withDefaultOpenPath(
+        options,
+        [...current.slice(0, depth), option.key],
+      ))
       return
     }
     if (option.value == null) return
@@ -248,18 +282,33 @@ export function CascadingPicker({
             const active = activePath[depth] === option.key
             const selected = option.value === value
             if (option.editor) {
+              const editor = option.editor
               return (
                 <label className="gc-cascade-editor" role="none" key={option.key}>
                   <span className="gc-cascade-editor-label">{option.label}</span>
-                  <input
-                    value={option.editor.value}
-                    aria-label={option.editor.ariaLabel}
-                    aria-invalid={option.editor.invalid || undefined}
-                    inputMode={option.editor.inputMode}
-                    placeholder={option.editor.placeholder}
-                    pattern={option.editor.pattern}
-                    onChange={(event) => option.editor?.onChange(event.target.value)}
-                  />
+                  {editor.multiline ? (
+                    <textarea
+                      value={editor.value}
+                      aria-label={editor.ariaLabel}
+                      aria-invalid={editor.invalid || undefined}
+                      inputMode={editor.inputMode}
+                      placeholder={editor.placeholder}
+                      onChange={(event) => editor.onChange(event.target.value)}
+                    />
+                  ) : (
+                    <input
+                      value={editor.value}
+                      aria-label={editor.ariaLabel}
+                      aria-invalid={editor.invalid || undefined}
+                      inputMode={editor.inputMode}
+                      placeholder={editor.placeholder}
+                      pattern={editor.pattern}
+                      onChange={(event) => editor.onChange(event.target.value)}
+                    />
+                  )}
+                  {editor.error ? (
+                    <span className="gc-cascade-editor-error" role="alert">{editor.error}</span>
+                  ) : null}
                 </label>
               )
             }
@@ -281,7 +330,10 @@ export function CascadingPicker({
                 onClick={() => choose(option, depth)}
                 onPointerEnter={() => {
                   if (option.children?.length) {
-                    setActivePath((current) => [...current.slice(0, depth), option.key])
+                    setActivePath((current) => withDefaultOpenPath(
+                      options,
+                      [...current.slice(0, depth), option.key],
+                    ))
                   }
                 }}
                 key={option.key}
@@ -298,7 +350,7 @@ export function CascadingPicker({
   ) : null
 
   return (
-    <div className="gc-cascade-root" ref={rootRef}>
+    <div className={`gc-cascade-root${narrowSafe ? ' is-narrow-safe' : ''}`} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"

@@ -13,6 +13,12 @@ import {
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import { NodeActionsEditor, type ActionOption } from './NodeActionsEditor'
 import type { EditorPickerCtx } from './editors'
+import type {
+  EntityAttributeCreateHandler,
+  EntityCreateHandler,
+  FormulaCreateHandler,
+  VariableCreateHandler,
+} from './component-form-fields'
 
 function labelOf(event: OverlayEventRef): string {
   const component = getComponentManifest(event.componentId)?.label?.trim()
@@ -43,6 +49,10 @@ export function ComponentEventsEditor({
   overlays,
   pickers,
   allowSpawn = true,
+  onCreateEntityAttribute,
+  onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
   renderRoute,
   onCatalogChange,
   onMountActionsChange,
@@ -56,6 +66,10 @@ export function ComponentEventsEditor({
   overlays?: Record<string, Overlay>
   pickers?: EditorPickerCtx
   allowSpawn?: boolean
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
   renderRoute?: (event: OverlayEventRef) => ReactNode
   onCatalogChange?: (next: OverlayReaction[] | undefined) => void
   onMountActionsChange?: (event: OverlayEventRef, actions: NodeAction[]) => void
@@ -96,6 +110,10 @@ export function ComponentEventsEditor({
               pickers={pickers}
               allowAdvance={mode === 'mount'}
               allowSpawn={allowSpawn}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
               renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
               onChange={(actions) => mode === 'catalog'
                 ? writeCatalog(event, actions)

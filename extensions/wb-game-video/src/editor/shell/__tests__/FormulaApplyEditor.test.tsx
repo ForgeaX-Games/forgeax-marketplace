@@ -2,10 +2,10 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Entity } from '../../../runtime/schema/graph-schema'
+import type { Entity, Variable } from '../../../runtime/schema/graph-schema'
 import type { Formula, FormulaHoleBinding } from '../../persist/formula-authoring'
 import { FormulaApplyEditor } from '../FormulaApplyEditor'
-import { ensureEntityAttribute } from '../metaCatalog'
+import { ensureEntityAttribute, ensureVariable } from '../metaCatalog'
 
 afterEach(cleanup)
 
@@ -55,6 +55,67 @@ describe('FormulaApplyEditor variable guidance', () => {
     )
 
     expect(screen.getByText('该公式需要变量，请先到「规则 → 变量」创建变量。')).toBeTruthy()
+  })
+
+  it('creates and binds a variable from a formula slot', () => {
+    const formula: Formula = {
+      id: 'formula-slot',
+      name: '变量加成',
+      ast: { t: 'hole', id: 'h0', holeId: 'bonus', kind: 'var', label: '加成变量' },
+    }
+    let latestVariables: Record<string, Variable> = {}
+    const onChange = vi.fn()
+    function Harness(): JSX.Element {
+      const [variables, setVariables] = useState<Record<string, Variable>>({})
+      latestVariables = variables
+      return (
+        <FormulaApplyEditor
+          formulaId={formula.id}
+          holeBindings={{}}
+          formulas={{ [formula.id]: formula }}
+          entities={{}}
+          variables={variables}
+          createVariable={{
+            onCreate: (request) => setVariables((current) => ensureVariable(current, request)),
+          }}
+          onChange={onChange}
+        />
+      )
+    }
+    render(<Harness />)
+
+    expect(screen.queryByText('该公式需要变量，请先到「规则 → 变量」创建变量。')).toBeNull()
+    chooseCascade(
+      screen.getByRole('combobox', { name: '加成变量来源' }),
+      '变量',
+      '配置「var0」变量',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '加成变量的新变量 ID' }), {
+      target: { value: 'bonus-rate' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '加成变量的新变量显示名' }), {
+      target: { value: '加成率' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '加成变量的新变量初始值' }), {
+      target: { value: '2' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(latestVariables['bonus-rate']).toEqual({
+      id: 'bonus-rate',
+      name: '加成率',
+      initial: 2,
+    })
+    expect(onChange).toHaveBeenCalledWith({
+      expr: 'var.bonus-rate',
+      pick: {
+        mode: 'formula',
+        formulaId: 'formula-slot',
+        holeBindings: {
+          bonus: { kind: 'var', varId: 'bonus-rate' },
+        },
+      },
+    })
   })
 
   it('keeps random sample output stable across unrelated rerenders', () => {
@@ -394,6 +455,80 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
       kind: 'entityAttr',
       entityId: 'boss',
       attr: 'vitality',
+    })
+  })
+
+  it('keeps entity and attribute creation visible beside existing formula bindings', () => {
+    const hpFormula: Formula = {
+      id: 'formula-current-hp',
+      name: '当前生命',
+      ast: {
+        t: 'hole',
+        id: 'current-hp',
+        holeId: 'currentHp',
+        kind: 'entityAttr',
+        label: '当前血量',
+        suggestAttr: 'hp',
+      },
+    }
+    const onChange = vi.fn()
+    const hpEntities = {
+      hero: {
+        id: 'hero',
+        name: '主角',
+        attrs: { hp: 100 },
+        attrMeta: { hp: { label: '生命值', initial: 100 } },
+      },
+    }
+    render(
+      <FormulaApplyEditor
+        formulaId={hpFormula.id}
+        holeBindings={{}}
+        formulas={{ [hpFormula.id]: hpFormula }}
+        entities={hpEntities}
+        variables={{}}
+        createEntity={{
+          template: { entityId: 'enemy', name: '敌方' },
+          onCreate: vi.fn(),
+        }}
+        createAttribute={{
+          template: {
+            attrId: 'hp',
+            initialValue: 100,
+            meta: { label: '当前血量', initial: 100 },
+          },
+          onCreate: vi.fn(),
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '当前血量来源' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
+
+    expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
+    let menuLabels = screen.getAllByRole('menuitem')
+      .map((item) => item.getAttribute('aria-label'))
+    expect(menuLabels.indexOf('主角')).toBeLessThan(menuLabels.indexOf('配置「敌方」实体'))
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
+    expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
+    menuLabels = screen.getAllByRole('menuitem')
+      .map((item) => item.getAttribute('aria-label'))
+    expect(menuLabels.indexOf('生命值')).toBeLessThan(menuLabels.indexOf('配置「当前血量」属性'))
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '生命值' }))
+    expect(onChange).toHaveBeenCalledWith({
+      expr: 'entity.hero.attr.hp',
+      pick: {
+        mode: 'formula',
+        formulaId: hpFormula.id,
+        holeBindings: {
+          currentHp: { kind: 'entityAttr', entityId: 'hero', attr: 'hp' },
+        },
+      },
     })
   })
 })

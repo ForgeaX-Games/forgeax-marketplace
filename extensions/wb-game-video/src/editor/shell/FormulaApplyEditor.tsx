@@ -29,10 +29,14 @@ import {
   variableDisplayName,
 } from './valueExprPick'
 import {
+  catalogIdOccupied,
   ensureEntity,
   ensureEntityAttribute,
+  nextAvailableCatalogId,
+  nextCatalogId,
   type EntityAttributeCreateRequest,
   type EntityCreateRequest,
+  type VariableCreateRequest,
 } from './metaCatalog'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
@@ -49,6 +53,12 @@ interface FormulaCreateDraft {
   initialValue: string
 }
 
+interface VariableCreateDraft {
+  variableId: string
+  name: string
+  initialValue: string
+}
+
 interface FormulaAttributeCreateConfig {
   template?: Omit<EntityAttributeCreateRequest, 'entityId'>
   onCreate: (request: EntityAttributeCreateRequest) => void
@@ -57,6 +67,10 @@ interface FormulaAttributeCreateConfig {
 interface FormulaEntityCreateConfig {
   template?: EntityCreateRequest
   onCreate: (request: EntityCreateRequest) => void
+}
+
+interface FormulaVariableCreateConfig {
+  onCreate: (request: VariableCreateRequest) => void
 }
 
 function validEntityId(value: string): boolean {
@@ -140,9 +154,11 @@ function attributeIdOccupied(entity: Entity | undefined, attrId: string): boolea
 
 function nextAvailableAttrId(entity: Entity | undefined, requestedId: string): string {
   if (!attributeIdOccupied(entity, requestedId)) return requestedId
-  let index = 2
-  while (attributeIdOccupied(entity, `${requestedId}${index}`)) index += 1
-  return `${requestedId}${index}`
+  const suffix = /^(.*?)(\d+)$/.exec(requestedId)
+  const prefix = suffix?.[1] ?? requestedId
+  let index = suffix ? Number(suffix[2]) + 1 : 2
+  while (attributeIdOccupied(entity, `${prefix}${index}`)) index += 1
+  return `${prefix}${index}`
 }
 
 function initialValueForHole(
@@ -205,6 +221,7 @@ export function FormulaApplyEditor({
   showFormulaPicker = true,
   createAttribute,
   createEntity,
+  createVariable,
 }: {
   formulaId: string
   holeBindings: Record<string, FormulaHoleBinding>
@@ -215,8 +232,10 @@ export function FormulaApplyEditor({
   showFormulaPicker?: boolean
   createAttribute?: FormulaAttributeCreateConfig
   createEntity?: FormulaEntityCreateConfig
+  createVariable?: FormulaVariableCreateConfig
 }): JSX.Element {
   const [createDrafts, setCreateDrafts] = useState<Record<string, FormulaCreateDraft>>({})
+  const [variableCreateDrafts, setVariableCreateDrafts] = useState<Record<string, VariableCreateDraft>>({})
   const options = listFormulaOptions(formulas)
   const formula = findFormula(formulas, formulaId)
   const holes = formula ? formulaHoles(formula) : []
@@ -292,7 +311,7 @@ export function FormulaApplyEditor({
             <p role="alert" style={{ ...hint, color: '#ffb86c' }}>
               公式引用的变量「{missingVariables.join('、')}」尚未创建，请先到「规则 → 变量」创建变量。
             </p>
-          ) : needsVariableBinding && !hasDeclaredVariables ? (
+          ) : needsVariableBinding && !hasDeclaredVariables && !createVariable ? (
             <p role="alert" style={{ ...hint, color: '#ffb86c' }}>
               该公式需要变量，请先到「规则 → 变量」创建变量。
             </p>
@@ -324,6 +343,7 @@ export function FormulaApplyEditor({
                 attributeRequest: EntityAttributeCreateRequest
                 binding: FormulaHoleBinding
               }>()
+              const variableCreateActions = new Map<string, VariableCreateRequest>()
               const requestedAttrId = boundAttrId
                 || createAttribute?.template?.attrId
                 || inferredAttrId(label, h.suggestAttr)
@@ -338,7 +358,7 @@ export function FormulaApplyEditor({
                     label: attrDisplayName(entity, attrOption.id),
                     value: entityAttrKey(entityOption.id, attrOption.id),
                   }))
-                  if (children.length === 0 && createAttribute) {
+                  if (createAttribute) {
                     const defaultAttrId = nextAvailableAttrId(entity, requestedAttrId)
                     const draftKey = [
                       'create-formula-attr',
@@ -387,6 +407,7 @@ export function FormulaApplyEditor({
                     })
                     children.push({
                       key: `configure:${actionKey}`,
+                      defaultOpen: true,
                       label: `配置「${draft.attrLabel.trim() || label}」属性`,
                       children: [
                         {
@@ -441,14 +462,13 @@ export function FormulaApplyEditor({
                   }
                 })
                 .filter((entityOption) => entityOption.children.length > 0)
-              const needsEntityCreation = listEntityOptions(entities).length === 0
-                || (!!boundEntityId && !boundEntity)
-              if (needsEntityCreation && createEntity && createAttribute) {
-                const defaultEntityId = boundEntityId
-                  || createEntity.template?.entityId
-                  || 'entity'
+              if (createEntity && createAttribute) {
+                const requestedEntityId = boundEntityId && !boundEntity
+                  ? boundEntityId
+                  : createEntity.template?.entityId || 'entity'
+                const defaultEntityId = nextAvailableCatalogId(requestedEntityId, entities)
                 const defaultEntityName = createEntity.template?.name
-                  || boundEntityId
+                  || (boundEntityId && !boundEntity ? boundEntityId : undefined)
                   || '实体'
                 const draftKey = [
                   'create-formula-entity',
@@ -497,6 +517,7 @@ export function FormulaApplyEditor({
                   attrMeta: { [attrId]: attributeRequest.meta ?? {} },
                 }
                 const valid = validEntityId(entityId)
+                  && !catalogIdOccupied(entities, entityId)
                   && !!draft.entityName.trim()
                   && ATTR_ID_PATTERN.test(attrId)
                   && !!draft.attrLabel.trim()
@@ -508,8 +529,9 @@ export function FormulaApplyEditor({
                   attributeRequest,
                   binding: { kind: 'entityAttr', entityId, attr: attrId },
                 })
-                entityBranches.unshift({
+                entityBranches.push({
                   key: `configure:${actionKey}`,
+                  defaultOpen: true,
                   label: `配置「${draft.entityName.trim() || defaultEntityName}」实体`,
                   children: [
                     {
@@ -518,7 +540,7 @@ export function FormulaApplyEditor({
                       editor: {
                         value: draft.entityId,
                         ariaLabel: '新实体 ID',
-                        invalid: !validEntityId(entityId),
+                        invalid: !validEntityId(entityId) || catalogIdOccupied(entities, entityId),
                         onChange: (value: string) =>
                           patchCreateDraft(draftKey, defaults, { entityId: value }),
                       },
@@ -586,11 +608,86 @@ export function FormulaApplyEditor({
                   children: entityBranches,
                 }]
                 : []
-              const variableOptions = listVarOptions(variables).map((option) => ({
+              const variableOptions: CascadingPickerOption[] = listVarOptions(variables).map((option) => ({
                 key: variableKey(option.id),
                 label: variableDisplayName(variables?.[option.id], option.id),
                 value: variableKey(option.id),
               }))
+              if ((h.kind === 'number' || h.kind === 'var') && createVariable) {
+                const defaultId = nextCatalogId('var', variables)
+                const draftKey = [
+                  'create-formula-variable',
+                  encodeURIComponent(h.holeId),
+                  encodeURIComponent(defaultId),
+                ].join(':')
+                const defaults: VariableCreateDraft = {
+                  variableId: defaultId,
+                  name: defaultId,
+                  initialValue: '',
+                }
+                const draft = { ...defaults, ...variableCreateDrafts[draftKey] }
+                const variableId = draft.variableId.trim()
+                const initialValue = parsedInitialValue(draft.initialValue)
+                const request: VariableCreateRequest = {
+                  variableId,
+                  name: draft.name.trim(),
+                  initialValue: initialValue ?? 0,
+                }
+                const actionKey = `${draftKey}:confirm`
+                variableCreateActions.set(actionKey, request)
+                const patch = (change: Partial<VariableCreateDraft>): void => {
+                  setVariableCreateDrafts((current) => ({
+                    ...current,
+                    [draftKey]: { ...defaults, ...current[draftKey], ...change },
+                  }))
+                }
+                variableOptions.push({
+                  key: `configure:${actionKey}`,
+                  defaultOpen: true,
+                  label: `配置「${draft.name.trim() || variableId || defaultId}」变量`,
+                  children: [
+                    {
+                      key: `detail:${actionKey}:id`,
+                      label: '变量 ID',
+                      editor: {
+                        value: draft.variableId,
+                        ariaLabel: `${label}的新变量 ID`,
+                        invalid: !variableId || catalogIdOccupied(variables, variableId),
+                        onChange: (value: string) => patch({ variableId: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:name`,
+                      label: '显示名',
+                      editor: {
+                        value: draft.name,
+                        ariaLabel: `${label}的新变量显示名`,
+                        onChange: (value: string) => patch({ name: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:initial`,
+                      label: '初始值',
+                      editor: {
+                        value: draft.initialValue,
+                        ariaLabel: `${label}的新变量初始值`,
+                        inputMode: 'decimal',
+                        invalid: initialValue === undefined,
+                        onChange: (value: string) => patch({ initialValue: value }),
+                      },
+                    },
+                    {
+                      key: actionKey,
+                      label: '确认创建并选择',
+                      value: actionKey,
+                      presentation: 'confirm',
+                      disabled: !variableId
+                        || catalogIdOccupied(variables, variableId)
+                        || initialValue === undefined,
+                    },
+                  ],
+                })
+              }
               const sourceOptions: CascadingPickerOption[] = [
                 ...(h.kind === 'number' || h.kind === 'entityAttr'
                   ? entityAttributeOptions
@@ -658,6 +755,15 @@ export function FormulaApplyEditor({
                             nextEntities,
                           ))
                         }
+                        return
+                      }
+                      const variableCreateRequest = variableCreateActions.get(value)
+                      if (variableCreateRequest && createVariable) {
+                        createVariable.onCreate(variableCreateRequest)
+                        setHole(h.holeId, {
+                          kind: 'var',
+                          varId: variableCreateRequest.variableId,
+                        })
                         return
                       }
                       if (value === 'constant') {

@@ -44,13 +44,13 @@ describe('EffectsEditor numeric operations', () => {
 
     fireEvent.change(screen.getByLabelText('数值'), { target: { value: '4' } })
     expect(latest[0]).toMatchObject({ op: 'mul', value: { expr: '1/(4)' } })
-    expect(screen.getByText('属性 · 主角 的 生命值 除以 4')).toBeTruthy()
+    expect(screen.getByText('属性 · 主角 的 生命值')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: '−' }))
     expect(screen.getByRole('button', { name: '−' }).classList.contains('is-on')).toBe(true)
     expect(screen.getByLabelText('数值')).toHaveValue('4')
     expect(latest[0]).toMatchObject({ op: 'add', value: { expr: '-(4)' } })
-    expect(screen.getByText('属性 · 主角 的 生命值 减少 4')).toBeTruthy()
+    expect(screen.getByText('属性 · 主角 的 生命值')).toBeTruthy()
     expect(screen.queryByText(/add|-\(4\)/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '+' }))
@@ -90,6 +90,53 @@ describe('EffectsEditor numeric operations', () => {
     expect(screen.getByRole('textbox', { name: '数值' })).toHaveValue('0')
     fireEvent.change(screen.getByRole('textbox', { name: '数值' }), { target: { value: '50' } })
     expect(latest[0]).toMatchObject({ op: 'add', value: { expr: '-(50)' } })
+  })
+
+  it('uses cascading target pickers and keeps creation forms visible', () => {
+    render(
+      <EffectsEditor
+        value={[{
+          kind: 'attr',
+          entityId: 'hero',
+          attr: 'hp',
+          op: 'add',
+          value: 0,
+        }]}
+        entities={{
+          hero: {
+            id: 'hero',
+            name: '主角',
+            attrs: { hp: 100 },
+            attrMeta: { hp: { label: '生命值' } },
+          },
+        }}
+        variables={{
+          rage: { id: 'rage', name: '怒气', initial: 0 },
+        }}
+        formulas={{}}
+        createEntity={{ onCreate: vi.fn() }}
+        createAttribute={{ onCreate: vi.fn() }}
+        createVariable={{ onCreate: vi.fn() }}
+        createFormula={{ onCreate: vi.fn() }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
+    expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '效果目标的新实体 ID' })).toHaveValue('entity1')
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: '属性' }))
+    expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值来源' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
+    expect(screen.getByRole('menuitem', { name: '怒气' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeDisabled()
   })
 })
 

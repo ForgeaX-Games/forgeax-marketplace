@@ -6,6 +6,8 @@ import {
   summarizeComponentInputs,
   type EntityAttributeCreateHandler,
   type EntityCreateHandler,
+  type FormulaCreateHandler,
+  type VariableCreateHandler,
 } from './component-form-fields'
 
 export function ComponentInputsDisclosure({
@@ -16,6 +18,8 @@ export function ComponentInputsDisclosure({
   onChange,
   onCreateEntityAttribute,
   onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
 }: {
   childId: string
   componentId: string
@@ -24,6 +28,8 @@ export function ComponentInputsDisclosure({
   onChange: (next: Record<string, unknown>) => void
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
 }): JSX.Element {
   const componentName = getComponentManifest(componentId)?.label ?? componentId
   const summary = summarizeComponentInputs(values)
@@ -69,6 +75,8 @@ export function ComponentInputsDisclosure({
           density="compact"
           onCreateEntityAttribute={onCreateEntityAttribute}
           onCreateEntity={onCreateEntity}
+          onCreateVariable={onCreateVariable}
+          onCreateFormula={onCreateFormula}
         />
       </div>
     </details>

@@ -29,7 +29,12 @@ import {
 } from '../../graph/edit/graph-edit'
 import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { ConditionEditor, createDefaultEffect, type EditorPickerCtx } from './editors'
-import type { EntityAttributeCreateHandler, EntityCreateHandler } from './component-form-fields'
+import type {
+  EntityAttributeCreateHandler,
+  EntityCreateHandler,
+  FormulaCreateHandler,
+  VariableCreateHandler,
+} from './component-form-fields'
 import { ComponentInputsDisclosure } from './ComponentInputsDisclosure'
 import { overlayDisplayLabel, PRESET_SCHEME_BY_ID } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
@@ -459,6 +464,9 @@ function LifecycleReactionsEditor({
   overlays,
   fieldTree,
   onCreateEntityAttribute,
+  onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
   onChange,
 }: {
   reactions: Reaction[] | undefined
@@ -487,6 +495,9 @@ function LifecycleReactionsEditor({
   overlays?: Record<string, Overlay>
   fieldTree: FieldNode[]
   onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
   onChange: (next: Reaction[] | undefined) => void
 }): JSX.Element {
   const settlements = (reactions ?? []).filter(isSettlement)
@@ -652,6 +663,9 @@ function LifecycleReactionsEditor({
               defaultSpawnTtlMs={1200}
               hideOverlayOptions={hideOverlayOptions}
               onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
               renderAdvance={(action, actionIndex) => {
                 const edge = action.edgeId ? advanceEdgeFor(action.edgeId) : undefined
                 return (
@@ -720,6 +734,10 @@ function OverlayReactionsEditor({
   onRouteTo,
   routingSettlement,
   onSetRouteTiming,
+  onCreateEntityAttribute,
+  onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
 }: {
   events: OverlayEventRef[]
   catalogReactions?: OverlayReaction[]
@@ -745,6 +763,10 @@ function OverlayReactionsEditor({
     transition: 'immediate' | 'onSettlement',
     settlement?: RoutingSettlement,
   ) => void
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
 }): JSX.Element | null {
   if (!events.length) return null
   const catalog = pickers ?? { entities, variables }
@@ -764,6 +786,10 @@ function OverlayReactionsEditor({
         overlays={overlays}
         pickers={catalog}
         allowSpawn={false}
+        onCreateEntityAttribute={onCreateEntityAttribute}
+        onCreateEntity={onCreateEntity}
+        onCreateVariable={onCreateVariable}
+        onCreateFormula={onCreateFormula}
         onMountActionsChange={(event, actions) => onChange(upsertEventReaction(reactions, event, actions))}
         renderRoute={(event) => {
           const actions = eventReactionDo(reactions, event)
@@ -1047,6 +1073,8 @@ export function NodeInspector({
   onRemoveMount,
   onCreateEntityAttribute,
   onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
   onJump,
 }: {
   graph: GameGraph
@@ -1108,6 +1136,10 @@ export function NodeInspector({
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   /** 新血条没有可选实体时，经面板二次确认后补建到场景实体目录。 */
   onCreateEntity?: EntityCreateHandler
+  /** 新组件动态值缺少变量时，经级联确认后补建到场景变量目录。 */
+  onCreateVariable?: VariableCreateHandler
+  /** 新组件动态值缺少公式时，经级联确认后补建到场景公式目录。 */
+  onCreateFormula?: FormulaCreateHandler
   onJump?: (id: string) => void
 }): JSX.Element {
   // 「音乐动作」在还没选曲子时也得选得动：没有 ref 的 push / replace 落不了盘（volume-only
@@ -1559,6 +1591,8 @@ export function NodeInspector({
                           pickers={pickers}
                           onCreateEntityAttribute={onCreateEntityAttribute}
                           onCreateEntity={onCreateEntity}
+                          onCreateVariable={onCreateVariable}
+                          onCreateFormula={onCreateFormula}
                         />
                       )
                     })}
@@ -1584,6 +1618,10 @@ export function NodeInspector({
                   }}
                   onRouteTo={(ev, targetId) => onChange(routeMountEventToNode(graph, node.id, i, ev, targetId))}
                   routingSettlement={d.routingSettlement}
+                  onCreateEntityAttribute={onCreateEntityAttribute}
+                  onCreateEntity={onCreateEntity}
+                  onCreateVariable={onCreateVariable}
+                  onCreateFormula={onCreateFormula}
                   onSetRouteTiming={(ev, transition, settlement) => onChange(
                     updateEventRouteTiming(graph, node.id, ev.localEventId, transition, settlement),
                   )}
@@ -1634,6 +1672,9 @@ export function NodeInspector({
           overlays={overlays}
           fieldTree={fieldTree}
           onCreateEntityAttribute={onCreateEntityAttribute}
+          onCreateEntity={onCreateEntity}
+          onCreateVariable={onCreateVariable}
+          onCreateFormula={onCreateFormula}
           onChange={(reactions) => patchData({ reactions })}
         />
       </div>

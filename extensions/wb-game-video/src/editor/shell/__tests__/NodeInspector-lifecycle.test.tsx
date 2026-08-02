@@ -113,7 +113,7 @@ describe('NodeInspector · 结算选中联动', () => {
     fireEvent.click(screen.getByRole('button', { name: '−' }))
     fireEvent.change(screen.getByRole('textbox', { name: '数值' }), { target: { value: '50' } })
 
-    expect(screen.getByText('属性 · 牛魔王 的 怒气 减少 50')).toBeTruthy()
+    expect(screen.getByText('属性 · 牛魔王 的 怒气')).toBeTruthy()
     expect(latest.nodes[0]?.data.reactions?.[0]).toEqual({
       when: { type: 'at', ms: 300 },
       do: [{
@@ -127,6 +127,41 @@ describe('NodeInspector · 结算选中联动', () => {
         }],
       }],
     })
+  })
+
+  it('节点结算把目录创建能力传给效果级联选择器', () => {
+    render(
+      <NodeInspector
+        graph={graphWith([lifecycle(300, 'hero')])}
+        nodeId="gate"
+        entities={{
+          hero: {
+            id: 'hero',
+            name: '主角',
+            attrs: { attack: 10 },
+            attrMeta: { attack: { label: '攻击力' } },
+          },
+        }}
+        variables={{
+          rage: { id: 'rage', name: '怒气', initial: 0 },
+        }}
+        formulas={{}}
+        onCreateEntityAttribute={vi.fn()}
+        onCreateEntity={vi.fn()}
+        onCreateVariable={vi.fn()}
+        onCreateFormula={vi.fn()}
+        onChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
+    expect(screen.getByRole('textbox', { name: '效果目标的新实体 ID' })).toHaveValue('entity1')
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    fireEvent.click(screen.getByRole('combobox', { name: '数值来源' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
+    expect(screen.getByRole('menuitem', { name: '怒气' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
   })
 
   it('结算效果类型只提供属性和变量', () => {

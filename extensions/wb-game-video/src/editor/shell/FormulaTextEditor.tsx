@@ -16,7 +16,11 @@ import type { Entity, Variable } from '../../runtime/schema/graph-schema'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import { createRng } from '../../runtime/engine/rng'
 import type { FormulaAstNode, FormulaHoleBinding } from '../persist/formula-authoring'
-import { normalizeFormulaTextInput, parseFormulaText, previewFormula, serializeFormula } from '../persist/formula-authoring'
+import {
+  parseFormulaAuthoringText,
+  previewFormula,
+  serializeFormula,
+} from '../persist/formula-authoring'
 import { formulaHoles, type FormulaHole } from './formulaApply'
 import { AttrPicker, EntityPicker, VariablePicker } from './scenario-pickers'
 import { LooseNumberInput } from './TermChainEditor'
@@ -130,8 +134,7 @@ export function FormulaTextEditor({
 
   const text = draft ?? canonical
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
-  const normalizedText = (src: string): string =>
-    normalizeFormulaTextInput(src, { entities, variables })
+  const authoringCatalog = { entities, variables }
 
   function rememberSelection(input: HTMLTextAreaElement): void {
     lastSelectionRef.current = {
@@ -145,7 +148,7 @@ export function FormulaTextEditor({
     const src = text.trim()
     if (!src) return null
     try {
-      return parseFormulaText(normalizedText(src))
+      return parseFormulaAuthoringText(src, authoringCatalog)
     } catch {
       return null
     }
@@ -154,8 +157,9 @@ export function FormulaTextEditor({
   const holes = useMemo<FormulaHole[]>(() => (liveAst ? formulaHoles({ id: '', ast: liveAst }) : []), [liveAst])
   const refs = useMemo(() => (liveAst ? collectRefs(liveAst) : null), [liveAst])
   const hasHole = holes.length > 0
-  const sampleValue = text.trim() && !error && !hasHole
-    ? tryEvalExpr(text, { ...ctx, rng: createRng(0) })
+  const sampleExpr = liveAst && !hasHole ? serializeFormula(liveAst, {}) : null
+  const sampleValue = sampleExpr && !error
+    ? tryEvalExpr(sampleExpr, { ...ctx, rng: createRng(0) })
     : null
 
   /** 校验并（成功时）回写 AST。 */
@@ -169,7 +173,7 @@ export function FormulaTextEditor({
       return
     }
     try {
-      const nextAst = parseFormulaText(normalizedText(src))
+      const nextAst = parseFormulaAuthoringText(src, authoringCatalog)
       setError(null)
       onChange(nextAst)
       setDraft(null)
@@ -180,7 +184,12 @@ export function FormulaTextEditor({
 
   /** 实时校验当前文本（输入 / 插入后调用）。 */
   function revalidate(next: string): void {
-    try { parseFormulaText(normalizedText(next.trim() || '0')); setError(null) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    try {
+      parseFormulaAuthoringText(next.trim() || '0', authoringCatalog)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   /** 往光标处插入片段（无选区时追加到末尾）；插入后聚焦并把光标移到片段末。 */

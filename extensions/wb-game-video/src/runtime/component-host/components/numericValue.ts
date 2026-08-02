@@ -44,10 +44,12 @@ export function resolveNumericValue(value: unknown, ctx: SkinCtx | undefined): n
   }
 }
 
-/** Resolve literal text or a `{ ref }` binding from the HUD snapshot. */
+/** Resolve literal text, a `{ ref }` binding, or a numeric `{ expr }` formula as display text. */
 export function resolveTextValue(value: unknown, ctx: SkinCtx | undefined): string | undefined {
   if (typeof value === 'string') return value
   if (!value || typeof value !== 'object') return undefined
+  const numeric = resolveNumericValue(value, ctx)
+  if (numeric !== undefined) return String(numeric)
   const ref = (value as { ref?: unknown }).ref
   if (typeof ref !== 'string' || !ref.trim()) return undefined
   const path = ref.split('.')

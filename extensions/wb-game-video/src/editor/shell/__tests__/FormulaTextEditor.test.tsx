@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { previewFormula } from '../../persist/formula-authoring'
 import { FormulaTextEditor } from '../FormulaTextEditor'
 
 afterEach(cleanup)
@@ -140,6 +141,25 @@ describe('FormulaTextEditor authoring syntax', () => {
     fireEvent.blur(input)
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ t: 'bin', op: '-' }))
+  })
+
+  it('normalizes full-width input and Unicode spacing through the shared authoring parser', () => {
+    const onChange = vi.fn()
+    render(
+      <FormulaTextEditor
+        ast={{ t: 'num', id: 'n0', v: 0 }}
+        onChange={onChange}
+      />,
+    )
+
+    const input = screen.getByRole('textbox', { name: '公式表达式' })
+    fireEvent.change(input, {
+      target: { value: 'ｍａｘ（　１０　－ ３，０　）' },
+    })
+    expect(screen.getByText('≈ 7')).toBeTruthy()
+    fireEvent.blur(input)
+
+    expect(previewFormula(onChange.mock.calls[0]![0])).toBe('max(10 - 3, 0)')
   })
 
   it('visually groups hyphenated references without offering score as authoring input', () => {

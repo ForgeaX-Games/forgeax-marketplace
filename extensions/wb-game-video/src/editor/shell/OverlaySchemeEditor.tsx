@@ -20,6 +20,8 @@ import {
   ComponentFormFields,
   type EntityAttributeCreateHandler,
   type EntityCreateHandler,
+  type FormulaCreateHandler,
+  type VariableCreateHandler,
 } from './component-form-fields'
 import { ComponentEventsEditor } from './ComponentEventsEditor'
 
@@ -136,6 +138,8 @@ export interface OverlaySchemeEditorProps {
   onReactionsChange: (reactions: OverlayReaction[] | undefined) => void
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
 }
 
 export function OverlaySchemeEditor({
@@ -157,6 +161,8 @@ export function OverlaySchemeEditor({
   onReactionsChange,
   onCreateEntityAttribute,
   onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
 }: OverlaySchemeEditorProps): JSX.Element {
   const [selectedChildId, setSelectedChildId] = useState('')
   // 交互热区重叠冲突（DOM 实测，来自画布回调）——组件清单里对应行标红。
@@ -360,6 +366,8 @@ export function OverlaySchemeEditor({
               onChange={(inputs) => onPatchChild(selectedChild.id, { inputs })}
               onCreateEntityAttribute={onCreateEntityAttribute}
               onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
             />
             {selectedEvents.length > 0 ? (
               <>
@@ -380,6 +388,10 @@ export function OverlaySchemeEditor({
                     spawnOptions={spawnOptions}
                     overlays={overlays}
                     pickers={{ entities, variables, formulas, itemIds }}
+                    onCreateEntityAttribute={onCreateEntityAttribute}
+                    onCreateEntity={onCreateEntity}
+                    onCreateVariable={onCreateVariable}
+                    onCreateFormula={onCreateFormula}
                     onCatalogChange={onReactionsChange}
                   />
                 </fieldset>

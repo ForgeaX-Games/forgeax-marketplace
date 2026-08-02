@@ -3,7 +3,11 @@
  * 新数据格式：EntitySpec→Entity、VarSpec→Variable（Variable 不再有 number/flag 之分）。
  */
 import type { AttrMeta, Entity, Variable } from '../../runtime/schema/graph-schema'
-import type { Formula } from '../persist/formula-authoring'
+import {
+  parseFormulaAuthoringText,
+  type Formula,
+  type FormulaAstNode,
+} from '../persist/formula-authoring'
 import { authoringOptionLabel } from '../authoring-option-label'
 
 export interface EntityAttributeCreateRequest {
@@ -17,6 +21,52 @@ export interface EntityCreateRequest {
   entityId: string
   name: string
   kind?: string
+}
+
+export interface VariableCreateRequest {
+  variableId: string
+  name: string
+  initialValue: number
+}
+
+export interface FormulaCreateRequest {
+  formulaId: string
+  name: string
+  ast: FormulaAstNode
+}
+
+export function catalogIdOccupied(
+  catalog: Record<string, { id?: string }> | undefined,
+  id: string,
+): boolean {
+  return Object.entries(catalog ?? {}).some(([key, item]) => key === id || item.id === id)
+}
+
+export function nextCatalogId(
+  prefix: string,
+  catalog: Record<string, { id?: string }> | undefined,
+): string {
+  let index = Object.keys(catalog ?? {}).length
+  let id = `${prefix}${index}`
+  while (catalogIdOccupied(catalog, id)) {
+    index += 1
+    id = `${prefix}${index}`
+  }
+  return id
+}
+
+export function nextAvailableCatalogId(
+  requestedId: string,
+  catalog: Record<string, { id?: string }> | undefined,
+): string {
+  if (!catalogIdOccupied(catalog, requestedId)) return requestedId
+  let index = 2
+  let id = `${requestedId}${index}`
+  while (catalogIdOccupied(catalog, id)) {
+    index += 1
+    id = `${requestedId}${index}`
+  }
+  return id
 }
 
 export function ensureEntity(
@@ -37,6 +87,52 @@ export function ensureEntity(
       attrs: {},
       attrMeta: {},
     },
+  }
+}
+
+export function ensureVariable(
+  variables: Record<string, Variable> | undefined,
+  request: VariableCreateRequest,
+): Record<string, Variable> {
+  const current = variables ?? {}
+  if (catalogIdOccupied(current, request.variableId)) return current
+
+  return {
+    ...current,
+    [request.variableId]: {
+      id: request.variableId,
+      name: request.name,
+      initial: request.initialValue,
+    },
+  }
+}
+
+export function formulaFromCreateRequest(request: FormulaCreateRequest): Formula {
+  return {
+    id: request.formulaId,
+    name: request.name,
+    ast: request.ast,
+  }
+}
+
+export function parseFormulaCreateContent(
+  content: string,
+  entities: Record<string, Entity> | undefined,
+  variables: Record<string, Variable> | undefined,
+): FormulaAstNode {
+  return parseFormulaAuthoringText(content, { entities, variables })
+}
+
+export function ensureFormula(
+  formulas: Record<string, Formula> | undefined,
+  request: FormulaCreateRequest,
+): Record<string, Formula> {
+  const current = formulas ?? {}
+  if (catalogIdOccupied(current, request.formulaId)) return current
+
+  return {
+    ...current,
+    [request.formulaId]: formulaFromCreateRequest(request),
   }
 }
 

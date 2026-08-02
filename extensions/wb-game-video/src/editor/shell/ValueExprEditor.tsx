@@ -8,7 +8,17 @@ import { useState, type CSSProperties } from 'react'
 import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
-import type { EntityAttributeCreateRequest, EntityCreateRequest } from './metaCatalog'
+import {
+  catalogIdOccupied,
+  formulaFromCreateRequest,
+  nextAvailableCatalogId,
+  nextCatalogId,
+  parseFormulaCreateContent,
+  type EntityAttributeCreateRequest,
+  type EntityCreateRequest,
+  type FormulaCreateRequest,
+  type VariableCreateRequest,
+} from './metaCatalog'
 import { EffectOpButtons } from './OpSymbolButtons'
 import { LooseNumberInput } from './TermChainEditor'
 import { FormulaApplyEditor } from './FormulaApplyEditor'
@@ -57,6 +67,14 @@ export interface ValueExprEntityCreateConfig {
   onCreate: (request: EntityCreateRequest) => void
 }
 
+export interface ValueExprVariableCreateConfig {
+  onCreate: (request: VariableCreateRequest) => void
+}
+
+export interface ValueExprFormulaCreateConfig {
+  onCreate: (request: FormulaCreateRequest) => void
+}
+
 function choiceKey(kind: 'entity' | 'var' | 'formula', ...parts: string[]): string {
   return `${kind}:${parts.map(encodeURIComponent).join(':')}`
 }
@@ -67,9 +85,11 @@ function nextAvailableAttrId(entity: Entity | undefined, requestedId: string): s
     ...Object.keys(entity?.attrMeta ?? {}),
   ])
   if (!occupied.has(requestedId)) return requestedId
-  let index = 2
-  while (occupied.has(`${requestedId}${index}`)) index += 1
-  return `${requestedId}${index}`
+  const suffix = /^(.*?)(\d+)$/.exec(requestedId)
+  const prefix = suffix?.[1] ?? requestedId
+  let index = suffix ? Number(suffix[2]) + 1 : 2
+  while (occupied.has(`${prefix}${index}`)) index += 1
+  return `${prefix}${index}`
 }
 
 const ATTR_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/
@@ -80,6 +100,18 @@ interface CreateDraft {
   attrId: string
   attrLabel: string
   initialValue: string
+}
+
+interface VariableCreateDraft {
+  variableId: string
+  name: string
+  initialValue: string
+}
+
+interface FormulaCreateDraft {
+  formulaId: string
+  name: string
+  content: string
 }
 
 function parsedInitialValue(value: string): number | undefined {
@@ -110,7 +142,10 @@ export function ValueExprEditor({
   allowAttribute,
   createAttribute,
   createEntity,
+  createVariable,
+  createFormula,
   fieldLabels,
+  stackControls = false,
 }: {
   value: ValueExprInput | undefined
   storedPick?: unknown
@@ -130,18 +165,37 @@ export function ValueExprEditor({
   preferredAttrIds?: readonly string[]
   /** 逐实体限制属性候选；变量、公式和固定值仍按原能力提供。 */
   allowAttribute?: (entity: Entity | undefined, attrId: string) => boolean
-  /** 某实体没有匹配属性时，在级联菜单内提供确认创建入口。 */
+  /** 在每个实体的级联菜单内提供配置、创建并选择属性入口。 */
   createAttribute?: ValueExprAttributeCreateConfig
-  /** 实体目录为空时，在级联菜单内提供确认创建入口。 */
+  /** 在实体属性级联菜单内提供配置、创建并选择实体入口。 */
   createEntity?: ValueExprEntityCreateConfig
+  /** 在级联菜单内配置、创建并选择变量。 */
+  createVariable?: ValueExprVariableCreateConfig
+  /** 在级联菜单内配置、创建并选择公式。 */
+  createFormula?: ValueExprFormulaCreateConfig
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/应用公式同一行）。 */
   effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
   /** Effect 表单使用显式字段名区分“取什么值”和“输入多少”，避免与目标实体属性混淆。 */
   fieldLabels?: { source: string; value: string }
+  /** 窄栏紧凑表单中让内容选择器与值输入上下排列。 */
+  stackControls?: boolean
 }): JSX.Element {
   const [createDrafts, setCreateDrafts] = useState<Record<string, CreateDraft>>({})
-  const createAttributeTemplate = createAttribute?.template
-  const createEntityTemplate = createEntity?.template
+  const [variableCreateDrafts, setVariableCreateDrafts] = useState<Record<string, VariableCreateDraft>>({})
+  const [formulaCreateDrafts, setFormulaCreateDrafts] = useState<Record<string, FormulaCreateDraft>>({})
+  const createAttributeTemplate = createAttribute
+    ? createAttribute.template ?? {
+      attrId: 'attr0',
+      initialValue: 0,
+      meta: { label: '属性', initial: 0 },
+    }
+    : undefined
+  const createEntityTemplate = createEntity
+    ? createEntity.template ?? {
+      entityId: nextCatalogId('entity', entities),
+      name: '实体',
+    }
+    : undefined
   const draftFor = (key: string, defaults: CreateDraft): CreateDraft => ({
     ...defaults,
     ...createDrafts[key],
@@ -192,6 +246,14 @@ export function ValueExprEditor({
     attributeRequest: EntityAttributeCreateRequest
     selectedValue: NumOrExpr
   }>()
+  const variableCreateActions = new Map<string, {
+    request: VariableCreateRequest
+    selectedValue: NumOrExpr
+  }>()
+  const formulaCreateActions = new Map<string, {
+    request: FormulaCreateRequest
+    selectedValue: NumOrExpr
+  }>()
   const variableChoices: ContentChoice[] = listVarOptions(variables).map((variable) => ({
     key: choiceKey('var', variable.id),
     kind: 'var',
@@ -224,15 +286,15 @@ export function ValueExprEditor({
           : 'legacy'
   const selectedKnown = selectedKey === 'empty' || choices.some((choice) => choice.key === selectedKey)
   const selectedChoice = choices.find((choice) => choice.key === selectedKey)
-  const missingEntityAction = orderedEntities.length === 0
-    && createEntity
+  const createEntityAction = createEntity
     && createEntityTemplate
     && createAttribute
     && createAttributeTemplate
     ? (() => {
-      const draftKey = `create-entity:${encodeURIComponent(createEntityTemplate.entityId)}:${encodeURIComponent(createAttributeTemplate.attrId)}`
+      const defaultEntityId = nextAvailableCatalogId(createEntityTemplate.entityId, entities)
+      const draftKey = `create-entity:${encodeURIComponent(defaultEntityId)}:${encodeURIComponent(createAttributeTemplate.attrId)}`
       const defaults: CreateDraft = {
-        entityId: createEntityTemplate.entityId,
+        entityId: defaultEntityId,
         entityName: createEntityTemplate.name,
         attrId: createAttributeTemplate.attrId,
         attrLabel: createAttributeTemplate.meta?.label ?? createAttributeTemplate.attrId,
@@ -264,6 +326,7 @@ export function ValueExprEditor({
         attrMeta: { [attrId]: attributeRequest.meta ?? {} },
       }
       const valid = !!entityId
+        && !catalogIdOccupied(entities, entityId)
         && ATTR_ID_PATTERN.test(attrId)
         && initialValue !== undefined
         && (!allowAttribute || allowAttribute(candidate, attrId))
@@ -282,201 +345,369 @@ export function ValueExprEditor({
         }),
       })
       return {
-        key: 'entity-values',
-        label: '实体属性',
-        children: [{
-          key: `configure:${actionKey}`,
-          label: `配置「${draft.entityName.trim() || createEntityTemplate.name}」实体`,
-          children: [
-            {
-              key: `detail:${actionKey}:entity-id`,
-              label: '实体 ID',
-              editor: {
-                value: draft.entityId,
-                ariaLabel: '新实体 ID',
-                invalid: !entityId,
-                onChange: (value: string) => patchDraft(draftKey, defaults, { entityId: value }),
-              },
+        key: `configure:${actionKey}`,
+        defaultOpen: true,
+        label: `配置「${draft.entityName.trim() || createEntityTemplate.name}」实体`,
+        children: [
+          {
+            key: `detail:${actionKey}:entity-id`,
+            label: '实体 ID',
+            editor: {
+              value: draft.entityId,
+              ariaLabel: '新实体 ID',
+              invalid: !entityId || catalogIdOccupied(entities, entityId),
+              onChange: (value: string) => patchDraft(draftKey, defaults, { entityId: value }),
             },
-            {
-              key: `detail:${actionKey}:entity-name`,
-              label: '实体显示名',
-              editor: {
-                value: draft.entityName,
-                ariaLabel: '新实体显示名',
-                onChange: (value: string) => patchDraft(draftKey, defaults, { entityName: value }),
-              },
+          },
+          {
+            key: `detail:${actionKey}:entity-name`,
+            label: '实体显示名',
+            editor: {
+              value: draft.entityName,
+              ariaLabel: '新实体显示名',
+              onChange: (value: string) => patchDraft(draftKey, defaults, { entityName: value }),
             },
-            {
-              key: `detail:${actionKey}:id`,
-              label: '属性 ID',
-              editor: {
-                value: draft.attrId,
-                ariaLabel: '新属性 ID',
-                pattern: '[A-Za-z_][A-Za-z0-9_-]*',
-                invalid: !ATTR_ID_PATTERN.test(attrId),
-                onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
-              },
+          },
+          {
+            key: `detail:${actionKey}:id`,
+            label: '属性 ID',
+            editor: {
+              value: draft.attrId,
+              ariaLabel: '新属性 ID',
+              pattern: '[A-Za-z_][A-Za-z0-9_-]*',
+              invalid: !ATTR_ID_PATTERN.test(attrId),
+              onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
             },
-            {
-              key: `detail:${actionKey}:label`,
-              label: '属性显示名',
-              editor: {
-                value: draft.attrLabel,
-                ariaLabel: '新属性显示名',
-                invalid: !!allowAttribute && !allowAttribute(candidate, attrId),
-                onChange: (value: string) => patchDraft(draftKey, defaults, { attrLabel: value }),
-              },
+          },
+          {
+            key: `detail:${actionKey}:label`,
+            label: '属性显示名',
+            editor: {
+              value: draft.attrLabel,
+              ariaLabel: '新属性显示名',
+              invalid: !!allowAttribute && !allowAttribute(candidate, attrId),
+              onChange: (value: string) => patchDraft(draftKey, defaults, { attrLabel: value }),
             },
-            {
-              key: `detail:${actionKey}:initial`,
-              label: '初始值',
-              editor: {
-                value: draft.initialValue,
-                ariaLabel: '新属性初始值',
-                inputMode: 'decimal' as const,
-                invalid: initialValue === undefined,
-                onChange: (value: string) => patchDraft(draftKey, defaults, { initialValue: value }),
-              },
+          },
+          {
+            key: `detail:${actionKey}:initial`,
+            label: '初始值',
+            editor: {
+              value: draft.initialValue,
+              ariaLabel: '新属性初始值',
+              inputMode: 'decimal' as const,
+              invalid: initialValue === undefined,
+              onChange: (value: string) => patchDraft(draftKey, defaults, { initialValue: value }),
             },
-            {
-              key: actionKey,
-              label: '确认创建并选择',
-              value: actionKey,
-              presentation: 'confirm' as const,
-              disabled: !valid,
-            },
-          ],
-        }],
+          },
+          {
+            key: actionKey,
+            label: '确认创建并选择',
+            value: actionKey,
+            presentation: 'confirm' as const,
+            disabled: !valid,
+          },
+        ],
       }
     })()
     : undefined
+  const entityBranches: CascadingPickerOption[] = entityChoicesByEntity
+    .filter((entry) => entry.choices.length > 0 || (createAttribute && createAttributeTemplate))
+    .map((entry) => ({
+      key: `entity:${encodeURIComponent(entry.entity.id)}`,
+      label: entry.entityName,
+      children: [
+        ...entry.choices.map((choice) => ({
+          key: choice.key,
+          label: choice.kind === 'entity'
+            ? attrDisplayName(entry.source, choice.attr)
+            : choice.label,
+          value: choice.key,
+        })),
+        ...(createAttribute && createAttributeTemplate
+          ? (() => {
+            const draftKey = `create-attr:${encodeURIComponent(entry.entity.id)}:${encodeURIComponent(createAttributeTemplate.attrId)}`
+            const defaults: CreateDraft = {
+              entityId: entry.entity.id,
+              entityName: entry.entityName,
+              attrId: nextAvailableAttrId(entry.source, createAttributeTemplate.attrId),
+              attrLabel: createAttributeTemplate.meta?.label ?? createAttributeTemplate.attrId,
+              initialValue: String(createAttributeTemplate.initialValue),
+            }
+            const draft = draftFor(draftKey, defaults)
+            const initialValue = parsedInitialValue(draft.initialValue)
+            const attrId = draft.attrId.trim()
+            const request: EntityAttributeCreateRequest = {
+              ...createAttributeTemplate,
+              entityId: entry.entity.id,
+              attrId,
+              initialValue: initialValue ?? 0,
+              meta: {
+                ...createAttributeTemplate.meta,
+                label: draft.attrLabel.trim() || undefined,
+                initial: initialValue ?? 0,
+              },
+            }
+            const candidate: Entity = {
+              ...(entry.source ?? { id: entry.entity.id }),
+              attrs: { ...entry.source?.attrs, [attrId]: request.initialValue },
+              attrMeta: { ...entry.source?.attrMeta, [attrId]: request.meta ?? {} },
+            }
+            const valid = ATTR_ID_PATTERN.test(attrId)
+              && !attributeIdOccupied(entry.source, attrId)
+              && initialValue !== undefined
+              && (!allowAttribute || allowAttribute(candidate, attrId))
+            const actionKey = `${draftKey}:confirm`
+            createActions.set(actionKey, {
+              attributeRequest: request,
+              selectedValue: compileValuePick({
+                mode: 'pick',
+                terms: [{ op: '+', source: 'entity', refId: entry.entity.id, attr: request.attrId }],
+              }),
+            })
+            return [{
+              key: `configure:${actionKey}`,
+              defaultOpen: true,
+              label: `配置「${draft.attrLabel.trim() || request.attrId}」属性`,
+              children: [
+                {
+                  key: `detail:${actionKey}:id`,
+                  label: '属性 ID',
+                  editor: {
+                    value: draft.attrId,
+                    ariaLabel: `${entry.entityName}的新属性 ID`,
+                    pattern: '[A-Za-z_][A-Za-z0-9_-]*',
+                    invalid: !ATTR_ID_PATTERN.test(attrId) || attributeIdOccupied(entry.source, attrId),
+                    onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
+                  },
+                },
+                {
+                  key: `detail:${actionKey}:label`,
+                  label: '显示名',
+                  editor: {
+                    value: draft.attrLabel,
+                    ariaLabel: `${entry.entityName}的新属性显示名`,
+                    invalid: !!allowAttribute && !allowAttribute(candidate, attrId),
+                    onChange: (value: string) => patchDraft(draftKey, defaults, { attrLabel: value }),
+                  },
+                },
+                {
+                  key: `detail:${actionKey}:initial`,
+                  label: '初始值',
+                  editor: {
+                    value: draft.initialValue,
+                    ariaLabel: `${entry.entityName}的新属性初始值`,
+                    inputMode: 'decimal' as const,
+                    invalid: initialValue === undefined,
+                    onChange: (value: string) => patchDraft(draftKey, defaults, { initialValue: value }),
+                  },
+                },
+                {
+                  key: actionKey,
+                  label: '确认创建并选择',
+                  value: actionKey,
+                  presentation: 'confirm' as const,
+                  disabled: !valid,
+                },
+              ],
+            }]
+          })()
+          : []),
+      ],
+    }))
   const pickerOptions: CascadingPickerOption[] = [
-    ...(missingEntityAction ? [missingEntityAction] : []),
-    ...(orderedEntities.length > 0 && (entityChoices.length > 0 || createAttributeTemplate) ? [{
+    ...(entityBranches.length > 0 || createEntityAction ? [{
       key: 'entity-values',
       label: '实体属性',
-      children: entityChoicesByEntity
-        .filter((entry) => entry.choices.length > 0 || createAttributeTemplate)
-        .map((entry) => ({
-          key: `entity:${encodeURIComponent(entry.entity.id)}`,
-          label: entry.entityName,
-          children: [
-            ...entry.choices.map((choice) => ({
-              key: choice.key,
-              label: choice.kind === 'entity'
-                ? attrDisplayName(entry.source, choice.attr)
-                : choice.label,
-              value: choice.key,
-            })),
-            ...(entry.choices.length === 0 && createAttribute && createAttributeTemplate
-              ? (() => {
-                const draftKey = `create-attr:${encodeURIComponent(entry.entity.id)}:${encodeURIComponent(createAttributeTemplate.attrId)}`
-                const defaults: CreateDraft = {
-                  entityId: entry.entity.id,
-                  entityName: entry.entityName,
-                  attrId: nextAvailableAttrId(entry.source, createAttributeTemplate.attrId),
-                  attrLabel: createAttributeTemplate.meta?.label ?? createAttributeTemplate.attrId,
-                  initialValue: String(createAttributeTemplate.initialValue),
-                }
-                const draft = draftFor(draftKey, defaults)
-                const initialValue = parsedInitialValue(draft.initialValue)
-                const attrId = draft.attrId.trim()
-                const request: EntityAttributeCreateRequest = {
-                  ...createAttributeTemplate,
-                  entityId: entry.entity.id,
-                  attrId,
-                  initialValue: initialValue ?? 0,
-                  meta: {
-                    ...createAttributeTemplate.meta,
-                    label: draft.attrLabel.trim() || undefined,
-                    initial: initialValue ?? 0,
-                  },
-                }
-                const candidate: Entity = {
-                  ...(entry.source ?? { id: entry.entity.id }),
-                  attrs: { ...entry.source?.attrs, [attrId]: request.initialValue },
-                  attrMeta: { ...entry.source?.attrMeta, [attrId]: request.meta ?? {} },
-                }
-                const valid = ATTR_ID_PATTERN.test(attrId)
-                  && !attributeIdOccupied(entry.source, attrId)
-                  && initialValue !== undefined
-                  && (!allowAttribute || allowAttribute(candidate, attrId))
-                const actionKey = `${draftKey}:confirm`
-                createActions.set(actionKey, {
-                  attributeRequest: request,
-                  selectedValue: compileValuePick({
-                    mode: 'pick',
-                    terms: [{ op: '+', source: 'entity', refId: entry.entity.id, attr: request.attrId }],
-                  }),
-                })
-                return [{
-                  key: `configure:${actionKey}`,
-                  label: `配置「${draft.attrLabel.trim() || request.attrId}」属性`,
-                  children: [
-                    {
-                      key: `detail:${actionKey}:id`,
-                      label: '属性 ID',
-                      editor: {
-                        value: draft.attrId,
-                        ariaLabel: `${entry.entityName}的新属性 ID`,
-                        pattern: '[A-Za-z_][A-Za-z0-9_-]*',
-                        invalid: !ATTR_ID_PATTERN.test(attrId) || attributeIdOccupied(entry.source, attrId),
-                        onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
-                      },
-                    },
-                    {
-                      key: `detail:${actionKey}:label`,
-                      label: '显示名',
-                      editor: {
-                        value: draft.attrLabel,
-                        ariaLabel: `${entry.entityName}的新属性显示名`,
-                        invalid: !!allowAttribute && !allowAttribute(candidate, attrId),
-                        onChange: (value: string) => patchDraft(draftKey, defaults, { attrLabel: value }),
-                      },
-                    },
-                    {
-                      key: `detail:${actionKey}:initial`,
-                      label: '初始值',
-                      editor: {
-                        value: draft.initialValue,
-                        ariaLabel: `${entry.entityName}的新属性初始值`,
-                        inputMode: 'decimal' as const,
-                        invalid: initialValue === undefined,
-                        onChange: (value: string) => patchDraft(draftKey, defaults, { initialValue: value }),
-                      },
-                    },
-                    {
-                      key: actionKey,
-                      label: '确认创建并选择',
-                      value: actionKey,
-                      presentation: 'confirm' as const,
-                      disabled: !valid,
-                    },
-                  ],
-                }]
-              })()
-              : []),
-          ],
-        })),
+      children: [
+        ...entityBranches,
+        ...(createEntityAction ? [createEntityAction] : []),
+      ],
     }] : []),
-    ...(variableChoices.length > 0 ? [{
+    ...(variableChoices.length > 0 || createVariable ? [{
       key: 'variable-values',
       label: '变量',
-      children: variableChoices.map((choice) => ({
-        key: choice.key,
-        label: choice.label,
-        value: choice.key,
-      })),
+      children: [
+        ...variableChoices.map((choice) => ({
+          key: choice.key,
+          label: choice.label,
+          value: choice.key,
+        })),
+        ...(createVariable ? (() => {
+          const defaultId = nextCatalogId('var', variables)
+          const draftKey = `create-variable:${encodeURIComponent(defaultId)}`
+          const defaults: VariableCreateDraft = {
+            variableId: defaultId,
+            name: defaultId,
+            initialValue: '',
+          }
+          const draft = { ...defaults, ...variableCreateDrafts[draftKey] }
+          const variableId = draft.variableId.trim()
+          const initialValue = parsedInitialValue(draft.initialValue)
+          const request: VariableCreateRequest = {
+            variableId,
+            name: draft.name.trim(),
+            initialValue: initialValue ?? 0,
+          }
+          const actionKey = `${draftKey}:confirm`
+          variableCreateActions.set(actionKey, {
+            request,
+            selectedValue: compileValuePick({
+              mode: 'pick',
+              terms: [{ op: '+', source: 'var', refId: variableId }],
+            }),
+          })
+          const patch = (change: Partial<VariableCreateDraft>): void => {
+            setVariableCreateDrafts((current) => ({
+              ...current,
+              [draftKey]: { ...defaults, ...current[draftKey], ...change },
+            }))
+          }
+          return [{
+            key: `configure:${actionKey}`,
+            defaultOpen: true,
+            label: `配置「${draft.name.trim() || variableId || defaultId}」变量`,
+            children: [
+              {
+                key: `detail:${actionKey}:id`,
+                label: '变量 ID',
+                editor: {
+                  value: draft.variableId,
+                  ariaLabel: '新变量 ID',
+                  invalid: !variableId || catalogIdOccupied(variables, variableId),
+                  onChange: (value: string) => patch({ variableId: value }),
+                },
+              },
+              {
+                key: `detail:${actionKey}:name`,
+                label: '显示名',
+                editor: {
+                  value: draft.name,
+                  ariaLabel: '新变量显示名',
+                  onChange: (value: string) => patch({ name: value }),
+                },
+              },
+              {
+                key: `detail:${actionKey}:initial`,
+                label: '初始值',
+                editor: {
+                  value: draft.initialValue,
+                  ariaLabel: '新变量初始值',
+                  inputMode: 'decimal' as const,
+                  invalid: initialValue === undefined,
+                  onChange: (value: string) => patch({ initialValue: value }),
+                },
+              },
+              {
+                key: actionKey,
+                label: '确认创建并选择',
+                value: actionKey,
+                presentation: 'confirm' as const,
+                disabled: !variableId
+                  || catalogIdOccupied(variables, variableId)
+                  || initialValue === undefined,
+              },
+            ],
+          }]
+        })() : []),
+      ],
     }] : []),
-    ...(formulaChoices.length > 0 ? [{
+    ...(formulaChoices.length > 0 || createFormula ? [{
       key: 'formula-values',
       label: '公式',
-      children: formulaChoices.map((choice) => ({
-        key: choice.key,
-        label: choice.label,
-        value: choice.key,
-      })),
+      children: [
+        ...formulaChoices.map((choice) => ({
+          key: choice.key,
+          label: choice.label,
+          value: choice.key,
+        })),
+        ...(createFormula ? (() => {
+          const defaultId = nextCatalogId('formula-', formulas)
+          const draftKey = `create-formula:${encodeURIComponent(defaultId)}`
+          const defaults: FormulaCreateDraft = {
+            formulaId: defaultId,
+            name: defaultId,
+            content: '',
+          }
+          const draft = { ...defaults, ...formulaCreateDrafts[draftKey] }
+          const formulaId = draft.formulaId.trim()
+          let formulaAst: FormulaCreateRequest['ast'] | undefined
+          let formulaError: string | undefined
+          if (!draft.content.trim()) {
+            formulaError = '请输入公式内容'
+          } else {
+            try {
+              formulaAst = parseFormulaCreateContent(draft.content, entities, variables)
+            } catch (error) {
+              formulaError = error instanceof Error ? error.message : String(error)
+            }
+          }
+          const request: FormulaCreateRequest | undefined = formulaAst
+            ? { formulaId, name: draft.name.trim(), ast: formulaAst }
+            : undefined
+          const actionKey = `${draftKey}:confirm`
+          if (request) {
+            formulaCreateActions.set(actionKey, {
+              request,
+              selectedValue: compileFormula(formulaFromCreateRequest(request), {}, entities),
+            })
+          }
+          const patch = (change: Partial<FormulaCreateDraft>): void => {
+            setFormulaCreateDrafts((current) => ({
+              ...current,
+              [draftKey]: { ...defaults, ...current[draftKey], ...change },
+            }))
+          }
+          return [{
+            key: `configure:${actionKey}`,
+            defaultOpen: true,
+            label: `配置「${draft.name.trim() || formulaId || defaultId}」公式`,
+            children: [
+              {
+                key: `detail:${actionKey}:id`,
+                label: '公式 ID',
+                editor: {
+                  value: draft.formulaId,
+                  ariaLabel: '新公式 ID',
+                  invalid: !formulaId || catalogIdOccupied(formulas, formulaId),
+                  onChange: (value: string) => patch({ formulaId: value }),
+                },
+              },
+              {
+                key: `detail:${actionKey}:name`,
+                label: '显示名',
+                editor: {
+                  value: draft.name,
+                  ariaLabel: '新公式显示名',
+                  onChange: (value: string) => patch({ name: value }),
+                },
+              },
+              {
+                key: `detail:${actionKey}:content`,
+                label: '公式内容',
+                editor: {
+                  value: draft.content,
+                  ariaLabel: '新公式内容',
+                  placeholder: '如：max(?攻击力 * ?倍率 - ?防御力, 0)',
+                  multiline: true,
+                  invalid: !formulaAst,
+                  error: formulaError,
+                  onChange: (value: string) => patch({ content: value }),
+                },
+              },
+              {
+                key: actionKey,
+                label: '确认创建并选择',
+                value: actionKey,
+                presentation: 'confirm' as const,
+                disabled: !formulaId
+                  || catalogIdOccupied(formulas, formulaId)
+                  || !formulaAst,
+              },
+            ],
+          }]
+        })() : []),
+      ],
     }] : []),
     { key: 'const', label: '常量', value: 'const' },
     ...(onClear ? [{ key: 'empty', label: emptyLabel, value: 'empty' }] : []),
@@ -500,6 +731,18 @@ export function ValueExprEditor({
       }
       createAttribute.onCreate(createAction.attributeRequest)
       onChange(createAction.selectedValue)
+      return
+    }
+    const variableCreateAction = variableCreateActions.get(key)
+    if (variableCreateAction && createVariable) {
+      createVariable.onCreate(variableCreateAction.request)
+      onChange(variableCreateAction.selectedValue)
+      return
+    }
+    const formulaCreateAction = formulaCreateActions.get(key)
+    if (formulaCreateAction && createFormula) {
+      createFormula.onCreate(formulaCreateAction.request)
+      onChange(formulaCreateAction.selectedValue)
       return
     }
     const choice = choices.find((item) => item.key === key)
@@ -551,13 +794,14 @@ export function ValueExprEditor({
         placeholder="常量：10 · 状态：entity.hero.attr.hp / var.qi · 公式：伤害公式"
         options={pickerOptions}
         onSelect={selectContent}
+        narrowSafe={stackControls}
       />
     </>
   )
 
   return (
     <div
-      style={formulaMode || fieldLabels
+      style={formulaMode || fieldLabels || stackControls
         ? { ...row, flexDirection: 'column', alignItems: 'stretch' }
         : row}
       title={hintText}
@@ -582,7 +826,9 @@ export function ValueExprEditor({
             onChange={(n) => onChange(n)}
             aria-label="常量数值"
             placeholder="输入常量"
-            style={{ flex: '0 1 32%', minWidth: 96 }}
+            style={stackControls
+              ? { flex: 'none', width: '100%', minWidth: 0 }
+              : { flex: '0 1 32%', minWidth: 96 }}
           />
         )
       )}
@@ -608,6 +854,7 @@ export function ValueExprEditor({
           showFormulaPicker={false}
           createAttribute={createAttribute}
           createEntity={createEntity}
+          createVariable={createVariable}
         />
       )}
 

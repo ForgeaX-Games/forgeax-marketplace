@@ -11,7 +11,7 @@ export const DialogueManifest: ComponentManifest = {
   label: '字幕/对白',
   inputs: [
     { key: 'speaker', label: '说话人', valueType: 'string', component: 'numberExpr' },
-    { key: 'text', label: '台词', valueType: 'string', default: '……'},
+    { key: 'text', label: '台词', valueType: 'string', component: 'numberExpr', default: '……' },
     { key: 'color', label: '字色', valueType: 'string', component: 'color' },
     { key: 'fontSize', label: '字号', valueType: 'number' },
   ],

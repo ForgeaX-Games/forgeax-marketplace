@@ -11,7 +11,7 @@ describe('components/new Dialogue', () => {
   it('declares its authoring inputs and renders speaker, text, and self-contained CSS', () => {
     expect(DialogueManifest.inputs).toEqual([
       { key: 'speaker', label: '说话人', valueType: 'string', component: 'numberExpr' },
-      { key: 'text', label: '台词', valueType: 'string', default: '……' },
+      { key: 'text', label: '台词', valueType: 'string', component: 'numberExpr', default: '……' },
       { key: 'color', label: '字色', valueType: 'string', component: 'color' },
       { key: 'fontSize', label: '字号', valueType: 'number' },
     ])
@@ -41,7 +41,7 @@ describe('components/new Dialogue', () => {
     expect(screen.getByText('……')).toHaveClass('gv-dialogue-text')
   })
 
-  it('Host resolves the dynamic speaker while keeping dialogue text literal', () => {
+  it('Host resolves dynamic speaker and dialogue text bindings', () => {
     const ctx: SkinCtx = {
       hud: {
         entities: {
@@ -67,7 +67,7 @@ describe('components/new Dialogue', () => {
             component: 'Dialogue',
             inputs: {
               speaker: { ref: 'entity.hero.name' },
-              text: '继续前进。',
+              text: { ref: 'var.qi' },
             },
           },
           undefined,
@@ -78,6 +78,6 @@ describe('components/new Dialogue', () => {
     )
 
     expect(screen.getByText('空藏')).toHaveClass('gv-dialogue-speaker')
-    expect(screen.getByText('继续前进。')).toHaveClass('gv-dialogue-text')
+    expect(screen.getByText('3')).toHaveClass('gv-dialogue-text')
   })
 })

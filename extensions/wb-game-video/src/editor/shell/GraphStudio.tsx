@@ -43,8 +43,12 @@ import { runtimeRuleSignature } from './runtime-rule-signature'
 import {
   ensureEntity,
   ensureEntityAttribute,
+  ensureFormula,
+  ensureVariable,
   type EntityAttributeCreateRequest,
   type EntityCreateRequest,
+  type FormulaCreateRequest,
+  type VariableCreateRequest,
 } from './metaCatalog'
 
 interface PlayAnchor {
@@ -113,6 +117,19 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setMeta((current) => {
       const entities = ensureEntity(current.entities, request)
       return entities !== current.entities ? { ...current, entities } : current
+    })
+  }, [setMeta])
+  const createVariable = useCallback((request: VariableCreateRequest) => {
+    setMeta((current) => {
+      const variables = ensureVariable(current.variables, request)
+      return variables !== current.variables ? { ...current, variables } : current
+    })
+  }, [setMeta])
+  const createFormula = useCallback((request: FormulaCreateRequest) => {
+    setMeta((current) => {
+      const currentFormulas = current.formulas as Record<string, Formula> | undefined
+      const formulas = ensureFormula(currentFormulas, request)
+      return formulas !== currentFormulas ? { ...current, formulas } : current
     })
   }, [setMeta])
   // 节点配置「引用蓝图」下拉：由 blueprints 派生为 SubFlowPackDef 列表（不落盘 packs）；
@@ -868,6 +885,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 }}
                 onCreateEntityAttribute={createEntityAttribute}
                 onCreateEntity={createEntity}
+                onCreateVariable={createVariable}
+                onCreateFormula={createFormula}
                 onJump={jump}
               />
             </div>

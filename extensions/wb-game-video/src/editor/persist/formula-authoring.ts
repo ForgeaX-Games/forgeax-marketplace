@@ -164,29 +164,30 @@ export function normalizeFormulaTextInput(
   src: string,
   catalog?: FormulaTextCatalog,
 ): string {
-  const punctuationNormalized = src.replace(
+  const punctuationNormalized = src.normalize('NFKC').replace(
     /[（），＋－−＊×／÷．]/g,
     (char) => FULL_WIDTH_FORMULA_CHARS[char] ?? char,
   )
+  const whitespaceNormalized = punctuationNormalized.replace(/\s+/gu, ' ')
   const refs = catalogReferenceTokens(catalog)
-  if (refs.length === 0) return punctuationNormalized
+  if (refs.length === 0) return whitespaceNormalized
 
   let out = ''
   let index = 0
-  while (index < punctuationNormalized.length) {
-    const previous = index > 0 ? punctuationNormalized[index - 1]! : ''
+  while (index < whitespaceNormalized.length) {
+    const previous = index > 0 ? whitespaceNormalized[index - 1]! : ''
     const boundary = !previous || !/[A-Za-z0-9_.-]/.test(previous)
     const ref = boundary
-      ? refs.find((candidate) => punctuationNormalized.startsWith(candidate, index))
+      ? refs.find((candidate) => whitespaceNormalized.startsWith(candidate, index))
       : undefined
     if (!ref) {
-      out += punctuationNormalized[index]!
+      out += whitespaceNormalized[index]!
       index += 1
       continue
     }
     out += ref
     index += ref.length
-    if (punctuationNormalized[index] === '-' && index + 1 < punctuationNormalized.length) {
+    if (whitespaceNormalized[index] === '-' && index + 1 < whitespaceNormalized.length) {
       out += ' - '
       index += 1
     }
@@ -210,6 +211,15 @@ export function parseFormulaText(src: string, nextId: () => string = makeIdAlloc
     return `${HOLE_REF_HEAD}.${idx}`
   })
   return liftExprToFormulaAst(parseExpr(substituted), nextId, idxToName)
+}
+
+/** 规则页与交互创建区共用的作者输入入口：按当前目录消除宽度、空白与短横线歧义后解析。 */
+export function parseFormulaAuthoringText(
+  src: string,
+  catalog?: FormulaTextCatalog,
+  nextId: () => string = makeIdAlloc(),
+): FormulaAstNode {
+  return parseFormulaText(normalizeFormulaTextInput(src, catalog), nextId)
 }
 
 // ── 正向：编辑器 AST → 运行时 Node（代入 holeBindings）→ serializeExpr ─────────────

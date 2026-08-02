@@ -4,11 +4,16 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { registerComponent, unregisterComponent } from '../../../runtime/registry/component-registry'
-import type { Entity, GameGraph, OverlayEventRef } from '../../../runtime/schema/graph-schema'
+import type { Entity, GameGraph, OverlayEventRef, Variable } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
 import { ComponentEventsEditor } from '../ComponentEventsEditor'
 import { ComponentFormFields } from '../component-form-fields'
-import { ensureEntity, ensureEntityAttribute } from '../metaCatalog'
+import {
+  ensureEntity,
+  ensureEntityAttribute,
+  ensureFormula,
+  ensureVariable,
+} from '../metaCatalog'
 import { NodeInspector } from '../NodeInspector'
 import { OverlaySchemeEditor } from '../OverlaySchemeEditor'
 
@@ -129,6 +134,96 @@ describe('ComponentEventsEditor', () => {
 })
 
 describe('NodeInspector overlay events', () => {
+  it('creates and selects variables and formulas from mounted component inputs', () => {
+    const initialGraph: GameGraph = {
+      nodes: [{
+        id: 'n1',
+        type: 'perf',
+        position: { x: 0, y: 0 },
+        inputs: [],
+        outputs: [],
+        data: {
+          name: '飘字节点',
+          overlayNodes: [{ overlay: 'hud' }],
+        },
+      }],
+      edges: [],
+    }
+    let latestGraph = initialGraph
+    let latestVariables: Record<string, Variable> = {}
+    let latestFormulas: Record<string, Formula> = {}
+    function Harness(): JSX.Element {
+      const [graph, setGraph] = useState(initialGraph)
+      const [variables, setVariables] = useState<Record<string, Variable>>({})
+      const [formulas, setFormulas] = useState<Record<string, Formula>>({})
+      latestGraph = graph
+      latestVariables = variables
+      latestFormulas = formulas
+      return (
+        <NodeInspector
+          graph={graph}
+          nodeId="n1"
+          overlays={{
+            hud: {
+              id: 'hud',
+              children: [{
+                id: 'gain',
+                component: 'GainFloatText',
+                inputs: { parameter: '+50' },
+              }],
+            },
+          }}
+          variables={variables}
+          formulas={formulas}
+          onCreateVariable={(request) => {
+            setVariables((current) => ensureVariable(current, request))
+          }}
+          onCreateFormula={(request) => {
+            setFormulas((current) => ensureFormula(current, request))
+          }}
+          onChange={setGraph}
+        />
+      )
+    }
+    const { container } = render(<Harness />)
+    const disclosure = container.querySelector('details[data-component-inputs-disclosure]')!
+    fireEvent.click(disclosure.querySelector('summary')!)
+
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '变量',
+    )
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(latestVariables.var0).toEqual({ id: 'var0', name: 'var0', initial: 0 })
+    expect(latestGraph.nodes[0]?.data.overlayNodes?.[0]?.overrides?.gain?.inputs?.parameter).toEqual({
+      ref: 'var.var0',
+    })
+
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '公式',
+      '配置「formula-0」公式',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: '3 * 4' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(latestFormulas['formula-0']).toMatchObject({
+      id: 'formula-0',
+      ast: { t: 'bin', id: 'n0', op: '*' },
+    })
+    expect(latestGraph.nodes[0]?.data.overlayNodes?.[0]?.overrides?.gain?.inputs?.parameter).toMatchObject({
+      expr: '3 * 4',
+      pick: { mode: 'formula', formulaId: 'formula-0', holeBindings: {} },
+    })
+  })
+
   it('omits the event response area when the mounted overlay exports no events', () => {
     const graph: GameGraph = {
       nodes: [{
@@ -551,6 +646,14 @@ describe('ComponentFormFields defaults', () => {
     for (const input of screen.queryAllByRole('spinbutton')) {
       expect(input).toHaveStyle({ width: '100%' })
     }
+
+    const parameterRow = screen.getByText('参数').parentElement!
+    const picker = within(parameterRow).getByRole('combobox', { name: '文本内容' })
+    const controlRow = picker.parentElement?.parentElement as HTMLElement
+    const literalInput = within(parameterRow).getByRole('textbox', { name: '固定文本' })
+    expect(controlRow).toHaveStyle({ flexDirection: 'column', alignItems: 'stretch' })
+    expect(picker.parentElement).toHaveClass('is-narrow-safe')
+    expect(literalInput).toHaveStyle({ width: '100%', minWidth: '0' })
   })
 
   it('stacks formula selection above its parameter bindings in compact component fields', () => {
@@ -1164,7 +1267,7 @@ describe('ComponentFormFields defaults', () => {
     expect(latestValues.current).toMatchObject({ expr: 'entity.enemy-boss.attr.vitality' })
   })
 
-  it('uses the dynamic text picker for subtitle speaker only', () => {
+  it('uses dynamic text pickers for subtitle speaker and dialogue text', () => {
     const onChange = vi.fn()
     render(
       <ComponentFormFields
@@ -1183,10 +1286,44 @@ describe('ComponentFormFields defaults', () => {
     )
 
     const pickers = screen.getAllByRole('combobox', { name: '文本内容' })
-    expect(pickers).toHaveLength(1)
-    chooseCascade(pickers[0]!, '实体', '空藏', '名称')
+    expect(pickers).toHaveLength(2)
+    fireEvent.click(pickers[0]!)
+    expect(screen.queryByRole('menuitem', { name: '变量' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '空藏' }))
+    expect(screen.queryByRole('menuitem', { name: 'hp' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '名称' }))
     expect(onChange).toHaveBeenCalledWith({
       speaker: { ref: 'entity.hero.name' },
     })
+    chooseCascade(pickers[1]!, '变量', '气力')
+    expect(onChange).toHaveBeenCalledWith({
+      text: { ref: 'var.qi' },
+    })
+  })
+
+  it('uses a dynamic text picker for interaction copy but not its trigger key', () => {
+    const onChange = vi.fn()
+    render(
+      <ComponentFormFields
+        componentId="TextOption"
+        values={{}}
+        pickers={{
+          variables: {
+            qi: { id: 'qi', name: '气力', initial: 3 },
+          },
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    const picker = screen.getByRole('combobox', { name: '文本内容' })
+    chooseCascade(picker, '变量', '气力')
+    expect(onChange).toHaveBeenCalledWith({
+      text: { ref: 'var.qi' },
+    })
+    const triggerRow = screen.getByText('触发按键').parentElement!
+    expect(within(triggerRow).getByRole('textbox')).toBeTruthy()
+    expect(within(triggerRow).queryByRole('combobox')).toBeNull()
   })
 })

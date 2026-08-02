@@ -134,6 +134,9 @@ describe('formula text ↔ AST round-trip (parseFormulaText / previewFormula)', 
   it('归一全角数学标点并落成半角规范表达式', () => {
     expect(roundtrip('max（?攻击，0）')).toBe('max(?攻击, 0)')
     expect(roundtrip('（2＋3）×4')).toBe('(2 + 3) * 4')
+    expect(normalizeFormulaTextInput('ｍａｘ（？攻击力　×　２，　０）'))
+      .toBe('max(?攻击力 * 2, 0)')
+    expect(roundtrip('　１\t＋\n２　')).toBe('1 + 2')
   })
 
   it('按目录最长引用区分短横线 id 与无空格减法', () => {

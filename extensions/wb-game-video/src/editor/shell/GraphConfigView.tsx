@@ -28,8 +28,12 @@ import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 import {
   ensureEntity,
   ensureEntityAttribute,
+  ensureFormula,
+  ensureVariable,
   type EntityAttributeCreateRequest,
   type EntityCreateRequest,
+  type FormulaCreateRequest,
+  type VariableCreateRequest,
 } from './metaCatalog'
 import type { ScenarioIdRename } from '../persist/scenario-id'
 import { collectItemIds } from './itemCatalog'
@@ -120,6 +124,19 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     setMeta((current) => {
       const entities = ensureEntity(current.entities, request)
       return entities !== current.entities ? { ...current, entities } : current
+    })
+  }
+  const createVariable = (request: VariableCreateRequest) => {
+    setMeta((current) => {
+      const variables = ensureVariable(current.variables, request)
+      return variables !== current.variables ? { ...current, variables } : current
+    })
+  }
+  const createFormula = (request: FormulaCreateRequest) => {
+    setMeta((current) => {
+      const currentFormulas = current.formulas as Record<string, Formula> | undefined
+      const formulas = ensureFormula(currentFormulas, request)
+      return formulas !== currentFormulas ? { ...current, formulas } : current
     })
   }
   const addScheme = () => {
@@ -297,6 +314,8 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                     setOverlays({ ...allOverlays, [selOverlay]: { ...ov, reactions } })}
                   onCreateEntityAttribute={createEntityAttribute}
                   onCreateEntity={createEntity}
+                  onCreateVariable={createVariable}
+                  onCreateFormula={createFormula}
                 />
               )
             }}

@@ -1,7 +1,12 @@
 import type { JSX, ReactNode } from 'react'
 import type { NodeAction, Overlay } from '../../runtime/schema/graph-schema'
 import { EffectsEditor, createDefaultEffect, type EditorPickerCtx } from './editors'
-import type { EntityAttributeCreateHandler } from './component-form-fields'
+import type {
+  EntityAttributeCreateHandler,
+  EntityCreateHandler,
+  FormulaCreateHandler,
+  VariableCreateHandler,
+} from './component-form-fields'
 import { ComponentInputsDisclosure } from './ComponentInputsDisclosure'
 
 export interface ActionOption {
@@ -54,6 +59,9 @@ export function NodeActionsEditor({
   defaultSpawnTtlMs,
   hideOverlayOptions = [],
   onCreateEntityAttribute,
+  onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
   renderAdvance,
   onChange,
 }: {
@@ -70,6 +78,9 @@ export function NodeActionsEditor({
   /** 当前节点内可被条件隐藏的已有界面挂载。 */
   hideOverlayOptions?: ActionOption[]
   onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
   renderAdvance?: (action: Extract<NodeAction, { kind: 'advance' }>, index: number) => ReactNode
   onChange: (next: NodeAction[]) => void
 }): JSX.Element {
@@ -105,6 +116,18 @@ export function NodeActionsEditor({
             <EffectsEditor
               value={action.effects}
               pickers={pickers}
+              createAttribute={onCreateEntityAttribute
+                ? { onCreate: onCreateEntityAttribute }
+                : undefined}
+              createEntity={onCreateEntity
+                ? { onCreate: onCreateEntity }
+                : undefined}
+              createVariable={onCreateVariable
+                ? { onCreate: onCreateVariable }
+                : undefined}
+              createFormula={onCreateFormula
+                ? { onCreate: onCreateFormula }
+                : undefined}
               allowAdd={false}
               allowedKinds={SETTLEMENT_EFFECT_KINDS}
               onChange={(effects) => patchAt(i, { kind: 'effect', effects: effects ?? [] })}
@@ -166,6 +189,9 @@ export function NodeActionsEditor({
                     pickers={pickers}
                     onChange={(inputs) => patchAt(i, { ...action, inputs: Object.keys(inputs).length ? inputs : undefined })}
                     onCreateEntityAttribute={onCreateEntityAttribute}
+                    onCreateEntity={onCreateEntity}
+                    onCreateVariable={onCreateVariable}
+                    onCreateFormula={onCreateFormula}
                   />
                 </div>
               ) : null}

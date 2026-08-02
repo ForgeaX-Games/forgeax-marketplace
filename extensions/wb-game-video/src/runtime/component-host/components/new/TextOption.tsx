@@ -11,7 +11,7 @@ export const TextOptionManifest: ComponentManifest = {
   id: 'TextOption',
   label: '文字交互',
   inputs: [
-    { key: 'text', label: '文字', valueType: 'string', default: '摁F交互' },
+    { key: 'text', label: '文字', valueType: 'string', component: 'numberExpr', default: '摁F交互' },
     { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#f0f0f0' },
     { key: 'fontSize', label: '字号', valueType: 'number', default: 2.4 },
     { key: 'triggerKey', label: '触发按键', valueType: 'string', default: 'F' },
