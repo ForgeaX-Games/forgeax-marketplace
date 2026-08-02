@@ -8,7 +8,7 @@
  * 公式引用仍以内嵌 `pick` 形式贴在数值字段旁，便于在任意图结构里跟随复制/删除；
  * 该结构是编辑器私有的扩展形状，runtime 不声明也不读取它。
  */
-import type { GameScenario, ValueTerm } from '../../runtime/schema/graph-schema'
+import type { Entity, GameScenario, ValueTerm, Variable } from '../../runtime/schema/graph-schema'
 import { parseExpr, serializeExpr, type Node as RuntimeExprNode } from '../../runtime/engine/expr'
 
 export type EditorValueTerm = ValueTerm & { id?: string }
@@ -36,6 +36,8 @@ export interface Formula {
   name?: string
   description?: string
   ast: FormulaAstNode
+  /** 新建但尚未填写表达式；底层保留占位 AST，编辑器显示为空。 */
+  draftEmpty?: boolean
 }
 
 /** 按 kind 区分的留空位绑定；应用公式时每个 holeId 填一份。 */
@@ -113,12 +115,92 @@ export function parseExprToFormulaAst(src: string): FormulaAstNode {
 const HOLE_TEXT_RE = /\?([\p{L}_][\p{L}\p{N}_]*)/gu
 const HOLE_REF_HEAD = '__hole__'
 
+export interface FormulaTextCatalog {
+  entities?: Record<string, Entity>
+  variables?: Record<string, Variable>
+}
+
+const FULL_WIDTH_FORMULA_CHARS: Record<string, string> = {
+  '（': '(',
+  '）': ')',
+  '，': ',',
+  '＋': '+',
+  '－': '-',
+  '−': '-',
+  '＊': '*',
+  '×': '*',
+  '／': '/',
+  '÷': '/',
+  '．': '.',
+}
+
+function catalogReferenceTokens(catalog: FormulaTextCatalog | undefined): string[] {
+  const refs = new Set<string>(['score'])
+  for (const [key, entity] of Object.entries(catalog?.entities ?? {})) {
+    const ids = new Set([key, entity.id].filter(Boolean))
+    const attrs = new Set([
+      ...Object.keys(entity.attrs ?? {}),
+      ...Object.keys(entity.attrMeta ?? {}),
+    ])
+    for (const entityId of ids) {
+      for (const attr of attrs) refs.add(`entity.${entityId}.attr.${attr}`)
+    }
+  }
+  for (const [key, variable] of Object.entries(catalog?.variables ?? {})) {
+    refs.add(`var.${variable.id || key}`)
+    refs.add(`var.${key}`)
+  }
+  return [...refs].sort((a, b) => b.length - a.length)
+}
+
+/**
+ * 作者输入归一：
+ * - 常见全角数学标点转成运行时 ASCII 语法；
+ * - 有实体/变量目录时按最长合法引用匹配，引用后的紧邻 `-` 明确解释为减法。
+ * 这样 `entity.ent-player.attr.attack-power` 保持完整，而
+ * `entity.ent-player.attr.attack-entity.ent-boss.attr.defense` 可无空格解析。
+ */
+export function normalizeFormulaTextInput(
+  src: string,
+  catalog?: FormulaTextCatalog,
+): string {
+  const punctuationNormalized = src.replace(
+    /[（），＋－−＊×／÷．]/g,
+    (char) => FULL_WIDTH_FORMULA_CHARS[char] ?? char,
+  )
+  const refs = catalogReferenceTokens(catalog)
+  if (refs.length === 0) return punctuationNormalized
+
+  let out = ''
+  let index = 0
+  while (index < punctuationNormalized.length) {
+    const previous = index > 0 ? punctuationNormalized[index - 1]! : ''
+    const boundary = !previous || !/[A-Za-z0-9_.-]/.test(previous)
+    const ref = boundary
+      ? refs.find((candidate) => punctuationNormalized.startsWith(candidate, index))
+      : undefined
+    if (!ref) {
+      out += punctuationNormalized[index]!
+      index += 1
+      continue
+    }
+    out += ref
+    index += ref.length
+    if (punctuationNormalized[index] === '-' && index + 1 < punctuationNormalized.length) {
+      out += ' - '
+      index += 1
+    }
+  }
+  return out
+}
+
 /** 含 hole 的文本 → AST（供公式文本编辑器）。解析失败抛 ExprError。 */
 export function parseFormulaText(src: string, nextId: () => string = makeIdAlloc()): FormulaAstNode {
+  const normalized = normalizeFormulaTextInput(src)
   // 唯一 hole 名 → ASCII 序号占位（避免中文名进 runtime tokenizer 被拒）。
   const nameToIdx = new Map<string, number>()
   const idxToName = new Map<string, string>()
-  const substituted = src.replace(HOLE_TEXT_RE, (_m, name: string) => {
+  const substituted = normalized.replace(HOLE_TEXT_RE, (_m, name: string) => {
     let idx = nameToIdx.get(name)
     if (idx == null) {
       idx = nameToIdx.size
@@ -269,7 +351,15 @@ export function normalizeHoleBinding(raw: unknown): FormulaHoleBinding | undefin
 }
 
 function migrateFormula(f: LegacyFormula): Formula {
-  if (f.ast) return { id: f.id, name: f.name, description: f.description, ast: f.ast }
+  if (f.ast) {
+    return {
+      id: f.id,
+      name: f.name,
+      description: f.description,
+      ast: f.ast,
+      ...(f.draftEmpty ? { draftEmpty: true } : {}),
+    }
+  }
   const ast = Array.isArray(f.terms) ? legacyTermsToAst(f.terms) : { t: 'num' as const, id: 'n0', v: 0 }
   return { id: f.id, name: f.name, description: f.description, ast }
 }

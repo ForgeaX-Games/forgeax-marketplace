@@ -3,35 +3,187 @@
  * （实体属性：选实体+属性；数值：输入常数；变量：选变量），实时编译回 NumOrExpr。
  */
 import type { CSSProperties, JSX } from 'react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula, FormulaHoleBinding } from '../persist/formula-authoring'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import { createRng } from '../../runtime/engine/rng'
-import { AttrSelect, EntitySelect } from './editors'
 import { LooseNumberInput } from './TermChainEditor'
-import { VariablePicker } from './scenario-pickers'
+import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
 import {
   compileFormula,
+  formulaHoleBindingIssues,
   formulaHoles,
   formulaPreview,
-  missingFormulaHoles,
   missingFormulaVariables,
 } from './formulaApply'
-import { findEntity, findFormula, listAttrOptions, listFormulaOptions } from './valueExprPick'
+import {
+  attrDisplayName,
+  entityDisplayName,
+  findEntity,
+  findFormula,
+  listAttrOptions,
+  listEntityOptions,
+  listFormulaOptions,
+  listVarOptions,
+  variableDisplayName,
+} from './valueExprPick'
+import {
+  ensureEntity,
+  ensureEntityAttribute,
+  type EntityAttributeCreateRequest,
+  type EntityCreateRequest,
+} from './metaCatalog'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
 const row: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }
 const hint: CSSProperties = { fontSize: 11, opacity: 0.65, lineHeight: 1.4 }
 const holeLbl: CSSProperties = { fontSize: 11, opacity: 0.8, minWidth: 120 }
+const ATTR_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/
 
-/** entityAttr 空位实际生效的属性 id（binding.attr 有效则用，否则约定名，否则实体第一个属性）。 */
-function effectiveAttr(binding: FormulaHoleBinding | undefined, suggestAttr: string | undefined, entities: Record<string, Entity> | undefined): string {
-  if (!binding || binding.kind !== 'entityAttr' || !binding.entityId) return ''
-  const attrs = listAttrOptions(findEntity(entities, binding.entityId))
-  if (binding.attr && attrs.some((a) => a.id === binding.attr)) return binding.attr
-  if (suggestAttr && attrs.some((a) => a.id === suggestAttr)) return suggestAttr
-  return attrs[0]?.id ?? ''
+interface FormulaCreateDraft {
+  entityId: string
+  entityName: string
+  attrId: string
+  attrLabel: string
+  initialValue: string
+}
+
+interface FormulaAttributeCreateConfig {
+  template?: Omit<EntityAttributeCreateRequest, 'entityId'>
+  onCreate: (request: EntityAttributeCreateRequest) => void
+}
+
+interface FormulaEntityCreateConfig {
+  template?: EntityCreateRequest
+  onCreate: (request: EntityCreateRequest) => void
+}
+
+function validEntityId(value: string): boolean {
+  const id = value.trim()
+  return !!id && id !== '.' && id !== '..' && !/[\\/]/.test(id)
+}
+
+function inferredInitialValue(attrId: string, label: string): number {
+  const semantic = `${attrId} ${label}`.toLowerCase()
+  if (/hp|health|血量|生命/.test(semantic)) return 100
+  if (/qi|energy|rage|mana|气力|能量|怒气/.test(semantic)) return 5
+  return 0
+}
+
+function parsedInitialValue(value: string): number | undefined {
+  if (!value.trim()) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+type FormulaAttributeSemantic = 'current-hp' | 'max-hp' | 'current-qi' | 'max-qi'
+
+const SEMANTIC_ATTR_IDS: Record<FormulaAttributeSemantic, readonly string[]> = {
+  'current-hp': ['hp', 'health'],
+  'max-hp': ['hpMax', 'maxHp', 'healthMax', 'maxHealth'],
+  'current-qi': ['qi', 'energy', 'rage', 'mana'],
+  'max-qi': ['qiMax', 'maxQi', 'energyMax', 'maxEnergy', 'rageMax', 'maxRage', 'manaMax', 'maxMana'],
+}
+
+function normalizedSemanticText(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_.\-—:：/\\()[\]（）【】]/g, '')
+}
+
+function formulaAttributeSemantic(label: string): FormulaAttributeSemantic | undefined {
+  const text = normalizedSemanticText(label)
+  const maximum = /最大|上限|峰值|maximum|max|limit|cap/.test(text)
+  const hp = /血量|生命值?|health|hitpoints?|hp/.test(text)
+  const qi = /气力|能量|怒气|energy|rage|mana|qi/.test(text)
+  if (hp) return maximum ? 'max-hp' : 'current-hp'
+  if (qi) return maximum ? 'max-qi' : 'current-qi'
+  return undefined
+}
+
+function labelMatchesSemantic(label: string, semantic: FormulaAttributeSemantic): boolean {
+  return formulaAttributeSemantic(label) === semantic
+}
+
+function attributeMatchesHole(
+  entity: Entity | undefined,
+  attrId: string,
+  label: string,
+  suggestAttr: string | undefined,
+): boolean {
+  const semantic = formulaAttributeSemantic(label)
+  const displayName = entity?.attrMeta?.[attrId]?.label?.trim()
+  if (semantic) {
+    if (displayName) return labelMatchesSemantic(displayName, semantic)
+    return SEMANTIC_ATTR_IDS[semantic].some((candidate) =>
+      candidate.toLowerCase() === attrId.toLowerCase())
+  }
+  if (suggestAttr) return attrId.toLowerCase() === suggestAttr.toLowerCase()
+  return true
+}
+
+function inferredAttrId(label: string, suggestAttr: string | undefined): string {
+  if (suggestAttr) return suggestAttr
+  const semantic = formulaAttributeSemantic(label)
+  if (semantic) return SEMANTIC_ATTR_IDS[semantic][0]!
+  const ascii = label.trim()
+    .replace(/[^A-Za-z0-9_-]+/g, ' ')
+    .trim()
+    .replace(/\s+([A-Za-z0-9])/g, (_, letter: string) => letter.toUpperCase())
+    .replace(/^[^A-Za-z_]+/, '')
+  return ascii || 'value'
+}
+
+function attributeIdOccupied(entity: Entity | undefined, attrId: string): boolean {
+  return Object.hasOwn(entity?.attrs ?? {}, attrId)
+    || Object.hasOwn(entity?.attrMeta ?? {}, attrId)
+}
+
+function nextAvailableAttrId(entity: Entity | undefined, requestedId: string): string {
+  if (!attributeIdOccupied(entity, requestedId)) return requestedId
+  let index = 2
+  while (attributeIdOccupied(entity, `${requestedId}${index}`)) index += 1
+  return `${requestedId}${index}`
+}
+
+function initialValueForHole(
+  template: Omit<EntityAttributeCreateRequest, 'entityId'> | undefined,
+  attrId: string,
+  label: string,
+  suggestAttr: string | undefined,
+): number {
+  if (template) {
+    const templateEntity: Entity = {
+      id: 'template',
+      attrs: { [template.attrId]: template.initialValue },
+      attrMeta: { [template.attrId]: template.meta ?? {} },
+    }
+    if (attributeMatchesHole(templateEntity, template.attrId, label, suggestAttr)) {
+      return template.initialValue
+    }
+  }
+  return inferredInitialValue(attrId, label)
+}
+
+function entityAttrKey(entityId: string, attrId: string): string {
+  return `entity:${encodeURIComponent(entityId)}:${encodeURIComponent(attrId)}`
+}
+
+function parseEntityAttrKey(value: string): { entityId: string; attrId: string } | undefined {
+  const match = /^entity:([^:]+):(.+)$/.exec(value)
+  if (!match) return undefined
+  return {
+    entityId: decodeURIComponent(match[1]!),
+    attrId: decodeURIComponent(match[2]!),
+  }
+}
+
+function variableKey(varId: string): string {
+  return `var:${encodeURIComponent(varId)}`
+}
+
+function parseVariableKey(value: string): string | undefined {
+  const match = /^var:(.+)$/.exec(value)
+  return match ? decodeURIComponent(match[1]!) : undefined
 }
 
 /** 样例求值上下文：实体 attrs 原样、变量取 initial；每次试算另建 seed 0 RNG。 */
@@ -51,6 +203,8 @@ export function FormulaApplyEditor({
   variables,
   onChange,
   showFormulaPicker = true,
+  createAttribute,
+  createEntity,
 }: {
   formulaId: string
   holeBindings: Record<string, FormulaHoleBinding>
@@ -59,11 +213,30 @@ export function FormulaApplyEditor({
   variables: Record<string, Variable> | undefined
   onChange: (next: NumOrExpr) => void
   showFormulaPicker?: boolean
+  createAttribute?: FormulaAttributeCreateConfig
+  createEntity?: FormulaEntityCreateConfig
 }): JSX.Element {
+  const [createDrafts, setCreateDrafts] = useState<Record<string, FormulaCreateDraft>>({})
   const options = listFormulaOptions(formulas)
   const formula = findFormula(formulas, formulaId)
   const holes = formula ? formulaHoles(formula) : []
-  const missingHoles = formula ? missingFormulaHoles(formula, holeBindings) : []
+  const bindingIssues = formula
+    ? formulaHoleBindingIssues(formula, holeBindings, entities ?? {})
+    : []
+  const actionableIssueIds = new Set(bindingIssues.flatMap((issue) => {
+    const hole = holes.find((candidate) => candidate.holeId === issue.holeId)
+    const binding = holeBindings[issue.holeId]
+    const usesEntityAttribute = hole?.kind === 'entityAttr' || binding?.kind === 'entityAttr'
+    if (!hole || !usesEntityAttribute) return []
+    const entityId = binding?.kind === 'entityAttr' ? binding.entityId : ''
+    const entity = findEntity(entities, entityId)
+    const actionableEntity = (!entityId || !entity) && !!createEntity && !!createAttribute
+    const actionableAttribute = !!createAttribute
+      && (!entity || !listAttrOptions(entity).some((option) =>
+        attributeMatchesHole(entity, option.id, hole.label || hole.holeId, hole.suggestAttr)))
+    return actionableEntity || actionableAttribute ? [issue.holeId] : []
+  }))
+  const visibleBindingIssues = bindingIssues.filter((issue) => !actionableIssueIds.has(issue.holeId))
   const missingVariables = formula ? missingFormulaVariables(formula, holeBindings, variables) : []
   const needsVariableBinding = holes.some((hole) => hole.kind === 'var')
   const hasDeclaredVariables = Object.keys(variables ?? {}).length > 0
@@ -79,11 +252,22 @@ export function FormulaApplyEditor({
     onChange(compileFormula(formula, { ...holeBindings, [holeId]: binding }, entities))
   }
 
+  function draftFor(key: string, defaults: FormulaCreateDraft): FormulaCreateDraft {
+    return { ...defaults, ...createDrafts[key] }
+  }
+
+  function patchCreateDraft(key: string, defaults: FormulaCreateDraft, patch: Partial<FormulaCreateDraft>): void {
+    setCreateDrafts((current) => ({
+      ...current,
+      [key]: { ...defaults, ...current[key], ...patch },
+    }))
+  }
+
   const compiled = formula ? compileFormula(formula, holeBindings, entities) : undefined
   const compiledLabel = compiled == null ? '' : typeof compiled === 'number' ? String(compiled) : compiled.expr
   // 填满全部留空位后，拿样例实体/变量值实时算出结果（≈ 值），替代与顶部「公式：」重复的编译串展示。
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
-  const sampleValue = compiledLabel && missingHoles.length === 0
+  const sampleValue = compiledLabel && bindingIssues.length === 0 && missingVariables.length === 0
     ? tryEvalExpr(compiledLabel, { ...ctx, rng: createRng(0) })
     : null
 
@@ -118,49 +302,404 @@ export function FormulaApplyEditor({
           ) : (
             holes.map((h) => {
               const binding = holeBindings[h.holeId]
+              const label = h.label ?? '留空位'
+              const boundEntityId = binding?.kind === 'entityAttr' ? binding.entityId : ''
+              const boundEntity = findEntity(entities, boundEntityId)
+              const boundAttrId = binding?.kind === 'entityAttr'
+                ? binding.attr || h.suggestAttr || ''
+                : ''
+              const selectedEntity = binding?.kind === 'entityAttr'
+                ? findEntity(entities, binding.entityId)
+                : undefined
+              const selectedAttrId = binding?.kind === 'entityAttr'
+                ? binding.attr || h.suggestAttr || ''
+                : ''
+              const selectedAttrExists = !!selectedEntity
+                && !!selectedAttrId
+                && listAttrOptions(selectedEntity).some((option) =>
+                  option.id === selectedAttrId
+                  && attributeMatchesHole(selectedEntity, option.id, label, h.suggestAttr))
+              const createActions = new Map<string, {
+                entityRequest?: EntityCreateRequest
+                attributeRequest: EntityAttributeCreateRequest
+                binding: FormulaHoleBinding
+              }>()
+              const requestedAttrId = boundAttrId
+                || createAttribute?.template?.attrId
+                || inferredAttrId(label, h.suggestAttr)
+              const entityBranches: CascadingPickerOption[] = listEntityOptions(entities)
+                .map((entityOption) => {
+                  const entity = findEntity(entities, entityOption.id)
+                  const attrOptions = listAttrOptions(entity)
+                    .filter((attrOption) =>
+                      attributeMatchesHole(entity, attrOption.id, label, h.suggestAttr))
+                  const children: CascadingPickerOption[] = attrOptions.map((attrOption) => ({
+                    key: entityAttrKey(entityOption.id, attrOption.id),
+                    label: attrDisplayName(entity, attrOption.id),
+                    value: entityAttrKey(entityOption.id, attrOption.id),
+                  }))
+                  if (children.length === 0 && createAttribute) {
+                    const defaultAttrId = nextAvailableAttrId(entity, requestedAttrId)
+                    const draftKey = [
+                      'create-formula-attr',
+                      encodeURIComponent(h.holeId),
+                      encodeURIComponent(entityOption.id),
+                    ].join(':')
+                    const defaults: FormulaCreateDraft = {
+                      entityId: entityOption.id,
+                      entityName: entityDisplayName(entity, entityOption.id),
+                      attrId: defaultAttrId,
+                      attrLabel: label,
+                      initialValue: String(initialValueForHole(
+                        createAttribute.template,
+                        defaultAttrId,
+                        label,
+                        h.suggestAttr,
+                      )),
+                    }
+                    const draft = draftFor(draftKey, defaults)
+                    const attrId = draft.attrId.trim()
+                    const initialValue = parsedInitialValue(draft.initialValue)
+                    const request: EntityAttributeCreateRequest = {
+                      entityId: entityOption.id,
+                      attrId,
+                      initialValue: initialValue ?? 0,
+                      meta: {
+                        ...createAttribute.template?.meta,
+                        label: draft.attrLabel.trim(),
+                        initial: initialValue ?? 0,
+                      },
+                    }
+                    const candidate: Entity = {
+                      ...(entity ?? { id: entityOption.id }),
+                      attrs: { ...entity?.attrs, [attrId]: initialValue ?? 0 },
+                      attrMeta: { ...entity?.attrMeta, [attrId]: request.meta ?? {} },
+                    }
+                    const valid = ATTR_ID_PATTERN.test(attrId)
+                      && !attributeIdOccupied(entity, attrId)
+                      && !!draft.attrLabel.trim()
+                      && initialValue !== undefined
+                      && attributeMatchesHole(candidate, attrId, label, h.suggestAttr)
+                    const actionKey = `${draftKey}:confirm`
+                    createActions.set(actionKey, {
+                      attributeRequest: request,
+                      binding: { kind: 'entityAttr', entityId: entityOption.id, attr: attrId },
+                    })
+                    children.push({
+                      key: `configure:${actionKey}`,
+                      label: `配置「${draft.attrLabel.trim() || label}」属性`,
+                      children: [
+                        {
+                          key: `detail:${actionKey}:id`,
+                          label: '属性 ID',
+                          editor: {
+                            value: draft.attrId,
+                            ariaLabel: `${entityDisplayName(entity, entityOption.id)}的新属性 ID`,
+                            pattern: '[A-Za-z_][A-Za-z0-9_-]*',
+                            invalid: !ATTR_ID_PATTERN.test(attrId) || attributeIdOccupied(entity, attrId),
+                            onChange: (value: string) =>
+                              patchCreateDraft(draftKey, defaults, { attrId: value }),
+                          },
+                        },
+                        {
+                          key: `detail:${actionKey}:label`,
+                          label: '显示名',
+                          editor: {
+                            value: draft.attrLabel,
+                            ariaLabel: `${entityDisplayName(entity, entityOption.id)}的新属性显示名`,
+                            invalid: !attributeMatchesHole(candidate, attrId, label, h.suggestAttr),
+                            onChange: (value: string) =>
+                              patchCreateDraft(draftKey, defaults, { attrLabel: value }),
+                          },
+                        },
+                        {
+                          key: `detail:${actionKey}:initial`,
+                          label: '初始值',
+                          editor: {
+                            value: draft.initialValue,
+                            ariaLabel: `${entityDisplayName(entity, entityOption.id)}的新属性初始值`,
+                            inputMode: 'decimal',
+                            invalid: initialValue === undefined,
+                            onChange: (value: string) =>
+                              patchCreateDraft(draftKey, defaults, { initialValue: value }),
+                          },
+                        },
+                        {
+                          key: actionKey,
+                          label: '确认创建并选择',
+                          value: actionKey,
+                          presentation: 'confirm',
+                          disabled: !valid,
+                        },
+                      ],
+                    })
+                  }
+                  return {
+                    key: `entity:${encodeURIComponent(entityOption.id)}`,
+                    label: entityDisplayName(entity, entityOption.id),
+                    children,
+                  }
+                })
+                .filter((entityOption) => entityOption.children.length > 0)
+              const needsEntityCreation = listEntityOptions(entities).length === 0
+                || (!!boundEntityId && !boundEntity)
+              if (needsEntityCreation && createEntity && createAttribute) {
+                const defaultEntityId = boundEntityId
+                  || createEntity.template?.entityId
+                  || 'entity'
+                const defaultEntityName = createEntity.template?.name
+                  || boundEntityId
+                  || '实体'
+                const draftKey = [
+                  'create-formula-entity',
+                  encodeURIComponent(h.holeId),
+                  encodeURIComponent(defaultEntityId),
+                ].join(':')
+                const defaultAttrId = inferredAttrId(
+                  label,
+                  boundAttrId || h.suggestAttr || createAttribute.template?.attrId,
+                )
+                const defaults: FormulaCreateDraft = {
+                  entityId: defaultEntityId,
+                  entityName: defaultEntityName,
+                  attrId: defaultAttrId,
+                  attrLabel: label,
+                  initialValue: String(initialValueForHole(
+                    createAttribute.template,
+                    defaultAttrId,
+                    label,
+                    h.suggestAttr,
+                  )),
+                }
+                const draft = draftFor(draftKey, defaults)
+                const entityId = draft.entityId.trim()
+                const attrId = draft.attrId.trim()
+                const initialValue = parsedInitialValue(draft.initialValue)
+                const entityRequest: EntityCreateRequest = {
+                  ...createEntity.template,
+                  entityId,
+                  name: draft.entityName.trim(),
+                }
+                const attributeRequest: EntityAttributeCreateRequest = {
+                  entityId,
+                  attrId,
+                  initialValue: initialValue ?? 0,
+                  meta: {
+                    ...createAttribute.template?.meta,
+                    label: draft.attrLabel.trim(),
+                    initial: initialValue ?? 0,
+                  },
+                }
+                const candidate: Entity = {
+                  id: entityId,
+                  name: entityRequest.name,
+                  attrs: { [attrId]: initialValue ?? 0 },
+                  attrMeta: { [attrId]: attributeRequest.meta ?? {} },
+                }
+                const valid = validEntityId(entityId)
+                  && !!draft.entityName.trim()
+                  && ATTR_ID_PATTERN.test(attrId)
+                  && !!draft.attrLabel.trim()
+                  && initialValue !== undefined
+                  && attributeMatchesHole(candidate, attrId, label, h.suggestAttr)
+                const actionKey = `${draftKey}:confirm`
+                createActions.set(actionKey, {
+                  entityRequest,
+                  attributeRequest,
+                  binding: { kind: 'entityAttr', entityId, attr: attrId },
+                })
+                entityBranches.unshift({
+                  key: `configure:${actionKey}`,
+                  label: `配置「${draft.entityName.trim() || defaultEntityName}」实体`,
+                  children: [
+                    {
+                      key: `detail:${actionKey}:entity-id`,
+                      label: '实体 ID',
+                      editor: {
+                        value: draft.entityId,
+                        ariaLabel: '新实体 ID',
+                        invalid: !validEntityId(entityId),
+                        onChange: (value: string) =>
+                          patchCreateDraft(draftKey, defaults, { entityId: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:entity-name`,
+                      label: '实体显示名',
+                      editor: {
+                        value: draft.entityName,
+                        ariaLabel: '新实体显示名',
+                        invalid: !draft.entityName.trim(),
+                        onChange: (value: string) =>
+                          patchCreateDraft(draftKey, defaults, { entityName: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:attr-id`,
+                      label: '属性 ID',
+                      editor: {
+                        value: draft.attrId,
+                        ariaLabel: '新属性 ID',
+                        pattern: '[A-Za-z_][A-Za-z0-9_-]*',
+                        invalid: !ATTR_ID_PATTERN.test(attrId),
+                        onChange: (value: string) =>
+                          patchCreateDraft(draftKey, defaults, { attrId: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:attr-label`,
+                      label: '显示名',
+                      editor: {
+                        value: draft.attrLabel,
+                        ariaLabel: '新属性显示名',
+                        invalid: !attributeMatchesHole(candidate, attrId, label, h.suggestAttr),
+                        onChange: (value: string) =>
+                          patchCreateDraft(draftKey, defaults, { attrLabel: value }),
+                      },
+                    },
+                    {
+                      key: `detail:${actionKey}:initial`,
+                      label: '初始值',
+                      editor: {
+                        value: draft.initialValue,
+                        ariaLabel: '新属性初始值',
+                        inputMode: 'decimal',
+                        invalid: initialValue === undefined,
+                        onChange: (value: string) =>
+                          patchCreateDraft(draftKey, defaults, { initialValue: value }),
+                      },
+                    },
+                    {
+                      key: actionKey,
+                      label: '确认创建并选择',
+                      value: actionKey,
+                      presentation: 'confirm',
+                      disabled: !valid,
+                    },
+                  ],
+                })
+              }
+              const entityAttributeOptions: CascadingPickerOption[] = entityBranches.length > 0
+                ? [{
+                  key: 'entity-attributes',
+                  label: '实体属性',
+                  children: entityBranches,
+                }]
+                : []
+              const variableOptions = listVarOptions(variables).map((option) => ({
+                key: variableKey(option.id),
+                label: variableDisplayName(variables?.[option.id], option.id),
+                value: variableKey(option.id),
+              }))
+              const sourceOptions: CascadingPickerOption[] = [
+                ...(h.kind === 'number' || h.kind === 'entityAttr'
+                  ? entityAttributeOptions
+                  : []),
+                ...(h.kind === 'number' || h.kind === 'var'
+                  ? variableOptions.length > 0
+                    ? [{
+                      key: 'variables',
+                      label: '变量',
+                      children: variableOptions,
+                    }]
+                    : []
+                  : []),
+                ...(h.kind === 'number'
+                  ? [{ key: 'constant', label: '常量', value: 'constant' }]
+                  : []),
+              ]
+              const sourceValue = binding?.kind === 'number'
+                ? 'constant'
+                : binding?.kind === 'entityAttr' && selectedAttrExists
+                  ? entityAttrKey(boundEntityId, selectedAttrId)
+                  : binding?.kind === 'var' && binding.varId
+                    ? variableKey(binding.varId)
+                    : ''
+              const sourceDisplayValue = binding?.kind === 'number'
+                ? '常量'
+                : binding?.kind === 'entityAttr' && selectedAttrExists
+                  ? `${entityDisplayName(selectedEntity, boundEntityId)}的${attrDisplayName(selectedEntity, selectedAttrId)}`
+                  : binding?.kind === 'var' && binding.varId
+                    ? variableDisplayName(variables?.[binding.varId], binding.varId)
+                    : ''
               return (
-                <div key={h.holeId} style={{ ...row, border: '1px solid var(--gc-accent-line, #2a2a2a)', borderRadius: 6, padding: 6 }}>
-                  <span style={holeLbl}>{h.label ?? '留空位'}{h.kind === 'entityAttr' && h.suggestAttr ? `（约定：${h.suggestAttr}）` : ''}</span>
-                  {h.kind === 'entityAttr' && (
-                    <>
-                      <EntitySelect
-                        value={binding?.kind === 'entityAttr' ? binding.entityId : ''}
-                        entities={entities}
-                        onChange={(id) => setHole(h.holeId, { kind: 'entityAttr', entityId: id, attr: undefined })}
-                      />
-                      <AttrSelect
-                        entityId={binding?.kind === 'entityAttr' ? binding.entityId : ''}
-                        value={effectiveAttr(binding, h.suggestAttr, entities)}
-                        entities={entities}
-                        onChange={(attr) => setHole(h.holeId, { kind: 'entityAttr', entityId: binding?.kind === 'entityAttr' ? binding.entityId : '', attr })}
-                      />
-                    </>
-                  )}
-                  {h.kind === 'number' && (
+                <div
+                  key={h.holeId}
+                  role="group"
+                  aria-label={`参数：${label}`}
+                  style={{ ...row, border: '1px solid var(--gc-accent-line, #2a2a2a)', borderRadius: 6, padding: 6 }}
+                >
+                  <span style={holeLbl}>{label}{h.kind === 'entityAttr' && h.suggestAttr ? `（约定：${h.suggestAttr}）` : ''}</span>
+                  <CascadingPicker
+                    ariaLabel={`${label}来源`}
+                    value={sourceValue}
+                    displayValue={sourceDisplayValue}
+                    placeholder="选择来源..."
+                    options={sourceOptions}
+                    onSelect={(value) => {
+                      const createAction = createActions.get(value)
+                      if (createAction) {
+                        let nextEntities = entities
+                        if (createAction.entityRequest && createEntity) {
+                          createEntity.onCreate(createAction.entityRequest)
+                          nextEntities = ensureEntity(nextEntities, createAction.entityRequest)
+                        }
+                        if (createAttribute) {
+                          createAttribute.onCreate(createAction.attributeRequest)
+                          nextEntities = ensureEntityAttribute(
+                            nextEntities,
+                            createAction.attributeRequest,
+                          )
+                        }
+                        if (formula) {
+                          onChange(compileFormula(
+                            formula,
+                            { ...holeBindings, [h.holeId]: createAction.binding },
+                            nextEntities,
+                          ))
+                        }
+                        return
+                      }
+                      if (value === 'constant') {
+                        setHole(h.holeId, {
+                          kind: 'number',
+                          value: binding?.kind === 'number' ? binding.value : 0,
+                        })
+                        return
+                      }
+                      const varId = parseVariableKey(value)
+                      if (varId) {
+                        setHole(h.holeId, { kind: 'var', varId })
+                        return
+                      }
+                      const selected = parseEntityAttrKey(value)
+                      if (!selected) return
+                      setHole(h.holeId, {
+                        kind: 'entityAttr',
+                        entityId: selected.entityId,
+                        attr: selected.attrId,
+                      })
+                    }}
+                  />
+                  {h.kind === 'number' && binding?.kind === 'number' && (
                     <LooseNumberInput
-                      value={binding?.kind === 'number' ? binding.value : 0}
+                      value={binding.value}
                       onChange={(value) => setHole(h.holeId, { kind: 'number', value })}
-                      aria-label={h.label ?? '数值'}
+                      aria-label={label}
                       style={{ width: 120 }}
-                    />
-                  )}
-                  {h.kind === 'var' && (
-                    <VariablePicker
-                      value={binding?.kind === 'var' ? binding.varId : ''}
-                      variables={variables}
-                      allowEmpty
-                      onChange={(varId) => setHole(h.holeId, { kind: 'var', varId })}
                     />
                   )}
                 </div>
               )
             })
           )}
-          {missingHoles.length > 0 ? (
+          {visibleBindingIssues.length > 0 ? (
             <p role="alert" style={{ ...hint, color: '#ffb86c', fontWeight: 600 }}>
-              还缺 {missingHoles.length} 个留空位未填。补全后才会用于结算。
+              参数绑定未完成：
+              {visibleBindingIssues.map((issue) => `${issue.label}（${issue.reason}）`).join('、')}。
+              补全后才会用于结算。
             </p>
-          ) : sampleValue != null ? (
+          ) : bindingIssues.length > 0 ? null : sampleValue != null ? (
             <p style={hint}>≈ {sampleValue}<span style={{ opacity: 0.6 }}>（按样例实体/变量值试算）</span></p>
           ) : (
             <p style={hint}>已填满，结算时按当前实体/变量值求值。</p>

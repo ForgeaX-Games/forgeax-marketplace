@@ -6,6 +6,7 @@
  */
 import type { CSSProperties, ReactNode } from 'react'
 import type { Entity, Variable } from '../../runtime/schema/graph-schema'
+import { authoringOptionLabel } from '../authoring-option-label'
 
 const rowStyle: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }
 const lbl: CSSProperties = { width: 52, opacity: 0.7, flexShrink: 0, fontSize: 11 }
@@ -24,16 +25,16 @@ function field(label: string, node: ReactNode): JSX.Element {
 }
 
 function entityLabel(e: Entity): string {
-  return e.name && e.name !== e.id ? `${e.name} (${e.id})` : e.id
+  return authoringOptionLabel(e.name, e.id)
 }
 
 function varLabel(v: Variable): string {
-  return v.name && v.name !== v.id ? `${v.name} (${v.id})` : v.id
+  return authoringOptionLabel(v.name, v.id)
 }
 
 function attrLabel(e: Entity | undefined, attr: string): string {
   const meta = e?.attrMeta?.[attr]?.label
-  return meta && meta !== attr ? `${meta} (${attr})` : attr
+  return authoringOptionLabel(meta, attr)
 }
 
 /** 实体 id：纯下拉，只能选已声明实体。 */

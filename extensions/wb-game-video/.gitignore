@@ -71,3 +71,4 @@ server.log
 server-*.log
 
 dist/standalone/
+dist/

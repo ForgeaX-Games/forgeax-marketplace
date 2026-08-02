@@ -91,4 +91,17 @@ describe('AssetLibraryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
     await waitFor(() => expect(api.remove).toHaveBeenCalledWith('bgm-1'))
   })
+
+  it('only reveals selection checkboxes in multi-select mode and deletes selected assets', async () => {
+    const api = controller({ removeMany: vi.fn(async () => ({ completed: 1 })) })
+    render(<AssetLibraryPanel controller={api} />)
+    expect(screen.queryByLabelText('选择 封面')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '多选' }))
+    fireEvent.click(screen.getByLabelText('选择 封面'))
+    fireEvent.click(screen.getByRole('button', { name: '删除选中' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() => expect(api.removeMany).toHaveBeenCalledWith(['image-1'], expect.any(Function)))
+  })
 })

@@ -32,8 +32,13 @@ describe('initState', () => {
     expect(st.score).toBe(0)
   })
 
-  it('rng always seed 0', () => {
+  it('defaults rng to seed 0', () => {
     const st = initState(scn())
     expect(st.rng!.next()).toBe(createRng(0).next())
+  })
+
+  it('accepts a session rng seed', () => {
+    const st = initState(scn(), 42)
+    expect(st.rng!.next()).toBe(createRng(42).next())
   })
 })

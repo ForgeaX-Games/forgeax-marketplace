@@ -2,9 +2,10 @@
  * NodeInspector —— 节点配置面板。选中画布节点后编辑其 `node.data`、overlay reactions 与出边。
  * Overlay 事件作者 SSOT = 各挂载 `overlayNodes[].reactions`；走向经 do 内 advance + 边。
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Entity, GameGraph, GraphCondition, Overlay, RoutingSettlement, SubFlowPackDef, Variable } from '../../runtime/schema/graph-schema'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Entity, GameEdge, GameGraph, GraphCondition, Overlay, OverlayChild, RoutingSettlement, SubFlowPackDef, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
+import { authoringOptionLabel } from '../authoring-option-label'
 import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
 import { patchNodeBgm, type AudioOption } from './bgm-authoring'
 import type { NodeAction, OverlayReaction, Reaction, OverlayEventRef } from '../../runtime/schema/node-config-schema'
@@ -17,6 +18,7 @@ import {
   disconnect,
   reconnect,
   removeNode,
+  setSettlementAdvanceTarget,
   updateEdgeData,
   updateEventRouteTiming,
   updateNodeData,
@@ -27,12 +29,14 @@ import {
 } from '../../graph/edit/graph-edit'
 import { mergeFlowHandles, flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { ConditionEditor, createDefaultEffect, type EditorPickerCtx } from './editors'
-import { ComponentFormFields, summarizeComponentInputs } from './component-form-fields'
-import { PRESET_SCHEME_BY_ID } from './schemeOverlays'
+import type { EntityAttributeCreateHandler, EntityCreateHandler } from './component-form-fields'
+import { ComponentInputsDisclosure } from './ComponentInputsDisclosure'
+import { overlayDisplayLabel, PRESET_SCHEME_BY_ID } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
 import { NodeActionsEditor } from './NodeActionsEditor'
 import { ComponentEventsEditor } from './ComponentEventsEditor'
 import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
+import { LooseNumberInput } from './TermChainEditor'
 
 /**
  * 「播放动作」下拉的 hover 说明 —— 面板上不再铺开这些解释（只留表单本身），所以三条动作的
@@ -47,6 +51,22 @@ import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
  * 容易替引擎脑补出来的一条不存在的规则。
  */
 const BGM_MODE_TITLE = '留空 = 这里不换音乐，继续播上层正在响的那首。配了就一直播：走边离开本节点、弹回外层子流程/子蓝图都不结束，只有在该停的节点上选「结束当前音乐」，或跳转 / 重开一局才会退掉它。\n起播并记住上一首 = 这层被结束时回到它；换曲不记住 = 顶掉正在响的那首、层数不变（正响的是文档默认床轨时例外：它是地板顶不掉，会另起一层）；结束当前音乐 = 结束正在响的这层，回到上一层还没结束的那首（只剩文档床时什么都不做）。'
+
+function serializableEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+export function sparseOverlayInputOverride(
+  base: Record<string, unknown> | undefined,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(next)) {
+    if (!serializableEqual(value, base?.[key])) out[key] = value
+  }
+  return out
+}
 
 function row(label: string, node: ReactNode): JSX.Element {
   return (
@@ -67,6 +87,80 @@ function row(label: string, node: ReactNode): JSX.Element {
       {/* 约束右侧控件：长 select 文案不得撑破父层 */}
       <span style={{ flex: 1, minWidth: 0, maxWidth: '100%', display: 'flex', alignItems: 'center' }}>{node}</span>
     </label>
+  )
+}
+
+function AdvanceTargetRow({
+  sourceLabel,
+  currentTarget,
+  nodeOptions,
+  onChange,
+}: {
+  sourceLabel: string
+  currentTarget: string
+  nodeOptions: OptItem[]
+  onChange: (targetId: string) => void
+}): JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 4, fontSize: 12 }}>
+      <span style={{ opacity: 0.7, flexShrink: 0 }}>从</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceLabel}>{sourceLabel}</span>
+      <span style={{ opacity: 0.7, flexShrink: 0 }}>到</span>
+      <select aria-label="目标节点" value={currentTarget} onChange={(event) => onChange(event.target.value)} style={{ flex: 1, minWidth: 0 }}>
+        <option value="">（无 · 只做副作用）</option>
+        {nodeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function RouteTimingEditor({
+  edge,
+  routingSettlement,
+  defaultAtMs = 1000,
+  onChange,
+}: {
+  edge: GameEdge
+  routingSettlement?: RoutingSettlement
+  defaultAtMs?: number
+  onChange: (transition: 'immediate' | 'onSettlement', settlement?: RoutingSettlement) => void
+}): JSX.Element {
+  const timing = edge.data?.transition === 'onSettlement'
+    ? routingSettlement?.type === 'at' ? 'at' : 'complete'
+    : 'immediate'
+  return (
+    <>
+      {row('跳转时机', (
+        <select
+          value={timing}
+          onChange={(event) => {
+            const value = event.target.value
+            if (value === 'immediate') onChange('immediate')
+            else if (value === 'at') onChange('onSettlement', { type: 'at', ms: Math.max(0, Math.round(defaultAtMs)) })
+            else onChange('onSettlement', { type: 'complete' })
+          }}
+          style={{ flex: 1 }}
+        >
+          <option value="immediate">立即跳转</option>
+          <option value="complete">当前节点播放结束时</option>
+          <option value="at">播放到指定时间时</option>
+        </select>
+      ))}
+      {timing === 'at' ? row('结算时间', (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+          <LooseNumberInput
+            value={routingSettlement?.type === 'at' ? routingSettlement.ms : 0}
+            emptyValue={0}
+            onChange={(value) => onChange('onSettlement', {
+              type: 'at',
+              ms: Math.max(0, value),
+            })}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <span style={{ fontSize: 11, opacity: 0.65 }}>ms</span>
+        </span>
+      )) : null}
+    </>
   )
 }
 
@@ -290,28 +384,45 @@ interface OptItem {
   value: string
   label: string
 }
-type SettlementTriggerType = 'at' | 'watch' | 'shown' | 'hidden'
+type SettlementTriggerType = 'at' | 'condition' | 'shown' | 'hidden'
 const SETTLEMENT_TRIGGER_LABEL: Record<SettlementTriggerType, string> = {
   at: '播到 X ms',
-  watch: '数值变化',
+  condition: '条件结算',
   shown: '界面出现',
   hidden: '界面消失',
 }
 function isReactive(r: Reaction): boolean {
-  return r.when.type === 'watch' || r.when.type === 'shown' || r.when.type === 'hidden'
+  return r.when.type === 'watch'
+    || r.when.type === 'state'
+    || r.when.type === 'shown'
+    || r.when.type === 'hidden'
 }
 function isSettlement(r: Reaction): boolean {
   return isLifecycle(r) || isReactive(r)
 }
 function settlementTriggerType(r: Reaction): SettlementTriggerType {
   const type = r.when.type
-  return type === 'watch' || type === 'shown' || type === 'hidden' ? type : 'at'
+  if (type === 'watch' || type === 'state') return 'condition'
+  return type === 'shown' || type === 'hidden' ? type : 'at'
+}
+
+function watchPathFromCondition(condition: GraphCondition): string {
+  if (condition.all.length !== 1) return ''
+  const clause = condition.all[0]!
+  if (clause.type === 'attr') return `entity.${clause.entityId}.attr.${clause.attr}`
+  if (clause.type === 'var') return `var.${clause.varId}`
+  return clause.type === 'score' ? 'score' : ''
 }
 
 function lifecycleAtMs(r: Reaction, durationMs?: number): number {
   if (r.when.type === 'at') return r.when.ms
   if (r.when.type === 'enter') return 0
   return Math.max(0, Math.round(durationMs ?? 0))
+}
+
+function isSettlementControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && Boolean(target.closest('button, input, select, textarea, label, a, summary, details, [role="button"], [contenteditable="true"]'))
 }
 
 function legacyPhaseHint(r: Reaction): string | null {
@@ -327,33 +438,55 @@ function legacyPhaseHint(r: Reaction): string | null {
 
 function LifecycleReactionsEditor({
   reactions,
+  sourceLabel,
+  nodeOptions,
   durationMs,
+  insertMs,
   focusedIndex,
   focusAnchorRevision,
   onFocusIndex,
   pickers,
   entities,
   variables,
-  edgeOptions,
+  advanceEdgeFor,
+  advanceTargetFor,
+  onAdvanceTargetChange,
+  routingSettlement,
+  onSetAdvanceTiming,
   componentOptions,
   spawnOptions,
+  hideOverlayOptions,
   overlays,
   fieldTree,
+  onCreateEntityAttribute,
   onChange,
 }: {
   reactions: Reaction[] | undefined
+  sourceLabel: string
+  nodeOptions: OptItem[]
   durationMs?: number
+  insertMs?: number
   focusedIndex?: number | null
   focusAnchorRevision?: number
   onFocusIndex?: (lifecycleIndex: number | null) => void
   pickers?: EditorPickerCtx
   entities?: Record<string, Entity>
   variables?: Record<string, Variable>
-  edgeOptions: OptItem[]
+  advanceEdgeFor: (edgeId: string) => GameEdge | undefined
+  advanceTargetFor: (edgeId: string) => string
+  onAdvanceTargetChange: (settlementIndex: number, actionIndex: number, targetId: string) => void
+  routingSettlement?: RoutingSettlement
+  onSetAdvanceTiming: (
+    edgeId: string,
+    transition: 'immediate' | 'onSettlement',
+    settlement?: RoutingSettlement,
+  ) => void
   componentOptions: OptItem[]
   spawnOptions: OptItem[]
+  hideOverlayOptions: OptItem[]
   overlays?: Record<string, Overlay>
   fieldTree: FieldNode[]
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
   onChange: (next: Reaction[] | undefined) => void
 }): JSX.Element {
   const settlements = (reactions ?? []).filter(isSettlement)
@@ -374,16 +507,16 @@ function LifecycleReactionsEditor({
     const when: Reaction['when'] =
       type === 'at'
         ? { type: 'at', ms: lifecycleAtMs(current, durationMs) }
-        : type === 'watch'
+        : type === 'condition'
           ? { type: 'watch', of: '', on: 'change' }
           : { type, of: componentOptions[0]?.value ?? '' }
     patchAt(i, { ...current, when })
   }
 
   useEffect(() => {
-    if (focusedIndex == null) return
+    if (focusAnchorRevision == null || focusedIndex == null) return
     itemRefs.current[focusedIndex]?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-  }, [focusedIndex, focusAnchorRevision])
+  }, [focusAnchorRevision])
 
   useEffect(() => {
     if (focusedIndex != null && focusedIndex >= settlements.length) onFocusIndex?.(null)
@@ -397,6 +530,8 @@ function LifecycleReactionsEditor({
         const legacy = isLifecycle(r) ? legacyPhaseHint(r) : null
         const triggerType = settlementTriggerType(r)
         const watchWhen = r.when.type === 'watch' ? r.when : null
+        const stateWhen = r.when.type === 'state' ? r.when : null
+        const conditionMode = stateWhen ? 'state' : (watchWhen?.on ?? 'change')
         const componentWhen = r.when.type === 'shown' || r.when.type === 'hidden' ? r.when : null
         const focused = focusedIndex === i
         return (
@@ -406,7 +541,10 @@ function LifecycleReactionsEditor({
             data-lifecycle-effect-index={i}
             data-settlement-index={i}
             data-selected={focused ? 'true' : 'false'}
-            onPointerDown={() => onFocusIndex?.(i)}
+            onClick={(event) => {
+              if (isSettlementControlTarget(event.target)) return
+              onFocusIndex?.(i)
+            }}
             style={{
               border: `1px solid ${focused ? '#5ad4c0' : '#2a2a2a'}`,
               borderRadius: 6,
@@ -426,42 +564,67 @@ function LifecycleReactionsEditor({
                 ))}
               </select>
               <button type="button" style={{ color: '#ff6b6b', fontSize: 11 }} onClick={() => removeAt(i)}>
-                移除
+                删除结算
               </button>
             </div>
             {triggerType === 'at' ? (
               <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                 <span style={{ fontSize: 12, opacity: 0.8, flexShrink: 0 }}>播到</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
+                <LooseNumberInput
                   value={atMs}
+                  emptyValue={0}
                   title={durationMs ? `本节点演出 ${durationMs}ms` : undefined}
-                  onChange={(e) => patchAt(i, { ...r, when: { type: 'at', ms: Math.max(0, Number(e.target.value) || 0) } })}
+                  onChange={(value) => patchAt(i, { ...r, when: { type: 'at', ms: Math.max(0, value) } })}
                   style={{ width: 88, minWidth: 0 }}
                 />
                 <span style={{ fontSize: 11, opacity: 0.65, flexShrink: 0 }}>ms</span>
               </span>
             ) : null}
-            {watchWhen ? (
+            {watchWhen || stateWhen ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <WatchFieldEditor
-                  tree={fieldTree}
-                  value={watchWhen.of}
-                  onChange={(of) => patchAt(i, { ...r, when: { ...watchWhen, of } })}
-                />
-                {row('方向', (
+                {row('条件类型', (
                   <select
-                    value={watchWhen.on ?? 'change'}
-                    onChange={(e) => patchAt(i, { ...r, when: { ...watchWhen, on: e.target.value as 'change' | 'inc' | 'dec' } })}
+                    aria-label="条件类型"
+                    value={conditionMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as 'change' | 'inc' | 'dec' | 'state'
+                      const when: Reaction['when'] = mode === 'state'
+                        ? { type: 'state', condition: stateWhen?.condition ?? { all: [] } }
+                        : {
+                            type: 'watch',
+                            of: watchWhen?.of ?? (stateWhen ? watchPathFromCondition(stateWhen.condition) : ''),
+                            on: mode,
+                          }
+                      patchAt(i, { ...r, when })
+                    }}
                     style={{ flex: 1 }}
                   >
-                    <option value="change">变化</option>
-                    <option value="inc">增加</option>
-                    <option value="dec">减少</option>
+                    <option value="change">数值变化</option>
+                    <option value="inc">数值增加</option>
+                    <option value="dec">数值减少</option>
+                    <option value="state">条件满足</option>
                   </select>
                 ))}
+                {watchWhen ? (
+                  <WatchFieldEditor
+                    tree={fieldTree}
+                    value={watchWhen.of}
+                    onChange={(of) => patchAt(i, { ...r, when: { ...watchWhen, of } })}
+                  />
+                ) : null}
+                {stateWhen ? (
+                  <ConditionEditor
+                    value={stateWhen.condition}
+                    nodeIds={nodeOptions.map((option) => option.value)}
+                    pickers={pickers}
+                    entities={entities}
+                    variables={variables}
+                    onChange={(condition) => patchAt(i, {
+                      ...r,
+                      when: { type: 'state', condition: condition ?? { all: [] } },
+                    })}
+                  />
+                ) : null}
               </div>
             ) : null}
             {componentWhen ? row('界面', (
@@ -481,22 +644,57 @@ function LifecycleReactionsEditor({
             <div style={{ fontSize: 11, opacity: 0.7, margin: '8px 0 4px' }}>动作</div>
             <NodeActionsEditor
               actions={r.do}
-              edgeOptions={edgeOptions}
               spawnOptions={spawnOptions}
               overlays={overlays}
               pickers={pickers}
-              allowSpawn={false}
-              onChange={(actions) => patchAt(i, { ...r, do: actions })}
+              allowSpawn={triggerType === 'condition'}
+              allowHideOverlay={triggerType === 'condition'}
+              defaultSpawnTtlMs={1200}
+              hideOverlayOptions={hideOverlayOptions}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              renderAdvance={(action, actionIndex) => {
+                const edge = action.edgeId ? advanceEdgeFor(action.edgeId) : undefined
+                return (
+                  <>
+                    <AdvanceTargetRow
+                      sourceLabel={sourceLabel}
+                      currentTarget={advanceTargetFor(action.edgeId)}
+                      nodeOptions={nodeOptions}
+                      onChange={(targetId) => onAdvanceTargetChange(i, actionIndex, targetId)}
+                    />
+                    {edge ? (
+                      <RouteTimingEditor
+                        edge={edge}
+                        routingSettlement={routingSettlement}
+                        defaultAtMs={atMs}
+                        onChange={(transition, settlement) => onSetAdvanceTiming(action.edgeId, transition, settlement)}
+                      />
+                    ) : null}
+                  </>
+                )
+              }}
+              onChange={(actions) => {
+                const advanceIndex = r.do.findIndex((action) => action.kind === 'advance')
+                if (advanceIndex >= 0 && !actions.some((action) => action.kind === 'advance')) {
+                  onAdvanceTargetChange(i, advanceIndex, '')
+                  return
+                }
+                patchAt(i, { ...r, do: actions })
+              }}
             />
           </div>
         )
       })}
       <button
         type="button"
-        onClick={() => commit([...settlements, {
-          when: { type: 'at', ms: 0 },
-          do: [{ kind: 'effect', effects: [createDefaultEffect('attr', entities ?? pickers?.entities, variables ?? pickers?.variables)] }],
-        }])}
+        onClick={() => {
+          const nextIndex = settlements.length
+          commit([...settlements, {
+            when: { type: 'at', ms: Math.max(0, Math.round(insertMs ?? 0)) },
+            do: [{ kind: 'effect', effects: [createDefaultEffect('attr', entities ?? pickers?.entities, variables ?? pickers?.variables)] }],
+          }])
+          onFocusIndex?.(nextIndex)
+        }}
       >
         ＋ 结算
       </button>
@@ -575,59 +773,33 @@ function OverlayReactionsEditor({
           const multiPool = pool.length > 1
           const currentTarget = multiPool ? '' : (advanceEdge?.target ?? (pool.length === 1 ? pool[0]!.target : ''))
           const routeEdge = advanceEdge ?? pool[0]
-          const timing = routeEdge?.data?.transition === 'onSettlement'
-            ? routingSettlement?.type === 'at' ? 'at' : 'complete'
-            : 'immediate'
           const hint = routeHints?.[event.localEventId] ?? routeHints?.[event.eventId]
           const sourceNode = graph.nodes.find((candidate) => candidate.id === nodeId)
-          const sourceLabel = sourceNode ? `${sourceNode.data.name || sourceNode.id} (${sourceNode.id})` : nodeId
+          const sourceLabel = sourceNode ? authoringOptionLabel(sourceNode.data.name, sourceNode.id) : nodeId
           return (
             <div style={{ marginTop: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 4, fontSize: 12 }}>
-                <span style={{ opacity: 0.7, flexShrink: 0 }}>从</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceLabel}>{sourceLabel}</span>
-                <span style={{ opacity: 0.7, flexShrink: 0 }}>到</span>
-                {multiPool ? (
+              {multiPool ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, marginBottom: 4, fontSize: 12 }}>
+                  <span style={{ opacity: 0.7, flexShrink: 0 }}>从</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceLabel}>{sourceLabel}</span>
+                  <span style={{ opacity: 0.7, flexShrink: 0 }}>到</span>
                   <span style={{ fontSize: 11, color: '#ce9178', minWidth: 0 }}>多目标边池（{pool.length}）· 请在「出边」调整 {hint ?? ''}</span>
-                ) : (
-                  <select aria-label="目标节点" value={currentTarget} onChange={(e) => onRouteTo(event, e.target.value)} style={{ flex: 1, minWidth: 0 }}>
-                    <option value="">（无 · 只做副作用）</option>
-                    {nodeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                )}
-              </div>
-              {routeEdge ? row('跳转时机', (
-                <select
-                  value={timing}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    if (value === 'immediate') onSetRouteTiming(event, 'immediate')
-                    else if (value === 'at') onSetRouteTiming(event, 'onSettlement', { type: 'at', ms: 1000 })
-                    else onSetRouteTiming(event, 'onSettlement', { type: 'complete' })
-                  }}
-                  style={{ flex: 1 }}
-                >
-                  <option value="immediate">立即跳转</option>
-                  <option value="complete">当前节点播放结束时</option>
-                  <option value="at">播放到指定时间时</option>
-                </select>
-              )) : null}
-              {routeEdge && timing === 'at' ? row('结算时间', (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={routingSettlement?.type === 'at' ? routingSettlement.ms : 0}
-                    onChange={(e) => onSetRouteTiming(event, 'onSettlement', {
-                      type: 'at',
-                      ms: Math.max(0, Number(e.target.value) || 0),
-                    })}
-                    style={{ flex: 1, minWidth: 0 }}
-                  />
-                  <span style={{ fontSize: 11, opacity: 0.65 }}>ms</span>
-                </span>
-              )) : null}
+                </div>
+              ) : (
+                <AdvanceTargetRow
+                  sourceLabel={sourceLabel}
+                  currentTarget={currentTarget}
+                  nodeOptions={nodeOptions}
+                  onChange={(targetId) => onRouteTo(event, targetId)}
+                />
+              )}
+              {routeEdge ? (
+                <RouteTimingEditor
+                  edge={routeEdge}
+                  routingSettlement={routingSettlement}
+                  onChange={(transition, settlement) => onSetRouteTiming(event, transition, settlement)}
+                />
+              ) : null}
             </div>
           )
         }}
@@ -651,21 +823,21 @@ function buildFieldTree(
 ): FieldNode[] {
   const ents: FieldNode[] = Object.values(entities ?? {}).map((e) => ({
     seg: e.id,
-    label: e.name && e.name !== e.id ? `${e.name} (${e.id})` : e.id,
+    label: authoringOptionLabel(e.name, e.id),
     children: [
       {
         seg: 'attr',
         label: '属性',
         children: Object.keys(e.attrs ?? {}).map((a) => ({
           seg: a,
-          label: e.attrMeta?.[a]?.label ? `${e.attrMeta[a]!.label} (${a})` : a,
+          label: authoringOptionLabel(e.attrMeta?.[a]?.label, a),
         })),
       },
     ],
   }))
   const vars: FieldNode[] = Object.values(variables ?? {}).map((v) => ({
     seg: v.id,
-    label: v.name && v.name !== v.id ? `${v.name} (${v.id})` : v.id,
+    label: authoringOptionLabel(v.name, v.id),
   }))
   return [
     { seg: 'entity', label: '实体', children: ents },
@@ -862,6 +1034,7 @@ export function NodeInspector({
   formulas,
   focusedMountId,
   focusedLifecycleIndex,
+  settlementInsertMs,
   focusAnchorRevision,
   onFocusMount,
   onFocusLifecycle,
@@ -872,6 +1045,8 @@ export function NodeInspector({
   onEnsureOverlay,
   onDropOverlayIfOrphan,
   onRemoveMount,
+  onCreateEntityAttribute,
+  onCreateEntity,
   onJump,
 }: {
   graph: GameGraph
@@ -900,6 +1075,8 @@ export function NodeInspector({
   focusedMountId?: string | null
   /** 预览台时间轴当前选中的结算（子集序号）；本区域据此高亮对应配置块。 */
   focusedLifecycleIndex?: number | null
+  /** 新增定时结算的插入时刻；没有时间轴选中时省略并回落到 0ms。 */
+  settlementInsertMs?: number
   /** 每次从预览/时间轴发起选中都会递增；确保重复选同一项也重新滚动。 */
   focusAnchorRevision?: number
   /** 点击某挂载卡片标题时上抛（与预览台双向联动）；再次点同一张 = 取消聚焦（回到全展开）。 */
@@ -927,6 +1104,10 @@ export function NodeInspector({
    * 未传则回落为只改 `overlayNodes`（旧行为，边会残留）。
    */
   onRemoveMount?: (mountId: string) => void
+  /** 新血条绑定缺失 hp 时，经面板二次确认后补建到场景实体目录。 */
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
+  /** 新血条没有可选实体时，经面板二次确认后补建到场景实体目录。 */
+  onCreateEntity?: EntityCreateHandler
   onJump?: (id: string) => void
 }): JSX.Element {
   // 「音乐动作」在还没选曲子时也得选得动：没有 ref 的 push / replace 落不了盘（volume-only
@@ -943,24 +1124,17 @@ export function NodeInspector({
   }
   const mountCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   useEffect(() => {
-    if (!focusedMountId) return
+    if (focusAnchorRevision == null || !focusedMountId) return
     mountCardRefs.current[focusedMountId]?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-  }, [focusedMountId, focusAnchorRevision])
+  }, [focusAnchorRevision])
   const node = graph.nodes.find((n) => n.id === nodeId)
   if (!node || !nodeId) return <div style={{ padding: 10, opacity: 0.6, fontSize: 12 }}>点画布上的节点以编辑</div>
   const d = node.data
   const nodeIds = graph.nodes.map((n) => n.id)
-  /** 下拉展示：名称优先，id 作后缀（名称与 id 相同时只显示一份）。 */
+  /** 下拉展示：中文名称只显示名称；没有中文名称时保留 id 兜底。 */
   const nodeLabel = (id: string) => {
     const n = graph.nodes.find((x) => x.id === id)
-    const name = n?.data.name?.trim()
-    if (!name || name === id) return id
-    return `${name} (${id})`
-  }
-  const overlayLabel = (id: string) => {
-    const title = overlays?.[id]?.title?.trim() || PRESET_SCHEME_BY_ID[id]?.title?.trim()
-    if (!title || title === id) return id
-    return `${title} (${id})`
+    return authoringOptionLabel(n?.data.name, id)
   }
   // 「默认样式 / ＋ 挂载」与界面 tab 保持同一份列表：自定义覆盖物 + 基础覆盖物（打平），
   // 直接从 live overlays 派生（见 builtin-schemes），不再用固化的 PRESET_SCHEME_OVERLAYS。
@@ -996,9 +1170,8 @@ export function NodeInspector({
     ? (nestPack.version ? `${nestPack.id}@${nestPack.version}` : nestPack.id)
     : ''
   const packLabel = (p: SubFlowPackDef) => {
-    const title = p.title?.trim()
     const key = `${p.id}@${p.version}`
-    return title && title !== p.id ? `${title} (${key})` : key
+    return authoringOptionLabel(p.title, key)
   }
   /** 下拉候选：排除自引用 + 会成环的候选（`isRefAllowed`）；已挂载的当前包永远保留展示，避免选中项丢失。 */
   const eligiblePacks = packs.filter((p) => p.id === nestPack?.id || !isRefAllowed || isRefAllowed(p.id))
@@ -1007,37 +1180,43 @@ export function NodeInspector({
   const compLabel = (component: string) => getComponentManifest(component)?.label ?? component
   const componentOptions: OptItem[] = (d.overlayNodes ?? []).flatMap((m) => {
     const mountId = overlayMountId(m)
-    return resolveMountChildren(overlays, m).map((c) => ({
-      value: `${mountId}/${c.id}`,
-      label: `${compLabel(c.component)}（${mountId}/${c.id}）`,
-    }))
+    const overlayTitle = overlays?.[m.overlay]?.title?.trim() || PRESET_SCHEME_BY_ID[m.overlay]?.title?.trim()
+    return resolveMountChildren(overlays, m).map((c) => {
+      const value = `${mountId}/${c.id}`
+      const names = [overlayTitle, compLabel(c.component)].filter((part, index, all) => part && all.indexOf(part) === index)
+      return { value, label: authoringOptionLabel(names.join(' · '), value) }
+    })
+  })
+  const hideOverlayOptions: OptItem[] = (d.overlayNodes ?? []).map((mount) => {
+    const mountId = overlayMountId(mount)
+    return { value: mountId, label: authoringOptionLabel(overlayDisplayLabel(mount.overlay, overlays), mountId) }
   })
   // spawn 模板只列界面方案（排除 node:* 本地内容容器 / 历史 fork）。
   const spawnOptions: OptItem[] = Object.values(overlays ?? {})
     .filter((o) => !o.id.startsWith('node:'))
     .flatMap((o) =>
-      o.children.map((c) => ({ value: `${o.id}/${c.id}`, label: `${compLabel(c.component)} · ${o.id}/${c.id}` })),
+      o.children.map((c) => {
+        const value = `${o.id}/${c.id}`
+        const names = [o.title?.trim(), compLabel(c.component)].filter((part, index, all) => part && all.indexOf(part) === index)
+        return { value, label: authoringOptionLabel(names.join(' · '), value) }
+      }),
     )
   const fieldTree = buildFieldTree(entities, variables)
   const pickers: EditorPickerCtx = { entities, variables, formulas, nodeLabel }
-  const flowHandleOptions = useMemo(() => {
+  const flowHandleOptions = (() => {
     const extra = graph.edges
       .filter((e) => e.source === node.id)
       .map((e) => e.sourceHandle ?? 'default')
     return mergeFlowHandles(deriveOutputs(node, overlays), extra)
-  }, [node, overlays, graph.edges])
-  const edgeOptions = useMemo<OptItem[]>(
-    () =>
-      graph.edges
-        .filter((e) => e.source === node.id)
-        .map((e) => ({
-          value: e.id,
-          label: `${flowHandleDisplay(e.sourceHandle ?? 'default')} → ${nodeLabel(e.target)}`,
-        })),
-    [graph.edges, node.id, nodeLabel],
-  )
+  })()
+  const edgeOptions: OptItem[] = graph.edges
+    .filter((e) => e.source === node.id)
+    .map((e) => ({
+      value: e.id,
+      label: `${flowHandleDisplay(e.sourceHandle ?? 'default')} → ${nodeLabel(e.target)}`,
+    }))
   /** 每个交互出口 → 目标节点摘要（单边 `→ X`，多边 `→ A | B`）。 */
-  const routeHints = useMemo(() => {
+  const routeHints = (() => {
     const byHandle = new Map<string, string[]>()
     for (const e of graph.edges) {
       if (e.source !== node.id) continue
@@ -1052,22 +1231,35 @@ export function NodeInspector({
       out[h] = labels.length === 1 ? `→ ${labels[0]}` : `→ ${labels.join(' | ')}（边池）`
     }
     return out
-  }, [graph.edges, node.id, nodeLabel])
+  })()
 
   const patchData = (p: NodeDataPatch) => onChange(updateNodeData(graph, node.id, p))
-  /**
-   * 编辑挂载组件的 inputs（NodeInspector 为准）：写成本挂载的稀疏 override（overrides[childId].inputs）。
-   * 值来自 ComponentFormFields（按 manifest.inputs 出控件），full-bag 覆盖——共享方案未改组件仍跟随原型。
-   */
+  /** added 组件直接改自身；方案原型组件只保存相对方案的字段级差量。 */
   const setChildInputs = (mountIndex: number, childId: string, nextInputs: Record<string, unknown>) => {
     const mounts = [...(d.overlayNodes ?? [])]
     const mount = mounts[mountIndex]
     if (!mount) return
-    const prev = mount.overrides?.[childId]
-    mounts[mountIndex] = {
-      ...mount,
-      overrides: { ...mount.overrides, [childId]: { ...prev, inputs: nextInputs } },
+    const addedIndex = mount.added?.findIndex((child) => child.id === childId) ?? -1
+    if (addedIndex >= 0) {
+      const added = [...(mount.added ?? [])]
+      added[addedIndex] = { ...added[addedIndex]!, inputs: nextInputs }
+      mounts[mountIndex] = { ...mount, added }
+      patchData({ overlayNodes: mounts })
+      return
     }
+
+    const base = overlays?.[mount.overlay]?.children.find((child) => child.id === childId)
+    if (!base) return
+    const sparseInputs = sparseOverlayInputOverride(base.inputs, nextInputs)
+    const prev = mount.overrides?.[childId]
+    const nextPatch: Partial<OverlayChild> = { ...prev }
+    if (Object.keys(sparseInputs).length > 0) nextPatch.inputs = sparseInputs
+    else delete nextPatch.inputs
+
+    const overrides = { ...mount.overrides }
+    if (Object.keys(nextPatch).length > 0) overrides[childId] = nextPatch
+    else delete overrides[childId]
+    mounts[mountIndex] = { ...mount, overrides: Object.keys(overrides).length ? overrides : undefined }
     patchData({ overlayNodes: mounts })
   }
   const targetNodeOptions: OptItem[] = nodeIds
@@ -1186,7 +1378,7 @@ export function NodeInspector({
           ) : null}
           <option value="">（无演出）</option>
           {videoOptions.map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
+            <option key={option.id} value={option.id}>{authoringOptionLabel(option.label, option.id)}</option>
           ))}
         </select>
       ))}
@@ -1282,7 +1474,7 @@ export function NodeInspector({
           >
             <option value="">＋ 添加界面</option>
             {schemeOverlayIds.map((id) => (
-              <option key={id} value={id}>{overlayLabel(id)}</option>
+              <option key={id} value={id}>{overlayDisplayLabel(id, overlays)}</option>
             ))}
           </select>
         </div>
@@ -1297,8 +1489,7 @@ export function NodeInspector({
               getComponentManifest,
               { mountId: mid, prefixMount: multi },
             )
-            const mountTitle = overlays?.[mount.overlay]?.title?.trim() || PRESET_SCHEME_BY_ID[mount.overlay]?.title?.trim()
-            const titleText = mountTitle && mountTitle !== mid ? `${mountTitle} (${mid})` : mid
+            const titleText = overlayDisplayLabel(mount.overlay, overlays)
             // 聚焦联动：有聚焦时只展开该挂载，其余折叠为标题行；无聚焦 = 全展开（默认）。
             const focused = focusedMountId === mid
             const expanded = !focusedMountId || focused
@@ -1357,57 +1548,18 @@ export function NodeInspector({
                   <div style={{ marginBottom: 4 }}>
                     {sectionLabel('组件参数')}
                     {mountChildren.map((child) => {
-                      const compName = getComponentManifest(child.component)?.label ?? child.component
                       const inputs = (child.inputs ?? {}) as Record<string, unknown>
-                      const summary = summarizeComponentInputs(inputs)
                       return (
-                        // 一个组件 = 一张卡片：展开后「参数」「事件」两组都被这层边框+底色包住，
-                        // 读起来是同一个整体（对齐 NodeActionsEditor 行的卡片写法）。
-                        <details
+                        <ComponentInputsDisclosure
                           key={child.id}
-                          style={{
-                            marginBottom: 6,
-                            border: '1px solid #2a2a2a',
-                            borderRadius: 6,
-                            padding: '2px 8px',
-                            fontSize: 11,
-                            background: 'rgba(0,0,0,0.22)',
-                          }}
-                        >
-                          <summary
-                            style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              alignItems: 'center',
-                              gap: 6,
-                              cursor: 'pointer',
-                              listStyle: 'none',
-                              padding: '2px 0',
-                            }}
-                            title={`组件 ${child.id}（${compName}）的 inputs。展开后编辑；悬停各字段可看说明。`}
-                          >
-                            <span style={{ opacity: 0.65 }}>组件</span>
-                            <b>{child.id}</b>
-                            <span style={{ opacity: 0.55 }}>· {compName}</span>
-                            {summary ? (
-                              <span style={{ fontFamily: 'ui-monospace, monospace', opacity: 0.75 }}>{summary}</span>
-                            ) : null}
-                            <span style={{ opacity: 0.4, marginLeft: 'auto' }}>▾</span>
-                          </summary>
-                          <div style={{ padding: '4px 0 6px' }}>
-                            {/* x/y 不在本面板出数字框：位置统一在左侧预览台拖拽调（拖拽直接写
-                                inputs.x/y）。仍保留在组件 manifest 里，因为 isPositionable() 靠它
-                                判定该组件能否拖拽定位。 */}
-                            <ComponentFormFields
-                              componentId={child.component}
-                              values={inputs}
-                              onChange={(next) => setChildInputs(i, child.id, next)}
-                              pickers={pickers}
-                              excludeKeys={['x', 'y']}
-                              density="compact"
-                            />
-                          </div>
-                        </details>
+                          childId={child.id}
+                          componentId={child.component}
+                          values={inputs}
+                          onChange={(next) => setChildInputs(i, child.id, next)}
+                          pickers={pickers}
+                          onCreateEntityAttribute={onCreateEntityAttribute}
+                          onCreateEntity={onCreateEntity}
+                        />
                       )
                     })}
                   </div>
@@ -1444,23 +1596,44 @@ export function NodeInspector({
         ) : null}
       </div>
 
-      {/* 定时 / 数值变化 / 界面显隐统一为结算；底层仍是同一组 node.data.reactions。 */}
+      {/* 定时 / 条件 / 界面显隐统一为结算；底层仍是同一组 node.data.reactions。 */}
       <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 6 }}>
         <b>结算</b>
         <LifecycleReactionsEditor
           reactions={d.reactions}
+          sourceLabel={nodeLabel(node.id)}
+          nodeOptions={targetNodeOptions}
           durationMs={d.durationMs}
+          insertMs={settlementInsertMs}
           focusedIndex={focusedLifecycleIndex}
           focusAnchorRevision={focusAnchorRevision}
           onFocusIndex={onFocusLifecycle}
           pickers={pickers}
           entities={entities}
           variables={variables}
-          edgeOptions={edgeOptions}
+          advanceEdgeFor={(edgeId) => graph.edges.find((edge) => edge.id === edgeId)}
+          advanceTargetFor={(edgeId) => graph.edges.find((edge) => edge.id === edgeId)?.target ?? ''}
+          onAdvanceTargetChange={(settlementIndex, actionIndex, targetId) => onChange(
+            setSettlementAdvanceTarget(graph, node.id, settlementIndex, actionIndex, targetId),
+          )}
+          routingSettlement={d.routingSettlement}
+          onSetAdvanceTiming={(edgeId, transition, settlement) => {
+            const edge = graph.edges.find((candidate) => candidate.id === edgeId)
+            if (!edge) return
+            onChange(updateEventRouteTiming(
+              graph,
+              node.id,
+              edge.sourceHandle ?? 'default',
+              transition,
+              settlement,
+            ))
+          }}
           componentOptions={componentOptions}
           spawnOptions={spawnOptions}
+          hideOverlayOptions={hideOverlayOptions}
           overlays={overlays}
           fieldTree={fieldTree}
+          onCreateEntityAttribute={onCreateEntityAttribute}
           onChange={(reactions) => patchData({ reactions })}
         />
       </div>
@@ -1543,7 +1716,7 @@ export function NodeInspector({
                 ) : null}
                 <option value="">（空）</option>
                 {audioOptions.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
+                  <option key={option.id} value={option.id}>{authoringOptionLabel(option.label, option.id)}</option>
                 ))}
               </select>
             ))}
@@ -1557,6 +1730,7 @@ export function NodeInspector({
                 />
                 <input
                   type="range"
+                  className="ni-bgm-volume"
                   aria-label="BGM 音量"
                   min={0}
                   max={1}
@@ -1564,7 +1738,12 @@ export function NodeInspector({
                   value={bgm?.volume ?? 1}
                   disabled={bgm?.volume === undefined}
                   onChange={(e) => patchData({ bgm: patchNodeBgm(bgm, { volume: Number(e.target.value) }) })}
-                  style={{ flex: 1, minWidth: 0 }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: 0,
+                    background: `linear-gradient(to right, #1683ff 0%, #1683ff ${(bgm?.volume ?? 1) * 100}%, rgba(255, 255, 255, 0.3) ${(bgm?.volume ?? 1) * 100}%, rgba(255, 255, 255, 0.3) 100%)`,
+                  }}
                 />
                 <span style={{ width: 48, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   {bgm?.volume === undefined ? '未设置' : `${Math.round(bgm.volume * 100)}%`}
@@ -1573,6 +1752,17 @@ export function NodeInspector({
             ))}
             {bgm?.ref ? (
               <>
+                {row('播放模式', (
+                  <select
+                    aria-label="BGM 播放模式"
+                    value={bgm.loop === false ? 'once' : 'loop'}
+                    onChange={(e) => patchData({ bgm: patchNodeBgm(bgm, { loop: e.target.value === 'loop' ? undefined : false }) })}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="loop">循环</option>
+                    <option value="once">单次</option>
+                  </select>
+                ))}
                 {row('重进时', (
                   <span
                     style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, opacity: 0.85 }}

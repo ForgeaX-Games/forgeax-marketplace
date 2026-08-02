@@ -168,6 +168,7 @@ export function SpawnInputsEditor({
                 value={(bag[inp.key] ?? inp.default) as TextOrRef | undefined}
                 entities={pickers?.entities}
                 variables={pickers?.variables}
+                formulas={pickers?.formulas}
                 onChange={(v) => patchKey(inp.key, v)}
               />
             ) : (

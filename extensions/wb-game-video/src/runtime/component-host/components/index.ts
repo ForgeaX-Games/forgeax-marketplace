@@ -81,7 +81,7 @@ export const HP_BAR_COMPONENTS: Array<{ id: string; label: string }> = [
 
 function installCoreSkins(reg: SkinRegistry): void {
   for (const { component, manifest } of newComponents) {
-    reg.registerOverlayRenderer(manifest.id, component)
+    reg.registerOverlayRenderer(manifest.id, component, manifest)
   }
 }
 
@@ -93,7 +93,7 @@ export function registerCoreSkins(): void {
   registered = true
   for (const { component, manifest } of newComponents) {
     registerComponent(manifest.id, manifest as ComponentDef)
-    registerOverlayRenderer(manifest.id, component)
+    registerOverlayRenderer(manifest.id, component, manifest)
   }
 }
 

@@ -69,7 +69,7 @@ export function ComponentEventsEditor({
     if (actions.length) {
       rest.push({
         when: { type: 'event', id: key },
-        do: actions.filter((action) => action.kind !== 'advance'),
+        do: actions.filter((action) => action.kind !== 'advance' && action.kind !== 'hideOverlay'),
       })
     }
     onCatalogChange?.(rest.length ? rest : undefined)

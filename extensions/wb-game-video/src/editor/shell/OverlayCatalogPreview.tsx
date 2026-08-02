@@ -9,13 +9,13 @@
  *    OverlayCanvasInteraction；本组件只负责 child 的渲染测量与字段写回。
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { Entity, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
+import type { Entity, Layout, Overlay, OverlayChild, Variable } from '../../runtime/schema/graph-schema'
 import { bootEditorSkins } from '../init'
 import { createCoreSkinRegistry } from '../../runtime/component-host/components'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { renderOverlayChildPreview } from './overlayChildPreview'
-import { isInteractive } from './editors'
+import { defaultsForComponent, isInteractive } from './editors'
 import { OVERLAY_PRESET_MIME } from './ComponentLibrary'
 import { overlayFitTargets } from './overlay-fit-targets'
 import {
@@ -27,29 +27,67 @@ import {
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n))
 const num = (v: unknown, d: number): number => (typeof v === 'number' ? v : d)
 
+/** 界面画布应展示动画的可见中段，不能让短时长组件定格在结束后的透明帧。 */
+export function interfaceCanvasPreviewTimeMs(child: OverlayChild, baseTimeMs: number): number {
+  const configured = child.inputs?.durationMs
+  const fallback = defaultsForComponent(child.component).durationMs
+  const durationMs = typeof configured === 'number' && Number.isFinite(configured) && configured > 0
+    ? configured
+    : typeof fallback === 'number' && Number.isFinite(fallback) && fallback > 0
+      ? fallback
+      : undefined
+  if (durationMs == null) return baseTimeMs
+  return Math.round(Math.min(baseTimeMs, durationMs * 0.4) * 1000) / 1000
+}
+
 /** 内容尚未完成 DOM 测量时的临时命中盒。 */
 const DEFAULT_BOX_W = 0.25
 const DEFAULT_BOX_H = 0.15
 const SNAP_INSET_PX = 18
+export const OVERLAY_GRID_STEP_PERCENT = 2.5
 
 /** 归一 stage 矩形。 */
 type NBox = { left: number; top: number; w: number; h: number }
 
 /** 仅供界面 tab 使用的编辑器设计框，不属于发布 schema。 */
 export const DEFAULT_OVERLAY_DESIGN_CANVAS: CanvasBox = {
-  left: 0.1,
-  top: 0.1,
-  width: 0.8,
-  height: 0.8,
+  left: 0,
+  top: 0,
+  width: 1,
+  height: 1,
 }
 const FULL_STAGE_CANVAS: CanvasBox = { left: 0, top: 0, width: 1, height: 1 }
 
-export type OverlaySnapKind = 'vertical-center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+export type OverlayCenterAlignment = 'center' | 'x-center' | 'y-center'
+export type OverlaySnapKind = OverlayCenterAlignment | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 export interface OverlayPlacement {
   left: number
   top: number
   snap: OverlaySnapKind | null
+}
+
+export function overlayBoxCenterAlignment(
+  canvas: CanvasBox,
+  box: CanvasBox,
+  tolerance: { x: number; y: number } = { x: 0.005, y: 0.005 },
+): OverlayCenterAlignment | null {
+  const centeredLeft = canvas.left + (canvas.width - box.width) / 2
+  const centeredTop = canvas.top + (canvas.height - box.height) / 2
+  const xCentered = Math.abs(box.left - centeredLeft) <= tolerance.x
+  const yCentered = Math.abs(box.top - centeredTop) <= tolerance.y
+  if (xCentered && yCentered) return 'center'
+  if (xCentered) return 'x-center'
+  if (yCentered) return 'y-center'
+  return null
+}
+
+export function isOverlayBoxCentered(
+  canvas: CanvasBox,
+  box: CanvasBox,
+  tolerance: { x: number; y: number } = { x: 0.005, y: 0.005 },
+): boolean {
+  return overlayBoxCenterAlignment(canvas, box, tolerance) === 'center'
 }
 
 function clampAxis(value: number, min: number, max: number): number {
@@ -75,7 +113,11 @@ export function placeOverlayBox(
   const insetTop = clampAxis(minTop + inset.y, minTop, maxTop)
   const insetRight = clampAxis(maxLeft - inset.x, minLeft, maxLeft)
   const insetBottom = clampAxis(maxTop - inset.y, minTop, maxTop)
-  const corners: Array<{ kind: Exclude<OverlaySnapKind, 'vertical-center'>; left: number; top: number }> = [
+  const corners: Array<{
+    kind: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+    left: number
+    top: number
+  }> = [
     { kind: 'top-left', left: insetLeft, top: insetTop },
     { kind: 'top-right', left: insetRight, top: insetTop },
     { kind: 'bottom-left', left: insetLeft, top: insetBottom },
@@ -93,12 +135,15 @@ export function placeOverlayBox(
 
   const centeredLeft = canvas.left + (canvas.width - box.width) / 2
   const centeredTop = canvas.top + (canvas.height - box.height) / 2
-  if (Math.abs(left - centeredLeft) <= threshold.x && Math.abs(top - centeredTop) <= threshold.y) {
-    left = centeredLeft
-    top = centeredTop
-    return { left, top, snap: 'vertical-center' }
+  const snapX = Math.abs(left - centeredLeft) <= threshold.x
+  const snapY = Math.abs(top - centeredTop) <= threshold.y
+  if (snapX) left = centeredLeft
+  if (snapY) top = centeredTop
+  return {
+    left,
+    top,
+    snap: snapX && snapY ? 'center' : snapX ? 'x-center' : snapY ? 'y-center' : null,
   }
-  return { left, top, snap: null }
 }
 
 /** 已识别吸附类型后，用组件的真实尺寸求最终落点。 */
@@ -107,6 +152,7 @@ export function positionForOverlaySnap(
   box: Pick<CanvasBox, 'width' | 'height'>,
   snap: OverlaySnapKind,
   inset: { x: number; y: number } = { x: 0, y: 0 },
+  desired: { left: number; top: number } = { left: canvas.left, top: canvas.top },
 ): { left: number; top: number } {
   const left = canvas.left + inset.x
   const top = canvas.top + inset.y
@@ -116,60 +162,14 @@ export function positionForOverlaySnap(
   if (snap === 'top-right') return { left: right, top }
   if (snap === 'bottom-left') return { left, top: bottom }
   if (snap === 'bottom-right') return { left: right, top: bottom }
+  const centeredLeft = canvas.left + (canvas.width - box.width) / 2
+  const centeredTop = canvas.top + (canvas.height - box.height) / 2
+  if (snap === 'x-center') return { left: centeredLeft, top: desired.top }
+  if (snap === 'y-center') return { left: desired.left, top: centeredTop }
   return {
-    left: canvas.left + (canvas.width - box.width) / 2,
-    top: canvas.top + (canvas.height - box.height) / 2,
+    left: centeredLeft,
+    top: centeredTop,
   }
-}
-
-function percentValue(value: number): string {
-  return String(Math.round(value * 1000) / 10)
-}
-
-function OverlayBoundsReadout({ box }: { box: CanvasBox }): JSX.Element {
-  return (
-    <div
-      data-overlay-bounds-readout
-      style={{
-        marginTop: 2,
-        display: 'grid',
-        gridTemplateColumns: 'max-content repeat(2, minmax(70px, 1fr))',
-        alignItems: 'center',
-        gap: 8,
-        minWidth: 0,
-      }}
-    >
-      <div style={{ fontSize: 11, opacity: 0.7, whiteSpace: 'nowrap' }}>
-        虚拟画布尺寸
-      </div>
-      {([
-        ['width', '宽%'],
-        ['height', '高%'],
-      ] as const).map(([key, label]) => (
-        <label
-          key={key}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'max-content minmax(0, 1fr)',
-            alignItems: 'center',
-            gap: 4,
-            minWidth: 0,
-            fontSize: 10,
-            opacity: 0.85,
-          }}
-        >
-          <span style={{ whiteSpace: 'nowrap' }}>{label}</span>
-          <input
-            type="number"
-            value={percentValue(box[key])}
-            aria-label={`覆盖物画布 ${label}`}
-            readOnly
-            style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', fontSize: 11 }}
-          />
-        </label>
-      ))}
-    </div>
-  )
 }
 
 function OverlaySnapGuides({
@@ -183,14 +183,18 @@ function OverlaySnapGuides({
 }): JSX.Element {
   const right = canvas.left + canvas.width
   const bottom = canvas.top + canvas.height
+  const corner = kind === 'top-left' || kind === 'top-right'
+    || kind === 'bottom-left' || kind === 'bottom-right'
+  const showVertical = corner || kind === 'center' || kind === 'x-center'
+  const showHorizontal = corner || kind === 'center' || kind === 'y-center'
   const x = kind === 'top-right' || kind === 'bottom-right'
     ? right - inset.x
-    : kind === 'vertical-center'
+    : kind === 'center' || kind === 'x-center'
       ? canvas.left + canvas.width / 2
       : canvas.left + inset.x
   const y = kind === 'bottom-left' || kind === 'bottom-right'
     ? bottom - inset.y
-    : kind === 'vertical-center'
+    : kind === 'center' || kind === 'y-center'
       ? canvas.top + canvas.height / 2
       : canvas.top + inset.y
   return (
@@ -199,14 +203,18 @@ function OverlaySnapGuides({
       data-snap-guide={kind}
       aria-hidden
     >
-      <span
-        className="ocp-snap-guide is-vertical"
-        style={{ left: `${x * 100}%`, top: `${canvas.top * 100}%`, height: `${canvas.height * 100}%` }}
-      />
-      <span
-        className="ocp-snap-guide is-horizontal"
-        style={{ left: `${canvas.left * 100}%`, top: `${y * 100}%`, width: `${canvas.width * 100}%` }}
-      />
+      {showVertical ? (
+        <span
+          className="ocp-snap-guide is-vertical"
+          style={{ left: `${x * 100}%`, top: `${canvas.top * 100}%`, height: `${canvas.height * 100}%` }}
+        />
+      ) : null}
+      {showHorizontal ? (
+        <span
+          className="ocp-snap-guide is-horizontal"
+          style={{ left: `${canvas.left * 100}%`, top: `${y * 100}%`, width: `${canvas.width * 100}%` }}
+        />
+      ) : null}
     </div>
   )
 }
@@ -225,24 +233,24 @@ const PREVIEW_CSS = `
   box-shadow: inset 0 0 40px rgba(0,0,0,.45);
 }
 .ocp-stage.is-dropping { border-color: var(--gc-accent, #c8955a); box-shadow: inset 0 0 40px rgba(200,149,90,.25); }
-.ocp-stage::after {
-  content: '界面预览';
-  position: absolute; left: 8px; top: 6px;
-  font-size: 10px; letter-spacing: .06em; opacity: .45; pointer-events: none; z-index: 999;
-}
 .ocp-design-canvas {
   position:absolute; z-index:48; box-sizing:border-box; pointer-events:none;
   border: 1px dashed rgba(190,196,204,.72);
-  border-radius: 2px;
+  border-radius: inherit;
   background:
-    repeating-linear-gradient(
-      135deg,
-      rgba(190,196,204,.08) 0,
-      rgba(190,196,204,.08) 6px,
-      rgba(190,196,204,.03) 6px,
-      rgba(190,196,204,.03) 12px
-  );
+    linear-gradient(to right, rgba(190,196,204,.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(190,196,204,.1) 1px, transparent 1px);
+  background-size: var(--ocp-grid-step) var(--ocp-grid-step);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
+}
+.ocp-design-canvas::before,.ocp-design-canvas::after {
+  content:''; position:absolute; pointer-events:none; opacity:.45;
+}
+.ocp-design-canvas::before {
+  left:50%; top:0; bottom:0; border-left:1px dashed rgba(112,190,184,.55);
+}
+.ocp-design-canvas::after {
+  left:0; right:0; top:50%; border-top:1px dashed rgba(112,190,184,.55);
 }
 .ocp-snap-guides { position:absolute; inset:0; z-index:60; pointer-events:none; }
 .ocp-snap-guide {
@@ -275,7 +283,16 @@ const PREVIEW_CSS = `
   font-size: 9px; line-height: 1; padding: 2px 5px; border-radius: 3px;
   background: var(--gc-accent, #c8955a); color: #1a1510; pointer-events: none;
   font-variant-numeric: tabular-nums; font-weight: 600;
+  opacity: 0; visibility: hidden; transition: opacity .12s ease;
 }
+.ocp-align-tag {
+  position:absolute; left:2px; bottom:2px; white-space:nowrap;
+  font-size:9px; line-height:1; padding:2px 5px; border-radius:3px;
+  background:rgba(72,155,149,.92); color:#f2fffd; pointer-events:none; font-weight:600;
+  opacity:0; visibility:hidden; transition:opacity .12s ease;
+}
+.oci-frame.is-hovered > .ocp-dim,
+.oci-frame.is-hovered > .ocp-align-tag { opacity:1; visibility:visible; }
 `
 
 function mockHudCtx(entities: Record<string, Entity> | undefined, variables: Record<string, Variable> | undefined): SkinCtx {
@@ -318,7 +335,7 @@ export interface OverlayCatalogPreviewProps {
   onPatchChildLayout?: (childId: string, patch: Partial<Layout>) => void
   /** 交互热区重叠冲突集变化时回调（DOM 实测得出）——供上层做参数列表标红 / banner。 */
   onWarnChange?: (ids: Set<string>) => void
-  /** 是否显示 80% 白色虚线设计框；基础界面只读预览关闭。 */
+  /** 是否显示铺满舞台的白色虚线设计框；基础界面只读预览关闭。 */
   showDesignCanvas?: boolean
   /** 只在预览中把每个组件的真实内容居中，不修改持久化 layout。 */
   centerChildren?: boolean
@@ -607,17 +624,19 @@ export function OverlayCatalogPreview({
     const cb = contentBoxes[pend.childId]
     if (!child || !cb) return // 尚未渲染/实测完 → 等下一次 contentBoxes 更新
     pendingSnapRef.current = null
+    const pointerDesired = {
+      left: pend.left - cb.w / 2,
+      top: pend.top - cb.h / 2,
+    }
     const desired = pend.snap
       ? positionForOverlaySnap(
           FULL_STAGE_CANVAS,
           { width: cb.w, height: cb.h },
           pend.snap,
           snapInset(),
+          pointerDesired,
         )
-      : {
-          left: pend.left - cb.w / 2,
-          top: pend.top - cb.h / 2,
-        }
+      : pointerDesired
     const placed = placeOverlayBox(
       FULL_STAGE_CANVAS,
       { width: cb.w, height: cb.h },
@@ -686,11 +705,12 @@ export function OverlayCatalogPreview({
             className="ocp-design-canvas"
             data-overlay-design-canvas
             style={{
+              '--ocp-grid-step': `${OVERLAY_GRID_STEP_PERCENT}%`,
               left: `${overlayCanvasRect.left * 100}%`,
               top: `${overlayCanvasRect.top * 100}%`,
               width: `${overlayCanvasRect.width * 100}%`,
               height: `${overlayCanvasRect.height * 100}%`,
-            }}
+            } as CSSProperties}
             aria-hidden
           />
         ) : null}
@@ -725,7 +745,9 @@ export function OverlayCatalogPreview({
                       child,
                       reg,
                       ctx,
-                      timeMs,
+                      interactive || centerChildren
+                        ? interfaceCanvasPreviewTimeMs(child, timeMs)
+                        : timeMs,
                     )}
                   </div>
                 )
@@ -779,16 +801,35 @@ export function OverlayCatalogPreview({
                     </span>
                   ) : null}
                   {state.selected ? (
-                    <span className="ocp-dim">
-                      {Math.round(state.box.left * stagePx.w)},{Math.round(state.box.top * stagePx.h)}
-                    </span>
+                    <>
+                      {(() => {
+                        const alignment = overlayBoxCenterAlignment(
+                          FULL_STAGE_CANVAS,
+                          state.box,
+                          {
+                            x: stagePx.w > 0 ? 1 / stagePx.w : 0.005,
+                            y: stagePx.h > 0 ? 1 / stagePx.h : 0.005,
+                          },
+                        )
+                        const label = alignment === 'center'
+                          ? 'XY 轴居中'
+                          : alignment === 'x-center'
+                            ? 'X 轴居中'
+                            : alignment === 'y-center'
+                              ? 'Y 轴居中'
+                              : ''
+                        return label ? <span className="ocp-align-tag">{label}</span> : null
+                      })()}
+                      <span className="ocp-dim">
+                        {Math.round(state.box.left * stagePx.w)},{Math.round(state.box.top * stagePx.h)}
+                      </span>
+                    </>
                   ) : null}
                 </>
               )}
             />}
         </div>
       </div>
-      {interactive && showDesignCanvas ? <OverlayBoundsReadout box={overlayCanvasRect} /> : null}
       {/* 预览时刻拖条：仅只读预览态显示（规则 tab 等）；界面 tab 可交互态不显，画布固定 t=400ms 渲染。 */}
       {showScrubber && (
         <label className="ocp-scrub">

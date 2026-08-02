@@ -40,7 +40,7 @@ export interface NodeRuntimeCtx {
   emit(d: RuntimeDirective): void
   childrenOf(node: GameNode): OverlayInstanceChild[]
   runElement(el: OverlayInstanceChild): void
-  /** perf 进入即调：重置本节点态 + seedWatch + 发 playClip(换片清叠层) + 相位置 playing。 */
+  /** perf 进入即调：重置本节点态 + 条件基线 + 发 playClip(换片清叠层) + 相位置 playing。 */
   beginPerform(): void
   /** 容器弹回即调：重置 fired + 相位置 playing（不重播演出）。 */
   beginResume(): void

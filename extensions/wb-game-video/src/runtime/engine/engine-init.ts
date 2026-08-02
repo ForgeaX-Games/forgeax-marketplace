@@ -5,13 +5,13 @@
  * - entities：attrs 直接拷贝作为初始/当前值；attrMeta 透传（clamp/ratio/复位约束）。
  *   若某 attr 只在 attrMeta 里给了 initial 而 attrs 没有，则用 initial 补上初值。
  *   **无 hp 特权**：hp 只是 attrs 里名为 hp 的一项（约定）。
- * - rng：固定 createRng(0)（落盘不再带 seed；需要可配置时再补回）。
+ * - rng：使用会话注入的 seed；缺省 0，保证 headless 调试和测试可复现。
  */
 import type { GameScenario } from '../schema/graph-schema'
 import { createRng } from './rng'
 import type { MutableEntity, MutableState } from './apply-effects'
 
-export function initState(scenario: GameScenario): MutableState {
+export function initState(scenario: GameScenario, rngSeed = 0): MutableState {
   const vars: Record<string, number> = {}
   const varMeta: Record<string, { min?: number; max?: number }> = {}
   const flags: Record<string, number> = {}
@@ -40,7 +40,7 @@ export function initState(scenario: GameScenario): MutableState {
     flags,
     score: 0,
     items: {},
-    rng: createRng(0),
+    rng: createRng(rngSeed),
     appliedOnce: new Set<string>(),
   }
 }

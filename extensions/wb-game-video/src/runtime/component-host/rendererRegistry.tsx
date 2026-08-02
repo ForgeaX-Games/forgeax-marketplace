@@ -1,13 +1,21 @@
 /**
  * Player 渲染器 registry —— 按 `component`（顶层组件 id）派发**独立 React 组件**。
  *
- * 全部组件统一 overlay 表（含原 interaction）；事件经 `emit` → session.emitEvent。
+ * 一律经 RuntimeComponentHost 解析 numberExpr / bind+attr 后，以扁平 props 交给叶子。
+ * 事件经 `emit` → session.emitEvent。
  */
 import { Component, createContext, useContext, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
+import type { ComponentManifest } from '../schema/node-config-schema'
 import type { OverlaySnap, OverlayMountSnap, HudSnap } from '../engine/session'
 import type { ConditionTarget } from '../engine/condition'
 import { childWrapStyle, layoutHasExplicitSize, mountWrapStyle } from '../schema/layout'
 import { isPlayerFocused } from '../input/playerFocus'
+import {
+  RuntimeComponentHost,
+  type OverlayRendererRegistration,
+} from './RuntimeComponentHost'
+
+export type { OverlayRendererRegistration } from './RuntimeComponentHost'
 
 /** 皮肤组件渲染时可读的游戏态上下文（vars/entities/score/flags）。 */
 export interface SkinCtx {
@@ -19,16 +27,13 @@ export interface SkinCtx {
   condition?: ConditionTarget
 }
 
+/** @deprecated 叶子已改扁平 props；保留类型仅供少数仍引用 OverlayProps 的旧测试/工具。 */
 export interface OverlayProps {
   overlay: OverlaySnap
-  /** 组件事件（点击 / 判定 / 超时）；由试玩面注入，路由到 session.emitEvent。 */
   emit?: (key: string) => void
-  /** 绘制时 resolve（battleHpBar / floatText expr）与选项门控。 */
   ctx?: SkinCtx
-  /** 编辑器预览。 */
   preview?: boolean
   previewTimeMs?: number
-  /** 编辑器预览是否正在播放；false 时按 previewTimeMs 定格。 */
   previewPlaying?: boolean
 }
 export type OverlayComponent = ComponentType<OverlayProps>
@@ -76,10 +81,14 @@ class SkinErrorBoundary extends Component<{ name: string; fallback?: ReactNode; 
 
 /** 可注入的 Overlay 渲染表（每局 Session 一份）。 */
 export class SkinRegistry {
-  private readonly overlay = new Map<string, OverlayComponent>()
+  private readonly overlay = new Map<string, OverlayRendererRegistration>()
 
-  registerOverlayRenderer(kind: string, c: OverlayComponent): void {
-    this.overlay.set(kind, c)
+  registerOverlayRenderer(
+    kind: string,
+    c: ComponentType<Record<string, unknown>>,
+    manifest?: ComponentManifest,
+  ): void {
+    this.overlay.set(kind, { component: c, manifest })
   }
   /** 是否已注册 overlay 渲染器。 */
   hasOverlayRenderer(id: string): boolean {
@@ -101,8 +110,8 @@ export class SkinRegistry {
     return (
       <div key={mount.mountId} style={wrapStyle}>
         {mount.children.map((child) => {
-          const C = this.overlay.get(child.component)
-          if (!C) return null
+          const registration = this.overlay.get(child.component)
+          if (!registration) return null
           const snap: OverlaySnap = {
             elementId: child.elementId,
             component: child.component,
@@ -112,7 +121,8 @@ export class SkinRegistry {
           return (
             <div key={child.elementId} style={childWrap}>
               <SkinErrorBoundary name={child.component}>
-                <C
+                <RuntimeComponentHost
+                  registration={registration}
                   overlay={snap}
                   emit={(key) => emit?.(child.elementId, key)}
                   ctx={ctx}
@@ -135,11 +145,12 @@ export class SkinRegistry {
     preview?: { timeMs?: number; playing?: boolean },
     ctx?: SkinCtx,
   ): ReactNode {
-    const C = this.overlay.get(overlay.component)
-    if (!C) return null
+    const registration = this.overlay.get(overlay.component)
+    if (!registration) return null
     return (
       <SkinErrorBoundary key={overlay.elementId} name={overlay.component}>
-        <C
+        <RuntimeComponentHost
+          registration={registration}
           overlay={overlay}
           emit={emit}
           ctx={ctx}
@@ -160,8 +171,12 @@ export class SkinRegistry {
 
 export const defaultSkinRegistry = new SkinRegistry()
 
-export function registerOverlayRenderer(kind: string, c: OverlayComponent): void {
-  defaultSkinRegistry.registerOverlayRenderer(kind, c)
+export function registerOverlayRenderer(
+  kind: string,
+  c: OverlayRendererRegistration['component'],
+  manifest?: ComponentManifest,
+): void {
+  defaultSkinRegistry.registerOverlayRenderer(kind, c, manifest)
 }
 export function renderOverlayMount(
   mount: OverlayMountSnap,

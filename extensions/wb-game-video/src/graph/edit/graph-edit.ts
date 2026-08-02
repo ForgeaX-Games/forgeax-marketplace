@@ -5,10 +5,11 @@
  * 连/删边会同步 event reactions 里的 `advance.edgeId`（显式走向）；
  * 未写 advance 时运行时仍可「有边则默认推进」。
  */
-import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef, SubProcess } from '../../runtime/schema/graph-schema'
+import type { EdgeRouting, EdgeTransition, GameEdge, GameGraph, GameNode, Layout, NodeData, OverlayNode, RoutingSettlement, SubFlowPack, SubFlowPackDef, SubProcess } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 import { isLifecycleReaction, isSettlementReaction } from '../../runtime/schema/node-config-schema'
+import { isSettlementAdvanceHandle, SETTLEMENT_ADVANCE_HANDLE_PREFIX } from '../flow-handle-labels'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -352,7 +353,7 @@ function ensureEventAdvanceReaction(node: GameNode, handle: string, edgeId: stri
  */
 export function bindAdvanceToEdge(graph: GameGraph, edge: GameEdge): GameGraph {
   const handle = edge.sourceHandle ?? 'default'
-  if (handle === 'default') return graph
+  if (handle === 'default' || isSettlementAdvanceHandle(handle)) return graph
   const multi = countHandleEdges(graph, edge.source, handle) > 1
   let changed = false
   const nodes = graph.nodes.map((n) => {
@@ -554,6 +555,122 @@ export function setSettlementReactionMs(graph: GameGraph, nodeId: string, settle
   return updateNodeData(graph, nodeId, {
     reactions: reactions.map((r, i) => (i === absolute ? { ...r, when: { type: 'at' as const, ms: next } } : r)),
   })
+}
+
+/** 条件结算界面在视频预览画布拖动后，写回对应 spawn 动作的既有 layout 字段。 */
+export function patchSettlementSpawnLayout(
+  graph: GameGraph,
+  nodeId: string,
+  settlementIndex: number,
+  actionIndex: number,
+  layout: Layout,
+): GameGraph {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!node || !reactions) return graph
+  const absolute = settlementReactionAbsoluteIndex(reactions, settlementIndex)
+  const reaction = reactions[absolute]
+  const action = reaction?.do[actionIndex]
+  if (!reaction || action?.kind !== 'spawn') return graph
+  return updateNodeData(graph, nodeId, {
+    reactions: reactions.map((candidate, reactionIndex) => reactionIndex === absolute
+      ? {
+          ...candidate,
+          do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
+            ? { ...action, layout }
+            : candidateAction),
+        }
+      : candidate),
+  })
+}
+
+function settlementReactionAbsoluteIndex(reactions: Reaction[], settlementIndex: number): number {
+  let seen = -1
+  return reactions.findIndex((reaction) => isSettlementReaction(reaction) && ++seen === settlementIndex)
+}
+
+function graphReferencesAdvanceEdge(graph: GameGraph, edgeId: string): boolean {
+  const references = (reactions: Reaction[] | undefined) =>
+    reactions?.some((reaction) => reaction.do.some((action) => action.kind === 'advance' && action.edgeId === edgeId)) ?? false
+  return graph.nodes.some((node) =>
+    references(node.data.reactions) || node.data.overlayNodes?.some((mount) => references(mount.reactions)),
+  )
+}
+
+function removeOrphanSettlementAdvanceEdge(graph: GameGraph, edgeId: string | undefined): GameGraph {
+  if (!edgeId || graphReferencesAdvanceEdge(graph, edgeId)) return graph
+  const edge = graph.edges.find((candidate) => candidate.id === edgeId)
+  if (!edge || !isSettlementAdvanceHandle(edge.sourceHandle ?? 'default')) return graph
+  return disconnect(graph, edgeId)
+}
+
+/**
+ * 把结算动作的“目标节点”编辑意图落成既有契约：`advance.edgeId` + 一条真实边。
+ * 已有 source→target 边时复用；没有时才创建仅供显式 advance 消费的专用边。
+ */
+export function setSettlementAdvanceTarget(
+  graph: GameGraph,
+  nodeId: string,
+  settlementIndex: number,
+  actionIndex: number,
+  targetId: string,
+): GameGraph {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!node || !reactions) return graph
+  const absolute = settlementReactionAbsoluteIndex(reactions, settlementIndex)
+  const reaction = reactions[absolute]
+  const action = reaction?.do[actionIndex]
+  if (!reaction || action?.kind !== 'advance') return graph
+
+  const currentEdge = graph.edges.find((edge) => edge.id === action.edgeId)
+  if (!targetId) {
+    const next = updateNodeData(graph, nodeId, {
+      reactions: reactions.map((candidate, index) => index === absolute
+        ? { ...candidate, do: candidate.do.filter((_, candidateIndex) => candidateIndex !== actionIndex) }
+        : candidate),
+    })
+    return removeOrphanSettlementAdvanceEdge(next, currentEdge?.id)
+  }
+  if (targetId === nodeId || !graph.nodes.some((candidate) => candidate.id === targetId)) return graph
+
+  let next = graph
+  let edge = currentEdge?.source === nodeId && currentEdge.target === targetId ? currentEdge : undefined
+  edge ??= graph.edges.find((candidate) => candidate.source === nodeId && candidate.target === targetId)
+  if (!edge && currentEdge?.source === nodeId && isSettlementAdvanceHandle(currentEdge.sourceHandle ?? 'default')) {
+    next = reconnect(graph, currentEdge.id, { target: targetId })
+    edge = next.edges.find((candidate) => candidate.id === currentEdge.id)
+  }
+  if (!edge) {
+    const edgeId = newId('edge')
+    next = connect(graph, {
+      id: edgeId,
+      source: nodeId,
+      sourceHandle: `${SETTLEMENT_ADVANCE_HANDLE_PREFIX}${edgeId}`,
+      target: targetId,
+      targetHandle: 'in',
+    })
+    edge = next.edges.find((candidate) => candidate.id === edgeId)
+  }
+  if (!edge) return graph
+
+  const nextNode = next.nodes.find((candidate) => candidate.id === nodeId)
+  const nextReactions = nextNode?.data.reactions
+  if (!nextReactions) return graph
+  const nextAbsolute = settlementReactionAbsoluteIndex(nextReactions, settlementIndex)
+  const nextReaction = nextReactions[nextAbsolute]
+  if (nextReaction?.do[actionIndex]?.kind !== 'advance') return graph
+  next = updateNodeData(next, nodeId, {
+    reactions: nextReactions.map((candidate, index) => index === nextAbsolute
+      ? {
+          ...candidate,
+          do: candidate.do.map((candidateAction, candidateIndex) => candidateIndex === actionIndex
+            ? { kind: 'advance' as const, edgeId: edge.id }
+            : candidateAction),
+        }
+      : candidate),
+  })
+  return removeOrphanSettlementAdvanceEdge(next, currentEdge?.id === edge.id ? undefined : currentEdge?.id)
 }
 
 /**

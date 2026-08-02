@@ -14,15 +14,14 @@ export interface BoundHpBarValues {
 export function resolveBoundHpBarValues(
   inputs: Record<string, unknown>,
   ctx: SkinCtx | undefined,
-  fallbackBind: string,
   fallbackCurrent: number,
   fallbackMax: number,
 ): BoundHpBarValues {
-  const bind = typeof inputs.bind === 'string' && inputs.bind ? inputs.bind : fallbackBind
-  const attr = typeof inputs.attr === 'string' && inputs.attr ? inputs.attr : 'hp'
+  const bind = typeof inputs.bind === 'string' && inputs.bind ? inputs.bind : ''
+  const attr = typeof inputs.attr === 'string' && inputs.attr ? inputs.attr : ''
   const authoredCurrent = typeof inputs.current === 'number' ? inputs.current : undefined
   const authoredMax = typeof inputs.max === 'number' ? inputs.max : undefined
-  const entity = ctx?.hud.entities[bind]
+  const entity = bind && attr ? ctx?.hud.entities[bind] : undefined
 
   if (!entity) {
     return {

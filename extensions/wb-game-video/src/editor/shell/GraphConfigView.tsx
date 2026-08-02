@@ -25,6 +25,15 @@ import {
 import { findDuplicateOverlays } from './overlay-dedup'
 import type { Formula } from '../persist/formula-authoring'
 import { countOverlayReferences } from '../../graph/edit/overlay-edit'
+import {
+  ensureEntity,
+  ensureEntityAttribute,
+  type EntityAttributeCreateRequest,
+  type EntityCreateRequest,
+} from './metaCatalog'
+import type { ScenarioIdRename } from '../persist/scenario-id'
+import { collectItemIds } from './itemCatalog'
+import { nextUniqueOverlayTitle, overlayTitleExists } from './overlay-title'
 
 export interface ConfigTab {
   section: ScenarioSection
@@ -50,6 +59,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const isDraft = useGraphScenario((s) => s.isDraft)
   const savedTip = useGraphScenario((s) => s.savedTip)
   const setMeta = useGraphScenario((s) => s.setMeta)
+  const renameScenarioId = useGraphScenario((s) => s.renameScenarioId)
   const doCommit = useGraphScenario((s) => s.commit) // 保存 = 打版本
   const reset = useGraphScenario((s) => s.reset)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
@@ -76,6 +86,10 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
     () => countOverlayReferences(Object.values(blueprints).map((doc) => doc.graph)),
     [blueprints],
   )
+  const itemIds = useMemo(
+    () => collectItemIds(meta.ui?.overlays, Object.values(blueprints).map((doc) => doc.graph)),
+    [blueprints, meta.ui?.overlays],
+  )
 
   // ── 界面（overlays）形态：树 + 单方案编辑 ──
   const overlaysMode = tabs.length === 1 && tabs[0]?.section === 'overlays'
@@ -93,15 +107,36 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 基础覆盖物方案只锁结构：单组件不可增删；inputs/layout 可编辑。
   const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
-  const setOverlays = (overlays: Record<string, Overlay>) => setMeta({ ...meta, ui: { ...meta.ui, overlays } })
+  const setOverlays = (overlays: Record<string, Overlay>) => {
+    setMeta((current) => ({ ...current, ui: { ...current.ui, overlays } }))
+  }
+  const createEntityAttribute = (request: EntityAttributeCreateRequest) => {
+    setMeta((current) => {
+      const entities = ensureEntityAttribute(current.entities, request)
+      return entities && entities !== current.entities ? { ...current, entities } : current
+    })
+  }
+  const createEntity = (request: EntityCreateRequest) => {
+    setMeta((current) => {
+      const entities = ensureEntity(current.entities, request)
+      return entities !== current.entities ? { ...current, entities } : current
+    })
+  }
   const addScheme = () => {
     const id = allocId('scheme-', allOverlays)
-    setOverlays({ [id]: { id, title: '新方案', children: [] }, ...allOverlays })
+    setOverlays({
+      [id]: { id, title: nextUniqueOverlayTitle(allOverlays), children: [] },
+      ...allOverlays,
+    })
     setSelectedOverlayId(id)
   }
   const renameScheme = (oid: string, title: string) => {
     const ov = allOverlays[oid]
     if (!ov) return
+    if (overlayTitleExists(allOverlays, title, oid)) {
+      window.alert(`界面方案名称「${title.trim()}」已存在`)
+      return
+    }
     setOverlays({ ...allOverlays, [oid]: { ...ov, title } })
   }
   const removeScheme = (oid: string) => {
@@ -249,6 +284,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   entities={meta.entities ?? {}}
                   variables={meta.variables ?? {}}
                   formulas={meta.formulas as Record<string, Formula> | undefined}
+                  itemIds={itemIds}
                   usageCount={overlayUsage[selOverlay] ?? 0}
                   locked={selLocked}
                   duplicateOf={dupMap.get(selOverlay) ?? []}
@@ -259,6 +295,8 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   onPatchChild={(c, patch) => patchOverlayChild(selOverlay, c, patch)}
                   onReactionsChange={(reactions) =>
                     setOverlays({ ...allOverlays, [selOverlay]: { ...ov, reactions } })}
+                  onCreateEntityAttribute={createEntityAttribute}
+                  onCreateEntity={createEntity}
                 />
               )
             }}
@@ -278,6 +316,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
                   section={active}
                   overlayUsage={overlayUsage}
                   onChange={setMeta}
+                  onRenameId={(rename: ScenarioIdRename) => renameScenarioId(rename)}
                 />
               </div>
             )}

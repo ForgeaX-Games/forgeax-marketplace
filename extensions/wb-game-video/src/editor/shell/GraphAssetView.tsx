@@ -23,6 +23,9 @@ const CSS = `
 .alp-workspace-head > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
 .alp-workspace-head h2 { margin: 0; color: var(--color-text-primary); font-size: 13px; }
 .alp-workspace-head > div > span { color: var(--color-text-tertiary); font-size: 11px; }
+.alp-workspace-head > button,.alp-batch-bar button { border: 1px solid var(--color-border-default); border-radius: 6px; padding: 4px 8px; color: var(--color-text-secondary); background: var(--color-background-elevated); font-size: 11px; cursor: pointer; }
+.alp-workspace-head > button.is-on { color: #1a1206; border-color: var(--accent, #f08840); background: var(--accent, #f08840); }
+.alp-batch-bar { display: flex; align-items: center; gap: 8px; }
 .alp-unavailable,.alp-error,.alp-loading { margin: 12px 12px 0; padding: 8px 10px; border: 1px solid var(--color-border-default); border-radius: 8px; font-size: 12px; color: var(--color-text-secondary); background: var(--color-background-elevated); }
 .alp-error { color: var(--color-text-danger); }
 .alp-list { flex: 1; min-height: 0; overflow: auto; background: var(--color-background-canvas); }
@@ -35,6 +38,8 @@ const CSS = `
 .alp-upload-tile-plus { color: var(--primary); font-size: 32px; font-weight: 300; line-height: 1; }
 .alp-upload-tile input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .alp-row { position: relative; display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 8px; background: var(--color-background-base); transition: border-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out); }
+.alp-row-check { position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 4px; background: var(--color-background-elevated); }
+.alp-row-check input { margin: 0; accent-color: var(--accent, #f08840); }
 .alp-row:hover { border-color: var(--color-border-default); transform: translateY(var(--motion-hover-y)); }
 .alp-row.is-selected { border-color: var(--primary); background: var(--color-interaction-selected-brand); }
 .alp-row-select { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding: 8px; border: 0; color: var(--color-text-primary); background: transparent; font: inherit; text-align: left; cursor: pointer; }
@@ -70,6 +75,7 @@ const CSS = `
 .alp-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 .alp-dialog button { padding: 6px 10px; border: 1px solid var(--color-border-default); border-radius: 6px; color: var(--color-text-primary); background: var(--color-background-elevated); cursor: pointer; }
 .alp-dialog button:last-child { color: var(--color-text-on-bright-primary); border-color: var(--primary); background: var(--primary); }
+.alp-dialog .alp-dialog-head button { color: var(--color-text-primary); border-color: var(--color-border-default); background: var(--color-background-elevated); }
 .alp-dialog button:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 680px) { .alp-kind-tabs { width: 104px; flex-basis: 104px; } .alp-list--grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } .alp-row-actions { opacity: 1; } .alp-meta { grid-template-columns: 1fr; } }
 `

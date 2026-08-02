@@ -2,6 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_OVERLAY_DESIGN_CANVAS,
+  interfaceCanvasPreviewTimeMs,
+  isOverlayBoxCentered,
+  OVERLAY_GRID_STEP_PERCENT,
+  overlayBoxCenterAlignment,
   OverlayCatalogPreview,
   placeOverlayBox,
 } from '../OverlayCatalogPreview'
@@ -11,8 +15,61 @@ afterEach(cleanup)
 const LOGICAL_CANVAS = { left: 0, top: 0, width: 1, height: 1 }
 
 describe('OverlayCatalogPreview fixed canvas', () => {
-  it('uses a centered 80% viewport with its own full logical coordinate stage', () => {
-    expect(DEFAULT_OVERLAY_DESIGN_CANVAS).toEqual({ left: 0.1, top: 0.1, width: 0.8, height: 0.8 })
+  it('keeps short animated components on a visible frame in the interface canvas', () => {
+    expect(interfaceCanvasPreviewTimeMs({
+      id: 'damage',
+      component: 'DamageFloatText',
+      inputs: { durationMs: 5 },
+    }, 400)).toBe(2)
+    expect(interfaceCanvasPreviewTimeMs({
+      id: 'gain',
+      component: 'GainFloatText',
+      inputs: {},
+    }, 400)).toBe(400)
+
+    const { rerender } = render(
+      <OverlayCatalogPreview
+        overlay={{
+          id: 'scheme',
+          children: [{
+            id: 'damage',
+            component: 'DamageFloatText',
+            inputs: { parameter: '-100', durationMs: 5 },
+          }],
+        }}
+        entities={{}}
+        variables={{}}
+        centerChildren
+        showSelectionFrames
+        showTimeScrubber={false}
+      />,
+    )
+
+    expect(screen.getByText('-100').parentElement).toHaveStyle({ '--preview-t': '2ms' })
+
+    rerender(
+      <OverlayCatalogPreview
+        overlay={{
+          id: 'scheme-gain',
+          children: [{
+            id: 'gain',
+            component: 'GainFloatText',
+            inputs: {},
+          }],
+        }}
+        entities={{}}
+        variables={{}}
+        centerChildren
+        showSelectionFrames
+        showTimeScrubber={false}
+      />,
+    )
+    expect(screen.getByText('+50').parentElement).toHaveStyle({ '--preview-t': '400ms' })
+  })
+
+  it('uses the full viewport without exposing read-only size controls', () => {
+    expect(DEFAULT_OVERLAY_DESIGN_CANVAS).toEqual({ left: 0, top: 0, width: 1, height: 1 })
+    expect(OVERLAY_GRID_STEP_PERCENT).toBe(2.5)
 
     const { container } = render(
       <OverlayCatalogPreview
@@ -23,17 +80,19 @@ describe('OverlayCatalogPreview fixed canvas', () => {
       />,
     )
     expect(container.querySelector('[data-overlay-design-canvas]')).toHaveStyle({
-      left: '10%',
-      top: '10%',
-      width: '80%',
-      height: '80%',
+      left: '0%',
+      top: '0%',
+      width: '100%',
+      height: '100%',
+      '--ocp-grid-step': '2.5%',
     })
     expect(container.querySelector('[data-overlay-coordinate-stage]')).toHaveStyle({
-      left: '10%',
-      top: '10%',
-      width: '80%',
-      height: '80%',
+      left: '0%',
+      top: '0%',
+      width: '100%',
+      height: '100%',
     })
+    expect(container.querySelector('[data-overlay-bounds-readout]')).toBeNull()
   })
 
   it('writes movement in logical 0..1 coordinates inside the inset viewport', async () => {
@@ -77,7 +136,7 @@ describe('OverlayCatalogPreview fixed canvas', () => {
       }
     })
     const onPatchChildLayout = vi.fn()
-    render(
+    const { container } = render(
       <OverlayCatalogPreview
         overlay={{
           id: 'scheme',
@@ -136,15 +195,92 @@ describe('OverlayCatalogPreview fixed canvas', () => {
     expect(placed.top).toBeCloseTo(expectedTop)
   })
 
-  it('snaps to the canvas center on both axes', () => {
+  it.each([
+    ['x-center', { left: 0.405, top: 0.2 }, { left: 0.4, top: 0.2 }],
+    ['y-center', { left: 0.2, top: 0.43 }, { left: 0.2, top: 0.425 }],
+    ['center', { left: 0.405, top: 0.43 }, { left: 0.4, top: 0.425 }],
+  ] as const)('snaps independently to %s', (kind, desired, expected) => {
     const placed = placeOverlayBox(
       LOGICAL_CANVAS,
       { width: 0.2, height: 0.15 },
-      { left: 0.405, top: 0.43 },
+      desired,
       { x: 0.02, y: 0.02 },
     )
-    expect(placed.snap).toBe('vertical-center')
-    expect(placed.left).toBeCloseTo(0.4)
-    expect(placed.top).toBeCloseTo(0.425)
+    expect(placed.snap).toBe(kind)
+    expect(placed.left).toBeCloseTo(expected.left)
+    expect(placed.top).toBeCloseTo(expected.top)
+  })
+
+  it('reports a selected component that is centered on both axes', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-overlay-fit-target')) {
+        return {
+          x: 80,
+          y: 40,
+          left: 80,
+          top: 40,
+          right: 120,
+          bottom: 60,
+          width: 40,
+          height: 20,
+          toJSON: () => ({}),
+        }
+      }
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }
+    })
+
+    const { container } = render(
+      <OverlayCatalogPreview
+        overlay={{
+          id: 'scheme',
+          children: [{
+            id: 'damage',
+            component: 'DamageFloatText',
+            layout: { left: 0, top: 0 },
+            inputs: { value: -25 },
+          }],
+        }}
+        entities={{}}
+        variables={{}}
+        selectedChildId="damage"
+        onSelectChild={vi.fn()}
+        onPatchChildLayout={vi.fn()}
+      />,
+    )
+
+    expect(isOverlayBoxCentered(
+      LOGICAL_CANVAS,
+      { left: 0.4, top: 0.4, width: 0.2, height: 0.2 },
+    )).toBe(true)
+    expect(overlayBoxCenterAlignment(
+      LOGICAL_CANVAS,
+      { left: 0.4, top: 0.2, width: 0.2, height: 0.2 },
+    )).toBe('x-center')
+    expect(overlayBoxCenterAlignment(
+      LOGICAL_CANVAS,
+      { left: 0.2, top: 0.4, width: 0.2, height: 0.2 },
+    )).toBe('y-center')
+    const alignmentTag = await screen.findByText('XY 轴居中')
+    expect(getComputedStyle(alignmentTag).visibility).toBe('hidden')
+
+    fireEvent.pointerMove(screen.getByRole('application', { name: '界面方案画布' }), {
+      clientX: 100,
+      clientY: 50,
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-canvas-item="damage"]')).toHaveClass('is-hovered')
+      expect(getComputedStyle(alignmentTag).visibility).toBe('visible')
+    })
   })
 })

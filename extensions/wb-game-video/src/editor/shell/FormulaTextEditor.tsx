@@ -6,7 +6,7 @@
  *  · 文本框下方一行**结构摘要**：引用了哪些实体/变量、含几个参数、无参数时 `≈ 样例值`
  *    ——不再逐字复述公式串（那与输入框重复）；
  *  · **试算面板**（默认折叠）：含 `?参数` 时给每个参数填样例值，实时算出结果，让用户直观看懂产出；
- *  · 插入工具条：往光标处插入 实体属性 / 变量 / score / 函数 / ?参数（复用 scenario-pickers）。
+ *  · 插入工具条：往光标处插入 实体属性 / 变量 / 函数 / ?参数（复用 scenario-pickers）。
  *
  * 与旧 FormulaAstEditor 的可编辑节点嵌套树不同——文本 ↔ AST 双向经 formula-authoring 的
  * parseFormulaText / previewFormula，runtime expr.ts 不认 hole，故 hole 语法只活在编辑器层。
@@ -16,13 +16,20 @@ import type { Entity, Variable } from '../../runtime/schema/graph-schema'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import { createRng } from '../../runtime/engine/rng'
 import type { FormulaAstNode, FormulaHoleBinding } from '../persist/formula-authoring'
-import { parseFormulaText, previewFormula, serializeFormula } from '../persist/formula-authoring'
+import { normalizeFormulaTextInput, parseFormulaText, previewFormula, serializeFormula } from '../persist/formula-authoring'
 import { formulaHoles, type FormulaHole } from './formulaApply'
 import { AttrPicker, EntityPicker, VariablePicker } from './scenario-pickers'
+import { LooseNumberInput } from './TermChainEditor'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
 const FORMULA_EXAMPLE = 'max(?攻击力 * ?技能倍率 - ?防御力, 0)'
-const HOLE_TOKEN_RE = /\?[\p{L}_][\p{L}\p{N}_]*/gu
+const FORMULA_TOKEN_RE = /\?[\p{L}_][\p{L}\p{N}_]*|entity\.[A-Za-z0-9_-]+\.attr\.[A-Za-z0-9_-]+|var\.[A-Za-z0-9_.-]+/gu
+const refTokenStyle: CSSProperties = {
+  color: '#78b9d6',
+  background: 'rgba(91,153,181,.12)',
+  borderRadius: 3,
+  boxShadow: 'inset 0 0 0 1px rgba(91,153,181,.28)',
+}
 
 /** 样例求值上下文：实体 attrs 原样、变量取 initial；每次试算另建 seed 0 RNG。 */
 function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string, Variable>): EvalCtx {
@@ -74,21 +81,24 @@ function varName(id: string, variables?: Record<string, Variable>): string {
   return variables?.[id]?.name || id
 }
 
-/** 把 `?名字` 统一渲染成 hole tag；输入高亮层和示例公式共用同一份样式。 */
+/** 把参数和状态引用渲染成不同 token，短横线因此明确属于整段引用。 */
 function FormulaSyntax({ text }: { text: string }): JSX.Element {
   const parts: JSX.Element[] = []
   let cursor = 0
-  for (const match of text.matchAll(HOLE_TOKEN_RE)) {
+  for (const match of text.matchAll(FORMULA_TOKEN_RE)) {
     const index = match.index
     if (index > cursor) {
       parts.push(<Fragment key={`text-${cursor}`}>{text.slice(cursor, index)}</Fragment>)
     }
+    const token = match[0]
+    const className = token.startsWith('?') ? 'gc-fx-hole-tag' : 'gc-fx-ref-tag'
+    const style = token.startsWith('?') ? undefined : refTokenStyle
     parts.push(
-      <span className="gc-fx-hole-tag" key={`hole-${index}`}>
-        {match[0]}
+      <span className={className} style={style} key={`token-${index}`}>
+        {token}
       </span>,
     )
-    cursor = index + match[0].length
+    cursor = index + token.length
   }
   if (cursor < text.length) {
     parts.push(<Fragment key={`text-${cursor}`}>{text.slice(cursor)}</Fragment>)
@@ -98,51 +108,68 @@ function FormulaSyntax({ text }: { text: string }): JSX.Element {
 
 export function FormulaTextEditor({
   ast,
+  empty = false,
   entities,
   variables,
+  onEmpty,
   onChange,
 }: {
   ast: FormulaAstNode
+  empty?: boolean
   entities?: Record<string, Entity>
   variables?: Record<string, Variable>
+  onEmpty?: () => void
   onChange: (ast: FormulaAstNode) => void
 }): JSX.Element {
-  const canonical = previewFormula(ast)
+  const canonical = empty ? '' : previewFormula(ast)
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const highlightRef = useRef<HTMLPreElement | null>(null)
+  const lastSelectionRef = useRef({ start: canonical.length, end: canonical.length })
 
   const text = draft ?? canonical
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
+  const normalizedText = (src: string): string =>
+    normalizeFormulaTextInput(src, { entities, variables })
+
+  function rememberSelection(input: HTMLTextAreaElement): void {
+    lastSelectionRef.current = {
+      start: input.selectionStart ?? input.value.length,
+      end: input.selectionEnd ?? input.value.length,
+    }
+  }
 
   // 结构摘要 / 试算面板都基于「当前文本能否解析成 AST」——解析成功用新 AST，失败沿用旧 AST。
   const liveAst = useMemo<FormulaAstNode | null>(() => {
     const src = text.trim()
-    if (!src) return { t: 'num', id: 'n0', v: 0 }
+    if (!src) return null
     try {
-      return parseFormulaText(src)
+      return parseFormulaText(normalizedText(src))
     } catch {
       return null
     }
-  }, [text])
+  }, [text, entities, variables])
 
   const holes = useMemo<FormulaHole[]>(() => (liveAst ? formulaHoles({ id: '', ast: liveAst }) : []), [liveAst])
   const refs = useMemo(() => (liveAst ? collectRefs(liveAst) : null), [liveAst])
   const hasHole = holes.length > 0
-  const sampleValue = !error && !hasHole ? tryEvalExpr(text, { ...ctx, rng: createRng(0) }) : null
+  const sampleValue = text.trim() && !error && !hasHole
+    ? tryEvalExpr(text, { ...ctx, rng: createRng(0) })
+    : null
 
   /** 校验并（成功时）回写 AST。 */
   function commit(next: string): void {
     const src = next.trim()
     if (!src) {
-      onChange({ t: 'num', id: 'n0', v: 0 })
+      if (onEmpty) onEmpty()
+      else onChange({ t: 'num', id: 'n0', v: 0 })
       setDraft(null)
       setError(null)
       return
     }
     try {
-      const nextAst = parseFormulaText(src)
+      const nextAst = parseFormulaText(normalizedText(src))
       setError(null)
       onChange(nextAst)
       setDraft(null)
@@ -153,7 +180,7 @@ export function FormulaTextEditor({
 
   /** 实时校验当前文本（输入 / 插入后调用）。 */
   function revalidate(next: string): void {
-    try { parseFormulaText(next.trim() || '0'); setError(null) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    try { parseFormulaText(normalizedText(next.trim() || '0')); setError(null) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
 
   /** 往光标处插入片段（无选区时追加到末尾）；插入后聚焦并把光标移到片段末。 */
@@ -166,14 +193,15 @@ export function FormulaTextEditor({
       revalidate(next)
       return
     }
-    const start = ta.selectionStart ?? base.length
-    const end = ta.selectionEnd ?? base.length
+    const start = Math.min(lastSelectionRef.current.start, base.length)
+    const end = Math.min(Math.max(start, lastSelectionRef.current.end), base.length)
     const next = base.slice(0, start) + frag + base.slice(end)
+    const pos = start + frag.length
+    lastSelectionRef.current = { start: pos, end: pos }
     setDraft(next)
     revalidate(next)
     requestAnimationFrame(() => {
       ta.focus()
-      const pos = start + frag.length
       ta.setSelectionRange(pos, pos)
     })
   }
@@ -201,17 +229,35 @@ export function FormulaTextEditor({
           spellCheck={false}
           rows={2}
           value={text}
+          placeholder="输入公式"
+          onFocus={(e) => {
+            if (draft == null && canonical === '0') {
+              e.currentTarget.select()
+              lastSelectionRef.current = { start: 0, end: 1 }
+              return
+            }
+            rememberSelection(e.currentTarget)
+          }}
           onChange={(e) => {
             const next = e.target.value
             setDraft(next)
             revalidate(next)
+            rememberSelection(e.currentTarget)
           }}
+          onSelect={(e) => rememberSelection(e.currentTarget)}
+          onClick={(e) => rememberSelection(e.currentTarget)}
+          onKeyUp={(e) => rememberSelection(e.currentTarget)}
           onScroll={(e) => {
             if (!highlightRef.current) return
             highlightRef.current.scrollTop = e.currentTarget.scrollTop
             highlightRef.current.scrollLeft = e.currentTarget.scrollLeft
           }}
-          onBlur={() => commit(draft ?? canonical)}
+          onBlur={(e) => {
+            rememberSelection(e.currentTarget)
+            const nextFocus = e.relatedTarget as HTMLElement | null
+            if (nextFocus?.closest('.gc-fx-tools')) return
+            commit(draft ?? canonical)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(draft ?? canonical) }
           }}
@@ -234,7 +280,6 @@ export function FormulaTextEditor({
                 变量 {[...refs.vars].map((id) => varName(id, variables)).join('、')}
               </span>
             )}
-            {refs.usesScore && <span className="gc-fx-summary-item">局面分</span>}
             {hasHole && <span className="gc-fx-summary-item gc-fx-summary-item--hole">参数 {holes.length}</span>}
             {refs.entities.size === 0 && refs.vars.size === 0 && !refs.usesScore && !hasHole && (
               <span className="gc-fx-summary-item gc-fx-summary-item--muted">常量表达式</span>
@@ -250,7 +295,14 @@ export function FormulaTextEditor({
       )}
 
       {/* 插入工具条 */}
-      <div className="gc-fx-tools">
+      <div
+        className="gc-fx-tools"
+        onBlur={(e) => {
+          const nextFocus = e.relatedTarget as Node | null
+          if (nextFocus && (e.currentTarget.contains(nextFocus) || nextFocus === taRef.current)) return
+          commit(draft ?? canonical)
+        }}
+      >
         {entOpts.length > 0 && (
           <label>实体
             <EntitySelectInsert entities={entities} onPick={(id, attr) => insert(`entity.${id}.attr.${attr}`)} />
@@ -261,7 +313,6 @@ export function FormulaTextEditor({
             <VariablePicker value="" variables={variables} allowEmpty onChange={(id) => id && insert(`var.${id}`)} />
           </label>
         )}
-        <button type="button" className="gc-fx-chip" onClick={() => insert('score')}>score</button>
         <select
           className="gc-fx-chip"
           value=""
@@ -278,7 +329,7 @@ export function FormulaTextEditor({
         <p className="gc-fx-err">解析失败：{error}</p>
       ) : (
         <p className="gc-fx-hint">
-          可用：数字 / var.&lt;id&gt; / entity.&lt;id&gt;.attr.&lt;名&gt; / score / floor·min·max·chance 等函数。
+          可用：数字 / 变量 / 实体属性 / floor·min·max·chance 等函数。
           <code> ?参数 </code>= 留空位（应用公式时绑定具体值）。⌘/Ctrl+Enter 提交。
         </p>
       )}
@@ -330,12 +381,12 @@ function TrialPanel({
         {holes.map((h) => (
           <label key={h.holeId} className="gc-fx-trial-row">
             <span className="gc-fx-trial-label">{h.label ?? h.holeId}</span>
-            <input
-              type="number"
+            <LooseNumberInput
               className="gc-fx-trial-input"
               value={sample(h)}
+              emptyValue={0}
               aria-label={`样例值 ${h.label ?? h.holeId}`}
-              onChange={(e) => setValues((prev) => ({ ...prev, [h.holeId]: Number(e.target.value) || 0 }))}
+              onChange={(value) => setValues((prev) => ({ ...prev, [h.holeId]: value }))}
             />
           </label>
         ))}

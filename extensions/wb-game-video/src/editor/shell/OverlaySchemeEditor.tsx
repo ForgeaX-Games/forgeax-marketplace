@@ -15,7 +15,12 @@ import { componentTypeLabel } from './editors'
 import { aggregateOverlayEvents } from '../../runtime/schema/overlay-events'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import type { Formula } from '../persist/formula-authoring'
-import { ComponentFormFields } from './component-form-fields'
+import { authoringOptionLabel } from '../authoring-option-label'
+import {
+  ComponentFormFields,
+  type EntityAttributeCreateHandler,
+  type EntityCreateHandler,
+} from './component-form-fields'
 import { ComponentEventsEditor } from './ComponentEventsEditor'
 
 const del: CSSProperties = { color: '#ff6b6b', marginLeft: 'auto' }
@@ -107,6 +112,7 @@ export interface OverlaySchemeEditorProps {
   entities: Record<string, Entity>
   variables: Record<string, Variable>
   formulas?: Record<string, Formula>
+  itemIds?: readonly string[]
   usageCount: number
   /**
    * 结构锁定态（基础覆盖物单组件方案）：
@@ -128,6 +134,8 @@ export interface OverlaySchemeEditorProps {
     patch: { inputs?: Record<string, unknown>; component?: string; layout?: Partial<Layout> },
   ) => void
   onReactionsChange: (reactions: OverlayReaction[] | undefined) => void
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
 }
 
 export function OverlaySchemeEditor({
@@ -137,6 +145,7 @@ export function OverlaySchemeEditor({
   entities,
   variables,
   formulas,
+  itemIds = [],
   usageCount,
   locked = false,
   duplicateOf = [],
@@ -146,6 +155,8 @@ export function OverlaySchemeEditor({
   onRemoveChild,
   onPatchChild,
   onReactionsChange,
+  onCreateEntityAttribute,
+  onCreateEntity,
 }: OverlaySchemeEditorProps): JSX.Element {
   const [selectedChildId, setSelectedChildId] = useState('')
   // 交互热区重叠冲突（DOM 实测，来自画布回调）——组件清单里对应行标红。
@@ -160,10 +171,13 @@ export function OverlaySchemeEditor({
     : []
   const overlays = overlayCatalog ?? { [overlay.id]: overlay }
   const spawnOptions = Object.values(overlays).flatMap((definition) =>
-    definition.children.map((child) => ({
-      value: `${definition.id}/${child.id}`,
-      label: `${definition.title?.trim() || definition.id} · ${componentTypeLabel(child.component)} · ${child.id}`,
-    })))
+    definition.children.map((child) => {
+      const value = `${definition.id}/${child.id}`
+      const name = [definition.title?.trim(), componentTypeLabel(child.component)]
+        .filter((part, index, all) => part && all.indexOf(part) === index)
+        .join(' · ')
+      return { value, label: authoringOptionLabel(name, value) }
+    }))
 
   // 进入方案时默认选中视觉最上层组件（zIndex 高者优先，同层级后渲染者优先）；
   // 双字幕等完全重叠时，默认选择因此与眼前实际可见的那一层一致。
@@ -340,10 +354,12 @@ export function OverlaySchemeEditor({
             <ComponentFormFields
               componentId={selectedChild.component}
               values={selectedChild.inputs ?? {}}
-              pickers={{ entities, variables, formulas }}
+              pickers={{ entities, variables, formulas, itemIds }}
               density="compact"
-              labelWidth="4em"
+              labelWidth="7em"
               onChange={(inputs) => onPatchChild(selectedChild.id, { inputs })}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
             />
             {selectedEvents.length > 0 ? (
               <>
@@ -363,7 +379,7 @@ export function OverlaySchemeEditor({
                     catalogReactions={overlay.reactions}
                     spawnOptions={spawnOptions}
                     overlays={overlays}
-                    pickers={{ entities, variables, formulas }}
+                    pickers={{ entities, variables, formulas, itemIds }}
                     onCatalogChange={onReactionsChange}
                   />
                 </fieldset>

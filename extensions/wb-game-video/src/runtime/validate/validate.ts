@@ -6,9 +6,10 @@
  * 传 `opts`（实体/变量/道具 id）后还查**引用**：condition/effect/expr 里引用的 entity/var/item/nodeId
  * 是否存在、reactions 中 advance 是否指向真实边；并对**纯瞬时环**（全为无演出/无交互节点 + 无条件边）给告警。
  */
-import type { GameGraph, GameScenario, Overlay, Reaction } from '../schema/graph-schema'
+import type { GameGraph, GameScenario, NodeAction, Overlay, Reaction } from '../schema/graph-schema'
 import { getSubFlowPack, getSubProcess } from '../schema/graph-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
+import { overlayMountId } from '../schema/node-config-schema'
 import { eventsFromParams, overlayReactionKey } from '../schema/overlay-events'
 import { deriveOutputs, getComponent } from '../registry/component-registry'
 import { defaultNodeKindRegistry, resolveNodeType } from '../nodes'
@@ -218,14 +219,13 @@ const BGM_MODES = new Set(['push', 'replace', 'stop'])
 
 /**
  * BGM 配置落在哪儿 —— 两处的 schema 不同（`NodeBgm` vs `DocumentBgm`），同一个键换个位置就是死键：
- * 只有节点有 `mode` / `restart`（作用域语义），只有文档床有 `loop`。
+ * 只有节点有 `mode` / `restart`（作用域语义）；`loop` 在文档床和节点曲目上都有效。
  */
 type BgmPosition = 'node' | 'doc'
 
 /** 节点作用域独有的键 → 落到文档床上一律不生效（见 checkBgm 的 `bgm.key.ignored`）。 */
 const NODE_ONLY_BGM_KEYS = ['mode', 'restart'] as const
-/** 文档床独有的键：`engine.applyNodeBgm` 逐字段构造 apply 入参、不展开落盘对象 → 节点恒 loop。 */
-const DOC_ONLY_BGM_KEYS = ['loop'] as const
+const DOC_ONLY_BGM_KEYS = [] as const
 
 /**
  * 校验一处 BGM 配置（`doc.bgm` 或 `node.data.bgm`，SPEC §3.3）。
@@ -265,6 +265,9 @@ function checkBgm(
   }
   if (b.volume !== undefined && (typeof b.volume !== 'number' || !Number.isFinite(b.volume) || b.volume < 0 || b.volume > 1)) {
     issues.push({ level: 'error', code: 'bgm.volume.range', msg: `bgm.volume '${String(b.volume)}' 越界（须是 [0, 1] 内的数字）`, at })
+  }
+  if (b.loop !== undefined && typeof b.loop !== 'boolean') {
+    issues.push({ level: 'error', code: 'bgm.flag.type', msg: `bgm.loop '${String(b.loop)}' 非法（只能是 true / false）`, at })
   }
   for (const key of ['fadeInMs', 'fadeOutMs'] as const) {
     const v = b[key]
@@ -580,6 +583,7 @@ function validateGraphScope(
           at: `node:${n.id}.overlayNodes[${mi}].reactions`,
         })),
       ]
+      const overlayMountIds = new Set((n.data.overlayNodes ?? []).map(overlayMountId))
       for (const pack of packs) {
         for (let i = 0; i < (pack.reactions ?? []).length; i++) {
           const r = pack.reactions![i]!
@@ -588,6 +592,36 @@ function validateGraphScope(
           if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
           for (const a of r.do) {
             if (a.kind === 'effect') walkRefs(a.effects, ctx, at, issues)
+            if (a.kind === 'spawn') {
+              walkRefs(a.inputs, ctx, at, issues)
+              const slash = a.from.indexOf('/')
+              const overlayId = slash > 0 ? a.from.slice(0, slash) : ''
+              const childId = slash > 0 ? a.from.slice(slash + 1) : ''
+              if (!overlayId || !childId || (overlays && !overlays[overlayId]?.children.some((child) => child.id === childId))) {
+                issues.push({
+                  level: 'error',
+                  code: 'ref.spawn.missing',
+                  msg: `reaction spawn.from '${a.from}' 未命中界面模板`,
+                  at,
+                })
+              }
+            }
+            if (a.kind === 'hideOverlay' && !a.mountId.trim()) {
+              issues.push({
+                level: 'error',
+                code: 'ref.hideOverlay.mount.empty',
+                msg: 'reaction hideOverlay.mountId 不能为空',
+                at,
+              })
+            }
+            if (a.kind === 'hideOverlay' && a.mountId.trim() && !overlayMountIds.has(a.mountId)) {
+              issues.push({
+                level: 'error',
+                code: 'ref.hideOverlay.mount.missing',
+                msg: `reaction hideOverlay.mountId '${a.mountId}' 未命中本节点内已有界面`,
+                at,
+              })
+            }
             if (a.kind === 'advance' && !edgeIds.has(a.edgeId)) {
               issues.push({ level: 'error', code: 'ref.edge.missing', msg: `reaction advance 指向未知边 '${a.edgeId}'`, at })
             }
