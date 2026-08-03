@@ -170,8 +170,8 @@ describe('GraphConfigView overlay usage', () => {
 
     const hpPicker = within(screen.getByText('血量').parentElement!)
       .getByRole('combobox', { name: '数值内容' })
-    chooseCascade(hpPicker, '实体属性', '配置「敌方」实体')
-    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    chooseCascade(hpPicker, '实体属性', '新增实体')
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(useGraphScenario.getState().meta.entities?.['ent-boss']).toMatchObject({
       id: 'ent-boss',
@@ -187,7 +187,7 @@ describe('GraphConfigView overlay usage', () => {
       within(screen.getByText('血量').parentElement!)
         .getByRole('combobox', { name: '数值内容' }),
       '变量',
-      '配置「var0」变量',
+      '新增变量',
     )
     fireEvent.change(screen.getByRole('textbox', { name: '新变量显示名' }), {
       target: { value: '战斗计数' },
@@ -195,7 +195,7 @@ describe('GraphConfigView overlay usage', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
       target: { value: '0' },
     })
-    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(useGraphScenario.getState().meta.variables?.var0).toEqual({
       id: 'var0',
@@ -210,7 +210,7 @@ describe('GraphConfigView overlay usage', () => {
       within(screen.getByText('血量').parentElement!)
         .getByRole('combobox', { name: '数值内容' }),
       '公式',
-      '配置「formula-0」公式',
+      '新增公式',
     )
     fireEvent.change(screen.getByRole('textbox', { name: '新公式显示名' }), {
       target: { value: '界面计算' },
@@ -218,7 +218,7 @@ describe('GraphConfigView overlay usage', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
       target: { value: 'var.var0 + 1' },
     })
-    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(useGraphScenario.getState().meta.formulas?.['formula-0']).toMatchObject({
       id: 'formula-0',

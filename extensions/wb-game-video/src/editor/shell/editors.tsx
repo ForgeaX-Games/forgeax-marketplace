@@ -22,6 +22,7 @@ import { flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { buildDefaults, getComponent, getComponentManifest } from '../../runtime/registry/component-registry'
 import {
   attrDisplayName,
+  attrValueText,
   catalogIdOccupied,
   entityDisplayName,
   findEntity,
@@ -654,7 +655,8 @@ export function AttrSelect({
       </select>
     )
   }
-  const attrs = listAttrOptions(findEntity(entities, entityId))
+  const entity = findEntity(entities, entityId)
+  const attrs = listAttrOptions(entity)
   const known = new Set(attrs.map((attr) => attr.id))
   const fallbacks = (fallbackValues ?? [])
     .filter((id, index, all) => id && !known.has(id) && all.indexOf(id) === index)
@@ -663,10 +665,10 @@ export function AttrSelect({
   const pickerOptions: CascadingPickerOption[] = options.map((attr) => ({
     key: `attr:${encodeURIComponent(attr.id)}`,
     label: attr.label,
+    secondaryText: known.has(attr.id) ? attrValueText(entity, attr.id) : undefined,
     value: attr.id,
   }))
   if (createAttribute) {
-    const entity = findEntity(entities, entityId)
     const template = createAttribute.template ?? {
       attrId: 'attr0',
       initialValue: 0,

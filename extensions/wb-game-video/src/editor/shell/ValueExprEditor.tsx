@@ -25,6 +25,7 @@ import { FormulaApplyEditor } from './FormulaApplyEditor'
 import { compileFormula } from './formulaApply'
 import {
   attrDisplayName,
+  attrValueText,
   compileValuePick,
   entityDisplayName,
   findEntity,
@@ -424,6 +425,9 @@ export function ValueExprEditor({
           label: choice.kind === 'entity'
             ? attrDisplayName(entry.source, choice.attr)
             : choice.label,
+          secondaryText: choice.kind === 'entity'
+            ? attrValueText(entry.source, choice.attr)
+            : undefined,
           value: choice.key,
         })),
         ...(createAttribute && createAttributeTemplate

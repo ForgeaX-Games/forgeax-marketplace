@@ -19,6 +19,7 @@ import {
 } from './formulaApply'
 import {
   attrDisplayName,
+  attrValueText,
   entityDisplayName,
   findEntity,
   findFormula,
@@ -356,6 +357,7 @@ export function FormulaApplyEditor({
                   const children: CascadingPickerOption[] = attrOptions.map((attrOption) => ({
                     key: entityAttrKey(entityOption.id, attrOption.id),
                     label: attrDisplayName(entity, attrOption.id),
+                    secondaryText: attrValueText(entity, attrOption.id),
                     value: entityAttrKey(entityOption.id, attrOption.id),
                   }))
                   if (createAttribute) {

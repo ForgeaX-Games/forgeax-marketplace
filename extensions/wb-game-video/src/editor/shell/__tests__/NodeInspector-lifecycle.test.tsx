@@ -155,14 +155,14 @@ describe('NodeInspector · 结算选中联动', () => {
     )
 
     fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '配置「实体」实体' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
     expect(screen.getByRole('textbox', { name: '效果目标的新实体 ID' })).toHaveValue('entity1')
     fireEvent.keyDown(document, { key: 'Escape' })
 
     fireEvent.click(screen.getByRole('combobox', { name: '数值来源' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
     expect(screen.getByRole('menuitem', { name: '怒气' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('menuitem', { name: '配置「var1」变量' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '新增变量' }))
     expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
   })
 

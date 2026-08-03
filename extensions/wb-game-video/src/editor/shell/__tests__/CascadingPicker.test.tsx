@@ -16,7 +16,12 @@ const options: CascadingPickerOption[] = [
       {
         key: 'hero',
         label: '主角',
-        children: [{ key: 'hero-hp', label: '当前生命', value: 'entity.hero.attr.hp' }],
+        children: [{
+          key: 'hero-hp',
+          label: '当前生命',
+          secondaryText: '12345678901234567890',
+          value: 'entity.hero.attr.hp',
+        }],
       },
       {
         key: 'enemy',
@@ -92,6 +97,13 @@ describe('CascadingPicker interaction stability', () => {
     for (const column of initialColumns) {
       expect(window.getComputedStyle(column).overflowY).toBe('auto')
     }
+    const attribute = screen.getByRole('menuitem', { name: '当前生命' })
+    const attributeValue = attribute.querySelector('.gc-cascade-item-secondary')
+    expect(attribute).toHaveAttribute('title', '当前生命：12345678901234567890')
+    expect(attributeValue).toHaveTextContent('12345678901234567890')
+    expect(window.getComputedStyle(attributeValue!).fontSize).toBe('10px')
+    expect(window.getComputedStyle(attributeValue!).textOverflow).toBe('ellipsis')
+    expect(window.getComputedStyle(attributeValue!).maxWidth).toBe('45%')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '变量' }))
     expect(within(panel).getAllByRole('group')).toHaveLength(2)
@@ -114,7 +126,7 @@ describe('CascadingPicker interaction stability', () => {
     expect(screen.getByRole('menuitem', { name: '主角' })).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('shows creation as an explicit plus action before opening the narrower editor column', () => {
+  it('shows a named create action and opens its form in a separate popup', () => {
     vi.useFakeTimers()
     render(
       <CascadingPicker
@@ -128,26 +140,40 @@ describe('CascadingPicker interaction stability', () => {
 
     fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
 
-    const create = screen.getByRole('menuitem', { name: '配置「实体」实体' })
+    const create = screen.getByRole('menuitem', { name: '新增实体' })
     expect(create).toHaveClass('is-create')
     expect(create).toHaveAttribute('title', '配置「实体」实体')
-    expect(create).toHaveTextContent('+')
-    expect(create).not.toHaveTextContent('配置「实体」实体')
-    expect(window.getComputedStyle(create).minHeight).toBe('26px')
+    expect(create).toHaveTextContent('+新增实体')
+    expect(create.parentElement).toHaveClass('gc-cascade-create-block')
+    expect(window.getComputedStyle(create.parentElement!).borderTopStyle).toBe('solid')
+    expect(window.getComputedStyle(create).minHeight).toBe('28px')
     expect(window.getComputedStyle(create).marginLeft).toBe('8px')
 
     fireEvent.pointerEnter(create)
     expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
 
+    const menu = screen.getByRole('menu', { name: '实体选项' })
+    const columnCount = within(menu).getAllByRole('group').length
     fireEvent.click(create)
 
+    const dialog = screen.getByRole('dialog', { name: '新增实体' })
     const editor = screen.getByRole('textbox', { name: '新实体 ID' })
-    expect(editor.closest('.gc-cascade-column')).toHaveClass('has-editor')
-    expect(window.getComputedStyle(editor.closest('.gc-cascade-column')!).width).toBe('240px')
+    expect(editor.closest('.gc-cascade-create-dialog')).toBe(dialog)
+    expect(editor.closest('.gc-cascade-column')).toBeNull()
+    expect(within(menu).getAllByRole('group')).toHaveLength(columnCount)
+    expect(menu.querySelector('.gc-cascade-column.has-editor')).toBeNull()
+    expect(dialog.style.position).toBe('fixed')
+    expect(dialog.style.height).toBe('')
+    expect(dialog.style.maxHeight).toBe('')
+    expect(dialog.style.overflowY).toBe('')
 
-    const confirm = screen.getByRole('menuitem', { name: '确认创建并选择' })
+    const confirm = screen.getByRole('button', { name: '确认' })
     expect(confirm).toHaveClass('is-confirm')
     expect(confirm.children).toHaveLength(1)
     expect(window.getComputedStyle(confirm).justifyContent).toBe('center')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '新增实体' })).toBeNull()
+    expect(screen.getByRole('menu', { name: '实体选项' })).toBeTruthy()
   })
 })

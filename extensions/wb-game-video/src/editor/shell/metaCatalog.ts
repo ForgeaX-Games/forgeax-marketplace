@@ -185,6 +185,10 @@ export function attrDisplayName(entity: Entity | undefined, attrId: string): str
   return entity?.attrMeta?.[attrId]?.label?.trim() || attrId
 }
 
+export function attrValueText(entity: Entity | undefined, attrId: string): string {
+  return String(entity?.attrs?.[attrId] ?? entity?.attrMeta?.[attrId]?.initial ?? 0)
+}
+
 export function variableDisplayName(variable: Variable | undefined, fallbackId: string): string {
   return variable?.name?.trim() || fallbackId
 }

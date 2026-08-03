@@ -29,6 +29,7 @@ export type { ValueTerm, ValueTermOp }
 
 export {
   attrDisplayName,
+  attrValueText,
   entityDisplayName,
   findEntity,
   findFormula,
