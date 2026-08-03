@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createRng } from '../../../engine/rng'
+import { resolveNumericValue, resolveTextValue } from '../../inputValue'
 import type { SkinCtx } from '../../rendererRegistry'
-import { resolveNumericValue, resolveTextValue } from '../numericValue'
 
 const ctx: SkinCtx = {
   hud: {
@@ -20,7 +20,7 @@ const ctx: SkinCtx = {
   },
 }
 
-describe('resolveNumericValue', () => {
+describe('input value resolution', () => {
   it('accepts constants, string expressions, and expression objects', () => {
     expect(resolveNumericValue(12, ctx)).toBe(12)
     expect(resolveNumericValue('entity.hero.attr.attack + var.qi', ctx)).toBe(23)
@@ -28,10 +28,12 @@ describe('resolveNumericValue', () => {
     expect(resolveNumericValue('bad(', ctx)).toBeUndefined()
   })
 
-  it('resolves literal text and entity name references', () => {
+  it('resolves literal text, state references, and numeric formulas as display text', () => {
     expect(resolveTextValue('我方', ctx)).toBe('我方')
     expect(resolveTextValue({ ref: 'entity.hero.name' }, ctx)).toBe('主角')
     expect(resolveTextValue({ ref: 'entity.hero.attr.hp' }, ctx)).toBe('80')
+    expect(resolveTextValue({ ref: 'var.qi' }, ctx)).toBe('3')
+    expect(resolveTextValue({ expr: 'entity.hero.attr.attack + var.qi' }, ctx)).toBe('-23')
   })
 
   it('clones runtime RNG before evaluating render-time formulas', () => {

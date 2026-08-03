@@ -26,6 +26,7 @@ import type {
   NumOrExpr,
   Overlay,
   OverlayChild,
+  OverlayInstanceChild,
   Reaction,
   Trigger,
 } from '../../runtime/schema/graph-schema'
@@ -41,12 +42,14 @@ import {
   hasOptionEventsInput,
   isPositionable,
 } from '../shell/editors'
+import { decodeEffectOperation, encodeEffectOperation } from '../shell/valueExprPick'
 import { INTERACTION_SKINS } from '../../runtime/component-host/components'
 import { FILTER_PRESETS, FX_PRESETS } from '../../runtime/fx/video-fx'
 import { initState } from '../../runtime/engine/engine-init'
 import type { OverlaySnap } from '../../runtime/engine/session'
 import type { MaterialItem, MaterialKind } from './materialTimelineShared'
-import { clampLayer, clampMs, normalizeLayer } from './materialTimelineShared'
+import { authoringOptionLabel } from '../authoring-option-label'
+import { FLOAT_TEXT_TIMELINE_WIDTH_PX, clampLayer, clampMs, normalizeLayer } from './materialTimelineShared'
 import {
   type PreviewEvalContext,
   type QteOutcomePreview,
@@ -77,7 +80,7 @@ import {
   resetOverride,
 } from '../../graph/edit/overlay-edit'
 import { createOverlayMount, overlayMountId } from '../../runtime/schema/node-config-schema'
-import { resolveMountChildren } from '../../runtime/schema/expand-overlay'
+import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
 import {
   STAGE_FILL_LAYOUT,
   layoutIsEffectivelyEmpty,
@@ -339,11 +342,13 @@ export function listSpawnTemplateOptions(
   const out: Array<{ value: string; label: string }> = []
   for (const ov of Object.values(overlays)) {
     for (const c of ov.children) {
-      const label = componentTypeLabel(c.component)
-      const title = ov.title?.trim()
+      const value = `${ov.id}/${c.id}`
+      const name = [ov.title?.trim(), componentTypeLabel(c.component)]
+        .filter((part, index, all) => part && all.indexOf(part) === index)
+        .join(' · ')
       out.push({
-        value: `${ov.id}/${c.id}`,
-        label: title ? `${label} · ${title}/${c.id}` : `${label} · ${ov.id}/${c.id}`,
+        value,
+        label: authoringOptionLabel(name, value),
       })
     }
   }
@@ -746,19 +751,18 @@ export function parseDamageFromContent(content: string): number {
 function settleEffectId(floatId: string): string {
   return `${floatId}-settle`
 }
-function hpEffect(
+export function createDamageHpEffect(
   entities: Record<string, Entity> | undefined,
   target: 'boss' | 'player',
   amount: NumOrExpr,
   floatId: string,
 ): GraphEffect {
+  const encoded = encodeEffectOperation('sub', amount)
   return {
     kind: 'attr',
     entityId: firstEntityId(entities, target),
     attr: 'hp',
-    op: 'add',
-    // 常量沿用旧语义（数值取绝对值后自动按扣血取负）；选取式公式的正负号完全由用户在条款里选（−=扣血/+=回血）。
-    value: typeof amount === 'number' ? -Math.abs(amount) : amount,
+    ...encoded,
     id: settleEffectId(floatId),
   }
 }
@@ -776,18 +780,24 @@ export function settleElementFor(scenario: GameScenario, node: GameNode | undefi
     r.do.some((a) => a.kind === 'effect' && a.effects.some((e) => e.id === eid)),
   )
 }
-function settleHpEffect(settle: Reaction | undefined): { value?: NumOrExpr; entityId?: string } | undefined {
+function settleHpEffect(
+  settle: Reaction | undefined,
+): Extract<GraphEffect, { kind: 'attr' }> | undefined {
   for (const a of settle?.do ?? []) {
     if (a.kind !== 'effect') continue
     const hp = a.effects.find((e) => e.kind === 'attr' && e.attr === 'hp')
-    if (hp) return hp as { value?: NumOrExpr; entityId?: string }
+    if (hp?.kind === 'attr') return hp
   }
   return undefined
 }
 /** 结算 reaction 的绝对伤害（公式态时取不到常量，返回 0）。 */
 export function settleDamage(settle: Reaction | undefined): number {
   const hp = settleHpEffect(settle)
-  return hp && typeof hp.value === 'number' ? Math.abs(hp.value) : 0
+  if (!hp) return 0
+  const operation = decodeEffectOperation(hp.op, hp.value)
+  return operation.op === 'sub' && typeof operation.value === 'number'
+    ? Math.abs(operation.value)
+    : 0
 }
 /** 结算 reaction 里 hp effect 的原始值（常量或 `{expr,pick}`），供检视器公式编辑器回填。 */
 export function settleValue(settle: Reaction | undefined): NumOrExpr | undefined {
@@ -824,7 +834,31 @@ function floatPreviewParams(
   el: OverlayChild,
   inputs: FloatTextParams,
 ): FloatTextParams {
-  if (inputs.expr != null && inputs.expr.trim() !== '') return inputs
+  const raw = inputs as FloatTextParams & {
+    fixedText?: unknown
+    parameter?: unknown
+    expr?: unknown
+  }
+  if (el.component === 'DamageFloatText' || el.component === 'GainFloatText') {
+    const fixedText = typeof raw.fixedText === 'string' ? raw.fixedText : ''
+    if (Object.prototype.hasOwnProperty.call(raw, 'parameter')) {
+      if (typeof raw.parameter === 'string') {
+        return { ...inputs, text: `${fixedText}${raw.parameter}`, expr: undefined }
+      }
+      if (
+        typeof raw.parameter === 'number'
+        || (
+          raw.parameter
+          && typeof raw.parameter === 'object'
+          && typeof (raw.parameter as { expr?: unknown }).expr === 'string'
+        )
+      ) {
+        return { ...inputs, text: `${fixedText}{v}`, expr: raw.parameter as never }
+      }
+      return { ...inputs, text: fixedText, expr: undefined }
+    }
+  }
+  if (raw.expr != null && (typeof raw.expr !== 'string' || raw.expr.trim() !== '')) return inputs
   const first = overlayEffects(scenario, node, el.id).find((e) => e.kind === 'attr' || e.kind === 'var')
   const v = first && (first.kind === 'attr' || first.kind === 'var') ? first.value : undefined
   if (v === undefined) return inputs
@@ -996,12 +1030,23 @@ function materialKindForChild(scenario: GameScenario, node: GameNode | undefined
   return 'component'
 }
 
+/** 这两种新飘字的持续时间由组件 `durationMs` 控制，时间轴只负责放置触发时刻。 */
+function isSelfTimedFloatText(componentId: string): boolean {
+  return componentId === 'DamageFloatText' || componentId === 'GainFloatText'
+}
+
 /** `kind` 由调用方传入（已由 `materialKindForChild` 算好），避免这里重复一遍 isKind 判断。 */
 function componentLabelOf(el: OverlayChild, kind: MaterialKind): string {
   const id = el.component
   const params = paramsOf(el)
   if (kind === 'subtitle') return str(params.text) || '字幕'
-  if (kind === 'overlay') return (str(params.text) ?? '').trim() || '飘字'
+  if (kind === 'overlay') {
+    const fixedText = str(params.fixedText) ?? ''
+    const parameter = typeof params.parameter === 'string' || typeof params.parameter === 'number'
+      ? String(params.parameter)
+      : ''
+    return `${fixedText}${parameter}`.trim() || (str(params.text) ?? '').trim() || '飘字'
+  }
   if (kind === 'option') return componentTypeLabel(id) || '选项'
   if (kind === 'filter') return filterLabel(params.filter)
   if (kind === 'fx') return fxLabel(params.fx)
@@ -1058,6 +1103,7 @@ export function collectMaterialsFromNode(scenario: GameScenario, node: GameNode 
       startMs: start,
       endMs: el.window?.endMs ?? Math.min(maxMs, defaultEnd),
       zIndex: normalizeLayer(el.layout?.zIndex, kind === 'component' ? 3 : kind === 'filter' ? 4 : kind === 'fx' ? 5 : kind === 'option' ? 3 : kind === 'overlay' ? 1 : 0),
+      fixedWidthPx: isSelfTimedFloatText(componentId) ? FLOAT_TEXT_TIMELINE_WIDTH_PX : undefined,
       overridden: overriddenFlag,
     })
   }
@@ -1082,13 +1128,23 @@ export function resetMaterialOverrideGraph(scenario: GameScenario, node: GameNod
  * 按 `appearAt - min(appearAt)` 归一，见 InkKouLayer），绝对值不决定它出现在视频何处。
  *
  * `window` 缺失时才回落 `timedStart`（trigger）→ maxMs——仅兜底未落 window 的瞬态 spawn。
+ * 自计时飘字例外：它的结束由 `inputs.durationMs` 决定；新挂载通常只有起点，若仍回落 maxMs，
+ * 固定宽度时间轴条会被误判为占满整段视频，导致无法水平移动。
  * 滤镜/特效无位置语义，返回 null（不参与挂载条跨度）。
  */
 function childVisibleSpan(el: OverlayChild, maxMs: number): { start: number; end: number } | null {
   if (el.component === 'filter' || el.component === 'fx') return null
   const start = el.window?.startMs ?? timedStart(el)
-  const end = el.window?.endMs ?? maxMs
+  const end = el.window?.endMs ?? (
+    isSelfTimedFloatText(el.component)
+      ? Math.min(maxMs, start + resolveFloatTextDurationMs(paramsOf(el).durationMs))
+      : maxMs
+  )
   return { start, end }
+}
+
+function resolveFloatTextDurationMs(value: unknown, fallback = 1100): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 /**
@@ -1106,11 +1162,13 @@ export function collectMountItemsFromNode(scenario: GameScenario, node: GameNode
   return mounts.map((mount, i) => {
     const mid = overlayMountId(mount)
     const children = resolveMountChildren(scenario.ui?.overlays, mount)
+    const timedChildren: OverlayChild[] = []
     let start: number | undefined
     let end: number | undefined
     for (const el of children) {
       const sp = childVisibleSpan(el, maxMs)
       if (!sp) continue
+      timedChildren.push(el)
       start = start == null ? sp.start : Math.min(start, sp.start)
       end = end == null ? sp.end : Math.max(end, sp.end)
     }
@@ -1119,11 +1177,14 @@ export function collectMountItemsFromNode(scenario: GameScenario, node: GameNode
       key: `mount:${mid}`,
       id: mid,
       kind: 'mount' as MaterialKind,
-      label: title ? (mid === mount.overlay ? title : `${title} · ${mid}`) : mid,
+      label: authoringOptionLabel(title, mid),
       startMs: start ?? 0,
       endMs: end ?? maxMs,
       zIndex: i,
       componentId: children.length > 1 ? `${children.length} 组件` : undefined,
+      fixedWidthPx: timedChildren.length === 1 && isSelfTimedFloatText(timedChildren[0]!.component)
+        ? FLOAT_TEXT_TIMELINE_WIDTH_PX
+        : undefined,
     }
   })
 }
@@ -1472,11 +1533,12 @@ export function previewSkinChildrenInWindow(
   node: GameNode | undefined,
   ms: number,
   maxMs: number,
-): OverlayChild[] {
+): OverlayInstanceChild[] {
   if (!node) return []
-  const out: OverlayChild[] = []
+  const out: OverlayInstanceChild[] = []
   // 与运行时一致：扫全部挂载（内容轨 + 常驻 HUD 方案），不能只看 primary。
-  for (const el of mountedChildrenOf(scenario, node)) {
+  // 必须保留实例 source.mountId；重复挂载同一方案时，裸 childId 无法区分所属挂载。
+  for (const el of expandNodeChildren(scenario, node)) {
     const sp = childVisibleSpan(el, maxMs)
     if (!sp) continue
     if (ms < sp.start || ms > sp.end) continue
@@ -1820,12 +1882,12 @@ export function addMaterialGraph(
       trigger: { when: 'enter' },
       window: { startMs, endMs },
       layout: layoutForNewChild(undefined, at ? at.zIndex : 1),
-      inputs: { text: '-100' },
+      inputs: { fixedText: '', parameter: '-100' },
     }
     const s1 = addOverlayChild(scenario, node.id, float)
     const s1Node = findNode(s1.graph, node.id) ?? node
     // 结算副作用挂节点 reaction（默认对 boss 扣 100，与飘字同相位出现）。
-    const s2 = upsertSettleEffects(s1, s1Node, id, floatSettleWhen(float), [hpEffect(entities, 'boss', 100, id)])
+    const s2 = upsertSettleEffects(s1, s1Node, id, floatSettleWhen(float), [createDamageHpEffect(entities, 'boss', 100, id)])
     return { scenario: s2, selectKey: `overlay:${id}` }
   }
   if (template === 'filter' || template === 'fx') {
@@ -2053,11 +2115,10 @@ export function patchSelectedLayoutGraph(
 
 /**
  * 飘字（floatText 展示 + 联动结算 reaction）的 inputs 编辑。键：
- *   - content  → inputs.text（显示文案，含 {v} 用数值替换）
+ *   - content  → inputs.fixedText（显示文案；`{v}` 位置由 parameter 替换）
  *   - effects  → 结算 reaction 的完整效果列表（`EffectsEditor` 直接产出；空数组＝纯展示，删结算）
- *   - 其余（expr/style/x/y…）→ 直接并入 inputs（undefined 删键）；expr 是 NumOrExpr（`number | {expr,pick}`）
- * expr 缺省时 {v} 取 effects 第一条的值（预览侧对齐，见 `activePreviewOverlaysFromNode`）；
- * 写了 expr 则显示与效果解耦。
+ *   - expr → inputs.parameter；其余（style/x/y…）直接并入 inputs。
+ * parameter 缺省时预览回落 effects 第一条的值；显式配置后显示与效果解耦。
  */
 export function patchOverlayGraph(
   scenario: GameScenario,
@@ -2075,13 +2136,25 @@ export function patchOverlayGraph(
     if (key === 'content') {
       const content = String(value)
       const cur = findElement(s, node, floatId)
-      s = patchOverlayChild(s, node.id, floatId, { inputs: { ...cur?.inputs, text: content } })
+      if (!cur) continue
+      const { text: _text, ...currentInputs } = cur.inputs ?? {}
+      const hasParameterSlot = content.includes('{v}')
+      s = patchOverlayChild(s, node.id, floatId, {
+        inputs: {
+          ...currentInputs,
+          fixedText: content.replace('{v}', ''),
+          ...(hasParameterSlot ? {} : { parameter: '' }),
+        },
+      })
     } else if (key === 'effects') {
       const list = Array.isArray(value) ? (value as GraphEffect[]) : []
       s = upsertSettleEffects(s, curNode(), floatId, floatSettleWhen(float), list)
     } else {
       const cur = findElement(s, node, floatId)
-      if (cur) s = patchOverlayChild(s, node.id, floatId, { inputs: mergeParams(cur, { [key]: value }) })
+      if (cur) {
+        const inputKey = key === 'expr' ? 'parameter' : key
+        s = patchOverlayChild(s, node.id, floatId, { inputs: mergeParams(cur, { [inputKey]: value }) })
+      }
     }
   }
   return s

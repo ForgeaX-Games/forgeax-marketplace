@@ -4,10 +4,17 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { registerComponent, unregisterComponent } from '../../../runtime/registry/component-registry'
-import type { Entity, GameGraph, OverlayEventRef } from '../../../runtime/schema/graph-schema'
+import type { Entity, GameGraph, OverlayEventRef, Variable } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
 import { ComponentEventsEditor } from '../ComponentEventsEditor'
+import { ComponentInputsDisclosure } from '../ComponentInputsDisclosure'
 import { ComponentFormFields } from '../component-form-fields'
+import {
+  ensureEntity,
+  ensureEntityAttribute,
+  ensureFormula,
+  ensureVariable,
+} from '../metaCatalog'
 import { NodeInspector } from '../NodeInspector'
 import { OverlaySchemeEditor } from '../OverlaySchemeEditor'
 
@@ -25,6 +32,31 @@ const event: OverlayEventRef = {
   label: '成功',
   componentId: 'qte',
 }
+
+function chooseCascade(trigger: HTMLElement, ...labels: string[]): void {
+  fireEvent.click(trigger)
+  for (const label of labels) {
+    fireEvent.click(screen.getByRole('menuitem', { name: label }))
+  }
+}
+
+describe('ComponentInputsDisclosure summary', () => {
+  it.each(['BattlePlayerHpBar', 'BattleEnemyHpBar'])(
+    'omits the dynamic label from the %s title summary',
+    (componentId) => {
+      render(
+        <ComponentInputsDisclosure
+          childId={`${componentId}-0`}
+          componentId={componentId}
+          values={{ label: { ref: 'entity.hero.name' } }}
+          onChange={vi.fn()}
+        />,
+      )
+
+      expect(screen.queryByText('label=[object Object]')).toBeNull()
+    },
+  )
+})
 
 describe('ComponentEventsEditor', () => {
   it('catalog mode writes stable keys and never offers advance', () => {
@@ -83,7 +115,7 @@ describe('ComponentEventsEditor', () => {
     expect(screen.getByText('从事件节点到目标节点')).toBeTruthy()
     expect(screen.queryByText('走边')).toBeNull()
     expect(screen.queryByRole('button', { name: /沿边推进/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '＋ 效果' }))
+    fireEvent.click(screen.getByRole('button', { name: '＋ 添加效果' }))
     expect(onMountActionsChange).toHaveBeenCalledWith(event, [
       { kind: 'advance', edgeId: 'edge-1' },
       expect.objectContaining({ kind: 'effect' }),
@@ -113,12 +145,105 @@ describe('ComponentEventsEditor', () => {
       />,
     )
 
-    const content = screen.getByRole('combobox', { name: '数值内容' })
-    expect(content.querySelector('option[value="formula:formula-damage"]')).toBeTruthy()
+    const content = screen.getByRole('combobox', { name: '数值来源' })
+    fireEvent.click(content)
+    fireEvent.click(screen.getByRole('menuitem', { name: '公式' }))
+    expect(screen.getByRole('menuitem', { name: '伤害' })).toBeTruthy()
   })
 })
 
 describe('NodeInspector overlay events', () => {
+  it('creates and selects variables and formulas from mounted component inputs', () => {
+    const initialGraph: GameGraph = {
+      nodes: [{
+        id: 'n1',
+        type: 'perf',
+        position: { x: 0, y: 0 },
+        inputs: [],
+        outputs: [],
+        data: {
+          name: '飘字节点',
+          overlayNodes: [{ overlay: 'hud' }],
+        },
+      }],
+      edges: [],
+    }
+    let latestGraph = initialGraph
+    let latestVariables: Record<string, Variable> = {}
+    let latestFormulas: Record<string, Formula> = {}
+    function Harness(): JSX.Element {
+      const [graph, setGraph] = useState(initialGraph)
+      const [variables, setVariables] = useState<Record<string, Variable>>({})
+      const [formulas, setFormulas] = useState<Record<string, Formula>>({})
+      latestGraph = graph
+      latestVariables = variables
+      latestFormulas = formulas
+      return (
+        <NodeInspector
+          graph={graph}
+          nodeId="n1"
+          overlays={{
+            hud: {
+              id: 'hud',
+              children: [{
+                id: 'gain',
+                component: 'GainFloatText',
+                inputs: { parameter: '+50' },
+              }],
+            },
+          }}
+          variables={variables}
+          formulas={formulas}
+          onCreateVariable={(request) => {
+            setVariables((current) => ensureVariable(current, request))
+          }}
+          onCreateFormula={(request) => {
+            setFormulas((current) => ensureFormula(current, request))
+          }}
+          onChange={setGraph}
+        />
+      )
+    }
+    const { container } = render(<Harness />)
+    const disclosure = container.querySelector('details[data-component-inputs-disclosure]')!
+    fireEvent.click(disclosure.querySelector('summary')!)
+
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '变量',
+      '配置「var0」变量',
+    )
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(latestVariables.var0).toEqual({ id: 'var0', name: 'var0', initial: 0 })
+    expect(latestGraph.nodes[0]?.data.overlayNodes?.[0]?.overrides?.gain?.inputs?.parameter).toEqual({
+      ref: 'var.var0',
+    })
+
+    chooseCascade(
+      screen.getByRole('combobox', { name: '文本内容' }),
+      '公式',
+      '配置「formula-0」公式',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: '3 * 4' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(latestFormulas['formula-0']).toMatchObject({
+      id: 'formula-0',
+      ast: { t: 'bin', id: 'n0', op: '*' },
+    })
+    expect(latestGraph.nodes[0]?.data.overlayNodes?.[0]?.overrides?.gain?.inputs?.parameter).toMatchObject({
+      expr: '3 * 4',
+      pick: { mode: 'formula', formulaId: 'formula-0', holeBindings: {} },
+    })
+  })
+
   it('omits the event response area when the mounted overlay exports no events', () => {
     const graph: GameGraph = {
       nodes: [{
@@ -218,6 +343,55 @@ describe('NodeInspector overlay events', () => {
 })
 
 describe('OverlaySchemeEditor selected child', () => {
+  it('does not show the internal scheme id below the name input', () => {
+    render(
+      <OverlaySchemeEditor
+        overlayId="scheme-9"
+        overlay={{ id: 'scheme-9', title: '第1个新方案', children: [] }}
+        entities={{}}
+        variables={{}}
+        usageCount={0}
+        onRename={vi.fn()}
+        onRemove={vi.fn()}
+        onAddChild={vi.fn()}
+        onRemoveChild={vi.fn()}
+        onPatchChild={vi.fn()}
+        onReactionsChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByDisplayValue('第1个新方案')).toBeTruthy()
+    expect(screen.queryByText('scheme-9')).toBeNull()
+  })
+
+  it('requires confirmation before deleting a custom interface scheme', () => {
+    const onRemove = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(
+      <OverlaySchemeEditor
+        overlayId="custom-hud"
+        overlay={{ id: 'custom-hud', title: '战斗界面', children: [] }}
+        entities={{}}
+        variables={{}}
+        usageCount={2}
+        onRename={vi.fn()}
+        onRemove={onRemove}
+        onAddChild={vi.fn()}
+        onRemoveChild={vi.fn()}
+        onPatchChild={vi.fn()}
+        onReactionsChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirm).toHaveBeenCalledWith('确定删除自定义界面方案「战斗界面」？当前仍被 2 个节点引用，删除后这些挂载将无法解析界面。')
+    expect(onRemove).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(onRemove).toHaveBeenCalledTimes(1)
+  })
+
   it('defaults overlapping components to the visually topmost child', async () => {
     const { container } = render(
       <OverlaySchemeEditor
@@ -247,7 +421,7 @@ describe('OverlaySchemeEditor selected child', () => {
     expect(container.querySelector('[data-canvas-item="subtitle-a"]')?.classList.contains('is-selected')).toBe(false)
   })
 
-  it('keeps the design canvas fixed at 80% and clips content to it', async () => {
+  it('uses a full editor viewport backed by full-stage logical coordinates', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.hasAttribute('data-overlay-fit-target')) {
         return {
@@ -298,13 +472,16 @@ describe('OverlaySchemeEditor selected child', () => {
       />,
     )
 
-    await waitFor(() => expect(screen.getByLabelText('覆盖物画布 宽%')).toHaveValue(80))
-    expect(screen.getByLabelText('覆盖物画布 高%')).toHaveValue(80)
+    await waitFor(() => expect(document.querySelector('[data-overlay-design-canvas]')).toBeTruthy())
+    expect(document.querySelector('[data-overlay-bounds-readout]')).toBeNull()
     expect(screen.queryByRole('button', { name: /调整dialogue大小/ })).toBeNull()
     expect(document.querySelectorAll('[data-overflow-child]')).toHaveLength(0)
     expect((document.querySelector('[data-overlay-content-clip]') as HTMLElement).style.clipPath).toContain('inset(')
     expect(document.querySelector('[data-overlay-design-canvas]')).toHaveStyle({
-      left: '10%', top: '10%', width: '80%', height: '80%',
+      left: '0%', top: '0%', width: '100%', height: '100%',
+    })
+    expect(document.querySelector('[data-overlay-coordinate-stage]')).toHaveStyle({
+      left: '0%', top: '0%', width: '100%', height: '100%',
     })
     expect(screen.queryByRole('button', { name: /调整覆盖物画布大小/ })).toBeNull()
   })
@@ -364,15 +541,18 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={vi.fn()}
       />,
     )
-    const currentField = screen.getByText('当前血量').parentElement!
-    expect(screen.getByText(/不能增删组件或调整组件大小/)).toBeTruthy()
+    const currentField = screen.getByText('血量').parentElement!
+    expect(screen.getByText(/不能增删或拖动组件/)).toBeTruthy()
+    expect(document.querySelector('[data-overlay-design-canvas]')).toBeNull()
+    expect(document.querySelector('[data-overlay-centered-child="hp"]')).toBeTruthy()
+    expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
+    expect(document.querySelector('[data-canvas-item="hp"]')).toHaveClass('is-selected')
+    expect(screen.queryByText('虚拟画布尺寸')).toBeNull()
     expect(screen.queryByRole('button', { name: /调整BattlePlayerHpBar大小/ })).toBeNull()
-    expect(currentField.style.gridTemplateColumns).toBe('4em minmax(0, 1fr)')
+    expect(currentField.style.gridTemplateColumns).toBe('7em minmax(0, 1fr)')
     expect(currentField.style.columnGap).toBe('8px')
     expect(currentField.style.fontSize).toBe('11px')
-    const modeRow = screen.getByRole('radiogroup', { name: '血量方式' }).parentElement!
-    expect(modeRow.style.gridTemplateColumns).toBe('4em minmax(0, 1fr)')
-    expect(screen.getByRole('radio', { name: '分别设置' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('radiogroup', { name: '血量来源' })).toBeNull()
     const current = currentField
       .querySelector('input[aria-label="常量数值"]') as HTMLInputElement
     expect(current.disabled).toBe(false)
@@ -409,13 +589,12 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={vi.fn()}
       />,
     )
-
     expect(container.querySelector('.ks-hud-boss-name')?.textContent).toBe('空藏')
   })
 
   it('keeps base structure locked while allowing catalog event actions', () => {
     const onReactionsChange = vi.fn()
-    render(
+    const { container } = render(
       <OverlaySchemeEditor
         overlayId="base:InkYingMo"
         overlay={{ id: 'base:InkYingMo', children: [{ id: 'choice', component: 'InkYingMo', inputs: {} }] }}
@@ -431,10 +610,16 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={onReactionsChange}
       />,
     )
+    expect(container.querySelector('[data-overlay-design-canvas]')).toBeNull()
+    expect(container.querySelector('[data-overlay-centered-child="choice"]')).toBeTruthy()
+    expect(screen.queryByText('虚拟画布尺寸')).toBeNull()
+    expect(screen.queryByLabelText('界面方案画布')).toBeNull()
+    expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
+    expect(container.querySelector('[data-canvas-item="choice"]')).toHaveClass('is-selected')
     expect((screen.getByTestId('overlay-event-editor') as HTMLFieldSetElement).disabled).toBe(false)
     expect(screen.getByText('choice:ying')).toBeTruthy()
-    const effectButtons = screen.getAllByRole('button', { name: '＋ 效果' })
-    const spawnButtons = screen.getAllByRole('button', { name: '＋ 生成组件' })
+    const effectButtons = screen.getAllByRole('button', { name: '＋ 添加效果' })
+    const spawnButtons = screen.getAllByRole('combobox', { name: '添加显示界面' })
     expect(effectButtons[0]).not.toBeDisabled()
     expect(spawnButtons[0]).not.toBeDisabled()
     fireEvent.click(effectButtons[0]!)
@@ -445,7 +630,7 @@ describe('OverlaySchemeEditor selected child', () => {
     render(
       <OverlaySchemeEditor
         overlayId="float"
-        overlay={{ id: 'float', children: [{ id: 'damage', component: 'DamageFloatText', inputs: { text: '-25' } }] }}
+        overlay={{ id: 'float', children: [{ id: 'damage', component: 'DamageFloatText', inputs: { parameter: '-25' } }] }}
         entities={{}}
         variables={{}}
         usageCount={0}
@@ -463,7 +648,195 @@ describe('OverlaySchemeEditor selected child', () => {
 })
 
 describe('ComponentFormFields defaults', () => {
-  it('shows declared defaults as placeholders without writing them into values', () => {
+  it.each([
+    [
+      'StatusNotice',
+      { fixedText: '获得道具', parameter: '〈xxx〉', color: '#f0f0f0', fontSize: 2.4, durationMs: 1600 },
+      ['固定文本', '参数', '字色', '字号', '总时长ms'],
+    ],
+    [
+      'DamageFloatText',
+      { fixedText: '', parameter: '-25', color: '#ff5a5a', fontSize: 3.5, durationMs: 1100 },
+      ['固定文本', '参数', '字色', '字号', '总时长ms'],
+    ],
+    [
+      'GainFloatText',
+      { fixedText: '', parameter: '+50', color: '#ffd54a', fontSize: 3.5, durationMs: 1100 },
+      ['固定文本', '参数', '字色', '字号', '总时长ms'],
+    ],
+  ])('gives %s compact parameters one full-width row with readable labels', (componentId, values, labels) => {
+    render(
+      <ComponentFormFields
+        componentId={componentId}
+        values={values}
+        density="compact"
+        labelWidth="7em"
+        onChange={() => undefined}
+      />,
+    )
+
+    for (const label of labels) {
+      const row = screen.getByText(label).parentElement!
+      expect(row.style.display).toBe('grid')
+      expect(row.style.width).toBe('100%')
+      expect(row.style.gridTemplateColumns).toBe(
+        label === '参数' ? '7em minmax(0, 1fr)' : '7em minmax(0, 320px)',
+      )
+    }
+
+    for (const input of screen.queryAllByRole('spinbutton')) {
+      expect(input).toHaveStyle({ width: '100%' })
+    }
+
+    const parameterRow = screen.getByText('参数').parentElement!
+    const picker = within(parameterRow).getByRole('combobox', { name: '文本内容' })
+    const controlRow = picker.parentElement?.parentElement as HTMLElement
+    const literalInput = within(parameterRow).getByRole('textbox', { name: '固定文本' })
+    expect(controlRow).toHaveStyle({ flexDirection: 'column', alignItems: 'stretch' })
+    expect(picker.parentElement).toHaveClass('is-narrow-safe')
+    expect(literalInput).toHaveStyle({ width: '100%', minWidth: '0' })
+  })
+
+  it('stacks formula selection above its parameter bindings in compact component fields', () => {
+    const formula: Formula = {
+      id: 'formula-layout',
+      name: '伤害公式',
+      ast: {
+        t: 'hole',
+        id: 'coefficient',
+        holeId: 'coefficient',
+        kind: 'number',
+        label: '系数',
+      },
+    }
+    render(
+      <ComponentFormFields
+        componentId="DamageFloatText"
+        values={{
+          parameter: {
+            expr: '0',
+            pick: {
+              mode: 'formula',
+              formulaId: formula.id,
+              holeBindings: {},
+            },
+          },
+        }}
+        pickers={{ formulas: { [formula.id]: formula } }}
+        density="compact"
+        labelWidth="7em"
+        onChange={() => undefined}
+      />,
+    )
+
+    const valueRow = screen.getByText('参数').parentElement!
+    const picker = within(valueRow).getByRole('combobox', { name: '文本内容' })
+    const valueEditor = picker.parentElement?.parentElement?.parentElement as HTMLElement
+
+    expect(valueRow.style.alignItems).toBe('start')
+    expect(screen.getByText('参数')).toHaveStyle({ paddingTop: '6px' })
+    expect(valueEditor.style.flexDirection).toBe('column')
+    expect(valueEditor.style.width).toBe('100%')
+    expect(within(valueRow).getByRole('group', { name: '参数：系数' })).toBeTruthy()
+  })
+
+  it('forwards formula attribute creation from GainFloatText into the binding editor', () => {
+    const formula: Formula = {
+      id: 'formula-hp-max',
+      name: '生命上限公式',
+      ast: {
+        t: 'hole',
+        id: 'max-hp',
+        holeId: 'maxHp',
+        kind: 'entityAttr',
+        label: '生命上限',
+        suggestAttr: 'hpMax',
+      },
+    }
+    render(
+      <ComponentFormFields
+        componentId="GainFloatText"
+        values={{
+          parameter: {
+            expr: '0',
+            pick: {
+              mode: 'formula',
+              formulaId: formula.id,
+              holeBindings: {
+                maxHp: { kind: 'entityAttr', entityId: 'ent-0', attr: 'hpMax' },
+              },
+            },
+          },
+        }}
+        pickers={{
+          formulas: { [formula.id]: formula },
+          entities: {
+            'ent-0': { id: 'ent-0', name: '我方', attrs: { hp: 80 } },
+          },
+        }}
+        density="compact"
+        onCreateEntityAttribute={vi.fn()}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(screen.queryByText(/参数绑定未完成/)).toBeNull()
+    chooseCascade(
+      screen.getByRole('combobox', { name: '生命上限来源' }),
+      '实体属性',
+      '我方',
+      '配置「生命上限」属性',
+    )
+    expect(screen.getByRole('textbox', { name: '我方的新属性 ID' })).toHaveValue('hpMax')
+    expect(screen.getByRole('menuitem', { name: '确认创建并选择' })).toBeEnabled()
+  })
+
+  it('never offers an unset/default option for interface enum settings', () => {
+    registerComponent('test-enum-input', {
+      inputs: [
+        {
+          key: 'mode',
+          label: '模式',
+          valueType: 'string',
+          default: 'second',
+          options: [
+            { value: 'first', label: '第一项' },
+            { value: 'second', label: '第二项' },
+          ],
+        },
+        {
+          key: 'alignment',
+          label: '对齐',
+          valueType: 'string',
+          options: [
+            { value: 'left', label: '左侧' },
+            { value: 'right', label: '右侧' },
+          ],
+        },
+      ],
+    })
+
+    render(
+      <ComponentFormFields
+        componentId="test-enum-input"
+        values={{}}
+        onChange={() => undefined}
+      />,
+    )
+
+    const mode = screen.getByRole('combobox', { name: '模式' })
+    const alignment = screen.getByRole('combobox', { name: '对齐' })
+    expect(mode).toHaveValue('second')
+    expect(alignment).toHaveValue('left')
+    expect(within(mode).queryByRole('option', { name: /默认|未选|未设置/ })).toBeNull()
+    expect(within(alignment).queryByRole('option', { name: /默认|未选|未设置/ })).toBeNull()
+    expect(within(mode).getAllByRole('option')).toHaveLength(2)
+    expect(within(alignment).getAllByRole('option')).toHaveLength(2)
+
+    unregisterComponent('test-enum-input')
+  })
+
+  it('shows declared defaults as placeholders and preserves explicitly empty text', () => {
     registerComponent('test-default-input', {
       inputs: [
         { key: 'text', label: '文本', valueType: 'string', default: '默认文本' },
@@ -490,14 +863,78 @@ describe('ComponentFormFields defaults', () => {
     expect(screen.getByPlaceholderText('3')).toBeTruthy()
 
     fireEvent.change(input, { target: { value: '' } })
-    expect(onChange).toHaveBeenNthCalledWith(1, {})
+    expect(onChange).toHaveBeenNthCalledWith(1, { text: '' })
 
     fireEvent.blur(input)
     expect(onChange).toHaveBeenCalledTimes(1)
     unregisterComponent('test-default-input')
   })
 
-  it('edits damage float text as either a fixed number or an applied formula', () => {
+  it('fills a declared numeric default only after an emptied input loses focus', () => {
+    registerComponent('test-number-default-input', {
+      inputs: [{ key: 'hp', label: '血量', valueType: 'number', default: 60 }],
+    })
+    const onChange = vi.fn()
+    function Harness(): JSX.Element {
+      const [values, setValues] = useState<Record<string, unknown>>({ hp: 60 })
+      return (
+        <ComponentFormFields
+          componentId="test-number-default-input"
+          values={values}
+          onChange={(next) => {
+            setValues(next)
+            onChange(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    const input = screen.getByDisplayValue('60')
+    fireEvent.change(input, { target: { value: '' } })
+
+    expect(input).toHaveValue(null)
+    expect(onChange).toHaveBeenNthCalledWith(1, {})
+
+    fireEvent.blur(input)
+
+    expect(input).toHaveValue(60)
+    expect(onChange).toHaveBeenNthCalledWith(2, { hp: 60 })
+    unregisterComponent('test-number-default-input')
+  })
+
+  it('edits damage float text parameter as either a constant or an applied formula', () => {
+    const formula: Formula = {
+      id: 'formula-float-damage',
+      name: '飘字伤害',
+      ast: { t: 'num', id: 'n0', v: -12 },
+    }
+    const onChange = vi.fn()
+    render(
+      <ComponentFormFields
+        componentId="DamageFloatText"
+        values={{ parameter: '-25' }}
+        pickers={{ formulas: { [formula.id]: formula } }}
+        onChange={onChange}
+      />,
+    )
+
+    expect(within(screen.getByText('参数').parentElement!)
+      .getByRole('textbox', { name: '固定文本' })).toHaveValue('-25')
+    chooseCascade(screen.getByRole('combobox', { name: '文本内容' }), '公式', '飘字伤害')
+    expect(onChange).toHaveBeenCalledWith({
+      parameter: {
+        expr: '-12',
+        pick: {
+          mode: 'formula',
+          formulaId: formula.id,
+          holeBindings: {},
+        },
+      },
+    })
+  })
+
+  it('uses a blank parameter without offering an unset option', () => {
     const formula: Formula = {
       id: 'formula-float-damage',
       name: '飘字伤害',
@@ -513,12 +950,17 @@ describe('ComponentFormFields defaults', () => {
       />,
     )
 
-    expect(screen.getByRole('textbox', { name: '常量数值' })).toHaveValue('-25')
-    fireEvent.change(screen.getByRole('combobox', { name: '数值内容' }), {
-      target: { value: `formula:${formula.id}` },
-    })
-    expect(onChange).toHaveBeenCalledWith({
-      value: {
+    const picker = screen.getByRole('combobox', { name: '文本内容' })
+    expect(picker).toHaveValue('literal')
+    expect(within(screen.getByText('参数').parentElement!)
+      .getByRole('textbox', { name: '固定文本' })).toHaveValue('')
+    fireEvent.click(picker)
+    expect(screen.queryByRole('menuitem', { name: '未设置（使用组件默认）' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '公式' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '飘字伤害' }))
+    expect(onChange).toHaveBeenLastCalledWith({
+      parameter: {
         expr: '-12',
         pick: {
           mode: 'formula',
@@ -534,7 +976,7 @@ describe('ComponentFormFields defaults', () => {
     render(
       <ComponentFormFields
         componentId="DamageFloatText"
-        values={{ value: { expr: 'entity.hero.attr.hp' } }}
+        values={{ parameter: { ref: 'entity.hero.attr.hp' } }}
         pickers={{
           entities: {
             hero: { id: 'hero', name: '主角', attrs: { hp: 80, attack: 12 } },
@@ -547,29 +989,60 @@ describe('ComponentFormFields defaults', () => {
       />,
     )
 
-    expect(screen.getByRole('combobox', { name: '数值内容' })).toHaveValue('entity:hero:hp')
-    expect(screen.getByText(/常量：10 · 状态：entity\.hero\.attr\.hp \/ var\.qi/)).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: '文本内容' })).toHaveValue('entity-attr:hero:hp')
+    expect(screen.queryByText(/常量：10 · 状态：entity\.hero\.attr\.hp \/ var\.qi/)).toBeNull()
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('switches hp bars between bound and custom value modes', () => {
+  it('shows only direct enemy hp bar parameters and prioritizes matching entity values', () => {
+    const formula: Formula = {
+      id: 'formula-hp',
+      name: '血量公式',
+      ast: { t: 'num', id: 'n0', v: 42 },
+    }
     const onChange = vi.fn()
     let latest: Record<string, unknown> = {}
     function Harness(): JSX.Element {
-      const [values, setValues] = useState<Record<string, unknown>>({})
+      const [values, setValues] = useState<Record<string, unknown>>({
+        label: { ref: 'entity.ent-boss.name' },
+        current: { expr: 'entity.ent-boss.attr.vitality' },
+        max: { expr: 'entity.ent-boss.attr.vitalityLimit' },
+      })
       latest = values
       return (
         <ComponentFormFields
-          componentId="BattlePlayerHpBar"
+          componentId="BattleEnemyHpBar"
           values={values}
           pickers={{
             entities: {
               'ent-player': {
                 id: 'ent-player',
+                kind: 'player',
                 name: '空藏',
                 attrs: { hp: 80, hpMax: 100 },
+                attrMeta: { hp: { label: '生命' } },
+              },
+              'ent-boss': {
+                id: 'ent-boss',
+                kind: 'boss',
+                name: '小怪',
+                attrs: {
+                  vitality: 700,
+                  vitalityLimit: 700,
+                  hp: 20,
+                  hpMax: 30,
+                  attack: 75,
+                  defense: 50,
+                },
+                attrMeta: {
+                  vitality: { label: '当前血量' },
+                  vitalityLimit: { label: '最大血量' },
+                  hp: { label: '攻击力' },
+                  hpMax: { label: '防御上限' },
+                },
               },
             },
+            formulas: { [formula.id]: formula },
           }}
           onChange={(next) => {
             setValues(next)
@@ -580,152 +1053,266 @@ describe('ComponentFormFields defaults', () => {
     }
     render(<Harness />)
 
-    expect(screen.getByRole('radio', { name: '绑定属性' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByText('绑定对象')).toBeTruthy()
-    expect(screen.queryByText('当前血量')).toBeNull()
-    fireEvent.click(screen.getByRole('radio', { name: '分别设置' }))
+    expect(screen.queryByText('实体')).toBeNull()
+    expect(screen.queryByText('属性')).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: '血量来源' })).toBeNull()
+    expect(screen.queryByText('当前值来源')).toBeNull()
+    expect(screen.queryByText('上限来源')).toBeNull()
+    expect(screen.getAllByRole('combobox')).toHaveLength(3)
 
-    const currentField = screen.getByText('当前血量').parentElement!
-    const maxField = screen.getByText('最大血量').parentElement!
-    const qiField = screen.getByText('当前气力').parentElement!
-    const qiMaxField = screen.getByText('气力上限').parentElement!
     const labelField = screen.getByText('显示名').parentElement!
-    const current = within(currentField).getByRole('combobox', { name: '数值内容' })
-    expect(currentField.style.display).toBe('grid')
-    expect(currentField.style.gridTemplateColumns).toBe('max-content minmax(0, 1fr)')
+    const currentField = screen.getByText('血量').parentElement!
+    const maxField = screen.getByText('最大血量').parentElement!
+    const labelSelect = within(labelField).getByRole('combobox', { name: '文本内容' })
+    const currentSelect = within(currentField).getByRole('combobox', { name: '数值内容' })
+    const maxSelect = within(maxField).getByRole('combobox', { name: '数值内容' })
+
+    expect(labelField.style.flexBasis).toBe('100%')
     expect(currentField.style.flexBasis).toBe('100%')
     expect(maxField.style.flexBasis).toBe('100%')
-    expect(qiField.style.flexBasis).toBe('100%')
-    expect(qiMaxField.style.flexBasis).toBe('100%')
-    expect(labelField.style.flexBasis).toBe('100%')
-    expect(labelField.compareDocumentPosition(currentField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.queryByText('绑定对象')).toBeNull()
-    expect(current).toHaveValue('entity:ent-player:hp')
-    expect(within(maxField).getByRole('combobox', { name: '数值内容' })).toHaveValue('entity:ent-player:hpMax')
-    expect(within(qiField).getByRole('combobox', { name: '数值内容' })).toHaveValue('empty')
-    expect(within(qiMaxField).getByRole('combobox', { name: '数值内容' })).toHaveValue('const')
-    expect(within(labelField).getByRole('combobox', { name: '文本内容' })).toHaveValue('literal')
-    expect(latest.current).toBeTruthy()
-    expect(latest.max).toBeTruthy()
+    expect(labelSelect).toHaveValue('entity-name:ent-boss')
+    expect(currentSelect).toHaveValue('entity:ent-boss:vitality')
+    expect(maxSelect).toHaveValue('entity:ent-boss:vitalityLimit')
+    expect(labelSelect).toHaveTextContent('小怪')
+    expect(currentSelect).toHaveTextContent('小怪的当前血量')
+    expect(maxSelect).toHaveTextContent('小怪的最大血量')
 
-    fireEvent.click(screen.getByRole('radio', { name: '绑定属性' }))
-    expect(latest.current).toBeUndefined()
-    expect(latest.max).toBeUndefined()
-    expect(screen.getByText('绑定对象')).toBeTruthy()
-    expect(onChange).toHaveBeenCalledTimes(2)
-  })
+    fireEvent.click(currentSelect)
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '小怪' }))
+    expect(screen.getByRole('menuitem', { name: '当前血量' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'attack' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'defense' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '攻击力' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '防御上限' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '最大血量' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '公式' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '血量公式' }))
+    expect(latest.current).toEqual({
+      expr: '42',
+      pick: {
+        mode: 'formula',
+        formulaId: formula.id,
+        holeBindings: {},
+      },
+    })
 
-  it('lists configured properties and repairs the property when the bound object changes', () => {
-    const onChange = vi.fn()
-    let latest: Record<string, unknown> = {}
-    function Harness(): JSX.Element {
-      const [values, setValues] = useState<Record<string, unknown>>({})
-      latest = values
-      return (
-        <ComponentFormFields
-          componentId="BattlePlayerHpBar"
-          values={values}
-          pickers={{
-            entities: {
-              'ent-player': {
-                id: 'ent-player',
-                name: '默认角色',
-                attrs: { hp: 80 },
-              },
-              hero: {
-                id: 'hero',
-                name: '自定义角色',
-                attrs: { rage: 12 },
-                attrMeta: { stamina: { label: '耐力', initial: 20 } },
-              },
-              boss: {
-                id: 'boss',
-                name: '首领',
-                attrs: { hp: 200 },
-              },
-            },
-          }}
-          onChange={(next) => {
-            latest = next
-            setValues(next)
-            onChange(next)
-          }}
-        />
-      )
-    }
-    render(<Harness />)
-
-    const entity = screen.getByRole('combobox', { name: '绑定对象' })
-    const attr = screen.getByRole('combobox', { name: '绑定属性' })
-    expect(entity).toHaveValue('ent-player')
-    expect(attr).toHaveValue('hp')
-
-    fireEvent.change(entity, { target: { value: 'hero' } })
-    expect(latest).toEqual({ bind: 'hero', attr: 'rage' })
-    expect(attr).toHaveValue('rage')
-    expect(within(attr).getByRole('option', { name: 'rage' })).toBeTruthy()
-    expect(within(attr).getByRole('option', { name: '耐力（stamina）' })).toBeTruthy()
-
-    fireEvent.change(attr, { target: { value: 'stamina' } })
-    expect(latest).toEqual({ bind: 'hero', attr: 'stamina' })
-
-    fireEvent.change(entity, { target: { value: 'boss' } })
-    expect(latest).toEqual({ bind: 'boss' })
-    expect(attr).toHaveValue('hp')
+    fireEvent.click(maxSelect)
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '小怪' }))
+    expect(screen.getByRole('menuitem', { name: '最大血量' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '当前血量' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '防御上限' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '常量' }))
+    fireEvent.change(within(maxField).getByRole('textbox', { name: '常量数值' }), {
+      target: { value: '900' },
+    })
+    const maxEditorRow = within(maxField).getByRole('textbox', { name: '常量数值' }).parentElement!
+    expect(maxEditorRow).toHaveStyle({ display: 'flex', flexWrap: 'nowrap' })
+    expect(latest.max).toBe(900)
     expect(onChange).toHaveBeenCalledTimes(3)
   })
 
-  it('shows the new hp bar default property when the entity catalog has no attributes', () => {
+  it('does not offer an unset option for player hp bar values', () => {
     render(
       <ComponentFormFields
         componentId="BattlePlayerHpBar"
-        values={{}}
+        values={{ current: 80, max: 100 }}
         pickers={{ entities: {} }}
-        onChange={vi.fn()}
+        onChange={() => undefined}
       />,
     )
 
-    const attr = screen.getByRole('combobox', { name: '绑定属性' })
-    expect(attr).toHaveValue('hp')
-    expect(within(attr).getByRole('option', { name: 'hp（未在对象中声明）' })).toBeTruthy()
+    const qiField = screen.getByText('当前气力').parentElement!
+    const qiPicker = within(qiField).getByRole('combobox', { name: '数值内容' })
+    const qiValue = within(qiField).getByRole('textbox', { name: '常量数值' })
+    expect(qiPicker).toHaveTextContent('常量')
+    expect(qiValue).toHaveValue('3')
+
+    fireEvent.click(qiPicker)
+    expect(screen.queryByRole('menuitem', { name: '未设置（使用组件默认）' })).toBeNull()
   })
 
-  it('removes the undeclared marker when hp is added to the bound object', () => {
+  it('offers a confirmed rule attribute setup when the required hp value is missing', () => {
+    const onChange = vi.fn()
+    let latestValues: Record<string, unknown> = { label: '敌方', current: 0, max: 100 }
     function Harness(): JSX.Element {
       const [entities, setEntities] = useState<Record<string, Entity>>({
-        'ent-player': { id: 'ent-player', name: '主角', attrs: {} },
+        boss: {
+          id: 'boss',
+          kind: 'boss',
+          name: '小怪',
+          attrs: { attack: 20, defense: 10, hp: 30 },
+          attrMeta: { hp: { label: '攻击力' } },
+        },
       })
+      const [values, setValues] = useState<Record<string, unknown>>(latestValues)
+      latestValues = values
       return (
         <>
-          <button
-            type="button"
-            onClick={() => setEntities({
-              'ent-player': { ...entities['ent-player']!, attrs: { hp: 100 } },
-            })}
-          >
-            添加 hp
-          </button>
           <ComponentFormFields
-            componentId="BattlePlayerHpBar"
-            values={{}}
+            componentId="BattleEnemyHpBar"
+            values={values}
             pickers={{ entities }}
-            onChange={vi.fn()}
+            onCreateEntityAttribute={(request) => {
+              setEntities((current) => ensureEntityAttribute(current, request) ?? current)
+            }}
+            onChange={(next) => {
+              setValues(next)
+              onChange(next)
+            }}
           />
+          <output data-testid="entities-state">{JSON.stringify(entities)}</output>
         </>
       )
     }
     render(<Harness />)
 
-    const attr = screen.getByRole('combobox', { name: '绑定属性' })
-    expect(within(attr).getByRole('option', { name: 'hp（未在对象中声明）' })).toBeTruthy()
+    const hpPicker = within(screen.getByText('血量').parentElement!)
+      .getByRole('combobox', { name: '数值内容' })
+    chooseCascade(hpPicker, '实体属性', '小怪', '配置「当前血量」属性')
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 hp' }))
+    expect(screen.queryByRole('menuitem', { name: 'attack' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'defense' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '攻击力' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '小怪的新属性 ID' })).toHaveValue('hp2')
+    expect(screen.getByRole('textbox', { name: '小怪的新属性显示名' })).toHaveValue('当前血量')
+    expect(screen.getByRole('textbox', { name: '小怪的新属性初始值' })).toHaveValue('100')
+    expect(screen.queryByRole('menuitem', { name: '最小值：0' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '最大值：100' })).toBeNull()
 
-    expect(within(attr).getByRole('option', { name: 'hp' })).toBeTruthy()
-    expect(within(attr).queryByRole('option', { name: 'hp（未在对象中声明）' })).toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '小怪的新属性 ID' }), {
+      target: { value: 'lifeNow' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '小怪的新属性显示名' }), {
+      target: { value: '生命值' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '小怪的新属性初始值' }), {
+      target: { value: '88' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(screen.getByTestId('entities-state')).toHaveTextContent(
+      '"attrs":{"attack":20,"defense":10,"hp":30,"lifeNow":88}',
+    )
+    expect(screen.getByTestId('entities-state')).toHaveTextContent(
+      '"lifeNow":{"label":"生命值","initial":88,"min":0,"max":100}',
+    )
+    expect(latestValues.current).toMatchObject({ expr: 'entity.boss.attr.lifeNow' })
+    expect(onChange).toHaveBeenCalled()
   })
 
-  it('uses the dynamic text picker for subtitle speaker and text', () => {
+  it('offers a confirmed entity setup for an hp label when the entity catalog is empty', () => {
+    let latestValues: Record<string, unknown> = { label: '敌方', current: 0, max: 100 }
+    function Harness(): JSX.Element {
+      const [entities, setEntities] = useState<Record<string, Entity>>({})
+      const [values, setValues] = useState<Record<string, unknown>>(latestValues)
+      latestValues = values
+      return (
+        <>
+          <ComponentFormFields
+            componentId="BattleEnemyHpBar"
+            values={values}
+            pickers={{ entities }}
+            onCreateEntity={(request) => {
+              setEntities((current) => ensureEntity(current, request))
+            }}
+            onChange={setValues}
+          />
+          <output data-testid="entities-state">{JSON.stringify(entities)}</output>
+        </>
+      )
+    }
+    render(<Harness />)
+
+    const labelPicker = within(screen.getByText('显示名').parentElement!)
+      .getByRole('combobox', { name: '文本内容' })
+    chooseCascade(labelPicker, '实体', '配置「敌方」实体')
+
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('ent-boss')
+    expect(screen.getByRole('textbox', { name: '新实体显示名' })).toHaveValue('敌方')
+    expect(screen.queryByRole('textbox', { name: '新实体类型' })).toBeNull()
+
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体 ID' }), {
+      target: { value: 'enemy-chief' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体显示名' }), {
+      target: { value: '首领' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(screen.getByTestId('entities-state')).toHaveTextContent(
+      '"enemy-chief":{"id":"enemy-chief","name":"首领","attrs":{},"attrMeta":{}}',
+    )
+    expect(latestValues.label).toEqual({ ref: 'entity.enemy-chief.name' })
+  })
+
+  it('creates an entity and the required hp property from an empty catalog', () => {
+    let latestValues: Record<string, unknown> = { label: '敌方', current: 0, max: 100 }
+    function Harness(): JSX.Element {
+      const [entities, setEntities] = useState<Record<string, Entity>>({})
+      const [values, setValues] = useState<Record<string, unknown>>(latestValues)
+      latestValues = values
+      return (
+        <>
+          <ComponentFormFields
+            componentId="BattleEnemyHpBar"
+            values={values}
+            pickers={{ entities }}
+            onCreateEntity={(request) => {
+              setEntities((current) => ensureEntity(current, request))
+            }}
+            onCreateEntityAttribute={(request) => {
+              setEntities((current) => ensureEntityAttribute(current, request) ?? current)
+            }}
+            onChange={setValues}
+          />
+          <output data-testid="entities-state">{JSON.stringify(entities)}</output>
+        </>
+      )
+    }
+    render(<Harness />)
+
+    const hpPicker = within(screen.getByText('血量').parentElement!)
+      .getByRole('combobox', { name: '数值内容' })
+    chooseCascade(hpPicker, '实体属性', '配置「敌方」实体')
+
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('ent-boss')
+    expect(screen.getByRole('textbox', { name: '新实体显示名' })).toHaveValue('敌方')
+    expect(screen.queryByRole('textbox', { name: '新实体类型' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新属性 ID' })).toHaveValue('hp')
+    expect(screen.getByRole('textbox', { name: '新属性显示名' })).toHaveValue('当前血量')
+    expect(screen.getByRole('textbox', { name: '新属性初始值' })).toHaveValue('100')
+    expect(screen.queryByRole('menuitem', { name: '最小值：0' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '最大值：100' })).toBeNull()
+
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体 ID' }), {
+      target: { value: 'enemy-boss' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体显示名' }), {
+      target: { value: '魔王' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新属性 ID' }), {
+      target: { value: 'vitality' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新属性显示名' }), {
+      target: { value: '生命值' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新属性初始值' }), {
+      target: { value: '90' },
+    })
+    fireEvent.click(screen.getByRole('menuitem', { name: '确认创建并选择' }))
+
+    expect(screen.getByTestId('entities-state')).toHaveTextContent(
+      '"enemy-boss":{"id":"enemy-boss","name":"魔王","attrs":{"vitality":90}',
+    )
+    expect(screen.getByTestId('entities-state')).toHaveTextContent(
+      '"vitality":{"label":"生命值","initial":90,"min":0,"max":100}',
+    )
+    expect(latestValues.current).toMatchObject({ expr: 'entity.enemy-boss.attr.vitality' })
+  })
+
+  it('uses dynamic text pickers for subtitle speaker and dialogue text', () => {
     const onChange = vi.fn()
     render(
       <ComponentFormFields
@@ -745,9 +1332,43 @@ describe('ComponentFormFields defaults', () => {
 
     const pickers = screen.getAllByRole('combobox', { name: '文本内容' })
     expect(pickers).toHaveLength(2)
-    fireEvent.change(pickers[0]!, { target: { value: 'entity-name:hero' } })
+    fireEvent.click(pickers[0]!)
+    expect(screen.queryByRole('menuitem', { name: '变量' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '空藏' }))
+    expect(screen.queryByRole('menuitem', { name: 'hp' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '名称' }))
     expect(onChange).toHaveBeenCalledWith({
       speaker: { ref: 'entity.hero.name' },
     })
+    chooseCascade(pickers[1]!, '变量', '气力')
+    expect(onChange).toHaveBeenCalledWith({
+      text: { ref: 'var.qi' },
+    })
+  })
+
+  it('uses a dynamic text picker for interaction copy but not its trigger key', () => {
+    const onChange = vi.fn()
+    render(
+      <ComponentFormFields
+        componentId="TextOption"
+        values={{}}
+        pickers={{
+          variables: {
+            qi: { id: 'qi', name: '气力', initial: 3 },
+          },
+        }}
+        onChange={onChange}
+      />,
+    )
+
+    const picker = screen.getByRole('combobox', { name: '文本内容' })
+    chooseCascade(picker, '变量', '气力')
+    expect(onChange).toHaveBeenCalledWith({
+      text: { ref: 'var.qi' },
+    })
+    const triggerRow = screen.getByText('触发按键').parentElement!
+    expect(within(triggerRow).getByRole('textbox')).toBeTruthy()
+    expect(within(triggerRow).queryByRole('combobox')).toBeNull()
   })
 })

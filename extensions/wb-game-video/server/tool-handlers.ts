@@ -27,6 +27,7 @@ import {
   type KeyframeInput,
   type OrchestrateCtx,
 } from './generation/orchestrate'
+import type { ExtensionCapabilities } from './generation/video-generation-gateway'
 import { importCharacterRefs, importSceneRefs } from './intake'
 import { readProject, writeProject } from '../src/editor/persist/blueprint-store-fs'
 import { validateDocument } from '../src/editor/persist/blueprint-project'
@@ -41,6 +42,8 @@ interface ToolCtx {
   gameId?: string
   projectRoot?: string
   game?: string
+  /** Host-provided bridge to the extension-platform capability registry. */
+  capabilities?: ExtensionCapabilities
 }
 
 interface BoundHostContext {
@@ -110,7 +113,7 @@ function orchestrateCtx(args: { gameSlug?: string }, ctx: ToolCtx): OrchestrateC
   const slug = pickSlug(args, bound)
   if (!slug || !bound) return null
   const dir = resolve(bound.gameRoot, 'assets')
-  return { dir, gameId: slug, env: ctx.env }
+  return { dir, gameId: slug, env: ctx.env, capabilities: ctx.capabilities }
 }
 
 const NO_REGISTRY_ERR = '宿主未绑定有效游戏目录或 gameSlug 与当前游戏不一致，无法访问素材层'

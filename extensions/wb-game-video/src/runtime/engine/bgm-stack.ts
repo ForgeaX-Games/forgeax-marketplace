@@ -76,12 +76,12 @@ export interface BgmPlaybackCommand {
 }
 
 /** 补齐默认值 + 冻结，产出一帧；`owner` 由调用方决定（replace 时沿用旧帧的）。 */
-function normalizeFrame(input: BgmApplyInput, owner: BgmOwner): BgmStackFrame {
+function normalizeFrame(input: BgmApplyInput, owner: BgmOwner, inheritedVolume = 1): BgmStackFrame {
   // 入参可能是 getNodeBgm 返回的落盘活对象，只读不改，另起新帧。
   return Object.freeze({
     owner,
     ref: input.ref,
-    volume: input.volume ?? 1,
+    volume: input.volume ?? inheritedVolume,
     fadeInMs: input.fadeInMs ?? 0,
     fadeOutMs: input.fadeOutMs ?? 0,
     restart: input.restart ?? false,
@@ -117,7 +117,9 @@ export class BgmStack {
     const sounding = this.top()
     const replacesTop = input.mode === 'replace' && sounding !== undefined && sounding.owner !== DOC_BGM_OWNER
     // replace 换曲不换层主：这一层仍归开它的那个作用域。
-    const frame = replacesTop ? normalizeFrame(input, sounding.owner) : normalizeFrame(input, input.owner)
+    const frame = replacesTop
+      ? normalizeFrame(input, sounding.owner, sounding.volume)
+      : normalizeFrame(input, input.owner, sounding?.volume)
     if (replacesTop) this.stack[this.stack.length - 1] = frame
     else this.stack.push(frame)
     return {
@@ -183,6 +185,11 @@ export class BgmStack {
   /** 栈快照（底 → 顶）；调用后再压栈不影响已取到的数组。 */
   frames(): readonly BgmStackFrame[] {
     return [...this.stack]
+  }
+
+  /** 编辑器时间轴回放恢复用；只恢复内存态，不发播放指令。 */
+  restore(frames: readonly BgmStackFrame[]): void {
+    this.stack.splice(0, this.stack.length, ...frames.map((frame) => Object.freeze({ ...frame })))
   }
 
   /** 结束若干层后「回到新栈顶」（或栈空则停播）的指令；`leaving` 只贡献淡出时长。 */

@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { GameGraph } from '../../../runtime/schema/graph-schema'
-import { canvasNodeDetails, GraphCanvas } from '../GraphCanvas'
+import { canvasNodeDetails, canvasSettlementLabel, GraphCanvas } from '../GraphCanvas'
 
 const graph: GameGraph = {
   nodes: [
@@ -40,7 +40,7 @@ describe('GraphCanvas output handles', () => {
     expect(queryAllByLabelText('入口节点')).toHaveLength(1)
   })
 
-  it('shows the selected video and interface names on a node', () => {
+  it('shows performance, interface and settlement details on a node', () => {
     const detailedGraph: GameGraph = {
       nodes: [{
         ...graph.nodes[0]!,
@@ -48,6 +48,15 @@ describe('GraphCanvas output handles', () => {
           name: '起点',
           media: { kind: 'video', ref: 'video-1' },
           overlayNodes: [{ overlay: 'main-ui' }, { overlay: 'dialogue-ui' }],
+          reactions: [
+            {
+              when: { type: 'at', ms: 1200 },
+              do: [
+                { kind: 'effect', effects: [{ kind: 'attr', entityId: 'player', attr: 'hp', op: 'add', value: -40 }] },
+                { kind: 'advance', edgeId: 'next' },
+              ],
+            },
+          ],
         },
       }],
       edges: [],
@@ -61,6 +70,14 @@ describe('GraphCanvas output handles', () => {
           'main-ui': { id: 'main-ui', title: '主界面', children: [] },
           'dialogue-ui': { id: 'dialogue-ui', title: '对话', children: [] },
         }}
+        entities={{
+          player: {
+            id: 'player',
+            name: '空藏',
+            attrs: { hp: 200 },
+            attrMeta: { hp: { label: '生命' } },
+          },
+        }}
       />,
     )
 
@@ -69,6 +86,8 @@ describe('GraphCanvas output handles', () => {
     expect(getByText('界面')).toBeTruthy()
     expect(getByText('主界面')).toBeTruthy()
     expect(getByText('对话')).toBeTruthy()
+    expect(getByText('结算')).toBeTruthy()
+    expect(getByText('1200 ms · 空藏.生命 -40；推进')).toBeTruthy()
     expect(
       getByTestId('node-edge-info').compareDocumentPosition(getByTestId('node-content-info'))
       & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -84,6 +103,42 @@ describe('GraphCanvas output handles', () => {
     expect(canvasNodeDetails(node)).toEqual({
       performance: 'missing-video',
       interfaces: ['missing-ui'],
+      settlements: [],
     })
+  })
+
+  it('summarizes every settlement trigger and excludes component events', () => {
+    const node: GameGraph['nodes'][number] = {
+      ...graph.nodes[0]!,
+      data: {
+        name: '起点',
+        reactions: [
+          {
+            when: { type: 'watch', of: 'score', on: 'inc' },
+            do: [{
+              kind: 'effect',
+              effects: [
+                { kind: 'var', varId: 'rage', op: 'add', value: 1 },
+                { kind: 'flag', varId: 'ready', value: true },
+              ],
+            }],
+          },
+          { when: { type: 'shown', of: 'hud/hp' }, do: [{ kind: 'spawn', from: 'toast/gain' }] },
+          { when: { type: 'event', id: 'confirm' }, do: [{ kind: 'advance', edgeId: 'next' }] },
+        ],
+      },
+    }
+
+    expect(canvasNodeDetails(node, undefined, [], undefined, {
+      rage: { id: 'rage', name: '怒气' },
+      ready: { id: 'ready', name: '可释放' },
+    }).settlements).toEqual([
+      '条件 · 怒气 +1；可释放=是',
+      '界面出现 · 显示 toast',
+    ])
+    expect(canvasSettlementLabel({
+      when: { type: 'complete' },
+      do: [{ kind: 'hideOverlay', mountId: 'hud' }],
+    })).toBe('演出结束 · 隐藏 hud')
   })
 })

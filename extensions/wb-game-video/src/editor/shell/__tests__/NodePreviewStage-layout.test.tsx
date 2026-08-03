@@ -14,6 +14,419 @@ afterEach(() => {
 })
 
 describe('NodePreviewStage overlay layout', () => {
+  it('keeps mode controls host-owned and exposes a configurable timeline disclosure', () => {
+    const current = node('n1', { durationMs: 3_000 })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+    const renderToggleIcon = vi.fn((expanded: boolean) => (
+      <span data-testid="custom-timeline-icon">{expanded ? 'collapse' : 'expand'}</span>
+    ))
+
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        timelineDisclosure={{ showToggle: true, renderToggleIcon }}
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('group', { name: '节点预览模式' })).toBeNull()
+    expect(container.querySelector('.mtl-root')).not.toBeNull()
+    const collapse = screen.getByRole('button', { name: '收起时间轴' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    expect(collapse.closest('.nps-controls')).not.toBeNull()
+    expect(screen.getByTestId('custom-timeline-icon')).toHaveTextContent('collapse')
+
+    fireEvent.click(collapse)
+    expect(container.querySelector('.mtl-root')).toBeNull()
+    const expand = screen.getByRole('button', { name: '展开时间轴' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByTestId('custom-timeline-icon')).toHaveTextContent('expand')
+
+    fireEvent.click(expand)
+    expect(container.querySelector('.mtl-root')).not.toBeNull()
+    expect(renderToggleIcon).toHaveBeenLastCalledWith(true)
+  })
+
+  it('hides the timeline disclosure button by default without hiding the timeline', () => {
+    const current = node('n1', { durationMs: 3_000 })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /时间轴/ })).toBeNull()
+    expect(container.querySelector('.mtl-root')).not.toBeNull()
+  })
+
+  it('does not overlay the video id or playback mode on the preview window', () => {
+    const current = node('n1', {
+      durationMs: 3_000,
+      media: { kind: 'video', ref: 'encoded-video.mp4' },
+      mediaPlayMode: 'loop',
+    })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.nps-frame .gc-badge')).toBeNull()
+    expect(screen.queryByText('encoded-video.mp4')).toBeNull()
+    expect(screen.queryByText('循环')).toBeNull()
+  })
+
+  it('renders a locked video track whose local pointer loops without rewinding the node playhead', async () => {
+    const current = node('n1', {
+      durationMs: 1_000,
+      media: { kind: 'video', ref: 'data:video/mp4;base64,loop-preview' },
+      mediaPlayMode: 'loop',
+    })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    const videoTrack = container.querySelector<HTMLElement>('.gc-mclip.is-video')
+    expect(videoTrack).toHaveClass('is-locked')
+    expect(videoTrack).toHaveAttribute('aria-label', expect.stringContaining('视频'))
+    expect(videoTrack?.querySelector('.gc-mhandle')).toBeNull()
+
+    const video = container.querySelector('video')!
+    Object.defineProperty(video, 'paused', { configurable: true, value: false })
+    video.currentTime = 0.9
+    fireEvent.play(video)
+    await waitFor(() => {
+      expect(container.querySelector('.gc-media-playhead')).toHaveAttribute('data-media-playhead-ms', '900')
+      expect(container.querySelector('.gc-playhead')).toHaveAttribute('data-playhead-ms', '900')
+    })
+
+    video.currentTime = 0.1
+    await waitFor(() => {
+      expect(container.querySelector('.gc-media-playhead')).toHaveAttribute('data-media-playhead-ms', '100')
+      expect(container.querySelector('.gc-playhead')).toHaveAttribute('data-playhead-ms', '1000')
+    })
+    fireEvent.pause(video)
+  })
+
+  it('uses only the node playhead for a play-once video track', () => {
+    const current = node('n1', {
+      durationMs: 1_000,
+      media: { kind: 'video', ref: 'data:video/mp4;base64,once-preview' },
+      mediaPlayMode: 'once',
+    })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.gc-mclip.is-video.is-locked')).not.toBeNull()
+    expect(container.querySelector('.gc-playhead')).not.toBeNull()
+    expect(container.querySelector('.gc-media-playhead')).toBeNull()
+  })
+
+  it('shows state condition settlements in the timeline condition lane', () => {
+    const current = node('n1', {
+      reactions: [{
+        when: { type: 'state', condition: { all: [{ type: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'eq', value: 50 }] } },
+        do: [],
+      }],
+    })
+    const scenario = scnOf({ nodes: [current], edges: [] })
+
+    render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={scenario.graph.nodes[0]!}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTitle('满足 1 项条件 → 未配置动作')).toBeTruthy()
+  })
+
+  it('highlights every condition settlement interface and drags the active spawn layout in the preview', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }
+    })
+    const current = node('n1', {
+      durationMs: 1_000,
+      reactions: [{
+        when: { type: 'watch', of: 'entity.bull.attr.rage', on: 'inc' },
+        do: [
+          {
+            kind: 'spawn',
+            from: 'rage/value',
+            ttlMs: 1200,
+            layout: { left: 0.1, top: 0.2, width: 0.2, height: 0.2 },
+          },
+          {
+            kind: 'spawn',
+            from: 'rage/value',
+            ttlMs: 1200,
+            layout: { left: 0.6, top: 0.5, width: 0.2, height: 0.2 },
+          },
+        ],
+      }],
+    })
+    const initialScenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        entities: { bull: { id: 'bull', attrs: { rage: 10 } } },
+        ui: {
+          overlays: {
+            rage: {
+              id: 'rage',
+              title: '怒气值界面',
+              children: [{
+                id: 'value',
+                component: 'DamageFloatText',
+                inputs: { parameter: 42 },
+              }],
+            },
+          },
+        },
+      },
+    )
+    let latestScenario: GameScenario = initialScenario
+    function Harness(): JSX.Element {
+      const [scenario, setScenario] = useState(initialScenario)
+      const [focusedLifecycleIndex, setFocusedLifecycleIndex] = useState<number | null>(null)
+      latestScenario = scenario
+      return (
+        <NodePreviewStage
+          scenario={scenario}
+          node={scenario.graph.nodes[0]!}
+          game="test"
+          muted
+          focusedLifecycleIndex={focusedLifecycleIndex}
+          onEditScenario={(edit) => setScenario((value) => edit(value, value.graph.nodes[0]!))}
+          onMutedChange={vi.fn()}
+          onFocusLifecycle={setFocusedLifecycleIndex}
+        />
+      )
+    }
+
+    const { container } = render(<Harness />)
+    const conditionMarker = screen.getByRole('button', { name: /entity\.bull\.attr\.rage 增加/ })
+    fireEvent.pointerDown(conditionMarker)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-preview-condition-spawn-id="condition-spawn:0:0"]')).not.toBeNull()
+      expect(container.querySelector('[data-preview-condition-spawn-id="condition-spawn:0:1"]')).not.toBeNull()
+      expect(container.querySelector('[data-canvas-item="condition-spawn:0:0"]')).toHaveClass(
+        'is-selected',
+        'is-highlighted',
+      )
+      expect(container.querySelector('[data-canvas-item="condition-spawn:0:1"]')).toHaveClass(
+        'is-highlighted',
+      )
+      expect(container.querySelector('[data-canvas-item="condition-spawn:0:1"]')).not.toHaveClass(
+        'is-selected',
+      )
+    })
+    expect(screen.getAllByText('+42')).toHaveLength(2)
+
+    const canvas = screen.getByRole('application', { name: '节点视频覆盖物画布' })
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 9, clientX: 30, clientY: 30 })
+    fireEvent.pointerMove(canvas, { pointerId: 9, clientX: 50, clientY: 40 })
+    fireEvent.pointerUp(canvas, { pointerId: 9, clientX: 50, clientY: 40 })
+    await waitFor(() => {
+      const action = latestScenario.graph.nodes[0]?.data.reactions?.[0]?.do[0]
+      expect(action?.kind).toBe('spawn')
+      if (action?.kind !== 'spawn') return
+      expect(action.layout?.left).toBeCloseTo(0.2)
+      expect(action.layout?.top).toBeCloseTo(0.3)
+      expect(action.layout).toMatchObject({ width: 0.2, height: 0.2 })
+    })
+  })
+
+  it('renders a condition settlement spawn in the editable node preview', async () => {
+    const current = node('n1', {
+      reactions: [
+        {
+          when: { type: 'at', ms: 0 },
+          do: [{
+            kind: 'effect',
+            effects: [{ kind: 'attr', entityId: 'ent-0', attr: 'nuqi', op: 'add', value: 80 }],
+          }],
+        },
+        {
+          when: { type: 'watch', of: 'entity.ent-0.attr.nuqi', on: 'inc' },
+          do: [{
+            kind: 'spawn',
+            from: 'float/rage',
+            ttlMs: 1200,
+            inputs: { parameter: { expr: 'delta' } },
+          }],
+        },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        entities: {
+          'ent-0': { id: 'ent-0', kind: 'enemy', attrs: { nuqi: 10 } },
+        },
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              children: [{
+                id: 'rage',
+                component: 'DamageFloatText',
+                inputs: { parameter: 0 },
+              }],
+            },
+          },
+        },
+      },
+    )
+
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-preview-spawn-id="spawn:1"]')).not.toBeNull()
+      expect(screen.getByText('+80')).toBeTruthy()
+    })
+  })
+
+  it('hides an existing interface when its condition is met while the node video preview plays', async () => {
+    const current = node('n1', {
+      durationMs: 1_000,
+      media: { ref: 'data:video/mp4;base64,preview' },
+      overlayNodes: [{ id: 'rage-mount', overlay: 'rage' }],
+      reactions: [
+        { when: { type: 'at', ms: 600 }, do: [{ kind: 'effect', effects: [{ kind: 'attr', entityId: 'bull', attr: 'rage', op: 'add', value: -10 }] }] },
+        { when: { type: 'watch', of: 'entity.bull.attr.rage', on: 'dec' }, do: [{ kind: 'hideOverlay', mountId: 'rage-mount' }] },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        entities: { bull: { id: 'bull', attrs: { rage: 10 } } },
+        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'DamageFloatText', trigger: { when: 'enter' } }] } } },
+      },
+    )
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+    const video = container.querySelector('video')!
+    Object.defineProperty(video, 'paused', { configurable: true, value: false })
+    video.currentTime = 0.5
+    fireEvent.play(video)
+
+    await waitFor(() => expect(container.querySelector('[data-preview-mount-id="rage-mount"]')).not.toBeNull())
+
+    video.currentTime = 0.7
+    await waitFor(() => expect(container.querySelector('[data-preview-mount-id="rage-mount"]')).toBeNull())
+    fireEvent.pause(video)
+  })
+
+  it('renders repeated mounts of the same overlay as separate instances', async () => {
+    const current = node('n1', {
+      overlayNodes: [
+        { overlay: 'float', layout: { left: 0, top: 0, width: 1, height: 1 } },
+        { id: 'float__2', overlay: 'float', layout: { left: 0.2, top: 0.1, width: 1, height: 1 } },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                trigger: { when: 'enter' },
+                inputs: { parameter: '+10' },
+              }],
+            },
+          },
+        },
+      },
+    )
+
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-preview-mount-id]')).toHaveLength(2)
+    })
+    expect(container.querySelector('[data-preview-mount-id="float"]')).not.toBeNull()
+    expect(container.querySelector('[data-preview-mount-id="float__2"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-overlay-fit-target]')).toHaveLength(2)
+  })
+
   it('never falls back to a ring and label when the real interface skin is not visible', () => {
     const current = node('n1', {
       overlayNodes: [{ overlay: 'qte-overlay' }],
@@ -45,12 +458,17 @@ describe('NodePreviewStage overlay layout', () => {
         scenario={scenario}
         node={current}
         game="test"
+        muted
         onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
       />,
     )
 
     expect(container.querySelector('.gc-preview-ring')).toBeNull()
     expect(container.querySelector('.gc-preview-label')).toBeNull()
+    expect(container.querySelector('[data-node-preview-overlay-scale="none"]')).not.toBeNull()
+    expect(container.querySelector('[data-overlay-scale-root]')).toBeNull()
+    expect(container.querySelector('[data-overlay-logical-stage]')).toBeNull()
   })
 
   it('moves a mounted overlay without writing or changing width/height', async () => {
@@ -112,8 +530,10 @@ describe('NodePreviewStage overlay layout', () => {
           scenario={scenario}
           node={currentNode}
           game="test"
+          muted
           focusedMountId="hud"
           onEditScenario={(edit) => setScenario((value) => edit(value, value.graph.nodes[0]!))}
+          onMutedChange={vi.fn()}
           onFocusMount={vi.fn()}
         />
       )
@@ -149,6 +569,78 @@ describe('NodePreviewStage overlay layout', () => {
       expect(layout?.height).toBe(1)
     })
     expect((container.querySelector('[data-canvas-item="hud"]') as HTMLElement).style.width).toBe('40%')
+  })
+
+  it('keeps duplicate mounts independently selectable and movable', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 100,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    })
+    const overlayId = 'base:DamageFloatText'
+    const secondMountId = `${overlayId}__2`
+    const current = node('n1', {
+      overlayNodes: [
+        { overlay: overlayId, layout: { left: 0.1, top: 0.1, width: 0.2, height: 0.2 } },
+        { id: secondMountId, overlay: overlayId, layout: { left: 0.6, top: 0.6, width: 0.2, height: 0.2 } },
+      ],
+    })
+    const initialScenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        ui: {
+          overlays: {
+            [overlayId]: {
+              id: overlayId,
+              title: '伤害飘字',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                trigger: { when: 'enter' },
+                inputs: { parameter: '-25' },
+              }],
+            },
+          },
+        },
+      },
+    )
+    let latestScenario = initialScenario
+    function Harness(): JSX.Element {
+      const [scenario, setScenario] = useState(initialScenario)
+      latestScenario = scenario
+      return (
+        <NodePreviewStage
+          scenario={scenario}
+          node={scenario.graph.nodes[0]!}
+          game="test"
+          muted
+          focusedMountId={secondMountId}
+          onEditScenario={(edit) => setScenario((value) => edit(value, value.graph.nodes[0]!))}
+          onMutedChange={vi.fn()}
+          onFocusMount={vi.fn()}
+        />
+      )
+    }
+    const { container } = render(<Harness />)
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.gc-preview-skin-layer > div')).toHaveLength(2)
+      expect(container.querySelector(`[data-canvas-item="${overlayId}"]`)).not.toBeNull()
+      expect(container.querySelector(`[data-canvas-item="${secondMountId}"]`)).toHaveClass('is-selected')
+    })
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => {
+      const mounts = latestScenario.graph.nodes[0]?.data.overlayNodes ?? []
+      expect(mounts[0]?.layout?.left).toBe(0.1)
+      expect(mounts[1]?.layout?.left).toBeCloseTo(0.605)
+    })
   })
 
   it('promotes a position-only stage overlay to a full-size mount on first move', async () => {
@@ -209,8 +701,10 @@ describe('NodePreviewStage overlay layout', () => {
           scenario={scenario}
           node={scenario.graph.nodes[0]!}
           game="test"
+          muted
           focusedMountId="dialogues"
           onEditScenario={(edit) => setScenario((value) => edit(value, value.graph.nodes[0]!))}
+          onMutedChange={vi.fn()}
           onFocusMount={vi.fn()}
         />
       )
@@ -272,7 +766,7 @@ describe('NodePreviewStage overlay layout', () => {
                 component: 'DamageFloatText',
                 layout: { left: 0.2, top: 0.3 },
                 trigger: { when: 'enter' },
-                inputs: { text: '-10' },
+                inputs: { parameter: '-10' },
               }],
             },
           },
@@ -288,8 +782,10 @@ describe('NodePreviewStage overlay layout', () => {
           scenario={scenario}
           node={scenario.graph.nodes[0]!}
           game="test"
+          muted
           focusedMountId="float"
           onEditScenario={(edit) => setScenario((value) => edit(value, value.graph.nodes[0]!))}
+          onMutedChange={vi.fn()}
           onFocusMount={vi.fn()}
         />
       )
@@ -318,5 +814,46 @@ describe('NodePreviewStage overlay layout', () => {
       expect(mountWrapper.style.width).toBe('fit-content')
       expect(mountWrapper.style.height).toBe('fit-content')
     })
+  })
+
+  it('keeps a focused short damage float visible in the paused node canvas', async () => {
+    const current = node('n1', {
+      durationMs: 3_000,
+      overlayNodes: [{ overlay: 'float' }],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                window: { startMs: 1_000 },
+                inputs: { parameter: '-10', durationMs: 7 },
+              }],
+            },
+          },
+        },
+      },
+    )
+    const { container } = render(
+      <NodePreviewStage
+        scenario={scenario}
+        node={current}
+        game="test"
+        muted
+        focusedMountId="float"
+        onEditScenario={vi.fn()}
+        onMutedChange={vi.fn()}
+        onFocusMount={vi.fn()}
+      />,
+    )
+
+    const text = await screen.findByText('-10')
+    expect(text.parentElement).toHaveStyle({ '--preview-t': '2.8ms' })
+    expect(container.querySelector('[data-overlay-fit-target]')).toBe(text)
   })
 })

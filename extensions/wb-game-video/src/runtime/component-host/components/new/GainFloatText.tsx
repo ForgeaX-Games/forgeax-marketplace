@@ -1,18 +1,17 @@
 /**
- * 增益飘字（component id: `GainFloatText`）—— value 支持固定数字或 `{expr}` 公式。
- * 公式绘制时从 SkinCtx 求值；位置与显示时段由外部 Overlay 编排。
+ * 增益飘字（component id: `GainFloatText`）。
+ * parameter 等由 RuntimeComponentHost 解析；此处只拼接展示。
  */
 import type { ReactNode } from 'react'
 import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
-import type { OverlayProps } from '../../rendererRegistry'
 import { animationTimingStyle, injectCss, ensureBrushFont, resolveTextAppearance, type TextAppearanceInputs } from './skinRuntime'
-import { resolveNumericFloatDurationMs, resolveNumericFloatText, type NumericFloatTextInputs } from './numericFloatText'
 
 export const GainFloatTextManifest: ComponentManifest = {
   id: 'GainFloatText',
   label: '增益飘字',
   inputs: [
-    { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: 50 },
+    { key: 'fixedText', label: '固定文本', valueType: 'string', default: '' },
+    { key: 'parameter', label: '参数', valueType: 'string', component: 'numberExpr' },
     { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ffd54a' },
     { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
     { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
@@ -20,12 +19,31 @@ export const GainFloatTextManifest: ComponentManifest = {
   events: [],
 }
 
-export function GainFloatText({ overlay, ctx, preview, previewTimeMs, previewPlaying }: OverlayProps): ReactNode {
+export interface GainFloatTextProps {
+  fixedText?: string
+  parameter?: string
+  color?: string
+  fontSize?: number
+  durationMs?: number
+  preview?: boolean
+  previewTimeMs?: number
+  previewPlaying?: boolean
+}
+
+export function GainFloatText({
+  fixedText = '',
+  parameter = '+50',
+  color,
+  fontSize,
+  durationMs = 1100,
+  preview,
+  previewTimeMs,
+  previewPlaying,
+}: GainFloatTextProps): ReactNode {
   injectCss('gain-float-text', GAIN_FLOAT_TEXT_CSS)
   ensureBrushFont()
-  const text = resolveNumericFloatText(overlay.inputs as NumericFloatTextInputs, ctx, '+50')
-  const textStyle = resolveTextAppearance(overlay.inputs as TextAppearanceInputs, { color: '#ffd54a', fontSize: 3.5 })
-  const durationMs = resolveNumericFloatDurationMs(overlay.inputs.durationMs)
+  const text = `${fixedText}${formatGainParameter(fixedText, parameter)}`
+  const textStyle = resolveTextAppearance({ color, fontSize } as TextAppearanceInputs, { color: '#ffd54a', fontSize: 3.5 })
   const frozen = preview && !previewPlaying
   return (
     <div
@@ -35,6 +53,15 @@ export function GainFloatText({ overlay, ctx, preview, previewTimeMs, previewPla
       <span data-overlay-fit-target style={textStyle}>{text}</span>
     </div>
   )
+}
+
+function formatGainParameter(fixedText: string, parameter: string): string {
+  const normalized = parameter.trim()
+  const numeric = Number(normalized)
+  const fixedMinus = fixedText.trim() === '-'
+  return normalized && Number.isFinite(numeric) && numeric > 0 && !normalized.startsWith('+') && !fixedMinus
+    ? `+${parameter}`
+    : parameter
 }
 
 const GAIN_FLOAT_TEXT_CSS = `

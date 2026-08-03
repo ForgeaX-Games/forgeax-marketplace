@@ -263,7 +263,7 @@ export interface NodeBgm {
    * - `stop`：结束当前这层，回到上一层还没结束的那首。文档床是地板，弹不掉（D13）。
    */
   mode?: 'push' | 'replace' | 'stop'
-  /** 0..1；随曲目起播时默认 1，未配曲目时表示仅调整当前 BGM 音量。 */
+  /** 0..1；未配置时沿用当前正在播放的 BGM 音量，起局无 BGM 时默认 1。 */
   volume?: number
   fadeInMs?: number
   fadeOutMs?: number
@@ -272,6 +272,8 @@ export interface NodeBgm {
    * 默认 false = 续播（回合循环友好）。
    */
   restart?: boolean
+  /** 默认 true = 循环；false = 单次播放。仅在配置了 ref 时生效。 */
+  loop?: boolean
 }
 
 /**

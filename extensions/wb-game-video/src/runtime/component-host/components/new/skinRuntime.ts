@@ -83,5 +83,6 @@ export function animationTimingStyle(durationMs: number, previewTimeMs?: number)
 
 /** 预览态 CSS 动画负 delay 使用的本地时间。 */
 export function previewTStyle(localMs: number): CSSProperties {
-  return { ['--preview-t']: `${Math.max(0, localMs)}ms` } as CSSProperties
+  const normalizedMs = Math.round(Math.max(0, localMs) * 1000) / 1000
+  return { ['--preview-t']: `${normalizedMs}ms` } as CSSProperties
 }

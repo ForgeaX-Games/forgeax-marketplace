@@ -130,6 +130,7 @@ describe('uploadVideoResource flow', () => {
       if (url.endsWith('/resources') && init?.method === 'POST') {
         order.push('create')
         expect(JSON.parse(String(init.body))).toMatchObject({
+          name: 'door.scene',
           source_meta: {
             duration_ms: 1200,
             mime_type: 'video/mp4',
@@ -155,7 +156,7 @@ describe('uploadVideoResource flow', () => {
       client: createKinoVideoClient({ fetch: fetchImpl }),
       transport,
       gameId: 'demo',
-      file: makeMp4File(),
+      file: makeMp4File('door.scene.mp4'),
       durationMs: 1200,
       onProgress: (value) => progress.push(value),
       signal: controller.signal,
@@ -215,6 +216,7 @@ describe('uploadVideoResource flow', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       game_id: 'demo',
       media_type: 'video',
+      name: 'replacement',
       url: preparedResponse().object_url,
     }), { signal: undefined })
     expect(resource.resource_id).toBe('res-existing')

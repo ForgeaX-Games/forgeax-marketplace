@@ -1,10 +1,10 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SkinRegistry, type OverlayProps } from '../component-host/rendererRegistry'
+import { SkinRegistry } from '../component-host/rendererRegistry'
 
 afterEach(cleanup)
 
-function Probe({ preview, previewTimeMs }: OverlayProps): JSX.Element {
+function Probe({ preview, previewTimeMs }: { preview?: boolean; previewTimeMs?: number }): JSX.Element {
   return <span data-testid="probe" data-preview={String(preview)} data-time={previewTimeMs} />
 }
 

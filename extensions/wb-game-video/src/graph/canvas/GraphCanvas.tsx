@@ -103,8 +103,21 @@ function ensureCanvasStyle(): void {
     .gv-edge-delete button[data-tip]:hover::after{opacity:1}
   `
 }
-import type { GameEdge, GameGraph, GameNode } from '../../runtime/schema/graph-schema'
-import type { Overlay } from '../../runtime/schema/node-config-schema'
+import type {
+  Entity,
+  GameEdge,
+  GameGraph,
+  GameNode,
+  GraphEffect,
+  NumOrExpr,
+  Variable,
+} from '../../runtime/schema/graph-schema'
+import {
+  isSettlementReaction,
+  type NodeAction,
+  type Overlay,
+  type Reaction,
+} from '../../runtime/schema/node-config-schema'
 import { getSubFlowPack, isSubflowContainerData } from '../../runtime/schema/graph-schema'
 import type { FXNode } from '../../runtime/schema/react-flow-schema'
 import { toFXView } from './fx-view'
@@ -141,6 +154,7 @@ interface CanvasNodeViewData {
 export interface CanvasNodeDetails {
   performance?: string
   interfaces: string[]
+  settlements: string[]
 }
 
 interface CanvasVideoOption {
@@ -148,11 +162,99 @@ interface CanvasVideoOption {
   label: string
 }
 
+interface CanvasSettlementContext {
+  entities?: Record<string, Entity>
+  variables?: Record<string, Variable>
+  overlays?: Record<string, Overlay>
+  graph?: GameGraph
+  node?: GameNode
+}
+
+function settlementTriggerLabel(reaction: Reaction): string {
+  const when = reaction.when
+  if (when.type === 'at') return `${Math.max(0, Math.round(when.ms))} ms`
+  if (when.type === 'enter') return '进入时'
+  if (when.type === 'exit') return '离开前'
+  if (when.type === 'complete') return when.if ? '结束条件' : '演出结束'
+  if (when.type === 'shown') return '界面出现'
+  if (when.type === 'hidden') return '界面消失'
+  return '条件'
+}
+
+function entityFor(entities: Record<string, Entity> | undefined, id: string): Entity | undefined {
+  return entities?.[id] ?? Object.values(entities ?? {}).find((entity) => entity.id === id)
+}
+
+function entityLabel(entities: Record<string, Entity> | undefined, id: string): string {
+  const entity = entityFor(entities, id)
+  return entity?.name?.trim() || (entity?.kind === 'player' ? '玩家' : entity?.kind === 'boss' ? 'Boss' : id)
+}
+
+function variableLabel(variables: Record<string, Variable> | undefined, id: string): string {
+  const variable = variables?.[id] ?? Object.values(variables ?? {}).find((item) => item.id === id)
+  return variable?.name?.trim() || id
+}
+
+function numericEffectValue(op: 'add' | 'mul' | 'set', value: NumOrExpr): string {
+  const raw = typeof value === 'number' ? String(value) : value.expr.trim() || '?'
+  if (op === 'set') return `=${raw}`
+  if (op === 'mul') return `×${raw}`
+  if (typeof value === 'number') return value > 0 ? `+${raw}` : raw
+  return raw.startsWith('-') ? raw : `+(${raw})`
+}
+
+function effectDescription(
+  effect: GraphEffect,
+  entities?: Record<string, Entity>,
+  variables?: Record<string, Variable>,
+): string {
+  if (effect.kind === 'attr') {
+    const entity = entityFor(entities, effect.entityId)
+    const attr = entity?.attrMeta?.[effect.attr]?.label?.trim() || effect.attr
+    return `${entityLabel(entities, effect.entityId)}.${attr} ${numericEffectValue(effect.op, effect.value)}`
+  }
+  if (effect.kind === 'var') {
+    return `${variableLabel(variables, effect.varId)} ${numericEffectValue(effect.op, effect.value)}`
+  }
+  if (effect.kind === 'flag') return `${variableLabel(variables, effect.varId)}=${effect.value ? '是' : '否'}`
+  return `${effect.op === 'give' ? '获得' : '失去'} ${effect.itemId || '道具'} ×${effect.count}`
+}
+
+function actionDescriptions(action: NodeAction, context: CanvasSettlementContext): string[] {
+  if (action.kind === 'effect') {
+    return action.effects.map((effect) => effectDescription(effect, context.entities, context.variables))
+  }
+  if (action.kind === 'advance') {
+    const targetId = context.graph?.edges.find((edge) => edge.id === action.edgeId)?.target
+    const target = context.graph?.nodes.find((node) => node.id === targetId)
+    return [target ? `推进 ${target.data.name}` : '推进']
+  }
+  if (action.kind === 'spawn') {
+    const overlayId = action.from.split('/')[0] ?? action.from
+    return [`显示 ${context.overlays?.[overlayId]?.title?.trim() || overlayId}`]
+  }
+  const mount = context.node?.data.overlayNodes?.find((item) => (item.id ?? item.overlay) === action.mountId)
+  return [`隐藏 ${context.overlays?.[mount?.overlay ?? '']?.title?.trim() || mount?.overlay || action.mountId}`]
+}
+
+/** 结算卡片直接说明 reaction 内的真实效果与目标，不用泛化的动作类型代替。 */
+export function canvasSettlementLabel(
+  reaction: Reaction,
+  context: CanvasSettlementContext = {},
+): string {
+  const trigger = settlementTriggerLabel(reaction)
+  const descriptions = reaction.do.flatMap((action) => actionDescriptions(action, context))
+  return descriptions.length > 0 ? `${trigger} · ${descriptions.join('；')}` : trigger
+}
+
 /** 画布摘要只投影既有引用；名称随素材库/界面目录实时更新，不重复写入节点契约。 */
 export function canvasNodeDetails(
   node: GameNode,
   overlays?: Record<string, Overlay>,
   videoOptions: readonly CanvasVideoOption[] = [],
+  entities?: Record<string, Entity>,
+  variables?: Record<string, Variable>,
+  graph?: GameGraph,
 ): CanvasNodeDetails {
   const mediaRef = node.data.media?.ref?.trim()
   const performance = mediaRef
@@ -162,7 +264,10 @@ export function canvasNodeDetails(
     const title = overlays?.[mount.overlay]?.title?.trim()
     return title || mount.overlay
   })
-  return { performance, interfaces }
+  const settlements = (node.data.reactions ?? [])
+    .filter(isSettlementReaction)
+    .map((reaction) => canvasSettlementLabel(reaction, { entities, variables, overlays, graph, node }))
+  return { performance, interfaces, settlements }
 }
 
 const BADGE_COLOR: Record<string, string> = {
@@ -347,7 +452,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )
         })}
       </div>
-      {(details.performance || details.interfaces.length > 0) && (
+      {(details.performance || details.interfaces.length > 0 || details.settlements.length > 0) && (
         <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '7px 10px', borderTop: '1px solid #2b2f37' }}>
           {details.performance && (
             <>
@@ -362,6 +467,18 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
               <span style={{ color: '#8f98a8' }}>界面</span>
               <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 {details.interfaces.map((label, index) => (
+                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </>
+          )}
+          {details.settlements.length > 0 && (
+            <>
+              <span style={{ color: '#8f98a8' }}>结算</span>
+              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                {details.settlements.map((label, index) => (
                   <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
                     {label}
                   </span>
@@ -480,6 +597,9 @@ export interface GraphCanvasProps {
   overlays?: Record<string, Overlay>
   /** 视频素材候选；仅用于把 node.data.media.ref 投影为节点卡片展示名。 */
   videoOptions?: readonly CanvasVideoOption[]
+  /** 场景规则目录；仅用于把 reaction 内的实体、属性和变量引用投影为可读说明。 */
+  entities?: Record<string, Entity>
+  variables?: Record<string, Variable>
   activeNodeId?: string | null
   traversedEdgeIds?: Set<string>
   /**
@@ -534,6 +654,8 @@ function GraphCanvasInner({
   entryNodeId,
   overlays,
   videoOptions = [],
+  entities,
+  variables,
   activeNodeId,
   traversedEdgeIds,
   readOnly = false,
@@ -707,7 +829,7 @@ function GraphCanvasInner({
           selected: selectedIds.includes(n.id),
           data: {
             fx: n,
-            details: canvasNodeDetails(graph.nodes.find((node) => node.id === n.id)!, overlays, videoOptions),
+            details: canvasNodeDetails(graph.nodes.find((node) => node.id === n.id)!, overlays, videoOptions, entities, variables, graph),
             active: n.id === activeNodeId,
             isEntry: n.id === entryNodeId,
             isGroup: containerIds.has(n.id),
@@ -718,7 +840,7 @@ function GraphCanvasInner({
             onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, graph.nodes, overlays, videoOptions, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, graph, overlays, videoOptions, entities, variables, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>

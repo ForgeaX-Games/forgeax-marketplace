@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import type { GameNode, GameScenario } from '../../../runtime/schema/graph-schema'
+import type { GameNode, GameScenario, NumOrExpr } from '../../../runtime/schema/graph-schema'
 import type { OverlayChild } from '../../../runtime/schema/node-config-schema'
 import type { QteCue } from '../../../runtime/component-host/components/Qte'
 import { registerCoreSkins } from '../../../runtime/component-host/components'
@@ -12,6 +12,7 @@ import {
   choiceElement,
   collectMaterialsFromNode,
   collectMountItemsFromNode,
+  createDamageHpEffect,
   deleteMaterialGraph,
   findElement,
   findNode,
@@ -45,6 +46,7 @@ import {
   resizeMountWindowGraph,
 } from '../graphMaterialOps'
 import type { MaterialItem } from '../materialTimelineShared'
+import { FLOAT_TEXT_TIMELINE_WIDTH_PX } from '../materialTimelineShared'
 import { expandNodeOverlays } from '../../../runtime/schema/expand-overlay'
 
 // `hasCuePointsInput`/`hasOptionEventsInput`（editors）按组件 inputs 结构判定，任何用到
@@ -565,6 +567,91 @@ describe('graphMaterialOps · 挂载组件全量上时间轴', () => {
         registerCoreSkins()
   })
 
+  it('新飘字在子件与单组件挂载时间轴上都投影为固定宽度', () => {
+    const n = node('a', { durationMs: 8000 })
+    const base = scnOf(
+      { nodes: [n], edges: [] },
+      {
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              title: '伤害飘字',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                window: { startMs: 1000, endMs: 2100 },
+                inputs: { value: -25, durationMs: 1100 },
+              }],
+            },
+          },
+        },
+      },
+    )
+    const scenario: GameScenario = {
+      ...base,
+      graph: {
+        ...base.graph,
+        nodes: base.graph.nodes.map((current) => (
+          current.id === 'a'
+            ? { ...current, data: { ...current.data, overlayNodes: [{ overlay: 'float' }] } }
+            : current
+        )),
+      },
+    }
+    const nodeA = findNode(scenario.graph, 'a')!
+
+    expect(collectMaterialsFromNode(scenario, nodeA, 8000)[0]?.fixedWidthPx).toBe(FLOAT_TEXT_TIMELINE_WIDTH_PX)
+    expect(collectMountItemsFromNode(scenario, nodeA, 8000)[0]?.fixedWidthPx).toBe(FLOAT_TEXT_TIMELINE_WIDTH_PX)
+  })
+
+  it('无结束时间的新飘字按组件时长投影并可整体移动', () => {
+    const n = node('a', { durationMs: 8000 })
+    const base = scnOf(
+      { nodes: [n], edges: [] },
+      {
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              title: '伤害飘字',
+              children: [{
+                id: 'damage',
+                component: 'DamageFloatText',
+                window: { startMs: 1000 },
+                inputs: { value: -25, durationMs: 1100 },
+              }],
+            },
+          },
+        },
+      },
+    )
+    const scenario: GameScenario = {
+      ...base,
+      graph: {
+        ...base.graph,
+        nodes: base.graph.nodes.map((current) => (
+          current.id === 'a'
+            ? { ...current, data: { ...current.data, overlayNodes: [{ overlay: 'float' }] } }
+            : current
+        )),
+      },
+    }
+    const nodeA = findNode(scenario.graph, 'a')!
+    const item = collectMountItemsFromNode(scenario, nodeA, 8000)[0]!
+    expect([item.startMs, item.endMs]).toEqual([1000, 2100])
+
+    const moved = patchMaterialGraph(
+      scenario,
+      nodeA,
+      8000,
+      item,
+      { startMs: 2500, endMs: 3600, zIndex: 0 },
+    )
+    const movedItem = collectMountItemsFromNode(moved, findNode(moved.graph, 'a')!, 8000)[0]!
+    expect([movedItem.startMs, movedItem.endMs]).toEqual([2500, 3600])
+  })
+
   it('挂载条：拖边缘拉伸 window，整体拖动保持跨度', () => {
     const n = node('a', { durationMs: 8000 })
     const base = scnOf(
@@ -771,7 +858,8 @@ describe('graphMaterialOps · 挂载组件全量上时间轴', () => {
     const mats = collectMaterialsFromNode(withMount, nodeA, 8000)
     expect(mats.some((m) => m.id === 'hp-player' && m.kind === 'component')).toBe(true)
     const skinKids = previewSkinChildrenInWindow(withMount, nodeA, 100, 8000)
-    expect(skinKids.some((c) => c.id === 'hp-player' && c.component === 'BattlePlayerHpBar')).toBe(true)
+    expect(skinKids.some((c) => c.id === 'scheme-static/hp-player' && c.component === 'BattlePlayerHpBar')).toBe(true)
+    expect(skinKids.find((c) => c.id === 'scheme-static/hp-player')?.source.mountId).toBe('scheme-static')
     const extras = listSchemeMountTabs(withMount, nodeA).flatMap((t) => t.components)
     expect(extras.some((c) => c.id === 'scheme-static/hp-player' && c.label === '我方')).toBe(true)
   })
@@ -1109,7 +1197,43 @@ describe('graphMaterialOps · 飘字 effects/expr（结算写回 node.data.react
     const { scenario, node: n, floatId } = seedFloat()
     const fx = overlayEffects(scenario, n, floatId)
     expect(fx).toHaveLength(1)
-    expect(fx[0]).toMatchObject({ kind: 'attr', attr: 'hp', op: 'add', value: -100, id: `${floatId}-settle` })
+    expect(fx[0]).toMatchObject({
+      kind: 'attr',
+      attr: 'hp',
+      op: 'add',
+      value: { expr: '-(100)' },
+      id: `${floatId}-settle`,
+    })
+    const preview = activePreviewOverlaysFromNode(scenario, n, 0, 8000)
+      .find((overlay) => overlay.id === `overlay:${floatId}`)
+    expect(preview?.label).toBe('-100')
+  })
+
+  it('常量和公式伤害统一编码为减法语义，并保留公式参数 sidecar', () => {
+    const formulaPick = {
+      mode: 'formula',
+      formulaId: 'damage',
+      holeBindings: {
+        attacker: { kind: 'entityAttr', entityId: 'ent-player', attr: 'attack' },
+        defender: { kind: 'entityAttr', entityId: 'ent-boss', attr: 'defense' },
+      },
+    }
+    const formulaValue = {
+      expr: 'entity.ent-player.attr.attack - entity.ent-boss.attr.defense',
+      pick: formulaPick,
+    } as unknown as NumOrExpr
+
+    expect(createDamageHpEffect(undefined, 'boss', formulaValue, 'float-1')).toMatchObject({
+      kind: 'attr',
+      entityId: 'ent-boss',
+      attr: 'hp',
+      op: 'add',
+      value: {
+        expr: '-(entity.ent-player.attr.attack - entity.ent-boss.attr.defense)',
+        pick: formulaPick,
+      },
+      id: 'float-1-settle',
+    })
   })
 
   it('effects 往返：EffectsEditor 产出的完整列表写入后可读回，首条打上定位 id', () => {
@@ -1145,7 +1269,7 @@ describe('graphMaterialOps · 飘字 effects/expr（结算写回 node.data.react
       undefined,
     )
     const el = findElement(withExpr, findNode(withExpr.graph, n.id), floatId)!
-    expect(el.inputs?.expr).toEqual({ expr: 'entity.ent-boss.attr.hp' })
+    expect(el.inputs?.parameter).toEqual({ expr: 'entity.ent-boss.attr.hp' })
 
     const cleared = patchOverlayGraph(
       withExpr,
@@ -1155,7 +1279,7 @@ describe('graphMaterialOps · 飘字 effects/expr（结算写回 node.data.react
       undefined,
     )
     const el2 = findElement(cleared, findNode(cleared.graph, n.id), floatId)!
-    expect(el2.inputs?.expr).toBeUndefined()
+    expect(el2.inputs?.parameter).toBeUndefined()
   })
 
   it('content 只改显示文案，不影响结算 effects', () => {
@@ -1163,7 +1287,8 @@ describe('graphMaterialOps · 飘字 effects/expr（结算写回 node.data.react
     const next = patchOverlayGraph(scenario, n, floatId, { content: '会心一击 {v}' }, undefined)
     const curNode = findNode(next.graph, n.id)!
     const el = findElement(next, curNode, floatId)!
-    expect(el.inputs?.text).toBe('会心一击 {v}')
+    expect(el.inputs?.fixedText).toBe('会心一击 ')
+    expect(el.inputs?.parameter).toBe('-100')
     expect(overlayEffects(next, curNode, floatId)).toHaveLength(1)
   })
 })
@@ -1196,10 +1321,15 @@ describe('graphMaterialOps · 同模板多挂载', () => {
     ])
     expect(expandNodeOverlays(twice.ui?.overlays, mountedNode).flatMap((mount) => mount.children.map((child) => child.id)))
       .toEqual(['n_door/damage', 'n_door__2/damage'])
+    expect(previewSkinChildrenInWindow(twice, mountedNode, 0, 3000).map((child) => [child.id, child.source.mountId]))
+      .toEqual([
+        ['n_door/damage', 'n_door'],
+        ['n_door__2/damage', 'n_door__2'],
+      ])
     expect(collectMountItemsFromNode(twice, mountedNode, 3000).map((item) => [item.key, item.label]))
       .toEqual([
         ['mount:n_door', '叩门界面'],
-        ['mount:n_door__2', '叩门界面 · n_door__2'],
+        ['mount:n_door__2', '叩门界面'],
       ])
 
     const removedSecond = removeMountGraph(twice, mountedNode, 'n_door__2')

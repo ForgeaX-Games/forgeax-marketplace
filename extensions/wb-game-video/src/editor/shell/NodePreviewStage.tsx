@@ -7,8 +7,9 @@
  *   - 皮肤层：`previewSkinChildrenInWindow` + `renderOverlayChildPreview` + PreviewClock
  *     （暂停冻结 CSS 动画）；滤镜/特效走 `resolveVideoFxForNode` 旁路；
  *   - 叠层操作框：节点视频画布只允许移动整份 overlay，写回挂载 `layout.left/top`；
- *   - 时间轴：`MaterialTimeline` 全交互，但**投影到挂载级**（`collectMountItemsFromNode`：
- *     一份挂载 = 一条），拖动整体平移挂载内子件、删除移除整份挂载，写回
+ *   - 时间轴：第 0 轨投影只读视频条，其后按挂载级投影（`collectMountItemsFromNode`：
+ *     一份挂载 = 一条）；循环视频另有仅限视频轨高度的媒体局部指针，节点逻辑播放头保持单调。
+ *     拖动挂载条整体平移挂载内子件、删除移除整份挂载，写回
  *     `patchMaterialGraph`（mount 分支 → shiftMountWindowGraph）/`deleteMaterialGraph`；
  *   - 「添加控件」条 = **覆盖物挂载入口**：前 5 个未挂载的预设覆盖物点击直接挂载，
  *     第 6 个「更多」展开完整列表（等价 NodeInspector 的「＋挂载」）。
@@ -20,9 +21,9 @@
  * `patchData → onChange → store` 数据流，本组件只多一个订阅者，天然实时；也不自动回写
  * `durationMs`（只影响本地播放头与时间轴上限，对齐 `videoDurationCapReached` 契约）。
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
-import type { GameNode, GameScenario, Layout } from '../../runtime/schema/graph-schema'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
+import type { GameNode, GameScenario, Layout, OverlayInstanceChild } from '../../runtime/schema/graph-schema'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { bootEditorSkins } from '../init'
 import { injectStyleOnce } from '../../styles/injectStyle'
@@ -31,21 +32,21 @@ import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
 import { advancePreviewMediaClock, PreviewClockProvider, previewClockLayerClassName, type PreviewMediaClock } from './previewClock'
-import { projectNodePreviewState } from './nodePreviewState'
+import { NodePreviewRuntimeProjector, projectNodePreviewState, projectSelectedConditionSpawns } from './nodePreviewState'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
-import { ScaledOverlayContent } from '../../runtime/play/ScaledOverlayContent'
 import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
 import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
-import { type MaterialItem, type TimelineConditionMarker, type TimelinePointMarker } from '../video/materialTimelineShared'
+import { settlementInsertMsBeforePlayhead, type MaterialItem } from '../video/materialTimelineShared'
+import { collectNodeTimelineMarkers } from '../video/nodeTimelineMarkers'
 import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
 import { PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
-import { isSettlementReaction, overlayMountId, type NodeAction, type OverlayInstanceChild } from '../../runtime/schema/node-config-schema'
+import {
+  overlayMountId,
+} from '../../runtime/schema/node-config-schema'
 import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
-import { findMountOwningChild } from '../../graph/edit/overlay-edit'
-import { setSettlementReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
-import { elementStartMs } from '../../graph/canvas/timeline-geometry'
+import { patchSettlementSpawnLayout, setSettlementReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
 import { overlayFitTargets } from './overlay-fit-targets'
 import {
   OverlayCanvasInteraction,
@@ -61,12 +62,16 @@ import {
   previewSkinChildrenInWindow,
   shiftMountWindowGraph,
 } from '../video/graphMaterialOps'
+import { FlowNodePreviewStage, type FlowNodePreviewState } from './FlowNodePreviewStage'
+
+export type { FlowNodePreviewState } from './FlowNodePreviewStage'
 
 /**
  * `--gc-*` 变量在 CATALOG_CSS 里挂 `.gc-tab` 作用域（GraphVideoView 外壳）；
  * 蓝图面板没有 gc-tab 祖先，这里自持一份同值变量，保证 gc-frame/gc-preview-* 类渲染一致。
  */
 const NPS_CSS = `
+.nps-shell { display: flex; flex: 1; min-height: 0; flex-direction: column; background: var(--work, #0e0c09); }
 .nps-root {
   --gc-bg: var(--work, #0e0c09);
   --gc-panel: var(--panel, #1b1713);
@@ -84,7 +89,6 @@ const NPS_CSS = `
   padding: 10px; min-height: 0; overflow-y: auto; flex: 1;
 }
 .nps-frame { flex: none; }
-.nps-frame .gc-badge { top: 8px; left: 8px; padding: 3px 9px; font-size: 11px; border-radius: 7px; }
 .nps-stage-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 4px;
@@ -102,6 +106,23 @@ const NPS_CSS = `
 .nps-controls button:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
 .nps-time { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .nps-controls .nps-mute { margin-left: auto; }
+.nps-controls .nps-timeline-toggle {
+  margin-left: auto; padding: 0; color: var(--gc-muted); transition:
+    background var(--motion-duration-base, 150ms) var(--motion-ease-out, ease),
+    border-color var(--motion-duration-base, 150ms) var(--motion-ease-out, ease),
+    color var(--motion-duration-fast, 110ms) var(--motion-ease-out, ease);
+}
+.nps-controls .nps-mute + .nps-timeline-toggle { margin-left: 0; }
+.nps-controls .nps-timeline-toggle:hover { color: var(--gc-text); }
+.nps-timeline-toggle-icon {
+  position: relative; flex: none; width: 16px; height: 16px; display: block;
+}
+.nps-timeline-toggle-icon::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 7px; height: 7px;
+  box-sizing: border-box; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translate(-50%, -50%) rotate(45deg); transform-origin: center;
+}
+.nps-timeline-toggle-icon.is-collapse::before { transform: translate(-50%, -50%) rotate(225deg); }
 .nps-fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
 .nps-fx-layer > div { position: absolute; inset: 0; }
 .nps-addbar { position: relative; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: none; }
@@ -127,6 +148,8 @@ const NPS_CSS = `
 .nps-root .mtl-root { flex: none; }
 `
 
+const NODE_VIDEO_TRACK_KEY = '__node-video__'
+
 const DEFAULT_MOUNT_W = 0.25
 const DEFAULT_MOUNT_H = 0.15
 
@@ -148,72 +171,157 @@ function fmtTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function effectsBrief(actions: NodeAction[]): string {
-  const effects = actions.flatMap((action) => (action.kind === 'effect' ? action.effects : []))
-  const spawns = actions.filter((action) => action.kind === 'spawn').length
-  const parts = effects.slice(0, 2).map((effect) => {
-    if (effect.kind === 'attr') return `${effect.entityId}.${effect.attr} ${effect.op} ${String(effect.value)}`
-    if (effect.kind === 'var') return `${effect.varId} ${effect.op} ${String(effect.value)}`
-    if (effect.kind === 'flag') return `${effect.varId} = ${effect.value}`
-    return `${effect.itemId} ${effect.op === 'give' ? '+' : '-'}${effect.count}`
-  })
-  if (effects.length > 2) parts.push(`等 ${effects.length} 项`)
-  if (spawns > 0) parts.push(`刷出 ${spawns} 个瞬态组件`)
-  if (actions.some((action) => action.kind === 'advance')) parts.push('沿边推进')
-  return parts.length ? parts.join(' · ') : '未配置动作'
+function isNumericFloatText(componentId: string): boolean {
+  return componentId === 'DamageFloatText' || componentId === 'GainFloatText'
 }
 
-function matchesReactionTarget(of: string, child: OverlayInstanceChild): boolean {
-  const source = child.source
-  return of === source.childId
-    || of === child.id
-    || of === `${source.mountId}/${source.childId}`
-    || of === `${source.overlayId}/${source.childId}`
+function resolveFloatTextDurationMs(value: unknown, fallback = 1100): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
-export function NodePreviewStage({
-  scenario,
-  node,
-  game,
-  focusedMountId,
-  focusedLifecycleIndex,
-  onEditScenario,
-  onFocusMount,
-  onFocusLifecycle,
-}: {
+function focusedFloatPreviewTimeMs(child: OverlayInstanceChild, playheadMs: number): number {
+  const startMs = child.window?.startMs
+    ?? (child.trigger.when === 'at' ? child.trigger.ms : 0)
+  const durationMs = resolveFloatTextDurationMs(child.inputs.durationMs)
+  const localMs = playheadMs - startMs
+  if (localMs > 0 && localMs < durationMs) return playheadMs
+  return startMs + Math.round(durationMs * 0.4 * 1000) / 1000
+}
+
+export interface NodePreviewStageProps {
   /** 读投影场景：canvasGraph（主图或下钻包图）+ ui.overlays + entities/variables。 */
   scenario: GameScenario
   /** 当前选中节点（canvasGraph 内；随编辑实时换引用）。 */
   node: GameNode
   game: string
-  /** 右侧表单当前聚焦的挂载 id（预览据此高亮对应叠层/时间轴条）。 */
+  /** GraphStudio 统一持有的节点预览静音状态，切换节点时保持。 */
+  muted: boolean
   focusedMountId?: string | null
-  /** 右侧表单当前聚焦的结算（生命周期子集序号）；时间轴据此高亮对应菱形。 */
   focusedLifecycleIndex?: number | null
-  /** 写回通道：主图走 setScenario，子蓝图下钻由上层分流到包图（见 GraphStudio）。 */
   onEditScenario: (fn: (s: GameScenario, n: GameNode) => GameScenario) => void
-  /** 选中某挂载覆盖物时上抛（右侧表单据此聚焦该卡片；传 null = 清空聚焦）。 */
+  onMutedChange: (muted: boolean) => void
+  onSelectedTimeChange?: (ms: number, selection: NodePreviewTimeSelection) => void
   onFocusMount?: (mountId: string | null) => void
-  /** 点中某结算菱形时上抛，让右侧对应配置块高亮。 */
   onFocusLifecycle?: (lifecycleIndex: number | null) => void
-}): JSX.Element {
+  /** 通用组件只消费模式；切换模式的控件由宿主提供。默认 edit。 */
+  mode?: 'edit' | 'preview'
+  /** 时间轴展开/收起配置。默认隐藏切换按钮，时间轴初始展开。 */
+  timelineDisclosure?: NodePreviewTimelineDisclosure
+  flow?: FlowNodePreviewState
+}
+
+export interface NodePreviewTimeSelection {
+  /** 按当前 px/ms 比例与播放头错开的建议结算时刻；优先在左侧，起点空间不足时放右侧。 */
+  settlementInsertMs: number
+}
+
+export interface NodePreviewTimelineDisclosure {
+  /** 是否在播放控制条展示展开/收起按钮。默认 false。 */
+  showToggle?: boolean
+  /** 受控展开状态；省略时使用组件内部状态。 */
+  expanded?: boolean
+  /** 非受控初始状态。默认 true。 */
+  defaultExpanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
+  /** 根据当前展开状态替换按钮图标。 */
+  renderToggleIcon?: (expanded: boolean) => ReactNode
+}
+
+export function NodePreviewStage(props: NodePreviewStageProps): JSX.Element {
   bootEditorSkins()
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   injectStyleOnce('node-preview-stage', NPS_CSS)
+  const mode = props.mode ?? 'edit'
+  const timelineId = useId()
+  const disclosure = props.timelineDisclosure
+  const [uncontrolledTimelineExpanded, setUncontrolledTimelineExpanded] = useState(
+    disclosure?.defaultExpanded ?? true,
+  )
+  const timelineExpanded = disclosure?.expanded ?? uncontrolledTimelineExpanded
+  const showTimelineToggle = disclosure?.showToggle ?? false
+  const toggleTimeline = (): void => {
+    const next = !timelineExpanded
+    setUncontrolledTimelineExpanded(next)
+    disclosure?.onExpandedChange?.(next)
+  }
+  const timelineToggle = showTimelineToggle ? (
+    <button
+      type="button"
+      className="nps-timeline-toggle"
+      aria-label={timelineExpanded ? '收起时间轴' : '展开时间轴'}
+      title={timelineExpanded ? '收起时间轴' : '展开时间轴'}
+      aria-expanded={timelineExpanded}
+      aria-controls={timelineId}
+      onClick={toggleTimeline}
+    >
+      {disclosure?.renderToggleIcon?.(timelineExpanded) ?? (
+        <span className={`nps-timeline-toggle-icon${timelineExpanded ? ' is-collapse' : ''}`} aria-hidden />
+      )}
+    </button>
+  ) : null
+  return (
+    <div className="nps-shell">
+      {mode === 'preview' && props.flow
+        ? (
+            <FlowNodePreviewStage
+              flow={props.flow}
+              timelineId={timelineId}
+              timelineExpanded={timelineExpanded}
+              timelineToggle={timelineToggle}
+            />
+          )
+        : (
+            <EditableNodePreviewStage
+              {...props}
+              timelineId={timelineId}
+              timelineExpanded={timelineExpanded}
+              timelineToggle={timelineToggle}
+            />
+          )}
+    </div>
+  )
+}
 
+interface EditableNodePreviewStageProps extends NodePreviewStageProps {
+  timelineId: string
+  timelineExpanded: boolean
+  timelineToggle: ReactNode
+}
+
+function EditableNodePreviewStage({
+  scenario,
+  node,
+  game,
+  muted,
+  focusedMountId,
+  focusedLifecycleIndex,
+  onEditScenario,
+  onMutedChange,
+  onSelectedTimeChange,
+  onFocusMount,
+  onFocusLifecycle,
+  timelineId,
+  timelineExpanded,
+  timelineToggle,
+}: EditableNodePreviewStageProps): JSX.Element {
   const contentAnchorRef = useRef<HTMLDivElement | null>(null)
+  const timelineHostRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const mediaClockRef = useRef<PreviewMediaClock | null>(null)
   const [playheadMs, setPlayheadMs] = useState(0)
+  const [mediaPlayheadMs, setMediaPlayheadMs] = useState(0)
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
-  const [isMuted, setIsMuted] = useState(true)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
+  const [selectedConditionSpawnId, setSelectedConditionSpawnId] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const mountPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const conditionSpawnPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [mountContentBoxes, setMountContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
+  const [conditionSpawnContentBoxes, setConditionSpawnContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
   const mountBoxSigRef = useRef('')
+  const conditionSpawnBoxSigRef = useRef('')
 
   const mediaRef = node.data.media?.ref ?? ''
   const playMode = node.data.mediaPlayMode ?? 'once'
@@ -236,21 +344,75 @@ export function NodePreviewStage({
   const maxMs = Math.max(1000, capMs ?? videoDurationMs ?? 0)
 
   const overlays = scenario.ui?.overlays
-  // 时间轴投影到挂载级：一份挂载 = 一条（跨度 = 挂载内全部子件的 [min,max]）。
-  const materials = useMemo(() => collectMountItemsFromNode(scenario, node, maxMs), [scenario, node, maxMs])
-  const previewSkinChildren = useMemo(
-    () => previewSkinChildrenInWindow(scenario, node, playheadMs, maxMs),
-    [scenario, node, playheadMs, maxMs],
+  // 视频固定占第 0 轨；挂载从第 1 轨开始，保持与全流程 preview 时间轴相同的层级心智。
+  const mountMaterials = useMemo(
+    () => collectMountItemsFromNode(scenario, node, maxMs),
+    [scenario, node, maxMs],
   )
+  const timelineMaterials = useMemo<MaterialItem[]>(() => {
+    const shiftedMounts = mediaRef
+      ? mountMaterials.map((material) => ({ ...material, zIndex: material.zIndex + 1 }))
+      : mountMaterials
+    if (!mediaRef) return shiftedMounts
+    return [{
+      key: NODE_VIDEO_TRACK_KEY,
+      id: NODE_VIDEO_TRACK_KEY,
+      kind: 'video',
+      label: node.data.name?.trim() || mediaRef,
+      startMs: 0,
+      endMs: maxMs,
+      zIndex: 0,
+      locked: true,
+    }, ...shiftedMounts]
+  }, [maxMs, mediaRef, mountMaterials, node.data.name])
+  const previewSkinChildren = useMemo(() => {
+    const visible = previewSkinChildrenInWindow(scenario, node, playheadMs, maxMs)
+    if (isVideoPlaying || !selectedMountId) return visible
+    const visibleIds = new Set(visible.map((child) => child.id))
+    const focusedFloats = expandNodeChildren(scenario, node).filter((child) => (
+      child.source.mountId === selectedMountId
+      && isNumericFloatText(child.component)
+      && !visibleIds.has(child.id)
+    ))
+    return focusedFloats.length ? [...visible, ...focusedFloats] : visible
+  }, [isVideoPlaying, maxMs, node, playheadMs, scenario, selectedMountId])
+  const runtimeProjector = useMemo(
+    () => new NodePreviewRuntimeProjector(scenario, node),
+    [scenario, node],
+  )
+  const runtimeProjection = useMemo(() => {
+    const spawns = runtimeProjector.project(playheadMs)
+    return { spawns, configuredMountIds: new Set(runtimeProjector.visibleConfiguredMountIds()) }
+  }, [playheadMs, runtimeProjector])
+  const previewSpawns = runtimeProjection.spawns
+  const runtimeVisibleMountIds = runtimeProjection.configuredMountIds
+  const selectedConditionSpawns = useMemo(
+    () => projectSelectedConditionSpawns(scenario, node, focusedLifecycleIndex),
+    [focusedLifecycleIndex, node, scenario],
+  )
+  const activeConditionSpawnId = selectedConditionSpawns.some((preview) => preview.id === selectedConditionSpawnId)
+    ? selectedConditionSpawnId
+    : selectedConditionSpawns[0]?.id ?? null
+  // 选中条件结算时使用稳定作者投影，避免与播放头真实触发的动态实例重叠。
+  const visibleRuntimeSpawns = selectedConditionSpawns.length ? [] : previewSpawns
+  const authorVisibleMountIds = useMemo(() => {
+    const ids = new Set(runtimeVisibleMountIds)
+    if (!isVideoPlaying && selectedMountId) ids.add(selectedMountId)
+    return ids
+  }, [isVideoPlaying, runtimeVisibleMountIds, selectedMountId])
   const previewMountGroups = useMemo(() => {
     const groups = new Map<string, {
       mount: NonNullable<GameNode['data']['overlayNodes']>[number]
       children: typeof previewSkinChildren
     }>()
+    const mountsById = new Map(
+      (node.data.overlayNodes ?? []).map((mount) => [overlayMountId(mount), mount] as const),
+    )
     for (const child of previewSkinChildren) {
-      const mount = findMountOwningChild(scenario, node, child.id)
+      const mountId = child.source.mountId
+      if (!authorVisibleMountIds.has(mountId)) continue
+      const mount = mountsById.get(mountId)
       if (!mount) continue
-      const mountId = overlayMountId(mount)
       const group = groups.get(mountId)
       if (group) group.children.push(child)
       else groups.set(mountId, { mount, children: [child] })
@@ -263,7 +425,7 @@ export function NodePreviewStage({
         resolveMountChildren(overlays, value.mount).map((child) => child.layout),
       ) ?? {},
     }))
-  }, [overlays, previewSkinChildren, scenario, node])
+  }, [authorVisibleMountIds, overlays, previewSkinChildren, node])
   const videoFx = useMemo(
     () => resolveVideoFxForNode(node, overlays, playheadMs, maxMs),
     [node, overlays, playheadMs, maxMs],
@@ -324,17 +486,23 @@ export function NodePreviewStage({
 
   useEffect(() => {
     setSelectedOverlayId(selectedMountId)
+    if (selectedMountId) setSelectedConditionSpawnId(null)
   }, [selectedMountId])
 
   // 换节点/换视频：清播放态与选中（视频因 key 变化 remount 自动重播）。
   useEffect(() => {
     mediaClockRef.current = null
     setPlayheadMs(0)
+    setMediaPlayheadMs(0)
     setVideoDurationMs(null)
     setLoadError(false)
     setMoreOpen(false)
     setSelectedOverlayId(focusedMountId ?? null)
   }, [node.id, mediaRef])
+
+  useEffect(() => {
+    if (selectedMountId) pauseForScrub()
+  }, [selectedMountId])
 
   // 播放期间 rAF 每帧推进播放头（平滑）；到 cap 提前收演出（once 语义，loop 不截断）。
   useEffect(() => {
@@ -344,6 +512,7 @@ export function NodePreviewStage({
       const el = videoRef.current
       if (el) {
         const nowMs = Math.round((el.currentTime || 0) * 1000)
+        setMediaPlayheadMs(nowMs)
         if (playMode !== 'loop' && videoDurationCapReached(nowMs, node.data.durationMs, el.duration)) {
           try { el.pause() } catch { /* ignore */ }
           setIsVideoPlaying(false)
@@ -366,6 +535,12 @@ export function NodePreviewStage({
     const v = videoRef.current
     if (v) { try { v.currentTime = target / 1000 } catch { /* metadata 未就绪 */ } }
     setPlayheadMs(target)
+    setMediaPlayheadMs(target)
+    const timelineCanvas = timelineHostRef.current?.querySelector<HTMLElement>('.gc-mtimeline-canvas')
+    const canvasPx = timelineCanvas?.getBoundingClientRect().width ?? 0
+    onSelectedTimeChange?.(target, {
+      settlementInsertMs: settlementInsertMsBeforePlayhead(target, maxMs, canvasPx),
+    })
   }
   function pauseForScrub(): void {
     const v = videoRef.current
@@ -384,15 +559,14 @@ export function NodePreviewStage({
     }
   }
   function toggleMute(): void {
-    const v = videoRef.current
-    if (!v) return
-    v.muted = !v.muted
-    setIsMuted(v.muted)
+    if (!videoRef.current) return
+    onMutedChange(!muted)
   }
 
   // ── 写回（全部走 graphMaterialOps 既有映射，无新协议字段） ─────────────────
   /** 时间轴挂载条整体平移（patchMaterialGraph 的 mount 分支）。 */
   function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number }): void {
+    if (item.locked || item.kind === 'video') return
     onEditScenario((s, n) => patchMaterialGraph(s, n, maxMs, item, patch))
   }
   /** 时间轴删除挂载条 = 移除整份挂载；挂载上有「添加」进来的子件时二次确认（连带删除）。 */
@@ -406,51 +580,10 @@ export function NodePreviewStage({
     if (selectedMountId === item.id) focusMount(null)
   }
 
-  const settlementTimeline = useMemo((): {
-    pointMarkers: TimelinePointMarker[]
-    conditionMarkers: TimelineConditionMarker[]
-  } => {
-    const pointMarkers: TimelinePointMarker[] = []
-    const conditionMarkers: TimelineConditionMarker[] = []
-    const settlement = node.data.routingSettlement
-    if (settlement?.type === 'at') {
-      pointMarkers.push({ id: 'settlement', ms: settlement.ms, kind: 'settlement', label: '结算时刻 · 延迟事件边在此刻提交并离开节点' })
-    }
-    const children = expandNodeChildren(scenario, node)
-    ;(node.data.reactions ?? []).filter(isSettlementReaction).forEach((reaction, settlementIndex) => {
-      const id = `life:${settlementIndex}`
-      const actionLabel = effectsBrief(reaction.do)
-      if (reaction.when.type === 'at' || reaction.when.type === 'enter') {
-        pointMarkers.push({
-          id,
-          ms: reaction.when.type === 'at' ? reaction.when.ms : 0,
-          kind: 'lifecycle',
-          label: `结算 · ${actionLabel}`,
-        })
-        return
-      }
-      if (reaction.when.type === 'watch') {
-        const direction = reaction.when.on === 'inc' ? '增加' : reaction.when.on === 'dec' ? '减少' : '变化'
-        conditionMarkers.push({ id, label: `${reaction.when.of || '未选数值'} ${direction} → ${actionLabel}` })
-        return
-      }
-      if (reaction.when.type === 'shown' || reaction.when.type === 'hidden') {
-        const when = reaction.when
-        const child = children.find((candidate) => matchesReactionTarget(when.of, candidate))
-        const ms = when.type === 'shown'
-          ? (child ? elementStartMs(child) : null)
-          : child?.window?.endMs ?? null
-        const phase = when.type === 'shown' ? '出现' : '消失'
-        const label = `${when.of || '未选界面'} ${phase} → ${actionLabel}`
-        if (ms != null) {
-          pointMarkers.push({ id, ms, kind: 'derived', draggable: false, label })
-        } else {
-          conditionMarkers.push({ id, label })
-        }
-      }
-    })
-    return { pointMarkers, conditionMarkers }
-  }, [node, overlays, scenario])
+  const settlementTimeline = useMemo(
+    () => collectNodeTimelineMarkers(scenario, node),
+    [node, scenario],
+  )
   const { pointMarkers, conditionMarkers } = settlementTimeline
 
   const lifecycleIndexOf = (id: string): number | null => {
@@ -495,6 +628,28 @@ export function NodePreviewStage({
       bottom: undefined,
     }))
   }
+  function patchConditionSpawnPosition(
+    preview: (typeof selectedConditionSpawns)[number],
+    position: { x: number; y: number },
+  ): void {
+    const effectiveLayout = preview.mount.mountLayout ?? {}
+    onEditScenario((s, n) => ({
+      ...s,
+      graph: patchSettlementSpawnLayout(
+        s.graph,
+        n.id,
+        preview.settlementIndex,
+        preview.actionIndex,
+        {
+          ...effectiveLayout,
+          left: position.x,
+          top: position.y,
+          right: undefined,
+          bottom: undefined,
+        },
+      ),
+    }))
+  }
   function reorderMount(mountId: string, direction: 'front' | 'back'): void {
     const zValues = previewMountGroups.map(({ mount }) =>
       typeof mount.layout?.zIndex === 'number' ? mount.layout.zIndex : 0)
@@ -502,6 +657,26 @@ export function NodePreviewStage({
       ? Math.max(0, ...zValues) + 1
       : Math.min(0, ...zValues) - 1
     onEditScenario((s, n) => patchOverlayMountLayoutGraph(s, n, mountId, { zIndex }))
+  }
+  function reorderConditionSpawn(
+    preview: (typeof selectedConditionSpawns)[number],
+    direction: 'front' | 'back',
+  ): void {
+    const zValues = allInteractionItems.map((item) => item.zIndex)
+    const zIndex = direction === 'front'
+      ? Math.max(0, ...zValues) + 1
+      : Math.min(0, ...zValues) - 1
+    const effectiveLayout = preview.mount.mountLayout ?? {}
+    onEditScenario((s, n) => ({
+      ...s,
+      graph: patchSettlementSpawnLayout(
+        s.graph,
+        n.id,
+        preview.settlementIndex,
+        preview.actionIndex,
+        { ...effectiveLayout, zIndex },
+      ),
+    }))
   }
 
   useLayoutEffect(() => {
@@ -546,7 +721,45 @@ export function NodePreviewStage({
       mountBoxSigRef.current = sig
       setMountContentBoxes(next)
     }
-  }, [previewMountGroups, playheadMs, contentRect])
+
+    const nextConditionSpawns: Record<string, { left: number; top: number; width: number; height: number }> = {}
+    for (const { id } of selectedConditionSpawns) {
+      const wrap = conditionSpawnPreviewRefs.current[id]
+      if (!wrap) continue
+      let left = Infinity
+      let top = Infinity
+      let right = -Infinity
+      let bottom = -Infinity
+      for (const element of overlayFitTargets(wrap)) {
+        const rect = element.getBoundingClientRect()
+        if (!rect.width || !rect.height) continue
+        left = Math.min(left, rect.left)
+        top = Math.min(top, rect.top)
+        right = Math.max(right, rect.right)
+        bottom = Math.max(bottom, rect.bottom)
+      }
+      if (!(right > left && bottom > top)) {
+        const fallback = wrap.getBoundingClientRect()
+        left = fallback.left
+        top = fallback.top
+        right = fallback.right
+        bottom = fallback.bottom
+      }
+      nextConditionSpawns[id] = {
+        left: (left - stageRect.left) / stageRect.width,
+        top: (top - stageRect.top) / stageRect.height,
+        width: (right - left) / stageRect.width,
+        height: (bottom - top) / stageRect.height,
+      }
+    }
+    const conditionSig = Object.entries(nextConditionSpawns)
+      .map(([id, box]) => `${id}:${box.left.toFixed(3)},${box.top.toFixed(3)},${box.width.toFixed(3)},${box.height.toFixed(3)}`)
+      .join('|')
+    if (conditionSig !== conditionSpawnBoxSigRef.current) {
+      conditionSpawnBoxSigRef.current = conditionSig
+      setConditionSpawnContentBoxes(nextConditionSpawns)
+    }
+  }, [previewMountGroups, selectedConditionSpawns, playheadMs, contentRect])
 
   const interactionItems = useMemo<CanvasInteractionItem[]>(() =>
     previewMountGroups.map(({ mountId, mount, children, layout }) => {
@@ -588,6 +801,45 @@ export function NodePreviewStage({
       }
     }), [mountContentBoxes, overlays, previewMountGroups])
 
+  const conditionSpawnInteractionItems = useMemo<CanvasInteractionItem[]>(() =>
+    selectedConditionSpawns.map((preview) => {
+      const layout = preview.mount.mountLayout
+      const content = conditionSpawnContentBoxes[preview.id]
+      const explicitBox: CanvasBox | null =
+        !isFullStageMountLayout(layout)
+        && typeof layout?.left === 'number'
+        && typeof layout.top === 'number'
+        && typeof layout.width === 'number'
+        && typeof layout.height === 'number'
+        && layout.translateX == null
+        && layout.translateY == null
+          ? { left: layout.left, top: layout.top, width: layout.width, height: layout.height }
+          : null
+      const box: CanvasBox = explicitBox ?? {
+        left: content?.left ?? (typeof layout?.left === 'number' ? layout.left : 0),
+        top: content?.top ?? (typeof layout?.top === 'number' ? layout.top : 0),
+        width: content?.width ?? DEFAULT_MOUNT_W,
+        height: content?.height ?? DEFAULT_MOUNT_H,
+      }
+      return {
+        id: preview.id,
+        label: preview.label,
+        position: {
+          x: typeof layout?.left === 'number' ? layout.left : 0,
+          y: typeof layout?.top === 'number' ? layout.top : 0,
+        },
+        frame: { kind: 'box', ...box },
+        zIndex: typeof layout?.zIndex === 'number' ? layout.zIndex : 0,
+        movable: true,
+        resizable: false,
+      }
+    }), [conditionSpawnContentBoxes, selectedConditionSpawns])
+
+  const allInteractionItems = useMemo(
+    () => [...interactionItems, ...conditionSpawnInteractionItems],
+    [conditionSpawnInteractionItems, interactionItems],
+  )
+
   const previewContentStyle: CSSProperties | undefined = contentRect
     ? { left: `${contentRect.left}px`, top: `${contentRect.top}px`, width: `${contentRect.width}px`, height: `${contentRect.height}px` }
     : undefined
@@ -595,10 +847,6 @@ export function NodePreviewStage({
   return (
     <div className="nps-root">
       <div className="gc-frame nps-frame" data-type="video">
-        <span className="gc-badge">
-          {mediaRef || '未绑定视频'}
-          {playMode === 'loop' ? <em>循环</em> : null}
-        </span>
         {previewSrc && !loadError ? (
           <video
             key={`${node.id}:${mediaRef}`}
@@ -607,19 +855,20 @@ export function NodePreviewStage({
             src={previewSrc}
             style={{ filter: videoFx.filter, transform: videoFx.transform }}
             autoPlay
-            muted
+            muted={muted}
             playsInline
             loop={playMode === 'loop'}
             onLoadedMetadata={(e) => {
               const dur = e.currentTarget.duration
               if (Number.isFinite(dur) && dur > 0) setVideoDurationMs(Math.round(dur * 1000))
+              setMediaPlayheadMs(Math.round(e.currentTarget.currentTime * 1000))
               recomputeRect()
             }}
             onPlay={() => setIsVideoPlaying(true)}
             onPause={() => setIsVideoPlaying(false)}
-            onVolumeChange={(e) => setIsMuted(e.currentTarget.muted)}
             onSeeked={(e) => {
               // 自定义时间轴 seekTo 已同步重置语义时钟；播放中的原生 loop seek 不得让结算倒带。
+              setMediaPlayheadMs(Math.round(e.currentTarget.currentTime * 1000))
               if (!e.currentTarget.paused) return
               const target = Math.max(0, Math.min(maxMs, Math.round(e.currentTarget.currentTime * 1000)))
               mediaClockRef.current = { mediaMs: target, playheadMs: target }
@@ -629,6 +878,7 @@ export function NodePreviewStage({
               mediaClockRef.current = { mediaMs: maxMs, playheadMs: maxMs }
               setIsVideoPlaying(false)
               setPlayheadMs(maxMs)
+              setMediaPlayheadMs(maxMs)
             }}
             onError={() => { setLoadError(true); setIsVideoPlaying(false) }}
           />
@@ -646,40 +896,93 @@ export function NodePreviewStage({
           </div>
         ) : null}
         <div ref={contentAnchorRef} className="gc-content-anchor" style={previewContentStyle}>
-          <div className="gc-preview-overlays">
-            <ScaledOverlayContent>
-              {previewSkinChildren.length > 0 ? (
-                <PreviewClockProvider value={previewClockValue}>
-                  <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
-                    {previewMountGroups.map(({ mountId, children, layout }) => (
-                      <div
-                        key={mountId}
-                        ref={(element) => { mountPreviewRefs.current[mountId] = element }}
-                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-                      >
-                        {children.map((child) => (
-                          <span key={child.id} style={{ display: 'contents' }}>
-                            {renderOverlayChildPreview(child, previewSkinReg, previewSkinCtx, playheadMs, layout, isVideoPlaying)}
-                          </span>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </PreviewClockProvider>
-              ) : null}
-            </ScaledOverlayContent>
+          <div className="gc-preview-overlays" data-node-preview-overlay-scale="none">
+            {previewSkinChildren.length > 0 || visibleRuntimeSpawns.length > 0 || selectedConditionSpawns.length > 0 ? (
+              <PreviewClockProvider value={previewClockValue}>
+                <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
+                  {previewMountGroups.map(({ mountId, children, layout }) => (
+                    <div
+                      key={mountId}
+                      ref={(element) => { mountPreviewRefs.current[mountId] = element }}
+                      data-preview-mount-id={mountId}
+                      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                    >
+                      {children.map((child) => (
+                        <span key={child.id} style={{ display: 'contents' }}>
+                          {renderOverlayChildPreview(
+                            child,
+                            previewSkinReg,
+                            previewSkinCtx,
+                            !isVideoPlaying
+                              && child.source.mountId === selectedMountId
+                              && isNumericFloatText(child.component)
+                              ? focusedFloatPreviewTimeMs(child, playheadMs)
+                              : playheadMs,
+                            layout,
+                            isVideoPlaying,
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                  {visibleRuntimeSpawns.map(({ mount, startedAtMs }) => (
+                    <div
+                      key={mount.mountId}
+                      data-preview-spawn-id={mount.mountId}
+                      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                    >
+                      {previewSkinReg.renderOverlayMount(
+                        mount,
+                        undefined,
+                        previewSkinCtx,
+                        { timeMs: Math.max(0, playheadMs - startedAtMs), playing: isVideoPlaying },
+                      )}
+                    </div>
+                  ))}
+                  {selectedConditionSpawns.map((preview) => (
+                    <div
+                      key={preview.id}
+                      ref={(element) => { conditionSpawnPreviewRefs.current[preview.id] = element }}
+                      data-preview-condition-spawn-id={preview.id}
+                      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                    >
+                      {previewSkinReg.renderOverlayMount(
+                        preview.mount,
+                        undefined,
+                        previewSkinCtx,
+                        { timeMs: 0, playing: false },
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </PreviewClockProvider>
+            ) : null}
             <OverlayCanvasInteraction
               stageRef={contentAnchorRef}
-              items={interactionItems}
-              selectedId={selectedOverlayId}
+              items={allInteractionItems}
+              selectedId={activeConditionSpawnId ?? selectedOverlayId}
+              highlightedIds={selectedConditionSpawns.map((preview) => preview.id)}
               frameVisibility="active"
               ariaLabel="节点视频覆盖物画布"
               onSelect={(id) => {
+                if (id?.startsWith('condition-spawn:')) {
+                  setSelectedConditionSpawnId(id)
+                  setSelectedOverlayId(null)
+                  if (focusedLifecycleIndex != null) onFocusLifecycle?.(focusedLifecycleIndex)
+                  return
+                }
                 setSelectedOverlayId(id)
+                setSelectedConditionSpawnId(null)
                 focusMount(id)
+                if (id == null) onFocusLifecycle?.(null)
               }}
               onMove={(id, position) => {
                 pauseForScrub()
+                const conditionPreview = selectedConditionSpawns.find((preview) => preview.id === id)
+                if (conditionPreview) {
+                  patchConditionSpawnPosition(conditionPreview, position)
+                  return
+                }
                 patchMountPosition(id, position)
               }}
               onInteractionChange={(active) => {
@@ -687,6 +990,11 @@ export function NodePreviewStage({
               }}
               onReorder={(id, direction) => {
                 pauseForScrub()
+                const conditionPreview = selectedConditionSpawns.find((preview) => preview.id === id)
+                if (conditionPreview) {
+                  reorderConditionSpawn(conditionPreview, direction)
+                  return
+                }
                 reorderMount(id, direction)
               }}
             />
@@ -699,9 +1007,10 @@ export function NodePreviewStage({
           {isVideoPlaying ? '⏸' : '▶'}
         </button>
         <span className="nps-time">{fmtTime(playheadMs)} / {fmtTime(maxMs)}</span>
-        <button type="button" className="nps-mute" onClick={toggleMute} title={isMuted ? '取消静音' : '静音'} aria-label={isMuted ? '取消静音' : '静音'}>
-          {isMuted ? '🔇' : '🔊'}
+        <button type="button" className="nps-mute" onClick={toggleMute} title={muted ? '取消静音' : '静音'} aria-label={muted ? '取消静音' : '静音'}>
+          {muted ? '🔇' : '🔊'}
         </button>
+        {timelineToggle}
       </div>
 
       {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 先暂时隐藏 */}
@@ -751,38 +1060,48 @@ export function NodePreviewStage({
         ) : null}
       </div>
 
-      <MaterialTimeline
-        materials={materials}
-        maxMs={maxMs}
-        playheadMs={playheadMs}
-        selectedMaterialKey={selectedMountId ? `mount:${selectedMountId}` : null}
-        pointMarkers={pointMarkers}
-        conditionMarkers={conditionMarkers}
-        selectedPointMarkerId={focusedLifecycleIndex != null ? `life:${focusedLifecycleIndex}` : null}
-        context="video"
-        editable
-        emptyHint="该节点暂无挂载覆盖物——用上方「添加控件」挂载一张覆盖物"
-        onSeek={seekTo}
-        onScrubStart={pauseForScrub}
-        onSelectMaterial={(key) => {
-          const mid = key.startsWith('mount:') ? key.slice('mount:'.length) : null
-          focusMount(mid)
-          const it = materials.find((m) => m.key === key)
-          if (it) {
-            // 选中即定格到该覆盖物可见窗的中段并暂停；动画按该局部时刻精确定帧。
-            seekTo(it.startMs + (it.endMs - it.startMs) / 2)
-            pauseForScrub()
-          }
-        }}
-        onPatchMaterial={patchMaterial}
-        onPointMarkerChange={movePointMarker}
-        onSelectPointMarker={(id) => {
-          const lifecycleIndex = lifecycleIndexOf(id)
-          if (lifecycleIndex != null) onFocusLifecycle?.(lifecycleIndex)
-        }}
-        onDeleteMaterial={deleteMaterial}
-        onDropTemplate={(template, atMs) => mountOverlay(template, atMs)}
-      />
+      {timelineExpanded ? (
+        <div id={timelineId} ref={timelineHostRef}>
+          <MaterialTimeline
+            materials={timelineMaterials}
+            maxMs={maxMs}
+            playheadMs={playheadMs}
+            mediaPlayhead={playMode === 'loop' && mediaRef
+              ? { materialKey: NODE_VIDEO_TRACK_KEY, localMs: mediaPlayheadMs }
+              : undefined}
+            selectedMaterialKey={selectedMountId ? `mount:${selectedMountId}` : null}
+            pointMarkers={pointMarkers}
+            conditionMarkers={conditionMarkers}
+            selectedPointMarkerId={focusedLifecycleIndex != null ? `life:${focusedLifecycleIndex}` : null}
+            context="video"
+            editable
+            emptyHint="该节点暂无挂载覆盖物——用上方「添加控件」挂载一张覆盖物"
+            onSeek={seekTo}
+            onScrubStart={pauseForScrub}
+            onSelectMaterial={(key) => {
+              const mid = key.startsWith('mount:') ? key.slice('mount:'.length) : null
+              focusMount(mid)
+              const it = mountMaterials.find((m) => m.key === key)
+              if (it) {
+                // 选中即定格到该覆盖物可见窗的中段并暂停；动画按该局部时刻精确定帧。
+                seekTo(it.startMs + (it.endMs - it.startMs) / 2)
+                pauseForScrub()
+              }
+            }}
+            onPatchMaterial={patchMaterial}
+            onPointMarkerChange={movePointMarker}
+            onSelectPointMarker={(id) => {
+              const lifecycleIndex = lifecycleIndexOf(id)
+              if (lifecycleIndex != null) {
+                pauseForScrub()
+                onFocusLifecycle?.(lifecycleIndex)
+              }
+            }}
+            onDeleteMaterial={deleteMaterial}
+            onDropTemplate={(template, atMs) => mountOverlay(template, atMs)}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

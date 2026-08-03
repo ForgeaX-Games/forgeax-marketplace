@@ -58,6 +58,12 @@ describe('patchNodeBgm', () => {
     expect(patchNodeBgm({ ref: 'a', restart: true }, { ref: 'b' })).toEqual({ ref: 'b', restart: true })
   })
 
+  it('播放模式默认循环不落盘，单次播放写 loop:false', () => {
+    expect(patchNodeBgm({ ref: 'a' }, { loop: false })).toEqual({ ref: 'a', loop: false })
+    expect(patchNodeBgm({ ref: 'a', loop: false }, { loop: undefined })).toEqual({ ref: 'a' })
+    expect(patchNodeBgm(undefined, { loop: false })).toBeUndefined()
+  })
+
   it('只勾 restart 而没有曲子 → 仍是删键（没有曲子可重播）', () => {
     expect(patchNodeBgm(undefined, { restart: true })).toBeUndefined()
   })

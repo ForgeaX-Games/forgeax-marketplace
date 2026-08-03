@@ -21,6 +21,12 @@ export interface FormulaHole {
   suggestAttr?: string
 }
 
+export interface FormulaHoleBindingIssue {
+  holeId: string
+  label: string
+  reason: string
+}
+
 /** 深度遍历 AST 收集全部留空位（应用公式时据此渲染填空控件）。 */
 export function formulaHoles(formula: Formula): FormulaHole[] {
   const out: FormulaHole[] = []
@@ -51,20 +57,67 @@ export function formulaHoles(formula: Formula): FormulaHole[] {
   return out
 }
 
-/** 判定一个绑定是否已「填够」（够 serializeFormula 产出具体值）。 */
-function holeBound(hole: FormulaHole, binding: FormulaHoleBinding | undefined): boolean {
-  if (!binding) return false
-  if (binding.kind === 'number') return true
-  if (binding.kind === 'var') return !!binding.varId
-  return !!binding.entityId && (!!binding.attr || !!hole.suggestAttr)
+function entityBindingIssue(
+  hole: FormulaHole,
+  binding: Extract<FormulaHoleBinding, { kind: 'entityAttr' }>,
+  entities: Record<string, Entity> | undefined,
+): string | undefined {
+  if (!binding.entityId) return '尚未选择实体'
+  if (entities === undefined) {
+    return binding.attr || hole.suggestAttr ? undefined : '尚未选择属性'
+  }
+  const entity = findEntity(entities, binding.entityId)
+  if (!entity) return `实体「${binding.entityId}」已不存在`
+  const attr = binding.attr || hole.suggestAttr
+  if (!attr) return '尚未选择属性'
+  if (!listAttrOptions(entity).some((option) => option.id === attr)) {
+    return `属性「${attr}」已不存在`
+  }
+  return undefined
+}
+
+/** 普通数值参数可绑定常量、实体属性或变量；显式实体/变量参数仍保持各自类型。 */
+function holeBindingIssue(
+  hole: FormulaHole,
+  binding: FormulaHoleBinding | undefined,
+  entities: Record<string, Entity> | undefined,
+): string | undefined {
+  if (!binding) return hole.kind === 'number' ? '尚未选择数值来源' : '尚未绑定'
+  if (hole.kind === 'entityAttr' && binding.kind !== 'entityAttr') return '需要绑定实体属性'
+  if (hole.kind === 'var' && binding.kind !== 'var') return '需要绑定变量'
+  if (binding.kind === 'number') return undefined
+  if (binding.kind === 'var') return binding.varId ? undefined : '尚未选择变量'
+  return entityBindingIssue(hole, binding, entities)
+}
+
+/** 返回每个缺失或失效绑定的具体原因，供应用 UI 明确提示。 */
+export function formulaHoleBindingIssues(
+  formula: Formula,
+  holeBindings: Record<string, FormulaHoleBinding>,
+  entities?: Record<string, Entity>,
+): FormulaHoleBindingIssue[] {
+  return formulaHoles(formula).flatMap((hole) => {
+    const reason = holeBindingIssue(
+      hole,
+      normalizeHoleBinding(holeBindings[hole.holeId]),
+      entities,
+    )
+    return reason
+      ? [{ holeId: hole.holeId, label: hole.label || hole.holeId, reason }]
+      : []
+  })
 }
 
 /** 尚未填全的留空位；调用方据此阻止把半成品误当完整公式。 */
 export function missingFormulaHoles(
   formula: Formula,
   holeBindings: Record<string, FormulaHoleBinding>,
+  entities?: Record<string, Entity>,
 ): FormulaHole[] {
-  return formulaHoles(formula).filter((hole) => !holeBound(hole, normalizeHoleBinding(holeBindings[hole.holeId])))
+  const missingIds = new Set(
+    formulaHoleBindingIssues(formula, holeBindings, entities).map((issue) => issue.holeId),
+  )
+  return formulaHoles(formula).filter((hole) => missingIds.has(hole.holeId))
 }
 
 /** 公式内直接引用和变量空位绑定中，当前变量目录尚未声明的 id。 */
@@ -116,8 +169,8 @@ export function formulaPreview(
 }
 
 /**
- * 归一 holeBindings：把旧形状 / 松散值转成 typed，并为 entityAttr 空位补默认属性
- * （binding.attr → suggestAttr → 实体首个属性）。
+ * 归一 holeBindings：把旧形状 / 松散值转成 typed，并为 entityAttr 空位补默认属性。
+ * 不完整或失效值仍保留在 sidecar，确保作者可以继续填写并看到准确提示。
  */
 function resolveBindings(
   formula: Formula,
@@ -148,7 +201,14 @@ export function compileFormula(
   entities: Record<string, Entity> | undefined,
 ): NumOrExpr {
   const resolved = resolveBindings(formula, holeBindings, entities)
-  const expr = serializeFormula(formula.ast, resolved) ?? '0'
+  const holesById = new Map(formulaHoles(formula).map((hole) => [hole.holeId, hole]))
+  const compilable = Object.fromEntries(
+    Object.entries(resolved).filter(([holeId, binding]) => {
+      const hole = holesById.get(holeId)
+      return hole && !holeBindingIssue(hole, binding, entities)
+    }),
+  )
+  const expr = serializeFormula(formula.ast, compilable) ?? '0'
   const pick: FormulaPick = { mode: 'formula', formulaId: formula.id, holeBindings: resolved }
   return { expr, pick } as unknown as NumOrExpr
 }

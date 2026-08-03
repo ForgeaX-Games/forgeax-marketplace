@@ -1,18 +1,17 @@
 /**
- * 伤害飘字（component id: `DamageFloatText`）—— value 支持固定数字或 `{expr}` 公式。
- * 公式绘制时从 SkinCtx 求值；位置与显示时段由外部 Overlay 编排。
+ * 伤害飘字（component id: `DamageFloatText`）。
+ * parameter 等由 RuntimeComponentHost 解析；此处只拼接展示。
  */
 import type { ReactNode } from 'react'
 import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
-import type { OverlayProps } from '../../rendererRegistry'
 import { animationTimingStyle, injectCss, ensureBrushFont, resolveTextAppearance, type TextAppearanceInputs } from './skinRuntime'
-import { resolveNumericFloatDurationMs, resolveNumericFloatText, type NumericFloatTextInputs } from './numericFloatText'
 
 export const DamageFloatTextManifest: ComponentManifest = {
   id: 'DamageFloatText',
   label: '伤害飘字',
   inputs: [
-    { key: 'value', label: '数值', valueType: 'number', component: 'numberExpr', default: -25 },
+    { key: 'fixedText', label: '固定文本', valueType: 'string', default: '' },
+    { key: 'parameter', label: '参数', valueType: 'string', component: 'numberExpr' },
     { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#ff5a5a' },
     { key: 'fontSize', label: '字号', valueType: 'number', default: 3.5 },
     { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1100 },
@@ -20,12 +19,31 @@ export const DamageFloatTextManifest: ComponentManifest = {
   events: [],
 }
 
-export function DamageFloatText({ overlay, ctx, preview, previewTimeMs, previewPlaying }: OverlayProps): ReactNode {
+export interface DamageFloatTextProps {
+  fixedText?: string
+  parameter?: string
+  color?: string
+  fontSize?: number
+  durationMs?: number
+  preview?: boolean
+  previewTimeMs?: number
+  previewPlaying?: boolean
+}
+
+export function DamageFloatText({
+  fixedText = '',
+  parameter = '-25',
+  color,
+  fontSize,
+  durationMs = 1100,
+  preview,
+  previewTimeMs,
+  previewPlaying,
+}: DamageFloatTextProps): ReactNode {
   injectCss('damage-float-text', DAMAGE_FLOAT_TEXT_CSS)
   ensureBrushFont()
-  const text = resolveNumericFloatText(overlay.inputs as NumericFloatTextInputs, ctx, '-25')
-  const textStyle = resolveTextAppearance(overlay.inputs as TextAppearanceInputs, { color: '#ff5a5a', fontSize: 3.5 })
-  const durationMs = resolveNumericFloatDurationMs(overlay.inputs.durationMs)
+  const text = `${fixedText}${formatDamageParameter(fixedText, parameter)}`
+  const textStyle = resolveTextAppearance({ color, fontSize } as TextAppearanceInputs, { color: '#ff5a5a', fontSize: 3.5 })
   const frozen = preview && !previewPlaying
   return (
     <div
@@ -35,6 +53,15 @@ export function DamageFloatText({ overlay, ctx, preview, previewTimeMs, previewP
       <span data-overlay-fit-target style={textStyle}>{text}</span>
     </div>
   )
+}
+
+function formatDamageParameter(fixedText: string, parameter: string): string {
+  const normalized = parameter.trim()
+  const numeric = Number(normalized)
+  const fixedMinus = fixedText.trim() === '-'
+  return normalized && Number.isFinite(numeric) && numeric > 0 && !normalized.startsWith('+') && !fixedMinus
+    ? `+${parameter}`
+    : parameter
 }
 
 const DAMAGE_FLOAT_TEXT_CSS = `

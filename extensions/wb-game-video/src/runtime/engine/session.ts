@@ -7,7 +7,7 @@
  */
 import type { GameGraph, GameNode, GameScenario, GraphLibraryDocument, SubFlowPackDef } from '../schema/graph-schema'
 import type { Layout } from '../schema/node-config-schema'
-import { GraphRuntime } from './engine'
+import { GraphRuntime, type GraphRuntimeCheckpoint } from './engine'
 import type { ComponentRegistry } from '../registry/component-registry'
 import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../component-host/components'
 import type { SkinRegistry } from '../component-host/rendererRegistry'
@@ -22,6 +22,8 @@ export interface GraphSessionOptions {
   packs?: readonly SubFlowPackDef[]
   /** 试玩根蓝图 id；缺省 `manifest.mainPackId` 或 `__root__`。 */
   rootBlueprintId?: string
+  /** 本会话的确定性随机种子；缺省 0，宿主的新游戏入口应显式生成。 */
+  rngSeed?: number
 }
 
 const MAX_LOGS = 60
@@ -145,6 +147,20 @@ export interface SessionSnapshot {
   callStack: CallStackFrameSnap[]
 }
 
+interface GraphSessionCheckpointData {
+  runtime: GraphRuntimeCheckpoint
+  snapshot: SessionSnapshot
+  pendingEntryReason: string | undefined
+  clipSeq: number
+  bgmSeq: number
+}
+
+/** 编辑器预览使用的内存恢复点；不会写入游戏配置。 */
+export interface GraphSessionCheckpoint {
+  readonly kind: 'wb-game-video.session-checkpoint.v1'
+  readonly payload: unknown
+}
+
 export class GraphSession {
   readonly runtime: GraphRuntime
   /** 本局皮肤表（Player 渲染用；与其它 Session 隔离）。 */
@@ -175,7 +191,14 @@ export class GraphSession {
       }
     }
     // 开跑用根 graph；依赖解析在 GraphRuntime 内走 manifest.packs（或 opts.packs 注入）。
-    this.runtime = new GraphRuntime(scenario.graph, scenario, components, opts.packs ?? [], rootId)
+    this.runtime = new GraphRuntime(
+      scenario.graph,
+      scenario,
+      components,
+      opts.packs ?? [],
+      rootId,
+      opts.rngSeed,
+    )
     this.nodesById = new Map(scenario.graph.nodes.map((n) => [n.id, n]))
     this.entityNames = Object.fromEntries(
       Object.entries(scenario.entities ?? {}).map(([id, entity]) => [id, entity.name?.trim() || id]),
@@ -256,6 +279,30 @@ export class GraphSession {
     opts?: { resetGlobals?: boolean; graph?: GameGraph; blueprintId?: string; graphPath?: string[] },
   ): SessionSnapshot {
     return this.apply(this.runtime.jumpToNode(nodeId, opts))
+  }
+
+  createCheckpoint(): GraphSessionCheckpoint {
+    const payload: GraphSessionCheckpointData = {
+      runtime: this.runtime.createCheckpoint(),
+      snapshot: cloneSessionSnapshotForCheckpoint(this.snapshot),
+      pendingEntryReason: this.pendingEntryReason,
+      clipSeq: this.clipSeq,
+      bgmSeq: this.bgmSeq,
+    }
+    return { kind: 'wb-game-video.session-checkpoint.v1', payload }
+  }
+
+  restoreCheckpoint(checkpoint: GraphSessionCheckpoint): SessionSnapshot {
+    if (checkpoint.kind !== 'wb-game-video.session-checkpoint.v1') {
+      throw new Error('unsupported graph session checkpoint')
+    }
+    const payload = checkpoint.payload as GraphSessionCheckpointData
+    this.runtime.restoreCheckpoint(payload.runtime)
+    this.snapshot = cloneSessionSnapshotForCheckpoint(payload.snapshot)
+    this.pendingEntryReason = payload.pendingEntryReason
+    this.clipSeq = payload.clipSeq
+    this.bgmSeq = payload.bgmSeq
+    return this.cloned()
   }
 
   /** 当前节点之后可能播放的视频，供 UI 在切换前建立并保留媒体元素。 */
@@ -368,5 +415,38 @@ export class GraphSession {
       log: [...s.log],
       hud: { ...s.hud, entities: { ...s.hud.entities }, vars: { ...s.hud.vars }, flags: { ...s.hud.flags } },
     }
+  }
+}
+
+function cloneSessionSnapshotForCheckpoint(s: SessionSnapshot): SessionSnapshot {
+  return {
+    ...s,
+    clip: s.clip ? { ...s.clip } : undefined,
+    bgm: s.bgm ? { ...s.bgm } : null,
+    overlayMounts: s.overlayMounts.map((mount) => ({
+      ...mount,
+      mountLayout: mount.mountLayout ? { ...mount.mountLayout } : undefined,
+      children: mount.children.map((child) => ({
+        ...child,
+        inputs: { ...child.inputs },
+        childLayout: child.childLayout ? { ...child.childLayout } : undefined,
+      })),
+    })),
+    visited: [...s.visited],
+    traversedEdgeIds: [...s.traversedEdgeIds],
+    callStack: s.callStack.map((frame) => ({ ...frame, graphPath: [...frame.graphPath] })),
+    activeGraphPath: [...s.activeGraphPath],
+    log: [...s.log],
+    hud: {
+      ...s.hud,
+      entities: Object.fromEntries(Object.entries(s.hud.entities).map(([id, entity]) => [id, {
+        ...entity,
+        attrs: { ...entity.attrs },
+        attrMax: { ...entity.attrMax },
+        initialAttrs: entity.initialAttrs ? { ...entity.initialAttrs } : undefined,
+      }])),
+      vars: { ...s.hud.vars },
+      flags: { ...s.hud.flags },
+    },
   }
 }

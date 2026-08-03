@@ -237,6 +237,56 @@
   --ks-bg-drift:         transparent;
 }
 
+/* NodeInspector BGM 音量：原生 Chromium 轨道在端点仍露出一截未填充色，改为按值自绘。 */
+.ni-bgm-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill, 9999px);
+  outline: none;
+  cursor: pointer;
+}
+
+.ni-bgm-volume:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ni-bgm-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #1683ff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
+.ni-bgm-volume::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: var(--radius-pill, 9999px);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ni-bgm-volume::-moz-range-progress {
+  height: 6px;
+  border-radius: var(--radius-pill, 9999px);
+  background: #1683ff;
+}
+
+.ni-bgm-volume::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #1683ff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
 /* Reset */
 * {
   box-sizing: border-box;

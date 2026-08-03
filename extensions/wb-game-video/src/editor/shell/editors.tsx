@@ -20,9 +20,30 @@ import type {
 import type { Formula } from '../persist/formula-authoring'
 import { flowHandleDisplay } from '../../graph/flow-handle-labels'
 import { buildDefaults, getComponent, getComponentManifest } from '../../runtime/registry/component-registry'
-import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
-import { ValueExprEditor } from './ValueExprEditor'
+import {
+  attrDisplayName,
+  catalogIdOccupied,
+  entityDisplayName,
+  findEntity,
+  listAttrOptions,
+  listEntityOptions,
+  listVarOptions,
+  nextAvailableCatalogId,
+  nextCatalogId,
+  type EntityAttributeCreateRequest,
+  type EntityCreateRequest,
+} from './metaCatalog'
+import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
+import {
+  ValueExprEditor,
+  type ValueExprAttributeCreateConfig,
+  type ValueExprEntityCreateConfig,
+  type ValueExprFormulaCreateConfig,
+  type ValueExprVariableCreateConfig,
+} from './ValueExprEditor'
 import { TextValueEditor, type TextOrRef } from './TextValueEditor'
+import { LooseNumberInput } from './TermChainEditor'
+import { EffectOpButtons } from './OpSymbolButtons'
 import {
   decodeEffectOperation,
   encodeEffectOperation,
@@ -47,6 +68,8 @@ export type MetaCatalogProps = {
   variables?: Record<string, Variable>
   /** 公式库（「规则 → 公式」维护）；数值字段（ValueInput）借它开出「应用公式」模式。 */
   formulas?: Record<string, Formula>
+  /** 从当前项目已有 item effect / hasItem condition 派生的道具 id。 */
+  itemIds?: readonly string[]
 }
 
 /** 兼容包装：entities/variables + 节点下拉展示。 */
@@ -64,12 +87,14 @@ function resolveCatalog(args: CatalogArgs): {
   entities: Record<string, Entity> | undefined
   variables: Record<string, Variable> | undefined
   formulas: Record<string, Formula> | undefined
+  itemIds: readonly string[]
   nodeLabel?: (id: string) => string
 } {
   return {
     entities: args.entities ?? args.pickers?.entities,
     variables: args.variables ?? args.pickers?.variables,
     formulas: args.formulas ?? args.pickers?.formulas,
+    itemIds: args.itemIds ?? args.pickers?.itemIds ?? [],
     nodeLabel: args.nodeLabel ?? args.pickers?.nodeLabel,
   }
 }
@@ -88,6 +113,43 @@ const lbl: CSSProperties = { width: 52, opacity: 0.7, flexShrink: 0, fontSize: 1
 const del: CSSProperties = { color: '#ff6b6b', marginLeft: 'auto' }
 const hint: CSSProperties = { fontSize: 11, opacity: 0.55, marginBottom: 4 }
 
+function ItemIdEditor({
+  value,
+  itemIds,
+  onChange,
+}: {
+  value: string
+  itemIds: readonly string[]
+  onChange: (itemId: string) => void
+}): JSX.Element {
+  const ids = [...new Set(itemIds.filter(Boolean))].sort()
+  const known = ids.includes(value)
+  return (
+    <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
+      <select
+        aria-label="道具"
+        value={known ? value : '__custom__'}
+        onChange={(event) => {
+          if (event.target.value !== '__custom__') onChange(event.target.value)
+        }}
+        style={{ flex: 1, minWidth: 0 }}
+      >
+        {ids.map((id) => <option key={id} value={id}>{id}</option>)}
+        <option value="__custom__">新建或输入道具 ID…</option>
+      </select>
+      {!known ? (
+        <input
+          aria-label="道具 ID"
+          value={value}
+          placeholder="如 lotus-key"
+          onChange={(event) => onChange(event.target.value)}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
 /** NumOrExpr 值相等判断：数字比值、表达式比串——用于判「运算符变换是否真的改了值」，没改则不入撤回栈。 */
 function numOrExprEqual(a: NumOrExpr | undefined, b: NumOrExpr | undefined): boolean {
   if (a === b) return true
@@ -96,11 +158,15 @@ function numOrExprEqual(a: NumOrExpr | undefined, b: NumOrExpr | undefined): boo
   return false
 }
 
-function field(label: string, node: JSX.Element): JSX.Element {
+function field(
+  label: string,
+  node: JSX.Element,
+  labelWidth?: CSSProperties['width'],
+): JSX.Element {
   // 用 div 而非 label：子树常含 button，包在 label 里会点到文字也触发按钮（如「乘」误删）。
   return (
     <div style={rowStyle}>
-      <span style={lbl}>{label}</span>
+      <span style={labelWidth === undefined ? lbl : { ...lbl, width: labelWidth }}>{label}</span>
       {node}
     </div>
   )
@@ -334,17 +400,40 @@ export function ValueInput({
   entities,
   variables,
   formulas,
+  itemIds,
   effectOp,
+  fieldLabels,
+  fieldLabelWidth,
   onClear,
+  emptyWhenUndefined,
   emptyLabel,
+  preferredEntityIds,
+  preferredAttrIds,
+  allowAttribute,
+  createAttribute,
+  createEntity,
+  createVariable,
+  createFormula,
+  stackControls,
 }: {
   value: NumOrExpr | string | undefined
   defaultValue?: number
   onChange: (v: NumOrExpr) => void
   onClear?: () => void
+  emptyWhenUndefined?: boolean
   emptyLabel?: string
+  preferredEntityIds?: readonly string[]
+  preferredAttrIds?: readonly string[]
+  allowAttribute?: (entity: Entity | undefined, attrId: string) => boolean
+  createAttribute?: ValueExprAttributeCreateConfig
+  createEntity?: ValueExprEntityCreateConfig
+  createVariable?: ValueExprVariableCreateConfig
+  createFormula?: ValueExprFormulaCreateConfig
+  stackControls?: boolean
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/选取公式同一行）。 */
   effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
+  fieldLabels?: { source: string; value: string }
+  fieldLabelWidth?: CSSProperties['width']
 } & MetaCatalogProps): JSX.Element {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
@@ -355,8 +444,19 @@ export function ValueInput({
         formulas={formulas}
         onChange={onChange}
         onClear={onClear}
+        emptyWhenUndefined={emptyWhenUndefined}
         emptyLabel={emptyLabel}
         effectOp={effectOp}
+        preferredEntityIds={preferredEntityIds}
+        preferredAttrIds={preferredAttrIds}
+        allowAttribute={allowAttribute}
+        createAttribute={createAttribute}
+        createEntity={createEntity}
+        createVariable={createVariable}
+        createFormula={createFormula}
+        fieldLabels={fieldLabels}
+        fieldLabelWidth={fieldLabelWidth}
+        stackControls={stackControls}
       />
     </div>
   )
@@ -367,15 +467,44 @@ export function TextValueInput({
   onChange,
   entities,
   variables,
+  formulas,
+  preferredEntityIds,
+  entityNameOnly,
+  createAttribute,
+  createEntity,
+  createVariable,
+  createFormula,
+  stackControls,
 }: {
   value: TextOrRef | undefined
   onChange: (v: TextOrRef) => void
   entities: Record<string, Entity> | undefined
   variables: Record<string, Variable> | undefined
+  formulas?: Record<string, Formula>
+  preferredEntityIds?: readonly string[]
+  entityNameOnly?: boolean
+  createAttribute?: ValueExprAttributeCreateConfig
+  createEntity?: ValueExprEntityCreateConfig
+  createVariable?: ValueExprVariableCreateConfig
+  createFormula?: ValueExprFormulaCreateConfig
+  stackControls?: boolean
 }): JSX.Element {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <TextValueEditor value={value} entities={entities} variables={variables} onChange={onChange} />
+      <TextValueEditor
+        value={value}
+        entities={entities}
+        variables={variables}
+        formulas={formulas}
+        preferredEntityIds={preferredEntityIds}
+        entityNameOnly={entityNameOnly}
+        createAttribute={createAttribute}
+        createEntity={createEntity}
+        createVariable={createVariable}
+        createFormula={createFormula}
+        stackControls={stackControls}
+        onChange={onChange}
+      />
     </div>
   )
 }
@@ -383,19 +512,116 @@ export function TextValueInput({
 export function EntitySelect({
   value,
   entities,
+  createEntity,
   onChange,
 }: {
   value: string
   entities: Record<string, Entity> | undefined
+  createEntity?: ValueExprEntityCreateConfig
   onChange: (id: string) => void
 }): JSX.Element {
+  const [createDrafts, setCreateDrafts] = useState<Record<string, {
+    entityId: string
+    name: string
+  }>>({})
   const opts = listEntityOptions(entities)
+  const known = new Set(opts.map((option) => option.id))
+  const pickerOptions: CascadingPickerOption[] = [
+    ...opts.map((option) => ({
+      key: `entity:${encodeURIComponent(option.id)}`,
+      label: option.label,
+      value: option.id,
+    })),
+    ...(value && !known.has(value) ? [{
+      key: `missing:${encodeURIComponent(value)}`,
+      label: `${value}（实体模板已删除）`,
+      value,
+      disabled: true,
+    }] : []),
+  ]
+  if (createEntity) {
+    const template = createEntity.template ?? {
+      entityId: nextCatalogId('entity', entities),
+      name: '实体',
+    }
+    const defaultId = nextAvailableCatalogId(template.entityId, entities)
+    const draftKey = `create-effect-entity:${encodeURIComponent(defaultId)}`
+    const defaults = { entityId: defaultId, name: template.name }
+    const draft = { ...defaults, ...createDrafts[draftKey] }
+    const entityId = draft.entityId.trim()
+    const actionKey = `${draftKey}:confirm`
+    const patch = (change: Partial<typeof defaults>): void => {
+      setCreateDrafts((current) => ({
+        ...current,
+        [draftKey]: { ...defaults, ...current[draftKey], ...change },
+      }))
+    }
+    pickerOptions.push({
+      key: `configure:${actionKey}`,
+      presentation: 'create',
+      label: `配置「${draft.name.trim() || entityId || defaultId}」实体`,
+      children: [
+        {
+          key: `detail:${actionKey}:id`,
+          label: '实体 ID',
+          editor: {
+            value: draft.entityId,
+            ariaLabel: '效果目标的新实体 ID',
+            invalid: !entityId || catalogIdOccupied(entities, entityId),
+            onChange: (next) => patch({ entityId: next }),
+          },
+        },
+        {
+          key: `detail:${actionKey}:name`,
+          label: '显示名',
+          editor: {
+            value: draft.name,
+            ariaLabel: '效果目标的新实体显示名',
+            onChange: (next) => patch({ name: next }),
+          },
+        },
+        {
+          key: actionKey,
+          label: '确认创建并选择',
+          value: actionKey,
+          presentation: 'confirm',
+          disabled: !entityId || catalogIdOccupied(entities, entityId),
+        },
+      ],
+    })
+    const select = (selected: string): void => {
+      if (selected !== actionKey) {
+        onChange(selected)
+        return
+      }
+      createEntity.onCreate({
+        ...template,
+        entityId,
+        name: draft.name.trim(),
+      })
+      onChange(entityId)
+    }
+    return (
+      <CascadingPicker
+        ariaLabel="实体"
+        value={value}
+        displayValue={opts.find((option) => option.id === value)?.label ?? value}
+        placeholder="选择实体..."
+        options={pickerOptions}
+        onSelect={select}
+        narrowSafe
+      />
+    )
+  }
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ flex: 1 }}>
-      <option value="" disabled={opts.length > 0}>选择对象…</option>
-      {opts.map((o) => (
-        <option key={o.id} value={o.id}>{o.label}</option>
+    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
+      <option value="" disabled={pickerOptions.length > 0}>选择对象…</option>
+      {opts.map((option) => (
+        <option key={option.id} value={option.id}>{option.label}</option>
       ))}
+      {value && !known.has(value) ? (
+        <option value={value} disabled>{value}（实体模板已删除）</option>
+      ) : null}
     </select>
   )
 }
@@ -406,25 +632,157 @@ export function AttrSelect({
   value,
   entities,
   fallbackValues,
+  createAttribute,
   onChange,
 }: {
   entityId: string
   value: string
   entities: Record<string, Entity> | undefined
   fallbackValues?: readonly string[]
+  createAttribute?: ValueExprAttributeCreateConfig
   onChange: (attr: string) => void
 }): JSX.Element {
+  const [createDrafts, setCreateDrafts] = useState<Record<string, {
+    attrId: string
+    label: string
+    initialValue: string
+  }>>({})
+  if (!entityId) {
+    return (
+      <select value="" disabled style={{ flex: 1 }}>
+        <option value="">请先选择对象…</option>
+      </select>
+    )
+  }
   const attrs = listAttrOptions(findEntity(entities, entityId))
   const known = new Set(attrs.map((attr) => attr.id))
   const fallbacks = (fallbackValues ?? [])
     .filter((id, index, all) => id && !known.has(id) && all.indexOf(id) === index)
-    .map((id) => ({ id, label: `${id}（未在对象中声明）` }))
+    .map((id) => ({ id, label: `${id}（实体无该属性）` }))
   const options = [...attrs, ...fallbacks]
+  const pickerOptions: CascadingPickerOption[] = options.map((attr) => ({
+    key: `attr:${encodeURIComponent(attr.id)}`,
+    label: attr.label,
+    value: attr.id,
+  }))
+  if (createAttribute) {
+    const entity = findEntity(entities, entityId)
+    const template = createAttribute.template ?? {
+      attrId: 'attr0',
+      initialValue: 0,
+      meta: { label: '属性', initial: 0 },
+    }
+    const occupied = new Set([
+      ...Object.keys(entity?.attrs ?? {}),
+      ...Object.keys(entity?.attrMeta ?? {}),
+    ])
+    let defaultAttrId = template.attrId
+    if (occupied.has(defaultAttrId)) {
+      const suffix = /^(.*?)(\d+)$/.exec(defaultAttrId)
+      const prefix = suffix?.[1] ?? defaultAttrId
+      let index = suffix ? Number(suffix[2]) + 1 : 2
+      while (occupied.has(`${prefix}${index}`)) index += 1
+      defaultAttrId = `${prefix}${index}`
+    }
+    const draftKey = `create-effect-attr:${encodeURIComponent(entityId)}:${encodeURIComponent(defaultAttrId)}`
+    const defaults = {
+      attrId: defaultAttrId,
+      label: template.meta?.label ?? template.attrId,
+      initialValue: String(template.initialValue),
+    }
+    const draft = { ...defaults, ...createDrafts[draftKey] }
+    const attrId = draft.attrId.trim()
+    const initialValue = draft.initialValue.trim() ? Number(draft.initialValue) : Number.NaN
+    const validInitialValue = Number.isFinite(initialValue)
+    const occupiedAttr = Object.hasOwn(entity?.attrs ?? {}, attrId)
+      || Object.hasOwn(entity?.attrMeta ?? {}, attrId)
+    const actionKey = `${draftKey}:confirm`
+    const request: EntityAttributeCreateRequest = {
+      ...template,
+      entityId,
+      attrId,
+      initialValue: validInitialValue ? initialValue : 0,
+      meta: {
+        ...template.meta,
+        label: draft.label.trim() || undefined,
+        initial: validInitialValue ? initialValue : 0,
+      },
+    }
+    const patch = (change: Partial<typeof defaults>): void => {
+      setCreateDrafts((current) => ({
+        ...current,
+        [draftKey]: { ...defaults, ...current[draftKey], ...change },
+      }))
+    }
+    pickerOptions.push({
+      key: `configure:${actionKey}`,
+      presentation: 'create',
+      label: `配置「${draft.label.trim() || attrId || defaultAttrId}」属性`,
+      children: [
+        {
+          key: `detail:${actionKey}:id`,
+          label: '属性 ID',
+          editor: {
+            value: draft.attrId,
+            ariaLabel: `${entityDisplayName(entity, entityId)}的新属性 ID`,
+            invalid: !attrId || occupiedAttr,
+            onChange: (next) => patch({ attrId: next }),
+          },
+        },
+        {
+          key: `detail:${actionKey}:label`,
+          label: '显示名',
+          editor: {
+            value: draft.label,
+            ariaLabel: `${entityDisplayName(entity, entityId)}的新属性显示名`,
+            onChange: (next) => patch({ label: next }),
+          },
+        },
+        {
+          key: `detail:${actionKey}:initial`,
+          label: '初始值',
+          editor: {
+            value: draft.initialValue,
+            ariaLabel: `${entityDisplayName(entity, entityId)}的新属性初始值`,
+            inputMode: 'decimal',
+            invalid: !validInitialValue,
+            onChange: (next) => patch({ initialValue: next }),
+          },
+        },
+        {
+          key: actionKey,
+          label: '确认创建并选择',
+          value: actionKey,
+          presentation: 'confirm',
+          disabled: !attrId || occupiedAttr || !validInitialValue,
+        },
+      ],
+    })
+    const select = (selected: string): void => {
+      if (selected !== actionKey) {
+        onChange(selected)
+        return
+      }
+      createAttribute.onCreate(request)
+      onChange(attrId)
+    }
+    return (
+      <CascadingPicker
+        ariaLabel="属性"
+        value={value}
+        displayValue={attrDisplayName(entity, value)}
+        placeholder="选择属性..."
+        options={pickerOptions}
+        onSelect={select}
+        narrowSafe
+      />
+    )
+  }
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ flex: 1 }}>
+    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
       <option value="" disabled={options.length > 0}>选择属性…</option>
-      {options.map((a) => (
-        <option key={a.id} value={a.id}>{a.label}</option>
+      {options.map((attr) => (
+        <option key={attr.id} value={attr.id}>{attr.label}</option>
       ))}
     </select>
   )
@@ -459,7 +817,7 @@ type EffectKind = GraphEffect['kind']
 // 「标记」(flag) 从新建下拉隐藏（避免与「变量」混淆）；已有 flag 数据仍可编辑。
 const EFFECT_KINDS: EffectKind[] = ['attr', 'var', 'item']
 
-/** 新建一条效果的默认值（属性 / 变量 / …）；供 EffectsEditor 与「＋ 效果」动作共用。 */
+/** 新建一条效果的默认值（属性 / 变量 / …）；供 EffectsEditor 与「＋ 添加效果」动作共用。 */
 export function createDefaultEffect(
   kind: EffectKind,
   entities: Record<string, Entity> | undefined,
@@ -489,17 +847,7 @@ function defaultEffect(
   return createDefaultEffect(kind, entities, variables)
 }
 
-function formatEffectValue(v: NumOrExpr | undefined): string {
-  if (v === undefined) return '…'
-  if (typeof v === 'number') return String(v)
-  if (typeof v === 'object' && v && 'expr' in v) {
-    const expr = String((v as { expr: string }).expr)
-    return expr.length > 36 ? `${expr.slice(0, 36)}…` : expr
-  }
-  return String(v)
-}
-
-/** 一行人话摘要：类型 · 谁 · 做什么。 */
+/** 折叠标题只标识效果目标；操作和值由展开后的控件展示。 */
 function summarizeEffect(
   eff: GraphEffect,
   entities?: Record<string, Entity>,
@@ -512,9 +860,9 @@ function summarizeEffect(
     listAttrOptions(findEntity(entities, entityId)).find((a) => a.id === attr)?.label ?? attr
   switch (eff.kind) {
     case 'attr':
-      return `${kind} · ${entLabel(eff.entityId)} 的 ${attrLabel(eff.entityId, eff.attr)} ${OP_LABEL[eff.op] ?? eff.op} ${formatEffectValue(eff.value)}`
+      return `${kind} · ${entLabel(eff.entityId)} 的 ${attrLabel(eff.entityId, eff.attr)}`
     case 'var':
-      return `${kind} · ${varLabel(eff.varId)} ${OP_LABEL[eff.op] ?? eff.op} ${formatEffectValue(eff.value)}`
+      return `${kind} · ${varLabel(eff.varId)}`
     case 'flag':
       return `${kind} · ${varLabel(eff.varId)} 设为 ${eff.value ? '是' : '否'}`
     case 'item':
@@ -524,22 +872,35 @@ function summarizeEffect(
 
 function EffectRow({
   eff,
+  allowedKinds,
   entities,
   variables,
   formulas,
+  itemIds,
+  createAttribute,
+  createEntity,
+  createVariable,
+  createFormula,
   onChange,
   onDelete,
   canUndoOp,
   onOpSnapshot,
   onUndoOp,
+  labelWidth,
 }: {
   eff: GraphEffect
+  allowedKinds: readonly EffectKind[]
   onChange: (e: GraphEffect) => void
   onDelete: () => void
+  createAttribute?: ValueExprAttributeCreateConfig
+  createEntity?: ValueExprEntityCreateConfig
+  createVariable?: ValueExprVariableCreateConfig
+  createFormula?: ValueExprFormulaCreateConfig
   /** 本行运算符撤回：canUndoOp = 有快照可撤；onOpSnapshot = 变换前存快照；onUndoOp = 执行撤回。 */
   canUndoOp?: boolean
   onOpSnapshot?: (snap: { op: NumericEffectOp; value: NumOrExpr }) => void
   onUndoOp?: () => void
+  labelWidth?: CSSProperties['width']
 } & MetaCatalogProps): JSX.Element {
   const entityOpts = listEntityOptions(entities)
   const numVars = listVarOptions(variables, { numbersOnly: true })
@@ -548,6 +909,9 @@ function EffectRow({
   const operation = eff.kind === 'attr' || eff.kind === 'var'
     ? decodeEffectOperation(eff.op, eff.value)
     : undefined
+  const selectableKinds = allowedKinds.includes(eff.kind)
+    ? allowedKinds
+    : [...allowedKinds, eff.kind]
 
   const handleOpChange = (nextDisplayOp: EffectDisplayOp): void => {
     if ((eff.kind !== 'attr' && eff.kind !== 'var') || !operation) return
@@ -591,13 +955,13 @@ function EffectRow({
         <select
           value={eff.kind}
           onChange={(e) => onChange(defaultEffect(e.target.value as EffectKind, entities, variables))}
-          title="效果类型：属性 / 变量 / 道具"
+          title={`效果类型：${allowedKinds.map((kind) => EFFECT_KIND_LABEL[kind] ?? kind).join(' / ')}`}
         >
-          {(eff.kind === 'flag' ? [...EFFECT_KINDS, 'flag' as EffectKind] : EFFECT_KINDS).map((k) => (
+          {selectableKinds.map((k) => (
             <option key={k} value={k}>{EFFECT_KIND_LABEL[k] ?? k}</option>
           ))}
         </select>
-      ))}
+      ), labelWidth)}
       {eff.kind === 'attr' && (
         <>
           {entityOpts.length === 0 && <p style={hint}>请先到「配置」添加实体</p>}
@@ -605,30 +969,38 @@ function EffectRow({
             <EntitySelect
               value={eff.entityId}
               entities={entities}
+              createEntity={createEntity}
               onChange={(entityId) => {
                 const attr = listAttrOptions(findEntity(entities, entityId))[0]?.id ?? eff.attr
                 onChange({ ...eff, entityId, attr })
               }}
             />
-          ))}
+          ), labelWidth)}
           {field('属性', (
             <AttrSelect
               entityId={eff.entityId}
               value={eff.attr}
               entities={entities}
+              createAttribute={createAttribute}
               onChange={(attr) => onChange({ ...eff, attr })}
             />
-          ))}
-          {field('值', (
-            <ValueInput
-              value={operation?.value ?? eff.value}
-              entities={entities}
-              variables={variables}
-              formulas={formulas}
-              onChange={handleValueChange}
-              effectOp={{ op: operation?.op ?? eff.op, onOpChange: handleOpChange }}
-            />
-          ))}
+          ), labelWidth)}
+          {field('操作', (
+            <EffectOpButtons op={operation?.op ?? eff.op} onChange={handleOpChange} />
+          ), labelWidth)}
+          <ValueInput
+            value={operation?.value ?? eff.value}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            createFormula={createFormula}
+            onChange={handleValueChange}
+            fieldLabels={{ source: '数值来源', value: '数值' }}
+            fieldLabelWidth={labelWidth}
+          />
         </>
       )}
       {eff.kind === 'var' && (
@@ -641,17 +1013,23 @@ function EffectRow({
               numbersOnly
               onChange={(varId) => onChange({ ...eff, varId })}
             />
-          ))}
-          {field('值', (
-            <ValueInput
-              value={operation?.value ?? eff.value}
-              entities={entities}
-              variables={variables}
-              formulas={formulas}
-              onChange={handleValueChange}
-              effectOp={{ op: operation?.op ?? eff.op, onOpChange: handleOpChange }}
-            />
-          ))}
+          ), labelWidth)}
+          {field('操作', (
+            <EffectOpButtons op={operation?.op ?? eff.op} onChange={handleOpChange} />
+          ), labelWidth)}
+          <ValueInput
+            value={operation?.value ?? eff.value}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            createFormula={createFormula}
+            onChange={handleValueChange}
+            fieldLabels={{ source: '数值来源', value: '数值' }}
+            fieldLabelWidth={labelWidth}
+          />
         </>
       )}
       {eff.kind === 'flag' && (
@@ -664,25 +1042,25 @@ function EffectRow({
               flagsOnly
               onChange={(varId) => onChange({ ...eff, varId })}
             />
-          ))}
+          ), labelWidth)}
           {field('值', (
             <select value={String(eff.value)} onChange={(e) => onChange({ ...eff, value: e.target.value === 'true' })}>
               <option value="true">是</option>
               <option value="false">否</option>
             </select>
-          ))}
+          ), labelWidth)}
         </>
       )}
       {eff.kind === 'item' && (
         <>
-          {field('道具', <input value={eff.itemId} onChange={(e) => onChange({ ...eff, itemId: e.target.value })} style={{ flex: 1 }} />)}
+          {field('道具', <ItemIdEditor value={eff.itemId} itemIds={itemIds ?? []} onChange={(itemId) => onChange({ ...eff, itemId })} />, labelWidth)}
           {field('操作', (
             <select value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as 'give' | 'take' })}>
-              <option value="give">{OP_LABEL.give}</option>
-              <option value="take">{OP_LABEL.take}</option>
+              <option value="give">给予（增加持有数量）</option>
+              <option value="take">取走（减少且不低于 0）</option>
             </select>
-          ))}
-          {field('数量', <input type="number" value={eff.count} onChange={(e) => onChange({ ...eff, count: Number(e.target.value) || 0 })} style={{ width: 90 }} />)}
+          ), labelWidth)}
+          {field('数量', <LooseNumberInput value={eff.count} emptyValue={0} onChange={(count) => onChange({ ...eff, count })} style={{ width: 90 }} />, labelWidth)}
         </>
       )}
     </div>
@@ -695,13 +1073,29 @@ export function EffectsEditor({
   entities,
   variables,
   formulas,
+  itemIds,
   pickers,
+  createAttribute,
+  createEntity,
+  createVariable,
+  createFormula,
+  labelWidth,
+  allowAdd = true,
+  allowedKinds = EFFECT_KINDS,
 }: {
   value: GraphEffect[] | undefined
   onChange: (v: GraphEffect[]) => void
   pickers?: EditorPickerCtx
+  createAttribute?: ValueExprAttributeCreateConfig
+  createEntity?: ValueExprEntityCreateConfig
+  createVariable?: ValueExprVariableCreateConfig
+  createFormula?: ValueExprFormulaCreateConfig
+  labelWidth?: CSSProperties['width']
+  allowAdd?: boolean
+  /** 限制新建/切换效果时可选择的类型；既有的其他类型仍保留显示，避免静默改写历史数据。 */
+  allowedKinds?: readonly EffectKind[]
 } & MetaCatalogProps): JSX.Element {
-  const cat = resolveCatalog({ entities, variables, formulas, pickers })
+  const cat = resolveCatalog({ entities, variables, formulas, itemIds, pickers })
   const list = value ?? []
   // 每行的运算符撤回栈（按行 index 存于父层——EffectsEditor 不会因单行 onChange 重挂，故栈稳定）。
   // 每次运算符变换（+ − × ÷ =）前把变换前的 {op, value} 压栈；撤回弹一步（连点 N 次可撤 N 次），
@@ -714,9 +1108,16 @@ export function EffectsEditor({
         <EffectRow
           key={i}
           eff={eff}
+          allowedKinds={allowedKinds}
           entities={cat.entities}
           variables={cat.variables}
           formulas={cat.formulas}
+          itemIds={cat.itemIds}
+          createAttribute={createAttribute}
+          createEntity={createEntity}
+          createVariable={createVariable}
+          createFormula={createFormula}
+          labelWidth={labelWidth}
           onChange={(next) => onChange(list.map((e, idx) => (idx === i ? next : e)))}
           onDelete={() => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }}
           canUndoOp={(opStacks.current.get(i)?.length ?? 0) > 0}
@@ -739,14 +1140,17 @@ export function EffectsEditor({
           }}
         />
       ))}
-      <button style={{ marginTop: 4 }} onClick={() => onChange([...list, defaultEffect('attr', cat.entities, cat.variables)])}>+ 效果</button>
+      {allowAdd ? (
+        <button style={{ marginTop: 4 }} onClick={() => onChange([...list, defaultEffect('attr', cat.entities, cat.variables)])}>+ 效果</button>
+      ) : null}
     </div>
   )
 }
 
 // ── condition（GraphCondition = { all: GraphClause[] }）────────────────────────
 type ClauseType = GraphClause['type']
-const CLAUSE_TYPES: ClauseType[] = ['attrRatio', 'attr', 'attrCompare', 'var', 'flag', 'visited', 'score', 'hasItem']
+// score 当前没有写入效果或正式业务来源，不再提供新建入口；历史 score 条件仍可编辑。
+const CLAUSE_TYPES: ClauseType[] = ['attrRatio', 'attr', 'attrCompare', 'var', 'flag', 'visited', 'hasItem']
 
 function defaultClause(
   type: ClauseType,
@@ -780,7 +1184,7 @@ function defaultClause(
 }
 
 const opSelect = (op: CmpOp, onChange: (op: CmpOp) => void): JSX.Element => (
-  <select value={op} onChange={(e) => onChange(e.target.value as CmpOp)}>
+  <select aria-label="比较运算符" value={op} onChange={(e) => onChange(e.target.value as CmpOp)}>
     {CMP_OPS.map((o) => (
       <option key={o} value={o}>{CMP_LABEL[o]}</option>
     ))}
@@ -792,6 +1196,7 @@ function ClauseRow({
   nodeIds,
   entities,
   variables,
+  itemIds,
   nodeLabel,
   onChange,
   onDelete,
@@ -802,11 +1207,14 @@ function ClauseRow({
   onChange: (c: GraphClause) => void
   onDelete: () => void
 } & MetaCatalogProps): JSX.Element {
+  const clauseTypes = clause.type === 'score'
+    ? [...CLAUSE_TYPES, 'score' as ClauseType]
+    : CLAUSE_TYPES
   return (
     <div style={box}>
       <div style={rowStyle}>
-        <select value={clause.type} onChange={(e) => onChange(defaultClause(e.target.value as ClauseType, entities, variables))}>
-          {CLAUSE_TYPES.map((t) => (
+        <select aria-label="条件字段类型" value={clause.type} onChange={(e) => onChange(defaultClause(e.target.value as ClauseType, entities, variables))}>
+          {clauseTypes.map((t) => (
             <option key={t} value={t}>{CLAUSE_LABEL[t] ?? t}</option>
           ))}
         </select>
@@ -833,7 +1241,7 @@ function ClauseRow({
             />
           ))}
           {field('op', opSelect(clause.op, (op) => onChange({ ...clause, op })))}
-          {field('值', <input type="number" value={clause.value} onChange={(e) => onChange({ ...clause, value: Number(e.target.value) || 0 })} style={{ width: 90 }} />)}
+          {field('值', <LooseNumberInput aria-label="比较值" value={clause.value} emptyValue={0} onChange={(value) => onChange({ ...clause, value })} style={{ width: 90 }} />)}
         </>
       )}
       {clause.type === 'attrCompare' && (
@@ -866,7 +1274,7 @@ function ClauseRow({
             />
           ))}
           {field('op', opSelect(clause.op, (op) => onChange({ ...clause, op })))}
-          {field('值', <input type="number" value={clause.value} onChange={(e) => onChange({ ...clause, value: Number(e.target.value) || 0 })} style={{ width: 90 }} />)}
+          {field('值', <LooseNumberInput aria-label="比较值" value={clause.value} emptyValue={0} onChange={(value) => onChange({ ...clause, value })} style={{ width: 90 }} />)}
         </>
       )}
       {clause.type === 'flag' && (
@@ -898,13 +1306,13 @@ function ClauseRow({
       {clause.type === 'score' && (
         <>
           {field('op', opSelect(clause.op, (op) => onChange({ ...clause, op })))}
-          {field('值', <input type="number" value={clause.value} onChange={(e) => onChange({ ...clause, value: Number(e.target.value) || 0 })} style={{ width: 90 }} />)}
+          {field('值', <LooseNumberInput aria-label="比较值" value={clause.value} emptyValue={0} onChange={(value) => onChange({ ...clause, value })} style={{ width: 90 }} />)}
         </>
       )}
       {clause.type === 'hasItem' && (
         <>
-          {field('道具', <input value={clause.itemId} onChange={(e) => onChange({ ...clause, itemId: e.target.value })} style={{ flex: 1 }} />)}
-          {field('数量', <input type="number" value={clause.count ?? 1} onChange={(e) => onChange({ ...clause, count: Number(e.target.value) || 0 })} style={{ width: 90 }} />)}
+          {field('道具', <ItemIdEditor value={clause.itemId} itemIds={itemIds ?? []} onChange={(itemId) => onChange({ ...clause, itemId })} />)}
+          {field('拥有数量至少', <LooseNumberInput value={clause.count ?? 1} emptyValue={1} onChange={(count) => onChange({ ...clause, count })} style={{ width: 90 }} />)}
         </>
       )}
     </div>
@@ -917,6 +1325,7 @@ export function ConditionEditor({
   onChange,
   entities,
   variables,
+  itemIds,
   pickers,
 }: {
   value: GraphCondition | undefined
@@ -924,7 +1333,7 @@ export function ConditionEditor({
   onChange: (v: GraphCondition | undefined) => void
   pickers?: EditorPickerCtx
 } & MetaCatalogProps): JSX.Element {
-  const cat = resolveCatalog({ entities, variables, pickers })
+  const cat = resolveCatalog({ entities, variables, itemIds, pickers })
   const all = value?.all ?? []
   const set = (next: GraphClause[]) => onChange(next.length ? { all: next } : undefined)
   return (
@@ -937,6 +1346,7 @@ export function ConditionEditor({
           nodeIds={nodeIds}
           entities={cat.entities}
           variables={cat.variables}
+          itemIds={cat.itemIds}
           nodeLabel={cat.nodeLabel}
           onChange={(next) => set(all.map((x, idx) => (idx === i ? next : x)))}
           onDelete={() => set(all.filter((_, idx) => idx !== i))}

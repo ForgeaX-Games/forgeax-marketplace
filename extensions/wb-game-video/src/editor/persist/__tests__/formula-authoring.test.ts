@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
-import { parseFormulaText, previewFormula, toEditorScenarioDocument, toRuntimeScenario } from '../formula-authoring'
+import {
+  normalizeFormulaTextInput,
+  parseFormulaText,
+  previewFormula,
+  toEditorScenarioDocument,
+  toRuntimeScenario,
+} from '../formula-authoring'
 
 const base: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -123,6 +129,39 @@ describe('formula text ↔ AST round-trip (parseFormulaText / previewFormula)', 
     expect(preview).toContain('score')
     expect(preview).toMatch(/max\(/)
     expect(preview).toMatch(/min\(/)
+  })
+
+  it('归一全角数学标点并落成半角规范表达式', () => {
+    expect(roundtrip('max（?攻击，0）')).toBe('max(?攻击, 0)')
+    expect(roundtrip('（2＋3）×4')).toBe('(2 + 3) * 4')
+    expect(normalizeFormulaTextInput('ｍａｘ（？攻击力　×　２，　０）'))
+      .toBe('max(?攻击力 * 2, 0)')
+    expect(roundtrip('　１\t＋\n２　')).toBe('1 + 2')
+  })
+
+  it('按目录最长引用区分短横线 id 与无空格减法', () => {
+    const catalog = {
+      entities: {
+        'ent-player': {
+          id: 'ent-player',
+          attrs: { attack: 80, 'attack-power': 100 },
+        },
+      },
+      variables: {
+        qi: { id: 'qi', initial: 3 },
+        'combo-count': { id: 'combo-count', initial: 2 },
+      },
+    }
+    expect(normalizeFormulaTextInput(
+      'entity.ent-player.attr.attack-10',
+      catalog,
+    )).toBe('entity.ent-player.attr.attack - 10')
+    expect(normalizeFormulaTextInput(
+      'entity.ent-player.attr.attack-power',
+      catalog,
+    )).toBe('entity.ent-player.attr.attack-power')
+    expect(normalizeFormulaTextInput('var.qi-var.combo-count', catalog))
+      .toBe('var.qi - var.combo-count')
   })
 
   it('解析失败抛错（供 UI 捕获提示）', () => {

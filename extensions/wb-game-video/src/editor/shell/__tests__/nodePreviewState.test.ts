@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
-import { projectNodePreviewState } from '../nodePreviewState'
+import { NodePreviewRuntimeProjector, projectNodePreviewState } from '../nodePreviewState'
 
 describe('projectNodePreviewState', () => {
   it('applies an at settlement at its configured playhead and resets when scrubbing backward', () => {
@@ -44,5 +44,76 @@ describe('projectNodePreviewState', () => {
 
     expect(projectNodePreviewState(scenario, current, 0, 1000).vars.qi).toBe(1)
     expect(projectNodePreviewState(scenario, current, 1000, 1000).vars.qi).toBe(6)
+  })
+
+  it('projects a condition settlement spawn at the triggering time and expires it by ttl', () => {
+    const current = node('entry', {
+      reactions: [
+        {
+          when: { type: 'at', ms: 300 },
+          do: [{
+            kind: 'effect',
+            effects: [{ kind: 'attr', entityId: 'ent-0', attr: 'nuqi', op: 'add', value: 80 }],
+          }],
+        },
+        {
+          when: { type: 'watch', of: 'entity.ent-0.attr.nuqi', on: 'inc' },
+          do: [{ kind: 'spawn', from: 'float/rage', ttlMs: 1200, inputs: { value: { expr: 'delta' } } }],
+        },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        entities: {
+          'ent-0': { id: 'ent-0', kind: 'enemy', attrs: { nuqi: 10 } },
+        },
+        ui: {
+          overlays: {
+            float: {
+              id: 'float',
+              children: [{ id: 'rage', component: 'DamageFloatText', inputs: { value: 0 } }],
+            },
+          },
+        },
+      },
+    )
+    const projector = new NodePreviewRuntimeProjector(scenario, current)
+
+    expect(projector.project(299)).toEqual([])
+    expect(projector.project(300)).toMatchObject([{
+      startedAtMs: 300,
+      mount: { children: [{ component: 'DamageFloatText', inputs: { value: 80 } }] },
+    }])
+    expect(projector.project(1499)).toHaveLength(1)
+    expect(projector.project(1500)).toEqual([])
+    expect(projector.project(300)).toHaveLength(1)
+  })
+
+  it('replays condition-controlled hiding of an existing interface while scrubbing the preview', () => {
+    const current = node('entry', {
+      overlayNodes: [{ id: 'rage-mount', overlay: 'rage' }],
+      reactions: [
+        { when: { type: 'at', ms: 600 }, do: [{ kind: 'effect', effects: [{ kind: 'attr', entityId: 'bull', attr: 'rage', op: 'add', value: -10 }] }] },
+        { when: { type: 'watch', of: 'entity.bull.attr.rage', on: 'dec' }, do: [{ kind: 'hideOverlay', mountId: 'rage-mount' }] },
+      ],
+    })
+    const scenario = scnOf(
+      { nodes: [current], edges: [] },
+      {
+        entities: { bull: { id: 'bull', attrs: { rage: 10 } } },
+        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'DamageFloatText', trigger: { when: 'enter' } }] } } },
+      },
+    )
+    const projector = new NodePreviewRuntimeProjector(scenario, current)
+
+    projector.project(299)
+    expect(projector.visibleConfiguredMountIds()).toEqual(['rage-mount'])
+    projector.project(599)
+    expect(projector.visibleConfiguredMountIds()).toEqual(['rage-mount'])
+    projector.project(600)
+    expect(projector.visibleConfiguredMountIds()).toEqual([])
+    projector.project(300)
+    expect(projector.visibleConfiguredMountIds()).toEqual(['rage-mount'])
   })
 })

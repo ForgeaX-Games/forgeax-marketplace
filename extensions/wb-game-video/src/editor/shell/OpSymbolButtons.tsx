@@ -53,9 +53,9 @@ export function OpSymbolButtons({
  */
 const EFFECT_OP_SYMBOLS: { key: string; symbol: string; title: string }[] = [
   { key: 'add', symbol: '+', title: '增加' },
-  { key: 'sub', symbol: '−', title: '减少（取反后按"增加"落盘）' },
+  { key: 'sub', symbol: '−', title: '减少' },
   { key: 'mul', symbol: '×', title: '乘以' },
-  { key: 'div', symbol: '÷', title: '除以（取倒数后按"乘以"落盘）' },
+  { key: 'div', symbol: '÷', title: '除以' },
   { key: 'set', symbol: '=', title: '设为' },
 ]
 

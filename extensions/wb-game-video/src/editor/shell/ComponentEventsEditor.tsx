@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react'
+import type { CSSProperties, JSX, ReactNode } from 'react'
 import type {
   NodeAction,
   Overlay,
@@ -13,6 +13,12 @@ import {
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import { NodeActionsEditor, type ActionOption } from './NodeActionsEditor'
 import type { EditorPickerCtx } from './editors'
+import type {
+  EntityAttributeCreateHandler,
+  EntityCreateHandler,
+  FormulaCreateHandler,
+  VariableCreateHandler,
+} from './component-form-fields'
 
 function labelOf(event: OverlayEventRef): string {
   const component = getComponentManifest(event.componentId)?.label?.trim()
@@ -42,7 +48,12 @@ export function ComponentEventsEditor({
   spawnOptions,
   overlays,
   pickers,
+  labelWidth,
   allowSpawn = true,
+  onCreateEntityAttribute,
+  onCreateEntity,
+  onCreateVariable,
+  onCreateFormula,
   renderRoute,
   onCatalogChange,
   onMountActionsChange,
@@ -55,7 +66,12 @@ export function ComponentEventsEditor({
   spawnOptions: ActionOption[]
   overlays?: Record<string, Overlay>
   pickers?: EditorPickerCtx
+  labelWidth?: CSSProperties['width']
   allowSpawn?: boolean
+  onCreateEntityAttribute?: EntityAttributeCreateHandler
+  onCreateEntity?: EntityCreateHandler
+  onCreateVariable?: VariableCreateHandler
+  onCreateFormula?: FormulaCreateHandler
   renderRoute?: (event: OverlayEventRef) => ReactNode
   onCatalogChange?: (next: OverlayReaction[] | undefined) => void
   onMountActionsChange?: (event: OverlayEventRef, actions: NodeAction[]) => void
@@ -69,7 +85,7 @@ export function ComponentEventsEditor({
     if (actions.length) {
       rest.push({
         when: { type: 'event', id: key },
-        do: actions.filter((action) => action.kind !== 'advance'),
+        do: actions.filter((action) => action.kind !== 'advance' && action.kind !== 'hideOverlay'),
       })
     }
     onCatalogChange?.(rest.length ? rest : undefined)
@@ -94,8 +110,13 @@ export function ComponentEventsEditor({
               spawnOptions={spawnOptions}
               overlays={overlays}
               pickers={pickers}
+              labelWidth={labelWidth}
               allowAdvance={mode === 'mount'}
               allowSpawn={allowSpawn}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
               renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
               onChange={(actions) => mode === 'catalog'
                 ? writeCatalog(event, actions)

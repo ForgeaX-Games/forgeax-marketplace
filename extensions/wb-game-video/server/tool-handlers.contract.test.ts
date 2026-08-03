@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeNodiaDemo } from '../src/editor/demo/demo'
 import tools from './tool-handlers'
 
@@ -39,6 +39,44 @@ afterEach(() => {
 })
 
 describe('host tool context contract', () => {
+  it('passes the injected extension-platform video capability through the existing generate-video tool contract', async () => {
+    const cwd = gameRoot()
+    mkdirSync(resolve(cwd, 'assets', 'media'), { recursive: true })
+    writeFileSync(resolve(cwd, 'assets', 'media', 'character.png'), 'character')
+    writeFileSync(resolve(cwd, 'assets', 'media', 'scene.png'), 'scene')
+    writeFileSync(resolve(cwd, 'assets', 'manifest.json'), JSON.stringify({
+      version: 2,
+      assets: [
+        { id: 'character', kind: 'image', productionType: 'character_ref', status: 'ready', file: 'media/character.png', mime: 'image/png', createdAt: 1, updatedAt: 1 },
+        { id: 'scene', kind: 'image', productionType: 'scene_ref', status: 'ready', file: 'media/scene.png', mime: 'image/png', createdAt: 1, updatedAt: 1 },
+      ],
+    }))
+    const invoke = vi.fn(async () => ({
+      asset: {
+        id: 'host-video-1', kind: 'video', status: 'ready', mime: 'video/mp4',
+        createdAt: 2, updatedAt: 2, provider: { kind: 'kino', ref: 'generation-1' },
+      },
+    }))
+
+    const result = await tools['wb-game-video:generate-video'](
+      {
+        sceneNodeId: 'node-1', nodeName: 'Opening', storyText: 'A rainy alley', durationSeconds: 5,
+        characterRefIds: ['character'], sceneRefIds: ['scene'],
+      },
+      { ...arrivalCtx(cwd), capabilities: { invoke } },
+    )
+
+    expect(invoke).toHaveBeenCalledWith(
+      'media.video.generate',
+      1,
+      expect.any(Object),
+      { requestId: expect.stringMatching(/^wb-game-video-v1-[0-9a-f]{64}$/) },
+    )
+    expect(result).toMatchObject({
+      asset: { id: 'host-video-1', productionType: 'video_clip', sceneNodeId: 'node-1' },
+    })
+  })
+
   it('persists blueprint.json under ctx.cwd and ignores title for versioning', async () => {
     const cwd = gameRoot()
     const project = makeNodiaDemo()
