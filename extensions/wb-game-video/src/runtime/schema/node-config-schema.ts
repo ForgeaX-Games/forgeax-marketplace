@@ -40,9 +40,6 @@ export interface ComponentInput {
   default?: unknown
   /** 有 options ⇒ 编辑器出 select。 */
   options?: { value: string; label: string }[]
-  /** 标量数值编辑器约束。 */
-  min?: number
-  step?: number
   /**
    * 用哪个**输入组件**渲染该 input：填了就优先用它，没填则按 `valueType` 出标量控件。
    * 例：`color`（取色）/ `entity`（实体引用）/ `events` / `effects` / `textStyle` / `qteCues` …
@@ -85,18 +82,16 @@ export interface ComponentManifest {
  * - effect：施加副作用（改 attr/var/flag/item）
  * - advance：沿指定出边 `edgeId` 推进到其 `target`（唯一「换节点」通道；目标只在边上）。
  *   交互/生命周期事件里可省略——省略时若存在匹配出边则默认推进；state 打断必须显式。
- * - spawn：由反应**主动实例化**一个 overlay 组件模板。`from` = `overlayId/childId` 引用目录模板，
- *   `inputs` 可含 `{expr}` 读 watch 局部量（prev/next/delta）；省略 `ttlMs` 时常驻到节点退出。
- * - hideOverlay：隐藏当前节点中 `mountId` 对应的整组已显示界面；重复隐藏或尚未显示时无操作。
+ * - spawn：由反应**主动实例化**一个 overlay 组件模板（瞬态表现，如伤害飘字）；
+ *   `from` = `overlayId/childId` 引用目录模板，`inputs` 可含 `{expr}` 读 watch 局部量（prev/next/delta）。
  */
 export type NodeAction =
   | { kind: 'effect'; effects: GraphEffect[] }
   | { kind: 'advance'; edgeId: string }
   | { kind: 'spawn'; from: string; inputs?: Record<string, unknown>; layout?: Layout; ttlMs?: number }
-  | { kind: 'hideOverlay'; mountId: string }
 
 /** Overlay 目录事件动作：目录是可复用表现/副作用模板，不得携带节点专属走向。 */
-export type OverlayReactionAction = Exclude<NodeAction, { kind: 'advance' } | { kind: 'hideOverlay' }>
+export type OverlayReactionAction = Exclude<NodeAction, { kind: 'advance' }>
 
 /**
  * Overlay 目录专用 reaction。稳定 key 恒为 `${childId}:${eventId}`；
@@ -114,7 +109,7 @@ export interface OverlayReaction {
  * - exit：离开节点前
  * - complete：节点收尾自动推进（`if` 缺省 = 无条件）
  * - event：组件事件（挂 mount.reactions；do = effect/spawn/advance）
- * - state：GraphCondition 从不成立变为成立时触发；编辑器与出边复用同一套条件配置。
+ * - state：历史局级规则相位（已不再消费；需要时再补回）
  * - watch：观察某表达式(`of`)的值变化（`on` change/inc/dec）→ do（effect/spawn/advance）；
  *   在每个写屏障处重采样比对（pull-diff）。局部量 prev/next/delta 供 do 内 `{expr}` 使用。
  * - shown / hidden：某 overlay 组件实例**出现 / 消失**时触发（`of` = childId / mountId/childId / overlayId/childId）。
@@ -146,12 +141,12 @@ export function isLifecycleReaction(r: Reaction): boolean {
 }
 
 /**
- * 作者界面统一呈现的「结算」：定时相位 + 数值变化 / 状态条件 / 界面条件触发；event 仍由组件入口管理。
+ * 作者界面统一呈现的「结算」：定时相位 + 数值/界面条件触发；event/state 仍由各自入口管理。
  * 编辑器和时间轴以这个子集内的序号双向定位，不能使用会随数组重排漂移的绝对下标。
  */
 export function isSettlementReaction(r: Reaction): boolean {
   const t = r.when.type
-  return isLifecycleReaction(r) || t === 'watch' || t === 'state' || t === 'shown' || t === 'hidden'
+  return isLifecycleReaction(r) || t === 'watch' || t === 'shown' || t === 'hidden'
 }
 
 /** Overlay 聚合后的事件（编辑器下拉项）。 */

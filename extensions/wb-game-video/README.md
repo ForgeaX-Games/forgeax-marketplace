@@ -8,8 +8,6 @@
 - 未保存草稿留在浏览器 localStorage。空项目启动为空库；内置 Nodia demo 只在用户显式选择“重置”时载入。
 - `wb-game-video:save-graph` 覆盖保存整份文档，`title` 当前忽略，成功返回 `{ ok: true, versions: [], gameSlug }`。
 - 运行时组件位于 [`src/runtime/component-host`](./src/runtime/component-host)，图中只保存组件 id 与可序列化输入。
-- 条件结算通过 `NodeAction.spawn` 显示界面：不带 `ttlMs` 时常驻到节点退出，带 `ttlMs` 时按时长隐藏。
-  `NodeAction.hideOverlay` 按稳定 `mountId` 隐藏当前节点已挂载的整组界面；它不删除界面配置，重复执行保持幂等。
 - 节点私有子流程使用 `data.subProcess = { entry, graph }` 显式嵌套；可复用子蓝图继续使用 `data.subFlowPack` 引用 `manifest.packs`。父子图之间不得直接连边。
 - 扩展同时提供 11 个 AI 工具：图读写、内置视频列表、镜头脚本/关键帧/视频生成、素材查询和角色/场景引用导入。完整调用契约见 [`SKILL.md`](./SKILL.md)。
 
@@ -48,7 +46,6 @@ bun run build
 | 覆盖组件与渲染注册 | [`src/runtime/component-host`](./src/runtime/component-host) |
 | 蓝图画布 | [`src/graph`](./src/graph) |
 | 编辑器、持久化和 demo | [`src/editor`](./src/editor) |
-| 节点预览/编辑通用组件接入 API | [`docs/node-preview-stage-api.md`](./docs/node-preview-stage-api.md) |
 | AI 工具后端 | [`server/tool-handlers.ts`](./server/tool-handlers.ts) |
 | 扩展声明 | [`forgeax-extension.json`](./forgeax-extension.json) |
 

@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -184,9 +184,8 @@ describe('public mirror vocabulary guard', () => {
     for (const root of scanRoots) {
       let hits = ''
       try {
-        hits = execFileSync(
-          rgPath,
-          ['-ni', ...excludes, pattern, root],
+        hits = execSync(
+          `"${rgPath}" -ni ${excludes.map((part) => `'${part}'`).join(' ')} '${pattern}' ${root}`,
           { cwd: PACKAGE_ROOT, encoding: 'utf8' },
         ).trim()
       } catch (error) {

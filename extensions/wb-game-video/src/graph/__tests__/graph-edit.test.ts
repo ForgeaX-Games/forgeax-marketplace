@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, patchSettlementSpawnLayout, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementAdvanceTarget, setSettlementReactionMs, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementReactionMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 
@@ -128,110 +128,6 @@ describe('graph-edit', () => {
     expect(setSettlementReactionMs(graph, 'a', 0, 900)).toBe(graph)
     expect(setSettlementReactionMs(graph, 'a', 1, 900).nodes[0]?.data.reactions?.[1]?.when)
       .toEqual({ type: 'at', ms: 900 })
-  })
-
-  it('patchSettlementSpawnLayout：只更新指定条件结算的显示界面位置', () => {
-    const graph: GameGraph = {
-      nodes: [{
-        ...n('a'),
-        data: {
-          name: 'a',
-          reactions: [{
-            when: { type: 'watch', of: 'score', on: 'inc' },
-            do: [
-              { kind: 'effect', effects: [] },
-              { kind: 'spawn', from: 'hud/rage', ttlMs: 1200 },
-            ],
-          }],
-        },
-      }],
-      edges: [],
-    }
-
-    const next = patchSettlementSpawnLayout(graph, 'a', 0, 1, { left: 0.25, top: 0.4 })
-    expect(next.nodes[0]?.data.reactions?.[0]?.do[1]).toEqual({
-      kind: 'spawn',
-      from: 'hud/rage',
-      ttlMs: 1200,
-      layout: { left: 0.25, top: 0.4 },
-    })
-    expect(graph.nodes[0]?.data.reactions?.[0]?.do[1]).not.toHaveProperty('layout')
-    expect(patchSettlementSpawnLayout(graph, 'a', 0, 0, { left: 1 })).toBe(graph)
-  })
-
-  it('setSettlementAdvanceTarget：按目标节点复用或创建边，并保持 advance.edgeId 契约', () => {
-    const graph: GameGraph = {
-      nodes: [{
-        ...n('a'),
-        data: {
-          name: 'a',
-          reactions: [{
-            when: { type: 'at', ms: 1000 },
-            do: [
-              { kind: 'effect', effects: [] },
-              { kind: 'advance', edgeId: '' },
-            ],
-          }],
-        },
-      }, n('b'), n('c')],
-      edges: [],
-    }
-
-    const toB = setSettlementAdvanceTarget(graph, 'a', 0, 1, 'b')
-    expect(toB.edges).toHaveLength(1)
-    expect(toB.edges[0]).toMatchObject({ source: 'a', target: 'b', targetHandle: 'in' })
-    expect(toB.edges[0]?.sourceHandle).toMatch(/^settlement-advance:/)
-    expect(toB.nodes[0]?.data.reactions?.[0]?.do[1]).toEqual({ kind: 'advance', edgeId: toB.edges[0]?.id })
-    expect(toB.nodes[0]?.data.reactions).toHaveLength(1) // 专用 handle 不伪造 event reaction
-
-    const toBAgain = setSettlementAdvanceTarget(toB, 'a', 0, 1, 'b')
-    expect(toBAgain.edges).toHaveLength(1)
-
-    const toC = setSettlementAdvanceTarget(toBAgain, 'a', 0, 1, 'c')
-    expect(toC.edges).toHaveLength(1)
-    expect(toC.edges[0]).toMatchObject({ id: toB.edges[0]?.id, source: 'a', target: 'c' })
-
-    const cleared = setSettlementAdvanceTarget(toC, 'a', 0, 1, '')
-    expect(cleared.edges).toHaveLength(0)
-    expect(cleared.nodes[0]?.data.reactions?.[0]?.do).toEqual([{ kind: 'effect', effects: [] }])
-  })
-
-  it('setSettlementAdvanceTarget reuses an existing source-to-target edge', () => {
-    const graph: GameGraph = {
-      nodes: [{
-        ...n('a'),
-        data: {
-          name: 'a',
-          reactions: [{ when: { type: 'watch', of: 'score', on: 'change' }, do: [{ kind: 'advance', edgeId: '' }] }],
-        },
-      }, n('b')],
-      edges: [{ id: 'existing', source: 'a', target: 'b', sourceHandle: 'pass', targetHandle: 'in' }],
-    }
-    const next = setSettlementAdvanceTarget(graph, 'a', 0, 0, 'b')
-    expect(next.edges).toHaveLength(1)
-    expect(next.nodes[0]?.data.reactions?.[0]?.do[0]).toEqual({ kind: 'advance', edgeId: 'existing' })
-  })
-
-  it('disconnect removes settlement advance so deleting the route disables the action', () => {
-    const graph: GameGraph = {
-      nodes: [{
-        ...n('a'),
-        data: {
-          name: 'a',
-          reactions: [{
-            when: { type: 'at', ms: 1000 },
-            do: [
-              { kind: 'effect', effects: [] },
-              { kind: 'advance', edgeId: 'route' },
-            ],
-          }],
-        },
-      }, n('b')],
-      edges: [{ id: 'route', source: 'a', target: 'b', sourceHandle: 'settlement-advance:route', targetHandle: 'in' }],
-    }
-    const next = disconnect(graph, 'route')
-    expect(next.edges).toHaveLength(0)
-    expect(next.nodes[0]?.data.reactions?.[0]?.do).toEqual([{ kind: 'effect', effects: [] }])
   })
 
   it('makeEmptySubFlowPack', () => {

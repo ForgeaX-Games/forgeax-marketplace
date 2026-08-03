@@ -6,7 +6,6 @@ import type { CSSProperties, JSX } from 'react'
 import type { Entity, Overlay, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { SpawnInputsEditor } from './spawn-inputs-editor'
-import { LooseNumberInput } from './TermChainEditor'
 
 export interface SettlementSpawnValue {
   from: string
@@ -72,11 +71,11 @@ export function SettlementSpawnEditor({
       ) : (
         <div style={box}>
           <div style={rowStyle}>
-            <span style={lbl}>界面</span>
+            <span style={lbl}>模板</span>
             <select
               style={{ flex: 1, minWidth: 120 }}
               value={value.from}
-              onChange={(e) => onChange({ from: e.target.value, ttlMs: value.ttlMs })}
+              onChange={(e) => onChange({ ...value, from: e.target.value })}
             >
               <option value="">（选组件模板）</option>
               {templates.map((t) => (
@@ -89,15 +88,19 @@ export function SettlementSpawnEditor({
           </div>
           <div style={rowStyle}>
             <span style={lbl}>存活ms</span>
-            <LooseNumberInput
+            <input
+              type="number"
+              min={100}
+              max={ttlCap}
+              step={100}
               value={ttlShown}
-              emptyValue={ttlCap}
               style={{ width: 100 }}
               title={`最长 ${ttlCap}ms（本节点时长）；本版不跨节点`}
-              onChange={(ttlMs) => {
+              onChange={(e) => {
+                const n = Number(e.target.value)
                 onChange({
                   ...value,
-                  ttlMs: Math.min(Math.max(100, ttlMs), ttlCap),
+                  ttlMs: Number.isFinite(n) ? Math.min(Math.max(100, n), ttlCap) : ttlCap,
                 })
               }}
             />

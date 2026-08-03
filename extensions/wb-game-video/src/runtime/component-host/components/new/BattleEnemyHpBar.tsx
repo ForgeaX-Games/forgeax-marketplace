@@ -1,33 +1,37 @@
 import type { ReactNode } from 'react'
+import type { OverlayProps } from '../../rendererRegistry'
 import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
 import { injectCss, ensureInkFilters, ensureBrushFont } from './skinRuntime'
+import { resolveBoundHpBarValues } from './boundHpBar'
+import { resolveNumericValue, resolveTextValue } from '../numericValue'
 
 export const BattleEnemyHpBarManifest: ComponentManifest = {
   id: 'BattleEnemyHpBar',
   label: '敌方水墨血条',
   inputs: [
+    { key: 'bind', label: '绑定对象', valueType: 'string', default: 'ent-boss', component: 'entity' },
+    { key: 'attr', label: '绑定属性', valueType: 'string', default: 'hp', component: 'attr' },
     { key: 'label', label: '显示名', valueType: 'string', default: '敌方', component: 'numberExpr' },
-    { key: 'current', label: '血量', valueType: 'number', required: true, component: 'numberExpr' },
-    { key: 'max', label: '最大血量', valueType: 'number', required: true, component: 'numberExpr' },
+    { key: 'current', label: '当前血量', valueType: 'number', component: 'numberExpr' },
+    { key: 'max', label: '最大血量', valueType: 'number', component: 'numberExpr' },
   ],
   events: [],
 }
 
-export interface BattleEnemyHpBarProps {
-  current?: number
-  max?: number
-  label?: string
-}
-
-/** 数值由 RuntimeComponentHost 解析后以扁平 props 传入；此处只展示。 */
-export function BattleEnemyHpBar({
-  current = 50,
-  max = 90,
-  label = '敌方',
-}: BattleEnemyHpBarProps): ReactNode {
+export function BattleEnemyHpBar({ overlay, ctx }: OverlayProps): ReactNode {
   injectCss('graph-battle-enemy-hud', ENEMY_CSS)
   ensureInkFilters()
   ensureBrushFont()
+  const inputs = overlay.inputs
+  const bound = resolveBoundHpBarValues(inputs, ctx, 'ent-boss', 50, 90)
+  const current = typeof inputs.current === 'number'
+    ? bound.current
+    : resolveNumericValue(inputs.current, ctx) ?? bound.current
+  const max = typeof inputs.max === 'number'
+    ? bound.max
+    : resolveNumericValue(inputs.max, ctx) ?? bound.max
+
+  const label = resolveTextValue(inputs.label, ctx) || '敌方'
 
   return (
     <div className="ks-hud-boss ks-hud-foe-unit" data-overlay-fit-target>

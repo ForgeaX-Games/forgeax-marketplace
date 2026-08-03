@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { GameScenario, GraphLibraryDocument } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
-import { createSessionSeed } from '../../runtime/play/sessionSeed'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { PlayerRootContext, type SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
@@ -27,7 +26,6 @@ import {
   deepestCallerOnBlueprint,
 } from './call-stack-view'
 import { graphPathLabels, resolveGraphAtPath } from '../../graph/edit/graph-scope'
-import { runtimeRuleSignature } from './runtime-rule-signature'
 
 function autoEmitTarget(snap: SessionSnapshot): { elementId: string; key: string } | null {
   // 自动演示：找首个可 emit 的挂载组件，抛其首个非 default 事件。
@@ -115,22 +113,22 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     return () => releasePlayerFocus(el)
   }, [])
 
-  // 规则的运行时字段变化后重建 session：新试玩读取最新模板，不把新值热灌进旧运行态。
-  const runtimeRulesSig = useGraphScenario((s) => runtimeRuleSignature(
-    s.meta.entities ?? s.demo?.entities,
-    s.meta.variables ?? s.demo?.variables,
-  ))
+  // 实体从空被回填后要重建 session（否则 HUD bind 不到 ent-*）。
+  const entitySig = useGraphScenario((s) => {
+    const e = s.meta.entities ?? s.demo?.entities
+    return e ? Object.keys(e).sort().join(',') : ''
+  })
   useEffect(() => {
     if (!ready) return
     const st = useGraphScenario.getState()
     const scn = st.scn()
     const rootBlueprintId = (scn as GraphLibraryDocument).manifest?.mainPackId ?? st.mainBlueprintId
     rootBlueprintIdRef.current = rootBlueprintId
-    const s = new GraphSession(scn, { rootBlueprintId, rngSeed: createSessionSeed() })
+    const s = new GraphSession(scn, { rootBlueprintId })
     sessionRef.current = s
     setSkins(s.skins)
     setSnap(s.start())
-  }, [restartKey, ready, runtimeRulesSig])
+  }, [restartKey, ready, entitySig])
 
   const videoSrc = resolveMediaSrc(snap?.clip?.mediaId, game)
   const preloadVideos = useMemo(
@@ -138,7 +136,7 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       videoSrc: resolveMediaSrc(candidate.mediaId, game),
       clip: candidate,
     })) ?? [],
-    [snap?.currentNodeId, game, restartKey, runtimeRulesSig],
+    [snap?.currentNodeId, game, restartKey, entitySig],
   )
   /** 床轨解析器（引擎只抛资产 id，URL 归壳层）；稳定引用，避免每帧让 BgmPlayer 重跑 effect。 */
   const resolveBgm = useCallback((id: string | undefined) => resolveMediaSrc(id, game), [game])
@@ -274,9 +272,9 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
       onFocus={() => claimPlayerFocus(rootRef.current)}
       style={{ position: 'relative', width: '100%', height: '100%', background: '#000', overflow: 'hidden', outline: 'none' }}
     >
-      {/* 床轨：独立音频通道，与视频共用试玩声音开关。按 restartKey 重挂 —— 新会话的 `bgm` 快照从 null 起，
+      {/* 床轨：独立音频通道，不受视频原声开关影响。按 restartKey 重挂 —— 新会话的 `bgm` 快照从 null 起，
           「还没发过指令」不是停播令，若不重挂，重开会把上一局的曲子拖进新局。 */}
-      <BgmPlayer key={restartKey} bgm={snap?.bgm ?? null} resolveAsset={resolveBgm} paused={paused} playbackRate={playbackRate} active={snap?.phase !== 'ended'} muted={!videoAudioEnabled} />
+      <BgmPlayer key={restartKey} bgm={snap?.bgm ?? null} resolveAsset={resolveBgm} paused={paused} playbackRate={playbackRate} />
 
       {/* 演出画面 + 叠层：共享 runtime/play 的 GameStage（视频舞台锚定内容矩形，HUD/QTE/交互随视频走）。 */}
       <GameStage

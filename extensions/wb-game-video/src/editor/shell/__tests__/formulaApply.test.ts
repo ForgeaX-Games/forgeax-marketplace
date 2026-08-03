@@ -3,7 +3,6 @@ import type { Entity, Variable } from '../../../runtime/schema/graph-schema'
 import type { Formula } from '../../persist/formula-authoring'
 import {
   compileFormula,
-  formulaHoleBindingIssues,
   formulaHoles,
   formulaPreview,
   missingFormulaHoles,
@@ -91,64 +90,6 @@ describe('formulaApply', () => {
 
   it('compileFormula 未填满留空位 → expr 兜底为 "0"（不完整不外泄半成品）', () => {
     expect(compileFormula(damageFormula, {}, entities)).toMatchObject({ expr: '0' })
-  })
-
-  it('普通数值参数可在每次应用时绑定不同敌我实体属性', () => {
-    const reusableFormula: Formula = {
-      id: 'formula-reusable-dmg',
-      name: '通用伤害',
-      ast: {
-        t: 'bin',
-        id: 'damage',
-        op: '-',
-        a: { t: 'hole', id: 'attacker', holeId: 'attacker', kind: 'number', label: '攻击方属性' },
-        b: { t: 'hole', id: 'defender', holeId: 'defender', kind: 'number', label: '防御方属性' },
-      },
-    }
-    const playerVsBoss = compileFormula(reusableFormula, {
-      attacker: { kind: 'entityAttr', entityId: 'ent-player', attr: 'attack' },
-      defender: { kind: 'entityAttr', entityId: 'ent-boss', attr: 'defense' },
-    }, entities)
-    const bossVsPlayer = compileFormula(reusableFormula, {
-      attacker: { kind: 'entityAttr', entityId: 'ent-boss', attr: 'attack' },
-      defender: { kind: 'entityAttr', entityId: 'ent-player', attr: 'defense' },
-    }, entities)
-
-    expect(playerVsBoss).toMatchObject({
-      expr: 'entity.ent-player.attr.attack - entity.ent-boss.attr.defense',
-    })
-    expect(bossVsPlayer).toMatchObject({
-      expr: 'entity.ent-boss.attr.attack - entity.ent-player.attr.defense',
-    })
-  })
-
-  it('报告已删除的实体或属性绑定，并阻止继续编译失效引用', () => {
-    const issues = formulaHoleBindingIssues(
-      damageFormula,
-      { atk: { kind: 'entityAttr', entityId: 'ent-player', attr: 'power' } },
-      entities,
-    )
-
-    expect(issues).toEqual([
-      { holeId: 'atk', label: '攻击方', reason: '属性「power」已不存在' },
-    ])
-    expect(missingFormulaHoles(
-      damageFormula,
-      { atk: { kind: 'entityAttr', entityId: 'deleted-enemy', attr: 'attack' } },
-      entities,
-    )).toHaveLength(1)
-    expect(compileFormula(
-      damageFormula,
-      { atk: { kind: 'entityAttr', entityId: 'deleted-enemy', attr: 'attack' } },
-      entities,
-    )).toMatchObject({
-      expr: '0',
-      pick: {
-        holeBindings: {
-          atk: { kind: 'entityAttr', entityId: 'deleted-enemy', attr: 'attack' },
-        },
-      },
-    })
   })
 
   it('recompileFormulaUsages 深度遍历命中已应用处并按公式最新定义重编译', () => {

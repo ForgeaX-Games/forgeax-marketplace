@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClipSnap } from '../../engine/session'
 import { GameStage, type GameStageProps } from '../GameStage'
@@ -162,62 +162,6 @@ describe('GameStage buffered playback', () => {
     expect(video.muted).toBe(false)
   })
 
-  it('reports the effective duration using the existing configured-cap contract', () => {
-    const onDurationChange = vi.fn()
-    const { container } = render(
-      <GameStage
-        {...props({
-          clip: { ...clip('a'), durationMs: 2_400 },
-          onDurationChange,
-        })}
-      />,
-    )
-    const video = videoFor(container, '/a.mp4')
-    Object.defineProperty(video, 'duration', { configurable: true, value: 4 })
-    fireEvent.loadedMetadata(video)
-
-    expect(onDurationChange).toHaveBeenCalledWith(2_400)
-  })
-
-  it('reports metadata captured while a preloaded video becomes active', async () => {
-    const onDurationChange = vi.fn()
-    const nextClip = clip('b')
-    const { container, rerender } = render(
-      <GameStage
-        {...props({
-          onDurationChange,
-          preloadVideos: [{ videoSrc: '/b.mp4', clip: nextClip }],
-        })}
-      />,
-    )
-    const first = videoFor(container, '/a.mp4')
-    const preloaded = videoFor(container, '/b.mp4')
-    Object.defineProperty(first, 'duration', { configurable: true, value: 15 })
-    Object.defineProperty(preloaded, 'duration', { configurable: true, value: 7 })
-    Object.defineProperty(preloaded, 'readyState', {
-      configurable: true,
-      value: HTMLMediaElement.HAVE_CURRENT_DATA,
-    })
-    fireEvent.loadedMetadata(first)
-    fireEvent.loadedMetadata(preloaded)
-    fireEvent.loadedData(first)
-    fireEvent.loadedData(preloaded)
-    onDurationChange.mockClear()
-
-    rerender(
-      <GameStage
-        {...props({
-          videoSrc: '/b.mp4',
-          clip: nextClip,
-          onDurationChange,
-          preloadVideos: [],
-        })}
-      />,
-    )
-
-    await waitFor(() => expect(onDurationChange).toHaveBeenCalledWith(7_000))
-  })
-
   it('ignores media events from the retained old video', () => {
     const onTick = vi.fn()
     const onPerformanceEnd = vi.fn()
@@ -248,25 +192,6 @@ describe('GameStage buffered playback', () => {
     submitFrame(next)
     fireEvent.ended(next)
     expect(onPerformanceEnd).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not restart an ended foreground video when preloads are reconciled', () => {
-    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
-    const { container, rerender } = render(<GameStage {...props()} />)
-    const video = videoFor(container, '/a.mp4')
-    fireEvent.loadedData(video)
-    Object.defineProperty(video, 'ended', { configurable: true, value: true })
-    play.mockClear()
-
-    rerender(
-      <GameStage
-        {...props({
-          preloadVideos: [{ videoSrc: '/b.mp4', clip: clip('b') }],
-        })}
-      />,
-    )
-
-    expect(play).not.toHaveBeenCalled()
   })
 
   it('keeps looping video independent from the node duration cap', () => {

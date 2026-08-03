@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  TIME_STEP_SEC,
-  fmtDur,
-  msToSec,
-  secToMs,
-  settlementInsertMsBeforePlayhead,
-} from '../materialTimelineShared'
+import { TIME_STEP_SEC, fmtDur, msToSec, secToMs } from '../materialTimelineShared'
 import { resolveSnapGridMs } from '../timelineMath'
 
 describe('time UI helpers', () => {
@@ -26,12 +20,5 @@ describe('time UI helpers', () => {
     expect(resolveSnapGridMs({ shift: false, alt: false })).toBe(10)
     expect(resolveSnapGridMs({ shift: true, alt: true })).toBe(10)
     expect(resolveSnapGridMs({ shift: false, alt: true })).toBe(100)
-  })
-
-  it('按视频时长和时间轴宽度换算结算点的非重叠像素间距', () => {
-    expect(settlementInsertMsBeforePlayhead(7_500, 15_000, 559)).toBe(7_120)
-    expect(settlementInsertMsBeforePlayhead(3_500, 7_000, 559)).toBe(3_320)
-    expect(settlementInsertMsBeforePlayhead(100, 15_000, 559)).toBe(480)
-    expect(settlementInsertMsBeforePlayhead(0, 15_000, 559)).toBe(380)
   })
 })

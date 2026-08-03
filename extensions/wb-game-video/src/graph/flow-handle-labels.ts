@@ -14,17 +14,9 @@ const BUILTIN: Record<string, string> = {
   B: '按键 B',
 }
 
-/** 仅由显式 `advance` 动作消费；不会作为事件出口或默认自动推进出口。 */
-export const SETTLEMENT_ADVANCE_HANDLE_PREFIX = 'settlement-advance:'
-
-export function isSettlementAdvanceHandle(id: string): boolean {
-  return id.startsWith(SETTLEMENT_ADVANCE_HANDLE_PREFIX)
-}
-
 /** 将 sourceHandle（= 出口 event id）转成展示文案。 */
 export function flowHandleDisplay(id: string, label?: string): string {
   if (label && label !== id) return label
-  if (isSettlementAdvanceHandle(id)) return '结算推进'
   if (BUILTIN[id]) return BUILTIN[id]
   return id
 }

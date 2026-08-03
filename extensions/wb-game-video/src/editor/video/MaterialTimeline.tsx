@@ -8,7 +8,6 @@ import {
   type MaterialItem,
   type TimelineConditionMarker,
   type TimelinePointMarker,
-  type TimelineSegment,
   TIMELINE_LAYER_STEP,
   TIMELINE_LAYER_TOP,
   TIMELINE_MIN_TRACKS,
@@ -40,6 +39,7 @@ const CLIP_LABEL_MIN_PX = 56
 const POINT_EDGE_OFFSET_PX = 9
 /** 为横向滚动条预留空间，避免它挤占第 6 轨后误触发纵向滚动条。 */
 const TIMELINE_SCROLLBAR_RESERVE_PX = 18
+
 function pointHeadOffsetPx(ms: number, maxMs: number): number {
   if (ms <= 0) return POINT_EDGE_OFFSET_PX
   if (ms >= maxMs) return -POINT_EDGE_OFFSET_PX
@@ -61,29 +61,17 @@ export interface MaterialTimelineProps {
   materials: MaterialItem[]
   maxMs: number
   playheadMs: number
-  /** 独立于节点逻辑播放头的媒体局部指针；循环视频回绕时只在对应视频条内回绕。 */
-  mediaPlayhead?: { materialKey: string; localMs: number }
   selectedMaterialKey: string | null
   isTimedQteNode?: boolean
   /** 视频 tab（全交互）或剧情树抽屉（可 gating）。目前仅用于文案，交互差异由下面的开关控制。 */
   context?: 'video' | 'story'
   /** 是否允许拖动编辑材料（剧情树只读预览时可关）。默认 true。 */
   editable?: boolean
-  /** 是否允许点选材料/结算标记。默认 true；流程预览关闭以避免联动编辑表单。 */
-  selectable?: boolean
-  /** 全流程预览的节点片段背景与边界；省略时保持单节点时间轴外观。 */
-  segments?: TimelineSegment[]
-  /** fit=总时长始终铺满视口；append=首段铺满视口，后续片段按同一 px/ms 向右追加。 */
-  widthMode?: 'fit' | 'append'
   emptyHint?: string
   /** 提供时，点击/拖动 ruler 或画布空白处即 seek 播放头到该时刻（宿主据此暂停播放并同步 <video>）。 */
   onSeek?: (ms: number) => void
   /** 一次手动拖拽（scrub）开始时触发一次 —— 宿主用它把正在播放的视频自动暂停。 */
   onScrubStart?: () => void
-  /** 一次手动拖拽结束时触发一次 —— 宿主恢复播放头的自动滚动策略。 */
-  onScrubEnd?: () => void
-  /** 持续拖动播放头的灵敏度；1 = 指针与时间轴等比例，默认 1。按下定位不受影响。 */
-  seekDragSensitivity?: number
   onSelectMaterial: (key: string) => void
   onPatchMaterial: (
     item: MaterialItem,
@@ -132,18 +120,12 @@ export function MaterialTimeline({
   materials,
   maxMs,
   playheadMs,
-  mediaPlayhead,
   selectedMaterialKey,
   isTimedQteNode = false,
   editable = true,
-  selectable = true,
-  segments,
-  widthMode = 'fit',
   emptyHint = '打开素材库，把控件加入当前节点时间轴',
   onSeek,
   onScrubStart,
-  onScrubEnd,
-  seekDragSensitivity = 1,
   onSelectMaterial,
   onPatchMaterial,
   onDeleteMaterial,
@@ -162,23 +144,10 @@ export function MaterialTimeline({
   const activeMode: 'material' | 'audio' = mode ?? 'material'
   const audioList = audioItems ?? []
   // 当前活动条目列表（几何 + key 通用；只有它们的字段被 drag/render 用到）。
-  const activeList: Array<{ key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number; fixedWidthPx?: number; locked?: boolean }> =
+  const activeList: Array<{ key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number }> =
     activeMode === 'audio' ? audioList : materials
-  const mediaPlayheadMaterial = mediaPlayhead
-    ? materials.find((material) => material.key === mediaPlayhead.materialKey)
-    : undefined
-  const mediaPlayheadTimelineMs = mediaPlayheadMaterial && mediaPlayhead
-    ? mediaPlayheadMaterial.startMs + Math.max(
-      0,
-      Math.min(mediaPlayheadMaterial.endMs - mediaPlayheadMaterial.startMs, mediaPlayhead.localMs),
-    )
-    : null
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
-  const seekDragActiveRef = useRef(false)
-  const normalizedSeekDragSensitivity = Number.isFinite(seekDragSensitivity)
-    ? Math.max(0, seekDragSensitivity)
-    : 1
   const [zoom, setZoom] = useState(1)
   const [viewportW, setViewportW] = useState(0)
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -198,12 +167,8 @@ export function MaterialTimeline({
     lifecycleMarkers.length ? lifecycleTrack + 2 : 0,
     conditionMarkers?.length ? conditionTrack + 2 : 0,
   )
-  // 流程预览锁定首段建立的 px/ms；后续片段等比例追加，视口通过横向滚动跟随。
-  const firstSegmentMs = segments?.[0]
-    ? Math.max(1, segments[0].endMs - segments[0].startMs)
-    : maxMs
-  const durationWidthScale = widthMode === 'append' ? maxMs / firstSegmentMs : 1
-  const canvasPx = Math.max(1, (viewportW || 1) * zoom * durationWidthScale)
+  // 缩放：画布宽 = 视口宽 × zoom（zoom=1 恰好铺满，无横向滚动）。
+  const canvasPx = Math.max(1, (viewportW || 1) * zoom)
   const pxPerMs = canvasPx / maxMs
   const canvasHeight = TIMELINE_LAYER_TOP + trackCount * TIMELINE_LAYER_STEP + 8
   const viewportHeight = TIMELINE_LAYER_TOP
@@ -237,7 +202,7 @@ export function MaterialTimeline({
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
         setZoom((z) => {
           const next = clampZoom(z * factor)
-          const nextCanvas = Math.max(1, (viewportW || 1) * next * durationWidthScale)
+          const nextCanvas = Math.max(1, (viewportW || 1) * next)
           requestAnimationFrame(() => {
             if (timelineViewportRef.current) {
               timelineViewportRef.current.scrollLeft = ratio * nextCanvas - localX
@@ -252,7 +217,7 @@ export function MaterialTimeline({
     }
     vp.addEventListener('wheel', onWheel, { passive: false })
     return () => vp.removeEventListener('wheel', onWheel)
-  }, [canvasPx, viewportW, durationWidthScale])
+  }, [canvasPx, viewportW])
 
   // 把当前拖拽的 patch 派发给对应回写（组件→onPatchMaterial / 音频→onPatchAudio）。
   function dispatchPatch(key: string, patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number }): void {
@@ -267,25 +232,16 @@ export function MaterialTimeline({
 
   function onPointerDown(
     e: React.PointerEvent,
-    item: { key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number; fixedWidthPx?: number; locked?: boolean },
+    item: { key: string; startMs: number; endMs: number; zIndex: number; markerMs?: number },
     dragMode: 'move' | 'start' | 'end' | 'marker',
   ): void {
     e.preventDefault()
     e.stopPropagation()
-    if (item.locked) {
-      if (onSeek) beginSeek(e)
-      return
-    }
     // 音频条仅显示 + 拖动，不进 material 选中/检视器流。
-    if (activeMode === 'material' && selectable) onSelectMaterial(item.key)
-    if (!editable && !selectable && onSeek) {
-      beginSeek(e)
-      return
-    }
+    if (activeMode === 'material') onSelectMaterial(item.key)
     // 让视口拿到焦点，Delete/Backspace 键删除才有落点（不滚动画面）。
     timelineViewportRef.current?.focus({ preventScroll: true })
     if (!editable) return
-    if (item.fixedWidthPx != null && (dragMode === 'start' || dragMode === 'end')) return
     timelineRef.current?.setPointerCapture(e.pointerId)
     const anchorMs = dragMode === 'marker' ? (item.markerMs ?? item.startMs) : item.startMs
     setDrag({ key: item.key, mode: dragMode, pointerX: e.clientX, startMs: anchorMs, endMs: item.endMs, zIndex: item.zIndex })
@@ -305,10 +261,7 @@ export function MaterialTimeline({
   function onPointerMove(e: React.PointerEvent): void {
     if (!drag) return
     if (drag.key === '__seek__') {
-      const rect = e.currentTarget.getBoundingClientRect()
-      if (rect.width <= 0 || !onSeek) return
-      const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs * normalizedSeekDragSensitivity
-      onSeek(clampMs(drag.startMs + deltaMs, 0, maxMs))
+      seekFromPointer(e)
       return
     }
     if (drag.key.startsWith(POINT_DRAG_PREFIX)) {
@@ -322,8 +275,7 @@ export function MaterialTimeline({
     }
     const rect = e.currentTarget.getBoundingClientRect()
     if (rect.width <= 0) return
-    const activeItem = activeList.find((m) => m.key === drag.key)
-    if (!activeItem) return
+    if (!activeList.some((m) => m.key === drag.key)) return
     const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
     const nextLayer = drag.mode === 'move' ? layerFromPointerY(e.clientY, rect, trackCount - 1) : drag.zIndex
     // 吸附：默认 0.01s（10ms）；Alt=0.1s 粗粒度。
@@ -335,19 +287,8 @@ export function MaterialTimeline({
     }
     const span = drag.endMs - drag.startMs
     if (drag.mode === 'move') {
-      // 固定宽度条表达触发时刻，不表达占用跨度。即使旧数据的 endMs 落在视频末尾，
-      // 也必须允许拖动起点；实际动画结束由组件时长决定并在写回层夹到视频范围内。
-      const fixedWidth = activeItem.fixedWidthPx != null
-      const start = clampMs(
-        snapMs(drag.startMs + deltaMs, grid),
-        0,
-        fixedWidth ? maxMs : Math.max(0, maxMs - span),
-      )
-      dispatchPatch(drag.key, {
-        startMs: start,
-        endMs: fixedWidth ? Math.min(maxMs, start + span) : start + span,
-        zIndex: nextLayer,
-      })
+      const start = clampMs(snapMs(drag.startMs + deltaMs, grid), 0, Math.max(0, maxMs - span))
+      dispatchPatch(drag.key, { startMs: start, endMs: start + span, zIndex: nextLayer })
     } else if (drag.mode === 'start') {
       dispatchPatch(drag.key, { startMs: snapMs(drag.startMs + deltaMs, grid), endMs: drag.endMs })
     } else {
@@ -356,33 +297,29 @@ export function MaterialTimeline({
   }
 
   function onPointerUp(): void {
-    if (seekDragActiveRef.current) {
-      seekDragActiveRef.current = false
-      onScrubEnd?.()
-    }
     setDrag(null)
   }
 
-  function seekMsFromPointer(clientX: number): number | null {
+  // ruler 上按下/拖动即 seek 播放头（宿主可选消费）。
+  function seekFromPointer(e: React.PointerEvent): void {
+    if (!onSeek) return
     const canvas = timelineRef.current
-    if (!canvas) return null
+    if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    if (rect.width <= 0) return null
-    return clampMs(((clientX - rect.left) / rect.width) * maxMs, 0, maxMs)
+    if (rect.width <= 0) return
+    const ratio = (e.clientX - rect.left) / rect.width
+    onSeek(clampMs(ratio * maxMs, 0, maxMs))
   }
 
-  // 按下先绝对定位；随后以较低灵敏度围绕该点微调，避免几像素就跨过大量视频时刻。
+  // 手动拖拽播放头（scrub）：ruler 与画布空白处按下都进入 seek-drag，拖到哪播放头到哪。
   function beginSeek(e: React.PointerEvent): void {
     if (!onSeek) return
-    const anchorMs = seekMsFromPointer(e.clientX)
-    if (anchorMs == null) return
     e.preventDefault()
     e.stopPropagation()
     onScrubStart?.() // 宿主据此暂停正在播放的视频
-    seekDragActiveRef.current = true
     timelineRef.current?.setPointerCapture(e.pointerId)
-    setDrag({ key: '__seek__', mode: 'move', pointerX: e.clientX, startMs: anchorMs, endMs: anchorMs, zIndex: 0 })
-    onSeek(anchorMs)
+    setDrag({ key: '__seek__', mode: 'move', pointerX: e.clientX, startMs: 0, endMs: 0, zIndex: 0 })
+    seekFromPointer(e)
   }
 
   // 画布空白处（非控件、非 ruler）按下也可拖拽播放头。控件的 pointerdown 会 stopPropagation，
@@ -422,7 +359,7 @@ export function MaterialTimeline({
 
   return (
     <div
-      className={`mtl-root${editable ? '' : ' is-readonly'}`}
+      className="mtl-root"
       style={{ '--gc-timeline-h': `${viewportHeight}px` } as CSSProperties}
     >
       <div className="gc-materialbar">
@@ -516,39 +453,7 @@ export function MaterialTimeline({
               aria-hidden
             />
           ))}
-          {segments?.map((segment) => (
-            <div
-              key={segment.id}
-              className={`gc-flow-segment${segment.active ? ' is-active' : ''}`}
-              style={{
-                left: `${segment.startMs * pxPerMs}px`,
-                width: `${Math.max(1, (segment.endMs - segment.startMs) * pxPerMs)}px`,
-                height: `${canvasHeight}px`,
-              }}
-              title={`${segment.label} · ${fmtDur(segment.startMs)} - ${fmtDur(segment.endMs)}`}
-              aria-hidden
-            >
-              <span>{segment.label}</span>
-            </div>
-          ))}
-          <div
-            className="gc-playhead"
-            data-playhead-ms={Math.round(playheadMs)}
-            style={{ left: `${playheadMs * pxPerMs}px` }}
-            aria-hidden
-          />
-          {mediaPlayheadTimelineMs != null && mediaPlayheadMaterial ? (
-            <div
-              className="gc-media-playhead"
-              data-media-playhead-ms={Math.round(mediaPlayhead?.localMs ?? 0)}
-              style={{
-                left: `${mediaPlayheadTimelineMs * pxPerMs}px`,
-                top: `${layerTop(mediaPlayheadMaterial.zIndex)}px`,
-                height: `${TIMELINE_LAYER_STEP - 2}px`,
-              }}
-              aria-hidden
-            />
-          ) : null}
+          <div className="gc-playhead" style={{ left: `${playheadMs * pxPerMs}px` }} aria-hidden />
           {settlementMarkers.map((mk) => {
             const dragKey = `${POINT_DRAG_PREFIX}${mk.id}`
             return (
@@ -556,14 +461,14 @@ export function MaterialTimeline({
                 key={mk.id}
                 className={`gc-point-mark is-settlement${drag?.key === dragKey ? ' is-dragging' : ''}`}
                 style={{ left: `${mk.ms * pxPerMs}px` }}
-                title={`${mk.label} · ${fmtDur(mk.ms)}（${editable ? '可拖' : '只读'}）`}
+                title={`${mk.label} · ${fmtDur(mk.ms)}（可拖）`}
               >
-                {/* 参考线只画到菱形：继续精确标出时刻，但不穿过下方时间轴行。 */}
+                {/* 结算是整节点的"到此刻收尾"，故用贯穿竖线；只有菱形头可抓，竖线可点会挡住材料条命中。 */}
                 <span
                   className="gc-point-head"
                   style={{ left: `${pointHeadOffsetPx(mk.ms, maxMs)}px` }}
                   role="slider"
-                  tabIndex={editable ? 0 : -1}
+                  tabIndex={0}
                   aria-label={mk.label}
                   aria-valuenow={mk.ms}
                   aria-valuemin={0}
@@ -588,15 +493,12 @@ export function MaterialTimeline({
             const dragKey = `${POINT_DRAG_PREFIX}${mk.id}`
             const derived = mk.kind === 'derived' || mk.draggable === false
             return (
-              // 竖线 + 效果轨菱形是一体的：包裹层零宽、按 ms 定位，竖线只从顶部画到菱形，
-              // 让时刻与上方覆盖物条对齐，同时不干扰菱形下方的时间轴行。
+              // 贯穿竖线 + 效果轨上的菱形是一体的：包裹层零宽、按 ms 定位，竖线让"这一刻"能跟
+              // 上方覆盖物条对齐着读，菱形则落在自己那一轨上被抓。
               <div
                 key={mk.id}
                 className={`gc-point-mark is-lifecycle${derived ? ' is-derived' : ''}${drag?.key === dragKey ? ' is-dragging' : ''}${selectedPointMarkerId === mk.id ? ' is-selected' : ''}`}
-                style={{
-                  left: `${mk.ms * pxPerMs}px`,
-                  height: `${layerTop(lifecycleTrack) + 16}px`,
-                }}
+                style={{ left: `${mk.ms * pxPerMs}px` }}
               >
                 <span
                   className={`gc-life-head${derived ? ' is-derived' : ''}`}
@@ -605,17 +507,17 @@ export function MaterialTimeline({
                     top: `${layerTop(lifecycleTrack) + 16}px`,
                   }}
                   role="slider"
-                  tabIndex={selectable || editable ? 0 : -1}
+                  tabIndex={0}
                   aria-label={mk.label}
                   aria-valuenow={mk.ms}
                   aria-valuemin={0}
                   aria-valuemax={maxMs}
-                  title={`${mk.label} · ${fmtDur(mk.ms)}${derived ? '（由界面窗口决定）' : editable ? '（可拖）' : '（只读）'}`}
+                  title={`${mk.label} · ${fmtDur(mk.ms)}${derived ? '（由界面窗口决定）' : '（可拖）'}`}
                   onPointerDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
                     // 按下即选（与材料条一致）：只想让右侧高亮时不必真的拖动。
-                    if (selectable) onSelectPointMarker?.(mk.id)
+                    onSelectPointMarker?.(mk.id)
                     if (derived || !editable || !onPointMarkerChange) return
                     timelineRef.current?.setPointerCapture(e.pointerId)
                     setDrag({ key: dragKey, mode: 'move', pointerX: e.clientX, startMs: mk.ms, endMs: mk.ms, zIndex: 0 })
@@ -640,10 +542,8 @@ export function MaterialTimeline({
                     onPointerDown={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      if (selectable) onSelectPointMarker?.(marker.id)
+                      onSelectPointMarker?.(marker.id)
                     }}
-                    tabIndex={selectable ? 0 : -1}
-                    aria-disabled={!selectable}
                   >
                     <span aria-hidden>↻</span>
                     <span>{marker.label}</span>
@@ -684,23 +584,19 @@ export function MaterialTimeline({
               })
             : materials.map((m) => {
                 const left = m.startMs * pxPerMs
-                const fixedWidth = m.fixedWidthPx != null
                 // 下限必须容得下「左手柄 + 中间可拖区 + 右手柄」，否则两个 8px 手柄在窄条上完全重叠，
                 // 只有 DOM 靠后的右手柄能被抓到 → 起点永远调不了（CLIP_MIN_PX 见常量注释）。
-                const width = fixedWidth
-                  ? Math.max(CLIP_MIN_PX, m.fixedWidthPx ?? CLIP_MIN_PX)
-                  : Math.max(CLIP_MIN_PX, (m.endMs - m.startMs) * pxPerMs)
+                const width = Math.max(CLIP_MIN_PX, (m.endMs - m.startMs) * pxPerMs)
                 const selected = selectedMaterialKey === m.key
                 return (
                   <Fragment key={m.key}>
                     <div
-                      className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}${m.overridden ? ' is-overridden' : ''}${fixedWidth ? ' is-fixed-width' : ''}${m.locked ? ' is-locked' : ''}`}
+                      className={`gc-mclip ${materialClass(m.kind)}${selected ? ' is-selected' : ''}${m.overridden ? ' is-overridden' : ''}`}
                       style={{ left: `${left}px`, width: `${width}px`, top: `${layerTop(m.zIndex)}px` }}
                       onPointerDown={(e) => onPointerDown(e, m, 'move')}
-                      aria-label={`${materialDisplayLabel(m)}${m.label ? ` · ${m.label}` : ''}`}
-                      title={`${materialDisplayLabel(m)}${m.label ? ` · ${m.label}` : ''} · ${fmtDur(m.startMs)}${fixedWidth ? ' · 动画时长由组件控制' : ` - ${fmtDur(m.endMs)}`}${m.overridden ? ' · 已脱离方案跟随' : ''}`}
+                      title={`${materialDisplayLabel(m)} · ${fmtDur(m.startMs)} - ${fmtDur(m.endMs)}${m.overridden ? ' · 已脱离方案跟随' : ''}`}
                     >
-                      {editable && !fixedWidth && !m.locked ? (
+                      {editable ? (
                         <button className="gc-mhandle is-left" onPointerDown={(e) => onPointerDown(e, m, 'start')} aria-label="调整起点" />
                       ) : null}
                       {/* 窄条上不渲染文字：否则会盖住两侧手柄的点击区（文案仍在 title 里可悬停看）。 */}
@@ -709,7 +605,7 @@ export function MaterialTimeline({
                           {materialDisplayLabel(m)}{m.label ? ` · ${m.label}` : ''}
                         </span>
                       ) : null}
-                      {editable && !m.locked && selected && onDeleteMaterial && canDeleteMaterial(m.kind) ? (
+                      {editable && selected && onDeleteMaterial && canDeleteMaterial(m.kind) ? (
                         <button
                           type="button"
                           className="gc-mdelete"
@@ -727,7 +623,7 @@ export function MaterialTimeline({
                           ×
                         </button>
                       ) : null}
-                      {editable && !fixedWidth && !m.locked ? (
+                      {editable ? (
                         <button className="gc-mhandle is-right" onPointerDown={(e) => onPointerDown(e, m, 'end')} aria-label="调整终点" />
                       ) : null}
                     </div>
@@ -738,10 +634,7 @@ export function MaterialTimeline({
                         style={{ left: `${m.markerMs * pxPerMs}px`, top: `${layerTop(m.zIndex) + 16}px` }}
                         title={`命中判定点（计分锚点）· ${fmtDur(m.markerMs)}`}
                         aria-label="命中判定点"
-                        onPointerDown={(e) => {
-                          if (editable) onPointerDown(e, m, 'marker')
-                          else if (selectable) onSelectMaterial(m.key)
-                        }}
+                        onPointerDown={(e) => (editable ? onPointerDown(e, m, 'marker') : onSelectMaterial(m.key))}
                       />
                     ) : null}
                   </Fragment>
@@ -809,8 +702,6 @@ const MATERIAL_TIMELINE_CSS = `
   touch-action: none;
 }
 .mtl-root .gc-mtimeline-canvas.is-seekable { cursor: text; }
-.mtl-root.is-readonly .gc-mtimeline-canvas.is-seekable,
-.mtl-root.is-readonly .gc-mtimeline-ruler.is-seekable { cursor: ew-resize; }
 .mtl-root .gc-mtimeline-viewport:focus-visible { outline: 1px solid var(--gc-accent-line); outline-offset: -1px; }
 .mtl-root .gc-mtimeline-ruler {
   position: sticky;
@@ -829,33 +720,6 @@ const MATERIAL_TIMELINE_CSS = `
   pointer-events: none;
   z-index: 1;
 }
-.mtl-root .gc-flow-segment {
-  position: absolute;
-  top: 0;
-  box-sizing: border-box;
-  border-right: 1px solid rgba(184,174,160,.3);
-  background: rgba(255,255,255,.018);
-  pointer-events: none;
-  z-index: 0;
-}
-.mtl-root .gc-flow-segment:nth-of-type(even) { background: rgba(255,255,255,.032); }
-.mtl-root .gc-flow-segment.is-active {
-  background: rgba(240,136,64,.065);
-  border-right-color: rgba(240,136,64,.45);
-}
-.mtl-root .gc-flow-segment > span {
-  position: absolute;
-  top: 23px;
-  left: 5px;
-  right: 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(184,174,160,.72);
-  font-size: 9px;
-  line-height: 10px;
-}
-.mtl-root .gc-flow-segment.is-active > span { color: #f5bd75; }
 .mtl-root .gc-mtick {
   position: absolute;
   top: 0;
@@ -892,33 +756,13 @@ const MATERIAL_TIMELINE_CSS = `
   background: var(--gc-accent);
   box-shadow: 0 0 8px rgba(240,136,64,.85);
 }
-.mtl-root .gc-media-playhead {
-  position: absolute;
-  width: 2px;
-  transform: translateX(-1px);
-  background: #78b7ff;
-  box-shadow: 0 0 9px rgba(95,163,247,.9);
-  z-index: 9;
-  pointer-events: none;
-}
-.mtl-root .gc-media-playhead::before {
-  content: "";
-  position: absolute;
-  top: -3px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  background: #78b7ff;
-}
-/* 节点级时刻标记：菱形上方的竖虚线 + 可拖菱形。与橙色播放头刻意区分——播放头是"现在播到哪"，
+/* 节点级时刻标记：竖虚线 + 可拖菱形。与橙色播放头刻意区分——播放头是"现在播到哪"，
    这些是"这一刻会发生一件事"。路由结算=蓝紫，动作结算=青绿；两种菱形错开高度，
    同一 ms 上重合时也还能各自抓到。 */
 .mtl-root .gc-point-mark {
   position: absolute;
   top: 0;
-  height: 10px;
+  bottom: 0;
   width: 0;
   z-index: 7;
   pointer-events: none;
@@ -939,12 +783,6 @@ const MATERIAL_TIMELINE_CSS = `
   cursor: ew-resize;
   pointer-events: auto;
 }
-.mtl-root.is-readonly .gc-point-head,
-.mtl-root.is-readonly .gc-life-head,
-.mtl-root.is-readonly .gc-mclip,
-.mtl-root.is-readonly .gc-mmarker,
-.mtl-root.is-readonly .gc-condition-band { cursor: default; }
-.mtl-root .gc-condition-band[aria-disabled="true"] { pointer-events: none; }
 .mtl-root .gc-point-head:hover,
 .mtl-root .gc-point-mark.is-dragging .gc-point-head {
   filter: brightness(1.35);
@@ -1140,8 +978,6 @@ const MATERIAL_TIMELINE_CSS = `
   box-shadow: 0 0 12px currentColor;
 }
 .mtl-root .gc-mclip:active { cursor: grabbing; }
-.mtl-root .gc-mclip.is-locked { cursor: ew-resize; }
-.mtl-root .gc-mclip.is-locked:active { cursor: ew-resize; }
 .mtl-root .gc-mclip.is-selected { outline: 2px solid var(--gc-accent); outline-offset: 2px; overflow: visible; }
 .mtl-root .gc-mclip.is-overridden { overflow: visible; }
 .mtl-root .gc-mclip.is-overridden::after {
@@ -1158,13 +994,6 @@ const MATERIAL_TIMELINE_CSS = `
 }
 .mtl-root .gc-mclip.is-subtitle { border-color: rgba(95,201,128,.58); color: #d6ffe2; }
 .mtl-root .gc-mclip.is-subtitle::before { background: #62c980; }
-.mtl-root .gc-mclip.is-video {
-  justify-content: flex-start;
-  border-color: rgba(95,163,247,.62);
-  color: #dcecff;
-  background: rgba(38,70,108,.42);
-}
-.mtl-root .gc-mclip.is-video::before { background: #5fa3f7; }
 .mtl-root .gc-mclip.is-overlay { border-color: rgba(240,136,64,.58); color: #ffd8bf; }
 .mtl-root .gc-mclip.is-overlay::before { background: var(--gc-accent); }
 .mtl-root .gc-mclip.is-qte { border-color: rgba(95,163,247,.58); color: #cfe4ff; }

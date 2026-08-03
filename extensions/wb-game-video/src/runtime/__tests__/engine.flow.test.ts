@@ -59,53 +59,6 @@ describe('timed settlement advance', () => {
     expect(rt.state.currentNodeId).toBe('a')
     rt.tick(1200)
     expect(rt.state.currentNodeId).toBe('b')
-    expect(rt.state.traversedEdgeIds.has('e-next')).toBe(true)
-  })
-
-  it('does not advance when the configured edge has been deleted', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 5000,
-          reactions: [{ when: { type: 'at', ms: 1200 }, do: [{ kind: 'advance', edgeId: 'deleted-edge' }] }],
-        }),
-        node('b', { durationMs: 5000 }),
-      ],
-      edges: [],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph))
-    rt.start()
-
-    rt.tick(1200)
-    expect(rt.state.currentNodeId).toBe('a')
-  })
-
-  it('holds a settlement-selected edge until the configured jump timing', () => {
-    const graph: GameGraph = {
-      nodes: [
-        node('a', {
-          durationMs: 5000,
-          routingSettlement: { type: 'complete' },
-          reactions: [{ when: { type: 'at', ms: 1200 }, do: [{ kind: 'advance', edgeId: 'e-next' }] }],
-        }),
-        node('b', { durationMs: 5000 }),
-      ],
-      edges: [{
-        id: 'e-next',
-        source: 'a',
-        target: 'b',
-        sourceHandle: 'settlement-advance:e-next',
-        targetHandle: 'in',
-        data: { transition: 'onSettlement' },
-      }],
-    }
-    const rt = new GraphRuntime(graph, scnOf(graph))
-    rt.start()
-
-    rt.tick(1200)
-    expect(rt.state.currentNodeId).toBe('a')
-    rt.onPerformanceEnd()
-    expect(rt.state.currentNodeId).toBe('b')
   })
 })
 

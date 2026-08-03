@@ -65,7 +65,7 @@ describe('NodeInspector · 蓝图节点角色约束', () => {
     )
     const populatedSelect = screen.getByTitle('引用蓝图库中的子蓝图；双击容器跳到该蓝图编辑')
     expect(within(populatedSelect).getByRole('option', { name: '无' })).toBeTruthy()
-    expect(within(populatedSelect).getByRole('option', { name: '战斗' })).toBeTruthy()
+    expect(within(populatedSelect).getByRole('option', { name: '战斗 (missing@1)' })).toBeTruthy()
   })
 
   it('切到子蓝图时不自动建库、不预挂候选，仅进入未挂包模式', () => {

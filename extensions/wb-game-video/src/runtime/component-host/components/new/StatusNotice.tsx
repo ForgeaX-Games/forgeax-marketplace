@@ -1,17 +1,17 @@
 /**
- * 状态提示（component id: `StatusNotice`）。
- * 文案由 RuntimeComponentHost 解析后以扁平 props 传入；此处只展示。
+ * 状态提示（component id: `StatusNotice`）—— 展示一次性的属性变更、获得物品等结果反馈。
+ * 业务侧负责生成完整文案；组件只负责统一的居中展示与短暂动画。
  */
 import type { ReactNode } from 'react'
 import type { ComponentManifest } from '@/runtime/schema/node-config-schema'
+import type { OverlayProps } from '../../rendererRegistry'
 import { animationTimingStyle, injectCss, resolveTextAppearance, type TextAppearanceInputs } from './skinRuntime'
 
 export const StatusNoticeManifest: ComponentManifest = {
   id: 'StatusNotice',
   label: '状态提示',
   inputs: [
-    { key: 'fixedText', label: '固定文本', valueType: 'string', default: '获得道具' },
-    { key: 'parameter', label: '参数', valueType: 'string', component: 'numberExpr', default: '〈xxx〉' },
+    { key: 'text', label: '提示文字', valueType: 'string', default: '获得道具〈xxx〉' },
     { key: 'color', label: '字色', valueType: 'string', component: 'color', default: '#f0f0f0' },
     { key: 'fontSize', label: '字号', valueType: 'number', default: 2.4 },
     { key: 'durationMs', label: '总时长ms', valueType: 'number', default: 1600 },
@@ -19,31 +19,14 @@ export const StatusNoticeManifest: ComponentManifest = {
   events: [],
 }
 
-export interface StatusNoticeProps {
-  fixedText?: string
-  parameter?: string
-  color?: string
-  fontSize?: number
-  durationMs?: number
-  preview?: boolean
-  previewTimeMs?: number
-  previewPlaying?: boolean
-}
-
-export function StatusNotice({
-  fixedText = '获得道具',
-  parameter = '〈xxx〉',
-  color,
-  fontSize,
-  durationMs = 1600,
-  preview,
-  previewTimeMs,
-  previewPlaying,
-}: StatusNoticeProps): ReactNode {
+export function StatusNotice({ overlay, preview, previewPlaying, previewTimeMs }: OverlayProps): ReactNode {
   injectCss('status-notice', STATUS_NOTICE_CSS)
-  const text = `${fixedText}${parameter}`
+  const text = typeof overlay.inputs.text === 'string' && overlay.inputs.text ? overlay.inputs.text : '获得道具〈xxx〉'
+  const durationMs = typeof overlay.inputs.durationMs === 'number' && Number.isFinite(overlay.inputs.durationMs) && overlay.inputs.durationMs > 0
+    ? overlay.inputs.durationMs
+    : 1600
   const frozen = preview && !previewPlaying
-  const textStyle = resolveTextAppearance({ color, fontSize } as TextAppearanceInputs, { color: '#f0f0f0', fontSize: 2.4 })
+  const textStyle = resolveTextAppearance(overlay.inputs as TextAppearanceInputs, { color: '#f0f0f0', fontSize: 2.4 })
 
   return (
     <div

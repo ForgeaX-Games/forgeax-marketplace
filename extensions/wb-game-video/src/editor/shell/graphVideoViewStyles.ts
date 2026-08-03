@@ -98,12 +98,6 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-row:has(> .val-row-action:focus-visible) .val-row-action { opacity: 1; pointer-events: auto; }
 .val-row-action:hover:not(:disabled), .val-row-action:focus-visible { color: var(--gc-text); border-color: var(--gc-accent-line); }
 .val-row-action:disabled { cursor: default; opacity: 0.4; }
-.gc-tab-video .gc-stage-video,
-.gc-tab-video .gc-video-top,
-.gc-tab-video .gvv-video-col { min-height: 0; }
-.gc-tab-video .gc-video-top { display: flex; height: 0; grid-template-columns: none; flex: 1 1 0; }
-.gc-tab-video .gvv-video-col { width: 100%; flex: 1 1 0; }
-.gc-tab-video .gc-frame { width: 100%; height: 100%; min-height: 0; max-height: none; flex: 1 1 0; aspect-ratio: auto; }
 @media (prefers-reduced-motion: reduce) { .val-row-action { transition: none; } }
 .val-load-more { margin: 8px 10px 12px; border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
 .val-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 40; }

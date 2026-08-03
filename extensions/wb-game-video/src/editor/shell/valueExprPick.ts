@@ -28,16 +28,12 @@ export type ValueExprInput = NumOrExpr | string
 export type { ValueTerm, ValueTermOp }
 
 export {
-  attrDisplayName,
-  entityDisplayName,
   findEntity,
   findFormula,
-  formulaDisplayName,
   listAttrOptions,
   listEntityOptions,
   listFormulaOptions,
   listVarOptions,
-  variableDisplayName,
 } from './metaCatalog'
 
 export const VALUE_TERM_OPS: ValueTermOp[] = ['+', '-', '*', '/']
@@ -145,12 +141,12 @@ export function decodeEffectOperation(op: NumericEffectOp, value: NumOrExpr): Ef
   if (op === 'set') return { op: 'set', value }
   if (op === 'add') {
     const unwrapped = unwrapExpr(value, '-(')
-    if (unwrapped !== undefined) return { op: 'sub', value: unwrapped }
+    if (unwrapped) return { op: 'sub', value: unwrapped }
     if (typeof value === 'number' && (value < 0 || Object.is(value, -0))) return { op: 'sub', value: -value }
     return { op: 'add', value }
   }
   const unwrapped = unwrapExpr(value, '1/(')
-  return unwrapped !== undefined ? { op: 'div', value: unwrapped } : { op: 'mul', value }
+  return unwrapped ? { op: 'div', value: unwrapped } : { op: 'mul', value }
 }
 
 /** 编辑器运算符落回发布契约；不扩展 NumericEffectOp schema。 */

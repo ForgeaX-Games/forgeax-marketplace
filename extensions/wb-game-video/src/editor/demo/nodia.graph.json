@@ -1293,15 +1293,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -1322,15 +1316,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -1494,15 +1482,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -1523,15 +1505,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -1678,15 +1654,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -1707,15 +1677,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -1854,15 +1818,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -1883,15 +1841,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2044,15 +1996,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -2073,15 +2019,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2226,15 +2166,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -2255,15 +2189,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2402,15 +2330,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -2431,15 +2353,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2656,15 +2572,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -2685,15 +2595,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2713,7 +2617,7 @@
                           {
                             "when": {
                               "type": "event",
-                              "id": "success"
+                              "id": "parry"
                             },
                             "do": [
                               {
@@ -2725,7 +2629,7 @@
                           {
                             "when": {
                               "type": "event",
-                              "id": "greatSuccess"
+                              "id": "dodge"
                             },
                             "do": [
                               {
@@ -2842,15 +2746,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -2871,15 +2769,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -2995,15 +2887,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -3024,15 +2910,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -3148,15 +3028,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-player.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-player.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-player.attr.hpMax"
-                              },
+                              "current": 300,
+                              "max": 300,
+                              "label": "空藏",
                               "qi": 0,
                               "qiMax": 5
                             },
@@ -3177,15 +3051,9 @@
                               "when": "enter"
                             },
                             "inputs": {
-                              "label": {
-                                "ref": "entity.ent-boss.name"
-                              },
-                              "current": {
-                                "expr": "entity.ent-boss.attr.hp"
-                              },
-                              "max": {
-                                "expr": "entity.ent-boss.attr.hpMax"
-                              }
+                              "current": 700,
+                              "max": 700,
+                              "label": "小怪"
                             },
                             "layout": {
                               "left": 0,
@@ -3270,14 +3138,14 @@
                   "id": "e-tele-pass",
                   "source": "tele",
                   "target": "block",
-                    "sourceHandle": "success",
+                  "sourceHandle": "parry",
                   "targetHandle": "in"
                 },
                 {
                   "id": "e-tele-good",
                   "source": "tele",
                   "target": "dodgeP",
-                    "sourceHandle": "greatSuccess",
+                  "sourceHandle": "dodge",
                   "targetHandle": "in"
                 },
                 {
@@ -3329,15 +3197,9 @@
                     "when": "enter"
                   },
                   "inputs": {
-                    "label": {
-                      "ref": "entity.ent-player.name"
-                    },
-                    "current": {
-                      "expr": "entity.ent-player.attr.hp"
-                    },
-                    "max": {
-                      "expr": "entity.ent-player.attr.hpMax"
-                    },
+                    "current": 300,
+                    "max": 300,
+                    "label": "空藏",
                     "qi": 0,
                     "qiMax": 5
                   },
@@ -3358,15 +3220,9 @@
                     "when": "enter"
                   },
                   "inputs": {
-                    "label": {
-                      "ref": "entity.ent-boss.name"
-                    },
-                    "current": {
-                      "expr": "entity.ent-boss.attr.hp"
-                    },
-                    "max": {
-                      "expr": "entity.ent-boss.attr.hpMax"
-                    }
+                    "current": 700,
+                    "max": 700,
+                    "label": "小怪"
                   },
                   "layout": {
                     "left": 0,
@@ -3420,15 +3276,9 @@
                     "when": "enter"
                   },
                   "inputs": {
-                    "label": {
-                      "ref": "entity.ent-player.name"
-                    },
-                    "current": {
-                      "expr": "entity.ent-player.attr.hp"
-                    },
-                    "max": {
-                      "expr": "entity.ent-player.attr.hpMax"
-                    },
+                    "current": 300,
+                    "max": 300,
+                    "label": "空藏",
                     "qi": 0,
                     "qiMax": 5
                   },
@@ -3449,15 +3299,9 @@
                     "when": "enter"
                   },
                   "inputs": {
-                    "label": {
-                      "ref": "entity.ent-boss.name"
-                    },
-                    "current": {
-                      "expr": "entity.ent-boss.attr.hp"
-                    },
-                    "max": {
-                      "expr": "entity.ent-boss.attr.hpMax"
-                    }
+                    "current": 700,
+                    "max": 700,
+                    "label": "小怪"
                   },
                   "layout": {
                     "left": 0,
@@ -4590,15 +4434,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -4619,15 +4457,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -4791,15 +4623,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -4820,15 +4646,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -4975,15 +4795,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5004,15 +4818,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -5151,15 +4959,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5180,15 +4982,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -5341,15 +5137,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5370,15 +5160,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -5523,15 +5307,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5552,15 +5330,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -5699,15 +5471,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5728,15 +5494,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -5953,15 +5713,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -5982,15 +5736,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -6010,7 +5758,7 @@
                                 {
                                   "when": {
                                     "type": "event",
-                                  "id": "success"
+                                    "id": "parry"
                                   },
                                   "do": [
                                     {
@@ -6022,7 +5770,7 @@
                                 {
                                   "when": {
                                     "type": "event",
-                                  "id": "greatSuccess"
+                                    "id": "dodge"
                                   },
                                   "do": [
                                     {
@@ -6139,15 +5887,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -6168,15 +5910,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -6292,15 +6028,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -6321,15 +6051,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -6445,15 +6169,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-player.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-player.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-player.attr.hpMax"
-                                    },
+                                    "current": 300,
+                                    "max": 300,
+                                    "label": "空藏",
                                     "qi": 0,
                                     "qiMax": 5
                                   },
@@ -6474,15 +6192,9 @@
                                     "when": "enter"
                                   },
                                   "inputs": {
-                                    "label": {
-                                      "ref": "entity.ent-boss.name"
-                                    },
-                                    "current": {
-                                      "expr": "entity.ent-boss.attr.hp"
-                                    },
-                                    "max": {
-                                      "expr": "entity.ent-boss.attr.hpMax"
-                                    }
+                                    "current": 700,
+                                    "max": 700,
+                                    "label": "小怪"
                                   },
                                   "layout": {
                                     "left": 0,
@@ -6567,14 +6279,14 @@
                         "id": "e-tele-pass",
                         "source": "tele",
                         "target": "block",
-                        "sourceHandle": "success",
+                        "sourceHandle": "parry",
                         "targetHandle": "in"
                       },
                       {
                         "id": "e-tele-good",
                         "source": "tele",
                         "target": "dodgeP",
-                        "sourceHandle": "greatSuccess",
+                        "sourceHandle": "dodge",
                         "targetHandle": "in"
                       },
                       {
@@ -6626,15 +6338,9 @@
                           "when": "enter"
                         },
                         "inputs": {
-                          "label": {
-                            "ref": "entity.ent-player.name"
-                          },
-                          "current": {
-                            "expr": "entity.ent-player.attr.hp"
-                          },
-                          "max": {
-                            "expr": "entity.ent-player.attr.hpMax"
-                          },
+                          "current": 300,
+                          "max": 300,
+                          "label": "空藏",
                           "qi": 0,
                           "qiMax": 5
                         },
@@ -6655,15 +6361,9 @@
                           "when": "enter"
                         },
                         "inputs": {
-                          "label": {
-                            "ref": "entity.ent-boss.name"
-                          },
-                          "current": {
-                            "expr": "entity.ent-boss.attr.hp"
-                          },
-                          "max": {
-                            "expr": "entity.ent-boss.attr.hpMax"
-                          }
+                          "current": 700,
+                          "max": 700,
+                          "label": "小怪"
                         },
                         "layout": {
                           "left": 0,
@@ -6717,15 +6417,9 @@
                           "when": "enter"
                         },
                         "inputs": {
-                          "label": {
-                            "ref": "entity.ent-player.name"
-                          },
-                          "current": {
-                            "expr": "entity.ent-player.attr.hp"
-                          },
-                          "max": {
-                            "expr": "entity.ent-player.attr.hpMax"
-                          },
+                          "current": 300,
+                          "max": 300,
+                          "label": "空藏",
                           "qi": 0,
                           "qiMax": 5
                         },
@@ -6746,15 +6440,9 @@
                           "when": "enter"
                         },
                         "inputs": {
-                          "label": {
-                            "ref": "entity.ent-boss.name"
-                          },
-                          "current": {
-                            "expr": "entity.ent-boss.attr.hp"
-                          },
-                          "max": {
-                            "expr": "entity.ent-boss.attr.hpMax"
-                          }
+                          "current": 700,
+                          "max": 700,
+                          "label": "小怪"
                         },
                         "layout": {
                           "left": 0,

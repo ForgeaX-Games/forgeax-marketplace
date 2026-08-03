@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSubProcess } from '../../../runtime/schema/graph-schema'
 import type { BlueprintDoc, GameScenario } from '../../../runtime/schema/graph-schema'
 import { disconnect } from '../../../graph/edit/graph-edit'
-import { GraphSession } from '../../../runtime/engine/session'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { GraphStudio } from '../GraphStudio'
 
@@ -107,32 +106,6 @@ describe('GraphStudio 节点配置分栏', () => {
     vi.unstubAllGlobals()
   })
 
-  it('实体规则数值变化时用最新模板重建试玩 session', async () => {
-    useGraphScenario.setState({
-      meta: {
-        entities: {
-          player: { id: 'player', attrs: { hpMax: 100 } },
-        },
-      },
-    })
-    const start = vi.spyOn(GraphSession.prototype, 'start')
-    render(<GraphStudio scenario={SCENARIO} />)
-    const startsBeforeRuleChange = start.mock.calls.length
-
-    act(() => {
-      useGraphScenario.setState((state) => ({
-        meta: {
-          ...state.meta,
-          entities: {
-            player: { id: 'player', attrs: { hpMax: 200 } },
-          },
-        },
-      }))
-    })
-
-    await waitFor(() => expect(start.mock.calls.length).toBeGreaterThan(startsBeforeRuleChange))
-  })
-
   it('记忆已有节点的展开状态，但新增节点时强制收起', async () => {
     render(<GraphStudio scenario={SCENARIO} />)
 
@@ -158,118 +131,6 @@ describe('GraphStudio 节点配置分栏', () => {
       expect(screen.getByRole('button', { name: '展开预览区' })).toBeTruthy()
       expect(screen.queryByTestId('node-preview-column')).toBeNull()
       expect(window.localStorage.getItem('wb-game-video.nodePanel.previewOpen')).toBe('0')
-    })
-  })
-
-  it('切换节点时保持节点预览的声音开关', async () => {
-    const videoScenario: GameScenario = {
-      ...SCENARIO,
-      graph: {
-        ...SCENARIO.graph,
-        nodes: SCENARIO.graph.nodes.map((node) => ({
-          ...node,
-          data: { ...node.data, media: { kind: 'VIDEO', ref: `${node.id}-video` } },
-        })),
-      },
-    }
-    window.localStorage.setItem('wb-game-video.nodePanel.previewOpen', '1')
-    useGraphScenario.setState({
-      demo: videoScenario,
-      blueprints: { [MAIN_ID]: { ...MAIN_DOC, graph: videoScenario.graph } },
-      graph: videoScenario.graph,
-      selectedNodeId: 'intro',
-    })
-
-    const { container } = render(<GraphStudio scenario={videoScenario} />)
-    const firstVideo = await waitFor(() => container.querySelector<HTMLVideoElement>('.nps-frame video')!)
-    expect(firstVideo.muted).toBe(true)
-
-    fireEvent.click(screen.getByRole('button', { name: '取消静音' }))
-    await waitFor(() => {
-      expect(firstVideo.muted).toBe(false)
-      expect(screen.getByRole('button', { name: '静音' })).toBeTruthy()
-    })
-
-    fireEvent.click(screen.getByTestId('rf__node-second'))
-    const secondVideo = await waitFor(() => {
-      const video = container.querySelector<HTMLVideoElement>('.nps-frame video')
-      expect(video).not.toBe(firstVideo)
-      return video!
-    })
-    expect(secondVideo.muted).toBe(false)
-    expect(screen.getByRole('button', { name: '静音' })).toBeTruthy()
-  })
-
-  it('试玩浮层与已展开的节点视频预览互斥，关闭后恢复预览', async () => {
-    window.localStorage.setItem('wb-game-video.nodePanel.previewOpen', '1')
-    render(<GraphStudio scenario={SCENARIO} />)
-
-    expect(screen.getByTestId('node-preview-column')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
-
-    await waitFor(() => {
-      expect(screen.getByTitle('隐藏')).toBeTruthy()
-      expect(screen.queryByTestId('node-preview-column')).toBeNull()
-      expect(screen.getByRole('button', { name: '展开预览区' })).toBeTruthy()
-    })
-    expect(window.localStorage.getItem('wb-game-video.nodePanel.previewOpen')).toBe('1')
-
-    fireEvent.click(screen.getByRole('button', { name: '展开预览区' }))
-    await waitFor(() => {
-      expect(screen.queryByTitle('隐藏')).toBeNull()
-      expect(screen.getByTestId('node-preview-column')).toBeTruthy()
-      expect(screen.getByRole('button', { name: '收起预览区' })).toBeTruthy()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
-    await waitFor(() => expect(screen.getByTitle('隐藏')).toBeTruthy())
-    fireEvent.click(screen.getByTitle('隐藏'))
-    await waitFor(() => {
-      expect(screen.queryByTitle('隐藏')).toBeNull()
-      expect(screen.getByTestId('node-preview-column')).toBeTruthy()
-      expect(screen.getByRole('button', { name: '收起预览区' })).toBeTruthy()
-    })
-    expect(window.localStorage.getItem('wb-game-video.nodePanel.previewOpen')).toBe('1')
-  })
-
-  it('按时间轴像素比例在当前指针前添加不重叠的结算', async () => {
-    window.localStorage.setItem('wb-game-video.nodePanel.previewOpen', '1')
-    useGraphScenario.setState({
-      demo: FOCUS_SCENARIO,
-      blueprints: { [MAIN_ID]: { ...MAIN_DOC, graph: FOCUS_SCENARIO.graph } },
-      graph: FOCUS_SCENARIO.graph,
-      meta: { ui: FOCUS_SCENARIO.ui },
-      selectedNodeId: 'intro',
-    })
-    const { container } = render(<GraphStudio scenario={FOCUS_SCENARIO} />)
-    const timeline = container.querySelector<HTMLElement>('.gc-mtimeline-canvas')!
-    vi.spyOn(timeline, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 0,
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 100,
-      width: 200,
-      height: 100,
-      toJSON: () => ({}),
-    })
-
-    fireEvent.pointerDown(container.querySelector('.gc-mtimeline-ruler')!, {
-      pointerId: 7,
-      clientX: 100,
-    })
-    fireEvent.pointerUp(timeline, { pointerId: 7, clientX: 100 })
-    fireEvent.click(screen.getByRole('button', { name: '＋ 结算' }))
-
-    await waitFor(() => {
-      const reactions = useGraphScenario.getState().graph.nodes[0]?.data.reactions ?? []
-      // 3s / 200px，14px 的视觉间距换算为 210ms：1500ms → 1290ms。
-      expect(reactions.at(-1)?.when).toEqual({ type: 'at', ms: 1_290 })
-    })
-    await waitFor(() => {
-      expect(container.querySelector('.gc-point-mark.is-lifecycle.is-selected')).toBeTruthy()
-      expect(container.querySelector('[data-lifecycle-effect-index][data-selected="true"]')).toBeTruthy()
     })
   })
 

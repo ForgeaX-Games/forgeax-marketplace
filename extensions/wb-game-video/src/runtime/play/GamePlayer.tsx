@@ -19,7 +19,6 @@ import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { GameStage } from './GameStage'
 import { BgmPlayer } from './BgmPlayer'
 import { VideoAudioToggle } from './VideoAudioToggle'
-import { createSessionSeed } from './sessionSeed'
 
 /** 媒体解析注入契约:节点媒体 id → 可播 url(宿主实现)。 */
 export type ResolveAsset = (mediaId: string | undefined, game: string) => string | undefined
@@ -30,16 +29,11 @@ export interface GamePlayerProps {
   game: string
   /** 媒体解析器（宿主注入）。 */
   resolveAsset: ResolveAsset
-  /** 固定 seed 可用于回放/调试；缺省时每个新会话自动生成。 */
-  rngSeed?: number
 }
 
-export function GamePlayer({ scenario, game, resolveAsset, rngSeed }: GamePlayerProps): JSX.Element {
+export function GamePlayer({ scenario, game, resolveAsset }: GamePlayerProps): JSX.Element {
   registerBuiltins()
-  const session = useMemo(
-    () => new GraphSession(scenario, { rngSeed: rngSeed ?? createSessionSeed() }),
-    [scenario, rngSeed],
-  )
+  const session = useMemo(() => new GraphSession(scenario), [scenario])
   const sessionRef = useRef(session)
   sessionRef.current = session
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -87,8 +81,8 @@ export function GamePlayer({ scenario, game, resolveAsset, rngSeed }: GamePlayer
         onFocus={() => claimPlayerFocus(rootRef.current)}
         style={{ position: 'relative', width: '100%', height: '100%', background: '#000', color: '#fff', outline: 'none' }}
       >
-        {/* 床轨：独立音频通道，与视频共用试玩声音开关；无独立 UI。 */}
-        <BgmPlayer bgm={snap.bgm} resolveAsset={resolveBgm} active={snap.phase !== 'ended'} muted={!videoAudioEnabled} />
+        {/* 床轨：独立音频通道，与视频原声开关无关；无 UI。 */}
+        <BgmPlayer bgm={snap.bgm} resolveAsset={resolveBgm} />
         <GameStage
           videoSrc={videoSrc}
           videoKey={`clip-${snap.clipSeq}`}

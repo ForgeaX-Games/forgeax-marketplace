@@ -12,11 +12,8 @@ export interface NumericFloatTextInputs {
   durationMs?: number
 }
 
-type NumericFloatSign = 'signed' | 'negative'
-
-function signed(value: number, sign: NumericFloatSign): string {
+function signed(value: number): string {
   const normalized = Object.is(value, -0) ? 0 : value
-  if (sign === 'negative') return `-${Math.abs(normalized)}`
   return normalized > 0 ? `+${normalized}` : String(normalized)
 }
 
@@ -24,10 +21,9 @@ export function resolveNumericFloatText(
   inputs: NumericFloatTextInputs,
   ctx: SkinCtx | undefined,
   fallback: string,
-  sign: NumericFloatSign = 'signed',
 ): string {
   const value = resolveNumericValue(inputs.value, ctx)
-  if (value != null) return signed(value, sign)
+  if (value != null) return signed(value)
   return typeof inputs.text === 'string' && inputs.text ? inputs.text : fallback
 }
 

@@ -20,7 +20,6 @@ import { ensureBuiltinSchemes } from '../demo/builtin-schemes'
 import { recompileFormulaUsages } from '../shell/formulaApply'
 import type { Formula } from './formula-authoring'
 import { toEditorScenarioDocument, toRuntimeScenario } from './formula-authoring'
-import { renameScenarioId, type ScenarioIdRename } from './scenario-id'
 import {
   documentFromBlueprints, documentFromScenario, emptyBlueprintDoc, emptyLibraryDocument,
   metaFromDocument, normalizeDocument, playDocument,
@@ -34,7 +33,6 @@ import { loadGameComponents } from '../../runtime/component-host'
 export type BlueprintTitleActionOk = { ok: true; id?: string }
 export type BlueprintTitleActionErr = { ok: false; reason: 'duplicate_title' | 'not_found' }
 export type BlueprintTitleActionResult = BlueprintTitleActionOk | BlueprintTitleActionErr
-export type ScenarioIdRenameActionResult = { ok: true } | { ok: false; reason: 'empty_id' | 'duplicate_id' | 'not_found' }
 
 /** 载入 demo / 文档时保证基础覆盖物存在——用于 reset()/首次落座。 */
 function withBuiltinSchemes<T extends GameScenario>(s: T): T {
@@ -153,7 +151,6 @@ interface GraphScenarioStore {
   ensureBoot: (game: string, demo: GameScenario) => void
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
-  renameScenarioId: (rename: ScenarioIdRename) => ScenarioIdRenameActionResult
   /** 原子写回整份 scenario（graph + meta 一次 set，避免拆两次 set 产生额外历史步）；写主蓝图。 */
   setScenario: (s: GameScenario) => void
   /** 标记未保存草稿 + 防抖写盘（撤销/重做后调用，让恢复的状态也落草稿）。 */
@@ -439,24 +436,6 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         return { meta: nextMeta }
       })
       scheduleDraft()
-    },
-    renameScenarioId: (rename) => {
-      const migrated = renameScenarioId(get().meta, get().blueprints, rename)
-      if (!migrated.ok) return migrated
-      set((st) => {
-        const recompiled = recompileFormulaUsages(
-          { blueprints: migrated.blueprints, meta: migrated.meta },
-          migrated.meta.formulas as Record<string, Formula> | undefined,
-          migrated.meta.entities,
-        )
-        return {
-          blueprints: recompiled.blueprints,
-          meta: recompiled.meta,
-          graph: recompiled.blueprints[st.activeBlueprintId]?.graph ?? st.graph,
-        }
-      })
-      scheduleDraft()
-      return { ok: true }
     },
     addTextStylePreset: (group, preset) => {
       set((st) => {

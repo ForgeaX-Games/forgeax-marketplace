@@ -98,17 +98,6 @@ describe('NodeInspector · 作用域 BGM', () => {
     expect(checkbox(/从头重播/)).toBeTruthy()
   })
 
-  it('有曲目时显示循环/单次播放模式，没曲目时隐藏', () => {
-    renderPanel(graphWith({ name: 'A' }))
-    expect(screen.queryByRole('combobox', { name: 'BGM 播放模式' })).toBeNull()
-    cleanup()
-    const data = renderControlled(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle' } }))
-    const playMode = screen.getByRole('combobox', { name: 'BGM 播放模式' }) as HTMLSelectElement
-    expect(playMode.value).toBe('loop')
-    fireEvent.change(playMode, { target: { value: 'once' } })
-    expect(data().bgm).toEqual({ ref: 'a-aud-battle', loop: false })
-  })
-
   it('音量默认未设置；开启后按 0..1 写回', () => {
     const data = renderControlled(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle' } }))
     expect(volumeSlider().value).toBe('1')
@@ -120,14 +109,6 @@ describe('NodeInspector · 作用域 BGM', () => {
     expect(volumeSlider().disabled).toBe(false)
     fireEvent.change(volumeSlider(), { target: { value: '0.35' } })
     expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0.35 })
-    fireEvent.change(volumeSlider(), { target: { value: '0' } })
-    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0 })
-    expect(volumeSlider().classList.contains('ni-bgm-volume')).toBe(true)
-    expect(volumeSlider().style.padding).toBe('0px')
-    expect(volumeSlider().style.background).toContain('0%')
-    fireEvent.change(volumeSlider(), { target: { value: '1' } })
-    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 1 })
-    expect(volumeSlider().style.background).toContain('100%')
   })
 
   it('未选曲目也可单独设置音量；关闭后回到未设置状态', () => {
@@ -300,7 +281,7 @@ describe('NodeInspector · 作用域 BGM', () => {
       .toEqual([
         ['__unavailable__', '（当前音乐不在素材库）'],
         ['', '（空）'],
-        ['a-aud-1', '战斗床'],
+        ['a-aud-1', '战斗床 (a-aud-1)'],
       ])
     expect(selector!.value).toBe('__unavailable__')
     expect(selector!.textContent).not.toContain('bgm-battle')

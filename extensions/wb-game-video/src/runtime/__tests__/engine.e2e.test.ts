@@ -66,7 +66,7 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     expect(callers(rt)).toEqual(['b_ai'])
     expect(rt.state.phase).toBe('playing')
 
-    rt.emitComponentEvent('tele/parry', 'success') // → 受击防反演出 block
+    rt.emitComponentEvent('tele/parry', 'parry') // → 受击防反演出 block
     expect(rt.state.currentNodeId).toBe('block')
 
     rt.onPerformanceEnd() // returns → b_ai → a_my → wait

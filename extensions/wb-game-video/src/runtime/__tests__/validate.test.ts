@@ -78,49 +78,6 @@ describe('validateGraph', () => {
     expect(issues.filter((issue) => issue.code.startsWith('overlay.reaction'))).toEqual([])
   })
 
-  it('validates node reaction spawn template references', () => {
-    const a = perf('a')
-    a.node.data.reactions = [{
-      when: { type: 'watch', of: 'score', on: 'change' },
-      do: [{ kind: 'spawn', from: 'hud/missing' }],
-    }]
-    const overlays: Record<string, Overlay> = {
-      hud: {
-        id: 'hud',
-        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
-      },
-    }
-
-    const issues = validateGraph({ nodes: [a.node], edges: [] }, { overlays })
-    expect(issues.map((issue) => issue.code)).toContain('ref.spawn.missing')
-
-    a.node.data.reactions[0]!.do = [{ kind: 'spawn', from: 'hud/rage' }]
-    expect(validateGraph({ nodes: [a.node], edges: [] }, { overlays }).map((issue) => issue.code)).not.toContain('ref.spawn.missing')
-  })
-
-  it('validates that hideOverlay targets an existing interface mount in the same node', () => {
-    const valid = perf('valid')
-    valid.node.data.overlayNodes = [{ id: 'boss-hud', overlay: 'hud' }]
-    valid.node.data.reactions = [
-      { when: { type: 'watch', of: 'score', on: 'dec' }, do: [{ kind: 'hideOverlay', mountId: 'boss-hud' }] },
-    ]
-    const invalid = perf('invalid')
-    invalid.node.data.reactions = [
-      { when: { type: 'watch', of: 'score', on: 'dec' }, do: [{ kind: 'hideOverlay', mountId: 'missing-ui' }] },
-    ]
-    const overlays: Record<string, Overlay> = {
-      hud: {
-        id: 'hud',
-        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
-      },
-    }
-
-    expect(validateGraph({ nodes: [valid.node], edges: [] }, { overlays }).map((issue) => issue.code))
-      .not.toContain('ref.hideOverlay.mount.missing')
-    expect(validateGraph({ nodes: [invalid.node], edges: [] }, { overlays }).map((issue) => issue.code))
-      .toContain('ref.hideOverlay.mount.missing')
-  })
-
   it('rejects invalid routing settlement data', () => {
     const a = perf('a')
     const b = perf('b')

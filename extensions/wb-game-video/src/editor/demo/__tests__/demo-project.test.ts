@@ -33,32 +33,6 @@ describe('NODIA_DEMO_PROJECT', () => {
       )).toBe(true)
     }
   })
-  it('stores direct value expressions for every new hp bar instance', () => {
-    const bars: Array<{ component?: string; inputs?: Record<string, unknown> }> = []
-    const visit = (value: unknown): void => {
-      if (Array.isArray(value)) {
-        value.forEach(visit)
-        return
-      }
-      if (!value || typeof value !== 'object') return
-      const record = value as Record<string, unknown>
-      if (record.component === 'BattlePlayerHpBar' || record.component === 'BattleEnemyHpBar') {
-        bars.push(record)
-      }
-      Object.values(record).forEach(visit)
-    }
-    visit(demoJson)
-
-    expect(bars.length).toBeGreaterThan(0)
-    expect(bars.every((bar) => {
-      const current = bar.inputs?.current as { expr?: unknown } | undefined
-      const max = bar.inputs?.max as { expr?: unknown } | undefined
-      return typeof current?.expr === 'string'
-        && typeof max?.expr === 'string'
-        && bar.inputs?.bind === undefined
-        && bar.inputs?.attr === undefined
-    })).toBe(true)
-  })
   it('turn containers have lethal edge exits (replaces old scenario.reactions)', () => {
     const outs = (id: string) => NODIA_DEMO_PROJECT.graph.edges.filter((e) => e.source === id)
     expect(outs('a_my').some((e) => e.id === 'e-amy-win')).toBe(true)

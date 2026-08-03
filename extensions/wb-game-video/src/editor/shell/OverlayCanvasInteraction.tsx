@@ -97,7 +97,7 @@ const CSS = `
 }
 .oci-frame.is-passive { border-color:transparent; }
 .oci-frame.is-passive.is-hovered { border-color:rgba(200,149,90,.48); }
-.oci-frame.is-selected, .oci-frame.is-highlighted {
+.oci-frame.is-selected {
   border-style:solid; border-color:var(--gc-accent,#c8955a);
   box-shadow:0 0 0 1px rgba(200,149,90,.42),0 0 12px rgba(200,149,90,.2);
 }
@@ -231,7 +231,6 @@ export function OverlayCanvasInteraction({
   stageRef,
   items,
   selectedId,
-  highlightedIds = [],
   onSelect,
   onMove,
   onResize,
@@ -245,8 +244,6 @@ export function OverlayCanvasInteraction({
   stageRef: RefObject<HTMLElement | null>
   items: readonly CanvasInteractionItem[]
   selectedId?: string | null
-  /** 同时显示选框的对象；不改变 selectedId 对应的键盘、缩放和层级操作目标。 */
-  highlightedIds?: readonly string[]
   onSelect: (id: string | null) => void
   onMove: (id: string, position: CanvasPoint) => void
   onResize?: (id: string, box: CanvasBox) => void
@@ -269,8 +266,6 @@ export function OverlayCanvasInteraction({
   const draggingRef = useRef(false)
   const spacePressedRef = useRef(false)
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
-  const highlightedIdSet = useMemo(() => new Set(highlightedIds), [highlightedIds])
-  const hoveredMovable = hoveredId ? itemMap.get(hoveredId)?.movable === true : false
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -495,7 +490,7 @@ export function OverlayCanvasInteraction({
   return (
     <>
       <div
-        className={`oci-layer${hoveredMovable || spacePressed ? ' is-over-item' : ''}${draggingId ? ' is-dragging' : ''}${resizingId ? ' is-resizing' : ''}`}
+        className={`oci-layer${hoveredId || spacePressed ? ' is-over-item' : ''}${draggingId ? ' is-dragging' : ''}${resizingId ? ' is-resizing' : ''}`}
         role="application"
         aria-label={ariaLabel}
         tabIndex={0}
@@ -506,7 +501,6 @@ export function OverlayCanvasInteraction({
       >
         {items.map((item) => {
           const box = resolveCanvasFrame(item.frame, stageSize)
-          const highlighted = highlightedIdSet.has(item.id)
           const state: CanvasItemState = {
             selected: item.id === selectedId,
             hovered: item.id === hoveredId,
@@ -517,8 +511,7 @@ export function OverlayCanvasInteraction({
             <div
               key={item.id}
               data-canvas-item={item.id}
-              data-highlighted={highlighted ? 'true' : 'false'}
-              className={`oci-frame${frameVisibility === 'active' ? ' is-passive' : ''}${state.hovered ? ' is-hovered' : ''}${highlighted ? ' is-highlighted' : ''}${state.selected ? ' is-selected' : ''}${item.warn ? ' is-warn' : ''}`}
+              className={`oci-frame${frameVisibility === 'active' ? ' is-passive' : ''}${state.hovered ? ' is-hovered' : ''}${state.selected ? ' is-selected' : ''}${item.warn ? ' is-warn' : ''}`}
               style={{
                 left: `${box.left * 100}%`,
                 top: `${box.top * 100}%`,

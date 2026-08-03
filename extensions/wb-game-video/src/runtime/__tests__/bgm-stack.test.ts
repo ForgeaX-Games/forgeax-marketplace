@@ -64,13 +64,6 @@ describe('BgmStack.apply — push', () => {
     expect(cmd.restart).toBe(true)
   })
 
-  it('新曲没配置音量时继承当前音量，显式音量才覆盖', () => {
-    const s = new BgmStack()
-    s.apply({ owner: DOC, ref: 'bgm-story', volume: 0.35 })
-    expect(s.apply({ owner: 'combat', ref: 'bgm-battle' }).volume).toBe(0.35)
-    expect(s.apply({ owner: 'boss', ref: 'bgm-boss', volume: 0.8 }).volume).toBe(0.8)
-  })
-
   it('不改写入参对象（getNodeBgm 返回的是落盘活对象）', () => {
     const s = new BgmStack()
     const nodeBgm: NodeBgm = { ref: 'bgm-battle', fadeInMs: 800 }
@@ -216,14 +209,6 @@ describe('BgmStack — 续播（同 ref 不重开）', () => {
     expect(cmd.restart).toBe(false)
     expect(cmd.volume).toBe(0.5)
     expect(s.top()?.owner).toBe('combat')
-  })
-
-  it('replace 换曲但没配置音量时保留当前音量', () => {
-    const s = new BgmStack()
-    s.apply({ owner: 'combat', ref: 'bgm-battle', volume: 0.4 })
-    const cmd = s.apply({ owner: 'boss', ref: 'bgm-boss', mode: 'replace' })
-    expect(cmd.volume).toBe(0.4)
-    expect(s.top()?.volume).toBe(0.4)
   })
 
 })

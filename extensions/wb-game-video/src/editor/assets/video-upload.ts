@@ -238,10 +238,6 @@ function fileExtension(fileName: string): string | undefined {
   return match?.[1]?.toLowerCase()
 }
 
-function fileDisplayName(fileName: string): string {
-  return fileName.replace(/\.[^.]+$/, '') || fileName
-}
-
 export function assertMediaUploadFile(mediaType: BrowserUploadMediaType, file: File): void {
   const policy = BROWSER_UPLOAD_POLICIES[mediaType]
   const extension = fileExtension(file.name)
@@ -632,7 +628,7 @@ async function runVideoResourceUpload(
   const report = createProgressReporter(options.onProgress)
 
   const createInput: PreparedVideoCreateInput = {
-    name: fileDisplayName(options.file.name),
+    name: options.file.name,
     durationMs: options.durationMs,
     type: options.type,
     remark: options.remark,

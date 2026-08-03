@@ -12,6 +12,6 @@ describe('new component contracts', () => {
   })
 
   it('battleParry exposes its static outcome events', () => {
-    expect(componentHandles('BattleParry', {}).map((handle) => handle.id)).toEqual(['greatSuccess', 'success', 'fail'])
+    expect(componentHandles('BattleParry', {}).map((handle) => handle.id)).toEqual(['parry', 'dodge', 'fail'])
   })
 })

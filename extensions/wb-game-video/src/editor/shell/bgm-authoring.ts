@@ -60,7 +60,6 @@ export function patchNodeBgm(current: NodeBgm | undefined, patch: Partial<NodeBg
   const fadeOutMs = cleanMs(merged.fadeOutMs)
   if (fadeOutMs !== undefined) out.fadeOutMs = fadeOutMs
   if (merged.restart === true) out.restart = true
-  if (merged.loop === false) out.loop = false
   return out
 }
 

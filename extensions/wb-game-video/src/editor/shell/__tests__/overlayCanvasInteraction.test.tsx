@@ -28,7 +28,6 @@ const ITEM: CanvasInteractionItem = {
 function Harness({
   items = [ITEM],
   selectedId = null,
-  highlightedIds = [],
   onSelect = vi.fn(),
   onMove = vi.fn(),
   onResize,
@@ -37,7 +36,6 @@ function Harness({
 }: {
   items?: CanvasInteractionItem[]
   selectedId?: string | null
-  highlightedIds?: readonly string[]
   onSelect?: (id: string | null) => void
   onMove?: (id: string, position: { x: number; y: number }) => void
   onResize?: (id: string, box: CanvasBox) => void
@@ -66,7 +64,6 @@ function Harness({
         stageRef={stageRef}
         items={items}
         selectedId={selectedId}
-        highlightedIds={highlightedIds}
         onSelect={onSelect}
         onMove={onMove}
         onResize={onResize}
@@ -200,37 +197,6 @@ describe('overlayFitTargets', () => {
 })
 
 describe('OverlayCanvasInteraction events', () => {
-  it('highlights multiple items while keeping resize controls on the active item', () => {
-    const secondItem: CanvasInteractionItem = {
-      ...ITEM,
-      id: 'second',
-      label: 'second',
-      position: { x: 0.5, y: 0.5 },
-      frame: { kind: 'box', left: 0.5, top: 0.5, width: 0.25, height: 0.25 },
-      zIndex: 2,
-    }
-
-    const { container } = render(
-      <Harness
-        items={[ITEM, secondItem]}
-        selectedId="item"
-        highlightedIds={['item', 'second']}
-        onResize={vi.fn()}
-      />,
-    )
-
-    const activeFrame = container.querySelector('[data-canvas-item="item"]')
-    const secondFrame = container.querySelector('[data-canvas-item="second"]')
-
-    expect(activeFrame).toHaveClass('is-selected', 'is-highlighted')
-    expect(secondFrame).toHaveClass('is-highlighted')
-    expect(secondFrame).not.toHaveClass('is-selected')
-    expect(activeFrame).toHaveAttribute('data-highlighted', 'true')
-    expect(secondFrame).toHaveAttribute('data-highlighted', 'true')
-    expect(screen.getAllByRole('button', { name: /调整item大小/ })).toHaveLength(8)
-    expect(screen.queryByRole('button', { name: /调整second大小/ })).toBeNull()
-  })
-
   it('drags from the existing position instead of snapping the anchor to pointer down', () => {
     const onSelect = vi.fn()
     const onMove = vi.fn()
