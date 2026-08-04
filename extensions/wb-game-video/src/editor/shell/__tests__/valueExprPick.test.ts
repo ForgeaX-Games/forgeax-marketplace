@@ -168,7 +168,7 @@ describe('valueExprPick', () => {
     expect(decodeEffectOperation('add', { expr: '-(10)' })).toEqual({ op: 'sub', value: 10 })
     expect(encodeEffectOperation('div', 2)).toEqual({ op: 'mul', value: { expr: '1/(2)' } })
     expect(decodeEffectOperation('mul', { expr: '1/(2)' })).toEqual({ op: 'div', value: 2 })
-    expect(decodeEffectOperation('add', -10)).toEqual({ op: 'sub', value: 10 })
+    expect(decodeEffectOperation('add', -10)).toEqual({ op: 'add', value: -10 })
     expect(decodeEffectOperation('add', { expr: '-(0)' })).toEqual({ op: 'sub', value: 0 })
     expect(decodeEffectOperation('mul', { expr: '1/(0)' })).toEqual({ op: 'div', value: 0 })
   })

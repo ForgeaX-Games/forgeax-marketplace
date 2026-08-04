@@ -11,6 +11,28 @@ export interface KinoEnvelope<T> {
 }
 
 export type KinoMediaType = 'image' | 'video' | 'audio' | 'font'
+export type KinoProviderKind = 'local' | 's3' | 'cos' | 'kino'
+export type KinoUploadMime =
+  | 'video/mp4'
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/webp'
+  | 'image/gif'
+  | 'audio/mpeg'
+  | 'audio/wav'
+  | 'audio/ogg'
+  | 'audio/mp4'
+  | 'audio/aac'
+  | 'font/woff2'
+  | 'font/woff'
+  | 'font/ttf'
+  | 'font/otf'
+
+export interface KinoProviderCapabilities {
+  provider: KinoProviderKind
+  media_types: KinoMediaType[]
+  upload_mimes: KinoUploadMime[]
+}
 
 export type KinoResourceType =
   | 'KEYFRAME'
@@ -72,21 +94,7 @@ export interface DirectUploadResponse {
 export interface PrepareUploadInput {
   game_id: string
   file_name?: string
-  mime_type:
-    | 'video/mp4'
-    | 'image/png'
-    | 'image/jpeg'
-    | 'image/webp'
-    | 'image/gif'
-    | 'audio/mpeg'
-    | 'audio/wav'
-    | 'audio/ogg'
-    | 'audio/mp4'
-    | 'audio/aac'
-    | 'font/woff2'
-    | 'font/woff'
-    | 'font/ttf'
-    | 'font/otf'
+  mime_type: KinoUploadMime
   bytes: number
   extension?: string
   client_resource_id?: string
@@ -152,6 +160,7 @@ export interface KinoRequestOptions {
 }
 
 export interface KinoVideoClient {
+  capabilities(options?: KinoRequestOptions): Promise<KinoProviderCapabilities>
   prepareUpload(input: PrepareUploadInput, options?: KinoRequestOptions): Promise<DirectUploadResponse>
   list(query: ListKinoResourcesQuery, options?: KinoRequestOptions): Promise<KinoResourcePage>
   get(resourceId: string, gameId: string, options?: KinoRequestOptions): Promise<KinoResourceDTO>
@@ -301,6 +310,12 @@ export function createKinoVideoClient(
   const baseUrl = normalizeBaseUrl(options.baseUrl)
 
   return {
+    async capabilities(options) {
+      return requestJson<KinoProviderCapabilities>(fetchImpl, baseUrl, '/capabilities', {
+        signal: options?.signal,
+      })
+    },
+
     async prepareUpload(input, options) {
       return requestJson<DirectUploadResponse>(fetchImpl, baseUrl, '/image-assets/upload', {
         method: 'POST',

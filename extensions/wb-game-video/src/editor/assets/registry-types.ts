@@ -47,6 +47,8 @@ export interface MediaAsset {
   status: MediaStatus
   /** 展示名（缺省由 productionType + id 兜底）。 */
   label?: string
+  /** Remote-provider manifest compatibility; provider-backed records require this alias. */
+  name?: string
   /** 生成用/记录用 prompt。 */
   prompt?: string
   /**
@@ -69,6 +71,8 @@ export interface MediaAsset {
   /** 产出来源：'wb-game-video' | 'wb-character' | '<scene-module>' 等。 */
   sourceModule?: string
   mime?: string
+  /** Remote-provider manifest compatibility; provider-backed records require this alias. */
+  mimeType?: string
   bytes?: number
   /** 视频时长（ms）。 */
   durationMs?: number

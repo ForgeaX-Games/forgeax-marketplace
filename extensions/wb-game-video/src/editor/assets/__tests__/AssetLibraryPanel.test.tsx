@@ -8,12 +8,17 @@ function controller(overrides: Partial<AssetLibraryController> = {}): AssetLibra
     available: true,
     loading: false,
     error: null,
+    provider: 'kino',
+    supportedKinds: ['image', 'audio'],
+    accept: {
+      image: '.png,.jpg,.jpeg,.webp',
+      audio: '.mp3,.wav',
+    },
     uploading: null,
     mutating: false,
     items: [
       { id: 'image-1', kind: 'image', name: '封面', mime: 'image/png' },
       { id: 'bgm-1', kind: 'audio', name: '主题曲', mime: 'audio/mpeg' },
-      { id: 'title.woff2', kind: 'font', name: '标题字体', mime: 'font/woff2', source: 'local' },
     ],
     refresh: vi.fn(async () => {}),
     upload: vi.fn(async () => undefined),
@@ -29,15 +34,32 @@ describe('AssetLibraryPanel', () => {
     render(<AssetLibraryPanel controller={controller()} />)
     expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('图片')
     expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('音频')
-    expect(screen.getByRole('navigation', { name: '资产类型' })).toHaveTextContent('字体')
+    expect(screen.getByRole('navigation', { name: '资产类型' })).not.toHaveTextContent('字体')
     expect(screen.getByLabelText('图片资产列表')).toHaveTextContent('封面')
-    expect(screen.getByLabelText('上传图片')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp,.gif')
+    expect(screen.getByLabelText('上传图片')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp')
     expect(screen.getByLabelText('上传图片')).toHaveAttribute('multiple')
     expect(screen.queryByRole('dialog', { name: '资产预览' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /音频 1/ }))
     expect(screen.getByLabelText('BGM 资产列表')).toHaveTextContent('主题曲')
-    expect(screen.getByLabelText('上传 BGM')).toHaveAttribute('accept', '.mp3,.wav,.ogg,.m4a,.aac')
+    expect(screen.getByLabelText('上传 BGM')).toHaveAttribute('accept', '.mp3,.wav')
+  })
+
+  it('shows font and provider-specific formats when capabilities allow them', () => {
+    render(<AssetLibraryPanel controller={controller({
+      provider: 'local',
+      supportedKinds: ['image', 'audio', 'font'],
+      accept: {
+        image: '.png,.jpg,.jpeg,.webp,.gif',
+        audio: '.mp3,.wav,.ogg,.m4a,.aac',
+        font: '.woff2,.woff,.ttf,.otf',
+      },
+      items: [
+        { id: 'image-1', kind: 'image', name: '封面', mime: 'image/png' },
+        { id: 'bgm-1', kind: 'audio', name: '主题曲', mime: 'audio/mpeg' },
+        { id: 'title.woff2', kind: 'font', name: '标题字体', mime: 'font/woff2' },
+      ],
+    })} />)
 
     fireEvent.click(screen.getByRole('button', { name: /字体 1/ }))
     expect(screen.getByLabelText('字体资产列表')).toHaveTextContent('标题字体')

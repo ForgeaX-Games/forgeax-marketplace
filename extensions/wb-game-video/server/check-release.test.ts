@@ -46,7 +46,7 @@ function createFixture(name: string, options: FixtureOptions = {}): string {
     writeFileSync(resolve(root, 'package.json'), '{ invalid package JSON\n')
   } else {
     writeJson(resolve(root, 'package.json'), {
-      name: options.packageName ?? '@forgeax/wb-game-video',
+      name: options.packageName ?? '@forgeax-extension/wb-game-video',
       version: '0.1.3',
       peerDependencies: {
         '@forgeax/extension-platform': options.platformVersion ?? '0.0.2',
@@ -60,7 +60,7 @@ function createFixture(name: string, options: FixtureOptions = {}): string {
     writeFileSync(resolve(root, 'forgeax-extension.json'), '{ invalid manifest JSON\n')
   } else {
     writeJson(resolve(root, 'forgeax-extension.json'), {
-      id: '@forgeax/wb-game-video',
+      id: '@forgeax-extension/wb-game-video',
       version: options.manifestVersion ?? '0.1.3',
       entry: {
         frontend: './dist/index.html',
@@ -163,7 +163,7 @@ describe('validateRelease', () => {
   it('still validates package identity and dependencies when manifest JSON is malformed', async () => {
     const malformedManifestRoot = createFixture('malformed-manifest', {
       malformedManifest: true,
-      packageName: '@forgeax/wb-game-video-invalid',
+      packageName: '@forgeax-extension/wb-game-video-invalid',
       platformVersion: '0.0.1',
     })
 
@@ -219,7 +219,7 @@ describe('validateRelease', () => {
     `${['wb', 'video', 'game'].join('-')}.html`,
     `${['reel', 'studio'].join('-')}.html`,
     `${['gv', 'id'].join('')}.html`,
-    `${['@forgeax-extension', 'wb-game-video'].join('/')}/index.html`,
+    `${['@forgeax', 'wb-game-video'].join('/')}/index.html`,
   ])('rejects legacy active identity in relative path %s', async (legacyPath) => {
     const activePath = `src/runtime/sdk/standalone/${legacyPath}`
     const oldIdentityRoot = createFixture(`old-path-${legacyPath.replaceAll('/', '-')}`, {

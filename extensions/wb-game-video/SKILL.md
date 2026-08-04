@@ -6,7 +6,7 @@ trigger: /wb-game-video
 
 # 视频游戏工坊 · AI Skill
 
-`@forgeax/wb-game-video` 编辑和运行 `GraphLibraryDocument`。根 `graph` 是运行入口，`manifest.mainPackId` 指向主蓝图，`manifest.packs` 保存主/子蓝图。修改后应通过 `src/runtime/validate/validate.ts` 校验。
+`@forgeax-extension/wb-game-video` 编辑和运行 `GraphLibraryDocument`。根 `graph` 是运行入口，`manifest.mainPackId` 指向主蓝图，`manifest.packs` 保存主/子蓝图。修改后应通过 `src/runtime/validate/validate.ts` 校验。
 
 ## 工具
 
@@ -54,6 +54,11 @@ import-character-refs + import-scene-refs
   → generate-video 或 generate-node-video
   → 把返回的 asset.id 绑定到节点 media.ref
 ```
+
+`generate-node-video` 超过 15 秒时逐段串行：优先使用 Provider 原生视频续接（Kino
+直接把上一段作为 `@视频N`）；没有该能力时，服务端用 `ffmpeg` 提取真实尾帧并作为
+下一段 `first_frame`。`strict` 模式会在首笔付费任务前预检，不会做到一半才因缺少
+`ffmpeg` 失败；只有调用方显式传 `continuityMode="independent"` 时才允许独立分段。
 
 素材写入 `.forgeax/games/<slug>/assets/`。蓝图写入 `.forgeax/games/<slug>/blueprint.json`，首次保存补 `.forgeax/games/<slug>/project.json`。
 

@@ -117,6 +117,14 @@ export interface GraphCondition {
 }
 
 // ── 实体 / 变量定义 ──────────────────────────────────────────────────────────
+/** 规则作者可持久化的值。字符串不参与数值运行态、公式、条件或副作用。 */
+export type ScalarValue = string | number
+
+/** 可安全投影到数值运行态的标量。 */
+export function isNumericScalar(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 /** attr 的静态约束/元信息（值本身在运行态的 attrs 里）。 */
 export interface AttrMeta {
   min?: number
@@ -131,8 +139,8 @@ export interface Entity {
   id: string
   name?: string
   kind?: string
-  /** 开放数值袋：attack/defense/speed/hp/… 任意扩展；公式按 entity.<id>.attr.<name> 引用。 */
-  attrs?: Record<string, number>
+  /** 开放标量袋：数值可被运行时公式引用；字符串仅供作者编辑与存储。 */
+  attrs?: Record<string, ScalarValue>
   /** 每个 attr 的约束（clamp 上下界 / 初值 / 显示名）；可选。 */
   attrMeta?: Record<string, AttrMeta>
 }
@@ -140,7 +148,7 @@ export interface Variable {
   /** 与 `GameScenario.variables` 的 Record key 对齐；编辑器添加时自动生成，不可手填。 */
   id: string
   name?: string
-  initial?: number
+  initial?: ScalarValue
   min?: number
   max?: number
 }

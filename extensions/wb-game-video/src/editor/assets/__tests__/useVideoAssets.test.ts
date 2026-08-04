@@ -21,6 +21,7 @@ vi.mock('../kino-api', async (importOriginal) => {
   return {
     ...actual,
     createKinoVideoClient: () => ({
+      capabilities: vi.fn(),
       list: defaultKinoList,
       playbackUrl: (id: string, gameId: string) =>
         `/api/v1/kino/resources/${id}/content?game_id=${encodeURIComponent(gameId)}`,
@@ -65,6 +66,7 @@ function makeResource(overrides: Partial<KinoResourceDTO> = {}): KinoResourceDTO
 function makeClient(overrides: Partial<KinoVideoClient> = {}): KinoVideoClient {
   const resource = makeResource()
   return {
+    capabilities: vi.fn(),
     prepareUpload: vi.fn(),
     list: vi.fn(async () => ({ items: [resource], total: 1, page: 1, page_size: 20 })),
     get: vi.fn(async () => resource),

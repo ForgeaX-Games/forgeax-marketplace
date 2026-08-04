@@ -133,6 +133,19 @@ describe('GraphStudio 节点配置分栏', () => {
     await waitFor(() => expect(start.mock.calls.length).toBeGreaterThan(startsBeforeRuleChange))
   })
 
+  it('在选中节点上提供 Chat 引用和视频生成入口', () => {
+    render(<GraphStudio scenario={SCENARIO} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '🔗 引用' }))
+    expect(screen.getByText('请在 Studio 中打开后使用侧边 Chat')).toBeTruthy()
+
+    const generationButton = screen.getByRole('button', { name: '🎬 生成视频' })
+    expect(generationButton.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(generationButton)
+    expect(generationButton.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByPlaceholderText('写给视频生成模型的镜头、动作、氛围提示词')).toBeTruthy()
+    expect(screen.getByText('▶ 生成视频', { selector: 'button' })).toBeTruthy()
+  })
   it('记忆已有节点的展开状态，但新增节点时强制收起', async () => {
     render(<GraphStudio scenario={SCENARIO} />)
 

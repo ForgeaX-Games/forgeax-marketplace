@@ -140,14 +140,13 @@ function unwrapExpr(value: NumOrExpr, prefix: '-(' | '1/('): NumOrExpr | undefin
 
 /**
  * 把发布态 `add/mul/set + value` 还原成编辑器的 `+ − × ÷ = + 原始操作数`。
- * 历史 `add + 负数` 也按减法展示；新写入的减/除统一使用可逆表达式包装，避免 ÷2 被折成 ×0.5 后丢失意图。
+ * 减/除统一使用可逆表达式包装 `-(...)` / `1/(...)`，避免 ÷2 被折成 ×0.5 后丢失意图。
  */
 export function decodeEffectOperation(op: NumericEffectOp, value: NumOrExpr): EffectOperationView {
   if (op === 'set') return { op: 'set', value }
   if (op === 'add') {
     const unwrapped = unwrapExpr(value, '-(')
     if (unwrapped !== undefined) return { op: 'sub', value: unwrapped }
-    if (typeof value === 'number' && (value < 0 || Object.is(value, -0))) return { op: 'sub', value: -value }
     return { op: 'add', value }
   }
   const unwrapped = unwrapExpr(value, '1/(')

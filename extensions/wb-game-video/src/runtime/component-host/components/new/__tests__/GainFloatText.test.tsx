@@ -4,20 +4,17 @@ import { describe, expect, it } from 'vitest'
 import { GainFloatText } from '../GainFloatText'
 
 describe('GainFloatText', () => {
-  it('prefixes unsigned positive numeric parameters with a plus sign', () => {
+  it('preserves unsigned positive numeric parameters without a plus sign', () => {
     render(<GainFloatText parameter="50" />)
 
-    expect(screen.getByText('+50')).toBeInTheDocument()
+    expect(screen.getByText('50')).toBeInTheDocument()
   })
 
-  it('does not duplicate a fixed minus sign for positive parameters', () => {
-    render(<GainFloatText fixedText="-" parameter="50" />)
-
+  it('concatenates fixed text and preserves explicit parameter signs', () => {
+    const { rerender } = render(<GainFloatText fixedText="-" parameter="50" />)
     expect(screen.getByText('-50')).toBeInTheDocument()
-  })
 
-  it('preserves signed, non-positive, and non-numeric parameters', () => {
-    const { rerender } = render(<GainFloatText parameter="+50" />)
+    rerender(<GainFloatText parameter="+50" />)
     expect(screen.getByText('+50')).toBeInTheDocument()
 
     rerender(<GainFloatText parameter="-50" />)

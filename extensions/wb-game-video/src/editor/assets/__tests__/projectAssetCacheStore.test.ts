@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssetLibraryClient, ManagedAsset } from '../assetLibraryClient'
+import type { KinoProviderCapabilities } from '../kino-api'
 import { useProjectAssetCache } from '../projectAssetCacheStore'
 
 function asset(id: string, kind: ManagedAsset['kind'] = 'audio'): ManagedAsset {
@@ -8,6 +9,11 @@ function asset(id: string, kind: ManagedAsset['kind'] = 'audio'): ManagedAsset {
 
 function client(list: AssetLibraryClient['list']): AssetLibraryClient {
   return {
+    capabilities: vi.fn(async (): Promise<KinoProviderCapabilities> => ({
+      provider: 'local',
+      media_types: ['video', 'image', 'audio', 'font'],
+      upload_mimes: ['video/mp4'],
+    })),
     list,
     upload: vi.fn(),
     rename: vi.fn(),

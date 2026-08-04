@@ -192,6 +192,7 @@ interface VideoArgs {
   styleAxes?: StyleAxes
   extend?: boolean
   transitionHint?: string
+  continuityMode?: 'strict' | 'independent'
 }
 
 export const tools = {
@@ -357,6 +358,7 @@ export const tools = {
         generateAudio: args.generateAudio,
         styleAxes: args.styleAxes,
         transitionHint: args.transitionHint,
+        continuityMode: args.continuityMode,
       })
       return { assets }
     } catch (e) {

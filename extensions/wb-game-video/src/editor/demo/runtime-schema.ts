@@ -321,20 +321,23 @@ export type CmpOp = 'gte' | 'lte' | 'gt' | 'lt' | 'eq' | 'neq'
 // §7. 实体 / 变量
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** 规则作者可持久化的值；字符串不参与数值运行态。 */
+export type ScalarValue = string | number
+
 export interface Entity {
   /** 与 `GameScenario.entities` 的 Record key 对齐。 */
   id: string
   name?: string
   kind?: string
-  /** 开放数值袋：attack/defense/speed/hp/… 任意扩展；**没有 hp 特权字段**。 */
-  attrs?: Record<string, number>
+  /** 开放标量袋：数值项可被运行时引用，字符串项仅供作者编辑与存储。 */
+  attrs?: Record<string, ScalarValue>
   attrMeta?: Record<string, AttrMeta>
 }
 export interface Variable {
   /** 与 `GameScenario.variables` 的 Record key 对齐。 */
   id: string
   name?: string
-  initial?: number
+  initial?: ScalarValue
   min?: number
   max?: number
 }

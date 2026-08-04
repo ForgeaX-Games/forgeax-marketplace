@@ -1,4 +1,4 @@
-# @forgeax/wb-game-video
+# @forgeax-extension/wb-game-video
 
 玩法优先的视频游戏蓝图编辑器与运行时。它把视频演出、血条、QTE、限时选择和热点交互组合成可序列化的 `GraphLibraryDocument`，由纯 TypeScript 状态机确定性执行。
 
@@ -26,6 +26,11 @@ bun run test
 bun run lint
 bun run build
 ```
+
+生成超过 15 秒的多段连续视频时，管线优先使用 Provider 的原生视频续接能力（Kino
+直接引用上一段视频）；Provider 不支持时才使用服务端 `PATH` 中的 `ffmpeg` 提取真实
+尾帧。两者都不可用时，`strict` 模式会在首笔付费任务前终止；调用方可显式选择
+`continuityMode="independent"`，接受各段独立生成。
 
 `@forgeax/extension-platform` 的 peer 与开发依赖都精确固定为 `0.0.2`。后端显式适配两种宿主上下文：
 

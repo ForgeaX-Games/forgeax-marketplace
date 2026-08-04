@@ -7,7 +7,7 @@
  *   **无 hp 特权**：hp 只是 attrs 里名为 hp 的一项（约定）。
  * - rng：使用会话注入的 seed；缺省 0，保证 headless 调试和测试可复现。
  */
-import type { GameScenario } from '../schema/graph-schema'
+import { isNumericScalar, type GameScenario } from '../schema/graph-schema'
 import { createRng } from './rng'
 import type { MutableEntity, MutableState } from './apply-effects'
 
@@ -18,16 +18,19 @@ export function initState(scenario: GameScenario, rngSeed = 0): MutableState {
 
   // 声明变量一律进 vars 桶（带 min/max clamp）；flag 为纯运行时概念，由 flag effect 写 flags 桶（默认 0）。
   for (const [id, raw] of Object.entries(scenario.variables ?? {})) {
-    vars[id] = raw.initial ?? 0
+    if (!isNumericScalar(raw.initial)) continue
+    vars[id] = raw.initial
     if (raw.min !== undefined || raw.max !== undefined) varMeta[id] = { min: raw.min, max: raw.max }
   }
 
   const entities: Record<string, MutableEntity> = {}
   for (const [id, raw] of Object.entries(scenario.entities ?? {})) {
-    const attrs: Record<string, number> = { ...(raw.attrs ?? {}) }
+    const attrs = Object.fromEntries(
+      Object.entries(raw.attrs ?? {}).filter(([, value]) => isNumericScalar(value)),
+    ) as Record<string, number>
     if (raw.attrMeta) {
       for (const [k, m] of Object.entries(raw.attrMeta)) {
-        if (attrs[k] === undefined && m.initial !== undefined) attrs[k] = m.initial
+        if (!Object.hasOwn(raw.attrs ?? {}, k) && attrs[k] === undefined && m.initial !== undefined) attrs[k] = m.initial
       }
     }
     entities[id] = { attrs, attrMeta: raw.attrMeta }

@@ -103,9 +103,17 @@ export function inferSeedanceTaskMode(roles: ReferenceImageRole[]): SeedanceTask
   return "reference";
 }
 
-function buildTaskModeLine(taskMode: SeedanceTaskMode): string {
+function buildTaskModeLine(taskMode: SeedanceTaskMode, roles: ReferenceImageRole[]): string {
   if (taskMode === "extend") {
-    return "向后延长 @视频1，时序延续以 @视频1 为唯一基准，首帧紧接其末帧的人物姿态、表情、光影和镜头位置；禁止跳切、跳帧或重置场景。";
+    const extendVideo = roles.find((role) => role.role === "extend_video");
+    const tailFrame = roles.find((role) => role.role === "keyframe_first");
+    if (extendVideo) {
+      return `向后延长 ${extendVideo.atSlot}，时序延续以其尾帧为唯一基准，首帧紧接其人物姿态、表情、光影和镜头位置；禁止跳切、跳帧或重置场景。`;
+    }
+    if (tailFrame) {
+      return `续写上一段视频，时序延续以 ${tailFrame.atSlot}（上一段视频的真实尾帧）为唯一基准；禁止跳切、跳帧或重置场景。`;
+    }
+    throw new Error("extend 视频 prompt 缺少上一段视频或真实尾帧锚点");
   }
   if (taskMode === "edit") {
     return "严格编辑 @视频1，仅修改被明确点名的元素；未提及的人物身份、动作、运镜和场景保持不变。";
@@ -268,9 +276,9 @@ function bindingToRole(b: VideoRefBinding): ReferenceImageRole {
 }
 
 /**
- * VIDEO_EXTEND_HEADER_BLOCK 从同目录 ./templates 引入（逐字搬自 FMV prompts/templates.ts）。
+ * V-PROMPT-15 从同目录 ./templates 引入；锚点按实际绑定的视频或真实尾帧动态渲染。
  */
-import { VIDEO_EXTEND_HEADER_BLOCK } from "./templates";
+import { buildVideoExtendHeaderBlock } from "./templates";
 
 /**
  * 视频 prompt 装配（薄输入版，对齐 reference-v2.ts:assembleSeedanceReferencePromptV2 段序）。
@@ -283,12 +291,12 @@ export function buildSeedanceVideoPrompt(input: VideoBindingInput): string {
   const clipSeconds = input.durationSeconds;
   const aspectRatio = input.aspectRatio ?? "16:9";
   const roles = input.refs.map(bindingToRole);
-  const taskMode = input.taskMode ?? inferSeedanceTaskMode(roles);
+  const taskMode = input.taskMode ?? (input.extend ? "extend" : inferSeedanceTaskMode(roles));
 
   const styleAndParams = buildStyleAndParamsBlock(input.styleKeywords, clipSeconds, aspectRatio);
   const subjectAnchor = buildSubjectAnchorOpening(roles);
   const constraintBlock = buildTopPriorityConstraints(roles);
-  const taskModeLine = buildTaskModeLine(taskMode);
+  const taskModeLine = buildTaskModeLine(taskMode, roles);
 
   const rawSequence = (input.seedancePrompt?.trim() || input.storyText?.trim() || "").trim();
   const shotSequence = rawSequence
@@ -309,9 +317,23 @@ export function buildSeedanceVideoPrompt(input: VideoBindingInput): string {
     .join("\n");
 
   if (input.extend) {
+    const extendVideo = roles.find((role) => role.role === "extend_video");
+    const tailFrame = roles.find((role) => role.role === "keyframe_first");
+    const continuityAnchor = extendVideo
+      ? { atSlot: extendVideo.atSlot, source: "video" as const }
+      : tailFrame
+        ? { atSlot: tailFrame.atSlot, source: "tail_frame" as const }
+        : null;
+    if (!continuityAnchor) {
+      throw new Error("extend 视频 prompt 缺少上一段视频或真实尾帧锚点");
+    }
+    const header = buildVideoExtendHeaderBlock(
+      continuityAnchor.atSlot,
+      continuityAnchor.source,
+    );
     const extendHeader = input.transitionHint
-      ? `${VIDEO_EXTEND_HEADER_BLOCK}\n7. 衔接锚点：${input.transitionHint}`
-      : VIDEO_EXTEND_HEADER_BLOCK;
+      ? `${header}\n衔接锚点：${input.transitionHint}`
+      : header;
     return [extendHeader, body].join("\n");
   }
   return body;
@@ -332,14 +354,14 @@ export const SEEDANCE_POLISH_SYSTEM_PROMPT = `你是 Seedance 2.0 Prompt Optimiz
 【结构保持 · 不可破坏】
 - 必须保持结构母版的段落顺序和段落标题，不得改写成散文。
 - 保留并原样输出结构母版中的「【基础设定】」「【氛围与画质】」等方括号段落标题。
-- 保留结构母版中的任务模式句，例如「向后延长 @视频1」「严格编辑 @视频1」「视频从首帧关键帧自然起势」。
+- 保留结构母版中的任务模式句，例如「续写上一段视频」「向后延长 @视频1」「严格编辑 @视频1」「视频从首帧关键帧自然起势」。
 - 保留结构母版中的所有「镜头N：」编号；不得增删镜头，不得改变镜头编号顺序。
 - 保留结构母版中的素材绑定句与 @ 引用用途说明；不得把 @ 引用藏进泛泛描述里。
 - 用户润色意图可以是大白话，你需要把它扩写进镜头序列，而不是用它替换整个结构母版。
 
 【sd2-pe 任务判定】
 - 多模态参考：使用 @图片N / @视频N / @音频N 绑定主体、场景、动作、音色。
-- 视频延长：必须写「向后延长 @视频N」或「从 @视频N 的尾帧无缝接续」，不要写「参考 @视频N」。
+- 视频延长：若母版绑定 @视频N，写「向后延长 @视频N」；若母版绑定上一段真实尾帧 @图片N，写「从 @图片N 无缝接续」。不得发明母版中不存在的 @视频N。
 - 视频编辑：必须写「严格编辑 @视频N，将其中的…修改/替换/删除为…」。
 - 组合任务：先说明参考维度，再说明严格编辑或延长的目标视频。
 

@@ -26,6 +26,7 @@ function resource(id: string): KinoResourceDTO {
 
 function client(list: KinoVideoClient['list']): KinoVideoClient {
   return {
+    capabilities: vi.fn(),
     prepareUpload: vi.fn(),
     list,
     get: vi.fn(),

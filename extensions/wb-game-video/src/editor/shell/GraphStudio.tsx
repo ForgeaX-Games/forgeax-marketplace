@@ -17,6 +17,7 @@ import { createKinoAssetLibraryClient } from '../assets/assetLibraryClient'
 import { useProjectAssets } from '../assets/projectAssetCacheStore'
 import { audioAssetOptions } from './bgm-authoring'
 import { NodePreviewStage } from './NodePreviewStage'
+import { NodeAgentVideoActions } from './NodeAgentVideoActions'
 import { VersionPicker } from './VersionPicker'
 import { PlayerRootContext } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
@@ -801,6 +802,19 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             <b style={{ fontSize: 12 }}>节点配置{selectedNode ? ` · ${selectedNode.data.name || selectedNode.id}` : ''}</b>
             <button onClick={() => setSelected(null)} title="关闭" style={{ marginLeft: 'auto', color: '#9aa2b1', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
+          {selectedNode ? (
+            <NodeAgentVideoActions
+              game={game}
+              blueprintId={activeBlueprintId}
+              blueprintTitle={blueprints[activeBlueprintId]?.title}
+              graphPath={drillLabels}
+              graph={canvasGraph}
+              scenario={previewScenario}
+              node={selectedNode}
+              videoGenerationEnabled={selectedCanConfigurePerformance}
+              onEditScenario={editPreviewScenario}
+            />
+          ) : null}
           {/* 展开态默认 3:2；拖拽后首列改用用户设定宽度。窄面板仍保证预览略宽于表单。 */}
           <div
             data-testid="node-panel-columns"

@@ -42,7 +42,7 @@ export function DamageFloatText({
 }: DamageFloatTextProps): ReactNode {
   injectCss('damage-float-text', DAMAGE_FLOAT_TEXT_CSS)
   ensureBrushFont()
-  const text = `${fixedText}${formatDamageParameter(fixedText, parameter)}`
+  const text = `${fixedText}${parameter}`
   const textStyle = resolveTextAppearance({ color, fontSize } as TextAppearanceInputs, { color: '#ff5a5a', fontSize: 3.5 })
   const frozen = preview && !previewPlaying
   return (
@@ -53,15 +53,6 @@ export function DamageFloatText({
       <span data-overlay-fit-target style={textStyle}>{text}</span>
     </div>
   )
-}
-
-function formatDamageParameter(fixedText: string, parameter: string): string {
-  const normalized = parameter.trim()
-  const numeric = Number(normalized)
-  const fixedMinus = fixedText.trim() === '-'
-  return normalized && Number.isFinite(numeric) && numeric > 0 && !normalized.startsWith('+') && !fixedMinus
-    ? `+${parameter}`
-    : parameter
 }
 
 const DAMAGE_FLOAT_TEXT_CSS = `

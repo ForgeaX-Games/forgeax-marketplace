@@ -7,7 +7,7 @@ import {
 import { extname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PACKAGE_NAME = '@forgeax/wb-game-video'
+const PACKAGE_NAME = '@forgeax-extension/wb-game-video'
 const PLATFORM_PACKAGE = '@forgeax/extension-platform'
 const PLATFORM_VERSION = '0.0.2'
 const TEXT_EXTENSIONS = new Set([
@@ -50,7 +50,9 @@ const oldEnvironmentNames = [
   ['WB', ['GAME', 'VIDEO'].join(''), 'PLUGIN', 'BUILD'].join('_'),
 ]
 const OLD_ACTIVE_IDENTITIES = [
-  new RegExp(['@forgeax-', 'extension/wb-game-', 'video'].join('')),
+  // Former package / manifest scope before @forgeax-extension alignment.
+  // Joined so this file itself does not match the scanner.
+  new RegExp(['@forgeax/', 'wb-game-', 'video'].join('')),
   new RegExp(`\\b(?:${oldToolNamespaces.join('|')})(?::[a-z]|\\.)`, 'i'),
   new RegExp(`\\b${compactLegacyReelName}\\b`, 'i'),
   new RegExp(`\\b${compactLegacyName}(?:[:.\\-\\]]|\\b)`, 'i'),
@@ -150,7 +152,7 @@ function oldIdentityPathMatch(packagePath) {
     }
 
     if (
-      component === '@forgeax-extension' &&
+      component === '@forgeax' &&
       components[index + 1] === 'wb-game-video'
     ) {
       return components.slice(0, index + 2).join('/')

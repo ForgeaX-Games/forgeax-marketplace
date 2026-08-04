@@ -25,10 +25,13 @@ describe('provider-backed generation references', () => {
       updatedAt: 1,
     }
 
-    await expect(resolveAssetImagePayload(ctx, asset)).resolves.toEqual({
+    const payload = await resolveAssetImagePayload(ctx, asset)
+    expect(payload).toMatchObject({
       base64: 'AQID',
       dataUrl: 'data:image/png;base64,AQID',
+      mime: 'image/png',
     })
+    expect([...payload.bytes]).toEqual([1, 2, 3])
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:18999/api/v1/kino/resources/uploaded-image/content?game_id=demo-game',
     )

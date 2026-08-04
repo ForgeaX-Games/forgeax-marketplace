@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateVideo, type OrchestrateCtx } from './orchestrate'
+import type { VideoGenerationRequest } from './video-generation-gateway'
 
 const roots: string[] = []
 
@@ -38,30 +39,35 @@ afterEach(() => {
 })
 
 describe('generateVideo capability seam', () => {
-  it('uses the host extension-platform capability instead of the legacy gateway and returns its MediaAsset binding', async () => {
+  it('sends reference bytes to the host capability and persists the generated video locally', async () => {
     const invoke = vi.fn(async (_id: string, _version: number, value: unknown) => {
-      expect(value).toMatchObject({
-        references: [
-          { role: 'first_frame', assetId: 'continuity' },
-          { role: 'reference_image', assetId: 'character' },
-          { role: 'reference_image', assetId: 'scene' },
-        ],
-      })
+      const request = value as VideoGenerationRequest
+      expect(request.references.map(({ role, assetId, mime, bytes }) => ({
+        role, assetId, mime, text: Buffer.from(bytes).toString(),
+      }))).toEqual([
+        { role: 'first_frame', assetId: 'continuity', mime: 'image/png', text: 'continuity' },
+        { role: 'reference_image', assetId: 'character', mime: 'image/png', text: 'character' },
+        { role: 'reference_image', assetId: 'scene', mime: 'image/png', text: 'scene' },
+      ])
       expect(value).not.toHaveProperty('imageWithRoles')
       return {
-        asset: {
-          id: 'host-video-1', kind: 'video', status: 'ready', mime: 'video/mp4',
-          createdAt: 2, updatedAt: 2, provider: { kind: 'kino', ref: 'generation-1' },
+        video: {
+          bytes: Uint8Array.from(Buffer.from('kino-video')),
+          mime: 'video/mp4',
+          sourceUrl: 'https://cdn.example/generated.mp4',
+          generationId: 'generation-1',
+          providerTaskId: 'seedance-task-1',
+          model: 'seedance2',
+          provider: {
+            kind: 'kino',
+            ref: 'https://cdn.example/generated.mp4',
+            upstreamResourceId: 'resource-1',
+          },
         },
       }
     })
 
     const context = createContext(invoke)
-    // Capability hosts resolve asset IDs themselves; this path must not read local
-    // bytes or call the legacy resource endpoint before invoking the host bridge.
-    rmSync(join(context.dir, 'media', 'character.png'))
-    rmSync(join(context.dir, 'media', 'scene.png'))
-    rmSync(join(context.dir, 'media', 'continuity.png'))
     const asset = await generateVideo(context, {
       sceneNodeId: 'node-1',
       nodeName: 'Opening',
@@ -79,11 +85,29 @@ describe('generateVideo capability seam', () => {
       { requestId: expect.stringMatching(/^wb-game-video-v1-[0-9a-f]{64}$/) },
     )
     expect(asset).toMatchObject({
-      id: 'host-video-1', kind: 'video', productionType: 'video_clip', status: 'ready',
-      sceneNodeId: 'node-1', durationMs: 5000,
-      provider: { kind: 'kino', ref: 'generation-1' },
+      id: expect.stringMatching(/^a-vid-/),
+      kind: 'video',
+      productionType: 'video_clip',
+      status: 'ready',
+      sceneNodeId: 'node-1',
+      durationMs: 5000,
+      mime: 'video/mp4',
+      bytes: 10,
+      url: 'https://cdn.example/generated.mp4',
+      provider: {
+        kind: 'kino',
+        ref: 'https://cdn.example/generated.mp4',
+        upstreamResourceId: 'resource-1',
+      },
+      meta: {
+        generationId: 'generation-1',
+        providerTaskId: 'seedance-task-1',
+        model: 'seedance2',
+      },
     })
-    expect(JSON.parse(readFileSync(join(context.dir, 'manifest.json'), 'utf8')).assets)
-      .toHaveLength(3)
+    expect(asset.file).toBeTruthy()
+    expect(existsSync(join(context.dir, asset.file!))).toBe(true)
+    expect(readFileSync(join(context.dir, asset.file!), 'utf8')).toBe('kino-video')
+    expect(JSON.parse(readFileSync(join(context.dir, 'manifest.json'), 'utf8')).assets).toHaveLength(4)
   })
 })

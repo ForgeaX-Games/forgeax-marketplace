@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   MAX_KINO_RESOURCE_PAGE_SIZE,
   createKinoVideoClient,
+  type KinoProviderCapabilities,
   type KinoResourceDTO,
   type KinoVideoClient,
 } from './kino-api'
@@ -28,6 +29,7 @@ export interface ManagedAsset {
 }
 
 export interface AssetLibraryClient {
+  capabilities(options?: { signal?: AbortSignal }): Promise<KinoProviderCapabilities>
   list(gameId: string, kind: ManagedAssetKind, options?: { signal?: AbortSignal }): Promise<ManagedAsset[]>
   upload(gameId: string, kind: ManagedAssetKind, file: File, options?: { signal?: AbortSignal }): Promise<ManagedAsset>
   rename(gameId: string, id: string, name: string, options?: { signal?: AbortSignal }): Promise<ManagedAsset>
@@ -35,6 +37,22 @@ export interface AssetLibraryClient {
 }
 
 const MAX_ASSET_LIBRARY_PAGES = 100
+const MANAGED_ASSET_KINDS: readonly ManagedAssetKind[] = ['image', 'audio', 'font']
+const FORMAT_LABEL_BY_MIME: Readonly<Record<string, string>> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/webp': 'WebP',
+  'image/gif': 'GIF',
+  'audio/mpeg': 'MP3',
+  'audio/wav': 'WAV',
+  'audio/ogg': 'OGG',
+  'audio/mp4': 'M4A',
+  'audio/aac': 'AAC',
+  'font/woff2': 'WOFF2',
+  'font/woff': 'WOFF',
+  'font/ttf': 'TTF',
+  'font/otf': 'OTF',
+}
 
 export class AssetLibraryUploadError extends Error {
   constructor(message: string) {
@@ -50,6 +68,58 @@ export interface CreateKinoAssetLibraryClientOptions {
 
 function displayName(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, '') || fileName
+}
+
+function kindLabel(kind: ManagedAssetKind): string {
+  return kind === 'image' ? '图片' : kind === 'audio' ? '音频' : '字体'
+}
+
+function managedKinds(capabilities: KinoProviderCapabilities): ManagedAssetKind[] {
+  return MANAGED_ASSET_KINDS.filter((kind) => capabilities.media_types.includes(kind))
+}
+
+function allowedUploadMimes(
+  kind: ManagedAssetKind,
+  capabilities: KinoProviderCapabilities,
+): string[] {
+  const supported = new Set<string>(capabilities.upload_mimes)
+  return BROWSER_UPLOAD_POLICIES[kind].mimeTypes.filter((mime) => supported.has(mime))
+}
+
+function joinChoices(values: readonly string[]): string {
+  if (values.length < 2) return values[0] ?? ''
+  return `${values.slice(0, -1).join('、')} 或 ${values.at(-1)}`
+}
+
+function supportedFormatLabel(kind: ManagedAssetKind, capabilities: KinoProviderCapabilities): string {
+  const labels = allowedUploadMimes(kind, capabilities).map((mime) => FORMAT_LABEL_BY_MIME[mime] ?? mime)
+  return `${joinChoices(labels)} ${kindLabel(kind)}`
+}
+
+function assertProviderAssetUploadFile(
+  kind: ManagedAssetKind,
+  file: File,
+  capabilities: KinoProviderCapabilities,
+): void {
+  if (!capabilities.media_types.includes(kind)) {
+    throw new AssetLibraryUploadError(`当前 ${capabilities.provider} provider 不支持${kindLabel(kind)}资产`)
+  }
+  if (!allowedUploadMimes(kind, capabilities).includes(file.type)) {
+    throw new AssetLibraryUploadError(
+      `不支持的${kindLabel(kind)}格式；仅支持${supportedFormatLabel(kind, capabilities)}`,
+    )
+  }
+}
+
+function acceptedExtensions(
+  kind: ManagedAssetKind,
+  capabilities: KinoProviderCapabilities,
+): string {
+  const allowed = new Set(allowedUploadMimes(kind, capabilities))
+  return Object.entries(BROWSER_UPLOAD_POLICIES[kind].extensions)
+    .filter(([mime]) => allowed.has(mime))
+    .flatMap(([, extensions]) => extensions.map((extension) => `.${extension}`))
+    .join(',')
 }
 
 function bytes(resource: KinoResourceDTO): number | undefined {
@@ -84,6 +154,10 @@ export function createKinoAssetLibraryClient(
   const client = options.client ?? createKinoVideoClient()
 
   return {
+    async capabilities(requestOptions) {
+      return client.capabilities(requestOptions)
+    },
+
     async list(gameId, kind, requestOptions) {
       const resources = new Map<string, ManagedAsset>()
       for (let page = 1; page <= MAX_ASSET_LIBRARY_PAGES; page += 1) {
@@ -103,13 +177,15 @@ export function createKinoAssetLibraryClient(
 
     async upload(gameId, kind, file, requestOptions) {
       try {
+        const capabilities = await client.capabilities(requestOptions)
+        assertProviderAssetUploadFile(kind, file, capabilities)
         const resource = await uploadProviderResource({
           client,
           transport: options.transport,
           gameId,
           mediaType: kind,
           file,
-        name: displayName(file.name),
+          name: displayName(file.name),
           source: 'wb-game-video',
           sourceMeta: { extra: { bytes: file.size } },
           signal: requestOptions?.signal,
@@ -119,19 +195,10 @@ export function createKinoAssetLibraryClient(
         if (!(error instanceof VideoUploadError)) throw error
         const policy = BROWSER_UPLOAD_POLICIES[kind]
         if (error.code === 'invalid_media_type') {
-          const supported = kind === 'image'
-            ? 'PNG、JPEG、WebP 或 GIF 图片'
-            : kind === 'audio'
-              ? 'MP3、WAV、OGG、M4A 或 AAC 音频'
-              : 'WOFF2、WOFF、TTF 或 OTF 字体'
-          throw new AssetLibraryUploadError(`不支持的${kind === 'font' ? '字体' : kind === 'image' ? '图片' : '音频'}格式；仅支持${supported}`)
+          throw new AssetLibraryUploadError(`不支持的${kindLabel(kind)}格式`)
         }
         if (error.code === 'invalid_file_name') {
-          throw new AssetLibraryUploadError(
-            kind === 'audio' && file.type === 'audio/mp4'
-              ? 'M4A 音频必须使用 .m4a 文件扩展名'
-              : '文件名或扩展名与媒体格式不匹配',
-          )
+          throw new AssetLibraryUploadError('文件名或扩展名与媒体格式不匹配')
         }
         if (error.code === 'invalid_upload_size') {
           throw new AssetLibraryUploadError(
@@ -171,6 +238,9 @@ export interface AssetLibraryController {
   available: boolean
   loading: boolean
   error: string | null
+  provider: KinoProviderCapabilities['provider'] | null
+  supportedKinds: readonly ManagedAssetKind[]
+  accept: Readonly<Partial<Record<ManagedAssetKind, string>>>
   uploading: ManagedAssetKind | null
   mutating: boolean
   items: ManagedAsset[]
@@ -181,21 +251,29 @@ export interface AssetLibraryController {
   removeMany(ids: readonly string[], onProgress?: (current: number, total: number) => void): Promise<{ completed: number, failedId?: string }>
 }
 
-const UNAVAILABLE_MESSAGE = '图片、BGM 与字体资源 API 尚未启用'
-
-function kindLabel(kind: ManagedAssetKind): string {
-  return kind === 'image' ? '图片' : kind === 'audio' ? '音频' : '字体'
-}
+const UNAVAILABLE_MESSAGE = '资产资源 API 尚未启用'
 
 export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): AssetLibraryController {
   const cache = useProjectAssetCache((state) => state.byGame[gameId])
   const refreshCached = useProjectAssetCache((state) => state.refresh)
   const upsertCached = useProjectAssetCache((state) => state.upsert)
   const removeCached = useProjectAssetCache((state) => state.remove)
-  const kinds: ManagedAssetKind[] = ['image', 'audio', 'font']
-  const items = kinds.flatMap((kind) => cache?.[kind]?.items ?? [])
-  const loading = kinds.some((kind) => cache?.[kind]?.loading)
-  const errors = kinds.flatMap((kind) => {
+  const [capabilities, setCapabilities] = useState<KinoProviderCapabilities | null>(null)
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false)
+  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null)
+  const supportedKinds = useMemo(
+    () => capabilities ? managedKinds(capabilities) : [],
+    [capabilities],
+  )
+  const accept = useMemo(() => {
+    if (!capabilities) return {}
+    return Object.fromEntries(
+      supportedKinds.map((kind) => [kind, acceptedExtensions(kind, capabilities)]),
+    ) as Partial<Record<ManagedAssetKind, string>>
+  }, [capabilities, supportedKinds])
+  const items = supportedKinds.flatMap((kind) => cache?.[kind]?.items ?? [])
+  const loading = capabilitiesLoading || supportedKinds.some((kind) => cache?.[kind]?.loading)
+  const errors = supportedKinds.flatMap((kind) => {
     const error = cache?.[kind]?.error
     return error ? [`${kindLabel(kind)}：${error}`] : []
   })
@@ -204,13 +282,28 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
   const [mutating, setMutating] = useState(false)
   const error = !client
     ? UNAVAILABLE_MESSAGE
-    : mutationError ?? (errors.length > 0 ? `部分资产加载失败；保留已缓存内容。${errors.join('；')}` : null)
+    : mutationError
+      ?? capabilitiesError
+      ?? (errors.length > 0 ? `部分资产加载失败；保留已缓存内容。${errors.join('；')}` : null)
 
   const refresh = useCallback(async () => {
     if (!client) {
+      setCapabilities(null)
+      setCapabilitiesError(null)
       return
     }
-    await Promise.all(kinds.map((kind) => refreshCached(gameId, kind, client)))
+    setCapabilitiesLoading(true)
+    setCapabilitiesError(null)
+    try {
+      const nextCapabilities = await client.capabilities()
+      const nextKinds = managedKinds(nextCapabilities)
+      setCapabilities(nextCapabilities)
+      await Promise.all(nextKinds.map((kind) => refreshCached(gameId, kind, client)))
+    } catch (cause) {
+      setCapabilitiesError(cause instanceof Error ? cause.message : '读取 provider 能力失败')
+    } finally {
+      setCapabilitiesLoading(false)
+    }
   }, [client, gameId, refreshCached])
 
   useEffect(() => {
@@ -218,7 +311,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
   }, [refresh])
 
   const upload = useCallback(async (kind: ManagedAssetKind, file: File) => {
-    if (!client) {
+    if (!client || !supportedKinds.includes(kind)) {
       return undefined
     }
     setUploading(kind)
@@ -233,7 +326,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setUploading(null)
     }
-  }, [client, gameId, upsertCached])
+  }, [client, gameId, supportedKinds, upsertCached])
 
   const rename = useCallback(async (id: string, name: string) => {
     if (!client) {
@@ -260,7 +353,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
       return
     }
     const current = useProjectAssetCache.getState().byGame[gameId]
-    const asset = kinds
+    const asset = supportedKinds
       .flatMap((kind) => current?.[kind]?.items ?? [])
       .find((item) => item.id === id)
     if (!asset) return
@@ -275,7 +368,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setMutating(false)
     }
-  }, [client, gameId, removeCached])
+  }, [client, gameId, removeCached, supportedKinds])
 
   const removeMany = useCallback(async (ids: readonly string[], onProgress?: (current: number, total: number) => void) => {
     if (!client || ids.length === 0) return { completed: 0 }
@@ -283,7 +376,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     setMutationError(null)
     const result = await deleteSequentially(ids, async (id) => {
       const current = useProjectAssetCache.getState().byGame[gameId]
-      const asset = kinds.flatMap((kind) => current?.[kind]?.items ?? []).find((item) => item.id === id)
+      const asset = supportedKinds.flatMap((kind) => current?.[kind]?.items ?? []).find((item) => item.id === id)
       if (!asset) return
       await client.remove(gameId, id)
       removeCached(gameId, asset.kind, id)
@@ -291,7 +384,22 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     setMutating(false)
     if (result.error) setMutationError(result.error instanceof Error ? result.error.message : '资产操作失败')
     return { completed: result.completed, failedId: result.failedId }
-  }, [client, gameId, removeCached])
+  }, [client, gameId, removeCached, supportedKinds])
 
-  return { available: Boolean(client), loading, error, uploading, mutating, items, refresh, upload, rename, remove, removeMany }
+  return {
+    available: Boolean(client),
+    loading,
+    error,
+    provider: capabilities?.provider ?? null,
+    supportedKinds,
+    accept,
+    uploading,
+    mutating,
+    items,
+    refresh,
+    upload,
+    rename,
+    remove,
+    removeMany,
+  }
 }

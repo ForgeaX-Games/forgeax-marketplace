@@ -2,7 +2,7 @@
  * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / formulas / 默认 BGM。
  */
 import { useEffect, useState, type CSSProperties, type JSX } from 'react'
-import type { AttrMeta, Entity, GameScenario, Layout, Overlay, Variable } from '../../runtime/schema/graph-schema'
+import type { AttrMeta, Entity, GameScenario, Layout, Overlay, ScalarValue, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
@@ -32,8 +32,8 @@ const sectionTitle: CSSProperties = {
   zIndex: 2,
   background: 'var(--gc-panel, #1b1713)',
 }
-const variableGridColumns = 'minmax(0, 0.9fr) minmax(0, 1.5fr) minmax(3.5rem, 0.55fr) 2rem'
-const entityAttrGrid = 'minmax(4.5rem, 0.45fr) minmax(0, 0.9fr) minmax(7rem, 1.25fr) 2rem'
+const variableGridColumns = 'minmax(0, 0.9fr) minmax(0, 1.5fr) minmax(4rem, 0.5fr) minmax(3.5rem, 0.55fr) 2rem'
+const entityAttrGrid = 'minmax(4.5rem, 0.45fr) minmax(0, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.25fr) 2rem'
 
 function field(label: string, node: JSX.Element): JSX.Element {
   return (
@@ -112,6 +112,26 @@ function OptionalNumberInput({ value, onCommit, label }: { value?: number; onCom
     const parsed = Number(raw)
     onCommit(raw && Number.isFinite(parsed) ? parsed : undefined)
   }} />
+}
+
+function ScalarValueInput({ value, onChange, label, style }: {
+  value: ScalarValue
+  onChange: (value: ScalarValue) => void
+  label: string
+  style?: CSSProperties
+}): JSX.Element {
+  const isString = typeof value === 'string'
+  return (
+    <>
+      <select value={isString ? 'string' : 'number'} aria-label={`${label}类型`} onChange={(event) => onChange(event.target.value === 'string' ? '' : 0)} style={{ minWidth: 0, width: '100%' }}>
+        <option value="number">数值</option>
+        <option value="string">字符</option>
+      </select>
+      {isString
+        ? <input type="text" value={value} aria-label={label} onChange={(event) => onChange(event.target.value)} style={style} />
+        : <LooseNumberInput value={value} aria-label={label} emptyValue={0} onChange={onChange} style={style} />}
+    </>
+  )
 }
 
 /** 自动分配与 Record key 对齐的 id（添加时用）。 */
@@ -241,6 +261,8 @@ export function ScenarioInspector({
   // 「通用样式」= 自由方案；排除每节点自动内容 overlay（node:*，那是时间轴的内容容器）。
   // 内置方案（静态/动态组件方案）固定置顶，其余按目录原有顺序跟后，见 sortSchemeIds。
   const schemeIds = sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:')))
+  // 标题输入本地缓存：onChange 自由输入，onBlur 时提交到 renameScheme 做重名校验。
+  const [schemeLocalTitles, setSchemeLocalTitles] = useState<Record<string, string>>({})
   const setOverlays = (overlays: Record<string, Overlay>) => onChange({ ...value, ui: { ...value.ui, overlays } })
   const patchOverlayChildInMeta = (
     overlayId: string,
@@ -323,9 +345,25 @@ export function ScenarioInspector({
                 <div key={id} style={box}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
                     <input
-                      value={ov.title ?? ''}
+                      value={schemeLocalTitles[id] ?? ov.title ?? ''}
                       placeholder={id}
-                      onChange={(e) => renameScheme(id, e.target.value)}
+                      onChange={(e) => setSchemeLocalTitles((prev) => ({ ...prev, [id]: e.target.value }))}
+                      onBlur={(e) => {
+                        const local = schemeLocalTitles[id]
+                        // 先清理本地缓存，保证聚焦后 value 回退到 ov.title
+                        setSchemeLocalTitles((prev) => {
+                          const next = { ...prev }
+                          delete next[id]
+                          return next
+                        })
+                        if (local !== undefined && local !== (ov.title ?? '')) {
+                          renameScheme(id, local)
+                          // 延迟聚焦：避免同步 blur→focus 触发重复 blur 事件
+                          setTimeout(() => {
+                            ;(e.target as HTMLInputElement).focus()
+                          }, 0)
+                        }
+                      }}
                       style={{ flex: 1, fontWeight: 600 }}
                     />
                     <UsageBadge count={overlayUsage?.[id] ?? 0} />
@@ -397,6 +435,7 @@ export function ScenarioInspector({
             >
               <span>ID</span>
               <span>名称</span>
+              <span>类型</span>
               <span>初值</span>
               <span />
             </div>
@@ -422,17 +461,15 @@ export function ScenarioInspector({
                 onChange={(e) => setVariables({ ...variables, [key]: { ...v, id: key, name: e.target.value } })}
                 style={{ width: '100%', minWidth: 0 }}
               />
-              <LooseNumberInput
+              <ScalarValueInput
                 value={v.initial ?? 0}
-                aria-label={`${v.id} 的初值`}
-                title="初值"
-                emptyValue={0}
+                label={`${v.id} 的初值`}
                 onChange={(initial) => setVariables({
                   ...variables,
                   [key]: {
                     ...v,
                     id: key,
-                    initial: clampRuleValue(initial, v),
+                    initial: typeof initial === 'number' ? clampRuleValue(initial, v) : initial,
                   },
                 })}
                 style={{ width: '100%', minWidth: 0 }}
@@ -448,14 +485,15 @@ export function ScenarioInspector({
               >
                 ×
               </button>
-              <ValueSettings values={v} label={v.id} onChange={(field, value) => {
-                const next = { ...v }
-                if (value === undefined) delete next[field]
-                else next[field] = value
-                const normalized = normalizeRange(next, field)
-                normalized.initial = clampRuleValue(normalized.initial ?? 0, normalized)
-                setVariables({ ...variables, [key]: normalized })
-              }} />
+              {typeof v.initial !== 'string' ? <ValueSettings values={{ min: v.min, max: v.max, initial: v.initial }} label={v.id} onChange={(field, value) => {
+                const normalized = normalizeRange({
+                  min: v.min,
+                  max: v.max,
+                  initial: typeof v.initial === 'number' ? v.initial : undefined,
+                  [field]: value,
+                }, field)
+                setVariables({ ...variables, [key]: { ...v, ...normalized, initial: clampRuleValue(normalized.initial ?? 0, normalized) } })
+              }} /> : null}
             </div>
           ))}
         </>
@@ -557,11 +595,16 @@ function EntityRow({
   const attrs = ent.attrs ?? {}
   const attrMeta = ent.attrMeta ?? {}
   const [editableAttrIds, setEditableAttrIds] = useState<Set<string>>(() => new Set())
-  const setAttrs = (a: Record<string, number>) => onChange({ ...ent, id: entKey, attrs: a })
+  const setAttrs = (a: Record<string, ScalarValue>) => onChange({ ...ent, id: entKey, attrs: a })
   const setAttrMeta = (m: Record<string, AttrMeta>) => onChange({ ...ent, id: entKey, attrMeta: m })
-  const setAttrValue = (attrId: string, value: number) => {
+  const setAttrValue = (attrId: string, value: ScalarValue) => {
     const nextAttrs = { ...attrs, [attrId]: value }
     const nextMeta = { ...attrMeta }
+
+    if (typeof value === 'string') {
+      onChange({ ...ent, id: entKey, attrs: nextAttrs, attrMeta: Object.keys(nextMeta).length ? nextMeta : undefined })
+      return
+    }
 
     // `<attr>Max` is the editor's established pairing convention (hp/hpMax,
     // stamina/staminaMax, ...). Rules author both the runtime seed in attrs and
@@ -575,9 +618,11 @@ function EntityRow({
       pairedBase
       && Object.hasOwn(nextAttrs, pairedBase)
       && Object.hasOwn(nextAttrs, `${pairedBase}Max`)
+      && typeof nextAttrs[pairedBase] === 'number'
+      && typeof nextAttrs[`${pairedBase}Max`] === 'number'
     ) {
-      const pairedMaxValue = nextAttrs[`${pairedBase}Max`] ?? 0
-      const pairedCurrentValue = nextAttrs[pairedBase] ?? 0
+      const pairedMaxValue = nextAttrs[`${pairedBase}Max`] as number
+      const pairedCurrentValue = nextAttrs[pairedBase] as number
       const pairedMeta = normalizeRange({
         ...nextMeta[pairedBase],
         max: pairedMaxValue,
@@ -662,16 +707,14 @@ function EntityRow({
             onChange={(e) => setAttrMeta({ ...attrMeta, [ak]: { ...attrMeta[ak], label: e.target.value || undefined } })}
             style={{ minWidth: 0, width: '100%' }}
           />
-          <LooseNumberInput
+          <ScalarValueInput
             value={av}
-            aria-label={`属性「${ak}」的数值`}
-            emptyValue={0}
+            label={`属性「${ak}」的数值`}
             onChange={(value) => setAttrValue(ak, value)}
             style={{ minWidth: 0, width: '100%' }}
-            title="当前/初始数值"
           />
           <button style={del} onClick={() => removeAttr(ak)} title="删除该属性">×</button>
-          <ValueSettings values={attrMeta[ak] ?? {}} label={`${ent.id} 的 ${ak}`} onChange={(field, value) => {
+          {typeof av !== 'string' ? <ValueSettings values={attrMeta[ak] ?? {}} label={`${ent.id} 的 ${ak}`} onChange={(field, value) => {
             const current = { ...attrMeta[ak] }
             if (value === undefined) delete current[field]
             else current[field] = value
@@ -680,14 +723,14 @@ function EntityRow({
             const nextAttrs = { ...attrs }
             if (Object.keys(normalized).length === 0) delete nextMeta[ak]
             else nextMeta[ak] = normalized
-            nextAttrs[ak] = clampRuleValue(nextAttrs[ak] ?? 0, normalized)
+            if (typeof nextAttrs[ak] === 'number') nextAttrs[ak] = clampRuleValue(nextAttrs[ak], normalized)
             onChange({
               ...ent,
               id: entKey,
               attrs: nextAttrs,
               attrMeta: Object.keys(nextMeta).length ? nextMeta : undefined,
             })
-          }} />
+          }} /> : null}
         </div>
       ))}
       {Object.keys(attrs).length === 0 ? <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 4 }}>暂无属性</div> : null}

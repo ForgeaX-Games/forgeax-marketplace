@@ -4,7 +4,7 @@
  * 右 = 组件库（拖 chip 落地）。基础界面保留只读居中预览，但不显示设计框且不允许拖动。
  * 组件增删改经回调交给持有 scenario.ui.overlays 的上层（GraphConfigView）。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { Entity, Layout, Overlay, OverlayReaction, Variable } from '../../runtime/schema/graph-schema'
 import {
@@ -167,6 +167,15 @@ export function OverlaySchemeEditor({
   const [selectedChildId, setSelectedChildId] = useState('')
   // 交互热区重叠冲突（DOM 实测，来自画布回调）——组件清单里对应行标红。
   const [warnIds, setWarnIds] = useState<Set<string>>(() => new Set())
+  // 标题输入本地状态：onChange 自由输入，onBlur 时提交到父组件做重名校验。
+  const [localTitle, setLocalTitle] = useState(overlay.title ?? '')
+  const overlayTitleRef = useRef(overlay.title)
+  useEffect(() => {
+    if (overlay.title !== overlayTitleRef.current) {
+      overlayTitleRef.current = overlay.title
+      setLocalTitle(overlay.title ?? '')
+    }
+  }, [overlay.title])
   const selectedChild = overlay.children.find((child) => child.id === selectedChildId)
   const selectedEvents = selectedChild
     ? aggregateOverlayEvents(
@@ -234,9 +243,20 @@ export function OverlaySchemeEditor({
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
           <input
-            value={overlay.title ?? ''}
+            value={localTitle}
             placeholder={overlayId}
-            onChange={(e) => onRename(e.target.value)}
+            onChange={(e) => setLocalTitle(e.target.value)}
+            onBlur={(e) => {
+              if (localTitle !== (overlay.title ?? '')) {
+                onRename(localTitle)
+                // 重置本地草稿（重名校验失败时 overlay.title 未变，避免下次 blur 再次弹窗）
+                setLocalTitle(overlay.title ?? '')
+                // 延迟聚焦：避免同步 blur→focus 触发重复 blur 事件
+                setTimeout(() => {
+                  ;(e.target as HTMLInputElement).focus()
+                }, 0)
+              }
+            }}
             style={{ flex: 1, fontWeight: 600 }}
           />
           <UsageBadge count={usageCount} />

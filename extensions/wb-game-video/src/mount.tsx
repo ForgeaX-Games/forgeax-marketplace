@@ -7,7 +7,7 @@
  *
  * 典型用法：
  * ```ts
- * import { mount } from '@forgeax/wb-game-video'
+ * import { mount } from '@forgeax-extension/wb-game-video'
  * const handle = mount(document.getElementById('host')!)
  * handle.unmount()
  * ```

@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import type { AssetLibraryController, ManagedAsset, ManagedAssetKind } from './assetLibraryClient'
 
-const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif'
-const AUDIO_ACCEPT = '.mp3,.wav,.ogg,.m4a,.aac'
-const FONT_ACCEPT = '.woff2,.woff,.ttf,.otf'
-
 interface BatchUploadState {
   current: number
   total: number
@@ -28,16 +24,17 @@ function formatBytes(value: number | undefined): string {
 
 function AssetUploadTile({
   kind,
+  accept,
   busy,
   disabled,
   onUpload,
 }: {
   kind: ManagedAssetKind
+  accept: string
   busy: boolean
   disabled: boolean
   onUpload: (kind: ManagedAssetKind, files: File[]) => void
 }): JSX.Element {
-  const accept = kind === 'image' ? IMAGE_ACCEPT : kind === 'audio' ? AUDIO_ACCEPT : FONT_ACCEPT
   const label = kind === 'image' ? '上传图片' : kind === 'audio' ? '上传 BGM' : '上传字体'
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
@@ -54,7 +51,7 @@ function AssetUploadTile({
 }
 
 function preview(asset: ManagedAsset | undefined): JSX.Element {
-  if (!asset) return <div className="alp-empty">选择一个图片、BGM 或字体查看详情。</div>
+  if (!asset) return <div className="alp-empty">选择一个资产查看详情。</div>
   const fontFamily = `asset-font-${asset.id.replace(/[^A-Za-z0-9_-]/g, '-')}`
   return (
     <div className="alp-stage">
@@ -100,22 +97,23 @@ export function AssetLibraryPanel({
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
   const [batchDeleting, setBatchDeleting] = useState<{ current: number, total: number } | null>(null)
 
-  const imageItems = useMemo(
-    () => controller.items.filter((item) => item.kind === 'image'),
-    [controller.items],
-  )
-  const audioItems = useMemo(
-    () => controller.items.filter((item) => item.kind === 'audio'),
-    [controller.items],
-  )
-  const fontItems = useMemo(
-    () => controller.items.filter((item) => item.kind === 'font'),
-    [controller.items],
-  )
-  const activeItems = activeKind === 'image' ? imageItems : activeKind === 'audio' ? audioItems : fontItems
+  const itemsByKind = useMemo(() => Object.fromEntries(
+    controller.supportedKinds.map((kind) => [
+      kind,
+      controller.items.filter((item) => item.kind === kind),
+    ]),
+  ) as Partial<Record<ManagedAssetKind, ManagedAsset[]>>, [controller.items, controller.supportedKinds])
+  const activeSupported = controller.supportedKinds.includes(activeKind)
+  const activeItems = itemsByKind[activeKind] ?? []
   const selected = activeItems.find((asset) => asset.id === selectedId)
   const previewAsset = activeItems.find((asset) => asset.id === previewId)
   const actionsDisabled = !controller.available || controller.mutating || controller.uploading != null || batchUpload?.status === 'uploading' || batchDeleting != null
+
+  useEffect(() => {
+    if (!activeSupported && controller.supportedKinds[0]) {
+      setActiveKind(controller.supportedKinds[0])
+    }
+  }, [activeSupported, controller.supportedKinds])
 
   useEffect(() => {
     setSelectedId((current) => (
@@ -191,30 +189,17 @@ export function AssetLibraryPanel({
     <div className="alp-root">
       <div className="alp-shell">
         <nav className="alp-kind-tabs" aria-label="资产类型">
-          <button
-            type="button"
-            className={activeKind === 'image' ? 'is-active' : ''}
-            aria-current={activeKind === 'image' ? 'page' : undefined}
-            onClick={() => setActiveKind('image')}
-          >
-            图片 <span>{imageItems.length}</span>
-          </button>
-          <button
-            type="button"
-            className={activeKind === 'audio' ? 'is-active' : ''}
-            aria-current={activeKind === 'audio' ? 'page' : undefined}
-            onClick={() => setActiveKind('audio')}
-          >
-            音频 <span>{audioItems.length}</span>
-          </button>
-          <button
-            type="button"
-            className={activeKind === 'font' ? 'is-active' : ''}
-            aria-current={activeKind === 'font' ? 'page' : undefined}
-            onClick={() => setActiveKind('font')}
-          >
-            字体 <span>{fontItems.length}</span>
-          </button>
+          {controller.supportedKinds.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={activeKind === kind ? 'is-active' : ''}
+              aria-current={activeKind === kind ? 'page' : undefined}
+              onClick={() => setActiveKind(kind)}
+            >
+              {kindLabel(kind)} <span>{itemsByKind[kind]?.length ?? 0}</span>
+            </button>
+          ))}
         </nav>
         <section className="alp-workspace" aria-label={workspaceLabel(activeKind)}>
           <header className="alp-workspace-head">
@@ -224,13 +209,13 @@ export function AssetLibraryPanel({
             </div>
             <button type="button" className={selectionMode ? 'is-on' : ''} disabled={actionsDisabled} onClick={() => { setSelectionMode((current) => !current); setSelectedIds(new Set()) }}>{selectionMode ? '完成' : '多选'}</button>
           </header>
-          {!controller.available ? <div className="alp-unavailable" role="status">图片、BGM 与字体资源 API 尚未启用。</div> : null}
+          {!controller.available ? <div className="alp-unavailable" role="status">资产资源 API 尚未启用。</div> : null}
           {controller.error || batchError ? <div className="alp-error" role="alert">{batchError ?? controller.error}</div> : null}
           {batchUpload ? <div className="alp-loading" role="status" title={batchUpload.fileName}>批量 {batchUpload.current}/{batchUpload.total}</div> : null}
           {batchDeleting ? <div className="alp-loading" role="status">删除 {batchDeleting.current}/{batchDeleting.total}</div> : null}
           {selectionMode ? <div className="alp-loading alp-batch-bar"><span>已选 {selectedIds.size} 项</span><button type="button" disabled={selectedIds.size === 0 || actionsDisabled} onClick={() => setPendingBatchDelete(true)}>删除选中</button></div> : null}
           <div className="alp-list alp-list--grid" aria-label={`${workspaceLabel(activeKind)}列表`}>
-            <AssetUploadTile kind={activeKind} busy={controller.uploading === activeKind || batchUpload?.status === 'uploading'} disabled={actionsDisabled} onUpload={(kind, files) => void uploadFiles(kind, files)} />
+            {activeSupported ? <AssetUploadTile kind={activeKind} accept={controller.accept[activeKind] ?? ''} busy={controller.uploading === activeKind || batchUpload?.status === 'uploading'} disabled={actionsDisabled} onUpload={(kind, files) => void uploadFiles(kind, files)} /> : null}
             {activeItems.map((asset) => (
                 <article className={`alp-row${asset.id === selectedId ? ' is-selected' : ''}${selectionMode ? ' is-selecting' : ''}`} key={asset.id}>
                   {selectionMode ? <label className="alp-row-check"><input type="checkbox" checked={selectedIds.has(asset.id)} disabled={actionsDisabled} onChange={() => toggleBatchSelection(asset.id)} aria-label={`选择 ${asset.name}`} /></label> : null}

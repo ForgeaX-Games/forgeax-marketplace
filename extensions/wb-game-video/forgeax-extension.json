@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "@forgeax/wb-game-video",
+  "id": "@forgeax-extension/wb-game-video",
   "version": "0.1.5",
   "kind": "workbench",
   "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
@@ -111,8 +111,8 @@
         "returns": "./schemas/generate-node-video.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "第3步(超长版)·为一节点生成成片，durationSeconds > 15s 时自动按 15s 拆段，第2段起前置 V-PROMPT-15 延长块 + 首帧续接。必传 character/scene 参考图。返回 assets[]（按段序，单段时长度为1）。",
-          "en": "Step 3 (long-form): generate a node's video; when durationSeconds > 15s it auto-splits into 15s segments, each 2nd+ segment prepends the V-PROMPT-15 extend header + first-frame seam. REQUIRES character/scene refs. Returns assets[] in segment order (length 1 when short)."
+          "zh": "第3步(超长版)·为一节点生成成片，durationSeconds > 15s 时自动拆段；优先使用 Provider 原生视频续接（Kino 直接引用上一段视频），否则才用 ffmpeg 提取真实尾帧。strict 模式在首笔付费任务前预检；可显式传 continuityMode=independent 接受独立分段。必传 character/scene 参考图，返回按序 assets[]。",
+          "en": "Step 3 (long-form): auto-split videos longer than 15s. Prefer provider-native continuation (Kino references the previous video), then fall back to ffmpeg tail-frame extraction. Strict mode preflights before the first paid task; continuityMode=independent explicitly accepts separate segments. REQUIRES character/scene refs and returns ordered assets[]."
         }
       },
       {

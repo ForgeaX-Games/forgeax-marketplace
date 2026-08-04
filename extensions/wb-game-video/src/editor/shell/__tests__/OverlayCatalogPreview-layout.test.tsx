@@ -4,7 +4,7 @@ import {
   DEFAULT_OVERLAY_DESIGN_CANVAS,
   interfaceCanvasPreviewTimeMs,
   isOverlayBoxCentered,
-  OVERLAY_GRID_STEP_PERCENT,
+  OVERLAY_GRID_STEP_VMIN,
   overlayBoxCenterAlignment,
   OverlayCatalogPreview,
   placeOverlayBox,
@@ -69,7 +69,7 @@ describe('OverlayCatalogPreview fixed canvas', () => {
 
   it('uses the full viewport without exposing read-only size controls', () => {
     expect(DEFAULT_OVERLAY_DESIGN_CANVAS).toEqual({ left: 0, top: 0, width: 1, height: 1 })
-    expect(OVERLAY_GRID_STEP_PERCENT).toBe(2.5)
+    expect(OVERLAY_GRID_STEP_VMIN).toBe(1.5)
 
     const { container } = render(
       <OverlayCatalogPreview
@@ -84,7 +84,7 @@ describe('OverlayCatalogPreview fixed canvas', () => {
       top: '0%',
       width: '100%',
       height: '100%',
-      '--ocp-grid-step': '2.5%',
+      '--ocp-grid-step': '1.5vmin',
     })
     expect(container.querySelector('[data-overlay-coordinate-stage]')).toHaveStyle({
       left: '0%',

@@ -177,4 +177,17 @@ describe('ScenarioInspector entity attributes', () => {
     expect(screen.getByTestId('entities-state')).toHaveTextContent('"attrs":{"hp":60}')
     expect(screen.getByTestId('entities-state')).toHaveTextContent('"hp":{"initial":60,"min":10,"max":60}')
   })
+
+  it('stores string attributes and hides their numeric settings', () => {
+    render(
+      <EntityHarness initial={{
+        hero: { id: 'hero', attrs: { title: 1 }, attrMeta: { title: { min: 0, max: 10 } } },
+      }} />,
+    )
+    fireEvent.change(screen.getByLabelText('属性「title」的数值类型'), { target: { value: 'string' } })
+    expect(screen.getByTestId('entities-state')).toHaveTextContent('"title":""')
+    expect(screen.queryByRole('button', { name: /高级设置/ })).toBeNull()
+    fireEvent.change(screen.getByLabelText('属性「title」的数值'), { target: { value: '守护者' } })
+    expect(screen.getByTestId('entities-state')).toHaveTextContent('"title":"守护者"')
+  })
 })

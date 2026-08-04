@@ -41,6 +41,17 @@ describe('blueprint-project document shape', () => {
     expect(p.graph).toEqual(p.manifest.packs[MAIN_ID]!.graph)
     expect(p.variables).toEqual(scn.variables)
   })
+  it('keeps string rule values through the persisted document shape', () => {
+    const source: EditorScenarioDocument = {
+      version: 'wb-game-video.graph.v1',
+      graph: mainGraph,
+      variables: { title: { id: 'title', initial: '森之守望者' } },
+      entities: { hero: { id: 'hero', attrs: { title: '主角', hp: 12 } } },
+    }
+    const document = documentFromScenario(source)
+    expect(document.variables?.title?.initial).toBe('森之守望者')
+    expect(document.entities?.hero?.attrs).toEqual({ title: '主角', hp: 12 })
+  })
   it('documentFromBlueprints keeps sub blueprints in manifest (no packs field)', () => {
     const p = libraryDoc()
     expect(Object.keys(p.manifest.packs).sort()).toEqual([MAIN_ID, 'pack-x'])

@@ -1,11 +1,14 @@
 /**
- * GraphApp —— 新引擎的**唯一应用外壳**（graph-only）。左侧沿用旧 ReelSidebar 的
- * 视觉/交互（rs-* 胶囊 tab）：蓝图/视频/界面/规则/试玩 五个 tab，点击时中间区域
- * 显示对应 graph 视图。完全不依赖旧 FMV（scenario/editor/player/llm/media/forge）。
+ * GraphApp —— 新引擎的**唯一应用外壳**（graph-only）。左侧栏使用新版 NewSidebar
+ * （按 Figma 12650_5727 还原，一级 chevron 展开式菜单 + 二级子项），点击一级切换
+ * 主区视图：蓝图/视频/资产/界面/规则/试玩。完全不依赖旧 FMV。
+ *
+ * 新旧并存策略：NewSidebar 已替换旧 GraphSidebar 在 UI 上的渲染位置；
+ * 旧 GraphSidebar 组件代码保留不删，待新版稳定后再统一清理。
  *
  * split-pane 适配（对齐旧 App，见 forgeax-extension.json `surface: split`）：
  *   宿主给同一表面挂两个 iframe，URL 分别带 `?pane=left` / `?pane=center`。
- *   - pane=left   → 只渲染侧栏（五个 tab），是 sidebar iframe 的全部内容。
+ *   - pane=left   → 只渲染侧栏（新版 NewSidebar），是 sidebar iframe 的全部内容。
  *   - pane=center → 只渲染当前 tab 对应的主区内容（不含侧栏）。
  *   - 无 pane     → 独立运行（bun run dev / 直接打开 dist），侧栏 + 主区都渲染。
  *   两个 iframe 靠 graphViewStore + BroadcastChannel 同步「当前 tab」。
@@ -16,6 +19,7 @@ import { GraphVideoView } from './editor/shell/GraphVideoView'
 import { GraphAssetView } from './editor/shell/GraphAssetView'
 import { GraphConfigView } from './editor/shell/GraphConfigView'
 import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
+import { NewSidebar } from './editor/shell/NewSidebar'
 import { useGraphScenario } from './editor/persist/graphScenarioStore'
 import { useGraphView, installGraphViewSync, type GraphView } from './editor/persist/graphViewStore'
 import { NODIA_DEMO } from './editor/demo/demo'
@@ -39,6 +43,18 @@ function readPane(): 'left' | 'center' | null {
   } catch {
     return null
   }
+}
+
+/**
+ * 是否启用新版左侧栏（NewSidebar，按 Figma 12650_5727）。
+ * 新版已默认替换旧 GraphSidebar 在 UI 上的渲染位置；旧组件代码暂保留不删，
+ * 待新版稳定后再统一清理。
+ *
+ * 当前实现：始终返回 'new'，所有 URL 都直接看到新版。
+ * 保留参数读取仅为后续回滚 / A-B 对比预留入口（暂不暴露给用户）。
+ */
+function readSidebarVariant(): 'new' | 'legacy' {
+  return 'new'
 }
 
 /** 侧栏（rs-* 复刻旧 ReelSidebar 视觉）——左 pane 的全部内容。 */
@@ -104,6 +120,7 @@ function GraphMain(): JSX.Element {
 export function GraphApp(): JSX.Element {
   injectStyleOnce('graph-app-shell', CSS)
   const [pane] = useState(readPane)
+  const [sidebarVariant] = useState(readSidebarVariant)
   const ensureBoot = useGraphScenario((s) => s.ensureBoot)
 
   // split-pane 嵌入态才开跨 iframe 同步桥；独立运行零开销。
@@ -112,15 +129,17 @@ export function GraphApp(): JSX.Element {
     return installGraphViewSync()
   }, [pane])
 
+  const sidebarEl = sidebarVariant === 'new' ? <NewSidebar /> : <GraphSidebar />
+
   if (pane === 'left') {
-    return <div className="ga-root is-pane-left"><GraphSidebar /></div>
+    return <div className="ga-root is-pane-left">{sidebarEl}</div>
   }
   if (pane === 'center') {
     return <div className="ga-root is-pane-center"><GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap></div>
   }
   return (
     <div className="ga-root">
-      <GraphSidebar />
+      {sidebarEl}
       <GameBootstrap slug={getGameSlug() ?? 'game-nodia-fighting'} onBoot={() => ensureBoot(getGameSlug() ?? 'game-nodia-fighting', NODIA_DEMO)}><GraphMain /></GameBootstrap>
     </div>
   )

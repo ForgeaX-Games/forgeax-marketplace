@@ -52,9 +52,13 @@ describe('host tool context contract', () => {
       ],
     }))
     const invoke = vi.fn(async () => ({
-      asset: {
-        id: 'host-video-1', kind: 'video', status: 'ready', mime: 'video/mp4',
-        createdAt: 2, updatedAt: 2, provider: { kind: 'kino', ref: 'generation-1' },
+      video: {
+        bytes: Uint8Array.from(Buffer.from('kino-video')),
+        mime: 'video/mp4',
+        sourceUrl: 'https://cdn.example.test/generated.mp4',
+        generationId: 'generation-1',
+        providerTaskId: 'provider-task-1',
+        model: 'seedance2',
       },
     }))
 
@@ -73,8 +77,15 @@ describe('host tool context contract', () => {
       { requestId: expect.stringMatching(/^wb-game-video-v1-[0-9a-f]{64}$/) },
     )
     expect(result).toMatchObject({
-      asset: { id: 'host-video-1', productionType: 'video_clip', sceneNodeId: 'node-1' },
+      asset: {
+        id: expect.stringMatching(/^a-vid-/),
+        productionType: 'video_clip',
+        sceneNodeId: 'node-1',
+        status: 'ready',
+        bytes: 10,
+      },
     })
+    expect(readFileSync(resolve(cwd, 'assets', result.asset!.file!), 'utf8')).toBe('kino-video')
   })
 
   it('persists blueprint.json under ctx.cwd and ignores title for versioning', async () => {

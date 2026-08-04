@@ -55,4 +55,20 @@ describe('ScenarioInspector rules editing', () => {
     expect(screen.getByLabelText('qi max')).toHaveValue('10')
     expect(screen.getByLabelText('qi initial')).toHaveValue('8')
   })
+
+  it('switches a variable to a stored string and hides its advanced settings', () => {
+    const { onChange } = renderInspector({
+      variables: { title: { id: 'title', initial: 1, min: 0, max: 10 } },
+    }, 'variables')
+    fireEvent.change(screen.getByLabelText('title 的初值类型'), { target: { value: 'string' } })
+    expect(onChange).toHaveBeenLastCalledWith({
+      variables: { title: { id: 'title', initial: '', min: 0, max: 10 } },
+    })
+  })
+
+  it('hides variable advanced settings for a stored string', () => {
+    renderInspector({ variables: { title: { id: 'title', initial: '', min: 0, max: 10 } } }, 'variables')
+    expect(screen.getByLabelText('title 的初值')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: /高级设置/ })).toBeNull()
+  })
 })
